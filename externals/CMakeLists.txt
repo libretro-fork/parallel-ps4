@@ -35,11 +35,6 @@ if (NOT TARGET fmt::fmt)
     add_subdirectory(fmt)
 endif()
 
-# LibAtrac9
-file(GLOB LIBATRAC9_SOURCES LibAtrac9/C/src/*.c)
-add_library(LibAtrac9 STATIC ${LIBATRAC9_SOURCES})
-target_include_directories(LibAtrac9 INTERFACE LibAtrac9/C/src)
-
 # FreeType
 if (NOT TARGET Freetype::Freetype)
     # Keep optional deps off to reduce build surface: the fonts it reads are not compressed.

@@ -1399,6 +1399,7 @@ set(LIBRETRO_COMMON_SOURCES
     ${LIBRETRO_COMMON_DIR}/file/file_path.c
     ${LIBRETRO_COMMON_DIR}/file/file_path_io.c
     ${LIBRETRO_COMMON_DIR}/formats/aac/raac.c
+    ${LIBRETRO_COMMON_DIR}/formats/atrac9/ratrac9.c
     ${LIBRETRO_COMMON_DIR}/formats/flac/rflac.c
     ${LIBRETRO_COMMON_DIR}/formats/h264/rh264.c
     ${LIBRETRO_COMMON_DIR}/formats/h265/rh265.c
@@ -1502,7 +1503,7 @@ create_target_directory_groups(shadps4)
 
 target_link_libraries(shadps4 PRIVATE spdlog::spdlog)
 target_link_libraries(shadps4 PRIVATE magic_enum::magic_enum fmt::fmt tsl::robin_map xbyak::xbyak RenderDoc::API Dear_ImGui gcn half::half)
-target_link_libraries(shadps4 PRIVATE Boost::headers GPUOpen::VulkanMemoryAllocator LibAtrac9 sirit Vulkan::Headers Zydis::Zydis)
+target_link_libraries(shadps4 PRIVATE Boost::headers GPUOpen::VulkanMemoryAllocator sirit Vulkan::Headers Zydis::Zydis)
 target_link_libraries(shadps4 PRIVATE Cpp_Httplib)
 target_link_libraries(shadps4 PRIVATE Freetype::Freetype)
 

@@ -4,12 +4,8 @@
 #include "ajm_result.h"
 #include "common/assert.h"
 #include "core/libraries/ajm/ajm_at9.h"
-#include "error_codes.h"
 
-extern "C" {
-#include <decoder.h>
-#include <libatrac9.h>
-}
+#include <formats/ratrac9.h>
 
 namespace Libraries::Ajm {
 
@@ -18,27 +14,6 @@ struct ChunkHeader {
     u32 length;
 };
 static_assert(sizeof(ChunkHeader) == 8);
-
-struct AudioFormat {
-    u16 fmt_type;
-    u16 num_channels;
-    u32 avg_sample_rate;
-    u32 avg_byte_rate;
-    u16 block_align;
-    u16 bits_per_sample;
-    u16 ext_size;
-    union {
-        u16 valid_bits_per_sample;
-        u16 samples_per_block;
-        u16 reserved;
-    };
-    u32 channel_mask;
-    u8 guid[16];
-    u32 version;
-    u8 config_data[4];
-    u32 reserved2;
-};
-static_assert(sizeof(AudioFormat) == 52);
 
 struct SampleData {
     u32 sample_length;
@@ -55,20 +30,19 @@ struct RIFFHeader {
 static_assert(sizeof(RIFFHeader) == 12);
 
 AjmAt9Decoder::AjmAt9Decoder(AjmFormatEncoding format, AjmAt9CodecFlags flags, u32)
-    : m_format(format), m_flags(flags), m_handle(Atrac9GetHandle()) {}
+    : m_format(format), m_flags(flags) {}
 
 AjmAt9Decoder::~AjmAt9Decoder() {
-    Atrac9ReleaseHandle(m_handle);
+    ratrac9_close(m_decoder);
 }
 
 void AjmAt9Decoder::Reset() {
-    Atrac9ReleaseHandle(m_handle);
-    m_handle = Atrac9GetHandle();
-    Atrac9InitDecoder(m_handle, m_config_data);
-    Atrac9GetCodecInfo(m_handle, &m_codec_info);
-
+    // Back to the start of the stream; the decoder's memory is kept
+    if (m_decoder) {
+        ratrac9_reset(m_decoder);
+    }
     m_num_frames = 0;
-    m_superframe_bytes_remain = m_codec_info.superframeSize;
+    m_superframe_bytes_remain = m_superframe_bytes;
 }
 
 void AjmAt9Decoder::Initialize(const void* buffer, u32 buffer_size) {
@@ -76,22 +50,30 @@ void AjmAt9Decoder::Initialize(const void* buffer, u32 buffer_size) {
                "Incorrect At9 initialization buffer size {}", buffer_size);
     const auto params = reinterpret_cast<const AjmDecAt9InitializeParameters*>(buffer);
     std::memcpy(m_config_data, params->config_data, ORBIS_AT9_CONFIG_DATA_SIZE);
+    ratrac9_close(m_decoder);
+    m_decoder = ratrac9_open(m_config_data);
+    m_is_initialized = m_decoder != nullptr;
+    if (!m_decoder) {
+        LOG_ERROR(Lib_Ajm, "Invalid ATRAC9 configuration {:02x}{:02x}{:02x}{:02x}",
+                  m_config_data[0], m_config_data[1], m_config_data[2], m_config_data[3]);
+        return;
+    }
+    m_channels = ratrac9_channels(m_decoder);
+    m_sample_rate = ratrac9_sample_rate(m_decoder);
+    m_frame_samples = ratrac9_frame_samples(m_decoder);
+    m_superframe_bytes = ratrac9_superframe_bytes(m_decoder);
+    m_frames_in_superframe = ratrac9_frames_per_superframe(m_decoder);
     AjmAt9Decoder::Reset();
-    m_pcm_buffer.resize(m_codec_info.frameSamples * m_codec_info.channels * GetPCMSize(m_format),
-                        0);
-    m_is_initialized = true;
+    m_pcm_buffer.resize(m_frame_samples * m_channels * GetPCMSize(m_format), 0);
 }
 
 void AjmAt9Decoder::GetInfo(void* out_info) const {
     auto* info = reinterpret_cast<AjmSidebandDecAt9CodecInfo*>(out_info);
-    info->super_frame_size = m_codec_info.superframeSize;
-    info->frames_in_super_frame = m_codec_info.framesInSuperframe;
+    info->super_frame_size = m_superframe_bytes;
+    info->frames_in_super_frame = m_frames_in_superframe;
     info->next_frame_size = m_superframe_bytes_remain;
-    info->frame_samples = m_codec_info.frameSamples;
+    info->frame_samples = m_frame_samples;
 }
-
-u8 g_at9_guid[] = {0xD2, 0x42, 0xE1, 0x47, 0xBA, 0x36, 0x8D, 0x4D,
-                   0x88, 0xFC, 0x61, 0x65, 0x4F, 0x8C, 0x83, 0x6C};
 
 bool AjmAt9Decoder::ParseRIFFHeader(std::span<u8>& in_buf, AjmInstanceGapless& gapless) {
     if (in_buf.size() < sizeof(RIFFHeader) + sizeof(ChunkHeader)) {
@@ -120,15 +102,11 @@ bool AjmAt9Decoder::ParseRIFFHeader(std::span<u8>& in_buf, AjmInstanceGapless& g
 
         switch (chunk->tag) {
         case ' tmf': {
-            if (chunk->length != sizeof(AudioFormat)) {
-                return false;
-            }
-            auto* fmt = reinterpret_cast<const AudioFormat*>(in_buf.data());
-            if (fmt->fmt_type != 0xFFFE || std::memcmp(fmt->guid, g_at9_guid, 16) != 0) {
-                return false;
-            }
+            // WAVE_FORMAT_EXTENSIBLE with the ATRAC9 sub-format, holding the config bytes
             AjmDecAt9InitializeParameters init_params = {};
-            std::memcpy(init_params.config_data, fmt->config_data, ORBIS_AT9_CONFIG_DATA_SIZE);
+            if (!ratrac9_parse_wave_fmt(in_buf.data(), chunk->length, init_params.config_data)) {
+                return false;
+            }
             Initialize(&init_params, sizeof(init_params));
             result = true;
             break;
@@ -182,47 +160,50 @@ DecoderResult AjmAt9Decoder::ProcessData(std::span<u8>& in_buf, SparseOutputBuff
         return result;
     }
 
+    const bool planar = True(m_flags & AjmAt9CodecFlags::NonInterleavedOutput);
     int ret = 0;
-    int bytes_used = 0;
+    size_t bytes_used = 0;
     switch (m_format) {
     case AjmFormatEncoding::S16:
-        ret = Atrac9Decode(m_handle, in_buf.data(), static_cast<int>(in_buf.size()),
-                           reinterpret_cast<s16*>(m_pcm_buffer.data()), &bytes_used,
-                           True(m_flags & AjmAt9CodecFlags::NonInterleavedOutput));
+        ret = ratrac9_decode_s16(m_decoder, in_buf.data(), in_buf.size(),
+                                 reinterpret_cast<s16*>(m_pcm_buffer.data()), planar, &bytes_used);
         break;
     case AjmFormatEncoding::S32:
-        ret = Atrac9DecodeS32(m_handle, in_buf.data(), static_cast<int>(in_buf.size()),
-                              reinterpret_cast<s32*>(m_pcm_buffer.data()), &bytes_used,
-                              True(m_flags & AjmAt9CodecFlags::NonInterleavedOutput));
+        ret = ratrac9_decode_s32(m_decoder, in_buf.data(), in_buf.size(),
+                                 reinterpret_cast<s32*>(m_pcm_buffer.data()), planar, &bytes_used);
         break;
     case AjmFormatEncoding::Float:
-        ret = Atrac9DecodeF32(m_handle, in_buf.data(), static_cast<int>(in_buf.size()),
-                              reinterpret_cast<float*>(m_pcm_buffer.data()), &bytes_used,
-                              True(m_flags & AjmAt9CodecFlags::NonInterleavedOutput));
+        ret =
+            ratrac9_decode_f32(m_decoder, in_buf.data(), in_buf.size(),
+                               reinterpret_cast<float*>(m_pcm_buffer.data()), planar, &bytes_used);
         break;
     default:
         UNREACHABLE();
     }
-    if (ret != At9Status::ERR_SUCCESS) {
-        LOG_ERROR(Lib_Ajm, "Atrac9Decode failed ret = {:#x}", ret);
+    if (ret != 0) {
+        LOG_ERROR(Lib_Ajm, "ATRAC9 decode failed ret = {}", ret);
         result.result = ORBIS_AJM_RESULT_CODEC_ERROR | ORBIS_AJM_RESULT_FATAL;
         result.internal_result = ret;
         return result;
     }
+    // A frame cut short counts the bytes it would have had: never step past the input
+    const auto consume = [&](size_t used) {
+        used = std::min(used, in_buf.size());
+        in_buf = in_buf.subspan(used);
+        m_superframe_bytes_remain -= std::min<u32>(m_superframe_bytes_remain, u32(used));
+    };
 
     result.frames_decoded += 1;
-    in_buf = in_buf.subspan(bytes_used);
-
-    m_superframe_bytes_remain -= bytes_used;
+    consume(bytes_used);
 
     u32 skip_samples = 0;
     if (gapless.current.skip_samples > 0) {
-        skip_samples = std::min(u16(m_codec_info.frameSamples), gapless.current.skip_samples);
+        skip_samples = std::min(u16(m_frame_samples), gapless.current.skip_samples);
         gapless.current.skip_samples -= skip_samples;
     }
 
     const auto max_pcm = gapless.init.total_samples != 0
-                             ? gapless.current.total_samples * m_codec_info.channels
+                             ? gapless.current.total_samples * m_channels
                              : std::numeric_limits<u32>::max();
 
     size_t pcm_written = 0;
@@ -240,32 +221,33 @@ DecoderResult AjmAt9Decoder::ProcessData(std::span<u8>& in_buf, SparseOutputBuff
         UNREACHABLE();
     }
 
-    result.samples_written = pcm_written / m_codec_info.channels;
-    gapless.current.skipped_samples += m_codec_info.frameSamples - result.samples_written;
+    result.samples_written = pcm_written / m_channels;
+    gapless.current.skipped_samples += m_frame_samples - result.samples_written;
     if (gapless.init.total_samples != 0) {
         gapless.current.total_samples -= result.samples_written;
     }
 
     m_num_frames += 1;
-    if ((m_num_frames % m_codec_info.framesInSuperframe) == 0) {
+    if ((m_num_frames % m_frames_in_superframe) == 0) {
         if (m_superframe_bytes_remain) {
-            in_buf = in_buf.subspan(m_superframe_bytes_remain);
+            consume(m_superframe_bytes_remain);
         }
-        m_superframe_bytes_remain = m_codec_info.superframeSize;
+        m_superframe_bytes_remain = m_superframe_bytes;
         m_num_frames = 0;
     } else if (gapless.IsEnd()) {
-        // Drain the remaining superframe
-        std::vector<s16> buf(m_codec_info.frameSamples * m_codec_info.channels, 0);
-        while ((m_num_frames % m_codec_info.framesInSuperframe) != 0) {
-            ret = Atrac9Decode(m_handle, in_buf.data(), static_cast<int>(in_buf.size()), buf.data(),
-                               &bytes_used, True(m_flags & AjmAt9CodecFlags::NonInterleavedOutput));
-            in_buf = in_buf.subspan(bytes_used);
-            m_superframe_bytes_remain -= bytes_used;
+        // Drain the remaining superframe, into the frame buffer whose samples are not used
+        while ((m_num_frames % m_frames_in_superframe) != 0) {
+            ret = ratrac9_decode_s16(m_decoder, in_buf.data(), in_buf.size(),
+                                     reinterpret_cast<s16*>(m_pcm_buffer.data()), planar,
+                                     &bytes_used);
+            if (ret == 0) {
+                consume(bytes_used);
+            }
             result.frames_decoded += 1;
             m_num_frames += 1;
         }
-        in_buf = in_buf.subspan(m_superframe_bytes_remain);
-        m_superframe_bytes_remain = m_codec_info.superframeSize;
+        consume(m_superframe_bytes_remain);
+        m_superframe_bytes_remain = m_superframe_bytes;
         m_num_frames = 0;
     }
 
@@ -274,24 +256,25 @@ DecoderResult AjmAt9Decoder::ProcessData(std::span<u8>& in_buf, SparseOutputBuff
 
 AjmSidebandFormat AjmAt9Decoder::GetFormat() const {
     return AjmSidebandFormat{
-        .num_channels = u32(m_codec_info.channels),
-        .channel_mask = GetChannelMask(u32(m_codec_info.channels)),
-        .sampl_freq = u32(m_codec_info.samplingRate),
+        .num_channels = m_channels,
+        .channel_mask = GetChannelMask(m_channels),
+        .sampl_freq = m_sample_rate,
         .sample_encoding = m_format,
-        .bitrate = u32((m_codec_info.samplingRate * m_codec_info.superframeSize * 8) /
-                       (m_codec_info.framesInSuperframe * m_codec_info.frameSamples)),
+        .bitrate = m_frames_in_superframe && m_frame_samples
+                       ? u32((u64(m_sample_rate) * m_superframe_bytes * 8) /
+                             (m_frames_in_superframe * m_frame_samples))
+                       : 0,
         .reserved = 0,
     };
 }
 
 u32 AjmAt9Decoder::GetNextFrameSize(const AjmInstanceGapless& gapless) const {
-    const auto skip_samples =
-        std::min<u32>(gapless.current.skip_samples, m_codec_info.frameSamples);
+    const auto skip_samples = std::min<u32>(gapless.current.skip_samples, m_frame_samples);
     const auto samples =
         gapless.init.total_samples != 0
-            ? std::min<u32>(gapless.current.total_samples, m_codec_info.frameSamples - skip_samples)
-            : m_codec_info.frameSamples - skip_samples;
-    return samples * m_codec_info.channels * GetPCMSize(m_format);
+            ? std::min<u32>(gapless.current.total_samples, m_frame_samples - skip_samples)
+            : m_frame_samples - skip_samples;
+    return samples * m_channels * GetPCMSize(m_format);
 }
 
 } // namespace Libraries::Ajm

@@ -7,7 +7,7 @@
 #include "common/types.h"
 #include "core/libraries/ajm/ajm_instance.h"
 
-#include "libatrac9.h"
+struct ratrac9;
 
 #include <span>
 #include <vector>
@@ -45,7 +45,7 @@ private:
     size_t WriteOutputSamples(SparseOutputBuffer& output, u32 skipped_samples, u32 max_samples) {
         std::span<T> pcm_data{reinterpret_cast<T*>(m_pcm_buffer.data()),
                               m_pcm_buffer.size() / sizeof(T)};
-        pcm_data = pcm_data.subspan(skipped_samples * m_codec_info.channels);
+        pcm_data = pcm_data.subspan(skipped_samples * m_channels);
         const auto pcm_size = std::min(u32(pcm_data.size()), max_samples);
         return output.Write(pcm_data.subspan(0, pcm_size));
     }
@@ -56,11 +56,16 @@ private:
     const AjmAt9CodecFlags m_flags;
 
     bool m_is_initialized{};
-    void* m_handle{};
+    // libretro-common's ATRAC9 decoder
+    ratrac9* m_decoder{};
     u8 m_config_data[ORBIS_AT9_CONFIG_DATA_SIZE]{};
     u32 m_superframe_bytes_remain{};
     u32 m_num_frames{};
-    Atrac9CodecInfo m_codec_info{};
+    u32 m_channels{};
+    u32 m_sample_rate{};
+    u32 m_frame_samples{};
+    u32 m_superframe_bytes{};
+    u32 m_frames_in_superframe{};
     std::vector<u8> m_pcm_buffer;
 };
 
