@@ -715,7 +715,7 @@ NetResult SocketConnect(s32 id, const sockaddr* addr, socklen_t len) {
     if (started != Error::InProgress) {
         return FromError(started);
     }
-    // Poll in 500 ms slices, old WSAPoll never signals a failed connect. On SO_CONNECTTIMEO
+    // Poll in 500 ms slices, so an abort is seen. On SO_CONNECTTIMEO
     // expiry return EWOULDBLOCK and leave the connect running.
     using namespace std::chrono_literals;
     const auto deadline = SocketDeadline(s->connect_timeout_us);

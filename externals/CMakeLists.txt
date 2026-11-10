@@ -134,11 +134,6 @@ endif()
 # GCN Headers
 add_subdirectory(gcn)
 
-#windows only
-if (WIN32)
-add_subdirectory(ext-wepoll)
-endif()
-
 # macOS Vulkan driver
 if (APPLE AND NOT ENABLE_SYSTEM_VULKAN)
     add_subdirectory(vulkan-loader)

@@ -1603,7 +1603,7 @@ if (APPLE)
 endif()
 
 if (WIN32)
-    target_link_libraries(shadps4 PRIVATE mincore wepoll wbemuuid ws2_32)
+    target_link_libraries(shadps4 PRIVATE mincore wbemuuid ws2_32)
 
     if (MSVC)
         # MSVC likes putting opinions on what people can use, disable:

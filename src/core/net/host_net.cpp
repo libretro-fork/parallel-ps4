@@ -8,16 +8,18 @@
 
 #include "core/net/host_net.h"
 
+#include <net/net_compat.h>
+#include <net/net_socket.h>
+
 #ifdef _WIN32
 #include <mstcpip.h>
-#include <wepoll.h>
 #ifdef _MSC_VER
 #pragma comment(lib, "Ws2_32.lib")
 #endif
 #ifndef SIO_UDP_CONNRESET
 #define SIO_UDP_CONNRESET _WSAIOW(IOC_VENDOR, 12)
 #endif
-#define HOST_NET_EPOLL 1
+#define HOST_NET_POLL 1
 #else
 #include <cerrno>
 #include <fcntl.h>
@@ -308,8 +310,8 @@ Error CreateSocketPair(int family, int type, int protocol, NativeSocket out[2]) 
         LastError() != Error::WouldBlock && LastError() != Error::InProgress) {
         return fail(LastError());
     }
-    WSAPOLLFD poll{listener, POLLRDNORM, 0};
-    if (WSAPoll(&poll, 1, 5000) != 1) {
+    pollfd poll{listener, POLLIN, 0};
+    if (socket_poll(&poll, 1, 5000) != 1) {
         return fail(Error::TimedOut);
     }
     server = Accept(listener, nullptr, nullptr, &e);
@@ -325,8 +327,8 @@ Error CreateSocketPair(int family, int type, int protocol, NativeSocket out[2]) 
     if (client_name.sin_port != server_peer.sin_port) {
         return fail(Error::ConnAborted); // someone else got in first
     }
-    WSAPOLLFD writable{client, POLLWRNORM, 0};
-    WSAPoll(&writable, 1, 5000);
+    pollfd writable{client, POLLOUT, 0};
+    socket_poll(&writable, 1, 5000);
     CloseSocket(listener);
     out[0] = client;
     out[1] = server;
@@ -532,7 +534,7 @@ WakeHandle::WakeHandle() {
 #if defined(__linux__)
     read_ = write_ = eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
 #elif defined(_WIN32)
-    // WSAPoll and wepoll only take sockets, so use a loopback UDP pair.
+    // select() only takes sockets, so use a loopback UDP pair.
     read_ = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
     write_ = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
     if (read_ == InvalidSocket || write_ == InvalidSocket) {
@@ -616,11 +618,7 @@ void WakeHandle::Drain() const {
 }
 
 WaitResult WaitOne(NativeSocket s, u32 interest, const WakeHandle& wake, Deadline deadline) {
-#ifdef _WIN32
-    WSAPOLLFD fds[2]{};
-#else
     pollfd fds[2]{};
-#endif
     fds[0].fd = s;
     fds[0].events = static_cast<short>(((interest & Readable) ? POLLIN : 0) |
                                        ((interest & Writable) ? POLLOUT : 0));
@@ -629,11 +627,8 @@ WaitResult WaitOne(NativeSocket s, u32 interest, const WakeHandle& wake, Deadlin
 
     for (;;) {
         fds[0].revents = fds[1].revents = 0;
-#ifdef _WIN32
-        const int n = WSAPoll(fds, 2, TimeoutMs(deadline));
-#else
-        const int n = poll(fds, 2, TimeoutMs(deadline));
-#endif
+        // select() on Windows, which also reports a failed connect, unlike WSAPoll
+        const int n = socket_poll(fds, 2, TimeoutMs(deadline));
         if (n < 0) {
 #ifndef _WIN32
             if (errno == EINTR) {
@@ -655,7 +650,7 @@ WaitResult WaitOne(NativeSocket s, u32 interest, const WakeHandle& wake, Deadlin
     }
 }
 
-#if HOST_NET_EPOLL // epoll or wepoll
+#if HOST_NET_EPOLL // Linux
 
 u32 ToEpoll(u32 events, u32 flags) {
     u32 ev = EPOLLRDHUP;
@@ -689,20 +684,11 @@ u32 FromEpoll(u32 ev) {
 }
 
 Error EpollError() {
-#ifdef _WIN32
-    // wepoll gives Win32 codes, not WSA ones. EEXIST/ENOENT are checked by the guest layer.
-    return Error::Internal;
-#else
     return LastError();
-#endif
 }
 
 HostEpoll::HostEpoll() {
-#ifdef _WIN32
-    handle_ = epoll_create1(0);
-#else
     handle_ = epoll_create1(EPOLL_CLOEXEC);
-#endif
     if (!Valid() || !wake_.Valid()) {
         return;
     }
@@ -713,22 +699,13 @@ HostEpoll::HostEpoll() {
 }
 
 HostEpoll::~HostEpoll() {
-    if (!Valid()) {
-        return;
+    if (Valid()) {
+        close(handle_);
     }
-#ifdef _WIN32
-    epoll_close(handle_);
-#else
-    close(handle_);
-#endif
 }
 
 bool HostEpoll::Valid() const {
-#ifdef _WIN32
-    return handle_ != nullptr;
-#else
     return handle_ >= 0;
-#endif
 }
 
 Error HostEpoll::Add(NativeSocket s, u64 tag, u32 events, u32 flags) {
@@ -759,11 +736,9 @@ EpollWaitResult HostEpoll::Wait(std::span<EpollEvent> out, Deadline deadline) {
     for (;;) {
         const int n = epoll_wait(handle_, buf.data(), cap, TimeoutMs(deadline));
         if (n < 0) {
-#ifndef _WIN32
             if (errno == EINTR) {
                 continue;
             }
-#endif
             return {0, false, EpollError()};
         }
         EpollWaitResult r{0, false, Error::Ok};
@@ -778,6 +753,234 @@ EpollWaitResult HostEpoll::Wait(std::span<EpollEvent> out, Deadline deadline) {
             return r;
         }
     }
+}
+
+#elif HOST_NET_POLL // Windows
+
+// The registrations live in a table the waiting threads read without a lock. Add, Modify and
+// Remove come one at a time (the guest layer holds its epoll's mutex), each slot a seqlock:
+// odd while it is written. A waiter builds its poll set from the slots, and takes a one-shot
+// registration it reports by a compare-and-swap, so two waiters never both report it.
+namespace {
+constexpr u64 SlotUsed = 1u << 0;
+constexpr u64 SlotIn = 1u << 1;
+constexpr u64 SlotOut = 1u << 2;
+constexpr u64 SlotOneShot = 1u << 3;
+constexpr u64 SlotArmed = 1u << 4;
+constexpr u64 SlotFlags = 0xff;
+
+u64 SlotVersion(u64 state) {
+    return state >> 8;
+}
+
+u64 SlotState(u64 version, u64 flags) {
+    return (version << 8) | flags;
+}
+} // namespace
+
+struct HostEpoll::Slot {
+    std::atomic<u64> state{0};
+    std::atomic<u64> socket{0};
+    std::atomic<u64> tag{0};
+};
+
+HostEpoll::HostEpoll() : slots_(std::make_unique<Slot[]>(MaxSlots)) {}
+
+HostEpoll::~HostEpoll() = default;
+
+bool HostEpoll::Valid() const {
+    return wake_.Valid();
+}
+
+Error HostEpoll::Store(NativeSocket s, u64 tag, u32 events, u32 flags, bool add) {
+    // The writer is the only one to change which socket a slot holds.
+    u32 free_slot = MaxSlots;
+    u32 index = MaxSlots;
+    const u32 high = high_water_.load(std::memory_order_relaxed);
+    for (u32 i = 0; i < high; ++i) {
+        const u64 state = slots_[i].state.load(std::memory_order_relaxed);
+        if (!(state & SlotUsed)) {
+            free_slot = std::min(free_slot, i);
+        } else if (slots_[i].socket.load(std::memory_order_relaxed) == static_cast<u64>(s)) {
+            index = i;
+            break;
+        }
+    }
+    if (index == MaxSlots) {
+        if (!add) {
+            return Error::NoEnt;
+        }
+        index = free_slot != MaxSlots ? free_slot : high;
+        if (index == MaxSlots) {
+            return Error::NoMem;
+        }
+    }
+    u64 flag_bits = SlotUsed | SlotArmed;
+    flag_bits |= (events & EvIn) ? SlotIn : 0;
+    flag_bits |= (events & EvOut) ? SlotOut : 0;
+    flag_bits |= (flags & OneShot) ? SlotOneShot : 0;
+    Write(index, s, tag, flag_bits);
+    if (index >= high) {
+        high_water_.store(index + 1, std::memory_order_release);
+    }
+    Changed();
+    return Error::Ok;
+}
+
+void HostEpoll::Write(u32 index, NativeSocket s, u64 tag, u64 flag_bits) {
+    Slot& slot = slots_[index];
+    // Odd: waiters skip the slot, and a waiter's one-shot take fails.
+    u64 state = slot.state.load(std::memory_order_relaxed);
+    while (!slot.state.compare_exchange_weak(
+        state, SlotState(SlotVersion(state) + 1, state & SlotFlags), std::memory_order_acquire,
+        std::memory_order_relaxed)) {
+    }
+    slot.socket.store(static_cast<u64>(s), std::memory_order_relaxed);
+    slot.tag.store(tag, std::memory_order_relaxed);
+    slot.state.store(SlotState(SlotVersion(state) + 2, flag_bits), std::memory_order_release);
+}
+
+// A waiter rebuilds its poll set when told. Only a waiting thread needs telling.
+void HostEpoll::Changed() {
+    if (waiters_.load(std::memory_order_acquire) != 0) {
+        wake_.Signal();
+    }
+}
+
+Error HostEpoll::Add(NativeSocket s, u64 tag, u32 events, u32 flags) {
+    return Store(s, tag, events, flags, true);
+}
+
+Error HostEpoll::Modify(NativeSocket s, u64 tag, u32 events, u32 flags) {
+    return Store(s, tag, events, flags, true);
+}
+
+Error HostEpoll::Remove(NativeSocket s) {
+    const u32 high = high_water_.load(std::memory_order_relaxed);
+    for (u32 i = 0; i < high; ++i) {
+        if ((slots_[i].state.load(std::memory_order_relaxed) & SlotUsed) &&
+            slots_[i].socket.load(std::memory_order_relaxed) == static_cast<u64>(s)) {
+            Write(i, InvalidSocket, 0, 0);
+            Changed();
+            return Error::Ok;
+        }
+    }
+    return Error::Ok; // the guest layer checks ENOENT
+}
+
+EpollWaitResult HostEpoll::Wait(std::span<EpollEvent> out, Deadline deadline) {
+    const size_t cap = std::min<size_t>(out.size(), 64);
+    if (cap == 0) {
+        return {0, false, Error::Inval};
+    }
+    struct Waiting {
+        std::atomic<u32>& count;
+        explicit Waiting(std::atomic<u32>& c) : count(c) {
+            count.fetch_add(1, std::memory_order_acq_rel);
+        }
+        ~Waiting() {
+            count.fetch_sub(1, std::memory_order_acq_rel);
+        }
+    } waiting{waiters_};
+
+    // The poll set lives with the thread rather than on a guest thread's stack
+    struct PollSet {
+        std::array<pollfd, MaxSlots + 1> fds;
+        std::array<u32, MaxSlots + 1> index;
+        std::array<u64, MaxSlots + 1> seen;
+    };
+    static thread_local PollSet set;
+    auto& fds = set.fds;
+    auto& index = set.index;
+    auto& seen = set.seen;
+    for (;;) {
+        // The poll set, from the slots as they are now
+        u32 n = 0;
+        fds[n].fd = wake_.PollHandle();
+        fds[n].events = POLLIN;
+        ++n;
+        const u32 high = high_water_.load(std::memory_order_acquire);
+        for (u32 i = 0; i < high; ++i) {
+            Slot& slot = slots_[i];
+            const u64 state = slot.state.load(std::memory_order_acquire);
+            if ((SlotVersion(state) & 1) || !(state & SlotUsed) || !(state & SlotArmed)) {
+                continue;
+            }
+            const auto sock =
+                static_cast<NativeSocket>(slot.socket.load(std::memory_order_relaxed));
+            std::atomic_thread_fence(std::memory_order_acquire);
+            if (slot.state.load(std::memory_order_relaxed) != state) {
+                continue; // changed under us; the writer will say so
+            }
+            fds[n].fd = sock;
+            fds[n].events = static_cast<short>(((state & SlotIn) ? POLLIN : 0) |
+                                               ((state & SlotOut) ? POLLOUT : 0));
+            index[n] = i;
+            seen[n] = state;
+            ++n;
+        }
+
+        // Another waiter may have taken the change signal: look again now and then
+        int timeout = TimeoutMs(deadline);
+        if (waiters_.load(std::memory_order_relaxed) > 1 && (timeout < 0 || timeout > 50)) {
+            timeout = 50;
+        }
+        const int ready = socket_poll(fds.data(), n, timeout);
+        if (ready < 0) {
+            return {0, false, LastError()};
+        }
+
+        EpollWaitResult r{0, false, Error::Ok};
+        if (fds[0].revents != 0) {
+            if (guest_wakes_.load(std::memory_order_acquire) != 0) {
+                r.woken = true;
+            } else {
+                // A table change. A guest wake that lands while draining is put back.
+                wake_.Drain();
+                if (guest_wakes_.load(std::memory_order_acquire) != 0) {
+                    wake_.Signal();
+                    r.woken = true;
+                }
+            }
+        }
+        for (u32 k = 1; k < n && static_cast<size_t>(r.count) < cap; ++k) {
+            const short rev = fds[k].revents;
+            if (rev == 0 || (rev & POLLNVAL)) {
+                continue;
+            }
+            Slot& slot = slots_[index[k]];
+            u64 state = seen[k];
+            if (state & SlotOneShot) {
+                // Taken once, by whichever waiter gets here first
+                if (!slot.state.compare_exchange_strong(
+                        state, SlotState(SlotVersion(state) + 2, state & ~SlotArmed),
+                        std::memory_order_acq_rel, std::memory_order_relaxed)) {
+                    continue;
+                }
+            } else if (slot.state.load(std::memory_order_acquire) != state) {
+                continue; // changed since the poll set was built
+            }
+            u32 ev = 0;
+            ev |= (rev & POLLIN) ? EvIn : 0;
+            ev |= (rev & POLLOUT) ? EvOut : 0;
+            ev |= (rev & POLLERR) ? EvErr : 0;
+            ev |= (rev & POLLHUP) ? EvHup : 0;
+            out[r.count++] = {slot.tag.load(std::memory_order_relaxed), ev};
+        }
+        if (r.count > 0 || r.woken || Expired(deadline)) {
+            return r;
+        }
+    }
+}
+
+void HostEpoll::Wake() {
+    guest_wakes_.fetch_add(1, std::memory_order_acq_rel);
+    wake_.Signal();
+}
+
+void HostEpoll::DrainWake() {
+    guest_wakes_.store(0, std::memory_order_release);
+    wake_.Drain();
 }
 
 #else // HOST_NET_KQUEUE (macOS, FreeBSD)
@@ -909,6 +1112,7 @@ EpollWaitResult HostEpoll::Wait(std::span<EpollEvent> out, Deadline deadline) {
 
 #endif
 
+#if !HOST_NET_POLL
 void HostEpoll::Wake() {
     wake_.Signal();
 }
@@ -916,5 +1120,6 @@ void HostEpoll::Wake() {
 void HostEpoll::DrainWake() {
     wake_.Drain();
 }
+#endif
 
 } // namespace Core::Net::Host

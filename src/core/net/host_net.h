@@ -4,12 +4,14 @@
 // Backends:
 //  * Linux:          poll + eventfd, epoll
 //  * macOS/FreeBSD:  poll + pipe, kqueue
-//  * Windows:        WSAPoll + loopback UDP pair, wepoll
+//  * Windows:        select() through libretro-common's socket_poll, loopback UDP pair
 
 #pragma once
 
+#include <atomic>
 #include <chrono>
 #include <cstddef>
+#include <memory>
 #include <optional>
 #include <span>
 
@@ -178,7 +180,8 @@ enum class WaitResult {
 
 WaitResult WaitOne(NativeSocket s, u32 interest, const WakeHandle& wake, Deadline deadline);
 
-// Host epoll/kqueue backing one guest epoll.
+// Host epoll/kqueue backing one guest epoll; on Windows, a table polled with select().
+// Add, Modify and Remove are not called from two threads at once; Wait may run meanwhile.
 enum EventBits : u32 {
     EvIn = 1u << 0,
     EvOut = 1u << 1,
@@ -188,7 +191,7 @@ enum EventBits : u32 {
     EvDescId = 1u << 4,
 };
 
-// Always level-triggered. The PS4 has no edge-triggered mode and wepoll ignores EPOLLET.
+// Always level-triggered. The PS4 has no edge-triggered mode.
 enum EpollFlags : u32 {
     OneShot = 1u << 0, // re-arm with Modify()
 };
@@ -228,7 +231,18 @@ public:
 
 private:
 #ifdef _WIN32
-    void* handle_ = nullptr; // wepoll HANDLE
+    // Sockets one epoll watches at most.
+    static constexpr u32 MaxSlots = 512;
+    struct Slot;
+
+    Error Store(NativeSocket s, u64 tag, u32 events, u32 flags, bool add);
+    void Write(u32 index, NativeSocket s, u64 tag, u64 flag_bits);
+    void Changed();
+
+    std::unique_ptr<Slot[]> slots_;
+    std::atomic<u32> high_water_{0}; // slots in use lie below
+    std::atomic<u32> waiters_{0};
+    std::atomic<u32> guest_wakes_{0}; // Wake() since DrainWake(); else the signal is a change
 #else
     int handle_ = -1;
 #endif
