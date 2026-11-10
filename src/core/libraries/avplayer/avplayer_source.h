@@ -3,15 +3,17 @@
 
 #pragma once
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
-#include <condition_variable>
 #include <memory>
 #include <mutex>
 #include <optional>
 #include <stop_token>
 #include <string_view>
+#include <type_traits>
 #include <utility>
+#include <vector>
 
 #include "common/assert.h"
 #include "core/libraries/avplayer/avplayer.h"
@@ -20,6 +22,8 @@
 #include "core/libraries/kernel/threads.h"
 
 #include "core/libraries/videodec/video_utils.h"
+
+#include <retro_waitable_spsc.h>
 
 struct RFILE;
 typedef struct rmp4 rmp4_t;
@@ -108,39 +112,97 @@ private:
     bool m_is_texture = false;
 };
 
-struct Frame {
-    GuestBuffer buffer;
-    AvPlayerFrameInfoEx info;
-};
+// A queue between two threads, on libretro-common's waitable SPSC ring: no lock, and a
+// waiting end sleeps on an eventcount. Close() releases both ends for good; the records
+// still in it can be taken.
+template <class T>
+class SpscRing {
+    static_assert(std::is_trivially_copyable_v<T>);
 
-class EventCV {
 public:
-    template <class Pred>
-    void Wait(Pred pred) {
-        std::unique_lock lock(m_mutex);
-        m_cv.wait(lock, std::move(pred));
+    SpscRing() = default;
+    SpscRing(const SpscRing&) = delete;
+    SpscRing& operator=(const SpscRing&) = delete;
+    ~SpscRing() {
+        Free();
     }
 
-    template <class Pred>
-    bool Wait(std::stop_token stop, Pred pred) {
-        std::unique_lock lock(m_mutex);
-        return m_cv.wait(lock, std::move(stop), std::move(pred));
+    // Not while another thread uses the ring.
+    bool Init(size_t count) {
+        Free();
+        m_live = retro_waitable_spsc_init(&m_queue, std::max<size_t>(count, 1) * sizeof(T));
+        return m_live;
     }
 
-    template <class Pred, class Rep, class Period>
-    bool WaitFor(std::chrono::duration<Rep, Period> timeout, Pred pred) {
-        std::unique_lock lock(m_mutex);
-        return m_cv.wait_for(lock, timeout, std::move(pred));
+    void Free() {
+        if (m_live) {
+            retro_waitable_spsc_free(&m_queue);
+            m_live = false;
+        }
     }
 
-    void Notify() {
-        std::unique_lock lock(m_mutex);
-        m_cv.notify_all();
+    // The producer's: waits for room, false once closed.
+    bool Push(const T& value) {
+        if (!m_live) {
+            return false;
+        }
+        while (retro_spsc_write_avail(&m_queue.queue) < sizeof(T)) {
+            if (retro_waitable_spsc_cancelled(&m_queue)) {
+                return false;
+            }
+            retro_waitable_spsc_wait_writable(&m_queue, sizeof(T), WaitBound);
+        }
+        retro_waitable_spsc_write(&m_queue, &value, sizeof(T));
+        return true;
+    }
+
+    // The consumer's.
+    bool TryPop(T& out) {
+        if (Size() == 0) {
+            return false;
+        }
+        retro_waitable_spsc_read(&m_queue, &out, sizeof(T));
+        return true;
+    }
+
+    // The consumer's: waits for a record, false once closed and empty.
+    bool Pop(T& out) {
+        for (;;) {
+            if (TryPop(out)) {
+                return true;
+            }
+            if (!m_live || retro_waitable_spsc_cancelled(&m_queue)) {
+                return false;
+            }
+            retro_waitable_spsc_wait_readable(&m_queue, sizeof(T), WaitBound);
+        }
+    }
+
+    bool Peek(T& out) const {
+        return Size() != 0 && retro_spsc_peek(&m_queue.queue, &out, sizeof(T)) == sizeof(T);
+    }
+
+    // Exact on the consumer's side, a hint elsewhere.
+    size_t Size() const {
+        return retro_spsc_read_avail(&m_queue.queue) / sizeof(T);
+    }
+
+    void Close() {
+        if (m_live) {
+            retro_waitable_spsc_cancel(&m_queue);
+        }
+    }
+
+    // Once both ends have stopped.
+    void Drain() {
+        retro_spsc_skip(&m_queue.queue, retro_spsc_read_avail(&m_queue.queue));
     }
 
 private:
-    std::mutex m_mutex{};
-    std::condition_variable_any m_cv{};
+    static constexpr int64_t WaitBound = 1000000; // a wake comes first; this only re-checks
+
+    retro_waitable_spsc_t m_queue{};
+    bool m_live = false;
 };
 
 class AvPlayerSource {
@@ -173,6 +235,14 @@ private:
         u64 timestamp = 0; // milliseconds
     };
 
+    // A decoded frame in a guest buffer of the pool.
+    struct Frame {
+        u32 buffer = 0;
+        AvPlayerFrameInfoEx info{};
+    };
+
+    void CloseQueues();
+
     u64 DurationMillis() const;
     AvPlayerStreamInfo CreateStreamInfo(u32 stream_index);
     bool OpenDemuxer();
@@ -204,28 +274,26 @@ private:
 
     std::unique_ptr<IDataStreamer> m_up_data_streamer;
 
-    AvPlayerQueue<GuestBuffer> m_audio_buffers;
-    AvPlayerQueue<GuestBuffer> m_video_buffers;
+    // The guest buffers, made at Start; the queues carry their indices. Every queue has one
+    // thread at each end: buffers go from the game to a decoder, packets from the demuxer to a
+    // decoder, frames from a decoder to the game.
+    std::vector<GuestBuffer> m_video_pool;
+    std::vector<GuestBuffer> m_audio_pool;
 
-    AvPlayerQueue<Packet> m_audio_packets;
-    AvPlayerQueue<Packet> m_video_packets;
+    SpscRing<u32> m_audio_buffers;
+    SpscRing<u32> m_video_buffers;
 
-    AvPlayerQueue<Frame> m_audio_frames;
-    AvPlayerQueue<Frame> m_video_frames;
+    SpscRing<Packet> m_audio_packets;
+    SpscRing<Packet> m_video_packets;
+
+    SpscRing<Frame> m_audio_frames;
+    SpscRing<Frame> m_video_frames;
 
     std::optional<Frame> m_current_video_frame;
     std::optional<Frame> m_current_audio_frame;
 
     std::optional<s32> m_video_stream_index{};
     std::optional<s32> m_audio_stream_index{};
-
-    EventCV m_audio_packets_cv{};
-    EventCV m_audio_frames_cv{};
-    EventCV m_audio_buffers_cv{};
-
-    EventCV m_video_packets_cv{};
-    EventCV m_video_frames_cv{};
-    EventCV m_video_buffers_cv{};
 
     std::mutex m_state_mutex{};
     Kernel::Thread m_demuxer_thread{};

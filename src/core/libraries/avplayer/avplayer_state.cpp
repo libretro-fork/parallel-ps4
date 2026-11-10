@@ -236,7 +236,7 @@ void AvPlayerState::AvControllerThread(std::stop_token stop) {
     Common::SetCurrentThreadName("shadPS4:AvController");
 
     while (!stop.stop_requested()) {
-        if (m_event_queue.Size() != 0) {
+        if (!m_event_queue.Empty()) {
             ProcessEvent();
             continue;
         }
@@ -248,19 +248,23 @@ void AvPlayerState::AvControllerThread(std::stop_token stop) {
 // Called inside GAME thread
 void AvPlayerState::AddSourceEvent() {
     SetState(AvState::AddingSource);
-    m_event_queue.Push(AvPlayerEvent{
-        .event = AvEventType::AddSource,
-    });
+    if (!m_event_queue.Push(AvPlayerEvent{
+            .event = AvEventType::AddSource,
+        })) {
+        LOG_ERROR(Lib_AvPlayer, "The event queue is full: an event is dropped");
+    }
 }
 
 void AvPlayerState::WarningEvent(s32 id) {
-    m_event_queue.Push(AvPlayerEvent{
-        .event = AvEventType::WarningId,
-        .payload =
-            {
-                .error = id,
-            },
-    });
+    if (!m_event_queue.Push(AvPlayerEvent{
+            .event = AvEventType::WarningId,
+            .payload =
+                {
+                    .error = id,
+                },
+        })) {
+        LOG_ERROR(Lib_AvPlayer, "The event queue is full: an event is dropped");
+    }
 }
 
 // Called inside GAME thread

@@ -91,7 +91,7 @@ private:
     std::mutex m_state_machine_mutex{};
     std::mutex m_event_handler_mutex{};
     Kernel::Thread m_controller_thread{};
-    AvPlayerQueue<AvPlayerEvent> m_event_queue{};
+    MpscRing<AvPlayerEvent, 64> m_event_queue{};
 };
 
 } // namespace Libraries::AvPlayer

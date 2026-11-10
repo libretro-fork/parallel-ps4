@@ -3,11 +3,12 @@
 
 #pragma once
 
-#include <mutex>
+#include <array>
+#include <atomic>
+#include <cstddef>
 #include <optional>
 #include <string_view>
-#include <utility>
-#include <queue>
+#include <type_traits>
 
 #include "core/libraries/avplayer/avplayer.h"
 
@@ -53,40 +54,68 @@ struct AvPlayerEvent {
     AvPlayerEventData payload;
 };
 
-template <class T>
-class AvPlayerQueue {
+// A bounded FIFO many threads put into and one takes from, without a lock (Vyukov's queue).
+template <class T, std::size_t N>
+class MpscRing {
+    static_assert(std::is_trivially_copyable_v<T> && (N & (N - 1)) == 0);
+
 public:
-    size_t Size() {
-        return m_queue.size();
+    MpscRing() {
+        for (std::size_t i = 0; i < N; ++i) {
+            m_cells[i].seq.store(i, std::memory_order_relaxed);
+        }
     }
 
-    void Push(T&& value) {
-        std::lock_guard guard(m_mutex);
-        m_queue.emplace(std::forward<T>(value));
+    // False when the ring is full.
+    bool Push(const T& value) {
+        std::size_t pos = m_tail.load(std::memory_order_relaxed);
+        for (;;) {
+            Cell& cell = m_cells[pos & (N - 1)];
+            const std::size_t seq = cell.seq.load(std::memory_order_acquire);
+            const auto diff = static_cast<std::ptrdiff_t>(seq - pos);
+            if (diff == 0) {
+                if (m_tail.compare_exchange_weak(pos, pos + 1, std::memory_order_relaxed)) {
+                    cell.value = value;
+                    cell.seq.store(pos + 1, std::memory_order_release);
+                    return true;
+                }
+            } else if (diff < 0) {
+                return false;
+            } else {
+                pos = m_tail.load(std::memory_order_relaxed);
+            }
+        }
     }
 
-    T& Front() {
-        return m_queue.front();
-    }
-
+    // The consumer's.
     std::optional<T> Pop() {
-        if (Size() == 0) {
+        Cell& cell = m_cells[m_head & (N - 1)];
+        if (cell.seq.load(std::memory_order_acquire) != m_head + 1) {
             return std::nullopt;
         }
-        std::lock_guard guard(m_mutex);
-        auto result = std::move(m_queue.front());
-        m_queue.pop();
-        return result;
+        const T value = cell.value;
+        cell.seq.store(m_head + N, std::memory_order_release);
+        ++m_head;
+        return value;
+    }
+
+    bool Empty() const {
+        return m_cells[m_head & (N - 1)].seq.load(std::memory_order_acquire) != m_head + 1;
     }
 
     void Clear() {
-        std::lock_guard guard(m_mutex);
-        m_queue = {};
+        while (Pop()) {
+        }
     }
 
 private:
-    std::mutex m_mutex{};
-    std::queue<T> m_queue{};
+    struct Cell {
+        std::atomic<std::size_t> seq;
+        T value;
+    };
+    std::array<Cell, N> m_cells{};
+    alignas(64) std::atomic<std::size_t> m_tail{0};
+    alignas(64) std::size_t m_head = 0;
 };
 
 AvPlayerSourceType GetSourceType(std::string_view path);

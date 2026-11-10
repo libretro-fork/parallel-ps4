@@ -48,6 +48,8 @@ constexpr size_t FirstRead = 64 * 1024;
 constexpr size_t ReadStep = 1024 * 1024;
 constexpr u32 MaxAudioChannels = 8;
 constexpr u32 MaxAudioFrame = 2048; // HE-AAC
+// Samples a decoder may fall behind the demuxer; well past what it reads ahead.
+constexpr size_t MaxQueuedPackets = 4096;
 
 bool IsTrackSupported(const rmp4_track& track) {
     return track.codec == RMP4_CODEC_H264 || track.codec == RMP4_CODEC_H265 ||
@@ -311,8 +313,10 @@ bool AvPlayerSource::Start() {
         const auto pitch = Common::AlignUp<u32>(track.width, 64);
         const auto height = Common::AlignUp<u32>(track.height, 16);
         const auto size = (pitch * height * 3) / 2;
-        for (u64 index = 0; index < m_max_num_video_framebuffers; ++index) {
-            m_video_buffers.Push(GuestBuffer(m_memory_replacement, 0x100, size, true));
+        m_video_pool.clear();
+        m_video_pool.reserve(m_max_num_video_framebuffers);
+        for (u32 index = 0; index < m_max_num_video_framebuffers; ++index) {
+            m_video_pool.emplace_back(m_memory_replacement, 0x100, size, true);
         }
     }
     if (m_audio_stream_index) {
@@ -331,15 +335,40 @@ bool AvPlayerSource::Start() {
         m_audio_skip = track.media_skip;
         // A frame of HE-AAC at the most channels, as 16-bit samples
         const auto size = MaxAudioChannels * sizeof(s16) * MaxAudioFrame;
-        for (u64 index = 0; index < (m_max_num_video_framebuffers * 2); ++index) {
-            m_audio_buffers.Push(GuestBuffer(m_memory_replacement, 0x10, size, false));
+        m_audio_pool.clear();
+        m_audio_pool.reserve(m_max_num_video_framebuffers * 2);
+        for (u32 index = 0; index < m_max_num_video_framebuffers * 2; ++index) {
+            m_audio_pool.emplace_back(m_memory_replacement, 0x10, size, false);
         }
+    }
+    // Fresh queues: the last playback's were closed. A frame queue holds every buffer, so a
+    // decoder never waits on it.
+    if (!m_video_buffers.Init(m_video_pool.size()) || !m_video_frames.Init(m_video_pool.size()) ||
+        !m_audio_buffers.Init(m_audio_pool.size()) || !m_audio_frames.Init(m_audio_pool.size()) ||
+        !m_video_packets.Init(MaxQueuedPackets) || !m_audio_packets.Init(MaxQueuedPackets)) {
+        LOG_ERROR(Lib_AvPlayer, "Could not allocate the playback queues.");
+        return false;
+    }
+    for (u32 index = 0; index < m_video_pool.size(); ++index) {
+        m_video_buffers.Push(index);
+    }
+    for (u32 index = 0; index < m_audio_pool.size(); ++index) {
+        m_audio_buffers.Push(index);
     }
     m_demuxer_thread.Run([this](std::stop_token stop) { this->DemuxerThread(stop); });
     m_video_decoder_thread.Run([this](std::stop_token stop) { this->VideoDecoderThread(stop); });
     m_audio_decoder_thread.Run([this](std::stop_token stop) { this->AudioDecoderThread(stop); });
     m_start_time = std::chrono::high_resolution_clock::now();
     return true;
+}
+
+void AvPlayerSource::CloseQueues() {
+    m_video_buffers.Close();
+    m_audio_buffers.Close();
+    m_audio_packets.Close();
+    m_video_packets.Close();
+    m_audio_frames.Close();
+    m_video_frames.Close();
 }
 
 bool AvPlayerSource::Stop() {
@@ -350,6 +379,8 @@ bool AvPlayerSource::Stop() {
         return false;
     }
 
+    // Closed queues wake every thread waiting on one
+    CloseQueues();
     m_video_decoder_thread.Stop();
     m_audio_decoder_thread.Stop();
     m_demuxer_thread.Stop();
@@ -357,12 +388,15 @@ bool AvPlayerSource::Stop() {
     m_current_audio_frame.reset();
     m_current_video_frame.reset();
 
-    m_video_buffers.Clear();
-    m_audio_buffers.Clear();
-    m_audio_packets.Clear();
-    m_video_packets.Clear();
-    m_audio_frames.Clear();
-    m_video_frames.Clear();
+    // The memory stays until the next Start, as other threads may still ask for a size
+    m_video_buffers.Drain();
+    m_audio_buffers.Drain();
+    m_audio_packets.Drain();
+    m_video_packets.Drain();
+    m_audio_frames.Drain();
+    m_video_frames.Drain();
+    m_video_pool.clear();
+    m_audio_pool.clear();
 
     m_last_audio_ts.reset();
     m_last_data_time.reset();
@@ -405,28 +439,24 @@ bool AvPlayerSource::GetVideoData(AvPlayerFrameInfoEx& video_info) {
         return false;
     }
 
-    if (m_video_frames.Size() == 0) {
+    Frame frame;
+    if (!m_video_frames.Peek(frame)) {
+        return false;
+    }
+    if (m_state.GetSyncMode() == AvPlayerAvSyncMode::Default &&
+        frame.info.timestamp > CurrentTime()) {
         return false;
     }
 
-    const auto current_time = CurrentTime();
-    const auto& new_frame = m_video_frames.Front();
-    if (m_state.GetSyncMode() == AvPlayerAvSyncMode::Default) {
-        if (new_frame.info.timestamp > current_time) {
-            return false;
-        }
-    }
-
+    // The frame handed out last time is done with
     if (m_current_video_frame.has_value()) {
-        m_video_buffers.Push(std::move(m_current_video_frame->buffer));
+        m_video_buffers.Push(m_current_video_frame->buffer);
         m_current_video_frame.reset();
-        m_video_buffers_cv.Notify();
     }
 
-    auto frame = m_video_frames.Pop();
-    video_info = frame->info;
-
-    m_current_video_frame = std::move(frame);
+    m_video_frames.TryPop(frame);
+    video_info = frame.info;
+    m_current_video_frame = frame;
     return true;
 }
 
@@ -435,28 +465,27 @@ bool AvPlayerSource::GetAudioData(AvPlayerFrameInfo& audio_info) {
         return false;
     }
 
-    if (m_audio_frames.Size() == 0) {
+    Frame frame;
+    if (!m_audio_frames.TryPop(frame)) {
         return false;
     }
 
     if (m_current_audio_frame.has_value()) {
-        m_audio_buffers.Push(std::move(m_current_audio_frame->buffer));
+        m_audio_buffers.Push(m_current_audio_frame->buffer);
         m_current_audio_frame.reset();
-        m_audio_buffers_cv.Notify();
     }
 
-    auto frame = m_audio_frames.Pop();
-    m_last_audio_ts = frame->info.timestamp;
+    m_last_audio_ts = frame.info.timestamp;
     m_last_data_time = std::chrono::high_resolution_clock::now();
     m_pause_duration = std::chrono::high_resolution_clock::duration(0);
 
     audio_info = {};
-    audio_info.timestamp = frame->info.timestamp;
-    audio_info.p_data = reinterpret_cast<u8*>(frame->info.p_data);
-    audio_info.details.audio.sample_rate = frame->info.details.audio.sample_rate;
-    audio_info.details.audio.size = frame->info.details.audio.size;
-    audio_info.details.audio.channel_count = frame->info.details.audio.channel_count;
-    m_current_audio_frame = std::move(frame);
+    audio_info.timestamp = frame.info.timestamp;
+    audio_info.p_data = reinterpret_cast<u8*>(frame.info.p_data);
+    audio_info.details.audio.sample_rate = frame.info.details.audio.sample_rate;
+    audio_info.details.audio.size = frame.info.details.audio.size;
+    audio_info.details.audio.channel_count = frame.info.details.audio.channel_count;
+    m_current_audio_frame = frame;
     return true;
 }
 
@@ -555,23 +584,22 @@ void AvPlayerSource::DemuxerThread(std::stop_token stop) {
             return;
         }
         const Packet out{packet.data, packet.size, NanosToMillis(packet.timestamp)};
+        // A full queue waits for its decoder; a closed one means the player stopped
         if (packet.track == video_track) {
-            m_video_packets.Push(Packet{out});
-            m_video_packets_cv.Notify();
+            if (!m_video_packets.Push(out)) {
+                break;
+            }
         } else if (packet.track == audio_track) {
-            m_audio_packets.Push(Packet{out});
-            m_audio_packets_cv.Notify();
+            if (!m_audio_packets.Push(out)) {
+                break;
+            }
         }
     }
 
     m_is_eof = true;
-
-    m_video_packets_cv.Notify();
-    m_audio_packets_cv.Notify();
-    m_video_frames_cv.Notify();
-    m_audio_frames_cv.Notify();
-    m_video_buffers_cv.Notify();
-    m_audio_buffers_cv.Notify();
+    // The decoders take what is left, then find the queues closed
+    m_video_packets.Close();
+    m_audio_packets.Close();
 
     m_video_decoder_thread.Join();
     m_audio_decoder_thread.Join();
@@ -590,31 +618,32 @@ void AvPlayerSource::VideoDecoderThread(std::stop_token stop) {
     }
     LOG_INFO(Lib_AvPlayer, "Video Decoder Thread started");
     auto& decoder = *m_video_decoder;
+    std::optional<u32> spare; // a buffer taken and not filled
     // Writes the ready picture straight into a guest buffer
     const auto output = [&]() -> bool {
-        if (m_video_buffers.Size() == 0 &&
-            !m_video_buffers_cv.Wait(stop, [this] { return m_video_buffers.Size() != 0; })) {
-            return false;
+        if (!spare.has_value()) {
+            u32 index = 0;
+            if (!m_video_buffers.Pop(index)) {
+                return false; // the player stopped
+            }
+            spare = index;
         }
-        auto buffer = m_video_buffers.Pop();
-        if (!buffer.has_value()) {
-            // Video buffers queue was cleared. This means that player was stopped.
-            return false;
-        }
-        u8* p_buffer = buffer->GetBuffer();
-        if (!decoder.WriteNV12(p_buffer, buffer->Size())) {
+        const GuestBuffer& buffer = m_video_pool[*spare];
+        u8* p_buffer = buffer.GetBuffer();
+        if (!decoder.WriteNV12(p_buffer, buffer.Size())) {
             LOG_ERROR(Lib_AvPlayer, "The {}x{} picture does not fit the frame buffer",
                       decoder.Width(), decoder.Height());
-            m_video_buffers.Push(std::move(buffer.value()));
-            return true;
+            return true; // the buffer is kept for the next picture
         }
         const auto width = Common::AlignUp<u32>(decoder.Width(), 16);
         const auto pitch = decoder.Pitch();
         const auto height = decoder.AlignedHeight();
         Core::Memory::Instance()->InvalidateMemory(reinterpret_cast<VAddr>(p_buffer),
                                                    decoder.Nv12Size());
-        m_video_frames.Push(Frame{
-            .buffer = std::move(buffer.value()),
+        const u32 index = *spare;
+        spare.reset();
+        return m_video_frames.Push(Frame{
+            .buffer = index,
             .info =
                 {
                     .p_data = p_buffer,
@@ -637,21 +666,12 @@ void AvPlayerSource::VideoDecoderThread(std::stop_token stop) {
                         },
                 },
         });
-        m_video_frames_cv.Notify();
-        return true;
     };
 
-    while ((!m_is_eof || m_video_packets.Size() != 0) && !stop.stop_requested()) {
-        if (m_video_packets.Size() == 0 &&
-            !m_video_packets_cv.Wait(stop, [this] { return m_video_packets.Size() != 0; })) {
-            continue;
-        }
-        const auto packet = m_video_packets.Pop();
-        if (!packet.has_value()) {
-            continue;
-        }
-        const Videodec::PictureMeta meta{.pts = packet->timestamp};
-        const int res = decoder.Decode(packet->data, packet->size, meta);
+    Packet packet;
+    while (!stop.stop_requested() && m_video_packets.Pop(packet)) {
+        const Videodec::PictureMeta meta{.pts = packet.timestamp};
+        const int res = decoder.Decode(packet.data, packet.size, meta);
         if (res < 0) {
             LOG_ERROR(Lib_AvPlayer, "Could not decode a video sample. Error = {}", res);
             m_state.OnError();
@@ -689,27 +709,19 @@ void AvPlayerSource::AudioDecoderThread(std::stop_token stop) {
         m_state.OnError();
         return;
     }
-    while ((!m_is_eof || m_audio_packets.Size() != 0) && !stop.stop_requested()) {
-        if (m_audio_packets.Size() == 0 &&
-            !m_audio_packets_cv.Wait(stop, [this] { return m_audio_packets.Size() != 0; })) {
-            continue;
-        }
-        const auto packet = m_audio_packets.Pop();
-        if (!packet.has_value()) {
-            continue;
-        }
-        if (m_audio_buffers.Size() == 0 &&
-            !m_audio_buffers_cv.Wait(stop, [this] { return m_audio_buffers.Size() != 0; })) {
-            break;
-        }
-        auto buffer = m_audio_buffers.Pop();
-        if (!buffer.has_value()) {
-            // Audio buffers queue was cleared. This means that player was stopped.
-            break;
+    Packet packet;
+    std::optional<u32> spare; // a buffer taken and not filled
+    while (!stop.stop_requested() && m_audio_packets.Pop(packet)) {
+        if (!spare.has_value()) {
+            u32 index = 0;
+            if (!m_audio_buffers.Pop(index)) {
+                break; // the player stopped
+            }
+            spare = index;
         }
         // Decoded straight into the guest buffer
-        auto* pcm = reinterpret_cast<s16*>(buffer->GetBuffer());
-        const int samples = raac_decode_s16(m_audio_decoder, packet->data, packet->size, pcm);
+        auto* pcm = reinterpret_cast<s16*>(m_audio_pool[*spare].GetBuffer());
+        const int samples = raac_decode_s16(m_audio_decoder, packet.data, packet.size, pcm);
         if (samples < 0) {
             LOG_ERROR(Lib_AvPlayer, "Could not decode an audio sample. Error = {}", samples);
             m_state.OnError();
@@ -720,29 +732,31 @@ void AvPlayerSource::AudioDecoderThread(std::stop_token stop) {
         m_audio_skip -= skip;
         const u32 count = static_cast<u32>(samples) - skip;
         if (count == 0) {
-            m_audio_buffers.Push(std::move(buffer.value()));
-            continue;
+            continue; // the buffer is kept for the next frame
         }
         u8* p_data = reinterpret_cast<u8*>(pcm + skip * channels);
         const u32 size = count * channels * sizeof(s16);
-        m_audio_frames.Push(Frame{
-            .buffer = std::move(buffer.value()),
-            .info =
-                {
-                    .p_data = p_data,
-                    .timestamp = packet->timestamp,
-                    .details =
-                        {
-                            .audio =
-                                {
-                                    .channel_count = u16(channels),
-                                    .sample_rate = sample_rate,
-                                    .size = size,
-                                },
-                        },
-                },
-        });
-        m_audio_frames_cv.Notify();
+        const u32 index = *spare;
+        spare.reset();
+        if (!m_audio_frames.Push(Frame{
+                .buffer = index,
+                .info =
+                    {
+                        .p_data = p_data,
+                        .timestamp = packet.timestamp,
+                        .details =
+                            {
+                                .audio =
+                                    {
+                                        .channel_count = u16(channels),
+                                        .sample_rate = sample_rate,
+                                        .size = size,
+                                    },
+                            },
+                    },
+            })) {
+            break;
+        }
     }
 
     LOG_INFO(Lib_AvPlayer, "Audio Decoder Thread exited normally");
