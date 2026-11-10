@@ -7,10 +7,7 @@
 
 namespace Libraries::Camera {
 
-void ConvertRGBA8888ToY8(const u8* src, u8* dst, int width, int height);
-void ConvertRGBA8888ToY16(const u8* src, u16* dst, int width, int height);
-void ConvertRGBA8888ToRAW8(const u8* src, u8* dst, int width, int height);
-void ConvertRGBA8888ToRAW16(const u8* src, u16* dst, int width, int height);
+// Conversions from the YUY2 a CameraBackend lends (camera_backend.h).
 void ConvertYUY2ToY8(const u8* src, u8* dst, int width, int height);
 void ConvertYUY2ToY16(const u8* src, u16* dst, int width, int height);
 void ConvertYUY2ToRAW8(const u8* src, u8* dst, int width, int height);

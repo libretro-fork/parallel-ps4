@@ -176,7 +176,6 @@ void EmulatorSettingsImpl::ClearGameSpecificOverrides() {
     ClearGroupOverrides(m_log);
     ClearGroupOverrides(m_debug);
     ClearGroupOverrides(m_input);
-    ClearGroupOverrides(m_audio);
     ClearGroupOverrides(m_gpu);
     ClearGroupOverrides(m_vulkan);
 }
@@ -211,10 +210,6 @@ bool EmulatorSettingsImpl::Save(const std::string& serial) {
             SaveGroupGameSpecific(m_input, inputObj);
             j["Input"] = inputObj;
 
-            json audioObj = json::object();
-            SaveGroupGameSpecific(m_audio, audioObj);
-            j["Audio"] = audioObj;
-
             json gpuObj = json::object();
             SaveGroupGameSpecific(m_gpu, gpuObj);
             j["GPU"] = gpuObj;
@@ -244,7 +239,6 @@ bool EmulatorSettingsImpl::Save(const std::string& serial) {
             j["Log"] = m_log;
             j["Debug"] = m_debug;
             j["Input"] = m_input;
-            j["Audio"] = m_audio;
             j["GPU"] = m_gpu;
             j["Vulkan"] = m_vulkan;
 
@@ -314,7 +308,6 @@ bool EmulatorSettingsImpl::Load(const std::string& serial) {
                 mergeGroup(m_log, "Log");
                 mergeGroup(m_debug, "Debug");
                 mergeGroup(m_input, "Input");
-                mergeGroup(m_audio, "Audio");
                 mergeGroup(m_gpu, "GPU");
                 mergeGroup(m_vulkan, "Vulkan");
             } else {
@@ -357,8 +350,6 @@ bool EmulatorSettingsImpl::Load(const std::string& serial) {
                 ApplyGroupOverrides(m_debug, gj.at("Debug"), changed);
             if (gj.contains("Input"))
                 ApplyGroupOverrides(m_input, gj.at("Input"), changed);
-            if (gj.contains("Audio"))
-                ApplyGroupOverrides(m_audio, gj.at("Audio"), changed);
             if (gj.contains("GPU"))
                 ApplyGroupOverrides(m_gpu, gj.at("GPU"), changed);
             if (gj.contains("Vulkan"))
@@ -380,7 +371,6 @@ void EmulatorSettingsImpl::SetDefaultValues() {
     m_log = LogSettings{};
     m_debug = DebugSettings{};
     m_input = InputSettings{};
-    m_audio = AudioSettings{};
     m_gpu = GPUSettings{};
     m_vulkan = VulkanSettings{};
 }
@@ -396,7 +386,6 @@ std::vector<std::string> EmulatorSettingsImpl::GetAllOverrideableKeys() const {
     addGroup(m_log.GetOverrideableFields());
     addGroup(m_debug.GetOverrideableFields());
     addGroup(m_input.GetOverrideableFields());
-    addGroup(m_audio.GetOverrideableFields());
     addGroup(m_gpu.GetOverrideableFields());
     addGroup(m_vulkan.GetOverrideableFields());
     return keys;

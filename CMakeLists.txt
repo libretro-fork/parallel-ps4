@@ -322,7 +322,7 @@ set(AUDIO_LIB src/core/libraries/audio/audioin.cpp
               src/core/libraries/audio/audioin.h
               src/core/libraries/audio/audioin_backend.h
               src/core/libraries/audio/audioin_error.h
-              src/core/libraries/audio/sdl_audio_in.cpp
+              src/core/libraries/audio/silent_audio_in.cpp
               src/core/libraries/voice/voice.cpp
               src/core/libraries/voice/voice.h
               src/core/libraries/voice/voice_error.h
@@ -757,9 +757,10 @@ set(MISC_LIBS  src/core/libraries/screenshot/screenshot.cpp
 )
 
 set(CAMERA_LIBS  src/core/libraries/camera/camera.cpp
-                 src/core/libraries/camera/camera.h
+                 src/core/libraries/camera/camera_backend.h
                  src/core/libraries/camera/camera_helpers.h
                  src/core/libraries/camera/camera_helpers.cpp
+                 src/core/libraries/camera/camera.h
                  src/core/libraries/camera/camera_audio.cpp
                  src/core/libraries/camera/camera_calibration.cpp
                  src/core/libraries/camera/camera_config.cpp

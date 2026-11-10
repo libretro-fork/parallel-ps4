@@ -18,6 +18,10 @@ std::mutex port_allocation_mutex;
 
 static std::unique_ptr<AudioInBackend> audio;
 
+std::unique_ptr<AudioInBackend> MakeAudioInBackend() {
+    return std::make_unique<SilentAudioIn>();
+}
+
 /*
  * Helper functions
  **/
@@ -62,7 +66,7 @@ int PS4_SYSV_ABI sceAudioInOpen(Libraries::UserService::OrbisUserServiceUserId u
     if (!initOnce) {
         // sceAudioInInit doesn't seem to be called by most apps before sceAudioInOpen so we init
         // here
-        audio = std::make_unique<SDLAudioIn>();
+        audio = MakeAudioInBackend();
         initOnce = true;
     }
 

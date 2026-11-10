@@ -317,7 +317,6 @@ struct InputSettings {
     Setting<bool> ime_accessibility_enabled{false};   // specific
     Setting<bool> ime_url_mail_short_panel{false};    // specific
     Setting<bool> is_circle_enter{false};             // specific
-    Setting<s32> camera_id{-1};
     Setting<bool> use_mice_as_mice{false};
     Setting<bool> use_keyboard_as_keyboard{false};
 
@@ -336,7 +335,6 @@ struct InputSettings {
             make_override<InputSettings>("ime_url_mail_short_panel",
                                          &InputSettings::ime_url_mail_short_panel),
             make_override<InputSettings>("is_circle_enter", &InputSettings::is_circle_enter),
-            make_override<InputSettings>("camera_id", &InputSettings::camera_id),
             make_override<InputSettings>("use_mice_as_mice", &InputSettings::use_mice_as_mice),
             make_override<InputSettings>("use_keyboard_as_keyboard",
                                          &InputSettings::use_keyboard_as_keyboard)};
@@ -346,22 +344,8 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(InputSettings, cursor_state, cursor_hide_time
                                    usb_device_backend, use_special_pad, special_pad_class,
                                    motion_controls_enabled, use_unified_input_config,
                                    default_controller_id, background_controller_input,
-                                   ime_accessibility_enabled, ime_url_mail_short_panel, camera_id,
+                                   ime_accessibility_enabled, ime_url_mail_short_panel,
                                    is_circle_enter, use_mice_as_mice, use_keyboard_as_keyboard)
-// -------------------------------
-// Audio settings
-// -------------------------------
-struct AudioSettings {
-    Setting<std::string> sdl_mic_device{"Default Device"};
-
-    std::vector<OverrideItem> GetOverrideableFields() const {
-        return std::vector<OverrideItem>{
-            make_override<AudioSettings>("sdl_mic_device", &AudioSettings::sdl_mic_device)};
-    }
-};
-
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(AudioSettings, sdl_mic_device)
-
 // -------------------------------
 // GPU settings
 // -------------------------------
@@ -523,7 +507,6 @@ private:
     LogSettings m_log{};
     DebugSettings m_debug{};
     InputSettings m_input{};
-    AudioSettings m_audio{};
     GPUSettings m_gpu{};
     VulkanSettings m_vulkan{};
     ConfigMode m_configMode{ConfigMode::Default};
@@ -572,7 +555,6 @@ public:
             m_log = other.m_log;
             m_debug = other.m_debug;
             m_input = other.m_input;
-            m_audio = other.m_audio;
             m_gpu = other.m_gpu;
             m_vulkan = other.m_vulkan;
             m_configMode = other.m_configMode;
@@ -592,9 +574,6 @@ public:
     }
     std::vector<OverrideItem> GetInputOverrideableFields() const {
         return m_input.GetOverrideableFields();
-    }
-    std::vector<OverrideItem> GetAudioOverrideableFields() const {
-        return m_audio.GetOverrideableFields();
     }
     std::vector<OverrideItem> GetGPUOverrideableFields() const {
         return m_gpu.GetOverrideableFields();
@@ -678,9 +657,6 @@ public:
     SETTING_FORWARD(m_log, LogType, type)
 #endif
 
-    // Audio settings
-    SETTING_FORWARD(m_audio, SDLMicDevice, sdl_mic_device)
-
     // Debug settings
     SETTING_FORWARD_BOOL(m_debug, DebugDump, debug_dump)
     SETTING_FORWARD_BOOL(m_debug, ShaderCollect, shader_collect)
@@ -736,7 +712,6 @@ public:
     SETTING_FORWARD_BOOL(m_input, UsingSpecialPad, use_special_pad)
     SETTING_FORWARD(m_input, SpecialPadClass, special_pad_class)
     SETTING_FORWARD_BOOL(m_input, UseUnifiedInputConfig, use_unified_input_config)
-    SETTING_FORWARD(m_input, CameraId, camera_id)
     SETTING_FORWARD_BOOL(m_input, CircleEnter, is_circle_enter)
     SETTING_FORWARD_BOOL(m_input, MiceUsedAsMice, use_mice_as_mice)
     SETTING_FORWARD_BOOL(m_input, KeyboardUsedAsKeyboard, use_keyboard_as_keyboard)
