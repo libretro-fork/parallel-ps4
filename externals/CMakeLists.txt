@@ -123,13 +123,6 @@ if (NOT TARGET magic_enum::magic_enum)
     add_subdirectory(magic_enum)
 endif()
 
-# xxHash
-if (NOT TARGET xxHash::xxhash)
-    add_library(xxhash xxhash/xxhash.h xxhash/xxhash.c)
-    target_include_directories(xxhash PUBLIC xxhash)
-    add_library(xxHash::xxhash ALIAS xxhash)
-endif()
-
 # Zydis
 if (NOT TARGET Zydis::Zydis)
     option(ZYDIS_BUILD_TOOLS "" OFF)

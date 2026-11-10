@@ -4,6 +4,7 @@ What changed in the libretro core of this fork, newest first. Changes that come 
 
 ## Unreleased
 
+- xxHash is replaced by libretro-common's XXH3 (`encodings/xxh3.h`), which gives the same hashes. Hashing a texture's backing memory no longer allocates.
 - Discord Rich Presence is gone (it was off by default, and the core builds were made without it), with its `discord_rpc_enabled` setting and the discord-rpc library.
 - SDL3 is gone from the core: no longer built, linked or carried. Building on Linux no longer needs the ALSA, PulseAudio, GLES, EGL or GL development packages.
 - The emulator no longer makes a hidden SDL window, nor runs an SDL event loop: the core's input comes only from RetroArch's ports, and a mouse or keyboard a game asks for reads as not connected. Gone with it: the keyboard, mouse and gamepad bindings of standalone shadPS4 (its input configuration files and hotkeys), SDL's gamepads and their light bar, gyro and rumble (rumble goes through RetroArch, as before), the quit dialog, and the settings only those read (`cursor_state`, `cursor_hide_timeout`, `motion_controls_enabled`, `use_unified_input_config`, `default_controller_id`, `background_controller_input`, `use_mice_as_mice`, `use_keyboard_as_keyboard`). The one-time prompt to migrate saves and trophies from standalone shadPS4's old layout goes too. The overlay is now drawn at the size of the picture when Resolution is Default, not at the configured one.

@@ -4,7 +4,7 @@
 #pragma once
 
 #include <boost/container/static_vector.hpp>
-#include <xxhash.h>
+#include <encodings/xxh3.h>
 
 #include "shader_recompiler/frontend/fetch_shader.h"
 #include "video_core/amdgpu/regs_color.h"
@@ -129,13 +129,13 @@ struct ClipDistanceShaderKey {
 template <>
 struct std::hash<Vulkan::GraphicsPipelineKey> {
     std::size_t operator()(const Vulkan::GraphicsPipelineKey& key) const noexcept {
-        return XXH3_64bits(&key, sizeof(key));
+        return xxh3_64(&key, sizeof(key), 0);
     }
 };
 
 template <>
 struct std::hash<Vulkan::ClipDistanceShaderKey> {
     std::size_t operator()(const Vulkan::ClipDistanceShaderKey& key) const noexcept {
-        return XXH3_64bits(&key, sizeof(key));
+        return xxh3_64(&key, sizeof(key), 0);
     }
 };

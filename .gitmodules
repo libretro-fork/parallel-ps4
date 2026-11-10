@@ -38,10 +38,6 @@
 	path = externals/sirit
 	url = https://github.com/shadps4-emu/sirit.git
 	shallow = true
-[submodule "externals/xxhash"]
-	path = externals/xxhash
-	url = https://github.com/Cyan4973/xxHash.git
-	shallow = true
 [submodule "externals/tracy"]
 	path = externals/tracy
 	url = https://github.com/shadps4-emu/tracy.git

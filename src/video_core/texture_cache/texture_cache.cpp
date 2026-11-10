@@ -3,7 +3,7 @@
 
 #include <algorithm>
 #include <limits>
-#include <xxhash.h>
+#include <encodings/xxh3.h>
 
 #include "common/assert.h"
 #include "common/debug.h"
@@ -29,24 +29,22 @@ static constexpr u32 MAX_SAMPLERS = std::numeric_limits<u16>::max();
 
 static u64 HashBackingMemory(VAddr virtual_addr, u64 size) {
     static constexpr std::array<u8, Core::GUEST_PAGE_SIZE> zeros{};
-    auto* state = XXH3_createState();
+    xxh3_state_t state;
     const auto& backing_pages = Core::Memory::Instance()->GetAddressSpace().BackingPages();
-    XXH3_64bits_reset(state);
+    xxh3_reset(&state, 0);
     while (size) {
         const u64 page = virtual_addr >> Core::GUEST_PAGE_BITS;
         const u64 offset_in_page = virtual_addr & (Core::GUEST_PAGE_SIZE - 1);
         const u64 hash_size = std::min<u64>(Core::GUEST_PAGE_SIZE - offset_in_page, size);
         if (auto* entry = backing_pages.find(page); entry && *entry) {
-            XXH3_64bits_update(state, *entry + offset_in_page, hash_size);
+            xxh3_update(&state, *entry + offset_in_page, hash_size);
         } else {
-            XXH3_64bits_update(state, zeros.data(), hash_size);
+            xxh3_update(&state, zeros.data(), hash_size);
         }
         size -= hash_size;
         virtual_addr += hash_size;
     }
-    const u64 hash = XXH3_64bits_digest(state);
-    XXH3_freeState(state);
-    return hash;
+    return xxh3_digest(&state);
 }
 
 TextureCache::TextureCache(const Vulkan::Instance& instance_, Vulkan::Scheduler& scheduler_,
@@ -174,7 +172,7 @@ void TextureCache::MarkAsMaybeDirty(ImageId image_id, Image& image) {
     if (image.cpu_hash == 0) {
         // Initialize hash
         const u8* addr = std::bit_cast<u8*>(image.info.guest_address);
-        image.cpu_hash = XXH3_64bits(addr, image.info.guest_size);
+        image.cpu_hash = xxh3_64(addr, image.info.guest_size, 0);
     }
     image.flags |= ImageFlagBits::MaybeCpuDirty;
     UntrackImage(image_id);
@@ -883,7 +881,7 @@ void TextureCache::RefreshImage(Image& image) {
         const u32 s_w = image.info.props.is_block ? Common::DivCeil(w, 4u) : w;
         const u32 s_h = image.info.props.is_block ? Common::DivCeil(h, 4u) : h;
         const u32 size = s_w * s_h * (image.info.num_bits / 8);
-        const u64 hash = XXH3_64bits(addr, size);
+        const u64 hash = xxh3_64(addr, size, 0);
         if (image.cpu_hash == hash) {
             image.flags &= ~ImageFlagBits::MaybeCpuDirty;
             return;
@@ -941,7 +939,7 @@ vk::Sampler TextureCache::GetSampler(const AmdGpu::Sampler& sharp,
                                      AmdGpu::BorderColorBuffer border_color_base,
                                      const bool is_depth) {
     // Compare and plain uses of one S# need separate samplers.
-    const u64 hash = HashCombine(XXH3_64bits(&sharp, sizeof(sharp)), is_depth);
+    const u64 hash = HashCombine(xxh3_64(&sharp, sizeof(sharp), 0), is_depth);
     const auto [it, new_sampler] = samplers.try_emplace(hash);
     if (new_sampler) {
         it->second = slot_samplers.Insert(instance, sharp, border_color_base, is_depth);

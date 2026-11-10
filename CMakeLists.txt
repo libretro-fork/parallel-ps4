@@ -280,7 +280,6 @@ if (ENABLE_SYSTEM_LIBRARIES)
     find_package(VulkanHeaders 1.4.330 CONFIG)
     find_package(VulkanMemoryAllocator 3.1.0 CONFIG)
     find_package(xbyak 7.07 CONFIG)
-    find_package(xxHash 0.8.2 MODULE)
     find_package(ZArchive 0.1.2 MODULE)
     find_package(ZLIB 1.3 MODULE)
     find_package(Zydis 5.0.0 MODULE)
@@ -1385,10 +1384,11 @@ add_library(shadps4 MODULE
 set_target_properties(shadps4 PROPERTIES PREFIX "" OUTPUT_NAME "shadps4_libretro")
 
 # The parts of libretro-common the core uses, a plain copy of RetroArch's
-# (libretro/libretro-common). Its headers are seen only by the C sources that need them.
+# (libretro/libretro-common). Its headers come after the core's own.
 set(LIBRETRO_COMMON_DIR ${CMAKE_CURRENT_SOURCE_DIR}/libretro/libretro-common)
 set(LIBRETRO_COMMON_SOURCES
     ${LIBRETRO_COMMON_DIR}/compat/compat_strl.c
+    ${LIBRETRO_COMMON_DIR}/encodings/encoding_xxh3.c
     ${LIBRETRO_COMMON_DIR}/features/features_cpu.c
     ${LIBRETRO_COMMON_DIR}/queues/retro_spsc.c
     ${LIBRETRO_COMMON_DIR}/queues/retro_waitable_spsc.c
@@ -1396,8 +1396,7 @@ set(LIBRETRO_COMMON_SOURCES
     ${LIBRETRO_COMMON_DIR}/rthreads/rthreads.c
 )
 target_sources(shadps4 PRIVATE ${LIBRETRO_COMMON_SOURCES})
-set_source_files_properties(${LIBRETRO_COMMON_SOURCES} libretro/audio_mix.c PROPERTIES
-    INCLUDE_DIRECTORIES ${LIBRETRO_COMMON_DIR}/include)
+target_include_directories(shadps4 PRIVATE ${LIBRETRO_COMMON_DIR}/include)
 if (UNIX AND NOT APPLE)
     # Only retro_* is exported and the core's own symbols bind inside it: a
     # frontend that carries a library the core has too must not get tied to
@@ -1456,7 +1455,7 @@ create_target_directory_groups(shadps4)
 
 target_link_libraries(shadps4 PRIVATE spdlog::spdlog)
 target_link_libraries(shadps4 PRIVATE magic_enum::magic_enum fmt::fmt tsl::robin_map xbyak::xbyak Tracy::TracyClient RenderDoc::API FFmpeg::ffmpeg Dear_ImGui ImGuiFileDialog gcn half::half ZLIB::ZLIB PNG::PNG minimp3 dr_flac)
-target_link_libraries(shadps4 PRIVATE Boost::headers GPUOpen::VulkanMemoryAllocator LibAtrac9 sirit Vulkan::Headers xxHash::xxhash Zydis::Zydis pugixml::pugixml)
+target_link_libraries(shadps4 PRIVATE Boost::headers GPUOpen::VulkanMemoryAllocator LibAtrac9 sirit Vulkan::Headers Zydis::Zydis pugixml::pugixml)
 target_link_libraries(shadps4 PRIVATE stb::headers lfreist-hwinfo::hwinfo nlohmann_json::nlohmann_json miniz::miniz fdk-aac CLI11::CLI11 Cpp_Httplib miniupnpc::miniupnpc)
 target_link_libraries(shadps4 PRIVATE Freetype::Freetype)
 

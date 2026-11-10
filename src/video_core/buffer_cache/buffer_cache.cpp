@@ -4,7 +4,6 @@
 #include <algorithm>
 #include <bit>
 #include <magic_enum/magic_enum.hpp>
-#include <xxhash.h>
 
 #include "common/alignment.h"
 #include "core/debug_state.h"

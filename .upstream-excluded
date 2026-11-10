@@ -41,3 +41,5 @@ externals/sdl3
 externals/discord-rpc
 src/common/discord_rpc_handler.cpp
 src/common/discord_rpc_handler.h
+externals/xxhash
+cmake/FindxxHash.cmake
