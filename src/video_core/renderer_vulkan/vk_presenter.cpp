@@ -642,7 +642,6 @@ void Presenter::RecreateFrame(Frame* frame, u32 width, u32 height) {
     frame->height = height;
 
     frame->imgui_texture = ImGui::Vulkan::AddTexture(view, vk::ImageLayout::eShaderReadOnlyOptimal);
-    frame->is_hdr = swapchain.GetHDR();
 }
 
 Frame* Presenter::PrepareLastFrame() {
@@ -916,19 +915,9 @@ void Presenter::Present(Frame* frame, bool is_reusing_frame, bool is_game_frame)
         swapchain.Recreate(window.GetWidth(), window.GetHeight());
     }
 
-    if (!swapchain.AcquireNextImage()) {
-        swapchain.Recreate(window.GetWidth(), window.GetHeight());
-        if (!swapchain.AcquireNextImage()) {
-            // User resizes the window too fast and GPU can't keep up. Skip this frame.
-            LOG_WARNING(Render_Vulkan, "Skipping frame!");
-            free_frame();
-            return;
-        }
-    }
+    swapchain.AcquireNextImage();
 
-    // Reset fence for queue submission. Do it here instead of GetRenderFrame() because we may
-    // skip frame because of slow swapchain recreation. If a frame skip occurs, we skip signal
-    // the frame's present fence and future GetRenderFrame() call will hang waiting for this frame.
+    // Reset fence for queue submission.
     const auto reset_result = instance.GetDevice().resetFences(frame->present_done);
     ASSERT_MSG(reset_result == vk::Result::eSuccess,
                "Unexpected error resetting present done fence: {}", vk::to_string(reset_result));
@@ -1058,11 +1047,8 @@ void Presenter::Present(Frame* frame, bool is_reusing_frame, bool is_game_frame)
         // into a buffer that is used again - unless the frontend draws from the image itself.
         const bool read_back_frame = !Libretro::GpuFramesActive();
         if (read_back_frame) {
-            frame_readback = TakeFrameReadback(
-                instance, extent.width, extent.height,
-                swapchain.GetHDR() ? vk::Format::eA2B10G10R10UnormPack32
-                                   : swapchain.GetSurfaceFormat().format,
-                swapchain.GetHDR());
+            frame_readback = TakeFrameReadback(instance, extent.width, extent.height,
+                                               swapchain.GetSurfaceFormat().format, false);
             auto& readback = *frame_readback;
 
             const vk::ImageMemoryBarrier to_transfer{
@@ -1157,13 +1143,7 @@ void Presenter::Present(Frame* frame, bool is_reusing_frame, bool is_game_frame)
     info.AddSignal(frame->present_done);
     scheduler.Flush(info);
 
-    // Present to swapchain.
-    {
-        std::scoped_lock submit_lock{Scheduler::submit_mutex};
-        if (!swapchain.Present()) {
-            swapchain.Recreate(window.GetWidth(), window.GetHeight());
-        }
-    }
+    swapchain.Present();
 
     free_frame();
     if (!is_reusing_frame && is_game_frame) {
@@ -1202,8 +1182,7 @@ Frame* Presenter::GetRenderFrame() {
         }
     }
 
-    if (frame->width != expected_frame_width || frame->height != expected_frame_height ||
-        frame->is_hdr != swapchain.GetHDR()) {
+    if (frame->width != expected_frame_width || frame->height != expected_frame_height) {
         RecreateFrame(frame, expected_frame_width, expected_frame_height);
     }
 

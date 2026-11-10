@@ -70,16 +70,9 @@ public:
         return *rasterizer.get();
     }
 
+    // The frontend is handed 8-bit XRGB8888: the game is told there is no HDR output.
     bool IsHDRSupported() const {
-        return swapchain.HasHDR();
-    }
-
-    void SetHDR(bool enable) {
-        if (!IsHDRSupported()) {
-            return;
-        }
-        swapchain.SetHDR(enable);
-        pp_settings.hdr = enable ? 1 : 0;
+        return false;
     }
 
     VideoCore::Image& RegisterVideoOutSurface(
