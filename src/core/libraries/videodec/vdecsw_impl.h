@@ -3,12 +3,12 @@
 
 #pragma once
 
-#include <condition_variable>
-#include <deque>
-#include <mutex>
-#include <optional>
+#include <array>
+#include <atomic>
 #include <thread>
 #include <vector>
+
+#include <rthreads/retro_eventcount.h>
 
 #include "vdecsw.h"
 #include "video_utils.h"
@@ -31,57 +31,81 @@ public:
     s32 Reset();
 
 private:
-    struct VdecSwCommand {
-        enum class Type {
-            Input,
-            Flush,
-            Reset,
-        };
-        Type type = Type::Input;
-        std::vector<u8> au_data;
-        OrbisVdecswInputData input = {};
+    // The game's calls post to the worker and take its results through rings; nothing
+    // takes a lock. The Sync calls wait on an eventcount, as the game asked to wait.
+    static constexpr u32 CommandSlots = 64; // inputs not yet synced, and other commands
+    static constexpr u32 FrameSlots = 32;   // pictures decoded ahead of the game's buffers
+
+    enum class CommandType : u32 { Input, Flush, Reset };
+
+    // Bounded MPMC-style cell: `seq` says whose turn it is. The access unit buffer is kept
+    // with the slot and reused, so it grows only for a larger access unit than before.
+    struct Command {
+        std::atomic<u32> seq{0};
+        CommandType type = CommandType::Input;
+        u32 epoch = 0;
+        OrbisVdecswInputData input{};
+        std::vector<u8> au;
     };
 
     struct CompletedInput {
         void* au_data = nullptr;
         u32 output_frame_count = 0;
         s32 result = 0;
+        u32 epoch = 0;
     };
 
-    void WorkerLoop(std::stop_token stop_token);
-    void ProcessInput(VdecSwCommand& item);
-    void ProcessFlush();
-    void ProcessReset();
-    // A picture decoded ahead of the game's output buffer, in NV12. The buffers go back to
-    // m_free_frames once written out, so a stream allocates only while it fills its queue.
+    // A picture decoded ahead of the game's output buffer, in NV12, in its slot's buffer.
     struct DecodedFrame {
         std::vector<u8> nv12;
         u32 width = 0;
         u32 height = 0;
+        u32 epoch = 0;
         Videodec::PictureMeta meta;
     };
 
-    void CompleteInput(void* au_data, u32 frame_count, s32 result);
-    u32 QueueFrame();
-    s32 WriteFrame(OrbisVdecswOutputInfo& outputInfo, DecodedFrame& frame,
+    bool PostCommand(CommandType type, const OrbisVdecswInputData* input);
+    void WorkerLoop();
+    void ProcessInput(Command& command);
+    void ProcessFlush(u32 epoch);
+    void CompleteInput(void* au_data, u32 frame_count, s32 result, u32 epoch);
+    u32 QueueFrame(u32 epoch);
+    // The game's side: the oldest result of the current epoch, the stale ones dropped.
+    bool PeekCompleted(CompletedInput& out);
+    DecodedFrame* PeekFrame();
+    void PopFrame();
+    bool Finalized() const;
+    s32 TakeOutput(OrbisVdecswOutputInfo& outputInfo, const OrbisVdecswFrameBuffer& frameBuffer);
+    s32 WriteFrame(OrbisVdecswOutputInfo& outputInfo, const DecodedFrame& frame,
                    const OrbisVdecswFrameBuffer& frameBuffer, bool isLastFrame);
-    void ClearFrameQueue();
+    void ResetOutputInfo(OrbisVdecswOutputInfo& outputInfo);
 
-private:
     Videodec::SwDecoder m_decoder;
     bool m_is_avc = false;
 
-    std::mutex m_mutex;
-    std::condition_variable_any m_input_cv;
-    std::condition_variable_any m_output_cv;
-    std::jthread m_worker_thread;
-    std::deque<VdecSwCommand> m_queue;
-    std::deque<CompletedInput> m_completed_inputs;
-    s32 m_unsynced_inputs = 0;
-    bool m_finalized = false;
-    std::optional<OrbisVdecswFrameBuffer> m_pending_output;
-    std::deque<DecodedFrame> m_frame_queue;
-    std::vector<std::vector<u8>> m_free_frames;
+    std::array<Command, CommandSlots> m_commands;
+    std::atomic<u32> m_command_tail{0}; // posters
+    u32 m_command_head = 0;             // the worker
+
+    std::array<CompletedInput, CommandSlots> m_completed;
+    std::atomic<u32> m_completed_tail{0}; // the worker
+    std::atomic<u32> m_completed_head{0}; // the game
+
+    std::array<DecodedFrame, FrameSlots> m_frames;
+    std::atomic<u32> m_frame_tail{0}; // the worker
+    std::atomic<u32> m_frame_head{0}; // the game
+
+    std::atomic<u32> m_epoch{0};             // bumped by Reset
+    std::atomic<u32> m_finalized_epoch{~0u}; // the epoch whose sequence the worker finished
+    std::atomic<s32> m_unsynced_inputs{0};
+    std::atomic<bool> m_output_set{false};
+    OrbisVdecswFrameBuffer m_pending_output{};
+    std::atomic<bool> m_stop{false};
+
+    retro_eventcount_t m_worker_ec{}; // commands, frame slots, stop
+    retro_eventcount_t m_game_ec{};   // results, pictures, the end of a sequence, stop
+    bool m_ec_ok = false;
+    std::thread m_worker_thread;
 };
 
 } // namespace Libraries::Vdecsw

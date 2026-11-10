@@ -14,19 +14,84 @@
 
 namespace Libraries::Vdecsw {
 
+namespace {
+// Waits on `ec` until `ready` holds.
+template <class F>
+void WaitFor(retro_eventcount_t* ec, F&& ready) {
+    while (!ready()) {
+        const int key = retro_eventcount_prepare_wait(ec);
+        if (ready()) {
+            retro_eventcount_cancel_wait(ec);
+            return;
+        }
+        retro_eventcount_commit_wait(ec, key);
+    }
+}
+} // namespace
+
 VdecDecoder::VdecDecoder(const OrbisVdecswDecoderConfigInfo& config_info,
                          const OrbisVdecswDecoderMemoryInfo& memory_info)
     : m_decoder(config_info.codec_type != OrbisVdecswCodecType::Avc),
       m_is_avc(config_info.codec_type == OrbisVdecswCodecType::Avc) {
-    m_worker_thread =
-        std::jthread([this](std::stop_token stop_token) { WorkerLoop(std::move(stop_token)); });
+    for (u32 i = 0; i < CommandSlots; ++i) {
+        m_commands[i].seq.store(i, std::memory_order_relaxed);
+    }
+    const bool worker_ec = retro_eventcount_init(&m_worker_ec);
+    const bool game_ec = retro_eventcount_init(&m_game_ec);
+    m_ec_ok = worker_ec && game_ec;
+    if (!m_ec_ok) {
+        LOG_ERROR(Lib_Vdecsw, "No eventcount: the decoder cannot run");
+        if (worker_ec) {
+            retro_eventcount_free(&m_worker_ec);
+        }
+        if (game_ec) {
+            retro_eventcount_free(&m_game_ec);
+        }
+        return;
+    }
+    m_worker_thread = std::thread([this] { WorkerLoop(); });
 }
 
 VdecDecoder::~VdecDecoder() {
-    m_worker_thread.request_stop();
-    m_input_cv.notify_all();
-    m_output_cv.notify_all();
+    if (!m_ec_ok) {
+        return;
+    }
+    m_stop.store(true, std::memory_order_release);
+    retro_eventcount_notify(&m_worker_ec);
+    retro_eventcount_notify(&m_game_ec);
     m_worker_thread.join();
+    retro_eventcount_free(&m_worker_ec);
+    retro_eventcount_free(&m_game_ec);
+}
+
+bool VdecDecoder::PostCommand(CommandType type, const OrbisVdecswInputData* input) {
+    u32 pos = m_command_tail.load(std::memory_order_relaxed);
+    Command* cell;
+    for (;;) {
+        cell = &m_commands[pos % CommandSlots];
+        const u32 seq = cell->seq.load(std::memory_order_acquire);
+        const s32 diff = static_cast<s32>(seq - pos);
+        if (diff == 0) {
+            if (m_command_tail.compare_exchange_weak(pos, pos + 1, std::memory_order_relaxed)) {
+                break;
+            }
+        } else if (diff < 0) {
+            return false; // full
+        } else {
+            pos = m_command_tail.load(std::memory_order_relaxed);
+        }
+    }
+    cell->type = type;
+    cell->epoch = m_epoch.load(std::memory_order_relaxed);
+    if (input) {
+        // The game may reuse its buffer as soon as this call returns
+        cell->input = *input;
+        const u8* au = static_cast<const u8*>(input->au_data);
+        cell->au.assign(au, au + input->au_size);
+    }
+    cell->seq.store(pos + 1, std::memory_order_release);
+    retro_eventcount_notify(&m_worker_ec);
+    return true;
 }
 
 s32 VdecDecoder::SetDecodeInput(const OrbisVdecswInputData& input_data) {
@@ -38,40 +103,56 @@ s32 VdecDecoder::SetDecodeInput(const OrbisVdecswInputData& input_data) {
         LOG_ERROR(Lib_Vdecsw, "ORBIS_VDECSW_ERROR_ACCESS_UNIT_SIZE");
         return ORBIS_VDECSW_ERROR_ACCESS_UNIT_SIZE;
     }
-
-    // The access unit data is copied because the game is allowed to reuse the
-    // buffer as soon as this call returns.
-    VdecSwCommand command{};
-    command.type = VdecSwCommand::Type::Input;
-    command.input = input_data;
-    command.au_data =
-        std::vector((u8*)input_data.au_data, (u8*)input_data.au_data + input_data.au_size);
-
-    {
-        std::scoped_lock lock{m_mutex};
-        m_queue.push_back(std::move(command));
-        ++m_unsynced_inputs;
+    if (!m_ec_ok) {
+        return ORBIS_VDECSW_ERROR_API_FAIL;
     }
-    m_input_cv.notify_one();
+    // Each input gives at most one picture: with the pictures not taken yet, the inputs in
+    // flight must fit the picture ring, so the worker never waits for the game here
+    const s32 unsynced = m_unsynced_inputs.load(std::memory_order_relaxed);
+    const u32 queued =
+        m_frame_tail.load(std::memory_order_acquire) - m_frame_head.load(std::memory_order_relaxed);
+    if (queued + static_cast<u32>(unsynced) + 1 > FrameSlots) {
+        LOG_TRACE(Lib_Vdecsw, "ORBIS_VDECSW_ERROR_OUTPUT_PENDING");
+        return ORBIS_VDECSW_ERROR_OUTPUT_PENDING;
+    }
+    // Room in the results ring too: the inputs not synced yet are bounded by it
+    if (unsynced >= static_cast<s32>(CommandSlots) - 2 ||
+        !PostCommand(CommandType::Input, &input_data)) {
+        LOG_ERROR(Lib_Vdecsw, "ORBIS_VDECSW_ERROR_INPUT_QUEUE_FULL");
+        return ORBIS_VDECSW_ERROR_INPUT_QUEUE_FULL;
+    }
+    m_unsynced_inputs.fetch_add(1, std::memory_order_relaxed);
     return ORBIS_OK;
 }
 
-s32 VdecDecoder::SyncDecodeInput(OrbisVdecswInputResult& input_result) {
-    std::unique_lock lock{m_mutex};
-    m_input_cv.wait(lock, [&] {
-        return !m_completed_inputs.empty() || m_unsynced_inputs == 0 ||
-               m_worker_thread.get_stop_token().stop_requested();
-    });
+bool VdecDecoder::PeekCompleted(CompletedInput& out) {
+    const u32 epoch = m_epoch.load(std::memory_order_relaxed);
+    u32 head = m_completed_head.load(std::memory_order_relaxed);
+    while (head != m_completed_tail.load(std::memory_order_acquire)) {
+        out = m_completed[head % CommandSlots];
+        m_completed_head.store(++head, std::memory_order_release);
+        if (out.epoch == epoch) {
+            return true;
+        }
+    }
+    return false;
+}
 
-    if (m_completed_inputs.empty()) {
+s32 VdecDecoder::SyncDecodeInput(OrbisVdecswInputResult& input_result) {
+    CompletedInput entry{};
+    bool got = false;
+    if (m_ec_ok) {
+        WaitFor(&m_game_ec, [&] {
+            got = got || PeekCompleted(entry);
+            return got || m_unsynced_inputs.load(std::memory_order_relaxed) == 0 ||
+                   m_stop.load(std::memory_order_acquire);
+        });
+    }
+    if (!got) {
         LOG_ERROR(Lib_Vdecsw, "ORBIS_VDECSW_ERROR_INPUT_QUEUE_EMPTY");
         return ORBIS_VDECSW_ERROR_INPUT_QUEUE_EMPTY;
     }
-
-    const CompletedInput entry = std::move(m_completed_inputs.front());
-    m_completed_inputs.pop_front();
-    --m_unsynced_inputs;
-
+    m_unsynced_inputs.fetch_sub(1, std::memory_order_relaxed);
     input_result.decoded_au = entry.au_data;
     input_result.output_frame_count = entry.output_frame_count;
     input_result.reserved0 = 0;
@@ -79,20 +160,16 @@ s32 VdecDecoder::SyncDecodeInput(OrbisVdecswInputResult& input_result) {
 }
 
 s32 VdecDecoder::TrySyncDecodeInput(OrbisVdecswInputResult& input_result) {
-    std::scoped_lock lock{m_mutex};
-    if (m_completed_inputs.empty()) {
-        if (m_unsynced_inputs == 0) {
+    CompletedInput entry{};
+    if (!PeekCompleted(entry)) {
+        if (m_unsynced_inputs.load(std::memory_order_relaxed) == 0) {
             LOG_ERROR(Lib_Vdecsw, "ORBIS_VDECSW_ERROR_INPUT_QUEUE_EMPTY");
             return ORBIS_VDECSW_ERROR_INPUT_QUEUE_EMPTY;
         }
         LOG_TRACE(Lib_Vdecsw, "ORBIS_VDECSW_ERROR_DECODE_PENDING");
         return ORBIS_VDECSW_ERROR_DECODE_PENDING;
     }
-
-    const CompletedInput entry = std::move(m_completed_inputs.front());
-    m_completed_inputs.pop_front();
-    --m_unsynced_inputs;
-
+    m_unsynced_inputs.fetch_sub(1, std::memory_order_relaxed);
     input_result.decoded_au = entry.au_data;
     input_result.output_frame_count = entry.output_frame_count;
     input_result.reserved0 = 0;
@@ -108,143 +185,153 @@ s32 VdecDecoder::SetDecodeOutput(const OrbisVdecswFrameBuffer& frame_buffer) {
         LOG_ERROR(Lib_Vdecsw, "ORBIS_VDECSW_ERROR_FRAME_BUFFER_SIZE");
         return ORBIS_VDECSW_ERROR_FRAME_BUFFER_SIZE;
     }
-
-    std::scoped_lock lock{m_mutex};
-    if (m_pending_output.has_value()) {
+    if (m_output_set.load(std::memory_order_acquire)) {
         LOG_ERROR(Lib_Vdecsw, "ORBIS_VDECSW_ERROR_OUTPUT_BUFFER_FULL");
         return ORBIS_VDECSW_ERROR_OUTPUT_BUFFER_FULL;
     }
-
     m_pending_output = frame_buffer;
+    m_output_set.store(true, std::memory_order_release);
     return ORBIS_OK;
 }
 
-s32 VdecDecoder::SyncDecodeOutput(OrbisVdecswOutputInfo& output_info) {
+VdecDecoder::DecodedFrame* VdecDecoder::PeekFrame() {
+    const u32 epoch = m_epoch.load(std::memory_order_relaxed);
+    u32 head = m_frame_head.load(std::memory_order_relaxed);
+    while (head != m_frame_tail.load(std::memory_order_acquire)) {
+        DecodedFrame& frame = m_frames[head % FrameSlots];
+        if (frame.epoch == epoch) {
+            return &frame;
+        }
+        m_frame_head.store(++head, std::memory_order_release);
+        retro_eventcount_notify(&m_worker_ec);
+    }
+    return nullptr;
+}
+
+void VdecDecoder::PopFrame() {
+    m_frame_head.fetch_add(1, std::memory_order_release);
+    retro_eventcount_notify(&m_worker_ec);
+}
+
+bool VdecDecoder::Finalized() const {
+    return m_finalized_epoch.load(std::memory_order_acquire) ==
+           m_epoch.load(std::memory_order_relaxed);
+}
+
+void VdecDecoder::ResetOutputInfo(OrbisVdecswOutputInfo& output_info) {
     output_info.is_valid = false;
     output_info.is_last_frame = false;
     output_info.is_error_frame = false;
     output_info.is_discarded_frame = false;
     output_info.picture_count = 0;
+}
 
-    std::unique_lock lock{m_mutex};
-    if (!m_pending_output.has_value()) {
+s32 VdecDecoder::TakeOutput(OrbisVdecswOutputInfo& output_info,
+                            const OrbisVdecswFrameBuffer& frame_buffer) {
+    // Finalized is read before the ring: the worker finishes a sequence after its last picture
+    const bool finalized = Finalized();
+    DecodedFrame* frame = PeekFrame();
+    if (!frame) {
+        output_info.is_last_frame = finalized;
+        return ORBIS_OK;
+    }
+    const u32 head = m_frame_head.load(std::memory_order_relaxed);
+    const bool is_last_frame =
+        finalized && head + 1 == m_frame_tail.load(std::memory_order_acquire);
+    const s32 result = WriteFrame(output_info, *frame, frame_buffer, is_last_frame);
+    PopFrame();
+    return result;
+}
+
+s32 VdecDecoder::SyncDecodeOutput(OrbisVdecswOutputInfo& output_info) {
+    ResetOutputInfo(output_info);
+    if (!m_output_set.load(std::memory_order_acquire)) {
         LOG_ERROR(Lib_Vdecsw, "ORBIS_VDECSW_ERROR_OUTPUT_BUFFER_EMPTY");
         return ORBIS_VDECSW_ERROR_OUTPUT_BUFFER_EMPTY;
     }
-
-    const OrbisVdecswFrameBuffer frame_buffer = *m_pending_output;
-    m_pending_output.reset();
-
-    m_output_cv.wait(lock, [&] {
-        return !m_frame_queue.empty() || m_finalized ||
-               m_worker_thread.get_stop_token().stop_requested();
-    });
-
-    if (m_frame_queue.empty()) {
-        // The sequence was finalized and all frames have been returned.
-        output_info.is_last_frame = m_finalized;
-        return ORBIS_OK;
+    const OrbisVdecswFrameBuffer frame_buffer = m_pending_output;
+    m_output_set.store(false, std::memory_order_release);
+    if (m_ec_ok) {
+        WaitFor(&m_game_ec, [&] {
+            return PeekFrame() != nullptr || Finalized() || m_stop.load(std::memory_order_acquire);
+        });
     }
-
-    DecodedFrame frame = std::move(m_frame_queue.front());
-    m_frame_queue.pop_front();
-    const bool is_last_frame = m_finalized && m_frame_queue.empty();
-    lock.unlock();
-
-    return WriteFrame(output_info, frame, frame_buffer, is_last_frame);
+    return TakeOutput(output_info, frame_buffer);
 }
 
 s32 VdecDecoder::TrySyncDecodeOutput(OrbisVdecswOutputInfo& output_info) {
-    output_info.is_valid = false;
-    output_info.is_last_frame = false;
-    output_info.is_error_frame = false;
-    output_info.is_discarded_frame = false;
-    output_info.picture_count = 0;
-
-    std::unique_lock lock{m_mutex};
-    if (!m_pending_output.has_value()) {
+    ResetOutputInfo(output_info);
+    if (!m_output_set.load(std::memory_order_acquire)) {
         LOG_ERROR(Lib_Vdecsw, "ORBIS_VDECSW_ERROR_OUTPUT_BUFFER_EMPTY");
         return ORBIS_VDECSW_ERROR_OUTPUT_BUFFER_EMPTY;
     }
-
-    if (m_frame_queue.empty()) {
-        if (m_finalized) {
-            output_info.is_last_frame = true;
-            m_pending_output.reset();
-            return ORBIS_OK;
-        }
+    if (!PeekFrame() && !Finalized()) {
         LOG_TRACE(Lib_Vdecsw, "ORBIS_VDECSW_ERROR_DECODE_PENDING");
         return ORBIS_VDECSW_ERROR_DECODE_PENDING;
     }
-
-    DecodedFrame frame = std::move(m_frame_queue.front());
-    m_frame_queue.pop_front();
-    const bool is_last_frame = m_finalized && m_frame_queue.empty();
-    const OrbisVdecswFrameBuffer frame_buffer = *m_pending_output;
-    m_pending_output.reset();
-    lock.unlock();
-
-    return WriteFrame(output_info, frame, frame_buffer, is_last_frame);
+    const OrbisVdecswFrameBuffer frame_buffer = m_pending_output;
+    m_output_set.store(false, std::memory_order_release);
+    return TakeOutput(output_info, frame_buffer);
 }
 
 s32 VdecDecoder::FinalizeDecodeSequence() {
-    VdecSwCommand command{};
-    command.type = VdecSwCommand::Type::Flush;
-    {
-        std::scoped_lock lock{m_mutex};
-        m_queue.push_back(std::move(command));
+    if (!m_ec_ok || !PostCommand(CommandType::Flush, nullptr)) {
+        return ORBIS_VDECSW_ERROR_INPUT_QUEUE_FULL;
     }
-    m_input_cv.notify_one();
     return ORBIS_OK;
 }
 
 s32 VdecDecoder::Reset() {
-    VdecSwCommand command{};
-    command.type = VdecSwCommand::Type::Reset;
-    {
-        std::scoped_lock lock{m_mutex};
-        m_pending_output.reset();
-        m_queue.push_back(std::move(command));
+    // A new epoch: whatever the worker still hands back from before is dropped as it is read
+    m_epoch.fetch_add(1, std::memory_order_relaxed);
+    m_output_set.store(false, std::memory_order_release);
+    m_unsynced_inputs.store(0, std::memory_order_relaxed);
+    CompletedInput stale;
+    PeekCompleted(stale);
+    PeekFrame();
+    if (!m_ec_ok || !PostCommand(CommandType::Reset, nullptr)) {
+        return ORBIS_VDECSW_ERROR_INPUT_QUEUE_FULL;
     }
-    m_input_cv.notify_one();
     return ORBIS_OK;
 }
 
-void VdecDecoder::WorkerLoop(std::stop_token stop_token) {
+void VdecDecoder::WorkerLoop() {
     Common::SetCurrentThreadName("shadPS4:VdecswWorker");
-
-    std::unique_lock lock{m_mutex};
-    while (!stop_token.stop_requested()) {
-        m_input_cv.wait(lock, stop_token, [&] { return !m_queue.empty(); });
-        if (stop_token.stop_requested() && m_queue.empty()) {
+    for (;;) {
+        Command* cell = nullptr;
+        WaitFor(&m_worker_ec, [&] {
+            Command& next = m_commands[m_command_head % CommandSlots];
+            if (next.seq.load(std::memory_order_acquire) == m_command_head + 1) {
+                cell = &next;
+                return true;
+            }
+            return m_stop.load(std::memory_order_acquire);
+        });
+        if (!cell) {
+            return;
+        }
+        switch (cell->type) {
+        case CommandType::Input:
+            ProcessInput(*cell);
+            break;
+        case CommandType::Flush:
+            ProcessFlush(cell->epoch);
+            break;
+        case CommandType::Reset:
+            m_decoder.Reset();
             break;
         }
-
-        VdecSwCommand command = std::move(m_queue.front());
-        m_queue.pop_front();
-        lock.unlock();
-
-        switch (command.type) {
-        case VdecSwCommand::Type::Input:
-            ProcessInput(command);
-            break;
-        case VdecSwCommand::Type::Flush:
-            ProcessFlush();
-            break;
-        case VdecSwCommand::Type::Reset:
-            ProcessReset();
-            break;
-        default:
-            break;
-        }
-
-        lock.lock();
+        cell->seq.store(m_command_head + CommandSlots, std::memory_order_release);
+        ++m_command_head;
     }
 }
 
-void VdecDecoder::ProcessInput(VdecSwCommand& command) {
+void VdecDecoder::ProcessInput(Command& command) {
+    if (command.epoch != m_epoch.load(std::memory_order_relaxed)) {
+        return; // posted before a reset
+    }
     if (!m_decoder.IsOpen()) {
-        CompleteInput(command.input.au_data, 0, ORBIS_VDECSW_ERROR_API_FAIL);
+        CompleteInput(command.input.au_data, 0, ORBIS_VDECSW_ERROR_API_FAIL, command.epoch);
         return;
     }
     const Videodec::PictureMeta meta{
@@ -252,88 +339,73 @@ void VdecDecoder::ProcessInput(VdecSwCommand& command) {
         .dts = command.input.dts_data,
         .attached = command.input.attached_data,
     };
-    const int ret = m_decoder.Decode(command.au_data.data(), command.au_data.size(), meta);
+    const int ret = m_decoder.Decode(command.au.data(), command.au.size(), meta);
     if (ret < 0) {
         LOG_ERROR(Lib_Vdecsw, "Error decoding the access unit: {}", ret);
-        CompleteInput(command.input.au_data, 0, ORBIS_VDECSW_ERROR_API_FAIL);
+        CompleteInput(command.input.au_data, 0, ORBIS_VDECSW_ERROR_API_FAIL, command.epoch);
         return;
     }
-    CompleteInput(command.input.au_data, ret ? QueueFrame() : 0, ORBIS_OK);
+    CompleteInput(command.input.au_data, ret ? QueueFrame(command.epoch) : 0, ORBIS_OK,
+                  command.epoch);
 }
 
-void VdecDecoder::ProcessFlush() {
+void VdecDecoder::ProcessFlush(u32 epoch) {
+    if (epoch != m_epoch.load(std::memory_order_relaxed)) {
+        return;
+    }
     // The pictures still held for display order
     while (m_decoder.IsOpen() && m_decoder.Drain()) {
-        QueueFrame();
+        QueueFrame(epoch);
     }
-
-    {
-        std::scoped_lock lock{m_mutex};
-        m_finalized = true;
-    }
-    m_output_cv.notify_all();
+    m_finalized_epoch.store(epoch, std::memory_order_release);
+    retro_eventcount_notify(&m_game_ec);
 }
 
-void VdecDecoder::ProcessReset() {
-    m_decoder.Reset();
-
-    std::scoped_lock lock{m_mutex};
-    m_unsynced_inputs -= (s32)m_completed_inputs.size();
-    m_completed_inputs.clear();
-    ClearFrameQueue();
-    m_finalized = false;
+void VdecDecoder::CompleteInput(void* au_data, u32 frame_count, s32 result, u32 epoch) {
+    const u32 tail = m_completed_tail.load(std::memory_order_relaxed);
+    // SetDecodeInput keeps the inputs not yet synced below the ring's size
+    m_completed[tail % CommandSlots] = CompletedInput{au_data, frame_count, result, epoch};
+    m_completed_tail.store(tail + 1, std::memory_order_release);
+    retro_eventcount_notify(&m_game_ec);
 }
 
-void VdecDecoder::CompleteInput(void* au_data, u32 frame_count, s32 result) {
-    {
-        std::scoped_lock lock{m_mutex};
-        m_completed_inputs.push_back(CompletedInput{au_data, frame_count, result});
+u32 VdecDecoder::QueueFrame(u32 epoch) {
+    const u32 tail = m_frame_tail.load(std::memory_order_relaxed);
+    // Only the pictures a flush hands out can find the ring full: the game takes them next
+    WaitFor(&m_worker_ec, [&] {
+        return tail - m_frame_head.load(std::memory_order_acquire) < FrameSlots ||
+               m_stop.load(std::memory_order_acquire) ||
+               epoch != m_epoch.load(std::memory_order_relaxed);
+    });
+    if (tail - m_frame_head.load(std::memory_order_acquire) >= FrameSlots ||
+        epoch != m_epoch.load(std::memory_order_relaxed)) {
+        return 0;
     }
-    m_input_cv.notify_all();
-}
-
-u32 VdecDecoder::QueueFrame() {
-    DecodedFrame frame;
-    {
-        std::scoped_lock lock{m_mutex};
-        if (!m_free_frames.empty()) {
-            frame.nv12 = std::move(m_free_frames.back());
-            m_free_frames.pop_back();
-        }
-    }
+    DecodedFrame& frame = m_frames[tail % FrameSlots];
     frame.nv12.resize(m_decoder.Nv12Size());
     if (!m_decoder.WriteNV12(frame.nv12.data(), frame.nv12.size())) {
         return 0;
     }
     frame.width = m_decoder.Width();
     frame.height = m_decoder.Height();
+    frame.epoch = epoch;
     frame.meta = m_decoder.Meta();
-    {
-        std::scoped_lock lock{m_mutex};
-        m_frame_queue.push_back(std::move(frame));
-    }
-    m_output_cv.notify_all();
+    m_frame_tail.store(tail + 1, std::memory_order_release);
+    retro_eventcount_notify(&m_game_ec);
     return 1;
 }
 
-s32 VdecDecoder::WriteFrame(OrbisVdecswOutputInfo& output_info, DecodedFrame& frame,
+s32 VdecDecoder::WriteFrame(OrbisVdecswOutputInfo& output_info, const DecodedFrame& frame,
                             const OrbisVdecswFrameBuffer& frame_buffer, bool is_last_frame) {
     const u64 info_size =
         m_is_avc ? sizeof(OrbisVdecswAvcPictureInfo) : sizeof(OrbisVdecswHevcPictureInfo);
-    const bool fits = frame_buffer.frame_buffer_size >= info_size &&
-                      frame.nv12.size() <= frame_buffer.frame_buffer_size - info_size;
-    if (fits) {
-        std::memcpy(frame_buffer.frame_buffer, frame.nv12.data(), frame.nv12.size());
-    }
-    {
-        std::scoped_lock lock{m_mutex};
-        m_free_frames.push_back(std::move(frame.nv12));
-    }
-    if (!fits) {
+    if (frame_buffer.frame_buffer_size < info_size ||
+        frame.nv12.size() > frame_buffer.frame_buffer_size - info_size) {
         LOG_ERROR(Lib_Vdecsw, "The {}x{} picture does not fit the frame buffer", frame.width,
                   frame.height);
         return ORBIS_VDECSW_ERROR_API_FAIL;
     }
+    std::memcpy(frame_buffer.frame_buffer, frame.nv12.data(), frame.nv12.size());
 
     const auto width = Common::AlignUp<u32>(frame.width, 16);
     const auto pitch = Common::AlignUp<u32>(frame.width, 64);
@@ -391,13 +463,6 @@ s32 VdecDecoder::WriteFrame(OrbisVdecswOutputInfo& output_info, DecodedFrame& fr
     }
 
     return ORBIS_OK;
-}
-
-void VdecDecoder::ClearFrameQueue() {
-    while (!m_frame_queue.empty()) {
-        m_free_frames.push_back(std::move(m_frame_queue.front().nv12));
-        m_frame_queue.pop_front();
-    }
 }
 
 } // namespace Libraries::Vdecsw
