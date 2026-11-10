@@ -32,14 +32,12 @@
 
 #include <fmt/format.h>
 
-#include <ft2build.h>
-#include FT_FREETYPE_H
-
 #include "common/logging/log.h"
 #include "common/singleton.h"
 #include "core/file_sys/fs.h"
 #include "core/libraries/error_codes.h"
 #include "core/libraries/font/font.h"
+#include "core/libraries/font/font_face.h"
 #include "core/libraries/libs.h"
 #include "font_error.h"
 
@@ -274,14 +272,14 @@ struct FontState {
         s32 shift_value = 0;
         std::filesystem::path path;
         std::shared_ptr<std::vector<unsigned char>> bytes;
-        FT_Face ft_face = nullptr;
+        FaceHandle ft_face = nullptr;
         bool ready = false;
     };
     std::vector<SystemFallbackFace> system_fallback_faces;
     Libraries::Font::OrbisFontLib library = nullptr;
     bool ext_face_ready = false;
     std::vector<unsigned char> ext_face_data;
-    FT_Face ext_ft_face = nullptr;
+    FaceHandle ext_ft_face = nullptr;
     float ext_scale_for_height = 0.0f;
     int ext_ascent = 0, ext_descent = 0, ext_lineGap = 0;
     int ext_units_per_em = 0;
@@ -320,7 +318,7 @@ struct FtExternalFaceObj {
     FtExternalFaceObj* next;
     u64 reserved20;
     u64 reserved28;
-    FT_Face face;
+    FaceHandle face;
     const u8* font_data;
     u32 font_size;
     u32 sfnt_base;
@@ -501,7 +499,7 @@ struct FontSetSelector {
 
     struct Candidate {
         u32 font_id = 0xffffffffu;
-        FT_Face face = nullptr;
+        FaceHandle face = nullptr;
     };
 
     u32 magic = kMagic;
@@ -855,8 +853,8 @@ LibraryState& GetLibState(Libraries::Font::OrbisFontLib lib);
 void RemoveLibState(Libraries::Font::OrbisFontLib lib);
 bool AcquireLibraryLock(FontLibOpaque* lib, u32& out_prev_lock_word);
 void ReleaseLibraryLock(FontLibOpaque* lib, u32 prev_lock_word);
-FT_Face CreateFreeTypeFaceFromBytes(const unsigned char* data, std::size_t size, u32 subfont_index);
-void DestroyFreeTypeFace(FT_Face& face);
+FaceHandle CreateFaceFromBytes(const unsigned char* data, std::size_t size, u32 subfont_index);
+void DestroyFace(FaceHandle& face);
 void LogFontOpenError(s32 rc);
 void LogExternalFormatSupport(u32 formats_mask);
 std::optional<std::filesystem::path> ResolveKnownSysFontAlias(
@@ -866,11 +864,11 @@ std::filesystem::path ResolveGuestPath(const char* guest_path);
 bool LoadGuestFileBytes(const std::filesystem::path& host_path,
                         std::vector<unsigned char>& out_bytes);
 bool LoadGuestPathBytes(const char* guest_path, std::vector<unsigned char>& out_bytes);
-FaceMetrics LoadFaceMetrics(FT_Face face);
+FaceMetrics LoadFaceMetrics(FaceHandle face);
 void PopulateStateMetrics(FontState& st, const FaceMetrics& m);
-float ComputeSysfontScaleFactor(FT_Face face, int units_per_em);
-s32 ComputeSysfontShiftValue(FT_Face face);
-float ComputeScaleExtForState(const FontState& st, FT_Face face, float pixel_h);
+float ComputeSysfontScaleFactor(FaceHandle face, int units_per_em);
+s32 ComputeSysfontShiftValue(FaceHandle face);
+float ComputeScaleExtForState(const FontState& st, FaceHandle face, float pixel_h);
 float ComputeScaleForPixelHeight(const FontState& st, float pixel_h);
 float SafeDpiToFloat(u32 dpi);
 float PointsToPixels(float pt, u32 dpi);
@@ -887,21 +885,21 @@ void LogStrideOnce(const Libraries::Font::OrbisFontRenderSurface* surf);
 void ClearRenderOutputs(Libraries::Font::OrbisFontGlyphMetrics* metrics,
                         Libraries::Font::OrbisFontRenderOutput* result);
 bool ResolveFaceAndScale(FontState& st, Libraries::Font::OrbisFontHandle handle, float pixel_h,
-                         FT_Face& face_out, float& scale_y_out);
-bool ResolveFace(FontState& st, Libraries::Font::OrbisFontHandle handle, FT_Face& face_out);
-s32 RenderCodepointToSurface(FontState& st, Libraries::Font::OrbisFontHandle handle, FT_Face face,
-                             float pixel_w, float pixel_h,
+                         FaceHandle& face_out, float& scale_y_out);
+bool ResolveFace(FontState& st, Libraries::Font::OrbisFontHandle handle, FaceHandle& face_out);
+s32 RenderCodepointToSurface(FontState& st, Libraries::Font::OrbisFontHandle handle,
+                             FaceHandle face, float pixel_w, float pixel_h,
                              Libraries::Font::OrbisFontRenderSurface* surf, u32 code, float x,
                              float y, Libraries::Font::OrbisFontGlyphMetrics* metrics,
                              Libraries::Font::OrbisFontRenderOutput* result, s32 shift_x_units,
                              s32 shift_y_units);
 s32 RenderCodepointToSurfaceWithScale(FontState& st, Libraries::Font::OrbisFontHandle handle,
-                                      FT_Face face, float scale_x, float scale_y,
+                                      FaceHandle face, float scale_x, float scale_y,
                                       Libraries::Font::OrbisFontRenderSurface* surf, u32 code,
                                       float x, float y, Libraries::Font::OrbisFontGlyphMetrics* m,
                                       Libraries::Font::OrbisFontRenderOutput* result);
 const GlyphEntry* GetGlyphEntry(FontState& st, Libraries::Font::OrbisFontHandle handle, u32 code,
-                                FT_Face& face_out, float& scale_out);
+                                FaceHandle& face_out, float& scale_out);
 const SystemFontDefinition* FindSystemFontDefinition(u32 font_set_type);
 BuiltinSystemFontSelection BuildBuiltinSystemFontSelection(u32 font_set_type);
 bool IsBuiltinFontPath(const std::filesystem::path& path);

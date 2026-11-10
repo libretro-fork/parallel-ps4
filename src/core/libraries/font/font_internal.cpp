@@ -5,11 +5,6 @@
 
 #include <array>
 
-#include <ft2build.h>
-#include FT_FREETYPE_H
-#include FT_OUTLINE_H
-#include FT_TRUETYPE_TABLES_H
-
 #include "common/path_util.h"
 #include "core/emulator_settings.h"
 #include "core/libraries/font/fontft_internal.h"
@@ -64,55 +59,24 @@ std::string ReportSystemFaceRequest(FontState& st, Libraries::Font::OrbisFontHan
 
 namespace {
 
-static FT_Library GetFreeTypeLibrary() {
-    static std::once_flag once;
-    static FT_Library lib = nullptr;
-    std::call_once(once, [] {
-        FT_Library created = nullptr;
-        if (FT_Init_FreeType(&created) != 0) {
-            created = nullptr;
-        }
-        lib = created;
-    });
-    return lib;
-}
-
-static constexpr FT_Int32 kFtLoadFlagsBase =
-    static_cast<FT_Int32>(FT_LOAD_NO_HINTING | FT_LOAD_NO_BITMAP | FT_LOAD_VERTICAL_LAYOUT);
-
-static constexpr FT_Int32 kFtLoadFlagsRender =
-    static_cast<FT_Int32>(kFtLoadFlagsBase | FT_LOAD_RENDER);
+static constexpr u32 kFtLoadFlagsRender = FaceLoadVerticalLayout | FaceLoadRender;
 
 } // namespace
 
-FT_Face CreateFreeTypeFaceFromBytes(const unsigned char* data, std::size_t size,
-                                    u32 subfont_index) {
-    if (!data || size == 0) {
-        return nullptr;
-    }
-    FT_Library lib = GetFreeTypeLibrary();
-    if (!lib) {
-        return nullptr;
-    }
-    FT_Face face = nullptr;
-    if (FT_New_Memory_Face(lib, reinterpret_cast<const FT_Byte*>(data), static_cast<FT_Long>(size),
-                           static_cast<FT_Long>(subfont_index), &face) != 0) {
-        LOG_DEBUG(Lib_Font, "CreateFreeTypeFaceFromBytes: failed size={} subfont_index={}", size,
+FaceHandle CreateFaceFromBytes(const unsigned char* data, std::size_t size, u32 subfont_index) {
+    FaceHandle face = Face::Open(data, size, subfont_index);
+    if (!face) {
+        LOG_DEBUG(Lib_Font, "CreateFaceFromBytes: failed size={} subfont_index={}", size,
                   subfont_index);
         return nullptr;
     }
-    (void)FT_Select_Charmap(face, FT_ENCODING_UNICODE);
-    LOG_DEBUG(Lib_Font, "CreateFreeTypeFaceFromBytes: ok face={} size={} subfont_index={}",
+    LOG_DEBUG(Lib_Font, "CreateFaceFromBytes: ok face={} size={} subfont_index={}",
               reinterpret_cast<const void*>(face), size, subfont_index);
     return face;
 }
 
-void DestroyFreeTypeFace(FT_Face& face) {
-    if (!face) {
-        return;
-    }
-    FT_Done_Face(face);
-    face = nullptr;
+void DestroyFace(FaceHandle& face) {
+    Face::Close(face);
 }
 
 namespace {
@@ -508,9 +472,9 @@ std::optional<std::filesystem::path> ResolveKnownSysFontAlias(
 }
 
 FontState::~FontState() {
-    DestroyFreeTypeFace(ext_ft_face);
+    DestroyFace(ext_ft_face);
     for (auto& fb : system_fallback_faces) {
-        DestroyFreeTypeFace(fb.ft_face);
+        DestroyFace(fb.ft_face);
     }
 }
 
@@ -590,7 +554,7 @@ bool BuildTrueOutline(GeneratedGlyph& gg) {
         return false;
     }
 
-    FT_Face primary_face = nullptr;
+    FaceHandle primary_face = nullptr;
     if (!ResolveFace(*st, gg.owner_handle, primary_face)) {
         return false;
     }
@@ -603,7 +567,7 @@ bool BuildTrueOutline(GeneratedGlyph& gg) {
 
     u32 resolved_code = gg.codepoint;
     u32 resolved_font_id = 0;
-    FT_Face resolved_face = primary_face;
+    FaceHandle resolved_face = primary_face;
     float resolved_scale_factor = 1.0f;
     float range_scale = 1.0f;
     s32 shift_x_units = 0;
@@ -668,69 +632,56 @@ bool BuildTrueOutline(GeneratedGlyph& gg) {
         return false;
     }
 
-    const FT_UInt glyph_index =
-        FT_Get_Char_Index(resolved_face, static_cast<FT_ULong>(resolved_code));
+    const u32 glyph_index = resolved_face->CharIndex(static_cast<u32>(resolved_code));
     if (glyph_index == 0) {
         return false;
     }
 
     const float scaled_w = gg.glyph.scale_x * resolved_scale_factor * range_scale;
     const float scaled_h = gg.glyph.base_scale * resolved_scale_factor * range_scale;
-    const auto char_w = static_cast<FT_F26Dot6>(static_cast<s32>(scaled_w * 64.0f));
-    const auto char_h = static_cast<FT_F26Dot6>(static_cast<s32>(scaled_h * 64.0f));
-    if (FT_Set_Char_Size(resolved_face, char_w, char_h, 72, 72) != 0) {
+    const auto char_w = static_cast<s64>(static_cast<s32>(scaled_w * 64.0f));
+    const auto char_h = static_cast<s64>(static_cast<s32>(scaled_h * 64.0f));
+    if (FaceSetCharSizeResult(resolved_face, char_w, char_h, 72, 72) != 0) {
         return false;
     }
 
     if (shift_x_units != 0 || shift_y_units != 0) {
-        if (!resolved_face->size) {
-            return false;
-        }
-        const long x_scale = static_cast<long>(resolved_face->size->metrics.x_scale);
-        const long y_scale = static_cast<long>(resolved_face->size->metrics.y_scale);
+        const long x_scale = static_cast<long>(resolved_face->size.x_scale);
+        const long y_scale = static_cast<long>(resolved_face->size.y_scale);
 
-        FT_Vector delta{};
-        delta.x = static_cast<FT_Pos>(RoundFixedMul16x16ToS32(x_scale, shift_x_units));
-        delta.y = static_cast<FT_Pos>(RoundFixedMul16x16ToS32(y_scale, shift_y_units));
-        FT_Set_Transform(resolved_face, nullptr, &delta);
+        FaceVector delta{};
+        delta.x = static_cast<s64>(RoundFixedMul16x16ToS32(x_scale, shift_x_units));
+        delta.y = static_cast<s64>(RoundFixedMul16x16ToS32(y_scale, shift_y_units));
+        resolved_face->SetDelta(delta.x, delta.y);
     } else {
-        FT_Set_Transform(resolved_face, nullptr, nullptr);
+        resolved_face->SetDelta(0, 0);
     }
 
-    constexpr FT_Int32 kFtLoadFlagsBase =
-        static_cast<FT_Int32>(FT_LOAD_NO_HINTING | FT_LOAD_NO_BITMAP);
-    const bool loaded = (FT_Load_Glyph(resolved_face, glyph_index, kFtLoadFlagsBase) == 0);
-    FT_Set_Transform(resolved_face, nullptr, nullptr);
+    const bool loaded = (FaceLoadGlyphResult(resolved_face, glyph_index, FaceLoadDefault) == 0);
+    resolved_face->SetDelta(0, 0);
     if (!loaded) {
         return false;
     }
 
-    const FT_GlyphSlot slot = resolved_face->glyph;
-    if (!slot || slot->format != FT_GLYPH_FORMAT_OUTLINE) {
-        return false;
-    }
-
-    const FT_Outline& outline = slot->outline;
-    if (outline.n_points <= 0 || outline.n_contours <= 0 || !outline.points || !outline.tags ||
-        !outline.contours) {
+    const FaceOutline& outline = resolved_face->glyph.outline;
+    if (outline.points.empty() || outline.contours.empty()) {
         return false;
     }
 
     gg.outline_points.clear();
     gg.outline_tags.clear();
     gg.outline_contours.clear();
-    gg.outline_points.reserve(static_cast<std::size_t>(outline.n_points));
-    gg.outline_tags.reserve(static_cast<std::size_t>(outline.n_points));
-    gg.outline_contours.reserve(static_cast<std::size_t>(outline.n_contours));
+    gg.outline_points.reserve(static_cast<std::size_t>(outline.points.size()));
+    gg.outline_tags.reserve(static_cast<std::size_t>(outline.points.size()));
+    gg.outline_contours.reserve(static_cast<std::size_t>(outline.contours.size()));
 
-    for (int i = 0; i < outline.n_points; ++i) {
-        const FT_Vector& p = outline.points[i];
+    for (std::size_t i = 0; i < outline.points.size(); ++i) {
+        const auto& p = outline.points[i];
         gg.outline_points.push_back(
             {static_cast<float>(p.x) / 64.0f, static_cast<float>(p.y) / 64.0f});
-        const std::uint8_t tag = outline.tags[i];
-        gg.outline_tags.push_back(FT_CURVE_TAG(tag) == FT_CURVE_TAG_ON ? 1 : 0);
+        gg.outline_tags.push_back(outline.tags[i] == FaceOutline::On ? 1 : 0);
     }
-    for (int c = 0; c < outline.n_contours; ++c) {
+    for (std::size_t c = 0; c < outline.contours.size(); ++c) {
         gg.outline_contours.push_back(static_cast<u16>(outline.contours[c]));
     }
 
@@ -964,18 +915,17 @@ bool LoadGuestPathBytes(const char* guest_path, std::vector<unsigned char>& out_
     return LoadGuestFileBytes(std::filesystem::path(guest_path), out_bytes);
 }
 
-FaceMetrics LoadFaceMetrics(FT_Face face) {
+FaceMetrics LoadFaceMetrics(FaceHandle face) {
     FaceMetrics m{};
     if (!face) {
         return m;
     }
-    m.units_per_em = static_cast<int>(face->units_per_EM);
+    m.units_per_em = static_cast<int>(face->units_per_em);
 
-    if (const auto* hhea =
-            static_cast<const TT_HoriHeader*>(FT_Get_Sfnt_Table(face, ft_sfnt_hhea))) {
-        m.hhea_ascent = static_cast<int>(hhea->Ascender);
-        m.hhea_descent = static_cast<int>(hhea->Descender);
-        m.hhea_lineGap = static_cast<int>(hhea->Line_Gap);
+    if (const auto* hhea = (face->hhea.present ? &face->hhea : nullptr)) {
+        m.hhea_ascent = static_cast<int>(hhea->ascender);
+        m.hhea_descent = static_cast<int>(hhea->descender);
+        m.hhea_lineGap = static_cast<int>(hhea->line_gap);
     } else {
         m.hhea_ascent = static_cast<int>(face->ascender);
         m.hhea_descent = static_cast<int>(face->descender);
@@ -983,12 +933,12 @@ FaceMetrics LoadFaceMetrics(FT_Face face) {
         m.hhea_lineGap = height - (m.hhea_ascent - m.hhea_descent);
     }
 
-    if (const auto* os2 = static_cast<const TT_OS2*>(FT_Get_Sfnt_Table(face, ft_sfnt_os2))) {
+    if (const auto* os2 = (face->os2.present ? &face->os2 : nullptr)) {
         m.has_typo = true;
-        m.typo_ascent = static_cast<int>(os2->sTypoAscender);
-        m.typo_descent = static_cast<int>(os2->sTypoDescender);
-        m.typo_lineGap = static_cast<int>(os2->sTypoLineGap);
-        m.use_typo = (os2->fsSelection & (1u << 7)) != 0;
+        m.typo_ascent = static_cast<int>(os2->typo_ascender);
+        m.typo_descent = static_cast<int>(os2->typo_descender);
+        m.typo_lineGap = static_cast<int>(os2->typo_line_gap);
+        m.use_typo = (os2->fs_selection & (1u << 7)) != 0;
     }
     return m;
 }
@@ -1004,14 +954,14 @@ void PopulateStateMetrics(FontState& st, const FaceMetrics& m) {
     st.ext_use_typo_metrics = m.use_typo && m.has_typo;
 }
 
-float ComputeScaleExtForState(const FontState& st, FT_Face face, float pixel_h) {
+float ComputeScaleExtForState(const FontState& st, FaceHandle face, float pixel_h) {
     if (st.ext_units_per_em > 0) {
         return pixel_h / static_cast<float>(st.ext_units_per_em);
     }
-    if (!face || face->units_per_EM == 0) {
+    if (!face || face->units_per_em == 0) {
         return 0.0f;
     }
-    return pixel_h / static_cast<float>(face->units_per_EM);
+    return pixel_h / static_cast<float>(face->units_per_em);
 }
 
 float ComputeScaleForPixelHeight(const FontState& st, float pixel_h) {
@@ -1116,7 +1066,7 @@ void ClearRenderOutputs(Libraries::Font::OrbisFontGlyphMetrics* metrics,
 }
 
 bool ResolveFaceAndScale(FontState& st, Libraries::Font::OrbisFontHandle handle, float pixel_h,
-                         FT_Face& face_out, float& scale_y_out) {
+                         FaceHandle& face_out, float& scale_y_out) {
     face_out = nullptr;
     scale_y_out = 0.0f;
     if (st.ext_face_ready) {
@@ -1142,7 +1092,7 @@ bool ResolveFaceAndScale(FontState& st, Libraries::Font::OrbisFontHandle handle,
     return scale_y_out > kScaleEpsilon;
 }
 
-bool ResolveFace(FontState& st, Libraries::Font::OrbisFontHandle handle, FT_Face& face_out) {
+bool ResolveFace(FontState& st, Libraries::Font::OrbisFontHandle handle, FaceHandle& face_out) {
     face_out = nullptr;
     if (st.ext_face_ready) {
         face_out = st.ext_ft_face;
@@ -1160,8 +1110,8 @@ bool ResolveFace(FontState& st, Libraries::Font::OrbisFontHandle handle, FT_Face
     return face_out != nullptr;
 }
 
-s32 RenderCodepointToSurface(FontState& st, Libraries::Font::OrbisFontHandle handle, FT_Face face,
-                             float pixel_w, float pixel_h,
+s32 RenderCodepointToSurface(FontState& st, Libraries::Font::OrbisFontHandle handle,
+                             FaceHandle face, float pixel_w, float pixel_h,
                              Libraries::Font::OrbisFontRenderSurface* surf, u32 code, float x,
                              float y, Libraries::Font::OrbisFontGlyphMetrics* metrics,
                              Libraries::Font::OrbisFontRenderOutput* result, s32 shift_x_units,
@@ -1181,7 +1131,7 @@ s32 RenderCodepointToSurface(FontState& st, Libraries::Font::OrbisFontHandle han
         return ORBIS_FONT_ERROR_NO_SUPPORT_SURFACE;
     }
 
-    FT_Face primary_face = face;
+    FaceHandle primary_face = face;
     if (!primary_face) {
         float primary_scale_y = 0.0f;
         if (!ResolveFaceAndScale(st, handle, pixel_h, primary_face, primary_scale_y)) {
@@ -1189,7 +1139,7 @@ s32 RenderCodepointToSurface(FontState& st, Libraries::Font::OrbisFontHandle han
         }
     }
 
-    auto resolve_scale_factor = [&](FT_Face candidate) -> float {
+    auto resolve_scale_factor = [&](FaceHandle candidate) -> float {
         if (!candidate) {
             return st.system_font_scale_factor;
         }
@@ -1204,13 +1154,12 @@ s32 RenderCodepointToSurface(FontState& st, Libraries::Font::OrbisFontHandle han
         return st.system_font_scale_factor;
     };
 
-    FT_Face resolved_face = primary_face;
-    FT_UInt resolved_glyph_index =
-        resolved_face ? FT_Get_Char_Index(resolved_face, static_cast<FT_ULong>(code)) : 0;
+    FaceHandle resolved_face = primary_face;
+    u32 resolved_glyph_index = resolved_face ? resolved_face->CharIndex(static_cast<u32>(code)) : 0;
     float resolved_scale_factor = resolve_scale_factor(resolved_face);
     if (resolved_glyph_index == 0) {
         if (st.ext_face_ready && st.ext_ft_face && resolved_face != st.ext_ft_face) {
-            const FT_UInt gi = FT_Get_Char_Index(st.ext_ft_face, static_cast<FT_ULong>(code));
+            const u32 gi = st.ext_ft_face->CharIndex(static_cast<u32>(code));
             if (gi != 0) {
                 resolved_face = st.ext_ft_face;
                 resolved_glyph_index = gi;
@@ -1222,7 +1171,7 @@ s32 RenderCodepointToSurface(FontState& st, Libraries::Font::OrbisFontHandle han
                 if (!fb.ready || !fb.ft_face) {
                     continue;
                 }
-                const FT_UInt gi = FT_Get_Char_Index(fb.ft_face, static_cast<FT_ULong>(code));
+                const u32 gi = fb.ft_face->CharIndex(static_cast<u32>(code));
                 if (gi == 0) {
                     continue;
                 }
@@ -1238,9 +1187,9 @@ s32 RenderCodepointToSurface(FontState& st, Libraries::Font::OrbisFontHandle han
     }
 
     const auto set_size = [&](float w, float h) -> bool {
-        const auto char_w = static_cast<FT_F26Dot6>(static_cast<s32>(w * 64.0f));
-        const auto char_h = static_cast<FT_F26Dot6>(static_cast<s32>(h * 64.0f));
-        return FT_Set_Char_Size(resolved_face, char_w, char_h, 72, 72) == 0;
+        const auto char_w = static_cast<s64>(static_cast<s32>(w * 64.0f));
+        const auto char_h = static_cast<s64>(static_cast<s32>(h * 64.0f));
+        return FaceSetCharSizeResult(resolved_face, char_w, char_h, 72, 72) == 0;
     };
     if (!set_size(pixel_w * resolved_scale_factor, pixel_h * resolved_scale_factor)) {
         return ORBIS_FONT_ERROR_NO_SUPPORT_GLYPH;
@@ -1248,21 +1197,21 @@ s32 RenderCodepointToSurface(FontState& st, Libraries::Font::OrbisFontHandle han
 
     const float frac_x = x - std::floor(x);
     const float frac_y = y - std::floor(y);
-    FT_Vector delta{};
-    delta.x = static_cast<FT_Pos>(static_cast<s32>(frac_x * 64.0f));
-    delta.y = static_cast<FT_Pos>(-static_cast<s32>(frac_y * 64.0f));
+    FaceVector delta{};
+    delta.x = static_cast<s64>(static_cast<s32>(frac_x * 64.0f));
+    delta.y = static_cast<s64>(-static_cast<s32>(frac_y * 64.0f));
 
-    if ((shift_x_units != 0 || shift_y_units != 0) && resolved_face->size) {
-        const long x_scale = static_cast<long>(resolved_face->size->metrics.x_scale);
-        const long y_scale = static_cast<long>(resolved_face->size->metrics.y_scale);
+    if (shift_x_units != 0 || shift_y_units != 0) {
+        const long x_scale = static_cast<long>(resolved_face->size.x_scale);
+        const long y_scale = static_cast<long>(resolved_face->size.y_scale);
 
-        delta.x += static_cast<FT_Pos>(RoundFixedMul16x16ToS32(x_scale, shift_x_units));
-        delta.y += static_cast<FT_Pos>(RoundFixedMul16x16ToS32(y_scale, shift_y_units));
+        delta.x += static_cast<s64>(RoundFixedMul16x16ToS32(x_scale, shift_x_units));
+        delta.y += static_cast<s64>(RoundFixedMul16x16ToS32(y_scale, shift_y_units));
     }
-    FT_Set_Transform(resolved_face, nullptr, &delta);
+    resolved_face->SetDelta(delta.x, delta.y);
 
-    if (FT_Load_Glyph(resolved_face, resolved_glyph_index, kFtLoadFlagsRender) != 0) {
-        FT_Set_Transform(resolved_face, nullptr, nullptr);
+    if (FaceLoadGlyphResult(resolved_face, resolved_glyph_index, kFtLoadFlagsRender) != 0) {
+        resolved_face->SetDelta(0, 0);
         return ORBIS_FONT_ERROR_NO_SUPPORT_GLYPH;
     }
     std::vector<unsigned char> glyph_bitmap;
@@ -1270,16 +1219,16 @@ s32 RenderCodepointToSurface(FontState& st, Libraries::Font::OrbisFontHandle han
     int glyph_w = 0;
     int glyph_h = 0;
 
-    const FT_GlyphSlot slot = resolved_face->glyph;
-    glyph_w = static_cast<int>(slot->bitmap.width);
-    glyph_h = static_cast<int>(slot->bitmap.rows);
+    const FaceGlyphPtr slot = (&resolved_face->glyph);
+    glyph_w = static_cast<int>(slot->bitmap_width);
+    glyph_h = static_cast<int>(slot->bitmap_rows);
     x0 = static_cast<int>(slot->bitmap_left);
     y0 = -static_cast<int>(slot->bitmap_top);
-    FT_Set_Transform(resolved_face, nullptr, nullptr);
+    resolved_face->SetDelta(0, 0);
 
-    const float bearing_x = static_cast<float>(slot->metrics.horiBearingX) / 64.0f;
-    const float bearing_y = static_cast<float>(slot->metrics.horiBearingY) / 64.0f;
-    const float advance = static_cast<float>(slot->metrics.horiAdvance) / 64.0f;
+    const float bearing_x = static_cast<float>(slot->metrics.hori_bearing_x) / 64.0f;
+    const float bearing_y = static_cast<float>(slot->metrics.hori_bearing_y) / 64.0f;
+    const float advance = static_cast<float>(slot->metrics.hori_advance) / 64.0f;
     const float width_px = static_cast<float>(slot->metrics.width) / 64.0f;
     const float height_px = static_cast<float>(slot->metrics.height) / 64.0f;
 
@@ -1294,9 +1243,9 @@ s32 RenderCodepointToSurface(FontState& st, Libraries::Font::OrbisFontHandle han
 
     glyph_bitmap.resize(static_cast<std::size_t>(glyph_w) * static_cast<std::size_t>(glyph_h));
     if (glyph_w > 0 && glyph_h > 0) {
-        const int pitch = static_cast<int>(slot->bitmap.pitch);
-        const unsigned char* src = reinterpret_cast<const unsigned char*>(slot->bitmap.buffer);
-        if (slot->bitmap.pixel_mode == FT_PIXEL_MODE_MONO) {
+        const int pitch = static_cast<int>(slot->bitmap_width);
+        const unsigned char* src = reinterpret_cast<const unsigned char*>(slot->bitmap.data());
+        if (false /* rendered as 8-bit coverage only */) {
             for (int row = 0; row < glyph_h; ++row) {
                 const unsigned char* src_row = src + static_cast<std::size_t>(row) * pitch;
                 unsigned char* dst_row =
@@ -1419,7 +1368,7 @@ s32 RenderCodepointToSurface(FontState& st, Libraries::Font::OrbisFontHandle han
 }
 
 s32 RenderCodepointToSurfaceWithScale(FontState& st, Libraries::Font::OrbisFontHandle handle,
-                                      FT_Face face, float scale_x, float scale_y,
+                                      FaceHandle face, float scale_x, float scale_y,
                                       Libraries::Font::OrbisFontRenderSurface* surf, u32 code,
                                       float x, float y, Libraries::Font::OrbisFontGlyphMetrics* m,
                                       Libraries::Font::OrbisFontRenderOutput* result) {
@@ -1440,21 +1389,20 @@ s32 RenderCodepointToSurfaceWithScale(FontState& st, Libraries::Font::OrbisFontH
         return ORBIS_FONT_ERROR_NO_SUPPORT_SURFACE;
     }
 
-    FT_Face primary_face = face;
+    FaceHandle primary_face = face;
     if (!ResolveFace(st, handle, primary_face)) {
         return ORBIS_FONT_ERROR_NO_SUPPORT_GLYPH;
     }
 
-    FT_Face resolved_face = primary_face;
-    FT_UInt resolved_glyph_index =
-        resolved_face ? FT_Get_Char_Index(resolved_face, static_cast<FT_ULong>(code)) : 0;
+    FaceHandle resolved_face = primary_face;
+    u32 resolved_glyph_index = resolved_face ? resolved_face->CharIndex(static_cast<u32>(code)) : 0;
     float resolved_scale_factor = st.system_font_scale_factor;
     if (resolved_glyph_index == 0) {
         for (const auto& fb : st.system_fallback_faces) {
             if (!fb.ready || !fb.ft_face) {
                 continue;
             }
-            const FT_UInt gi = FT_Get_Char_Index(fb.ft_face, static_cast<FT_ULong>(code));
+            const u32 gi = fb.ft_face->CharIndex(static_cast<u32>(code));
             if (gi == 0) {
                 continue;
             }
@@ -1470,7 +1418,7 @@ s32 RenderCodepointToSurfaceWithScale(FontState& st, Libraries::Font::OrbisFontH
 
     const int base_units = (st.ext_units_per_em > 0)
                                ? st.ext_units_per_em
-                               : static_cast<int>(resolved_face->units_per_EM);
+                               : static_cast<int>(resolved_face->units_per_em);
     if (base_units <= 0) {
         return ORBIS_FONT_ERROR_NO_SUPPORT_GLYPH;
     }
@@ -1479,9 +1427,9 @@ s32 RenderCodepointToSurfaceWithScale(FontState& st, Libraries::Font::OrbisFontH
     const float pixel_h = scale_y * static_cast<float>(base_units) * resolved_scale_factor;
 
     const auto set_size = [&](float w, float h) -> bool {
-        const auto char_w = static_cast<FT_F26Dot6>(static_cast<s32>(w * 64.0f));
-        const auto char_h = static_cast<FT_F26Dot6>(static_cast<s32>(h * 64.0f));
-        return FT_Set_Char_Size(resolved_face, char_w, char_h, 72, 72) == 0;
+        const auto char_w = static_cast<s64>(static_cast<s32>(w * 64.0f));
+        const auto char_h = static_cast<s64>(static_cast<s32>(h * 64.0f));
+        return FaceSetCharSizeResult(resolved_face, char_w, char_h, 72, 72) == 0;
     };
     if (!set_size(pixel_w, pixel_h)) {
         return ORBIS_FONT_ERROR_NO_SUPPORT_GLYPH;
@@ -1489,13 +1437,13 @@ s32 RenderCodepointToSurfaceWithScale(FontState& st, Libraries::Font::OrbisFontH
 
     const float frac_x = x - std::floor(x);
     const float frac_y = y - std::floor(y);
-    FT_Vector delta{};
-    delta.x = static_cast<FT_Pos>(static_cast<s32>(frac_x * 64.0f));
-    delta.y = static_cast<FT_Pos>(-static_cast<s32>(frac_y * 64.0f));
-    FT_Set_Transform(resolved_face, nullptr, &delta);
+    FaceVector delta{};
+    delta.x = static_cast<s64>(static_cast<s32>(frac_x * 64.0f));
+    delta.y = static_cast<s64>(-static_cast<s32>(frac_y * 64.0f));
+    resolved_face->SetDelta(delta.x, delta.y);
 
-    if (FT_Load_Glyph(resolved_face, resolved_glyph_index, kFtLoadFlagsRender) != 0) {
-        FT_Set_Transform(resolved_face, nullptr, nullptr);
+    if (FaceLoadGlyphResult(resolved_face, resolved_glyph_index, kFtLoadFlagsRender) != 0) {
+        resolved_face->SetDelta(0, 0);
         return ORBIS_FONT_ERROR_NO_SUPPORT_GLYPH;
     }
     std::vector<unsigned char> glyph_bitmap;
@@ -1503,16 +1451,16 @@ s32 RenderCodepointToSurfaceWithScale(FontState& st, Libraries::Font::OrbisFontH
     int glyph_w = 0;
     int glyph_h = 0;
 
-    const FT_GlyphSlot slot = resolved_face->glyph;
-    glyph_w = static_cast<int>(slot->bitmap.width);
-    glyph_h = static_cast<int>(slot->bitmap.rows);
+    const FaceGlyphPtr slot = (&resolved_face->glyph);
+    glyph_w = static_cast<int>(slot->bitmap_width);
+    glyph_h = static_cast<int>(slot->bitmap_rows);
     x0 = static_cast<int>(slot->bitmap_left);
     y0 = -static_cast<int>(slot->bitmap_top);
-    FT_Set_Transform(resolved_face, nullptr, nullptr);
+    resolved_face->SetDelta(0, 0);
 
-    const float bearing_x = static_cast<float>(slot->metrics.horiBearingX) / 64.0f;
-    const float bearing_y = static_cast<float>(slot->metrics.horiBearingY) / 64.0f;
-    const float advance = static_cast<float>(slot->metrics.horiAdvance) / 64.0f;
+    const float bearing_x = static_cast<float>(slot->metrics.hori_bearing_x) / 64.0f;
+    const float bearing_y = static_cast<float>(slot->metrics.hori_bearing_y) / 64.0f;
+    const float advance = static_cast<float>(slot->metrics.hori_advance) / 64.0f;
     const float width_px = static_cast<float>(slot->metrics.width) / 64.0f;
     const float height_px = static_cast<float>(slot->metrics.height) / 64.0f;
 
@@ -1527,9 +1475,9 @@ s32 RenderCodepointToSurfaceWithScale(FontState& st, Libraries::Font::OrbisFontH
 
     glyph_bitmap.resize(static_cast<std::size_t>(glyph_w) * static_cast<std::size_t>(glyph_h));
     if (glyph_w > 0 && glyph_h > 0) {
-        const int pitch = static_cast<int>(slot->bitmap.pitch);
-        const unsigned char* src = reinterpret_cast<const unsigned char*>(slot->bitmap.buffer);
-        if (slot->bitmap.pixel_mode == FT_PIXEL_MODE_MONO) {
+        const int pitch = static_cast<int>(slot->bitmap_width);
+        const unsigned char* src = reinterpret_cast<const unsigned char*>(slot->bitmap.data());
+        if (false /* rendered as 8-bit coverage only */) {
             for (int row = 0; row < glyph_h; ++row) {
                 const unsigned char* src_row = src + static_cast<std::size_t>(row) * pitch;
                 unsigned char* dst_row =
@@ -1652,7 +1600,7 @@ s32 RenderCodepointToSurfaceWithScale(FontState& st, Libraries::Font::OrbisFontH
 }
 
 const GlyphEntry* GetGlyphEntry(FontState& st, Libraries::Font::OrbisFontHandle handle, u32 code,
-                                FT_Face& face_out, float& scale_out) {
+                                FaceHandle& face_out, float& scale_out) {
     face_out = nullptr;
     scale_out = 0.0f;
 
@@ -1675,14 +1623,14 @@ const GlyphEntry* GetGlyphEntry(FontState& st, Libraries::Font::OrbisFontHandle 
     }
 
     float resolved_scale_factor = st.system_font_scale_factor;
-    FT_Face resolved_face = face_out;
-    FT_UInt resolved_glyph_index = FT_Get_Char_Index(resolved_face, static_cast<FT_ULong>(code));
+    FaceHandle resolved_face = face_out;
+    u32 resolved_glyph_index = resolved_face->CharIndex(static_cast<u32>(code));
     if (resolved_glyph_index == 0) {
         for (const auto& fb : st.system_fallback_faces) {
             if (!fb.ready || !fb.ft_face) {
                 continue;
             }
-            const FT_UInt gi = FT_Get_Char_Index(fb.ft_face, static_cast<FT_ULong>(code));
+            const u32 gi = fb.ft_face->CharIndex(static_cast<u32>(code));
             if (gi == 0) {
                 continue;
             }
@@ -1706,26 +1654,26 @@ const GlyphEntry* GetGlyphEntry(FontState& st, Libraries::Font::OrbisFontHandle 
     }
     if (!ge) {
         const auto set_size = [&](float h) -> bool {
-            const auto char_h = static_cast<FT_F26Dot6>(static_cast<s32>(h * 64.0f));
-            return FT_Set_Char_Size(resolved_face, 0, char_h, 72, 72) == 0;
+            const auto char_h = static_cast<s64>(static_cast<s32>(h * 64.0f));
+            return FaceSetCharSizeResult(resolved_face, 0, char_h, 72, 72) == 0;
         };
         if (!set_size(pixel_h_f)) {
             return nullptr;
         }
 
-        if (FT_Load_Glyph(resolved_face, resolved_glyph_index, kFtLoadFlagsRender) != 0) {
+        if (FaceLoadGlyphResult(resolved_face, resolved_glyph_index, kFtLoadFlagsRender) != 0) {
             return nullptr;
         }
 
-        const FT_GlyphSlot slot = resolved_face->glyph;
+        const FaceGlyphPtr slot = (&resolved_face->glyph);
         GlyphEntry entry{};
-        entry.w = static_cast<int>(slot->bitmap.width);
-        entry.h = static_cast<int>(slot->bitmap.rows);
+        entry.w = static_cast<int>(slot->bitmap_width);
+        entry.h = static_cast<int>(slot->bitmap_rows);
         entry.x0 = static_cast<int>(slot->bitmap_left);
         entry.y0 = -static_cast<int>(slot->bitmap_top);
         entry.x1 = entry.x0 + entry.w;
         entry.y1 = entry.y0 + entry.h;
-        entry.advance = static_cast<float>(slot->metrics.horiAdvance) / 64.0f;
+        entry.advance = static_cast<float>(slot->metrics.hori_advance) / 64.0f;
         entry.bearingX = static_cast<float>(slot->bitmap_left);
         ge = &st.ext_cache.emplace(key, std::move(entry)).first->second;
     }
@@ -1838,37 +1786,37 @@ const SystemFontDefinition* FindSystemFontDefinition(u32 font_set_type) {
     return nullptr;
 }
 
-float ComputeSysfontScaleFactor(FT_Face face, int units_per_em) {
+float ComputeSysfontScaleFactor(FaceHandle face, int units_per_em) {
     (void)units_per_em;
     if (!face) {
         return 1.0f;
     }
-    const auto* os2 = static_cast<const TT_OS2*>(FT_Get_Sfnt_Table(face, ft_sfnt_os2));
-    if (os2 && os2->sTypoAscender == 770 && os2->sTypoDescender == -230) {
+    const auto* os2 = (face->os2.present ? &face->os2 : nullptr);
+    if (os2 && os2->typo_ascender == 770 && os2->typo_descender == -230) {
         return 1024.0f / 952.0f;
     }
     return 1.0f;
 }
 
-s32 ComputeSysfontShiftValue(FT_Face face) {
+s32 ComputeSysfontShiftValue(FaceHandle face) {
     if (!face) {
         return 0;
     }
-    const auto* os2 = static_cast<const TT_OS2*>(FT_Get_Sfnt_Table(face, ft_sfnt_os2));
+    const auto* os2 = (face->os2.present ? &face->os2 : nullptr);
     if (!os2) {
         return 0;
     }
     const bool is_jp_pro_metrics =
-        (os2->sTypoAscender == 880) && (os2->sTypoDescender == -120) && (os2->sTypoLineGap == 1);
+        (os2->typo_ascender == 880) && (os2->typo_descender == -120) && (os2->typo_line_gap == 1);
     if (!is_jp_pro_metrics) {
         return 0;
     }
-    const auto* vhea = static_cast<const TT_VertHeader*>(FT_Get_Sfnt_Table(face, ft_sfnt_vhea));
+    const auto* vhea = (face->vhea.present ? &face->vhea : nullptr);
     if (!vhea) {
         return 0;
     }
-    const int units = static_cast<int>(face->units_per_EM);
-    const int gap = static_cast<int>(os2->sTypoLineGap);
+    const int units = static_cast<int>(face->units_per_em);
+    const int gap = static_cast<int>(os2->typo_line_gap);
     const int shift = 1024 - units - gap;
     if (shift > 0 && shift < 128) {
         return static_cast<s32>(shift);
@@ -2248,16 +2196,16 @@ bool AddSystemFallbackFace(FontState& st, const std::filesystem::path& path, u32
     fallback.font_id = 0xffffffffu;
     fallback.path = path;
     fallback.bytes = std::make_shared<std::vector<unsigned char>>(std::move(fallback_bytes));
-    fallback.ft_face = CreateFreeTypeFaceFromBytes(fallback.bytes->data(), fallback.bytes->size(),
-                                                   fallback_face_index);
+    fallback.ft_face =
+        CreateFaceFromBytes(fallback.bytes->data(), fallback.bytes->size(), fallback_face_index);
     fallback.ready = (fallback.ft_face != nullptr);
     if (!fallback.ready) {
-        DestroyFreeTypeFace(fallback.ft_face);
+        DestroyFace(fallback.ft_face);
         return false;
     }
 
     fallback.scale_factor = ComputeSysfontScaleFactor(
-        fallback.ft_face, fallback.ft_face ? static_cast<int>(fallback.ft_face->units_per_EM) : 0);
+        fallback.ft_face, fallback.ft_face ? static_cast<int>(fallback.ft_face->units_per_em) : 0);
     fallback.shift_value = ComputeSysfontShiftValue(fallback.ft_face);
     st.system_fallback_faces.push_back(std::move(fallback));
     return true;
@@ -2315,10 +2263,10 @@ bool AttachSystemFont(FontState& st, Libraries::Font::OrbisFontHandle handle) {
         return false;
     }
 
-    DestroyFreeTypeFace(st.ext_ft_face);
+    DestroyFace(st.ext_ft_face);
     st.ext_face_data = std::move(primary_bytes);
-    st.ext_ft_face = CreateFreeTypeFaceFromBytes(st.ext_face_data.data(), st.ext_face_data.size(),
-                                                 primary_face_index);
+    st.ext_ft_face =
+        CreateFaceFromBytes(st.ext_face_data.data(), st.ext_face_data.size(), primary_face_index);
     if (!st.ext_ft_face) {
         st.ext_face_data.clear();
         return false;

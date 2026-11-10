@@ -11,11 +11,8 @@
 #include <memory>
 #include <vector>
 
-#include <ft2build.h>
-#include FT_FREETYPE_H
-#include FT_SYSTEM_H
-
 #include "core/libraries/font/font.h"
+#include "core/libraries/font/font_face.h"
 #include "core/libraries/font/fontft.h"
 
 namespace Libraries::Font {
@@ -614,8 +611,8 @@ using GuestReallocFn = void*(PS4_SYSV_ABI*)(void* object, void* p, u32 size);
 struct FtLibraryCtx {
     void* alloc_ctx = nullptr;
     void** alloc_vtbl = nullptr;
-    FT_Memory ft_memory = nullptr;
-    FT_Library ft_lib = nullptr;
+    void* ft_memory = nullptr; // unused; kept for the guest-visible layout
+    void* ft_lib = nullptr;
 };
 
 struct BeU16 {

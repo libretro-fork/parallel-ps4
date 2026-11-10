@@ -38,10 +38,6 @@
 	path = externals/ext-boost
 	url = https://github.com/shadps4-emu/ext-boost.git
 	shallow = true
-[submodule "externals/freetype"]
-	path = externals/freetype
-	url = https://github.com/freetype/freetype.git
-	shallow = true
 [submodule "externals/libusb"]
 	path = externals/libusb
 	url = https://github.com/shadexternals/libusb.git

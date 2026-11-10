@@ -263,7 +263,6 @@ if (ENABLE_SYSTEM_LIBRARIES)
     list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
     find_package(Boost 1.84.0 CONFIG)
     find_package(fmt 12.0.0 CONFIG)
-    find_package(Freetype 2.14.1 MODULE)
     find_package(glslang 15 CONFIG)
     find_package(magic_enum 0.9.7 CONFIG)
     find_package(RenderDoc 1.6.0 MODULE)
@@ -496,6 +495,8 @@ set(SYSTEM_LIBS src/core/libraries/system/commondialog.cpp
                 src/core/libraries/web_browser_dialog/webbrowserdialog.h
                 src/core/libraries/font/font.cpp
                 src/core/libraries/font/font.h
+                src/core/libraries/font/font_face.cpp
+                src/core/libraries/font/font_face.h
                 src/core/libraries/font/font_internal.cpp
                 src/core/libraries/font/font_internal.h
                 src/core/libraries/font/fontft.cpp
@@ -1397,6 +1398,7 @@ set(LIBRETRO_COMMON_SOURCES
     ${LIBRETRO_COMMON_DIR}/features/features_cpu.c
     ${LIBRETRO_COMMON_DIR}/file/file_path.c
     ${LIBRETRO_COMMON_DIR}/file/file_path_io.c
+    ${LIBRETRO_COMMON_DIR}/gfx/font/rtt.c
     ${LIBRETRO_COMMON_DIR}/formats/aac/raac.c
     ${LIBRETRO_COMMON_DIR}/formats/atrac9/ratrac9.c
     ${LIBRETRO_COMMON_DIR}/formats/flac/rflac.c
@@ -1508,7 +1510,6 @@ create_target_directory_groups(shadps4)
 
 target_link_libraries(shadps4 PRIVATE magic_enum::magic_enum fmt::fmt tsl::robin_map xbyak::xbyak RenderDoc::API Dear_ImGui gcn)
 target_link_libraries(shadps4 PRIVATE Boost::headers GPUOpen::VulkanMemoryAllocator sirit Vulkan::Headers Zydis::Zydis)
-target_link_libraries(shadps4 PRIVATE Freetype::Freetype)
 
 if (ENABLE_FEX_GUEST_CPU)
     target_compile_definitions(shadps4 PRIVATE SHADPS4_ENABLE_FEX_GUEST_CPU=1)

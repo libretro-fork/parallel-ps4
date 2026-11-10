@@ -77,3 +77,4 @@ externals/date
 externals/epoll-shim
 externals/ext-wepoll
 externals/half
+externals/freetype

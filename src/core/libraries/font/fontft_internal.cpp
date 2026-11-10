@@ -21,11 +21,8 @@
 #include <string_view>
 #include <unordered_map>
 #include <vector>
-#include <ft2build.h>
-#include FT_FREETYPE_H
-#include FT_MODULE_H
-#include FT_SYSTEM_H
-#include FT_TRUETYPE_TABLES_H
+
+#include <streams/file_stream.h>
 
 #include "common/logging/log.h"
 #include "common/singleton.h"
@@ -48,32 +45,22 @@ using Libraries::Font::OrbisFontStyleFrame;
 namespace {
 static thread_local GetCharGlyphMetricsFailLogState g_get_char_metrics_fail;
 
-static void LogGetCharGlyphMetricsFailOnce(std::string_view stage, s32 rc, FT_Error ft_err,
-                                           bool is_system, u32 code, FT_UInt glyph_index,
-                                           FT_Face face, float scale_w, float scale_h) {
+static void LogGetCharGlyphMetricsFailOnce(std::string_view stage, s32 rc, s32 ft_err,
+                                           bool is_system, u32 code, u32 glyph_index,
+                                           FaceHandle face, float scale_w, float scale_h) {
     constexpr u32 kMaxDetailedLogs = 16;
     if (g_get_char_metrics_fail.count < kMaxDetailedLogs) {
-        u32 enc = 0;
-        u16 platform_id = 0;
-        u16 encoding_id = 0;
         u32 num_glyphs = 0;
-        u32 num_charmaps = 0;
         if (face) {
             num_glyphs = static_cast<u32>(face->num_glyphs);
-            num_charmaps = static_cast<u32>(face->num_charmaps);
-            if (face->charmap) {
-                enc = static_cast<u32>(face->charmap->encoding);
-                platform_id = face->charmap->platform_id;
-                encoding_id = face->charmap->encoding_id;
-            }
         }
 
         LOG_WARNING(
             Lib_Font,
             "GetCharGlyphMetricsFail: rc={} stage={} ft_err={} is_system={} code={} glyph_index={} "
-            "num_glyphs={} cmap(enc={},pid={},eid={}) num_charmaps={} scale_w={} scale_h={}",
-            rc, stage, static_cast<int>(ft_err), is_system, code, glyph_index, num_glyphs, enc,
-            platform_id, encoding_id, num_charmaps, scale_w, scale_h);
+            "num_glyphs={} scale_w={} scale_h={}",
+            rc, stage, static_cast<int>(ft_err), is_system, code, glyph_index, num_glyphs, scale_w,
+            scale_h);
 
         ++g_get_char_metrics_fail.count;
         return;
@@ -105,50 +92,26 @@ static void UpdateFtFontObjShiftCache(u8* font_obj) {
     obj->layout_scale_vec[1] = 0x0000000000010000ull;
 }
 
-static FT_UInt ResolveGlyphIndexWithFallback(FT_Face face, u32 codepoint) {
+static u32 ResolveGlyphIndexWithFallback(FaceHandle face, u32 codepoint) {
     if (!face) {
         return 0;
     }
 
-    const FT_ULong cp = static_cast<FT_ULong>(codepoint);
-    const FT_CharMap original = face->charmap;
-    FT_UInt glyph_index = FT_Get_Char_Index(face, cp);
-    if (glyph_index != 0 || !face->charmaps || face->num_charmaps <= 1) {
-        return glyph_index;
-    }
-
-    for (int i = 0; i < face->num_charmaps; i++) {
-        FT_CharMap cmap = face->charmaps[i];
-        if (!cmap || cmap == original) {
-            continue;
-        }
-        if (FT_Set_Charmap(face, cmap) != 0) {
-            continue;
-        }
-        glyph_index = FT_Get_Char_Index(face, cp);
-        if (glyph_index != 0) {
-            break;
-        }
-    }
-
-    if (original && face->charmap != original) {
-        (void)FT_Set_Charmap(face, original);
-    }
-    return glyph_index;
+    return face->CharIndex(codepoint);
 }
 
-static FT_F26Dot6 ClampPpem26Dot6(FT_F26Dot6 value) {
-    constexpr FT_F26Dot6 kMaxPpem26Dot6 = static_cast<FT_F26Dot6>(65535 * 64);
+static s64 ClampPpem26Dot6(s64 value) {
+    constexpr s64 kMaxPpem26Dot6 = static_cast<s64>(65535 * 64);
     if (value > kMaxPpem26Dot6) {
         return kMaxPpem26Dot6;
     }
     if (value < -kMaxPpem26Dot6) {
-        return static_cast<FT_F26Dot6>(-kMaxPpem26Dot6);
+        return static_cast<s64>(-kMaxPpem26Dot6);
     }
     return value;
 }
 
-static float ComputeRequestedAppliedScaleRatio(FT_F26Dot6 requested, FT_F26Dot6 applied) {
+static float ComputeRequestedAppliedScaleRatio(s64 requested, s64 applied) {
     if (requested == 0 || applied == 0) {
         return 1.0f;
     }
@@ -294,10 +257,9 @@ s64 RoundFixedMul16x16ToS64(long fixed_16_16, s32 value) {
     return static_cast<s64>(static_cast<s32>(static_cast<u64>(tmp) >> 16));
 }
 
-static FT_Error SetCharSizeCompat(FT_Face face, FT_F26Dot6 char_w, FT_F26Dot6 char_h, u32 dpi_x,
-                                  u32 dpi_y, FT_F26Dot6* out_used_w = nullptr,
-                                  FT_F26Dot6* out_used_h = nullptr) {
-    auto write_used = [&](FT_F26Dot6 used_w, FT_F26Dot6 used_h) {
+static s32 SetCharSizeCompat(FaceHandle face, s64 char_w, s64 char_h, u32 dpi_x, u32 dpi_y,
+                             s64* out_used_w = nullptr, s64* out_used_h = nullptr) {
+    auto write_used = [&](s64 used_w, s64 used_h) {
         if (out_used_w) {
             *out_used_w = used_w;
         }
@@ -307,64 +269,25 @@ static FT_Error SetCharSizeCompat(FT_Face face, FT_F26Dot6 char_w, FT_F26Dot6 ch
     };
     if (!face) {
         write_used(char_w, char_h);
-        return FT_Err_Invalid_Face_Handle;
+        return 1;
     }
 
-    FT_Error err = FT_Set_Char_Size(face, char_w, char_h, dpi_x, dpi_y);
+    s32 err = FaceSetCharSizeResult(face, char_w, char_h, dpi_x, dpi_y);
     if (err == 0) {
         write_used(char_w, char_h);
         return 0;
     }
 
-    const FT_F26Dot6 clamped_w = ClampPpem26Dot6(char_w);
-    const FT_F26Dot6 clamped_h = ClampPpem26Dot6(char_h);
+    const s64 clamped_w = ClampPpem26Dot6(char_w);
+    const s64 clamped_h = ClampPpem26Dot6(char_h);
     if (clamped_w != char_w || clamped_h != char_h) {
-        err = FT_Set_Char_Size(face, clamped_w, clamped_h, dpi_x, dpi_y);
+        err = FaceSetCharSizeResult(face, clamped_w, clamped_h, dpi_x, dpi_y);
         if (err == 0) {
             write_used(clamped_w, clamped_h);
             return 0;
         }
     }
 
-    if (face->num_fixed_sizes <= 0 || !face->available_sizes) {
-        write_used(char_w, char_h);
-        return err;
-    }
-
-    const double req_w = static_cast<double>(std::abs(static_cast<long long>(char_w))) / 64.0;
-    const double req_h = static_cast<double>(std::abs(static_cast<long long>(char_h))) / 64.0;
-    const double target_w = (req_w > 0.0) ? req_w : req_h;
-    const double target_h = (req_h > 0.0) ? req_h : req_w;
-    if (target_w <= 0.0 || target_h <= 0.0) {
-        write_used(char_w, char_h);
-        return err;
-    }
-
-    int best_idx = -1;
-    double best_score = std::numeric_limits<double>::infinity();
-    for (int i = 0; i < face->num_fixed_sizes; i++) {
-        const FT_Bitmap_Size& strike = face->available_sizes[i];
-        const double strike_w = std::max(1.0, static_cast<double>(strike.x_ppem) / 64.0);
-        const double strike_h = std::max(1.0, static_cast<double>(strike.y_ppem) / 64.0);
-        const double rel_w = std::abs(strike_w - target_w) / target_w;
-        const double rel_h = std::abs(strike_h - target_h) / target_h;
-        const double score = rel_w + rel_h;
-        if (score < best_score) {
-            best_score = score;
-            best_idx = i;
-        }
-    }
-
-    if (best_idx < 0) {
-        write_used(char_w, char_h);
-        return err;
-    }
-    err = FT_Select_Size(face, best_idx);
-    if (err == 0) {
-        const FT_Bitmap_Size& strike = face->available_sizes[best_idx];
-        write_used(strike.x_ppem, strike.y_ppem);
-        return 0;
-    }
     write_used(char_w, char_h);
     return err;
 }
@@ -1404,7 +1327,7 @@ s32 GetCharGlyphMetrics(OrbisFontHandle fontHandle, u32 code, OrbisFontGlyphMetr
         return scale_rc;
     }
 
-    FT_Face resolved_face = nullptr;
+    FaceHandle resolved_face = nullptr;
     if (st->ext_face_ready) {
         resolved_face = st->ext_ft_face;
     } else {
@@ -1466,7 +1389,7 @@ s32 GetCharGlyphMetrics(OrbisFontHandle fontHandle, u32 code, OrbisFontGlyphMetr
                     }
                     node = node->next;
                 }
-                resolved_face = node ? static_cast<FT_Face>(node->ft_face) : nullptr;
+                resolved_face = node ? static_cast<FaceHandle>(node->ft_face) : nullptr;
                 if (entry) {
                     if (mode_low == 3) {
                         entry->lock_mode3 = lock_word & 0x7fffffffu;
@@ -1501,10 +1424,10 @@ s32 GetCharGlyphMetrics(OrbisFontHandle fontHandle, u32 code, OrbisFontGlyphMetr
         }
     }
 
-    FT_UInt resolved_glyph_index = ResolveGlyphIndexWithFallback(resolved_face, resolved_code);
+    u32 resolved_glyph_index = ResolveGlyphIndexWithFallback(resolved_face, resolved_code);
     if (resolved_glyph_index == 0) {
         if (st->ext_face_ready && st->ext_ft_face && resolved_face != st->ext_ft_face) {
-            const FT_UInt gi = ResolveGlyphIndexWithFallback(st->ext_ft_face, resolved_code);
+            const u32 gi = ResolveGlyphIndexWithFallback(st->ext_ft_face, resolved_code);
             if (gi != 0) {
                 resolved_face = st->ext_ft_face;
                 resolved_glyph_index = gi;
@@ -1517,7 +1440,7 @@ s32 GetCharGlyphMetrics(OrbisFontHandle fontHandle, u32 code, OrbisFontGlyphMetr
             if (!fb.ready || !fb.ft_face) {
                 continue;
             }
-            const FT_UInt gi = ResolveGlyphIndexWithFallback(fb.ft_face, resolved_code);
+            const u32 gi = ResolveGlyphIndexWithFallback(fb.ft_face, resolved_code);
             if (gi == 0) {
                 continue;
             }
@@ -1581,10 +1504,10 @@ s32 GetCharGlyphMetrics(OrbisFontHandle fontHandle, u32 code, OrbisFontGlyphMetr
     const float scaled_w = scale_w * resolved_scale_factor * range_scale;
     const float scaled_h = scale_h * resolved_scale_factor * range_scale;
 
-    const auto char_w = static_cast<FT_F26Dot6>(static_cast<s32>(scaled_w * 64.0f));
-    const auto char_h = static_cast<FT_F26Dot6>(static_cast<s32>(scaled_h * 64.0f));
-    FT_F26Dot6 used_char_w = char_w;
-    FT_F26Dot6 used_char_h = char_h;
+    const auto char_w = static_cast<s64>(static_cast<s32>(scaled_w * 64.0f));
+    const auto char_h = static_cast<s64>(static_cast<s32>(scaled_h * 64.0f));
+    s64 used_char_w = char_w;
+    s64 used_char_h = char_h;
     if (SetCharSizeCompat(resolved_face, char_w, char_h, 72, 72, &used_char_w, &used_char_h) != 0) {
         if (use_cached_style) {
             font->cached_style.cache_lock_word = prev_cached_lock;
@@ -1595,30 +1518,21 @@ s32 GetCharGlyphMetrics(OrbisFontHandle fontHandle, u32 code, OrbisFontGlyphMetr
     }
 
     if (shift_x_units != 0 || shift_y_units != 0) {
-        if (!resolved_face->size) {
-            if (use_cached_style) {
-                font->cached_style.cache_lock_word = prev_cached_lock;
-            }
-            font->lock_word = prev_font_lock;
-            clear_metrics();
-            return ORBIS_FONT_ERROR_NO_SUPPORT_GLYPH;
-        }
-        const long x_scale = static_cast<long>(resolved_face->size->metrics.x_scale);
-        const long y_scale = static_cast<long>(resolved_face->size->metrics.y_scale);
+        const long x_scale = static_cast<long>(resolved_face->size.x_scale);
+        const long y_scale = static_cast<long>(resolved_face->size.y_scale);
 
-        FT_Vector delta{};
-        delta.x = static_cast<FT_Pos>(RoundFixedMul16x16ToS32(x_scale, shift_x_units));
-        delta.y = static_cast<FT_Pos>(RoundFixedMul16x16ToS32(y_scale, shift_y_units));
-        FT_Set_Transform(resolved_face, nullptr, &delta);
+        FaceVector delta{};
+        delta.x = static_cast<s64>(RoundFixedMul16x16ToS32(x_scale, shift_x_units));
+        delta.y = static_cast<s64>(RoundFixedMul16x16ToS32(y_scale, shift_y_units));
+        resolved_face->SetDelta(delta.x, delta.y);
     } else {
-        FT_Set_Transform(resolved_face, nullptr, nullptr);
+        resolved_face->SetDelta(0, 0);
     }
 
-    constexpr FT_Int32 kFtLoadFlagsBase =
-        static_cast<FT_Int32>(FT_LOAD_NO_HINTING | FT_LOAD_NO_BITMAP | FT_LOAD_VERTICAL_LAYOUT);
+    constexpr u32 kFtLoadFlagsBase = FaceLoadVerticalLayout;
 
-    if (FT_Load_Glyph(resolved_face, resolved_glyph_index, kFtLoadFlagsBase) != 0) {
-        FT_Set_Transform(resolved_face, nullptr, nullptr);
+    if (FaceLoadGlyphResult(resolved_face, resolved_glyph_index, kFtLoadFlagsBase) != 0) {
+        resolved_face->SetDelta(0, 0);
         if (use_cached_style) {
             font->cached_style.cache_lock_word = prev_cached_lock;
         }
@@ -1626,12 +1540,12 @@ s32 GetCharGlyphMetrics(OrbisFontHandle fontHandle, u32 code, OrbisFontGlyphMetr
         clear_metrics();
         return ORBIS_FONT_ERROR_NO_SUPPORT_GLYPH;
     }
-    FT_Set_Transform(resolved_face, nullptr, nullptr);
+    resolved_face->SetDelta(0, 0);
 
-    const FT_GlyphSlot slot = resolved_face->glyph;
-    const float bearing_x = static_cast<float>(slot->metrics.horiBearingX) / 64.0f;
-    const float bearing_y = static_cast<float>(slot->metrics.horiBearingY) / 64.0f;
-    const float advance = static_cast<float>(slot->metrics.horiAdvance) / 64.0f;
+    const FaceGlyphPtr slot = (&resolved_face->glyph);
+    const float bearing_x = static_cast<float>(slot->metrics.hori_bearing_x) / 64.0f;
+    const float bearing_y = static_cast<float>(slot->metrics.hori_bearing_y) / 64.0f;
+    const float advance = static_cast<float>(slot->metrics.hori_advance) / 64.0f;
     const float width_px = static_cast<float>(slot->metrics.width) / 64.0f;
     const float height_px = static_cast<float>(slot->metrics.height) / 64.0f;
     const float scale_ratio_x = ComputeRequestedAppliedScaleRatio(char_w, used_char_w);
@@ -1760,48 +1674,47 @@ static s32 RenderGlyphIndexToSurface(FontObj& font_obj, u32 glyph_index,
         return ORBIS_FONT_ERROR_NO_SUPPORT_SURFACE;
     }
 
-    FT_Face face = static_cast<FT_Face>(font_obj.ft_face);
-    if (!face || !face->size) {
+    FaceHandle face = static_cast<FaceHandle>(font_obj.ft_face);
+    if (!face) {
         return ORBIS_FONT_ERROR_NO_SUPPORT_GLYPH;
     }
 
     const float frac_x = x - std::floor(x);
     const float frac_y = y - std::floor(y);
-    FT_Vector delta{};
-    delta.x = static_cast<FT_Pos>(static_cast<s32>(frac_x * 64.0f));
-    delta.y = static_cast<FT_Pos>(-static_cast<s32>(frac_y * 64.0f));
+    FaceVector delta{};
+    delta.x = static_cast<s64>(static_cast<s32>(frac_x * 64.0f));
+    delta.y = static_cast<s64>(-static_cast<s32>(frac_y * 64.0f));
 
-    if ((font_obj.shift_units_x != 0 || font_obj.shift_units_y != 0) && face->size) {
-        const long x_scale = static_cast<long>(face->size->metrics.x_scale);
-        const long y_scale = static_cast<long>(face->size->metrics.y_scale);
+    if (font_obj.shift_units_x != 0 || font_obj.shift_units_y != 0) {
+        const long x_scale = static_cast<long>(face->size.x_scale);
+        const long y_scale = static_cast<long>(face->size.y_scale);
 
-        delta.x += static_cast<FT_Pos>(RoundFixedMul16x16ToS32(x_scale, font_obj.shift_units_x));
-        delta.y += static_cast<FT_Pos>(RoundFixedMul16x16ToS32(y_scale, font_obj.shift_units_y));
+        delta.x += static_cast<s64>(RoundFixedMul16x16ToS32(x_scale, font_obj.shift_units_x));
+        delta.y += static_cast<s64>(RoundFixedMul16x16ToS32(y_scale, font_obj.shift_units_y));
     }
 
-    FT_Set_Transform(face, nullptr, &delta);
+    face->SetDelta(delta.x, delta.y);
 
-    constexpr FT_Int32 kFtLoadFlagsRender = static_cast<FT_Int32>(
-        FT_LOAD_NO_HINTING | FT_LOAD_NO_BITMAP | FT_LOAD_VERTICAL_LAYOUT | FT_LOAD_RENDER);
-    if (FT_Load_Glyph(face, static_cast<FT_UInt>(glyph_index), kFtLoadFlagsRender) != 0) {
-        FT_Set_Transform(face, nullptr, nullptr);
+    constexpr u32 kFtLoadFlagsRender = FaceLoadVerticalLayout | FaceLoadRender;
+    if (FaceLoadGlyphResult(face, static_cast<u32>(glyph_index), kFtLoadFlagsRender) != 0) {
+        face->SetDelta(0, 0);
         return ORBIS_FONT_ERROR_NO_SUPPORT_GLYPH;
     }
-    FT_Set_Transform(face, nullptr, nullptr);
+    face->SetDelta(0, 0);
 
-    const FT_GlyphSlot slot = face->glyph;
+    const FaceGlyphPtr slot = (&face->glyph);
     if (!slot) {
         return ORBIS_FONT_ERROR_NO_SUPPORT_GLYPH;
     }
 
-    const int glyph_w = static_cast<int>(slot->bitmap.width);
-    const int glyph_h = static_cast<int>(slot->bitmap.rows);
+    const int glyph_w = static_cast<int>(slot->bitmap_width);
+    const int glyph_h = static_cast<int>(slot->bitmap_rows);
     const int x0 = static_cast<int>(slot->bitmap_left);
     const int y0 = -static_cast<int>(slot->bitmap_top);
 
-    const float bearing_x = static_cast<float>(slot->metrics.horiBearingX) / 64.0f;
-    const float bearing_y = static_cast<float>(slot->metrics.horiBearingY) / 64.0f;
-    const float advance = static_cast<float>(slot->metrics.horiAdvance) / 64.0f;
+    const float bearing_x = static_cast<float>(slot->metrics.hori_bearing_x) / 64.0f;
+    const float bearing_y = static_cast<float>(slot->metrics.hori_bearing_y) / 64.0f;
+    const float advance = static_cast<float>(slot->metrics.hori_advance) / 64.0f;
     const float width_px = static_cast<float>(slot->metrics.width) / 64.0f;
     const float height_px = static_cast<float>(slot->metrics.height) / 64.0f;
 
@@ -1817,9 +1730,9 @@ static s32 RenderGlyphIndexToSurface(FontObj& font_obj, u32 glyph_index,
     std::vector<unsigned char> glyph_bitmap;
     glyph_bitmap.resize(static_cast<std::size_t>(glyph_w) * static_cast<std::size_t>(glyph_h));
     if (glyph_w > 0 && glyph_h > 0) {
-        const int pitch = static_cast<int>(slot->bitmap.pitch);
-        const unsigned char* src = reinterpret_cast<const unsigned char*>(slot->bitmap.buffer);
-        if (slot->bitmap.pixel_mode == FT_PIXEL_MODE_MONO) {
+        const int pitch = static_cast<int>(slot->bitmap_width);
+        const unsigned char* src = reinterpret_cast<const unsigned char*>(slot->bitmap.data());
+        if (false /* rendered as 8-bit coverage only */) {
             for (int row = 0; row < glyph_h; ++row) {
                 const unsigned char* src_row = src + static_cast<std::size_t>(row) * pitch;
                 unsigned char* dst_row =
@@ -2271,7 +2184,7 @@ s32 RenderGlyphImageCore(Libraries::Font::OrbisFontGlyph fontGlyph,
         baseline_y = static_cast<float>(baseline);
     }
 
-    FT_Face face = nullptr;
+    FaceHandle face = nullptr;
     if (!ResolveFace(*st, gg->owner_handle, face)) {
         ClearRenderOutputs(metrics, result);
         st->bound_renderer = previous_renderer;
@@ -2508,6 +2421,16 @@ s32 StyleStateGetWeightScale(const void* style_state_block, float* weightXScale,
 
 namespace Libraries::FontFt::Internal {
 
+using Libraries::Font::Internal::Face;
+using Libraries::Font::Internal::FaceGlyphPtr;
+using Libraries::Font::Internal::FaceHandle;
+using Libraries::Font::Internal::FaceHhea;
+using Libraries::Font::Internal::FaceLoadFlagsFromSony;
+using Libraries::Font::Internal::FaceLoadGlyphResult;
+using Libraries::Font::Internal::FaceOs2;
+using Libraries::Font::Internal::FaceSizeMetrics;
+using Libraries::Font::Internal::FaceVector;
+
 namespace {
 
 static std::once_flag g_driver_table_once;
@@ -2681,60 +2604,6 @@ static std::optional<FontObjSidecar> TakeFontObjSidecar(const FontObj* obj) {
     return out;
 }
 
-static void* FtAlloc(FT_Memory memory, long size) {
-    if (!memory || size <= 0) {
-        return nullptr;
-    }
-    auto* ctx = static_cast<FtLibraryCtx*>(memory->user);
-    if (!ctx || !ctx->alloc_vtbl) {
-        return nullptr;
-    }
-    const auto alloc_fn = reinterpret_cast<GuestAllocFn>(ctx->alloc_vtbl[0]);
-    return alloc_fn ? alloc_fn(ctx->alloc_ctx, static_cast<u32>(size)) : nullptr;
-}
-
-static void FtFree(FT_Memory memory, void* block) {
-    if (!memory || !block) {
-        return;
-    }
-    auto* ctx = static_cast<FtLibraryCtx*>(memory->user);
-    if (!ctx || !ctx->alloc_vtbl) {
-        return;
-    }
-    const auto free_fn = reinterpret_cast<GuestFreeFn>(ctx->alloc_vtbl[1]);
-    if (free_fn) {
-        free_fn(ctx->alloc_ctx, block);
-    }
-}
-
-static void* FtRealloc(FT_Memory memory, long cur_size, long new_size, void* block) {
-    if (!memory) {
-        return nullptr;
-    }
-    auto* ctx = static_cast<FtLibraryCtx*>(memory->user);
-    if (!ctx || !ctx->alloc_vtbl) {
-        return nullptr;
-    }
-    const auto realloc_fn = reinterpret_cast<GuestReallocFn>(ctx->alloc_vtbl[2]);
-    if (realloc_fn) {
-        return realloc_fn(ctx->alloc_ctx, block, static_cast<u32>(new_size));
-    }
-
-    if (new_size <= 0) {
-        FtFree(memory, block);
-        return nullptr;
-    }
-    void* out = FtAlloc(memory, new_size);
-    if (!out) {
-        return nullptr;
-    }
-    if (block && cur_size > 0) {
-        std::memcpy(out, block, static_cast<std::size_t>(std::min(cur_size, new_size)));
-    }
-    FtFree(memory, block);
-    return out;
-}
-
 } // namespace
 
 const Libraries::FontFt::OrbisFontLibrarySelection* GetDriverTable() {
@@ -2816,27 +2685,9 @@ s32 PS4_SYSV_ABI LibraryInitStub(const void* memory, void* library) {
     ctx->alloc_ctx = alloc_ctx;
     ctx->alloc_vtbl = alloc_vtbl;
 
-    FT_Memory ft_mem = static_cast<FT_Memory>(alloc_fn(alloc_ctx, sizeof(FT_MemoryRec_)));
-    if (!ft_mem) {
-        free_fn(alloc_ctx, ctx);
-        return ORBIS_FONT_ERROR_ALLOCATION_FAILED;
-    }
-    std::memset(ft_mem, 0, sizeof(*ft_mem));
-    ft_mem->user = ctx;
-    ft_mem->alloc = &FtAlloc;
-    ft_mem->free = &FtFree;
-    ft_mem->realloc = &FtRealloc;
-    ctx->ft_memory = ft_mem;
-
-    FT_Library ft_lib = nullptr;
-    const FT_Error ft_err = FT_New_Library(ft_mem, &ft_lib);
-    if (ft_err != 0 || !ft_lib) {
-        free_fn(alloc_ctx, ft_mem);
-        free_fn(alloc_ctx, ctx);
-        return ORBIS_FONT_ERROR_ALLOCATION_FAILED;
-    }
-    FT_Add_Default_Modules(ft_lib);
-    ctx->ft_lib = ft_lib;
+    // Faces are read in place; the library needs no state of its own. A non-null marker keeps
+    // the open path's "library ready" check.
+    ctx->ft_lib = ctx;
 
     auto* lib = static_cast<FontLibOpaque*>(library);
     lib->fontset_registry = ctx;
@@ -2896,14 +2747,7 @@ s32 PS4_SYSV_ABI LibraryTermStub(void* library) {
         return ORBIS_FONT_ERROR_INVALID_PARAMETER;
     }
 
-    if (ctx->ft_lib) {
-        FT_Done_Library(ctx->ft_lib);
-        ctx->ft_lib = nullptr;
-    }
-    if (ctx->ft_memory) {
-        free_fn(alloc_ctx, ctx->ft_memory);
-        ctx->ft_memory = nullptr;
-    }
+    ctx->ft_lib = nullptr;
     free_fn(alloc_ctx, ctx);
     lib->fontset_registry = nullptr;
     return ORBIS_OK;
@@ -3018,18 +2862,19 @@ s32 PS4_SYSV_ABI LibraryOpenFontMemoryStub(void* library, u32 mode, const void* 
         return ORBIS_FONT_ERROR_INVALID_LIBRARY;
     }
 
-    FT_Face face = nullptr;
-    FT_Error ft_err = 0;
+    // Faces are read in place, so whatever holds the bytes outlives the face.
+    constexpr s32 kOpenErrResource = 1;
+    constexpr s32 kOpenErrFormat = 2;
+    FaceHandle face = nullptr;
+    s32 ft_err = 0;
     if (mode == 1) {
-        ft_err = FT_New_Memory_Face(ctx->ft_lib, reinterpret_cast<const FT_Byte*>(data),
-                                    static_cast<FT_Long>(size), static_cast<FT_Long>(subFontIndex),
-                                    &face);
+        face = Face::Open(reinterpret_cast<const u8*>(data), size, subFontIndex);
+        ft_err = face ? 0 : kOpenErrFormat;
     } else if (archive_font_bytes) {
-        ft_err = FT_New_Memory_Face(ctx->ft_lib,
-                                    reinterpret_cast<const FT_Byte*>(archive_font_bytes->data()),
-                                    static_cast<FT_Long>(archive_font_bytes->size()),
-                                    static_cast<FT_Long>(subFontIndex), &face);
-        if (ft_err == 0 && face) {
+        face = Face::Open(archive_font_bytes->data(), archive_font_bytes->size(), subFontIndex,
+                          archive_font_bytes);
+        ft_err = face ? 0 : kOpenErrFormat;
+        if (face) {
             shared_data = archive_font_bytes;
             data = archive_font_bytes->data();
             size = static_cast<u32>(archive_font_bytes->size());
@@ -3051,7 +2896,7 @@ s32 PS4_SYSV_ABI LibraryOpenFontMemoryStub(void* library, u32 mode, const void* 
         }
 
         std::error_code ec;
-        FT_Error last_ft_err = 0;
+        s32 last_ft_err = 0;
         bool attempted_open = false;
         for (const auto& cand : candidates) {
             if (cand.empty()) {
@@ -3062,12 +2907,11 @@ s32 PS4_SYSV_ABI LibraryOpenFontMemoryStub(void* library, u32 mode, const void* 
             if (const auto builtin_bytes = Libraries::Font::Internal::LoadBuiltinFontBytesShared(
                     cand_path, &builtin_face_index)) {
                 attempted_open = true;
-                ft_err = FT_New_Memory_Face(ctx->ft_lib,
-                                            reinterpret_cast<const FT_Byte*>(builtin_bytes->data()),
-                                            static_cast<FT_Long>(builtin_bytes->size()),
-                                            static_cast<FT_Long>(builtin_face_index), &face);
+                face = Face::Open(builtin_bytes->data(), builtin_bytes->size(), builtin_face_index,
+                                  builtin_bytes);
+                ft_err = face ? 0 : kOpenErrFormat;
                 last_ft_err = ft_err;
-                if (ft_err == 0 && face) {
+                if (face) {
                     shared_data = builtin_bytes;
                     data = builtin_bytes->data();
                     size = static_cast<u32>(builtin_bytes->size());
@@ -3080,17 +2924,26 @@ s32 PS4_SYSV_ABI LibraryOpenFontMemoryStub(void* library, u32 mode, const void* 
                 continue;
             }
             attempted_open = true;
-            ft_err =
-                FT_New_Face(ctx->ft_lib, cand.c_str(), static_cast<FT_Long>(subFontIndex), &face);
+            void* file_buf = nullptr;
+            s64 file_len = 0;
+            if (!filestream_read_file(cand.c_str(), &file_buf, &file_len) || !file_buf) {
+                ft_err = kOpenErrResource;
+                last_ft_err = ft_err;
+                continue;
+            }
+            std::shared_ptr<const void> file_keep(file_buf, std::free);
+            face = Face::Open(static_cast<const u8*>(file_buf), static_cast<std::size_t>(file_len),
+                              subFontIndex, std::move(file_keep));
+            ft_err = face ? 0 : kOpenErrFormat;
             last_ft_err = ft_err;
-            if (ft_err == 0 && face) {
+            if (face) {
                 break;
             }
         }
         if (ft_err != 0) {
             ft_err = last_ft_err;
         } else if (!attempted_open) {
-            ft_err = FT_Err_Cannot_Open_Resource;
+            ft_err = kOpenErrResource;
         }
     }
     if (ft_err != 0 || !face) {
@@ -3100,17 +2953,15 @@ s32 PS4_SYSV_ABI LibraryOpenFontMemoryStub(void* library, u32 mode, const void* 
         if (mode == 1) {
             return ORBIS_FONT_ERROR_NO_SUPPORT_FORMAT;
         }
-        if (ft_err == FT_Err_Unknown_File_Format) {
+        if (ft_err == kOpenErrFormat) {
             return ORBIS_FONT_ERROR_NO_SUPPORT_FORMAT;
         }
         return ORBIS_FONT_ERROR_FS_OPEN_FAILED;
     }
 
-    (void)FT_Select_Charmap(face, FT_ENCODING_UNICODE);
-
     auto* obj = static_cast<FontObj*>(alloc_fn(alloc_ctx, sizeof(FontObj)));
     if (!obj) {
-        FT_Done_Face(face);
+        Face::Close(face);
         if (owned_data) {
             free_fn(alloc_ctx, owned_data);
         }
@@ -3158,11 +3009,11 @@ s32 PS4_SYSV_ABI LibraryCloseFontObjStub(void* fontObj, u32 /*flags*/) {
         return ORBIS_OK;
     }
 
-    FT_Face face = static_cast<FT_Face>(obj->ft_face);
-    FtLibraryCtx* ctx = nullptr;
-    if (face && face->memory) {
-        ctx = static_cast<FtLibraryCtx*>(face->memory->user);
-    }
+    FaceHandle face = static_cast<FaceHandle>(obj->ft_face);
+    // ft_ctx_0x58 points at the library's marker, which is the library context itself
+    FtLibraryCtx* ctx = obj->ft_ctx_0x58
+                            ? static_cast<FtLibraryCtx*>(*static_cast<void**>(obj->ft_ctx_0x58))
+                            : nullptr;
 
     const auto free_fn =
         (ctx && ctx->alloc_vtbl) ? reinterpret_cast<GuestFreeFn>(ctx->alloc_vtbl[1]) : nullptr;
@@ -3174,7 +3025,7 @@ s32 PS4_SYSV_ABI LibraryCloseFontObjStub(void* fontObj, u32 /*flags*/) {
     }
 
     if (face) {
-        FT_Done_Face(face);
+        Face::Close(face);
         obj->ft_face = nullptr;
     }
     if (owned_data && free_fn) {
@@ -3200,11 +3051,11 @@ s32 PS4_SYSV_ABI LibraryGetFaceScaleStub(void* fontObj, u16* outUnitsPerEm, floa
         return ORBIS_FONT_ERROR_FATAL;
     }
     auto* obj = static_cast<FontObj*>(fontObj);
-    const auto* face = static_cast<const FT_Face>(obj->ft_face);
+    const auto* face = static_cast<const FaceHandle>(obj->ft_face);
     if (!face) {
         return ORBIS_FONT_ERROR_FATAL;
     }
-    const u16 units = face->units_per_EM;
+    const u16 units = face->units_per_em;
     *outUnitsPerEm = units;
     *outScale = static_cast<float>(static_cast<u32>(units)) * kOneOver64;
     return ORBIS_OK;
@@ -3215,21 +3066,20 @@ s32 PS4_SYSV_ABI LibraryGetFaceMetricStub(void* fontObj, u32 metricId, u16* outM
         return ORBIS_FONT_ERROR_FATAL;
     }
     auto* obj = static_cast<FontObj*>(fontObj);
-    const auto* face = static_cast<const FT_Face>(obj->ft_face);
+    const auto* face = static_cast<const FaceHandle>(obj->ft_face);
     if (!face) {
         return ORBIS_FONT_ERROR_FATAL;
     }
 
-    const u16 units = face->units_per_EM;
+    const u16 units = face->units_per_em;
     if (metricId == 0x0e00) {
         *outMetric = units;
         return ORBIS_OK;
     }
     if (metricId == 0xea00) {
-        const TT_OS2* os2 =
-            static_cast<const TT_OS2*>(FT_Get_Sfnt_Table(const_cast<FT_Face>(face), ft_sfnt_os2));
+        const FaceOs2* os2 = (face->os2.present ? &face->os2 : nullptr);
         if (os2) {
-            *outMetric = static_cast<u16>(os2->sTypoAscender);
+            *outMetric = static_cast<u16>(os2->typo_ascender);
             return ORBIS_OK;
         }
         *outMetric = units;
@@ -3245,7 +3095,7 @@ s32 PS4_SYSV_ABI LibraryGetGlyphIndexStub(void* fontObj, u32 codepoint_u16, u32*
         return ORBIS_FONT_ERROR_FATAL;
     }
     auto* obj = static_cast<FontObj*>(fontObj);
-    const FT_Face face = static_cast<FT_Face>(obj->ft_face);
+    const FaceHandle face = static_cast<FaceHandle>(obj->ft_face);
     if (!face) {
         *out_glyph_index = 0;
         return ORBIS_FONT_ERROR_FATAL;
@@ -3264,25 +3114,22 @@ s32 PS4_SYSV_ABI LibrarySetCharSizeWithDpiStub(void* fontObj, u32 dpi_x, u32 dpi
         return ORBIS_FONT_ERROR_FATAL;
     }
     auto* obj = static_cast<FontObj*>(fontObj);
-    const FT_Face face = static_cast<FT_Face>(obj->ft_face);
+    const FaceHandle face = static_cast<FaceHandle>(obj->ft_face);
     if (!face) {
         return ORBIS_FONT_ERROR_FATAL;
     }
 
-    const auto char_w = static_cast<FT_F26Dot6>(static_cast<s32>(scale_x * 64.0f));
-    const auto char_h = static_cast<FT_F26Dot6>(static_cast<s32>(scale_y * 64.0f));
+    const auto char_w = static_cast<s64>(static_cast<s32>(scale_x * 64.0f));
+    const auto char_h = static_cast<s64>(static_cast<s32>(scale_y * 64.0f));
     if (Libraries::Font::Internal::SetCharSizeCompat(face, char_w, char_h, dpi_x, dpi_y) != 0) {
         return ORBIS_FONT_ERROR_FATAL;
     }
 
-    const FT_Size size = face->size;
-    if (!size) {
-        return ORBIS_FONT_ERROR_FATAL;
-    }
+    const FaceSizeMetrics* size = &face->size;
 
-    const u16 units = face->units_per_EM;
-    const long x_scale = static_cast<long>(size->metrics.x_scale);
-    const long y_scale = static_cast<long>(size->metrics.y_scale);
+    const u16 units = face->units_per_em;
+    const long x_scale = static_cast<long>(size->x_scale);
+    const long y_scale = static_cast<long>(size->y_scale);
 
     *out_scale_x = Libraries::Font::Internal::FixedMulUnitsToF26Dot6(x_scale, units);
     *out_scale_y = Libraries::Font::Internal::FixedMulUnitsToF26Dot6(y_scale, units);
@@ -3304,8 +3151,8 @@ s32 PS4_SYSV_ABI LibraryComputeLayoutBlockStub(void* fontObj, const void* style_
         return ORBIS_FONT_ERROR_FATAL;
     }
     auto* obj = static_cast<FontObj*>(fontObj);
-    const FT_Face face = static_cast<FT_Face>(obj->ft_face);
-    if (!face || !face->size) {
+    const FaceHandle face = static_cast<FaceHandle>(obj->ft_face);
+    if (!face) {
         return ORBIS_FONT_ERROR_FATAL;
     }
 
@@ -3315,16 +3162,16 @@ s32 PS4_SYSV_ABI LibraryComputeLayoutBlockStub(void* fontObj, const void* style_
     const float effect_height = style->effect_weight_y;
     const float slant = style->slant_ratio;
 
-    const s64 y_scale = static_cast<s64>(face->size->metrics.y_scale);
-    const s64 x_scale = static_cast<s64>(face->size->metrics.x_scale);
+    const s64 y_scale = static_cast<s64>(face->size.y_scale);
+    const s64 x_scale = static_cast<s64>(face->size.x_scale);
     const s64 y_shift = obj->shift_cache_y;
     const s64 x_shift = obj->shift_cache_x;
-    const s64 units_per_em = static_cast<s64>(static_cast<u16>(face->units_per_EM));
+    const s64 units_per_em = static_cast<s64>(static_cast<u16>(face->units_per_em));
 
     s32 y_min_px = Libraries::Font::Internal::RoundMul16x16ToS32(
-        static_cast<s64>(face->bbox.yMin) + y_shift, y_scale);
+        static_cast<s64>(face->bbox_y_min) + y_shift, y_scale);
     s32 y_max_px = Libraries::Font::Internal::RoundMul16x16ToS32(
-        static_cast<s64>(face->bbox.yMax) + y_shift, y_scale);
+        static_cast<s64>(face->bbox_y_max) + y_shift, y_scale);
 
     s32 half_effect_w_px = 0;
     s32 left_adjust_px = 0;
@@ -3365,9 +3212,9 @@ s32 PS4_SYSV_ABI LibraryComputeLayoutBlockStub(void* fontObj, const void* style_
     out.half_effect_width = static_cast<float>(half_effect_w_px) * kOneOver64;
 
     const s32 x_min_px = Libraries::Font::Internal::RoundMul16x16ToS32(
-        static_cast<s64>(face->bbox.xMin) + x_shift, x_scale);
+        static_cast<s64>(face->bbox_x_min) + x_shift, x_scale);
     const s32 x_max_px = Libraries::Font::Internal::RoundMul16x16ToS32(
-        static_cast<s64>(face->bbox.xMax) + x_shift, x_scale);
+        static_cast<s64>(face->bbox_x_max) + x_shift, x_scale);
 
     out.line_advance = static_cast<float>(y_max_px - y_min_px) * kOneOver64;
     out.baseline = static_cast<float>(y_max_px) * kOneOver64;
@@ -3380,9 +3227,8 @@ s32 PS4_SYSV_ABI LibraryComputeLayoutBlockStub(void* fontObj, const void* style_
     out.max_advance_width = static_cast<float>(max_adv_w_px) * kOneOver64;
 
     float hhea_out = 0.0f;
-    if (const TT_HoriHeader* hhea =
-            static_cast<const TT_HoriHeader*>(FT_Get_Sfnt_Table(face, ft_sfnt_hhea))) {
-        const s64 caret_rise_units = x_shift + static_cast<s64>(hhea->caret_Slope_Rise);
+    if (const FaceHhea* hhea = (face->hhea.present ? &face->hhea : nullptr)) {
+        const s64 caret_rise_units = x_shift + static_cast<s64>(hhea->caret_slope_rise);
         const s32 caret_rise_px =
             Libraries::Font::Internal::TruncFixed16x16ToInt(caret_rise_units * x_scale);
         hhea_out = static_cast<float>(caret_rise_px - half_effect_w_px) * kOneOver64;
@@ -3398,8 +3244,8 @@ s32 PS4_SYSV_ABI LibraryComputeLayoutAltBlockStub(void* fontObj, const void* sty
         return ORBIS_FONT_ERROR_FATAL;
     }
     auto* obj = static_cast<FontObj*>(fontObj);
-    const FT_Face face = static_cast<FT_Face>(obj->ft_face);
-    if (!face || !face->size) {
+    const FaceHandle face = static_cast<FaceHandle>(obj->ft_face);
+    if (!face) {
         return ORBIS_FONT_ERROR_FATAL;
     }
 
@@ -3409,23 +3255,23 @@ s32 PS4_SYSV_ABI LibraryComputeLayoutAltBlockStub(void* fontObj, const void* sty
     const float p1c = style->effect_weight_y;
     const float p20 = style->slant_ratio;
 
-    const long x_scale = static_cast<long>(face->size->metrics.x_scale);
-    const long y_scale = static_cast<long>(face->size->metrics.y_scale);
+    const long x_scale = static_cast<long>(face->size.x_scale);
+    const long y_scale = static_cast<long>(face->size.y_scale);
 
-    const auto* vhea = static_cast<const TT_VertHeader*>(FT_Get_Sfnt_Table(face, ft_sfnt_vhea));
+    const auto* vhea = (face->vhea.present ? &face->vhea : nullptr);
     const long y_shift = static_cast<long>(obj->shift_cache_y);
     const long x_shift = static_cast<long>(obj->shift_cache_x);
-    const long units = static_cast<long>(static_cast<u16>(face->units_per_EM));
+    const long units = static_cast<long>(static_cast<u16>(face->units_per_em));
 
     long y_ascender = 0;
     long y_descender = 0;
     if (vhea) {
-        y_ascender = static_cast<long>(vhea->Ascender) + y_shift;
-        y_descender = static_cast<long>(vhea->Descender) + y_shift;
+        y_ascender = static_cast<long>(vhea->ascender) + y_shift;
+        y_descender = static_cast<long>(vhea->descender) + y_shift;
     }
 
-    const long left_in = static_cast<long>(face->bbox.xMin) + x_shift;
-    const long right_in = static_cast<long>(face->bbox.xMax) + x_shift;
+    const long left_in = static_cast<long>(face->bbox_x_min) + x_shift;
+    const long right_in = static_cast<long>(face->bbox_x_max) + x_shift;
 
     const s32 scaled_left =
         Libraries::Font::Internal::RoundFixedMulValueScaleToS32(left_in, x_scale);
@@ -3530,17 +3376,17 @@ s32 PS4_SYSV_ABI LibraryLoadGlyphCachedStub(void* fontObj, u32 glyphIndex, s32 m
     }
 
     auto* obj = static_cast<Libraries::Font::Internal::FontObj*>(fontObj);
-    FT_Face face = static_cast<FT_Face>(obj->ft_face);
+    FaceHandle face = static_cast<FaceHandle>(obj->ft_face);
     if (!face) {
         return ORBIS_FONT_ERROR_FATAL;
     }
 
-    FT_GlyphSlot slot = face->glyph;
+    FaceGlyphPtr slot = (&face->glyph);
     if (!slot) {
         return ORBIS_FONT_ERROR_FATAL;
     }
 
-    const u16 units_per_em = static_cast<u16>(face->units_per_EM);
+    const u16 units_per_em = static_cast<u16>(face->units_per_em);
     const bool cached_match = (obj->cached_glyph_index_0x64 == static_cast<s32>(glyphIndex)) &&
                               (obj->cached_units_x_0x68 == static_cast<u64>(units_per_em)) &&
                               (obj->cached_units_y_0x70 == obj->cached_units_x_0x68) && (mode == 0);
@@ -3555,8 +3401,8 @@ s32 PS4_SYSV_ABI LibraryLoadGlyphCachedStub(void* fontObj, u32 glyphIndex, s32 m
     };
 
     auto write_out_words_from_slot = [&]() {
-        const s32 n_contours = static_cast<s32>(slot->outline.n_contours);
-        const s32 n_points = static_cast<s32>(slot->outline.n_points);
+        const s32 n_contours = static_cast<s32>(slot->outline.contours.size());
+        const s32 n_points = static_cast<s32>(slot->outline.points.size());
 
         const u32 computed_4 = static_cast<u32>(n_points * 0x10 + 0x68 +
                                                 ((n_points + 0x0F + n_contours * 2) & 0xFFFFFFF0u));
@@ -3578,8 +3424,8 @@ s32 PS4_SYSV_ABI LibraryLoadGlyphCachedStub(void* fontObj, u32 glyphIndex, s32 m
         return ORBIS_OK;
     }
 
-    const FT_Int32 load_flags = static_cast<FT_Int32>(((mode == 0) ? 1 : 0) | 0x1A);
-    const FT_Error ft_err = FT_Load_Glyph(face, static_cast<FT_UInt>(glyphIndex), load_flags);
+    const s32 load_flags = static_cast<s32>(((mode == 0) ? 1 : 0) | 0x1A);
+    const s32 ft_err = FaceLoadGlyphResult(face, static_cast<u32>(glyphIndex), load_flags);
     if (ft_err != 0) {
         obj->cached_glyph_index_0x64 = 0;
         obj->cached_units_x_0x68 = 0;
@@ -3590,7 +3436,7 @@ s32 PS4_SYSV_ABI LibraryLoadGlyphCachedStub(void* fontObj, u32 glyphIndex, s32 m
                                 : ORBIS_FONT_ERROR_NO_SUPPORT_GLYPH;
     }
 
-    slot = face->glyph;
+    slot = (&face->glyph);
     if (!slot) {
         return ORBIS_FONT_ERROR_FATAL;
     }
@@ -3607,11 +3453,8 @@ s32 PS4_SYSV_ABI LibraryLoadGlyphCachedStub(void* fontObj, u32 glyphIndex, s32 m
         obj->layout_scale_vec[0] = 0x0000000000010000ull;
         obj->layout_scale_vec[1] = 0x0000000000010000ull;
     } else {
-        if (!face->size) {
-            return ORBIS_FONT_ERROR_FATAL;
-        }
-        const long x_scale = static_cast<long>(face->size->metrics.x_scale);
-        const long y_scale = static_cast<long>(face->size->metrics.y_scale);
+        const long x_scale = static_cast<long>(face->size.x_scale);
+        const long y_scale = static_cast<long>(face->size.y_scale);
 
         obj->cached_units_x_0x68 =
             static_cast<u64>(Libraries::Font::Internal::TruncMulUnitsToS64(x_scale, units_per_em));
@@ -3651,13 +3494,13 @@ s32 PS4_SYSV_ABI LibraryGetGlyphMetricsStub(void* fontObj, std::uint32_t* opt_pa
     }
 
     auto* obj = static_cast<Libraries::Font::Internal::FontObj*>(fontObj);
-    FT_Face face = static_cast<FT_Face>(obj->ft_face);
-    if (!face || !face->glyph || !face->size) {
+    FaceHandle face = static_cast<FaceHandle>(obj->ft_face);
+    if (!face) {
         return ORBIS_FONT_ERROR_FATAL;
     }
 
-    FT_GlyphSlot slot = face->glyph;
-    FT_Size size = face->size;
+    FaceGlyphPtr slot = (&face->glyph);
+    const FaceSizeMetrics* size = &face->size;
 
     std::memset(out_params, 0, 0x48);
 
@@ -3670,20 +3513,21 @@ s32 PS4_SYSV_ABI LibraryGetGlyphMetricsStub(void* fontObj, std::uint32_t* opt_pa
         write_ptr(out_params, 0x08, opt_param2);
     }
 
-    const u8 face_flag_bit = static_cast<u8>((static_cast<u32>(face->face_flags) >> 5) & 1u);
+    const u8 face_flag_bit = static_cast<u8>(face->has_vertical ? 1u : 0u);
     const bool has_seed_vec = (obj->layout_seed_vec[0] != 0 || obj->layout_seed_vec[1] != 0);
     out_params[2] = static_cast<u8>(0xF0u | (has_seed_vec ? 0x08u : 0u) | face_flag_bit);
     out_params[3] = 0;
-    write_u16(out_params, 0x04, static_cast<u16>(face->units_per_EM));
+    write_u16(out_params, 0x04, static_cast<u16>(face->units_per_em));
     write_ptr(out_params, 0x10, outline_blob);
     write_ptr(out_params, 0x18, out_metrics);
 
     float style_shift_x = 0.0f;
     float style_shift_y = 0.0f;
     if (obj->reserved_0x04 != 0) {
-        style_shift_x = static_cast<float>(slot->metrics.vertBearingX - slot->metrics.horiBearingX);
+        style_shift_x =
+            static_cast<float>(slot->metrics.vert_bearing_x - slot->metrics.hori_bearing_x);
         style_shift_y =
-            static_cast<float>(-(slot->metrics.horiBearingY + slot->metrics.vertBearingY));
+            static_cast<float>(-(slot->metrics.hori_bearing_y + slot->metrics.vert_bearing_y));
         out_params[1] = 1;
     } else {
         out_params[1] = 0;
@@ -3706,8 +3550,8 @@ s32 PS4_SYSV_ABI LibraryGetGlyphMetricsStub(void* fontObj, std::uint32_t* opt_pa
               static_cast<float>(static_cast<s64>(obj->cached_units_y_0x70)) * kOneOver64);
     write_u32(out_params, 0x44, 0);
 
-    s64 x_scale = static_cast<s64>(size->metrics.x_scale);
-    s64 y_scale = static_cast<s64>(size->metrics.y_scale);
+    s64 x_scale = static_cast<s64>(size->x_scale);
+    s64 y_scale = static_cast<s64>(size->y_scale);
     const s64 obj_scale_x = static_cast<s64>(obj->layout_scale_vec[0]);
     const s64 obj_scale_y = static_cast<s64>(obj->layout_scale_vec[1]);
     if (obj_scale_x != 0 && obj_scale_x != 0x10000) {
@@ -3724,16 +3568,16 @@ s32 PS4_SYSV_ABI LibraryGetGlyphMetricsStub(void* fontObj, std::uint32_t* opt_pa
 
     const s64 width_raw = static_cast<s64>(slot->metrics.width);
     const s64 height_raw = static_cast<s64>(slot->metrics.height);
-    const s64 hori_bearing_x_raw = static_cast<s64>(slot->metrics.horiBearingX);
-    const s64 hori_advance_raw = static_cast<s64>(slot->metrics.horiAdvance);
-    const s64 vert_bearing_x_raw = static_cast<s64>(slot->metrics.vertBearingX);
-    const s64 vert_bearing_y_raw = static_cast<s64>(slot->metrics.vertBearingY);
-    const s64 vert_advance_raw = static_cast<s64>(slot->metrics.vertAdvance);
+    const s64 hori_bearing_x_raw = static_cast<s64>(slot->metrics.hori_bearing_x);
+    const s64 hori_advance_raw = static_cast<s64>(slot->metrics.hori_advance);
+    const s64 vert_bearing_x_raw = static_cast<s64>(slot->metrics.vert_bearing_x);
+    const s64 vert_bearing_y_raw = static_cast<s64>(slot->metrics.vert_bearing_y);
+    const s64 vert_advance_raw = static_cast<s64>(slot->metrics.vert_advance);
 
     const s64 hori_advance_unscaled = static_cast<s64>(seed_x) + hori_advance_raw;
     const s64 vert_advance_unscaled = static_cast<s64>(seed_y) + vert_advance_raw;
-    slot->metrics.horiAdvance = static_cast<FT_Pos>(hori_advance_unscaled);
-    slot->metrics.vertAdvance = static_cast<FT_Pos>(vert_advance_unscaled);
+    slot->metrics.hori_advance = static_cast<s64>(hori_advance_unscaled);
+    slot->metrics.vert_advance = static_cast<s64>(vert_advance_unscaled);
 
     if (width_raw == 0 && height_raw == 0) {
         const s64 hori_advance = scale_if(hori_advance_unscaled, x_scale);
@@ -3769,7 +3613,7 @@ s32 PS4_SYSV_ABI LibraryGetGlyphMetricsStub(void* fontObj, std::uint32_t* opt_pa
     s64 vert_bearing_x = 0;
     s64 vert_bearing_y = 0;
 
-    if ((static_cast<u32>(face->face_flags) & 0x20u) == 0) {
+    if (!face->has_vertical) {
         vert_bearing_x = left - (hori_advance / 2);
         vert_bearing_y = (vert_advance - out_height) / 2;
     } else {
@@ -3777,8 +3621,8 @@ s32 PS4_SYSV_ABI LibraryGetGlyphMetricsStub(void* fontObj, std::uint32_t* opt_pa
             s64 vb_x = static_cast<s64>(shift_x) + vert_bearing_x_raw;
             vert_bearing_x = scale_if(vb_x, x_scale);
         } else {
-            slot->metrics.vertBearingX =
-                static_cast<FT_Pos>(hori_bearing_x_raw - (hori_advance_unscaled / 2));
+            slot->metrics.vert_bearing_x =
+                static_cast<s64>(hori_bearing_x_raw - (hori_advance_unscaled / 2));
             vert_bearing_x = left - (hori_advance / 2);
             write_f32(out_params, 0x20, static_cast<float>(-(hori_advance_unscaled / 2)));
         }
@@ -3802,15 +3646,15 @@ s32 PS4_SYSV_ABI LibraryGetGlyphMetricsStub(void* fontObj, std::uint32_t* opt_pa
             handle_u8 + style_off);
 
         const float slant_ratio = style->slant_ratio;
-        if ((slant_ratio != 0.0f || std::isnan(slant_ratio)) && slot->outline.points &&
-            slot->outline.n_points > 0) {
+        if ((slant_ratio != 0.0f || std::isnan(slant_ratio)) && !slot->outline.points.empty() &&
+            slot->outline.points.size() > 0) {
             const s64 shear =
                 static_cast<s64>(static_cast<s32>(std::trunc(slant_ratio * 65536.0f)));
             s64 min_x = std::numeric_limits<s64>::max();
             s64 max_x = std::numeric_limits<s64>::min();
-            const int n_points = static_cast<int>(slot->outline.n_points);
+            const int n_points = static_cast<int>(slot->outline.points.size());
             for (int i = 0; i < n_points; ++i) {
-                const FT_Vector p = slot->outline.points[i];
+                const auto& p = slot->outline.points[i];
                 s64 px = static_cast<s64>(p.x) + static_cast<s64>(shift_x);
                 s64 py = static_cast<s64>(p.y) + static_cast<s64>(shift_y);
                 px = scale_if(px, x_scale);

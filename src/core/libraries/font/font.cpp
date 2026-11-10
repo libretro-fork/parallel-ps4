@@ -26,9 +26,6 @@
 #include <unordered_set>
 #include <vector>
 #include <fmt/format.h>
-#include <ft2build.h>
-#include FT_FREETYPE_H
-#include FT_TRUETYPE_TABLES_H
 #include "common/logging/log.h"
 #include "common/path_util.h"
 #include "core/emulator_settings.h"
@@ -1991,18 +1988,17 @@ s32 PS4_SYSV_ABI sceFontGetKerning(OrbisFontHandle fontHandle, u32 preCode, u32 
         }
     }
 
-    FT_Face resolved_face = st.ext_ft_face;
+    Internal::FaceHandle resolved_face = st.ext_ft_face;
     float resolved_scale_factor = st.system_font_scale_factor;
-    FT_UInt g1 =
-        resolved_face ? FT_Get_Char_Index(resolved_face, static_cast<FT_ULong>(preCode)) : 0;
-    FT_UInt g2 = resolved_face ? FT_Get_Char_Index(resolved_face, static_cast<FT_ULong>(code)) : 0;
+    u32 g1 = resolved_face ? resolved_face->CharIndex(static_cast<u32>(preCode)) : 0;
+    u32 g2 = resolved_face ? resolved_face->CharIndex(static_cast<u32>(code)) : 0;
     if (g1 == 0 || g2 == 0) {
         for (const auto& fb : st.system_fallback_faces) {
             if (!fb.ready || !fb.ft_face) {
                 continue;
             }
-            const FT_UInt fb_g1 = FT_Get_Char_Index(fb.ft_face, static_cast<FT_ULong>(preCode));
-            const FT_UInt fb_g2 = FT_Get_Char_Index(fb.ft_face, static_cast<FT_ULong>(code));
+            const u32 fb_g1 = fb.ft_face->CharIndex(static_cast<u32>(preCode));
+            const u32 fb_g2 = fb.ft_face->CharIndex(static_cast<u32>(code));
             if (fb_g1 == 0 || fb_g2 == 0) {
                 continue;
             }
@@ -2017,12 +2013,12 @@ s32 PS4_SYSV_ABI sceFontGetKerning(OrbisFontHandle fontHandle, u32 preCode, u32 
     if (resolved_face && g1 != 0 && g2 != 0) {
         const float scaled_w = st.scale_w * resolved_scale_factor;
         const float scaled_h = st.scale_h * resolved_scale_factor;
-        const auto char_w = static_cast<FT_F26Dot6>(static_cast<s32>(scaled_w * 64.0f));
-        const auto char_h = static_cast<FT_F26Dot6>(static_cast<s32>(scaled_h * 64.0f));
-        (void)FT_Set_Char_Size(resolved_face, char_w, char_h, 72, 72);
+        const auto char_w = static_cast<s64>(static_cast<s32>(scaled_w * 64.0f));
+        const auto char_h = static_cast<s64>(static_cast<s32>(scaled_h * 64.0f));
+        (void)Internal::FaceSetCharSizeResult(resolved_face, char_w, char_h, 72, 72);
 
-        FT_Vector delta{};
-        FT_Get_Kerning(resolved_face, g1, g2, FT_KERNING_DEFAULT, &delta);
+        Internal::FaceVector delta{};
+        resolved_face->Kerning(g1, g2, &delta.x, &delta.y);
         const float kx = static_cast<float>(delta.x) / 64.0f;
         kerning->offsetX = kx;
         kerning->offsetY = 0.0f;
@@ -3198,9 +3194,9 @@ s32 PS4_SYSV_ABI sceFontOpenFontFile(OrbisFontLib library, const char* guest_pat
     if (LoadGuestPathBytes(guest_path, file_bytes) &&
         file_bytes.size() <= std::numeric_limits<u32>::max()) {
         auto& st = Internal::GetState(handle);
-        Internal::DestroyFreeTypeFace(st.ext_ft_face);
+        Internal::DestroyFace(st.ext_ft_face);
         for (auto& fb : st.system_fallback_faces) {
-            Internal::DestroyFreeTypeFace(fb.ft_face);
+            Internal::DestroyFace(fb.ft_face);
         }
         st = {};
         st.library = library;
@@ -3209,8 +3205,8 @@ s32 PS4_SYSV_ABI sceFontOpenFontFile(OrbisFontLib library, const char* guest_pat
         st.ext_face_data = std::move(file_bytes);
 
         const u32 chosen_index = open_detail ? open_detail->subfont_index : 0u;
-        st.ext_ft_face = Internal::CreateFreeTypeFaceFromBytes(
-            st.ext_face_data.data(), st.ext_face_data.size(), chosen_index);
+        st.ext_ft_face = Internal::CreateFaceFromBytes(st.ext_face_data.data(),
+                                                       st.ext_face_data.size(), chosen_index);
         if (st.ext_ft_face) {
             st.ext_cache.clear();
             st.scratch.clear();
@@ -3583,7 +3579,7 @@ s32 PS4_SYSV_ABI sceFontOpenFontInstance(OrbisFontHandle fontHandle, OrbisFontHa
         dst_state.ext_ft_face = nullptr;
 
         if (!dst_state.ext_face_data.empty()) {
-            dst_state.ext_ft_face = Internal::CreateFreeTypeFaceFromBytes(
+            dst_state.ext_ft_face = Internal::CreateFaceFromBytes(
                 dst_state.ext_face_data.data(), dst_state.ext_face_data.size(), subfont_index);
         }
         if (dst_state.ext_ft_face) {
@@ -3598,15 +3594,15 @@ s32 PS4_SYSV_ABI sceFontOpenFontInstance(OrbisFontHandle fontHandle, OrbisFontHa
             if (!fb.bytes || fb.bytes->empty()) {
                 continue;
             }
-            fb.ft_face = Internal::CreateFreeTypeFaceFromBytes(fb.bytes->data(), fb.bytes->size(),
-                                                               subfont_index);
+            fb.ft_face =
+                Internal::CreateFaceFromBytes(fb.bytes->data(), fb.bytes->size(), subfont_index);
             fb.ready = (fb.ft_face != nullptr);
         }
     } else {
         auto& dst_state = Internal::GetState(out_handle);
-        Internal::DestroyFreeTypeFace(dst_state.ext_ft_face);
+        Internal::DestroyFace(dst_state.ext_ft_face);
         for (auto& fb : dst_state.system_fallback_faces) {
-            Internal::DestroyFreeTypeFace(fb.ft_face);
+            Internal::DestroyFace(fb.ft_face);
         }
         dst_state = {};
         dst_state.library = static_cast<OrbisFontLib>(src->library);
@@ -4002,9 +3998,9 @@ s32 PS4_SYSV_ABI sceFontOpenFontMemory(OrbisFontLib library, const void* fontAdd
     ReleaseLibraryLock(lib, prev_lib_lock);
 
     auto& st = Internal::GetState(handle);
-    Internal::DestroyFreeTypeFace(st.ext_ft_face);
+    Internal::DestroyFace(st.ext_ft_face);
     for (auto& fb : st.system_fallback_faces) {
-        Internal::DestroyFreeTypeFace(fb.ft_face);
+        Internal::DestroyFace(fb.ft_face);
     }
     st = {};
     st.library = library;
@@ -4016,8 +4012,8 @@ s32 PS4_SYSV_ABI sceFontOpenFontMemory(OrbisFontLib library, const void* fontAdd
     }
 
     const u32 chosen_index = open_params ? open_params->subfont_index : 0u;
-    st.ext_ft_face = Internal::CreateFreeTypeFaceFromBytes(st.ext_face_data.data(),
-                                                           st.ext_face_data.size(), chosen_index);
+    st.ext_ft_face = Internal::CreateFaceFromBytes(st.ext_face_data.data(), st.ext_face_data.size(),
+                                                   chosen_index);
 
     if (st.ext_ft_face) {
         st.ext_cache.clear();
@@ -4220,9 +4216,9 @@ s32 PS4_SYSV_ABI sceFontOpenFontSet(OrbisFontLib library, u32 fontSetType, u32 o
         h->style_tail.reserved_0x24 = 0.0f;
 
         auto& st = Internal::GetState(handle);
-        Internal::DestroyFreeTypeFace(st.ext_ft_face);
+        Internal::DestroyFace(st.ext_ft_face);
         for (auto& fb : st.system_fallback_faces) {
-            Internal::DestroyFreeTypeFace(fb.ft_face);
+            Internal::DestroyFace(fb.ft_face);
         }
         st = {};
         st.library = library;
@@ -4233,8 +4229,8 @@ s32 PS4_SYSV_ABI sceFontOpenFontSet(OrbisFontLib library, u32 fontSetType, u32 o
         st.system_font_scale_factor = 1.0f;
         st.system_font_shift_value = 0;
         st.ext_face_data = std::move(primary_bytes);
-        st.ext_ft_face = Internal::CreateFreeTypeFaceFromBytes(
-            st.ext_face_data.data(), st.ext_face_data.size(), primary_face_index);
+        st.ext_ft_face = Internal::CreateFaceFromBytes(st.ext_face_data.data(),
+                                                       st.ext_face_data.size(), primary_face_index);
         if (!st.ext_ft_face) {
             LOG_ERROR(Lib_Font, "FONT_OPEN_FAILED");
             return cleanup_handle_for_error(ORBIS_FONT_ERROR_FONT_OPEN_FAILED);
@@ -4245,12 +4241,12 @@ s32 PS4_SYSV_ABI sceFontOpenFontSet(OrbisFontLib library, u32 fontSetType, u32 o
         st.ext_face_ready = true;
 
         {
-            const u16 units = static_cast<u16>(st.ext_ft_face->units_per_EM);
+            const u16 units = static_cast<u16>(st.ext_ft_face->units_per_em);
             h->metricA = units;
             u16 ascender = units;
-            if (const TT_OS2* os2 =
-                    static_cast<const TT_OS2*>(FT_Get_Sfnt_Table(st.ext_ft_face, ft_sfnt_os2))) {
-                ascender = static_cast<u16>(os2->sTypoAscender);
+            if (const Internal::FaceOs2* os2 =
+                    (st.ext_ft_face->os2.present ? &st.ext_ft_face->os2 : nullptr)) {
+                ascender = static_cast<u16>(os2->typo_ascender);
             }
             h->metricB = ascender;
 
