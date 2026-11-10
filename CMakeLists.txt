@@ -794,7 +794,11 @@ set(DEV_TOOLS src/core/devtools/layer.cpp
               src/core/devtools/widget/text_editor.h
 )
 
-set(COMMON src/common/logging/classes.cpp
+set(COMMON src/common/c_bridge.cpp
+           src/common/c_bridge.h
+           src/common/json_util.c
+           src/common/json_util.h
+           src/common/logging/classes.cpp
            src/common/logging/classes.h
            src/common/logging/formatter.h
            src/common/logging/log.cpp
@@ -869,7 +873,7 @@ set(COMMON src/common/logging/classes.cpp
            src/common/multi_level_page_table.h
            ${CMAKE_CURRENT_BINARY_DIR}/src/common/scm_rev.cpp
            src/common/scm_rev.h
-           src/common/key_manager.cpp
+           src/common/key_manager.c
            src/common/key_manager.h
 )
 
@@ -1392,6 +1396,7 @@ set(LIBRETRO_COMMON_SOURCES
     ${LIBRETRO_COMMON_DIR}/file/file_path.c
     ${LIBRETRO_COMMON_DIR}/file/file_path_io.c
     ${LIBRETRO_COMMON_DIR}/formats/flac/rflac.c
+    ${LIBRETRO_COMMON_DIR}/formats/json/rjson.c
     ${LIBRETRO_COMMON_DIR}/formats/mp3/rmp3.c
     ${LIBRETRO_COMMON_DIR}/formats/png/rpng.c
     ${LIBRETRO_COMMON_DIR}/formats/png/rpng_encode.c

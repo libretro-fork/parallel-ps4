@@ -1,79 +1,42 @@
-// SPDX-FileCopyrightText: Copyright 2025-2026 shadLauncher4 Project
-// SPDX-License-Identifier: GPL-2.0-or-later
+/* SPDX-FileCopyrightText: Copyright 2025-2026 shadLauncher4 Project
+ * SPDX-License-Identifier: GPL-2.0-or-later */
 
-#pragma once
+#ifndef SHADPS4_COMMON_KEY_MANAGER_H
+#define SHADPS4_COMMON_KEY_MANAGER_H
 
-#include <cstdint>
-#include <filesystem>
-#include <memory>
-#include <mutex>
-#include <string>
-#include <vector>
-#include "common/types.h"
-#include "nlohmann/json.hpp"
+/* User-supplied keys, kept in keys.json in the user directory:
+ *
+ *   { "TrophyKeySet": { "ReleaseTrophyKey": "<hex>" } } */
 
-using json = nlohmann::json;
+#include <stddef.h>
+#include <stdint.h>
 
-class KeyManager {
-public:
-    // ------------------- Nested keysets -------------------
-    struct TrophyKeySet {
-        std::vector<u8> ReleaseTrophyKey;
-    };
+#include <boolean.h>
+#include <retro_common_api.h>
 
-    struct AllKeys {
-        KeyManager::TrophyKeySet TrophyKeySet;
-    };
+RETRO_BEGIN_DECLS
 
-    // ------------------- Construction -------------------
-    KeyManager();
-    ~KeyManager();
+#define KEY_MANAGER_KEY_MAX 64
 
-    // ------------------- Singleton -------------------
-    static std::shared_ptr<KeyManager> GetInstance();
-    static void SetInstance(std::shared_ptr<KeyManager> instance);
-
-    // ------------------- File operations -------------------
-    bool LoadFromFile();
-    bool SaveToFile();
-
-    // ------------------- Key operations -------------------
-    void SetDefaultKeys();
-    bool HasKeys() const;
-
-    // ------------------- Getters / Setters -------------------
-    const AllKeys& GetAllKeys() const {
-        return m_keys;
-    }
-    void SetAllKeys(const AllKeys& keys) {
-        m_keys = keys;
-    }
-
-    static std::vector<u8> HexStringToBytes(const std::string& hexStr);
-    static std::string BytesToHexString(const std::vector<u8>& bytes);
-
-private:
-    void KeysToJson(json& j) const;
-    void JsonToKeys(const json& j);
-
-    AllKeys m_keys{};
-
-    static std::shared_ptr<KeyManager> s_instance;
-    static std::mutex s_mutex;
+struct key_manager_key {
+    uint8_t data[KEY_MANAGER_KEY_MAX];
+    size_t size;
 };
 
-// ------------------- NLOHMANN macros -------------------
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(KeyManager::TrophyKeySet, ReleaseTrophyKey)
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(KeyManager::AllKeys, TrophyKeySet)
-
-namespace nlohmann {
-template <>
-struct adl_serializer<std::vector<u8>> {
-    static void to_json(json& j, const std::vector<u8>& vec) {
-        j = KeyManager::BytesToHexString(vec);
-    }
-    static void from_json(const json& j, std::vector<u8>& vec) {
-        vec = KeyManager::HexStringToBytes(j.get<std::string>());
-    }
+struct key_manager_keys {
+    struct key_manager_key release_trophy_key;
 };
-} // namespace nlohmann
+
+/* Reads keys.json. A missing file is created with the defaults (no keys).
+ * On a bad file the defaults are kept and false is returned. */
+bool key_manager_load(void);
+bool key_manager_save(void);
+
+const struct key_manager_keys* key_manager_get_keys(void);
+void key_manager_set_keys(const struct key_manager_keys* keys);
+void key_manager_set_default_keys(void);
+bool key_manager_has_keys(void);
+
+RETRO_END_DECLS
+
+#endif

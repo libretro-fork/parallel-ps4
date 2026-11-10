@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright 2024-2026 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include <cstring>
 #include <system_error>
 
 #include "common/aes.h"
@@ -40,16 +41,15 @@ static void removePadding(std::vector<u8>& vec) {
 bool TRP::Extract(const std::filesystem::path& trophyPath, std::string npCommId,
                   const std::filesystem::path& outputPath) {
     // Retrieve trophy key
-    const auto& user_key_vec =
-        KeyManager::GetInstance()->GetAllKeys().TrophyKeySet.ReleaseTrophyKey;
+    const key_manager_key& user_key_vec = key_manager_get_keys()->release_trophy_key;
 
-    if (user_key_vec.size() != 16) {
+    if (user_key_vec.size != 16) {
         LOG_INFO(Common_Filesystem, "Trophy decryption key is not specified");
         return false;
     }
 
     std::array<u8, 16> user_key{};
-    std::copy(user_key_vec.begin(), user_key_vec.end(), user_key.begin());
+    std::memcpy(user_key.data(), user_key_vec.data, user_key.size());
 
     s32 trpFileIndex = 0;
     bool success = true;

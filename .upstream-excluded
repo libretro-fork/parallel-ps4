@@ -58,3 +58,4 @@ externals/stb
 src/common/stb.cpp
 src/common/stb.h
 cmake/Findstb.cmake
+src/common/key_manager.cpp

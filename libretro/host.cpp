@@ -294,7 +294,7 @@ int RunEmulator(const char* argument) {
 
     Common::Log::Setup("shadps4.log");
     IPC::Instance().Init();
-    KeyManager::GetInstance()->LoadFromFile();
+    key_manager_load();
     EmulatorSettings.Load();
     UserSettings.Load();
 

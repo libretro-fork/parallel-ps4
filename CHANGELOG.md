@@ -4,6 +4,7 @@ What changed in the libretro core of this fork, newest first. Changes that come 
 
 ## Unreleased
 
+- The key file (`keys.json`) is read and written in C89 with libretro-common's streaming JSON parser and writer (`formats/rjson.h`), in place of nlohmann::json. It is written to a temporary file first and then renamed over the old one, so a failed write no longer leaves it half-written. It is no longer written again when the core shuts down.
 - stb_image and stb_image_write are gone: the overlay's PNGs (trophy icons and the like) decode with libretro-common's rpng. A PNG that fails to decode is now skipped instead of uploaded from a null image.
 - CLI11 and ImGuiFileDialog are no longer built: nothing in the core used them.
 - pugixml is replaced by libretro-common's rxml for the trophy files and the memory patches. A file is parsed in place from the buffer it is read into. Comments in a user's trophy progress file are not kept when it is written back.
