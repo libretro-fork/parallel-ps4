@@ -3,11 +3,11 @@
 
 #pragma once
 
+#include <chrono>
 #include <condition_variable>
 #include <mutex>
 #include <string>
 #include <vector>
-#include <boost/asio/steady_timer.hpp>
 
 #include <unordered_map>
 #include "common/rdtsc.h"
@@ -89,7 +89,9 @@ struct EqueueEvent {
     void* data = nullptr;
     std::chrono::steady_clock::time_point time_added;
     std::chrono::nanoseconds timer_interval;
-    std::unique_ptr<boost::asio::steady_timer> timer;
+    // When the timer next fires, and which arming that is: an older one is stale
+    std::chrono::steady_clock::time_point timer_due{};
+    u64 timer_generation = 0;
 
     void Clear() {
         is_triggered = false;
@@ -191,6 +193,8 @@ public:
     int WaitForSmallTimer(OrbisKernelEvent* ev, int num, u32 micros);
 
     bool EventExists(u64 id, s16 filter);
+    // The event is still there and still armed as this generation.
+    bool TimerCurrent(u64 id, s16 filter, u64 generation);
 
 private:
     OrbisKernelEqueue m_handle;
@@ -202,6 +206,8 @@ private:
 };
 
 EqueueInternal* GetEqueue(OrbisKernelEqueue eq);
+// The thread that fires the equeues' timers.
+void StartTimerService();
 u64 PS4_SYSV_ABI sceKernelGetEventData(const OrbisKernelEvent* ev);
 
 void RegisterEventQueue(Core::Loader::SymbolsResolver* sym);

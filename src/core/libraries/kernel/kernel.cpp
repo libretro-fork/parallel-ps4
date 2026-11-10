@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include <thread>
-#include <boost/asio/io_context.hpp>
 
 #include "common/assert.h"
 #include "common/elf_info.h"
@@ -44,38 +43,7 @@ static u64 g_stack_chk_guard = 0xDEADBEEF54321ABC; // dummy return
 char const* g_environment[64];
 static const char* g_progname = "eboot.bin";
 
-boost::asio::io_context io_context;
-static std::mutex m_asio_req;
-static std::condition_variable_any cv_asio_req;
-static std::atomic<u32> asio_requests;
-static std::jthread service_thread;
-
 Core::EntryParams entry_params{};
-
-void KernelSignalRequest() {
-    std::unique_lock lock{m_asio_req};
-    ++asio_requests;
-    cv_asio_req.notify_one();
-}
-
-static void KernelServiceThread(std::stop_token stoken) {
-    Common::SetCurrentThreadName("shadPS4:KernelServiceThread");
-
-    while (!stoken.stop_requested()) {
-        {
-            std::unique_lock lock{m_asio_req};
-            Common::CondvarWait(cv_asio_req, lock, stoken, [] { return asio_requests != 0; });
-        }
-        if (stoken.stop_requested()) {
-            break;
-        }
-
-        io_context.run();
-        io_context.restart();
-
-        asio_requests = 0;
-    }
-}
 
 static PS4_SYSV_ABI void stack_chk_fail() {
     void* caller = __builtin_return_address(0);
@@ -461,7 +429,7 @@ u64 PS4_SYSV_ABI posix_sysconf(s32 name) {
 }
 
 void RegisterLib(Core::Loader::SymbolsResolver* sym) {
-    service_thread = std::jthread{KernelServiceThread};
+    StartTimerService();
 
     static char const** kernel_environ = g_environment;
 

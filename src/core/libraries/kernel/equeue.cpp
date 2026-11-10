@@ -1,13 +1,18 @@
 // SPDX-FileCopyrightText: Copyright 2024-2026 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include <algorithm>
+#include <array>
+#include <atomic>
 #include <span>
 #include <thread>
 #include <magic_enum/magic_enum.hpp>
+#include <rthreads/retro_eventcount.h>
 
 #include "common/assert.h"
 #include "common/logging/log.h"
 #include "common/singleton.h"
+#include "common/thread.h"
 #include "core/file_sys/fs.h"
 #include "core/libraries/kernel/equeue.h"
 #include "core/libraries/kernel/kernel.h"
@@ -19,9 +24,6 @@
 
 namespace Libraries::Kernel {
 
-extern boost::asio::io_context io_context;
-extern void KernelSignalRequest();
-
 static std::unordered_map<s32, EqueueInternal*> kqueues;
 static constexpr auto HrTimerSpinlockThresholdNs = 1200000u;
 
@@ -30,6 +32,140 @@ EqueueInternal* GetEqueue(OrbisKernelEqueue eq) {
         return nullptr;
     }
     return kqueues[eq];
+}
+
+// The equeues' timers. Arming one posts it to a lock-free ring (Vyukov's queue); one thread
+// keeps them in a heap and sleeps on an eventcount until the first is due. Removing an event
+// leaves its entry in the heap: the generation it carries no longer matches, so it is dropped
+// when it comes up.
+namespace {
+using TimerClock = std::chrono::steady_clock;
+using TimerFn = void (*)(OrbisKernelEqueue, const OrbisKernelEvent&);
+
+struct ArmedTimer {
+    TimerClock::time_point due;
+    OrbisKernelEqueue eq;
+    OrbisKernelEvent event;
+    u64 generation;
+    TimerFn fire;
+};
+
+class TimerService {
+public:
+    void Start() {
+        if (m_thread.joinable()) {
+            return;
+        }
+        for (size_t i = 0; i < Cells; ++i) {
+            m_cells[i].seq.store(i, std::memory_order_relaxed);
+        }
+        retro_eventcount_init(&m_ec);
+        m_heap.reserve(Cells);
+        m_thread = std::jthread([this](std::stop_token stop) { Run(stop); });
+    }
+
+    void Arm(const ArmedTimer& timer) {
+        size_t pos = m_tail.load(std::memory_order_relaxed);
+        for (;;) {
+            Cell& cell = m_cells[pos % Cells];
+            const size_t seq = cell.seq.load(std::memory_order_acquire);
+            const auto diff = static_cast<std::ptrdiff_t>(seq - pos);
+            if (diff == 0) {
+                if (m_tail.compare_exchange_weak(pos, pos + 1, std::memory_order_relaxed)) {
+                    cell.timer = timer;
+                    cell.seq.store(pos + 1, std::memory_order_release);
+                    break;
+                }
+            } else if (diff < 0) {
+                std::this_thread::yield(); // full: the service thread is draining it
+                pos = m_tail.load(std::memory_order_relaxed);
+            } else {
+                pos = m_tail.load(std::memory_order_relaxed);
+            }
+        }
+        retro_eventcount_notify(&m_ec);
+    }
+
+    static u64 NextGeneration() {
+        static std::atomic<u64> generation{0};
+        return generation.fetch_add(1, std::memory_order_relaxed) + 1;
+    }
+
+private:
+    static constexpr size_t Cells = 1024;
+    struct Cell {
+        std::atomic<size_t> seq;
+        ArmedTimer timer;
+    };
+
+    static bool Later(const ArmedTimer& a, const ArmedTimer& b) {
+        return a.due > b.due;
+    }
+
+    bool Pop(ArmedTimer& out) {
+        Cell& cell = m_cells[m_head % Cells];
+        if (cell.seq.load(std::memory_order_acquire) != m_head + 1) {
+            return false;
+        }
+        out = cell.timer;
+        cell.seq.store(m_head + Cells, std::memory_order_release);
+        ++m_head;
+        return true;
+    }
+
+    bool Pending() const {
+        return m_cells[m_head % Cells].seq.load(std::memory_order_acquire) == m_head + 1;
+    }
+
+    void Run(std::stop_token stop) {
+        Common::SetCurrentThreadName("shadPS4:KernelTimers");
+        std::stop_callback wake{stop, [this] { retro_eventcount_notify(&m_ec); }};
+        while (!stop.stop_requested()) {
+            ArmedTimer timer;
+            while (Pop(timer)) {
+                m_heap.push_back(timer);
+                std::push_heap(m_heap.begin(), m_heap.end(), Later);
+            }
+            const auto now = TimerClock::now();
+            while (!m_heap.empty() && m_heap.front().due <= now) {
+                std::pop_heap(m_heap.begin(), m_heap.end(), Later);
+                timer = m_heap.back();
+                m_heap.pop_back();
+                if (const auto equeue = GetEqueue(timer.eq);
+                    equeue &&
+                    equeue->TimerCurrent(timer.event.ident, timer.event.filter, timer.generation)) {
+                    timer.fire(timer.eq, timer.event);
+                }
+            }
+            const int key = retro_eventcount_prepare_wait(&m_ec);
+            if (Pending() || stop.stop_requested()) {
+                retro_eventcount_cancel_wait(&m_ec);
+                continue;
+            }
+            if (m_heap.empty()) {
+                retro_eventcount_commit_wait(&m_ec, key);
+            } else {
+                const auto left = std::chrono::duration_cast<std::chrono::microseconds>(
+                    m_heap.front().due - TimerClock::now());
+                retro_eventcount_commit_wait_timeout(&m_ec, key,
+                                                     std::max<int64_t>(left.count(), 0));
+            }
+        }
+    }
+
+    std::array<Cell, Cells> m_cells{};
+    alignas(64) std::atomic<size_t> m_tail{0};
+    alignas(64) size_t m_head = 0;
+    retro_eventcount_t m_ec{};
+    std::vector<ArmedTimer> m_heap; // the service thread's; reserved at start
+    std::jthread m_thread;
+};
+
+TimerService g_timer_service;
+} // namespace
+
+void StartTimerService() {
+    g_timer_service.Start();
 }
 
 static void HrTimerCallback(OrbisKernelEqueue eq, const OrbisKernelEvent& kevent) {
@@ -148,30 +284,24 @@ bool EqueueInternal::ScheduleEvent(u64 id, s16 filter,
     ASSERT(event.event.filter == OrbisKernelEvent::Filter::Timer ||
            event.event.filter == OrbisKernelEvent::Filter::HrTimer);
 
-    if (!it->timer) {
-        it->timer = std::make_unique<boost::asio::steady_timer>(io_context, event.timer_interval);
+    if (it->timer_generation == 0) {
+        it->timer_due = std::chrono::steady_clock::now() + event.timer_interval;
     } else {
-        // If the timer already exists we are scheduling a reoccurrence after the next period.
-        // Set the expiration time to the previous occurrence plus the period.
-        it->timer->expires_at(it->timer->expiry() + event.timer_interval);
+        // Already armed: the next period starts where the last one ended
+        it->timer_due += event.timer_interval;
     }
-
-    it->timer->async_wait(
-        [this, event_data = event.event, callback](const boost::system::error_code& ec) {
-            if (ec) {
-                if (ec != boost::system::errc::operation_canceled) {
-                    LOG_ERROR(Kernel_Event, "Timer callback error: {}", ec.message());
-                } else {
-                    // Timer was cancelled (removed) before it triggered
-                    LOG_DEBUG(Kernel_Event, "Timer cancelled");
-                }
-                return;
-            }
-            callback(this->m_handle, event_data);
-        });
-    KernelSignalRequest();
+    it->timer_generation = TimerService::NextGeneration();
+    g_timer_service.Arm({it->timer_due, m_handle, event.event, it->timer_generation, callback});
 
     return true;
+}
+
+bool EqueueInternal::TimerCurrent(u64 id, s16 filter, u64 generation) {
+    std::scoped_lock lock{m_mutex};
+    return std::ranges::any_of(m_events, [&](const EqueueEvent& ev) {
+        return ev.event.ident == id && ev.event.filter == filter &&
+               ev.timer_generation == generation;
+    });
 }
 
 bool EqueueInternal::RemoveEvent(u64 id, s16 filter) {
@@ -644,7 +774,7 @@ s32 PS4_SYSV_ABI sceKernelAddHRTimerEvent(OrbisKernelEqueue eq, int id, OrbisKer
     // slowness of the notification mechanism. For instance, a 100us timer will lose its precision
     // as the trigger time drifts by +50-700%, depending on the host PC and workload. To address
     // this issue, we use a spinlock for small waits (which can be adjusted using
-    // `HrTimerSpinlockThresholdUs`) and fall back to boost asio timers if the time to tick is
+    // `HrTimerSpinlockThresholdUs`) and fall back to the timer service if the time to tick is
     // large. Even for large delays, we truncate a small portion to complete the wait
     // using the spinlock, prioritizing precision.
     auto& equeue = kqueues[eq];
