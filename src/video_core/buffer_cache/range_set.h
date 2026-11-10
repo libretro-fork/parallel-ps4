@@ -3,97 +3,60 @@
 
 #pragma once
 
-#include <boost/icl/discrete_interval.hpp>
-#include <boost/icl/interval_map.hpp>
-#include <boost/icl/split_interval_map.hpp>
-#include <boost/icl/split_interval_set.hpp>
-#include <boost/pool/pool.hpp>
-#include <boost/pool/pool_alloc.hpp>
-#include <boost/pool/poolfwd.hpp>
+#include <algorithm>
+
+#include "common/interval_set.h"
 #include "common/types.h"
 
 namespace VideoCore {
 
-template <class T>
-using RangeSetsAllocator =
-    boost::fast_pool_allocator<T, boost::default_user_allocator_new_delete,
-                               boost::details::pool::default_mutex, 1024, 2048>;
-
+/// A set of address ranges: sorted, merged intervals in one array (IntervalList), where
+/// Boost.ICL kept a tree of pool-allocated nodes.
 struct RangeSet {
-    using IntervalSet =
-        boost::icl::interval_set<VAddr, std::less,
-                                 ICL_INTERVAL_INSTANCE(ICL_INTERVAL_DEFAULT, VAddr, std::less),
-                                 RangeSetsAllocator>;
-    using IntervalType = typename IntervalSet::interval_type;
-
-    explicit RangeSet() = default;
+    explicit RangeSet() {
+        m_ranges.Reserve(1024);
+    }
     ~RangeSet() = default;
 
     void Add(VAddr base_address, size_t size) {
-        const VAddr end_address = base_address + size;
-        IntervalType interval{base_address, end_address};
-        m_ranges_set.add(interval);
+        m_ranges.Add(Interval{base_address, base_address + size});
     }
 
     void Subtract(VAddr base_address, size_t size) {
-        const VAddr end_address = base_address + size;
-        IntervalType interval{base_address, end_address};
-        m_ranges_set.subtract(interval);
+        m_ranges.Subtract(base_address, base_address + size);
     }
 
     void Clear() {
-        m_ranges_set.clear();
+        m_ranges.Clear();
     }
 
     bool Contains(VAddr base_address, size_t size) const {
-        const VAddr end_address = base_address + size;
-        IntervalType interval{base_address, end_address};
-        return boost::icl::contains(m_ranges_set, interval);
+        // An empty range is contained in anything, as Boost.ICL had it
+        return size == 0 || m_ranges.Contains(base_address, base_address + size);
     }
 
     bool Intersects(VAddr base_address, size_t size) const {
-        const VAddr end_address = base_address + size;
-        IntervalType interval{base_address, end_address};
-        return boost::icl::intersects(m_ranges_set, interval);
+        return m_ranges.Overlaps(base_address, base_address + size);
     }
 
     template <typename Func>
     void ForEach(Func&& func) const {
-        if (m_ranges_set.empty()) {
-            return;
-        }
-
-        for (const auto& set : m_ranges_set) {
-            const VAddr inter_addr_end = set.upper();
-            const VAddr inter_addr = set.lower();
-            func(inter_addr, inter_addr_end);
+        for (const Interval& range : m_ranges) {
+            func(range.start, range.end);
         }
     }
 
     template <typename Func>
     void ForEachInRange(VAddr base_addr, size_t size, Func&& func) const {
-        if (m_ranges_set.empty() || size == 0) {
+        if (size == 0) {
             return;
         }
         const VAddr start_address = base_addr;
         const VAddr end_address = start_address + size;
-        const IntervalType search_interval{start_address, end_address};
-        auto it = m_ranges_set.lower_bound(search_interval);
-        if (it == m_ranges_set.end()) {
-            return;
-        }
-        auto end_it = m_ranges_set.upper_bound(search_interval);
-        for (; it != end_it; it++) {
-            VAddr inter_addr_end = it->upper();
-            VAddr inter_addr = it->lower();
-            if (inter_addr_end > end_address) {
-                inter_addr_end = end_address;
-            }
-            if (inter_addr < start_address) {
-                inter_addr = start_address;
-            }
-            func(inter_addr, inter_addr_end);
-        }
+        m_ranges.ForEachInRange(start_address, end_address, [&](const Interval& range) {
+            func(std::max<VAddr>(range.start, start_address),
+                 std::min<VAddr>(range.end, end_address));
+        });
     }
 
     template <typename Func>
@@ -110,216 +73,7 @@ struct RangeSet {
         }
     }
 
-    IntervalSet m_ranges_set;
-};
-
-template <typename T>
-class RangeMap {
-public:
-    using IntervalMap =
-        boost::icl::interval_map<VAddr, T, boost::icl::total_absorber, std::less,
-                                 boost::icl::inplace_identity, boost::icl::inter_section,
-                                 ICL_INTERVAL_INSTANCE(ICL_INTERVAL_DEFAULT, VAddr, std::less),
-                                 RangeSetsAllocator>;
-    using IntervalType = typename IntervalMap::interval_type;
-
-public:
-    RangeMap() = default;
-    ~RangeMap() = default;
-
-    RangeMap(RangeMap const&) = delete;
-    RangeMap& operator=(RangeMap const&) = delete;
-
-    RangeMap(RangeMap&& other);
-    RangeMap& operator=(RangeMap&& other);
-
-    void Add(VAddr base_address, size_t size, const T& value) {
-        const VAddr end_address = base_address + size;
-        IntervalType interval{base_address, end_address};
-        m_ranges_map.add({interval, value});
-    }
-
-    void Subtract(VAddr base_address, size_t size) {
-        const VAddr end_address = base_address + size;
-        IntervalType interval{base_address, end_address};
-        m_ranges_map -= interval;
-    }
-
-    void Clear() {
-        m_ranges_map.clear();
-    }
-
-    bool Contains(VAddr base_address, size_t size) const {
-        const VAddr end_address = base_address + size;
-        IntervalType interval{base_address, end_address};
-        return boost::icl::contains(m_ranges_map, interval);
-    }
-
-    bool Intersects(VAddr base_address, size_t size) const {
-        const VAddr end_address = base_address + size;
-        IntervalType interval{base_address, end_address};
-        return boost::icl::intersects(m_ranges_map, interval);
-    }
-
-    template <typename Func>
-    void ForEach(Func&& func) const {
-        if (m_ranges_map.empty()) {
-            return;
-        }
-
-        for (const auto& [interval, value] : m_ranges_map) {
-            const VAddr inter_addr_end = interval.upper();
-            const VAddr inter_addr = interval.lower();
-            func(inter_addr, inter_addr_end, value);
-        }
-    }
-
-    template <typename Func>
-    void ForEachInRange(VAddr base_addr, size_t size, Func&& func) const {
-        if (m_ranges_map.empty() || size == 0) {
-            return;
-        }
-        const VAddr start_address = base_addr;
-        const VAddr end_address = start_address + size;
-        const IntervalType search_interval{start_address, end_address};
-        auto it = m_ranges_map.lower_bound(search_interval);
-        if (it == m_ranges_map.end()) {
-            return;
-        }
-        auto end_it = m_ranges_map.upper_bound(search_interval);
-        for (; it != end_it; it++) {
-            VAddr inter_addr_end = it->first.upper();
-            VAddr inter_addr = it->first.lower();
-            if (inter_addr_end > end_address) {
-                inter_addr_end = end_address;
-            }
-            if (inter_addr < start_address) {
-                inter_addr = start_address;
-            }
-            func(inter_addr, inter_addr_end, it->second);
-        }
-    }
-
-    template <typename Func>
-    void ForEachNotInRange(VAddr base_addr, size_t size, Func&& func) const {
-        const VAddr end_addr = base_addr + size;
-        ForEachInRange(base_addr, size, [&](VAddr range_addr, VAddr range_end, const T&) {
-            if (size_t gap_size = range_addr - base_addr; gap_size != 0) {
-                func(base_addr, gap_size);
-            }
-            base_addr = range_end;
-        });
-        if (base_addr != end_addr) {
-            func(base_addr, end_addr - base_addr);
-        }
-    }
-
-private:
-    IntervalMap m_ranges_map;
-};
-
-template <typename T>
-class SplitRangeMap {
-public:
-    using IntervalMap = boost::icl::split_interval_map<
-        VAddr, T, boost::icl::total_absorber, std::less, boost::icl::inplace_identity,
-        boost::icl::inter_section, ICL_INTERVAL_INSTANCE(ICL_INTERVAL_DEFAULT, VAddr, std::less),
-        RangeSetsAllocator>;
-    using IntervalType = typename IntervalMap::interval_type;
-
-public:
-    SplitRangeMap() = default;
-    ~SplitRangeMap() = default;
-
-    SplitRangeMap(SplitRangeMap const&) = delete;
-    SplitRangeMap& operator=(SplitRangeMap const&) = delete;
-
-    SplitRangeMap(SplitRangeMap&& other);
-    SplitRangeMap& operator=(SplitRangeMap&& other);
-
-    void Add(VAddr base_address, size_t size, const T& value) {
-        const VAddr end_address = base_address + size;
-        IntervalType interval{base_address, end_address};
-        m_ranges_map.add({interval, value});
-    }
-
-    void Subtract(VAddr base_address, size_t size) {
-        const VAddr end_address = base_address + size;
-        IntervalType interval{base_address, end_address};
-        m_ranges_map -= interval;
-    }
-
-    void Clear() {
-        m_ranges_map.clear();
-    }
-
-    bool Contains(VAddr base_address, size_t size) const {
-        const VAddr end_address = base_address + size;
-        IntervalType interval{base_address, end_address};
-        return boost::icl::contains(m_ranges_map, interval);
-    }
-
-    bool Intersects(VAddr base_address, size_t size) const {
-        const VAddr end_address = base_address + size;
-        IntervalType interval{base_address, end_address};
-        return boost::icl::intersects(m_ranges_map, interval);
-    }
-
-    template <typename Func>
-    void ForEach(Func&& func) const {
-        if (m_ranges_map.empty()) {
-            return;
-        }
-
-        for (const auto& [interval, value] : m_ranges_map) {
-            const VAddr inter_addr_end = interval.upper();
-            const VAddr inter_addr = interval.lower();
-            func(inter_addr, inter_addr_end, value);
-        }
-    }
-
-    template <typename Func>
-    void ForEachInRange(VAddr base_addr, size_t size, Func&& func) const {
-        if (m_ranges_map.empty() || size == 0) {
-            return;
-        }
-        const VAddr start_address = base_addr;
-        const VAddr end_address = start_address + size;
-        const IntervalType search_interval{start_address, end_address};
-        auto it = m_ranges_map.lower_bound(search_interval);
-        if (it == m_ranges_map.end()) {
-            return;
-        }
-        auto end_it = m_ranges_map.upper_bound(search_interval);
-        for (; it != end_it; it++) {
-            VAddr inter_addr_end = it->first.upper();
-            VAddr inter_addr = it->first.lower();
-            if (inter_addr_end > end_address) {
-                inter_addr_end = end_address;
-            }
-            if (inter_addr < start_address) {
-                inter_addr = start_address;
-            }
-            func(inter_addr, inter_addr_end, it->second);
-        }
-    }
-
-    template <typename Func>
-    void ForEachNotInRange(VAddr base_addr, size_t size, Func&& func) const {
-        const VAddr end_addr = base_addr + size;
-        ForEachInRange(base_addr, size, [&](VAddr range_addr, VAddr range_end, const T&) {
-            if (size_t gap_size = range_addr - base_addr; gap_size != 0) {
-                func(base_addr, gap_size);
-            }
-            base_addr = range_end;
-        });
-        if (base_addr != end_addr) {
-            func(base_addr, end_addr - base_addr);
-        }
-    }
-
-private:
-    IntervalMap m_ranges_map;
+    IntervalList<> m_ranges;
 };
 
 } // namespace VideoCore

@@ -346,7 +346,7 @@ public:
 
         auto regions = Core::Memory::Instance()->GetAddressSpace().GetUsableRegions();
         for (auto& region : regions) {
-            OnMap(region.lower(), region.upper());
+            OnMap(region.start, region.end);
         }
         LOG_INFO(Common_Memory, "registered reserved memory with userfaultfd");
 

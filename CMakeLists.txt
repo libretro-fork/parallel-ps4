@@ -261,7 +261,6 @@ endif()
 
 if (ENABLE_SYSTEM_LIBRARIES)
     list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
-    find_package(Boost 1.84.0 CONFIG)
     find_package(fmt 12.0.0 CONFIG)
     find_package(glslang 15 CONFIG)
     find_package(magic_enum 0.9.7 CONFIG)
@@ -1488,7 +1487,7 @@ endif()
 create_target_directory_groups(shadps4)
 
 target_link_libraries(shadps4 PRIVATE magic_enum::magic_enum fmt::fmt tsl::robin_map xbyak::xbyak Dear_ImGui gcn)
-target_link_libraries(shadps4 PRIVATE Boost::headers GPUOpen::VulkanMemoryAllocator sirit Vulkan::Headers Zydis::Zydis)
+target_link_libraries(shadps4 PRIVATE GPUOpen::VulkanMemoryAllocator sirit Vulkan::Headers Zydis::Zydis)
 
 if (ENABLE_FEX_GUEST_CPU)
     target_compile_definitions(shadps4 PRIVATE SHADPS4_ENABLE_FEX_GUEST_CPU=1)

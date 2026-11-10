@@ -12,8 +12,9 @@
 #elif defined(__FreeBSD__)
 #include <machine/sysarch.h>
 #elif defined(__APPLE__) && defined(ARCH_X86_64)
+#include <atomic>
+#include <bit>
 #include <architecture/i386/table.h>
-#include <boost/icl/interval_set.hpp>
 #include <i386/user_ldt.h>
 #include <sys/mman.h>
 #elif !defined(ARCH_X86_64)
@@ -71,16 +72,37 @@ static constexpr u16 ldt_block_size = 0x1000;
 static constexpr u16 ldt_index_base = 8;
 static constexpr u16 ldt_index_total = (ldt_region_size - ldt_region_base) / ldt_block_size;
 
-static boost::icl::interval_set<u16> free_ldts{};
-static std::mutex free_ldts_lock;
+// One bit per LDT slot, set while it is free: a thread takes the lowest free one with a
+// compare-and-swap and gives it back with an atomic or, so no lock is held.
+static constexpr u32 ldt_free_words = (ldt_index_total + 63) / 64;
+static std::atomic<u64> free_ldts[ldt_free_words];
+
+static void ReleaseLdtIndex(u16 index) {
+    const u32 slot = index - ldt_index_base;
+    free_ldts[slot / 64].fetch_or(u64{1} << (slot % 64), std::memory_order_release);
+}
+
+static bool AcquireLdtIndex(u16* out) {
+    for (u32 w = 0; w < ldt_free_words; ++w) {
+        u64 bits = free_ldts[w].load(std::memory_order_relaxed);
+        while (bits != 0) {
+            const u64 lowest = bits & (~bits + 1);
+            if (free_ldts[w].compare_exchange_weak(bits, bits & ~lowest, std::memory_order_acquire,
+                                                   std::memory_order_relaxed)) {
+                *out = static_cast<u16>(ldt_index_base + w * 64 + std::countr_zero(lowest));
+                return true;
+            }
+        }
+    }
+    return false;
+}
 static std::once_flag ldt_region_init_flag;
 static pthread_key_t ldt_page_slot = 0;
 
 static void FreeLdtPage(void* raw) {
     const auto* ldt_page = static_cast<LdtPage*>(raw);
 
-    std::unique_lock lock{free_ldts_lock};
-    free_ldts += ldt_page->index;
+    ReleaseLdtIndex(ldt_page->index);
 }
 
 static void InitLdtRegion() {
@@ -89,8 +111,9 @@ static void InitLdtRegion() {
              MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED, -1, 0);
     ASSERT_MSG(result != MAP_FAILED, "Failed to map memory region for LDT entries.");
 
-    free_ldts +=
-        boost::icl::interval<u16>::right_open(ldt_index_base, ldt_index_base + ldt_index_total);
+    for (u32 slot = 0; slot < ldt_index_total; ++slot) {
+        ReleaseLdtIndex(static_cast<u16>(ldt_index_base + slot));
+    }
     ASSERT_MSG(pthread_key_create(&ldt_page_slot, FreeLdtPage) == 0,
                "Failed to create thread LDT page key: {}", errno);
 }
@@ -111,12 +134,8 @@ void SetTcbBase(void* image_address) {
 
     // Allocate a new LDT index for the current thread.
     u16 ldt_index;
-    {
-        std::unique_lock lock{free_ldts_lock};
-        ASSERT_MSG(!free_ldts.empty(), "Out of LDT space.");
-        ldt_index = first(*free_ldts.begin());
-        free_ldts -= ldt_index;
-    }
+    const bool acquired = AcquireLdtIndex(&ldt_index);
+    ASSERT_MSG(acquired, "Out of LDT space.");
 
     const uintptr_t addr = ldt_region_base + (ldt_index - ldt_index_base) * ldt_block_size;
 

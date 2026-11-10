@@ -1293,16 +1293,14 @@ bool Rasterizer::IsMapped(VAddr addr, u64 size) {
         // Memory range wrapped the address space, cannot be mapped.
         return false;
     }
-    const auto range = decltype(mapped_ranges)::interval_type::right_open(addr, addr + size);
-
     Common::RecursiveSharedLock lock{mapped_ranges_mutex};
-    return boost::icl::contains(mapped_ranges, range);
+    return mapped_ranges.Contains(addr, addr + size);
 }
 
 void Rasterizer::MapMemory(VAddr addr, u64 size) {
     {
         std::scoped_lock lock{mapped_ranges_mutex};
-        mapped_ranges += decltype(mapped_ranges)::interval_type::right_open(addr, addr + size);
+        mapped_ranges.Add(Interval{addr, addr + size});
     }
 }
 
@@ -1315,7 +1313,7 @@ void Rasterizer::UnmapMemory(VAddr addr, u64 size) {
     texture_cache.UnmapMemory(addr, size);
     {
         std::scoped_lock lock{mapped_ranges_mutex};
-        mapped_ranges -= decltype(mapped_ranges)::interval_type::right_open(addr, addr + size);
+        mapped_ranges.Subtract(addr, addr + size);
     }
 }
 

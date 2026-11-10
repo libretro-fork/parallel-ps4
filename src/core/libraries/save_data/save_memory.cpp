@@ -10,7 +10,6 @@
 #include <utility>
 #include <fmt/format.h>
 
-#include "boost/icl/concept/interval.hpp"
 #include "common/elf_info.h"
 #include "common/logging/log.h"
 #include "common/path_util.h"

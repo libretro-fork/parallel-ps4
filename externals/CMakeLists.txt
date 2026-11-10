@@ -16,11 +16,6 @@ if (MSVC)
     add_definitions(-D_CRT_SECURE_NO_WARNINGS -D_CRT_NONSTDC_NO_DEPRECATE -D_SCL_SECURE_NO_WARNINGS)
 endif()
 
-# Boost
-if (NOT TARGET Boost::headers)
-    add_subdirectory(ext-boost)
-endif()
-
 # fmtlib
 if (NOT TARGET fmt::fmt)
     add_subdirectory(fmt)

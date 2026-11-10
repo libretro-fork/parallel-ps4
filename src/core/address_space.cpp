@@ -605,10 +605,11 @@ struct AddressSpace::Impl {
         }
     }
 
-    boost::icl::interval_set<VAddr> GetUsableRegions() {
-        boost::icl::interval_set<VAddr> reserved_regions;
+    IntervalList<> GetUsableRegions() {
+        IntervalList<> reserved_regions;
         for (auto region : regions) {
-            reserved_regions.insert({region.second.base, region.second.base + region.second.size});
+            reserved_regions.Add(
+                Interval{region.second.base, region.second.base + region.second.size});
         }
         return reserved_regions;
     }
@@ -894,20 +895,21 @@ void AddressSpace::Protect(VAddr virtual_addr, u64 size, MemoryPermission perms)
     return impl->Protect(virtual_addr, size, read, write, execute);
 }
 
-boost::icl::interval_set<VAddr> AddressSpace::GetUsableRegions() {
+IntervalList<> AddressSpace::GetUsableRegions() {
 #ifdef _WIN32
     // On Windows, we need to obtain the accessible intervals from the implementation's regions.
     return impl->GetUsableRegions();
 #else
     // On Linux and Mac, the memory space is fully represented by the three major regions
-    boost::icl::interval_set<VAddr> reserved_regions;
+    IntervalList<> reserved_regions;
     VAddr system_managed_addr = reinterpret_cast<VAddr>(system_managed_base);
     VAddr system_reserved_addr = reinterpret_cast<VAddr>(system_reserved_base);
     VAddr user_addr = reinterpret_cast<VAddr>(user_base);
 
-    reserved_regions.insert({system_managed_addr, system_managed_addr + system_managed_size});
-    reserved_regions.insert({system_reserved_addr, system_reserved_addr + system_reserved_size});
-    reserved_regions.insert({user_addr, user_addr + user_size});
+    reserved_regions.Add(Interval{system_managed_addr, system_managed_addr + system_managed_size});
+    reserved_regions.Add(
+        Interval{system_reserved_addr, system_reserved_addr + system_reserved_size});
+    reserved_regions.Add(Interval{user_addr, user_addr + user_size});
     return reserved_regions;
 #endif
 }

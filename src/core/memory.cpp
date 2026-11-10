@@ -21,9 +21,8 @@ MemoryManager::MemoryManager() {
     auto regions = impl.GetUsableRegions();
     u64 total_usable_space = 0;
     for (auto region : regions) {
-        vma_map.emplace(region.lower(),
-                        VirtualMemoryArea{region.lower(), region.upper() - region.lower()});
-        LOG_INFO(Kernel_Vmm, "{:#x} - {:#x}", region.lower(), region.upper());
+        vma_map.emplace(region.start, VirtualMemoryArea{region.start, region.end - region.start});
+        LOG_INFO(Kernel_Vmm, "{:#x} - {:#x}", region.start, region.end);
     }
 
     // Pre-initialize direct backing

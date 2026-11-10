@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "common/interval_set.h"
 #include "common/recursive_lock.h"
 #include "common/shared_first_mutex.h"
 #include "video_core/buffer_cache/buffer_cache.h"
@@ -88,15 +89,6 @@ public:
         return pipeline_cache;
     }
 
-    template <typename Func>
-    void ForEachMappedRangeInRange(VAddr addr, u64 size, Func&& func) {
-        const auto range = decltype(mapped_ranges)::interval_type::right_open(addr, addr + size);
-        Common::RecursiveSharedLock lock{mapped_ranges_mutex};
-        for (const auto& mapped_range : (mapped_ranges & range)) {
-            func(mapped_range);
-        }
-    }
-
     std::thread::id GetGpuCommandProcessorThread();
 #ifdef __linux__
     u32 GetGpuCommandProcessorThreadId();
@@ -143,7 +135,7 @@ private:
     VideoCore::TextureCache texture_cache;
     AmdGpu::Liverpool* liverpool;
     Core::MemoryManager* memory;
-    boost::icl::interval_set<VAddr> mapped_ranges;
+    IntervalList<> mapped_ranges; // sorted, merged
     Common::SharedFirstMutex mapped_ranges_mutex;
     PipelineCache pipeline_cache;
     const bool host_markers_enabled;

@@ -4,9 +4,9 @@
 #pragma once
 
 #include <memory>
-#include <boost/icl/separate_interval_set.hpp>
 #include "common/arch.h"
 #include "common/enum.h"
+#include "common/interval_set.h"
 #include "common/multi_level_page_table.h"
 #include "common/types.h"
 
@@ -97,8 +97,8 @@ public:
     /// Protects requested region.
     void Protect(VAddr virtual_addr, u64 size, MemoryPermission perms);
 
-    // Returns an interval set containing all usable regions.
-    boost::icl::interval_set<VAddr> GetUsableRegions();
+    // Returns the usable regions, sorted and merged.
+    IntervalList<> GetUsableRegions();
 
 private:
     struct Impl;
