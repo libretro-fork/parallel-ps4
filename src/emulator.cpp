@@ -8,9 +8,9 @@
 #include <iostream>
 #include <set>
 #include <sstream>
+#include <features/features_cpu.h>
 #include <fmt/core.h>
 #include <fmt/xchar.h>
-#include <hwinfo/hwinfo.h>
 
 #include "common/elf_info.h"
 #include "common/logging/log.h"
@@ -514,16 +514,11 @@ void Emulator::Run(std::filesystem::path file, std::vector<std::string> args,
     LOG_INFO(Config, "Vulkan rdocEnable: {}", emu_settings_get_renderdoc_enabled());
     LOG_INFO(Config, "Vulkan PipelineCacheEnabled: {}", emu_settings_get_pipeline_cache_enabled());
 
-    hwinfo::Memory ram;
-    hwinfo::OS os;
-    const auto cpus = hwinfo::getAllCPUs();
-    for (const auto& cpu : cpus) {
-        LOG_INFO(Config, "CPU Model: {}", cpu.modelName());
-        LOG_INFO(Config, "CPU Physical Cores: {}, Logical Cores: {}", cpu.numPhysicalCores(),
-                 cpu.numLogicalCores());
-    }
-    LOG_INFO(Config, "Total RAM: {} GB", std::round(ram.total_Bytes() / pow(1024, 3)));
-    LOG_INFO(Config, "Operating System: {}", os.name());
+    char cpu_model[128] = {};
+    cpu_features_get_model_name(cpu_model, sizeof(cpu_model));
+    LOG_INFO(Config, "CPU Model: {}", cpu_model);
+    LOG_INFO(Config, "CPU Physical Cores: {}, Logical Cores: {}",
+             cpu_features_get_core_amount_physical(), cpu_features_get_core_amount());
 
     if (param_sfo_exists) {
         LOG_INFO(Loader, "Game id: {} Title: {}", id, title);

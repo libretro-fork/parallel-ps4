@@ -154,10 +154,6 @@ endif()
 # GCN Headers
 add_subdirectory(gcn)
 
-# hwinfo
-set(HWINFO_STATIC ON)
-add_subdirectory(hwinfo)
-
 if (APPLE OR ${CMAKE_SYSTEM_NAME} STREQUAL "FreeBSD")
     # date
     if (NOT TARGET date::date-tz)

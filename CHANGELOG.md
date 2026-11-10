@@ -4,6 +4,7 @@ What changed in the libretro core of this fork, newest first. Changes that come 
 
 ## Unreleased
 
+- The hwinfo library is gone: the CPU model and core counts in the log come from libretro-common's `features/features_cpu.h`. The total RAM and the operating system are no longer logged by the core; RetroArch's log has both.
 - The Tracy profiler is gone: its hooks in the HLE libraries, the renderer and the GPU command processor, its Vulkan timestamp context and the library. Debug builds no longer open a profiler connection.
 - fdk-aac is gone: the game's AAC decoder (libSceAjm's M4AAC) decodes with libretro-common's raac, AAC-LC, HE-AAC and HE-AAC v2 alike, from ADTS or raw streams. Each frame is decoded straight into the game's output buffer, in float when the game asks for float. 7.1 streams now come out as the eight channels the game asked for, where fdk-aac folded them down to 5.1, and without fdk-aac's output limiter, which reshaped and delayed the sound. HE-AAC frames now hand over all of their 2048 samples per channel; only the first 1024 were written before. Needs RetroArch's raac patches (ADTS header parse and WAVE channel order, parametric stereo).
 - nlohmann::json is gone: nothing in the core uses it any more. The core no longer carries the library.
