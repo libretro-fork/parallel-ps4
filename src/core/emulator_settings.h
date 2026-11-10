@@ -168,7 +168,6 @@ enum emu_settings_section {
     EMU_SETTING(fast_shader_math, "fast_shader_math", GPU, BOOL, false, OVR, GEN)                  \
                                                                                                    \
     EMU_SETTING(gpu_id, "gpu_id", VULKAN, INT, -1, OVR, GEN)                                       \
-    EMU_SETTING(renderdoc_enabled, "renderdoc_enabled", VULKAN, BOOL, false, OVR, GEN)             \
     EMU_SETTING(vkvalidation_enabled, "vkvalidation_enabled", VULKAN, BOOL, false, OVR, GEN)       \
     EMU_SETTING(vkvalidation_core_enabled, "vkvalidation_core_enabled", VULKAN, BOOL, true, OVR,   \
                 GEN)                                                                               \

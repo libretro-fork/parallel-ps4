@@ -50,12 +50,6 @@ SPDX-FileCopyrightText = "2009-2010 Iowa State University"
 SPDX-License-Identifier = "BSL-1.0"
 
 [[annotations]]
-path = "externals/renderdoc/**"
-precedence = "aggregate"
-SPDX-FileCopyrightText = "2019-2024 Baldur Karlsson"
-SPDX-License-Identifier = "MIT"
-
-[[annotations]]
 path = "externals/stb/**"
 precedence = "aggregate"
 SPDX-FileCopyrightText = "2017 Sean Barrett"

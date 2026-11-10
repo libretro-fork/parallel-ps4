@@ -265,7 +265,6 @@ if (ENABLE_SYSTEM_LIBRARIES)
     find_package(fmt 12.0.0 CONFIG)
     find_package(glslang 15 CONFIG)
     find_package(magic_enum 0.9.7 CONFIG)
-    find_package(RenderDoc 1.6.0 MODULE)
     find_package(tsl-robin-map 1.3.0 CONFIG)
     find_package(VulkanHeaders 1.4.330 CONFIG)
     find_package(VulkanMemoryAllocator 3.1.0 CONFIG)
@@ -1266,8 +1265,6 @@ set(VIDEO_CORE src/video_core/amdgpu/cb_db_extent.h
                src/video_core/cache_storage.h
                src/video_core/page_manager.cpp
                src/video_core/page_manager.h
-               src/video_core/renderdoc.cpp
-               src/video_core/renderdoc.h
 )
 
 set(IMGUI src/imgui/imgui_config.h
@@ -1508,7 +1505,7 @@ endif()
 
 create_target_directory_groups(shadps4)
 
-target_link_libraries(shadps4 PRIVATE magic_enum::magic_enum fmt::fmt tsl::robin_map xbyak::xbyak RenderDoc::API Dear_ImGui gcn)
+target_link_libraries(shadps4 PRIVATE magic_enum::magic_enum fmt::fmt tsl::robin_map xbyak::xbyak Dear_ImGui gcn)
 target_link_libraries(shadps4 PRIVATE Boost::headers GPUOpen::VulkanMemoryAllocator sirit Vulkan::Headers Zydis::Zydis)
 
 if (ENABLE_FEX_GUEST_CPU)

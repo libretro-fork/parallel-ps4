@@ -44,7 +44,6 @@
 #include "emulator.h"
 #include "libretro/libretro_bridge.h"
 #include "video_core/cache_storage.h"
-#include "video_core/renderdoc.h"
 
 #ifdef _WIN32
 #include <WinSock2.h>
@@ -511,7 +510,6 @@ void Emulator::Run(std::filesystem::path file, std::vector<std::string> args,
     LOG_INFO(Config, "Vulkan crashDiagnostics: {}", emu_settings_get_vkcrash_diagnostic_enabled());
     LOG_INFO(Config, "Vulkan hostMarkers: {}", emu_settings_get_vkhost_markers());
     LOG_INFO(Config, "Vulkan guestMarkers: {}", emu_settings_get_vkguest_markers());
-    LOG_INFO(Config, "Vulkan rdocEnable: {}", emu_settings_get_renderdoc_enabled());
     LOG_INFO(Config, "Vulkan PipelineCacheEnabled: {}", emu_settings_get_pipeline_cache_enabled());
 
     char cpu_model[128] = {};
@@ -562,9 +560,6 @@ void Emulator::Run(std::filesystem::path file, std::vector<std::string> args,
     controllers = Common::Singleton<Input::GameControllers>::Instance();
     linker = Common::Singleton<Core::Linker>::Instance();
 
-    // Load renderdoc module
-    VideoCore::LoadRenderDoc();
-
     // Initialize patcher
     if (!id.empty()) {
         MemoryPatcher::g_game_serial = id;
@@ -598,12 +593,6 @@ void Emulator::Run(std::filesystem::path file, std::vector<std::string> args,
     std::error_code ec_usb;
     std::filesystem::create_directories(mount_usb_dir, ec_usb);
     mnt->Mount(mount_usb_dir, "/mnt/usb0");
-
-    const auto& mount_captures_dir = Common::FS::GetUserPath(Common::FS::PathType::CapturesDir);
-    if (!std::filesystem::exists(mount_captures_dir)) {
-        std::filesystem::create_directory(mount_captures_dir);
-    }
-    VideoCore::SetOutputDir(mount_captures_dir, id);
 
     // Mount system fonts
     const auto& fonts_dir = Common::FS::PathFromCString(emu_settings_get_font_dir);

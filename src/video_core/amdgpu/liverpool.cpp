@@ -13,7 +13,6 @@
 #include "core/platform.h"
 #include "video_core/amdgpu/liverpool.h"
 #include "video_core/amdgpu/pm4_cmds.h"
-#include "video_core/renderdoc.h"
 #include "video_core/renderer_vulkan/vk_rasterizer.h"
 
 namespace AmdGpu {
@@ -117,8 +116,6 @@ void Liverpool::Process(std::stop_token stoken) {
             break;
         }
 
-        VideoCore::StartCapture();
-
         curr_qid = -1;
 
         while ((num_submits || num_commands) && !stoken.stop_requested()) {
@@ -152,7 +149,6 @@ void Liverpool::Process(std::stop_token stoken) {
         }
 
         if (submit_done) {
-            VideoCore::EndCapture();
             if (rasterizer) {
                 rasterizer->OnSubmit();
                 rasterizer->Flush();
