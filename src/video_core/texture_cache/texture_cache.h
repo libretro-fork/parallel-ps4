@@ -8,8 +8,6 @@
 #include <optional>
 #include <thread>
 #include <unordered_set>
-#include <absl/container/flat_hash_map.h>
-#include <absl/container/flat_hash_set.h>
 #include <boost/container/small_vector.hpp>
 #include <queue>
 #include <tsl/robin_map.h>
@@ -17,6 +15,7 @@
 #include "common/lru_cache.h"
 #include "common/multi_level_page_table.h"
 #include "common/slot_vector.h"
+#include "common/u64_map.h"
 #include "shader_recompiler/resource.h"
 #include "video_core/texture_cache/blit_helper.h"
 #include "video_core/texture_cache/image.h"
@@ -230,11 +229,11 @@ public:
 
     /// Returns metadata information if the specified address belongs to a live image.
     std::optional<MetaDataInfo> GetMetaInfo(VAddr address) const {
-        const auto it = surface_metas.find(address);
-        if (it == surface_metas.end()) {
+        const auto* found = FindMeta(address);
+        if (!found) {
             return std::nullopt;
         }
-        const auto& meta = it->second;
+        const auto& meta = *found;
         if (!meta.owner_id || !slot_images.IsAllocated(meta.owner_id)) {
             return std::nullopt;
         }
@@ -247,27 +246,24 @@ public:
 
     /// Returns meta type if the specified address is a metadata surface.
     std::optional<MetaType> IsMeta(VAddr address) const {
-        auto it = surface_metas.find(address);
-        if (it != surface_metas.end()) {
-            return it->second.type;
+        if (const auto* meta = FindMeta(address)) {
+            return meta->type;
         }
         return std::nullopt;
     }
 
     /// Returns true if a slice of the specified metadata surface has been cleared.
     bool IsMetaCleared(VAddr address, u32 slice) const {
-        const auto& it = surface_metas.find(address);
-        if (it != surface_metas.end()) {
-            return it->second.clear_mask & (1u << slice);
+        if (const auto* meta = FindMeta(address)) {
+            return meta->clear_mask & (1u << slice);
         }
         return false;
     }
 
     /// Clears all slices of the specified metadata surface.
     bool ClearMeta(VAddr address) {
-        auto it = surface_metas.find(address);
-        if (it != surface_metas.end()) {
-            it->second.clear_mask = u32(-1);
+        if (auto* meta = FindMeta(address)) {
+            meta->clear_mask = u32(-1);
             return true;
         }
         return false;
@@ -275,12 +271,11 @@ public:
 
     /// Updates the state of a slice of the specified metadata surface.
     bool TouchMeta(VAddr address, u32 slice, bool is_clear) {
-        auto it = surface_metas.find(address);
-        if (it != surface_metas.end()) {
+        if (auto* meta = FindMeta(address)) {
             if (is_clear) {
-                it->second.clear_mask |= 1u << slice;
+                meta->clear_mask |= 1u << slice;
             } else {
-                it->second.clear_mask &= ~(1u << slice);
+                meta->clear_mask &= ~(1u << slice);
             }
             return true;
         }
@@ -415,8 +410,8 @@ private:
     Common::SlotVector<Sampler> slot_samplers;
     BlitHelper blit_helper;
     TileManager tile_manager;
-    absl::flat_hash_map<u64, SamplerId> samplers;
-    absl::flat_hash_set<ImageId> download_images;
+    u64_map_t samplers{};        // sampler hash -> SamplerId
+    u64_map_t download_images{}; // set of ImageId indices
     u64 total_used_memory = 0;
     u64 trigger_gc_memory = 0;
     u64 pressure_gc_memory = 0;
@@ -430,7 +425,11 @@ private:
     Common::LRUCache<Sampler> sampler_lru_cache;
     const bool readback_linear_images;
     std::mutex download_images_mutex;
-    absl::flat_hash_map<VAddr, MetaDataInfo> surface_metas;
+    u64_map_t surface_metas{}; // VAddr -> MetaDataInfo
+
+    MetaDataInfo* FindMeta(VAddr address) const {
+        return static_cast<MetaDataInfo*>(u64_map_find(&surface_metas, address));
+    }
 };
 DECLARE_ENUM_FLAG_OPERATORS(TextureCache::DownloadMemoryFlags)
 

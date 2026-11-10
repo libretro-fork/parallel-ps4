@@ -57,6 +57,13 @@ TextureCache::TextureCache(const Vulkan::Instance& instance_, Vulkan::Scheduler&
       readback_linear_images{emu_settings_get_readback_linear_images_enabled()} {
 
     u32 max_samplers = instance.GetMaxSamplerAllocationCount();
+
+    // Made once at the most the GPU can hold, so no frame ever grows them; the other two
+    // double only past what a frame normally holds.
+    static_assert(std::is_trivially_copyable_v<MetaDataInfo>);
+    u64_map_init(&samplers, sizeof(SamplerId), std::min(max_samplers, MAX_SAMPLERS));
+    u64_map_init(&download_images, 0, 256);
+    u64_map_init(&surface_metas, sizeof(MetaDataInfo), 4096);
     trigger_gc_samplers = max_samplers * 3 / 4;
     pressure_gc_samplers = max_samplers * 7 / 8;
     critical_gc_samplers = max_samplers * 15 / 16;
@@ -88,14 +95,20 @@ TextureCache::TextureCache(const Vulkan::Instance& instance_, Vulkan::Scheduler&
     trigger_gc_memory = static_cast<u64>((device_local_memory - mem_threshold) / 2);
 }
 
-TextureCache::~TextureCache() = default;
+TextureCache::~TextureCache() {
+    u64_map_free(&samplers);
+    u64_map_free(&download_images);
+    u64_map_free(&surface_metas);
+}
 
 void TextureCache::ProcessDownloadImages() {
     std::unique_lock lk{download_images_mutex};
-    for (const ImageId image_id : download_images) {
-        DownloadImageMemory(image_id, DownloadMemoryFlags::Sync);
+    size_t pos = 0;
+    u64 index;
+    while (u64_map_next(&download_images, &pos, &index)) {
+        DownloadImageMemory(ImageId{static_cast<u32>(index)}, DownloadMemoryFlags::Sync);
     }
-    download_images.clear();
+    u64_map_clear(&download_images);
 }
 
 void TextureCache::DownloadImageMemory(ImageId image_id, DownloadMemoryFlags flags) {
@@ -726,7 +739,7 @@ ImageView& TextureCache::FindTexture(ImageId image_id, const ImageDesc& desc) {
         if (readback_linear_images && (!image.info.props.is_tiled || image.info.size.width <= 8) &&
             image.info.guest_address != 0) {
             std::unique_lock lk{download_images_mutex};
-            download_images.emplace(image_id);
+            u64_map_insert(&download_images, image_id.index, nullptr);
         }
     }
     UpdateImage(image_id);
@@ -734,13 +747,14 @@ ImageView& TextureCache::FindTexture(ImageId image_id, const ImageDesc& desc) {
 }
 
 void TextureCache::RegisterMeta(VAddr address, MetaDataInfo info) {
-    const auto it = surface_metas.find(address);
-    if (it == surface_metas.end()) {
-        surface_metas.emplace(address, info);
+    bool inserted = false;
+    auto* slot = static_cast<MetaDataInfo*>(u64_map_insert(&surface_metas, address, &inserted));
+    if (inserted) {
+        *slot = info;
         return;
     }
 
-    auto& registered = it->second;
+    auto& registered = *slot;
     if (registered.type != info.type || registered.owner_uid != info.owner_uid) {
         registered = info;
         return;
@@ -752,9 +766,9 @@ void TextureCache::RegisterMeta(VAddr address, MetaDataInfo info) {
 }
 
 void TextureCache::UnregisterMeta(VAddr address, u64 owner_uid) {
-    const auto it = surface_metas.find(address);
-    if (it != surface_metas.end() && it->second.owner_uid == owner_uid) {
-        surface_metas.erase(address);
+    const auto* meta = FindMeta(address);
+    if (meta && meta->owner_uid == owner_uid) {
+        u64_map_erase(&surface_metas, address);
     }
 }
 
@@ -763,7 +777,7 @@ ImageView& TextureCache::FindRenderTarget(ImageId image_id, const ImageDesc& des
     image.flags |= ImageFlagBits::GpuModified;
     if (readback_linear_images && (!image.info.props.is_tiled || image.info.size.width <= 8)) {
         std::unique_lock lk{download_images_mutex};
-        download_images.emplace(image_id);
+        u64_map_insert(&download_images, image_id.index, nullptr);
     }
     image.usage.render_target = 1u;
     UpdateImage(image_id);
@@ -936,15 +950,16 @@ vk::Sampler TextureCache::GetSampler(const AmdGpu::Sampler& sharp,
                                      const bool is_depth) {
     // Compare and plain uses of one S# need separate samplers.
     const u64 hash = HashCombine(xxh3_64(&sharp, sizeof(sharp), 0), is_depth);
-    const auto [it, new_sampler] = samplers.try_emplace(hash);
+    bool new_sampler = false;
+    auto* id = static_cast<SamplerId*>(u64_map_insert(&samplers, hash, &new_sampler));
     if (new_sampler) {
-        it->second = slot_samplers.Insert(instance, sharp, border_color_base, is_depth);
-        Sampler& sampler = slot_samplers[it->second];
+        *id = slot_samplers.Insert(instance, sharp, border_color_base, is_depth);
+        Sampler& sampler = slot_samplers[*id];
         sampler.hash = hash;
         sampler_lru_cache.Insert(sampler, gc_tick);
     }
 
-    Sampler& sampler = slot_samplers[it->second];
+    Sampler& sampler = slot_samplers[*id];
     sampler_lru_cache.Touch(sampler, gc_tick);
     return sampler.Handle();
 }
@@ -1172,7 +1187,7 @@ void TextureCache::GarbageCollectImages() {
 }
 
 void TextureCache::GarbageCollectSamplers() {
-    total_used_samplers = samplers.size();
+    total_used_samplers = samplers.count;
     if (total_used_samplers < trigger_gc_samplers) {
         return;
     }
@@ -1194,7 +1209,7 @@ void TextureCache::GarbageCollectSamplers() {
         }
         --num_deletions;
         sampler_lru_cache.Free(sampler);
-        samplers.erase(sampler.hash);
+        u64_map_erase(&samplers, sampler.hash);
         const auto sampler_id = slot_samplers.GetSlotId(sampler);
         slot_samplers.Erase(sampler_id);
         return false;
@@ -1243,9 +1258,7 @@ void TextureCache::DeleteImage(ImageId image_id) {
 
     {
         std::unique_lock lk{download_images_mutex};
-        if (download_images.contains(image_id)) {
-            download_images.erase(image_id);
-        }
+        u64_map_erase(&download_images, image_id.index);
     }
 
     // Reclaim image and any image views it references.

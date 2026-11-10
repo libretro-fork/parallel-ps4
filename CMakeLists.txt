@@ -792,6 +792,8 @@ set(DEV_TOOLS src/core/devtools/layer.cpp
 set(COMMON src/common/c_bridge.cpp
            src/common/c_bridge.h
            src/common/json_util.c
+           src/common/u64_map.c
+           src/common/u64_map.h
            src/common/json_util.h
            src/common/logging/classes.cpp
            src/common/logging/classes.h
