@@ -42,26 +42,6 @@ enum class ConfigMode {
     Clean,
 };
 
-enum AudioBackend : int {
-    SDL,
-    OpenAL,
-    // Add more backends as needed
-};
-
-enum OpenALHrtfMode : int {
-    HrtfAuto, // Let OpenAL Soft decide (on for headphone-like stereo outputs)
-    HrtfOn,   // Force HRTF binaural rendering
-    HrtfOff,  // Never use HRTF
-};
-
-enum OpenALOutputMode : int {
-    OutputAuto,       // Let OpenAL Soft negotiate with the device
-    OutputStereo,     // Force stereo output
-    OutputQuad,       // Force quadraphonic output
-    OutputSurround51, // Force 5.1 surround output
-    OutputSurround71, // Force 7.1 surround output
-};
-
 template <typename T>
 struct Setting {
     T default_value{};
@@ -372,38 +352,15 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(InputSettings, cursor_state, cursor_hide_time
 // Audio settings
 // -------------------------------
 struct AudioSettings {
-    Setting<u32> audio_backend{AudioBackend::SDL};
     Setting<std::string> sdl_mic_device{"Default Device"};
-    Setting<std::string> sdl_main_output_device{"Default Device"};
-    Setting<std::string> sdl_padSpk_output_device{"Default Device"};
-    Setting<std::string> openal_mic_device{"Default Device"};
-    Setting<std::string> openal_main_output_device{"Default Device"};
-    Setting<std::string> openal_padSpk_output_device{"Default Device"};
-    Setting<u32> openal_hrtf{OpenALHrtfMode::HrtfAuto};
-    Setting<u32> openal_output_mode{OpenALOutputMode::OutputAuto};
 
     std::vector<OverrideItem> GetOverrideableFields() const {
         return std::vector<OverrideItem>{
-            make_override<AudioSettings>("audio_backend", &AudioSettings::audio_backend),
-            make_override<AudioSettings>("sdl_mic_device", &AudioSettings::sdl_mic_device),
-            make_override<AudioSettings>("sdl_main_output_device",
-                                         &AudioSettings::sdl_main_output_device),
-            make_override<AudioSettings>("sdl_padSpk_output_device",
-                                         &AudioSettings::sdl_padSpk_output_device),
-            make_override<AudioSettings>("openal_mic_device", &AudioSettings::openal_mic_device),
-            make_override<AudioSettings>("openal_main_output_device",
-                                         &AudioSettings::openal_main_output_device),
-            make_override<AudioSettings>("openal_padSpk_output_device",
-                                         &AudioSettings::openal_padSpk_output_device),
-            make_override<AudioSettings>("openal_hrtf", &AudioSettings::openal_hrtf),
-            make_override<AudioSettings>("openal_output_mode", &AudioSettings::openal_output_mode)};
+            make_override<AudioSettings>("sdl_mic_device", &AudioSettings::sdl_mic_device)};
     }
 };
 
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(AudioSettings, audio_backend, sdl_mic_device,
-                                   sdl_main_output_device, sdl_padSpk_output_device,
-                                   openal_mic_device, openal_main_output_device,
-                                   openal_padSpk_output_device, openal_hrtf, openal_output_mode)
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(AudioSettings, sdl_mic_device)
 
 // -------------------------------
 // GPU settings
@@ -526,7 +483,6 @@ public:
     bool Save(const std::string& serial = "");
     bool Load(const std::string& serial = "");
     void SetDefaultValues();
-    bool TransferSettings();
 
     // Config mode
     ConfigMode GetConfigMode() const {
@@ -605,7 +561,6 @@ private:
     }
 
     static void PrintChangedSummary(const std::vector<std::string>& changed);
-    void MigrateNetworkKeys(const nlohmann::json& general, const nlohmann::json& network);
 
 public:
     // Used by the launcher to back up / restore settings (e.g. per-game settings dialog)
@@ -724,15 +679,7 @@ public:
 #endif
 
     // Audio settings
-    SETTING_FORWARD(m_audio, AudioBackend, audio_backend)
     SETTING_FORWARD(m_audio, SDLMicDevice, sdl_mic_device)
-    SETTING_FORWARD(m_audio, SDLMainOutputDevice, sdl_main_output_device)
-    SETTING_FORWARD(m_audio, SDLPadSpkOutputDevice, sdl_padSpk_output_device)
-    SETTING_FORWARD(m_audio, OpenALMicDevice, openal_mic_device)
-    SETTING_FORWARD(m_audio, OpenALMainOutputDevice, openal_main_output_device)
-    SETTING_FORWARD(m_audio, OpenALPadSpkOutputDevice, openal_padSpk_output_device)
-    SETTING_FORWARD(m_audio, OpenALHrtf, openal_hrtf)
-    SETTING_FORWARD(m_audio, OpenALOutputMode, openal_output_mode)
 
     // Debug settings
     SETTING_FORWARD_BOOL(m_debug, DebugDump, debug_dump)

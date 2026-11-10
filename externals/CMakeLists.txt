@@ -143,19 +143,6 @@ if (NOT TARGET magic_enum::magic_enum)
     add_subdirectory(magic_enum)
 endif()
 
-# Toml11
-if (NOT TARGET toml11::toml11)
-    add_subdirectory(toml11)
-
-    if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
-      if (CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
-        get_target_property(_toml11_compile_options toml11 INTERFACE_COMPILE_OPTIONS)
-        list(REMOVE_ITEM _toml11_compile_options "/Zc:preprocessor")
-        set_target_properties(toml11 PROPERTIES INTERFACE_COMPILE_OPTIONS ${_toml11_compile_options})
-      endif()
-    endif()
-endif()
-
 # xxHash
 if (NOT TARGET xxHash::xxhash)
     add_library(xxhash xxhash/xxhash.h xxhash/xxhash.c)

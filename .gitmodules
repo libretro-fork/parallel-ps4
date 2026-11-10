@@ -30,10 +30,6 @@
 	path = externals/magic_enum
 	url = https://github.com/Neargye/magic_enum.git
 	shallow = true
-[submodule "externals/toml11"]
-	path = externals/toml11
-	url = https://github.com/ToruNiina/toml11.git
-	shallow = true
 [submodule "externals/zydis"]
 	path = externals/zydis
 	url = https://github.com/zyantific/zydis.git
