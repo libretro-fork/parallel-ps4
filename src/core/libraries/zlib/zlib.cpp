@@ -5,8 +5,9 @@
 #include <mutex>
 #include <stop_token>
 #include <unordered_map>
-#include <miniz.h>
 #include <queue>
+
+#include <encodings/deflate.h>
 
 #include "common/logging/log.h"
 #include "common/thread.h"
@@ -43,6 +44,9 @@ static u64 next_request_id;
 void ZlibTaskThread(const std::stop_token& stop) {
     Common::SetCurrentThreadName("shadPS4:ZlibTaskThread");
 
+    // One inflater for the thread, reset per request rather than made each time.
+    void* inflater = rinflate_new(15);
+
     while (!stop.stop_requested()) {
         InflateTask task;
         {
@@ -55,23 +59,41 @@ void ZlibTaskThread(const std::stop_token& stop) {
             task_queue.pop();
         }
 
-        mz_ulong decompressed_length = task.dst_length;
-        const auto ret = mz_uncompress(static_cast<u8*>(task.dst), &decompressed_length,
-                                       static_cast<const u8*>(task.src), task.src_length);
+        // A zlib stream (RFC 1950), whole, into the game's buffer: what uncompress() does.
+        size_t decompressed_length = 0;
+        size_t consumed = 0;
+        int ret = RDEFLATE_PROCESS_ERROR;
+        if (inflater) {
+            rinflate_reset(inflater, 15);
+            rinflate_set_in(inflater, static_cast<const u8*>(task.src), task.src_length);
+            rinflate_set_out(inflater, static_cast<u8*>(task.dst), task.dst_length);
+            do {
+                size_t read = 0;
+                size_t wrote = 0;
+                ret = rinflate_process(inflater, &read, &wrote);
+                consumed += read;
+                decompressed_length += wrote;
+            } while (ret == RDEFLATE_PROCESS_NEXT && consumed < task.src_length &&
+                     decompressed_length < task.dst_length);
+        }
 
         {
             // Lock, insert the new result, and push the finished request ID to the done queue.
             std::unique_lock lock(mutex);
             results[task.request_id] = InflateResult{
                 .length = static_cast<u32>(decompressed_length),
-                .status = ret == Z_BUF_ERROR ? ORBIS_ZLIB_ERROR_NOSPACE
-                          : ret == Z_OK      ? ORBIS_OK
-                                             : ORBIS_ZLIB_ERROR_FATAL,
+                // Suspended with input left: the output is full. With none left, the stream
+                // ends early, which uncompress() reports as bad data.
+                .status = ret == RDEFLATE_PROCESS_END ? ORBIS_OK
+                          : ret == RDEFLATE_PROCESS_NEXT && consumed < task.src_length
+                              ? ORBIS_ZLIB_ERROR_NOSPACE
+                              : ORBIS_ZLIB_ERROR_FATAL,
             };
             done_queue.push(task.request_id);
         }
         done_queue_cv.notify_one();
     }
+    rinflate_free(inflater);
 }
 
 s32 PS4_SYSV_ABI sceZlibInitialize(const void* buffer, u32 length) {

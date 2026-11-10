@@ -31,7 +31,6 @@ public:
     [[nodiscard]] bool IsOpened() const {
         return opened;
     }
-    void FinishPreload();
 
     bool Save(BlobType type, const std::string& name, std::vector<u8>&& data);
     bool Save(BlobType type, const std::string& name, std::vector<u32>&& data);

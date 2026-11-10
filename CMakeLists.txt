@@ -270,7 +270,6 @@ if (ENABLE_SYSTEM_LIBRARIES)
     find_package(half 1.12.0 MODULE)
     find_package(magic_enum 0.9.7 CONFIG)
     find_package(miniupnpc 2.3.3 MODULE)
-    find_package(miniz 3.1 CONFIG)
     find_package(nlohmann_json 3.12 CONFIG)
     find_package(PNG 1.6 MODULE)
     find_package(LibreSSL 4.3.1 MODULE)
@@ -1390,6 +1389,8 @@ set_target_properties(shadps4 PROPERTIES PREFIX "" OUTPUT_NAME "shadps4_libretro
 set(LIBRETRO_COMMON_DIR ${CMAKE_CURRENT_SOURCE_DIR}/libretro/libretro-common)
 set(LIBRETRO_COMMON_SOURCES
     ${LIBRETRO_COMMON_DIR}/compat/compat_strl.c
+    ${LIBRETRO_COMMON_DIR}/encodings/encoding_crc32.c
+    ${LIBRETRO_COMMON_DIR}/encodings/encoding_deflate.c
     ${LIBRETRO_COMMON_DIR}/encodings/encoding_xxh3.c
     ${LIBRETRO_COMMON_DIR}/features/features_cpu.c
     ${LIBRETRO_COMMON_DIR}/formats/flac/rflac.c
@@ -1460,7 +1461,7 @@ create_target_directory_groups(shadps4)
 target_link_libraries(shadps4 PRIVATE spdlog::spdlog)
 target_link_libraries(shadps4 PRIVATE magic_enum::magic_enum fmt::fmt tsl::robin_map xbyak::xbyak Tracy::TracyClient RenderDoc::API FFmpeg::ffmpeg Dear_ImGui ImGuiFileDialog gcn half::half ZLIB::ZLIB PNG::PNG)
 target_link_libraries(shadps4 PRIVATE Boost::headers GPUOpen::VulkanMemoryAllocator LibAtrac9 sirit Vulkan::Headers Zydis::Zydis pugixml::pugixml)
-target_link_libraries(shadps4 PRIVATE stb::headers lfreist-hwinfo::hwinfo nlohmann_json::nlohmann_json miniz::miniz fdk-aac CLI11::CLI11 Cpp_Httplib miniupnpc::miniupnpc)
+target_link_libraries(shadps4 PRIVATE stb::headers lfreist-hwinfo::hwinfo nlohmann_json::nlohmann_json fdk-aac CLI11::CLI11 Cpp_Httplib miniupnpc::miniupnpc)
 target_link_libraries(shadps4 PRIVATE Freetype::Freetype)
 
 if (ENABLE_FEX_GUEST_CPU)

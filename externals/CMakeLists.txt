@@ -242,12 +242,6 @@ set(JSON_BuildTests OFF CACHE INTERNAL "")
 add_subdirectory(json)
 endif()
 
-# miniz
-if (NOT TARGET miniz::miniz)
-add_subdirectory(miniz)
-add_library(miniz::miniz ALIAS miniz)
-endif()
-
 # cli11
 if (NOT TARGET CLI11::CLI11)
     set(CLI11_BUILD_TESTS OFF CACHE BOOL "" FORCE)

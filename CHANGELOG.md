@@ -4,6 +4,7 @@ What changed in the libretro core of this fork, newest first. Changes that come 
 
 ## Unreleased
 
+- miniz is gone. The game-facing zlib library (`sceZlibInflate`) inflates with libretro-common's `encodings/deflate.h`. The pipeline cache is always kept as files in the game's cache folder: the zip-archived form (`pipeline_cache_archived`, off by default and not a core option) is gone with its setting.
 - minimp3 and dr_flac are replaced by libretro-common's MP3 and FLAC decoders (`formats/rmp3.h`, `formats/rflac.h`) for the music player and the custom trophy sound. A track is decoded straight into the buffer it plays from, with no copy afterwards, and a track decoded with FFmpeg (AAC, M4A, MP4) is no longer copied once more after decoding.
 - xxHash is replaced by libretro-common's XXH3 (`encodings/xxh3.h`), which gives the same hashes. Hashing a texture's backing memory no longer allocates.
 - Discord Rich Presence is gone (it was off by default, and the core builds were made without it), with its `discord_rpc_enabled` setting and the discord-rpc library.

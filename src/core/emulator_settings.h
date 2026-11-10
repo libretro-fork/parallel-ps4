@@ -394,7 +394,6 @@ struct VulkanSettings {
     Setting<bool> vkhost_markers{false};
     Setting<bool> vkguest_markers{false};
     Setting<bool> pipeline_cache_enabled{false};
-    Setting<bool> pipeline_cache_archived{false};
 
     std::vector<OverrideItem> GetOverrideableFields() const {
         return std::vector<OverrideItem>{
@@ -414,16 +413,13 @@ struct VulkanSettings {
             make_override<VulkanSettings>("vkguest_markers", &VulkanSettings::vkguest_markers),
             make_override<VulkanSettings>("pipeline_cache_enabled",
                                           &VulkanSettings::pipeline_cache_enabled),
-            make_override<VulkanSettings>("pipeline_cache_archived",
-                                          &VulkanSettings::pipeline_cache_archived),
         };
     }
 };
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(VulkanSettings, gpu_id, renderdoc_enabled, vkvalidation_enabled,
                                    vkvalidation_core_enabled, vkvalidation_sync_enabled,
                                    vkvalidation_gpu_enabled, vkcrash_diagnostic_enabled,
-                                   vkhost_markers, vkguest_markers, pipeline_cache_enabled,
-                                   pipeline_cache_archived)
+                                   vkhost_markers, vkguest_markers, pipeline_cache_enabled)
 
 // -------------------------------
 // Main manager
@@ -690,7 +686,6 @@ public:
     SETTING_FORWARD_BOOL(m_vulkan, VkHostMarkersEnabled, vkhost_markers)
     SETTING_FORWARD_BOOL(m_vulkan, VkGuestMarkersEnabled, vkguest_markers)
     SETTING_FORWARD_BOOL(m_vulkan, PipelineCacheEnabled, pipeline_cache_enabled)
-    SETTING_FORWARD_BOOL(m_vulkan, PipelineCacheArchived, pipeline_cache_archived)
 
 #undef SETTING_FORWARD
 #undef SETTING_FORWARD_BOOL
