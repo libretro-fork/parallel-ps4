@@ -24,6 +24,9 @@ struct InitInfo {
     vk::Device device;
     uint32_t queue_family;
     vk::Queue queue;
+    // The queue the frames that draw the textures go to, when it is not queue: a texture is
+    // retired once both have passed it
+    vk::Queue draw_queue;
     uint32_t image_count;               // >= 2
     vk::DeviceSize min_allocation_size; // Minimum allocation size
     vk::PipelineCache pipeline_cache;
@@ -47,8 +50,13 @@ struct UploadTextureData {
     vk::DeviceMemory upload_buffer_memory;
 
     ImTextureID im_texture;
+    // Signalled when the upload has run
+    vk::Fence fence;
 
+    /// Submits the upload and returns; Uploaded() says when it has run.
     void Upload();
+    /// Whether the upload has run; the first time it has, its buffers go back. Never waits.
+    bool Uploaded();
 
     void Destroy();
 };
@@ -67,6 +75,10 @@ UploadTextureData UploadTexture(vk::Format format, u32 width, u32 height, size_t
                                 UploadFill fill, void* ctx);
 
 void RemoveTexture(ImTextureID descriptor_set);
+
+/// Frees what the GPU has finished with among the textures destroyed; never waits. Called
+/// once a frame, on the thread that uploads and destroys them.
+void CollectRetired();
 
 bool Init(InitInfo info);
 void Shutdown();

@@ -4,6 +4,7 @@
 #include <cstdlib>
 #include <deque>
 #include <utility>
+#include <vector>
 
 #include <formats/image.h>
 #include <formats/rpng.h>
@@ -270,7 +271,24 @@ void DecodePngFile(std::filesystem::path path, Inner* core) {
     g_worker_cv.notify_one();
 }
 
+// Uploads submitted and not yet run, oldest first; the render thread's alone
+static std::vector<Inner*> g_uploading;
+
 void Submit() {
+    // Nothing here waits for the GPU: an upload is published once its fence has signalled, and
+    // a destroyed texture's objects go once the queues have passed it.
+    Vulkan::CollectRetired();
+    std::erase_if(g_uploading, [](Inner* core) {
+        if (!core->upload_data.Uploaded()) {
+            return false;
+        }
+        core->texture_id = core->upload_data.im_texture;
+        if (core->count.fetch_sub(1) == 1) {
+            delete core;
+        }
+        return true;
+    });
+
     UploadJob upload;
     {
         std::unique_lock lk{g_upload_mtx};
@@ -288,10 +306,7 @@ void Submit() {
     }
     if (upload.core != nullptr) {
         upload.core->upload_data.Upload();
-        upload.core->texture_id = upload.core->upload_data.im_texture;
-        if (upload.core->count.fetch_sub(1) == 1) {
-            delete upload.core;
-        }
+        g_uploading.push_back(upload.core);
     } else {
         upload.data.Destroy();
     }

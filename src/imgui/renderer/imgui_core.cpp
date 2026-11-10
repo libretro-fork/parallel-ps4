@@ -136,6 +136,7 @@ void Initialize(const ::Vulkan::Instance& instance, const Frontend::Window& wind
         .device = instance.GetDevice(),
         .queue_family = instance.GetPresentQueueFamilyIndex(),
         .queue = instance.GetPresentQueue(),
+        .draw_queue = instance.GetGraphicsQueue(),
         .image_count = image_count,
         .min_allocation_size = 1024 * 1024,
         .pipeline_rendering_create_info{

@@ -3,8 +3,11 @@
 
 // Based on imgui_impl_vulkan.cpp from Dear ImGui repository
 
+#include <algorithm>
+#include <array>
 #include <cstdio>
 #include <mutex>
+#include <vector>
 
 #include <imgui.h>
 
@@ -237,17 +240,41 @@ static inline vk::DeviceSize AlignBufferSize(vk::DeviceSize size, vk::DeviceSize
     return (size + alignment - 1) & ~(alignment - 1);
 }
 
+// A destroyed texture's objects, freed once every queue that may still use them has passed
+// the fences submitted after its last use
+struct RetiredTexture {
+    std::array<vk::Fence, 2> fences{};
+    ImTextureID im_texture = nullptr;
+    vk::ImageView image_view;
+    vk::Image image;
+    vk::DeviceMemory image_memory;
+};
+static std::vector<RetiredTexture> g_retired;
+
 void UploadTextureData::Upload() {
     VkData* bd = GetBackendData();
     const InitInfo& v = bd->init_info;
 
+    // Submitted with a fence, not waited for: Uploaded() polls it
+    fence = CheckVkResult(v.device.createFence({}, v.allocator));
     vk::SubmitInfo submit_info{
         .commandBufferCount = 1,
         .pCommandBuffers = &command_buffer,
     };
-    CheckVkErr(v.queue.submit({submit_info}));
-    CheckVkErr(v.queue.waitIdle());
+    CheckVkErr(v.queue.submit({submit_info}, fence));
+}
 
+bool UploadTextureData::Uploaded() {
+    if (!fence) {
+        return upload_buffer == VK_NULL_HANDLE;
+    }
+    VkData* bd = GetBackendData();
+    const InitInfo& v = bd->init_info;
+    if (v.device.getFenceStatus(fence) != vk::Result::eSuccess) {
+        return false;
+    }
+    v.device.destroyFence(fence, v.allocator);
+    fence = VK_NULL_HANDLE;
     v.device.destroyBuffer(upload_buffer, v.allocator);
     v.device.freeMemory(upload_buffer_memory, v.allocator);
     {
@@ -256,22 +283,57 @@ void UploadTextureData::Upload() {
     }
     upload_buffer = VK_NULL_HANDLE;
     upload_buffer_memory = VK_NULL_HANDLE;
+    return true;
 }
 
 void UploadTextureData::Destroy() {
     VkData* bd = GetBackendData();
     const InitInfo& v = bd->init_info;
 
-    CheckVkErr(v.device.waitIdle());
-    RemoveTexture(im_texture);
+    // Not waited for: a fence on each queue that may still draw it, and the objects go when
+    // both have signalled (CollectRetired)
+    RetiredTexture retired{
+        .im_texture = im_texture,
+        .image_view = image_view,
+        .image = image,
+        .image_memory = image_memory,
+    };
+    retired.fences[0] = CheckVkResult(v.device.createFence({}, v.allocator));
+    CheckVkErr(v.queue.submit({}, retired.fences[0]));
+    if (v.draw_queue && v.draw_queue != v.queue) {
+        retired.fences[1] = CheckVkResult(v.device.createFence({}, v.allocator));
+        CheckVkErr(v.draw_queue.submit({}, retired.fences[1]));
+    }
+    g_retired.push_back(retired);
     im_texture = nullptr;
-
-    v.device.destroyImageView(image_view, v.allocator);
     image_view = VK_NULL_HANDLE;
-    v.device.destroyImage(image, v.allocator);
     image = VK_NULL_HANDLE;
-    v.device.freeMemory(image_memory, v.allocator);
     image_memory = VK_NULL_HANDLE;
+}
+
+void CollectRetired() {
+    VkData* bd = GetBackendData();
+    if (!bd || g_retired.empty()) {
+        return;
+    }
+    const InitInfo& v = bd->init_info;
+    std::erase_if(g_retired, [&](RetiredTexture& retired) {
+        for (const vk::Fence fence : retired.fences) {
+            if (fence && v.device.getFenceStatus(fence) != vk::Result::eSuccess) {
+                return false;
+            }
+        }
+        for (const vk::Fence fence : retired.fences) {
+            if (fence) {
+                v.device.destroyFence(fence, v.allocator);
+            }
+        }
+        RemoveTexture(retired.im_texture);
+        v.device.destroyImageView(retired.image_view, v.allocator);
+        v.device.destroyImage(retired.image, v.allocator);
+        v.device.freeMemory(retired.image_memory, v.allocator);
+        return true;
+    });
 }
 
 // Register a texture
@@ -1285,6 +1347,9 @@ void Shutdown() {
     IM_ASSERT(bd != nullptr && "No renderer backend to shutdown, or already shutdown?");
     ImGuiIO& io = ImGui::GetIO();
 
+    // Shutting down, the one place that waits for the GPU: what is retired goes now
+    CheckVkErr(bd->init_info.device.waitIdle());
+    CollectRetired();
     ImGuiImplVulkanDestroyDeviceObjects();
     io.BackendRendererName = nullptr;
     io.BackendRendererUserData = nullptr;
