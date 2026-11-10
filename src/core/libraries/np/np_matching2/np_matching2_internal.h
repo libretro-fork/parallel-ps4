@@ -19,15 +19,13 @@
 #include "core/libraries/np/np_matching2/np_matching2_cache.h"
 #include "core/libraries/np/np_types.h"
 
-namespace shadnet {
-class CreateJoinRoomResponse;
-class GetWorldInfoListReply;
-class GetRoomDataExternalListReply;
-class GetRoomMemberDataExternalListReply;
-class GetUserInfoListReply;
-class LeaveRoomReply;
-class SearchRoomReply;
-} // namespace shadnet
+struct shadnet_CreateJoinRoomResponse;
+struct shadnet_GetWorldInfoListReply;
+struct shadnet_GetRoomDataExternalListReply;
+struct shadnet_GetRoomMemberDataExternalListReply;
+struct shadnet_GetUserInfoListReply;
+struct shadnet_LeaveRoomReply;
+struct shadnet_SearchRoomReply;
 
 namespace Libraries::Np {
 class NpHandler;
@@ -315,31 +313,31 @@ void StoreRequestCallback(const std::shared_ptr<ContextObject>& ctx,
 RequestCallbackInfo ConsumeRequestCallback(const std::shared_ptr<ContextObject>& ctx);
 
 void* BuildCreateJoinRoomPayload(ContextObject& ctx, CallbackPayload& payload,
-                                 const shadnet::CreateJoinRoomResponse& resp);
+                                 const shadnet_CreateJoinRoomResponse& resp);
 void* BuildCreateJoinRoomPayloadA(ContextObject& ctx, CallbackPayload& payload,
-                                  const shadnet::CreateJoinRoomResponse& resp);
+                                  const shadnet_CreateJoinRoomResponse& resp);
 void* BuildLeaveRoomPayload(ContextObject& ctx, CallbackPayload& payload,
-                            const shadnet::LeaveRoomReply& resp);
+                            const shadnet_LeaveRoomReply& resp);
 void* BuildGetWorldInfoListPayload(ContextObject& ctx, CallbackPayload& payload,
-                                   const shadnet::GetWorldInfoListReply& resp);
+                                   const shadnet_GetWorldInfoListReply& resp);
 void* BuildSearchRoomPayload(ContextObject& ctx, CallbackPayload& payload,
-                             const shadnet::SearchRoomReply& resp);
+                             const shadnet_SearchRoomReply& resp);
 void* BuildSearchRoomPayloadA(ContextObject& ctx, CallbackPayload& payload,
-                              const shadnet::SearchRoomReply& resp);
+                              const shadnet_SearchRoomReply& resp);
 void* BuildGetRoomDataExternalListPayload(ContextObject& ctx, CallbackPayload& payload,
-                                          const shadnet::GetRoomDataExternalListReply& resp);
+                                          const shadnet_GetRoomDataExternalListReply& resp);
 void* BuildGetRoomDataExternalListPayloadA(ContextObject& ctx, CallbackPayload& payload,
-                                           const shadnet::GetRoomDataExternalListReply& resp);
+                                           const shadnet_GetRoomDataExternalListReply& resp);
 void* BuildGetRoomMemberDataExternalListPayload(
     ContextObject& ctx, CallbackPayload& payload,
-    const shadnet::GetRoomMemberDataExternalListReply& resp);
+    const shadnet_GetRoomMemberDataExternalListReply& resp);
 void* BuildGetRoomMemberDataExternalListPayloadA(
     ContextObject& ctx, CallbackPayload& payload,
-    const shadnet::GetRoomMemberDataExternalListReply& resp);
+    const shadnet_GetRoomMemberDataExternalListReply& resp);
 void* BuildGetUserInfoListPayload(ContextObject& ctx, CallbackPayload& payload,
-                                  const shadnet::GetUserInfoListReply& resp);
+                                  const shadnet_GetUserInfoListReply& resp);
 void* BuildGetUserInfoListPayloadA(ContextObject& ctx, CallbackPayload& payload,
-                                   const shadnet::GetUserInfoListReply& resp);
+                                   const shadnet_GetUserInfoListReply& resp);
 void* BuildGetRoomDataInternalPayload(ContextObject& ctx, CallbackPayload& payload,
                                       OrbisNpMatching2RoomId room_id);
 void* BuildGetRoomMemberDataInternalPayload(

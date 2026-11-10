@@ -4,7 +4,16 @@
 
 #include "common/logging/log.h"
 #include "core/libraries/np/np_handler/np_handler.h"
-#include "shadnet.pb.h"
+#include "shadnet/messages.h"
+
+using ShadNet::Bytes;
+using ShadNet::Decode;
+using ShadNet::Encode;
+using ShadNet::Items;
+using ShadNet::Scratch;
+using ShadNet::SetItems;
+using ShadNet::Str;
+using ShadNet::View;
 
 namespace Libraries::Np {
 
@@ -131,16 +140,18 @@ void NpHandler::OnTrophyReply(s32 user_id, ShadNet::CommandType cmd, u64 pkt_id,
         return;
     }
 
-    shadnet::SyncTrophiesReply pb;
-    if (!pb.ParseFromArray(body.data() + 4, static_cast<int>(blob_sz))) {
+    shadnet_SyncTrophiesReply pb{};
+
+    Scratch pb_scratch;
+    if (!Decode(pb, body.data() + 4, blob_sz, pb_scratch)) {
         LOG_WARNING(NpHandler, "could not parse reply");
         return;
     }
 
     std::vector<std::pair<s32, u64>> merged;
-    merged.reserve(pb.trophies_size());
-    for (const auto& t : pb.trophies())
-        merged.emplace_back(t.trophyid(), t.timestamp());
+    merged.reserve(pb.trophies.count);
+    for (const auto& t : Items(pb.trophies))
+        merged.emplace_back(t.trophyId, t.timestamp);
 
     LOG_INFO(NpHandler, "server holds {} trophies for user_id={}", merged.size(), user_id);
     on_merged(merged);

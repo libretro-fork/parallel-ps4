@@ -270,7 +270,6 @@ if (ENABLE_SYSTEM_LIBRARIES)
     find_package(VulkanMemoryAllocator 3.1.0 CONFIG)
     find_package(xbyak 7.07 CONFIG)
     find_package(Zydis 5.0.0 MODULE)
-    find_package(absl 20250512.1 CONFIG)
     list(POP_BACK CMAKE_MODULE_PATH)
 endif()
 
@@ -1305,36 +1304,15 @@ set(EMULATOR src/emulator.cpp
              src/frontend_window.h
 )
 
-# shadNet protobuf generation
-# A cross build cannot run the protoc it builds for the target: it is given one
-# built for the build machine (.ci/build-windows-cross.sh).
-set(SHADPS4_HOST_PROTOC "" CACHE FILEPATH "protoc for the build machine, for a cross build")
-if (SHADPS4_HOST_PROTOC)
-    set(SHADNET_PROTOC "${SHADPS4_HOST_PROTOC}")
-else()
-    set(SHADNET_PROTOC protobuf::protoc)
-endif()
-set(SHADNET_PROTO_OUT "${CMAKE_CURRENT_BINARY_DIR}/shadnet_proto_gen")
-file(MAKE_DIRECTORY "${SHADNET_PROTO_OUT}")
-add_custom_command(
-    OUTPUT
-        "${SHADNET_PROTO_OUT}/shadnet.pb.cc"
-        "${SHADNET_PROTO_OUT}/shadnet.pb.h"
-    COMMAND ${SHADNET_PROTOC}
-        "--proto_path=${CMAKE_CURRENT_SOURCE_DIR}/src/shadnet"
-        "--cpp_out=${SHADNET_PROTO_OUT}"
-        "${CMAKE_CURRENT_SOURCE_DIR}/src/shadnet/shadnet.proto"
-    DEPENDS
-        "${CMAKE_CURRENT_SOURCE_DIR}/src/shadnet/shadnet.proto"
-    COMMENT "Generating shadnet protobuf sources"
-    VERBATIM
-)
-
 set(SHADNET src/shadnet/client.cpp
             src/shadnet/client.h
             src/shadnet/server_probe.cpp
             src/shadnet/server_probe.h
-            "${SHADNET_PROTO_OUT}/shadnet.pb.cc"
+            src/shadnet/messages.h
+            src/shadnet/pb_wire.c
+            src/shadnet/pb_wire.h
+            src/shadnet/shadnet_msg.c
+            src/shadnet/shadnet_msg.h
 )
 
 # The libretro core: a module the frontend loads, which starts itself again in a
@@ -1546,8 +1524,6 @@ if (ENABLE_FEX_GUEST_CPU)
     )
     target_link_libraries(shadps4 PRIVATE ${FEXCORE_GUEST_CPU_LIBRARIES} pthread dl)
 endif()
-target_link_libraries(shadps4 PRIVATE libprotobuf)
-target_include_directories(shadps4 PRIVATE "${SHADNET_PROTO_OUT}")
 
 if (${CMAKE_SYSTEM_NAME} STREQUAL "FreeBSD")
     target_link_libraries(shadps4 PRIVATE "/usr/lib/libusb.so")

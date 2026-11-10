@@ -6,7 +6,16 @@
 #include "core/libraries/np/np_error.h"
 #include "core/libraries/np/np_handler/np_handler.h"
 #include "core/libraries/np/np_types.h"
-#include "shadnet.pb.h"
+#include "shadnet/messages.h"
+
+using ShadNet::Bytes;
+using ShadNet::Decode;
+using ShadNet::Encode;
+using ShadNet::Items;
+using ShadNet::Scratch;
+using ShadNet::SetItems;
+using ShadNet::Str;
+using ShadNet::View;
 
 namespace Libraries::Np {
 
@@ -83,20 +92,20 @@ void NpHandler::OnAuthReply(s32 user_id, ShadNet::CommandType /*cmd*/, u64 pkt_i
     }
     const u32 blob_sz = static_cast<u32>(body[0]) | (static_cast<u32>(body[1]) << 8) |
                         (static_cast<u32>(body[2]) << 16) | (static_cast<u32>(body[3]) << 24);
-    shadnet::GetAuthorizationCodeReply pb;
-    if (body.size() - 4 < blob_sz ||
-        !pb.ParseFromArray(body.data() + 4, static_cast<int>(blob_sz))) {
+    shadnet_GetAuthorizationCodeReply pb{};
+    Scratch pb_scratch;
+    if (body.size() - 4 < blob_sz || !Decode(pb, body.data() + 4, blob_sz, pb_scratch)) {
         LOG_WARNING(NpHandler, "could not parse reply");
         req->SetResult(ORBIS_NP_AUTH_ERROR_NO_TOKEN_RECEIVED);
         return;
     }
-    if (pb.code().empty() || pb.code().size() >= sizeof(OrbisNpAuthorizationCode::code)) {
-        LOG_WARNING(NpHandler, "code has invalid length {}", pb.code().size());
+    if ((pb.code.size == 0) || pb.code.size >= sizeof(OrbisNpAuthorizationCode::code)) {
+        LOG_WARNING(NpHandler, "code has invalid length {}", pb.code.size);
         req->SetResult(ORBIS_NP_AUTH_ERROR_NO_TOKEN_RECEIVED);
         return;
     }
     LOG_INFO(NpHandler, "user_id={} pkt_id={} received code", user_id, pkt_id);
-    req->SetAuthorizationCode(pb.code(), NpAuthIssuerId);
+    req->SetAuthorizationCode(Str(pb.code), NpAuthIssuerId);
 }
 
 } // namespace Libraries::Np

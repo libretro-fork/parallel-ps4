@@ -16,7 +16,16 @@
 #include "core/libraries/np/np_error.h"
 #include "core/libraries/np/np_handler/np_handler.h"
 #include "core/libraries/np/np_matching2/np_matching2_internal.h"
-#include "shadnet.pb.h"
+#include "shadnet/messages.h"
+
+using ShadNet::Bytes;
+using ShadNet::Decode;
+using ShadNet::Encode;
+using ShadNet::Items;
+using ShadNet::Scratch;
+using ShadNet::SetItems;
+using ShadNet::Str;
+using ShadNet::View;
 
 namespace Libraries::Np::NpMatching2 {
 
@@ -65,15 +74,15 @@ void ReserveExternalRoomPayloadStorage(CallbackPayload& p, const Reply& resp) {
     size_t bin_buffers = 0;
     size_t owners = 0;
 
-    for (int i = 0; i < resp.rooms_size(); ++i) {
-        const auto& r = resp.rooms(i);
-        groups += static_cast<size_t>(r.groups_size());
-        int_attrs += static_cast<size_t>(r.external_search_int_attrs_size());
-        const size_t room_bin_attrs = static_cast<size_t>(r.external_search_bin_attrs_size()) +
-                                      static_cast<size_t>(r.external_bin_attrs_size());
+    for (int i = 0; i < resp.rooms.count; ++i) {
+        const auto& r = resp.rooms.items[i];
+        groups += static_cast<size_t>(r.groups.count);
+        int_attrs += static_cast<size_t>(r.external_search_int_attrs.count);
+        const size_t room_bin_attrs = static_cast<size_t>(r.external_search_bin_attrs.count) +
+                                      static_cast<size_t>(r.external_bin_attrs.count);
         bin_attrs += room_bin_attrs;
         bin_buffers += room_bin_attrs;
-        if (!r.owner_npid().empty()) {
+        if (!(r.owner_npid.size == 0)) {
             ++owners;
         }
     }
@@ -88,69 +97,68 @@ void ReserveExternalRoomPayloadStorage(CallbackPayload& p, const Reply& resp) {
 } // namespace
 
 void BuildCreateJoinRoomPayloadCommon(ContextObject& ctx, CallbackPayload& p,
-                                      const shadnet::CreateJoinRoomResponse& resp) {
-    const auto& rd = resp.room_data();
+                                      const shadnet_CreateJoinRoomResponse& resp) {
+    const auto& rd = resp.room_data;
     auto cache = NpHandler::GetInstance().LockMatching2Cache(ctx.ctx_id);
 
     LOG_DEBUG(Lib_NpMatching2,
               "Room payload: room={} me={} owner={} max={} public/open={}/{} "
               "private/open={}/{} flags={:#x} passwdMask={:#x} joinedMask={:#x} groups={} "
               "internalBinAttrs={} members={}",
-              rd.room_id(), resp.me_member_id(), resp.owner_member_id(), rd.max_slot(),
-              rd.public_slots(), rd.open_public_slots(), rd.private_slots(),
-              rd.open_private_slots(), rd.flags(), rd.passwd_slot_mask(), rd.joined_slot_mask(),
-              rd.groups_size(), rd.bin_attrs_internal_size(), resp.members_size());
+              rd.room_id, resp.me_member_id, resp.owner_member_id, rd.max_slot, rd.public_slots,
+              rd.open_public_slots, rd.private_slots, rd.open_private_slots, rd.flags,
+              rd.passwd_slot_mask, rd.joined_slot_mask, rd.groups.count,
+              rd.bin_attrs_internal.count, resp.members.count);
 
-    p.room_groups.resize(rd.groups_size());
-    for (int i = 0; i < rd.groups_size(); ++i) {
-        const auto& g = rd.groups(i);
+    p.room_groups.resize(rd.groups.count);
+    for (int i = 0; i < rd.groups.count; ++i) {
+        const auto& g = rd.groups.items[i];
         LOG_DEBUG(Lib_NpMatching2,
                   "  roomGroup[{}] id={} slots={} members={} hasPasswd={} hasLabel={} labelSize={}",
-                  i, g.group_id(), g.slot_count(), g.num_members(), g.has_passwd(), g.has_label(),
-                  g.label().size());
+                  i, g.group_id, g.slot_count, g.num_members, g.has_passwd, g.has_label,
+                  g.label.size);
         auto& dst = p.room_groups[i];
-        dst.id = static_cast<OrbisNpMatching2RoomGroupId>(g.group_id());
-        dst.hasPasswd = g.has_passwd();
-        dst.hasLabel = g.has_label();
+        dst.id = static_cast<OrbisNpMatching2RoomGroupId>(g.group_id);
+        dst.hasPasswd = g.has_passwd;
+        dst.hasLabel = g.has_label;
         std::memset(dst.label.data, 0, sizeof(dst.label.data));
-        std::memcpy(dst.label.data, g.label().data(),
-                    std::min(g.label().size(), sizeof(dst.label.data)));
-        dst.slots = g.slot_count();
-        dst.groupMembers = g.num_members();
+        std::memcpy(dst.label.data, g.label.data, std::min(g.label.size, sizeof(dst.label.data)));
+        dst.slots = g.slot_count;
+        dst.groupMembers = g.num_members;
     }
 
-    p.room_bin_attrs.resize(rd.bin_attrs_internal_size());
-    for (int i = 0; i < rd.bin_attrs_internal_size(); ++i) {
-        const auto& a = rd.bin_attrs_internal(i);
+    p.room_bin_attrs.resize(rd.bin_attrs_internal.count);
+    for (int i = 0; i < rd.bin_attrs_internal.count; ++i) {
+        const auto& a = rd.bin_attrs_internal.items[i];
         LOG_DEBUG(Lib_NpMatching2,
                   "  roomInternalBin[{}] id={:#x} updateMember={} updateDate={} size={} data={}", i,
-                  a.attr_id(), a.update_member_id(), a.update_date(), a.data().size(),
-                  HexPreview(a.data(), 128));
-        p.bin_buffers.emplace_back(a.data().begin(), a.data().end());
+                  a.attr_id, a.update_member_id, a.update_date, a.data.size,
+                  HexPreview(View(a.data), 128));
+        p.bin_buffers.emplace_back(a.data.data, a.data.data + a.data.size);
         auto& buf = p.bin_buffers.back();
         auto& dst = p.room_bin_attrs[i];
         dst = {};
-        dst.lastUpdate.tick = a.update_date();
-        dst.memberId = static_cast<OrbisNpMatching2RoomMemberId>(a.update_member_id());
-        dst.binAttr.id = static_cast<OrbisNpMatching2AttributeId>(a.attr_id());
+        dst.lastUpdate.tick = a.update_date;
+        dst.memberId = static_cast<OrbisNpMatching2RoomMemberId>(a.update_member_id);
+        dst.binAttr.id = static_cast<OrbisNpMatching2AttributeId>(a.attr_id);
         dst.binAttr.data = buf.empty() ? nullptr : buf.data();
         dst.binAttr.dataSize = buf.size();
     }
     p.room_data = std::make_unique<OrbisNpMatching2RoomDataInternal>();
     auto& room = *p.room_data;
     room = {};
-    room.publicSlots = static_cast<u16>(rd.public_slots());
-    room.privateSlots = static_cast<u16>(rd.private_slots());
-    room.openPublicSlots = static_cast<u16>(rd.open_public_slots());
-    room.openPrivateSlots = static_cast<u16>(rd.open_private_slots());
-    room.maxSlot = static_cast<u16>(rd.max_slot());
-    room.serverId = static_cast<OrbisNpMatching2ServerId>(rd.server_id());
-    room.worldId = rd.world_id();
-    room.lobbyId = rd.lobby_id();
-    room.roomId = rd.room_id();
-    room.passwdSlotMask = rd.passwd_slot_mask();
-    room.joinedSlotMask = rd.joined_slot_mask();
-    room.flags = rd.flags();
+    room.publicSlots = static_cast<u16>(rd.public_slots);
+    room.privateSlots = static_cast<u16>(rd.private_slots);
+    room.openPublicSlots = static_cast<u16>(rd.open_public_slots);
+    room.openPrivateSlots = static_cast<u16>(rd.open_private_slots);
+    room.maxSlot = static_cast<u16>(rd.max_slot);
+    room.serverId = static_cast<OrbisNpMatching2ServerId>(rd.server_id);
+    room.worldId = rd.world_id;
+    room.lobbyId = rd.lobby_id;
+    room.roomId = rd.room_id;
+    room.passwdSlotMask = rd.passwd_slot_mask;
+    room.joinedSlotMask = rd.joined_slot_mask;
+    room.flags = rd.flags;
     room.roomGroup = p.room_groups.empty() ? nullptr : p.room_groups.data();
     room.roomGroups = p.room_groups.size();
     room.internalBinAttr = p.room_bin_attrs.empty() ? nullptr : p.room_bin_attrs.data();
@@ -177,9 +185,9 @@ void BuildCreateJoinRoomPayloadCommon(ContextObject& ctx, CallbackPayload& p,
     rc.passwd_slot_mask = room.passwdSlotMask;
     rc.joined_slot_mask = room.joinedSlotMask;
     rc.flags = room.flags;
-    rc.owner = resp.me_member_id() == resp.owner_member_id();
+    rc.owner = resp.me_member_id == resp.owner_member_id;
     rc.signaling_type = ORBIS_NP_MATCHING2_SIGNALING_TYPE_MESH;
-    rc.signaling_main_member = static_cast<OrbisNpMatching2RoomMemberId>(resp.owner_member_id());
+    rc.signaling_main_member = static_cast<OrbisNpMatching2RoomMemberId>(resp.owner_member_id);
     rc.bin_attrs_internal.resize(p.room_bin_attrs.size());
     rc.bin_buffers.clear();
     rc.bin_buffers.reserve(p.room_bin_attrs.size());
@@ -200,47 +208,47 @@ void BuildCreateJoinRoomPayloadCommon(ContextObject& ctx, CallbackPayload& p,
         dst.binAttr.dataSize = buf.size();
     }
     ctx.room_id = room.roomId;
-    ctx.my_member_id = static_cast<OrbisNpMatching2RoomMemberId>(resp.me_member_id());
+    ctx.my_member_id = static_cast<OrbisNpMatching2RoomMemberId>(resp.me_member_id);
     ctx.is_room_owner = rc.owner;
     for (const auto& g : p.room_groups) {
         rc.groups[g.id] = g;
     }
-    const int member_count = resp.members_size();
+    const int member_count = resp.members.count;
     for (int i = 0; i < member_count; ++i) {
-        const auto& m = resp.members(i);
+        const auto& m = resp.members.items[i];
         LOG_DEBUG(Lib_NpMatching2,
                   "  member[{}] id={} npid='{}' owner={} team={} nat={} flags={:#x} group={} "
                   "addr={}:{} account={} platform={} bins={}",
-                  i, m.member_id(), m.npid(), m.is_owner(), m.team_id(), m.nat_type(),
-                  m.flag_attr(), m.group_id(), m.addr(), m.port(), m.account_id(), m.platform(),
-                  m.bin_attrs_internal_size());
-        MemberCache& mc = rc.members[static_cast<OrbisNpMatching2RoomMemberId>(m.member_id())];
+                  i, m.member_id, View(m.npid), m.is_owner, m.team_id, m.nat_type, m.flag_attr,
+                  m.group_id, View(m.addr), m.port, m.account_id, m.platform,
+                  m.bin_attrs_internal.count);
+        MemberCache& mc = rc.members[static_cast<OrbisNpMatching2RoomMemberId>(m.member_id)];
         mc = MemberCache{};
-        mc.member_id = static_cast<OrbisNpMatching2RoomMemberId>(m.member_id());
-        mc.team_id = static_cast<OrbisNpMatching2TeamId>(m.team_id());
-        mc.nat_type = static_cast<OrbisNpMatching2NatType>(m.nat_type());
-        mc.flag_attr = m.flag_attr();
-        mc.group_id = static_cast<OrbisNpMatching2RoomGroupId>(m.group_id());
-        mc.join_date = m.join_date();
-        mc.addr = IpStringToAddr(m.addr());
-        mc.port = Libraries::Net::sceNetHtons(static_cast<u16>(m.port()));
-        SetNpId(mc.np_id, m.npid());
-        mc.account_id = static_cast<Libraries::Np::OrbisNpAccountId>(m.account_id());
-        mc.platform = static_cast<Libraries::Np::OrbisNpPlatformType>(m.platform());
-        for (const auto& a : m.bin_attrs_internal()) {
+        mc.member_id = static_cast<OrbisNpMatching2RoomMemberId>(m.member_id);
+        mc.team_id = static_cast<OrbisNpMatching2TeamId>(m.team_id);
+        mc.nat_type = static_cast<OrbisNpMatching2NatType>(m.nat_type);
+        mc.flag_attr = m.flag_attr;
+        mc.group_id = static_cast<OrbisNpMatching2RoomGroupId>(m.group_id);
+        mc.join_date = m.join_date;
+        mc.addr = IpStringToAddr(View(m.addr));
+        mc.port = Libraries::Net::sceNetHtons(static_cast<u16>(m.port));
+        SetNpId(mc.np_id, View(m.npid));
+        mc.account_id = static_cast<Libraries::Np::OrbisNpAccountId>(m.account_id);
+        mc.platform = static_cast<Libraries::Np::OrbisNpPlatformType>(m.platform);
+        for (const auto& a : Items(m.bin_attrs_internal)) {
             LOG_INFO(Lib_NpMatching2, "    memberBin id={:#x} updateDate={} size={} data={}",
-                     a.attr_id(), a.update_date(), a.data().size(), HexPreview(a.data(), 128));
-            MemberBinCache& b = mc.bins[a.attr_id()];
-            b.id = static_cast<OrbisNpMatching2AttributeId>(a.attr_id());
-            b.update_date = a.update_date();
-            b.data.assign(a.data().begin(), a.data().end());
+                     a.attr_id, a.update_date, a.data.size, HexPreview(View(a.data), 128));
+            MemberBinCache& b = mc.bins[a.attr_id];
+            b.id = static_cast<OrbisNpMatching2AttributeId>(a.attr_id);
+            b.update_date = a.update_date;
+            b.data.assign(a.data.data, a.data.data + a.data.size);
         }
         if (mc.member_id != ctx.my_member_id) {
             PeerInfo peer{};
             peer.member_id = mc.member_id;
             peer.addr = mc.addr;
             peer.port = mc.port;
-            SetNpOnlineId(peer.online_id, m.npid());
+            SetNpOnlineId(peer.online_id, View(m.npid));
             cache->peers[mc.member_id] = peer;
         }
     }
@@ -255,25 +263,25 @@ OrbisNpMatching2RoomGroup* FindPayloadGroup(CallbackPayload& p, OrbisNpMatching2
     return nullptr;
 }
 
-void ReserveMemberBinAttrs(CallbackPayload& p, const shadnet::CreateJoinRoomResponse& resp) {
+void ReserveMemberBinAttrs(CallbackPayload& p, const shadnet_CreateJoinRoomResponse& resp) {
     size_t total = 0;
-    for (const auto& member : resp.members()) {
-        total += static_cast<size_t>(member.bin_attrs_internal_size());
+    for (const auto& member : Items(resp.members)) {
+        total += static_cast<size_t>(member.bin_attrs_internal.count);
     }
     p.member_bin_attrs.reserve(total);
 }
 
 OrbisNpMatching2RoomMemberBinAttrInternal* AppendMemberBinAttrs(
-    CallbackPayload& p, const shadnet::MatchingRoomMemberData& member, u64& count) {
+    CallbackPayload& p, const shadnet_MatchingRoomMemberData& member, u64& count) {
     const size_t first = p.member_bin_attrs.size();
-    count = static_cast<u64>(member.bin_attrs_internal_size());
-    for (const auto& a : member.bin_attrs_internal()) {
-        p.bin_buffers.emplace_back(a.data().begin(), a.data().end());
+    count = static_cast<u64>(member.bin_attrs_internal.count);
+    for (const auto& a : Items(member.bin_attrs_internal)) {
+        p.bin_buffers.emplace_back(a.data.data, a.data.data + a.data.size);
         auto& buf = p.bin_buffers.back();
         auto& dst = p.member_bin_attrs.emplace_back();
         dst = OrbisNpMatching2RoomMemberBinAttrInternal{};
-        dst.lastUpdate.tick = a.update_date();
-        dst.binAttr.id = static_cast<OrbisNpMatching2AttributeId>(a.attr_id());
+        dst.lastUpdate.tick = a.update_date;
+        dst.binAttr.id = static_cast<OrbisNpMatching2AttributeId>(a.attr_id);
         dst.binAttr.data = buf.empty() ? nullptr : buf.data();
         dst.binAttr.dataSize = buf.size();
     }
@@ -281,28 +289,28 @@ OrbisNpMatching2RoomMemberBinAttrInternal* AppendMemberBinAttrs(
 }
 
 void* BuildCreateJoinRoomPayload(ContextObject& ctx, CallbackPayload& p,
-                                 const shadnet::CreateJoinRoomResponse& resp) {
+                                 const shadnet_CreateJoinRoomResponse& resp) {
     p.Reset();
     BuildCreateJoinRoomPayloadCommon(ctx, p, resp);
 
-    const int member_count = resp.members_size();
+    const int member_count = resp.members.count;
     p.member_data.resize(member_count);
     ReserveMemberBinAttrs(p, resp);
     for (int i = 0; i < member_count; ++i) {
-        const auto& m = resp.members(i);
+        const auto& m = resp.members.items[i];
         auto& dst = p.member_data[i];
         dst = OrbisNpMatching2RoomMemberDataInternal{};
         dst.next = (i + 1 < member_count) ? &p.member_data[i + 1] : nullptr;
-        dst.joinDate = m.join_date();
-        SetNpId(dst.npId, m.npid());
-        dst.memberId = static_cast<OrbisNpMatching2RoomMemberId>(m.member_id());
-        dst.teamId = static_cast<OrbisNpMatching2TeamId>(m.team_id());
-        dst.natType = static_cast<OrbisNpMatching2NatType>(m.nat_type());
-        dst.flagAttr = m.flag_attr();
-        if (m.is_owner()) {
+        dst.joinDate = m.join_date;
+        SetNpId(dst.npId, View(m.npid));
+        dst.memberId = static_cast<OrbisNpMatching2RoomMemberId>(m.member_id);
+        dst.teamId = static_cast<OrbisNpMatching2TeamId>(m.team_id);
+        dst.natType = static_cast<OrbisNpMatching2NatType>(m.nat_type);
+        dst.flagAttr = m.flag_attr;
+        if (m.is_owner) {
             dst.flagAttr |= ORBIS_NP_MATCHING2_ROOMMEMBER_FLAG_ATTR_OWNER;
         }
-        dst.roomGroup = FindPayloadGroup(p, static_cast<OrbisNpMatching2RoomGroupId>(m.group_id()));
+        dst.roomGroup = FindPayloadGroup(p, static_cast<OrbisNpMatching2RoomGroupId>(m.group_id));
         dst.roomMemberBinAttrInternal =
             AppendMemberBinAttrs(p, m, dst.roomMemberBinAttrInternalNum);
     }
@@ -315,10 +323,10 @@ void* BuildCreateJoinRoomPayload(ContextObject& ctx, CallbackPayload& p,
     out.members.me = nullptr;
     out.members.owner = nullptr;
     for (auto& md : p.member_data) {
-        if (md.memberId == static_cast<OrbisNpMatching2RoomMemberId>(resp.me_member_id())) {
+        if (md.memberId == static_cast<OrbisNpMatching2RoomMemberId>(resp.me_member_id)) {
             out.members.me = &md;
         }
-        if (md.memberId == static_cast<OrbisNpMatching2RoomMemberId>(resp.owner_member_id())) {
+        if (md.memberId == static_cast<OrbisNpMatching2RoomMemberId>(resp.owner_member_id)) {
             out.members.owner = &md;
         }
     }
@@ -328,30 +336,30 @@ void* BuildCreateJoinRoomPayload(ContextObject& ctx, CallbackPayload& p,
 }
 
 void* BuildCreateJoinRoomPayloadA(ContextObject& ctx, CallbackPayload& p,
-                                  const shadnet::CreateJoinRoomResponse& resp) {
+                                  const shadnet_CreateJoinRoomResponse& resp) {
     p.Reset();
     BuildCreateJoinRoomPayloadCommon(ctx, p, resp);
 
-    const int member_count = resp.members_size();
+    const int member_count = resp.members.count;
     p.member_data_a.resize(member_count);
     ReserveMemberBinAttrs(p, resp);
     for (int i = 0; i < member_count; ++i) {
-        const auto& m = resp.members(i);
+        const auto& m = resp.members.items[i];
         auto& dst = p.member_data_a[i];
         dst = OrbisNpMatching2RoomMemberDataInternalA{};
         dst.next = (i + 1 < member_count) ? &p.member_data_a[i + 1] : nullptr;
-        dst.joinDateTicks.tick = m.join_date();
-        dst.user.accountId = static_cast<Libraries::Np::OrbisNpAccountId>(m.account_id());
-        dst.user.platform = static_cast<Libraries::Np::OrbisNpPlatformType>(m.platform());
-        SetNpOnlineId(dst.onlineId, m.npid());
-        dst.memberId = static_cast<OrbisNpMatching2RoomMemberId>(m.member_id());
-        dst.teamId = static_cast<OrbisNpMatching2TeamId>(m.team_id());
-        dst.natType = static_cast<OrbisNpMatching2NatType>(m.nat_type());
-        dst.flags = m.flag_attr();
-        if (m.is_owner()) {
+        dst.joinDateTicks.tick = m.join_date;
+        dst.user.accountId = static_cast<Libraries::Np::OrbisNpAccountId>(m.account_id);
+        dst.user.platform = static_cast<Libraries::Np::OrbisNpPlatformType>(m.platform);
+        SetNpOnlineId(dst.onlineId, View(m.npid));
+        dst.memberId = static_cast<OrbisNpMatching2RoomMemberId>(m.member_id);
+        dst.teamId = static_cast<OrbisNpMatching2TeamId>(m.team_id);
+        dst.natType = static_cast<OrbisNpMatching2NatType>(m.nat_type);
+        dst.flags = m.flag_attr;
+        if (m.is_owner) {
             dst.flags |= ORBIS_NP_MATCHING2_ROOMMEMBER_FLAG_ATTR_OWNER;
         }
-        dst.roomGroup = FindPayloadGroup(p, static_cast<OrbisNpMatching2RoomGroupId>(m.group_id()));
+        dst.roomGroup = FindPayloadGroup(p, static_cast<OrbisNpMatching2RoomGroupId>(m.group_id));
         dst.roomMemberInternalBinAttr = AppendMemberBinAttrs(p, m, dst.roomMemberInternalBinAttrs);
     }
 
@@ -363,10 +371,10 @@ void* BuildCreateJoinRoomPayloadA(ContextObject& ctx, CallbackPayload& p,
     out.members.me = nullptr;
     out.members.owner = nullptr;
     for (auto& md : p.member_data_a) {
-        if (md.memberId == static_cast<OrbisNpMatching2RoomMemberId>(resp.me_member_id())) {
+        if (md.memberId == static_cast<OrbisNpMatching2RoomMemberId>(resp.me_member_id)) {
             out.members.me = &md;
         }
-        if (md.memberId == static_cast<OrbisNpMatching2RoomMemberId>(resp.owner_member_id())) {
+        if (md.memberId == static_cast<OrbisNpMatching2RoomMemberId>(resp.owner_member_id)) {
             out.members.owner = &md;
         }
     }
@@ -376,11 +384,11 @@ void* BuildCreateJoinRoomPayloadA(ContextObject& ctx, CallbackPayload& p,
 }
 
 void* BuildLeaveRoomPayload(ContextObject& ctx, CallbackPayload& p,
-                            const shadnet::LeaveRoomReply& resp) {
+                            const shadnet_LeaveRoomReply& resp) {
     p.Reset();
 
     p.leave_room_response = std::make_unique<OrbisNpMatching2LeaveRoomResponse>();
-    p.leave_room_response->roomId = static_cast<OrbisNpMatching2RoomId>(resp.room_id());
+    p.leave_room_response->roomId = static_cast<OrbisNpMatching2RoomId>(resp.room_id);
 
     if (ctx.room_id == p.leave_room_response->roomId) {
         auto cache = NpHandler::GetInstance().LockMatching2Cache(ctx.ctx_id);
@@ -396,20 +404,20 @@ void* BuildLeaveRoomPayload(ContextObject& ctx, CallbackPayload& p,
 }
 
 void* BuildGetWorldInfoListPayload(ContextObject& ctx, CallbackPayload& p,
-                                   const shadnet::GetWorldInfoListReply& resp) {
+                                   const shadnet_GetWorldInfoListReply& resp) {
     p.Reset();
 
-    p.world_list.resize(resp.worlds_size());
-    for (int i = 0; i < resp.worlds_size(); ++i) {
-        const auto& w = resp.worlds(i);
+    p.world_list.resize(resp.worlds.count);
+    for (int i = 0; i < resp.worlds.count; ++i) {
+        const auto& w = resp.worlds.items[i];
         auto& dst = p.world_list[i];
         dst = OrbisNpMatching2World{};
-        dst.worldId = static_cast<OrbisNpMatching2WorldId>(w.world_id());
-        dst.lobbiesNum = w.lobbies_num();
-        dst.maxLobbyMembersNum = w.max_lobby_members();
-        dst.lobbyMembersNum = w.lobby_members_num();
-        dst.roomsNum = w.rooms_num();
-        dst.roomMembersNum = w.room_members_num();
+        dst.worldId = static_cast<OrbisNpMatching2WorldId>(w.world_id);
+        dst.lobbiesNum = w.lobbies_num;
+        dst.maxLobbyMembersNum = w.max_lobby_members;
+        dst.lobbyMembersNum = w.lobby_members_num;
+        dst.roomsNum = w.rooms_num;
+        dst.roomMembersNum = w.room_members_num;
     }
     for (size_t i = 0; i + 1 < p.world_list.size(); ++i) {
         p.world_list[i].next = &p.world_list[i + 1];
@@ -424,92 +432,92 @@ void* BuildGetWorldInfoListPayload(ContextObject& ctx, CallbackPayload& p,
 }
 
 void* BuildSearchRoomPayload(ContextObject& ctx, CallbackPayload& p,
-                             const shadnet::SearchRoomReply& resp) {
+                             const shadnet_SearchRoomReply& resp) {
     p.Reset();
     ReserveExternalRoomPayloadStorage(p, resp);
 
-    const int room_count = resp.rooms_size();
+    const int room_count = resp.rooms.count;
     LOG_INFO(Lib_NpMatching2, "Search response rooms={}", room_count);
     p.room_data_external.resize(room_count);
     for (int i = 0; i < room_count; ++i) {
-        const auto& r = resp.rooms(i);
+        const auto& r = resp.rooms.items[i];
         LOG_DEBUG(Lib_NpMatching2,
                   "  room[{}] id={} max={} cur={} public/open={}/{} private/open={}/{} "
                   "flags={:#x} groups={} searchInt={} searchBin={} extBin={}",
-                  i, r.room_id(), r.max_slot(), r.cur_members(), r.public_slots(),
-                  r.open_public_slots(), r.private_slots(), r.open_private_slots(), r.flags(),
-                  r.groups_size(), r.external_search_int_attrs_size(),
-                  r.external_search_bin_attrs_size(), r.external_bin_attrs_size());
-        for (int a = 0; a < r.external_search_int_attrs_size(); ++a) {
-            const auto& src = r.external_search_int_attrs(a);
-            LOG_DEBUG(Lib_NpMatching2, "    searchInt[{}] id={:#x} value={}", a, src.attr_id(),
-                      src.attr_value());
+                  i, r.room_id, r.max_slot, r.cur_members, r.public_slots, r.open_public_slots,
+                  r.private_slots, r.open_private_slots, r.flags, r.groups.count,
+                  r.external_search_int_attrs.count, r.external_search_bin_attrs.count,
+                  r.external_bin_attrs.count);
+        for (int a = 0; a < r.external_search_int_attrs.count; ++a) {
+            const auto& src = r.external_search_int_attrs.items[a];
+            LOG_DEBUG(Lib_NpMatching2, "    searchInt[{}] id={:#x} value={}", a, src.attr_id,
+                      src.attr_value);
         }
-        for (int a = 0; a < r.external_search_bin_attrs_size(); ++a) {
-            const auto& src = r.external_search_bin_attrs(a);
-            LOG_DEBUG(Lib_NpMatching2, "    searchBin[{}] id={:#x} size={} data={}", a,
-                      src.attr_id(), src.data().size(), HexPreview(src.data(), 128));
+        for (int a = 0; a < r.external_search_bin_attrs.count; ++a) {
+            const auto& src = r.external_search_bin_attrs.items[a];
+            LOG_DEBUG(Lib_NpMatching2, "    searchBin[{}] id={:#x} size={} data={}", a, src.attr_id,
+                      src.data.size, HexPreview(View(src.data), 128));
         }
-        for (int a = 0; a < r.external_bin_attrs_size(); ++a) {
-            const auto& src = r.external_bin_attrs(a);
-            LOG_DEBUG(Lib_NpMatching2, "    extBin[{}] id={:#x} size={} data={}", a, src.attr_id(),
-                      src.data().size(), HexPreview(src.data(), 128));
+        for (int a = 0; a < r.external_bin_attrs.count; ++a) {
+            const auto& src = r.external_bin_attrs.items[a];
+            LOG_DEBUG(Lib_NpMatching2, "    extBin[{}] id={:#x} size={} data={}", a, src.attr_id,
+                      src.data.size, HexPreview(View(src.data), 128));
         }
         auto& dst = p.room_data_external[i];
         dst = OrbisNpMatching2RoomDataExternal{};
         dst.next = (i + 1 < room_count) ? &p.room_data_external[i + 1] : nullptr;
-        dst.maxSlot = static_cast<u16>(r.max_slot());
-        dst.curMembers = static_cast<u16>(r.cur_members());
-        dst.flags = r.flags();
-        dst.serverId = static_cast<OrbisNpMatching2ServerId>(r.server_id());
-        dst.worldId = static_cast<OrbisNpMatching2WorldId>(r.world_id());
-        dst.lobbyId = r.lobby_id();
-        dst.roomId = r.room_id();
-        dst.passwdSlotMask = r.passwd_slot_mask();
-        dst.joinedSlotMask = r.joined_slot_mask();
-        dst.publicSlots = static_cast<u16>(r.public_slots());
-        dst.privateSlots = static_cast<u16>(r.private_slots());
-        dst.openPublicSlots = static_cast<u16>(r.open_public_slots());
-        dst.openPrivateSlots = static_cast<u16>(r.open_private_slots());
+        dst.maxSlot = static_cast<u16>(r.max_slot);
+        dst.curMembers = static_cast<u16>(r.cur_members);
+        dst.flags = r.flags;
+        dst.serverId = static_cast<OrbisNpMatching2ServerId>(r.server_id);
+        dst.worldId = static_cast<OrbisNpMatching2WorldId>(r.world_id);
+        dst.lobbyId = r.lobby_id;
+        dst.roomId = r.room_id;
+        dst.passwdSlotMask = r.passwd_slot_mask;
+        dst.joinedSlotMask = r.joined_slot_mask;
+        dst.publicSlots = static_cast<u16>(r.public_slots);
+        dst.privateSlots = static_cast<u16>(r.private_slots);
+        dst.openPublicSlots = static_cast<u16>(r.open_public_slots);
+        dst.openPrivateSlots = static_cast<u16>(r.open_private_slots);
 
-        if (!r.owner_npid().empty()) {
+        if (!(r.owner_npid.size == 0)) {
             auto& npid = p.ext_owner_npids.emplace_back();
-            SetNpId(npid, r.owner_npid());
+            SetNpId(npid, View(r.owner_npid));
             dst.ownerNpId = &npid;
         }
 
-        if (r.groups_size() > 0) {
+        if (r.groups.count > 0) {
             OrbisNpMatching2RoomGroupInfo* first = nullptr;
-            for (int g = 0; g < r.groups_size(); ++g) {
-                const auto& src = r.groups(g);
+            for (int g = 0; g < r.groups.count; ++g) {
+                const auto& src = r.groups.items[g];
                 auto& gi = p.ext_room_groups.emplace_back();
                 gi = OrbisNpMatching2RoomGroupInfo{};
-                gi.id = static_cast<OrbisNpMatching2RoomGroupId>(src.group_id());
-                gi.hasPasswd = src.has_passwd();
-                gi.slots = src.slot_count();
-                gi.groupMembers = src.num_members();
+                gi.id = static_cast<OrbisNpMatching2RoomGroupId>(src.group_id);
+                gi.hasPasswd = src.has_passwd;
+                gi.slots = src.slot_count;
+                gi.groupMembers = src.num_members;
                 if (!first) {
                     first = &gi;
                 }
             }
             dst.roomGroup = first;
-            dst.roomGroups = static_cast<u64>(r.groups_size());
+            dst.roomGroups = static_cast<u64>(r.groups.count);
         }
 
-        if (r.external_search_int_attrs_size() > 0) {
+        if (r.external_search_int_attrs.count > 0) {
             OrbisNpMatching2IntAttr* first = nullptr;
-            for (int a = 0; a < r.external_search_int_attrs_size(); ++a) {
-                const auto& src = r.external_search_int_attrs(a);
+            for (int a = 0; a < r.external_search_int_attrs.count; ++a) {
+                const auto& src = r.external_search_int_attrs.items[a];
                 auto& ia = p.ext_int_attrs.emplace_back();
                 ia = OrbisNpMatching2IntAttr{};
-                ia.id = static_cast<OrbisNpMatching2AttributeId>(src.attr_id());
-                ia.num = src.attr_value();
+                ia.id = static_cast<OrbisNpMatching2AttributeId>(src.attr_id);
+                ia.num = src.attr_value;
                 if (!first) {
                     first = &ia;
                 }
             }
             dst.externalSearchIntAttr = first;
-            dst.externalSearchIntAttrs = static_cast<u64>(r.external_search_int_attrs_size());
+            dst.externalSearchIntAttrs = static_cast<u64>(r.external_search_int_attrs.count);
         }
 
         auto build_bin = [&](const auto& src_attrs, OrbisNpMatching2BinAttr*& out_ptr,
@@ -519,11 +527,11 @@ void* BuildSearchRoomPayload(ContextObject& ctx, CallbackPayload& p,
             }
             OrbisNpMatching2BinAttr* first = nullptr;
             for (const auto& src : src_attrs) {
-                p.bin_buffers.emplace_back(src.data().begin(), src.data().end());
+                p.bin_buffers.emplace_back(src.data.data, src.data.data + src.data.size);
                 auto& buf = p.bin_buffers.back();
                 auto& ba = p.ext_bin_attrs.emplace_back();
                 ba = OrbisNpMatching2BinAttr{};
-                ba.id = static_cast<OrbisNpMatching2AttributeId>(src.attr_id());
+                ba.id = static_cast<OrbisNpMatching2AttributeId>(src.attr_id);
                 ba.data = buf.empty() ? nullptr : buf.data();
                 ba.dataSize = buf.size();
                 if (!first) {
@@ -533,17 +541,17 @@ void* BuildSearchRoomPayload(ContextObject& ctx, CallbackPayload& p,
             out_ptr = first;
             out_num = static_cast<u64>(src_attrs.size());
         };
-        build_bin(r.external_search_bin_attrs(), dst.externalSearchBinAttr,
+        build_bin(Items(r.external_search_bin_attrs), dst.externalSearchBinAttr,
                   dst.externalSearchBinAttrs);
-        build_bin(r.external_bin_attrs(), dst.externalBinAttr, dst.externalBinAttrs);
+        build_bin(Items(r.external_bin_attrs), dst.externalBinAttr, dst.externalBinAttrs);
     }
 
     p.search_room_response = std::make_unique<OrbisNpMatching2SearchRoomResponse>();
     auto& out = *p.search_room_response;
     out = OrbisNpMatching2SearchRoomResponse{};
-    out.range.start = resp.range_start();
-    out.range.total = resp.range_total();
-    out.range.results = resp.range_result();
+    out.range.start = resp.range_start;
+    out.range.total = resp.range_total;
+    out.range.results = resp.range_result;
     out.roomDataExt = p.room_data_external.empty() ? nullptr : p.room_data_external.data();
 
     p.request_data = p.search_room_response.get();
@@ -551,95 +559,95 @@ void* BuildSearchRoomPayload(ContextObject& ctx, CallbackPayload& p,
 }
 
 void* BuildSearchRoomPayloadA(ContextObject& ctx, CallbackPayload& p,
-                              const shadnet::SearchRoomReply& resp) {
+                              const shadnet_SearchRoomReply& resp) {
     p.Reset();
     ReserveExternalRoomPayloadStorage(p, resp);
 
-    const int room_count = resp.rooms_size();
+    const int room_count = resp.rooms.count;
     LOG_INFO(Lib_NpMatching2, "Search response rooms={} range start={} total={} results={}",
-             room_count, resp.range_start(), resp.range_total(), resp.range_result());
+             room_count, resp.range_start, resp.range_total, resp.range_result);
     p.room_data_external_a.resize(room_count);
     for (int i = 0; i < room_count; ++i) {
-        const auto& r = resp.rooms(i);
+        const auto& r = resp.rooms.items[i];
         LOG_DEBUG(Lib_NpMatching2,
                   "  roomA[{}] id={} max={} cur={} public/open={}/{} private/open={}/{} "
                   "flags={:#x} groups={} searchInt={} searchBin={} extBin={} owner='{}' "
                   "account={} platform={}",
-                  i, r.room_id(), r.max_slot(), r.cur_members(), r.public_slots(),
-                  r.open_public_slots(), r.private_slots(), r.open_private_slots(), r.flags(),
-                  r.groups_size(), r.external_search_int_attrs_size(),
-                  r.external_search_bin_attrs_size(), r.external_bin_attrs_size(), r.owner_npid(),
-                  r.owner_account_id(), r.owner_platform());
-        for (int a = 0; a < r.external_search_int_attrs_size(); ++a) {
-            const auto& src = r.external_search_int_attrs(a);
-            LOG_DEBUG(Lib_NpMatching2, "    searchIntA[{}] id={:#x} value={}", a, src.attr_id(),
-                      src.attr_value());
+                  i, r.room_id, r.max_slot, r.cur_members, r.public_slots, r.open_public_slots,
+                  r.private_slots, r.open_private_slots, r.flags, r.groups.count,
+                  r.external_search_int_attrs.count, r.external_search_bin_attrs.count,
+                  r.external_bin_attrs.count, View(r.owner_npid), r.owner_account_id,
+                  r.owner_platform);
+        for (int a = 0; a < r.external_search_int_attrs.count; ++a) {
+            const auto& src = r.external_search_int_attrs.items[a];
+            LOG_DEBUG(Lib_NpMatching2, "    searchIntA[{}] id={:#x} value={}", a, src.attr_id,
+                      src.attr_value);
         }
-        for (int a = 0; a < r.external_search_bin_attrs_size(); ++a) {
-            const auto& src = r.external_search_bin_attrs(a);
+        for (int a = 0; a < r.external_search_bin_attrs.count; ++a) {
+            const auto& src = r.external_search_bin_attrs.items[a];
             LOG_DEBUG(Lib_NpMatching2, "    searchBinA[{}] id={:#x} size={} data={}", a,
-                      src.attr_id(), src.data().size(), HexPreview(src.data(), 128));
+                      src.attr_id, src.data.size, HexPreview(View(src.data), 128));
         }
-        for (int a = 0; a < r.external_bin_attrs_size(); ++a) {
-            const auto& src = r.external_bin_attrs(a);
-            LOG_DEBUG(Lib_NpMatching2, "    extBinA[{}] id={:#x} size={} data={}", a, src.attr_id(),
-                      src.data().size(), HexPreview(src.data(), 128));
+        for (int a = 0; a < r.external_bin_attrs.count; ++a) {
+            const auto& src = r.external_bin_attrs.items[a];
+            LOG_DEBUG(Lib_NpMatching2, "    extBinA[{}] id={:#x} size={} data={}", a, src.attr_id,
+                      src.data.size, HexPreview(View(src.data), 128));
         }
         auto& dst = p.room_data_external_a[i];
         dst = OrbisNpMatching2RoomDataExternalA{};
         dst.next = (i + 1 < room_count) ? &p.room_data_external_a[i + 1] : nullptr;
-        dst.maxSlot = static_cast<u16>(r.max_slot());
-        dst.curMembers = static_cast<u16>(r.cur_members());
-        dst.flags = r.flags();
-        dst.serverId = static_cast<OrbisNpMatching2ServerId>(r.server_id());
-        dst.worldId = static_cast<OrbisNpMatching2WorldId>(r.world_id());
-        dst.lobbyId = r.lobby_id();
-        dst.roomId = r.room_id();
-        dst.passwdSlotMask = r.passwd_slot_mask();
-        dst.joinedSlotMask = r.joined_slot_mask();
-        dst.publicSlots = static_cast<u16>(r.public_slots());
-        dst.privateSlots = static_cast<u16>(r.private_slots());
-        dst.openPublicSlots = static_cast<u16>(r.open_public_slots());
-        dst.openPrivateSlots = static_cast<u16>(r.open_private_slots());
+        dst.maxSlot = static_cast<u16>(r.max_slot);
+        dst.curMembers = static_cast<u16>(r.cur_members);
+        dst.flags = r.flags;
+        dst.serverId = static_cast<OrbisNpMatching2ServerId>(r.server_id);
+        dst.worldId = static_cast<OrbisNpMatching2WorldId>(r.world_id);
+        dst.lobbyId = r.lobby_id;
+        dst.roomId = r.room_id;
+        dst.passwdSlotMask = r.passwd_slot_mask;
+        dst.joinedSlotMask = r.joined_slot_mask;
+        dst.publicSlots = static_cast<u16>(r.public_slots);
+        dst.privateSlots = static_cast<u16>(r.private_slots);
+        dst.openPublicSlots = static_cast<u16>(r.open_public_slots);
+        dst.openPrivateSlots = static_cast<u16>(r.open_private_slots);
 
-        if (!r.owner_npid().empty()) {
-            SetNpOnlineId(dst.ownerOnlineId, r.owner_npid());
+        if (!(r.owner_npid.size == 0)) {
+            SetNpOnlineId(dst.ownerOnlineId, View(r.owner_npid));
         }
-        dst.owner.accountId = static_cast<Libraries::Np::OrbisNpAccountId>(r.owner_account_id());
-        dst.owner.platform = static_cast<Libraries::Np::OrbisNpPlatformType>(r.owner_platform());
+        dst.owner.accountId = static_cast<Libraries::Np::OrbisNpAccountId>(r.owner_account_id);
+        dst.owner.platform = static_cast<Libraries::Np::OrbisNpPlatformType>(r.owner_platform);
 
-        if (r.groups_size() > 0) {
+        if (r.groups.count > 0) {
             OrbisNpMatching2RoomGroupInfo* first = nullptr;
-            for (int g = 0; g < r.groups_size(); ++g) {
-                const auto& src = r.groups(g);
+            for (int g = 0; g < r.groups.count; ++g) {
+                const auto& src = r.groups.items[g];
                 auto& gi = p.ext_room_groups.emplace_back();
                 gi = OrbisNpMatching2RoomGroupInfo{};
-                gi.id = static_cast<OrbisNpMatching2RoomGroupId>(src.group_id());
-                gi.hasPasswd = src.has_passwd();
-                gi.slots = src.slot_count();
-                gi.groupMembers = src.num_members();
+                gi.id = static_cast<OrbisNpMatching2RoomGroupId>(src.group_id);
+                gi.hasPasswd = src.has_passwd;
+                gi.slots = src.slot_count;
+                gi.groupMembers = src.num_members;
                 if (!first) {
                     first = &gi;
                 }
             }
             dst.roomGroup = first;
-            dst.roomGroups = static_cast<u64>(r.groups_size());
+            dst.roomGroups = static_cast<u64>(r.groups.count);
         }
 
-        if (r.external_search_int_attrs_size() > 0) {
+        if (r.external_search_int_attrs.count > 0) {
             OrbisNpMatching2IntAttr* first = nullptr;
-            for (int a = 0; a < r.external_search_int_attrs_size(); ++a) {
-                const auto& src = r.external_search_int_attrs(a);
+            for (int a = 0; a < r.external_search_int_attrs.count; ++a) {
+                const auto& src = r.external_search_int_attrs.items[a];
                 auto& ia = p.ext_int_attrs.emplace_back();
                 ia = OrbisNpMatching2IntAttr{};
-                ia.id = static_cast<OrbisNpMatching2AttributeId>(src.attr_id());
-                ia.num = src.attr_value();
+                ia.id = static_cast<OrbisNpMatching2AttributeId>(src.attr_id);
+                ia.num = src.attr_value;
                 if (!first) {
                     first = &ia;
                 }
             }
             dst.externalSearchIntAttr = first;
-            dst.externalSearchIntAttrs = static_cast<u64>(r.external_search_int_attrs_size());
+            dst.externalSearchIntAttrs = static_cast<u64>(r.external_search_int_attrs.count);
         }
 
         auto build_bin = [&](const auto& src_attrs, OrbisNpMatching2BinAttr*& out_ptr,
@@ -649,11 +657,11 @@ void* BuildSearchRoomPayloadA(ContextObject& ctx, CallbackPayload& p,
             }
             OrbisNpMatching2BinAttr* first = nullptr;
             for (const auto& src : src_attrs) {
-                p.bin_buffers.emplace_back(src.data().begin(), src.data().end());
+                p.bin_buffers.emplace_back(src.data.data, src.data.data + src.data.size);
                 auto& buf = p.bin_buffers.back();
                 auto& ba = p.ext_bin_attrs.emplace_back();
                 ba = OrbisNpMatching2BinAttr{};
-                ba.id = static_cast<OrbisNpMatching2AttributeId>(src.attr_id());
+                ba.id = static_cast<OrbisNpMatching2AttributeId>(src.attr_id);
                 ba.data = buf.empty() ? nullptr : buf.data();
                 ba.dataSize = buf.size();
                 if (!first) {
@@ -663,17 +671,17 @@ void* BuildSearchRoomPayloadA(ContextObject& ctx, CallbackPayload& p,
             out_ptr = first;
             out_num = static_cast<u64>(src_attrs.size());
         };
-        build_bin(r.external_search_bin_attrs(), dst.externalSearchBinAttr,
+        build_bin(Items(r.external_search_bin_attrs), dst.externalSearchBinAttr,
                   dst.externalSearchBinAttrs);
-        build_bin(r.external_bin_attrs(), dst.externalBinAttr, dst.externalBinAttrs);
+        build_bin(Items(r.external_bin_attrs), dst.externalBinAttr, dst.externalBinAttrs);
     }
 
     p.search_room_response_a = std::make_unique<OrbisNpMatching2SearchRoomResponseA>();
     auto& out = *p.search_room_response_a;
     out = OrbisNpMatching2SearchRoomResponseA{};
-    out.range.start = resp.range_start();
-    out.range.total = resp.range_total();
-    out.range.results = resp.range_result();
+    out.range.start = resp.range_start;
+    out.range.total = resp.range_total;
+    out.range.results = resp.range_result;
     out.roomDataExt = p.room_data_external_a.empty() ? nullptr : p.room_data_external_a.data();
 
     p.request_data = p.search_room_response_a.get();
@@ -681,92 +689,92 @@ void* BuildSearchRoomPayloadA(ContextObject& ctx, CallbackPayload& p,
 }
 
 void* BuildGetRoomDataExternalListPayload(ContextObject& ctx, CallbackPayload& p,
-                                          const shadnet::GetRoomDataExternalListReply& resp) {
+                                          const shadnet_GetRoomDataExternalListReply& resp) {
     p.Reset();
     ReserveExternalRoomPayloadStorage(p, resp);
 
-    const int room_count = resp.rooms_size();
+    const int room_count = resp.rooms.count;
     LOG_INFO(Lib_NpMatching2, "getRoomDataExternalList response rooms={}", room_count);
     p.room_data_external.resize(room_count);
     for (int i = 0; i < room_count; ++i) {
-        const auto& r = resp.rooms(i);
+        const auto& r = resp.rooms.items[i];
         LOG_DEBUG(Lib_NpMatching2,
                   "  room[{}] id={} max={} cur={} public/open={}/{} private/open={}/{} "
                   "flags={:#x} groups={} searchInt={} searchBin={} extBin={}",
-                  i, r.room_id(), r.max_slot(), r.cur_members(), r.public_slots(),
-                  r.open_public_slots(), r.private_slots(), r.open_private_slots(), r.flags(),
-                  r.groups_size(), r.external_search_int_attrs_size(),
-                  r.external_search_bin_attrs_size(), r.external_bin_attrs_size());
-        for (int a = 0; a < r.external_search_int_attrs_size(); ++a) {
-            const auto& src = r.external_search_int_attrs(a);
-            LOG_DEBUG(Lib_NpMatching2, "    searchInt[{}] id={:#x} value={}", a, src.attr_id(),
-                      src.attr_value());
+                  i, r.room_id, r.max_slot, r.cur_members, r.public_slots, r.open_public_slots,
+                  r.private_slots, r.open_private_slots, r.flags, r.groups.count,
+                  r.external_search_int_attrs.count, r.external_search_bin_attrs.count,
+                  r.external_bin_attrs.count);
+        for (int a = 0; a < r.external_search_int_attrs.count; ++a) {
+            const auto& src = r.external_search_int_attrs.items[a];
+            LOG_DEBUG(Lib_NpMatching2, "    searchInt[{}] id={:#x} value={}", a, src.attr_id,
+                      src.attr_value);
         }
-        for (int a = 0; a < r.external_search_bin_attrs_size(); ++a) {
-            const auto& src = r.external_search_bin_attrs(a);
-            LOG_DEBUG(Lib_NpMatching2, "    searchBin[{}] id={:#x} size={} data={}", a,
-                      src.attr_id(), src.data().size(), HexPreview(src.data(), 128));
+        for (int a = 0; a < r.external_search_bin_attrs.count; ++a) {
+            const auto& src = r.external_search_bin_attrs.items[a];
+            LOG_DEBUG(Lib_NpMatching2, "    searchBin[{}] id={:#x} size={} data={}", a, src.attr_id,
+                      src.data.size, HexPreview(View(src.data), 128));
         }
-        for (int a = 0; a < r.external_bin_attrs_size(); ++a) {
-            const auto& src = r.external_bin_attrs(a);
-            LOG_DEBUG(Lib_NpMatching2, "    extBin[{}] id={:#x} size={} data={}", a, src.attr_id(),
-                      src.data().size(), HexPreview(src.data(), 128));
+        for (int a = 0; a < r.external_bin_attrs.count; ++a) {
+            const auto& src = r.external_bin_attrs.items[a];
+            LOG_DEBUG(Lib_NpMatching2, "    extBin[{}] id={:#x} size={} data={}", a, src.attr_id,
+                      src.data.size, HexPreview(View(src.data), 128));
         }
         auto& dst = p.room_data_external[i];
         dst = OrbisNpMatching2RoomDataExternal{};
         dst.next = (i + 1 < room_count) ? &p.room_data_external[i + 1] : nullptr;
-        dst.maxSlot = static_cast<u16>(r.max_slot());
-        dst.curMembers = static_cast<u16>(r.cur_members());
-        dst.flags = r.flags();
-        dst.serverId = static_cast<OrbisNpMatching2ServerId>(r.server_id());
-        dst.worldId = static_cast<OrbisNpMatching2WorldId>(r.world_id());
-        dst.lobbyId = r.lobby_id();
-        dst.roomId = r.room_id();
-        dst.passwdSlotMask = r.passwd_slot_mask();
-        dst.joinedSlotMask = r.joined_slot_mask();
-        dst.publicSlots = static_cast<u16>(r.public_slots());
-        dst.privateSlots = static_cast<u16>(r.private_slots());
-        dst.openPublicSlots = static_cast<u16>(r.open_public_slots());
-        dst.openPrivateSlots = static_cast<u16>(r.open_private_slots());
+        dst.maxSlot = static_cast<u16>(r.max_slot);
+        dst.curMembers = static_cast<u16>(r.cur_members);
+        dst.flags = r.flags;
+        dst.serverId = static_cast<OrbisNpMatching2ServerId>(r.server_id);
+        dst.worldId = static_cast<OrbisNpMatching2WorldId>(r.world_id);
+        dst.lobbyId = r.lobby_id;
+        dst.roomId = r.room_id;
+        dst.passwdSlotMask = r.passwd_slot_mask;
+        dst.joinedSlotMask = r.joined_slot_mask;
+        dst.publicSlots = static_cast<u16>(r.public_slots);
+        dst.privateSlots = static_cast<u16>(r.private_slots);
+        dst.openPublicSlots = static_cast<u16>(r.open_public_slots);
+        dst.openPrivateSlots = static_cast<u16>(r.open_private_slots);
 
-        if (!r.owner_npid().empty()) {
+        if (!(r.owner_npid.size == 0)) {
             auto& npid = p.ext_owner_npids.emplace_back();
-            SetNpId(npid, r.owner_npid());
+            SetNpId(npid, View(r.owner_npid));
             dst.ownerNpId = &npid;
         }
 
-        if (r.groups_size() > 0) {
+        if (r.groups.count > 0) {
             OrbisNpMatching2RoomGroupInfo* first = nullptr;
-            for (int g = 0; g < r.groups_size(); ++g) {
-                const auto& src = r.groups(g);
+            for (int g = 0; g < r.groups.count; ++g) {
+                const auto& src = r.groups.items[g];
                 auto& gi = p.ext_room_groups.emplace_back();
                 gi = OrbisNpMatching2RoomGroupInfo{};
-                gi.id = static_cast<OrbisNpMatching2RoomGroupId>(src.group_id());
-                gi.hasPasswd = src.has_passwd();
-                gi.slots = src.slot_count();
-                gi.groupMembers = src.num_members();
+                gi.id = static_cast<OrbisNpMatching2RoomGroupId>(src.group_id);
+                gi.hasPasswd = src.has_passwd;
+                gi.slots = src.slot_count;
+                gi.groupMembers = src.num_members;
                 if (!first) {
                     first = &gi;
                 }
             }
             dst.roomGroup = first;
-            dst.roomGroups = static_cast<u64>(r.groups_size());
+            dst.roomGroups = static_cast<u64>(r.groups.count);
         }
 
-        if (r.external_search_int_attrs_size() > 0) {
+        if (r.external_search_int_attrs.count > 0) {
             OrbisNpMatching2IntAttr* first = nullptr;
-            for (int a = 0; a < r.external_search_int_attrs_size(); ++a) {
-                const auto& src = r.external_search_int_attrs(a);
+            for (int a = 0; a < r.external_search_int_attrs.count; ++a) {
+                const auto& src = r.external_search_int_attrs.items[a];
                 auto& ia = p.ext_int_attrs.emplace_back();
                 ia = OrbisNpMatching2IntAttr{};
-                ia.id = static_cast<OrbisNpMatching2AttributeId>(src.attr_id());
-                ia.num = src.attr_value();
+                ia.id = static_cast<OrbisNpMatching2AttributeId>(src.attr_id);
+                ia.num = src.attr_value;
                 if (!first) {
                     first = &ia;
                 }
             }
             dst.externalSearchIntAttr = first;
-            dst.externalSearchIntAttrs = static_cast<u64>(r.external_search_int_attrs_size());
+            dst.externalSearchIntAttrs = static_cast<u64>(r.external_search_int_attrs.count);
         }
 
         auto build_bin = [&](const auto& src_attrs, OrbisNpMatching2BinAttr*& out_ptr,
@@ -776,11 +784,11 @@ void* BuildGetRoomDataExternalListPayload(ContextObject& ctx, CallbackPayload& p
             }
             OrbisNpMatching2BinAttr* first = nullptr;
             for (const auto& src : src_attrs) {
-                p.bin_buffers.emplace_back(src.data().begin(), src.data().end());
+                p.bin_buffers.emplace_back(src.data.data, src.data.data + src.data.size);
                 auto& buf = p.bin_buffers.back();
                 auto& ba = p.ext_bin_attrs.emplace_back();
                 ba = OrbisNpMatching2BinAttr{};
-                ba.id = static_cast<OrbisNpMatching2AttributeId>(src.attr_id());
+                ba.id = static_cast<OrbisNpMatching2AttributeId>(src.attr_id);
                 ba.data = buf.empty() ? nullptr : buf.data();
                 ba.dataSize = buf.size();
                 if (!first) {
@@ -790,9 +798,9 @@ void* BuildGetRoomDataExternalListPayload(ContextObject& ctx, CallbackPayload& p
             out_ptr = first;
             out_num = static_cast<u64>(src_attrs.size());
         };
-        build_bin(r.external_search_bin_attrs(), dst.externalSearchBinAttr,
+        build_bin(Items(r.external_search_bin_attrs), dst.externalSearchBinAttr,
                   dst.externalSearchBinAttrs);
-        build_bin(r.external_bin_attrs(), dst.externalBinAttr, dst.externalBinAttrs);
+        build_bin(Items(r.external_bin_attrs), dst.externalBinAttr, dst.externalBinAttrs);
     }
 
     p.room_data_external_list_response =
@@ -807,69 +815,69 @@ void* BuildGetRoomDataExternalListPayload(ContextObject& ctx, CallbackPayload& p
 }
 
 void* BuildGetRoomDataExternalListPayloadA(ContextObject& ctx, CallbackPayload& p,
-                                           const shadnet::GetRoomDataExternalListReply& resp) {
+                                           const shadnet_GetRoomDataExternalListReply& resp) {
     p.Reset();
     ReserveExternalRoomPayloadStorage(p, resp);
 
-    const int room_count = resp.rooms_size();
+    const int room_count = resp.rooms.count;
     p.room_data_external_a.resize(room_count);
     for (int i = 0; i < room_count; ++i) {
-        const auto& r = resp.rooms(i);
+        const auto& r = resp.rooms.items[i];
         auto& dst = p.room_data_external_a[i];
         dst = OrbisNpMatching2RoomDataExternalA{};
         dst.next = (i + 1 < room_count) ? &p.room_data_external_a[i + 1] : nullptr;
-        dst.maxSlot = static_cast<u16>(r.max_slot());
-        dst.curMembers = static_cast<u16>(r.cur_members());
-        dst.flags = r.flags();
-        dst.serverId = static_cast<OrbisNpMatching2ServerId>(r.server_id());
-        dst.worldId = static_cast<OrbisNpMatching2WorldId>(r.world_id());
-        dst.lobbyId = r.lobby_id();
-        dst.roomId = r.room_id();
-        dst.passwdSlotMask = r.passwd_slot_mask();
-        dst.joinedSlotMask = r.joined_slot_mask();
-        dst.publicSlots = static_cast<u16>(r.public_slots());
-        dst.privateSlots = static_cast<u16>(r.private_slots());
-        dst.openPublicSlots = static_cast<u16>(r.open_public_slots());
-        dst.openPrivateSlots = static_cast<u16>(r.open_private_slots());
+        dst.maxSlot = static_cast<u16>(r.max_slot);
+        dst.curMembers = static_cast<u16>(r.cur_members);
+        dst.flags = r.flags;
+        dst.serverId = static_cast<OrbisNpMatching2ServerId>(r.server_id);
+        dst.worldId = static_cast<OrbisNpMatching2WorldId>(r.world_id);
+        dst.lobbyId = r.lobby_id;
+        dst.roomId = r.room_id;
+        dst.passwdSlotMask = r.passwd_slot_mask;
+        dst.joinedSlotMask = r.joined_slot_mask;
+        dst.publicSlots = static_cast<u16>(r.public_slots);
+        dst.privateSlots = static_cast<u16>(r.private_slots);
+        dst.openPublicSlots = static_cast<u16>(r.open_public_slots);
+        dst.openPrivateSlots = static_cast<u16>(r.open_private_slots);
 
-        if (!r.owner_npid().empty()) {
-            SetNpOnlineId(dst.ownerOnlineId, r.owner_npid());
+        if (!(r.owner_npid.size == 0)) {
+            SetNpOnlineId(dst.ownerOnlineId, View(r.owner_npid));
         }
-        dst.owner.accountId = static_cast<Libraries::Np::OrbisNpAccountId>(r.owner_account_id());
-        dst.owner.platform = static_cast<Libraries::Np::OrbisNpPlatformType>(r.owner_platform());
+        dst.owner.accountId = static_cast<Libraries::Np::OrbisNpAccountId>(r.owner_account_id);
+        dst.owner.platform = static_cast<Libraries::Np::OrbisNpPlatformType>(r.owner_platform);
 
-        if (r.groups_size() > 0) {
+        if (r.groups.count > 0) {
             OrbisNpMatching2RoomGroupInfo* first = nullptr;
-            for (int g = 0; g < r.groups_size(); ++g) {
-                const auto& src = r.groups(g);
+            for (int g = 0; g < r.groups.count; ++g) {
+                const auto& src = r.groups.items[g];
                 auto& gi = p.ext_room_groups.emplace_back();
                 gi = OrbisNpMatching2RoomGroupInfo{};
-                gi.id = static_cast<OrbisNpMatching2RoomGroupId>(src.group_id());
-                gi.hasPasswd = src.has_passwd();
-                gi.slots = src.slot_count();
-                gi.groupMembers = src.num_members();
+                gi.id = static_cast<OrbisNpMatching2RoomGroupId>(src.group_id);
+                gi.hasPasswd = src.has_passwd;
+                gi.slots = src.slot_count;
+                gi.groupMembers = src.num_members;
                 if (!first) {
                     first = &gi;
                 }
             }
             dst.roomGroup = first;
-            dst.roomGroups = static_cast<u64>(r.groups_size());
+            dst.roomGroups = static_cast<u64>(r.groups.count);
         }
 
-        if (r.external_search_int_attrs_size() > 0) {
+        if (r.external_search_int_attrs.count > 0) {
             OrbisNpMatching2IntAttr* first = nullptr;
-            for (int a = 0; a < r.external_search_int_attrs_size(); ++a) {
-                const auto& src = r.external_search_int_attrs(a);
+            for (int a = 0; a < r.external_search_int_attrs.count; ++a) {
+                const auto& src = r.external_search_int_attrs.items[a];
                 auto& ia = p.ext_int_attrs.emplace_back();
                 ia = OrbisNpMatching2IntAttr{};
-                ia.id = static_cast<OrbisNpMatching2AttributeId>(src.attr_id());
-                ia.num = src.attr_value();
+                ia.id = static_cast<OrbisNpMatching2AttributeId>(src.attr_id);
+                ia.num = src.attr_value;
                 if (!first) {
                     first = &ia;
                 }
             }
             dst.externalSearchIntAttr = first;
-            dst.externalSearchIntAttrs = static_cast<u64>(r.external_search_int_attrs_size());
+            dst.externalSearchIntAttrs = static_cast<u64>(r.external_search_int_attrs.count);
         }
 
         auto build_bin = [&](const auto& src_attrs, OrbisNpMatching2BinAttr*& out_ptr,
@@ -879,11 +887,11 @@ void* BuildGetRoomDataExternalListPayloadA(ContextObject& ctx, CallbackPayload& 
             }
             OrbisNpMatching2BinAttr* first = nullptr;
             for (const auto& src : src_attrs) {
-                p.bin_buffers.emplace_back(src.data().begin(), src.data().end());
+                p.bin_buffers.emplace_back(src.data.data, src.data.data + src.data.size);
                 auto& buf = p.bin_buffers.back();
                 auto& ba = p.ext_bin_attrs.emplace_back();
                 ba = OrbisNpMatching2BinAttr{};
-                ba.id = static_cast<OrbisNpMatching2AttributeId>(src.attr_id());
+                ba.id = static_cast<OrbisNpMatching2AttributeId>(src.attr_id);
                 ba.data = buf.empty() ? nullptr : buf.data();
                 ba.dataSize = buf.size();
                 if (!first) {
@@ -893,9 +901,9 @@ void* BuildGetRoomDataExternalListPayloadA(ContextObject& ctx, CallbackPayload& 
             out_ptr = first;
             out_num = static_cast<u64>(src_attrs.size());
         };
-        build_bin(r.external_search_bin_attrs(), dst.externalSearchBinAttr,
+        build_bin(Items(r.external_search_bin_attrs), dst.externalSearchBinAttr,
                   dst.externalSearchBinAttrs);
-        build_bin(r.external_bin_attrs(), dst.externalBinAttr, dst.externalBinAttrs);
+        build_bin(Items(r.external_bin_attrs), dst.externalBinAttr, dst.externalBinAttrs);
     }
 
     p.room_data_external_list_response_a =
@@ -911,19 +919,19 @@ void* BuildGetRoomDataExternalListPayloadA(ContextObject& ctx, CallbackPayload& 
 
 void* BuildGetRoomMemberDataExternalListPayload(
     ContextObject& ctx, CallbackPayload& p,
-    const shadnet::GetRoomMemberDataExternalListReply& resp) {
+    const shadnet_GetRoomMemberDataExternalListReply& resp) {
     p.Reset();
 
-    const int member_count = resp.members_size();
+    const int member_count = resp.members.count;
     p.member_data_external.resize(member_count);
     for (int i = 0; i < member_count; ++i) {
-        const auto& src = resp.members(i);
+        const auto& src = resp.members.items[i];
         auto& dst = p.member_data_external[i];
         dst = OrbisNpMatching2RoomMemberDataExternal{};
         dst.next = (i + 1 < member_count) ? &p.member_data_external[i + 1] : nullptr;
-        SetNpId(dst.npId, src.npid());
-        dst.joinDate.tick = src.join_date();
-        dst.role = static_cast<OrbisNpMatching2Role>(src.role());
+        SetNpId(dst.npId, View(src.npid));
+        dst.joinDate.tick = src.join_date;
+        dst.role = static_cast<OrbisNpMatching2Role>(src.role);
     }
 
     p.room_member_data_external_list_response =
@@ -940,21 +948,21 @@ void* BuildGetRoomMemberDataExternalListPayload(
 
 void* BuildGetRoomMemberDataExternalListPayloadA(
     ContextObject& ctx, CallbackPayload& p,
-    const shadnet::GetRoomMemberDataExternalListReply& resp) {
+    const shadnet_GetRoomMemberDataExternalListReply& resp) {
     p.Reset();
 
-    const int member_count = resp.members_size();
+    const int member_count = resp.members.count;
     p.member_data_external_a.resize(member_count);
     for (int i = 0; i < member_count; ++i) {
-        const auto& src = resp.members(i);
+        const auto& src = resp.members.items[i];
         auto& dst = p.member_data_external_a[i];
         dst = OrbisNpMatching2RoomMemberDataExternalA{};
         dst.next = (i + 1 < member_count) ? &p.member_data_external_a[i + 1] : nullptr;
-        dst.user.accountId = static_cast<Libraries::Np::OrbisNpAccountId>(src.account_id());
-        dst.user.platform = static_cast<Libraries::Np::OrbisNpPlatformType>(src.platform());
-        SetNpOnlineId(dst.onlineId, src.npid());
-        dst.joinDate.tick = src.join_date();
-        dst.role = static_cast<OrbisNpMatching2Role>(src.role());
+        dst.user.accountId = static_cast<Libraries::Np::OrbisNpAccountId>(src.account_id);
+        dst.user.platform = static_cast<Libraries::Np::OrbisNpPlatformType>(src.platform);
+        SetNpOnlineId(dst.onlineId, View(src.npid));
+        dst.joinDate.tick = src.join_date;
+        dst.role = static_cast<OrbisNpMatching2Role>(src.role);
     }
 
     p.room_member_data_external_list_response_a =
@@ -970,34 +978,34 @@ void* BuildGetRoomMemberDataExternalListPayloadA(
 }
 
 void* BuildGetUserInfoListPayload(ContextObject& ctx, CallbackPayload& p,
-                                  const shadnet::GetUserInfoListReply& resp) {
+                                  const shadnet_GetUserInfoListReply& resp) {
     p.Reset();
 
     size_t total_bin_attrs = 0;
-    for (int i = 0; i < resp.users_size(); ++i) {
-        total_bin_attrs += static_cast<size_t>(resp.users(i).user_bin_attrs_size());
+    for (int i = 0; i < resp.users.count; ++i) {
+        total_bin_attrs += static_cast<size_t>(resp.users.items[i].user_bin_attrs.count);
     }
     p.user_bin_attrs.reserve(total_bin_attrs);
     p.bin_buffers.reserve(total_bin_attrs);
 
-    const int user_count = resp.users_size();
+    const int user_count = resp.users.count;
     p.user_info.resize(user_count);
     for (int i = 0; i < user_count; ++i) {
-        const auto& u = resp.users(i);
+        const auto& u = resp.users.items[i];
         auto& dst = p.user_info[i];
         dst = OrbisNpMatching2UserInfo{};
         dst.next = (i + 1 < user_count) ? &p.user_info[i + 1] : nullptr;
-        SetNpId(dst.npId, u.npid());
+        SetNpId(dst.npId, View(u.npid));
 
-        if (u.user_bin_attrs_size() > 0) {
+        if (u.user_bin_attrs.count > 0) {
             OrbisNpMatching2BinAttr* first = nullptr;
-            for (int a = 0; a < u.user_bin_attrs_size(); ++a) {
-                const auto& src = u.user_bin_attrs(a);
-                p.bin_buffers.emplace_back(src.data().begin(), src.data().end());
+            for (int a = 0; a < u.user_bin_attrs.count; ++a) {
+                const auto& src = u.user_bin_attrs.items[a];
+                p.bin_buffers.emplace_back(src.data.data, src.data.data + src.data.size);
                 auto& buf = p.bin_buffers.back();
                 auto& ba = p.user_bin_attrs.emplace_back();
                 ba = OrbisNpMatching2BinAttr{};
-                ba.id = static_cast<OrbisNpMatching2AttributeId>(src.attr_id());
+                ba.id = static_cast<OrbisNpMatching2AttributeId>(src.attr_id);
                 ba.data = buf.empty() ? nullptr : buf.data();
                 ba.dataSize = buf.size();
                 if (!first) {
@@ -1005,7 +1013,7 @@ void* BuildGetUserInfoListPayload(ContextObject& ctx, CallbackPayload& p,
                 }
             }
             dst.userBinAttr = first;
-            dst.userBinAttrNum = static_cast<u64>(u.user_bin_attrs_size());
+            dst.userBinAttrNum = static_cast<u64>(u.user_bin_attrs.count);
         }
     }
 
@@ -1020,36 +1028,36 @@ void* BuildGetUserInfoListPayload(ContextObject& ctx, CallbackPayload& p,
 }
 
 void* BuildGetUserInfoListPayloadA(ContextObject& ctx, CallbackPayload& p,
-                                   const shadnet::GetUserInfoListReply& resp) {
+                                   const shadnet_GetUserInfoListReply& resp) {
     p.Reset();
 
     size_t total_bin_attrs = 0;
-    for (int i = 0; i < resp.users_size(); ++i) {
-        total_bin_attrs += static_cast<size_t>(resp.users(i).user_bin_attrs_size());
+    for (int i = 0; i < resp.users.count; ++i) {
+        total_bin_attrs += static_cast<size_t>(resp.users.items[i].user_bin_attrs.count);
     }
     p.user_bin_attrs.reserve(total_bin_attrs);
     p.bin_buffers.reserve(total_bin_attrs);
 
-    const int user_count = resp.users_size();
+    const int user_count = resp.users.count;
     p.user_info_a.resize(user_count);
     for (int i = 0; i < user_count; ++i) {
-        const auto& u = resp.users(i);
+        const auto& u = resp.users.items[i];
         auto& dst = p.user_info_a[i];
         dst = OrbisNpMatching2UserInfoA{};
         dst.next = (i + 1 < user_count) ? &p.user_info_a[i + 1] : nullptr;
-        SetNpOnlineId(dst.userOnlineId, u.npid());
-        dst.user.accountId = static_cast<Libraries::Np::OrbisNpAccountId>(u.account_id());
-        dst.user.platform = static_cast<Libraries::Np::OrbisNpPlatformType>(u.platform());
+        SetNpOnlineId(dst.userOnlineId, View(u.npid));
+        dst.user.accountId = static_cast<Libraries::Np::OrbisNpAccountId>(u.account_id);
+        dst.user.platform = static_cast<Libraries::Np::OrbisNpPlatformType>(u.platform);
 
-        if (u.user_bin_attrs_size() > 0) {
+        if (u.user_bin_attrs.count > 0) {
             OrbisNpMatching2BinAttr* first = nullptr;
-            for (int a = 0; a < u.user_bin_attrs_size(); ++a) {
-                const auto& src = u.user_bin_attrs(a);
-                p.bin_buffers.emplace_back(src.data().begin(), src.data().end());
+            for (int a = 0; a < u.user_bin_attrs.count; ++a) {
+                const auto& src = u.user_bin_attrs.items[a];
+                p.bin_buffers.emplace_back(src.data.data, src.data.data + src.data.size);
                 auto& buf = p.bin_buffers.back();
                 auto& ba = p.user_bin_attrs.emplace_back();
                 ba = OrbisNpMatching2BinAttr{};
-                ba.id = static_cast<OrbisNpMatching2AttributeId>(src.attr_id());
+                ba.id = static_cast<OrbisNpMatching2AttributeId>(src.attr_id);
                 ba.data = buf.empty() ? nullptr : buf.data();
                 ba.dataSize = buf.size();
                 if (!first) {
@@ -1057,7 +1065,7 @@ void* BuildGetUserInfoListPayloadA(ContextObject& ctx, CallbackPayload& p,
                 }
             }
             dst.userBinAttr = first;
-            dst.userBinAttrNum = static_cast<u64>(u.user_bin_attrs_size());
+            dst.userBinAttrNum = static_cast<u64>(u.user_bin_attrs.count);
         }
     }
 

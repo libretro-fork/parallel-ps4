@@ -107,8 +107,8 @@ for d in ("sdk/lib/um/x86_64", "sdk/lib/ucrt/x86_64", "crt/lib/x86_64"):
 print(f"library case links: {libs}")
 PY
 
-# The tools the build runs: glslang, which compiles the host shaders, the tool
-# that turns the fonts into sources, and protoc. Built for Linux here, from
+# The tools the build runs: glslang, which compiles the host shaders, and the
+# tool that turns the fonts into sources. Built for Linux here, from
 # the same sources, and handed to the Windows build, which cannot run its own.
 HOST="$TOOLS/host"
 CC=clang-19 CXX=clang++-19 cmake -S externals/glslang -B "$HOST/glslang" -G Ninja \
@@ -117,28 +117,6 @@ cmake --build "$HOST/glslang" --target glslang-standalone -- -j "$NUMPROC"
 HOST_GLSLANG=$(find "$HOST/glslang" -type f \( -name glslang -o -name glslangValidator \) -perm -u+x | head -1)
 clang++-19 -O1 -o "$HOST/font-embed" externals/imgui/misc/fonts/binary_to_compressed_c.cpp
 test -x "$HOST_GLSLANG"
-# protoc with abseil beside it, set up as externals/CMakeLists.txt does
-mkdir -p "$HOST/protoc-src"
-cat > "$HOST/protoc-src/CMakeLists.txt" <<PROTOC_EOF
-cmake_minimum_required(VERSION 3.24)
-project(host_protoc C CXX)
-set(CMAKE_CXX_STANDARD 17)
-set(ABSL_PROPAGATE_CXX_STD ON)
-add_subdirectory("$PWD/externals/abseil-cpp" abseil EXCLUDE_FROM_ALL)
-set(protobuf_BUILD_TESTS OFF CACHE INTERNAL "")
-set(protobuf_BUILD_EXAMPLES OFF CACHE INTERNAL "")
-set(protobuf_BUILD_PROTOC_BINARIES ON CACHE INTERNAL "")
-set(protobuf_INSTALL OFF CACHE INTERNAL "")
-set(protobuf_WITH_ZLIB OFF CACHE INTERNAL "")
-set(protobuf_BUILD_SHARED_LIBS OFF CACHE INTERNAL "")
-set(protobuf_LOCAL_DEPENDENCIES_ONLY ON CACHE INTERNAL "")
-set(protobuf_FORCE_FETCH_DEPENDENCIES OFF CACHE INTERNAL "")
-add_subdirectory("$PWD/externals/protobuf" protobuf)
-PROTOC_EOF
-CC=clang-19 CXX=clang++-19 cmake -S "$HOST/protoc-src" -B "$HOST/protoc" -G Ninja -DCMAKE_BUILD_TYPE=Release
-cmake --build "$HOST/protoc" --target protoc -- -j "$NUMPROC"
-HOST_PROTOC=$(find "$HOST/protoc" -type f -name 'protoc*' -perm -u+x | head -1)
-test -x "$HOST_PROTOC"
 
 TOOLCHAIN="$TOOLS/clang-cl-x86_64.cmake"
 cat > "$TOOLCHAIN" <<TOOLCHAIN_EOF
@@ -188,8 +166,7 @@ TOOLCHAIN_EOF
 cmake -S . -B "$BUILD_DIR" -G Ninja -DCMAKE_BUILD_TYPE=Release \
   -DCMAKE_TOOLCHAIN_FILE="$TOOLCHAIN" \
   -DENABLE_UPDATER=OFF \
-  -DSHADPS4_HOST_GLSLANG="$HOST_GLSLANG" -DSHADPS4_HOST_FONT_EMBED="$HOST/font-embed" \
-  -DSHADPS4_HOST_PROTOC="$HOST_PROTOC"
+  -DSHADPS4_HOST_GLSLANG="$HOST_GLSLANG" -DSHADPS4_HOST_FONT_EMBED="$HOST/font-embed"
 export PATH="$LLVM:$PATH"
 export LIB="$MSVC/crt/lib/x86_64;$MSVC/sdk/lib/um/x86_64;$MSVC/sdk/lib/ucrt/x86_64"
 cmake --build "$BUILD_DIR" -- -j "$NUMPROC" ${SHAD_CROSS_KEEP_GOING:+-k 0}

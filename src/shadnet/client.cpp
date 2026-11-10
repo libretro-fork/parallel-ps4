@@ -12,7 +12,7 @@
 #include "common/logging/log.h"
 #include "common/scm_rev.h"
 #include "common/thread.h"
-#include "shadnet.pb.h"
+#include "shadnet/messages.h"
 
 #ifdef _WIN32
 #pragma comment(lib, "Ws2_32.lib")
@@ -33,19 +33,19 @@ namespace ShadNet {
 // Build a u32-LE-prefixed proto blob payload for a request packet.
 template <typename T>
 static std::vector<u8> MakeProtoPayload(const T& msg) {
-    const std::string serialised = msg.SerializeAsString();
-    const u32 len = static_cast<u32>(serialised.size());
-    std::vector<u8> out(4);
-    out[0] = static_cast<u8>(len);
-    out[1] = static_cast<u8>(len >> 8);
-    out[2] = static_cast<u8>(len >> 16);
-    out[3] = static_cast<u8>(len >> 24);
-    out.insert(out.end(), serialised.begin(), serialised.end());
+    const u32 len = static_cast<u32>(EncodedSize(msg));
+    std::vector<u8> out;
+    out.reserve(4 + len);
+    out.push_back(static_cast<u8>(len));
+    out.push_back(static_cast<u8>(len >> 8));
+    out.push_back(static_cast<u8>(len >> 16));
+    out.push_back(static_cast<u8>(len >> 24));
+    EncodeAppend(msg, out);
     return out;
 }
 
 // Read a u32-LE-prefixed proto blob starting at pos in p.
-// Returns the raw bytes ready for ParseFromString.
+// Returns the raw bytes ready for Decode.
 std::string ShadNetClient::ExtractBlob(const std::vector<u8>& p, int pos) {
     if (pos + 4 > static_cast<int>(p.size()))
         return {};
@@ -198,15 +198,16 @@ void ShadNetClient::ConnectThread() {
     m_sem_connected.release();
 
     // Build Login request as protobuf
-    shadnet::LoginRequest req;
-    req.set_npid(m_npid);
-    req.set_password(m_password);
-    if (!m_token.empty())
-        req.set_token(m_token);
-    req.set_title_id(std::string(Common::ElfInfo::Instance().GameSerial()));
-    req.set_title_name(std::string(Common::ElfInfo::Instance().Title()));
+    const std::string title_id(Common::ElfInfo::Instance().GameSerial());
+    const std::string title_name(Common::ElfInfo::Instance().Title());
+    shadnet_LoginRequest req{};
+    req.npid = Bytes(m_npid);
+    req.password = Bytes(m_password);
+    req.token = Bytes(m_token);
+    req.title_id = Bytes(title_id);
+    req.title_name = Bytes(title_name);
     // Appear-Offline preference. shadNet handles us as offline for everyone else while set.
-    req.set_appear_offline(m_appear_offline);
+    req.appear_offline = m_appear_offline;
 
     const u64 id = m_pkt_counter.fetch_add(1);
     if (!SendAll(BuildPacket(CommandType::Login, id, MakeProtoPayload(req)))) {
@@ -506,26 +507,26 @@ u64 ShadNetClient::SubmitRequest(CommandType cmd, const std::vector<u8>& payload
 }
 
 u64 ShadNetClient::AddFriend(const std::string& npid) {
-    shadnet::FriendCommandRequest req;
-    req.set_npid(npid);
+    shadnet_FriendCommandRequest req{};
+    req.npid = Bytes(npid);
     return SubmitRequest(CommandType::AddFriend, MakeProtoPayload(req));
 }
 
 u64 ShadNetClient::RemoveFriend(const std::string& npid) {
-    shadnet::FriendCommandRequest req;
-    req.set_npid(npid);
+    shadnet_FriendCommandRequest req{};
+    req.npid = Bytes(npid);
     return SubmitRequest(CommandType::RemoveFriend, MakeProtoPayload(req));
 }
 
 u64 ShadNetClient::AddBlock(const std::string& npid) {
-    shadnet::FriendCommandRequest req;
-    req.set_npid(npid);
+    shadnet_FriendCommandRequest req{};
+    req.npid = Bytes(npid);
     return SubmitRequest(CommandType::AddBlock, MakeProtoPayload(req));
 }
 
 u64 ShadNetClient::RemoveBlock(const std::string& npid) {
-    shadnet::FriendCommandRequest req;
-    req.set_npid(npid);
+    shadnet_FriendCommandRequest req{};
+    req.npid = Bytes(npid);
     return SubmitRequest(CommandType::RemoveBlock, MakeProtoPayload(req));
 }
 
@@ -533,34 +534,35 @@ u64 ShadNetClient::SetAppearOffline(bool enable) {
     m_appear_offline = enable; // cache so the (re)login packet carries the current state
     if (!IsAuthenticated())
         return 0; // not connected yet -> login will carry the cached value
-    shadnet::SetAppearOfflineRequest req;
-    req.set_appear_offline(enable);
+    shadnet_SetAppearOfflineRequest req{};
+    req.appear_offline = enable;
     return SubmitRequest(CommandType::SetAppearOffline, MakeProtoPayload(req));
 }
 
 u64 ShadNetClient::LookupOnlineId(const std::string& npid) {
-    shadnet::LookupOnlineIdRequest req;
-    req.set_npid(npid);
+    shadnet_LookupOnlineIdRequest req{};
+    req.npid = Bytes(npid);
     return SubmitRequest(CommandType::LookupOnlineId, MakeProtoPayload(req));
 }
 
 u64 ShadNetClient::GetAuthorizationCode(const std::string& client_id, const std::string& scope) {
-    shadnet::GetAuthorizationCodeRequest req;
-    req.set_client_id(client_id);
-    req.set_scope(scope);
+    shadnet_GetAuthorizationCodeRequest req{};
+    req.client_id = Bytes(client_id);
+    req.scope = Bytes(scope);
     return SubmitRequest(CommandType::GetAuthorizationCode, MakeProtoPayload(req));
 }
 
-static std::vector<u8> MakeComIdPayload(const std::string& com_id, const std::string& proto_bytes) {
+template <typename T>
+static std::vector<u8> MakeComIdPayload(const std::string& com_id, const T& msg) {
+    const u32 sz = static_cast<u32>(EncodedSize(msg));
     std::vector<u8> payload;
-    payload.reserve(12 + 4 + proto_bytes.size());
+    payload.reserve(com_id.size() + 4 + sz);
     payload.insert(payload.end(), com_id.begin(), com_id.end());
-    const u32 sz = static_cast<u32>(proto_bytes.size());
     payload.push_back(static_cast<u8>(sz));
     payload.push_back(static_cast<u8>(sz >> 8));
     payload.push_back(static_cast<u8>(sz >> 16));
     payload.push_back(static_cast<u8>(sz >> 24));
-    payload.insert(payload.end(), proto_bytes.begin(), proto_bytes.end());
+    EncodeAppend(msg, payload);
     return payload;
 }
 
@@ -580,40 +582,29 @@ std::string ShadNetClient::BuildVersionString() {
 }
 
 u64 ShadNetClient::ReportClientVersion() {
-    shadnet::SetClientVersionRequest req;
-    req.set_version(BuildVersionString());
-    const std::string blob = req.SerializeAsString();
-
-    std::vector<u8> payload;
-    payload.reserve(4 + blob.size());
-    const u32 sz = static_cast<u32>(blob.size());
-    payload.push_back(static_cast<u8>(sz));
-    payload.push_back(static_cast<u8>(sz >> 8));
-    payload.push_back(static_cast<u8>(sz >> 16));
-    payload.push_back(static_cast<u8>(sz >> 24));
-    payload.insert(payload.end(), blob.begin(), blob.end());
-
-    return SubmitRequest(CommandType::SetClientVersion, payload);
+    const std::string version = BuildVersionString();
+    shadnet_SetClientVersionRequest req{};
+    req.version = Bytes(version);
+    return SubmitRequest(CommandType::SetClientVersion, MakeProtoPayload(req));
 }
 
 u64 ShadNetClient::UnlockTrophy(const std::string& com_id, s32 trophy_id, u64 timestamp) {
-    shadnet::UnlockTrophyRequest req;
-    req.set_trophyid(trophy_id);
-    req.set_timestamp(timestamp);
-    return SubmitRequest(CommandType::UnlockTrophy,
-                         MakeComIdPayload(com_id, req.SerializeAsString()));
+    shadnet_UnlockTrophyRequest req{};
+    req.trophyId = trophy_id;
+    req.timestamp = timestamp;
+    return SubmitRequest(CommandType::UnlockTrophy, MakeComIdPayload(com_id, req));
 }
 
 u64 ShadNetClient::SyncTrophies(const std::string& com_id,
                                 const std::vector<std::pair<s32, u64>>& local_trophies) {
-    shadnet::SyncTrophiesRequest req;
-    for (const auto& [id, ts] : local_trophies) {
-        auto* entry = req.add_trophies();
-        entry->set_trophyid(id);
-        entry->set_timestamp(ts);
+    std::vector<shadnet_TrophyEntry> entries(local_trophies.size());
+    for (std::size_t i = 0; i < local_trophies.size(); ++i) {
+        entries[i].trophyId = local_trophies[i].first;
+        entries[i].timestamp = local_trophies[i].second;
     }
-    return SubmitRequest(CommandType::SyncTrophies,
-                         MakeComIdPayload(com_id, req.SerializeAsString()));
+    shadnet_SyncTrophiesRequest req{};
+    SetItems(req.trophies, entries);
+    return SubmitRequest(CommandType::SyncTrophies, MakeComIdPayload(com_id, req));
 }
 
 bool ShadNetClient::IsTrophiesEnabled() const {
@@ -691,23 +682,24 @@ void ShadNetClient::HandleLoginReply(const std::vector<u8>& payload) {
         if (res.error == ErrorType::NoError) {
             // payload[0]   = ErrorType byte
             // payload[1..] = u32 LE blob size + LoginReply proto bytes
-            shadnet::LoginReply pb;
+            shadnet_LoginReply pb{};
+            Scratch pb_scratch;
             const std::string blob = ExtractBlob(payload, 1);
-            if (!blob.empty() && pb.ParseFromString(blob)) {
-                res.avatarUrl = pb.avatar_url();
-                res.userId = pb.user_id();
-                for (const auto& f : pb.friends()) {
+            if (!blob.empty() && Decode(pb, blob, pb_scratch)) {
+                res.avatarUrl = Str(pb.avatar_url);
+                res.userId = pb.user_id;
+                for (const auto& f : Items(pb.friends)) {
                     FriendEntry fe;
-                    fe.npid = f.npid();
-                    fe.online = f.online();
+                    fe.npid = Str(f.npid);
+                    fe.online = f.online;
                     res.friends.push_back(std::move(fe));
                 }
-                for (const auto& n : pb.friend_requests_sent())
-                    res.requestsSent.push_back(n);
-                for (const auto& n : pb.friend_requests_received())
-                    res.requestsReceived.push_back(n);
-                for (const auto& n : pb.blocked())
-                    res.blocked.push_back(n);
+                for (const auto& n : Items(pb.friend_requests_sent))
+                    res.requestsSent.push_back(Str(n));
+                for (const auto& n : Items(pb.friend_requests_received))
+                    res.requestsReceived.push_back(Str(n));
+                for (const auto& n : Items(pb.blocked))
+                    res.blocked.push_back(Str(n));
 
                 m_avatar_url = res.avatarUrl;
                 m_user_id = res.userId;
@@ -776,19 +768,20 @@ void ShadNetClient::HandleGetTokenReply(const std::vector<u8>& payload) {
         RequestServerFeatures();
         return;
     }
-    shadnet::GetTokenReply pb;
+    shadnet_GetTokenReply pb{};
+    Scratch pb_scratch;
     const std::string blob = ExtractBlob(payload, 1);
-    if (blob.empty() || !pb.ParseFromString(blob)) {
+    if (blob.empty() || !Decode(pb, blob, pb_scratch)) {
         LOG_ERROR(ShadNet, "Failed to parse GetTokenReply proto");
         RequestServerFeatures();
         return;
     }
     {
         std::lock_guard lock(m_mutex_bearer);
-        m_bearer_token = pb.token();
+        m_bearer_token = Str(pb.token);
     }
     LOG_INFO(ShadNet, "Bearer token captured ({} chars) for accountID={} canonical npid='{}'",
-             pb.token().size(), pb.user_id(), pb.npid());
+             pb.token.size, pb.user_id, View(pb.npid));
     RequestServerFeatures();
 }
 
@@ -800,11 +793,12 @@ void ShadNetClient::HandleServerFeaturesReply(const std::vector<u8>& payload) {
     if (!payload.empty()) {
         const ErrorType err = static_cast<ErrorType>(payload[0]);
         if (err == ErrorType::NoError) {
-            shadnet::ServerFeaturesReply pb;
+            shadnet_ServerFeaturesReply pb{};
+            Scratch pb_scratch;
             const std::string blob = ExtractBlob(payload, 1);
-            if (!blob.empty() && pb.ParseFromString(blob)) {
-                matching2_enabled = pb.matching2_enabled();
-                trophies_enabled = pb.trophies_enabled();
+            if (!blob.empty() && Decode(pb, blob, pb_scratch)) {
+                matching2_enabled = pb.matching2_enabled;
+                trophies_enabled = pb.trophies_enabled;
                 parsed = true;
             }
         } else {
@@ -839,104 +833,109 @@ void ShadNetClient::HandleNotification(u16 cmd_raw, const std::vector<u8>& paylo
 
     switch (static_cast<NotificationType>(cmd_raw)) {
     case NotificationType::FriendQuery: {
-        shadnet::NotifyFriendQuery pb;
-        if (!pb.ParseFromString(blob)) {
+        shadnet_NotifyFriendQuery pb{};
+        Scratch pb_scratch;
+        if (!Decode(pb, blob, pb_scratch)) {
             LOG_WARNING(ShadNet, "FriendQuery parse error");
             break;
         }
         NotifyFriendQuery n;
-        n.fromNpid = pb.from_npid();
+        n.fromNpid = Str(pb.from_npid);
         LOG_DEBUG(ShadNet, "FriendQuery from '{}'", n.fromNpid);
         if (onFriendQuery)
             onFriendQuery(n);
         break;
     }
     case NotificationType::FriendNew: {
-        shadnet::NotifyFriendNew pb;
-        if (!pb.ParseFromString(blob)) {
+        shadnet_NotifyFriendNew pb{};
+        Scratch pb_scratch;
+        if (!Decode(pb, blob, pb_scratch)) {
             LOG_WARNING(ShadNet, "FriendNew parse error");
             break;
         }
         NotifyFriendNew n;
-        n.npid = pb.npid();
-        n.online = pb.online();
+        n.npid = Str(pb.npid);
+        n.online = pb.online;
         LOG_DEBUG(ShadNet, "FriendNew '{}' ({})", n.npid, n.online ? "online" : "offline");
         if (onFriendNew)
             onFriendNew(n);
         break;
     }
     case NotificationType::FriendLost: {
-        shadnet::NotifyFriendLost pb;
-        if (!pb.ParseFromString(blob)) {
+        shadnet_NotifyFriendLost pb{};
+        Scratch pb_scratch;
+        if (!Decode(pb, blob, pb_scratch)) {
             LOG_WARNING(ShadNet, "FriendLost parse error");
             break;
         }
         NotifyFriendLost n;
-        n.npid = pb.npid();
+        n.npid = Str(pb.npid);
         LOG_DEBUG(ShadNet, "FriendLost '{}'", n.npid);
         if (onFriendLost)
             onFriendLost(n);
         break;
     }
     case NotificationType::FriendStatus: {
-        shadnet::NotifyFriendStatus pb;
-        if (!pb.ParseFromString(blob)) {
+        shadnet_NotifyFriendStatus pb{};
+        Scratch pb_scratch;
+        if (!Decode(pb, blob, pb_scratch)) {
             LOG_WARNING(ShadNet, "FriendStatus parse error");
             break;
         }
         NotifyFriendStatus n;
-        n.npid = pb.npid();
-        n.online = pb.online();
-        n.timestamp = pb.timestamp();
+        n.npid = Str(pb.npid);
+        n.online = pb.online;
+        n.timestamp = pb.timestamp;
         LOG_DEBUG(ShadNet, "FriendStatus '{}' is {}", n.npid, n.online ? "online" : "offline");
         if (onFriendStatus)
             onFriendStatus(n);
         break;
     }
     case NotificationType::RoomEvent: {
-        shadnet::NotifyRoomEvent pb;
-        if (!pb.ParseFromString(blob)) {
+        shadnet_NotifyRoomEvent pb{};
+        Scratch pb_scratch;
+        if (!Decode(pb, blob, pb_scratch)) {
             LOG_WARNING(ShadNet, "RoomEvent parse error");
             break;
         }
         NotifyRoomEvent n;
-        n.ctx_id = pb.ctx_id();
-        n.room_id = pb.room_id();
-        n.event = pb.event();
-        n.event_cause = pb.event_cause();
-        n.error_code = pb.error_code();
-        n.flags = pb.flags();
-        n.has_passwd_mask = pb.has_passwd_mask();
-        n.passwd_slot_mask = pb.passwd_slot_mask();
-        if (pb.has_member()) {
-            const auto& m = pb.member();
-            n.member_npid = m.npid();
-            n.member_account_id = m.account_id();
-            n.member_platform = m.platform();
-            n.member_id = m.member_id();
-            n.member_team_id = m.team_id();
-            n.member_is_owner = m.is_owner();
-            n.member_join_date = m.join_date();
-            n.member_nat_type = m.nat_type();
-            n.member_flag_attr = m.flag_attr();
-            n.member_group_id = m.group_id();
-            n.member_addr = m.addr();
-            n.member_port = m.port();
-            for (const auto& a : m.bin_attrs_internal()) {
+        n.ctx_id = pb.ctx_id;
+        n.room_id = pb.room_id;
+        n.event = pb.event;
+        n.event_cause = pb.event_cause;
+        n.error_code = pb.error_code;
+        n.flags = pb.flags;
+        n.has_passwd_mask = pb.has_passwd_mask;
+        n.passwd_slot_mask = pb.passwd_slot_mask;
+        if (pb.has_member) {
+            const auto& m = pb.member;
+            n.member_npid = Str(m.npid);
+            n.member_account_id = m.account_id;
+            n.member_platform = m.platform;
+            n.member_id = m.member_id;
+            n.member_team_id = m.team_id;
+            n.member_is_owner = m.is_owner;
+            n.member_join_date = m.join_date;
+            n.member_nat_type = m.nat_type;
+            n.member_flag_attr = m.flag_attr;
+            n.member_group_id = m.group_id;
+            n.member_addr = Str(m.addr);
+            n.member_port = m.port;
+            for (const auto& a : Items(m.bin_attrs_internal)) {
                 MatchingBinAttr ba;
-                ba.attr_id = a.attr_id();
-                ba.update_date = a.update_date();
-                ba.update_member_id = a.update_member_id();
-                ba.data.assign(a.data().begin(), a.data().end());
+                ba.attr_id = a.attr_id;
+                ba.update_date = a.update_date;
+                ba.update_member_id = a.update_member_id;
+                ba.data.assign(a.data.data, a.data.data + a.data.size);
                 n.member_bin_attrs.push_back(std::move(ba));
             }
         }
-        for (const auto& a : pb.bin_attrs()) {
+        for (const auto& a : Items(pb.bin_attrs)) {
             MatchingBinAttr ba;
-            ba.attr_id = a.attr_id();
-            ba.update_date = a.update_date();
-            ba.update_member_id = a.update_member_id();
-            ba.data.assign(a.data().begin(), a.data().end());
+            ba.attr_id = a.attr_id;
+            ba.update_date = a.update_date;
+            ba.update_member_id = a.update_member_id;
+            ba.data.assign(a.data.data, a.data.data + a.data.size);
             n.bin_attrs.push_back(std::move(ba));
         }
         LOG_DEBUG(ShadNet, "RoomEvent room_id={} event={:#x} cause={}", n.room_id, n.event,
@@ -946,24 +945,25 @@ void ShadNetClient::HandleNotification(u16 cmd_raw, const std::vector<u8>& paylo
         break;
     }
     case NotificationType::RoomMessage: {
-        shadnet::NotifyRoomMessage pb;
-        if (!pb.ParseFromString(blob)) {
+        shadnet_NotifyRoomMessage pb{};
+        Scratch pb_scratch;
+        if (!Decode(pb, blob, pb_scratch)) {
             LOG_WARNING(ShadNet, "RoomMessage parse error");
             break;
         }
         NotifyRoomMessage n;
-        n.ctx_id = pb.ctx_id();
-        n.room_id = pb.room_id();
-        n.src_member_id = pb.src_member_id();
-        n.event = pb.event();
-        n.cast_type = pb.cast_type();
-        for (const u32 member_id : pb.dst_member_ids()) {
+        n.ctx_id = pb.ctx_id;
+        n.room_id = pb.room_id;
+        n.src_member_id = pb.src_member_id;
+        n.event = pb.event;
+        n.cast_type = pb.cast_type;
+        for (const u32 member_id : Items(pb.dst_member_ids)) {
             n.dst_member_ids.push_back(member_id);
         }
-        n.src_npid = pb.src_npid();
-        n.src_account_id = pb.src_account_id();
-        n.src_platform = pb.src_platform();
-        n.msg.assign(pb.msg().begin(), pb.msg().end());
+        n.src_npid = Str(pb.src_npid);
+        n.src_account_id = pb.src_account_id;
+        n.src_platform = pb.src_platform;
+        n.msg.assign(pb.msg.data, pb.msg.data + pb.msg.size);
         LOG_DEBUG(ShadNet, "RoomMessage room_id={} src={} event={:#x} bytes={}", n.room_id,
                   n.src_member_id, n.event, n.msg.size());
         if (onRoomMessage)
@@ -1027,16 +1027,17 @@ void ShadNetClient::HandleNotification(u16 cmd_raw, const std::vector<u8>& paylo
         break;
     }
     case NotificationType::ServiceUnavailable: {
-        shadnet::NotifyServiceUnavailable pb;
-        if (!pb.ParseFromString(blob)) {
+        shadnet_NotifyServiceUnavailable pb{};
+        Scratch pb_scratch;
+        if (!Decode(pb, blob, pb_scratch)) {
             LOG_WARNING(ShadNet, "ServiceUnavailable parse error");
             break;
         }
         NotifyServiceUnavailable n;
-        n.service = pb.service();
-        n.reason = pb.reason();
-        n.inUse = pb.in_use();
-        n.limit = pb.limit();
+        n.service = pb.service;
+        n.reason = pb.reason;
+        n.inUse = pb.in_use;
+        n.limit = pb.limit;
         LOG_INFO(ShadNet, "ServiceUnavailable service={} reason={} in_use={} limit={}", n.service,
                  n.reason, n.inUse, n.limit);
         if (onServiceUnavailable)
@@ -1044,15 +1045,16 @@ void ShadNetClient::HandleNotification(u16 cmd_raw, const std::vector<u8>& paylo
         break;
     }
     case NotificationType::ClientRejected: {
-        shadnet::NotifyClientRejected pb;
-        if (!pb.ParseFromString(blob)) {
+        shadnet_NotifyClientRejected pb{};
+        Scratch pb_scratch;
+        if (!Decode(pb, blob, pb_scratch)) {
             LOG_WARNING(ShadNet, "ClientRejected parse error");
             break;
         }
         NotifyClientRejected n;
-        n.reason = pb.reason();
-        n.message = pb.message();
-        n.version = pb.version();
+        n.reason = pb.reason;
+        n.message = Str(pb.message);
+        n.version = Str(pb.version);
         LOG_ERROR(ShadNet, "Server rejected this client (reason={}, version='{}'): {}", n.reason,
                   n.version, n.message);
         if (onClientRejected)

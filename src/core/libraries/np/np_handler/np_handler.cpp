@@ -18,8 +18,17 @@
 #include "core/libraries/np/np_matching2/np_matching2_mm.h"
 #include "core/user_manager.h"
 #include "imgui/shadnet_notifications_layer.h"
-#include "shadnet.pb.h"
+#include "shadnet/messages.h"
 #include "shadnet/server_probe.h"
+
+using ShadNet::Bytes;
+using ShadNet::Decode;
+using ShadNet::Encode;
+using ShadNet::Items;
+using ShadNet::Scratch;
+using ShadNet::SetItems;
+using ShadNet::Str;
+using ShadNet::View;
 
 namespace Libraries::Np {
 
@@ -760,16 +769,18 @@ void NpHandler::OnLookupReply(s32 user_id, ShadNet::CommandType /*cmd*/, u64 pkt
         return;
     }
 
-    shadnet::LookupOnlineIdReply pb;
-    if (!pb.ParseFromArray(body.data() + 4, static_cast<int>(blob_sz))) {
+    shadnet_LookupOnlineIdReply pb{};
+
+    Scratch pb_scratch;
+    if (!Decode(pb, body.data() + 4, blob_sz, pb_scratch)) {
         LOG_WARNING(NpHandler, "LookupOnlineId: could not parse reply");
         on_result(ORBIS_NP_COMMUNITY_ERROR_BAD_RESPONSE, 0, {});
         return;
     }
 
     LOG_INFO(NpHandler, "LookupOnlineId: user_id={} pkt_id={} -> accountId={} npid='{}'", user_id,
-             pkt_id, pb.account_id(), pb.npid());
-    on_result(ORBIS_OK, pb.account_id(), pb.npid());
+             pkt_id, pb.account_id, View(pb.npid));
+    on_result(ORBIS_OK, pb.account_id, Str(pb.npid));
 }
 
 void NpHandler::OnClientRejected(s32 user_id, const ShadNet::NotifyClientRejected& n) {
