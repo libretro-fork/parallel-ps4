@@ -1,10 +1,7 @@
 // SPDX-FileCopyrightText: Copyright 2024-2026 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
-#include <boost/preprocessor/stringize.hpp>
-
 #include "common/assert.h"
-#include "common/debug.h"
 #include "common/polyfill_thread.h"
 #include "common/scope_exit.h"
 #include "common/thread.h"
@@ -21,34 +18,16 @@
 
 namespace AmdGpu {
 
-static const char* dcb_task_name{"DCB_TASK"};
-static const char* ccb_task_name{"CCB_TASK"};
+#define YIELD_CE()                                                                                 \
+    co_yield {}
+#define YIELD_GFX()                                                                                \
+    co_yield {}
+#define YIELD_ASC(id)                                                                              \
+    co_yield {}
 
-#define MAX_NAMES 56
-static_assert(Liverpool::NumComputeRings <= MAX_NAMES);
-
-#define NAME_NUM(z, n, name) BOOST_PP_STRINGIZE(name) BOOST_PP_STRINGIZE(n),
-#define NAME_ARRAY(name, num) {BOOST_PP_REPEAT(num, NAME_NUM, name)}
-
-static const char* acb_task_name[] = NAME_ARRAY(ACB_TASK, MAX_NAMES);
-
-#define YIELD(name)                                                                                \
-    FIBER_EXIT;                                                                                    \
-    co_yield {};                                                                                   \
-    FIBER_ENTER(name);
-
-#define YIELD_CE() YIELD(ccb_task_name)
-#define YIELD_GFX() YIELD(dcb_task_name)
-#define YIELD_ASC(id) YIELD(acb_task_name[id])
-
-#define RESUME(task, name)                                                                         \
-    FIBER_EXIT;                                                                                    \
-    task.handle.resume();                                                                          \
-    FIBER_ENTER(name);
-
-#define RESUME_CE(task) RESUME(task, ccb_task_name)
-#define RESUME_GFX(task) RESUME(task, dcb_task_name)
-#define RESUME_ASC(task, id) RESUME(task, acb_task_name[id])
+#define RESUME_CE(task) task.handle.resume()
+#define RESUME_GFX(task) task.handle.resume()
+#define RESUME_ASC(task, id) task.handle.resume()
 
 std::array<u8, 48_KB> Liverpool::ConstantEngine::constants_heap;
 
@@ -186,7 +165,6 @@ void Liverpool::Process(std::stop_token stoken) {
 }
 
 Liverpool::Task Liverpool::ProcessCeUpdate(std::span<const u32> ccb) {
-    FIBER_ENTER(ccb_task_name);
 
     while (!ccb.empty()) {
         ProcessCommands();
@@ -251,12 +229,9 @@ Liverpool::Task Liverpool::ProcessCeUpdate(std::span<const u32> ccb) {
         }
         ccb = NextPacket(ccb, header->type3.NumWords() + 1);
     }
-
-    FIBER_EXIT;
 }
 
 Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb) {
-    FIBER_ENTER(dcb_task_name);
 
     const auto base_addr = reinterpret_cast<uintptr_t>(dcb.data());
     while (!dcb.empty()) {
@@ -903,13 +878,10 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb) {
             break;
         }
     }
-
-    FIBER_EXIT;
 }
 
 template <bool is_indirect>
 Liverpool::Task Liverpool::ProcessCompute(std::span<const u32> acb, u32 vqid) {
-    FIBER_ENTER(acb_task_name[vqid]);
     auto& queue = asc_queues[{vqid}];
 
     struct IndirectPatch {
@@ -1175,8 +1147,6 @@ Liverpool::Task Liverpool::ProcessCompute(std::span<const u32> acb, u32 vqid) {
             *queue.read_addr %= queue.ring_size_dw;
         }
     }
-
-    FIBER_EXIT;
 }
 
 Liverpool::CmdBuffer Liverpool::CopyCmdBuffers(std::span<const u32> dcb, std::span<const u32> ccb) {

@@ -16,10 +16,6 @@
 #include "video_core/renderer_vulkan/vk_semaphore.h"
 #include "vulkan/vulkan.hpp"
 
-namespace tracy {
-class VkCtxScope;
-}
-
 namespace Vulkan {
 
 class Instance;
@@ -479,7 +475,6 @@ private:
     std::jthread priority_pending_ops_thread;
     RenderState render_state;
     bool is_rendering = false;
-    tracy::VkCtxScope* profiler_scope{};
 };
 
 } // namespace Vulkan

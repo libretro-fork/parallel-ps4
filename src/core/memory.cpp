@@ -3,7 +3,6 @@
 
 #include "common/alignment.h"
 #include "common/assert.h"
-#include "common/debug.h"
 #include "common/elf_info.h"
 #include "core/emulator_settings.h"
 #include "core/file_sys/fs.h"
@@ -457,9 +456,6 @@ s32 MemoryManager::PoolCommit(VAddr virtual_addr, u64 size, MemoryProt prot, s32
         void* out_addr = impl.Map(current_addr, size_to_map, new_dmem_area.base);
         rasterizer->RegisterMemory(current_addr, size_to_map);
 
-        // Tracy memory tracking breaks from merging memory areas. Disabled for now.
-        // TRACK_ALLOC(out_addr, size_to_map, "VMEM");
-
         handle = MergeAdjacent(dmem_map, new_dmem_handle);
         current_addr += size_to_map;
         remaining_size -= size_to_map;
@@ -638,9 +634,6 @@ s32 MemoryManager::MapMemory(void** out_addr, VAddr virtual_addr, u64 size, Memo
             void* out_addr = impl.Map(current_addr, size_to_map, new_fmem_area.base, is_exec);
             rasterizer->RegisterMemory(current_addr, size_to_map);
 
-            // Tracy memory tracking breaks from merging memory areas. Disabled for now.
-            // TRACK_ALLOC(out_addr, size_to_map, "VMEM");
-
             // Merge this handle with adjacent areas
             handle = MergeAdjacent(fmem_map, new_fmem_handle);
 
@@ -695,8 +688,6 @@ s32 MemoryManager::MapMemory(void** out_addr, VAddr virtual_addr, u64 size, Memo
         if (type != VMAType::Flexible) {
             impl.Map(mapped_addr, size, phys_addr, is_exec);
             rasterizer->RegisterMemory(mapped_addr, size);
-            // Tracy memory tracking breaks from merging memory areas. Disabled for now.
-            // TRACK_ALLOC(mapped_addr, size, "VMEM");
         }
 
 #ifdef SHADPS4_ENABLE_FEX_GUEST_CPU
@@ -925,9 +916,6 @@ s32 MemoryManager::PoolDecommit(VAddr virtual_addr, u64 size) {
     VAddr unmapped_addr = impl.Unmap(virtual_addr, &size_to_unmap);
     rasterizer->RegisterMemory(unmapped_addr, size_to_unmap);
 
-    // Tracy memory tracking breaks from merging memory areas. Disabled for now.
-    // TRACK_FREE(virtual_addr, "VMEM");
-
     return ORBIS_OK;
 }
 
@@ -1024,9 +1012,6 @@ u64 MemoryManager::UnmapBytesFromEntry(VAddr virtual_addr, VirtualMemoryArea vma
         u64 size_to_unmap = size_in_vma;
         VAddr unmapped_addr = impl.Unmap(virtual_addr, &size_to_unmap);
         rasterizer->RegisterMemory(unmapped_addr, size_to_unmap);
-
-        // Tracy memory tracking breaks from merging memory areas. Disabled for now.
-        // TRACK_FREE(virtual_addr, "VMEM");
     }
     return size_in_vma;
 }

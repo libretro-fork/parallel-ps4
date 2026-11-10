@@ -5,7 +5,6 @@
 #include <boost/asio/io_context.hpp>
 
 #include "common/assert.h"
-#include "common/debug.h"
 #include "common/elf_info.h"
 #include "common/logging/log.h"
 #include "common/polyfill_thread.h"
@@ -63,7 +62,6 @@ static void KernelServiceThread(std::stop_token stoken) {
     Common::SetCurrentThreadName("shadPS4:KernelServiceThread");
 
     while (!stoken.stop_requested()) {
-        HLE_TRACE;
         {
             std::unique_lock lock{m_asio_req};
             Common::CondvarWait(cv_asio_req, lock, stoken, [] { return asio_requests != 0; });

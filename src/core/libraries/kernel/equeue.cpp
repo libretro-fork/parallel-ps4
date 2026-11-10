@@ -6,7 +6,6 @@
 #include <magic_enum/magic_enum.hpp>
 
 #include "common/assert.h"
-#include "common/debug.h"
 #include "common/logging/log.h"
 #include "common/singleton.h"
 #include "core/file_sys/fs.h"
@@ -597,14 +596,12 @@ int PS4_SYSV_ABI sceKernelDeleteEqueue(OrbisKernelEqueue eq) {
 
 int PS4_SYSV_ABI sceKernelWaitEqueue(OrbisKernelEqueue eq, OrbisKernelEvent* ev, int num, int* out,
                                      OrbisKernelUseconds* timo) {
-    HLE_TRACE;
     if (!kqueues.contains(eq)) {
         return ORBIS_KERNEL_ERROR_EBADF;
     }
 
     auto& equeue = kqueues[eq];
 
-    TRACE_HINT(equeue->GetName());
     LOG_TRACE(Kernel_Event, "equeue = {} num = {}", equeue->GetName(), num);
 
     if (ev == nullptr) {

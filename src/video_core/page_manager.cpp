@@ -5,7 +5,6 @@
 #include <utility>
 #include "common/adaptive_mutex.h"
 #include "common/assert.h"
-#include "common/debug.h"
 #include "common/div_ceil.h"
 #include "common/error.h"
 #include "common/multi_level_page_table.h"
@@ -423,7 +422,6 @@ struct SignalImpl : public PageManager::Impl {
     }
 
     void Protect(VAddr address, size_t size, Core::MemoryPermission perms) override {
-        RENDERER_TRACE;
         auto* memory = Core::Memory::Instance();
         auto& impl = memory->GetAddressSpace();
         ASSERT_MSG(perms != Core::MemoryPermission::Write,

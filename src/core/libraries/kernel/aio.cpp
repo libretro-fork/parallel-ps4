@@ -5,7 +5,6 @@
 
 #include "aio.h"
 #include "common/assert.h"
-#include "common/debug.h"
 #include "common/logging/log.h"
 #include "core/libraries/kernel/equeue.h"
 #include "core/libraries/kernel/orbis_error.h"

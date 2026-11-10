@@ -12,7 +12,6 @@
 #include <fmt/xchar.h>
 #include <hwinfo/hwinfo.h>
 
-#include "common/debug.h"
 #include "common/elf_info.h"
 #include "common/logging/log.h"
 #include "common/memory_patcher.h"

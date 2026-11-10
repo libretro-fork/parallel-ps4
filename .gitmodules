@@ -34,10 +34,6 @@
 	path = externals/sirit
 	url = https://github.com/shadps4-emu/sirit.git
 	shallow = true
-[submodule "externals/tracy"]
-	path = externals/tracy
-	url = https://github.com/shadps4-emu/tracy.git
-	shallow = true
 [submodule "externals/ext-boost"]
 	path = externals/ext-boost
 	url = https://github.com/shadps4-emu/ext-boost.git

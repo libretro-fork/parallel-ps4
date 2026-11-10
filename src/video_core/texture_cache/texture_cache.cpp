@@ -6,7 +6,6 @@
 #include <encodings/xxh3.h>
 
 #include "common/assert.h"
-#include "common/debug.h"
 #include "common/div_ceil.h"
 #include "common/hash.h"
 #include "core/emulator_settings.h"
@@ -865,9 +864,6 @@ void TextureCache::RefreshImage(Image& image) {
         image.flags &= ~ImageFlagBits::Dirty;
         return;
     }
-
-    RENDERER_TRACE;
-    TRACE_HINT(fmt::format("{:x}:{:x}", image.info.guest_address, image.info.guest_size));
 
     if (True(image.flags & ImageFlagBits::MaybeCpuDirty) &&
         False(image.flags & ImageFlagBits::CpuDirty)) {

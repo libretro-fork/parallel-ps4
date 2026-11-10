@@ -1,7 +1,6 @@
 // SPDX-FileCopyrightText: Copyright 2024-2026 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
-#include "common/debug.h"
 #include "common/elf_info.h"
 #include "common/io_file.h"
 #include "common/path_util.h"
@@ -594,10 +593,6 @@ void Presenter::Present(Frame* frame, bool is_reusing_frame, bool is_game_frame)
     }
 
     {
-        auto* profiler_ctx = instance.GetProfilerContext();
-        TracyVkNamedZoneC(profiler_ctx, renderer_gpu_zone, cmdbuf, "Host frame",
-                          MarkersPalette::GpuMarkerColor, profiler_ctx != nullptr);
-
         const vk::Extent2D extent = swapchain.GetExtent();
         const std::array pre_barriers{
             vk::ImageMemoryBarrier{
@@ -755,10 +750,6 @@ void Presenter::Present(Frame* frame, bool is_reusing_frame, bool is_game_frame)
         cmdbuf.pipelineBarrier(vk::PipelineStageFlagBits::eAllCommands,
                                vk::PipelineStageFlagBits::eAllCommands,
                                vk::DependencyFlagBits::eByRegion, {}, {}, post_barrier);
-
-        if (profiler_ctx) {
-            TracyVkCollect(profiler_ctx, cmdbuf);
-        }
     }
     if (emu_settings_get_vkhost_markers()) {
         cmdbuf.endDebugUtilsLabelEXT();

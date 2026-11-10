@@ -8,9 +8,6 @@
 
 #include "video_core/renderer_vulkan/vk_platform.h"
 
-#define TRACY_VK_USE_SYMBOL_TABLE
-#include <tracy/TracyVulkan.hpp>
-
 VK_DEFINE_HANDLE(VmaAllocator)
 
 namespace Vulkan {
@@ -68,10 +65,6 @@ public:
 
     vk::Queue GetPresentQueue() const {
         return present_queue;
-    }
-
-    TracyVkCtx GetProfilerContext() const {
-        return profiler_context;
     }
 
     /// Returns true if anisotropic filtering is supported
@@ -541,7 +534,6 @@ private:
     std::vector<vk::PhysicalDevice> physical_devices;
     std::vector<std::string> available_extensions;
     std::unordered_map<vk::Format, vk::FormatProperties3> format_properties;
-    TracyVkCtx profiler_context{};
     u32 queue_family_index{0};
     bool custom_border_color{};
     bool fragment_shader_barycentric{};
