@@ -7,12 +7,10 @@
 #include "common/logging/log.h"
 #include "core/emulator_settings.h"
 #include "imgui/renderer/imgui_core.h"
+#include "libretro/libretro_bridge.h"
 #include "sdl_window.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_swapchain.h"
-#ifdef LIBRETRO
-#include "libretro/libretro_bridge.h"
-#endif
 
 namespace Vulkan {
 
@@ -21,7 +19,6 @@ static constexpr vk::SurfaceFormatKHR SURFACE_FORMAT_HDR = {
     .colorSpace = vk::ColorSpaceKHR::eHdr10St2084EXT,
 };
 
-#ifdef LIBRETRO
 // The libretro core has no surface to present to: the "swapchain" is a few images of its own,
 // taken in turn, and the presenter reads each finished one back for the frontend. B8G8R8A8 is
 // the frontend's XRGB8888 byte for byte.
@@ -32,12 +29,6 @@ Swapchain::Swapchain(const Instance& instance_, const Frontend::WindowSDL& windo
     surface_format.format = vk::Format::eB8G8R8A8Unorm;
     surface_format.colorSpace = vk::ColorSpaceKHR::eSrgbNonlinear;
     present_mode = vk::PresentModeKHR::eFifo;
-#else
-Swapchain::Swapchain(const Instance& instance_, const Frontend::WindowSDL& window_)
-    : instance{instance_}, window{window_}, surface{CreateSurface(instance.GetInstance(), window)} {
-    FindPresentFormat();
-    FindPresentMode();
-#endif
 
     Create(window.GetWidth(), window.GetHeight());
     ImGui::Core::Initialize(instance, window, image_count, surface_format.format);
@@ -45,9 +36,6 @@ Swapchain::Swapchain(const Instance& instance_, const Frontend::WindowSDL& windo
 
 Swapchain::~Swapchain() {
     Destroy();
-#ifndef LIBRETRO
-    instance.GetInstance().destroySurfaceKHR(surface);
-#endif
 }
 
 void Swapchain::Create(u32 width_, u32 height_) {
@@ -55,16 +43,13 @@ void Swapchain::Create(u32 width_, u32 height_) {
     height = height_;
     needs_recreation = false;
 
-#ifdef LIBRETRO
     // Images the frontend has are kept: it was sent them once, and draws from them.
     if (Libretro::GpuFramesActive() && !images.empty()) {
         return;
     }
-#endif
 
     Destroy();
 
-#ifdef LIBRETRO
     extent = vk::Extent2D{std::max(width, 1u), std::max(height, 1u)};
     image_index = 0;
     frame_index = 0;
@@ -79,7 +64,6 @@ void Swapchain::Create(u32 width_, u32 height_) {
     SetupImages();
     RefreshSemaphores();
     return;
-#endif
 
     SetSurfaceProperties();
 
@@ -145,12 +129,10 @@ void Swapchain::SetHDR(bool hdr) {
 }
 
 bool Swapchain::AcquireNextImage() {
-#ifdef LIBRETRO
     // An image the frontend is not showing, when it shows them itself.
     image_index = Libretro::GpuFramesActive() ? Libretro::AcquireImage()
                                               : (image_index + 1) % image_count;
     return true;
-#endif
     vk::Device device = instance.GetDevice();
     vk::Result result =
         device.acquireNextImageKHR(swapchain, std::numeric_limits<u64>::max(),
@@ -176,10 +158,8 @@ bool Swapchain::AcquireNextImage() {
 }
 
 bool Swapchain::Present() {
-#ifdef LIBRETRO
     frame_index = (frame_index + 1) % image_count;
     return true;
-#endif
     const vk::PresentInfoKHR present_info = {
         .waitSemaphoreCount = 1,
         .pWaitSemaphores = &present_ready[image_index],
@@ -321,7 +301,6 @@ void Swapchain::Destroy() {
     if (swapchain) {
         device.destroySwapchainKHR(swapchain);
     }
-#ifdef LIBRETRO
     for (const auto& image : images) {
         device.destroyImage(image);
     }
@@ -330,7 +309,6 @@ void Swapchain::Destroy() {
         device.freeMemory(memory);
     }
     offscreen_memory.clear();
-#endif
 
     for (const auto& sem : image_acquired) {
         device.destroySemaphore(sem);
@@ -368,7 +346,6 @@ void Swapchain::RefreshSemaphores() {
     }
 }
 
-#ifdef LIBRETRO
 bool Swapchain::CreateSharedImages() {
 #if defined(__linux__) || defined(_WIN32)
     // Once only: the images' descriptors are sent to the frontend once, and the picture's size
@@ -562,17 +539,9 @@ void Swapchain::CreateOffscreenImages() {
                    "Failed to bind offscreen image memory: {}", vk::to_string(bind_result));
     }
 }
-#endif
 
 void Swapchain::SetupImages() {
     vk::Device device = instance.GetDevice();
-#ifndef LIBRETRO
-    auto [images_result, imgs] = device.getSwapchainImagesKHR(swapchain);
-    ASSERT_MSG(images_result == vk::Result::eSuccess, "Failed to create swapchain images: {}",
-               vk::to_string(images_result));
-    images = std::move(imgs);
-    image_count = static_cast<u32>(images.size());
-#endif
     images_view.resize(image_count);
     for (u32 i = 0; i < image_count; ++i) {
         if (images_view[i]) {

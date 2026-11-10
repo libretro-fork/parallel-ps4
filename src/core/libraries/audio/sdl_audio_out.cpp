@@ -14,9 +14,7 @@
 #include "core/libraries/audio/audioout.h"
 #include "core/libraries/audio/audioout_backend.h"
 #include "core/libraries/kernel/threads.h"
-#ifdef LIBRETRO
 #include "libretro/libretro_bridge.h"
-#endif
 
 // SIMD support detection
 #if defined(__x86_64__) || defined(_M_X64)
@@ -34,11 +32,6 @@ constexpr float INV_VOLUME_0DB = 1.0f / VOLUME_0DB;
 constexpr float VOLUME_EPSILON = 0.001f;
 // Timing constants
 constexpr u64 VOLUME_CHECK_INTERVAL_US = 50000; // Check every 50ms
-constexpr u64 MIN_SLEEP_THRESHOLD_US = 10;
-constexpr u64 TIMING_RESYNC_THRESHOLD_US = 100000; // Resync if >100ms behind
-
-// Queue management
-constexpr u32 QUEUE_MULTIPLIER = 4;
 // Memory alignment for SIMD
 constexpr size_t AUDIO_BUFFER_ALIGNMENT = 32;
 
@@ -61,10 +54,10 @@ enum ChannelPos : u8 {
 class SDLPortBackend : public PortBackend {
 public:
     explicit SDLPortBackend(const PortOut& port)
-        : frame_size(port.format_info.FrameSize()), guest_buffer_size(port.BufferSize()),
-          buffer_frames(port.buffer_frames), sample_rate(port.sample_rate),
-          num_channels(port.format_info.num_channels), is_float(port.format_info.is_float),
-          is_std(port.format_info.is_std), channel_layout(port.format_info.channel_layout) {
+        : frame_size(port.format_info.FrameSize()), buffer_frames(port.buffer_frames),
+          sample_rate(port.sample_rate), num_channels(port.format_info.num_channels),
+          is_float(port.format_info.is_float), is_std(port.format_info.is_std),
+          channel_layout(port.format_info.channel_layout) {
 
         if (!Initialize(port.type)) {
             LOG_ERROR(Lib_AudioOut, "Failed to initialize SDL audio backend");
@@ -87,11 +80,7 @@ public:
         UpdateVolumeIfChanged();
         const u64 current_time = Kernel::sceKernelGetProcessTime();
         convert(ptr, internal_buffer, buffer_frames, nullptr);
-#ifdef LIBRETRO
         WaitForFrontend();
-#else
-        HandleTiming(current_time);
-#endif
 
         if ((output_count++ & 0xF) == 0) { // Check every 16 outputs
             ManageAudioQueue();
@@ -143,9 +132,6 @@ public:
 
 private:
     bool Initialize(OrbisAudioOutPort type) {
-        // Calculate timing parameters
-        period_us = (1000000ULL * buffer_frames + sample_rate / 2) / sample_rate;
-
         // Allocate aligned internal buffer for SIMD operations
         internal_buffer_size = buffer_frames * sizeof(float) * num_channels;
 
@@ -181,9 +167,7 @@ private:
     }
 
     void Cleanup() {
-#ifdef LIBRETRO
         Libretro::RemoveAudioStream(stream);
-#endif
         if (stream) {
             SDL_DestroyAudioStream(stream);
             stream = nullptr;
@@ -226,35 +210,6 @@ private:
         }
     }
 
-    void HandleTiming(u64 current_time) {
-        if (next_output_time == 0) [[unlikely]] {
-            // First output - set initial timing
-            next_output_time = current_time + period_us;
-            return;
-        }
-
-        const s64 time_diff = static_cast<s64>(current_time - next_output_time);
-
-        if (time_diff > static_cast<s64>(TIMING_RESYNC_THRESHOLD_US)) [[unlikely]] {
-            // We're far behind - resync
-            next_output_time = current_time + period_us;
-        } else if (time_diff < 0) {
-            // We're ahead of schedule - wait
-            const u64 time_to_wait = static_cast<u64>(-time_diff);
-            next_output_time += period_us;
-
-            if (time_to_wait > MIN_SLEEP_THRESHOLD_US) {
-                // Sleep for most of the wait period
-                const u64 sleep_duration = time_to_wait - MIN_SLEEP_THRESHOLD_US;
-                std::this_thread::sleep_for(std::chrono::microseconds(sleep_duration));
-            }
-        } else {
-            // Slightly behind or on time - just advance
-            next_output_time += period_us;
-        }
-    }
-
-#ifdef LIBRETRO
     // The libretro core: the port is paced by what the frontend takes, as a device would pace
     // it, not by the clock. The frontend takes a frame's worth per run at its own rate, a
     // little off the game's; against the clock the difference piled up as latency until the
@@ -271,7 +226,6 @@ private:
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
         }
     }
-#endif
 
     void ManageAudioQueue() {
         const auto queued = SDL_GetAudioStreamQueued(stream);
@@ -284,7 +238,6 @@ private:
         }
     }
 
-#ifdef LIBRETRO
     // The libretro core: the port's stream is bound to no device. SDL converts what the game
     // writes to the frontend's format (16-bit stereo at 48 kHz) and the core takes it out a
     // frame's worth per retro_run, mixing the ports.
@@ -319,118 +272,6 @@ private:
                  static_cast<int>(type), sample_rate, num_channels);
         return true;
     }
-#else
-    bool OpenDevice(OrbisAudioOutPort type) {
-        // Determine device
-        const std::string device_name = GetDeviceName(type);
-        const SDL_AudioDeviceID dev_id = SelectAudioDevice(device_name, type);
-
-        if (dev_id == SDL_INVALID_AUDIODEVICEID) {
-            return false;
-        }
-
-        const SDL_AudioSpec fmt = {
-            .format = SDL_AUDIO_F32LE,
-            .channels = static_cast<u8>(num_channels),
-            .freq = static_cast<int>(sample_rate),
-        };
-
-        // Create audio stream
-        stream = SDL_OpenAudioDeviceStream(dev_id, &fmt, nullptr, nullptr);
-        if (!stream) {
-            LOG_ERROR(Lib_AudioOut, "Failed to create SDL audio stream: {}", SDL_GetError());
-            return false;
-        }
-
-        SDL_AudioSpec dev_spec{};
-        if (num_channels >= 6 &&
-            SDL_GetAudioDeviceFormat(SDL_GetAudioStreamDevice(stream), &dev_spec, nullptr) &&
-            dev_spec.channels >= 1 && dev_spec.channels <= 2) {
-            ps4_downmix = true;
-            internal_buffer_size = buffer_frames * sizeof(float) * 2;
-            LOG_INFO(Lib_AudioOut, "Stereo device: using PS4-accurate {}ch->stereo downmix",
-                     num_channels);
-
-            SDL_DestroyAudioStream(stream);
-            const SDL_AudioSpec stereo_fmt = {
-                .format = SDL_AUDIO_F32LE,
-                .channels = 2,
-                .freq = static_cast<int>(sample_rate),
-            };
-            stream = SDL_OpenAudioDeviceStream(dev_id, &stereo_fmt, nullptr, nullptr);
-            if (!stream) {
-                LOG_ERROR(Lib_AudioOut, "Failed to recreate SDL audio stream: {}", SDL_GetError());
-                return false;
-            }
-        }
-
-        // Configure channel mapping (input is already stereo when folding)
-        if (!ps4_downmix && !ConfigureChannelMap()) {
-            SDL_DestroyAudioStream(stream);
-            stream = nullptr;
-            return false;
-        }
-
-        // Set initial volume
-        const float initial_gain = current_gain.load(std::memory_order_relaxed);
-        if (!SDL_SetAudioStreamGain(stream, initial_gain)) {
-            LOG_WARNING(Lib_AudioOut, "Failed to set initial audio gain: {}", SDL_GetError());
-        }
-
-        // Start playback
-        if (!SDL_ResumeAudioStreamDevice(stream)) {
-            LOG_ERROR(Lib_AudioOut, "Failed to resume audio stream: {}", SDL_GetError());
-            SDL_DestroyAudioStream(stream);
-            stream = nullptr;
-            return false;
-        }
-
-        LOG_INFO(Lib_AudioOut, "Opened audio device: {} ({} Hz, {} ch, gain: {:.3f})", device_name,
-                 sample_rate, num_channels, initial_gain);
-        return true;
-    }
-
-#endif
-
-    SDL_AudioDeviceID SelectAudioDevice(const std::string& device_name, OrbisAudioOutPort type) {
-        if (device_name == "None") {
-            LOG_INFO(Lib_AudioOut, "Audio device disabled for port type {}",
-                     static_cast<int>(type));
-            return SDL_INVALID_AUDIODEVICEID;
-        }
-
-        if (device_name.empty() || device_name == "Default Device") {
-            return SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK;
-        }
-
-        // Search for specific device
-        int num_devices = 0;
-        SDL_AudioDeviceID* dev_array = SDL_GetAudioPlaybackDevices(&num_devices);
-
-        if (!dev_array) {
-            LOG_WARNING(Lib_AudioOut, "No audio devices found, using default");
-            return SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK;
-        }
-
-        SDL_AudioDeviceID selected_device = SDL_INVALID_AUDIODEVICEID;
-
-        for (int i = 0; i < num_devices; i++) {
-            const char* dev_name = SDL_GetAudioDeviceName(dev_array[i]);
-            if (dev_name && device_name == dev_name) {
-                selected_device = dev_array[i];
-                break;
-            }
-        }
-
-        SDL_free(dev_array);
-
-        if (selected_device == SDL_INVALID_AUDIODEVICEID) {
-            LOG_WARNING(Lib_AudioOut, "Audio device '{}' not found, using default", device_name);
-            return SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK;
-        }
-
-        return selected_device;
-    }
 
     bool ConfigureChannelMap() {
         if (num_channels == 0) {
@@ -452,18 +293,6 @@ private:
         }
 
         return true;
-    }
-
-    std::string GetDeviceName(OrbisAudioOutPort type) const {
-        switch (type) {
-        case OrbisAudioOutPort::Main:
-        case OrbisAudioOutPort::Bgm:
-            return EmulatorSettings.GetSDLMainOutputDevice();
-        case OrbisAudioOutPort::PadSpk:
-            return EmulatorSettings.GetSDLPadSpkOutputDevice();
-        default:
-            return EmulatorSettings.GetSDLMainOutputDevice();
-        }
     }
 
     static constexpr float DOWNMIX_FRONT = 1.0f;
@@ -551,27 +380,10 @@ private:
         if (!stream) {
             return;
         }
-#ifdef LIBRETRO
         // No device to ask: a quarter of a second of what the game writes. The port waits for
         // the frontend well before that (WaitForFrontend), so this is only reached when the
         // frontend has stopped taking sound.
         queue_threshold = (sample_rate / 4) * sizeof(float) * (ps4_downmix ? 2 : num_channels);
-        return;
-#endif
-
-        SDL_AudioSpec discard;
-        int sdl_buffer_frames = 0;
-
-        if (!SDL_GetAudioDeviceFormat(SDL_GetAudioStreamDevice(stream), &discard,
-                                      &sdl_buffer_frames)) {
-            LOG_WARNING(Lib_AudioOut, "Failed to get SDL buffer size: {}", SDL_GetError());
-        }
-
-        const u32 sdl_buffer_size = sdl_buffer_frames * sizeof(float) * num_channels;
-        queue_threshold = std::max(guest_buffer_size, sdl_buffer_size) * QUEUE_MULTIPLIER;
-
-        LOG_DEBUG(Lib_AudioOut, "Audio queue threshold: {} bytes (SDL buffer: {} frames)",
-                  queue_threshold, sdl_buffer_frames);
     }
 
     using ConverterFunc = void (*)(const void* src, void* dst, u32 frames, const float* volumes);
@@ -698,7 +510,6 @@ private:
 
     // Audio format parameters
     const u32 frame_size;
-    const u32 guest_buffer_size;
     const u32 buffer_frames;
     const u32 sample_rate;
     const u32 num_channels;
@@ -708,9 +519,7 @@ private:
     bool ps4_downmix{false};
     const std::array<int, 8> channel_layout;
 
-    alignas(64) u64 period_us{0};
     alignas(64) std::atomic<u64> last_output_time{0};
-    u64 next_output_time{0};
     u64 last_volume_check_time{0};
     u32 output_count{0};
 

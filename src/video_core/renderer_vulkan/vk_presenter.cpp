@@ -38,9 +38,7 @@
 #include <iomanip>
 #include <limits>
 #include <memory>
-#ifdef LIBRETRO
 #include <mutex>
-#endif
 #include <span>
 #include <sstream>
 #include <system_error>
@@ -48,9 +46,7 @@
 #include <imgui.h>
 #include <stb_image_write.h>
 #include <vk_mem_alloc.h>
-#ifdef LIBRETRO
 #include "libretro/libretro_bridge.h"
-#endif
 
 namespace Vulkan {
 
@@ -158,7 +154,6 @@ struct ScreenshotReadback {
           width{width_}, height{height_}, format{format_}, hdr_encoded{hdr_encoded_} {}
 };
 
-#ifdef LIBRETRO
 // The libretro core reads every frame back, and a buffer made for each one cost more than the
 // copy it was made for: at 3840x2160 the device ran out of memory. The buffers are kept and
 // used again. The list is never destroyed: it would outlive the device it belongs to.
@@ -210,7 +205,6 @@ static void ReturnFrameReadback(std::shared_ptr<ScreenshotReadback> readback) {
         }
     }
 }
-#endif
 
 static std::string SanitizeFilenameComponent(std::string value) {
     for (char& c : value) {
@@ -912,13 +906,11 @@ void Presenter::Present(Frame* frame, bool is_reusing_frame, bool is_game_frame)
         }
     };
 
-#ifdef LIBRETRO
     // Resolution: Default - the picture at the game's size, once it has said it
     if (u32 game_width, game_height; Libretro::TakeGameSize(game_width, game_height)) {
         window.SetSize(game_width, game_height);
         swapchain.Recreate(game_width, game_height);
     }
-#endif
     // Recreate the swapchain if the window was resized.
     if (window.GetWidth() != swapchain.GetWidth() || window.GetHeight() != swapchain.GetHeight()) {
         swapchain.Recreate(window.GetWidth(), window.GetHeight());
@@ -950,11 +942,9 @@ void Presenter::Present(Frame* frame, bool is_reusing_frame, bool is_game_frame)
     const auto cmdbuf = scheduler.CommandBuffer();
     const u32 capture_with_overlays_count = VideoCore::ConsumeWithOverlaysScreenshotRequests();
     std::optional<ScreenshotReadback> pending_screenshot;
-#ifdef LIBRETRO
     // The frame for the frontend. Screenshots are not taken in the core.
     std::shared_ptr<ScreenshotReadback> frame_readback;
     (void)capture_with_overlays_count;
-#endif
 
     if (EmulatorSettings.IsVkHostMarkersEnabled()) {
         cmdbuf.beginDebugUtilsLabelEXT(vk::DebugUtilsLabelEXT{
@@ -1064,30 +1054,16 @@ void Presenter::Present(Frame* frame, bool is_reusing_frame, bool is_game_frame)
         }
         ImGui::Core::Render(cmdbuf, swapchain_image_view, swapchain.GetExtent());
 
-#ifdef LIBRETRO
         // Every frame is read back for the frontend, by the way a screenshot with overlays is,
         // into a buffer that is used again - unless the frontend draws from the image itself.
         const bool read_back_frame = !Libretro::GpuFramesActive();
-#else
-        const bool read_back_frame = capture_with_overlays_count > 0;
-#endif
         if (read_back_frame) {
-#ifdef LIBRETRO
             frame_readback = TakeFrameReadback(
                 instance, extent.width, extent.height,
                 swapchain.GetHDR() ? vk::Format::eA2B10G10R10UnormPack32
                                    : swapchain.GetSurfaceFormat().format,
                 swapchain.GetHDR());
             auto& readback = *frame_readback;
-#else
-            auto& readback = pending_screenshot.emplace(
-                instance, ScreenshotKind::WithOverlays,
-                BuildScreenshotPaths(ScreenshotKind::WithOverlays, capture_with_overlays_count),
-                extent.width, extent.height,
-                swapchain.GetHDR() ? vk::Format::eA2B10G10R10UnormPack32
-                                   : swapchain.GetSurfaceFormat().format,
-                swapchain.GetHDR());
-#endif
 
             const vk::ImageMemoryBarrier to_transfer{
                 .srcAccessMask = vk::AccessFlagBits::eColorAttachmentWrite,
@@ -1124,14 +1100,10 @@ void Presenter::Present(Frame* frame, bool is_reusing_frame, bool is_game_frame)
             .srcAccessMask = post_src_access_mask,
             .dstAccessMask = vk::AccessFlagBits::eNone,
             .oldLayout = post_old_layout,
-#ifdef LIBRETRO
             // What the frontend is told an image it draws from is in
             // (libretro/gpu_frames.cpp, Import).
             .newLayout = Libretro::GpuFramesActive() ? vk::ImageLayout::eShaderReadOnlyOptimal
                                                      : vk::ImageLayout::ePresentSrcKHR,
-#else
-            .newLayout = vk::ImageLayout::ePresentSrcKHR,
-#endif
             .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
             .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
             .image = swapchain_image,
@@ -1156,7 +1128,6 @@ void Presenter::Present(Frame* frame, bool is_reusing_frame, bool is_game_frame)
     }
 
     // Flush vulkan commands.
-#ifdef LIBRETRO
     if (Libretro::GpuFramesActive()) {
         // The frame is the image: published once the GPU has drawn it.
         const vk::Extent2D shown = swapchain.GetExtent();
@@ -1175,7 +1146,6 @@ void Presenter::Present(Frame* frame, bool is_reusing_frame, bool is_game_frame)
             ReturnFrameReadback(readback);
         });
     }
-#endif
     if (pending_screenshot) {
         scheduler.DeferPriorityOperation([deferred_screenshot = std::move(pending_screenshot)]() {
             SavePendingScreenshot(deferred_screenshot.value());
@@ -1183,14 +1153,7 @@ void Presenter::Present(Frame* frame, bool is_reusing_frame, bool is_game_frame)
     }
 
     SubmitInfo info{};
-#ifndef LIBRETRO
-    info.AddWait(swapchain.GetImageAcquiredSemaphore());
-#endif
     info.AddWait(frame->ready_semaphore, frame->ready_tick);
-#ifndef LIBRETRO
-    // The libretro core's images are its own: nothing acquires them and nothing presents them.
-    info.AddSignal(swapchain.GetPresentReadySemaphore());
-#endif
     info.AddSignal(frame->present_done);
     scheduler.Flush(info);
 

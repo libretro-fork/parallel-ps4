@@ -56,13 +56,11 @@ public:
         return width;
     }
 
-#ifdef LIBRETRO
     // The libretro core's Resolution: Default, the game's own size (no window to resize)
     void SetSize(s32 width_, s32 height_) {
         width = width_;
         height = height_;
     }
-#endif
 
     s32 GetHeight() const {
         return height;

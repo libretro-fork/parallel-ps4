@@ -57,14 +57,12 @@ foreach(BPP IN ITEMS 8 16 32 64 96 128)
     add_host_shader(tiling.comp tiling_macro_${BPP}_comp BITS_PER_PIXEL=${BPP} IS_MACRO_TILED=1)
 endforeach()
 
-if (ENABLE_LIBRETRO)
-    # The 8- and 16-bit tiling shaders over 32-bit words, for GPUs without 8- or 16-bit storage
-    # buffer access (tile_manager.cpp)
-    foreach(BPP IN ITEMS 8 16)
-        add_host_shader(tiling.comp tiling_micro_${BPP}_words_comp BITS_PER_PIXEL=${BPP} IS_MACRO_TILED=0 WORD_ACCESS=1)
-        add_host_shader(tiling.comp tiling_macro_${BPP}_words_comp BITS_PER_PIXEL=${BPP} IS_MACRO_TILED=1 WORD_ACCESS=1)
-    endforeach()
-endif()
+# The 8- and 16-bit tiling shaders over 32-bit words, for GPUs without 8- or 16-bit storage
+# buffer access (tile_manager.cpp)
+foreach(BPP IN ITEMS 8 16)
+    add_host_shader(tiling.comp tiling_micro_${BPP}_words_comp BITS_PER_PIXEL=${BPP} IS_MACRO_TILED=0 WORD_ACCESS=1)
+    add_host_shader(tiling.comp tiling_macro_${BPP}_words_comp BITS_PER_PIXEL=${BPP} IS_MACRO_TILED=1 WORD_ACCESS=1)
+endforeach()
 
 list(REMOVE_DUPLICATES SHADER_FILES)
 add_custom_target(host_shaders DEPENDS ${SHADER_HEADERS} SOURCES ${SHADER_FILES})

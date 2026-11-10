@@ -13,9 +13,7 @@
 #include "core/file_sys/backends/zarchive_fs.h"
 #include "core/file_sys/fs.h"
 #include "core/file_sys/ifile.h"
-#ifdef LIBRETRO
 #include "libretro/pkg_backend.h"
-#endif
 
 namespace Core::FileSys {
 
@@ -72,7 +70,6 @@ std::unique_ptr<IBackend> OpenGameBackend(const std::filesystem::path& root) {
         return nullptr;
     }
 
-#ifdef LIBRETRO
     if (Libretro::IsPkgFile(*resolved)) {
         auto backend = std::make_unique<Libretro::PkgBackend>(*resolved);
         if (!backend->IsOpen()) {
@@ -80,7 +77,6 @@ std::unique_ptr<IBackend> OpenGameBackend(const std::filesystem::path& root) {
         }
         return backend;
     }
-#endif
     if (IsZArchiveFile(*resolved)) {
         auto backend = std::make_unique<ZArchiveBackend>(*resolved);
         if (!backend->IsOpen()) {

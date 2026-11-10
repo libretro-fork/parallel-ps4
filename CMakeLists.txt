@@ -39,17 +39,11 @@ cmake_dependent_option(ENABLE_SYSTEM_VULKAN "Enable the system Vulkan driver" OF
 option(ENABLE_DISCORD_RPC "Enable the Discord RPC integration" ON)
 option(ENABLE_UPDATER "Enables the options to updater" ON)
 option(ENABLE_TESTS "Build unit tests (requires GTest)" OFF)
-option(ENABLE_LIBRETRO "Build the libretro core (shadps4_libretro)" ON)
 # aarch64: the game's x86-64 code through FEXCore in the emulator's own process, in place of
 # box64. FEX is built on its own (.ci/build-fex.sh) and its static libraries linked in.
 option(ENABLE_FEX_GUEST_CPU "Build the native ARM64 FEXCore guest CPU backend" OFF)
 set(FEXCORE_GUEST_CPU_SOURCE_DIR "" CACHE PATH "FEX source directory for the FEXCore guest CPU backend")
 set(FEXCORE_GUEST_CPU_BUILD_DIR "" CACHE PATH "AArch64 FEX build directory for the FEXCore guest CPU backend")
-if (NOT ENABLE_LIBRETRO)
-    # The standalone's entry point, packaging files, tests and documents are not in this
-    # repository (.upstream-excluded).
-    message(FATAL_ERROR "This repository builds the libretro core only; the standalone emulator is upstream's, github.com/shadps4-emu/shadPS4")
-endif()
 if (ENABLE_TESTS)
     message(FATAL_ERROR "Upstream's tests are not in this repository (.upstream-excluded)")
 endif()
@@ -1389,99 +1383,12 @@ endif()
 
 if(NOT ENABLE_TESTS)
 
-if (ENABLE_LIBRETRO)
-    # The libretro core: a module the frontend loads, which starts itself again in a
-    # process of its own to run the emulator (libretro/libretro_core.cpp in the
-    # frontend's process, libretro/host.cpp in the emulator's, in the place of
-    # main.cpp). The target keeps the name shadps4, so everything below applies to it
-    # as to the executable.
-    add_library(shadps4 MODULE
-        ${AUDIO_CORE}
-        ${IMGUI}
-        ${INPUT}
-        ${COMMON}
-        ${CORE}
-        ${SHADER_RECOMPILER}
-        ${VIDEO_CORE}
-        ${EMULATOR}
-        ${SHADNET}
-        libretro/gpu_frames.cpp
-        libretro/gpu_frames.h
-        libretro/host.cpp
-        libretro/libretro.h
-        libretro/libretro_vulkan.h
-        libretro/memory_export.cpp
-        libretro/pkg_backend.cpp
-        libretro/pkg_backend.h
-        libretro/pkg_entries.cpp
-        libretro/pkg_reader.cpp
-        libretro/pkg_reader.h
-        libretro/libretro_bridge.h
-        libretro/libretro_core.cpp
-        libretro/libretro_core_options.h
-        libretro/libretro_core_options_intl.h
-        libretro/shared_state.h
-        src/emulator.cpp
-        src/emulator.h
-        src/sdl_window.h
-        src/sdl_window.cpp
-    )
-    set_target_properties(shadps4 PROPERTIES PREFIX "" OUTPUT_NAME "shadps4_libretro")
-    add_compile_definitions(LIBRETRO)
-    if (UNIX AND NOT APPLE)
-        # Only retro_* is exported and the core's own symbols bind inside it:
-        # a frontend that carries SDL itself must not get tied to the core's.
-        target_link_options(shadps4 PRIVATE
-            -Wl,-Bsymbolic
-            -Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/libretro/link.T)
-
-        # The launcher of the emulator's process, built first and carried in the core
-        # as an array (libretro/host_main.c, libretro/embed_host.cmake).
-        add_executable(shadps4_libretro_host libretro/host_main.c)
-        target_link_libraries(shadps4_libretro_host PRIVATE ${CMAKE_DL_LIBS})
-        set(LIBRETRO_HOST_BLOB "${CMAKE_CURRENT_BINARY_DIR}/libretro_host_blob.c")
-        add_custom_command(
-            OUTPUT "${LIBRETRO_HOST_BLOB}"
-            COMMAND ${CMAKE_COMMAND}
-                    -DINPUT=$<TARGET_FILE:shadps4_libretro_host>
-                    -DOUTPUT=${LIBRETRO_HOST_BLOB}
-                    -P ${CMAKE_CURRENT_SOURCE_DIR}/libretro/embed_host.cmake
-            DEPENDS shadps4_libretro_host ${CMAKE_CURRENT_SOURCE_DIR}/libretro/embed_host.cmake
-            VERBATIM)
-        target_sources(shadps4 PRIVATE "${LIBRETRO_HOST_BLOB}")
-
-        # The C++ runtime is linked in: on aarch64 the x86-64 build runs under box64,
-        # which has no x86-64 libstdc++ to give it.
-        target_link_options(shadps4 PRIVATE -static-libstdc++ -static-libgcc)
-
-        # On aarch64 the core carries the x86-64 emulator and box64, which it writes into
-        # the frontend's system directory and starts its emulator process through
-        # (libretro_core.cpp). LIBRETRO_X86_64_PARTS is a directory with box64, the x86-64
-        # build's shadps4_libretro_host and its shadps4_libretro.so.
-        set(LIBRETRO_X86_64_PARTS "" CACHE PATH "box64 and the x86-64 build, for the aarch64 core")
-        if (ARCHITECTURE STREQUAL "arm64" AND LIBRETRO_X86_64_PARTS)
-            set(LIBRETRO_PARTS_ASM "${CMAKE_CURRENT_BINARY_DIR}/libretro_x86_64_parts.S")
-            set(LIBRETRO_PARTS_TEXT ".section .rodata\n")
-            foreach (part box64 shadps4_libretro_host shadps4_libretro.so)
-                if (NOT EXISTS "${LIBRETRO_X86_64_PARTS}/${part}")
-                    message(FATAL_ERROR "${LIBRETRO_X86_64_PARTS}/${part} is missing")
-                endif()
-                string(MAKE_C_IDENTIFIER "${part}" symbol)
-                string(APPEND LIBRETRO_PARTS_TEXT
-                    ".balign 16\n.globl g_part_${symbol}\n.hidden g_part_${symbol}\ng_part_${symbol}:\n"
-                    ".incbin \"${LIBRETRO_X86_64_PARTS}/${part}\"\n"
-                    ".globl g_part_${symbol}_end\n.hidden g_part_${symbol}_end\ng_part_${symbol}_end:\n")
-            endforeach()
-            string(APPEND LIBRETRO_PARTS_TEXT ".section .note.GNU-stack,\"\",%progbits\n")
-            file(WRITE "${LIBRETRO_PARTS_ASM}" "${LIBRETRO_PARTS_TEXT}")
-            set_source_files_properties("${LIBRETRO_PARTS_ASM}" PROPERTIES OBJECT_DEPENDS
-                "${LIBRETRO_X86_64_PARTS}/box64;${LIBRETRO_X86_64_PARTS}/shadps4_libretro_host;${LIBRETRO_X86_64_PARTS}/shadps4_libretro.so")
-            target_sources(shadps4 PRIVATE "${LIBRETRO_PARTS_ASM}")
-            target_compile_definitions(shadps4 PRIVATE LIBRETRO_X86_64_PARTS)
-        endif()
-    endif()
-else()
-add_executable(shadps4
+# The libretro core: a module the frontend loads, which starts itself again in a
+# process of its own to run the emulator (libretro/libretro_core.cpp in the
+# frontend's process, libretro/host.cpp in the emulator's, in the place of
+# main.cpp). The target keeps upstream's name, shadps4, so everything below applies
+# to it.
+add_library(shadps4 MODULE
     ${AUDIO_CORE}
     ${IMGUI}
     ${INPUT}
@@ -1491,12 +1398,79 @@ add_executable(shadps4
     ${VIDEO_CORE}
     ${EMULATOR}
     ${SHADNET}
-    src/main.cpp
+    libretro/gpu_frames.cpp
+    libretro/gpu_frames.h
+    libretro/host.cpp
+    libretro/libretro.h
+    libretro/libretro_vulkan.h
+    libretro/memory_export.cpp
+    libretro/pkg_backend.cpp
+    libretro/pkg_backend.h
+    libretro/pkg_entries.cpp
+    libretro/pkg_reader.cpp
+    libretro/pkg_reader.h
+    libretro/libretro_bridge.h
+    libretro/libretro_core.cpp
+    libretro/libretro_core_options.h
+    libretro/libretro_core_options_intl.h
+    libretro/shared_state.h
     src/emulator.cpp
     src/emulator.h
     src/sdl_window.h
     src/sdl_window.cpp
 )
+set_target_properties(shadps4 PROPERTIES PREFIX "" OUTPUT_NAME "shadps4_libretro")
+if (UNIX AND NOT APPLE)
+    # Only retro_* is exported and the core's own symbols bind inside it:
+    # a frontend that carries SDL itself must not get tied to the core's.
+    target_link_options(shadps4 PRIVATE
+        -Wl,-Bsymbolic
+        -Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/libretro/link.T)
+
+    # The launcher of the emulator's process, built first and carried in the core
+    # as an array (libretro/host_main.c, libretro/embed_host.cmake).
+    add_executable(shadps4_libretro_host libretro/host_main.c)
+    target_link_libraries(shadps4_libretro_host PRIVATE ${CMAKE_DL_LIBS})
+    set(LIBRETRO_HOST_BLOB "${CMAKE_CURRENT_BINARY_DIR}/libretro_host_blob.c")
+    add_custom_command(
+        OUTPUT "${LIBRETRO_HOST_BLOB}"
+        COMMAND ${CMAKE_COMMAND}
+                -DINPUT=$<TARGET_FILE:shadps4_libretro_host>
+                -DOUTPUT=${LIBRETRO_HOST_BLOB}
+                -P ${CMAKE_CURRENT_SOURCE_DIR}/libretro/embed_host.cmake
+        DEPENDS shadps4_libretro_host ${CMAKE_CURRENT_SOURCE_DIR}/libretro/embed_host.cmake
+        VERBATIM)
+    target_sources(shadps4 PRIVATE "${LIBRETRO_HOST_BLOB}")
+
+    # The C++ runtime is linked in: on aarch64 the x86-64 build runs under box64,
+    # which has no x86-64 libstdc++ to give it.
+    target_link_options(shadps4 PRIVATE -static-libstdc++ -static-libgcc)
+
+    # On aarch64 the core carries the x86-64 emulator and box64, which it writes into
+    # the frontend's system directory and starts its emulator process through
+    # (libretro_core.cpp). LIBRETRO_X86_64_PARTS is a directory with box64, the x86-64
+    # build's shadps4_libretro_host and its shadps4_libretro.so.
+    set(LIBRETRO_X86_64_PARTS "" CACHE PATH "box64 and the x86-64 build, for the aarch64 core")
+    if (ARCHITECTURE STREQUAL "arm64" AND LIBRETRO_X86_64_PARTS)
+        set(LIBRETRO_PARTS_ASM "${CMAKE_CURRENT_BINARY_DIR}/libretro_x86_64_parts.S")
+        set(LIBRETRO_PARTS_TEXT ".section .rodata\n")
+        foreach (part box64 shadps4_libretro_host shadps4_libretro.so)
+            if (NOT EXISTS "${LIBRETRO_X86_64_PARTS}/${part}")
+                message(FATAL_ERROR "${LIBRETRO_X86_64_PARTS}/${part} is missing")
+            endif()
+            string(MAKE_C_IDENTIFIER "${part}" symbol)
+            string(APPEND LIBRETRO_PARTS_TEXT
+                ".balign 16\n.globl g_part_${symbol}\n.hidden g_part_${symbol}\ng_part_${symbol}:\n"
+                ".incbin \"${LIBRETRO_X86_64_PARTS}/${part}\"\n"
+                ".globl g_part_${symbol}_end\n.hidden g_part_${symbol}_end\ng_part_${symbol}_end:\n")
+        endforeach()
+        string(APPEND LIBRETRO_PARTS_TEXT ".section .note.GNU-stack,\"\",%progbits\n")
+        file(WRITE "${LIBRETRO_PARTS_ASM}" "${LIBRETRO_PARTS_TEXT}")
+        set_source_files_properties("${LIBRETRO_PARTS_ASM}" PROPERTIES OBJECT_DEPENDS
+            "${LIBRETRO_X86_64_PARTS}/box64;${LIBRETRO_X86_64_PARTS}/shadps4_libretro_host;${LIBRETRO_X86_64_PARTS}/shadps4_libretro.so")
+        target_sources(shadps4 PRIVATE "${LIBRETRO_PARTS_ASM}")
+        target_compile_definitions(shadps4 PRIVATE LIBRETRO_X86_64_PARTS)
+    endif()
 endif()
 
 create_target_directory_groups(shadps4)
@@ -1629,35 +1603,6 @@ if (WIN32)
     if (MSVC)
         target_link_libraries(shadps4 PRIVATE clang_rt.builtins-x86_64.lib)
     endif()
-
-    # The three below are properties of an executable: the libretro core is
-    # loaded into the frontend's process, at whatever its base and stack are.
-    if (NOT ENABLE_LIBRETRO)
-    # Disable ASLR so we can reserve the user area
-    if (MSVC)
-        target_link_options(shadps4 PRIVATE /DYNAMICBASE:NO)
-    else()
-        target_link_options(shadps4 PRIVATE -Wl,--disable-dynamicbase)
-    endif()
-
-    # Increase stack commit area (Needed, otherwise there are crashes)
-    if (MSVC)
-        target_link_options(shadps4 PRIVATE /STACK:0x200000,0x200000)
-    else()
-        target_link_options(shadps4 PRIVATE -Wl,--stack,2097152)
-    endif()
-
-    # Change base image address
-    if (MSVC)
-        target_link_options(shadps4 PRIVATE /BASE:0x700000000000)
-    else()
-        target_link_options(shadps4 PRIVATE -Wl,--image-base=0x700000000000)
-    endif()
-    endif()
-endif()
-
-if (WIN32 AND NOT ENABLE_LIBRETRO)
-    target_sources(shadps4 PRIVATE src/dist/shadps4.rc)
 endif()
 
 if (NOT MSVC)
@@ -1708,11 +1653,6 @@ target_include_directories(shadps4 PRIVATE ${IMGUI_RESOURCES_INCLUDE})
 # Discord RPC
 if (ENABLE_DISCORD_RPC)
     target_link_libraries(shadps4 PRIVATE discord-rpc)
-endif()
-
-# Install rules
-if (NOT ENABLE_LIBRETRO)
-install(TARGETS shadps4 BUNDLE DESTINATION .)
 endif()
 
 else()

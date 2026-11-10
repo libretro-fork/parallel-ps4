@@ -9,7 +9,7 @@
 
 #include "common/arch.h"
 
-#if defined(LIBRETRO) && defined(__aarch64__) && defined(__linux__)
+#if defined(__aarch64__) && defined(__linux__)
 
 #include <array>
 #include <cstring>

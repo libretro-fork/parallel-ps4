@@ -109,7 +109,6 @@ public:
         return features.shaderInt16;
     }
 
-#ifdef LIBRETRO
     /// Whether shaders can read and write 8-bit and 16-bit values in storage buffers. Some
     /// mobile GPUs cannot (Adreno 618 with Turnip): the tiling shaders take 32-bit words there.
     bool IsStorageBuffer8BitAccessSupported() const {
@@ -118,7 +117,6 @@ public:
     bool IsStorageBuffer16BitAccessSupported() const {
         return storage_buffer_16bit_access;
     }
-#endif
 
     /// Returns true if 8-bit ints are supported in shaders
     bool IsShaderInt8Supported() const {
@@ -330,21 +328,18 @@ public:
         return properties.deviceType == vk::PhysicalDeviceType::eIntegratedGpu;
     }
 
-#ifdef LIBRETRO
     /// Whether the device can export an image's memory - as a descriptor on Linux, an NT
     /// handle on Windows - which is how the libretro core hands the picture to the frontend on
     /// the GPU
     bool IsExternalMemoryExportSupported() const {
         return external_memory_export;
     }
-#endif
 
     /// Returns the pipeline cache unique identifier
     const auto GetPipelineCacheUUID() const {
         return properties.pipelineCacheUUID;
     }
 
-#ifdef LIBRETRO
     /// Whether the device has sparse buffers at all
     bool IsSparseBindingSupported() const {
         return features.sparseBinding;
@@ -359,7 +354,6 @@ public:
     vk::DeviceSize SparseAddressSpaceSize() const {
         return properties.limits.sparseAddressSpaceSize;
     }
-#endif
 
     /// Returns the minimum required alignment for uniforms
     vk::DeviceSize UniformMinAlignment() const {
@@ -535,9 +529,7 @@ private:
     vk::PhysicalDeviceFeatures features;
     vk::PhysicalDeviceVulkan12Features vk12_features;
     vk::PhysicalDeviceVulkan13Features vk13_features;
-#ifdef LIBRETRO
     bool storage_buffer_16bit_access{};
-#endif
     vk::PhysicalDeviceExtendedDynamicState3FeaturesEXT dynamic_state_3_features;
     vk::PhysicalDeviceShaderAtomicFloat2FeaturesEXT shader_atomic_float2_features;
     vk::PhysicalDeviceWorkgroupMemoryExplicitLayoutFeaturesKHR
@@ -583,9 +575,7 @@ private:
     bool image_view_min_lod{};
     bool shader_clock{};
     bool supports_memory_budget{};
-#ifdef LIBRETRO
     bool external_memory_export{};
-#endif
     bool supports_block_texel_view{};
     u64 total_memory_budget{};
     std::vector<size_t> valid_heaps;

@@ -107,10 +107,8 @@ constexpr auto LOG_FILE = "shad_log.txt";
  */
 void SetUserPath(PathType user_path, const std::filesystem::path& new_path);
 
-#ifdef LIBRETRO
 // The libretro core's user directory, set before any path is asked for.
 void SetLibretroUserDir(const std::filesystem::path& dir);
-#endif
 
 /**
  * Recursively searches for an installed game by its ID.

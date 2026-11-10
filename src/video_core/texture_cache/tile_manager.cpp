@@ -12,22 +12,20 @@
 
 #include "video_core/host_shaders/tiling_macro_128_comp.h"
 #include "video_core/host_shaders/tiling_macro_16_comp.h"
+#include "video_core/host_shaders/tiling_macro_16_words_comp.h"
 #include "video_core/host_shaders/tiling_macro_32_comp.h"
 #include "video_core/host_shaders/tiling_macro_64_comp.h"
 #include "video_core/host_shaders/tiling_macro_8_comp.h"
+#include "video_core/host_shaders/tiling_macro_8_words_comp.h"
 #include "video_core/host_shaders/tiling_macro_96_comp.h"
 #include "video_core/host_shaders/tiling_micro_128_comp.h"
 #include "video_core/host_shaders/tiling_micro_16_comp.h"
+#include "video_core/host_shaders/tiling_micro_16_words_comp.h"
 #include "video_core/host_shaders/tiling_micro_32_comp.h"
 #include "video_core/host_shaders/tiling_micro_64_comp.h"
 #include "video_core/host_shaders/tiling_micro_8_comp.h"
-#include "video_core/host_shaders/tiling_micro_96_comp.h"
-#ifdef LIBRETRO
-#include "video_core/host_shaders/tiling_macro_16_words_comp.h"
-#include "video_core/host_shaders/tiling_macro_8_words_comp.h"
-#include "video_core/host_shaders/tiling_micro_16_words_comp.h"
 #include "video_core/host_shaders/tiling_micro_8_words_comp.h"
-#endif
+#include "video_core/host_shaders/tiling_micro_96_comp.h"
 
 #include <magic_enum/magic_enum.hpp>
 #include <vk_mem_alloc.h>
@@ -131,24 +129,20 @@ vk::Pipeline TileManager::GetTilingPipeline(const ImageInfo& info, bool is_tiler
     case 8:
         code = is_macro ? std::span<const u32>{TILING_MACRO_8_COMP}
                         : std::span<const u32>{TILING_MICRO_8_COMP};
-#ifdef LIBRETRO
         // Without 8-bit storage buffer access the 8-bit shader reads and writes garbage
         // (text and some textures in stripes on an Adreno 618)
         if (!instance.IsStorageBuffer8BitAccessSupported()) {
             code = is_macro ? std::span<const u32>{TILING_MACRO_8_WORDS_COMP}
                             : std::span<const u32>{TILING_MICRO_8_WORDS_COMP};
         }
-#endif
         break;
     case 16:
         code = is_macro ? std::span<const u32>{TILING_MACRO_16_COMP}
                         : std::span<const u32>{TILING_MICRO_16_COMP};
-#ifdef LIBRETRO
         if (!instance.IsStorageBuffer16BitAccessSupported()) {
             code = is_macro ? std::span<const u32>{TILING_MACRO_16_WORDS_COMP}
                             : std::span<const u32>{TILING_MICRO_16_WORDS_COMP};
         }
-#endif
         break;
     case 32:
         code = is_macro ? std::span<const u32>{TILING_MACRO_32_COMP}

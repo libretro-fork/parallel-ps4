@@ -594,11 +594,9 @@ ImageId TextureCache::FindImage(ImageDesc& desc, bool exact_fmt) {
 
     ASSERT(info.guest_address != 0);
 
-#ifdef LIBRETRO
     if (desc.type == BindingType::VideoOut) {
         frame_extent = info.size;
     }
-#endif
 
     SmallVector<ImageId, 8> image_ids;
     ForEachImageInRegion(info.guest_address, info.guest_size,
@@ -663,7 +661,6 @@ ImageId TextureCache::FindImage(ImageDesc& desc, bool exact_fmt) {
     if (!image_id) {
         u32 scale_num = 1;
         u32 scale_den = 1;
-#ifdef LIBRETRO
         // Resolution below the game's: a target of the frame's size, which the game draws
         // into and samples back, and its depth buffer; one mip and layer, as the frame has
         const bool target = desc.type == BindingType::RenderTarget ||
@@ -675,7 +672,6 @@ ImageId TextureCache::FindImage(ImageDesc& desc, bool exact_fmt) {
             scale_num = width;
             scale_den = frame_extent.width;
         }
-#endif
         image_id =
             slot_images.Insert(instance, runtime, slot_image_views, info, scale_num, scale_den);
         RegisterImage(image_id);

@@ -4,7 +4,7 @@
 #include <unordered_map>
 #include <boost/container/flat_map.hpp>
 #include <queue>
-#if defined(LIBRETRO) && defined(__aarch64__)
+#ifdef __aarch64__
 // x86-64 walkers emitted on an aarch64 host (srt_walker_interpreter.cpp): Xbyak's 64-bit mode
 #define XBYAK64
 #define XBYAK64_GCC
@@ -32,7 +32,7 @@
 
 // The libretro core on aarch64 emits the same x86-64 walkers, which srt_walker_interpreter.cpp
 // runs there (RunSrtWalker)
-#if defined(ARCH_X86_64) || (defined(LIBRETRO) && defined(__aarch64__) && defined(__linux__))
+#if defined(ARCH_X86_64) || (defined(__aarch64__) && defined(__linux__))
 
 using namespace Xbyak::util;
 

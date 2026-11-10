@@ -8,11 +8,6 @@
 #define VK_USE_PLATFORM_WIN32_KHR
 #elif defined(__APPLE__)
 #define VK_USE_PLATFORM_METAL_EXT
-#elif !defined(LIBRETRO)
-// Not in the libretro core, which makes no surface: it builds without the X11 and Wayland
-// headers
-#define VK_USE_PLATFORM_WAYLAND_KHR
-#define VK_USE_PLATFORM_XLIB_KHR
 #endif
 
 #include <vector>

@@ -1,9 +1,7 @@
 // SPDX-FileCopyrightText: Copyright 2025-2026 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
-#ifdef LIBRETRO
 #include <cstdlib>
-#endif
 
 #include "common/elf_info.h"
 #include "common/logging/log.h"
@@ -313,15 +311,10 @@ u32 PS4_SYSV_ABI posix_getuid() {
 }
 
 s32 PS4_SYSV_ABI exit(s32 status) {
-#ifdef LIBRETRO
     // The game ended itself. The process ends the way it does when content is closed in
     // the frontend, so its at_quick_exit work runs and the core is handed the game's own
     // status in place of a signal.
     std::quick_exit(status);
-#else
-    UNREACHABLE_MSG("Exiting with status code {}", status);
-    return 0;
-#endif
 }
 
 s32 PS4_SYSV_ABI sceKernelSetProcessProperty(u32 prop_type, const void* prop_data, size_t prop_size,

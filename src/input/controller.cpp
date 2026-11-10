@@ -11,15 +11,13 @@
 #include <SDL3/SDL.h>
 
 #include "common/logging/log.h"
+#include "common/singleton.h"
 #include "core/emulator_settings.h"
 #include "core/libraries/kernel/time.h"
 #include "core/libraries/system/userservice.h"
 #include "core/user_settings.h"
 #include "input/controller.h"
-#ifdef LIBRETRO
-#include "common/singleton.h"
 #include "libretro/libretro_bridge.h"
-#endif
 
 namespace Input {
 
@@ -264,7 +262,6 @@ void GameControllers::ResetLightbarColors() {
 }
 
 bool GameController::SetVibration(u8 smallMotor, u8 largeMotor) {
-#ifdef LIBRETRO
     // The core's pads are the frontend's ports, in the controllers' order.
     auto& all = *Common::Singleton<GameControllers>::Instance();
     for (u32 i = 0; i < 4; ++i) {
@@ -273,7 +270,6 @@ bool GameController::SetVibration(u8 smallMotor, u8 largeMotor) {
             break;
         }
     }
-#endif
     if (m_sdl_gamepad != nullptr) {
         return SDL_RumbleGamepad(m_sdl_gamepad, (smallMotor / 255.0f) * 0xFFFF,
                                  (largeMotor / 255.0f) * 0xFFFF, -1);
@@ -285,15 +281,10 @@ static bool is_first_check = true;
 
 void GameControllers::TryOpenSDLControllers() {
     using namespace Libraries::UserService;
-#ifdef LIBRETRO
     // SDL's gamepads are not started in the core (sdl_window.cpp), and are not to be asked:
     // none, so the first controller is connected below as the one driven from outside.
     int controller_count = 0;
     SDL_JoystickID* new_joysticks = nullptr;
-#else
-    int controller_count;
-    SDL_JoystickID* new_joysticks = SDL_GetGamepads(&controller_count);
-#endif
     LOG_INFO(Input, "{} controllers are currently connected", controller_count);
 
     std::unordered_set<SDL_JoystickID> assigned_ids;

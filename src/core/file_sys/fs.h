@@ -38,13 +38,11 @@ inline constexpr bool NeedsCaseInsensitiveSearch = true;
 class MntPoints {
 public:
     static bool ignore_game_patches;
-#ifdef LIBRETRO
     // The libretro core runs a game straight from its PKG: the update's PKG it found beside
     // the game's, laid over /app0 in the place of a "-UPDATE" folder.
     static std::filesystem::path libretro_update;
     // And the additional content's PKGs beside it, in addition to the addcont folder.
     static std::vector<std::filesystem::path> libretro_addcont;
-#endif
     struct MntPair {
         std::filesystem::path host_path;
         std::string mount; // e.g /app0

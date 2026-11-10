@@ -42,7 +42,7 @@ jobs:
         key: libretro-linux-${{ hashFiles('**/CMakeLists.txt', 'cmake/**') }}
 
     - name: Configure CMake
-      run: cmake --fresh -B ${{github.workspace}}/build -DENABLE_LIBRETRO=ON -DENABLE_DISCORD_RPC=OFF -DENABLE_UPDATER=OFF -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}} -DCMAKE_C_COMPILER=clang-19 -DCMAKE_CXX_COMPILER=clang++-19 -DCMAKE_EXE_LINKER_FLAGS="-fuse-ld=mold" -DCMAKE_SHARED_LINKER_FLAGS="-fuse-ld=mold" -DCMAKE_MODULE_LINKER_FLAGS="-fuse-ld=mold" -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+      run: cmake --fresh -B ${{github.workspace}}/build -DENABLE_DISCORD_RPC=OFF -DENABLE_UPDATER=OFF -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}} -DCMAKE_C_COMPILER=clang-19 -DCMAKE_CXX_COMPILER=clang++-19 -DCMAKE_EXE_LINKER_FLAGS="-fuse-ld=mold" -DCMAKE_SHARED_LINKER_FLAGS="-fuse-ld=mold" -DCMAKE_MODULE_LINKER_FLAGS="-fuse-ld=mold" -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
 
     - name: Build
       run: cmake --build ${{github.workspace}}/build --config ${{env.BUILD_TYPE}} --parallel $(nproc)
@@ -111,7 +111,7 @@ jobs:
         key: libretro-linux-arm64-${{ hashFiles('**/CMakeLists.txt', 'cmake/**') }}
 
     - name: Configure CMake
-      run: cmake --fresh -B ${{github.workspace}}/build -DENABLE_LIBRETRO=ON -DENABLE_DISCORD_RPC=OFF -DENABLE_UPDATER=OFF -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}} -DCMAKE_C_COMPILER=clang-19 -DCMAKE_CXX_COMPILER=clang++-19 -DCMAKE_EXE_LINKER_FLAGS="-fuse-ld=mold" -DCMAKE_SHARED_LINKER_FLAGS="-fuse-ld=mold" -DCMAKE_MODULE_LINKER_FLAGS="-fuse-ld=mold" -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache -DLIBRETRO_X86_64_PARTS=${{github.workspace}}/parts
+      run: cmake --fresh -B ${{github.workspace}}/build -DENABLE_DISCORD_RPC=OFF -DENABLE_UPDATER=OFF -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}} -DCMAKE_C_COMPILER=clang-19 -DCMAKE_CXX_COMPILER=clang++-19 -DCMAKE_EXE_LINKER_FLAGS="-fuse-ld=mold" -DCMAKE_SHARED_LINKER_FLAGS="-fuse-ld=mold" -DCMAKE_MODULE_LINKER_FLAGS="-fuse-ld=mold" -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache -DLIBRETRO_X86_64_PARTS=${{github.workspace}}/parts
 
     - name: Build
       run: cmake --build ${{github.workspace}}/build --config ${{env.BUILD_TYPE}} --parallel $(nproc)
@@ -173,7 +173,7 @@ jobs:
       run: "$(find ${{github.workspace}}/fex-build -name fexcore-smoke -type f -perm -u+x | head -1)"
 
     - name: Configure CMake
-      run: cmake --fresh -B ${{github.workspace}}/build -DENABLE_LIBRETRO=ON -DENABLE_DISCORD_RPC=OFF -DENABLE_UPDATER=OFF -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}} -DCMAKE_C_COMPILER=clang-19 -DCMAKE_CXX_COMPILER=clang++-19 -DCMAKE_EXE_LINKER_FLAGS="-fuse-ld=mold" -DCMAKE_SHARED_LINKER_FLAGS="-fuse-ld=mold" -DCMAKE_MODULE_LINKER_FLAGS="-fuse-ld=mold" -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache -DENABLE_FEX_GUEST_CPU=ON -DFEXCORE_GUEST_CPU_SOURCE_DIR=${{github.workspace}}/fex -DFEXCORE_GUEST_CPU_BUILD_DIR=${{github.workspace}}/fex-build
+      run: cmake --fresh -B ${{github.workspace}}/build -DENABLE_DISCORD_RPC=OFF -DENABLE_UPDATER=OFF -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}} -DCMAKE_C_COMPILER=clang-19 -DCMAKE_CXX_COMPILER=clang++-19 -DCMAKE_EXE_LINKER_FLAGS="-fuse-ld=mold" -DCMAKE_SHARED_LINKER_FLAGS="-fuse-ld=mold" -DCMAKE_MODULE_LINKER_FLAGS="-fuse-ld=mold" -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache -DENABLE_FEX_GUEST_CPU=ON -DFEXCORE_GUEST_CPU_SOURCE_DIR=${{github.workspace}}/fex -DFEXCORE_GUEST_CPU_BUILD_DIR=${{github.workspace}}/fex-build
 
     # -k: every file that does not compile yet, not just the first
     - name: Build
@@ -275,7 +275,7 @@ jobs:
         key: libretro-windows-${{ hashFiles('**/CMakeLists.txt', 'cmake/**') }}
 
     - name: Configure CMake
-      run: cmake --fresh -G Ninja -B ${{github.workspace}}/build -DENABLE_LIBRETRO=ON -DENABLE_DISCORD_RPC=OFF -DENABLE_UPDATER=OFF -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}} -DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+      run: cmake --fresh -G Ninja -B ${{github.workspace}}/build -DENABLE_DISCORD_RPC=OFF -DENABLE_UPDATER=OFF -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}} -DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
 
     - name: Build
       run: cmake --build ${{github.workspace}}/build --config ${{env.BUILD_TYPE}} --parallel $env:NUMBER_OF_PROCESSORS

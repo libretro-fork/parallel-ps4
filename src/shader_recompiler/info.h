@@ -169,7 +169,7 @@ struct Info : InfoPersistent {
         ASSERT(user_data.size() <= NUM_USER_DATA_REGS);
         std::memcpy(flattened_ud_buf.data(), user_data.data(), user_data.size_bytes());
         if (srt_info.walker_func) {
-#if defined(LIBRETRO) && defined(__aarch64__) && defined(__linux__)
+#if defined(__aarch64__) && defined(__linux__)
             RunSrtWalker(srt_info.walker_func, user_data.data(), flattened_ud_buf.data());
 #else
             srt_info.walker_func(user_data.data(), flattened_ud_buf.data());

@@ -15,7 +15,7 @@ namespace Shader {
 
 using PFN_SrtWalker = void PS4_SYSV_ABI (*)(const u32* /*user_data*/, u32* /*flat_dst*/);
 PFN_SrtWalker RegisterWalkerCode(const u8* ptr, size_t size);
-#if defined(LIBRETRO) && defined(__aarch64__) && defined(__linux__)
+#if defined(__aarch64__) && defined(__linux__)
 // Runs an x86-64 walker on aarch64 (srt_walker_interpreter.cpp)
 void RunSrtWalker(PFN_SrtWalker walker, const u32* user_data, u32* flat_dst);
 #endif

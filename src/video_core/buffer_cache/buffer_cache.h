@@ -51,10 +51,8 @@ DECLARE_ENUM_FLAG_OPERATORS(ObtainBufferFlags)
 class BufferCache {
     static constexpr u64 ADDRESS_SPACE_BITS = 40;
     static constexpr u64 DEFAULT_ARENA_PAGE_BITS = 32;
-#ifdef LIBRETRO
     // The smallest an arena page gets on a device with little sparse address space
     static constexpr u64 MIN_ARENA_PAGE_BITS = 26;
-#endif
     static constexpr u64 MIN_BLOCK_SIZE = 16_KB;
     static constexpr u64 STREAM_THRESHOLD = 16_KB;
 
@@ -195,13 +193,11 @@ private:
     };
     IntervalList<Backing> resident_ranges;
 
-#ifdef LIBRETRO
     // The device has no sparse buffers: every arena is fully backed by memory of its own,
     // nothing is bound, and an arena that replaces others takes their contents by a copy
     bool dense_arenas{};
     void MigrateDenseArena(const Buffer* old_arena, const Buffer* new_arena);
     void WriteArenaPageTable(const Buffer* arena, std::span<const Interval> ranges);
-#endif
     u32 arena_memory_type_index{};
     u32 block_size{};
     u32 block_shift{};

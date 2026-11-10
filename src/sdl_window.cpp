@@ -101,7 +101,7 @@ WindowSDL::WindowSDL(s32 width_, s32 height_, Input::GameControllers* controller
     if (!SDL_SetHint(SDL_HINT_APP_NAME, "shadPS4")) {
         UNREACHABLE_MSG("Failed to set SDL window hint: {}", SDL_GetError());
     }
-#if defined(LIBRETRO) && defined(SDL_PLATFORM_LINUX)
+#ifdef SDL_PLATFORM_LINUX
     // The hidden window of the core is on a video driver without a display server: SDL is
     // built without the X11 and Wayland ones there (externals/CMakeLists.txt).
     SDL_SetHint(SDL_HINT_VIDEO_DRIVER, "offscreen,dummy");
@@ -125,71 +125,25 @@ WindowSDL::WindowSDL(s32 width_, s32 height_, Input::GameControllers* controller
     SDL_SetNumberProperty(props, SDL_PROP_WINDOW_CREATE_Y_NUMBER, SDL_WINDOWPOS_CENTERED);
     SDL_SetNumberProperty(props, SDL_PROP_WINDOW_CREATE_WIDTH_NUMBER, width);
     SDL_SetNumberProperty(props, SDL_PROP_WINDOW_CREATE_HEIGHT_NUMBER, height);
-#ifdef LIBRETRO
     // The frontend shows the picture. The window stays, hidden, for what still hangs on it:
     // the size of the picture, ImGui's platform layer and the event loop. It is not a Vulkan
     // window: no surface is made for it (vk_swapchain.cpp), and a video driver without a
     // display server could not make it one.
-#if defined(SDL_PLATFORM_LINUX)
+#ifdef SDL_PLATFORM_LINUX
     SDL_SetNumberProperty(props, "flags", SDL_WINDOW_HIDDEN);
 #else
     SDL_SetNumberProperty(props, "flags", SDL_WINDOW_VULKAN | SDL_WINDOW_HIDDEN);
 #endif
-#else
-    SDL_SetNumberProperty(props, "flags", SDL_WINDOW_VULKAN);
-#endif
     SDL_SetBooleanProperty(props, SDL_PROP_WINDOW_CREATE_RESIZABLE_BOOLEAN, true);
-    // Creating the window directly in fullscreen avoids a visible windowed -> fullscreen
-    // transition on startup. SDL sizes the window to the display and keeps the requested
-    // width/height as the windowed size to restore when leaving fullscreen.
-#ifndef LIBRETRO
-    SDL_SetBooleanProperty(props, SDL_PROP_WINDOW_CREATE_FULLSCREEN_BOOLEAN,
-                           EmulatorSettings.IsFullScreen());
-#endif
     window = SDL_CreateWindowWithProperties(props);
     SDL_DestroyProperties(props);
     if (window == nullptr) {
         UNREACHABLE_MSG("Failed to create window handle: {}", SDL_GetError());
     }
 
-    // The core's hidden window has the Output Resolution, which can be smaller
-#ifndef LIBRETRO
-    SDL_SetWindowMinimumSize(window, 640, 360);
-#endif
-
-    bool error = false;
-    const SDL_DisplayID displayIndex = SDL_GetDisplayForWindow(window);
-    if (displayIndex == 0) {
-        LOG_ERROR(Frontend, "Error getting display index: {}", SDL_GetError());
-        error = true;
-    }
-    const SDL_DisplayMode* displayMode;
-    if ((displayMode = SDL_GetCurrentDisplayMode(displayIndex)) == 0) {
-        LOG_ERROR(Frontend, "Error getting display mode: {}", SDL_GetError());
-        error = true;
-    }
-#ifndef LIBRETRO
-    if (!error) {
-        SDL_SetWindowFullscreenMode(
-            window, EmulatorSettings.GetFullScreenMode() == "Fullscreen" ? displayMode : NULL);
-    }
-    SDL_SetWindowFullscreen(window, EmulatorSettings.IsFullScreen());
-    SDL_SyncWindow(window);
-#endif
-    // The window geometry is only final once the fullscreen transition has settled; refresh
-    // the cached size so the first swapchain and the splashscreen use the real drawable size.
-#ifndef LIBRETRO
-    SDL_GetWindowSizeInPixels(window, &width, &height);
-#endif
-    // In the libretro core the size stays the one asked for, the Output Resolution option: the
-    // window is hidden, and what the desktop made of it - clamped to the display, or scaled on
-    // a high-DPI one - is not the size of the picture.
-
-#ifndef LIBRETRO
-    // The libretro core gets its pads from the frontend (libretro/host.cpp); with SDL's
-    // gamepads left alone the first controller stays the one driven from outside.
-    SDL_InitSubSystem(SDL_INIT_GAMEPAD);
-#endif
+    // The size stays the one asked for, the Resolution option: the window is hidden, and what
+    // the desktop made of it - clamped to the display, or scaled on a high-DPI one - is not
+    // the size of the picture.
 
 #if defined(SDL_PLATFORM_WIN32)
     window_info.type = WindowSystemType::Windows;
@@ -226,18 +180,9 @@ WindowSDL::WindowSDL(s32 width_, s32 height_, Input::GameControllers* controller
 WindowSDL::~WindowSDL() = default;
 
 void WindowSDL::SetIcon(std::span<const u8> png_data) {
-#ifdef LIBRETRO
     // The window of the core is hidden and never shown, so it has no use for an icon, and the
     // video driver it is on under Linux cannot take one.
     (void)png_data;
-#else
-    if (png_data.empty()) {
-        LOG_WARNING(Core, "No window icon data available, using default icon.");
-        SetDefaultWindowIcon(window);
-        return;
-    }
-    SetWindowIcon(window, std::vector<u8>(png_data.begin(), png_data.end()));
-#endif
 }
 
 void WindowSDL::WaitEvent() {
@@ -405,9 +350,6 @@ void WindowSDL::ReleaseKeyboard() {
 }
 
 void WindowSDL::OnResize() {
-#ifndef LIBRETRO
-    SDL_GetWindowSizeInPixels(window, &width, &height);
-#endif
     ImGui::Core::OnResize();
 }
 

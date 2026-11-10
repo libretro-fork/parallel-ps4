@@ -78,7 +78,6 @@ BufferCache::BufferCache(const Vulkan::Instance& instance_, Vulkan::Scheduler& s
       memory_semaphore{instance} {
     vk::BufferCreateFlags sparse_flags =
         vk::BufferCreateFlagBits::eSparseBinding | vk::BufferCreateFlagBits::eSparseResidency;
-#ifdef LIBRETRO
     // An arena is a sparse buffer over 4 GiB of the guest's address space, and a game uses
     // several. A device whose sparse resources share less address space than a few of those
     // (Adreno 618 has 4 GiB in all) could not make the first one, so there the arenas are
@@ -110,7 +109,6 @@ BufferCache::BufferCache(const Vulkan::Instance& instance_, Vulkan::Scheduler& s
                     sparse_space >> 20, ARENA_PAGE_SIZE >> 20,
                     instance.IsSparseResidencyBufferSupported() ? "used" : "not available");
     }
-#endif
     address_space.resize(NUM_ARENA_PAGES);
     const vk::BufferCreateInfo probe_ci = {
         .flags = sparse_flags,
@@ -366,7 +364,6 @@ void BufferCache::SynchronizeDmaBuffers() {
 const Buffer* BufferCache::GetArena(u64 first_block, u64 last_block) {
     const u64 first_page = first_block >> blocks_per_arena_page_shift;
     const u64 last_page = last_block >> blocks_per_arena_page_shift;
-#ifdef LIBRETRO
     // With small arena pages one buffer can cover several of them: one arena over all of
     // them, as long as none has an arena yet.
     if (last_page - first_page > 1) {
@@ -384,10 +381,6 @@ const Buffer* BufferCache::GetArena(u64 first_block, u64 last_block) {
                   new_arena);
         return new_arena;
     }
-#else
-    ASSERT_MSG(last_page - first_page <= 1,
-               "Buffer request cannot span more than two VA arena pages");
-#endif
 
     const auto* first_arena = address_space[first_page];
     const auto* last_arena = address_space[last_page];
@@ -414,21 +407,15 @@ const Buffer* BufferCache::GetArena(u64 first_block, u64 last_block) {
     const u64 total_size = first_size + last_size;
     const u64 end_block = (first_addr + total_size) >> block_shift;
     auto* new_arena = &arenas.emplace_back(instance, first_addr, total_size, MemoryType::Sparse);
-#ifdef LIBRETRO
     if (dense_arenas) {
         MigrateDenseArena(first_arena, new_arena);
         MigrateDenseArena(last_arena, new_arena);
     }
     auto* bind = dense_arenas ? nullptr : BindsForArena(new_arena);
-#else
-    auto* bind = BindsForArena(new_arena);
-#endif
     resident_ranges.ForEachInRange(base_block, end_block, [&](const Backing& backing) {
-#ifdef LIBRETRO
         if (!bind) {
             return;
         }
-#endif
         const u64 start = std::max(base_block, backing.start);
         const u64 end = std::min(end_block, backing.end);
         bind->binds.push_back(vk::SparseMemoryBind{
@@ -461,7 +448,6 @@ void BufferCache::EnsureResident(const Buffer* arena, u64 first_block, u64 last_
     if (bind_ranges.Empty()) {
         return;
     }
-#ifdef LIBRETRO
     if (dense_arenas) {
         // The arena's own memory backs it already: the blocks are only marked resident and
         // given their addresses
@@ -473,7 +459,6 @@ void BufferCache::EnsureResident(const Buffer* arena, u64 first_block, u64 last_
         WriteArenaPageTable(arena, ranges);
         return;
     }
-#endif
 
     const vk::MemoryAllocateFlagsInfo alloc_flags = {
         .flags = vk::MemoryAllocateFlagBits::eDeviceAddress,
@@ -614,7 +599,6 @@ bool BufferCache::SynchronizeMemoryFromImage(const Buffer* arena, VAddr device_a
     return true;
 }
 
-#ifdef LIBRETRO
 void BufferCache::MigrateDenseArena(const Buffer* old_arena, const Buffer* new_arena) {
     if (!old_arena) {
         return;
@@ -665,7 +649,6 @@ void BufferCache::WriteArenaPageTable(const Buffer* arena, std::span<const Inter
     staging.Flush();
     runtime.CopyBuffer(staging.buffer, bda_pagetable_buffer.get(), copies);
 }
-#endif
 
 void BufferCache::SubmitPendingArenaBinds(Vulkan::SubmitInfo& info) {
     if (pending_binds.empty()) {

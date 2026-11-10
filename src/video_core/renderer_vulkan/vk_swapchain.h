@@ -70,12 +70,10 @@ public:
         return frame_index;
     }
 
-#ifdef LIBRETRO
     /// Which of the images that stand in for a swapchain's the frame is drawn into
     u32 GetImageIndex() const {
         return image_index;
     }
-#endif
 
     vk::Extent2D GetExtent() const {
         return extent;
@@ -118,7 +116,6 @@ private:
     /// Creates the image acquired and present ready semaphores
     void RefreshSemaphores();
 
-#ifdef LIBRETRO
     /// Creates the images that stand in for a swapchain's
     void CreateOffscreenImages();
 
@@ -126,7 +123,6 @@ private:
     /// be handed over on the GPU. False when that cannot be done: the images are then to be
     /// made the plain way
     bool CreateSharedImages();
-#endif
 
 private:
     const Instance& instance;
@@ -140,9 +136,7 @@ private:
     vk::SurfaceTransformFlagBitsKHR transform;
     vk::CompositeAlphaFlagBitsKHR composite_alpha;
     std::vector<vk::Image> images;
-#ifdef LIBRETRO
     std::vector<vk::DeviceMemory> offscreen_memory;
-#endif
     std::vector<vk::ImageView> images_view;
     std::vector<vk::Semaphore> image_acquired;
     std::vector<vk::Semaphore> present_ready;

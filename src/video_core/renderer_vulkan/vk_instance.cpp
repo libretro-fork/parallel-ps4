@@ -5,19 +5,17 @@
 #include <fmt/format.h>
 #include <fmt/ranges.h>
 
+#include <array>
+#include <cstring>
 #include "common/assert.h"
 #include "common/debug.h"
 #include "common/types.h"
 #include "imgui/renderer/imgui_core.h"
+#include "libretro/libretro_bridge.h"
 #include "sdl_window.h"
 #include "video_core/renderer_vulkan/liverpool_to_vk.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_platform.h"
-#ifdef LIBRETRO
-#include <array>
-#include <cstring>
-#include "libretro/libretro_bridge.h"
-#endif
 
 #include <vk_mem_alloc.h>
 
@@ -110,7 +108,6 @@ Instance::Instance(Frontend::WindowSDL& window, s32 physical_device_index,
     ASSERT_MSG(num_physical_devices > 0, "No physical devices found");
     LOG_INFO(Render_Vulkan, "Found {} physical devices", num_physical_devices);
 
-#ifdef LIBRETRO
     // With the picture handed to the frontend on the GPU, the frontend's GPU: an image's
     // memory cannot be handed from one GPU to another (libretro/gpu_frames.cpp).
     bool on_frontend_gpu = false;
@@ -130,9 +127,7 @@ Instance::Instance(Frontend::WindowSDL& window, s32 physical_device_index,
     }
     if (on_frontend_gpu) {
         LOG_INFO(Render_Vulkan, "Using the frontend's GPU");
-    } else
-#endif
-    if (physical_device_index < 0) {
+    } else if (physical_device_index < 0) {
         std::vector<
             std::tuple<size_t, vk::PhysicalDeviceProperties2, vk::PhysicalDeviceMemoryProperties>>
             properties2{};
@@ -255,12 +250,8 @@ bool Instance::CreateDevice() {
         return false;
     }
 
-#ifdef LIBRETRO
     // Room for the one the libretro core adds below.
     boost::container::static_vector<const char*, 40> enabled_extensions;
-#else
-    boost::container::static_vector<const char*, 32> enabled_extensions;
-#endif
     const auto add_extension = [&](std::string_view extension) -> bool {
         const auto result =
             std::find_if(available_extensions.begin(), available_extensions.end(),
@@ -380,10 +371,10 @@ bool Instance::CreateDevice() {
     }
     image_view_min_lod = add_extension(VK_EXT_IMAGE_VIEW_MIN_LOD_EXTENSION_NAME);
     supports_memory_budget = add_extension(VK_EXT_MEMORY_BUDGET_EXTENSION_NAME);
-#if defined(LIBRETRO) && defined(__linux__)
+#if defined(__linux__)
     // The picture handed to the frontend on the GPU (libretro/gpu_frames.h).
     external_memory_export = add_extension(VK_KHR_EXTERNAL_MEMORY_FD_EXTENSION_NAME);
-#elif defined(LIBRETRO) && defined(_WIN32)
+#elif defined(_WIN32)
     // The same, by NT handle. Spelled out: its macro comes with Vulkan's Win32 declarations.
     external_memory_export = add_extension("VK_KHR_external_memory_win32");
 #endif
@@ -424,9 +415,7 @@ bool Instance::CreateDevice() {
     };
 
     const auto vk11_features = feature_chain.get<vk::PhysicalDeviceVulkan11Features>();
-#ifdef LIBRETRO
     storage_buffer_16bit_access = vk11_features.storageBuffer16BitAccess;
-#endif
     vk12_features = feature_chain.get<vk::PhysicalDeviceVulkan12Features>();
     vk13_features = feature_chain.get<vk::PhysicalDeviceVulkan13Features>();
     vk::StructureChain device_chain = {

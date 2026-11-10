@@ -216,17 +216,9 @@ s32 PS4_SYSV_ABI sceAudioOutInit() {
         return ORBIS_AUDIO_OUT_ERROR_ALREADY_INIT;
     }
 
-#ifdef LIBRETRO
     // The frontend plays the sound: the SDL backend's streams are not bound to a device, and
     // the libretro core reads them (sdl_audio_out.cpp).
     audio = std::make_unique<SDLAudioOut>();
-#else
-    if (EmulatorSettings.GetAudioBackend() == AudioBackend::OpenAL) {
-        audio = std::make_unique<OpenALAudioOut>();
-    } else {
-        audio = std::make_unique<SDLAudioOut>();
-    }
-#endif
 
     LOG_INFO(Lib_AudioOut, "Audio system initialized");
     return ORBIS_OK;

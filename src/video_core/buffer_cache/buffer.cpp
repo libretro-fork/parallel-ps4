@@ -141,7 +141,6 @@ Buffer::Buffer(const Vulkan::Instance& instance, VAddr cpu_addr_, u64 size_bytes
         .usage = AllFlags,
         .sharingMode = vk::SharingMode::eExclusive,
     };
-#ifdef LIBRETRO
     // A device without sparse buffers (Intel Gen9 under Mesa) gets arenas fully backed by
     // memory of their own, made when the buffer cache first needs them
     if (mem_type == MemoryType::Sparse && !instance.IsSparseBindingSupported()) {
@@ -150,7 +149,6 @@ Buffer::Buffer(const Vulkan::Instance& instance, VAddr cpu_addr_, u64 size_bytes
     if (mem_type == MemoryType::Sparse && !instance.IsSparseResidencyBufferSupported()) {
         buffer_ci.flags |= vk::BufferCreateFlagBits::eSparseBinding;
     }
-#endif
     VmaAllocationInfo alloc_info{};
     buffer.Create(buffer_ci, mem_type, &alloc_info);
 
