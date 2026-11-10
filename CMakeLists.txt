@@ -1398,6 +1398,7 @@ set(LIBRETRO_COMMON_SOURCES
     ${LIBRETRO_COMMON_DIR}/features/features_cpu.c
     ${LIBRETRO_COMMON_DIR}/file/file_path.c
     ${LIBRETRO_COMMON_DIR}/file/file_path_io.c
+    ${LIBRETRO_COMMON_DIR}/formats/aac/raac.c
     ${LIBRETRO_COMMON_DIR}/formats/flac/rflac.c
     ${LIBRETRO_COMMON_DIR}/formats/json/rjson.c
     ${LIBRETRO_COMMON_DIR}/formats/mp3/rmp3.c
@@ -1489,7 +1490,7 @@ create_target_directory_groups(shadps4)
 target_link_libraries(shadps4 PRIVATE spdlog::spdlog)
 target_link_libraries(shadps4 PRIVATE magic_enum::magic_enum fmt::fmt tsl::robin_map xbyak::xbyak Tracy::TracyClient RenderDoc::API FFmpeg::ffmpeg Dear_ImGui gcn half::half)
 target_link_libraries(shadps4 PRIVATE Boost::headers GPUOpen::VulkanMemoryAllocator LibAtrac9 sirit Vulkan::Headers Zydis::Zydis)
-target_link_libraries(shadps4 PRIVATE lfreist-hwinfo::hwinfo fdk-aac Cpp_Httplib miniupnpc::miniupnpc)
+target_link_libraries(shadps4 PRIVATE lfreist-hwinfo::hwinfo Cpp_Httplib miniupnpc::miniupnpc)
 target_link_libraries(shadps4 PRIVATE Freetype::Freetype)
 
 if (ENABLE_FEX_GUEST_CPU)

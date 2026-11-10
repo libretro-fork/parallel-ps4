@@ -193,8 +193,6 @@ if (WIN32)
 add_subdirectory(ext-wepoll)
 endif()
 
-add_subdirectory(aacdec)
-
 # miniupnpc
 if (NOT TARGET miniupnpc::miniupnpc)
 set(UPNPC_BUILD_STATIC ON CACHE BOOL "" FORCE)

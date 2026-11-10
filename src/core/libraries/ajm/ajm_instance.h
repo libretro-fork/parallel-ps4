@@ -3,6 +3,9 @@
 
 #pragma once
 
+#include <array>
+#include <cstdint>
+
 #include "common/enum.h"
 #include "common/types.h"
 #include "core/libraries/ajm/ajm.h"
@@ -39,6 +42,41 @@ public:
             LOG_ERROR(Lib_Ajm, "Could not write {} samples", pcm.size());
         }
         return samples_written;
+    }
+
+    // Writes count frames of channels samples each straight into the output memory:
+    // fill(first, n, dst) produces frames [first, first + n) at dst. Only a frame that
+    // straddles two chunks, or a chunk the samples would sit unaligned in, goes through
+    // a frame-sized buffer. Returns the samples written.
+    template <class T, class Fill>
+    size_t WriteFrames(size_t count, u32 channels, Fill&& fill) {
+        constexpr u32 MaxChannels = 8;
+        const size_t frame_bytes = channels * sizeof(T);
+        size_t done = 0;
+        size_t samples = 0;
+        while (done < count && !IsEmpty() && channels <= MaxChannels) {
+            const size_t whole = m_current->size() / frame_bytes;
+            if (whole == 0 ||
+                reinterpret_cast<std::uintptr_t>(m_current->data()) % alignof(T) != 0) {
+                std::array<T, MaxChannels> frame;
+                fill(done, 1, frame.data());
+                samples += Write(std::span<T>(frame.data(), channels));
+                ++done;
+                continue;
+            }
+            const size_t n = std::min(whole, count - done);
+            fill(done, n, reinterpret_cast<T*>(m_current->data()));
+            *m_current = m_current->subspan(n * frame_bytes);
+            if (m_current->empty()) {
+                ++m_current;
+            }
+            done += n;
+            samples += n * channels;
+        }
+        if (done < count) {
+            LOG_ERROR(Lib_Ajm, "Could not write {} frames", count - done);
+        }
+        return samples;
     }
 
     bool IsEmpty() const {

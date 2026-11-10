@@ -7,10 +7,10 @@
 #include "common/types.h"
 #include "core/libraries/ajm/ajm_instance.h"
 
+#include <array>
 #include <span>
-#include <vector>
 
-struct AAC_DECODER_INSTANCE;
+typedef struct raac raac_t;
 
 namespace Libraries::Ajm {
 
@@ -51,19 +51,20 @@ private:
         u32 sampling_freq_type;
     };
 
-    template <class T>
-    size_t WriteOutputSamples(SparseOutputBuffer& output, std::span<const s16> pcm);
-    std::span<const s16> GetOuputPcm(u32 skipped_pcm, u32 max_pcm) const;
+    // Opens the decoder for an AudioSpecificConfig, keeping the open one when it is the same.
+    bool Open(const u8* asc, size_t asc_size);
+    void Close();
 
     const AjmFormatEncoding m_format;
     const AjmAacCodecFlags m_flags;
     const u32 m_channels;
-    std::vector<s16> m_pcm_buffer;
-    std::vector<float> m_resample_buffer;
 
     u32 m_skip_frames = 0;
+    u32 m_last_frame_bytes = 0;
     InitializeParameters m_init_params = {};
-    AAC_DECODER_INSTANCE* m_decoder = nullptr;
+    raac_t* m_decoder = nullptr;
+    std::array<u8, 32> m_asc{};
+    size_t m_asc_size = 0;
 };
 
 } // namespace Libraries::Ajm

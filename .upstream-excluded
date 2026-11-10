@@ -64,3 +64,4 @@ src/core/user_manager.cpp
 src/core/user_settings.cpp
 src/core/user_settings.h
 externals/json
+externals/aacdec
