@@ -1,16 +1,17 @@
 // SPDX-FileCopyrightText: Copyright 2025-2026 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include <algorithm>
+#include <map>
 #include <mutex>
 #include <optional>
-#include <cmrc/cmrc.hpp>
 #include <imgui.h>
 #include <queue>
 
+#include "common/embedded_resources.h"
 #include "imgui/imgui_std.h"
 #include "notifications_layer.h"
 
-CMRC_DECLARE(res);
 namespace shadNotifications {
 
 std::optional<NotificationsUI> current_notif;
@@ -129,9 +130,8 @@ void NotificationsUI::Draw() {
 }
 
 void QueueNotification(std::string message, float timer, position pos, stockIcons icon) {
-    auto resource = cmrc::res::get_filesystem();
-    auto file = resource.open(iconMap.at(icon));
-    std::vector<u8> imgdata = std::vector<u8>(file.begin(), file.end());
+    // Embedded in the core: lent, not copied
+    auto png = Common::FS::FileView::Borrow(Common::GetEmbeddedResource(iconMap.at(icon)));
 
     bool addBackground = false;
     if (icon == shadNotifications::stockIcons::Input ||
@@ -140,10 +140,10 @@ void QueueNotification(std::string message, float timer, position pos, stockIcon
         addBackground = true;
     }
 
-    QueueNotification(message, timer, pos, imgdata, addBackground);
+    QueueNotification(message, timer, pos, std::move(png), addBackground);
 }
 
-void QueueNotification(std::string message, float timer, position pos, std::vector<u8> pngData,
+void QueueNotification(std::string message, float timer, position pos, Common::FS::FileView pngData,
                        bool addBackground) {
     std::lock_guard<std::mutex> lock(queueMtx);
 
@@ -151,7 +151,7 @@ void QueueNotification(std::string message, float timer, position pos, std::vect
     info.message = message;
     info.timer = timer;
     info.pos = pos;
-    info.icon = ImGui::RefCountedTexture::DecodePngTexture(pngData);
+    info.icon = ImGui::RefCountedTexture::DecodePngTexture(std::move(pngData));
     info.addIconBackground = addBackground;
 
     if (!current_notif.has_value()) {

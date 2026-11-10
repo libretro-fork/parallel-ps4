@@ -5,7 +5,6 @@
 #include <cstring>
 #include <filesystem>
 #include <mutex>
-#include <cmrc/cmrc.hpp>
 #include <fmt/format.h>
 #include <imgui.h>
 #include <imgui/imgui_std.h>
@@ -14,6 +13,7 @@
 #define MINIMP3_IMPLEMENTATION
 
 #include "common/audio_file.h"
+#include "common/embedded_resources.h"
 #include "common/io_file.h"
 #include "common/logging/formatter.h"
 #include "common/logging/log.h"
@@ -22,7 +22,6 @@
 #include "core/libraries/np/trophy_ui.h"
 #include "libretro/audio_mix.h"
 
-CMRC_DECLARE(res);
 namespace fs = std::filesystem;
 using namespace ImGui;
 namespace Libraries::Np::NpTrophy {
@@ -108,9 +107,8 @@ void PreloadTrophySound() {
         }
         return;
     }
-    const auto file = cmrc::res::get_filesystem().open("src/resources/trophy.wav");
-    if (ParseWav(reinterpret_cast<const u8*>(file.begin()), file.size(), &samples, &frames,
-                 &channels, &hz)) {
+    const auto file = Common::GetEmbeddedResource("src/resources/trophy.wav");
+    if (ParseWav(file.data(), file.size(), &samples, &frames, &channels, &hz)) {
         ResampleTrophySound(samples, frames, channels, hz);
     }
 }
@@ -162,9 +160,8 @@ TrophyUI::TrophyUI(const std::filesystem::path& trophyIconPath, const std::strin
         trophy_type_icon = RefCountedTexture::DecodePngFile(customPath);
     } else {
         // Embedded in the core: lent, not copied
-        auto file = cmrc::res::get_filesystem().open(pathString);
         trophy_type_icon = RefCountedTexture::DecodePngTexture(
-            Common::FS::FileView::Borrow({reinterpret_cast<const u8*>(file.begin()), file.size()}));
+            Common::FS::FileView::Borrow(Common::GetEmbeddedResource(pathString)));
     }
 
     AddLayer(this);

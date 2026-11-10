@@ -1,0 +1,465 @@
+# Source lists and per-library flags for the static Makefile build of the
+# shadps4 libretro core. Included by Makefile, which sets the platform
+# switches used here:
+#
+#   ARCH_X86_64 / ARCH_ARM64     target architecture
+#   OS_LINUX                     target OS
+#
+# and takes these options:
+#
+#   LIBRETRO_X86_64_PARTS=<dir>  aarch64: carry box64 and the x86-64 build
+#                                (box64, shadps4_libretro_host, shadps4_libretro.so)
+#   ENABLE_FEX_GUEST_CPU=1       aarch64: run the game's code through FEXCore, with
+#   FEXCORE_GUEST_CPU_SOURCE_DIR=<dir> FEXCORE_GUEST_CPU_BUILD_DIR=<dir>
+#                                FEX built on its own (.ci/build-fex.sh)
+#
+# The lists follow CMakeLists.txt: a source added there is added here too.
+
+LRC_DIR := libretro/libretro-common
+EXT_DIR := externals
+
+# ----------------------------------------------------------------------------
+# Generated files
+# ----------------------------------------------------------------------------
+# Written aside and moved in place only when they change, so a build with
+# nothing new compiles nothing.
+replace_if_changed = cmp -s $(1).tmp $(1) || mv -f $(1).tmp $(1); rm -f $(1).tmp
+
+# Version and git information (src/common/scm_rev.cpp.in), as CMakeLists.txt
+# fills them in; the date is the commit's, so the same commit builds the same.
+APP_VERSION     := 0.20.1 WIP
+GIT_REV         := $(shell git rev-parse HEAD 2>/dev/null)
+GIT_DESC        := $(shell git describe --always --long --dirty 2>/dev/null)
+GIT_BRANCH      := $(shell git rev-parse --abbrev-ref HEAD 2>/dev/null)
+GIT_REMOTE_NAME := $(firstword $(subst /, ,$(shell git rev-parse --abbrev-ref --symbolic-full-name @{u} 2>/dev/null)))
+ifeq ($(GIT_REMOTE_NAME),)
+   GIT_REMOTE_NAME := $(shell git config --get remote.pushDefault 2>/dev/null)
+endif
+ifeq ($(GIT_REMOTE_NAME),)
+   GIT_REMOTE_NAME := origin
+endif
+GIT_REMOTE_URL  := $(shell git config --get remote.$(GIT_REMOTE_NAME).url 2>/dev/null)
+BUILD_DATE      := $(shell git log -1 --format=%cd --date=format:'%Y-%m-%d %H:%M:%S' 2>/dev/null)
+
+SCM_REV_CPP := $(GEN_DIR)/scm_rev.cpp
+SCM_REV_STATUS := $(shell mkdir -p $(GEN_DIR); sed \
+	-e 's|@APP_VERSION@|$(APP_VERSION)|' -e 's|@APP_IS_RELEASE@|false|' \
+	-e 's|@GIT_REV@|$(GIT_REV)|' -e 's|@GIT_BRANCH@|$(GIT_BRANCH)|' \
+	-e 's|@GIT_DESC@|$(GIT_DESC)|' -e 's|@GIT_REMOTE_NAME@|$(GIT_REMOTE_NAME)|' \
+	-e 's|@GIT_REMOTE_URL@|$(GIT_REMOTE_URL)|' -e 's|@BUILD_DATE@|$(BUILD_DATE)|' \
+	src/common/scm_rev.cpp.in > $(SCM_REV_CPP).tmp; $(call replace_if_changed,$(SCM_REV_CPP)))
+
+# The files the core carries (src/common/embedded_resources.h)
+EMBEDDED_RESOURCES := $(addprefix src/resources/,big_picture/controller.png \
+	big_picture/profiles.png big_picture/settings.png bronze.png gold.png platinum.png \
+	shadps4.png silver.png trophy.wav amd_rcp_index_table.bin.zstd \
+	amd_rsqrt_index_table.bin.zstd)
+EMBEDDED_RESOURCES_C := $(GEN_DIR)/embedded_resources.c
+$(EMBEDDED_RESOURCES_C): $(EMBEDDED_RESOURCES) libretro/embed.sh
+	@mkdir -p $(@D)
+	sh libretro/embed.sh resources $@ . $(EMBEDDED_RESOURCES)
+
+# The ImGui fonts, packed by ImGui's own tool built for the build machine
+# (src/imgui/renderer/CMakeLists.txt); font_data.cpp includes them.
+FONT_TOOL := $(GEN_DIR)/binary_to_compressed_c
+$(FONT_TOOL): $(EXT_DIR)/imgui/misc/fonts/binary_to_compressed_c.cpp
+	@mkdir -p $(@D)
+	$(HOSTCXX) -O2 $< -o $@
+
+FONTS_DIR := $(GEN_DIR)/fonts
+FONTS :=
+# $(1) the font, $(2) the name it is generated under
+define FONT_template
+$(FONTS_DIR)/imgui_fonts/$(2).g.cpp: src/imgui/renderer/fonts/$(1) $(FONT_TOOL)
+	@mkdir -p $$(@D)
+	$(FONT_TOOL) -nostatic $$< imgui_font_$(basename $(2)) > $$@.tmp
+	mv -f $$@.tmp $$@
+FONTS += $(FONTS_DIR)/imgui_fonts/$(2).g.cpp
+endef
+$(eval $(call FONT_template,NotoSans-Regular.ttf,notosans_regular.ttf))
+$(eval $(call FONT_template,NotoSansArabic-Regular.ttf,notosansarabic_regular.ttf))
+$(eval $(call FONT_template,NotoSansCJK-Regular.ttc,notosanscjk_regular.ttc))
+$(eval $(call FONT_template,NotoSansSymbols2-Regular.ttf,notosanssymbols2_regular.ttf))
+$(eval $(call FONT_template,NotoSansThai-Regular.ttf,notosansthai_regular.ttf))
+$(eval $(call FONT_template,ProggyVector-Regular.ttf,proggyvector_regular.ttf))
+$(OBJ_DIR)/src/imgui/renderer/font_data.cpp.o: $(FONTS)
+
+# Linux: the launcher of the emulator's process (libretro/host_main.c), built
+# for the target and carried in the core as an array.
+ifeq ($(OS_LINUX),1)
+LIBRETRO_HOST      := $(OBJ_DIR)/gen/shadps4_libretro_host
+LIBRETRO_HOST_BLOB := $(OBJ_DIR)/gen/libretro_host_blob.c
+$(LIBRETRO_HOST): libretro/host_main.c
+	@mkdir -p $(@D)
+	$(CC) $(filter-out -fPIC -fvisibility=hidden,$(CFLAGS)) -fPIE -pie -Isrc -MMD -MP $< -o $@ -ldl
+$(LIBRETRO_HOST_BLOB): $(LIBRETRO_HOST) libretro/embed.sh
+	sh libretro/embed.sh host $@ $<
+-include $(LIBRETRO_HOST).d
+endif
+
+# aarch64: box64 and the x86-64 build, carried in the core, which writes them
+# into the frontend's system directory and starts its emulator process through
+# them (libretro_core.cpp).
+ifneq ($(LIBRETRO_X86_64_PARTS),)
+ifneq ($(ARCH_ARM64),1)
+$(error LIBRETRO_X86_64_PARTS is for the aarch64 core)
+endif
+X86_64_PARTS := box64 shadps4_libretro_host shadps4_libretro.so
+X86_64_PARTS_FILES := $(addprefix $(LIBRETRO_X86_64_PARTS)/,$(X86_64_PARTS))
+$(foreach f,$(X86_64_PARTS_FILES),$(if $(wildcard $(f)),,$(error $(f) is missing)))
+X86_64_PARTS_ASM := $(GEN_DIR)/libretro_x86_64_parts.S
+X86_64_PARTS_STATUS := $(shell mkdir -p $(GEN_DIR); { \
+	echo '.section .rodata'; \
+	for part in $(X86_64_PARTS); do \
+		symbol=g_part_`echo $$part | tr -c 'A-Za-z0-9_\n' '_'`; \
+		echo '.balign 16'; \
+		echo ".globl $$symbol"; echo ".hidden $$symbol"; echo "$$symbol:"; \
+		echo ".incbin \"$(LIBRETRO_X86_64_PARTS)/$$part\""; \
+		echo ".globl $${symbol}_end"; echo ".hidden $${symbol}_end"; echo "$${symbol}_end:"; \
+	done; \
+	echo '.section .note.GNU-stack,"",%progbits'; \
+	} > $(X86_64_PARTS_ASM).tmp; $(call replace_if_changed,$(X86_64_PARTS_ASM)))
+$(OBJ_DIR)/$(X86_64_PARTS_ASM).o: $(X86_64_PARTS_FILES)
+endif
+
+# ----------------------------------------------------------------------------
+# The core
+# ----------------------------------------------------------------------------
+CORE_SOURCES_CXX :=
+CORE_SOURCES_CXX += $(addprefix src/common/,assert.cpp audio_file.cpp c_bridge.cpp decoder.cpp \
+	embedded_resources.cpp error.cpp io_file.cpp memory_patcher.cpp native_clock.cpp ntapi.cpp number_utils.cpp \
+	path_util.cpp rdtsc.cpp recursive_lock.cpp signal_context.cpp slot_vector.cpp spin_lock.cpp \
+	string_util.cpp thread.cpp xml.cpp)
+CORE_SOURCES_CXX += $(addprefix src/common/logging/,classes.cpp log.cpp)
+CORE_SOURCES_CXX += $(addprefix src/core/,address_space.cpp debug_state.cpp debugger.cpp \
+	emulator_state.cpp linker.cpp memory.cpp module.cpp signals.cpp thread.cpp tls.cpp)
+CORE_SOURCES_CXX += $(addprefix src/core/aerolib/,aerolib.cpp stubs.cpp)
+CORE_SOURCES_CXX += $(addprefix src/core/devtools/gcn/,gcn_context_regs.cpp gcn_op_names.cpp \
+	gcn_shader_regs.cpp)
+CORE_SOURCES_CXX += $(addprefix src/core/devtools/,layer.cpp layer_extra.cpp options.cpp)
+CORE_SOURCES_CXX += $(addprefix src/core/devtools/widget/,cmd_list.cpp frame_dump.cpp \
+	frame_graph.cpp gpu_memory.cpp memory_map.cpp module_list.cpp reg_popup.cpp reg_view.cpp \
+	shader_list.cpp text_editor.cpp)
+CORE_SOURCES_CXX += $(addprefix src/core/file_format/,npbind.cpp playgo_chunk.cpp psf.cpp rif.cpp \
+	trp.cpp)
+CORE_SOURCES_CXX += $(addprefix src/core/file_sys/backends/,host_fs.cpp zarchive_fs.cpp)
+CORE_SOURCES_CXX += $(addprefix src/core/file_sys/devices/,base_device.cpp console_device.cpp \
+	deci_tty_device.cpp logger.cpp random_device.cpp rng_device.cpp srandom_device.cpp \
+	urandom_device.cpp zero_device.cpp)
+CORE_SOURCES_CXX += $(addprefix src/core/file_sys/directories/,base_directory.cpp \
+	normal_directory.cpp pfs_directory.cpp)
+CORE_SOURCES_CXX += $(addprefix src/core/file_sys/,fs.cpp ifile.cpp)
+CORE_SOURCES_CXX += $(addprefix src/core/ipc/,ipc.cpp)
+CORE_SOURCES_CXX += $(addprefix src/core/libraries/ajm/,ajm.cpp ajm_aac.cpp ajm_at9.cpp \
+	ajm_batch.cpp ajm_context.cpp ajm_instance.cpp ajm_instance_statistics.cpp ajm_mp3.cpp)
+CORE_SOURCES_CXX += $(addprefix src/core/libraries/app_content/,app_content.cpp)
+CORE_SOURCES_CXX += $(addprefix src/core/libraries/audio/,audioin.cpp audioout.cpp \
+	frontend_audio_out.cpp silent_audio_in.cpp)
+CORE_SOURCES_CXX += $(addprefix src/core/libraries/audio3d/,audio3d.cpp)
+CORE_SOURCES_CXX += $(addprefix src/core/libraries/avplayer/,avplayer.cpp avplayer_common.cpp \
+	avplayer_file_streamer.cpp avplayer_handle_streamer.cpp avplayer_impl.cpp avplayer_source.cpp \
+	avplayer_state.cpp)
+CORE_SOURCES_CXX += $(addprefix src/core/libraries/camera/,camera.cpp camera_audio.cpp \
+	camera_calibration.cpp camera_config.cpp camera_device.cpp camera_helpers.cpp)
+CORE_SOURCES_CXX += $(addprefix src/core/libraries/companion/,companion_httpd.cpp \
+	companion_util.cpp)
+CORE_SOURCES_CXX += $(addprefix src/core/libraries/content_export/,content_export.cpp)
+CORE_SOURCES_CXX += $(addprefix src/core/libraries/disc_map/,disc_map.cpp)
+CORE_SOURCES_CXX += $(addprefix src/core/libraries/font/,font.cpp font_face.cpp font_internal.cpp \
+	fontft.cpp fontft_internal.cpp)
+CORE_SOURCES_CXX += $(addprefix src/core/libraries/game_live_streaming/,gamelivestreaming.cpp)
+CORE_SOURCES_CXX += $(addprefix src/core/libraries/gnmdriver/,gnmdriver.cpp)
+CORE_SOURCES_CXX += $(addprefix src/core/libraries/hmd/,hmd.cpp hmd_distortion.cpp \
+	hmd_reprojection.cpp hmd_setup_dialog.cpp)
+CORE_SOURCES_CXX += $(addprefix src/core/libraries/ime/,error_dialog.cpp ime.cpp ime_dialog.cpp \
+	ime_dialog_ui.cpp ime_kb_layout.cpp ime_ui.cpp ime_ui_shared.cpp)
+CORE_SOURCES_CXX += $(addprefix src/core/libraries/invitation_dialog/,invitation_dialog.cpp \
+	invitation_dialog_ui.cpp)
+CORE_SOURCES_CXX += $(addprefix src/core/libraries/jpeg/,jpegenc.cpp)
+CORE_SOURCES_CXX += $(addprefix src/core/libraries/kernel/,aio.cpp debug.cpp equeue.cpp \
+	file_system.cpp kernel.cpp memory.cpp process.cpp threads.cpp time.cpp)
+CORE_SOURCES_CXX += $(addprefix src/core/libraries/kernel/coredump/,coredump.cpp)
+CORE_SOURCES_CXX += $(addprefix src/core/libraries/kernel/sync/,mutex.cpp)
+CORE_SOURCES_CXX += $(addprefix src/core/libraries/kernel/threads/,barrier.cpp condvar.cpp \
+	event_flag.cpp exception.cpp mutex.cpp pthread.cpp pthread_attr.cpp pthread_clean.cpp \
+	pthread_spec.cpp rwlock.cpp semaphore.cpp sleepq.cpp stack.cpp stack_asm.cpp tcb.cpp \
+	thread_state.cpp)
+CORE_SOURCES_CXX += $(addprefix src/core/libraries/keyboard/,keyboard.cpp)
+CORE_SOURCES_CXX += $(addprefix src/core/libraries/libc_internal/,libc_internal.cpp \
+	libc_internal_io.cpp libc_internal_math.cpp libc_internal_memory.cpp libc_internal_str.cpp \
+	libc_internal_threads.cpp)
+CORE_SOURCES_CXX += $(addprefix src/core/libraries/libpng/,pngdec.cpp pngenc.cpp)
+CORE_SOURCES_CXX += $(addprefix src/core/libraries/,libs.cpp)
+CORE_SOURCES_CXX += $(addprefix src/core/libraries/mouse/,mouse.cpp)
+CORE_SOURCES_CXX += $(addprefix src/core/libraries/move/,move.cpp)
+CORE_SOURCES_CXX += $(addprefix src/core/libraries/music/,music_player_service.cpp)
+CORE_SOURCES_CXX += $(addprefix src/core/libraries/net/,net.cpp net_kernel.cpp net_log.cpp \
+	net_p2p.cpp net_p2p_ioctl.cpp net_resolver.cpp net_translate.cpp net_upnp.cpp net_util.cpp)
+CORE_SOURCES_CXX += $(addprefix src/core/libraries/network/,http.cpp http2.cpp net_ctl_obj.cpp \
+	netctl.cpp ssl.cpp ssl2.cpp)
+CORE_SOURCES_CXX += $(addprefix src/core/libraries/ngs2/,ngs2.cpp ngs2_custom.cpp ngs2_eq.cpp \
+	ngs2_geom.cpp ngs2_impl.cpp ngs2_mastering.cpp ngs2_pan.cpp ngs2_report.cpp ngs2_reverb.cpp \
+	ngs2_sampler.cpp ngs2_submixer.cpp)
+CORE_SOURCES_CXX += $(addprefix src/core/libraries/np/np_auth/,np_auth.cpp)
+CORE_SOURCES_CXX += $(addprefix src/core/libraries/np/np_commerce/,np_commerce.cpp \
+	np_commerce_ui.cpp)
+CORE_SOURCES_CXX += $(addprefix src/core/libraries/np/,np_common.cpp np_manager.cpp np_partner.cpp \
+	np_party.cpp np_sns_facebook_dialog.cpp np_trophy.cpp signaling_handler.cpp trophy_ui.cpp)
+CORE_SOURCES_CXX += $(addprefix src/core/libraries/np/np_handler/,np_handler.cpp \
+	np_handler_auth.cpp np_handler_friends.cpp np_handler_invitation.cpp np_handler_score.cpp \
+	np_handler_trophy.cpp np_handler_tus.cpp np_handler_web_api.cpp)
+CORE_SOURCES_CXX += $(addprefix src/core/libraries/np/np_matching2/,np_matching2.cpp \
+	np_matching2_internal.cpp np_matching2_mm.cpp np_matching2_signaling.cpp)
+CORE_SOURCES_CXX += $(addprefix src/core/libraries/np/np_profile_dialog/,np_profile_dialog.cpp \
+	np_profile_dialog_ui.cpp)
+CORE_SOURCES_CXX += $(addprefix src/core/libraries/np/np_score/,np_score.cpp)
+CORE_SOURCES_CXX += $(addprefix src/core/libraries/np/np_signaling/,np_signaling.cpp \
+	np_signaling_helpers.cpp np_signaling_state.cpp np_signaling_transport.cpp)
+CORE_SOURCES_CXX += $(addprefix src/core/libraries/np/np_tus/,np_tus.cpp)
+CORE_SOURCES_CXX += $(addprefix src/core/libraries/np/np_utility/,np_utility.cpp)
+CORE_SOURCES_CXX += $(addprefix src/core/libraries/np/np_web_api/,np_web_api.cpp \
+	np_web_api_internal.cpp)
+CORE_SOURCES_CXX += $(addprefix src/core/libraries/np/np_web_api2/,np_web_api2.cpp \
+	np_web_api2_context.cpp np_web_api2_internal.cpp np_web_api2_push_event.cpp)
+CORE_SOURCES_CXX += $(addprefix src/core/libraries/pad/,pad.cpp)
+CORE_SOURCES_CXX += $(addprefix src/core/libraries/playgo/,playgo.cpp playgo_dialog.cpp)
+CORE_SOURCES_CXX += $(addprefix src/core/libraries/random/,random.cpp)
+CORE_SOURCES_CXX += $(addprefix src/core/libraries/razor_cpu/,razor_cpu.cpp)
+CORE_SOURCES_CXX += $(addprefix src/core/libraries/remote_play/,remoteplay.cpp)
+CORE_SOURCES_CXX += $(addprefix src/core/libraries/rtc/,rtc.cpp)
+CORE_SOURCES_CXX += $(addprefix src/core/libraries/rudp/,rudp.cpp)
+CORE_SOURCES_CXX += $(addprefix src/core/libraries/save_data/dialog/,savedatadialog.cpp \
+	savedatadialog_ui.cpp)
+CORE_SOURCES_CXX += $(addprefix src/core/libraries/save_data/,save_backup.cpp save_instance.cpp \
+	save_memory.cpp savedata.cpp)
+CORE_SOURCES_CXX += $(addprefix src/core/libraries/screenshot/,screenshot.cpp)
+CORE_SOURCES_CXX += $(addprefix src/core/libraries/share_play/,shareplay.cpp)
+CORE_SOURCES_CXX += $(addprefix src/core/libraries/signin_dialog/,signindialog.cpp)
+CORE_SOURCES_CXX += $(addprefix src/core/libraries/sysmodule/,sysmodule.cpp sysmodule_internal.cpp)
+CORE_SOURCES_CXX += $(addprefix src/core/libraries/system/,commondialog.cpp msgdialog.cpp \
+	msgdialog_ui.cpp systemservice.cpp userservice.cpp)
+CORE_SOURCES_CXX += $(addprefix src/core/libraries/system_gesture/,system_gesture.cpp)
+CORE_SOURCES_CXX += $(addprefix src/core/libraries/ulobjmgr/,ulobjmgr.cpp)
+CORE_SOURCES_CXX += $(addprefix src/core/libraries/usbd/emulated/,dimensions.cpp infinity.cpp \
+	skylander.cpp)
+CORE_SOURCES_CXX += $(addprefix src/core/libraries/usbd/,usbd.cpp usbstorage.cpp)
+CORE_SOURCES_CXX += $(addprefix src/core/libraries/video_recording/,video_recording.cpp)
+CORE_SOURCES_CXX += $(addprefix src/core/libraries/videodec/,vdecsw.cpp vdecsw_impl.cpp \
+	video_utils.cpp videodec.cpp videodec2.cpp videodec2_impl.cpp videodec_impl.cpp)
+CORE_SOURCES_CXX += $(addprefix src/core/libraries/videoout/,driver.cpp video_out.cpp)
+CORE_SOURCES_CXX += $(addprefix src/core/libraries/voice/,voice.cpp)
+CORE_SOURCES_CXX += $(addprefix src/core/libraries/vr_tracker/,vr_tracker.cpp)
+CORE_SOURCES_CXX += $(addprefix src/core/libraries/web_browser_dialog/,webbrowserdialog.cpp)
+CORE_SOURCES_CXX += $(addprefix src/core/libraries/zlib/,zlib.cpp)
+CORE_SOURCES_CXX += $(addprefix src/core/loader/,dwarf.cpp elf.cpp symbols_resolver.cpp)
+CORE_SOURCES_CXX += $(addprefix src/core/net/,guest_net.cpp host_net.cpp net_service.cpp \
+	p2p_codec.cpp p2p_crypto.cpp p2p_tcp.cpp p2p_transport.cpp)
+CORE_SOURCES_CXX += $(addprefix src/,emulator.cpp)
+CORE_SOURCES_CXX += $(addprefix src/imgui/,friends_layer.cpp imgui_translations.cpp \
+	invitation_prompt_layer.cpp notifications_layer.cpp shadnet_notifications_layer.cpp)
+CORE_SOURCES_CXX += $(addprefix src/imgui/renderer/,font_data.cpp font_stack.cpp imgui_core.cpp \
+	imgui_impl_vulkan.cpp texture_manager.cpp)
+CORE_SOURCES_CXX += $(addprefix src/input/,controller.cpp controller_state.cpp)
+CORE_SOURCES_CXX += $(addprefix src/shader_recompiler/backend/spirv/,emit_spirv.cpp \
+	emit_spirv_atomic.cpp emit_spirv_barriers.cpp emit_spirv_bitwise_conversion.cpp \
+	emit_spirv_composite.cpp emit_spirv_context_get_set.cpp emit_spirv_convert.cpp \
+	emit_spirv_discard_frag.cpp emit_spirv_floating_point.cpp emit_spirv_image.cpp \
+	emit_spirv_integer.cpp emit_spirv_logical.cpp emit_spirv_quad_rect.cpp emit_spirv_select.cpp \
+	emit_spirv_shared_memory.cpp emit_spirv_special.cpp emit_spirv_undefined.cpp emit_spirv_warp.cpp \
+	spirv_emit_context.cpp)
+CORE_SOURCES_CXX += $(addprefix src/shader_recompiler/frontend/,control_flow_graph.cpp \
+	copy_shader.cpp decode.cpp fetch_shader.cpp format.cpp instruction.cpp \
+	structured_control_flow.cpp)
+CORE_SOURCES_CXX += $(addprefix src/shader_recompiler/frontend/translate/,data_share.cpp \
+	export.cpp scalar_alu.cpp scalar_flow.cpp scalar_memory.cpp translate.cpp vector_alu.cpp \
+	vector_interpolation.cpp vector_memory.cpp)
+CORE_SOURCES_CXX += $(addprefix src/shader_recompiler/ir/,abstract_syntax_list.cpp attribute.cpp \
+	basic_block.cpp dominance.cpp ir_emitter.cpp microinstruction.cpp opcodes.cpp patch.cpp \
+	post_order.cpp program.cpp type.cpp value.cpp)
+CORE_SOURCES_CXX += $(addprefix src/shader_recompiler/ir/passes/,constant_propagation_pass.cpp \
+	dead_code_elimination_pass.cpp flatten_extended_userdata_pass.cpp hull_shader_transform.cpp \
+	inject_clip_distance_attributes.cpp inverse_ballot_elimination_pass.cpp \
+	lower_buffer_format_to_raw.cpp lower_fp64_to_fp32.cpp lower_hardware_intrinsics.cpp \
+	lower_phis_to_regs_pass.cpp lower_user_clip_planes.cpp lower_wave64_pass.cpp \
+	phi_simplification_pass.cpp readlane_elimination_pass.cpp resource_discover_pass.cpp \
+	resource_patching_pass.cpp ring_access_elimination.cpp shader_info_collection_pass.cpp \
+	shared_memory_barrier_pass.cpp shared_memory_simplify_pass.cpp shared_memory_to_storage_pass.cpp \
+	srt_walker_interpreter.cpp ssa_repair_pass.cpp ssa_rewrite_pass.cpp)
+CORE_SOURCES_CXX += $(addprefix src/shader_recompiler/,recompiler.cpp)
+CORE_SOURCES_CXX += $(addprefix src/shadnet/,client.cpp server_probe.cpp)
+CORE_SOURCES_CXX += $(addprefix src/video_core/amdgpu/,liverpool.cpp pixel_format.cpp regs.cpp \
+	tiling.cpp)
+CORE_SOURCES_CXX += $(addprefix src/video_core/buffer_cache/,buffer.cpp buffer_cache.cpp \
+	fault_manager.cpp)
+CORE_SOURCES_CXX += $(addprefix src/video_core/,cache_storage.cpp page_manager.cpp)
+CORE_SOURCES_CXX += $(addprefix src/video_core/renderer_vulkan/host_passes/,pp_pass.cpp)
+CORE_SOURCES_CXX += $(addprefix src/video_core/renderer_vulkan/,liverpool_to_vk.cpp vk_common.cpp \
+	vk_compute_pipeline.cpp vk_graphics_pipeline.cpp vk_instance.cpp vk_pipeline_cache.cpp \
+	vk_pipeline_common.cpp vk_pipeline_serialization.cpp vk_platform.cpp vk_presenter.cpp \
+	vk_rasterizer.cpp vk_resource_pool.cpp vk_runtime.cpp vk_scheduler.cpp vk_semaphore.cpp \
+	vk_shader_hle.cpp vk_shader_util.cpp vk_staging_buffer_pool.cpp vk_swapchain.cpp)
+CORE_SOURCES_CXX += $(addprefix src/video_core/texture_cache/,blit_helper.cpp \
+	host_compatibility.cpp image.cpp image_info.cpp image_view.cpp sampler.cpp texture_cache.cpp \
+	tile_manager.cpp)
+
+CORE_SOURCES_C :=
+CORE_SOURCES_C += $(addprefix src/common/,enum_names.c json_util.c key_manager.c patch_index.c \
+	ptr_table.c u64_map.c)
+CORE_SOURCES_C += $(addprefix src/core/,emulator_settings.c user_manager.c)
+CORE_SOURCES_C += $(addprefix src/core/libraries/network/,host_override.c)
+CORE_SOURCES_C += $(addprefix src/core/libraries/np/np_handler/,np_invitation_json.c)
+CORE_SOURCES_C += $(addprefix src/shadnet/,pb_wire.c shadnet_msg.c)
+CORE_SOURCES_C += $(addprefix src/video_core/host_shaders/,host_spirv.c)
+
+CORE_SOURCES_CXX += $(SCM_REV_CPP)
+CORE_SOURCES_CXX += $(addprefix libretro/,gpu_frames.cpp host.cpp libretro_core.cpp \
+	memory_export.cpp pkg_backend.cpp pkg_entries.cpp pkg_reader.cpp)
+CORE_SOURCES_C += libretro/audio_mix.c $(EMBEDDED_RESOURCES_C)
+ifeq ($(OS_LINUX),1)
+   CORE_SOURCES_C += $(LIBRETRO_HOST_BLOB)
+endif
+ifeq ($(ARCH_X86_64),1)
+   CORE_SOURCES_CXX += src/core/cpu_patches.cpp \
+	$(addprefix src/core/libraries/fiber/,fiber.cpp fiber_context.cpp)
+endif
+
+CORE_FLAGS := -DIMGUI_USER_CONFIG='"imgui/imgui_config.h"' -DZYCORE_STATIC_BUILD \
+	-DZYDIS_STATIC_BUILD -Isrc -I$(LRC_DIR)/include -I. -I$(FONTS_DIR) \
+	-isystem $(EXT_DIR)/fmt/include -isystem $(EXT_DIR)/xbyak -isystem $(EXT_DIR)/imgui \
+	-isystem $(EXT_DIR)/gcn/include -isystem $(EXT_DIR)/vma/include \
+	-isystem $(EXT_DIR)/sirit/include -isystem $(EXT_DIR)/sirit/externals/SPIRV-Headers/include \
+	-isystem $(EXT_DIR)/vulkan-headers/include -isystem $(EXT_DIR)/zydis/include \
+	-isystem $(EXT_DIR)/zydis/dependencies/zycore/include -isystem $(EXT_DIR)/libusb/libusb
+CORE_CXXFLAGS := -Wno-invalid-offsetof
+
+ifneq ($(X86_64_PARTS_ASM),)
+   CORE_SOURCES_ASM += $(X86_64_PARTS_ASM)
+   CORE_FLAGS += -DLIBRETRO_X86_64_PARTS
+endif
+
+# aarch64: the game's x86-64 code through FEXCore, in the emulator's own
+# process, in place of box64
+ifeq ($(ENABLE_FEX_GUEST_CPU),1)
+ifneq ($(ARCH_ARM64),1)
+$(error ENABLE_FEX_GUEST_CPU is for the aarch64 core)
+endif
+FEX_SRC   := $(FEXCORE_GUEST_CPU_SOURCE_DIR)
+FEX_BUILD := $(FEXCORE_GUEST_CPU_BUILD_DIR)
+ifeq ($(FEX_SRC)$(FEX_BUILD),)
+$(error ENABLE_FEX_GUEST_CPU needs FEXCORE_GUEST_CPU_SOURCE_DIR and FEXCORE_GUEST_CPU_BUILD_DIR)
+endif
+# libSceFiber HLE, its switches done on the guest's registers (no fiber_context.cpp asm)
+CORE_SOURCES_CXX += src/core/libraries/fiber/fiber.cpp src/core/fex/fex_guest_engine.cpp \
+	$(addprefix src/core/guest_cpu/,fex_guest_cpu.cpp fex_hle_bridge.cpp guest_cpu.cpp \
+	hle_call_adapter.cpp)
+CORE_FLAGS += -DSHADPS4_ENABLE_FEX_GUEST_CPU=1 -DFEXCORE_HAS_PRESERVE_ALL_ATTR=1 \
+	-DFEX_DISABLE_TELEMETRY=1 -DFEX_HAS_PRESERVE_ALL_ATTR=1 \
+	'-DFEXCORE_PRESERVE_ALL_ATTR=__attribute__((preserve_all))' \
+	'-DFEX_PRESERVE_ALL_ATTR=__attribute__((preserve_all))' \
+	-I$(FEX_BUILD) -I$(FEX_SRC) -I$(FEX_SRC)/Source -I$(FEX_BUILD)/Source \
+	-I$(FEX_BUILD)/generated -I$(FEX_SRC)/Source/Tools/CommonTools \
+	-I$(FEX_BUILD)/FEXCore/Source -I$(FEX_SRC)/FEXCore/include -I$(FEX_BUILD)/include \
+	-I$(FEX_SRC)/External/unordered_dense/include -I$(FEX_SRC)/External/fmt/include \
+	-I$(FEX_SRC)/External/xxhash -I$(FEX_SRC)/FEXHeaderUtils -I$(FEX_SRC)/CodeEmitter \
+	-I$(FEX_SRC)/External/cephes/include -I$(FEX_SRC)/External/SoftFloat-3e/include \
+	-I$(FEX_SRC)/External/SoftFloat-3e/include/SoftFloat-3e \
+	-I$(FEX_SRC)/Source/Common/cpp-optparse -I$(FEX_SRC)/External/tiny-json \
+	-I$(FEX_SRC)/External/range-v3/include -I$(FEX_SRC)/External/rpmalloc
+FEX_LIBRARIES := $(addprefix $(FEX_BUILD)/,FEXCore/Source/libFEXCore.a \
+	Source/Common/libCommon.a Source/Tools/CommonTools/libCommonTools.a \
+	FEXCore/Source/libJemallocLibs.a Source/Common/cpp-optparse/libcpp-optparse.a \
+	External/tiny-json/libtiny-json.a FEXCore/Source/libFEXCore_Base.a \
+	External/fmt/libfmt.a External/xxhash/cmake_unofficial/libxxhash.a \
+	External/cephes/libcephes_128bit.a External/SoftFloat-3e/libsoftfloat_3e.a \
+	External/rpmalloc/librpmalloc.a)
+$(foreach f,$(FEX_LIBRARIES),$(if $(wildcard $(f)),,$(error FEXCore guest CPU library is missing: $(f). Build FEX with .ci/build-fex.sh first.)))
+LIBS := $(FEX_LIBRARIES) $(LIBS)
+endif
+
+# ----------------------------------------------------------------------------
+# libretro-common
+# ----------------------------------------------------------------------------
+LRC_SOURCES_C :=
+LRC_SOURCES_C += $(addprefix $(LRC_DIR)/compat/,compat_posix_string.c \
+	compat_strcasestr.c compat_strl.c)
+LRC_SOURCES_C += $(addprefix $(LRC_DIR)/crypto/,crypto.c kdf.c pk.c x509.c)
+LRC_SOURCES_C += $(addprefix $(LRC_DIR)/encodings/,encoding_base64.c \
+	encoding_crc32.c encoding_deflate.c encoding_rzstd.c encoding_utf.c encoding_xxh3.c \
+	encoding_xxh64.c)
+LRC_SOURCES_C += $(addprefix $(LRC_DIR)/features/,features_cpu.c)
+LRC_SOURCES_C += $(addprefix $(LRC_DIR)/file/,file_path.c file_path_io.c)
+LRC_SOURCES_C += $(addprefix $(LRC_DIR)/formats/aac/,raac.c)
+LRC_SOURCES_C += $(addprefix $(LRC_DIR)/formats/atrac9/,ratrac9.c)
+LRC_SOURCES_C += $(addprefix $(LRC_DIR)/formats/flac/,rflac.c)
+LRC_SOURCES_C += $(addprefix $(LRC_DIR)/formats/h264/,rh264.c)
+LRC_SOURCES_C += $(addprefix $(LRC_DIR)/formats/h265/,rh265.c rh265_sps_crop.c)
+LRC_SOURCES_C += $(addprefix $(LRC_DIR)/formats/json/,rjson.c)
+LRC_SOURCES_C += $(addprefix $(LRC_DIR)/formats/mp3/,rmp3.c)
+LRC_SOURCES_C += $(addprefix $(LRC_DIR)/formats/mp4/,rmp4.c rmp4_audio.c)
+LRC_SOURCES_C += $(addprefix $(LRC_DIR)/formats/png/,rpng.c rpng_encode.c)
+LRC_SOURCES_C += $(addprefix $(LRC_DIR)/formats/xml/,rxml.c)
+LRC_SOURCES_C += $(addprefix $(LRC_DIR)/formats/zar/,zar.c)
+LRC_SOURCES_C += $(addprefix $(LRC_DIR)/gfx/font/,rtt.c)
+LRC_SOURCES_C += $(addprefix $(LRC_DIR)/hash/,lrc_hash.c)
+LRC_SOURCES_C += $(addprefix $(LRC_DIR)/lists/,string_list.c)
+LRC_SOURCES_C += $(addprefix $(LRC_DIR)/net/,net_compat.c net_http.c net_socket.c \
+	net_socket_ssl_retro.c net_upnp.c)
+LRC_SOURCES_C += $(addprefix $(LRC_DIR)/queues/,retro_spsc.c retro_waitable_spsc.c)
+LRC_SOURCES_C += $(addprefix $(LRC_DIR)/rthreads/,retro_eventcount.c rthreads.c)
+LRC_SOURCES_C += $(addprefix $(LRC_DIR)/streams/,file_stream.c interface_stream.c \
+	memory_stream.c trans_stream.c trans_stream_deflate.c trans_stream_pipe.c)
+LRC_SOURCES_C += $(addprefix $(LRC_DIR)/string/,rstrtod.c stdstring.c)
+LRC_SOURCES_C += $(addprefix $(LRC_DIR)/time/,rtime.c)
+LRC_SOURCES_C += $(addprefix $(LRC_DIR)/utils/,md5.c)
+LRC_SOURCES_C += $(addprefix $(LRC_DIR)/vfs/,vfs_implementation.c)
+
+LRC_FLAGS := -I$(LRC_DIR)/include
+# HTTPS through libretro-common's own TLS client
+$(OBJ_DIR)/$(LRC_DIR)/net/net_http.c.o: CFLAGS += -DHAVE_SSL -DHAVE_RETROSSL
+# AAC in MP4/M4A, for the music player
+$(OBJ_DIR)/$(LRC_DIR)/formats/mp4/rmp4_audio.c.o: CFLAGS += -DHAVE_RAAC
+# Zstandard-compressed blocks in ZArchive
+$(OBJ_DIR)/$(LRC_DIR)/formats/zar/zar.c.o: CFLAGS += -DHAVE_RZSTD
+
+# ----------------------------------------------------------------------------
+# Libraries
+# ----------------------------------------------------------------------------
+FMT_SOURCES_CXX := $(addprefix $(EXT_DIR)/fmt/src/,format.cc os.cc)
+FMT_FLAGS := -I$(EXT_DIR)/fmt/include
+
+IMGUI_SOURCES_CXX := $(addprefix $(EXT_DIR)/imgui/,imgui.cpp imgui_demo.cpp imgui_draw.cpp \
+	imgui_tables.cpp imgui_widgets.cpp)
+IMGUI_FLAGS := -DIMGUI_USER_CONFIG='"src/imgui/imgui_config.h"' -I. -I$(EXT_DIR)/imgui
+
+SIRIT_SOURCES_CXX := $(EXT_DIR)/sirit/src/sirit.cpp \
+	$(addprefix $(EXT_DIR)/sirit/src/instructions/,annotation.cpp arithmetic.cpp atomic.cpp \
+	barrier.cpp bit.cpp constant.cpp conversion.cpp debug.cpp derivatives.cpp extension.cpp \
+	flow.cpp function.cpp group.cpp image.cpp logical.cpp memory.cpp misc.cpp type.cpp)
+SIRIT_FLAGS := -I$(EXT_DIR)/sirit/include -I$(EXT_DIR)/sirit/src \
+	-isystem $(EXT_DIR)/sirit/externals/SPIRV-Headers/include
+SIRIT_CXXFLAGS := -std=c++20
+
+ZYDIS_DIR := $(EXT_DIR)/zydis
+ZYCORE_DIR := $(ZYDIS_DIR)/dependencies/zycore
+ZYDIS_SOURCES_C := $(addprefix $(ZYDIS_DIR)/src/,Decoder.c DecoderData.c Disassembler.c \
+	Encoder.c EncoderData.c Formatter.c FormatterATT.c FormatterBase.c FormatterBuffer.c \
+	FormatterIntel.c MetaInfo.c Mnemonic.c Register.c Segment.c SharedData.c String.c \
+	Utils.c Zydis.c)
+ZYDIS_FLAGS := -DZYCORE_STATIC_BUILD -DZYDIS_STATIC_BUILD -I$(ZYDIS_DIR)/include \
+	-I$(ZYDIS_DIR)/src -I$(ZYCORE_DIR)/include
+ZYCORE_SOURCES_C := $(addprefix $(ZYCORE_DIR)/src/,Allocator.c ArgParse.c Bitset.c Format.c \
+	List.c String.c Vector.c Zycore.c) \
+	$(addprefix $(ZYCORE_DIR)/src/API/,Memory.c Process.c Synchronization.c Terminal.c \
+	Thread.c)
+ZYCORE_FLAGS := -DZYCORE_STATIC_BUILD -D_GNU_SOURCE -I$(ZYCORE_DIR)/include -I$(ZYCORE_DIR)/src
+
+LIBUSB_DIR := $(EXT_DIR)/libusb/libusb
+LIBUSB_SOURCES_C := $(addprefix $(LIBUSB_DIR)/,core.c descriptor.c hotplug.c io.c strerror.c \
+	sync.c)
+ifeq ($(OS_LINUX),1)
+   LIBUSB_SOURCES_C += $(addprefix $(LIBUSB_DIR)/os/,linux_usbfs.c linux_netlink.c \
+	events_posix.c threads_posix.c)
+endif
+LIBUSB_FLAGS := -Ilibretro/libusb-config -I$(LIBUSB_DIR) -I$(LIBUSB_DIR)/os -w
+
+LIB_GROUPS := CORE LRC FMT IMGUI SIRIT ZYDIS ZYCORE LIBUSB

@@ -15,7 +15,6 @@
 #include <unordered_set>
 #include <vector>
 #include <Zydis/Zydis.h>
-#include <cmrc/cmrc.hpp>
 #include <encodings/rzstd.h>
 #include <fmt/format.h>
 #include <xbyak/xbyak.h>
@@ -24,6 +23,7 @@
 #include "common/arch.h"
 #include "common/assert.h"
 #include "common/decoder.h"
+#include "common/embedded_resources.h"
 #include "common/signal_context.h"
 #include "common/types.h"
 #include "core/signals.h"
@@ -39,8 +39,6 @@
 #include <pthread.h>
 #include <sys/ucontext.h>
 #endif
-
-CMRC_DECLARE(res);
 
 using namespace Xbyak::util;
 
@@ -66,22 +64,19 @@ static bool InitializeIndexTables() {
     if (rcp_index_tables_initialized) {
         return true;
     }
-    const auto rcp_file =
-        cmrc::res::get_filesystem().open("src/resources/amd_rcp_index_table.bin.zstd");
+    const auto rcp_file = Common::GetEmbeddedResource("src/resources/amd_rcp_index_table.bin.zstd");
     size_t rcp_size = 0;
     if (rzstd_decode(reinterpret_cast<u8*>(rcp_index_table.data()), rcp_index_table_size,
-                     reinterpret_cast<const u8*>(rcp_file.begin()), rcp_file.size(),
-                     &rcp_size) != RZSTD_PROCESS_END ||
+                     rcp_file.data(), rcp_file.size(), &rcp_size) != RZSTD_PROCESS_END ||
         rcp_size != rcp_index_table_size) {
         LOG_WARNING(Core, "Failed to decompress AMD RCP index table");
         return false;
     }
     const auto rsqrt_file =
-        cmrc::res::get_filesystem().open("src/resources/amd_rsqrt_index_table.bin.zstd");
+        Common::GetEmbeddedResource("src/resources/amd_rsqrt_index_table.bin.zstd");
     size_t rsqrt_size = 0;
     if (rzstd_decode(reinterpret_cast<u8*>(rsqrt_index_table.data()), rcp_index_table_size,
-                     reinterpret_cast<const u8*>(rsqrt_file.begin()), rsqrt_file.size(),
-                     &rsqrt_size) != RZSTD_PROCESS_END ||
+                     rsqrt_file.data(), rsqrt_file.size(), &rsqrt_size) != RZSTD_PROCESS_END ||
         rsqrt_size != rcp_index_table_size) {
         LOG_WARNING(Core, "Failed to decompress AMD RSQRT index table");
         return false;

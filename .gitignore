@@ -423,3 +423,7 @@ cmake-build-*
 result
 # the Windows cross build's tools (.ci/build-windows-cross.sh in CI)
 .cross-tools/
+
+# The static Makefile build
+*_libretro.so
+*_libretro.dll

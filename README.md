@@ -110,6 +110,14 @@ cmake -B build -DENABLE_UPDATER=OFF \
 cmake --build build --parallel
 ```
 
+Or with the static Makefile, which needs no CMake (`nproc` jobs; the objects go under `obj/`):
+
+```
+make -j$(nproc) CC=clang CXX=clang++
+```
+
+It takes `DEBUG=1`, `LTO=-flto`, `SANITIZER=address`, and for an aarch64 build `LIBRETRO_X86_64_PARTS=<dir>` (box64 and the x86-64 build) or `ENABLE_FEX_GUEST_CPU=1` with `FEXCORE_GUEST_CPU_SOURCE_DIR` and `FEXCORE_GUEST_CPU_BUILD_DIR`, as the CMake options of the same names. The source lists in `Makefile.common` follow `CMakeLists.txt`.
+
 The CI workflow `.github/workflows/libretro.yml` builds both platforms. `.gitlab-ci.yml` is the recipe for libretro's buildbot, and `.github/workflows/gitlab-preflight.yml` replays it.
 
 ## License

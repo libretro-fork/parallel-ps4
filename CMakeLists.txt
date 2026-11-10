@@ -869,6 +869,8 @@ set(COMMON src/common/c_bridge.cpp
            src/common/multi_level_page_table.h
            ${CMAKE_CURRENT_BINARY_DIR}/src/common/scm_rev.cpp
            src/common/scm_rev.h
+           src/common/embedded_resources.cpp
+           src/common/embedded_resources.h
            src/common/key_manager.c
            src/common/key_manager.h
 )
@@ -1581,12 +1583,8 @@ endif()
 
 target_include_directories(shadps4 PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
-# embed resources
-
-include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/CMakeRC.cmake")
-cmrc_add_resource_library(embedded-resources
-        ALIAS res::embedded
-        NAMESPACE res
+# The files the core carries (src/common/embedded_resources.h), written into a C source
+set(EMBEDDED_RESOURCES
         src/resources/big_picture/controller.png
         src/resources/big_picture/profiles.png
         src/resources/big_picture/settings.png
@@ -1598,7 +1596,18 @@ cmrc_add_resource_library(embedded-resources
         src/resources/trophy.wav
         src/resources/amd_rcp_index_table.bin.zstd
         src/resources/amd_rsqrt_index_table.bin.zstd)
-target_link_libraries(shadps4 PRIVATE res::embedded)
+set(EMBEDDED_RESOURCES_SOURCE "${CMAKE_CURRENT_BINARY_DIR}/embedded_resources.c")
+list(TRANSFORM EMBEDDED_RESOURCES PREPEND "${CMAKE_CURRENT_SOURCE_DIR}/" OUTPUT_VARIABLE EMBEDDED_RESOURCES_FILES)
+add_custom_command(
+    OUTPUT "${EMBEDDED_RESOURCES_SOURCE}"
+    COMMAND ${CMAKE_COMMAND}
+            -DROOT=${CMAKE_CURRENT_SOURCE_DIR}
+            -DOUTPUT=${EMBEDDED_RESOURCES_SOURCE}
+            "-DFILES=${EMBEDDED_RESOURCES}"
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/EmbedResources.cmake
+    DEPENDS ${EMBEDDED_RESOURCES_FILES} ${CMAKE_CURRENT_SOURCE_DIR}/cmake/EmbedResources.cmake
+    VERBATIM)
+target_sources(shadps4 PRIVATE "${EMBEDDED_RESOURCES_SOURCE}")
 
 # ImGui resources
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/src/imgui/renderer)

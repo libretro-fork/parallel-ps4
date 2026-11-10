@@ -49,7 +49,7 @@ private:
 
 void QueueNotification(std::string message, float timer, position pos,
                        stockIcons = shadNotifications::stockIcons::shadPS4);
-void QueueNotification(std::string message, float timer, position pos, std::vector<u8> pngData,
+void QueueNotification(std::string message, float timer, position pos, Common::FS::FileView pngData,
                        bool iconBackground = false);
 
 }; // namespace shadNotifications
