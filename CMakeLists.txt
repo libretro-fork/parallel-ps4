@@ -803,7 +803,6 @@ set(COMMON src/common/c_bridge.cpp
            src/common/logging/formatter.h
            src/common/logging/log.cpp
            src/common/logging/log.h
-           src/common/logging/log_file_sink.h
            src/common/aes.h
            src/common/alignment.h
            src/common/arch.h
@@ -1512,7 +1511,6 @@ endif()
 
 create_target_directory_groups(shadps4)
 
-target_link_libraries(shadps4 PRIVATE spdlog::spdlog)
 target_link_libraries(shadps4 PRIVATE magic_enum::magic_enum fmt::fmt tsl::robin_map xbyak::xbyak RenderDoc::API Dear_ImGui gcn half::half)
 target_link_libraries(shadps4 PRIVATE Boost::headers GPUOpen::VulkanMemoryAllocator sirit Vulkan::Headers Zydis::Zydis)
 target_link_libraries(shadps4 PRIVATE Freetype::Freetype)

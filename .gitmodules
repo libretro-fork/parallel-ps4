@@ -62,11 +62,6 @@
 	path = externals/libusb
 	url = https://github.com/shadexternals/libusb.git
 	branch = shadps4
-[submodule "externals/spdlog"]
-	path = externals/spdlog
-	url = https://github.com/gabime/spdlog.git
-	shallow = true
-	branch = v2.x
 [submodule "externals/mesa-kosmickrisp"]
 	path = externals/mesa-kosmickrisp
 	url = https://github.com/shadexternals/mesa-kosmickrisp

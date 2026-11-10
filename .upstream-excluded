@@ -72,3 +72,4 @@ externals/ffmpeg-core
 externals/LibAtrac9
 externals/cpp-httplib
 externals/libressl
+externals/spdlog

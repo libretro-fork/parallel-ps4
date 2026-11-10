@@ -47,6 +47,7 @@ public:
     }
 };
 
-std::string GetCurrentThreadName();
+// Writes the calling thread's name, NUL-terminated, without allocating; returns its length.
+std::size_t GetCurrentThreadName(char* out, std::size_t size);
 
 } // namespace Common

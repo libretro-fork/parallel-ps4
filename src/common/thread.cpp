@@ -3,6 +3,8 @@
 // SPDX-FileCopyrightText: Copyright 2026 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include <algorithm>
+#include <cstring>
 #include <ctime>
 #include <string>
 #include <thread>
@@ -251,30 +253,40 @@ void AccurateTimer::End() {
         target_interval - std::chrono::duration_cast<std::chrono::nanoseconds>(now - start_time);
 }
 
-std::string GetCurrentThreadName() {
+std::size_t GetCurrentThreadName(char* out, std::size_t size) {
     using namespace Libraries::Kernel;
+    if (size == 0) {
+        return 0;
+    }
+    std::size_t length = 0;
     if (g_curthread && !g_curthread->name.empty()) {
-        if (g_curthread->tcb->tcb_fiber) {
-            return fmt::format("{}@@{}", g_curthread->name,
-                               g_curthread->tcb->tcb_fiber->current_fiber->name);
-        }
-        return g_curthread->name;
-    }
+        const auto result = g_curthread->tcb->tcb_fiber
+                                ? fmt::format_to_n(out, size - 1, "{}@@{}", g_curthread->name,
+                                                   g_curthread->tcb->tcb_fiber->current_fiber->name)
+                                : fmt::format_to_n(out, size - 1, "{}", g_curthread->name);
+        length = std::min<std::size_t>(result.size, size - 1);
+    } else {
 #ifdef _WIN32
-    PWSTR name{};
-    if (FAILED(GetThreadDescription(GetCurrentThread(), &name)) || name == nullptr) {
-        return "<unknown name>";
-    }
-    const auto result = Common::UTF16ToUTF8(name);
-    LocalFree(name);
-    return result;
+        PWSTR name{};
+        if (SUCCEEDED(GetThreadDescription(GetCurrentThread(), &name)) && name != nullptr) {
+            const int written = WideCharToMultiByte(CP_UTF8, 0, name, -1, out,
+                                                    static_cast<int>(size), nullptr, nullptr);
+            length = written > 0 ? static_cast<std::size_t>(written) - 1 : 0;
+            LocalFree(name);
+        }
 #else
-    char name[256];
-    if (pthread_getname_np(pthread_self(), name, sizeof(name)) != 0) {
-        return "<unknown name>";
-    }
-    return std::string{name};
+        if (pthread_getname_np(pthread_self(), out, size) == 0) {
+            length = std::strlen(out);
+        }
 #endif
+    }
+    if (length == 0) {
+        static constexpr char unknown[] = "<unknown name>";
+        length = std::min(sizeof(unknown) - 1, size - 1);
+        std::memcpy(out, unknown, length);
+    }
+    out[length] = '\0';
+    return length;
 }
 
 } // namespace Common

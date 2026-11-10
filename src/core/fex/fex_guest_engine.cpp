@@ -3,7 +3,7 @@
 #include "fex_guest_engine.h"
 
 // Ucontext layout only — do not include pthread.h here. pthread → semaphore →
-// assert → log → spdlog, which the FEXCore-only guest harness does not provide.
+// assert → log → the log writer, which the FEXCore-only guest harness does not provide.
 #include "core/libraries/kernel/threads/exception.h"
 #include "Common/Config.h"
 #include "Common/HostFeatures.h"
