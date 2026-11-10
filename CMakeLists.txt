@@ -278,7 +278,6 @@ if (ENABLE_SYSTEM_LIBRARIES)
     find_package(miniz 3.1 CONFIG)
     find_package(nlohmann_json 3.12 CONFIG)
     find_package(PNG 1.6 MODULE)
-    find_package(OpenAL CONFIG)
     find_package(LibreSSL 4.3.1 MODULE)
     find_package(RenderDoc 1.6.0 MODULE)
     find_package(SDL3 3.1.2 CONFIG)
@@ -337,13 +336,9 @@ set(AUDIO_LIB src/core/libraries/audio/audioin.cpp
               src/core/libraries/audio/audioout_backend.h
               src/core/libraries/audio/audioout_error.h
               src/core/libraries/audio/sdl_audio_out.cpp
-              src/core/libraries/audio/openal_audio_out.cpp
-              src/core/libraries/audio/openal_manager.h
               src/core/libraries/ngs2/ngs2.cpp
               src/core/libraries/ngs2/ngs2.h
               src/core/libraries/audio3d/audio3d.cpp
-              src/core/libraries/audio3d/audio3d_openal.cpp
-              src/core/libraries/audio3d/audio3d_openal.h
               src/core/libraries/audio3d/audio3d.h
               src/core/libraries/audio3d/audio3d_error.h
 )
@@ -1478,7 +1473,7 @@ create_target_directory_groups(shadps4)
 target_link_libraries(shadps4 PRIVATE spdlog::spdlog)
 target_link_libraries(shadps4 PRIVATE magic_enum::magic_enum fmt::fmt toml11::toml11 tsl::robin_map xbyak::xbyak Tracy::TracyClient RenderDoc::API FFmpeg::ffmpeg Dear_ImGui ImGuiFileDialog gcn half::half ZLIB::ZLIB PNG::PNG minimp3 dr_flac)
 target_link_libraries(shadps4 PRIVATE Boost::headers GPUOpen::VulkanMemoryAllocator LibAtrac9 sirit Vulkan::Headers xxHash::xxhash Zydis::Zydis SDL3::SDL3 pugixml::pugixml)
-target_link_libraries(shadps4 PRIVATE stb::headers lfreist-hwinfo::hwinfo nlohmann_json::nlohmann_json miniz::miniz fdk-aac CLI11::CLI11 OpenAL::OpenAL Cpp_Httplib miniupnpc::miniupnpc)
+target_link_libraries(shadps4 PRIVATE stb::headers lfreist-hwinfo::hwinfo nlohmann_json::nlohmann_json miniz::miniz fdk-aac CLI11::CLI11 Cpp_Httplib miniupnpc::miniupnpc)
 target_link_libraries(shadps4 PRIVATE Freetype::Freetype)
 
 if (ENABLE_FEX_GUEST_CPU)

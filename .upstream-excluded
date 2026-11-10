@@ -12,3 +12,8 @@ scripts
 src/dist
 src/main.cpp
 tests
+externals/openal-soft
+src/core/libraries/audio/openal_audio_out.cpp
+src/core/libraries/audio/openal_manager.h
+src/core/libraries/audio3d/audio3d_openal.cpp
+src/core/libraries/audio3d/audio3d_openal.h

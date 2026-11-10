@@ -9,7 +9,6 @@
 #include "core/libraries/audio/audioin.h"
 #include "core/libraries/audio/audioout.h"
 #include "core/libraries/audio3d/audio3d.h"
-#include "core/libraries/audio3d/audio3d_openal.h"
 #include "core/libraries/avplayer/avplayer.h"
 #include "core/libraries/camera/camera.h"
 #include "core/libraries/companion/companion_httpd.h"
@@ -116,11 +115,9 @@ void LinkFunctionImpl(Core::Loader::SymbolsResolver* sym, char const* nid, char 
 namespace Libraries {
 
 static void RegisterAudio3d(Core::Loader::SymbolsResolver* sym) {
-    if (EmulatorSettings.GetAudioBackend() == AudioBackend::OpenAL) {
-        Libraries::Audio3dOpenAL::RegisterLib(sym);
-    } else {
-        Libraries::Audio3d::RegisterLib(sym);
-    }
+    // The frontend plays the sound: Audio3D goes out through AudioOut, never to a device of
+    // its own.
+    Libraries::Audio3d::RegisterLib(sym);
 }
 
 void InitHLELibs(Core::Loader::SymbolsResolver* sym) {

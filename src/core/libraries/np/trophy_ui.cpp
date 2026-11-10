@@ -111,22 +111,6 @@ TrophyUI::TrophyUI(const std::filesystem::path& trophyIconPath, const std::strin
                 }
             }
         }
-
-        // user selected OpenAl Backend, use same device as OpenAl main Device
-    } else if (EmulatorSettings.GetAudioBackend() == 1) {
-        if (EmulatorSettings.GetOpenALMainOutputDevice() != "Default Device") {
-            int count;
-            SDL_AudioDeviceID* devices = SDL_GetAudioPlaybackDevices(&count);
-
-            for (int i = 0; i < count; i++) {
-                std::string name = SDL_GetAudioDeviceName(devices[i]);
-                // Device names are the same for openAl/Sdl, just with an added prefix
-                name.erase(0, 15);
-                if (name == EmulatorSettings.GetOpenALMainOutputDevice()) {
-                    audioDevice = SDL_OpenAudioDevice(devices[i], NULL);
-                }
-            }
-        }
     }
 
     if (audioDevice == 0) {

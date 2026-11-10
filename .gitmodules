@@ -117,9 +117,6 @@
 [submodule "externals/cpp-httplib"]
 	path = externals/cpp-httplib
 	url = https://github.com/shadexternals/cpp-httplib.git
-[submodule "externals/openal-soft"]
-	path = externals/openal-soft
-	url = https://github.com/shadexternals/openal-soft.git
 [submodule "externals/libusb"]
 	path = externals/libusb
 	url = https://github.com/shadexternals/libusb.git
