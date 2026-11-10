@@ -37,6 +37,9 @@ public:
         return m_h265 != nullptr;
     }
 
+    // The avcC/hvcC record of an MP4 track, for its length-prefixed samples.
+    bool SetExtradata(const u8* data, std::size_t size);
+
     // 1 when a picture is ready, 0 when none is (yet), negative for a stream the decoder
     // cannot take.
     int Decode(const u8* data, std::size_t size, const PictureMeta& meta);

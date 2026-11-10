@@ -68,3 +68,4 @@ externals/aacdec
 externals/tracy
 externals/hwinfo
 externals/miniupnp
+externals/ffmpeg-core

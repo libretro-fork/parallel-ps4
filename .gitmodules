@@ -42,10 +42,6 @@
 	path = externals/date
 	url = https://github.com/HowardHinnant/date.git
 	shallow = true
-[submodule "externals/ffmpeg-core"]
-	path = externals/ffmpeg-core
-	url = https://github.com/shadps4-emu/ext-ffmpeg-core.git
-	shallow = true
 [submodule "externals/half"]
 	path = externals/half
 	url = https://github.com/ROCm/half.git

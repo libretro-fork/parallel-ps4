@@ -19,13 +19,11 @@
 #include "core/libraries/avplayer/avplayer_data_streamer.h"
 #include "core/libraries/kernel/threads.h"
 
-struct AVCodecContext;
-struct AVFormatContext;
-struct AVFrame;
-struct AVIOContext;
-struct AVPacket;
-struct SwrContext;
-struct SwsContext;
+#include "core/libraries/videodec/video_utils.h"
+
+struct RFILE;
+typedef struct rmp4 rmp4_t;
+typedef struct raac raac_t;
 
 namespace Libraries::AvPlayer {
 
@@ -168,22 +166,18 @@ public:
     bool IsActive();
 
 private:
+    // An MP4 sample, read in place from the file's bytes.
+    struct Packet {
+        const u8* data = nullptr;
+        size_t size = 0;
+        u64 timestamp = 0; // milliseconds
+    };
+
     u64 DurationMillis() const;
     AvPlayerStreamInfo CreateStreamInfo(u32 stream_index);
-
-    static void ReleaseAVPacket(AVPacket* packet);
-    static void ReleaseAVFrame(AVFrame* frame);
-    static void ReleaseAVCodecContext(AVCodecContext* context);
-    static void ReleaseSWRContext(SwrContext* context);
-    static void ReleaseSWSContext(SwsContext* context);
-    static void ReleaseAVFormatContext(AVFormatContext* context);
-
-    using AVPacketPtr = std::unique_ptr<AVPacket, decltype(&ReleaseAVPacket)>;
-    using AVFramePtr = std::unique_ptr<AVFrame, decltype(&ReleaseAVFrame)>;
-    using AVCodecContextPtr = std::unique_ptr<AVCodecContext, decltype(&ReleaseAVCodecContext)>;
-    using SWRContextPtr = std::unique_ptr<SwrContext, decltype(&ReleaseSWRContext)>;
-    using SWSContextPtr = std::unique_ptr<SwsContext, decltype(&ReleaseSWSContext)>;
-    using AVFormatContextPtr = std::unique_ptr<AVFormatContext, decltype(&ReleaseAVFormatContext)>;
+    bool OpenDemuxer();
+    // Makes the bytes below hi of a file that is not mapped readable.
+    bool Load(size_t hi);
 
     void DemuxerThread(std::stop_token stop);
     void VideoDecoderThread(std::stop_token stop);
@@ -191,16 +185,10 @@ private:
 
     bool HasRunningThreads() const;
 
-    AVFramePtr ConvertAudioFrame(const AVFrame& frame);
-    AVFramePtr ConvertVideoFrame(const AVFrame& frame);
-
-    Frame PrepareAudioFrame(GuestBuffer buffer, const AVFrame& frame);
-    Frame PrepareVideoFrame(GuestBuffer buffer, const AVFrame& frame);
-
     AvPlayerStateCallback& m_state;
 
     struct Stream {
-        size_t ffmpeg_index = 0;
+        int track = 0; // rmp4's track index
         AvPlayerStreamInfo info;
     };
 
@@ -219,8 +207,8 @@ private:
     AvPlayerQueue<GuestBuffer> m_audio_buffers;
     AvPlayerQueue<GuestBuffer> m_video_buffers;
 
-    AvPlayerQueue<AVPacketPtr> m_audio_packets;
-    AvPlayerQueue<AVPacketPtr> m_video_packets;
+    AvPlayerQueue<Packet> m_audio_packets;
+    AvPlayerQueue<Packet> m_video_packets;
 
     AvPlayerQueue<Frame> m_audio_frames;
     AvPlayerQueue<Frame> m_video_frames;
@@ -244,11 +232,19 @@ private:
     Kernel::Thread m_video_decoder_thread{};
     Kernel::Thread m_audio_decoder_thread{};
 
-    AVFormatContextPtr m_avformat_context{nullptr, &ReleaseAVFormatContext};
-    AVCodecContextPtr m_video_codec_context{nullptr, &ReleaseAVCodecContext};
-    AVCodecContextPtr m_audio_codec_context{nullptr, &ReleaseAVCodecContext};
-    SWRContextPtr m_swr_context{nullptr, &ReleaseSWRContext};
-    SWSContextPtr m_sws_context{nullptr, &ReleaseSWSContext};
+    // The file's bytes: mapped, or for a file read through callbacks, a buffer of its size
+    // filled as the demuxer reaches each sample.
+    RFILE* m_file = nullptr;
+    const u8* m_data = nullptr;
+    u8* m_owned = nullptr;
+    size_t m_size = 0;
+    size_t m_loaded_hi = 0; // the file is read in order: what lies below is in place
+    bool m_fully_loaded = false;
+    rmp4_t* m_demuxer = nullptr;
+
+    std::unique_ptr<Videodec::SwDecoder> m_video_decoder;
+    raac_t* m_audio_decoder = nullptr;
+    u64 m_audio_skip = 0; // samples a channel the edit list trims, still to drop
 
     std::optional<u64> m_last_audio_ts{};
     std::optional<std::chrono::high_resolution_clock::time_point> m_last_data_time{};

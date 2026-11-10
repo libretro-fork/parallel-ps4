@@ -29,6 +29,11 @@ SwDecoder::~SwDecoder() {
     }
 }
 
+bool SwDecoder::SetExtradata(const u8* data, size_t size) {
+    return m_h264 ? rh264_video_set_extradata(m_h264, data, size) == 0
+                  : m_h265 && rh265_video_set_extradata(m_h265, data, size) == 0;
+}
+
 int SwDecoder::Decode(const u8* data, size_t size, const PictureMeta& meta) {
     const u64 seq = m_seq++;
     m_ring[seq % MetaRing] = meta;
