@@ -18,9 +18,6 @@
 #include "common/thread.h"
 #include "core/emulator_settings.h"
 #include "core/ipc/ipc.h"
-#ifdef ENABLE_DISCORD_RPC
-#include "common/discord_rpc_handler.h"
-#endif
 #include "common/elf_info.h"
 #include "common/memory_patcher.h"
 #include "common/ntapi.h"
@@ -658,17 +655,6 @@ void Emulator::Run(std::filesystem::path file, std::vector<std::string> args,
         LOG_CRITICAL(Loader, "Failed to load game's eboot.bin: {}", guest_eboot_path);
         std::quick_exit(0);
     }
-
-#ifdef ENABLE_DISCORD_RPC
-    // Discord RPC
-    if (EmulatorSettings.IsDiscordRPCEnabled()) {
-        auto* rpc = Common::Singleton<DiscordRPCHandler::RPC>::Instance();
-        if (rpc->getRPCEnabled() == false) {
-            rpc->init();
-        }
-        rpc->setStatusPlaying(game_info.title, id);
-    }
-#endif
 
     if (!id.empty()) {
         start_time = std::chrono::steady_clock::now();

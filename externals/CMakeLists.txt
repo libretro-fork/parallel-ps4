@@ -209,10 +209,6 @@ if (NOT TARGET libusb::usb)
     endif()
 endif()
 
-# Discord RPC
-if (ENABLE_DISCORD_RPC)
-    add_subdirectory(discord-rpc)
-endif()
 
 # GCN Headers
 add_subdirectory(gcn)

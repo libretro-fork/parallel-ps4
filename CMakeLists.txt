@@ -36,7 +36,6 @@ endif()
 include(CMakeDependentOption)
 cmake_dependent_option(ENABLE_SYSTEM_VULKAN "Enable the system Vulkan driver" OFF APPLE OFF)
 
-option(ENABLE_DISCORD_RPC "Enable the Discord RPC integration" ON)
 option(ENABLE_UPDATER "Enables the options to updater" ON)
 # aarch64: the game's x86-64 code through FEXCore in the emulator's own process, in place of
 # box64. FEX is built on its own (.ci/build-fex.sh) and its static libraries linked in.
@@ -881,9 +880,6 @@ set(COMMON src/common/logging/classes.cpp
            src/common/key_manager.h
 )
 
-if (ENABLE_DISCORD_RPC)
-    list(APPEND COMMON src/common/discord_rpc_handler.cpp src/common/discord_rpc_handler.h)
-endif()
 
 set(NET_CORE  src/core/net/guest_net.cpp
               src/core/net/guest_net.h
@@ -1515,9 +1511,6 @@ endif()
 target_compile_definitions(shadps4 PRIVATE IMGUI_USER_CONFIG="imgui/imgui_config.h")
 target_compile_definitions(Dear_ImGui PRIVATE IMGUI_USER_CONFIG="${PROJECT_SOURCE_DIR}/src/imgui/imgui_config.h")
 
-if (ENABLE_DISCORD_RPC)
-    target_compile_definitions(shadps4 PRIVATE ENABLE_DISCORD_RPC)
-endif()
 
 if (${CMAKE_SYSTEM_NAME} STREQUAL "Linux")
     target_link_libraries(shadps4 PRIVATE uuid)
@@ -1628,7 +1621,3 @@ add_dependencies(shadps4 ImGui_Resources)
 target_include_directories(shadps4 PRIVATE ${IMGUI_RESOURCES_INCLUDE})
 
 
-# Discord RPC
-if (ENABLE_DISCORD_RPC)
-    target_link_libraries(shadps4 PRIVATE discord-rpc)
-endif()

@@ -105,7 +105,7 @@ Linux, with upstream's build dependencies (the list is in `.github/workflows/lib
 ```
 git clone --recursive https://github.com/WizzardSK/shadps4-libretro.git
 cd shadps4-libretro
-cmake -B build -DENABLE_DISCORD_RPC=OFF -DENABLE_UPDATER=OFF \
+cmake -B build -DENABLE_UPDATER=OFF \
     -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
 cmake --build build --parallel
 ```
