@@ -44,7 +44,6 @@
 #include <system_error>
 #include <vector>
 #include <imgui.h>
-#include <stb_image_write.h>
 #include <vk_mem_alloc.h>
 #include "libretro/libretro_bridge.h"
 

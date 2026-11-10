@@ -1,14 +1,16 @@
 // SPDX-FileCopyrightText: Copyright 2024-2026 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include <cstdlib>
 #include <deque>
 #include <utility>
 
+#include <formats/image.h>
+#include <formats/rpng.h>
 #include <imgui.h>
 #include "common/assert.h"
 #include "common/io_file.h"
 #include "common/polyfill_thread.h"
-#include "common/stb.h"
 #include "common/thread.h"
 #include "core/emulator_settings.h"
 #include "imgui_impl_vulkan.h"
@@ -169,13 +171,30 @@ void WorkerLoop() {
                 file.Close();
             }
 
-            int width, height;
-            const stbi_uc* pixels =
-                stbi_load_from_memory(png_raw.data(), png_raw.size(), &width, &height, nullptr, 4);
+            // Decoded with libretro-common's rpng as R,G,B,A bytes, the texture's own format.
+            void* pixels = nullptr;
+            unsigned width = 0;
+            unsigned height = 0;
+            int ret = IMAGE_PROCESS_ERROR;
+            rpng_t* rpng = rpng_alloc();
+            if (rpng && rpng_set_buf_ptr(rpng, png_raw.data(), png_raw.size()) &&
+                rpng_start(rpng)) {
+                while (rpng_iterate_image(rpng)) {
+                }
+                do {
+                    ret = rpng_process_image(rpng, &pixels, png_raw.size(), &width, &height, true);
+                } while (ret == IMAGE_PROCESS_NEXT);
+            }
+            rpng_free(rpng);
+            if (ret != IMAGE_PROCESS_END || !pixels) {
+                std::free(pixels);
+                LOG_ERROR(ImGui, "Failed to decode PNG {}", path.string());
+                continue;
+            }
 
             auto texture = Vulkan::UploadTexture(pixels, vk::Format::eR8G8B8A8Unorm, width, height,
-                                                 width * height * 4 * sizeof(stbi_uc));
-            stbi_image_free((void*)pixels);
+                                                 static_cast<size_t>(width) * height * 4);
+            std::free(pixels);
 
             core->upload_data = texture;
             core->width = width;

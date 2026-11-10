@@ -54,3 +54,7 @@ externals/zlib-ng
 externals/pugixml
 externals/CLI11
 externals/ImGuiFileDialog
+externals/stb
+src/common/stb.cpp
+src/common/stb.h
+cmake/Findstb.cmake

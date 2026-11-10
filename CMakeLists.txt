@@ -272,7 +272,6 @@ if (ENABLE_SYSTEM_LIBRARIES)
     find_package(nlohmann_json 3.12 CONFIG)
     find_package(LibreSSL 4.3.1 MODULE)
     find_package(RenderDoc 1.6.0 MODULE)
-    find_package(stb MODULE)
     find_package(tsl-robin-map 1.3.0 CONFIG)
     find_package(VulkanHeaders 1.4.330 CONFIG)
     find_package(VulkanMemoryAllocator 3.1.0 CONFIG)
@@ -852,8 +851,6 @@ set(COMMON src/common/logging/classes.cpp
            src/common/slot_vector.h
            src/common/spin_lock.cpp
            src/common/spin_lock.h
-           src/common/stb.cpp
-           src/common/stb.h
            src/common/string_literal.h
            src/common/string_util.cpp
            src/common/string_util.h
@@ -1484,7 +1481,7 @@ create_target_directory_groups(shadps4)
 target_link_libraries(shadps4 PRIVATE spdlog::spdlog)
 target_link_libraries(shadps4 PRIVATE magic_enum::magic_enum fmt::fmt tsl::robin_map xbyak::xbyak Tracy::TracyClient RenderDoc::API FFmpeg::ffmpeg Dear_ImGui gcn half::half)
 target_link_libraries(shadps4 PRIVATE Boost::headers GPUOpen::VulkanMemoryAllocator LibAtrac9 sirit Vulkan::Headers Zydis::Zydis)
-target_link_libraries(shadps4 PRIVATE stb::headers lfreist-hwinfo::hwinfo nlohmann_json::nlohmann_json fdk-aac Cpp_Httplib miniupnpc::miniupnpc)
+target_link_libraries(shadps4 PRIVATE lfreist-hwinfo::hwinfo nlohmann_json::nlohmann_json fdk-aac Cpp_Httplib miniupnpc::miniupnpc)
 target_link_libraries(shadps4 PRIVATE Freetype::Freetype)
 
 if (ENABLE_FEX_GUEST_CPU)
