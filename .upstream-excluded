@@ -52,3 +52,5 @@ cmake/FindZArchive.cmake
 externals/libpng
 externals/zlib-ng
 externals/pugixml
+externals/CLI11
+externals/ImGuiFileDialog

@@ -4,6 +4,7 @@ What changed in the libretro core of this fork, newest first. Changes that come 
 
 ## Unreleased
 
+- CLI11 and ImGuiFileDialog are no longer built: nothing in the core used them.
 - pugixml is replaced by libretro-common's rxml for the trophy files and the memory patches. A file is parsed in place from the buffer it is read into. Comments in a user's trophy progress file are not kept when it is written back.
 - libpng and zlib-ng are gone: the game's PNG libraries (libScePngDec, libScePngEnc) decode and encode with libretro-common's rpng. A PNG decodes straight into the game's image buffer and encodes straight into its output buffer. An RGBA encode now honours the game's row pitch, which it ignored before. With this, the core carries no zlib at all.
 - ZArchive and zstd are replaced by libretro-common: a game packed as a `.zar` is read with `formats/zar.h` from a memory mapping of the archive (`streams/file_stream.h`). Reads no longer pass through one shared worker thread under a lock: each thread reads on its own, and a file's octets go straight to where the game wants them. Paths inside an archive are now matched without regard to ASCII case. The AMD reciprocal tables decode with `encodings/rzstd.h`.
