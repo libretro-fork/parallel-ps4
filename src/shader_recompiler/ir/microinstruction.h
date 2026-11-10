@@ -8,7 +8,7 @@
 #include <type_traits>
 
 #include <list>
-#include <boost/intrusive/list.hpp>
+#include "common/intrusive_list.h"
 #include "common/small_vector.h"
 
 #include "common/assert.h"
@@ -28,7 +28,7 @@ struct Use {
     bool operator==(const Use&) const noexcept = default;
 };
 
-class Inst : public boost::intrusive::list_base_hook<> {
+class Inst : public Common::ListHook {
 public:
     explicit Inst(IR::Opcode op_, u32 flags_) noexcept;
     explicit Inst(const Inst& base);

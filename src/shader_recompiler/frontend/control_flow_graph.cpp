@@ -9,20 +9,6 @@
 
 namespace Shader::Gcn {
 
-struct Compare {
-    bool operator()(const Block& lhs, u32 rhs) const noexcept {
-        return lhs.begin < rhs;
-    }
-
-    bool operator()(u32 lhs, const Block& rhs) const noexcept {
-        return lhs < rhs.begin;
-    }
-
-    bool operator()(const Block& lhs, const Block& rhs) const noexcept {
-        return lhs.begin < rhs.begin;
-    }
-};
-
 static IR::Condition MakeCondition(const GcnInst& inst) {
     if (inst.IsCmpx()) {
         return IR::Condition::Execnz;
@@ -219,7 +205,7 @@ void CFG::SplitDivergenceScopes() {
                     block->end_index = curr_end;
                     block->end_inst = inst_list[curr_end];
                     block->num_predecessors = 1;
-                    blocks.insert_before(next_blk, *block);
+                    blocks.insert(next_blk, *block);
 
                     // If we are inside the parent block, make an epilogue block and jump to it.
                     if (curr_end != blk->end_index) {
@@ -234,7 +220,7 @@ void CFG::SplitDivergenceScopes() {
                         epi_block->branch_true = blk->branch_true;
                         epi_block->branch_false = blk->branch_false;
                         epi_block->num_predecessors = 2;
-                        blocks.insert_before(next_blk, *epi_block);
+                        blocks.insert(next_blk, *epi_block);
 
                         // Have divergence block always jump to epilogue block.
                         block->cond = IR::Condition::True;
@@ -304,15 +290,22 @@ void CFG::EmitBlocks() {
         block->end_index = end_index;
         block->end_inst = end_inst;
         block->cond = MakeCondition(end_inst);
-        blocks.insert(*block);
+        InsertSorted(*block);
     }
 }
 
 void CFG::LinkBlocks() {
-    const auto get_block = [this](u32 address) {
-        auto it = blocks.find(address, Compare{});
-        ASSERT_MSG(it != blocks.cend() && it->begin == address);
-        return &*it;
+    // The blocks by address, for a binary search; LinkBlocks adds none
+    std::vector<Block*> by_address;
+    by_address.reserve(blocks.size());
+    for (Block& block : blocks) {
+        by_address.push_back(&block);
+    }
+    const auto get_block = [&by_address](u32 address) {
+        const auto it = std::lower_bound(by_address.begin(), by_address.end(), address,
+                                         [](const Block* b, u32 a) { return b->begin < a; });
+        ASSERT_MSG(it != by_address.end() && (*it)->begin == address);
+        return *it;
     };
 
     for (auto it = blocks.begin(); it != blocks.end(); it++) {

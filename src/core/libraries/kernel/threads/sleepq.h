@@ -2,18 +2,18 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include <list>
-#include <boost/intrusive/list.hpp>
-#include <boost/intrusive/list_hook.hpp>
+
+#include "common/intrusive_list.h"
 
 namespace Libraries::Kernel {
 
 struct Pthread;
 struct SleepQueue;
 
-using ListBaseHook =
-    boost::intrusive::list_base_hook<boost::intrusive::link_mode<boost::intrusive::auto_unlink>>;
+// A queue takes itself out of whatever list holds it when destroyed
+using ListBaseHook = Common::ListHook;
 
-using SleepqList = boost::intrusive::list<SleepQueue, boost::intrusive::constant_time_size<false>>;
+using SleepqList = Common::IntrusiveList<SleepQueue>;
 
 struct SleepQueue : public ListBaseHook {
     std::list<Pthread*> sq_blocked;

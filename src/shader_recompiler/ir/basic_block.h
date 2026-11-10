@@ -7,7 +7,7 @@
 #include <map>
 #include <span>
 #include <vector>
-#include <boost/intrusive/list.hpp>
+#include "common/intrusive_list.h"
 
 #include "common/object_pool.h"
 #include "common/types.h"
@@ -24,7 +24,7 @@ namespace Shader::IR {
 
 class Block {
 public:
-    using InstructionList = boost::intrusive::list<Inst>;
+    using InstructionList = Common::IntrusiveList<Inst>;
     using size_type = InstructionList::size_type;
     using iterator = InstructionList::iterator;
     using const_iterator = InstructionList::const_iterator;

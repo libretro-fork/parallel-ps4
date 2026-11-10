@@ -6,7 +6,7 @@
 #include <algorithm>
 #include <span>
 #include <string>
-#include <boost/intrusive/set.hpp>
+#include "common/intrusive_list.h"
 #include "common/small_vector.h"
 
 #include "common/assert.h"
@@ -21,8 +21,7 @@ class Block;
 
 namespace Shader::Gcn {
 
-using Hook =
-    boost::intrusive::set_base_hook<boost::intrusive::link_mode<boost::intrusive::normal_link>>;
+using Hook = Common::ListHook;
 
 enum class EndClass {
     Branch, ///< Block ends with a (un)conditional branch.
@@ -53,7 +52,8 @@ struct Block : Hook {
 
 class CFG {
     using Label = u32;
-    using BlockList = boost::intrusive::set<Block>;
+    // In address order: a list kept sorted as blocks go in
+    using BlockList = Common::IntrusiveList<Block>;
     using iterator = BlockList::iterator;
 
 public:
@@ -74,6 +74,22 @@ private:
     void LinkBlocks();
     void SplitDivergenceScopes();
     void RemoveUnreachableBlocks();
+
+    // Puts @block in address order; a block whose address is already there is left out
+    void InsertSorted(Block& block) {
+        auto it = blocks.end();
+        while (it != blocks.begin()) {
+            const auto prev = std::prev(it);
+            if (prev->begin < block.begin) {
+                break;
+            }
+            if (prev->begin == block.begin) {
+                return;
+            }
+            it = prev;
+        }
+        blocks.insert(it, block);
+    }
 
     void AddLabel(Label address) {
         const auto it = std::ranges::find(labels, address);

@@ -8,8 +8,8 @@
 #include <unordered_map>
 #include <utility>
 #include <vector>
-#include <boost/intrusive/list.hpp>
 #include <fmt/format.h>
+#include "common/intrusive_list.h"
 #include "shader_recompiler/frontend/structured_control_flow.h"
 #include "shader_recompiler/frontend/translate/translate.h"
 #include "shader_recompiler/ir/ir_emitter.h"
@@ -21,15 +21,11 @@ namespace {
 
 struct Statement;
 
-// Use normal_link because we are not guaranteed to destroy the tree in order
-using ListBaseHook =
-    boost::intrusive::list_base_hook<boost::intrusive::link_mode<boost::intrusive::normal_link>>;
+// A statement takes itself out of its tree when destroyed, so the tree can be
+// destroyed in any order. No count is kept: splice stays constant time.
+using ListBaseHook = Common::ListHook;
 
-using Tree = boost::intrusive::list<Statement,
-                                    // Allow using Statement without a definition
-                                    boost::intrusive::base_hook<ListBaseHook>,
-                                    // Avoid linear complexity on splice, size is never called
-                                    boost::intrusive::constant_time_size<false>>;
+using Tree = Common::IntrusiveList<Statement>;
 using Node = Tree::iterator;
 
 enum class StatementType {
