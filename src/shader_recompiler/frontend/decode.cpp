@@ -6,7 +6,7 @@
 #include "core/libraries/kernel/process.h"
 #include "shader_recompiler/frontend/decode.h"
 
-#include <magic_enum/magic_enum.hpp>
+#include "common/enum_names.h"
 
 namespace Shader::Gcn {
 
@@ -267,8 +267,8 @@ void GcnDecodeContext::updateInstructionMeta(InstEncoding encoding) {
     ASSERT_MSG(instFormat.src_type != ScalarType::Undefined &&
                    instFormat.dst_type != ScalarType::Undefined,
                "Instruction format table incomplete for opcode {} ({}, encoding = 0x{:x})",
-               magic_enum::enum_name(m_instruction.opcode), u32(m_instruction.opcode),
-               u32(encoding));
+               enum_name(&enum_names_Shader_Gcn_Opcode, static_cast<s64>(m_instruction.opcode)),
+               u32(m_instruction.opcode), u32(encoding));
 
     m_instruction.inst_class = instFormat.inst_class;
     m_instruction.category = instFormat.inst_category;
@@ -534,8 +534,8 @@ void GcnDecodeContext::decodeDataParallelPrimitive(InstEncoding encoding, GcnCod
         LOG_ERROR(
             Render_Recompiler,
             "unhandled DPP operation: {} ({:#x}), value {}, bc {}, row_mask {:#b}, bank_mask {:#b}",
-            magic_enum::enum_name(op.op), u32(op.op), op.value, bool(dpp.bc), u8(dpp.row_mask),
-            u8(dpp.bank_mask));
+            enum_name(&enum_names_Shader_Gcn_DppCtrl, static_cast<s64>(op.op)), u32(op.op),
+            op.value, bool(dpp.bc), u8(dpp.row_mask), u8(dpp.bank_mask));
 
         m_instruction.src[0].dpp = op;
     }

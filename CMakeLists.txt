@@ -263,7 +263,6 @@ if (ENABLE_SYSTEM_LIBRARIES)
     list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
     find_package(fmt 12.0.0 CONFIG)
     find_package(glslang 15 CONFIG)
-    find_package(magic_enum 0.9.7 CONFIG)
     find_package(VulkanHeaders 1.4.330 CONFIG)
     find_package(VulkanMemoryAllocator 3.1.0 CONFIG)
     find_package(xbyak 7.07 CONFIG)
@@ -844,6 +843,8 @@ set(COMMON src/common/c_bridge.cpp
            src/common/signal_context.cpp
            src/common/singleton.h
            src/common/slab_heap.h
+           src/common/enum_names.c
+           src/common/enum_names.h
            src/common/flat_map.h
            src/common/intrusive_list.h
            src/common/intrusive_list_cpp.h
@@ -1488,7 +1489,7 @@ endif()
 
 create_target_directory_groups(shadps4)
 
-target_link_libraries(shadps4 PRIVATE magic_enum::magic_enum fmt::fmt xbyak::xbyak Dear_ImGui gcn)
+target_link_libraries(shadps4 PRIVATE fmt::fmt xbyak::xbyak Dear_ImGui gcn)
 target_link_libraries(shadps4 PRIVATE GPUOpen::VulkanMemoryAllocator sirit Vulkan::Headers Zydis::Zydis)
 
 if (ENABLE_FEX_GUEST_CPU)

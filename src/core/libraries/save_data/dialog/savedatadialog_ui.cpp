@@ -3,7 +3,7 @@
 
 #include <fmt/chrono.h>
 #include <imgui.h>
-#include <magic_enum/magic_enum.hpp>
+#include "common/enum_names.h"
 
 #include "common/elf_info.h"
 #include "common/singleton.h"
@@ -261,7 +261,9 @@ SaveDialogState::SystemState::SystemState(const SaveDialogState& state,
         M("Cannot create more saved data", "##UNKNOWN##", "##UNKNOWN##");
         break;
     default:
-        msg = fmt::format("Unknown message type: {}", magic_enum::enum_name(sys.msgType));
+        msg = fmt::format("Unknown message type: {}",
+                          enum_name(&enum_names_Libraries_SaveData_Dialog_SystemMessageType,
+                                    static_cast<s64>(sys.msgType)));
         break;
     }
 

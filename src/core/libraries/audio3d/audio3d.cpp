@@ -4,7 +4,7 @@
 #include <algorithm>
 #include <vector>
 #include <fmt/format.h>
-#include <magic_enum/magic_enum.hpp>
+#include "common/enum_names.h"
 
 #include "common/assert.h"
 #include "common/logging/log.h"
@@ -254,8 +254,12 @@ s32 PS4_SYSV_ABI sceAudio3dBedWrite2(const OrbisAudio3dPortId port_id, const u32
         Lib_Audio3d,
         "called, port_id = {}, num_channels = {}, format = {}, num_samples = {}, output_route "
         "= {}, restricted = {}",
-        port_id, num_channels, magic_enum::enum_name(format), num_samples,
-        magic_enum::enum_name(output_route), restricted);
+        port_id, num_channels,
+        enum_name(&enum_names_Libraries_Audio3d_OrbisAudio3dFormat, static_cast<s64>(format)),
+        num_samples,
+        enum_name(&enum_names_Libraries_Audio3d_OrbisAudio3dOutputRoute,
+                  static_cast<s64>(output_route)),
+        restricted);
 
     if (!state->ports.contains(port_id)) {
         LOG_ERROR(Lib_Audio3d, "!state->ports.contains(port_id)");
@@ -1113,8 +1117,9 @@ s32 PS4_SYSV_ABI sceAudio3dPortOpen(const Libraries::UserService::OrbisUserServi
 
 s32 PS4_SYSV_ABI sceAudio3dPortPush(const OrbisAudio3dPortId port_id,
                                     const OrbisAudio3dBlocking blocking) {
-    LOG_DEBUG(Lib_Audio3d, "called, port_id = {}, blocking = {}", port_id,
-              magic_enum::enum_name(blocking));
+    LOG_DEBUG(
+        Lib_Audio3d, "called, port_id = {}, blocking = {}", port_id,
+        enum_name(&enum_names_Libraries_Audio3d_OrbisAudio3dBlocking, static_cast<s64>(blocking)));
 
     if (!state->ports.contains(port_id)) {
         LOG_ERROR(Lib_Audio3d, "!state->ports.contains(port_id)");

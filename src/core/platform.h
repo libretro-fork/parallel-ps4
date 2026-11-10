@@ -8,7 +8,7 @@
 #include "common/singleton.h"
 #include "common/types.h"
 
-#include <magic_enum/magic_enum.hpp>
+#include "common/enum_names.h"
 
 #include <functional>
 #include <mutex>
@@ -68,7 +68,8 @@ struct IrqController {
         auto& ctx = irq_contexts.try_emplace(irq).first->second;
         std::unique_lock lock{ctx.m_lock};
 
-        LOG_TRACE(Core, "IRQ signaled: {}", magic_enum::enum_name(irq));
+        LOG_TRACE(Core, "IRQ signaled: {}",
+                  enum_name(&enum_names_Platform_InterruptId, static_cast<s64>(irq)));
 
         for (auto& [uid, h] : ctx.persistent_handlers) {
             h(irq);

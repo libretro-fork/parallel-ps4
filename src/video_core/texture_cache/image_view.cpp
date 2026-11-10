@@ -10,7 +10,7 @@
 #include "video_core/texture_cache/image_view.h"
 #include "vulkan/vulkan.hpp"
 
-#include <magic_enum/magic_enum.hpp>
+#include "common/enum_names.h"
 
 namespace VideoCore {
 
@@ -138,7 +138,8 @@ ImageView::ImageView(const Vulkan::Instance& instance, const ImageViewInfo& info
     };
     if (!IsViewTypeCompatible(info.type, image.info.type)) {
         LOG_ERROR(Render_Vulkan, "image view type {} is incompatible with image type {}",
-                  magic_enum::enum_name(info.type), magic_enum::enum_name(image.info.type));
+                  enum_name(&enum_names_AmdGpu_ImageType, static_cast<s64>(info.type)),
+                  enum_name(&enum_names_AmdGpu_ImageType, static_cast<s64>(image.info.type)));
     }
 
     auto [view_result, view] = instance.GetDevice().createImageViewUnique(image_view_ci);

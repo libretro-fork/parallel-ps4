@@ -10,8 +10,6 @@
 #include "shader_recompiler/ir/patch.h"
 #include "shader_recompiler/runtime_info.h"
 
-#include <magic_enum/magic_enum.hpp>
-
 namespace Shader::Backend::SPIRV {
 
 using PointerType = EmitContext::PointerType;

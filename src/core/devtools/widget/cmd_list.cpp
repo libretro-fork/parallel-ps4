@@ -9,6 +9,7 @@
 #include <imgui.h>
 
 #include "cmd_list.h"
+#include "common/enum_names.h"
 #include "frame_dump.h"
 #include "imgui_internal.h"
 #include "imgui_memory_editor.h"
@@ -21,7 +22,6 @@
 using namespace ImGui;
 using namespace Pal::Gfx6;
 using Liverpool = AmdGpu::Liverpool;
-using magic_enum::enum_name;
 
 namespace Core::Devtools::Gcn {
 
@@ -85,7 +85,7 @@ void ParsePolygonControl(u32 value, bool begin_table) {
         TableSetColumnIndex(0);
         Text("FACE");
         TableSetColumnIndex(1);
-        Text("%s", enum_name(reg.front_face).data());
+        Text("%s", enum_name(&enum_names_AmdGpu_FrontFace, static_cast<s64>(reg.front_face)));
 
         TableNextRow();
         TableSetColumnIndex(0);
@@ -97,13 +97,15 @@ void ParsePolygonControl(u32 value, bool begin_table) {
         TableSetColumnIndex(0);
         Text("POLYMODE_FRONT_PTYPE");
         TableSetColumnIndex(1);
-        Text("%s", enum_name(reg.polygon_mode_front).data());
+        Text("%s",
+             enum_name(&enum_names_AmdGpu_PolygonMode, static_cast<s64>(reg.polygon_mode_front)));
 
         TableNextRow();
         TableSetColumnIndex(0);
         Text("POLYMODE_BACK_PTYPE");
         TableSetColumnIndex(1);
-        Text("%s", enum_name(reg.polygon_mode_back).data());
+        Text("%s",
+             enum_name(&enum_names_AmdGpu_PolygonMode, static_cast<s64>(reg.polygon_mode_back)));
 
         TableNextRow();
         TableSetColumnIndex(0);
@@ -134,7 +136,8 @@ void ParsePolygonControl(u32 value, bool begin_table) {
         Text("PROVOKING_VTX_LAST");
         TableSetColumnIndex(1);
         Text("%X (%s)", static_cast<u32>(reg.provoking_vtx_last),
-             enum_name(reg.provoking_vtx_last).data());
+             enum_name(&enum_names_AmdGpu_ProvokingVtxLast,
+                       static_cast<s64>(reg.provoking_vtx_last)));
 
         TableNextRow();
         TableSetColumnIndex(0);
@@ -287,7 +290,8 @@ void ParseColorControl(u32 value, bool begin_table) {
         TableSetColumnIndex(0);
         Text("MODE");
         TableSetColumnIndex(1);
-        Text("%X (%s)", static_cast<u32>(reg.mode), enum_name(reg.mode).data());
+        Text("%X (%s)", static_cast<u32>(reg.mode),
+             enum_name(&enum_names_AmdGpu_ColorControl_OperationMode, static_cast<s64>(reg.mode)));
 
         TableNextRow();
         TableSetColumnIndex(0);
@@ -310,13 +314,15 @@ void ParseColor0Info(u32 value, bool begin_table) {
         TableSetColumnIndex(0);
         Text("ENDIAN");
         TableSetColumnIndex(1);
-        Text("%s", enum_name(reg.endian).data());
+        Text("%s",
+             enum_name(&enum_names_AmdGpu_ColorBuffer_EndianSwap, static_cast<s64>(reg.endian)));
 
         TableNextRow();
         TableSetColumnIndex(0);
         Text("FORMAT");
         TableSetColumnIndex(1);
-        Text("%s", enum_name(AmdGpu::DataFormat(reg.format)).data());
+        Text("%s", enum_name(&enum_names_AmdGpu_DataFormat,
+                             static_cast<s64>(AmdGpu::DataFormat(reg.format))));
 
         TableNextRow();
         TableSetColumnIndex(0);
@@ -328,13 +334,15 @@ void ParseColor0Info(u32 value, bool begin_table) {
         TableSetColumnIndex(0);
         Text("NUMBER_TYPE");
         TableSetColumnIndex(1);
-        Text("%s", enum_name(AmdGpu::NumberFormat(reg.number_type)).data());
+        Text("%s", enum_name(&enum_names_AmdGpu_NumberFormat,
+                             static_cast<s64>(AmdGpu::NumberFormat(reg.number_type))));
 
         TableNextRow();
         TableSetColumnIndex(0);
         Text("COMP_SWAP");
         TableSetColumnIndex(1);
-        Text("%s", enum_name(reg.comp_swap).data());
+        Text("%s",
+             enum_name(&enum_names_AmdGpu_ColorBuffer_SwapMode, static_cast<s64>(reg.comp_swap)));
 
         TableNextRow();
         TableSetColumnIndex(0);
@@ -370,7 +378,8 @@ void ParseColor0Info(u32 value, bool begin_table) {
         TableSetColumnIndex(0);
         Text("ROUND_MODE");
         TableSetColumnIndex(1);
-        Text("%X (%s)", static_cast<u32>(reg.round_mode), enum_name(reg.round_mode).data());
+        Text("%X (%s)", static_cast<u32>(reg.round_mode),
+             enum_name(&enum_names_AmdGpu_ColorBuffer_RoundMode, static_cast<s64>(reg.round_mode)));
 
         TableNextRow();
         TableSetColumnIndex(0);
@@ -429,7 +438,7 @@ void ParseColor0Attrib(u32 value, bool begin_table) {
         TableSetColumnIndex(0);
         Text("TILE_MODE_INDEX");
         TableSetColumnIndex(1);
-        Text("%s", enum_name(reg.tile_mode_index).data());
+        Text("%s", enum_name(&enum_names_AmdGpu_TileMode, static_cast<s64>(reg.tile_mode_index)));
 
         TableNextRow();
         TableSetColumnIndex(0);
@@ -477,40 +486,48 @@ void ParseBlendControl(u32 value, bool begin_table) {
         Text("COLOR_SRCBLEND");
         TableSetColumnIndex(1);
         Text("%X (%s)", static_cast<u32>(reg.color_src_factor),
-             enum_name(reg.color_src_factor).data());
+             enum_name(&enum_names_AmdGpu_BlendControl_BlendFactor,
+                       static_cast<s64>(reg.color_src_factor)));
 
         TableNextRow();
         TableSetColumnIndex(0);
         Text("COLOR_COMB_FCN");
         TableSetColumnIndex(1);
-        Text("%X (%s)", static_cast<u32>(reg.color_func), enum_name(reg.color_func).data());
+        Text(
+            "%X (%s)", static_cast<u32>(reg.color_func),
+            enum_name(&enum_names_AmdGpu_BlendControl_BlendFunc, static_cast<s64>(reg.color_func)));
 
         TableNextRow();
         TableSetColumnIndex(0);
         Text("COLOR_DESTBLEND");
         TableSetColumnIndex(1);
         Text("%X (%s)", static_cast<u32>(reg.color_dst_factor),
-             enum_name(reg.color_dst_factor).data());
+             enum_name(&enum_names_AmdGpu_BlendControl_BlendFactor,
+                       static_cast<s64>(reg.color_dst_factor)));
 
         TableNextRow();
         TableSetColumnIndex(0);
         Text("ALPHA_SRCBLEND");
         TableSetColumnIndex(1);
         Text("%X (%s)", static_cast<u32>(reg.alpha_src_factor),
-             enum_name(reg.alpha_src_factor).data());
+             enum_name(&enum_names_AmdGpu_BlendControl_BlendFactor,
+                       static_cast<s64>(reg.alpha_src_factor)));
 
         TableNextRow();
         TableSetColumnIndex(0);
         Text("ALPHA_COMB_FCN");
         TableSetColumnIndex(1);
-        Text("%X (%s)", static_cast<u32>(reg.alpha_func), enum_name(reg.alpha_func).data());
+        Text(
+            "%X (%s)", static_cast<u32>(reg.alpha_func),
+            enum_name(&enum_names_AmdGpu_BlendControl_BlendFunc, static_cast<s64>(reg.alpha_func)));
 
         TableNextRow();
         TableSetColumnIndex(0);
         Text("ALPHA_DESTBLEND");
         TableSetColumnIndex(1);
         Text("%X (%s)", static_cast<u32>(reg.alpha_dst_factor),
-             enum_name(reg.alpha_dst_factor).data());
+             enum_name(&enum_names_AmdGpu_BlendControl_BlendFactor,
+                       static_cast<s64>(reg.alpha_dst_factor)));
 
         TableNextRow();
         TableSetColumnIndex(0);
@@ -640,7 +657,8 @@ void ParseDepthControl(u32 value, bool begin_table) {
         TableSetColumnIndex(0);
         Text("ZFUNC");
         TableSetColumnIndex(1);
-        Text("%X (%s)", static_cast<u32>(reg.depth_func), enum_name(reg.depth_func).data());
+        Text("%X (%s)", static_cast<u32>(reg.depth_func),
+             enum_name(&enum_names_AmdGpu_CompareFunc, static_cast<s64>(reg.depth_func)));
 
         TableNextRow();
         TableSetColumnIndex(0);
@@ -653,14 +671,14 @@ void ParseDepthControl(u32 value, bool begin_table) {
         Text("STENCILFUNC");
         TableSetColumnIndex(1);
         Text("%X (%s)", static_cast<u32>(reg.stencil_ref_func),
-             enum_name(reg.stencil_ref_func).data());
+             enum_name(&enum_names_AmdGpu_CompareFunc, static_cast<s64>(reg.stencil_ref_func)));
 
         TableNextRow();
         TableSetColumnIndex(0);
         Text("STENCILFUNC_BF");
         TableSetColumnIndex(1);
         Text("%X (%s)", static_cast<u32>(reg.stencil_bf_func),
-             enum_name(reg.stencil_bf_func).data());
+             enum_name(&enum_names_AmdGpu_CompareFunc, static_cast<s64>(reg.stencil_bf_func)));
 
         TableNextRow();
         TableSetColumnIndex(0);
@@ -772,7 +790,8 @@ void ParseZInfo(u32 value, bool begin_table) {
         TableSetColumnIndex(0);
         Text("FORMAT");
         TableSetColumnIndex(1);
-        Text("%X (%s)", static_cast<u32>(reg.format), enum_name(reg.format).data());
+        Text("%X (%s)", static_cast<u32>(reg.format),
+             enum_name(&enum_names_AmdGpu_DepthBuffer_ZFormat, static_cast<s64>(reg.format)));
 
         TableNextRow();
         TableSetColumnIndex(0);

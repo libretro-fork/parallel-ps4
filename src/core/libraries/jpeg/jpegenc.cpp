@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright 2024 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
-#include <magic_enum/magic_enum.hpp>
+#include "common/enum_names.h"
 
 #include "common/alignment.h"
 #include "common/assert.h"
@@ -177,10 +177,16 @@ s32 PS4_SYSV_ABI sceJpegEncEncode(OrbisJpegEncHandle handle, const OrbisJpegEncE
               "image_pitch = {} , pixel_format = {} , encode_mode = {} , color_space = {} , "
               "sampling_type = {} , compression_ratio = {} , restart_interval = {}",
               param->image_size, param->jpeg_size, param->image_width, param->image_height,
-              param->image_pitch, magic_enum::enum_name(param->pixel_format),
-              magic_enum::enum_name(param->encode_mode), magic_enum::enum_name(param->color_space),
-              magic_enum::enum_name(param->sampling_type), param->compression_ratio,
-              param->restart_interval);
+              param->image_pitch,
+              enum_name(&enum_names_Libraries_JpegEnc_OrbisJpegEncEncodeParamPixelFormat,
+                        static_cast<s64>(param->pixel_format)),
+              enum_name(&enum_names_Libraries_JpegEnc_OrbisJpengEncEncodeParamEncodeMode,
+                        static_cast<s64>(param->encode_mode)),
+              enum_name(&enum_names_Libraries_JpegEnc_OrbisJpengEncEncodeParamColorSpace,
+                        static_cast<s64>(param->color_space)),
+              enum_name(&enum_names_Libraries_JpegEnc_OrbisJpengEncEncodeParamSamplingType,
+                        static_cast<s64>(param->sampling_type)),
+              param->compression_ratio, param->restart_interval);
 
     if (output_info) {
         output_info->size = param->jpeg_size;

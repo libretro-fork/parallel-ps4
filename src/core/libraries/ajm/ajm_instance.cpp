@@ -7,7 +7,7 @@
 #include "ajm_mp3.h"
 #include "ajm_result.h"
 
-#include <magic_enum/magic_enum.hpp>
+#include "common/enum_names.h"
 
 namespace Libraries::Ajm {
 
@@ -42,7 +42,9 @@ AjmInstance::AjmInstance(AjmCodecType codec_type, AjmInstanceFlags flags) : m_fl
         break;
     }
     default:
-        UNREACHABLE_MSG("Unimplemented codec type {}", magic_enum::enum_name(codec_type));
+        UNREACHABLE_MSG(
+            "Unimplemented codec type {}",
+            enum_name(&enum_names_Libraries_Ajm_AjmCodecType, static_cast<s64>(codec_type)));
     }
 }
 

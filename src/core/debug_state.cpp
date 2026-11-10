@@ -4,6 +4,7 @@
 #include <imgui.h>
 
 #include "common/assert.h"
+#include "common/enum_names.h"
 #include "common/native_clock.h"
 #include "common/singleton.h"
 #include "core/signals.h"
@@ -135,10 +136,11 @@ void DebugStateImpl::PushQueueDump(QueueDump dump) {
                 const auto addr = dump.base_addr + offset;
                 waiting_reg_dumps.emplace(addr, &frame);
                 waiting_reg_dumps_dbg.emplace(
-                    addr,
-                    fmt::format("#{} h({}) queue {} {} {}",
-                                frame_dump_list.size() - gnm_frame_dump_request_count, addr,
-                                magic_enum::enum_name(dump.type), dump.submit_num, dump.num2));
+                    addr, fmt::format("#{} h({}) queue {} {} {}",
+                                      frame_dump_list.size() - gnm_frame_dump_request_count, addr,
+                                      enum_name(&enum_names_DebugStateType_QueueType,
+                                                static_cast<s64>(dump.type)),
+                                      dump.submit_num, dump.num2));
             }
             data = data.subspan(header->NumWords() + 1);
         }

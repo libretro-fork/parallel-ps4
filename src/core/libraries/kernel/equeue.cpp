@@ -6,8 +6,8 @@
 #include <atomic>
 #include <span>
 #include <thread>
-#include <magic_enum/magic_enum.hpp>
 #include <rthreads/retro_eventcount.h>
+#include "common/enum_names.h"
 
 #include "common/assert.h"
 #include "common/logging/log.h"
@@ -625,7 +625,8 @@ s32 PS4_SYSV_ABI posix_kevent(s32 handle, OrbisKernelEvent* changelist, u64 ncha
         auto event = changelist[i];
         if (!SupportedEqueueFilter(event.filter)) {
             LOG_ERROR(Kernel_Event, "Unsupported event filter {}",
-                      magic_enum::enum_name(event.filter));
+                      enum_name(&enum_names_Libraries_Kernel_OrbisKernelEvent_Filter,
+                                static_cast<s64>(event.filter)));
             continue;
         }
 
@@ -661,7 +662,8 @@ s32 PS4_SYSV_ABI posix_kevent(s32 handle, OrbisKernelEvent* changelist, u64 ncha
                    event.filter != OrbisKernelEvent::Filter::Write) {
             // The title is using filter-specific flags. Right now, these are unhandled.
             LOG_ERROR(Kernel_Event, "Unhandled fflags {:#x} for event filter {}", event.fflags,
-                      magic_enum::enum_name(event.filter));
+                      enum_name(&enum_names_Libraries_Kernel_OrbisKernelEvent_Filter,
+                                static_cast<s64>(event.filter)));
             continue;
         }
     }

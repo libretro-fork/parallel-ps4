@@ -7,7 +7,7 @@
 #include <ranges>
 #include <semaphore>
 
-#include <magic_enum/magic_enum.hpp>
+#include "common/enum_names.h"
 
 #include "save_backup.h"
 #include "save_instance.h"
@@ -205,7 +205,9 @@ bool NewRequest(Libraries::UserService::OrbisUserServiceUserId user_id, std::str
 
     if (g_backup_status != WorkerStatus::Waiting && g_backup_status != WorkerStatus::Running) {
         LOG_ERROR(Lib_SaveData, "Called backup while status is {}. Backup request to {} ignored",
-                  magic_enum::enum_name(g_backup_status.load()), fmt::UTF(save_path.u8string()));
+                  enum_name(&enum_names_Libraries_SaveData_Backup_WorkerStatus,
+                            static_cast<s64>(g_backup_status.load())),
+                  fmt::UTF(save_path.u8string()));
         return false;
     }
     {

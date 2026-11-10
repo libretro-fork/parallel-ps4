@@ -52,11 +52,6 @@ if (NOT TARGET xbyak::xbyak)
     add_subdirectory(xbyak)
 endif()
 
-# MagicEnum
-if (NOT TARGET magic_enum::magic_enum)
-    add_subdirectory(magic_enum)
-endif()
-
 # Zydis
 if (NOT TARGET Zydis::Zydis)
     option(ZYDIS_BUILD_TOOLS "" OFF)

@@ -12,7 +12,6 @@
 #include <vector>
 #include <imgui.h>
 #include <imgui_internal.h>
-#include <magic_enum/magic_enum.hpp>
 
 #include "common/assert.h"
 #include "common/logging/log.h"

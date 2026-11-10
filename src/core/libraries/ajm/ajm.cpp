@@ -9,7 +9,7 @@
 #include "core/libraries/error_codes.h"
 #include "core/libraries/libs.h"
 
-#include <magic_enum/magic_enum.hpp>
+#include "common/enum_names.h"
 
 namespace Libraries::Ajm {
 
@@ -151,7 +151,8 @@ AjmCodecType PS4_SYSV_ABI sceAjmInstanceCodecType(u32 instance_id) {
 int PS4_SYSV_ABI sceAjmInstanceCreate(u32 context_id, AjmCodecType codec_type,
                                       AjmInstanceFlags flags, u32* out_instance) {
     LOG_INFO(Lib_Ajm, "called context = {}, codec_type = {}, flags = {:#x}", context_id,
-             magic_enum::enum_name(codec_type), flags.raw);
+             enum_name(&enum_names_Libraries_Ajm_AjmCodecType, static_cast<s64>(codec_type)),
+             flags.raw);
 
     auto it = contexts.find(context_id);
     if (it == contexts.end()) {

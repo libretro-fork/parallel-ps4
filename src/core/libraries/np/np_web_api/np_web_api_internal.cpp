@@ -8,8 +8,8 @@
 #include <deque>
 #include <string>
 #include <string_view>
-#include <magic_enum/magic_enum.hpp>
 #include "common/elf_info.h"
+#include "common/enum_names.h"
 #include "core/emulator_settings.h"
 #include "core/libraries/kernel/process.h"
 #include "core/libraries/kernel/time.h"
@@ -914,7 +914,9 @@ s32 sendRequest(s64 requestId, s32 partIndex, const void* pData, u64 dataSize, s
 
     LOG_INFO(Lib_NpWebApi, "requestId={:#x} apiGroup='{}' path='{}' method={} httpReqId={}",
              requestId, request->userApiGroup, request->userPath,
-             magic_enum::enum_name(request->userMethod), request->http_request_id);
+             enum_name(&enum_names_Libraries_Np_NpWebApi_OrbisNpWebApiHttpMethod,
+                       static_cast<s64>(request->userMethod)),
+             request->http_request_id);
 
     s32 sendResult = ORBIS_OK;
     if (flag != 0) {

@@ -11,7 +11,7 @@
 #include "core/libraries/np/np_web_api/np_web_api_internal.h"
 
 #include <fmt/format.h>
-#include <magic_enum/magic_enum.hpp>
+#include "common/enum_names.h"
 
 namespace Libraries::Np::NpWebApi {
 
@@ -258,7 +258,9 @@ s32 PS4_SYSV_ABI sceNpWebApiCreateMultipartRequest(s32 titleUserCtxId, const cha
 
     LOG_INFO(Lib_NpWebApi,
              "called, titleUserCtxId = {:#x}, pApiGroup = '{}', pPath = '{}', method = {}",
-             titleUserCtxId, pApiGroup, pPath, magic_enum::enum_name(method));
+             titleUserCtxId, pApiGroup, pPath,
+             enum_name(&enum_names_Libraries_Np_NpWebApi_OrbisNpWebApiHttpMethod,
+                       static_cast<s64>(method)));
 
     return createRequest(titleUserCtxId, pApiGroup, pPath, method, nullptr, nullptr, pRequestId,
                          true);
@@ -284,7 +286,9 @@ s32 PS4_SYSV_ABI sceNpWebApiCreateRequest(s32 titleUserCtxId, const char* pApiGr
 
     LOG_INFO(Lib_NpWebApi,
              "called, titleUserCtxId = {:#x}, pApiGroup = '{}', pPath = '{}', method = {}",
-             titleUserCtxId, pApiGroup, pPath, magic_enum::enum_name(method));
+             titleUserCtxId, pApiGroup, pPath,
+             enum_name(&enum_names_Libraries_Np_NpWebApi_OrbisNpWebApiHttpMethod,
+                       static_cast<s64>(method)));
 
     return createRequest(titleUserCtxId, pApiGroup, pPath, method, pContentParameter, nullptr,
                          pRequestId, false);
@@ -425,7 +429,9 @@ s32 PS4_SYSV_ABI sceNpWebApiIntCreateRequest(
 
     LOG_INFO(Lib_NpWebApi,
              "called, titleUserCtxId = {:#x}, pApiGroup = '{}', pPath = '{}', method = {}",
-             titleUserCtxId, pApiGroup, pPath, magic_enum::enum_name(method));
+             titleUserCtxId, pApiGroup, pPath,
+             enum_name(&enum_names_Libraries_Np_NpWebApi_OrbisNpWebApiHttpMethod,
+                       static_cast<s64>(method)));
 
     return createRequest(titleUserCtxId, pApiGroup, pPath, method, pContentParameter, pInternalArgs,
                          pRequestId, false);

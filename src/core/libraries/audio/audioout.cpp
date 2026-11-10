@@ -7,7 +7,7 @@
 #include <stop_token>
 #include <thread>
 #include <fmt/format.h>
-#include <magic_enum/magic_enum.hpp>
+#include "common/enum_names.h"
 
 #include "common/assert.h"
 #include "common/logging/log.h"
@@ -227,14 +227,19 @@ s32 PS4_SYSV_ABI sceAudioOutOpen(UserService::OrbisUserServiceUserId user_id,
                                  OrbisAudioOutPort port_type, s32 index, u32 length,
                                  u32 sample_rate,
                                  OrbisAudioOutParamExtendedInformation param_type) {
-    LOG_INFO(Lib_AudioOut,
-             "called, user_id={}, port_type={}({}), index={}, length={}, "
-             "sample_rate={}, data_format={}({}), attributes={}({})",
-             user_id, magic_enum::enum_name(port_type), static_cast<u32>(port_type), index, length,
-             sample_rate, magic_enum::enum_name(param_type.data_format.Value()),
-             static_cast<u32>(param_type.data_format.Value()),
-             magic_enum::enum_name(param_type.attributes.Value()),
-             static_cast<u32>(param_type.attributes.Value()));
+    LOG_INFO(
+        Lib_AudioOut,
+        "called, user_id={}, port_type={}({}), index={}, length={}, "
+        "sample_rate={}, data_format={}({}), attributes={}({})",
+        user_id,
+        enum_name(&enum_names_Libraries_AudioOut_OrbisAudioOutPort, static_cast<s64>(port_type)),
+        static_cast<u32>(port_type), index, length, sample_rate,
+        enum_name(&enum_names_Libraries_AudioOut_OrbisAudioOutParamFormat,
+                  static_cast<s64>(param_type.data_format.Value())),
+        static_cast<u32>(param_type.data_format.Value()),
+        enum_name(&enum_names_Libraries_AudioOut_OrbisAudioOutParamAttr,
+                  static_cast<s64>(param_type.attributes.Value())),
+        static_cast<u32>(param_type.attributes.Value()));
 
     if (lazy_init.load(std::memory_order_relaxed) == 0 || audio == nullptr) {
         LOG_ERROR(Lib_AudioOut, "Audio out not initialized");
@@ -356,8 +361,10 @@ s32 PS4_SYSV_ABI sceAudioOutOpen(UserService::OrbisUserServiceUserId user_id,
 
     // Create handle
     s32 handle = (_type << 16) | port_id | 0x20000000;
-    LOG_INFO(Lib_AudioOut, "opened port_type={}({}) -> port_id={}, handle={:#x}",
-             magic_enum::enum_name(port_type), _type, port_id, handle);
+    LOG_INFO(
+        Lib_AudioOut, "opened port_type={}({}) -> port_id={}, handle={:#x}",
+        enum_name(&enum_names_Libraries_AudioOut_OrbisAudioOutPort, static_cast<s64>(port_type)),
+        _type, port_id, handle);
     return handle;
 }
 

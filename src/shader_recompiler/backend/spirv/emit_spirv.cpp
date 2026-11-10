@@ -6,7 +6,7 @@
 #include <type_traits>
 #include <utility>
 #include <vector>
-#include <magic_enum/magic_enum.hpp>
+#include "common/enum_names.h"
 
 #include "common/assert.h"
 #include "common/func_traits.h"
@@ -236,7 +236,8 @@ spv::ExecutionMode ExecutionMode(AmdGpu::TessellationType primitive) {
     case AmdGpu::TessellationType::Quad:
         return spv::ExecutionMode::Quads;
     }
-    UNREACHABLE_MSG("Tessellation primitive {}", magic_enum::enum_name(primitive));
+    UNREACHABLE_MSG("Tessellation primitive {}",
+                    enum_name(&enum_names_AmdGpu_TessellationType, static_cast<s64>(primitive)));
 }
 
 spv::ExecutionMode ExecutionMode(AmdGpu::TessellationPartitioning spacing) {
@@ -256,7 +257,9 @@ spv::ExecutionMode ExecutionMode(AmdGpu::TessellationPartitioning spacing) {
     default:
         break;
     }
-    UNREACHABLE_MSG("Tessellation spacing {}", magic_enum::enum_name(spacing));
+    UNREACHABLE_MSG(
+        "Tessellation spacing {}",
+        enum_name(&enum_names_AmdGpu_TessellationPartitioning, static_cast<s64>(spacing)));
 }
 
 void SetupCapabilities(const Info& info, const Profile& profile, const RuntimeInfo& runtime_info,
@@ -544,7 +547,7 @@ void SetupRoundingMode(EmitContext& ctx, const Profile& profile, const RuntimeIn
         }
     } else if (fp_round_mode != AmdGpu::FpRoundMode::NearestEven) {
         LOG_WARNING(Render_Vulkan, "Unimplemented FP rounding mode {}",
-                    magic_enum::enum_name(fp_round_mode));
+                    enum_name(&enum_names_AmdGpu_FpRoundMode, static_cast<s64>(fp_round_mode)));
     }
 
     if (ctx.info.uses_fp16 || ctx.info.uses_fp64) {

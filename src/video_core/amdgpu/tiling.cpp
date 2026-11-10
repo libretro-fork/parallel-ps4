@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include <bit>
-#include <magic_enum/magic_enum.hpp>
+#include "common/enum_names.h"
 #include "video_core/amdgpu/tiling.h"
 
 namespace AmdGpu {
@@ -11,7 +11,7 @@ static constexpr u32 MICROTILE_SIZE = 8;
 static constexpr u32 DRAM_ROW_SIZE = 1024;
 
 std::string_view NameOf(TileMode tile_mode) {
-    return magic_enum::enum_name(tile_mode);
+    return enum_name(&enum_names_AmdGpu_TileMode, static_cast<s64>(tile_mode));
 }
 
 PipeConfig GetPipeConfig(TileMode tile_mode) {

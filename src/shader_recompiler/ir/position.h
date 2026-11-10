@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include <magic_enum/magic_enum.hpp>
+#include "common/enum_names.h"
 #include "common/logging/log.h"
 #include "shader_recompiler/ir/ir_emitter.h"
 #include "shader_recompiler/runtime_info.h"
@@ -34,7 +34,7 @@ inline void ExportPosition(IREmitter& ir, const StageRuntimeInfo& stage,
             LOG_WARNING(Render,
                         "{} is exported in vertex shader but tessellation-based primitive "
                         "emulation is active. Not implemented yet.",
-                        magic_enum::enum_name(output));
+                        enum_name(&enum_names_Shader_Output, static_cast<s64>(output)));
             return;
         }
     }

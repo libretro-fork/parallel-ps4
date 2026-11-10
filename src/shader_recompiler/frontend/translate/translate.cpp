@@ -18,7 +18,7 @@
 
 #include <algorithm>
 #include <numbers>
-#include <magic_enum/magic_enum.hpp>
+#include "common/enum_names.h"
 
 namespace Shader::Gcn {
 
@@ -1208,8 +1208,9 @@ void Translator::EmitFetch(const GcnInst& inst) {
 
 void Translator::LogMissingOpcode(const GcnInst& inst) {
     LOG_ERROR(Render_Recompiler, "Unknown opcode {} ({}, category = {})",
-              magic_enum::enum_name(inst.opcode), u32(inst.opcode),
-              magic_enum::enum_name(inst.category));
+              enum_name(&enum_names_Shader_Gcn_Opcode, static_cast<s64>(inst.opcode)),
+              u32(inst.opcode),
+              enum_name(&enum_names_Shader_Gcn_InstCategory, static_cast<s64>(inst.category)));
     info.translation_failed = true;
 }
 

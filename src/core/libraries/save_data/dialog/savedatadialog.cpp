@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright 2024 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
-#include <magic_enum/magic_enum.hpp>
+#include "common/enum_names.h"
 
 #include "common/elf_info.h"
 #include "common/logging/log.h"
@@ -44,7 +44,8 @@ Error PS4_SYSV_ABI sceSaveDataDialogGetResult(OrbisSaveDataDialogResult* result)
 }
 
 Status PS4_SYSV_ABI sceSaveDataDialogGetStatus() {
-    LOG_TRACE(Lib_SaveDataDialog, "called status={}", magic_enum::enum_name(g_status));
+    LOG_TRACE(Lib_SaveDataDialog, "called status={}",
+              enum_name(&enum_names_Libraries_CommonDialog_Status, static_cast<s64>(g_status)));
     return g_status;
 }
 
@@ -78,7 +79,9 @@ Error PS4_SYSV_ABI sceSaveDataDialogOpen(const OrbisSaveDataDialogParam* param) 
         LOG_DEBUG(Lib_SaveDataDialog, "called param:(NULL)");
         return Error::ARG_NULL;
     }
-    LOG_DEBUG(Lib_SaveDataDialog, "called param->mode: {}", magic_enum::enum_name(param->mode));
+    LOG_DEBUG(Lib_SaveDataDialog, "called param->mode: {}",
+              enum_name(&enum_names_Libraries_SaveData_Dialog_SaveDataDialogMode,
+                        static_cast<s64>(param->mode)));
     ASSERT(param->size == sizeof(OrbisSaveDataDialogParam));
     ASSERT(param->baseParam.size == sizeof(CommonDialog::BaseParam));
     g_result = {};
@@ -135,7 +138,8 @@ Error PS4_SYSV_ABI sceSaveDataDialogTerminate() {
 }
 
 Status PS4_SYSV_ABI sceSaveDataDialogUpdateStatus() {
-    LOG_TRACE(Lib_SaveDataDialog, "called status={}", magic_enum::enum_name(g_status));
+    LOG_TRACE(Lib_SaveDataDialog, "called status={}",
+              enum_name(&enum_names_Libraries_CommonDialog_Status, static_cast<s64>(g_status)));
     return g_status;
 }
 

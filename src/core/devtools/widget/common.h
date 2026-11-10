@@ -8,7 +8,7 @@
 #include <type_traits>
 #include <variant>
 
-#include <magic_enum/magic_enum.hpp>
+#include "common/enum_names.h"
 
 #include "common/bit_field.h"
 #include "common/io_file.h"
@@ -66,10 +66,45 @@ void DrawRow(const char* text, const char* fmt, Args... args) {
     ImGui::TextUnformatted(buf);
 }
 
+// The names of the register enums the rows show, from the C89 tables
+inline const char* EnumName(AmdGpu::ClipSpace v) {
+    return enum_name(&enum_names_AmdGpu_ClipSpace, static_cast<s64>(v));
+}
+inline const char* EnumName(AmdGpu::ColorControl::OperationMode v) {
+    return enum_name(&enum_names_AmdGpu_ColorControl_OperationMode, static_cast<s64>(v));
+}
+inline const char* EnumName(AmdGpu::CompareFunc v) {
+    return enum_name(&enum_names_AmdGpu_CompareFunc, static_cast<s64>(v));
+}
+inline const char* EnumName(AmdGpu::CullMode v) {
+    return enum_name(&enum_names_AmdGpu_CullMode, static_cast<s64>(v));
+}
+inline const char* EnumName(AmdGpu::DepthBuffer::StencilFormat v) {
+    return enum_name(&enum_names_AmdGpu_DepthBuffer_StencilFormat, static_cast<s64>(v));
+}
+inline const char* EnumName(AmdGpu::DepthBuffer::ZFormat v) {
+    return enum_name(&enum_names_AmdGpu_DepthBuffer_ZFormat, static_cast<s64>(v));
+}
+inline const char* EnumName(AmdGpu::FrontFace v) {
+    return enum_name(&enum_names_AmdGpu_FrontFace, static_cast<s64>(v));
+}
+inline const char* EnumName(AmdGpu::NumberFormat v) {
+    return enum_name(&enum_names_AmdGpu_NumberFormat, static_cast<s64>(v));
+}
+inline const char* EnumName(AmdGpu::PolygonMode v) {
+    return enum_name(&enum_names_AmdGpu_PolygonMode, static_cast<s64>(v));
+}
+inline const char* EnumName(AmdGpu::PrimitiveType v) {
+    return enum_name(&enum_names_AmdGpu_PrimitiveType, static_cast<s64>(v));
+}
+inline const char* EnumName(AmdGpu::TileMode v) {
+    return enum_name(&enum_names_AmdGpu_TileMode, static_cast<s64>(v));
+}
+
 template <typename T>
 void DrawValueRow(const char* text, T value) {
     if constexpr (std::is_enum_v<T>) {
-        return DrawRow(text, "%X (%s)", value, magic_enum::enum_name(value).data());
+        return DrawRow(text, "%X (%s)", value, EnumName(value));
     } else if constexpr (std::is_integral_v<T>) {
         return DrawRow(text, "%X", value);
     } else if constexpr (std::is_base_of_v<BitField<T::position, T::bits, typename T::Type>, T>) {

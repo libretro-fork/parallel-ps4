@@ -5,14 +5,12 @@
 
 #include <cstdio>
 #include <imgui.h>
-#include <magic_enum/magic_enum.hpp>
 
 #include "cmd_list.h"
 #include "common.h"
 #include "imgui/imgui_std.h"
 
 using namespace ImGui;
-using magic_enum::enum_name;
 
 namespace Core::Devtools::Widget {
 

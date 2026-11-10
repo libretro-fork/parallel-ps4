@@ -8,7 +8,7 @@
 #include "core/libraries/avplayer/avplayer_state.h"
 #include "core/libraries/kernel/process.h"
 
-#include <magic_enum/magic_enum.hpp>
+#include "common/enum_names.h"
 
 namespace Libraries::AvPlayer {
 
@@ -413,7 +413,9 @@ bool AvPlayerState::SetState(AvState state) {
 
     if (!IsStateTransitionValid(state)) {
         LOG_ERROR(Lib_AvPlayer, "Invalid state transition: {} -> {}",
-                  magic_enum::enum_name(m_current_state.load()), magic_enum::enum_name(state));
+                  enum_name(&enum_names_Libraries_AvPlayer_AvState,
+                            static_cast<s64>(m_current_state.load())),
+                  enum_name(&enum_names_Libraries_AvPlayer_AvState, static_cast<s64>(state)));
         return false;
     }
     m_previous_state.store(m_current_state);
@@ -432,7 +434,8 @@ std::optional<bool> AvPlayerState::OnBufferingCheckEvent(u32 num_frames) {
 
 // Called inside CONTROLLER thread
 void AvPlayerState::EmitEvent(AvPlayerEvents event_id, void* event_data) {
-    LOG_INFO(Lib_AvPlayer, "Sending event to the game: id = {}", magic_enum::enum_name(event_id));
+    LOG_INFO(Lib_AvPlayer, "Sending event to the game: id = {}",
+             enum_name(&enum_names_Libraries_AvPlayer_AvPlayerEvents, static_cast<s64>(event_id)));
     const auto callback = m_init_data.event_replacement.event_callback;
     if (callback) {
         const auto ptr = m_init_data.event_replacement.object_ptr;

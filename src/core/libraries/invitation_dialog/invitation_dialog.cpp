@@ -3,7 +3,7 @@
 
 #include <cstring>
 #include <fmt/format.h>
-#include <magic_enum/magic_enum.hpp>
+#include "common/enum_names.h"
 
 #include "common/logging/log.h"
 #include "core/libraries/error_codes.h"
@@ -135,7 +135,7 @@ sceInvitationDialogOpenA(const OrbisInvitationDialogParamA* param) {
     if (g_status != Libraries::CommonDialog::Status::INITIALIZED &&
         g_status != Libraries::CommonDialog::Status::FINISHED) {
         LOG_INFO(Lib_InvitationDialog, "Called without proper initialization (status={})",
-                 magic_enum::enum_name(g_status));
+                 enum_name(&enum_names_Libraries_CommonDialog_Status, static_cast<s64>(g_status)));
         return Libraries::CommonDialog::Error::INVALID_STATE;
     }
 
@@ -320,7 +320,9 @@ s32 PS4_SYSV_ABI sceInvitationDialogGetResult(OrbisInvitationDialogResult* resul
         LOG_INFO(Lib_InvitationDialog, "Result callbackArg={}", fmt::ptr(result->callbackArg));
     }
     LOG_INFO(Lib_InvitationDialog, "Result errorCode={:#x}", result->errorCode);
-    LOG_INFO(Lib_InvitationDialog, "Result status={}", magic_enum::enum_name(result->result));
+    LOG_INFO(
+        Lib_InvitationDialog, "Result status={}",
+        enum_name(&enum_names_Libraries_CommonDialog_Result, static_cast<s64>(result->result)));
 
     if (result->sentOnlineIds) {
         LOG_INFO(Lib_InvitationDialog, "Result sentOnlineIds count={}",
@@ -353,17 +355,18 @@ s32 PS4_SYSV_ABI sceInvitationDialogGetResult(OrbisInvitationDialogResult* resul
 
 Libraries::CommonDialog::Status PS4_SYSV_ABI sceInvitationDialogUpdateStatus() {
     LOG_DEBUG(Lib_InvitationDialog, "UpdateStatus called, current status={}",
-              magic_enum::enum_name(g_status));
+              enum_name(&enum_names_Libraries_CommonDialog_Status, static_cast<s64>(g_status)));
     return g_status;
 }
 
 Libraries::CommonDialog::Error PS4_SYSV_ABI sceInvitationDialogClose() {
     LOG_DEBUG(Lib_InvitationDialog, "Closing invitation dialog, current status={}",
-              magic_enum::enum_name(g_status));
+              enum_name(&enum_names_Libraries_CommonDialog_Status, static_cast<s64>(g_status)));
 
     if (g_status != Libraries::CommonDialog::Status::RUNNING) {
-        LOG_WARNING(Lib_InvitationDialog, "Cannot close dialog: not running (status={})",
-                    magic_enum::enum_name(g_status));
+        LOG_WARNING(
+            Lib_InvitationDialog, "Cannot close dialog: not running (status={})",
+            enum_name(&enum_names_Libraries_CommonDialog_Status, static_cast<s64>(g_status)));
         return Libraries::CommonDialog::Error::NOT_RUNNING;
     }
 
@@ -373,7 +376,7 @@ Libraries::CommonDialog::Error PS4_SYSV_ABI sceInvitationDialogClose() {
 
 Libraries::CommonDialog::Error PS4_SYSV_ABI sceInvitationDialogTerminate() {
     LOG_DEBUG(Lib_InvitationDialog, "Terminating invitation dialog system, current status={}",
-              magic_enum::enum_name(g_status));
+              enum_name(&enum_names_Libraries_CommonDialog_Status, static_cast<s64>(g_status)));
 
     if (g_status == Libraries::CommonDialog::Status::RUNNING) {
         LOG_DEBUG(Lib_InvitationDialog, "Dialog is running, closing before termination");
@@ -393,7 +396,7 @@ Libraries::CommonDialog::Error PS4_SYSV_ABI sceInvitationDialogTerminate() {
 
 Libraries::CommonDialog::Status PS4_SYSV_ABI sceInvitationDialogGetStatus() {
     LOG_DEBUG(Lib_InvitationDialog, "Getting invitation dialog status: {}",
-              magic_enum::enum_name(g_status));
+              enum_name(&enum_names_Libraries_CommonDialog_Status, static_cast<s64>(g_status)));
     return g_status;
 }
 
@@ -406,7 +409,7 @@ Libraries::CommonDialog::Error PS4_SYSV_ABI sceInvitationDialogInitialize() {
 
     if (g_status != Libraries::CommonDialog::Status::NONE) {
         LOG_ERROR(Lib_InvitationDialog, "Invitation dialog already initialized (status={})",
-                  magic_enum::enum_name(g_status));
+                  enum_name(&enum_names_Libraries_CommonDialog_Status, static_cast<s64>(g_status)));
         return Libraries::CommonDialog::Error::ALREADY_INITIALIZED;
     }
 

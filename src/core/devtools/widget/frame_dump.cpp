@@ -5,7 +5,7 @@
 #include <ctime>
 #include <fmt/chrono.h>
 #include <imgui.h>
-#include <magic_enum/magic_enum.hpp>
+#include "common/enum_names.h"
 
 #include "common/io_file.h"
 #include "core/devtools/options.h"
@@ -53,8 +53,10 @@ FrameDumpViewer::FrameDumpViewer(const FrameDump& _frame_dump)
         if (!cmd.data.empty()) {
             has_queue_type[static_cast<s32>(cmd.type)] = true;
         }
-        const auto fname = fmt::format("F{} {}_{:02}_{:02}", frame_dump->frame_id,
-                                       magic_enum::enum_name(cmd.type), cmd.submit_num, cmd.num2);
+        const auto fname =
+            fmt::format("F{} {}_{:02}_{:02}", frame_dump->frame_id,
+                        enum_name(&enum_names_DebugStateType_QueueType, static_cast<s64>(cmd.type)),
+                        cmd.submit_num, cmd.num2);
         cmd_list_viewer.emplace_back(frame_dump.get(), cmd.data, cmd.base_addr, fname);
         if (cmd.type == QueueType::dcb && cmd.submit_num == 0 && cmd.num2 == 0) {
             selected_cmd = static_cast<s32>(cmd_list_viewer.size() - 1);
@@ -100,12 +102,15 @@ void FrameDumpViewer::Draw() {
         BeginGroup();
         TextEx("Queue type");
         SameLine();
-        if (BeginCombo("##select_queue_type", magic_enum::enum_name(selected_queue_type).data(),
+        if (BeginCombo("##select_queue_type",
+                       enum_name(&enum_names_DebugStateType_QueueType,
+                                 static_cast<s64>(selected_queue_type)),
                        ImGuiComboFlags_WidthFitPreview)) {
             bool selected = false;
 #define COMBO(x)                                                                                   \
     if (has_queue_type[static_cast<s32>(x)])                                                       \
-    C_V(magic_enum::enum_name(x).data(), x, selected_queue_type, selected)
+    C_V(enum_name(&enum_names_DebugStateType_QueueType, static_cast<s64>(x)), x,                   \
+        selected_queue_type, selected)
             COMBO(QueueType::dcb);
             COMBO(QueueType::ccb);
             COMBO(QueueType::acb);
@@ -121,7 +126,8 @@ void FrameDumpViewer::Draw() {
             auto time = std::time(nullptr);
             auto now_time = *std::localtime(&time);
             const auto fname = fmt::format("{:%F %H-%M-%S} {}_{}_{}.bin", now_time,
-                                           magic_enum::enum_name(selected_queue_type),
+                                           enum_name(&enum_names_DebugStateType_QueueType,
+                                                     static_cast<s64>(selected_queue_type)),
                                            selected_submit_num, selected_queue_num2);
             Common::FS::IOFile file(fname, Common::FS::FileAccessMode::Create);
             const auto& data = frame_dump->queues[selected_cmd].data;

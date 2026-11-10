@@ -17,7 +17,7 @@
 #include <ranges>
 #include <thread>
 #include <vector>
-#include <magic_enum/magic_enum.hpp>
+#include "common/enum_names.h"
 
 #include "common/assert.h"
 #include "common/error.h"
@@ -976,7 +976,9 @@ s32 PS4_SYSV_ABI fstat(s32 fd, OrbisKernelStat* sb) {
         return Libraries::Net::KernelFstat(fd, sb);
     }
     case Core::FileSys::FileType::Equeue: {
-        LOG_ERROR(Kernel_Fs, "(STUBBED) file type {}", magic_enum::enum_name(file->type.load()));
+        LOG_ERROR(
+            Kernel_Fs, "(STUBBED) file type {}",
+            enum_name(&enum_names_Core_FileSys_FileType, static_cast<s64>(file->type.load())));
         break;
     }
     default:

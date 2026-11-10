@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include "common/assert.h"
+#include "common/enum_names.h"
 #include "common/polyfill_thread.h"
 #include "common/scope_exit.h"
 #include "common/thread.h"
@@ -654,8 +655,10 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb) {
             case PM4ItOpcode::EventWrite: {
                 const auto* event = reinterpret_cast<const PM4CmdEventWrite*>(header);
                 LOG_DEBUG(Render, "Encountered EventWrite: event_type = {}, event_index = {}",
-                          magic_enum::enum_name(event->event_type.Value()),
-                          magic_enum::enum_name(event->event_index.Value()));
+                          enum_name(&enum_names_AmdGpu_EventType,
+                                    static_cast<s64>(event->event_type.Value())),
+                          enum_name(&enum_names_AmdGpu_EventIndex,
+                                    static_cast<s64>(event->event_index.Value())));
                 if (event->event_type.Value() == EventType::SoVgtStreamoutFlush) {
                     // TODO: handle proper synchronization, for now signal that update is done
                     // immediately
@@ -845,7 +848,8 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb) {
                             "Unimplemented IT_STRMOUT_BUFFER_UPDATE, update_memory = {}, "
                             "source_select = {}, buffer_select = {}",
                             strmout->update_memory.Value(),
-                            magic_enum::enum_name(strmout->source_select.Value()),
+                            enum_name(&enum_names_AmdGpu_SourceSelect,
+                                      static_cast<s64>(strmout->source_select.Value())),
                             strmout->buffer_select.Value());
                 break;
             }

@@ -5,7 +5,6 @@
 #include <optional>
 #include <string>
 #include <imgui.h>
-#include <magic_enum/magic_enum.hpp>
 #include <stdio.h>
 
 #include "common.h"
@@ -21,7 +20,6 @@
 #endif
 
 using namespace ImGui;
-using magic_enum::enum_name;
 
 constexpr auto depth_id = 0xF3;
 

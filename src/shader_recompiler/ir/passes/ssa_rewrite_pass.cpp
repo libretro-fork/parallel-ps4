@@ -13,7 +13,10 @@
 //      https://link.springer.com/chapter/10.1007/978-3-642-37051-9_6
 //
 
+#include <unordered_map>
 #include <vector>
+
+#include "common/enum_names.h"
 #include "shader_recompiler/ir/basic_block.h"
 #include "shader_recompiler/ir/opcodes.h"
 #include "shader_recompiler/ir/program.h"
@@ -112,7 +115,8 @@ constexpr IR::Opcode UndefOpcode(IR::RegTag tag) noexcept {
             UNREACHABLE_MSG("Unknown virtual reg type {}", tag.reg.type);
         }
     default:
-        UNREACHABLE_MSG("Unknown reg type {}", magic_enum::enum_name(tag.type));
+        UNREACHABLE_MSG("Unknown reg type {}",
+                        enum_name(&enum_names_Shader_IR_RegType, static_cast<s64>(tag.type)));
     }
 }
 

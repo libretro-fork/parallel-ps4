@@ -3,7 +3,7 @@
 
 #include <cinttypes>
 #include <imgui.h>
-#include <magic_enum/magic_enum.hpp>
+#include "common/enum_names.h"
 
 #include "core/debug_state.h"
 #include "core/memory.h"
@@ -28,9 +28,9 @@ bool MemoryMapViewer::Iterator::DrawLine() {
         TableNextColumn();
         Text("%" PRIX64, m.size);
         TableNextColumn();
-        Text("%s", magic_enum::enum_name(m.type).data());
+        Text("%s", enum_name(&enum_names_Core_VMAType, static_cast<s64>(m.type)));
         TableNextColumn();
-        Text("%s", magic_enum::enum_name(m.prot).data());
+        Text("%s", enum_name(&enum_names_Core_MemoryProt, static_cast<s64>(m.prot)));
         TableNextColumn();
         if (True(m.prot & MemoryProt::CpuExec)) {
             Text("X");
@@ -54,7 +54,7 @@ bool MemoryMapViewer::Iterator::DrawLine() {
     Text("%" PRIX64, m.size);
     TableNextColumn();
     auto type = static_cast<::Libraries::Kernel::MemoryTypes>(m.memory_type);
-    Text("%s", magic_enum::enum_name(type).data());
+    Text("%s", enum_name(&enum_names_Libraries_Kernel_MemoryTypes, static_cast<s64>(type)));
     TableNextColumn();
     Text("%d",
          m.dma_type == PhysicalMemoryType::Pooled || m.dma_type == PhysicalMemoryType::Committed);

@@ -4,31 +4,13 @@
 #pragma once
 
 #include <core/libraries/system/userservice.h>
-#include <magic_enum/magic_enum.hpp>
 #include "common/enum.h"
+#include "common/enum_names.h"
 #include "common/types.h"
 #include "core/libraries/rtc/rtc.h"
 
 constexpr u32 ORBIS_IME_MAX_TEXT_LENGTH = 2048;
 constexpr u32 ORBIS_IME_DIALOG_MAX_TEXT_LENGTH = 2048;
-
-template <typename E>
-const std::underlying_type_t<E> generate_full_mask() {
-    static_assert(std::is_enum_v<E>, "E must be an enum type.");
-    static_assert(magic_enum::customize::enum_range<E>::is_flags,
-                  "E must be marked as is_flags = true.");
-
-    using U = std::underlying_type_t<E>;
-    const auto values = magic_enum::enum_values<E>();
-    U mask = 0;
-
-    // Use index-based loop for better constexpr compatibility
-    for (std::size_t i = 0; i < values.size(); ++i) {
-        mask |= static_cast<U>(values[i]);
-    }
-
-    return mask;
-}
 
 enum class Error : u32 {
     OK = 0x0,
@@ -94,11 +76,8 @@ enum class OrbisImeOption : u32 {
     USE_OVER_2K_COORDINATES = 16384,
 };
 DECLARE_ENUM_FLAG_OPERATORS(OrbisImeOption);
-template <>
-struct magic_enum::customize::enum_range<OrbisImeOption> {
-    static constexpr bool is_flags = true;
-};
-const u32 kValidImeOptionMask = generate_full_mask<OrbisImeOption>();
+const u32 kValidImeOptionMask = static_cast<std::underlying_type_t<OrbisImeOption>>(
+    enum_names_mask(&enum_names_OrbisImeOption));
 
 enum class OrbisImeExtOption : u32 {
     DEFAULT = 0x00000000,
@@ -128,11 +107,8 @@ constexpr u32 kValidImeExtOptionMask = static_cast<u32>(
     OrbisImeExtOption::DISABLE_LIST_FOR_EXT_KEYBOARD |
     OrbisImeExtOption::HIDE_KEYPANEL_IF_EXT_KEYBOARD | OrbisImeExtOption::INIT_EXT_KEYBOARD_MODE);
 
-template <>
-struct magic_enum::customize::enum_range<OrbisImeExtOption> {
-    static constexpr bool is_flags = true;
-};
-const u32 kValidImeDialogExtOptionMask = generate_full_mask<OrbisImeExtOption>();
+const u32 kValidImeDialogExtOptionMask = static_cast<std::underlying_type_t<OrbisImeExtOption>>(
+    enum_names_mask(&enum_names_OrbisImeExtOption));
 
 enum class OrbisImeLanguage : u64 {
     DANISH = 0x0000000000000001,
@@ -168,11 +144,8 @@ enum class OrbisImeLanguage : u64 {
 };
 DECLARE_ENUM_FLAG_OPERATORS(OrbisImeLanguage);
 
-template <>
-struct magic_enum::customize::enum_range<OrbisImeLanguage> {
-    static constexpr bool is_flags = true;
-};
-const u64 kValidOrbisImeLanguageMask = generate_full_mask<OrbisImeLanguage>();
+const u64 kValidOrbisImeLanguageMask = static_cast<std::underlying_type_t<OrbisImeLanguage>>(
+    enum_names_mask(&enum_names_OrbisImeLanguage));
 
 enum class OrbisImeDisableDevice : u32 {
     DEFAULT = 0x00000000,
@@ -181,11 +154,9 @@ enum class OrbisImeDisableDevice : u32 {
     REMOTE_OSK = 0x00000004,
 };
 DECLARE_ENUM_FLAG_OPERATORS(OrbisImeDisableDevice);
-template <>
-struct magic_enum::customize::enum_range<OrbisImeDisableDevice> {
-    static constexpr bool is_flags = true;
-};
-const u32 kValidOrbisImeDisableDeviceMask = generate_full_mask<OrbisImeDisableDevice>();
+const u32 kValidOrbisImeDisableDeviceMask =
+    static_cast<std::underlying_type_t<OrbisImeDisableDevice>>(
+        enum_names_mask(&enum_names_OrbisImeDisableDevice));
 
 enum class OrbisImeInputMethodState : u32 {
     PREEDIT = 0x01000000,
@@ -195,11 +166,9 @@ enum class OrbisImeInputMethodState : u32 {
     FULL_WIDTH = 0x10000000,
 };
 DECLARE_ENUM_FLAG_OPERATORS(OrbisImeInputMethodState);
-template <>
-struct magic_enum::customize::enum_range<OrbisImeInputMethodState> {
-    static constexpr bool is_flags = true;
-};
-const u32 kValidOrbisImeInputMethodStateMask = generate_full_mask<OrbisImeInputMethodState>();
+const u32 kValidOrbisImeInputMethodStateMask =
+    static_cast<std::underlying_type_t<OrbisImeInputMethodState>>(
+        enum_names_mask(&enum_names_OrbisImeInputMethodState));
 
 enum class OrbisImeInitExtKeyboardMode : u32 {
     ISABLE_ARABIC_INDIC_NUMERALS = 0x00000001,
@@ -209,11 +178,9 @@ enum class OrbisImeInitExtKeyboardMode : u32 {
     INPUT_METHOD_STATE_FULL_WIDTH = 0x10000000,
 };
 DECLARE_ENUM_FLAG_OPERATORS(OrbisImeInitExtKeyboardMode);
-template <>
-struct magic_enum::customize::enum_range<OrbisImeInitExtKeyboardMode> {
-    static constexpr bool is_flags = true;
-};
-const u32 kValidOrbisImeInitExtKeyboardModeMask = generate_full_mask<OrbisImeInitExtKeyboardMode>();
+const u32 kValidOrbisImeInitExtKeyboardModeMask =
+    static_cast<std::underlying_type_t<OrbisImeInitExtKeyboardMode>>(
+        enum_names_mask(&enum_names_OrbisImeInitExtKeyboardMode));
 
 enum class OrbisImeKeycodeState : u32 {
     KEYCODE_VALID = 0x00000001,
@@ -240,11 +207,9 @@ enum class OrbisImeKeycodeState : u32 {
     FROM_IME_INPUT = 0x00200000,
 };
 DECLARE_ENUM_FLAG_OPERATORS(OrbisImeKeycodeState);
-template <>
-struct magic_enum::customize::enum_range<OrbisImeKeycodeState> {
-    static constexpr bool is_flags = true;
-};
-const u32 kValidOrbisImeKeycodeStateMask = generate_full_mask<OrbisImeKeycodeState>();
+const u32 kValidOrbisImeKeycodeStateMask =
+    static_cast<std::underlying_type_t<OrbisImeKeycodeState>>(
+        enum_names_mask(&enum_names_OrbisImeKeycodeState));
 
 enum class OrbisImeKeyboardOption : u32 {
     Default = 0,
@@ -256,11 +221,9 @@ enum class OrbisImeKeyboardOption : u32 {
     DisableCapslockWithoutShift = 32,
 };
 DECLARE_ENUM_FLAG_OPERATORS(OrbisImeKeyboardOption)
-template <>
-struct magic_enum::customize::enum_range<OrbisImeKeyboardOption> {
-    static constexpr bool is_flags = true;
-};
-const u32 kValidOrbisImeKeyboardOptionMask = generate_full_mask<OrbisImeKeyboardOption>();
+const u32 kValidOrbisImeKeyboardOptionMask =
+    static_cast<std::underlying_type_t<OrbisImeKeyboardOption>>(
+        enum_names_mask(&enum_names_OrbisImeKeyboardOption));
 
 enum class OrbisImeKeyboardMode : u32 {
     Auto = 0,

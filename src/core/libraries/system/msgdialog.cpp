@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include <imgui.h>
-#include <magic_enum/magic_enum.hpp>
+#include "common/enum_names.h"
 
 #include "common/assert.h"
 #include "common/logging/log.h"
@@ -44,7 +44,8 @@ Error PS4_SYSV_ABI sceMsgDialogGetResult(DialogResult* result) {
 }
 
 Status PS4_SYSV_ABI sceMsgDialogGetStatus() {
-    LOG_TRACE(Lib_MsgDlg, "called status={}", magic_enum::enum_name(g_status));
+    LOG_TRACE(Lib_MsgDlg, "called status={}",
+              enum_name(&enum_names_Libraries_CommonDialog_Status, static_cast<s64>(g_status)));
     return g_status;
 }
 
@@ -74,7 +75,9 @@ Error PS4_SYSV_ABI sceMsgDialogOpen(const OrbisParam* param) {
         LOG_DEBUG(Lib_MsgDlg, "called param:(NULL)");
         return Error::ARG_NULL;
     }
-    LOG_DEBUG(Lib_MsgDlg, "called param->mode: {}", magic_enum::enum_name(param->mode));
+    LOG_DEBUG(
+        Lib_MsgDlg, "called param->mode: {}",
+        enum_name(&enum_names_Libraries_MsgDialog_MsgDialogMode, static_cast<s64>(param->mode)));
     ASSERT(param->size == sizeof(OrbisParam));
     ASSERT(param->baseParam.size == sizeof(CommonDialog::BaseParam));
     g_result = {};
@@ -145,7 +148,8 @@ Error PS4_SYSV_ABI sceMsgDialogTerminate() {
 }
 
 Status PS4_SYSV_ABI sceMsgDialogUpdateStatus() {
-    LOG_TRACE(Lib_MsgDlg, "called status={}", magic_enum::enum_name(g_status));
+    LOG_TRACE(Lib_MsgDlg, "called status={}",
+              enum_name(&enum_names_Libraries_CommonDialog_Status, static_cast<s64>(g_status)));
     return g_status;
 }
 

@@ -1,7 +1,6 @@
 // SPDX-FileCopyrightText: Copyright 2024 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
-#include <magic_enum/magic_enum.hpp>
 #include "common/assert.h"
 #include "shader_recompiler/frontend/translate/translate.h"
 

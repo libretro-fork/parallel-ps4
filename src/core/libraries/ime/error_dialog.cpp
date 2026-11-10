@@ -4,7 +4,7 @@
 #include <utility>
 #include <fmt/format.h>
 #include <imgui.h>
-#include <magic_enum/magic_enum.hpp>
+#include "common/enum_names.h"
 
 #include "common/assert.h"
 #include "common/logging/log.h"
@@ -132,7 +132,8 @@ Error PS4_SYSV_ABI sceErrorDialogClose() {
 }
 
 Status PS4_SYSV_ABI sceErrorDialogGetStatus() {
-    LOG_TRACE(Lib_ErrorDialog, "called status={}", magic_enum::enum_name(g_status));
+    LOG_TRACE(Lib_ErrorDialog, "called status={}",
+              enum_name(&enum_names_Libraries_CommonDialog_Status, static_cast<s64>(g_status)));
     return g_status;
 }
 
@@ -187,7 +188,8 @@ Error PS4_SYSV_ABI sceErrorDialogTerminate() {
 }
 
 Status PS4_SYSV_ABI sceErrorDialogUpdateStatus() {
-    LOG_TRACE(Lib_ErrorDialog, "called status={}", magic_enum::enum_name(g_status));
+    LOG_TRACE(Lib_ErrorDialog, "called status={}",
+              enum_name(&enum_names_Libraries_CommonDialog_Status, static_cast<s64>(g_status)));
     return g_status;
 }
 

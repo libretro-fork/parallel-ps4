@@ -3,7 +3,7 @@
 
 #include <cstring>
 #include <fmt/format.h>
-#include <magic_enum/magic_enum.hpp>
+#include "common/enum_names.h"
 #include "common/logging/log.h"
 #include "core/libraries/error_codes.h"
 #include "core/libraries/libs.h"
@@ -91,7 +91,8 @@ sceNpProfileDialogGetResult(OrbisNpProfileDialogResult* result) {
 }
 
 Libraries::CommonDialog::Status PS4_SYSV_ABI sceNpProfileDialogGetStatus() {
-    LOG_TRACE(Lib_NpProfileDialog, "called status={}", magic_enum::enum_name(g_status));
+    LOG_TRACE(Lib_NpProfileDialog, "called status={}",
+              enum_name(&enum_names_Libraries_CommonDialog_Status, static_cast<s64>(g_status)));
     return g_status;
 }
 
@@ -174,7 +175,8 @@ Libraries::CommonDialog::Error PS4_SYSV_ABI sceNpProfileDialogTerminate() {
 }
 
 Libraries::CommonDialog::Status PS4_SYSV_ABI sceNpProfileDialogUpdateStatus() {
-    LOG_TRACE(Lib_NpProfileDialog, "called status={}", magic_enum::enum_name(g_status));
+    LOG_TRACE(Lib_NpProfileDialog, "called status={}",
+              enum_name(&enum_names_Libraries_CommonDialog_Status, static_cast<s64>(g_status)));
     return g_status;
 }
 

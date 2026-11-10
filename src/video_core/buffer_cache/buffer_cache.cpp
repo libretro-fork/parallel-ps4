@@ -3,7 +3,7 @@
 
 #include <algorithm>
 #include <bit>
-#include <magic_enum/magic_enum.hpp>
+#include "common/enum_names.h"
 
 #include "common/alignment.h"
 #include "core/debug_state.h"
@@ -551,7 +551,8 @@ bool BufferCache::SynchronizeMemoryFromImage(const Buffer* arena, VAddr device_a
             return true;
         } else {
             LOG_WARNING(Render_Vulkan, "Unhandled metadata type {}",
-                        magic_enum::enum_name(meta->type));
+                        enum_name(&enum_names_VideoCore_TextureCache_MetaType,
+                                  static_cast<s64>(meta->type)));
         }
     }
     const ImageId image_id = texture_cache.FindImageFromRange(device_addr, size);

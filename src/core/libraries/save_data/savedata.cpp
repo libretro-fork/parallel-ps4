@@ -6,7 +6,7 @@
 #include <thread>
 #include <vector>
 
-#include <magic_enum/magic_enum.hpp>
+#include "common/enum_names.h"
 
 #include "common/assert.h"
 #include "common/cstring.h"
@@ -1027,7 +1027,9 @@ Error PS4_SYSV_ABI sceSaveDataGetParam(const OrbisSaveDataMountPoint* mountPoint
         LOG_INFO(Lib_SaveData, "called with invalid parameter");
         return Error::PARAMETER;
     }
-    LOG_DEBUG(Lib_SaveData, "called: paramType = {}", magic_enum::enum_name(paramType));
+    LOG_DEBUG(Lib_SaveData, "called: paramType = {}",
+              enum_name(&enum_names_Libraries_SaveData_OrbisSaveDataParamType,
+                        static_cast<s64>(paramType)));
     const PSF* param_sfo = nullptr;
 
     const std::string_view mount_point_str{mountPoint->data};
@@ -1428,7 +1430,9 @@ Error PS4_SYSV_ABI sceSaveDataSetParam(const OrbisSaveDataMountPoint* mountPoint
         LOG_INFO(Lib_SaveData, "called with invalid parameter");
         return Error::PARAMETER;
     }
-    LOG_DEBUG(Lib_SaveData, "called: paramType = {}", magic_enum::enum_name(paramType));
+    LOG_DEBUG(Lib_SaveData, "called: paramType = {}",
+              enum_name(&enum_names_Libraries_SaveData_OrbisSaveDataParamType,
+                        static_cast<s64>(paramType)));
     PSF* param_sfo = nullptr;
     const std::string_view mount_point_str{mountPoint->data};
     for (auto& instance : g_mount_slots) {

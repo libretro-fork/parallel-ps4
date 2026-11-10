@@ -27,8 +27,8 @@
 #include "video_core/host_shaders/tiling_micro_8_words_comp.h"
 #include "video_core/host_shaders/tiling_micro_96_comp.h"
 
-#include <magic_enum/magic_enum.hpp>
 #include <vk_mem_alloc.h>
+#include "common/enum_names.h"
 
 namespace VideoCore {
 
@@ -181,8 +181,9 @@ vk::Pipeline TileManager::GetTilingPipeline(const ImageInfo& info, bool is_tiler
         .pData = spec_data.data(),
     };
 
-    const auto module_name = fmt::format("{}_{} {}", magic_enum::enum_name(info.tile_mode),
-                                         info.num_bits, is_tiler ? "tiler" : "detiler");
+    const auto module_name = fmt::format(
+        "{}_{} {}", enum_name(&enum_names_AmdGpu_TileMode, static_cast<s64>(info.tile_mode)),
+        info.num_bits, is_tiler ? "tiler" : "detiler");
     LOG_INFO(Render_Vulkan, "Creating tiling pipeline {}", module_name);
     Vulkan::SetObjectName(device, module, module_name);
 
