@@ -83,3 +83,5 @@ externals/abseil-cpp
 externals/ext-boost
 externals/robin-map
 externals/magic_enum
+externals/vulkan-loader
+externals/mesa-kosmickrisp

@@ -9,8 +9,6 @@ set(CMAKE_CXX_STANDARD_REQUIRED True)
 
 if(APPLE)
     list(APPEND ADDITIONAL_LANGUAGES OBJC)
-    # Minimum OS version for KosmicKrisp
-    set(CMAKE_OSX_DEPLOYMENT_TARGET 26.0 CACHE STRING "")
 endif()
 
 if (NOT CMAKE_BUILD_TYPE)
@@ -34,7 +32,6 @@ if(UNIX AND NOT APPLE)
 endif()
 
 include(CMakeDependentOption)
-cmake_dependent_option(ENABLE_SYSTEM_VULKAN "Enable the system Vulkan driver" OFF APPLE OFF)
 
 option(ENABLE_UPDATER "Enables the options to updater" ON)
 # aarch64: the game's x86-64 code through FEXCore in the emulator's own process, in place of
@@ -1545,31 +1542,6 @@ if (${CMAKE_SYSTEM_NAME} STREQUAL "Linux")
 endif()
 
 if (APPLE)
-    if (NOT ENABLE_SYSTEM_VULKAN)
-        # Bundle Vulkan loader and KosmicKrisp driver with the emulator.
-        set_property(TARGET shadps4 APPEND PROPERTY BUILD_RPATH "@executable_path")
-
-        set(LOADER_DEST "${CMAKE_CURRENT_BINARY_DIR}/libvulkan.dylib")
-        set(DRIVER_DEST "${CMAKE_CURRENT_BINARY_DIR}/libvulkan_kosmickrisp.dylib")
-        set(ICD_DEST "${CMAKE_CURRENT_BINARY_DIR}/kosmickrisp_mesa_icd.json")
-
-        add_custom_command(
-            OUTPUT ${LOADER_DEST}
-            DEPENDS ${VULKAN_LOADER_PATH} vulkan
-            COMMAND ${CMAKE_COMMAND} -E copy ${VULKAN_LOADER_PATH} ${LOADER_DEST})
-        add_custom_command(
-            OUTPUT ${DRIVER_DEST}
-            DEPENDS ${VULKAN_DRIVER_PATH} kosmickrisp
-            COMMAND ${CMAKE_COMMAND} -E copy ${VULKAN_DRIVER_PATH} ${DRIVER_DEST})
-        add_custom_command(
-            OUTPUT ${ICD_DEST}
-            DEPENDS ${VULKAN_ICD_PATH} kosmickrisp
-            COMMAND ${CMAKE_COMMAND} -E copy ${VULKAN_ICD_PATH} ${ICD_DEST})
-
-        add_custom_target(CopyVulkanDriver DEPENDS ${LOADER_DEST} ${DRIVER_DEST} ${ICD_DEST})
-        add_dependencies(shadps4 CopyVulkanDriver)
-    endif()
-
     if (ARCHITECTURE STREQUAL "x86_64")
         # Reserve system-managed memory space.
         target_link_options(shadps4 PRIVATE -Wl,-ld_classic,-no_pie,-no_fixup_chains,-no_huge,-pagezero_size,0x4000,-segaddr,TCB_SPACE,0x4000,-segaddr,SYSTEM_MANAGED,0x400000,-segaddr,SYSTEM_RESERVED,0x7FFFFC000,-segaddr,USER_AREA,0x7000000000,-image_base,0x700000000000)
