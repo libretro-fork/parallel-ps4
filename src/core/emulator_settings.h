@@ -1,693 +1,255 @@
-// SPDX-FileCopyrightText: Copyright 2025-2026 shadPS4 Emulator Project
-// SPDX-License-Identifier: GPL-2.0-or-later
+/* SPDX-FileCopyrightText: Copyright 2025-2026 shadPS4 Emulator Project
+ * SPDX-License-Identifier: GPL-2.0-or-later */
 
-#pragma once
+#ifndef SHADPS4_CORE_EMULATOR_SETTINGS_H
+#define SHADPS4_CORE_EMULATOR_SETTINGS_H
 
-#include <atomic>
-#include <filesystem>
-#include <functional>
-#include <memory>
-#include <mutex>
-#include <sstream>
-#include <string>
-#include <vector>
-#include <nlohmann/json.hpp>
-#include "common/logging/log.h"
-#include "common/types.h"
+/* The emulator's settings, kept in config.json in the user directory, with
+ * per-game overrides in custom_configs/<serial>.json.
+ *
+ * Every setting has a factory default, a base value (config.json) and,
+ * when it can be overridden per game, an optional game-specific value.
+ * Each one listed in EMU_SETTINGS_LIST gets
+ *
+ *   <type> emu_settings_get_<name>(void);
+ *   void   emu_settings_set_<name>(<type> value, bool game_specific);
+ *
+ * unless it is marked CUSTOM, in which case its accessors are declared
+ * below by hand. Strings are returned as pointers into the settings; they
+ * stay valid until that setting is changed. */
 
-#define EmulatorSettings (*EmulatorSettingsImpl::GetInstance())
+#include <stddef.h>
+#include <stdint.h>
 
-enum UsbBackendType : int {
-    Real,
-    SkylandersPortal,
-    InfinityBase,
-    DimensionsToypad,
+#include <boolean.h>
+#include <retro_common_api.h>
+
+RETRO_BEGIN_DECLS
+
+#define EMU_SETTINGS_STRING_MAX 256
+#define EMU_SETTINGS_PATH_MAX 4096
+#define EMU_SETTINGS_INSTALL_DIRS_MAX 16
+
+enum emu_usb_backend {
+    EMU_USB_BACKEND_REAL = 0,
+    EMU_USB_BACKEND_SKYLANDERS_PORTAL,
+    EMU_USB_BACKEND_INFINITY_BASE,
+    EMU_USB_BACKEND_DIMENSIONS_TOYPAD
 };
 
-enum GpuReadbacksMode : int {
-    Disabled,
-    Relaxed,
-    Precise,
+enum emu_readbacks_mode {
+    EMU_READBACKS_DISABLED = 0,
+    EMU_READBACKS_RELAXED,
+    EMU_READBACKS_PRECISE
 };
 
-enum class ConfigMode {
-    Default,
-    Global,
-    Clean,
+/* Which value a getter returns. */
+enum emu_config_mode {
+    /* the game-specific value if there is one, else the base value */
+    EMU_CONFIG_MODE_DEFAULT = 0,
+    /* the base value */
+    EMU_CONFIG_MODE_GLOBAL,
+    /* the factory default */
+    EMU_CONFIG_MODE_CLEAN
 };
 
-template <typename T>
-struct Setting {
-    T default_value{};
-    T value{};
-    std::optional<T> game_specific_value{};
-
-    Setting() = default;
-    // Single-argument ctor: initialises both default_value and value so
-    // that CleanMode can always recover the intended factory default.
-    /*implicit*/ Setting(T init) : default_value(std::move(init)), value(default_value) {}
-
-    /// Return the active value under the given mode.
-    T get(ConfigMode mode = ConfigMode::Default) const {
-        switch (mode) {
-        case ConfigMode::Default:
-            return game_specific_value.value_or(value);
-        case ConfigMode::Global:
-            return value;
-        case ConfigMode::Clean:
-            return default_value;
-        }
-        return value;
-    }
-
-    /// Write v to the base layer.
-    /// Set proper value as base or game_specific
-    void set(const T& v, bool game_specific = false) {
-        if (game_specific) {
-            game_specific_value = v;
-        } else {
-            value = v;
-        }
-    }
-
-    /// Discard the game-specific override; subsequent get(Default) will
-    /// fall back to the base value.
-    void reset_game_specific() {
-        game_specific_value = std::nullopt;
-    }
+enum emu_settings_section {
+    EMU_SECTION_GENERAL = 0,
+    EMU_SECTION_NETWORK,
+    EMU_SECTION_LOG,
+    EMU_SECTION_DEBUG,
+    EMU_SECTION_INPUT,
+    EMU_SECTION_GPU,
+    EMU_SECTION_VULKAN,
+    EMU_SECTION_COUNT
 };
 
-template <typename T>
-void to_json(nlohmann::json& j, const Setting<T>& s) {
-    j = s.value;
-}
+/* Flags: OVR can be overridden per game; 0 is global only. */
+#define EMU_SETTINGS_FLAG_0 0
+#define EMU_SETTINGS_FLAG_OVR 1
 
-template <typename T>
-void from_json(const nlohmann::json& j, Setting<T>& s) {
-    s.value = j.get<T>();
-}
+/* C types of the setting types. */
+#define EMU_SETTINGS_CTYPE_BOOL bool
+#define EMU_SETTINGS_CTYPE_INT int
+#define EMU_SETTINGS_CTYPE_UINT unsigned
+#define EMU_SETTINGS_CTYPE_U64 uint64_t
+#define EMU_SETTINGS_CTYPE_DOUBLE double
+#define EMU_SETTINGS_CTYPE_STRING const char*
+#define EMU_SETTINGS_CTYPE_PATH const char*
 
-struct OverrideItem {
-    const char* key;
-    std::function<void(void* group_ptr, const nlohmann::json& entry,
-                       std::vector<std::string>& changed)>
-        apply;
-    /// Return the value that should be written to the per-game config file.
-    /// Falls back to base value if no game-specific override is set.
-    std::function<nlohmann::json(const void* group_ptr)> get_for_save;
+#ifdef _WIN32
+#define EMU_SETTINGS_LIST_WIN32_LOG EMU_SETTING(log_type, "type", LOG, STRING, "wincolor", OVR, GEN)
+#else
+#define EMU_SETTINGS_LIST_WIN32_LOG
+#endif
 
-    /// Clear game_specific_value for this field.
-    std::function<void(void* group_ptr)> reset_game_specific;
+/* EMU_SETTING(name, json key, section, type, default, flags, accessors) */
+#define EMU_SETTINGS_LIST                                                                          \
+    EMU_SETTING(addon_install_dir, "addon_install_dir", GENERAL, PATH, "", 0, CUSTOM)              \
+    EMU_SETTING(home_dir, "home_dir", GENERAL, PATH, "", 0, CUSTOM)                                \
+    EMU_SETTING(sys_modules_dir, "sys_modules_dir", GENERAL, PATH, "", 0, CUSTOM)                  \
+    EMU_SETTING(font_dir, "font_dir", GENERAL, PATH, "", 0, CUSTOM)                                \
+    EMU_SETTING(volume_slider, "volume_slider", GENERAL, INT, 100, OVR, GEN)                       \
+    EMU_SETTING(neo_mode, "neo_mode", GENERAL, BOOL, false, OVR, GEN)                              \
+    EMU_SETTING(dev_kit_mode, "dev_kit_mode", GENERAL, BOOL, false, OVR, GEN)                      \
+    EMU_SETTING(extra_dmem_in_mbytes, "extra_dmem_in_mbytes", GENERAL, INT, 0, OVR, GEN)           \
+    EMU_SETTING(extra_fmem_in_mbytes, "extra_fmem_in_mbytes", GENERAL, INT, 0, OVR, GEN)           \
+    EMU_SETTING(trophy_popup_disabled, "trophy_popup_disabled", GENERAL, BOOL, false, OVR, GEN)    \
+    EMU_SETTING(trophy_notification_duration, "trophy_notification_duration", GENERAL, DOUBLE,     \
+                6.0, OVR, GEN)                                                                     \
+    EMU_SETTING(trophy_notification_side, "trophy_notification_side", GENERAL, STRING, "right",    \
+                OVR, GEN)                                                                          \
+    EMU_SETTING(show_splash, "show_splash", GENERAL, BOOL, false, OVR, GEN)                        \
+    EMU_SETTING(show_fps_counter, "show_fps_counter", GENERAL, BOOL, false, 0, GEN)                \
+    EMU_SETTING(console_language, "console_language", GENERAL, INT, 1, OVR, GEN)                   \
+    EMU_SETTING(big_picture_scale, "big_picture_scale", GENERAL, INT, 1000, 0, GEN)                \
+    EMU_SETTING(big_picture_folder_depth, "big_picture_folder_depth", GENERAL, INT, 2, 0, GEN)     \
+    EMU_SETTING(redzone_patches, "redzone_patches", GENERAL, BOOL, false, OVR, GEN)                \
+                                                                                                   \
+    EMU_SETTING(connected_to_network, "connected_to_network", NETWORK, BOOL, false, OVR, GEN)      \
+    EMU_SETTING(shad_net_enabled, "shad_net_enabled", NETWORK, BOOL, false, OVR, GEN)              \
+    EMU_SETTING(shadnet_server, "shadnet_server", NETWORK, STRING, "srv.shadps4.net:31313", OVR,   \
+                GEN)                                                                               \
+    EMU_SETTING(shadnet_webapi_server, "shadnet_webapi_server", NETWORK, STRING,                   \
+                "http://srv.shadps4.net:31315", OVR, GEN)                                          \
+    EMU_SETTING(enable_upnp, "enable_upnp", NETWORK, BOOL, true, OVR, GEN)                         \
+    /* 0 is any free port, 3658 the PS4's; with UPnP it is forwarded on the router */              \
+    EMU_SETTING(p2p_port, "p2p_port", NETWORK, INT, 3658, OVR, GEN)                                \
+    EMU_SETTING(disable_https, "disable_https", NETWORK, BOOL, false, OVR, GEN)                    \
+                                                                                                   \
+    EMU_SETTING(log_append, "append", LOG, BOOL, false, OVR, GEN)                                  \
+    EMU_SETTING(log_enable, "enable", LOG, BOOL, true, OVR, GEN)                                   \
+    EMU_SETTING(log_filter, "filter", LOG, STRING, "", OVR, GEN)                                   \
+    EMU_SETTING(log_flush_level, "flush_level", LOG, STRING, "", OVR, GEN)                         \
+    EMU_SETTING(log_max_skip_duration, "max_skip_duration", LOG, UINT, 5000, OVR, GEN)             \
+    EMU_SETTING(log_separate, "separate", LOG, BOOL, false, OVR, GEN)                              \
+    EMU_SETTING(log_size_limit, "size_limit", LOG, U64, 104857600, OVR, GEN)                       \
+    EMU_SETTING(log_skip_duplicate, "skip_duplicate", LOG, BOOL, true, OVR, GEN)                   \
+    EMU_SETTING(log_sync, "sync", LOG, BOOL, true, OVR, GEN)                                       \
+    EMU_SETTINGS_LIST_WIN32_LOG                                                                    \
+                                                                                                   \
+    EMU_SETTING(debug_dump, "debug_dump", DEBUG, BOOL, false, OVR, GEN)                            \
+    EMU_SETTING(shader_collect, "shader_collect", DEBUG, BOOL, false, OVR, GEN)                    \
+    EMU_SETTING(config_version, "config_version", DEBUG, STRING, "", 0, GEN)                       \
+                                                                                                   \
+    EMU_SETTING(usb_device_backend, "usb_device_backend", INPUT, INT, EMU_USB_BACKEND_REAL, OVR,   \
+                GEN)                                                                               \
+    EMU_SETTING(use_special_pad, "use_special_pad", INPUT, BOOL, false, 0, GEN)                    \
+    EMU_SETTING(special_pad_class, "special_pad_class", INPUT, INT, 1, 0, GEN)                     \
+    EMU_SETTING(ime_accessibility_enabled, "ime_accessibility_enabled", INPUT, BOOL, false, OVR,   \
+                GEN)                                                                               \
+    EMU_SETTING(ime_url_mail_short_panel, "ime_url_mail_short_panel", INPUT, BOOL, false, OVR,     \
+                GEN)                                                                               \
+    EMU_SETTING(is_circle_enter, "is_circle_enter", INPUT, BOOL, false, OVR, GEN)                  \
+                                                                                                   \
+    EMU_SETTING(window_width, "window_width", GPU, UINT, 1280, OVR, GEN)                           \
+    EMU_SETTING(window_height, "window_height", GPU, UINT, 720, OVR, GEN)                          \
+    EMU_SETTING(internal_screen_width, "internal_screen_width", GPU, UINT, 1280, 0, GEN)           \
+    EMU_SETTING(internal_screen_height, "internal_screen_height", GPU, UINT, 720, 0, GEN)          \
+    EMU_SETTING(null_gpu, "null_gpu", GPU, BOOL, false, OVR, GEN)                                  \
+    EMU_SETTING(copy_gpu_buffers, "copy_gpu_buffers", GPU, BOOL, false, OVR, GEN)                  \
+    EMU_SETTING(readbacks_mode, "readbacks_mode", GPU, UINT, EMU_READBACKS_DISABLED, OVR, GEN)     \
+    EMU_SETTING(readback_linear_images_enabled, "readback_linear_images_enabled", GPU, BOOL,       \
+                false, OVR, GEN)                                                                   \
+    EMU_SETTING(direct_memory_access_enabled, "direct_memory_access_enabled", GPU, BOOL, false,    \
+                OVR, GEN)                                                                          \
+    EMU_SETTING(dump_shaders, "dump_shaders", GPU, BOOL, false, OVR, GEN)                          \
+    EMU_SETTING(patch_shaders, "patch_shaders", GPU, BOOL, false, OVR, GEN)                        \
+    EMU_SETTING(vblank_frequency, "vblank_frequency", GPU, UINT, 60, OVR, CUSTOM)                  \
+    EMU_SETTING(full_screen, "full_screen", GPU, BOOL, false, OVR, GEN)                            \
+    EMU_SETTING(full_screen_mode, "full_screen_mode", GPU, STRING, "Windowed", OVR, GEN)           \
+    EMU_SETTING(present_mode, "present_mode", GPU, STRING, "Mailbox", OVR, GEN)                    \
+    EMU_SETTING(hdr_allowed, "hdr_allowed", GPU, BOOL, false, OVR, GEN)                            \
+    EMU_SETTING(fsr_enabled, "fsr_enabled", GPU, BOOL, false, OVR, GEN)                            \
+    EMU_SETTING(rcas_enabled, "rcas_enabled", GPU, BOOL, true, OVR, GEN)                           \
+    EMU_SETTING(rcas_attenuation, "rcas_attenuation", GPU, INT, 250, OVR, GEN)                     \
+    EMU_SETTING(userfaultfd, "userfaultfd", GPU, BOOL, false, OVR, GEN)                            \
+    EMU_SETTING(inline_fetch_shader, "inline_fetch_shader", GPU, BOOL, false, OVR, GEN)            \
+    EMU_SETTING(fast_shader_math, "fast_shader_math", GPU, BOOL, false, OVR, GEN)                  \
+                                                                                                   \
+    EMU_SETTING(gpu_id, "gpu_id", VULKAN, INT, -1, OVR, GEN)                                       \
+    EMU_SETTING(renderdoc_enabled, "renderdoc_enabled", VULKAN, BOOL, false, OVR, GEN)             \
+    EMU_SETTING(vkvalidation_enabled, "vkvalidation_enabled", VULKAN, BOOL, false, OVR, GEN)       \
+    EMU_SETTING(vkvalidation_core_enabled, "vkvalidation_core_enabled", VULKAN, BOOL, true, OVR,   \
+                GEN)                                                                               \
+    EMU_SETTING(vkvalidation_sync_enabled, "vkvalidation_sync_enabled", VULKAN, BOOL, false, OVR,  \
+                GEN)                                                                               \
+    EMU_SETTING(vkvalidation_gpu_enabled, "vkvalidation_gpu_enabled", VULKAN, BOOL, false, OVR,    \
+                GEN)                                                                               \
+    EMU_SETTING(vkcrash_diagnostic_enabled, "vkcrash_diagnostic_enabled", VULKAN, BOOL, false,     \
+                OVR, GEN)                                                                          \
+    EMU_SETTING(vkhost_markers, "vkhost_markers", VULKAN, BOOL, false, OVR, GEN)                   \
+    EMU_SETTING(vkguest_markers, "vkguest_markers", VULKAN, BOOL, false, OVR, GEN)                 \
+    EMU_SETTING(pipeline_cache_enabled, "pipeline_cache_enabled", VULKAN, BOOL, false, OVR, GEN)
+
+enum emu_setting_id {
+#define EMU_SETTING(name, key, section, type, def, flags, acc) EMU_SETTING_ID_##name,
+    EMU_SETTINGS_LIST
+#undef EMU_SETTING
+        EMU_SETTING_ID_COUNT
 };
 
-template <typename Struct, typename T>
-inline OverrideItem make_override(const char* key, Setting<T> Struct::* member) {
-    return OverrideItem{
-        key,
-        [member, key](void* base, const nlohmann::json& entry, std::vector<std::string>& changed) {
-            Struct* obj = reinterpret_cast<Struct*>(base);
-            Setting<T>& dst = obj->*member;
-            try {
-                T newValue = entry.get<T>();
-                if (dst.value != newValue) {
-                    std::ostringstream oss;
-                    oss << key << " ( " << dst.value << " -> " << newValue << " )";
-                    changed.push_back(oss.str());
-                }
-                dst.game_specific_value = newValue;
-            } catch (const std::exception& e) {
-                LOG_ERROR(Config, "[make_override] error parsing {}: {}", key, e.what());
-                LOG_ERROR(Config, "[make_override] Entry was: {}", entry.dump());
-                LOG_ERROR(Config, "[make_override] Type name: {}", entry.type_name());
-            }
-        },
+#define EMU_SETTINGS_DECL_GEN(name, type)                                                          \
+    EMU_SETTINGS_CTYPE_##type emu_settings_get_##name(void);                                       \
+    void emu_settings_set_##name(EMU_SETTINGS_CTYPE_##type value, bool game_specific);
+#define EMU_SETTINGS_DECL_CUSTOM(name, type)
+#define EMU_SETTING(name, key, section, type, def, flags, acc) EMU_SETTINGS_DECL_##acc(name, type)
+EMU_SETTINGS_LIST
+#undef EMU_SETTING
 
-        // --- get_for_save -------------------------------------------
-        // Returns game_specific_value when present, otherwise base value.
-        // This means a freshly-opened game-specific dialog still shows
-        // useful (current-global) values rather than empty entries.
-        [member](const void* base) -> nlohmann::json {
-            const Struct* obj = reinterpret_cast<const Struct*>(base);
-            const Setting<T>& src = obj->*member;
-            return nlohmann::json(src.game_specific_value.value_or(src.value));
-        },
+/* The directory settings. Each getter writes the configured directory, or
+ * the user directory it defaults to when none is set, into s and returns
+ * its length (len or more means it didn't fit). */
+size_t emu_settings_get_addon_install_dir(char* s, size_t len);
+size_t emu_settings_get_home_dir(char* s, size_t len);
+size_t emu_settings_get_sys_modules_dir(char* s, size_t len);
+size_t emu_settings_get_font_dir(char* s, size_t len);
+void emu_settings_set_addon_install_dir(const char* dir);
+void emu_settings_set_home_dir(const char* dir);
+void emu_settings_set_sys_modules_dir(const char* dir);
+void emu_settings_set_font_dir(const char* dir);
 
-        // --- reset_game_specific ------------------------------------
-        [member](void* base) {
-            Struct* obj = reinterpret_cast<Struct*>(base);
-            (obj->*member).reset_game_specific();
-        }};
-}
+/* Never below 30. */
+unsigned emu_settings_get_vblank_frequency(void);
+void emu_settings_set_vblank_frequency(unsigned value, bool game_specific);
 
-// -------------------------------
-// Support types
-// -------------------------------
-struct GameInstallDir {
-    std::filesystem::path path;
+/* shadNet is on when its setting is, unless it was turned off for the
+ * rest of this run. */
+bool emu_settings_is_shadnet_enabled(void);
+void emu_settings_set_shadnet_session_disabled(bool disabled);
+bool emu_settings_is_shadnet_session_disabled(void);
+
+/* Game install directories. */
+struct emu_settings_install_dir {
+    char path[EMU_SETTINGS_PATH_MAX];
     bool enabled;
 };
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(GameInstallDir, path, enabled)
+size_t emu_settings_install_dir_count(void);
+const struct emu_settings_install_dir* emu_settings_install_dir_at(size_t index);
+bool emu_settings_add_install_dir(const char* path, bool enabled);
+void emu_settings_remove_install_dir(const char* path);
+void emu_settings_set_install_dir_enabled(const char* path, bool enabled);
+void emu_settings_clear_install_dirs(void);
 
-// -------------------------------
-// General settings
-// -------------------------------
-struct GeneralSettings {
-    Setting<std::vector<GameInstallDir>> install_dirs;
-    Setting<std::filesystem::path> addon_install_dir;
-    Setting<std::filesystem::path> home_dir;
-    Setting<std::filesystem::path> sys_modules_dir;
-    Setting<std::filesystem::path> font_dir;
+enum emu_config_mode emu_settings_get_config_mode(void);
+void emu_settings_set_config_mode(enum emu_config_mode mode);
 
-    Setting<int> volume_slider{100};
-    Setting<bool> neo_mode{false};
-    Setting<bool> dev_kit_mode{false};
-    Setting<int> extra_dmem_in_mbytes{0};
-    Setting<int> extra_fmem_in_mbytes{0};
-    Setting<bool> trophy_popup_disabled{false};
-    Setting<double> trophy_notification_duration{6.0};
-    Setting<std::string> trophy_notification_side{"right"};
-    Setting<bool> show_splash{false};
-    Setting<bool> show_fps_counter{false};
-    Setting<int> console_language{1};
-    Setting<int> big_picture_scale{1000};
-    Setting<int> big_picture_folder_depth{2};
-    Setting<bool> redzone_patches{false};
-    // return a vector of override descriptors (runtime, but tiny)
-    std::vector<OverrideItem> GetOverrideableFields() const {
-        return std::vector<OverrideItem>{
-            make_override<GeneralSettings>("volume_slider", &GeneralSettings::volume_slider),
-            make_override<GeneralSettings>("neo_mode", &GeneralSettings::neo_mode),
-            make_override<GeneralSettings>("dev_kit_mode", &GeneralSettings::dev_kit_mode),
-            make_override<GeneralSettings>("extra_dmem_in_mbytes",
-                                           &GeneralSettings::extra_dmem_in_mbytes),
-            make_override<GeneralSettings>("extra_fmem_in_mbytes",
-                                           &GeneralSettings::extra_fmem_in_mbytes),
-            make_override<GeneralSettings>("trophy_popup_disabled",
-                                           &GeneralSettings::trophy_popup_disabled),
-            make_override<GeneralSettings>("trophy_notification_duration",
-                                           &GeneralSettings::trophy_notification_duration),
-            make_override<GeneralSettings>("show_splash", &GeneralSettings::show_splash),
-            make_override<GeneralSettings>("trophy_notification_side",
-                                           &GeneralSettings::trophy_notification_side),
-            make_override<GeneralSettings>("console_language", &GeneralSettings::console_language),
-            make_override<GeneralSettings>("redzone_patches", &GeneralSettings::redzone_patches)};
-    }
-};
+/* Resets every setting to its factory default. */
+void emu_settings_set_defaults(void);
+/* Drops every game-specific value, back to the base values. */
+void emu_settings_clear_game_overrides(void);
 
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(GeneralSettings, install_dirs, addon_install_dir, home_dir,
-                                   sys_modules_dir, font_dir, volume_slider, neo_mode, dev_kit_mode,
-                                   extra_dmem_in_mbytes, extra_fmem_in_mbytes,
-                                   trophy_popup_disabled, trophy_notification_duration, show_splash,
-                                   trophy_notification_side, show_fps_counter,
-                                   console_language, big_picture_scale, big_picture_folder_depth,
-                                   redzone_patches)
+/* Reads config.json; a missing one is created with the defaults, and one
+ * written by another build is saved again. Drops game-specific values. */
+bool emu_settings_load(void);
+/* Applies custom_configs/<serial>.json on top of the base values. Returns
+ * false when the game has no such file. */
+bool emu_settings_load_game(const char* serial);
+/* Writes config.json, keeping the members this build doesn't know. */
+bool emu_settings_save(void);
+/* Writes every overridable setting to custom_configs/<serial>.json. */
+bool emu_settings_save_game(const char* serial);
 
-// -------------------------------
-// Network settings
-// -------------------------------
-struct NetworkSettings {
-    Setting<bool> connected_to_network{false};
-    Setting<bool> shad_net_enabled{false};
-    Setting<std::string> shadnet_server{"srv.shadps4.net:31313"};
-    Setting<std::string> shadnet_webapi_server{"http://srv.shadps4.net:31315"};
-    Setting<bool> enable_upnp{true};
-    Setting<int> p2p_port{3658}; // 0 is any free port, 3658 is the default PS4 port. With UPnP
-                                 // enabled it is forwarded on the router.
-    Setting<bool> disable_https{false};
+RETRO_END_DECLS
 
-    std::vector<OverrideItem> GetOverrideableFields() const {
-        return std::vector<OverrideItem>{
-            make_override<NetworkSettings>("connected_to_network",
-                                           &NetworkSettings::connected_to_network),
-            make_override<NetworkSettings>("shad_net_enabled", &NetworkSettings::shad_net_enabled),
-            make_override<NetworkSettings>("shadnet_server", &NetworkSettings::shadnet_server),
-            make_override<NetworkSettings>("shadnet_webapi_server",
-                                           &NetworkSettings::shadnet_webapi_server),
-            make_override<NetworkSettings>("enable_upnp", &NetworkSettings::enable_upnp),
-            make_override<NetworkSettings>("p2p_port", &NetworkSettings::p2p_port),
-            make_override<NetworkSettings>("disable_https", &NetworkSettings::disable_https)};
-    }
-};
-
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(NetworkSettings, connected_to_network, shad_net_enabled,
-                                   shadnet_server, shadnet_webapi_server, enable_upnp, p2p_port,
-                                   disable_https)
-
-// -------------------------------
-// Log settings
-// -------------------------------
-struct LogSettings {
-    Setting<bool> append{false}; // specific
-    Setting<bool> enable{true};  // specific
-    Setting<std::string> filter{""};
-    Setting<std::string> flush_level{""};
-    Setting<u32> max_skip_duration{5'000};
-    Setting<bool> separate{false}; // specific
-    Setting<unsigned long long> size_limit{100_MB};
-    Setting<bool> skip_duplicate{true};
-    Setting<bool> sync{true};
-#ifdef _WIN32
-    Setting<std::string> type{"wincolor"};
 #endif
-
-    // return a vector of override descriptors (runtime, but tiny)
-    std::vector<OverrideItem> GetOverrideableFields() const {
-        return std::vector<OverrideItem>{
-            make_override<LogSettings>("append", &LogSettings::append),
-            make_override<LogSettings>("enable", &LogSettings::enable),
-            make_override<LogSettings>("filter", &LogSettings::filter),
-            make_override<LogSettings>("flush_level", &LogSettings::flush_level),
-            make_override<LogSettings>("max_skip_duration", &LogSettings::max_skip_duration),
-            make_override<LogSettings>("separate", &LogSettings::separate),
-            make_override<LogSettings>("size_limit", &LogSettings::size_limit),
-            make_override<LogSettings>("skip_duplicate", &LogSettings::skip_duplicate),
-            make_override<LogSettings>("sync", &LogSettings::sync),
-#ifdef _WIN32
-            make_override<LogSettings>("type", &LogSettings::type),
-#endif
-        };
-    }
-};
-#ifdef _WIN32
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(LogSettings, append, enable, filter, flush_level,
-                                   max_skip_duration, separate, size_limit, skip_duplicate, sync,
-                                   type)
-#else
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(LogSettings, append, enable, filter, flush_level,
-                                   max_skip_duration, separate, size_limit, skip_duplicate, sync)
-#endif
-
-// -------------------------------
-// Debug settings
-// -------------------------------
-struct DebugSettings {
-    Setting<bool> debug_dump{false};         // specific
-    Setting<bool> shader_collect{false};     // specific
-    Setting<std::string> config_version{""}; // specific
-
-    std::vector<OverrideItem> GetOverrideableFields() const {
-        return std::vector<OverrideItem>{
-            make_override<DebugSettings>("debug_dump", &DebugSettings::debug_dump),
-            make_override<DebugSettings>("shader_collect", &DebugSettings::shader_collect)};
-    }
-};
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(DebugSettings, debug_dump, shader_collect, config_version)
-
-// -------------------------------
-// Input settings
-// -------------------------------
-
-struct InputSettings {
-    Setting<int> usb_device_backend{UsbBackendType::Real}; // specific
-    Setting<bool> use_special_pad{false};
-    Setting<int> special_pad_class{1};
-    Setting<bool> ime_accessibility_enabled{false};   // specific
-    Setting<bool> ime_url_mail_short_panel{false};    // specific
-    Setting<bool> is_circle_enter{false};             // specific
-
-    std::vector<OverrideItem> GetOverrideableFields() const {
-        return std::vector<OverrideItem>{
-            make_override<InputSettings>("usb_device_backend", &InputSettings::usb_device_backend),
-            make_override<InputSettings>("ime_accessibility_enabled",
-                                         &InputSettings::ime_accessibility_enabled),
-            make_override<InputSettings>("ime_url_mail_short_panel",
-                                         &InputSettings::ime_url_mail_short_panel),
-            make_override<InputSettings>("is_circle_enter", &InputSettings::is_circle_enter)};
-    }
-};
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(InputSettings, usb_device_backend, use_special_pad,
-                                   special_pad_class, ime_accessibility_enabled,
-                                   ime_url_mail_short_panel, is_circle_enter)
-// -------------------------------
-// GPU settings
-// -------------------------------
-struct GPUSettings {
-    Setting<u32> window_width{1280};
-    Setting<u32> window_height{720};
-    Setting<u32> internal_screen_width{1280};
-    Setting<u32> internal_screen_height{720};
-    Setting<bool> null_gpu{false};
-    Setting<bool> copy_gpu_buffers{false};
-    Setting<u32> readbacks_mode{GpuReadbacksMode::Disabled};
-    Setting<bool> readback_linear_images_enabled{false};
-    Setting<bool> direct_memory_access_enabled{false};
-    Setting<bool> dump_shaders{false};
-    Setting<bool> patch_shaders{false};
-    Setting<u32> vblank_frequency{60};
-    Setting<bool> full_screen{false};
-    Setting<std::string> full_screen_mode{"Windowed"};
-    Setting<std::string> present_mode{"Mailbox"};
-    Setting<bool> hdr_allowed{false};
-    Setting<bool> fsr_enabled{false};
-    Setting<bool> rcas_enabled{true};
-    Setting<int> rcas_attenuation{250};
-    Setting<bool> userfaultfd{false};
-    Setting<bool> inline_fetch_shader{false};
-    Setting<bool> fast_shader_math{false};
-
-    std::vector<OverrideItem> GetOverrideableFields() const {
-        return std::vector<OverrideItem>{
-            make_override<GPUSettings>("null_gpu", &GPUSettings::null_gpu),
-            make_override<GPUSettings>("copy_gpu_buffers", &GPUSettings::copy_gpu_buffers),
-            make_override<GPUSettings>("full_screen", &GPUSettings::full_screen),
-            make_override<GPUSettings>("full_screen_mode", &GPUSettings::full_screen_mode),
-            make_override<GPUSettings>("present_mode", &GPUSettings::present_mode),
-            make_override<GPUSettings>("window_height", &GPUSettings::window_height),
-            make_override<GPUSettings>("window_width", &GPUSettings::window_width),
-            make_override<GPUSettings>("hdr_allowed", &GPUSettings::hdr_allowed),
-            make_override<GPUSettings>("fsr_enabled", &GPUSettings::fsr_enabled),
-            make_override<GPUSettings>("rcas_enabled", &GPUSettings::rcas_enabled),
-            make_override<GPUSettings>("rcas_attenuation", &GPUSettings::rcas_attenuation),
-            make_override<GPUSettings>("dump_shaders", &GPUSettings::dump_shaders),
-            make_override<GPUSettings>("patch_shaders", &GPUSettings::patch_shaders),
-            make_override<GPUSettings>("readbacks_mode", &GPUSettings::readbacks_mode),
-            make_override<GPUSettings>("readback_linear_images_enabled",
-                                       &GPUSettings::readback_linear_images_enabled),
-            make_override<GPUSettings>("direct_memory_access_enabled",
-                                       &GPUSettings::direct_memory_access_enabled),
-            make_override<GPUSettings>("vblank_frequency", &GPUSettings::vblank_frequency),
-            make_override<GPUSettings>("userfaultfd", &GPUSettings::userfaultfd),
-            make_override<GPUSettings>("inline_fetch_shader", &GPUSettings::inline_fetch_shader),
-            make_override<GPUSettings>("fast_shader_math", &GPUSettings::fast_shader_math),
-        };
-    }
-};
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(GPUSettings, window_width, window_height, internal_screen_width,
-                                   internal_screen_height, null_gpu, copy_gpu_buffers,
-                                   readbacks_mode, readback_linear_images_enabled,
-                                   direct_memory_access_enabled, dump_shaders, patch_shaders,
-                                   vblank_frequency, full_screen, full_screen_mode, present_mode,
-                                   hdr_allowed, fsr_enabled, rcas_enabled, rcas_attenuation,
-                                   userfaultfd, inline_fetch_shader, fast_shader_math)
-
-// -------------------------------
-// Vulkan settings
-// -------------------------------
-struct VulkanSettings {
-    Setting<s32> gpu_id{-1};
-    Setting<bool> renderdoc_enabled{false};
-    Setting<bool> vkvalidation_enabled{false};
-    Setting<bool> vkvalidation_core_enabled{true};
-    Setting<bool> vkvalidation_sync_enabled{false};
-    Setting<bool> vkvalidation_gpu_enabled{false};
-    Setting<bool> vkcrash_diagnostic_enabled{false};
-    Setting<bool> vkhost_markers{false};
-    Setting<bool> vkguest_markers{false};
-    Setting<bool> pipeline_cache_enabled{false};
-
-    std::vector<OverrideItem> GetOverrideableFields() const {
-        return std::vector<OverrideItem>{
-            make_override<VulkanSettings>("gpu_id", &VulkanSettings::gpu_id),
-            make_override<VulkanSettings>("renderdoc_enabled", &VulkanSettings::renderdoc_enabled),
-            make_override<VulkanSettings>("vkvalidation_enabled",
-                                          &VulkanSettings::vkvalidation_enabled),
-            make_override<VulkanSettings>("vkvalidation_core_enabled",
-                                          &VulkanSettings::vkvalidation_core_enabled),
-            make_override<VulkanSettings>("vkvalidation_sync_enabled",
-                                          &VulkanSettings::vkvalidation_sync_enabled),
-            make_override<VulkanSettings>("vkvalidation_gpu_enabled",
-                                          &VulkanSettings::vkvalidation_gpu_enabled),
-            make_override<VulkanSettings>("vkcrash_diagnostic_enabled",
-                                          &VulkanSettings::vkcrash_diagnostic_enabled),
-            make_override<VulkanSettings>("vkhost_markers", &VulkanSettings::vkhost_markers),
-            make_override<VulkanSettings>("vkguest_markers", &VulkanSettings::vkguest_markers),
-            make_override<VulkanSettings>("pipeline_cache_enabled",
-                                          &VulkanSettings::pipeline_cache_enabled),
-        };
-    }
-};
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(VulkanSettings, gpu_id, renderdoc_enabled, vkvalidation_enabled,
-                                   vkvalidation_core_enabled, vkvalidation_sync_enabled,
-                                   vkvalidation_gpu_enabled, vkcrash_diagnostic_enabled,
-                                   vkhost_markers, vkguest_markers, pipeline_cache_enabled)
-
-// -------------------------------
-// Main manager
-// -------------------------------
-class EmulatorSettingsImpl {
-public:
-    EmulatorSettingsImpl();
-    ~EmulatorSettingsImpl();
-
-    static std::shared_ptr<EmulatorSettingsImpl> GetInstance();
-    static void SetInstance(std::shared_ptr<EmulatorSettingsImpl> instance);
-
-    bool Save(const std::string& serial = "");
-    bool Load(const std::string& serial = "");
-    void SetDefaultValues();
-
-    // Config mode
-    ConfigMode GetConfigMode() const {
-        return m_configMode;
-    }
-    void SetConfigMode(ConfigMode mode) {
-        m_configMode = mode;
-    }
-
-    //
-    // Game-specific override management
-    /// Clears all per-game overrides.  Call this when a game exits so
-    /// the emulator reverts to global settings.
-    void ClearGameSpecificOverrides();
-
-    // general accessors
-    bool AddGameInstallDir(const std::filesystem::path& dir, bool enabled = true);
-    std::vector<std::filesystem::path> GetGameInstallDirs() const;
-    void SetAllGameInstallDirs(const std::vector<GameInstallDir>& dirs);
-    void RemoveGameInstallDir(const std::filesystem::path& dir);
-    void SetGameInstallDirEnabled(const std::filesystem::path& dir, bool enabled);
-    void SetGameInstallDirs(const std::vector<std::filesystem::path>& dirs_config);
-    const std::vector<bool> GetGameInstallDirsEnabled();
-    const std::vector<GameInstallDir>& GetAllGameInstallDirs() const;
-
-    std::filesystem::path GetHomeDir();
-    void SetHomeDir(const std::filesystem::path& dir);
-    std::filesystem::path GetSysModulesDir();
-    void SetSysModulesDir(const std::filesystem::path& dir);
-    std::filesystem::path GetFontsDir();
-    void SetFontsDir(const std::filesystem::path& dir);
-    std::filesystem::path GetAddonInstallDir();
-    void SetAddonInstallDir(const std::filesystem::path& dir);
-
-private:
-    GeneralSettings m_general{};
-    NetworkSettings m_network{};
-    LogSettings m_log{};
-    DebugSettings m_debug{};
-    InputSettings m_input{};
-    GPUSettings m_gpu{};
-    VulkanSettings m_vulkan{};
-    ConfigMode m_configMode{ConfigMode::Default};
-
-    // Runtime-only override: when true, IsShadNetEnabled() reports false for the
-    // rest of this run regardless of the persisted setting
-    std::atomic<bool> m_shadnet_session_disabled{false};
-
-    static std::shared_ptr<EmulatorSettingsImpl> s_instance;
-    static std::mutex s_mutex;
-
-    /// Apply overrideable fields from groupJson into group.game_specific_value.
-    template <typename Group>
-    void ApplyGroupOverrides(Group& group, const nlohmann::json& groupJson,
-                             std::vector<std::string>& changed) {
-        for (auto& item : group.GetOverrideableFields()) {
-            if (!groupJson.contains(item.key))
-                continue;
-            item.apply(&group, groupJson.at(item.key), changed);
-        }
-    }
-
-    // Write all overrideable fields from group into out (for game-specific save).
-    template <typename Group>
-    static void SaveGroupGameSpecific(const Group& group, nlohmann::json& out) {
-        for (auto& item : group.GetOverrideableFields())
-            out[item.key] = item.get_for_save(&group);
-    }
-
-    // Discard every game-specific override in group.
-    template <typename Group>
-    static void ClearGroupOverrides(Group& group) {
-        for (auto& item : group.GetOverrideableFields())
-            item.reset_game_specific(&group);
-    }
-
-    static void PrintChangedSummary(const std::vector<std::string>& changed);
-
-public:
-    // Used by the launcher to back up / restore settings (e.g. per-game settings dialog)
-    EmulatorSettingsImpl& operator=(const EmulatorSettingsImpl& other) {
-        if (this != &other) {
-            m_shadnet_session_disabled.store(other.m_shadnet_session_disabled.load());
-            m_general = other.m_general;
-            m_network = other.m_network;
-            m_log = other.m_log;
-            m_debug = other.m_debug;
-            m_input = other.m_input;
-            m_gpu = other.m_gpu;
-            m_vulkan = other.m_vulkan;
-            m_configMode = other.m_configMode;
-        }
-        return *this;
-    }
-
-    // Add these getters to access overrideable fields
-    std::vector<OverrideItem> GetGeneralOverrideableFields() const {
-        return m_general.GetOverrideableFields();
-    }
-    std::vector<OverrideItem> GetNetworkOverrideableFields() const {
-        return m_network.GetOverrideableFields();
-    }
-    std::vector<OverrideItem> GetDebugOverrideableFields() const {
-        return m_debug.GetOverrideableFields();
-    }
-    std::vector<OverrideItem> GetInputOverrideableFields() const {
-        return m_input.GetOverrideableFields();
-    }
-    std::vector<OverrideItem> GetGPUOverrideableFields() const {
-        return m_gpu.GetOverrideableFields();
-    }
-    std::vector<OverrideItem> GetVulkanOverrideableFields() const {
-        return m_vulkan.GetOverrideableFields();
-    }
-    std::vector<std::string> GetAllOverrideableKeys() const;
-
-#define SETTING_FORWARD(group, Name, field)                                                        \
-    auto Get##Name() const {                                                                       \
-        return (group).field.get(m_configMode);                                                    \
-    }                                                                                              \
-    void Set##Name(const decltype((group).field.value)& v, bool specific = false) {                \
-        (group).field.set(v, specific);                                                            \
-    }
-#define SETTING_FORWARD_BOOL(group, Name, field)                                                   \
-    bool Is##Name() const {                                                                        \
-        return (group).field.get(m_configMode);                                                    \
-    }                                                                                              \
-    void Set##Name(bool v, bool specific = false) {                                                \
-        (group).field.set(v, specific);                                                            \
-    }
-#define SETTING_FORWARD_BOOL_READONLY(group, Name, field)                                          \
-    bool Is##Name() const {                                                                        \
-        return (group).field.get(m_configMode);                                                    \
-    }
-
-    // General settings
-    SETTING_FORWARD(m_general, VolumeSlider, volume_slider)
-    SETTING_FORWARD_BOOL(m_general, Neo, neo_mode)
-    SETTING_FORWARD_BOOL(m_general, DevKit, dev_kit_mode)
-    SETTING_FORWARD(m_general, ExtraDmemInMBytes, extra_dmem_in_mbytes)
-    SETTING_FORWARD(m_general, ExtraFmemInMBytes, extra_fmem_in_mbytes)
-    bool IsShadNetEnabled() const {
-        return m_network.shad_net_enabled.get(m_configMode) &&
-               !m_shadnet_session_disabled.load(std::memory_order_relaxed);
-    }
-    void SetShadNetEnabled(bool v, bool specific = false) {
-        m_network.shad_net_enabled.set(v, specific);
-    }
-    bool IsShadNetEnabledSetting() const {
-        return m_network.shad_net_enabled.get(m_configMode);
-    }
-    void SetShadNetSessionDisabled(bool v) {
-        m_shadnet_session_disabled.store(v, std::memory_order_relaxed);
-    }
-    bool IsShadNetSessionDisabled() const {
-        return m_shadnet_session_disabled.load(std::memory_order_relaxed);
-    }
-    SETTING_FORWARD_BOOL(m_general, TrophyPopupDisabled, trophy_popup_disabled)
-    SETTING_FORWARD(m_general, TrophyNotificationDuration, trophy_notification_duration)
-    SETTING_FORWARD(m_general, TrophyNotificationSide, trophy_notification_side)
-    SETTING_FORWARD_BOOL(m_general, ShowSplash, show_splash)
-    SETTING_FORWARD_BOOL(m_general, ShowFpsCounter, show_fps_counter)
-    SETTING_FORWARD(m_general, ConsoleLanguage, console_language)
-    SETTING_FORWARD(m_general, BigPictureScale, big_picture_scale)
-    SETTING_FORWARD(m_general, BigPictureFolderDepth, big_picture_folder_depth)
-    SETTING_FORWARD_BOOL(m_general, RedZonePatchingEnabled, redzone_patches)
-
-    // Network settings
-    SETTING_FORWARD_BOOL(m_network, ConnectedToNetwork, connected_to_network)
-    SETTING_FORWARD(m_network, ShadNetServer, shadnet_server)
-    SETTING_FORWARD(m_network, ShadNetWebApiServer, shadnet_webapi_server)
-    SETTING_FORWARD_BOOL(m_network, UPnPEnabled, enable_upnp)
-    SETTING_FORWARD(m_network, P2PPort, p2p_port)
-    SETTING_FORWARD_BOOL(m_network, ForcedHttpsDisabled, disable_https)
-
-    // Log settings
-    SETTING_FORWARD_BOOL(m_log, LogAppend, append)
-    SETTING_FORWARD_BOOL(m_log, LogEnable, enable)
-    SETTING_FORWARD(m_log, LogFilter, filter)
-    SETTING_FORWARD(m_log, LogFlushLevel, flush_level)
-    SETTING_FORWARD(m_log, LogMaxSkipDuration, max_skip_duration)
-    SETTING_FORWARD_BOOL(m_log, LogSeparate, separate)
-    SETTING_FORWARD(m_log, LogSizeLimit, size_limit)
-    SETTING_FORWARD_BOOL(m_log, LogSkipDuplicate, skip_duplicate)
-    SETTING_FORWARD_BOOL(m_log, LogSync, sync)
-#ifdef _WIN32
-    SETTING_FORWARD(m_log, LogType, type)
-#endif
-
-    // Debug settings
-    SETTING_FORWARD_BOOL(m_debug, DebugDump, debug_dump)
-    SETTING_FORWARD_BOOL(m_debug, ShaderCollect, shader_collect)
-    SETTING_FORWARD(m_debug, ConfigVersion, config_version)
-
-    // GPU Settings
-    SETTING_FORWARD_BOOL(m_gpu, NullGPU, null_gpu)
-    SETTING_FORWARD_BOOL(m_gpu, DumpShaders, dump_shaders)
-    SETTING_FORWARD_BOOL(m_gpu, CopyGpuBuffers, copy_gpu_buffers)
-    SETTING_FORWARD_BOOL(m_gpu, FullScreen, full_screen)
-    SETTING_FORWARD(m_gpu, FullScreenMode, full_screen_mode)
-    SETTING_FORWARD(m_gpu, PresentMode, present_mode)
-    SETTING_FORWARD(m_gpu, WindowHeight, window_height)
-    SETTING_FORWARD(m_gpu, WindowWidth, window_width)
-    SETTING_FORWARD(m_gpu, InternalScreenHeight, internal_screen_height)
-    SETTING_FORWARD(m_gpu, InternalScreenWidth, internal_screen_width)
-    SETTING_FORWARD_BOOL(m_gpu, HdrAllowed, hdr_allowed)
-    SETTING_FORWARD_BOOL(m_gpu, FsrEnabled, fsr_enabled)
-    SETTING_FORWARD_BOOL(m_gpu, RcasEnabled, rcas_enabled)
-    SETTING_FORWARD(m_gpu, RcasAttenuation, rcas_attenuation)
-    SETTING_FORWARD(m_gpu, ReadbacksMode, readbacks_mode)
-    SETTING_FORWARD_BOOL(m_gpu, ReadbackLinearImagesEnabled, readback_linear_images_enabled)
-    SETTING_FORWARD_BOOL(m_gpu, DirectMemoryAccessEnabled, direct_memory_access_enabled)
-    SETTING_FORWARD_BOOL_READONLY(m_gpu, PatchShaders, patch_shaders)
-    SETTING_FORWARD_BOOL(m_gpu, UserfaultfdTracking, userfaultfd)
-    SETTING_FORWARD_BOOL_READONLY(m_gpu, InlineFetchShader, inline_fetch_shader)
-    SETTING_FORWARD_BOOL_READONLY(m_gpu, FastShaderMath, fast_shader_math)
-
-    u32 GetVblankFrequency() {
-        if (m_gpu.vblank_frequency.value < 30) {
-            return 30;
-        }
-        return m_gpu.vblank_frequency.get();
-    }
-    void SetVblankFrequency(const u32& v, bool is_specific = false) {
-        u32 val = v < 30 ? 30 : v;
-        if (is_specific) {
-            m_gpu.vblank_frequency.game_specific_value = val;
-        } else {
-            m_gpu.vblank_frequency.value = val;
-        }
-    }
-
-    // Input Settings
-    SETTING_FORWARD(m_input, UsbDeviceBackend, usb_device_backend)
-    SETTING_FORWARD_BOOL(m_input, ImeAccessibilityEnabled, ime_accessibility_enabled)
-    SETTING_FORWARD_BOOL(m_input, ImeUrlMailShortPanel, ime_url_mail_short_panel)
-    SETTING_FORWARD_BOOL(m_input, UsingSpecialPad, use_special_pad)
-    SETTING_FORWARD(m_input, SpecialPadClass, special_pad_class)
-    SETTING_FORWARD_BOOL(m_input, CircleEnter, is_circle_enter)
-
-    // Vulkan settings
-    SETTING_FORWARD(m_vulkan, GpuId, gpu_id)
-    SETTING_FORWARD_BOOL(m_vulkan, RenderdocEnabled, renderdoc_enabled)
-    SETTING_FORWARD_BOOL(m_vulkan, VkValidationEnabled, vkvalidation_enabled)
-    SETTING_FORWARD_BOOL(m_vulkan, VkValidationCoreEnabled, vkvalidation_core_enabled)
-    SETTING_FORWARD_BOOL(m_vulkan, VkValidationSyncEnabled, vkvalidation_sync_enabled)
-    SETTING_FORWARD_BOOL(m_vulkan, VkValidationGpuEnabled, vkvalidation_gpu_enabled)
-    SETTING_FORWARD_BOOL(m_vulkan, VkCrashDiagnosticEnabled, vkcrash_diagnostic_enabled)
-    SETTING_FORWARD_BOOL(m_vulkan, VkHostMarkersEnabled, vkhost_markers)
-    SETTING_FORWARD_BOOL(m_vulkan, VkGuestMarkersEnabled, vkguest_markers)
-    SETTING_FORWARD_BOOL(m_vulkan, PipelineCacheEnabled, pipeline_cache_enabled)
-
-#undef SETTING_FORWARD
-#undef SETTING_FORWARD_BOOL
-#undef SETTING_FORWARD_BOOL_READONLY
-};

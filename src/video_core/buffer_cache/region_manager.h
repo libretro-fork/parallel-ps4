@@ -27,7 +27,7 @@ class RegionManager {
 public:
     explicit RegionManager(PageManager* tracker_, VAddr cpu_addr_)
         : tracker{tracker_}, cpu_addr{cpu_addr_},
-          readbacks_mode{EmulatorSettings.GetReadbacksMode()} {
+          readbacks_mode{emu_settings_get_readbacks_mode()} {
         cpu.Fill(true);
         gpu.Fill(false);
     }
@@ -309,7 +309,7 @@ private:
             } else if (state_op == StateOp::Clear) {
                 return PageOp::Track;
             }
-        } else if (type == Type::GPU && readbacks_mode == GpuReadbacksMode::Precise) {
+        } else if (type == Type::GPU && readbacks_mode == EMU_READBACKS_PRECISE) {
             if (state_op == StateOp::Set) {
                 return PageOp::Track;
             } else if (state_op == StateOp::Clear) {

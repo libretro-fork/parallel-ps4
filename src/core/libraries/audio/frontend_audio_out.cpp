@@ -32,7 +32,7 @@ public:
     explicit FrontendPortBackend(const PortOut& port)
         : buffer_frames(port.buffer_frames), num_channels(port.format_info.num_channels),
           is_float(port.format_info.is_float), input(audio_mix_input_open()) {
-        gain.store(EmulatorSettings.GetVolumeSlider() * 0.01f, std::memory_order_relaxed);
+        gain.store(emu_settings_get_volume_slider() * 0.01f, std::memory_order_relaxed);
         if (!input) {
             LOG_ERROR(Lib_AudioOut, "No input left in the core's mix: port type {} is silent",
                       static_cast<int>(port.type));
@@ -89,7 +89,7 @@ public:
                 std::max(max_channel_gain, static_cast<float>(ch_volumes[i]) * INV_VOLUME_0DB);
         }
         game_gain.store(max_channel_gain, std::memory_order_relaxed);
-        gain.store(max_channel_gain * EmulatorSettings.GetVolumeSlider() * 0.01f,
+        gain.store(max_channel_gain * emu_settings_get_volume_slider() * 0.01f,
                    std::memory_order_relaxed);
     }
 
@@ -101,7 +101,7 @@ private:
             return;
         }
         last_volume_check_time = now;
-        gain.store(EmulatorSettings.GetVolumeSlider() * 0.01f *
+        gain.store(emu_settings_get_volume_slider() * 0.01f *
                        game_gain.load(std::memory_order_relaxed),
                    std::memory_order_relaxed);
     }

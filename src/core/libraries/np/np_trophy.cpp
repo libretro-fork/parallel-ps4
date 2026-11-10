@@ -899,11 +899,11 @@ int PS4_SYSV_ABI sceNpTrophyRegisterContext(OrbisNpTrophyContext context,
 
         const auto trophy_base =
             Common::FS::GetUserPath(Common::FS::PathType::TrophyDir) / np_comm_id;
-        ctx.xml_save_file = EmulatorSettings.GetHomeDir() / std::to_string(ctx.user_id) / "trophy" /
-                            (np_comm_id + ".xml");
+        ctx.xml_save_file = Common::FS::PathFromCString(emu_settings_get_home_dir) /
+                            std::to_string(ctx.user_id) / "trophy" / (np_comm_id + ".xml");
         ctx.xml_dir = trophy_base / "Xml";
         ctx.icons_dir = trophy_base / "Icons";
-        ctx.trophy_xml_path = GetTrophyXmlPath(ctx.xml_dir, EmulatorSettings.GetConsoleLanguage());
+        ctx.trophy_xml_path = GetTrophyXmlPath(ctx.xml_dir, emu_settings_get_console_language());
 
         if (!std::filesystem::exists(ctx.trophy_xml_path)) {
             LOG_ERROR(Lib_NpTrophy, "Could not find trophy files.");
@@ -1108,7 +1108,7 @@ int PS4_SYSV_ABI sceNpTrophyUnlockTrophy(OrbisNpTrophyContext context, OrbisNpTr
     if (unlock_platinum) {
         std::thread plat_popup_thread{[=]() {
             std::this_thread::sleep_for(std::chrono::milliseconds(
-                (s32)EmulatorSettings.GetTrophyNotificationDuration() * 1000 + 250));
+                (s32)emu_settings_get_trophy_notification_duration() * 1000 + 250));
             AddTrophyToQueue(platinum_icon_path, platinum_name, "P");
         }};
         plat_popup_thread.detach();

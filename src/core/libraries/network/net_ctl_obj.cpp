@@ -46,7 +46,7 @@ s32 NetCtlInternal::RegisterNpToolkitCallback(OrbisNetCtlCallbackForNpToolkit fu
 
 void NetCtlInternal::CheckCallback() {
     std::scoped_lock lock{m_mutex};
-    const auto event = EmulatorSettings.IsConnectedToNetwork()
+    const auto event = emu_settings_get_connected_to_network()
                            ? ORBIS_NET_CTL_EVENT_TYPE_IPOBTAINED
                            : ORBIS_NET_CTL_EVENT_TYPE_DISCONNECTED;
     for (const auto [func, arg] : callbacks) {
@@ -58,7 +58,7 @@ void NetCtlInternal::CheckCallback() {
 
 void NetCtlInternal::CheckNpToolkitCallback() {
     std::scoped_lock lock{m_mutex};
-    const auto event = EmulatorSettings.IsConnectedToNetwork()
+    const auto event = emu_settings_get_connected_to_network()
                            ? ORBIS_NET_CTL_EVENT_TYPE_IPOBTAINED
                            : ORBIS_NET_CTL_EVENT_TYPE_DISCONNECTED;
     for (const auto [func, arg] : nptool_callbacks) {

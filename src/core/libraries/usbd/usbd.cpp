@@ -457,14 +457,14 @@ int PS4_SYSV_ABI Func_D56B43060720B1E0() {
 }
 
 void RegisterLib(Core::Loader::SymbolsResolver* sym) {
-    switch (EmulatorSettings.GetUsbDeviceBackend()) {
-    case UsbBackendType::SkylandersPortal:
+    switch (emu_settings_get_usb_device_backend()) {
+    case EMU_USB_BACKEND_SKYLANDERS_PORTAL:
         usb_backend = std::make_shared<SkylandersPortalBackend>();
         break;
-    case UsbBackendType::InfinityBase:
+    case EMU_USB_BACKEND_INFINITY_BASE:
         usb_backend = std::make_shared<InfinityBaseBackend>();
         break;
-    case UsbBackendType::DimensionsToypad:
+    case EMU_USB_BACKEND_DIMENSIONS_TOYPAD:
         usb_backend = std::make_shared<DimensionsToypadBackend>();
         break;
     default:

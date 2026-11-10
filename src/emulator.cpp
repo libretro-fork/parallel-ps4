@@ -13,18 +13,16 @@
 #include <hwinfo/hwinfo.h>
 
 #include "common/debug.h"
-#include "common/logging/log.h"
-#include "common/string_util.h"
-#include "common/thread.h"
-#include "core/emulator_settings.h"
-#include "core/ipc/ipc.h"
 #include "common/elf_info.h"
+#include "common/logging/log.h"
 #include "common/memory_patcher.h"
 #include "common/ntapi.h"
 #include "common/path_util.h"
 #include "common/polyfill_thread.h"
 #include "common/scm_rev.h"
 #include "common/singleton.h"
+#include "common/string_util.h"
+#include "common/thread.h"
 #include "core/cpu_patches.h" // Windows static guest red-zone protection
 #include "core/debugger.h"
 #include "core/devtools/widget/module_list.h"
@@ -33,6 +31,7 @@
 #include "core/file_format/psf.h"
 #include "core/file_format/trp.h"
 #include "core/file_sys/fs.h"
+#include "core/ipc/ipc.h"
 #include "core/libraries/kernel/kernel.h"
 #include "core/libraries/libs.h"
 #include "core/libraries/np/np_handler/np_handler.h"
@@ -42,7 +41,7 @@
 #include "core/libraries/usbd/usbstorage.h"
 #include "core/linker.h"
 #include "core/memory.h"
-#include "core/user_settings.h"
+#include "core/user_manager.h"
 #include "emulator.h"
 #include "libretro/libretro_bridge.h"
 #include "video_core/cache_storage.h"
@@ -247,8 +246,12 @@ std::map<s32, std::string> ExtractTrophies(std::string_view npbind_guest,
         }
 
         // Move extracted trophy contents into each user's folder
-        for (User user : UserSettings.GetUserManager().GetValidUsers()) {
-            auto const user_trophy_file = EmulatorSettings.GetHomeDir() /
+        for (size_t user_index = 0; user_index < user_manager_count(); ++user_index) {
+            const struct user& user = *user_manager_at(user_index);
+            if (!user_manager_has_home_dir(&user)) {
+                continue;
+            }
+            auto const user_trophy_file = Common::FS::PathFromCString(emu_settings_get_home_dir) /
                                           std::to_string(user.user_id) / "trophy" /
                                           (np_comm_id + ".xml");
             if (!std::filesystem::exists(user_trophy_file)) {
@@ -429,14 +432,18 @@ void Emulator::Run(std::filesystem::path file, std::vector<std::string> args,
         }
     }
 
-    EmulatorSettings.Load(id);
+    if (id.empty()) {
+        emu_settings_load();
+    } else if (emu_settings_load_game(id.c_str())) {
+        EmulatorState::GetInstance()->SetGameSpecifigConfigUsed(true);
+    }
     // The frontend's core options, on top of what the config files say.
     Libretro::ApplyCoreOptions();
     // Before the game runs: a trophy unlocked in play decodes nothing.
     Libraries::Np::NpTrophy::PreloadTrophySound();
     // Switch to configured log
-    Common::Log::Switch((!id.empty() && EmulatorSettings.IsLogSeparate()) ? id + ".log"
-                                                                          : "shad_log.txt",
+    Common::Log::Switch((!id.empty() && emu_settings_get_log_separate()) ? id + ".log"
+                                                                         : "shad_log.txt",
                         append_log);
 
     auto guest_eboot_path = "/app0/" + eboot_name.generic_string();
@@ -471,43 +478,42 @@ void Emulator::Run(std::filesystem::path file, std::vector<std::string> args,
     LOG_INFO(Config, "Game-specific config used: {}",
              EmulatorState::GetInstance()->IsGameSpecifigConfigUsed());
 
-    LOG_INFO(Config, "General isNeo: {}", EmulatorSettings.IsNeo());
-    LOG_INFO(Config, "General isDevKit: {}", EmulatorSettings.IsDevKit());
-    LOG_INFO(Config, "General isConnectedToNetwork: {}", EmulatorSettings.IsConnectedToNetwork());
-    LOG_INFO(Config, "General isShadNetEnabled: {}", EmulatorSettings.IsShadNetEnabled());
+    LOG_INFO(Config, "General isNeo: {}", emu_settings_get_neo_mode());
+    LOG_INFO(Config, "General isDevKit: {}", emu_settings_get_dev_kit_mode());
+    LOG_INFO(Config, "General isConnectedToNetwork: {}", emu_settings_get_connected_to_network());
+    LOG_INFO(Config, "General isShadNetEnabled: {}", emu_settings_is_shadnet_enabled());
 #ifdef _WIN32
-    LOG_INFO(Config, "General isRedZonePatchingEnabled: {}",
-             EmulatorSettings.IsRedZonePatchingEnabled());
+    LOG_INFO(Config, "General isRedZonePatchingEnabled: {}", emu_settings_get_redzone_patches());
 #endif
-    LOG_INFO(Config, "General p2pPort: {}", EmulatorSettings.GetP2PPort());
-    LOG_INFO(Config, "Log sync: {}", EmulatorSettings.IsLogSync());
-    LOG_INFO(Config, "Log skipDuplicate: {}", EmulatorSettings.IsLogSkipDuplicate());
+    LOG_INFO(Config, "General p2pPort: {}", emu_settings_get_p2p_port());
+    LOG_INFO(Config, "Log sync: {}", emu_settings_get_log_sync());
+    LOG_INFO(Config, "Log skipDuplicate: {}", emu_settings_get_log_skip_duplicate());
 #ifdef _WIN32
-    LOG_INFO(Config, "Log type: {}", EmulatorSettings.GetLogType());
+    LOG_INFO(Config, "Log type: {}", emu_settings_get_log_type());
 #endif
-    LOG_INFO(Config, "GPU isNullGpu: {}", EmulatorSettings.IsNullGPU());
-    LOG_INFO(Config, "GPU readbacksMode: {}", EmulatorSettings.GetReadbacksMode());
+    LOG_INFO(Config, "GPU isNullGpu: {}", emu_settings_get_null_gpu());
+    LOG_INFO(Config, "GPU readbacksMode: {}", emu_settings_get_readbacks_mode());
     LOG_INFO(Config, "GPU readbackLinearImages: {}",
-             EmulatorSettings.IsReadbackLinearImagesEnabled());
-    LOG_INFO(Config, "GPU directMemoryAccess: {}", EmulatorSettings.IsDirectMemoryAccessEnabled());
-    LOG_INFO(Config, "GPU shouldDumpShaders: {}", EmulatorSettings.IsDumpShaders());
-    LOG_INFO(Config, "GPU vblankFrequency: {}", EmulatorSettings.GetVblankFrequency());
-    LOG_INFO(Config, "GPU shouldCopyGPUBuffers: {}", EmulatorSettings.IsCopyGpuBuffers());
+             emu_settings_get_readback_linear_images_enabled());
+    LOG_INFO(Config, "GPU directMemoryAccess: {}", emu_settings_get_direct_memory_access_enabled());
+    LOG_INFO(Config, "GPU shouldDumpShaders: {}", emu_settings_get_dump_shaders());
+    LOG_INFO(Config, "GPU vblankFrequency: {}", emu_settings_get_vblank_frequency());
+    LOG_INFO(Config, "GPU shouldCopyGPUBuffers: {}", emu_settings_get_copy_gpu_buffers());
 #ifdef __linux__
-    LOG_INFO(Config, "GPU userfaultfdTracking: {}", EmulatorSettings.IsUserfaultfdTracking());
+    LOG_INFO(Config, "GPU userfaultfdTracking: {}", emu_settings_get_userfaultfd());
 #endif
-    LOG_INFO(Config, "GPU inlineFetchShader: {}", EmulatorSettings.IsInlineFetchShader());
-    LOG_INFO(Config, "GPU fastShaderMath: {}", EmulatorSettings.IsFastShaderMath());
-    LOG_INFO(Config, "Vulkan gpuId: {}", EmulatorSettings.GetGpuId());
-    LOG_INFO(Config, "Vulkan vkValidation: {}", EmulatorSettings.IsVkValidationEnabled());
-    LOG_INFO(Config, "Vulkan vkValidationCore: {}", EmulatorSettings.IsVkValidationCoreEnabled());
-    LOG_INFO(Config, "Vulkan vkValidationSync: {}", EmulatorSettings.IsVkValidationSyncEnabled());
-    LOG_INFO(Config, "Vulkan vkValidationGpu: {}", EmulatorSettings.IsVkValidationGpuEnabled());
-    LOG_INFO(Config, "Vulkan crashDiagnostics: {}", EmulatorSettings.IsVkCrashDiagnosticEnabled());
-    LOG_INFO(Config, "Vulkan hostMarkers: {}", EmulatorSettings.IsVkHostMarkersEnabled());
-    LOG_INFO(Config, "Vulkan guestMarkers: {}", EmulatorSettings.IsVkGuestMarkersEnabled());
-    LOG_INFO(Config, "Vulkan rdocEnable: {}", EmulatorSettings.IsRenderdocEnabled());
-    LOG_INFO(Config, "Vulkan PipelineCacheEnabled: {}", EmulatorSettings.IsPipelineCacheEnabled());
+    LOG_INFO(Config, "GPU inlineFetchShader: {}", emu_settings_get_inline_fetch_shader());
+    LOG_INFO(Config, "GPU fastShaderMath: {}", emu_settings_get_fast_shader_math());
+    LOG_INFO(Config, "Vulkan gpuId: {}", emu_settings_get_gpu_id());
+    LOG_INFO(Config, "Vulkan vkValidation: {}", emu_settings_get_vkvalidation_enabled());
+    LOG_INFO(Config, "Vulkan vkValidationCore: {}", emu_settings_get_vkvalidation_core_enabled());
+    LOG_INFO(Config, "Vulkan vkValidationSync: {}", emu_settings_get_vkvalidation_sync_enabled());
+    LOG_INFO(Config, "Vulkan vkValidationGpu: {}", emu_settings_get_vkvalidation_gpu_enabled());
+    LOG_INFO(Config, "Vulkan crashDiagnostics: {}", emu_settings_get_vkcrash_diagnostic_enabled());
+    LOG_INFO(Config, "Vulkan hostMarkers: {}", emu_settings_get_vkhost_markers());
+    LOG_INFO(Config, "Vulkan guestMarkers: {}", emu_settings_get_vkguest_markers());
+    LOG_INFO(Config, "Vulkan rdocEnable: {}", emu_settings_get_renderdoc_enabled());
+    LOG_INFO(Config, "Vulkan PipelineCacheEnabled: {}", emu_settings_get_pipeline_cache_enabled());
 
     hwinfo::Memory ram;
     hwinfo::OS os;
@@ -548,7 +554,7 @@ void Emulator::Run(std::filesystem::path file, std::vector<std::string> args,
 
 #ifdef _WIN32
     // Enable red-zone patching if the setting is enabled
-    if (EmulatorSettings.IsRedZonePatchingEnabled()) {
+    if (emu_settings_get_redzone_patches()) {
         WindowsGuestRedZoneProtection::SetActiveMode(
             WindowsGuestRedZoneProtectionMode::StaticPatching);
     }
@@ -574,8 +580,8 @@ void Emulator::Run(std::filesystem::path file, std::vector<std::string> args,
     game_info.trophy_index_map =
         ExtractTrophies("/app0/sce_sys/npbind.dat", "/app0/sce_sys/trophy");
 
-    window = std::make_unique<Frontend::Window>(EmulatorSettings.GetWindowWidth(),
-                                                EmulatorSettings.GetWindowHeight());
+    window = std::make_unique<Frontend::Window>(emu_settings_get_window_width(),
+                                                emu_settings_get_window_height());
 
     g_window = window.get();
 
@@ -606,7 +612,7 @@ void Emulator::Run(std::filesystem::path file, std::vector<std::string> args,
     VideoCore::SetOutputDir(mount_captures_dir, id);
 
     // Mount system fonts
-    const auto& fonts_dir = EmulatorSettings.GetFontsDir();
+    const auto& fonts_dir = Common::FS::PathFromCString(emu_settings_get_font_dir);
     if (!std::filesystem::exists(fonts_dir)) {
         std::filesystem::create_directory(fonts_dir);
     }

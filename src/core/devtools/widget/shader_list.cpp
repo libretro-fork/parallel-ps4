@@ -238,7 +238,7 @@ void ShaderList::Draw() {
         return;
     }
 
-    if (!EmulatorSettings.IsShaderCollect()) {
+    if (!emu_settings_get_shader_collect()) {
         DrawCenteredText("Enable 'shader_collect' in config to see shaders");
         End();
         return;

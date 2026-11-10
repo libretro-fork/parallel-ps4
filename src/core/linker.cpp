@@ -492,7 +492,7 @@ Linker::GuestFunctionResult Linker::RunGuestMain(EntryParams* params) {
 #endif
 
 void Linker::Execute(const std::vector<std::string>& args) {
-    if (EmulatorSettings.IsDebugDump()) {
+    if (emu_settings_get_debug_dump()) {
         DebugDump();
     }
 
@@ -502,7 +502,7 @@ void Linker::Execute(const std::vector<std::string>& args) {
 
     // Map libSceLibcInternal
     const auto& libc_internal_path =
-        EmulatorSettings.GetSysModulesDir() / "libSceLibcInternal.sprx";
+        Common::FS::PathFromCString(emu_settings_get_sys_modules_dir) / "libSceLibcInternal.sprx";
     bool has_libcinternal = false;
     if (std::filesystem::exists(libc_internal_path)) {
         LoadModule(libc_internal_path);

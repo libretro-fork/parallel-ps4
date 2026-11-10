@@ -20,7 +20,7 @@ public:
 
 public:
     explicit MemoryTracker(PageManager& tracker_)
-        : tracker{&tracker_}, readbacks_mode{EmulatorSettings.GetReadbacksMode()} {}
+        : tracker{&tracker_}, readbacks_mode{emu_settings_get_readbacks_mode()} {}
     ~MemoryTracker() = default;
 
     /// Returns true if a region has been modified from the GPU
@@ -64,7 +64,7 @@ public:
 
     /// Removes all protection from a page and ensures GPU data has been flushed if requested
     void InvalidateRegion(VAddr cpu_addr, u64 size, auto&& on_flush) noexcept {
-        if (readbacks_mode == GpuReadbacksMode::Disabled) {
+        if (readbacks_mode == EMU_READBACKS_DISABLED) {
             return MarkRegionAsCpuModified(cpu_addr, size);
         }
         bool should_flush = false;

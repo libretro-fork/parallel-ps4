@@ -5,6 +5,8 @@
 
 #include <filesystem>
 #include <optional>
+#include <string>
+#include <string_view>
 #include <vector>
 
 namespace Common::FS {
@@ -77,6 +79,17 @@ constexpr auto LOG_FILE = "shad_log.txt";
  * @returns UTF-8 encoded std::string.
  */
 [[nodiscard]] std::string PathToUTF8String(const std::filesystem::path& path);
+
+/**
+ * Converts a UTF-8 encoded string to a filesystem path.
+ */
+[[nodiscard]] std::filesystem::path PathFromUTF8String(std::string_view utf8);
+
+/**
+ * Gets a path from a C function that writes a UTF-8 path into a buffer and returns its
+ * length, like the directory getters of core/emulator_settings.h. Empty when it doesn't fit.
+ */
+[[nodiscard]] std::filesystem::path PathFromCString(size_t (*get)(char* s, size_t len));
 
 /**
  * Gets the filesystem path associated with the PathType enum.

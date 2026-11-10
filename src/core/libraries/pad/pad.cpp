@@ -7,7 +7,7 @@
 #include "core/emulator_settings.h"
 #include "core/libraries/libs.h"
 #include "core/libraries/pad/pad_errors.h"
-#include "core/user_settings.h"
+#include "core/user_manager.h"
 #include "imgui/renderer/imgui_core.h"
 #include "input/controller.h"
 #include "pad.h"
@@ -70,8 +70,8 @@ int PS4_SYSV_ABI scePadDeviceClassGetExtendedInformation(
     }
     LOG_ERROR(Lib_Pad, "(STUBBED) called");
     std::memset(pExtInfo, 0, sizeof(OrbisPadDeviceClassExtendedInformation));
-    if (EmulatorSettings.IsUsingSpecialPad()) {
-        pExtInfo->deviceClass = (OrbisPadDeviceClass)EmulatorSettings.GetSpecialPadClass();
+    if (emu_settings_get_use_special_pad()) {
+        pExtInfo->deviceClass = (OrbisPadDeviceClass)emu_settings_get_special_pad_class();
     }
     return ORBIS_OK;
 }
@@ -151,8 +151,8 @@ int PS4_SYSV_ABI scePadGetControllerInformation(s32 handle, OrbisPadControllerIn
     pInfo->deviceClass = OrbisPadDeviceClass::Standard;
     pInfo->connected = state.connected;
     if (state.connected) {
-        pInfo->deviceClass = EmulatorSettings.IsUsingSpecialPad()
-                                 ? (OrbisPadDeviceClass)EmulatorSettings.GetSpecialPadClass()
+        pInfo->deviceClass = emu_settings_get_use_special_pad()
+                                 ? (OrbisPadDeviceClass)emu_settings_get_special_pad_class()
                                  : OrbisPadDeviceClass::Standard;
     }
     LOG_DEBUG(Lib_Pad, "c: {} cc: {}, ct: {}, dc: {}", pInfo->connected, pInfo->connectedCount,
@@ -330,7 +330,7 @@ int PS4_SYSV_ABI scePadOpen(Libraries::UserService::OrbisUserServiceUserId userI
     if (type == ORBIS_PAD_PORT_TYPE_REMOTE_CONTROL) {
         return ORBIS_PAD_ERROR_INVALID_ARG;
     }
-    auto u = UserManagement.GetUserByID(userId);
+    auto u = user_manager_get_by_id(userId);
     if (!u) {
         return ORBIS_DEVICE_SERVICE_ERROR_USER_NOT_LOGIN;
     }
@@ -338,8 +338,8 @@ int PS4_SYSV_ABI scePadOpen(Libraries::UserService::OrbisUserServiceUserId userI
     pad_handle_map[{userId, type, index}] = new_handle;
 
     handle_to_controller_map[new_handle] =
-        controllers[type == (EmulatorSettings.IsUsingSpecialPad() ? 2 : 0)
-                        ? UserManagement.GetUserByID(userId)->player_index - 1
+        controllers[type == (emu_settings_get_use_special_pad() ? 2 : 0)
+                        ? user_manager_get_by_id(userId)->player_index - 1
                         : 4];
     LOG_INFO(Lib_Pad,
              "called user_id = {}, type = {}, index = {}, player index = {}, out handle = {}",
@@ -484,7 +484,7 @@ int PS4_SYSV_ABI scePadResetLightBar(s32 handle) {
         return ORBIS_PAD_ERROR_INVALID_HANDLE;
     }
     auto& controller = *it->second;
-    auto u = UserManagement.GetUserByPlayerIndex(controller.user_id);
+    auto u = user_manager_get_by_player_index(controller.user_id);
     s32 colour_index = u ? u->user_color - 1 : 0;
     Input::Colour colour{255, 0, 0};
     if (colour_index >= 0 && colour_index <= 3) {

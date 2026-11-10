@@ -37,8 +37,8 @@
 #include "core/file_sys/fs.h"
 #include "core/ipc/ipc.h"
 #include "core/libraries/pad/pad.h"
+#include "core/libraries/system/userservice.h"
 #include "core/user_manager.h"
-#include "core/user_settings.h"
 #include "emulator.h"
 #include "input/controller.h"
 #include "libretro.h"
@@ -109,21 +109,24 @@ constexpr const char* trophy_sides[] = {"left", "right", "top", "bottom"};
 // the FPS counter from the overlay's, which upstream's IPC changes the same way.
 void ApplyLiveOptions() {
     const auto& live = shared->live;
-    EmulatorSettings.SetVolumeSlider(live.volume.load());
-    EmulatorSettings.SetFsrEnabled(live.fsr.load() != 0);
-    EmulatorSettings.SetRcasEnabled(live.rcas.load() != 0);
-    EmulatorSettings.SetRcasAttenuation(live.rcas_attenuation.load());
+    emu_settings_set_volume_slider(live.volume.load(), false);
+    emu_settings_set_fsr_enabled(live.fsr.load() != 0, false);
+    emu_settings_set_rcas_enabled(live.rcas.load() != 0, false);
+    emu_settings_set_rcas_attenuation(live.rcas_attenuation.load(), false);
     if (presenter) {
         auto& fsr = presenter->GetFsrSettingsRef();
         fsr.enable = live.fsr.load() != 0;
         fsr.use_rcas = live.rcas.load() != 0;
         fsr.rcas_attenuation = static_cast<float>(live.rcas_attenuation.load() / 1000.0f);
     }
-    EmulatorSettings.SetShowFpsCounter(live.show_fps.load() != 0);
+    emu_settings_set_show_fps_counter(live.show_fps.load() != 0, false);
     Overlay::SetSimpleFps(live.show_fps.load() != 0);
-    EmulatorSettings.SetTrophyPopupDisabled(live.trophy_popup.load() == 0);
-    EmulatorSettings.SetTrophyNotificationSide(trophy_sides[std::min(live.trophy_side.load(), 3u)]);
-    EmulatorSettings.SetTrophyNotificationDuration(static_cast<double>(live.trophy_seconds.load()));
+    emu_settings_set_trophy_popup_disabled(live.trophy_popup.load() == 0,
+                                           false);
+    emu_settings_set_trophy_notification_side(
+        trophy_sides[std::min(live.trophy_side.load(), 3u)], false);
+    emu_settings_set_trophy_notification_duration(
+        static_cast<double>(live.trophy_seconds.load()), false);
 }
 
 // Ends the process on the core's word, and applies the options changed meanwhile
@@ -217,14 +220,21 @@ void PumpInput() {
         if (!others_connected) {
             others_connected = true;
             for (std::uint32_t pad = 1; pad < pads; ++pad) {
-                auto* user = UserManagement.GetUserByPlayerIndex(static_cast<s32>(pad) + 1);
-                if (!user) {
-                    LOG_WARNING(Input, "No user for player {}: controller {} stays disconnected",
-                                pad + 1, pad + 1);
-                    continue;
+              auto *user =
+                  user_manager_get_by_player_index(static_cast<s32>(pad) + 1);
+              if (!user) {
+                LOG_WARNING(
+                    Input,
+                    "No user for player {}: controller {} stays disconnected",
+                    pad + 1, pad + 1);
+                continue;
                 }
                 controllers[pad]->user_id = user->user_id;
-                UserManagement.LoginUser(user, static_cast<s32>(pad) + 1);
+                if (user_manager_login(user, static_cast<s32>(pad) + 1)) {
+                  Libraries::UserService::AddUserServiceEvent(
+                      {Libraries::UserService::OrbisUserServiceEventType::Login,
+                       user->user_id});
+                }
                 controllers[pad]->ConnectController();
                 LOG_INFO(Input, "Controller {} connected from the frontend's port {}", pad + 1,
                          pad + 1);
@@ -295,8 +305,8 @@ int RunEmulator(const char* argument) {
     Common::Log::Setup("shadps4.log");
     IPC::Instance().Init();
     key_manager_load();
-    EmulatorSettings.Load();
-    UserSettings.Load();
+    emu_settings_load();
+    user_manager_load();
 
     auto* emulator = Common::Singleton<Core::Emulator>::Instance();
     emulator->executableName = "shadps4_libretro";
@@ -499,33 +509,37 @@ void ApplyCoreOptions() {
         return;
     }
     const SharedOptions& options = shared->options;
-    EmulatorSettings.SetNeo(options.neo_mode != 0);
-    EmulatorSettings.SetCircleEnter(options.circle_enter != 0);
-    EmulatorSettings.SetConnectedToNetwork(options.network != 0);
-    EmulatorSettings.SetShowSplash(options.show_splash != 0);
-    EmulatorSettings.SetWindowWidth(options.width);
-    EmulatorSettings.SetWindowHeight(options.height);
+    emu_settings_set_neo_mode(options.neo_mode != 0, false);
+    emu_settings_set_is_circle_enter(options.circle_enter != 0, false);
+    emu_settings_set_connected_to_network(options.network != 0, false);
+    emu_settings_set_show_splash(options.show_splash != 0, false);
+    emu_settings_set_window_width(options.width, false);
+    emu_settings_set_window_height(options.height, false);
     VideoCore::render_width.store(options.render_width);
-    EmulatorSettings.SetFsrEnabled(options.fsr != 0);
-    EmulatorSettings.SetRcasEnabled(options.rcas != 0);
-    EmulatorSettings.SetVblankFrequency(options.vblank_frequency);
-    EmulatorSettings.SetReadbacksMode(options.readbacks);
-    EmulatorSettings.SetDirectMemoryAccessEnabled(options.direct_memory_access != 0);
-    EmulatorSettings.SetShowFpsCounter(options.show_fps != 0);
-    EmulatorSettings.SetVolumeSlider(options.volume);
-    EmulatorSettings.SetConsoleLanguage(options.console_language);
-    EmulatorSettings.SetDevKit(options.dev_kit != 0);
-    EmulatorSettings.SetExtraDmemInMBytes(options.extra_dmem_mbytes);
-    EmulatorSettings.SetRcasAttenuation(options.rcas_attenuation);
-    EmulatorSettings.SetReadbackLinearImagesEnabled(options.readback_linear_images != 0);
-    EmulatorSettings.SetPipelineCacheEnabled(options.shader_cache != 0);
-    EmulatorSettings.SetCopyGpuBuffers(options.copy_gpu_buffers != 0);
-    EmulatorSettings.SetTrophyPopupDisabled(options.trophy_popup == 0);
-    EmulatorSettings.SetTrophyNotificationSide(trophy_sides[std::min(options.trophy_side, 3u)]);
-    EmulatorSettings.SetTrophyNotificationDuration(static_cast<double>(options.trophy_seconds));
-    EmulatorSettings.SetLogEnable(options.log_enable != 0);
-    EmulatorSettings.SetLogSeparate(options.log_separate != 0);
-    EmulatorSettings.SetLogSync(options.log_sync != 0);
+    emu_settings_set_fsr_enabled(options.fsr != 0, false);
+    emu_settings_set_rcas_enabled(options.rcas != 0, false);
+    emu_settings_set_vblank_frequency(options.vblank_frequency, false);
+    emu_settings_set_readbacks_mode(options.readbacks, false);
+    emu_settings_set_direct_memory_access_enabled(
+        options.direct_memory_access != 0, false);
+    emu_settings_set_show_fps_counter(options.show_fps != 0, false);
+    emu_settings_set_volume_slider(options.volume, false);
+    emu_settings_set_console_language(options.console_language, false);
+    emu_settings_set_dev_kit_mode(options.dev_kit != 0, false);
+    emu_settings_set_extra_dmem_in_mbytes(options.extra_dmem_mbytes, false);
+    emu_settings_set_rcas_attenuation(options.rcas_attenuation, false);
+    emu_settings_set_readback_linear_images_enabled(
+        options.readback_linear_images != 0, false);
+    emu_settings_set_pipeline_cache_enabled(options.shader_cache != 0, false);
+    emu_settings_set_copy_gpu_buffers(options.copy_gpu_buffers != 0, false);
+    emu_settings_set_trophy_popup_disabled(options.trophy_popup == 0, false);
+    emu_settings_set_trophy_notification_side(
+        trophy_sides[std::min(options.trophy_side, 3u)], false);
+    emu_settings_set_trophy_notification_duration(
+        static_cast<double>(options.trophy_seconds), false);
+    emu_settings_set_log_enable(options.log_enable != 0, false);
+    emu_settings_set_log_separate(options.log_separate != 0, false);
+    emu_settings_set_log_sync(options.log_sync != 0, false);
 }
 
 void SetRumble(std::uint32_t pad, std::uint8_t small_motor, std::uint8_t large_motor) {

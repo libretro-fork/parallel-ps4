@@ -30,6 +30,7 @@
 #include FT_FREETYPE_H
 #include FT_TRUETYPE_TABLES_H
 #include "common/logging/log.h"
+#include "common/path_util.h"
 #include "core/emulator_settings.h"
 #include "core/file_sys/fs.h"
 #include "core/libraries/error_codes.h"
@@ -4126,7 +4127,8 @@ s32 PS4_SYSV_ABI sceFontOpenFontSet(OrbisFontLib library, u32 fontSetType, u32 o
                 using_builtin_primary = true;
             } else {
                 LOG_ERROR(Lib_Font, "FONT_OPEN_FAILED path='{}' fontsPath='{}'",
-                          primary_path.string(), EmulatorSettings.GetFontsDir().string());
+                          primary_path.string(),
+                          Common::FS::PathFromCString(emu_settings_get_font_dir).string());
                 return release_library_and_clear_out(ORBIS_FONT_ERROR_FONT_OPEN_FAILED);
             }
         }

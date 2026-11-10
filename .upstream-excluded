@@ -59,3 +59,7 @@ src/common/stb.cpp
 src/common/stb.h
 cmake/Findstb.cmake
 src/common/key_manager.cpp
+src/core/emulator_settings.cpp
+src/core/user_manager.cpp
+src/core/user_settings.cpp
+src/core/user_settings.h

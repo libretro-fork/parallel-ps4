@@ -23,7 +23,7 @@ bool NpHandler::SendSessionInvitation(s32 user_id, const std::string& session_id
         LOG_ERROR(NpHandler, "empty session_id or recipient list");
         return false;
     }
-    const std::string base_url = EmulatorSettings.GetShadNetWebApiServer();
+    const std::string base_url = emu_settings_get_shadnet_webapi_server();
     if (base_url.empty()) {
         LOG_ERROR(NpHandler, "WebAPI server address is empty");
         return false;

@@ -16,7 +16,7 @@
 #include "core/libraries/np/np_manager.h"
 #include "core/libraries/np/np_matching2/np_matching2_internal.h"
 #include "core/libraries/np/np_matching2/np_matching2_mm.h"
-#include "core/user_settings.h"
+#include "core/user_manager.h"
 #include "imgui/shadnet_notifications_layer.h"
 #include "shadnet.pb.h"
 #include "shadnet/server_probe.h"
@@ -68,7 +68,7 @@ void NpHandler::ResetMatching2Caches() {
 }
 
 std::pair<std::string, u16> NpHandler::ParseServerAddress() const {
-    const std::string server_str = EmulatorSettings.GetShadNetServer();
+    const std::string server_str = emu_settings_get_shadnet_server();
     u16 port = 31313; // default port
     if (server_str.empty()) {
         LOG_ERROR(NpHandler,
@@ -93,7 +93,7 @@ std::pair<std::string, u16> NpHandler::ParseServerAddress() const {
 }
 
 bool NpHandler::ConnectUserById(s32 user_id) {
-    if (!EmulatorSettings.IsShadNetEnabled())
+    if (!emu_settings_is_shadnet_enabled())
         return false;
 
     {
@@ -102,7 +102,7 @@ bool NpHandler::ConnectUserById(s32 user_id) {
             return false; // already connected
     }
 
-    const User* u = UserManagement.GetUserByID(user_id);
+    const struct user* u = user_manager_get_by_id(user_id);
     if (!u)
         return false;
     if (!u->shadnet_enabled) {
@@ -110,7 +110,7 @@ bool NpHandler::ConnectUserById(s32 user_id) {
                   u->user_name);
         return false;
     }
-    if (u->shadnet_npid.empty() || u->shadnet_password.empty()) {
+    if (u->shadnet_npid[0] == '\0' || u->shadnet_password[0] == '\0') {
         LOG_WARNING(NpHandler, "user_id={} ('{}') shadNet enabled but credentials missing,skipping",
                     u->user_id, u->user_name);
         return false;
@@ -134,7 +134,7 @@ void NpHandler::Initialize() {
         return;
     }
 
-    if (!EmulatorSettings.IsShadNetEnabled()) {
+    if (!emu_settings_is_shadnet_enabled()) {
         LOG_INFO(NpHandler, "shadNet disabled globally we are in offline mode");
         return;
     }
@@ -143,7 +143,7 @@ void NpHandler::Initialize() {
         const auto [host, port] = ParseServerAddress();
         const ShadNet::ProbeInfo probe = ShadNet::ProbeServer(host, port);
         if (probe.result != ShadNet::ProbeResult::Ok) {
-            EmulatorSettings.SetShadNetSessionDisabled(true);
+            emu_settings_set_shadnet_session_disabled(true);
             switch (probe.result) {
             case ShadNet::ProbeResult::VersionMismatch:
                 LOG_WARNING(NpHandler,
@@ -184,10 +184,9 @@ void NpHandler::Initialize() {
         }
     }
 
-    const auto logged_in = UserManagement.GetLoggedInUsers(); // get all login users
     int connected_count = 0;
     for (int i = 0; i < Libraries::UserService::ORBIS_USER_SERVICE_MAX_LOGIN_USERS; ++i) {
-        const User* u = logged_in[i];
+        const struct user* u = user_manager_get_logged_in(static_cast<unsigned>(i));
         if (!u)
             continue;
         if (ConnectUserById(u->user_id))
@@ -282,7 +281,7 @@ bool NpHandler::ConnectUser(s32 user_id, const std::string& host, u16 port, cons
         if (st != ShadNet::ShadNetState::FailureProtocol)
             return;
         const u32 server_ver = client->GetServerProtocolVersion();
-        EmulatorSettings.SetShadNetSessionDisabled(true);
+        emu_settings_set_shadnet_session_disabled(true);
         if (server_ver != 0) {
             LOG_ERROR(NpHandler,
                       "shadNet protocol version mismatch (server v{}, emulator v{}); disabling "
@@ -326,7 +325,7 @@ bool NpHandler::ConnectUser(s32 user_id, const std::string& host, u16 port, cons
              client->GetUserId());
 
     Net::UPnPClient::Instance().SetP2PFeaturesEnabled(client->IsMatching2Enabled());
-    if (client->IsMatching2Enabled() && EmulatorSettings.IsUPnPEnabled()) {
+    if (client->IsMatching2Enabled() && emu_settings_get_enable_upnp()) {
         Net::UPnPClient::Instance().Start();
     }
 
@@ -480,7 +479,7 @@ void NpHandler::WorkerThread() {
 }
 
 void NpHandler::MarkForReconnect(s32 user_id) {
-    if (!EmulatorSettings.IsShadNetEnabled())
+    if (!emu_settings_is_shadnet_enabled())
         return; // offline mode: nothing to reconnect to
     constexpr auto kInitialBackoff = std::chrono::milliseconds(2000);
     std::lock_guard lock(m_mutex_clients);
@@ -505,7 +504,7 @@ void NpHandler::TryReconnect() {
     for (s32 uid : due) {
         if (!m_worker_running)
             return;
-        if (!EmulatorSettings.IsShadNetEnabled()) {
+        if (!emu_settings_is_shadnet_enabled()) {
             std::lock_guard lock(m_mutex_clients);
             m_reconnect.erase(uid);
             continue;
@@ -774,7 +773,7 @@ void NpHandler::OnLookupReply(s32 user_id, ShadNet::CommandType /*cmd*/, u64 pkt
 }
 
 void NpHandler::OnClientRejected(s32 user_id, const ShadNet::NotifyClientRejected& n) {
-    EmulatorSettings.SetShadNetSessionDisabled(true);
+    emu_settings_set_shadnet_session_disabled(true);
     {
         std::lock_guard lock(m_mutex_clients);
         m_reconnect.erase(user_id);

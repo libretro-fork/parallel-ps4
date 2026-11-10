@@ -5,7 +5,6 @@
 
 #include "common/logging/log.h"
 
-#include <core/user_settings.h>
 #include <queue>
 #include "common/singleton.h"
 #include "core/emulator_settings.h"
@@ -15,6 +14,7 @@
 #include "core/libraries/system/userservice.h"
 #include "core/libraries/system/userservice_error.h"
 #include "core/tls.h"
+#include "core/user_manager.h"
 #include "input/controller.h"
 
 namespace Libraries::UserService {
@@ -516,7 +516,7 @@ s32 PS4_SYSV_ABI sceUserServiceGetInitialUser(int* user_id) {
         LOG_ERROR(Lib_UserService, "user_id is null");
         return ORBIS_USER_SERVICE_ERROR_INVALID_ARGUMENT;
     }
-    *user_id = UserManagement.GetDefaultUser().user_id;
+    *user_id = user_manager_get_default_user()->user_id;
     return ORBIS_OK;
 }
 
@@ -596,16 +596,12 @@ s32 PS4_SYSV_ABI sceUserServiceGetLoginUserIdList(OrbisUserServiceLoginUserIdLis
         userIdList->user_id[i] = ORBIS_USER_SERVICE_USER_ID_INVALID;
     }
 
-    auto& user_manager = UserManagement;
-
-    auto logged_in_users = user_manager.GetLoggedInUsers();
-
     for (int i = 0; i < ORBIS_USER_SERVICE_MAX_LOGIN_USERS; i++) {
-        s32 id =
-            logged_in_users[i] ? logged_in_users[i]->user_id : ORBIS_USER_SERVICE_USER_ID_INVALID;
+        const struct user* u = user_manager_get_logged_in(static_cast<unsigned>(i));
+        s32 id = u ? u->user_id : ORBIS_USER_SERVICE_USER_ID_INVALID;
         userIdList->user_id[i] = id;
         LOG_DEBUG(Lib_UserService, "Slot {}: User ID {} (port {})", i, id,
-                  logged_in_users[i] ? logged_in_users[i]->player_index : -1);
+                  u ? u->player_index : -1);
     }
     return ORBIS_OK;
 }
@@ -1076,7 +1072,7 @@ s32 PS4_SYSV_ABI sceUserServiceGetUserColor(int user_id, OrbisUserServiceUserCol
         LOG_ERROR(Lib_UserService, "color is null");
         return ORBIS_USER_SERVICE_ERROR_INVALID_ARGUMENT;
     }
-    *color = (OrbisUserServiceUserColor)UserManagement.GetUserByID(user_id)->user_color;
+    *color = (OrbisUserServiceUserColor)user_manager_get_by_id(user_id)->user_color;
     return ORBIS_OK;
 }
 
@@ -1107,7 +1103,7 @@ s32 PS4_SYSV_ABI sceUserServiceGetUserName(int user_id, char* user_name, std::si
     }
 
     std::string name = "shadPS4";
-    auto const* u = UserManagement.GetUserByID(user_id);
+    auto const* u = user_manager_get_by_id(user_id);
     if (u != nullptr) {
         name = u->user_name;
     } else {
@@ -2216,7 +2212,7 @@ int PS4_SYSV_ABI Func_D2B814603E7B4477() {
 }
 
 void RegisterLib(Core::Loader::SymbolsResolver* sym) {
-    g_shadnet_enabled = EmulatorSettings.IsShadNetEnabled();
+    g_shadnet_enabled = emu_settings_is_shadnet_enabled();
     LIB_FUNCTION("Psl9mfs3duM", "libSceUserServiceForShellCore", 1, "libSceUserService",
                  sceUserServiceInitializeForShellCore);
     LIB_FUNCTION("CydP+QtA0KI", "libSceUserServiceForShellCore", 1, "libSceUserService",

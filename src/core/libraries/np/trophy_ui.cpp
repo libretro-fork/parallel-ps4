@@ -16,6 +16,7 @@
 
 #include "common/audio_file.h"
 #include "common/logging/formatter.h"
+#include "common/logging/log.h"
 #include "common/path_util.h"
 #include "core/emulator_settings.h"
 #include "core/libraries/np/trophy_ui.h"
@@ -122,8 +123,8 @@ TrophyUI::TrophyUI(const std::filesystem::path& trophyIconPath, const std::strin
                    const std::string_view& rarity)
     : trophy_name(trophyName), trophy_type(rarity) {
 
-    side = EmulatorSettings.GetTrophyNotificationSide();
-    trophy_timer = EmulatorSettings.GetTrophyNotificationDuration();
+    side = emu_settings_get_trophy_notification_side();
+    trophy_timer = emu_settings_get_trophy_notification_duration();
 
     if (std::filesystem::exists(trophyIconPath)) {
         trophy_icon = RefCountedTexture::DecodePngFile(trophyIconPath);
@@ -179,7 +180,7 @@ TrophyUI::TrophyUI(const std::filesystem::path& trophyIconPath, const std::strin
     // Louder than the game, as standalone plays it.
     if (!trophy_sound.empty()) {
         audio_mix_play_clip(trophy_sound.data(), static_cast<unsigned>(trophy_sound.size() / 2),
-                            EmulatorSettings.GetVolumeSlider() * 0.01f * 1.2f);
+                            emu_settings_get_volume_slider() * 0.01f * 1.2f);
     }
 }
 
@@ -338,7 +339,7 @@ void AddTrophyToQueue(const std::filesystem::path& trophyIconPath, const std::st
                       const std::string_view& rarity) {
     std::lock_guard<std::mutex> lock(queueMtx);
 
-    if (EmulatorSettings.IsTrophyPopupDisabled()) {
+    if (emu_settings_get_trophy_popup_disabled()) {
         return;
     } else if (current_trophy_ui.has_value()) {
         current_trophy_ui.reset();

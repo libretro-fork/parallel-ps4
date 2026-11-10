@@ -12,7 +12,7 @@
 #include "core/emulator_settings.h"
 #include "core/libraries/kernel/time.h"
 #include "core/libraries/system/userservice.h"
-#include "core/user_settings.h"
+#include "core/user_manager.h"
 #include "input/controller.h"
 #include "libretro/libretro_bridge.h"
 
@@ -231,14 +231,17 @@ void GameControllers::ConnectFirstController() {
         return;
     }
     connected = true;
-    auto* u = UserManagement.GetUserByPlayerIndex(1);
+    auto* u = user_manager_get_by_player_index(1);
     controllers[0]->user_id = u->user_id;
     controllers[0]->ConnectController();
-    UserManagement.LoginUser(u, 1);
+    if (user_manager_login(u, 1)) {
+        Libraries::UserService::AddUserServiceEvent(
+            {Libraries::UserService::OrbisUserServiceEventType::Login, u->user_id});
+    }
 }
 
 std::optional<u8> GameControllers::GetControllerIndexFromUserID(s32 user_id) {
-    auto const u = UserManagement.GetUserByID(user_id);
+    auto const u = user_manager_get_by_id(user_id);
     if (!u) {
         return std::nullopt;
     }

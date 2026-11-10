@@ -19,7 +19,6 @@
 #include "core/libraries/np/np_manager.h"
 #include "core/tls.h"
 #include "core/user_manager.h"
-#include "core/user_settings.h"
 
 namespace Libraries::Np::NpManager {
 
@@ -52,7 +51,7 @@ struct NpRequest {
 static void FillCountryCodeFromProfile(Libraries::UserService::OrbisUserServiceUserId user_id,
                                        OrbisNpCountryCode* out) {
     std::memset(out, 0, sizeof(OrbisNpCountryCode));
-    const User* u = UserManagement.GetUserByID(user_id);
+    const struct user* u = user_manager_get_by_id(user_id);
     const std::string cfg = u ? u->np_country : std::string();
     const bool ok = cfg.size() == 2 && std::isalpha(static_cast<unsigned char>(cfg[0])) &&
                     std::isalpha(static_cast<unsigned char>(cfg[1]));
@@ -63,7 +62,7 @@ static void FillCountryCodeFromProfile(Libraries::UserService::OrbisUserServiceU
 static void FillLanguageCodeFromProfile(Libraries::UserService::OrbisUserServiceUserId user_id,
                                         OrbisNpLanguageCode* out) {
     std::memset(out, 0, sizeof(OrbisNpLanguageCode));
-    const User* u = UserManagement.GetUserByID(user_id);
+    const struct user* u = user_manager_get_by_id(user_id);
     const std::string cfg = u ? u->np_language : std::string();
     const bool ok = cfg.size() == 2 && std::isalpha(static_cast<unsigned char>(cfg[0])) &&
                     std::isalpha(static_cast<unsigned char>(cfg[1]));
@@ -72,7 +71,7 @@ static void FillLanguageCodeFromProfile(Libraries::UserService::OrbisUserService
 }
 
 static s8 GetAgeFromProfile(Libraries::UserService::OrbisUserServiceUserId user_id) {
-    const User* u = UserManagement.GetUserByID(user_id);
+    const struct user* u = user_manager_get_by_id(user_id);
     const int v = u ? static_cast<int>(u->np_age) : 0;
     if (v <= 0 || v > 127) {
         return 13;
@@ -82,7 +81,7 @@ static s8 GetAgeFromProfile(Libraries::UserService::OrbisUserServiceUserId user_
 
 static void FillDateOfBirthFromProfile(Libraries::UserService::OrbisUserServiceUserId user_id,
                                        OrbisNpDate* out) {
-    const User* u = UserManagement.GetUserByID(user_id);
+    const struct user* u = user_manager_get_by_id(user_id);
     const std::string s = u ? u->np_date_of_birth : std::string();
 
     int y = 0, m = 0, d = 0;
@@ -490,7 +489,7 @@ s32 PS4_SYSV_ABI sceNpGetAccountCountryA(Libraries::UserService::OrbisUserServic
         user_id == Libraries::UserService::ORBIS_USER_SERVICE_USER_ID_INVALID) {
         return ORBIS_NP_ERROR_INVALID_ARGUMENT;
     }
-    if (UserManagement.GetUserByID(user_id) == nullptr) {
+    if (user_manager_get_by_id(user_id) == nullptr) {
         return ORBIS_NP_ERROR_USER_NOT_FOUND;
     }
     if (!g_shadnet_enabled || !Libraries::Np::NpHandler::GetInstance().IsPsnSignedIn(user_id)) {
@@ -522,7 +521,7 @@ s32 PS4_SYSV_ABI sceNpGetAccountDateOfBirthA(Libraries::UserService::OrbisUserSe
         user_id == Libraries::UserService::ORBIS_USER_SERVICE_USER_ID_INVALID) {
         return ORBIS_NP_ERROR_INVALID_ARGUMENT;
     }
-    if (UserManagement.GetUserByID(user_id) == nullptr) {
+    if (user_manager_get_by_id(user_id) == nullptr) {
         return ORBIS_NP_ERROR_USER_NOT_FOUND;
     }
     if (!g_shadnet_enabled || !Libraries::Np::NpHandler::GetInstance().IsPsnSignedIn(user_id)) {
@@ -691,7 +690,7 @@ sceNpGetUserIdByAccountId(u64 account_id, Libraries::UserService::OrbisUserServi
         return ORBIS_NP_ERROR_SIGNED_OUT;
 
     // Verify the resolved user_id is actually a logged-in local user
-    const User* u = UserManagement.GetUserByID(found);
+    const struct user* u = user_manager_get_by_id(found);
     if (!u || !u->logged_in)
         return ORBIS_NP_ERROR_USER_NOT_FOUND;
 
@@ -714,7 +713,7 @@ s32 PS4_SYSV_ABI sceNpGetUserIdByOnlineId(const OrbisNpOnlineId* online_id,
         return ORBIS_NP_ERROR_SIGNED_OUT;
 
     // Verify the resolved user_id is actually a logged-in local user
-    const User* u = UserManagement.GetUserByID(found);
+    const struct user* u = user_manager_get_by_id(found);
     if (!u || !u->logged_in)
         return ORBIS_NP_ERROR_USER_NOT_FOUND;
 
@@ -735,13 +734,13 @@ s32 PS4_SYSV_ABI sceNpHasSignedUp(Libraries::UserService::OrbisUserServiceUserId
             return ORBIS_NP_ERROR_INVALID_ARGUMENT;
         }
     }
-    const User* u = UserManagement.GetUserByID(user_id);
+    const struct user* u = user_manager_get_by_id(user_id);
     if (u == nullptr) {
         return ORBIS_NP_ERROR_USER_NOT_FOUND;
     }
     // A user has signed up if they have a shadNet npid configured.
     // This is independent of shadnet_enabled and current connection state.
-    *has_signed_up = !u->shadnet_npid.empty();
+    *has_signed_up = u->shadnet_npid[0] != '\0';
     return ORBIS_OK;
 }
 
@@ -1211,7 +1210,7 @@ void DeregisterNpCallback(std::string key) {
 void RegisterLib(Core::Loader::SymbolsResolver* sym) {
     ASSERT_MSG(Libraries::Kernel::sceKernelGetCompiledSdkVersion(&g_firmware_version) == ORBIS_OK,
                "Failed to get compiled SDK version.");
-    g_shadnet_enabled = EmulatorSettings.IsShadNetEnabled();
+    g_shadnet_enabled = emu_settings_is_shadnet_enabled();
 
     // Route live NP state changes from NpHandler into the dispatch queue so they are
     // delivered on the game's thread during sceNpCheckCallback (single delivery path).

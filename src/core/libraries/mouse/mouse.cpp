@@ -5,7 +5,7 @@
 #include "common/logging/log.h"
 #include "core/libraries/error_codes.h"
 #include "core/libraries/libs.h"
-#include "core/user_settings.h"
+#include "core/user_manager.h"
 #include "mouse.h"
 #include "mouse_error.h"
 
@@ -67,7 +67,7 @@ int PS4_SYSV_ABI sceMouseMbusInit() {
 int PS4_SYSV_ABI sceMouseOpen(Libraries::UserService::OrbisUserServiceUserId userId, s32 type,
                               s32 index, OrbisMouseOpenParam* pParam) {
     LOG_WARNING(Lib_Mouse, "(DUMMY) called, uid: {}, type: {}, index: {}", userId, type, index);
-    auto u = UserManagement.GetUserByID(userId);
+    auto u = user_manager_get_by_id(userId);
     if (!u || type != 0 || index < 0 || index > 1) {
         LOG_ERROR(Lib_Mouse, "invalid argument");
         return ORBIS_MOUSE_ERROR_INVALID_ARG;

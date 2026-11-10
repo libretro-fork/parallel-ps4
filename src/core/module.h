@@ -5,6 +5,7 @@
 
 #include <string>
 #include <vector>
+#include "common/path_util.h"
 #include "common/types.h"
 #include "core/emulator_settings.h"
 #include "core/loader/elf.h"
@@ -166,7 +167,7 @@ public:
     }
 
     bool IsSystemLib() {
-        auto system_path = EmulatorSettings.GetSysModulesDir();
+        auto system_path = Common::FS::PathFromCString(emu_settings_get_sys_modules_dir);
         if (file.string().starts_with(system_path.string().c_str())) {
             return true;
         }

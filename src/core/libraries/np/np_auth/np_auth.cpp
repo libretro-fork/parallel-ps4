@@ -15,7 +15,7 @@
 #include "core/libraries/np/np_error.h"
 #include "core/libraries/np/np_handler/np_handler.h"
 #include "core/libraries/system/userservice.h"
-#include "core/user_settings.h"
+#include "core/user_manager.h"
 
 namespace Libraries::Np::NpAuth {
 
@@ -119,7 +119,7 @@ s32 GetAuthorizationCode(s32 req_id, const OrbisNpAuthGetAuthorizationCodeParame
         LOG_ERROR(Lib_NpAuth, "called with null parameter");
         return ORBIS_NP_AUTH_ERROR_INVALID_ARGUMENT;
     }
-    if (UserManagement.GetUserByID(param->user_id) == nullptr) {
+    if (user_manager_get_by_id(param->user_id) == nullptr) {
         LOG_ERROR(Lib_NpAuth, "user not found: {}", param->user_id);
         return ORBIS_NP_ERROR_USER_NOT_FOUND;
     }
@@ -383,7 +383,7 @@ s32 PS4_SYSV_ABI sceNpAuthGetIdTokenV3(s32 req_id, const OrbisNpAuthGetIdTokenPa
 }
 
 void RegisterLib(Core::Loader::SymbolsResolver* sym) {
-    g_shadnet_enabled = EmulatorSettings.IsShadNetEnabled();
+    g_shadnet_enabled = emu_settings_is_shadnet_enabled();
 
     LIB_FUNCTION("6bwFkosYRQg", "libSceNpAuth", 1, "libSceNpAuth", sceNpAuthCreateRequest);
     LIB_FUNCTION("N+mr7GjTvr8", "libSceNpAuth", 1, "libSceNpAuth", sceNpAuthCreateAsyncRequest);

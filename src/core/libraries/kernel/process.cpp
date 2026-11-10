@@ -21,19 +21,19 @@ s32 PS4_SYSV_ABI sceKernelIsInSandbox() {
 s32 PS4_SYSV_ABI sceKernelIsNeoMode() {
     static s32 IsNeoMode = -1;
     if (IsNeoMode == -1) {
-        IsNeoMode = EmulatorSettings.IsNeo() &&
+        IsNeoMode = emu_settings_get_neo_mode() &&
                     Common::ElfInfo::Instance().GetPSFAttributes().support_neo_mode;
     }
     return IsNeoMode;
 }
 
 s32 PS4_SYSV_ABI sceKernelHasNeoMode() {
-    return EmulatorSettings.IsNeo();
+    return emu_settings_get_neo_mode();
 }
 
 s32 PS4_SYSV_ABI sceKernelIsDevkit() {
-    LOG_INFO(Lib_Kernel, "called, isDevkit: {}", EmulatorSettings.IsDevKit());
-    return EmulatorSettings.IsDevKit();
+    LOG_INFO(Lib_Kernel, "called, isDevkit: {}", emu_settings_get_dev_kit_mode());
+    return emu_settings_get_dev_kit_mode();
 }
 
 s32 PS4_SYSV_ABI sceKernelIsProspero() {
@@ -49,7 +49,7 @@ s32 PS4_SYSV_ABI sceKernelGetMainSocId() {
     // These hardcoded values are based on hardware observations.
     // Different models of PS4/PS4 Pro likely return slightly different values.
     LOG_DEBUG(Lib_Kernel, "called");
-    if (EmulatorSettings.IsNeo()) {
+    if (emu_settings_get_neo_mode()) {
         return 0x740f30;
     }
     return 0x710f10;

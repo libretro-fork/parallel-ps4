@@ -101,7 +101,7 @@ void Initialize(const ::Vulkan::Instance& instance, const Frontend::Window& wind
     font_cfg.OversampleH = 2;
     font_cfg.OversampleV = 1;
     io.Fonts->Flags |= ImFontAtlasFlags_NoPowerOfTwoHeight;
-    const int console_language = EmulatorSettings.GetConsoleLanguage();
+    const int console_language = emu_settings_get_console_language();
     io.FontDefault = FontStack::AddPrimaryUiFont(io.Fonts, 32.0f, console_language, font_cfg, true);
 
     io.Fonts->AddFontFromMemoryCompressedTTF(imgui_font_proggyvector_regular_compressed_data,
@@ -112,7 +112,7 @@ void Initialize(const ::Vulkan::Instance& instance, const Frontend::Window& wind
     FontStack::AddPrimaryUiFont(io.Fonts, 128.0f, console_language, font_cfg, false);
 
     // Big Picture
-    FontStack::AddPrimaryUiFont(ImGui::GetIO().Fonts, 64.0f, EmulatorSettings.GetConsoleLanguage(),
+    FontStack::AddPrimaryUiFont(ImGui::GetIO().Fonts, 64.0f, emu_settings_get_console_language(),
                                 font_cfg, true);
 
     // Let the atlas size grow to the largest image the device can create,
@@ -259,7 +259,7 @@ void Render(const vk::CommandBuffer& cmdbuf, const vk::ImageView& image_view,
         return;
     }
 
-    if (EmulatorSettings.IsVkHostMarkersEnabled()) {
+    if (emu_settings_get_vkhost_markers()) {
         cmdbuf.beginDebugUtilsLabelEXT(vk::DebugUtilsLabelEXT{
             .pLabelName = "ImGui Render",
         });
@@ -284,7 +284,7 @@ void Render(const vk::CommandBuffer& cmdbuf, const vk::ImageView& image_view,
     cmdbuf.beginRendering(render_info);
     Vulkan::RenderDrawData(*draw_data, cmdbuf);
     cmdbuf.endRendering();
-    if (EmulatorSettings.IsVkHostMarkersEnabled()) {
+    if (emu_settings_get_vkhost_markers()) {
         cmdbuf.endDebugUtilsLabelEXT();
     }
 }

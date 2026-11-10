@@ -217,7 +217,7 @@ void CollectShaderInfoPass(IR::Program& program, const Profile& profile) {
         }
     }
 
-    if (!EmulatorSettings.IsDirectMemoryAccessEnabled()) {
+    if (!emu_settings_get_direct_memory_access_enabled()) {
         info.uses_dma = false;
         info.readconst_types = Info::ReadConstType::None;
     }

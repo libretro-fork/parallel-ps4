@@ -3,7 +3,9 @@
 
 #include "common/arch.h"
 #include "common/elf_info.h"
+#include "common/path_util.h"
 #include "common/singleton.h"
+#include "core/emulator_settings.h"
 #include "core/libraries/ajm/ajm.h"
 #include "core/libraries/app_content/app_content.h"
 #include "core/libraries/audio/audioin.h"
@@ -124,7 +126,7 @@ void InitHLELibs(Core::Loader::SymbolsResolver* sym) {
     LOG_INFO(Lib_Kernel, "Initializing HLE libraries");
 
     auto* game_info = Common::Singleton<Common::ElfInfo>::Instance();
-    const auto& sys_module_path = EmulatorSettings.GetSysModulesDir();
+    const auto& sys_module_path = Common::FS::PathFromCString(emu_settings_get_sys_modules_dir);
     const auto& game_specific_modules_path =
         sys_module_path /
         (game_info->GameSerial().empty() ? std::string_view("no_serial") : game_info->GameSerial());

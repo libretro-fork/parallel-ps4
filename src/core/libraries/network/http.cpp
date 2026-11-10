@@ -684,7 +684,7 @@ static s32 RunRealHttpRequest(const SendRequestPlan& plan_in, HttpResponse& out_
 
 #ifdef CPPHTTPLIB_OPENSSL_SUPPORT
         if (plan.scheme == "https") {
-            const bool config_disabled_verify = EmulatorSettings.IsForcedHttpsDisabled();
+            const bool config_disabled_verify = emu_settings_get_disable_https();
             const bool game_disabled_verify =
                 (plan.settings.ssl_flags & ORBIS_HTTPS_FLAG_SERVER_VERIFY) == 0;
             bool verify_server = !config_disabled_verify && !game_disabled_verify;
@@ -1588,7 +1588,7 @@ int PS4_SYSV_ABI sceHttpSendRequest(int reqId, const void* postData, u64 size) {
         }
     }
 
-    const bool online = EmulatorSettings.IsConnectedToNetwork();
+    const bool online = emu_settings_get_connected_to_network();
     LOG_INFO(Lib_Http, "reqId={} dispatched to async worker [{} {} {}://{}:{}{}]", reqId,
              online ? "ONLINE" : "OFFLINE", HttpMethodName(plan.method), plan.scheme, plan.host,
              plan.port, plan.path);
@@ -2426,7 +2426,7 @@ int PS4_SYSV_ABI sceHttpsDisableOptionPrivate(int id, u32 sslFlags) {
 
 int PS4_SYSV_ABI sceHttpsEnableOption(int id, u32 sslFlags) {
     LOG_INFO(Lib_Http, "called id={}, sslFlags={:#x}", id, sslFlags);
-    if (EmulatorSettings.IsForcedHttpsDisabled()) {
+    if (emu_settings_get_disable_https()) {
         LOG_INFO(Lib_Http, "HTTPS is forced disabled, disabling options for id={}", id);
         return sceHttpsDisableOption(id, sslFlags);
     }
@@ -2453,7 +2453,7 @@ int PS4_SYSV_ABI sceHttpsEnableOption(int id, u32 sslFlags) {
 
 int PS4_SYSV_ABI sceHttpsEnableOptionPrivate(int id, u32 sslFlags) {
     LOG_INFO(Lib_Http, "called id={}, sslFlags={:#x}", id, sslFlags);
-    if (EmulatorSettings.IsForcedHttpsDisabled()) {
+    if (emu_settings_get_disable_https()) {
         return sceHttpsDisableOptionPrivate(id, sslFlags);
     }
     // Same as sceHttpsEnableOption but accepts the wider Private

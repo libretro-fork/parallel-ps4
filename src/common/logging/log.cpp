@@ -3,7 +3,10 @@
 
 #include <cstdlib>
 #include <iostream>
+#include <ranges>
 #include <string>
+#include <string_view>
+#include <vector>
 #include <fmt/std.h>
 #include <spdlog/sinks/async_sink.h>
 #include <spdlog/sinks/dup_filter_sink.h>
@@ -125,7 +128,7 @@ void Setup(std::string_view shadps4_filename) {
     // Setup console
 
 #ifdef _WIN32
-    if (EmulatorSettings.GetLogType() == "wincolor") {
+    if (std::string_view(emu_settings_get_log_type()) == "wincolor") {
         g_console_sink = std::make_shared<spdlog::sinks::wincolor_stdout_sink_mt>();
     } else {
         g_console_sink = std::make_shared<spdlog::sinks::msvc_sink_mt>();
@@ -141,7 +144,7 @@ void Setup(std::string_view shadps4_filename) {
 
     g_shad_file_sink = std::make_shared<LogFileSink>(
         (GetUserPath(Common::FS::PathType::LogDir) / shadps4_filename).string(), false,
-        EmulatorSettings.GetLogSizeLimit());
+        emu_settings_get_log_size_limit());
     g_shad_file_sink->set_pattern("%^%v%$");
 
     UpdateSinks();
@@ -149,13 +152,13 @@ void Setup(std::string_view shadps4_filename) {
 
 void Switch(std::string_view game_filename, bool append_log) {
     UpdateSinks();
-    UpdateLogLevels(EmulatorSettings.GetLogFilter());
-    UpdateLogFlushLevel(EmulatorSettings.GetLogFlushLevel());
+    UpdateLogLevels(emu_settings_get_log_filter());
+    UpdateLogFlushLevel(emu_settings_get_log_flush_level());
 
-    g_shad_file_sink->_size_limit = EmulatorSettings.GetLogSizeLimit();
+    g_shad_file_sink->_size_limit = emu_settings_get_log_size_limit();
     g_shad_file_sink->session_file_helper_.open(
         (GetUserPath(Common::FS::PathType::LogDir) / game_filename).string(),
-        !(append_log || EmulatorSettings.IsLogAppend()));
+        !(append_log || emu_settings_get_log_append()));
 }
 
 void Shutdown() {
@@ -185,13 +188,13 @@ void UpdateSinks() {
 
     std::initializer_list<spdlog::sink_ptr> dup_filter{
         std::make_shared<spdlog::sinks::dup_filter_sink_mt>(
-            std::chrono::milliseconds(EmulatorSettings.GetLogMaxSkipDuration()),
-            EmulatorSettings.IsLogSync() ? sinks : async_sink)};
+            std::chrono::milliseconds(emu_settings_get_log_max_skip_duration()),
+            emu_settings_get_log_sync() ? sinks : async_sink)};
 
     for (auto& logger : ALL_LOGGERS) {
-        logger->sinks() = EmulatorSettings.IsLogSkipDuplicate()
+        logger->sinks() = emu_settings_get_log_skip_duplicate()
                               ? dup_filter
-                              : (EmulatorSettings.IsLogSync() ? sinks : async_sink);
+                              : (emu_settings_get_log_sync() ? sinks : async_sink);
     }
 }
 
@@ -199,7 +202,7 @@ void UpdateLogLevels(std::string_view log_filter) {
     spdlog::level default_log_level = spdlog::level::info;
     std::unordered_map<std::string, spdlog::level> log_level_per_class;
 
-    if (EmulatorSettings.IsLogEnable()) {
+    if (emu_settings_get_log_enable()) {
         for (const auto class_level : std::views::split(log_filter, ' ')) {
             const auto class_level_pair =
                 std::views::split(class_level, ':') | std::ranges::to<std::vector<std::string>>();
@@ -223,7 +226,7 @@ void UpdateLogLevels(std::string_view log_filter) {
     for (u32 i = 0; i < ALL_LOGGERS.size(); ++i) {
         const auto log_class = static_cast<Class>(i);
         auto& logger = ALL_LOGGERS[i];
-        if (EmulatorSettings.IsLogEnable()) {
+        if (emu_settings_get_log_enable()) {
             const auto level_it = log_level_per_class.find(std::string(NameOf(log_class)));
             const auto log_level =
                 level_it != log_level_per_class.end() ? level_it->second : default_log_level;

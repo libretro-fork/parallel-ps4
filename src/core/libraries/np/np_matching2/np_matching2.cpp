@@ -230,7 +230,7 @@ int PS4_SYSV_ABI sceNpMatching2ContextStart(OrbisNpMatching2ContextId ctxId, u64
         LOG_ERROR(Lib_NpMatching2, "not initialized");
         return ORBIS_NP_MATCHING2_ERROR_NOT_INITIALIZED;
     }
-    if (!EmulatorSettings.IsConnectedToNetwork() || !EmulatorSettings.IsShadNetEnabled()) {
+    if (!emu_settings_get_connected_to_network() || !emu_settings_is_shadnet_enabled()) {
         // error confirmed with a real console disconnected from the internet
         constexpr int ORBIS_NET_ERROR_RESOLVER_ETIMEDOUT = 0x804101e2;
         LOG_ERROR(Lib_NpMatching2, "not connected to network");

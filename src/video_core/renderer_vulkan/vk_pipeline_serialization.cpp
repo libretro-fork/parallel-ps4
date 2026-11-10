@@ -302,7 +302,7 @@ bool PipelineCache::LoadPipelineStage(Serialization::Archive& ar, size_t stage) 
 }
 
 void PipelineCache::WarmUp() {
-    if (!EmulatorSettings.IsPipelineCacheEnabled()) {
+    if (!emu_settings_get_pipeline_cache_enabled()) {
         return;
     }
 

@@ -533,7 +533,7 @@ int PS4_SYSV_ABI sceAppContentInitialize(const OrbisAppContentInitParam* initPar
     is_initialized = true;
     auto* param_sfo = Common::Singleton<PSF>::Instance();
 
-    const auto addons_dir = EmulatorSettings.GetAddonInstallDir();
+    const auto addons_dir = Common::FS::PathFromCString(emu_settings_get_addon_install_dir);
     if (const auto value = param_sfo->GetString("TITLE_ID"); value.has_value()) {
         title_id = *value;
     } else {

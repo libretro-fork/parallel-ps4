@@ -1,73 +1,76 @@
-// SPDX-FileCopyrightText: Copyright 2026 shadPS4 Emulator Project
-// SPDX-License-Identifier: GPL-2.0-or-later
+/* SPDX-FileCopyrightText: Copyright 2026 shadPS4 Emulator Project
+ * SPDX-License-Identifier: GPL-2.0-or-later */
 
-#pragma once
-#include <filesystem>
-#include <string>
-#include <vector>
-#include <nlohmann/json.hpp>
-#include "common/types.h"
+#ifndef SHADPS4_CORE_USER_MANAGER_H
+#define SHADPS4_CORE_USER_MANAGER_H
 
-struct User {
-    s32 user_id = -1;
-    std::string user_name = "";
-    u32 user_color = 1;
-    int player_index = 0; // 1-4
-    bool logged_in = false;
-    // ShadNet settings
-    std::string shadnet_npid = "";     // account identifier
-    std::string shadnet_password = ""; // account password
-    std::string shadnet_token = "";    // 2FA/validation token (future use)
-    std::string shadnet_email = "";    // email address (furute use)
-    bool shadnet_enabled = false;      // enable shadnet for user
-    // these are used to populate NP profile fields
-    std::string np_country = "us";               // ISO 3166-1 alpha-2, e.g. "us", "jp", "gb"
-    std::string np_language = "en";              // ISO 639-1, e.g. "en", "ja", "fr"
-    u8 np_age = 30;                              // 0..127
-    std::string np_date_of_birth = "1994-01-01"; // ISO 8601 date "YYYY-MM-DD"
+/* The console's users, kept in users.json in the user directory:
+ *
+ *   { "Users": { "user": [ { "user_id": 1000, ... }, ... ],
+ *                "commit_hash": "<build>" } }
+ *
+ * Each user has a home directory, <home_dir>/<user_id>. */
+
+#include <stddef.h>
+#include <stdint.h>
+
+#include <boolean.h>
+#include <retro_common_api.h>
+
+RETRO_BEGIN_DECLS
+
+#define USER_MANAGER_MAX_USERS 16
+#define USER_MANAGER_MAX_LOGGED_IN 4
+#define USER_MANAGER_STRING_MAX 128
+
+struct user {
+    int32_t user_id;
+    char user_name[USER_MANAGER_STRING_MAX];
+    uint32_t user_color;
+    /* 1-4, or -1 for none */
+    int player_index;
+    bool logged_in;
+    /* shadNet account */
+    char shadnet_npid[USER_MANAGER_STRING_MAX];
+    char shadnet_password[USER_MANAGER_STRING_MAX];
+    /* validation token (future use) */
+    char shadnet_token[USER_MANAGER_STRING_MAX];
+    /* email address (future use) */
+    char shadnet_email[USER_MANAGER_STRING_MAX];
+    bool shadnet_enabled;
+    /* NP profile: ISO 3166-1 alpha-2 country, ISO 639-1 language,
+     * age 0..127 and ISO 8601 date of birth */
+    char np_country[8];
+    char np_language[8];
+    uint8_t np_age;
+    char np_date_of_birth[16];
 };
 
-struct Users {
-    std::vector<User> user{};
-    std::string commit_hash{};
-};
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(User, user_id, user_color, user_name, player_index,
-                                                shadnet_npid, shadnet_password, shadnet_token,
-                                                shadnet_email, shadnet_enabled, np_country,
-                                                np_language, np_age, np_date_of_birth)
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(Users, user, commit_hash)
+/* Reads users.json. A missing file is created with the four default users
+ * (and their home directories), and one written by another build is saved
+ * again. */
+bool user_manager_load(void);
+/* Writes users.json, keeping the members this build doesn't know. */
+bool user_manager_save(void);
 
-using LoggedInUsers = std::array<User*, 4>;
+size_t user_manager_count(void);
+struct user* user_manager_at(size_t index);
+struct user* user_manager_get_by_id(int32_t user_id);
+struct user* user_manager_get_by_player_index(int32_t player_index);
+/* The user on player 1, or NULL. */
+struct user* user_manager_get_default_user(void);
+/* Whether the user's home directory exists. */
+bool user_manager_has_home_dir(const struct user* user);
 
-class UserManager {
-public:
-    UserManager() = default;
+/* The user logged in on player slot 0..3, or NULL. */
+struct user* user_manager_get_logged_in(unsigned slot);
+/* Logs user in on player_index (1-4). Returns true when that changed
+ * anything, for the caller to post the login event. */
+bool user_manager_login(struct user* user, int32_t player_index);
+/* Returns true when user was logged in, for the caller to post the logout
+ * event. */
+bool user_manager_logout(struct user* user);
 
-    bool AddUser(const User& user);
-    bool RemoveUser(s32 user_id);
-    bool RenameUser(s32 user_id, const std::string& new_name);
-    User* GetUserByID(s32 user_id);
-    User* GetUserByPlayerIndex(s32 index);
-    const std::vector<User>& GetAllUsers() const;
-    Users CreateDefaultUsers();
-    bool SetDefaultUser(u32 user_id);
-    User GetDefaultUser();
-    void SetControllerPort(u32 user_id, int port);
-    std::vector<User> GetValidUsers() const;
-    LoggedInUsers GetLoggedInUsers() const;
-    void LoginUser(User* u, s32 player_index);
-    void LogoutUser(User* u);
+RETRO_END_DECLS
 
-    Users& GetUsers() {
-        return m_users;
-    }
-    const Users& GetUsers() const {
-        return m_users;
-    }
-
-    bool Save() const;
-
-private:
-    Users m_users;
-    LoggedInUsers logged_in_users{};
-};
+#endif

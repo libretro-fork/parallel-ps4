@@ -3062,7 +3062,7 @@ void RegisterLib(Core::Loader::SymbolsResolver* sym) {
         sdk_version = 0;
     }
 
-    if (EmulatorSettings.IsCopyGpuBuffers()) {
+    if (emu_settings_get_copy_gpu_buffers()) {
         liverpool->ReserveCopyBufferSpace();
     }
 

@@ -199,6 +199,20 @@ std::string PathToUTF8String(const std::filesystem::path& path) {
     return std::string{u8_string.begin(), u8_string.end()};
 }
 
+std::filesystem::path PathFromUTF8String(std::string_view utf8) {
+    return std::filesystem::path(
+        std::u8string_view(reinterpret_cast<const char8_t*>(utf8.data()), utf8.size()));
+}
+
+std::filesystem::path PathFromCString(size_t (*get)(char* s, size_t len)) {
+    char buf[4096];
+    const size_t len = get(buf, sizeof(buf));
+    if (len >= sizeof(buf)) {
+        return {};
+    }
+    return PathFromUTF8String(std::string_view(buf, len));
+}
+
 const fs::path& GetUserPath(PathType shad_path) {
     return UserPaths.at(shad_path);
 }

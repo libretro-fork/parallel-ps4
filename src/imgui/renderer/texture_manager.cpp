@@ -154,7 +154,7 @@ void WorkerLoop() {
             g_job_list.pop_front();
             g_job_list_mtx.unlock();
 
-            if (EmulatorSettings.IsVkCrashDiagnosticEnabled()) {
+            if (emu_settings_get_vkcrash_diagnostic_enabled()) {
                 // FIXME: Crash diagnostic hangs when building the command buffer here
                 continue;
             }

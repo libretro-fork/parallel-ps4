@@ -209,8 +209,8 @@ static void CopyImageToReadback(const vk::CommandBuffer& cmdbuf, const vk::Image
 
 Presenter::Presenter(Frontend::Window& window_, AmdGpu::Liverpool* liverpool_)
     : window{window_}, liverpool{liverpool_},
-      instance{EmulatorSettings.GetGpuId(), EmulatorSettings.IsVkValidationEnabled(),
-               EmulatorSettings.IsVkCrashDiagnosticEnabled()},
+      instance{emu_settings_get_gpu_id(), emu_settings_get_vkvalidation_enabled(),
+               emu_settings_get_vkcrash_diagnostic_enabled()},
       draw_scheduler{instance}, present_scheduler{instance}, flip_scheduler{instance},
       swapchain{instance, window}, runtime{instance, draw_scheduler},
       rasterizer{std::make_unique<Rasterizer>(instance, draw_scheduler, runtime, liverpool)},
@@ -229,10 +229,10 @@ Presenter::Presenter(Frontend::Window& window_, AmdGpu::Liverpool* liverpool_)
         free_queue.push(&frame);
     }
 
-    fsr_settings.enable = EmulatorSettings.IsFsrEnabled();
-    fsr_settings.use_rcas = EmulatorSettings.IsRcasEnabled();
+    fsr_settings.enable = emu_settings_get_fsr_enabled();
+    fsr_settings.use_rcas = emu_settings_get_rcas_enabled();
     fsr_settings.rcas_attenuation =
-        static_cast<float>(EmulatorSettings.GetRcasAttenuation() / 1000.f);
+        static_cast<float>(emu_settings_get_rcas_attenuation() / 1000.f);
 
     fsr_pass.Create(device, instance.GetAllocator(), num_images);
     pp_pass.Create(device, swapchain.GetSurfaceFormat().format);
@@ -587,7 +587,7 @@ void Presenter::Present(Frame* frame, bool is_reusing_frame, bool is_game_frame)
     // The frame for the frontend, when it does not draw from the image itself
     std::shared_ptr<FrameReadback> frame_readback;
 
-    if (EmulatorSettings.IsVkHostMarkersEnabled()) {
+    if (emu_settings_get_vkhost_markers()) {
         cmdbuf.beginDebugUtilsLabelEXT(vk::DebugUtilsLabelEXT{
             .pLabelName = "Present",
         });
@@ -685,7 +685,7 @@ void Presenter::Present(Frame* frame, bool is_reusing_frame, bool is_game_frame)
                 ImGui::SetCursorPos(ImGui::GetCursorStartPos() + offset);
                 ImGui::Image(game_texture, size);
 
-                if (EmulatorSettings.IsNullGPU()) {
+                if (emu_settings_get_null_gpu()) {
                     Core::Devtools::Layer::DrawNullGpuNotice();
                 }
             }
@@ -760,7 +760,7 @@ void Presenter::Present(Frame* frame, bool is_reusing_frame, bool is_game_frame)
             TracyVkCollect(profiler_ctx, cmdbuf);
         }
     }
-    if (EmulatorSettings.IsVkHostMarkersEnabled()) {
+    if (emu_settings_get_vkhost_markers()) {
         cmdbuf.endDebugUtilsLabelEXT();
     }
 

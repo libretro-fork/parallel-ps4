@@ -79,7 +79,7 @@ void InstallKernelIntegration() {
     });
     SetKernelErrnoHook([](int orbis_errno) { *Libraries::Kernel::__Error() = orbis_errno; });
     SetSystemHooks({
-        .is_online = [] { return EmulatorSettings.IsConnectedToNetwork(); },
+        .is_online = [] { return emu_settings_get_connected_to_network(); },
         .mac_address =
             [](std::array<u8, 6>* mac) {
                 auto* netinfo = Common::Singleton<NetUtil::NetUtilInternal>::Instance();
@@ -91,7 +91,7 @@ void InstallKernelIntegration() {
             },
         .p2p_port =
             [] {
-                const int port = EmulatorSettings.GetP2PPort();
+                const int port = emu_settings_get_p2p_port();
                 if (port < 0 || port > 0xffff) {
                     LOG_WARNING(Lib_Net, "p2p_port {} is not a UDP port, using 3658", port);
                     return u16{3658};
@@ -100,7 +100,7 @@ void InstallKernelIntegration() {
             },
         .p2p_started =
             [](u16 port) {
-                if (!EmulatorSettings.IsConnectedToNetwork() || !EmulatorSettings.IsUPnPEnabled()) {
+                if (!emu_settings_get_connected_to_network() || !emu_settings_get_enable_upnp()) {
                     LOG_INFO(Lib_Net, "P2P on UDP port {}: UPnP forwarding off", port);
                     return;
                 }

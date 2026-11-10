@@ -632,7 +632,7 @@ private:
                 }
 
                 const float vol =
-                    (m_volume.load() / 25.0f) * (EmulatorSettings.GetVolumeSlider() * 0.01f);
+                    (m_volume.load() / 25.0f) * (emu_settings_get_volume_slider() * 0.01f);
                 unsigned done = 0;
                 while (done < chunk_frames) {
                     s16* dst = nullptr;

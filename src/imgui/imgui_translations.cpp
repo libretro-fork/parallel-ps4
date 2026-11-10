@@ -1,6 +1,9 @@
 // SPDX-FileCopyrightText: Copyright 2026 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include <map>
+#include <string>
+#include "common/types.h"
 #include "core/emulator_settings.h"
 #include "imgui_translations.h"
 
@@ -42,11 +45,11 @@ const std::map<u32, std::map<std::string, std::string>> langMap = {
 
 std::string tr(std::string input) {
     // since we're coding in English
-    if (EmulatorSettings.GetConsoleLanguage() == 1 || EmulatorSettings.GetConsoleLanguage() == 18)
+    if (emu_settings_get_console_language() == 1 || emu_settings_get_console_language() == 18)
         return input;
 
     const std::map<std::string, std::string> translationTable =
-        langMap.at(EmulatorSettings.GetConsoleLanguage());
+        langMap.at(emu_settings_get_console_language());
 
     if (!translationTable.contains(input)) {
         return input;

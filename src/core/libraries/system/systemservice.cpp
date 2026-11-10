@@ -21,7 +21,7 @@ std::mutex g_event_queue_mutex;
 s32 g_sdk_version{};
 
 bool IsSplashVisible() {
-    return EmulatorSettings.IsShowSplash() && g_splash_status;
+    return emu_settings_get_show_splash() && g_splash_status;
 }
 
 int PS4_SYSV_ABI sceAppMessagingClearEventFlag() {
@@ -1931,7 +1931,7 @@ s32 PS4_SYSV_ABI sceSystemServiceParamGetInt(OrbisSystemServiceParamId param_id,
     }
     switch (param_id) {
     case OrbisSystemServiceParamId::Lang: {
-        s32 lang = EmulatorSettings.GetConsoleLanguage();
+        s32 lang = emu_settings_get_console_language();
         if (lang == 0x15 && g_sdk_version < Common::ElfInfo::FW_200) {
             lang = 0x12;
         }
@@ -1985,8 +1985,8 @@ s32 PS4_SYSV_ABI sceSystemServiceParamGetInt(OrbisSystemServiceParamId param_id,
         *value = u32(OrbisSystemParamGameParentalLevel::Off);
         break;
     case OrbisSystemServiceParamId::EnterButtonAssign:
-        *value = u32(EmulatorSettings.IsCircleEnter() ? OrbisSystemParamEnterButtonAssign::Circle
-                                                      : OrbisSystemParamEnterButtonAssign::Cross);
+        *value = u32(emu_settings_get_is_circle_enter() ? OrbisSystemParamEnterButtonAssign::Circle
+                                                        : OrbisSystemParamEnterButtonAssign::Cross);
         break;
     default:
         LOG_ERROR(Lib_SystemService, "param_id {} unsupported!", u32(param_id));

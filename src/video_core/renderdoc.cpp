@@ -33,7 +33,7 @@ void LoadRenderDoc() {
 
     // Check if we are running by RDoc GUI
     HMODULE mod = GetModuleHandleA("renderdoc.dll");
-    if (!mod && EmulatorSettings.IsRenderdocEnabled()) {
+    if (!mod && emu_settings_get_renderdoc_enabled()) {
         // If enabled in config, try to load RDoc runtime in offline mode
         HKEY h_reg_key;
         LONG result = RegOpenKeyExW(HKEY_LOCAL_MACHINE,
@@ -69,7 +69,7 @@ void LoadRenderDoc() {
 #endif
     // Check if we are running by RDoc GUI
     void* mod = dlopen(RENDERDOC_LIB, RTLD_NOW | RTLD_NOLOAD);
-    if (!mod && EmulatorSettings.IsRenderdocEnabled()) {
+    if (!mod && emu_settings_get_renderdoc_enabled()) {
         // If enabled in config, try to load RDoc runtime in offline mode
         if ((mod = dlopen(RENDERDOC_LIB, RTLD_NOW))) {
             const auto RENDERDOC_GetAPI =
