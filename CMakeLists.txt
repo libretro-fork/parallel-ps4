@@ -268,7 +268,6 @@ if (ENABLE_SYSTEM_LIBRARIES)
     find_package(glslang 15 CONFIG)
     find_package(half 1.12.0 MODULE)
     find_package(magic_enum 0.9.7 CONFIG)
-    find_package(miniupnpc 2.3.3 MODULE)
     find_package(LibreSSL 4.3.1 MODULE)
     find_package(RenderDoc 1.6.0 MODULE)
     find_package(tsl-robin-map 1.3.0 CONFIG)
@@ -1387,7 +1386,10 @@ set_target_properties(shadps4 PROPERTIES PREFIX "" OUTPUT_NAME "shadps4_libretro
 # (libretro/libretro-common). Its headers come after the core's own.
 set(LIBRETRO_COMMON_DIR ${CMAKE_CURRENT_SOURCE_DIR}/libretro/libretro-common)
 set(LIBRETRO_COMMON_SOURCES
+    ${LIBRETRO_COMMON_DIR}/compat/compat_posix_string.c
+    ${LIBRETRO_COMMON_DIR}/compat/compat_strcasestr.c
     ${LIBRETRO_COMMON_DIR}/compat/compat_strl.c
+    ${LIBRETRO_COMMON_DIR}/encodings/encoding_base64.c
     ${LIBRETRO_COMMON_DIR}/encodings/encoding_crc32.c
     ${LIBRETRO_COMMON_DIR}/encodings/encoding_deflate.c
     ${LIBRETRO_COMMON_DIR}/encodings/encoding_rzstd.c
@@ -1405,6 +1407,11 @@ set(LIBRETRO_COMMON_SOURCES
     ${LIBRETRO_COMMON_DIR}/formats/png/rpng_encode.c
     ${LIBRETRO_COMMON_DIR}/formats/xml/rxml.c
     ${LIBRETRO_COMMON_DIR}/formats/zar/zar.c
+    ${LIBRETRO_COMMON_DIR}/lists/string_list.c
+    ${LIBRETRO_COMMON_DIR}/net/net_compat.c
+    ${LIBRETRO_COMMON_DIR}/net/net_http.c
+    ${LIBRETRO_COMMON_DIR}/net/net_socket.c
+    ${LIBRETRO_COMMON_DIR}/net/net_upnp.c
     ${LIBRETRO_COMMON_DIR}/queues/retro_spsc.c
     ${LIBRETRO_COMMON_DIR}/queues/retro_waitable_spsc.c
     ${LIBRETRO_COMMON_DIR}/rthreads/retro_eventcount.c
@@ -1489,7 +1496,7 @@ create_target_directory_groups(shadps4)
 target_link_libraries(shadps4 PRIVATE spdlog::spdlog)
 target_link_libraries(shadps4 PRIVATE magic_enum::magic_enum fmt::fmt tsl::robin_map xbyak::xbyak RenderDoc::API FFmpeg::ffmpeg Dear_ImGui gcn half::half)
 target_link_libraries(shadps4 PRIVATE Boost::headers GPUOpen::VulkanMemoryAllocator LibAtrac9 sirit Vulkan::Headers Zydis::Zydis)
-target_link_libraries(shadps4 PRIVATE Cpp_Httplib miniupnpc::miniupnpc)
+target_link_libraries(shadps4 PRIVATE Cpp_Httplib)
 target_link_libraries(shadps4 PRIVATE Freetype::Freetype)
 
 if (ENABLE_FEX_GUEST_CPU)
@@ -1589,7 +1596,7 @@ elseif (${CMAKE_SYSTEM_NAME} STREQUAL "FreeBSD")
 endif()
 
 if (WIN32)
-    target_link_libraries(shadps4 PRIVATE mincore wepoll wbemuuid)
+    target_link_libraries(shadps4 PRIVATE mincore wepoll wbemuuid ws2_32)
 
     if (MSVC)
         # MSVC likes putting opinions on what people can use, disable:

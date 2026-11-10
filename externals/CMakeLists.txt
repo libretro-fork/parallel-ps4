@@ -171,16 +171,6 @@ if (WIN32)
 add_subdirectory(ext-wepoll)
 endif()
 
-# miniupnpc
-if (NOT TARGET miniupnpc::miniupnpc)
-set(UPNPC_BUILD_STATIC ON CACHE BOOL "" FORCE)
-set(UPNPC_BUILD_SHARED OFF CACHE BOOL "" FORCE)
-set(UPNPC_BUILD_TESTS OFF CACHE BOOL "" FORCE)
-set(UPNPC_BUILD_SAMPLE OFF CACHE BOOL "" FORCE)
-set(UPNPC_NO_INSTALL ON CACHE BOOL "" FORCE)
-add_subdirectory(miniupnp/miniupnpc)
-endif()
-
 # LibreSSL
 if (TARGET LibreSSL::SSL OR TARGET LibreSSL::Crypto)
     set(SSL_DEPENDENCIES LibreSSL::SSL LibreSSL::Crypto)

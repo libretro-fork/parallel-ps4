@@ -4,74 +4,50 @@
 #pragma once
 
 #include <atomic>
-#include <condition_variable>
-#include <mutex>
-#include <string>
 #include <thread>
-#include "common/types.h"
 
-#include <miniupnpc.h>
-#include <upnpcommands.h>
+#include <net/net_upnp.h>
+#include <rthreads/retro_eventcount.h>
+
+#include "common/types.h"
 
 namespace Libraries::Net {
 
+// Forwards the P2P port through the router with UPnP, on a thread of its own: callers only post
+// what they want forwarded and never wait for the router.
 class UPnPClient {
 public:
     static UPnPClient& Instance();
 
-    // Kick off async IGD discovery. Safe to call multiple times — only the first call has effect.
+    // Starts finding the router. Only the first call does anything.
     void Start();
     void SetP2PFeaturesEnabled(bool enabled);
 
-    // Block until discovery completes or timeout_ms elapses. Returns true if IGD was found.
-    bool WaitReady(int timeout_ms);
-
-    bool IsAvailable() const;
-
-    // External IP in network byte order as reported by the IGD. 0 if not yet known.
+    // External IP in network byte order as reported by the router. 0 if not (yet) known.
     u32 GetExternalIp() const;
 
-    // External IP as a dotted-decimal string. Empty if not yet known.
-    std::string GetExternalIpString() const;
-
-    // External port the IGD mapped for us. Matches the internal port unless the router remapped it.
-    u16 GetExternalPort() const;
-
-    void AddMapping(u16 port);
-    void RemoveMapping(u16 port);
-
-    // Forwards `port` once discovery has finished (waiting up to 10 s for it), on a background
-    // thread so the caller never waits for the router. Replaces an earlier request's mapping.
+    // Forwards `port` once the router is found, replacing an earlier request's mapping.
     void MapPortAsync(u16 port);
     // Removes what MapPortAsync forwarded, if it is `port`.
     void UnmapPort(u16 port);
 
 private:
-    UPnPClient() = default;
+    UPnPClient();
     ~UPnPClient();
     UPnPClient(const UPnPClient&) = delete;
     UPnPClient& operator=(const UPnPClient&) = delete;
 
-    void DiscoverThread();
+    void Run();
 
     std::atomic<bool> m_started{false};
     std::atomic<bool> m_p2p_features_enabled{true};
-    std::atomic<bool> m_done{false};
-    std::atomic<bool> m_available{false};
+    std::atomic<bool> m_quit{false};
     std::atomic<u32> m_external_ip_nbo{0};
-    std::atomic<u16> m_external_port{0};
-    std::atomic<u16> m_mapped_port{0}; // forwarded by MapPortAsync, removed on exit
-    char m_external_ip_str[16]{};
-
-    char m_lan_addr[64]{};
-    UPNPUrls m_urls{};
-    IGDdatas m_data{};
-
-    std::mutex m_mutex;
-    std::condition_variable m_cv;
+    // The port wanted forwarded, 0 for none. The thread alone talks to the router.
+    std::atomic<u16> m_wanted_port{0};
+    retro_eventcount_t m_wake{};
+    bool m_wake_ok = false;
     std::thread m_thread;
-    std::mutex m_map_mutex; // serializes MapPortAsync / UnmapPort
-    std::thread m_map_thread;
 };
 
 } // namespace Libraries::Net
