@@ -4,51 +4,67 @@
 #pragma once
 
 #include <atomic>
-#include <condition_variable>
 #include <filesystem>
 #include <memory>
-#include <mutex>
+#include <optional>
+#include <string>
 #include <string_view>
-#include <thread>
+#include <vector>
+
+#include <formats/zar.h>
 
 #include "core/file_sys/ifile.h"
 
-class ZArchiveReader;
+struct RFILE;
 
 namespace Core::FileSys {
 
-struct SharedReader {
-    SharedReader(ZArchiveReader* r, std::shared_ptr<Common::FS::IOFile> file);
-    ~SharedReader();
+// A ZArchive (.zar) file, read with libretro-common's reader (formats/zar.h) from a memory
+// mapping of the whole archive (streams/file_stream.h). Nothing here takes a lock: the mapping
+// is read from any thread, and each thread reading the archive has a reader of its own
+// (Reader()), since a reader holds the state of the one operation it is doing.
+class ZarArchive {
+public:
+    explicit ZarArchive(const std::filesystem::path& path);
+    ~ZarArchive();
 
-    SharedReader(const SharedReader&) = delete;
-    SharedReader& operator=(const SharedReader&) = delete;
+    ZarArchive(const ZarArchive&) = delete;
+    ZarArchive& operator=(const ZarArchive&) = delete;
 
-    using JobFn = void (*)(void*);
-    void Dispatch(JobFn fn, void* ctx);
+    bool IsOpen() const {
+        return m_map != nullptr;
+    }
 
-    ZArchiveReader* reader{nullptr};
-    std::shared_ptr<Common::FS::IOFile> archive_file;
-    std::mutex mutex;
+    // The file or directory at @rel ('/' separated, without regard to ASCII case).
+    bool LookUp(std::string_view rel, zar_file_t& out) const;
+
+    // Up to @size octets of @file from @offset straight into @dst; fewer at its end.
+    u64 Read(const zar_file_t& file, u64 offset, void* dst, u64 size) const;
+
+    // The entries of the directory at @rel, in name order; nullopt when it is no directory.
+    std::optional<std::vector<DirEntry>> List(std::string_view rel) const;
+
+    // Stat of the entry at @rel: the archive's own times, a guest inode of its own.
+    bool Stat(std::string_view rel, const zar_file_t& file, FileStat& out) const;
 
 private:
-    void WorkerLoop();
+    zar_t* Reader() const;
+    // Drives an operation to its end, answering each range it asks for from the mapping.
+    template <typename Step>
+    int Run(zar_t* z, Step&& step) const;
 
-    std::mutex m_job_mutex;
-    std::condition_variable m_job_cv;
-    JobFn m_job_fn{nullptr};
-    void* m_job_ctx{nullptr};
-    bool m_has_job{false};
-    bool m_stop{false};
-    std::thread::id m_worker_id;
-    std::thread m_worker;
+    RFILE* m_file{nullptr};
+    const u8* m_map{nullptr};
+    u64 m_size{0};
+    u64 m_serial{0};
+    std::optional<Common::FS::FileInfo> m_info;
 };
 
-// IFile implementation backed by a node inside a ZArchive (.zar) file.
+// IFile implementation backed by a file inside a ZArchive (.zar) file.
 class ZArchiveFile final : public IFile {
 public:
-    ZArchiveFile(std::shared_ptr<SharedReader> reader, uint32_t node, u64 size,
-                 std::filesystem::path archive_path);
+    ZArchiveFile(std::shared_ptr<const ZarArchive> archive, const zar_file_t& file,
+                 const FileStat& stat, std::filesystem::path archive_path);
     ~ZArchiveFile() override = default;
 
     s64 Read(void* dst, u64 size) override;
@@ -76,29 +92,25 @@ public:
     }
 
 private:
-    std::shared_ptr<SharedReader> m_reader;
-    uint32_t m_node;
-    u64 m_size;
-    u32 m_inode{0};
+    std::shared_ptr<const ZarArchive> m_archive;
+    zar_file_t m_file;
+    FileStat m_stat;
     std::filesystem::path m_archive_path;
-    mutable std::mutex m_position_mutex;
-    u64 m_position{0};
+    std::atomic<u64> m_position{0};
 };
 
-// Streaming directory iterator over a ZArchive node.
+// The entries of a directory, listed when it is opened.
 class ZArchiveDirectory final : public IDirectory {
 public:
-    ZArchiveDirectory(std::shared_ptr<SharedReader> reader, uint32_t node);
+    explicit ZArchiveDirectory(std::vector<DirEntry> entries) : m_entries(std::move(entries)) {}
     ~ZArchiveDirectory() override = default;
 
     bool Next(DirEntry& out) override;
     void Rewind() override;
 
 private:
-    std::shared_ptr<SharedReader> m_reader;
-    uint32_t m_node;
-    uint32_t m_index{0};
-    uint32_t m_count{0};
+    std::vector<DirEntry> m_entries;
+    size_t m_index{0};
 };
 
 // Backend that maps a mounted namespace onto the contents of a .zar
@@ -108,7 +120,7 @@ public:
     ~ZArchiveBackend() override;
 
     bool IsOpen() const {
-        return m_reader && m_reader->reader != nullptr;
+        return m_archive && m_archive->IsOpen();
     }
 
     bool Exists(std::string_view rel_path) override;
@@ -134,10 +146,8 @@ public:
     std::optional<std::vector<u8>> ReadFile(std::string_view rel_path) const override;
 
 private:
-    uint32_t LookUp(std::string_view rel_path, bool allow_file, bool allow_directory);
-
     std::filesystem::path m_archive_path;
-    std::shared_ptr<SharedReader> m_reader;
+    std::shared_ptr<const ZarArchive> m_archive;
 };
 
 } // namespace Core::FileSys

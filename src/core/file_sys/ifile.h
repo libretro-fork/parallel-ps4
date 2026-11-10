@@ -37,7 +37,7 @@ struct FileIdentity {
     };
     Kind kind{Kind::HostFile};
     Common::FS::FileIdentity host{};
-    u32 node{0};
+    u64 node{0}; // an archive entry's own number
 
     bool operator==(const FileIdentity&) const = default;
 };

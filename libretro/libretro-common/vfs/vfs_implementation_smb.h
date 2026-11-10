@@ -1,0 +1,143 @@
+#ifndef VFS_IMPLEMENTATION_SMB_H
+#define VFS_IMPLEMENTATION_SMB_H
+
+#include <stdint.h>
+#include <vfs/vfs.h>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+/* System headers may lack SMB2_SEC_ defines but
+ * will clash with libsmb2 if provided here
+ */
+#define RETRO_SMB2_SEC_UNDEFINED 0
+#define RETRO_SMB2_SEC_NTLMSSP 1
+#define RETRO_SMB2_SEC_KRB5 2
+#define RETRO_SMB2_DEFAULT_MAX_CLIENTS 4
+#define RETRO_SMB2_DEFAULT_CLIENT_TIMEOUT 5
+
+struct smb_settings {
+   const char *server_address;
+   const char *share;
+   const char *username;
+   const char *password;
+   const char *workgroup;
+   unsigned    timeout;
+   unsigned    num_contexts;
+   unsigned    auth_mode;
+   const char *subdir;
+   /* Kerberos (built-in client): the realm, and the KDC when it is not
+    * the server itself; empty realm means NTLMSSP only */
+   const char *realm;
+   const char *kdc;
+   unsigned    readahead;       /* KiB per open file; 0: the client's default */
+};
+
+typedef struct smb_settings smb_settings_t;
+
+#define RETRO_SMB_DIRENT_FILE 0
+#define RETRO_SMB_DIRENT_DIR  1
+
+struct smbc_dirent {
+   char name[256];
+   int  type;     /* RETRO_SMB_DIRENT_* */
+   int64_t size;  /* file size */
+};
+
+/* 'dir' is NULL and 'shares' is populated when the handle enumerates the
+ * shares exported by the server rather than a directory inside one. */
+typedef struct {
+   struct smb2_context *ctx;
+   struct smb2dir *dir;
+   void *slot;          /* the pool slot the listing holds, NULL if private */
+   char **shares;
+   unsigned share_count;
+   unsigned share_index;
+   struct smbc_dirent ent;   /* the entry readdir returns; per handle, so
+                              * listings on different threads never share it */
+} smb_dir_handle;
+
+/* Hands the client new settings: they are copied, strings included,
+ * so the caller may change or free @new_cfg once this returns. */
+bool smb_init_cfg(const struct smb_settings *new_cfg);
+
+/* What the last connect for a share came to. */
+enum smb_failure
+{
+   SMB_FAILURE_UNKNOWN = 0,  /* no record */
+   SMB_FAILURE_CONNECTED,
+   SMB_FAILURE_RESOLVE,      /* the server name did not resolve */
+   SMB_FAILURE_CONNECT,      /* refused, timed out, dropped */
+   SMB_FAILURE_LOGIN,
+   SMB_FAILURE_SHARE         /* no such share, or access to it denied */
+};
+
+/* The code of the share @url reaches under the current settings, as a
+ * stat would; no I/O. Two threads failing on one share at once may
+ * leave either's code. */
+enum smb_failure smb_url_failure(const char *url);
+
+/* Whether a URL can be read under the settings. */
+enum smb_url_result
+{
+   SMB_URL_OK = 0,
+   SMB_URL_NO_SERVER,
+   SMB_URL_SHARE_DIFFERS     /* a share is configured and the URL's differs */
+};
+
+/* Checks @url's share against the settings, ignoring case; on a
+ * difference @detail gets the configured share, else "". The URL's
+ * host is not compared: the configured server is always read. No
+ * I/O. */
+enum smb_url_result smb_url_check(const char *url, char *detail, size_t len);
+
+/* File operations */
+bool    retro_vfs_file_open_smb(libretro_vfs_implementation_file *stream,
+        const char *path, unsigned mode, unsigned hints);
+int64_t retro_vfs_file_read_smb(libretro_vfs_implementation_file *stream,
+        void *s, uint64_t len);
+int64_t retro_vfs_file_view_smb(libretro_vfs_implementation_file *stream,
+        uint64_t len, const uint8_t **ptr);
+int64_t retro_vfs_file_write_smb(libretro_vfs_implementation_file *stream,
+        const void *s, uint64_t len);
+int64_t retro_vfs_file_seek_smb(libretro_vfs_implementation_file *stream,
+        int64_t offset, int whence);
+int64_t retro_vfs_file_tell_smb(libretro_vfs_implementation_file *stream);
+int     retro_vfs_file_close_smb(libretro_vfs_implementation_file *stream);
+
+/* Directory operations */
+smb_dir_handle* retro_vfs_opendir_smb(const char *path, bool include_hidden);
+struct smbc_dirent* retro_vfs_readdir_smb(smb_dir_handle* dh);
+int                 retro_vfs_closedir_smb(smb_dir_handle* dh);
+
+/* Stat */
+int retro_vfs_stat_smb(const char *path, int64_t *size);
+
+/* Errors */
+int retro_vfs_file_error_smb(libretro_vfs_implementation_file *stream);
+/* Why the last connect, share listing or opendir failed; "" if none has. */
+const char *smb_get_last_error(void);
+
+/* Context management */
+void smb_shutdown(void);
+
+/* For libsmb2 contexts made outside the VFS (cloud sync): libsmb2
+ * keeps every context on one list with no lock of its own. */
+struct smb2_context *smb_ctx_new(void);
+void smb_ctx_free(struct smb2_context *ctx);
+
+/* What read-ahead served from its windows and what it missed, in KiB,
+ * over the files closed since the last call; the counts are then reset.
+ * Both are 0 while read-ahead is off. */
+void smb_take_readahead_stats(unsigned *window_kib, unsigned *direct_kib);
+
+/* Whether every idle pooled connection has its pool's read-ahead
+ * window. For the tests. */
+bool smb_pool_windows_ok(void);
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif /* VFS_IMPLEMENTATION_SMB_H */

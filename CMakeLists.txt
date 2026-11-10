@@ -279,10 +279,8 @@ if (ENABLE_SYSTEM_LIBRARIES)
     find_package(VulkanHeaders 1.4.330 CONFIG)
     find_package(VulkanMemoryAllocator 3.1.0 CONFIG)
     find_package(xbyak 7.07 CONFIG)
-    find_package(ZArchive 0.1.2 MODULE)
     find_package(ZLIB 1.3 MODULE)
     find_package(Zydis 5.0.0 MODULE)
-    find_package(zstd 1.5.6 CONFIG)
     find_package(pugixml 1.14 CONFIG)
     find_package(absl 20250512.1 CONFIG)
     if (APPLE)
@@ -1391,17 +1389,36 @@ set(LIBRETRO_COMMON_SOURCES
     ${LIBRETRO_COMMON_DIR}/compat/compat_strl.c
     ${LIBRETRO_COMMON_DIR}/encodings/encoding_crc32.c
     ${LIBRETRO_COMMON_DIR}/encodings/encoding_deflate.c
+    ${LIBRETRO_COMMON_DIR}/encodings/encoding_rzstd.c
+    ${LIBRETRO_COMMON_DIR}/encodings/encoding_utf.c
     ${LIBRETRO_COMMON_DIR}/encodings/encoding_xxh3.c
+    ${LIBRETRO_COMMON_DIR}/encodings/encoding_xxh64.c
     ${LIBRETRO_COMMON_DIR}/features/features_cpu.c
+    ${LIBRETRO_COMMON_DIR}/file/file_path.c
+    ${LIBRETRO_COMMON_DIR}/file/file_path_io.c
     ${LIBRETRO_COMMON_DIR}/formats/flac/rflac.c
     ${LIBRETRO_COMMON_DIR}/formats/mp3/rmp3.c
+    ${LIBRETRO_COMMON_DIR}/formats/zar/zar.c
     ${LIBRETRO_COMMON_DIR}/queues/retro_spsc.c
     ${LIBRETRO_COMMON_DIR}/queues/retro_waitable_spsc.c
     ${LIBRETRO_COMMON_DIR}/rthreads/retro_eventcount.c
     ${LIBRETRO_COMMON_DIR}/rthreads/rthreads.c
+    ${LIBRETRO_COMMON_DIR}/streams/file_stream.c
+    ${LIBRETRO_COMMON_DIR}/string/rstrtod.c
+    ${LIBRETRO_COMMON_DIR}/string/stdstring.c
+    ${LIBRETRO_COMMON_DIR}/time/rtime.c
+    ${LIBRETRO_COMMON_DIR}/vfs/vfs_implementation.c
 )
 target_sources(shadps4 PRIVATE ${LIBRETRO_COMMON_SOURCES})
 target_include_directories(shadps4 PRIVATE ${LIBRETRO_COMMON_DIR}/include)
+# zar.c reads Zstandard-compressed blocks with encodings/rzstd.h; the VFS maps files
+# (filestream_get_mapped_ptr) with mmap where there is one, and its own way on Windows.
+set_source_files_properties(${LIBRETRO_COMMON_DIR}/formats/zar/zar.c PROPERTIES
+    COMPILE_DEFINITIONS HAVE_RZSTD)
+if (NOT WIN32)
+    set_source_files_properties(${LIBRETRO_COMMON_DIR}/vfs/vfs_implementation.c PROPERTIES
+        COMPILE_DEFINITIONS HAVE_MMAP)
+endif()
 if (UNIX AND NOT APPLE)
     # Only retro_* is exported and the core's own symbols bind inside it: a
     # frontend that carries a library the core has too must not get tied to
@@ -1501,8 +1518,6 @@ if (ENABLE_FEX_GUEST_CPU)
     target_link_libraries(shadps4 PRIVATE ${FEXCORE_GUEST_CPU_LIBRARIES} pthread dl)
 endif()
 target_link_libraries(shadps4 PRIVATE libprotobuf)
-target_link_libraries(shadps4 PRIVATE ZArchive::zarchive)
-target_link_libraries(shadps4 PRIVATE zstd::libzstd)
 target_include_directories(shadps4 PRIVATE "${SHADNET_PROTO_OUT}")
 
 if (${CMAKE_SYSTEM_NAME} STREQUAL "FreeBSD")

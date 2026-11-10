@@ -4,6 +4,7 @@ What changed in the libretro core of this fork, newest first. Changes that come 
 
 ## Unreleased
 
+- ZArchive and zstd are replaced by libretro-common: a game packed as a `.zar` is read with `formats/zar.h` from a memory mapping of the archive (`streams/file_stream.h`). Reads no longer pass through one shared worker thread under a lock: each thread reads on its own, and a file's octets go straight to where the game wants them. Paths inside an archive are now matched without regard to ASCII case. The AMD reciprocal tables decode with `encodings/rzstd.h`.
 - The core's own inflating no longer uses zlib: PKG blocks and gzip HTTP bodies inflate with libretro-common's `encodings/deflate.h`. A gzip body is inflated into a buffer of the size its trailer records, made once. zlib-ng is left only for libpng, which the game's PNG libraries are built on.
 - miniz is gone. The game-facing zlib library (`sceZlibInflate`) inflates with libretro-common's `encodings/deflate.h`. The pipeline cache is always kept as files in the game's cache folder: the zip-archived form (`pipeline_cache_archived`, off by default and not a core option) is gone with its setting.
 - minimp3 and dr_flac are replaced by libretro-common's MP3 and FLAC decoders (`formats/rmp3.h`, `formats/rflac.h`) for the music player and the custom trophy sound. A track is decoded straight into the buffer it plays from, with no copy afterwards, and a track decoded with FFmpeg (AAC, M4A, MP4) is no longer copied once more after decoding.

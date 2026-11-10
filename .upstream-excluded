@@ -46,3 +46,6 @@ cmake/FindxxHash.cmake
 externals/minimp3
 externals/dr_flac
 externals/miniz
+externals/zarchive
+externals/zstd
+cmake/FindZArchive.cmake
