@@ -4,6 +4,7 @@ What changed in the libretro core of this fork, newest first. Changes that come 
 
 ## Unreleased
 
+- The music player decodes AAC with libretro-common in place of FFmpeg: `.aac` (ADTS) with raac, `.m4a`/`.mp4` with rmp4 and raac, the track's edit list trimming the encoder delay. The decoded track is now one malloc'd buffer that rmp4's output is taken over into without a copy, and that MP3 and FLAC grow in place. The file extension is matched in any case.
 - The game's MP3 decoder (libSceAjm's MP3) decodes with libretro-common's rmp3 in place of FFmpeg, frame by frame straight from the game's input, without a parser holding back data between jobs. Float and 32-bit output come from rmp3's float synthesis, 16-bit from its fixed-point one; FFmpeg's resampler is no longer involved. A frame whose bit reservoir reaches back before the stream was joined comes out as silence of the frame's length. Needs RetroArch's two rmp3 patches (float frame decode, a frame with part of the next behind it).
 - miniupnpc is gone: the P2P port is forwarded through the router with libretro-common's `net/net_upnp.h`. Finding the router, mapping and unmapping now all happen on one thread of its own; callers only post the port they want forwarded and never wait for the router. The mapping is removed when the core shuts down. Needs RetroArch's net_upnp patch.
 - The hwinfo library is gone: the CPU model and core counts in the log come from libretro-common's `features/features_cpu.h`. The total RAM and the operating system are no longer logged by the core; RetroArch's log has both.

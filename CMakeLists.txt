@@ -1403,6 +1403,8 @@ set(LIBRETRO_COMMON_SOURCES
     ${LIBRETRO_COMMON_DIR}/formats/flac/rflac.c
     ${LIBRETRO_COMMON_DIR}/formats/json/rjson.c
     ${LIBRETRO_COMMON_DIR}/formats/mp3/rmp3.c
+    ${LIBRETRO_COMMON_DIR}/formats/mp4/rmp4.c
+    ${LIBRETRO_COMMON_DIR}/formats/mp4/rmp4_audio.c
     ${LIBRETRO_COMMON_DIR}/formats/png/rpng.c
     ${LIBRETRO_COMMON_DIR}/formats/png/rpng_encode.c
     ${LIBRETRO_COMMON_DIR}/formats/xml/rxml.c
@@ -1429,6 +1431,9 @@ set(LIBRETRO_COMMON_SOURCES
 )
 target_sources(shadps4 PRIVATE ${LIBRETRO_COMMON_SOURCES})
 target_include_directories(shadps4 PRIVATE ${LIBRETRO_COMMON_DIR}/include)
+# AAC in MP4/M4A, for the music player
+set_source_files_properties(${LIBRETRO_COMMON_DIR}/formats/mp4/rmp4_audio.c PROPERTIES
+    COMPILE_DEFINITIONS HAVE_RAAC)
 # zar.c reads Zstandard-compressed blocks with encodings/rzstd.h; the VFS maps files
 # (filestream_get_mapped_ptr) with mmap where there is one, and its own way on Windows.
 set_source_files_properties(${LIBRETRO_COMMON_DIR}/formats/zar/zar.c PROPERTIES

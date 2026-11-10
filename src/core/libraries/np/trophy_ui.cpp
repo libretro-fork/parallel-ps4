@@ -87,7 +87,7 @@ void PreloadTrophySound() {
         Common::AudioFile::Pcm pcm;
         if (Common::AudioFile::DecodeMp3(bytes.data(), bytes.size(), pcm) &&
             (pcm.channels == 1 || pcm.channels == 2)) {
-            ResampleTrophySound(pcm.samples.data(), pcm.Frames(), pcm.channels, pcm.hz);
+            ResampleTrophySound(pcm.Data(), pcm.Frames(), pcm.channels, pcm.hz);
         } else {
             LOG_ERROR(Lib_NpTrophy, "Could not decode the custom trophy sound {}",
                       fmt::UTF(mp3_path.u8string()));

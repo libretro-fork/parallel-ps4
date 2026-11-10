@@ -1,7 +1,9 @@
 // SPDX-FileCopyrightText: Copyright 2026 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include <algorithm>
 #include <atomic>
+#include <cctype>
 #include <chrono>
 #include <condition_variable>
 #include <mutex>
@@ -10,16 +12,6 @@
 #include <unordered_map>
 #include <vector>
 #include <queue>
-
-extern "C" {
-#include <libavcodec/avcodec.h>
-#include <libavformat/avformat.h>
-#include <libavutil/channel_layout.h>
-#include <libavutil/mathematics.h>
-#include <libavutil/opt.h>
-#include <libswresample/swresample.h>
-}
-#include "common/support/avdec.h"
 
 #include "common/audio_file.h"
 #include "common/logging/log.h"
@@ -368,132 +360,6 @@ private:
         StopPlayback();
     }
 
-    static bool DecodeAudioWithFFmpeg(const std::string& path, Common::AudioFile::Pcm& pcm) {
-        AVFormatContext* format_ctx = nullptr;
-        if (avformat_open_input(&format_ctx, path.c_str(), nullptr, nullptr) != 0) {
-            return false;
-        }
-        if (avformat_find_stream_info(format_ctx, nullptr) < 0) {
-            avformat_close_input(&format_ctx);
-            return false;
-        }
-        int audio_stream_idx =
-            av_find_best_stream(format_ctx, AVMEDIA_TYPE_AUDIO, -1, -1, nullptr, 0);
-        if (audio_stream_idx < 0) {
-            avformat_close_input(&format_ctx);
-            return false;
-        }
-        AVStream* stream = format_ctx->streams[audio_stream_idx];
-        const AVCodec* decoder = avcodec_find_decoder(stream->codecpar->codec_id);
-        if (!decoder) {
-            avformat_close_input(&format_ctx);
-            return false;
-        }
-        AVCodecContext* codec_ctx = avcodec_alloc_context3(decoder);
-        if (!codec_ctx) {
-            avformat_close_input(&format_ctx);
-            return false;
-        }
-        if (avcodec_parameters_to_context(codec_ctx, stream->codecpar) < 0 ||
-            avcodec_open2(codec_ctx, decoder, nullptr) < 0) {
-            avcodec_free_context(&codec_ctx);
-            avformat_close_input(&format_ctx);
-            return false;
-        }
-
-        int out_channels =
-            codec_ctx->ch_layout.nb_channels > 0 ? codec_ctx->ch_layout.nb_channels : 2;
-        int out_sample_rate = codec_ctx->sample_rate > 0 ? codec_ctx->sample_rate : 44100;
-        AVChannelLayout out_ch_layout;
-        av_channel_layout_default(&out_ch_layout, out_channels);
-
-        SwrContext* swr = nullptr;
-        int swr_res = swr_alloc_set_opts2(&swr, &out_ch_layout, AV_SAMPLE_FMT_S16, out_sample_rate,
-                                          &codec_ctx->ch_layout, codec_ctx->sample_fmt,
-                                          codec_ctx->sample_rate, 0, nullptr);
-        if (swr_res < 0 || !swr || swr_init(swr) < 0) {
-            if (swr)
-                swr_free(&swr);
-            av_channel_layout_uninit(&out_ch_layout);
-            avcodec_free_context(&codec_ctx);
-            avformat_close_input(&format_ctx);
-            return false;
-        }
-
-        AVPacket* pkt = av_packet_alloc();
-        AVFrame* frame = av_frame_alloc();
-        std::vector<int16_t>& pcm_data = pcm.samples;
-
-        while (av_read_frame(format_ctx, pkt) >= 0) {
-            if (pkt->stream_index == audio_stream_idx) {
-                if (avcodec_send_packet(codec_ctx, pkt) >= 0) {
-                    while (avcodec_receive_frame(codec_ctx, frame) >= 0) {
-                        int max_out_samples =
-                            av_rescale_rnd(swr_get_delay(swr, out_sample_rate) + frame->nb_samples,
-                                           out_sample_rate, codec_ctx->sample_rate, AV_ROUND_UP);
-                        size_t cur_size = pcm_data.size();
-                        pcm_data.resize(cur_size + max_out_samples * out_channels);
-                        uint8_t* out_ptr = reinterpret_cast<uint8_t*>(pcm_data.data() + cur_size);
-                        int converted =
-                            swr_convert(swr, &out_ptr, max_out_samples,
-                                        (const uint8_t**)frame->extended_data, frame->nb_samples);
-                        if (converted > 0) {
-                            pcm_data.resize(cur_size + converted * out_channels);
-                        } else {
-                            pcm_data.resize(cur_size);
-                        }
-                    }
-                }
-            }
-            av_packet_unref(pkt);
-        }
-
-        avcodec_send_packet(codec_ctx, nullptr);
-        while (avcodec_receive_frame(codec_ctx, frame) >= 0) {
-            int max_out_samples =
-                av_rescale_rnd(swr_get_delay(swr, out_sample_rate) + frame->nb_samples,
-                               out_sample_rate, codec_ctx->sample_rate, AV_ROUND_UP);
-            size_t cur_size = pcm_data.size();
-            pcm_data.resize(cur_size + max_out_samples * out_channels);
-            uint8_t* out_ptr = reinterpret_cast<uint8_t*>(pcm_data.data() + cur_size);
-            int converted = swr_convert(swr, &out_ptr, max_out_samples,
-                                        (const uint8_t**)frame->extended_data, frame->nb_samples);
-            if (converted > 0) {
-                pcm_data.resize(cur_size + converted * out_channels);
-            } else {
-                pcm_data.resize(cur_size);
-            }
-        }
-
-        int max_out_samples = swr_get_delay(swr, out_sample_rate);
-        if (max_out_samples > 0) {
-            size_t cur_size = pcm_data.size();
-            pcm_data.resize(cur_size + max_out_samples * out_channels);
-            uint8_t* out_ptr = reinterpret_cast<uint8_t*>(pcm_data.data() + cur_size);
-            int converted = swr_convert(swr, &out_ptr, max_out_samples, nullptr, 0);
-            if (converted > 0) {
-                pcm_data.resize(cur_size + converted * out_channels);
-            } else {
-                pcm_data.resize(cur_size);
-            }
-        }
-
-        av_frame_free(&frame);
-        av_packet_free(&pkt);
-        swr_free(&swr);
-        av_channel_layout_uninit(&out_ch_layout);
-        avcodec_free_context(&codec_ctx);
-        avformat_close_input(&format_ctx);
-
-        if (pcm_data.empty()) {
-            return false;
-        }
-
-        pcm.channels = static_cast<u32>(out_channels);
-        pcm.hz = static_cast<u32>(out_sample_rate);
-        return true;
-    }
-
     void PlaybackWorker(u32 start_track_index, u64 initial_start_time_ms) {
         u32 track_idx = start_track_index;
         u64 start_time_ms = initial_start_time_ms;
@@ -564,18 +430,24 @@ private:
             Common::AudioFile::Pcm pcm;
             bool decoded = false;
 
-            const auto ext = host_path.extension().string();
-            if (ext == ".flac" || ext == ".FLAC" || ext == ".mp3" || ext == ".MP3") {
+            std::string ext = host_path.extension().string();
+            std::transform(ext.begin(), ext.end(), ext.begin(),
+                           [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+            if (ext == ".flac" || ext == ".mp3" || ext == ".aac" || ext == ".m4a" ||
+                ext == ".mp4") {
                 // Read whole and decoded in place, into one buffer the mix resamples from.
                 const auto bytes = Common::AudioFile::ReadWhole(host_path);
-                decoded = ext == ".flac" || ext == ".FLAC"
-                              ? Common::AudioFile::DecodeFlac(bytes.data(), bytes.size(), pcm)
-                              : Common::AudioFile::DecodeMp3(bytes.data(), bytes.size(), pcm);
-            }
-
-            if (!decoded && (ext == ".m4a" || ext == ".M4A" || ext == ".aac" || ext == ".AAC" ||
-                             ext == ".mp4" || ext == ".MP4")) {
-                decoded = DecodeAudioWithFFmpeg(host_path.string(), pcm);
+                const u8* data = bytes.data();
+                const size_t size = bytes.size();
+                if (ext == ".flac") {
+                    decoded = Common::AudioFile::DecodeFlac(data, size, pcm);
+                } else if (ext == ".mp3") {
+                    decoded = Common::AudioFile::DecodeMp3(data, size, pcm);
+                } else if (ext == ".aac") {
+                    decoded = Common::AudioFile::DecodeAdts(data, size, pcm);
+                } else {
+                    decoded = Common::AudioFile::DecodeMp4(data, size, pcm);
+                }
             }
 
             if (!decoded) {
@@ -640,8 +512,8 @@ private:
                     if (room == 0) {
                         break;
                     }
-                    const unsigned got = audio_mix_resample(&resampler, pcm.samples.data(),
-                                                            total_frames, &pos, dst, room, vol);
+                    const unsigned got = audio_mix_resample(&resampler, pcm.Data(), total_frames,
+                                                            &pos, dst, room, vol);
                     audio_mix_input_commit(input, got);
                     done += got;
                     if (got < room) {
