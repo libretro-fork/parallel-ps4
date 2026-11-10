@@ -1314,16 +1314,6 @@ set(IMGUI src/imgui/imgui_config.h
           src/imgui/renderer/font_stack.h
           src/imgui/renderer/texture_manager.cpp
           src/imgui/renderer/texture_manager.h
-          src/imgui/big_picture/big_picture.cpp
-          src/imgui/big_picture/big_picture.h
-          src/imgui/big_picture/settings_dialog_imgui.cpp
-          src/imgui/big_picture/settings_dialog_imgui.h
-          src/imgui/big_picture/settings_dialog_layer.cpp
-          src/imgui/big_picture/settings_dialog_layer.h
-          src/imgui/big_picture/imgui_impl_sdl3_big_picture.cpp
-          src/imgui/big_picture/imgui_impl_sdl3_big_picture.h
-          src/imgui/big_picture/imgui_impl_sdlrenderer3.cpp
-          src/imgui/big_picture/imgui_impl_sdlrenderer3.h
 )
 
 set(INPUT src/input/controller.cpp
@@ -1372,9 +1362,6 @@ set(SHADNET src/shadnet/client.cpp
             src/shadnet/server_probe.h
             "${SHADNET_PROTO_OUT}/shadnet.pb.cc"
 )
-if (APPLE)
-    list(APPEND EMULATOR src/sdl_window_apple.mm)
-endif()
 
 if(NOT ENABLE_TESTS)
 
@@ -1622,13 +1609,8 @@ cmrc_add_resource_library(embedded-resources
         ALIAS res::embedded
         NAMESPACE res
         src/resources/big_picture/controller.png
-        src/resources/big_picture/experimental.png
-        src/resources/big_picture/folder.png
-        src/resources/big_picture/graphics.png
-        src/resources/big_picture/log.png
         src/resources/big_picture/profiles.png
         src/resources/big_picture/settings.png
-        src/resources/big_picture/trophy.png
         src/resources/bronze.png
         src/resources/gold.png
         src/resources/platinum.png

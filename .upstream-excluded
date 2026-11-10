@@ -17,3 +17,10 @@ src/core/libraries/audio/openal_audio_out.cpp
 src/core/libraries/audio/openal_manager.h
 src/core/libraries/audio3d/audio3d_openal.cpp
 src/core/libraries/audio3d/audio3d_openal.h
+src/imgui/big_picture
+src/sdl_window_apple.mm
+src/resources/big_picture/experimental.png
+src/resources/big_picture/folder.png
+src/resources/big_picture/graphics.png
+src/resources/big_picture/log.png
+src/resources/big_picture/trophy.png

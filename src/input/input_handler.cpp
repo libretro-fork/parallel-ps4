@@ -25,7 +25,6 @@
 #include "core/devtools/layer.h"
 #include "core/emulator_settings.h"
 #include "core/emulator_state.h"
-#include "imgui/big_picture/settings_dialog_layer.h"
 #include "input/controller.h"
 #include "input/input_mouse.h"
 
@@ -786,7 +785,8 @@ void ControllerOutput::FinalizeUpdate(u8 gamepad_index) {
             PushSDLEvent(SDL_EVENT_RDOC_CAPTURE);
             break;
         case HOTKEY_SCREENSHOT_WITH_OVERLAYS:
-            PushSDLEvent(SDL_EVENT_SCREENSHOT_WITH_OVERLAYS);
+        case HOTKEY_OPEN_EMULATOR_SETTINGS:
+            // The frontend takes screenshots, and the emulator's settings are core options.
             break;
         case HOTKEY_ADD_VIRTUAL_USER:
             PushSDLEvent(SDL_EVENT_ADD_VIRTUAL_USER);
@@ -810,11 +810,6 @@ void ControllerOutput::FinalizeUpdate(u8 gamepad_index) {
             break;
         case HOTKEY_QUIT:
             PushSDLEvent(SDL_EVENT_QUIT_DIALOG);
-            break;
-        case HOTKEY_OPEN_EMULATOR_SETTINGS:
-            if (new_button_state) {
-                ImGuiEmuSettings::OpenInGameSettingsDialog();
-            }
             break;
         case HOTKEY_TOGGLE_FRIENDS:
             PushSDLEvent(SDL_EVENT_TOGGLE_FRIENDS);

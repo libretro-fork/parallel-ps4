@@ -7,14 +7,11 @@
 #include <SDL3/SDL_properties.h>
 #include <SDL3/SDL_timer.h>
 #include <SDL3/SDL_video.h>
-#include <cmrc/cmrc.hpp>
-#include <stb_image.h>
 
 #include "common/assert.h"
 #include "common/elf_info.h"
 #include "common/io_file.h"
 #include "common/logging/formatter.h"
-#include "common/scope_exit.h"
 #include "core/debug_state.h"
 #include "core/devtools/layer.h"
 #include "core/emulator_settings.h"
@@ -36,8 +33,6 @@
 #include <core/emulator_settings.h>
 #include "core/libraries/keyboard/keyboard.h"
 #include "core/libraries/mouse/sdl_mouse.h"
-
-CMRC_DECLARE(res);
 
 namespace Frontend {
 
@@ -179,12 +174,6 @@ WindowSDL::WindowSDL(s32 width_, s32 height_, Input::GameControllers* controller
 
 WindowSDL::~WindowSDL() = default;
 
-void WindowSDL::SetIcon(std::span<const u8> png_data) {
-    // The window of the core is hidden and never shown, so it has no use for an icon, and the
-    // video driver it is on under Linux cannot take one.
-    (void)png_data;
-}
-
 void WindowSDL::WaitEvent() {
     // Called on main thread
     SDL_Event event;
@@ -311,12 +300,7 @@ void WindowSDL::WaitEvent() {
     case SDL_EVENT_RDOC_CAPTURE:
         if (VideoCore::IsRenderDocLoaded()) {
             VideoCore::TriggerCapture();
-        } else {
-            VideoCore::RequestScreenshot(VideoCore::ScreenshotRequest::GameOnly);
         }
-        break;
-    case SDL_EVENT_SCREENSHOT_WITH_OVERLAYS:
-        VideoCore::RequestScreenshot(VideoCore::ScreenshotRequest::WithOverlays);
         break;
     default:
         break;
@@ -439,40 +423,6 @@ void WindowSDL::OnGamepadEvent(const SDL_Event* event) {
         // update bindings
         Input::ActivateOutputsFromInputs();
     }
-}
-
-#ifndef __APPLE__
-void SetWindowIcon(SDL_Window* window, const std::vector<u8>& png) {
-    int imageWidth = 0;
-    int imageHeight = 0;
-    constexpr int numChannels = 4;
-    unsigned char* imageData = stbi_load_from_memory(png.data(), png.size(), &imageWidth,
-                                                     &imageHeight, nullptr, numChannels);
-    if (imageData == nullptr) {
-        LOG_ERROR(Core, "Failed to load window icon image: {}", stbi_failure_reason());
-        return;
-    }
-    SCOPE_EXIT {
-        stbi_image_free(imageData);
-    };
-
-    SDL_Surface* surface = SDL_CreateSurfaceFrom(imageWidth, imageHeight, SDL_PIXELFORMAT_RGBA32,
-                                                 imageData, imageWidth * numChannels);
-    if (surface == nullptr) {
-        LOG_ERROR(Core, "Failed to create SDL surface for window icon: {}", SDL_GetError());
-    }
-    if (!SDL_SetWindowIcon(window, surface)) {
-        LOG_ERROR(Core, "Failed to set SDL window icon: {}", SDL_GetError());
-    }
-    SDL_DestroySurface(surface);
-}
-#endif
-
-void SetDefaultWindowIcon(SDL_Window* window) {
-    const auto resource = cmrc::res::get_filesystem();
-    const auto file = resource.open("src/resources/shadps4.png");
-    const std::vector<u8> texData = std::vector<u8>(file.begin(), file.end());
-    SetWindowIcon(window, texData);
 }
 
 } // namespace Frontend

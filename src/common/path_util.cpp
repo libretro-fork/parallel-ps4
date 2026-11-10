@@ -129,7 +129,6 @@ static std::unordered_map<PathType, fs::path> MakeUserPaths() {
 
     create_path(PathType::UserDir, user_dir);
     create_path(PathType::LogDir, user_dir / LOG_DIR);
-    create_path(PathType::ScreenshotsDir, user_dir / SCREENSHOTS_DIR);
     create_path(PathType::ShaderDir, user_dir / SHADER_DIR);
     create_path(PathType::GameDataDir, user_dir / GAMEDATA_DIR);
     create_path(PathType::TempDataDir, user_dir / TEMPDATA_DIR);
