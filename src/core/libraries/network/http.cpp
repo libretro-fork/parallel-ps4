@@ -33,10 +33,10 @@
 #include "core/libraries/network/http.h"
 #include "http_error.h"
 
-#if __has_include(<httplib.h>)
-#include <httplib.h>
-#define ORBIS_HTTP_WITH_HTTPLIB 1
-#endif
+#include <net/net_http.h>
+#include <net/net_socket_ssl.h>
+
+#include "core/net/net_service.h"
 
 namespace Libraries::Http {
 
@@ -147,7 +147,7 @@ struct HttpState {
     // Contexts where sceHttpsLoadCert was called. We can't actually parse the
     // PS4 cert blobs, but we use this as a signal that
     // the game expects custom CA validation. Connections under these contexts
-    // bypass cpp-httplib's default verification so endpoints aren't blocked
+    // skip the TLS client's default verification so endpoints aren't blocked
     std::unordered_set<int> contexts_with_loaded_certs;
     std::unordered_map<int, HttpTemplate> templates;
     std::unordered_map<int, HttpConnection> connections;
@@ -407,57 +407,108 @@ static void LogSendRequestSettings(const HttpRequest& req, int reqId, u64 body_s
     LOG_INFO(Lib_Http, "--- end dump reqId={} ---", reqId);
 }
 
-#ifdef CPPHTTPLIB_OPENSSL_SUPPORT
-#define ORBIS_HTTP_HAS_HTTPS 1
-#else
-#define ORBIS_HTTP_HAS_HTTPS 0
-#endif
+// A request run by the network service thread, which owns libretro-common's net_http.
+struct HttpTransfer {
+    // In
+    std::string url;
+    std::string method;
+    std::string headers; // "Name: value\r\n" lines
+    const u8* body = nullptr;
+    size_t body_size = 0;
+    std::string content_type;
+    bool no_verify = false;
+    int timeout_ms = 0;
+    // Out
+    int status = -1;
+    char* header_block = nullptr; // net_http's block, freed with free()
+    std::vector<u8> data;
+    const char* failure = nullptr; // the transport stage that failed
+    int failure_code = 0;
+    bool timed_out = false;
+};
 
-#ifdef ORBIS_HTTP_WITH_HTTPLIB
-static s32 TranslateHttplibError(httplib::Error err) {
-    using E = httplib::Error;
-    switch (err) {
-    case E::Success:
-        return ORBIS_OK;
-    // TCP couldn't be established (DNS resolved but the host refused / no
-    // route / unreachable). Closest firmware code is ResolverEnohost.
-    case E::Connection:
-        return ORBIS_HTTP_ERROR_RESOLVER_ENOHOST;
-    // Timed out at connect time or during the request.
-    case E::ConnectionTimeout:
-    case E::Timeout:
-        return ORBIS_HTTP_ERROR_TIMEOUT;
-    // TCP set up but the stream broke mid-flight, or peer closed early.
-    case E::Read:
-    case E::Write:
-    case E::ConnectionClosed:
-        return ORBIS_HTTP_ERROR_BROKEN;
-    // Anything TLS-related.
-    case E::SSLConnection:
-    case E::SSLLoadingCerts:
-    case E::SSLServerVerification:
-    case E::SSLServerHostnameVerification:
-        return ORBIS_HTTP_ERROR_SSL;
-    // CONNECT-method proxy handshake failed.
-    case E::ProxyConnection:
-        return ORBIS_HTTP_ERROR_PROXY;
-    // User aborted or library cancelled.
-    case E::Canceled:
-        return ORBIS_HTTP_ERROR_ABORTED;
-    // Exceeded our redirect-loop bound
-    case E::ExceedRedirectCount:
-        return ORBIS_HTTP_ERROR_NETWORK;
-    // Internal-bug paths that exist across all cpp-httplib versions.
-    case E::Unknown:
-    case E::BindIPAddress:
-    case E::UnsupportedMultipartBoundaryChars:
-    case E::Compression:
-        return ORBIS_HTTP_ERROR_UNKNOWN;
-    default:
-        return ORBIS_HTTP_ERROR_UNKNOWN;
+static void RunTransfer(void* p) {
+    auto* t = static_cast<HttpTransfer*>(p);
+    http_connection_t* conn = net_http_connection_new(t->url.c_str(), t->method.c_str(), nullptr);
+    if (!conn) {
+        t->failure = "bad_url";
+        return;
     }
+    while (!net_http_connection_iterate(conn)) {
+    }
+    if (!net_http_connection_done(conn)) {
+        net_http_connection_free(conn);
+        t->failure = "bad_url";
+        return;
+    }
+    if (!t->headers.empty()) {
+        net_http_connection_set_headers(conn, t->headers.c_str());
+    }
+    if (t->body_size > 0 || !t->content_type.empty()) {
+        net_http_connection_set_content(conn,
+                                        t->content_type.empty() ? nullptr : t->content_type.c_str(),
+                                        t->body_size, t->body);
+    }
+    // libSceHttp follows redirects by its own rules
+    net_http_connection_set_redirects(conn, false);
+    ssl_socket_retro_config tls{};
+    if (t->no_verify) {
+        tls.flags = SSL_RETRO_NO_VERIFY;
+        net_http_connection_set_tls(conn, &tls);
+    }
+    http_t* http = net_http_new(conn);
+    net_http_connection_free(conn);
+    if (!http) {
+        t->failure = "request_oom";
+        return;
+    }
+    const auto deadline =
+        std::chrono::steady_clock::now() + std::chrono::milliseconds(t->timeout_ms);
+    while (!net_http_update(http, nullptr, nullptr)) {
+        if (std::chrono::steady_clock::now() >= deadline) {
+            t->timed_out = true;
+            break;
+        }
+        net_http_wait(http, 50);
+    }
+    if (!t->timed_out) {
+        // Any parsed status is a response, a 3xx or 4xx included; net_http_error counts
+        // those as errors too
+        t->failure = net_http_failure(http, &t->failure_code);
+        if (!t->failure && net_http_status(http) > 0) {
+            t->status = net_http_status(http);
+            t->header_block = net_http_headers_take(http, true);
+            size_t len = 0;
+            if (u8* data = net_http_data(http, &len, true)) {
+                t->data.assign(data, data + len);
+                free(data);
+            }
+        } else if (!t->failure) {
+            t->failure = "transfer_failed";
+        }
+    }
+    net_http_delete(http);
 }
-#endif // ORBIS_HTTP_WITH_HTTPLIB
+
+// net_http's failed transport stage as libSceHttp reports it.
+static s32 TranslateTransportFailure(const HttpTransfer& t) {
+    if (t.timed_out) {
+        return ORBIS_HTTP_ERROR_TIMEOUT;
+    }
+    const std::string_view stage = t.failure ? t.failure : "";
+    if (stage == "dns_lookup_failed" || stage == "socket_connect_failed") {
+        // DNS or TCP could not reach the host. Closest firmware code is ResolverEnohost.
+        return ORBIS_HTTP_ERROR_RESOLVER_ENOHOST;
+    }
+    if (stage.starts_with("ssl_")) {
+        return ORBIS_HTTP_ERROR_SSL;
+    }
+    if (stage.starts_with("receive_") || stage.starts_with("socket_send") ||
+        stage == "transfer_failed") {
+        return ORBIS_HTTP_ERROR_BROKEN;
+    }
+    return ORBIS_HTTP_ERROR_UNKNOWN;
+}
 
 constexpr int MaxRedirects = 5;
 
@@ -548,7 +599,7 @@ std::optional<ResolvedRedirect> ResolveRedirectLocation(const std::string& curre
 
 // Inflate a strictly GZIP-formatted body (header + deflate stream + trailer), into a buffer of
 // the size its trailer records, made once.
-static std::optional<std::vector<u8>> InflateGzipBody(const std::string& compressed) {
+static std::optional<std::vector<u8>> InflateGzipBody(const std::vector<u8>& compressed) {
     if (compressed.empty()) {
         return std::vector<u8>{};
     }
@@ -588,15 +639,6 @@ static std::optional<std::vector<u8>> InflateGzipBody(const std::string& compres
 static s32 RunRealHttpRequest(const SendRequestPlan& plan_in, HttpResponse& out_res,
                               u32& out_event_bits) {
     out_event_bits = 0;
-#ifndef ORBIS_HTTP_WITH_HTTPLIB
-    // Test or no-httplib build: behave like a transport failure.
-    SynthesizeTransportFailureResponse(out_res);
-    LOG_INFO(Lib_Http,
-             "real I/O path requested but httplib not available; "
-             "falling back to transport failure for {}://{}{}",
-             plan_in.scheme, plan_in.host, plan_in.path);
-    return ORBIS_HTTP_ERROR_RESOLVER_ENODNS;
-#else
     // Mutable copy: PS4-faithful redirect loop rewrites scheme/host/port/path/method.
     SendRequestPlan plan = plan_in;
 
@@ -654,35 +696,60 @@ static s32 RunRealHttpRequest(const SendRequestPlan& plan_in, HttpResponse& out_
             }
         }
 
-        if (plan.scheme == "https" && !ORBIS_HTTP_HAS_HTTPS) {
-            LOG_ERROR(Lib_Http, "HTTPS request but cpp-httplib lacks OpenSSL support");
-            SynthesizeTransportFailureResponse(out_res);
-            return ORBIS_HTTP_ERROR_SSL;
-        }
-
         std::string base_url = plan.scheme + "://" + plan.host;
         if ((plan.scheme == "https" && plan.port != 443) ||
             (plan.scheme == "http" && plan.port != 80)) {
             base_url += ":" + std::to_string(plan.port);
         }
-        httplib::Client cli(base_url);
-        cli.set_connection_timeout(pick_timeout_seconds(plan.settings.connect_timeout_us, 30));
-        cli.set_read_timeout(pick_timeout_seconds(plan.settings.recv_timeout_us, 120));
-        cli.set_write_timeout(pick_timeout_seconds(plan.settings.send_timeout_us, 120));
 
-        // We always handle redirects manually per PS4 rules
-        cli.set_follow_location(false);
-        cli.set_decompress(false);
+        HttpTransfer transfer;
+        transfer.url = base_url + plan.path;
+        transfer.method = [&]() -> std::string {
+            switch (plan.method) {
+            case ORBIS_HTTP_METHOD_GET:
+                return "GET";
+            case ORBIS_HTTP_METHOD_POST:
+                return "POST";
+            case ORBIS_HTTP_METHOD_HEAD:
+                return "HEAD";
+            case ORBIS_HTTP_METHOD_OPTIONS:
+                return "OPTIONS";
+            case ORBIS_HTTP_METHOD_PUT:
+                return "PUT";
+            case ORBIS_HTTP_METHOD_DELETE:
+                return "DELETE";
+            case ORBIS_HTTP_METHOD_CUSTOM:
+                return plan.method_str.empty() ? "GET" : plan.method_str;
+            default:
+                LOG_ERROR(Lib_Http, "Unsupported method {}; using GET", plan.method);
+                return "GET";
+            }
+        }();
+        // Both timeouts bound the whole transfer here
+        const u32 connect_s = pick_timeout_seconds(plan.settings.connect_timeout_us, 30).count();
+        const u32 recv_s = pick_timeout_seconds(plan.settings.recv_timeout_us, 120).count();
+        transfer.timeout_ms = static_cast<int>((connect_s + recv_s) * 1000);
 
         bool game_set_accept_encoding = false;
+        bool game_set_content_type = false;
         for (const auto& [k, v] : plan.headers) {
-            if (HeaderNameMatches(k, "Accept-Encoding")) {
-                game_set_accept_encoding = true;
-                break;
+            // net_http writes Host and Content-Length itself
+            if (HeaderNameMatches(k, "Host") || HeaderNameMatches(k, "Content-Length")) {
+                continue;
             }
+            game_set_accept_encoding |= HeaderNameMatches(k, "Accept-Encoding");
+            game_set_content_type |= HeaderNameMatches(k, "Content-Type");
+            transfer.headers += k + ": " + std::string(TrimHeaderValue(v)) + "\r\n";
+        }
+        if (plan.settings.accept_encoding_gzip && !game_set_accept_encoding) {
+            transfer.headers += "Accept-Encoding: gzip\r\n";
+        }
+        transfer.body = plan.body.empty() ? nullptr : plan.body.data();
+        transfer.body_size = plan.body.size();
+        if (!game_set_content_type && !plan.content_type.empty()) {
+            transfer.content_type = plan.content_type;
         }
 
-#ifdef CPPHTTPLIB_OPENSSL_SUPPORT
         if (plan.scheme == "https") {
             const bool config_disabled_verify = emu_settings_get_disable_https();
             const bool game_disabled_verify =
@@ -695,7 +762,7 @@ static s32 RunRealHttpRequest(const SendRequestPlan& plan_in, HttpResponse& out_
                          "bypassing cert verification",
                          plan.scheme, plan.host);
             }
-            cli.enable_server_certificate_verification(verify_server);
+            transfer.no_verify = !verify_server;
             if (config_disabled_verify) {
                 LOG_INFO(Lib_Http, "{}://{}: server cert verification disabled by configuration",
                          plan.scheme, plan.host);
@@ -704,75 +771,32 @@ static s32 RunRealHttpRequest(const SendRequestPlan& plan_in, HttpResponse& out_
                          plan.scheme, plan.host, plan.settings.ssl_flags);
             }
         }
-#endif
 
-        httplib::Headers headers;
-        for (const auto& [k, v] : plan.headers) {
-            headers.emplace(k, std::string(TrimHeaderValue(v)));
-        }
-        if (plan.settings.accept_encoding_gzip && !game_set_accept_encoding) {
-            headers.emplace("Accept-Encoding", "gzip");
-        }
-
-        const char* body_ptr =
-            plan.body.empty() ? "" : reinterpret_cast<const char*>(plan.body.data());
-        const size_t body_size = plan.body.size();
-
-        auto result = [&]() {
-            switch (plan.method) {
-            case ORBIS_HTTP_METHOD_GET:
-                return cli.Get(plan.path, headers);
-            case ORBIS_HTTP_METHOD_POST:
-                return cli.Post(plan.path, headers, body_ptr, body_size, plan.content_type);
-            case ORBIS_HTTP_METHOD_HEAD:
-                return cli.Head(plan.path, headers);
-            case ORBIS_HTTP_METHOD_OPTIONS:
-                return cli.Options(plan.path, headers);
-            case ORBIS_HTTP_METHOD_PUT:
-                return cli.Put(plan.path, headers, body_ptr, body_size, plan.content_type);
-            case ORBIS_HTTP_METHOD_DELETE:
-                return cli.Delete(plan.path, headers, body_ptr, body_size, plan.content_type);
-            case ORBIS_HTTP_METHOD_CUSTOM: {
-                httplib::Request creq;
-                creq.method = plan.method_str.empty() ? "GET" : plan.method_str;
-                creq.path = plan.path;
-                creq.headers = headers;
-                if (body_size > 0) {
-                    creq.body.assign(body_ptr, body_size);
-                }
-                return cli.send(creq);
-            }
-            default:
-                LOG_ERROR(Lib_Http, "Unsupported method {}; using GET", plan.method);
-                return cli.Get(plan.path, headers);
-            }
-        }();
-
-        if (!result) {
-            const int err_val = static_cast<int>(result.error());
-            LOG_ERROR(Lib_Http, "cpp-httplib failed for {} {}{}: error={} ({})",
-                      HttpMethodName(plan.method), base_url, plan.path, err_val,
-                      httplib::to_string(static_cast<httplib::Error>(err_val)));
+        // net_http belongs to the network service thread; this call was asked to block
+        if (!Core::Net::NetService::Instance().Run(&RunTransfer, &transfer) ||
+            transfer.status < 0) {
+            LOG_ERROR(Lib_Http, "{} {}{} failed: {} ({}){}", HttpMethodName(plan.method), base_url,
+                      plan.path, transfer.failure ? transfer.failure : "no service",
+                      transfer.failure_code, transfer.timed_out ? ", timed out" : "");
+            free(transfer.header_block);
             SynthesizeTransportFailureResponse(out_res);
-            return TranslateHttplibError(result.error());
+            return TranslateTransportFailure(transfer);
         }
+        // Free the header block on every way out
+        const std::unique_ptr<char, decltype(&free)> header_block(transfer.header_block, &free);
+        const char* const hdrs = header_block ? header_block.get() : "\0";
 
         // Populate response (overwrites any prior-iteration 3xx).
-        out_res.status_code = result->status;
+        out_res.status_code = transfer.status;
         out_res.content_length_result = 0;
         out_res.read_cursor = 0;
 
         // Inflate only when the response is actually GZIP-encoded and the flag is enabled
-        std::string content_encoding;
-        for (const auto& [k, v] : result->headers) {
-            if (HeaderNameMatches(k, "Content-Encoding")) {
-                content_encoding = v;
-                break;
-            }
-        }
+        const char* content_encoding = net_http_header_value(hdrs, "Content-Encoding");
         bool inflated = false;
-        if (plan.settings.inflate_gzip && HeaderNameMatches(content_encoding, "gzip")) {
-            if (auto inflated_body = InflateGzipBody(result->body)) {
+        if (plan.settings.inflate_gzip && content_encoding &&
+            HeaderNameMatches(content_encoding, "gzip")) {
+            if (auto inflated_body = InflateGzipBody(transfer.data)) {
                 out_res.body = std::move(*inflated_body);
                 inflated = true;
             } else {
@@ -783,19 +807,21 @@ static s32 RunRealHttpRequest(const SendRequestPlan& plan_in, HttpResponse& out_
             }
         }
         if (!inflated) {
-            out_res.body.assign(result->body.begin(), result->body.end());
+            out_res.body = std::move(transfer.data);
         }
         out_res.content_length = out_res.body.size();
         std::string reason;
         {
-            const std::string label = HttpStatusLabel(result->status);
+            const std::string label = HttpStatusLabel(transfer.status);
             const auto space = label.find(' ');
             reason = (space == std::string::npos) ? label : label.substr(space + 1);
         }
         out_res.all_headers_blob =
-            "HTTP/1.1 " + std::to_string(result->status) + " " + reason + "\r\n";
-        for (const auto& [k, v] : result->headers) {
-            out_res.all_headers_blob += k + ": " + v + "\r\n";
+            "HTTP/1.1 " + std::to_string(transfer.status) + " " + reason + "\r\n";
+        for (const char* h = net_http_header_next(hdrs, nullptr); h;
+             h = net_http_header_next(hdrs, h)) {
+            out_res.all_headers_blob += h;
+            out_res.all_headers_blob += "\r\n";
         }
         out_res.all_headers_blob += "\r\n";
 
@@ -813,13 +839,8 @@ static s32 RunRealHttpRequest(const SendRequestPlan& plan_in, HttpResponse& out_
             break;
         }
 
-        std::string location;
-        for (const auto& [k, v] : result->headers) {
-            if (HeaderNameMatches(k, "Location")) {
-                location = v;
-                break;
-            }
-        }
+        const char* location_value = net_http_header_value(hdrs, "Location");
+        const std::string location = location_value ? location_value : "";
         if (location.empty()) {
             LOG_INFO(Lib_Http, "{} response without Location header; returning as-is",
                      out_res.status_code);
@@ -869,8 +890,7 @@ static s32 RunRealHttpRequest(const SendRequestPlan& plan_in, HttpResponse& out_
         }
 
         // Cross-host: rewrite any game-supplied Host header
-        // If the game didn't add one, cpp-httplib auto-generates the correct
-        // value from the new base_url on the next iteration.
+        // If the game didn't add one, net_http writes the right one from the new URL.
         if (host_changed) {
             std::string host_value = plan.host;
             const bool default_port = (plan.scheme == "https" && plan.port == 443) ||
@@ -893,7 +913,6 @@ static s32 RunRealHttpRequest(const SendRequestPlan& plan_in, HttpResponse& out_
     out_event_bits =
         ORBIS_HTTP_NB_EVENT_IN | ORBIS_HTTP_NB_EVENT_OUT | ORBIS_HTTP_NB_EVENT_RESOLVED;
     return 0;
-#endif // ORBIS_HTTP_WITH_HTTPLIB
 }
 
 static std::string_view TrimHeaderValue(std::string_view value) {
@@ -1818,7 +1837,7 @@ int PS4_SYSV_ABI sceHttpsLoadCert(int libhttpCtxId, int caCertNum, const void** 
     // Firmware would hand caList/cert/privKey to libSceSsl, which would parse
     // them into an X509_STORE used by the TLS layer. We don't implement that
     // pipeline. Instead, we record that this context expects custom CA-based
-    // verification, and at TLS-handshake time we bypass cpp-httplib's default
+    // verification, and at TLS-handshake time we skip the TLS client's default
     // CA verification so the game's private-CA-signed endpoints aren't blocked
     // by our system CA store not knowing about them.
     g_state.contexts_with_loaded_certs.insert(libhttpCtxId);

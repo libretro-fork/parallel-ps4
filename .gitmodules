@@ -58,9 +58,6 @@
 	path = externals/freetype
 	url = https://github.com/freetype/freetype.git
 	shallow = true
-[submodule "externals/cpp-httplib"]
-	path = externals/cpp-httplib
-	url = https://github.com/shadexternals/cpp-httplib.git
 [submodule "externals/libusb"]
 	path = externals/libusb
 	url = https://github.com/shadexternals/libusb.git
@@ -70,9 +67,6 @@
 	url = https://github.com/gabime/spdlog.git
 	shallow = true
 	branch = v2.x
-[submodule "externals/libressl"]
-	path = externals/libressl
-	url = https://github.com/shadexternals/libressl
 [submodule "externals/mesa-kosmickrisp"]
 	path = externals/mesa-kosmickrisp
 	url = https://github.com/shadexternals/mesa-kosmickrisp

@@ -267,7 +267,6 @@ if (ENABLE_SYSTEM_LIBRARIES)
     find_package(glslang 15 CONFIG)
     find_package(half 1.12.0 MODULE)
     find_package(magic_enum 0.9.7 CONFIG)
-    find_package(LibreSSL 4.3.1 MODULE)
     find_package(RenderDoc 1.6.0 MODULE)
     find_package(tsl-robin-map 1.3.0 CONFIG)
     find_package(VulkanHeaders 1.4.330 CONFIG)
@@ -884,6 +883,8 @@ set(NET_CORE  src/core/net/guest_net.cpp
               src/core/net/guest_net.h
               src/core/net/host_net.cpp
               src/core/net/host_net.h
+              src/core/net/net_service.cpp
+              src/core/net/net_service.h
               src/core/net/p2p_codec.cpp
               src/core/net/p2p_codec.h
               src/core/net/p2p_crypto.cpp
@@ -1388,6 +1389,10 @@ set(LIBRETRO_COMMON_SOURCES
     ${LIBRETRO_COMMON_DIR}/compat/compat_posix_string.c
     ${LIBRETRO_COMMON_DIR}/compat/compat_strcasestr.c
     ${LIBRETRO_COMMON_DIR}/compat/compat_strl.c
+    ${LIBRETRO_COMMON_DIR}/crypto/crypto.c
+    ${LIBRETRO_COMMON_DIR}/crypto/kdf.c
+    ${LIBRETRO_COMMON_DIR}/crypto/pk.c
+    ${LIBRETRO_COMMON_DIR}/crypto/x509.c
     ${LIBRETRO_COMMON_DIR}/encodings/encoding_base64.c
     ${LIBRETRO_COMMON_DIR}/encodings/encoding_crc32.c
     ${LIBRETRO_COMMON_DIR}/encodings/encoding_deflate.c
@@ -1412,10 +1417,12 @@ set(LIBRETRO_COMMON_SOURCES
     ${LIBRETRO_COMMON_DIR}/formats/png/rpng_encode.c
     ${LIBRETRO_COMMON_DIR}/formats/xml/rxml.c
     ${LIBRETRO_COMMON_DIR}/formats/zar/zar.c
+    ${LIBRETRO_COMMON_DIR}/hash/lrc_hash.c
     ${LIBRETRO_COMMON_DIR}/lists/string_list.c
     ${LIBRETRO_COMMON_DIR}/net/net_compat.c
     ${LIBRETRO_COMMON_DIR}/net/net_http.c
     ${LIBRETRO_COMMON_DIR}/net/net_socket.c
+    ${LIBRETRO_COMMON_DIR}/net/net_socket_ssl_retro.c
     ${LIBRETRO_COMMON_DIR}/net/net_upnp.c
     ${LIBRETRO_COMMON_DIR}/queues/retro_spsc.c
     ${LIBRETRO_COMMON_DIR}/queues/retro_waitable_spsc.c
@@ -1430,10 +1437,14 @@ set(LIBRETRO_COMMON_SOURCES
     ${LIBRETRO_COMMON_DIR}/string/rstrtod.c
     ${LIBRETRO_COMMON_DIR}/string/stdstring.c
     ${LIBRETRO_COMMON_DIR}/time/rtime.c
+    ${LIBRETRO_COMMON_DIR}/utils/md5.c
     ${LIBRETRO_COMMON_DIR}/vfs/vfs_implementation.c
 )
 target_sources(shadps4 PRIVATE ${LIBRETRO_COMMON_SOURCES})
 target_include_directories(shadps4 PRIVATE ${LIBRETRO_COMMON_DIR}/include)
+# HTTPS through libretro-common's own TLS client
+set_source_files_properties(${LIBRETRO_COMMON_DIR}/net/net_http.c PROPERTIES
+    COMPILE_DEFINITIONS "HAVE_SSL;HAVE_RETROSSL")
 # AAC in MP4/M4A, for the music player
 set_source_files_properties(${LIBRETRO_COMMON_DIR}/formats/mp4/rmp4_audio.c PROPERTIES
     COMPILE_DEFINITIONS HAVE_RAAC)
@@ -1504,7 +1515,6 @@ create_target_directory_groups(shadps4)
 target_link_libraries(shadps4 PRIVATE spdlog::spdlog)
 target_link_libraries(shadps4 PRIVATE magic_enum::magic_enum fmt::fmt tsl::robin_map xbyak::xbyak RenderDoc::API Dear_ImGui gcn half::half)
 target_link_libraries(shadps4 PRIVATE Boost::headers GPUOpen::VulkanMemoryAllocator sirit Vulkan::Headers Zydis::Zydis)
-target_link_libraries(shadps4 PRIVATE Cpp_Httplib)
 target_link_libraries(shadps4 PRIVATE Freetype::Freetype)
 
 if (ENABLE_FEX_GUEST_CPU)

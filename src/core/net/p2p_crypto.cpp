@@ -3,10 +3,8 @@
 
 #include <algorithm>
 
-#include <openssl/crypto.h>
-#include <openssl/evp.h>
-#include <openssl/hmac.h>
-#include <openssl/rand.h>
+#include <crypto/crypto.h>
+#include <crypto/kdf.h>
 
 #include "core/net/p2p_crypto.h"
 
@@ -21,37 +19,32 @@ bool Crypt(std::vector<u8>& payload, const P2PKey& key, const std::array<u8, 4>&
     for (size_t i = 0; i < iv.size(); ++i) {
         iv[i] = iv_seed[i & 3];
     }
-    EVP_CIPHER_CTX* context = EVP_CIPHER_CTX_new();
-    if (!context) {
+    aes_ctx aes;
+    if (aes_init(&aes, key.value.data(), key.value.size()) != 0) {
         return false;
     }
-    int output_size = 0;
-    int final_size = 0;
-    const bool ok = EVP_CipherInit_ex(context, EVP_aes_128_cfb128(), nullptr, key.value.data(),
-                                      iv.data(), encrypt ? 1 : 0) == 1 &&
-                    EVP_CipherUpdate(context, payload.data(), &output_size, payload.data(),
-                                     static_cast<int>(payload.size())) == 1 &&
-                    EVP_CipherFinal_ex(context, payload.data() + output_size, &final_size) == 1;
-    EVP_CIPHER_CTX_free(context);
-    return ok && static_cast<size_t>(output_size + final_size) == payload.size();
+    unsigned num = 0;
+    if (encrypt) {
+        aes_cfb128_encrypt(&aes, iv.data(), &num, payload.data(), payload.data(), payload.size());
+    } else {
+        aes_cfb128_decrypt(&aes, iv.data(), &num, payload.data(), payload.data(), payload.size());
+    }
+    crypto_memzero(&aes, sizeof(aes));
+    return true;
 }
 
 std::array<u8, SignatureSize> Sign(std::span<const u8> body, const P2PKey& key) {
-    std::array<u8, EVP_MAX_MD_SIZE> digest{};
-    unsigned int digest_size = 0;
-    HMAC(EVP_sha1(), key.value.data(), static_cast<int>(key.value.size()), body.data(), body.size(),
-         digest.data(), &digest_size);
+    std::array<u8, 20> digest{};
+    hmac_sha1(key.value.data(), key.value.size(), body.data(), body.size(), digest.data());
     std::array<u8, SignatureSize> signature{};
     std::copy_n(digest.begin(), signature.size(), signature.begin());
     return signature;
 }
 
 std::array<u8, 4> DeriveCommunicationId(std::span<const u8, 16> value) {
-    std::array<u8, EVP_MAX_MD_SIZE> digest{};
-    unsigned int digest_size = 0;
+    std::array<u8, 20> digest{};
     const u8 empty = 0;
-    HMAC(EVP_sha1(), value.data(), static_cast<int>(value.size()), &empty, 0, digest.data(),
-         &digest_size);
+    hmac_sha1(value.data(), value.size(), &empty, 0, digest.data());
     std::array<u8, 4> id{};
     std::copy_n(digest.begin(), id.size(), id.begin());
     return id;
@@ -62,7 +55,7 @@ bool ProtectPayload(std::span<const u8> data, bool encrypt, bool sign, const P2P
     std::vector<u8> body(data.begin(), data.end());
     std::array<u8, IvSeedSize> iv{};
     if (encrypt &&
-        (RAND_bytes(iv.data(), static_cast<int>(iv.size())) != 1 || !Crypt(body, key, iv, true))) {
+        (crypto_random_bytes(iv.data(), iv.size()) != 0 || !Crypt(body, key, iv, true))) {
         return false;
     }
     output.clear();
@@ -98,7 +91,7 @@ bool UnprotectPayload(std::span<const u8> data, bool encrypt, bool sign, const P
     output.assign(data.begin() + offset, data.end());
     if (sign) {
         const auto expected = Sign(output, key);
-        if (CRYPTO_memcmp(signature.data(), expected.data(), signature.size()) != 0) {
+        if (!crypto_memeq_ct(signature.data(), expected.data(), signature.size())) {
             return false;
         }
     }

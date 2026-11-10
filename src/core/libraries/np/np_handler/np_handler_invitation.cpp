@@ -5,13 +5,15 @@
 #include <algorithm>
 #include <chrono>
 #include <cstring>
-#include <httplib.h>
+#include <net/net_http.h>
+
 #include "common/logging/log.h"
 #include "core/emulator_settings.h"
 #include "core/libraries/invitation_dialog/invitation_dialog.h"
 #include "core/libraries/np/np_handler/np_handler.h"
 #include "core/libraries/np/np_handler/np_invitation_json.h"
 #include "core/libraries/system/systemservice.h"
+#include "core/net/net_service.h"
 #include "imgui/invitation_prompt_layer.h"
 
 namespace Libraries::Np {
@@ -62,17 +64,48 @@ bool NpHandler::SendSessionInvitation(s32 user_id, const std::string& session_id
     const std::string path = "/v1/sessions/" + session_id + "/invitations";
     const std::string content_type = "multipart/mixed; boundary=" + boundary;
 
-    httplib::Client cli(base_url);
-    cli.set_connection_timeout(5);
-    cli.set_read_timeout(10);
-    const httplib::Headers headers = {{"Authorization", "Bearer " + token}};
-    const auto res = cli.Post(path.c_str(), headers, body, content_type.c_str());
-    if (!res) {
+    // A POST on the network service thread, which owns net_http
+    struct Post {
+        std::string url, headers, body, content_type;
+        int status = -1;
+    } post{base_url + path, "Authorization: Bearer " + token + "\r\n", body, content_type};
+    const auto run = [](void* p) {
+        auto* post = static_cast<Post*>(p);
+        http_connection_t* conn = net_http_connection_new(post->url.c_str(), "POST", nullptr);
+        if (!conn) {
+            return;
+        }
+        while (!net_http_connection_iterate(conn)) {
+        }
+        if (!net_http_connection_done(conn)) {
+            net_http_connection_free(conn);
+            return;
+        }
+        net_http_connection_set_headers(conn, post->headers.c_str());
+        net_http_connection_set_content(conn, post->content_type.c_str(), post->body.size(),
+                                        post->body.data());
+        http_t* http = net_http_new(conn);
+        net_http_connection_free(conn);
+        if (!http) {
+            return;
+        }
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(15);
+        bool done = false;
+        while (!(done = net_http_update(http, nullptr, nullptr)) &&
+               std::chrono::steady_clock::now() < deadline) {
+            net_http_wait(http, 50);
+        }
+        if (done && !net_http_failure(http, nullptr) && net_http_status(http) > 0) {
+            post->status = net_http_status(http);
+        }
+        net_http_delete(http);
+    };
+    if (!Core::Net::NetService::Instance().Run(run, &post) || post.status < 0) {
         LOG_ERROR(NpHandler, "POST {} failed (no response)", path);
         return false;
     }
-    if (res->status != 200 && res->status != 204) {
-        LOG_ERROR(NpHandler, "POST {} -> HTTP {}", path, res->status);
+    if (post.status != 200 && post.status != 204) {
+        LOG_ERROR(NpHandler, "POST {} -> HTTP {}", path, post.status);
         return false;
     }
     LOG_INFO(NpHandler, "sent invite to {} recipient(s) for session '{}'", to.size(), session_id);
