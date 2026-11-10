@@ -60,13 +60,15 @@ if (NOT TARGET ZLIB::ZLIB)
     )
     FetchContent_MakeAvailable(ZLIB)
     add_library(ZLIB::ZLIB ALIAS zlib)
-    # libpng expects this variable to exist after its find_package(ZLIB)
+    # Only for libpng, which the game's PNG libraries are built on; the core's own inflating is
+    # libretro-common's. libpng expects this variable to exist after its find_package(ZLIB)
     set(ZLIB_INCLUDE_DIRS "${FETCHCONTENT_BASE_DIR}/zlib-build")
 endif()
 
 # FreeType
 if (NOT TARGET Freetype::Freetype)
-    # Keep optional deps off to reduce build surface; zlib stays enabled for compressed fonts.
+    # Keep optional deps off to reduce build surface: the fonts it reads are not compressed.
+    set(FT_DISABLE_ZLIB ON CACHE BOOL "" FORCE)
     set(FT_DISABLE_BZIP2 ON CACHE BOOL "" FORCE)
     set(FT_DISABLE_BROTLI ON CACHE BOOL "" FORCE)
     set(FT_DISABLE_HARFBUZZ ON CACHE BOOL "" FORCE)
@@ -281,14 +283,6 @@ endif()
 # cpp-httplib
 add_library(Cpp_Httplib INTERFACE)
 target_include_directories(Cpp_Httplib INTERFACE cpp-httplib/)
-
-if (TARGET ZLIB::ZLIB)
-    target_link_libraries(Cpp_Httplib INTERFACE ZLIB::ZLIB)
-    target_compile_definitions(Cpp_Httplib INTERFACE CPPHTTPLIB_ZLIB_SUPPORT)
-    message(STATUS "cpp-httplib: zlib support enabled (gzip response decompression)")
-else()
-    message(STATUS "cpp-httplib: zlib not available — gzip responses will arrive uncompressed")
-endif()
 
 if (DEFINED SSL_DEPENDENCIES)
     target_link_libraries(Cpp_Httplib INTERFACE ${SSL_DEPENDENCIES})

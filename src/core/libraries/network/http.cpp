@@ -18,9 +18,9 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
+#include <encodings/deflate.h>
 #include <fmt/format.h>
 #include <nlohmann/json.hpp>
-#include <zlib.h>
 #include "common/elf_info.h"
 #include "common/logging/log.h"
 #include "common/path_util.h"
@@ -723,45 +723,42 @@ std::optional<ResolvedRedirect> ResolveRedirectLocation(const std::string& curre
     return std::nullopt;
 }
 
-// Inflate a strictly GZIP-formatted body (header + deflate stream + trailer).
+// Inflate a strictly GZIP-formatted body (header + deflate stream + trailer), into a buffer of
+// the size its trailer records, made once.
 static std::optional<std::vector<u8>> InflateGzipBody(const std::string& compressed) {
     if (compressed.empty()) {
         return std::vector<u8>{};
     }
-    z_stream strm{};
-    if (inflateInit2(&strm, 15 + 16) != Z_OK) {
+    if (compressed.size() < 18) { // a gzip header and trailer at least
         return std::nullopt;
     }
-    strm.next_in = reinterpret_cast<Bytef*>(const_cast<char*>(compressed.data()));
-    strm.avail_in = static_cast<uInt>(compressed.size());
+    const auto* in = reinterpret_cast<const u8*>(compressed.data());
+    const u8* isize = in + compressed.size() - 4;
+    const size_t size = static_cast<size_t>(isize[0]) | static_cast<size_t>(isize[1]) << 8 |
+                        static_cast<size_t>(isize[2]) << 16 | static_cast<size_t>(isize[3]) << 24;
 
-    std::vector<u8> out;
-    out.resize(std::max<size_t>(compressed.size() * 3, 4096));
+    void* stream = rinflate_new(31);
+    if (!stream) {
+        return std::nullopt;
+    }
+    std::vector<u8> out(size);
+    rinflate_set_in(stream, in, compressed.size());
+    rinflate_set_out(stream, out.data(), out.size());
     size_t produced = 0;
-    int ret = Z_OK;
-    while (true) {
-        if (produced == out.size()) {
-            out.resize(out.size() * 2);
-        }
-        strm.next_out = reinterpret_cast<Bytef*>(out.data() + produced);
-        strm.avail_out = static_cast<uInt>(out.size() - produced);
-        const uInt avail_out_before = strm.avail_out;
-        ret = inflate(&strm, Z_NO_FLUSH);
-        produced += (avail_out_before - strm.avail_out);
-        if (ret == Z_STREAM_END) {
-            break;
-        }
-        if (ret != Z_OK) {
-            inflateEnd(&strm);
-            return std::nullopt;
-        }
-        if (strm.avail_in == 0 && strm.avail_out > 0) {
-            inflateEnd(&strm);
-            return std::nullopt;
+    int ret = RDEFLATE_PROCESS_NEXT;
+    while (ret == RDEFLATE_PROCESS_NEXT) {
+        size_t read = 0;
+        size_t wrote = 0;
+        ret = rinflate_process(stream, &read, &wrote);
+        produced += wrote;
+        if (ret == RDEFLATE_PROCESS_NEXT && read == 0 && wrote == 0) {
+            break; // more than the trailer said, or cut short
         }
     }
-    inflateEnd(&strm);
-    out.resize(produced);
+    rinflate_free(stream);
+    if (ret != RDEFLATE_PROCESS_END || produced != out.size()) {
+        return std::nullopt;
+    }
     return out;
 }
 

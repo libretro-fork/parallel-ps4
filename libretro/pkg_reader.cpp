@@ -5,13 +5,13 @@
 #include <cctype>
 #include <cstring>
 
+#include <encodings/deflate.h>
 #include <openssl/aes.h>
 #include <openssl/bn.h>
 #include <openssl/evp.h>
 #include <openssl/hmac.h>
 #include <openssl/rsa.h>
 #include <openssl/sha.h>
-#include <zlib.h>
 
 #include "common/endian.h"
 #include "common/string_util.h"
@@ -172,17 +172,34 @@ bool AesCbcDecrypt(const std::array<u8, 32>& ivkey, const u8* in, u8* out, std::
     return ok;
 }
 
+// A block's zlib stream, inflated straight into the block. Each thread that
+// reads blocks keeps one inflater, reset per block rather than made each time.
 void Inflate(const u8* in, std::size_t in_size, u8* out, std::size_t out_size) {
-    z_stream stream{};
-    if (inflateInit(&stream) != Z_OK) {
-        return;
+  struct Inflater {
+    void *stream = rinflate_new(15);
+    ~Inflater() { rinflate_free(stream); }
+  };
+  thread_local Inflater inflater;
+  if (!inflater.stream) {
+    return;
+  }
+  rinflate_reset(inflater.stream, 15);
+  rinflate_set_in(inflater.stream, in, in_size);
+  rinflate_set_out(inflater.stream, out, out_size);
+  std::size_t taken = 0;
+  std::size_t made = 0;
+  int result = RDEFLATE_PROCESS_NEXT;
+  while (result == RDEFLATE_PROCESS_NEXT && taken < in_size &&
+         made < out_size) {
+    std::size_t read = 0;
+    std::size_t wrote = 0;
+    result = rinflate_process(inflater.stream, &read, &wrote);
+    taken += read;
+    made += wrote;
+    if (read == 0 && wrote == 0) {
+      break;
     }
-    stream.next_in = const_cast<u8*>(in);
-    stream.avail_in = static_cast<uInt>(in_size);
-    stream.next_out = out;
-    stream.avail_out = static_cast<uInt>(out_size);
-    inflate(&stream, Z_FINISH);
-    inflateEnd(&stream);
+  }
 }
 
 // The text values of a param.sfo. Not PSF: this runs in the frontend's process too, where
