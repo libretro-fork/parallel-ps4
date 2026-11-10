@@ -274,9 +274,6 @@ if (ENABLE_SYSTEM_LIBRARIES)
     find_package(xbyak 7.07 CONFIG)
     find_package(Zydis 5.0.0 MODULE)
     find_package(absl 20250512.1 CONFIG)
-    if (APPLE)
-        find_package(epoll-shim 3.14 CONFIG)
-    endif()
     list(POP_BACK CMAKE_MODULE_PATH)
 endif()
 
@@ -1599,14 +1596,10 @@ if (APPLE)
         target_link_options(shadps4 PRIVATE -Wl,-ld_classic,-no_pie,-no_fixup_chains,-no_huge,-pagezero_size,0x4000,-segaddr,TCB_SPACE,0x4000,-segaddr,SYSTEM_MANAGED,0x400000,-segaddr,SYSTEM_RESERVED,0x7FFFFC000,-segaddr,USER_AREA,0x7000000000,-image_base,0x700000000000)
     endif()
 
-    target_link_libraries(shadps4 PRIVATE epoll-shim)
-
     # Create and embed Info.plist
     set(INFO_PLIST_PATH ${CMAKE_CURRENT_BINARY_DIR}/src/dist/Info.plist)
     configure_file(${CMAKE_CURRENT_SOURCE_DIR}/src/dist/MacOSBundleInfo.plist.in ${INFO_PLIST_PATH})
     target_link_options(shadps4 PRIVATE LINKER:-sectcreate,__TEXT,__info_plist,${INFO_PLIST_PATH})
-elseif (${CMAKE_SYSTEM_NAME} STREQUAL "FreeBSD")
-    target_link_libraries(shadps4 PRIVATE epoll-shim)
 endif()
 
 if (WIN32)

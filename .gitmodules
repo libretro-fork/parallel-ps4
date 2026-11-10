@@ -42,9 +42,6 @@
 	path = externals/half
 	url = https://github.com/ROCm/half.git
 	shallow = true
-[submodule "externals/epoll-shim"]
-	path = externals/epoll-shim
-	url = https://github.com/jiixyj/epoll-shim.git
 [submodule "externals/ext-wepoll"]
 	path = externals/ext-wepoll
 	url = https://github.com/shadps4-emu/ext-wepoll.git

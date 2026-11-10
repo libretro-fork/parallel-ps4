@@ -134,12 +134,6 @@ endif()
 # GCN Headers
 add_subdirectory(gcn)
 
-if (APPLE OR ${CMAKE_SYSTEM_NAME} STREQUAL "FreeBSD")
-    if (NOT TARGET epoll-shim)
-        add_subdirectory(epoll-shim)
-    endif()
-endif()
-
 #windows only
 if (WIN32)
 add_subdirectory(ext-wepoll)

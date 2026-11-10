@@ -74,3 +74,4 @@ externals/cpp-httplib
 externals/libressl
 externals/spdlog
 externals/date
+externals/epoll-shim
