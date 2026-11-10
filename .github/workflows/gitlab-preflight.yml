@@ -36,10 +36,7 @@ jobs:
             apt-get update -qq
             apt-get install -y --no-install-recommends \
               clang-19 clang-tools-19 mold libstdc++-14-dev \
-              libgles2-mesa-dev libasound2-dev libpulse-dev \
-              libudev-dev \
-              libegl1-mesa-dev \
-              libgl1-mesa-dev libdbus-1-dev uuid-dev \
+              libudev-dev libdbus-1-dev uuid-dev \
               python3 nasm zlib1g-dev
             cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
               -DENABLE_DISCORD_RPC=OFF -DENABLE_UPDATER=OFF \

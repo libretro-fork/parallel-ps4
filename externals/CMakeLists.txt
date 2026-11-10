@@ -75,26 +75,6 @@ if (NOT TARGET Freetype::Freetype)
     add_library(Freetype::Freetype ALIAS freetype)
 endif()
 
-# SDL3
-if (NOT TARGET SDL3::SDL3)
-    set(SDL_TEST_LIBRARY OFF)
-    set(SDL_PIPEWIRE OFF)
-    set(SDL_AVX512F OFF)
-    if (UNIX AND NOT APPLE)
-        # The frontend shows the picture: the emulator's window is a hidden one
-        # that nothing is drawn to (src/sdl_window.cpp), so SDL is built without
-        # the X11, Wayland and KMS video backends, and the core needs neither
-        # their headers to build nor a display server to run.
-        set(SDL_X11 OFF)
-        set(SDL_WAYLAND OFF)
-        set(SDL_KMSDRM OFF)
-        set(SDL_OFFSCREEN ON)
-        set(SDL_DUMMYVIDEO ON)
-        set(SDL_UNIX_CONSOLE_BUILD ON)
-    endif()
-    add_subdirectory(sdl3)
-endif()
-
 # vulkan-headers
 if (NOT TARGET Vulkan::Headers)
     set(VULKAN_HEADERS_ENABLE_MODULE OFF)

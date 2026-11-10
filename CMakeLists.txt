@@ -276,7 +276,6 @@ if (ENABLE_SYSTEM_LIBRARIES)
     find_package(PNG 1.6 MODULE)
     find_package(LibreSSL 4.3.1 MODULE)
     find_package(RenderDoc 1.6.0 MODULE)
-    find_package(SDL3 3.1.2 CONFIG)
     find_package(stb MODULE)
     find_package(tsl-robin-map 1.3.0 CONFIG)
     find_package(VulkanHeaders 1.4.330 CONFIG)
@@ -1404,8 +1403,9 @@ target_sources(shadps4 PRIVATE ${LIBRETRO_COMMON_SOURCES})
 set_source_files_properties(${LIBRETRO_COMMON_SOURCES} libretro/audio_mix.c PROPERTIES
     INCLUDE_DIRECTORIES ${LIBRETRO_COMMON_DIR}/include)
 if (UNIX AND NOT APPLE)
-    # Only retro_* is exported and the core's own symbols bind inside it:
-    # a frontend that carries SDL itself must not get tied to the core's.
+    # Only retro_* is exported and the core's own symbols bind inside it: a
+    # frontend that carries a library the core has too must not get tied to
+    # the core's.
     target_link_options(shadps4 PRIVATE
         -Wl,-Bsymbolic
         -Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/libretro/link.T)
@@ -1460,7 +1460,7 @@ create_target_directory_groups(shadps4)
 
 target_link_libraries(shadps4 PRIVATE spdlog::spdlog)
 target_link_libraries(shadps4 PRIVATE magic_enum::magic_enum fmt::fmt tsl::robin_map xbyak::xbyak Tracy::TracyClient RenderDoc::API FFmpeg::ffmpeg Dear_ImGui ImGuiFileDialog gcn half::half ZLIB::ZLIB PNG::PNG minimp3 dr_flac)
-target_link_libraries(shadps4 PRIVATE Boost::headers GPUOpen::VulkanMemoryAllocator LibAtrac9 sirit Vulkan::Headers xxHash::xxhash Zydis::Zydis SDL3::SDL3 pugixml::pugixml)
+target_link_libraries(shadps4 PRIVATE Boost::headers GPUOpen::VulkanMemoryAllocator LibAtrac9 sirit Vulkan::Headers xxHash::xxhash Zydis::Zydis pugixml::pugixml)
 target_link_libraries(shadps4 PRIVATE stb::headers lfreist-hwinfo::hwinfo nlohmann_json::nlohmann_json miniz::miniz fdk-aac CLI11::CLI11 Cpp_Httplib miniupnpc::miniupnpc)
 target_link_libraries(shadps4 PRIVATE Freetype::Freetype)
 

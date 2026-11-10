@@ -37,3 +37,4 @@ src/core/libraries/mouse/sdl_mouse.cpp
 src/core/libraries/mouse/sdl_mouse.h
 src/imgui/renderer/imgui_impl_sdl3.cpp
 src/imgui/renderer/imgui_impl_sdl3.h
+externals/sdl3
