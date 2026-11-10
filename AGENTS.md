@@ -33,7 +33,7 @@ This repository builds the libretro core and nothing else. The standalone's part
 - When something new is deleted for the same reason, add its path to `.upstream-excluded` in the same commit.
 - This `AGENTS.md`, `README.md` and `CHANGELOG.md` replace or add to upstream's own. When a merge conflicts on them, keep these.
 - After a merge, `CHANGELOG.md` names the upstream commit merged.
-- Behaviour that exists only for the core stays behind `#ifdef LIBRETRO` or `if (ENABLE_LIBRETRO)`, as small as it can be, so merges stay easy.
+- There is no `LIBRETRO` define or `ENABLE_LIBRETRO` option: the core is the only thing built. When a merge brings upstream code for the standalone's window, presentation, audio devices or packaging, keep the core's behaviour and drop the standalone's, without adding a guard to choose between them. Keep such changes small, so merges stay easy.
 - Work the rules below demand of the emulator itself - removing draw-path compiles, allocations, locks, sleeps and copies - is not limited to libretro-only code: it changes upstream's files where it has to. Keep it merge-friendly: new mechanisms in new files, narrow hooks in upstream's, and no reformatting of code the change does not need to touch. A merge that conflicts with such work keeps the work and takes the rest of upstream's change.
 
 ## These files
