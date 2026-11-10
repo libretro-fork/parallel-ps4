@@ -57,9 +57,11 @@ bool DecodeMp3(const u8* data, size_t size, Pcm& out) {
     out.channels = mp3.channels;
     out.hz = mp3.sampleRate;
     out.frames = 0;
-    // Room for the length at 128 kbit/s, grown when the stream is longer: the frames are read
-    // straight into it.
-    u64 room = std::max<u64>(static_cast<u64>(size) * out.hz / 16000, 4096);
+    // The tag frame gives the length and rmp3 trims the encoder's delay and padding, so the
+    // track is gapless. Without it, room for the length at 128 kbit/s, grown when the stream is
+    // longer. The frames are read straight into it.
+    u64 room = mp3.totalFrames ? mp3.totalFrames + 1
+                               : std::max<u64>(static_cast<u64>(size) * out.hz / 16000, 4096);
     for (;;) {
         if (!Reserve(out, room)) {
             break;
