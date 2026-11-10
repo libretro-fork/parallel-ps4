@@ -38,15 +38,11 @@ cmake_dependent_option(ENABLE_SYSTEM_VULKAN "Enable the system Vulkan driver" OF
 
 option(ENABLE_DISCORD_RPC "Enable the Discord RPC integration" ON)
 option(ENABLE_UPDATER "Enables the options to updater" ON)
-option(ENABLE_TESTS "Build unit tests (requires GTest)" OFF)
 # aarch64: the game's x86-64 code through FEXCore in the emulator's own process, in place of
 # box64. FEX is built on its own (.ci/build-fex.sh) and its static libraries linked in.
 option(ENABLE_FEX_GUEST_CPU "Build the native ARM64 FEXCore guest CPU backend" OFF)
 set(FEXCORE_GUEST_CPU_SOURCE_DIR "" CACHE PATH "FEX source directory for the FEXCore guest CPU backend")
 set(FEXCORE_GUEST_CPU_BUILD_DIR "" CACHE PATH "AArch64 FEX build directory for the FEXCore guest CPU backend")
-if (ENABLE_TESTS)
-    message(FATAL_ERROR "Upstream's tests are not in this repository (.upstream-excluded)")
-endif()
 option(ENABLE_SYSTEM_LIBRARIES "Enable building against system libraries" OFF)
 
 # First, determine whether to use CMAKE_OSX_ARCHITECTURES or CMAKE_SYSTEM_PROCESSOR.
@@ -1363,8 +1359,6 @@ set(SHADNET src/shadnet/client.cpp
             "${SHADNET_PROTO_OUT}/shadnet.pb.cc"
 )
 
-if(NOT ENABLE_TESTS)
-
 # The libretro core: a module the frontend loads, which starts itself again in a
 # process of its own to run the emulator (libretro/libretro_core.cpp in the
 # frontend's process, libretro/host.cpp in the emulator's, in the place of
@@ -1630,9 +1624,4 @@ target_include_directories(shadps4 PRIVATE ${IMGUI_RESOURCES_INCLUDE})
 # Discord RPC
 if (ENABLE_DISCORD_RPC)
     target_link_libraries(shadps4 PRIVATE discord-rpc)
-endif()
-
-else()
-    enable_testing()
-    add_subdirectory(tests)
 endif()
