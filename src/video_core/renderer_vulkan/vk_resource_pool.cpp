@@ -107,10 +107,13 @@ DescriptorHeap::DescriptorHeap(const Instance& instance, Semaphore* work_semapho
                                u32 descriptor_heap_count_)
     : device{instance.GetDevice()}, work_semaphore{work_semaphore_},
       descriptor_heap_count{descriptor_heap_count_}, pool_sizes{pool_sizes_} {
+    // One entry per set layout in use; made once, it doubles only past that
+    u64_map_init(&descriptor_sets, sizeof(DescSetBatch), 256);
     CreateDescriptorPool();
 }
 
 DescriptorHeap::~DescriptorHeap() {
+    u64_map_free(&descriptor_sets);
     device.destroyDescriptorPool(curr_pool);
     for (const auto [pool, tick] : pending_pools) {
         work_semaphore->Wait(tick);
@@ -120,16 +123,14 @@ DescriptorHeap::~DescriptorHeap() {
 
 vk::DescriptorSet DescriptorHeap::Commit(vk::DescriptorSetLayout set_layout) {
     const u64 set_key = std::bit_cast<u64>(set_layout);
-    const auto [it, _] = descriptor_sets.try_emplace(set_key);
+    auto* batch = static_cast<DescSetBatch*>(u64_map_insert(&descriptor_sets, set_key, nullptr));
+    ASSERT(batch);
 
     // Check if allocated sets exist and pick one.
-    if (!it->second.empty()) {
-        const auto desc_set = it->second.back();
-        it.value().pop_back();
-        return desc_set;
+    if (batch->count != 0) {
+        return batch->sets[--batch->count];
     }
 
-    DescSetBatch desc_sets(DescriptorSetBatch);
     std::array<vk::DescriptorSetLayout, DescriptorSetBatch> layouts;
     layouts.fill(set_layout);
 
@@ -139,13 +140,12 @@ vk::DescriptorSet DescriptorHeap::Commit(vk::DescriptorSetLayout set_layout) {
         .pSetLayouts = layouts.data(),
     };
 
-    // Attempt to allocate the descriptor set batch.
-    auto result = device.allocateDescriptorSets(&alloc_info, desc_sets.data());
+    // Attempt to allocate the descriptor set batch straight into the table.
+    auto* sets = reinterpret_cast<vk::DescriptorSet*>(batch->sets);
+    auto result = device.allocateDescriptorSets(&alloc_info, sets);
     if (result == vk::Result::eSuccess) {
-        const auto desc_set = desc_sets.back();
-        desc_sets.pop_back();
-        it.value() = std::move(desc_sets);
-        return desc_set;
+        batch->count = DescriptorSetBatch - 1;
+        return sets[DescriptorSetBatch - 1];
     }
 
     // The pool has run out. Record current tick and place it in pending list.
@@ -164,18 +164,18 @@ vk::DescriptorSet DescriptorHeap::Commit(vk::DescriptorSetLayout set_layout) {
         CreateDescriptorPool();
     }
 
+    // We've changed pool so also reset descriptor batch cache.
+    u64_map_clear(&descriptor_sets);
+    batch = static_cast<DescSetBatch*>(u64_map_insert(&descriptor_sets, set_key, nullptr));
+    sets = reinterpret_cast<vk::DescriptorSet*>(batch->sets);
+
     // Attempt to allocate again with fresh pool.
     alloc_info.descriptorPool = curr_pool;
-    result = device.allocateDescriptorSets(&alloc_info, desc_sets.data());
+    result = device.allocateDescriptorSets(&alloc_info, sets);
     ASSERT_MSG(result == vk::Result::eSuccess,
                "Unexpected error during descriptor set allocation {}", vk::to_string(result));
-
-    // We've changed pool so also reset descriptor batch cache.
-    descriptor_sets.clear();
-    const auto desc_set = desc_sets.back();
-    desc_sets.pop_back();
-    descriptor_sets[set_key] = std::move(desc_sets);
-    return desc_set;
+    batch->count = DescriptorSetBatch - 1;
+    return sets[DescriptorSetBatch - 1];
 }
 
 void DescriptorHeap::CreateDescriptorPool() {

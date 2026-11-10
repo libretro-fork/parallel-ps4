@@ -264,7 +264,6 @@ if (ENABLE_SYSTEM_LIBRARIES)
     find_package(fmt 12.0.0 CONFIG)
     find_package(glslang 15 CONFIG)
     find_package(magic_enum 0.9.7 CONFIG)
-    find_package(tsl-robin-map 1.3.0 CONFIG)
     find_package(VulkanHeaders 1.4.330 CONFIG)
     find_package(VulkanMemoryAllocator 3.1.0 CONFIG)
     find_package(xbyak 7.07 CONFIG)
@@ -790,6 +789,8 @@ set(DEV_TOOLS src/core/devtools/layer.cpp
 set(COMMON src/common/c_bridge.cpp
            src/common/c_bridge.h
            src/common/json_util.c
+           src/common/ptr_table.c
+           src/common/ptr_table.h
            src/common/u64_map.c
            src/common/u64_map.h
            src/common/json_util.h
@@ -1487,7 +1488,7 @@ endif()
 
 create_target_directory_groups(shadps4)
 
-target_link_libraries(shadps4 PRIVATE magic_enum::magic_enum fmt::fmt tsl::robin_map xbyak::xbyak Dear_ImGui gcn)
+target_link_libraries(shadps4 PRIVATE magic_enum::magic_enum fmt::fmt xbyak::xbyak Dear_ImGui gcn)
 target_link_libraries(shadps4 PRIVATE GPUOpen::VulkanMemoryAllocator sirit Vulkan::Headers Zydis::Zydis)
 
 if (ENABLE_FEX_GUEST_CPU)

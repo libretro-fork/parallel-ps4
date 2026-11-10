@@ -47,11 +47,6 @@ if (NOT TARGET glslang::glslang)
     target_include_directories(glslang INTERFACE "${CMAKE_CURRENT_BINARY_DIR}/glslang")
 endif()
 
-# Robin-map
-if (NOT TARGET tsl::robin_map)
-    add_subdirectory(robin-map)
-endif()
-
 # Xbyak
 if (NOT TARGET xbyak::xbyak)
     add_subdirectory(xbyak)

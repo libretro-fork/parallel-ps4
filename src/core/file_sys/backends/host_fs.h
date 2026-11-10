@@ -9,7 +9,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
-#include <tsl/robin_map.h>
+#include <unordered_map>
 #include "common/io_file.h"
 #include "core/file_sys/ifile.h"
 
@@ -106,7 +106,7 @@ private:
     std::filesystem::path m_root;
     bool m_read_only;
     mutable std::mutex m_case_cache_mutex;
-    mutable tsl::robin_map<std::string, std::filesystem::path> m_case_cache;
+    mutable std::unordered_map<std::string, std::filesystem::path> m_case_cache;
 };
 
 } // namespace Core::FileSys

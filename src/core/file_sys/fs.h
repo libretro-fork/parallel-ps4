@@ -8,8 +8,8 @@
 #include <mutex>
 #include <optional>
 #include <string>
+#include <unordered_map>
 #include <vector>
-#include <tsl/robin_map.h>
 #include "common/io_file.h"
 #include "common/logging/formatter.h"
 #include "core/file_sys/devices/base_device.h"
@@ -131,7 +131,7 @@ public:
 private:
     std::vector<MntPair> m_mnt_pairs;
     std::vector<std::filesystem::path> path_parts;
-    tsl::robin_map<std::filesystem::path, std::filesystem::path> path_cache;
+    std::unordered_map<std::filesystem::path, std::filesystem::path> path_cache;
     std::mutex m_mutex;
 };
 

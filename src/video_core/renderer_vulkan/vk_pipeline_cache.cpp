@@ -273,6 +273,10 @@ PipelineCache::PipelineCache(const Instance& instance_, Scheduler& scheduler_,
                              AmdGpu::Liverpool* liverpool_, u32 sparse_page_shift)
     : instance{instance_}, scheduler{scheduler_}, liverpool{liverpool_},
       desc_heap{instance, scheduler.GetWorkSemaphore(), DescriptorHeapSizes} {
+    // Sized for a large game's shaders and pipelines, so they seldom grow mid-game
+    ptr_table_init(&program_cache, 4096);
+    ptr_table_init(&compute_pipelines, 1024);
+    ptr_table_init(&graphics_pipelines, 8192);
     const auto& vk12_props = instance.GetVk12Properties();
     profile = Shader::Profile{
         .max_viewport_width = instance.GetMaxViewportWidth(),
@@ -337,22 +341,50 @@ PipelineCache::PipelineCache(const Instance& instance_, Scheduler& scheduler_,
     pipeline_cache = std::move(cache);
 }
 
-PipelineCache::~PipelineCache() = default;
+PipelineCache::~PipelineCache() {
+    size_t pos = 0;
+    while (auto* p = static_cast<GraphicsPipeline*>(ptr_table_next(&graphics_pipelines, &pos))) {
+        delete p;
+    }
+    pos = 0;
+    while (auto* p = static_cast<ComputePipeline*>(ptr_table_next(&compute_pipelines, &pos))) {
+        delete p;
+    }
+    pos = 0;
+    while (auto* p = static_cast<Program*>(ptr_table_next(&program_cache, &pos))) {
+        delete p;
+    }
+    ptr_table_free(&graphics_pipelines);
+    ptr_table_free(&compute_pipelines);
+    ptr_table_free(&program_cache);
+}
+
+static int MatchGraphicsKey(const void* pipeline, const void* key) {
+    return static_cast<const GraphicsPipeline*>(pipeline)->GetGraphicsKey() ==
+           *static_cast<const GraphicsPipelineKey*>(key);
+}
+
+GraphicsPipeline* PipelineCache::FindGraphicsPipeline(const GraphicsPipelineKey& key,
+                                                      u64 hash) const {
+    return static_cast<GraphicsPipeline*>(
+        ptr_table_find(&graphics_pipelines, hash, MatchGraphicsKey, &key));
+}
 
 const GraphicsPipeline* PipelineCache::GetGraphicsPipeline(const DrawIndirectParams params) {
     draw_indirect_params = params;
     if (!RefreshGraphicsKey()) {
         return nullptr;
     }
-    const auto [it, is_new] = graphics_pipelines.try_emplace(graphics_key);
-    if (is_new) {
-        const auto pipeline_hash = std::hash<GraphicsPipelineKey>{}(graphics_key);
+    const auto pipeline_hash = std::hash<GraphicsPipelineKey>{}(graphics_key);
+    GraphicsPipeline* pipeline = FindGraphicsPipeline(graphics_key, pipeline_hash);
+    if (!pipeline) {
         LOG_INFO(Render_Vulkan, "Compiling graphics pipeline {:#x}", pipeline_hash);
 
         GraphicsPipeline::SerializationSupport sdata{};
-        it.value() = std::make_unique<GraphicsPipeline>(
-            instance, scheduler, desc_heap, profile, graphics_key, *pipeline_cache, infos,
-            runtime_infos, fetch_shader, modules, sdata, false);
+        pipeline = new GraphicsPipeline(instance, scheduler, desc_heap, profile, graphics_key,
+                                        *pipeline_cache, infos, runtime_infos, fetch_shader,
+                                        modules, sdata, false);
+        ptr_table_insert(&graphics_pipelines, pipeline_hash, pipeline);
 
         RegisterPipelineData(graphics_key, pipeline_hash, sdata);
         ++num_new_pipelines;
@@ -366,22 +398,22 @@ const GraphicsPipeline* PipelineCache::GetGraphicsPipeline(const DrawIndirectPar
             }
         }
     }
-    return it->second.get();
+    return pipeline;
 }
 
 const ComputePipeline* PipelineCache::GetComputePipeline() {
     if (!RefreshComputeKey()) {
         return nullptr;
     }
-    const auto [it, is_new] = compute_pipelines.try_emplace(compute_key);
-    if (is_new) {
+    ComputePipeline* pipeline = FindComputePipeline(compute_key);
+    if (!pipeline) {
         const auto pipeline_hash = std::hash<ComputePipelineKey>{}(compute_key);
         LOG_INFO(Render_Vulkan, "Compiling compute pipeline {:#x}", pipeline_hash);
 
         ComputePipeline::SerializationSupport sdata{};
-        it.value() = std::make_unique<ComputePipeline>(instance, scheduler, desc_heap, profile,
-                                                       *pipeline_cache, compute_key, *infos[0],
-                                                       modules[0], sdata, false);
+        pipeline = new ComputePipeline(instance, scheduler, desc_heap, profile, *pipeline_cache,
+                                       compute_key, *infos[0], modules[0], sdata, false);
+        ptr_table_insert(&compute_pipelines, compute_key.value, pipeline);
         RegisterPipelineData(compute_key, sdata);
         ++num_new_pipelines;
 
@@ -390,7 +422,7 @@ const ComputePipeline* PipelineCache::GetComputePipeline() {
             module_related_pipelines[m].emplace_back(compute_key);
         }
     }
-    return it->second.get();
+    return pipeline;
 }
 
 bool PipelineCache::RefreshGraphicsKey() {
@@ -659,10 +691,10 @@ PipelineCache::Result PipelineCache::GetProgram(HwStage hw_stage, SwStage sw_sta
                                                 const Shader::ShaderParams& params,
                                                 Shader::Backend::Bindings& binding) {
     auto runtime_info = BuildRuntimeInfo(hw_stage, sw_stage);
-    auto [it_pgm, new_program] = program_cache.try_emplace(params.hash);
-    if (new_program) {
-        it_pgm.value() = std::make_unique<Program>(hw_stage, sw_stage, params);
-        auto& program = it_pgm.value();
+    Program* program = FindProgram(params.hash);
+    if (!program) {
+        program = new Program(hw_stage, sw_stage, params);
+        ptr_table_insert(&program_cache, params.hash, program);
         auto start = binding;
         const auto module = CompileModule(program->info, runtime_info, params.code, 0, binding);
         auto spec = Shader::StageSpecialization(program->info, runtime_info, profile, start);
@@ -676,7 +708,6 @@ PipelineCache::Result PipelineCache::GetProgram(HwStage hw_stage, SwStage sw_sta
         return std::make_tuple(&program->info, module, perm_hash);
     }
 
-    auto& program = it_pgm.value();
     auto& info = program->info;
     info.pgm_base = params.Base(); // Needs to be actualized for inline cbuffer address fixup
     info.user_data = params.user_data;
@@ -710,7 +741,8 @@ PipelineCache::Result PipelineCache::GetProgram(HwStage hw_stage, SwStage sw_sta
 std::optional<vk::ShaderModule> PipelineCache::ReplaceShader(vk::ShaderModule module,
                                                              std::span<const u32> spv_code) {
     std::optional<vk::ShaderModule> new_module{};
-    for (const auto& [_, program] : program_cache) {
+    size_t pos = 0;
+    while (auto* program = static_cast<Program*>(ptr_table_next(&program_cache, &pos))) {
         for (auto& m : program->modules) {
             if (m.module == module) {
                 const auto& d = instance.GetDevice();
@@ -724,11 +756,18 @@ std::optional<vk::ShaderModule> PipelineCache::ReplaceShader(vk::ShaderModule mo
         auto& pipeline_keys = module_related_pipelines[module];
         for (auto& key : pipeline_keys) {
             if (std::holds_alternative<GraphicsPipelineKey>(key)) {
-                auto& graphics_key = std::get<GraphicsPipelineKey>(key);
-                graphics_pipelines.erase(graphics_key);
+                const auto& graphics_key = std::get<GraphicsPipelineKey>(key);
+                const u64 hash = std::hash<GraphicsPipelineKey>{}(graphics_key);
+                if (auto* p = FindGraphicsPipeline(graphics_key, hash)) {
+                    ptr_table_erase(&graphics_pipelines, hash, p);
+                    delete p;
+                }
             } else if (std::holds_alternative<ComputePipelineKey>(key)) {
-                auto& compute_key = std::get<ComputePipelineKey>(key);
-                compute_pipelines.erase(compute_key);
+                const auto& compute_key = std::get<ComputePipelineKey>(key);
+                if (auto* p = FindComputePipeline(compute_key)) {
+                    ptr_table_erase(&compute_pipelines, compute_key.value, p);
+                    delete p;
+                }
             }
         }
     }

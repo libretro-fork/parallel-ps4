@@ -14,10 +14,6 @@
 	path = externals/glslang
 	url = https://github.com/KhronosGroup/glslang.git
 	shallow = true
-[submodule "externals/robin-map"]
-	path = externals/robin-map
-	url = https://github.com/Tessil/robin-map.git
-	shallow = true
 [submodule "externals/xbyak"]
 	path = externals/xbyak
 	url = https://github.com/herumi/xbyak.git

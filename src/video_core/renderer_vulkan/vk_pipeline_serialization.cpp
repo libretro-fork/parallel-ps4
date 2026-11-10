@@ -156,12 +156,10 @@ bool PipelineCache::LoadComputePipeline(Serialization::Archive& ar) {
         return false;
     }
 
-    const auto [it, is_new] = compute_pipelines.try_emplace(compute_key);
-    ASSERT(is_new);
-
-    it.value() =
-        std::make_unique<ComputePipeline>(instance, scheduler, desc_heap, profile, *pipeline_cache,
-                                          compute_key, *infos[0], modules[0], sdata, true);
+    ASSERT(!FindComputePipeline(compute_key));
+    ptr_table_insert(&compute_pipelines, compute_key.value,
+                     new ComputePipeline(instance, scheduler, desc_heap, profile, *pipeline_cache,
+                                         compute_key, *infos[0], modules[0], sdata, true));
 
     infos.fill(nullptr);
     modules.fill(nullptr);
@@ -231,12 +229,12 @@ bool PipelineCache::LoadGraphicsPipeline(Serialization::Archive& ar) {
         }
     }
 
-    const auto [it, is_new] = graphics_pipelines.try_emplace(graphics_key);
-    ASSERT(is_new);
-
-    it.value() = std::make_unique<GraphicsPipeline>(
-        instance, scheduler, desc_heap, profile, graphics_key, *pipeline_cache, infos,
-        runtime_infos, fetch_shader, modules, sdata, true);
+    const u64 pipeline_hash = std::hash<GraphicsPipelineKey>{}(graphics_key);
+    ASSERT(!FindGraphicsPipeline(graphics_key, pipeline_hash));
+    ptr_table_insert(&graphics_pipelines, pipeline_hash,
+                     new GraphicsPipeline(instance, scheduler, desc_heap, profile, graphics_key,
+                                          *pipeline_cache, infos, runtime_infos, fetch_shader,
+                                          modules, sdata, true));
 
     infos.fill(nullptr);
     modules.fill(nullptr);
@@ -267,17 +265,18 @@ bool PipelineCache::LoadPipelineStage(Serialization::Archive& ar, size_t stage) 
 
     vk::ShaderModule module{};
 
-    auto [it_pgm, new_program] = program_cache.try_emplace(program->info.pgm_hash);
-    if (new_program) {
+    Program* cached = FindProgram(program->info.pgm_hash);
+    if (!cached) {
         module = CompileSPV(spv, instance.GetDevice());
-        it_pgm.value() = std::move(program);
+        cached = program.release();
+        ptr_table_insert(&program_cache, cached->info.pgm_hash, cached);
     } else {
-        const auto& it = std::ranges::find(it_pgm.value()->modules, spec, &Program::Module::spec);
-        if (it != it_pgm.value()->modules.end()) {
+        const auto& it = std::ranges::find(cached->modules, spec, &Program::Module::spec);
+        if (it != cached->modules.end()) {
             // A matching permutation is valid only at its original index. A different index means
             // the store holds entries from more than one cache generation, so this pipeline is
             // left to compile at runtime.
-            const auto idx = std::distance(it_pgm.value()->modules.begin(), it);
+            const auto idx = std::distance(cached->modules.begin(), it);
             if (perm_idx != idx) {
                 LOG_WARNING(Render_Vulkan,
                             "Cached permutation {} of {}_{:x} conflicts with index {}, skipping "
@@ -290,11 +289,11 @@ bool PipelineCache::LoadPipelineStage(Serialization::Archive& ar, size_t stage) 
             module = CompileSPV(spv, instance.GetDevice());
         }
     }
-    it_pgm.value()->InsertPermut(module, std::move(spec), perm_idx);
+    cached->InsertPermut(module, std::move(spec), perm_idx);
 
-    infos[stage] = &it_pgm.value()->info;
+    infos[stage] = &cached->info;
     modules[stage] = module;
-    if (auto& fetch = it_pgm.value()->modules[perm_idx].spec.fetch_shader_data; !fetch.Empty()) {
+    if (auto& fetch = cached->modules[perm_idx].spec.fetch_shader_data; !fetch.Empty()) {
         fetch_shader = &fetch;
     }
 

@@ -3,8 +3,9 @@
 
 #pragma once
 
+#include <unordered_map>
 #include <variant>
-#include <tsl/robin_map.h>
+#include "common/ptr_table.h"
 #include "shader_recompiler/profile.h"
 #include "shader_recompiler/recompiler.h"
 #include "shader_recompiler/specialization.h"
@@ -129,9 +130,18 @@ private:
     Shader::Profile profile{};
     Shader::Pools pools;
     DrawIndirectParams draw_indirect_params{};
-    tsl::robin_map<size_t, std::unique_ptr<Program>> program_cache;
-    tsl::robin_map<ComputePipelineKey, std::unique_ptr<ComputePipeline>> compute_pipelines;
-    tsl::robin_map<GraphicsPipelineKey, std::unique_ptr<GraphicsPipeline>> graphics_pipelines;
+    // C89 tables of the objects, filed by hash; the cache owns what they point at
+    ptr_table_t program_cache{};      // Program*, by the shader's hash
+    ptr_table_t compute_pipelines{};  // ComputePipeline*, by its key's value
+    ptr_table_t graphics_pipelines{}; // GraphicsPipeline*, by the key's xxh3; keys compared
+    Program* FindProgram(u64 hash) const {
+        return static_cast<Program*>(ptr_table_find(&program_cache, hash, nullptr, nullptr));
+    }
+    ComputePipeline* FindComputePipeline(const ComputePipelineKey& key) const {
+        return static_cast<ComputePipeline*>(
+            ptr_table_find(&compute_pipelines, key.value, nullptr, nullptr));
+    }
+    GraphicsPipeline* FindGraphicsPipeline(const GraphicsPipelineKey& key, u64 hash) const;
     std::array<Shader::RuntimeInfo, MaxShaderStages> runtime_infos{};
     std::array<const Shader::Info*, MaxShaderStages> infos{};
     std::array<vk::ShaderModule, MaxShaderStages> modules{};
@@ -141,8 +151,8 @@ private:
     u32 num_new_pipelines{}; // new pipelines added to the cache since the game start
 
     // Only if Config::collectShadersForDebug()
-    tsl::robin_map<vk::ShaderModule,
-                   std::vector<std::variant<GraphicsPipelineKey, ComputePipelineKey>>>
+    std::unordered_map<vk::ShaderModule,
+                       std::vector<std::variant<GraphicsPipelineKey, ComputePipelineKey>>>
         module_related_pipelines;
 };
 

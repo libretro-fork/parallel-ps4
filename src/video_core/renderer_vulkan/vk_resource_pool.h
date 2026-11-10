@@ -5,10 +5,10 @@
 
 #include <deque>
 #include <vector>
-#include <tsl/robin_map.h>
 #include "common/small_vector.h"
 
 #include "common/types.h"
+#include "common/u64_map.h"
 #include "video_core/renderer_vulkan/vk_common.h"
 
 namespace Vulkan {
@@ -68,6 +68,9 @@ class DescriptorHeap final {
     static constexpr u32 DescriptorSetBatch = 32;
 
 public:
+    DescriptorHeap(const DescriptorHeap&) = delete;
+    DescriptorHeap& operator=(const DescriptorHeap&) = delete;
+
     explicit DescriptorHeap(const Instance& instance, Semaphore* work_semaphore,
                             std::span<const vk::DescriptorPoolSize> pool_sizes,
                             u32 descriptor_heap_count = 1024);
@@ -85,8 +88,12 @@ private:
     std::span<const vk::DescriptorPoolSize> pool_sizes;
     vk::DescriptorPool curr_pool;
     std::deque<std::pair<vk::DescriptorPool, u64>> pending_pools;
-    using DescSetBatch = Common::StaticVector<vk::DescriptorSet, DescriptorSetBatch>;
-    tsl::robin_map<u64, DescSetBatch> descriptor_sets;
+    // Sets allocated ahead for one layout, taken from the back
+    struct DescSetBatch {
+        VkDescriptorSet sets[DescriptorSetBatch];
+        u32 count;
+    };
+    u64_map_t descriptor_sets{}; // set layout handle -> DescSetBatch
 };
 
 } // namespace Vulkan
