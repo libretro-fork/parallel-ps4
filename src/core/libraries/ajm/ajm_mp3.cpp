@@ -2,7 +2,10 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include <bit>
+#include <cmath>
 #include <cstring>
+
+#include <formats/rmp3.h>
 
 #include "ajm_error.h"
 #include "ajm_mp3.h"
@@ -10,14 +13,6 @@
 
 #include "common/assert.h"
 #include "core/libraries/error_codes.h"
-
-extern "C" {
-#include <libavcodec/avcodec.h>
-#include <libavutil/opt.h>
-#include <libswresample/swresample.h>
-}
-
-#include "common/support/avdec.h"
 
 namespace Libraries::Ajm {
 
@@ -67,64 +62,20 @@ struct Mp3Header {
 };
 static_assert(sizeof(Mp3Header) == sizeof(u32));
 
-static AVSampleFormat AjmToAVSampleFormat(AjmFormatEncoding format) {
-    switch (format) {
-    case AjmFormatEncoding::S16:
-        return AV_SAMPLE_FMT_S16;
-    case AjmFormatEncoding::S32:
-        return AV_SAMPLE_FMT_S32;
-    case AjmFormatEncoding::Float:
-        return AV_SAMPLE_FMT_FLT;
-    default:
-        UNREACHABLE();
-    }
-}
-
-AVFrame* AjmMp3Decoder::ConvertAudioFrame(AVFrame* frame) {
-    AVSampleFormat format = AjmToAVSampleFormat(m_format);
-    if (frame->format == format) {
-        return frame;
-    }
-
-    AVFrame* new_frame = av_frame_alloc();
-    new_frame->pts = frame->pts;
-    new_frame->pkt_dts = frame->pkt_dts < 0 ? 0 : frame->pkt_dts;
-    new_frame->format = format;
-    new_frame->ch_layout = frame->ch_layout;
-    new_frame->sample_rate = frame->sample_rate;
-
-    AVChannelLayout in_ch_layout = frame->ch_layout;
-    AVChannelLayout out_ch_layout = new_frame->ch_layout;
-    swr_alloc_set_opts2(&m_swr_context, &out_ch_layout, AVSampleFormat(new_frame->format),
-                        frame->sample_rate, &in_ch_layout, AVSampleFormat(frame->format),
-                        frame->sample_rate, 0, nullptr);
-    swr_init(m_swr_context);
-    const auto res = swr_convert_frame(m_swr_context, new_frame, frame);
-    if (res < 0) {
-        LOG_ERROR(Lib_AvPlayer, "Could not convert frame: {}", av_err2str(res));
-        av_frame_free(&new_frame);
-        av_frame_free(&frame);
-        return nullptr;
-    }
-    av_frame_free(&frame);
-    return new_frame;
-}
+struct AjmMp3Decoder::State {
+    rmp3dec decoder;
+    rmp3_frame_buf pcm;
+};
 
 AjmMp3Decoder::AjmMp3Decoder(AjmFormatEncoding format, AjmMp3CodecFlags flags, u32)
-    : m_format(format), m_flags(flags), m_codec(avcodec_find_decoder(AV_CODEC_ID_MP3)),
-      m_codec_context(avcodec_alloc_context3(m_codec)), m_parser(av_parser_init(m_codec->id)) {
-    int ret = avcodec_open2(m_codec_context, m_codec, nullptr);
-    ASSERT_MSG(ret >= 0, "Could not open m_codec");
+    : m_format(format), m_flags(flags), m_state(std::make_unique<State>()) {
+    rmp3dec_init(&m_state->decoder);
 }
 
-AjmMp3Decoder::~AjmMp3Decoder() {
-    swr_free(&m_swr_context);
-    av_parser_close(m_parser);
-    avcodec_free_context(&m_codec_context);
-}
+AjmMp3Decoder::~AjmMp3Decoder() = default;
 
 void AjmMp3Decoder::Reset() {
-    avcodec_flush_buffers(m_codec_context);
+    rmp3dec_init(&m_state->decoder);
     m_header.reset();
     m_frame_samples = 0;
 }
@@ -148,95 +99,113 @@ u32 AjmMp3Decoder::GetMinimumInputSize() const {
     return 4;
 }
 
+static s32 FloatToS32(float x) {
+    if (x >= 1.0f) {
+        return INT32_MAX;
+    }
+    if (x <= -1.0f) {
+        return INT32_MIN;
+    }
+    return static_cast<s32>(std::lrint(static_cast<double>(x) * 2147483648.0));
+}
+
 DecoderResult AjmMp3Decoder::ProcessData(std::span<u8>& in_buf, SparseOutputBuffer& output,
                                          AjmInstanceGapless& gapless) {
     DecoderResult result{};
-    AVPacket* pkt = av_packet_alloc();
+    rmp3dec_frame_info info{};
+    rmp3dec* dec = &m_state->decoder;
+    const int mp3_bytes = static_cast<int>(std::min<size_t>(in_buf.size(), INT32_MAX));
+    const bool s16_out = m_format == AjmFormatEncoding::S16;
 
-    int ret = av_parser_parse2(m_parser, m_codec_context, &pkt->data, &pkt->size, in_buf.data(),
-                               in_buf.size(), AV_NOPTS_VALUE, AV_NOPTS_VALUE, 0);
-    ASSERT_MSG(ret >= 0, "Error while parsing {}", ret);
-    in_buf = in_buf.subspan(ret);
-
-    if (pkt->size >= 4) {
-        u32 raw_header = 0;
-        std::memcpy(&raw_header, pkt->data, sizeof(raw_header));
-        m_header = std::byteswap(raw_header);
-        AjmDecMp3ParseFrame info{};
-        auto res = ParseMp3Header(pkt->data, pkt->size, true, &info);
-        ASSERT(res == ORBIS_OK);
-
-        m_frame_samples = info.samples_per_channel;
-        if (info.total_samples != 0 || info.encoder_delay != 0) {
-            gapless.init = {
-                .total_samples = info.total_samples,
-                .skip_samples = static_cast<u16>(info.encoder_delay),
-                .skipped_samples = 0,
-            };
-            gapless.current = gapless.init;
-        }
-
-        // Send the packet with the compressed data to the decoder
-        pkt->pts = m_parser->pts;
-        pkt->dts = m_parser->dts;
-        pkt->flags = (m_parser->key_frame == 1) ? AV_PKT_FLAG_KEY : 0;
-        ret = avcodec_send_packet(m_codec_context, pkt);
-        ASSERT_MSG(ret >= 0, "Error submitting the packet to the decoder {}", ret);
-
-        // Read all the output frames (in general there may be any number of them
-        while (ret >= 0) {
-            AVFrame* frame = av_frame_alloc();
-            ret = avcodec_receive_frame(m_codec_context, frame);
-            if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF) {
-                av_frame_free(&frame);
-                break;
-            } else if (ret < 0) {
-                UNREACHABLE_MSG("Error during decoding");
-            }
-            frame = ConvertAudioFrame(frame);
-
-            result.frames_decoded += 1;
-            u32 skip_samples = 0;
-            if (gapless.current.skip_samples > 0) {
-                skip_samples = std::min(u16(frame->nb_samples), gapless.current.skip_samples);
-                gapless.current.skip_samples -= skip_samples;
-            }
-
-            const auto max_pcm =
-                gapless.init.total_samples != 0
-                    ? gapless.current.total_samples * m_codec_context->ch_layout.nb_channels
-                    : std::numeric_limits<u32>::max();
-
-            u32 pcm_written = 0;
-            switch (m_format) {
-            case AjmFormatEncoding::S16:
-                pcm_written = WriteOutputPCM<s16>(frame, output, skip_samples, max_pcm);
-                break;
-            case AjmFormatEncoding::S32:
-                pcm_written = WriteOutputPCM<s32>(frame, output, skip_samples, max_pcm);
-                break;
-            case AjmFormatEncoding::Float:
-                pcm_written = WriteOutputPCM<float>(frame, output, skip_samples, max_pcm);
-                break;
-            default:
-                UNREACHABLE();
-            }
-
-            const auto samples = pcm_written / m_codec_context->ch_layout.nb_channels;
-            gapless.current.skipped_samples += frame->nb_samples - samples;
-            if (gapless.init.total_samples != 0) {
-                gapless.current.total_samples -= samples;
-            }
-            result.samples_written += samples;
-
-            av_frame_free(&frame);
-        }
-    } else {
+    int frame = s16_out
+                    ? rmp3dec_decode_s16(dec, in_buf.data(), mp3_bytes, m_state->pcm.s16, &info)
+                    : rmp3dec_decode_f32(dec, in_buf.data(), mp3_bytes, m_state->pcm.f32, &info);
+    if (info.frame_bytes <= 0) {
         result.result |= ORBIS_AJM_RESULT_PARTIAL_INPUT;
+        return result;
+    }
+    const u8* data = in_buf.data();
+    const size_t frame_bytes = static_cast<size_t>(info.frame_bytes);
+    in_buf = in_buf.subspan(std::min(frame_bytes, in_buf.size()));
+    if (frame == 0) {
+        if (info.hz == 0) {
+            // Only junk before a frame that isn't all here yet
+            return result;
+        }
+        // A frame whose bit reservoir reaches back before the stream: silence, as long as
+        // the frame, so the gapless counts stay in step
+        frame = info.layer == 1 ? 384 : (info.layer == 3 && info.hz < 32000 ? 576 : 1152);
+        std::memset(&m_state->pcm, 0, sizeof(m_state->pcm));
     }
 
-    av_packet_free(&pkt);
+    // The frame starts where its header does, after any junk rmp3 skipped
+    size_t start = 0;
+    while (start + 4 <= frame_bytes && std::memcmp(data + start, dec->header, 4) != 0) {
+        ++start;
+    }
+    u32 raw_header = 0;
+    std::memcpy(&raw_header, dec->header, sizeof(raw_header));
+    m_header = std::byteswap(raw_header);
+    AjmDecMp3ParseFrame parsed{};
+    if (start + 4 <= frame_bytes &&
+        ParseMp3Header(data + start, static_cast<u32>(frame_bytes - start), true, &parsed) ==
+            ORBIS_OK &&
+        (parsed.total_samples != 0 || parsed.encoder_delay != 0)) {
+        gapless.init = {
+            .total_samples = parsed.total_samples,
+            .skip_samples = static_cast<u16>(parsed.encoder_delay),
+            .skipped_samples = 0,
+        };
+        gapless.current = gapless.init;
+    }
+    m_frame_samples = static_cast<u32>(frame);
+    m_channels = static_cast<u32>(info.channels);
+    m_sample_rate = static_cast<u32>(info.hz);
+    m_bitrate = static_cast<u32>(info.bitrate_kbps) * 1000;
+    result.frames_decoded += 1;
 
+    u32 skip_samples = 0;
+    if (gapless.current.skip_samples > 0) {
+        skip_samples = std::min<u32>(frame, gapless.current.skip_samples);
+        gapless.current.skip_samples -= skip_samples;
+    }
+    const u32 max_samples =
+        gapless.init.total_samples != 0 ? gapless.current.total_samples : u32(frame);
+    const u32 count = std::min<u32>(frame - skip_samples, max_samples);
+    const u32 channels = m_channels;
+
+    size_t written = 0;
+    switch (m_format) {
+    case AjmFormatEncoding::S16:
+        written = output.WriteFrames<s16>(count, channels, [&](size_t first, size_t n, s16* dst) {
+            std::memcpy(dst, m_state->pcm.s16 + (skip_samples + first) * channels,
+                        n * channels * sizeof(s16));
+        });
+        break;
+    case AjmFormatEncoding::S32:
+        written = output.WriteFrames<s32>(count, channels, [&](size_t first, size_t n, s32* dst) {
+            const float* src = m_state->pcm.f32 + (skip_samples + first) * channels;
+            for (size_t i = 0; i < n * channels; ++i) {
+                dst[i] = FloatToS32(src[i]);
+            }
+        });
+        break;
+    case AjmFormatEncoding::Float:
+        written =
+            output.WriteFrames<float>(count, channels, [&](size_t first, size_t n, float* dst) {
+                std::memcpy(dst, m_state->pcm.f32 + (skip_samples + first) * channels,
+                            n * channels * sizeof(float));
+            });
+        break;
+    default:
+        UNREACHABLE();
+    }
+
+    result.samples_written = static_cast<u32>(written / channels);
+    gapless.current.skipped_samples += frame - result.samples_written;
+    if (gapless.init.total_samples != 0) {
+        gapless.current.total_samples -= result.samples_written;
+    }
     return result;
 }
 
@@ -246,7 +215,7 @@ u32 AjmMp3Decoder::GetNextFrameSize(const AjmInstanceGapless& gapless) const {
         gapless.init.total_samples != 0
             ? std::min<u32>(gapless.current.total_samples, m_frame_samples - skip_samples)
             : m_frame_samples - skip_samples;
-    return samples * m_codec_context->ch_layout.nb_channels * GetPCMSize(m_format);
+    return samples * m_channels * GetPCMSize(m_format);
 }
 
 class BitReader {
@@ -496,11 +465,11 @@ int AjmMp3Decoder::ParseMp3Frame(const u8* p_begin, u32 stream_size, int parse_o
 
 AjmSidebandFormat AjmMp3Decoder::GetFormat() const {
     return AjmSidebandFormat{
-        .num_channels = u32(m_codec_context->ch_layout.nb_channels),
-        .channel_mask = GetChannelMask(u32(m_codec_context->ch_layout.nb_channels)),
-        .sampl_freq = u32(m_codec_context->sample_rate),
+        .num_channels = m_channels,
+        .channel_mask = GetChannelMask(m_channels),
+        .sampl_freq = m_sample_rate,
         .sample_encoding = m_format,
-        .bitrate = u32(m_codec_context->bit_rate),
+        .bitrate = m_bitrate,
         .reserved = 0,
     };
 };

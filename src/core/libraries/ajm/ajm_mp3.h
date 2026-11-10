@@ -3,14 +3,11 @@
 
 #pragma once
 
+#include <memory>
+
 #include "common/enum.h"
 #include "common/types.h"
 #include "core/libraries/ajm/ajm_instance.h"
-
-extern "C" {
-#include <libavcodec/avcodec.h>
-struct SwrContext;
-}
 
 namespace Libraries::Ajm {
 
@@ -82,25 +79,17 @@ public:
                              AjmDecMp3ParseFrame* frame);
 
 private:
-    template <class T>
-    size_t WriteOutputPCM(AVFrame* frame, SparseOutputBuffer& output, u32 skipped_samples,
-                          u32 max_pcm) {
-        std::span<T> pcm_data(reinterpret_cast<T*>(frame->data[0]),
-                              frame->nb_samples * frame->ch_layout.nb_channels);
-        pcm_data = pcm_data.subspan(skipped_samples * frame->ch_layout.nb_channels);
-        return output.Write(pcm_data.subspan(0, std::min(u32(pcm_data.size()), max_pcm)));
-    }
-
-    AVFrame* ConvertAudioFrame(AVFrame* frame);
+    struct State;
 
     const AjmFormatEncoding m_format;
-    const AjmMp3CodecFlags m_flags;
-    const AVCodec* m_codec = nullptr;
-    AVCodecContext* m_codec_context = nullptr;
-    AVCodecParserContext* m_parser = nullptr;
-    SwrContext* m_swr_context = nullptr;
+    [[maybe_unused]] const AjmMp3CodecFlags m_flags;
+    // The decoder and its frame of PCM, allocated with the instance.
+    std::unique_ptr<State> m_state;
     std::optional<u32> m_header;
     u32 m_frame_samples = 0;
+    u32 m_channels = 0;
+    u32 m_sample_rate = 0;
+    u32 m_bitrate = 0;
 };
 
 } // namespace Libraries::Ajm
