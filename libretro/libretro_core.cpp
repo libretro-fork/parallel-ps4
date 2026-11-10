@@ -41,6 +41,7 @@
 #include <system_error>
 #include <vector>
 
+#include <rthreads/rthreads.h>
 #include <streams/file_stream.h>
 
 #include "common/io_file.h"
@@ -278,6 +279,25 @@ void Notify(const char* text) {
     Log(RETRO_LOG_ERROR, "%s", text);
 }
 
+// A message with a progress bar, where the frontend draws one.
+void NotifyProgress(const char* text, int percent) {
+    struct retro_message_ext message {};
+    message.msg = text;
+    message.duration = 3000;
+    message.priority = 2;
+    message.level = RETRO_LOG_INFO;
+    message.target = RETRO_MESSAGE_TARGET_ALL;
+    message.type = RETRO_MESSAGE_TYPE_PROGRESS;
+    message.progress = static_cast<int8_t>(percent);
+    unsigned version = 0;
+    if (environ_cb(RETRO_ENVIRONMENT_GET_MESSAGE_INTERFACE_VERSION, &version) && version >= 1) {
+        environ_cb(RETRO_ENVIRONMENT_SET_MESSAGE_EXT, &message);
+    } else {
+        struct retro_message old = {text, 180};
+        environ_cb(RETRO_ENVIRONMENT_SET_MESSAGE, &old);
+    }
+}
+
 // The frontend's paths are UTF-8.
 std::filesystem::path Utf8Path(const std::string& text) {
     return std::filesystem::path(
@@ -300,11 +320,34 @@ bool IsPkgPath(const std::string& path) {
     return extension == ".pkg";
 }
 
+// PKG Content's Install, on a thread of its own: extracting a game takes minutes, and the
+// frontend's thread must not wait on it. retro_run starts the game once it is done. The two
+// threads share nothing but this, through the atomics: what the worker writes before it sets
+// done, the frontend's thread reads after it sees it set.
+struct PkgInstallJob {
+    sthread_t* thread = nullptr;
+    std::string game;
+    std::string user_dir;
+    std::string title_id;
+    std::string update;
+    std::string addcont;
+    // Written by the worker
+    std::string boot;
+    std::string error;
+    std::atomic<int> percent{0};
+    std::atomic<bool> cancel{false};
+    std::atomic<bool> succeeded{false};
+    std::atomic<bool> done{false};
+    // Read by the frontend's thread only
+    int told_percent = -1;
+};
+PkgInstallJob* pkg_install = nullptr;
+
 // The core option PKG Content's Install: a PKG's files extracted into dir. A dir that holds
 // the same PKG already (by its marker file) is kept as it is; one that holds another is
 // replaced.
-bool InstallPkg(const std::filesystem::path& pkg, const std::filesystem::path& dir,
-                const std::string& user_dir) {
+bool InstallPkg(PkgInstallJob& job, const std::filesystem::path& pkg,
+                const std::filesystem::path& dir, const std::string& user_dir) {
     std::error_code ec;
     const auto marker = dir / ".libretro_pkg";
     const std::string stamp = Utf8String(pkg.filename()) + "\n" +
@@ -318,7 +361,7 @@ bool InstallPkg(const std::filesystem::path& pkg, const std::filesystem::path& d
     Libretro::PkgReader reader;
     std::string error;
     if (!reader.Open(pkg, Libretro::PkgKeysFile(Utf8Path(user_dir)), error)) {
-        Notify(("shadPS4: the PKG cannot be read: " + error).c_str());
+        job.error = "shadPS4: the PKG cannot be read: " + error;
         return false;
     }
     const auto files = reader.Files();
@@ -329,10 +372,9 @@ bool InstallPkg(const std::filesystem::path& pkg, const std::filesystem::path& d
     std::filesystem::create_directories(dir.parent_path(), ec);
     const auto space = std::filesystem::space(dir.parent_path(), ec);
     if (!ec && space.available < total) {
-        Notify(("shadPS4: installing " + Utf8String(pkg.filename()) + " needs " +
-                std::to_string(total >> 20) + " MiB, and there are " +
-                std::to_string(space.available >> 20) + " MiB free")
-                   .c_str());
+        job.error = "shadPS4: installing " + Utf8String(pkg.filename()) + " needs " +
+                    std::to_string(total >> 20) + " MiB, and there are " +
+                    std::to_string(space.available >> 20) + " MiB free";
         return false;
     }
 
@@ -351,6 +393,10 @@ bool InstallPkg(const std::filesystem::path& pkg, const std::filesystem::path& d
                                      Common::FS::FileHint::Sequential);
         bool written = out.IsOpen();
         for (u64 at = 0; written && at < node->size;) {
+            if (job.cancel.load(std::memory_order_relaxed)) {
+                job.error = "shadPS4: the install was stopped";
+                return false;
+            }
             const u64 read = reader.Read(*node, at, buffer.size(), buffer.data());
             if (read == 0) {
                 written = false;
@@ -361,8 +407,11 @@ bool InstallPkg(const std::filesystem::path& pkg, const std::filesystem::path& d
             done += read;
         }
         if (!written) {
-            Notify(("shadPS4: " + Utf8String(target) + " could not be written").c_str());
+            job.error = "shadPS4: " + Utf8String(target) + " could not be written";
             return false;
+        }
+        if (total) {
+            job.percent.store(static_cast<int>(done * 100 / total), std::memory_order_relaxed);
         }
         if (total && done * 10 / total > static_cast<u64>(told)) {
             told = static_cast<int>(done * 10 / total);
@@ -376,18 +425,22 @@ bool InstallPkg(const std::filesystem::path& pkg, const std::filesystem::path& d
 // Install mode: the game into games/<title ID>, its update into games/<title ID>-UPDATE and
 // each additional content into addcont/<title ID>/<entitlement label>, the folders the
 // emulator looks in; boot is then the installed eboot.bin.
-bool InstallPkgContent(const std::string& game, const std::string& user_dir,
-                       const std::string& title_id, const std::string& update,
-                       const std::string& addcont, std::string& boot) {
+bool InstallPkgContent(PkgInstallJob& job) {
+    const std::string& game = job.game;
+    const std::string& user_dir = job.user_dir;
+    const std::string& title_id = job.title_id;
+    const std::string& update = job.update;
+    const std::string& addcont = job.addcont;
+    std::string& boot = job.boot;
     const auto user = Utf8Path(user_dir);
     const auto game_dir = user / "games" / Utf8Path(title_id);
     const auto update_dir = user / "games" / Utf8Path(title_id + "-UPDATE");
-    if (!InstallPkg(Utf8Path(game), game_dir, user_dir)) {
+    if (!InstallPkg(job, Utf8Path(game), game_dir, user_dir)) {
         return false;
     }
     std::error_code ec;
     if (!update.empty()) {
-        if (!InstallPkg(Utf8Path(update), update_dir, user_dir)) {
+        if (!InstallPkg(job, Utf8Path(update), update_dir, user_dir)) {
             return false;
         }
     } else if (std::filesystem::exists(update_dir / ".libretro_pkg", ec)) {
@@ -410,17 +463,34 @@ bool InstallPkgContent(const std::string& game, const std::string& user_dir,
             continue;
         }
         const auto label = summary.content_id.substr(dash + 1);
-        if (!InstallPkg(Utf8Path(path), user / "addcont" / Utf8Path(title_id) / Utf8Path(label),
-                        user_dir)) {
+        if (!InstallPkg(job, Utf8Path(path),
+                        user / "addcont" / Utf8Path(title_id) / Utf8Path(label), user_dir)) {
             return false;
         }
     }
     boot = Utf8String(game_dir / "eboot.bin");
     if (boot.size() >= Libretro::PATH_BYTES) {
-        Log(RETRO_LOG_ERROR, "The installed game's path is too long");
+        job.error = "shadPS4: the installed game's path is too long";
         return false;
     }
     return true;
+}
+
+void PkgInstallThread(void* data) {
+    auto& job = *static_cast<PkgInstallJob*>(data);
+    job.succeeded.store(InstallPkgContent(job), std::memory_order_relaxed);
+    job.done.store(true, std::memory_order_release);
+}
+
+// Stops an install, waiting at most for the block being written.
+void StopPkgInstall() {
+    if (!pkg_install) {
+        return;
+    }
+    pkg_install->cancel.store(true, std::memory_order_relaxed);
+    sthread_join(pkg_install->thread);
+    delete pkg_install;
+    pkg_install = nullptr;
 }
 
 // A game run from its PKG: the keys are there, the PKG is a game's, and its update (the
@@ -1107,47 +1177,9 @@ RETRO_API void retro_reset(void) {
     }
 }
 
-RETRO_API bool retro_load_game(const struct retro_game_info* game) {
-    if (!game || !game->path || !*game->path) {
-        Log(RETRO_LOG_ERROR, "No content: load a game's eboot.bin or PKG");
-        return false;
-    }
-    const std::string user_dir = SystemDirectory();
-    if (user_dir.empty()) {
-        Log(RETRO_LOG_ERROR, "The frontend gave no system directory");
-        return false;
-    }
-    if (std::strlen(game->path) >= Libretro::PATH_BYTES ||
-        user_dir.size() >= Libretro::PATH_BYTES) {
-        Log(RETRO_LOG_ERROR, "The game's path or the system directory is too long");
-        return false;
-    }
-
-    // A PKG is run from as it is, or installed first and its eboot.bin run (PKG Content).
-    std::string boot_path = game->path;
-    std::string update_path;
-    std::string addcont_paths;
-    if (IsPkgPath(game->path)) {
-        std::string title_id;
-        if (!FindPkgContent(game->path, user_dir, title_id, update_path, addcont_paths)) {
-            return false;
-        }
-        if (OptionValue("shadps4_pkg_content", "run") == "install") {
-            if (!InstallPkgContent(game->path, user_dir, title_id, update_path, addcont_paths,
-                                   boot_path)) {
-                return false;
-            }
-            update_path.clear();
-            addcont_paths.clear();
-        }
-    }
-
-    enum retro_pixel_format format = RETRO_PIXEL_FORMAT_XRGB8888;
-    environ_cb(RETRO_ENVIRONMENT_SET_PIXEL_FORMAT, &format);
-    if (!environ_cb(RETRO_ENVIRONMENT_GET_RUMBLE_INTERFACE, &rumble)) {
-        rumble = {};
-    }
-
+// The game started in the emulator's process, over the memory shared with it.
+static bool StartGame(const std::string& boot_path, const std::string& user_dir,
+               const std::string& update_path, const std::string& addcont_paths) {
     std::string argument;
     if (!CreateShared(argument)) {
         Log(RETRO_LOG_ERROR, "The memory shared with the emulator could not be made");
@@ -1227,11 +1259,69 @@ RETRO_API bool retro_load_game(const struct retro_game_info* game) {
     return true;
 }
 
+RETRO_API bool retro_load_game(const struct retro_game_info* game) {
+    if (!game || !game->path || !*game->path) {
+        Log(RETRO_LOG_ERROR, "No content: load a game's eboot.bin or PKG");
+        return false;
+    }
+    const std::string user_dir = SystemDirectory();
+    if (user_dir.empty()) {
+        Log(RETRO_LOG_ERROR, "The frontend gave no system directory");
+        return false;
+    }
+    if (std::strlen(game->path) >= Libretro::PATH_BYTES ||
+        user_dir.size() >= Libretro::PATH_BYTES) {
+        Log(RETRO_LOG_ERROR, "The game's path or the system directory is too long");
+        return false;
+    }
+
+    enum retro_pixel_format format = RETRO_PIXEL_FORMAT_XRGB8888;
+    environ_cb(RETRO_ENVIRONMENT_SET_PIXEL_FORMAT, &format);
+    if (!environ_cb(RETRO_ENVIRONMENT_GET_RUMBLE_INTERFACE, &rumble)) {
+        rumble = {};
+    }
+
+    // A PKG is run from as it is, or installed first and its eboot.bin run (PKG Content).
+    std::string update_path;
+    std::string addcont_paths;
+    if (IsPkgPath(game->path)) {
+        std::string title_id;
+        if (!FindPkgContent(game->path, user_dir, title_id, update_path, addcont_paths)) {
+            return false;
+        }
+        if (OptionValue("shadps4_pkg_content", "run") == "install") {
+            // Installed on a thread of its own; retro_run starts the game when it is done,
+            // and shows black until then, at the size the game will have.
+            Libretro::SharedOptions options{};
+            ReadCoreOptions(options);
+            output_width = options.width;
+            output_height = options.height;
+            auto* job = new PkgInstallJob;
+            job->game = game->path;
+            job->user_dir = user_dir;
+            job->title_id = title_id;
+            job->update = update_path;
+            job->addcont = addcont_paths;
+            job->thread = sthread_create(PkgInstallThread, job);
+            if (!job->thread) {
+                delete job;
+                Log(RETRO_LOG_ERROR, "No thread for the PKG install");
+                return false;
+            }
+            pkg_install = job;
+            NotifyProgress("shadPS4: installing the PKG", 0);
+            return true;
+        }
+    }
+    return StartGame(game->path, user_dir, update_path, addcont_paths);
+}
+
 RETRO_API bool retro_load_game_special(unsigned, const struct retro_game_info*, size_t) {
     return false;
 }
 
 RETRO_API void retro_unload_game(void) {
+    StopPkgInstall();
     if (shared) {
         shared->quit.store(1, std::memory_order_release);
     }
@@ -1251,11 +1341,46 @@ RETRO_API void retro_unload_game(void) {
     emulator_running = false;
 }
 
+// While a PKG is installed: its progress, then the game started, or the frontend asked to close
+// the content when the install failed.
+static void PollPkgInstall() {
+    PkgInstallJob& job = *pkg_install;
+    if (!job.done.load(std::memory_order_acquire)) {
+        const int percent = job.percent.load(std::memory_order_relaxed);
+        if (percent / 5 != job.told_percent / 5) {
+            job.told_percent = percent;
+            char text[96];
+            std::snprintf(text, sizeof(text), "shadPS4: installing the PKG, %d %%", percent);
+            NotifyProgress(text, percent);
+        }
+        return;
+    }
+    // Done: the thread has ended, so joining it does not wait
+    sthread_join(job.thread);
+    const bool succeeded = job.succeeded.load(std::memory_order_relaxed);
+    const std::string boot = job.boot;
+    const std::string user_dir = job.user_dir;
+    const std::string error = job.error;
+    delete pkg_install;
+    pkg_install = nullptr;
+    if (!succeeded || !StartGame(boot, user_dir, {}, {})) {
+        if (!error.empty()) {
+            Notify(error.c_str());
+        }
+        shutdown_requested = true;
+        environ_cb(RETRO_ENVIRONMENT_SHUTDOWN, nullptr);
+    }
+}
+
 RETRO_API void retro_run(void) {
     static int16_t sound[kAudioFrames * 2];
 
     if (input_poll_cb) {
         input_poll_cb();
+    }
+
+    if (pkg_install) {
+        PollPkgInstall();
     }
 
     // An option changed: those that take effect while the game runs go to the emulator
