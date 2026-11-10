@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright 2024 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
-#include <half.hpp>
+#include <math/float16.h>
 #include "common/number_utils.h"
 
 constexpr u32 UF11_EXPONENT_SHIFT = 6;
@@ -79,7 +79,7 @@ float Uf10ToF32(u16 val) {
 }
 
 float Uf16ToF32(u16 val) {
-    return half_float::half_cast<float>(reinterpret_cast<half_float::half&>(val));
+    return retro_half_to_float(val);
 }
 
 float U2ToUnorm(u8 val) {

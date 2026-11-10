@@ -265,7 +265,6 @@ if (ENABLE_SYSTEM_LIBRARIES)
     find_package(fmt 12.0.0 CONFIG)
     find_package(Freetype 2.14.1 MODULE)
     find_package(glslang 15 CONFIG)
-    find_package(half 1.12.0 MODULE)
     find_package(magic_enum 0.9.7 CONFIG)
     find_package(RenderDoc 1.6.0 MODULE)
     find_package(tsl-robin-map 1.3.0 CONFIG)
@@ -1507,7 +1506,7 @@ endif()
 
 create_target_directory_groups(shadps4)
 
-target_link_libraries(shadps4 PRIVATE magic_enum::magic_enum fmt::fmt tsl::robin_map xbyak::xbyak RenderDoc::API Dear_ImGui gcn half::half)
+target_link_libraries(shadps4 PRIVATE magic_enum::magic_enum fmt::fmt tsl::robin_map xbyak::xbyak RenderDoc::API Dear_ImGui gcn)
 target_link_libraries(shadps4 PRIVATE Boost::headers GPUOpen::VulkanMemoryAllocator sirit Vulkan::Headers Zydis::Zydis)
 target_link_libraries(shadps4 PRIVATE Freetype::Freetype)
 

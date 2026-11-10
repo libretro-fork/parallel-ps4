@@ -38,10 +38,6 @@
 	path = externals/ext-boost
 	url = https://github.com/shadps4-emu/ext-boost.git
 	shallow = true
-[submodule "externals/half"]
-	path = externals/half
-	url = https://github.com/ROCm/half.git
-	shallow = true
 [submodule "externals/freetype"]
 	path = externals/freetype
 	url = https://github.com/freetype/freetype.git

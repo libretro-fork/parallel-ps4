@@ -99,13 +99,6 @@ if (WIN32)
     target_compile_options(sirit PRIVATE $<$<CXX_COMPILER_ID:Clang>:-Wno-error=unused-command-line-argument>)
 endif()
 
-# half
-if (NOT TARGET half::half)
-    add_library(half INTERFACE)
-    target_include_directories(half INTERFACE half/include)
-    add_library(half::half ALIAS half)
-endif()
-
 # Dear ImGui
 add_library(Dear_ImGui
         imgui/imgui.cpp
