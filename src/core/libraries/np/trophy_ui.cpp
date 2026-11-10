@@ -13,8 +13,8 @@
 #include <queue>
 
 #define MINIMP3_IMPLEMENTATION
-#include <minimp3_ex.h>
 
+#include "common/audio_file.h"
 #include "common/logging/formatter.h"
 #include "common/path_util.h"
 #include "core/emulator_settings.h"
@@ -82,17 +82,15 @@ void PreloadTrophySound() {
     const auto mp3_path = dir / "trophy.mp3";
     const auto wav_path = dir / "trophy.wav";
     if (fs::exists(mp3_path)) {
-        mp3dec_t dec;
-        mp3dec_file_info_t info{};
-        mp3dec_init(&dec);
-        if (mp3dec_load(&dec, mp3_path.string().c_str(), &info, nullptr, nullptr) == 0 &&
-            info.samples > 0 && (info.channels == 1 || info.channels == 2) && info.hz > 0) {
-            ResampleTrophySound(info.buffer, info.samples / info.channels, info.channels, info.hz);
+        const auto bytes = Common::AudioFile::ReadWhole(mp3_path);
+        Common::AudioFile::Pcm pcm;
+        if (Common::AudioFile::DecodeMp3(bytes.data(), bytes.size(), pcm) &&
+            (pcm.channels == 1 || pcm.channels == 2)) {
+            ResampleTrophySound(pcm.samples.data(), pcm.Frames(), pcm.channels, pcm.hz);
         } else {
             LOG_ERROR(Lib_NpTrophy, "Could not decode the custom trophy sound {}",
                       fmt::UTF(mp3_path.u8string()));
         }
-        std::free(info.buffer);
         return;
     }
     const s16* samples = nullptr;
@@ -100,16 +98,12 @@ void PreloadTrophySound() {
     u32 channels = 0;
     u32 hz = 0;
     if (fs::exists(wav_path)) {
-        // Mapped, and read in place.
-        mp3dec_map_info_t map{};
-        if (mp3dec_open_file(wav_path.string().c_str(), &map) == 0) {
-            if (ParseWav(map.buffer, map.size, &samples, &frames, &channels, &hz)) {
-                ResampleTrophySound(samples, frames, channels, hz);
-            } else {
-                LOG_ERROR(Lib_NpTrophy, "The custom trophy sound {} is not 16-bit PCM",
-                          fmt::UTF(wav_path.u8string()));
-            }
-            mp3dec_close_file(&map);
+        const auto bytes = Common::AudioFile::ReadWhole(wav_path);
+        if (ParseWav(bytes.data(), bytes.size(), &samples, &frames, &channels, &hz)) {
+            ResampleTrophySound(samples, frames, channels, hz);
+        } else {
+            LOG_ERROR(Lib_NpTrophy, "The custom trophy sound {} is not 16-bit PCM",
+                      fmt::UTF(wav_path.u8string()));
         }
         return;
     }

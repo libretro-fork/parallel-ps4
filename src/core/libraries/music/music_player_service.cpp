@@ -11,8 +11,6 @@
 #include <vector>
 #include <queue>
 
-#include <minimp3_ex.h>
-
 extern "C" {
 #include <libavcodec/avcodec.h>
 #include <libavformat/avformat.h>
@@ -23,9 +21,7 @@ extern "C" {
 }
 #include "common/support/avdec.h"
 
-#define DR_FLAC_IMPLEMENTATION
-#include <dr_flac.h>
-
+#include "common/audio_file.h"
 #include "common/logging/log.h"
 #include "common/singleton.h"
 #include "core/emulator_settings.h"
@@ -372,7 +368,7 @@ private:
         StopPlayback();
     }
 
-    static bool DecodeAudioWithFFmpeg(const std::string& path, mp3dec_file_info_t* file_info) {
+    static bool DecodeAudioWithFFmpeg(const std::string& path, Common::AudioFile::Pcm& pcm) {
         AVFormatContext* format_ctx = nullptr;
         if (avformat_open_input(&format_ctx, path.c_str(), nullptr, nullptr) != 0) {
             return false;
@@ -426,7 +422,7 @@ private:
 
         AVPacket* pkt = av_packet_alloc();
         AVFrame* frame = av_frame_alloc();
-        std::vector<int16_t> pcm_data;
+        std::vector<int16_t>& pcm_data = pcm.samples;
 
         while (av_read_frame(format_ctx, pkt) >= 0) {
             if (pkt->stream_index == audio_stream_idx) {
@@ -493,14 +489,8 @@ private:
             return false;
         }
 
-        file_info->channels = out_channels;
-        file_info->hz = out_sample_rate;
-        file_info->samples = pcm_data.size();
-        file_info->buffer = static_cast<mp3d_sample_t*>(malloc(pcm_data.size() * sizeof(int16_t)));
-        if (!file_info->buffer) {
-            return false;
-        }
-        std::memcpy(file_info->buffer, pcm_data.data(), pcm_data.size() * sizeof(int16_t));
+        pcm.channels = static_cast<u32>(out_channels);
+        pcm.hz = static_cast<u32>(out_sample_rate);
         return true;
     }
 
@@ -571,40 +561,21 @@ private:
                 break;
             }
 
-            mp3dec_file_info_t file_info{};
+            Common::AudioFile::Pcm pcm;
             bool decoded = false;
 
             const auto ext = host_path.extension().string();
-            if (ext == ".flac" || ext == ".FLAC") {
-                unsigned int flac_channels = 0;
-                unsigned int flac_hz = 0;
-                drflac_uint64 flac_total_frames = 0;
-                drflac_int16* flac_buf = drflac_open_file_and_read_pcm_frames_s16(
-                    host_path.string().c_str(), &flac_channels, &flac_hz, &flac_total_frames,
-                    nullptr);
-                if (flac_buf && flac_total_frames > 0 && flac_channels > 0 && flac_hz > 0) {
-                    file_info.channels = static_cast<int>(flac_channels);
-                    file_info.hz = static_cast<int>(flac_hz);
-                    file_info.samples = static_cast<size_t>(flac_total_frames * flac_channels);
-                    file_info.buffer = reinterpret_cast<mp3d_sample_t*>(flac_buf);
-                    decoded = true;
-                }
-            }
-
-            if (!decoded && (ext == ".mp3" || ext == ".MP3")) {
-                mp3dec_t dec;
-                mp3dec_init(&dec);
-                int res =
-                    mp3dec_load(&dec, host_path.string().c_str(), &file_info, nullptr, nullptr);
-                if (res == 0 && file_info.samples > 0 && file_info.channels > 0 &&
-                    file_info.hz > 0) {
-                    decoded = true;
-                }
+            if (ext == ".flac" || ext == ".FLAC" || ext == ".mp3" || ext == ".MP3") {
+                // Read whole and decoded in place, into one buffer the mix resamples from.
+                const auto bytes = Common::AudioFile::ReadWhole(host_path);
+                decoded = ext == ".flac" || ext == ".FLAC"
+                              ? Common::AudioFile::DecodeFlac(bytes.data(), bytes.size(), pcm)
+                              : Common::AudioFile::DecodeMp3(bytes.data(), bytes.size(), pcm);
             }
 
             if (!decoded && (ext == ".m4a" || ext == ".M4A" || ext == ".aac" || ext == ".AAC" ||
                              ext == ".mp4" || ext == ".MP4")) {
-                decoded = DecodeAudioWithFFmpeg(host_path.string(), &file_info);
+                decoded = DecodeAudioWithFFmpeg(host_path.string(), pcm);
             }
 
             if (!decoded) {
@@ -612,34 +583,30 @@ private:
                 break;
             }
 
-            u64 total_duration =
-                (static_cast<u64>(file_info.samples) / file_info.channels) * 1000 / file_info.hz;
+            const u64 total_frames = pcm.Frames();
+            u64 total_duration = total_frames * 1000 / pcm.hz;
             m_total_duration_ms = total_duration;
 
             if (m_stop_requested.load()) {
-                free(file_info.buffer);
                 break;
             }
 
             // The track goes to the frontend through the core's mix, resampled to its 48 kHz
             // straight from the decoded buffer into the input's ring.
-            if (file_info.channels > 2) {
-                LOG_ERROR(Lib_AudioOut, "Music with {} channels is not played", file_info.channels);
-                free(file_info.buffer);
+            if (pcm.channels > 2) {
+                LOG_ERROR(Lib_AudioOut, "Music with {} channels is not played", pcm.channels);
                 break;
             }
             audio_mix_input_t* input = audio_mix_input_open();
             if (!input) {
                 LOG_ERROR(Lib_AudioOut, "No input left in the core's mix for music");
-                free(file_info.buffer);
                 break;
             }
             audio_mix_resampler_t resampler;
-            audio_mix_resampler_init(&resampler, static_cast<unsigned>(file_info.hz),
-                                     static_cast<unsigned>(file_info.channels));
-            const u64 total_frames = file_info.samples / file_info.channels;
+            audio_mix_resampler_init(&resampler, static_cast<unsigned>(pcm.hz),
+                                     static_cast<unsigned>(pcm.channels));
             const auto frame_at = [&](u64 ms) {
-                return std::min<u64>(ms * file_info.hz / 1000, total_frames) << 32;
+                return std::min<u64>(ms * pcm.hz / 1000, total_frames) << 32;
             };
             u64 pos = start_time_ms > 0 && total_duration > 0 ? frame_at(start_time_ms) : 0;
 
@@ -673,7 +640,7 @@ private:
                     if (room == 0) {
                         break;
                     }
-                    const unsigned got = audio_mix_resample(&resampler, file_info.buffer,
+                    const unsigned got = audio_mix_resample(&resampler, pcm.samples.data(),
                                                             total_frames, &pos, dst, room, vol);
                     audio_mix_input_commit(input, got);
                     done += got;
@@ -681,11 +648,10 @@ private:
                         break; // the track has ended
                     }
                 }
-                m_current_time_ms = (pos >> 32) * 1000 / file_info.hz;
+                m_current_time_ms = (pos >> 32) * 1000 / pcm.hz;
             }
 
             audio_mix_input_close(input);
-            free(file_info.buffer);
 
             if (m_stop_requested.load()) {
                 break;

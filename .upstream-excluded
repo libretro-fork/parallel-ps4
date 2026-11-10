@@ -43,3 +43,5 @@ src/common/discord_rpc_handler.cpp
 src/common/discord_rpc_handler.h
 externals/xxhash
 cmake/FindxxHash.cmake
+externals/minimp3
+externals/dr_flac

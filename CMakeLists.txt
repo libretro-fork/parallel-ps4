@@ -812,6 +812,8 @@ set(COMMON src/common/logging/classes.cpp
            src/common/alignment.h
            src/common/arch.h
            src/common/assert.cpp
+           src/common/audio_file.cpp
+           src/common/audio_file.h
            src/common/assert.h
            src/common/bit_field.h
            src/common/bounded_threadsafe_queue.h
@@ -1390,6 +1392,8 @@ set(LIBRETRO_COMMON_SOURCES
     ${LIBRETRO_COMMON_DIR}/compat/compat_strl.c
     ${LIBRETRO_COMMON_DIR}/encodings/encoding_xxh3.c
     ${LIBRETRO_COMMON_DIR}/features/features_cpu.c
+    ${LIBRETRO_COMMON_DIR}/formats/flac/rflac.c
+    ${LIBRETRO_COMMON_DIR}/formats/mp3/rmp3.c
     ${LIBRETRO_COMMON_DIR}/queues/retro_spsc.c
     ${LIBRETRO_COMMON_DIR}/queues/retro_waitable_spsc.c
     ${LIBRETRO_COMMON_DIR}/rthreads/retro_eventcount.c
@@ -1454,7 +1458,7 @@ endif()
 create_target_directory_groups(shadps4)
 
 target_link_libraries(shadps4 PRIVATE spdlog::spdlog)
-target_link_libraries(shadps4 PRIVATE magic_enum::magic_enum fmt::fmt tsl::robin_map xbyak::xbyak Tracy::TracyClient RenderDoc::API FFmpeg::ffmpeg Dear_ImGui ImGuiFileDialog gcn half::half ZLIB::ZLIB PNG::PNG minimp3 dr_flac)
+target_link_libraries(shadps4 PRIVATE magic_enum::magic_enum fmt::fmt tsl::robin_map xbyak::xbyak Tracy::TracyClient RenderDoc::API FFmpeg::ffmpeg Dear_ImGui ImGuiFileDialog gcn half::half ZLIB::ZLIB PNG::PNG)
 target_link_libraries(shadps4 PRIVATE Boost::headers GPUOpen::VulkanMemoryAllocator LibAtrac9 sirit Vulkan::Headers Zydis::Zydis pugixml::pugixml)
 target_link_libraries(shadps4 PRIVATE stb::headers lfreist-hwinfo::hwinfo nlohmann_json::nlohmann_json miniz::miniz fdk-aac CLI11::CLI11 Cpp_Httplib miniupnpc::miniupnpc)
 target_link_libraries(shadps4 PRIVATE Freetype::Freetype)
