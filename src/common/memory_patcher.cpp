@@ -6,9 +6,9 @@
 #include <fstream>
 #include <sstream>
 #include <string>
-#include <nlohmann/json.hpp>
 #include "common/elf_info.h"
 #include "common/logging/log.h"
+#include "common/patch_index.h"
 #include "common/path_util.h"
 #include "common/xml.h"
 #include "core/emulator_state.h"
@@ -244,29 +244,13 @@ void OnGameLoaded() {
                 continue;
             }
 
-            std::ifstream json_file{files_json_path};
-            nlohmann::json available_patches;
-
-            if (!json_file.is_open()) {
-                LOG_ERROR(Loader, "Could not open patch index: {}", files_json_path.string());
+            char patch_name[1024];
+            if (!patch_index_find(Common::FS::PathToUTF8String(files_json_path).c_str(),
+                                  g_game_serial.c_str(), patch_name, sizeof(patch_name))) {
                 continue;
             }
-
-            try {
-                available_patches = nlohmann::json::parse(json_file);
-            } catch (const nlohmann::json::parse_error& e) {
-                LOG_ERROR(Loader, "Could not parse patch index {}: {}", files_json_path.string(),
-                          e.what());
-                continue;
-            }
-
-            std::filesystem::path game_patch_file;
-            for (auto const& [filename, serials] : available_patches.items()) {
-                if (std::find(serials.begin(), serials.end(), g_game_serial) != serials.end()) {
-                    game_patch_file = repo.path() / filename;
-                    break;
-                }
-            }
+            const std::filesystem::path game_patch_file =
+                repo.path() / std::u8string_view(reinterpret_cast<const char8_t*>(patch_name));
             if (std::filesystem::exists(game_patch_file)) {
                 ApplyPatchesFromXML(game_patch_file);
             }

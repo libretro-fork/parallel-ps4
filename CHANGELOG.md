@@ -4,6 +4,7 @@ What changed in the libretro core of this fork, newest first. Changes that come 
 
 ## Unreleased
 
+- The HTTP host overrides (`host_overrides.json`), the patch repositories' `files.json` index and the body of a shadNet session invitation are read and written in C89 with libretro-common's rjson, in place of nlohmann::json. At most 64 host overrides are kept; more are logged and skipped.
 - The key file (`keys.json`) is read and written in C89 with libretro-common's streaming JSON parser and writer (`formats/rjson.h`), in place of nlohmann::json. It is written to a temporary file first and then renamed over the old one, so a failed write no longer leaves it half-written. It is no longer written again when the core shuts down.
 - stb_image and stb_image_write are gone: the overlay's PNGs (trophy icons and the like) decode with libretro-common's rpng. A PNG that fails to decode is now skipped instead of uploaded from a null image.
 - CLI11 and ImGuiFileDialog are no longer built: nothing in the core used them.

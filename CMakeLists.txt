@@ -385,7 +385,9 @@ if (ARCHITECTURE STREQUAL "x86_64" OR ARCHITECTURE STREQUAL "arm64")
     list(APPEND KERNEL_LIB src/core/libraries/kernel/threads/stack_asm.cpp)
 endif()
 
-set(NETWORK_LIBS src/core/libraries/network/http.cpp
+set(NETWORK_LIBS src/core/libraries/network/host_override.c
+                 src/core/libraries/network/host_override.h
+                 src/core/libraries/network/http.cpp
                  src/core/libraries/network/http.h
                  src/core/libraries/network/http_error.h
                  src/core/libraries/network/http2.cpp
@@ -671,6 +673,8 @@ set(NP_LIBS src/core/libraries/np/np_error.h
             src/core/libraries/np/np_handler/np_handler_friends.cpp
             src/core/libraries/np/np_handler/np_handler_auth.cpp
             src/core/libraries/np/np_handler/np_handler_invitation.cpp
+            src/core/libraries/np/np_handler/np_invitation_json.c
+            src/core/libraries/np/np_handler/np_invitation_json.h
             src/core/libraries/np/np_handler/np_handler_score.cpp
             src/core/libraries/np/np_handler/np_handler_trophy.cpp
             src/core/libraries/np/np_handler/np_handler_tus.cpp
@@ -870,6 +874,8 @@ set(COMMON src/common/c_bridge.cpp
            src/common/number_utils.cpp
            src/common/memory_patcher.h
            src/common/memory_patcher.cpp
+           src/common/patch_index.c
+           src/common/patch_index.h
            src/common/multi_level_page_table.h
            ${CMAKE_CURRENT_BINARY_DIR}/src/common/scm_rev.cpp
            src/common/scm_rev.h

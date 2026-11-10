@@ -10,45 +10,11 @@
 #include "core/emulator_settings.h"
 #include "core/libraries/invitation_dialog/invitation_dialog.h"
 #include "core/libraries/np/np_handler/np_handler.h"
+#include "core/libraries/np/np_handler/np_invitation_json.h"
 #include "core/libraries/system/systemservice.h"
 #include "imgui/invitation_prompt_layer.h"
 
 namespace Libraries::Np {
-
-// Minimal JSON string escaper for the invitation-request body (npids are safe but the user message
-// can contain quotes/backslashes/control chars).
-std::string JsonEscape(const std::string& in) {
-    std::string out;
-    out.reserve(in.size() + 8);
-    for (const char c : in) {
-        switch (c) {
-        case '"':
-            out += "\\\"";
-            break;
-        case '\\':
-            out += "\\\\";
-            break;
-        case '\n':
-            out += "\\n";
-            break;
-        case '\r':
-            out += "\\r";
-            break;
-        case '\t':
-            out += "\\t";
-            break;
-        default:
-            if (static_cast<unsigned char>(c) < 0x20) {
-                char buf[8];
-                std::snprintf(buf, sizeof(buf), "\\u%04x", c);
-                out += buf;
-            } else {
-                out += c;
-            }
-        }
-    }
-    return out;
-}
 
 bool NpHandler::SendSessionInvitation(s32 user_id, const std::string& session_id,
                                       const std::vector<std::string>& to,
@@ -69,22 +35,20 @@ bool NpHandler::SendSessionInvitation(s32 user_id, const std::string& session_id
     }
 
     // invitation-request JSON: {"to":[...],"message":"..."}
-    std::string json = "{\"to\":[";
-    for (size_t i = 0; i < to.size(); ++i) {
-        if (i != 0) {
-            json += ',';
-        }
-        json += '"';
-        json += JsonEscape(to[i]);
-        json += '"';
+    std::vector<const char*> recipients;
+    recipients.reserve(to.size());
+    for (const auto& npid : to) {
+        recipients.push_back(npid.c_str());
     }
-    json += ']';
-    if (!message.empty()) {
-        json += ",\"message\":\"";
-        json += JsonEscape(message);
-        json += '"';
+    std::string json;
+    json.resize(np_invitation_request_json(nullptr, 0, recipients.data(), recipients.size(),
+                                           message.c_str()));
+    if (json.empty() ||
+        np_invitation_request_json(json.data(), json.size() + 1, recipients.data(),
+                                   recipients.size(), message.c_str()) != json.size()) {
+        LOG_ERROR(NpHandler, "could not build the invitation request");
+        return false;
     }
-    json += '}';
 
     // multipart/mixed with a single JSON part; shadNet keys on the Content-Description.
     const std::string boundary = "shadps4invite" + std::to_string(user_id);
