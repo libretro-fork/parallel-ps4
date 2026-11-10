@@ -195,12 +195,6 @@ endif()
 
 add_subdirectory(aacdec)
 
-#nlohmann json 
-if (NOT TARGET nlohmann_json::nlohmann_json)
-set(JSON_BuildTests OFF CACHE INTERNAL "")
-add_subdirectory(json)
-endif()
-
 # miniupnpc
 if (NOT TARGET miniupnpc::miniupnpc)
 set(UPNPC_BUILD_STATIC ON CACHE BOOL "" FORCE)
