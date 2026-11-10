@@ -7,9 +7,9 @@
 #include <cstring>
 #include <type_traits>
 
-#include <boost/container/list.hpp>
-#include <boost/container/small_vector.hpp>
+#include <list>
 #include <boost/intrusive/list.hpp>
+#include "common/small_vector.h"
 
 #include "common/assert.h"
 #include "shader_recompiler/ir/opcodes.h"
@@ -146,11 +146,11 @@ private:
     RegTag reg_tag{};
     union {
         NonTriviallyDummy dummy{};
-        boost::container::small_vector<std::pair<Block*, Value>, 2> phi_args;
+        Common::SmallVector<std::pair<Block*, Value>, 2> phi_args;
         std::array<Value, 6> args;
     };
 
-    boost::container::list<IR::Use> uses;
+    std::list<IR::Use> uses;
 };
 static_assert(sizeof(Inst) <= 184, "Inst size unintentionally increased");
 

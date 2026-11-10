@@ -11,12 +11,12 @@
 #include "video_core/renderer_vulkan/vk_presenter.h"
 #include "video_core/renderer_vulkan/vk_shader_util.h"
 
-#include <boost/container/static_vector.hpp>
+#include "common/small_vector.h"
 
 namespace Vulkan::HostPasses {
 
 void PostProcessingPass::Create(vk::Device device, const vk::Format surface_format) {
-    boost::container::static_vector<vk::DescriptorSetLayoutBinding, 2> bindings{
+    Common::StaticVector<vk::DescriptorSetLayoutBinding, 2> bindings{
         {
             .binding = 0,
             .descriptorType = vk::DescriptorType::eCombinedImageSampler,

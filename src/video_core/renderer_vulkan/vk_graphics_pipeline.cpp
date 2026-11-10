@@ -3,7 +3,7 @@
 
 #include <algorithm>
 #include <utility>
-#include <boost/container/small_vector.hpp>
+#include "common/small_vector.h"
 
 #include "common/assert.h"
 #include "shader_recompiler/backend/spirv/emit_spirv_discard_frag.h"
@@ -139,7 +139,7 @@ GraphicsPipeline::GraphicsPipeline(
         .pNext = instance.IsDepthClipControlSupported() ? &clip_control : nullptr,
     };
 
-    boost::container::static_vector<vk::DynamicState, 32> dynamic_states = {
+    Common::StaticVector<vk::DynamicState, 32> dynamic_states = {
         vk::DynamicState::eViewportWithCount,  vk::DynamicState::eScissorWithCount,
         vk::DynamicState::eBlendConstants,     vk::DynamicState::eDepthTestEnable,
         vk::DynamicState::eDepthWriteEnable,   vk::DynamicState::eDepthCompareOp,
@@ -169,8 +169,7 @@ GraphicsPipeline::GraphicsPipeline(
         .pDynamicStates = dynamic_states.data(),
     };
 
-    boost::container::static_vector<vk::PipelineShaderStageCreateInfo, MaxShaderStages>
-        shader_stages;
+    Common::StaticVector<vk::PipelineShaderStageCreateInfo, MaxShaderStages> shader_stages;
     auto stage = u32(Shader::SwStage::Vertex);
     if (infos[stage]) {
         shader_stages.emplace_back(vk::PipelineShaderStageCreateInfo{
@@ -478,7 +477,7 @@ template void GraphicsPipeline::GetVertexInputs(
     VertexInputs<AmdGpu::Buffer>& guest_buffers, u32 step_rate_0, u32 step_rate_1) const;
 
 void GraphicsPipeline::BuildDescSetLayout(bool preloading) {
-    boost::container::small_vector<vk::DescriptorSetLayoutBinding, 32> bindings;
+    Common::SmallVector<vk::DescriptorSetLayoutBinding, 32> bindings;
     u32 binding{};
 
     for (const auto* stage : stages) {

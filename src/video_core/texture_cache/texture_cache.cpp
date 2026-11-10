@@ -125,7 +125,7 @@ void TextureCache::DownloadImageMemory(ImageId image_id, DownloadMemoryFlags fla
     ASSERT(!(is_sync && is_priority));
 
     u32 copy_size = 0;
-    boost::container::small_vector<vk::BufferImageCopy, 8> buffer_copies;
+    Common::SmallVector<vk::BufferImageCopy, 8> buffer_copies;
     for (u32 mip = 0; mip < image_mips; ++mip) {
         const u32 width = std::max(image.info.size.width >> mip, 1u);
         const u32 height = std::max(image.info.size.height >> mip, 1u);
@@ -194,7 +194,7 @@ void TextureCache::InvalidateMemory(VAddr addr, size_t size) {
     const auto pages_start = PageManager::GetPageAddr(addr);
     const auto pages_end = PageManager::GetNextPageAddr(addr + size - 1);
 
-    SmallVector<ImageId, 8> image_ids;
+    Common::SmallVector<ImageId, 8> image_ids;
     ForEachImageInRegion(pages_start, pages_end - pages_start,
                          [&](ImageId image_id, Image&) { image_ids.push_back(image_id); });
 
@@ -250,7 +250,7 @@ void TextureCache::MarkAsMaybeGpuDirty(VAddr addr, size_t size) {
 }
 
 void TextureCache::UnmapMemory(VAddr cpu_addr, size_t size) {
-    SmallVector<ImageId, 16> deleted_images;
+    Common::SmallVector<ImageId, 16> deleted_images;
     ForEachImageInRegion(cpu_addr, size, [&](ImageId id, Image&) { deleted_images.push_back(id); });
     for (const ImageId id : deleted_images) {
         // TODO: Download image data back to host.
@@ -608,7 +608,7 @@ ImageId TextureCache::FindImage(ImageDesc& desc, bool exact_fmt) {
         frame_extent = info.size;
     }
 
-    SmallVector<ImageId, 8> image_ids;
+    Common::SmallVector<ImageId, 8> image_ids;
     ForEachImageInRegion(info.guest_address, info.guest_size,
                          [&](ImageId image_id, Image& image) { image_ids.push_back(image_id); });
 
@@ -703,7 +703,7 @@ ImageId TextureCache::FindImage(ImageDesc& desc, bool exact_fmt) {
 }
 
 ImageId TextureCache::FindImageFromRange(VAddr address, size_t size, bool ensure_valid) {
-    SmallVector<ImageId, 4> image_ids;
+    Common::SmallVector<ImageId, 4> image_ids;
     ForEachImageWithAddress(address, [&](ImageId image_id, Image& image) {
         if (ensure_valid && !image.HasGpuValidData()) {
             return;
@@ -904,7 +904,7 @@ void TextureCache::RefreshImage(Image& image) {
     const bool is_gpu_modified = True(image.flags & ImageFlagBits::GpuModified);
     const bool is_gpu_dirty = True(image.flags & ImageFlagBits::GpuDirty);
 
-    SmallVector<vk::BufferImageCopy, 14> image_copies;
+    Common::SmallVector<vk::BufferImageCopy, 14> image_copies;
     for (u32 m = 0; m < num_mips; m++) {
         const u32 width = std::max(image.info.size.width >> m, 1u);
         const u32 height = std::max(image.info.size.height >> m, 1u);
@@ -1093,8 +1093,8 @@ void TextureCache::GarbageCollectImages() {
     bool aggresive = false;
     u64 ticks_to_destroy = 0;
     size_t num_deletions = 0;
-    boost::container::small_vector<ImageId, 8> download_queue;
-    boost::container::small_vector<ImageId, 8> maybe_download;
+    Common::SmallVector<ImageId, 8> download_queue;
+    Common::SmallVector<ImageId, 8> maybe_download;
 
     const auto configure = [&](bool allow_aggressive) {
         pressured = total_used_memory >= pressure_gc_memory;

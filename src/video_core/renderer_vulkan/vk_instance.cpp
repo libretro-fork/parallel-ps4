@@ -1,9 +1,9 @@
 // SPDX-FileCopyrightText: Copyright 2024 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
-#include <boost/container/static_vector.hpp>
 #include <fmt/format.h>
 #include <fmt/ranges.h>
+#include "common/small_vector.h"
 
 #include <array>
 #include <cstring>
@@ -246,7 +246,7 @@ bool Instance::CreateDevice() {
     }
 
     // Room for the one the libretro core adds below.
-    boost::container::static_vector<const char*, 40> enabled_extensions;
+    Common::StaticVector<const char*, 40> enabled_extensions;
     const auto add_extension = [&](std::string_view extension) -> bool {
         const auto result =
             std::find_if(available_extensions.begin(), available_extensions.end(),

@@ -8,9 +8,9 @@
 #include <optional>
 #include <thread>
 #include <unordered_set>
-#include <boost/container/small_vector.hpp>
 #include <queue>
 #include <tsl/robin_map.h>
+#include "common/small_vector.h"
 
 #include "common/lru_cache.h"
 #include "common/multi_level_page_table.h"
@@ -62,7 +62,7 @@ class TextureCache {
     };
 
     struct alignas(64) Bucket {
-        SmallVector<BucketEntry, 4, u32> entries;
+        Common::SmallVector<BucketEntry, 4, u32> entries;
     };
     static_assert(sizeof(Bucket) == 64);
 

@@ -19,7 +19,7 @@
 #include <limits>
 #include <unordered_map>
 #include <vector>
-#include <boost/container/small_vector.hpp>
+#include "common/small_vector.h"
 
 #include "common/hash.h"
 #include "shader_recompiler/ir/opcodes.h"
@@ -44,7 +44,7 @@ static bool IsDisallowedOp(IR::Opcode op) {
     return op == IR::Opcode::InverseBallot || op == IR::Opcode::GetUserData;
 }
 
-using InstList = boost::container::small_vector<IR::Inst*, 4>;
+using InstList = Common::SmallVector<IR::Inst*, 4>;
 
 struct CommonOp {
     IR::Opcode op{IR::Opcode::Void};
@@ -246,7 +246,7 @@ private:
             IR::Inst* phi;
             size_t arg_idx;
         };
-        boost::container::small_vector<Frame, 8> dfs;
+        Common::SmallVector<Frame, 8> dfs;
 
         const auto push_phi = [&](IR::Inst* phi, NodeInfo& info) {
             info.index = index_counter;
@@ -340,7 +340,7 @@ static void FoldSccCommonOps(std::vector<PhiScc>& sccs) {
 
 static void DeduplicateSccs(std::vector<PhiScc>& sccs) {
     struct SccGroup {
-        boost::container::small_vector<u32, 4> sccs;
+        Common::SmallVector<u32, 4> sccs;
         bool queued{};
     };
     std::unordered_map<u64, SccGroup, std::identity> scc_groups;

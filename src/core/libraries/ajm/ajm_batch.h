@@ -7,7 +7,7 @@
 #include "common/types.h"
 #include "core/libraries/ajm/ajm.h"
 
-#include <boost/container/small_vector.hpp>
+#include "common/small_vector.h"
 
 #include <atomic>
 #include <limits>
@@ -30,7 +30,7 @@ struct AjmJob {
     };
 
     struct Output {
-        boost::container::small_vector<std::span<u8>, 8> buffers;
+        Common::SmallVector<std::span<u8>, 8> buffers;
         AjmSidebandResult* p_result = nullptr;
         AjmSidebandStream* p_stream = nullptr;
         AjmSidebandFormat* p_format = nullptr;
@@ -54,7 +54,7 @@ struct AjmBatch {
     std::atomic_bool canceled{};
     std::atomic_bool processed{};
     std::binary_semaphore finished{0};
-    boost::container::small_vector<AjmJob, 16> jobs;
+    Common::SmallVector<AjmJob, 16> jobs;
 
     static std::shared_ptr<AjmBatch> FromBatchBuffer(std::span<u8> buffer);
 };

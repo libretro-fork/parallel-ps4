@@ -6,7 +6,7 @@
 #include <deque>
 #include <span>
 #include <vector>
-#include <boost/container/small_vector.hpp>
+#include "common/small_vector.h"
 
 #include "common/enum.h"
 #include "common/interval_set.h"
@@ -131,7 +131,7 @@ public:
 private:
     struct ArenaBinds {
         const Buffer* arena;
-        boost::container::small_vector<vk::SparseMemoryBind, 32> binds;
+        Common::SmallVector<vk::SparseMemoryBind, 32> binds;
     };
 
     ArenaBinds* BindsForArena(const Buffer* arena) {

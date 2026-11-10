@@ -242,7 +242,7 @@ bool Runtime::BlitScaled(VideoCore::Image* src, VideoCore::Image* dst, u32 dst_m
     const auto dst_size = dst->HostSize();
     const u32 layers = std::min<u32>(src->info.resources.layers, dst->info.resources.layers - dst_layer);
     const u32 levels = std::min<u32>(src->info.resources.levels, dst->info.resources.levels - dst_mip);
-    SmallVector<vk::ImageBlit, 8> regions;
+    Common::SmallVector<vk::ImageBlit, 8> regions;
     for (u32 mip = 0; mip < levels; ++mip) {
         vk::ImageBlit region{
             .srcSubresource{src_aspect, mip, 0, layers},
@@ -300,7 +300,7 @@ void Runtime::CopyImage(VideoCore::Image* src, VideoCore::Image* dst) {
     SetBackingSamples(dst, dst->info.num_samples, false);
     SetBackingSamples(src, src->info.num_samples);
 
-    SmallVector<vk::ImageCopy, 8> regions;
+    Common::SmallVector<vk::ImageCopy, 8> regions;
 
     const vk::ImageAspectFlags src_aspect = src->aspect_mask & ~vk::ImageAspectFlagBits::eStencil;
     const vk::ImageAspectFlags dst_aspect = dst->aspect_mask & ~vk::ImageAspectFlagBits::eStencil;
@@ -400,7 +400,7 @@ void Runtime::CopyImageWithBuffer(VideoCore::Image* src, VideoCore::Image* dst,
         .imageExtent = {src->HostSize().width, src->HostSize().height, src->HostSize().depth},
     };
     u64 copy_size = BufferImageCopySize(buffer_copy, src->info.pixel_format);
-    SmallVector<vk::BufferImageCopy, 8> buffer_copies;
+    Common::SmallVector<vk::BufferImageCopy, 8> buffer_copies;
     buffer_copies.push_back(buffer_copy);
     for (u32 mip = 1; mip < num_mips; ++mip) {
         auto mip_copy = buffer_copy;

@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright 2026 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
-#include <boost/container/small_vector.hpp>
+#include "common/small_vector.h"
 
 #include "shader_recompiler/ir/basic_block.h"
 #include "shader_recompiler/ir/dominance.h"
@@ -16,7 +16,7 @@ void SsaRepairPass(IR::Program& program) {
     IR::ComputeDominators(post_order);
     IR::ComputeDominanceFrontiers(post_order);
 
-    boost::container::small_vector<IR::Use, 2> invalid_uses;
+    Common::SmallVector<IR::Use, 2> invalid_uses;
     for (IR::Block* block : post_order) {
         for (IR::Inst& inst : block->Instructions()) {
             if (!inst.HasUses()) {

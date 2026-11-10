@@ -310,7 +310,7 @@ void Translator::BUFFER_STORE(u32 num_dwords, bool is_inst_typed, bool is_buffer
                               ir.GetScalarReg(sharp + 2), ir.GetScalarReg(sharp + 3));
     const IR::VectorReg src_reg{inst.src[1].code};
 
-    boost::container::static_vector<IR::Value, 4> comps;
+    Common::StaticVector<IR::Value, 4> comps;
     for (u32 i = 0; i < num_dwords; i++) {
         const auto src_reg_i = src_reg + i;
         if (buffer_info.typed) {
@@ -494,7 +494,7 @@ void Translator::IMAGE_STORE(bool has_mip, const GcnInst& inst) {
     info.is_array.Assign(mimg.da);
     info.is_r128.Assign(mimg.r128);
 
-    boost::container::static_vector<IR::F32, 4> comps;
+    Common::StaticVector<IR::F32, 4> comps;
     for (u32 i = 0; i < 4; i++) {
         if (((mimg.dmask >> i) & 1) == 0) {
             comps.push_back(ir.Imm32(0.f));

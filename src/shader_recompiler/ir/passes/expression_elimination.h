@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include <boost/container/small_vector.hpp>
+#include "common/small_vector.h"
 
 #include "shader_recompiler/ir/basic_block.h"
 #include "shader_recompiler/ir/microinstruction.h"
@@ -31,7 +31,7 @@ static bool IsIdenticalInst(const IR::Inst* a, const IR::Inst* b) {
 }
 
 static void RunLocalCSE(IR::Block* block) {
-    boost::container::small_vector<IR::Inst*, 8> inst_list;
+    Common::SmallVector<IR::Inst*, 8> inst_list;
     auto it = std::ranges::find_if_not(*block, IR::IsPhi);
     for (; it != block->end(); ++it) {
         IR::Inst& inst{*it};

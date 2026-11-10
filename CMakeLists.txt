@@ -844,6 +844,7 @@ set(COMMON src/common/c_bridge.cpp
            src/common/signal_context.cpp
            src/common/singleton.h
            src/common/slab_heap.h
+           src/common/flat_map.h
            src/common/small_vector.h
            src/common/slot_vector.cpp
            src/common/slot_vector.h

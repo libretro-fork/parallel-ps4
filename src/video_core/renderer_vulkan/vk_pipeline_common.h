@@ -7,7 +7,7 @@
 #include "shader_recompiler/runtime_info.h"
 #include "video_core/renderer_vulkan/vk_common.h"
 
-#include <boost/container/small_vector.hpp>
+#include "common/small_vector.h"
 
 namespace Shader {
 struct Info;

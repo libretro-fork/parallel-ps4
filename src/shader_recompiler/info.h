@@ -5,8 +5,8 @@
 
 #include <span>
 #include <vector>
-#include <boost/container/static_vector.hpp>
 #include "common/assert.h"
+#include "common/small_vector.h"
 #include "common/types.h"
 #include "shader_recompiler/backend/bindings.h"
 #include "shader_recompiler/frontend/copy_shader.h"

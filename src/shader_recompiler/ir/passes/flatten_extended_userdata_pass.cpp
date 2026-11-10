@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include <unordered_map>
-#include <boost/container/flat_map.hpp>
 #include <queue>
+#include "common/flat_map.h"
 #ifdef __aarch64__
 // x86-64 walkers emitted on an aarch64 host (srt_walker_interpreter.cpp): Xbyak's 64-bit mode
 #define XBYAK64
@@ -164,14 +164,13 @@ struct PassInfo {
     };
 
     // map offset to inst
-    using PtrUserList =
-        boost::container::flat_map<IR::Value, Shader::IR::Inst*, PointerListCompare>;
+    using PtrUserList = Common::FlatMap<IR::Value, Shader::IR::Inst*, 8, PointerListCompare>;
 
     Optimization::SrtGvnTable gvn_table;
     // keys are GetUserData, ReadConst or ReadConstBuffer instructions that are used as pointers
     std::unordered_map<IR::Inst*, PtrUserList> pointer_uses;
     // GetUserData instructions corresponding to sgpr_base of SRT roots
-    boost::container::small_flat_map<IR::ScalarReg, IR::Inst*, 1> srt_roots;
+    Common::FlatMap<IR::ScalarReg, IR::Inst*, 1> srt_roots;
 
     // pick a single inst for a given value number
     std::unordered_map<u32, IR::Inst*> vn_to_inst;
@@ -763,7 +762,7 @@ void FlattenExtendedUserdataPass(IR::Program& program) {
 
     // traverse at end and assign offsets to duplicate readconsts, using
     // vn_to_inst as the source
-    boost::container::small_vector<IR::Inst*, 32> all_readconsts, visited;
+    Common::SmallVector<IR::Inst*, 32> all_readconsts, visited;
     std::queue<IR::Inst*> queue;
 
     for (auto it = post_order.rbegin(); it != post_order.rend(); it++) {

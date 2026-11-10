@@ -5,8 +5,8 @@
 
 #include <deque>
 #include <vector>
-#include <boost/container/static_vector.hpp>
 #include <tsl/robin_map.h>
+#include "common/small_vector.h"
 
 #include "common/types.h"
 #include "video_core/renderer_vulkan/vk_common.h"
@@ -85,7 +85,7 @@ private:
     std::span<const vk::DescriptorPoolSize> pool_sizes;
     vk::DescriptorPool curr_pool;
     std::deque<std::pair<vk::DescriptorPool, u64>> pending_pools;
-    using DescSetBatch = boost::container::static_vector<vk::DescriptorSet, DescriptorSetBatch>;
+    using DescSetBatch = Common::StaticVector<vk::DescriptorSet, DescriptorSetBatch>;
     tsl::robin_map<u64, DescSetBatch> descriptor_sets;
 };
 

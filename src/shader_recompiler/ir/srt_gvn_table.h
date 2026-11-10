@@ -2,9 +2,9 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include <unordered_map>
-#include <boost/container/small_vector.hpp>
 #include "common/assert.h"
 #include "common/hash.h"
+#include "common/small_vector.h"
 #include "shader_recompiler/ir/microinstruction.h"
 #include "shader_recompiler/ir/opcodes.h"
 #include "shader_recompiler/ir/value.h"
@@ -90,7 +90,7 @@ private:
     ValueNumberTable value_numbers;
     u32 next_num;
 
-    using InstVector = boost::container::small_vector<u32, 8>;
+    using InstVector = Common::SmallVector<u32, 8>;
 
     InstVector MakeInstVector(IR::Inst* inst) {
         InstVector iv;

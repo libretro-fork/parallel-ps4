@@ -83,11 +83,11 @@ struct StageSpecialization {
     RuntimeInfo runtime_info{};
     std::bitset<MaxStageResources> bitset{};
     Gcn::FetchShaderData fetch_shader_data{};
-    SmallVector<VsAttribSpecialization, 32> vs_attribs;
-    SmallVector<BufferSpecialization, 16> buffers;
-    SmallVector<ImageSpecialization, 16> images;
-    SmallVector<FMaskSpecialization, 8> fmasks;
-    SmallVector<SamplerSpecialization, 16> samplers;
+    Common::SmallVector<VsAttribSpecialization, 32> vs_attribs;
+    Common::SmallVector<BufferSpecialization, 16> buffers;
+    Common::SmallVector<ImageSpecialization, 16> images;
+    Common::SmallVector<FMaskSpecialization, 8> fmasks;
+    Common::SmallVector<SamplerSpecialization, 16> samplers;
     Backend::Bindings start{};
 
     StageSpecialization() = default;

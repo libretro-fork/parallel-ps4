@@ -7,7 +7,7 @@
 #include "shader_recompiler/ir/type.h"
 #include "video_core/amdgpu/resource.h"
 
-#include <boost/container/static_vector.hpp>
+#include "common/small_vector.h"
 
 namespace Shader {
 
@@ -117,7 +117,7 @@ struct BufferResource {
         return buffer;
     }
 };
-using BufferResourceList = boost::container::static_vector<BufferResource, NUM_BUFFERS>;
+using BufferResourceList = Common::StaticVector<BufferResource, NUM_BUFFERS>;
 
 enum class MipStorageFallbackMode : u16 {
     None,
@@ -177,7 +177,7 @@ struct ImageResource {
                    : 1;
     }
 };
-using ImageResourceList = boost::container::static_vector<ImageResource, NUM_IMAGES>;
+using ImageResourceList = Common::StaticVector<ImageResource, NUM_IMAGES>;
 
 struct SamplerResource {
     SharpFetch<AmdGpu::Sampler> sharp_fetch{};
@@ -208,7 +208,7 @@ struct SamplerResource {
         return sampler;
     }
 };
-using SamplerResourceList = boost::container::static_vector<SamplerResource, NUM_SAMPLERS>;
+using SamplerResourceList = Common::StaticVector<SamplerResource, NUM_SAMPLERS>;
 
 struct FMaskResource {
     SharpLocation sharp_idx;
@@ -217,7 +217,7 @@ struct FMaskResource {
         return info.template ReadUdSharp<AmdGpu::Image>(sharp_idx);
     }
 };
-using FMaskResourceList = boost::container::static_vector<FMaskResource, NUM_FMASKS>;
+using FMaskResourceList = Common::StaticVector<FMaskResource, NUM_FMASKS>;
 
 struct PushData {
     static constexpr u32 XOffsetIndex = 0;

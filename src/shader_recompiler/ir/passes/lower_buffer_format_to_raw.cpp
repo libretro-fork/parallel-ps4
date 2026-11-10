@@ -90,7 +90,7 @@ static IR::Value LoadBufferFormat(IR::IREmitter& ir, const IR::Value handle, con
     }
 
     // Pad to 4 components and apply additional modifications.
-    boost::container::static_vector<IR::Value, 4> components;
+    Common::StaticVector<IR::Value, 4> components;
     for (u32 i = 0; i < 4; i++) {
         if (i < format_info.num_components) {
             const auto component =
@@ -111,7 +111,7 @@ static void StoreBufferFormat(IR::IREmitter& ir, const IR::Value handle, const I
                               const FormatInfo& format_info) {
     // Extract actual number of components and apply additional modifications.
     const auto swizzled = ApplySwizzle(ir, value, format_info.swizzle.Inverse());
-    boost::container::static_vector<IR::Value, 4> components;
+    Common::StaticVector<IR::Value, 4> components;
     for (u32 i = 0; i < format_info.num_components; i++) {
         const auto component = IR::F32{ir.CompositeExtract(swizzled, i)};
         components.push_back(ApplyWriteNumberConversion(ir, component, format_info.num_conversion));

@@ -44,7 +44,7 @@ struct Program {
         Shader::StageSpecialization spec;
     };
     static constexpr size_t MaxPermutations = 8;
-    using ModuleList = boost::container::small_vector<Module, MaxPermutations>;
+    using ModuleList = Common::SmallVector<Module, MaxPermutations>;
 
     Shader::Info info;
     ModuleList modules{};

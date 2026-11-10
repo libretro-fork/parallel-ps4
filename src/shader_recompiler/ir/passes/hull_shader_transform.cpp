@@ -510,7 +510,7 @@ void HullShaderTransform(IR::Program& program, const RuntimeInfo& runtime_info) 
                     attr_read = ir.BitCast<IR::U32>(
                         ReadTessControlPointAttribute(addr, stride, ir, 0, is_tcs_output_read));
                 } else {
-                    boost::container::static_vector<IR::Value, 4> read_components;
+                    Common::StaticVector<IR::Value, 4> read_components;
                     for (auto i = 0; i < num_dwords; i++) {
                         const IR::F32 component =
                             ReadTessControlPointAttribute(addr, stride, ir, i, is_tcs_output_read);
@@ -590,7 +590,7 @@ void DomainShaderTransform(const IR::Program& program, const RuntimeInfo& runtim
                 if (num_dwords == 1) {
                     attr_read = ir.BitCast<IR::U32>(GetInput(addr, 0));
                 } else {
-                    boost::container::static_vector<IR::Value, 4> read_components;
+                    Common::StaticVector<IR::Value, 4> read_components;
                     for (auto i = 0; i < num_dwords; i++) {
                         const IR::F32 component = GetInput(addr, i);
                         read_components.push_back(ir.BitCast<IR::U32>(component));

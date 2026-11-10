@@ -218,7 +218,7 @@ struct DomIntervalList : public IntervalList<IV> {
 
     void Add(IV value) {
         auto [first, last] = this->OverlapRun(value.start, value.end);
-        SmallVector<IV, 8> out;
+        Common::SmallVector<IV, 8> out;
         if (first != last && first->start < value.start) {
             out.emplace_back(first->SubRange(first->start, value.start));
         }

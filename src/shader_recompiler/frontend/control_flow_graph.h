@@ -6,8 +6,8 @@
 #include <algorithm>
 #include <span>
 #include <string>
-#include <boost/container/small_vector.hpp>
 #include <boost/intrusive/set.hpp>
+#include "common/small_vector.h"
 
 #include "common/assert.h"
 #include "common/object_pool.h"
@@ -95,7 +95,7 @@ public:
     Common::ObjectPool<Block>& block_pool;
     std::span<const GcnInst> inst_list;
     std::vector<u32> index_to_pc;
-    boost::container::small_vector<Label, 16> labels;
+    Common::SmallVector<Label, 16> labels;
     BlockList blocks;
 };
 

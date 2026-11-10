@@ -5,8 +5,8 @@
 
 #include <unordered_map>
 #include <utility>
-#include <boost/container_hash/hash.hpp>
 
+#include "common/hash.h"
 #include "common/types.h"
 #include "video_core/amdgpu/tiling.h"
 #include "video_core/buffer_cache/buffer.h"
@@ -31,12 +31,10 @@ class TileManager {
 
         struct Hash {
             size_t operator()(const TilingKey& key) const {
-                size_t hash = 0;
-                boost::hash_combine(hash, key.tile_mode);
-                boost::hash_combine(hash, key.num_bits);
-                boost::hash_combine(hash, key.num_samples);
-                boost::hash_combine(hash, key.is_tiler);
-                return hash;
+                // The four fields packed into two words, then mixed
+                const u64 a = (static_cast<u64>(key.tile_mode) << 32) | key.num_bits;
+                const u64 b = (static_cast<u64>(key.num_samples) << 1) | (key.is_tiler ? 1 : 0);
+                return static_cast<size_t>(HashCombine(HashCombine(u64{0}, a), b));
             }
         };
     };

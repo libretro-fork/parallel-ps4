@@ -678,7 +678,7 @@ std::vector<u32> EmitSPIRV(const Profile& profile, const RuntimeInfo& runtime_in
 
 Id EmitPhi(EmitContext& ctx, IR::Inst* inst) {
     const size_t num_args{inst->NumArgs()};
-    boost::container::small_vector<Id, 32> blocks;
+    Common::SmallVector<Id, 32> blocks;
     blocks.reserve(num_args);
     for (size_t index = 0; index < num_args; ++index) {
         blocks.push_back(inst->PhiBlock(index)->Definition<Id>());

@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include <boost/container/small_vector.hpp>
+#include "common/small_vector.h"
 
 #include "shader_recompiler/ir/opcodes.h"
 #include "shader_recompiler/ir/value.h"
@@ -31,7 +31,7 @@ struct ResourceDiscovery {
     IR::Inst* user{};
     std::array<SharpReference, 2> sharps;
 };
-using ResourceDiscoveryList = boost::container::small_vector<ResourceDiscovery, 32>;
+using ResourceDiscoveryList = Common::SmallVector<ResourceDiscovery, 32>;
 
 inline bool IsBufferAtomic(const IR::Inst& inst) {
     switch (inst.GetOpcode()) {

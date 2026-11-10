@@ -3,8 +3,8 @@
 
 #include <array>
 #include <source_location>
-#include <boost/container/small_vector.hpp>
 #include "common/assert.h"
+#include "common/small_vector.h"
 #include "shader_recompiler/ir/debug_print.h"
 #include "shader_recompiler/ir/ir_emitter.h"
 #include "shader_recompiler/ir/opcodes.h"
@@ -2197,7 +2197,7 @@ void IREmitter::ImageWrite(const Value& handle, const Value& coords, const U32& 
 //                      {ir.GetVectorReg(IR::VectorReg::V0),
 //                       ir.GetVectorReg(IR::VectorReg::V1),
 //                       ir.GetVectorReg(IR::VectorReg::V2)});
-void IREmitter::DebugPrint(const char* fmt, boost::container::small_vector<Value, 5> format_args) {
+void IREmitter::DebugPrint(const char* fmt, Common::SmallVector<Value, 5> format_args) {
     std::array<Value, DEBUGPRINT_NUM_FORMAT_ARGS> args;
 
     ASSERT_MSG(format_args.size() < DEBUGPRINT_NUM_FORMAT_ARGS,

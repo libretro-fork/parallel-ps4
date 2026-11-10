@@ -20,7 +20,7 @@ static IR::Inst* SearchChain(IR::Inst* inst, u32 lane) {
 
 static bool IsPossibleToEliminate(IR::Inst* inst, u32 lane) {
     // Breadth-first search visiting the right most arguments first
-    boost::container::small_vector<IR::Inst*, 16> visited;
+    Common::SmallVector<IR::Inst*, 16> visited;
     std::queue<IR::Inst*> queue;
     queue.push(inst);
 
@@ -79,7 +79,7 @@ static IR::Value GetRealValue(PhiMap& phi_map, IR::Inst* inst, u32 lane) {
         it->second = IR::Value{new_phi};
 
         // Gather all arguments.
-        boost::container::small_vector<IR::Value, 5> phi_args;
+        Common::SmallVector<IR::Value, 5> phi_args;
         for (size_t arg_index = 0; arg_index < inst->NumArgs(); arg_index++) {
             IR::Value arg = inst->Arg(arg_index);
             if (!arg.IsImmediate()) {

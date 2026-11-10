@@ -192,7 +192,7 @@ void BufferCache::ReadMemory(VAddr device_addr, u64 size, bool is_write, bool as
 }
 
 void BufferCache::DownloadMemory(const Buffer* arena, VAddr device_addr, u64 size, bool async) {
-    boost::container::small_vector<vk::BufferCopy, 1> copies;
+    Common::SmallVector<vk::BufferCopy, 1> copies;
     u64 total_size_bytes = 0;
     const VAddr arena_base = arena->cpu_addr;
     memory_tracker->ForEachDownloadRange<false>(device_addr, size, [&](u64 address, u64 size) {
@@ -306,7 +306,7 @@ void BufferCache::ReadEdgeImagePages(const Image& image) {
     const VAddr image_end = image_addr + image_size;
     const VAddr page_start = PageManager::GetPageAddr(image_addr);
     const VAddr page_end = PageManager::GetNextPageAddr(image_end - 1);
-    boost::container::small_vector<vk::BufferCopy, 2> copies;
+    Common::SmallVector<vk::BufferCopy, 2> copies;
     u64 total_size_bytes = 0;
     const auto [buffer, offset] = ObtainBuffer(page_start, page_end - page_start);
     const auto add_download = [&](VAddr start, VAddr end) {
@@ -450,7 +450,7 @@ void BufferCache::EnsureResident(const Buffer* arena, u64 first_block, u64 last_
     if (dense_arenas) {
         // The arena's own memory backs it already: the blocks are only marked resident and
         // given their addresses
-        boost::container::small_vector<Interval, 4> ranges;
+        Common::SmallVector<Interval, 4> ranges;
         for (const auto& range : bind_ranges) {
             resident_ranges.Add(Backing{{range.start, range.end}, vk::DeviceMemory{}, range.start});
             ranges.push_back({range.start, range.end});
@@ -469,7 +469,7 @@ void BufferCache::EnsureResident(const Buffer* arena, u64 first_block, u64 last_
     };
     const auto device_memory = Vulkan::Check(instance.GetDevice().allocateMemory(alloc_info));
 
-    boost::container::small_vector<vk::BufferCopy, 8> copies;
+    Common::SmallVector<vk::BufferCopy, 8> copies;
     const auto staging =
         staging_pool.Request(resident_blocks * sizeof(vk::DeviceAddress), MemoryType::HostUncached);
 
@@ -509,7 +509,7 @@ void BufferCache::EnsureResident(const Buffer* arena, u64 first_block, u64 last_
 
 bool BufferCache::SynchronizeMemory(const Buffer* arena, VAddr device_addr, u32 size,
                                     bool is_written, bool is_texel_buffer) {
-    boost::container::small_vector<vk::BufferCopy, 4> copies;
+    Common::SmallVector<vk::BufferCopy, 4> copies;
     size_t total_size_bytes{};
     memory_tracker->ForEachUploadRange(device_addr, size, is_written, [&](u64 addr, u64 size) {
         copies.emplace_back(total_size_bytes, addr, size);
@@ -567,7 +567,7 @@ bool BufferCache::SynchronizeMemoryFromImage(const Buffer* arena, VAddr device_a
                "Texel buffer aliases image subresources {:x} : {:x}", device_addr,
                image.info.guest_address);
     const u64 arena_offset = arena->Offset(device_addr);
-    boost::container::small_vector<vk::BufferImageCopy, 8> buffer_copies;
+    Common::SmallVector<vk::BufferImageCopy, 8> buffer_copies;
     for (u32 mip = 0; mip < image.info.resources.levels; mip++) {
         const auto& mip_info = image.info.mips_layout[mip];
         const u32 width = std::max(image.info.size.width >> mip, 1u);
@@ -606,8 +606,8 @@ void BufferCache::MigrateDenseArena(const Buffer* old_arena, const Buffer* new_a
     // accesses by address there
     const u64 base_block = old_arena->cpu_addr >> block_shift;
     const u64 end_block = (old_arena->cpu_addr + old_arena->size_bytes) >> block_shift;
-    boost::container::small_vector<vk::BufferCopy, 8> copies;
-    boost::container::small_vector<Interval, 8> ranges;
+    Common::SmallVector<vk::BufferCopy, 8> copies;
+    Common::SmallVector<Interval, 8> ranges;
     resident_ranges.ForEachInRange(base_block, end_block, [&](const Backing& backing) {
         const u64 start = std::max(base_block, backing.start);
         const u64 end = std::min(end_block, backing.end);
@@ -633,7 +633,7 @@ void BufferCache::WriteArenaPageTable(const Buffer* arena, std::span<const Inter
     }
     const auto staging =
         staging_pool.Request(num_blocks * sizeof(vk::DeviceAddress), MemoryType::HostUncached);
-    boost::container::small_vector<vk::BufferCopy, 8> copies;
+    Common::SmallVector<vk::BufferCopy, 8> copies;
     auto* bda_addrs = reinterpret_cast<vk::DeviceAddress*>(staging.mapped);
     u64 offset = staging.offset;
     for (const auto& range : ranges) {

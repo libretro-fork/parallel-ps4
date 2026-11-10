@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright 2024 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
-#include <boost/container/static_vector.hpp>
+#include "common/small_vector.h"
 #include "shader_recompiler/backend/spirv/emit_spirv_instructions.h"
 #include "shader_recompiler/backend/spirv/spirv_emit_context.h"
 #include "shader_recompiler/ir/microinstruction.h"
@@ -132,7 +132,7 @@ struct ImageOperands {
     }
 
     spv::ImageOperandsMask mask{};
-    boost::container::static_vector<Id, 4> operands;
+    Common::StaticVector<Id, 4> operands;
 };
 
 Id EmitImageHandle(EmitContext& ctx, Id, Id) {

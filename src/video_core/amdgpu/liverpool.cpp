@@ -884,7 +884,7 @@ Liverpool::Task Liverpool::ProcessCompute(std::span<const u32> acb, u32 vqid) {
         const PM4Header* header;
         VAddr indirect_addr;
     };
-    boost::container::small_vector<IndirectPatch, 4> indirect_patches;
+    Common::SmallVector<IndirectPatch, 4> indirect_patches;
 
     auto base_addr = reinterpret_cast<VAddr>(acb.data());
     size_t acb_size = acb.size_bytes();

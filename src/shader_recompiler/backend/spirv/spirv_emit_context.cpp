@@ -9,9 +9,9 @@
 #include "shader_recompiler/ir/microinstruction.h"
 #include "shader_recompiler/runtime_info.h"
 
-#include <boost/container/static_vector.hpp>
 #include <fmt/format.h>
 #include <spirv/unified1/spirv.hpp11>
+#include "common/small_vector.h"
 
 #include <numbers>
 #include <string_view>

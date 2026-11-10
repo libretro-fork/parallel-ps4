@@ -1,9 +1,9 @@
 // SPDX-FileCopyrightText: Copyright 2024-2026 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
-#include <boost/container/small_vector.hpp>
 #include "common/alignment.h"
 #include "common/scope_exit.h"
+#include "common/small_vector.h"
 #include "core/libraries/kernel/posix_error.h"
 #include "core/libraries/kernel/threads/pthread.h"
 #include "core/libraries/kernel/threads/sleepq.h"
@@ -32,7 +32,7 @@ ThreadState::ThreadState() {
 }
 
 void ThreadState::Collect(Pthread* curthread) {
-    boost::container::small_vector<Pthread*, 8> work_list;
+    Common::SmallVector<Pthread*, 8> work_list;
     {
         std::scoped_lock lk{thread_list_lock};
         for (auto it = gc_list.begin(); it != gc_list.end();) {

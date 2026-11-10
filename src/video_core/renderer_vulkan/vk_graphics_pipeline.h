@@ -3,8 +3,8 @@
 
 #pragma once
 
-#include <boost/container/static_vector.hpp>
 #include <encodings/xxh3.h>
+#include "common/small_vector.h"
 
 #include "shader_recompiler/frontend/fetch_shader.h"
 #include "video_core/amdgpu/regs_color.h"
@@ -27,7 +27,7 @@ class Scheduler;
 class DescriptorHeap;
 
 template <typename T>
-using VertexInputs = boost::container::static_vector<T, MaxVertexBufferCount>;
+using VertexInputs = Common::StaticVector<T, MaxVertexBufferCount>;
 
 struct GraphicsPipelineKey {
     std::array<size_t, MaxShaderStages> stage_hashes;

@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright 2026 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
-#include <boost/container/small_vector.hpp>
+#include "common/small_vector.h"
 #include "shader_recompiler/ir/ir_emitter.h"
 #include "shader_recompiler/ir/program.h"
 
@@ -25,7 +25,7 @@ static void LowerCmpClass(IR::Block& block, IR::Inst& inst) {
 }
 
 static void LowerPackedAncillary(IR::Inst& value) {
-    boost::container::small_vector<IR::Inst*, 4> extracts;
+    Common::SmallVector<IR::Inst*, 4> extracts;
     for (const auto& [user, operand] : value.Uses()) {
         if (user->GetOpcode() == IR::Opcode::BitFieldUExtract && operand == 0 &&
             user->Arg(1).IsImmediate() && user->Arg(2).IsImmediate()) {

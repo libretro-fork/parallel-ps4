@@ -2,15 +2,15 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include <algorithm>
-#include <boost/container/flat_set.hpp>
-#include <boost/container/small_vector.hpp>
+#include "common/flat_map.h"
+#include "common/small_vector.h"
 #include "shader_recompiler/ir/post_order.h"
 
 namespace Shader::IR {
 
 BlockList PostOrder(Block* const first_block) {
-    boost::container::small_vector<Block*, 16> block_stack;
-    boost::container::flat_set<Block*> visited;
+    Common::SmallVector<Block*, 16> block_stack;
+    Common::FlatSet<Block*, 32> visited;
     BlockList post_order_blocks;
 
     visited.insert(first_block);

@@ -6,8 +6,8 @@
 #include <algorithm>
 #include <optional>
 #include <type_traits>
-#include <boost/container/small_vector.hpp>
 #include <queue>
+#include "common/small_vector.h"
 #include "shader_recompiler/ir/value.h"
 
 namespace Shader::IR {
@@ -23,7 +23,7 @@ auto BreadthFirstSearch(Instruction* inst, Pred&& pred)
     }
 
     // Breadth-first search visiting the right most arguments first
-    boost::container::small_vector<Instruction*, 2> visited;
+    Common::SmallVector<Instruction*, 2> visited;
     std::queue<Instruction*> queue;
     queue.push(inst);
 

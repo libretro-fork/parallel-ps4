@@ -49,7 +49,7 @@ struct VertexAttribute {
 
 struct FetchShaderData {
     u32 size = 0;
-    SmallVector<VertexAttribute, 8> attributes;
+    Common::SmallVector<VertexAttribute, 8> attributes;
     s8 vertex_offset_sgpr = -1;   ///< SGPR of vertex offset from VADDR
     s8 instance_offset_sgpr = -1; ///< SGPR of instance offset from VADDR
 

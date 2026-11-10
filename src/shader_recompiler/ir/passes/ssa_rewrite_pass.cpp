@@ -123,7 +123,7 @@ public:
     }
 
     IR::Value ReadVariable(IR::RegTag tag, IR::Block* block) {
-        boost::container::small_vector<IR::Block*, 16> chain;
+        Common::SmallVector<IR::Block*, 16> chain;
         IR::Value result{};
 
         while (block) {

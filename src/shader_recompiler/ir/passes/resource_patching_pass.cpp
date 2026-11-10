@@ -160,7 +160,7 @@ private:
 
 } // Anonymous namespace
 
-using SharpSources = boost::container::small_vector<const IR::Inst*, 4>;
+using SharpSources = Common::SmallVector<const IR::Inst*, 4>;
 
 SharpLocation SharpLocationFromSource(const IR::Inst* inst) {
     SharpLocation location{};

@@ -151,7 +151,7 @@ struct Image : public Common::LRUNode<> {
 
     ImageView& FindView(const ImageViewInfo& view_info, bool ensure_guest_samples = true);
 
-    using Barriers = SmallVector<vk::ImageMemoryBarrier2, 32>;
+    using Barriers = Common::SmallVector<vk::ImageMemoryBarrier2, 32>;
     void GetBarriers(Barriers& out_barriers, vk::ImageLayout dst_layout, vk::AccessFlags2 dst_mask,
                      vk::PipelineStageFlags2 dst_stage,
                      std::optional<SubresourceRange> subres_range = {});
@@ -182,11 +182,11 @@ public:
         UniqueImage image;
         State state;
         std::vector<State> subresource_states;
-        SmallVector<ImageViewInfo, 2> image_view_infos;
-        SmallVector<ImageViewId, 2> image_view_ids;
+        Common::SmallVector<ImageViewInfo, 2> image_view_infos;
+        Common::SmallVector<ImageViewId, 2> image_view_ids;
         u32 num_samples;
     };
-    SmallVector<BackingImage, 2> backing_images;
+    Common::SmallVector<BackingImage, 2> backing_images;
     BackingImage* backing{};
     u64* memory_usage_counter{};
     u64 image_uid{};
