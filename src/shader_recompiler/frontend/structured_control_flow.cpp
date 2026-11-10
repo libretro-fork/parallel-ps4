@@ -9,7 +9,7 @@
 #include <utility>
 #include <vector>
 #include <fmt/format.h>
-#include "common/intrusive_list.h"
+#include "common/intrusive_list_cpp.h"
 #include "shader_recompiler/frontend/structured_control_flow.h"
 #include "shader_recompiler/frontend/translate/translate.h"
 #include "shader_recompiler/ir/ir_emitter.h"

@@ -3,7 +3,7 @@
 
 #include <list>
 
-#include "common/intrusive_list.h"
+#include "common/intrusive_list_cpp.h"
 
 namespace Libraries::Kernel {
 

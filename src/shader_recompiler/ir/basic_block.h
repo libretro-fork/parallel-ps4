@@ -7,7 +7,7 @@
 #include <map>
 #include <span>
 #include <vector>
-#include "common/intrusive_list.h"
+#include "common/intrusive_list_cpp.h"
 
 #include "common/object_pool.h"
 #include "common/types.h"

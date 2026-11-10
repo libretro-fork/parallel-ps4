@@ -8,7 +8,7 @@
 #include <type_traits>
 
 #include <list>
-#include "common/intrusive_list.h"
+#include "common/intrusive_list_cpp.h"
 #include "common/small_vector.h"
 
 #include "common/assert.h"
