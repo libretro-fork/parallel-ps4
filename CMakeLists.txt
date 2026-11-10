@@ -331,7 +331,7 @@ set(AUDIO_LIB src/core/libraries/audio/audioin.cpp
               src/core/libraries/audio/audioout.h
               src/core/libraries/audio/audioout_backend.h
               src/core/libraries/audio/audioout_error.h
-              src/core/libraries/audio/sdl_audio_out.cpp
+              src/core/libraries/audio/frontend_audio_out.cpp
               src/core/libraries/ngs2/ngs2.cpp
               src/core/libraries/ngs2/ngs2.h
               src/core/libraries/audio3d/audio3d.cpp
@@ -1374,6 +1374,8 @@ add_library(shadps4 MODULE
     ${VIDEO_CORE}
     ${EMULATOR}
     ${SHADNET}
+    libretro/audio_mix.c
+    libretro/audio_mix.h
     libretro/gpu_frames.cpp
     libretro/gpu_frames.h
     libretro/host.cpp
@@ -1396,6 +1398,21 @@ add_library(shadps4 MODULE
     src/sdl_window.cpp
 )
 set_target_properties(shadps4 PROPERTIES PREFIX "" OUTPUT_NAME "shadps4_libretro")
+
+# The parts of libretro-common the core uses, a plain copy of RetroArch's
+# (libretro/libretro-common). Its headers are seen only by the C sources that need them.
+set(LIBRETRO_COMMON_DIR ${CMAKE_CURRENT_SOURCE_DIR}/libretro/libretro-common)
+set(LIBRETRO_COMMON_SOURCES
+    ${LIBRETRO_COMMON_DIR}/compat/compat_strl.c
+    ${LIBRETRO_COMMON_DIR}/features/features_cpu.c
+    ${LIBRETRO_COMMON_DIR}/queues/retro_spsc.c
+    ${LIBRETRO_COMMON_DIR}/queues/retro_waitable_spsc.c
+    ${LIBRETRO_COMMON_DIR}/rthreads/retro_eventcount.c
+    ${LIBRETRO_COMMON_DIR}/rthreads/rthreads.c
+)
+target_sources(shadps4 PRIVATE ${LIBRETRO_COMMON_SOURCES})
+set_source_files_properties(${LIBRETRO_COMMON_SOURCES} libretro/audio_mix.c PROPERTIES
+    INCLUDE_DIRECTORIES ${LIBRETRO_COMMON_DIR}/include)
 if (UNIX AND NOT APPLE)
     # Only retro_* is exported and the core's own symbols bind inside it:
     # a frontend that carries SDL itself must not get tied to the core's.

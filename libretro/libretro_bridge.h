@@ -23,11 +23,6 @@ bool GameSizePending();
 /// The rate the frontend is given the sound at.
 inline constexpr int AUDIO_SAMPLE_RATE = 48000;
 
-/// An audio port's SDL_AudioStream, converting to 16-bit stereo at AUDIO_SAMPLE_RATE and bound to
-/// no device: the core reads it. Removed before it is destroyed.
-void AddAudioStream(void* sdl_audio_stream);
-void RemoveAudioStream(void* sdl_audio_stream);
-
 /// Sets the emulator's settings from the frontend's core options, as they were when the game was
 /// loaded. Called by the emulator once it has loaded its own configuration.
 void ApplyCoreOptions();

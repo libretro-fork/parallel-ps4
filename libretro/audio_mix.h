@@ -1,0 +1,72 @@
+/* SPDX-FileCopyrightText: Copyright 2026 shadPS4 Emulator Project
+ * SPDX-License-Identifier: GPL-2.0-or-later */
+
+/* The sound the emulator hands the frontend: every source (an audio port, the trophy sound,
+ * the music player) writes 16-bit stereo at 48 kHz into an input of its own, and one thread
+ * sums the inputs into the ring the core plays from. The console's audio is 48 kHz, so
+ * nothing is resampled here; the frontend resamples to its device.
+ *
+ * Inputs come from a pool made once, at start: opening and closing one allocates nothing.
+ * Each is a ring with one producer (its source) and one consumer (the mixing thread), handed
+ * over without a lock. A source waits on an eventcount for room, which the mixing thread
+ * signals as it takes frames. */
+
+#ifndef SHADPS4_LIBRETRO_AUDIO_MIX_H
+#define SHADPS4_LIBRETRO_AUDIO_MIX_H
+
+#include <stddef.h>
+#include <stdint.h>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+/* Frames of 16-bit stereo an input holds. Room for the most a port writes at once (2048
+ * frames) on top of what a port may keep queued (AUDIO_MIX_QUEUE_FRAMES). */
+#define AUDIO_MIX_INPUT_FRAMES 4096
+/* What a source keeps queued at most before it waits for the frontend: 32 ms. */
+#define AUDIO_MIX_QUEUE_FRAMES 1536
+/* Inputs open at once at most. */
+#define AUDIO_MIX_INPUTS 32
+
+typedef struct audio_mix_input audio_mix_input_t;
+
+/* Makes the pool. Once, before any input is opened. Returns 0 when there is no memory. */
+int audio_mix_init(void);
+
+/* An input for a source, or NULL when all are open. */
+audio_mix_input_t* audio_mix_input_open(void);
+
+/* The source is done with the input: the mixing thread drops what it still holds and hands
+ * the input back to the pool. The source does not touch it again. */
+void audio_mix_input_close(audio_mix_input_t* in);
+
+/* Waits until no more than AUDIO_MIX_QUEUE_FRAMES are queued and @frames more fit, or
+ * @timeout_us passes. Returns nonzero when they fit. */
+int audio_mix_input_wait(audio_mix_input_t* in, unsigned frames, int64_t timeout_us);
+
+/* Room to write into, in place: up to @frames contiguous frames at *@ptr. Returns how many;
+ * where the ring wraps it is fewer, and a second call gives the rest. */
+unsigned audio_mix_input_reserve(audio_mix_input_t* in, int16_t** ptr, unsigned frames);
+
+/* Hands @frames written at the last reserve to the mixing thread. */
+void audio_mix_input_commit(audio_mix_input_t* in, unsigned frames);
+
+/* Mixing thread only: sums up to @frames of every open input into @ring (16-bit stereo,
+ * @ring_mask + 1 frames, a power of two) from frame index @at. An input with fewer frames
+ * than another adds silence for the difference. Returns the frames written. */
+unsigned audio_mix_pump(int16_t* ring, uint32_t ring_mask, uint32_t at, unsigned frames);
+
+/* Conversion of what a source has into the input's format, with a gain applied
+ * (1.0 = unchanged). @channels is 1, 2 or 8; eight are folded to stereo the way the console
+ * does for stereo output. */
+void audio_mix_convert_s16(int16_t* dst, const int16_t* src, unsigned frames, unsigned channels,
+                           float gain);
+void audio_mix_convert_f32(int16_t* dst, const float* src, unsigned frames, unsigned channels,
+                           float gain);
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif

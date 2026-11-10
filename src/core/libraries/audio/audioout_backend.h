@@ -26,7 +26,8 @@ public:
     virtual std::unique_ptr<PortBackend> Open(PortOut& port) = 0;
 };
 
-class SDLAudioOut final : public AudioOutBackend {
+// The libretro core's: ports go to the frontend through the core's mix.
+class FrontendAudioOut final : public AudioOutBackend {
 public:
     std::unique_ptr<PortBackend> Open(PortOut& port) override;
 };

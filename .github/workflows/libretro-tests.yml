@@ -1,0 +1,19 @@
+# SPDX-FileCopyrightText: 2026 shadPS4 Emulator Project
+# SPDX-License-Identifier: GPL-2.0-or-later
+
+name: libretro core tests
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  tests:
+    name: Core tests (sanitizers)
+    runs-on: ubuntu-24.04
+    steps:
+    - uses: actions/checkout@v6
+
+    - name: Run
+      run: sh libretro/tests/run.sh

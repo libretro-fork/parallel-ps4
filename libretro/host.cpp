@@ -1,17 +1,19 @@
 // SPDX-FileCopyrightText: Copyright 2026 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
-// The emulator's side of the libretro core. The core (libretro_core.cpp) lives in the
-// frontend's process and starts this module again in a process of its own - through rundll32
-// on Windows, through the small launcher built into the core elsewhere (host_main.c) - which
-// enters here, in retro_host_main. The emulator then runs as it does standalone, in a process
-// whose address space is its own and which can be ended when content is closed, and trades
-// with the core through the shared memory of shared_state.h:
+// The emulator's side of the libretro core. The core (libretro_core.cpp) lives
+// in the frontend's process and starts this module again in a process of its
+// own - through rundll32 on Windows, through the small launcher built into the
+// core elsewhere (host_main.c) - which enters here, in retro_host_main. The
+// emulator then runs as it does standalone, in a process whose address space is
+// its own and which can be ended when content is closed, and trades with the
+// core through the shared memory of shared_state.h:
 //
 //   picture  each finished frame, read back by the renderer (PushFrame)
-//   sound    the audio ports' streams, mixed into a ring (PumpAudio)
-//   pads     the frontend's ports, put on the controllers (PumpInput), and their motors
-//   options  the core options, put on top of the emulator's configuration (ApplyCoreOptions)
+//   sound    the sources' inputs of the mix, summed into a ring (PumpAudio,
+//   audio_mix.c) pads     the frontend's ports, put on the controllers
+//   (PumpInput), and their motors options  the core options, put on top of the
+//   emulator's configuration (ApplyCoreOptions)
 
 #include <algorithm>
 #include <atomic>
@@ -20,14 +22,12 @@
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
-#include <mutex>
 #include <string>
 #include <string_view>
 #include <thread>
 #include <vector>
 
-#include <SDL3/SDL_audio.h>
-
+#include "audio_mix.h"
 #include "common/key_manager.h"
 #include "common/logging/log.h"
 #include "common/path_util.h"
@@ -61,9 +61,6 @@ extern std::unique_ptr<Vulkan::Presenter> presenter;
 namespace {
 
 Libretro::SharedState* shared = nullptr;
-
-std::mutex audio_mutex;
-std::vector<SDL_AudioStream*> audio_streams;
 
 // The renderer has drawn: the emulator is up, its controllers made.
 std::atomic<bool> frame_seen{false};
@@ -143,50 +140,30 @@ void WatchQuit() {
     std::quick_exit(0);
 }
 
-// What the audio ports have, summed, into the ring the core plays from. A port that has less
-// than another contributes silence for the difference.
+// What the sources have, summed, into the ring the core plays from. A source
+// that has less than another contributes silence for the difference.
 void PumpAudio() {
-    constexpr std::uint32_t chunk_frames = 1024;
-    static std::int16_t port[chunk_frames * 2];
-    static std::int32_t sum[chunk_frames * 2];
+  for (;;) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(2));
 
-    for (;;) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(2));
-
-        const std::uint32_t written = shared->audio_written.load(std::memory_order_relaxed);
-        const std::uint32_t read = shared->audio_read.load(std::memory_order_acquire);
-        // Up to the target and no further: what the ports have beyond it stays in their
-        // streams, where the game's audio threads wait for it to be taken.
-        const std::uint32_t queued = written - read;
-        const std::uint32_t free_frames =
-            queued < Libretro::AUDIO_RING_TARGET_FRAMES ? Libretro::AUDIO_RING_TARGET_FRAMES - queued : 0;
-        const std::uint32_t wanted = std::min(chunk_frames, free_frames);
-        if (wanted == 0) {
-            continue;
-        }
-
-        std::uint32_t frames = 0;
-        std::memset(sum, 0, sizeof(sum));
-        {
-            std::lock_guard lock{audio_mutex};
-            for (SDL_AudioStream* stream : audio_streams) {
-                const int bytes = SDL_GetAudioStreamData(stream, port, static_cast<int>(wanted * 4));
-                const std::uint32_t got = bytes > 0 ? static_cast<std::uint32_t>(bytes) / 4 : 0;
-                for (std::uint32_t i = 0; i < got * 2; ++i) {
-                    sum[i] += port[i];
-                }
-                frames = std::max(frames, got);
-            }
-        }
-        for (std::uint32_t i = 0; i < frames; ++i) {
-            const std::uint32_t at = (written + i) & (Libretro::AUDIO_RING_FRAMES - 1);
-            shared->audio[at * 2 + 0] =
-                static_cast<std::int16_t>(std::clamp(sum[i * 2 + 0], -32768, 32767));
-            shared->audio[at * 2 + 1] =
-                static_cast<std::int16_t>(std::clamp(sum[i * 2 + 1], -32768, 32767));
-        }
-        shared->audio_written.store(written + frames, std::memory_order_release);
+    const std::uint32_t written =
+        shared->audio_written.load(std::memory_order_relaxed);
+    const std::uint32_t read =
+        shared->audio_read.load(std::memory_order_acquire);
+    // Up to the target and no further: what the sources have beyond it stays in
+    // their inputs, where the game's audio threads wait for it to be taken.
+    const std::uint32_t queued = written - read;
+    const std::uint32_t wanted =
+        queued < Libretro::AUDIO_RING_TARGET_FRAMES
+            ? Libretro::AUDIO_RING_TARGET_FRAMES - queued
+            : 0;
+    if (wanted == 0) {
+      continue;
     }
+    const std::uint32_t frames = audio_mix_pump(
+        shared->audio, Libretro::AUDIO_RING_FRAMES - 1, written, wanted);
+    shared->audio_written.store(written + frames, std::memory_order_release);
+  }
 }
 
 // The frontend's ports onto the controllers. Only what changed: every call queues a state for
@@ -300,6 +277,9 @@ int RunEmulator(const char* argument) {
     }
 
     std::thread(WatchQuit).detach();
+    if (!audio_mix_init()) {
+      LOG_CRITICAL(Lib_AudioOut, "No memory for the core's audio mix");
+    }
     std::thread(PumpAudio).detach();
     std::thread(PumpInput).detach();
 
@@ -544,16 +524,6 @@ void SetRumble(std::uint32_t pad, std::uint8_t small_motor, std::uint8_t large_m
         shared->rumble[pad].store(small_motor | (static_cast<std::uint32_t>(large_motor) << 8),
                                   std::memory_order_release);
     }
-}
-
-void AddAudioStream(void* sdl_audio_stream) {
-    std::lock_guard lock{audio_mutex};
-    audio_streams.push_back(static_cast<SDL_AudioStream*>(sdl_audio_stream));
-}
-
-void RemoveAudioStream(void* sdl_audio_stream) {
-    std::lock_guard lock{audio_mutex};
-    std::erase(audio_streams, static_cast<SDL_AudioStream*>(sdl_audio_stream));
 }
 
 } // namespace Libretro

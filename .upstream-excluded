@@ -24,3 +24,4 @@ src/resources/big_picture/folder.png
 src/resources/big_picture/graphics.png
 src/resources/big_picture/log.png
 src/resources/big_picture/trophy.png
+src/core/libraries/audio/sdl_audio_out.cpp
