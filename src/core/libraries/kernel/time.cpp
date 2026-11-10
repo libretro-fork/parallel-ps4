@@ -17,9 +17,6 @@
 #include <windows.h>
 #include "common/ntapi.h"
 #else
-#if defined(__APPLE__) || defined(__FreeBSD__)
-#include <date/tz.h>
-#endif
 #include <ctime>
 #include <sys/resource.h>
 #include <sys/time.h>

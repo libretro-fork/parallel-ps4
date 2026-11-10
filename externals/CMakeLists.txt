@@ -135,12 +135,6 @@ endif()
 add_subdirectory(gcn)
 
 if (APPLE OR ${CMAKE_SYSTEM_NAME} STREQUAL "FreeBSD")
-    # date
-    if (NOT TARGET date::date-tz)
-        option(BUILD_TZ_LIB "" ON)
-        option(USE_SYSTEM_TZ_DB "" ON)
-        add_subdirectory(date)
-    endif()
     if (NOT TARGET epoll-shim)
         add_subdirectory(epoll-shim)
     endif()
