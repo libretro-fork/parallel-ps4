@@ -32,21 +32,20 @@ bool PSF::Open(const std::filesystem::path& filepath) {
         last_write = system_clock::from_time_t(tp);
     }
 
-    Common::FS::IOFile file(filepath, Common::FS::FileAccessMode::Read);
-    if (!file.IsOpen()) {
+    // Read where it lies
+    const auto file = Common::FS::FileView::Map(filepath);
+    if (!file) {
         return false;
     }
-
-    const u64 psfSize = file.GetSize();
-    ASSERT_MSG(psfSize != 0, "SFO file at {} is empty!", filepath.string());
-    std::vector<u8> psf(psfSize);
-    file.Seek(0);
-    file.Read(psf);
-    file.Close();
-    return Open(psf);
+    ASSERT_MSG(!file->empty(), "SFO file at {} is empty!", filepath.string());
+    return Open(file->Bytes());
 }
 
 bool PSF::Open(const std::unique_ptr<Core::FileSys::IFile>& file) {
+    if (const auto host_path = file->GetHostPath()) {
+        return Open(*host_path);
+    }
+    // In an archive: decompressed into a buffer
     std::vector<u8> psf_buf(file->Size());
     if (file->Read(psf_buf.data(), psf_buf.size()) != static_cast<s64>(psf_buf.size())) {
         return false;
@@ -54,7 +53,7 @@ bool PSF::Open(const std::unique_ptr<Core::FileSys::IFile>& file) {
     return Open(psf_buf);
 }
 
-bool PSF::Open(const std::vector<u8>& psf_buffer) {
+bool PSF::Open(std::span<const u8> psf_buffer) {
     const u8* psf_data = psf_buffer.data();
 
     entry_list.clear();

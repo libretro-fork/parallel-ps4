@@ -3,6 +3,10 @@
 
 #pragma once
 
+#include <filesystem>
+#include <span>
+#include <string>
+#include <string_view>
 #include <vector>
 #include "common/endian.h"
 #include "common/io_file.h"
@@ -36,13 +40,17 @@ class TRP {
 public:
     TRP();
     ~TRP();
+    /// Extracts the .trp file at @trophyPath, read where it lies (mapped).
     bool Extract(const std::filesystem::path& trophyPath, std::string npCommId,
+                 const std::filesystem::path& outputPath);
+    /// Extracts a TRP held in memory (mapped, or decoded out of an archive).
+    bool Extract(std::span<const u8> trp, std::string npCommId,
                  const std::filesystem::path& outputPath);
 
 private:
-    bool ProcessPngEntry(Common::FS::IOFile& file, const TrpEntry& entry,
+    bool ProcessPngEntry(std::span<const u8> trp, const TrpEntry& entry,
                          const std::filesystem::path& outputPath, std::string_view name);
-    bool ProcessEncryptedXmlEntry(Common::FS::IOFile& file, const TrpEntry& entry,
+    bool ProcessEncryptedXmlEntry(std::span<const u8> trp, const TrpEntry& entry,
                                   const std::filesystem::path& outputPath, std::string_view name,
                                   const std::array<u8, 16>& user_key, const std::string& npCommId);
 };

@@ -618,21 +618,22 @@ std::unique_ptr<IDirectory> MntPoints::OpenDir(std::string_view guest_path) {
     return std::make_unique<MergedDirectory>(std::move(entries));
 }
 
-std::optional<std::vector<u8>> MntPoints::ReadFile(std::string_view guest_path) {
-    auto handle = Open(guest_path, /*writable=*/false);
-    if (!handle) {
+std::optional<Common::FS::FileView> MntPoints::ReadFile(std::string_view guest_path) {
+    const auto corrected = SanitizeGuestPath(guest_path);
+    if (!corrected || *corrected == "/") {
         return std::nullopt;
     }
-    const u64 size = handle->Size();
-    std::vector<u8> buf(size);
-    if (size == 0) {
-        return buf;
-    }
-    const s64 got = handle->Read(buf.data(), size);
-    if (got < 0 || static_cast<u64>(got) != size) {
+    const auto mount = GetMount(*corrected);
+    if (!mount) {
         return std::nullopt;
     }
-    return buf;
+    const auto rel = RelativeToMount(*corrected, *mount);
+    for (const auto& backend : mount->backends) {
+        if (backend->Exists(rel) && !backend->IsDirectory(rel)) {
+            return backend->ReadFile(rel);
+        }
+    }
+    return std::nullopt;
 }
 
 int HandleTable::CreateHandle() {

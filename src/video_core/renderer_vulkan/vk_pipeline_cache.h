@@ -5,6 +5,7 @@
 
 #include <unordered_map>
 #include <variant>
+#include "common/io_file.h"
 #include "common/ptr_table.h"
 #include "shader_recompiler/profile.h"
 #include "shader_recompiler/recompiler.h"
@@ -109,8 +110,8 @@ private:
 
     void DumpShader(std::span<const u32> code, u64 hash, Shader::HwStage stage, size_t perm_idx,
                     std::string_view ext);
-    std::optional<std::vector<u32>> GetShaderPatch(u64 hash, Shader::HwStage stage, size_t perm_idx,
-                                                   std::string_view ext);
+    std::optional<Common::FS::FileView> GetShaderPatch(u64 hash, Shader::HwStage stage,
+                                                       size_t perm_idx, std::string_view ext);
     vk::ShaderModule CompileModule(Shader::Info& info, Shader::RuntimeInfo& runtime_info,
                                    const std::span<const u32>& code, size_t perm_idx,
                                    Shader::Backend::Bindings& binding);

@@ -106,8 +106,7 @@ const SymbolRecord* SymbolsResolver::FindSymbol(const SymbolResolver& s) const {
 }
 
 void SymbolsResolver::DebugDump(const std::filesystem::path& file_name) {
-    Common::FS::IOFile f{file_name, Common::FS::FileAccessMode::Create,
-                         Common::FS::FileType::TextFile};
+    Common::FS::IOFile f{file_name, Common::FS::FileAccessMode::Create};
     for (const auto& symbol : m_symbols) {
         const auto id = symbol.symbol;
         const auto aeronid = AeroLib::FindByNid(id.name.c_str());

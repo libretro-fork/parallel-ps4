@@ -1,7 +1,6 @@
 // SPDX-FileCopyrightText: Copyright 2026 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
-#include <fstream>
 #include <system_error>
 
 #include "common/string_util.h"
@@ -28,10 +27,14 @@ FileStat MakeFileStat(const Common::FS::FileInfo& info, u32 inode) {
 
 } // namespace
 
-// Guest code expects POSIX sharing: opening a file already open for writing must not fail.
+// Guest code expects POSIX sharing: opening a file already open for writing must not fail. A file
+// of a read-only mount (the game's own) cannot change underneath, so it is mapped and read from
+// where it lies.
 HostFile::HostFile(std::filesystem::path host_path, Common::FS::FileAccessMode mode, bool read_only)
-    : m_path(std::move(host_path)), m_file(m_path, mode, Common::FS::FileType::BinaryFile,
-                                           Common::FS::FileShareFlag::ShareReadWrite),
+    : m_path(std::move(host_path)),
+      m_file(m_path, mode,
+             read_only && mode == Common::FS::FileAccessMode::Read ? Common::FS::FileHint::Mapped
+                                                                   : Common::FS::FileHint::None),
       m_read_only(read_only) {
     if (const auto info = m_file.GetInfo()) {
         m_inode = GetGuestInode(FileIdentity{.host = info->identity}).value_or(0);
@@ -49,7 +52,10 @@ s64 HostFile::Write(const void* src, u64 size) {
     if (!m_file.IsOpen() || m_read_only) {
         return -1;
     }
-    return static_cast<s64>(m_file.WriteRaw<u8>(src, size));
+    const s64 written = static_cast<s64>(m_file.WriteRaw<u8>(src, size));
+    // Visible at once to every other handle on the file, as on the console
+    m_file.Flush();
+    return written;
 }
 
 bool HostFile::Seek(s64 offset, Common::FS::SeekOrigin origin) {
@@ -238,28 +244,8 @@ std::unique_ptr<IDirectory> HostFsBackend::OpenDir(std::string_view rel_path) {
     return std::make_unique<HostDirectory>(path);
 }
 
-std::optional<std::vector<u8>> HostFsBackend::ReadFile(std::string_view rel_path) const {
-    const std::filesystem::path full_path = m_root / rel_path;
-    std::error_code ec;
-    if (!std::filesystem::is_regular_file(full_path, ec) || ec) {
-        return std::nullopt;
-    }
-
-    std::ifstream in(full_path, std::ios::binary | std::ios::ate);
-    if (!in.is_open()) {
-        return std::nullopt;
-    }
-    const auto size = in.tellg();
-    if (size < 0) {
-        return std::nullopt;
-    }
-    std::vector<u8> data(static_cast<size_t>(size));
-    in.seekg(0);
-    in.read(reinterpret_cast<char*>(data.data()), size);
-    if (!in.good() && !in.eof()) {
-        return std::nullopt;
-    }
-    return data;
+std::optional<Common::FS::FileView> HostFsBackend::ReadFile(std::string_view rel_path) const {
+    return Common::FS::FileView::Map(Resolve(rel_path));
 }
 
 } // namespace Core::FileSys

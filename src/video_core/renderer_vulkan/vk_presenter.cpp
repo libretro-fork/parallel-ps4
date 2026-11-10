@@ -32,7 +32,6 @@
 #include <cstring>
 #include <ctime>
 #include <filesystem>
-#include <fstream>
 #include <iomanip>
 #include <limits>
 #include <memory>
@@ -640,9 +639,10 @@ void Presenter::Present(Frame* frame, bool is_reusing_frame, bool is_game_frame)
                 if (Libraries::SystemService::IsSplashVisible()) { // draw splash
                     if (!splash_img.has_value()) {
                         splash_img.emplace();
-                        const auto& splash_data = Common::ElfInfo::Instance().GetSplashData();
+                        const auto splash_data = Common::ElfInfo::Instance().GetSplashData();
                         if (!splash_data.empty()) {
-                            splash_img = ImGui::RefCountedTexture::DecodePngTexture(splash_data);
+                            splash_img = ImGui::RefCountedTexture::DecodePngTexture(
+                                Common::FS::FileView::Borrow(splash_data));
                         }
                     }
                     if (auto& splash_image = this->splash_img.value()) {

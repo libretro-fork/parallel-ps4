@@ -5,6 +5,7 @@
 #include <system_error>
 
 #include "common/aes.h"
+#include "common/io_file.h"
 #include "common/key_manager.h"
 #include "common/logging/log.h"
 #include "common/path_util.h"
@@ -40,6 +41,19 @@ static void removePadding(std::vector<u8>& vec) {
 
 bool TRP::Extract(const std::filesystem::path& trophyPath, std::string npCommId,
                   const std::filesystem::path& outputPath) {
+    if (trophyPath.extension() != ".trp") {
+        return false;
+    }
+    const auto file = Common::FS::FileView::Map(trophyPath);
+    if (!file) {
+        LOG_ERROR(Common_Filesystem, "Unable to open trophy file: {}", trophyPath.string());
+        return false;
+    }
+    return Extract(file->Bytes(), std::move(npCommId), outputPath);
+}
+
+bool TRP::Extract(std::span<const u8> trp, std::string npCommId,
+                  const std::filesystem::path& outputPath) {
     // Retrieve trophy key
     const key_manager_key& user_key_vec = key_manager_get_keys()->release_trophy_key;
 
@@ -58,25 +72,17 @@ bool TRP::Extract(const std::filesystem::path& trophyPath, std::string npCommId,
         std::filesystem::remove_all(outputPath, ec);
     };
     try {
-        if (trophyPath.extension() != ".trp") {
-            return false;
-        }
-        Common::FS::IOFile file(trophyPath, Common::FS::FileAccessMode::Read);
-        if (!file.IsOpen()) {
-            LOG_ERROR(Common_Filesystem, "Unable to open trophy file: {}", trophyPath.string());
-            return false;
-        }
-
         TrpHeader header;
-        if (!file.Read(header)) {
-            LOG_ERROR(Common_Filesystem, "Failed to read TRP header from {}", trophyPath.string());
+        if (trp.size() < sizeof(header)) {
+            LOG_ERROR(Common_Filesystem, "Failed to read TRP header");
             return false;
         }
+        std::memcpy(&header, trp.data(), sizeof(header));
 
         if (header.magic != TRP_MAGIC) {
             LOG_ERROR(Common_Filesystem,
-                      "Wrong trophy magic number in {}: got {:#010x}, expected {:#010x}",
-                      trophyPath.string(), static_cast<u32>(header.magic), TRP_MAGIC);
+                      "Wrong trophy magic number: got {:#010x}, expected {:#010x}",
+                      static_cast<u32>(header.magic), TRP_MAGIC);
             return false;
         }
 
@@ -95,31 +101,26 @@ bool TRP::Extract(const std::filesystem::path& trophyPath, std::string npCommId,
 
         // Process each entry in the TRP file
         for (u32 i = 0; i < header.entry_num; i++) {
-            if (!file.Seek(seekPos)) {
-                LOG_ERROR(Common_Filesystem, "Failed to seek to TRP entry offset");
-                success = false;
-                break;
-            }
-            seekPos += static_cast<s64>(header.entry_size);
-
             TrpEntry entry;
-            if (!file.Read(entry)) {
+            if (seekPos < 0 || static_cast<u64>(seekPos) + sizeof(entry) > trp.size()) {
                 LOG_ERROR(Common_Filesystem, "Failed to read TRP entry");
                 success = false;
                 break;
             }
+            std::memcpy(&entry, trp.data() + seekPos, sizeof(entry));
+            seekPos += static_cast<s64>(header.entry_size);
 
             std::string_view name(entry.entry_name);
 
             if (entry.flag == ENTRY_FLAG_PNG) {
-                if (!ProcessPngEntry(file, entry, outputPath, name)) {
+                if (!ProcessPngEntry(trp, entry, outputPath, name)) {
                     success = false;
                     // Continue with next entry
                 }
             } else if (entry.flag == ENTRY_FLAG_ENCRYPTED_XML) {
                 // Check if we have a valid NPCommID for decryption
                 if (npCommId.size() >= 12 && npCommId[0] == 'N' && npCommId[1] == 'P') {
-                    if (!ProcessEncryptedXmlEntry(file, entry, outputPath, name, user_key,
+                    if (!ProcessEncryptedXmlEntry(trp, entry, outputPath, name, user_key,
                                                   npCommId)) {
                         success = false;
                         // Continue with next entry
@@ -156,19 +157,25 @@ bool TRP::Extract(const std::filesystem::path& trophyPath, std::string npCommId,
     return true;
 }
 
-bool TRP::ProcessPngEntry(Common::FS::IOFile& file, const TrpEntry& entry,
-                          const std::filesystem::path& outputPath, std::string_view name) {
-    if (!file.Seek(entry.entry_pos)) {
-        LOG_ERROR(Common_Filesystem, "Failed to seek to PNG entry offset");
-        return false;
+/// The bytes of @entry inside @trp, or nothing when it reaches past the end
+static std::span<const u8> EntryBytes(std::span<const u8> trp, const TrpEntry& entry) {
+    const u64 pos = entry.entry_pos;
+    const u64 len = entry.entry_len;
+    if (pos > trp.size() || len > trp.size() - pos) {
+        return {};
     }
+    return trp.subspan(pos, len);
+}
 
-    std::vector<u8> icon(entry.entry_len);
-    if (!file.Read(icon)) {
+bool TRP::ProcessPngEntry(std::span<const u8> trp, const TrpEntry& entry,
+                          const std::filesystem::path& outputPath, std::string_view name) {
+    const auto icon = EntryBytes(trp, entry);
+    if (icon.size() != entry.entry_len) {
         LOG_ERROR(Common_Filesystem, "Failed to read PNG data");
         return false;
     }
 
+    // Written straight from the TRP
     auto outputFile = outputPath / "Icons" / name;
     size_t written = Common::FS::IOFile::WriteBytes(outputFile, icon);
     if (written != icon.size()) {
@@ -180,41 +187,27 @@ bool TRP::ProcessPngEntry(Common::FS::IOFile& file, const TrpEntry& entry,
     return true;
 }
 
-bool TRP::ProcessEncryptedXmlEntry(Common::FS::IOFile& file, const TrpEntry& entry,
+bool TRP::ProcessEncryptedXmlEntry(std::span<const u8> trp, const TrpEntry& entry,
                                    const std::filesystem::path& outputPath, std::string_view name,
                                    const std::array<u8, 16>& user_key,
                                    const std::string& npCommId) {
     constexpr size_t IV_LEN = 16;
 
-    if (!file.Seek(entry.entry_pos)) {
-        LOG_ERROR(Common_Filesystem, "Failed to seek to encrypted XML entry offset");
+    const auto bytes = EntryBytes(trp, entry);
+    if (bytes.size() != entry.entry_len) {
+        LOG_ERROR(Common_Filesystem, "Failed to read encrypted XML data");
         return false;
     }
-
-    std::array<u8, IV_LEN> esfmIv;
-    if (!file.Read(esfmIv)) {
-        LOG_ERROR(Common_Filesystem, "Failed to read IV for encrypted XML");
-        return false;
-    }
-
     if (entry.entry_len <= IV_LEN) {
         LOG_ERROR(Common_Filesystem, "Encrypted XML entry too small");
         return false;
     }
 
-    // Skip to the encrypted data (after IV)
-    if (!file.Seek(entry.entry_pos + IV_LEN)) {
-        LOG_ERROR(Common_Filesystem, "Failed to seek to encrypted data");
-        return false;
-    }
-
-    std::vector<u8> ESFM(entry.entry_len - IV_LEN);
-    std::vector<u8> XML(entry.entry_len - IV_LEN);
-
-    if (!file.Read(ESFM)) {
-        LOG_ERROR(Common_Filesystem, "Failed to read encrypted XML data");
-        return false;
-    }
+    // The IV, then the encrypted data, decrypted from where it lies
+    std::array<u8, IV_LEN> esfmIv;
+    std::memcpy(esfmIv.data(), bytes.data(), IV_LEN);
+    const std::span<const u8> ESFM = bytes.subspan(IV_LEN);
+    std::vector<u8> XML(ESFM.size());
 
     // Decrypt the data
     std::span<const u8, 16> key_span(user_key);

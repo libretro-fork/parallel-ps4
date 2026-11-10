@@ -59,7 +59,7 @@ public:
 
     bool Open(const std::filesystem::path& filepath);
     bool Open(const std::unique_ptr<Core::FileSys::IFile>& file);
-    bool Open(const std::vector<u8>& psf_buffer);
+    bool Open(std::span<const u8> psf_buffer);
 
     [[nodiscard]] std::vector<u8> Encode() const;
     void Encode(std::vector<u8>& buf) const;

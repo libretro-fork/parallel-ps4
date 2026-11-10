@@ -25,10 +25,10 @@ typedef int net_socket;
 #include <net/if_dl.h>
 #include <net/route.h>
 #endif
-#if defined(__linux__) || defined(__FreeBSD__)
-#include <fstream>
-#include <iostream>
-#include <sstream>
+#if defined(__linux__)
+#include <cstdio>
+
+#include <streams/file_stream.h>
 #endif
 
 #include <map>
@@ -231,30 +231,32 @@ bool NetUtilInternal::RetrieveDefaultGateway() {
 #elif defined(__FreeBSD__)
     return true;
 #else
-    std::ifstream route{"/proc/net/route"};
-    std::string line;
-
-    std::getline(route, line);
-    while (std::getline(route, line)) {
-        std::istringstream iss{line};
-        std::string iface, destination, gateway;
-        int flags;
-
-        iss >> iface >> destination >> gateway >> std::hex >> flags;
-
-        if (destination == "00000000") {
-            u64 default_gateway{};
-            std::stringstream ss;
-            ss << std::hex << gateway;
-            ss >> default_gateway;
-
+    RFILE* route = filestream_open("/proc/net/route", RETRO_VFS_FILE_ACCESS_READ,
+                                   RETRO_VFS_FILE_ACCESS_HINT_NONE);
+    if (!route) {
+        return false;
+    }
+    // Lines of "Iface Destination Gateway Flags ...", in hex, after a header line
+    char line[512];
+    bool found = false;
+    filestream_gets(route, line, sizeof(line));
+    while (!found && filestream_gets(route, line, sizeof(line))) {
+        char iface[64];
+        unsigned destination = 0;
+        unsigned gateway = 0;
+        if (std::sscanf(line, "%63s %x %x", iface, &destination, &gateway) == 3 &&
+            destination == 0) {
             char str[INET_ADDRSTRLEN];
             in_addr addr;
-            addr.s_addr = default_gateway;
+            addr.s_addr = gateway;
             inet_ntop(AF_INET, &addr, str, sizeof(str));
             this->default_gateway = str;
-            return true;
+            found = true;
         }
+    }
+    filestream_close(route);
+    if (found) {
+        return true;
     }
 #endif
     return false;

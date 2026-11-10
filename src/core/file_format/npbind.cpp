@@ -2,27 +2,16 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include <cstring>
-#include <fstream>
 #include <iomanip>
 #include <sstream>
 #include <vector>
+#include "common/io_file.h"
 #include "npbind.h"
 
 bool NPBindFile::Load(const std::string& path) {
-    std::ifstream f(path, std::ios::binary | std::ios::ate);
-    if (!f)
-        return false;
-
-    std::streamsize sz = f.tellg();
-    if (sz <= 0)
-        return false;
-
-    f.seekg(0, std::ios::beg);
-    std::vector<u8> buf(static_cast<size_t>(sz));
-    if (!f.read(reinterpret_cast<char*>(buf.data()), sz))
-        return false;
-
-    return Load(std::span<const u8>{buf});
+    // Read where it lies
+    const auto file = Common::FS::FileView::Map(path);
+    return file && !file->empty() && Load(file->Bytes());
 }
 
 bool NPBindFile::Load(std::span<const u8> data) {

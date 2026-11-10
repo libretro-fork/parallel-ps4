@@ -1,13 +1,14 @@
 //  SPDX-FileCopyrightText: Copyright 2024-2026 shadPS4 Emulator Project
 //  SPDX-License-Identifier: GPL-2.0-or-later
 
-#include <fstream>
+#include <span>
 
 #include "shader_list.h"
 
 #include <imgui.h>
 
 #include "common.h"
+#include "common/io_file.h"
 #include "common/path_util.h"
 #include "common/string_util.h"
 #include "core/debug_state.h"
@@ -75,10 +76,8 @@ bool ShaderList::Selection::DrawShader(DebugStateType::ShaderDump& value) {
         patch_bin_path = patch_path;
         patch_bin_path += ".spv";
         patch_path += ".glsl";
-        if (std::filesystem::exists(patch_path)) {
-            std::ifstream file{patch_path};
-            value.patch_source =
-                std::string{std::istreambuf_iterator{file}, std::istreambuf_iterator<char>{}};
+        if (const auto file = Common::FS::FileView::Map(patch_path)) {
+            value.patch_source.assign(reinterpret_cast<const char*>(file->data()), file->size());
         }
 
         value.is_patched = !value.patch_spv.empty();
@@ -166,8 +165,7 @@ bool ShaderList::Selection::DrawShader(DebugStateType::ShaderDump& value) {
         }
         if (save) {
             value.patch_source = glsl_editor->GetText();
-            std::ofstream file{patch_path, std::ios::binary | std::ios::trunc};
-            file << value.patch_source;
+            Common::FS::IOFile::WriteBytes(patch_path, std::span<const char>{value.patch_source});
             std::string msg = "Patch saved to ";
             msg += Common::U8stringToString(patch_path.u8string());
             DebugState.ShowDebugMessage(msg);

@@ -58,7 +58,8 @@ void PersistMemory(u32 slot_id, bool lock) {
     while (n++ < 10) {
         try {
             IOFile f;
-            int r = f.Open(memoryPath, Common::FS::FileAccessMode::Create);
+            int r = f.Open(memoryPath, Common::FS::FileAccessMode::Create,
+                           Common::FS::FileHint::Sequential);
             if (f.IsOpen()) {
                 f.WriteRaw<u8>(data.memory_cache.data(), data.memory_cache.size());
                 f.Close();
@@ -145,13 +146,10 @@ void SetIcon(u32 slot_id, void* buf, size_t buf_size) {
         // games can seed save-slot icons too.
         if (auto bytes = g_mnt->ReadFile("/app0/sce_sys/save_data.png")) {
             fs::create_directories(icon_path.parent_path());
-            IOFile dst(icon_path, Common::FS::FileAccessMode::Create);
-            dst.WriteRaw<u8>(bytes->data(), bytes->size());
+            IOFile::WriteBytes(icon_path, bytes->Bytes());
         }
     } else {
-        IOFile file(icon_path, Common::FS::FileAccessMode::Create);
-        file.WriteRaw<u8>(buf, buf_size);
-        file.Close();
+        IOFile::WriteBytes(icon_path, std::span<const u8>{static_cast<const u8*>(buf), buf_size});
     }
 }
 
@@ -166,19 +164,10 @@ PSF& GetParamSFO(u32 slot_id) {
     return data.sfo;
 }
 
-std::vector<u8> GetIcon(u32 slot_id) {
+std::optional<Common::FS::FileView> GetIcon(u32 slot_id) {
     std::lock_guard lck{g_slot_mtx};
     auto& data = g_attached_slots[slot_id];
-    const auto icon_path = data.folder_path / sce_sys / "icon0.png";
-    IOFile f{icon_path, Common::FS::FileAccessMode::Read};
-    if (!f.IsOpen()) {
-        return {};
-    }
-    const u64 size = f.GetSize();
-    std::vector<u8> ret;
-    ret.resize(size);
-    f.ReadSpan(std::span{ret});
-    return ret;
+    return Common::FS::FileView::Map(data.folder_path / sce_sys / "icon0.png");
 }
 
 void SaveSFO(u32 slot_id) {
@@ -200,7 +189,8 @@ void ReadMemory(u32 slot_id, void* buf, size_t buf_size, int64_t offset) {
     auto& memory = data.memory_cache;
     if (memory.empty()) { // Load file
         memory.resize(data.memory_cache_size);
-        IOFile f{data.folder_path / FilenameSaveDataMemory, Common::FS::FileAccessMode::Read};
+        IOFile f{data.folder_path / FilenameSaveDataMemory, Common::FS::FileAccessMode::Read,
+                 Common::FS::FileHint::Sequential};
         if (f.IsOpen()) {
             f.Seek(0);
             f.ReadSpan(std::span{memory});

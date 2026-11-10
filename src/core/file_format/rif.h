@@ -3,7 +3,9 @@
 
 #pragma once
 
+#include <cstring>
 #include <filesystem>
+#include <span>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -86,7 +88,7 @@ public:
     RIF& operator=(RIF&& other) noexcept = default;
 
     bool Open(const std::filesystem::path& ridx_path, const std::filesystem::path& rifa_path);
-    bool Open(const std::vector<u8>& ridx_buffer, const std::vector<u8>& rifa_buffer);
+    bool Open(std::span<const u8> ridx_buffer, std::span<const u8> rifa_buffer);
 
     const std::string& GetServiceId() {
         return service_id;

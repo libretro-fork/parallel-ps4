@@ -10,9 +10,11 @@
 #include <Windows.h>
 #include <debugapi.h>
 #elif defined(__linux__)
-#include <filesystem>
-#include <fstream>
+#include <cstdio>
 #include <unistd.h>
+
+#include <file/file_path.h>
+#include <streams/file_stream.h>
 #elif defined(__APPLE__) || defined(__FreeBSD__)
 #include <errno.h>
 #include <signal.h>
@@ -25,16 +27,20 @@ bool Core::Debugger::IsDebuggerAttached() {
 #if defined(_WIN32)
     return IsDebuggerPresent();
 #elif defined(__linux__)
-    std::ifstream status_file("/proc/self/status");
-    std::string line;
-    while (std::getline(status_file, line)) {
-        if (line.starts_with("TracerPid:")) {
-            std::string tracer_pid = line.substr(10);
-            tracer_pid.erase(0, tracer_pid.find_first_not_of(" \t"));
-            return tracer_pid != "0";
+    RFILE* status_file = filestream_open("/proc/self/status", RETRO_VFS_FILE_ACCESS_READ,
+                                         RETRO_VFS_FILE_ACCESS_HINT_NONE);
+    if (!status_file) {
+        return false;
+    }
+    char line[256];
+    int tracer_pid = 0;
+    while (filestream_gets(status_file, line, sizeof(line))) {
+        if (std::sscanf(line, "TracerPid: %d", &tracer_pid) == 1) {
+            break;
         }
     }
-    return false;
+    filestream_close(status_file);
+    return tracer_pid != 0;
 #elif defined(__APPLE__)
     int mib[4];
     struct kinfo_proc info;
@@ -87,7 +93,7 @@ void Core::Debugger::WaitForPid(int pid) {
 #elif defined(__linux__)
     std::string proc_path = "/proc/" + std::to_string(pid);
 
-    while (std::filesystem::exists(proc_path)) {
+    while (path_is_directory(proc_path.c_str())) {
         std::this_thread::sleep_for(std::chrono::milliseconds(500));
         std::cerr << "Waiting for process " << pid << " to exit..." << std::endl;
     }

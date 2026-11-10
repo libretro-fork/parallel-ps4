@@ -53,7 +53,7 @@ std::string FormatNamedParams(std::initializer_list<NamedParam> params) {
     return fmt::to_string(buffer);
 }
 
-bool HasSfntTables(const std::vector<unsigned char>& bytes);
+bool HasSfntTables(std::span<const u8> bytes);
 std::string ReportSystemFaceRequest(FontState& st, Libraries::Font::OrbisFontHandle handle,
                                     bool& attached_out);
 
@@ -437,33 +437,6 @@ static std::optional<std::filesystem::path> ResolveKnownSysFontAliasImpl(
     return std::nullopt;
 }
 
-static std::mutex g_sysfont_file_cache_mutex;
-static std::unordered_map<std::string, std::shared_ptr<std::vector<unsigned char>>>
-    g_sysfont_file_cache;
-
-static std::shared_ptr<std::vector<unsigned char>> GetCachedFontBytes(
-    const std::filesystem::path& host_path) {
-    const std::string key = host_path.string();
-    {
-        std::scoped_lock lock(g_sysfont_file_cache_mutex);
-        if (auto it = g_sysfont_file_cache.find(key); it != g_sysfont_file_cache.end()) {
-            return it->second;
-        }
-    }
-
-    std::vector<unsigned char> bytes;
-    if (!LoadGuestFileBytes(host_path, bytes) || bytes.empty()) {
-        return {};
-    }
-
-    auto shared = std::make_shared<std::vector<unsigned char>>(std::move(bytes));
-    {
-        std::scoped_lock lock(g_sysfont_file_cache_mutex);
-        g_sysfont_file_cache.emplace(key, shared);
-    }
-    return shared;
-}
-
 } // namespace
 
 std::optional<std::filesystem::path> ResolveKnownSysFontAlias(
@@ -837,7 +810,7 @@ void LogExternalFormatSupport(u32 formats_mask) {
     LOG_INFO(Lib_Font, "ExternalFormatsMask=0x{:X}", formats_mask);
 }
 
-bool LoadFontFile(const std::filesystem::path& path, std::vector<unsigned char>& out_bytes);
+bool LoadFontFile(const std::filesystem::path& path, FontBlob& out_bytes);
 
 void LogFontOpenParams(const Libraries::Font::OrbisFontOpenParams* params) {
     if (!params) {
@@ -868,34 +841,16 @@ std::filesystem::path ResolveGuestPath(const char* guest_path) {
     return g_mnt->GetHostPath(guest_path);
 }
 
-bool LoadGuestFileBytes(const std::filesystem::path& host_path,
-                        std::vector<unsigned char>& out_bytes) {
-    std::ifstream file(host_path, std::ios::binary | std::ios::ate);
-    if (!file) {
+bool LoadGuestFileBytes(const std::filesystem::path& host_path, FontBlob& out_bytes) {
+    auto view = Common::FS::FileView::Map(host_path);
+    if (!view) {
         return false;
     }
-    const std::streamoff size = file.tellg();
-    if (size < 0) {
-        return false;
-    }
-    if (size == 0) {
-        out_bytes.clear();
-        return true;
-    }
-    if (static_cast<std::uint64_t>(size) > std::numeric_limits<std::size_t>::max()) {
-        return false;
-    }
-    out_bytes.resize(static_cast<std::size_t>(size));
-    file.seekg(0, std::ios::beg);
-    if (!file.read(reinterpret_cast<char*>(out_bytes.data()),
-                   static_cast<std::streamsize>(out_bytes.size()))) {
-        out_bytes.clear();
-        return false;
-    }
+    out_bytes = std::make_shared<const Common::FS::FileView>(std::move(*view));
     return true;
 }
 
-bool LoadGuestPathBytes(const char* guest_path, std::vector<unsigned char>& out_bytes) {
+bool LoadGuestPathBytes(const char* guest_path, FontBlob& out_bytes) {
     if (!guest_path) {
         return false;
     }
@@ -905,7 +860,7 @@ bool LoadGuestPathBytes(const char* guest_path, std::vector<unsigned char>& out_
         }
         if (g_mnt) {
             if (auto bytes = g_mnt->ReadFile(guest_path)) {
-                out_bytes = std::move(*bytes);
+                out_bytes = std::make_shared<const Common::FS::FileView>(std::move(*bytes));
                 return true;
             }
         }
@@ -1824,8 +1779,7 @@ s32 ComputeSysfontShiftValue(FaceHandle face) {
     return 0;
 }
 
-std::shared_ptr<std::vector<unsigned char>> LoadBuiltinFontBytesShared(
-    const std::filesystem::path& path, u32* out_subfont_index) {
+FontBlob LoadBuiltinFontBytesShared(const std::filesystem::path& path, u32* out_subfont_index) {
     const auto* blob = FindBuiltinFontBlob(path);
     if (!blob) {
         return {};
@@ -1835,7 +1789,7 @@ std::shared_ptr<std::vector<unsigned char>> LoadBuiltinFontBytesShared(
     }
 
     static std::mutex cache_mutex;
-    static std::unordered_map<std::string, std::shared_ptr<std::vector<unsigned char>>> cache;
+    static std::unordered_map<std::string, FontBlob> cache;
 
     const std::string cache_key(blob->virtual_path);
     {
@@ -1850,14 +1804,17 @@ std::shared_ptr<std::vector<unsigned char>> LoadBuiltinFontBytesShared(
         return {};
     }
 
-    auto bytes = std::make_shared<std::vector<unsigned char>>(output_len);
-    if (StbDecompress(bytes->data(), blob->compressed_data) != output_len) {
+    // Decompressed once into its own buffer, kept for the session and shared by every face
+    std::vector<u8> bytes(output_len);
+    if (StbDecompress(bytes.data(), blob->compressed_data) != output_len) {
         return {};
     }
 
     {
         std::scoped_lock lock(cache_mutex);
-        return cache.emplace(cache_key, std::move(bytes)).first->second;
+        return cache
+            .emplace(cache_key, std::make_shared<const Common::FS::FileView>(std::move(bytes)))
+            .first->second;
     }
 }
 
@@ -2092,7 +2049,7 @@ const FontSetCache* EnsureFontSetCache(u32 font_set_type) {
             path = BuildBuiltinSystemFontSelection(font_set_type).primary_path;
         }
         if (!path.empty() && LoadFontFile(path, cache.bytes)) {
-            cache.available = HasSfntTables(cache.bytes);
+            cache.available = HasSfntTables(cache.bytes->Bytes());
             cache.path = cache.available ? path : std::filesystem::path{};
         } else {
             cache.available = false;
@@ -2103,7 +2060,7 @@ const FontSetCache* EnsureFontSetCache(u32 font_set_type) {
     return cache.available ? &cache : nullptr;
 }
 
-bool HasSfntTables(const std::vector<unsigned char>& bytes) {
+bool HasSfntTables(std::span<const u8> bytes) {
     if (bytes.size() < 12) {
         return false;
     }
@@ -2116,22 +2073,23 @@ bool HasSfntTables(const std::vector<unsigned char>& bytes) {
     return true;
 }
 
-bool LoadFontFileWithSubfont(const std::filesystem::path& path,
-                             std::vector<unsigned char>& out_bytes, u32& out_subfont_index) {
+bool LoadFontFileWithSubfont(const std::filesystem::path& path, FontBlob& out_bytes,
+                             u32& out_subfont_index) {
     if (path.empty()) {
         return false;
     }
 
-    if (const auto builtin_bytes = LoadBuiltinFontBytesShared(path, &out_subfont_index)) {
-        out_bytes.assign(builtin_bytes->begin(), builtin_bytes->end());
-        return !out_bytes.empty();
+    // Shared, not copied: the built-in font stays decompressed for the session
+    if (auto builtin_bytes = LoadBuiltinFontBytesShared(path, &out_subfont_index)) {
+        out_bytes = std::move(builtin_bytes);
+        return !out_bytes->empty();
     }
 
     out_subfont_index = 0;
     auto try_load = [&](const std::filesystem::path& p) -> bool {
-        out_bytes.clear();
-        if (!LoadGuestFileBytes(p, out_bytes) || out_bytes.empty()) {
-            out_bytes.clear();
+        out_bytes.reset();
+        if (!LoadGuestFileBytes(p, out_bytes) || out_bytes->empty()) {
+            out_bytes.reset();
             return false;
         }
         return true;
@@ -2171,7 +2129,7 @@ bool LoadFontFileWithSubfont(const std::filesystem::path& path,
     return false;
 }
 
-bool LoadFontFile(const std::filesystem::path& path, std::vector<unsigned char>& out_bytes) {
+bool LoadFontFile(const std::filesystem::path& path, FontBlob& out_bytes) {
     u32 ignored_subfont_index = 0;
     return LoadFontFileWithSubfont(path, out_bytes, ignored_subfont_index);
 }
@@ -2186,7 +2144,7 @@ bool AddSystemFallbackFace(FontState& st, const std::filesystem::path& path, u32
         return false;
     }
 
-    std::vector<unsigned char> fallback_bytes;
+    FontBlob fallback_bytes;
     u32 fallback_face_index = subfont_index;
     if (!LoadFontFileWithSubfont(path, fallback_bytes, fallback_face_index)) {
         return false;
@@ -2195,7 +2153,7 @@ bool AddSystemFallbackFace(FontState& st, const std::filesystem::path& path, u32
     FontState::SystemFallbackFace fallback{};
     fallback.font_id = 0xffffffffu;
     fallback.path = path;
-    fallback.bytes = std::make_shared<std::vector<unsigned char>>(std::move(fallback_bytes));
+    fallback.bytes = std::move(fallback_bytes);
     fallback.ft_face =
         CreateFaceFromBytes(fallback.bytes->data(), fallback.bytes->size(), fallback_face_index);
     fallback.ready = (fallback.ft_face != nullptr);
@@ -2251,7 +2209,7 @@ bool AttachSystemFont(FontState& st, Libraries::Font::OrbisFontHandle handle) {
 
     std::filesystem::path primary_path = ResolveSystemFontPath(st.font_set_type);
     bool using_builtin_primary = false;
-    std::vector<unsigned char> primary_bytes;
+    FontBlob primary_bytes;
     u32 primary_face_index = subfont_index;
     if (primary_path.empty() ||
         !LoadFontFileWithSubfont(primary_path, primary_bytes, primary_face_index)) {
@@ -2266,9 +2224,9 @@ bool AttachSystemFont(FontState& st, Libraries::Font::OrbisFontHandle handle) {
     DestroyFace(st.ext_ft_face);
     st.ext_face_data = std::move(primary_bytes);
     st.ext_ft_face =
-        CreateFaceFromBytes(st.ext_face_data.data(), st.ext_face_data.size(), primary_face_index);
+        CreateFaceFromBytes(st.ext_face_data->data(), st.ext_face_data->size(), primary_face_index);
     if (!st.ext_ft_face) {
-        st.ext_face_data.clear();
+        st.ext_face_data.reset();
         return false;
     }
 

@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cstring>
+#include <span>
 
 #include <encodings/deflate.h>
 #include <openssl/aes.h>
@@ -204,7 +205,7 @@ void Inflate(const u8* in, std::size_t in_size, u8* out, std::size_t out_size) {
 
 // The text values of a param.sfo. Not PSF: this runs in the frontend's process too, where
 // the emulator's log is not set up.
-std::unordered_map<std::string, std::string> SfoStrings(const std::vector<u8>& sfo) {
+std::unordered_map<std::string, std::string> SfoStrings(std::span<const u8> sfo) {
     std::unordered_map<std::string, std::string> values;
     const auto u32_at = [&](std::size_t at) -> u32 {
         return at + 4 <= sfo.size() ? u32(sfo[at]) | u32(sfo[at + 1]) << 8 |
@@ -260,13 +261,12 @@ std::filesystem::path PkgKeysFile(const std::filesystem::path& user_dir) {
 }
 
 bool LoadPkgKeys(const std::filesystem::path& path, PkgKeys& keys, std::string& error) {
-    Common::FS::IOFile file(path, Common::FS::FileAccessMode::Read);
-    if (!file.IsOpen()) {
+    const auto file = Common::FS::FileView::Map(path);
+    if (!file) {
         error = "PKG content needs the PKG keys in " + path.string();
         return false;
     }
-    std::string text(file.GetSize(), '\0');
-    file.ReadRaw<char>(text.data(), text.size());
+    const std::string_view text{reinterpret_cast<const char*>(file->data()), file->size()};
     keys = {};
     const std::pair<std::string_view, std::vector<u8>*> names[] = {
         {"derived_key3_modulus", &keys.derived_key3_modulus},
@@ -279,13 +279,13 @@ bool LoadPkgKeys(const std::filesystem::path& path, PkgKeys& keys, std::string& 
     std::size_t start = 0;
     while (start < text.size()) {
         std::size_t end = text.find('\n', start);
-        if (end == std::string::npos) {
+        if (end == std::string_view::npos) {
             end = text.size();
         }
-        const std::string line = text.substr(start, end - start);
+        const std::string_view line = text.substr(start, end - start);
         start = end + 1;
         const auto equals = line.find('=');
-        if (line.empty() || line[0] == '#' || equals == std::string::npos) {
+        if (line.empty() || line[0] == '#' || equals == std::string_view::npos) {
             continue;
         }
         std::string name;
@@ -334,7 +334,8 @@ bool LoadPkgKeys(const std::filesystem::path& path, PkgKeys& keys, std::string& 
 }
 
 bool ReadPkgSummary(const std::filesystem::path& path, PkgSummary& summary, std::string& error) {
-    Common::FS::IOFile file(path, Common::FS::FileAccessMode::Read);
+    // Mapped: param.sfo is read where it lies
+    Common::FS::IOFile file(path, Common::FS::FileAccessMode::Read, Common::FS::FileHint::Mapped);
     PkgHeader header{};
     if (!ReadHeader(file, header, error)) {
         return false;
@@ -353,12 +354,12 @@ bool ReadPkgSummary(const std::filesystem::path& path, PkgSummary& summary, std:
         if (entry.id != 0x1000) { // param.sfo, which is not encrypted
             continue;
         }
-        std::vector<u8> sfo(entry.size);
-        if (!file.Seek(entry.offset) || file.ReadRaw<u8>(sfo.data(), sfo.size()) != sfo.size()) {
+        const auto mapped = file.Mapped();
+        if (static_cast<u64>(entry.offset) + entry.size > mapped.size()) {
             error = "the PKG's param.sfo could not be read";
             return false;
         }
-        auto values = SfoStrings(sfo);
+        auto values = SfoStrings(mapped.subspan(entry.offset, entry.size));
         summary.category = values["CATEGORY"];
         summary.app_ver = values["APP_VER"];
         if (!values["TITLE_ID"].empty()) {

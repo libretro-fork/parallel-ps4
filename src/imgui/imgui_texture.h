@@ -7,6 +7,7 @@
 #include <vector>
 #include <imgui.h>
 
+#include "common/io_file.h"
 #include "common/types.h"
 
 namespace ImGui {
@@ -28,6 +29,8 @@ public:
     };
 
     static RefCountedTexture DecodePngTexture(std::vector<u8> data);
+    /// Decodes PNG bytes that are lent (mapped, embedded) or kept by @data.
+    static RefCountedTexture DecodePngTexture(Common::FS::FileView data);
 
     static RefCountedTexture DecodePngFile(std::filesystem::path path);
 

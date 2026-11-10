@@ -21,14 +21,13 @@
 #include <unistd.h>
 #include <ucontext.h>
 
-#include <array>
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <cerrno>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <cstdio>
-#include <fstream>
 
 // Weak fallback when exception.cpp is not linked (fexcore-guest-harness).
 // Full shadPS4 provides the strong definition that reads g_curthread.
@@ -38,6 +37,7 @@ __attribute__((weak)) u64 FexCurrentGuestStackTop() noexcept {
 }
 } // namespace Libraries::Kernel
 #include <limits>
+#include <memory>
 #include <mutex>
 #include <optional>
 #include <shared_mutex>
@@ -48,6 +48,8 @@ __attribute__((weak)) u64 FexCurrentGuestStackTop() noexcept {
 #include <unordered_set>
 #include <utility>
 #include <vector>
+
+#include <streams/file_stream.h>
 
 namespace Core::Fex {
 namespace {
@@ -158,53 +160,60 @@ bool RangesOverlap(const GuestExecutionRange& lhs, const GuestExecutionRange& rh
 }
 
 EngineResult<bool> ValidateHostMapping(const GuestExecutionRange& range) {
-  std::ifstream maps {"/proc/self/maps"};
-  if (!maps.is_open()) {
-    const auto error = errno == 0 ? EACCES : errno;
-    FEX_TRACE(
-                 "BACHATA_FEX_MAPPING_FAIL reason=proc_maps_open error=%d begin=%#lx size=%#lx "
-                 "executable=%d writable=%d\n",
-                 error, static_cast<unsigned long>(range.Begin),
-                 static_cast<unsigned long>(range.Size), range.Executable, range.Writable);
-    return Failure(EngineStage::Mapping, error);
-  }
+    // Closed on every way out
+    const std::unique_ptr<RFILE, int (*)(RFILE*)> maps{
+        filestream_open("/proc/self/maps", RETRO_VFS_FILE_ACCESS_READ,
+                        RETRO_VFS_FILE_ACCESS_HINT_NONE),
+        filestream_close};
+    if (!maps) {
+        const auto error = errno == 0 ? EACCES : errno;
+        FEX_TRACE("BACHATA_FEX_MAPPING_FAIL reason=proc_maps_open error=%d begin=%#lx size=%#lx "
+                  "executable=%d writable=%d\n",
+                  error, static_cast<unsigned long>(range.Begin),
+                  static_cast<unsigned long>(range.Size), range.Executable, range.Writable);
+        return Failure(EngineStage::Mapping, error);
+    }
 
   const auto rangeEnd = range.Begin + range.Size;
   std::uintptr_t covered = range.Begin;
-  std::string line;
-  while (std::getline(maps, line)) {
-    unsigned long mapBegin {};
-    unsigned long mapEnd {};
-    char permissions[5] {};
-    if (std::sscanf(line.c_str(), "%lx-%lx %4s", &mapBegin, &mapEnd, permissions) != 3) continue;
-    const auto begin = static_cast<std::uintptr_t>(mapBegin);
-    const auto end = static_cast<std::uintptr_t>(mapEnd);
-    if (end <= covered) continue;
-    if (begin > covered) break;
-    // FEX translates guest instructions into its own executable code cache. Guest code only
-    // needs to be readable on the host, and must be sealed against writes before translation.
-    if (range.Executable && (permissions[0] != 'r' || permissions[1] == 'w')) {
-      FEX_TRACE(
-                   "BACHATA_FEX_MAPPING_FAIL reason=host_guest_code_permission error=%d "
-                   "begin=%#lx size=%#lx executable=%d writable=%d host_begin=%#lx "
-                   "host_end=%#lx host_permissions=%s\n",
-                   EACCES, static_cast<unsigned long>(range.Begin),
-                   static_cast<unsigned long>(range.Size), range.Executable, range.Writable,
-                   static_cast<unsigned long>(begin), static_cast<unsigned long>(end), permissions);
-      return Failure(EngineStage::Mapping, EACCES);
-    }
-    if (range.Writable && (permissions[1] != 'w' || permissions[2] == 'x')) {
-      FEX_TRACE(
-                   "BACHATA_FEX_MAPPING_FAIL reason=host_write_permission error=%d begin=%#lx "
-                   "size=%#lx executable=%d writable=%d host_begin=%#lx host_end=%#lx "
-                   "host_permissions=%s\n",
-                   EACCES, static_cast<unsigned long>(range.Begin),
-                   static_cast<unsigned long>(range.Size), range.Executable, range.Writable,
-                   static_cast<unsigned long>(begin), static_cast<unsigned long>(end), permissions);
-      return Failure(EngineStage::Mapping, EACCES);
-    }
-    covered = std::min(end, rangeEnd);
-    if (covered == rangeEnd) return true;
+  char line[4096];
+  while (filestream_gets(maps.get(), line, sizeof(line))) {
+      unsigned long mapBegin{};
+      unsigned long mapEnd{};
+      char permissions[5]{};
+      if (std::sscanf(line, "%lx-%lx %4s", &mapBegin, &mapEnd, permissions) != 3)
+          continue;
+      const auto begin = static_cast<std::uintptr_t>(mapBegin);
+      const auto end = static_cast<std::uintptr_t>(mapEnd);
+      if (end <= covered)
+          continue;
+      if (begin > covered)
+          break;
+      // FEX translates guest instructions into its own executable code cache. Guest code only
+      // needs to be readable on the host, and must be sealed against writes before translation.
+      if (range.Executable && (permissions[0] != 'r' || permissions[1] == 'w')) {
+          FEX_TRACE("BACHATA_FEX_MAPPING_FAIL reason=host_guest_code_permission error=%d "
+                    "begin=%#lx size=%#lx executable=%d writable=%d host_begin=%#lx "
+                    "host_end=%#lx host_permissions=%s\n",
+                    EACCES, static_cast<unsigned long>(range.Begin),
+                    static_cast<unsigned long>(range.Size), range.Executable, range.Writable,
+                    static_cast<unsigned long>(begin), static_cast<unsigned long>(end),
+                    permissions);
+          return Failure(EngineStage::Mapping, EACCES);
+      }
+      if (range.Writable && (permissions[1] != 'w' || permissions[2] == 'x')) {
+          FEX_TRACE("BACHATA_FEX_MAPPING_FAIL reason=host_write_permission error=%d begin=%#lx "
+                    "size=%#lx executable=%d writable=%d host_begin=%#lx host_end=%#lx "
+                    "host_permissions=%s\n",
+                    EACCES, static_cast<unsigned long>(range.Begin),
+                    static_cast<unsigned long>(range.Size), range.Executable, range.Writable,
+                    static_cast<unsigned long>(begin), static_cast<unsigned long>(end),
+                    permissions);
+          return Failure(EngineStage::Mapping, EACCES);
+      }
+      covered = std::min(end, rangeEnd);
+      if (covered == rangeEnd)
+          return true;
   }
   FEX_TRACE(
                "BACHATA_FEX_MAPPING_FAIL reason=host_mapping_gap error=%d begin=%#lx size=%#lx "

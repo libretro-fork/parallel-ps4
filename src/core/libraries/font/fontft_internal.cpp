@@ -13,7 +13,6 @@
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
-#include <fstream>
 #include <limits>
 #include <mutex>
 #include <optional>
@@ -21,8 +20,6 @@
 #include <string_view>
 #include <unordered_map>
 #include <vector>
-
-#include <streams/file_stream.h>
 
 #include "common/logging/log.h"
 #include "common/singleton.h"
@@ -2819,8 +2816,8 @@ s32 PS4_SYSV_ABI LibraryOpenFontMemoryStub(void* library, u32 mode, const void* 
     const u8* data = nullptr;
     u32 size = 0;
     void* owned_data = nullptr;
-    std::shared_ptr<std::vector<unsigned char>> shared_data;
-    std::shared_ptr<std::vector<u8>> archive_font_bytes;
+    std::shared_ptr<const void> shared_data;
+    Libraries::Font::Internal::FontBlob archive_font_bytes;
     std::string open_path;
     std::filesystem::path host_path_fs{};
 
@@ -2845,7 +2842,8 @@ s32 PS4_SYSV_ABI LibraryOpenFontMemoryStub(void* library, u32 mode, const void* 
                         host_path_fs = *host;
                         open_path = host_path_fs.string();
                     } else if (auto bytes = mnt->ReadFile(path)) {
-                        archive_font_bytes = std::make_shared<std::vector<u8>>(std::move(*bytes));
+                        archive_font_bytes =
+                            std::make_shared<const Common::FS::FileView>(std::move(*bytes));
                     }
                 }
             }
@@ -2924,16 +2922,15 @@ s32 PS4_SYSV_ABI LibraryOpenFontMemoryStub(void* library, u32 mode, const void* 
                 continue;
             }
             attempted_open = true;
-            void* file_buf = nullptr;
-            s64 file_len = 0;
-            if (!filestream_read_file(cand.c_str(), &file_buf, &file_len) || !file_buf) {
+            // Mapped and read where it lies, kept by the face
+            auto mapped = Common::FS::FileView::Map(cand_path);
+            if (!mapped) {
                 ft_err = kOpenErrResource;
                 last_ft_err = ft_err;
                 continue;
             }
-            std::shared_ptr<const void> file_keep(file_buf, std::free);
-            face = Face::Open(static_cast<const u8*>(file_buf), static_cast<std::size_t>(file_len),
-                              subFontIndex, std::move(file_keep));
+            auto file_keep = std::make_shared<const Common::FS::FileView>(std::move(*mapped));
+            face = Face::Open(file_keep->data(), file_keep->size(), subFontIndex, file_keep);
             ft_err = face ? 0 : kOpenErrFormat;
             last_ft_err = ft_err;
             if (face) {
@@ -3018,7 +3015,7 @@ s32 PS4_SYSV_ABI LibraryCloseFontObjStub(void* fontObj, u32 /*flags*/) {
     const auto free_fn =
         (ctx && ctx->alloc_vtbl) ? reinterpret_cast<GuestFreeFn>(ctx->alloc_vtbl[1]) : nullptr;
     void* owned_data = nullptr;
-    std::shared_ptr<std::vector<unsigned char>> shared_data;
+    std::shared_ptr<const void> shared_data;
     if (const auto sidecar = TakeFontObjSidecar(obj)) {
         owned_data = sidecar->owned_data;
         shared_data = sidecar->shared_data;

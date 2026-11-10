@@ -663,7 +663,8 @@ struct FontObjSidecar {
     u32 font_size = 0;
     u32 sfnt_base = 0;
     void* owned_data = nullptr;
-    std::shared_ptr<std::vector<unsigned char>> shared_data;
+    /// Keeps the bytes font_data points into, when it is not owned_data
+    std::shared_ptr<const void> shared_data;
 };
 
 struct LayoutOutIo {

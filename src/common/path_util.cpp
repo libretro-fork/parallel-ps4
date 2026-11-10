@@ -1,8 +1,11 @@
 // SPDX-FileCopyrightText: Copyright 2024-2026 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
-#include <fstream>
+#include <string_view>
 #include <unordered_map>
+
+#include <streams/file_stream.h>
+
 #include "common/logging/log.h"
 #include "common/path_util.h"
 #include "common/scope_exit.h"
@@ -146,19 +149,20 @@ static std::unordered_map<PathType, fs::path> MakeUserPaths() {
     create_path(PathType::CustomModulesDir, user_dir / CUSTOM_MODULES_DIR);
     create_path(PathType::LicensesDir, user_dir / LICENSES_DIR);
 
-    std::ofstream notice_file(user_dir / CUSTOM_TROPHY / "Notice.txt");
-    if (notice_file.is_open()) {
-        notice_file
-            << "++++++++++++++++++++++++++++++++\n+ Custom Trophy Images / Sound "
-               "+\n++++++++++++++++++++++++++++++++\n\nYou can add custom images to the "
-               "trophies.\n*We recommend a square resolution image, for example 200x200, 500x500, "
-               "the same size as the height and width.\nIn this folder ('user\\custom_trophy'), "
-               "add the files with the following "
-               "names:\n\nbronze.png\nsilver.png\ngold.png\nplatinum.png\n\nYou can add a custom "
-               "sound for trophy notifications.\n*By default, no audio is played unless it is in "
-               "this folder and you are using the QT version.\nIn this folder "
-               "('user\\custom_trophy'), add the files with the following names:\n\ntrophy.mp3";
-        notice_file.close();
+    // Written once, and again only when the text has changed
+    static constexpr std::string_view notice =
+        "++++++++++++++++++++++++++++++++\n+ Custom Trophy Images / Sound "
+        "+\n++++++++++++++++++++++++++++++++\n\nYou can add custom images to the "
+        "trophies.\n*We recommend a square resolution image, for example 200x200, 500x500, "
+        "the same size as the height and width.\nIn this folder ('user\\custom_trophy'), "
+        "add the files with the following "
+        "names:\n\nbronze.png\nsilver.png\ngold.png\nplatinum.png\n\nYou can add a custom "
+        "sound for trophy notifications.\n*By default, no audio is played unless it is in "
+        "this folder and you are using the QT version.\nIn this folder "
+        "('user\\custom_trophy'), add the files with the following names:\n\ntrophy.mp3";
+    const std::string notice_path = PathToUTF8String(user_dir / CUSTOM_TROPHY / "Notice.txt");
+    if (!filestream_matches_buf(notice_path.c_str(), notice.data(), notice.size())) {
+        filestream_write_file(notice_path.c_str(), notice.data(), static_cast<s64>(notice.size()));
     }
 
     return paths;

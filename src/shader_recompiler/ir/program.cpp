@@ -29,7 +29,7 @@ void DumpProgram(const Program& program, const Info& info, const std::string& ty
     }
     const auto ir_filename =
         fmt::format("{}_{:#018x}.{}irprogram.txt", info.hw_stage, info.pgm_hash, type);
-    const auto ir_file = IOFile{dump_dir / ir_filename, FileAccessMode::Create, FileType::TextFile};
+    const auto ir_file = IOFile{dump_dir / ir_filename, FileAccessMode::Create};
 
     size_t index{0};
     std::map<const IR::Inst*, size_t> inst_to_index;
@@ -47,8 +47,7 @@ void DumpProgram(const Program& program, const Info& info, const std::string& ty
 
     const auto asl_filename =
         fmt::format("{}_{:#018x}.{}asl.txt", info.hw_stage, info.pgm_hash, type);
-    const auto asl_file =
-        IOFile{dump_dir / asl_filename, FileAccessMode::Create, FileType::TextFile};
+    const auto asl_file = IOFile{dump_dir / asl_filename, FileAccessMode::Create};
 
     for (const auto& node : program.syntax_list) {
         std::string s = IR::DumpASLNode(node, block_to_index, inst_to_index) + '\n';

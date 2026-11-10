@@ -3,8 +3,10 @@
 
 #pragma once
 
+#include <optional>
 #include <vector>
 #include <core/libraries/system/userservice.h>
+#include "common/io_file.h"
 #include "core/libraries/save_data/save_backup.h"
 
 class PSF;
@@ -30,7 +32,8 @@ void SetIcon(u32 slot_id, void* buf = nullptr, size_t buf_size = 0);
 
 [[nodiscard]] PSF& GetParamSFO(u32 slot_id);
 
-[[nodiscard]] std::vector<u8> GetIcon(u32 slot_id);
+/// The slot's icon0.png, mapped where it lies; nothing when there is none.
+[[nodiscard]] std::optional<Common::FS::FileView> GetIcon(u32 slot_id);
 
 // Save now or wait for the background thread to save
 void SaveSFO(u32 slot_id);

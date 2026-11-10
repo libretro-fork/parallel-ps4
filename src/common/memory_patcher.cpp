@@ -3,7 +3,6 @@
 
 #include <algorithm>
 #include <codecvt>
-#include <fstream>
 #include <sstream>
 #include <string>
 #include "common/elf_info.h"

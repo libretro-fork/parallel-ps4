@@ -217,7 +217,8 @@ public:
     }
 
     virtual std::filesystem::path RootPath() const = 0;
-    virtual std::optional<std::vector<u8>> ReadFile(std::string_view rel_path) const = 0;
+    /// The whole file, lent where it lies (mapped), or decoded out of an archive.
+    virtual std::optional<Common::FS::FileView> ReadFile(std::string_view rel_path) const = 0;
 };
 
 // Equal identities get the same guest inode for the lifetime of the process.
@@ -238,8 +239,8 @@ public:
 // Opens the appropriate backend for root
 [[nodiscard]] std::unique_ptr<IBackend> OpenGameBackend(const std::filesystem::path& root);
 
-[[nodiscard]] std::optional<std::vector<u8>> ReadGameFile(const std::filesystem::path& game_root,
-                                                          std::string_view rel_path);
+[[nodiscard]] std::optional<Common::FS::FileView> ReadGameFile(
+    const std::filesystem::path& game_root, std::string_view rel_path);
 
 // Returns a real path on the host filesystem for rel_path inside game_root.
 // For directory-backed games this is just game_root / rel_path; for archives

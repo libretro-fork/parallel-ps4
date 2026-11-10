@@ -155,8 +155,7 @@ void SaveInstance::SetupAndMount(bool read_only, bool copy_icon, bool ignore_cor
                 if (fs::exists(output_icon)) {
                     fs::remove(output_icon);
                 }
-                Common::FS::IOFile dst(output_icon, Common::FS::FileAccessMode::Create);
-                dst.WriteRaw<u8>(bytes->data(), bytes->size());
+                Common::FS::IOFile::WriteBytes(output_icon, bytes->Bytes());
             }
         }
         exists = true;

@@ -118,7 +118,7 @@ bool WriteVector(const BlobType type, std::filesystem::path&& path_, std::vector
             auto path{path_};
             path.replace_extension(GetBlobFileExtension(type));
             using namespace Common::FS;
-            const auto file = IOFile{path, FileAccessMode::Create};
+            const auto file = IOFile{path, FileAccessMode::Create, FileHint::Sequential};
             file.Write(v);
         }};
         std::scoped_lock lock{m_request};
@@ -129,15 +129,6 @@ bool WriteVector(const BlobType type, std::filesystem::path&& path_, std::vector
     ++num_requests;
     request_cv.notify_one();
     return true;
-}
-
-template <typename T>
-void LoadVector(BlobType type, std::filesystem::path& path, std::vector<T>& v) {
-    using namespace Common::FS;
-    path.replace_extension(GetBlobFileExtension(type));
-    const auto file = IOFile{path, FileAccessMode::Read};
-    v.resize(file.GetSize() / sizeof(T));
-    file.Read(v);
 }
 
 bool DataBase::Save(BlobType type, const std::string& name, std::vector<u8>&& data) {
@@ -158,34 +149,22 @@ bool DataBase::Save(BlobType type, const std::string& name, std::vector<u32>&& d
     return WriteVector(type, std::move(path), std::move(data));
 }
 
-void DataBase::Load(BlobType type, const std::string& name, std::vector<u8>& data) {
+std::optional<Common::FS::FileView> DataBase::Load(BlobType type, const std::string& name) {
     if (!opened) {
-        return;
+        return std::nullopt;
     }
-
     auto path = cache_path / name;
-    return LoadVector(type, path, data);
+    path.replace_extension(GetBlobFileExtension(type));
+    return Common::FS::FileView::Map(path);
 }
 
-void DataBase::Load(BlobType type, const std::string& name, std::vector<u32>& data) {
-    if (!opened) {
-        return;
-    }
-
-    auto path = cache_path / name;
-    return LoadVector(type, path, data);
-}
-
-void DataBase::ForEachBlob(BlobType type, const std::function<void(std::vector<u8>&& data)>& func) {
+void DataBase::ForEachBlob(BlobType type,
+                           const std::function<void(std::span<const u8> data)>& func) {
     const auto& ext = GetBlobFileExtension(type);
     for (const auto& file_name : std::filesystem::directory_iterator{cache_path}) {
         if (file_name.path().extension().string().ends_with(ext)) {
-            using namespace Common::FS;
-            const auto& file = IOFile{file_name, FileAccessMode::Read};
-            if (file.IsOpen()) {
-                std::vector<u8> data(file.GetSize());
-                file.Read(data);
-                func(std::move(data));
+            if (const auto view = Common::FS::FileView::Map(file_name.path())) {
+                func(view->Bytes());
             }
         }
     }

@@ -35,9 +35,6 @@ struct Pcm {
     }
 };
 
-// The file's bytes, read in one go; empty when it cannot be read.
-std::vector<u8> ReadWhole(const std::filesystem::path& path);
-
 // Decodes a whole MP3, FLAC, ADTS AAC or MP4/M4A (AAC) file held in memory, read in place.
 // False when it is not one.
 bool DecodeMp3(const u8* data, size_t size, Pcm& out);

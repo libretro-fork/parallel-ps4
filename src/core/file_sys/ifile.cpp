@@ -1,10 +1,11 @@
 // SPDX-FileCopyrightText: Copyright 2026 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
-#include <fstream>
 #include <mutex>
 #include <system_error>
 #include <unordered_map>
+
+#include <streams/file_stream.h>
 
 #include "common/hash.h"
 #include "common/logging/log.h"
@@ -88,8 +89,8 @@ std::unique_ptr<IBackend> OpenGameBackend(const std::filesystem::path& root) {
     return std::make_unique<HostFsBackend>(*resolved, true);
 }
 
-std::optional<std::vector<u8>> ReadGameFile(const std::filesystem::path& game_root,
-                                            std::string_view rel_path) {
+std::optional<Common::FS::FileView> ReadGameFile(const std::filesystem::path& game_root,
+                                                 std::string_view rel_path) {
     const auto backend = OpenGameBackend(game_root);
     if (!backend) {
         return std::nullopt;
@@ -137,15 +138,9 @@ std::optional<std::filesystem::path> ResolveGameFilePath(const std::filesystem::
     std::error_code mkdir_ec;
     std::filesystem::create_directories(dest.parent_path(), mkdir_ec);
 
-    std::ofstream out(dest, std::ios::binary | std::ios::trunc);
-    if (!out.is_open()) {
-        LOG_ERROR(Common_Filesystem, "Failed to open destination for archive extraction: {}",
-                  dest.string());
-        return std::nullopt;
-    }
-    out.write(reinterpret_cast<const char*>(data->data()),
-              static_cast<std::streamsize>(data->size()));
-    if (!out.good()) {
+    if (!filestream_write_file(Common::FS::PathToUTF8String(dest).c_str(), data->data(),
+                               static_cast<s64>(data->size()))) {
+        LOG_ERROR(Common_Filesystem, "Failed to write the archive extraction: {}", dest.string());
         return std::nullopt;
     }
     return dest;

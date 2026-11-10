@@ -133,7 +133,8 @@ struct OrbisSaveDataIcon {
 
     Error LoadIcon(const fs::path& icon_path) {
         try {
-            const Common::FS::IOFile file(icon_path, Common::FS::FileAccessMode::Read);
+            const Common::FS::IOFile file(icon_path, Common::FS::FileAccessMode::Read,
+                                          Common::FS::FileHint::Sequential);
             dataSize = file.GetSize();
             file.Seek(0);
             file.ReadRaw<u8>(buf, std::min(bufSize, dataSize));
@@ -1159,9 +1160,12 @@ Error PS4_SYSV_ABI sceSaveDataGetSaveDataMemory2(OrbisSaveDataMemoryGet2* getPar
     }
     auto icon = getParam->icon;
     if (icon != nullptr) {
-        auto icon_mem = SaveMemory::GetIcon(slot_id);
-        size_t total = std::min(icon->bufSize, icon_mem.size());
-        std::memcpy(icon->buf, icon_mem.data(), total);
+        // Copied once, from the mapped file into the game's buffer
+        const auto icon_mem = SaveMemory::GetIcon(slot_id);
+        const size_t total = icon_mem ? std::min(icon->bufSize, icon_mem->size()) : 0;
+        if (total) {
+            std::memcpy(icon->buf, icon_mem->data(), total);
+        }
         icon->dataSize = total;
     }
 

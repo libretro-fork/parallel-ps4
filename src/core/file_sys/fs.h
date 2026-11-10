@@ -96,7 +96,8 @@ public:
 
     /// open + read the whole file as bytes. Returns nullopt
     /// when the file does not exist or is unreadable.
-    std::optional<std::vector<u8>> ReadFile(std::string_view guest_path);
+    /// The whole file, lent where it lies (mapped), or decoded out of an archive.
+    std::optional<Common::FS::FileView> ReadFile(std::string_view guest_path);
 
     /// Normalizes and validates a guest path (resolves dot and dot-dot components).
     static std::optional<std::string> SanitizeGuestPath(std::string_view path);

@@ -9,34 +9,21 @@
 #include "core/file_format/rif.h"
 
 bool RIF::Open(const std::filesystem::path& ridx_path, const std::filesystem::path& rifa_path) {
-    Common::FS::IOFile ridx_file(ridx_path, Common::FS::FileAccessMode::Read);
-    if (!ridx_file.IsOpen()) {
+    // Both read where they lie
+    const auto ridx = Common::FS::FileView::Map(ridx_path);
+    if (!ridx) {
         return false;
     }
-
-    Common::FS::IOFile rifa_file(rifa_path, Common::FS::FileAccessMode::Read);
-    if (!rifa_file.IsOpen()) {
+    const auto rifa = Common::FS::FileView::Map(rifa_path);
+    if (!rifa) {
         return false;
     }
-
-    const u64 ridxSize = ridx_file.GetSize();
-    ASSERT_MSG(ridxSize != 0, "RIDX file at {} is empty!", ridx_path.string());
-    std::vector<u8> ridx(ridxSize);
-    ridx_file.Seek(0);
-    ridx_file.Read(ridx);
-    ridx_file.Close();
-
-    const u64 rifaSize = rifa_file.GetSize();
-    ASSERT_MSG(rifaSize != 0, "RIFA file at {} is empty!", rifa_path.string());
-    std::vector<u8> rifa(rifaSize);
-    rifa_file.Seek(0);
-    rifa_file.Read(rifa);
-    rifa_file.Close();
-
-    return Open(ridx, rifa);
+    ASSERT_MSG(!ridx->empty(), "RIDX file at {} is empty!", ridx_path.string());
+    ASSERT_MSG(!rifa->empty(), "RIFA file at {} is empty!", rifa_path.string());
+    return Open(ridx->Bytes(), rifa->Bytes());
 }
 
-bool RIF::Open(const std::vector<u8>& ridx_buffer, const std::vector<u8>& rifa_buffer) {
+bool RIF::Open(std::span<const u8> ridx_buffer, std::span<const u8> rifa_buffer) {
     const u8* ridx_data = ridx_buffer.data();
     const u8* rifa_data = rifa_buffer.data();
 

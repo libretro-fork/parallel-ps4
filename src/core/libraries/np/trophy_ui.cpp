@@ -4,7 +4,6 @@
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
-#include <fstream>
 #include <mutex>
 #include <cmrc/cmrc.hpp>
 #include <fmt/format.h>
@@ -15,6 +14,7 @@
 #define MINIMP3_IMPLEMENTATION
 
 #include "common/audio_file.h"
+#include "common/io_file.h"
 #include "common/logging/formatter.h"
 #include "common/logging/log.h"
 #include "common/path_util.h"
@@ -83,9 +83,9 @@ void PreloadTrophySound() {
     const auto mp3_path = dir / "trophy.mp3";
     const auto wav_path = dir / "trophy.wav";
     if (fs::exists(mp3_path)) {
-        const auto bytes = Common::AudioFile::ReadWhole(mp3_path);
+        const auto bytes = Common::FS::FileView::Map(mp3_path);
         Common::AudioFile::Pcm pcm;
-        if (Common::AudioFile::DecodeMp3(bytes.data(), bytes.size(), pcm) &&
+        if (bytes && Common::AudioFile::DecodeMp3(bytes->data(), bytes->size(), pcm) &&
             (pcm.channels == 1 || pcm.channels == 2)) {
             ResampleTrophySound(pcm.Data(), pcm.Frames(), pcm.channels, pcm.hz);
         } else {
@@ -99,8 +99,8 @@ void PreloadTrophySound() {
     u32 channels = 0;
     u32 hz = 0;
     if (fs::exists(wav_path)) {
-        const auto bytes = Common::AudioFile::ReadWhole(wav_path);
-        if (ParseWav(bytes.data(), bytes.size(), &samples, &frames, &channels, &hz)) {
+        const auto bytes = Common::FS::FileView::Map(wav_path);
+        if (bytes && ParseWav(bytes->data(), bytes->size(), &samples, &frames, &channels, &hz)) {
             ResampleTrophySound(samples, frames, channels, hz);
         } else {
             LOG_ERROR(Lib_NpTrophy, "The custom trophy sound {} is not 16-bit PCM",
@@ -158,22 +158,14 @@ TrophyUI::TrophyUI(const std::filesystem::path& trophyIconPath, const std::strin
         customPath = (CustomTrophy_Dir / "bronze.png").string();
     }
 
-    std::vector<u8> imgdata;
-    auto resource = cmrc::res::get_filesystem();
     if (!customPath.empty()) {
-        std::ifstream file(customPath, std::ios::binary);
-        if (file) {
-            imgdata = std::vector<u8>(std::istreambuf_iterator<char>(file),
-                                      std::istreambuf_iterator<char>());
-        } else {
-            LOG_ERROR(Lib_NpTrophy, "Could not open custom file for trophy in {}", customPath);
-        }
+        trophy_type_icon = RefCountedTexture::DecodePngFile(customPath);
     } else {
-        auto file = resource.open(pathString);
-        imgdata = std::vector<u8>(file.begin(), file.end());
+        // Embedded in the core: lent, not copied
+        auto file = cmrc::res::get_filesystem().open(pathString);
+        trophy_type_icon = RefCountedTexture::DecodePngTexture(
+            Common::FS::FileView::Borrow({reinterpret_cast<const u8*>(file.begin()), file.size()}));
     }
-
-    trophy_type_icon = RefCountedTexture::DecodePngTexture(imgdata);
 
     AddLayer(this);
 

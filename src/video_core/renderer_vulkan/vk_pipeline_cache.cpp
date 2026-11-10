@@ -667,11 +667,15 @@ vk::ShaderModule PipelineCache::CompileModule(Shader::Info& info, Shader::Runtim
 
     vk::ShaderModule module;
 
-    auto patch = GetShaderPatch(info.pgm_hash, info.hw_stage, perm_idx, "spv");
-    const bool is_patched = patch && emu_settings_get_patch_shaders();
+    const auto patch_file = GetShaderPatch(info.pgm_hash, info.hw_stage, perm_idx, "spv");
+    const std::span<const u32> patch =
+        patch_file ? std::span<const u32>{reinterpret_cast<const u32*>(patch_file->data()),
+                                          patch_file->size() / sizeof(u32)}
+                   : std::span<const u32>{};
+    const bool is_patched = !patch.empty() && emu_settings_get_patch_shaders();
     if (is_patched) {
         LOG_INFO(Loader, "Loaded patch for {} shader {:#x}", info.hw_stage, info.pgm_hash);
-        module = CompileSPV(*patch, instance.GetDevice());
+        module = CompileSPV(patch, instance.GetDevice());
     } else {
         module = CompileSPV(spv, instance.GetDevice());
     }
@@ -681,8 +685,7 @@ vk::ShaderModule PipelineCache::CompileModule(Shader::Info& info, Shader::Runtim
     const auto name = GetShaderName(info.hw_stage, info.pgm_hash, perm_idx);
     Vulkan::SetObjectName(instance.GetDevice(), module, name);
     if (emu_settings_get_shader_collect()) {
-        DebugState.CollectShader(name, info.sw_stage, module, spv, code,
-                                 patch ? *patch : std::span<const u32>{}, is_patched);
+        DebugState.CollectShader(name, info.sw_stage, module, spv, code, patch, is_patched);
     }
     return module;
 }
@@ -798,9 +801,9 @@ void PipelineCache::DumpShader(std::span<const u32> code, u64 hash, Shader::HwSt
     file.WriteSpan(code);
 }
 
-std::optional<std::vector<u32>> PipelineCache::GetShaderPatch(u64 hash, Shader::HwStage stage,
-                                                              size_t perm_idx,
-                                                              std::string_view ext) {
+std::optional<Common::FS::FileView> PipelineCache::GetShaderPatch(u64 hash, Shader::HwStage stage,
+                                                                  size_t perm_idx,
+                                                                  std::string_view ext) {
 
     using namespace Common::FS;
     const auto patch_dir = GetUserPath(PathType::ShaderDir) / "patch";
@@ -812,9 +815,7 @@ std::optional<std::vector<u32>> PipelineCache::GetShaderPatch(u64 hash, Shader::
     if (!std::filesystem::exists(filepath)) {
         return {};
     }
-    const auto file = IOFile{patch_dir / filename, FileAccessMode::Read};
-    std::vector<u32> code(file.GetSize() / sizeof(u32));
-    file.Read(code);
-    return code;
+    // Mapped where it lies: a mapping starts on a page, so the words are aligned
+    return FileView::Map(filepath);
 }
 } // namespace Vulkan

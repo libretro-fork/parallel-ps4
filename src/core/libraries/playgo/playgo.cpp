@@ -253,7 +253,7 @@ s32 PS4_SYSV_ABI scePlayGoInitialize(OrbisPlayGoInitParams* param) {
 
     auto* mnt = Common::Singleton<Core::FileSys::MntPoints>::Instance();
     if (auto bytes = mnt->ReadFile("/app0/sce_sys/playgo-chunk.dat")) {
-        if (!playgo->Open(std::span<const u8>{*bytes})) {
+        if (!playgo->Open(bytes->Bytes())) {
             LOG_WARNING(Lib_PlayGo, "Could not parse PlayGo file");
         }
     } else {

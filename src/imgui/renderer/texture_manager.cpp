@@ -38,6 +38,10 @@ RefCountedTexture::RefCountedTexture(Inner* inner) : inner(inner) {
 }
 
 RefCountedTexture RefCountedTexture::DecodePngTexture(std::vector<u8> data) {
+    return DecodePngTexture(Common::FS::FileView{std::move(data)});
+}
+
+RefCountedTexture RefCountedTexture::DecodePngTexture(Common::FS::FileView data) {
     const auto core = new Inner;
     Core::TextureManager::DecodePngTexture(std::move(data), core);
     return RefCountedTexture(core);
@@ -103,7 +107,8 @@ RefCountedTexture::operator bool() const {
 
 struct Job {
     Inner* core;
-    std::vector<u8> data;
+    /// The PNG, lent or kept; a file is mapped by the worker
+    Common::FS::FileView data;
     std::filesystem::path path;
 };
 
@@ -159,16 +164,13 @@ void WorkerLoop() {
                 continue;
             }
 
-            if (!path.empty()) { // Decode PNG from file
-                Common::FS::IOFile file(path, Common::FS::FileAccessMode::Read);
-                if (!file.IsOpen()) {
+            if (!path.empty()) { // Decode PNG from file, mapped where it lies
+                auto mapped = Common::FS::FileView::Map(path);
+                if (!mapped) {
                     LOG_ERROR(ImGui, "Failed to open PNG file: {}", path.string());
                     continue;
                 }
-                png_raw.resize(file.GetSize());
-                file.Seek(0);
-                file.ReadRaw<u8>(png_raw.data(), png_raw.size());
-                file.Close();
+                png_raw = std::move(*mapped);
             }
 
             // Decoded with libretro-common's rpng as R,G,B,A bytes, the texture's own format.
@@ -177,7 +179,9 @@ void WorkerLoop() {
             unsigned height = 0;
             int ret = IMAGE_PROCESS_ERROR;
             rpng_t* rpng = rpng_alloc();
-            if (rpng && rpng_set_buf_ptr(rpng, png_raw.data(), png_raw.size()) &&
+            if (rpng &&
+                // rpng only reads the bytes
+                rpng_set_buf_ptr(rpng, const_cast<u8*>(png_raw.data()), png_raw.size()) &&
                 rpng_start(rpng)) {
                 while (rpng_iterate_image(rpng)) {
                 }
@@ -220,7 +224,7 @@ void StopWorker() {
     g_worker_cv.notify_one();
 }
 
-void DecodePngTexture(std::vector<u8> data, Inner* core) {
+void DecodePngTexture(Common::FS::FileView data, Inner* core) {
     ++core->count;
     Job job{
         .core = core,

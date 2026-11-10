@@ -143,14 +143,13 @@ bool PipelineCache::LoadComputePipeline(Serialization::Archive& ar) {
     ComputePipeline::SerializationSupport sdata{};
     sdata.Deserialize(ar);
 
-    std::vector<u8> meta_blob;
-    Storage::DataBase::Instance().Load(Storage::BlobType::ShaderMeta,
-                                       fmt::format("{:#018x}", compute_key.value), meta_blob);
-    if (meta_blob.empty()) {
+    const auto meta_blob = Storage::DataBase::Instance().Load(
+        Storage::BlobType::ShaderMeta, fmt::format("{:#018x}", compute_key.value));
+    if (!meta_blob || meta_blob->empty()) {
         return false;
     }
 
-    Serialization::Archive meta_ar{std::move(meta_blob)};
+    Serialization::Archive meta_ar{meta_blob->Bytes()};
 
     if (!LoadPipelineStage(meta_ar, 0)) {
         return false;
@@ -215,14 +214,13 @@ bool PipelineCache::LoadGraphicsPipeline(Serialization::Archive& ar) {
             continue;
         }
 
-        std::vector<u8> meta_blob;
-        Storage::DataBase::Instance().Load(Storage::BlobType::ShaderMeta,
-                                           fmt::format("{:#018x}", hash), meta_blob);
-        if (meta_blob.empty()) {
+        const auto meta_blob = Storage::DataBase::Instance().Load(Storage::BlobType::ShaderMeta,
+                                                                  fmt::format("{:#018x}", hash));
+        if (!meta_blob || meta_blob->empty()) {
             return false;
         }
 
-        Serialization::Archive meta_ar{std::move(meta_blob)};
+        Serialization::Archive meta_ar{meta_blob->Bytes()};
 
         if (!LoadPipelineStage(meta_ar, stage_idx)) {
             return false;
@@ -252,13 +250,15 @@ bool PipelineCache::LoadPipelineStage(Serialization::Archive& ar, size_t stage) 
         return false;
     }
 
-    std::vector<u32> spv{};
-    Storage::DataBase::Instance().Load(Storage::BlobType::ShaderBinary,
-                                       fmt::format("{:#018x}_{}", program->info.pgm_hash, perm_idx),
-                                       spv);
-    if (spv.empty()) {
+    // Mapped where it lies: a mapping starts on a page, so the words are aligned
+    const auto spv_blob = Storage::DataBase::Instance().Load(
+        Storage::BlobType::ShaderBinary,
+        fmt::format("{:#018x}_{}", program->info.pgm_hash, perm_idx));
+    if (!spv_blob || spv_blob->size() < sizeof(u32)) {
         return false;
     }
+    const std::span<const u32> spv{reinterpret_cast<const u32*>(spv_blob->data()),
+                                   spv_blob->size() / sizeof(u32)};
 
     // Permutation hash depends on shader variation index. To prevent collisions, we need insert it
     // at the exact position rather than append
@@ -308,25 +308,25 @@ void PipelineCache::WarmUp() {
     Storage::DataBase::Instance().Open();
 
     // Check if cache is compatible
-    std::vector<u8> profile_data{};
-    Storage::DataBase::Instance().Load(Storage::BlobType::ShaderProfile, "profile", profile_data);
-    if (profile_data.empty()) {
-        profile_data.resize(sizeof(profile));
-        std::memcpy(profile_data.data(), &profile, sizeof(profile));
+    const auto profile_data =
+        Storage::DataBase::Instance().Load(Storage::BlobType::ShaderProfile, "profile");
+    if (!profile_data || profile_data->empty()) {
+        std::vector<u8> new_profile(sizeof(profile));
+        std::memcpy(new_profile.data(), &profile, sizeof(profile));
         Storage::DataBase::Instance().Save(Storage::BlobType::ShaderProfile, "profile",
-                                           std::move(profile_data));
+                                           std::move(new_profile));
         return;
     }
-    if (profile_data.size() != sizeof(Shader::Profile)) {
+    if (profile_data->size() != sizeof(Shader::Profile)) {
         LOG_WARNING(Render,
                     "Pipeline cache profile has unexpected size ({} != {}). Ignoring the cache",
-                    profile_data.size(), sizeof(Shader::Profile));
+                    profile_data->size(), sizeof(Shader::Profile));
         Storage::DataBase::Instance().Close();
         return;
     }
 
     Shader::Profile cached_profile{};
-    std::memcpy(&cached_profile, profile_data.data(), sizeof(cached_profile));
+    std::memcpy(&cached_profile, profile_data->data(), sizeof(cached_profile));
     if (cached_profile != profile) {
         LOG_WARNING(Render,
                     "Pipeline cache isn't compatible with current system. Ignoring the cache");
@@ -338,10 +338,10 @@ void PipelineCache::WarmUp() {
     u32 num_total_pipelines{};
 
     Storage::DataBase::Instance().ForEachBlob(
-        Storage::BlobType::PipelineKey, [&](std::vector<u8>&& data) {
+        Storage::BlobType::PipelineKey, [&](std::span<const u8> data) {
             ++num_total_pipelines;
 
-            Serialization::Archive ar{std::move(data)};
+            Serialization::Archive ar{data};
             Serialization::Reader pldata{ar};
 
             u32 version{};
@@ -433,7 +433,7 @@ bool PersistentSrtInfo::Deserialize(Serialization::Archive& ar) {
     srt.Read(this, sizeof(*this));
 
     if (walker_func_size) {
-        walker_func = RegisterWalkerCode(ar.CurrPtr(), walker_func_size);
+        walker_func = RegisterWalkerCode(ar.ReadPtr(), walker_func_size);
         ar.Advance(walker_func_size);
     }
 

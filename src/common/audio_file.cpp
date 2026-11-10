@@ -9,7 +9,6 @@
 #include <formats/rmp4_audio.h>
 
 #include "common/audio_file.h"
-#include "common/io_file.h"
 
 namespace Common::AudioFile {
 
@@ -35,19 +34,6 @@ bool Finish(Pcm& out) {
     return true;
 }
 } // namespace
-
-std::vector<u8> ReadWhole(const std::filesystem::path& path) {
-    std::vector<u8> bytes;
-    Common::FS::IOFile file(path, Common::FS::FileAccessMode::Read);
-    if (!file.IsOpen()) {
-        return bytes;
-    }
-    bytes.resize(file.GetSize());
-    if (file.ReadRaw<u8>(bytes.data(), bytes.size()) != bytes.size()) {
-        bytes.clear();
-    }
-    return bytes;
-}
 
 bool DecodeMp3(const u8* data, size_t size, Pcm& out) {
     rmp3 mp3;

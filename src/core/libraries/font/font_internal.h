@@ -13,7 +13,6 @@
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
-#include <fstream>
 #include <initializer_list>
 #include <iterator>
 #include <limits>
@@ -32,6 +31,7 @@
 
 #include <fmt/format.h>
 
+#include "common/io_file.h"
 #include "common/logging/log.h"
 #include "common/singleton.h"
 #include "core/file_sys/fs.h"
@@ -46,6 +46,10 @@ struct FontHandleOpaqueNative;
 }
 
 namespace Libraries::Font::Internal {
+
+/// A font file's bytes, which a face reads in place: mapped where they lie, decoded (a built-in
+/// font, an archive entry), or lent (the game's own memory). Shared by the faces open on them.
+using FontBlob = std::shared_ptr<const Common::FS::FileView>;
 
 struct FontLibOpaque;
 struct OrbisFontRenderer_;
@@ -271,14 +275,15 @@ struct FontState {
         float scale_factor = 1.0f;
         s32 shift_value = 0;
         std::filesystem::path path;
-        std::shared_ptr<std::vector<unsigned char>> bytes;
+        FontBlob bytes;
         FaceHandle ft_face = nullptr;
         bool ready = false;
     };
     std::vector<SystemFallbackFace> system_fallback_faces;
     Libraries::Font::OrbisFontLib library = nullptr;
     bool ext_face_ready = false;
-    std::vector<unsigned char> ext_face_data;
+    /// The bytes ext_ft_face reads in place
+    FontBlob ext_face_data;
     FaceHandle ext_ft_face = nullptr;
     float ext_scale_for_height = 0.0f;
     int ext_ascent = 0, ext_descent = 0, ext_lineGap = 0;
@@ -641,7 +646,7 @@ struct SystemFontDefinition {
 struct FontSetCache {
     bool loaded = false;
     bool available = false;
-    std::vector<unsigned char> bytes;
+    FontBlob bytes;
     std::filesystem::path path;
 };
 
@@ -861,9 +866,10 @@ std::optional<std::filesystem::path> ResolveKnownSysFontAlias(
     const std::filesystem::path& sysfonts_dir, std::string_view ps4_filename);
 void LogFontOpenParams(const Libraries::Font::OrbisFontOpenParams* params);
 std::filesystem::path ResolveGuestPath(const char* guest_path);
-bool LoadGuestFileBytes(const std::filesystem::path& host_path,
-                        std::vector<unsigned char>& out_bytes);
-bool LoadGuestPathBytes(const char* guest_path, std::vector<unsigned char>& out_bytes);
+/// A host file's bytes, mapped where they lie.
+bool LoadGuestFileBytes(const std::filesystem::path& host_path, FontBlob& out_bytes);
+/// A guest (or, not starting with '/', host) file's bytes, mapped or decoded out of an archive.
+bool LoadGuestPathBytes(const char* guest_path, FontBlob& out_bytes);
 FaceMetrics LoadFaceMetrics(FaceHandle face);
 void PopulateStateMetrics(FontState& st, const FaceMetrics& m);
 float ComputeSysfontScaleFactor(FaceHandle face, int units_per_em);
@@ -903,15 +909,14 @@ const GlyphEntry* GetGlyphEntry(FontState& st, Libraries::Font::OrbisFontHandle 
 const SystemFontDefinition* FindSystemFontDefinition(u32 font_set_type);
 BuiltinSystemFontSelection BuildBuiltinSystemFontSelection(u32 font_set_type);
 bool IsBuiltinFontPath(const std::filesystem::path& path);
-std::shared_ptr<std::vector<unsigned char>> LoadBuiltinFontBytesShared(
-    const std::filesystem::path& path, u32* out_subfont_index);
+FontBlob LoadBuiltinFontBytesShared(const std::filesystem::path& path, u32* out_subfont_index);
 std::filesystem::path GetSysFontBaseDir();
 std::filesystem::path ResolveSystemFontPath(u32 font_set_type);
 const struct FontSetCache* EnsureFontSetCache(u32 font_set_type);
-bool HasSfntTables(const std::vector<unsigned char>& bytes);
-bool LoadFontFileWithSubfont(const std::filesystem::path& path,
-                             std::vector<unsigned char>& out_bytes, u32& out_subfont_index);
-bool LoadFontFile(const std::filesystem::path& path, std::vector<unsigned char>& out_bytes);
+bool HasSfntTables(std::span<const u8> bytes);
+bool LoadFontFileWithSubfont(const std::filesystem::path& path, FontBlob& out_bytes,
+                             u32& out_subfont_index);
+bool LoadFontFile(const std::filesystem::path& path, FontBlob& out_bytes);
 bool AddSystemFallbackFace(FontState& st, const std::filesystem::path& path, u32 subfont_index);
 void AddBuiltinFallbackFaces(FontState& st, u32 font_set_type, u32 subfont_index,
                              std::string* preferred_latin_name_lower);

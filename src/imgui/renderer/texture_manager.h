@@ -21,7 +21,7 @@ void StartWorker();
 
 void StopWorker();
 
-void DecodePngTexture(std::vector<u8> data, Inner* core);
+void DecodePngTexture(Common::FS::FileView data, Inner* core);
 
 void DecodePngFile(std::filesystem::path path, Inner* core);
 

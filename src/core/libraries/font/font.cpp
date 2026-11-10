@@ -13,7 +13,6 @@
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
-#include <fstream>
 #include <limits>
 #include <memory>
 #include <mutex>
@@ -3190,9 +3189,9 @@ s32 PS4_SYSV_ABI sceFontOpenFontFile(OrbisFontLib library, const char* guest_pat
 
     ReleaseLibraryLock(lib, prev_lib_lock);
 
-    std::vector<unsigned char> file_bytes;
+    Internal::FontBlob file_bytes;
     if (LoadGuestPathBytes(guest_path, file_bytes) &&
-        file_bytes.size() <= std::numeric_limits<u32>::max()) {
+        file_bytes->size() <= std::numeric_limits<u32>::max()) {
         auto& st = Internal::GetState(handle);
         Internal::DestroyFace(st.ext_ft_face);
         for (auto& fb : st.system_fallback_faces) {
@@ -3205,8 +3204,8 @@ s32 PS4_SYSV_ABI sceFontOpenFontFile(OrbisFontLib library, const char* guest_pat
         st.ext_face_data = std::move(file_bytes);
 
         const u32 chosen_index = open_detail ? open_detail->subfont_index : 0u;
-        st.ext_ft_face = Internal::CreateFaceFromBytes(st.ext_face_data.data(),
-                                                       st.ext_face_data.size(), chosen_index);
+        st.ext_ft_face = Internal::CreateFaceFromBytes(st.ext_face_data->data(),
+                                                       st.ext_face_data->size(), chosen_index);
         if (st.ext_ft_face) {
             st.ext_cache.clear();
             st.scratch.clear();
@@ -3578,9 +3577,9 @@ s32 PS4_SYSV_ABI sceFontOpenFontInstance(OrbisFontHandle fontHandle, OrbisFontHa
         dst_state.ext_face_ready = false;
         dst_state.ext_ft_face = nullptr;
 
-        if (!dst_state.ext_face_data.empty()) {
+        if (dst_state.ext_face_data && !dst_state.ext_face_data->empty()) {
             dst_state.ext_ft_face = Internal::CreateFaceFromBytes(
-                dst_state.ext_face_data.data(), dst_state.ext_face_data.size(), subfont_index);
+                dst_state.ext_face_data->data(), dst_state.ext_face_data->size(), subfont_index);
         }
         if (dst_state.ext_ft_face) {
             const Internal::FaceMetrics m = Internal::LoadFaceMetrics(dst_state.ext_ft_face);
@@ -4006,14 +4005,13 @@ s32 PS4_SYSV_ABI sceFontOpenFontMemory(OrbisFontLib library, const void* fontAdd
     st.library = library;
     st.font_set_type = 0;
     st.system_font_path.clear();
-    {
-        const u8* src = static_cast<const u8*>(fontAddress);
-        st.ext_face_data.assign(src, src + fontSize);
-    }
+    // The game's own memory, read in place: a game keeps a font's memory until it closes the font
+    st.ext_face_data = std::make_shared<const Common::FS::FileView>(Common::FS::FileView::Borrow(
+        {static_cast<const u8*>(fontAddress), static_cast<size_t>(fontSize)}));
 
     const u32 chosen_index = open_params ? open_params->subfont_index : 0u;
-    st.ext_ft_face = Internal::CreateFaceFromBytes(st.ext_face_data.data(), st.ext_face_data.size(),
-                                                   chosen_index);
+    st.ext_ft_face = Internal::CreateFaceFromBytes(st.ext_face_data->data(),
+                                                   st.ext_face_data->size(), chosen_index);
 
     if (st.ext_ft_face) {
         st.ext_cache.clear();
@@ -4113,7 +4111,7 @@ s32 PS4_SYSV_ABI sceFontOpenFontSet(OrbisFontLib library, u32 fontSetType, u32 o
         }
         LOG_INFO(Lib_Font, "OpenFontSet: stage=resolved_primary_path");
 
-        std::vector<unsigned char> primary_bytes;
+        Internal::FontBlob primary_bytes;
         u32 primary_face_index = sub_font_index;
         if (!Internal::LoadFontFileWithSubfont(primary_path, primary_bytes, primary_face_index)) {
             if (!using_builtin_primary && !builtin_selection.primary_path.empty() &&
@@ -4229,8 +4227,8 @@ s32 PS4_SYSV_ABI sceFontOpenFontSet(OrbisFontLib library, u32 fontSetType, u32 o
         st.system_font_scale_factor = 1.0f;
         st.system_font_shift_value = 0;
         st.ext_face_data = std::move(primary_bytes);
-        st.ext_ft_face = Internal::CreateFaceFromBytes(st.ext_face_data.data(),
-                                                       st.ext_face_data.size(), primary_face_index);
+        st.ext_ft_face = Internal::CreateFaceFromBytes(
+            st.ext_face_data->data(), st.ext_face_data->size(), primary_face_index);
         if (!st.ext_ft_face) {
             LOG_ERROR(Lib_Font, "FONT_OPEN_FAILED");
             return cleanup_handle_for_error(ORBIS_FONT_ERROR_FONT_OPEN_FAILED);

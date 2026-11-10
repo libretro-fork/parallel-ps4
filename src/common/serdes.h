@@ -8,6 +8,7 @@
 
 #include <cstddef>
 #include <cstring>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -21,49 +22,75 @@ concept Container = requires(T t) {
     { t.size() } -> std::convertible_to<std::size_t>;
 };
 
+/// Bytes to serialize into, owned, or to deserialize from, owned or lent (a mapped cache file
+/// read where it lies).
 struct Archive {
     void Alloc(size_t size) {
         container.resize(size);
+        Own();
     }
 
     void Grow(size_t size) {
         container.resize(container.size() + size);
+        Own();
     }
 
     void Merge(const Archive& ar) {
-        container.insert(container.end(), ar.container.cbegin(), ar.container.cend());
+        container.insert(container.end(), ar.base, ar.base + ar.size);
+        Own();
         offset = container.size();
     }
 
     [[nodiscard]] size_t SizeBytes() const {
-        return container.size();
+        return size;
     }
 
     u8* CurrPtr() {
+        ASSERT_MSG(base == container.data(), "Writing into lent bytes");
         return container.data() + offset;
     }
 
-    void Advance(size_t size) {
-        ASSERT_MSG(offset + size <= container.size(),
+    const u8* ReadPtr() const {
+        return base + offset;
+    }
+
+    void Advance(size_t bytes) {
+        ASSERT_MSG(offset + bytes <= size,
                    "Invalid or corrupted deserialization container/shader cache");
-        offset += size;
+        offset += bytes;
     }
 
     std::vector<u8>&& TakeOff() {
         offset = 0;
+        base = nullptr;
+        size = 0;
         return std::move(container);
     }
 
     [[nodiscard]] bool IsEoS() const {
-        return offset >= container.size();
+        return offset >= size;
     }
 
     Archive() = default;
-    explicit Archive(std::vector<u8>&& v) : container{v} {}
+    explicit Archive(std::vector<u8>&& v) : container{std::move(v)} {
+        Own();
+    }
+    /// Reads @lent in place; it must outlive the archive.
+    explicit Archive(std::span<const u8> lent) : base{lent.data()}, size{lent.size()} {}
+
+    Archive(const Archive&) = delete;
+    Archive& operator=(const Archive&) = delete;
 
 private:
+    void Own() {
+        base = container.data();
+        size = container.size();
+    }
+
     u32 offset{};
     std::vector<u8> container{};
+    const u8* base{};
+    size_t size{};
 
     friend struct Writer;
     friend struct Reader;
@@ -72,7 +99,7 @@ private:
 struct Writer {
     template <typename T>
     void Write(const T* ptr, size_t size) {
-        if (ar.offset + size >= ar.container.size()) {
+        if (ar.offset + size >= ar.size) {
             ar.Grow(size);
         }
         std::memcpy(ar.CurrPtr(), reinterpret_cast<const void*>(ptr), size);
@@ -107,9 +134,9 @@ struct Writer {
 struct Reader {
     template <typename T>
     void Read(T* ptr, size_t size) {
-        ASSERT_MSG(ar.offset + size <= ar.container.size(),
+        ASSERT_MSG(ar.offset + size <= ar.size,
                    "Invalid or corrupted deserialization container/shader cache");
-        std::memcpy(reinterpret_cast<void*>(ptr), ar.CurrPtr(), size);
+        std::memcpy(reinterpret_cast<void*>(ptr), ar.ReadPtr(), size);
         ar.Advance(size);
     }
 

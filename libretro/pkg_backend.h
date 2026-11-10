@@ -88,7 +88,7 @@ public:
         return pkg_path;
     }
 
-    std::optional<std::vector<u8>> ReadFile(std::string_view rel_path) const override;
+    std::optional<Common::FS::FileView> ReadFile(std::string_view rel_path) const override;
 
 private:
     std::filesystem::path pkg_path;

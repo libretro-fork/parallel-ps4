@@ -3,66 +3,47 @@
 
 #pragma once
 
-#include <cstdio>
-#include <cstring>
 #include <filesystem>
 #include <optional>
 #include <span>
+#include <string>
+#include <string_view>
 #include <type_traits>
+#include <vector>
 
-#include "common/assert.h"
 #include "common/concepts.h"
 #include "common/types.h"
 #include "enum.h"
 
+// libretro-common's file stream (streams/file_stream.h)
+struct RFILE;
+
 namespace Common::FS {
 
 enum class FileAccessMode {
-    /**
-     * If the file at path exists, it opens the file for reading.
-     * If the file at path does not exist, it fails to open the file.
-     */
+    /// Opens an existing file for reading.
     Read = 1 << 0,
-    /**
-     * If the file at path exists, it opens the file for writing.
-     * If the file at path does not exist, it fails to open the file.
-     */
+    /// Opens an existing file for writing, keeping its contents.
     Write = 1 << 1,
-    /**
-     * If the file at path exists, it opens the file for reading and writing.
-     * If the file at path does not exist, it fails to open the file.
-     */
+    /// Opens an existing file for reading and writing, keeping its contents.
     ReadWrite = Read | Write,
-    /**
-     * If the file at path exists, it opens the file for appending.
-     * If the file at path does not exist, it creates and opens a new empty file for appending.
-     */
+    /// Opens a file for appending, creating it if it does not exist: every write goes to the end.
     Append = 1 << 2,
-    /**
-     * If the file at path exists, it opens the file for both reading and appending.
-     * If the file at path does not exist, it creates and opens a new empty file for both
-     * reading and appending.
-     */
+    /// As Append, and the file can be read.
     ReadAppend = Read | Append,
-    /**
-     * If the file at path exists, the existing contents of the file are erased.
-     * The empty file is then opened for writing.
-     * If the file at path does not exist, it creates and opens a new empty file for writing.
-     */
+    /// Creates a file, or empties an existing one, for writing.
     Create = 1 << 3,
 };
 DECLARE_ENUM_FLAG_OPERATORS(FileAccessMode);
 
-enum class FileType {
-    BinaryFile,
-    TextFile,
-};
-
-enum class FileShareFlag {
-    ShareNone,      // Provides exclusive access to the file.
-    ShareReadOnly,  // Provides read only shared access to the file.
-    ShareWriteOnly, // Provides write only shared access to the file.
-    ShareReadWrite, // Provides read and write shared access to the file.
+/// How a file will be used, so the file stream can serve it the cheapest way.
+enum class FileHint {
+    None,
+    /// Read where it lies: a read-only file is memory mapped, and Mapped() and View() lend its
+    /// bytes in place instead of copying them out.
+    Mapped,
+    /// Read or written front to back once: no stdio buffer between the caller and the file.
+    Sequential,
 };
 
 enum class SeekOrigin : u32 {
@@ -93,20 +74,17 @@ struct FileInfo {
 
 [[nodiscard]] std::optional<FileInfo> GetFileInfo(const std::filesystem::path& path);
 
+/// A file, read and written through libretro-common's file stream (RFILE).
 class IOFile final {
 public:
     IOFile();
 
-    explicit IOFile(const std::string& path, FileAccessMode mode,
-                    FileType type = FileType::BinaryFile,
-                    FileShareFlag flag = FileShareFlag::ShareReadOnly);
-
-    explicit IOFile(std::string_view path, FileAccessMode mode,
-                    FileType type = FileType::BinaryFile,
-                    FileShareFlag flag = FileShareFlag::ShareReadOnly);
     explicit IOFile(const std::filesystem::path& path, FileAccessMode mode,
-                    FileType type = FileType::BinaryFile,
-                    FileShareFlag flag = FileShareFlag::ShareReadOnly);
+                    FileHint hint = FileHint::None);
+    explicit IOFile(const std::string& path, FileAccessMode mode, FileHint hint = FileHint::None)
+        : IOFile(std::filesystem::path(path), mode, hint) {}
+    explicit IOFile(std::string_view path, FileAccessMode mode, FileHint hint = FileHint::None)
+        : IOFile(std::filesystem::path(path), mode, hint) {}
 
     ~IOFile();
 
@@ -124,10 +102,6 @@ public:
         return file_access_mode;
     }
 
-    FileType GetType() const {
-        return file_type;
-    }
-
     bool IsOpen() const {
         return file != nullptr;
     }
@@ -137,11 +111,13 @@ public:
                file_access_mode == FileAccessMode::Write;
     }
 
+    /// The OS handle a guest mapping of the file is made from: a file mapping or file handle
+    /// on Windows, a descriptor elsewhere.
     uintptr_t GetFileMapping();
 
+    /// 0 on success, else an errno value.
     int Open(const std::filesystem::path& path, FileAccessMode mode,
-             FileType type = FileType::BinaryFile,
-             FileShareFlag flag = FileShareFlag::ShareReadOnly);
+             FileHint hint = FileHint::None);
     void Close();
 
     void Unlink();
@@ -155,6 +131,18 @@ public:
 
     bool Seek(s64 offset, SeekOrigin origin = SeekOrigin::SetOrigin) const;
     s64 Tell() const;
+
+    /// The whole file, lent in place, when it was opened with FileHint::Mapped and could be
+    /// mapped; empty otherwise. Valid until the file is closed.
+    std::span<const u8> Mapped() const;
+
+    /// Lends up to @len bytes at the file position in place (from the mapping or the stream's
+    /// read-ahead) and moves past them, as a read would. Returns the bytes lent, 0 at the end,
+    /// -1 when nothing can be lent there: read instead. Valid until the next call on the file.
+    s64 View(u64 len, const u8** ptr) const;
+
+    /// Asks the OS to start reading [offset, offset + len) ahead of use. Returns at once.
+    void Prefetch(u64 offset, u64 len) const;
 
     template <typename T>
     size_t Read(T& data) const {
@@ -184,93 +172,112 @@ public:
     template <typename T>
     size_t ReadSpan(std::span<T> data) const {
         static_assert(std::is_trivially_copyable_v<T>, "Data type must be trivially copyable.");
-
-        if (!IsOpen()) {
-            return 0;
-        }
-
         return ReadRaw<T>(data.data(), data.size());
     }
 
+    /// Reads @count elements of T into @data; returns the whole elements read.
     template <typename T>
-    size_t ReadRaw(void* data, size_t size) const {
-        u64 read = std::fread(data, sizeof(T), size, file);
-        ASSERT_MSG(std::ferror(file) == 0, "Failed to read file, error = {}", std::strerror(errno));
-        return read;
+    size_t ReadRaw(void* data, size_t count) const {
+        return ReadBytes(data, count * sizeof(T)) / sizeof(T);
     }
 
     template <typename T>
     size_t WriteSpan(std::span<const T> data) const {
         static_assert(std::is_trivially_copyable_v<T>, "Data type must be trivially copyable.");
-
-        if (!IsOpen()) {
-            return 0;
-        }
-
-        u64 written = std::fwrite(data.data(), sizeof(T), data.size(), file);
-        ASSERT_MSG(std::ferror(file) == 0, "Failed to write to file, error = {}",
-                   std::strerror(errno));
-        std::fflush(file);
-        return written;
+        return WriteRaw<T>(data.data(), data.size());
     }
 
     template <typename T>
     bool ReadObject(T& object) const {
         static_assert(std::is_trivially_copyable_v<T>, "Data type must be trivially copyable.");
         static_assert(!std::is_pointer_v<T>, "T must not be a pointer to an object.");
-
-        if (!IsOpen()) {
-            return false;
-        }
-
-        bool success = std::fread(&object, sizeof(T), 1, file) == 1;
-        ASSERT_MSG(std::ferror(file) == 0, "Failed to read file, error = {}", std::strerror(errno));
-        return success;
+        return ReadBytes(&object, sizeof(T)) == sizeof(T);
     }
 
+    /// Writes @count elements of T from @data; returns the whole elements written.
     template <typename T>
-    size_t WriteRaw(const void* data, size_t size) const {
-        u64 bytes = std::fwrite(data, sizeof(T), size, file);
-        ASSERT_MSG(std::ferror(file) == 0, "Failed to write to file, error = {}",
-                   std::strerror(errno));
-        std::fflush(file);
-        return bytes;
+    size_t WriteRaw(const void* data, size_t count) const {
+        return WriteBytes(data, count * sizeof(T)) / sizeof(T);
     }
 
     template <typename T>
     bool WriteObject(const T& object) const {
         static_assert(std::is_trivially_copyable_v<T>, "Data type must be trivially copyable.");
         static_assert(!std::is_pointer_v<T>, "T must not be a pointer to an object.");
-
-        if (!IsOpen()) {
-            return false;
-        }
-
-        u64 bytes = std::fwrite(&object, sizeof(T), 1, file) == 1;
-        ASSERT_MSG(std::ferror(file) == 0, "Failed to read file, error = {}", std::strerror(errno));
-        std::fflush(file);
-        return bytes;
+        return WriteBytes(&object, sizeof(T)) == sizeof(T);
     }
-
-    std::string ReadString(size_t length) const;
 
     size_t WriteString(std::span<const char> string) const {
         return WriteSpan(string);
     }
 
-    static size_t WriteBytes(const std::filesystem::path path, const auto& data) {
-        IOFile out(path, FileAccessMode::Create);
+    /// Writes @data to a new file at @path in one go; returns the elements written.
+    static size_t WriteBytes(const std::filesystem::path& path, const auto& data) {
+        IOFile out(path, FileAccessMode::Create, FileHint::Sequential);
         return out.Write(data);
     }
-    std::FILE* file = nullptr;
+
+    RFILE* Handle() const {
+        return file;
+    }
 
 private:
+    size_t ReadBytes(void* data, size_t size) const;
+    size_t WriteBytes(const void* data, size_t size) const;
+
+    RFILE* file = nullptr;
     std::filesystem::path file_path;
     FileAccessMode file_access_mode{};
-    FileType file_type{};
-
     uintptr_t file_mapping = 0;
 };
+
+/// A file's bytes, lent where they lie: a read-only mapping of a host file, or, for a source
+/// that cannot lend (an entry decompressed out of an archive), the buffer it was decoded into.
+class FileView {
+public:
+    FileView() = default;
+    /// Bytes with no file behind them, kept by the view.
+    explicit FileView(std::vector<u8>&& decoded) : owned{std::move(decoded)}, bytes{owned} {}
+
+    FileView(FileView&& other) noexcept;
+    FileView& operator=(FileView&& other) noexcept;
+    FileView(const FileView&) = delete;
+    FileView& operator=(const FileView&) = delete;
+
+    /// Maps the file at @path; nothing when it cannot be opened or mapped.
+    static std::optional<FileView> Map(const std::filesystem::path& path);
+
+    /// Lends @bytes, which must outlive the view (embedded resources, data kept for the session).
+    static FileView Borrow(std::span<const u8> bytes) {
+        FileView view;
+        view.bytes = bytes;
+        return view;
+    }
+
+    std::span<const u8> Bytes() const {
+        return bytes;
+    }
+    const u8* data() const {
+        return bytes.data();
+    }
+    size_t size() const {
+        return bytes.size();
+    }
+    bool empty() const {
+        return bytes.empty();
+    }
+    operator std::span<const u8>() const {
+        return bytes;
+    }
+
+private:
+    IOFile file;
+    std::vector<u8> owned;
+    std::span<const u8> bytes;
+};
+
+/// Copies the file at @from to @to through the VFS, which clones it where the file system can.
+bool CopyFile(const std::filesystem::path& from, const std::filesystem::path& to);
 
 u64 GetDirectorySize(const std::filesystem::path& path);
 

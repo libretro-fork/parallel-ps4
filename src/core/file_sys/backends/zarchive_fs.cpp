@@ -332,7 +332,7 @@ std::unique_ptr<IDirectory> ZArchiveBackend::OpenDir(std::string_view rel_path) 
     return std::make_unique<ZArchiveDirectory>(std::move(*entries));
 }
 
-std::optional<std::vector<u8>> ZArchiveBackend::ReadFile(std::string_view rel_path) const {
+std::optional<Common::FS::FileView> ZArchiveBackend::ReadFile(std::string_view rel_path) const {
     zar_file_t file;
     if (!IsOpen() || !m_archive->LookUp(rel_path, file) || file.dir) {
         return std::nullopt;
@@ -342,7 +342,8 @@ std::optional<std::vector<u8>> ZArchiveBackend::ReadFile(std::string_view rel_pa
         LOG_ERROR(Common_Filesystem, "Short read from ZArchive entry: {}", rel_path);
         return std::nullopt;
     }
-    return data;
+    // Decompressed into its own buffer, which the view keeps
+    return Common::FS::FileView{std::move(data)};
 }
 
 } // namespace Core::FileSys

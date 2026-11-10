@@ -37,11 +37,13 @@
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
-#include <fstream>
 #include <string>
 #include <system_error>
 #include <vector>
 
+#include <streams/file_stream.h>
+
+#include "common/io_file.h"
 #include "common/scm_rev.h"
 #include "core/libraries/pad/pad.h"
 #include "libretro.h"
@@ -307,15 +309,10 @@ bool InstallPkg(const std::filesystem::path& pkg, const std::filesystem::path& d
     const auto marker = dir / ".libretro_pkg";
     const std::string stamp = Utf8String(pkg.filename()) + "\n" +
                               std::to_string(std::filesystem::file_size(pkg, ec)) + "\n";
-    {
-        std::ifstream in(marker, std::ios::binary);
-        const std::string have((std::istreambuf_iterator<char>(in)),
-                               std::istreambuf_iterator<char>());
-        if (have == stamp) {
-            Log(RETRO_LOG_INFO, "%s is installed in %s", Utf8String(pkg).c_str(),
-                Utf8String(dir).c_str());
-            return true;
-        }
+    if (filestream_matches_buf(Utf8String(marker).c_str(), stamp.data(), stamp.size())) {
+        Log(RETRO_LOG_INFO, "%s is installed in %s", Utf8String(pkg).c_str(),
+            Utf8String(dir).c_str());
+        return true;
     }
 
     Libretro::PkgReader reader;
@@ -349,18 +346,21 @@ bool InstallPkg(const std::filesystem::path& pkg, const std::filesystem::path& d
         const auto* node = reader.Find(rel);
         const auto target = dir / Utf8Path(rel);
         std::filesystem::create_directories(target.parent_path(), ec);
-        std::ofstream out(target, std::ios::binary | std::ios::trunc);
-        for (u64 at = 0; out && at < node->size;) {
+        // Written front to back once, with no stdio buffer between
+        const Common::FS::IOFile out(target, Common::FS::FileAccessMode::Create,
+                                     Common::FS::FileHint::Sequential);
+        bool written = out.IsOpen();
+        for (u64 at = 0; written && at < node->size;) {
             const u64 read = reader.Read(*node, at, buffer.size(), buffer.data());
             if (read == 0) {
+                written = false;
                 break;
             }
-            out.write(reinterpret_cast<const char*>(buffer.data()),
-                      static_cast<std::streamsize>(read));
+            written = out.WriteRaw<u8>(buffer.data(), read) == read;
             at += read;
             done += read;
         }
-        if (!out) {
+        if (!written) {
             Notify(("shadPS4: " + Utf8String(target) + " could not be written").c_str());
             return false;
         }
@@ -369,7 +369,7 @@ bool InstallPkg(const std::filesystem::path& pkg, const std::filesystem::path& d
             Log(RETRO_LOG_INFO, "Installing: %d %%", told * 10);
         }
     }
-    std::ofstream(marker, std::ios::binary) << stamp;
+    filestream_write_file(Utf8String(marker).c_str(), stamp.data(), static_cast<s64>(stamp.size()));
     return true;
 }
 
@@ -681,13 +681,8 @@ extern "C" const unsigned char g_part_shadps4_libretro_so[], g_part_shadps4_libr
 bool WriteParts(const std::string& dir) {
 #ifdef LIBRETRO_X86_64_PARTS
     const std::string stamp = dir + "build";
-    if (FILE* file = std::fopen(stamp.c_str(), "rb")) {
-        char written[64] = {};
-        const size_t length = std::fread(written, 1, sizeof(written) - 1, file);
-        std::fclose(file);
-        if (std::string(written, length) == Common::g_scm_rev) {
-            return true;
-        }
+    if (filestream_matches_buf(stamp.c_str(), Common::g_scm_rev, std::strlen(Common::g_scm_rev))) {
+        return true;
     }
     mkdir(dir.c_str(), 0755);
     static const struct {
@@ -702,23 +697,18 @@ bool WriteParts(const std::string& dir) {
     for (const auto& part : parts) {
         const std::string path = dir + part.name;
         const std::string temporary = path + ".new";
-        FILE* file = std::fopen(temporary.c_str(), "wb");
-        const size_t size = static_cast<size_t>(part.end - part.begin);
-        const bool written = file && std::fwrite(part.begin, 1, size, file) == size;
-        if (file && std::fclose(file) != 0) {
-            Log(RETRO_LOG_ERROR, "%s could not be written: %s", temporary.c_str(),
-                std::strerror(errno));
-            return false;
-        }
+        // Straight from where the core carries it
+        const bool written = filestream_write_file(temporary.c_str(), part.begin,
+                                                   static_cast<s64>(part.end - part.begin));
         if (!written || chmod(temporary.c_str(), 0755) != 0 ||
-            std::rename(temporary.c_str(), path.c_str()) != 0) {
+            filestream_rename(temporary.c_str(), path.c_str()) != 0) {
             Log(RETRO_LOG_ERROR, "%s could not be written: %s", path.c_str(), std::strerror(errno));
-            std::remove(temporary.c_str());
+            filestream_delete(temporary.c_str());
             return false;
         }
     }
-    FILE* file = std::fopen(stamp.c_str(), "wb");
-    if (!file || std::fputs(Common::g_scm_rev, file) < 0 || std::fclose(file) != 0) {
+    if (!filestream_write_file(stamp.c_str(), Common::g_scm_rev,
+                               static_cast<s64>(std::strlen(Common::g_scm_rev)))) {
         Log(RETRO_LOG_ERROR, "%s could not be written", stamp.c_str());
         return false;
     }

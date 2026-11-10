@@ -14,6 +14,7 @@
 #include <queue>
 
 #include "common/audio_file.h"
+#include "common/io_file.h"
 #include "common/logging/log.h"
 #include "common/singleton.h"
 #include "core/emulator_settings.h"
@@ -435,10 +436,10 @@ private:
                            [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
             if (ext == ".flac" || ext == ".mp3" || ext == ".aac" || ext == ".m4a" ||
                 ext == ".mp4") {
-                // Read whole and decoded in place, into one buffer the mix resamples from.
-                const auto bytes = Common::AudioFile::ReadWhole(host_path);
-                const u8* data = bytes.data();
-                const size_t size = bytes.size();
+                // Mapped and decoded where it lies, into one buffer the mix resamples from.
+                const auto bytes = Common::FS::FileView::Map(host_path);
+                const u8* data = bytes ? bytes->data() : nullptr;
+                const size_t size = bytes ? bytes->size() : 0;
                 if (ext == ".flac") {
                     decoded = Common::AudioFile::DecodeFlac(data, size, pcm);
                 } else if (ext == ".mp3") {

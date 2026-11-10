@@ -515,28 +515,24 @@ bool Elf::IsSharedLib() {
 }
 
 void Elf::ElfHeaderDebugDump(const std::filesystem::path& file_name) {
-    Common::FS::IOFile f{file_name, Common::FS::FileAccessMode::Create,
-                         Common::FS::FileType::TextFile};
+    Common::FS::IOFile f{file_name, Common::FS::FileAccessMode::Create};
     f.WriteString(ElfHeaderStr());
 }
 
 void Elf::SelfHeaderDebugDump(const std::filesystem::path& file_name) {
-    Common::FS::IOFile f{file_name, Common::FS::FileAccessMode::Create,
-                         Common::FS::FileType::TextFile};
+    Common::FS::IOFile f{file_name, Common::FS::FileAccessMode::Create};
     f.WriteString(SElfHeaderStr());
 }
 
 void Elf::SelfSegHeaderDebugDump(const std::filesystem::path& file_name) {
-    Common::FS::IOFile f{file_name, Common::FS::FileAccessMode::Create,
-                         Common::FS::FileType::TextFile};
+    Common::FS::IOFile f{file_name, Common::FS::FileAccessMode::Create};
     for (u16 i = 0; i < m_self.segment_count; i++) {
         f.WriteString(SELFSegHeader(i));
     }
 }
 
 void Elf::PHeaderDebugDump(const std::filesystem::path& file_name) {
-    Common::FS::IOFile f{file_name, Common::FS::FileAccessMode::Create,
-                         Common::FS::FileType::TextFile};
+    Common::FS::IOFile f{file_name, Common::FS::FileAccessMode::Create};
     if (m_elf_header.e_phentsize > 0) {
         for (u16 i = 0; i < m_elf_header.e_phnum; i++) {
             f.WriteString(ElfPHeaderStr(i));

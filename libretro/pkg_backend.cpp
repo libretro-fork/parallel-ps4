@@ -201,16 +201,17 @@ bool PkgBackend::Stat(std::string_view rel_path, Core::FileSys::FileStat& out) {
     return node && NodeStat(pkg_path, node, out);
 }
 
-std::optional<std::vector<u8>> PkgBackend::ReadFile(std::string_view rel_path) const {
+std::optional<Common::FS::FileView> PkgBackend::ReadFile(std::string_view rel_path) const {
     const auto* node = reader ? reader->Find(rel_path) : nullptr;
     if (!node || node->directory) {
         return std::nullopt;
     }
     std::vector<u8> data(node->size);
+    // Decrypted and inflated into its own buffer, which the view keeps
     if (reader->Read(*node, 0, data.size(), data.data()) != data.size()) {
         return std::nullopt;
     }
-    return data;
+    return Common::FS::FileView{std::move(data)};
 }
 
 } // namespace Libretro

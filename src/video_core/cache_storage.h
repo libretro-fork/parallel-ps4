@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "common/io_file.h"
 #include "common/path_util.h"
 #include "common/singleton.h"
 #include "common/types.h"
@@ -35,10 +36,11 @@ public:
     bool Save(BlobType type, const std::string& name, std::vector<u8>&& data);
     bool Save(BlobType type, const std::string& name, std::vector<u32>&& data);
 
-    void Load(BlobType type, const std::string& name, std::vector<u8>& data);
-    void Load(BlobType type, const std::string& name, std::vector<u32>& data);
+    /// The blob, mapped where it lies; nothing when there is none.
+    std::optional<Common::FS::FileView> Load(BlobType type, const std::string& name);
 
-    void ForEachBlob(BlobType type, const std::function<void(std::vector<u8>&& data)>& func);
+    /// Calls @func with each blob of @type, lent until it returns.
+    void ForEachBlob(BlobType type, const std::function<void(std::span<const u8> data)>& func);
 
 private:
     std::jthread io_worker{};

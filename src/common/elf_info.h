@@ -11,6 +11,7 @@
 #include <map>
 #include "assert.h"
 #include "bit_field.h"
+#include "common/io_file.h"
 #include "singleton.h"
 #include "types.h"
 
@@ -73,7 +74,8 @@ class ElfInfo {
     u32 sdk_ver = 0;
     PSFAttributes psf_attributes{};
 
-    std::vector<u8> splash_data{};
+    /// pic1.png, mapped where it lies for the session
+    Common::FS::FileView splash_data{};
     std::filesystem::path game_folder{};
     std::vector<std::string> npCommIds{};
     std::map<s32, std::string> trophy_index_map{};
@@ -138,8 +140,8 @@ public:
         return psf_attributes;
     }
 
-    [[nodiscard]] const std::vector<u8>& GetSplashData() const {
-        return splash_data;
+    [[nodiscard]] std::span<const u8> GetSplashData() const {
+        return splash_data.Bytes();
     }
 
     [[nodiscard]] const std::filesystem::path& GetGameFolder() const {

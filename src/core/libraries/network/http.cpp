@@ -8,7 +8,6 @@
 #include <condition_variable>
 #include <cstring>
 #include <deque>
-#include <fstream>
 #include <memory>
 #include <mutex>
 #include <sstream>

@@ -2,17 +2,19 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include <algorithm>
+#include <cstdio>
 #include <ctime>
 #include <filesystem>
-#include <fstream>
 #include <iostream>
 #include <set>
 #include <sstream>
 #include <features/features_cpu.h>
 #include <fmt/core.h>
 #include <fmt/xchar.h>
+#include <streams/file_stream.h>
 
 #include "common/elf_info.h"
+#include "common/io_file.h"
 #include "common/logging/log.h"
 #include "common/memory_patcher.h"
 #include "common/ntapi.h"
@@ -136,7 +138,7 @@ std::map<s32, std::string> ExtractTrophies(std::string_view npbind_guest,
 
     NPBindFile npbind;
     const auto npbind_bytes = mnt->ReadFile(npbind_guest);
-    if (!npbind_bytes || !npbind.Load(std::span<const u8>{*npbind_bytes})) {
+    if (!npbind_bytes || !npbind.Load(npbind_bytes->Bytes())) {
         LOG_WARNING(Common_Filesystem, "Failed to load npbind.dat file");
         return trophy_index_map;
     }
@@ -199,29 +201,15 @@ std::map<s32, std::string> ExtractTrophies(std::string_view npbind_guest,
             Common::FS::GetUserPath(Common::FS::PathType::TrophyDir) / np_comm_id;
         if (!std::filesystem::exists(trophy_output_dir)) {
             const std::string entry_guest = std::string(trophy_dir_guest) + "/" + entry.name;
-            std::filesystem::path trp_source;
-            std::filesystem::path temp_extract;
-            if (auto handle = mnt->Open(entry_guest, /*writable=*/false)) {
-                if (auto host = handle->GetHostPath(); host.has_value()) {
-                    trp_source = *host;
-                } else {
-                    // Archive-backed: dump bytes to a temp file for TRP.
-                    if (auto bytes = mnt->ReadFile(entry_guest)) {
-                        temp_extract = std::filesystem::temp_directory_path() /
-                                       (np_comm_id + "_" + entry.name);
-                        Common::FS::IOFile out(temp_extract, Common::FS::FileAccessMode::Create);
-                        out.WriteRaw<u8>(bytes->data(), bytes->size());
-                        out.Close();
-                        trp_source = temp_extract;
-                    }
-                }
-            }
-            if (trp_source.empty()) {
+            // Mapped where it lies, or decoded out of an archive
+            const auto trp_bytes = mnt->ReadFile(entry_guest);
+            if (!trp_bytes) {
                 LOG_ERROR(Loader, "Couldn't read trophy file {}", entry.name);
                 continue;
             }
+            const auto trp_source = mnt->GetHostPath(entry_guest);
             TRP trp;
-            bool ok = trp.Extract(trp_source, np_comm_id, trophy_output_dir);
+            bool ok = trp.Extract(trp_bytes->Bytes(), np_comm_id, trophy_output_dir);
             if (!ok) {
                 // if it's an update and doesn't contain trophies fallback to base
                 const auto base_source = mnt->GetHostPath(
@@ -232,10 +220,6 @@ std::map<s32, std::string> ExtractTrophies(std::string_view npbind_guest,
                                 base_source.string());
                     ok = trp.Extract(base_source, np_comm_id, trophy_output_dir);
                 }
-            }
-            if (!temp_extract.empty()) {
-                std::error_code ec;
-                std::filesystem::remove(temp_extract, ec);
             }
             if (!ok) {
                 LOG_ERROR(Loader, "Couldn't extract trophy file {}", entry.name);
@@ -797,42 +781,36 @@ void Emulator::UpdatePlayTime(const std::string_view serial) {
     }
 
     const auto user_dir = Common::FS::GetUserPath(Common::FS::PathType::UserDir);
-    const auto filePath = (user_dir / "play_time.txt").string();
-
-    std::ifstream in(filePath);
-    if (!in && !std::ofstream(filePath)) {
-        LOG_INFO(Loader, "Error opening play_time.txt");
-        return;
-    }
+    const auto file_path = user_dir / "play_time.txt";
 
     const auto end_time = std::chrono::steady_clock::now();
     const auto duration = std::chrono::duration_cast<std::chrono::seconds>(end_time - start_time);
     start_time = end_time;
     const int total_seconds = static_cast<int>(duration.count());
 
-    std::vector<std::string> lines;
-    std::string line;
-    while (std::getline(in, line)) {
-        lines.push_back(line);
-    }
-    in.close();
+    // One line a game, "serial h:mm:ss last-played", read where it lies (mapped)
+    auto file = Common::FS::FileView::Map(file_path);
+    const std::string_view text =
+        file ? std::string_view{reinterpret_cast<const char*>(file->data()), file->size()}
+             : std::string_view{};
+    const auto first_word = [](std::string_view line) {
+        return line.substr(0, line.find_first_of(" \t\r"));
+    };
 
     int accumulated_seconds = 0;
-    bool found = false;
-
-    for (const auto& l : lines) {
-        std::istringstream iss(l);
-        std::string s, time_str;
-        if (iss >> s >> time_str && s == serial) {
-            int h, m, s_;
-            char c1, c2;
-            std::istringstream ts(time_str);
-            if (ts >> h >> c1 >> m >> c2 >> s_ && c1 == ':' && c2 == ':') {
-                accumulated_seconds = h * 3600 + m * 60 + s_;
-                found = true;
-                break;
-            }
+    for (size_t pos = 0; pos < text.size();) {
+        const size_t end = std::min(text.find('\n', pos), text.size());
+        const std::string_view line = text.substr(pos, end - pos);
+        pos = end + 1;
+        if (first_word(line) != serial) {
+            continue;
         }
+        const std::string fields{line.substr(serial.size())};
+        int h, m, s_;
+        if (std::sscanf(fields.c_str(), " %d:%d:%d", &h, &m, &s_) == 3) {
+            accumulated_seconds = h * 3600 + m * 60 + s_;
+        }
+        break;
     }
 
     accumulated_seconds += total_seconds;
@@ -844,21 +822,33 @@ void Emulator::UpdatePlayTime(const std::string_view serial) {
 
     const std::time_t last_time_played = std::time(nullptr);
 
-    std::ofstream outfile(filePath, std::ios::trunc);
+    // The other games' lines as they were, this one's replaced or added
+    std::string out;
+    out.reserve(text.size() + 64);
     bool lineUpdated = false;
-    for (const auto& l : lines) {
-        std::istringstream iss(l);
-        std::string s;
-        if (iss >> s && s == serial) {
-            outfile << fmt::format("{} {} {}\n", serial, playTimeSaved, last_time_played);
+    for (size_t pos = 0; pos < text.size();) {
+        const size_t end = std::min(text.find('\n', pos), text.size());
+        const std::string_view line = text.substr(pos, end - pos);
+        pos = end + 1;
+        if (first_word(line) == serial) {
+            out += fmt::format("{} {} {}\n", serial, playTimeSaved, last_time_played);
             lineUpdated = true;
         } else {
-            outfile << l << "\n";
+            out += line;
+            out += '\n';
         }
     }
-
     if (!lineUpdated) {
-        outfile << fmt::format("{} {} {}\n", serial, playTimeSaved, last_time_played);
+        out += fmt::format("{} {} {}\n", serial, playTimeSaved, last_time_played);
+    }
+
+    // Written whole, replacing the old file only once it is complete; the mapping goes first, as
+    // Windows will not replace a mapped file
+    file.reset();
+    if (!filestream_write_file_atomic(Common::FS::PathToUTF8String(file_path).c_str(), out.data(),
+                                      static_cast<s64>(out.size()))) {
+        LOG_INFO(Loader, "Error writing play_time.txt");
+        return;
     }
 
     LOG_INFO(Loader, "Playing time for {}: {} {}", serial, playTimeSaved, last_time_played);

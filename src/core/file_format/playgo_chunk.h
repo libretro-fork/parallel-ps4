@@ -113,7 +113,6 @@ public:
 
     bool Open(const std::filesystem::path& filepath);
     bool Open(std::span<const u8> data);
-    bool LoadChunks(const Common::FS::IOFile& file);
 
     PlaygoHeader& GetPlaygoHeader() {
         return playgoHeader;
@@ -121,9 +120,6 @@ public:
     std::mutex& GetSpeedMutex() {
         return speed_mutex;
     }
-
-private:
-    bool load_chunk_data(const Common::FS::IOFile& file, const chunk_t chunk, std::string& data);
 
 private:
     PlaygoHeader playgoHeader;
