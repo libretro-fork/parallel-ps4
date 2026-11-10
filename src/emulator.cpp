@@ -40,6 +40,7 @@
 #include "core/libraries/libs.h"
 #include "core/libraries/np/np_handler/np_handler.h"
 #include "core/libraries/np/np_trophy.h"
+#include "core/libraries/np/trophy_ui.h"
 #include "core/libraries/save_data/save_backup.h"
 #include "core/libraries/usbd/usbstorage.h"
 #include "core/linker.h"
@@ -439,6 +440,8 @@ void Emulator::Run(std::filesystem::path file, std::vector<std::string> args,
     EmulatorSettings.Load(id);
     // The frontend's core options, on top of what the config files say.
     Libretro::ApplyCoreOptions();
+    // Before the game runs: a trophy unlocked in play decodes nothing.
+    Libraries::Np::NpTrophy::PreloadTrophySound();
     // Switch to configured log
     Common::Log::Switch((!id.empty() && EmulatorSettings.IsLogSeparate()) ? id + ".log"
                                                                           : "shad_log.txt",

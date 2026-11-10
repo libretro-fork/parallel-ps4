@@ -106,6 +106,61 @@ static void test_pool(void)
    CHECK(audio_mix_input_open() != NULL, "closed inputs come back");
 }
 
+static void test_clip(void)
+{
+   static const int16_t clip[6] = {100, -100, 200, -200, 300, -300};
+   unsigned n;
+   audio_mix_play_clip(clip, 3, 2.0f);
+   n = audio_mix_pump(ring, RING_FRAMES - 1, 0, 2);
+   CHECK(n == 2 && ring[0] == 200 && ring[1] == -200 && ring[2] == 400, "clip plays, gain");
+   n = audio_mix_pump(ring, RING_FRAMES - 1, 2, 1024);
+   CHECK(n == 1 && ring[4] == 600 && ring[5] == -600, "clip ends where it ends");
+   n = audio_mix_pump(ring, RING_FRAMES - 1, 3, 1024);
+   CHECK(n == 0, "nothing after the clip");
+}
+
+static void test_resample(void)
+{
+   static int16_t src[2000 * 2];
+   static int16_t out[5000 * 2];
+   audio_mix_resampler_t r;
+   uint64_t pos;
+   unsigned i, n;
+   int exact = 1, dc = 1;
+
+   for (i = 0; i < 2000; i++)
+   {
+      src[i * 2 + 0] = (int16_t)(i * 7);
+      src[i * 2 + 1] = (int16_t)(-(int)i * 3);
+   }
+   audio_mix_resampler_init(&r, 48000, 2);
+   pos = 0;
+   n   = audio_mix_resample(&r, src, 2000, &pos, out, 5000, 1.0f);
+   for (i = 0; i < n * 2; i++)
+      if (out[i] != src[i])
+         exact = 0;
+   CHECK(n == 2000 && exact, "48 kHz passes through unchanged");
+
+   for (i = 0; i < 2000 * 2; i++)
+      src[i] = 10000;
+   audio_mix_resampler_init(&r, 24000, 2);
+   pos = 0;
+   n   = audio_mix_resample(&r, src, 2000, &pos, out, 5000, 1.0f);
+   for (i = 16; i < n - 16; i++)
+      if (out[i * 2] < 9995 || out[i * 2] > 10005)
+         dc = 0;
+   CHECK(n == 4000 && dc, "24 kHz doubles, level kept");
+
+   audio_mix_resampler_init(&r, 96000, 1);
+   pos = 0;
+   n   = audio_mix_resample(&r, src, 4000, &pos, out, 5000, 0.5f);
+   dc  = 1;
+   for (i = 16; i < n - 16; i++)
+      if (out[i * 2] < 4995 || out[i * 2] > 5005 || out[i * 2 + 1] != out[i * 2])
+         dc = 0;
+   CHECK(n == 2000 && dc, "96 kHz mono halves, level and gain kept");
+}
+
 /* A producer writes a counting sequence in port-sized buffers, waiting for room; the main
  * thread mixes until all of it has arrived. */
 #define BUFFER_FRAMES 1024
@@ -173,6 +228,8 @@ int main(void)
    test_convert();
    test_sum_and_close();
    test_pool();
+   test_clip();
+   test_resample();
    test_stream();
    if (failures)
       return 1;

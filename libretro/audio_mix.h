@@ -57,6 +57,28 @@ void audio_mix_input_commit(audio_mix_input_t* in, unsigned frames);
  * than another adds silence for the difference. Returns the frames written. */
 unsigned audio_mix_pump(int16_t* ring, uint32_t ring_mask, uint32_t at, unsigned frames);
 
+/* A sound played once over everything else, the trophy sound: @frames of 16-bit stereo at
+ * 48 kHz, borrowed and read by the mixing thread as it plays them, so they stay untouched
+ * for the life of the process. Playing it again starts it over. One caller thread. */
+void audio_mix_play_clip(const int16_t* frames, unsigned count, float gain);
+
+/* Resampling of sound that is not the console's own (a music file, the trophy sound) to the
+ * mix's 48 kHz, with a 16-tap windowed sinc. Reads @src (16-bit, 1 or 2 channels,
+ * @src_frames long) in place from *@pos, a 32.32 fixed-point frame position it advances,
+ * and writes up to @out_frames of 16-bit stereo to @out with @gain applied. Returns the
+ * frames written: fewer once the source runs out. */
+typedef struct audio_mix_resampler
+{
+   uint64_t step;      /* source frames per output frame, 32.32 */
+   float cutoff;       /* of the sinc, relative to the source's Nyquist */
+   unsigned channels;
+} audio_mix_resampler_t;
+
+void audio_mix_resampler_init(audio_mix_resampler_t* r, unsigned src_hz, unsigned channels);
+unsigned audio_mix_resample(const audio_mix_resampler_t* r, const int16_t* src,
+                            uint64_t src_frames, uint64_t* pos, int16_t* out,
+                            unsigned out_frames, float gain);
+
 /* Conversion of what a source has into the input's format, with a gain applied
  * (1.0 = unchanged). @channels is 1, 2 or 8; eight are folded to stereo the way the console
  * does for stereo output. */

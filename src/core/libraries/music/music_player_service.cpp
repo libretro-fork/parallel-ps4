@@ -11,7 +11,6 @@
 #include <vector>
 #include <queue>
 
-#include <SDL3/SDL.h>
 #include <minimp3_ex.h>
 
 extern "C" {
@@ -33,6 +32,7 @@ extern "C" {
 #include "core/file_sys/fs.h"
 #include "core/libraries/error_codes.h"
 #include "core/libraries/libs.h"
+#include "libretro/audio_mix.h"
 #include "music_player_service.h"
 
 namespace Libraries::MusicPlayerService {
@@ -621,92 +621,70 @@ private:
                 break;
             }
 
-            const SDL_AudioSpec spec = {
-                .format = SDL_AUDIO_S16LE,
-                .channels = static_cast<u8>(file_info.channels),
-                .freq = static_cast<int>(file_info.hz),
-            };
-
-            SDL_AudioStream* stream = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK,
-                                                                &spec, nullptr, nullptr);
-            if (!stream) {
-                LOG_ERROR(Lib_AudioOut, "Failed to open SDL audio stream: {}", SDL_GetError());
+            // The track goes to the frontend through the core's mix, resampled to its 48 kHz
+            // straight from the decoded buffer into the input's ring.
+            if (file_info.channels > 2) {
+                LOG_ERROR(Lib_AudioOut, "Music with {} channels is not played", file_info.channels);
                 free(file_info.buffer);
                 break;
             }
-
-            SDL_ResumeAudioStreamDevice(stream);
-
-            size_t sample_offset = 0;
-            if (start_time_ms > 0 && total_duration > 0) {
-                sample_offset = (start_time_ms * file_info.hz / 1000) * file_info.channels;
-                if (sample_offset > file_info.samples) {
-                    sample_offset = file_info.samples;
-                }
+            audio_mix_input_t* input = audio_mix_input_open();
+            if (!input) {
+                LOG_ERROR(Lib_AudioOut, "No input left in the core's mix for music");
+                free(file_info.buffer);
+                break;
             }
+            audio_mix_resampler_t resampler;
+            audio_mix_resampler_init(&resampler, static_cast<unsigned>(file_info.hz),
+                                     static_cast<unsigned>(file_info.channels));
+            const u64 total_frames = file_info.samples / file_info.channels;
+            const auto frame_at = [&](u64 ms) {
+                return std::min<u64>(ms * file_info.hz / 1000, total_frames) << 32;
+            };
+            u64 pos = start_time_ms > 0 && total_duration > 0 ? frame_at(start_time_ms) : 0;
 
-            constexpr size_t chunk_frames = 2048;
-            const size_t chunk_samples = chunk_frames * file_info.channels;
-            bool flushed = false;
-
+            constexpr unsigned chunk_frames = 1024;
             while (!m_stop_requested.load()) {
                 s64 seek_target = m_seek_offset_ms.exchange(-1);
                 if (seek_target >= 0) {
-                    sample_offset =
-                        (static_cast<u64>(seek_target) * file_info.hz / 1000) * file_info.channels;
-                    if (sample_offset > file_info.samples) {
-                        sample_offset = file_info.samples;
-                    }
+                    pos = frame_at(static_cast<u64>(seek_target));
                     m_current_time_ms = static_cast<u64>(seek_target);
-                    SDL_ClearAudioStream(stream);
-                    flushed = false;
                 }
 
                 if (m_pause_requested.load()) {
-                    SDL_PauseAudioStreamDevice(stream);
                     std::this_thread::sleep_for(std::chrono::milliseconds(20));
                     continue;
                 }
 
-                SDL_ResumeAudioStreamDevice(stream);
-
-                float vol =
-                    (m_volume.load() / 25.0f) * (EmulatorSettings.GetVolumeSlider() * 0.01f);
-                SDL_SetAudioStreamGain(stream, vol);
-
-                int queued = SDL_GetAudioStreamQueued(stream);
-                if (sample_offset < file_info.samples) {
-                    if (queued <
-                        static_cast<int>(chunk_frames * file_info.channels * sizeof(int16_t) * 4)) {
-                        size_t to_write =
-                            std::min(chunk_samples, file_info.samples - sample_offset);
-                        SDL_PutAudioStreamData(stream, &file_info.buffer[sample_offset],
-                                               static_cast<int>(to_write * sizeof(int16_t)));
-                        sample_offset += to_write;
-                    }
-                } else {
-                    if (!flushed) {
-                        SDL_FlushAudioStream(stream);
-                        flushed = true;
-                    }
-                    if (queued <= 0) {
-                        break;
-                    }
+                if ((pos >> 32) >= total_frames) {
+                    break;
+                }
+                // Bounded, so stop, pause and seek are seen while the frontend takes nothing.
+                if (!audio_mix_input_wait(input, chunk_frames, 20000)) {
+                    continue;
                 }
 
-                size_t queued_samples =
-                    (queued > 0)
-                        ? (static_cast<size_t>(queued) / (file_info.channels * sizeof(int16_t)))
-                        : 0;
-                size_t played_samples =
-                    (sample_offset > queued_samples) ? (sample_offset - queued_samples) : 0;
-                u64 cur_ms = (played_samples / file_info.channels) * 1000 / file_info.hz;
-                m_current_time_ms = cur_ms;
-
-                std::this_thread::sleep_for(std::chrono::milliseconds(10));
+                const float vol =
+                    (m_volume.load() / 25.0f) * (EmulatorSettings.GetVolumeSlider() * 0.01f);
+                unsigned done = 0;
+                while (done < chunk_frames) {
+                    s16* dst = nullptr;
+                    const unsigned room = audio_mix_input_reserve(input, &dst, chunk_frames - done);
+                    if (room == 0) {
+                        break;
+                    }
+                    const unsigned got = audio_mix_resample(&resampler, file_info.buffer,
+                                                            total_frames, &pos, dst, room, vol);
+                    audio_mix_input_commit(input, got);
+                    done += got;
+                    if (got < room) {
+                        break; // the track has ended
+                    }
+                }
+                m_current_time_ms = (pos >> 32) * 1000 / file_info.hz;
             }
 
-            SDL_DestroyAudioStream(stream);
+            audio_mix_input_close(input);
             free(file_info.buffer);
 
             if (m_stop_requested.load()) {

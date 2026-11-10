@@ -1,6 +1,7 @@
 /* SPDX-FileCopyrightText: Copyright 2026 shadPS4 Emulator Project
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
+#include <math.h>
 #include <string.h>
 
 #include <retro_atomic.h>
@@ -28,13 +29,64 @@ struct audio_mix_input
 };
 
 static struct audio_mix_input inputs[AUDIO_MIX_INPUTS];
+
+/* The clip: published by its caller with a serial the mixing thread checks before and after
+ * it reads the fields, so a clip started again while being read is taken on the next pass. */
+static retro_atomic_size_t clip_frames; /* the frames' address */
+static retro_atomic_int_t clip_count;
+static retro_atomic_int_t clip_gain_milli;
+static retro_atomic_int_t clip_serial;
+/* The mixing thread's own: the clip it plays and how far it is. */
+static int clip_seen;
+static const int16_t* clip_play;
+static unsigned clip_left;
+static float clip_play_gain;
+
+/* The resampler's kernel: a sinc windowed with a Blackman window over 16 taps, at cutoff 1,
+ * for 256 fractional positions and one more to interpolate to, each row summing to 1. */
+#define SINC_TAPS 16
+#define SINC_HALF 7
+#define SINC_PHASES 256
+static float sinc_table[SINC_PHASES + 1][SINC_TAPS];
 /* The mixing thread's sums: one chunk of stereo frames. */
 #define PUMP_FRAMES 1024
 static int32_t pump_sum[PUMP_FRAMES * 2];
 
+static double sinc_kernel(double x, double cutoff)
+{
+   const double pi = 3.14159265358979323846;
+   double t        = x / (SINC_TAPS / 2.0); /* -1..1 across the taps */
+   double w, v;
+   if (t <= -1.0 || t >= 1.0)
+      return 0.0;
+   w = 0.42 + 0.5 * cos(pi * t) + 0.08 * cos(2.0 * pi * t);
+   v = x == 0.0 ? cutoff : sin(pi * cutoff * x) / (pi * x);
+   return v * w;
+}
+
+static void sinc_row(float* row, double frac, double cutoff)
+{
+   unsigned t;
+   double sum = 0.0;
+   double w[SINC_TAPS];
+   for (t = 0; t < SINC_TAPS; t++)
+   {
+      w[t] = sinc_kernel((double)((int)t - SINC_HALF) - frac, cutoff);
+      sum += w[t];
+   }
+   for (t = 0; t < SINC_TAPS; t++)
+      row[t] = (float)(w[t] / sum);
+}
+
 int audio_mix_init(void)
 {
    unsigned i;
+   for (i = 0; i <= SINC_PHASES; i++)
+      sinc_row(sinc_table[i], (double)i / SINC_PHASES, 1.0);
+   retro_atomic_size_init(&clip_frames, 0);
+   retro_atomic_int_init(&clip_count, 0);
+   retro_atomic_int_init(&clip_gain_milli, 0);
+   retro_atomic_int_init(&clip_serial, 0);
    for (i = 0; i < AUDIO_MIX_INPUTS; i++)
    {
       retro_atomic_int_init(&inputs[i].state, INPUT_FREE);
@@ -111,6 +163,41 @@ static unsigned pump_add(struct audio_mix_input* in, unsigned frames)
    return done;
 }
 
+void audio_mix_play_clip(const int16_t* frames, unsigned count, float gain)
+{
+   retro_atomic_store_relaxed_size(&clip_frames, (size_t)frames);
+   retro_atomic_store_relaxed_int(&clip_count, (int)count);
+   retro_atomic_store_relaxed_int(&clip_gain_milli, (int)(gain * 1000.0f));
+   retro_atomic_fetch_add_int(&clip_serial, 1);
+}
+
+/* Takes a newly started clip, and adds what is left of the playing one to the sums. Returns
+ * the frames it added. */
+static unsigned pump_clip(unsigned frames)
+{
+   unsigned i, n;
+   int serial = retro_atomic_load_acquire_int(&clip_serial);
+   if (serial != clip_seen)
+   {
+      const int16_t* f = (const int16_t*)retro_atomic_load_relaxed_size(&clip_frames);
+      unsigned count   = (unsigned)retro_atomic_load_relaxed_int(&clip_count);
+      float gain       = retro_atomic_load_relaxed_int(&clip_gain_milli) / 1000.0f;
+      if (retro_atomic_load_acquire_int(&clip_serial) == serial)
+      {
+         clip_seen      = serial;
+         clip_play      = f;
+         clip_left      = count;
+         clip_play_gain = gain;
+      }
+   }
+   n = clip_left < frames ? clip_left : frames;
+   for (i = 0; i < n * 2; i++)
+      pump_sum[i] += (int32_t)(clip_play[i] * clip_play_gain);
+   clip_play += n * 2;
+   clip_left -= n;
+   return n;
+}
+
 unsigned audio_mix_pump(int16_t* ring, uint32_t ring_mask, uint32_t at, unsigned frames)
 {
    unsigned i;
@@ -118,6 +205,7 @@ unsigned audio_mix_pump(int16_t* ring, uint32_t ring_mask, uint32_t at, unsigned
    if (frames > PUMP_FRAMES)
       frames = PUMP_FRAMES;
    memset(pump_sum, 0, frames * 2 * sizeof(pump_sum[0]));
+   most = pump_clip(frames);
 
    for (i = 0; i < AUDIO_MIX_INPUTS; i++)
    {
@@ -155,6 +243,71 @@ static int16_t clamp_s16(float v)
    if (v < -32768.0f)
       return -32768;
    return (int16_t)v;
+}
+
+void audio_mix_resampler_init(audio_mix_resampler_t* r, unsigned src_hz, unsigned channels)
+{
+   r->step     = ((uint64_t)src_hz << 32) / 48000u;
+   r->cutoff   = src_hz > 48000u ? 48000.0f / (float)src_hz : 1.0f;
+   r->channels = channels == 1 ? 1 : 2;
+}
+
+unsigned audio_mix_resample(const audio_mix_resampler_t* r, const int16_t* src,
+                            uint64_t src_frames, uint64_t* pos, int16_t* out,
+                            unsigned out_frames, float gain)
+{
+   unsigned n;
+   unsigned ch   = r->channels;
+   uint64_t p    = *pos;
+   float row[SINC_TAPS];
+   for (n = 0; n < out_frames; n++)
+   {
+      uint64_t idx = p >> 32;
+      float frac   = (float)(p & 0xffffffffu) / 4294967296.0f;
+      float l      = 0.0f;
+      float rr     = 0.0f;
+      unsigned t;
+      if (idx >= src_frames)
+         break;
+      if (r->cutoff >= 1.0f)
+      {
+         float a           = frac * SINC_PHASES;
+         unsigned ph       = (unsigned)a;
+         const float* lo   = sinc_table[ph];
+         const float* hi   = sinc_table[ph + 1];
+         a -= (float)ph;
+         for (t = 0; t < SINC_TAPS; t++)
+            row[t] = lo[t] + (hi[t] - lo[t]) * a;
+      }
+      else
+      {
+         /* Fewer than 48000 frames a second out than in: the cutoff is lowered to the new
+          * Nyquist, and the kernel made for this position. */
+         sinc_row(row, frac, r->cutoff);
+      }
+      for (t = 0; t < SINC_TAPS; t++)
+      {
+         int64_t at = (int64_t)idx + (int)t - SINC_HALF;
+         if (at < 0 || (uint64_t)at >= src_frames)
+            continue;
+         if (ch == 1)
+         {
+            float v = src[at] * row[t];
+            l += v;
+            rr += v;
+         }
+         else
+         {
+            l += src[at * 2 + 0] * row[t];
+            rr += src[at * 2 + 1] * row[t];
+         }
+      }
+      out[n * 2 + 0] = clamp_s16(l * gain);
+      out[n * 2 + 1] = clamp_s16(rr * gain);
+      p += r->step;
+   }
+   *pos = p;
+   return n;
 }
 
 /* The console's fold of 7.1 to stereo: front at full level, centre and both surround pairs at

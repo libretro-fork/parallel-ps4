@@ -1,10 +1,11 @@
 // SPDX-FileCopyrightText: Copyright 2025-2026 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include <cstdlib>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <mutex>
-#include <SDL3/SDL_init.h>
 #include <cmrc/cmrc.hpp>
 #include <fmt/format.h>
 #include <imgui.h>
@@ -18,6 +19,7 @@
 #include "common/path_util.h"
 #include "core/emulator_settings.h"
 #include "core/libraries/np/trophy_ui.h"
+#include "libretro/audio_mix.h"
 
 CMRC_DECLARE(res);
 namespace fs = std::filesystem;
@@ -25,6 +27,98 @@ using namespace ImGui;
 namespace Libraries::Np::NpTrophy {
 
 std::optional<TrophyUI> current_trophy_ui;
+
+// The trophy sound, as the core's mix plays it: 16-bit stereo at 48 kHz, made once when the
+// emulator starts and borrowed by the mix each time a trophy is unlocked.
+static std::vector<s16> trophy_sound;
+
+// 16-bit PCM in a RIFF/WAVE file, 1 or 2 channels: where its samples are, read in place.
+static bool ParseWav(const u8* data, size_t size, const s16** samples, u64* frames, u32* channels,
+                     u32* hz) {
+    if (size < 12 || std::memcmp(data, "RIFF", 4) != 0 || std::memcmp(data + 8, "WAVE", 4) != 0) {
+        return false;
+    }
+    const auto le16 = [](const u8* p) { return static_cast<u32>(p[0] | (p[1] << 8)); };
+    const auto le32 = [](const u8* p) {
+        return static_cast<u32>(p[0] | (p[1] << 8) | (p[2] << 16) | (static_cast<u32>(p[3]) << 24));
+    };
+    bool have_fmt = false;
+    for (size_t at = 12; at + 8 <= size;) {
+        const u32 chunk = le32(data + at + 4);
+        const u8* body = data + at + 8;
+        if (chunk > size - at - 8) {
+            return false;
+        }
+        if (std::memcmp(data + at, "fmt ", 4) == 0 && chunk >= 16) {
+            if (le16(body) != 1 || le16(body + 14) != 16) {
+                return false; // only 16-bit PCM
+            }
+            *channels = le16(body + 2);
+            *hz = le32(body + 4);
+            have_fmt = *channels == 1 || *channels == 2;
+        } else if (std::memcmp(data + at, "data", 4) == 0 && have_fmt && *hz > 0) {
+            *samples = reinterpret_cast<const s16*>(body);
+            *frames = chunk / (2 * *channels);
+            return true;
+        }
+        at += 8 + chunk + (chunk & 1);
+    }
+    return false;
+}
+
+static void ResampleTrophySound(const s16* samples, u64 frames, u32 channels, u32 hz) {
+    audio_mix_resampler_t r;
+    audio_mix_resampler_init(&r, hz, channels);
+    trophy_sound.resize(static_cast<size_t>(((frames * 48000) / hz + 1) * 2));
+    u64 pos = 0;
+    const unsigned out = audio_mix_resample(&r, samples, frames, &pos, trophy_sound.data(),
+                                            static_cast<unsigned>(trophy_sound.size() / 2), 1.0f);
+    trophy_sound.resize(static_cast<size_t>(out) * 2);
+}
+
+void PreloadTrophySound() {
+    trophy_sound.clear();
+    const auto dir = Common::FS::GetUserPath(Common::FS::PathType::CustomTrophy);
+    const auto mp3_path = dir / "trophy.mp3";
+    const auto wav_path = dir / "trophy.wav";
+    if (fs::exists(mp3_path)) {
+        mp3dec_t dec;
+        mp3dec_file_info_t info{};
+        mp3dec_init(&dec);
+        if (mp3dec_load(&dec, mp3_path.string().c_str(), &info, nullptr, nullptr) == 0 &&
+            info.samples > 0 && (info.channels == 1 || info.channels == 2) && info.hz > 0) {
+            ResampleTrophySound(info.buffer, info.samples / info.channels, info.channels, info.hz);
+        } else {
+            LOG_ERROR(Lib_NpTrophy, "Could not decode the custom trophy sound {}",
+                      fmt::UTF(mp3_path.u8string()));
+        }
+        std::free(info.buffer);
+        return;
+    }
+    const s16* samples = nullptr;
+    u64 frames = 0;
+    u32 channels = 0;
+    u32 hz = 0;
+    if (fs::exists(wav_path)) {
+        // Mapped, and read in place.
+        mp3dec_map_info_t map{};
+        if (mp3dec_open_file(wav_path.string().c_str(), &map) == 0) {
+            if (ParseWav(map.buffer, map.size, &samples, &frames, &channels, &hz)) {
+                ResampleTrophySound(samples, frames, channels, hz);
+            } else {
+                LOG_ERROR(Lib_NpTrophy, "The custom trophy sound {} is not 16-bit PCM",
+                          fmt::UTF(wav_path.u8string()));
+            }
+            mp3dec_close_file(&map);
+        }
+        return;
+    }
+    const auto file = cmrc::res::get_filesystem().open("src/resources/trophy.wav");
+    if (ParseWav(reinterpret_cast<const u8*>(file.begin()), file.size(), &samples, &frames,
+                 &channels, &hz)) {
+        ResampleTrophySound(samples, frames, channels, hz);
+    }
+}
 std::queue<TrophyInfo> trophy_queue;
 std::mutex queueMtx;
 std::string side = "right";
@@ -88,71 +182,14 @@ TrophyUI::TrophyUI(const std::filesystem::path& trophyIconPath, const std::strin
 
     AddLayer(this);
 
-    if (SDL_WasInit(SDL_INIT_AUDIO) != 0) {
-        if (!SDL_Init(SDL_INIT_AUDIO)) {
-            LOG_ERROR(Lib_NpTrophy, "Unable to init SDL Audio for trophy sound: {}",
-                      SDL_GetError());
-            return;
-        }
-    }
-
-    audioDevice = SDL_OpenAudioDevice(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, nullptr);
-
-    // user selected Sdl Backend, use same device as Sdl main Device
-    if (EmulatorSettings.GetAudioBackend() == 0) {
-        if (EmulatorSettings.GetSDLMainOutputDevice() != "Default Device") {
-            int count;
-            SDL_AudioDeviceID* devices = SDL_GetAudioPlaybackDevices(&count);
-
-            for (int i = 0; i < count; i++) {
-                std::string name = SDL_GetAudioDeviceName(devices[i]);
-                if (name == EmulatorSettings.GetSDLMainOutputDevice()) {
-                    audioDevice = SDL_OpenAudioDevice(devices[i], NULL);
-                }
-            }
-        }
-    }
-
-    if (audioDevice == 0) {
-        LOG_ERROR(Lib_NpTrophy, "Unable to open audio device for trophy sound playback: {}",
-                  SDL_GetError());
-        return;
-    }
-
-    const auto musicPathMp3 = CustomTrophy_Dir / "trophy.mp3";
-    const auto musicPathWav = CustomTrophy_Dir / "trophy.wav";
-    std::vector<unsigned char> sound_data;
-
-    if (std::filesystem::exists(musicPathMp3)) {
-        std::ifstream file(musicPathMp3, std::ios::binary);
-        sound_data = std::vector<unsigned char>((std::istreambuf_iterator<char>(file)),
-                                                std::istreambuf_iterator<char>());
-        file.close();
-        PlayMp3(sound_data);
-    } else if (std::filesystem::exists(musicPathWav)) {
-        std::ifstream file(musicPathWav, std::ios::binary);
-        sound_data = std::vector<unsigned char>((std::istreambuf_iterator<char>(file)),
-                                                std::istreambuf_iterator<char>());
-        file.close();
-        PlayWav(sound_data);
-    } else {
-        auto soundFile = resource.open("src/resources/trophy.wav");
-        sound_data = std::vector<unsigned char>(soundFile.begin(), soundFile.end());
-        PlayWav(sound_data);
+    // Louder than the game, as standalone plays it.
+    if (!trophy_sound.empty()) {
+        audio_mix_play_clip(trophy_sound.data(), static_cast<unsigned>(trophy_sound.size() / 2),
+                            EmulatorSettings.GetVolumeSlider() * 0.01f * 1.2f);
     }
 }
 
 TrophyUI::~TrophyUI() {
-    if (stream) {
-        SDL_DestroyAudioStream(stream);
-    }
-
-    // if emulator is not using sdl audio backend
-    if (EmulatorSettings.GetAudioBackend() != 0) {
-        SDL_CloseAudioDevice(audioDevice);
-        SDL_QuitSubSystem(SDL_INIT_AUDIO);
-    }
-
     Finish();
 }
 
@@ -301,64 +338,6 @@ void TrophyUI::Draw() {
             current_trophy_ui.reset();
         }
     }
-}
-
-void TrophyUI::PlayMp3(std::vector<unsigned char> mp3Data) {
-    mp3dec_t mp3d;
-    mp3dec_frame_info_t info;
-    std::vector<short> pcm(MINIMP3_MAX_SAMPLES_PER_FRAME);
-    mp3dec_init(&mp3d);
-
-    // always s16 when decoded by minimp3, channels/frequency changed later on as necessary
-    SDL_AudioSpec spec = {SDL_AUDIO_S16, 2, 44100};
-    bool specInfoSet = false;
-
-    stream = SDL_CreateAudioStream(&spec, &spec);
-    SDL_BindAudioStream(audioDevice, stream);
-
-    // make this louder than game stream
-    SDL_SetAudioStreamGain(stream,
-                           static_cast<float>(EmulatorSettings.GetVolumeSlider() * 0.01f * 1.2f));
-    unsigned char* buffer_ptr = mp3Data.data();
-    size_t remaining_size = mp3Data.size();
-
-    while (remaining_size > 0) {
-        int samples = mp3dec_decode_frame(&mp3d, buffer_ptr, remaining_size, pcm.data(), &info);
-        if (samples > 0) {
-            if (!specInfoSet && info.hz > 0 && info.channels > 0) {
-                spec = {SDL_AUDIO_S16, info.channels, info.hz};
-                SDL_SetAudioStreamFormat(stream, &spec, &spec);
-                specInfoSet = true;
-            }
-
-            SDL_PutAudioStreamData(stream, pcm.data(), samples * 2 * sizeof(short));
-            buffer_ptr += info.frame_bytes;
-            remaining_size -= info.frame_bytes;
-        } else {
-            break;
-        }
-    }
-}
-
-void TrophyUI::PlayWav(std::vector<unsigned char> wavData) {
-    SDL_AudioSpec spec;
-    Uint8* audioBuf = nullptr;
-    Uint32 audioLen = 0;
-
-    SDL_IOStream* io = SDL_IOFromConstMem(wavData.data(), wavData.size());
-    if (!SDL_LoadWAV_IO(io, true, &spec, &audioBuf, &audioLen)) {
-        LOG_ERROR(Lib_NpTrophy, "Unable to load trophy wave file data: {}", SDL_GetError());
-        return;
-    }
-
-    SDL_AudioStream* stream = SDL_CreateAudioStream(&spec, &spec);
-    SDL_BindAudioStream(audioDevice, stream);
-
-    // make this louder than game stream
-    SDL_SetAudioStreamGain(stream,
-                           static_cast<float>(EmulatorSettings.GetVolumeSlider() * 0.01f * 1.2f));
-    SDL_PutAudioStreamData(stream, audioBuf, audioLen);
-    SDL_free(audioBuf);
 }
 
 void AddTrophyToQueue(const std::filesystem::path& trophyIconPath, const std::string& trophyName,

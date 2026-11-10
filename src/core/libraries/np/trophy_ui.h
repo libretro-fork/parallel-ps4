@@ -4,7 +4,6 @@
 #pragma once
 
 #include <string>
-#include <SDL3/SDL_audio.h>
 
 #include "imgui/imgui_layer.h"
 #include "imgui/imgui_texture.h"
@@ -22,15 +21,10 @@ public:
     void Draw() override;
 
 private:
-    void PlayMp3(std::vector<unsigned char> mp3Data);
-    void PlayWav(std::vector<unsigned char> wavData);
-
     std::string trophy_name;
     std::string_view trophy_type;
     ImGui::RefCountedTexture trophy_icon;
     ImGui::RefCountedTexture trophy_type_icon;
-    SDL_AudioStream* stream;
-    SDL_AudioDeviceID audioDevice;
 };
 
 struct TrophyInfo {
@@ -38,6 +32,10 @@ struct TrophyInfo {
     std::string trophy_name;
     std::string_view trophy_type;
 };
+
+/// Makes the trophy sound ready for the core's mix: the custom one in the user's folder, or the
+/// built-in one. Called once, before the game runs, so nothing is decoded when a trophy unlocks.
+void PreloadTrophySound();
 
 void AddTrophyToQueue(const std::filesystem::path& trophyIconPath, const std::string& trophyName,
                       const std::string_view& rarity);
