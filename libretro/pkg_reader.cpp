@@ -7,12 +7,10 @@
 #include <span>
 
 #include <encodings/deflate.h>
-#include <openssl/aes.h>
-#include <openssl/bn.h>
-#include <openssl/evp.h>
-#include <openssl/hmac.h>
-#include <openssl/rsa.h>
-#include <openssl/sha.h>
+#include <crypto/crypto.h>
+#include <crypto/kdf.h>
+#include <crypto/pk.h>
+#include <lrc_hash.h>
 
 #include "common/endian.h"
 #include "common/string_util.h"
@@ -118,35 +116,42 @@ bool ReadEntries(const Common::FS::IOFile& file, const PkgHeader& header,
                entries.size() * sizeof(PkgEntry);
 }
 
-// RSAES-PKCS1-v1_5 with one of the PKG keys; the first 32 bytes of the message.
+// RSAES-PKCS1-v1_5 with one of the PKG keys; the first 32 bytes of the message. The keys are
+// the well-known fake-signing ones, so the exponentiation need not hide the private exponent.
 bool RsaDecrypt(const std::vector<u8>& modulus, const std::vector<u8>& public_exponent,
                 const std::vector<u8>& private_exponent, const u8* ciphertext,
                 std::array<u8, 32>& out) {
-    if (modulus.size() != 256) {
+    (void)public_exponent;
+    constexpr std::size_t Bytes = 256;
+    constexpr unsigned k = Bytes / BN_WORD_BYTES;
+    if (modulus.size() != Bytes || private_exponent.empty() ||
+        private_exponent.size() > Bytes) {
         return false;
     }
-    RSA* rsa = RSA_new();
-    if (!rsa) {
+    bn_word n[k], c[k], d[k], r2[k], m[k];
+    bn_word work[3 * k + BN_MONT_TMP_WORDS(k)];
+    bn_from_be(n, k, modulus.data(), Bytes);
+    bn_from_be(c, k, ciphertext, Bytes);
+    bn_from_be(d, k, private_exponent.data(), private_exponent.size());
+    if ((n[0] & 1) == 0 || bn_cmp(c, n, k) >= 0) {
         return false;
     }
-    BIGNUM* n = BN_bin2bn(modulus.data(), static_cast<int>(modulus.size()), nullptr);
-    BIGNUM* e = BN_bin2bn(public_exponent.data(), static_cast<int>(public_exponent.size()), nullptr);
-    BIGNUM* d =
-        BN_bin2bn(private_exponent.data(), static_cast<int>(private_exponent.size()), nullptr);
-    if (!n || !e || !d || RSA_set0_key(rsa, n, e, d) != 1) {
-        BN_free(n);
-        BN_free(e);
-        BN_free(d);
-        RSA_free(rsa);
+    bn_mont_r2(r2, n, k);
+    bn_mod_exp(m, c, d, k, n, r2, bn_mont_n0(n), k, work);
+    std::array<u8, Bytes> message{};
+    bn_to_be(message.data(), Bytes, m, k);
+    // 00 02, at least 8 non-zero padding octets, 00, then the message
+    if (message[0] != 0 || message[1] != 2) {
         return false;
     }
-    std::array<u8, 256> message{};
-    const int length = RSA_private_decrypt(256, ciphertext, message.data(), rsa, RSA_PKCS1_PADDING);
-    RSA_free(rsa);
-    if (length < static_cast<int>(out.size())) {
+    std::size_t at = 2;
+    while (at < Bytes && message[at] != 0) {
+        at++;
+    }
+    if (at < 10 || at >= Bytes || Bytes - (at + 1) < out.size()) {
         return false;
     }
-    std::memcpy(out.data(), message.data(), out.size());
+    std::memcpy(out.data(), message.data() + at + 1, out.size());
     return true;
 }
 
@@ -156,24 +161,23 @@ std::array<u8, 32> EntryIvKey(const PkgEntry& entry, const std::array<u8, 32>& d
     std::memcpy(input.data(), &entry, sizeof(entry));
     std::memcpy(input.data() + sizeof(entry), dk3.data(), dk3.size());
     std::array<u8, 32> ivkey{};
-    SHA256(input.data(), input.size(), ivkey.data());
+    sha256_state state;
+    sha256_stream_init(&state, 0);
+    sha256_stream_update(&state, input.data(), input.size());
+    sha256_stream_final(&state, ivkey.data());
     return ivkey;
 }
 
 // AES-128-CBC without padding: the IV is the first half of ivkey, the key the second.
 bool AesCbcDecrypt(const std::array<u8, 32>& ivkey, const u8* in, u8* out, std::size_t size) {
-    EVP_CIPHER_CTX* ctx = EVP_CIPHER_CTX_new();
-    if (!ctx) {
+    aes_ctx ctx;
+    if (aes_init(&ctx, ivkey.data() + 16, 16) != 0) {
         return false;
     }
-    int written = 0;
-    const bool ok =
-        EVP_DecryptInit_ex(ctx, EVP_aes_128_cbc(), nullptr, ivkey.data() + 16, ivkey.data()) ==
-            1 &&
-        EVP_CIPHER_CTX_set_padding(ctx, 0) == 1 &&
-        EVP_DecryptUpdate(ctx, out, &written, in, static_cast<int>(size)) == 1;
-    EVP_CIPHER_CTX_free(ctx);
-    return ok;
+    u8 iv[16];
+    std::memcpy(iv, ivkey.data(), sizeof(iv));
+    aes_cbc_decrypt(&ctx, iv, in, out, size / 16 * 16);
+    return true;
 }
 
 // A block's zlib stream, inflated straight into the block. Each thread that
@@ -445,21 +449,13 @@ bool PkgReader::Open(const std::filesystem::path& pkg_path,
         return false;
     }
     std::array<u8, 32> keys{};
-    unsigned int keys_size = 0;
-    HMAC(EVP_sha256(), ekpfs.data(), static_cast<int>(ekpfs.size()), input.data(), input.size(),
-         keys.data(), &keys_size);
+    hmac_sha256(ekpfs.data(), ekpfs.size(), input.data(), input.size(), keys.data());
     std::memcpy(tweak_key.data(), keys.data(), 16);
     std::memcpy(data_key.data(), keys.data() + 16, 16);
-    {
-        std::array<u8, 32> xts_key{};
-        std::memcpy(xts_key.data(), data_key.data(), 16);
-        std::memcpy(xts_key.data() + 16, tweak_key.data(), 16);
-        auto* ctx = static_cast<EVP_CIPHER_CTX*>(xts);
-        if (!ctx ||
-            EVP_DecryptInit_ex(ctx, EVP_aes_128_xts(), nullptr, xts_key.data(), nullptr) != 1) {
-            error = "the PFS's cipher could not be set up";
-            return false;
-        }
+    if (aes_init(&xts_data, data_key.data(), 16) != 0 ||
+        aes_init(&xts_tweak, tweak_key.data(), 16) != 0) {
+        error = "the PFS's cipher could not be set up";
+        return false;
     }
 
     if (!ParsePfs(error)) {
@@ -523,22 +519,14 @@ void PkgReader::AddNode(const std::string& rel, Node node) {
 }
 
 PkgReader::PkgReader()
-    : xts{EVP_CIPHER_CTX_new()}, cache_memory(CachedBlocks * (BlockSize + BlockTail)),
+    : cache_memory(CachedBlocks * (BlockSize + BlockTail)),
       sector_scratch(BlockSize + 2 * SectorSize) {
     cache_index.fill(NoBlock);
 }
 
-PkgReader::~PkgReader() {
-    EVP_CIPHER_CTX_free(static_cast<EVP_CIPHER_CTX*>(xts));
-}
-
 bool PkgReader::ReadSectors(u64 first_sector, u64 size, u8* out) {
-    // XTS-AES-128 over sectors of 0x1000, the sector number as the tweak: the key is set once,
-    // and each sector only gets its IV.
-    auto* ctx = static_cast<EVP_CIPHER_CTX*>(xts);
-    if (!ctx) {
-        return false;
-    }
+    // XTS-AES-128 over sectors of 0x1000, the sector number (little-endian) as the tweak, from
+    // where the sectors lie in the mapping straight into out
     const u64 base = pfs_image_offset + first_sector * SectorSize;
     for (u64 done = 0; done + SectorSize <= size; done += SectorSize) {
         const u64 at = base + done;
@@ -551,16 +539,12 @@ bool PkgReader::ReadSectors(u64 first_sector, u64 size, u8* out) {
             }
             in = partial.data();
         }
-        std::array<u8, 16> iv{};
+        std::array<u8, 16> tweak{};
         const u64 sector = first_sector + done / SectorSize;
         for (int i = 0; i < 8; i++) {
-            iv[i] = static_cast<u8>(sector >> (8 * i));
+            tweak[i] = static_cast<u8>(sector >> (8 * i));
         }
-        int written = 0;
-        if (EVP_DecryptInit_ex(ctx, nullptr, nullptr, nullptr, iv.data()) != 1 ||
-            EVP_DecryptUpdate(ctx, out + done, &written, in, static_cast<int>(SectorSize)) != 1) {
-            return false;
-        }
+        aes_xts_decrypt(&xts_data, &xts_tweak, tweak.data(), in, out + done, SectorSize);
     }
     return true;
 }

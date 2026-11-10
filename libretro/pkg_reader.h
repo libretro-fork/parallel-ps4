@@ -20,6 +20,8 @@
 #include <unordered_map>
 #include <vector>
 
+#include <crypto/crypto.h>
+
 #include "common/io_file.h"
 #include "common/types.h"
 
@@ -90,7 +92,6 @@ public:
     u64 Read(const Node& node, u64 offset, u64 size, void* dst);
 
     PkgReader();
-    ~PkgReader();
     PkgReader(const PkgReader&) = delete;
     PkgReader& operator=(const PkgReader&) = delete;
 
@@ -111,8 +112,9 @@ private:
     Common::FS::IOFile file;
     std::span<const u8> image;
     std::mutex mutex;
-    // XTS-AES with the data and tweak keys, set once: per sector only the IV changes
-    void* xts = nullptr;
+    // XTS-AES's data and tweak keys, expanded once: per sector only the tweak changes
+    aes_ctx xts_data{};
+    aes_ctx xts_tweak{};
 
     u64 pfs_image_offset = 0;
     u64 pfsc_offset = 0;
