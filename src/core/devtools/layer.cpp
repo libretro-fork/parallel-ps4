@@ -3,10 +3,8 @@
 
 #include "layer.h"
 
-#include <SDL3/SDL_events.h>
 #include <imgui.h>
 
-#include "SDL3/SDL_log.h"
 #include "common/singleton.h"
 #include "common/types.h"
 #include "core/debug_state.h"
@@ -32,7 +30,6 @@ using L = ::Core::Devtools::Layer;
 static bool show_simple_fps = false;
 static bool visibility_toggled = false;
 static bool fps_pinned = false;
-static bool show_quit_window = false;
 
 static bool show_volume = false;
 static float volume_start_time;
@@ -462,35 +459,6 @@ void L::Draw() {
         PopFont();
     }
 
-    if (show_quit_window) {
-        ImVec2 center = ImGui::GetMainViewport()->GetCenter();
-        ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
-
-        if (Begin("Quit Notification", nullptr,
-                  ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoDecoration |
-                      ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoDocking)) {
-            SetWindowFontScale(1.5f);
-            Overlay::TextCentered("Are you sure you want to quit?");
-            NewLine();
-            Text("Press Escape or Circle/B button to cancel");
-            Text("Press Enter or Cross/A button to quit");
-
-            if (IsKeyPressed(ImGuiKey_Escape, false) ||
-                (IsKeyPressed(ImGuiKey_GamepadFaceRight, false))) {
-                show_quit_window = false;
-            }
-
-            if (IsKeyPressed(ImGuiKey_Enter, false) ||
-                (IsKeyPressed(ImGuiKey_GamepadFaceDown, false))) {
-                SDL_Event event;
-                SDL_memset(&event, 0, sizeof(event));
-                event.type = SDL_EVENT_QUIT;
-                SDL_PushEvent(&event);
-            }
-        }
-        End();
-    }
-
     if (show_volume) {
         float current_time = ImGui::GetTime();
 
@@ -517,27 +485,9 @@ void L::Draw() {
 
 namespace Overlay {
 
-void TextCentered(const std::string& text) {
-    float window_width = GetContentRegionAvail().x;
-    float text_width = CalcTextSize(text.c_str()).x;
-    float text_indentation = (window_width - text_width) * 0.5f;
-
-    SetCursorPosX(text_indentation);
-    Text("%s", text.c_str());
-}
-
-void ToggleSimpleFps() {
-    show_simple_fps = !show_simple_fps;
-    visibility_toggled = true;
-}
-
 void SetSimpleFps(bool enabled) {
     show_simple_fps = enabled;
     visibility_toggled = true;
-}
-
-void ToggleQuitWindow() {
-    show_quit_window = !show_quit_window;
 }
 
 void ShowVolume() {

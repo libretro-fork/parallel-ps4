@@ -61,7 +61,7 @@
 #endif
 #include <core/file_format/npbind.h>
 
-Frontend::WindowSDL* g_window = nullptr;
+Frontend::Window* g_window = nullptr;
 
 namespace Libraries::Kernel {
 extern char const* g_environment[64];
@@ -101,11 +101,6 @@ void Emulator::Shutdown() {
         play_time_thread.join();
     }
     UpdatePlayTime(Common::Singleton<Common::ElfInfo>::Instance()->GameSerial());
-    if (controllers) {
-        controllers->ResetLightbarColors();
-        // need to give SDL time to do this before the runtime exits
-        std::this_thread::sleep_for(std::chrono::milliseconds{10});
-    }
     exit_done = true;
 }
 
@@ -584,29 +579,8 @@ void Emulator::Run(std::filesystem::path file, std::vector<std::string> args,
     game_info.trophy_index_map =
         ExtractTrophies("/app0/sce_sys/npbind.dat", "/app0/sce_sys/trophy");
 
-    std::string game_title = fmt::format("{} - {} <{}>", id, title, app_version);
-    std::string window_title = "";
-    std::string remote_url(Common::g_scm_remote_url);
-    std::string remote_host = Common::GetRemoteNameFromLink();
-    if (Common::g_is_release) {
-        if (remote_host == "shadps4-emu" || remote_url.length() == 0) {
-            window_title = fmt::format("shadPS4 v{} | {}", Common::g_version, game_title);
-        } else {
-            window_title =
-                fmt::format("shadPS4 {}/v{} | {}", remote_host, Common::g_version, game_title);
-        }
-    } else {
-        if (remote_host == "shadps4-emu" || remote_url.length() == 0) {
-            window_title = fmt::format("shadPS4 v{} {} {} | {}", Common::g_version,
-                                       Common::g_scm_branch, Common::g_scm_desc, game_title);
-        } else {
-            window_title = fmt::format("shadPS4 v{} {}/{} {} | {}", Common::g_version, remote_host,
-                                       Common::g_scm_branch, Common::g_scm_desc, game_title);
-        }
-    }
-    window = std::make_unique<Frontend::WindowSDL>(EmulatorSettings.GetWindowWidth(),
-                                                   EmulatorSettings.GetWindowHeight(), controllers,
-                                                   window_title);
+    window = std::make_unique<Frontend::Window>(EmulatorSettings.GetWindowWidth(),
+                                                EmulatorSettings.GetWindowHeight());
 
     g_window = window.get();
 
@@ -708,11 +682,7 @@ void Emulator::Run(std::filesystem::path file, std::vector<std::string> args,
 
     linker->Execute(args);
 
-    window->InitTimers();
-    while (window->IsOpen()) {
-        window->WaitEvent();
-    }
-
+    Frontend::WaitForQuit();
     std::quick_exit(0);
 }
 

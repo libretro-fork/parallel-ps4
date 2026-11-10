@@ -8,8 +8,6 @@
 #include <optional>
 #include <utility>
 
-#include <SDL3/SDL_gamepad.h>
-#include "SDL3/SDL_joystick.h"
 #include "common/assert.h"
 #include "common/ring_buffer_queue.h"
 #include "core/libraries/pad/pad.h"
@@ -87,7 +85,7 @@ class GameController {
 public:
     GameController();
     virtual ~GameController() = default;
-    void ConnectController(SDL_Gamepad* pad);
+    void ConnectController();
     void DisconnectController();
 
     State ReadState();
@@ -95,20 +93,16 @@ public:
 
     void Button(Libraries::Pad::OrbisPadButtonDataOffset button, bool isPressed);
     void Axis(Input::Axis axis, int value, bool smooth = true);
-    void UpdateGyro(const float gyro[3]);
-    void UpdateAcceleration(const float acceleration[3]);
     void PollState();
     void ResetOrientation();
     void SetLightBarRGB(u8 const r, u8 const g, u8 const b);
     void SetLightBarRGB(Colour const c);
     Colour GetLightBarRGB();
-    void PollLightColour();
     bool SetVibration(u8 smallMotor, u8 largeMotor);
     void SetTouchpadState(int touchIndex, bool touchDown, float x, float y);
 
     float gyro_buf[3] = {0.0f, 0.0f, 0.0f}, accel_buf[3] = {0.0f, 9.81f, 0.0f};
     s32 user_id = Libraries::UserService::ORBIS_USER_SERVICE_USER_ID_INVALID;
-    SDL_Gamepad* m_sdl_gamepad = nullptr;
 
 private:
     // m_state_mutex must be held by the caller.
@@ -119,7 +113,6 @@ private:
     u64 m_touch_down_timestamp{};
     u64 m_last_orientation_update{};
     Colour colour;
-    std::optional<Colour> override_colour{};
 
     State m_state;
 
@@ -141,19 +134,11 @@ public:
         }
         return controllers[i];
     }
-    void TryOpenSDLControllers();
-    u8 GetGamepadIndexFromJoystickId(SDL_JoystickID id);
+    // The first controller, connected and its user logged in when the game starts the pad
+    // library: the one the frontend's first port drives (libretro/host.cpp connects the others).
+    void ConnectFirstController();
     static std::optional<u8> GetControllerIndexFromUserID(s32 user_id);
     static std::optional<u8> GetControllerIndexFromControllerID(s32 controller_id);
-
-    void SetControllerCustomColor(s32 i, u8 r, u8 g, u8 b) {
-        // reset to ensure the next function always runs, even if there already was a preexisting
-        // override colour before
-        controllers[i]->override_colour = std::nullopt;
-        controllers[i]->SetLightBarRGB(r, g, b);
-        controllers[i]->override_colour = {r, g, b};
-    }
-    void ResetLightbarColors();
 };
 
 } // namespace Input

@@ -3,7 +3,6 @@
 
 #pragma once
 
-#include <SDL3/SDL_events.h>
 #include "common/types.h"
 
 namespace Core::Loader {
@@ -11,8 +10,6 @@ class SymbolsResolver;
 }
 
 namespace Libraries::Keyboard {
-
-bool PushSDLEvent(SDL_Event& e);
 
 static constexpr s32 ORBIS_KEYBOARD_ERROR_INVALID_ARG = 0x80DA0001;
 static constexpr s32 ORBIS_KEYBOARD_ERROR_INVALID_PORT = 0x80DA0002;

@@ -11,10 +11,6 @@
 #define TRACY_VK_USE_SYMBOL_TABLE
 #include <tracy/TracyVulkan.hpp>
 
-namespace Frontend {
-class WindowSDL;
-}
-
 VK_DEFINE_HANDLE(VmaAllocator)
 
 namespace Vulkan {
@@ -22,8 +18,7 @@ namespace Vulkan {
 class Instance {
 public:
     explicit Instance(bool validation = false, bool crash_diagnostic = false);
-    explicit Instance(Frontend::WindowSDL& window, s32 physical_device_index,
-                      bool enable_validation = false, bool enable_crash_diagnostic = false);
+    Instance(s32 physical_device_index, bool enable_validation, bool enable_crash_diagnostic);
     ~Instance();
 
     /// Returns a formatted string for the driver version

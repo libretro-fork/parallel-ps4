@@ -11,17 +11,11 @@
 #include "common/types.h"
 #include "video_core/renderer_vulkan/vk_common.h"
 
-namespace Frontend {
-enum class WindowSystemType : u8;
-class WindowSDL;
-} // namespace Frontend
-
 namespace Vulkan {
 
 constexpr u32 TargetVulkanApiVersion = VK_API_VERSION_1_3;
 
-vk::UniqueInstance CreateInstance(Frontend::WindowSystemType window_type, bool enable_validation,
-                                  bool enable_crash_diagnostic);
+vk::UniqueInstance CreateInstance(bool enable_validation, bool enable_crash_diagnostic);
 
 vk::UniqueDebugUtilsMessengerEXT CreateDebugCallback(vk::Instance instance);
 

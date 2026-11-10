@@ -2,10 +2,12 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <bit>
+#include <cfloat>
+#include <chrono>
 #include <cstdint>
-#include <SDL3/SDL_events.h>
 #include <imgui.h>
 
 #include "common/path_util.h"
@@ -14,12 +16,11 @@
 #include "core/emulator_settings.h"
 #include "font_data.h"
 #include "font_stack.h"
+#include "frontend_window.h"
 #include "imgui/imgui_layer.h"
 #include "imgui_core.h"
-#include "imgui_impl_sdl3.h"
 #include "imgui_impl_vulkan.h"
 #include "imgui_internal.h"
-#include "sdl_window.h"
 #include "texture_manager.h"
 #include "video_core/renderer_vulkan/vk_presenter.h"
 
@@ -36,6 +37,16 @@ static std::deque<std::pair<bool, ImGui::Layer*>> change_layers{};
 static std::mutex change_layers_mutex{};
 
 static ImGuiID dock_id;
+
+// ImGui's platform in the core: no window of the system's and no input of its own (the overlay
+// has no mouse or keyboard; the game's pad reads stay with the game), so all it is given is the
+// size of the picture it is drawn on and the time between frames.
+static const Frontend::Window* platform_window = nullptr;
+static std::chrono::steady_clock::time_point last_frame_time{};
+static std::chrono::steady_clock::time_point last_game_frame_time{};
+static std::array<float, 60> game_frame_seconds{};
+static float game_frame_seconds_sum = 0.0f;
+static std::size_t game_frame_index = 0;
 static std::atomic<std::uint32_t> force_gamepad_input_capture_count{0};
 
 namespace ImGui {
@@ -61,7 +72,7 @@ bool IsGamepadInputCaptured() {
     return force_gamepad_input_capture_count.load(std::memory_order_relaxed) > 0;
 }
 
-void Initialize(const ::Vulkan::Instance& instance, const Frontend::WindowSDL& window,
+void Initialize(const ::Vulkan::Instance& instance, const Frontend::Window& window,
                 const u32 image_count, vk::Format surface_format,
                 const vk::AllocationCallbacks* allocator) {
 
@@ -116,7 +127,8 @@ void Initialize(const ::Vulkan::Instance& instance, const Frontend::WindowSDL& w
     StyleColorsDark();
 
     ::Core::Devtools::Layer::SetupSettings();
-    Sdl::Init(window.GetSDLWindow());
+    platform_window = &window;
+    io.BackendPlatformName = "shadps4_libretro";
 
     const Vulkan::InitInfo vk_info{
         .instance = instance.GetInstance(),
@@ -141,15 +153,7 @@ void Initialize(const ::Vulkan::Instance& instance, const Frontend::WindowSDL& w
     ImFormatString(label, IM_ARRAYSIZE(label), "WindowOverViewport_%08X", GetMainViewport()->ID);
     dock_id = ImHashStr(label);
 
-    if (const auto dpi = SDL_GetWindowDisplayScale(window.GetSDLWindow()); dpi > 0.0f) {
-        GetIO().FontGlobalScale *= dpi;
-    }
-
     std::at_quick_exit([] { SaveIniSettingsToDisk(GetIO().IniFilename); });
-}
-
-void OnResize() {
-    Sdl::OnResize();
 }
 
 void OnSurfaceFormatChange(vk::Format surface_format) {
@@ -170,53 +174,45 @@ void Shutdown(const vk::Device& device) {
     const auto log_filename = (void*)io.LogFilename;
 
     Vulkan::Shutdown();
-    Sdl::Shutdown();
+    platform_window = nullptr;
+    GetIO().BackendPlatformName = nullptr;
     DestroyContext();
 
     delete[] (char*)ini_filename;
     delete[] (char*)log_filename;
 }
 
-bool ProcessEvent(SDL_Event* event) {
-    Sdl::ProcessEvent(event);
-    switch (event->type) {
-    // Don't block release/up events
-    case SDL_EVENT_MOUSE_MOTION:
-    case SDL_EVENT_MOUSE_WHEEL:
-    case SDL_EVENT_MOUSE_BUTTON_DOWN: {
-        const auto& io = GetIO();
-        return io.WantCaptureMouse && io.Ctx->NavWindow != nullptr &&
-               (io.Ctx->NavWindow->Flags & ImGuiWindowFlags_NoNav) == 0;
-    }
-    case SDL_EVENT_TEXT_INPUT:
-    case SDL_EVENT_KEY_DOWN: {
-        if (IsGamepadInputCaptured()) {
-            // Keep keyboard events flowing through the regular input-binding path while IME/OSK
-            // captures gamepad input, so keyboard equivalents of pad buttons still update the
-            // virtual controller state.
-            return false;
-        }
-        const auto& io = GetIO();
-        return io.WantCaptureKeyboard && io.Ctx->NavWindow != nullptr &&
-               io.Ctx->NavWindow->ID != dock_id;
-    }
-    case SDL_EVENT_GAMEPAD_BUTTON_DOWN:
-    case SDL_EVENT_GAMEPAD_BUTTON_UP:
-    case SDL_EVENT_GAMEPAD_AXIS_MOTION:
-    case SDL_EVENT_GAMEPAD_TOUCHPAD_DOWN:
-    case SDL_EVENT_GAMEPAD_TOUCHPAD_UP:
-    case SDL_EVENT_GAMEPAD_TOUCHPAD_MOTION:
-    case SDL_EVENT_GAMEPAD_SENSOR_UPDATE: {
-        if (IsGamepadInputCaptured()) {
-            // Let controller events continue to input bindings so OSK shortcuts and virtual
-            // controller state keep updating; game-side pad reads are blocked in libScePad.
-            return false;
-        }
-        const auto& io = GetIO();
-        return io.NavActive && io.Ctx->NavWindow != nullptr && io.Ctx->NavWindow->ID != dock_id;
-    }
-    default:
-        return false;
+// Each frame: the picture's size, the time step, and, on a frame of
+// the game's own, its frame time and rate for the overlay.
+static void PlatformNewFrame(bool is_reusing_frame) {
+    using namespace std::chrono;
+    ImGuiIO& io = GetIO();
+    io.DisplaySize = ImVec2(static_cast<float>(platform_window->GetWidth()),
+                            static_cast<float>(platform_window->GetHeight()));
+
+    const auto now = steady_clock::now();
+    const auto seconds = [](steady_clock::duration d) {
+        return std::max(duration<float>(d).count(), FLT_MIN);
+    };
+    io.DeltaTime = last_frame_time.time_since_epoch().count() != 0 ? seconds(now - last_frame_time)
+                                                                   : 1.0f / 60.0f;
+    last_frame_time = now;
+
+    if (!is_reusing_frame) {
+        const float delta = last_game_frame_time.time_since_epoch().count() != 0
+                                ? seconds(now - last_game_frame_time)
+                                : 1.0f / 60.0f;
+        last_game_frame_time = now;
+        DebugState.FrameDeltaTime = delta;
+
+        float& slot = game_frame_seconds[game_frame_index];
+        game_frame_seconds_sum += delta - slot;
+        slot = delta;
+        game_frame_index = (game_frame_index + 1) % game_frame_seconds.size();
+        DebugState.Framerate =
+            game_frame_seconds_sum > 0.0f
+                ? 1.0f / (game_frame_seconds_sum / static_cast<float>(game_frame_seconds.size()))
+                : FLT_MAX;
     }
 }
 
@@ -235,7 +231,7 @@ ImGuiID NewFrame(bool is_reusing_frame) {
         }
     }
 
-    Sdl::NewFrame(is_reusing_frame);
+    PlatformNewFrame(is_reusing_frame);
     ImGui::NewFrame();
     SetKeyOwner(ImGuiKey_GamepadFaceUp, ImHashStr("shadps4/pad"));
 

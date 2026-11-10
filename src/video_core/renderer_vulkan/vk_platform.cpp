@@ -17,7 +17,6 @@
 #include "common/logging/log.h"
 #include "common/path_util.h"
 #include "core/emulator_settings.h"
-#include "sdl_window.h"
 #include "video_core/renderer_vulkan/vk_platform.h"
 
 #ifdef __APPLE__
@@ -87,8 +86,7 @@ static auto GetLayerExtensions(std::vector<const char*>&& extensions,
     return extensions;
 }
 
-std::vector<const char*> GetInstanceExtensions(Frontend::WindowSystemType window_type,
-                                               bool enable_debug_utils) {
+std::vector<const char*> GetInstanceExtensions(bool enable_debug_utils) {
     const auto [properties_result, properties] = vk::enumerateInstanceExtensionProperties();
     if (properties_result != vk::Result::eSuccess || properties.empty()) {
         LOG_ERROR(Render_Vulkan, "Failed to query extension properties: {}",
@@ -96,41 +94,9 @@ std::vector<const char*> GetInstanceExtensions(Frontend::WindowSystemType window
         return {};
     }
 
-    // Add the windowing system specific extension
+    // No surface: the frontend presents the picture.
     std::vector<const char*> extensions;
-    extensions.reserve(7);
-
-    switch (window_type) {
-    case Frontend::WindowSystemType::Headless:
-        break;
-#if defined(VK_USE_PLATFORM_WIN32_KHR)
-    case Frontend::WindowSystemType::Windows:
-        extensions.push_back(VK_KHR_WIN32_SURFACE_EXTENSION_NAME);
-        break;
-#elif defined(VK_USE_PLATFORM_XLIB_KHR) || defined(VK_USE_PLATFORM_WAYLAND_KHR)
-    case Frontend::WindowSystemType::X11:
-        extensions.push_back(VK_KHR_XLIB_SURFACE_EXTENSION_NAME);
-        break;
-    case Frontend::WindowSystemType::Wayland:
-        extensions.push_back(VK_KHR_WAYLAND_SURFACE_EXTENSION_NAME);
-        break;
-#elif defined(VK_USE_PLATFORM_METAL_EXT)
-    case Frontend::WindowSystemType::Metal:
-        extensions.push_back(VK_EXT_METAL_SURFACE_EXTENSION_NAME);
-        break;
-#endif
-    default:
-        LOG_ERROR(Render_Vulkan, "Presentation not supported on this platform");
-        break;
-    }
-
-    if (window_type != Frontend::WindowSystemType::Headless) {
-        extensions.push_back(VK_KHR_SURFACE_EXTENSION_NAME);
-    }
-
-    if (EmulatorSettings.IsHdrAllowed()) {
-        extensions.push_back(VK_EXT_SWAPCHAIN_COLOR_SPACE_EXTENSION_NAME);
-    }
+    extensions.reserve(2);
 
     if (enable_debug_utils) {
         extensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
@@ -186,8 +152,7 @@ std::vector<const char*> GetInstanceLayers(bool enable_validation, bool enable_c
     return layers;
 }
 
-vk::UniqueInstance CreateInstance(Frontend::WindowSystemType window_type, bool enable_validation,
-                                  bool enable_crash_diagnostic) {
+vk::UniqueInstance CreateInstance(bool enable_validation, bool enable_crash_diagnostic) {
     LOG_INFO(Render_Vulkan, "Creating vulkan instance");
 
 #if defined(__APPLE__)
@@ -218,7 +183,7 @@ vk::UniqueInstance CreateInstance(Frontend::WindowSystemType window_type, bool e
                VK_VERSION_MAJOR(available_version), VK_VERSION_MINOR(available_version));
 
     const auto layers = GetInstanceLayers(enable_validation, enable_crash_diagnostic);
-    const auto extensions = GetLayerExtensions(GetInstanceExtensions(window_type, true), layers);
+    const auto extensions = GetLayerExtensions(GetInstanceExtensions(true), layers);
 
     const vk::ApplicationInfo application_info = {
         .pApplicationName = "shadPS4",

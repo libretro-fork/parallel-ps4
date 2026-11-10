@@ -5,9 +5,9 @@
 #include <limits>
 #include "common/assert.h"
 #include "common/logging/log.h"
+#include "frontend_window.h"
 #include "imgui/renderer/imgui_core.h"
 #include "libretro/libretro_bridge.h"
-#include "sdl_window.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_swapchain.h"
 
@@ -18,7 +18,7 @@ namespace Vulkan {
 // the frontend's XRGB8888 byte for byte.
 static constexpr u32 OFFSCREEN_IMAGE_COUNT = 3;
 
-Swapchain::Swapchain(const Instance& instance_, const Frontend::WindowSDL& window_)
+Swapchain::Swapchain(const Instance& instance_, const Frontend::Window& window_)
     : instance{instance_}, window{window_} {
     surface_format.format = vk::Format::eB8G8R8A8Unorm;
     surface_format.colorSpace = vk::ColorSpaceKHR::eSrgbNonlinear;

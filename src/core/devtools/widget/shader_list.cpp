@@ -14,7 +14,6 @@
 #include "core/devtools/options.h"
 #include "core/emulator_settings.h"
 #include "imgui/imgui_std.h"
-#include "sdl_window.h"
 #include "video_core/renderer_vulkan/vk_presenter.h"
 #include "video_core/renderer_vulkan/vk_rasterizer.h"
 
@@ -31,14 +30,9 @@ ShaderList::Selection::Selection(int index)
     isa_editor->SetReadOnly(true);
     glsl_editor->SetPalette(TextEditor::GetDarkPalette());
     glsl_editor->SetLanguageDefinition(TextEditor::LanguageDefinition::GLSL());
-    presenter->GetWindow().RequestKeyboard();
 }
 
-ShaderList::Selection::~Selection() {
-    if (index >= 0) {
-        presenter->GetWindow().ReleaseKeyboard();
-    }
-}
+ShaderList::Selection::~Selection() = default;
 
 ShaderList::Selection::Selection(Selection&& other) noexcept
     : index{other.index}, isa_editor{std::move(other.isa_editor)},

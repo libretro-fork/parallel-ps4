@@ -616,8 +616,6 @@ int PS4_SYSV_ABI scePadSetLoginUserNumber() {
 int PS4_SYSV_ABI scePadSetMotionSensorState(s32 handle, bool bEnable) {
     LOG_ERROR(Lib_Pad, "(STUBBED) called");
     return ORBIS_OK;
-    // it's already handled by the SDL backend and will be on no matter what
-    // (assuming the controller supports it)
 }
 
 int PS4_SYSV_ABI scePadSetProcessFocus() {
@@ -746,7 +744,7 @@ int PS4_SYSV_ABI Func_EF103E845B6F0420() {
 }
 
 void RegisterLib(Core::Loader::SymbolsResolver* sym) {
-    Common::Singleton<GameControllers>::Instance()->TryOpenSDLControllers();
+    Common::Singleton<GameControllers>::Instance()->ConnectFirstController();
 
     LIB_FUNCTION("6ncge5+l5Qs", "libScePad", 1, "libScePad", scePadClose);
     LIB_FUNCTION("kazv1NzSB8c", "libScePad", 1, "libScePad", scePadConnectPort);

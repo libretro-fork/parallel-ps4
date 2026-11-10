@@ -6,8 +6,6 @@
 #include <iostream>
 #include <string>
 
-#include <SDL3/SDL.h>
-
 #include "common/memory_patcher.h"
 #include "common/thread.h"
 #include "common/types.h"
@@ -16,8 +14,7 @@
 #include "core/emulator_settings.h"
 #include "core/emulator_state.h"
 #include "core/libraries/audio/audioout.h"
-#include "input/input_handler.h"
-#include "sdl_window.h"
+#include "frontend_window.h"
 #include "src/core/libraries/usbd/usbd.h"
 #include "video_core/renderer_vulkan/vk_presenter.h"
 
@@ -48,7 +45,7 @@ extern std::unique_ptr<Vulkan::Presenter> presenter;
  * Command list:
  * - CAPABILITIES:
  *   - ENABLE_MEMORY_PATCH: enables PATCH_MEMORY command
- *   - ENABLE_EMU_CONTROL: enables PAUSE, RESUME, STOP, TOGGLE_FULLSCREEN commands
+ *   - ENABLE_EMU_CONTROL: enables PAUSE, RESUME, STOP commands
  * - INPUT CMD:
  *   - RUN: start the emulator execution
  *   - START: start the game execution
@@ -60,7 +57,6 @@ extern std::unique_ptr<Vulkan::Presenter> presenter;
  *   - PAUSE: pause the game execution
  *   - RESUME: resume the game execution
  *   - STOP: stop and quit the emulator
- *   - TOGGLE_FULLSCREEN: enable / disable fullscreen
  * - OUTPUT CMD:
  *   - RESTART(argn: number, argv: ...string): Request restart of the emulator, must call STOP
  **/
@@ -142,15 +138,7 @@ void IPC::InputLoop() {
         } else if (cmd == "RESUME") {
             DebugState.ResumeGuestThreads();
         } else if (cmd == "STOP") {
-            SDL_Event event;
-            SDL_memset(&event, 0, sizeof(event));
-            event.type = SDL_EVENT_QUIT;
-            SDL_PushEvent(&event);
-        } else if (cmd == "TOGGLE_FULLSCREEN") {
-            SDL_Event event;
-            SDL_memset(&event, 0, sizeof(event));
-            event.type = SDL_EVENT_TOGGLE_FULLSCREEN;
-            SDL_PushEvent(&event);
+            Frontend::RequestQuit();
         } else if (cmd == "ADJUST_VOLUME") {
             int value = static_cast<int>(next_u64());
             bool is_game_specific = next_u64() != 0;
@@ -209,9 +197,6 @@ void IPC::InputLoop() {
                 const u8 index = next_u64();
                 ref->CancelRemoveFigure(index);
             }
-        } else if (cmd == "RELOAD_INPUTS") {
-            std::string config = next_str();
-            Input::ParseInputConfig(config);
         } else {
             std::cerr << ";UNKNOWN CMD: " << cmd << std::endl;
         }

@@ -5,10 +5,7 @@
 #include <cmath>
 #include <cstring>
 #include <mutex>
-#include <unordered_set>
 #include <utility>
-
-#include <SDL3/SDL.h>
 
 #include "common/logging/log.h"
 #include "common/singleton.h"
@@ -109,16 +106,6 @@ void GameController::Axis(Input::Axis axis, int value, bool smooth) {
     PushStateLocked(timestamp);
 }
 
-void GameController::UpdateGyro(const float gyro[3]) {
-    std::lock_guard lock{m_state_mutex};
-    std::memcpy(gyro_buf, gyro, sizeof(gyro_buf));
-}
-
-void GameController::UpdateAcceleration(const float acceleration[3]) {
-    std::lock_guard lock{m_state_mutex};
-    std::memcpy(accel_buf, acceleration, sizeof(accel_buf));
-}
-
 void GameController::PollState() {
     std::lock_guard lock{m_state_mutex};
     PushStateLocked();
@@ -154,12 +141,8 @@ void GameController::SetTouchpadState(int touch_index, bool touch_down, float x,
     PushStateLocked(timestamp);
 }
 
-void GameController::ConnectController(SDL_Gamepad* pad) {
+void GameController::ConnectController() {
     std::lock_guard lock{m_state_mutex};
-    m_sdl_gamepad = pad;
-    if (override_colour) {
-        SetLightBarRGB({});
-    }
     m_states_queue.Clear();
     if (!m_state.connected) {
         ++m_state.connected_count;
@@ -175,7 +158,6 @@ void GameController::ConnectController(SDL_Gamepad* pad) {
 void GameController::DisconnectController() {
     std::lock_guard lock{m_state_mutex};
     m_states_queue.Clear();
-    m_sdl_gamepad = nullptr;
 
     const u8 connected_count = m_state.connected_count;
     m_state = {};
@@ -217,18 +199,10 @@ void GameController::PushStateLocked(u64 timestamp) {
     m_states_queue.Push(m_state);
 }
 
+// The light bar's colour, as the game set it, for the game to read back: the frontend has no
+// light bar to show it on.
 void GameController::SetLightBarRGB(u8 const r, u8 const g, u8 const b) {
-    if (override_colour.has_value()) {
-        if (m_sdl_gamepad) {
-            SDL_SetGamepadLED(m_sdl_gamepad, override_colour->r, override_colour->g,
-                              override_colour->b);
-        }
-        return;
-    }
     colour = {r, g, b};
-    if (m_sdl_gamepad != nullptr) {
-        SDL_SetGamepadLED(m_sdl_gamepad, r, g, b);
-    }
 }
 
 void GameController::SetLightBarRGB(Colour const c) {
@@ -237,28 +211,6 @@ void GameController::SetLightBarRGB(Colour const c) {
 
 Colour GameController::GetLightBarRGB() {
     return colour;
-}
-
-void GameController::PollLightColour() {
-    if (m_sdl_gamepad != nullptr) {
-        SDL_SetGamepadLED(m_sdl_gamepad, colour.r, colour.g, colour.b);
-    }
-}
-
-void GameControllers::ResetLightbarColors() {
-    for (auto& c : controllers) {
-        auto const* u = UserManagement.GetUserByID(c->user_id);
-        if (!u || !c->m_sdl_gamepad) {
-            continue;
-        }
-        auto const i = u->user_color - 1;
-        if (i < 0 || i > 3) {
-            continue;
-        }
-        auto const& col = g_user_colours[i];
-        c->override_colour = std::nullopt;
-        c->SetLightBarRGB(col);
-    }
 }
 
 bool GameController::SetVibration(u8 smallMotor, u8 largeMotor) {
@@ -270,116 +222,19 @@ bool GameController::SetVibration(u8 smallMotor, u8 largeMotor) {
             break;
         }
     }
-    if (m_sdl_gamepad != nullptr) {
-        return SDL_RumbleGamepad(m_sdl_gamepad, (smallMotor / 255.0f) * 0xFFFF,
-                                 (largeMotor / 255.0f) * 0xFFFF, -1);
-    }
     return true;
 }
 
-static bool is_first_check = true;
-
-void GameControllers::TryOpenSDLControllers() {
-    using namespace Libraries::UserService;
-    // SDL's gamepads are not started in the core (sdl_window.cpp), and are not to be asked:
-    // none, so the first controller is connected below as the one driven from outside.
-    int controller_count = 0;
-    SDL_JoystickID* new_joysticks = nullptr;
-    LOG_INFO(Input, "{} controllers are currently connected", controller_count);
-
-    std::unordered_set<SDL_JoystickID> assigned_ids;
-    std::array<bool, 4> slot_taken{false, false, false, false};
-
-    for (int i = 0; i < 4; i++) {
-        SDL_Gamepad* pad = controllers[i]->m_sdl_gamepad;
-        if (pad) {
-            SDL_JoystickID id = SDL_GetGamepadID(pad);
-            bool still_connected = false;
-            for (int j = 0; j < controller_count; j++) {
-                if (new_joysticks[j] == id) {
-                    still_connected = true;
-                    assigned_ids.insert(id);
-                    slot_taken[i] = true;
-                    break;
-                }
-            }
-            if (!still_connected) {
-                SDL_CloseGamepad(pad);
-                controllers[i]->DisconnectController();
-                controllers[i]->user_id = -1;
-                slot_taken[i] = false;
-            }
-        }
+void GameControllers::ConnectFirstController() {
+    static bool connected = false;
+    if (connected) [[likely]] {
+        return;
     }
-
-    for (int j = 0; j < controller_count; j++) {
-        SDL_JoystickID id = new_joysticks[j];
-        if (assigned_ids.contains(id))
-            continue;
-
-        SDL_Gamepad* pad = SDL_OpenGamepad(id);
-        if (!pad) {
-            continue;
-        }
-
-        for (int i = 0; i < 4; i++) {
-            if (!slot_taken[i]) {
-                auto u = UserManagement.GetUserByPlayerIndex(i + 1);
-                if (!u) {
-                    LOG_INFO(Input, "User {} not found", i + 1);
-                    continue; // for now, if you don't specify who Player N is in the config,
-                              // Player N won't be registered at all
-                }
-                auto* c = controllers[i];
-                LOG_INFO(Input, "Gamepad registered for slot {}! Handle: {}", i,
-                         SDL_GetGamepadID(pad));
-                slot_taken[i] = true;
-                c->user_id = u->user_id;
-                UserManagement.LoginUser(u, i + 1);
-                c->ConnectController(pad);
-                if (EmulatorSettings.IsMotionControlsEnabled()) {
-                    if (SDL_SetGamepadSensorEnabled(c->m_sdl_gamepad, SDL_SENSOR_GYRO, true)) {
-                        const float poll_rate =
-                            SDL_GetGamepadSensorDataRate(c->m_sdl_gamepad, SDL_SENSOR_GYRO);
-                        LOG_INFO(Input, "Gyro initialized, poll rate: {}", poll_rate);
-                    } else {
-                        LOG_ERROR(Input, "Failed to initialize gyro controls for gamepad {}",
-                                  c->user_id);
-                    }
-                    if (SDL_SetGamepadSensorEnabled(c->m_sdl_gamepad, SDL_SENSOR_ACCEL, true)) {
-                        const float poll_rate =
-                            SDL_GetGamepadSensorDataRate(c->m_sdl_gamepad, SDL_SENSOR_ACCEL);
-                        LOG_INFO(Input, "Accel initialized, poll rate: {}", poll_rate);
-                    } else {
-                        LOG_ERROR(Input, "Failed to initialize accel controls for gamepad {}",
-                                  c->user_id);
-                    }
-                }
-                break;
-            }
-        }
-    }
-    if (is_first_check) [[unlikely]] {
-        is_first_check = false;
-        if (controller_count == 0) {
-            auto u = UserManagement.GetUserByPlayerIndex(1);
-            controllers[0]->user_id = u->user_id;
-            controllers[0]->ConnectController(nullptr);
-            UserManagement.LoginUser(u, 1);
-        }
-    }
-    SDL_free(new_joysticks);
-}
-u8 GameControllers::GetGamepadIndexFromJoystickId(SDL_JoystickID id) {
-    auto g = SDL_GetGamepadFromID(id);
-    ASSERT(g != nullptr);
-    for (int i = 0; i < 5; i++) {
-        if (controllers[i]->m_sdl_gamepad == g) {
-            return i;
-        }
-    }
-    // LOG_TRACE(Input, "Gamepad index: {}", index);
-    return -1;
+    connected = true;
+    auto* u = UserManagement.GetUserByPlayerIndex(1);
+    controllers[0]->user_id = u->user_id;
+    controllers[0]->ConnectController();
+    UserManagement.LoginUser(u, 1);
 }
 
 std::optional<u8> GameControllers::GetControllerIndexFromUserID(s32 user_id) {

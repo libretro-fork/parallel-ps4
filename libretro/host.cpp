@@ -166,13 +166,17 @@ void PumpAudio() {
   }
 }
 
-// The frontend's ports onto the controllers. Only what changed: every call queues a state for
-// the game to read.
+// The frontend's ports onto the controllers. Only what changed: every call
+// queues a state for the game to read.
 //
-// The first controller is connected by the emulator itself, as the one it has when no gamepad
-// is plugged in (GameControllers::TryOpenSDLControllers, from scePadInit). The others, as many
-// as the Controllers option says, are connected here the way that function connects a gamepad:
-// the user of that player number is logged in and the controller marked connected.
+// The first controller is connected by the emulator itself when the game loads
+// the pad library (GameControllers::ConnectFirstController). The others, as
+// many as the Controllers option says, are connected here the same way: the
+// user of that player number is logged in and the controller marked connected.
+//
+// Each connected controller also reports its state every 4 ms whether or not it
+// changed, as a pad does: a game reading several states at once gets the
+// history it expects.
 void PumpInput() {
     using Libraries::Pad::OrbisPadButtonDataOffset;
     static constexpr OrbisPadButtonDataOffset buttons[] = {
@@ -197,9 +201,11 @@ void PumpInput() {
     }
     const std::uint32_t pads = std::clamp<std::uint32_t>(shared->options.pads, 1, Libretro::MAX_PADS);
     bool others_connected = false;
+    bool report = false;
 
     for (;;) {
         std::this_thread::sleep_for(std::chrono::milliseconds(2));
+        report = !report;
         if (!frame_seen) {
             continue;
         }
@@ -219,7 +225,7 @@ void PumpInput() {
                 }
                 controllers[pad]->user_id = user->user_id;
                 UserManagement.LoginUser(user, static_cast<s32>(pad) + 1);
-                controllers[pad]->ConnectController(nullptr);
+                controllers[pad]->ConnectController();
                 LOG_INFO(Input, "Controller {} connected from the frontend's port {}", pad + 1,
                          pad + 1);
             }
@@ -245,6 +251,9 @@ void PumpInput() {
                     axis_value[pad][i] = value;
                     controller->Axis(axes[i], static_cast<int>(value), false);
                 }
+            }
+            if (report) {
+              controller->PollState();
             }
         }
     }

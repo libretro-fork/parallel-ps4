@@ -9,8 +9,8 @@
 
 #include "common/singleton.h"
 #include "core/linker.h"
+#include "frontend_window.h"
 #include "input/controller.h"
-#include "sdl_window.h"
 
 namespace Core {
 
@@ -54,7 +54,7 @@ private:
     Core::MemoryManager* memory;
     Input::GameControllers* controllers;
     Core::Linker* linker;
-    std::unique_ptr<Frontend::WindowSDL> window;
+    std::unique_ptr<Frontend::Window> window;
     std::chrono::steady_clock::time_point start_time;
     std::jthread play_time_thread;
 };

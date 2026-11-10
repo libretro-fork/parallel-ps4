@@ -27,3 +27,13 @@ src/resources/big_picture/trophy.png
 src/core/libraries/audio/sdl_audio_out.cpp
 externals/toml11
 src/core/libraries/audio/sdl_audio_in.cpp
+src/sdl_window.cpp
+src/sdl_window.h
+src/input/input_handler.cpp
+src/input/input_handler.h
+src/input/input_mouse.cpp
+src/input/input_mouse.h
+src/core/libraries/mouse/sdl_mouse.cpp
+src/core/libraries/mouse/sdl_mouse.h
+src/imgui/renderer/imgui_impl_sdl3.cpp
+src/imgui/renderer/imgui_impl_sdl3.h

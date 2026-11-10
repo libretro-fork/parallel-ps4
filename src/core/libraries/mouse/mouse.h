@@ -4,7 +4,6 @@
 #pragma once
 
 #include "common/enum.h"
-#include "common/ring_buffer_queue.h"
 #include "core/libraries/system/userservice.h"
 
 namespace Core::Loader {
@@ -34,11 +33,6 @@ struct OrbisMouseOpenParam {
     MouseOpenBehaviour flag;
     u8 reserve[7];
 };
-
-extern RingBufferQueue<OrbisMouseData> mouse_states[2];
-extern s32 mouse_handles[2];
-extern s32 mouse_sdl_handles[2];
-extern bool g_lib_init, g_is_merged_mode;
 
 s32 PS4_SYSV_ABI sceMouseClose(s32 handle);
 s32 PS4_SYSV_ABI sceMouseConnectPort();

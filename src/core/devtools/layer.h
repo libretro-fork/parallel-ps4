@@ -28,11 +28,7 @@ private:
 
 namespace Overlay {
 
-void ToggleSimpleFps();
 void SetSimpleFps(bool enabled);
-void ToggleQuitWindow();
 void ShowVolume();
-
-void TextCentered(const std::string& text);
 
 } // namespace Overlay

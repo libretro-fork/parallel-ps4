@@ -12,7 +12,6 @@
 #include "common/types.h"
 #include "imgui/renderer/imgui_core.h"
 #include "libretro/libretro_bridge.h"
-#include "sdl_window.h"
 #include "video_core/renderer_vulkan/liverpool_to_vk.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_platform.h"
@@ -92,14 +91,11 @@ std::string GetReadableVersion(u32 version) {
 } // Anonymous namespace
 
 Instance::Instance(bool enable_validation, bool enable_crash_diagnostic)
-    : instance{CreateInstance(Frontend::WindowSystemType::Headless, enable_validation,
-                              enable_crash_diagnostic)},
+    : instance{CreateInstance(enable_validation, enable_crash_diagnostic)},
       physical_devices{EnumeratePhysicalDevices(instance)} {}
 
-Instance::Instance(Frontend::WindowSDL& window, s32 physical_device_index,
-                   bool enable_validation /*= false*/, bool enable_crash_diagnostic /*= false*/)
-    : instance{
-          CreateInstance(window.GetWindowInfo().type, enable_validation, enable_crash_diagnostic)},
+Instance::Instance(s32 physical_device_index, bool enable_validation, bool enable_crash_diagnostic)
+    : instance{CreateInstance(enable_validation, enable_crash_diagnostic)},
       physical_devices{EnumeratePhysicalDevices(instance)} {
     if (enable_validation) {
         debug_callback = CreateDebugCallback(*instance);

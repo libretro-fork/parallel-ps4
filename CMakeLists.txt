@@ -510,8 +510,6 @@ set(SYSTEM_LIBS src/core/libraries/system/commondialog.cpp
                 src/core/libraries/mouse/mouse_error.h
                 src/core/libraries/keyboard/keyboard.cpp
                 src/core/libraries/keyboard/keyboard.h
-                src/core/libraries/mouse/sdl_mouse.cpp
-                src/core/libraries/mouse/sdl_mouse.h
                 src/core/libraries/web_browser_dialog/webbrowserdialog.cpp
                 src/core/libraries/web_browser_dialog/webbrowserdialog.h
                 src/core/libraries/font/font.cpp
@@ -1300,8 +1298,6 @@ set(IMGUI src/imgui/imgui_config.h
           src/imgui/notifications_layer.h
           src/imgui/renderer/imgui_core.cpp
           src/imgui/renderer/imgui_core.h
-          src/imgui/renderer/imgui_impl_sdl3.cpp
-          src/imgui/renderer/imgui_impl_sdl3.h
           src/imgui/renderer/imgui_impl_vulkan.cpp
           src/imgui/renderer/imgui_impl_vulkan.h
           src/imgui/renderer/font_data.cpp
@@ -1315,16 +1311,11 @@ set(IMGUI src/imgui/imgui_config.h
 set(INPUT src/input/controller.cpp
           src/input/controller.h
           src/input/controller_state.cpp
-          src/input/input_handler.cpp
-          src/input/input_handler.h
-          src/input/input_mouse.cpp
-          src/input/input_mouse.h
 )
 
 set(EMULATOR src/emulator.cpp
              src/emulator.h
-             src/sdl_window.h
-             src/sdl_window.cpp
+             src/frontend_window.h
 )
 
 # shadNet protobuf generation
@@ -1394,8 +1385,7 @@ add_library(shadps4 MODULE
     libretro/shared_state.h
     src/emulator.cpp
     src/emulator.h
-    src/sdl_window.h
-    src/sdl_window.cpp
+    src/frontend_window.h
 )
 set_target_properties(shadps4 PROPERTIES PREFIX "" OUTPUT_NAME "shadps4_libretro")
 

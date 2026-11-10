@@ -17,12 +17,6 @@
 
 #define EmulatorSettings (*EmulatorSettingsImpl::GetInstance())
 
-enum HideCursorState : int {
-    Never,
-    Idle,
-    Always,
-};
-
 enum UsbBackendType : int {
     Real,
     SkylandersPortal,
@@ -305,47 +299,26 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(DebugSettings, debug_dump, shader_collect, co
 // -------------------------------
 
 struct InputSettings {
-    Setting<int> cursor_state{HideCursorState::Idle};      // specific
-    Setting<int> cursor_hide_timeout{5};                   // specific
     Setting<int> usb_device_backend{UsbBackendType::Real}; // specific
     Setting<bool> use_special_pad{false};
     Setting<int> special_pad_class{1};
-    Setting<bool> motion_controls_enabled{true}; // specific
-    Setting<bool> use_unified_input_config{true};
-    Setting<std::string> default_controller_id{""};
-    Setting<bool> background_controller_input{false}; // specific
     Setting<bool> ime_accessibility_enabled{false};   // specific
     Setting<bool> ime_url_mail_short_panel{false};    // specific
     Setting<bool> is_circle_enter{false};             // specific
-    Setting<bool> use_mice_as_mice{false};
-    Setting<bool> use_keyboard_as_keyboard{false};
 
     std::vector<OverrideItem> GetOverrideableFields() const {
         return std::vector<OverrideItem>{
-            make_override<InputSettings>("cursor_state", &InputSettings::cursor_state),
-            make_override<InputSettings>("cursor_hide_timeout",
-                                         &InputSettings::cursor_hide_timeout),
             make_override<InputSettings>("usb_device_backend", &InputSettings::usb_device_backend),
-            make_override<InputSettings>("motion_controls_enabled",
-                                         &InputSettings::motion_controls_enabled),
-            make_override<InputSettings>("background_controller_input",
-                                         &InputSettings::background_controller_input),
             make_override<InputSettings>("ime_accessibility_enabled",
                                          &InputSettings::ime_accessibility_enabled),
             make_override<InputSettings>("ime_url_mail_short_panel",
                                          &InputSettings::ime_url_mail_short_panel),
-            make_override<InputSettings>("is_circle_enter", &InputSettings::is_circle_enter),
-            make_override<InputSettings>("use_mice_as_mice", &InputSettings::use_mice_as_mice),
-            make_override<InputSettings>("use_keyboard_as_keyboard",
-                                         &InputSettings::use_keyboard_as_keyboard)};
+            make_override<InputSettings>("is_circle_enter", &InputSettings::is_circle_enter)};
     }
 };
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(InputSettings, cursor_state, cursor_hide_timeout,
-                                   usb_device_backend, use_special_pad, special_pad_class,
-                                   motion_controls_enabled, use_unified_input_config,
-                                   default_controller_id, background_controller_input,
-                                   ime_accessibility_enabled, ime_url_mail_short_panel,
-                                   is_circle_enter, use_mice_as_mice, use_keyboard_as_keyboard)
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(InputSettings, usb_device_backend, use_special_pad,
+                                   special_pad_class, ime_accessibility_enabled,
+                                   ime_url_mail_short_panel, is_circle_enter)
 // -------------------------------
 // GPU settings
 // -------------------------------
@@ -701,20 +674,12 @@ public:
     }
 
     // Input Settings
-    SETTING_FORWARD(m_input, CursorState, cursor_state)
-    SETTING_FORWARD(m_input, CursorHideTimeout, cursor_hide_timeout)
     SETTING_FORWARD(m_input, UsbDeviceBackend, usb_device_backend)
-    SETTING_FORWARD_BOOL(m_input, MotionControlsEnabled, motion_controls_enabled)
-    SETTING_FORWARD_BOOL(m_input, BackgroundControllerInput, background_controller_input)
     SETTING_FORWARD_BOOL(m_input, ImeAccessibilityEnabled, ime_accessibility_enabled)
     SETTING_FORWARD_BOOL(m_input, ImeUrlMailShortPanel, ime_url_mail_short_panel)
-    SETTING_FORWARD(m_input, DefaultControllerId, default_controller_id)
     SETTING_FORWARD_BOOL(m_input, UsingSpecialPad, use_special_pad)
     SETTING_FORWARD(m_input, SpecialPadClass, special_pad_class)
-    SETTING_FORWARD_BOOL(m_input, UseUnifiedInputConfig, use_unified_input_config)
     SETTING_FORWARD_BOOL(m_input, CircleEnter, is_circle_enter)
-    SETTING_FORWARD_BOOL(m_input, MiceUsedAsMice, use_mice_as_mice)
-    SETTING_FORWARD_BOOL(m_input, KeyboardUsedAsKeyboard, use_keyboard_as_keyboard)
 
     // Vulkan settings
     SETTING_FORWARD(m_vulkan, GpuId, gpu_id)
