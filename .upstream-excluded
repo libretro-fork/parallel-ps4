@@ -49,3 +49,5 @@ externals/miniz
 externals/zarchive
 externals/zstd
 cmake/FindZArchive.cmake
+externals/libpng
+externals/zlib-ng

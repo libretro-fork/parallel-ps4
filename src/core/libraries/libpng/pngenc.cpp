@@ -1,8 +1,12 @@
 // SPDX-FileCopyrightText: Copyright 2026 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
-#include <algorithm>
-#include <png.h>
+#include <cstdlib>
+
+#include <formats/rpng.h>
+#include <libretro.h>
+#include <streams/interface_stream.h>
+
 #include "common/logging/log.h"
 #include "core/libraries/error_codes.h"
 #include "core/libraries/libpng/pngenc.h"
@@ -12,61 +16,12 @@
 
 namespace Libraries::PngEnc {
 
+// The handle's memory, as the game sizes it with scePngEncQueryMemorySize. An encode needs
+// nothing kept between calls: libretro-common's rpng (formats/rpng.h) encodes from the game's
+// image straight into its output buffer.
 struct PngHandler {
-    png_structp png_ptr;
-    png_infop info_ptr;
+    u64 reserved[2];
 };
-
-struct PngWriter {
-    u8* cursor;
-    u8* start;
-    size_t capacity;
-    bool cancel_write;
-};
-
-static inline int MapPngFilter(u16 filter) {
-    if (filter == (u16)OrbisPngEncFilterType::All) {
-        return PNG_ALL_FILTERS;
-    }
-
-    int f = 0;
-
-    if (filter & (u16)OrbisPngEncFilterType::None)
-        f |= PNG_FILTER_NONE;
-    if (filter & (u16)OrbisPngEncFilterType::Sub)
-        f |= PNG_FILTER_SUB;
-    if (filter & (u16)OrbisPngEncFilterType::Up)
-        f |= PNG_FILTER_UP;
-    if (filter & (u16)OrbisPngEncFilterType::Average)
-        f |= PNG_FILTER_AVG;
-    if (filter & (u16)OrbisPngEncFilterType::Paeth)
-        f |= PNG_FILTER_PAETH;
-
-    return f;
-}
-
-void PngWriteFn(png_structp png_ptr, png_bytep data, size_t length) {
-    PngWriter* ctx = (PngWriter*)png_get_io_ptr(png_ptr);
-
-    if ((size_t)(ctx->cursor - ctx->start) + length > ctx->capacity) {
-        LOG_ERROR(Lib_Png, "PNG output buffer too small");
-        ctx->cancel_write = true;
-        return;
-    }
-
-    memcpy(ctx->cursor, data, length);
-    ctx->cursor += length;
-}
-
-void PngFlushFn(png_structp png_ptr) {}
-
-void PngEncError(png_structp png_ptr, png_const_charp error_message) {
-    LOG_ERROR(Lib_Png, "PNG error {}", error_message);
-}
-
-void PngEncWarning(png_structp png_ptr, png_const_charp error_message) {
-    LOG_ERROR(Lib_Png, "PNG warning {}", error_message);
-}
 
 s32 PS4_SYSV_ABI scePngEncCreate(const OrbisPngEncCreateParam* param, void* memoryAddress,
                                  u32 memorySize, OrbisPngEncHandle* handle) {
@@ -86,27 +41,12 @@ s32 PS4_SYSV_ABI scePngEncCreate(const OrbisPngEncCreateParam* param, void* memo
     }
 
     auto pngh = (PngHandler*)memoryAddress;
-
-    pngh->png_ptr =
-        png_create_write_struct(PNG_LIBPNG_VER_STRING, nullptr, PngEncError, PngEncWarning);
-
-    if (pngh->png_ptr == nullptr)
-        return ORBIS_PNG_ENC_ERROR_FATAL;
-
-    pngh->info_ptr = png_create_info_struct(pngh->png_ptr);
-    if (pngh->info_ptr == nullptr) {
-        png_destroy_write_struct(&pngh->png_ptr, nullptr);
-        return false;
-    }
-
     *handle = pngh;
 
     return ORBIS_OK;
 }
 
 s32 PS4_SYSV_ABI scePngEncDelete(OrbisPngEncHandle handle) {
-    auto pngh = (PngHandler*)handle;
-    png_destroy_write_struct(&pngh->png_ptr, &pngh->info_ptr);
     return ORBIS_OK;
 }
 
@@ -136,105 +76,44 @@ s32 PS4_SYSV_ABI scePngEncEncode(OrbisPngEncHandle handle, const OrbisPngEncEnco
         return ORBIS_PNG_ENC_ERROR_INVALID_SIZE;
     }
 
-    auto pngh = (PngHandler*)handle;
+    // 8 bits a channel, RGBA or BGRA in memory, rows image_pitch bytes apart. rpng chooses
+    // each row's filter by itself and compresses at its own level, so the game's filter and
+    // level only change how small the file comes out, not what it decodes to.
+    if (param->bit_depth != 8) {
+        LOG_WARNING(Lib_Png, "PNG encode at bit depth {}: written at 8", param->bit_depth);
+    }
+    const bool bgra = param->pixel_format == OrbisPngEncPixelFormat::B8G8R8A8;
+    const bool alpha = param->color_space == OrbisPngEncColorSpace::RGBA;
+    const rpng_pixfmt format = alpha ? (bgra ? RPNG_PIXFMT_ARGB32 : RPNG_PIXFMT_RGBA32)
+                                     : (bgra ? RPNG_PIXFMT_XRGB8888 : RPNG_PIXFMT_XBGR8888);
+    const u32 pitch = param->image_pitch ? param->image_pitch : param->image_width * 4;
 
-    if (setjmp(png_jmpbuf(pngh->png_ptr))) {
-        LOG_ERROR(Lib_Png, "LibPNG aborted encode");
+    intfstream_t* out =
+        intfstream_open_memory(param->png_mem_addr, RETRO_VFS_FILE_ACCESS_WRITE,
+                               RETRO_VFS_FILE_ACCESS_HINT_NONE, param->png_mem_size);
+    if (!out) {
         return ORBIS_PNG_ENC_ERROR_FATAL;
     }
+    const bool ok =
+        rpng_save_image_stream_fmt(param->image_mem_addr, out, param->image_width,
+                                   param->image_height, static_cast<s32>(pitch), format, nullptr);
+    const s64 size = intfstream_tell(out);
+    intfstream_close(out);
+    free(out);
 
-    int png_color_type = PNG_COLOR_TYPE_RGB;
-
-    if (param->color_space == OrbisPngEncColorSpace::RGBA) {
-        png_color_type |= PNG_COLOR_MASK_ALPHA;
-    }
-
-    int png_interlace_type = PNG_INTERLACE_NONE;
-    int png_compression_type = PNG_COMPRESSION_TYPE_DEFAULT;
-    int png_filter_method = PNG_FILTER_TYPE_DEFAULT;
-
-    PngWriter writer{};
-    writer.cursor = param->png_mem_addr;
-    writer.start = param->png_mem_addr;
-    writer.capacity = param->png_mem_size;
-
-    png_set_write_fn(pngh->png_ptr, &writer, PngWriteFn, PngFlushFn);
-
-    png_set_IHDR(pngh->png_ptr, pngh->info_ptr, param->image_width, param->image_height,
-                 param->bit_depth, png_color_type, png_interlace_type, png_compression_type,
-                 png_filter_method);
-
-    if (param->pixel_format == OrbisPngEncPixelFormat::B8G8R8A8) {
-        png_set_bgr(pngh->png_ptr);
-    }
-
-    png_set_compression_level(pngh->png_ptr, std::clamp<u16>(param->compression_level, 0, 9));
-    png_set_filter(pngh->png_ptr, 0, MapPngFilter(param->filter_type));
-
-    png_write_info(pngh->png_ptr, pngh->info_ptr);
-
-    int channels = 4;
-    size_t row_stride = param->image_width * channels;
-
-    uint32_t processed_height = 0;
-
-    if (param->color_space == OrbisPngEncColorSpace::RGBA) {
-        for (; processed_height < param->image_height; ++processed_height) {
-            png_bytep row = (png_bytep)param->image_mem_addr + processed_height * row_stride;
-            png_write_row(pngh->png_ptr, row);
-
-            if (outputInfo != nullptr) {
-                outputInfo->processed_height = processed_height;
-            }
-
-            if (writer.cancel_write) {
-                LOG_ERROR(Lib_Png, "Ran out of room to write PNG");
-                return ORBIS_PNG_ENC_ERROR_DATA_OVERFLOW;
-            }
+    if (!ok) {
+        if (size >= static_cast<s64>(param->png_mem_size)) {
+            LOG_ERROR(Lib_Png, "Ran out of room to write PNG");
+            return ORBIS_PNG_ENC_ERROR_DATA_OVERFLOW;
         }
-    } else {
-        // our input data is always rgba but when outputting without an alpha channel, libpng
-        // expects the input to not have alpha either, i couldn't find a way around this easily?
-        // png_strip_alpha is for reading and set_background wasn't working, this seems fine...?
-        std::vector<uint8_t> rgb_row(param->image_width * 3);
-
-        for (; processed_height < param->image_height; ++processed_height) {
-            const unsigned char* src =
-                param->image_mem_addr + processed_height * param->image_pitch;
-
-            uint8_t* dst = rgb_row.data();
-
-            for (uint32_t x = 0; x < param->image_width; ++x) {
-                dst[0] = src[0];
-                dst[1] = src[1];
-                dst[2] = src[2];
-                src += 4; // skip reading alpha channel
-                dst += 3;
-            }
-
-            png_write_row(pngh->png_ptr, rgb_row.data());
-
-            if (outputInfo != nullptr) {
-                outputInfo->processed_height = processed_height;
-            }
-
-            if (writer.cancel_write) {
-                LOG_ERROR(Lib_Png, "Ran out of room to write PNG");
-                return ORBIS_PNG_ENC_ERROR_DATA_OVERFLOW;
-            }
-        }
+        LOG_ERROR(Lib_Png, "PNG encode failed");
+        return ORBIS_PNG_ENC_ERROR_FATAL;
     }
-
-    png_write_flush(pngh->png_ptr);
-
-    png_write_end(pngh->png_ptr, pngh->info_ptr);
-
     if (outputInfo != nullptr) {
-        outputInfo->data_size = writer.cursor - writer.start;
-        outputInfo->processed_height = processed_height;
+        outputInfo->data_size = static_cast<u32>(size);
+        outputInfo->processed_height = param->image_height;
     }
-
-    return writer.cursor - writer.start;
+    return static_cast<s32>(size);
 }
 
 s32 PS4_SYSV_ABI scePngEncQueryMemorySize(const OrbisPngEncCreateParam* param) {

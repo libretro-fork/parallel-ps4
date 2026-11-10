@@ -271,7 +271,6 @@ if (ENABLE_SYSTEM_LIBRARIES)
     find_package(magic_enum 0.9.7 CONFIG)
     find_package(miniupnpc 2.3.3 MODULE)
     find_package(nlohmann_json 3.12 CONFIG)
-    find_package(PNG 1.6 MODULE)
     find_package(LibreSSL 4.3.1 MODULE)
     find_package(RenderDoc 1.6.0 MODULE)
     find_package(stb MODULE)
@@ -279,7 +278,6 @@ if (ENABLE_SYSTEM_LIBRARIES)
     find_package(VulkanHeaders 1.4.330 CONFIG)
     find_package(VulkanMemoryAllocator 3.1.0 CONFIG)
     find_package(xbyak 7.07 CONFIG)
-    find_package(ZLIB 1.3 MODULE)
     find_package(Zydis 5.0.0 MODULE)
     find_package(pugixml 1.14 CONFIG)
     find_package(absl 20250512.1 CONFIG)
@@ -1398,12 +1396,19 @@ set(LIBRETRO_COMMON_SOURCES
     ${LIBRETRO_COMMON_DIR}/file/file_path_io.c
     ${LIBRETRO_COMMON_DIR}/formats/flac/rflac.c
     ${LIBRETRO_COMMON_DIR}/formats/mp3/rmp3.c
+    ${LIBRETRO_COMMON_DIR}/formats/png/rpng.c
+    ${LIBRETRO_COMMON_DIR}/formats/png/rpng_encode.c
     ${LIBRETRO_COMMON_DIR}/formats/zar/zar.c
     ${LIBRETRO_COMMON_DIR}/queues/retro_spsc.c
     ${LIBRETRO_COMMON_DIR}/queues/retro_waitable_spsc.c
     ${LIBRETRO_COMMON_DIR}/rthreads/retro_eventcount.c
     ${LIBRETRO_COMMON_DIR}/rthreads/rthreads.c
     ${LIBRETRO_COMMON_DIR}/streams/file_stream.c
+    ${LIBRETRO_COMMON_DIR}/streams/interface_stream.c
+    ${LIBRETRO_COMMON_DIR}/streams/memory_stream.c
+    ${LIBRETRO_COMMON_DIR}/streams/trans_stream.c
+    ${LIBRETRO_COMMON_DIR}/streams/trans_stream_deflate.c
+    ${LIBRETRO_COMMON_DIR}/streams/trans_stream_pipe.c
     ${LIBRETRO_COMMON_DIR}/string/rstrtod.c
     ${LIBRETRO_COMMON_DIR}/string/stdstring.c
     ${LIBRETRO_COMMON_DIR}/time/rtime.c
@@ -1476,7 +1481,7 @@ endif()
 create_target_directory_groups(shadps4)
 
 target_link_libraries(shadps4 PRIVATE spdlog::spdlog)
-target_link_libraries(shadps4 PRIVATE magic_enum::magic_enum fmt::fmt tsl::robin_map xbyak::xbyak Tracy::TracyClient RenderDoc::API FFmpeg::ffmpeg Dear_ImGui ImGuiFileDialog gcn half::half PNG::PNG)
+target_link_libraries(shadps4 PRIVATE magic_enum::magic_enum fmt::fmt tsl::robin_map xbyak::xbyak Tracy::TracyClient RenderDoc::API FFmpeg::ffmpeg Dear_ImGui ImGuiFileDialog gcn half::half)
 target_link_libraries(shadps4 PRIVATE Boost::headers GPUOpen::VulkanMemoryAllocator LibAtrac9 sirit Vulkan::Headers Zydis::Zydis pugixml::pugixml)
 target_link_libraries(shadps4 PRIVATE stb::headers lfreist-hwinfo::hwinfo nlohmann_json::nlohmann_json fdk-aac CLI11::CLI11 Cpp_Httplib miniupnpc::miniupnpc)
 target_link_libraries(shadps4 PRIVATE Freetype::Freetype)

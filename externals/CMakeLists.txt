@@ -46,25 +46,6 @@ file(GLOB LIBATRAC9_SOURCES LibAtrac9/C/src/*.c)
 add_library(LibAtrac9 STATIC ${LIBATRAC9_SOURCES})
 target_include_directories(LibAtrac9 INTERFACE LibAtrac9/C/src)
 
-# zlib
-if (NOT TARGET ZLIB::ZLIB)
-    set(ZLIB_ENABLE_TESTS OFF)
-    set(WITH_GTEST OFF)
-    set(WITH_NEW_STRATEGIES ON)
-    set(ZLIB_COMPAT ON CACHE BOOL "" FORCE)
-    include(FetchContent)
-    FetchContent_Declare(
-        ZLIB
-        SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/zlib-ng"
-        OVERRIDE_FIND_PACKAGE
-    )
-    FetchContent_MakeAvailable(ZLIB)
-    add_library(ZLIB::ZLIB ALIAS zlib)
-    # Only for libpng, which the game's PNG libraries are built on; the core's own inflating is
-    # libretro-common's. libpng expects this variable to exist after its find_package(ZLIB)
-    set(ZLIB_INCLUDE_DIRS "${FETCHCONTENT_BASE_DIR}/zlib-build")
-endif()
-
 # FreeType
 if (NOT TARGET Freetype::Freetype)
     # Keep optional deps off to reduce build surface: the fonts it reads are not compressed.
@@ -143,17 +124,6 @@ if (NOT TARGET half::half)
     add_library(half INTERFACE)
     target_include_directories(half INTERFACE half/include)
     add_library(half::half ALIAS half)
-endif()
-
-# libpng
-if (NOT TARGET PNG::PNG)
-    set(PNG_SHARED OFF CACHE BOOL "" FORCE)
-    set(PNG_STATIC ON CACHE BOOL "" FORCE)
-    set(PNG_TESTS OFF CACHE BOOL "" FORCE)
-    set(PNG_TOOLS OFF CACHE BOOL "" FORCE)
-    set(SKIP_INSTALL_ALL OFF CACHE BOOL "" FORCE)
-    add_subdirectory(libpng)
-    add_library(PNG::PNG ALIAS png_static)
 endif()
 
 # Dear ImGui
