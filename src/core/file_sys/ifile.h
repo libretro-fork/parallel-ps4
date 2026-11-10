@@ -106,6 +106,14 @@ public:
         return true;
     }
 
+    /// Whether Read writes the destination with the emulator's own code (a copy out of a mapping,
+    /// a decoder), which the memory tracker's fault handler serves when the destination is a
+    /// protected guest page, so a guest's buffer can be read into directly. False when Read
+    /// is a read() system call, which fails with EFAULT on such a page instead.
+    virtual bool ReadsInPlace() const {
+        return true;
+    }
+
     virtual bool IsReadOnly() const {
         return true;
     }

@@ -114,13 +114,14 @@ void DataBase::Close() {
 template <typename T>
 bool WriteVector(const BlobType type, std::filesystem::path&& path_, std::vector<T>&& v) {
     {
-        auto request = std::packaged_task<void()>{[=]() {
-            auto path{path_};
-            path.replace_extension(GetBlobFileExtension(type));
-            using namespace Common::FS;
-            const auto file = IOFile{path, FileAccessMode::Create, FileHint::Sequential};
-            file.Write(v);
-        }};
+        // The blob moves into the request: written from where it is, never copied
+        auto request =
+            std::packaged_task<void()>{[type, path = std::move(path_), v = std::move(v)]() mutable {
+                path.replace_extension(GetBlobFileExtension(type));
+                using namespace Common::FS;
+                const auto file = IOFile{path, FileAccessMode::Create, FileHint::Sequential};
+                file.Write(v);
+            }};
         std::scoped_lock lock{m_request};
         req_queue.emplace(std::move(request));
     }

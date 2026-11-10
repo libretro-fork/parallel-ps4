@@ -28,6 +28,9 @@ constexpr u32 PfscMagic = 0x43534650;
 constexpr u64 SectorSize = 0x1000;
 constexpr u64 BlockSize = 0x10000;
 constexpr std::size_t CachedBlocks = 16;
+// Zeros past a cached block, for a directory record read at its end
+constexpr u64 BlockTail = 0x400;
+constexpr u32 NoBlock = ~0u;
 
 // The PKG header as upstream's pkg.h had it.
 struct PkgHeader {
@@ -374,13 +377,18 @@ bool ReadPkgSummary(const std::filesystem::path& path, PkgSummary& summary, std:
 bool PkgReader::Open(const std::filesystem::path& pkg_path,
                      const std::filesystem::path& keys_file, std::string& error) {
     path = pkg_path;
-    file.Open(path, Common::FS::FileAccessMode::Read);
+    file.Open(path, Common::FS::FileAccessMode::Read, Common::FS::FileHint::Mapped);
     PkgHeader header{};
     if (!ReadHeader(file, header, error)) {
         return false;
     }
     if (header.pkg_size > file.GetSize()) {
         error = "the PKG is shorter than its header says (an incomplete download?)";
+        return false;
+    }
+    image = file.Mapped();
+    if (image.size() != file.GetSize()) {
+        error = "the PKG could not be mapped";
         return false;
     }
     pfs_image_offset = header.pfs_image_offset;
@@ -442,6 +450,17 @@ bool PkgReader::Open(const std::filesystem::path& pkg_path,
          keys.data(), &keys_size);
     std::memcpy(tweak_key.data(), keys.data(), 16);
     std::memcpy(data_key.data(), keys.data() + 16, 16);
+    {
+        std::array<u8, 32> xts_key{};
+        std::memcpy(xts_key.data(), data_key.data(), 16);
+        std::memcpy(xts_key.data() + 16, tweak_key.data(), 16);
+        auto* ctx = static_cast<EVP_CIPHER_CTX*>(xts);
+        if (!ctx ||
+            EVP_DecryptInit_ex(ctx, EVP_aes_128_xts(), nullptr, xts_key.data(), nullptr) != 1) {
+            error = "the PFS's cipher could not be set up";
+            return false;
+        }
+    }
 
     if (!ParsePfs(error)) {
         return false;
@@ -461,6 +480,14 @@ bool PkgReader::Open(const std::filesystem::path& pkg_path,
         node.entry_id = entry.id;
         node.entry_offset = entry.offset;
         node.size = entry.size;
+        // license.dat, license.info, nptitle.dat and npbind.dat are encrypted.
+        node.entry_encrypted = entry.id >= 0x400 && entry.id <= 0x403;
+        if (node.entry_encrypted) {
+            node.entry_ivkey = EntryIvKey(entry, dk3);
+        }
+        if (static_cast<u64>(entry.offset) + entry.size > image.size()) {
+            continue;
+        }
         AddNode(rel, std::move(node));
     }
     return true;
@@ -495,40 +522,52 @@ void PkgReader::AddNode(const std::string& rel, Node node) {
     slot = std::move(node);
 }
 
-bool PkgReader::DecryptSectors(u8* data, u64 size, u64 first_sector) {
-    // XTS-AES-128 over sectors of 0x1000, the sector number as the tweak.
-    EVP_CIPHER_CTX* ctx = EVP_CIPHER_CTX_new();
+PkgReader::PkgReader()
+    : xts{EVP_CIPHER_CTX_new()}, cache_memory(CachedBlocks * (BlockSize + BlockTail)),
+      sector_scratch(BlockSize + 2 * SectorSize) {
+    cache_index.fill(NoBlock);
+}
+
+PkgReader::~PkgReader() {
+    EVP_CIPHER_CTX_free(static_cast<EVP_CIPHER_CTX*>(xts));
+}
+
+bool PkgReader::ReadSectors(u64 first_sector, u64 size, u8* out) {
+    // XTS-AES-128 over sectors of 0x1000, the sector number as the tweak: the key is set once,
+    // and each sector only gets its IV.
+    auto* ctx = static_cast<EVP_CIPHER_CTX*>(xts);
     if (!ctx) {
         return false;
     }
-    std::array<u8, 32> key{};
-    std::memcpy(key.data(), data_key.data(), 16);
-    std::memcpy(key.data() + 16, tweak_key.data(), 16);
-    bool ok = true;
-    for (u64 done = 0; ok && done + SectorSize <= size; done += SectorSize) {
+    const u64 base = pfs_image_offset + first_sector * SectorSize;
+    for (u64 done = 0; done + SectorSize <= size; done += SectorSize) {
+        const u64 at = base + done;
+        const u8* in = image.data() + at;
+        std::array<u8, SectorSize> partial{};
+        if (at + SectorSize > image.size()) {
+            // The PKG ends inside it: what there is, then zeros, as a short read left them
+            if (at < image.size()) {
+                std::memcpy(partial.data(), in, image.size() - at);
+            }
+            in = partial.data();
+        }
         std::array<u8, 16> iv{};
         const u64 sector = first_sector + done / SectorSize;
         for (int i = 0; i < 8; i++) {
             iv[i] = static_cast<u8>(sector >> (8 * i));
         }
         int written = 0;
-        ok = EVP_DecryptInit_ex(ctx, EVP_aes_128_xts(), nullptr, key.data(), iv.data()) == 1 &&
-             EVP_DecryptUpdate(ctx, data + done, &written, data + done,
-                               static_cast<int>(SectorSize)) == 1;
-    }
-    EVP_CIPHER_CTX_free(ctx);
-    return ok;
-}
-
-const std::vector<u8>* PkgReader::Block(u32 index) {
-    for (auto it = cache.begin(); it != cache.end(); ++it) {
-        if (it->first == index) {
-            cache.splice(cache.begin(), cache, it);
-            return &cache.front().second;
+        if (EVP_DecryptInit_ex(ctx, nullptr, nullptr, nullptr, iv.data()) != 1 ||
+            EVP_DecryptUpdate(ctx, out + done, &written, in, static_cast<int>(SectorSize)) != 1) {
+            return false;
         }
     }
+    return true;
+}
+
+bool PkgReader::DecodeBlock(u32 index, u8* out) {
     if (index + 1 >= block_map.size()) {
-        return nullptr;
+        return false;
     }
     const u64 offset = block_map[index];
     const u64 size = block_map[index + 1] - offset;
@@ -536,26 +575,44 @@ const std::vector<u8>* PkgReader::Block(u32 index) {
     const u64 start = pfsc_offset + offset;
     const u64 skip = start % SectorSize;
     const u64 span = (skip + size + SectorSize - 1) / SectorSize * SectorSize;
-    std::vector<u8> sectors(span);
-    if (!file.Seek(pfs_image_offset + start - skip)) {
-        return nullptr;
+    if (size >= BlockSize && skip == 0) {
+        // Stored as it is, on whole sectors: decrypted straight into place
+        return ReadSectors(start / SectorSize, BlockSize, out);
     }
-    file.ReadRaw<u8>(sectors.data(), sectors.size()); // a short read at the end stays zeroed
-    if (!DecryptSectors(sectors.data(), sectors.size(), (start - skip) / SectorSize)) {
-        return nullptr;
+    if (span > sector_scratch.size()) {
+        return false;
     }
-
-    std::vector<u8> block(BlockSize);
+    if (!ReadSectors((start - skip) / SectorSize, span, sector_scratch.data())) {
+        return false;
+    }
     if (size >= BlockSize) {
-        std::memcpy(block.data(), sectors.data() + skip, BlockSize); // stored as it is
+        std::memcpy(out, sector_scratch.data() + skip, BlockSize); // stored as it is
     } else {
-        Inflate(sectors.data() + skip, size, block.data(), block.size());
+        Inflate(sector_scratch.data() + skip, size, out, BlockSize);
     }
-    if (cache.size() >= CachedBlocks) {
-        cache.pop_back();
+    return true;
+}
+
+const u8* PkgReader::Block(u32 index) {
+    std::size_t slot = 0;
+    for (std::size_t i = 0; i < CachedBlocks; i++) {
+        if (cache_index[i] == index) {
+            cache_used[i] = ++cache_clock;
+            return cache_memory.data() + i * (BlockSize + BlockTail);
+        }
+        if (cache_used[i] < cache_used[slot]) {
+            slot = i;
+        }
     }
-    cache.emplace_front(index, std::move(block));
-    return &cache.front().second;
+    // Into the least recently used slot
+    u8* out = cache_memory.data() + slot * (BlockSize + BlockTail);
+    cache_index[slot] = NoBlock;
+    if (!DecodeBlock(index, out)) {
+        return nullptr;
+    }
+    cache_index[slot] = index;
+    cache_used[slot] = ++cache_clock;
+    return out;
 }
 
 bool PkgReader::ParsePfs(std::string& error) {
@@ -564,9 +621,7 @@ bool PkgReader::ParsePfs(std::string& error) {
     const u64 image_size = file.GetSize() - pfs_image_offset;
     for (u64 at = 0x20000; at + SectorSize <= image_size && at < 0x1000000; at += BlockSize) {
         std::array<u8, SectorSize> sector{};
-        if (!file.Seek(pfs_image_offset + at) ||
-            file.ReadRaw<u8>(sector.data(), sector.size()) != sector.size() ||
-            !DecryptSectors(sector.data(), sector.size(), at / SectorSize)) {
+        if (!ReadSectors(at / SectorSize, SectorSize, sector.data())) {
             break;
         }
         u32 magic = 0;
@@ -584,9 +639,7 @@ bool PkgReader::ParsePfs(std::string& error) {
     PFSCHdr header{};
     {
         std::array<u8, SectorSize> sector{};
-        file.Seek(pfs_image_offset + pfsc_offset);
-        file.ReadRaw<u8>(sector.data(), sector.size());
-        DecryptSectors(sector.data(), sector.size(), pfsc_offset / SectorSize);
+        ReadSectors(pfsc_offset / SectorSize, SectorSize, sector.data());
         std::memcpy(&header, sector.data(), sizeof(header));
     }
     if (header.block_sz2 <= 0 || header.data_length <= 0) {
@@ -601,9 +654,7 @@ bool PkgReader::ParsePfs(std::string& error) {
         const u64 skip = map_start % SectorSize;
         const u64 span = (skip + map_bytes + SectorSize - 1) / SectorSize * SectorSize;
         std::vector<u8> sectors(span);
-        file.Seek(pfs_image_offset + map_start - skip);
-        file.ReadRaw<u8>(sectors.data(), sectors.size());
-        DecryptSectors(sectors.data(), sectors.size(), (map_start - skip) / SectorSize);
+        ReadSectors((map_start - skip) / SectorSize, span, sectors.data());
         block_map.resize(num_blocks + 1);
         std::memcpy(block_map.data(), sectors.data() + skip, map_bytes);
     }
@@ -616,22 +667,21 @@ bool PkgReader::ParsePfs(std::string& error) {
     int counter = 0;
     bool dinode_reached = false;
     bool uroot_reached = false;
-    // Room past the block for a Dirent read at its end.
-    std::vector<u8> data(BlockSize + sizeof(Dirent));
+    // Read in place in the cache, whose zeroed tail takes a Dirent read at a block's end
+    static_assert(sizeof(Dirent) <= BlockTail);
     for (u64 i = 0; i < num_blocks; i++) {
-        const auto* block = Block(static_cast<u32>(i));
-        if (!block) {
+        const u8* data = Block(static_cast<u32>(i));
+        if (!data) {
             break;
         }
-        std::memcpy(data.data(), block->data(), BlockSize);
         if (i == 0) {
-            std::memcpy(&inode_count, data.data() + 0x30, 4);
+            std::memcpy(&inode_count, data + 0x30, 4);
         }
         const u64 inode_blocks = (static_cast<u64>(inode_count) * 0xA8 + BlockSize - 1) / BlockSize;
         if (i >= 1 && i <= inode_blocks) {
             for (u64 p = 0; p + sizeof(Inode) <= BlockSize; p += 0xA8) {
                 Inode node;
-                std::memcpy(&node, data.data() + p, sizeof(node));
+                std::memcpy(&node, data + p, sizeof(node));
                 if (node.Mode == 0) {
                     break;
                 }
@@ -639,14 +689,14 @@ bool PkgReader::ParsePfs(std::string& error) {
             }
         }
 
-        if (std::string_view(reinterpret_cast<const char*>(data.data()) + 0x10, 15) ==
+        if (std::string_view(reinterpret_cast<const char*>(data) + 0x10, 15) ==
             "flat_path_table") {
             uroot_reached = true;
         }
         if (uroot_reached) {
             for (u64 j = 0; j < BlockSize;) {
                 Dirent dirent;
-                std::memcpy(&dirent, data.data() + j, sizeof(dirent));
+                std::memcpy(&dirent, data + j, sizeof(dirent));
                 if (dirent.ino != 0) {
                     counter++;
                 } else {
@@ -663,14 +713,14 @@ bool PkgReader::ParsePfs(std::string& error) {
         }
 
         if (data[0x10] == '.' &&
-            std::string_view(reinterpret_cast<const char*>(data.data()) + 0x28, 2) == "..") {
+            std::string_view(reinterpret_cast<const char*>(data) + 0x28, 2) == "..") {
             dinode_reached = true;
         }
         bool end_reached = false;
         if (dinode_reached) {
             for (u64 j = 0; j < BlockSize;) {
                 Dirent dirent;
-                std::memcpy(&dirent, data.data() + j, sizeof(dirent));
+                std::memcpy(&dirent, data + j, sizeof(dirent));
                 if (dirent.ino == 0 || dirent.entsize <= 0 || dirent.namelen < 0 ||
                     dirent.namelen > 255) {
                     break;
@@ -702,7 +752,8 @@ bool PkgReader::ParsePfs(std::string& error) {
             }
         }
     }
-    cache.clear();
+    // The walk's blocks are not the game's
+    cache_index.fill(NoBlock);
     if (!nodes.contains("eboot.bin") && !nodes.contains("sce_sys/param.sfo")) {
         error = "no files were found in the PKG's PFS";
         return false;
@@ -734,34 +785,34 @@ const PkgReader::Node* PkgReader::Find(std::string_view rel) const {
     return nullptr;
 }
 
-bool PkgReader::ReadEntry(const Node& node, std::vector<u8>& out) {
-    out.resize(node.size);
-    if (!file.Seek(node.entry_offset) || file.ReadRaw<u8>(out.data(), out.size()) != out.size()) {
-        return false;
+u64 PkgReader::ReadEntry(const Node& node, u64 offset, u64 size, u8* dst) {
+    const u8* bytes = image.data() + node.entry_offset;
+    // AES-CBC over its whole 16-byte blocks, the rest as it is. A block decrypts on its own
+    // given the one before, so only the blocks asked for are decrypted, from where they lie.
+    const u64 whole = node.entry_encrypted ? node.size / 16 * 16 : 0;
+    u64 done = 0;
+    while (done < size) {
+        const u64 at = offset + done;
+        if (at >= whole) {
+            std::memcpy(dst + done, bytes + at, size - done);
+            return size;
+        }
+        const u64 first = at / 16 * 16;
+        const u64 last = std::min(whole, (offset + size + 15) / 16 * 16);
+        // Up to a scratch's worth at a time
+        const u64 count = std::min<u64>(last - first, sector_scratch.size());
+        std::array<u8, 32> ivkey = node.entry_ivkey;
+        if (first != 0) {
+            std::memcpy(ivkey.data(), bytes + first - 16, 16); // the IV: the block before
+        }
+        if (!AesCbcDecrypt(ivkey, bytes + first, sector_scratch.data(), count)) {
+            return done;
+        }
+        const u64 take = std::min(size - done, first + count - at);
+        std::memcpy(dst + done, sector_scratch.data() + (at - first), take);
+        done += take;
     }
-    // license.dat, license.info, nptitle.dat and npbind.dat are encrypted.
-    if (node.entry_id >= 0x400 && node.entry_id <= 0x403) {
-        PkgEntry record{};
-        // The key comes from the entry's table record, which is read again here.
-        PkgHeader header{};
-        std::string error;
-        std::vector<PkgEntry> entries;
-        if (!file.Seek(0) || !ReadHeader(file, header, error) ||
-            !ReadEntries(file, header, entries)) {
-            return false;
-        }
-        for (const PkgEntry& entry : entries) {
-            if (entry.id == node.entry_id) {
-                record = entry;
-            }
-        }
-        const std::size_t whole = out.size() / 16 * 16;
-        std::vector<u8> plain(whole);
-        if (whole && AesCbcDecrypt(EntryIvKey(record, dk3), out.data(), plain.data(), whole)) {
-            std::memcpy(out.data(), plain.data(), whole);
-        }
-    }
-    return true;
+    return done;
 }
 
 u64 PkgReader::Read(const Node& node, u64 offset, u64 size, void* dst) {
@@ -770,15 +821,10 @@ u64 PkgReader::Read(const Node& node, u64 offset, u64 size, void* dst) {
     }
     size = std::min(size, node.size - offset);
     std::scoped_lock lock{mutex};
-    if (node.entry) {
-        std::vector<u8> data;
-        if (!ReadEntry(node, data)) {
-            return 0;
-        }
-        std::memcpy(dst, data.data() + offset, size);
-        return size;
-    }
     u8* out = static_cast<u8*>(dst);
+    if (node.entry) {
+        return ReadEntry(node, offset, size, out);
+    }
     u64 done = 0;
     while (done < size) {
         const u64 at = offset + done;
@@ -786,13 +832,21 @@ u64 PkgReader::Read(const Node& node, u64 offset, u64 size, void* dst) {
         if (index >= node.blocks) {
             break;
         }
-        const auto* block = Block(node.first_block + static_cast<u32>(index));
-        if (!block) {
-            break;
-        }
+        const u32 block = node.first_block + static_cast<u32>(index);
         const u64 within = at % BlockSize;
         const u64 count = std::min(size - done, BlockSize - within);
-        std::memcpy(out + done, block->data() + within, count);
+        if (count == BlockSize) {
+            // A whole block: decoded straight into the caller's memory, past the cache
+            if (!DecodeBlock(block, out + done)) {
+                break;
+            }
+        } else {
+            const u8* cached = Block(block);
+            if (!cached) {
+                break;
+            }
+            std::memcpy(out + done, cached + within, count);
+        }
         done += count;
     }
     return done;

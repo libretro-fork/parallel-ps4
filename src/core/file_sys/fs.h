@@ -193,6 +193,10 @@ struct File {
     Common::FS::IOFile* GetHostFile() const {
         return handle ? handle->GetHostFile() : nullptr;
     }
+
+    bool ReadsInPlace() const {
+        return handle && handle->ReadsInPlace();
+    }
 };
 
 class HandleTable {

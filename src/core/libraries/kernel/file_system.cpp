@@ -428,6 +428,8 @@ s64 PS4_SYSV_ABI sceKernelWrite(s32 fd, const void* buf, u64 nbytes) {
     return result;
 }
 
+// For a file read with read(): the guest's buffer may be a page the memory tracker protects,
+// which read() fails on with EFAULT, so it goes through here and is copied in.
 static thread_local std::vector<u8> file_buf{};
 
 s64 ReadFile(Core::FileSys::File* file, void* buf, u64 nbytes) {
@@ -435,8 +437,13 @@ s64 ReadFile(Core::FileSys::File* file, void* buf, u64 nbytes) {
     // Invalidate up to the actual number of bytes that could be read.
     const auto remaining = file->GetSize() - file->Tell();
     memory->InvalidateMemory(reinterpret_cast<VAddr>(buf), std::min<u64>(nbytes, remaining));
-    if (file_buf.capacity() < nbytes) {
-        file_buf.reserve(nbytes);
+    if (file->ReadsInPlace()) {
+        // Straight into the guest's buffer: a mapped file or a decoder, whose writes to a
+        // protected page the tracker's fault handler serves
+        return file->Read(buf, nbytes);
+    }
+    if (file_buf.size() < nbytes) {
+        file_buf.resize(nbytes);
     }
     s64 bytes = file->Read(file_buf.data(), nbytes);
     if (bytes < 0) {

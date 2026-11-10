@@ -320,6 +320,22 @@ ImTextureID AddTexture(vk::ImageView image_view, vk::ImageLayout image_layout,
 }
 UploadTextureData UploadTexture(const void* data, vk::Format format, u32 width, u32 height,
                                 size_t size) {
+    struct Source {
+        const void* data;
+        size_t size;
+    } source{data, size};
+    return UploadTexture(
+        format, width, height, size,
+        [](void* ctx, void* dst) {
+            const auto& src = *static_cast<const Source*>(ctx);
+            std::memcpy(dst, src.data, src.size);
+            return true;
+        },
+        &source);
+}
+
+UploadTextureData UploadTexture(vk::Format format, u32 width, u32 height, size_t size,
+                                UploadFill fill, void* ctx) {
     ImGuiIO& io = GetIO();
     VkData* bd = GetBackendData();
     const InitInfo& v = bd->init_info;
@@ -404,10 +420,10 @@ UploadTextureData UploadTexture(const void* data, vk::Format format, u32 width, 
         CheckVkErr(v.device.bindBufferMemory(info.upload_buffer, info.upload_buffer_memory, 0));
     }
 
-    // Upload to Buffer
+    // Upload to Buffer: written in place by the caller
     {
-        char* map = (char*)CheckVkResult(v.device.mapMemory(info.upload_buffer_memory, 0, size));
-        memcpy(map, data, size);
+        void* map = CheckVkResult(v.device.mapMemory(info.upload_buffer_memory, 0, size));
+        const bool filled = fill(ctx, map);
         vk::MappedMemoryRange range[1]{
             {
                 .memory = info.upload_buffer_memory,
@@ -416,6 +432,21 @@ UploadTextureData UploadTexture(const void* data, vk::Format format, u32 width, 
         };
         CheckVkErr(v.device.flushMappedMemoryRanges(range));
         v.device.unmapMemory(info.upload_buffer_memory);
+        if (!filled) {
+            // Nothing recorded yet: the command buffer and the buffers go back
+            CheckVkErr(info.command_buffer.end());
+            {
+                std::unique_lock lk(bd->command_pool_mutex);
+                v.device.freeCommandBuffers(bd->command_pool, {info.command_buffer});
+            }
+            v.device.destroyBuffer(info.upload_buffer, v.allocator);
+            v.device.freeMemory(info.upload_buffer_memory, v.allocator);
+            RemoveTexture(info.im_texture);
+            v.device.destroyImageView(info.image_view, v.allocator);
+            v.device.destroyImage(info.image, v.allocator);
+            v.device.freeMemory(info.image_memory, v.allocator);
+            return {};
+        }
     }
 
     // Copy to Image

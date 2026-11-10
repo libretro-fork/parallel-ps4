@@ -59,6 +59,13 @@ ImTextureID AddTexture(vk::ImageView image_view, vk::ImageLayout image_layout,
 UploadTextureData UploadTexture(const void* data, vk::Format format, u32 width, u32 height,
                                 size_t size);
 
+/// As UploadTexture, with the pixels written by @fill straight into the upload buffer (size
+/// bytes, rows width pixels apart) instead of copied there. When @fill returns false, nothing
+/// is made and the result's im_texture is null.
+using UploadFill = bool (*)(void* ctx, void* dst);
+UploadTextureData UploadTexture(vk::Format format, u32 width, u32 height, size_t size,
+                                UploadFill fill, void* ctx);
+
 void RemoveTexture(ImTextureID descriptor_set);
 
 bool Init(InitInfo info);

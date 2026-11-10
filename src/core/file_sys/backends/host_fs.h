@@ -45,6 +45,11 @@ public:
         return m_read_only;
     }
 
+    /// A mapped file is read with a copy out of the mapping
+    bool ReadsInPlace() const override {
+        return !m_file.Mapped().empty();
+    }
+
     bool IsWriteOnly() const override {
         return m_file.IsOpen() && m_file.IsWriteOnly();
     }

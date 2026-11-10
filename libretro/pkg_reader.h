@@ -12,9 +12,9 @@
 
 #include <array>
 #include <filesystem>
-#include <list>
 #include <mutex>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -60,10 +60,13 @@ public:
         // A file of the PFS: its first block in the PFSC block map and its block count.
         u32 first_block = 0;
         u32 blocks = 0;
-        // A file of the PKG's own entries (sce_sys/...): where it is in the PKG.
+        // A file of the PKG's own entries (sce_sys/...): where it is in the PKG, and, for one
+        // that is encrypted, its key and IV.
         bool entry = false;
+        bool entry_encrypted = false;
         u32 entry_id = 0;
         u64 entry_offset = 0;
+        std::array<u8, 32> entry_ivkey{};
         // A directory: the names in it.
         std::vector<std::string> children;
     };
@@ -83,20 +86,33 @@ public:
     // The paths of all its files.
     std::vector<std::string> Files() const;
 
-    // Reads up to size bytes of a file from offset; returns the bytes read.
+    // Reads up to size bytes of a file from offset straight into dst; returns the bytes read.
     u64 Read(const Node& node, u64 offset, u64 size, void* dst);
 
+    PkgReader();
+    ~PkgReader();
+    PkgReader(const PkgReader&) = delete;
+    PkgReader& operator=(const PkgReader&) = delete;
+
 private:
-    bool DecryptSectors(u8* data, u64 size, u64 first_sector);
-    // One 64 KiB block of the PFSC image, decrypted and inflated; null when it cannot be read.
-    const std::vector<u8>* Block(u32 index);
-    bool ReadEntry(const Node& node, std::vector<u8>& out);
+    // Decrypts the PFS image's sectors from first_sector on, size bytes (whole sectors), from
+    // where they lie in the mapped PKG into out; past the PKG's end it is zeros.
+    bool ReadSectors(u64 first_sector, u64 size, u8* out);
+    // A block of the PFSC image decoded into out (BlockSize bytes).
+    bool DecodeBlock(u32 index, u8* out);
+    // A block, decoded once into the cache; null when it cannot be read.
+    const u8* Block(u32 index);
+    u64 ReadEntry(const Node& node, u64 offset, u64 size, u8* dst);
     bool ParsePfs(std::string& error);
     void AddNode(const std::string& rel, Node node);
 
     std::filesystem::path path;
+    // The PKG, mapped: its sectors are decrypted from where they lie.
     Common::FS::IOFile file;
+    std::span<const u8> image;
     std::mutex mutex;
+    // XTS-AES with the data and tweak keys, set once: per sector only the IV changes
+    void* xts = nullptr;
 
     u64 pfs_image_offset = 0;
     u64 pfsc_offset = 0;
@@ -108,8 +124,13 @@ private:
     std::unordered_map<std::string, Node> nodes;     // by the path as the PKG has it
     std::unordered_map<std::string, std::string> lower; // lower-case path -> path
 
-    // The blocks read last, newest first.
-    std::list<std::pair<u32, std::vector<u8>>> cache;
+    // The blocks read last, in slots made once (with a zeroed tail, for the PFS walk that
+    // reads a record at a block's end), and the sectors of the block being decoded.
+    std::vector<u8> cache_memory;
+    std::array<u32, 16> cache_index{};
+    std::array<u64, 16> cache_used{};
+    u64 cache_clock = 0;
+    std::vector<u8> sector_scratch;
 };
 
 } // namespace Libretro

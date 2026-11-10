@@ -173,32 +173,56 @@ void WorkerLoop() {
                 png_raw = std::move(*mapped);
             }
 
-            // Decoded with libretro-common's rpng as R,G,B,A bytes, the texture's own format.
-            void* pixels = nullptr;
-            unsigned width = 0;
-            unsigned height = 0;
-            int ret = IMAGE_PROCESS_ERROR;
+            // Decoded with libretro-common's rpng as R,G,B,A bytes, the texture's own format,
+            // straight into the texture's upload buffer: the PNG is read where it lies and the
+            // pixels are written once.
             rpng_t* rpng = rpng_alloc();
-            if (rpng &&
+            rpng_info info{};
+            if (!rpng ||
                 // rpng only reads the bytes
-                rpng_set_buf_ptr(rpng, const_cast<u8*>(png_raw.data()), png_raw.size()) &&
-                rpng_start(rpng)) {
-                while (rpng_iterate_image(rpng)) {
-                }
-                do {
-                    ret = rpng_process_image(rpng, &pixels, png_raw.size(), &width, &height, true);
-                } while (ret == IMAGE_PROCESS_NEXT);
-            }
-            rpng_free(rpng);
-            if (ret != IMAGE_PROCESS_END || !pixels) {
-                std::free(pixels);
+                !rpng_set_buf_ptr(rpng, const_cast<u8*>(png_raw.data()), png_raw.size()) ||
+                !rpng_start(rpng)) {
+                rpng_free(rpng);
                 LOG_ERROR(ImGui, "Failed to decode PNG {}", path.string());
                 continue;
             }
-
-            auto texture = Vulkan::UploadTexture(pixels, vk::Format::eR8G8B8A8Unorm, width, height,
-                                                 static_cast<size_t>(width) * height * 4);
-            std::free(pixels);
+            while (rpng_iterate_image(rpng)) {
+            }
+            if (!rpng_get_info(rpng, &info) || info.width == 0 || info.height == 0) {
+                rpng_free(rpng);
+                LOG_ERROR(ImGui, "Failed to decode PNG {}", path.string());
+                continue;
+            }
+            struct Decode {
+                rpng_t* rpng;
+                size_t size;
+                unsigned width;
+            } decode{rpng, png_raw.size(), info.width};
+            auto texture = Vulkan::UploadTexture(
+                vk::Format::eR8G8B8A8Unorm, info.width, info.height,
+                static_cast<size_t>(info.width) * info.height * 4,
+                [](void* ctx, void* dst) {
+                    const auto& d = *static_cast<const Decode*>(ctx);
+                    if (!rpng_set_output(d.rpng, static_cast<uint32_t*>(dst), d.width)) {
+                        return false;
+                    }
+                    void* pixels = nullptr;
+                    unsigned w = 0;
+                    unsigned h = 0;
+                    int ret;
+                    do {
+                        ret = rpng_process_image(d.rpng, &pixels, d.size, &w, &h, true);
+                    } while (ret == IMAGE_PROCESS_NEXT);
+                    return ret == IMAGE_PROCESS_END && pixels == dst;
+                },
+                &decode);
+            rpng_free(rpng);
+            if (!texture.im_texture) {
+                LOG_ERROR(ImGui, "Failed to decode PNG {}", path.string());
+                continue;
+            }
+            const unsigned width = info.width;
+            const unsigned height = info.height;
 
             core->upload_data = texture;
             core->width = width;
