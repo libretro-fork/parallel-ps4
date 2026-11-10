@@ -107,16 +107,11 @@ for d in ("sdk/lib/um/x86_64", "sdk/lib/ucrt/x86_64", "crt/lib/x86_64"):
 print(f"library case links: {libs}")
 PY
 
-# The tools the build runs: glslang, which compiles the host shaders, and the
-# tool that turns the fonts into sources. Built for Linux here, from
-# the same sources, and handed to the Windows build, which cannot run its own.
+# The tool the build runs that turns the fonts into sources. Built for Linux
+# here and handed to the Windows build, which cannot run its own.
 HOST="$TOOLS/host"
-CC=clang-19 CXX=clang++-19 cmake -S externals/glslang -B "$HOST/glslang" -G Ninja \
-  -DCMAKE_BUILD_TYPE=Release -DENABLE_OPT=OFF -DGLSLANG_TESTS=OFF -DBUILD_SHARED_LIBS=OFF
-cmake --build "$HOST/glslang" --target glslang-standalone -- -j "$NUMPROC"
-HOST_GLSLANG=$(find "$HOST/glslang" -type f \( -name glslang -o -name glslangValidator \) -perm -u+x | head -1)
+mkdir -p "$HOST"
 clang++-19 -O1 -o "$HOST/font-embed" externals/imgui/misc/fonts/binary_to_compressed_c.cpp
-test -x "$HOST_GLSLANG"
 
 TOOLCHAIN="$TOOLS/clang-cl-x86_64.cmake"
 cat > "$TOOLCHAIN" <<TOOLCHAIN_EOF
@@ -166,7 +161,7 @@ TOOLCHAIN_EOF
 cmake -S . -B "$BUILD_DIR" -G Ninja -DCMAKE_BUILD_TYPE=Release \
   -DCMAKE_TOOLCHAIN_FILE="$TOOLCHAIN" \
   -DENABLE_UPDATER=OFF \
-  -DSHADPS4_HOST_GLSLANG="$HOST_GLSLANG" -DSHADPS4_HOST_FONT_EMBED="$HOST/font-embed"
+  -DSHADPS4_HOST_FONT_EMBED="$HOST/font-embed"
 export PATH="$LLVM:$PATH"
 export LIB="$MSVC/crt/lib/x86_64;$MSVC/sdk/lib/um/x86_64;$MSVC/sdk/lib/ucrt/x86_64"
 cmake --build "$BUILD_DIR" -- -j "$NUMPROC" ${SHAD_CROSS_KEEP_GOING:+-k 0}

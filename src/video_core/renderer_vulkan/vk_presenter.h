@@ -8,7 +8,6 @@
 #include "core/libraries/videoout/buffer.h"
 #include "imgui/imgui_texture.h"
 #include "libretro/libretro_bridge.h"
-#include "video_core/renderer_vulkan/host_passes/fsr_pass.h"
 #include "video_core/renderer_vulkan/host_passes/pp_pass.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_runtime.h"
@@ -56,10 +55,6 @@ public:
 
     HostPasses::PostProcessingPass::Settings& GetPPSettingsRef() {
         return pp_settings;
-    }
-
-    HostPasses::FsrPass::Settings& GetFsrSettingsRef() {
-        return fsr_settings;
     }
 
     Frontend::Window& GetWindow() const {
@@ -111,8 +106,6 @@ private:
 
     Frontend::Window& window;
     Instance instance;
-    HostPasses::FsrPass fsr_pass;
-    HostPasses::FsrPass::Settings fsr_settings{};
     HostPasses::PostProcessingPass::Settings pp_settings{};
     HostPasses::PostProcessingPass pp_pass;
     AmdGpu::Liverpool* liverpool;

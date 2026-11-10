@@ -226,8 +226,6 @@ void ReadCoreOptions(Libretro::SharedOptions& options) {
         options.follow_game_size = 0;
     }
 
-    options.fsr = enabled("shadps4_fsr", "disabled");
-    options.rcas = enabled("shadps4_rcas", "enabled");
     options.vblank_frequency =
         static_cast<uint32_t>(std::atoi(OptionValue("shadps4_vblank_frequency", "60").c_str()));
     const std::string readbacks = OptionValue("shadps4_readbacks", "disabled");
@@ -244,8 +242,6 @@ void ReadCoreOptions(Libretro::SharedOptions& options) {
     options.dev_kit = enabled("shadps4_dev_kit", "disabled");
     options.extra_dmem_mbytes =
         std::clamp(std::atoi(OptionValue("shadps4_extra_memory", "0").c_str()), 0, 20000);
-    options.rcas_attenuation =
-        std::clamp(std::atoi(OptionValue("shadps4_rcas_attenuation", "250").c_str()), 0, 3000);
     options.readback_linear_images = enabled("shadps4_readback_linear_images", "disabled");
     options.shader_cache = enabled("shadps4_shader_cache", "disabled");
     options.copy_gpu_buffers = enabled("shadps4_copy_gpu_buffers", "enabled");
@@ -1279,9 +1275,6 @@ RETRO_API void retro_run(void) {
         Libretro::SharedOptions options{};
         ReadCoreOptions(options);
         auto& live = shared->live;
-        live.fsr.store(options.fsr);
-        live.rcas.store(options.rcas);
-        live.rcas_attenuation.store(options.rcas_attenuation);
         live.show_fps.store(options.show_fps);
         live.volume.store(options.volume);
         live.trophy_popup.store(options.trophy_popup);

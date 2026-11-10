@@ -1,16 +1,15 @@
 // SPDX-FileCopyrightText: Copyright 2025 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include <vector>
+
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_scheduler.h"
 #include "video_core/renderer_vulkan/vk_shader_util.h"
 #include "video_core/texture_cache/blit_helper.h"
 #include "video_core/texture_cache/image.h"
 
-#include "video_core/host_shaders/color_to_ms_depth_frag.h"
-#include "video_core/host_shaders/fs_tri_vert.h"
-#include "video_core/host_shaders/ms_image_blit_frag.h"
-#include "video_core/host_shaders/ms_image_blit_msaa_frag.h"
+#include "video_core/host_shaders/host_spirv.h"
 
 namespace VideoCore {
 
@@ -250,10 +249,14 @@ void BlitHelper::CopyBetweenMsImages(u32 width, u32 height, u32 num_samples,
 
 void BlitHelper::CreateShaders() {
     const auto device = instance.GetDevice();
-    fs_tri_vertex = Vulkan::CompileSPV(FS_TRI_VERT, device);
-    color_to_ms_depth_frag = Vulkan::CompileSPV(COLOR_TO_MS_DEPTH_FRAG, device);
-    src_msaa_copy_frag = Vulkan::CompileSPV(MS_IMAGE_BLIT_MSAA_FRAG, device);
-    src_non_msaa_copy_frag = Vulkan::CompileSPV(MS_IMAGE_BLIT_FRAG, device);
+    std::vector<u32> words(HOST_SPIRV_MAX_WORDS);
+    const auto compile = [&](size_t size) {
+        return Vulkan::CompileSPV({words.data(), size}, device);
+    };
+    fs_tri_vertex = compile(host_spirv_fs_tri_vert(words.data(), words.size()));
+    color_to_ms_depth_frag = compile(host_spirv_color_to_ms_depth_frag(words.data(), words.size()));
+    src_msaa_copy_frag = compile(host_spirv_ms_image_blit_frag(words.data(), words.size(), 1));
+    src_non_msaa_copy_frag = compile(host_spirv_ms_image_blit_frag(words.data(), words.size(), 0));
 }
 
 void BlitHelper::CreatePipelineLayouts() {

@@ -10,23 +10,6 @@
 #include "video_core/texture_cache/image_view.h"
 #include "video_core/texture_cache/tile_manager.h"
 
-#include "video_core/host_shaders/tiling_macro_128_comp.h"
-#include "video_core/host_shaders/tiling_macro_16_comp.h"
-#include "video_core/host_shaders/tiling_macro_16_words_comp.h"
-#include "video_core/host_shaders/tiling_macro_32_comp.h"
-#include "video_core/host_shaders/tiling_macro_64_comp.h"
-#include "video_core/host_shaders/tiling_macro_8_comp.h"
-#include "video_core/host_shaders/tiling_macro_8_words_comp.h"
-#include "video_core/host_shaders/tiling_macro_96_comp.h"
-#include "video_core/host_shaders/tiling_micro_128_comp.h"
-#include "video_core/host_shaders/tiling_micro_16_comp.h"
-#include "video_core/host_shaders/tiling_micro_16_words_comp.h"
-#include "video_core/host_shaders/tiling_micro_32_comp.h"
-#include "video_core/host_shaders/tiling_micro_64_comp.h"
-#include "video_core/host_shaders/tiling_micro_8_comp.h"
-#include "video_core/host_shaders/tiling_micro_8_words_comp.h"
-#include "video_core/host_shaders/tiling_micro_96_comp.h"
-
 #include <vk_mem_alloc.h>
 #include "common/enum_names.h"
 
@@ -104,7 +87,8 @@ vk::Pipeline TileManager::GetTilingPipeline(const ImageInfo& info, bool is_tiler
     const auto device = instance.GetDevice();
     const auto micro_tile_mode = AmdGpu::GetMicroTileMode(info.tile_mode);
     const bool is_macro = AmdGpu::IsMacroTiled(info.array_mode);
-    std::array<u32, 12> spec_data{
+    // The image's tiling parameters, folded into the shader
+    std::array<u32, 12> params{
         info.num_samples,
         u32(micro_tile_mode),
         AmdGpu::GetMicroTileThickness(info.array_mode),
@@ -113,73 +97,39 @@ vk::Pipeline TileManager::GetTilingPipeline(const ImageInfo& info, bool is_tiler
     if (is_macro) {
         const auto macro_tile_mode =
             AmdGpu::CalculateMacrotileMode(info.tile_mode, info.num_bits, info.num_samples);
-        spec_data[4] = u32(info.array_mode);
-        spec_data[5] = u32(AmdGpu::GetPipeConfig(info.tile_mode));
-        spec_data[6] = AmdGpu::GetBankWidth(macro_tile_mode);
-        spec_data[7] = AmdGpu::GetBankHeight(macro_tile_mode);
-        spec_data[8] = AmdGpu::GetNumBanks(macro_tile_mode);
-        spec_data[9] = std::bit_width(spec_data[8]) - 1;
-        spec_data[10] = AmdGpu::CalculateTileSplit(info.tile_mode, info.array_mode, micro_tile_mode,
-                                                   info.num_bits);
-        spec_data[11] = AmdGpu::GetMacrotileAspect(macro_tile_mode);
+        params[4] = u32(info.array_mode);
+        params[5] = u32(AmdGpu::GetPipeConfig(info.tile_mode));
+        params[6] = AmdGpu::GetBankWidth(macro_tile_mode);
+        params[7] = AmdGpu::GetBankHeight(macro_tile_mode);
+        params[8] = AmdGpu::GetNumBanks(macro_tile_mode);
+        params[9] = std::bit_width(params[8]) - 1;
+        params[10] = AmdGpu::CalculateTileSplit(info.tile_mode, info.array_mode, micro_tile_mode,
+                                                info.num_bits);
+        params[11] = AmdGpu::GetMacrotileAspect(macro_tile_mode);
     }
 
-    std::span<const u32> code;
+    // Without 8- or 16-bit storage buffer access the 8- and 16-bit shaders read and write
+    // garbage (text and some textures in stripes on an Adreno 618): those texels are moved
+    // inside 32-bit words instead
+    const bool word_access =
+        (info.num_bits == 8 && !instance.IsStorageBuffer8BitAccessSupported()) ||
+        (info.num_bits == 16 && !instance.IsStorageBuffer16BitAccessSupported());
     switch (info.num_bits) {
     case 8:
-        code = is_macro ? std::span<const u32>{TILING_MACRO_8_COMP}
-                        : std::span<const u32>{TILING_MICRO_8_COMP};
-        // Without 8-bit storage buffer access the 8-bit shader reads and writes garbage
-        // (text and some textures in stripes on an Adreno 618)
-        if (!instance.IsStorageBuffer8BitAccessSupported()) {
-            code = is_macro ? std::span<const u32>{TILING_MACRO_8_WORDS_COMP}
-                            : std::span<const u32>{TILING_MICRO_8_WORDS_COMP};
-        }
-        break;
     case 16:
-        code = is_macro ? std::span<const u32>{TILING_MACRO_16_COMP}
-                        : std::span<const u32>{TILING_MICRO_16_COMP};
-        if (!instance.IsStorageBuffer16BitAccessSupported()) {
-            code = is_macro ? std::span<const u32>{TILING_MACRO_16_WORDS_COMP}
-                            : std::span<const u32>{TILING_MICRO_16_WORDS_COMP};
-        }
-        break;
     case 32:
-        code = is_macro ? std::span<const u32>{TILING_MACRO_32_COMP}
-                        : std::span<const u32>{TILING_MICRO_32_COMP};
-        break;
     case 64:
-        code = is_macro ? std::span<const u32>{TILING_MACRO_64_COMP}
-                        : std::span<const u32>{TILING_MICRO_64_COMP};
-        break;
     case 96:
-        code = is_macro ? std::span<const u32>{TILING_MACRO_96_COMP}
-                        : std::span<const u32>{TILING_MICRO_96_COMP};
-        break;
     case 128:
-        code = is_macro ? std::span<const u32>{TILING_MACRO_128_COMP}
-                        : std::span<const u32>{TILING_MICRO_128_COMP};
         break;
     default:
         UNREACHABLE_MSG("Unsupported tiling pixel width {}", info.num_bits);
     }
-
-    const auto module = Vulkan::CompileSPV(code, device);
-    static constexpr auto spec_entries = [] {
-        std::array<vk::SpecializationMapEntry, 12> entries{};
-        for (u32 i = 0; i < entries.size(); ++i) {
-            entries[i] = vk::SpecializationMapEntry{i, i * u32(sizeof(u32)), sizeof(u32)};
-        }
-        return entries;
-    }();
-
-    const u32 spec_count = is_macro ? 12 : 4;
-    const vk::SpecializationInfo specialization{
-        .mapEntryCount = spec_count,
-        .pMapEntries = spec_entries.data(),
-        .dataSize = spec_count * sizeof(u32),
-        .pData = spec_data.data(),
-    };
+    const size_t num_words =
+        host_spirv_tiling_comp(spirv_words.data(), spirv_words.size(), info.num_bits, is_macro,
+                               word_access, params.data(), is_macro ? 12 : 4);
+    ASSERT_MSG(num_words != 0, "Tiling shader does not fit");
+    const auto module = Vulkan::CompileSPV({spirv_words.data(), num_words}, device);
 
     const auto module_name = fmt::format(
         "{}_{} {}", enum_name(&enum_names_AmdGpu_TileMode, static_cast<s64>(info.tile_mode)),
@@ -191,7 +141,6 @@ vk::Pipeline TileManager::GetTilingPipeline(const ImageInfo& info, bool is_tiler
         .stage = vk::ShaderStageFlagBits::eCompute,
         .module = module,
         .pName = "main",
-        .pSpecializationInfo = &specialization,
     };
     const vk::ComputePipelineCreateInfo compute_pipeline_ci = {
         .stage = shader_ci,

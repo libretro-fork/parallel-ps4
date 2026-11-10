@@ -33,20 +33,6 @@ if (NOT TARGET GPUOpen::VulkanMemoryAllocator)
     add_subdirectory(vma)
 endif()
 
-# glslang
-if (NOT TARGET glslang::glslang)
-    set(SKIP_GLSLANG_INSTALL ON CACHE BOOL "")
-    set(ENABLE_GLSLANG_BINARIES ON CACHE BOOL "" FORCE)
-    set(ENABLE_SPVREMAPPER OFF CACHE BOOL "")
-    set(ENABLE_CTEST OFF CACHE BOOL "")
-    set(ENABLE_HLSL OFF CACHE BOOL "")
-    set(BUILD_EXTERNAL OFF CACHE BOOL "")
-    set(ENABLE_OPT OFF CACHE BOOL "")
-    add_subdirectory(glslang)
-    file(COPY glslang/SPIRV DESTINATION glslang/glslang FILES_MATCHING PATTERN "*.h")
-    target_include_directories(glslang INTERFACE "${CMAKE_CURRENT_BINARY_DIR}/glslang")
-endif()
-
 # Xbyak
 if (NOT TARGET xbyak::xbyak)
     add_subdirectory(xbyak)

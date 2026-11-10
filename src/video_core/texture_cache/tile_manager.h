@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <array>
 #include <unordered_map>
 #include <utility>
 
@@ -10,6 +11,7 @@
 #include "common/types.h"
 #include "video_core/amdgpu/tiling.h"
 #include "video_core/buffer_cache/buffer.h"
+#include "video_core/host_shaders/host_spirv.h"
 
 namespace Vulkan {
 struct Runtime;
@@ -61,6 +63,8 @@ private:
     vk::UniqueDescriptorSetLayout desc_layout;
     vk::UniquePipelineLayout pl_layout;
     std::unordered_map<TilingKey, vk::UniquePipeline, TilingKey::Hash> tiling_pipelines;
+    /// A new tiling pipeline's module, written here instead of allocated
+    std::array<u32, HOST_SPIRV_MAX_WORDS> spirv_words;
 };
 
 } // namespace VideoCore

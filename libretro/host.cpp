@@ -44,7 +44,6 @@
 #include "libretro.h"
 #include "libretro_bridge.h"
 #include "shared_state.h"
-#include "video_core/renderer_vulkan/vk_presenter.h"
 #include "video_core/texture_cache/texture_cache.h"
 
 #ifdef _WIN32
@@ -54,9 +53,6 @@
 #include <sys/socket.h>
 #include <unistd.h>
 #endif
-
-// The presenter, as upstream's IPC and devtools reach it
-extern std::unique_ptr<Vulkan::Presenter> presenter;
 
 namespace {
 
@@ -105,20 +101,11 @@ Libretro::SharedState* OpenShared(const char* argument) {
 constexpr const char* trophy_sides[] = {"left", "right", "top", "bottom"};
 
 // The options changed while the game runs, where the emulator reads them as it goes: the
-// volume and the trophy notifications from its settings, FSR from the presenter's own copy and
-// the FPS counter from the overlay's, which upstream's IPC changes the same way.
+// volume and the trophy notifications from its settings, the FPS counter from the overlay's,
+// which upstream's IPC changes the same way.
 void ApplyLiveOptions() {
     const auto& live = shared->live;
     emu_settings_set_volume_slider(live.volume.load(), false);
-    emu_settings_set_fsr_enabled(live.fsr.load() != 0, false);
-    emu_settings_set_rcas_enabled(live.rcas.load() != 0, false);
-    emu_settings_set_rcas_attenuation(live.rcas_attenuation.load(), false);
-    if (presenter) {
-        auto& fsr = presenter->GetFsrSettingsRef();
-        fsr.enable = live.fsr.load() != 0;
-        fsr.use_rcas = live.rcas.load() != 0;
-        fsr.rcas_attenuation = static_cast<float>(live.rcas_attenuation.load() / 1000.0f);
-    }
     emu_settings_set_show_fps_counter(live.show_fps.load() != 0, false);
     Overlay::SetSimpleFps(live.show_fps.load() != 0);
     emu_settings_set_trophy_popup_disabled(live.trophy_popup.load() == 0,
@@ -516,8 +503,6 @@ void ApplyCoreOptions() {
     emu_settings_set_window_width(options.width, false);
     emu_settings_set_window_height(options.height, false);
     VideoCore::render_width.store(options.render_width);
-    emu_settings_set_fsr_enabled(options.fsr != 0, false);
-    emu_settings_set_rcas_enabled(options.rcas != 0, false);
     emu_settings_set_vblank_frequency(options.vblank_frequency, false);
     emu_settings_set_readbacks_mode(options.readbacks, false);
     emu_settings_set_direct_memory_access_enabled(
@@ -527,7 +512,6 @@ void ApplyCoreOptions() {
     emu_settings_set_console_language(options.console_language, false);
     emu_settings_set_dev_kit_mode(options.dev_kit != 0, false);
     emu_settings_set_extra_dmem_in_mbytes(options.extra_dmem_mbytes, false);
-    emu_settings_set_rcas_attenuation(options.rcas_attenuation, false);
     emu_settings_set_readback_linear_images_enabled(
         options.readback_linear_images != 0, false);
     emu_settings_set_pipeline_cache_enabled(options.shader_cache != 0, false);

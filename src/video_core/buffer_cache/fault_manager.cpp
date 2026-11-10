@@ -1,6 +1,8 @@
 // SPDX-FileCopyrightText: Copyright 2025 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include <vector>
+
 #include "common/div_ceil.h"
 #include "video_core/buffer_cache/buffer_cache.h"
 #include "video_core/buffer_cache/fault_manager.h"
@@ -9,7 +11,7 @@
 #include "video_core/renderer_vulkan/vk_scheduler.h"
 #include "video_core/renderer_vulkan/vk_shader_util.h"
 
-#include "video_core/host_shaders/fault_buffer_process_comp.h"
+#include "video_core/host_shaders/host_spirv.h"
 
 namespace VideoCore {
 
@@ -47,25 +49,16 @@ FaultManager::FaultManager(const Vulkan::Instance& instance, Vulkan::Scheduler& 
     fault_process_desc_layout =
         Vulkan::Check(device.createDescriptorSetLayoutUnique(desc_layout_ci));
 
-    const std::array<u32, 2> spec_data{sparse_pagebits, MaxPageFaults};
-    const std::array<vk::SpecializationMapEntry, 2> spec_entries{{
-        {0, 0, sizeof(u32)},
-        {1, sizeof(u32), sizeof(u32)},
-    }};
-    const vk::SpecializationInfo specialization{
-        .mapEntryCount = static_cast<u32>(spec_entries.size()),
-        .pMapEntries = spec_entries.data(),
-        .dataSize = sizeof(spec_data),
-        .pData = spec_data.data(),
-    };
-    const auto module = Vulkan::CompileSPV(FAULT_BUFFER_PROCESS_COMP, device);
+    std::vector<u32> words(HOST_SPIRV_MAX_WORDS);
+    const size_t num_words = host_spirv_fault_buffer_process_comp(words.data(), words.size(),
+                                                                  sparse_pagebits, MaxPageFaults);
+    const auto module = Vulkan::CompileSPV({words.data(), num_words}, device);
     Vulkan::SetObjectName(device, module, "Fault Buffer Parser");
 
     const vk::PipelineShaderStageCreateInfo shader_ci = {
         .stage = vk::ShaderStageFlagBits::eCompute,
         .module = module,
         .pName = "main",
-        .pSpecializationInfo = &specialization,
     };
 
     const vk::PipelineLayoutCreateInfo layout_info = {

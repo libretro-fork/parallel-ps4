@@ -10,10 +10,6 @@
 	path = externals/vma
 	url = https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator.git
 	shallow = true
-[submodule "externals/glslang"]
-	path = externals/glslang
-	url = https://github.com/KhronosGroup/glslang.git
-	shallow = true
 [submodule "externals/xbyak"]
 	path = externals/xbyak
 	url = https://github.com/herumi/xbyak.git

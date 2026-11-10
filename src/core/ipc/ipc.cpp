@@ -144,22 +144,9 @@ void IPC::InputLoop() {
             bool is_game_specific = next_u64() != 0;
             emu_settings_set_volume_slider(value, is_game_specific);
             Libraries::AudioOut::AdjustVol();
-        } else if (cmd == "SET_FSR") {
-            bool use_fsr = next_u64() != 0;
-            if (presenter) {
-                presenter->GetFsrSettingsRef().enable = use_fsr;
-            }
-        } else if (cmd == "SET_RCAS") {
-            bool use_rcas = next_u64() != 0;
-            if (presenter) {
-                presenter->GetFsrSettingsRef().use_rcas = use_rcas;
-            }
-        } else if (cmd == "SET_RCAS_ATTENUATION") {
-            int value = static_cast<int>(next_u64());
-            if (presenter) {
-                presenter->GetFsrSettingsRef().rcas_attenuation =
-                    static_cast<float>(value / 1000.0f);
-            }
+        } else if (cmd == "SET_FSR" || cmd == "SET_RCAS" || cmd == "SET_RCAS_ATTENUATION") {
+            // FSR is gone: its value is read and dropped, keeping the commands after in step
+            next_u64();
         } else if (cmd == "USB_LOAD_FIGURE") {
             const auto ref = Libraries::Usbd::usb_backend->GetImplRef();
             if (ref) {

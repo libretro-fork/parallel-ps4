@@ -85,3 +85,16 @@ externals/robin-map
 externals/magic_enum
 externals/vulkan-loader
 externals/mesa-kosmickrisp
+externals/glslang
+src/video_core/host_shaders/CMakeLists.txt
+src/video_core/host_shaders/AddShaderHeaderInclude.cmake
+src/video_core/host_shaders/color_to_ms_depth.frag
+src/video_core/host_shaders/fault_buffer_process.comp
+src/video_core/host_shaders/fs_tri.vert
+src/video_core/host_shaders/fsr
+src/video_core/host_shaders/fsr.comp
+src/video_core/host_shaders/ms_image_blit.frag
+src/video_core/host_shaders/post_process.frag
+src/video_core/host_shaders/tiling.comp
+src/video_core/renderer_vulkan/host_passes/fsr_pass.cpp
+src/video_core/renderer_vulkan/host_passes/fsr_pass.h

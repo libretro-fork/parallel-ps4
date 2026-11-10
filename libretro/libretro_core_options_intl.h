@@ -112,22 +112,6 @@ extern "C" {
 #define OPTION_VAL_1920X1080_AR NULL
 #define OPTION_VAL_2560X1440_AR NULL
 #define OPTION_VAL_3840X2160_AR NULL
-#define SHADPS4_FSR_LABEL_AR NULL
-#define SHADPS4_FSR_INFO_0_AR NULL
-#define SHADPS4_RCAS_LABEL_AR NULL
-#define SHADPS4_RCAS_INFO_0_AR NULL
-#define SHADPS4_RCAS_ATTENUATION_LABEL_AR NULL
-#define SHADPS4_RCAS_ATTENUATION_INFO_0_AR NULL
-#define OPTION_VAL_0_SHADPS4_RCAS_ATTENUATION_AR NULL
-#define OPTION_VAL_125_AR NULL
-#define OPTION_VAL_250_AR NULL
-#define OPTION_VAL_375_AR NULL
-#define OPTION_VAL_500_AR NULL
-#define OPTION_VAL_750_AR NULL
-#define OPTION_VAL_1000_AR NULL
-#define OPTION_VAL_1500_AR NULL
-#define OPTION_VAL_2000_AR NULL
-#define OPTION_VAL_3000_AR NULL
 #define SHADPS4_VBLANK_FREQUENCY_LABEL_AR NULL
 #define SHADPS4_VBLANK_FREQUENCY_INFO_0_AR NULL
 #define OPTION_VAL_30_SHADPS4_VBLANK_FREQUENCY_AR NULL
@@ -386,56 +370,6 @@ struct retro_core_option_v2_definition option_defs_ar[] = {
             { NULL, NULL },
         },
         "1280x720"
-    },
-    {
-        "shadps4_fsr",
-        SHADPS4_FSR_LABEL_AR,
-        NULL,
-        SHADPS4_FSR_INFO_0_AR,
-        NULL,
-        "video",
-        {
-            { "disabled", NULL },
-            { "enabled",  NULL },
-            { NULL, NULL },
-        },
-        "disabled"
-    },
-    {
-        "shadps4_rcas",
-        SHADPS4_RCAS_LABEL_AR,
-        NULL,
-        SHADPS4_RCAS_INFO_0_AR,
-        NULL,
-        "video",
-        {
-            { "enabled",  NULL },
-            { "disabled", NULL },
-            { NULL, NULL },
-        },
-        "enabled"
-    },
-    {
-        "shadps4_rcas_attenuation",
-        SHADPS4_RCAS_ATTENUATION_LABEL_AR,
-        NULL,
-        SHADPS4_RCAS_ATTENUATION_INFO_0_AR,
-        NULL,
-        "video",
-        {
-            { "0", OPTION_VAL_0_SHADPS4_RCAS_ATTENUATION_AR },
-            { "125", OPTION_VAL_125_AR },
-            { "250", OPTION_VAL_250_AR },
-            { "375", OPTION_VAL_375_AR },
-            { "500", OPTION_VAL_500_AR },
-            { "750", OPTION_VAL_750_AR },
-            { "1000", OPTION_VAL_1000_AR },
-            { "1500", OPTION_VAL_1500_AR },
-            { "2000", OPTION_VAL_2000_AR },
-            { "3000", OPTION_VAL_3000_AR },
-            { NULL, NULL },
-        },
-        "250"
     },
     {
         "shadps4_vblank_frequency",
@@ -731,22 +665,6 @@ struct retro_core_options_v2 options_ar = {
 #define OPTION_VAL_1920X1080_AST NULL
 #define OPTION_VAL_2560X1440_AST NULL
 #define OPTION_VAL_3840X2160_AST NULL
-#define SHADPS4_FSR_LABEL_AST NULL
-#define SHADPS4_FSR_INFO_0_AST NULL
-#define SHADPS4_RCAS_LABEL_AST NULL
-#define SHADPS4_RCAS_INFO_0_AST NULL
-#define SHADPS4_RCAS_ATTENUATION_LABEL_AST NULL
-#define SHADPS4_RCAS_ATTENUATION_INFO_0_AST NULL
-#define OPTION_VAL_0_SHADPS4_RCAS_ATTENUATION_AST NULL
-#define OPTION_VAL_125_AST NULL
-#define OPTION_VAL_250_AST NULL
-#define OPTION_VAL_375_AST NULL
-#define OPTION_VAL_500_AST NULL
-#define OPTION_VAL_750_AST NULL
-#define OPTION_VAL_1000_AST NULL
-#define OPTION_VAL_1500_AST NULL
-#define OPTION_VAL_2000_AST NULL
-#define OPTION_VAL_3000_AST NULL
 #define SHADPS4_VBLANK_FREQUENCY_LABEL_AST NULL
 #define SHADPS4_VBLANK_FREQUENCY_INFO_0_AST NULL
 #define OPTION_VAL_30_SHADPS4_VBLANK_FREQUENCY_AST NULL
@@ -1005,56 +923,6 @@ struct retro_core_option_v2_definition option_defs_ast[] = {
             { NULL, NULL },
         },
         "1280x720"
-    },
-    {
-        "shadps4_fsr",
-        SHADPS4_FSR_LABEL_AST,
-        NULL,
-        SHADPS4_FSR_INFO_0_AST,
-        NULL,
-        "video",
-        {
-            { "disabled", NULL },
-            { "enabled",  NULL },
-            { NULL, NULL },
-        },
-        "disabled"
-    },
-    {
-        "shadps4_rcas",
-        SHADPS4_RCAS_LABEL_AST,
-        NULL,
-        SHADPS4_RCAS_INFO_0_AST,
-        NULL,
-        "video",
-        {
-            { "enabled",  NULL },
-            { "disabled", NULL },
-            { NULL, NULL },
-        },
-        "enabled"
-    },
-    {
-        "shadps4_rcas_attenuation",
-        SHADPS4_RCAS_ATTENUATION_LABEL_AST,
-        NULL,
-        SHADPS4_RCAS_ATTENUATION_INFO_0_AST,
-        NULL,
-        "video",
-        {
-            { "0", OPTION_VAL_0_SHADPS4_RCAS_ATTENUATION_AST },
-            { "125", OPTION_VAL_125_AST },
-            { "250", OPTION_VAL_250_AST },
-            { "375", OPTION_VAL_375_AST },
-            { "500", OPTION_VAL_500_AST },
-            { "750", OPTION_VAL_750_AST },
-            { "1000", OPTION_VAL_1000_AST },
-            { "1500", OPTION_VAL_1500_AST },
-            { "2000", OPTION_VAL_2000_AST },
-            { "3000", OPTION_VAL_3000_AST },
-            { NULL, NULL },
-        },
-        "250"
     },
     {
         "shadps4_vblank_frequency",
@@ -1350,22 +1218,6 @@ struct retro_core_options_v2 options_ast = {
 #define OPTION_VAL_1920X1080_BE NULL
 #define OPTION_VAL_2560X1440_BE NULL
 #define OPTION_VAL_3840X2160_BE NULL
-#define SHADPS4_FSR_LABEL_BE NULL
-#define SHADPS4_FSR_INFO_0_BE NULL
-#define SHADPS4_RCAS_LABEL_BE NULL
-#define SHADPS4_RCAS_INFO_0_BE NULL
-#define SHADPS4_RCAS_ATTENUATION_LABEL_BE NULL
-#define SHADPS4_RCAS_ATTENUATION_INFO_0_BE NULL
-#define OPTION_VAL_0_SHADPS4_RCAS_ATTENUATION_BE NULL
-#define OPTION_VAL_125_BE NULL
-#define OPTION_VAL_250_BE NULL
-#define OPTION_VAL_375_BE NULL
-#define OPTION_VAL_500_BE NULL
-#define OPTION_VAL_750_BE NULL
-#define OPTION_VAL_1000_BE NULL
-#define OPTION_VAL_1500_BE NULL
-#define OPTION_VAL_2000_BE NULL
-#define OPTION_VAL_3000_BE NULL
 #define SHADPS4_VBLANK_FREQUENCY_LABEL_BE NULL
 #define SHADPS4_VBLANK_FREQUENCY_INFO_0_BE NULL
 #define OPTION_VAL_30_SHADPS4_VBLANK_FREQUENCY_BE NULL
@@ -1624,56 +1476,6 @@ struct retro_core_option_v2_definition option_defs_be[] = {
             { NULL, NULL },
         },
         "1280x720"
-    },
-    {
-        "shadps4_fsr",
-        SHADPS4_FSR_LABEL_BE,
-        NULL,
-        SHADPS4_FSR_INFO_0_BE,
-        NULL,
-        "video",
-        {
-            { "disabled", NULL },
-            { "enabled",  NULL },
-            { NULL, NULL },
-        },
-        "disabled"
-    },
-    {
-        "shadps4_rcas",
-        SHADPS4_RCAS_LABEL_BE,
-        NULL,
-        SHADPS4_RCAS_INFO_0_BE,
-        NULL,
-        "video",
-        {
-            { "enabled",  NULL },
-            { "disabled", NULL },
-            { NULL, NULL },
-        },
-        "enabled"
-    },
-    {
-        "shadps4_rcas_attenuation",
-        SHADPS4_RCAS_ATTENUATION_LABEL_BE,
-        NULL,
-        SHADPS4_RCAS_ATTENUATION_INFO_0_BE,
-        NULL,
-        "video",
-        {
-            { "0", OPTION_VAL_0_SHADPS4_RCAS_ATTENUATION_BE },
-            { "125", OPTION_VAL_125_BE },
-            { "250", OPTION_VAL_250_BE },
-            { "375", OPTION_VAL_375_BE },
-            { "500", OPTION_VAL_500_BE },
-            { "750", OPTION_VAL_750_BE },
-            { "1000", OPTION_VAL_1000_BE },
-            { "1500", OPTION_VAL_1500_BE },
-            { "2000", OPTION_VAL_2000_BE },
-            { "3000", OPTION_VAL_3000_BE },
-            { NULL, NULL },
-        },
-        "250"
     },
     {
         "shadps4_vblank_frequency",
@@ -1969,22 +1771,6 @@ struct retro_core_options_v2 options_be = {
 #define OPTION_VAL_1920X1080_CA NULL
 #define OPTION_VAL_2560X1440_CA NULL
 #define OPTION_VAL_3840X2160_CA NULL
-#define SHADPS4_FSR_LABEL_CA NULL
-#define SHADPS4_FSR_INFO_0_CA NULL
-#define SHADPS4_RCAS_LABEL_CA NULL
-#define SHADPS4_RCAS_INFO_0_CA NULL
-#define SHADPS4_RCAS_ATTENUATION_LABEL_CA NULL
-#define SHADPS4_RCAS_ATTENUATION_INFO_0_CA NULL
-#define OPTION_VAL_0_SHADPS4_RCAS_ATTENUATION_CA NULL
-#define OPTION_VAL_125_CA NULL
-#define OPTION_VAL_250_CA NULL
-#define OPTION_VAL_375_CA NULL
-#define OPTION_VAL_500_CA NULL
-#define OPTION_VAL_750_CA NULL
-#define OPTION_VAL_1000_CA NULL
-#define OPTION_VAL_1500_CA NULL
-#define OPTION_VAL_2000_CA NULL
-#define OPTION_VAL_3000_CA NULL
 #define SHADPS4_VBLANK_FREQUENCY_LABEL_CA NULL
 #define SHADPS4_VBLANK_FREQUENCY_INFO_0_CA NULL
 #define OPTION_VAL_30_SHADPS4_VBLANK_FREQUENCY_CA NULL
@@ -2243,56 +2029,6 @@ struct retro_core_option_v2_definition option_defs_ca[] = {
             { NULL, NULL },
         },
         "1280x720"
-    },
-    {
-        "shadps4_fsr",
-        SHADPS4_FSR_LABEL_CA,
-        NULL,
-        SHADPS4_FSR_INFO_0_CA,
-        NULL,
-        "video",
-        {
-            { "disabled", NULL },
-            { "enabled",  NULL },
-            { NULL, NULL },
-        },
-        "disabled"
-    },
-    {
-        "shadps4_rcas",
-        SHADPS4_RCAS_LABEL_CA,
-        NULL,
-        SHADPS4_RCAS_INFO_0_CA,
-        NULL,
-        "video",
-        {
-            { "enabled",  NULL },
-            { "disabled", NULL },
-            { NULL, NULL },
-        },
-        "enabled"
-    },
-    {
-        "shadps4_rcas_attenuation",
-        SHADPS4_RCAS_ATTENUATION_LABEL_CA,
-        NULL,
-        SHADPS4_RCAS_ATTENUATION_INFO_0_CA,
-        NULL,
-        "video",
-        {
-            { "0", OPTION_VAL_0_SHADPS4_RCAS_ATTENUATION_CA },
-            { "125", OPTION_VAL_125_CA },
-            { "250", OPTION_VAL_250_CA },
-            { "375", OPTION_VAL_375_CA },
-            { "500", OPTION_VAL_500_CA },
-            { "750", OPTION_VAL_750_CA },
-            { "1000", OPTION_VAL_1000_CA },
-            { "1500", OPTION_VAL_1500_CA },
-            { "2000", OPTION_VAL_2000_CA },
-            { "3000", OPTION_VAL_3000_CA },
-            { NULL, NULL },
-        },
-        "250"
     },
     {
         "shadps4_vblank_frequency",
@@ -2588,22 +2324,6 @@ struct retro_core_options_v2 options_ca = {
 #define OPTION_VAL_1920X1080_CHS NULL
 #define OPTION_VAL_2560X1440_CHS NULL
 #define OPTION_VAL_3840X2160_CHS NULL
-#define SHADPS4_FSR_LABEL_CHS NULL
-#define SHADPS4_FSR_INFO_0_CHS NULL
-#define SHADPS4_RCAS_LABEL_CHS NULL
-#define SHADPS4_RCAS_INFO_0_CHS NULL
-#define SHADPS4_RCAS_ATTENUATION_LABEL_CHS NULL
-#define SHADPS4_RCAS_ATTENUATION_INFO_0_CHS NULL
-#define OPTION_VAL_0_SHADPS4_RCAS_ATTENUATION_CHS NULL
-#define OPTION_VAL_125_CHS NULL
-#define OPTION_VAL_250_CHS NULL
-#define OPTION_VAL_375_CHS NULL
-#define OPTION_VAL_500_CHS NULL
-#define OPTION_VAL_750_CHS NULL
-#define OPTION_VAL_1000_CHS NULL
-#define OPTION_VAL_1500_CHS NULL
-#define OPTION_VAL_2000_CHS NULL
-#define OPTION_VAL_3000_CHS NULL
 #define SHADPS4_VBLANK_FREQUENCY_LABEL_CHS NULL
 #define SHADPS4_VBLANK_FREQUENCY_INFO_0_CHS NULL
 #define OPTION_VAL_30_SHADPS4_VBLANK_FREQUENCY_CHS NULL
@@ -2862,56 +2582,6 @@ struct retro_core_option_v2_definition option_defs_chs[] = {
             { NULL, NULL },
         },
         "1280x720"
-    },
-    {
-        "shadps4_fsr",
-        SHADPS4_FSR_LABEL_CHS,
-        NULL,
-        SHADPS4_FSR_INFO_0_CHS,
-        NULL,
-        "video",
-        {
-            { "disabled", NULL },
-            { "enabled",  NULL },
-            { NULL, NULL },
-        },
-        "disabled"
-    },
-    {
-        "shadps4_rcas",
-        SHADPS4_RCAS_LABEL_CHS,
-        NULL,
-        SHADPS4_RCAS_INFO_0_CHS,
-        NULL,
-        "video",
-        {
-            { "enabled",  NULL },
-            { "disabled", NULL },
-            { NULL, NULL },
-        },
-        "enabled"
-    },
-    {
-        "shadps4_rcas_attenuation",
-        SHADPS4_RCAS_ATTENUATION_LABEL_CHS,
-        NULL,
-        SHADPS4_RCAS_ATTENUATION_INFO_0_CHS,
-        NULL,
-        "video",
-        {
-            { "0", OPTION_VAL_0_SHADPS4_RCAS_ATTENUATION_CHS },
-            { "125", OPTION_VAL_125_CHS },
-            { "250", OPTION_VAL_250_CHS },
-            { "375", OPTION_VAL_375_CHS },
-            { "500", OPTION_VAL_500_CHS },
-            { "750", OPTION_VAL_750_CHS },
-            { "1000", OPTION_VAL_1000_CHS },
-            { "1500", OPTION_VAL_1500_CHS },
-            { "2000", OPTION_VAL_2000_CHS },
-            { "3000", OPTION_VAL_3000_CHS },
-            { NULL, NULL },
-        },
-        "250"
     },
     {
         "shadps4_vblank_frequency",
@@ -3207,22 +2877,6 @@ struct retro_core_options_v2 options_chs = {
 #define OPTION_VAL_1920X1080_CHT NULL
 #define OPTION_VAL_2560X1440_CHT NULL
 #define OPTION_VAL_3840X2160_CHT NULL
-#define SHADPS4_FSR_LABEL_CHT NULL
-#define SHADPS4_FSR_INFO_0_CHT NULL
-#define SHADPS4_RCAS_LABEL_CHT NULL
-#define SHADPS4_RCAS_INFO_0_CHT NULL
-#define SHADPS4_RCAS_ATTENUATION_LABEL_CHT NULL
-#define SHADPS4_RCAS_ATTENUATION_INFO_0_CHT NULL
-#define OPTION_VAL_0_SHADPS4_RCAS_ATTENUATION_CHT NULL
-#define OPTION_VAL_125_CHT NULL
-#define OPTION_VAL_250_CHT NULL
-#define OPTION_VAL_375_CHT NULL
-#define OPTION_VAL_500_CHT NULL
-#define OPTION_VAL_750_CHT NULL
-#define OPTION_VAL_1000_CHT NULL
-#define OPTION_VAL_1500_CHT NULL
-#define OPTION_VAL_2000_CHT NULL
-#define OPTION_VAL_3000_CHT NULL
 #define SHADPS4_VBLANK_FREQUENCY_LABEL_CHT NULL
 #define SHADPS4_VBLANK_FREQUENCY_INFO_0_CHT NULL
 #define OPTION_VAL_30_SHADPS4_VBLANK_FREQUENCY_CHT NULL
@@ -3481,56 +3135,6 @@ struct retro_core_option_v2_definition option_defs_cht[] = {
             { NULL, NULL },
         },
         "1280x720"
-    },
-    {
-        "shadps4_fsr",
-        SHADPS4_FSR_LABEL_CHT,
-        NULL,
-        SHADPS4_FSR_INFO_0_CHT,
-        NULL,
-        "video",
-        {
-            { "disabled", NULL },
-            { "enabled",  NULL },
-            { NULL, NULL },
-        },
-        "disabled"
-    },
-    {
-        "shadps4_rcas",
-        SHADPS4_RCAS_LABEL_CHT,
-        NULL,
-        SHADPS4_RCAS_INFO_0_CHT,
-        NULL,
-        "video",
-        {
-            { "enabled",  NULL },
-            { "disabled", NULL },
-            { NULL, NULL },
-        },
-        "enabled"
-    },
-    {
-        "shadps4_rcas_attenuation",
-        SHADPS4_RCAS_ATTENUATION_LABEL_CHT,
-        NULL,
-        SHADPS4_RCAS_ATTENUATION_INFO_0_CHT,
-        NULL,
-        "video",
-        {
-            { "0", OPTION_VAL_0_SHADPS4_RCAS_ATTENUATION_CHT },
-            { "125", OPTION_VAL_125_CHT },
-            { "250", OPTION_VAL_250_CHT },
-            { "375", OPTION_VAL_375_CHT },
-            { "500", OPTION_VAL_500_CHT },
-            { "750", OPTION_VAL_750_CHT },
-            { "1000", OPTION_VAL_1000_CHT },
-            { "1500", OPTION_VAL_1500_CHT },
-            { "2000", OPTION_VAL_2000_CHT },
-            { "3000", OPTION_VAL_3000_CHT },
-            { NULL, NULL },
-        },
-        "250"
     },
     {
         "shadps4_vblank_frequency",
@@ -3826,22 +3430,6 @@ struct retro_core_options_v2 options_cht = {
 #define OPTION_VAL_1920X1080_CS NULL
 #define OPTION_VAL_2560X1440_CS NULL
 #define OPTION_VAL_3840X2160_CS NULL
-#define SHADPS4_FSR_LABEL_CS NULL
-#define SHADPS4_FSR_INFO_0_CS NULL
-#define SHADPS4_RCAS_LABEL_CS NULL
-#define SHADPS4_RCAS_INFO_0_CS NULL
-#define SHADPS4_RCAS_ATTENUATION_LABEL_CS NULL
-#define SHADPS4_RCAS_ATTENUATION_INFO_0_CS NULL
-#define OPTION_VAL_0_SHADPS4_RCAS_ATTENUATION_CS NULL
-#define OPTION_VAL_125_CS NULL
-#define OPTION_VAL_250_CS NULL
-#define OPTION_VAL_375_CS NULL
-#define OPTION_VAL_500_CS NULL
-#define OPTION_VAL_750_CS NULL
-#define OPTION_VAL_1000_CS NULL
-#define OPTION_VAL_1500_CS NULL
-#define OPTION_VAL_2000_CS NULL
-#define OPTION_VAL_3000_CS NULL
 #define SHADPS4_VBLANK_FREQUENCY_LABEL_CS NULL
 #define SHADPS4_VBLANK_FREQUENCY_INFO_0_CS NULL
 #define OPTION_VAL_30_SHADPS4_VBLANK_FREQUENCY_CS NULL
@@ -4100,56 +3688,6 @@ struct retro_core_option_v2_definition option_defs_cs[] = {
             { NULL, NULL },
         },
         "1280x720"
-    },
-    {
-        "shadps4_fsr",
-        SHADPS4_FSR_LABEL_CS,
-        NULL,
-        SHADPS4_FSR_INFO_0_CS,
-        NULL,
-        "video",
-        {
-            { "disabled", NULL },
-            { "enabled",  NULL },
-            { NULL, NULL },
-        },
-        "disabled"
-    },
-    {
-        "shadps4_rcas",
-        SHADPS4_RCAS_LABEL_CS,
-        NULL,
-        SHADPS4_RCAS_INFO_0_CS,
-        NULL,
-        "video",
-        {
-            { "enabled",  NULL },
-            { "disabled", NULL },
-            { NULL, NULL },
-        },
-        "enabled"
-    },
-    {
-        "shadps4_rcas_attenuation",
-        SHADPS4_RCAS_ATTENUATION_LABEL_CS,
-        NULL,
-        SHADPS4_RCAS_ATTENUATION_INFO_0_CS,
-        NULL,
-        "video",
-        {
-            { "0", OPTION_VAL_0_SHADPS4_RCAS_ATTENUATION_CS },
-            { "125", OPTION_VAL_125_CS },
-            { "250", OPTION_VAL_250_CS },
-            { "375", OPTION_VAL_375_CS },
-            { "500", OPTION_VAL_500_CS },
-            { "750", OPTION_VAL_750_CS },
-            { "1000", OPTION_VAL_1000_CS },
-            { "1500", OPTION_VAL_1500_CS },
-            { "2000", OPTION_VAL_2000_CS },
-            { "3000", OPTION_VAL_3000_CS },
-            { NULL, NULL },
-        },
-        "250"
     },
     {
         "shadps4_vblank_frequency",
@@ -4445,22 +3983,6 @@ struct retro_core_options_v2 options_cs = {
 #define OPTION_VAL_1920X1080_DE NULL
 #define OPTION_VAL_2560X1440_DE NULL
 #define OPTION_VAL_3840X2160_DE NULL
-#define SHADPS4_FSR_LABEL_DE NULL
-#define SHADPS4_FSR_INFO_0_DE NULL
-#define SHADPS4_RCAS_LABEL_DE NULL
-#define SHADPS4_RCAS_INFO_0_DE NULL
-#define SHADPS4_RCAS_ATTENUATION_LABEL_DE NULL
-#define SHADPS4_RCAS_ATTENUATION_INFO_0_DE NULL
-#define OPTION_VAL_0_SHADPS4_RCAS_ATTENUATION_DE NULL
-#define OPTION_VAL_125_DE NULL
-#define OPTION_VAL_250_DE NULL
-#define OPTION_VAL_375_DE NULL
-#define OPTION_VAL_500_DE NULL
-#define OPTION_VAL_750_DE NULL
-#define OPTION_VAL_1000_DE NULL
-#define OPTION_VAL_1500_DE NULL
-#define OPTION_VAL_2000_DE NULL
-#define OPTION_VAL_3000_DE NULL
 #define SHADPS4_VBLANK_FREQUENCY_LABEL_DE NULL
 #define SHADPS4_VBLANK_FREQUENCY_INFO_0_DE NULL
 #define OPTION_VAL_30_SHADPS4_VBLANK_FREQUENCY_DE NULL
@@ -4719,56 +4241,6 @@ struct retro_core_option_v2_definition option_defs_de[] = {
             { NULL, NULL },
         },
         "1280x720"
-    },
-    {
-        "shadps4_fsr",
-        SHADPS4_FSR_LABEL_DE,
-        NULL,
-        SHADPS4_FSR_INFO_0_DE,
-        NULL,
-        "video",
-        {
-            { "disabled", NULL },
-            { "enabled",  NULL },
-            { NULL, NULL },
-        },
-        "disabled"
-    },
-    {
-        "shadps4_rcas",
-        SHADPS4_RCAS_LABEL_DE,
-        NULL,
-        SHADPS4_RCAS_INFO_0_DE,
-        NULL,
-        "video",
-        {
-            { "enabled",  NULL },
-            { "disabled", NULL },
-            { NULL, NULL },
-        },
-        "enabled"
-    },
-    {
-        "shadps4_rcas_attenuation",
-        SHADPS4_RCAS_ATTENUATION_LABEL_DE,
-        NULL,
-        SHADPS4_RCAS_ATTENUATION_INFO_0_DE,
-        NULL,
-        "video",
-        {
-            { "0", OPTION_VAL_0_SHADPS4_RCAS_ATTENUATION_DE },
-            { "125", OPTION_VAL_125_DE },
-            { "250", OPTION_VAL_250_DE },
-            { "375", OPTION_VAL_375_DE },
-            { "500", OPTION_VAL_500_DE },
-            { "750", OPTION_VAL_750_DE },
-            { "1000", OPTION_VAL_1000_DE },
-            { "1500", OPTION_VAL_1500_DE },
-            { "2000", OPTION_VAL_2000_DE },
-            { "3000", OPTION_VAL_3000_DE },
-            { NULL, NULL },
-        },
-        "250"
     },
     {
         "shadps4_vblank_frequency",
@@ -5064,22 +4536,6 @@ struct retro_core_options_v2 options_de = {
 #define OPTION_VAL_1920X1080_EL NULL
 #define OPTION_VAL_2560X1440_EL NULL
 #define OPTION_VAL_3840X2160_EL NULL
-#define SHADPS4_FSR_LABEL_EL NULL
-#define SHADPS4_FSR_INFO_0_EL NULL
-#define SHADPS4_RCAS_LABEL_EL NULL
-#define SHADPS4_RCAS_INFO_0_EL NULL
-#define SHADPS4_RCAS_ATTENUATION_LABEL_EL NULL
-#define SHADPS4_RCAS_ATTENUATION_INFO_0_EL NULL
-#define OPTION_VAL_0_SHADPS4_RCAS_ATTENUATION_EL NULL
-#define OPTION_VAL_125_EL NULL
-#define OPTION_VAL_250_EL NULL
-#define OPTION_VAL_375_EL NULL
-#define OPTION_VAL_500_EL NULL
-#define OPTION_VAL_750_EL NULL
-#define OPTION_VAL_1000_EL NULL
-#define OPTION_VAL_1500_EL NULL
-#define OPTION_VAL_2000_EL NULL
-#define OPTION_VAL_3000_EL NULL
 #define SHADPS4_VBLANK_FREQUENCY_LABEL_EL NULL
 #define SHADPS4_VBLANK_FREQUENCY_INFO_0_EL NULL
 #define OPTION_VAL_30_SHADPS4_VBLANK_FREQUENCY_EL NULL
@@ -5338,56 +4794,6 @@ struct retro_core_option_v2_definition option_defs_el[] = {
             { NULL, NULL },
         },
         "1280x720"
-    },
-    {
-        "shadps4_fsr",
-        SHADPS4_FSR_LABEL_EL,
-        NULL,
-        SHADPS4_FSR_INFO_0_EL,
-        NULL,
-        "video",
-        {
-            { "disabled", NULL },
-            { "enabled",  NULL },
-            { NULL, NULL },
-        },
-        "disabled"
-    },
-    {
-        "shadps4_rcas",
-        SHADPS4_RCAS_LABEL_EL,
-        NULL,
-        SHADPS4_RCAS_INFO_0_EL,
-        NULL,
-        "video",
-        {
-            { "enabled",  NULL },
-            { "disabled", NULL },
-            { NULL, NULL },
-        },
-        "enabled"
-    },
-    {
-        "shadps4_rcas_attenuation",
-        SHADPS4_RCAS_ATTENUATION_LABEL_EL,
-        NULL,
-        SHADPS4_RCAS_ATTENUATION_INFO_0_EL,
-        NULL,
-        "video",
-        {
-            { "0", OPTION_VAL_0_SHADPS4_RCAS_ATTENUATION_EL },
-            { "125", OPTION_VAL_125_EL },
-            { "250", OPTION_VAL_250_EL },
-            { "375", OPTION_VAL_375_EL },
-            { "500", OPTION_VAL_500_EL },
-            { "750", OPTION_VAL_750_EL },
-            { "1000", OPTION_VAL_1000_EL },
-            { "1500", OPTION_VAL_1500_EL },
-            { "2000", OPTION_VAL_2000_EL },
-            { "3000", OPTION_VAL_3000_EL },
-            { NULL, NULL },
-        },
-        "250"
     },
     {
         "shadps4_vblank_frequency",
@@ -5683,22 +5089,6 @@ struct retro_core_options_v2 options_el = {
 #define OPTION_VAL_1920X1080_EN NULL
 #define OPTION_VAL_2560X1440_EN NULL
 #define OPTION_VAL_3840X2160_EN NULL
-#define SHADPS4_FSR_LABEL_EN NULL
-#define SHADPS4_FSR_INFO_0_EN NULL
-#define SHADPS4_RCAS_LABEL_EN NULL
-#define SHADPS4_RCAS_INFO_0_EN NULL
-#define SHADPS4_RCAS_ATTENUATION_LABEL_EN NULL
-#define SHADPS4_RCAS_ATTENUATION_INFO_0_EN NULL
-#define OPTION_VAL_0_SHADPS4_RCAS_ATTENUATION_EN NULL
-#define OPTION_VAL_125_EN NULL
-#define OPTION_VAL_250_EN NULL
-#define OPTION_VAL_375_EN NULL
-#define OPTION_VAL_500_EN NULL
-#define OPTION_VAL_750_EN NULL
-#define OPTION_VAL_1000_EN NULL
-#define OPTION_VAL_1500_EN NULL
-#define OPTION_VAL_2000_EN NULL
-#define OPTION_VAL_3000_EN NULL
 #define SHADPS4_VBLANK_FREQUENCY_LABEL_EN NULL
 #define SHADPS4_VBLANK_FREQUENCY_INFO_0_EN NULL
 #define OPTION_VAL_30_SHADPS4_VBLANK_FREQUENCY_EN NULL
@@ -5957,56 +5347,6 @@ struct retro_core_option_v2_definition option_defs_en[] = {
             { NULL, NULL },
         },
         "1280x720"
-    },
-    {
-        "shadps4_fsr",
-        SHADPS4_FSR_LABEL_EN,
-        NULL,
-        SHADPS4_FSR_INFO_0_EN,
-        NULL,
-        "video",
-        {
-            { "disabled", NULL },
-            { "enabled",  NULL },
-            { NULL, NULL },
-        },
-        "disabled"
-    },
-    {
-        "shadps4_rcas",
-        SHADPS4_RCAS_LABEL_EN,
-        NULL,
-        SHADPS4_RCAS_INFO_0_EN,
-        NULL,
-        "video",
-        {
-            { "enabled",  NULL },
-            { "disabled", NULL },
-            { NULL, NULL },
-        },
-        "enabled"
-    },
-    {
-        "shadps4_rcas_attenuation",
-        SHADPS4_RCAS_ATTENUATION_LABEL_EN,
-        NULL,
-        SHADPS4_RCAS_ATTENUATION_INFO_0_EN,
-        NULL,
-        "video",
-        {
-            { "0", OPTION_VAL_0_SHADPS4_RCAS_ATTENUATION_EN },
-            { "125", OPTION_VAL_125_EN },
-            { "250", OPTION_VAL_250_EN },
-            { "375", OPTION_VAL_375_EN },
-            { "500", OPTION_VAL_500_EN },
-            { "750", OPTION_VAL_750_EN },
-            { "1000", OPTION_VAL_1000_EN },
-            { "1500", OPTION_VAL_1500_EN },
-            { "2000", OPTION_VAL_2000_EN },
-            { "3000", OPTION_VAL_3000_EN },
-            { NULL, NULL },
-        },
-        "250"
     },
     {
         "shadps4_vblank_frequency",
@@ -6302,22 +5642,6 @@ struct retro_core_options_v2 options_en = {
 #define OPTION_VAL_1920X1080_EO NULL
 #define OPTION_VAL_2560X1440_EO NULL
 #define OPTION_VAL_3840X2160_EO NULL
-#define SHADPS4_FSR_LABEL_EO NULL
-#define SHADPS4_FSR_INFO_0_EO NULL
-#define SHADPS4_RCAS_LABEL_EO NULL
-#define SHADPS4_RCAS_INFO_0_EO NULL
-#define SHADPS4_RCAS_ATTENUATION_LABEL_EO NULL
-#define SHADPS4_RCAS_ATTENUATION_INFO_0_EO NULL
-#define OPTION_VAL_0_SHADPS4_RCAS_ATTENUATION_EO NULL
-#define OPTION_VAL_125_EO NULL
-#define OPTION_VAL_250_EO NULL
-#define OPTION_VAL_375_EO NULL
-#define OPTION_VAL_500_EO NULL
-#define OPTION_VAL_750_EO NULL
-#define OPTION_VAL_1000_EO NULL
-#define OPTION_VAL_1500_EO NULL
-#define OPTION_VAL_2000_EO NULL
-#define OPTION_VAL_3000_EO NULL
 #define SHADPS4_VBLANK_FREQUENCY_LABEL_EO NULL
 #define SHADPS4_VBLANK_FREQUENCY_INFO_0_EO NULL
 #define OPTION_VAL_30_SHADPS4_VBLANK_FREQUENCY_EO NULL
@@ -6576,56 +5900,6 @@ struct retro_core_option_v2_definition option_defs_eo[] = {
             { NULL, NULL },
         },
         "1280x720"
-    },
-    {
-        "shadps4_fsr",
-        SHADPS4_FSR_LABEL_EO,
-        NULL,
-        SHADPS4_FSR_INFO_0_EO,
-        NULL,
-        "video",
-        {
-            { "disabled", NULL },
-            { "enabled",  NULL },
-            { NULL, NULL },
-        },
-        "disabled"
-    },
-    {
-        "shadps4_rcas",
-        SHADPS4_RCAS_LABEL_EO,
-        NULL,
-        SHADPS4_RCAS_INFO_0_EO,
-        NULL,
-        "video",
-        {
-            { "enabled",  NULL },
-            { "disabled", NULL },
-            { NULL, NULL },
-        },
-        "enabled"
-    },
-    {
-        "shadps4_rcas_attenuation",
-        SHADPS4_RCAS_ATTENUATION_LABEL_EO,
-        NULL,
-        SHADPS4_RCAS_ATTENUATION_INFO_0_EO,
-        NULL,
-        "video",
-        {
-            { "0", OPTION_VAL_0_SHADPS4_RCAS_ATTENUATION_EO },
-            { "125", OPTION_VAL_125_EO },
-            { "250", OPTION_VAL_250_EO },
-            { "375", OPTION_VAL_375_EO },
-            { "500", OPTION_VAL_500_EO },
-            { "750", OPTION_VAL_750_EO },
-            { "1000", OPTION_VAL_1000_EO },
-            { "1500", OPTION_VAL_1500_EO },
-            { "2000", OPTION_VAL_2000_EO },
-            { "3000", OPTION_VAL_3000_EO },
-            { NULL, NULL },
-        },
-        "250"
     },
     {
         "shadps4_vblank_frequency",
@@ -6921,22 +6195,6 @@ struct retro_core_options_v2 options_eo = {
 #define OPTION_VAL_1920X1080_ES NULL
 #define OPTION_VAL_2560X1440_ES NULL
 #define OPTION_VAL_3840X2160_ES NULL
-#define SHADPS4_FSR_LABEL_ES NULL
-#define SHADPS4_FSR_INFO_0_ES NULL
-#define SHADPS4_RCAS_LABEL_ES NULL
-#define SHADPS4_RCAS_INFO_0_ES NULL
-#define SHADPS4_RCAS_ATTENUATION_LABEL_ES NULL
-#define SHADPS4_RCAS_ATTENUATION_INFO_0_ES NULL
-#define OPTION_VAL_0_SHADPS4_RCAS_ATTENUATION_ES NULL
-#define OPTION_VAL_125_ES NULL
-#define OPTION_VAL_250_ES NULL
-#define OPTION_VAL_375_ES NULL
-#define OPTION_VAL_500_ES NULL
-#define OPTION_VAL_750_ES NULL
-#define OPTION_VAL_1000_ES NULL
-#define OPTION_VAL_1500_ES NULL
-#define OPTION_VAL_2000_ES NULL
-#define OPTION_VAL_3000_ES NULL
 #define SHADPS4_VBLANK_FREQUENCY_LABEL_ES NULL
 #define SHADPS4_VBLANK_FREQUENCY_INFO_0_ES NULL
 #define OPTION_VAL_30_SHADPS4_VBLANK_FREQUENCY_ES NULL
@@ -7195,56 +6453,6 @@ struct retro_core_option_v2_definition option_defs_es[] = {
             { NULL, NULL },
         },
         "1280x720"
-    },
-    {
-        "shadps4_fsr",
-        SHADPS4_FSR_LABEL_ES,
-        NULL,
-        SHADPS4_FSR_INFO_0_ES,
-        NULL,
-        "video",
-        {
-            { "disabled", NULL },
-            { "enabled",  NULL },
-            { NULL, NULL },
-        },
-        "disabled"
-    },
-    {
-        "shadps4_rcas",
-        SHADPS4_RCAS_LABEL_ES,
-        NULL,
-        SHADPS4_RCAS_INFO_0_ES,
-        NULL,
-        "video",
-        {
-            { "enabled",  NULL },
-            { "disabled", NULL },
-            { NULL, NULL },
-        },
-        "enabled"
-    },
-    {
-        "shadps4_rcas_attenuation",
-        SHADPS4_RCAS_ATTENUATION_LABEL_ES,
-        NULL,
-        SHADPS4_RCAS_ATTENUATION_INFO_0_ES,
-        NULL,
-        "video",
-        {
-            { "0", OPTION_VAL_0_SHADPS4_RCAS_ATTENUATION_ES },
-            { "125", OPTION_VAL_125_ES },
-            { "250", OPTION_VAL_250_ES },
-            { "375", OPTION_VAL_375_ES },
-            { "500", OPTION_VAL_500_ES },
-            { "750", OPTION_VAL_750_ES },
-            { "1000", OPTION_VAL_1000_ES },
-            { "1500", OPTION_VAL_1500_ES },
-            { "2000", OPTION_VAL_2000_ES },
-            { "3000", OPTION_VAL_3000_ES },
-            { NULL, NULL },
-        },
-        "250"
     },
     {
         "shadps4_vblank_frequency",
@@ -7540,22 +6748,6 @@ struct retro_core_options_v2 options_es = {
 #define OPTION_VAL_1920X1080_FA NULL
 #define OPTION_VAL_2560X1440_FA NULL
 #define OPTION_VAL_3840X2160_FA NULL
-#define SHADPS4_FSR_LABEL_FA NULL
-#define SHADPS4_FSR_INFO_0_FA NULL
-#define SHADPS4_RCAS_LABEL_FA NULL
-#define SHADPS4_RCAS_INFO_0_FA NULL
-#define SHADPS4_RCAS_ATTENUATION_LABEL_FA NULL
-#define SHADPS4_RCAS_ATTENUATION_INFO_0_FA NULL
-#define OPTION_VAL_0_SHADPS4_RCAS_ATTENUATION_FA NULL
-#define OPTION_VAL_125_FA NULL
-#define OPTION_VAL_250_FA NULL
-#define OPTION_VAL_375_FA NULL
-#define OPTION_VAL_500_FA NULL
-#define OPTION_VAL_750_FA NULL
-#define OPTION_VAL_1000_FA NULL
-#define OPTION_VAL_1500_FA NULL
-#define OPTION_VAL_2000_FA NULL
-#define OPTION_VAL_3000_FA NULL
 #define SHADPS4_VBLANK_FREQUENCY_LABEL_FA NULL
 #define SHADPS4_VBLANK_FREQUENCY_INFO_0_FA NULL
 #define OPTION_VAL_30_SHADPS4_VBLANK_FREQUENCY_FA NULL
@@ -7814,56 +7006,6 @@ struct retro_core_option_v2_definition option_defs_fa[] = {
             { NULL, NULL },
         },
         "1280x720"
-    },
-    {
-        "shadps4_fsr",
-        SHADPS4_FSR_LABEL_FA,
-        NULL,
-        SHADPS4_FSR_INFO_0_FA,
-        NULL,
-        "video",
-        {
-            { "disabled", NULL },
-            { "enabled",  NULL },
-            { NULL, NULL },
-        },
-        "disabled"
-    },
-    {
-        "shadps4_rcas",
-        SHADPS4_RCAS_LABEL_FA,
-        NULL,
-        SHADPS4_RCAS_INFO_0_FA,
-        NULL,
-        "video",
-        {
-            { "enabled",  NULL },
-            { "disabled", NULL },
-            { NULL, NULL },
-        },
-        "enabled"
-    },
-    {
-        "shadps4_rcas_attenuation",
-        SHADPS4_RCAS_ATTENUATION_LABEL_FA,
-        NULL,
-        SHADPS4_RCAS_ATTENUATION_INFO_0_FA,
-        NULL,
-        "video",
-        {
-            { "0", OPTION_VAL_0_SHADPS4_RCAS_ATTENUATION_FA },
-            { "125", OPTION_VAL_125_FA },
-            { "250", OPTION_VAL_250_FA },
-            { "375", OPTION_VAL_375_FA },
-            { "500", OPTION_VAL_500_FA },
-            { "750", OPTION_VAL_750_FA },
-            { "1000", OPTION_VAL_1000_FA },
-            { "1500", OPTION_VAL_1500_FA },
-            { "2000", OPTION_VAL_2000_FA },
-            { "3000", OPTION_VAL_3000_FA },
-            { NULL, NULL },
-        },
-        "250"
     },
     {
         "shadps4_vblank_frequency",
@@ -8159,22 +7301,6 @@ struct retro_core_options_v2 options_fa = {
 #define OPTION_VAL_1920X1080_FI NULL
 #define OPTION_VAL_2560X1440_FI NULL
 #define OPTION_VAL_3840X2160_FI NULL
-#define SHADPS4_FSR_LABEL_FI NULL
-#define SHADPS4_FSR_INFO_0_FI NULL
-#define SHADPS4_RCAS_LABEL_FI NULL
-#define SHADPS4_RCAS_INFO_0_FI NULL
-#define SHADPS4_RCAS_ATTENUATION_LABEL_FI NULL
-#define SHADPS4_RCAS_ATTENUATION_INFO_0_FI NULL
-#define OPTION_VAL_0_SHADPS4_RCAS_ATTENUATION_FI NULL
-#define OPTION_VAL_125_FI NULL
-#define OPTION_VAL_250_FI NULL
-#define OPTION_VAL_375_FI NULL
-#define OPTION_VAL_500_FI NULL
-#define OPTION_VAL_750_FI NULL
-#define OPTION_VAL_1000_FI NULL
-#define OPTION_VAL_1500_FI NULL
-#define OPTION_VAL_2000_FI NULL
-#define OPTION_VAL_3000_FI NULL
 #define SHADPS4_VBLANK_FREQUENCY_LABEL_FI NULL
 #define SHADPS4_VBLANK_FREQUENCY_INFO_0_FI NULL
 #define OPTION_VAL_30_SHADPS4_VBLANK_FREQUENCY_FI NULL
@@ -8433,56 +7559,6 @@ struct retro_core_option_v2_definition option_defs_fi[] = {
             { NULL, NULL },
         },
         "1280x720"
-    },
-    {
-        "shadps4_fsr",
-        SHADPS4_FSR_LABEL_FI,
-        NULL,
-        SHADPS4_FSR_INFO_0_FI,
-        NULL,
-        "video",
-        {
-            { "disabled", NULL },
-            { "enabled",  NULL },
-            { NULL, NULL },
-        },
-        "disabled"
-    },
-    {
-        "shadps4_rcas",
-        SHADPS4_RCAS_LABEL_FI,
-        NULL,
-        SHADPS4_RCAS_INFO_0_FI,
-        NULL,
-        "video",
-        {
-            { "enabled",  NULL },
-            { "disabled", NULL },
-            { NULL, NULL },
-        },
-        "enabled"
-    },
-    {
-        "shadps4_rcas_attenuation",
-        SHADPS4_RCAS_ATTENUATION_LABEL_FI,
-        NULL,
-        SHADPS4_RCAS_ATTENUATION_INFO_0_FI,
-        NULL,
-        "video",
-        {
-            { "0", OPTION_VAL_0_SHADPS4_RCAS_ATTENUATION_FI },
-            { "125", OPTION_VAL_125_FI },
-            { "250", OPTION_VAL_250_FI },
-            { "375", OPTION_VAL_375_FI },
-            { "500", OPTION_VAL_500_FI },
-            { "750", OPTION_VAL_750_FI },
-            { "1000", OPTION_VAL_1000_FI },
-            { "1500", OPTION_VAL_1500_FI },
-            { "2000", OPTION_VAL_2000_FI },
-            { "3000", OPTION_VAL_3000_FI },
-            { NULL, NULL },
-        },
-        "250"
     },
     {
         "shadps4_vblank_frequency",
@@ -8778,22 +7854,6 @@ struct retro_core_options_v2 options_fi = {
 #define OPTION_VAL_1920X1080_FR NULL
 #define OPTION_VAL_2560X1440_FR NULL
 #define OPTION_VAL_3840X2160_FR NULL
-#define SHADPS4_FSR_LABEL_FR NULL
-#define SHADPS4_FSR_INFO_0_FR NULL
-#define SHADPS4_RCAS_LABEL_FR NULL
-#define SHADPS4_RCAS_INFO_0_FR NULL
-#define SHADPS4_RCAS_ATTENUATION_LABEL_FR NULL
-#define SHADPS4_RCAS_ATTENUATION_INFO_0_FR NULL
-#define OPTION_VAL_0_SHADPS4_RCAS_ATTENUATION_FR NULL
-#define OPTION_VAL_125_FR NULL
-#define OPTION_VAL_250_FR NULL
-#define OPTION_VAL_375_FR NULL
-#define OPTION_VAL_500_FR NULL
-#define OPTION_VAL_750_FR NULL
-#define OPTION_VAL_1000_FR NULL
-#define OPTION_VAL_1500_FR NULL
-#define OPTION_VAL_2000_FR NULL
-#define OPTION_VAL_3000_FR NULL
 #define SHADPS4_VBLANK_FREQUENCY_LABEL_FR NULL
 #define SHADPS4_VBLANK_FREQUENCY_INFO_0_FR NULL
 #define OPTION_VAL_30_SHADPS4_VBLANK_FREQUENCY_FR NULL
@@ -9052,56 +8112,6 @@ struct retro_core_option_v2_definition option_defs_fr[] = {
             { NULL, NULL },
         },
         "1280x720"
-    },
-    {
-        "shadps4_fsr",
-        SHADPS4_FSR_LABEL_FR,
-        NULL,
-        SHADPS4_FSR_INFO_0_FR,
-        NULL,
-        "video",
-        {
-            { "disabled", NULL },
-            { "enabled",  NULL },
-            { NULL, NULL },
-        },
-        "disabled"
-    },
-    {
-        "shadps4_rcas",
-        SHADPS4_RCAS_LABEL_FR,
-        NULL,
-        SHADPS4_RCAS_INFO_0_FR,
-        NULL,
-        "video",
-        {
-            { "enabled",  NULL },
-            { "disabled", NULL },
-            { NULL, NULL },
-        },
-        "enabled"
-    },
-    {
-        "shadps4_rcas_attenuation",
-        SHADPS4_RCAS_ATTENUATION_LABEL_FR,
-        NULL,
-        SHADPS4_RCAS_ATTENUATION_INFO_0_FR,
-        NULL,
-        "video",
-        {
-            { "0", OPTION_VAL_0_SHADPS4_RCAS_ATTENUATION_FR },
-            { "125", OPTION_VAL_125_FR },
-            { "250", OPTION_VAL_250_FR },
-            { "375", OPTION_VAL_375_FR },
-            { "500", OPTION_VAL_500_FR },
-            { "750", OPTION_VAL_750_FR },
-            { "1000", OPTION_VAL_1000_FR },
-            { "1500", OPTION_VAL_1500_FR },
-            { "2000", OPTION_VAL_2000_FR },
-            { "3000", OPTION_VAL_3000_FR },
-            { NULL, NULL },
-        },
-        "250"
     },
     {
         "shadps4_vblank_frequency",
@@ -9397,22 +8407,6 @@ struct retro_core_options_v2 options_fr = {
 #define OPTION_VAL_1920X1080_GA NULL
 #define OPTION_VAL_2560X1440_GA NULL
 #define OPTION_VAL_3840X2160_GA NULL
-#define SHADPS4_FSR_LABEL_GA NULL
-#define SHADPS4_FSR_INFO_0_GA NULL
-#define SHADPS4_RCAS_LABEL_GA NULL
-#define SHADPS4_RCAS_INFO_0_GA NULL
-#define SHADPS4_RCAS_ATTENUATION_LABEL_GA NULL
-#define SHADPS4_RCAS_ATTENUATION_INFO_0_GA NULL
-#define OPTION_VAL_0_SHADPS4_RCAS_ATTENUATION_GA NULL
-#define OPTION_VAL_125_GA NULL
-#define OPTION_VAL_250_GA NULL
-#define OPTION_VAL_375_GA NULL
-#define OPTION_VAL_500_GA NULL
-#define OPTION_VAL_750_GA NULL
-#define OPTION_VAL_1000_GA NULL
-#define OPTION_VAL_1500_GA NULL
-#define OPTION_VAL_2000_GA NULL
-#define OPTION_VAL_3000_GA NULL
 #define SHADPS4_VBLANK_FREQUENCY_LABEL_GA NULL
 #define SHADPS4_VBLANK_FREQUENCY_INFO_0_GA NULL
 #define OPTION_VAL_30_SHADPS4_VBLANK_FREQUENCY_GA NULL
@@ -9671,56 +8665,6 @@ struct retro_core_option_v2_definition option_defs_ga[] = {
             { NULL, NULL },
         },
         "1280x720"
-    },
-    {
-        "shadps4_fsr",
-        SHADPS4_FSR_LABEL_GA,
-        NULL,
-        SHADPS4_FSR_INFO_0_GA,
-        NULL,
-        "video",
-        {
-            { "disabled", NULL },
-            { "enabled",  NULL },
-            { NULL, NULL },
-        },
-        "disabled"
-    },
-    {
-        "shadps4_rcas",
-        SHADPS4_RCAS_LABEL_GA,
-        NULL,
-        SHADPS4_RCAS_INFO_0_GA,
-        NULL,
-        "video",
-        {
-            { "enabled",  NULL },
-            { "disabled", NULL },
-            { NULL, NULL },
-        },
-        "enabled"
-    },
-    {
-        "shadps4_rcas_attenuation",
-        SHADPS4_RCAS_ATTENUATION_LABEL_GA,
-        NULL,
-        SHADPS4_RCAS_ATTENUATION_INFO_0_GA,
-        NULL,
-        "video",
-        {
-            { "0", OPTION_VAL_0_SHADPS4_RCAS_ATTENUATION_GA },
-            { "125", OPTION_VAL_125_GA },
-            { "250", OPTION_VAL_250_GA },
-            { "375", OPTION_VAL_375_GA },
-            { "500", OPTION_VAL_500_GA },
-            { "750", OPTION_VAL_750_GA },
-            { "1000", OPTION_VAL_1000_GA },
-            { "1500", OPTION_VAL_1500_GA },
-            { "2000", OPTION_VAL_2000_GA },
-            { "3000", OPTION_VAL_3000_GA },
-            { NULL, NULL },
-        },
-        "250"
     },
     {
         "shadps4_vblank_frequency",
@@ -10016,22 +8960,6 @@ struct retro_core_options_v2 options_ga = {
 #define OPTION_VAL_1920X1080_GL NULL
 #define OPTION_VAL_2560X1440_GL NULL
 #define OPTION_VAL_3840X2160_GL NULL
-#define SHADPS4_FSR_LABEL_GL NULL
-#define SHADPS4_FSR_INFO_0_GL NULL
-#define SHADPS4_RCAS_LABEL_GL NULL
-#define SHADPS4_RCAS_INFO_0_GL NULL
-#define SHADPS4_RCAS_ATTENUATION_LABEL_GL NULL
-#define SHADPS4_RCAS_ATTENUATION_INFO_0_GL NULL
-#define OPTION_VAL_0_SHADPS4_RCAS_ATTENUATION_GL NULL
-#define OPTION_VAL_125_GL NULL
-#define OPTION_VAL_250_GL NULL
-#define OPTION_VAL_375_GL NULL
-#define OPTION_VAL_500_GL NULL
-#define OPTION_VAL_750_GL NULL
-#define OPTION_VAL_1000_GL NULL
-#define OPTION_VAL_1500_GL NULL
-#define OPTION_VAL_2000_GL NULL
-#define OPTION_VAL_3000_GL NULL
 #define SHADPS4_VBLANK_FREQUENCY_LABEL_GL NULL
 #define SHADPS4_VBLANK_FREQUENCY_INFO_0_GL NULL
 #define OPTION_VAL_30_SHADPS4_VBLANK_FREQUENCY_GL NULL
@@ -10290,56 +9218,6 @@ struct retro_core_option_v2_definition option_defs_gl[] = {
             { NULL, NULL },
         },
         "1280x720"
-    },
-    {
-        "shadps4_fsr",
-        SHADPS4_FSR_LABEL_GL,
-        NULL,
-        SHADPS4_FSR_INFO_0_GL,
-        NULL,
-        "video",
-        {
-            { "disabled", NULL },
-            { "enabled",  NULL },
-            { NULL, NULL },
-        },
-        "disabled"
-    },
-    {
-        "shadps4_rcas",
-        SHADPS4_RCAS_LABEL_GL,
-        NULL,
-        SHADPS4_RCAS_INFO_0_GL,
-        NULL,
-        "video",
-        {
-            { "enabled",  NULL },
-            { "disabled", NULL },
-            { NULL, NULL },
-        },
-        "enabled"
-    },
-    {
-        "shadps4_rcas_attenuation",
-        SHADPS4_RCAS_ATTENUATION_LABEL_GL,
-        NULL,
-        SHADPS4_RCAS_ATTENUATION_INFO_0_GL,
-        NULL,
-        "video",
-        {
-            { "0", OPTION_VAL_0_SHADPS4_RCAS_ATTENUATION_GL },
-            { "125", OPTION_VAL_125_GL },
-            { "250", OPTION_VAL_250_GL },
-            { "375", OPTION_VAL_375_GL },
-            { "500", OPTION_VAL_500_GL },
-            { "750", OPTION_VAL_750_GL },
-            { "1000", OPTION_VAL_1000_GL },
-            { "1500", OPTION_VAL_1500_GL },
-            { "2000", OPTION_VAL_2000_GL },
-            { "3000", OPTION_VAL_3000_GL },
-            { NULL, NULL },
-        },
-        "250"
     },
     {
         "shadps4_vblank_frequency",
@@ -10635,22 +9513,6 @@ struct retro_core_options_v2 options_gl = {
 #define OPTION_VAL_1920X1080_HE NULL
 #define OPTION_VAL_2560X1440_HE NULL
 #define OPTION_VAL_3840X2160_HE NULL
-#define SHADPS4_FSR_LABEL_HE NULL
-#define SHADPS4_FSR_INFO_0_HE NULL
-#define SHADPS4_RCAS_LABEL_HE NULL
-#define SHADPS4_RCAS_INFO_0_HE NULL
-#define SHADPS4_RCAS_ATTENUATION_LABEL_HE NULL
-#define SHADPS4_RCAS_ATTENUATION_INFO_0_HE NULL
-#define OPTION_VAL_0_SHADPS4_RCAS_ATTENUATION_HE NULL
-#define OPTION_VAL_125_HE NULL
-#define OPTION_VAL_250_HE NULL
-#define OPTION_VAL_375_HE NULL
-#define OPTION_VAL_500_HE NULL
-#define OPTION_VAL_750_HE NULL
-#define OPTION_VAL_1000_HE NULL
-#define OPTION_VAL_1500_HE NULL
-#define OPTION_VAL_2000_HE NULL
-#define OPTION_VAL_3000_HE NULL
 #define SHADPS4_VBLANK_FREQUENCY_LABEL_HE NULL
 #define SHADPS4_VBLANK_FREQUENCY_INFO_0_HE NULL
 #define OPTION_VAL_30_SHADPS4_VBLANK_FREQUENCY_HE NULL
@@ -10909,56 +9771,6 @@ struct retro_core_option_v2_definition option_defs_he[] = {
             { NULL, NULL },
         },
         "1280x720"
-    },
-    {
-        "shadps4_fsr",
-        SHADPS4_FSR_LABEL_HE,
-        NULL,
-        SHADPS4_FSR_INFO_0_HE,
-        NULL,
-        "video",
-        {
-            { "disabled", NULL },
-            { "enabled",  NULL },
-            { NULL, NULL },
-        },
-        "disabled"
-    },
-    {
-        "shadps4_rcas",
-        SHADPS4_RCAS_LABEL_HE,
-        NULL,
-        SHADPS4_RCAS_INFO_0_HE,
-        NULL,
-        "video",
-        {
-            { "enabled",  NULL },
-            { "disabled", NULL },
-            { NULL, NULL },
-        },
-        "enabled"
-    },
-    {
-        "shadps4_rcas_attenuation",
-        SHADPS4_RCAS_ATTENUATION_LABEL_HE,
-        NULL,
-        SHADPS4_RCAS_ATTENUATION_INFO_0_HE,
-        NULL,
-        "video",
-        {
-            { "0", OPTION_VAL_0_SHADPS4_RCAS_ATTENUATION_HE },
-            { "125", OPTION_VAL_125_HE },
-            { "250", OPTION_VAL_250_HE },
-            { "375", OPTION_VAL_375_HE },
-            { "500", OPTION_VAL_500_HE },
-            { "750", OPTION_VAL_750_HE },
-            { "1000", OPTION_VAL_1000_HE },
-            { "1500", OPTION_VAL_1500_HE },
-            { "2000", OPTION_VAL_2000_HE },
-            { "3000", OPTION_VAL_3000_HE },
-            { NULL, NULL },
-        },
-        "250"
     },
     {
         "shadps4_vblank_frequency",
@@ -11254,22 +10066,6 @@ struct retro_core_options_v2 options_he = {
 #define OPTION_VAL_1920X1080_HU NULL
 #define OPTION_VAL_2560X1440_HU NULL
 #define OPTION_VAL_3840X2160_HU NULL
-#define SHADPS4_FSR_LABEL_HU NULL
-#define SHADPS4_FSR_INFO_0_HU NULL
-#define SHADPS4_RCAS_LABEL_HU NULL
-#define SHADPS4_RCAS_INFO_0_HU NULL
-#define SHADPS4_RCAS_ATTENUATION_LABEL_HU NULL
-#define SHADPS4_RCAS_ATTENUATION_INFO_0_HU NULL
-#define OPTION_VAL_0_SHADPS4_RCAS_ATTENUATION_HU NULL
-#define OPTION_VAL_125_HU NULL
-#define OPTION_VAL_250_HU NULL
-#define OPTION_VAL_375_HU NULL
-#define OPTION_VAL_500_HU NULL
-#define OPTION_VAL_750_HU NULL
-#define OPTION_VAL_1000_HU NULL
-#define OPTION_VAL_1500_HU NULL
-#define OPTION_VAL_2000_HU NULL
-#define OPTION_VAL_3000_HU NULL
 #define SHADPS4_VBLANK_FREQUENCY_LABEL_HU NULL
 #define SHADPS4_VBLANK_FREQUENCY_INFO_0_HU NULL
 #define OPTION_VAL_30_SHADPS4_VBLANK_FREQUENCY_HU NULL
@@ -11528,56 +10324,6 @@ struct retro_core_option_v2_definition option_defs_hu[] = {
             { NULL, NULL },
         },
         "1280x720"
-    },
-    {
-        "shadps4_fsr",
-        SHADPS4_FSR_LABEL_HU,
-        NULL,
-        SHADPS4_FSR_INFO_0_HU,
-        NULL,
-        "video",
-        {
-            { "disabled", NULL },
-            { "enabled",  NULL },
-            { NULL, NULL },
-        },
-        "disabled"
-    },
-    {
-        "shadps4_rcas",
-        SHADPS4_RCAS_LABEL_HU,
-        NULL,
-        SHADPS4_RCAS_INFO_0_HU,
-        NULL,
-        "video",
-        {
-            { "enabled",  NULL },
-            { "disabled", NULL },
-            { NULL, NULL },
-        },
-        "enabled"
-    },
-    {
-        "shadps4_rcas_attenuation",
-        SHADPS4_RCAS_ATTENUATION_LABEL_HU,
-        NULL,
-        SHADPS4_RCAS_ATTENUATION_INFO_0_HU,
-        NULL,
-        "video",
-        {
-            { "0", OPTION_VAL_0_SHADPS4_RCAS_ATTENUATION_HU },
-            { "125", OPTION_VAL_125_HU },
-            { "250", OPTION_VAL_250_HU },
-            { "375", OPTION_VAL_375_HU },
-            { "500", OPTION_VAL_500_HU },
-            { "750", OPTION_VAL_750_HU },
-            { "1000", OPTION_VAL_1000_HU },
-            { "1500", OPTION_VAL_1500_HU },
-            { "2000", OPTION_VAL_2000_HU },
-            { "3000", OPTION_VAL_3000_HU },
-            { NULL, NULL },
-        },
-        "250"
     },
     {
         "shadps4_vblank_frequency",
@@ -11873,22 +10619,6 @@ struct retro_core_options_v2 options_hu = {
 #define OPTION_VAL_1920X1080_ID NULL
 #define OPTION_VAL_2560X1440_ID NULL
 #define OPTION_VAL_3840X2160_ID NULL
-#define SHADPS4_FSR_LABEL_ID NULL
-#define SHADPS4_FSR_INFO_0_ID NULL
-#define SHADPS4_RCAS_LABEL_ID NULL
-#define SHADPS4_RCAS_INFO_0_ID NULL
-#define SHADPS4_RCAS_ATTENUATION_LABEL_ID NULL
-#define SHADPS4_RCAS_ATTENUATION_INFO_0_ID NULL
-#define OPTION_VAL_0_SHADPS4_RCAS_ATTENUATION_ID NULL
-#define OPTION_VAL_125_ID NULL
-#define OPTION_VAL_250_ID NULL
-#define OPTION_VAL_375_ID NULL
-#define OPTION_VAL_500_ID NULL
-#define OPTION_VAL_750_ID NULL
-#define OPTION_VAL_1000_ID NULL
-#define OPTION_VAL_1500_ID NULL
-#define OPTION_VAL_2000_ID NULL
-#define OPTION_VAL_3000_ID NULL
 #define SHADPS4_VBLANK_FREQUENCY_LABEL_ID NULL
 #define SHADPS4_VBLANK_FREQUENCY_INFO_0_ID NULL
 #define OPTION_VAL_30_SHADPS4_VBLANK_FREQUENCY_ID NULL
@@ -12147,56 +10877,6 @@ struct retro_core_option_v2_definition option_defs_id[] = {
             { NULL, NULL },
         },
         "1280x720"
-    },
-    {
-        "shadps4_fsr",
-        SHADPS4_FSR_LABEL_ID,
-        NULL,
-        SHADPS4_FSR_INFO_0_ID,
-        NULL,
-        "video",
-        {
-            { "disabled", NULL },
-            { "enabled",  NULL },
-            { NULL, NULL },
-        },
-        "disabled"
-    },
-    {
-        "shadps4_rcas",
-        SHADPS4_RCAS_LABEL_ID,
-        NULL,
-        SHADPS4_RCAS_INFO_0_ID,
-        NULL,
-        "video",
-        {
-            { "enabled",  NULL },
-            { "disabled", NULL },
-            { NULL, NULL },
-        },
-        "enabled"
-    },
-    {
-        "shadps4_rcas_attenuation",
-        SHADPS4_RCAS_ATTENUATION_LABEL_ID,
-        NULL,
-        SHADPS4_RCAS_ATTENUATION_INFO_0_ID,
-        NULL,
-        "video",
-        {
-            { "0", OPTION_VAL_0_SHADPS4_RCAS_ATTENUATION_ID },
-            { "125", OPTION_VAL_125_ID },
-            { "250", OPTION_VAL_250_ID },
-            { "375", OPTION_VAL_375_ID },
-            { "500", OPTION_VAL_500_ID },
-            { "750", OPTION_VAL_750_ID },
-            { "1000", OPTION_VAL_1000_ID },
-            { "1500", OPTION_VAL_1500_ID },
-            { "2000", OPTION_VAL_2000_ID },
-            { "3000", OPTION_VAL_3000_ID },
-            { NULL, NULL },
-        },
-        "250"
     },
     {
         "shadps4_vblank_frequency",
@@ -12492,22 +11172,6 @@ struct retro_core_options_v2 options_id = {
 #define OPTION_VAL_1920X1080_IT NULL
 #define OPTION_VAL_2560X1440_IT NULL
 #define OPTION_VAL_3840X2160_IT NULL
-#define SHADPS4_FSR_LABEL_IT NULL
-#define SHADPS4_FSR_INFO_0_IT NULL
-#define SHADPS4_RCAS_LABEL_IT NULL
-#define SHADPS4_RCAS_INFO_0_IT NULL
-#define SHADPS4_RCAS_ATTENUATION_LABEL_IT NULL
-#define SHADPS4_RCAS_ATTENUATION_INFO_0_IT NULL
-#define OPTION_VAL_0_SHADPS4_RCAS_ATTENUATION_IT NULL
-#define OPTION_VAL_125_IT NULL
-#define OPTION_VAL_250_IT NULL
-#define OPTION_VAL_375_IT NULL
-#define OPTION_VAL_500_IT NULL
-#define OPTION_VAL_750_IT NULL
-#define OPTION_VAL_1000_IT NULL
-#define OPTION_VAL_1500_IT NULL
-#define OPTION_VAL_2000_IT NULL
-#define OPTION_VAL_3000_IT NULL
 #define SHADPS4_VBLANK_FREQUENCY_LABEL_IT NULL
 #define SHADPS4_VBLANK_FREQUENCY_INFO_0_IT NULL
 #define OPTION_VAL_30_SHADPS4_VBLANK_FREQUENCY_IT NULL
@@ -12766,56 +11430,6 @@ struct retro_core_option_v2_definition option_defs_it[] = {
             { NULL, NULL },
         },
         "1280x720"
-    },
-    {
-        "shadps4_fsr",
-        SHADPS4_FSR_LABEL_IT,
-        NULL,
-        SHADPS4_FSR_INFO_0_IT,
-        NULL,
-        "video",
-        {
-            { "disabled", NULL },
-            { "enabled",  NULL },
-            { NULL, NULL },
-        },
-        "disabled"
-    },
-    {
-        "shadps4_rcas",
-        SHADPS4_RCAS_LABEL_IT,
-        NULL,
-        SHADPS4_RCAS_INFO_0_IT,
-        NULL,
-        "video",
-        {
-            { "enabled",  NULL },
-            { "disabled", NULL },
-            { NULL, NULL },
-        },
-        "enabled"
-    },
-    {
-        "shadps4_rcas_attenuation",
-        SHADPS4_RCAS_ATTENUATION_LABEL_IT,
-        NULL,
-        SHADPS4_RCAS_ATTENUATION_INFO_0_IT,
-        NULL,
-        "video",
-        {
-            { "0", OPTION_VAL_0_SHADPS4_RCAS_ATTENUATION_IT },
-            { "125", OPTION_VAL_125_IT },
-            { "250", OPTION_VAL_250_IT },
-            { "375", OPTION_VAL_375_IT },
-            { "500", OPTION_VAL_500_IT },
-            { "750", OPTION_VAL_750_IT },
-            { "1000", OPTION_VAL_1000_IT },
-            { "1500", OPTION_VAL_1500_IT },
-            { "2000", OPTION_VAL_2000_IT },
-            { "3000", OPTION_VAL_3000_IT },
-            { NULL, NULL },
-        },
-        "250"
     },
     {
         "shadps4_vblank_frequency",
@@ -13111,22 +11725,6 @@ struct retro_core_options_v2 options_it = {
 #define OPTION_VAL_1920X1080_JA NULL
 #define OPTION_VAL_2560X1440_JA NULL
 #define OPTION_VAL_3840X2160_JA NULL
-#define SHADPS4_FSR_LABEL_JA NULL
-#define SHADPS4_FSR_INFO_0_JA NULL
-#define SHADPS4_RCAS_LABEL_JA NULL
-#define SHADPS4_RCAS_INFO_0_JA NULL
-#define SHADPS4_RCAS_ATTENUATION_LABEL_JA NULL
-#define SHADPS4_RCAS_ATTENUATION_INFO_0_JA NULL
-#define OPTION_VAL_0_SHADPS4_RCAS_ATTENUATION_JA NULL
-#define OPTION_VAL_125_JA NULL
-#define OPTION_VAL_250_JA NULL
-#define OPTION_VAL_375_JA NULL
-#define OPTION_VAL_500_JA NULL
-#define OPTION_VAL_750_JA NULL
-#define OPTION_VAL_1000_JA NULL
-#define OPTION_VAL_1500_JA NULL
-#define OPTION_VAL_2000_JA NULL
-#define OPTION_VAL_3000_JA NULL
 #define SHADPS4_VBLANK_FREQUENCY_LABEL_JA NULL
 #define SHADPS4_VBLANK_FREQUENCY_INFO_0_JA NULL
 #define OPTION_VAL_30_SHADPS4_VBLANK_FREQUENCY_JA NULL
@@ -13385,56 +11983,6 @@ struct retro_core_option_v2_definition option_defs_ja[] = {
             { NULL, NULL },
         },
         "1280x720"
-    },
-    {
-        "shadps4_fsr",
-        SHADPS4_FSR_LABEL_JA,
-        NULL,
-        SHADPS4_FSR_INFO_0_JA,
-        NULL,
-        "video",
-        {
-            { "disabled", NULL },
-            { "enabled",  NULL },
-            { NULL, NULL },
-        },
-        "disabled"
-    },
-    {
-        "shadps4_rcas",
-        SHADPS4_RCAS_LABEL_JA,
-        NULL,
-        SHADPS4_RCAS_INFO_0_JA,
-        NULL,
-        "video",
-        {
-            { "enabled",  NULL },
-            { "disabled", NULL },
-            { NULL, NULL },
-        },
-        "enabled"
-    },
-    {
-        "shadps4_rcas_attenuation",
-        SHADPS4_RCAS_ATTENUATION_LABEL_JA,
-        NULL,
-        SHADPS4_RCAS_ATTENUATION_INFO_0_JA,
-        NULL,
-        "video",
-        {
-            { "0", OPTION_VAL_0_SHADPS4_RCAS_ATTENUATION_JA },
-            { "125", OPTION_VAL_125_JA },
-            { "250", OPTION_VAL_250_JA },
-            { "375", OPTION_VAL_375_JA },
-            { "500", OPTION_VAL_500_JA },
-            { "750", OPTION_VAL_750_JA },
-            { "1000", OPTION_VAL_1000_JA },
-            { "1500", OPTION_VAL_1500_JA },
-            { "2000", OPTION_VAL_2000_JA },
-            { "3000", OPTION_VAL_3000_JA },
-            { NULL, NULL },
-        },
-        "250"
     },
     {
         "shadps4_vblank_frequency",
@@ -13730,22 +12278,6 @@ struct retro_core_options_v2 options_ja = {
 #define OPTION_VAL_1920X1080_KO NULL
 #define OPTION_VAL_2560X1440_KO NULL
 #define OPTION_VAL_3840X2160_KO NULL
-#define SHADPS4_FSR_LABEL_KO NULL
-#define SHADPS4_FSR_INFO_0_KO NULL
-#define SHADPS4_RCAS_LABEL_KO NULL
-#define SHADPS4_RCAS_INFO_0_KO NULL
-#define SHADPS4_RCAS_ATTENUATION_LABEL_KO NULL
-#define SHADPS4_RCAS_ATTENUATION_INFO_0_KO NULL
-#define OPTION_VAL_0_SHADPS4_RCAS_ATTENUATION_KO NULL
-#define OPTION_VAL_125_KO NULL
-#define OPTION_VAL_250_KO NULL
-#define OPTION_VAL_375_KO NULL
-#define OPTION_VAL_500_KO NULL
-#define OPTION_VAL_750_KO NULL
-#define OPTION_VAL_1000_KO NULL
-#define OPTION_VAL_1500_KO NULL
-#define OPTION_VAL_2000_KO NULL
-#define OPTION_VAL_3000_KO NULL
 #define SHADPS4_VBLANK_FREQUENCY_LABEL_KO NULL
 #define SHADPS4_VBLANK_FREQUENCY_INFO_0_KO NULL
 #define OPTION_VAL_30_SHADPS4_VBLANK_FREQUENCY_KO NULL
@@ -14004,56 +12536,6 @@ struct retro_core_option_v2_definition option_defs_ko[] = {
             { NULL, NULL },
         },
         "1280x720"
-    },
-    {
-        "shadps4_fsr",
-        SHADPS4_FSR_LABEL_KO,
-        NULL,
-        SHADPS4_FSR_INFO_0_KO,
-        NULL,
-        "video",
-        {
-            { "disabled", NULL },
-            { "enabled",  NULL },
-            { NULL, NULL },
-        },
-        "disabled"
-    },
-    {
-        "shadps4_rcas",
-        SHADPS4_RCAS_LABEL_KO,
-        NULL,
-        SHADPS4_RCAS_INFO_0_KO,
-        NULL,
-        "video",
-        {
-            { "enabled",  NULL },
-            { "disabled", NULL },
-            { NULL, NULL },
-        },
-        "enabled"
-    },
-    {
-        "shadps4_rcas_attenuation",
-        SHADPS4_RCAS_ATTENUATION_LABEL_KO,
-        NULL,
-        SHADPS4_RCAS_ATTENUATION_INFO_0_KO,
-        NULL,
-        "video",
-        {
-            { "0", OPTION_VAL_0_SHADPS4_RCAS_ATTENUATION_KO },
-            { "125", OPTION_VAL_125_KO },
-            { "250", OPTION_VAL_250_KO },
-            { "375", OPTION_VAL_375_KO },
-            { "500", OPTION_VAL_500_KO },
-            { "750", OPTION_VAL_750_KO },
-            { "1000", OPTION_VAL_1000_KO },
-            { "1500", OPTION_VAL_1500_KO },
-            { "2000", OPTION_VAL_2000_KO },
-            { "3000", OPTION_VAL_3000_KO },
-            { NULL, NULL },
-        },
-        "250"
     },
     {
         "shadps4_vblank_frequency",
@@ -14349,22 +12831,6 @@ struct retro_core_options_v2 options_ko = {
 #define OPTION_VAL_1920X1080_NL NULL
 #define OPTION_VAL_2560X1440_NL NULL
 #define OPTION_VAL_3840X2160_NL NULL
-#define SHADPS4_FSR_LABEL_NL NULL
-#define SHADPS4_FSR_INFO_0_NL NULL
-#define SHADPS4_RCAS_LABEL_NL NULL
-#define SHADPS4_RCAS_INFO_0_NL NULL
-#define SHADPS4_RCAS_ATTENUATION_LABEL_NL NULL
-#define SHADPS4_RCAS_ATTENUATION_INFO_0_NL NULL
-#define OPTION_VAL_0_SHADPS4_RCAS_ATTENUATION_NL NULL
-#define OPTION_VAL_125_NL NULL
-#define OPTION_VAL_250_NL NULL
-#define OPTION_VAL_375_NL NULL
-#define OPTION_VAL_500_NL NULL
-#define OPTION_VAL_750_NL NULL
-#define OPTION_VAL_1000_NL NULL
-#define OPTION_VAL_1500_NL NULL
-#define OPTION_VAL_2000_NL NULL
-#define OPTION_VAL_3000_NL NULL
 #define SHADPS4_VBLANK_FREQUENCY_LABEL_NL NULL
 #define SHADPS4_VBLANK_FREQUENCY_INFO_0_NL NULL
 #define OPTION_VAL_30_SHADPS4_VBLANK_FREQUENCY_NL NULL
@@ -14623,56 +13089,6 @@ struct retro_core_option_v2_definition option_defs_nl[] = {
             { NULL, NULL },
         },
         "1280x720"
-    },
-    {
-        "shadps4_fsr",
-        SHADPS4_FSR_LABEL_NL,
-        NULL,
-        SHADPS4_FSR_INFO_0_NL,
-        NULL,
-        "video",
-        {
-            { "disabled", NULL },
-            { "enabled",  NULL },
-            { NULL, NULL },
-        },
-        "disabled"
-    },
-    {
-        "shadps4_rcas",
-        SHADPS4_RCAS_LABEL_NL,
-        NULL,
-        SHADPS4_RCAS_INFO_0_NL,
-        NULL,
-        "video",
-        {
-            { "enabled",  NULL },
-            { "disabled", NULL },
-            { NULL, NULL },
-        },
-        "enabled"
-    },
-    {
-        "shadps4_rcas_attenuation",
-        SHADPS4_RCAS_ATTENUATION_LABEL_NL,
-        NULL,
-        SHADPS4_RCAS_ATTENUATION_INFO_0_NL,
-        NULL,
-        "video",
-        {
-            { "0", OPTION_VAL_0_SHADPS4_RCAS_ATTENUATION_NL },
-            { "125", OPTION_VAL_125_NL },
-            { "250", OPTION_VAL_250_NL },
-            { "375", OPTION_VAL_375_NL },
-            { "500", OPTION_VAL_500_NL },
-            { "750", OPTION_VAL_750_NL },
-            { "1000", OPTION_VAL_1000_NL },
-            { "1500", OPTION_VAL_1500_NL },
-            { "2000", OPTION_VAL_2000_NL },
-            { "3000", OPTION_VAL_3000_NL },
-            { NULL, NULL },
-        },
-        "250"
     },
     {
         "shadps4_vblank_frequency",
@@ -14968,22 +13384,6 @@ struct retro_core_options_v2 options_nl = {
 #define OPTION_VAL_1920X1080_NO NULL
 #define OPTION_VAL_2560X1440_NO NULL
 #define OPTION_VAL_3840X2160_NO NULL
-#define SHADPS4_FSR_LABEL_NO NULL
-#define SHADPS4_FSR_INFO_0_NO NULL
-#define SHADPS4_RCAS_LABEL_NO NULL
-#define SHADPS4_RCAS_INFO_0_NO NULL
-#define SHADPS4_RCAS_ATTENUATION_LABEL_NO NULL
-#define SHADPS4_RCAS_ATTENUATION_INFO_0_NO NULL
-#define OPTION_VAL_0_SHADPS4_RCAS_ATTENUATION_NO NULL
-#define OPTION_VAL_125_NO NULL
-#define OPTION_VAL_250_NO NULL
-#define OPTION_VAL_375_NO NULL
-#define OPTION_VAL_500_NO NULL
-#define OPTION_VAL_750_NO NULL
-#define OPTION_VAL_1000_NO NULL
-#define OPTION_VAL_1500_NO NULL
-#define OPTION_VAL_2000_NO NULL
-#define OPTION_VAL_3000_NO NULL
 #define SHADPS4_VBLANK_FREQUENCY_LABEL_NO NULL
 #define SHADPS4_VBLANK_FREQUENCY_INFO_0_NO NULL
 #define OPTION_VAL_30_SHADPS4_VBLANK_FREQUENCY_NO NULL
@@ -15242,56 +13642,6 @@ struct retro_core_option_v2_definition option_defs_no[] = {
             { NULL, NULL },
         },
         "1280x720"
-    },
-    {
-        "shadps4_fsr",
-        SHADPS4_FSR_LABEL_NO,
-        NULL,
-        SHADPS4_FSR_INFO_0_NO,
-        NULL,
-        "video",
-        {
-            { "disabled", NULL },
-            { "enabled",  NULL },
-            { NULL, NULL },
-        },
-        "disabled"
-    },
-    {
-        "shadps4_rcas",
-        SHADPS4_RCAS_LABEL_NO,
-        NULL,
-        SHADPS4_RCAS_INFO_0_NO,
-        NULL,
-        "video",
-        {
-            { "enabled",  NULL },
-            { "disabled", NULL },
-            { NULL, NULL },
-        },
-        "enabled"
-    },
-    {
-        "shadps4_rcas_attenuation",
-        SHADPS4_RCAS_ATTENUATION_LABEL_NO,
-        NULL,
-        SHADPS4_RCAS_ATTENUATION_INFO_0_NO,
-        NULL,
-        "video",
-        {
-            { "0", OPTION_VAL_0_SHADPS4_RCAS_ATTENUATION_NO },
-            { "125", OPTION_VAL_125_NO },
-            { "250", OPTION_VAL_250_NO },
-            { "375", OPTION_VAL_375_NO },
-            { "500", OPTION_VAL_500_NO },
-            { "750", OPTION_VAL_750_NO },
-            { "1000", OPTION_VAL_1000_NO },
-            { "1500", OPTION_VAL_1500_NO },
-            { "2000", OPTION_VAL_2000_NO },
-            { "3000", OPTION_VAL_3000_NO },
-            { NULL, NULL },
-        },
-        "250"
     },
     {
         "shadps4_vblank_frequency",
@@ -15587,22 +13937,6 @@ struct retro_core_options_v2 options_no = {
 #define OPTION_VAL_1920X1080_PL NULL
 #define OPTION_VAL_2560X1440_PL NULL
 #define OPTION_VAL_3840X2160_PL NULL
-#define SHADPS4_FSR_LABEL_PL NULL
-#define SHADPS4_FSR_INFO_0_PL NULL
-#define SHADPS4_RCAS_LABEL_PL NULL
-#define SHADPS4_RCAS_INFO_0_PL NULL
-#define SHADPS4_RCAS_ATTENUATION_LABEL_PL NULL
-#define SHADPS4_RCAS_ATTENUATION_INFO_0_PL NULL
-#define OPTION_VAL_0_SHADPS4_RCAS_ATTENUATION_PL NULL
-#define OPTION_VAL_125_PL NULL
-#define OPTION_VAL_250_PL NULL
-#define OPTION_VAL_375_PL NULL
-#define OPTION_VAL_500_PL NULL
-#define OPTION_VAL_750_PL NULL
-#define OPTION_VAL_1000_PL NULL
-#define OPTION_VAL_1500_PL NULL
-#define OPTION_VAL_2000_PL NULL
-#define OPTION_VAL_3000_PL NULL
 #define SHADPS4_VBLANK_FREQUENCY_LABEL_PL NULL
 #define SHADPS4_VBLANK_FREQUENCY_INFO_0_PL NULL
 #define OPTION_VAL_30_SHADPS4_VBLANK_FREQUENCY_PL NULL
@@ -15861,56 +14195,6 @@ struct retro_core_option_v2_definition option_defs_pl[] = {
             { NULL, NULL },
         },
         "1280x720"
-    },
-    {
-        "shadps4_fsr",
-        SHADPS4_FSR_LABEL_PL,
-        NULL,
-        SHADPS4_FSR_INFO_0_PL,
-        NULL,
-        "video",
-        {
-            { "disabled", NULL },
-            { "enabled",  NULL },
-            { NULL, NULL },
-        },
-        "disabled"
-    },
-    {
-        "shadps4_rcas",
-        SHADPS4_RCAS_LABEL_PL,
-        NULL,
-        SHADPS4_RCAS_INFO_0_PL,
-        NULL,
-        "video",
-        {
-            { "enabled",  NULL },
-            { "disabled", NULL },
-            { NULL, NULL },
-        },
-        "enabled"
-    },
-    {
-        "shadps4_rcas_attenuation",
-        SHADPS4_RCAS_ATTENUATION_LABEL_PL,
-        NULL,
-        SHADPS4_RCAS_ATTENUATION_INFO_0_PL,
-        NULL,
-        "video",
-        {
-            { "0", OPTION_VAL_0_SHADPS4_RCAS_ATTENUATION_PL },
-            { "125", OPTION_VAL_125_PL },
-            { "250", OPTION_VAL_250_PL },
-            { "375", OPTION_VAL_375_PL },
-            { "500", OPTION_VAL_500_PL },
-            { "750", OPTION_VAL_750_PL },
-            { "1000", OPTION_VAL_1000_PL },
-            { "1500", OPTION_VAL_1500_PL },
-            { "2000", OPTION_VAL_2000_PL },
-            { "3000", OPTION_VAL_3000_PL },
-            { NULL, NULL },
-        },
-        "250"
     },
     {
         "shadps4_vblank_frequency",
@@ -16206,22 +14490,6 @@ struct retro_core_options_v2 options_pl = {
 #define OPTION_VAL_1920X1080_PT_BR NULL
 #define OPTION_VAL_2560X1440_PT_BR NULL
 #define OPTION_VAL_3840X2160_PT_BR NULL
-#define SHADPS4_FSR_LABEL_PT_BR NULL
-#define SHADPS4_FSR_INFO_0_PT_BR NULL
-#define SHADPS4_RCAS_LABEL_PT_BR NULL
-#define SHADPS4_RCAS_INFO_0_PT_BR NULL
-#define SHADPS4_RCAS_ATTENUATION_LABEL_PT_BR NULL
-#define SHADPS4_RCAS_ATTENUATION_INFO_0_PT_BR NULL
-#define OPTION_VAL_0_SHADPS4_RCAS_ATTENUATION_PT_BR NULL
-#define OPTION_VAL_125_PT_BR NULL
-#define OPTION_VAL_250_PT_BR NULL
-#define OPTION_VAL_375_PT_BR NULL
-#define OPTION_VAL_500_PT_BR NULL
-#define OPTION_VAL_750_PT_BR NULL
-#define OPTION_VAL_1000_PT_BR NULL
-#define OPTION_VAL_1500_PT_BR NULL
-#define OPTION_VAL_2000_PT_BR NULL
-#define OPTION_VAL_3000_PT_BR NULL
 #define SHADPS4_VBLANK_FREQUENCY_LABEL_PT_BR NULL
 #define SHADPS4_VBLANK_FREQUENCY_INFO_0_PT_BR NULL
 #define OPTION_VAL_30_SHADPS4_VBLANK_FREQUENCY_PT_BR NULL
@@ -16480,56 +14748,6 @@ struct retro_core_option_v2_definition option_defs_pt_br[] = {
             { NULL, NULL },
         },
         "1280x720"
-    },
-    {
-        "shadps4_fsr",
-        SHADPS4_FSR_LABEL_PT_BR,
-        NULL,
-        SHADPS4_FSR_INFO_0_PT_BR,
-        NULL,
-        "video",
-        {
-            { "disabled", NULL },
-            { "enabled",  NULL },
-            { NULL, NULL },
-        },
-        "disabled"
-    },
-    {
-        "shadps4_rcas",
-        SHADPS4_RCAS_LABEL_PT_BR,
-        NULL,
-        SHADPS4_RCAS_INFO_0_PT_BR,
-        NULL,
-        "video",
-        {
-            { "enabled",  NULL },
-            { "disabled", NULL },
-            { NULL, NULL },
-        },
-        "enabled"
-    },
-    {
-        "shadps4_rcas_attenuation",
-        SHADPS4_RCAS_ATTENUATION_LABEL_PT_BR,
-        NULL,
-        SHADPS4_RCAS_ATTENUATION_INFO_0_PT_BR,
-        NULL,
-        "video",
-        {
-            { "0", OPTION_VAL_0_SHADPS4_RCAS_ATTENUATION_PT_BR },
-            { "125", OPTION_VAL_125_PT_BR },
-            { "250", OPTION_VAL_250_PT_BR },
-            { "375", OPTION_VAL_375_PT_BR },
-            { "500", OPTION_VAL_500_PT_BR },
-            { "750", OPTION_VAL_750_PT_BR },
-            { "1000", OPTION_VAL_1000_PT_BR },
-            { "1500", OPTION_VAL_1500_PT_BR },
-            { "2000", OPTION_VAL_2000_PT_BR },
-            { "3000", OPTION_VAL_3000_PT_BR },
-            { NULL, NULL },
-        },
-        "250"
     },
     {
         "shadps4_vblank_frequency",
@@ -16825,22 +15043,6 @@ struct retro_core_options_v2 options_pt_br = {
 #define OPTION_VAL_1920X1080_PT_PT NULL
 #define OPTION_VAL_2560X1440_PT_PT NULL
 #define OPTION_VAL_3840X2160_PT_PT NULL
-#define SHADPS4_FSR_LABEL_PT_PT NULL
-#define SHADPS4_FSR_INFO_0_PT_PT NULL
-#define SHADPS4_RCAS_LABEL_PT_PT NULL
-#define SHADPS4_RCAS_INFO_0_PT_PT NULL
-#define SHADPS4_RCAS_ATTENUATION_LABEL_PT_PT NULL
-#define SHADPS4_RCAS_ATTENUATION_INFO_0_PT_PT NULL
-#define OPTION_VAL_0_SHADPS4_RCAS_ATTENUATION_PT_PT NULL
-#define OPTION_VAL_125_PT_PT NULL
-#define OPTION_VAL_250_PT_PT NULL
-#define OPTION_VAL_375_PT_PT NULL
-#define OPTION_VAL_500_PT_PT NULL
-#define OPTION_VAL_750_PT_PT NULL
-#define OPTION_VAL_1000_PT_PT NULL
-#define OPTION_VAL_1500_PT_PT NULL
-#define OPTION_VAL_2000_PT_PT NULL
-#define OPTION_VAL_3000_PT_PT NULL
 #define SHADPS4_VBLANK_FREQUENCY_LABEL_PT_PT NULL
 #define SHADPS4_VBLANK_FREQUENCY_INFO_0_PT_PT NULL
 #define OPTION_VAL_30_SHADPS4_VBLANK_FREQUENCY_PT_PT NULL
@@ -17099,56 +15301,6 @@ struct retro_core_option_v2_definition option_defs_pt_pt[] = {
             { NULL, NULL },
         },
         "1280x720"
-    },
-    {
-        "shadps4_fsr",
-        SHADPS4_FSR_LABEL_PT_PT,
-        NULL,
-        SHADPS4_FSR_INFO_0_PT_PT,
-        NULL,
-        "video",
-        {
-            { "disabled", NULL },
-            { "enabled",  NULL },
-            { NULL, NULL },
-        },
-        "disabled"
-    },
-    {
-        "shadps4_rcas",
-        SHADPS4_RCAS_LABEL_PT_PT,
-        NULL,
-        SHADPS4_RCAS_INFO_0_PT_PT,
-        NULL,
-        "video",
-        {
-            { "enabled",  NULL },
-            { "disabled", NULL },
-            { NULL, NULL },
-        },
-        "enabled"
-    },
-    {
-        "shadps4_rcas_attenuation",
-        SHADPS4_RCAS_ATTENUATION_LABEL_PT_PT,
-        NULL,
-        SHADPS4_RCAS_ATTENUATION_INFO_0_PT_PT,
-        NULL,
-        "video",
-        {
-            { "0", OPTION_VAL_0_SHADPS4_RCAS_ATTENUATION_PT_PT },
-            { "125", OPTION_VAL_125_PT_PT },
-            { "250", OPTION_VAL_250_PT_PT },
-            { "375", OPTION_VAL_375_PT_PT },
-            { "500", OPTION_VAL_500_PT_PT },
-            { "750", OPTION_VAL_750_PT_PT },
-            { "1000", OPTION_VAL_1000_PT_PT },
-            { "1500", OPTION_VAL_1500_PT_PT },
-            { "2000", OPTION_VAL_2000_PT_PT },
-            { "3000", OPTION_VAL_3000_PT_PT },
-            { NULL, NULL },
-        },
-        "250"
     },
     {
         "shadps4_vblank_frequency",
@@ -17444,22 +15596,6 @@ struct retro_core_options_v2 options_pt_pt = {
 #define OPTION_VAL_1920X1080_RU NULL
 #define OPTION_VAL_2560X1440_RU NULL
 #define OPTION_VAL_3840X2160_RU NULL
-#define SHADPS4_FSR_LABEL_RU NULL
-#define SHADPS4_FSR_INFO_0_RU NULL
-#define SHADPS4_RCAS_LABEL_RU NULL
-#define SHADPS4_RCAS_INFO_0_RU NULL
-#define SHADPS4_RCAS_ATTENUATION_LABEL_RU NULL
-#define SHADPS4_RCAS_ATTENUATION_INFO_0_RU NULL
-#define OPTION_VAL_0_SHADPS4_RCAS_ATTENUATION_RU NULL
-#define OPTION_VAL_125_RU NULL
-#define OPTION_VAL_250_RU NULL
-#define OPTION_VAL_375_RU NULL
-#define OPTION_VAL_500_RU NULL
-#define OPTION_VAL_750_RU NULL
-#define OPTION_VAL_1000_RU NULL
-#define OPTION_VAL_1500_RU NULL
-#define OPTION_VAL_2000_RU NULL
-#define OPTION_VAL_3000_RU NULL
 #define SHADPS4_VBLANK_FREQUENCY_LABEL_RU NULL
 #define SHADPS4_VBLANK_FREQUENCY_INFO_0_RU NULL
 #define OPTION_VAL_30_SHADPS4_VBLANK_FREQUENCY_RU NULL
@@ -17718,56 +15854,6 @@ struct retro_core_option_v2_definition option_defs_ru[] = {
             { NULL, NULL },
         },
         "1280x720"
-    },
-    {
-        "shadps4_fsr",
-        SHADPS4_FSR_LABEL_RU,
-        NULL,
-        SHADPS4_FSR_INFO_0_RU,
-        NULL,
-        "video",
-        {
-            { "disabled", NULL },
-            { "enabled",  NULL },
-            { NULL, NULL },
-        },
-        "disabled"
-    },
-    {
-        "shadps4_rcas",
-        SHADPS4_RCAS_LABEL_RU,
-        NULL,
-        SHADPS4_RCAS_INFO_0_RU,
-        NULL,
-        "video",
-        {
-            { "enabled",  NULL },
-            { "disabled", NULL },
-            { NULL, NULL },
-        },
-        "enabled"
-    },
-    {
-        "shadps4_rcas_attenuation",
-        SHADPS4_RCAS_ATTENUATION_LABEL_RU,
-        NULL,
-        SHADPS4_RCAS_ATTENUATION_INFO_0_RU,
-        NULL,
-        "video",
-        {
-            { "0", OPTION_VAL_0_SHADPS4_RCAS_ATTENUATION_RU },
-            { "125", OPTION_VAL_125_RU },
-            { "250", OPTION_VAL_250_RU },
-            { "375", OPTION_VAL_375_RU },
-            { "500", OPTION_VAL_500_RU },
-            { "750", OPTION_VAL_750_RU },
-            { "1000", OPTION_VAL_1000_RU },
-            { "1500", OPTION_VAL_1500_RU },
-            { "2000", OPTION_VAL_2000_RU },
-            { "3000", OPTION_VAL_3000_RU },
-            { NULL, NULL },
-        },
-        "250"
     },
     {
         "shadps4_vblank_frequency",
@@ -18063,22 +16149,6 @@ struct retro_core_options_v2 options_ru = {
 #define OPTION_VAL_1920X1080_SK NULL
 #define OPTION_VAL_2560X1440_SK NULL
 #define OPTION_VAL_3840X2160_SK NULL
-#define SHADPS4_FSR_LABEL_SK NULL
-#define SHADPS4_FSR_INFO_0_SK NULL
-#define SHADPS4_RCAS_LABEL_SK NULL
-#define SHADPS4_RCAS_INFO_0_SK NULL
-#define SHADPS4_RCAS_ATTENUATION_LABEL_SK NULL
-#define SHADPS4_RCAS_ATTENUATION_INFO_0_SK NULL
-#define OPTION_VAL_0_SHADPS4_RCAS_ATTENUATION_SK NULL
-#define OPTION_VAL_125_SK NULL
-#define OPTION_VAL_250_SK NULL
-#define OPTION_VAL_375_SK NULL
-#define OPTION_VAL_500_SK NULL
-#define OPTION_VAL_750_SK NULL
-#define OPTION_VAL_1000_SK NULL
-#define OPTION_VAL_1500_SK NULL
-#define OPTION_VAL_2000_SK NULL
-#define OPTION_VAL_3000_SK NULL
 #define SHADPS4_VBLANK_FREQUENCY_LABEL_SK NULL
 #define SHADPS4_VBLANK_FREQUENCY_INFO_0_SK NULL
 #define OPTION_VAL_30_SHADPS4_VBLANK_FREQUENCY_SK NULL
@@ -18337,56 +16407,6 @@ struct retro_core_option_v2_definition option_defs_sk[] = {
             { NULL, NULL },
         },
         "1280x720"
-    },
-    {
-        "shadps4_fsr",
-        SHADPS4_FSR_LABEL_SK,
-        NULL,
-        SHADPS4_FSR_INFO_0_SK,
-        NULL,
-        "video",
-        {
-            { "disabled", NULL },
-            { "enabled",  NULL },
-            { NULL, NULL },
-        },
-        "disabled"
-    },
-    {
-        "shadps4_rcas",
-        SHADPS4_RCAS_LABEL_SK,
-        NULL,
-        SHADPS4_RCAS_INFO_0_SK,
-        NULL,
-        "video",
-        {
-            { "enabled",  NULL },
-            { "disabled", NULL },
-            { NULL, NULL },
-        },
-        "enabled"
-    },
-    {
-        "shadps4_rcas_attenuation",
-        SHADPS4_RCAS_ATTENUATION_LABEL_SK,
-        NULL,
-        SHADPS4_RCAS_ATTENUATION_INFO_0_SK,
-        NULL,
-        "video",
-        {
-            { "0", OPTION_VAL_0_SHADPS4_RCAS_ATTENUATION_SK },
-            { "125", OPTION_VAL_125_SK },
-            { "250", OPTION_VAL_250_SK },
-            { "375", OPTION_VAL_375_SK },
-            { "500", OPTION_VAL_500_SK },
-            { "750", OPTION_VAL_750_SK },
-            { "1000", OPTION_VAL_1000_SK },
-            { "1500", OPTION_VAL_1500_SK },
-            { "2000", OPTION_VAL_2000_SK },
-            { "3000", OPTION_VAL_3000_SK },
-            { NULL, NULL },
-        },
-        "250"
     },
     {
         "shadps4_vblank_frequency",
@@ -18682,22 +16702,6 @@ struct retro_core_options_v2 options_sk = {
 #define OPTION_VAL_1920X1080_SV NULL
 #define OPTION_VAL_2560X1440_SV NULL
 #define OPTION_VAL_3840X2160_SV NULL
-#define SHADPS4_FSR_LABEL_SV NULL
-#define SHADPS4_FSR_INFO_0_SV NULL
-#define SHADPS4_RCAS_LABEL_SV NULL
-#define SHADPS4_RCAS_INFO_0_SV NULL
-#define SHADPS4_RCAS_ATTENUATION_LABEL_SV NULL
-#define SHADPS4_RCAS_ATTENUATION_INFO_0_SV NULL
-#define OPTION_VAL_0_SHADPS4_RCAS_ATTENUATION_SV NULL
-#define OPTION_VAL_125_SV NULL
-#define OPTION_VAL_250_SV NULL
-#define OPTION_VAL_375_SV NULL
-#define OPTION_VAL_500_SV NULL
-#define OPTION_VAL_750_SV NULL
-#define OPTION_VAL_1000_SV NULL
-#define OPTION_VAL_1500_SV NULL
-#define OPTION_VAL_2000_SV NULL
-#define OPTION_VAL_3000_SV NULL
 #define SHADPS4_VBLANK_FREQUENCY_LABEL_SV NULL
 #define SHADPS4_VBLANK_FREQUENCY_INFO_0_SV NULL
 #define OPTION_VAL_30_SHADPS4_VBLANK_FREQUENCY_SV NULL
@@ -18956,56 +16960,6 @@ struct retro_core_option_v2_definition option_defs_sv[] = {
             { NULL, NULL },
         },
         "1280x720"
-    },
-    {
-        "shadps4_fsr",
-        SHADPS4_FSR_LABEL_SV,
-        NULL,
-        SHADPS4_FSR_INFO_0_SV,
-        NULL,
-        "video",
-        {
-            { "disabled", NULL },
-            { "enabled",  NULL },
-            { NULL, NULL },
-        },
-        "disabled"
-    },
-    {
-        "shadps4_rcas",
-        SHADPS4_RCAS_LABEL_SV,
-        NULL,
-        SHADPS4_RCAS_INFO_0_SV,
-        NULL,
-        "video",
-        {
-            { "enabled",  NULL },
-            { "disabled", NULL },
-            { NULL, NULL },
-        },
-        "enabled"
-    },
-    {
-        "shadps4_rcas_attenuation",
-        SHADPS4_RCAS_ATTENUATION_LABEL_SV,
-        NULL,
-        SHADPS4_RCAS_ATTENUATION_INFO_0_SV,
-        NULL,
-        "video",
-        {
-            { "0", OPTION_VAL_0_SHADPS4_RCAS_ATTENUATION_SV },
-            { "125", OPTION_VAL_125_SV },
-            { "250", OPTION_VAL_250_SV },
-            { "375", OPTION_VAL_375_SV },
-            { "500", OPTION_VAL_500_SV },
-            { "750", OPTION_VAL_750_SV },
-            { "1000", OPTION_VAL_1000_SV },
-            { "1500", OPTION_VAL_1500_SV },
-            { "2000", OPTION_VAL_2000_SV },
-            { "3000", OPTION_VAL_3000_SV },
-            { NULL, NULL },
-        },
-        "250"
     },
     {
         "shadps4_vblank_frequency",
@@ -19301,22 +17255,6 @@ struct retro_core_options_v2 options_sv = {
 #define OPTION_VAL_1920X1080_TR NULL
 #define OPTION_VAL_2560X1440_TR NULL
 #define OPTION_VAL_3840X2160_TR NULL
-#define SHADPS4_FSR_LABEL_TR NULL
-#define SHADPS4_FSR_INFO_0_TR NULL
-#define SHADPS4_RCAS_LABEL_TR NULL
-#define SHADPS4_RCAS_INFO_0_TR NULL
-#define SHADPS4_RCAS_ATTENUATION_LABEL_TR NULL
-#define SHADPS4_RCAS_ATTENUATION_INFO_0_TR NULL
-#define OPTION_VAL_0_SHADPS4_RCAS_ATTENUATION_TR NULL
-#define OPTION_VAL_125_TR NULL
-#define OPTION_VAL_250_TR NULL
-#define OPTION_VAL_375_TR NULL
-#define OPTION_VAL_500_TR NULL
-#define OPTION_VAL_750_TR NULL
-#define OPTION_VAL_1000_TR NULL
-#define OPTION_VAL_1500_TR NULL
-#define OPTION_VAL_2000_TR NULL
-#define OPTION_VAL_3000_TR NULL
 #define SHADPS4_VBLANK_FREQUENCY_LABEL_TR NULL
 #define SHADPS4_VBLANK_FREQUENCY_INFO_0_TR NULL
 #define OPTION_VAL_30_SHADPS4_VBLANK_FREQUENCY_TR NULL
@@ -19575,56 +17513,6 @@ struct retro_core_option_v2_definition option_defs_tr[] = {
             { NULL, NULL },
         },
         "1280x720"
-    },
-    {
-        "shadps4_fsr",
-        SHADPS4_FSR_LABEL_TR,
-        NULL,
-        SHADPS4_FSR_INFO_0_TR,
-        NULL,
-        "video",
-        {
-            { "disabled", NULL },
-            { "enabled",  NULL },
-            { NULL, NULL },
-        },
-        "disabled"
-    },
-    {
-        "shadps4_rcas",
-        SHADPS4_RCAS_LABEL_TR,
-        NULL,
-        SHADPS4_RCAS_INFO_0_TR,
-        NULL,
-        "video",
-        {
-            { "enabled",  NULL },
-            { "disabled", NULL },
-            { NULL, NULL },
-        },
-        "enabled"
-    },
-    {
-        "shadps4_rcas_attenuation",
-        SHADPS4_RCAS_ATTENUATION_LABEL_TR,
-        NULL,
-        SHADPS4_RCAS_ATTENUATION_INFO_0_TR,
-        NULL,
-        "video",
-        {
-            { "0", OPTION_VAL_0_SHADPS4_RCAS_ATTENUATION_TR },
-            { "125", OPTION_VAL_125_TR },
-            { "250", OPTION_VAL_250_TR },
-            { "375", OPTION_VAL_375_TR },
-            { "500", OPTION_VAL_500_TR },
-            { "750", OPTION_VAL_750_TR },
-            { "1000", OPTION_VAL_1000_TR },
-            { "1500", OPTION_VAL_1500_TR },
-            { "2000", OPTION_VAL_2000_TR },
-            { "3000", OPTION_VAL_3000_TR },
-            { NULL, NULL },
-        },
-        "250"
     },
     {
         "shadps4_vblank_frequency",
@@ -19920,22 +17808,6 @@ struct retro_core_options_v2 options_tr = {
 #define OPTION_VAL_1920X1080_UK NULL
 #define OPTION_VAL_2560X1440_UK NULL
 #define OPTION_VAL_3840X2160_UK NULL
-#define SHADPS4_FSR_LABEL_UK NULL
-#define SHADPS4_FSR_INFO_0_UK NULL
-#define SHADPS4_RCAS_LABEL_UK NULL
-#define SHADPS4_RCAS_INFO_0_UK NULL
-#define SHADPS4_RCAS_ATTENUATION_LABEL_UK NULL
-#define SHADPS4_RCAS_ATTENUATION_INFO_0_UK NULL
-#define OPTION_VAL_0_SHADPS4_RCAS_ATTENUATION_UK NULL
-#define OPTION_VAL_125_UK NULL
-#define OPTION_VAL_250_UK NULL
-#define OPTION_VAL_375_UK NULL
-#define OPTION_VAL_500_UK NULL
-#define OPTION_VAL_750_UK NULL
-#define OPTION_VAL_1000_UK NULL
-#define OPTION_VAL_1500_UK NULL
-#define OPTION_VAL_2000_UK NULL
-#define OPTION_VAL_3000_UK NULL
 #define SHADPS4_VBLANK_FREQUENCY_LABEL_UK NULL
 #define SHADPS4_VBLANK_FREQUENCY_INFO_0_UK NULL
 #define OPTION_VAL_30_SHADPS4_VBLANK_FREQUENCY_UK NULL
@@ -20194,56 +18066,6 @@ struct retro_core_option_v2_definition option_defs_uk[] = {
             { NULL, NULL },
         },
         "1280x720"
-    },
-    {
-        "shadps4_fsr",
-        SHADPS4_FSR_LABEL_UK,
-        NULL,
-        SHADPS4_FSR_INFO_0_UK,
-        NULL,
-        "video",
-        {
-            { "disabled", NULL },
-            { "enabled",  NULL },
-            { NULL, NULL },
-        },
-        "disabled"
-    },
-    {
-        "shadps4_rcas",
-        SHADPS4_RCAS_LABEL_UK,
-        NULL,
-        SHADPS4_RCAS_INFO_0_UK,
-        NULL,
-        "video",
-        {
-            { "enabled",  NULL },
-            { "disabled", NULL },
-            { NULL, NULL },
-        },
-        "enabled"
-    },
-    {
-        "shadps4_rcas_attenuation",
-        SHADPS4_RCAS_ATTENUATION_LABEL_UK,
-        NULL,
-        SHADPS4_RCAS_ATTENUATION_INFO_0_UK,
-        NULL,
-        "video",
-        {
-            { "0", OPTION_VAL_0_SHADPS4_RCAS_ATTENUATION_UK },
-            { "125", OPTION_VAL_125_UK },
-            { "250", OPTION_VAL_250_UK },
-            { "375", OPTION_VAL_375_UK },
-            { "500", OPTION_VAL_500_UK },
-            { "750", OPTION_VAL_750_UK },
-            { "1000", OPTION_VAL_1000_UK },
-            { "1500", OPTION_VAL_1500_UK },
-            { "2000", OPTION_VAL_2000_UK },
-            { "3000", OPTION_VAL_3000_UK },
-            { NULL, NULL },
-        },
-        "250"
     },
     {
         "shadps4_vblank_frequency",
@@ -20539,22 +18361,6 @@ struct retro_core_options_v2 options_uk = {
 #define OPTION_VAL_1920X1080_VAL NULL
 #define OPTION_VAL_2560X1440_VAL NULL
 #define OPTION_VAL_3840X2160_VAL NULL
-#define SHADPS4_FSR_LABEL_VAL NULL
-#define SHADPS4_FSR_INFO_0_VAL NULL
-#define SHADPS4_RCAS_LABEL_VAL NULL
-#define SHADPS4_RCAS_INFO_0_VAL NULL
-#define SHADPS4_RCAS_ATTENUATION_LABEL_VAL NULL
-#define SHADPS4_RCAS_ATTENUATION_INFO_0_VAL NULL
-#define OPTION_VAL_0_SHADPS4_RCAS_ATTENUATION_VAL NULL
-#define OPTION_VAL_125_VAL NULL
-#define OPTION_VAL_250_VAL NULL
-#define OPTION_VAL_375_VAL NULL
-#define OPTION_VAL_500_VAL NULL
-#define OPTION_VAL_750_VAL NULL
-#define OPTION_VAL_1000_VAL NULL
-#define OPTION_VAL_1500_VAL NULL
-#define OPTION_VAL_2000_VAL NULL
-#define OPTION_VAL_3000_VAL NULL
 #define SHADPS4_VBLANK_FREQUENCY_LABEL_VAL NULL
 #define SHADPS4_VBLANK_FREQUENCY_INFO_0_VAL NULL
 #define OPTION_VAL_30_SHADPS4_VBLANK_FREQUENCY_VAL NULL
@@ -20813,56 +18619,6 @@ struct retro_core_option_v2_definition option_defs_val[] = {
             { NULL, NULL },
         },
         "1280x720"
-    },
-    {
-        "shadps4_fsr",
-        SHADPS4_FSR_LABEL_VAL,
-        NULL,
-        SHADPS4_FSR_INFO_0_VAL,
-        NULL,
-        "video",
-        {
-            { "disabled", NULL },
-            { "enabled",  NULL },
-            { NULL, NULL },
-        },
-        "disabled"
-    },
-    {
-        "shadps4_rcas",
-        SHADPS4_RCAS_LABEL_VAL,
-        NULL,
-        SHADPS4_RCAS_INFO_0_VAL,
-        NULL,
-        "video",
-        {
-            { "enabled",  NULL },
-            { "disabled", NULL },
-            { NULL, NULL },
-        },
-        "enabled"
-    },
-    {
-        "shadps4_rcas_attenuation",
-        SHADPS4_RCAS_ATTENUATION_LABEL_VAL,
-        NULL,
-        SHADPS4_RCAS_ATTENUATION_INFO_0_VAL,
-        NULL,
-        "video",
-        {
-            { "0", OPTION_VAL_0_SHADPS4_RCAS_ATTENUATION_VAL },
-            { "125", OPTION_VAL_125_VAL },
-            { "250", OPTION_VAL_250_VAL },
-            { "375", OPTION_VAL_375_VAL },
-            { "500", OPTION_VAL_500_VAL },
-            { "750", OPTION_VAL_750_VAL },
-            { "1000", OPTION_VAL_1000_VAL },
-            { "1500", OPTION_VAL_1500_VAL },
-            { "2000", OPTION_VAL_2000_VAL },
-            { "3000", OPTION_VAL_3000_VAL },
-            { NULL, NULL },
-        },
-        "250"
     },
     {
         "shadps4_vblank_frequency",
@@ -21158,22 +18914,6 @@ struct retro_core_options_v2 options_val = {
 #define OPTION_VAL_1920X1080_VN NULL
 #define OPTION_VAL_2560X1440_VN NULL
 #define OPTION_VAL_3840X2160_VN NULL
-#define SHADPS4_FSR_LABEL_VN NULL
-#define SHADPS4_FSR_INFO_0_VN NULL
-#define SHADPS4_RCAS_LABEL_VN NULL
-#define SHADPS4_RCAS_INFO_0_VN NULL
-#define SHADPS4_RCAS_ATTENUATION_LABEL_VN NULL
-#define SHADPS4_RCAS_ATTENUATION_INFO_0_VN NULL
-#define OPTION_VAL_0_SHADPS4_RCAS_ATTENUATION_VN NULL
-#define OPTION_VAL_125_VN NULL
-#define OPTION_VAL_250_VN NULL
-#define OPTION_VAL_375_VN NULL
-#define OPTION_VAL_500_VN NULL
-#define OPTION_VAL_750_VN NULL
-#define OPTION_VAL_1000_VN NULL
-#define OPTION_VAL_1500_VN NULL
-#define OPTION_VAL_2000_VN NULL
-#define OPTION_VAL_3000_VN NULL
 #define SHADPS4_VBLANK_FREQUENCY_LABEL_VN NULL
 #define SHADPS4_VBLANK_FREQUENCY_INFO_0_VN NULL
 #define OPTION_VAL_30_SHADPS4_VBLANK_FREQUENCY_VN NULL
@@ -21432,56 +19172,6 @@ struct retro_core_option_v2_definition option_defs_vn[] = {
             { NULL, NULL },
         },
         "1280x720"
-    },
-    {
-        "shadps4_fsr",
-        SHADPS4_FSR_LABEL_VN,
-        NULL,
-        SHADPS4_FSR_INFO_0_VN,
-        NULL,
-        "video",
-        {
-            { "disabled", NULL },
-            { "enabled",  NULL },
-            { NULL, NULL },
-        },
-        "disabled"
-    },
-    {
-        "shadps4_rcas",
-        SHADPS4_RCAS_LABEL_VN,
-        NULL,
-        SHADPS4_RCAS_INFO_0_VN,
-        NULL,
-        "video",
-        {
-            { "enabled",  NULL },
-            { "disabled", NULL },
-            { NULL, NULL },
-        },
-        "enabled"
-    },
-    {
-        "shadps4_rcas_attenuation",
-        SHADPS4_RCAS_ATTENUATION_LABEL_VN,
-        NULL,
-        SHADPS4_RCAS_ATTENUATION_INFO_0_VN,
-        NULL,
-        "video",
-        {
-            { "0", OPTION_VAL_0_SHADPS4_RCAS_ATTENUATION_VN },
-            { "125", OPTION_VAL_125_VN },
-            { "250", OPTION_VAL_250_VN },
-            { "375", OPTION_VAL_375_VN },
-            { "500", OPTION_VAL_500_VN },
-            { "750", OPTION_VAL_750_VN },
-            { "1000", OPTION_VAL_1000_VN },
-            { "1500", OPTION_VAL_1500_VN },
-            { "2000", OPTION_VAL_2000_VN },
-            { "3000", OPTION_VAL_3000_VN },
-            { NULL, NULL },
-        },
-        "250"
     },
     {
         "shadps4_vblank_frequency",

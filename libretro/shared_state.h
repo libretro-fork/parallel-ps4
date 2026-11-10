@@ -13,7 +13,7 @@
 namespace Libretro {
 
 inline constexpr std::uint32_t SHARED_MAGIC = 0x34505368; // "hSP4"
-inline constexpr std::uint32_t SHARED_VERSION = 11;
+inline constexpr std::uint32_t SHARED_VERSION = 12;
 
 inline constexpr std::uint32_t MAX_WIDTH = 3840;
 inline constexpr std::uint32_t MAX_HEIGHT = 2160;
@@ -83,8 +83,6 @@ struct SharedOptions {
     std::uint32_t show_splash;
     std::uint32_t width;
     std::uint32_t height;
-    std::uint32_t fsr;
-    std::uint32_t rcas;
     /// The width the game is rendered at when below its own, or 0 (Resolution: Default).
     std::uint32_t render_width;
     /// Resolution: Default - the picture is the game's own size, once the game has said it
@@ -100,8 +98,6 @@ struct SharedOptions {
     std::int32_t console_language;
     std::uint32_t dev_kit;
     std::int32_t extra_dmem_mbytes;
-    /// In thousandths, as the emulator keeps it.
-    std::int32_t rcas_attenuation;
     std::uint32_t readback_linear_images;
     std::uint32_t shader_cache;
     std::uint32_t copy_gpu_buffers;
@@ -139,9 +135,6 @@ struct SharedState {
     /// the frontend's user changes one; options_serial counts the changes, and the emulator
     /// applies them when it moves. The rest of options is read when the game starts.
     struct {
-        std::atomic<std::uint32_t> fsr;
-        std::atomic<std::uint32_t> rcas;
-        std::atomic<std::int32_t> rcas_attenuation;
         std::atomic<std::uint32_t> show_fps;
         std::atomic<std::int32_t> volume;
         std::atomic<std::uint32_t> trophy_popup;

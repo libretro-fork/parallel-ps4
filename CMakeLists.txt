@@ -259,7 +259,6 @@ endif()
 if (ENABLE_SYSTEM_LIBRARIES)
     list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
     find_package(fmt 12.0.0 CONFIG)
-    find_package(glslang 15 CONFIG)
     find_package(VulkanHeaders 1.4.330 CONFIG)
     find_package(VulkanMemoryAllocator 3.1.0 CONFIG)
     find_package(xbyak 7.07 CONFIG)
@@ -1204,6 +1203,8 @@ set(VIDEO_CORE src/video_core/amdgpu/cb_db_extent.h
                src/video_core/buffer_cache/range_set.h
                src/video_core/buffer_cache/region_definitions.h
                src/video_core/buffer_cache/region_manager.h
+               src/video_core/host_shaders/host_spirv.c
+               src/video_core/host_shaders/host_spirv.h
                src/video_core/renderer_vulkan/liverpool_to_vk.cpp
                src/video_core/renderer_vulkan/liverpool_to_vk.h
                src/video_core/renderer_vulkan/vk_common.cpp
@@ -1242,8 +1243,6 @@ set(VIDEO_CORE src/video_core/amdgpu/cb_db_extent.h
                src/video_core/renderer_vulkan/vk_staging_buffer_pool.h
                src/video_core/renderer_vulkan/vk_swapchain.cpp
                src/video_core/renderer_vulkan/vk_swapchain.h
-               src/video_core/renderer_vulkan/host_passes/fsr_pass.cpp
-               src/video_core/renderer_vulkan/host_passes/fsr_pass.h
                src/video_core/renderer_vulkan/host_passes/pp_pass.cpp
                src/video_core/renderer_vulkan/host_passes/pp_pass.h
                src/video_core/texture_cache/blit_helper.cpp
@@ -1581,13 +1580,6 @@ if (NOT MSVC)
 endif()
 
 target_include_directories(shadps4 PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-
-# Shaders sources
-set(HOST_SHADERS_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/src/video_core/host_shaders)
-
-add_subdirectory(${HOST_SHADERS_INCLUDE})
-add_dependencies(shadps4 host_shaders)
-target_include_directories(shadps4 PRIVATE ${HOST_SHADERS_INCLUDE})
 
 # embed resources
 

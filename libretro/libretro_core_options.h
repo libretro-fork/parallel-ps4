@@ -283,56 +283,6 @@ struct retro_core_option_v2_definition option_defs_us[] = {
         "default"
     },
     {
-        "shadps4_fsr",
-        "FSR Upscaling",
-        NULL,
-        "Scales the game's picture to the output resolution with AMD FidelityFX Super Resolution instead of plain filtering.",
-        NULL,
-        "video",
-        {
-            { "disabled", NULL },
-            { "enabled",  NULL },
-            { NULL, NULL },
-        },
-        "disabled"
-    },
-    {
-        "shadps4_rcas",
-        "FSR Sharpening",
-        NULL,
-        "Sharpens the picture after FSR Upscaling. Has no effect while FSR Upscaling is disabled.",
-        NULL,
-        "video",
-        {
-            { "enabled",  NULL },
-            { "disabled", NULL },
-            { NULL, NULL },
-        },
-        "enabled"
-    },
-    {
-        "shadps4_rcas_attenuation",
-        "FSR Sharpening Strength",
-        NULL,
-        "How much FSR Sharpening is held back: lower values sharpen more. Has no effect while FSR Sharpening is disabled.",
-        NULL,
-        "video",
-        {
-            { "0", "0.000" },
-            { "125", "0.125" },
-            { "250", "0.250" },
-            { "375", "0.375" },
-            { "500", "0.500" },
-            { "750", "0.750" },
-            { "1000", "1.000" },
-            { "1500", "1.500" },
-            { "2000", "2.000" },
-            { "3000", "3.000" },
-            { NULL, NULL },
-        },
-        "250"
-    },
-    {
         "shadps4_vblank_frequency",
         "VBlank Frequency",
         NULL,

@@ -3,10 +3,11 @@
 
 #include "video_core/renderer_vulkan/host_passes/pp_pass.h"
 
+#include <vector>
+
 #include "common/assert.h"
 #include "core/emulator_settings.h"
-#include "video_core/host_shaders/fs_tri_vert.h"
-#include "video_core/host_shaders/post_process_frag.h"
+#include "video_core/host_shaders/host_spirv.h"
 #include "video_core/renderer_vulkan/vk_platform.h"
 #include "video_core/renderer_vulkan/vk_presenter.h"
 #include "video_core/renderer_vulkan/vk_shader_util.h"
@@ -40,11 +41,14 @@ void PostProcessingPass::Create(vk::Device device, const vk::Format surface_form
         .size = sizeof(Settings),
     };
 
-    const auto& vs_module = CompileSPV(FS_TRI_VERT, device);
+    std::vector<u32> words(HOST_SPIRV_MAX_WORDS);
+    const auto& vs_module =
+        CompileSPV({words.data(), host_spirv_fs_tri_vert(words.data(), words.size())}, device);
     ASSERT(vs_module);
     SetObjectName(device, vs_module, "fs_tri.vert");
 
-    const auto& fs_module = CompileSPV(POST_PROCESS_FRAG, device);
+    const auto& fs_module = CompileSPV(
+        {words.data(), host_spirv_post_process_frag(words.data(), words.size())}, device);
     ASSERT(fs_module);
     SetObjectName(device, fs_module, "post_process.frag");
 

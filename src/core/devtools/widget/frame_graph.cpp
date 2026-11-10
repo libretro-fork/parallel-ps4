@@ -102,7 +102,6 @@ void FrameGraph::Draw() {
              DebugState.game_resolution.second);
         Text("Output Res: %dx%d", DebugState.output_resolution.first,
              DebugState.output_resolution.second);
-        Text("FSR: %s", DebugState.is_using_fsr ? "on" : "off");
     }
     End();
 }
