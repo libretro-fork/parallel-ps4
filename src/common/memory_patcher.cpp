@@ -7,10 +7,10 @@
 #include <sstream>
 #include <string>
 #include <nlohmann/json.hpp>
-#include <pugixml.hpp>
 #include "common/elf_info.h"
 #include "common/logging/log.h"
 #include "common/path_util.h"
+#include "common/xml.h"
 #include "core/emulator_state.h"
 #include "core/file_format/psf.h"
 #include "memory_patcher.h"
@@ -130,16 +130,16 @@ std::string convertValueToHex(const std::string type, const std::string valueStr
 void ApplyPendingPatches();
 
 void ApplyPatchesFromXML(std::filesystem::path path) {
-    pugi::xml_document doc;
-    pugi::xml_parse_result result = doc.load_file(path.c_str());
+    Common::Xml::Document doc;
+    const bool result = doc.Load(path);
 
     auto* param_sfo = Common::Singleton<PSF>::Instance();
     auto app_version = param_sfo->GetString("APP_VER").value_or("Unknown version");
 
     if (result) {
         auto patchXML = doc.child("Patch");
-        for (pugi::xml_node_iterator it = patchXML.children().begin();
-             it != patchXML.children().end(); ++it) {
+        for (const Common::Xml::Node node : patchXML.children()) {
+            const auto* it = &node;
 
             if (std::string(it->name()) == "Metadata") {
                 if (std::string(it->attribute("isEnabled").value()) == "true") {
@@ -152,8 +152,8 @@ void ApplyPatchesFromXML(std::filesystem::path path) {
                         continue;
 
                     auto patchList = it->first_child();
-                    for (pugi::xml_node_iterator patchLineIt = patchList.children().begin();
-                         patchLineIt != patchList.children().end(); ++patchLineIt) {
+                    for (const Common::Xml::Node patchLine : patchList.children()) {
+                        const auto* patchLineIt = &patchLine;
 
                         std::string type = patchLineIt->attribute("Type").value();
                         if (!versionMatches && type != "mask" && type != "mask_jump32")
@@ -216,7 +216,7 @@ void ApplyPatchesFromXML(std::filesystem::path path) {
             }
         }
     } else {
-        LOG_ERROR(Loader, "Could not parse patch XML: {}", result.description());
+        LOG_ERROR(Loader, "Could not read or parse patch XML: {}", path.string());
     }
 }
 

@@ -5,11 +5,11 @@
 #include <thread>
 #include <unordered_map>
 #include <fmt/format.h>
-#include <pugixml.hpp>
 #include "common/elf_info.h"
 #include "common/logging/log.h"
 #include "common/path_util.h"
 #include "common/slot_vector.h"
+#include "common/xml.h"
 #include "core/emulator_settings.h"
 #include "core/libraries/libs.h"
 #include "core/libraries/np/np_error.h"
@@ -79,31 +79,23 @@ static std::filesystem::path GetTrophyXmlPath(const std::filesystem::path& xml_d
 static void ApplyUnlockToXmlFile(const std::filesystem::path& xml_path, OrbisNpTrophyId trophyId,
                                  u64 trophyTimestamp, bool unlock_platinum,
                                  OrbisNpTrophyId platinumId, u64 platinumTimestamp) {
-    pugi::xml_document doc;
-    if (!doc.load_file(xml_path.native().c_str())) {
+    Common::Xml::Document doc;
+    if (!doc.Load(xml_path)) {
         LOG_WARNING(Lib_NpTrophy, "ApplyUnlock: failed to load {}", xml_path.string());
         return;
     }
 
     auto trophyconf = doc.child("trophyconf");
-    for (pugi::xml_node& node : trophyconf.children()) {
+    for (Common::Xml::Node node : trophyconf.children()) {
         if (std::string_view(node.name()) != "trophy") {
             continue;
         }
         int id = node.attribute("id").as_int(ORBIS_NP_TROPHY_INVALID_TROPHY_ID);
 
         auto set_unlock = [&](u64 ts) {
-            if (node.attribute("unlockstate").empty()) {
-                node.append_attribute("unlockstate") = "true";
-            } else {
-                node.attribute("unlockstate").set_value("true");
-            }
+            doc.SetAttribute(node, "unlockstate", "true");
             const auto ts_str = std::to_string(ts);
-            if (node.attribute("timestamp").empty()) {
-                node.append_attribute("timestamp") = ts_str.c_str();
-            } else {
-                node.attribute("timestamp").set_value(ts_str.c_str());
-            }
+            doc.SetAttribute(node, "timestamp", ts_str);
         };
 
         if (id == trophyId) {
@@ -113,18 +105,18 @@ static void ApplyUnlockToXmlFile(const std::filesystem::path& xml_path, OrbisNpT
         }
     }
 
-    doc.save_file(xml_path.native().c_str());
+    doc.Save(xml_path);
 }
 
 // Reads every unlocked trophy out of a user's save XML as (id, timestamp) pairs.
 static std::vector<std::pair<s32, u64>> ReadUnlockedTrophies(
     const std::filesystem::path& xml_save_file) {
     std::vector<std::pair<s32, u64>> out;
-    pugi::xml_document doc;
-    if (!doc.load_file(xml_save_file.native().c_str())) {
+    Common::Xml::Document doc;
+    if (!doc.Load(xml_save_file)) {
         return out;
     }
-    for (const pugi::xml_node& node : doc.child("trophyconf").children()) {
+    for (const Common::Xml::Node node : doc.child("trophyconf").children()) {
         if (std::string_view(node.name()) != "trophy") {
             continue;
         }
@@ -146,14 +138,14 @@ static u32 ApplyServerTrophies(const std::filesystem::path& xml_save_file,
     if (server_trophies.empty()) {
         return 0;
     }
-    pugi::xml_document doc;
-    if (!doc.load_file(xml_save_file.native().c_str())) {
+    Common::Xml::Document doc;
+    if (!doc.Load(xml_save_file)) {
         LOG_WARNING(Lib_NpTrophy, "ApplyServerTrophies: failed to load {}", xml_save_file.string());
         return 0;
     }
 
     u32 applied = 0;
-    for (pugi::xml_node& node : doc.child("trophyconf").children()) {
+    for (Common::Xml::Node node : doc.child("trophyconf").children()) {
         if (std::string_view(node.name()) != "trophy") {
             continue;
         }
@@ -167,22 +159,14 @@ static u32 ApplyServerTrophies(const std::filesystem::path& xml_save_file,
             continue;
         }
 
-        if (node.attribute("unlockstate").empty()) {
-            node.append_attribute("unlockstate") = "true";
-        } else {
-            node.attribute("unlockstate").set_value("true");
-        }
+        doc.SetAttribute(node, "unlockstate", "true");
         const auto ts_str = std::to_string(match->second);
-        if (node.attribute("timestamp").empty()) {
-            node.append_attribute("timestamp") = ts_str.c_str();
-        } else {
-            node.attribute("timestamp").set_value(ts_str.c_str());
-        }
+        doc.SetAttribute(node, "timestamp", ts_str);
         ++applied;
     }
 
     if (applied > 0) {
-        doc.save_file(xml_save_file.native().c_str());
+        doc.Save(xml_save_file);
     }
     return applied;
 }
@@ -436,18 +420,19 @@ int PS4_SYSV_ABI sceNpTrophyGetGameInfo(OrbisNpTrophyContext context, OrbisNpTro
     const auto& trophy_file = ctx.trophy_xml_path;
     const auto& trophy_save_file = ctx.xml_save_file;
 
-    pugi::xml_document doc;
-    pugi::xml_parse_result result = doc.load_file(trophy_file.native().c_str());
+    Common::Xml::Document doc;
+    const bool result = doc.Load(trophy_file);
 
     if (!result) {
-        LOG_ERROR(Lib_NpTrophy, "Failed to parse trophy xml : {}", result.description());
+        LOG_ERROR(Lib_NpTrophy, "Failed to parse trophy xml : {}",
+                  "the file could not be read or parsed");
         return ORBIS_OK;
     }
 
     GameTrophyInfo game_info{};
 
     auto trophyconf = doc.child("trophyconf");
-    for (const pugi::xml_node& node : trophyconf.children()) {
+    for (const Common::Xml::Node node : trophyconf.children()) {
         std::string_view node_name = node.name();
 
         if (node_name == "title-name") {
@@ -463,15 +448,16 @@ int PS4_SYSV_ABI sceNpTrophyGetGameInfo(OrbisNpTrophyContext context, OrbisNpTro
             game_info.num_groups++;
     }
 
-    pugi::xml_document save_doc;
-    pugi::xml_parse_result save_result = save_doc.load_file(ctx.xml_save_file.native().c_str());
+    Common::Xml::Document save_doc;
+    const bool save_result = save_doc.Load(ctx.xml_save_file);
 
     if (!save_result) {
-        LOG_ERROR(Lib_NpTrophy, "Failed to parse user trophy xml : {}", result.description());
+        LOG_ERROR(Lib_NpTrophy, "Failed to parse user trophy xml : {}",
+                  "the file could not be read or parsed");
         return ORBIS_OK;
     }
     auto save_trophyconf = save_doc.child("trophyconf");
-    for (const pugi::xml_node& node : save_trophyconf.children()) {
+    for (const Common::Xml::Node node : save_trophyconf.children()) {
         std::string_view node_name = node.name();
         if (node_name == "trophy") {
             bool current_trophy_unlockstate = node.attribute("unlockstate").as_bool();
@@ -553,18 +539,19 @@ int PS4_SYSV_ABI sceNpTrophyGetGroupInfo(OrbisNpTrophyContext context, OrbisNpTr
         return ORBIS_NP_TROPHY_ERROR_NOT_REGISTERED;
     const auto& trophy_file = ctx.trophy_xml_path;
 
-    pugi::xml_document doc;
-    pugi::xml_parse_result result = doc.load_file(trophy_file.native().c_str());
+    Common::Xml::Document doc;
+    const bool result = doc.Load(trophy_file);
 
     if (!result) {
-        LOG_ERROR(Lib_NpTrophy, "Failed to open trophy xml : {}", result.description());
+        LOG_ERROR(Lib_NpTrophy, "Failed to open trophy xml : {}",
+                  "the file could not be read or parsed");
         return ORBIS_OK;
     }
 
     GroupTrophyInfo group_info{};
 
     auto trophyconf = doc.child("trophyconf");
-    for (const pugi::xml_node& node : trophyconf.children()) {
+    for (const Common::Xml::Node node : trophyconf.children()) {
         std::string_view node_name = node.name();
 
         if (node_name == "group") {
@@ -587,15 +574,16 @@ int PS4_SYSV_ABI sceNpTrophyGetGroupInfo(OrbisNpTrophyContext context, OrbisNpTr
         data->group_id = groupId;
     }
 
-    pugi::xml_document save_doc;
-    pugi::xml_parse_result save_result = save_doc.load_file(ctx.xml_save_file.native().c_str());
+    Common::Xml::Document save_doc;
+    const bool save_result = save_doc.Load(ctx.xml_save_file);
 
     if (!save_result) {
-        LOG_ERROR(Lib_NpTrophy, "Failed to parse user trophy xml : {}", result.description());
+        LOG_ERROR(Lib_NpTrophy, "Failed to parse user trophy xml : {}",
+                  "the file could not be read or parsed");
         return ORBIS_OK;
     }
     auto save_trophyconf = save_doc.child("trophyconf");
-    for (const pugi::xml_node& node : save_trophyconf.children()) {
+    for (const Common::Xml::Node node : save_trophyconf.children()) {
         std::string_view node_name = node.name();
         if (node_name == "trophy") {
             bool current_trophy_unlockstate = node.attribute("unlockstate").as_bool();
@@ -670,15 +658,15 @@ int PS4_SYSV_ABI sceNpTrophyGetTrophyIcon(OrbisNpTrophyContext context, OrbisNpT
         return ORBIS_NP_TROPHY_ERROR_NOT_REGISTERED;
 
     // Check that the trophy is unlocked and icons are only available for earned trophies.
-    pugi::xml_document doc;
-    if (!doc.load_file(ctx.xml_save_file.native().c_str())) {
+    Common::Xml::Document doc;
+    if (!doc.Load(ctx.xml_save_file)) {
         LOG_ERROR(Lib_NpTrophy, "Failed to open trophy XML: {}", ctx.xml_save_file.string());
         return ORBIS_NP_TROPHY_ERROR_ICON_FILE_NOT_FOUND;
     }
 
     bool unlocked = false;
     bool found = false;
-    for (const pugi::xml_node& node : doc.child("trophyconf").children()) {
+    for (const Common::Xml::Node node : doc.child("trophyconf").children()) {
         if (std::string_view(node.name()) != "trophy")
             continue;
         if (node.attribute("id").as_int(ORBIS_NP_TROPHY_INVALID_TROPHY_ID) == trophyId) {
@@ -742,17 +730,18 @@ int PS4_SYSV_ABI sceNpTrophyGetTrophyInfo(OrbisNpTrophyContext context, OrbisNpT
         return ORBIS_NP_TROPHY_ERROR_NOT_REGISTERED;
     const auto& trophy_file = ctx.trophy_xml_path;
 
-    pugi::xml_document doc;
-    pugi::xml_parse_result result = doc.load_file(trophy_file.native().c_str());
+    Common::Xml::Document doc;
+    const bool result = doc.Load(trophy_file);
 
     if (!result) {
-        LOG_ERROR(Lib_NpTrophy, "Failed to open trophy xml : {}", result.description());
+        LOG_ERROR(Lib_NpTrophy, "Failed to open trophy xml : {}",
+                  "the file could not be read or parsed");
         return ORBIS_OK;
     }
 
     auto trophyconf = doc.child("trophyconf");
 
-    for (const pugi::xml_node& node : trophyconf.children()) {
+    for (const Common::Xml::Node node : trophyconf.children()) {
         std::string_view node_name = node.name();
 
         if (node_name == "trophy") {
@@ -769,15 +758,16 @@ int PS4_SYSV_ABI sceNpTrophyGetTrophyInfo(OrbisNpTrophyContext context, OrbisNpT
         }
     }
 
-    pugi::xml_document save_doc;
-    pugi::xml_parse_result save_result = save_doc.load_file(ctx.xml_save_file.native().c_str());
+    Common::Xml::Document save_doc;
+    const bool save_result = save_doc.Load(ctx.xml_save_file);
 
     if (!save_result) {
-        LOG_ERROR(Lib_NpTrophy, "Failed to parse user trophy xml : {}", result.description());
+        LOG_ERROR(Lib_NpTrophy, "Failed to parse user trophy xml : {}",
+                  "the file could not be read or parsed");
         return ORBIS_OK;
     }
     auto save_trophyconf = save_doc.child("trophyconf");
-    for (const pugi::xml_node& node : save_trophyconf.children()) {
+    for (const Common::Xml::Node node : save_trophyconf.children()) {
         std::string_view node_name = node.name();
 
         if (node_name == "trophy") {
@@ -839,11 +829,12 @@ s32 PS4_SYSV_ABI sceNpTrophyGetTrophyUnlockState(OrbisNpTrophyContext context,
 
     ORBIS_NP_TROPHY_FLAG_ZERO(flags);
 
-    pugi::xml_document doc;
-    pugi::xml_parse_result result = doc.load_file(trophy_file.native().c_str());
+    Common::Xml::Document doc;
+    const bool result = doc.Load(trophy_file);
 
     if (!result) {
-        LOG_ERROR(Lib_NpTrophy, "Failed to open trophy XML: {}", result.description());
+        LOG_ERROR(Lib_NpTrophy, "Failed to open trophy XML: {}",
+                  "the file could not be read or parsed");
         *count = 0;
         return ORBIS_OK;
     }
@@ -851,7 +842,7 @@ s32 PS4_SYSV_ABI sceNpTrophyGetTrophyUnlockState(OrbisNpTrophyContext context,
     int num_trophies = 0;
     auto trophyconf = doc.child("trophyconf");
 
-    for (const pugi::xml_node& node : trophyconf.children()) {
+    for (const Common::Xml::Node node : trophyconf.children()) {
         std::string_view node_name = node.name();
         int current_trophy_id = node.attribute("id").as_int(ORBIS_NP_TROPHY_INVALID_TROPHY_ID);
         bool current_trophy_unlockstate = node.attribute("unlockstate").as_bool();
@@ -978,15 +969,16 @@ int PS4_SYSV_ABI sceNpTrophyUnlockTrophy(OrbisNpTrophyContext context, OrbisNpTr
     const auto& xml_dir = ctx.xml_dir;
     const auto& trophy_file = ctx.trophy_xml_path;
 
-    pugi::xml_document save_doc;
-    pugi::xml_parse_result save_result = save_doc.load_file(ctx.xml_save_file.native().c_str());
+    Common::Xml::Document save_doc;
+    const bool save_result = save_doc.Load(ctx.xml_save_file);
 
     if (!save_result) {
-        LOG_ERROR(Lib_NpTrophy, "Failed to parse user trophy xml : {}", save_result.description());
+        LOG_ERROR(Lib_NpTrophy, "Failed to parse user trophy xml : {}",
+                  "the file could not be read or parsed");
         return ORBIS_OK;
     }
     auto save_trophyconf = save_doc.child("trophyconf");
-    for (const pugi::xml_node& node : save_trophyconf.children()) {
+    for (const Common::Xml::Node node : save_trophyconf.children()) {
         std::string_view node_name = node.name();
         if (std::string_view(node.name()) != "trophy")
             continue;
@@ -1002,24 +994,26 @@ int PS4_SYSV_ABI sceNpTrophyUnlockTrophy(OrbisNpTrophyContext context, OrbisNpTr
         }
     }
 
-    pugi::xml_document doc;
-    pugi::xml_parse_result result = doc.load_file(ctx.xml_save_file.native().c_str());
+    Common::Xml::Document doc;
+    const bool result = doc.Load(ctx.xml_save_file);
 
     if (!result) {
-        LOG_ERROR(Lib_NpTrophy, "Failed to parse trophy xml : {}", result.description());
+        LOG_ERROR(Lib_NpTrophy, "Failed to parse trophy xml : {}",
+                  "the file could not be read or parsed");
         return ORBIS_NP_TROPHY_ERROR_TITLE_NOT_FOUND;
     }
 
-    pugi::xml_document lang_doc;
-    const bool has_lang_doc = lang_doc.load_file(trophy_file.native().c_str());
+    Common::Xml::Document lang_doc;
+    const bool has_lang_doc = lang_doc.Load(trophy_file);
     if (!has_lang_doc) {
         LOG_ERROR(Lib_NpTrophy, "Failed to parse localized trophy xml : {}", trophy_file.string());
     }
 
-    const auto get_localized_name = [&](int id, const pugi::xml_node& fallback) -> std::string {
+    const auto get_localized_name = [&](int id, const Common::Xml::Node& fallback) -> std::string {
         if (has_lang_doc) {
-            for (const pugi::xml_node& n : lang_doc.child("trophyconf").children("trophy")) {
-                if (n.attribute("id").as_int(ORBIS_NP_TROPHY_INVALID_TROPHY_ID) != id) {
+            for (const Common::Xml::Node n : lang_doc.child("trophyconf").children()) {
+                if (n.name() != "trophy" ||
+                    n.attribute("id").as_int(ORBIS_NP_TROPHY_INVALID_TROPHY_ID) != id) {
                     continue;
                 }
                 std::string name = n.child("name").text().as_string();
@@ -1036,7 +1030,7 @@ int PS4_SYSV_ABI sceNpTrophyUnlockTrophy(OrbisNpTrophyContext context, OrbisNpTr
 
     int num_base_trophies = 0;
     int num_base_trophies_unlocked = 0;
-    pugi::xml_node platinum_node;
+    Common::Xml::Node platinum_node;
 
     // Outputs filled during the scan.
     bool trophy_found = false;
@@ -1046,7 +1040,7 @@ int PS4_SYSV_ABI sceNpTrophyUnlockTrophy(OrbisNpTrophyContext context, OrbisNpTr
 
     auto trophyconf = doc.child("trophyconf");
 
-    for (pugi::xml_node& node : trophyconf.children()) {
+    for (Common::Xml::Node node : trophyconf.children()) {
         if (std::string_view(node.name()) != "trophy")
             continue;
 

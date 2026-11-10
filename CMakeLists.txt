@@ -279,7 +279,6 @@ if (ENABLE_SYSTEM_LIBRARIES)
     find_package(VulkanMemoryAllocator 3.1.0 CONFIG)
     find_package(xbyak 7.07 CONFIG)
     find_package(Zydis 5.0.0 MODULE)
-    find_package(pugixml 1.14 CONFIG)
     find_package(absl 20250512.1 CONFIG)
     if (APPLE)
         find_package(date 3.0.1 CONFIG)
@@ -809,6 +808,8 @@ set(COMMON src/common/logging/classes.cpp
            src/common/assert.cpp
            src/common/audio_file.cpp
            src/common/audio_file.h
+           src/common/xml.cpp
+           src/common/xml.h
            src/common/assert.h
            src/common/bit_field.h
            src/common/bounded_threadsafe_queue.h
@@ -1398,6 +1399,7 @@ set(LIBRETRO_COMMON_SOURCES
     ${LIBRETRO_COMMON_DIR}/formats/mp3/rmp3.c
     ${LIBRETRO_COMMON_DIR}/formats/png/rpng.c
     ${LIBRETRO_COMMON_DIR}/formats/png/rpng_encode.c
+    ${LIBRETRO_COMMON_DIR}/formats/xml/rxml.c
     ${LIBRETRO_COMMON_DIR}/formats/zar/zar.c
     ${LIBRETRO_COMMON_DIR}/queues/retro_spsc.c
     ${LIBRETRO_COMMON_DIR}/queues/retro_waitable_spsc.c
@@ -1482,7 +1484,7 @@ create_target_directory_groups(shadps4)
 
 target_link_libraries(shadps4 PRIVATE spdlog::spdlog)
 target_link_libraries(shadps4 PRIVATE magic_enum::magic_enum fmt::fmt tsl::robin_map xbyak::xbyak Tracy::TracyClient RenderDoc::API FFmpeg::ffmpeg Dear_ImGui ImGuiFileDialog gcn half::half)
-target_link_libraries(shadps4 PRIVATE Boost::headers GPUOpen::VulkanMemoryAllocator LibAtrac9 sirit Vulkan::Headers Zydis::Zydis pugixml::pugixml)
+target_link_libraries(shadps4 PRIVATE Boost::headers GPUOpen::VulkanMemoryAllocator LibAtrac9 sirit Vulkan::Headers Zydis::Zydis)
 target_link_libraries(shadps4 PRIVATE stb::headers lfreist-hwinfo::hwinfo nlohmann_json::nlohmann_json fdk-aac CLI11::CLI11 Cpp_Httplib miniupnpc::miniupnpc)
 target_link_libraries(shadps4 PRIVATE Freetype::Freetype)
 

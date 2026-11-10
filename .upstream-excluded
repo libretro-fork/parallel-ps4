@@ -51,3 +51,4 @@ externals/zstd
 cmake/FindZArchive.cmake
 externals/libpng
 externals/zlib-ng
+externals/pugixml

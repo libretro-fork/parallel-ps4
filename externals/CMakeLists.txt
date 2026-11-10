@@ -155,12 +155,6 @@ option(TRACY_ONLY_LOCALHOST "" ON)
 option(TRACY_NO_CONTEXT_SWITCH "" ON)
 add_subdirectory(tracy)
 
-# pugixml
-if (NOT TARGET pugixml::pugixml)
-    option(PUGIXML_NO_EXCEPTIONS "" ON)
-    add_subdirectory(pugixml)
-endif()
-
 # libusb
 if (NOT TARGET libusb::usb)
     if (${CMAKE_SYSTEM_NAME} STREQUAL "FreeBSD")
