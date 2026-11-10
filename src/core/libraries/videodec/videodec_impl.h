@@ -3,15 +3,8 @@
 
 #pragma once
 
-#include <vector>
-
+#include "video_utils.h"
 #include "videodec.h"
-
-extern "C" {
-#include <libavcodec/avcodec.h>
-#include <libavutil/imgutils.h>
-#include <libswscale/swscale.h>
-}
 
 namespace Libraries::Videodec {
 
@@ -28,11 +21,10 @@ public:
     s32 Reset();
 
 private:
-    AVFrame* ConvertNV12Frame(AVFrame& frame);
+    s32 Output(OrbisVideodecFrameBuffer& pFrameBufferInOut,
+               OrbisVideodecPictureInfo& pPictureInfoOut);
 
-private:
-    AVCodecContext* mCodecContext = nullptr;
-    SwsContext* mSwsContext = nullptr;
+    SwDecoder mDecoder{false};
 };
 
 } // namespace Libraries::Videodec

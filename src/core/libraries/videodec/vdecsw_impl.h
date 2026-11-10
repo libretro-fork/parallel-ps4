@@ -11,12 +11,7 @@
 #include <vector>
 
 #include "vdecsw.h"
-
-extern "C" {
-#include <libavcodec/avcodec.h>
-#include <libavutil/imgutils.h>
-#include <libswscale/swscale.h>
-}
+#include "video_utils.h"
 
 namespace Libraries::Vdecsw {
 
@@ -57,16 +52,23 @@ private:
     void ProcessInput(VdecSwCommand& item);
     void ProcessFlush();
     void ProcessReset();
+    // A picture decoded ahead of the game's output buffer, in NV12. The buffers go back to
+    // m_free_frames once written out, so a stream allocates only while it fills its queue.
+    struct DecodedFrame {
+        std::vector<u8> nv12;
+        u32 width = 0;
+        u32 height = 0;
+        Videodec::PictureMeta meta;
+    };
+
     void CompleteInput(void* au_data, u32 frame_count, s32 result);
-    u32 ReceiveFrames();
-    AVFrame* ConvertNV12Frame(AVFrame& frame);
-    s32 WriteFrame(OrbisVdecswOutputInfo& outputInfo, AVFrame& frame,
+    u32 QueueFrame();
+    s32 WriteFrame(OrbisVdecswOutputInfo& outputInfo, DecodedFrame& frame,
                    const OrbisVdecswFrameBuffer& frameBuffer, bool isLastFrame);
     void ClearFrameQueue();
 
 private:
-    AVCodecContext* m_codec_context = nullptr;
-    SwsContext* m_sws_context = nullptr;
+    Videodec::SwDecoder m_decoder;
     bool m_is_avc = false;
 
     std::mutex m_mutex;
@@ -78,7 +80,8 @@ private:
     s32 m_unsynced_inputs = 0;
     bool m_finalized = false;
     std::optional<OrbisVdecswFrameBuffer> m_pending_output;
-    std::deque<AVFrame*> m_frame_queue;
+    std::deque<DecodedFrame> m_frame_queue;
+    std::vector<std::vector<u8>> m_free_frames;
 };
 
 } // namespace Libraries::Vdecsw

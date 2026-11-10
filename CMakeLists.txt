@@ -1401,6 +1401,9 @@ set(LIBRETRO_COMMON_SOURCES
     ${LIBRETRO_COMMON_DIR}/file/file_path_io.c
     ${LIBRETRO_COMMON_DIR}/formats/aac/raac.c
     ${LIBRETRO_COMMON_DIR}/formats/flac/rflac.c
+    ${LIBRETRO_COMMON_DIR}/formats/h264/rh264.c
+    ${LIBRETRO_COMMON_DIR}/formats/h265/rh265.c
+    ${LIBRETRO_COMMON_DIR}/formats/h265/rh265_sps_crop.c
     ${LIBRETRO_COMMON_DIR}/formats/json/rjson.c
     ${LIBRETRO_COMMON_DIR}/formats/mp3/rmp3.c
     ${LIBRETRO_COMMON_DIR}/formats/mp4/rmp4.c

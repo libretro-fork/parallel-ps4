@@ -3,17 +3,8 @@
 
 #pragma once
 
-#include <memory>
-#include <vector>
-#include <queue>
-
+#include "video_utils.h"
 #include "videodec2.h"
-
-extern "C" {
-#include <libavcodec/avcodec.h>
-#include <libavutil/imgutils.h>
-#include <libswscale/swscale.h>
-}
 
 namespace Libraries::Videodec2 {
 
@@ -29,23 +20,9 @@ public:
     s32 Reset();
 
 private:
-    static void ReleaseAVPacket(AVPacket* packet);
-    static void ReleaseAVFrame(AVFrame* frame);
-    static void ReleaseAVCodecContext(AVCodecContext* context);
-    static void ReleaseSwsContext(SwsContext* context);
+    s32 Output(OrbisVideodec2FrameBuffer& frameBuffer, OrbisVideodec2OutputInfo& outputInfo);
 
-    using AVPacketPtr = std::unique_ptr<AVPacket, decltype(&ReleaseAVPacket)>;
-    using AVFramePtr = std::unique_ptr<AVFrame, decltype(&ReleaseAVFrame)>;
-    using AVCodecContextPtr = std::unique_ptr<AVCodecContext, decltype(&ReleaseAVCodecContext)>;
-    using SwsContextPtr = std::unique_ptr<SwsContext, decltype(&ReleaseSwsContext)>;
-
-    void DrainFrames();
-    AVFramePtr ConvertNV12Frame(AVFrame& frame);
-
-private:
-    AVCodecContextPtr m_codec_context{nullptr, &ReleaseAVCodecContext};
-    SwsContextPtr m_sws_context{nullptr, &ReleaseSwsContext};
-    std::queue<AVFramePtr> m_frame_queue;
+    Videodec::SwDecoder m_decoder;
 };
 
 } // namespace Libraries::Videodec2
