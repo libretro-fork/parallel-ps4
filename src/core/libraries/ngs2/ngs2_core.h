@@ -265,6 +265,11 @@ typedef struct ngs2_module_desc {
     size_t param_size;
     size_t work_size;
     uintptr_t user_data;
+    /* envelope, chorus, delay: 0 where the game gave no option */
+    uint32_t max_points;
+    uint32_t max_phases;
+    uint32_t max_taps;
+    float max_length; /* seconds */
 } ngs2_module_desc;
 
 /* What a rack is made with: the game's options, with the library's values
@@ -280,6 +285,7 @@ typedef struct ngs2_rack_desc {
     uint32_t max_inputs;
     uint32_t max_waveform_blocks;
     uint32_t max_filters;
+    uint32_t max_envelope_points;
     uint32_t max_atrac9_decoders;
     uint32_t reverb_size;
     uint32_t num_buffers;

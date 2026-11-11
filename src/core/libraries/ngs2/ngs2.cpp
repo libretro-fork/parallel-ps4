@@ -227,6 +227,7 @@ s32 ReadRackOption(u32 rack_id, const OrbisNgs2RackOption* option, ngs2_rack_des
         desc.max_voices = 256;
         desc.max_waveform_blocks = 4;
         desc.max_filters = 8;
+        desc.max_envelope_points = 8;
         desc.max_atrac9_decoders = 256;
         if (option) {
             if (option->size < sizeof(OrbisNgs2SamplerRackOption)) {
@@ -235,11 +236,13 @@ s32 ReadRackOption(u32 rack_id, const OrbisNgs2RackOption* option, ngs2_rack_des
             const auto& o = *reinterpret_cast<const OrbisNgs2SamplerRackOption*>(option);
             desc.max_waveform_blocks = o.maxWaveformBlocks;
             desc.max_filters = o.maxFilters;
+            desc.max_envelope_points = o.maxEnvelopePoints;
             desc.max_atrac9_decoders = o.maxAtrac9Decoders;
         }
         break;
     case NGS2_RACK_SUBMIXER:
         desc.max_filters = 8;
+        desc.max_envelope_points = 8;
         if (option) {
             if (option->size < sizeof(OrbisNgs2SubmixerRackOption)) {
                 return ORBIS_NGS2_ERROR_INVALID_OPTION_SIZE;
@@ -247,6 +250,7 @@ s32 ReadRackOption(u32 rack_id, const OrbisNgs2RackOption* option, ngs2_rack_des
             const auto& o = *reinterpret_cast<const OrbisNgs2SubmixerRackOption*>(option);
             desc.max_channels = o.maxChannels;
             desc.max_filters = o.maxFilters;
+            desc.max_envelope_points = o.maxEnvelopePoints;
             desc.max_inputs = o.maxInputs;
         }
         break;
@@ -335,6 +339,20 @@ s32 ReadRackOption(u32 rack_id, const OrbisNgs2RackOption* option, ngs2_rack_des
                 out.param_size = fx.paramSize;
                 out.work_size = fx.workSize;
                 out.user_data = fx.userData;
+            } else if (in.moduleId == 0x10 && in.option &&
+                       in.option->size >= sizeof(OrbisNgs2CustomEnvelopeModuleOption)) {
+                out.max_points =
+                    reinterpret_cast<const OrbisNgs2CustomEnvelopeModuleOption*>(in.option)
+                        ->maxPoints;
+            } else if (in.moduleId == 0x1c && in.option && in.option->size >= 12) {
+                // size, maxPhases, reserved
+                std::memcpy(&out.max_phases, reinterpret_cast<const u8*>(in.option) + 4, 4);
+            } else if (in.moduleId == 0x1d && in.option &&
+                       in.option->size >= sizeof(OrbisNgs2CustomDelayModuleOption)) {
+                const auto& dl =
+                    *reinterpret_cast<const OrbisNgs2CustomDelayModuleOption*>(in.option);
+                out.max_taps = dl.maxTaps;
+                out.max_length = dl.maxLength;
             }
         }
         for (u32 i = 0; i < NGS2_MAX_CUSTOM_PORTS; i++) {

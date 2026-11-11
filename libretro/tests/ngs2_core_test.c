@@ -237,6 +237,7 @@ static void base_desc(ngs2_rack_desc *d, uint32_t id) {
    d->num_buffers = 1;
    d->max_waveform_blocks = 4;
    d->max_filters = 2;
+   d->max_envelope_points = 4;
    d->max_atrac9_decoders = 4;
 }
 
@@ -878,6 +879,302 @@ static void test_atrac9(void) {
    }
 }
 
+typedef struct envelope_param {
+   ngs2_param_header header;
+   uint32_t forward;
+   uint32_t release;
+   const uint32_t *points; /* curve, duration, height */
+} envelope_param;
+
+typedef struct seven_param {
+   ngs2_param_header header;
+   uint32_t flags;
+   float f[6];
+   uint32_t reserved;
+} seven_param;
+
+typedef struct delay_param {
+   ngs2_param_header header;
+   float dry, wet, input, feedback, lowpass;
+   uint32_t num_taps;
+   float taps[16]; /* level, seconds */
+   float mix[NGS2_MAX_CHANNELS];
+   uint32_t mask;
+   uint32_t flags;
+} delay_param;
+
+typedef struct chorus_param {
+   ngs2_param_header header;
+   uint32_t flags, phases, mask;
+   float input, delay, rate, depth, feedback, wet, dry;
+} chorus_param;
+
+static float as_float(uint32_t bits) {
+   float f;
+   memcpy(&f, &bits, sizeof(f));
+   return f;
+}
+
+static uint32_t as_bits(float f) {
+   uint32_t bits;
+   memcpy(&bits, &f, sizeof(bits));
+   return bits;
+}
+
+/* How much of @x, one channel of stereo, is a sine of @hz */
+static double tone(const float *x, unsigned n, double hz) {
+   double re = 0.0, im = 0.0;
+   unsigned i;
+   for (i = 0; i < n; i++) {
+      re += x[i * 2] * cos(2.0 * PI * hz * i / RATE);
+      im += x[i * 2] * sin(2.0 * PI * hz * i / RATE);
+   }
+   return sqrt(re * re + im * im) / n;
+}
+
+/* A sampler of a steady level (or a sine) through @sub into the master */
+static ngs2_voice *effects_source(rig *r, ngs2_voice *sub, int sine) {
+   static int16_t pcm[48000];
+   ngs2_voice *v = ngs2_rack_voice(r->samplers, 0);
+   unsigned i;
+   for (i = 0; i < 48000; i++)
+      pcm[i] = sine ? (int16_t)(16384.0 * sin(2.0 * PI * 440.0 * i / RATE)) : 16384;
+   CHECK(sampler_setup(v, NGS2_WAVE_PCM_I16L, 1, RATE) == NGS2_OK);
+   CHECK(add_block(v, pcm, sizeof(pcm), 48000, 0, 0, 0) == NGS2_OK);
+   if (sub) {
+      CHECK(patch(v, 0, sub) == NGS2_OK);
+      CHECK(patch(sub, 0, r->master) == NGS2_OK);
+      CHECK(event(sub, NGS2_EVENT_PLAY) == NGS2_OK);
+   } else {
+      CHECK(patch(v, 0, r->master) == NGS2_OK);
+   }
+   return v;
+}
+
+#define LEVEL 0.35355339f /* half, as a centre in stereo */
+
+/* The envelope a sampler is given, the compressor and distortion of a
+ * submixer, the limiter of the mastering voice */
+static void test_effects(void) {
+   rig r;
+   ngs2_rack_desc d;
+   float out[GRAIN * 2];
+   ngs2_voice *v, *sub;
+   envelope_param ep;
+   seven_param sp;
+   two_u32_param lp;
+   ngs2_sampler_state state;
+   uint32_t points[6];
+   unsigned i;
+
+   /* Up over 128 samples, and when told to stop down over 256 */
+   rig_open(&r, RATE);
+   v = effects_source(&r, NULL, 0);
+   points[0] = 0;
+   points[1] = 128;
+   points[2] = as_bits(1.0f);
+   points[3] = 0;
+   points[4] = 256;
+   points[5] = as_bits(0.0f);
+   memset(&ep, 0, sizeof(ep));
+   head(&ep.header, sizeof(ep), 0x10000006u);
+   ep.forward = 1;
+   ep.release = 1;
+   ep.points = points;
+   CHECK(ngs2_voice_control(v, &ep.header) == NGS2_OK);
+   CHECK(event(v, NGS2_EVENT_PLAY) == NGS2_OK);
+   render(&r, out, 2);
+   CHECK(fabs(out[64 * 2] - LEVEL * 0.5f) < 1e-4);
+   CHECK(fabs(out[200 * 2] - LEVEL) < 1e-4);
+   ngs2_voice_sampler_state(v, &state);
+   CHECK(state.envelope_height == 1.0f);
+   CHECK(event(v, NGS2_EVENT_STOP) == NGS2_OK);
+   CHECK(ngs2_voice_state_flags(v) & NGS2_STATE_PLAYING);
+   render(&r, out, 2);
+   CHECK(fabs(out[64 * 2] - LEVEL * 0.75f) < 1e-4);
+   CHECK(fabs(out[192 * 2] - LEVEL * 0.25f) < 1e-4);
+   CHECK(ngs2_voice_state_flags(v) == NGS2_STATE_INUSE);
+   render(&r, out, 2);
+   CHECK(out[100] == 0.0f);
+
+   /* The limiter of the mastering voice lets nothing over its threshold */
+   memset(&lp, 0, sizeof(lp));
+   head(&lp.header, sizeof(lp), 0x30000003u);
+   lp.a = 1;
+   lp.b = as_bits(0.25f);
+   CHECK(ngs2_voice_control(r.master, &lp.header) == NGS2_OK);
+   head(&ep.header, sizeof(ep), 0x10000006u);
+   ep.forward = ep.release = 0;
+   CHECK(ngs2_voice_control(v, &ep.header) == NGS2_OK);
+   CHECK(event(v, NGS2_EVENT_PLAY) == NGS2_OK);
+   render(&r, out, 2);
+   for (i = 0; i < GRAIN * 2; i++)
+      if (out[i] > 0.25001f) {
+         CHECK(!"over the limiter's threshold");
+         break;
+      }
+   CHECK(fabs(out[200 * 2] - 0.25f) < 1e-4);
+   rig_close(&r);
+
+   /* Over the threshold a compressor lets the level grow by its ratio only */
+   rig_open(&r, RATE);
+   base_desc(&d, NGS2_RACK_SUBMIXER);
+   d.max_envelope_points = 4;
+   r.extra = make_rack(r.system, &d, &r.extra_mem);
+   sub = ngs2_rack_voice(r.extra, 0);
+   CHECK(mixer_setup(sub, 0x20000000u, 2, 0) == NGS2_OK);
+   v = effects_source(&r, sub, 0);
+   memset(&sp, 0, sizeof(sp));
+   head(&sp.header, sizeof(sp), 0x20000002u);
+   sp.f[0] = 0.1f; /* threshold */
+   sp.f[1] = 0.5f; /* ratio */
+   sp.f[5] = 1.0f; /* level */
+   CHECK(ngs2_voice_control(sub, &sp.header) == NGS2_OK);
+   CHECK(event(v, NGS2_EVENT_PLAY) == NGS2_OK);
+   render(&r, out, 2);
+   render(&r, out, 2);
+   CHECK(fabs(out[100 * 2] - (0.1f + (LEVEL - 0.1f) * 0.5f)) < 1e-4);
+   /* Switched off (flag 1) it leaves the sound alone */
+   sp.flags = 1;
+   CHECK(ngs2_voice_control(sub, &sp.header) == NGS2_OK);
+   render(&r, out, 2);
+   CHECK(fabs(out[100 * 2] - LEVEL) < 1e-4);
+   /* A distortion that doubles and clips at a half */
+   memset(&sp, 0, sizeof(sp));
+   head(&sp.header, sizeof(sp), 0x20000003u);
+   sp.f[0] = 2.0f; /* a */
+   sp.f[2] = 0.5f; /* clip */
+   sp.f[4] = 1.0f; /* wet */
+   CHECK(ngs2_voice_control(sub, &sp.header) == NGS2_OK);
+   render(&r, out, 2);
+   CHECK(fabs(out[100 * 2] - 0.5f) < 1e-4);
+   sp.header.size = 20;
+   CHECK(ngs2_voice_control(sub, &sp.header) == NGS2_ERROR_INVALID_VOICE_CONTROL_SIZE);
+   (void)as_float;
+   rig_close(&r);
+}
+
+/* The modules of a custom rack: delay, chorus, pitch shift, envelope */
+static void test_modules(void) {
+   rig r;
+   ngs2_rack_desc d;
+   static float out[GRAIN * 2];
+   static float all[GRAIN * 2 * 24];
+   ngs2_voice *v, *sub;
+   delay_param dp;
+   chorus_param cp;
+   envelope_param ep;
+   two_u32_param pp;
+   uint32_t points[3];
+   unsigned i, g;
+
+   /* What goes into a delay comes out as late as its tap is */
+   rig_open(&r, RATE);
+   base_desc(&d, NGS2_RACK_CUSTOM_SUBMIXER);
+   d.max_voices = 1;
+   d.num_modules = 2;
+   d.modules[0].id = 0x1d;
+   d.modules[0].max_length = 0.5f;
+   d.modules[1].id = 0x10;
+   r.extra = make_rack(r.system, &d, &r.extra_mem);
+   CHECK(r.extra != NULL);
+   sub = ngs2_rack_voice(r.extra, 0);
+   CHECK(mixer_setup(sub, 0x40020000u, 2, 2) == NGS2_OK);
+   v = effects_source(&r, sub, 0);
+   memset(&dp, 0, sizeof(dp));
+   head(&dp.header, sizeof(dp), 0x40001d00u);
+   dp.wet = 1.0f;
+   dp.input = 1.0f;
+   dp.num_taps = 1;
+   dp.taps[0] = 1.0f;
+   dp.taps[1] = 100.0f / RATE + 1e-6f;
+   CHECK(ngs2_voice_control(sub, &dp.header) == NGS2_OK);
+   CHECK(event(v, NGS2_EVENT_PLAY) == NGS2_OK);
+   render(&r, out, 2);
+   CHECK(out[50 * 2] == 0.0f && out[102 * 2] == 0.0f);
+   CHECK(fabs(out[104 * 2] - LEVEL) < 1e-4 && fabs(out[200 * 2 + 1] - LEVEL) < 1e-4);
+   /* The source killed, the delay still gives what it holds, then nothing */
+   CHECK(event(v, NGS2_EVENT_KILL) == NGS2_OK);
+   render(&r, out, 2);
+   CHECK(fabs(out[50 * 2] - LEVEL) < 1e-4 && out[150 * 2] == 0.0f);
+   /* The rack's envelope module, down to a quarter at once */
+   points[0] = 0;
+   points[1] = 0;
+   points[2] = as_bits(0.25f);
+   memset(&ep, 0, sizeof(ep));
+   head(&ep.header, sizeof(ep), 0x40001001u);
+   ep.forward = 1;
+   ep.points = points;
+   CHECK(ngs2_voice_control(sub, &ep.header) == NGS2_OK);
+   dp.dry = 1.0f;
+   dp.wet = 0.0f;
+   CHECK(ngs2_voice_control(sub, &dp.header) == NGS2_OK);
+   CHECK(sampler_setup(v, NGS2_WAVE_PCM_I16L, 1, RATE) == NGS2_OK);
+   effects_source(&r, NULL, 0);
+   CHECK(patch(v, 0, sub) == NGS2_OK);
+   CHECK(event(v, NGS2_EVENT_PLAY) == NGS2_OK);
+   render(&r, out, 2);
+   CHECK(fabs(out[200 * 2] - LEVEL * 0.25f) < 1e-4);
+   rig_close(&r);
+
+   /* A sine an octave up is a sine of twice the pitch; a chorus keeps it a sound */
+   rig_open(&r, RATE);
+   base_desc(&d, NGS2_RACK_CUSTOM_SUBMIXER);
+   d.max_voices = 1;
+   d.num_modules = 2;
+   d.modules[0].id = 0x20;
+   d.modules[1].id = 0x1c;
+   r.extra = make_rack(r.system, &d, &r.extra_mem);
+   CHECK(r.extra != NULL);
+   sub = ngs2_rack_voice(r.extra, 0);
+   CHECK(mixer_setup(sub, 0x40020000u, 2, 2) == NGS2_OK);
+   v = effects_source(&r, sub, 1);
+   memset(&pp, 0, sizeof(pp));
+   head(&pp.header, 12, 0x40002000u);
+   pp.a = 1200;
+   CHECK(ngs2_voice_control(sub, &pp.header) == NGS2_OK);
+   CHECK(event(v, NGS2_EVENT_PLAY) == NGS2_OK);
+   for (g = 0; g < 24; g++)
+      render(&r, all + g * GRAIN * 2, 2);
+   CHECK(finite_all(all, GRAIN * 2 * 24));
+   {
+      /* It crosses zero twice as often as the sine that went in, and is as loud */
+      unsigned crossings = 0;
+      double power = 0.0;
+      const float *x = all + GRAIN * 2 * 12;
+      for (i = 1; i < GRAIN * 12; i++) {
+         if ((x[i * 2] < 0.0f) != (x[i * 2 - 2] < 0.0f))
+            crossings++;
+         power += x[i * 2] * x[i * 2];
+      }
+      CHECK(crossings > 100 && crossings < 126);
+      CHECK(sqrt(power / (GRAIN * 12)) > 0.12);
+   }
+   pp.a = 0;
+   CHECK(ngs2_voice_control(sub, &pp.header) == NGS2_OK);
+   memset(&cp, 0, sizeof(cp));
+   head(&cp.header, sizeof(cp), 0x40001c01u);
+   cp.phases = 3;
+   cp.input = 1.0f;
+   cp.delay = 0.02f;
+   cp.rate = 1.5f;
+   cp.depth = 0.3f;
+   cp.feedback = 0.2f;
+   cp.wet = 0.5f;
+   cp.dry = 0.5f;
+   CHECK(ngs2_voice_control(sub, &cp.header) == NGS2_OK);
+   for (g = 0; g < 24; g++)
+      render(&r, all + g * GRAIN * 2, 2);
+   CHECK(finite_all(all, GRAIN * 2 * 24));
+   CHECK(tone(all + GRAIN * 2 * 12, GRAIN * 12, 440.0) > 0.03);
+   for (i = 0; i < GRAIN * 2 * 24; i++)
+      if (all[i] > 1.0f || all[i] < -1.0f) {
+         CHECK(!"the chorus is louder than what went in");
+         break;
+      }
+   rig_close(&r);
+}
+
 int main(void) {
    test_passthrough();
    test_resample();
@@ -885,6 +1182,8 @@ int main(void) {
    test_levels();
    test_chain();
    test_custom();
+   test_effects();
+   test_modules();
    test_formats();
    test_atrac9();
    if (failures) {
