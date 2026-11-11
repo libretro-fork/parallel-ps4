@@ -13,6 +13,7 @@
 #include "common/combiner.h"
 #include "common/path_util.h"
 #include "common/quick_exit.h"
+#include "common/singleton.h"
 #include "core/debug_state.h"
 #include "core/devtools/layer.h"
 #include "core/emulator_settings.h"
@@ -23,6 +24,7 @@
 #include "imgui_core.h"
 #include "imgui_impl_vulkan.h"
 #include "imgui_internal.h"
+#include "input/controller.h"
 #include "texture_manager.h"
 #include "video_core/renderer_vulkan/vk_presenter.h"
 
@@ -189,6 +191,56 @@ void Shutdown(const vk::Device& device) {
     delete[] (char*)log_filename;
 }
 
+// The first controller, as it was last published, is what moves through a
+// dialog and presses its buttons: there is no other input here. ImGui takes
+// a key event only where the key changed.
+static void PadToImGui(ImGuiIO& io) {
+    using Libraries::Pad::OrbisPadButtonDataOffset;
+    struct Key {
+        OrbisPadButtonDataOffset button;
+        ImGuiKey key;
+    };
+    static constexpr Key keys[] = {
+        {OrbisPadButtonDataOffset::Cross, ImGuiKey_GamepadFaceDown},
+        {OrbisPadButtonDataOffset::Circle, ImGuiKey_GamepadFaceRight},
+        {OrbisPadButtonDataOffset::Square, ImGuiKey_GamepadFaceLeft},
+        {OrbisPadButtonDataOffset::Triangle, ImGuiKey_GamepadFaceUp},
+        {OrbisPadButtonDataOffset::Up, ImGuiKey_GamepadDpadUp},
+        {OrbisPadButtonDataOffset::Down, ImGuiKey_GamepadDpadDown},
+        {OrbisPadButtonDataOffset::Left, ImGuiKey_GamepadDpadLeft},
+        {OrbisPadButtonDataOffset::Right, ImGuiKey_GamepadDpadRight},
+        {OrbisPadButtonDataOffset::L1, ImGuiKey_GamepadL1},
+        {OrbisPadButtonDataOffset::R1, ImGuiKey_GamepadR1},
+        {OrbisPadButtonDataOffset::L2, ImGuiKey_GamepadL2},
+        {OrbisPadButtonDataOffset::R2, ImGuiKey_GamepadR2},
+        {OrbisPadButtonDataOffset::L3, ImGuiKey_GamepadL3},
+        {OrbisPadButtonDataOffset::R3, ImGuiKey_GamepadR3},
+        {OrbisPadButtonDataOffset::Options, ImGuiKey_GamepadStart},
+        {OrbisPadButtonDataOffset::TouchPad, ImGuiKey_GamepadBack},
+    };
+    auto& controllers = *Common::Singleton<Input::GameControllers>::Instance();
+    const Input::State state = controllers[0]->ReadState();
+    if (!state.connected) {
+        io.BackendFlags &= ~ImGuiBackendFlags_HasGamepad;
+        return;
+    }
+    io.BackendFlags |= ImGuiBackendFlags_HasGamepad;
+    for (const Key& k : keys) {
+        io.AddKeyEvent(k.key, True(state.buttonsState & k.button));
+    }
+    const auto stick = [&](Input::Axis axis, ImGuiKey low, ImGuiKey high) {
+        const float v =
+            (static_cast<float>(state.axes[std::to_underlying(axis)]) - 128.0f) / 127.0f;
+        const float dead = 0.25f;
+        io.AddKeyAnalogEvent(low, v < -dead, v < -dead ? std::min(-v, 1.0f) : 0.0f);
+        io.AddKeyAnalogEvent(high, v > dead, v > dead ? std::min(v, 1.0f) : 0.0f);
+    };
+    stick(Input::Axis::LeftX, ImGuiKey_GamepadLStickLeft, ImGuiKey_GamepadLStickRight);
+    stick(Input::Axis::LeftY, ImGuiKey_GamepadLStickUp, ImGuiKey_GamepadLStickDown);
+    stick(Input::Axis::RightX, ImGuiKey_GamepadRStickLeft, ImGuiKey_GamepadRStickRight);
+    stick(Input::Axis::RightY, ImGuiKey_GamepadRStickUp, ImGuiKey_GamepadRStickDown);
+}
+
 // Each frame: the picture's size, the time step, and, on a frame of
 // the game's own, its frame time and rate for the overlay.
 static void PlatformNewFrame(bool is_reusing_frame) {
@@ -204,6 +256,8 @@ static void PlatformNewFrame(bool is_reusing_frame) {
     io.DeltaTime = last_frame_time.time_since_epoch().count() != 0 ? seconds(now - last_frame_time)
                                                                    : 1.0f / 60.0f;
     last_frame_time = now;
+
+    PadToImGui(io);
 
     if (!is_reusing_frame) {
         const float delta = last_game_frame_time.time_since_epoch().count() != 0

@@ -915,9 +915,13 @@ int PS4_SYSV_ABI sceNpTrophyRegisterContext(OrbisNpTrophyContext context,
             // Stub success here to prevent issues specific to missing a trophy key.
         }
     } else {
+        // A copy of a game without a readable npbind.dat: it has no trophies here, which is
+        // not a reason for the game to put an error on screen. Its trophy files are not found
+        // either, as above, and there is nothing to bring over from shadNet.
         LOG_ERROR(Lib_NpTrophy, "No npCommId found for trophy index/service_label: {}",
                   ctx.service_label);
-        return ORBIS_NP_UTIL_ERROR_INVALID_TITLEID;
+        ctx.registered = true;
+        return ORBIS_OK;
     }
 
     ctx.registered = true;
