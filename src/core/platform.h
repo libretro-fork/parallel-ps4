@@ -10,8 +10,10 @@
 
 #include "common/enum_names.h"
 
+#include "common/combiner.h"
+
+#include <array>
 #include <functional>
-#include <mutex>
 #include <unordered_map>
 #include <queue>
 
@@ -34,62 +36,62 @@ enum class InterruptId : u32 {
 
 using IrqHandler = std::function<void(InterruptId)>;
 
+/// The handlers of each interrupt, registered, unregistered and run one at a time in its own
+/// Common::Combiner: no lock, and a signal on one interrupt never waits on another's.
 struct IrqController {
     void RegisterOnce(InterruptId irq, IrqHandler handler) {
-        ASSERT_MSG(static_cast<u32>(irq) <= static_cast<u32>(InterruptId::InterruptIdMax),
-                   "Invalid IRQ number");
-        auto& ctx = irq_contexts.try_emplace(irq).first->second;
-        std::unique_lock lock{ctx.m_lock};
-        ctx.one_time_subscribers.emplace(handler);
+        auto& ctx = Context(irq);
+        ctx.combiner.Run([&] { ctx.one_time_subscribers.emplace(std::move(handler)); });
     }
 
     void Register(InterruptId irq, IrqHandler handler, void* uid) {
-        ASSERT_MSG(static_cast<u32>(irq) <= static_cast<u32>(InterruptId::InterruptIdMax),
-                   "Invalid IRQ number");
-        auto& ctx = irq_contexts.try_emplace(irq).first->second;
-
-        std::unique_lock lock{ctx.m_lock};
-        ASSERT_MSG(ctx.persistent_handlers.find(uid) == ctx.persistent_handlers.cend(),
-                   "The handler is already registered!");
-        ctx.persistent_handlers.emplace(uid, handler);
+        auto& ctx = Context(irq);
+        ctx.combiner.Run([&] {
+            ASSERT_MSG(ctx.persistent_handlers.find(uid) == ctx.persistent_handlers.cend(),
+                       "The handler is already registered!");
+            ctx.persistent_handlers.emplace(uid, std::move(handler));
+        });
     }
 
     void Unregister(InterruptId irq, void* uid) {
-        ASSERT_MSG(static_cast<u32>(irq) <= static_cast<u32>(InterruptId::InterruptIdMax),
-                   "Invalid IRQ number");
-        auto& ctx = irq_contexts.try_emplace(irq).first->second;
-        std::unique_lock lock{ctx.m_lock};
-        ctx.persistent_handlers.erase(uid);
+        auto& ctx = Context(irq);
+        ctx.combiner.Run([&] { ctx.persistent_handlers.erase(uid); });
     }
 
     void Signal(InterruptId irq) {
-        ASSERT_MSG(static_cast<u32>(irq) <= static_cast<u32>(InterruptId::InterruptIdMax),
-                   "Unexpected IRQ signaled");
-        auto& ctx = irq_contexts.try_emplace(irq).first->second;
-        std::unique_lock lock{ctx.m_lock};
+        auto& ctx = Context(irq);
+        ctx.combiner.Run([&] {
+            LOG_TRACE(Core, "IRQ signaled: {}",
+                      enum_name(&enum_names_Platform_InterruptId, static_cast<s64>(irq)));
 
-        LOG_TRACE(Core, "IRQ signaled: {}",
-                  enum_name(&enum_names_Platform_InterruptId, static_cast<s64>(irq)));
+            for (auto& [uid, h] : ctx.persistent_handlers) {
+                h(irq);
+            }
 
-        for (auto& [uid, h] : ctx.persistent_handlers) {
-            h(irq);
-        }
+            if (!ctx.one_time_subscribers.empty()) {
+                const auto& h = ctx.one_time_subscribers.front();
+                h(irq);
 
-        if (!ctx.one_time_subscribers.empty()) {
-            const auto& h = ctx.one_time_subscribers.front();
-            h(irq);
-
-            ctx.one_time_subscribers.pop();
-        }
+                ctx.one_time_subscribers.pop();
+            }
+        });
     }
 
 private:
     struct IrqContext {
         std::unordered_map<void*, IrqHandler> persistent_handlers{};
         std::queue<IrqHandler> one_time_subscribers{};
-        std::mutex m_lock{};
+        Common::Combiner combiner;
     };
-    std::unordered_map<InterruptId, IrqContext> irq_contexts{};
+
+    IrqContext& Context(InterruptId irq) {
+        ASSERT_MSG(static_cast<u32>(irq) <= static_cast<u32>(InterruptId::InterruptIdMax),
+                   "Invalid IRQ number");
+        return irq_contexts[static_cast<u32>(irq)];
+    }
+
+    // One per interrupt number, made up front: none is added while another is signalled
+    std::array<IrqContext, static_cast<u32>(InterruptId::InterruptIdMax) + 1> irq_contexts{};
 };
 
 using IrqC = Common::Singleton<IrqController>;
