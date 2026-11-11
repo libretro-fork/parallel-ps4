@@ -5,6 +5,7 @@
 #include "gnmdriver.h"
 
 #include "common/assert.h"
+#include "common/combiner.h"
 #include "common/elf_info.h"
 #include "common/logging/log.h"
 #include "common/slot_vector.h"
@@ -62,11 +63,12 @@ static constexpr std::array indirect_sgpr_offsets{0u, 0u, 0x4cu, 0u, 0xccu, 0u, 
 // this flag in case we need it in the future.
 static constexpr bool UseNeoCompatSequences = false;
 
-// In case if `submitDone` is issued we need to block submissions until GPU idle
-static u32 submission_lock{};
-std::condition_variable cv_lock{};
-std::mutex m_wait_idle{};
-std::mutex m_submit_lock{};
+// In case if `submitDone` is issued we need to block submissions until GPU idle. Set by the
+// submitter, cleared by it or by the GPU idle interrupt; WaitGpuIdle parks on idle_ec.
+static std::atomic<u32> submission_lock{};
+static retro_eventcount_t idle_ec{};
+// The submissions run one at a time, in order, and so does all the state below
+static Common::Combiner submit_combiner;
 static u64 frames_submitted{};      // frame counter
 static bool send_init_packet{true}; // initialize HW state before first game's submit in a frame
 static s32 sdk_version{0};
@@ -77,23 +79,42 @@ static u32 asc_next_offs_dw[Liverpool::NumComputeRings];
 static VAddr tessellation_factors_ring_addr = -1;
 static constexpr u32 tessellation_offchip_buffer_size = 0x800000u;
 
+static void ReleaseSubmissionLock() {
+    submission_lock.store(0, std::memory_order_seq_cst);
+    retro_eventcount_notify(&idle_ec);
+}
+
 static void ResetSubmissionLock(Platform::InterruptId irq) {
-    std::unique_lock lock{m_wait_idle};
     // The GPU thread signals idle after it has seen its queues empty, and the game can submit
-    // and take the lock in between: the signal for the init sequence then released the lock
-    // while the frame's command buffer was still waiting, the game went on to its next frame
-    // and wrote over that buffer ("Out of order flip IRQ"). With something submitted the GPU
-    // thread is not idle; it signals again once that is done.
+    // in between: the signal for the init sequence then released the lock while the frame's
+    // command buffer was still waiting, the game went on to its next frame and wrote over that
+    // buffer ("Out of order flip IRQ"). With something submitted the GPU thread is not idle; it
+    // signals again once that is done.
     if (!liverpool->IsGpuIdle()) {
         return;
     }
-    submission_lock = 0;
-    cv_lock.notify_all();
+    ReleaseSubmissionLock();
+}
+
+/// After SubmitGfx, before SubmitDone: blocks submissions until the GPU is idle. The lock is
+/// taken first and the GPU looked at after, and the interrupt looks at the GPU before it
+/// releases, so whichever sees the GPU idle last releases it: none is left held.
+static void TakeSubmissionLock() {
+    submission_lock.store(1, std::memory_order_seq_cst);
+    if (liverpool->IsGpuIdle()) {
+        ReleaseSubmissionLock();
+    }
 }
 
 static void WaitGpuIdle() {
-    std::unique_lock lock{m_wait_idle};
-    cv_lock.wait(lock, [] { return submission_lock == 0; });
+    for (;;) {
+        const int key = retro_eventcount_prepare_wait(&idle_ec);
+        if (submission_lock.load(std::memory_order_seq_cst) == 0) {
+            retro_eventcount_cancel_wait(&idle_ec);
+            return;
+        }
+        retro_eventcount_commit_wait(&idle_ec, key);
+    }
 }
 
 // Write a special NOP packet with N DWs data block
@@ -311,69 +332,72 @@ void PS4_SYSV_ABI sceGnmDingDong(u32 gnm_vqid, u32 next_offs_dw) {
         return;
     }
 
-    std::scoped_lock lk{m_submit_lock};
-    WaitGpuIdle();
+    submit_combiner.Run([&] {
+        WaitGpuIdle();
 
-    if (DebugState.ShouldPauseInSubmit()) {
-        DebugState.PauseGuestThreads();
-    }
-
-    auto vqid = gnm_vqid - 1;
-    auto& asc_queue = liverpool->asc_queues[{vqid}];
-
-    auto& offs_dw = asc_next_offs_dw[vqid];
-
-    if (next_offs_dw == offs_dw) {
-        return;
-    }
-
-    if (next_offs_dw < offs_dw && next_offs_dw != 0) {
-        // For cases if a submission is split at the end of the ring buffer, we need to submit it in
-        // two parts to handle the wrap
-        liverpool->SubmitAsc(gnm_vqid, {reinterpret_cast<const u32*>(asc_queue.map_addr) + offs_dw,
-                                        asc_queue.ring_size_dw - offs_dw});
-        offs_dw = 0;
-    }
-
-    const auto* acb_ptr = reinterpret_cast<const u32*>(asc_queue.map_addr) + offs_dw;
-    const auto acb_size_dw = (next_offs_dw ? next_offs_dw : asc_queue.ring_size_dw) - offs_dw;
-    const std::span acb_span{acb_ptr, acb_size_dw};
-
-    asc_next_offs_dw[vqid] = next_offs_dw;
-
-    if (DebugState.DumpingCurrentFrame()) {
-        static auto last_frame_num = -1LL;
-        static u32 seq_num{};
-        if (last_frame_num == frames_submitted) {
-            ++seq_num;
-        } else {
-            last_frame_num = frames_submitted;
-            seq_num = 0u;
+        if (DebugState.ShouldPauseInSubmit()) {
+            DebugState.PauseGuestThreads();
         }
 
-        // Up to this point, all ACB submissions have been stored in a secondary command buffer.
-        // Dumping them using the current ring pointer would result in files containing only the
-        // `IndirectBuffer` command. To access the actual command stream, we need to unwrap the IB.
-        auto acb = acb_span;
-        auto base_addr = reinterpret_cast<uintptr_t>(acb_ptr);
-        const auto* indirect_buffer =
-            reinterpret_cast<const PM4CmdIndirectBuffer*>(acb_span.data());
-        if (indirect_buffer->header.opcode == PM4ItOpcode::IndirectBuffer) {
-            base_addr = reinterpret_cast<uintptr_t>(indirect_buffer->Address<const u32>());
-            acb = {reinterpret_cast<const u32*>(base_addr), indirect_buffer->ib_size};
+        auto vqid = gnm_vqid - 1;
+        auto& asc_queue = liverpool->asc_queues[{vqid}];
+
+        auto& offs_dw = asc_next_offs_dw[vqid];
+
+        if (next_offs_dw == offs_dw) {
+            return;
         }
 
-        using namespace DebugStateType;
+        if (next_offs_dw < offs_dw && next_offs_dw != 0) {
+            // For cases if a submission is split at the end of the ring buffer, we need to submit
+            // it in two parts to handle the wrap
+            liverpool->SubmitAsc(gnm_vqid,
+                                 {reinterpret_cast<const u32*>(asc_queue.map_addr) + offs_dw,
+                                  asc_queue.ring_size_dw - offs_dw});
+            offs_dw = 0;
+        }
 
-        DebugState.PushQueueDump({
-            .type = QueueType::acb,
-            .submit_num = seq_num,
-            .num2 = gnm_vqid,
-            .data = {acb.begin(), acb.end()},
-            .base_addr = base_addr,
-        });
-    }
-    liverpool->SubmitAsc(gnm_vqid, acb_span);
+        const auto* acb_ptr = reinterpret_cast<const u32*>(asc_queue.map_addr) + offs_dw;
+        const auto acb_size_dw = (next_offs_dw ? next_offs_dw : asc_queue.ring_size_dw) - offs_dw;
+        const std::span acb_span{acb_ptr, acb_size_dw};
+
+        asc_next_offs_dw[vqid] = next_offs_dw;
+
+        if (DebugState.DumpingCurrentFrame()) {
+            static auto last_frame_num = -1LL;
+            static u32 seq_num{};
+            if (last_frame_num == frames_submitted) {
+                ++seq_num;
+            } else {
+                last_frame_num = frames_submitted;
+                seq_num = 0u;
+            }
+
+            // Up to this point, all ACB submissions have been stored in a secondary command buffer.
+            // Dumping them using the current ring pointer would result in files containing only the
+            // `IndirectBuffer` command. To access the actual command stream, we need to unwrap the
+            // IB.
+            auto acb = acb_span;
+            auto base_addr = reinterpret_cast<uintptr_t>(acb_ptr);
+            const auto* indirect_buffer =
+                reinterpret_cast<const PM4CmdIndirectBuffer*>(acb_span.data());
+            if (indirect_buffer->header.opcode == PM4ItOpcode::IndirectBuffer) {
+                base_addr = reinterpret_cast<uintptr_t>(indirect_buffer->Address<const u32>());
+                acb = {reinterpret_cast<const u32*>(base_addr), indirect_buffer->ib_size};
+            }
+
+            using namespace DebugStateType;
+
+            DebugState.PushQueueDump({
+                .type = QueueType::acb,
+                .submit_num = seq_num,
+                .num2 = gnm_vqid,
+                .data = {acb.begin(), acb.end()},
+                .base_addr = base_addr,
+            });
+        }
+        liverpool->SubmitAsc(gnm_vqid, acb_span);
+    });
 }
 
 void PS4_SYSV_ABI sceGnmDingDongForWorkload(u32 gnm_vqid, u32 next_offs_dw, u64 workload_id) {
@@ -1439,55 +1463,49 @@ s32 PS4_SYSV_ABI sceGnmRequestFlipAndSubmitDoneForWorkload(u64 workload, u32* gp
         return ORBIS_GNM_ERROR_SUBMISSION_NOT_ENOUGH_RESOURCES;
     }
 
-    std::scoped_lock lk{m_submit_lock};
-    WaitGpuIdle();
+    return submit_combiner.Run([&]() -> s32 {
+        WaitGpuIdle();
 
-    // Write a PrepareFlip, then patch the flip request
-    auto* nop = reinterpret_cast<PM4CmdNop*>(gpu_addr);
-    nop->header = PM4Type3Header{PM4ItOpcode::Nop, 0x3e};
-    nop->data_block[0] = PM4CmdNop::PayloadType::PrepareFlip;
-    const s32 patch_result =
-        PatchFlipRequest(gpu_addr, 0x40, vo_handle, buf_idx, flip_mode, flip_arg, nullptr /*unk*/);
-    if (patch_result != ORBIS_OK) {
-        return patch_result;
-    }
-
-    // Submit
-    const auto& dcb_span = std::span{gpu_addr, 0x40};
-    if (DebugState.DumpingCurrentFrame()) {
-        static auto last_frame_num = -1LL;
-        static u32 seq_num{};
-        if (last_frame_num == frames_submitted) {
-            ++seq_num;
-        } else {
-            last_frame_num = frames_submitted;
-            seq_num = 0u;
+        // Write a PrepareFlip, then patch the flip request
+        auto* nop = reinterpret_cast<PM4CmdNop*>(gpu_addr);
+        nop->header = PM4Type3Header{PM4ItOpcode::Nop, 0x3e};
+        nop->data_block[0] = PM4CmdNop::PayloadType::PrepareFlip;
+        const s32 patch_result = PatchFlipRequest(gpu_addr, 0x40, vo_handle, buf_idx, flip_mode,
+                                                  flip_arg, nullptr /*unk*/);
+        if (patch_result != ORBIS_OK) {
+            return patch_result;
         }
 
-        using DebugStateType::QueueType;
+        // Submit
+        const auto& dcb_span = std::span{gpu_addr, 0x40};
+        if (DebugState.DumpingCurrentFrame()) {
+            static auto last_frame_num = -1LL;
+            static u32 seq_num{};
+            if (last_frame_num == frames_submitted) {
+                ++seq_num;
+            } else {
+                last_frame_num = frames_submitted;
+                seq_num = 0u;
+            }
 
-        DebugState.PushQueueDump({
-            .type = QueueType::dcb,
-            .submit_num = seq_num,
-            .num2 = 0,
-            .data = {dcb_span.begin(), dcb_span.end()},
-            .base_addr = reinterpret_cast<uintptr_t>(gpu_addr),
-        });
-    }
-    liverpool->SubmitGfx(dcb_span, {});
+            using DebugStateType::QueueType;
 
-    {
-        // Under the mutex ResetSubmissionLock checks the queues under, so its check and this
-        // one cannot cross.
-        std::unique_lock lock{m_wait_idle};
-        if (!liverpool->IsGpuIdle()) {
-            submission_lock = true;
+            DebugState.PushQueueDump({
+                .type = QueueType::dcb,
+                .submit_num = seq_num,
+                .num2 = 0,
+                .data = {dcb_span.begin(), dcb_span.end()},
+                .base_addr = reinterpret_cast<uintptr_t>(gpu_addr),
+            });
         }
-    }
-    liverpool->SubmitDone();
-    send_init_packet = true;
+        liverpool->SubmitGfx(dcb_span, {});
 
-    return ORBIS_OK;
+        TakeSubmissionLock();
+        liverpool->SubmitDone();
+        send_init_packet = true;
+
+        return ORBIS_OK;
+    });
 }
 
 int PS4_SYSV_ABI sceGnmRequestMipStatsReportAndReset() {
@@ -2422,17 +2440,18 @@ s32 PS4_SYSV_ABI sceGnmSubmitAndFlipCommandBuffersForWorkload(
     auto* cmdbuf = dcb_gpu_addrs[count - 1];
     const auto size_dw = dcb_sizes_in_bytes[count - 1] / 4;
 
-    std::scoped_lock lk{m_submit_lock};
-    WaitGpuIdle();
+    return submit_combiner.Run([&]() -> s32 {
+        WaitGpuIdle();
 
-    const s32 patch_result =
-        PatchFlipRequest(cmdbuf, size_dw, vo_handle, buf_idx, flip_mode, flip_arg, nullptr /*unk*/);
-    if (patch_result != ORBIS_OK) {
-        return patch_result;
-    }
+        const s32 patch_result = PatchFlipRequest(cmdbuf, size_dw, vo_handle, buf_idx, flip_mode,
+                                                  flip_arg, nullptr /*unk*/);
+        if (patch_result != ORBIS_OK) {
+            return patch_result;
+        }
 
-    return PerformSubmit(count, const_cast<const u32**>(dcb_gpu_addrs), dcb_sizes_in_bytes,
-                         const_cast<const u32**>(ccb_gpu_addrs), ccb_sizes_in_bytes);
+        return PerformSubmit(count, const_cast<const u32**>(dcb_gpu_addrs), dcb_sizes_in_bytes,
+                             const_cast<const u32**>(ccb_gpu_addrs), ccb_sizes_in_bytes);
+    });
 }
 
 s32 PS4_SYSV_ABI sceGnmSubmitCommandBuffersForWorkload(u32 workload, u32 count,
@@ -2464,11 +2483,12 @@ s32 PS4_SYSV_ABI sceGnmSubmitCommandBuffersForWorkload(u32 workload, u32 count,
         }
     }
 
-    std::scoped_lock lk{m_submit_lock};
-    WaitGpuIdle();
+    return submit_combiner.Run([&]() -> s32 {
+        WaitGpuIdle();
 
-    return PerformSubmit(count, const_cast<const u32**>(dcb_gpu_addrs), dcb_sizes_in_bytes,
-                         const_cast<const u32**>(ccb_gpu_addrs), ccb_sizes_in_bytes);
+        return PerformSubmit(count, const_cast<const u32**>(dcb_gpu_addrs), dcb_sizes_in_bytes,
+                             const_cast<const u32**>(ccb_gpu_addrs), ccb_sizes_in_bytes);
+    });
 }
 
 s32 PS4_SYSV_ABI sceGnmSubmitCommandBuffers(u32 count, const u32* dcb_gpu_addrs[],
@@ -2480,21 +2500,15 @@ s32 PS4_SYSV_ABI sceGnmSubmitCommandBuffers(u32 count, const u32* dcb_gpu_addrs[
 
 s32 PS4_SYSV_ABI sceGnmSubmitDone() {
     LOG_DEBUG(Lib_GnmDriver, "called");
-    std::scoped_lock lk{m_submit_lock};
-    WaitGpuIdle();
-    {
-        // Under the mutex ResetSubmissionLock checks the queues under, so its check and this
-        // one cannot cross.
-        std::unique_lock lock{m_wait_idle};
-        if (!liverpool->IsGpuIdle()) {
-            submission_lock = true;
-        }
-    }
-    liverpool->SubmitDone();
-    send_init_packet = true;
-    ++frames_submitted;
-    DebugState.IncGnmFrameNum();
-    return ORBIS_OK;
+    return submit_combiner.Run([&]() -> s32 {
+        WaitGpuIdle();
+        TakeSubmissionLock();
+        liverpool->SubmitDone();
+        send_init_packet = true;
+        ++frames_submitted;
+        DebugState.IncGnmFrameNum();
+        return ORBIS_OK;
+    });
 }
 
 int PS4_SYSV_ABI sceGnmUnmapComputeQueue(u32 vqid) {
@@ -3061,6 +3075,7 @@ void RegisterLib(Core::Loader::SymbolsResolver* sym) {
         liverpool->ReserveCopyBufferSpace();
     }
 
+    retro_eventcount_init(&idle_ec);
     Platform::IrqC::Instance()->Register(Platform::InterruptId::GpuIdle, ResetSubmissionLock,
                                          nullptr);
 
