@@ -32,7 +32,9 @@ void UpdateLogLevels(std::string_view log_filter);
 void UpdateLogFlushLevel(std::string_view log_flush_level);
 
 [[nodiscard]] inline bool ShouldLog(Class log_class, Level level) {
-    return level >= g_class_levels[static_cast<std::size_t>(log_class)];
+    // A critical line is written whatever the filter says, and with logging off: it is what
+    // a crash or a stop leaves behind
+    return level == Level::Critical || level >= g_class_levels[static_cast<std::size_t>(log_class)];
 }
 
 void VLog(Class log_class, Level level, const char* file, int line, const char* func,

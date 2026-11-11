@@ -17,6 +17,8 @@
 #include "core/libraries/kernel/kernel.h"
 #include "core/libraries/kernel/threads/exception.h"
 #include "core/libraries/kernel/threads/pthread.h"
+#include "core/linker.h"
+#include "core/module.h"
 #include "core/signals.h"
 #ifdef SHADPS4_ENABLE_FEX_GUEST_CPU
 #include "core/fex/fex_guest_engine.h"
@@ -39,6 +41,8 @@ static constexpr DWORD MS_VC_EXCEPTION = 0x406D1388;
 namespace Core {
 
 #if defined(_WIN32)
+
+static LONG WINAPI CrashReport(EXCEPTION_POINTERS* info) noexcept;
 
 static LONG WINAPI SignalHandler(EXCEPTION_POINTERS* pExp) noexcept {
     using namespace Libraries::Kernel;
@@ -154,7 +158,22 @@ static LONG WINAPI SignalHandler(EXCEPTION_POINTERS* pExp) noexcept {
     const bool report_unhandled =
         use_static_windows_guest_red_zone_protection ? static_protection_exception : true;
     if (report_unhandled) {
-        LOG_CRITICAL(Debug, "Unhandled Exception code {:#x} at {}", code, address);
+        // The ones nothing after this handler can make good: reported in full here. The
+        // filter of last resort is reached through the thread's frames, and from the game's
+        // code, which has no unwind tables, it is not reached at all.
+        switch (code) {
+        case EXCEPTION_ACCESS_VIOLATION:
+        case EXCEPTION_ILLEGAL_INSTRUCTION:
+        case EXCEPTION_PRIV_INSTRUCTION:
+        case EXCEPTION_IN_PAGE_ERROR:
+        case EXCEPTION_STACK_OVERFLOW:
+        case EXCEPTION_INT_DIVIDE_BY_ZERO:
+            CrashReport(pExp);
+            break;
+        default:
+            LOG_CRITICAL(Debug, "Unhandled Exception code {:#x} at {}", code, address);
+            break;
+        }
         Common::Singleton<Core::Emulator>::Instance()->Shutdown();
     }
 
@@ -403,7 +422,12 @@ static std::string DescribeAddress(u64 address) {
         return fmt::format("{:#x} ({}+{:#x})", address, name ? name + 1 : path,
                            address - reinterpret_cast<u64>(module));
     }
-    return fmt::format("{:#x} (in no module: the game's code or generated code)", address);
+    // One of the game's own modules, by the address it was loaded at
+    if (const auto* guest = Common::Singleton<Core::Linker>::Instance()->FindByAddress(address)) {
+        return fmt::format("{:#x} (the game's {}+{:#x})", address, guest->name,
+                           address - guest->GetBaseAddress());
+    }
+    return fmt::format("{:#x} (in no module: generated code or data)", address);
 }
 
 // The last word on an exception nothing handled, just before Windows ends the process: what
