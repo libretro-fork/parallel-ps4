@@ -108,7 +108,7 @@ struct DepthRenderControl {
     u32 stencil_compress_disable : 1;
     u32 depth_compress_disable : 1;
     u32 copy_centroid : 1;
-    u32 copy_sample : 1;
+    u32 copy_sample : 4;
     u32 decompress_enable : 1;
 };
 

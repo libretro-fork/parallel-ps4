@@ -39,6 +39,13 @@ size_t host_spirv_color_to_ms_depth_frag(uint32_t* out, size_t cap);
  * current sample when @msaa */
 size_t host_spirv_ms_image_blit_frag(uint32_t* out, size_t cap, int msaa);
 
+/* One plane of a depth buffer as colour: depth, or stencil when @stencil,
+ * of the texel under the fragment from the texture at binding 0 (sample
+ * @sample of it when @msaa), into the first component of a float target or,
+ * when @uint_out, an integer one */
+size_t host_spirv_depth_to_color_frag(uint32_t* out, size_t cap, int msaa, int stencil,
+                                      int uint_out, uint32_t sample);
+
 /* The GPU's page fault bits (binding 0) as a list of page addresses
  * (binding 1) */
 size_t host_spirv_fault_buffer_process_comp(uint32_t* out, size_t cap, uint32_t caching_pagebits,

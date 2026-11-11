@@ -76,6 +76,13 @@ $CC -std=c89 -O1 -g -Wall -fsanitize=address,undefined -isystem externals/vulkan
     libretro/tests/tiling_device_test.c src/video_core/host_shaders/host_spirv.c \
     -o "$OUT/tiling_device_test" -ldl
 ASAN_OPTIONS=detect_leaks=0 "$OUT/tiling_device_test"
+# The depth-to-colour shader on a real device: each sample of a depth buffer's depth and stencil
+# comes out as the colour it should
+$CC -std=c89 -O1 -g -Wall -fsanitize=address,undefined -isystem externals/vulkan-headers/include \
+    -isystem externals/sirit/externals/SPIRV-Headers/include -Isrc -I$L/include \
+    libretro/tests/depth_to_color_device_test.c src/video_core/host_shaders/host_spirv.c \
+    -o "$OUT/depth_to_color_device_test" -ldl
+ASAN_OPTIONS=detect_leaks=0 "$OUT/depth_to_color_device_test"
 # The vertex capture's report on a capture it makes itself, a mesh of each kind in it
 $CC -std=c89 -pedantic -O1 -g -Wall -Wno-long-long -fsanitize=address,undefined \
     tools/vertex_capture_report.c -o "$OUT/vertex_capture_report" -lm

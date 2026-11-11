@@ -639,6 +639,46 @@ void Runtime::CopyDepthStencil(VideoCore::Image* src, VideoCore::Image* dst,
     dst->flags &= ~VideoCore::ImageFlagBits::Dirty;
 }
 
+void Runtime::CopyDepthToColor(VideoCore::Image* src, VideoCore::Image* dst, bool stencil,
+                               bool uint_out, u32 sample, u32 src_layer, u32 dst_layer) {
+    const auto plane =
+        stencil ? vk::ImageAspectFlagBits::eStencil : vk::ImageAspectFlagBits::eDepth;
+    if (!(src->aspect_mask & plane) || !(dst->aspect_mask & vk::ImageAspectFlagBits::eColor)) {
+        return;
+    }
+    // All of the target is written, so what its other backing held is not carried over
+    SetBackingSamples(dst, dst->info.num_samples, false);
+    scheduler.EndRendering();
+
+    bool needs_flush =
+        Transit(src, vk::ImageLayout::eShaderReadOnlyOptimal,
+                vk::PipelineStageFlagBits2::eFragmentShader, vk::AccessFlagBits2::eShaderRead);
+    needs_flush |= Transit(dst, vk::ImageLayout::eColorAttachmentOptimal,
+                           vk::PipelineStageFlagBits2::eColorAttachmentOutput,
+                           vk::AccessFlagBits2::eColorAttachmentRead |
+                               vk::AccessFlagBits2::eColorAttachmentWrite);
+    if (needs_flush) {
+        FlushBarriers();
+    }
+
+    const u32 src_samples = src->backing->num_samples;
+    const u32 width = std::min(src->HostSize().width, dst->HostSize().width);
+    const u32 height = std::min(src->HostSize().height, dst->HostSize().height);
+    instance.Mark(scheduler.CommandBuffer(),
+                  "depth to colour: from image at, to image at, stencil|sample<<8|samples<<16, "
+                  "w|h<<16",
+                  src->info.guest_address, dst->info.guest_address,
+                  u64(stencil) | u64(sample) << 8 | u64(src_samples) << 16,
+                  u64(width) | u64(height) << 16);
+    blit_helper->CopyDepthToColor(width, height, dst->backing->num_samples, src->info.pixel_format,
+                                  dst->info.pixel_format, src_samples > 1, stencil, uint_out,
+                                  std::min(sample, src_samples - 1), src->GetImage(), src_layer,
+                                  dst->GetImage(), dst_layer);
+
+    dst->flags |= VideoCore::ImageFlagBits::GpuModified;
+    dst->flags &= ~VideoCore::ImageFlagBits::Dirty;
+}
+
 void Runtime::ResolveImage(VideoCore::Image* src, VideoCore::Image* dst,
                            const VideoCore::SubresourceRange& src_range,
                            const VideoCore::SubresourceRange& dst_range) {

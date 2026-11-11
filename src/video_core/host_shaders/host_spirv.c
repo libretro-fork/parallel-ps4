@@ -663,6 +663,53 @@ size_t host_spirv_ms_image_blit_frag(uint32_t* out, size_t cap, int msaa) {
     return spv_end(m, SpvExecutionModelFragment, out, cap);
 }
 
+size_t host_spirv_depth_to_color_frag(uint32_t* out, size_t cap, int msaa, int stencil,
+                                      int uint_out, uint32_t sample) {
+    uint32_t out_color, frag_coord, image_t, tex, fc, coord, image, texel, value;
+    uint32_t t_u32x4, sampled_t, texel_t, out_t, shuffle[4], parts[4];
+    spv_module_t module, *m = &module;
+    spv_begin(m);
+    t_u32x4 = t2(m, SpvOpTypeVector, m->t_u32, 4);
+    sampled_t = stencil ? m->t_u32 : m->t_f32;
+    texel_t = stencil ? t_u32x4 : m->t_f32x4;
+    out_t = uint_out ? t_u32x4 : m->t_f32x4;
+    spv_io(m, SpvStorageClassInput, m->t_f32x2, 0); /* uv: unused, fed by the vertex stage */
+    out_color = spv_io(m, SpvStorageClassOutput, out_t, 0);
+    frag_coord = spv_builtin(m, SpvStorageClassInput, m->t_f32x4, SpvBuiltInFragCoord);
+    image_t = t_image(m, sampled_t, msaa);
+    tex = spv_binding(m, SpvStorageClassUniformConstant, image_t, 0);
+    spv_main(m);
+    fc = load(m, m->t_f32x4, frag_coord);
+    shuffle[0] = fc;
+    shuffle[1] = fc;
+    shuffle[2] = 0;
+    shuffle[3] = 1;
+    coord =
+        op1(m, SpvOpConvertFToS, m->t_s32x2, opn(m, SpvOpVectorShuffle, m->t_f32x2, 4, shuffle));
+    image = load(m, image_t, tex);
+    if (msaa)
+        texel = op4(m, SpvOpImageFetch, texel_t, image, coord, SpvImageOperandsSampleMask,
+                    k_s32(m, (int32_t)sample));
+    else
+        texel =
+            op4(m, SpvOpImageFetch, texel_t, image, coord, SpvImageOperandsLodMask, k_s32(m, 0));
+    value = op2(m, SpvOpCompositeExtract, sampled_t, texel, 0);
+    /* The plane's own bits when the target's kind is the plane's; else stencil as a
+     * fraction of 255 in a float target, and depth's bits in an integer one */
+    if (stencil && !uint_out)
+        value = op2(m, SpvOpFMul, m->t_f32, op1(m, SpvOpConvertUToF, m->t_f32, value),
+                    k_f32(m, 1.0f / 255.0f));
+    else if (!stencil && uint_out)
+        value = op1(m, SpvOpBitcast, m->t_u32, value);
+    parts[0] = value;
+    parts[1] = uint_out ? k_u32(m, 0) : k_f32(m, 0.0f);
+    parts[2] = parts[1];
+    parts[3] = parts[1];
+    store(m, out_color, opn(m, SpvOpCompositeConstruct, out_t, 4, parts));
+    spv_mode(m, SpvExecutionModeOriginUpperLeft, 0, NULL);
+    return spv_end(m, SpvExecutionModelFragment, out, cap);
+}
+
 /* A storage buffer holding one runtime array of @elem, @stride bytes apart */
 static uint32_t storage_array(spv_module_t* m, uint32_t elem, uint32_t stride, uint32_t binding) {
     uint32_t array_t = spv_type_own(m, SpvOpTypeRuntimeArray, 1, &elem);

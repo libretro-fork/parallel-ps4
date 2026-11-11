@@ -81,6 +81,19 @@ bool Rasterizer::FilterDraw() {
         return false;
     }
 
+    const auto& db_control = regs.depth_render_control;
+    if ((db_control.depth_copy || db_control.stencil_copy) && regs.color_buffers[0]) {
+        // The depth block writes what it reads to the first colour target in place of the
+        // pixel shader's colour: how a game turns a depth buffer, or one sample of it, into
+        // a texture it can read. An integer target takes stencil, any other depth.
+        const bool to_integer = AmdGpu::IsInteger(regs.color_buffers[0].GetNumberFmt());
+        const bool is_stencil = db_control.stencil_copy && (to_integer || !db_control.depth_copy);
+        if (is_stencil ? regs.depth_buffer.StencilValid() : regs.depth_buffer.DepthValid()) {
+            DepthToColor(is_stencil, db_control.copy_sample);
+            return false;
+        }
+    }
+
     const bool cb_disabled =
         regs.color_control.mode == AmdGpu::ColorControl::OperationMode::Disable;
     const auto depth_copy =
@@ -1329,6 +1342,34 @@ void Rasterizer::DepthStencilCopy(bool is_depth, bool is_stencil) {
 
     runtime.CopyDepthStencil(&read_image, &write_image, sub_range);
 
+    ScopeMarkerEnd();
+}
+
+void Rasterizer::DepthToColor(bool is_stencil, u32 sample) {
+    const auto& regs = liverpool->regs;
+    const auto& col_buf = regs.color_buffers[0];
+
+    auto depth_desc = VideoCore::TextureCache::ImageDesc(
+        regs.depth_buffer, regs.depth_view, regs.depth_control,
+        regs.depth_htile_data_base.GetAddress(), liverpool->last_db_extent, false);
+    auto color_desc = VideoCore::TextureCache::ImageDesc(col_buf, liverpool->last_cb_extent[0]);
+
+    const auto depth_id = texture_cache.FindImage(depth_desc);
+    const auto color_id = texture_cache.FindImage(color_desc);
+    texture_cache.UpdateImage(depth_id);
+    // Marks the target as written by the GPU and keeps its cmask and fmask known
+    const auto& color_view = texture_cache.FindRenderTarget(color_id, color_desc);
+    texture_cache.TouchMeta(col_buf.CmaskAddress(), color_view.info.range.base.layer, false);
+
+    auto& depth_image = texture_cache.GetImage(depth_id);
+    auto& color_image = texture_cache.GetImage(color_id);
+
+    ScopeMarkerBegin(fmt::format("DepthToColor:D={:#x}:C={:#x}:stencil={}:sample={}",
+                                 depth_image.info.guest_address, color_image.info.guest_address,
+                                 is_stencil, sample));
+    runtime.CopyDepthToColor(&depth_image, &color_image, is_stencil,
+                             AmdGpu::IsInteger(col_buf.GetNumberFmt()), sample,
+                             regs.depth_view.slice_start, color_view.info.range.base.layer);
     ScopeMarkerEnd();
 }
 

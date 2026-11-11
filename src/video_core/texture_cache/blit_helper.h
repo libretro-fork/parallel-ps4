@@ -31,6 +31,12 @@ public:
     void CopyBetweenMsImages(u32 width, u32 height, u32 num_samples, vk::Format pixel_format,
                              bool src_msaa, vk::Image source, vk::Image dest);
 
+    /// One plane of a depth buffer, from one of its samples, into a colour image
+    void CopyDepthToColor(u32 width, u32 height, u32 dst_samples, vk::Format src_format,
+                          vk::Format dst_format, bool src_msaa, bool stencil, bool uint_out,
+                          u32 sample, vk::Image source, u32 src_layer, vk::Image dest,
+                          u32 dst_layer);
+
 private:
     void CreateShaders();
     void CreatePipelineLayouts();
@@ -42,6 +48,17 @@ private:
 
         auto operator<=>(const MsPipelineKey&) const noexcept = default;
     };
+    struct DepthToColorKey {
+        u32 dst_samples;
+        vk::Format attachment_format;
+        u32 sample;
+        bool src_msaa;
+        bool stencil;
+        bool uint_out;
+
+        auto operator<=>(const DepthToColorKey&) const noexcept = default;
+    };
+    void CreateDepthToColorPipeline(const DepthToColorKey& key);
     void CreateColorToMSDepthPipeline(const MsPipelineKey& key);
     void CreateMsCopyPipeline(const MsPipelineKey& key);
 
@@ -58,6 +75,7 @@ private:
     using MsPipeline = std::pair<MsPipelineKey, vk::UniquePipeline>;
     std::vector<MsPipeline> color_to_ms_depth_pl;
     std::vector<MsPipeline> ms_image_copy_pl;
+    std::vector<std::pair<DepthToColorKey, vk::UniquePipeline>> depth_to_color_pl;
 };
 
 } // namespace VideoCore
