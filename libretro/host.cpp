@@ -40,6 +40,7 @@
 #include "core/ipc/ipc.h"
 #include "core/libraries/pad/pad.h"
 #include "core/libraries/system/userservice.h"
+#include "core/signals.h"
 #include "core/user_manager.h"
 #include "emulator.h"
 #include "input/controller.h"
@@ -342,6 +343,7 @@ int RunEmulator(const char* argument) {
     std::thread(PumpInput).detach();
 
     Common::Log::Setup("shadps4.log");
+    Core::InstallCrashReport();
     IPC::Instance().Init();
     key_manager_load();
     emu_settings_load();

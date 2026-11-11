@@ -1479,13 +1479,13 @@ RETRO_API void retro_run(void) {
             char text[160];
             if (crashed) {
                 std::snprintf(text, sizeof(text),
-                              "ParaLLEl PS4: the emulator stopped unexpectedly (%d); see shadps4.log",
+                              "ParaLLEl PS4: the emulator stopped unexpectedly (%d); see shad_log.txt in the log directory",
                               code);
                 Notify(text);
             } else if (code != 0) {
                 // The game ended itself, with an error of its own: not the emulator's crash.
                 std::snprintf(text, sizeof(text),
-                              "ParaLLEl PS4: the game ended with an error (%d); see shadps4.log", code);
+                              "ParaLLEl PS4: the game ended with an error (%d); see shad_log.txt in the log directory", code);
                 Notify(text);
             } else {
                 Log(RETRO_LOG_INFO, "The emulator ended");

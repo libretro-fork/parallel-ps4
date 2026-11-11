@@ -15,6 +15,11 @@
 #endif
 namespace Core {
 
+/// Has an exception nothing handles written to the log, with where it happened and how it got
+/// there, before the process ends (Windows; elsewhere the signal handlers report). Callable
+/// before anything else is set up, and again.
+void InstallCrashReport();
+
 using AccessViolationHandler = bool (*)(void* context, void* fault_address);
 using IllegalInstructionHandler = bool (*)(void* context);
 

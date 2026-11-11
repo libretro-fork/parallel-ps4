@@ -255,7 +255,10 @@ void Emit(Level level, const char* text, std::size_t length) {
         filestream_write(g_w.session, "\n", 1);
         g_w.session_size += length + 1;
     }
-    if (level >= static_cast<Level>(retro_atomic_load_relaxed_int(&g_flush_level))) {
+    // A critical line is the last before the process ends more often than not: never left in
+    // a buffer
+    if (level == Level::Critical ||
+        level >= static_cast<Level>(retro_atomic_load_relaxed_int(&g_flush_level))) {
         FlushOutputs();
     }
 }

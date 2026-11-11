@@ -1,11 +1,16 @@
 // SPDX-FileCopyrightText: Copyright 2024-2026 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include <cstring>
 #include <iterator>
+#include <string>
+
 #include <fmt/format.h>
+#include <retro_atomic.h>
 #include "common/arch.h"
 #include "common/assert.h"
 #include "common/decoder.h"
+#include "common/logging/log.h"
 #include "common/quick_exit.h"
 #include "common/signal_context.h"
 #include "core/cpu_patches.h" // Windows static guest red-zone protection
@@ -384,10 +389,99 @@ void SignalHandler(int sig, siginfo_t* info, void* raw_context) {
 
 #endif
 
+#if defined(_WIN32)
+// Where an address is, for the crash report: its module and the offset into it, or that it is
+// in none (the game's code, or code generated for it).
+static std::string DescribeAddress(u64 address) {
+    HMODULE module = nullptr;
+    char path[MAX_PATH];
+    if (GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+                               GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                           reinterpret_cast<LPCSTR>(address), &module) &&
+        module && GetModuleFileNameA(module, path, sizeof(path))) {
+        const char* name = std::strrchr(path, '\\');
+        return fmt::format("{:#x} ({}+{:#x})", address, name ? name + 1 : path,
+                           address - reinterpret_cast<u64>(module));
+    }
+    return fmt::format("{:#x} (in no module: the game's code or generated code)", address);
+}
+
+// The last word on an exception nothing handled, just before Windows ends the process: what
+// happened, where, and how it got there, written and flushed to the log. Without it a crash
+// left a log with nothing about it, or with nothing at all: the lines before it were still
+// in the writer's buffers.
+static LONG WINAPI CrashReport(EXCEPTION_POINTERS* info) noexcept {
+    static retro_atomic_int_t reported{0};
+    if (!info || !info->ExceptionRecord || !info->ContextRecord ||
+        retro_atomic_exchange_int(&reported, 1) != 0) {
+        return EXCEPTION_CONTINUE_SEARCH;
+    }
+    const EXCEPTION_RECORD& record = *info->ExceptionRecord;
+    const CONTEXT& ctx = *info->ContextRecord;
+    LOG_CRITICAL(Debug, "The emulator crashed: exception {:#x} at {}", record.ExceptionCode,
+                 DescribeAddress(reinterpret_cast<u64>(record.ExceptionAddress)));
+    if (record.ExceptionCode == EXCEPTION_ACCESS_VIOLATION && record.NumberParameters >= 2) {
+        static constexpr const char* kinds[] = {"reading", "writing"};
+        const u64 kind = record.ExceptionInformation[0];
+        LOG_CRITICAL(Debug, "  {} address {:#x}", kind == 8 ? "executing" : kinds[kind & 1],
+                     record.ExceptionInformation[1]);
+    }
+    LOG_CRITICAL(Debug, "  thread {} '{}'", GetCurrentThreadId(),
+                 Libraries::Kernel::g_curthread ? Libraries::Kernel::g_curthread->name
+                                                : std::string{"(not a game thread)"});
+#if defined(_M_X64) || defined(__x86_64__)
+    LOG_CRITICAL(Debug, "  rax={:#x} rbx={:#x} rcx={:#x} rdx={:#x} rsi={:#x} rdi={:#x}", ctx.Rax,
+                 ctx.Rbx, ctx.Rcx, ctx.Rdx, ctx.Rsi, ctx.Rdi);
+    LOG_CRITICAL(Debug, "  rbp={:#x} rsp={:#x} r8={:#x} r9={:#x} r10={:#x} r11={:#x}", ctx.Rbp,
+                 ctx.Rsp, ctx.R8, ctx.R9, ctx.R10, ctx.R11);
+    LOG_CRITICAL(Debug, "  r12={:#x} r13={:#x} r14={:#x} r15={:#x} rip={:#x}", ctx.R12, ctx.R13,
+                 ctx.R14, ctx.R15, ctx.Rip);
+    // The callers, as far as the unwind tables go: they end at the game's code
+    CONTEXT frame = ctx;
+    for (int depth = 0; depth < 24 && frame.Rip != 0; ++depth) {
+        LOG_CRITICAL(Debug, "  #{} {}", depth, DescribeAddress(frame.Rip));
+        DWORD64 image_base = 0;
+        PRUNTIME_FUNCTION function = RtlLookupFunctionEntry(frame.Rip, &image_base, nullptr);
+        if (!function) {
+            // A leaf function has no entry: its return address is at the top of its stack.
+            // Outside the modules (the game's code) there are no tables to go by: the end.
+            HMODULE module = nullptr;
+            SIZE_T read = 0;
+            u64 return_address = 0;
+            if (!GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+                                        GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                                    reinterpret_cast<LPCSTR>(frame.Rip), &module) ||
+                !ReadProcessMemory(GetCurrentProcess(), reinterpret_cast<LPCVOID>(frame.Rsp),
+                                   &return_address, sizeof(return_address), &read) ||
+                read != sizeof(return_address)) {
+                break;
+            }
+            frame.Rip = return_address;
+            frame.Rsp += 8;
+            continue;
+        }
+        void* handler_data = nullptr;
+        DWORD64 establisher = 0;
+        RtlVirtualUnwind(UNW_FLAG_NHANDLER, image_base, frame.Rip, function, &frame, &handler_data,
+                         &establisher, nullptr);
+    }
+#endif
+    Common::Log::Flush();
+    return EXCEPTION_CONTINUE_SEARCH;
+}
+#endif
+
+void InstallCrashReport() {
+#if defined(_WIN32)
+    SetUnhandledExceptionFilter(CrashReport);
+#endif
+}
+
 SignalDispatch::SignalDispatch() {
 #if defined(_WIN32)
     ASSERT_MSG(handle = AddVectoredExceptionHandler(0, SignalHandler),
                "Failed to register exception handler.");
+    InstallCrashReport();
 #else
     struct sigaction action{};
     action.sa_sigaction = SignalHandler;
