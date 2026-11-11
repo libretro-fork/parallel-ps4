@@ -49,6 +49,9 @@ typedef struct binding {
 
 typedef struct draw {
   u32 primitive, num_indices, num_instances, count;
+  /* The vertices the draw reads, by number in each input; num_vertices 0 when
+   * the capture does not say (an older capture, an indirect draw) */
+  u32 first_vertex, num_vertices;
   const binding_t *bindings;
 } draw_t;
 
@@ -133,7 +136,10 @@ static int compare_floats(const void *a, const void *b) {
 static int parse(const u8 *file, size_t size) {
   size_t at = 8;
   u32 d = 0, n = 0;
-  if (size < 8 || memcmp(file, "PS4VCAP1", 8) != 0) {
+  size_t head = 16;
+  if (size >= 8 && memcmp(file, "PS4VCAP2", 8) == 0) {
+    head = 24; /* a draw also says which vertices it reads */
+  } else if (size < 8 || memcmp(file, "PS4VCAP1", 8) != 0) {
     return 0;
   }
   /* Two passes: count, then fill */
@@ -164,12 +170,12 @@ static int parse(const u8 *file, size_t size) {
     if (chunk > size - at - 16) {
       break;
     }
-    if (type == CHUNK_DRAW && chunk >= 16) {
-      memcpy(&draws[d], body, 16);
-      if ((u64)draws[d].count * sizeof(binding_t) > chunk - 16) {
+    if (type == CHUNK_DRAW && chunk >= head) {
+      memcpy(&draws[d], body, head);
+      if ((u64)draws[d].count * sizeof(binding_t) > chunk - head) {
         draws[d].count = 0;
       }
-      draws[d].bindings = (const binding_t *)(body + 16);
+      draws[d].bindings = (const binding_t *)(body + head);
       ++d;
     } else if (type != CHUNK_DRAW && chunk >= 8) {
       datas[n].type = type;
@@ -191,7 +197,7 @@ static const char *const verdict_names[4] = {"game", "gpu", "clobber",
                                              "upload"};
 
 static void report(int verbose) {
-  u32 di, bi, checked = 0;
+  u32 di, bi, checked = 0, ranged = 0;
   for (di = 0; di < num_draws; ++di) {
     const draw_t *draw = &draws[di];
     for (bi = 0; bi < draw->count; ++bi) {
@@ -199,7 +205,8 @@ static void report(int verbose) {
       const u8 *host, *guest;
       float *values, median[4], extent[4];
       int width = 0, comps, c, verdict;
-      u32 n, v, bad = 0, same = 0, guest_bad = 0, first_bad = 0;
+      u32 n, v, v0, v1, bad = 0, same = 0, guest_bad = 0, first_bad = 0;
+      u32 shown[3];
       memcpy(&b, &draw->bindings[bi], sizeof(b));
       comps = float_format(b.format, &width);
       if (comps < 3 || (b.flags & BINDING_PER_INSTANCE) || b.stride == 0 ||
@@ -212,7 +219,16 @@ static void report(int verbose) {
         continue;
       }
       n = (u32)((b.size - (u64)(comps * width)) / b.stride) + 1;
-      if (n < 8) {
+      /* Only the vertices the draw reads: the bytes bound after them are
+       * another mesh's, or nothing */
+      v0 = 0;
+      v1 = n;
+      if (draw->num_vertices) {
+        v0 = draw->first_vertex < n ? draw->first_vertex : n;
+        v1 = draw->num_vertices < n - v0 ? v0 + draw->num_vertices : n;
+        ++ranged;
+      }
+      if (v1 - v0 < 4) {
         continue;
       }
       ++checked;
@@ -221,7 +237,7 @@ static void report(int verbose) {
       values = (float *)malloc((size_t)n * sizeof(float));
       for (c = 0; c < 3; ++c) {
         u32 finite = 0;
-        for (v = 0; v < n; ++v) {
+        for (v = v0; v < v1; ++v) {
           const float f =
               component(host + (size_t)v * b.stride + c * width, width);
           if (f == f && fabs(f) < 1e30) {
@@ -246,7 +262,7 @@ static void report(int verbose) {
           span = extent[2];
         if (span < 1e-3f)
           span = 1e-3f;
-        for (v = 0; v < n; ++v) {
+        for (v = v0; v < v1; ++v) {
           const u8 *h = host + (size_t)v * b.stride;
           const u8 *g = guest + (size_t)v * b.stride;
           int out = 0, guest_out = 0;
@@ -263,6 +279,8 @@ static void report(int verbose) {
           }
           if (!bad)
             first_bad = v;
+          if (bad < 3)
+            shown[bad] = v;
           ++bad;
           if (memcmp(h, g, (size_t)(comps * width)) == 0)
             ++same;
@@ -283,15 +301,34 @@ static void report(int verbose) {
         printf("draw %u input %u: %u of %u vertices thrown (first %u), %s%s; "
                "game's memory "
                "has the same for %u, bad for %u -> %s\n",
-               di, b.semantic, bad, n, first_bad,
+               di, b.semantic, bad, v1 - v0, first_bad,
                (b.flags & BINDING_GPU_WRITTEN) ? "GPU-written range"
                                                : "not GPU-written",
                (b.flags & BINDING_STREAM) ? ", stream buffer" : "", same,
                guest_bad, verdict_names[verdict]);
+        printf(
+            "  primitive %u, %u indices, format %u, stride %u, at 0x%lx%08lx; "
+            "vertices %u to %u of %u bound%s\n",
+            draw->primitive, draw->num_indices, b.format, b.stride,
+            (unsigned long)(b.address >> 32),
+            (unsigned long)(b.address & 0xffffffffu), v0, v1 - 1, n,
+            draw->num_vertices ? "" : " (the draw's own range not captured)");
+        for (v = 0; v < bad && v < 3; ++v) {
+          const u8 *h = host + (size_t)shown[v] * b.stride;
+          const u8 *g = guest + (size_t)shown[v] * b.stride;
+          printf("  vertex %u: GPU (%g, %g, %g), game (%g, %g, %g); the mesh "
+                 "is about (%g, %g, %g)\n",
+                 shown[v], component(h, width), component(h + width, width),
+                 component(h + 2 * width, width), component(g, width),
+                 component(g + width, width), component(g + 2 * width, width),
+                 median[0], median[1], median[2]);
+        }
       }
     }
   }
-  printf("%u draws, %u vertex inputs checked\n", num_draws, checked);
+  printf("%u draws, %u vertex inputs checked, %u of them over the vertices the "
+         "draw reads\n",
+         num_draws, checked, ranged);
   printf("thrown vertices: game %u, gpu %u, clobber %u, upload %u\n",
          verdicts[0], verdicts[1], verdicts[2], verdicts[3]);
   if (!(verdicts[0] | verdicts[1] | verdicts[2] | verdicts[3])) {
@@ -299,8 +336,9 @@ static void report(int verbose) {
            "is on screen\n");
   } else if (verdicts[2] >= verdicts[0] && verdicts[2] >= verdicts[1] &&
              verdicts[2] >= verdicts[3]) {
-    printf("=> the GPU's vertices were replaced by an upload of the game's "
-           "memory\n");
+    printf("=> the thrown vertices are what the game's memory has, in ranges "
+           "the GPU has written: the GPU's vertices were replaced by an upload "
+           "of the game's memory, or the game computed them so\n");
   } else if (verdicts[0] >= verdicts[1] && verdicts[0] >= verdicts[3]) {
     printf("=> the game's own code produced them (CPU side: animation, cloth, "
            "physics)\n");
@@ -333,10 +371,11 @@ static void put_chunk(u32 type, u32 draw, const void *head, u64 head_size,
   put(body, (size_t)body_size);
 }
 
-static void put_mesh(u32 draw, u32 flags, int host_bad, int guest_bad) {
+static void put_mesh(u32 draw, u32 flags, int host_bad, int guest_bad,
+                     u32 used) {
   float host[64 * 3], guest[64 * 3];
   binding_t b;
-  u32 head[4];
+  u32 head[6];
   u64 address = 0x100000ull * (draw + 1);
   int i;
   for (i = 0; i < 64 * 3; ++i) {
@@ -364,26 +403,32 @@ static void put_mesh(u32 draw, u32 flags, int host_bad, int guest_bad) {
   head[1] = 64;
   head[2] = 1;
   head[3] = 1;
+  head[4] = 0;
+  head[5] = used;
   put_chunk(CHUNK_DRAW, draw, head, sizeof(head), &b, sizeof(b));
   put_chunk(CHUNK_HOST, draw, &address, 8, host, sizeof(host));
   put_chunk(CHUNK_GUEST, draw, &address, 8, guest, sizeof(guest));
 }
 
 static int selftest(void) {
-  put("PS4VCAP1", 8);
-  put_mesh(0, 0, 0, 0);                   /* sound */
-  put_mesh(1, 0, 1, 1);                   /* game */
-  put_mesh(2, BINDING_GPU_WRITTEN, 1, 0); /* gpu */
-  put_mesh(3, BINDING_GPU_WRITTEN, 1, 1); /* clobber */
-  put_mesh(4, 0, 1, 0);                   /* upload */
-  put_mesh(5, BINDING_GPU_WRITTEN, 0,
-           1); /* sound: only the game's stale memory is off */
+  put("PS4VCAP2", 8);
+  put_mesh(0, 0, 0, 0, 64);                   /* sound */
+  put_mesh(1, 0, 1, 1, 64);                   /* game */
+  put_mesh(2, BINDING_GPU_WRITTEN, 1, 0, 64); /* gpu */
+  put_mesh(3, BINDING_GPU_WRITTEN, 1, 1, 64); /* clobber */
+  put_mesh(4, 0, 1, 0, 64);                   /* upload */
+  /* sound: only the game's stale memory is off */
+  put_mesh(5, BINDING_GPU_WRITTEN, 0, 1, 64);
+  /* sound: the bad bytes are bound, but past the vertices the draw reads */
+  put_mesh(6, 0, 1, 1, 8);
+  /* the same with the draw's range not captured: taken for the mesh's own */
+  put_mesh(7, 0, 1, 1, 0);
   if (!parse(out, out_size)) {
     printf("FAIL parse\n");
     return 1;
   }
   report(1);
-  if (num_draws != 6 || verdicts[0] != 1 || verdicts[1] != 1 ||
+  if (num_draws != 8 || verdicts[0] != 2 || verdicts[1] != 1 ||
       verdicts[2] != 1 || verdicts[3] != 1) {
     printf("FAIL verdicts\n");
     return 1;

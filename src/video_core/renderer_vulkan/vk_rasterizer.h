@@ -115,6 +115,7 @@ private:
     bool BindResources(const Pipeline* pipeline);
 
     void BindVertexBuffers(const GraphicsPipeline* pipeline);
+    void CaptureDrawVertices(const GraphicsPipeline* pipeline, bool is_indexed, u32 index_offset);
     void BindIndexBuffer(u32 index_offset = 0, bool is_indirect = false);
 
     void ResetBindings(bool is_compute);
@@ -170,6 +171,11 @@ private:
     u32 target_scale_num = 1;
     u32 target_scale_den = 1;
     bool needs_barrier{};
+    /// A vertex capture's: the vertices the draw being recorded reads, and its indices read
+    /// to find them
+    u32 capture_first_vertex{};
+    u32 capture_num_vertices{};
+    std::vector<u8> capture_indices;
 };
 
 } // namespace Vulkan

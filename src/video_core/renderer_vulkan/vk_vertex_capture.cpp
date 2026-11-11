@@ -21,19 +21,24 @@ constexpr int Asked = 1;
 constexpr int Recording = 2;
 constexpr int Draining = 3;
 
-/// The file: "PS4VCAP1", then chunks of {u32 type, u32 draw, u64 size} and size bytes.
-constexpr u32 ChunkDraw = 1;  ///< {u32 primitive, num_indices, num_instances, count}, Bindings
+/// The file: "PS4VCAP2", then chunks of {u32 type, u32 draw, u64 size} and size bytes.
+constexpr u32 ChunkDraw = 1;  ///< {u32 primitive, num_indices, num_instances, count, first
+                              ///< vertex, vertices}, Bindings
 constexpr u32 ChunkGuest = 2; ///< {u64 address}, the bytes in the game's memory
 constexpr u32 ChunkHost = 3;  ///< {u64 address}, the bytes the GPU has
 
 constexpr u64 MaxBytes = 768ull << 20;
-constexpr u32 SubmitsCaptured = 2;
+/// A capture ends at the second frame the game shows after it began, so that one whole frame
+/// is in it; or after this many submits, for a game whose frames are not seen
+constexpr u32 FlipsCaptured = 2;
+constexpr u32 SubmitsCaptured = 512;
 
 // The GPU thread's
 RFILE* file{};
 u64 written{};
 u32 draws{};
 u32 submits_left{};
+u32 flips_left{};
 u32 host_pending{};
 /// Ranges recorded already, by address and size: the GPU's own are recorded each time
 std::array<u64, 4096> seen{};
@@ -63,6 +68,15 @@ void Close() {
     retro_atomic_store_release_int(&state, Idle);
 }
 
+/// No more draws are recorded; the file is closed once the readbacks asked for have come
+void Finish() {
+    if (host_pending == 0) {
+        Close();
+    } else {
+        retro_atomic_store_release_int(&state, Draining);
+    }
+}
+
 } // Anonymous namespace
 
 retro_atomic_int_t state{Idle};
@@ -83,24 +97,30 @@ void OnSubmit() {
             retro_atomic_store_release_int(&state, Idle);
             return;
         }
-        filestream_write(file, "PS4VCAP1", 8);
+        filestream_write(file, "PS4VCAP2", 8);
         written = 8;
         draws = 0;
         host_pending = 0;
         submits_left = SubmitsCaptured;
+        flips_left = FlipsCaptured;
         seen.fill(0);
         retro_atomic_store_release_int(&state, Recording);
-    } else if (now == Recording && draws != 0 && --submits_left == 0) {
-        if (host_pending == 0) {
-            Close();
-        } else {
-            retro_atomic_store_release_int(&state, Draining);
-        }
+    } else if (now == Recording && --submits_left == 0) {
+        Finish();
     }
 }
 
-u32 Draw(u32 primitive, u32 num_indices, u32 num_instances, std::span<const Binding> bindings) {
-    const u32 head[4] = {primitive, num_indices, num_instances, static_cast<u32>(bindings.size())};
+void OnFlip() {
+    if (retro_atomic_load_relaxed_int(&state) == Recording && --flips_left == 0) {
+        Finish();
+    }
+}
+
+u32 Draw(u32 primitive, u32 num_indices, u32 num_instances, u32 first_vertex, u32 num_vertices,
+         std::span<const Binding> bindings) {
+    const u32 head[6] = {primitive,     num_indices,
+                         num_instances, static_cast<u32>(bindings.size()),
+                         first_vertex,  num_vertices};
     Chunk(ChunkDraw, draws, head, sizeof(head), bindings.data(), bindings.size_bytes());
     return draws++;
 }

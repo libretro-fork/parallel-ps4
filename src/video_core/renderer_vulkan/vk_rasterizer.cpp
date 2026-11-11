@@ -202,6 +202,9 @@ void Rasterizer::Draw(bool is_indexed, u32 index_offset) {
     }
     const auto state = BeginRendering(pipeline);
 
+    if (VertexCapture::Active()) [[unlikely]] {
+        CaptureDrawVertices(pipeline, is_indexed, index_offset);
+    }
     BindVertexBuffers(pipeline);
     if (is_indexed) {
         BindIndexBuffer(index_offset);
@@ -439,6 +442,47 @@ bool Rasterizer::BindResources(const Pipeline* pipeline) {
     return true;
 }
 
+void Rasterizer::CaptureDrawVertices(const GraphicsPipeline* pipeline, bool is_indexed,
+                                     u32 index_offset) {
+    // For a vertex capture: which vertices of its inputs this draw reads. The bytes bound
+    // after them are another mesh's.
+    const auto& regs = liverpool->regs;
+    const auto [vertex_offset, instance_offset] = GetDrawOffsets(
+        regs, pipeline->GetStage(Shader::SwStage::Vertex), pipeline->GetFetchShader());
+    capture_first_vertex = vertex_offset;
+    capture_num_vertices = regs.num_indices;
+    if (!is_indexed) {
+        return;
+    }
+    const bool is_index16 = regs.index_buffer_type.index_type == AmdGpu::IndexType::Index16;
+    const u32 index_size = is_index16 ? sizeof(u16) : sizeof(u32);
+    const VAddr base_address = regs.index_base_address.Address<VAddr>();
+    const VAddr address = base_address + u64(index_offset) * index_size;
+    const u64 wanted = u64(std::min(regs.num_indices, regs.max_index_size)) * index_size;
+    const u64 size = base_address != 0 ? memory->ClampRangeSize(address, wanted) : 0;
+    capture_num_vertices = 0;
+    if (size < index_size) {
+        return;
+    }
+    capture_indices.resize(size);
+    memory->CopySparseMemory(address, capture_indices.data(), size);
+    u32 lowest = UINT32_MAX, highest = 0;
+    for (u64 at = 0; at + index_size <= size; at += index_size) {
+        u32 index = 0;
+        std::memcpy(&index, capture_indices.data() + at, index_size);
+        // The index that restarts a strip names no vertex
+        if (index == (is_index16 ? 0xFFFFu : 0xFFFFFFFFu)) {
+            continue;
+        }
+        lowest = std::min(lowest, index);
+        highest = std::max(highest, index);
+    }
+    if (lowest <= highest) {
+        capture_first_vertex = vertex_offset + lowest;
+        capture_num_vertices = highest - lowest + 1;
+    }
+}
+
 void Rasterizer::BindVertexBuffers(const GraphicsPipeline* pipeline) {
     const auto& regs = liverpool->regs;
     VertexInputs<vk::VertexInputAttributeDescription2EXT> attributes;
@@ -547,9 +591,10 @@ void Rasterizer::BindVertexBuffers(const GraphicsPipeline* pipeline) {
             captured.push_back({attributes[i].location, static_cast<u32>(attributes[i].format),
                                 buffer.GetStride(), flags, buffer.base_address, buffer.GetSize()});
         }
-        const u32 draw =
-            VertexCapture::Draw(static_cast<u32>(regs.primitive_type), regs.num_indices,
-                                regs.num_instances.NumInstances(), captured);
+        const u32 draw = VertexCapture::Draw(static_cast<u32>(regs.primitive_type),
+                                             regs.num_indices, regs.num_instances.NumInstances(),
+                                             capture_first_vertex, capture_num_vertices, captured);
+        capture_num_vertices = 0;
         auto& staging_pool = runtime.GetStagingPool();
         for (const auto& range : ranges_merged) {
             const u64 size = memory->ClampRangeSize(range.base_address, range.GetSize());

@@ -9,7 +9,7 @@
 
 #include "common/types.h"
 
-/// A capture, on request, of the vertex inputs of every draw over about a frame: each
+/// A capture, on request, of the vertex inputs of every draw of a whole frame: each
 /// vertex buffer's bytes as the game's memory has them and as the GPU is given them, and
 /// whether the GPU wrote them. Written to vertex_capture.bin in the log directory and read by
 /// tools/vertex_capture_report.c, which says where a broken mesh's vertices came from.
@@ -39,11 +39,17 @@ inline bool Active() {
     return retro_atomic_load_relaxed_int(&state) == 2;
 }
 
-/// At each submit: starts a capture asked for, and ends one after two. GPU thread.
+/// At each submit: starts a capture asked for. GPU thread.
 void OnSubmit();
 
-/// Records a draw; its number, for the data that follows.
-u32 Draw(u32 primitive, u32 num_indices, u32 num_instances, std::span<const Binding> bindings);
+/// At each frame the game shows: a capture ends at the second after it began, with one whole
+/// frame in it. GPU thread.
+void OnFlip();
+
+/// Records a draw; its number, for the data that follows. @num_vertices vertices from
+/// @first_vertex of each input are the ones the draw reads, 0 when that is not known.
+u32 Draw(u32 primitive, u32 num_indices, u32 num_instances, u32 first_vertex, u32 num_vertices,
+         std::span<const Binding> bindings);
 
 /// True if this range's bytes are still wanted: not past the capture's size, and not a
 /// range already recorded that the GPU has not written.
