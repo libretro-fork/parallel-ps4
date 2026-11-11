@@ -4,11 +4,10 @@
 #pragma once
 
 #include <map>
-#include <mutex>
 #include <string>
 #include <string_view>
+#include "common/combiner.h"
 #include "common/enum.h"
-#include "common/event_mutex.h"
 #include "common/shared_first_mutex.h"
 #include "common/singleton.h"
 #include "common/types.h"
@@ -368,7 +367,9 @@ private:
     PhysMap fmem_map;
     VMAMap vma_map;
     Common::SharedFirstMutex mutex{};
-    Common::EventMutex unmap_mutex{};
+    /// Every change to the maps runs here, one at a time; mutex keeps the readers off the maps
+    /// while a change is under way.
+    Common::Combiner unmap_mutex;
 #ifdef SHADPS4_ENABLE_FEX_GUEST_CPU
     MemoryMapGeneration mapping_generation{};
 #endif
