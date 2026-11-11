@@ -224,19 +224,7 @@ void Rasterizer::Draw(bool is_indexed, u32 index_offset) {
 
     const auto cmdbuf = scheduler.CommandBuffer();
     cmdbuf.bindPipeline(vk::PipelineBindPoint::eGraphics, pipeline->Handle());
-    if (const auto* fs = pipeline->StageInfo(Shader::SwStage::Fragment)) {
-        u64 written_buffers = 0, written_images = 0;
-        for (const auto& buffer : fs->buffers) {
-            written_buffers += buffer.is_written;
-        }
-        for (const auto& image : fs->images) {
-            written_images += image.is_written;
-        }
-        instance.Note("fragment shader: buffers|written<<16, images|written<<16, reads memory",
-                      u64(fs->buffers.size()) | written_buffers << 16,
-                      u64(fs->images.size()) | written_images << 16, fs->uses_dma);
-    }
-    instance.Mark(cmdbuf, "draw: vertex shader, fragment shader, indices|indexed<<32, instances",
+    instance.Note("draw: vertex shader, fragment shader, indices|indexed<<32, instances",
                   vs_info.pgm_hash, pipeline->StageHash(Shader::SwStage::Fragment),
                   u64(regs.num_indices) | u64(is_indexed) << 32, regs.num_instances.NumInstances());
 
@@ -307,7 +295,7 @@ void Rasterizer::DrawIndirect(bool is_indexed, VAddr arg_address, u32 offset, u3
 
     const auto cmdbuf = scheduler.CommandBuffer();
     cmdbuf.bindPipeline(vk::PipelineBindPoint::eGraphics, pipeline->Handle());
-    instance.Mark(cmdbuf, "indirect draw: vertex shader, fragment shader, arguments at, count",
+    instance.Note("indirect draw: vertex shader, fragment shader, arguments at, count",
                   pipeline->StageHash(Shader::SwStage::Vertex),
                   pipeline->StageHash(Shader::SwStage::Fragment), arg_address + offset, max_count);
 

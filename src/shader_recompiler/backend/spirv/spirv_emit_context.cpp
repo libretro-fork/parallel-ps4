@@ -371,7 +371,7 @@ void EmitContext::DefineInputs() {
             output_layer = DefineVariable(U32[1], spv::BuiltIn::Layer, spv::StorageClass::Input);
             Decorate(output_layer, spv::Decoration::Flat);
         }
-        if (info.loads.Get(IR::Attribute::SampleIndex)) {
+        if (info.loads.Get(IR::Attribute::SampleIndex) && !runtime_info.hw.fs.one_colour_fragment) {
             sample_index = DefineVariable(U32[1], spv::BuiltIn::SampleId, spv::StorageClass::Input);
             Decorate(sample_index, spv::Decoration::Flat);
         }
@@ -420,7 +420,7 @@ void EmitContext::DefineInputs() {
                                                 spv::StorageClass::Input);
                 }
                 // we would need sample_index to interpolate the bary_coord later
-                if (!ValidId(sample_index)) {
+                if (!ValidId(sample_index) && !runtime_info.hw.fs.one_colour_fragment) {
                     sample_index =
                         DefineVariable(U32[1], spv::BuiltIn::SampleId, spv::StorageClass::Input);
                     Decorate(sample_index, spv::Decoration::Flat);
@@ -478,8 +478,11 @@ void EmitContext::DefineInputs() {
                                                              : spv::Decoration::NoPerspective);
             }
             if (auxiliary != Qualifier::None) {
-                Decorate(attr_id, auxiliary == Qualifier::Centroid ? spv::Decoration::Centroid
-                                                                   : spv::Decoration::Sample);
+                // An input taken at the sample would make the shader run for each sample
+                Decorate(attr_id,
+                         auxiliary == Qualifier::Centroid || runtime_info.hw.fs.one_colour_fragment
+                             ? spv::Decoration::Centroid
+                             : spv::Decoration::Sample);
             }
             input_params[i] = GetAttributeInfo(AmdGpu::NumberFormat::Float, attr_id, num_components,
                                                false, false, primary == Qualifier::PerVertex);

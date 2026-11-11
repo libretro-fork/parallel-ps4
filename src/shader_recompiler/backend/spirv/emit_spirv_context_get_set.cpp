@@ -145,7 +145,9 @@ Id EmitGetAttribute(EmitContext& ctx, IR::Attribute attr, u32 comp, u32 index) {
             return ctx.OpCompositeExtract(
                 ctx.F32[1],
                 ctx.OpInterpolateAtSample(ctx.F32[3], ctx.bary_coord,
-                                          ctx.OpLoad(ctx.U32[1], ctx.sample_index)),
+                                          ctx.runtime_info.hw.fs.one_colour_fragment
+                                              ? ctx.ConstU32(0U)
+                                              : ctx.OpLoad(ctx.U32[1], ctx.sample_index)),
                 comp);
         }
     case IR::Attribute::BaryCoordNoPersp:
@@ -213,6 +215,11 @@ Id EmitGetAttributeU32(EmitContext& ctx, IR::Attribute attr, u32 comp) {
     case IR::Attribute::LocalInvocationIndex:
         return ctx.OpLoad(ctx.U32[1], ctx.local_invocation_index);
     case IR::Attribute::SampleIndex:
+        // With one colour fragment under more depth samples the PS4 shades the fragment, not
+        // each sample: there is one run for a pixel, and it is sample 0's
+        if (ctx.runtime_info.hw.fs.one_colour_fragment) {
+            return ctx.ConstU32(0U);
+        }
         return ctx.OpLoad(ctx.U32[1], ctx.sample_index);
     case IR::Attribute::SampleMask:
         return ctx.OpLoad(ctx.U32[1],

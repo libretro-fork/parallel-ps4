@@ -127,7 +127,8 @@ GraphicsPipeline::GraphicsPipeline(
             .rasterizationSamples = LiverpoolToVK::NumSamples(
                 key.num_samples, instance.GetColorSampleCounts() & instance.GetDepthSampleCounts()),
             .sampleShadingEnable =
-                fs_info.addr_flags.persp_sample_ena || fs_info.addr_flags.linear_sample_ena,
+                !fs_info.one_colour_fragment &&
+                (fs_info.addr_flags.persp_sample_ena || fs_info.addr_flags.linear_sample_ena),
         };
     }
 
