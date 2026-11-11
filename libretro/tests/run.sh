@@ -36,6 +36,13 @@ for san in address,undefined thread; do
         -fsanitize=$san -Isrc -Ilibretro/tests -I$L/include libretro/tests/ngs2_core_test.c \
         src/core/libraries/ngs2/ngs2_core.c $L/formats/atrac9/ratrac9.c -o "$OUT/$name" -lm
     "$OUT/$name"
+    # libSceNgs2's waveform parsing, panning and geometry
+    name=ngs2_util_test-$(echo $san | tr , -)
+    $CC -std=c89 -O1 -g -Wall -Wdeclaration-after-statement -fno-omit-frame-pointer \
+        -fsanitize=$san -Isrc -I$L/include libretro/tests/ngs2_util_test.c \
+        src/core/libraries/ngs2/ngs2_util.c src/core/libraries/ngs2/ngs2_core.c \
+        $L/formats/atrac9/ratrac9.c -o "$OUT/$name" -lm
+    "$OUT/$name"
     # libSceAudiodec, as a game calls it
     name=audiodec_test-$(echo $san | tr , -)
     $CC -std=c89 -O1 -g -Wall -Wdeclaration-after-statement -fno-omit-frame-pointer \

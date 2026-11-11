@@ -308,7 +308,7 @@ CORE_SOURCES_C += $(addprefix src/common/,enum_names.c json_util.c key_manager.c
 	ptr_table.c u64_map.c)
 CORE_SOURCES_C += $(addprefix src/core/,emulator_settings.c user_manager.c)
 CORE_SOURCES_C += $(addprefix src/core/libraries/network/,host_override.c)
-CORE_SOURCES_C += $(addprefix src/core/libraries/ngs2/,ngs2_core.c)
+CORE_SOURCES_C += $(addprefix src/core/libraries/ngs2/,ngs2_core.c ngs2_util.c)
 CORE_SOURCES_C += $(addprefix src/core/libraries/audiodec/,audiodec.c)
 CORE_SOURCES_C += $(addprefix src/core/libraries/ult/,ult.c ult_sync.c)
 CORE_SOURCES_C += $(addprefix src/core/libraries/np/np_handler/,np_invitation_json.c)

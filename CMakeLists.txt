@@ -446,6 +446,8 @@ set(SYSTEM_LIBS src/core/libraries/system/commondialog.cpp
                 src/core/libraries/ngs2/ngs2_error.h
                 src/core/libraries/ngs2/ngs2_core.c
                 src/core/libraries/ngs2/ngs2_core.h
+                src/core/libraries/ngs2/ngs2_util.c
+                src/core/libraries/ngs2/ngs2_util.h
                 src/core/libraries/ngs2/ngs2_impl.h
                 src/core/libraries/ngs2/ngs2_custom.cpp
                 src/core/libraries/ngs2/ngs2_custom.h

@@ -30,6 +30,7 @@
 #define MODULE_FILTER 0x13u
 #define MODULE_GAIN 0x15u
 #define MODULE_USER_FX 0x19u
+#define MODULE_PEAK_METER 0x1au
 #define MODULE_REVERB 0x1bu
 #define MODULE_CHORUS 0x1cu
 #define MODULE_DELAY 0x1du
@@ -46,6 +47,7 @@
 #define SHIFT_WINDOW 2048u
 #define SHIFT_LINE 4096u
 #define LIMITER_RELEASE 0.05f
+#define MAX_METER_BLOCKS 256u
 
 #define PARAM_MATRIX_LEVELS 1u
 #define PARAM_PORT_VOLUME 2u
@@ -142,7 +144,21 @@ typedef struct ngs2_limiter {
     int on;
     float threshold;
     float gain;
+    float peak; /* the loudest the last grain came in */
 } ngs2_limiter;
+
+/* Off, the loudest sample, or the root of the mean square: of the last
+ * grains, as many as the rack was made to keep */
+typedef struct ngs2_meter {
+    float* history; /* NGS2_MAX_CHANNELS of blocks */
+    uint32_t blocks;
+    uint32_t cursor;
+    uint32_t count;
+    uint32_t mode;
+    uint32_t grain; /* of the grains in the history */
+    float peak;
+    float channel_peak[NGS2_MAX_CHANNELS];
+} ngs2_meter;
 
 typedef struct ngs2_delay_fx {
     float* line; /* channels of size */
@@ -189,6 +205,7 @@ typedef struct ngs2_module_state {
     ngs2_delay_fx* delay;
     ngs2_chorus* chorus;
     ngs2_shift* shift;
+    ngs2_meter* meter;
     float gain[NGS2_MAX_CHANNELS];
     float gain_to[NGS2_MAX_CHANNELS];
     ngs2_biquad filter;
@@ -241,6 +258,8 @@ struct ngs2_voice {
     ngs2_distortion distortion;
     ngs2_compressor compressor;
     ngs2_limiter limiter;
+    ngs2_meter* meter;
+    ngs2_meter* meter_in; /* a mastering voice's, of what comes in */
     uint32_t releasing; /* envelopes on their way down before it stops */
 
     /* mastering */
@@ -806,6 +825,89 @@ static int reverb_run(ngs2_reverb* r, const float* in, uint32_t in_ch, float* ou
 static uint32_t rd32(const ngs2_param_header* p, size_t offset);
 static float rdf(const ngs2_param_header* p, size_t offset);
 
+static uint32_t meter_blocks(uint32_t blocks) {
+    return !blocks ? 1u : blocks > MAX_METER_BLOCKS ? MAX_METER_BLOCKS : blocks;
+}
+
+static ngs2_meter* meter_layout(arena* a, uint32_t blocks) {
+    ngs2_meter* m = (ngs2_meter*)arena_take(a, sizeof(ngs2_meter));
+    float* history =
+        (float*)arena_take(a, (size_t)NGS2_MAX_CHANNELS * meter_blocks(blocks) * sizeof(float));
+    if (m && history) {
+        m->history = history;
+        m->blocks = meter_blocks(blocks);
+    }
+    return m;
+}
+
+static void meter_clear(ngs2_meter* m) {
+    if (!m)
+        return;
+    m->cursor = m->count = 0;
+    m->peak = 0.0f;
+    memset(m->channel_peak, 0, sizeof(m->channel_peak));
+}
+
+static void meter_set(ngs2_meter* m, uint32_t mode) {
+    if (!m || m->mode == mode)
+        return;
+    m->mode = mode;
+    meter_clear(m);
+}
+
+/* @samples NULL: a grain of silence */
+static void meter_run(ngs2_meter* m, const float* samples, uint32_t channels, uint32_t stride,
+                      uint32_t grain) {
+    uint32_t c, i, b;
+    if (!m)
+        return;
+    if (!m->mode) {
+        m->peak = 0.0f;
+        return;
+    }
+    if (m->grain != grain) {
+        m->grain = grain;
+        m->cursor = m->count = 0;
+    }
+    for (c = 0; c < NGS2_MAX_CHANNELS; c++) {
+        float value = 0.0f;
+        if (samples && c < channels) {
+            const float* x = samples + (size_t)c * stride;
+            if (m->mode == 1u) {
+                for (i = 0; i < grain; i++) {
+                    float mag = x[i] < 0.0f ? -x[i] : x[i];
+                    if (mag > value)
+                        value = mag;
+                }
+            } else {
+                for (i = 0; i < grain; i++)
+                    value += x[i] * x[i];
+            }
+        }
+        m->history[(size_t)c * m->blocks + m->cursor] = value;
+    }
+    m->cursor = (m->cursor + 1u) % m->blocks;
+    if (m->count < m->blocks)
+        m->count++;
+    m->peak = 0.0f;
+    for (c = 0; c < NGS2_MAX_CHANNELS; c++) {
+        const float* h = m->history + (size_t)c * m->blocks;
+        float value = 0.0f;
+        if (m->mode == 1u) {
+            for (b = 0; b < m->count; b++)
+                if (h[b] > value)
+                    value = h[b];
+        } else {
+            for (b = 0; b < m->count; b++)
+                value += h[b];
+            value = (float)sqrt(value / ((float)m->count * (float)grain));
+        }
+        m->channel_peak[c] = value;
+        if (value > m->peak)
+            m->peak = value;
+    }
+}
+
 static ngs2_envelope* envelope_layout(arena* a, uint32_t max_points) {
     ngs2_envelope* e = (ngs2_envelope*)arena_take(a, sizeof(ngs2_envelope));
     ngs2_env_point* p = (ngs2_env_point*)arena_take(a, (size_t)max_points * sizeof(*p));
@@ -1041,8 +1143,9 @@ static void compressor_run(ngs2_compressor* k, float* samples, uint32_t channels
  * the loudest of every 32 samples needs and comes back slowly */
 static void limiter_run(ngs2_limiter* l, float* samples, uint32_t channels, uint32_t stride,
                         uint32_t grain, uint32_t rate) {
-    float release;
+    float release, grain_peak = 0.0f;
     uint32_t start, c, i;
+    l->peak = 0.0f;
     if (!l->on || !(l->threshold > 0.0f))
         return;
     release = smoothing(LIMITER_RELEASE, rate / FX_BLOCK);
@@ -1057,6 +1160,8 @@ static void limiter_run(ngs2_limiter* l, float* samples, uint32_t channels, uint
                     peak = mag;
             }
         }
+        if (peak > grain_peak)
+            grain_peak = peak;
         target = peak > l->threshold ? l->threshold / peak : 1.0f;
         if (target < from)
             from = target; /* no sample of the block over */
@@ -1073,6 +1178,7 @@ static void limiter_run(ngs2_limiter* l, float* samples, uint32_t channels, uint
                 x[i] *= g;
         }
     }
+    l->peak = grain_peak;
 }
 
 static uint32_t delay_frames(const ngs2_module_desc* md, uint32_t rate) {
@@ -1485,6 +1591,11 @@ static int desc_sampler(const ngs2_rack_desc* d) {
     return d->rack_id == NGS2_RACK_SAMPLER || d->rack_id == NGS2_RACK_CUSTOM_SAMPLER;
 }
 
+static int desc_custom(const ngs2_rack_desc* d) {
+    return d->rack_id == NGS2_RACK_CUSTOM_SAMPLER || d->rack_id == NGS2_RACK_CUSTOM_SUBMIXER ||
+           d->rack_id == NGS2_RACK_CUSTOM_MASTERING;
+}
+
 static int desc_valid(const ngs2_rack_desc* d) {
     uint32_t i;
     switch (d->rack_id) {
@@ -1587,11 +1698,23 @@ static ngs2_rack* rack_layout(arena* a, const ngs2_rack_desc* d, uint32_t rate) 
                 voice->blocks = blocks;
                 voice->saved = saved;
             }
-        } else {
+        }
+        /* A sampler with modules sends what they make of its sound */
+        if (!desc_sampler(d) || d->num_modules) {
             for (b = 0; b < buffers; b++) {
                 float* buf = (float*)arena_take(a, grain_floats);
                 if (voice)
                     voice->buf[b] = buf;
+            }
+        }
+        if (d->rack_id != NGS2_RACK_REVERB && !desc_custom(d)) {
+            ngs2_meter* meter = meter_layout(a, d->peak_meter_blocks);
+            if (voice)
+                voice->meter = meter;
+            if (d->rack_id == NGS2_RACK_MASTERING) {
+                meter = meter_layout(a, d->peak_meter_blocks);
+                if (voice)
+                    voice->meter_in = meter;
             }
         }
         if (d->max_envelope_points) {
@@ -1622,6 +1745,10 @@ static ngs2_rack* rack_layout(arena* a, const ngs2_rack_desc* d, uint32_t rate) 
                         a, md->max_points ? md->max_points : DEFAULT_ENVELOPE_POINTS);
                     if (modules)
                         modules[m].envelope = env;
+                } else if (md->id == MODULE_PEAK_METER) {
+                    ngs2_meter* meter = meter_layout(a, md->max_points);
+                    if (modules)
+                        modules[m].meter = meter;
                 } else if (md->id == MODULE_DELAY) {
                     ngs2_delay_fx* dl = delay_layout(a, delay_frames(md, rate), d->max_channels);
                     if (modules)
@@ -1894,7 +2021,10 @@ static void voice_reset(ngs2_voice* v) {
             shift_clear(m->shift);
             m->shift->cent = 0;
         }
+        meter_set(m->meter, 0);
     }
+    meter_set(v->meter, 0);
+    meter_set(v->meter_in, 0);
     if (v->envelope) {
         v->envelope->set = 0;
         envelope_start(v->envelope);
@@ -2038,8 +2168,13 @@ static void voice_fx_restart(ngs2_voice* v) {
     for (c = 0; c < NGS2_MAX_CHANNELS; c++)
         v->compressor.gain[c] = 1.0f;
     v->limiter.gain = 1.0f;
+    v->limiter.peak = 0.0f;
+    v->peak = 0.0f;
+    meter_clear(v->meter);
+    meter_clear(v->meter_in);
     for (i = 0; i < v->rack->desc.num_modules; i++) {
         ngs2_module_state* m = &v->modules[i];
+        meter_clear(m->meter);
         if (m->envelope)
             envelope_start(m->envelope);
         for (c = 0; c < NGS2_MAX_CHANNELS; c++)
@@ -2332,6 +2467,11 @@ static int custom_param(ngs2_voice* v, const ngs2_param_header* p) {
         return distortion_set(&m->distortion, p, 8);
     case MODULE_COMPRESSOR:
         return compressor_set(&m->compressor, p, 8);
+    case MODULE_PEAK_METER:
+        if (p->size < 12)
+            return NGS2_ERROR_INVALID_VOICE_CONTROL_SIZE;
+        meter_set(m->meter, rd32(p, 8));
+        return NGS2_OK;
     case MODULE_DELAY:
         return delay_set(m->delay, p, r->system->sample_rate);
     case MODULE_CHORUS:
@@ -2480,7 +2620,12 @@ static int rack_param(ngs2_voice* v, const ngs2_param_header* p) {
                 values[c] = rdf(p, 24u + 4u * c);
             return set_filter(v, &v->filters[index], rd32(p, 12), rd32(p, 16), rd32(p, 20), values);
         }
-        default: /* frame offset, peak meter */
+        case 9:
+            if (p->size < 12)
+                return NGS2_ERROR_INVALID_VOICE_CONTROL_SIZE;
+            meter_set(v->meter, rd32(p, 8));
+            return NGS2_OK;
+        default: /* frame offset */
             return NGS2_OK;
         }
     case NGS2_RACK_SUBMIXER:
@@ -2518,7 +2663,12 @@ static int rack_param(ngs2_voice* v, const ngs2_param_header* p) {
                 values[c] = rdf(p, 24u + 4u * c);
             return set_filter(v, &v->filters[index], rd32(p, 12), rd32(p, 16), rd32(p, 20), values);
         }
-        default: /* peak meter */
+        case 5:
+            if (p->size < 12)
+                return NGS2_ERROR_INVALID_VOICE_CONTROL_SIZE;
+            meter_set(v->meter, rd32(p, 8));
+            return NGS2_OK;
+        default:
             return NGS2_OK;
         }
     case NGS2_RACK_REVERB:
@@ -2564,7 +2714,13 @@ static int rack_param(ngs2_voice* v, const ngs2_param_header* p) {
                 return NGS2_ERROR_INVALID_VOICE_CONTROL_SIZE;
             v->output_id = rd32(p, 8);
             return NGS2_OK;
-        default: /* matrix, lfe, peak meter */
+        case 6:
+            if (p->size < 12)
+                return NGS2_ERROR_INVALID_VOICE_CONTROL_SIZE;
+            meter_set(v->meter, rd32(p, 8));
+            meter_set(v->meter_in, rd32(p, 8));
+            return NGS2_OK;
+        default: /* matrix, lfe */
             return NGS2_OK;
         }
     case NGS2_RACK_CUSTOM_SUBMIXER:
@@ -2640,6 +2796,67 @@ void ngs2_voice_sampler_state(const ngs2_voice* voice, ngs2_sampler_state* state
     state->decoded_bytes = voice->decoded_bytes;
     state->user_data = voice->waveform_user_data;
     state->waveform_data = voice->waveform_data;
+}
+
+void ngs2_voice_mixer_state(const ngs2_voice* voice, ngs2_mixer_state* state) {
+    uint32_t c;
+    memset(state, 0, sizeof(*state));
+    state->envelope_height =
+        voice->envelope && voice->envelope->set ? voice->envelope->height : 1.0f;
+    state->compressor_height = 1.0f;
+    state->limiter_press = 1.0f;
+    if (voice->play == PLAY_EMPTY)
+        return;
+    state->peak_height = voice->peak;
+    if (voice->compressor.set && !(voice->compressor.flags & 1u))
+        for (c = 0; c < voice->channels && c < NGS2_MAX_CHANNELS; c++)
+            if (voice->compressor.gain[c] < state->compressor_height)
+                state->compressor_height = voice->compressor.gain[c];
+    state->limiter_peak = voice->limiter.peak;
+    state->limiter_press = voice->limiter.gain;
+    for (c = 0; c < NGS2_MAX_CHANNELS; c++) {
+        state->input_peak[c] = voice->meter_in ? voice->meter_in->channel_peak[c] : 0.0f;
+        state->output_peak[c] = voice->meter ? voice->meter->channel_peak[c] : 0.0f;
+    }
+}
+
+size_t ngs2_voice_module_state(const ngs2_voice* voice, uint32_t module, void* out, size_t size) {
+    const ngs2_rack_desc* d = &voice->rack->desc;
+    const ngs2_module_state* m;
+    float values[2 + NGS2_MAX_CHANNELS];
+    size_t bytes = 0;
+    uint32_t c;
+    if (module >= d->num_modules)
+        return 0;
+    m = &voice->modules[module];
+    memset(values, 0, sizeof(values));
+    switch (d->modules[module].id) {
+    case MODULE_ENVELOPE:
+        values[0] = m->envelope && m->envelope->set ? m->envelope->height : 1.0f;
+        bytes = 2 * sizeof(float);
+        break;
+    case MODULE_COMPRESSOR:
+        values[1] = 1.0f;
+        if (m->compressor.set && !(m->compressor.flags & 1u))
+            for (c = 0; c < voice->channels && c < NGS2_MAX_CHANNELS; c++)
+                if (m->compressor.gain[c] < values[1])
+                    values[1] = m->compressor.gain[c];
+        bytes = 2 * sizeof(float);
+        break;
+    case MODULE_PEAK_METER:
+        if (m->meter) {
+            values[0] = m->meter->peak;
+            memcpy(&values[1], m->meter->channel_peak, sizeof(m->meter->channel_peak));
+        }
+        bytes = (2 + NGS2_MAX_CHANNELS) * sizeof(float);
+        break;
+    default:
+        return 0;
+    }
+    if (bytes > size)
+        bytes = size;
+    memcpy(out, values, bytes);
+    return bytes;
 }
 
 float ngs2_voice_peak(const ngs2_voice* voice) {
@@ -3098,20 +3315,7 @@ static int run_user_fx(ngs2_system* s, void* handler, const uintptr_t* data, uin
     return 1;
 }
 
-static void measure_peak(ngs2_voice* v, const float* samples, uint32_t channels, uint32_t stride,
-                         uint32_t grain) {
-    uint32_t c, i;
-    float peak = 0.0f;
-    for (c = 0; c < channels; c++) {
-        const float* x = samples + (size_t)c * stride;
-        for (i = 0; i < grain; i++) {
-            float a = x[i] < 0.0f ? -x[i] : x[i];
-            if (a > peak)
-                peak = a;
-        }
-    }
-    v->peak = peak;
-}
+static uint32_t render_modules(ngs2_voice* v, int* sound);
 
 /* @count of its envelopes came down to their end: with the last, it stops */
 static void voice_released(ngs2_voice* v, uint32_t count) {
@@ -3137,9 +3341,27 @@ static void render_sampler(ngs2_voice* v) {
     run_user_fx(s, v->fx_handler, v->fx_data, &v->fx_flags, r->out, v->channels, stride);
     if (v->ramp != RAMP_NONE)
         apply_ramp(r->out, v->channels, stride, grain, v->ramp);
-    measure_peak(v, r->out, v->channels, stride, grain);
-    for (i = 0; i < NGS2_MAX_BUFFERS; i++)
-        bufs[i] = sound || v->fx_handler ? r->out : NULL;
+    if (r->desc.num_modules) {
+        /* The modules of a custom sampler, on the buffers they name */
+        int has[NGS2_MAX_BUFFERS];
+        uint32_t c;
+        float* first = mixer_input(v, 0);
+        for (i = 0; i < NGS2_MAX_BUFFERS; i++)
+            has[i] = 0;
+        has[0] = sound || v->fx_handler != NULL;
+        for (c = 0; c < v->channels; c++)
+            memcpy(first + (size_t)c * stride, r->out + (size_t)c * stride, grain * sizeof(float));
+        released += (int)render_modules(v, has);
+        for (i = 0; i < NGS2_MAX_BUFFERS; i++)
+            bufs[i] = i < r->buffers && has[i] ? v->buf[i] : NULL;
+        meter_run(v->meter, bufs[0], v->channels, stride, grain);
+    } else {
+        meter_run(v->meter, r->out, v->channels, stride, grain);
+        for (i = 0; i < NGS2_MAX_BUFFERS; i++)
+            bufs[i] = sound || v->fx_handler ? r->out : NULL;
+    }
+    if (v->meter)
+        v->peak = v->meter->peak;
     send(v, bufs, stride, grain);
     voice_released(v, (uint32_t)released);
     /* Nothing left of its waveform and none to come */
@@ -3182,6 +3404,9 @@ static uint32_t render_modules(ngs2_voice* v, int* sound) {
         case MODULE_COMPRESSOR:
             if (has)
                 compressor_run(&st->compressor, dst, v->channels, stride, grain, s->sample_rate);
+            break;
+        case MODULE_PEAK_METER:
+            meter_run(st->meter, has ? dst : NULL, v->channels, stride, grain);
             break;
         case MODULE_DELAY:
             has = delay_run(st->delay, dst, v->channels, stride, grain, has);
@@ -3264,6 +3489,7 @@ static void render_mixer(ngs2_voice* v, const ngs2_render_buffer* outputs, uint3
                               grain, sound[0]);
         main_buf = r->out;
     } else {
+        meter_run(v->meter_in, sound[0] ? main_buf : NULL, v->channels, stride, grain);
         for (i = 0; i < r->desc.max_filters; i++)
             if (v->filters[i].enabled && sound[0])
                 biquad_run(&v->filters[i], main_buf, v->channels, stride, grain);
@@ -3287,10 +3513,8 @@ static void render_mixer(ngs2_voice* v, const ngs2_render_buffer* outputs, uint3
         if (bufs[i] && v->ramp != RAMP_NONE)
             apply_ramp(bufs[i], v->channels, stride, grain, v->ramp);
     }
-    if (sound[0])
-        measure_peak(v, main_buf, v->channels, stride, grain);
-    else
-        v->peak = 0.0f;
+    meter_run(v->meter, sound[0] ? main_buf : NULL, v->channels, stride, grain);
+    v->peak = v->meter ? v->meter->peak : 0.0f;
     if (!is_mastering(r)) {
         send(v, bufs, stride, grain);
         return;

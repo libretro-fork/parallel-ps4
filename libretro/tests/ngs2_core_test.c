@@ -1175,6 +1175,105 @@ static void test_modules(void) {
    rig_close(&r);
 }
 
+/* A custom sampler's modules work on what it plays, and a peak meter says
+ * how loud the last grains were */
+static void test_sampler_modules(void) {
+   rig r;
+   ngs2_rack_desc d;
+   static int16_t pcm[4800];
+   float out[GRAIN * 2];
+   float state[10];
+   ngs2_voice *v;
+   gain_param gp;
+   two_u32_param mp;
+   ngs2_mixer_state ms;
+   ngs2_sampler_state ss;
+   unsigned i;
+   rig_open(&r, RATE);
+   base_desc(&d, NGS2_RACK_CUSTOM_SAMPLER);
+   d.max_voices = 1;
+   d.num_modules = 2;
+   d.modules[0].id = 0x15;
+   d.modules[1].id = 0x1a;
+   d.modules[1].max_points = 2;
+   r.extra = make_rack(r.system, &d, &r.extra_mem);
+   CHECK(r.extra != NULL);
+   v = ngs2_rack_voice(r.extra, 0);
+   for (i = 0; i < 4800; i++)
+      pcm[i] = 16384;
+   {
+      setup_param p;
+      memset(&p, 0, sizeof(p));
+      head(&p.header, sizeof(p), 0x40010000u);
+      p.format.type = NGS2_WAVE_PCM_I16L;
+      p.format.channels = 1;
+      p.format.sample_rate = RATE;
+      CHECK(ngs2_voice_control(v, &p.header) == NGS2_OK);
+   }
+   {
+      blocks_param p;
+      ngs2_waveform_block b;
+      memset(&p, 0, sizeof(p));
+      memset(&b, 0, sizeof(b));
+      b.data_size = sizeof(pcm);
+      b.num_samples = 4800;
+      head(&p.header, sizeof(p), 0x40010001u);
+      p.data = pcm;
+      p.num_blocks = 1;
+      p.blocks = &b;
+      CHECK(ngs2_voice_control(v, &p.header) == NGS2_OK);
+   }
+   CHECK(patch(v, 0, r.master) == NGS2_OK);
+   /* The modules of a custom sampler are numbered from 1: the gain to a half */
+   memset(&gp, 0, sizeof(gp));
+   head(&gp.header, sizeof(gp), 0x40001501u);
+   for (i = 0; i < NGS2_MAX_CHANNELS; i++)
+      gp.levels[i] = 0.5f;
+   CHECK(ngs2_voice_control(v, &gp.header) == NGS2_OK);
+   memset(&mp, 0, sizeof(mp));
+   head(&mp.header, sizeof(mp), 0x40001a02u);
+   mp.a = 1;
+   CHECK(ngs2_voice_control(v, &mp.header) == NGS2_OK);
+   CHECK(event(v, NGS2_EVENT_PLAY) == NGS2_OK);
+   render(&r, out, 2);
+   CHECK(fabs(out[200 * 2] - LEVEL * 0.5f) < 1e-4);
+   memset(state, 0, sizeof(state));
+   CHECK(ngs2_voice_module_state(v, 1, state, sizeof(state)) == sizeof(state));
+   CHECK(fabs(state[0] - 0.25f) < 1e-4 && fabs(state[1] - 0.25f) < 1e-4 && state[2] == 0.0f);
+   CHECK(ngs2_voice_module_state(v, 0, state, sizeof(state)) == 0);
+   /* The mastering voice's own meter: off, then what comes in and what goes out */
+   ngs2_voice_mixer_state(r.master, &ms);
+   CHECK(ms.output_peak[0] == 0.0f && ms.limiter_press == 1.0f);
+   head(&mp.header, sizeof(mp), 0x30000006u);
+   CHECK(ngs2_voice_control(r.master, &mp.header) == NGS2_OK);
+   render(&r, out, 2);
+   ngs2_voice_mixer_state(r.master, &ms);
+   CHECK(fabs(ms.input_peak[0] - LEVEL * 0.5f) < 1e-4);
+   CHECK(fabs(ms.output_peak[1] - LEVEL * 0.5f) < 1e-4 && ms.output_peak[2] == 0.0f);
+   CHECK(fabs(ms.peak_height - LEVEL * 0.5f) < 1e-4);
+   rig_close(&r);
+
+   /* A sampler's meter keeps the loudest of as many grains as the rack keeps */
+   rig_open(&r, RATE);
+   v = ngs2_rack_voice(r.samplers, 0);
+   for (i = 0; i < 4800; i++)
+      pcm[i] = i < 100 ? 32767 : 8192;
+   CHECK(sampler_setup(v, NGS2_WAVE_PCM_I16L, 1, RATE) == NGS2_OK);
+   CHECK(add_block(v, pcm, sizeof(pcm), 4800, 0, 0, 0) == NGS2_OK);
+   CHECK(patch(v, 0, r.master) == NGS2_OK);
+   CHECK(event(v, NGS2_EVENT_PLAY) == NGS2_OK);
+   render(&r, out, 2);
+   ngs2_voice_sampler_state(v, &ss);
+   CHECK(ss.peak_height == 0.0f);
+   head(&mp.header, sizeof(mp), 0x10000009u);
+   mp.a = 1;
+   CHECK(ngs2_voice_control(v, &mp.header) == NGS2_OK);
+   render(&r, out, 2);
+   ngs2_voice_sampler_state(v, &ss);
+   CHECK(fabs(ss.peak_height - 0.25f) < 1e-4);
+   rig_close(&r);
+}
+
 int main(void) {
    test_passthrough();
    test_resample();
@@ -1184,6 +1283,7 @@ int main(void) {
    test_custom();
    test_effects();
    test_modules();
+   test_sampler_modules();
    test_formats();
    test_atrac9();
    if (failures) {

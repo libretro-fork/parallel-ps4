@@ -5,8 +5,12 @@
 #include <cstring>
 #include <new>
 #include <retro_atomic.h>
+#include <streams/file_stream.h>
 #include "common/event_count.h"
 #include "common/logging/log.h"
+#include "common/path_util.h"
+#include "common/singleton.h"
+#include "core/file_sys/fs.h"
 #include "core/guest_call.h"
 #include "core/libraries/error_codes.h"
 #include "core/libraries/libs.h"
@@ -22,40 +26,127 @@
 #include "core/libraries/ngs2/ngs2_reverb.h"
 #include "core/libraries/ngs2/ngs2_sampler.h"
 #include "core/libraries/ngs2/ngs2_submixer.h"
+#include "core/libraries/ngs2/ngs2_util.h"
 
 namespace Libraries::Ngs2 {
 
 // Ngs2
 
+static_assert(sizeof(ngs2_waveform_info) == sizeof(OrbisNgs2WaveformInfo));
+static_assert(sizeof(ngs2_pan_work) == sizeof(OrbisNgs2PanWork));
+static_assert(sizeof(ngs2_pan_param) == sizeof(OrbisNgs2PanParam));
+static_assert(sizeof(ngs2_geom_listener) == sizeof(OrbisNgs2GeomListenerParam));
+static_assert(sizeof(ngs2_geom_work) == sizeof(OrbisNgs2GeomListenerWork));
+static_assert(sizeof(ngs2_geom_source) == sizeof(OrbisNgs2GeomSourceParam));
+static_assert(sizeof(ngs2_geom_attribute) == sizeof(OrbisNgs2GeomAttribute));
+
 s32 PS4_SYSV_ABI sceNgs2CalcWaveformBlock(const OrbisNgs2WaveformFormat* format, u32 samplePos,
                                           u32 numSamples, OrbisNgs2WaveformBlock* outBlock) {
-    LOG_ERROR(Lib_Ngs2, "samplePos = {}, numSamples = {}", samplePos, numSamples);
-    return ORBIS_OK;
+    return ngs2_calc_waveform_block(reinterpret_cast<const ngs2_waveform_format*>(format),
+                                    samplePos, numSamples,
+                                    reinterpret_cast<ngs2_waveform_block*>(outBlock));
 }
 
 s32 PS4_SYSV_ABI sceNgs2GetWaveformFrameInfo(const OrbisNgs2WaveformFormat* format,
                                              u32* outFrameSize, u32* outNumFrameSamples,
                                              u32* outUnitsPerFrame, u32* outNumDelaySamples) {
-    LOG_ERROR(Lib_Ngs2, "called");
-    return ORBIS_OK;
+    return ngs2_waveform_frame_info(reinterpret_cast<const ngs2_waveform_format*>(format),
+                                    outFrameSize, outNumFrameSamples, outUnitsPerFrame,
+                                    outNumDelaySamples);
 }
 
 s32 PS4_SYSV_ABI sceNgs2ParseWaveformData(const void* data, size_t dataSize,
                                           OrbisNgs2WaveformInfo* outInfo) {
-    LOG_ERROR(Lib_Ngs2, "dataSize = {}", dataSize);
-    return ORBIS_OK;
+    const s32 result =
+        ngs2_parse_waveform_data(data, dataSize, reinterpret_cast<ngs2_waveform_info*>(outInfo));
+    if (result != ORBIS_OK) {
+        LOG_ERROR(Lib_Ngs2, "dataSize = {}: {:#x}", dataSize, u32(result));
+    }
+    return result;
 }
+
+namespace {
+
+struct FileSource {
+    RFILE* file;
+    u64 base;
+};
+
+int ReadFileSource(void* user, uint64_t offset, void* dst, size_t size) {
+    const auto* source = static_cast<const FileSource*>(user);
+    if (filestream_seek(source->file, s64(source->base + offset), RETRO_VFS_SEEK_POSITION_START) <
+        0) {
+        return -1;
+    }
+    return filestream_read(source->file, dst, s64(size)) == s64(size) ? 0 : -1;
+}
+
+struct UserSource {
+    OrbisNgs2ParseReadHandler handler;
+    uintptr_t user_data;
+};
+
+int ReadUserSource(void* user, uint64_t offset, void* dst, size_t size) {
+    const auto* source = static_cast<const UserSource*>(user);
+    return Core::CallGuest(source->handler, source->user_data, u32(offset), dst, size) < 0 ? -1 : 0;
+}
+
+} // namespace
 
 s32 PS4_SYSV_ABI sceNgs2ParseWaveformFile(const char* path, u64 offset,
                                           OrbisNgs2WaveformInfo* outInfo) {
-    LOG_ERROR(Lib_Ngs2, "path = {}, offset = {}", path, offset);
+    if (!outInfo) {
+        return ORBIS_NGS2_ERROR_INVALID_OUT_ADDRESS;
+    }
+    std::memset(outInfo, 0, sizeof(*outInfo));
+    if (!path) {
+        return ORBIS_NGS2_ERROR_INVALID_WAVEFORM_DATA;
+    }
+    auto* mnt = Common::Singleton<Core::FileSys::MntPoints>::Instance();
+    const auto host = Common::FS::PathToUTF8String(mnt->GetHostPath(path));
+    RFILE* const file =
+        filestream_open(host.c_str(), RETRO_VFS_FILE_ACCESS_READ, RETRO_VFS_FILE_ACCESS_HINT_NONE);
+    if (!file) {
+        LOG_ERROR(Lib_Ngs2, "cannot open {}", path);
+        return ORBIS_NGS2_ERROR_INVALID_WAVEFORM_DATA;
+    }
+    const s64 size = filestream_get_size(file);
+    s32 result = ORBIS_NGS2_ERROR_INVALID_WAVEFORM_DATA;
+    if (size >= 0 && offset <= u64(size)) {
+        FileSource source{file, offset};
+        result = ngs2_parse_waveform(ReadFileSource, &source, u64(size) - offset,
+                                     reinterpret_cast<ngs2_waveform_info*>(outInfo));
+    }
+    filestream_close(file);
+    if (result != ORBIS_OK) {
+        LOG_ERROR(Lib_Ngs2, "path = {}, offset = {}: {:#x}", path, offset, u32(result));
+        return result;
+    }
+    // Where things are in the file, not in the waveform that starts at the offset
+    outInfo->dataOffset += u32(offset);
+    for (u32 i = 0; i < outInfo->numBlocks; i++) {
+        outInfo->aBlock[i].dataOffset += u32(offset);
+    }
     return ORBIS_OK;
 }
 
 s32 PS4_SYSV_ABI sceNgs2ParseWaveformUser(OrbisNgs2ParseReadHandler handler, uintptr_t userData,
                                           OrbisNgs2WaveformInfo* outInfo) {
-    LOG_ERROR(Lib_Ngs2, "userData = {}", userData);
-    return ORBIS_OK;
+    if (!outInfo) {
+        return ORBIS_NGS2_ERROR_INVALID_OUT_ADDRESS;
+    }
+    if (!handler) {
+        std::memset(outInfo, 0, sizeof(*outInfo));
+        return ORBIS_NGS2_ERROR_INVALID_WAVEFORM_DATA;
+    }
+    // How much there is only the game's reader knows: it refuses what is past the end
+    UserSource source{handler, userData};
+    const s32 result = ngs2_parse_waveform(ReadUserSource, &source, 0xffffffffull,
+                                           reinterpret_cast<ngs2_waveform_info*>(outInfo));
+    if (result != ORBIS_OK) {
+        LOG_ERROR(Lib_Ngs2, "{:#x}", u32(result));
+    }
+    return result;
 }
 
 // What follows is the library over ngs2_core.c: handles, the system's lock, the game's options
@@ -237,6 +328,7 @@ s32 ReadRackOption(u32 rack_id, const OrbisNgs2RackOption* option, ngs2_rack_des
             desc.max_waveform_blocks = o.maxWaveformBlocks;
             desc.max_filters = o.maxFilters;
             desc.max_envelope_points = o.maxEnvelopePoints;
+            desc.peak_meter_blocks = o.numPeakMeterBlocks;
             desc.max_atrac9_decoders = o.maxAtrac9Decoders;
         }
         break;
@@ -251,6 +343,7 @@ s32 ReadRackOption(u32 rack_id, const OrbisNgs2RackOption* option, ngs2_rack_des
             desc.max_channels = o.maxChannels;
             desc.max_filters = o.maxFilters;
             desc.max_envelope_points = o.maxEnvelopePoints;
+            desc.peak_meter_blocks = o.numPeakMeterBlocks;
             desc.max_inputs = o.maxInputs;
         }
         break;
@@ -272,8 +365,9 @@ s32 ReadRackOption(u32 rack_id, const OrbisNgs2RackOption* option, ngs2_rack_des
             if (option->size < sizeof(OrbisNgs2MasteringRackOption)) {
                 return ORBIS_NGS2_ERROR_INVALID_OPTION_SIZE;
             }
-            desc.max_channels =
-                reinterpret_cast<const OrbisNgs2MasteringRackOption*>(option)->maxChannels;
+            const auto& o = *reinterpret_cast<const OrbisNgs2MasteringRackOption*>(option);
+            desc.max_channels = o.maxChannels;
+            desc.peak_meter_blocks = o.numPeakMeterBlocks;
         }
         break;
     case NGS2_RACK_CUSTOM_SAMPLER: {
@@ -327,6 +421,7 @@ s32 ReadRackOption(u32 rack_id, const OrbisNgs2RackOption* option, ngs2_rack_des
             out.extra_buffer = in.extraBufferId;
             out.dest_buffer = in.destBufferId;
             out.state_size = in.stateSize;
+            out.state_offset = in.stateOffset;
             if (in.moduleId == 0x1f && in.option &&
                 in.option->size >= sizeof(OrbisNgs2CustomUserFx2ModuleOption)) {
                 const auto& fx =
@@ -344,6 +439,11 @@ s32 ReadRackOption(u32 rack_id, const OrbisNgs2RackOption* option, ngs2_rack_des
                 out.max_points =
                     reinterpret_cast<const OrbisNgs2CustomEnvelopeModuleOption*>(in.option)
                         ->maxPoints;
+            } else if (in.moduleId == 0x1a && in.option &&
+                       in.option->size >= sizeof(OrbisNgs2CustomPeakMeterModuleOption)) {
+                out.max_points =
+                    reinterpret_cast<const OrbisNgs2CustomPeakMeterModuleOption*>(in.option)
+                        ->numBlocks;
             } else if (in.moduleId == 0x1c && in.option && in.option->size >= 12) {
                 // size, maxPhases, reserved
                 std::memcpy(&out.max_phases, reinterpret_cast<const u8*>(in.option) + 4, 4);
@@ -972,6 +1072,8 @@ s32 PS4_SYSV_ABI sceNgs2VoiceGetState(OrbisNgs2Handle voiceHandle, OrbisNgs2Voic
     };
     ngs2_sampler_state sampler;
     ngs2_voice_sampler_state(voice, &sampler);
+    ngs2_mixer_state mixer;
+    ngs2_voice_mixer_state(voice, &mixer);
     switch (ngs2_rack_description(ngs2_voice_rack(voice))->rack_id) {
     case NGS2_RACK_SAMPLER:
         give(sampler);
@@ -989,14 +1091,19 @@ s32 PS4_SYSV_ABI sceNgs2VoiceGetState(OrbisNgs2Handle voiceHandle, OrbisNgs2Voic
     case NGS2_RACK_SUBMIXER: {
         OrbisNgs2SubmixerVoiceState state{};
         state.voiceState.stateFlags = sampler.state_flags;
-        state.envelopeHeight = 1.0f;
-        state.peakHeight = ngs2_voice_peak(voice);
+        state.envelopeHeight = mixer.envelope_height;
+        state.peakHeight = mixer.peak_height;
+        state.compressorHeight = mixer.compressor_height;
         give(state);
         break;
     }
     case NGS2_RACK_MASTERING: {
         OrbisNgs2MasteringVoiceState state{};
         state.voiceState.stateFlags = sampler.state_flags;
+        state.limiterPeakLevel = mixer.limiter_peak;
+        state.limiterPressLevel = mixer.limiter_press;
+        std::memcpy(state.aInputPeakHeight, mixer.input_peak, sizeof(state.aInputPeakHeight));
+        std::memcpy(state.aOutputPeakHeight, mixer.output_peak, sizeof(state.aOutputPeakHeight));
         give(state);
         break;
     }
@@ -1006,6 +1113,18 @@ s32 PS4_SYSV_ABI sceNgs2VoiceGetState(OrbisNgs2Handle voiceHandle, OrbisNgs2Voic
         give(state);
         break;
     }
+    }
+    // A custom rack's modules that have a state, where the game said each is to go
+    const ngs2_rack_desc* const desc = ngs2_rack_description(ngs2_voice_rack(voice));
+    for (u32 i = 0; i < desc->num_modules; i++) {
+        const auto& md = desc->modules[i];
+        if (!md.state_size || md.state_offset < sizeof(OrbisNgs2VoiceState) ||
+            md.state_offset > stateSize) {
+            continue;
+        }
+        ngs2_voice_module_state(voice, i,
+                                static_cast<u8*>(static_cast<void*>(outState)) + md.state_offset,
+                                std::min<size_t>(md.state_size, stateSize - md.state_offset));
     }
     return ORBIS_OK;
 }
@@ -1036,41 +1155,41 @@ s32 PS4_SYSV_ABI sceNgs2CustomRackGetModuleInfo(OrbisNgs2Handle rackHandle, u32 
 // Ngs2Geom
 
 s32 PS4_SYSV_ABI sceNgs2GeomResetListenerParam(OrbisNgs2GeomListenerParam* outListenerParam) {
-    LOG_ERROR(Lib_Ngs2, "called");
-    return ORBIS_OK;
+    return ngs2_geom_reset_listener(reinterpret_cast<ngs2_geom_listener*>(outListenerParam));
 }
 
 s32 PS4_SYSV_ABI sceNgs2GeomResetSourceParam(OrbisNgs2GeomSourceParam* outSourceParam) {
-    LOG_ERROR(Lib_Ngs2, "called");
-    return ORBIS_OK;
+    return ngs2_geom_reset_source(reinterpret_cast<ngs2_geom_source*>(outSourceParam));
 }
 
 s32 PS4_SYSV_ABI sceNgs2GeomCalcListener(const OrbisNgs2GeomListenerParam* param,
                                          OrbisNgs2GeomListenerWork* outWork, u32 flags) {
-    LOG_ERROR(Lib_Ngs2, "flags = {}", flags);
-    return ORBIS_OK;
+    return ngs2_geom_calc_listener(reinterpret_cast<const ngs2_geom_listener*>(param),
+                                   reinterpret_cast<ngs2_geom_work*>(outWork), flags);
 }
 
 s32 PS4_SYSV_ABI sceNgs2GeomApply(const OrbisNgs2GeomListenerWork* listener,
                                   const OrbisNgs2GeomSourceParam* source,
                                   OrbisNgs2GeomAttribute* outAttrib, u32 flags) {
-    LOG_ERROR(Lib_Ngs2, "flags = {}", flags);
-    return ORBIS_OK;
+    return ngs2_geom_apply(reinterpret_cast<const ngs2_geom_work*>(listener),
+                           reinterpret_cast<const ngs2_geom_source*>(source),
+                           reinterpret_cast<ngs2_geom_attribute*>(outAttrib), flags);
 }
 
 // Ngs2Pan
 
 s32 PS4_SYSV_ABI sceNgs2PanInit(OrbisNgs2PanWork* work, const float* aSpeakerAngle, float unitAngle,
                                 u32 numSpeakers) {
-    LOG_ERROR(Lib_Ngs2, "unitAngle = {}, numSpeakers = {}", unitAngle, numSpeakers);
-    return ORBIS_OK;
+    return ngs2_pan_init(reinterpret_cast<ngs2_pan_work*>(work), aSpeakerAngle, unitAngle,
+                         numSpeakers);
 }
 
 s32 PS4_SYSV_ABI sceNgs2PanGetVolumeMatrix(OrbisNgs2PanWork* work, const OrbisNgs2PanParam* aParam,
                                            u32 numParams, u32 matrixFormat,
                                            float* outVolumeMatrix) {
-    LOG_ERROR(Lib_Ngs2, "numParams = {}, matrixFormat = {}", numParams, matrixFormat);
-    return ORBIS_OK;
+    return ngs2_pan_matrix(reinterpret_cast<const ngs2_pan_work*>(work),
+                           reinterpret_cast<const ngs2_pan_param*>(aParam), numParams, matrixFormat,
+                           outVolumeMatrix);
 }
 
 // Ngs2Report

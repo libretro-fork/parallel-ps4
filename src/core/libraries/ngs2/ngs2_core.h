@@ -266,7 +266,8 @@ typedef struct ngs2_module_desc {
     size_t work_size;
     uintptr_t user_data;
     /* envelope, chorus, delay: 0 where the game gave no option */
-    uint32_t max_points;
+    uint32_t max_points;   /* a peak meter's blocks */
+    uint32_t state_offset; /* where in a voice's state the game reads the module's */
     uint32_t max_phases;
     uint32_t max_taps;
     float max_length; /* seconds */
@@ -286,6 +287,7 @@ typedef struct ngs2_rack_desc {
     uint32_t max_waveform_blocks;
     uint32_t max_filters;
     uint32_t max_envelope_points;
+    uint32_t peak_meter_blocks;
     uint32_t max_atrac9_decoders;
     uint32_t reverb_size;
     uint32_t num_buffers;
@@ -347,6 +349,22 @@ int ngs2_voice_control(ngs2_voice* voice, const ngs2_param_header* list);
 uint32_t ngs2_voice_state_flags(const ngs2_voice* voice);
 void ngs2_voice_sampler_state(const ngs2_voice* voice, ngs2_sampler_state* state);
 float ngs2_voice_peak(const ngs2_voice* voice);
+
+/* What a submixer or a mastering voice reports */
+typedef struct ngs2_mixer_state {
+    float envelope_height;
+    float peak_height;
+    float compressor_height; /* the gain of the channel it holds down most */
+    float limiter_peak;
+    float limiter_press;
+    float input_peak[NGS2_MAX_CHANNELS];
+    float output_peak[NGS2_MAX_CHANNELS];
+} ngs2_mixer_state;
+void ngs2_voice_mixer_state(const ngs2_voice* voice, ngs2_mixer_state* state);
+/* The state of a custom rack's module as the PS4 lays it out (an envelope's
+ * height, a compressor's, a peak meter's): the bytes written, 0 for a
+ * module with none. */
+size_t ngs2_voice_module_state(const ngs2_voice* voice, uint32_t module, void* out, size_t size);
 int ngs2_voice_port_info(const ngs2_voice* voice, uint32_t port, ngs2_port_info* info);
 /* @levels has room for NGS2_MAX_LEVELS */
 int ngs2_voice_matrix_info(const ngs2_voice* voice, uint32_t matrix, uint32_t* num_levels,
