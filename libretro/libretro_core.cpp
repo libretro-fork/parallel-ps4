@@ -60,7 +60,9 @@
 #include <dlfcn.h>
 #include <fcntl.h>
 #include <spawn.h>
+#include <poll.h>
 #include <sys/mman.h>
+#include <sys/syscall.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
@@ -895,14 +897,33 @@ void StopEmulator() {
     if (emulator_pid <= 0) {
         return;
     }
-    // It ends itself on the quit flag; what has not within three seconds is ended.
+    // It ends itself on the quit flag; what has not within three seconds is ended. Waited
+    // on through a descriptor for the process (Linux 5.3), which is readable once it has
+    // ended, so unloading returns the moment it does; without one, looked at every 10 ms.
     int status = 0;
-    for (int i = 0; i < 300; ++i) {
-        if (waitpid(emulator_pid, &status, WNOHANG) == emulator_pid) {
+#ifdef SYS_pidfd_open
+    const int process = static_cast<int>(syscall(SYS_pidfd_open, emulator_pid, 0));
+#else
+    const int process = -1;
+#endif
+    if (process >= 0) {
+        pollfd ended{process, POLLIN, 0};
+        int ready;
+        while ((ready = poll(&ended, 1, 3000)) < 0 && errno == EINTR) {
+        }
+        close(process);
+        if (ready > 0 && waitpid(emulator_pid, &status, 0) == emulator_pid) {
             emulator_pid = -1;
             return;
         }
-        usleep(10 * 1000);
+    } else {
+        for (int i = 0; i < 300; ++i) {
+            if (waitpid(emulator_pid, &status, WNOHANG) == emulator_pid) {
+                emulator_pid = -1;
+                return;
+            }
+            usleep(10 * 1000);
+        }
     }
     kill(emulator_pid, SIGKILL);
     waitpid(emulator_pid, &status, 0);
