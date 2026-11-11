@@ -111,6 +111,7 @@ struct SharedOptions {
     std::int32_t extra_dmem_mbytes;
     std::uint32_t readback_linear_images;
     std::uint32_t shader_cache;
+    std::uint32_t dump_shaders;
     std::uint32_t copy_gpu_buffers;
     /// The picture is handed over on the GPU: the frontend gave the core a Vulkan context.
     std::uint32_t gpu_frames;

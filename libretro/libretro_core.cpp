@@ -252,6 +252,7 @@ void ReadCoreOptions(Libretro::SharedOptions& options) {
         std::clamp(std::atoi(OptionValue("shadps4_extra_memory", "0").c_str()), 0, 20000);
     options.readback_linear_images = enabled("shadps4_readback_linear_images", "disabled");
     options.shader_cache = enabled("shadps4_shader_cache", "disabled");
+    options.dump_shaders = enabled("shadps4_dump_shaders", "disabled");
     options.copy_gpu_buffers = enabled("shadps4_copy_gpu_buffers", "enabled");
     // The picture is handed over on the GPU wherever the frontend gives a Vulkan context
     options.gpu_frames = 1;

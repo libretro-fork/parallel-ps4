@@ -409,6 +409,20 @@ struct retro_core_option_v2_definition option_defs_us[] = {
         "disabled"
     },
     {
+        "shadps4_dump_shaders",
+        "Dump Shaders (diagnostics)",
+        NULL,
+        "Writes every shader the game uses, as the game has it (.bin) and as it is given to the GPU (.spv), to shadPS4/shader/dumps under the frontend's system directory. For looking into a picture that is wrong; takes effect when a game is started.",
+        NULL,
+        "video",
+        {
+            { "disabled", NULL },
+            { "enabled",  NULL },
+            { NULL, NULL },
+        },
+        "disabled"
+    },
+    {
         "shadps4_show_fps",
         "Show FPS Counter",
         NULL,

@@ -600,6 +600,7 @@ void ApplyCoreOptions() {
     emu_settings_set_readback_linear_images_enabled(
         options.readback_linear_images != 0, false);
     emu_settings_set_pipeline_cache_enabled(options.shader_cache != 0, false);
+    emu_settings_set_dump_shaders(options.dump_shaders != 0, false);
     emu_settings_set_copy_gpu_buffers(options.copy_gpu_buffers != 0, false);
     emu_settings_set_trophy_popup_disabled(options.trophy_popup == 0, false);
     emu_settings_set_trophy_notification_side(
