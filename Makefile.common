@@ -198,7 +198,7 @@ CORE_SOURCES_CXX += $(addprefix src/core/libraries/net/,net.cpp net_kernel.cpp n
 CORE_SOURCES_CXX += $(addprefix src/core/libraries/network/,http.cpp http2.cpp net_ctl_obj.cpp \
 	netctl.cpp ssl.cpp ssl2.cpp)
 CORE_SOURCES_CXX += $(addprefix src/core/libraries/ngs2/,ngs2.cpp ngs2_custom.cpp ngs2_eq.cpp \
-	ngs2_geom.cpp ngs2_impl.cpp ngs2_mastering.cpp ngs2_pan.cpp ngs2_report.cpp ngs2_reverb.cpp \
+	ngs2_geom.cpp ngs2_mastering.cpp ngs2_pan.cpp ngs2_report.cpp ngs2_reverb.cpp \
 	ngs2_sampler.cpp ngs2_submixer.cpp)
 CORE_SOURCES_CXX += $(addprefix src/core/libraries/np/np_auth/,np_auth.cpp)
 CORE_SOURCES_CXX += $(addprefix src/core/libraries/np/np_commerce/,np_commerce.cpp \
@@ -309,6 +309,7 @@ CORE_SOURCES_C += $(addprefix src/common/,enum_names.c json_util.c key_manager.c
 	ptr_table.c u64_map.c)
 CORE_SOURCES_C += $(addprefix src/core/,emulator_settings.c user_manager.c)
 CORE_SOURCES_C += $(addprefix src/core/libraries/network/,host_override.c)
+CORE_SOURCES_C += $(addprefix src/core/libraries/ngs2/,ngs2_core.c)
 CORE_SOURCES_C += $(addprefix src/core/libraries/np/np_handler/,np_invitation_json.c)
 CORE_SOURCES_C += $(addprefix src/shadnet/,pb_wire.c shadnet_msg.c)
 CORE_SOURCES_C += $(addprefix src/video_core/host_shaders/,host_spirv.c)
