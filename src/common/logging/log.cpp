@@ -27,6 +27,7 @@
 
 #include "common/logging/log.h"
 #include "common/path_util.h"
+#include "common/quick_exit.h"
 #include "common/thread.h"
 #include "common/types.h"
 #include "core/emulator_settings.h"
@@ -442,7 +443,7 @@ void Setup(std::string_view shadps4_filename) {
     static std::once_flag already_registered;
     std::call_once(already_registered, []() {
         std::atexit(Shutdown);
-        std::at_quick_exit(Flush);
+        Common::AtQuickExit(Flush);
     });
 
     std::scoped_lock lock{g_control};

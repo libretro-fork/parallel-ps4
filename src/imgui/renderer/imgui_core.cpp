@@ -11,6 +11,7 @@
 #include <imgui.h>
 
 #include "common/path_util.h"
+#include "common/quick_exit.h"
 #include "core/debug_state.h"
 #include "core/devtools/layer.h"
 #include "core/emulator_settings.h"
@@ -154,7 +155,7 @@ void Initialize(const ::Vulkan::Instance& instance, const Frontend::Window& wind
     ImFormatString(label, IM_ARRAYSIZE(label), "WindowOverViewport_%08X", GetMainViewport()->ID);
     dock_id = ImHashStr(label);
 
-    std::at_quick_exit([] { SaveIniSettingsToDisk(GetIO().IniFilename); });
+    Common::AtQuickExit([] { SaveIniSettingsToDisk(GetIO().IniFilename); });
 }
 
 void OnSurfaceFormatChange(vk::Format surface_format) {

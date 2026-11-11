@@ -5,6 +5,7 @@
 
 #include "common/elf_info.h"
 #include "common/logging/log.h"
+#include "common/quick_exit.h"
 #include "core/emulator_settings.h"
 #include "core/file_sys/fs.h"
 #include "core/libraries/kernel/orbis_error.h"
@@ -314,7 +315,7 @@ s32 PS4_SYSV_ABI exit(s32 status) {
     // The game ended itself. The process ends the way it does when content is closed in
     // the frontend, so its at_quick_exit work runs and the core is handed the game's own
     // status in place of a signal.
-    std::quick_exit(status);
+    Common::QuickExit(status);
 }
 
 s32 PS4_SYSV_ABI sceKernelSetProcessProperty(u32 prop_type, const void* prop_data, size_t prop_size,

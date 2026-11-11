@@ -20,6 +20,7 @@
 #include "common/ntapi.h"
 #include "common/path_util.h"
 #include "common/polyfill_thread.h"
+#include "common/quick_exit.h"
 #include "common/scm_rev.h"
 #include "common/singleton.h"
 #include "common/string_util.h"
@@ -78,7 +79,7 @@ Emulator::Emulator() {
     WSADATA wsaData;
     WSAStartup(versionWanted, &wsaData);
 #endif
-    std::at_quick_exit([]() { Common::Singleton<Core::Emulator>::Instance()->Shutdown(); });
+    Common::AtQuickExit([]() { Common::Singleton<Core::Emulator>::Instance()->Shutdown(); });
 }
 
 Emulator::~Emulator() {}
@@ -623,7 +624,7 @@ void Emulator::Run(std::filesystem::path file, std::vector<std::string> args,
     // Load the module with the linker.
     if (linker->LoadModule(guest_eboot_path) == -1) {
         LOG_CRITICAL(Loader, "Failed to load game's eboot.bin: {}", guest_eboot_path);
-        std::quick_exit(0);
+        Common::QuickExit(0);
     }
 
     if (!id.empty()) {
@@ -639,7 +640,7 @@ void Emulator::Run(std::filesystem::path file, std::vector<std::string> args,
     linker->Execute(args);
 
     Frontend::WaitForQuit();
-    std::quick_exit(0);
+    Common::QuickExit(0);
 }
 
 void Emulator::Restart(std::filesystem::path eboot_path,
@@ -743,7 +744,7 @@ void Emulator::Restart(std::filesystem::path eboot_path,
 
     if (!success) {
         std::cerr << "Failed to restart game: {}" << GetLastError() << std::endl;
-        std::quick_exit(1);
+        Common::QuickExit(1);
     }
 
     CloseHandle(pi.hProcess);
@@ -764,14 +765,14 @@ void Emulator::Restart(std::filesystem::path eboot_path,
         // Child process - execute the new instance
         execvp(executableName, argv.data());
         std::cerr << "Failed to restart game: execvp failed" << std::endl;
-        std::quick_exit(1);
+        Common::QuickExit(1);
     } else if (pid < 0) {
         std::cerr << "Failed to restart game: fork failed" << std::endl;
-        std::quick_exit(1);
+        Common::QuickExit(1);
     }
 #endif
 
-    std::quick_exit(0);
+    Common::QuickExit(0);
 }
 
 void Emulator::UpdatePlayTime(const std::string_view serial) {

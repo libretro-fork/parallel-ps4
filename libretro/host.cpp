@@ -27,6 +27,7 @@
 #include <thread>
 #include <vector>
 
+#include "common/quick_exit.h"
 #include "audio_mix.h"
 #include "common/key_manager.h"
 #include "common/logging/log.h"
@@ -137,7 +138,7 @@ void WatchQuit() {
         }
         wakes.control.Wait(key);
     }
-    std::quick_exit(0);
+    Common::QuickExit(0);
 }
 
 // What the sources have, summed, into the ring the core plays from. A source
