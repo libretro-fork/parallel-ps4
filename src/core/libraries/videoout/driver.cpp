@@ -44,10 +44,20 @@ VideoOutDriver::VideoOutDriver(u32 width, u32 height) {
     main_port.resolution.full_height = height;
     main_port.resolution.pane_width = width;
     main_port.resolution.pane_height = height;
+    static_assert(std::is_trivially_copyable_v<Request>);
+    retro_spsc_init(&requests, 256 * sizeof(Request));
+    retro_eventcount_init(&request_taken_ec);
     present_thread = std::jthread([&](std::stop_token token) { PresentThread(token); });
 }
 
-VideoOutDriver::~VideoOutDriver() = default;
+VideoOutDriver::~VideoOutDriver() {
+    present_thread.request_stop();
+    if (present_thread.joinable()) {
+        present_thread.join();
+    }
+    retro_eventcount_free(&request_taken_ec);
+    retro_spsc_free(&requests);
+}
 
 int VideoOutDriver::Open(const ServiceThreadParams* params) {
     if (main_port.is_open) {
@@ -59,8 +69,6 @@ int VideoOutDriver::Open(const ServiceThreadParams* params) {
 }
 
 void VideoOutDriver::Close(s32 handle) {
-    std::scoped_lock lock{mutex};
-
     // Mark as closed
     main_port.is_open = false;
     main_port.flip_rate = 0;
@@ -69,8 +77,11 @@ void VideoOutDriver::Close(s32 handle) {
     // Clear port information
     std::memset(main_port.buffer_labels.data(), 0, sizeof(main_port.buffer_labels));
     std::memset(main_port.groups.data(), 0, sizeof(main_port.groups));
-    std::memset(&main_port.vblank_status, 0, sizeof(main_port.vblank_status));
-    main_port.flip_status = FlipStatus{};
+    // The present thread clears the status it writes
+    main_port.flip_pending.store(0);
+    main_port.gc_queue.store(0);
+    main_port.submit_tsc.store(0);
+    main_port.reset_status.store(true, std::memory_order_release);
 
     // Re-initialize buffers
     std::memset(main_port.buffer_slots.data(), 0, sizeof(main_port.buffer_slots));
@@ -79,22 +90,31 @@ void VideoOutDriver::Close(s32 handle) {
     }
 
     // Clear events
-    for (auto event : main_port.flip_events) {
-        auto equeue = Kernel::GetEqueue(event);
+    for (auto& slot : main_port.flip_events) {
+        const auto event = slot.exchange(0);
+        auto equeue = event ? Kernel::GetEqueue(event) : nullptr;
         if (equeue != nullptr) {
             equeue->RemoveEvent(static_cast<u64>(OrbisVideoOutInternalEventId::Flip),
                                 Kernel::OrbisKernelEvent::Filter::VideoOut);
         }
     }
-    main_port.flip_events.clear();
-    for (auto event : main_port.vblank_events) {
-        auto equeue = Kernel::GetEqueue(event);
+    for (auto& slot : main_port.vblank_events) {
+        const auto event = slot.exchange(0);
+        auto equeue = event ? Kernel::GetEqueue(event) : nullptr;
         if (equeue != nullptr) {
             equeue->RemoveEvent(static_cast<u64>(OrbisVideoOutInternalEventId::Vblank),
                                 Kernel::OrbisKernelEvent::Filter::VideoOut);
         }
     }
-    main_port.vblank_events.clear();
+}
+
+void VideoOutDriver::ResetStatus() {
+    retro_seqlock_write_begin(&main_port.flip_seq);
+    main_port.flip_status = FlipStatus{};
+    retro_seqlock_write_end(&main_port.flip_seq);
+    retro_seqlock_write_begin(&main_port.vblank_seq);
+    std::memset(&main_port.vblank_status, 0, sizeof(main_port.vblank_status));
+    retro_seqlock_write_end(&main_port.vblank_seq);
 }
 
 VideoOutPort* VideoOutDriver::GetPort(int handle) {
@@ -227,7 +247,6 @@ int VideoOutDriver::ChangeBufferAttribute(VideoOutPort* port, s32 attributeIndex
              static_cast<u32>(attribute->tiling_mode), attribute->width, attribute->height,
              attribute->pitch_in_pixel, attribute->option);
 
-    std::unique_lock lock{port->port_mutex};
     std::memcpy(&port->groups[attributeIndex].attrib, attribute, sizeof(BufferAttribute));
     return 0;
 }
@@ -239,22 +258,26 @@ void VideoOutDriver::Flip(const Request& req) {
     // Update flip status.
     auto* port = req.port;
     {
-        std::unique_lock lock{port->port_mutex};
+        const u64 process_time = Libraries::Kernel::sceKernelGetProcessTime();
+        const u64 tsc = Libraries::Kernel::sceKernelReadTsc();
         auto& flip_status = port->flip_status;
+        retro_seqlock_write_begin(&port->flip_seq);
         flip_status.count++;
-        flip_status.process_time = Libraries::Kernel::sceKernelGetProcessTime();
-        flip_status.tsc = Libraries::Kernel::sceKernelReadTsc();
+        flip_status.process_time = process_time;
+        flip_status.tsc = tsc;
         flip_status.flip_arg = req.flip_arg;
         flip_status.current_buffer = req.index;
+        retro_seqlock_write_end(&port->flip_seq);
         if (req.eop) {
-            --flip_status.gc_queue_num;
+            port->gc_queue.fetch_sub(1);
         }
-        --flip_status.flip_pending_num;
+        port->flip_pending.fetch_sub(1);
     }
 
     // Trigger flip events for the port.
-    for (auto event : port->flip_events) {
-        auto equeue = Kernel::GetEqueue(event);
+    for (auto& slot : port->flip_events) {
+        const auto event = slot.load(std::memory_order_acquire);
+        auto equeue = event ? Kernel::GetEqueue(event) : nullptr;
         if (equeue != nullptr) {
             equeue->TriggerEvent(
                 static_cast<u64>(OrbisVideoOutInternalEventId::Flip),
@@ -287,19 +310,18 @@ void VideoOutDriver::DrawLastFrame() {
 
 bool VideoOutDriver::SubmitFlip(VideoOutPort* port, s32 index, s64 flip_arg,
                                 bool is_eop /*= false*/) {
-    {
-        std::unique_lock lock{port->port_mutex};
-        if (index != -1 && port->flip_status.flip_pending_num > 16) {
+    // integral GPU and CPU pending flips counter
+    s32 pending = port->flip_pending.load(std::memory_order_relaxed);
+    do {
+        if (index != -1 && pending > 16) {
             LOG_ERROR(Lib_VideoOut, "Flip queue is full");
             return false;
         }
-
-        if (is_eop) {
-            ++port->flip_status.gc_queue_num;
-        }
-        ++port->flip_status.flip_pending_num; // integral GPU and CPU pending flips counter
-        port->flip_status.submit_tsc = Libraries::Kernel::sceKernelReadTsc();
+    } while (!port->flip_pending.compare_exchange_weak(pending, pending + 1));
+    if (is_eop) {
+        port->gc_queue.fetch_add(1);
     }
+    port->submit_tsc.store(Libraries::Kernel::sceKernelReadTsc(), std::memory_order_relaxed);
 
     if (!is_eop) {
         // Non EOP flips can arrive from any thread so ask GPU thread to perform them
@@ -322,14 +344,23 @@ void VideoOutDriver::SubmitFlipInternal(VideoOutPort* port, s32 index, s64 flip_
         frame = presenter->PrepareFrame(group, buffer.address_left);
     }
 
-    std::scoped_lock lock{mutex};
-    requests.push({
+    const Request request{
         .frame = frame,
         .port = port,
         .flip_arg = flip_arg,
         .index = index,
         .eop = is_eop,
-    });
+    };
+    // The GPU thread is the only one to write; with the ring full it waits for the present
+    // thread to take one
+    while (retro_spsc_write(&requests, &request, sizeof(request)) != sizeof(request)) {
+        const int key = retro_eventcount_prepare_wait(&request_taken_ec);
+        if (retro_spsc_write_avail(&requests) >= sizeof(request)) {
+            retro_eventcount_cancel_wait(&request_taken_ec);
+            continue;
+        }
+        retro_eventcount_commit_wait(&request_taken_ec, key);
+    }
 }
 
 void VideoOutDriver::PresentThread(std::stop_token token) {
@@ -341,17 +372,20 @@ void VideoOutDriver::PresentThread(std::stop_token token) {
     Common::AccurateTimer timer{vblank_period};
 
     const auto receive_request = [this] -> Request {
-        std::scoped_lock lk{mutex};
-        if (!requests.empty()) {
-            const auto request = requests.front();
-            requests.pop();
-            return request;
+        Request request{};
+        if (retro_spsc_read(&requests, &request, sizeof(request)) != sizeof(request)) {
+            return {};
         }
-        return {};
+        retro_eventcount_notify(&request_taken_ec);
+        return request;
     };
 
     while (!token.stop_requested()) {
         timer.Start();
+
+        if (main_port.reset_status.exchange(false, std::memory_order_acquire)) {
+            ResetStatus();
+        }
 
         if (DebugState.IsGuestThreadsPaused()) {
             DrawLastFrame();
@@ -377,12 +411,10 @@ void VideoOutDriver::PresentThread(std::stop_token token) {
         }
 
         {
-            // Needs lock here as can be concurrently read by `sceVideoOutGetVblankStatus`
-            std::scoped_lock lock{main_port.vo_mutex};
-
             // Trigger flip events for the port
-            for (auto event : main_port.vblank_events) {
-                auto equeue = Kernel::GetEqueue(event);
+            for (auto& slot : main_port.vblank_events) {
+                const auto event = slot.load(std::memory_order_acquire);
+                auto equeue = event ? Kernel::GetEqueue(event) : nullptr;
                 if (equeue != nullptr) {
                     equeue->TriggerEvent(
                         static_cast<u64>(OrbisVideoOutInternalEventId::Vblank),
@@ -393,11 +425,15 @@ void VideoOutDriver::PresentThread(std::stop_token token) {
                 }
             }
 
-            // Update vblank status
+            // Update vblank status: read by sceVideoOutGetVblankStatus and WaitVblank
+            const u64 process_time = Libraries::Kernel::sceKernelGetProcessTime();
+            const u64 tsc = Libraries::Kernel::sceKernelReadTsc();
+            retro_seqlock_write_begin(&main_port.vblank_seq);
             vblank_status.count++;
-            vblank_status.process_time = Libraries::Kernel::sceKernelGetProcessTime();
-            vblank_status.tsc = Libraries::Kernel::sceKernelReadTsc();
-            main_port.vblank_cv.notify_all();
+            vblank_status.process_time = process_time;
+            vblank_status.tsc = tsc;
+            retro_seqlock_write_end(&main_port.vblank_seq);
+            retro_eventcount_notify(&main_port.vblank_ec);
         }
 
         timer.End();

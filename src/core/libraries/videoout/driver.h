@@ -6,9 +6,12 @@
 #include "common/polyfill_thread.h"
 #include "core/libraries/videoout/video_out.h"
 
-#include <condition_variable>
-#include <mutex>
-#include <queue>
+#include <array>
+#include <atomic>
+
+#include <retro_spsc.h>
+#include <rthreads/retro_eventcount.h>
+#include <rthreads/retro_seqlock.h>
 
 namespace Vulkan {
 struct Frame;
@@ -22,18 +25,97 @@ struct VideoOutPort {
     std::array<u64, MaxDisplayBuffers> buffer_labels; // should be contiguous in memory
     static_assert(sizeof(buffer_labels[0]) == 8u);
     std::array<BufferAttributeGroup, MaxDisplayBufferGroups> groups;
+    /// The present thread's part of the flip status (count, times, flip_arg, current_buffer),
+    /// written by it alone under flip_seq; the counts the submitters change are flip_pending
+    /// and gc_queue, and submit_tsc. GetFlipStatus puts them together.
     FlipStatus flip_status;
+    retro_seqlock_t flip_seq{};
+    std::atomic<s32> flip_pending{};
+    std::atomic<s32> gc_queue{};
+    std::atomic<u64> submit_tsc{};
+    /// Written by the present thread alone, under vblank_seq; vblank_ec is notified after each.
     SceVideoOutVblankStatus vblank_status;
-    std::vector<Kernel::OrbisKernelEqueue> flip_events;
-    std::vector<Kernel::OrbisKernelEqueue> vblank_events;
-    std::mutex vo_mutex;
-    std::mutex port_mutex;
-    std::condition_variable vo_cv;
-    std::condition_variable vblank_cv;
+    retro_seqlock_t vblank_seq{};
+    retro_eventcount_t vblank_ec{};
+    /// The event queues to tell; a slot holds 0 when free, and is taken and freed with a
+    /// compare-exchange, so the present thread walks them while the game adds and deletes.
+    static constexpr size_t MaxEventQueues = 16;
+    using EventQueues = std::array<std::atomic<Kernel::OrbisKernelEqueue>, MaxEventQueues>;
+    EventQueues flip_events{};
+    EventQueues vblank_events{};
+    /// The GPU thread waiting on a VO label parks on vo_ec; a flip that clears one notifies it.
+    retro_eventcount_t vo_ec{};
+    /// Close asks the present thread to clear what only it writes.
+    std::atomic<bool> reset_status{false};
     int flip_rate = 0;
     int prev_index = -1;
     bool is_open = false;
     bool is_hdr = false;
+
+    VideoOutPort() {
+        retro_seqlock_init(&flip_seq);
+        retro_seqlock_init(&vblank_seq);
+        retro_eventcount_init(&vblank_ec);
+        retro_eventcount_init(&vo_ec);
+    }
+    ~VideoOutPort() {
+        retro_eventcount_free(&vo_ec);
+        retro_eventcount_free(&vblank_ec);
+    }
+
+    static bool AddEventQueue(EventQueues& queues, Kernel::OrbisKernelEqueue eq) {
+        for (auto& slot : queues) {
+            Kernel::OrbisKernelEqueue expected = 0;
+            if (slot.compare_exchange_strong(expected, eq)) {
+                return true;
+            }
+        }
+        return false;
+    }
+    static void RemoveEventQueue(EventQueues& queues, Kernel::OrbisKernelEqueue eq) {
+        for (auto& slot : queues) {
+            Kernel::OrbisKernelEqueue expected = eq;
+            if (slot.compare_exchange_strong(expected, 0)) {
+                return;
+            }
+        }
+    }
+
+    FlipStatus GetFlipStatus() {
+        FlipStatus status;
+        int seq;
+        do {
+            seq = retro_seqlock_read_begin(&flip_seq);
+            status = flip_status;
+        } while (retro_seqlock_read_retry(&flip_seq, seq));
+        status.submit_tsc = submit_tsc.load(std::memory_order_relaxed);
+        status.gc_queue_num = gc_queue.load(std::memory_order_relaxed);
+        status.flip_pending_num = flip_pending.load(std::memory_order_relaxed);
+        return status;
+    }
+
+    SceVideoOutVblankStatus GetVblankStatus() {
+        SceVideoOutVblankStatus status;
+        int seq;
+        do {
+            seq = retro_seqlock_read_begin(&vblank_seq);
+            status = vblank_status;
+        } while (retro_seqlock_read_retry(&vblank_seq, seq));
+        return status;
+    }
+
+    /// Until the next vblank.
+    void WaitVblank() {
+        const u64 prev_count = GetVblankStatus().count;
+        for (;;) {
+            const int key = retro_eventcount_prepare_wait(&vblank_ec);
+            if (GetVblankStatus().count != prev_count) {
+                retro_eventcount_cancel_wait(&vblank_ec);
+                return;
+            }
+            retro_eventcount_commit_wait(&vblank_ec, key);
+        }
+    }
 
     s32 FindFreeGroup() const {
         s32 index = 0;
@@ -50,13 +132,18 @@ struct VideoOutPort {
     }
 
     void WaitVoLabel(auto&& pred) {
-        std::unique_lock lk{vo_mutex};
-        vo_cv.wait(lk, pred);
+        while (!pred()) {
+            const int key = retro_eventcount_prepare_wait(&vo_ec);
+            if (pred()) {
+                retro_eventcount_cancel_wait(&vo_ec);
+                return;
+            }
+            retro_eventcount_commit_wait(&vo_ec, key);
+        }
     }
 
     void SignalVoLabel() {
-        std::scoped_lock lk{vo_mutex};
-        vo_cv.notify_one();
+        retro_eventcount_notify(&vo_ec);
     }
 
     [[nodiscard]] int NumRegisteredBuffers() const {
@@ -109,11 +196,14 @@ private:
     void DrawLastFrame();  // Used when there is no flip request
     void SubmitFlipInternal(VideoOutPort* port, s32 index, s64 flip_arg, bool is_eop = false);
     void PresentThread(std::stop_token token);
+    void ResetStatus();
 
-    std::mutex mutex;
     VideoOutPort main_port{};
+    /// Flip requests, from the GPU thread (which runs every flip, EOP or not) to the present
+    /// thread; a full ring has the GPU thread wait on request_taken_ec.
+    retro_spsc_t requests{};
+    retro_eventcount_t request_taken_ec{};
     std::jthread present_thread;
-    std::queue<Request> requests;
 };
 
 } // namespace Libraries::VideoOut

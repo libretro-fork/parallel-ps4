@@ -59,9 +59,10 @@ s32 PS4_SYSV_ABI sceVideoOutAddFlipEvent(Kernel::OrbisKernelEqueue eq, s32 handl
     event.event.fflags = 0;
     event.event.data = 0;
     event.data = port;
+    if (!VideoOutPort::AddEventQueue(port->flip_events, eq)) {
+        LOG_ERROR(Lib_VideoOut, "No room for another flip event queue");
+    }
     equeue->AddEvent(event);
-
-    port->flip_events.push_back(eq);
     return ORBIS_OK;
 }
 
@@ -76,7 +77,7 @@ s32 PS4_SYSV_ABI sceVideoOutDeleteFlipEvent(Kernel::OrbisKernelEqueue eq, s32 ha
         return ORBIS_VIDEO_OUT_ERROR_INVALID_EVENT_QUEUE;
     }
     equeue->RemoveEvent(handle, Kernel::OrbisKernelEvent::Filter::VideoOut);
-    port->flip_events.erase(find(port->flip_events.begin(), port->flip_events.end(), eq));
+    VideoOutPort::RemoveEventQueue(port->flip_events, eq);
     return ORBIS_OK;
 }
 
@@ -101,9 +102,10 @@ s32 PS4_SYSV_ABI sceVideoOutAddVblankEvent(Kernel::OrbisKernelEqueue eq, s32 han
     event.event.fflags = 0;
     event.event.data = 0;
     event.data = port;
+    if (!VideoOutPort::AddEventQueue(port->vblank_events, eq)) {
+        LOG_ERROR(Lib_VideoOut, "No room for another vblank event queue");
+    }
     equeue->AddEvent(event);
-
-    port->vblank_events.push_back(eq);
     return ORBIS_OK;
 }
 
@@ -118,7 +120,7 @@ s32 PS4_SYSV_ABI sceVideoOutDeleteVblankEvent(Kernel::OrbisKernelEqueue eq, s32 
         return ORBIS_VIDEO_OUT_ERROR_INVALID_EVENT_QUEUE;
     }
     equeue->RemoveEvent(handle, Kernel::OrbisKernelEvent::Filter::VideoOut);
-    port->vblank_events.erase(find(port->vblank_events.begin(), port->vblank_events.end(), eq));
+    VideoOutPort::RemoveEventQueue(port->vblank_events, eq);
     return ORBIS_OK;
 }
 
@@ -147,9 +149,7 @@ s32 PS4_SYSV_ABI sceVideoOutSetFlipRate(s32 handle, s32 rate) {
 s32 PS4_SYSV_ABI sceVideoOutIsFlipPending(s32 handle) {
     LOG_TRACE(Lib_VideoOut, "called");
     auto* port = driver->GetPort(handle);
-    std::unique_lock lock{port->port_mutex};
-    s32 pending = port->flip_status.flip_pending_num;
-    return pending;
+    return port->flip_pending.load(std::memory_order_relaxed);
 }
 
 s32 PS4_SYSV_ABI sceVideoOutSubmitFlip(s32 handle, s32 bufferIndex, s32 flipMode, s64 flipArg) {
@@ -253,10 +253,7 @@ s32 PS4_SYSV_ABI sceVideoOutGetFlipStatus(s32 handle, FlipStatus* status) {
         return ORBIS_VIDEO_OUT_ERROR_INVALID_HANDLE;
     }
 
-    {
-        std::unique_lock lock{port->port_mutex};
-        *status = port->flip_status;
-    }
+    *status = port->GetFlipStatus();
 
     LOG_TRACE(Lib_VideoOut,
               "count = {}, processTime = {}, tsc = {}, submitTsc = {}, flipArg = {}, gcQueueNum = "
@@ -279,8 +276,7 @@ s32 PS4_SYSV_ABI sceVideoOutGetVblankStatus(int handle, SceVideoOutVblankStatus*
         return ORBIS_VIDEO_OUT_ERROR_INVALID_HANDLE;
     }
 
-    std::unique_lock lock{port->vo_mutex};
-    *status = port->vblank_status;
+    *status = port->GetVblankStatus();
     return ORBIS_OK;
 }
 
@@ -382,9 +378,7 @@ s32 PS4_SYSV_ABI sceVideoOutWaitVblank(s32 handle) {
         return ORBIS_VIDEO_OUT_ERROR_INVALID_HANDLE;
     }
 
-    std::unique_lock lock{port->vo_mutex};
-    const auto prev_counter = port->vblank_status.count;
-    port->vblank_cv.wait(lock, [&]() { return prev_counter != port->vblank_status.count; });
+    port->WaitVblank();
     return ORBIS_OK;
 }
 
