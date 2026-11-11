@@ -4,12 +4,13 @@
 #pragma once
 
 #include <chrono>
-#include <condition_variable>
 #include <mutex>
 #include <string>
 #include <vector>
 
 #include <unordered_map>
+#include "common/combiner.h"
+#include "common/event_count.h"
 #include "common/rdtsc.h"
 #include "common/types.h"
 
@@ -179,17 +180,12 @@ public:
 
     bool AddSmallTimer(EqueueEvent& event);
     bool HasSmallTimer() {
-        std::scoped_lock lock{m_mutex};
-        return !m_small_timers.empty();
+        return m_combiner.Run([&] { return !m_small_timers.empty(); });
     }
     bool RemoveSmallTimer(u64 id) {
-        bool removed = false;
-        {
-            std::scoped_lock lock{m_mutex};
-            removed = m_small_timers.erase(id) > 0;
-        }
+        const bool removed = m_combiner.Run([&] { return m_small_timers.erase(id) > 0; });
         // A waiter sleeping toward this timer looks again
-        m_cond.notify_all();
+        m_wake.Notify();
         return removed;
     }
 
@@ -202,9 +198,10 @@ public:
 private:
     OrbisKernelEqueue m_handle;
     std::string m_name;
-    std::mutex m_mutex;
+    // The events and timers change one call at a time here; waiters park on m_wake
+    Common::Combiner m_combiner;
     std::vector<EqueueEvent> m_events;
-    std::condition_variable m_cond;
+    Common::EventCount m_wake;
     std::unordered_map<u64, SmallTimer> m_small_timers;
 };
 

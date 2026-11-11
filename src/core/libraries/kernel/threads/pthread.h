@@ -11,7 +11,11 @@
 #include <mutex>
 #include <shared_mutex>
 
+#include <rthreads/retro_eventcount.h>
+
 #include "common/enum.h"
+#include "common/event_count.h"
+#include "common/event_mutex.h"
 #include "common/shared_first_mutex.h"
 #include "core/libraries/kernel/sync/mutex.h"
 #include "core/libraries/kernel/sync/semaphore.h"
@@ -45,11 +49,19 @@ struct Pthread;
 
 struct PthreadBarrier {
     struct State {
-        std::mutex mutex;
-        std::condition_variable cv;
+        /// The generation in the high half, the threads arrived in it in the low half: one
+        /// compare-exchange arrives, and the last one starts the next generation. The others
+        /// park on generation_ec until it does.
+        std::atomic<u64> word{};
+        retro_eventcount_t generation_ec{};
         u32 count;
-        u32 arrived{};
-        u64 generation{};
+
+        State() {
+            retro_eventcount_init(&generation_ec);
+        }
+        ~State() {
+            retro_eventcount_free(&generation_ec);
+        }
     };
     std::shared_ptr<State> state;
 };
@@ -297,7 +309,9 @@ struct Pthread {
     static constexpr u32 MaxDeferWaiters = 50;
 
     std::atomic<s32> tid;
-    std::unique_ptr<std::mutex> lock = std::make_unique<std::mutex>();
+    // Held across calls (libthr's thread lock): taken here, given back where the thread is
+    // collected
+    std::unique_ptr<Common::EventMutex> lock = std::make_unique<Common::EventMutex>();
     u32 cycle;
     std::atomic_int locklevel;
     std::atomic_int critical_count;
@@ -344,8 +358,9 @@ struct Pthread {
     int nwaiter_defer;
     WakeSemaphore* defer_waiters[MaxDeferWaiters]{};
     Pthread* join_target{};
-    std::mutex join_wait_mutex;
-    std::condition_variable join_wait_cv;
+    /// Notified when the thread has ended, and when its joiner is cancelled: the joiner parks
+    /// here
+    Common::EventCount join_wait;
 
     std::array<std::atomic<u32>, 128> pending_signal_counts{};
     std::array<std::atomic<u32>, 4> guest_sigmask{};

@@ -33,8 +33,7 @@ ThreadState::ThreadState() {
 
 void ThreadState::Collect(Pthread* curthread) {
     Common::SmallVector<Pthread*, 8> work_list;
-    {
-        std::scoped_lock lk{thread_list_lock};
+    thread_list_combiner.Run([&] {
         for (auto it = gc_list.begin(); it != gc_list.end();) {
             Pthread* td = *it;
             if (td->tid != TidTerminated) {
@@ -45,7 +44,7 @@ void ThreadState::Collect(Pthread* curthread) {
             work_list.push_back(td);
             it = gc_list.erase(it);
         }
-    }
+    });
     for (Pthread* td : work_list) {
         Free(curthread, td);
     }
@@ -61,13 +60,15 @@ void ThreadState::TryCollect(Pthread* thread) {
 
     thread->refcount++;
     thread->lock->unlock();
-    std::scoped_lock lk{thread_list_lock};
-    thread->lock->lock();
-    thread->refcount--;
-    if (thread->ShouldCollect()) {
-        threads.erase(thread);
-        gc_list.push_back(thread);
-    }
+    // The thread lock is taken again inside, and given back by the SCOPE_EXIT above
+    thread_list_combiner.Run([&] {
+        thread->lock->lock();
+        thread->refcount--;
+        if (thread->ShouldCollect()) {
+            threads.erase(thread);
+            gc_list.push_back(thread);
+        }
+    });
 }
 
 Pthread* ThreadState::Alloc(Pthread* curthread) {
@@ -76,13 +77,12 @@ Pthread* ThreadState::Alloc(Pthread* curthread) {
         if (GcNeeded()) {
             Collect(curthread);
         }
-        if (!free_threads.empty()) {
-            std::scoped_lock lk{free_thread_lock};
+        free_thread_combiner.Run([&] {
             if (!free_threads.empty()) {
                 thread = free_threads.back();
                 free_threads.pop_back();
             }
-        }
+        });
     }
     if (thread == nullptr) {
         if (total_threads > MaxThreads) {
@@ -97,8 +97,7 @@ Pthread* ThreadState::Alloc(Pthread* curthread) {
     }
     Core::Tcb* tcb = nullptr;
     if (curthread != nullptr) {
-        std::scoped_lock lk{tcb_lock};
-        tcb = TcbCtor(thread, 0 /* not initial tls */);
+        tcb = tcb_combiner.Run([&] { return TcbCtor(thread, 0 /* not initial tls */); });
     } else {
         tcb = TcbCtor(thread, 1 /* initial tls */);
     }
@@ -119,23 +118,21 @@ Pthread* ThreadState::Alloc(Pthread* curthread) {
 
 void ThreadState::Free(Pthread* curthread, Pthread* thread) {
     if (curthread != nullptr) {
-        std::scoped_lock lk{tcb_lock};
-        TcbDtor(thread->tcb);
+        tcb_combiner.Run([&] { TcbDtor(thread->tcb); });
     } else {
         TcbDtor(thread->tcb);
     }
     thread->tcb = nullptr;
     auto* sleepqueue = thread->sleepqueue;
     bool should_free;
-    {
-        std::scoped_lock lk{free_thread_lock};
+    free_thread_combiner.Run([&] {
         if (free_threads.size() >= MaxCachedThreads) {
             should_free = true;
         } else {
             should_free = false;
             free_threads.push_back(thread);
         }
-    }
+    });
     if (should_free) {
         delete sleepqueue;
         thread_heap.Free(thread);
@@ -147,17 +144,19 @@ int ThreadState::FindThread(Pthread* thread, const bool include_dead) {
     if (thread == nullptr) {
         return POSIX_EINVAL;
     }
-    std::scoped_lock lk{thread_list_lock};
-    const auto it = threads.find(thread);
-    if (it == threads.end()) {
-        return POSIX_ESRCH;
-    }
-    thread->lock->lock();
-    if (!include_dead && thread->state == PthreadState::Dead) {
-        thread->lock->unlock();
-        return POSIX_ESRCH;
-    }
-    return 0;
+    // Returns with the thread lock held when it finds the thread
+    return thread_list_combiner.Run([&] {
+        const auto it = threads.find(thread);
+        if (it == threads.end()) {
+            return POSIX_ESRCH;
+        }
+        thread->lock->lock();
+        if (!include_dead && thread->state == PthreadState::Dead) {
+            thread->lock->unlock();
+            return POSIX_ESRCH;
+        }
+        return 0;
+    });
 }
 
 int ThreadState::RefAdd(Pthread* thread, bool include_dead) {

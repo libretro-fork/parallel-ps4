@@ -44,15 +44,28 @@ s32 PS4_SYSV_ABI posix_pthread_barrier_wait(PthreadBarrierT* barrier) {
         return POSIX_EINVAL;
     }
     const auto value = (*barrier)->state;
-    std::unique_lock lock{value->mutex};
-    if (++value->arrived == value->count) {
-        value->arrived = 0;
-        ++value->generation;
-        value->cv.notify_all();
+    u64 word = value->word.load(std::memory_order_relaxed);
+    u64 next;
+    bool last;
+    do {
+        const u32 arrived = static_cast<u32>(word) + 1;
+        last = arrived == value->count;
+        next = last ? ((word >> 32) + 1) << 32 : (word & ~u64{0xFFFFFFFF}) | arrived;
+    } while (!value->word.compare_exchange_weak(word, next, std::memory_order_acq_rel,
+                                                std::memory_order_relaxed));
+    if (last) {
+        retro_eventcount_notify(&value->generation_ec);
         return PthreadBarrierSerialThread;
     }
-    const u64 generation = value->generation;
-    value->cv.wait(lock, [&] { return value->generation != generation; });
+    const u64 generation = word >> 32;
+    for (;;) {
+        const int key = retro_eventcount_prepare_wait(&value->generation_ec);
+        if ((value->word.load(std::memory_order_acquire) >> 32) != generation) {
+            retro_eventcount_cancel_wait(&value->generation_ec);
+            break;
+        }
+        retro_eventcount_commit_wait(&value->generation_ec, key);
+    }
     return 0;
 }
 
@@ -67,8 +80,7 @@ s32 PS4_SYSV_ABI posix_pthread_barrier_destroy(PthreadBarrierT* barrier) {
     }
     auto* handle = *barrier;
     const auto value = handle->state;
-    std::unique_lock lock{value->mutex};
-    if (value->arrived != 0) {
+    if (static_cast<u32>(value->word.load(std::memory_order_acquire)) != 0) {
         return POSIX_EBUSY;
     }
     *barrier = nullptr;

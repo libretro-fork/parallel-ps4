@@ -36,65 +36,69 @@ int ThreadState::CreateStack(PthreadAttr* attr) {
     attr->flags &= ~PthreadAttrFlags::StackUser;
 
     /*
-     * Use the garbage collector lock for synchronization of the
-     * spare stack lists and allocations from usrstack.
+     * The thread list's combiner keeps the spare stack lists and the
+     * allocations from usrstack in step.
      */
-    thread_list_lock.lock();
-
-    /*
-     * If the stack and guard sizes are default, try to allocate a stack
-     * from the default-size stack cache:
-     */
-    if (stacksize == ThrStackDefault && guardsize == ThrGuardDefault) {
-        if (!dstackq.empty()) {
-            /* Use the spare stack. */
-            Stack* spare_stack = dstackq.top();
-            dstackq.pop();
-            attr->stackaddr_attr = spare_stack->stackaddr;
+    VAddr new_stackaddr{};
+    const bool cached = thread_list_combiner.Run([&] {
+        /*
+         * If the stack and guard sizes are default, try to allocate a stack
+         * from the default-size stack cache:
+         */
+        if (stacksize == ThrStackDefault && guardsize == ThrGuardDefault) {
+            if (!dstackq.empty()) {
+                /* Use the spare stack. */
+                Stack* spare_stack = dstackq.top();
+                dstackq.pop();
+                attr->stackaddr_attr = spare_stack->stackaddr;
+            }
         }
-    }
-    /*
-     * The user specified a non-default stack and/or guard size, so try to
-     * allocate a stack from the non-default size stack cache, using the
-     * rounded up stack size (stack_size) in the search:
-     */
-    else {
-        const auto it = std::ranges::find_if(mstackq, [&](Stack* stack) {
-            return stack->stacksize == stacksize && stack->guardsize == guardsize;
-        });
-        if (it != mstackq.end()) {
-            attr->stackaddr_attr = (*it)->stackaddr;
-            mstackq.erase(it);
+        /*
+         * The user specified a non-default stack and/or guard size, so try to
+         * allocate a stack from the non-default size stack cache, using the
+         * rounded up stack size (stack_size) in the search:
+         */
+        else {
+            const auto it = std::ranges::find_if(mstackq, [&](Stack* stack) {
+                return stack->stacksize == stacksize && stack->guardsize == guardsize;
+            });
+            if (it != mstackq.end()) {
+                attr->stackaddr_attr = (*it)->stackaddr;
+                mstackq.erase(it);
+            }
         }
-    }
 
-    /* A cached stack was found.  Release the lock. */
-    if (attr->stackaddr_attr != nullptr) {
+        /* A cached stack was found. */
+        if (attr->stackaddr_attr != nullptr) {
+            return true;
+        }
+
+        /* Allocate a stack from usrstack. */
+        if (last_stack == 0) {
+            static constexpr VAddr UsrStack = 0x7EFFF8000ULL;
+            last_stack = UsrStack - ThrStackInitial - ThrGuardDefault;
+        }
+
+        /* Allocate a new stack. */
+        new_stackaddr = last_stack - stacksize - guardsize;
+
+        /*
+         * Even if stack allocation fails, we don't want to try to
+         * use this location again, so unconditionally decrement
+         * last_stack.  Under normal operating conditions, the most
+         * likely reason for an mmap() error is a stack overflow of
+         * the adjacent thread stack.
+         */
+        last_stack -= (stacksize + guardsize);
+
+        return false;
+    });
+    /* A cached stack was found. */
+    if (cached) {
         std::memset(attr->stackaddr_attr, 0, stacksize);
-        thread_list_lock.unlock();
         return 0;
     }
-
-    /* Allocate a stack from usrstack. */
-    if (last_stack == 0) {
-        static constexpr VAddr UsrStack = 0x7EFFF8000ULL;
-        last_stack = UsrStack - ThrStackInitial - ThrGuardDefault;
-    }
-
-    /* Allocate a new stack. */
-    VAddr stackaddr = last_stack - stacksize - guardsize;
-
-    /*
-     * Even if stack allocation fails, we don't want to try to
-     * use this location again, so unconditionally decrement
-     * last_stack.  Under normal operating conditions, the most
-     * likely reason for an mmap() error is a stack overflow of
-     * the adjacent thread stack.
-     */
-    last_stack -= (stacksize + guardsize);
-
-    /* Release the lock before mmap'ing it. */
-    thread_list_lock.unlock();
+    VAddr stackaddr = new_stackaddr;
 
     /* Map the stack and guard page together, and split guard
        page from allocated space: */

@@ -7,6 +7,7 @@
 #include <fmt/format.h>
 
 #include "common/assert.h"
+#include "common/combiner.h"
 #include "core/libraries/kernel/kernel.h"
 #include "core/libraries/kernel/posix_error.h"
 #include "core/libraries/kernel/threads/pthread.h"
@@ -16,7 +17,7 @@
 
 namespace Libraries::Kernel {
 
-static std::mutex CondStaticLock;
+static Common::Combiner CondStaticCombiner;
 
 #define THR_COND_INITIALIZER ((PthreadCond*)nullptr)
 #define THR_COND_DESTROYED ((PthreadCond*)1)
@@ -52,11 +53,12 @@ static int CondInit(PthreadCondT* cond, const PthreadCondAttrT* cond_attr, const
 }
 
 static int InitStatic(Pthread* thread, PthreadCondT* cond) {
-    std::scoped_lock lk{CondStaticLock};
-    if (*cond == nullptr) {
-        return CondInit(cond, nullptr, nullptr);
-    }
-    return 0;
+    return CondStaticCombiner.Run([&]() -> int {
+        if (*cond == nullptr) {
+            return CondInit(cond, nullptr, nullptr);
+        }
+        return 0;
+    });
 }
 
 #define CHECK_AND_INIT_COND                                                                        \

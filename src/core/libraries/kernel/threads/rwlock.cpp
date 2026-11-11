@@ -3,6 +3,7 @@
 
 #include <chrono>
 
+#include "common/combiner.h"
 #include "common/elf_info.h"
 #include "core/libraries/kernel/kernel.h"
 #include "core/libraries/kernel/posix_error.h"
@@ -12,7 +13,7 @@
 
 namespace Libraries::Kernel {
 
-static std::mutex RwlockStaticLock;
+static Common::Combiner RwlockStaticCombiner;
 static s32 sdk_version;
 
 #define THR_RWLOCK_INITIALIZER ((PthreadRwlock*)NULL)
@@ -60,15 +61,16 @@ int PS4_SYSV_ABI posix_pthread_rwlock_destroy(PthreadRwlockT* rwlock) {
 }
 
 static int InitStatic(Pthread* thread, PthreadRwlockT* rwlock) {
-    std::scoped_lock lk{RwlockStaticLock};
-    if (*rwlock == THR_RWLOCK_INITIALIZER) {
-        auto* prwlock = new (std::nothrow) PthreadRwlock{};
-        if (prwlock == nullptr) {
-            return POSIX_ENOMEM;
+    return RwlockStaticCombiner.Run([&]() -> int {
+        if (*rwlock == THR_RWLOCK_INITIALIZER) {
+            auto* prwlock = new (std::nothrow) PthreadRwlock{};
+            if (prwlock == nullptr) {
+                return POSIX_ENOMEM;
+            }
+            *rwlock = prwlock;
         }
-        *rwlock = prwlock;
-    }
-    return 0;
+        return 0;
+    });
 }
 
 int PS4_SYSV_ABI posix_pthread_rwlock_init(PthreadRwlockT* rwlock, const PthreadRwlockAttrT* attr) {

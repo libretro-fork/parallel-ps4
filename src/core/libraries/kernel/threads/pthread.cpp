@@ -78,12 +78,9 @@ static void ExitThread() {
      * Kernel will do wakeup at the address, so joiner thread
      * will be resumed if it is sleeping at the address.
      */
-    {
-        std::scoped_lock wait_lock{curthread->join_wait_mutex};
-        curthread->tid.store(TidTerminated, std::memory_order_release);
-    }
+    curthread->tid.store(TidTerminated, std::memory_order_release);
     curthread->tid.notify_all();
-    curthread->join_wait_cv.notify_all();
+    retro_eventcount_notify(curthread->join_wait.get());
 
     curthread->native_thr->Exit();
     UNREACHABLE();
@@ -189,25 +186,36 @@ static int JoinThread(PthreadT pthread, void** thread_return, const OrbisKernelT
     curthread->cancel_point = true;
     PthreadTestCancel();
 
-    std::unique_lock wait_lock{pthread->join_wait_mutex};
     const auto finished_or_cancelled = [&] {
         return pthread->tid.load(std::memory_order_acquire) == TidTerminated ||
                curthread->ShouldCancel();
     };
     while (pthread->tid.load(std::memory_order_acquire) != TidTerminated) {
         if (curthread->ShouldCancel()) {
-            wait_lock.unlock();
             PthreadTestCancel();
         }
-        if (abstime == nullptr) {
-            pthread->join_wait_cv.wait(wait_lock, finished_or_cancelled);
-        } else if (!pthread->join_wait_cv.wait_until(wait_lock, abstime->TimePoint(),
-                                                     finished_or_cancelled)) {
-            ret = POSIX_ETIMEDOUT;
-            break;
+        const int key = retro_eventcount_prepare_wait(pthread->join_wait.get());
+        if (finished_or_cancelled()) {
+            retro_eventcount_cancel_wait(pthread->join_wait.get());
+            continue;
         }
+        if (abstime == nullptr) {
+            retro_eventcount_commit_wait(pthread->join_wait.get(), key);
+            continue;
+        }
+        const auto left = std::chrono::ceil<std::chrono::microseconds>(
+                              abstime->TimePoint() - std::chrono::system_clock::now())
+                              .count();
+        if (left <= 0) {
+            retro_eventcount_cancel_wait(pthread->join_wait.get());
+            if (!finished_or_cancelled()) {
+                ret = POSIX_ETIMEDOUT;
+                break;
+            }
+            continue;
+        }
+        retro_eventcount_commit_wait_timeout(pthread->join_wait.get(), key, left);
     }
-    wait_lock.unlock();
 
     curthread->cancel_point = false;
     {
@@ -785,19 +793,15 @@ int PS4_SYSV_ABI posix_pthread_cancel(PthreadT thread) {
 
     Pthread* join_target = thread->join_target;
     bool newly_pending;
-    if (join_target != nullptr) {
-        std::scoped_lock wait_lock{join_target->join_wait_mutex};
-        newly_pending = !thread->cancel_pending.exchange(true);
-    } else {
-        newly_pending = !thread->cancel_pending.exchange(true);
-    }
+    // The joiner looks at this after it opens its wait, so the notify below reaches it
+    newly_pending = !thread->cancel_pending.exchange(true);
     // libkernel interrupts the target only when cancellation first becomes pending. The
     // per-thread wake predicate is the host equivalent and is drained before each wait.
     if (newly_pending) {
         thread->wake_sema.release();
         thread->signal_sema.release();
         if (join_target != nullptr) {
-            join_target->join_wait_cv.notify_all();
+            retro_eventcount_notify(join_target->join_wait.get());
         }
         if (thread != g_curthread) {
             InterruptPthreadForCancellation(thread);

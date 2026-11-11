@@ -8,6 +8,7 @@
 #include <mutex>
 #include <set>
 #include <stack>
+#include "common/combiner.h"
 #include "common/singleton.h"
 #include "common/slab_heap.h"
 #include "common/types.h"
@@ -53,18 +54,12 @@ struct ThreadState {
     void FreeStack(PthreadAttr* attr);
 
     void Link(Pthread* curthread, Pthread* thread) {
-        {
-            std::scoped_lock lk{thread_list_lock};
-            threads.insert(thread);
-        }
+        thread_list_combiner.Run([&] { threads.insert(thread); });
         active_threads.fetch_add(1);
     }
 
     void Unlink(Pthread* curthread, Pthread* thread) {
-        {
-            std::scoped_lock lk{thread_list_lock};
-            threads.erase(thread);
-        }
+        thread_list_combiner.Run([&] { threads.erase(thread); });
         active_threads.fetch_sub(1);
     }
 
@@ -72,9 +67,10 @@ struct ThreadState {
     std::set<Pthread*> threads;
     std::list<Pthread*> free_threads;
     std::list<Pthread*> gc_list;
-    std::mutex free_thread_lock;
-    std::mutex tcb_lock;
-    std::mutex thread_list_lock;
+    // Each list, and the TLS blocks, changes one call at a time in its own combiner
+    Common::Combiner free_thread_combiner;
+    Common::Combiner tcb_combiner;
+    Common::Combiner thread_list_combiner;
     std::atomic<s32> total_threads{};
     std::atomic<s32> active_threads{};
     std::stack<Stack*> dstackq;

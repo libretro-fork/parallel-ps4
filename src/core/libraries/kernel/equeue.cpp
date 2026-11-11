@@ -190,9 +190,7 @@ bool EqueueInternal::AddEvent(EqueueEvent& event) {
     const u64 id = event.event.ident;
     const auto filter = event.event.filter;
 
-    {
-        std::scoped_lock lock{m_mutex};
-
+    const bool updated = m_combiner.Run([&] {
         // Calculate timer interval
         event.time_added = std::chrono::steady_clock::now();
         if (event.event.filter == OrbisKernelEvent::Filter::Timer) {
@@ -243,7 +241,7 @@ bool EqueueInternal::AddEvent(EqueueEvent& event) {
             old_event.event.data = event.event.data;
             CheckIoEvent(old_event);
             if (old_event.IsTriggered()) {
-                m_cond.notify_all();
+                m_wake.Notify();
             }
             return true;
         }
@@ -255,8 +253,12 @@ bool EqueueInternal::AddEvent(EqueueEvent& event) {
         m_events.emplace_back(std::move(event));
 
         if (is_triggered) {
-            m_cond.notify_all();
+            m_wake.Notify();
         }
+        return false;
+    });
+    if (updated) {
+        return true;
     }
 
     // Schedule callbacks for timer events
@@ -271,59 +273,59 @@ bool EqueueInternal::AddEvent(EqueueEvent& event) {
 
 bool EqueueInternal::ScheduleEvent(u64 id, s16 filter,
                                    void (*callback)(OrbisKernelEqueue, const OrbisKernelEvent&)) {
-    std::scoped_lock lock{m_mutex};
+    return m_combiner.Run([&]() -> bool {
+        const auto& it = std::ranges::find_if(m_events, [id, filter](auto& ev) {
+            return ev.event.ident == id && ev.event.filter == filter;
+        });
+        if (it == m_events.cend()) {
+            return false;
+        }
 
-    const auto& it = std::ranges::find_if(m_events, [id, filter](auto& ev) {
-        return ev.event.ident == id && ev.event.filter == filter;
+        const auto& event = *it;
+        ASSERT(event.event.filter == OrbisKernelEvent::Filter::Timer ||
+               event.event.filter == OrbisKernelEvent::Filter::HrTimer);
+
+        if (it->timer_generation == 0) {
+            it->timer_due = std::chrono::steady_clock::now() + event.timer_interval;
+        } else {
+            // Already armed: the next period starts where the last one ended
+            it->timer_due += event.timer_interval;
+        }
+        it->timer_generation = TimerService::NextGeneration();
+        g_timer_service.Arm({it->timer_due, m_handle, event.event, it->timer_generation, callback});
+
+        return true;
     });
-    if (it == m_events.cend()) {
-        return false;
-    }
-
-    const auto& event = *it;
-    ASSERT(event.event.filter == OrbisKernelEvent::Filter::Timer ||
-           event.event.filter == OrbisKernelEvent::Filter::HrTimer);
-
-    if (it->timer_generation == 0) {
-        it->timer_due = std::chrono::steady_clock::now() + event.timer_interval;
-    } else {
-        // Already armed: the next period starts where the last one ended
-        it->timer_due += event.timer_interval;
-    }
-    it->timer_generation = TimerService::NextGeneration();
-    g_timer_service.Arm({it->timer_due, m_handle, event.event, it->timer_generation, callback});
-
-    return true;
 }
 
 bool EqueueInternal::TimerCurrent(u64 id, s16 filter, u64 generation) {
-    std::scoped_lock lock{m_mutex};
-    return std::ranges::any_of(m_events, [&](const EqueueEvent& ev) {
-        return ev.event.ident == id && ev.event.filter == filter &&
-               ev.timer_generation == generation;
+    return m_combiner.Run([&]() -> bool {
+        return std::ranges::any_of(m_events, [&](const EqueueEvent& ev) {
+            return ev.event.ident == id && ev.event.filter == filter &&
+                   ev.timer_generation == generation;
+        });
     });
 }
 
 bool EqueueInternal::RemoveEvent(u64 id, s16 filter) {
     bool has_found = false;
-    std::scoped_lock lock{m_mutex};
-
-    const auto& it = std::ranges::find_if(m_events, [id, filter](auto& ev) {
-        return ev.event.ident == id && ev.event.filter == filter;
+    return m_combiner.Run([&]() -> bool {
+        const auto& it = std::ranges::find_if(m_events, [id, filter](auto& ev) {
+            return ev.event.ident == id && ev.event.filter == filter;
+        });
+        if (it != m_events.cend()) {
+            m_events.erase(it);
+            has_found = true;
+        }
+        return has_found;
     });
-    if (it != m_events.cend()) {
-        m_events.erase(it);
-        has_found = true;
-    }
-    return has_found;
 }
 
 int EqueueInternal::WaitForEvents(OrbisKernelEvent* ev, int num, const OrbisKernelUseconds* timo) {
     if (timo != nullptr && *timo == 0) {
         // Effectively acts as a poll; only events that have already
         // arrived at the time of this function call can be received
-        std::scoped_lock lock{m_mutex};
-        return GetTriggeredEvents(ev, num);
+        return m_combiner.Run([&] { return GetTriggeredEvents(ev, num); });
     }
     const auto micros = timo ? *timo : 0u;
 
@@ -333,38 +335,37 @@ int EqueueInternal::WaitForEvents(OrbisKernelEvent* ev, int num, const OrbisKern
     }
 
     int count = 0;
-
-    std::unique_lock lock{m_mutex};
-    if (micros == 0) {
-        // Wait indefinitely for events
-        if (HasPendingIoEvents()) {
-            while ((count = GetTriggeredEvents(ev, num)) == 0) {
-                m_cond.wait_for(lock, std::chrono::milliseconds(10));
-            }
-        } else {
-            m_cond.wait(lock, [&] {
-                count = GetTriggeredEvents(ev, num);
-                return count > 0;
-            });
+    const auto take = [&] {
+        count = m_combiner.Run([&] { return GetTriggeredEvents(ev, num); });
+        return count > 0;
+    };
+    // I/O readiness is looked at, not notified: with I/O events pending the wait is cut in
+    // slices of at most 10 ms
+    const bool poll_io = m_combiner.Run([&] { return HasPendingIoEvents(); });
+    const bool forever = micros == 0;
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::microseconds(micros);
+    while (!take()) {
+        const int key = retro_eventcount_prepare_wait(m_wake.get());
+        if (take()) {
+            retro_eventcount_cancel_wait(m_wake.get());
+            break;
         }
-    } else {
-        // Wait up until the timeout value
-        if (HasPendingIoEvents()) {
-            const auto deadline =
-                std::chrono::steady_clock::now() + std::chrono::microseconds(micros);
-            while ((count = GetTriggeredEvents(ev, num)) == 0 &&
-                   std::chrono::steady_clock::now() < deadline) {
-                const auto remaining = std::chrono::duration_cast<std::chrono::milliseconds>(
-                    deadline - std::chrono::steady_clock::now());
-                const auto slice = std::clamp(remaining, std::chrono::milliseconds(1),
-                                              std::chrono::milliseconds(10));
-                m_cond.wait_for(lock, slice);
+        s64 slice_us = poll_io ? 10'000 : -1;
+        if (!forever) {
+            const auto left = std::chrono::ceil<std::chrono::microseconds>(
+                                  deadline - std::chrono::steady_clock::now())
+                                  .count();
+            if (left <= 0) {
+                retro_eventcount_cancel_wait(m_wake.get());
+                take();
+                break;
             }
+            slice_us = slice_us < 0 ? left : std::clamp<s64>(left, 1'000, slice_us);
+        }
+        if (slice_us < 0) {
+            retro_eventcount_commit_wait(m_wake.get(), key);
         } else {
-            m_cond.wait_for(lock, std::chrono::microseconds(micros), [&] {
-                count = GetTriggeredEvents(ev, num);
-                return count > 0;
-            });
+            retro_eventcount_commit_wait_timeout(m_wake.get(), key, slice_us);
         }
     }
 
@@ -373,8 +374,7 @@ int EqueueInternal::WaitForEvents(OrbisKernelEvent* ev, int num, const OrbisKern
 
 bool EqueueInternal::TriggerEvent(u64 ident, s16 filter, void* trigger_data) {
     bool has_found = false;
-    {
-        std::scoped_lock lock{m_mutex};
+    m_combiner.Run([&] {
         for (auto& event : m_events) {
             if (event.event.ident == ident && event.event.filter == filter) {
                 if (filter == OrbisKernelEvent::Filter::VideoOut) {
@@ -390,8 +390,8 @@ bool EqueueInternal::TriggerEvent(u64 ident, s16 filter, void* trigger_data) {
                 has_found = true;
             }
         }
-    }
-    m_cond.notify_all();
+    });
+    m_wake.Notify();
     return has_found;
 }
 
@@ -527,12 +527,9 @@ bool EqueueInternal::AddSmallTimer(EqueueEvent& ev) {
     st.event = ev.event;
     st.added = std::chrono::steady_clock::now();
     st.interval = std::chrono::nanoseconds(ts.tv_nsec + ts.tv_sec * 1000000000);
-    {
-        std::scoped_lock lock{m_mutex};
-        m_small_timers[st.event.ident] = std::move(st);
-    }
+    m_combiner.Run([&] { m_small_timers[st.event.ident] = std::move(st); });
     // A waiter sleeping toward a later timer looks again
-    m_cond.notify_all();
+    m_wake.Notify();
     return true;
 }
 
@@ -550,47 +547,54 @@ int EqueueInternal::WaitForSmallTimer(OrbisKernelEvent* ev, int num, u32 micros)
 #endif
     const auto wait_end =
         (micros == 0) ? Clock::time_point::max() : Clock::now() + std::chrono::microseconds{micros};
-    std::unique_lock lock{m_mutex};
     for (;;) {
+        // Opened before looking, so that a timer added or removed after the look wakes it
+        const int key = retro_eventcount_prepare_wait(m_wake.get());
         const auto now = Clock::now();
         int count = 0;
         auto first_due = Clock::time_point::max();
-        for (auto it = m_small_timers.begin(); it != m_small_timers.end() && count < num;) {
-            const SmallTimer& st = it->second;
-            const auto due = st.added + st.interval;
-            if (now >= due) {
-                ev[count++] = st.event;
-                it = m_small_timers.erase(it);
-            } else {
-                first_due = std::min(first_due, due);
-                ++it;
+        m_combiner.Run([&] {
+            for (auto it = m_small_timers.begin(); it != m_small_timers.end() && count < num;) {
+                const SmallTimer& st = it->second;
+                const auto due = st.added + st.interval;
+                if (now >= due) {
+                    ev[count++] = st.event;
+                    it = m_small_timers.erase(it);
+                } else {
+                    first_due = std::min(first_due, due);
+                    ++it;
+                }
             }
-        }
+        });
         if (count > 0) {
+            retro_eventcount_cancel_wait(m_wake.get());
             return count;
         }
         if (now >= wait_end) {
+            retro_eventcount_cancel_wait(m_wake.get());
             return 0;
         }
         const auto until = std::min(first_due, wait_end);
         if (until - now > spin_window) {
-            m_cond.wait_until(lock, until - spin_window);
+            const auto sleep_us =
+                std::chrono::duration_cast<std::chrono::microseconds>(until - spin_window - now);
+            retro_eventcount_commit_wait_timeout(m_wake.get(), key,
+                                                 std::max<s64>(sleep_us.count(), 1));
         } else {
-            lock.unlock();
+            retro_eventcount_cancel_wait(m_wake.get());
             std::this_thread::yield();
-            lock.lock();
         }
     }
 }
 
 bool EqueueInternal::EventExists(u64 id, s16 filter) {
-    std::scoped_lock lock{m_mutex};
+    return m_combiner.Run([&]() -> bool {
+        const auto& it = std::ranges::find_if(m_events, [id, filter](auto& ev) {
+            return ev.event.ident == id && ev.event.filter == filter;
+        });
 
-    const auto& it = std::ranges::find_if(m_events, [id, filter](auto& ev) {
-        return ev.event.ident == id && ev.event.filter == filter;
+        return it != m_events.cend();
     });
-
-    return it != m_events.cend();
 }
 
 s32 PS4_SYSV_ABI posix_kqueue() {

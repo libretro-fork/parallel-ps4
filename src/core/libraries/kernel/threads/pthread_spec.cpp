@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright 2024-2026 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include "common/combiner.h"
 #include "core/libraries/kernel/kernel.h"
 #include "core/libraries/kernel/posix_error.h"
 #include "core/libraries/kernel/threads/pthread.h"
@@ -15,20 +16,21 @@ static constexpr u32 PthreadKeysMax = 256;
 static constexpr u32 PthreadDestructorIterations = 4;
 
 static std::array<PthreadKey, PthreadKeysMax> ThreadKeytable{};
-static std::mutex KeytableLock;
+static Common::Combiner KeytableCombiner;
 
 int PS4_SYSV_ABI posix_pthread_key_create(PthreadKeyT* key, PthreadKeyDestructor destructor) {
-    std::scoped_lock lk{KeytableLock};
-    const auto it = std::ranges::find_if(
-        ThreadKeytable, [](const PthreadKey& k) { return k.allocated.load() == 0; });
-    if (it != ThreadKeytable.end()) {
-        it->allocated = 1;
-        it->destructor = destructor;
-        it->seqno++;
-        *key = static_cast<PthreadKeyT>(std::distance(ThreadKeytable.begin(), it));
-        return 0;
-    }
-    return POSIX_EAGAIN;
+    return KeytableCombiner.Run([&]() -> int {
+        const auto it = std::ranges::find_if(
+            ThreadKeytable, [](const PthreadKey& k) { return k.allocated.load() == 0; });
+        if (it != ThreadKeytable.end()) {
+            it->allocated = 1;
+            it->destructor = destructor;
+            it->seqno++;
+            *key = static_cast<PthreadKeyT>(std::distance(ThreadKeytable.begin(), it));
+            return 0;
+        }
+        return POSIX_EAGAIN;
+    });
 }
 
 int PS4_SYSV_ABI posix_pthread_key_delete(PthreadKeyT key) {
@@ -36,13 +38,14 @@ int PS4_SYSV_ABI posix_pthread_key_delete(PthreadKeyT key) {
         return POSIX_EINVAL;
     }
 
-    std::scoped_lock lk{KeytableLock};
-    if (!ThreadKeytable[key].allocated) {
-        return POSIX_EINVAL;
-    }
+    return KeytableCombiner.Run([&]() -> int {
+        if (!ThreadKeytable[key].allocated) {
+            return POSIX_EINVAL;
+        }
 
-    ThreadKeytable[key].allocated = 0;
-    return 0;
+        ThreadKeytable[key].allocated = 0;
+        return 0;
+    });
 }
 
 void _thread_cleanupspecific() {
@@ -54,47 +57,43 @@ void _thread_cleanupspecific() {
         return;
     }
 
-    std::unique_lock lk{KeytableLock};
     for (int i = 0; (i < PthreadDestructorIterations) && (curthread->specific_data_count > 0);
          i++) {
         for (int key = 0; (key < PthreadKeysMax) && (curthread->specific_data_count > 0); key++) {
             destructor = nullptr;
 
-            if (ThreadKeytable[key].allocated && (curthread->specific[key].data != nullptr)) {
-                if (curthread->specific[key].seqno == ThreadKeytable[key].seqno) {
-                    data = curthread->specific[key].data;
-                    destructor = ThreadKeytable[key].destructor;
+            // The table is read in its combiner; the destructor runs outside it
+            KeytableCombiner.Run([&] {
+                if (ThreadKeytable[key].allocated && (curthread->specific[key].data != nullptr)) {
+                    if (curthread->specific[key].seqno == ThreadKeytable[key].seqno) {
+                        data = curthread->specific[key].data;
+                        destructor = ThreadKeytable[key].destructor;
+                    }
+                    curthread->specific[key].data = nullptr;
+                    curthread->specific_data_count--;
+                } else if (curthread->specific[key].data != nullptr) {
+                    /*
+                     * This can happen if the key is deleted via
+                     * pthread_key_delete without first setting the value
+                     * to NULL in all threads.  POSIX says that the
+                     * destructor is not invoked in this case.
+                     */
+                    curthread->specific[key].data = nullptr;
+                    curthread->specific_data_count--;
                 }
-                curthread->specific[key].data = nullptr;
-                curthread->specific_data_count--;
-            } else if (curthread->specific[key].data != nullptr) {
-                /*
-                 * This can happen if the key is deleted via
-                 * pthread_key_delete without first setting the value
-                 * to NULL in all threads.  POSIX says that the
-                 * destructor is not invoked in this case.
-                 */
-                curthread->specific[key].data = nullptr;
-                curthread->specific_data_count--;
-            }
+            });
 
             /*
              * If there is a destructor, call it
-             * with the key table entry unlocked:
+             * outside the key table's combiner:
              */
             if (destructor != nullptr) {
-                /*
-                 * Don't hold the lock while calling the
-                 * destructor:
-                 */
-                lk.unlock();
 #ifdef SHADPS4_ENABLE_FEX_GUEST_CPU
                 Core::GuestCpu::RunGuestFunctionOrAbort(
                     reinterpret_cast<void*>(destructor), "pthread key destructor", data);
 #else
                 destructor(data);
 #endif
-                lk.lock();
             }
         }
     }

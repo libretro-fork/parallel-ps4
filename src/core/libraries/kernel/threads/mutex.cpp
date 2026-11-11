@@ -6,6 +6,7 @@
 
 #include "common/arch.h"
 #include "common/assert.h"
+#include "common/combiner.h"
 #include "common/types.h"
 #include "core/libraries/kernel/kernel.h"
 #include "core/libraries/kernel/posix_error.h"
@@ -15,7 +16,7 @@
 namespace Libraries::Kernel {
 
 static constexpr u32 MUTEX_ADAPTIVE_SPINS = 2000;
-static std::mutex MutxStaticLock;
+static Common::Combiner MutxStaticCombiner;
 
 #define THR_MUTEX_INITIALIZER ((PthreadMutex*)NULL)
 #define THR_ADAPTIVE_MUTEX_INITIALIZER ((PthreadMutex*)1)
@@ -87,14 +88,14 @@ static s32 MutexInit(PthreadMutexT* mutex, const PthreadMutexAttr* mutex_attr, c
 }
 
 static s32 InitStatic(Pthread* thread, PthreadMutexT* mutex) {
-    std::scoped_lock lk{MutxStaticLock};
-
-    if (*mutex == THR_MUTEX_INITIALIZER) {
-        return MutexInit(mutex, &PthreadMutexattrDefault, nullptr);
-    } else if (*mutex == THR_ADAPTIVE_MUTEX_INITIALIZER) {
-        return MutexInit(mutex, &PthreadMutexattrAdaptiveDefault, nullptr);
-    }
-    return 0;
+    return MutxStaticCombiner.Run([&]() -> s32 {
+        if (*mutex == THR_MUTEX_INITIALIZER) {
+            return MutexInit(mutex, &PthreadMutexattrDefault, nullptr);
+        } else if (*mutex == THR_ADAPTIVE_MUTEX_INITIALIZER) {
+            return MutexInit(mutex, &PthreadMutexattrAdaptiveDefault, nullptr);
+        }
+        return 0;
+    });
 }
 
 s32 PS4_SYSV_ABI posix_pthread_mutex_init(PthreadMutexT* mutex,
