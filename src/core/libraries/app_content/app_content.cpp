@@ -650,11 +650,10 @@ int PS4_SYSV_ABI sceAppContentTemporaryDataMount2(OrbisAppContentTemporaryDataOp
     const auto tid = !title_id.empty() ? title_id : param_sfo->GetString("TITLE_ID").value_or("");
     const auto mount_temp_dir = Common::FS::GetUserPath(Common::FS::PathType::TempDataDir) / tid;
 
-    std::error_code ec;
     if (option == ORBIS_APP_CONTENT_TEMPORARY_DATA_OPTION_FORMAT) {
-        std::filesystem::remove_all(mount_temp_dir, ec);
+        Common::FS::RemoveAll(mount_temp_dir);
     }
-    std::filesystem::create_directories(mount_temp_dir, ec);
+    Common::FS::CreateDirectories(mount_temp_dir);
 
     static constexpr std::string_view TmpMount = "/temp0";
     TmpMount.copy(mountPoint->data, TmpMount.size());

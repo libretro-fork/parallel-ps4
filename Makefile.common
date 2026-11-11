@@ -387,7 +387,7 @@ LRC_SOURCES_C += $(addprefix $(LRC_DIR)/encodings/,encoding_base64.c \
 	encoding_crc32.c encoding_deflate.c encoding_rzstd.c encoding_utf.c encoding_xxh3.c \
 	encoding_xxh64.c)
 LRC_SOURCES_C += $(addprefix $(LRC_DIR)/features/,features_cpu.c)
-LRC_SOURCES_C += $(addprefix $(LRC_DIR)/file/,file_path.c file_path_io.c)
+LRC_SOURCES_C += $(addprefix $(LRC_DIR)/file/,file_path.c file_path_io.c retro_dirent.c)
 LRC_SOURCES_C += $(addprefix $(LRC_DIR)/formats/aac/,raac.c)
 LRC_SOURCES_C += $(addprefix $(LRC_DIR)/formats/atrac9/,ratrac9.c)
 LRC_SOURCES_C += $(addprefix $(LRC_DIR)/formats/flac/,rflac.c)

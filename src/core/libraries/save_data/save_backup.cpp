@@ -15,6 +15,7 @@
 #include "common/io_file.h"
 #include "common/logging/formatter.h"
 #include "common/logging/log.h"
+#include "common/path_util.h"
 #include "common/polyfill_thread.h"
 #include "common/thread.h"
 
@@ -28,18 +29,9 @@ namespace fs = std::filesystem;
 namespace Libraries::SaveData::Backup {
 
 static void CopyShareReadWrite(const std::filesystem::path& from, const std::filesystem::path& to) {
-    std::error_code ec;
-    if (fs::is_directory(from, ec)) {
-        fs::create_directories(to, ec);
-        for (const auto& entry : fs::directory_iterator(from)) {
-            CopyShareReadWrite(entry.path(), to / entry.path().filename());
-        }
-        return;
-    }
-
-    // Through the VFS's copy, which clones the file where the file system can and otherwise
+    // Through the VFS's copy, which clones each file where the file system can and otherwise
     // moves it without holding all of it
-    if (!Common::FS::CopyFile(from, to)) {
+    if (!Common::FS::CopyAll(from, to)) {
         LOG_ERROR(Lib_SaveData, "Backup: failed to copy {} to {}", fmt::UTF(from.u8string()),
                   fmt::UTF(to.u8string()));
     }
@@ -59,7 +51,7 @@ static std::atomic g_backup_status = WorkerStatus::NotStarted;
 
 static void backup(const std::filesystem::path& dir_name) {
     std::unique_lock lk{g_backup_running_mutex};
-    if (!fs::exists(dir_name)) {
+    if (!Common::FS::Exists(dir_name)) {
         return;
     }
 
@@ -67,35 +59,34 @@ static void backup(const std::filesystem::path& dir_name) {
     const auto backup_dir_tmp = dir_name / ::backup_dir_tmp;
     const auto backup_dir_old = dir_name / ::backup_dir_old;
 
-    fs::remove_all(backup_dir_tmp);
-    fs::remove_all(backup_dir_old);
+    Common::FS::RemoveAll(backup_dir_tmp);
+    Common::FS::RemoveAll(backup_dir_old);
 
     std::vector<std::filesystem::path> backup_files;
-    for (const auto& entry : fs::directory_iterator(dir_name)) {
-        const auto filename = entry.path().filename();
-        if (filename != ::backup_dir) {
-            backup_files.push_back(entry.path());
+    Common::FS::ForEachEntry(dir_name, [&](std::string_view name, bool) {
+        if (name != ::backup_dir) {
+            backup_files.push_back(dir_name / Common::FS::PathFromUTF8String(name));
         }
-    }
+    });
 
     g_backup_progress = 0;
 
     int total_count = static_cast<int>(backup_files.size());
     int current_count = 0;
 
-    fs::create_directory(backup_dir_tmp);
+    Common::FS::CreateDirectories(backup_dir_tmp);
     for (const auto& file : backup_files) {
         CopyShareReadWrite(file, backup_dir_tmp / file.filename());
         current_count++;
         g_backup_progress = current_count * 100 / total_count;
     }
-    bool has_existing_backup = fs::exists(backup_dir);
+    bool has_existing_backup = Common::FS::Exists(backup_dir);
     if (has_existing_backup) {
-        fs::rename(backup_dir, backup_dir_old);
+        Common::FS::Rename(backup_dir, backup_dir_old);
     }
-    fs::rename(backup_dir_tmp, backup_dir);
+    Common::FS::Rename(backup_dir_tmp, backup_dir);
     if (has_existing_backup) {
-        fs::remove_all(backup_dir_old);
+        Common::FS::RemoveAll(backup_dir_old);
     }
 }
 
@@ -216,20 +207,15 @@ bool NewRequest(Libraries::UserService::OrbisUserServiceUserId user_id, std::str
 bool Restore(const std::filesystem::path& save_path) {
     LOG_INFO(Lib_SaveData, "Restoring backup for {}", fmt::UTF(save_path.u8string()));
     std::unique_lock lk{g_backup_running_mutex};
-    if (!fs::exists(save_path) || !fs::exists(save_path / backup_dir)) {
+    if (!Common::FS::Exists(save_path) || !Common::FS::Exists(save_path / backup_dir)) {
         return false;
     }
-    for (const auto& entry : fs::directory_iterator(save_path)) {
-        const auto filename = entry.path().filename();
-        if (filename != backup_dir) {
-            fs::remove_all(entry.path());
+    Common::FS::ForEachEntry(save_path, [&](std::string_view name, bool) {
+        if (name != backup_dir) {
+            Common::FS::RemoveAll(save_path / Common::FS::PathFromUTF8String(name));
         }
-    }
-
-    for (const auto& entry : fs::directory_iterator(save_path / backup_dir)) {
-        const auto filename = entry.path().filename();
-        fs::copy(entry.path(), save_path / filename, fs::copy_options::recursive);
-    }
+    });
+    Common::FS::CopyAll(save_path / backup_dir, save_path);
 
     return true;
 }

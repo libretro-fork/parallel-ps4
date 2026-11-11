@@ -1387,8 +1387,7 @@ s32 PS4_SYSV_ABI posix_rename(const char* from, const char* to) {
         *__Error() = POSIX_EROFS;
         return -1;
     }
-    std::error_code ec;
-    if (!fs::exists(src_path, ec)) {
+    if (!Common::FS::Exists(src_path)) {
         *__Error() = POSIX_ENOENT;
         return -1;
     }
@@ -1397,14 +1396,18 @@ s32 PS4_SYSV_ABI posix_rename(const char* from, const char* to) {
         *__Error() = POSIX_EROFS;
         return -1;
     }
-    if (src_path == dst_path ||
-        (fs::exists(dst_path, ec) && fs::equivalent(src_path, dst_path, ec))) {
+    if (src_path == dst_path) {
         return ORBIS_OK;
     }
-    const bool src_is_dir = fs::is_directory(src_path, ec);
-    const bool dst_is_dir = fs::is_directory(dst_path, ec);
-
-    if (fs::exists(dst_path, ec)) {
+    const auto src_info = Common::FS::GetFileInfo(src_path);
+    const auto dst_info = Common::FS::GetFileInfo(dst_path);
+    if (src_info && dst_info && src_info->identity == dst_info->identity) {
+        // Two names of one file
+        return ORBIS_OK;
+    }
+    const bool src_is_dir = src_info && src_info->is_directory;
+    if (dst_info) {
+        const bool dst_is_dir = dst_info->is_directory;
         if (src_is_dir && !dst_is_dir) {
             *__Error() = POSIX_ENOTDIR;
             return -1;
@@ -1413,36 +1416,46 @@ s32 PS4_SYSV_ABI posix_rename(const char* from, const char* to) {
             *__Error() = POSIX_EISDIR;
             return -1;
         }
-        if (dst_is_dir && !fs::is_empty(dst_path, ec)) {
-            *__Error() = POSIX_ENOTEMPTY;
-            return -1;
+        if (dst_is_dir) {
+            bool empty = true;
+            Common::FS::ForEachEntry(dst_path, [&](std::string_view, bool) { empty = false; });
+            if (!empty) {
+                *__Error() = POSIX_ENOTEMPTY;
+                return -1;
+            }
+            // An empty directory is replaced; not every host's rename replaces one
+            Common::FS::RemoveAll(dst_path);
         }
     }
 
-    // On Windows, fs::rename will error if the file has been opened before.
-    fs::copy(src_path, dst_path, fs::copy_options::overwrite_existing | fs::copy_options::recursive,
-             ec);
-    if (ec) {
-        *__Error() = POSIX_EIO;
-        return -1;
-    }
+    // Moved, not copied. A file the game has open is closed for the move (Windows will not
+    // move an open file) and opened again at its new name.
     auto* h = Common::Singleton<Core::FileSys::HandleTable>::Instance();
     auto file = h->GetFile(src_path);
+    Common::FS::FileAccessMode access_mode = Common::FS::FileAccessMode::ReadWrite;
     if (file) {
-        Common::FS::FileAccessMode access_mode = Common::FS::FileAccessMode::ReadWrite;
         if (auto* host = file->GetHostFile()) {
             access_mode = host->GetAccessMode();
         }
         file->handle.reset();
-        fs::remove(src_path, ec);
-        // Reopen through the mount stack at the destination guest path.
-        file->handle = mnt->Open(std::string_view(to), access_mode);
-        file->m_host_name = dst_path;
-        file->m_guest_name = to;
-    } else {
-        fs::remove_all(src_path, ec);
     }
-
+    bool moved = Common::FS::Rename(src_path, dst_path);
+    if (!moved) {
+        // Across file systems: copied, then the source removed
+        moved = Common::FS::CopyAll(src_path, dst_path) && Common::FS::RemoveAll(src_path);
+    }
+    if (file) {
+        // Through the mount stack, at whichever name the file now has
+        file->handle = mnt->Open(std::string_view(moved ? to : from), access_mode);
+        if (moved) {
+            file->m_host_name = dst_path;
+            file->m_guest_name = to;
+        }
+    }
+    if (!moved) {
+        *__Error() = POSIX_EIO;
+        return -1;
+    }
     return ORBIS_OK;
 }
 

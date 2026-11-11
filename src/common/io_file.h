@@ -4,6 +4,7 @@
 #pragma once
 
 #include <filesystem>
+#include <functional>
 #include <optional>
 #include <span>
 #include <string>
@@ -278,6 +279,26 @@ private:
 
 /// Copies the file at @from to @to through the VFS, which clones it where the file system can.
 bool CopyFile(const std::filesystem::path& from, const std::filesystem::path& to);
+
+// Files and directories through libretro-common (file/file_path.h, retro_dirent.h)
+
+/// True when there is something at @path.
+bool Exists(const std::filesystem::path& path);
+bool IsDirectory(const std::filesystem::path& path);
+/// Makes the directory @path and any of its parents that are missing; true when it is there.
+bool CreateDirectories(const std::filesystem::path& path);
+/// Removes @path: a file, or a directory with everything in it, without following links.
+/// True when nothing is left there, including when there was nothing to begin with.
+bool RemoveAll(const std::filesystem::path& path);
+/// Copies the file or directory @from to @to, making directories as needed and replacing
+/// files already there. Each file is cloned where the file system can.
+bool CopyAll(const std::filesystem::path& from, const std::filesystem::path& to);
+/// Moves @from to @to, replacing a file at @to.
+bool Rename(const std::filesystem::path& from, const std::filesystem::path& to);
+/// Calls @func with the name of each entry of the directory @dir, hidden ones included and
+/// "." and ".." left out, and whether it is a directory. False when @dir cannot be listed.
+bool ForEachEntry(const std::filesystem::path& dir,
+                  const std::function<void(std::string_view name, bool is_dir)>& func);
 
 u64 GetDirectorySize(const std::filesystem::path& path);
 

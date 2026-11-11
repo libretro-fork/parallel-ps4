@@ -67,10 +67,7 @@ bool TRP::Extract(std::span<const u8> trp, std::string npCommId,
 
     s32 trpFileIndex = 0;
     bool success = true;
-    const auto cleanupOnFailure = [&outputPath] {
-        std::error_code ec;
-        std::filesystem::remove_all(outputPath, ec);
-    };
+    const auto cleanupOnFailure = [&outputPath] { Common::FS::RemoveAll(outputPath); };
     try {
         TrpHeader header;
         if (trp.size() < sizeof(header)) {

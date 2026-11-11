@@ -380,7 +380,7 @@ bool InstallPkg(PkgInstallJob& job, const std::filesystem::path& pkg,
 
     Log(RETRO_LOG_INFO, "Installing %s into %s: %zu files, %llu MiB", Utf8String(pkg).c_str(),
         Utf8String(dir).c_str(), files.size(), static_cast<unsigned long long>(total >> 20));
-    std::filesystem::remove_all(dir, ec);
+    Common::FS::RemoveAll(dir);
     std::vector<u8> buffer(4 << 20);
     u64 done = 0;
     int told = 0;
@@ -446,7 +446,7 @@ bool InstallPkgContent(PkgInstallJob& job) {
     } else if (std::filesystem::exists(update_dir / ".libretro_pkg", ec)) {
         // An update this core installed whose PKG is gone.
         Log(RETRO_LOG_INFO, "The update's PKG is gone: %s removed", Utf8String(update_dir).c_str());
-        std::filesystem::remove_all(update_dir, ec);
+        Common::FS::RemoveAll(update_dir);
     }
     for (std::string_view paths{addcont}; !paths.empty();) {
         const auto end = paths.find('\n');

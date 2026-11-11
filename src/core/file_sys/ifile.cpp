@@ -5,6 +5,7 @@
 #include <system_error>
 #include <unordered_map>
 
+#include <file/file_path.h>
 #include <streams/file_stream.h>
 
 #include "common/hash.h"
@@ -147,34 +148,11 @@ std::optional<std::filesystem::path> ResolveGameFilePath(const std::filesystem::
 }
 
 u64 GetGameRootSize(const std::filesystem::path& game_root) {
-    std::error_code ec;
-
     if (IsZArchiveFile(game_root)) {
-        const auto size = std::filesystem::file_size(game_root, ec);
-        return ec ? 0ull : static_cast<u64>(size);
+        const s64 size = path_get_size(Common::FS::PathToUTF8String(game_root).c_str());
+        return size > 0 ? static_cast<u64>(size) : 0ull;
     }
-
-    if (!std::filesystem::is_directory(game_root, ec) || ec) {
-        return 0ull;
-    }
-
-    u64 total = 0;
-    for (std::filesystem::recursive_directory_iterator
-             it(game_root, std::filesystem::directory_options::skip_permission_denied, ec),
-         end;
-         it != end; it.increment(ec)) {
-        if (ec) {
-            break;
-        }
-        std::error_code entry_ec;
-        if (it->is_regular_file(entry_ec) && !entry_ec) {
-            const auto size = it->file_size(entry_ec);
-            if (!entry_ec) {
-                total += static_cast<u64>(size);
-            }
-        }
-    }
-    return total;
+    return Common::FS::GetDirectorySize(game_root);
 }
 
 } // namespace Core::FileSys

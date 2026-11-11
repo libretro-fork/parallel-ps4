@@ -6,6 +6,7 @@
 #include <vector>
 
 #include <file/file_path.h>
+#include <retro_dirent.h>
 #include <streams/file_stream.h>
 #include <vfs/vfs.h>
 
@@ -495,17 +496,57 @@ bool CopyFile(const fs::path& from, const fs::path& to) {
     return filestream_copy_close(copy) == 0;
 }
 
-u64 GetDirectorySize(const std::filesystem::path& path) {
-    if (!fs::exists(path)) {
-        return 0;
-    }
+bool Exists(const fs::path& path) {
+    return path_is_valid(PathToUTF8String(path).c_str());
+}
 
-    u64 total = 0;
-    for (const auto& entry : fs::recursive_directory_iterator(path)) {
-        if (fs::is_regular_file(entry.path())) {
-            total += fs::file_size(entry.path());
-        }
+bool IsDirectory(const fs::path& path) {
+    return path_is_directory(PathToUTF8String(path).c_str());
+}
+
+bool CreateDirectories(const fs::path& path) {
+    return path_mkdir(PathToUTF8String(path).c_str());
+}
+
+bool RemoveAll(const fs::path& path) {
+    return path_remove_tree(PathToUTF8String(path).c_str());
+}
+
+bool CopyAll(const fs::path& from, const fs::path& to) {
+    return path_copy_tree(PathToUTF8String(from).c_str(), PathToUTF8String(to).c_str());
+}
+
+bool Rename(const fs::path& from, const fs::path& to) {
+    return filestream_rename(PathToUTF8String(from).c_str(), PathToUTF8String(to).c_str()) == 0;
+}
+
+bool ForEachEntry(const fs::path& dir,
+                  const std::function<void(std::string_view name, bool is_dir)>& func) {
+    RDIR* rdir = retro_opendir_include_hidden(PathToUTF8String(dir).c_str(), true);
+    if (!rdir) {
+        return false;
     }
+    while (retro_readdir(rdir)) {
+        const std::string_view name = retro_dirent_get_name(rdir);
+        if (name == "." || name == "..") {
+            continue;
+        }
+        func(name, retro_dirent_is_dir(rdir, nullptr));
+    }
+    retro_closedir(rdir);
+    return true;
+}
+
+u64 GetDirectorySize(const fs::path& path) {
+    u64 total = 0;
+    ForEachEntry(path, [&](std::string_view name, bool is_dir) {
+        const fs::path entry = path / PathFromUTF8String(name);
+        if (is_dir) {
+            total += GetDirectorySize(entry);
+        } else if (const s64 size = path_get_size(PathToUTF8String(entry).c_str()); size > 0) {
+            total += static_cast<u64>(size);
+        }
+    });
     return total;
 }
 

@@ -1377,6 +1377,7 @@ set(LIBRETRO_COMMON_SOURCES
     ${LIBRETRO_COMMON_DIR}/features/features_cpu.c
     ${LIBRETRO_COMMON_DIR}/file/file_path.c
     ${LIBRETRO_COMMON_DIR}/file/file_path_io.c
+    ${LIBRETRO_COMMON_DIR}/file/retro_dirent.c
     ${LIBRETRO_COMMON_DIR}/gfx/font/rtt.c
     ${LIBRETRO_COMMON_DIR}/formats/aac/raac.c
     ${LIBRETRO_COMMON_DIR}/formats/atrac9/ratrac9.c
