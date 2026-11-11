@@ -122,68 +122,70 @@ std::shared_ptr<IBackend> MntPoints::CreateBackend(const std::filesystem::path& 
 
 void MntPoints::Mount(const std::filesystem::path& host_folder, const std::string& guest_folder,
                       bool read_only) {
-    std::scoped_lock lock{m_mutex};
-    const auto guest_folder_sanitized = RemoveTrailingSlashes(guest_folder);
-    auto it = std::find_if(m_mnt_pairs.begin(), m_mnt_pairs.end(), [&](const MntPair& pair) {
-        return pair.mount == guest_folder_sanitized;
+    m_mutex.Run([&] {
+        const auto guest_folder_sanitized = RemoveTrailingSlashes(guest_folder);
+        auto it = std::find_if(m_mnt_pairs.begin(), m_mnt_pairs.end(), [&](const MntPair& pair) {
+            return pair.mount == guest_folder_sanitized;
+        });
+        if (it != m_mnt_pairs.end()) {
+            if (it->host_path == host_folder && it->read_only == read_only) {
+                LOG_DEBUG(Kernel_Fs, "Mount point {} already mounted to {}, skipping",
+                          guest_folder_sanitized, host_folder.string());
+                return;
+            }
+            LOG_INFO(Kernel_Fs, "Replacing mount point {} (old: {}, new: {})",
+                     guest_folder_sanitized, it->host_path.string(), host_folder.string());
+            m_mnt_pairs.erase(it);
+        }
+
+        // Build the backend stack for this mount.
+        std::vector<std::shared_ptr<IBackend>> stack;
+        const bool eligible_for_overlays =
+            guest_folder_sanitized == "/app0" || guest_folder_sanitized == "/hostapp";
+
+        const auto probe_overlay = [this](const std::filesystem::path& base,
+                                          std::string_view suffix) -> std::shared_ptr<IBackend> {
+            return CreateBackend(OverlayPath(base, suffix), /*ro=*/true);
+        };
+        // check for mods , updates,patch
+        if (eligible_for_overlays) {
+            if (auto mods = probe_overlay(host_folder, "-mods")) {
+                stack.push_back(std::move(mods));
+            }
+            if (!ignore_game_patches) {
+                auto patch = libretro_update.empty() ? probe_overlay(host_folder, "-UPDATE")
+                                                     : CreateBackend(libretro_update, true);
+                if (!patch) {
+                    patch = probe_overlay(host_folder, "-patch");
+                }
+                if (patch) {
+                    stack.push_back(std::move(patch));
+                }
+            }
+        }
+
+        std::shared_ptr<IBackend> base = CreateBackend(host_folder, read_only);
+        ASSERT_MSG(base, "Mount: base path does not resolve to a backend: {}",
+                   host_folder.string());
+        stack.push_back(std::move(base));
+
+        m_mnt_pairs.emplace_back(host_folder, guest_folder_sanitized, read_only, std::move(stack));
+        LOG_INFO(Kernel_Fs, "Mounted '{}' -> '{}'", guest_folder_sanitized, host_folder.string());
     });
-    if (it != m_mnt_pairs.end()) {
-        if (it->host_path == host_folder && it->read_only == read_only) {
-            LOG_DEBUG(Kernel_Fs, "Mount point {} already mounted to {}, skipping",
-                      guest_folder_sanitized, host_folder.string());
-            return;
-        }
-        LOG_INFO(Kernel_Fs, "Replacing mount point {} (old: {}, new: {})", guest_folder_sanitized,
-                 it->host_path.string(), host_folder.string());
-        m_mnt_pairs.erase(it);
-    }
-
-    // Build the backend stack for this mount.
-    std::vector<std::shared_ptr<IBackend>> stack;
-    const bool eligible_for_overlays =
-        guest_folder_sanitized == "/app0" || guest_folder_sanitized == "/hostapp";
-
-    const auto probe_overlay = [this](const std::filesystem::path& base,
-                                      std::string_view suffix) -> std::shared_ptr<IBackend> {
-        return CreateBackend(OverlayPath(base, suffix), /*ro=*/true);
-    };
-    // check for mods , updates,patch
-    if (eligible_for_overlays) {
-        if (auto mods = probe_overlay(host_folder, "-mods")) {
-            stack.push_back(std::move(mods));
-        }
-        if (!ignore_game_patches) {
-            auto patch = libretro_update.empty() ? probe_overlay(host_folder, "-UPDATE")
-                                                 : CreateBackend(libretro_update, true);
-            if (!patch) {
-                patch = probe_overlay(host_folder, "-patch");
-            }
-            if (patch) {
-                stack.push_back(std::move(patch));
-            }
-        }
-    }
-
-    std::shared_ptr<IBackend> base = CreateBackend(host_folder, read_only);
-    ASSERT_MSG(base, "Mount: base path does not resolve to a backend: {}", host_folder.string());
-    stack.push_back(std::move(base));
-
-    m_mnt_pairs.emplace_back(host_folder, guest_folder_sanitized, read_only, std::move(stack));
-    LOG_INFO(Kernel_Fs, "Mounted '{}' -> '{}'", guest_folder_sanitized, host_folder.string());
 }
 
 void MntPoints::Unmount(const std::string& guest_folder) {
-    std::scoped_lock lock{m_mutex};
-    const auto guest_folder_sanitized = RemoveTrailingSlashes(guest_folder);
-    auto it = std::remove_if(m_mnt_pairs.begin(), m_mnt_pairs.end(), [&](const MntPair& pair) {
-        return pair.mount == guest_folder_sanitized;
+    m_mutex.Run([&] {
+        const auto guest_folder_sanitized = RemoveTrailingSlashes(guest_folder);
+        auto it = std::remove_if(m_mnt_pairs.begin(), m_mnt_pairs.end(), [&](const MntPair& pair) {
+            return pair.mount == guest_folder_sanitized;
+        });
+        m_mnt_pairs.erase(it, m_mnt_pairs.end());
     });
-    m_mnt_pairs.erase(it, m_mnt_pairs.end());
 }
 
 void MntPoints::UnmountAll() {
-    std::scoped_lock lock{m_mutex};
-    m_mnt_pairs.clear();
+    m_mutex.Run([&] { m_mnt_pairs.clear(); });
 }
 
 // Normalize a guest path. Resolves redundant slashes (e.g. Turok2 double slashes like
@@ -293,51 +295,52 @@ std::filesystem::path MntPoints::GetHostPath(std::string_view path, bool* is_rea
     const auto search = [&](const auto host_path) {
         // If the path does not exist attempt to verify this.
         // Retrieve parent path until we find one that exists.
-        std::scoped_lock lk{m_mutex};
-        path_parts.clear();
-        auto current_path = host_path;
-        while (!current_path.empty() && !Common::FS::Exists(current_path)) {
-            // We have probably cached this if it's a folder.
-            if (auto it = path_cache.find(current_path); it != path_cache.end()) {
-                current_path = it->second;
-                break;
-            }
-            path_parts.emplace_back(current_path.filename());
-            current_path = current_path.parent_path();
-        }
-        if (!current_path.empty()) {
-            // We have found an anchor. Traverse parts we recoded and see if they
-            // exist in filesystem but in different case.
-            auto guest_path = current_path;
-            while (!path_parts.empty()) {
-                const auto part = path_parts.back();
-                const auto add_match = [&](const auto& host_part) {
-                    current_path /= host_part;
-                    guest_path /= part;
-                    path_cache[guest_path] = current_path;
-                    path_parts.pop_back();
-                };
-                // Can happen when the mismatch is in upper folder.
-                if (Common::FS::Exists(current_path / part)) {
-                    add_match(part);
-                    continue;
+        return m_mutex.Run([&] {
+            path_parts.clear();
+            auto current_path = host_path;
+            while (!current_path.empty() && !Common::FS::Exists(current_path)) {
+                // We have probably cached this if it's a folder.
+                if (auto it = path_cache.find(current_path); it != path_cache.end()) {
+                    current_path = it->second;
+                    break;
                 }
-                const auto part_low = Common::ToLower(part.string());
-                // A name that matches in a case insensitive manner
-                std::string candidate;
-                Common::FS::ForEachEntry(current_path, [&](std::string_view name, bool) {
-                    if (candidate.empty() && Common::ToLower(std::string{name}) == part_low) {
-                        candidate = name;
+                path_parts.emplace_back(current_path.filename());
+                current_path = current_path.parent_path();
+            }
+            if (!current_path.empty()) {
+                // We have found an anchor. Traverse parts we recoded and see if they
+                // exist in filesystem but in different case.
+                auto guest_path = current_path;
+                while (!path_parts.empty()) {
+                    const auto part = path_parts.back();
+                    const auto add_match = [&](const auto& host_part) {
+                        current_path /= host_part;
+                        guest_path /= part;
+                        path_cache[guest_path] = current_path;
+                        path_parts.pop_back();
+                    };
+                    // Can happen when the mismatch is in upper folder.
+                    if (Common::FS::Exists(current_path / part)) {
+                        add_match(part);
+                        continue;
                     }
-                });
-                if (candidate.empty()) {
-                    return std::optional<std::filesystem::path>({});
+                    const auto part_low = Common::ToLower(part.string());
+                    // A name that matches in a case insensitive manner
+                    std::string candidate;
+                    Common::FS::ForEachEntry(current_path, [&](std::string_view name, bool) {
+                        if (candidate.empty() && Common::ToLower(std::string{name}) == part_low) {
+                            candidate = name;
+                        }
+                    });
+                    if (candidate.empty()) {
+                        return std::optional<std::filesystem::path>({});
+                    }
+                    // Record the actual path in the cache.
+                    add_match(Common::FS::PathFromUTF8String(candidate));
                 }
-                // Record the actual path in the cache.
-                add_match(Common::FS::PathFromUTF8String(candidate));
             }
-        }
-        return std::optional<std::filesystem::path>(current_path);
+            return std::optional<std::filesystem::path>(current_path);
+        });
     };
 
     if ((corrected_path.starts_with("/app0") || corrected_path.starts_with("/hostapp")) &&
@@ -371,17 +374,18 @@ void MntPoints::IterateDirectory(std::string_view guest_directory,
     if (corrected == "/") {
         callback(std::filesystem::path("/."), false);
         callback(std::filesystem::path("/.."), false);
-        std::scoped_lock lock{m_mutex};
-        std::unordered_set<std::string> seen;
-        for (const auto& mount : m_mnt_pairs) {
-            std::string name = mount.mount;
-            if (name.starts_with("/")) {
-                name = name.substr(1);
+        m_mutex.Run([&] {
+            std::unordered_set<std::string> seen;
+            for (const auto& mount : m_mnt_pairs) {
+                std::string name = mount.mount;
+                if (name.starts_with("/")) {
+                    name = name.substr(1);
+                }
+                if (!name.empty() && seen.insert(name).second) {
+                    callback(std::filesystem::path("/") / name, /*is_file=*/false);
+                }
             }
-            if (!name.empty() && seen.insert(name).second) {
-                callback(std::filesystem::path("/") / name, /*is_file=*/false);
-            }
-        }
+        });
         return;
     }
     const auto mount = GetMount(corrected);
@@ -555,21 +559,22 @@ std::unique_ptr<IDirectory> MntPoints::OpenDir(std::string_view guest_path) {
         return nullptr;
     }
     if (*corrected == "/") {
-        std::scoped_lock lock{m_mutex};
         std::vector<DirEntry> entries;
-        std::unordered_set<std::string> seen;
-        for (const auto& mount : m_mnt_pairs) {
-            std::string name = mount.mount;
-            if (name.starts_with("/")) {
-                name = name.substr(1);
+        m_mutex.Run([&] {
+            std::unordered_set<std::string> seen;
+            for (const auto& mount : m_mnt_pairs) {
+                std::string name = mount.mount;
+                if (name.starts_with("/")) {
+                    name = name.substr(1);
+                }
+                if (!name.empty() && seen.insert(name).second) {
+                    entries.push_back(DirEntry{
+                        .name = std::move(name),
+                        .is_directory = true,
+                    });
+                }
             }
-            if (!name.empty() && seen.insert(name).second) {
-                entries.push_back(DirEntry{
-                    .name = std::move(name),
-                    .is_directory = true,
-                });
-            }
-        }
+        });
         return std::make_unique<MergedDirectory>(std::move(entries));
     }
     const auto mount = GetMount(*corrected);
@@ -624,73 +629,78 @@ std::optional<Common::FS::FileView> MntPoints::ReadFile(std::string_view guest_p
 }
 
 int HandleTable::CreateHandle() {
-    std::scoped_lock lock{m_mutex};
+    return m_mutex.Run([&]() -> int {
+        auto* file = new File{};
+        file->is_opened = false;
 
-    auto* file = new File{};
-    file->is_opened = false;
+        int existingFilesNum = m_files.size();
 
-    int existingFilesNum = m_files.size();
-
-    for (int index = 0; index < existingFilesNum; index++) {
-        if (m_files.at(index) == nullptr) {
-            m_files[index] = file;
-            return index;
+        for (int index = 0; index < existingFilesNum; index++) {
+            if (m_files.at(index) == nullptr) {
+                m_files[index] = file;
+                return index;
+            }
         }
-    }
 
-    m_files.push_back(file);
-    return m_files.size() - 1;
+        m_files.push_back(file);
+        return m_files.size() - 1;
+    });
 }
 
 void HandleTable::DeleteHandle(int d) {
-    std::scoped_lock lock{m_mutex};
-    delete m_files.at(d);
-    m_files[d] = nullptr;
+    m_mutex.Run([&] {
+        delete m_files.at(d);
+        m_files[d] = nullptr;
+    });
 }
 
 File* HandleTable::GetFile(int d) {
-    std::scoped_lock lock{m_mutex};
-    if (d < 0 || d >= m_files.size()) {
-        return nullptr;
-    }
-    return m_files.at(d);
+    return m_mutex.Run([&]() -> File* {
+        if (d < 0 || d >= m_files.size()) {
+            return nullptr;
+        }
+        return m_files.at(d);
+    });
 }
 
 File* HandleTable::GetSocket(int d) {
-    std::scoped_lock lock{m_mutex};
-    if (d < 0 || d >= m_files.size()) {
-        return nullptr;
-    }
-    auto file = m_files.at(d);
-    if (!file) {
-        return nullptr;
-    }
-    if (file->type != Core::FileSys::FileType::Socket) {
-        return nullptr;
-    }
-    return file;
+    return m_mutex.Run([&]() -> File* {
+        if (d < 0 || d >= m_files.size()) {
+            return nullptr;
+        }
+        auto file = m_files.at(d);
+        if (!file) {
+            return nullptr;
+        }
+        if (file->type != Core::FileSys::FileType::Socket) {
+            return nullptr;
+        }
+        return file;
+    });
 }
 
 std::vector<int> HandleTable::GetSocketHandles() {
-    std::scoped_lock lock{m_mutex};
-    std::vector<int> handles;
-    for (int index = 0; index < m_files.size(); index++) {
-        const auto* file = m_files.at(index);
-        if (file && file->type == Core::FileSys::FileType::Socket) {
-            handles.push_back(index);
+    return m_mutex.Run([&]() -> std::vector<int> {
+        std::vector<int> handles;
+        for (int index = 0; index < m_files.size(); index++) {
+            const auto* file = m_files.at(index);
+            if (file && file->type == Core::FileSys::FileType::Socket) {
+                handles.push_back(index);
+            }
         }
-    }
-    return handles;
+        return handles;
+    });
 }
 
 File* HandleTable::GetFile(const std::filesystem::path& host_name) {
-    std::scoped_lock lock{m_mutex};
-    for (auto* file : m_files) {
-        if (file != nullptr && file->m_host_name == host_name) {
-            return file;
+    return m_mutex.Run([&]() -> File* {
+        for (auto* file : m_files) {
+            if (file != nullptr && file->m_host_name == host_name) {
+                return file;
+            }
         }
-    }
-    return nullptr;
+        return nullptr;
+    });
 }
 
 void HandleTable::CreateStdHandles() {
@@ -710,27 +720,30 @@ void HandleTable::CreateStdHandles() {
 }
 
 int HandleTable::GetFileDescriptor(File* file) {
-    std::scoped_lock lock{m_mutex};
-    auto it = std::find(m_files.begin(), m_files.end(), file);
+    return m_mutex.Run([&]() -> int {
+        auto it = std::find(m_files.begin(), m_files.end(), file);
 
-    if (it != m_files.end()) {
-        return std::distance(m_files.begin(), it);
-    }
-    return 0;
+        if (it != m_files.end()) {
+            return std::distance(m_files.begin(), it);
+        }
+        return 0;
+    });
 }
 
 void HandleTable::FlushAll() {
-    std::scoped_lock lock{m_mutex};
-    for (auto* file : m_files) {
-        if (file != nullptr && file->is_opened) {
-            std::scoped_lock lk{file->m_mutex};
-            if (file->type == FileType::Device && file->device) {
-                file->device->fsync();
-            } else if (file->type == FileType::Regular) {
-                file->Flush();
+    m_mutex.Run([&] {
+        for (auto* file : m_files) {
+            if (file != nullptr && file->is_opened) {
+                file->m_mutex.Run([&] {
+                    if (file->type == FileType::Device && file->device) {
+                        file->device->fsync();
+                    } else if (file->type == FileType::Regular) {
+                        file->Flush();
+                    }
+                });
             }
         }
-    }
+    });
 }
 
 } // namespace Core::FileSys

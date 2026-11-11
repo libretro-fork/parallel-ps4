@@ -3,7 +3,6 @@
 
 #include <chrono>
 #include <climits>
-#include <condition_variable>
 #include <cstdint>
 #include <map>
 #include <mutex>
@@ -22,7 +21,9 @@
 #include "common/enum_names.h"
 
 #include "common/assert.h"
+#include "common/combiner.h"
 #include "common/error.h"
+#include "common/event_count.h"
 #include "common/logging/log.h"
 #include "common/scope_exit.h"
 #include "common/singleton.h"
@@ -96,15 +97,15 @@ namespace Libraries::Kernel {
 namespace {
 
 struct FlockState {
-    std::mutex mtx;
-    std::condition_variable cv;
+    Common::Combiner mtx;
+    Common::EventCount changed;
     bool is_exclusive = false;
     Core::FileSys::File* exclusive_owner = nullptr;
     std::unordered_map<Core::FileSys::File*, u32> shared_holders;
     u32 total_waiters = 0;
 };
 
-std::mutex g_flock_map_mtx;
+Common::Combiner g_flock_map_mtx;
 std::unordered_map<std::string, std::shared_ptr<FlockState>> g_flock_states;
 
 std::string GetFileLockKey(Core::FileSys::File* file) {
@@ -117,34 +118,36 @@ std::string GetFileLockKey(Core::FileSys::File* file) {
 void ReleaseFlockState(Core::FileSys::File* file) {
     const std::string key = GetFileLockKey(file);
     std::shared_ptr<FlockState> state;
-    {
-        std::scoped_lock lock{g_flock_map_mtx};
+    g_flock_map_mtx.Run([&] {
         auto it = g_flock_states.find(key);
         if (it != g_flock_states.end()) {
             state = it->second;
         }
-    }
+    });
     if (state) {
-        std::scoped_lock lock{state->mtx};
-        bool changed = false;
-        if (state->is_exclusive && state->exclusive_owner == file) {
-            state->is_exclusive = false;
-            state->exclusive_owner = nullptr;
-            changed = true;
-        }
-        if (state->shared_holders.erase(file) > 0) {
-            changed = true;
-        }
-        if (changed) {
-            state->cv.notify_all();
-        }
-        if (!state->is_exclusive && state->shared_holders.empty() && state->total_waiters == 0) {
-            std::scoped_lock map_lock{g_flock_map_mtx};
+        state->mtx.Run([&] {
+            bool changed = false;
+            if (state->is_exclusive && state->exclusive_owner == file) {
+                state->is_exclusive = false;
+                state->exclusive_owner = nullptr;
+                changed = true;
+            }
+            if (state->shared_holders.erase(file) > 0) {
+                changed = true;
+            }
+            if (changed) {
+                state->changed.Notify();
+            }
             if (!state->is_exclusive && state->shared_holders.empty() &&
                 state->total_waiters == 0) {
-                g_flock_states.erase(key);
+                g_flock_map_mtx.Run([&] {
+                    if (!state->is_exclusive && state->shared_holders.empty() &&
+                        state->total_waiters == 0) {
+                        g_flock_states.erase(key);
+                    }
+                });
             }
-        }
+        });
     }
 }
 
@@ -396,25 +399,26 @@ s64 PS4_SYSV_ABI write(s32 fd, const void* buf, u64 nbytes) {
     if (file->type == Core::FileSys::FileType::Socket) {
         return Libraries::Net::KernelWrite(fd, buf, nbytes);
     }
-    std::scoped_lock lk{file->m_mutex};
-    if (file->type == Core::FileSys::FileType::Device) {
-        s64 result = file->device->write(buf, nbytes);
-        if (result < 0) {
-            ErrSceToPosix(result);
+    return file->m_mutex.Run([&]() -> s64 {
+        if (file->type == Core::FileSys::FileType::Device) {
+            s64 result = file->device->write(buf, nbytes);
+            if (result < 0) {
+                ErrSceToPosix(result);
+                return -1;
+            }
+            return result;
+        } else if (file->type == Core::FileSys::FileType::Directory) {
+            *__Error() = POSIX_EBADF;
             return -1;
         }
-        return result;
-    } else if (file->type == Core::FileSys::FileType::Directory) {
-        *__Error() = POSIX_EBADF;
-        return -1;
-    }
 
-    if (file->IsReadOnly()) {
-        *__Error() = POSIX_EBADF;
-        return -1;
-    }
+        if (file->IsReadOnly()) {
+            *__Error() = POSIX_EBADF;
+            return -1;
+        }
 
-    return file->Write(buf, nbytes);
+        return file->Write(buf, nbytes);
+    });
 }
 
 s64 PS4_SYSV_ABI posix_write(s32 fd, const void* buf, u64 nbytes) {
@@ -463,33 +467,34 @@ s64 PS4_SYSV_ABI readv(s32 fd, const OrbisKernelIovec* iov, s32 iovcnt) {
         return -1;
     }
 
-    std::scoped_lock lk{file->m_mutex};
-    if (file->type == Core::FileSys::FileType::Device) {
-        s64 result = file->device->readv(iov, iovcnt);
-        if (result < 0) {
-            ErrSceToPosix(result);
+    return file->m_mutex.Run([&]() -> s64 {
+        if (file->type == Core::FileSys::FileType::Device) {
+            s64 result = file->device->readv(iov, iovcnt);
+            if (result < 0) {
+                ErrSceToPosix(result);
+                return -1;
+            }
+            return result;
+        } else if (file->type == Core::FileSys::FileType::Directory) {
+            s64 result = file->directory->readv(iov, iovcnt);
+            if (result < 0) {
+                ErrSceToPosix(result);
+                return -1;
+            }
+            return result;
+        }
+
+        if (file->IsWriteOnly()) {
+            *__Error() = POSIX_EBADF;
             return -1;
         }
-        return result;
-    } else if (file->type == Core::FileSys::FileType::Directory) {
-        s64 result = file->directory->readv(iov, iovcnt);
-        if (result < 0) {
-            ErrSceToPosix(result);
-            return -1;
+
+        s64 total_read = 0;
+        for (s32 i = 0; i < iovcnt; i++) {
+            total_read += ReadFile(file, iov[i].iov_base, iov[i].iov_len);
         }
-        return result;
-    }
-
-    if (file->IsWriteOnly()) {
-        *__Error() = POSIX_EBADF;
-        return -1;
-    }
-
-    s64 total_read = 0;
-    for (s32 i = 0; i < iovcnt; i++) {
-        total_read += ReadFile(file, iov[i].iov_base, iov[i].iov_len);
-    }
-    return total_read;
+        return total_read;
+    });
 }
 
 s64 PS4_SYSV_ABI posix_readv(s32 fd, const OrbisKernelIovec* iov, s32 iovcnt) {
@@ -513,30 +518,30 @@ s64 PS4_SYSV_ABI writev(s32 fd, const OrbisKernelIovec* iov, s32 iovcnt) {
         return -1;
     }
 
-    std::scoped_lock lk{file->m_mutex};
-
-    if (file->type == Core::FileSys::FileType::Device) {
-        s64 result = file->device->writev(iov, iovcnt);
-        if (result < 0) {
-            ErrSceToPosix(result);
+    return file->m_mutex.Run([&]() -> s64 {
+        if (file->type == Core::FileSys::FileType::Device) {
+            s64 result = file->device->writev(iov, iovcnt);
+            if (result < 0) {
+                ErrSceToPosix(result);
+                return -1;
+            }
+            return result;
+        } else if (file->type == Core::FileSys::FileType::Directory) {
+            *__Error() = POSIX_EBADF;
             return -1;
         }
-        return result;
-    } else if (file->type == Core::FileSys::FileType::Directory) {
-        *__Error() = POSIX_EBADF;
-        return -1;
-    }
 
-    if (file->IsReadOnly()) {
-        *__Error() = POSIX_EBADF;
-        return -1;
-    }
+        if (file->IsReadOnly()) {
+            *__Error() = POSIX_EBADF;
+            return -1;
+        }
 
-    s64 total_written = 0;
-    for (s32 i = 0; i < iovcnt; i++) {
-        total_written += file->Write(iov[i].iov_base, iov[i].iov_len);
-    }
-    return total_written;
+        s64 total_written = 0;
+        for (s32 i = 0; i < iovcnt; i++) {
+            total_written += file->Write(iov[i].iov_base, iov[i].iov_len);
+        }
+        return total_written;
+    });
 }
 
 s64 PS4_SYSV_ABI posix_writev(s32 fd, const OrbisKernelIovec* iov, s32 iovcnt) {
@@ -560,57 +565,58 @@ s64 PS4_SYSV_ABI posix_lseek(s32 fd, s64 offset, s32 whence) {
         return -1;
     }
 
-    std::scoped_lock lk{file->m_mutex};
-    if (file->type == Core::FileSys::FileType::Device) {
-        s64 result = file->device->lseek(offset, whence);
-        if (result < 0) {
-            ErrSceToPosix(result);
+    return file->m_mutex.Run([&]() -> s64 {
+        if (file->type == Core::FileSys::FileType::Device) {
+            s64 result = file->device->lseek(offset, whence);
+            if (result < 0) {
+                ErrSceToPosix(result);
+                return -1;
+            }
+            return result;
+        } else if (file->type == Core::FileSys::FileType::Directory) {
+            s64 result = file->directory->lseek(offset, whence);
+            if (result < 0) {
+                ErrSceToPosix(result);
+                return -1;
+            }
+            return result;
+        }
+
+        Common::FS::SeekOrigin origin{};
+        if (whence == 0) {
+            origin = Common::FS::SeekOrigin::SetOrigin;
+        } else if (whence == 1) {
+            origin = Common::FS::SeekOrigin::CurrentPosition;
+        } else if (whence == 2) {
+            origin = Common::FS::SeekOrigin::End;
+        } else if (whence == 3 || whence == 4) {
+            // whence parameter belongs to an unsupported POSIX extension
+            *__Error() = POSIX_ENOTTY;
+            return -1;
+        } else {
+            // whence parameter is invalid
+            *__Error() = POSIX_EINVAL;
             return -1;
         }
-        return result;
-    } else if (file->type == Core::FileSys::FileType::Directory) {
-        s64 result = file->directory->lseek(offset, whence);
-        if (result < 0) {
-            ErrSceToPosix(result);
+
+        if (!file->Seek(offset, origin)) {
+            if (errno != 0) {
+                // Seek failed in platform-specific code, errno needs to be converted.
+                SetPosixErrno(errno);
+                return -1;
+            }
+            // Shouldn't be possible, but just in case.
             return -1;
         }
-        return result;
-    }
 
-    Common::FS::SeekOrigin origin{};
-    if (whence == 0) {
-        origin = Common::FS::SeekOrigin::SetOrigin;
-    } else if (whence == 1) {
-        origin = Common::FS::SeekOrigin::CurrentPosition;
-    } else if (whence == 2) {
-        origin = Common::FS::SeekOrigin::End;
-    } else if (whence == 3 || whence == 4) {
-        // whence parameter belongs to an unsupported POSIX extension
-        *__Error() = POSIX_ENOTTY;
-        return -1;
-    } else {
-        // whence parameter is invalid
-        *__Error() = POSIX_EINVAL;
-        return -1;
-    }
-
-    if (!file->Seek(offset, origin)) {
-        if (errno != 0) {
-            // Seek failed in platform-specific code, errno needs to be converted.
+        s64 result = file->Tell();
+        if (result < 0) {
+            // Tell failed in platform-specific code, errno needs to be converted.
             SetPosixErrno(errno);
             return -1;
         }
-        // Shouldn't be possible, but just in case.
-        return -1;
-    }
-
-    s64 result = file->Tell();
-    if (result < 0) {
-        // Tell failed in platform-specific code, errno needs to be converted.
-        SetPosixErrno(errno);
-        return -1;
-    }
-    return result;
+        return result;
+    });
 }
 
 s64 PS4_SYSV_ABI sceKernelLseek(s32 fd, s64 offset, s32 whence) {
@@ -633,29 +639,30 @@ s64 PS4_SYSV_ABI read(s32 fd, void* buf, u64 nbytes) {
     if (file->type == Core::FileSys::FileType::Socket) {
         return Libraries::Net::KernelRead(fd, buf, nbytes);
     }
-    std::scoped_lock lk{file->m_mutex};
-    if (file->type == Core::FileSys::FileType::Device) {
-        s64 result = file->device->read(buf, nbytes);
-        if (result < 0) {
-            ErrSceToPosix(result);
+    return file->m_mutex.Run([&]() -> s64 {
+        if (file->type == Core::FileSys::FileType::Device) {
+            s64 result = file->device->read(buf, nbytes);
+            if (result < 0) {
+                ErrSceToPosix(result);
+                return -1;
+            }
+            return result;
+        } else if (file->type == Core::FileSys::FileType::Directory) {
+            s64 result = file->directory->read(buf, nbytes);
+            if (result < 0) {
+                ErrSceToPosix(result);
+                return -1;
+            }
+            return result;
+        }
+
+        if (file->IsWriteOnly()) {
+            *__Error() = POSIX_EBADF;
             return -1;
         }
-        return result;
-    } else if (file->type == Core::FileSys::FileType::Directory) {
-        s64 result = file->directory->read(buf, nbytes);
-        if (result < 0) {
-            ErrSceToPosix(result);
-            return -1;
-        }
-        return result;
-    }
 
-    if (file->IsWriteOnly()) {
-        *__Error() = POSIX_EBADF;
-        return -1;
-    }
-
-    return ReadFile(file, buf, nbytes);
+        return ReadFile(file, buf, nbytes);
+    });
 }
 
 s64 PS4_SYSV_ABI posix_read(s32 fd, void* buf, u64 nbytes) {
@@ -1483,41 +1490,42 @@ s64 PS4_SYSV_ABI posix_preadv(s32 fd, OrbisKernelIovec* iov, s32 iovcnt, s64 off
         return -1;
     }
 
-    std::scoped_lock lk{file->m_mutex};
-    if (file->type == Core::FileSys::FileType::Device) {
-        s64 result = file->device->preadv(iov, iovcnt, offset);
-        if (result < 0) {
-            ErrSceToPosix(result);
+    return file->m_mutex.Run([&]() -> s64 {
+        if (file->type == Core::FileSys::FileType::Device) {
+            s64 result = file->device->preadv(iov, iovcnt, offset);
+            if (result < 0) {
+                ErrSceToPosix(result);
+                return -1;
+            }
+            return result;
+        } else if (file->type == Core::FileSys::FileType::Directory) {
+            s64 result = file->directory->preadv(iov, iovcnt, offset);
+            if (result < 0) {
+                ErrSceToPosix(result);
+                return -1;
+            }
+            return result;
+        }
+
+        if (file->IsWriteOnly()) {
+            *__Error() = POSIX_EBADF;
             return -1;
         }
-        return result;
-    } else if (file->type == Core::FileSys::FileType::Directory) {
-        s64 result = file->directory->preadv(iov, iovcnt, offset);
-        if (result < 0) {
-            ErrSceToPosix(result);
+
+        const s64 pos = file->Tell();
+        SCOPE_EXIT {
+            file->Seek(pos);
+        };
+        if (!file->Seek(offset)) {
+            *__Error() = POSIX_EIO;
             return -1;
         }
-        return result;
-    }
-
-    if (file->IsWriteOnly()) {
-        *__Error() = POSIX_EBADF;
-        return -1;
-    }
-
-    const s64 pos = file->Tell();
-    SCOPE_EXIT {
-        file->Seek(pos);
-    };
-    if (!file->Seek(offset)) {
-        *__Error() = POSIX_EIO;
-        return -1;
-    }
-    s64 total_read = 0;
-    for (s32 i = 0; i < iovcnt; i++) {
-        total_read += ReadFile(file, iov[i].iov_base, iov[i].iov_len);
-    }
-    return total_read;
+        s64 total_read = 0;
+        for (s32 i = 0; i < iovcnt; i++) {
+            total_read += ReadFile(file, iov[i].iov_base, iov[i].iov_len);
+        }
+        return total_read;
+    });
 }
 
 s64 PS4_SYSV_ABI sceKernelPreadv(s32 fd, OrbisKernelIovec* iov, s32 iovcnt, s64 offset) {
@@ -1547,17 +1555,18 @@ s32 PS4_SYSV_ABI posix_fsync(s32 fd) {
         return -1;
     }
 
-    std::scoped_lock lk{file->m_mutex};
-    if (file->type == Core::FileSys::FileType::Device) {
-        s32 result = file->device->fsync();
-        if (result < 0) {
-            ErrSceToPosix(result);
-            return -1;
+    return file->m_mutex.Run([&]() -> s32 {
+        if (file->type == Core::FileSys::FileType::Device) {
+            s32 result = file->device->fsync();
+            if (result < 0) {
+                ErrSceToPosix(result);
+                return -1;
+            }
+            return result;
         }
-        return result;
-    }
-    file->Flush();
-    return ORBIS_OK;
+        file->Flush();
+        return ORBIS_OK;
+    });
 }
 
 s32 PS4_SYSV_ABI sceKernelFsync(s32 fd) {
@@ -1625,130 +1634,156 @@ s32 PS4_SYSV_ABI posix_flock(s32 fd, s32 operation) {
     const std::string key = GetFileLockKey(file);
 
     std::shared_ptr<FlockState> state;
-    {
-        std::scoped_lock lock{g_flock_map_mtx};
+    const bool nothing_to_unlock = g_flock_map_mtx.Run([&] {
         auto it = g_flock_states.find(key);
         if (it == g_flock_states.end()) {
             if (lock_op == ORBIS_KERNEL_LOCK_UN) {
-                return ORBIS_OK;
+                return true;
             }
             state = std::make_shared<FlockState>();
             g_flock_states.emplace(key, state);
         } else {
             state = it->second;
         }
+        return false;
+    });
+    if (nothing_to_unlock) {
+        return ORBIS_OK;
     }
 
-    std::unique_lock lock{state->mtx};
-    if (!file->is_opened) {
-        *__Error() = POSIX_EBADF;
-        return -1;
-    }
-
-    switch (lock_op) {
-    case ORBIS_KERNEL_LOCK_EX: {
-        // If this descriptor already holds exclusive lock, idempotent success.
-        if (state->is_exclusive && state->exclusive_owner == file) {
-            return ORBIS_OK;
-        }
-
-        auto can_acquire = [&]() {
+    // The state changes in its combiner; a holder that has to wait parks on state->changed and
+    // tries again
+    bool waiting = false;
+    for (;;) {
+        bool must_wait = false;
+        const int wait_key = retro_eventcount_prepare_wait(state->changed.get());
+        const s32 result = state->mtx.Run([&]() -> s32 {
+            if (waiting) {
+                state->total_waiters--;
+                waiting = false;
+            }
             if (!file->is_opened) {
-                return true;
-            }
-            if (state->is_exclusive) {
-                return false;
-            }
-            if (state->shared_holders.empty()) {
-                return true;
-            }
-            // Allow atomic upgrade if this descriptor is the sole shared lock holder.
-            if (state->shared_holders.size() == 1 && state->shared_holders.contains(file)) {
-                return true;
-            }
-            return false;
-        };
-
-        if (!can_acquire()) {
-            if (non_blocking) {
-                *__Error() = POSIX_EWOULDBLOCK;
-                LOG_TRACE(Kernel_Fs, "flock: fd = {} LOCK_EX would block", fd);
+                *__Error() = POSIX_EBADF;
                 return -1;
             }
-            state->total_waiters++;
-            state->cv.wait(lock, can_acquire);
-            state->total_waiters--;
-        }
 
-        if (!file->is_opened) {
-            *__Error() = POSIX_EBADF;
-            return -1;
-        }
+            switch (lock_op) {
+            case ORBIS_KERNEL_LOCK_EX: {
+                // If this descriptor already holds exclusive lock, idempotent success.
+                if (state->is_exclusive && state->exclusive_owner == file) {
+                    return ORBIS_OK;
+                }
 
-        state->shared_holders.erase(file);
-        state->is_exclusive = true;
-        state->exclusive_owner = file;
-        return ORBIS_OK;
-    }
+                auto can_acquire = [&]() {
+                    if (!file->is_opened) {
+                        return true;
+                    }
+                    if (state->is_exclusive) {
+                        return false;
+                    }
+                    if (state->shared_holders.empty()) {
+                        return true;
+                    }
+                    // Allow atomic upgrade if this descriptor is the sole shared lock holder.
+                    if (state->shared_holders.size() == 1 && state->shared_holders.contains(file)) {
+                        return true;
+                    }
+                    return false;
+                };
 
-    case ORBIS_KERNEL_LOCK_SH: {
-        // If this descriptor holds exclusive lock, downgrade to shared.
-        if (state->is_exclusive && state->exclusive_owner == file) {
-            state->is_exclusive = false;
-            state->exclusive_owner = nullptr;
-            state->shared_holders[file] = 1;
-            state->cv.notify_all();
-            return ORBIS_OK;
-        }
+                if (!can_acquire()) {
+                    if (non_blocking) {
+                        *__Error() = POSIX_EWOULDBLOCK;
+                        LOG_TRACE(Kernel_Fs, "flock: fd = {} LOCK_EX would block", fd);
+                        return -1;
+                    }
+                    // Counted while it waits, so the state stays in the map
+                    state->total_waiters++;
+                    waiting = true;
+                    must_wait = true;
+                    return 0;
+                }
 
-        auto can_acquire = [&]() { return !file->is_opened || !state->is_exclusive; };
+                if (!file->is_opened) {
+                    *__Error() = POSIX_EBADF;
+                    return -1;
+                }
 
-        if (!can_acquire()) {
-            if (non_blocking) {
-                *__Error() = POSIX_EWOULDBLOCK;
-                LOG_TRACE(Kernel_Fs, "flock: fd = {} LOCK_SH would block", fd);
+                state->shared_holders.erase(file);
+                state->is_exclusive = true;
+                state->exclusive_owner = file;
+                return ORBIS_OK;
+            }
+
+            case ORBIS_KERNEL_LOCK_SH: {
+                // If this descriptor holds exclusive lock, downgrade to shared.
+                if (state->is_exclusive && state->exclusive_owner == file) {
+                    state->is_exclusive = false;
+                    state->exclusive_owner = nullptr;
+                    state->shared_holders[file] = 1;
+                    state->changed.Notify();
+                    return ORBIS_OK;
+                }
+
+                auto can_acquire = [&]() { return !file->is_opened || !state->is_exclusive; };
+
+                if (!can_acquire()) {
+                    if (non_blocking) {
+                        *__Error() = POSIX_EWOULDBLOCK;
+                        LOG_TRACE(Kernel_Fs, "flock: fd = {} LOCK_SH would block", fd);
+                        return -1;
+                    }
+                    // Counted while it waits, so the state stays in the map
+                    state->total_waiters++;
+                    waiting = true;
+                    must_wait = true;
+                    return 0;
+                }
+
+                if (!file->is_opened) {
+                    *__Error() = POSIX_EBADF;
+                    return -1;
+                }
+
+                state->shared_holders[file]++;
+                return ORBIS_OK;
+            }
+
+            case ORBIS_KERNEL_LOCK_UN: {
+                bool changed = false;
+                if (state->is_exclusive && state->exclusive_owner == file) {
+                    state->is_exclusive = false;
+                    state->exclusive_owner = nullptr;
+                    changed = true;
+                }
+                if (state->shared_holders.erase(file) > 0) {
+                    changed = true;
+                }
+                if (changed) {
+                    state->changed.Notify();
+                }
+                if (!state->is_exclusive && state->shared_holders.empty() &&
+                    state->total_waiters == 0) {
+                    g_flock_map_mtx.Run([&] {
+                        if (!state->is_exclusive && state->shared_holders.empty() &&
+                            state->total_waiters == 0) {
+                            g_flock_states.erase(key);
+                        }
+                    });
+                }
+                return ORBIS_OK;
+            }
+
+            default:
+                *__Error() = POSIX_EINVAL;
                 return -1;
             }
-            state->total_waiters++;
-            state->cv.wait(lock, can_acquire);
-            state->total_waiters--;
+        });
+        if (!must_wait) {
+            retro_eventcount_cancel_wait(state->changed.get());
+            return result;
         }
-
-        if (!file->is_opened) {
-            *__Error() = POSIX_EBADF;
-            return -1;
-        }
-
-        state->shared_holders[file]++;
-        return ORBIS_OK;
-    }
-
-    case ORBIS_KERNEL_LOCK_UN: {
-        bool changed = false;
-        if (state->is_exclusive && state->exclusive_owner == file) {
-            state->is_exclusive = false;
-            state->exclusive_owner = nullptr;
-            changed = true;
-        }
-        if (state->shared_holders.erase(file) > 0) {
-            changed = true;
-        }
-        if (changed) {
-            state->cv.notify_all();
-        }
-        if (!state->is_exclusive && state->shared_holders.empty() && state->total_waiters == 0) {
-            std::scoped_lock map_lock{g_flock_map_mtx};
-            if (!state->is_exclusive && state->shared_holders.empty() &&
-                state->total_waiters == 0) {
-                g_flock_states.erase(key);
-            }
-        }
-        return ORBIS_OK;
-    }
-
-    default:
-        *__Error() = POSIX_EINVAL;
-        return -1;
+        retro_eventcount_commit_wait(state->changed.get(), wait_key);
     }
 }
 
@@ -1850,38 +1885,38 @@ s64 PS4_SYSV_ABI posix_pwritev(s32 fd, const OrbisKernelIovec* iov, s32 iovcnt, 
         return -1;
     }
 
-    std::scoped_lock lk{file->m_mutex};
-
-    if (file->type == Core::FileSys::FileType::Device) {
-        s64 result = file->device->pwritev(iov, iovcnt, offset);
-        if (result < 0) {
-            ErrSceToPosix(result);
+    return file->m_mutex.Run([&]() -> s64 {
+        if (file->type == Core::FileSys::FileType::Device) {
+            s64 result = file->device->pwritev(iov, iovcnt, offset);
+            if (result < 0) {
+                ErrSceToPosix(result);
+                return -1;
+            }
+            return result;
+        } else if (file->type == Core::FileSys::FileType::Directory) {
+            *__Error() = POSIX_EBADF;
             return -1;
         }
-        return result;
-    } else if (file->type == Core::FileSys::FileType::Directory) {
-        *__Error() = POSIX_EBADF;
-        return -1;
-    }
 
-    if (file->IsReadOnly()) {
-        *__Error() = POSIX_EBADF;
-        return -1;
-    }
+        if (file->IsReadOnly()) {
+            *__Error() = POSIX_EBADF;
+            return -1;
+        }
 
-    const s64 pos = file->Tell();
-    SCOPE_EXIT {
-        file->Seek(pos);
-    };
-    if (!file->Seek(offset)) {
-        *__Error() = POSIX_EIO;
-        return -1;
-    }
-    s64 total_written = 0;
-    for (s32 i = 0; i < iovcnt; i++) {
-        total_written += file->Write(iov[i].iov_base, iov[i].iov_len);
-    }
-    return total_written;
+        const s64 pos = file->Tell();
+        SCOPE_EXIT {
+            file->Seek(pos);
+        };
+        if (!file->Seek(offset)) {
+            *__Error() = POSIX_EIO;
+            return -1;
+        }
+        s64 total_written = 0;
+        for (s32 i = 0; i < iovcnt; i++) {
+            total_written += file->Write(iov[i].iov_base, iov[i].iov_len);
+        }
+        return total_written;
+    });
 }
 
 s64 PS4_SYSV_ABI posix_pwrite(s32 fd, void* buf, u64 nbytes, s64 offset) {

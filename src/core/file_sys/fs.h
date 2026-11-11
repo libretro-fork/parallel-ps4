@@ -5,11 +5,11 @@
 
 #include <atomic>
 #include <memory>
-#include <mutex>
 #include <optional>
 #include <string>
 #include <unordered_map>
 #include <vector>
+#include "common/combiner.h"
 #include "common/io_file.h"
 #include "common/logging/formatter.h"
 #include "core/file_sys/devices/base_device.h"
@@ -103,11 +103,13 @@ public:
     static std::optional<std::string> SanitizeGuestPath(std::string_view path);
 
     const MntPair* GetMountFromHostPath(const std::string& host_path) {
-        std::scoped_lock lock{m_mutex};
-        const auto it = std::ranges::find_if(m_mnt_pairs, [&](const MntPair& mount) {
-            return host_path.starts_with(std::string{fmt::UTF(mount.host_path.u8string()).data});
+        return m_mutex.Run([&]() -> const MntPair* {
+            const auto it = std::ranges::find_if(m_mnt_pairs, [&](const MntPair& mount) {
+                return host_path.starts_with(
+                    std::string{fmt::UTF(mount.host_path.u8string()).data});
+            });
+            return it == m_mnt_pairs.end() ? nullptr : &*it;
         });
-        return it == m_mnt_pairs.end() ? nullptr : &*it;
     }
 
     const MntPair* GetMount(std::string_view guest_path) {
@@ -117,23 +119,24 @@ public:
             normalized = std::filesystem::path(guest_path).lexically_normal().generic_string();
             guest_path = normalized;
         }
-        std::scoped_lock lock{m_mutex};
-        const auto it = std::ranges::find_if(m_mnt_pairs, [&](const auto& mount) {
-            // When doing starts-with check, add a trailing slash to make sure we don't match
-            // against only part of the mount path.
-            return guest_path == mount.mount || guest_path.starts_with(mount.mount + "/");
+        return m_mutex.Run([&]() -> const MntPair* {
+            const auto it = std::ranges::find_if(m_mnt_pairs, [&](const auto& mount) {
+                // When doing starts-with check, add a trailing slash to make sure we don't match
+                // against only part of the mount path.
+                return guest_path == mount.mount || guest_path.starts_with(mount.mount + "/");
+            });
+            if (it == m_mnt_pairs.end()) {
+                return nullptr;
+            }
+            return &*it;
         });
-        if (it == m_mnt_pairs.end()) {
-            return nullptr;
-        }
-        return &*it;
     }
 
 private:
     std::vector<MntPair> m_mnt_pairs;
     std::vector<std::filesystem::path> path_parts;
     std::unordered_map<std::filesystem::path, std::filesystem::path> path_cache;
-    std::mutex m_mutex;
+    Common::Combiner m_mutex; // what it guards changes one call at a time here
 };
 
 enum class FileType {
@@ -150,7 +153,7 @@ struct File {
     std::filesystem::path m_host_name;
     std::string m_guest_name;
     std::unique_ptr<IFile> handle;
-    std::mutex m_mutex;
+    Common::Combiner m_mutex; // what it guards changes one call at a time here
     std::shared_ptr<Directories::BaseDirectory> directory; // only valid for type == Directory
     std::shared_ptr<Devices::BaseDevice> device;           // only valid for type == Device
 
@@ -217,7 +220,7 @@ public:
 
 private:
     std::vector<File*> m_files;
-    std::mutex m_mutex;
+    Common::Combiner m_mutex; // what it guards changes one call at a time here
 };
 
 } // namespace Core::FileSys
