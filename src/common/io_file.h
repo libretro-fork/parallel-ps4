@@ -43,7 +43,9 @@ enum class FileHint {
     /// Read where it lies: a read-only file is memory mapped, and Mapped() and View() lend its
     /// bytes in place instead of copying them out.
     Mapped,
-    /// Read or written front to back once: no stdio buffer between the caller and the file.
+    /// No stdio buffer between the caller and the file, reading or writing: each call goes to
+    /// the descriptor, and what is written is in the file at once. For big pieces, or a file
+    /// shared with other handles; small pieces are better off buffered.
     Sequential,
 };
 

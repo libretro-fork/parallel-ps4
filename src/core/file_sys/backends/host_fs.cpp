@@ -32,12 +32,14 @@ FileStat MakeFileStat(const Common::FS::FileInfo& info, u32 inode) {
 
 // Guest code expects POSIX sharing: opening a file already open for writing must not fail. A file
 // of a read-only mount (the game's own) cannot change underneath, so it is mapped and read from
-// where it lies.
+// where it lies. Any other goes straight to the descriptor (libretro-common's descriptor path):
+// no copy through a stdio buffer, and a write is in the file for every other handle at once, as
+// on the console.
 HostFile::HostFile(std::filesystem::path host_path, Common::FS::FileAccessMode mode, bool read_only)
-    : m_path(std::move(host_path)),
-      m_file(m_path, mode,
-             read_only && mode == Common::FS::FileAccessMode::Read ? Common::FS::FileHint::Mapped
-                                                                   : Common::FS::FileHint::None),
+    : m_path(std::move(host_path)), m_file(m_path, mode,
+                                           read_only && mode == Common::FS::FileAccessMode::Read
+                                               ? Common::FS::FileHint::Mapped
+                                               : Common::FS::FileHint::Sequential),
       m_read_only(read_only) {
     if (const auto info = m_file.GetInfo()) {
         m_inode = GetGuestInode(FileIdentity{.host = info->identity}).value_or(0);
@@ -55,10 +57,8 @@ s64 HostFile::Write(const void* src, u64 size) {
     if (!m_file.IsOpen() || m_read_only) {
         return -1;
     }
-    const s64 written = static_cast<s64>(m_file.WriteRaw<u8>(src, size));
-    // Visible at once to every other handle on the file, as on the console
-    m_file.Flush();
-    return written;
+    // On the descriptor: visible at once to every other handle on the file, as on the console
+    return static_cast<s64>(m_file.WriteRaw<u8>(src, size));
 }
 
 bool HostFile::Seek(s64 offset, Common::FS::SeekOrigin origin) {
