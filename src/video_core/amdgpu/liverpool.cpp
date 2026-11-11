@@ -1185,14 +1185,17 @@ Liverpool::Task Liverpool::ProcessCompute(std::span<const u32> acb, u32 vqid) {
 
 Liverpool::CmdBuffer Liverpool::CopyCmdBuffers(std::span<const u32> dcb, std::span<const u32> ccb) {
     auto& queue = mapped_queues[GfxQueueId];
-    ASSERT_MSG(queue.dcb_buffer.capacity() >=
-                   static_cast<u32>(retro_atomic_load_seq_cst_int(&queue.dcb_buffer_offset)) +
-                       dcb.size(),
-               "dcb copy buffer out of reserved space");
-    ASSERT_MSG(queue.ccb_buffer.capacity() >=
-                   static_cast<u32>(retro_atomic_load_seq_cst_int(&queue.ccb_buffer_offset)) +
-                       ccb.size(),
-               "ccb copy buffer out of reserved space");
+    // More commands between two flips than the copies have room for (Sekiro after a cutscene):
+    // those past it are read where the game has them, as with the copying off, instead of the
+    // emulator stopping. The room cannot grow: the GPU thread reads the copies handed out.
+    if (queue.dcb_buffer.capacity() <
+            static_cast<u32>(retro_atomic_load_seq_cst_int(&queue.dcb_buffer_offset)) +
+                dcb.size() ||
+        queue.ccb_buffer.capacity() <
+            static_cast<u32>(retro_atomic_load_seq_cst_int(&queue.ccb_buffer_offset)) +
+                ccb.size()) {
+        return std::make_pair(dcb, ccb);
+    }
 
     queue.dcb_buffer.resize(std::max(
         queue.dcb_buffer.size(),

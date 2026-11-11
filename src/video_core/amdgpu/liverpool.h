@@ -126,7 +126,8 @@ public:
 
     void ReserveCopyBufferSpace() {
         GpuQueue& gfx_queue = mapped_queues[GfxQueueId];
-        constexpr size_t GfxReservedSize = 2_MB >> 2;
+        // In words. 2 MiB was less than Sekiro submits in a frame after a cutscene.
+        constexpr size_t GfxReservedSize = 16_MB >> 2;
         gfx_queue.ccb_buffer.reserve(GfxReservedSize);
         gfx_queue.dcb_buffer.reserve(GfxReservedSize);
     }
