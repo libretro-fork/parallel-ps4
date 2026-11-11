@@ -3,11 +3,11 @@
 
 #pragma once
 
-#include <atomic>
 #include <list>
 #include <mutex>
 #include <set>
 #include <stack>
+#include <retro_atomic.h>
 #include "common/combiner.h"
 #include "common/singleton.h"
 #include "common/slab_heap.h"
@@ -55,12 +55,12 @@ struct ThreadState {
 
     void Link(Pthread* curthread, Pthread* thread) {
         thread_list_combiner.Run([&] { threads.insert(thread); });
-        active_threads.fetch_add(1);
+        retro_atomic_fetch_add_int(&active_threads, 1);
     }
 
     void Unlink(Pthread* curthread, Pthread* thread) {
         thread_list_combiner.Run([&] { threads.erase(thread); });
-        active_threads.fetch_sub(1);
+        retro_atomic_fetch_sub_int(&active_threads, 1);
     }
 
     Common::SlabHeap<Pthread> thread_heap;
@@ -71,8 +71,8 @@ struct ThreadState {
     Common::Combiner free_thread_combiner;
     Common::Combiner tcb_combiner;
     Common::Combiner thread_list_combiner;
-    std::atomic<s32> total_threads{};
-    std::atomic<s32> active_threads{};
+    retro_atomic_int_t total_threads{};
+    retro_atomic_int_t active_threads{};
     std::stack<Stack*> dstackq;
     std::list<Stack*> mstackq;
     VAddr last_stack = 0;

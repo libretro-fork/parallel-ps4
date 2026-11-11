@@ -3,7 +3,6 @@
 
 #include <algorithm>
 #include <array>
-#include <atomic>
 #include <bit>
 #include <memory>
 #include <mutex>
@@ -13,6 +12,7 @@
 #include <vector>
 #include "common/combiner.h"
 
+#include <retro_atomic.h>
 #include "core/net/guest_net.h"
 #include "core/net/p2p_transport.h"
 
@@ -62,7 +62,7 @@ struct GuestSocket {
             p2p_dgram->Close();
         }
         if (native != Host::InvalidSocket && type == SOCK_STREAM) {
-            Host::PrepareClose(native, !nonblocking);
+            Host::PrepareClose(native, retro_atomic_load_seq_cst_int(&nonblocking) == 0);
         }
         Host::CloseSocket(native);
     }
@@ -85,15 +85,15 @@ struct GuestSocket {
     const std::shared_ptr<P2P::DatagramSocket> p2p_dgram;
     const std::shared_ptr<P2P::StreamSocket> p2p_stream;
 
-    std::atomic<bool> nonblocking{false};
-    std::atomic<bool> reuse_addr{false};
-    std::atomic<bool> reuse_port{false};
-    std::atomic<s64> rcv_timeout_us{0}; // 0 = no timeout
-    std::atomic<s64> snd_timeout_us{0};
-    std::atomic<s64> connect_timeout_us{0}; // SO_CONNECTTIMEO
-    std::atomic<s64> accept_timeout_us{0};  // SO_ACCEPTTIMEO
-    std::atomic<bool> connected{false};     // also set while connecting
-    std::atomic<bool> listening{false};
+    retro_atomic_int_t nonblocking{0};
+    retro_atomic_int_t reuse_addr{0};
+    retro_atomic_int_t reuse_port{0};
+    retro_atomic_64_t rcv_timeout_us{0}; // 0 = no timeout
+    retro_atomic_64_t snd_timeout_us{0};
+    retro_atomic_64_t connect_timeout_us{0}; // SO_CONNECTTIMEO
+    retro_atomic_64_t accept_timeout_us{0};  // SO_ACCEPTTIMEO
+    retro_atomic_int_t connected{0};         // also set while connecting
+    retro_atomic_int_t listening{0};
 
     Common::Combiner attr_mutex;
     SocketAttributes attributes;
@@ -141,8 +141,8 @@ struct ExternalObject {
 
     const u32 generation;
     P2P::ReadinessFlag done;
-    std::atomic<bool> signaled{false};
-    std::atomic<bool> hangup{false};
+    retro_atomic_int_t signaled{0};
+    retro_atomic_int_t hangup{0};
 
     Common::Combiner reg_mutex;
     bool closed = false;
@@ -296,7 +296,7 @@ private:
 };
 
 ObjectTable g_objects;
-std::atomic<u32> g_next_generation{1};
+retro_atomic_int_t g_next_generation{1};
 
 Common::Combiner g_p2p_mutex;
 std::shared_ptr<P2P::Transport> g_p2p_transports[2];
@@ -416,8 +416,9 @@ NetResult RunBlocking(GuestSocket& s, Side side, u32 interest, Host::Deadline de
     }
 }
 
-Host::Deadline SocketDeadline(const std::atomic<s64>& timeout_us) {
-    return Host::DeadlineFromSocketTimeout(std::chrono::microseconds{timeout_us.load()});
+Host::Deadline SocketDeadline(const retro_atomic_64_t& timeout_us) {
+    return Host::DeadlineFromSocketTimeout(
+        std::chrono::microseconds{static_cast<s64>(retro_atomic_load_acquire_64(&timeout_us))});
 }
 
 template <typename SendSome>
@@ -552,7 +553,8 @@ NetResult CloseObject(s32 id) {
 }
 
 NetResult ReserveExternalId() {
-    auto object = std::make_shared<ExternalObject>(g_next_generation.fetch_add(1));
+    auto object = std::make_shared<ExternalObject>(
+        static_cast<u32>(retro_atomic_fetch_add_int(&g_next_generation, 1)));
     if (!object->done.Valid()) {
         return NetResult::Fail(Error::NoBufs);
     }
@@ -564,8 +566,8 @@ NetResult SignalExternal(s32 id, bool hangup) {
     if (!x) {
         return NetResult::Fail(Error::BadF);
     }
-    x->hangup = hangup;
-    x->signaled = true;
+    (void)retro_atomic_exchange_int(&x->hangup, hangup);
+    (void)retro_atomic_exchange_int(&x->signaled, 1);
     x->done.Set(true);
     return NetResult::Ok();
 }
@@ -641,7 +643,8 @@ NetResult SocketCreate(int family, int type, int protocol) {
     if (native == Host::InvalidSocket) {
         return NetResult::Fail(e);
     }
-    auto s = std::make_shared<GuestSocket>(native, type, g_next_generation.fetch_add(1));
+    auto s = std::make_shared<GuestSocket>(
+        native, type, static_cast<u32>(retro_atomic_fetch_add_int(&g_next_generation, 1)));
     return g_objects.Insert(std::move(s));
 }
 
@@ -650,8 +653,10 @@ NetResult SocketCreatePair(int family, int type, int protocol, s32 ids[2]) {
     if (const Error e = Host::CreateSocketPair(family, type, protocol, natives); e != Error::Ok) {
         return NetResult::Fail(e);
     }
-    auto first = std::make_shared<GuestSocket>(natives[0], type, g_next_generation.fetch_add(1));
-    auto second = std::make_shared<GuestSocket>(natives[1], type, g_next_generation.fetch_add(1));
+    auto first = std::make_shared<GuestSocket>(
+        natives[0], type, static_cast<u32>(retro_atomic_fetch_add_int(&g_next_generation, 1)));
+    auto second = std::make_shared<GuestSocket>(
+        natives[1], type, static_cast<u32>(retro_atomic_fetch_add_int(&g_next_generation, 1)));
     const NetResult a = g_objects.Insert(std::move(first));
     if (a.error != Error::Ok) {
         return a;
@@ -674,7 +679,9 @@ NetResult SocketBind(s32 id, const sockaddr* addr, socklen_t len) {
     if (s->IsP2P()) {
         return NetResult::Fail(Error::Inval); // use P2PSocketBind
     }
-    if (const Error e = Host::PrepareBind(s->native, s->reuse_addr, s->reuse_port);
+    if (const Error e =
+            Host::PrepareBind(s->native, (retro_atomic_load_seq_cst_int(&s->reuse_addr) != 0),
+                              (retro_atomic_load_seq_cst_int(&s->reuse_port) != 0));
         e != Error::Ok) {
         return NetResult::Fail(e);
     }
@@ -692,7 +699,7 @@ NetResult SocketListen(s32 id, int backlog) {
     const Error e =
         s->p2p_stream ? s->p2p_stream->Listen(backlog) : Host::Listen(s->native, backlog);
     if (e == Error::Ok) {
-        s->listening = true;
+        (void)retro_atomic_exchange_int(&s->listening, 1);
     }
     return FromError(e);
 }
@@ -705,16 +712,16 @@ NetResult SocketConnect(s32 id, const sockaddr* addr, socklen_t len) {
     if (s->IsP2P()) {
         return NetResult::Fail(Error::Inval); // use P2PSocketConnect
     }
-    if (s->listening) {
+    if (retro_atomic_load_seq_cst_int(&s->listening) != 0) {
         return NetResult::Fail(Error::OpNotSupp);
     }
-    if (s->nonblocking) {
+    if (retro_atomic_load_seq_cst_int(&s->nonblocking) != 0) {
         if (ConsumePendingAbort(*s, Side::Send)) {
             return NetResult::Fail(AbortedError);
         }
         const Error e = Host::Connect(s->native, addr, len);
         if (e == Error::Ok || e == Error::InProgress) {
-            s->connected = true;
+            (void)retro_atomic_exchange_int(&s->connected, 1);
         }
         return FromError(e);
     }
@@ -725,7 +732,7 @@ NetResult SocketConnect(s32 id, const sockaddr* addr, socklen_t len) {
     }
     const Error started = Host::Connect(s->native, addr, len);
     if (started == Error::Ok || started == Error::InProgress) {
-        s->connected = true;
+        (void)retro_atomic_exchange_int(&s->connected, 1);
     }
     if (started != Error::InProgress) {
         return FromError(started);
@@ -770,24 +777,35 @@ NetResult SocketAccept(s32 id, sockaddr* addr, socklen_t* len) {
         return NetResult::Fail(Error::Inval); // use P2PSocketAccept
     }
     Host::NativeSocket client = Host::InvalidSocket;
-    const NetResult r = RunBlocking(
-        *s, Side::Recv, Host::Readable, SocketDeadline(s->accept_timeout_us), !s->nonblocking, [&] {
-            Error e;
-            client = Host::Accept(s->native, addr, len, &e);
-            return client == Host::InvalidSocket ? NetResult::Fail(e) : NetResult::Ok();
-        });
+    const NetResult r =
+        RunBlocking(*s, Side::Recv, Host::Readable, SocketDeadline(s->accept_timeout_us),
+                    retro_atomic_load_seq_cst_int(&s->nonblocking) == 0, [&] {
+                        Error e;
+                        client = Host::Accept(s->native, addr, len, &e);
+                        return client == Host::InvalidSocket ? NetResult::Fail(e) : NetResult::Ok();
+                    });
     if (r.error != Error::Ok) {
         return r;
     }
-    auto c = std::make_shared<GuestSocket>(client, s->type, g_next_generation.fetch_add(1));
-    c->nonblocking = s->nonblocking.load();
-    c->reuse_addr = s->reuse_addr.load();
-    c->reuse_port = s->reuse_port.load();
-    c->rcv_timeout_us = s->rcv_timeout_us.load();
-    c->snd_timeout_us = s->snd_timeout_us.load();
-    c->connect_timeout_us = s->connect_timeout_us.load();
-    c->accept_timeout_us = s->accept_timeout_us.load();
-    c->connected = true;
+    auto c = std::make_shared<GuestSocket>(
+        client, s->type, static_cast<u32>(retro_atomic_fetch_add_int(&g_next_generation, 1)));
+    (void)retro_atomic_exchange_int(&c->nonblocking,
+                                    (retro_atomic_load_seq_cst_int(&s->nonblocking) != 0));
+    (void)retro_atomic_exchange_int(&c->reuse_addr,
+                                    (retro_atomic_load_seq_cst_int(&s->reuse_addr) != 0));
+    (void)retro_atomic_exchange_int(&c->reuse_port,
+                                    (retro_atomic_load_seq_cst_int(&s->reuse_port) != 0));
+    (void)retro_atomic_exchange_64(
+        &c->rcv_timeout_us, static_cast<s64>(retro_atomic_load_acquire_64(&s->rcv_timeout_us)));
+    (void)retro_atomic_exchange_64(
+        &c->snd_timeout_us, static_cast<s64>(retro_atomic_load_acquire_64(&s->snd_timeout_us)));
+    (void)retro_atomic_exchange_64(
+        &c->connect_timeout_us,
+        static_cast<s64>(retro_atomic_load_acquire_64(&s->connect_timeout_us)));
+    (void)retro_atomic_exchange_64(
+        &c->accept_timeout_us,
+        static_cast<s64>(retro_atomic_load_acquire_64(&s->accept_timeout_us)));
+    (void)retro_atomic_exchange_int(&c->connected, 1);
     s->attr_mutex.Run([&] { c->attributes = s->attributes; });
     return g_objects.Insert(std::move(c));
 }
@@ -821,11 +839,13 @@ NetResult SocketSendTo(s32 id, const void* buf, size_t len, int host_flags, bool
         return io.error == Error::Ok ? NetResult::Ok(io.value) : NetResult::Fail(io.error);
     }
     const auto* bytes = static_cast<const u8*>(buf);
-    return SendAll(*s, len, !dontwait && !s->nonblocking, s->type == SOCK_STREAM, [&](size_t sent) {
-        const size_t chunk = std::min(len - sent, MaxStreamSendChunk);
-        const auto io = Host::SendTo(s->native, bytes + sent, chunk, host_flags, addr, addr_len);
-        return NetResult{io.value, io.error};
-    });
+    return SendAll(*s, len, !dontwait && retro_atomic_load_seq_cst_int(&s->nonblocking) == 0,
+                   s->type == SOCK_STREAM, [&](size_t sent) {
+                       const size_t chunk = std::min(len - sent, MaxStreamSendChunk);
+                       const auto io =
+                           Host::SendTo(s->native, bytes + sent, chunk, host_flags, addr, addr_len);
+                       return NetResult{io.value, io.error};
+                   });
 }
 
 NetResult SocketRecvFrom(s32 id, void* buf, size_t len, int host_flags, bool dontwait,
@@ -837,7 +857,7 @@ NetResult SocketRecvFrom(s32 id, void* buf, size_t len, int host_flags, bool don
     if (s->IsP2P()) {
         return NetResult::Fail(Error::Inval); // use P2PSocketRecvFrom
     }
-    const bool blocking = !dontwait && !s->nonblocking;
+    const bool blocking = !dontwait && retro_atomic_load_seq_cst_int(&s->nonblocking) == 0;
     // Host socket is non-blocking, so MSG_WAITALL is handled here.
     const bool waitall = (host_flags & MSG_WAITALL) != 0;
     host_flags &= ~MSG_WAITALL;
@@ -922,14 +942,14 @@ NetResult SocketGetInfo(s32 id, SocketInfo* info) {
     }
     info->type = s->type;
     info->p2p = s->IsP2P();
-    info->nonblocking = s->nonblocking;
-    info->reuse_addr = s->reuse_addr;
-    info->rcv_timeout_us = s->rcv_timeout_us;
-    info->snd_timeout_us = s->snd_timeout_us;
-    info->connect_timeout_us = s->connect_timeout_us;
-    info->accept_timeout_us = s->accept_timeout_us;
-    info->connected = s->connected;
-    info->listening = s->listening;
+    info->nonblocking = retro_atomic_load_seq_cst_int(&s->nonblocking) != 0;
+    info->reuse_addr = retro_atomic_load_seq_cst_int(&s->reuse_addr) != 0;
+    info->rcv_timeout_us = retro_atomic_load_acquire_64(&s->rcv_timeout_us);
+    info->snd_timeout_us = retro_atomic_load_acquire_64(&s->snd_timeout_us);
+    info->connect_timeout_us = retro_atomic_load_acquire_64(&s->connect_timeout_us);
+    info->accept_timeout_us = retro_atomic_load_acquire_64(&s->accept_timeout_us);
+    info->connected = retro_atomic_load_seq_cst_int(&s->connected) != 0;
+    info->listening = retro_atomic_load_seq_cst_int(&s->listening) != 0;
     if (s->p2p_stream) {
         const Error e = s->p2p_stream->ConnectResult();
         info->pending_error =
@@ -981,7 +1001,7 @@ NetResult SocketSetNonBlocking(s32 id, bool enable) {
     if (!s) {
         return NetResult::Fail(Error::BadF);
     }
-    s->nonblocking = enable; // host socket is always non-blocking
+    (void)retro_atomic_exchange_int(&s->nonblocking, enable); // host socket is always non-blocking
     return NetResult::Ok();
 }
 
@@ -990,7 +1010,7 @@ NetResult SocketSetReuseAddr(s32 id, bool enable) {
     if (!s) {
         return NetResult::Fail(Error::BadF);
     }
-    s->reuse_addr = enable;
+    (void)retro_atomic_exchange_int(&s->reuse_addr, enable);
     return NetResult::Ok();
 }
 
@@ -999,7 +1019,7 @@ NetResult SocketSetReusePort(s32 id, bool enable) {
     if (!s) {
         return NetResult::Fail(Error::BadF);
     }
-    s->reuse_port = enable;
+    (void)retro_atomic_exchange_int(&s->reuse_port, enable);
     return NetResult::Ok();
 }
 
@@ -1008,7 +1028,7 @@ NetResult SocketSetRecvTimeout(s32 id, std::chrono::microseconds value) {
     if (!s) {
         return NetResult::Fail(Error::BadF);
     }
-    s->rcv_timeout_us = value.count();
+    (void)retro_atomic_exchange_64(&s->rcv_timeout_us, value.count());
     return NetResult::Ok();
 }
 
@@ -1017,7 +1037,7 @@ NetResult SocketSetConnectTimeout(s32 id, std::chrono::microseconds value) {
     if (!s) {
         return NetResult::Fail(Error::BadF);
     }
-    s->connect_timeout_us = std::max<s64>(value.count(), 0);
+    (void)retro_atomic_exchange_64(&s->connect_timeout_us, std::max<s64>(value.count(), 0));
     return NetResult::Ok();
 }
 
@@ -1026,7 +1046,7 @@ NetResult SocketSetAcceptTimeout(s32 id, std::chrono::microseconds value) {
     if (!s) {
         return NetResult::Fail(Error::BadF);
     }
-    s->accept_timeout_us = std::max<s64>(value.count(), 0);
+    (void)retro_atomic_exchange_64(&s->accept_timeout_us, std::max<s64>(value.count(), 0));
     return NetResult::Ok();
 }
 
@@ -1035,7 +1055,7 @@ NetResult SocketSetSendTimeout(s32 id, std::chrono::microseconds value) {
     if (!s) {
         return NetResult::Fail(Error::BadF);
     }
-    s->snd_timeout_us = value.count();
+    (void)retro_atomic_exchange_64(&s->snd_timeout_us, value.count());
     return NetResult::Ok();
 }
 
@@ -1133,7 +1153,7 @@ NetResult P2PSocketCreate(int family, bool stream) {
     if (!transport) {
         return NetResult::Fail(Error::NetDown); // TODO: real error when P2P is down
     }
-    const u32 generation = g_next_generation.fetch_add(1);
+    const u32 generation = static_cast<u32>(retro_atomic_fetch_add_int(&g_next_generation, 1));
     auto s = stream ? std::make_shared<GuestSocket>(transport->CreateStream(), generation)
                     : std::make_shared<GuestSocket>(transport->CreateDatagram(), generation);
     const auto* handles = s->P2PHandles();
@@ -1185,20 +1205,20 @@ NetResult P2PSocketConnect(s32 id, const P2P::Endpoint& peer, u16 peer_vport) {
     if (s->p2p_dgram) {
         const Error e = s->p2p_dgram->SetPeer(peer, peer_vport);
         if (e == Error::Ok) {
-            s->connected = true;
+            (void)retro_atomic_exchange_int(&s->connected, 1);
         }
         return FromError(e);
     }
-    if (s->listening) {
+    if (retro_atomic_load_seq_cst_int(&s->listening) != 0) {
         return NetResult::Fail(Error::OpNotSupp);
     }
-    if (s->nonblocking) {
+    if (retro_atomic_load_seq_cst_int(&s->nonblocking) != 0) {
         if (ConsumePendingAbort(*s, Side::Send)) {
             return NetResult::Fail(AbortedError);
         }
         const Error e = s->p2p_stream->Connect(peer, peer_vport);
         if (e == Error::Ok || e == Error::InProgress) {
-            s->connected = true;
+            (void)retro_atomic_exchange_int(&s->connected, 1);
         }
         return FromError(e);
     }
@@ -1208,7 +1228,7 @@ NetResult P2PSocketConnect(s32 id, const P2P::Endpoint& peer, u16 peer_vport) {
     }
     const Error started = s->p2p_stream->Connect(peer, peer_vport);
     if (started == Error::Ok || started == Error::InProgress) {
-        s->connected = true;
+        (void)retro_atomic_exchange_int(&s->connected, 1);
     }
     if (started != Error::InProgress) {
         return FromError(started);
@@ -1244,18 +1264,21 @@ NetResult P2PSocketAccept(s32 id, P2P::Endpoint* peer, u16* peer_vport) {
         return NetResult::Fail(Error::OpNotSupp);
     }
     std::shared_ptr<P2P::StreamSocket> child;
-    const NetResult r = RunBlocking(*s, Side::Recv, Host::Readable,
-                                    SocketDeadline(s->accept_timeout_us), !s->nonblocking, [&] {
-                                        Error e;
-                                        child = s->p2p_stream->Accept(peer, peer_vport, &e);
-                                        return child ? NetResult::Ok() : NetResult::Fail(e);
-                                    });
+    const NetResult r =
+        RunBlocking(*s, Side::Recv, Host::Readable, SocketDeadline(s->accept_timeout_us),
+                    retro_atomic_load_seq_cst_int(&s->nonblocking) == 0, [&] {
+                        Error e;
+                        child = s->p2p_stream->Accept(peer, peer_vport, &e);
+                        return child ? NetResult::Ok() : NetResult::Fail(e);
+                    });
     if (r.error != Error::Ok) {
         return r;
     }
-    auto c = std::make_shared<GuestSocket>(std::move(child), g_next_generation.fetch_add(1));
-    c->nonblocking = s->nonblocking.load();
-    c->connected = true;
+    auto c = std::make_shared<GuestSocket>(
+        std::move(child), static_cast<u32>(retro_atomic_fetch_add_int(&g_next_generation, 1)));
+    (void)retro_atomic_exchange_int(&c->nonblocking,
+                                    (retro_atomic_load_seq_cst_int(&s->nonblocking) != 0));
+    (void)retro_atomic_exchange_int(&c->connected, 1);
     s->attr_mutex.Run([&] { c->attributes = s->attributes; });
     return g_objects.Insert(std::move(c));
 }
@@ -1268,7 +1291,8 @@ NetResult P2PSocketSendTo(s32 id, const void* buf, size_t len, bool dontwait,
     }
     const auto* bytes = static_cast<const u8*>(buf);
     return SendAll(
-        *s, len, !dontwait && !s->nonblocking, s->p2p_stream != nullptr, [&](size_t sent) {
+        *s, len, !dontwait && retro_atomic_load_seq_cst_int(&s->nonblocking) == 0,
+        s->p2p_stream != nullptr, [&](size_t sent) {
             const std::span<const u8> rest{bytes + sent, len - sent};
             const auto io = s->p2p_stream
                                 ? s->p2p_stream->Send(rest)
@@ -1285,7 +1309,7 @@ NetResult P2PSocketRecvFrom(s32 id, void* buf, size_t len, bool peek, bool dontw
     if (!s || !s->IsP2P()) {
         return NetResult::Fail(s ? Error::Inval : Error::BadF);
     }
-    const bool blocking = !dontwait && !s->nonblocking;
+    const bool blocking = !dontwait && retro_atomic_load_seq_cst_int(&s->nonblocking) == 0;
     const auto deadline = SocketDeadline(s->rcv_timeout_us);
     auto* bytes = static_cast<u8*>(buf);
     const bool loop = blocking && waitall && !peek && s->p2p_stream != nullptr;
@@ -1580,7 +1604,8 @@ static NetResult EpollWaitOn(const std::shared_ptr<GuestEpoll>& ep, std::span<Gu
                     it->second.armed = false;
                     it->second.reported = true;
                     // EPOLLIN | EPOLLDESCID, plus EPOLLHUP if the lookup was aborted.
-                    events = Host::EvIn | Host::EvDescId | (x->hangup ? Host::EvHup : 0u);
+                    events = Host::EvIn | Host::EvDescId |
+                             ((retro_atomic_load_seq_cst_int(&x->hangup) != 0) ? Host::EvHup : 0u);
                 } else if (it->second.p2p) {
                     // The handle only signals a change, recompute the state.
                     const auto s = g_objects.Get<GuestSocket>(socket_id);

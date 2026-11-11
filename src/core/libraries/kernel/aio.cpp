@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include <array>
-#include <atomic>
 #include <chrono>
 #include <cstring>
 #include <mutex>
@@ -12,6 +11,7 @@
 #include <rthreads/retro_eventcount.h>
 #include <rthreads/rthreads.h>
 
+#include <retro_atomic.h>
 #include "aio.h"
 #include "common/assert.h"
 #include "common/logging/log.h"
@@ -32,21 +32,21 @@ static constexpr u32 AioMaxBatch = 128;
 
 struct AioBatch {
     mpsc_stack_node_t node; // first: the stack links batches through it
-    std::atomic<s32> state{0};
+    retro_atomic_int_t state{0};
     bool write = false;
     u32 count = 0;
     std::array<OrbisKernelAioRWRequest, AioMaxBatch> requests{};
 };
 
 static std::array<AioBatch, ORBIS_KERNEL_AIO_MAX_QUEUES> g_batches;
-static std::atomic<u32> g_next_id{0};
+static retro_atomic_int_t g_next_id{0};
 static mpsc_stack_t g_pending;
 static retro_eventcount_t g_work;
 static retro_eventcount_t g_done;
 static std::once_flag g_worker_once;
 
-static void AioDo(const OrbisKernelAioRWRequest& req, bool write, std::atomic<s32>& state) {
-    if (state.load(std::memory_order_acquire) == ORBIS_KERNEL_AIO_STATE_ABORTED) {
+static void AioDo(const OrbisKernelAioRWRequest& req, bool write, retro_atomic_int_t& state) {
+    if (static_cast<s32>(retro_atomic_load_acquire_int(&state)) == ORBIS_KERNEL_AIO_STATE_ABORTED) {
         req.result->state = ORBIS_KERNEL_AIO_STATE_ABORTED;
         return;
     }
@@ -76,10 +76,10 @@ static void AioWorker(void*) {
             }
             // Done, unless it was cancelled meanwhile
             s32 expected = ORBIS_KERNEL_AIO_STATE_PROCESSING;
-            batch->state.compare_exchange_strong(
-                expected,
-                failed ? ORBIS_KERNEL_AIO_STATE_ABORTED : ORBIS_KERNEL_AIO_STATE_COMPLETED,
-                std::memory_order_acq_rel);
+            (retro_atomic_cas_int(&batch->state, expected,
+                                  failed ? ORBIS_KERNEL_AIO_STATE_ABORTED
+                                         : ORBIS_KERNEL_AIO_STATE_COMPLETED) ||
+             ((expected = static_cast<s32>(retro_atomic_load_acquire_int(&batch->state))), false));
         }
         retro_eventcount_notify(&g_done);
     }
@@ -91,12 +91,12 @@ static AioBatch* Batch(OrbisKernelAioSubmitId id) {
 
 static s32 State(OrbisKernelAioSubmitId id) {
     const AioBatch* batch = Batch(id);
-    return batch ? batch->state.load(std::memory_order_acquire) : 0;
+    return batch ? static_cast<s32>(retro_atomic_load_acquire_int(&batch->state)) : 0;
 }
 
 static void SetState(OrbisKernelAioSubmitId id, s32 state) {
     if (AioBatch* batch = Batch(id)) {
-        batch->state.store(state, std::memory_order_release);
+        retro_atomic_store_release_int(&batch->state, state);
     }
 }
 
@@ -113,31 +113,32 @@ static OrbisKernelAioSubmitId Submit(const OrbisKernelAioRWRequest* req, u32 cou
     });
     // Ids 1 to 511 in turn; 0 is the cancel functions' own
     const OrbisKernelAioSubmitId id = static_cast<OrbisKernelAioSubmitId>(
-        1 + g_next_id.fetch_add(1, std::memory_order_relaxed) % (ORBIS_KERNEL_AIO_MAX_QUEUES - 1));
+        1 + static_cast<u32>(retro_atomic_fetch_add_int(&g_next_id, 1)) %
+                (ORBIS_KERNEL_AIO_MAX_QUEUES - 1));
     AioBatch& batch = g_batches[id];
     // An id comes round again after 511 submits; one still in flight then is waited out
-    while (batch.state.load(std::memory_order_acquire) == ORBIS_KERNEL_AIO_STATE_PROCESSING) {
+    while (static_cast<s32>(retro_atomic_load_acquire_int(&batch.state)) ==
+           ORBIS_KERNEL_AIO_STATE_PROCESSING) {
         std::this_thread::yield();
     }
     for (u32 i = 0; i < count; i++) {
         req[i].result->state = ORBIS_KERNEL_AIO_STATE_PROCESSING;
     }
     if (count > AioMaxBatch) {
-        batch.state.store(ORBIS_KERNEL_AIO_STATE_PROCESSING, std::memory_order_relaxed);
+        retro_atomic_store_relaxed_int(&batch.state, ORBIS_KERNEL_AIO_STATE_PROCESSING);
         bool failed = false;
         for (u32 i = 0; i < count; i++) {
             AioDo(req[i], write, batch.state);
             failed |= req[i].result->state == ORBIS_KERNEL_AIO_STATE_ABORTED;
         }
-        batch.state.store(failed ? ORBIS_KERNEL_AIO_STATE_ABORTED
-                                 : ORBIS_KERNEL_AIO_STATE_COMPLETED,
-                          std::memory_order_release);
+        retro_atomic_store_release_int(&batch.state, failed ? ORBIS_KERNEL_AIO_STATE_ABORTED
+                                                            : ORBIS_KERNEL_AIO_STATE_COMPLETED);
         return id;
     }
     batch.write = write;
     batch.count = count;
     std::memcpy(batch.requests.data(), req, count * sizeof(*req));
-    batch.state.store(ORBIS_KERNEL_AIO_STATE_PROCESSING, std::memory_order_relaxed);
+    retro_atomic_store_relaxed_int(&batch.state, ORBIS_KERNEL_AIO_STATE_PROCESSING);
     mpsc_stack_push(&g_pending, &batch.node);
     retro_eventcount_notify(&g_work);
     return id;

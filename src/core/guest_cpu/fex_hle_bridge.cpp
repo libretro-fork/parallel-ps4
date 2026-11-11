@@ -4,17 +4,17 @@
 #include "hle_trace.h"
 
 #include <algorithm>
-#include <atomic>
 #include <cerrno>
 #include <cstdio>
 #include <cstdlib>
 #include <mutex>
+#include <retro_atomic.h>
 
 namespace {
 // Diagnostic cap: high enough to capture full boot + background-thread HLE activity
 // (the 256 default truncated the trace before the game's Fios driver thread ran).
 constexpr uint32_t HleTraceLimit = 100000;
-std::atomic_uint32_t HleTraceCount{};
+retro_atomic_int_t HleTraceCount{};
 
 thread_local Core::GuestCpu::HleCallFrame* ActiveHleCallFrame{};
 
@@ -82,9 +82,9 @@ Fex::EngineResult<bool> HleGuestBridge::Invoke(HleCallFrame& frame) {
     // on memcpy/lock HLE cut Driveclub 3D to 11-15 fps. After the window fills,
     // skip the fetch_add so hot polling APIs do not contend on the counter.
     static const bool trace_requested = BachataHleTraceRequested(std::getenv("BACHATA_FEX_HLE_TRACE"));
-    auto trace_index = HleTraceCount.load(std::memory_order_relaxed);
+    auto trace_index = static_cast<u32>(retro_atomic_load_relaxed_int(&HleTraceCount));
     if (trace_requested && trace_index < HleTraceLimit) {
-        trace_index = HleTraceCount.fetch_add(1, std::memory_order_relaxed);
+        trace_index = static_cast<u32>(retro_atomic_fetch_add_int(&HleTraceCount, 1));
     }
     const bool trace = trace_requested && trace_index < HleTraceLimit;
     if (trace) {

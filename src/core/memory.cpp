@@ -725,7 +725,8 @@ s32 MemoryManager::MapFile(void** out_addr, VAddr virtual_addr, u64 size, Memory
             return ORBIS_KERNEL_ERROR_EBADF;
         }
 
-        if (file->type != Core::FileSys::FileType::Regular) {
+        if (static_cast<FileSys::FileType>(retro_atomic_load_seq_cst_int(&file->type)) !=
+            Core::FileSys::FileType::Regular) {
             LOG_WARNING(Kernel_Vmm, "Unsupported file type for mmap, fd {}", fd);
             return ORBIS_KERNEL_ERROR_EBADF;
         }

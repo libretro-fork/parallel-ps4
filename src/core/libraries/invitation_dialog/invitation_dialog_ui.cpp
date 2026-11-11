@@ -8,6 +8,7 @@
 #include <vector>
 #include <imgui.h>
 
+#include <retro_atomic.h>
 #include "common/logging/log.h"
 #include "core/libraries/invitation_dialog/invitation_dialog.h"
 #include "core/libraries/invitation_dialog/invitation_dialog_ui.h"
@@ -73,8 +74,8 @@ void InvitationDialogUi::Finish(Result result) {
 
 void InvitationDialogUi::Draw() {
     using namespace ImGui;
-    if (pending_accept && pending_accept->done.load(std::memory_order_acquire)) {
-        const bool ok = pending_accept->success.load(std::memory_order_acquire);
+    if (pending_accept && (retro_atomic_load_acquire_int(&pending_accept->done) != 0)) {
+        const bool ok = (retro_atomic_load_acquire_int(&pending_accept->success) != 0);
         const std::string finished_id = pending_accept->invitation_id;
         pending_accept.reset();
         if (status && *status == Status::RUNNING && state) {
@@ -95,8 +96,8 @@ void InvitationDialogUi::Draw() {
             }
         }
     }
-    if (pending_send && pending_send->done.load(std::memory_order_acquire)) {
-        const bool ok = pending_send->success.load(std::memory_order_acquire);
+    if (pending_send && (retro_atomic_load_acquire_int(&pending_send->done) != 0)) {
+        const bool ok = (retro_atomic_load_acquire_int(&pending_send->success) != 0);
         auto finished = std::move(pending_send);
         if (status && *status == Status::RUNNING && state) {
             if (ok) {
@@ -253,8 +254,8 @@ void InvitationDialogUi::Draw() {
                 std::thread([pending, uid, session_id, to, message]() {
                     const bool ok = Libraries::Np::NpHandler::GetInstance().SendSessionInvitation(
                         uid, session_id, to, message);
-                    pending->success.store(ok, std::memory_order_release);
-                    pending->done.store(true, std::memory_order_release);
+                    retro_atomic_store_release_int(&pending->success, ok);
+                    retro_atomic_store_release_int(&pending->done, 1);
                 }).detach();
             }
             EndDisabled();
@@ -286,8 +287,8 @@ void InvitationDialogUi::Draw() {
                 std::thread([pending, uid]() {
                     const bool ok = Libraries::Np::NpHandler::GetInstance().AcceptSessionInvitation(
                         uid, pending->invitation_id);
-                    pending->success.store(ok, std::memory_order_release);
-                    pending->done.store(true, std::memory_order_release);
+                    retro_atomic_store_release_int(&pending->success, ok);
+                    retro_atomic_store_release_int(&pending->done, 1);
                 }).detach();
             }
             EndDisabled();

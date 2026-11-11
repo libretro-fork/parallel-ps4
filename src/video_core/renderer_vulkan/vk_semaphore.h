@@ -3,10 +3,10 @@
 
 #pragma once
 
-#include <atomic>
 #include <condition_variable>
 #include <thread>
 #include <queue>
+#include <retro_atomic.h>
 #include "common/types.h"
 #include "video_core/renderer_vulkan/vk_common.h"
 
@@ -21,11 +21,11 @@ public:
     ~Semaphore();
 
     [[nodiscard]] u64 CurrentTick() const noexcept {
-        return current_tick.load(std::memory_order_acquire);
+        return static_cast<u64>(retro_atomic_load_acquire_64(&current_tick));
     }
 
     [[nodiscard]] u64 KnownGpuTick() const noexcept {
-        return gpu_tick.load(std::memory_order_acquire);
+        return static_cast<u64>(retro_atomic_load_acquire_64(&gpu_tick));
     }
 
     [[nodiscard]] bool IsFree(u64 tick) const noexcept {
@@ -33,7 +33,7 @@ public:
     }
 
     [[nodiscard]] u64 NextTick() noexcept {
-        return current_tick.fetch_add(1, std::memory_order_release);
+        return static_cast<u64>(retro_atomic_fetch_add_64(&current_tick, 1));
     }
 
     [[nodiscard]] vk::Semaphore Handle() const noexcept {
@@ -49,8 +49,8 @@ public:
 protected:
     const Instance& instance;
     vk::UniqueSemaphore semaphore;    ///< Timeline semaphore.
-    std::atomic<u64> gpu_tick{0};     ///< Current known GPU tick.
-    std::atomic<u64> current_tick{1}; ///< Current logical tick.
+    retro_atomic_64_t gpu_tick{0};    ///< Current known GPU tick.
+    retro_atomic_64_t current_tick{1}; ///< Current logical tick.
 };
 
 } // namespace Vulkan

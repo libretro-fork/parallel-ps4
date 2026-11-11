@@ -3,8 +3,9 @@
 
 #pragma once
 
-#include <atomic>
+#include <retro_atomic.h>
 
+#include "common/event_count.h"
 #include "common/types.h"
 
 namespace Frontend {
@@ -37,15 +38,16 @@ private:
 
 // The emulator is asked to end (IPC's STOP, the quit dialog). Its main thread, waiting in
 // WaitForQuit once the game runs, ends the process the way it ends on the core's word.
-inline std::atomic<bool> quit_requested{false};
+inline retro_atomic_int_t quit_requested{0};
+inline Common::EventCount quit_event;
 
 inline void RequestQuit() {
-    quit_requested.store(true, std::memory_order_release);
-    quit_requested.notify_all();
+    retro_atomic_store_release_int(&quit_requested, 1);
+    quit_event.Notify();
 }
 
 inline void WaitForQuit() {
-    quit_requested.wait(false, std::memory_order_acquire);
+    quit_event.Wait([] { return retro_atomic_load_acquire_int(&quit_requested) != 0; });
 }
 
 } // namespace Frontend

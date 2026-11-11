@@ -631,7 +631,7 @@ std::optional<Common::FS::FileView> MntPoints::ReadFile(std::string_view guest_p
 int HandleTable::CreateHandle() {
     return m_mutex.Run([&]() -> int {
         auto* file = new File{};
-        file->is_opened = false;
+        (void)retro_atomic_exchange_int(&file->is_opened, 0);
 
         int existingFilesNum = m_files.size();
 
@@ -672,7 +672,8 @@ File* HandleTable::GetSocket(int d) {
         if (!file) {
             return nullptr;
         }
-        if (file->type != Core::FileSys::FileType::Socket) {
+        if (static_cast<FileType>(retro_atomic_load_seq_cst_int(&file->type)) !=
+            Core::FileSys::FileType::Socket) {
             return nullptr;
         }
         return file;
@@ -684,7 +685,8 @@ std::vector<int> HandleTable::GetSocketHandles() {
         std::vector<int> handles;
         for (int index = 0; index < m_files.size(); index++) {
             const auto* file = m_files.at(index);
-            if (file && file->type == Core::FileSys::FileType::Socket) {
+            if (file && static_cast<FileType>(retro_atomic_load_seq_cst_int(&file->type)) ==
+                            Core::FileSys::FileType::Socket) {
                 handles.push_back(index);
             }
         }
@@ -707,8 +709,8 @@ void HandleTable::CreateStdHandles() {
     auto setup = [this](const char* path, auto* device) {
         int fd = CreateHandle();
         auto* file = GetFile(fd);
-        file->is_opened = true;
-        file->type = FileType::Device;
+        (void)retro_atomic_exchange_int(&file->is_opened, 1);
+        (void)retro_atomic_exchange_int(&file->type, static_cast<int>(FileType::Device));
         file->m_guest_name = path;
         file->device =
             std::shared_ptr<Devices::BaseDevice>{reinterpret_cast<Devices::BaseDevice*>(device)};
@@ -733,11 +735,14 @@ int HandleTable::GetFileDescriptor(File* file) {
 void HandleTable::FlushAll() {
     m_mutex.Run([&] {
         for (auto* file : m_files) {
-            if (file != nullptr && file->is_opened) {
+            if (file != nullptr && (retro_atomic_load_seq_cst_int(&file->is_opened) != 0)) {
                 file->m_mutex.Run([&] {
-                    if (file->type == FileType::Device && file->device) {
+                    if (static_cast<FileType>(retro_atomic_load_seq_cst_int(&file->type)) ==
+                            FileType::Device &&
+                        file->device) {
                         file->device->fsync();
-                    } else if (file->type == FileType::Regular) {
+                    } else if (static_cast<FileType>(retro_atomic_load_seq_cst_int(&file->type)) ==
+                               FileType::Regular) {
                         file->Flush();
                     }
                 });

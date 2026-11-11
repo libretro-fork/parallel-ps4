@@ -7,6 +7,7 @@
 #include <cmath>
 #include <memory>
 
+#include <retro_atomic.h>
 #include "common/logging/log.h"
 #include "core/emulator_settings.h"
 #include "core/libraries/audio/audioout.h"
@@ -32,7 +33,8 @@ public:
     explicit FrontendPortBackend(const PortOut& port)
         : buffer_frames(port.buffer_frames), num_channels(port.format_info.num_channels),
           is_float(port.format_info.is_float), input(audio_mix_input_open()) {
-        gain.store(emu_settings_get_volume_slider() * 0.01f, std::memory_order_relaxed);
+        retro_atomic_store_relaxed_int(
+            &gain, std::bit_cast<int>(emu_settings_get_volume_slider() * 0.01f));
         if (!input) {
             LOG_ERROR(Lib_AudioOut, "No input left in the core's mix: port type {} is silent",
                       static_cast<int>(port.type));
@@ -60,7 +62,7 @@ public:
         if (!audio_mix_input_wait(input, buffer_frames, FRONTEND_WAIT_US)) {
             return; // the frontend is not taking sound: the buffer is dropped
         }
-        const float g = gain.load(std::memory_order_relaxed);
+        const float g = std::bit_cast<float>(retro_atomic_load_relaxed_int(&gain));
         const u32 sample_bytes = is_float ? 4 : 2;
         const u8* src = static_cast<const u8*>(ptr);
         u32 done = 0;
@@ -88,9 +90,9 @@ public:
             max_channel_gain =
                 std::max(max_channel_gain, static_cast<float>(ch_volumes[i]) * INV_VOLUME_0DB);
         }
-        game_gain.store(max_channel_gain, std::memory_order_relaxed);
-        gain.store(max_channel_gain * emu_settings_get_volume_slider() * 0.01f,
-                   std::memory_order_relaxed);
+        retro_atomic_store_relaxed_int(&game_gain, std::bit_cast<int>(max_channel_gain));
+        retro_atomic_store_relaxed_int(
+            &gain, std::bit_cast<int>(max_channel_gain * emu_settings_get_volume_slider() * 0.01f));
     }
 
 private:
@@ -101,17 +103,18 @@ private:
             return;
         }
         last_volume_check_time = now;
-        gain.store(emu_settings_get_volume_slider() * 0.01f *
-                       game_gain.load(std::memory_order_relaxed),
-                   std::memory_order_relaxed);
+        retro_atomic_store_relaxed_int(
+            &gain,
+            std::bit_cast<int>(emu_settings_get_volume_slider() * 0.01f *
+                               std::bit_cast<float>(retro_atomic_load_relaxed_int(&game_gain))));
     }
 
     const u32 buffer_frames;
     const u32 num_channels;
     const bool is_float;
     audio_mix_input_t* input;
-    std::atomic<float> gain{1.0f};
-    std::atomic<float> game_gain{1.0f};
+    retro_atomic_int_t gain{1};
+    retro_atomic_int_t game_gain{1};
     u64 last_volume_check_time{0};
 };
 

@@ -3,7 +3,6 @@
 
 #pragma once
 
-#include <atomic>
 #include <filesystem>
 #include <memory>
 #include <optional>
@@ -13,6 +12,7 @@
 
 #include <formats/zar.h>
 
+#include <retro_atomic.h>
 #include "core/file_sys/ifile.h"
 
 struct RFILE;
@@ -96,7 +96,7 @@ private:
     zar_file_t m_file;
     FileStat m_stat;
     std::filesystem::path m_archive_path;
-    std::atomic<u64> m_position{0};
+    retro_atomic_64_t m_position{0};
 };
 
 // The entries of a directory, listed when it is opened.

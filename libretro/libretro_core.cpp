@@ -28,7 +28,7 @@
 // through system memory.
 
 #include <algorithm>
-#include <atomic>
+#include <retro_atomic.h>
 #include <cctype>
 #include <cerrno>
 #include <climits>
@@ -339,10 +339,10 @@ struct PkgInstallJob {
     // Written by the worker
     std::string boot;
     std::string error;
-    std::atomic<int> percent{0};
-    std::atomic<bool> cancel{false};
-    std::atomic<bool> succeeded{false};
-    std::atomic<bool> done{false};
+    retro_atomic_int_t percent{0};
+    retro_atomic_int_t cancel{0};
+    retro_atomic_int_t succeeded{0};
+    retro_atomic_int_t done{0};
     // Read by the frontend's thread only
     int told_percent = -1;
 };
@@ -398,7 +398,7 @@ bool InstallPkg(PkgInstallJob& job, const std::filesystem::path& pkg,
                                      Common::FS::FileHint::Sequential);
         bool written = out.IsOpen();
         for (u64 at = 0; written && at < node->size;) {
-            if (job.cancel.load(std::memory_order_relaxed)) {
+            if (retro_atomic_load_relaxed_int(&job.cancel) != 0) {
                 job.error = "ParaLLEl PS4: the install was stopped";
                 return false;
             }
@@ -416,7 +416,7 @@ bool InstallPkg(PkgInstallJob& job, const std::filesystem::path& pkg,
             return false;
         }
         if (total) {
-            job.percent.store(static_cast<int>(done * 100 / total), std::memory_order_relaxed);
+            retro_atomic_store_relaxed_int(&job.percent, static_cast<int>(done * 100 / total));
         }
         if (total && done * 10 / total > static_cast<u64>(told)) {
             told = static_cast<int>(done * 10 / total);
@@ -483,8 +483,8 @@ bool InstallPkgContent(PkgInstallJob& job) {
 
 void PkgInstallThread(void* data) {
     auto& job = *static_cast<PkgInstallJob*>(data);
-    job.succeeded.store(InstallPkgContent(job), std::memory_order_relaxed);
-    job.done.store(true, std::memory_order_release);
+    retro_atomic_store_relaxed_int(&job.succeeded, InstallPkgContent(job));
+    retro_atomic_store_release_int(&job.done, 1);
 }
 
 // Stops an install, waiting at most for the block being written.
@@ -492,7 +492,7 @@ void StopPkgInstall() {
     if (!pkg_install) {
         return;
     }
-    pkg_install->cancel.store(true, std::memory_order_relaxed);
+    retro_atomic_store_relaxed_int(&pkg_install->cancel, 1);
     sthread_join(pkg_install->thread);
     delete pkg_install;
     pkg_install = nullptr;
@@ -964,9 +964,9 @@ void SendInput() {
     };
     // The emulator is woken only when something changed
     bool changed = false;
-    const auto put = [&changed](std::atomic<uint32_t>& at, uint32_t value) {
-        if (at.load(std::memory_order_relaxed) != value) {
-            at.store(value, std::memory_order_release);
+    const auto put = [&changed](retro_atomic_int_t& at, uint32_t value) {
+        if (static_cast<uint32_t>(retro_atomic_load_relaxed_int(&at)) != value) {
+            retro_atomic_store_release_int(&at, value);
             changed = true;
         }
     };
@@ -1017,7 +1017,7 @@ void ApplyRumble() {
         return;
     }
     for (unsigned pad = 0; pad < Libretro::MAX_PADS; ++pad) {
-        const uint32_t wanted = shared->rumble[pad].load(std::memory_order_acquire);
+        const uint32_t wanted = static_cast<std::uint32_t>(retro_atomic_load_acquire_int(&shared->rumble[pad]));
         if (wanted == applied[pad]) {
             continue;
         }
@@ -1035,7 +1035,7 @@ void ApplyRumble() {
 // through the shared memory to be uploaded.
 bool GpuUploads() {
     return shared &&
-           shared->gpu_frames_state.load(std::memory_order_acquire) == Libretro::GPU_FRAMES_FAILED;
+           static_cast<std::uint32_t>(retro_atomic_load_acquire_int(&shared->gpu_frames_state)) == Libretro::GPU_FRAMES_FAILED;
 }
 
 // The newest frame, if there is one newer than the one shown. A frame stays whole until the
@@ -1043,7 +1043,7 @@ bool GpuUploads() {
 // while it was made; else the newer one is tried.
 void TakeFrame() {
     for (int attempt = 0; attempt < 3; ++attempt) {
-        const uint32_t latest = shared->frame_latest.load();
+        const uint32_t latest = static_cast<std::uint32_t>(retro_atomic_load_seq_cst_int(&shared->frame_latest));
         if (latest == 0 || latest == shown_latest) {
             return;
         }
@@ -1054,11 +1054,11 @@ void TakeFrame() {
         if (slot >= (images ? Libretro::FRAME_IMAGES : Libretro::FRAME_SLOTS)) {
             return;
         }
-        if (shared->frame_held.exchange(slot) != slot) {
+        if (static_cast<std::uint32_t>(retro_atomic_exchange_int(&shared->frame_held, slot)) != slot) {
             // The image it held is free for the emulator to draw into
             wakes.frame.Notify();
         }
-        if (shared->frame_latest.load() != latest) {
+        if (static_cast<std::uint32_t>(retro_atomic_load_seq_cst_int(&shared->frame_latest)) != latest) {
             continue;
         }
         const uint32_t width = shared->frame_size[slot].width;
@@ -1089,8 +1089,8 @@ void SendAudio() {
     static const int16_t silence[kAudioFrames * 2] = {};
     uint32_t frames = 0;
     if (shared) {
-        const uint32_t read = shared->audio_read.load(std::memory_order_relaxed);
-        const uint32_t written = shared->audio_written.load(std::memory_order_acquire);
+        const uint32_t read = static_cast<std::uint32_t>(retro_atomic_load_relaxed_int(&shared->audio_read));
+        const uint32_t written = static_cast<std::uint32_t>(retro_atomic_load_acquire_int(&shared->audio_written));
         frames = std::min<uint32_t>(written - read, kAudioFrames);
         const uint32_t at = read & (Libretro::AUDIO_RING_FRAMES - 1);
         const uint32_t first = std::min<uint32_t>(frames, Libretro::AUDIO_RING_FRAMES - at);
@@ -1101,7 +1101,7 @@ void SendAudio() {
             audio_batch_cb(shared->audio, frames - first);
         }
         if (frames) {
-            shared->audio_read.store(read + frames, std::memory_order_release);
+            retro_atomic_store_release_int(&shared->audio_read, read + frames);
             // Room in the ring: the emulator mixes more
             wakes.audio.Notify();
         }
@@ -1296,13 +1296,13 @@ static bool StartGame(const std::string& boot_path, const std::string& user_dir,
     output_height = shared->options.height;
     for (auto& axes : shared->axes) {
         for (auto& axis : axes) {
-            axis = 128;
+            (void)retro_atomic_exchange_int(&axis, 128);
         }
-        axes[Libretro::SHARED_AXIS_TRIGGER_LEFT] = 0;
-        axes[Libretro::SHARED_AXIS_TRIGGER_RIGHT] = 0;
+        (void)retro_atomic_exchange_int(&axes[Libretro::SHARED_AXIS_TRIGGER_LEFT], 0);
+        (void)retro_atomic_exchange_int(&axes[Libretro::SHARED_AXIS_TRIGGER_RIGHT], 0);
     }
 
-    shared->frame_held.store(Libretro::FRAME_SLOT_NONE);
+    (void)retro_atomic_exchange_int(&shared->frame_held, Libretro::FRAME_SLOT_NONE);
     shown_frame = nullptr;
     shown_width = 0;
     shown_height = 0;
@@ -1392,7 +1392,7 @@ RETRO_API bool retro_load_game_special(unsigned, const struct retro_game_info*, 
 RETRO_API void retro_unload_game(void) {
     StopPkgInstall();
     if (shared) {
-        shared->quit.store(1, std::memory_order_release);
+        retro_atomic_store_release_int(&shared->quit, 1);
         wakes.control.Notify();
     }
     StopEmulator();
@@ -1415,8 +1415,8 @@ RETRO_API void retro_unload_game(void) {
 // the content when the install failed.
 static void PollPkgInstall() {
     PkgInstallJob& job = *pkg_install;
-    if (!job.done.load(std::memory_order_acquire)) {
-        const int percent = job.percent.load(std::memory_order_relaxed);
+    if (retro_atomic_load_acquire_int(&job.done) == 0) {
+        const int percent = retro_atomic_load_relaxed_int(&job.percent);
         if (percent / 5 != job.told_percent / 5) {
             job.told_percent = percent;
             char text[96];
@@ -1427,7 +1427,7 @@ static void PollPkgInstall() {
     }
     // Done: the thread has ended, so joining it does not wait
     sthread_join(job.thread);
-    const bool succeeded = job.succeeded.load(std::memory_order_relaxed);
+    const bool succeeded = (retro_atomic_load_relaxed_int(&job.succeeded) != 0);
     const std::string boot = job.boot;
     const std::string user_dir = job.user_dir;
     const std::string error = job.error;
@@ -1458,12 +1458,12 @@ RETRO_API void retro_run(void) {
         Libretro::SharedOptions options{};
         ReadCoreOptions(options);
         auto& live = shared->live;
-        live.show_fps.store(options.show_fps);
-        live.volume.store(options.volume);
-        live.trophy_popup.store(options.trophy_popup);
-        live.trophy_side.store(options.trophy_side);
-        live.trophy_seconds.store(options.trophy_seconds);
-        shared->options_serial.fetch_add(1, std::memory_order_release);
+        (void)retro_atomic_exchange_int(&live.show_fps, options.show_fps);
+        (void)retro_atomic_exchange_int(&live.volume, options.volume);
+        (void)retro_atomic_exchange_int(&live.trophy_popup, options.trophy_popup);
+        (void)retro_atomic_exchange_int(&live.trophy_side, options.trophy_side);
+        (void)retro_atomic_exchange_int(&live.trophy_seconds, options.trophy_seconds);
+        retro_atomic_fetch_add_int(&shared->options_serial, 1);
         wakes.control.Notify();
     }
 

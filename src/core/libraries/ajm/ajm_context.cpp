@@ -15,6 +15,7 @@
 
 #include <span>
 #include <utility>
+#include <retro_atomic.h>
 
 namespace Libraries::Ajm {
 
@@ -35,12 +36,13 @@ s32 AjmContext::BatchCancel(const u32 batch_id) {
         return ORBIS_AJM_ERROR_INVALID_BATCH;
     }
 
-    if (batch->processed) {
+    if (retro_atomic_load_seq_cst_int(&batch->processed) != 0) {
         return ORBIS_OK;
     }
 
     bool expected = false;
-    batch->canceled.compare_exchange_strong(expected, true);
+    (retro_atomic_cas_int(&batch->canceled, expected, true) ||
+     ((expected = (retro_atomic_load_acquire_int(&batch->canceled) != 0)), false));
     return ORBIS_OK;
 }
 
@@ -59,9 +61,10 @@ void AjmContext::WorkerThread(std::stop_token stop) {
     Common::SetCurrentThreadName("shadPS4:AjmWorker");
     while (!stop.stop_requested()) {
         auto batch = batch_queue.PopWait(stop);
-        if (batch != nullptr && !batch->canceled) {
+        if (batch != nullptr && retro_atomic_load_seq_cst_int(&batch->canceled) == 0) {
             bool expected = false;
-            batch->processed.compare_exchange_strong(expected, true);
+            (retro_atomic_cas_int(&batch->processed, expected, true) ||
+             ((expected = (retro_atomic_load_acquire_int(&batch->processed) != 0)), false));
             ProcessBatch(batch->id, batch->jobs);
             batch->finished.release();
         }
@@ -93,20 +96,21 @@ s32 AjmContext::BatchWait(const u32 batch_id, const u32 timeout, AjmBatchError* 
     }
 
     bool expected = false;
-    if (!batch->waiting.compare_exchange_strong(expected, true)) {
+    if (!(retro_atomic_cas_int(&batch->waiting, expected, true) ||
+          ((expected = (retro_atomic_load_acquire_int(&batch->waiting) != 0)), false))) {
         return ORBIS_AJM_ERROR_BUSY;
     }
 
     if (timeout == ORBIS_AJM_WAIT_INFINITE) {
         batch->finished.acquire();
     } else if (!batch->finished.try_acquire_for(std::chrono::milliseconds(timeout))) {
-        batch->waiting = false;
+        (void)retro_atomic_exchange_int(&batch->waiting, 0);
         return ORBIS_AJM_ERROR_IN_PROGRESS;
     }
 
     batches.Take(batch_id - 1);
 
-    if (batch->canceled) {
+    if (retro_atomic_load_seq_cst_int(&batch->canceled) != 0) {
         return ORBIS_AJM_ERROR_CANCELLED;
     }
 

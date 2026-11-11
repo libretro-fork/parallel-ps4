@@ -3,7 +3,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #pragma once
-#include <atomic>
 #include <condition_variable>
 #include <functional>
 #include <mutex>
@@ -13,6 +12,7 @@
 #include <thread>
 #include <utility>
 #include <vector>
+#include <retro_atomic.h>
 #include "common/combiner.h"
 #include "common/event_mutex.h"
 #include "common/types.h"
@@ -322,7 +322,7 @@ public:
     // Online ID this client logged in with (set once in Start()).
     const std::string& GetNpid() const;
     u32 GetServerProtocolVersion() const {
-        return m_server_protocol_version.load();
+        return static_cast<u32>(retro_atomic_load_seq_cst_int(&m_server_protocol_version));
     }
     u32 GetAddrLocal() const;
     u32 GetAddrServer() const;
@@ -411,10 +411,10 @@ private:
     std::string m_token;
     bool m_appear_offline = false; // user's Appear-Offline preference (sent at login)
 
-    std::atomic<bool> m_terminate{false};
-    std::atomic<bool> m_connected{false};
-    std::atomic<bool> m_authenticated{false};
-    std::atomic<ShadNetState> m_state{ShadNetState::Ok};
+    retro_atomic_int_t m_terminate{0};
+    retro_atomic_int_t m_connected{0};
+    retro_atomic_int_t m_authenticated{0};
+    retro_atomic_int_t m_state{static_cast<int>(ShadNetState::Ok)};
 
     std::binary_semaphore m_sem_connected{0};
     std::binary_semaphore m_sem_authenticated{0};
@@ -434,17 +434,17 @@ private:
     u64 m_user_id = 0;
     mutable Common::Combiner m_mutex_bearer;
     std::string m_bearer_token;
-    std::atomic<u32> m_addr_local{0};
-    std::atomic<u32> m_addr_server{0};
-    std::atomic<u32> m_server_protocol_version{0};
-    std::atomic<bool> m_matching2_enabled{false};
-    std::atomic<bool> m_trophies_enabled{false};
-    std::atomic<bool> m_server_features_received{false};
+    retro_atomic_int_t m_addr_local{0};
+    retro_atomic_int_t m_addr_server{0};
+    retro_atomic_int_t m_server_protocol_version{0};
+    retro_atomic_int_t m_matching2_enabled{0};
+    retro_atomic_int_t m_trophies_enabled{0};
+    retro_atomic_int_t m_server_features_received{0};
 
     mutable Common::Combiner m_mutex_friends;
     std::vector<FriendEntry> m_friends;
 
-    std::atomic<u64> m_pkt_counter{1};
+    retro_atomic_64_t m_pkt_counter{1};
 };
 
 } // namespace ShadNet

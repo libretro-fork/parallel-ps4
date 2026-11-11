@@ -3,6 +3,7 @@
 
 #include <new>
 
+#include <retro_atomic.h>
 #include "core/libraries/kernel/kernel.h"
 #include "core/libraries/kernel/posix_error.h"
 #include "core/libraries/kernel/threads/pthread.h"
@@ -44,15 +45,15 @@ s32 PS4_SYSV_ABI posix_pthread_barrier_wait(PthreadBarrierT* barrier) {
         return POSIX_EINVAL;
     }
     const auto value = (*barrier)->state;
-    u64 word = value->word.load(std::memory_order_relaxed);
+    u64 word = static_cast<u64>(retro_atomic_load_relaxed_64(&value->word));
     u64 next;
     bool last;
     do {
         const u32 arrived = static_cast<u32>(word) + 1;
         last = arrived == value->count;
         next = last ? ((word >> 32) + 1) << 32 : (word & ~u64{0xFFFFFFFF}) | arrived;
-    } while (!value->word.compare_exchange_weak(word, next, std::memory_order_acq_rel,
-                                                std::memory_order_relaxed));
+    } while (!(retro_atomic_cas_64(&value->word, word, next) ||
+               ((word = static_cast<u64>(retro_atomic_load_acquire_64(&value->word))), false)));
     if (last) {
         retro_eventcount_notify(&value->generation_ec);
         return PthreadBarrierSerialThread;
@@ -60,7 +61,7 @@ s32 PS4_SYSV_ABI posix_pthread_barrier_wait(PthreadBarrierT* barrier) {
     const u64 generation = word >> 32;
     for (;;) {
         const int key = retro_eventcount_prepare_wait(&value->generation_ec);
-        if ((value->word.load(std::memory_order_acquire) >> 32) != generation) {
+        if ((static_cast<u64>(retro_atomic_load_acquire_64(&value->word)) >> 32) != generation) {
             retro_eventcount_cancel_wait(&value->generation_ec);
             break;
         }
@@ -80,7 +81,7 @@ s32 PS4_SYSV_ABI posix_pthread_barrier_destroy(PthreadBarrierT* barrier) {
     }
     auto* handle = *barrier;
     const auto value = handle->state;
-    if (static_cast<u32>(value->word.load(std::memory_order_acquire)) != 0) {
+    if (static_cast<u32>(static_cast<u64>(retro_atomic_load_acquire_64(&value->word))) != 0) {
         return POSIX_EBUSY;
     }
     *barrier = nullptr;

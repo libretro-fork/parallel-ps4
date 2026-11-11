@@ -4,11 +4,11 @@
 #pragma once
 
 #include <array>
-#include <atomic>
 #include <thread>
 
 #include <rthreads/retro_eventcount.h>
 
+#include <retro_atomic.h>
 #include "common/types.h"
 
 namespace Core::Net {
@@ -37,14 +37,14 @@ private:
 
     static constexpr u32 Slots = 64;
     struct Cell {
-        std::atomic<u32> seq{0};
+        retro_atomic_int_t seq{0};
         Job job = nullptr;
         void* user = nullptr;
     };
     std::array<Cell, Slots> m_cells;
-    std::atomic<u32> m_tail{0}; // posters
+    retro_atomic_int_t m_tail{0}; // posters
     u32 m_head = 0;             // the service thread
-    std::atomic<bool> m_stop{false};
+    retro_atomic_int_t m_stop{0};
     retro_eventcount_t m_work{}; // jobs posted, stop
     retro_eventcount_t m_done{}; // a waited-for job finished
     bool m_ok = false;

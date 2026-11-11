@@ -4,12 +4,12 @@
 #pragma once
 
 #include <array>
-#include <atomic>
 #include <thread>
 #include <vector>
 
 #include <rthreads/retro_eventcount.h>
 
+#include <retro_atomic.h>
 #include "vdecsw.h"
 #include "video_utils.h"
 
@@ -41,7 +41,7 @@ private:
     // Bounded MPMC-style cell: `seq` says whose turn it is. The access unit buffer is kept
     // with the slot and reused, so it grows only for a larger access unit than before.
     struct Command {
-        std::atomic<u32> seq{0};
+        retro_atomic_int_t seq{0};
         CommandType type = CommandType::Input;
         u32 epoch = 0;
         OrbisVdecswInputData input{};
@@ -84,23 +84,24 @@ private:
     bool m_is_avc = false;
 
     std::array<Command, CommandSlots> m_commands;
-    std::atomic<u32> m_command_tail{0}; // posters
+    retro_atomic_int_t m_command_tail{0}; // posters
     u32 m_command_head = 0;             // the worker
 
     std::array<CompletedInput, CommandSlots> m_completed;
-    std::atomic<u32> m_completed_tail{0}; // the worker
-    std::atomic<u32> m_completed_head{0}; // the game
+    retro_atomic_int_t m_completed_tail{0}; // the worker
+    retro_atomic_int_t m_completed_head{0}; // the game
 
     std::array<DecodedFrame, FrameSlots> m_frames;
-    std::atomic<u32> m_frame_tail{0}; // the worker
-    std::atomic<u32> m_frame_head{0}; // the game
+    retro_atomic_int_t m_frame_tail{0}; // the worker
+    retro_atomic_int_t m_frame_head{0}; // the game
 
-    std::atomic<u32> m_epoch{0};             // bumped by Reset
-    std::atomic<u32> m_finalized_epoch{~0u}; // the epoch whose sequence the worker finished
-    std::atomic<s32> m_unsynced_inputs{0};
-    std::atomic<bool> m_output_set{false};
+    retro_atomic_int_t m_epoch{0}; // bumped by Reset
+    retro_atomic_int_t m_finalized_epoch{
+        static_cast<int>(~0u)}; // the epoch whose sequence the worker finished
+    retro_atomic_int_t m_unsynced_inputs{0};
+    retro_atomic_int_t m_output_set{0};
     OrbisVdecswFrameBuffer m_pending_output{};
-    std::atomic<bool> m_stop{false};
+    retro_atomic_int_t m_stop{0};
 
     retro_eventcount_t m_worker_ec{}; // commands, frame slots, stop
     retro_eventcount_t m_game_ec{};   // results, pictures, the end of a sequence, stop

@@ -70,9 +70,10 @@ void InstallKernelIntegration() {
                 auto* table = FDTable::Instance();
                 const int fd = table->CreateHandle();
                 auto* file = table->GetFile(fd);
-                file->type = Core::FileSys::FileType::Socket;
+                (void)retro_atomic_exchange_int(&file->type,
+                                                static_cast<int>(Core::FileSys::FileType::Socket));
                 file->m_guest_name = "net";
-                file->is_opened = true;
+                (void)retro_atomic_exchange_int(&file->is_opened, 1);
                 return fd;
             },
         .release = [](s32 fd) { FDTable::Instance()->DeleteHandle(fd); },

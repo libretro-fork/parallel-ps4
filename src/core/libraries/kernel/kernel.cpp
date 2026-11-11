@@ -165,7 +165,8 @@ s32 PS4_SYSV_ABI kernel_ioctl(s32 fd, u64 cmd, VA_ARGS) {
         g_posix_errno = POSIX_EBADF;
         return -1;
     }
-    if (file->type != Core::FileSys::FileType::Device) {
+    if (static_cast<Core::FileSys::FileType>(retro_atomic_load_seq_cst_int(&file->type)) !=
+        Core::FileSys::FileType::Device) {
         LOG_WARNING(Lib_Kernel, "ioctl: fd = {:X} cmd = {:X} file->type != Device", fd, cmd);
         g_posix_errno = ENOTTY;
         return -1;

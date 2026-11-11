@@ -3,13 +3,13 @@
 
 #pragma once
 
-#include <atomic>
 #include <optional>
 #include <thread>
 #include <unordered_set>
 #include <queue>
 #include "common/small_vector.h"
 
+#include <retro_atomic.h>
 #include "common/lru_cache.h"
 #include "common/multi_level_page_table.h"
 #include "common/slot_vector.h"
@@ -34,7 +34,7 @@ namespace VideoCore {
 // The libretro core's Resolution, as a width: when it is below the game's frame size (that
 // of its video out buffers), the render targets of that size are made that much smaller on
 // the GPU. 0 for the game's own, as elsewhere.
-inline std::atomic<u32> render_width{0};
+inline retro_atomic_int_t render_width{0};
 
 class BufferCache;
 class PageManager;

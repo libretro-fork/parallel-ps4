@@ -5,6 +5,7 @@
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_semaphore.h"
 
+#include <retro_atomic.h>
 #include "common/assert.h"
 
 namespace Vulkan {
@@ -32,7 +33,7 @@ void Semaphore::Refresh() {
     u64 this_tick{};
     u64 counter{};
     do {
-        this_tick = gpu_tick.load(std::memory_order_acquire);
+        this_tick = static_cast<u64>(retro_atomic_load_acquire_64(&gpu_tick));
         auto [counter_result, cntr] = instance.GetDevice().getSemaphoreCounterValue(*semaphore);
         ASSERT_MSG(counter_result == vk::Result::eSuccess,
                    "Failed to get master semaphore value: {}", vk::to_string(counter_result));
@@ -40,8 +41,8 @@ void Semaphore::Refresh() {
         if (counter < this_tick) {
             return;
         }
-    } while (!gpu_tick.compare_exchange_weak(this_tick, counter, std::memory_order_release,
-                                             std::memory_order_relaxed));
+    } while (!(retro_atomic_cas_64(&gpu_tick, this_tick, counter) ||
+               ((this_tick = static_cast<u64>(retro_atomic_load_acquire_64(&gpu_tick))), false)));
 }
 
 void Semaphore::Wait(u64 tick) {

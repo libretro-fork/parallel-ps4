@@ -11,11 +11,11 @@
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_pipeline_cache.h"
 
-#include <atomic>
 #include <functional>
 #include <thread>
 
 #include <queues/mpsc_stack.h>
+#include <retro_atomic.h>
 #include <rthreads/retro_eventcount.h>
 #include <rthreads/rthreads.h>
 
@@ -35,9 +35,9 @@ struct Request {
 // Save pushes onto a lock-free stack from any thread; the writer drains it.
 mpsc_stack_t g_pending;
 retro_eventcount_t g_work;
-std::atomic<bool> g_stop{};
+retro_atomic_int_t g_stop{};
 // Saves between their check of DataBase::opened and their push, for Close to wait out
-std::atomic<u32> g_saving{};
+retro_atomic_int_t g_saving{};
 
 } // namespace
 
@@ -70,7 +70,7 @@ void DataBase::ProcessIO(void* arg) {
         if (!node) {
             // Close stops the writer only once no Save can push any more: what was
             // pushed is written before it goes.
-            if (g_stop.load(std::memory_order_acquire)) {
+            if (retro_atomic_load_acquire_int(&g_stop) != 0) {
                 retro_eventcount_cancel_wait(&g_work);
                 break;
             }
@@ -113,9 +113,9 @@ void DataBase::Open() {
 
     mpsc_stack_init(&g_pending);
     retro_eventcount_init(&g_work);
-    g_stop.store(false, std::memory_order_relaxed);
+    retro_atomic_store_relaxed_int(&g_stop, 0);
     io_worker = sthread_create(ProcessIO, this);
-    opened.store(io_worker != nullptr, std::memory_order_seq_cst);
+    (void)retro_atomic_exchange_int(&opened, io_worker != nullptr);
 }
 
 void DataBase::Close() {
@@ -125,11 +125,11 @@ void DataBase::Close() {
 
     // No Save gets past its check after this; wait out the ones already past it (a few
     // instructions each), then let the writer finish what was pushed and go.
-    opened.store(false, std::memory_order_seq_cst);
-    while (g_saving.load(std::memory_order_seq_cst) != 0) {
+    (void)retro_atomic_exchange_int(&opened, 0);
+    while (static_cast<u32>(retro_atomic_load_seq_cst_int(&g_saving)) != 0) {
         std::this_thread::yield();
     }
-    g_stop.store(true, std::memory_order_release);
+    retro_atomic_store_release_int(&g_stop, 1);
     retro_eventcount_notify(&g_work);
     sthread_join(io_worker);
     io_worker = nullptr;
@@ -139,14 +139,14 @@ void DataBase::Close() {
 
 bool DataBase::Push(BlobType type, std::string&& name, std::vector<u8>&& bytes,
                     std::vector<u32>&& words) {
-    g_saving.fetch_add(1, std::memory_order_seq_cst);
-    if (!opened.load(std::memory_order_seq_cst)) {
-        g_saving.fetch_sub(1, std::memory_order_release);
+    retro_atomic_fetch_add_int(&g_saving, 1);
+    if (retro_atomic_load_seq_cst_int(&opened) == 0) {
+        retro_atomic_fetch_sub_int(&g_saving, 1);
         return false;
     }
     auto* request = new Request{{}, type, std::move(name), std::move(bytes), std::move(words)};
     mpsc_stack_push(&g_pending, &request->node);
-    g_saving.fetch_sub(1, std::memory_order_release);
+    retro_atomic_fetch_sub_int(&g_saving, 1);
     retro_eventcount_notify(&g_work);
     return true;
 }

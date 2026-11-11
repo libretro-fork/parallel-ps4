@@ -8,10 +8,10 @@
 #include "common/singleton.h"
 #include "common/types.h"
 
-#include <atomic>
 #include <functional>
 #include <string>
 #include <vector>
+#include <retro_atomic.h>
 
 struct sthread;
 
@@ -33,7 +33,7 @@ public:
     void Open();
     void Close();
     [[nodiscard]] bool IsOpened() const {
-        return opened.load(std::memory_order_acquire);
+        return (retro_atomic_load_acquire_int(&opened) != 0);
     }
 
     /// Hands @data to the writer thread, which writes it from where it lies. Any thread;
@@ -53,7 +53,7 @@ private:
 
     sthread* io_worker{};
     std::filesystem::path cache_path{};
-    std::atomic<bool> opened{};
+    retro_atomic_int_t opened{};
 };
 
 } // namespace Storage

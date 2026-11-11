@@ -9,6 +9,7 @@
 #include <utility>
 #include <fmt/format.h>
 
+#include <retro_atomic.h>
 #include "common/logging/log.h"
 #include "common/thread.h"
 #include "core/libraries/net/net.h"
@@ -1503,11 +1504,13 @@ OrbisNpMatching2RequestId AllocRequestId() {
 }
 
 bool IsInitialized() {
-    return NpHandler::GetInstance().GetMatching2State().initialized.load();
+    return (retro_atomic_load_seq_cst_int(
+                &NpHandler::GetInstance().GetMatching2State().initialized) != 0);
 }
 
 void SetInitialized(bool initialized) {
-    NpHandler::GetInstance().GetMatching2State().initialized.store(initialized);
+    (void)retro_atomic_exchange_int(&NpHandler::GetInstance().GetMatching2State().initialized,
+                                    initialized);
 }
 
 void StoreRequestCallback(const std::shared_ptr<ContextObject>& ctx,
@@ -1750,7 +1753,7 @@ PS4_SYSV_ABI void* EventDispatcherThreadMain(void*) {
     Common::SetCurrentThreadName("Matching2:Dispatch");
     auto& state = NpHandler::GetInstance().GetMatching2State();
     std::unique_lock lock(state.queue_mutex);
-    while (state.dispatch_running.load()) {
+    while (retro_atomic_load_seq_cst_int(&state.dispatch_running) != 0) {
         const auto now = std::chrono::steady_clock::now();
 
         std::vector<PendingEvent> ready;
@@ -1785,7 +1788,7 @@ PS4_SYSV_ABI void* EventDispatcherThreadMain(void*) {
 
 void InitEventDispatcher() {
     auto& state = NpHandler::GetInstance().GetMatching2State();
-    if (state.dispatch_running.exchange(true)) {
+    if (retro_atomic_exchange_int(&state.dispatch_running, 1) != 0) {
         return;
     }
     const s32 rc = NpCommon::sceNpCreateThread(
@@ -1794,7 +1797,7 @@ void InitEventDispatcher() {
         ORBIS_NP_MATCHING2_THREAD_STACK_SIZE_DEFAULT, 0, "SceNpMatching2Ex");
     if (rc < 0) {
         LOG_ERROR(Lib_NpMatching2, "failed to create event dispatcher thread: {:#x}", rc);
-        state.dispatch_running.store(false);
+        (void)retro_atomic_exchange_int(&state.dispatch_running, 0);
         state.dispatch_thread = nullptr;
         return;
     }
@@ -1803,7 +1806,7 @@ void InitEventDispatcher() {
 
 void TermEventDispatcher() {
     auto& state = NpHandler::GetInstance().GetMatching2State();
-    if (!state.dispatch_running.exchange(false)) {
+    if (retro_atomic_exchange_int(&state.dispatch_running, 0) == 0) {
         return;
     }
     state.queue_cv.notify_all();

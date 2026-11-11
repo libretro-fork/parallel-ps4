@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright 2025-2026 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include <retro_atomic.h>
 #include "common/assert.h"
 #include "common/thread.h"
 #include "core/debug_state.h"
@@ -78,10 +79,10 @@ void VideoOutDriver::Close(s32 handle) {
     std::memset(main_port.buffer_labels.data(), 0, sizeof(main_port.buffer_labels));
     std::memset(main_port.groups.data(), 0, sizeof(main_port.groups));
     // The present thread clears the status it writes
-    main_port.flip_pending.store(0);
-    main_port.gc_queue.store(0);
-    main_port.submit_tsc.store(0);
-    main_port.reset_status.store(true, std::memory_order_release);
+    (void)retro_atomic_exchange_int(&main_port.flip_pending, 0);
+    (void)retro_atomic_exchange_int(&main_port.gc_queue, 0);
+    (void)retro_atomic_exchange_64(&main_port.submit_tsc, 0);
+    retro_atomic_store_release_int(&main_port.reset_status, 1);
 
     // Re-initialize buffers
     std::memset(main_port.buffer_slots.data(), 0, sizeof(main_port.buffer_slots));
@@ -91,7 +92,7 @@ void VideoOutDriver::Close(s32 handle) {
 
     // Clear events
     for (auto& slot : main_port.flip_events) {
-        const auto event = slot.exchange(0);
+        const auto event = retro_atomic_exchange_64(&slot, 0);
         auto equeue = event ? Kernel::GetEqueue(event) : nullptr;
         if (equeue != nullptr) {
             equeue->RemoveEvent(static_cast<u64>(OrbisVideoOutInternalEventId::Flip),
@@ -99,7 +100,7 @@ void VideoOutDriver::Close(s32 handle) {
         }
     }
     for (auto& slot : main_port.vblank_events) {
-        const auto event = slot.exchange(0);
+        const auto event = retro_atomic_exchange_64(&slot, 0);
         auto equeue = event ? Kernel::GetEqueue(event) : nullptr;
         if (equeue != nullptr) {
             equeue->RemoveEvent(static_cast<u64>(OrbisVideoOutInternalEventId::Vblank),
@@ -269,14 +270,14 @@ void VideoOutDriver::Flip(const Request& req) {
         flip_status.current_buffer = req.index;
         retro_seqlock_write_end(&port->flip_seq);
         if (req.eop) {
-            port->gc_queue.fetch_sub(1);
+            retro_atomic_fetch_sub_int(&port->gc_queue, 1);
         }
-        port->flip_pending.fetch_sub(1);
+        retro_atomic_fetch_sub_int(&port->flip_pending, 1);
     }
 
     // Trigger flip events for the port.
     for (auto& slot : port->flip_events) {
-        const auto event = slot.load(std::memory_order_acquire);
+        const auto event = retro_atomic_load_acquire_64(&slot);
         auto equeue = event ? Kernel::GetEqueue(event) : nullptr;
         if (equeue != nullptr) {
             equeue->TriggerEvent(
@@ -311,17 +312,19 @@ void VideoOutDriver::DrawLastFrame() {
 bool VideoOutDriver::SubmitFlip(VideoOutPort* port, s32 index, s64 flip_arg,
                                 bool is_eop /*= false*/) {
     // integral GPU and CPU pending flips counter
-    s32 pending = port->flip_pending.load(std::memory_order_relaxed);
+    s32 pending = static_cast<s32>(retro_atomic_load_relaxed_int(&port->flip_pending));
     do {
         if (index != -1 && pending > 16) {
             LOG_ERROR(Lib_VideoOut, "Flip queue is full");
             return false;
         }
-    } while (!port->flip_pending.compare_exchange_weak(pending, pending + 1));
+    } while (!(
+        retro_atomic_cas_int(&port->flip_pending, pending, pending + 1) ||
+        ((pending = static_cast<s32>(retro_atomic_load_acquire_int(&port->flip_pending))), false)));
     if (is_eop) {
-        port->gc_queue.fetch_add(1);
+        retro_atomic_fetch_add_int(&port->gc_queue, 1);
     }
-    port->submit_tsc.store(Libraries::Kernel::sceKernelReadTsc(), std::memory_order_relaxed);
+    retro_atomic_store_relaxed_64(&port->submit_tsc, Libraries::Kernel::sceKernelReadTsc());
 
     if (!is_eop) {
         // Non EOP flips can arrive from any thread so ask GPU thread to perform them
@@ -383,7 +386,7 @@ void VideoOutDriver::PresentThread(std::stop_token token) {
     while (!token.stop_requested()) {
         timer.Start();
 
-        if (main_port.reset_status.exchange(false, std::memory_order_acquire)) {
+        if (retro_atomic_exchange_int(&main_port.reset_status, 0) != 0) {
             ResetStatus();
         }
 
@@ -413,7 +416,7 @@ void VideoOutDriver::PresentThread(std::stop_token token) {
         {
             // Trigger flip events for the port
             for (auto& slot : main_port.vblank_events) {
-                const auto event = slot.load(std::memory_order_acquire);
+                const auto event = retro_atomic_load_acquire_64(&slot);
                 auto equeue = event ? Kernel::GetEqueue(event) : nullptr;
                 if (equeue != nullptr) {
                     equeue->TriggerEvent(

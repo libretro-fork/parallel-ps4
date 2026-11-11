@@ -3,8 +3,8 @@
 
 #pragma once
 
-#include <atomic>
 #include <cstdint>
+#include <retro_atomic.h>
 
 namespace Core {
 
@@ -13,7 +13,7 @@ public:
     class Mutation final {
     public:
         explicit Mutation(MemoryMapGeneration& owner_) : owner{owner_} {
-            owner.value.fetch_add(1, std::memory_order_acq_rel);
+            retro_atomic_fetch_add_64(&owner.value, 1);
         }
 
         ~Mutation() {
@@ -24,7 +24,7 @@ public:
             if (!active) {
                 return;
             }
-            owner.value.fetch_add(1, std::memory_order_release);
+            retro_atomic_fetch_add_64(&owner.value, 1);
             active = false;
         }
 
@@ -41,11 +41,11 @@ public:
     }
 
     [[nodiscard]] std::uint64_t Load() const {
-        return value.load(std::memory_order_acquire);
+        return static_cast<u64>(retro_atomic_load_acquire_64(&value));
     }
 
 private:
-    std::atomic_uint64_t value{};
+    retro_atomic_64_t value{};
 };
 
 } // namespace Core

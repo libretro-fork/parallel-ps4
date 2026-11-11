@@ -5,6 +5,7 @@
 #include <limits>
 #include <encodings/xxh3.h>
 
+#include <retro_atomic.h>
 #include "common/assert.h"
 #include "common/div_ceil.h"
 #include "common/hash.h"
@@ -678,7 +679,7 @@ ImageId TextureCache::FindImage(ImageDesc& desc, bool exact_fmt) {
         const bool target = desc.type == BindingType::RenderTarget ||
                             desc.type == BindingType::DepthTarget ||
                             desc.type == BindingType::VideoOut;
-        const u32 width = render_width.load();
+        const u32 width = static_cast<u32>(retro_atomic_load_seq_cst_int(&render_width));
         if (target && width != 0 && width < frame_extent.width && info.size == frame_extent &&
             info.resources.levels == 1 && info.resources.layers == 1) {
             scale_num = width;

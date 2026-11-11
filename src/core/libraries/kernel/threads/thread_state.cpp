@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright 2024-2026 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include <retro_atomic.h>
 #include "common/alignment.h"
 #include "common/scope_exit.h"
 #include "common/small_vector.h"
@@ -36,7 +37,7 @@ void ThreadState::Collect(Pthread* curthread) {
     thread_list_combiner.Run([&] {
         for (auto it = gc_list.begin(); it != gc_list.end();) {
             Pthread* td = *it;
-            if (td->tid != TidTerminated) {
+            if (static_cast<s32>(retro_atomic_load_seq_cst_int(&td->tid)) != TidTerminated) {
                 ++it;
                 continue;
             }
@@ -85,13 +86,13 @@ Pthread* ThreadState::Alloc(Pthread* curthread) {
         });
     }
     if (thread == nullptr) {
-        if (total_threads > MaxThreads) {
+        if (static_cast<s32>(retro_atomic_load_seq_cst_int(&total_threads)) > MaxThreads) {
             return nullptr;
         }
-        total_threads.fetch_add(1);
+        retro_atomic_fetch_add_int(&total_threads, 1);
         thread = thread_heap.Allocate();
         if (thread == nullptr) {
-            total_threads.fetch_sub(1);
+            retro_atomic_fetch_sub_int(&total_threads, 1);
             return nullptr;
         }
     }
@@ -110,7 +111,7 @@ Pthread* ThreadState::Alloc(Pthread* curthread) {
         thread->sleepqueue = new SleepQueue{};
     } else {
         thread_heap.Free(thread);
-        total_threads.fetch_sub(1);
+        retro_atomic_fetch_sub_int(&total_threads, 1);
         thread = nullptr;
     }
     return thread;
@@ -136,7 +137,7 @@ void ThreadState::Free(Pthread* curthread, Pthread* thread) {
     if (should_free) {
         delete sleepqueue;
         thread_heap.Free(thread);
-        total_threads.fetch_sub(1);
+        retro_atomic_fetch_sub_int(&total_threads, 1);
     }
 }
 

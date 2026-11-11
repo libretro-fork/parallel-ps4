@@ -13,6 +13,7 @@
 #include "save_backup.h"
 #include "save_instance.h"
 
+#include <retro_atomic.h>
 #include "common/io_file.h"
 #include "common/logging/formatter.h"
 #include "common/logging/log.h"
@@ -47,8 +48,8 @@ static Common::Combiner g_backup_queue_mutex;
 static std::deque<BackupRequest> g_backup_queue;
 static std::deque<BackupRequest> g_result_queue;
 
-static std::atomic_int g_backup_progress = 0;
-static std::atomic g_backup_status = WorkerStatus::NotStarted;
+static retro_atomic_int_t g_backup_progress{0};
+static retro_atomic_int_t g_backup_status{static_cast<int>(WorkerStatus::NotStarted)};
 
 static void backup(const std::filesystem::path& dir_name) {
     g_backup_running_mutex.Run([&] {
@@ -70,7 +71,7 @@ static void backup(const std::filesystem::path& dir_name) {
             }
         });
 
-        g_backup_progress = 0;
+        (void)retro_atomic_exchange_int(&g_backup_progress, 0);
 
         int total_count = static_cast<int>(backup_files.size());
         int current_count = 0;
@@ -79,7 +80,7 @@ static void backup(const std::filesystem::path& dir_name) {
         for (const auto& file : backup_files) {
             CopyShareReadWrite(file, backup_dir_tmp / file.filename());
             current_count++;
-            g_backup_progress = current_count * 100 / total_count;
+            (void)retro_atomic_exchange_int(&g_backup_progress, current_count * 100 / total_count);
         }
         bool has_existing_backup = Common::FS::Exists(backup_dir);
         if (has_existing_backup) {
@@ -94,8 +95,9 @@ static void backup(const std::filesystem::path& dir_name) {
 
 static void BackupThreadBody() {
     Common::SetCurrentThreadName("shadPS4:SaveData:BackupThread");
-    while (g_backup_status != WorkerStatus::Stopping) {
-        g_backup_status = WorkerStatus::Waiting;
+    while (static_cast<WorkerStatus>(retro_atomic_load_seq_cst_int(&g_backup_status)) !=
+           WorkerStatus::Stopping) {
+        (void)retro_atomic_exchange_int(&g_backup_status, static_cast<int>(WorkerStatus::Waiting));
 
         bool wait;
         BackupRequest req;
@@ -121,7 +123,7 @@ static void BackupThreadBody() {
         if (req.save_path.empty()) {
             break;
         }
-        g_backup_status = WorkerStatus::Running;
+        (void)retro_atomic_exchange_int(&g_backup_status, static_cast<int>(WorkerStatus::Running));
 
         LOG_INFO(Lib_SaveData, "Backing up the following directory: {}",
                  fmt::UTF(req.save_path.u8string()));
@@ -145,24 +147,28 @@ static void BackupThreadBody() {
         });
         std::this_thread::sleep_for(std::chrono::seconds(5)); // Don't backup too often
     }
-    g_backup_status = WorkerStatus::NotStarted;
+    (void)retro_atomic_exchange_int(&g_backup_status, static_cast<int>(WorkerStatus::NotStarted));
 }
 
 void StartThread() {
-    if (g_backup_status != WorkerStatus::NotStarted) {
+    if (static_cast<WorkerStatus>(retro_atomic_load_seq_cst_int(&g_backup_status)) !=
+        WorkerStatus::NotStarted) {
         return;
     }
     LOG_DEBUG(Lib_SaveData, "Starting backup thread");
-    g_backup_status = WorkerStatus::Waiting;
+    (void)retro_atomic_exchange_int(&g_backup_status, static_cast<int>(WorkerStatus::Waiting));
     g_backup_thread = std::jthread{BackupThreadBody};
 }
 
 void StopThread() {
-    if (g_backup_status == WorkerStatus::NotStarted || g_backup_status == WorkerStatus::Stopping) {
+    if (static_cast<WorkerStatus>(retro_atomic_load_seq_cst_int(&g_backup_status)) ==
+            WorkerStatus::NotStarted ||
+        static_cast<WorkerStatus>(retro_atomic_load_seq_cst_int(&g_backup_status)) ==
+            WorkerStatus::Stopping) {
         return;
     }
     LOG_DEBUG(Lib_SaveData, "Stopping backup thread");
-    g_backup_status = WorkerStatus::Stopping;
+    (void)retro_atomic_exchange_int(&g_backup_status, static_cast<int>(WorkerStatus::Stopping));
     g_backup_queue_mutex.Run([&] { g_backup_queue.emplace_back(BackupRequest{}); });
     g_backup_thread_semaphore.release();
     while (GetWorkerStatus() != WorkerStatus::NotStarted) {
@@ -174,10 +180,14 @@ bool NewRequest(Libraries::UserService::OrbisUserServiceUserId user_id, std::str
                 std::string_view dir_name, OrbisSaveDataEventType origin) {
     auto save_path = SaveInstance::MakeDirSavePath(user_id, title_id, dir_name);
 
-    if (g_backup_status != WorkerStatus::Waiting && g_backup_status != WorkerStatus::Running) {
+    if (static_cast<WorkerStatus>(retro_atomic_load_seq_cst_int(&g_backup_status)) !=
+            WorkerStatus::Waiting &&
+        static_cast<WorkerStatus>(retro_atomic_load_seq_cst_int(&g_backup_status)) !=
+            WorkerStatus::Running) {
         LOG_ERROR(Lib_SaveData, "Called backup while status is {}. Backup request to {} ignored",
                   enum_name(&enum_names_Libraries_SaveData_Backup_WorkerStatus,
-                            static_cast<s64>(g_backup_status.load())),
+                            static_cast<s64>(static_cast<WorkerStatus>(
+                                retro_atomic_load_seq_cst_int(&g_backup_status)))),
                   fmt::UTF(save_path.u8string()));
         return false;
     }
@@ -222,7 +232,7 @@ bool Restore(const std::filesystem::path& save_path) {
 }
 
 WorkerStatus GetWorkerStatus() {
-    return g_backup_status;
+    return static_cast<WorkerStatus>(retro_atomic_load_seq_cst_int(&g_backup_status));
 }
 
 bool IsBackupExecutingFor(const std::filesystem::path& save_path) {
@@ -258,11 +268,11 @@ void PushBackupEvent(BackupRequest&& req) {
 }
 
 float GetProgress() {
-    return static_cast<float>(g_backup_progress) / 100.0f;
+    return static_cast<float>(retro_atomic_load_seq_cst_int(&g_backup_progress)) / 100.0f;
 }
 
 void ClearProgress() {
-    g_backup_progress = 0;
+    (void)retro_atomic_exchange_int(&g_backup_progress, 0);
 }
 
 } // namespace Libraries::SaveData::Backup

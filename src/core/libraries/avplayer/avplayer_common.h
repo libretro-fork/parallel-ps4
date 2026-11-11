@@ -4,12 +4,12 @@
 #pragma once
 
 #include <array>
-#include <atomic>
 #include <cstddef>
 #include <optional>
 #include <string_view>
 #include <type_traits>
 
+#include <retro_atomic.h>
 #include "core/libraries/avplayer/avplayer.h"
 
 #define AVPLAYER_IS_ERROR(x) ((x) < 0)
@@ -62,27 +62,30 @@ class MpscRing {
 public:
     MpscRing() {
         for (std::size_t i = 0; i < N; ++i) {
-            m_cells[i].seq.store(i, std::memory_order_relaxed);
+            retro_atomic_store_relaxed_64(&m_cells[i].seq, i);
         }
     }
 
     // False when the ring is full.
     bool Push(const T& value) {
-        std::size_t pos = m_tail.load(std::memory_order_relaxed);
+        std::size_t pos = static_cast<std::size_t>(retro_atomic_load_relaxed_64(&m_tail));
         for (;;) {
             Cell& cell = m_cells[pos & (N - 1)];
-            const std::size_t seq = cell.seq.load(std::memory_order_acquire);
+            const std::size_t seq =
+                static_cast<std::size_t>(retro_atomic_load_acquire_64(&cell.seq));
             const auto diff = static_cast<std::ptrdiff_t>(seq - pos);
             if (diff == 0) {
-                if (m_tail.compare_exchange_weak(pos, pos + 1, std::memory_order_relaxed)) {
+                if ((retro_atomic_cas_64(&m_tail, pos, pos + 1) ||
+                     ((pos = static_cast<std::size_t>(retro_atomic_load_acquire_64(&m_tail))),
+                      false))) {
                     cell.value = value;
-                    cell.seq.store(pos + 1, std::memory_order_release);
+                    retro_atomic_store_release_64(&cell.seq, pos + 1);
                     return true;
                 }
             } else if (diff < 0) {
                 return false;
             } else {
-                pos = m_tail.load(std::memory_order_relaxed);
+                pos = static_cast<std::size_t>(retro_atomic_load_relaxed_64(&m_tail));
             }
         }
     }
@@ -90,17 +93,18 @@ public:
     // The consumer's.
     std::optional<T> Pop() {
         Cell& cell = m_cells[m_head & (N - 1)];
-        if (cell.seq.load(std::memory_order_acquire) != m_head + 1) {
+        if (static_cast<std::size_t>(retro_atomic_load_acquire_64(&cell.seq)) != m_head + 1) {
             return std::nullopt;
         }
         const T value = cell.value;
-        cell.seq.store(m_head + N, std::memory_order_release);
+        retro_atomic_store_release_64(&cell.seq, m_head + N);
         ++m_head;
         return value;
     }
 
     bool Empty() const {
-        return m_cells[m_head & (N - 1)].seq.load(std::memory_order_acquire) != m_head + 1;
+        return static_cast<std::size_t>(
+                   retro_atomic_load_acquire_64(&m_cells[m_head & (N - 1)].seq)) != m_head + 1;
     }
 
     void Clear() {
@@ -110,11 +114,11 @@ public:
 
 private:
     struct Cell {
-        std::atomic<std::size_t> seq;
+        retro_atomic_64_t seq;
         T value;
     };
     std::array<Cell, N> m_cells{};
-    alignas(64) std::atomic<std::size_t> m_tail{0};
+    alignas(64) retro_atomic_64_t m_tail{0};
     alignas(64) std::size_t m_head = 0;
 };
 

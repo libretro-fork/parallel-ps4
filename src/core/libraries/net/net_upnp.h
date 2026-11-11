@@ -3,10 +3,9 @@
 
 #pragma once
 
-#include <atomic>
-
 #include <net/net_upnp.h>
 
+#include <retro_atomic.h>
 #include "common/types.h"
 
 namespace Libraries::Net {
@@ -40,11 +39,11 @@ private:
     static void Sync(void* self);
     static void Shutdown(void* self);
 
-    std::atomic<bool> m_started{false};
-    std::atomic<bool> m_p2p_features_enabled{true};
-    std::atomic<u32> m_external_ip_nbo{0};
+    retro_atomic_int_t m_started{0};
+    retro_atomic_int_t m_p2p_features_enabled{1};
+    retro_atomic_int_t m_external_ip_nbo{0};
     // The port wanted forwarded, 0 for none
-    std::atomic<u16> m_wanted_port{0};
+    retro_atomic_int_t m_wanted_port{0}; // a u16
     net_upnp_gateway m_gateway{};
     bool m_have_gateway = false;
     u16 m_mapped = 0;

@@ -22,6 +22,7 @@
 // only ever samples a finished image.
 
 #include "gpu_frames.h"
+#include <retro_atomic.h>
 
 #if defined(__linux__) || defined(_WIN32)
 
@@ -170,7 +171,7 @@ void Fail(const char* format, ...) {
                         "memory: %s", failure_text);
     // The emulator reads its frames back from now on, and they are uploaded here
     if (shared_state) {
-        shared_state->gpu_frames_state.store(GPU_FRAMES_FAILED, std::memory_order_release);
+        retro_atomic_store_release_int(&shared_state->gpu_frames_state, GPU_FRAMES_FAILED);
     }
 }
 
@@ -440,15 +441,15 @@ bool SameGpu() {
 // The emulator waits to be told which GPU the frontend is on before it picks its own
 // (host.cpp, FrontendGpu), so that both are on the same one where there are several.
 void TellFrontendGpu() {
-    if (!shared_state || shared_state->frontend_gpu.load() != 0) {
+    if (!shared_state || static_cast<std::uint32_t>(retro_atomic_load_seq_cst_int(&shared_state->frontend_gpu)) != 0) {
         return;
     }
     VkPhysicalDeviceIDProperties ids{};
     if (vulkan && FrontendIds(ids)) {
         std::memcpy(shared_state->frontend_gpu_uuid, ids.deviceUUID, VK_UUID_SIZE);
-        shared_state->frontend_gpu.store(1);
+        (void)retro_atomic_exchange_int(&shared_state->frontend_gpu, 1);
     } else {
-        shared_state->frontend_gpu.store(2);
+        (void)retro_atomic_exchange_int(&shared_state->frontend_gpu, 2);
     }
     if (shared_wake) {
         shared_wake->Notify();
@@ -558,7 +559,7 @@ void Import() {
     }
     imported = true;
     if (shared_state) {
-        shared_state->gpu_frames_state.store(GPU_FRAMES_SHOWN, std::memory_order_release);
+        retro_atomic_store_release_int(&shared_state->gpu_frames_state, GPU_FRAMES_SHOWN);
     }
     Log(RETRO_LOG_INFO, "The picture is handed over on the GPU: %u images of %ux%u", message.count,
         message.width, message.height);
@@ -850,7 +851,7 @@ void SetShared(SharedState* shared, SharedWake* wake) {
 
 #if defined(_WIN32)
 void Receive(int, void* emulator_process) {
-    if (!shared_state || have_message || shared_state->gpu_images_ready.load() == 0) {
+    if (!shared_state || have_message || static_cast<std::uint32_t>(retro_atomic_load_seq_cst_int(&shared_state->gpu_images_ready)) == 0) {
         return;
     }
     const GpuImagesMessage received = shared_state->gpu_images;

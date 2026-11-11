@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <retro_atomic.h>
 #include "core/libraries/kernel/threads/pthread.h"
 
 namespace Libraries::Ngs2 {
@@ -135,7 +136,7 @@ struct SystemInternal {
     u64 lastRenderTick;         // 280
     u64 renderCount;            // 288
     u32 isActive;               // 296
-    std::atomic<int> lockCount; // 300
+    retro_atomic_int_t lockCount; // 300
     u32 uid;                    // 304
     u32 systemType;             // 308
 
@@ -161,7 +162,7 @@ struct SystemInternal {
 struct HandleInternal {
     HandleInternal* selfPtr;    // 0
     SystemInternal* systemData; // 8
-    std::atomic<int> refCount;  // 16
+    retro_atomic_int_t refCount; // 16
     u32 handleType;             // 24
     u32 handleID;               // 28
 };

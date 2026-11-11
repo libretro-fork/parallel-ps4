@@ -3,12 +3,12 @@
 
 #include <algorithm>
 #include <array>
-#include <atomic>
 #include <span>
 #include <thread>
 #include <rthreads/retro_eventcount.h>
 #include "common/enum_names.h"
 
+#include <retro_atomic.h>
 #include "common/assert.h"
 #include "common/logging/log.h"
 #include "common/singleton.h"
@@ -57,7 +57,7 @@ public:
             return;
         }
         for (size_t i = 0; i < Cells; ++i) {
-            m_cells[i].seq.store(i, std::memory_order_relaxed);
+            retro_atomic_store_relaxed_64(&m_cells[i].seq, i);
         }
         retro_eventcount_init(&m_ec);
         m_heap.reserve(Cells);
@@ -65,36 +65,37 @@ public:
     }
 
     void Arm(const ArmedTimer& timer) {
-        size_t pos = m_tail.load(std::memory_order_relaxed);
+        size_t pos = static_cast<size_t>(retro_atomic_load_relaxed_64(&m_tail));
         for (;;) {
             Cell& cell = m_cells[pos % Cells];
-            const size_t seq = cell.seq.load(std::memory_order_acquire);
+            const size_t seq = static_cast<size_t>(retro_atomic_load_acquire_64(&cell.seq));
             const auto diff = static_cast<std::ptrdiff_t>(seq - pos);
             if (diff == 0) {
-                if (m_tail.compare_exchange_weak(pos, pos + 1, std::memory_order_relaxed)) {
+                if ((retro_atomic_cas_64(&m_tail, pos, pos + 1) ||
+                     ((pos = static_cast<size_t>(retro_atomic_load_acquire_64(&m_tail))), false))) {
                     cell.timer = timer;
-                    cell.seq.store(pos + 1, std::memory_order_release);
+                    retro_atomic_store_release_64(&cell.seq, pos + 1);
                     break;
                 }
             } else if (diff < 0) {
                 std::this_thread::yield(); // full: the service thread is draining it
-                pos = m_tail.load(std::memory_order_relaxed);
+                pos = static_cast<size_t>(retro_atomic_load_relaxed_64(&m_tail));
             } else {
-                pos = m_tail.load(std::memory_order_relaxed);
+                pos = static_cast<size_t>(retro_atomic_load_relaxed_64(&m_tail));
             }
         }
         retro_eventcount_notify(&m_ec);
     }
 
     static u64 NextGeneration() {
-        static std::atomic<u64> generation{0};
-        return generation.fetch_add(1, std::memory_order_relaxed) + 1;
+        static retro_atomic_64_t generation{0};
+        return static_cast<u64>(retro_atomic_fetch_add_64(&generation, 1)) + 1;
     }
 
 private:
     static constexpr size_t Cells = 1024;
     struct Cell {
-        std::atomic<size_t> seq;
+        retro_atomic_64_t seq;
         ArmedTimer timer;
     };
 
@@ -104,17 +105,18 @@ private:
 
     bool Pop(ArmedTimer& out) {
         Cell& cell = m_cells[m_head % Cells];
-        if (cell.seq.load(std::memory_order_acquire) != m_head + 1) {
+        if (static_cast<size_t>(retro_atomic_load_acquire_64(&cell.seq)) != m_head + 1) {
             return false;
         }
         out = cell.timer;
-        cell.seq.store(m_head + Cells, std::memory_order_release);
+        retro_atomic_store_release_64(&cell.seq, m_head + Cells);
         ++m_head;
         return true;
     }
 
     bool Pending() const {
-        return m_cells[m_head % Cells].seq.load(std::memory_order_acquire) == m_head + 1;
+        return static_cast<size_t>(retro_atomic_load_acquire_64(&m_cells[m_head % Cells].seq)) ==
+               m_head + 1;
     }
 
     void Run(std::stop_token stop) {
@@ -154,7 +156,7 @@ private:
     }
 
     std::array<Cell, Cells> m_cells{};
-    alignas(64) std::atomic<size_t> m_tail{0};
+    alignas(64) retro_atomic_64_t m_tail{0};
     alignas(64) size_t m_head = 0;
     retro_eventcount_t m_ec{};
     std::vector<ArmedTimer> m_heap; // the service thread's; reserved at start
@@ -437,7 +439,8 @@ bool EqueueInternal::CheckIoEvent(EqueueEvent& ev) {
     }
 
     if (filter == OrbisKernelEvent::Filter::Read) {
-        if (file->type == Core::FileSys::FileType::Regular) {
+        if (static_cast<Core::FileSys::FileType>(retro_atomic_load_seq_cst_int(&file->type)) ==
+            Core::FileSys::FileType::Regular) {
             if (file->handle) {
                 const u64 file_size = file->handle->Size();
                 const u64 current_pos = file->handle->Tell();
@@ -448,7 +451,8 @@ bool EqueueInternal::CheckIoEvent(EqueueEvent& ev) {
                 }
                 return true;
             }
-        } else if (file->type == Core::FileSys::FileType::Socket) {
+        } else if (static_cast<Core::FileSys::FileType>(retro_atomic_load_seq_cst_int(
+                       &file->type)) == Core::FileSys::FileType::Socket) {
             const auto readable = Core::Net::SocketBytesReadable(static_cast<s32>(ev.event.ident));
             if (readable.error == Core::Net::Host::Error::Ok && readable.value > 0) {
                 ev.TriggerIo(static_cast<u64>(readable.value));
@@ -478,10 +482,12 @@ bool EqueueInternal::CheckIoEvent(EqueueEvent& ev) {
             }
         }
     } else if (filter == OrbisKernelEvent::Filter::Write) {
-        if (file->type == Core::FileSys::FileType::Regular) {
+        if (static_cast<Core::FileSys::FileType>(retro_atomic_load_seq_cst_int(&file->type)) ==
+            Core::FileSys::FileType::Regular) {
             ev.TriggerIo(0);
             return true;
-        } else if (file->type == Core::FileSys::FileType::Socket) {
+        } else if (static_cast<Core::FileSys::FileType>(retro_atomic_load_seq_cst_int(
+                       &file->type)) == Core::FileSys::FileType::Socket) {
             Core::Net::SelectEntry entry{
                 .id = static_cast<s32>(ev.event.ident),
                 .interest = Core::Net::Host::EvOut,
@@ -498,7 +504,8 @@ bool EqueueInternal::CheckIoEvent(EqueueEvent& ev) {
             }
         }
     } else if (filter == OrbisKernelEvent::Filter::Vnode) {
-        if (file->type == Core::FileSys::FileType::Regular) {
+        if (static_cast<Core::FileSys::FileType>(retro_atomic_load_seq_cst_int(&file->type)) ==
+            Core::FileSys::FileType::Regular) {
             ev.TriggerIo(0, ev.event.fflags);
             return true;
         }
@@ -602,7 +609,8 @@ s32 PS4_SYSV_ABI posix_kqueue() {
     auto* handles = Common::Singleton<Core::FileSys::HandleTable>::Instance();
     s32 kqueue_handle = handles->CreateHandle();
     auto* kqueue_file = handles->GetFile(kqueue_handle);
-    kqueue_file->type = Core::FileSys::FileType::Equeue;
+    (void)retro_atomic_exchange_int(&kqueue_file->type,
+                                    static_cast<int>(Core::FileSys::FileType::Equeue));
 
     // Plenty of equeue logic uses names to identify queues.
     // Create a unique name for the queue we create.
@@ -727,7 +735,8 @@ int PS4_SYSV_ABI sceKernelCreateEqueue(OrbisKernelEqueue* eq, const char* name) 
     auto* handles = Common::Singleton<Core::FileSys::HandleTable>::Instance();
     OrbisKernelEqueue kqueue_handle = handles->CreateHandle();
     auto* kqueue_file = handles->GetFile(kqueue_handle);
-    kqueue_file->type = Core::FileSys::FileType::Equeue;
+    (void)retro_atomic_exchange_int(&kqueue_file->type,
+                                    static_cast<int>(Core::FileSys::FileType::Equeue));
 
     // Create the equeue
     kqueues[kqueue_handle] = new EqueueInternal(kqueue_handle, name);

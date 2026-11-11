@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include <algorithm>
-#include <atomic>
 #include <cctype>
 #include <chrono>
 #include <condition_variable>
@@ -13,6 +12,7 @@
 #include <vector>
 #include <queue>
 
+#include <retro_atomic.h>
 #include "common/audio_file.h"
 #include "common/combiner.h"
 #include "common/event_mutex.h"
@@ -39,7 +39,7 @@ public:
         m_mutex.Run([&] {
             m_tracks = tracks;
             m_tracklists[0] = tracks;
-            m_tracklist_version++;
+            retro_atomic_fetch_add_64(&m_tracklist_version, 1);
         });
     }
 
@@ -48,7 +48,7 @@ public:
         m_mutex.Run([&] {
             m_tracks.clear();
             m_tracklists.clear();
-            m_tracklist_version++;
+            retro_atomic_fetch_add_64(&m_tracklist_version, 1);
         });
     }
 
@@ -87,23 +87,23 @@ public:
 
     s32 BeginTransaction() {
         return m_mutex.Run([&]() -> s32 {
-            if (m_in_transaction.load()) {
+            if (retro_atomic_load_seq_cst_int(&m_in_transaction) != 0) {
                 LOG_ERROR(Lib_AudioOut, "BeginTransaction: already in transaction");
                 return ORBIS_MUSIC_PLAYER_SERVICE_ERROR_ALREADY_IN_TRANSACTION;
             }
-            m_in_transaction = true;
+            (void)retro_atomic_exchange_int(&m_in_transaction, 1);
             return ORBIS_OK;
         });
     }
 
     s32 EndTransaction() {
         return m_mutex.Run([&]() -> s32 {
-            if (!m_in_transaction.load()) {
+            if (retro_atomic_load_seq_cst_int(&m_in_transaction) == 0) {
                 LOG_ERROR(Lib_AudioOut, "EndTransaction: not in transaction");
                 return ORBIS_MUSIC_PLAYER_SERVICE_ERROR_NOT_IN_TRANSACTION;
             }
-            m_in_transaction = false;
-            m_tracklist_version++;
+            (void)retro_atomic_exchange_int(&m_in_transaction, 0);
+            retro_atomic_fetch_add_64(&m_tracklist_version, 1);
             auto it = m_tracklists.find(0);
             if (it != m_tracklists.end()) {
                 m_tracks = it->second;
@@ -118,7 +118,7 @@ public:
             return ORBIS_MUSIC_PLAYER_SERVICE_ERROR_INVALID_PARAMETER;
         }
         return m_mutex.Run([&]() -> s32 {
-            if (!m_in_transaction.load()) {
+            if (retro_atomic_load_seq_cst_int(&m_in_transaction) == 0) {
                 LOG_ERROR(Lib_AudioOut, "CreateTrackList: not in transaction");
                 return ORBIS_MUSIC_PLAYER_SERVICE_ERROR_NOT_IN_TRANSACTION;
             }
@@ -133,7 +133,7 @@ public:
             return ORBIS_MUSIC_PLAYER_SERVICE_ERROR_INVALID_PARAMETER;
         }
         return m_mutex.Run([&]() -> s32 {
-            if (!m_in_transaction.load()) {
+            if (retro_atomic_load_seq_cst_int(&m_in_transaction) == 0) {
                 LOG_ERROR(Lib_AudioOut, "RemoveTrackList: not in transaction");
                 return ORBIS_MUSIC_PLAYER_SERVICE_ERROR_NOT_IN_TRANSACTION;
             }
@@ -152,7 +152,7 @@ public:
             return ORBIS_MUSIC_PLAYER_SERVICE_ERROR_INVALID_PARAMETER;
         }
         return m_mutex.Run([&]() -> s32 {
-            if (!m_in_transaction.load()) {
+            if (retro_atomic_load_seq_cst_int(&m_in_transaction) == 0) {
                 LOG_ERROR(Lib_AudioOut, "InsertTrackEntry: not in transaction");
                 return ORBIS_MUSIC_PLAYER_SERVICE_ERROR_NOT_IN_TRANSACTION;
             }
@@ -173,7 +173,7 @@ public:
             return ORBIS_MUSIC_PLAYER_SERVICE_ERROR_INVALID_PARAMETER;
         }
         return m_mutex.Run([&]() -> s32 {
-            if (!m_in_transaction.load()) {
+            if (retro_atomic_load_seq_cst_int(&m_in_transaction) == 0) {
                 LOG_ERROR(Lib_AudioOut, "RemoveTrackEntry: not in transaction");
                 return ORBIS_MUSIC_PLAYER_SERVICE_ERROR_NOT_IN_TRANSACTION;
             }
@@ -186,7 +186,7 @@ public:
     }
 
     u64 GetTrackListVersion() const {
-        return m_tracklist_version.load();
+        return static_cast<u64>(retro_atomic_load_acquire_64(&m_tracklist_version));
     }
 
     u32 GetTrackCount() {
@@ -227,18 +227,18 @@ public:
                 if (track_index >= m_tracks.size()) {
                     return true;
                 }
-                m_current_track_idx = track_index;
+                (void)retro_atomic_exchange_int(&m_current_track_idx, track_index);
                 return false;
             })) {
             return;
         }
 
-        m_stop_requested = false;
-        m_pause_requested = false;
-        m_seek_offset_ms = -1;
-        m_current_time_ms = start_time_ms;
-        m_total_duration_ms = 0;
-        m_play_state = 1;
+        (void)retro_atomic_exchange_int(&m_stop_requested, 0);
+        (void)retro_atomic_exchange_int(&m_pause_requested, 0);
+        (void)retro_atomic_exchange_64(&m_seek_offset_ms, -1);
+        (void)retro_atomic_exchange_64(&m_current_time_ms, start_time_ms);
+        (void)retro_atomic_exchange_64(&m_total_duration_ms, 0);
+        (void)retro_atomic_exchange_int(&m_play_state, 1);
 
         m_worker_thread =
             std::thread(&MusicPlayerManager::PlaybackWorker, this, track_index, start_time_ms);
@@ -249,11 +249,11 @@ public:
     }
 
     void StopPlaybackInternal() {
-        m_stop_requested = true;
-        m_pause_requested = false;
-        m_play_state = 0;
-        m_current_time_ms = 0;
-        m_total_duration_ms = 0;
+        (void)retro_atomic_exchange_int(&m_stop_requested, 1);
+        (void)retro_atomic_exchange_int(&m_pause_requested, 0);
+        (void)retro_atomic_exchange_int(&m_play_state, 0);
+        (void)retro_atomic_exchange_64(&m_current_time_ms, 0);
+        (void)retro_atomic_exchange_64(&m_total_duration_ms, 0);
 
         if (m_worker_thread.joinable()) {
             m_worker_thread.join();
@@ -261,23 +261,25 @@ public:
     }
 
     void Pause() {
-        m_pause_requested = true;
-        m_play_state = 2;
+        (void)retro_atomic_exchange_int(&m_pause_requested, 1);
+        (void)retro_atomic_exchange_int(&m_play_state, 2);
     }
 
     void Unpause() {
-        m_pause_requested = false;
-        m_play_state = 1;
+        (void)retro_atomic_exchange_int(&m_pause_requested, 0);
+        (void)retro_atomic_exchange_int(&m_play_state, 1);
     }
 
     void Seek(u64 time_ms) {
-        m_seek_offset_ms = static_cast<s64>(time_ms);
-        m_current_time_ms = time_ms;
+        (void)retro_atomic_exchange_64(&m_seek_offset_ms, static_cast<s64>(time_ms));
+        (void)retro_atomic_exchange_64(&m_current_time_ms, time_ms);
     }
 
     bool IsTrackActive(u32 track_index) {
-        return (m_current_track_idx.load() == track_index) && (m_play_state.load() != 0) &&
-               m_worker_thread.joinable() && !m_stop_requested.load();
+        return (static_cast<u32>(retro_atomic_load_seq_cst_int(&m_current_track_idx)) ==
+                track_index) &&
+               (static_cast<u32>(retro_atomic_load_seq_cst_int(&m_play_state)) != 0) &&
+               m_worker_thread.joinable() && retro_atomic_load_seq_cst_int(&m_stop_requested) == 0;
     }
 
     void PlayOrSeek(u32 track_index, u64 start_time_ms) {
@@ -307,9 +309,10 @@ public:
         m_control_mutex.Run([&] {
             u32 count = GetTrackCount();
             if (count > 0) {
-                u32 cur = m_current_track_idx.load();
+                u32 cur = static_cast<u32>(retro_atomic_load_seq_cst_int(&m_current_track_idx));
                 u32 next_idx = (cur + 1) % count;
-                if (m_shuffle_mode.load() == 1 && count > 1) {
+                if (static_cast<u32>(retro_atomic_load_seq_cst_int(&m_shuffle_mode)) == 1 &&
+                    count > 1) {
                     for (int retry = 0; retry < 10 && next_idx == cur; ++retry) {
                         next_idx = static_cast<u32>(rand() % count);
                     }
@@ -323,7 +326,7 @@ public:
         m_control_mutex.Run([&] {
             u32 count = GetTrackCount();
             if (count > 0) {
-                u32 cur = m_current_track_idx.load();
+                u32 cur = static_cast<u32>(retro_atomic_load_seq_cst_int(&m_current_track_idx));
                 u32 prev_idx = (cur > 0) ? (cur - 1) : 0;
                 PlayLocked(prev_idx, 0);
             }
@@ -331,43 +334,43 @@ public:
     }
 
     void SetVolume(int vol) {
-        m_volume = std::clamp(vol, 0, 25);
+        (void)retro_atomic_exchange_int(&m_volume, std::clamp(vol, 0, 25));
     }
 
     int GetVolume() const {
-        return m_volume.load();
+        return retro_atomic_load_seq_cst_int(&m_volume);
     }
 
     void SetRepeatMode(u32 mode) {
-        m_repeat_mode = mode;
+        (void)retro_atomic_exchange_int(&m_repeat_mode, mode);
     }
 
     void SetShuffle(u32 mode) {
-        m_shuffle_mode = mode;
+        (void)retro_atomic_exchange_int(&m_shuffle_mode, mode);
     }
 
     u32 GetPlayState() const {
-        return m_play_state.load();
+        return static_cast<u32>(retro_atomic_load_seq_cst_int(&m_play_state));
     }
 
     u32 GetCurrentTrackIndex() const {
-        return m_current_track_idx.load();
+        return static_cast<u32>(retro_atomic_load_seq_cst_int(&m_current_track_idx));
     }
 
     u64 GetCurrentTimeMs() const {
-        return m_current_time_ms.load();
+        return static_cast<u64>(retro_atomic_load_acquire_64(&m_current_time_ms));
     }
 
     u64 GetTotalDurationMs() const {
-        return m_total_duration_ms.load();
+        return static_cast<u64>(retro_atomic_load_acquire_64(&m_total_duration_ms));
     }
 
     u32 GetRepeatMode() const {
-        return m_repeat_mode.load();
+        return static_cast<u32>(retro_atomic_load_seq_cst_int(&m_repeat_mode));
     }
 
     u32 GetShuffleMode() const {
-        return m_shuffle_mode.load();
+        return static_cast<u32>(retro_atomic_load_seq_cst_int(&m_shuffle_mode));
     }
 
 private:
@@ -380,12 +383,12 @@ private:
         u32 track_idx = start_track_index;
         u64 start_time_ms = initial_start_time_ms;
 
-        while (!m_stop_requested.load()) {
+        while (retro_atomic_load_seq_cst_int(&m_stop_requested) == 0) {
             std::string guest_path;
             const bool have_track = m_mutex.Run([&] {
                 if (track_idx < m_tracks.size()) {
                     guest_path = m_tracks[track_idx];
-                    m_current_track_idx = track_idx;
+                    (void)retro_atomic_exchange_int(&m_current_track_idx, track_idx);
                     return true;
                 }
                 return false;
@@ -474,9 +477,9 @@ private:
 
             const u64 total_frames = pcm.Frames();
             u64 total_duration = total_frames * 1000 / pcm.hz;
-            m_total_duration_ms = total_duration;
+            (void)retro_atomic_exchange_64(&m_total_duration_ms, total_duration);
 
-            if (m_stop_requested.load()) {
+            if (retro_atomic_load_seq_cst_int(&m_stop_requested) != 0) {
                 break;
             }
 
@@ -500,14 +503,15 @@ private:
             u64 pos = start_time_ms > 0 && total_duration > 0 ? frame_at(start_time_ms) : 0;
 
             constexpr unsigned chunk_frames = 1024;
-            while (!m_stop_requested.load()) {
-                s64 seek_target = m_seek_offset_ms.exchange(-1);
+            while (retro_atomic_load_seq_cst_int(&m_stop_requested) == 0) {
+                s64 seek_target = static_cast<s64>(retro_atomic_exchange_64(&m_seek_offset_ms, -1));
                 if (seek_target >= 0) {
                     pos = frame_at(static_cast<u64>(seek_target));
-                    m_current_time_ms = static_cast<u64>(seek_target);
+                    (void)retro_atomic_exchange_64(&m_current_time_ms,
+                                                   static_cast<u64>(seek_target));
                 }
 
-                if (m_pause_requested.load()) {
+                if (retro_atomic_load_seq_cst_int(&m_pause_requested) != 0) {
                     std::this_thread::sleep_for(std::chrono::milliseconds(20));
                     continue;
                 }
@@ -520,8 +524,8 @@ private:
                     continue;
                 }
 
-                const float vol =
-                    (m_volume.load() / 25.0f) * (emu_settings_get_volume_slider() * 0.01f);
+                const float vol = (retro_atomic_load_seq_cst_int(&m_volume) / 25.0f) *
+                                  (emu_settings_get_volume_slider() * 0.01f);
                 unsigned done = 0;
                 while (done < chunk_frames) {
                     s16* dst = nullptr;
@@ -537,12 +541,12 @@ private:
                         break; // the track has ended
                     }
                 }
-                m_current_time_ms = (pos >> 32) * 1000 / pcm.hz;
+                (void)retro_atomic_exchange_64(&m_current_time_ms, (pos >> 32) * 1000 / pcm.hz);
             }
 
             audio_mix_input_close(input);
 
-            if (m_stop_requested.load()) {
+            if (retro_atomic_load_seq_cst_int(&m_stop_requested) != 0) {
                 break;
             }
 
@@ -551,8 +555,8 @@ private:
                 break;
             }
 
-            u32 rep = m_repeat_mode.load();
-            u32 shuf = m_shuffle_mode.load();
+            u32 rep = static_cast<u32>(retro_atomic_load_seq_cst_int(&m_repeat_mode));
+            u32 shuf = static_cast<u32>(retro_atomic_load_seq_cst_int(&m_shuffle_mode));
 
             u32 next_track = track_idx;
             if (rep == 2) {
@@ -580,14 +584,14 @@ private:
 
             track_idx = next_track;
             start_time_ms = 0;
-            m_current_track_idx = track_idx;
-            m_current_time_ms = 0;
+            (void)retro_atomic_exchange_int(&m_current_track_idx, track_idx);
+            (void)retro_atomic_exchange_64(&m_current_time_ms, 0);
             LOG_INFO(Lib_AudioOut, "Auto-advancing to track_index={}", track_idx);
         }
 
-        if (!m_stop_requested.load()) {
-            m_play_state = 0;
-            m_current_time_ms = 0;
+        if (retro_atomic_load_seq_cst_int(&m_stop_requested) == 0) {
+            (void)retro_atomic_exchange_int(&m_play_state, 0);
+            (void)retro_atomic_exchange_64(&m_current_time_ms, 0);
             LOG_INFO(Lib_AudioOut, "Playback finished");
         }
     }
@@ -595,24 +599,24 @@ private:
     Common::Combiner m_control_mutex;
     Common::Combiner m_mutex;
     std::vector<std::string> m_tracks;
-    std::atomic<u32> m_play_state{0};
-    std::atomic<u32> m_current_track_idx{0};
-    std::atomic<u64> m_current_time_ms{0};
-    std::atomic<u64> m_total_duration_ms{0};
-    std::atomic<int> m_volume{25};
-    std::atomic<u32> m_repeat_mode{0};
-    std::atomic<u32> m_shuffle_mode{0};
-    std::atomic<bool> m_stop_requested{false};
-    std::atomic<bool> m_pause_requested{false};
-    std::atomic<s64> m_seek_offset_ms{-1};
+    retro_atomic_int_t m_play_state{0};
+    retro_atomic_int_t m_current_track_idx{0};
+    retro_atomic_64_t m_current_time_ms{0};
+    retro_atomic_64_t m_total_duration_ms{0};
+    retro_atomic_int_t m_volume{25};
+    retro_atomic_int_t m_repeat_mode{0};
+    retro_atomic_int_t m_shuffle_mode{0};
+    retro_atomic_int_t m_stop_requested{0};
+    retro_atomic_int_t m_pause_requested{0};
+    retro_atomic_64_t m_seek_offset_ms{-1};
     std::thread m_worker_thread;
     Common::EventMutex m_event_mutex;
     Common::EventCondition m_event_cv;
     std::queue<MusicEvent> m_event_queue;
     std::unordered_map<u32, std::vector<std::string>> m_tracklists;
     std::unordered_map<std::string, u32> m_usb_devices;
-    std::atomic<bool> m_in_transaction{false};
-    std::atomic<u64> m_tracklist_version{1};
+    retro_atomic_int_t m_in_transaction{0};
+    retro_atomic_64_t m_tracklist_version{1};
 };
 
 static s32 PS4_SYSV_ABI sceMusicPlayerServiceInitialize(size_t pool_size, void* pool_addr) {

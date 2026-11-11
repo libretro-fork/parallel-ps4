@@ -24,7 +24,6 @@
 
 #include <algorithm>
 #include <array>
-#include <atomic>
 #include <cerrno>
 #include <cstdio>
 #include <cstdlib>
@@ -50,6 +49,7 @@ __attribute__((weak)) u64 FexCurrentGuestStackTop() noexcept {
 #include <utility>
 #include <vector>
 
+#include <retro_atomic.h>
 #include <streams/file_stream.h>
 
 namespace Core::Fex {
@@ -69,7 +69,7 @@ constexpr uint64_t kCallbackInput = 0x1020'3040'5060'7080ULL;
 constexpr uint64_t kInvalidationInitial = 0x0123'4567'89ab'cdefULL;
 constexpr uint64_t kInvalidationUpdated = 0xfedc'ba98'7654'3210ULL;
 
-std::atomic_uint32_t FexBlockTraceCount {};
+retro_atomic_int_t FexBlockTraceCount{};
 
 // Forward-declare so ActiveFexExecution can hold the HLE bridge for deferred flush.
 class BridgeSyscallHandler;
@@ -130,10 +130,10 @@ private:
 void FexMessageHandler(LogMan::DebugLevels level, const char* message) {
   if (message == nullptr) return;
   if (std::strstr(message, "Guest x86 Begin") != nullptr) {
-    const auto index = FexBlockTraceCount.fetch_add(1, std::memory_order_relaxed);
-    if (index < kFexBlockTraceLimit) {
-      FEX_TRACE( "BACHATA_FEX_BLOCK index=%u %s\n", index, message);
-    }
+      const auto index = static_cast<u32>(retro_atomic_fetch_add_int(&FexBlockTraceCount, 1));
+      if (index < kFexBlockTraceLimit) {
+          FEX_TRACE("BACHATA_FEX_BLOCK index=%u %s\n", index, message);
+      }
   } else if (level <= LogMan::ERROR) {
     // FEX's own errors, always
     std::fprintf(stderr, "BACHATA_FEX_ERROR level=%u %s\n", static_cast<unsigned>(level),
@@ -289,7 +289,7 @@ public:
       const bool traceEnabled = std::getenv("BACHATA_FEX_TRACE") != nullptr;
       FEXCore::Config::Set(FEXCore::Config::CONFIG_X86DISASSEMBLE,
                            traceEnabled ? "1" : "0");
-      FexBlockTraceCount.store(0, std::memory_order_relaxed);
+      retro_atomic_store_relaxed_int(&FexBlockTraceCount, 0);
       LogMan::Msg::InstallHandler(FexMessageHandler);
     }
     ++Users;

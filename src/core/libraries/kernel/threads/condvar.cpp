@@ -6,6 +6,7 @@
 #include <cstring>
 #include <fmt/format.h>
 
+#include <retro_atomic.h>
 #include "common/assert.h"
 #include "common/combiner.h"
 #include "core/libraries/kernel/kernel.h"
@@ -36,8 +37,8 @@ static int CondInit(PthreadCondT* cond, const PthreadCondAttrT* cond_attr, const
     if (name) {
         cvp->name = name;
     } else {
-        static std::atomic<int> CondId{0};
-        cvp->name = fmt::format("Cond{}", CondId.fetch_add(1));
+        static retro_atomic_int_t CondId{0};
+        cvp->name = fmt::format("Cond{}", retro_atomic_fetch_add_int(&CondId, 1));
     }
 
     if (cond_attr == nullptr || *cond_attr == nullptr) {
@@ -148,7 +149,7 @@ int PthreadCond::Wait(PthreadMutexT* mutex, const OrbisKernelTimespec* abstime, 
     int error = 0;
     bool first_sleep = true;
     for (;;) {
-        curthread->cancel_point = true;
+        (void)retro_atomic_exchange_int(&curthread->cancel_point, 1);
         curthread->ClearWake();
         const bool cancel_pending = curthread->ShouldCancel();
         SleepqUnlock(this);
@@ -186,7 +187,7 @@ int PthreadCond::Wait(PthreadMutexT* mutex, const OrbisKernelTimespec* abstime, 
             SleepqUnlock(this);
             curthread->mutex_obj = nullptr;
             mp->CvLock(recurse);
-            curthread->cancel_point = false;
+            (void)retro_atomic_exchange_int(&curthread->cancel_point, 0);
             PthreadTestCancel();
             return 0;
         } else if (error == POSIX_ETIMEDOUT) {
@@ -202,7 +203,7 @@ int PthreadCond::Wait(PthreadMutexT* mutex, const OrbisKernelTimespec* abstime, 
     SleepqUnlock(this);
     curthread->mutex_obj = nullptr;
     const int error2 = mp->CvLock(recurse);
-    curthread->cancel_point = false;
+    (void)retro_atomic_exchange_int(&curthread->cancel_point, 0);
     PthreadCancelInterrupt();
     if (error == 0) {
         error = error2;
@@ -277,7 +278,8 @@ int PthreadCond::Signal(Pthread* thread) {
     has_user_waiters = SleepqRemove(sq, td);
 
     WakeSemaphore* wake_address = &td->wake_sema;
-    if (mp != nullptr && curthread != nullptr && mp->m_owner.load() == curthread) {
+    if (mp != nullptr && curthread != nullptr &&
+        static_cast<Pthread*>(retro_atomic_load_acquire_ptr(&mp->m_owner)) == curthread) {
         if (curthread->nwaiter_defer >= Pthread::MaxDeferWaiters) {
             curthread->WakeAll();
         }
@@ -309,7 +311,8 @@ int PthreadCond::Broadcast() {
         Pthread* curthread = ba2->curthread;
         PthreadMutex* mp = td->mutex_obj;
 
-        if (mp != nullptr && curthread != nullptr && mp->m_owner.load() == curthread) {
+        if (mp != nullptr && curthread != nullptr &&
+            static_cast<Pthread*>(retro_atomic_load_acquire_ptr(&mp->m_owner)) == curthread) {
             if (curthread->nwaiter_defer >= Pthread::MaxDeferWaiters) {
                 curthread->WakeAll();
             }

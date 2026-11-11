@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include <algorithm>
-#include <atomic>
 #include <cctype>
 #include <chrono>
 #include <condition_variable>
@@ -37,6 +36,7 @@
 #include <net/net_http.h>
 #include <net/net_socket_ssl.h>
 
+#include <retro_atomic.h>
 #include "core/net/net_service.h"
 
 namespace Libraries::Http {
@@ -156,7 +156,7 @@ struct HttpState {
     std::unordered_map<int, std::shared_ptr<Epoll>> epolls;
     // 301-redirect cache
     std::unordered_map<int, std::unordered_map<std::string, ResolvedRedirect>> redirect_cache_301;
-    std::atomic<bool> shutting_down{false};
+    retro_atomic_int_t shutting_down{0};
 };
 
 static HttpState g_state;
@@ -1027,9 +1027,11 @@ static int WaitForResponseReady(HttpRequest& req, std::unique_lock<Common::Event
         return ORBIS_HTTP_ERROR_EAGAIN;
     }
     req.cv.wait(lock, [&req]() {
-        return req.state != HttpRequestState::Sending || g_state.shutting_down.load();
+        return req.state != HttpRequestState::Sending ||
+               (retro_atomic_load_seq_cst_int(&g_state.shutting_down) != 0);
     });
-    if (g_state.shutting_down.load() || req.state == HttpRequestState::Aborted) {
+    if ((retro_atomic_load_seq_cst_int(&g_state.shutting_down) != 0) ||
+        req.state == HttpRequestState::Aborted) {
         return ORBIS_HTTP_ERROR_ABORTED;
     }
     return ORBIS_OK;
@@ -1502,7 +1504,7 @@ int PS4_SYSV_ABI sceHttpInit(int libnetMemId, int libsslCtxId, u64 poolSize) {
         const int ctx_id = ++g_state.next_ctx_id;
         g_state.active_contexts.insert(ctx_id);
         g_state.inited = true; // true while at least one context is alive
-        g_state.shutting_down.store(false);
+        (void)retro_atomic_exchange_int(&g_state.shutting_down, 0);
         LOG_INFO(Lib_Http, "initialized -> ctxId={} (active contexts: {})", ctx_id,
                  g_state.active_contexts.size());
         return ctx_id;
@@ -1637,11 +1639,12 @@ int PS4_SYSV_ABI sceHttpSendRequest(int reqId, const void* postData, u64 size) {
         }
 
         std::lock_guard<Common::EventMutex> lock(g_state.m_mutex);
-        if (g_state.shutting_down.load() || req_ptr->deleted ||
+        if ((retro_atomic_load_seq_cst_int(&g_state.shutting_down) != 0) || req_ptr->deleted ||
             req_ptr->state == HttpRequestState::Aborted) {
-            const char* reason = g_state.shutting_down.load() ? "shutdown"
-                                 : req_ptr->deleted           ? "deleted"
-                                                              : "aborted";
+            const char* reason = (retro_atomic_load_seq_cst_int(&g_state.shutting_down) != 0)
+                                     ? "shutdown"
+                                 : req_ptr->deleted ? "deleted"
+                                                    : "aborted";
             LOG_INFO(Lib_Http,
                      "reqId={} worker finished but request was {} before completion; "
                      "dropping result (would have been status={}, errno={:#x})",
@@ -1947,14 +1950,14 @@ int PS4_SYSV_ABI sceHttpWaitRequest(OrbisHttpEpollHandle eh, OrbisHttpNBEvent* n
         // Poll mode: don't wait, just return 0.
         return 0;
     }
-    if (epoll_ptr->destroyed || g_state.shutting_down.load()) {
+    if (epoll_ptr->destroyed || (retro_atomic_load_seq_cst_int(&g_state.shutting_down) != 0)) {
         // Don't wait if we already know we'd be woken right away.
         return 0;
     }
 
     auto predicate = [&]() {
         return !epoll_ptr->events.empty() || epoll_ptr->destroyed || epoll_ptr->abort_requested ||
-               g_state.shutting_down.load();
+               (retro_atomic_load_seq_cst_int(&g_state.shutting_down) != 0);
     };
     if (timeout < 0) {
         epoll_ptr->cv.wait(lock, predicate);
@@ -2001,7 +2004,7 @@ int PS4_SYSV_ABI sceHttpTerm(int libhttpCtxId) {
         if (g_state.active_contexts.empty()) {
             // Last context torn down - wipe all dependent objects.
             LOG_INFO(Lib_Http, "last context terminated, clearing state");
-            g_state.shutting_down.store(true);
+            (void)retro_atomic_exchange_int(&g_state.shutting_down, 1);
             size_t in_flight = 0;
             for (auto& [id, req_ptr] : g_state.requests) {
                 if (req_ptr->state == HttpRequestState::Sending) {

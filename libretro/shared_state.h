@@ -4,7 +4,6 @@
 #pragma once
 
 #include <algorithm>
-#include <atomic>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
@@ -12,6 +11,7 @@
 #include <thread>
 
 #include <rthreads/retro_shared_eventcount.h>
+#include <retro_atomic.h>
 
 // The memory the libretro core (libretro_core.cpp, in the frontend's process) shares with the
 // emulator it runs in a process of its own (host.cpp). One block: this header, then three
@@ -150,40 +150,40 @@ struct SharedState {
     SharedOptions options;
 
     /// Set by the core when content is closed: the emulator ends itself.
-    std::atomic<std::uint32_t> quit;
+    retro_atomic_int_t quit;
 
     /// The options that take effect while the game runs, written again by the core whenever
     /// the frontend's user changes one; options_serial counts the changes, and the emulator
     /// applies them when it moves. The rest of options is read when the game starts.
     struct {
-        std::atomic<std::uint32_t> show_fps;
-        std::atomic<std::int32_t> volume;
-        std::atomic<std::uint32_t> trophy_popup;
-        std::atomic<std::uint32_t> trophy_side;
-        std::atomic<std::uint32_t> trophy_seconds;
+        retro_atomic_int_t show_fps;
+        retro_atomic_int_t volume;
+        retro_atomic_int_t trophy_popup;
+        retro_atomic_int_t trophy_side;
+        retro_atomic_int_t trophy_seconds;
     } live;
-    std::atomic<std::uint32_t> options_serial;
+    retro_atomic_int_t options_serial;
 
     // Core to emulator, per pad.
-    std::atomic<std::uint32_t> buttons[MAX_PADS];
-    std::atomic<std::uint32_t> axes[MAX_PADS][SHARED_AXIS_COUNT];
+    retro_atomic_int_t buttons[MAX_PADS];
+    retro_atomic_int_t axes[MAX_PADS][SHARED_AXIS_COUNT];
 
     // Emulator to core.
     /// A pad's motors, the small one in the low byte and the large one above it.
-    std::atomic<std::uint32_t> rumble[MAX_PADS];
+    retro_atomic_int_t rumble[MAX_PADS];
 
     /// The newest frame: frames published so far, shifted by FRAME_SLOT_BITS, plus the slot the
     /// newest is in. Zero while there is none. Written by the emulator only. A slot is one of
     /// the FRAME_SLOTS frames in this memory, or with gpu_frames one of the emulator's
     /// FRAME_IMAGES images.
-    std::atomic<std::uint32_t> frame_latest;
+    retro_atomic_int_t frame_latest;
     /// The slot the core is showing, which it hands to the frontend without a copy, or
     /// FRAME_SLOT_NONE. Written by the core only. The emulator writes a frame into a slot that
     /// is neither this one nor the newest. The core sets this to the newest slot and then reads
     /// frame_latest again: if it still names that slot, the emulator either saw the slot held or
     /// had not published anything newer, so it is not writing there. Both sides use the default,
     /// sequentially consistent ordering for the two; the argument needs it.
-    std::atomic<std::uint32_t> frame_held;
+    retro_atomic_int_t frame_held;
     struct {
         std::uint32_t width;
         std::uint32_t height;
@@ -193,13 +193,13 @@ struct SharedState {
     /// its own on, as an image's memory cannot be handed from one GPU to another.
     /// frontend_gpu is 0 until the core knows, then 1 with the device's UUID in
     /// frontend_gpu_uuid, or 2 when it could not find out.
-    std::atomic<std::uint32_t> frontend_gpu;
+    retro_atomic_int_t frontend_gpu;
     std::uint8_t frontend_gpu_uuid[16];
 
     /// Windows, with gpu_frames: the emulator's images, as the socket carries them elsewhere.
     /// gpu_images_ready is set once the rest is written; the handles are the emulator's, and
     /// the core duplicates them into its own process.
-    std::atomic<std::uint32_t> gpu_images_ready;
+    retro_atomic_int_t gpu_images_ready;
     GpuImagesMessage gpu_images;
     std::uint64_t gpu_image_handles[FRAME_IMAGES];
 
@@ -207,12 +207,12 @@ struct SharedState {
     /// (GPU_FRAMES_SHOWN), or either side found they cannot be shared (GPU_FRAMES_FAILED): the
     /// emulator then reads each frame back into this memory, as without gpu_frames, and the
     /// core uploads it into an image of the frontend's device.
-    std::atomic<std::uint32_t> gpu_frames_state;
+    retro_atomic_int_t gpu_frames_state;
 
     /// A ring of interleaved 16-bit stereo, one writer (the emulator) and one reader (the core).
     /// The indices count frames and only grow; a position is index & (AUDIO_RING_FRAMES - 1).
-    std::atomic<std::uint32_t> audio_written;
-    std::atomic<std::uint32_t> audio_read;
+    retro_atomic_int_t audio_written;
+    retro_atomic_int_t audio_read;
     std::int16_t audio[AUDIO_RING_FRAMES * 2];
 };
 

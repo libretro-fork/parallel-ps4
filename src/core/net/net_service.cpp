@@ -4,6 +4,7 @@
 #include <net/net_compat.h>
 #include <net/net_http.h>
 
+#include <retro_atomic.h>
 #include "common/logging/log.h"
 #include "common/thread.h"
 #include "core/net/net_service.h"
@@ -26,7 +27,7 @@ void WaitFor(retro_eventcount_t* ec, F&& ready) {
 struct Waited {
     NetService::Job job;
     void* user;
-    std::atomic<bool> done{false};
+    retro_atomic_int_t done{0};
 };
 } // namespace
 
@@ -37,7 +38,7 @@ NetService& NetService::Instance() {
 
 NetService::NetService() {
     for (u32 i = 0; i < Slots; ++i) {
-        m_cells[i].seq.store(i, std::memory_order_relaxed);
+        retro_atomic_store_relaxed_int(&m_cells[i].seq, i);
     }
     const bool work = retro_eventcount_init(&m_work);
     const bool done = retro_eventcount_init(&m_done);
@@ -59,7 +60,7 @@ NetService::~NetService() {
     if (!m_ok) {
         return;
     }
-    m_stop.store(true, std::memory_order_release);
+    retro_atomic_store_release_int(&m_stop, 1);
     retro_eventcount_notify(&m_work);
     m_thread.join();
     retro_eventcount_free(&m_work);
@@ -70,25 +71,26 @@ bool NetService::Post(Job job, void* user) {
     if (!m_ok) {
         return false;
     }
-    u32 pos = m_tail.load(std::memory_order_relaxed);
+    u32 pos = static_cast<u32>(retro_atomic_load_relaxed_int(&m_tail));
     Cell* cell;
     for (;;) {
         cell = &m_cells[pos % Slots];
-        const u32 seq = cell->seq.load(std::memory_order_acquire);
+        const u32 seq = static_cast<u32>(retro_atomic_load_acquire_int(&cell->seq));
         const s32 diff = static_cast<s32>(seq - pos);
         if (diff == 0) {
-            if (m_tail.compare_exchange_weak(pos, pos + 1, std::memory_order_relaxed)) {
+            if ((retro_atomic_cas_int(&m_tail, pos, pos + 1) ||
+                 ((pos = static_cast<u32>(retro_atomic_load_acquire_int(&m_tail))), false))) {
                 break;
             }
         } else if (diff < 0) {
             return false;
         } else {
-            pos = m_tail.load(std::memory_order_relaxed);
+            pos = static_cast<u32>(retro_atomic_load_relaxed_int(&m_tail));
         }
     }
     cell->job = job;
     cell->user = user;
-    cell->seq.store(pos + 1, std::memory_order_release);
+    retro_atomic_store_release_int(&cell->seq, pos + 1);
     retro_eventcount_notify(&m_work);
     return true;
 }
@@ -98,12 +100,12 @@ bool NetService::Run(Job job, void* user) {
     const auto trampoline = [](void* p) {
         auto* w = static_cast<Waited*>(p);
         w->job(w->user);
-        w->done.store(true, std::memory_order_release);
+        retro_atomic_store_release_int(&w->done, 1);
     };
     if (!Post(trampoline, &waited)) {
         return false;
     }
-    WaitFor(&m_done, [&] { return waited.done.load(std::memory_order_acquire); });
+    WaitFor(&m_done, [&] { return (retro_atomic_load_acquire_int(&waited.done) != 0); });
     return true;
 }
 
@@ -118,18 +120,18 @@ void NetService::Loop() {
         Cell* cell = nullptr;
         WaitFor(&m_work, [&] {
             Cell& next = m_cells[m_head % Slots];
-            if (next.seq.load(std::memory_order_acquire) == m_head + 1) {
+            if (static_cast<u32>(retro_atomic_load_acquire_int(&next.seq)) == m_head + 1) {
                 cell = &next;
                 return true;
             }
-            return m_stop.load(std::memory_order_acquire);
+            return (retro_atomic_load_acquire_int(&m_stop) != 0);
         });
         if (!cell) {
             break;
         }
         const Job job = cell->job;
         void* user = cell->user;
-        cell->seq.store(m_head + Slots, std::memory_order_release);
+        retro_atomic_store_release_int(&cell->seq, m_head + Slots);
         ++m_head;
         job(user);
         retro_eventcount_notify(&m_done);

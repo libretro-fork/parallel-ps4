@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright 2024-2026 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include <retro_atomic.h>
 #include "common/combiner.h"
 #include "core/libraries/kernel/kernel.h"
 #include "core/libraries/kernel/posix_error.h"
@@ -20,12 +21,13 @@ static Common::Combiner KeytableCombiner;
 
 int PS4_SYSV_ABI posix_pthread_key_create(PthreadKeyT* key, PthreadKeyDestructor destructor) {
     return KeytableCombiner.Run([&]() -> int {
-        const auto it = std::ranges::find_if(
-            ThreadKeytable, [](const PthreadKey& k) { return k.allocated.load() == 0; });
+        const auto it = std::ranges::find_if(ThreadKeytable, [](const PthreadKey& k) {
+            return retro_atomic_load_seq_cst_int(&k.allocated) == 0;
+        });
         if (it != ThreadKeytable.end()) {
-            it->allocated = 1;
+            (void)retro_atomic_exchange_int(&it->allocated, 1);
             it->destructor = destructor;
-            it->seqno++;
+            retro_atomic_fetch_add_int(&it->seqno, 1);
             *key = static_cast<PthreadKeyT>(std::distance(ThreadKeytable.begin(), it));
             return 0;
         }
@@ -39,11 +41,11 @@ int PS4_SYSV_ABI posix_pthread_key_delete(PthreadKeyT key) {
     }
 
     return KeytableCombiner.Run([&]() -> int {
-        if (!ThreadKeytable[key].allocated) {
+        if (!retro_atomic_load_seq_cst_int(&ThreadKeytable[key].allocated)) {
             return POSIX_EINVAL;
         }
 
-        ThreadKeytable[key].allocated = 0;
+        (void)retro_atomic_exchange_int(&ThreadKeytable[key].allocated, 0);
         return 0;
     });
 }
@@ -64,8 +66,10 @@ void _thread_cleanupspecific() {
 
             // The table is read in its combiner; the destructor runs outside it
             KeytableCombiner.Run([&] {
-                if (ThreadKeytable[key].allocated && (curthread->specific[key].data != nullptr)) {
-                    if (curthread->specific[key].seqno == ThreadKeytable[key].seqno) {
+                if (retro_atomic_load_seq_cst_int(&ThreadKeytable[key].allocated) != 0 &&
+                    (curthread->specific[key].data != nullptr)) {
+                    if (curthread->specific[key].seqno ==
+                        retro_atomic_load_seq_cst_int(&ThreadKeytable[key].seqno)) {
                         data = curthread->specific[key].data;
                         destructor = ThreadKeytable[key].destructor;
                     }
@@ -116,7 +120,7 @@ int PS4_SYSV_ABI posix_pthread_setspecific(PthreadKeyT key, const void* value) {
     if (key >= PthreadKeysMax) {
         return POSIX_EINVAL;
     }
-    if (!ThreadKeytable[key].allocated) {
+    if (!retro_atomic_load_seq_cst_int(&ThreadKeytable[key].allocated)) {
         return POSIX_EINVAL;
     }
 
@@ -128,7 +132,7 @@ int PS4_SYSV_ABI posix_pthread_setspecific(PthreadKeyT key, const void* value) {
         pthread->specific_data_count--;
     }
     pthread->specific[key].data = value;
-    pthread->specific[key].seqno = ThreadKeytable[key].seqno;
+    pthread->specific[key].seqno = retro_atomic_load_seq_cst_int(&ThreadKeytable[key].seqno);
     return 0;
 }
 
@@ -139,8 +143,9 @@ const void* PS4_SYSV_ABI posix_pthread_getspecific(PthreadKeyT key) {
         return nullptr;
     }
 
-    if (ThreadKeytable[key].allocated &&
-        (pthread->specific[key].seqno == ThreadKeytable[key].seqno)) {
+    if (retro_atomic_load_seq_cst_int(&ThreadKeytable[key].allocated) != 0 &&
+        (pthread->specific[key].seqno ==
+         retro_atomic_load_seq_cst_int(&ThreadKeytable[key].seqno))) {
         return pthread->specific[key].data;
     }
 

@@ -4,9 +4,9 @@
 #pragma once
 
 #include <cstdlib>
+#include <retro_atomic.h>
 
 #if defined(__MINGW32__) && !defined(_UCRT)
-#include <atomic>
 #include <stdlib.h>
 #endif
 
@@ -19,13 +19,13 @@ namespace Common {
 // process ends without running static destructors or atexit handlers.
 namespace Detail {
 inline void (*quick_exit_handlers[32])() = {};
-inline std::atomic<int> quick_exit_count{0};
+inline retro_atomic_int_t quick_exit_count{0};
 } // namespace Detail
 
 inline int AtQuickExit(void (*handler)()) {
-    const int slot = Detail::quick_exit_count.fetch_add(1);
+    const int slot = retro_atomic_fetch_add_int(&Detail::quick_exit_count, 1);
     if (slot >= 32) {
-        Detail::quick_exit_count.fetch_sub(1);
+        retro_atomic_fetch_sub_int(&Detail::quick_exit_count, 1);
         return -1;
     }
     Detail::quick_exit_handlers[slot] = handler;
@@ -33,7 +33,7 @@ inline int AtQuickExit(void (*handler)()) {
 }
 
 [[noreturn]] inline void QuickExit(int status) {
-    for (int slot = Detail::quick_exit_count.load(); slot-- > 0;) {
+    for (int slot = retro_atomic_load_seq_cst_int(&Detail::quick_exit_count); slot-- > 0;) {
         if (Detail::quick_exit_handlers[slot]) {
             Detail::quick_exit_handlers[slot]();
         }

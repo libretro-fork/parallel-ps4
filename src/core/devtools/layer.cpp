@@ -52,6 +52,7 @@ static Widget::GpuMemoryViewer gpu_memory;
 // clang-format off
 static std::string help_text =
 #include "help.txt"
+#include <retro_atomic.h>
     ;
 // clang-format on
 
@@ -368,7 +369,8 @@ void L::Draw() {
     PushID("DevtoolsLayer");
 
     if (!DebugState.IsGuestThreadsPaused()) {
-        const auto fn = DebugState.flip_frame_count.load();
+        const auto fn =
+            static_cast<std::int32_t>(retro_atomic_load_seq_cst_int(&DebugState.flip_frame_count));
         frame_graph.AddFrame(fn, DebugState.FrameDeltaTime);
     }
 

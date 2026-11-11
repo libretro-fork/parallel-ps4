@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright 2024-2026 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include <retro_atomic.h>
 #include "common/assert.h"
 #include "common/enum_names.h"
 #include "common/polyfill_thread.h"
@@ -84,7 +85,7 @@ Liverpool::~Liverpool() {
 }
 
 void Liverpool::SubmitFinished() {
-    if (num_submits.fetch_sub(1) == 1) {
+    if (static_cast<u32>(retro_atomic_fetch_sub_int(&num_submits, 1)) == 1) {
         retro_eventcount_notify(&idle_ec);
     }
 }
@@ -105,16 +106,16 @@ void Liverpool::ProcessCeQueue() {
 
 void Liverpool::ProcessCommands() {
     // Process incoming commands with high priority
-    while (num_commands.load(std::memory_order_relaxed)) {
+    while (static_cast<u32>(retro_atomic_load_relaxed_int(&num_commands))) {
         mpsc_stack_node_t* node = mpsc_stack_reverse(mpsc_stack_drain(&commands));
         while (node) {
             auto* command = reinterpret_cast<Command*>(node);
             node = node->next;
             command->func();
-            num_commands.fetch_sub(1, std::memory_order_relaxed);
-            if (std::atomic<bool>* done = command->done) {
+            retro_atomic_fetch_sub_int(&num_commands, 1);
+            if (retro_atomic_int_t* done = command->done) {
                 // The sender's: it may be gone as soon as done is set
-                done->store(true, std::memory_order_release);
+                retro_atomic_store_release_int(done, 1);
                 retro_eventcount_notify(&command_done_ec);
             } else {
                 delete command;
@@ -133,8 +134,9 @@ void Liverpool::Process(std::stop_token stoken) {
     // A stop wakes the thread wherever it parks on work_ec
     const std::stop_callback wake_on_stop{stoken, [this] { retro_eventcount_notify(&work_ec); }};
     const auto has_work = [&] {
-        return num_commands.load() || num_submits.load() ||
-               submit_done.load(std::memory_order_acquire) || stoken.stop_requested();
+        return static_cast<u32>(retro_atomic_load_seq_cst_int(&num_commands)) ||
+               static_cast<u32>(retro_atomic_load_seq_cst_int(&num_submits)) ||
+               (retro_atomic_load_acquire_int(&submit_done) != 0) || stoken.stop_requested();
     };
 
     while (!stoken.stop_requested()) {
@@ -152,11 +154,14 @@ void Liverpool::Process(std::stop_token stoken) {
 
         curr_qid = -1;
 
-        while ((num_submits || num_commands) && !stoken.stop_requested()) {
+        while ((static_cast<u32>(retro_atomic_load_seq_cst_int(&num_submits)) ||
+                static_cast<u32>(retro_atomic_load_seq_cst_int(&num_commands))) &&
+               !stoken.stop_requested()) {
             ProcessCommands();
             ProcessCeQueue();
 
-            curr_qid = (curr_qid + 1) % num_mapped_queues.load(std::memory_order_acquire);
+            curr_qid = (curr_qid + 1) %
+                       static_cast<u32>(retro_atomic_load_acquire_int(&num_mapped_queues));
 
             auto& queue = mapped_queues[curr_qid];
 
@@ -174,7 +179,7 @@ void Liverpool::Process(std::stop_token stoken) {
             }
         }
 
-        if (submit_done.exchange(false, std::memory_order_acquire)) {
+        if (retro_atomic_exchange_int(&submit_done, 0) != 0) {
             if (rasterizer) {
                 rasterizer->OnSubmit();
                 rasterizer->Flush();
@@ -832,7 +837,8 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb) {
                         // Everything submitted so far is in the GFX queue
                         TaskQueue& gfx_submits = mapped_queues[GfxQueueId].submits;
                         gfx_submits.Take();
-                        return num_submits.load() == gfx_submits.size;
+                        return static_cast<u32>(retro_atomic_load_seq_cst_int(&num_submits)) ==
+                               gfx_submits.size;
                     }()) {
                     vo_port->WaitVoLabel([&] { return wait_reg_mem->Test(regs.reg_array); });
                     break;
@@ -1179,32 +1185,46 @@ Liverpool::Task Liverpool::ProcessCompute(std::span<const u32> acb, u32 vqid) {
 
 Liverpool::CmdBuffer Liverpool::CopyCmdBuffers(std::span<const u32> dcb, std::span<const u32> ccb) {
     auto& queue = mapped_queues[GfxQueueId];
-    ASSERT_MSG(queue.dcb_buffer.capacity() >= queue.dcb_buffer_offset + dcb.size(),
+    ASSERT_MSG(queue.dcb_buffer.capacity() >=
+                   static_cast<u32>(retro_atomic_load_seq_cst_int(&queue.dcb_buffer_offset)) +
+                       dcb.size(),
                "dcb copy buffer out of reserved space");
-    ASSERT_MSG(queue.ccb_buffer.capacity() >= queue.ccb_buffer_offset + ccb.size(),
+    ASSERT_MSG(queue.ccb_buffer.capacity() >=
+                   static_cast<u32>(retro_atomic_load_seq_cst_int(&queue.ccb_buffer_offset)) +
+                       ccb.size(),
                "ccb copy buffer out of reserved space");
 
-    queue.dcb_buffer.resize(
-        std::max(queue.dcb_buffer.size(), queue.dcb_buffer_offset + dcb.size()));
-    queue.ccb_buffer.resize(
-        std::max(queue.ccb_buffer.size(), queue.ccb_buffer_offset + ccb.size()));
+    queue.dcb_buffer.resize(std::max(
+        queue.dcb_buffer.size(),
+        static_cast<u32>(retro_atomic_load_seq_cst_int(&queue.dcb_buffer_offset)) + dcb.size()));
+    queue.ccb_buffer.resize(std::max(
+        queue.ccb_buffer.size(),
+        static_cast<u32>(retro_atomic_load_seq_cst_int(&queue.ccb_buffer_offset)) + ccb.size()));
 
-    const u32 prev_dcb_buffer_offset = queue.dcb_buffer_offset;
-    const u32 prev_ccb_buffer_offset = queue.ccb_buffer_offset;
+    const u32 prev_dcb_buffer_offset =
+        static_cast<u32>(retro_atomic_load_seq_cst_int(&queue.dcb_buffer_offset));
+    const u32 prev_ccb_buffer_offset =
+        static_cast<u32>(retro_atomic_load_seq_cst_int(&queue.ccb_buffer_offset));
     if (!dcb.empty()) {
-        std::memcpy(queue.dcb_buffer.data() + queue.dcb_buffer_offset, dcb.data(),
-                    dcb.size_bytes());
-        queue.dcb_buffer_offset += dcb.size();
-        dcb = std::span<const u32>{queue.dcb_buffer.begin() + prev_dcb_buffer_offset,
-                                   queue.dcb_buffer.begin() + queue.dcb_buffer_offset};
+        std::memcpy(queue.dcb_buffer.data() +
+                        static_cast<u32>(retro_atomic_load_seq_cst_int(&queue.dcb_buffer_offset)),
+                    dcb.data(), dcb.size_bytes());
+        retro_atomic_fetch_add_int(&queue.dcb_buffer_offset, dcb.size());
+        dcb = std::span<const u32>{
+            queue.dcb_buffer.begin() + prev_dcb_buffer_offset,
+            queue.dcb_buffer.begin() +
+                static_cast<u32>(retro_atomic_load_seq_cst_int(&queue.dcb_buffer_offset))};
     }
 
     if (!ccb.empty()) {
-        std::memcpy(queue.ccb_buffer.data() + queue.ccb_buffer_offset, ccb.data(),
-                    ccb.size_bytes());
-        queue.ccb_buffer_offset += ccb.size();
-        ccb = std::span<const u32>{queue.ccb_buffer.begin() + prev_ccb_buffer_offset,
-                                   queue.ccb_buffer.begin() + queue.ccb_buffer_offset};
+        std::memcpy(queue.ccb_buffer.data() +
+                        static_cast<u32>(retro_atomic_load_seq_cst_int(&queue.ccb_buffer_offset)),
+                    ccb.data(), ccb.size_bytes());
+        retro_atomic_fetch_add_int(&queue.ccb_buffer_offset, ccb.size());
+        ccb = std::span<const u32>{
+            queue.ccb_buffer.begin() + prev_ccb_buffer_offset,
+            queue.ccb_buffer.begin() +
+                static_cast<u32>(retro_atomic_load_seq_cst_int(&queue.ccb_buffer_offset))};
     }
 
     return std::make_pair(dcb, ccb);
@@ -1220,10 +1240,10 @@ void Liverpool::SubmitGfx(std::span<const u32> dcb, std::span<const u32> ccb) {
     auto task = ProcessGraphics(dcb);
     // Counted before it is visible, so the GPU thread never takes num_submits below zero
     if (!ccb.empty()) {
-        num_submits.fetch_add(1);
+        retro_atomic_fetch_add_int(&num_submits, 1);
         ce_submits.Push(ProcessCeUpdate(ccb).handle);
     }
-    num_submits.fetch_add(1);
+    retro_atomic_fetch_add_int(&num_submits, 1);
     queue.submits.Push(task.handle);
     retro_eventcount_notify(&work_ec);
 }
@@ -1234,11 +1254,13 @@ void Liverpool::SubmitAsc(u32 gnm_vqid, std::span<const u32> acb) {
 
     const auto vqid = gnm_vqid - 1;
     const auto& task = ProcessCompute(acb, vqid);
-    u32 mapped = num_mapped_queues.load(std::memory_order_relaxed);
-    while (mapped < gnm_vqid + 1 && !num_mapped_queues.compare_exchange_weak(
-                                        mapped, gnm_vqid + 1, std::memory_order_release)) {
+    u32 mapped = static_cast<u32>(retro_atomic_load_relaxed_int(&num_mapped_queues));
+    while (mapped < gnm_vqid + 1 &&
+           !(retro_atomic_cas_int(&num_mapped_queues, mapped, gnm_vqid + 1) ||
+             ((mapped = static_cast<u32>(retro_atomic_load_acquire_int(&num_mapped_queues))),
+              false))) {
     }
-    num_submits.fetch_add(1);
+    retro_atomic_fetch_add_int(&num_submits, 1);
     queue.submits.Push(task.handle);
     retro_eventcount_notify(&work_ec);
 }

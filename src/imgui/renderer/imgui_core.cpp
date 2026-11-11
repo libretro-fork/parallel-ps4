@@ -3,13 +3,13 @@
 
 #include <algorithm>
 #include <array>
-#include <atomic>
 #include <bit>
 #include <cfloat>
 #include <chrono>
 #include <cstdint>
 #include <imgui.h>
 
+#include <retro_atomic.h>
 #include "common/combiner.h"
 #include "common/path_util.h"
 #include "common/quick_exit.h"
@@ -49,21 +49,24 @@ static std::chrono::steady_clock::time_point last_game_frame_time{};
 static std::array<float, 60> game_frame_seconds{};
 static float game_frame_seconds_sum = 0.0f;
 static std::size_t game_frame_index = 0;
-static std::atomic<std::uint32_t> force_gamepad_input_capture_count{0};
+static retro_atomic_int_t force_gamepad_input_capture_count{0};
 
 namespace ImGui {
 
 namespace Core {
 
 void AcquireGamepadInputCapture() {
-    force_gamepad_input_capture_count.fetch_add(1, std::memory_order_relaxed);
+    retro_atomic_fetch_add_int(&force_gamepad_input_capture_count, 1);
 }
 
 void ReleaseGamepadInputCapture() {
-    std::uint32_t expected = force_gamepad_input_capture_count.load(std::memory_order_relaxed);
+    std::uint32_t expected = static_cast<std::uint32_t>(
+        retro_atomic_load_relaxed_int(&force_gamepad_input_capture_count));
     while (expected != 0) {
-        if (force_gamepad_input_capture_count.compare_exchange_weak(
-                expected, expected - 1, std::memory_order_relaxed, std::memory_order_relaxed)) {
+        if ((retro_atomic_cas_int(&force_gamepad_input_capture_count, expected, expected - 1) ||
+             ((expected = static_cast<std::uint32_t>(
+                   retro_atomic_load_acquire_int(&force_gamepad_input_capture_count))),
+              false))) {
             return;
         }
     }
@@ -71,7 +74,8 @@ void ReleaseGamepadInputCapture() {
 }
 
 bool IsGamepadInputCaptured() {
-    return force_gamepad_input_capture_count.load(std::memory_order_relaxed) > 0;
+    return static_cast<std::uint32_t>(
+               retro_atomic_load_relaxed_int(&force_gamepad_input_capture_count)) > 0;
 }
 
 void Initialize(const ::Vulkan::Instance& instance, const Frontend::Window& window,

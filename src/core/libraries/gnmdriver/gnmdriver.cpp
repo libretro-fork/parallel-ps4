@@ -4,6 +4,7 @@
 #include "gnm_error.h"
 #include "gnmdriver.h"
 
+#include <retro_atomic.h>
 #include "common/assert.h"
 #include "common/combiner.h"
 #include "common/elf_info.h"
@@ -65,7 +66,7 @@ static constexpr bool UseNeoCompatSequences = false;
 
 // In case if `submitDone` is issued we need to block submissions until GPU idle. Set by the
 // submitter, cleared by it or by the GPU idle interrupt; WaitGpuIdle parks on idle_ec.
-static std::atomic<u32> submission_lock{};
+static retro_atomic_int_t submission_lock{};
 static retro_eventcount_t idle_ec{};
 // The submissions run one at a time, in order, and so does all the state below
 static Common::Combiner submit_combiner;
@@ -80,7 +81,7 @@ static VAddr tessellation_factors_ring_addr = -1;
 static constexpr u32 tessellation_offchip_buffer_size = 0x800000u;
 
 static void ReleaseSubmissionLock() {
-    submission_lock.store(0, std::memory_order_seq_cst);
+    (void)retro_atomic_exchange_int(&submission_lock, 0);
     retro_eventcount_notify(&idle_ec);
 }
 
@@ -100,7 +101,7 @@ static void ResetSubmissionLock(Platform::InterruptId irq) {
 /// taken first and the GPU looked at after, and the interrupt looks at the GPU before it
 /// releases, so whichever sees the GPU idle last releases it: none is left held.
 static void TakeSubmissionLock() {
-    submission_lock.store(1, std::memory_order_seq_cst);
+    (void)retro_atomic_exchange_int(&submission_lock, 1);
     if (liverpool->IsGpuIdle()) {
         ReleaseSubmissionLock();
     }
@@ -109,7 +110,7 @@ static void TakeSubmissionLock() {
 static void WaitGpuIdle() {
     for (;;) {
         const int key = retro_eventcount_prepare_wait(&idle_ec);
-        if (submission_lock.load(std::memory_order_seq_cst) == 0) {
+        if (static_cast<u32>(retro_atomic_load_seq_cst_int(&submission_lock)) == 0) {
             retro_eventcount_cancel_wait(&idle_ec);
             return;
         }
@@ -189,7 +190,7 @@ s32 PS4_SYSV_ABI sceGnmAddEqEvent(OrbisKernelEqueue eq, u64 id, void* udata) {
 
 int PS4_SYSV_ABI sceGnmAreSubmitsAllowed() {
     LOG_TRACE(Lib_GnmDriver, "called");
-    return submission_lock == 0;
+    return static_cast<u32>(retro_atomic_load_seq_cst_int(&submission_lock)) == 0;
 }
 
 int PS4_SYSV_ABI sceGnmBeginWorkload(u32 workload_stream, u64* workload) {

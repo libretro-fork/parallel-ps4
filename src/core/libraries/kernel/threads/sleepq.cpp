@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include <array>
+#include <retro_atomic.h>
 #include "common/event_mutex.h"
 #include "core/libraries/kernel/threads/pthread.h"
 #include "core/libraries/kernel/threads/sleepq.h"
@@ -25,7 +26,7 @@ static std::array<SleepQueueChain, HASHSIZE> sc_table{};
 
 void SleepqLock(void* wchan) {
     if (g_curthread != nullptr) {
-        g_curthread->locklevel.fetch_add(1, std::memory_order_acq_rel);
+        retro_atomic_fetch_add_int(&g_curthread->locklevel, 1);
     }
     SleepQueueChain* sc = SC_LOOKUP(wchan);
     sc->sc_lock.lock();
@@ -35,7 +36,7 @@ void SleepqUnlock(void* wchan) {
     SleepQueueChain* sc = SC_LOOKUP(wchan);
     sc->sc_lock.unlock();
     if (g_curthread != nullptr) {
-        const int previous = g_curthread->locklevel.fetch_sub(1, std::memory_order_acq_rel);
+        const int previous = retro_atomic_fetch_sub_int(&g_curthread->locklevel, 1);
         ASSERT(previous > 0);
         if (previous == 1) {
             PthreadCancelInterrupt();

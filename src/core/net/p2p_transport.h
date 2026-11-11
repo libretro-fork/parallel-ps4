@@ -5,7 +5,6 @@
 
 #pragma once
 
-#include <atomic>
 #include <deque>
 #include <functional>
 #include <map>
@@ -14,6 +13,7 @@
 #include <thread>
 #include "common/combiner.h"
 
+#include <retro_atomic.h>
 #include "core/net/p2p_tcp.h"
 
 namespace Core::Net::P2P {
@@ -248,7 +248,7 @@ private:
     u64 loss_rng_ = 0x9e3779b97f4a7c15ull;
 
     std::thread thread_;
-    std::atomic<bool> stop_{false};
+    retro_atomic_int_t stop_{0};
     Host::WakeHandle kick_;
     Clock::time_point sleeping_until_ = Clock::time_point::min();
     std::vector<u8> receive_buffer_;

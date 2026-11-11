@@ -26,8 +26,8 @@ public:
     EventMutex& operator=(const EventMutex&) = delete;
 
     bool try_lock() {
-        return !held.load(std::memory_order_relaxed) &&
-               !held.exchange(true, std::memory_order_acquire);
+        return retro_atomic_load_relaxed_int(&held) == 0 &&
+               retro_atomic_exchange_int(&held, 1) == 0;
     }
 
     void lock() {
@@ -42,7 +42,7 @@ public:
     }
 
     void unlock() {
-        held.store(false, std::memory_order_release);
+        retro_atomic_store_release_int(&held, 0);
         retro_eventcount_notify(&released);
     }
 
@@ -84,7 +84,7 @@ public:
     }
 
 private:
-    std::atomic<bool> held{false};
+    retro_atomic_int_t held{0};
     retro_eventcount_t released{};
 };
 
@@ -193,6 +193,7 @@ private:
 } // namespace Common
 
 #include <thread>
+#include <retro_atomic.h>
 
 namespace Common {
 
@@ -200,33 +201,33 @@ namespace Common {
 class RecursiveEventMutex {
 public:
     bool try_lock() {
-        const auto self = std::this_thread::get_id();
-        if (owner.load(std::memory_order_relaxed) == self) {
+        void* const self = ThisThread();
+        if (retro_atomic_load_relaxed_ptr(&owner) == self) {
             ++depth;
             return true;
         }
         if (!mutex.try_lock()) {
             return false;
         }
-        owner.store(self, std::memory_order_relaxed);
+        retro_atomic_store_relaxed_ptr(&owner, self);
         depth = 1;
         return true;
     }
 
     void lock() {
-        const auto self = std::this_thread::get_id();
-        if (owner.load(std::memory_order_relaxed) == self) {
+        void* const self = ThisThread();
+        if (retro_atomic_load_relaxed_ptr(&owner) == self) {
             ++depth;
             return;
         }
         mutex.lock();
-        owner.store(self, std::memory_order_relaxed);
+        retro_atomic_store_relaxed_ptr(&owner, self);
         depth = 1;
     }
 
     void unlock() {
         if (--depth == 0) {
-            owner.store(std::thread::id{}, std::memory_order_relaxed);
+            retro_atomic_store_relaxed_ptr(&owner, nullptr);
             mutex.unlock();
         }
     }
@@ -245,7 +246,13 @@ public:
 
 private:
     EventMutex mutex;
-    std::atomic<std::thread::id> owner{};
+    /// One address per thread, which no other thread has while it lives
+    static void* ThisThread() {
+        static thread_local char tag;
+        return &tag;
+    }
+
+    retro_atomic_ptr_t owner{};
     unsigned depth = 0; // the owner's alone
 };
 

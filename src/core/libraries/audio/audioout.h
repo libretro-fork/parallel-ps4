@@ -4,11 +4,11 @@
 #pragma once
 
 #include <array>
-#include <atomic>
 #include <memory>
 
 #include <rthreads/retro_eventcount.h>
 
+#include <retro_atomic.h>
 #include "common/bit_field.h"
 #include "common/combiner.h"
 #include "core/libraries/kernel/threads.h"
@@ -128,8 +128,8 @@ struct PortOut {
     /// drained_ec, where the game waits. The game's calls on a port run one at a time in
     /// writers; volume and mix level changes in control.
     void* output_buffer = nullptr;
-    std::atomic<bool> output_ready{false};
-    std::atomic<bool> closing{false};
+    retro_atomic_int_t output_ready{0};
+    retro_atomic_int_t closing{0};
     retro_eventcount_t drained_ec{};
     Common::Combiner writers;
     Common::Combiner control;
@@ -142,11 +142,11 @@ struct PortOut {
     bool WaitDrained() {
         for (;;) {
             const int key = retro_eventcount_prepare_wait(&drained_ec);
-            if (closing.load(std::memory_order_acquire)) {
+            if (retro_atomic_load_acquire_int(&closing) != 0) {
                 retro_eventcount_cancel_wait(&drained_ec);
                 return false;
             }
-            if (!output_ready.load(std::memory_order_acquire)) {
+            if (retro_atomic_load_acquire_int(&output_ready) == 0) {
                 retro_eventcount_cancel_wait(&drained_ec);
                 return true;
             }
@@ -158,7 +158,7 @@ struct PortOut {
     AudioFormatInfo format_info;
     u32 sample_rate = 48000;
     u32 buffer_frames = 1024;
-    std::atomic<u64> last_output_time{0};
+    retro_atomic_64_t last_output_time{0};
     std::array<s32, 8> volume;
     s32 userId = 0;
     s32 mixLevelPadSpk = ORBIS_AUDIO_OUT_MIXLEVEL_PADSPK_DEFAULT;

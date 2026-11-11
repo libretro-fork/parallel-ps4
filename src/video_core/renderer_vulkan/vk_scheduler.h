@@ -3,10 +3,10 @@
 
 #pragma once
 
-#include <atomic>
 #include <thread>
 
 #include <queues/mpsc_stack.h>
+#include <retro_atomic.h>
 #include <rthreads/retro_eventcount.h>
 
 #include "common/combiner.h"
@@ -519,7 +519,12 @@ private:
     /// again runs it there and then, as the recursive mutex allowed.
     PendingOps pending_ops;
     Common::Combiner pending_combiner;
-    std::atomic<std::thread::id> pending_runner{};
+    /// The thread running the pending operations, while it does: its ThisThread()
+    retro_atomic_ptr_t pending_runner{};
+    static void* ThisThread() {
+        static thread_local char tag;
+        return &tag;
+    }
     PendingOps priority_pending_ops;
     retro_eventcount_t priority_pending_ops_ec{};
     std::jthread priority_pending_ops_thread;

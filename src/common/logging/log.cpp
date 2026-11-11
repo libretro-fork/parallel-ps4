@@ -7,7 +7,6 @@
 // the line is critical; otherwise it is dropped and counted. Flush() waits for the writer.
 
 #include <algorithm>
-#include <atomic>
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
@@ -25,6 +24,7 @@
 #include <rthreads/retro_eventcount.h>
 #include <streams/file_stream.h>
 
+#include <retro_atomic.h>
 #include "common/combiner.h"
 #include "common/logging/log.h"
 #include "common/path_util.h"
@@ -46,7 +46,7 @@ constexpr std::size_t MAX_RECORD = 4096;
 enum class Kind : u8 { Line, Session, Flush };
 
 struct Cell {
-    std::atomic<u64> seq;
+    retro_atomic_64_t seq;
     s64 time_ms;
     u32 length; // of the whole record, in its first cell
     Kind kind;
@@ -59,23 +59,23 @@ constexpr std::array<std::string_view, 7> LEVEL_NAMES{"Trace", "Debug",    "Info
                                                       "Error", "Critical", "Off"};
 
 Cell g_ring[NUM_CELLS];
-alignas(64) std::atomic<u64> g_tail{0};
+alignas(64) retro_atomic_64_t g_tail{0};
 alignas(64) u64 g_head = 0; // the writer's
-std::atomic<u64> g_dropped{0};
-std::atomic<u64> g_flushed{0};
-std::atomic<bool> g_running{false};
-std::atomic<bool> g_stop{false};
+retro_atomic_64_t g_dropped{0};
+retro_atomic_64_t g_flushed{0};
+retro_atomic_int_t g_running{0};
+retro_atomic_int_t g_stop{0};
 retro_eventcount_t g_writer_ec{};
 retro_eventcount_t g_flush_ec{};
 std::thread g_writer;
 Common::Combiner g_control; // Setup/Shutdown only
 
 // Settings the writer reads.
-std::atomic<bool> g_sync{true};
-std::atomic<bool> g_skip_duplicate{true};
-std::atomic<u32> g_max_skip_ms{5000};
-std::atomic<u64> g_size_limit{0};
-std::atomic<Level> g_flush_level{Level::Off};
+retro_atomic_int_t g_sync{1};
+retro_atomic_int_t g_skip_duplicate{1};
+retro_atomic_int_t g_max_skip_ms{5000};
+retro_atomic_64_t g_size_limit{0};
+retro_atomic_int_t g_flush_level{static_cast<int>(Level::Off)};
 #ifdef _WIN32
 bool g_debugger_console = false;
 #endif
@@ -90,7 +90,7 @@ void InitRing() {
     static std::once_flag once;
     std::call_once(once, [] {
         for (std::size_t i = 0; i < NUM_CELLS; ++i) {
-            g_ring[i].seq.store(i, std::memory_order_relaxed);
+            retro_atomic_store_relaxed_64(&g_ring[i].seq, i);
         }
         retro_eventcount_init(&g_writer_ec);
         retro_eventcount_init(&g_flush_ec);
@@ -101,20 +101,22 @@ void InitRing() {
 // when the ring is full.
 u64 TryPush(Kind kind, Level level, const char* data, std::size_t length) {
     const std::size_t cells = std::max<std::size_t>(1, (length + CELL_BYTES - 1) / CELL_BYTES);
-    u64 pos = g_tail.load(std::memory_order_relaxed);
+    u64 pos = static_cast<u64>(retro_atomic_load_relaxed_64(&g_tail));
     for (;;) {
         // The writer frees cells in order, so if the last one is free, all of them are.
         const u64 last = pos + cells - 1;
-        const u64 seq = g_ring[last % NUM_CELLS].seq.load(std::memory_order_acquire);
+        const u64 seq =
+            static_cast<u64>(retro_atomic_load_acquire_64(&g_ring[last % NUM_CELLS].seq));
         const s64 diff = static_cast<s64>(seq - last);
         if (diff == 0) {
-            if (g_tail.compare_exchange_weak(pos, pos + cells, std::memory_order_relaxed)) {
+            if ((retro_atomic_cas_64(&g_tail, pos, pos + cells) ||
+                 ((pos = static_cast<u64>(retro_atomic_load_acquire_64(&g_tail))), false))) {
                 break;
             }
         } else if (diff < 0) {
             return 0;
         } else {
-            pos = g_tail.load(std::memory_order_relaxed);
+            pos = static_cast<u64>(retro_atomic_load_relaxed_64(&g_tail));
         }
     }
     Cell& first = g_ring[pos % NUM_CELLS];
@@ -127,7 +129,7 @@ u64 TryPush(Kind kind, Level level, const char* data, std::size_t length) {
         Cell& cell = g_ring[(pos + i) % NUM_CELLS];
         const std::size_t offset = i * CELL_BYTES;
         std::memcpy(cell.text, data + offset, std::min(CELL_BYTES, length - offset));
-        cell.seq.store(pos + i + 1, std::memory_order_release);
+        retro_atomic_store_release_64(&cell.seq, pos + i + 1);
     }
     retro_eventcount_notify(&g_writer_ec);
     return pos + cells;
@@ -138,8 +140,8 @@ u64 Push(Kind kind, Level level, const char* data, std::size_t length, bool must
         if (const u64 end = TryPush(kind, level, data, length)) {
             return end;
         }
-        if (!must || g_stop.load(std::memory_order_acquire)) {
-            g_dropped.fetch_add(1, std::memory_order_relaxed);
+        if (!must || (retro_atomic_load_acquire_int(&g_stop) != 0)) {
+            retro_atomic_fetch_add_64(&g_dropped, 1);
             return 0;
         }
         std::this_thread::yield();
@@ -247,13 +249,13 @@ void Emit(Level level, const char* text, std::size_t length) {
             filestream_write(g_w.main, text, length);
             filestream_write(g_w.main, "\n", 1);
         }
-    } else if (g_w.session_size < g_size_limit.load(std::memory_order_relaxed) ||
+    } else if (g_w.session_size < static_cast<u64>(retro_atomic_load_relaxed_64(&g_size_limit)) ||
                level == Level::Critical) {
         filestream_write(g_w.session, text, length);
         filestream_write(g_w.session, "\n", 1);
         g_w.session_size += length + 1;
     }
-    if (level >= g_flush_level.load(std::memory_order_relaxed)) {
+    if (level >= static_cast<Level>(retro_atomic_load_relaxed_int(&g_flush_level))) {
         FlushOutputs();
     }
 }
@@ -270,7 +272,7 @@ void ReportSkipped(Level level) {
 }
 
 void WriteLine(Level level, s64 time_ms, const char* text, std::size_t length) {
-    const u64 dropped = g_dropped.load(std::memory_order_relaxed);
+    const u64 dropped = static_cast<u64>(retro_atomic_load_relaxed_64(&g_dropped));
     if (dropped != g_w.reported_drops) {
         char note[96];
         const int note_length =
@@ -279,9 +281,10 @@ void WriteLine(Level level, s64 time_ms, const char* text, std::size_t length) {
         g_w.reported_drops = dropped;
         Emit(Level::Warning, note, static_cast<std::size_t>(note_length));
     }
-    if (g_skip_duplicate.load(std::memory_order_relaxed)) {
+    if (retro_atomic_load_relaxed_int(&g_skip_duplicate) != 0) {
         if (length == g_w.last_length && std::memcmp(text, g_w.last, length) == 0 &&
-            time_ms - g_w.last_time < g_max_skip_ms.load(std::memory_order_relaxed)) {
+            time_ms - g_w.last_time <
+                static_cast<u32>(retro_atomic_load_relaxed_int(&g_max_skip_ms))) {
             ++g_w.skipped;
             return;
         }
@@ -307,7 +310,7 @@ void OpenSession(const char* payload, std::size_t length) {
 // Takes one ready record, if there is one.
 bool PopRecord() {
     Cell& first = g_ring[g_head % NUM_CELLS];
-    if (first.seq.load(std::memory_order_acquire) != g_head + 1) {
+    if (static_cast<u64>(retro_atomic_load_acquire_64(&first.seq)) != g_head + 1) {
         return false;
     }
     const std::size_t cells = first.cells;
@@ -318,12 +321,12 @@ bool PopRecord() {
     for (std::size_t i = 0; i < cells; ++i) {
         Cell& cell = g_ring[(g_head + i) % NUM_CELLS];
         // The producer that claimed this record is still filling it.
-        while (cell.seq.load(std::memory_order_acquire) != g_head + i + 1) {
+        while (static_cast<u64>(retro_atomic_load_acquire_64(&cell.seq)) != g_head + i + 1) {
             std::this_thread::yield();
         }
         const std::size_t offset = i * CELL_BYTES;
         std::memcpy(g_w.record + offset, cell.text, std::min(CELL_BYTES, length - offset));
-        cell.seq.store(g_head + i + NUM_CELLS, std::memory_order_release);
+        retro_atomic_store_release_64(&cell.seq, g_head + i + NUM_CELLS);
     }
     g_head += cells;
     g_w.record[length] = '\0';
@@ -337,7 +340,7 @@ bool PopRecord() {
     case Kind::Flush:
         ReportSkipped(Level::Info);
         FlushOutputs();
-        g_flushed.store(g_head, std::memory_order_release);
+        retro_atomic_store_release_64(&g_flushed, g_head);
         retro_eventcount_notify(&g_flush_ec);
         break;
     }
@@ -345,7 +348,8 @@ bool PopRecord() {
 }
 
 bool RecordReady() {
-    return g_ring[g_head % NUM_CELLS].seq.load(std::memory_order_acquire) == g_head + 1;
+    return static_cast<u64>(retro_atomic_load_acquire_64(&g_ring[g_head % NUM_CELLS].seq)) ==
+           g_head + 1;
 }
 
 void WriterLoop() {
@@ -355,16 +359,16 @@ void WriterLoop() {
             continue;
         }
         FlushOutputs();
-        if (g_stop.load(std::memory_order_acquire)) {
+        if (retro_atomic_load_acquire_int(&g_stop) != 0) {
             // Lines claimed before the stop are being filled; take them too.
-            if (g_head == g_tail.load(std::memory_order_acquire)) {
+            if (g_head == static_cast<u64>(retro_atomic_load_acquire_64(&g_tail))) {
                 break;
             }
             std::this_thread::yield();
             continue;
         }
         const int key = retro_eventcount_prepare_wait(&g_writer_ec);
-        if (RecordReady() || g_stop.load(std::memory_order_acquire)) {
+        if (RecordReady() || (retro_atomic_load_acquire_int(&g_stop) != 0)) {
             retro_eventcount_cancel_wait(&g_writer_ec);
             continue;
         }
@@ -374,7 +378,7 @@ void WriterLoop() {
     FlushOutputs();
     CloseFile(g_w.session);
     CloseFile(g_w.main);
-    g_flushed.store(g_head, std::memory_order_release);
+    retro_atomic_store_release_64(&g_flushed, g_head);
     retro_eventcount_notify(&g_flush_ec);
 }
 
@@ -420,7 +424,7 @@ void PushSession(const std::string& path, bool truncate) {
 
 void VLog(Class log_class, Level level, const char* file, int line, const char* func,
           fmt::string_view format, fmt::format_args args) {
-    if (!g_running.load(std::memory_order_acquire)) {
+    if (retro_atomic_load_acquire_int(&g_running) == 0) {
         return;
     }
     char thread[64];
@@ -437,7 +441,7 @@ void VLog(Class log_class, Level level, const char* file, int line, const char* 
     }
     // Sync logging keeps every line, waiting for room; otherwise only critical lines wait.
     Push(Kind::Line, level, text, length,
-         level == Level::Critical || g_sync.load(std::memory_order_relaxed));
+         level == Level::Critical || (retro_atomic_load_relaxed_int(&g_sync) != 0));
 }
 
 void Setup(std::string_view shadps4_filename) {
@@ -449,21 +453,21 @@ void Setup(std::string_view shadps4_filename) {
 
     g_control.Run([&] {
         InitRing();
-        if (g_running.load(std::memory_order_acquire)) {
+        if (retro_atomic_load_acquire_int(&g_running) != 0) {
             return;
         }
 #ifdef _WIN32
         g_debugger_console = std::string_view(emu_settings_get_log_type()) != "wincolor";
 #endif
-        g_size_limit.store(emu_settings_get_log_size_limit(), std::memory_order_relaxed);
+        retro_atomic_store_relaxed_64(&g_size_limit, emu_settings_get_log_size_limit());
         UpdateSinks();
 
         // The writer starts with nothing queued, so it can own the files from here on.
         g_w.main = OpenFile(
             (GetUserPath(Common::FS::PathType::LogDir) / shadps4_filename).string().c_str(), false);
-        g_stop.store(false, std::memory_order_relaxed);
+        retro_atomic_store_relaxed_int(&g_stop, 0);
         g_writer = std::thread(WriterLoop);
-        g_running.store(true, std::memory_order_release);
+        retro_atomic_store_release_int(&g_running, 1);
     });
 }
 
@@ -471,8 +475,8 @@ void Switch(std::string_view game_filename, bool append_log) {
     UpdateSinks();
     UpdateLogLevels(emu_settings_get_log_filter());
     UpdateLogFlushLevel(emu_settings_get_log_flush_level());
-    g_size_limit.store(emu_settings_get_log_size_limit(), std::memory_order_relaxed);
-    if (!g_running.load(std::memory_order_acquire)) {
+    retro_atomic_store_relaxed_64(&g_size_limit, emu_settings_get_log_size_limit());
+    if (retro_atomic_load_acquire_int(&g_running) == 0) {
         return;
     }
     PushSession((GetUserPath(Common::FS::PathType::LogDir) / game_filename).string(),
@@ -481,24 +485,24 @@ void Switch(std::string_view game_filename, bool append_log) {
 
 void Shutdown() {
     g_control.Run([&] {
-        if (!g_running.exchange(false, std::memory_order_acq_rel)) {
+        if (retro_atomic_exchange_int(&g_running, 0) == 0) {
             return;
         }
-        g_stop.store(true, std::memory_order_release);
+        retro_atomic_store_release_int(&g_stop, 1);
         retro_eventcount_notify(&g_writer_ec);
         g_writer.join();
     });
 }
 
 void Flush() {
-    if (!g_running.load(std::memory_order_acquire)) {
+    if (retro_atomic_load_acquire_int(&g_running) == 0) {
         return;
     }
     const u64 end = Push(Kind::Flush, Level::Info, "", 0, true);
     for (;;) {
         const int key = retro_eventcount_prepare_wait(&g_flush_ec);
-        if (g_flushed.load(std::memory_order_acquire) >= end ||
-            !g_running.load(std::memory_order_acquire)) {
+        if (static_cast<u64>(retro_atomic_load_acquire_64(&g_flushed)) >= end ||
+            retro_atomic_load_acquire_int(&g_running) == 0) {
             retro_eventcount_cancel_wait(&g_flush_ec);
             return;
         }
@@ -507,9 +511,9 @@ void Flush() {
 }
 
 void UpdateSinks() {
-    g_sync.store(emu_settings_get_log_sync(), std::memory_order_relaxed);
-    g_skip_duplicate.store(emu_settings_get_log_skip_duplicate(), std::memory_order_relaxed);
-    g_max_skip_ms.store(emu_settings_get_log_max_skip_duration(), std::memory_order_relaxed);
+    retro_atomic_store_relaxed_int(&g_sync, emu_settings_get_log_sync());
+    retro_atomic_store_relaxed_int(&g_skip_duplicate, emu_settings_get_log_skip_duplicate());
+    retro_atomic_store_relaxed_int(&g_max_skip_ms, emu_settings_get_log_max_skip_duration());
 }
 
 void UpdateLogLevels(std::string_view log_filter) {
@@ -551,7 +555,7 @@ void UpdateLogLevels(std::string_view log_filter) {
 
 void UpdateLogFlushLevel(std::string_view log_flush_level) {
     if (!log_flush_level.empty()) {
-        g_flush_level.store(LevelFromString(log_flush_level), std::memory_order_relaxed);
+        retro_atomic_store_relaxed_int(&g_flush_level, LevelFromString(log_flush_level));
     }
 }
 

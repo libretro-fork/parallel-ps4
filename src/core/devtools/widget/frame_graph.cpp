@@ -3,6 +3,7 @@
 
 #include "frame_graph.h"
 
+#include <retro_atomic.h>
 #include "common/singleton.h"
 #include "core/debug_state.h"
 #include "core/emulator_settings.h"
@@ -94,8 +95,9 @@ void FrameGraph::Draw() {
 
         Text("Frame time: %.3f ms (%.1f FPS)", deltaTime, frameRate);
         Text("Presenter time: %.3f ms (%.1f FPS)", io.DeltaTime * 1000.0f, 1.0f / io.DeltaTime);
-        Text("Flip frame: %d Gnm submit frame: %d", DebugState.flip_frame_count.load(),
-             DebugState.gnm_frame_count.load());
+        Text("Flip frame: %d Gnm submit frame: %d",
+             static_cast<std::int32_t>(retro_atomic_load_seq_cst_int(&DebugState.flip_frame_count)),
+             static_cast<std::int32_t>(retro_atomic_load_seq_cst_int(&DebugState.gnm_frame_count)));
         Text("Draw calls: %.0f   Dispatches: %.0f", DebugState.GetDrawCallsAvg(),
              DebugState.GetDispatchesAvg());
         Text("Game Res: %dx%d", DebugState.game_resolution.first,

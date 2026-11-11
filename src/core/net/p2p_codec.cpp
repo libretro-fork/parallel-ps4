@@ -3,6 +3,7 @@
 
 #include <cstring>
 
+#include <retro_atomic.h>
 #include "core/net/p2p_codec.h"
 
 namespace Core::Net::P2P {
@@ -110,7 +111,7 @@ Codec::Decoded FramingCodec::Decode(std::span<const u8> packet, const Endpoint& 
     if (flags & FlagBroadcast) {
         // Layout unconfirmed, report a few so we can check
         if (broadcast_observer &&
-            reported_broadcasts.fetch_add(1, std::memory_order_relaxed) < MaxReportedBroadcasts) {
+            retro_atomic_fetch_add_int(&reported_broadcasts, 1) < MaxReportedBroadcasts) {
             broadcast_observer(packet, from);
         }
         if (stream) {

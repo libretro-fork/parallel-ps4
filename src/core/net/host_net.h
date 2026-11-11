@@ -8,12 +8,12 @@
 
 #pragma once
 
-#include <atomic>
 #include <chrono>
 #include <cstddef>
 #include <memory>
 #include <optional>
 #include <span>
+#include <retro_atomic.h>
 
 #include "common/types.h"
 
@@ -240,9 +240,9 @@ private:
     void Changed();
 
     std::unique_ptr<Slot[]> slots_;
-    std::atomic<u32> high_water_{0}; // slots in use lie below
-    std::atomic<u32> waiters_{0};
-    std::atomic<u32> guest_wakes_{0}; // Wake() since DrainWake(); else the signal is a change
+    retro_atomic_int_t high_water_{0}; // slots in use lie below
+    retro_atomic_int_t waiters_{0};
+    retro_atomic_int_t guest_wakes_{0}; // Wake() since DrainWake(); else the signal is a change
 #else
     int handle_ = -1;
 #endif

@@ -21,6 +21,7 @@
 #include <sys/ucontext.h>
 #endif
 #include <unordered_set>
+#include <retro_atomic.h>
 #include "exception.h"
 
 namespace Libraries::Kernel {
@@ -489,7 +490,8 @@ s32 PS4_SYSV_ABI posix_sigpending(Sigset* set) {
     posix_sigemptyset(set);
 
     for (s32 sig = 1; sig <= 128; sig++) {
-        if (g_curthread->pending_signal_counts[sig - 1].load(std::memory_order_acquire) != 0) {
+        if (static_cast<u32>(
+                retro_atomic_load_acquire_int(&g_curthread->pending_signal_counts[sig - 1])) != 0) {
             posix_sigaddset(set, sig);
         }
     }
@@ -502,16 +504,16 @@ s32 PS4_SYSV_ABI posix_sigsuspend(const Sigset* sigmask) {
     auto& thr = g_curthread;
     thr->GetGuestSigmask(old_mask);
 
-    thr->sigsuspend_interrupted.store(false, std::memory_order_release);
-    thr->in_sigsuspend.store(true, std::memory_order_release);
+    retro_atomic_store_release_int(&thr->sigsuspend_interrupted, 0);
+    retro_atomic_store_release_int(&thr->in_sigsuspend, 1);
 
     thr->SetGuestSigmask(*sigmask);
 
-    while (!thr->sigsuspend_interrupted.load(std::memory_order_acquire)) {
+    while (retro_atomic_load_acquire_int(&thr->sigsuspend_interrupted) == 0) {
         thr->signal_sema.acquire();
     }
 
-    thr->in_sigsuspend.store(false, std::memory_order_release);
+    retro_atomic_store_release_int(&thr->in_sigsuspend, 0);
 
     thr->SetGuestSigmask(old_mask);
 
@@ -530,10 +532,10 @@ s32 PS4_SYSV_ABI posix_sigwait(const Sigset* set, s32* sig) {
     }
 
     thread->sigwait_set = *set;
-    thread->in_sigwait.store(true, std::memory_order_release);
+    retro_atomic_store_release_int(&thread->in_sigwait, 1);
 
     auto finish = [&] {
-        thread->in_sigwait.store(false, std::memory_order_release);
+        retro_atomic_store_release_int(&thread->in_sigwait, 0);
         posix_sigemptyset(&thread->sigwait_set);
     };
 

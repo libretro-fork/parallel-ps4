@@ -4,7 +4,6 @@
 #pragma once
 
 #include <algorithm>
-#include <atomic>
 #include <chrono>
 #include <memory>
 #include <mutex>
@@ -24,6 +23,7 @@
 
 #include "core/libraries/videodec/video_utils.h"
 
+#include <retro_atomic.h>
 #include <retro_waitable_spsc.h>
 
 struct RFILE;
@@ -281,9 +281,9 @@ private:
     AvPlayerMemAllocator m_memory_replacement{};
     u32 m_max_num_video_framebuffers{};
 
-    std::atomic_bool m_is_looping = false;
-    std::atomic_bool m_is_paused = false;
-    std::atomic_bool m_is_eof = false;
+    retro_atomic_int_t m_is_looping{0};
+    retro_atomic_int_t m_is_paused{0};
+    retro_atomic_int_t m_is_eof{0};
 
     std::unique_ptr<IDataStreamer> m_up_data_streamer;
 

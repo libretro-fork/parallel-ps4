@@ -3,12 +3,12 @@
 
 #pragma once
 
-#include <atomic>
 #include <mutex>
 #include <shared_mutex>
 #include <unordered_map>
 #include <vector>
 #include <queue>
+#include <retro_atomic.h>
 
 #include "common/combiner.h"
 #include "common/types.h"
@@ -140,17 +140,17 @@ class DebugStateImpl {
 
     Common::Combiner guest_threads_mutex{};
     std::vector<ThreadID> guest_threads{};
-    std::atomic_bool is_guest_threads_paused = false;
+    retro_atomic_int_t is_guest_threads_paused{0};
     u64 pause_time{};
 
-    std::atomic_int32_t flip_frame_count = 0;
-    std::atomic_int32_t gnm_frame_count = 0;
+    retro_atomic_int_t flip_frame_count{0};
+    retro_atomic_int_t gnm_frame_count{0};
     // Counted during the frame, then folded into a running average when the frame flips. The raw
     // per frame count changes too fast to read while playing, so only the average is shown.
-    std::atomic_int32_t draw_call_count = 0;
-    std::atomic<float> draw_call_count_avg = 0.0f;
-    std::atomic_int32_t dispatch_count = 0;
-    std::atomic<float> dispatch_count_avg = 0.0f;
+    retro_atomic_int_t draw_call_count{0};
+    retro_atomic_int_t draw_call_count_avg{0};
+    retro_atomic_int_t dispatch_count{0};
+    retro_atomic_int_t dispatch_count_avg{0};
 
     s32 gnm_frame_dump_request_count = -1;
     std::unordered_map<size_t, FrameDump*> waiting_reg_dumps;
@@ -190,47 +190,53 @@ public:
     void ResumeGuestThreads();
 
     bool IsGuestThreadsPaused() const {
-        return is_guest_threads_paused;
+        return (retro_atomic_load_seq_cst_int(&is_guest_threads_paused) != 0);
     }
 
     void IncFlipFrameNum() {
         // Low weight on the newest frame, so the average settles instead of jumping around.
         static constexpr float smoothing = 0.05f;
-        const auto draws = draw_call_count.exchange(0, std::memory_order_relaxed);
-        const auto draws_avg = draw_call_count_avg.load(std::memory_order_relaxed);
-        draw_call_count_avg.store(draws_avg + (float(draws) - draws_avg) * smoothing,
-                                  std::memory_order_relaxed);
+        const auto draws =
+            static_cast<std::int32_t>(retro_atomic_exchange_int(&draw_call_count, 0));
+        const auto draws_avg =
+            std::bit_cast<float>(retro_atomic_load_relaxed_int(&draw_call_count_avg));
+        retro_atomic_store_relaxed_int(
+            &draw_call_count_avg,
+            std::bit_cast<int>(draws_avg + (float(draws) - draws_avg) * smoothing));
 
-        const auto dispatches = dispatch_count.exchange(0, std::memory_order_relaxed);
-        const auto dispatches_avg = dispatch_count_avg.load(std::memory_order_relaxed);
-        dispatch_count_avg.store(dispatches_avg + (float(dispatches) - dispatches_avg) * smoothing,
-                                 std::memory_order_relaxed);
-        ++flip_frame_count;
+        const auto dispatches =
+            static_cast<std::int32_t>(retro_atomic_exchange_int(&dispatch_count, 0));
+        const auto dispatches_avg =
+            std::bit_cast<float>(retro_atomic_load_relaxed_int(&dispatch_count_avg));
+        retro_atomic_store_relaxed_int(
+            &dispatch_count_avg,
+            std::bit_cast<int>(dispatches_avg + (float(dispatches) - dispatches_avg) * smoothing));
+        retro_atomic_fetch_add_int(&flip_frame_count, 1);
     }
 
     void IncDrawCall() noexcept {
-        draw_call_count.fetch_add(1, std::memory_order_relaxed);
+        retro_atomic_fetch_add_int(&draw_call_count, 1);
     }
 
     void IncDispatch() noexcept {
-        dispatch_count.fetch_add(1, std::memory_order_relaxed);
+        retro_atomic_fetch_add_int(&dispatch_count, 1);
     }
 
     [[nodiscard]] float GetDrawCallsAvg() const noexcept {
-        return draw_call_count_avg.load(std::memory_order_relaxed);
+        return std::bit_cast<float>(retro_atomic_load_relaxed_int(&draw_call_count_avg));
     }
 
     [[nodiscard]] float GetDispatchesAvg() const noexcept {
-        return dispatch_count_avg.load(std::memory_order_relaxed);
+        return std::bit_cast<float>(retro_atomic_load_relaxed_int(&dispatch_count_avg));
     }
 
     void IncGnmFrameNum() {
-        ++gnm_frame_count;
+        retro_atomic_fetch_add_int(&gnm_frame_count, 1);
         --gnm_frame_dump_request_count;
     }
 
     u32 GetFrameNum() const {
-        return flip_frame_count;
+        return static_cast<std::int32_t>(retro_atomic_load_seq_cst_int(&flip_frame_count));
     }
 
     bool DumpingCurrentFrame() const {

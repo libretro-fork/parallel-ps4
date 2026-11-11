@@ -7,6 +7,7 @@
 #include <fmt/format.h>
 #include "common/enum_names.h"
 
+#include <retro_atomic.h>
 #include "common/assert.h"
 #include "common/logging/log.h"
 #include "common/shared_slots.h"
@@ -25,7 +26,7 @@ static Common::SharedSlots<PortOut, ORBIS_AUDIO_OUT_NUM_PORTS> port_table;
 static Common::Combiner port_allocation;
 
 static std::unique_ptr<AudioOutBackend> audio;
-static std::atomic<int> lazy_init{0};
+static retro_atomic_int_t lazy_init{0};
 
 // Port allocation ranges
 constexpr struct PortRange {
@@ -144,7 +145,7 @@ static int AllocatePort(OrbisAudioOutPort type) {
 }
 
 void AdjustVol() {
-    if (lazy_init.load(std::memory_order_relaxed) == 0 && audio == nullptr) {
+    if (retro_atomic_load_relaxed_int(&lazy_init) == 0 && audio == nullptr) {
         return;
     }
 
@@ -181,12 +182,12 @@ static void AudioOutputThread(std::shared_ptr<PortOut> port, const std::stop_tok
             break;
         }
 
-        if (port->output_ready.load(std::memory_order_acquire)) {
+        if (retro_atomic_load_acquire_int(&port->output_ready) != 0) {
             port->impl->Output(port->output_buffer);
             // moved from sceAudioOutOutput TOOD recheck
-            port->last_output_time.store(Kernel::sceKernelGetProcessTime(),
-                                         std::memory_order_relaxed);
-            port->output_ready.store(false, std::memory_order_release);
+            retro_atomic_store_relaxed_64(&port->last_output_time,
+                                          Kernel::sceKernelGetProcessTime());
+            retro_atomic_store_release_int(&port->output_ready, 0);
             retro_eventcount_notify(&port->drained_ec);
         }
 
@@ -197,8 +198,8 @@ static void AudioOutputThread(std::shared_ptr<PortOut> port, const std::stop_tok
         timer.End();
     }
 
-    port->closing.store(true, std::memory_order_release);
-    port->output_ready.store(false, std::memory_order_release);
+    retro_atomic_store_release_int(&port->closing, 1);
+    retro_atomic_store_release_int(&port->output_ready, 0);
     retro_eventcount_notify(&port->drained_ec);
 }
 
@@ -209,7 +210,8 @@ s32 PS4_SYSV_ABI sceAudioOutInit() {
     LOG_TRACE(Lib_AudioOut, "called");
 
     int expected = 0;
-    if (!lazy_init.compare_exchange_strong(expected, 1, std::memory_order_acq_rel)) {
+    if (!(retro_atomic_cas_int(&lazy_init, expected, 1) ||
+          ((expected = retro_atomic_load_acquire_int(&lazy_init)), false))) {
         return ORBIS_AUDIO_OUT_ERROR_ALREADY_INIT;
     }
 
@@ -238,7 +240,7 @@ s32 PS4_SYSV_ABI sceAudioOutOpen(UserService::OrbisUserServiceUserId user_id,
                   static_cast<s64>(param_type.attributes.Value())),
         static_cast<u32>(param_type.attributes.Value()));
 
-    if (lazy_init.load(std::memory_order_relaxed) == 0 || audio == nullptr) {
+    if (retro_atomic_load_relaxed_int(&lazy_init) == 0 || audio == nullptr) {
         LOG_ERROR(Lib_AudioOut, "Audio out not initialized");
         return ORBIS_AUDIO_OUT_ERROR_NOT_INIT;
     }
@@ -366,7 +368,7 @@ s32 PS4_SYSV_ABI sceAudioOutOpen(UserService::OrbisUserServiceUserId user_id,
 s32 PS4_SYSV_ABI sceAudioOutClose(s32 handle) {
     LOG_INFO(Lib_AudioOut, "handle = {:#x}", handle);
 
-    if (lazy_init.load(std::memory_order_relaxed) == 0 || audio == nullptr) {
+    if (retro_atomic_load_relaxed_int(&lazy_init) == 0 || audio == nullptr) {
         LOG_ERROR(Lib_AudioOut, "Audio out not initialized");
         return ORBIS_AUDIO_OUT_ERROR_NOT_INIT;
     }
@@ -398,7 +400,7 @@ s32 PS4_SYSV_ABI sceAudioOutClose(s32 handle) {
     }
 
     // Kick out any guest thread blocked in sceAudioOutOutput before joining.
-    port->closing.store(true, std::memory_order_release);
+    retro_atomic_store_release_int(&port->closing, 1);
     retro_eventcount_notify(&port->drained_ec);
 
     // Stop the output thread.
@@ -415,7 +417,7 @@ s32 PS4_SYSV_ABI sceAudioOutClose(s32 handle) {
 }
 
 s32 PS4_SYSV_ABI sceAudioOutGetLastOutputTime(s32 handle, u64* output_time) {
-    if (lazy_init.load(std::memory_order_relaxed) == 0 || audio == nullptr) {
+    if (retro_atomic_load_relaxed_int(&lazy_init) == 0 || audio == nullptr) {
         LOG_ERROR(Lib_AudioOut, "audio is not init");
         return ORBIS_AUDIO_OUT_ERROR_NOT_INIT;
     }
@@ -438,13 +440,13 @@ s32 PS4_SYSV_ABI sceAudioOutGetLastOutputTime(s32 handle, u64* output_time) {
         return ORBIS_AUDIO_OUT_ERROR_NOT_OPENED;
     }
 
-    *output_time = port->last_output_time.load(std::memory_order_relaxed);
+    *output_time = static_cast<u64>(retro_atomic_load_relaxed_64(&port->last_output_time));
 
     return ORBIS_OK;
 }
 
 s32 PS4_SYSV_ABI sceAudioOutGetPortState(s32 handle, OrbisAudioOutPortState* state) {
-    if (lazy_init.load(std::memory_order_relaxed) == 0 || audio == nullptr) {
+    if (retro_atomic_load_relaxed_int(&lazy_init) == 0 || audio == nullptr) {
         LOG_ERROR(Lib_AudioOut, "audio is not init");
         return ORBIS_AUDIO_OUT_ERROR_NOT_INIT;
     }
@@ -511,7 +513,7 @@ s32 PS4_SYSV_ABI sceAudioOutGetPortState(s32 handle, OrbisAudioOutPortState* sta
 s32 PS4_SYSV_ABI sceAudioOutOutput(s32 handle, void* ptr) {
     LOG_TRACE(Lib_AudioOut, "(STUBBED) called, handle={:#x}, ptr={}", handle, fmt::ptr(ptr));
 
-    if (lazy_init.load(std::memory_order_relaxed) == 0 || audio == nullptr) {
+    if (retro_atomic_load_relaxed_int(&lazy_init) == 0 || audio == nullptr) {
         LOG_ERROR(Lib_AudioOut, "audio is not init");
         return ORBIS_AUDIO_OUT_ERROR_NOT_INIT;
     }
@@ -551,7 +553,7 @@ s32 PS4_SYSV_ABI sceAudioOutOutput(s32 handle, void* ptr) {
             return 0;
         }
         std::memcpy(port->output_buffer, ptr, port->BufferSize());
-        port->output_ready.store(true, std::memory_order_release);
+        retro_atomic_store_release_int(&port->output_ready, 1);
         return port->buffer_frames * port->format_info.num_channels;
     });
 }
@@ -566,7 +568,7 @@ s32 PS4_SYSV_ABI sceAudioOutOutputs(OrbisAudioOutOutputParam* param, u32 num) {
     } else {
         LOG_TRACE(Lib_AudioOut, "(STUBBED) called, param=nullptr, num={}", num);
     }
-    if (lazy_init.load(std::memory_order_relaxed) == 0 || audio == nullptr) {
+    if (retro_atomic_load_relaxed_int(&lazy_init) == 0 || audio == nullptr) {
         LOG_ERROR(Lib_AudioOut, "audio is not init");
         return ORBIS_AUDIO_OUT_ERROR_NOT_INIT;
     }
@@ -654,7 +656,7 @@ s32 PS4_SYSV_ABI sceAudioOutOutputs(OrbisAudioOutOutputParam* param, u32 num) {
                 return false;
             }
             std::memcpy(port->output_buffer, param[i].ptr, port->BufferSize());
-            port->output_ready.store(true, std::memory_order_release);
+            retro_atomic_store_release_int(&port->output_ready, 1);
             return true;
         });
         if (!open) {
@@ -667,7 +669,7 @@ s32 PS4_SYSV_ABI sceAudioOutOutputs(OrbisAudioOutOutputParam* param, u32 num) {
 }
 
 s32 PS4_SYSV_ABI sceAudioOutSetVolume(s32 handle, s32 flag, s32* vol) {
-    if (lazy_init.load(std::memory_order_relaxed) == 0 || audio == nullptr) {
+    if (retro_atomic_load_relaxed_int(&lazy_init) == 0 || audio == nullptr) {
         LOG_ERROR(Lib_AudioOut, "audio is not init");
         return ORBIS_AUDIO_OUT_ERROR_NOT_INIT;
     }
@@ -738,7 +740,7 @@ static void SetPortVolume(PortOut& port_ref, s32 flag, s32 vol_value) {
 
 s32 PS4_SYSV_ABI sceAudioOutSetMixLevelPadSpk(s32 handle, s32 mixLevel) {
     LOG_INFO(Lib_AudioOut, "(STUBBED) called");
-    if (lazy_init.load(std::memory_order_relaxed) == 0 || audio == nullptr) {
+    if (retro_atomic_load_relaxed_int(&lazy_init) == 0 || audio == nullptr) {
         LOG_ERROR(Lib_AudioOut, "audio is not init");
         return ORBIS_AUDIO_OUT_ERROR_NOT_INIT;
     }
@@ -773,7 +775,7 @@ s32 PS4_SYSV_ABI sceAudioOutSetMixLevelPadSpk(s32 handle, s32 mixLevel) {
 }
 
 s32 PS4_SYSV_ABI sceAudioOutGetSystemState(OrbisAudioOutSystemState* state) {
-    if (lazy_init.load(std::memory_order_relaxed) == 0 || audio == nullptr) {
+    if (retro_atomic_load_relaxed_int(&lazy_init) == 0 || audio == nullptr) {
         LOG_ERROR(Lib_AudioOut, "audio is not init");
         return ORBIS_AUDIO_OUT_ERROR_NOT_INIT;
     }

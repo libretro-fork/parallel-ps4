@@ -1,7 +1,6 @@
 // SPDX-FileCopyrightText: Copyright 2024-2026 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
-#include <atomic>
 #include <chrono>
 #include <list>
 #include <thread>
@@ -16,6 +15,7 @@
 #ifdef SHADPS4_ENABLE_FEX_GUEST_CPU
 #include "core/guest_cpu/hle_call_adapter.h"
 #endif
+#include <retro_atomic.h>
 #include "pthread.h"
 
 namespace Libraries::Kernel {
@@ -39,7 +39,7 @@ public:
 
     struct Waiter {
         /// Set, after the flags below, once any of them is; the waiter parks on m_wake_ec
-        std::atomic<bool> woken{false};
+        retro_atomic_int_t woken{0};
 
         u64 bits{};
         WaitMode wait_mode{};
@@ -74,7 +74,7 @@ public:
         // Until every waiter has left
         for (;;) {
             const int key = retro_eventcount_prepare_wait(&m_wake_ec);
-            if (m_waiter_count.load(std::memory_order_acquire) == 0) {
+            if (static_cast<u32>(retro_atomic_load_acquire_int(&m_waiter_count)) == 0) {
                 retro_eventcount_cancel_wait(&m_wake_ec);
                 break;
             }
@@ -104,7 +104,7 @@ public:
     }
 
     void AddWaiter(Waiter& waiter) {
-        m_waiter_count.fetch_add(1, std::memory_order_relaxed);
+        retro_atomic_fetch_add_int(&m_waiter_count, 1);
         if (m_queue_mode == QueueMode::Fifo) {
             m_waiters.push_back(&waiter);
             return;
@@ -119,13 +119,13 @@ public:
 
     void RemoveWaiter(Waiter& waiter) {
         m_waiters.remove(&waiter);
-        if (m_waiter_count.fetch_sub(1, std::memory_order_release) == 1 && m_deleted) {
+        if (static_cast<u32>(retro_atomic_fetch_sub_int(&m_waiter_count, 1)) == 1 && m_deleted) {
             retro_eventcount_notify(&m_wake_ec);
         }
     }
 
     void Wake(Waiter& waiter) {
-        waiter.woken.store(true, std::memory_order_release);
+        retro_atomic_store_release_int(&waiter.woken, 1);
         retro_eventcount_notify(&m_wake_ec);
     }
 
@@ -168,9 +168,9 @@ public:
 
         // Until woken, or out of time
         bool out_of_time = false;
-        while (!waiter.woken.load(std::memory_order_acquire)) {
+        while (retro_atomic_load_acquire_int(&waiter.woken) == 0) {
             const int key = retro_eventcount_prepare_wait(&m_wake_ec);
-            if (waiter.woken.load(std::memory_order_acquire)) {
+            if (retro_atomic_load_acquire_int(&waiter.woken) != 0) {
                 retro_eventcount_cancel_wait(&m_wake_ec);
                 break;
             }
@@ -192,7 +192,7 @@ public:
             RemoveWaiter(waiter);
 
             // Woken meanwhile: that stands
-            if (out_of_time && !waiter.woken.load(std::memory_order_relaxed)) {
+            if (out_of_time && retro_atomic_load_relaxed_int(&waiter.woken) == 0) {
                 if (result)
                     *result = m_bits;
 
@@ -269,7 +269,7 @@ private:
     // The bits and the waiters change one call at a time here; the waiters park on m_wake_ec
     Common::Combiner m_combiner;
     retro_eventcount_t m_wake_ec{};
-    std::atomic<u32> m_waiter_count{0};
+    retro_atomic_int_t m_waiter_count{0};
 
     std::list<Waiter*> m_waiters;
 

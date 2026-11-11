@@ -7,6 +7,7 @@
 #include <thread>
 #include <fmt/format.h>
 
+#include <retro_atomic.h>
 #include "client.h"
 #include "common/elf_info.h"
 #include "common/logging/log.h"
@@ -71,12 +72,12 @@ void ShadNetClient::Start(const std::string& host, u16 port, const std::string& 
     m_npid = npid;
     m_password = password;
     m_token = token;
-    m_terminate = false;
+    (void)retro_atomic_exchange_int(&m_terminate, 0);
     m_thread_connect = std::thread(&ShadNetClient::ConnectThread, this);
 }
 
 void ShadNetClient::Stop() {
-    m_terminate = true;
+    (void)retro_atomic_exchange_int(&m_terminate, 1);
     try {
         m_sem_connected.release();
     } catch (...) {
@@ -97,36 +98,40 @@ void ShadNetClient::Stop() {
 
 ShadNetState ShadNetClient::WaitForConnection() {
     if (auto returned = m_mutex_connected.Run([&]() -> std::optional<ShadNetState> {
-            if (m_connected)
+            if (retro_atomic_load_seq_cst_int(&m_connected) != 0)
                 return std::optional<ShadNetState>{ShadNetState::Ok};
             return std::nullopt;
         })) {
         return *returned;
     }
     m_sem_connected.acquire();
-    return m_connected ? ShadNetState::Ok : m_state.load();
+    return (retro_atomic_load_seq_cst_int(&m_connected) != 0)
+               ? ShadNetState::Ok
+               : static_cast<ShadNetState>(retro_atomic_load_seq_cst_int(&m_state));
 }
 
 ShadNetState ShadNetClient::WaitForAuthenticated() {
     if (auto returned = m_mutex_authenticated.Run([&]() -> std::optional<ShadNetState> {
-            if (m_authenticated)
+            if (retro_atomic_load_seq_cst_int(&m_authenticated) != 0)
                 return std::optional<ShadNetState>{ShadNetState::Ok};
             return std::nullopt;
         })) {
         return *returned;
     }
     m_sem_authenticated.acquire();
-    return m_authenticated ? ShadNetState::Ok : m_state.load();
+    return (retro_atomic_load_seq_cst_int(&m_authenticated) != 0)
+               ? ShadNetState::Ok
+               : static_cast<ShadNetState>(retro_atomic_load_seq_cst_int(&m_state));
 }
 
 bool ShadNetClient::IsConnected() const {
-    return m_connected.load();
+    return (retro_atomic_load_seq_cst_int(&m_connected) != 0);
 }
 bool ShadNetClient::IsAuthenticated() const {
-    return m_authenticated.load();
+    return (retro_atomic_load_seq_cst_int(&m_authenticated) != 0);
 }
 ShadNetState ShadNetClient::GetState() const {
-    return m_state.load();
+    return static_cast<ShadNetState>(retro_atomic_load_seq_cst_int(&m_state));
 }
 const std::string& ShadNetClient::GetAvatarUrl() const {
     return m_avatar_url;
@@ -138,13 +143,13 @@ const std::string& ShadNetClient::GetNpid() const {
     return m_npid;
 }
 u32 ShadNetClient::GetAddrLocal() const {
-    return m_addr_local.load();
+    return static_cast<u32>(retro_atomic_load_seq_cst_int(&m_addr_local));
 }
 u32 ShadNetClient::GetAddrServer() const {
-    return m_addr_server.load();
+    return static_cast<u32>(retro_atomic_load_seq_cst_int(&m_addr_server));
 }
 bool ShadNetClient::IsMatching2Enabled() const {
-    return m_matching2_enabled.load();
+    return (retro_atomic_load_seq_cst_int(&m_matching2_enabled) != 0);
 }
 
 u32 ShadNetClient::GetNumFriends() const {
@@ -169,19 +174,24 @@ void ShadNetClient::ConnectThread() {
     Common::SetCurrentThreadName("ShadNet:Connect");
     bool connected = false;
     u32 backoff_ms = SHAD_CONNECT_RETRY_BACKOFF_MS;
-    for (u32 attempt = 1; attempt <= SHAD_CONNECT_MAX_ATTEMPTS && !m_terminate; ++attempt) {
+    for (u32 attempt = 1;
+         attempt <= SHAD_CONNECT_MAX_ATTEMPTS && retro_atomic_load_seq_cst_int(&m_terminate) == 0;
+         ++attempt) {
         if (DoConnect()) {
             connected = true;
             break;
         }
-        if (m_state == ShadNetState::FailureProtocol)
+        if (static_cast<ShadNetState>(retro_atomic_load_seq_cst_int(&m_state)) ==
+            ShadNetState::FailureProtocol)
             break;
-        if (m_terminate || attempt == SHAD_CONNECT_MAX_ATTEMPTS)
+        if ((retro_atomic_load_seq_cst_int(&m_terminate) != 0) ||
+            attempt == SHAD_CONNECT_MAX_ATTEMPTS)
             break;
         LOG_WARNING(ShadNet, "ShadNet: connect attempt {}/{} to {}:{} failed, retrying in {} ms",
                     attempt, SHAD_CONNECT_MAX_ATTEMPTS, m_host, m_port, backoff_ms);
         // Interruptible backoff: poll m_terminate so Stop() wakes us promptly.
-        for (u32 waited = 0; waited < backoff_ms && !m_terminate; waited += 100)
+        for (u32 waited = 0;
+             waited < backoff_ms && retro_atomic_load_seq_cst_int(&m_terminate) == 0; waited += 100)
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
         backoff_ms = std::min<u32>(backoff_ms * 2, 8000);
     }
@@ -209,10 +219,10 @@ void ShadNetClient::ConnectThread() {
     // Appear-Offline preference. shadNet handles us as offline for everyone else while set.
     req.appear_offline = m_appear_offline;
 
-    const u64 id = m_pkt_counter.fetch_add(1);
+    const u64 id = static_cast<u64>(retro_atomic_fetch_add_64(&m_pkt_counter, 1));
     if (!SendAll(BuildPacket(CommandType::Login, id, MakeProtoPayload(req)))) {
         LOG_ERROR(ShadNet, "ShadNet: Failed to send Login packet");
-        m_state = ShadNetState::FailureOther;
+        (void)retro_atomic_exchange_int(&m_state, static_cast<int>(ShadNetState::FailureOther));
         return;
     }
     LOG_INFO(ShadNet, "Login packet sent for '{}'", m_npid);
@@ -229,10 +239,10 @@ bool ShadNetClient::OnReaderThread() {
 void ShadNetClient::ReaderThread() {
     Common::SetCurrentThreadName("ShadNet:Reader");
     t_reader_thread = true;
-    while (!m_terminate) {
+    while (retro_atomic_load_seq_cst_int(&m_terminate) == 0) {
         u8 hdr[SHAD_HEADER_SIZE];
         if (!RecvN(hdr, SHAD_HEADER_SIZE)) {
-            if (!m_terminate)
+            if (retro_atomic_load_seq_cst_int(&m_terminate) == 0)
                 LOG_WARNING(ShadNet, "Reader header recv failed, disconnecting");
             break;
         }
@@ -243,7 +253,8 @@ void ShadNetClient::ReaderThread() {
 
         if (total_sz < SHAD_HEADER_SIZE || total_sz > SHAD_MAX_PACKET_SIZE) {
             LOG_ERROR(ShadNet, "Corrupt packet (total_sz={})", total_sz);
-            m_state = ShadNetState::FailureProtocol;
+            (void)retro_atomic_exchange_int(&m_state,
+                                            static_cast<int>(ShadNetState::FailureProtocol));
             break;
         }
         std::vector<u8> payload;
@@ -251,7 +262,7 @@ void ShadNetClient::ReaderThread() {
         if (payload_sz > 0) {
             payload.resize(payload_sz);
             if (!RecvN(payload.data(), payload_sz)) {
-                if (!m_terminate)
+                if (retro_atomic_load_seq_cst_int(&m_terminate) == 0)
                     LOG_WARNING(ShadNet, "Reader payload recv failed");
                 break;
             }
@@ -259,28 +270,30 @@ void ShadNetClient::ReaderThread() {
         DispatchPacket(ptype, cmd_raw, pkt_id, payload);
     }
 
-    if (!m_authenticated) {
-        if (m_state == ShadNetState::Ok)
-            m_state = ShadNetState::FailureOther;
+    if (retro_atomic_load_seq_cst_int(&m_authenticated) == 0) {
+        if (static_cast<ShadNetState>(retro_atomic_load_seq_cst_int(&m_state)) == ShadNetState::Ok)
+            (void)retro_atomic_exchange_int(&m_state, static_cast<int>(ShadNetState::FailureOther));
         m_sem_authenticated.release();
     }
-    m_connected = false;
-    m_authenticated = false;
+    (void)retro_atomic_exchange_int(&m_connected, 0);
+    (void)retro_atomic_exchange_int(&m_authenticated, 0);
     LOG_INFO(ShadNet, "ReaderThread exiting");
 }
 
 void ShadNetClient::WriterThread() {
     Common::SetCurrentThreadName("ShadNet:Writer");
-    while (!m_terminate) {
+    while (retro_atomic_load_seq_cst_int(&m_terminate) == 0) {
         std::unique_lock lock(m_mutex_send_queue);
-        m_cv_send_queue.wait(lock, [&] { return m_terminate.load() || !m_send_queue.empty(); });
-        if (m_terminate)
+        m_cv_send_queue.wait(lock, [&] {
+            return (retro_atomic_load_seq_cst_int(&m_terminate) != 0) || !m_send_queue.empty();
+        });
+        if (retro_atomic_load_seq_cst_int(&m_terminate) != 0)
             break;
         std::vector<std::vector<u8>> batch;
         std::swap(batch, m_send_queue);
         lock.unlock();
         for (auto& pkt : batch) {
-            if (!m_connected)
+            if (retro_atomic_load_seq_cst_int(&m_connected) == 0)
                 break;
             if (!SendAll(pkt)) {
                 LOG_ERROR(ShadNet, "WriterThread send failed");
@@ -293,7 +306,9 @@ void ShadNetClient::WriterThread() {
 // Connect / Disconnect
 
 bool ShadNetClient::DoConnect() {
-    m_state = ShadNetState::Ok; // reset; this attempt sets a failure code only on error
+    (void)retro_atomic_exchange_int(
+        &m_state, static_cast<int>(
+                      ShadNetState::Ok)); // reset; this attempt sets a failure code only on error
     struct addrinfo hints{}, *res_list = nullptr;
     hints.ai_family = AF_INET;
     hints.ai_socktype = SOCK_STREAM;
@@ -301,14 +316,14 @@ bool ShadNetClient::DoConnect() {
     if (::getaddrinfo(m_host.c_str(), std::to_string(m_port).c_str(), &hints, &res_list) != 0 ||
         !res_list) {
         LOG_ERROR(ShadNet, "DNS resolution failed for '{}'", m_host);
-        m_state = ShadNetState::FailureResolve;
+        (void)retro_atomic_exchange_int(&m_state, static_cast<int>(ShadNetState::FailureResolve));
         return false;
     }
 
     m_sock = ::socket(res_list->ai_family, SOCK_STREAM, IPPROTO_TCP);
     if (m_sock == SHAD_INVALID_SOCK) {
         ::freeaddrinfo(res_list);
-        m_state = ShadNetState::FailureConnect;
+        (void)retro_atomic_exchange_int(&m_state, static_cast<int>(ShadNetState::FailureConnect));
         return false;
     }
 
@@ -352,7 +367,7 @@ bool ShadNetClient::DoConnect() {
         LOG_ERROR(ShadNet, "connect() timed out or failed for {}:{}", m_host, m_port);
         SHAD_CLOSE(m_sock);
         m_sock = SHAD_INVALID_SOCK;
-        m_state = ShadNetState::FailureConnect;
+        (void)retro_atomic_exchange_int(&m_state, static_cast<int>(ShadNetState::FailureConnect));
         return false;
     }
 
@@ -372,12 +387,12 @@ bool ShadNetClient::DoConnect() {
     struct sockaddr_in local{};
     socklen_t alen = sizeof(local);
     if (::getsockname(m_sock, reinterpret_cast<struct sockaddr*>(&local), &alen) == 0)
-        m_addr_local.store(local.sin_addr.s_addr);
+        (void)retro_atomic_exchange_int(&m_addr_local, local.sin_addr.s_addr);
 
     struct sockaddr_in peer{};
     socklen_t plen = sizeof(peer);
     if (::getpeername(m_sock, reinterpret_cast<struct sockaddr*>(&peer), &plen) == 0)
-        m_addr_server.store(peer.sin_addr.s_addr);
+        (void)retro_atomic_exchange_int(&m_addr_server, peer.sin_addr.s_addr);
 
     LOG_INFO(ShadNet, "TCP connected to {}:{}", m_host, m_port);
 
@@ -397,13 +412,15 @@ bool ShadNetClient::DoConnect() {
     if (!RecvN(hdr, SHAD_HEADER_SIZE)) {
         LOG_ERROR(ShadNet, "Timeout reading ServerInfo header");
         DoDisconnect();
-        m_state = ShadNetState::FailureServerInfo;
+        (void)retro_atomic_exchange_int(&m_state,
+                                        static_cast<int>(ShadNetState::FailureServerInfo));
         return false;
     }
     if (static_cast<PacketType>(hdr[0]) != PacketType::ServerInfo) {
         LOG_ERROR(ShadNet, "Expected ServerInfo, got packet type {:02x}", hdr[0]);
         DoDisconnect();
-        m_state = ShadNetState::FailureServerInfo;
+        (void)retro_atomic_exchange_int(&m_state,
+                                        static_cast<int>(ShadNetState::FailureServerInfo));
         return false;
     }
     const u32 total_sz = GetLE32(hdr + 3);
@@ -412,17 +429,19 @@ bool ShadNetClient::DoConnect() {
     if (payload_sz > 0 && !RecvN(si_payload.data(), payload_sz)) {
         LOG_ERROR(ShadNet, "Timeout reading ServerInfo payload");
         DoDisconnect();
-        m_state = ShadNetState::FailureServerInfo;
+        (void)retro_atomic_exchange_int(&m_state,
+                                        static_cast<int>(ShadNetState::FailureServerInfo));
         return false;
     }
     if (payload_sz >= 4) {
         const u32 server_ver = GetLE32(si_payload.data());
-        m_server_protocol_version.store(server_ver);
+        (void)retro_atomic_exchange_int(&m_server_protocol_version, server_ver);
         if (server_ver != SHAD_PROTOCOL_VERSION) {
             LOG_ERROR(ShadNet, "Protocol version mismatch server={} client={}", server_ver,
                       SHAD_PROTOCOL_VERSION);
             DoDisconnect();
-            m_state = ShadNetState::FailureProtocol;
+            (void)retro_atomic_exchange_int(&m_state,
+                                            static_cast<int>(ShadNetState::FailureProtocol));
             return false;
         }
     }
@@ -437,7 +456,7 @@ bool ShadNetClient::DoConnect() {
     ::setsockopt(m_sock, SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<const char*>(&no_timeout),
                  sizeof(no_timeout));
 
-    m_connected = true;
+    (void)retro_atomic_exchange_int(&m_connected, 1);
     return true;
 }
 
@@ -456,7 +475,7 @@ void ShadNetClient::DoDisconnect() {
 bool ShadNetClient::RecvN(u8* buf, u32 n) {
     u32 received = 0;
     while (received < n) {
-        if (m_terminate)
+        if (retro_atomic_load_seq_cst_int(&m_terminate) != 0)
             return false;
         const int r = static_cast<int>(::recv(m_sock, reinterpret_cast<char*>(buf + received),
                                               static_cast<int>(n - received), 0));
@@ -497,7 +516,7 @@ std::vector<u8> ShadNetClient::BuildPacket(CommandType cmd, u64 id,
 }
 
 u64 ShadNetClient::SubmitRequest(CommandType cmd, const std::vector<u8>& payload) {
-    const u64 pkt_id = m_pkt_counter.fetch_add(1);
+    const u64 pkt_id = static_cast<u64>(retro_atomic_fetch_add_64(&m_pkt_counter, 1));
     auto pkt = BuildPacket(cmd, pkt_id, payload);
     m_mutex_send_queue.Run([&] { m_send_queue.push_back(std::move(pkt)); });
     m_cv_send_queue.notify_all();
@@ -606,11 +625,11 @@ u64 ShadNetClient::SyncTrophies(const std::string& com_id,
 }
 
 bool ShadNetClient::IsTrophiesEnabled() const {
-    return m_trophies_enabled.load();
+    return (retro_atomic_load_seq_cst_int(&m_trophies_enabled) != 0);
 }
 
 bool ShadNetClient::RequestServerFeatures() {
-    const u64 pkt_id = m_pkt_counter.fetch_add(1);
+    const u64 pkt_id = static_cast<u64>(retro_atomic_fetch_add_64(&m_pkt_counter, 1));
     std::vector<u8> empty_payload;
     std::vector<u8> pkt = BuildPacket(CommandType::GetServerFeatures, pkt_id, empty_payload);
     m_mutex_send_queue.Run([&] { m_send_queue.push_back(std::move(pkt)); });
@@ -699,11 +718,11 @@ void ShadNetClient::HandleLoginReply(const std::vector<u8>& payload) {
                 m_avatar_url = res.avatarUrl;
                 m_user_id = res.userId;
                 m_mutex_friends.Run([&] { m_friends = res.friends; });
-                m_authenticated = true;
+                (void)retro_atomic_exchange_int(&m_authenticated, 1);
                 LOG_INFO(ShadNet, "Logged in npid='{}' userId={} friends={}", m_npid, m_user_id,
                          m_friends.size());
 
-                const u64 pkt_id = m_pkt_counter.fetch_add(1);
+                const u64 pkt_id = static_cast<u64>(retro_atomic_fetch_add_64(&m_pkt_counter, 1));
                 std::vector<u8> empty_payload;
                 std::vector<u8> pkt = BuildPacket(CommandType::GetToken, pkt_id, empty_payload);
                 m_mutex_send_queue.Run([&] { m_send_queue.push_back(std::move(pkt)); });
@@ -712,26 +731,32 @@ void ShadNetClient::HandleLoginReply(const std::vector<u8>& payload) {
             } else {
                 res.error = ErrorType::Malformed;
                 LOG_ERROR(ShadNet, "Failed to parse LoginReply proto");
-                m_state = ShadNetState::FailureProtocol;
+                (void)retro_atomic_exchange_int(&m_state,
+                                                static_cast<int>(ShadNetState::FailureProtocol));
                 m_sem_authenticated.release();
                 DoDisconnect();
             }
         } else {
             switch (res.error) {
             case ErrorType::LoginAlreadyLoggedIn:
-                m_state = ShadNetState::FailureAlreadyIn;
+                (void)retro_atomic_exchange_int(&m_state,
+                                                static_cast<int>(ShadNetState::FailureAlreadyIn));
                 break;
             case ErrorType::LoginInvalidUsername:
-                m_state = ShadNetState::FailureUsername;
+                (void)retro_atomic_exchange_int(&m_state,
+                                                static_cast<int>(ShadNetState::FailureUsername));
                 break;
             case ErrorType::LoginInvalidPassword:
-                m_state = ShadNetState::FailurePassword;
+                (void)retro_atomic_exchange_int(&m_state,
+                                                static_cast<int>(ShadNetState::FailurePassword));
                 break;
             case ErrorType::LoginInvalidToken:
-                m_state = ShadNetState::FailureToken;
+                (void)retro_atomic_exchange_int(&m_state,
+                                                static_cast<int>(ShadNetState::FailureToken));
                 break;
             default:
-                m_state = ShadNetState::FailureAuth;
+                (void)retro_atomic_exchange_int(&m_state,
+                                                static_cast<int>(ShadNetState::FailureAuth));
                 break;
             }
             LOG_ERROR(ShadNet, "Login rejected error code {}", static_cast<u8>(res.error));
@@ -794,9 +819,9 @@ void ShadNetClient::HandleServerFeaturesReply(const std::vector<u8>& payload) {
         }
     }
 
-    m_matching2_enabled.store(matching2_enabled);
-    m_trophies_enabled.store(trophies_enabled);
-    m_server_features_received.store(parsed);
+    (void)retro_atomic_exchange_int(&m_matching2_enabled, matching2_enabled);
+    (void)retro_atomic_exchange_int(&m_trophies_enabled, trophies_enabled);
+    (void)retro_atomic_exchange_int(&m_server_features_received, parsed);
     ReportClientVersion();
     LOG_INFO(ShadNet, "Server features: matching2_enabled={} trophies_enabled={}{}",
              matching2_enabled ? "true" : "false", trophies_enabled ? "true" : "false",

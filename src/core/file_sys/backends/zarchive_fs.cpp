@@ -9,6 +9,7 @@
 #include <encodings/xxh3.h>
 #include <streams/file_stream.h>
 
+#include <retro_atomic.h>
 #include "common/logging/log.h"
 #include "core/file_sys/backends/zarchive_fs.h"
 
@@ -34,7 +35,7 @@ u64 EntryNode(std::string_view rel) {
     return xxh3_64(key.data(), key.size(), 0);
 }
 
-std::atomic<u64> next_serial{1};
+retro_atomic_64_t next_serial{1};
 
 } // namespace
 
@@ -54,7 +55,7 @@ ZarArchive::ZarArchive(const std::filesystem::path& path) {
         return;
     }
     m_size = static_cast<u64>(size);
-    m_serial = next_serial.fetch_add(1, std::memory_order_relaxed);
+    m_serial = static_cast<u64>(retro_atomic_fetch_add_64(&next_serial, 1));
     m_info = Common::FS::GetFileInfo(path);
     m_map = map;
     // The archive is opened once here, to refuse a file that is not one.
@@ -203,12 +204,12 @@ s64 ZArchiveFile::Read(void* dst, u64 size) {
     if (!IsOpen() || size == 0) {
         return 0;
     }
-    const u64 pos = m_position.load(std::memory_order_relaxed);
+    const u64 pos = static_cast<u64>(retro_atomic_load_relaxed_64(&m_position));
     if (pos >= m_file.size) {
         return 0;
     }
     const u64 read = m_archive->Read(m_file, pos, dst, std::min(size, m_file.size - pos));
-    m_position.store(pos + read, std::memory_order_relaxed);
+    retro_atomic_store_relaxed_64(&m_position, pos + read);
     return static_cast<s64>(read);
 }
 
@@ -224,7 +225,7 @@ bool ZArchiveFile::Seek(s64 offset, Common::FS::SeekOrigin origin) {
         base = 0;
         break;
     case Common::FS::SeekOrigin::CurrentPosition:
-        base = static_cast<s64>(m_position.load(std::memory_order_relaxed));
+        base = static_cast<s64>(static_cast<u64>(retro_atomic_load_relaxed_64(&m_position)));
         break;
     case Common::FS::SeekOrigin::End:
         base = static_cast<s64>(m_file.size);
@@ -234,12 +235,12 @@ bool ZArchiveFile::Seek(s64 offset, Common::FS::SeekOrigin origin) {
     if (target < 0) {
         return false;
     }
-    m_position.store(static_cast<u64>(target), std::memory_order_relaxed);
+    retro_atomic_store_relaxed_64(&m_position, static_cast<u64>(target));
     return true;
 }
 
 u64 ZArchiveFile::Tell() const {
-    return m_position.load(std::memory_order_relaxed);
+    return static_cast<u64>(retro_atomic_load_relaxed_64(&m_position));
 }
 
 u64 ZArchiveFile::Size() const {

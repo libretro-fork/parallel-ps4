@@ -3,6 +3,7 @@
 
 #include <imgui.h>
 
+#include <retro_atomic.h>
 #include "common/assert.h"
 #include "common/enum_names.h"
 #include "common/native_clock.h"
@@ -67,7 +68,7 @@ void DebugStateImpl::PauseGuestThreads() {
     // The caller, not whichever thread runs the combiner
     const ThreadID self_id = ThisThreadID();
     const bool already = guest_threads_mutex.Run([&] {
-        if (is_guest_threads_paused) {
+        if (retro_atomic_load_seq_cst_int(&is_guest_threads_paused) != 0) {
             return true;
         }
         if (ShouldPauseInSubmit()) {
@@ -82,7 +83,7 @@ void DebugStateImpl::PauseGuestThreads() {
             }
         }
         pause_time = Libraries::Kernel::Dev::GetClock()->GetUptime();
-        is_guest_threads_paused = true;
+        (void)retro_atomic_exchange_int(&is_guest_threads_paused, 1);
         return false;
     });
     if (already) {
@@ -95,7 +96,7 @@ void DebugStateImpl::PauseGuestThreads() {
 
 void DebugStateImpl::ResumeGuestThreads() {
     guest_threads_mutex.Run([&] {
-        if (!is_guest_threads_paused) {
+        if (retro_atomic_load_seq_cst_int(&is_guest_threads_paused) == 0) {
             return;
         }
 
@@ -104,7 +105,7 @@ void DebugStateImpl::ResumeGuestThreads() {
         for (const auto& id : guest_threads) {
             ResumeThread(id);
         }
-        is_guest_threads_paused = false;
+        (void)retro_atomic_exchange_int(&is_guest_threads_paused, 0);
     });
 }
 
@@ -113,7 +114,7 @@ void DebugStateImpl::RequestFrameDump(s32 count) {
     gnm_frame_dump_request_count = count;
     frame_dump_list.clear();
     frame_dump_list.resize(count);
-    const auto f = gnm_frame_count.load() + 1;
+    const auto f = static_cast<std::int32_t>(retro_atomic_load_seq_cst_int(&gnm_frame_count)) + 1;
     for (size_t i = 0; i < count; ++i) {
         frame_dump_list[i].frame_id = f + i;
     }

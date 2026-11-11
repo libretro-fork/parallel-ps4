@@ -3,11 +3,11 @@
 
 #pragma once
 
-#include <atomic>
 #include <memory>
 #include <string>
 #include <vector>
 
+#include <retro_atomic.h>
 #include "core/libraries/invitation_dialog/invitation_dialog.h"
 #include "core/libraries/np/np_handler/np_handler.h"
 #include "core/libraries/system/commondialog.h"
@@ -49,13 +49,13 @@ class InvitationDialogUi final : public ImGui::Layer {
     CommonDialog::Status* status{nullptr};
     DialogState* state{nullptr};
     struct PendingAccept {
-        std::atomic<bool> done{false};
-        std::atomic<bool> success{false};
+        retro_atomic_int_t done{0};
+        retro_atomic_int_t success{0};
         std::string invitation_id;
     };
     struct PendingSend {
-        std::atomic<bool> done{false};
-        std::atomic<bool> success{false};
+        retro_atomic_int_t done{0};
+        retro_atomic_int_t success{0};
         std::vector<std::string> sent_npids;
         std::vector<Libraries::Np::OrbisNpAccountId> sent_account_ids;
     };

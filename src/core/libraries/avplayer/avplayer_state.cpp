@@ -8,6 +8,7 @@
 #include "core/libraries/avplayer/avplayer_state.h"
 #include "core/libraries/kernel/process.h"
 
+#include <retro_atomic.h>
 #include "common/enum_names.h"
 
 namespace Libraries::AvPlayer {
@@ -176,8 +177,10 @@ bool AvPlayerState::GetStreamInfo(u32 stream_index, AvPlayerStreamInfo& info) {
 // Called inside GAME thread
 bool AvPlayerState::Start() {
     std::unique_lock lock(m_source_mutex);
-    if (m_current_state == AvState::Ready || m_current_state == AvState::Stop || Stop()) {
-        m_eof_stop_event_sent = false;
+    if (static_cast<AvState>(retro_atomic_load_seq_cst_int(&m_current_state)) == AvState::Ready ||
+        static_cast<AvState>(retro_atomic_load_seq_cst_int(&m_current_state)) == AvState::Stop ||
+        Stop()) {
+        (void)retro_atomic_exchange_int(&m_eof_stop_event_sent, 0);
         SetState(AvState::Starting);
         if (!m_up_source->Start()) {
             LOG_ERROR(Lib_AvPlayer, "Could not start playback.");
@@ -196,12 +199,17 @@ bool AvPlayerState::Start() {
 // Called inside GAME thread
 bool AvPlayerState::Pause() {
     std::shared_lock lock(m_source_mutex);
-    if (m_current_state == AvState::EndOfFile) {
+    if (static_cast<AvState>(retro_atomic_load_seq_cst_int(&m_current_state)) ==
+        AvState::EndOfFile) {
         return true;
     }
-    if (m_up_source == nullptr || m_current_state == AvState::Pause ||
-        m_current_state == AvState::Ready || m_current_state == AvState::Initial ||
-        m_current_state == AvState::Unknown || m_current_state == AvState::AddingSource) {
+    if (m_up_source == nullptr ||
+        static_cast<AvState>(retro_atomic_load_seq_cst_int(&m_current_state)) == AvState::Pause ||
+        static_cast<AvState>(retro_atomic_load_seq_cst_int(&m_current_state)) == AvState::Ready ||
+        static_cast<AvState>(retro_atomic_load_seq_cst_int(&m_current_state)) == AvState::Initial ||
+        static_cast<AvState>(retro_atomic_load_seq_cst_int(&m_current_state)) == AvState::Unknown ||
+        static_cast<AvState>(retro_atomic_load_seq_cst_int(&m_current_state)) ==
+            AvState::AddingSource) {
         LOG_ERROR(Lib_AvPlayer, "Could not pause playback.");
         return false;
     }
@@ -216,12 +224,13 @@ bool AvPlayerState::Pause() {
 // Called inside GAME thread
 bool AvPlayerState::Resume() {
     std::shared_lock lock(m_source_mutex);
-    if (m_up_source == nullptr || m_current_state != AvState::Pause) {
+    if (m_up_source == nullptr ||
+        static_cast<AvState>(retro_atomic_load_seq_cst_int(&m_current_state)) != AvState::Pause) {
         LOG_ERROR(Lib_AvPlayer, "Could not resume playback.");
         return false;
     }
     m_up_source->Resume();
-    const auto state = m_previous_state.load();
+    const auto state = static_cast<AvState>(retro_atomic_load_seq_cst_int(&m_previous_state));
     SetState(state);
     OnPlaybackStateChanged(state);
     return true;
@@ -294,7 +303,8 @@ bool AvPlayerState::EnableStream(u32 stream_index) {
 // Called inside GAME thread
 bool AvPlayerState::Stop() {
     std::shared_lock lock(m_source_mutex);
-    if (m_up_source == nullptr || m_current_state == AvState::Stop) {
+    if (m_up_source == nullptr ||
+        static_cast<AvState>(retro_atomic_load_seq_cst_int(&m_current_state)) == AvState::Stop) {
         return false;
     }
     if (!m_up_source->Stop()) {
@@ -303,7 +313,7 @@ bool AvPlayerState::Stop() {
     if (!SetState(AvState::Stop)) {
         return false;
     }
-    m_eof_stop_event_sent = true;
+    (void)retro_atomic_exchange_int(&m_eof_stop_event_sent, 1);
     OnPlaybackStateChanged(AvState::Stop);
     return true;
 }
@@ -337,7 +347,9 @@ bool AvPlayerState::IsActive() {
     if (m_up_source == nullptr) {
         return false;
     }
-    return m_current_state != AvState::Stop && m_current_state != AvState::Error &&
+    return static_cast<AvState>(retro_atomic_load_seq_cst_int(&m_current_state)) != AvState::Stop &&
+           static_cast<AvState>(retro_atomic_load_seq_cst_int(&m_current_state)) !=
+               AvState::Error &&
            m_up_source->IsActive();
 }
 
@@ -381,7 +393,8 @@ void AvPlayerState::OnEOF() {
 
 void AvPlayerState::UpdateEndOfFileState() {
     std::shared_lock lock(m_source_mutex);
-    if (m_up_source == nullptr || m_up_source->IsActive() || m_eof_stop_event_sent.exchange(true)) {
+    if (m_up_source == nullptr || m_up_source->IsActive() ||
+        (retro_atomic_exchange_int(&m_eof_stop_event_sent, 1) != 0)) {
         return;
     }
     lock.unlock();
@@ -424,12 +437,14 @@ bool AvPlayerState::SetState(AvState state) {
     if (!IsStateTransitionValid(state)) {
         LOG_ERROR(Lib_AvPlayer, "Invalid state transition: {} -> {}",
                   enum_name(&enum_names_Libraries_AvPlayer_AvState,
-                            static_cast<s64>(m_current_state.load())),
+                            static_cast<s64>(static_cast<AvState>(
+                                retro_atomic_load_seq_cst_int(&m_current_state)))),
                   enum_name(&enum_names_Libraries_AvPlayer_AvState, static_cast<s64>(state)));
         return false;
     }
-    m_previous_state.store(m_current_state);
-    m_current_state.store(state);
+    (void)retro_atomic_exchange_int(&m_previous_state,
+                                    retro_atomic_load_seq_cst_int(&m_current_state));
+    (void)retro_atomic_exchange_int(&m_current_state, static_cast<int>(state));
     return true;
 }
 
@@ -455,7 +470,7 @@ void AvPlayerState::EmitEvent(AvPlayerEvents event_id, void* event_data) {
 
 // Called inside CONTROLLER thread
 void AvPlayerState::ProcessEvent() {
-    if (m_current_state == AvState::Jump) {
+    if (static_cast<AvState>(retro_atomic_load_seq_cst_int(&m_current_state)) == AvState::Jump) {
         return;
     }
 
@@ -471,7 +486,7 @@ void AvPlayerState::ProcessEvent() {
         break;
     }
     case AvEventType::RevertState: {
-        SetState(m_previous_state.load());
+        SetState(static_cast<AvState>(retro_atomic_load_seq_cst_int(&m_previous_state)));
         break;
     }
     case AvEventType::AddSource: {
@@ -501,20 +516,26 @@ void AvPlayerState::ProcessEvent() {
 
 // Called inside CONTROLLER thread
 void AvPlayerState::UpdateBufferingState() {
-    if (m_current_state == AvState::EndOfFile) {
+    if (static_cast<AvState>(retro_atomic_load_seq_cst_int(&m_current_state)) ==
+        AvState::EndOfFile) {
         UpdateEndOfFileState();
-    } else if (m_current_state == AvState::Buffering) {
+    } else if (static_cast<AvState>(retro_atomic_load_seq_cst_int(&m_current_state)) ==
+               AvState::Buffering) {
         const auto has_frames = OnBufferingCheckEvent(10);
         if (!has_frames.has_value()) {
             return;
         }
         if (has_frames.value()) {
             const auto state =
-                m_previous_state >= AvState::C0x0B ? m_previous_state.load() : AvState::Play;
+                static_cast<AvState>(retro_atomic_load_seq_cst_int(&m_previous_state)) >=
+                        AvState::C0x0B
+                    ? static_cast<AvState>(retro_atomic_load_seq_cst_int(&m_previous_state))
+                    : AvState::Play;
             SetState(state);
             OnPlaybackStateChanged(state);
         }
-    } else if (m_current_state == AvState::Play) {
+    } else if (static_cast<AvState>(retro_atomic_load_seq_cst_int(&m_current_state)) ==
+               AvState::Play) {
         const auto has_frames = OnBufferingCheckEvent(0);
         if (!has_frames.has_value()) {
             return;
@@ -529,7 +550,7 @@ void AvPlayerState::UpdateBufferingState() {
 bool AvPlayerState::IsStateTransitionValid(AvState state) {
     switch (state) {
     case AvState::Play: {
-        switch (m_current_state.load()) {
+        switch (static_cast<AvState>(retro_atomic_load_seq_cst_int(&m_current_state))) {
         case AvState::Stop:
         case AvState::EndOfFile:
         // case AvState::C0x08:
@@ -540,7 +561,7 @@ bool AvPlayerState::IsStateTransitionValid(AvState state) {
         }
     }
     case AvState::Pause: {
-        switch (m_current_state.load()) {
+        switch (static_cast<AvState>(retro_atomic_load_seq_cst_int(&m_current_state))) {
         case AvState::Stop:
         case AvState::EndOfFile:
         // case AvState::C0x08:
@@ -552,7 +573,7 @@ bool AvPlayerState::IsStateTransitionValid(AvState state) {
         }
     }
     case AvState::Jump: {
-        switch (m_current_state.load()) {
+        switch (static_cast<AvState>(retro_atomic_load_seq_cst_int(&m_current_state))) {
         case AvState::Stop:
         case AvState::EndOfFile:
         // case AvState::C0x08:
@@ -565,7 +586,7 @@ bool AvPlayerState::IsStateTransitionValid(AvState state) {
         }
     }
     case AvState::TrickMode: {
-        switch (m_current_state.load()) {
+        switch (static_cast<AvState>(retro_atomic_load_seq_cst_int(&m_current_state))) {
         case AvState::Stop:
         case AvState::EndOfFile:
         // case AvState::C0x08:
@@ -578,7 +599,7 @@ bool AvPlayerState::IsStateTransitionValid(AvState state) {
         }
     }
     case AvState::Buffering: {
-        switch (m_current_state.load()) {
+        switch (static_cast<AvState>(retro_atomic_load_seq_cst_int(&m_current_state))) {
         case AvState::Stop:
         case AvState::EndOfFile:
         case AvState::Pause:

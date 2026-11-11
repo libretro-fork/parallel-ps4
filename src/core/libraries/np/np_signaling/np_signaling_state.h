@@ -3,7 +3,6 @@
 
 #pragma once
 
-#include <atomic>
 #include <chrono>
 #include <condition_variable>
 #include <cstring>
@@ -14,6 +13,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include <retro_atomic.h>
 #include "common/combiner.h"
 #include "common/event_mutex.h"
 #include "common/types.h"
@@ -196,8 +196,8 @@ struct NpSignalingContext {
 
     u16 bound_port{0};
 
-    std::atomic<u32> ext_addr{0};
-    std::atomic<u16> ext_port{0};
+    retro_atomic_int_t ext_addr{0};
+    retro_atomic_u16_t ext_port{0};
     Common::EventMutex stun_mutex{};
     Common::EventCondition stun_cv{};
 
@@ -275,7 +275,7 @@ struct NpSignalingState {
     Libraries::Kernel::PthreadT dispatch_thread = nullptr;
     bool dispatch_stop = false;
 
-    std::atomic<bool> runtime_stop{false};
+    retro_atomic_int_t runtime_stop{0};
     Common::Combiner runtime_thread_mutex;
     std::thread runtime_thread;
     Common::EventMutex activation_mutex;

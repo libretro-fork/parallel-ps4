@@ -6,7 +6,7 @@
 #include "common/assert.h"
 #include "common/types.h"
 
-#include <atomic>
+#include <retro_atomic.h>
 
 namespace Core::Loader {
 class SymbolsResolver;
@@ -59,7 +59,7 @@ struct OrbisFiberData {
 
 struct OrbisFiber {
     u32 magic_start;
-    std::atomic<FiberState> state;
+    retro_atomic_int_t state;
     OrbisFiberEntry entry;
     u64 arg_on_initialize;
     void* addr_context;

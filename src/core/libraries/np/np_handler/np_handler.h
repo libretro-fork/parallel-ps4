@@ -4,7 +4,6 @@
 
 #pragma once
 
-#include <atomic>
 #include <chrono>
 #include <functional>
 #include <map>
@@ -17,6 +16,7 @@
 #include <utility>
 #include <vector>
 
+#include <retro_atomic.h>
 #include "common/combiner.h"
 #include "common/event_mutex.h"
 #include "common/types.h"
@@ -98,7 +98,7 @@ public:
     // enabled, shadNet handles the user as offline for everyone else. Call from the UI/config.
     void SetAppearOffline(bool enable);
     bool IsAppearOffline() const {
-        return m_appear_offline.load();
+        return (retro_atomic_load_seq_cst_int(&m_appear_offline) != 0);
     }
 
     /// Full NP ID for this user, built once from shadnet_npid after login.
@@ -440,7 +440,7 @@ private:
     std::string GetNpCommId(s32 service_label) const;
 
     // Appear-Offline preference, applied to every client at login and on change.
-    std::atomic<bool> m_appear_offline{false};
+    retro_atomic_int_t m_appear_offline{0};
 
     // Per-user client map
     mutable Common::Combiner m_mutex_clients;
@@ -523,8 +523,8 @@ private:
                      const std::vector<u8>& body);
 
     // Worker thread
-    std::atomic<bool> m_initialized{false};
-    std::atomic<bool> m_worker_running{false};
+    retro_atomic_int_t m_initialized{0};
+    retro_atomic_int_t m_worker_running{0};
     std::thread m_worker_thread;
 
     // Users dropped by a network error and awaiting transparent reconnect

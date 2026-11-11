@@ -4,7 +4,6 @@
 #pragma once
 
 #include <array>
-#include <atomic>
 #include <chrono>
 #include <condition_variable>
 #include <map>
@@ -13,6 +12,7 @@
 #include <string>
 #include <vector>
 
+#include <retro_atomic.h>
 #include "common/combiner.h"
 #include "common/event_mutex.h"
 #include "common/types.h"
@@ -294,7 +294,7 @@ struct PendingEvent {
 };
 
 struct NpMatching2State {
-    std::atomic<bool> initialized = false;
+    retro_atomic_int_t initialized{0};
 
     OrbisNpMatching2RequestId next_request_id = 1;
     Common::Combiner mutex;
@@ -303,7 +303,7 @@ struct NpMatching2State {
     Common::EventMutex queue_mutex;
     Common::EventCondition queue_cv;
     std::vector<PendingEvent> pending_events;
-    std::atomic<bool> dispatch_running{false};
+    retro_atomic_int_t dispatch_running{0};
 };
 
 OrbisNpMatching2RequestId AllocRequestId();

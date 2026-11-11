@@ -21,6 +21,7 @@
 #include <optional>
 #include "common/combiner.h"
 
+#include <retro_atomic.h>
 #include "core/net/p2p_crypto.h"
 #include "core/net/p2p_transport.h"
 
@@ -101,7 +102,7 @@ private:
 
     std::shared_ptr<Keyring> keyring;
     BroadcastObserver broadcast_observer;
-    std::atomic<int> reported_broadcasts{0};
+    retro_atomic_int_t reported_broadcasts{0};
     Common::Combiner pseudo_mutex;
     std::map<Endpoint, PseudoHeader> pseudo_cache;
 };

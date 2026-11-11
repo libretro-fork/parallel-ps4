@@ -7,6 +7,7 @@
 #include <map>
 #include <mutex>
 #include <unordered_map>
+#include <retro_atomic.h>
 
 #ifdef _WIN32
 #include <sys/utime.h>
@@ -204,8 +205,9 @@ s32 PS4_SYSV_ABI open(const char* raw_path, s32 flags, u16 mode) {
     if (path.starts_with("/dev/")) {
         for (const auto& [prefix, factory] : available_device) {
             if (path == prefix) {
-                file->is_opened = true;
-                file->type = Core::FileSys::FileType::Device;
+                (void)retro_atomic_exchange_int(&file->is_opened, 1);
+                (void)retro_atomic_exchange_int(&file->type,
+                                                static_cast<int>(Core::FileSys::FileType::Device));
                 file->m_guest_name = path;
                 file->device = factory(handle, path.data(), flags, mode);
                 return handle;
@@ -280,8 +282,9 @@ s32 PS4_SYSV_ABI open(const char* raw_path, s32 flags, u16 mode) {
             return -1;
         }
 
-        file->type = Core::FileSys::FileType::Directory;
-        file->is_opened = true;
+        (void)retro_atomic_exchange_int(&file->type,
+                                        static_cast<int>(Core::FileSys::FileType::Directory));
+        (void)retro_atomic_exchange_int(&file->is_opened, 1);
         if (file->m_guest_name.starts_with("/app0") || file->m_guest_name.starts_with("/addcont")) {
             // TODO: Properly identify type for paths like "/app0/.."
             file->directory = Core::Directories::PfsDirectory::Create(file->m_guest_name);
@@ -289,7 +292,8 @@ s32 PS4_SYSV_ABI open(const char* raw_path, s32 flags, u16 mode) {
             file->directory = Core::Directories::NormalDirectory::Create(file->m_guest_name);
         }
     } else {
-        file->type = Core::FileSys::FileType::Regular;
+        (void)retro_atomic_exchange_int(&file->type,
+                                        static_cast<int>(Core::FileSys::FileType::Regular));
 
         // Reject writes to read-only mounts up front, so we can report
         // the right errno instead of a generic open failure.
@@ -334,7 +338,7 @@ s32 PS4_SYSV_ABI open(const char* raw_path, s32 flags, u16 mode) {
         }
     }
 
-    file->is_opened = true;
+    (void)retro_atomic_exchange_int(&file->is_opened, 1);
     return handle;
 }
 
@@ -361,14 +365,16 @@ s32 PS4_SYSV_ABI close(s32 fd) {
         *__Error() = POSIX_EPERM;
         return -1;
     }
-    if (file->type == Core::FileSys::FileType::Socket) {
+    if (static_cast<Core::FileSys::FileType>(retro_atomic_load_seq_cst_int(&file->type)) ==
+        Core::FileSys::FileType::Socket) {
         return Libraries::Net::KernelClose(fd);
     }
     ReleaseFlockState(file);
-    if (file->type == Core::FileSys::FileType::Regular) {
+    if (static_cast<Core::FileSys::FileType>(retro_atomic_load_seq_cst_int(&file->type)) ==
+        Core::FileSys::FileType::Regular) {
         file->handle.reset();
     }
-    file->is_opened = false;
+    (void)retro_atomic_exchange_int(&file->is_opened, 0);
     LOG_INFO(Kernel_Fs, "Closing {}", file->m_guest_name);
     // FIXME: Lock file mutex before deleting it?
     h->DeleteHandle(fd);
@@ -396,18 +402,21 @@ s64 PS4_SYSV_ABI write(s32 fd, const void* buf, u64 nbytes) {
         return -1;
     }
 
-    if (file->type == Core::FileSys::FileType::Socket) {
+    if (static_cast<Core::FileSys::FileType>(retro_atomic_load_seq_cst_int(&file->type)) ==
+        Core::FileSys::FileType::Socket) {
         return Libraries::Net::KernelWrite(fd, buf, nbytes);
     }
     return file->m_mutex.Run([&]() -> s64 {
-        if (file->type == Core::FileSys::FileType::Device) {
+        if (static_cast<Core::FileSys::FileType>(retro_atomic_load_seq_cst_int(&file->type)) ==
+            Core::FileSys::FileType::Device) {
             s64 result = file->device->write(buf, nbytes);
             if (result < 0) {
                 ErrSceToPosix(result);
                 return -1;
             }
             return result;
-        } else if (file->type == Core::FileSys::FileType::Directory) {
+        } else if (static_cast<Core::FileSys::FileType>(retro_atomic_load_seq_cst_int(
+                       &file->type)) == Core::FileSys::FileType::Directory) {
             *__Error() = POSIX_EBADF;
             return -1;
         }
@@ -480,14 +489,16 @@ s64 PS4_SYSV_ABI readv(s32 fd, const OrbisKernelIovec* iov, s32 iovcnt) {
     }
 
     return file->m_mutex.Run([&]() -> s64 {
-        if (file->type == Core::FileSys::FileType::Device) {
+        if (static_cast<Core::FileSys::FileType>(retro_atomic_load_seq_cst_int(&file->type)) ==
+            Core::FileSys::FileType::Device) {
             s64 result = file->device->readv(iov, iovcnt);
             if (result < 0) {
                 ErrSceToPosix(result);
                 return -1;
             }
             return result;
-        } else if (file->type == Core::FileSys::FileType::Directory) {
+        } else if (static_cast<Core::FileSys::FileType>(retro_atomic_load_seq_cst_int(
+                       &file->type)) == Core::FileSys::FileType::Directory) {
             s64 result = file->directory->readv(iov, iovcnt);
             if (result < 0) {
                 ErrSceToPosix(result);
@@ -531,14 +542,16 @@ s64 PS4_SYSV_ABI writev(s32 fd, const OrbisKernelIovec* iov, s32 iovcnt) {
     }
 
     return file->m_mutex.Run([&]() -> s64 {
-        if (file->type == Core::FileSys::FileType::Device) {
+        if (static_cast<Core::FileSys::FileType>(retro_atomic_load_seq_cst_int(&file->type)) ==
+            Core::FileSys::FileType::Device) {
             s64 result = file->device->writev(iov, iovcnt);
             if (result < 0) {
                 ErrSceToPosix(result);
                 return -1;
             }
             return result;
-        } else if (file->type == Core::FileSys::FileType::Directory) {
+        } else if (static_cast<Core::FileSys::FileType>(retro_atomic_load_seq_cst_int(
+                       &file->type)) == Core::FileSys::FileType::Directory) {
             *__Error() = POSIX_EBADF;
             return -1;
         }
@@ -578,14 +591,16 @@ s64 PS4_SYSV_ABI posix_lseek(s32 fd, s64 offset, s32 whence) {
     }
 
     return file->m_mutex.Run([&]() -> s64 {
-        if (file->type == Core::FileSys::FileType::Device) {
+        if (static_cast<Core::FileSys::FileType>(retro_atomic_load_seq_cst_int(&file->type)) ==
+            Core::FileSys::FileType::Device) {
             s64 result = file->device->lseek(offset, whence);
             if (result < 0) {
                 ErrSceToPosix(result);
                 return -1;
             }
             return result;
-        } else if (file->type == Core::FileSys::FileType::Directory) {
+        } else if (static_cast<Core::FileSys::FileType>(retro_atomic_load_seq_cst_int(
+                       &file->type)) == Core::FileSys::FileType::Directory) {
             s64 result = file->directory->lseek(offset, whence);
             if (result < 0) {
                 ErrSceToPosix(result);
@@ -648,18 +663,21 @@ s64 PS4_SYSV_ABI read(s32 fd, void* buf, u64 nbytes) {
         return -1;
     }
 
-    if (file->type == Core::FileSys::FileType::Socket) {
+    if (static_cast<Core::FileSys::FileType>(retro_atomic_load_seq_cst_int(&file->type)) ==
+        Core::FileSys::FileType::Socket) {
         return Libraries::Net::KernelRead(fd, buf, nbytes);
     }
     return file->m_mutex.Run([&]() -> s64 {
-        if (file->type == Core::FileSys::FileType::Device) {
+        if (static_cast<Core::FileSys::FileType>(retro_atomic_load_seq_cst_int(&file->type)) ==
+            Core::FileSys::FileType::Device) {
             s64 result = file->device->read(buf, nbytes);
             if (result < 0) {
                 ErrSceToPosix(result);
                 return -1;
             }
             return result;
-        } else if (file->type == Core::FileSys::FileType::Directory) {
+        } else if (static_cast<Core::FileSys::FileType>(retro_atomic_load_seq_cst_int(
+                       &file->type)) == Core::FileSys::FileType::Directory) {
             s64 result = file->directory->read(buf, nbytes);
             if (result < 0) {
                 ErrSceToPosix(result);
@@ -959,7 +977,7 @@ s32 PS4_SYSV_ABI fstat(s32 fd, OrbisKernelStat* sb) {
     }
     std::memset(sb, 0, sizeof(OrbisKernelStat));
 
-    switch (file->type) {
+    switch (static_cast<Core::FileSys::FileType>(retro_atomic_load_seq_cst_int(&file->type))) {
     case Core::FileSys::FileType::Device: {
         s32 result = file->device->fstat(sb);
         if (result < 0) {
@@ -1003,13 +1021,15 @@ s32 PS4_SYSV_ABI fstat(s32 fd, OrbisKernelStat* sb) {
         return Libraries::Net::KernelFstat(fd, sb);
     }
     case Core::FileSys::FileType::Equeue: {
-        LOG_ERROR(
-            Kernel_Fs, "(STUBBED) file type {}",
-            enum_name(&enum_names_Core_FileSys_FileType, static_cast<s64>(file->type.load())));
+        LOG_ERROR(Kernel_Fs, "(STUBBED) file type {}",
+                  enum_name(&enum_names_Core_FileSys_FileType,
+                            static_cast<s64>(static_cast<Core::FileSys::FileType>(
+                                retro_atomic_load_seq_cst_int(&file->type)))));
         break;
     }
     default:
-        UNREACHABLE_MSG("{}", u32(file->type.load()));
+        UNREACHABLE_MSG("{}", u32(static_cast<Core::FileSys::FileType>(
+                                  retro_atomic_load_seq_cst_int(&file->type))));
     }
     return ORBIS_OK;
 }
@@ -1041,7 +1061,8 @@ s32 PS4_SYSV_ABI posix_ftruncate(s32 fd, s64 length) {
         return -1;
     }
 
-    if (file->type == Core::FileSys::FileType::Device) {
+    if (static_cast<Core::FileSys::FileType>(retro_atomic_load_seq_cst_int(&file->type)) ==
+        Core::FileSys::FileType::Device) {
         s32 result = file->device->ftruncate(length);
         if (result < 0) {
             ErrSceToPosix(result);
@@ -1050,7 +1071,8 @@ s32 PS4_SYSV_ABI posix_ftruncate(s32 fd, s64 length) {
         return result;
     }
 
-    if (file->type == Core::FileSys::FileType::Directory ||
+    if (static_cast<Core::FileSys::FileType>(retro_atomic_load_seq_cst_int(&file->type)) ==
+            Core::FileSys::FileType::Directory ||
         (file->handle && file->handle->IsReadOnly())) {
         *__Error() = POSIX_EINVAL;
         return -1;
@@ -1191,8 +1213,10 @@ s32 PS4_SYSV_ABI posix_fchmod(s32 fd, u32 mode) {
         return -1;
     }
 
-    if (file->type != Core::FileSys::FileType::Regular &&
-        file->type != Core::FileSys::FileType::Directory) {
+    if (static_cast<Core::FileSys::FileType>(retro_atomic_load_seq_cst_int(&file->type)) !=
+            Core::FileSys::FileType::Regular &&
+        static_cast<Core::FileSys::FileType>(retro_atomic_load_seq_cst_int(&file->type)) !=
+            Core::FileSys::FileType::Directory) {
         *__Error() = POSIX_EINVAL;
         return -1;
     }
@@ -1324,8 +1348,10 @@ s32 PS4_SYSV_ABI posix_futimes(s32 fd, const OrbisKernelTimeval* times) {
         return -1;
     }
 
-    if (file->type != Core::FileSys::FileType::Regular &&
-        file->type != Core::FileSys::FileType::Directory) {
+    if (static_cast<Core::FileSys::FileType>(retro_atomic_load_seq_cst_int(&file->type)) !=
+            Core::FileSys::FileType::Regular &&
+        static_cast<Core::FileSys::FileType>(retro_atomic_load_seq_cst_int(&file->type)) !=
+            Core::FileSys::FileType::Directory) {
         *__Error() = POSIX_EINVAL;
         return -1;
     }
@@ -1503,14 +1529,16 @@ s64 PS4_SYSV_ABI posix_preadv(s32 fd, OrbisKernelIovec* iov, s32 iovcnt, s64 off
     }
 
     return file->m_mutex.Run([&]() -> s64 {
-        if (file->type == Core::FileSys::FileType::Device) {
+        if (static_cast<Core::FileSys::FileType>(retro_atomic_load_seq_cst_int(&file->type)) ==
+            Core::FileSys::FileType::Device) {
             s64 result = file->device->preadv(iov, iovcnt, offset);
             if (result < 0) {
                 ErrSceToPosix(result);
                 return -1;
             }
             return result;
-        } else if (file->type == Core::FileSys::FileType::Directory) {
+        } else if (static_cast<Core::FileSys::FileType>(retro_atomic_load_seq_cst_int(
+                       &file->type)) == Core::FileSys::FileType::Directory) {
             s64 result = file->directory->preadv(iov, iovcnt, offset);
             if (result < 0) {
                 ErrSceToPosix(result);
@@ -1585,7 +1613,8 @@ s32 PS4_SYSV_ABI posix_fsync(s32 fd) {
     }
 
     return file->m_mutex.Run([&]() -> s32 {
-        if (file->type == Core::FileSys::FileType::Device) {
+        if (static_cast<Core::FileSys::FileType>(retro_atomic_load_seq_cst_int(&file->type)) ==
+            Core::FileSys::FileType::Device) {
             s32 result = file->device->fsync();
             if (result < 0) {
                 ErrSceToPosix(result);
@@ -1639,7 +1668,8 @@ s32 PS4_SYSV_ABI posix_flock(s32 fd, s32 operation) {
         return -1;
     }
 
-    if (file->type == Core::FileSys::FileType::Socket) {
+    if (static_cast<Core::FileSys::FileType>(retro_atomic_load_seq_cst_int(&file->type)) ==
+        Core::FileSys::FileType::Socket) {
         *__Error() = POSIX_EOPNOTSUPP;
         return -1;
     }
@@ -1691,7 +1721,7 @@ s32 PS4_SYSV_ABI posix_flock(s32 fd, s32 operation) {
                 state->total_waiters--;
                 waiting = false;
             }
-            if (!file->is_opened) {
+            if (retro_atomic_load_seq_cst_int(&file->is_opened) == 0) {
                 *__Error() = POSIX_EBADF;
                 return -1;
             }
@@ -1704,7 +1734,7 @@ s32 PS4_SYSV_ABI posix_flock(s32 fd, s32 operation) {
                 }
 
                 auto can_acquire = [&]() {
-                    if (!file->is_opened) {
+                    if (retro_atomic_load_seq_cst_int(&file->is_opened) == 0) {
                         return true;
                     }
                     if (state->is_exclusive) {
@@ -1733,7 +1763,7 @@ s32 PS4_SYSV_ABI posix_flock(s32 fd, s32 operation) {
                     return 0;
                 }
 
-                if (!file->is_opened) {
+                if (retro_atomic_load_seq_cst_int(&file->is_opened) == 0) {
                     *__Error() = POSIX_EBADF;
                     return -1;
                 }
@@ -1754,7 +1784,10 @@ s32 PS4_SYSV_ABI posix_flock(s32 fd, s32 operation) {
                     return ORBIS_OK;
                 }
 
-                auto can_acquire = [&]() { return !file->is_opened || !state->is_exclusive; };
+                auto can_acquire = [&]() {
+                    return retro_atomic_load_seq_cst_int(&file->is_opened) == 0 ||
+                           !state->is_exclusive;
+                };
 
                 if (!can_acquire()) {
                     if (non_blocking) {
@@ -1769,7 +1802,7 @@ s32 PS4_SYSV_ABI posix_flock(s32 fd, s32 operation) {
                     return 0;
                 }
 
-                if (!file->is_opened) {
+                if (retro_atomic_load_seq_cst_int(&file->is_opened) == 0) {
                     *__Error() = POSIX_EBADF;
                     return -1;
                 }
@@ -1844,7 +1877,7 @@ static s64 GetDents(s32 fd, char* buf, u64 nbytes, s64* basep) {
         return -1;
     }
 
-    switch (file->type) {
+    switch (static_cast<Core::FileSys::FileType>(retro_atomic_load_seq_cst_int(&file->type))) {
     case Core::FileSys::FileType::Directory: {
         s64 result = file->directory->getdents(buf, nbytes, basep);
         if (result < 0) {
@@ -1915,14 +1948,16 @@ s64 PS4_SYSV_ABI posix_pwritev(s32 fd, const OrbisKernelIovec* iov, s32 iovcnt, 
     }
 
     return file->m_mutex.Run([&]() -> s64 {
-        if (file->type == Core::FileSys::FileType::Device) {
+        if (static_cast<Core::FileSys::FileType>(retro_atomic_load_seq_cst_int(&file->type)) ==
+            Core::FileSys::FileType::Device) {
             s64 result = file->device->pwritev(iov, iovcnt, offset);
             if (result < 0) {
                 ErrSceToPosix(result);
                 return -1;
             }
             return result;
-        } else if (file->type == Core::FileSys::FileType::Directory) {
+        } else if (static_cast<Core::FileSys::FileType>(retro_atomic_load_seq_cst_int(
+                       &file->type)) == Core::FileSys::FileType::Directory) {
             *__Error() = POSIX_EBADF;
             return -1;
         }
@@ -2075,13 +2110,19 @@ s32 PS4_SYSV_ABI posix_select(s32 nfds, GuestFdSet* readfds, GuestFdSet* writefd
             continue;
         }
         auto* file = h->GetFile(i);
-        if (!file || ((file->type == Core::FileSys::FileType::Regular && !file->IsBackendOpen()) ||
-                      (file->type == Core::FileSys::FileType::Socket && !file->is_opened))) {
+        if (!file ||
+            ((static_cast<Core::FileSys::FileType>(retro_atomic_load_seq_cst_int(&file->type)) ==
+                  Core::FileSys::FileType::Regular &&
+              !file->IsBackendOpen()) ||
+             (static_cast<Core::FileSys::FileType>(retro_atomic_load_seq_cst_int(&file->type)) ==
+                  Core::FileSys::FileType::Socket &&
+              retro_atomic_load_seq_cst_int(&file->is_opened) == 0))) {
             LOG_ERROR(Kernel_Fs, "fd {} is null or not opened", i);
             *__Error() = POSIX_EBADF;
             return -1;
         }
-        if (file->type == Core::FileSys::FileType::Socket) {
+        if (static_cast<Core::FileSys::FileType>(retro_atomic_load_seq_cst_int(&file->type)) ==
+            Core::FileSys::FileType::Socket) {
             const u32 interest = (want_read ? Core::Net::Host::EvIn : 0u) |
                                  (want_write ? Core::Net::Host::EvOut : 0u);
             if (interest != 0) {

@@ -4,10 +4,10 @@
 #pragma once
 
 #include <algorithm>
-#include <atomic>
 #include <deque>
 #include <vector>
 
+#include <retro_atomic.h>
 #include "common/types.h"
 #include "video_core/buffer_cache/region_manager.h"
 
@@ -119,7 +119,9 @@ private:
         u64 page_offset = cpu_address & HIGHER_PAGE_MASK;
         while (remaining_size > 0) {
             const u64 copy_amount = std::min(HIGHER_PAGE_SIZE - page_offset, remaining_size);
-            if (auto* region = top_tier[page_index].load(std::memory_order_acquire); region) {
+            if (auto* region = static_cast<RegionManager*>(
+                    retro_atomic_load_acquire_ptr(&top_tier[page_index]));
+                region) {
                 if constexpr (BOOL_BREAK) {
                     if (func(region, page_offset, copy_amount)) {
                         return true;
@@ -160,7 +162,7 @@ private:
         new_manager->SetCpuAddress(base_cpu_addr);
         free_managers.pop_back();
         // Published once made: the fault handler's thread reads the table meanwhile
-        top_tier[page_index].store(new_manager, std::memory_order_release);
+        retro_atomic_store_release_ptr(&top_tier[page_index], new_manager);
         return new_manager;
     }
 
@@ -170,7 +172,7 @@ private:
     std::vector<RegionManager*> free_managers;
     /// Made by the GPU thread (the regions are made only where it marks or uploads), read by
     /// any.
-    std::array<std::atomic<RegionManager*>, NUM_HIGH_PAGES> top_tier{};
+    std::array<retro_atomic_ptr_t, NUM_HIGH_PAGES> top_tier{};
 };
 
 } // namespace VideoCore

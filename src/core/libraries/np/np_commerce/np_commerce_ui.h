@@ -3,9 +3,9 @@
 
 #pragma once
 
-#include <atomic>
 #include <string>
 #include <vector>
+#include <retro_atomic.h>
 #include "common/types.h"
 #include "core/libraries/system/commondialog.h"
 #include "imgui/imgui_layer.h"
@@ -73,9 +73,9 @@ enum class PsStoreIconLayout : s32 {
 };
 
 class PsStoreIconLayer final : public ImGui::Layer {
-    std::atomic<bool> shown{false};
-    std::atomic<PsStoreIconPos> pos{PsStoreIconPos::CENTER};
-    std::atomic<PsStoreIconLayout> layout{PsStoreIconLayout::DEFAULT};
+    retro_atomic_int_t shown{0};
+    retro_atomic_int_t pos{static_cast<int>(PsStoreIconPos::CENTER)};
+    retro_atomic_int_t layout{static_cast<int>(PsStoreIconLayout::DEFAULT)};
 
 public:
     static PsStoreIconLayer& Instance();

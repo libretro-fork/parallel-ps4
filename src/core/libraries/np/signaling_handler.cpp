@@ -4,7 +4,6 @@
 #include "core/libraries/np/signaling_handler.h"
 
 #include <algorithm>
-#include <atomic>
 #include <chrono>
 #include <condition_variable>
 #include <cstring>
@@ -13,6 +12,7 @@
 #include <thread>
 #include <vector>
 
+#include <retro_atomic.h>
 #include "common/logging/log.h"
 #include "common/singleton.h"
 #include "core/libraries/net/net.h"
@@ -89,8 +89,9 @@ void HandleStunEcho(const NpSignaling::StunEcho& echo) {
             if (!ctx.active) {
                 continue;
             }
-            ctx.ext_addr.store(echo.ext_ip);
-            ctx.ext_port.store(echo.ext_port);
+            (void)retro_atomic_exchange_int(&ctx.ext_addr, echo.ext_ip);
+            retro_atomic_store_release_u16(&ctx.ext_port, echo.ext_port);
+            retro_atomic_thread_fence_seq_cst();
             ctx.stun_cv.notify_all();
             LOG_DEBUG(Lib_NpSignaling, "STUN echo: ctxId={} ext_addr={:#x} ext_port={}", ctx_id,
                       echo.ext_ip, Net::sceNetNtohs(echo.ext_port));
@@ -1265,7 +1266,7 @@ void ThreadMain() {
     LOG_DEBUG(Lib_NpSignaling, "Signaling runtime thread started");
     auto& state = NpHandler::GetInstance().GetSignalingState();
     auto last_publish = std::chrono::steady_clock::time_point{};
-    while (!state.runtime_stop.load(std::memory_order_relaxed)) {
+    while (retro_atomic_load_relaxed_int(&state.runtime_stop) == 0) {
         if (!NpSignaling::Transport::EnsureTransport()) {
             std::this_thread::sleep_for(std::chrono::milliseconds(50));
             continue;
@@ -1292,11 +1293,11 @@ void ThreadMain() {
 
 void ActivationThreadMain() {
     auto& state = NpHandler::GetInstance().GetSignalingState();
-    while (!state.runtime_stop.load(std::memory_order_relaxed)) {
+    while (retro_atomic_load_relaxed_int(&state.runtime_stop) == 0) {
         {
             std::unique_lock lock(state.activation_mutex);
             state.activation_cv.wait_for(lock, std::chrono::milliseconds(250), [&state] {
-                if (state.runtime_stop.load(std::memory_order_relaxed)) {
+                if (retro_atomic_load_relaxed_int(&state.runtime_stop) != 0) {
                     return true;
                 }
                 NpSignaling::SignalingMutexGuard signaling_lock;
@@ -1304,7 +1305,7 @@ void ActivationThreadMain() {
             });
         }
 
-        if (state.runtime_stop.load(std::memory_order_relaxed)) {
+        if (retro_atomic_load_relaxed_int(&state.runtime_stop) != 0) {
             break;
         }
 
@@ -1322,7 +1323,7 @@ void Start() {
                       state.context_refs);
             return;
         }
-        state.runtime_stop.store(false, std::memory_order_relaxed);
+        retro_atomic_store_relaxed_int(&state.runtime_stop, 0);
         LOG_DEBUG(Lib_NpSignaling, "Signaling runtime starting refs={}", state.context_refs);
         state.runtime_thread = std::thread(ThreadMain);
         state.activation_thread = std::thread(ActivationThreadMain);
@@ -1335,7 +1336,7 @@ void Stop() {
             if (state.context_refs > 0) {
                 return true;
             }
-            state.runtime_stop.store(true, std::memory_order_relaxed);
+            retro_atomic_store_relaxed_int(&state.runtime_stop, 1);
             state.activation_cv.notify_all();
             return false;
         })) {

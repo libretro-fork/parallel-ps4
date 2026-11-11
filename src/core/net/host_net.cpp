@@ -5,6 +5,7 @@
 #include <array>
 #include <climits>
 #include <cstdint>
+#include <retro_atomic.h>
 
 #include "core/net/host_net.h"
 
@@ -779,9 +780,9 @@ u64 SlotState(u64 version, u64 flags) {
 } // namespace
 
 struct HostEpoll::Slot {
-    std::atomic<u64> state{0};
-    std::atomic<u64> socket{0};
-    std::atomic<u64> tag{0};
+    retro_atomic_64_t state{0};
+    retro_atomic_64_t socket{0};
+    retro_atomic_64_t tag{0};
 };
 
 HostEpoll::HostEpoll() : slots_(std::make_unique<Slot[]>(MaxSlots)) {}
@@ -796,12 +797,13 @@ Error HostEpoll::Store(NativeSocket s, u64 tag, u32 events, u32 flags, bool add)
     // The writer is the only one to change which socket a slot holds.
     u32 free_slot = MaxSlots;
     u32 index = MaxSlots;
-    const u32 high = high_water_.load(std::memory_order_relaxed);
+    const u32 high = static_cast<u32>(retro_atomic_load_relaxed_int(&high_water_));
     for (u32 i = 0; i < high; ++i) {
-        const u64 state = slots_[i].state.load(std::memory_order_relaxed);
+        const u64 state = static_cast<u64>(retro_atomic_load_relaxed_64(&slots_[i].state));
         if (!(state & SlotUsed)) {
             free_slot = std::min(free_slot, i);
-        } else if (slots_[i].socket.load(std::memory_order_relaxed) == static_cast<u64>(s)) {
+        } else if (static_cast<u64>(retro_atomic_load_relaxed_64(&slots_[i].socket)) ==
+                   static_cast<u64>(s)) {
             index = i;
             break;
         }
@@ -821,7 +823,7 @@ Error HostEpoll::Store(NativeSocket s, u64 tag, u32 events, u32 flags, bool add)
     flag_bits |= (flags & OneShot) ? SlotOneShot : 0;
     Write(index, s, tag, flag_bits);
     if (index >= high) {
-        high_water_.store(index + 1, std::memory_order_release);
+        retro_atomic_store_release_int(&high_water_, index + 1);
     }
     Changed();
     return Error::Ok;
@@ -830,19 +832,19 @@ Error HostEpoll::Store(NativeSocket s, u64 tag, u32 events, u32 flags, bool add)
 void HostEpoll::Write(u32 index, NativeSocket s, u64 tag, u64 flag_bits) {
     Slot& slot = slots_[index];
     // Odd: waiters skip the slot, and a waiter's one-shot take fails.
-    u64 state = slot.state.load(std::memory_order_relaxed);
-    while (!slot.state.compare_exchange_weak(
-        state, SlotState(SlotVersion(state) + 1, state & SlotFlags), std::memory_order_acquire,
-        std::memory_order_relaxed)) {
+    u64 state = static_cast<u64>(retro_atomic_load_relaxed_64(&slot.state));
+    while (!(retro_atomic_cas_64(&slot.state, state,
+                                 SlotState(SlotVersion(state) + 1, state & SlotFlags)) ||
+             ((state = static_cast<u64>(retro_atomic_load_acquire_64(&slot.state))), false))) {
     }
-    slot.socket.store(static_cast<u64>(s), std::memory_order_relaxed);
-    slot.tag.store(tag, std::memory_order_relaxed);
-    slot.state.store(SlotState(SlotVersion(state) + 2, flag_bits), std::memory_order_release);
+    retro_atomic_store_relaxed_64(&slot.socket, static_cast<u64>(s));
+    retro_atomic_store_relaxed_64(&slot.tag, tag);
+    retro_atomic_store_release_64(&slot.state, SlotState(SlotVersion(state) + 2, flag_bits));
 }
 
 // A waiter rebuilds its poll set when told. Only a waiting thread needs telling.
 void HostEpoll::Changed() {
-    if (waiters_.load(std::memory_order_acquire) != 0) {
+    if (static_cast<u32>(retro_atomic_load_acquire_int(&waiters_)) != 0) {
         wake_.Signal();
     }
 }
@@ -856,10 +858,11 @@ Error HostEpoll::Modify(NativeSocket s, u64 tag, u32 events, u32 flags) {
 }
 
 Error HostEpoll::Remove(NativeSocket s) {
-    const u32 high = high_water_.load(std::memory_order_relaxed);
+    const u32 high = static_cast<u32>(retro_atomic_load_relaxed_int(&high_water_));
     for (u32 i = 0; i < high; ++i) {
-        if ((slots_[i].state.load(std::memory_order_relaxed) & SlotUsed) &&
-            slots_[i].socket.load(std::memory_order_relaxed) == static_cast<u64>(s)) {
+        if ((static_cast<u64>(retro_atomic_load_relaxed_64(&slots_[i].state)) & SlotUsed) &&
+            static_cast<u64>(retro_atomic_load_relaxed_64(&slots_[i].socket)) ==
+                static_cast<u64>(s)) {
             Write(i, InvalidSocket, 0, 0);
             Changed();
             return Error::Ok;
@@ -874,12 +877,12 @@ EpollWaitResult HostEpoll::Wait(std::span<EpollEvent> out, Deadline deadline) {
         return {0, false, Error::Inval};
     }
     struct Waiting {
-        std::atomic<u32>& count;
-        explicit Waiting(std::atomic<u32>& c) : count(c) {
-            count.fetch_add(1, std::memory_order_acq_rel);
+        retro_atomic_int_t& count;
+        explicit Waiting(retro_atomic_int_t& c) : count(c) {
+            retro_atomic_fetch_add_int(&count, 1);
         }
         ~Waiting() {
-            count.fetch_sub(1, std::memory_order_acq_rel);
+            retro_atomic_fetch_sub_int(&count, 1);
         }
     } waiting{waiters_};
 
@@ -899,17 +902,17 @@ EpollWaitResult HostEpoll::Wait(std::span<EpollEvent> out, Deadline deadline) {
         fds[n].fd = wake_.PollHandle();
         fds[n].events = POLLIN;
         ++n;
-        const u32 high = high_water_.load(std::memory_order_acquire);
+        const u32 high = static_cast<u32>(retro_atomic_load_acquire_int(&high_water_));
         for (u32 i = 0; i < high; ++i) {
             Slot& slot = slots_[i];
-            const u64 state = slot.state.load(std::memory_order_acquire);
+            const u64 state = static_cast<u64>(retro_atomic_load_acquire_64(&slot.state));
             if ((SlotVersion(state) & 1) || !(state & SlotUsed) || !(state & SlotArmed)) {
                 continue;
             }
-            const auto sock =
-                static_cast<NativeSocket>(slot.socket.load(std::memory_order_relaxed));
-            std::atomic_thread_fence(std::memory_order_acquire);
-            if (slot.state.load(std::memory_order_relaxed) != state) {
+            const auto sock = static_cast<NativeSocket>(
+                static_cast<u64>(retro_atomic_load_relaxed_64(&slot.socket)));
+            retro_atomic_thread_fence_acquire();
+            if (static_cast<u64>(retro_atomic_load_relaxed_64(&slot.state)) != state) {
                 continue; // changed under us; the writer will say so
             }
             fds[n].fd = sock;
@@ -922,7 +925,8 @@ EpollWaitResult HostEpoll::Wait(std::span<EpollEvent> out, Deadline deadline) {
 
         // Another waiter may have taken the change signal: look again now and then
         int timeout = TimeoutMs(deadline);
-        if (waiters_.load(std::memory_order_relaxed) > 1 && (timeout < 0 || timeout > 50)) {
+        if (static_cast<u32>(retro_atomic_load_relaxed_int(&waiters_)) > 1 &&
+            (timeout < 0 || timeout > 50)) {
             timeout = 50;
         }
         const int ready = socket_poll(fds.data(), n, timeout);
@@ -932,12 +936,12 @@ EpollWaitResult HostEpoll::Wait(std::span<EpollEvent> out, Deadline deadline) {
 
         EpollWaitResult r{0, false, Error::Ok};
         if (fds[0].revents != 0) {
-            if (guest_wakes_.load(std::memory_order_acquire) != 0) {
+            if (static_cast<u32>(retro_atomic_load_acquire_int(&guest_wakes_)) != 0) {
                 r.woken = true;
             } else {
                 // A table change. A guest wake that lands while draining is put back.
                 wake_.Drain();
-                if (guest_wakes_.load(std::memory_order_acquire) != 0) {
+                if (static_cast<u32>(retro_atomic_load_acquire_int(&guest_wakes_)) != 0) {
                     wake_.Signal();
                     r.woken = true;
                 }
@@ -952,12 +956,13 @@ EpollWaitResult HostEpoll::Wait(std::span<EpollEvent> out, Deadline deadline) {
             u64 state = seen[k];
             if (state & SlotOneShot) {
                 // Taken once, by whichever waiter gets here first
-                if (!slot.state.compare_exchange_strong(
-                        state, SlotState(SlotVersion(state) + 2, state & ~SlotArmed),
-                        std::memory_order_acq_rel, std::memory_order_relaxed)) {
+                if (!(retro_atomic_cas_64(&slot.state, state,
+                                          SlotState(SlotVersion(state) + 2, state & ~SlotArmed)) ||
+                      ((state = static_cast<u64>(retro_atomic_load_acquire_64(&slot.state))),
+                       false))) {
                     continue;
                 }
-            } else if (slot.state.load(std::memory_order_acquire) != state) {
+            } else if (static_cast<u64>(retro_atomic_load_acquire_64(&slot.state)) != state) {
                 continue; // changed since the poll set was built
             }
             u32 ev = 0;
@@ -965,7 +970,7 @@ EpollWaitResult HostEpoll::Wait(std::span<EpollEvent> out, Deadline deadline) {
             ev |= (rev & POLLOUT) ? EvOut : 0;
             ev |= (rev & POLLERR) ? EvErr : 0;
             ev |= (rev & POLLHUP) ? EvHup : 0;
-            out[r.count++] = {slot.tag.load(std::memory_order_relaxed), ev};
+            out[r.count++] = {static_cast<u64>(retro_atomic_load_relaxed_64(&slot.tag)), ev};
         }
         if (r.count > 0 || r.woken || Expired(deadline)) {
             return r;
@@ -974,12 +979,12 @@ EpollWaitResult HostEpoll::Wait(std::span<EpollEvent> out, Deadline deadline) {
 }
 
 void HostEpoll::Wake() {
-    guest_wakes_.fetch_add(1, std::memory_order_acq_rel);
+    retro_atomic_fetch_add_int(&guest_wakes_, 1);
     wake_.Signal();
 }
 
 void HostEpoll::DrainWake() {
-    guest_wakes_.store(0, std::memory_order_release);
+    retro_atomic_store_release_int(&guest_wakes_, 0);
     wake_.Drain();
 }
 

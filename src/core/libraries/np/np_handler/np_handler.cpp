@@ -6,6 +6,7 @@
 #include <chrono>
 #include <cstring>
 #include <fmt/format.h>
+#include <retro_atomic.h>
 #include "common/elf_info.h"
 #include "common/logging/log.h"
 #include "core/emulator_settings.h"
@@ -131,13 +132,14 @@ bool NpHandler::ConnectUserById(s32 user_id) {
 
 void NpHandler::StartWorker() {
     bool expected = false;
-    if (m_worker_running.compare_exchange_strong(expected, true)) {
+    if ((retro_atomic_cas_int(&m_worker_running, expected, true) ||
+         ((expected = (retro_atomic_load_acquire_int(&m_worker_running) != 0)), false))) {
         m_worker_thread = std::thread(&NpHandler::WorkerThread, this);
     }
 }
 
 void NpHandler::Initialize() {
-    if (m_initialized.exchange(true)) {
+    if (retro_atomic_exchange_int(&m_initialized, 1) != 0) {
         LOG_WARNING(NpHandler, "Initialize called more than once");
         return;
     }
@@ -210,10 +212,10 @@ void NpHandler::Initialize() {
 }
 
 void NpHandler::Shutdown() {
-    if (!m_initialized.exchange(false))
+    if (retro_atomic_exchange_int(&m_initialized, 0) == 0)
         return;
 
-    m_worker_running = false;
+    (void)retro_atomic_exchange_int(&m_worker_running, 0);
 
     // Stop any pending reconnect retries.
     m_mutex_clients.Run([&] { m_reconnect.clear(); });
@@ -275,7 +277,7 @@ bool NpHandler::ConnectUser(s32 user_id, const std::string& host, u16 port, cons
 
     // Seed the current Appear-Offline preference so the login packet carries it (the send
     // is suppressed pre-auth; it just caches on the client).
-    client->SetAppearOffline(m_appear_offline.load());
+    client->SetAppearOffline(retro_atomic_load_seq_cst_int(&m_appear_offline) != 0);
     client->Start(host, port, npid, password, token);
 
     // Shared handling for an incompatible-protocol failure (version mismatch or
@@ -350,7 +352,7 @@ bool NpHandler::ConnectUser(s32 user_id, const std::string& host, u16 port, cons
 }
 
 void NpHandler::SetAppearOffline(bool enable) {
-    m_appear_offline = enable;
+    (void)retro_atomic_exchange_int(&m_appear_offline, enable);
     m_mutex_clients.Run([&] {
         for (auto& [uid, client] : m_clients) {
             if (client)
@@ -455,7 +457,7 @@ void NpHandler::OnUserLoggedOut(s32 user_id) {
 void NpHandler::WorkerThread() {
     constexpr auto INTERVAL = std::chrono::milliseconds(500);
 
-    while (m_worker_running) {
+    while (retro_atomic_load_seq_cst_int(&m_worker_running) != 0) {
         std::this_thread::sleep_for(INTERVAL);
 
         // Collect ids of dropped clients
@@ -501,7 +503,7 @@ void NpHandler::TryReconnect() {
     });
 
     for (s32 uid : due) {
-        if (!m_worker_running)
+        if (retro_atomic_load_seq_cst_int(&m_worker_running) == 0)
             return;
         if (!emu_settings_is_shadnet_enabled()) {
             m_mutex_clients.Run([&] { m_reconnect.erase(uid); });

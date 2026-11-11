@@ -3,8 +3,8 @@
 
 #pragma once
 
-#include <atomic>
 #include <memory>
+#include <retro_atomic.h>
 #include "common/assert.h"
 #include "common/types.h"
 
@@ -20,11 +20,11 @@ public:
     constexpr SlabHeapImpl() = default;
 
     void Initialize() {
-        ASSERT(Pointer(m_head.load()) == nullptr);
+        ASSERT(Pointer(static_cast<u64>(retro_atomic_load_acquire_64(&m_head))) == nullptr);
     }
 
     Node* GetHead() const {
-        return Pointer(m_head.load(std::memory_order_acquire));
+        return Pointer(static_cast<u64>(retro_atomic_load_acquire_64(&m_head)));
     }
 
     /// Pops the free list: a compare-exchange on its head, which carries a tag that every
@@ -34,15 +34,15 @@ public:
     /// is still slab memory, never unmapped, and its stale next is thrown away by the failed
     /// exchange.
     void* Allocate() {
-        u64 head = m_head.load(std::memory_order_acquire);
+        u64 head = static_cast<u64>(retro_atomic_load_acquire_64(&m_head));
         for (;;) {
             Node* node = Pointer(head);
             if (node == nullptr) {
                 return nullptr;
             }
             const u64 next = Pack(node->next, Tag(head) + 1);
-            if (m_head.compare_exchange_weak(head, next, std::memory_order_acquire,
-                                             std::memory_order_acquire)) {
+            if ((retro_atomic_cas_64(&m_head, head, next) ||
+                 ((head = static_cast<u64>(retro_atomic_load_acquire_64(&m_head))), false))) {
                 return node;
             }
         }
@@ -50,11 +50,11 @@ public:
 
     void Free(void* obj) {
         Node* node = static_cast<Node*>(obj);
-        u64 head = m_head.load(std::memory_order_relaxed);
+        u64 head = static_cast<u64>(retro_atomic_load_relaxed_64(&m_head));
         do {
             node->next = Pointer(head);
-        } while (!m_head.compare_exchange_weak(
-            head, Pack(node, Tag(head) + 1), std::memory_order_release, std::memory_order_relaxed));
+        } while (!(retro_atomic_cas_64(&m_head, head, Pack(node, Tag(head) + 1)) ||
+                   ((head = static_cast<u64>(retro_atomic_load_acquire_64(&m_head))), false)));
     }
 
 private:
@@ -72,7 +72,7 @@ private:
         return address | ((tag & 0xFFFF) << 48);
     }
 
-    std::atomic<u64> m_head{};
+    retro_atomic_64_t m_head{};
 };
 
 class SlabHeapBase : protected SlabHeapImpl {

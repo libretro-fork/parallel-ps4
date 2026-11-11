@@ -5,6 +5,7 @@
 
 #include "vdecsw_impl.h"
 
+#include <retro_atomic.h>
 #include "common/alignment.h"
 #include "common/assert.h"
 #include "common/logging/log.h"
@@ -34,7 +35,7 @@ VdecDecoder::VdecDecoder(const OrbisVdecswDecoderConfigInfo& config_info,
     : m_decoder(config_info.codec_type != OrbisVdecswCodecType::Avc),
       m_is_avc(config_info.codec_type == OrbisVdecswCodecType::Avc) {
     for (u32 i = 0; i < CommandSlots; ++i) {
-        m_commands[i].seq.store(i, std::memory_order_relaxed);
+        retro_atomic_store_relaxed_int(&m_commands[i].seq, i);
     }
     const bool worker_ec = retro_eventcount_init(&m_worker_ec);
     const bool game_ec = retro_eventcount_init(&m_game_ec);
@@ -56,7 +57,7 @@ VdecDecoder::~VdecDecoder() {
     if (!m_ec_ok) {
         return;
     }
-    m_stop.store(true, std::memory_order_release);
+    retro_atomic_store_release_int(&m_stop, 1);
     retro_eventcount_notify(&m_worker_ec);
     retro_eventcount_notify(&m_game_ec);
     m_worker_thread.join();
@@ -65,31 +66,33 @@ VdecDecoder::~VdecDecoder() {
 }
 
 bool VdecDecoder::PostCommand(CommandType type, const OrbisVdecswInputData* input) {
-    u32 pos = m_command_tail.load(std::memory_order_relaxed);
+    u32 pos = static_cast<u32>(retro_atomic_load_relaxed_int(&m_command_tail));
     Command* cell;
     for (;;) {
         cell = &m_commands[pos % CommandSlots];
-        const u32 seq = cell->seq.load(std::memory_order_acquire);
+        const u32 seq = static_cast<u32>(retro_atomic_load_acquire_int(&cell->seq));
         const s32 diff = static_cast<s32>(seq - pos);
         if (diff == 0) {
-            if (m_command_tail.compare_exchange_weak(pos, pos + 1, std::memory_order_relaxed)) {
+            if ((retro_atomic_cas_int(&m_command_tail, pos, pos + 1) ||
+                 ((pos = static_cast<u32>(retro_atomic_load_acquire_int(&m_command_tail))),
+                  false))) {
                 break;
             }
         } else if (diff < 0) {
             return false; // full
         } else {
-            pos = m_command_tail.load(std::memory_order_relaxed);
+            pos = static_cast<u32>(retro_atomic_load_relaxed_int(&m_command_tail));
         }
     }
     cell->type = type;
-    cell->epoch = m_epoch.load(std::memory_order_relaxed);
+    cell->epoch = static_cast<u32>(retro_atomic_load_relaxed_int(&m_epoch));
     if (input) {
         // The game may reuse its buffer as soon as this call returns
         cell->input = *input;
         const u8* au = static_cast<const u8*>(input->au_data);
         cell->au.assign(au, au + input->au_size);
     }
-    cell->seq.store(pos + 1, std::memory_order_release);
+    retro_atomic_store_release_int(&cell->seq, pos + 1);
     retro_eventcount_notify(&m_worker_ec);
     return true;
 }
@@ -108,9 +111,9 @@ s32 VdecDecoder::SetDecodeInput(const OrbisVdecswInputData& input_data) {
     }
     // Each input gives at most one picture: with the pictures not taken yet, the inputs in
     // flight must fit the picture ring, so the worker never waits for the game here
-    const s32 unsynced = m_unsynced_inputs.load(std::memory_order_relaxed);
-    const u32 queued =
-        m_frame_tail.load(std::memory_order_acquire) - m_frame_head.load(std::memory_order_relaxed);
+    const s32 unsynced = static_cast<s32>(retro_atomic_load_relaxed_int(&m_unsynced_inputs));
+    const u32 queued = static_cast<u32>(retro_atomic_load_acquire_int(&m_frame_tail)) -
+                       static_cast<u32>(retro_atomic_load_relaxed_int(&m_frame_head));
     if (queued + static_cast<u32>(unsynced) + 1 > FrameSlots) {
         LOG_TRACE(Lib_Vdecsw, "ORBIS_VDECSW_ERROR_OUTPUT_PENDING");
         return ORBIS_VDECSW_ERROR_OUTPUT_PENDING;
@@ -121,16 +124,16 @@ s32 VdecDecoder::SetDecodeInput(const OrbisVdecswInputData& input_data) {
         LOG_ERROR(Lib_Vdecsw, "ORBIS_VDECSW_ERROR_INPUT_QUEUE_FULL");
         return ORBIS_VDECSW_ERROR_INPUT_QUEUE_FULL;
     }
-    m_unsynced_inputs.fetch_add(1, std::memory_order_relaxed);
+    retro_atomic_fetch_add_int(&m_unsynced_inputs, 1);
     return ORBIS_OK;
 }
 
 bool VdecDecoder::PeekCompleted(CompletedInput& out) {
-    const u32 epoch = m_epoch.load(std::memory_order_relaxed);
-    u32 head = m_completed_head.load(std::memory_order_relaxed);
-    while (head != m_completed_tail.load(std::memory_order_acquire)) {
+    const u32 epoch = static_cast<u32>(retro_atomic_load_relaxed_int(&m_epoch));
+    u32 head = static_cast<u32>(retro_atomic_load_relaxed_int(&m_completed_head));
+    while (head != static_cast<u32>(retro_atomic_load_acquire_int(&m_completed_tail))) {
         out = m_completed[head % CommandSlots];
-        m_completed_head.store(++head, std::memory_order_release);
+        retro_atomic_store_release_int(&m_completed_head, ++head);
         if (out.epoch == epoch) {
             return true;
         }
@@ -144,15 +147,16 @@ s32 VdecDecoder::SyncDecodeInput(OrbisVdecswInputResult& input_result) {
     if (m_ec_ok) {
         WaitFor(&m_game_ec, [&] {
             got = got || PeekCompleted(entry);
-            return got || m_unsynced_inputs.load(std::memory_order_relaxed) == 0 ||
-                   m_stop.load(std::memory_order_acquire);
+            return got ||
+                   static_cast<s32>(retro_atomic_load_relaxed_int(&m_unsynced_inputs)) == 0 ||
+                   (retro_atomic_load_acquire_int(&m_stop) != 0);
         });
     }
     if (!got) {
         LOG_ERROR(Lib_Vdecsw, "ORBIS_VDECSW_ERROR_INPUT_QUEUE_EMPTY");
         return ORBIS_VDECSW_ERROR_INPUT_QUEUE_EMPTY;
     }
-    m_unsynced_inputs.fetch_sub(1, std::memory_order_relaxed);
+    retro_atomic_fetch_sub_int(&m_unsynced_inputs, 1);
     input_result.decoded_au = entry.au_data;
     input_result.output_frame_count = entry.output_frame_count;
     input_result.reserved0 = 0;
@@ -162,14 +166,14 @@ s32 VdecDecoder::SyncDecodeInput(OrbisVdecswInputResult& input_result) {
 s32 VdecDecoder::TrySyncDecodeInput(OrbisVdecswInputResult& input_result) {
     CompletedInput entry{};
     if (!PeekCompleted(entry)) {
-        if (m_unsynced_inputs.load(std::memory_order_relaxed) == 0) {
+        if (static_cast<s32>(retro_atomic_load_relaxed_int(&m_unsynced_inputs)) == 0) {
             LOG_ERROR(Lib_Vdecsw, "ORBIS_VDECSW_ERROR_INPUT_QUEUE_EMPTY");
             return ORBIS_VDECSW_ERROR_INPUT_QUEUE_EMPTY;
         }
         LOG_TRACE(Lib_Vdecsw, "ORBIS_VDECSW_ERROR_DECODE_PENDING");
         return ORBIS_VDECSW_ERROR_DECODE_PENDING;
     }
-    m_unsynced_inputs.fetch_sub(1, std::memory_order_relaxed);
+    retro_atomic_fetch_sub_int(&m_unsynced_inputs, 1);
     input_result.decoded_au = entry.au_data;
     input_result.output_frame_count = entry.output_frame_count;
     input_result.reserved0 = 0;
@@ -185,37 +189,37 @@ s32 VdecDecoder::SetDecodeOutput(const OrbisVdecswFrameBuffer& frame_buffer) {
         LOG_ERROR(Lib_Vdecsw, "ORBIS_VDECSW_ERROR_FRAME_BUFFER_SIZE");
         return ORBIS_VDECSW_ERROR_FRAME_BUFFER_SIZE;
     }
-    if (m_output_set.load(std::memory_order_acquire)) {
+    if (retro_atomic_load_acquire_int(&m_output_set) != 0) {
         LOG_ERROR(Lib_Vdecsw, "ORBIS_VDECSW_ERROR_OUTPUT_BUFFER_FULL");
         return ORBIS_VDECSW_ERROR_OUTPUT_BUFFER_FULL;
     }
     m_pending_output = frame_buffer;
-    m_output_set.store(true, std::memory_order_release);
+    retro_atomic_store_release_int(&m_output_set, 1);
     return ORBIS_OK;
 }
 
 VdecDecoder::DecodedFrame* VdecDecoder::PeekFrame() {
-    const u32 epoch = m_epoch.load(std::memory_order_relaxed);
-    u32 head = m_frame_head.load(std::memory_order_relaxed);
-    while (head != m_frame_tail.load(std::memory_order_acquire)) {
+    const u32 epoch = static_cast<u32>(retro_atomic_load_relaxed_int(&m_epoch));
+    u32 head = static_cast<u32>(retro_atomic_load_relaxed_int(&m_frame_head));
+    while (head != static_cast<u32>(retro_atomic_load_acquire_int(&m_frame_tail))) {
         DecodedFrame& frame = m_frames[head % FrameSlots];
         if (frame.epoch == epoch) {
             return &frame;
         }
-        m_frame_head.store(++head, std::memory_order_release);
+        retro_atomic_store_release_int(&m_frame_head, ++head);
         retro_eventcount_notify(&m_worker_ec);
     }
     return nullptr;
 }
 
 void VdecDecoder::PopFrame() {
-    m_frame_head.fetch_add(1, std::memory_order_release);
+    retro_atomic_fetch_add_int(&m_frame_head, 1);
     retro_eventcount_notify(&m_worker_ec);
 }
 
 bool VdecDecoder::Finalized() const {
-    return m_finalized_epoch.load(std::memory_order_acquire) ==
-           m_epoch.load(std::memory_order_relaxed);
+    return static_cast<u32>(retro_atomic_load_acquire_int(&m_finalized_epoch)) ==
+           static_cast<u32>(retro_atomic_load_relaxed_int(&m_epoch));
 }
 
 void VdecDecoder::ResetOutputInfo(OrbisVdecswOutputInfo& output_info) {
@@ -235,9 +239,9 @@ s32 VdecDecoder::TakeOutput(OrbisVdecswOutputInfo& output_info,
         output_info.is_last_frame = finalized;
         return ORBIS_OK;
     }
-    const u32 head = m_frame_head.load(std::memory_order_relaxed);
+    const u32 head = static_cast<u32>(retro_atomic_load_relaxed_int(&m_frame_head));
     const bool is_last_frame =
-        finalized && head + 1 == m_frame_tail.load(std::memory_order_acquire);
+        finalized && head + 1 == static_cast<u32>(retro_atomic_load_acquire_int(&m_frame_tail));
     const s32 result = WriteFrame(output_info, *frame, frame_buffer, is_last_frame);
     PopFrame();
     return result;
@@ -245,15 +249,16 @@ s32 VdecDecoder::TakeOutput(OrbisVdecswOutputInfo& output_info,
 
 s32 VdecDecoder::SyncDecodeOutput(OrbisVdecswOutputInfo& output_info) {
     ResetOutputInfo(output_info);
-    if (!m_output_set.load(std::memory_order_acquire)) {
+    if (retro_atomic_load_acquire_int(&m_output_set) == 0) {
         LOG_ERROR(Lib_Vdecsw, "ORBIS_VDECSW_ERROR_OUTPUT_BUFFER_EMPTY");
         return ORBIS_VDECSW_ERROR_OUTPUT_BUFFER_EMPTY;
     }
     const OrbisVdecswFrameBuffer frame_buffer = m_pending_output;
-    m_output_set.store(false, std::memory_order_release);
+    retro_atomic_store_release_int(&m_output_set, 0);
     if (m_ec_ok) {
         WaitFor(&m_game_ec, [&] {
-            return PeekFrame() != nullptr || Finalized() || m_stop.load(std::memory_order_acquire);
+            return PeekFrame() != nullptr || Finalized() ||
+                   (retro_atomic_load_acquire_int(&m_stop) != 0);
         });
     }
     return TakeOutput(output_info, frame_buffer);
@@ -261,7 +266,7 @@ s32 VdecDecoder::SyncDecodeOutput(OrbisVdecswOutputInfo& output_info) {
 
 s32 VdecDecoder::TrySyncDecodeOutput(OrbisVdecswOutputInfo& output_info) {
     ResetOutputInfo(output_info);
-    if (!m_output_set.load(std::memory_order_acquire)) {
+    if (retro_atomic_load_acquire_int(&m_output_set) == 0) {
         LOG_ERROR(Lib_Vdecsw, "ORBIS_VDECSW_ERROR_OUTPUT_BUFFER_EMPTY");
         return ORBIS_VDECSW_ERROR_OUTPUT_BUFFER_EMPTY;
     }
@@ -270,7 +275,7 @@ s32 VdecDecoder::TrySyncDecodeOutput(OrbisVdecswOutputInfo& output_info) {
         return ORBIS_VDECSW_ERROR_DECODE_PENDING;
     }
     const OrbisVdecswFrameBuffer frame_buffer = m_pending_output;
-    m_output_set.store(false, std::memory_order_release);
+    retro_atomic_store_release_int(&m_output_set, 0);
     return TakeOutput(output_info, frame_buffer);
 }
 
@@ -283,9 +288,9 @@ s32 VdecDecoder::FinalizeDecodeSequence() {
 
 s32 VdecDecoder::Reset() {
     // A new epoch: whatever the worker still hands back from before is dropped as it is read
-    m_epoch.fetch_add(1, std::memory_order_relaxed);
-    m_output_set.store(false, std::memory_order_release);
-    m_unsynced_inputs.store(0, std::memory_order_relaxed);
+    retro_atomic_fetch_add_int(&m_epoch, 1);
+    retro_atomic_store_release_int(&m_output_set, 0);
+    retro_atomic_store_relaxed_int(&m_unsynced_inputs, 0);
     CompletedInput stale;
     PeekCompleted(stale);
     PeekFrame();
@@ -301,11 +306,11 @@ void VdecDecoder::WorkerLoop() {
         Command* cell = nullptr;
         WaitFor(&m_worker_ec, [&] {
             Command& next = m_commands[m_command_head % CommandSlots];
-            if (next.seq.load(std::memory_order_acquire) == m_command_head + 1) {
+            if (static_cast<u32>(retro_atomic_load_acquire_int(&next.seq)) == m_command_head + 1) {
                 cell = &next;
                 return true;
             }
-            return m_stop.load(std::memory_order_acquire);
+            return (retro_atomic_load_acquire_int(&m_stop) != 0);
         });
         if (!cell) {
             return;
@@ -321,13 +326,13 @@ void VdecDecoder::WorkerLoop() {
             m_decoder.Reset();
             break;
         }
-        cell->seq.store(m_command_head + CommandSlots, std::memory_order_release);
+        retro_atomic_store_release_int(&cell->seq, m_command_head + CommandSlots);
         ++m_command_head;
     }
 }
 
 void VdecDecoder::ProcessInput(Command& command) {
-    if (command.epoch != m_epoch.load(std::memory_order_relaxed)) {
+    if (command.epoch != static_cast<u32>(retro_atomic_load_relaxed_int(&m_epoch))) {
         return; // posted before a reset
     }
     if (!m_decoder.IsOpen()) {
@@ -350,35 +355,35 @@ void VdecDecoder::ProcessInput(Command& command) {
 }
 
 void VdecDecoder::ProcessFlush(u32 epoch) {
-    if (epoch != m_epoch.load(std::memory_order_relaxed)) {
+    if (epoch != static_cast<u32>(retro_atomic_load_relaxed_int(&m_epoch))) {
         return;
     }
     // The pictures still held for display order
     while (m_decoder.IsOpen() && m_decoder.Drain()) {
         QueueFrame(epoch);
     }
-    m_finalized_epoch.store(epoch, std::memory_order_release);
+    retro_atomic_store_release_int(&m_finalized_epoch, epoch);
     retro_eventcount_notify(&m_game_ec);
 }
 
 void VdecDecoder::CompleteInput(void* au_data, u32 frame_count, s32 result, u32 epoch) {
-    const u32 tail = m_completed_tail.load(std::memory_order_relaxed);
+    const u32 tail = static_cast<u32>(retro_atomic_load_relaxed_int(&m_completed_tail));
     // SetDecodeInput keeps the inputs not yet synced below the ring's size
     m_completed[tail % CommandSlots] = CompletedInput{au_data, frame_count, result, epoch};
-    m_completed_tail.store(tail + 1, std::memory_order_release);
+    retro_atomic_store_release_int(&m_completed_tail, tail + 1);
     retro_eventcount_notify(&m_game_ec);
 }
 
 u32 VdecDecoder::QueueFrame(u32 epoch) {
-    const u32 tail = m_frame_tail.load(std::memory_order_relaxed);
+    const u32 tail = static_cast<u32>(retro_atomic_load_relaxed_int(&m_frame_tail));
     // Only the pictures a flush hands out can find the ring full: the game takes them next
     WaitFor(&m_worker_ec, [&] {
-        return tail - m_frame_head.load(std::memory_order_acquire) < FrameSlots ||
-               m_stop.load(std::memory_order_acquire) ||
-               epoch != m_epoch.load(std::memory_order_relaxed);
+        return tail - static_cast<u32>(retro_atomic_load_acquire_int(&m_frame_head)) < FrameSlots ||
+               (retro_atomic_load_acquire_int(&m_stop) != 0) ||
+               epoch != static_cast<u32>(retro_atomic_load_relaxed_int(&m_epoch));
     });
-    if (tail - m_frame_head.load(std::memory_order_acquire) >= FrameSlots ||
-        epoch != m_epoch.load(std::memory_order_relaxed)) {
+    if (tail - static_cast<u32>(retro_atomic_load_acquire_int(&m_frame_head)) >= FrameSlots ||
+        epoch != static_cast<u32>(retro_atomic_load_relaxed_int(&m_epoch))) {
         return 0;
     }
     DecodedFrame& frame = m_frames[tail % FrameSlots];
@@ -390,7 +395,7 @@ u32 VdecDecoder::QueueFrame(u32 epoch) {
     frame.height = m_decoder.Height();
     frame.epoch = epoch;
     frame.meta = m_decoder.Meta();
-    m_frame_tail.store(tail + 1, std::memory_order_release);
+    retro_atomic_store_release_int(&m_frame_tail, tail + 1);
     retro_eventcount_notify(&m_game_ec);
     return 1;
 }

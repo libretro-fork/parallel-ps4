@@ -3,7 +3,6 @@
 
 #pragma once
 
-#include <atomic>
 #include <condition_variable>
 #include <forward_list>
 #include <list>
@@ -13,6 +12,7 @@
 
 #include <rthreads/retro_eventcount.h>
 
+#include <retro_atomic.h>
 #include "common/enum.h"
 #include "common/event_count.h"
 #include "common/event_mutex.h"
@@ -52,7 +52,7 @@ struct PthreadBarrier {
         /// The generation in the high half, the threads arrived in it in the low half: one
         /// compare-exchange arrives, and the last one starts the next generation. The others
         /// park on generation_ec until it does.
-        std::atomic<u64> word{};
+        retro_atomic_64_t word{};
         retro_eventcount_t generation_ec{};
         u32 count;
 
@@ -94,7 +94,7 @@ enum class PthreadMutexProt : u32 {
 };
 
 struct PthreadMutex {
-    std::atomic<Pthread*> m_owner;
+    retro_atomic_ptr_t m_owner;
     int m_count;
     int m_spinloops;
     int m_yieldloops;
@@ -260,8 +260,8 @@ struct PthreadSpecificElem {
 using PthreadKeyDestructor = void PS4_SYSV_ABI (*)(const void*);
 
 struct PthreadKey {
-    std::atomic<int> allocated;
-    std::atomic<int> seqno;
+    retro_atomic_int_t allocated;
+    retro_atomic_int_t seqno;
     PthreadKeyDestructor destructor;
 };
 using PthreadKeyT = s32;
@@ -274,7 +274,7 @@ enum class PthreadOnceState : u32 {
 };
 
 struct PthreadOnce {
-    std::atomic<PthreadOnceState> state;
+    retro_atomic_int_t state;
     PthreadMutexT mutex;
 };
 
@@ -308,28 +308,28 @@ struct Pthread {
     static constexpr u32 ThrMagic = 0xd09ba115U;
     static constexpr u32 MaxDeferWaiters = 50;
 
-    std::atomic<s32> tid;
+    retro_atomic_int_t tid;
     // Held across calls (libthr's thread lock): taken here, given back where the thread is
     // collected
     std::unique_ptr<Common::EventMutex> lock = std::make_unique<Common::EventMutex>();
     u32 cycle;
-    std::atomic_int locklevel;
-    std::atomic_int critical_count;
+    retro_atomic_int_t locklevel;
+    retro_atomic_int_t critical_count;
     int sigblock;
     int refcount;
     PthreadEntryFunc start_routine;
     void* arg;
     std::unique_ptr<Core::NativeThread> native_thr;
     PthreadAttr attr;
-    std::atomic_bool cancel_enable;
-    std::atomic_bool cancel_pending;
-    std::atomic_bool cancel_point;
-    std::atomic_bool no_cancel;
-    std::atomic_bool cancel_async;
-    std::atomic_bool cancelling;
+    retro_atomic_int_t cancel_enable;
+    retro_atomic_int_t cancel_pending;
+    retro_atomic_int_t cancel_point;
+    retro_atomic_int_t no_cancel;
+    retro_atomic_int_t cancel_async;
+    retro_atomic_int_t cancelling;
     u64 sigmask;
     bool unblock_sigcancel;
-    std::atomic_bool in_sigsuspend{};
+    retro_atomic_int_t in_sigsuspend{};
     bool force_exit;
     PthreadState state;
     int error;
@@ -362,17 +362,17 @@ struct Pthread {
     /// here
     Common::EventCount join_wait;
 
-    std::array<std::atomic<u32>, 128> pending_signal_counts{};
-    std::array<std::atomic<u32>, 4> guest_sigmask{};
+    std::array<retro_atomic_int_t, 128> pending_signal_counts{};
+    std::array<retro_atomic_int_t, 4> guest_sigmask{};
 
     WakeSemaphore signal_sema{0};
-    std::atomic_bool in_sigwait{};
-    // std::atomic_bool in_sigsuspend{};
-    std::atomic_bool sigsuspend_interrupted{};
+    retro_atomic_int_t in_sigwait{};
+    // retro_atomic_int_t in_sigsuspend{};
+    retro_atomic_int_t sigsuspend_interrupted{};
     Sigset sigwait_set{};
     OrbisKernelExceptionHandlerStack sigaltstack{};
     Mcontext suspended_context{};
-    std::atomic_bool is_suspended_in_signal{false};
+    retro_atomic_int_t is_suspended_in_signal{0};
 
     bool IsSignalBlocked(s32 sig) const;
     void QueueSignal(s32 sig);
@@ -388,8 +388,8 @@ struct Pthread {
     void SetGuestSigmask(Sigset const& mask);
 
     bool InCritical() const noexcept {
-        return locklevel.load(std::memory_order_acquire) > 0 ||
-               critical_count.load(std::memory_order_acquire) > 0;
+        return retro_atomic_load_acquire_int(&locklevel) > 0 ||
+               retro_atomic_load_acquire_int(&critical_count) > 0;
     }
 
     bool ShouldCollect() const noexcept {
@@ -397,7 +397,9 @@ struct Pthread {
     }
 
     bool ShouldCancel() const noexcept {
-        return cancel_pending && cancel_enable && no_cancel == 0;
+        return (retro_atomic_load_seq_cst_int(&cancel_pending) != 0) &&
+               (retro_atomic_load_seq_cst_int(&cancel_enable) != 0) &&
+               (retro_atomic_load_seq_cst_int(&no_cancel) != 0) == 0;
     }
 
     void WakeAll() {

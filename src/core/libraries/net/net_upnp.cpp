@@ -3,6 +3,7 @@
 
 #include <net/net_compat.h>
 
+#include <retro_atomic.h>
 #include "common/logging/log.h"
 #include "core/net/net_service.h"
 #include "net_upnp.h"
@@ -26,19 +27,20 @@ UPnPClient::UPnPClient() {
 }
 
 UPnPClient::~UPnPClient() {
-    if (m_started.load()) {
+    if (retro_atomic_load_seq_cst_int(&m_started) != 0) {
         // Leave nothing on the router: the mappings have no lease time
         Core::Net::NetService::Instance().Run(&UPnPClient::Shutdown, this);
     }
 }
 
 void UPnPClient::Start() {
-    if (!m_p2p_features_enabled.load()) {
+    if (retro_atomic_load_seq_cst_int(&m_p2p_features_enabled) == 0) {
         LOG_INFO(Lib_Net, "UPNP: skipped because Matching2 is disabled");
         return;
     }
     bool expected = false;
-    if (!m_started.compare_exchange_strong(expected, true)) {
+    if (!(retro_atomic_cas_int(&m_started, expected, true) ||
+          ((expected = (retro_atomic_load_acquire_int(&m_started) != 0)), false))) {
         return;
     }
     LOG_INFO(Lib_Net, "UPNP: looking for the router");
@@ -46,23 +48,23 @@ void UPnPClient::Start() {
 }
 
 void UPnPClient::SetP2PFeaturesEnabled(bool enabled) {
-    m_p2p_features_enabled.store(enabled);
+    (void)retro_atomic_exchange_int(&m_p2p_features_enabled, enabled);
 }
 
 u32 UPnPClient::GetExternalIp() const {
-    return m_external_ip_nbo.load();
+    return static_cast<u32>(retro_atomic_load_seq_cst_int(&m_external_ip_nbo));
 }
 
 void UPnPClient::MapPortAsync(u16 port) {
-    m_wanted_port.store(port);
-    if (m_started.load()) {
+    (void)retro_atomic_exchange_int(&m_wanted_port, port);
+    if (retro_atomic_load_seq_cst_int(&m_started) != 0) {
         Core::Net::NetService::Instance().Post(&UPnPClient::Sync, this);
     }
 }
 
 void UPnPClient::UnmapPort(u16 port) {
-    u16 expected = port;
-    if (m_wanted_port.compare_exchange_strong(expected, 0) && m_started.load()) {
+    if (retro_atomic_cas_int(&m_wanted_port, port, 0) &&
+        retro_atomic_load_seq_cst_int(&m_started) != 0) {
         Core::Net::NetService::Instance().Post(&UPnPClient::Sync, this);
     }
 }
@@ -81,7 +83,7 @@ void UPnPClient::Discover(void* self_) {
     }
     u32 ip_nbo = 0;
     inet_pton(AF_INET, external_ip, &ip_nbo);
-    self->m_external_ip_nbo.store(ip_nbo);
+    (void)retro_atomic_exchange_int(&self->m_external_ip_nbo, ip_nbo);
     self->m_have_gateway = true;
     LOG_INFO(Lib_Net, "UPNP: IGD found - external IP={} lan={} (port mapping available)",
              external_ip, self->m_gateway.lan_addr);
@@ -93,7 +95,7 @@ void UPnPClient::Sync(void* self_) {
     if (!self->m_have_gateway) {
         return; // Discover syncs once it has found the router
     }
-    const u16 wanted = self->m_wanted_port.load();
+    const u16 wanted = static_cast<u16>(retro_atomic_load_acquire_int(&self->m_wanted_port));
     if (wanted == self->m_mapped) {
         return;
     }
@@ -114,7 +116,7 @@ void UPnPClient::Sync(void* self_) {
 
 void UPnPClient::Shutdown(void* self_) {
     auto* self = static_cast<UPnPClient*>(self_);
-    self->m_wanted_port.store(0);
+    (void)retro_atomic_exchange_int(&self->m_wanted_port, 0);
     Sync(self);
 }
 

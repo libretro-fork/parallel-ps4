@@ -8,6 +8,7 @@
 
 #include "core/libraries/kernel/sync/semaphore.h"
 
+#include <retro_atomic.h>
 #include "common/combiner.h"
 #include "common/logging/log.h"
 #include "common/slot_vector.h"
@@ -25,7 +26,7 @@ constexpr s32 ORBIS_KERNEL_SEM_VALUE_MAX = 0x7FFFFFFF;
 struct PthreadSem {
     explicit PthreadSem(s32 value_) : value{value_} {}
 
-    std::atomic<s32> value;
+    retro_atomic_int_t value;
     // waiters changes one call at a time here
     Common::Combiner waiters_combiner;
     std::list<Pthread*> waiters;
@@ -35,7 +36,7 @@ class ScopedPthreadCritical {
 public:
     explicit ScopedPthreadCritical(Pthread* thread_) : thread{thread_} {
         if (thread != nullptr) {
-            thread->critical_count.fetch_add(1, std::memory_order_acq_rel);
+            retro_atomic_fetch_add_int(&thread->critical_count, 1);
         }
     }
 
@@ -43,7 +44,7 @@ public:
         if (thread == nullptr) {
             return;
         }
-        const int previous = thread->critical_count.fetch_sub(1, std::memory_order_acq_rel);
+        const int previous = retro_atomic_fetch_sub_int(&thread->critical_count, 1);
         ASSERT(previous > 0);
         if (previous == 1) {
             PthreadCancelInterrupt();
@@ -55,10 +56,10 @@ private:
 };
 
 static bool PthreadSemTryAcquire(PthreadSem* sem) {
-    s32 value = sem->value.load(std::memory_order_acquire);
+    s32 value = static_cast<s32>(retro_atomic_load_acquire_int(&sem->value));
     while (value > 0) {
-        if (sem->value.compare_exchange_weak(value, value - 1, std::memory_order_acq_rel,
-                                             std::memory_order_acquire)) {
+        if ((retro_atomic_cas_int(&sem->value, value, value - 1) ||
+             ((value = static_cast<s32>(retro_atomic_load_acquire_int(&sem->value))), false))) {
             return true;
         }
     }
@@ -96,10 +97,10 @@ static s32 PthreadSemWait(PthreadSem* sem, const OrbisKernelTimespec* abstime, u
                 // This is the host equivalent of entering a cancellation-point umtx wait.
                 // Resetting the predicate and publishing the waiter are serialized with
                 // sem_post.
-                curthread->cancel_point = true;
+                (void)retro_atomic_exchange_int(&curthread->cancel_point, 1);
                 curthread->ClearWake();
                 if (curthread->ShouldCancel()) {
-                    curthread->cancel_point = false;
+                    (void)retro_atomic_exchange_int(&curthread->cancel_point, 0);
                     cancel_before_wait = true;
                 } else {
                     sem->waiters.push_back(curthread);
@@ -140,7 +141,7 @@ static s32 PthreadSemWait(PthreadSem* sem, const OrbisKernelTimespec* abstime, u
             ScopedPthreadCritical critical{curthread};
             sem->waiters_combiner.Run([&] {
                 sem->waiters.remove(curthread);
-                curthread->cancel_point = false;
+                (void)retro_atomic_exchange_int(&curthread->cancel_point, 0);
             });
         }
 
@@ -170,8 +171,8 @@ public:
         std::optional<WaitingThread> waiter;
         WaitList::iterator it;
         const s32 early = combiner.Run([&]() -> s32 {
-            if (token_count >= need_count) {
-                token_count -= need_count;
+            if (static_cast<s32>(retro_atomic_load_seq_cst_int(&token_count)) >= need_count) {
+                retro_atomic_fetch_sub_int(&token_count, need_count);
                 return ORBIS_OK;
             }
             if (!can_block) {
@@ -214,20 +215,22 @@ public:
     }
 
     bool SignalOwned(s32 signal_count) {
-        if (token_count + signal_count > max_count) {
+        if (static_cast<s32>(retro_atomic_load_seq_cst_int(&token_count)) + signal_count >
+            max_count) {
             return false;
         }
-        token_count += signal_count;
+        retro_atomic_fetch_add_int(&token_count, signal_count);
 
         // Wake up threads in order of priority.
         for (auto it = wait_list.begin(); it != wait_list.end();) {
             auto* waiter = *it;
-            if (waiter->need_count > token_count) {
+            if (waiter->need_count >
+                static_cast<s32>(retro_atomic_load_seq_cst_int(&token_count))) {
                 ++it;
                 continue;
             }
             it = wait_list.erase(it);
-            token_count -= waiter->need_count;
+            retro_atomic_fetch_sub_int(&token_count, waiter->need_count);
             waiter->was_signaled = true;
             waiter->sem.release();
         }
@@ -245,7 +248,7 @@ public:
                 waiter->sem.release();
             }
             wait_list.clear();
-            token_count = set_count < 0 ? init_count : set_count;
+            (void)retro_atomic_exchange_int(&token_count, set_count < 0 ? init_count : set_count);
             return ORBIS_OK;
         });
     }
@@ -326,7 +329,7 @@ public:
 
     WaitList wait_list;
     std::string name;
-    std::atomic<s32> token_count;
+    retro_atomic_int_t token_count;
     // The count and the waiters change one call at a time here
     Common::Combiner combiner;
     s32 max_count;
@@ -454,13 +457,14 @@ s32 PS4_SYSV_ABI posix_sem_post(PthreadSem** sem) {
     }
     ScopedPthreadCritical critical{g_curthread};
     // Atomically check for overflow and increment in one step.
-    s32 current = (*sem)->value.load();
+    s32 current;
     do {
+        current = retro_atomic_load_seq_cst_int(&(*sem)->value);
         if (current == ORBIS_KERNEL_SEM_VALUE_MAX) {
             *__Error() = POSIX_EOVERFLOW;
             return -1;
         }
-    } while (!(*sem)->value.compare_exchange_weak(current, current + 1));
+    } while (!retro_atomic_cas_int(&(*sem)->value, current, current + 1));
 
     (*sem)->waiters_combiner.Run([&] {
         // libkernel wakes every waiter after incrementing the value. Only waiters that win the
@@ -479,7 +483,7 @@ s32 PS4_SYSV_ABI posix_sem_getvalue(PthreadSem** sem, s32* sval) {
         return -1;
     }
     if (sval) {
-        *sval = (*sem)->value;
+        *sval = retro_atomic_load_seq_cst_int(&(*sem)->value);
     }
     return 0;
 }

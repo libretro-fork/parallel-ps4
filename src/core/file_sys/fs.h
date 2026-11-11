@@ -3,12 +3,12 @@
 
 #pragma once
 
-#include <atomic>
 #include <memory>
 #include <optional>
 #include <string>
 #include <unordered_map>
 #include <vector>
+#include <retro_atomic.h>
 #include "common/combiner.h"
 #include "common/io_file.h"
 #include "common/logging/formatter.h"
@@ -148,8 +148,8 @@ enum class FileType {
 };
 
 struct File {
-    std::atomic_bool is_opened{};
-    std::atomic<FileType> type{FileType::Regular};
+    retro_atomic_int_t is_opened{};
+    retro_atomic_int_t type{static_cast<int>(FileType::Regular)};
     std::filesystem::path m_host_name;
     std::string m_guest_name;
     std::unique_ptr<IFile> handle;

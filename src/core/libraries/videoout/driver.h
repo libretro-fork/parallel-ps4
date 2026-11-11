@@ -7,8 +7,8 @@
 #include "core/libraries/videoout/video_out.h"
 
 #include <array>
-#include <atomic>
 
+#include <retro_atomic.h>
 #include <retro_spsc.h>
 #include <rthreads/retro_eventcount.h>
 #include <rthreads/retro_seqlock.h>
@@ -30,9 +30,9 @@ struct VideoOutPort {
     /// and gc_queue, and submit_tsc. GetFlipStatus puts them together.
     FlipStatus flip_status;
     retro_seqlock_t flip_seq{};
-    std::atomic<s32> flip_pending{};
-    std::atomic<s32> gc_queue{};
-    std::atomic<u64> submit_tsc{};
+    retro_atomic_int_t flip_pending{};
+    retro_atomic_int_t gc_queue{};
+    retro_atomic_64_t submit_tsc{};
     /// Written by the present thread alone, under vblank_seq; vblank_ec is notified after each.
     SceVideoOutVblankStatus vblank_status;
     retro_seqlock_t vblank_seq{};
@@ -40,13 +40,13 @@ struct VideoOutPort {
     /// The event queues to tell; a slot holds 0 when free, and is taken and freed with a
     /// compare-exchange, so the present thread walks them while the game adds and deletes.
     static constexpr size_t MaxEventQueues = 16;
-    using EventQueues = std::array<std::atomic<Kernel::OrbisKernelEqueue>, MaxEventQueues>;
+    using EventQueues = std::array<retro_atomic_64_t, MaxEventQueues>;
     EventQueues flip_events{};
     EventQueues vblank_events{};
     /// The GPU thread waiting on a VO label parks on vo_ec; a flip that clears one notifies it.
     retro_eventcount_t vo_ec{};
     /// Close asks the present thread to clear what only it writes.
-    std::atomic<bool> reset_status{false};
+    retro_atomic_int_t reset_status{0};
     int flip_rate = 0;
     int prev_index = -1;
     bool is_open = false;
@@ -65,8 +65,7 @@ struct VideoOutPort {
 
     static bool AddEventQueue(EventQueues& queues, Kernel::OrbisKernelEqueue eq) {
         for (auto& slot : queues) {
-            Kernel::OrbisKernelEqueue expected = 0;
-            if (slot.compare_exchange_strong(expected, eq)) {
+            if (retro_atomic_cas_64(&slot, 0, eq)) {
                 return true;
             }
         }
@@ -74,8 +73,7 @@ struct VideoOutPort {
     }
     static void RemoveEventQueue(EventQueues& queues, Kernel::OrbisKernelEqueue eq) {
         for (auto& slot : queues) {
-            Kernel::OrbisKernelEqueue expected = eq;
-            if (slot.compare_exchange_strong(expected, 0)) {
+            if (retro_atomic_cas_64(&slot, eq, 0)) {
                 return;
             }
         }
@@ -88,9 +86,9 @@ struct VideoOutPort {
             seq = retro_seqlock_read_begin(&flip_seq);
             status = flip_status;
         } while (retro_seqlock_read_retry(&flip_seq, seq));
-        status.submit_tsc = submit_tsc.load(std::memory_order_relaxed);
-        status.gc_queue_num = gc_queue.load(std::memory_order_relaxed);
-        status.flip_pending_num = flip_pending.load(std::memory_order_relaxed);
+        status.submit_tsc = static_cast<u64>(retro_atomic_load_relaxed_64(&submit_tsc));
+        status.gc_queue_num = static_cast<s32>(retro_atomic_load_relaxed_int(&gc_queue));
+        status.flip_pending_num = static_cast<s32>(retro_atomic_load_relaxed_int(&flip_pending));
         return status;
     }
 

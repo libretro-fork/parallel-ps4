@@ -5,6 +5,7 @@
 
 #include <cstdio>
 #include <imgui.h>
+#include <retro_atomic.h>
 
 using namespace ImGui;
 
@@ -32,7 +33,7 @@ void GpuMemoryViewer::Draw() {
         End();
         return;
     }
-    last_drawn_ms.store(NowMs(), std::memory_order_relaxed);
+    retro_atomic_store_relaxed_64(&last_drawn_ms, NowMs());
 
     std::map<std::string, GpuMemoryGroup> snapshot;
     mutex.Run([&] { snapshot = groups; });

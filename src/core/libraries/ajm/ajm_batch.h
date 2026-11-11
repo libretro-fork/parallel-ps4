@@ -9,13 +9,13 @@
 
 #include "common/small_vector.h"
 
-#include <atomic>
 #include <limits>
 #include <memory>
 #include <optional>
 #include <semaphore>
 #include <span>
 #include <vector>
+#include <retro_atomic.h>
 
 namespace Libraries::Ajm {
 
@@ -50,9 +50,9 @@ struct AjmJob {
 
 struct AjmBatch {
     u32 id{};
-    std::atomic_bool waiting{};
-    std::atomic_bool canceled{};
-    std::atomic_bool processed{};
+    retro_atomic_int_t waiting{};
+    retro_atomic_int_t canceled{};
+    retro_atomic_int_t processed{};
     std::binary_semaphore finished{0};
     Common::SmallVector<AjmJob, 16> jobs;
 

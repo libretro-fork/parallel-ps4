@@ -8,6 +8,7 @@
 #include <formats/rmp4.h>
 #include <streams/file_stream.h>
 
+#include <retro_atomic.h>
 #include "common/alignment.h"
 #include "common/singleton.h"
 #include "common/thread.h"
@@ -285,11 +286,11 @@ bool AvPlayerSource::EnableStream(u32 stream_index) {
 }
 
 void AvPlayerSource::SetLooping(bool is_looping) {
-    m_is_looping = is_looping;
+    (void)retro_atomic_exchange_int(&m_is_looping, is_looping);
 }
 
 std::optional<bool> AvPlayerSource::HasFrames(u32 num_frames) {
-    return m_video_packets.Size() > num_frames || m_is_eof;
+    return m_video_packets.Size() > num_frames || (retro_atomic_load_seq_cst_int(&m_is_eof) != 0);
 }
 
 bool AvPlayerSource::Start() {
@@ -404,20 +405,20 @@ bool AvPlayerSource::Stop() {
     m_pause_time = {};
     m_pause_duration = {};
 
-    m_is_paused = false;
-    m_is_eof = false;
+    (void)retro_atomic_exchange_int(&m_is_paused, 0);
+    (void)retro_atomic_exchange_int(&m_is_eof, 0);
 
     return true;
 }
 
 void AvPlayerSource::Pause() {
     m_pause_time = std::chrono::high_resolution_clock::now();
-    m_is_paused = true;
+    (void)retro_atomic_exchange_int(&m_is_paused, 1);
 }
 
 void AvPlayerSource::Resume() {
     m_pause_duration += std::chrono::high_resolution_clock::now() - m_pause_time;
-    m_is_paused = false;
+    (void)retro_atomic_exchange_int(&m_is_paused, 0);
 }
 
 bool AvPlayerSource::GetVideoData(AvPlayerFrameInfo& video_info) {
@@ -435,7 +436,7 @@ bool AvPlayerSource::GetVideoData(AvPlayerFrameInfo& video_info) {
 }
 
 bool AvPlayerSource::GetVideoData(AvPlayerFrameInfoEx& video_info) {
-    if (!IsActive() || m_is_paused) {
+    if (!IsActive() || (retro_atomic_load_seq_cst_int(&m_is_paused) != 0)) {
         return false;
     }
 
@@ -461,7 +462,7 @@ bool AvPlayerSource::GetVideoData(AvPlayerFrameInfoEx& video_info) {
 }
 
 bool AvPlayerSource::GetAudioData(AvPlayerFrameInfo& audio_info) {
-    if (!IsActive() || m_is_paused) {
+    if (!IsActive() || (retro_atomic_load_seq_cst_int(&m_is_paused) != 0)) {
         return false;
     }
 
@@ -505,7 +506,7 @@ u64 AvPlayerSource::CurrentTime() {
         return 0;
     }
 
-    if (m_is_eof && !IsActive()) {
+    if ((retro_atomic_load_seq_cst_int(&m_is_eof) != 0) && !IsActive()) {
         return m_duration;
     }
     if (!IsActive()) {
@@ -513,7 +514,9 @@ u64 AvPlayerSource::CurrentTime() {
     }
 
     using namespace std::chrono;
-    const auto now = m_is_paused.load() ? m_pause_time : high_resolution_clock::now();
+    const auto now = (retro_atomic_load_seq_cst_int(&m_is_paused) != 0)
+                         ? m_pause_time
+                         : high_resolution_clock::now();
     if (m_audio_stream_index) {
         const auto last_audio = m_last_data_time.value_or(now);
         const auto elapsed =
@@ -531,8 +534,8 @@ u64 AvPlayerSource::CurrentTime() {
 }
 
 bool AvPlayerSource::IsActive() {
-    return !m_is_eof || m_audio_packets.Size() != 0 || m_video_packets.Size() != 0 ||
-           m_video_frames.Size() != 0 || m_audio_frames.Size() != 0;
+    return retro_atomic_load_seq_cst_int(&m_is_eof) == 0 || m_audio_packets.Size() != 0 ||
+           m_video_packets.Size() != 0 || m_video_frames.Size() != 0 || m_audio_frames.Size() != 0;
 }
 
 void AvPlayerSource::DemuxerThread(std::stop_token stop) {
@@ -569,7 +572,7 @@ void AvPlayerSource::DemuxerThread(std::stop_token stop) {
         rmp4_packet packet{};
         const int res = rmp4_read_packet(m_demuxer, &packet);
         if (res == 0) {
-            if (m_is_looping) {
+            if (retro_atomic_load_seq_cst_int(&m_is_looping) != 0) {
                 LOG_INFO(Lib_AvPlayer, "EOF reached in demuxer. Looping the source...");
                 m_state.OnWarning(ORBIS_AVPLAYER_ERROR_WAR_LOOPING_BACK);
                 // Every sample has been read once: the bytes stay in place
@@ -598,7 +601,7 @@ void AvPlayerSource::DemuxerThread(std::stop_token stop) {
         }
     }
 
-    m_is_eof = true;
+    (void)retro_atomic_exchange_int(&m_is_eof, 1);
     // The decoders take what is left, then find the queues closed
     m_video_packets.Close();
     m_audio_packets.Close();

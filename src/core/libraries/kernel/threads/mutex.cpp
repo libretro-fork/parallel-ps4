@@ -4,6 +4,7 @@
 #include <thread>
 #include <fmt/format.h>
 
+#include <retro_atomic.h>
 #include "common/arch.h"
 #include "common/assert.h"
 #include "common/combiner.h"
@@ -68,12 +69,13 @@ static s32 MutexInit(PthreadMutexT* mutex, const PthreadMutexAttr* mutex_attr, c
     if (name) {
         pmutex->name = name;
     } else {
-        static std::atomic<s32> MutexId{0};
-        pmutex->name = fmt::format("Mutex{}", MutexId.fetch_add(1));
+        static retro_atomic_int_t MutexId{0};
+        pmutex->name =
+            fmt::format("Mutex{}", static_cast<s32>(retro_atomic_fetch_add_int(&MutexId, 1)));
     }
 
     pmutex->m_flags = PthreadMutexFlags(attr->m_type);
-    pmutex->m_owner.store(nullptr, std::memory_order_relaxed);
+    retro_atomic_store_relaxed_ptr(&pmutex->m_owner, nullptr);
     pmutex->m_count = 0;
     pmutex->m_spinloops = 0;
     pmutex->m_yieldloops = 0;
@@ -126,7 +128,7 @@ s32 PS4_SYSV_ABI posix_pthread_mutex_destroy(PthreadMutexT* mutex) {
     if (m == THR_MUTEX_DESTROYED) {
         return POSIX_EINVAL;
     }
-    if (m->m_owner.load(std::memory_order_acquire) != nullptr) {
+    if (static_cast<Pthread*>(retro_atomic_load_acquire_ptr(&m->m_owner)) != nullptr) {
         return POSIX_EBUSY;
     }
     *mutex = THR_MUTEX_DESTROYED;
@@ -205,7 +207,7 @@ s32 PthreadMutex::SelfLock(const OrbisKernelTimespec* abstime, u64 usec) {
 
 s32 PthreadMutex::Lock(const OrbisKernelTimespec* abstime, u64 usec) {
     Pthread* curthread = g_curthread;
-    if (m_owner.load(std::memory_order_acquire) == curthread) {
+    if (static_cast<Pthread*>(retro_atomic_load_acquire_ptr(&m_owner)) == curthread) {
         return SelfLock(abstime, usec);
     }
 
@@ -219,7 +221,7 @@ s32 PthreadMutex::Lock(const OrbisKernelTimespec* abstime, u64 usec) {
         s32 count = m_spinloops;
         while (count--) {
             if (m_lock.try_lock()) {
-                m_owner.store(curthread, std::memory_order_release);
+                retro_atomic_store_release_ptr(&m_owner, curthread);
                 return 0;
             }
             CPU_SPINWAIT;
@@ -229,7 +231,7 @@ s32 PthreadMutex::Lock(const OrbisKernelTimespec* abstime, u64 usec) {
         while (count--) {
             std::this_thread::yield();
             if (m_lock.try_lock()) {
-                m_owner.store(curthread, std::memory_order_release);
+                retro_atomic_store_release_ptr(&m_owner, curthread);
                 return 0;
             }
         }
@@ -249,19 +251,19 @@ s32 PthreadMutex::Lock(const OrbisKernelTimespec* abstime, u64 usec) {
         }
     }
     if (ret == 0) {
-        m_owner.store(curthread, std::memory_order_release);
+        retro_atomic_store_release_ptr(&m_owner, curthread);
     }
     return ret;
 }
 
 s32 PthreadMutex::TryLock() {
     Pthread* curthread = g_curthread;
-    if (m_owner.load(std::memory_order_acquire) == curthread) {
+    if (static_cast<Pthread*>(retro_atomic_load_acquire_ptr(&m_owner)) == curthread) {
         return SelfTryLock();
     }
     const s32 ret = m_lock.try_lock() ? 0 : POSIX_EBUSY;
     if (ret == 0) {
-        m_owner.store(curthread, std::memory_order_release);
+        retro_atomic_store_release_ptr(&m_owner, curthread);
     }
     return ret;
 }
@@ -292,7 +294,7 @@ s32 PthreadMutex::Unlock() {
     /*
      * Check if the running thread is not the owner of the mutex.
      */
-    if (m_owner.load(std::memory_order_acquire) != curthread) [[unlikely]] {
+    if (static_cast<Pthread*>(retro_atomic_load_acquire_ptr(&m_owner)) != curthread) [[unlikely]] {
         return POSIX_EPERM;
     }
 
@@ -302,7 +304,7 @@ s32 PthreadMutex::Unlock() {
         const bool deferred = True(m_flags & PthreadMutexFlags::Deferred);
         m_flags &= ~PthreadMutexFlags::Deferred;
 
-        m_owner.store(nullptr, std::memory_order_release);
+        retro_atomic_store_release_ptr(&m_owner, nullptr);
         m_lock.unlock();
 
         if (curthread->will_sleep == 0 && deferred) {
@@ -350,7 +352,7 @@ s32 PS4_SYSV_ABI posix_pthread_mutex_isowned_np(PthreadMutexT* mutex) {
     if (m <= THR_MUTEX_DESTROYED) {
         return 0;
     }
-    return m->m_owner.load(std::memory_order_acquire) == g_curthread;
+    return static_cast<Pthread*>(retro_atomic_load_acquire_ptr(&m->m_owner)) == g_curthread;
 }
 
 s32 PthreadMutex::IsOwned(Pthread* curthread) const {
@@ -360,7 +362,7 @@ s32 PthreadMutex::IsOwned(Pthread* curthread) const {
         }
         return POSIX_EPERM;
     }
-    if (m_owner.load(std::memory_order_acquire) != curthread) {
+    if (static_cast<Pthread*>(retro_atomic_load_acquire_ptr(&m_owner)) != curthread) {
         return POSIX_EPERM;
     }
     return 0;

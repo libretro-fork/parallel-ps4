@@ -133,15 +133,15 @@ void Scheduler::Wait(u64 tick) {
 }
 
 void Scheduler::PopPendingOperations() {
-    if (pending_runner.load(std::memory_order_relaxed) == std::this_thread::get_id()) {
+    if (retro_atomic_load_relaxed_ptr(&pending_runner) == ThisThread()) {
         // From an operation being run
         RunPendingOperations();
         return;
     }
     pending_combiner.Run([this] {
-        pending_runner.store(std::this_thread::get_id(), std::memory_order_relaxed);
+        retro_atomic_store_relaxed_ptr(&pending_runner, ThisThread());
         RunPendingOperations();
-        pending_runner.store({}, std::memory_order_relaxed);
+        retro_atomic_store_relaxed_ptr(&pending_runner, nullptr);
     });
 }
 

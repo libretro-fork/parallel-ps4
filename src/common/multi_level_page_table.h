@@ -3,8 +3,8 @@
 
 #pragma once
 
-#include <atomic>
 #include <memory>
+#include <retro_atomic.h>
 
 namespace Common {
 
@@ -24,11 +24,11 @@ public:
     /// it publishes its page with a compare-exchange, and a thread that loses the race frees
     /// its own and takes the winner's. No lock, and a reader never waits.
     explicit MultiLevelPageTable(size_t /*chunk_size*/ = 64)
-        : top_level{std::make_unique<std::atomic<L1Page*>[]>(TopSize)} {}
+        : top_level{std::make_unique<retro_atomic_ptr_t[]>(TopSize)} {}
 
     ~MultiLevelPageTable() noexcept {
         for (size_t i = 0; i < TopSize; ++i) {
-            delete top_level[i].load(std::memory_order_relaxed);
+            delete static_cast<L1Page*>(retro_atomic_load_relaxed_ptr(&top_level[i]));
         }
     }
 
@@ -36,7 +36,8 @@ public:
     MultiLevelPageTable& operator=(const MultiLevelPageTable&) = delete;
 
     [[nodiscard]] Entry* find(size_t page) {
-        L1Page* l1 = top_level[page >> L2_BITS].load(std::memory_order_acquire);
+        L1Page* l1 =
+            static_cast<L1Page*>(retro_atomic_load_acquire_ptr(&top_level[page >> L2_BITS]));
         if (!l1) [[unlikely]] {
             return nullptr;
         }
@@ -44,7 +45,8 @@ public:
     }
 
     [[nodiscard]] const Entry* find(size_t page) const {
-        const L1Page* l1 = top_level[page >> L2_BITS].load(std::memory_order_acquire);
+        const L1Page* l1 =
+            static_cast<L1Page*>(retro_atomic_load_acquire_ptr(&top_level[page >> L2_BITS]));
         if (!l1) [[unlikely]] {
             return nullptr;
         }
@@ -71,7 +73,7 @@ private:
     static constexpr size_t TopSize = 1ULL << L1_BITS;
 
     L1Page* Get(size_t l1_page) const {
-        L1Page* l1 = top_level[l1_page].load(std::memory_order_acquire);
+        L1Page* l1 = static_cast<L1Page*>(retro_atomic_load_acquire_ptr(&top_level[l1_page]));
         if (NULL_CHECK && !l1) [[unlikely]] {
             l1 = Make(l1_page);
         }
@@ -79,20 +81,21 @@ private:
     }
 
     L1Page* Make(size_t l1_page) const {
-        L1Page* l1 = top_level[l1_page].load(std::memory_order_acquire);
+        L1Page* l1 = static_cast<L1Page*>(retro_atomic_load_acquire_ptr(&top_level[l1_page]));
         if (l1) {
             return l1;
         }
         auto* made = new L1Page{};
-        if (top_level[l1_page].compare_exchange_strong(l1, made, std::memory_order_acq_rel,
-                                                       std::memory_order_acquire)) {
+        if ((retro_atomic_cas_ptr(&top_level[l1_page], l1, made) ||
+             ((l1 = static_cast<L1Page*>(retro_atomic_load_acquire_ptr(&top_level[l1_page]))),
+              false))) {
             return made;
         }
         delete made; // another thread's page went in first: l1 holds it
         return l1;
     }
 
-    std::unique_ptr<std::atomic<L1Page*>[]> top_level;
+    std::unique_ptr<retro_atomic_ptr_t[]> top_level;
 };
 
 } // namespace Common

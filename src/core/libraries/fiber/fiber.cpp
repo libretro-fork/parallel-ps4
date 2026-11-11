@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright 2025 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include <retro_atomic.h>
 #include "fiber.h"
 
 #include "common/elf_info.h"
@@ -24,7 +25,7 @@ static constexpr u32 kFiberOptSignature = 0xbb40e64d;
 static constexpr u64 kFiberStackSignature = 0x7149f2ca7149f2ca;
 static constexpr u64 kFiberStackSizeCheck = 0xdeadbeefdeadbeef;
 
-static std::atomic<u32> context_size_check = false;
+static retro_atomic_int_t context_size_check{0};
 
 OrbisFiberContext* GetFiberContext() {
     return Core::GetTcbBase()->tcb_fiber;
@@ -191,7 +192,7 @@ s32 PS4_SYSV_ABI sceFiberInitializeImpl(OrbisFiber* fiber, const char* name, Orb
     if (build_ver >= Common::ElfInfo::FW_350) {
         user_flags |= FiberFlags::SetFpuRegs;
     }
-    if (context_size_check) {
+    if (static_cast<u32>(retro_atomic_load_seq_cst_int(&context_size_check))) {
         user_flags |= FiberFlags::ContextSizeCheck;
     }
 
@@ -233,7 +234,7 @@ s32 PS4_SYSV_ABI sceFiberInitializeImpl(OrbisFiber* fiber, const char* name, Orb
         }
     }
 
-    fiber->state = FiberState::Idle;
+    (void)retro_atomic_exchange_int(&fiber->state, FiberState::Idle);
     return ORBIS_OK;
 }
 
@@ -261,7 +262,9 @@ s32 PS4_SYSV_ABI sceFiberFinalize(OrbisFiber* fiber) {
     }
 
     FiberState expected = FiberState::Idle;
-    if (!fiber->state.compare_exchange_strong(expected, FiberState::Terminated)) {
+    if (!(retro_atomic_cas_int(&fiber->state, expected, FiberState::Terminated) ||
+          ((expected = static_cast<FiberState>(retro_atomic_load_acquire_int(&fiber->state))),
+           false))) {
         return ORBIS_FIBER_ERROR_STATE;
     }
 
@@ -295,7 +298,9 @@ s32 PS4_SYSV_ABI sceFiberRunImpl(OrbisFiber* fiber, void* addr_context, u64 size
     }
 
     FiberState expected = FiberState::Idle;
-    if (!fiber->state.compare_exchange_strong(expected, FiberState::Run)) {
+    if (!(retro_atomic_cas_int(&fiber->state, expected, FiberState::Run) ||
+          ((expected = static_cast<FiberState>(retro_atomic_load_acquire_int(&fiber->state))),
+           false))) {
         return ORBIS_FIBER_ERROR_STATE;
     }
 
@@ -330,7 +335,7 @@ s32 PS4_SYSV_ABI sceFiberRunImpl(OrbisFiber* fiber, void* addr_context, u64 size
 
     OrbisFiber* cur_fiber = ctx.current_fiber;
     ctx.current_fiber = nullptr;
-    cur_fiber->state = FiberState::Idle;
+    (void)retro_atomic_exchange_int(&cur_fiber->state, FiberState::Idle);
 
     if (ctx.return_val != 0) {
         /* Fiber entry returned! This should never happen. */
@@ -371,7 +376,9 @@ s32 PS4_SYSV_ABI sceFiberSwitchImpl(OrbisFiber* fiber, void* addr_context, u64 s
     }
 
     FiberState expected = FiberState::Idle;
-    if (!fiber->state.compare_exchange_strong(expected, FiberState::Run)) {
+    if (!(retro_atomic_cas_int(&fiber->state, expected, FiberState::Run) ||
+          ((expected = static_cast<FiberState>(retro_atomic_load_acquire_int(&fiber->state))),
+           false))) {
         return ORBIS_FIBER_ERROR_STATE;
     }
 
@@ -392,7 +399,7 @@ s32 PS4_SYSV_ABI sceFiberSwitchImpl(OrbisFiber* fiber, void* addr_context, u64 s
 
     g_ctx = GetFiberContext();
     if (g_ctx->prev_fiber) {
-        g_ctx->prev_fiber->state = FiberState::Idle;
+        (void)retro_atomic_exchange_int(&g_ctx->prev_fiber->state, FiberState::Idle);
         g_ctx->prev_fiber = nullptr;
     }
 
@@ -432,7 +439,7 @@ s32 PS4_SYSV_ABI sceFiberReturnToThread(u64 arg_on_return, u64* arg_on_run) {
         if (jmp) {
             g_ctx = GetFiberContext();
             if (g_ctx->prev_fiber) {
-                g_ctx->prev_fiber->state = FiberState::Idle;
+                (void)retro_atomic_exchange_int(&g_ctx->prev_fiber->state, FiberState::Idle);
                 g_ctx->prev_fiber = nullptr;
             }
             if (arg_on_run) {
@@ -488,7 +495,7 @@ u64 FiberExitAddress() {
 
 // entry(arg_on_initialize, arg_on_run_to) on a stack, as _sceFiberSwitchEntry starts it
 void StartEntry(HleCallFrame& frame, OrbisFiberEntry entry, u64 arg_on_initialize,
-                u64 arg_on_run_to, u64 stack_top, std::atomic<FiberState>* prev_state) {
+                u64 arg_on_run_to, u64 stack_top, retro_atomic_int_t* prev_state) {
     if (prev_state) {
         *prev_state = FiberState::Idle;
     }
@@ -549,7 +556,7 @@ void SwitchToFiber(HleCallFrame& frame, OrbisFiber* fiber, u64 arg_on_run_to,
         ResumeFiber(frame, fiber, g_ctx);
         return;
     }
-    std::atomic<FiberState>* prev_state = nullptr;
+    retro_atomic_int_t* prev_state = nullptr;
     if (g_ctx->prev_fiber) {
         prev_state = &g_ctx->prev_fiber->state;
         g_ctx->prev_fiber = nullptr;
@@ -608,7 +615,9 @@ s32 PS4_SYSV_ABI sceFiberRunImpl(OrbisFiber* fiber, void* addr_context, u64 size
         }
     }
     FiberState expected = FiberState::Idle;
-    if (!fiber->state.compare_exchange_strong(expected, FiberState::Run)) {
+    if (!(retro_atomic_cas_int(&fiber->state, expected, FiberState::Run) ||
+          ((expected = static_cast<FiberState>(retro_atomic_load_acquire_int(&fiber->state))),
+           false))) {
         return ORBIS_FIBER_ERROR_STATE;
     }
 
@@ -652,7 +661,9 @@ s32 PS4_SYSV_ABI sceFiberSwitchImpl(OrbisFiber* fiber, void* addr_context, u64 s
         }
     }
     FiberState expected = FiberState::Idle;
-    if (!fiber->state.compare_exchange_strong(expected, FiberState::Run)) {
+    if (!(retro_atomic_cas_int(&fiber->state, expected, FiberState::Run) ||
+          ((expected = static_cast<FiberState>(retro_atomic_load_acquire_int(&fiber->state))),
+           false))) {
         return ORBIS_FIBER_ERROR_STATE;
     }
 
@@ -733,7 +744,9 @@ s32 PS4_SYSV_ABI sceFiberStartContextSizeCheck(u32 flags) {
     }
 
     u32 expected = 0;
-    if (!context_size_check.compare_exchange_strong(expected, 1u)) {
+    if (!(retro_atomic_cas_int(&context_size_check, expected, 1u) ||
+          ((expected = static_cast<u32>(retro_atomic_load_acquire_int(&context_size_check))),
+           false))) {
         return ORBIS_FIBER_ERROR_STATE;
     }
 
@@ -742,7 +755,9 @@ s32 PS4_SYSV_ABI sceFiberStartContextSizeCheck(u32 flags) {
 
 s32 PS4_SYSV_ABI sceFiberStopContextSizeCheck() {
     u32 expected = 1;
-    if (!context_size_check.compare_exchange_strong(expected, 0u)) {
+    if (!(retro_atomic_cas_int(&context_size_check, expected, 0u) ||
+          ((expected = static_cast<u32>(retro_atomic_load_acquire_int(&context_size_check))),
+           false))) {
         return ORBIS_FIBER_ERROR_STATE;
     }
 

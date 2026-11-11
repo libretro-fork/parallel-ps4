@@ -3,7 +3,6 @@
 
 #pragma once
 
-#include <atomic>
 #include <chrono>
 #include <map>
 #include <mutex>
@@ -11,6 +10,7 @@
 #include <utility>
 #include <vector>
 
+#include <retro_atomic.h>
 #include "common/combiner.h"
 #include "common/types.h"
 
@@ -35,7 +35,7 @@ public:
     void Draw();
 
     static bool IsEnabled() {
-        const s64 last = last_drawn_ms.load(std::memory_order_relaxed);
+        const s64 last = static_cast<s64>(retro_atomic_load_relaxed_64(&last_drawn_ms));
         return last != 0 && NowMs() - last < ENABLED_TIMEOUT_MS;
     }
 
@@ -52,7 +52,7 @@ private:
         return duration_cast<milliseconds>(steady_clock::now().time_since_epoch()).count();
     }
 
-    static inline std::atomic<s64> last_drawn_ms{0};
+    static inline retro_atomic_64_t last_drawn_ms{0};
     static inline Common::Combiner mutex;
     static inline std::map<std::string, GpuMemoryGroup> groups;
 };

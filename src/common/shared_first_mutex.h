@@ -3,12 +3,12 @@
 
 #pragma once
 
-#include <atomic>
 #include <chrono>
 #include <cstdint>
 #include <mutex>        // std::scoped_lock, std::unique_lock, used with it
 #include <shared_mutex> // std::shared_lock
 
+#include <retro_atomic.h>
 #include <rthreads/retro_eventcount.h>
 
 namespace Common {
@@ -35,8 +35,8 @@ public:
 
     bool try_lock() {
         u32 expected = 0;
-        return state.compare_exchange_strong(expected, Writer, std::memory_order_acquire,
-                                             std::memory_order_relaxed);
+        return (retro_atomic_cas_int(&state, expected, Writer) ||
+                ((expected = static_cast<u32>(retro_atomic_load_acquire_int(&state))), false));
     }
 
     template <typename Clock, typename Duration>
@@ -45,7 +45,7 @@ public:
     }
 
     void unlock() {
-        state.store(0, std::memory_order_release);
+        retro_atomic_store_release_int(&state, 0);
         retro_eventcount_notify(&released);
     }
 
@@ -54,10 +54,10 @@ public:
     }
 
     bool try_lock_shared() {
-        u32 current = state.load(std::memory_order_relaxed);
+        u32 current = static_cast<u32>(retro_atomic_load_relaxed_int(&state));
         while (!(current & Writer)) {
-            if (state.compare_exchange_weak(current, current + 1, std::memory_order_acquire,
-                                            std::memory_order_relaxed)) {
+            if ((retro_atomic_cas_int(&state, current, current + 1) ||
+                 ((current = static_cast<u32>(retro_atomic_load_acquire_int(&state))), false))) {
                 return true;
             }
         }
@@ -70,7 +70,7 @@ public:
     }
 
     void unlock_shared() {
-        if (state.fetch_sub(1, std::memory_order_release) == 1) {
+        if (static_cast<u32>(retro_atomic_fetch_sub_int(&state, 1)) == 1) {
             retro_eventcount_notify(&released);
         }
     }
@@ -110,7 +110,7 @@ private:
         return true;
     }
 
-    std::atomic<u32> state{0};
+    retro_atomic_int_t state{0};
     retro_eventcount_t released{};
 };
 

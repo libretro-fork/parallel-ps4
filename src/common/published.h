@@ -3,11 +3,11 @@
 
 #pragma once
 
-#include <atomic>
 #include <utility>
 
 #include <queues/retro_retire.h>
 
+#include <retro_atomic.h>
 #include "common/combiner.h"
 
 #if !defined(RETRO_RETIRE_LOCK_FREE)
@@ -30,7 +30,7 @@ public:
         retro_retire_init(&retire);
     }
     ~Published() {
-        delete current.load();
+        delete static_cast<Node*>(retro_atomic_load_acquire_ptr(&current));
         retro_retire_drain(&retire, Free);
     }
     Published(const Published&) = delete;
@@ -47,17 +47,18 @@ public:
                 retro_retire_leave(retire, Free);
             }
         } leave{&retire};
-        return func(std::as_const(current.load(std::memory_order_acquire)->value));
+        return func(
+            std::as_const(static_cast<Node*>(retro_atomic_load_acquire_ptr(&current))->value));
     }
 
     /// Calls @func on a copy of the current value, then publishes the copy.
     template <typename F>
     void Update(F&& func) {
         writers.Run([&] {
-            Node* old = current.load(std::memory_order_relaxed);
+            Node* old = static_cast<Node*>(retro_atomic_load_relaxed_ptr(&current));
             auto* node = new Node{{}, old->value};
             func(node->value);
-            current.store(node, std::memory_order_release);
+            retro_atomic_store_release_ptr(&current, node);
             retro_retire(&retire, &old->node, Free);
         });
     }
@@ -72,7 +73,7 @@ private:
         delete reinterpret_cast<Node*>(node);
     }
 
-    std::atomic<Node*> current;
+    retro_atomic_ptr_t current;
     mutable retro_retire_t retire{};
     Combiner writers;
 };

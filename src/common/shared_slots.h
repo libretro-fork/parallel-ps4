@@ -4,12 +4,12 @@
 #pragma once
 
 #include <array>
-#include <atomic>
 #include <cstddef>
 #include <memory>
 #include <optional>
 
 #include <queues/retro_retire.h>
+#include <retro_atomic.h>
 
 #if !defined(RETRO_RETIRE_LOCK_FREE)
 #error "Common::SharedSlots needs lock-free pointer atomics"
@@ -32,7 +32,7 @@ public:
     }
     ~SharedSlots() {
         for (auto& slot : slots) {
-            delete slot.exchange(nullptr);
+            delete static_cast<Holder*>(retro_atomic_exchange_ptr(&slot, nullptr));
         }
         retro_retire_drain(&retire, Free);
     }
@@ -46,7 +46,7 @@ public:
     /// What slot @index holds, or null.
     std::shared_ptr<T> Get(size_t index) {
         retro_retire_enter(&retire);
-        const Holder* holder = slots[index].load(std::memory_order_acquire);
+        const Holder* holder = static_cast<Holder*>(retro_atomic_load_acquire_ptr(&slots[index]));
         std::shared_ptr<T> object = holder ? holder->object : nullptr;
         retro_retire_leave(&retire, Free);
         return object;
@@ -54,14 +54,16 @@ public:
 
     /// True if slot @index holds nothing (it may be filled right after).
     bool Empty(size_t index) const {
-        return slots[index].load(std::memory_order_acquire) == nullptr;
+        return static_cast<Holder*>(retro_atomic_load_acquire_ptr(&slots[index])) == nullptr;
     }
 
     /// Puts @object in slot @index if it is empty. @return false if it was not.
     bool Put(size_t index, std::shared_ptr<T> object) {
         auto* holder = new Holder{{}, std::move(object)};
         Holder* expected = nullptr;
-        if (!slots[index].compare_exchange_strong(expected, holder, std::memory_order_acq_rel)) {
+        if (!(retro_atomic_cas_ptr(&slots[index], expected, holder) ||
+              ((expected = static_cast<Holder*>(retro_atomic_load_acquire_ptr(&slots[index]))),
+               false))) {
             delete holder;
             return false;
         }
@@ -73,12 +75,14 @@ public:
     /// @return the slot, or nothing if all are full.
     std::optional<size_t> Insert(std::shared_ptr<T> object) {
         auto* holder = new Holder{{}, std::move(object)};
-        const size_t start = next.load(std::memory_order_relaxed);
+        const size_t start = static_cast<size_t>(retro_atomic_load_relaxed_64(&next));
         for (size_t n = 0; n < N; ++n) {
             const size_t index = (start + n) % N;
             Holder* expected = nullptr;
-            if (slots[index].compare_exchange_strong(expected, holder, std::memory_order_acq_rel)) {
-                next.store((index + 1) % N, std::memory_order_relaxed);
+            if ((retro_atomic_cas_ptr(&slots[index], expected, holder) ||
+                 ((expected = static_cast<Holder*>(retro_atomic_load_acquire_ptr(&slots[index]))),
+                  false))) {
+                retro_atomic_store_relaxed_64(&next, (index + 1) % N);
                 retro_retire(&retire, nullptr, Free);
                 return index;
             }
@@ -89,7 +93,7 @@ public:
 
     /// Empties slot @index. @return what it held, or null.
     std::shared_ptr<T> Take(size_t index) {
-        Holder* holder = slots[index].exchange(nullptr, std::memory_order_acq_rel);
+        Holder* holder = static_cast<Holder*>(retro_atomic_exchange_ptr(&slots[index], nullptr));
         if (!holder) {
             return nullptr;
         }
@@ -108,8 +112,8 @@ private:
         delete reinterpret_cast<Holder*>(node);
     }
 
-    std::array<std::atomic<Holder*>, N> slots{};
-    std::atomic<size_t> next{0};
+    std::array<retro_atomic_ptr_t, N> slots{};
+    retro_atomic_64_t next{0};
     retro_retire_t retire{};
 };
 

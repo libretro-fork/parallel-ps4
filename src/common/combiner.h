@@ -11,6 +11,7 @@
 #include <utility>
 
 #include <queues/mpsc_stack.h>
+#include <retro_atomic.h>
 #include <rthreads/retro_eventcount.h>
 
 namespace Common {
@@ -60,30 +61,37 @@ private:
         mpsc_stack_node_t node; // first: the stack links requests through it
         void (*call)(void*);
         void* ctx;
-        std::atomic<bool> done;
+        retro_atomic_int_t done;
     };
+
+    /// One address per thread, which no other thread has while it lives
+    static void* ThisThread() {
+        static thread_local char tag;
+        return &tag;
+    }
 
     void RunErased(void* ctx, void (*call)(void*)) {
         // From inside a function this Combiner runs: it holds the Combiner already
-        if (owner.load(std::memory_order_relaxed) == std::this_thread::get_id()) {
+        if (retro_atomic_load_relaxed_ptr(&owner) == ThisThread()) {
             call(ctx);
             return;
         }
         Request request{{}, call, ctx, false};
         mpsc_stack_push(&pending, &request.node);
         // Pairs with Combine's fence: a push that loses the race for busy is seen there
-        std::atomic_thread_fence(std::memory_order_seq_cst);
+        retro_atomic_thread_fence_seq_cst();
         for (;;) {
-            if (!busy.exchange(true, std::memory_order_seq_cst)) {
+            if (retro_atomic_exchange_int(&busy, 1) == 0) {
                 Combine();
             }
-            if (request.done.load(std::memory_order_acquire)) {
+            if (retro_atomic_load_acquire_int(&request.done) != 0) {
                 return;
             }
             const int key = retro_eventcount_prepare_wait(&done_ec);
             // Not run yet, and nobody combining: whoever released found it pushed and is
             // about to take over, or this thread can
-            if (request.done.load(std::memory_order_acquire) || !busy.load()) {
+            if ((retro_atomic_load_acquire_int(&request.done) != 0) ||
+                retro_atomic_load_seq_cst_int(&busy) == 0) {
                 retro_eventcount_cancel_wait(&done_ec);
                 continue;
             }
@@ -97,31 +105,31 @@ private:
         for (;;) {
             mpsc_stack_node_t* node = mpsc_stack_reverse(mpsc_stack_drain(&pending));
             const bool ran = node != nullptr;
-            owner.store(std::this_thread::get_id(), std::memory_order_relaxed);
+            retro_atomic_store_relaxed_ptr(&owner, ThisThread());
             while (node) {
                 auto* request = reinterpret_cast<Request*>(node);
                 node = node->next;
                 request->call(request->ctx);
                 // The caller's: it may be gone as soon as done is set
-                request->done.store(true, std::memory_order_release);
+                retro_atomic_store_release_int(&request->done, 1);
             }
-            owner.store(std::thread::id{}, std::memory_order_relaxed);
+            retro_atomic_store_relaxed_ptr(&owner, nullptr);
             if (ran) {
                 retro_eventcount_notify(&done_ec);
             }
-            busy.store(false, std::memory_order_seq_cst);
+            (void)retro_atomic_exchange_int(&busy, 0);
             // A push whose taking of busy failed is seen here (RunErased's fence)
-            std::atomic_thread_fence(std::memory_order_seq_cst);
-            if (mpsc_stack_empty(&pending) || busy.exchange(true, std::memory_order_acquire)) {
+            retro_atomic_thread_fence_seq_cst();
+            if (mpsc_stack_empty(&pending) || (retro_atomic_exchange_int(&busy, 1) != 0)) {
                 return;
             }
         }
     }
 
     mpsc_stack_t pending{};
-    std::atomic<bool> busy{false};
+    retro_atomic_int_t busy{0};
     /// The thread running the functions, while it does
-    std::atomic<std::thread::id> owner{};
+    retro_atomic_ptr_t owner{};
     retro_eventcount_t done_ec{};
 };
 

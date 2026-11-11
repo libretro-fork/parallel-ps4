@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include <mutex>
+#include <retro_atomic.h>
 #include "common/arch.h"
 #include "common/assert.h"
 #include "core/libraries/kernel/threads/pthread.h"
@@ -75,20 +76,20 @@ static constexpr u16 ldt_index_total = (ldt_region_size - ldt_region_base) / ldt
 // One bit per LDT slot, set while it is free: a thread takes the lowest free one with a
 // compare-and-swap and gives it back with an atomic or, so no lock is held.
 static constexpr u32 ldt_free_words = (ldt_index_total + 63) / 64;
-static std::atomic<u64> free_ldts[ldt_free_words];
+static retro_atomic_64_t free_ldts[ldt_free_words];
 
 static void ReleaseLdtIndex(u16 index) {
     const u32 slot = index - ldt_index_base;
-    free_ldts[slot / 64].fetch_or(u64{1} << (slot % 64), std::memory_order_release);
+    retro_atomic_fetch_or_64(&free_ldts[slot / 64], u64{1} << (slot % 64));
 }
 
 static bool AcquireLdtIndex(u16* out) {
     for (u32 w = 0; w < ldt_free_words; ++w) {
-        u64 bits = free_ldts[w].load(std::memory_order_relaxed);
+        u64 bits = static_cast<u64>(retro_atomic_load_relaxed_64(&free_ldts[w]));
         while (bits != 0) {
             const u64 lowest = bits & (~bits + 1);
-            if (free_ldts[w].compare_exchange_weak(bits, bits & ~lowest, std::memory_order_acquire,
-                                                   std::memory_order_relaxed)) {
+            if ((retro_atomic_cas_64(&free_ldts[w], bits, bits & ~lowest) ||
+                 ((bits = static_cast<u64>(retro_atomic_load_acquire_64(&free_ldts[w]))), false))) {
                 *out = static_cast<u16>(ldt_index_base + w * 64 + std::countr_zero(lowest));
                 return true;
             }

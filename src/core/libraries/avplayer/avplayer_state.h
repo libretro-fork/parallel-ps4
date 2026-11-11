@@ -3,7 +3,6 @@
 
 #pragma once
 
-#include <atomic>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -13,6 +12,7 @@
 #include "common/event_mutex.h"
 #include "common/shared_first_mutex.h"
 
+#include <retro_atomic.h>
 #include "core/libraries/avplayer/avplayer.h"
 #include "core/libraries/avplayer/avplayer_source.h"
 #include "core/libraries/kernel/threads.h"
@@ -83,12 +83,12 @@ private:
     char m_default_language[4]{};
     AvPlayerAvSyncMode m_sync_mode = AvPlayerAvSyncMode::Default;
 
-    std::atomic<AvState> m_current_state;
-    std::atomic<AvState> m_previous_state;
-    std::atomic_bool m_eof_stop_event_sent{false};
+    retro_atomic_int_t m_current_state;
+    retro_atomic_int_t m_previous_state;
+    retro_atomic_int_t m_eof_stop_event_sent{0};
     u32 m_thread_priority;
     u32 m_thread_affinity;
-    std::atomic_uint32_t m_some_event_result{};
+    retro_atomic_int_t m_some_event_result{};
 
     Common::SharedFirstMutex m_source_mutex{};
     Common::EventMutex m_state_machine_mutex{};

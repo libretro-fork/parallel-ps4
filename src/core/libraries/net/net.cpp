@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+
 #include <bit>
 #include <cctype>
 #include <chrono>
@@ -21,6 +22,7 @@
 #include <unordered_map>
 #include <vector>
 #include <fmt/format.h>
+#include <retro_atomic.h>
 
 #include "common/combiner.h"
 #include "common/logging/log.h"
@@ -87,11 +89,13 @@ bool IsEpoll(OrbisNetId id) {
     return Core::Net::GetObjectKind(id) == Core::Net::NetObjectKind::Epoll;
 }
 
-std::atomic<void (*)(int)> g_kernel_errno_hook{nullptr};
+// A void (*)(int), set once by the kernel module
+retro_atomic_ptr_t g_kernel_errno_hook{nullptr};
 
 s32 SetErrno(int orbis_errno, const std::source_location where = std::source_location::current()) {
     g_net_errno = orbis_errno;
-    if (const auto hook = g_kernel_errno_hook.load(std::memory_order_relaxed)) {
+    if (const auto hook =
+            reinterpret_cast<void (*)(int)>(retro_atomic_load_relaxed_ptr(&g_kernel_errno_hook))) {
         hook(orbis_errno);
     }
     LogFailure(orbis_errno, where);
@@ -2818,7 +2822,7 @@ s32 PS4_SYSV_ABI sceNetEmulationSet() {
 }
 
 void SetKernelErrnoHook(void (*hook)(int orbis_errno)) {
-    g_kernel_errno_hook.store(hook);
+    (void)retro_atomic_exchange_ptr(&g_kernel_errno_hook, reinterpret_cast<void*>(hook));
 }
 
 SystemHooks GetSystemHooks() {

@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cstring>
 #include <tuple>
+#include <retro_atomic.h>
 
 #include "core/net/p2p_transport.h"
 
@@ -157,7 +158,7 @@ std::shared_ptr<Transport> Transport::Create(int family, const Endpoint& bind_ad
 }
 
 Transport::~Transport() {
-    stop_.store(true);
+    (void)retro_atomic_exchange_int(&stop_, 1);
     kick_.Signal();
     if (thread_.joinable()) {
         thread_.join();
@@ -195,14 +196,14 @@ bool Transport::RecvSignaling(size_t channel, std::vector<u8>* data, Endpoint* f
 }
 
 void Transport::ThreadMain() {
-    while (!stop_.load()) {
+    while (retro_atomic_load_seq_cst_int(&stop_) == 0) {
         std::optional<Clock::time_point> deadline;
         mutex_.Run([&] {
             deadline = EarliestDeadline();
             sleeping_until_ = deadline.value_or(Clock::time_point::max());
         });
         const auto result = Host::WaitOne(socket_, Host::Readable, kick_, deadline);
-        if (stop_.load()) {
+        if (retro_atomic_load_seq_cst_int(&stop_) != 0) {
             return;
         }
         if (result == Host::WaitResult::Woken) {

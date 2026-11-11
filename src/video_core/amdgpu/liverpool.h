@@ -3,7 +3,6 @@
 
 #pragma once
 
-#include <atomic>
 #include <coroutine>
 #include <cstddef>
 #include <exception>
@@ -14,6 +13,7 @@
 #include <queues/mpsc_stack.h>
 #include <rthreads/retro_eventcount.h>
 
+#include <retro_atomic.h>
 #include "common/assert.h"
 #include "common/slot_vector.h"
 #include "common/types.h"
@@ -73,16 +73,16 @@ public:
     void SubmitAsc(u32 gnm_vqid, std::span<const u32> acb);
 
     void SubmitDone() noexcept {
-        mapped_queues[GfxQueueId].ccb_buffer_offset = 0;
-        mapped_queues[GfxQueueId].dcb_buffer_offset = 0;
-        submit_done.store(true, std::memory_order_release);
+        (void)retro_atomic_exchange_int(&mapped_queues[GfxQueueId].ccb_buffer_offset, 0);
+        (void)retro_atomic_exchange_int(&mapped_queues[GfxQueueId].dcb_buffer_offset, 0);
+        retro_atomic_store_release_int(&submit_done, 1);
         retro_eventcount_notify(&work_ec);
     }
 
     void WaitGpuIdle() noexcept {
         for (;;) {
             const int key = retro_eventcount_prepare_wait(&idle_ec);
-            if (num_submits.load() == 0) {
+            if (static_cast<u32>(retro_atomic_load_seq_cst_int(&num_submits)) == 0) {
                 retro_eventcount_cancel_wait(&idle_ec);
                 return;
             }
@@ -91,7 +91,7 @@ public:
     }
 
     bool IsGpuIdle() const {
-        return num_submits == 0;
+        return static_cast<u32>(retro_atomic_load_seq_cst_int(&num_submits)) == 0;
     }
 
     void SetVoPort(Libraries::VideoOut::VideoOutPort* port) {
@@ -108,12 +108,12 @@ public:
     void SendCommand(auto&& func) {
         if constexpr (wait_done) {
             // On this thread's stack until it has run
-            std::atomic<bool> done{false};
+            retro_atomic_int_t done{0};
             Command command{{}, Common::UniqueFunction<void>{[&func] { func(); }}, &done};
             PushCommand(&command);
             for (;;) {
                 const int key = retro_eventcount_prepare_wait(&command_done_ec);
-                if (done.load(std::memory_order_acquire)) {
+                if (retro_atomic_load_acquire_int(&done) != 0) {
                     retro_eventcount_cancel_wait(&command_done_ec);
                     break;
                 }
@@ -254,8 +254,8 @@ private:
     };
 
     struct GpuQueue {
-        std::atomic<u32> dcb_buffer_offset;
-        std::atomic<u32> ccb_buffer_offset;
+        retro_atomic_int_t dcb_buffer_offset;
+        retro_atomic_int_t ccb_buffer_offset;
         std::vector<u32> dcb_buffer;
         std::vector<u32> ccb_buffer;
         TaskQueue submits{};
@@ -263,7 +263,7 @@ private:
     };
     std::array<GpuQueue, NumTotalQueues> mapped_queues{};
     TaskQueue ce_submits;
-    std::atomic<u32> num_mapped_queues{1u}; // GFX is always available
+    retro_atomic_int_t num_mapped_queues{static_cast<int>(1u)}; // GFX is always available
 
     /// A function for the GPU thread to run (SendCommand)
     struct Command {
@@ -271,10 +271,10 @@ private:
         Common::UniqueFunction<void> func;
         /// Set once it has run, where the sender waits; else the command was allocated and
         /// is deleted once it has run.
-        std::atomic<bool>* done;
+        retro_atomic_int_t* done;
     };
     void PushCommand(Command* command) {
-        num_commands.fetch_add(1, std::memory_order_relaxed);
+        retro_atomic_fetch_add_int(&num_commands, 1);
         mpsc_stack_push(&commands, &command->node);
         retro_eventcount_notify(&work_ec);
     }
@@ -298,9 +298,9 @@ private:
     Libraries::VideoOut::VideoOutPort* vo_port{};
     const bool guest_markers_enabled;
     std::jthread process_thread{};
-    std::atomic<u32> num_submits{};
-    std::atomic<u32> num_commands{};
-    std::atomic<bool> submit_done{};
+    retro_atomic_int_t num_submits{};
+    retro_atomic_int_t num_commands{};
+    retro_atomic_int_t submit_done{};
     mpsc_stack_t commands{};
     /// The GPU thread parks on work_ec until there is something to do; WaitGpuIdle on
     /// idle_ec until num_submits is 0; SendCommand<true> on command_done_ec until it has run.

@@ -25,6 +25,7 @@
 #include <unordered_set>
 #include <vector>
 #include <fmt/format.h>
+#include <retro_atomic.h>
 #include "common/combiner.h"
 #include "common/io_file.h"
 #include "common/logging/log.h"
@@ -105,7 +106,7 @@ struct HleFontString {
 };
 
 struct HleFontCharacterStorage {
-    std::atomic<u32> ref_count{1};
+    retro_atomic_int_t ref_count{1};
     std::vector<OrbisFontTextCharacter> characters{};
 };
 
@@ -282,7 +283,7 @@ static HleFontWriting* GetHleFontWriting(OrbisFontWriting* font_writing) {
 
 static void AddRefCharacterStorage(HleFontCharacterStorage* storage) {
     if (storage) {
-        storage->ref_count.fetch_add(1, std::memory_order_relaxed);
+        retro_atomic_fetch_add_int(&storage->ref_count, 1);
     }
 }
 
@@ -291,7 +292,7 @@ static void ReleaseCharacterStorage(HleFontCharacterStorage*& storage) {
         return;
     }
 
-    if (storage->ref_count.fetch_sub(1, std::memory_order_acq_rel) == 1) {
+    if (static_cast<u32>(retro_atomic_fetch_sub_int(&storage->ref_count, 1)) == 1) {
         delete storage;
     }
     storage = nullptr;
@@ -1928,8 +1929,8 @@ s32 PS4_SYSV_ABI sceFontGetHorizontalLayout(OrbisFontHandle fontHandle,
         layout->decorationExtent = layout_blocks.effect_height();
         const auto* style_frame = reinterpret_cast<const OrbisFontStyleFrame*>(font->style_frame);
         if (style_frame) {
-            static std::atomic<int> s_layout_trace_budget{120};
-            const int remaining = s_layout_trace_budget.fetch_sub(1, std::memory_order_relaxed);
+            static retro_atomic_int_t s_layout_trace_budget{120};
+            const int remaining = retro_atomic_fetch_sub_int(&s_layout_trace_budget, 1);
             if (remaining > 0) {
                 LOG_INFO(Lib_Font,
                          "GetHorizontalLayoutTrace: handle={} flags=0x{:02X} unit={} dpi=({}, {}) "

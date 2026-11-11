@@ -4,11 +4,11 @@
 #pragma once
 
 #include <array>
-#include <atomic>
 #include <cstddef>
 #include <stop_token>
 #include <utility>
 
+#include <retro_atomic.h>
 #include <rthreads/retro_eventcount.h>
 
 namespace Common {
@@ -26,7 +26,7 @@ class BoundedQueue {
 public:
     BoundedQueue() {
         for (std::size_t i = 0; i < Capacity; ++i) {
-            m_cells[i].seq.store(i, std::memory_order::relaxed);
+            retro_atomic_store_relaxed_64(&m_cells[i].seq, i);
         }
         retro_eventcount_init(&m_readable);
         retro_eventcount_init(&m_writable);
@@ -105,68 +105,79 @@ public:
 
 private:
     struct Cell {
-        std::atomic_size_t seq;
+        retro_atomic_64_t seq;
         T data;
     };
 
     template <typename... Args>
     bool TryPush(Args&&... args) {
-        std::size_t pos = m_write_index.load(std::memory_order::relaxed);
+        std::size_t pos = static_cast<std::size_t>(retro_atomic_load_relaxed_64(&m_write_index));
         Cell* cell;
         for (;;) {
             cell = &m_cells[pos & (Capacity - 1)];
-            const std::size_t seq = cell->seq.load(std::memory_order::acquire);
+            const std::size_t seq =
+                static_cast<std::size_t>(retro_atomic_load_acquire_64(&cell->seq));
             const auto diff = static_cast<std::ptrdiff_t>(seq - pos);
             if (diff == 0) {
-                if (m_write_index.compare_exchange_weak(pos, pos + 1, std::memory_order::relaxed)) {
+                if ((retro_atomic_cas_64(&m_write_index, pos, pos + 1) ||
+                     ((pos =
+                           static_cast<std::size_t>(retro_atomic_load_acquire_64(&m_write_index))),
+                      false))) {
                     break;
                 }
             } else if (diff < 0) {
                 return false; // full
             } else {
-                pos = m_write_index.load(std::memory_order::relaxed);
+                pos = static_cast<std::size_t>(retro_atomic_load_relaxed_64(&m_write_index));
             }
         }
         cell->data = T(std::forward<Args>(args)...);
-        cell->seq.store(pos + 1, std::memory_order::release);
+        retro_atomic_store_release_64(&cell->seq, pos + 1);
         return true;
     }
 
     bool TryTake(T& t) {
-        std::size_t pos = m_read_index.load(std::memory_order::relaxed);
+        std::size_t pos = static_cast<std::size_t>(retro_atomic_load_relaxed_64(&m_read_index));
         Cell* cell;
         for (;;) {
             cell = &m_cells[pos & (Capacity - 1)];
-            const std::size_t seq = cell->seq.load(std::memory_order::acquire);
+            const std::size_t seq =
+                static_cast<std::size_t>(retro_atomic_load_acquire_64(&cell->seq));
             const auto diff = static_cast<std::ptrdiff_t>(seq - (pos + 1));
             if (diff == 0) {
-                if (m_read_index.compare_exchange_weak(pos, pos + 1, std::memory_order::relaxed)) {
+                if ((retro_atomic_cas_64(&m_read_index, pos, pos + 1) ||
+                     ((pos = static_cast<std::size_t>(retro_atomic_load_acquire_64(&m_read_index))),
+                      false))) {
                     break;
                 }
             } else if (diff < 0) {
                 return false; // empty
             } else {
-                pos = m_read_index.load(std::memory_order::relaxed);
+                pos = static_cast<std::size_t>(retro_atomic_load_relaxed_64(&m_read_index));
             }
         }
         t = std::move(cell->data);
         cell->data = T{}; // what it held is released now, not when the cell is next written
-        cell->seq.store(pos + Capacity, std::memory_order::release);
+        retro_atomic_store_release_64(&cell->seq, pos + Capacity);
         return true;
     }
 
     bool Empty() const {
-        const std::size_t pos = m_read_index.load(std::memory_order::relaxed);
-        return m_cells[pos & (Capacity - 1)].seq.load(std::memory_order::acquire) != pos + 1;
+        const std::size_t pos =
+            static_cast<std::size_t>(retro_atomic_load_relaxed_64(&m_read_index));
+        return static_cast<std::size_t>(
+                   retro_atomic_load_acquire_64(&m_cells[pos & (Capacity - 1)].seq)) != pos + 1;
     }
 
     bool Full() const {
-        const std::size_t pos = m_write_index.load(std::memory_order::relaxed);
-        return m_cells[pos & (Capacity - 1)].seq.load(std::memory_order::acquire) != pos;
+        const std::size_t pos =
+            static_cast<std::size_t>(retro_atomic_load_relaxed_64(&m_write_index));
+        return static_cast<std::size_t>(
+                   retro_atomic_load_acquire_64(&m_cells[pos & (Capacity - 1)].seq)) != pos;
     }
 
-    alignas(128) std::atomic_size_t m_read_index{0};
-    alignas(128) std::atomic_size_t m_write_index{0};
+    alignas(128) retro_atomic_64_t m_read_index{0};
+    alignas(128) retro_atomic_64_t m_write_index{0};
     alignas(128) std::array<Cell, Capacity> m_cells;
     retro_eventcount_t m_readable{};
     retro_eventcount_t m_writable{};

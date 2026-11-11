@@ -17,6 +17,7 @@
 #include <Zydis/Zydis.h>
 #include <encodings/rzstd.h>
 #include <fmt/format.h>
+#include <retro_atomic.h>
 #include <xbyak/xbyak.h>
 #include <xbyak/xbyak_util.h>
 #include "common/alignment.h"
@@ -1170,16 +1171,17 @@ static void TryPatchAot(void* code_address, u64 code_size) {
 namespace WindowsGuestRedZoneProtection {
 namespace {
 
-std::atomic active_mode{WindowsGuestRedZoneProtectionMode::Disabled};
+retro_atomic_int_t active_mode{static_cast<int>(WindowsGuestRedZoneProtectionMode::Disabled)};
 
 } // namespace
 
 void SetActiveMode(WindowsGuestRedZoneProtectionMode mode) noexcept {
-    active_mode.store(mode, std::memory_order_release);
+    retro_atomic_store_release_int(&active_mode, mode);
 }
 
 WindowsGuestRedZoneProtectionMode GetActiveMode() noexcept {
-    return active_mode.load(std::memory_order_acquire);
+    return static_cast<WindowsGuestRedZoneProtectionMode>(
+        retro_atomic_load_acquire_int(&active_mode));
 }
 
 bool IsStaticPatchingEnabled() noexcept {

@@ -16,6 +16,7 @@
 //   emulator's configuration (ApplyCoreOptions)
 
 #include <algorithm>
+#include <retro_atomic.h>
 #include <atomic>
 #include <cerrno>
 #include <chrono>
@@ -62,17 +63,17 @@ Libretro::SharedState* shared = nullptr;
 Libretro::SharedWakes wakes;
 
 // The renderer has drawn: the emulator is up, its controllers made.
-std::atomic<bool> frame_seen{false};
+retro_atomic_int_t frame_seen{0};
 
 // The picture handed over on the GPU: whether the images were sent to the core, and which of
 // them have a frame being drawn that is not published yet.
-std::atomic<bool> gpu_frames_active{false};
+retro_atomic_int_t gpu_frames_active{0};
 
 // Resolution: Default (SetGameSize): the game's size, packed as width << 16 | height, and
 // whether the presenter has taken it
-std::atomic<std::uint32_t> game_size{0};
-std::atomic<bool> game_size_new{false};
-std::atomic<bool> image_in_flight[Libretro::FRAME_IMAGES];
+retro_atomic_int_t game_size{0};
+retro_atomic_int_t game_size_new{0};
+retro_atomic_int_t image_in_flight[Libretro::FRAME_IMAGES];
 
 Libretro::SharedState* OpenShared(const char* argument) {
 #ifdef _WIN32
@@ -108,15 +109,15 @@ constexpr const char* trophy_sides[] = {"left", "right", "top", "bottom"};
 // which upstream's IPC changes the same way.
 void ApplyLiveOptions() {
     const auto& live = shared->live;
-    emu_settings_set_volume_slider(live.volume.load(), false);
-    emu_settings_set_show_fps_counter(live.show_fps.load() != 0, false);
-    Overlay::SetSimpleFps(live.show_fps.load() != 0);
-    emu_settings_set_trophy_popup_disabled(live.trophy_popup.load() == 0,
+    emu_settings_set_volume_slider(static_cast<std::int32_t>(retro_atomic_load_seq_cst_int(&live.volume)), false);
+    emu_settings_set_show_fps_counter(static_cast<std::uint32_t>(retro_atomic_load_seq_cst_int(&live.show_fps)) != 0, false);
+    Overlay::SetSimpleFps(static_cast<std::uint32_t>(retro_atomic_load_seq_cst_int(&live.show_fps)) != 0);
+    emu_settings_set_trophy_popup_disabled(static_cast<std::uint32_t>(retro_atomic_load_seq_cst_int(&live.trophy_popup)) == 0,
                                            false);
     emu_settings_set_trophy_notification_side(
-        trophy_sides[std::min(live.trophy_side.load(), 3u)], false);
+        trophy_sides[std::min(static_cast<std::uint32_t>(retro_atomic_load_seq_cst_int(&live.trophy_side)), 3u)], false);
     emu_settings_set_trophy_notification_duration(
-        static_cast<double>(live.trophy_seconds.load()), false);
+        static_cast<double>(static_cast<std::uint32_t>(retro_atomic_load_seq_cst_int(&live.trophy_seconds))), false);
 }
 
 // Ends the process on the core's word, and applies the options changed meanwhile. Parked
@@ -125,11 +126,11 @@ void WatchQuit() {
     std::uint32_t serial = 0;
     for (;;) {
         const int key = wakes.control.Prepare();
-        if (shared->quit.load(std::memory_order_acquire)) {
+        if (static_cast<std::uint32_t>(retro_atomic_load_acquire_int(&shared->quit))) {
             wakes.control.Cancel();
             break;
         }
-        const std::uint32_t now = shared->options_serial.load(std::memory_order_acquire);
+        const std::uint32_t now = static_cast<std::uint32_t>(retro_atomic_load_acquire_int(&shared->options_serial));
         if (now != serial) {
             wakes.control.Cancel();
             serial = now;
@@ -148,8 +149,8 @@ void PumpAudio() {
         // The window opens first: a read by the core or a source's commit from here on wakes
         // the wait below, whatever the mix found
         const int key = wakes.audio.Prepare();
-        const std::uint32_t written = shared->audio_written.load(std::memory_order_relaxed);
-        const std::uint32_t read = shared->audio_read.load(std::memory_order_acquire);
+        const std::uint32_t written = static_cast<std::uint32_t>(retro_atomic_load_relaxed_int(&shared->audio_written));
+        const std::uint32_t read = static_cast<std::uint32_t>(retro_atomic_load_acquire_int(&shared->audio_read));
         // Up to the target and no further: what the sources have beyond it stays in
         // their inputs, where the game's audio threads wait for it to be taken.
         const std::uint32_t queued = written - read;
@@ -161,7 +162,7 @@ void PumpAudio() {
                    : 0;
         if (frames) {
             wakes.audio.Cancel();
-            shared->audio_written.store(written + frames, std::memory_order_release);
+            retro_atomic_store_release_int(&shared->audio_written, written + frames);
             continue;
         }
         // The ring is as full as it should be, or the sources have nothing: until the core
@@ -233,7 +234,7 @@ void PumpInput() {
                 next_report = now + report_period;
             }
         }
-        if (!frame_seen) {
+        if (retro_atomic_load_seq_cst_int(&frame_seen) == 0) {
             wait(key);
             continue;
         }
@@ -272,7 +273,7 @@ void PumpInput() {
             if (!controller || controller->user_id < 0) {
                 continue;
             }
-            const std::uint32_t now = shared->buttons[pad].load(std::memory_order_acquire);
+            const std::uint32_t now = static_cast<std::uint32_t>(retro_atomic_load_acquire_int(&shared->buttons[pad]));
             for (const auto button : buttons) {
                 const auto bit = static_cast<std::uint32_t>(button);
                 if ((now ^ held[pad]) & bit) {
@@ -282,7 +283,8 @@ void PumpInput() {
             held[pad] = now;
 
             for (std::uint32_t i = 0; i < Libretro::SHARED_AXIS_COUNT; ++i) {
-                const std::uint32_t value = shared->axes[pad][i].load(std::memory_order_acquire);
+                const std::uint32_t value =
+                    static_cast<std::uint32_t>(retro_atomic_load_acquire_int(&shared->axes[pad][i]));
                 if (value != axis_value[pad][i]) {
                     axis_value[pad][i] = value;
                     controller->Axis(axes[i], static_cast<int>(value), false);
@@ -354,23 +356,23 @@ void SetGameSize(std::uint32_t width, std::uint32_t height) {
     width = std::min(width, MAX_WIDTH);
     height = std::min(height, MAX_HEIGHT);
     const std::uint32_t packed = width << 16 | height;
-    if (game_size.exchange(packed) != packed) {
-        game_size_new.store(true);
+    if (static_cast<std::uint32_t>(retro_atomic_exchange_int(&game_size, packed)) != packed) {
+        (void)retro_atomic_exchange_int(&game_size_new, 1);
     }
 }
 
 bool TakeGameSize(std::uint32_t& width, std::uint32_t& height) {
-    if (!game_size_new.exchange(false)) {
+    if (retro_atomic_exchange_int(&game_size_new, 0) == 0) {
         return false;
     }
-    const std::uint32_t packed = game_size.load();
+    const std::uint32_t packed = static_cast<std::uint32_t>(retro_atomic_load_seq_cst_int(&game_size));
     width = packed >> 16;
     height = packed & 0xFFFF;
     return true;
 }
 
 bool GameSizePending() {
-    return shared && shared->options.follow_game_size != 0 && game_size.load() == 0;
+    return shared && shared->options.follow_game_size != 0 && static_cast<std::uint32_t>(retro_atomic_load_seq_cst_int(&game_size)) == 0;
 }
 
 void PushFrame(const void* pixels, std::uint32_t width, std::uint32_t height) {
@@ -385,9 +387,9 @@ void PushFrame(const void* pixels, std::uint32_t width, std::uint32_t height) {
     }
     // Into the slot that is neither the newest nor the one the core is showing
     // (shared_state.h, frame_held).
-    const std::uint32_t latest = shared->frame_latest.load();
+    const std::uint32_t latest = static_cast<std::uint32_t>(retro_atomic_load_seq_cst_int(&shared->frame_latest));
     const std::uint32_t newest = latest == 0 ? FRAME_SLOT_NONE : latest & FRAME_SLOT_MASK;
-    const std::uint32_t held = shared->frame_held.load();
+    const std::uint32_t held = static_cast<std::uint32_t>(retro_atomic_load_seq_cst_int(&shared->frame_held));
     std::uint32_t slot = 0;
     while (slot == newest || slot == held) {
         ++slot;
@@ -395,8 +397,8 @@ void PushFrame(const void* pixels, std::uint32_t width, std::uint32_t height) {
     shared->frame_size[slot].width = width;
     shared->frame_size[slot].height = height;
     std::memcpy(SharedFrame(shared, slot), pixels, static_cast<std::size_t>(width) * height * 4);
-    shared->frame_latest.store((((latest >> FRAME_SLOT_BITS) + 1) << FRAME_SLOT_BITS) | slot);
-    frame_seen = true;
+    (void)retro_atomic_exchange_int(&shared->frame_latest, (((latest >> FRAME_SLOT_BITS) + 1) << FRAME_SLOT_BITS) | slot);
+    (void)retro_atomic_exchange_int(&frame_seen, 1);
 }
 
 bool GpuFramesWanted() {
@@ -421,13 +423,13 @@ bool FrontendGpu(std::uint8_t* device_uuid) {
         const int key = wakes.control.Prepare();
         const auto left = std::chrono::duration_cast<std::chrono::microseconds>(
             give_up - std::chrono::steady_clock::now());
-        if (shared->frontend_gpu.load() != 0 || left.count() <= 0) {
+        if (static_cast<std::uint32_t>(retro_atomic_load_seq_cst_int(&shared->frontend_gpu)) != 0 || left.count() <= 0) {
             wakes.control.Cancel();
             break;
         }
         wakes.control.Wait(key, left.count());
     }
-    if (shared->frontend_gpu.load() != 1) {
+    if (static_cast<std::uint32_t>(retro_atomic_load_seq_cst_int(&shared->frontend_gpu)) != 1) {
         LOG_WARNING(Render_Vulkan, "The frontend's GPU is not known");
         return false;
     }
@@ -444,7 +446,7 @@ bool ShareImages(const std::uint64_t* memory_handles, std::uint32_t count, std::
                  std::uint32_t memory_type, const std::uint64_t* allocation_sizes,
                  const std::uint8_t* device_uuid, const std::uint8_t* driver_uuid) {
 #if defined(__linux__) || defined(_WIN32)
-    if (!GpuFramesWanted() || count == 0 || count > FRAME_IMAGES || gpu_frames_active) {
+    if (!GpuFramesWanted() || count == 0 || count > FRAME_IMAGES || (retro_atomic_load_seq_cst_int(&gpu_frames_active) != 0)) {
         return false;
     }
     GpuImagesMessage message{};
@@ -463,7 +465,7 @@ bool ShareImages(const std::uint64_t* memory_handles, std::uint32_t count, std::
     // In the shared memory; the core duplicates the handles into its own process.
     shared->gpu_images = message;
     std::memcpy(shared->gpu_image_handles, memory_handles, count * sizeof(std::uint64_t));
-    shared->gpu_images_ready.store(1);
+    (void)retro_atomic_exchange_int(&shared->gpu_images_ready, 1);
 #else
     int descriptors[FRAME_IMAGES];
     for (std::uint32_t i = 0; i < count; ++i) {
@@ -489,9 +491,9 @@ bool ShareImages(const std::uint64_t* memory_handles, std::uint32_t count, std::
     }
 #endif
     for (auto& in_flight : image_in_flight) {
-        in_flight = false;
+        (void)retro_atomic_exchange_int(&in_flight, 0);
     }
-    gpu_frames_active = true;
+    (void)retro_atomic_exchange_int(&gpu_frames_active, 1);
     LOG_INFO(Render_Vulkan, "The picture is handed to the frontend on the GPU: {} images of {}x{}",
              count, width, height);
     return true;
@@ -502,13 +504,13 @@ bool ShareImages(const std::uint64_t* memory_handles, std::uint32_t count, std::
 
 bool GpuFramesActive() {
     // Until either side finds the images cannot be shared
-    return gpu_frames_active &&
-           shared->gpu_frames_state.load(std::memory_order_acquire) != GPU_FRAMES_FAILED;
+    return (retro_atomic_load_seq_cst_int(&gpu_frames_active) != 0) &&
+           static_cast<std::uint32_t>(retro_atomic_load_acquire_int(&shared->gpu_frames_state)) != GPU_FRAMES_FAILED;
 }
 
 void GpuFramesFailed(const char* why) {
     if (!GpuFramesWanted() ||
-        shared->gpu_frames_state.exchange(GPU_FRAMES_FAILED) == GPU_FRAMES_FAILED) {
+        static_cast<std::uint32_t>(retro_atomic_exchange_int(&shared->gpu_frames_state, GPU_FRAMES_FAILED)) == GPU_FRAMES_FAILED) {
         return;
     }
     LOG_WARNING(Render_Vulkan, "The picture goes through system memory: {}", why);
@@ -522,11 +524,11 @@ std::uint32_t AcquireImage() {
     const auto give_up = std::chrono::steady_clock::now() + std::chrono::milliseconds(100);
     for (;;) {
         const int key = wakes.frame.Prepare();
-        const std::uint32_t latest = shared->frame_latest.load();
+        const std::uint32_t latest = static_cast<std::uint32_t>(retro_atomic_load_seq_cst_int(&shared->frame_latest));
         const std::uint32_t newest = latest == 0 ? FRAME_SLOT_NONE : latest & FRAME_SLOT_MASK;
-        const std::uint32_t held = shared->frame_held.load();
+        const std::uint32_t held = static_cast<std::uint32_t>(retro_atomic_load_seq_cst_int(&shared->frame_held));
         for (std::uint32_t image = 0; image < FRAME_IMAGES; ++image) {
-            if (image != newest && image != held && !image_in_flight[image].exchange(true)) {
+            if (image != newest && image != held && retro_atomic_exchange_int(&image_in_flight[image], 1) == 0) {
                 wakes.frame.Cancel();
                 return image;
             }
@@ -539,14 +541,14 @@ std::uint32_t AcquireImage() {
         }
         wakes.frame.Wait(key, left.count());
     }
-    const std::uint32_t latest = shared->frame_latest.load();
+    const std::uint32_t latest = static_cast<std::uint32_t>(retro_atomic_load_seq_cst_int(&shared->frame_latest));
     const std::uint32_t newest = latest == 0 ? FRAME_SLOT_NONE : latest & FRAME_SLOT_MASK;
-    const std::uint32_t held = shared->frame_held.load();
+    const std::uint32_t held = static_cast<std::uint32_t>(retro_atomic_load_seq_cst_int(&shared->frame_held));
     std::uint32_t image = 0;
     while (image == newest || image == held) {
         ++image;
     }
-    image_in_flight[image] = true;
+    (void)retro_atomic_exchange_int(&image_in_flight[image], 1);
     return image;
 }
 
@@ -556,12 +558,12 @@ void PushImage(std::uint32_t image, std::uint32_t width, std::uint32_t height) {
     }
     shared->frame_size[image].width = width;
     shared->frame_size[image].height = height;
-    const std::uint32_t latest = shared->frame_latest.load();
-    shared->frame_latest.store((((latest >> FRAME_SLOT_BITS) + 1) << FRAME_SLOT_BITS) | image);
-    image_in_flight[image] = false;
+    const std::uint32_t latest = static_cast<std::uint32_t>(retro_atomic_load_seq_cst_int(&shared->frame_latest));
+    (void)retro_atomic_exchange_int(&shared->frame_latest, (((latest >> FRAME_SLOT_BITS) + 1) << FRAME_SLOT_BITS) | image);
+    (void)retro_atomic_exchange_int(&image_in_flight[image], 0);
     // An image is free again for a frame that waits for one
     wakes.frame.Notify();
-    frame_seen = true;
+    (void)retro_atomic_exchange_int(&frame_seen, 1);
 }
 
 void ApplyCoreOptions() {
@@ -575,7 +577,7 @@ void ApplyCoreOptions() {
     emu_settings_set_show_splash(options.show_splash != 0, false);
     emu_settings_set_window_width(options.width, false);
     emu_settings_set_window_height(options.height, false);
-    VideoCore::render_width.store(options.render_width);
+    (void)retro_atomic_exchange_int(&VideoCore::render_width, options.render_width);
     emu_settings_set_vblank_frequency(options.vblank_frequency, false);
     emu_settings_set_readbacks_mode(options.readbacks, false);
     emu_settings_set_direct_memory_access_enabled(
@@ -601,8 +603,8 @@ void ApplyCoreOptions() {
 
 void SetRumble(std::uint32_t pad, std::uint8_t small_motor, std::uint8_t large_motor) {
     if (shared && pad < MAX_PADS) {
-        shared->rumble[pad].store(small_motor | (static_cast<std::uint32_t>(large_motor) << 8),
-                                  std::memory_order_release);
+        retro_atomic_store_release_int(&shared->rumble[pad],
+                                       small_motor | (static_cast<std::uint32_t>(large_motor) << 8));
     }
 }
 

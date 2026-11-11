@@ -9,6 +9,7 @@
 #include <formats/image.h>
 #include <formats/rpng.h>
 #include <imgui.h>
+#include <retro_atomic.h>
 #include "common/assert.h"
 #include "common/event_mutex.h"
 #include "common/io_file.h"
@@ -22,7 +23,7 @@ namespace ImGui {
 
 namespace Core::TextureManager {
 struct Inner {
-    std::atomic_int count = 0;
+    retro_atomic_int_t count{0};
     ImTextureID texture_id = nullptr;
     u32 width = 0;
     u32 height = 0;
@@ -36,7 +37,7 @@ struct Inner {
 using namespace Core::TextureManager;
 
 RefCountedTexture::RefCountedTexture(Inner* inner) : inner(inner) {
-    ++inner->count;
+    retro_atomic_fetch_add_int(&inner->count, 1);
 }
 
 RefCountedTexture RefCountedTexture::DecodePngTexture(std::vector<u8> data) {
@@ -59,7 +60,7 @@ RefCountedTexture::RefCountedTexture() : inner(nullptr) {}
 
 RefCountedTexture::RefCountedTexture(const RefCountedTexture& other) : inner(other.inner) {
     if (inner != nullptr) {
-        ++inner->count;
+        retro_atomic_fetch_add_int(&inner->count, 1);
     }
 }
 
@@ -72,7 +73,7 @@ RefCountedTexture& RefCountedTexture::operator=(const RefCountedTexture& other) 
         return *this;
     inner = other.inner;
     if (inner != nullptr) {
-        ++inner->count;
+        retro_atomic_fetch_add_int(&inner->count, 1);
     }
     return *this;
 }
@@ -86,7 +87,7 @@ RefCountedTexture& RefCountedTexture::operator=(RefCountedTexture&& other) noexc
 
 RefCountedTexture::~RefCountedTexture() {
     if (inner != nullptr) {
-        if (inner->count.fetch_sub(1) == 1) {
+        if (retro_atomic_fetch_sub_int(&inner->count, 1) == 1) {
             delete inner;
         }
     }
@@ -251,7 +252,7 @@ void StopWorker() {
 }
 
 void DecodePngTexture(Common::FS::FileView data, Inner* core) {
-    ++core->count;
+    retro_atomic_fetch_add_int(&core->count, 1);
     Job job{
         .core = core,
         .data = std::move(data),
@@ -262,7 +263,7 @@ void DecodePngTexture(Common::FS::FileView data, Inner* core) {
 }
 
 void DecodePngFile(std::filesystem::path path, Inner* core) {
-    ++core->count;
+    retro_atomic_fetch_add_int(&core->count, 1);
     Job job{
         .core = core,
         .path = std::move(path),
@@ -284,7 +285,7 @@ void Submit() {
             return false;
         }
         core->texture_id = core->upload_data.im_texture;
-        if (core->count.fetch_sub(1) == 1) {
+        if (retro_atomic_fetch_sub_int(&core->count, 1) == 1) {
             delete core;
         }
         return true;

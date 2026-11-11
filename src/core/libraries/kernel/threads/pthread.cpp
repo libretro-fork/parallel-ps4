@@ -18,6 +18,7 @@
 #include "core/fex/fex_guest_engine.h"
 #include "core/guest_cpu/guest_callback.h"
 #endif
+#include <retro_atomic.h>
 #include "core/libraries/kernel/kernel.h"
 #include "core/libraries/kernel/orbis_error.h"
 #include "core/libraries/kernel/posix_error.h"
@@ -61,7 +62,7 @@ static void ExitThread() {
     }
 
     auto* thread_state = ThrState::Instance();
-    ASSERT(thread_state->active_threads.fetch_sub(1) != 1);
+    ASSERT(static_cast<s32>(retro_atomic_fetch_sub_int(&thread_state->active_threads, 1)) != 1);
 
     curthread->lock->lock();
     curthread->state = PthreadState::Dead;
@@ -78,8 +79,7 @@ static void ExitThread() {
      * Kernel will do wakeup at the address, so joiner thread
      * will be resumed if it is sleeping at the address.
      */
-    curthread->tid.store(TidTerminated, std::memory_order_release);
-    curthread->tid.notify_all();
+    retro_atomic_store_release_int(&curthread->tid, TidTerminated);
     retro_eventcount_notify(curthread->join_wait.get());
 
     curthread->native_thr->Exit();
@@ -91,14 +91,14 @@ void PS4_SYSV_ABI posix_pthread_exit(void* status) {
     Pthread* curthread = g_curthread;
 
     /* Check if this thread is already in the process of exiting: */
-    ASSERT_MSG(!curthread->cancelling, "Thread {} has called pthread_exit from a destructor",
-               fmt::ptr(curthread));
+    ASSERT_MSG(retro_atomic_load_seq_cst_int(&curthread->cancelling) == 0,
+               "Thread {} has called pthread_exit from a destructor", fmt::ptr(curthread));
 
     /* Flag this thread as exiting. */
-    curthread->cancelling = true;
-    curthread->no_cancel = true;
-    curthread->cancel_async = false;
-    curthread->cancel_point = false;
+    (void)retro_atomic_exchange_int(&curthread->cancelling, 1);
+    (void)retro_atomic_exchange_int(&curthread->no_cancel, 1);
+    (void)retro_atomic_exchange_int(&curthread->cancel_async, 0);
+    (void)retro_atomic_exchange_int(&curthread->cancel_point, 0);
 
     /* Save the return value: */
     curthread->ret = status;
@@ -183,14 +183,14 @@ static int JoinThread(PthreadT pthread, void** thread_return, const OrbisKernelT
     PthreadCleanup cup{backout_join, pthread, 0};
     curthread->cleanup.push_front(&cup);
 
-    curthread->cancel_point = true;
+    (void)retro_atomic_exchange_int(&curthread->cancel_point, 1);
     PthreadTestCancel();
 
     const auto finished_or_cancelled = [&] {
-        return pthread->tid.load(std::memory_order_acquire) == TidTerminated ||
+        return static_cast<s32>(retro_atomic_load_acquire_int(&pthread->tid)) == TidTerminated ||
                curthread->ShouldCancel();
     };
-    while (pthread->tid.load(std::memory_order_acquire) != TidTerminated) {
+    while (static_cast<s32>(retro_atomic_load_acquire_int(&pthread->tid)) != TidTerminated) {
         if (curthread->ShouldCancel()) {
             PthreadTestCancel();
         }
@@ -217,7 +217,7 @@ static int JoinThread(PthreadT pthread, void** thread_return, const OrbisKernelT
         retro_eventcount_commit_wait_timeout(pthread->join_wait.get(), key, left);
     }
 
-    curthread->cancel_point = false;
+    (void)retro_atomic_exchange_int(&curthread->cancel_point, 0);
     {
         std::scoped_lock lock{*curthread->lock};
         curthread->join_target = nullptr;
@@ -356,8 +356,9 @@ int PS4_SYSV_ABI posix_pthread_create_name_np(PthreadT* thread, const PthreadAtt
         new_thread->attr.sched_policy = curthread->attr.sched_policy;
     }
 
-    static std::atomic<int> TidCounter = 1;
-    new_thread->tid = ++TidCounter;
+    static retro_atomic_int_t TidCounter{1};
+    retro_atomic_store_release_int(&new_thread->tid,
+                                   retro_atomic_fetch_add_int(&TidCounter, 1) + 1);
 
     if (new_thread->attr.stackaddr_attr == nullptr) {
         /* Add additional stack space for HLE */
@@ -378,14 +379,15 @@ int PS4_SYSV_ABI posix_pthread_create_name_np(PthreadT* thread, const PthreadAtt
     new_thread->magic = Pthread::ThrMagic;
     new_thread->start_routine = start_routine;
     new_thread->arg = arg;
-    new_thread->cancel_enable = true;
-    new_thread->cancel_async = false;
+    (void)retro_atomic_exchange_int(&new_thread->cancel_enable, 1);
+    (void)retro_atomic_exchange_int(&new_thread->cancel_async, 0);
 
     auto* memory = Core::Memory::Instance();
     if (name && memory->IsValidMapping(reinterpret_cast<VAddr>(name))) {
         new_thread->name = name;
     } else {
-        new_thread->name = fmt::format("Thread{}", new_thread->tid.load());
+        new_thread->name = fmt::format(
+            "Thread{}", static_cast<s32>(retro_atomic_load_seq_cst_int(&new_thread->tid)));
     }
 
     ASSERT(new_thread->attr.suspend == 0);
@@ -423,7 +425,7 @@ int PS4_SYSV_ABI posix_pthread_create(PthreadT* thread, const PthreadAttrT* attr
 }
 
 int PS4_SYSV_ABI posix_pthread_getthreadid_np() {
-    return g_curthread->tid;
+    return retro_atomic_load_acquire_int(&g_curthread->tid);
 }
 
 int PS4_SYSV_ABI posix_pthread_getname_np(PthreadT thread, char* name) {
@@ -473,25 +475,35 @@ int PS4_SYSV_ABI posix_getpid() {
     return GLOBAL_PID;
 }
 
+// Where the threads waiting on any pthread_once park until its routine ends
+static Common::EventCount once_event;
+
 int PS4_SYSV_ABI posix_pthread_once(PthreadOnce* once_control,
                                     void PS4_SYSV_ABI (*init_routine)()) {
+    const auto not_waiting = [once_control] {
+        return static_cast<PthreadOnceState>(retro_atomic_load_acquire_int(&once_control->state)) !=
+               PthreadOnceState::Wait;
+    };
     for (;;) {
-        auto state = once_control->state.load();
+        const auto state =
+            static_cast<PthreadOnceState>(retro_atomic_load_seq_cst_int(&once_control->state));
         if (state == PthreadOnceState::Done) {
             return 0;
         }
         if (state == PthreadOnceState::NeverDone) {
-            if (once_control->state.compare_exchange_strong(state, PthreadOnceState::InProgress,
-                                                            std::memory_order_acquire)) {
+            if (retro_atomic_cas_int(&once_control->state,
+                                     static_cast<int>(PthreadOnceState::NeverDone),
+                                     static_cast<int>(PthreadOnceState::InProgress))) {
                 break;
             }
         } else if (state == PthreadOnceState::InProgress) {
-            if (once_control->state.compare_exchange_strong(state, PthreadOnceState::Wait,
-                                                            std::memory_order_acquire)) {
-                once_control->state.wait(PthreadOnceState::Wait);
+            if (retro_atomic_cas_int(&once_control->state,
+                                     static_cast<int>(PthreadOnceState::InProgress),
+                                     static_cast<int>(PthreadOnceState::Wait))) {
+                once_event.Wait(not_waiting);
             }
         } else if (state == PthreadOnceState::Wait) {
-            once_control->state.wait(state);
+            once_event.Wait(not_waiting);
         } else {
             return POSIX_EINVAL;
         }
@@ -499,14 +511,13 @@ int PS4_SYSV_ABI posix_pthread_once(PthreadOnce* once_control,
 
     const auto once_cancel_handler = [](void* arg) PS4_SYSV_ABI {
         auto* once_control2 = static_cast<PthreadOnce*>(arg);
-        auto state = PthreadOnceState::InProgress;
-        if (once_control2->state.compare_exchange_strong(state, PthreadOnceState::NeverDone,
-                                                         std::memory_order_release)) {
+        if (retro_atomic_cas_int(&once_control2->state,
+                                 static_cast<int>(PthreadOnceState::InProgress),
+                                 static_cast<int>(PthreadOnceState::NeverDone))) {
             return;
         }
-
-        once_control2->state.store(PthreadOnceState::NeverDone, std::memory_order_release);
-        once_control2->state.notify_all();
+        retro_atomic_store_release_int(&once_control2->state, PthreadOnceState::NeverDone);
+        once_event.Notify();
     };
 
     PthreadCleanup cup{once_cancel_handler, once_control, 0};
@@ -523,13 +534,12 @@ int PS4_SYSV_ABI posix_pthread_once(PthreadOnce* once_control,
 #endif
     g_curthread->cleanup.pop_front();
 
-    auto state = PthreadOnceState::InProgress;
-    if (once_control->state.compare_exchange_strong(state, PthreadOnceState::Done,
-                                                    std::memory_order_release)) {
+    if (retro_atomic_cas_int(&once_control->state, static_cast<int>(PthreadOnceState::InProgress),
+                             static_cast<int>(PthreadOnceState::Done))) {
         return 0;
     }
-    once_control->state.store(PthreadOnceState::Done);
-    once_control->state.notify_all();
+    (void)retro_atomic_exchange_int(&once_control->state, static_cast<int>(PthreadOnceState::Done));
+    once_event.Notify();
     return 0;
 }
 
@@ -772,8 +782,8 @@ void PthreadCancelInterrupt() noexcept {
     // posix_pthread_cancel has already released the thread's host wake semaphore. Matching
     // libkernel's SIGTHR handler, a cancellation point must finish its normal wake/relock path;
     // only asynchronous cancellation outside a cancellation point exits immediately.
-    if (curthread != nullptr && !curthread->cancel_point.load(std::memory_order_acquire) &&
-        curthread->cancel_async.load(std::memory_order_acquire)) {
+    if (curthread != nullptr && retro_atomic_load_acquire_int(&curthread->cancel_point) == 0 &&
+        (retro_atomic_load_acquire_int(&curthread->cancel_async) != 0)) {
         PthreadTestCancel();
     }
 }
@@ -794,7 +804,7 @@ int PS4_SYSV_ABI posix_pthread_cancel(PthreadT thread) {
     Pthread* join_target = thread->join_target;
     bool newly_pending;
     // The joiner looks at this after it opens its wait, so the notify below reaches it
-    newly_pending = !thread->cancel_pending.exchange(true);
+    newly_pending = retro_atomic_exchange_int(&thread->cancel_pending, 1) == 0;
     // libkernel interrupts the target only when cancellation first becomes pending. The
     // per-thread wake predicate is the host equivalent and is drained before each wait.
     if (newly_pending) {
@@ -807,8 +817,9 @@ int PS4_SYSV_ABI posix_pthread_cancel(PthreadT thread) {
             InterruptPthreadForCancellation(thread);
         }
     }
-    const bool cancel_self =
-        thread == g_curthread && thread->cancel_async.load() && !thread->cancel_point.load();
+    const bool cancel_self = thread == g_curthread &&
+                             (retro_atomic_load_seq_cst_int(&thread->cancel_async) != 0) &&
+                             retro_atomic_load_seq_cst_int(&thread->cancel_point) == 0;
     thread->lock->unlock();
 
     if (cancel_self) {
@@ -820,13 +831,13 @@ int PS4_SYSV_ABI posix_pthread_cancel(PthreadT thread) {
 int PS4_SYSV_ABI posix_pthread_setcancelstate(PthreadCancelState state,
                                               PthreadCancelState* oldstate) {
     Pthread* curthread = g_curthread;
-    int oldval = curthread->cancel_enable;
+    int oldval = (retro_atomic_load_seq_cst_int(&curthread->cancel_enable) != 0);
     switch (state) {
     case PthreadCancelState::Disable:
-        curthread->cancel_enable = false;
+        (void)retro_atomic_exchange_int(&curthread->cancel_enable, 0);
         break;
     case PthreadCancelState::Enable:
-        curthread->cancel_enable = true;
+        (void)retro_atomic_exchange_int(&curthread->cancel_enable, 1);
         PthreadTestCancel();
         break;
     default:
@@ -841,13 +852,13 @@ int PS4_SYSV_ABI posix_pthread_setcancelstate(PthreadCancelState state,
 
 int PS4_SYSV_ABI posix_pthread_setcanceltype(PthreadCancelType type, PthreadCancelType* oldtype) {
     Pthread* curthread = g_curthread;
-    const bool old_async = curthread->cancel_async.load();
+    const bool old_async = (retro_atomic_load_seq_cst_int(&curthread->cancel_async) != 0);
     switch (type) {
     case PthreadCancelType::Deferred:
-        curthread->cancel_async = false;
+        (void)retro_atomic_exchange_int(&curthread->cancel_async, 0);
         break;
     case PthreadCancelType::Asynchronous:
-        curthread->cancel_async = true;
+        (void)retro_atomic_exchange_int(&curthread->cancel_async, 1);
         PthreadTestCancel();
         break;
     default:
@@ -924,13 +935,15 @@ static bool SigDflHandler(int sig) {
 
 bool Pthread::IsSignalBlocked(s32 sig) const {
     const s32 index = sig - 1;
-    return (guest_sigmask[index >> 5].load(std::memory_order_acquire) >> (index & 31)) & 1;
+    return (static_cast<u32>(retro_atomic_load_acquire_int(&guest_sigmask[index >> 5])) >>
+            (index & 31)) &
+           1;
 }
 
 void Pthread::QueueSignal(s32 sig) {
-    pending_signal_counts[sig - 1].fetch_add(1, std::memory_order_release);
+    retro_atomic_fetch_add_int(&pending_signal_counts[sig - 1], 1);
 
-    if (in_sigwait.load(std::memory_order_acquire)) {
+    if (retro_atomic_load_acquire_int(&in_sigwait) != 0) {
         signal_sema.release();
     }
 }
@@ -938,10 +951,9 @@ void Pthread::QueueSignal(s32 sig) {
 bool Pthread::ConsumeSignal(s32 sig) {
     auto& pending = pending_signal_counts[sig - 1];
 
-    u32 count = pending.load(std::memory_order_acquire);
-    while (count != 0) {
-        if (pending.compare_exchange_weak(count, count - 1, std::memory_order_acq_rel,
-                                          std::memory_order_acquire)) {
+    for (int count = retro_atomic_load_acquire_int(&pending); count != 0;
+         count = retro_atomic_load_acquire_int(&pending)) {
+        if (retro_atomic_cas_int(&pending, count, count - 1)) {
             return true;
         }
     }
@@ -954,7 +966,7 @@ s32 Pthread::FindPendingSignal(const Sigset& set) const {
             continue;
         }
 
-        if (pending_signal_counts[sig - 1].load(std::memory_order_acquire) != 0) {
+        if (static_cast<u32>(retro_atomic_load_acquire_int(&pending_signal_counts[sig - 1])) != 0) {
             return sig;
         }
     }
@@ -967,11 +979,11 @@ s32 Pthread::FindPendingUnblockedSignal() const {
         if (IsSignalBlocked(sig)) {
             continue;
         }
-        if (in_sigwait.load(std::memory_order_acquire) &&
+        if ((retro_atomic_load_acquire_int(&in_sigwait) != 0) &&
             posix_sigismember(&sigwait_set, sig) != 0) {
             continue;
         }
-        if (pending_signal_counts[sig - 1].load(std::memory_order_acquire) != 0) {
+        if (static_cast<u32>(retro_atomic_load_acquire_int(&pending_signal_counts[sig - 1])) != 0) {
             return sig;
         }
     }
@@ -980,7 +992,7 @@ s32 Pthread::FindPendingUnblockedSignal() const {
 
 bool Pthread::HasPendingSignal() const {
     for (s32 sig = 1; sig <= 128; sig++) {
-        if (pending_signal_counts[sig - 1].load(std::memory_order_acquire) != 0) {
+        if (static_cast<u32>(retro_atomic_load_acquire_int(&pending_signal_counts[sig - 1])) != 0) {
             return true;
         }
     }
@@ -1020,13 +1032,13 @@ void Pthread::WakeForSignal() {
 
 void Pthread::SetGuestSigmask(Sigset const& mask) {
     for (size_t i = 0; i < 4; i++) {
-        guest_sigmask[i].store(mask.bits[i], std::memory_order_release);
+        retro_atomic_store_release_int(&guest_sigmask[i], mask.bits[i]);
     }
 }
 
 void Pthread::GetGuestSigmask(Sigset& mask) {
     for (size_t i = 0; i < 4; i++) {
-        mask.bits[i] = guest_sigmask[i].load(std::memory_order_acquire);
+        mask.bits[i] = static_cast<u32>(retro_atomic_load_acquire_int(&guest_sigmask[i]));
     }
 }
 
@@ -1133,8 +1145,8 @@ bool Pthread::DispatchSignal(s32 sig, Siginfo* info, Ucontext* context) {
 
     SetGuestSigmask(old_mask);
 
-    if (in_sigsuspend.load(std::memory_order_acquire)) {
-        sigsuspend_interrupted.store(true, std::memory_order_release);
+    if (retro_atomic_load_acquire_int(&in_sigsuspend) != 0) {
+        retro_atomic_store_release_int(&sigsuspend_interrupted, 1);
         signal_sema.release();
     }
 
@@ -1151,7 +1163,8 @@ bool Pthread::DispatchPendingSignals(Siginfo* info, Ucontext* context) {
         info->_si_signo = sig;
     }
 
-    if (in_sigwait.load(std::memory_order_acquire) && posix_sigismember(&sigwait_set, sig) != 0) {
+    if ((retro_atomic_load_acquire_int(&in_sigwait) != 0) &&
+        posix_sigismember(&sigwait_set, sig) != 0) {
         signal_sema.release();
         return false;
     }
@@ -1298,7 +1311,9 @@ int PS4_SYSV_ABI posix_pthread_suspend_user_context_np(PthreadT thread) {
         pthread_t pthr = reinterpret_cast<pthread_t>(thread->native_thr->GetHandle());
         if (pthr) {
             pthread_kill(pthr, SIGSLEEP);
-            for (int i = 0; i < 1000 && !thread->is_suspended_in_signal; ++i) {
+            for (int i = 0;
+                 i < 1000 && retro_atomic_load_seq_cst_int(&thread->is_suspended_in_signal) == 0;
+                 ++i) {
                 std::this_thread::yield();
             }
         }
@@ -1440,7 +1455,7 @@ int PS4_SYSV_ABI posix_pthread_get_user_context_np(PthreadT thread, Ucontext* ct
             }
         }
 #else
-        if (thread->is_suspended_in_signal) {
+        if (retro_atomic_load_seq_cst_int(&thread->is_suspended_in_signal) != 0) {
             ctx->uc_mcontext = thread->suspended_context;
             got_state = true;
         }

@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <imgui.h>
+#include <retro_atomic.h>
 #include "common/logging/log.h"
 #include "core/libraries/np/np_commerce/np_commerce_ui.h"
 #include "imgui/imgui_std.h"
@@ -294,29 +295,30 @@ PsStoreIconLayer& PsStoreIconLayer::Instance() {
 }
 
 void PsStoreIconLayer::Show(PsStoreIconPos p) {
-    pos.store(p);
-    if (!shown.exchange(true)) {
+    (void)retro_atomic_exchange_int(&pos, static_cast<int>(p));
+    if (retro_atomic_exchange_int(&shown, 1) == 0) {
         AddLayer(this);
     }
 }
 
 void PsStoreIconLayer::Hide() {
-    if (shown.exchange(false)) {
+    if (retro_atomic_exchange_int(&shown, 0) != 0) {
         RemoveLayer(this);
     }
 }
 
 void PsStoreIconLayer::SetLayout(PsStoreIconLayout l) {
-    layout.store(l);
+    (void)retro_atomic_exchange_int(&layout, static_cast<int>(l));
 }
 
 void PsStoreIconLayer::Draw() {
-    if (!shown.load()) {
+    if (retro_atomic_load_seq_cst_int(&shown) == 0) {
         return;
     }
     const auto& io = GetIO();
     const ImVec2 ds = io.DisplaySize;
-    const float scale = LayoutScale(layout.load());
+    const float scale =
+        LayoutScale(static_cast<PsStoreIconLayout>(retro_atomic_load_seq_cst_int(&layout)));
     const float inset_x = ds.x * (1.0f - scale) * 0.5f;
     const float inset_y = ds.y * (1.0f - scale) * 0.5f;
 
@@ -324,7 +326,7 @@ void PsStoreIconLayer::Draw() {
     constexpr float pad = 16.0f;
 
     float x;
-    switch (pos.load()) {
+    switch (static_cast<PsStoreIconPos>(retro_atomic_load_seq_cst_int(&pos))) {
     case PsStoreIconPos::LEFT:
         x = inset_x + pad;
         break;
