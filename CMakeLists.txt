@@ -829,8 +829,6 @@ set(COMMON src/common/c_bridge.cpp
            src/common/polyfill_thread.h
            src/common/rdtsc.cpp
            src/common/rdtsc.h
-           src/common/recursive_lock.cpp
-           src/common/recursive_lock.h
            src/common/scope_exit.h
            src/common/serdes.h
            src/common/sha1.h
@@ -847,8 +845,6 @@ set(COMMON src/common/c_bridge.cpp
            src/common/small_vector.h
            src/common/slot_vector.cpp
            src/common/slot_vector.h
-           src/common/spin_lock.cpp
-           src/common/spin_lock.h
            src/common/string_literal.h
            src/common/string_util.cpp
            src/common/string_util.h

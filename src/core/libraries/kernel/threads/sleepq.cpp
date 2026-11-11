@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include <array>
-#include "common/spin_lock.h"
+#include "common/event_mutex.h"
 #include "core/libraries/kernel/threads/pthread.h"
 #include "core/libraries/kernel/threads/sleepq.h"
 
@@ -15,7 +15,8 @@ static constexpr int HASHSIZE = (1 << HASHSHIFT);
 #define SC_LOOKUP(wc) &sc_table[SC_HASH(wc)]
 
 struct SleepQueueChain {
-    Common::SpinLock sc_lock;
+    // Parks under contention where a spin lock burned the core
+    Common::EventMutex sc_lock;
     SleepqList sc_queues;
     int sc_type;
 };

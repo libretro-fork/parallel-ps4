@@ -30,7 +30,6 @@
 #include <sys/ioctl.h>
 #include <sys/syscall.h>
 #else
-#include "common/spin_lock.h"
 #endif
 
 namespace VideoCore {

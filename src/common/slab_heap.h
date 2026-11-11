@@ -6,7 +6,7 @@
 #include <atomic>
 #include <memory>
 #include "common/assert.h"
-#include "common/spin_lock.h"
+#include "common/types.h"
 
 namespace Common {
 
@@ -20,38 +20,59 @@ public:
     constexpr SlabHeapImpl() = default;
 
     void Initialize() {
-        ASSERT(m_head == nullptr);
+        ASSERT(Pointer(m_head.load()) == nullptr);
     }
 
     Node* GetHead() const {
-        return m_head;
+        return Pointer(m_head.load(std::memory_order_acquire));
     }
 
+    /// Pops the free list: a compare-exchange on its head, which carries a tag that every
+    /// change bumps, so a head popped and pushed back meanwhile (ABA) fails the exchange. The
+    /// tag sits in the pointer's top 16 bits, which user addresses leave clear on the 48-bit
+    /// x86-64 and arm64 address spaces this runs on. A node read while another thread takes it
+    /// is still slab memory, never unmapped, and its stale next is thrown away by the failed
+    /// exchange.
     void* Allocate() {
-        m_lock.lock();
-
-        Node* ret = m_head;
-        if (ret != nullptr) {
-            m_head = ret->next;
+        u64 head = m_head.load(std::memory_order_acquire);
+        for (;;) {
+            Node* node = Pointer(head);
+            if (node == nullptr) {
+                return nullptr;
+            }
+            const u64 next = Pack(node->next, Tag(head) + 1);
+            if (m_head.compare_exchange_weak(head, next, std::memory_order_acquire,
+                                             std::memory_order_acquire)) {
+                return node;
+            }
         }
-
-        m_lock.unlock();
-        return ret;
     }
 
     void Free(void* obj) {
-        m_lock.lock();
-
         Node* node = static_cast<Node*>(obj);
-        node->next = m_head;
-        m_head = node;
-
-        m_lock.unlock();
+        u64 head = m_head.load(std::memory_order_relaxed);
+        do {
+            node->next = Pointer(head);
+        } while (!m_head.compare_exchange_weak(
+            head, Pack(node, Tag(head) + 1), std::memory_order_release, std::memory_order_relaxed));
     }
 
 private:
-    std::atomic<Node*> m_head{};
-    Common::SpinLock m_lock;
+    static constexpr u64 PointerMask = (u64{1} << 48) - 1;
+
+    static Node* Pointer(u64 word) {
+        return reinterpret_cast<Node*>(static_cast<uintptr_t>(word & PointerMask));
+    }
+    static u64 Tag(u64 word) {
+        return word >> 48;
+    }
+    static u64 Pack(Node* node, u64 tag) {
+        const u64 address = reinterpret_cast<uintptr_t>(node);
+        ASSERT_MSG((address & ~PointerMask) == 0, "Slab address beyond 48 bits");
+        return address | ((tag & 0xFFFF) << 48);
+    }
+
+    std::atomic<u64> m_head{};
 };
 
 class SlabHeapBase : protected SlabHeapImpl {

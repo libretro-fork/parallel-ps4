@@ -128,7 +128,7 @@ endif
 CORE_SOURCES_CXX :=
 CORE_SOURCES_CXX += $(addprefix src/common/,assert.cpp audio_file.cpp c_bridge.cpp decoder.cpp \
 	embedded_resources.cpp error.cpp io_file.cpp memory_patcher.cpp native_clock.cpp ntapi.cpp number_utils.cpp \
-	path_util.cpp rdtsc.cpp recursive_lock.cpp signal_context.cpp slot_vector.cpp spin_lock.cpp \
+	path_util.cpp rdtsc.cpp signal_context.cpp slot_vector.cpp \
 	string_util.cpp thread.cpp xml.cpp)
 CORE_SOURCES_CXX += $(addprefix src/common/logging/,classes.cpp log.cpp)
 CORE_SOURCES_CXX += $(addprefix src/core/,address_space.cpp debug_state.cpp debugger.cpp \

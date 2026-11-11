@@ -6,6 +6,8 @@
 #include <atomic>
 #include <chrono>
 #include <cstdint>
+#include <mutex>        // std::scoped_lock, std::unique_lock, used with it
+#include <shared_mutex> // std::shared_lock
 
 #include <rthreads/retro_eventcount.h>
 
