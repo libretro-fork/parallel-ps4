@@ -1,20 +1,20 @@
 // SPDX-FileCopyrightText: Copyright 2024 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
-#include <shared_mutex>
 #include <fmt/format.h>
 #include "audioin_backend.h"
 #include "audioin_error.h"
 #include "common/logging/log.h"
+#include "common/shared_slots.h"
 #include "core/libraries/audio/audioin.h"
 #include "core/libraries/error_codes.h"
 #include "core/libraries/libs.h"
 
 namespace Libraries::AudioIn {
 
-std::array<std::shared_ptr<PortIn>, ORBIS_AUDIO_IN_NUM_PORTS> port_table{};
-std::shared_mutex port_table_mutex;
-std::mutex port_allocation_mutex;
+// The open ports, read by any thread with no lock; opening and closing run one at a time
+static Common::SharedSlots<PortIn, ORBIS_AUDIO_IN_NUM_PORTS> port_table;
+static Common::Combiner port_allocation;
 
 static std::unique_ptr<AudioInBackend> audio;
 
@@ -47,9 +47,8 @@ static s32 GetPortType(s32 handle) {
 
 static int AllocatePort(OrbisAudioInType type) {
     // TODO implement port type ranges if needed
-    for (int i = 0; i <= ORBIS_AUDIO_IN_NUM_PORTS; i++) {
-        std::shared_lock read_lock{port_table_mutex};
-        if (!port_table[i]) {
+    for (int i = 0; i < ORBIS_AUDIO_IN_NUM_PORTS; i++) {
+        if (port_table.Empty(i)) {
             return i;
         }
     }
@@ -90,66 +89,62 @@ int PS4_SYSV_ABI sceAudioInOpen(Libraries::UserService::OrbisUserServiceUserId u
         return ORBIS_AUDIO_IN_ERROR_INVALID_FREQ;
     }
 
-    std::unique_lock lock{port_allocation_mutex};
-
-    // Allocate port
-    int port_id = AllocatePort(in_type);
-    if (port_id < 0) {
-        LOG_ERROR(Lib_AudioIn, "No free audio input ports available");
-        return ORBIS_AUDIO_IN_ERROR_PORT_FULL;
-    }
-
-    // Create port object
-    std::shared_ptr<PortIn> port;
-    try {
-        port = std::make_shared<PortIn>();
-
-        port->type = in_type;
-        port->format = format;
-        port->samples_num = len;
-        port->freq = freq;
-
-        // Determine channel count and sample size based on format
-        switch (format) {
-        case OrbisAudioInParamFormat::S16Mono:
-            port->channels_num = 1;
-            port->sample_size = 2;
-            break;
-        case OrbisAudioInParamFormat::S16Stereo:
-            port->channels_num = 2;
-            port->sample_size = 2;
-            break;
-        default:
-            LOG_ERROR(Lib_AudioIn, "Unsupported audio format: {}", static_cast<u32>(format));
-            return ORBIS_AUDIO_IN_ERROR_INVALID_PARAM;
+    return port_allocation.Run([&]() -> int {
+        // Allocate port
+        int port_id = AllocatePort(in_type);
+        if (port_id < 0) {
+            LOG_ERROR(Lib_AudioIn, "No free audio input ports available");
+            return ORBIS_AUDIO_IN_ERROR_PORT_FULL;
         }
 
-        // Open backend
-        port->impl = audio->Open(*port);
-        if (!port->impl) {
-            throw std::runtime_error("Failed to create audio backend");
+        // Create port object
+        std::shared_ptr<PortIn> port;
+        try {
+            port = std::make_shared<PortIn>();
+
+            port->type = in_type;
+            port->format = format;
+            port->samples_num = len;
+            port->freq = freq;
+
+            // Determine channel count and sample size based on format
+            switch (format) {
+            case OrbisAudioInParamFormat::S16Mono:
+                port->channels_num = 1;
+                port->sample_size = 2;
+                break;
+            case OrbisAudioInParamFormat::S16Stereo:
+                port->channels_num = 2;
+                port->sample_size = 2;
+                break;
+            default:
+                LOG_ERROR(Lib_AudioIn, "Unsupported audio format: {}", static_cast<u32>(format));
+                return ORBIS_AUDIO_IN_ERROR_INVALID_PARAM;
+            }
+
+            // Open backend
+            port->impl = audio->Open(*port);
+            if (!port->impl) {
+                throw std::runtime_error("Failed to create audio backend");
+            }
+
+        } catch (const std::bad_alloc&) {
+            LOG_ERROR(Lib_AudioIn, "Failed to allocate memory for audio port");
+            return ORBIS_AUDIO_IN_ERROR_OUT_OF_MEMORY;
+        } catch (const std::exception& e) {
+            LOG_ERROR(Lib_AudioIn, "Failed to open audio input port: {}", e.what());
+            return ORBIS_AUDIO_IN_ERROR_NOT_OPENED;
         }
 
-    } catch (const std::bad_alloc&) {
-        LOG_ERROR(Lib_AudioIn, "Failed to allocate memory for audio port");
-        return ORBIS_AUDIO_IN_ERROR_OUT_OF_MEMORY;
-    } catch (const std::exception& e) {
-        LOG_ERROR(Lib_AudioIn, "Failed to open audio input port: {}", e.what());
-        return ORBIS_AUDIO_IN_ERROR_NOT_OPENED;
-    }
+        port_table.Put(port_id, port);
 
-    // Store the port pointer with write lock
-    {
-        std::unique_lock write_lock{port_table_mutex};
-        port_table[port_id] = port;
-    }
+        // Create handle
+        s32 handle = (type << 16) | port_id | 0x30000000;
 
-    // Create handle
-    s32 handle = (type << 16) | port_id | 0x30000000;
-
-    LOG_INFO(Lib_AudioIn, "Opened audio input port {}: type={}, samples={}, freq={}, format={}",
-             handle, static_cast<u32>(in_type), len, freq, static_cast<u32>(format));
-    return handle;
+        LOG_INFO(Lib_AudioIn, "Opened audio input port {}: type={}, samples={}, freq={}, format={}",
+                 handle, static_cast<u32>(in_type), len, freq, static_cast<u32>(format));
+        return handle;
+    });
 }
 
 int PS4_SYSV_ABI sceAudioInHqOpen(Libraries::UserService::OrbisUserServiceUserId userId, u32 type,
@@ -172,23 +167,14 @@ int PS4_SYSV_ABI sceAudioInClose(s32 handle) {
         return ORBIS_AUDIO_IN_ERROR_INVALID_HANDLE;
     }
 
-    std::unique_lock lock{port_allocation_mutex};
-    std::shared_ptr<PortIn> port;
-
-    // Get and clear the port pointer with write lock
-    {
-        std::unique_lock write_lock{port_table_mutex};
-        port = std::move(port_table[port_id]);
-        if (!port) {
-            LOG_ERROR(Lib_AudioIn, "Port wasn't open {}", port_id);
-            return ORBIS_AUDIO_IN_ERROR_NOT_OPENED;
-        }
-        port_table[port_id].reset();
+    const auto port = port_allocation.Run([&] { return port_table.Take(port_id); });
+    if (!port) {
+        LOG_ERROR(Lib_AudioIn, "Port wasn't open {}", port_id);
+        return ORBIS_AUDIO_IN_ERROR_NOT_OPENED;
     }
 
     // Free resources
-    std::scoped_lock port_lock{port->mutex};
-    port->impl.reset();
+    port->access.Run([&] { port->impl.reset(); });
 
     LOG_INFO(Lib_AudioIn, "Closed audio input port {}", handle);
     return ORBIS_OK;
@@ -208,24 +194,24 @@ int PS4_SYSV_ABI sceAudioInInput(s32 handle, void* dest) {
         return ORBIS_AUDIO_IN_ERROR_INVALID_POINTER;
     }
 
-    // Get port with read lock
-    std::shared_ptr<PortIn> port;
-    {
-        std::shared_lock read_lock{port_table_mutex};
-        if (port_id < 0 || port_id >= static_cast<int>(port_table.size())) {
-            LOG_ERROR(Lib_AudioIn, "Invalid port id: {}", port_id);
-            return ORBIS_AUDIO_IN_ERROR_INVALID_HANDLE;
-        }
-        port = port_table[port_id];
+    if (port_id < 0 || port_id >= static_cast<int>(port_table.size())) {
+        LOG_ERROR(Lib_AudioIn, "Invalid port id: {}", port_id);
+        return ORBIS_AUDIO_IN_ERROR_INVALID_HANDLE;
     }
+    const std::shared_ptr<PortIn> port = port_table.Get(port_id);
 
     if (!port || !port->impl) {
         LOG_ERROR(Lib_AudioIn, "Audio input port {} is not open", handle);
         return ORBIS_AUDIO_IN_ERROR_NOT_OPENED;
     }
 
-    std::scoped_lock lock{port->mutex};
-    return port->impl->Read(dest);
+    return port->access.Run([&]() -> int {
+        // Closed meanwhile
+        if (!port->impl) {
+            return ORBIS_AUDIO_IN_ERROR_NOT_OPENED;
+        }
+        return port->impl->Read(dest);
+    });
 }
 
 int PS4_SYSV_ABI sceAudioInGetSilentState(s32 handle) {
@@ -235,28 +221,25 @@ int PS4_SYSV_ABI sceAudioInGetSilentState(s32 handle) {
         LOG_ERROR(Lib_AudioIn, "Invalid port id");
         return ORBIS_AUDIO_IN_ERROR_INVALID_HANDLE;
     }
-    // Get port with read lock
-    std::shared_ptr<PortIn> port;
-    {
-        std::shared_lock read_lock{port_table_mutex};
-        if (port_id < 0 || port_id >= static_cast<int>(port_table.size())) {
-            LOG_ERROR(Lib_AudioIn, "Invalid port id: {}", port_id);
-            return ORBIS_AUDIO_IN_ERROR_INVALID_HANDLE;
-        }
-        port = port_table[port_id];
+    if (port_id < 0 || port_id >= static_cast<int>(port_table.size())) {
+        LOG_ERROR(Lib_AudioIn, "Invalid port id: {}", port_id);
+        return ORBIS_AUDIO_IN_ERROR_INVALID_HANDLE;
     }
+    const std::shared_ptr<PortIn> port = port_table.Get(port_id);
 
     if (!port || !port->impl) {
         LOG_ERROR(Lib_AudioIn, "Audio input port {} is not open", handle);
         return ORBIS_AUDIO_IN_ERROR_NOT_OPENED;
     }
 
-    u32 silent_state = 0;
-    std::scoped_lock lock{port->mutex};
-    if (!port->impl->IsAvailable()) { // if no mic exist or is not available
-        silent_state |= ORBIS_AUDIO_IN_SILENT_STATE_DEVICE_NONE;
-    }
-    return silent_state;
+    return port->access.Run([&]() -> int {
+        u32 silent_state = 0;
+        // if no mic exist or is not available
+        if (!port->impl || !port->impl->IsAvailable()) {
+            silent_state |= ORBIS_AUDIO_IN_SILENT_STATE_DEVICE_NONE;
+        }
+        return silent_state;
+    });
 }
 
 /*

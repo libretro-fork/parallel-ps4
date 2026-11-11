@@ -4,8 +4,8 @@
 #pragma once
 
 #include <memory>
-#include <mutex>
 #include <core/libraries/system/userservice.h>
+#include "common/combiner.h"
 #include "common/types.h"
 
 namespace Core::Loader {
@@ -28,7 +28,8 @@ constexpr int ORBIS_AUDIO_IN_SILENT_STATE_USER_SETTING = 0x0000000;
 constexpr int ORBIS_AUDIO_IN_SILENT_STATE_UNABLE_FORMAT = 0x00000008;
 
 struct PortIn {
-    std::mutex mutex;
+    /// The calls that use impl run one at a time here, and so does Close's reset of it
+    Common::Combiner access;
     std::unique_ptr<PortInBackend> impl{};
     OrbisAudioInType type;
     OrbisAudioInParamFormat format;

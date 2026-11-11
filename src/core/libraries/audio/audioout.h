@@ -3,11 +3,14 @@
 
 #pragma once
 
-#include <condition_variable>
+#include <array>
+#include <atomic>
 #include <memory>
-#include <mutex>
+
+#include <rthreads/retro_eventcount.h>
 
 #include "common/bit_field.h"
+#include "common/combiner.h"
 #include "core/libraries/kernel/threads.h"
 #include "core/libraries/system/userservice.h"
 
@@ -118,20 +121,44 @@ struct AudioFormatInfo {
 };
 
 struct PortOut {
-    std::mutex mutex;
     std::unique_ptr<PortBackend> impl{};
 
+    /// One buffer between the game and the port's output thread: the game fills it while
+    /// output_ready is false and sets it, the thread hands it on and clears it, and notifies
+    /// drained_ec, where the game waits. The game's calls on a port run one at a time in
+    /// writers; volume and mix level changes in control.
     void* output_buffer = nullptr;
-    std::condition_variable_any output_cv;
-    bool output_ready = false;
-    bool closing = false;
+    std::atomic<bool> output_ready{false};
+    std::atomic<bool> closing{false};
+    retro_eventcount_t drained_ec{};
+    Common::Combiner writers;
+    Common::Combiner control;
     Kernel::Thread output_thread{};
+
+    PortOut();
+    ~PortOut();
+
+    /// Until the buffer is free or the port closes. @return false if it closed.
+    bool WaitDrained() {
+        for (;;) {
+            const int key = retro_eventcount_prepare_wait(&drained_ec);
+            if (closing.load(std::memory_order_acquire)) {
+                retro_eventcount_cancel_wait(&drained_ec);
+                return false;
+            }
+            if (!output_ready.load(std::memory_order_acquire)) {
+                retro_eventcount_cancel_wait(&drained_ec);
+                return true;
+            }
+            retro_eventcount_commit_wait(&drained_ec, key);
+        }
+    }
 
     OrbisAudioOutPort type;
     AudioFormatInfo format_info;
     u32 sample_rate = 48000;
     u32 buffer_frames = 1024;
-    u64 last_output_time = 0;
+    std::atomic<u64> last_output_time{0};
     std::array<s32, 8> volume;
     s32 userId = 0;
     s32 mixLevelPadSpk = ORBIS_AUDIO_OUT_MIXLEVEL_PADSPK_DEFAULT;
