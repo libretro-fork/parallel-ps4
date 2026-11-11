@@ -171,6 +171,7 @@ struct ngs2_voice {
     uint32_t window_units;
     uint32_t window_pos;
     uint32_t window_count;
+    uint32_t at9_frame; /* frames of the superframe decoded */
     int32_t vag_history[NGS2_MAX_CHANNELS][2];
     float vag_window[NGS2_MAX_CHANNELS * VAG_SAMPLES];
 };
@@ -1954,8 +1955,10 @@ static void block_begin(ngs2_voice* v, ngs2_block* b) {
         v->block_left = b->info.num_samples ? b->info.num_samples : 0xffffffffu;
         if (!b->data && !b->info.num_samples)
             v->block_left = 0;
-        if (v->format.type == NGS2_WAVE_ATRAC9 && v->decoder)
+        if (v->format.type == NGS2_WAVE_ATRAC9 && v->decoder) {
             ratrac9_reset(v->decoder->at9);
+            v->at9_frame = 0;
+        }
         if (v->format.type == NGS2_WAVE_VAG)
             memset(v->vag_history, 0, sizeof(v->vag_history));
     }
@@ -2030,14 +2033,31 @@ static int window_fill(ngs2_voice* v, ngs2_block* b) {
         return 1;
     } else {
         ratrac9_t* at9 = v->decoder->at9;
-        uint32_t frame = ratrac9_frame_bytes(at9), samples = ratrac9_frame_samples(at9);
+        uint32_t superframe = ratrac9_superframe_bytes(at9), samples = ratrac9_frame_samples(at9);
+        /* A superframe's frames follow one another byte for byte; the next superframe
+         * starts at the next multiple of a superframe's size */
+        uint32_t end = (v->block_pos / superframe + 1u) * superframe;
         size_t used = 0;
-        if (!b->data || v->block_pos + frame > b->info.data_size)
+        if (end > b->info.data_size)
+            end = b->info.data_size;
+        if (!b->data || v->block_pos >= end)
             return 0;
         /* Channel after channel, each of the frame's samples, as the window is read */
-        if (ratrac9_decode_f32(at9, b->data + v->block_pos, frame, v->window, true, &used) < 0)
+        if (ratrac9_decode_f32(at9, b->data + v->block_pos, end - v->block_pos, v->window, true,
+                               &used) < 0 ||
+            used == 0) {
+            /* What is left of a superframe that does not decode is silence */
             memset(v->window, 0, sizeof(float) * samples * channels);
-        v->block_pos += frame;
+            ratrac9_reset(at9);
+            v->at9_frame = 0;
+            v->block_pos = end;
+        } else if (++v->at9_frame == ratrac9_frames_per_superframe(at9) ||
+                   v->block_pos + used >= end) {
+            v->at9_frame = 0;
+            v->block_pos = end;
+        } else {
+            v->block_pos += (uint32_t)used;
+        }
         v->window_count = samples;
         return 1;
     }

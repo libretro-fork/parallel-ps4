@@ -816,14 +816,20 @@ static void test_atrac9(void) {
    ratrac9_t *d = ratrac9_open(at9_config);
    ngs2_voice *v;
    unsigned i, g, order;
+   size_t at = 0;
    setup_param p;
    blocks_param bp;
    ngs2_waveform_block b;
    CHECK(d != NULL);
-   CHECK(ratrac9_frame_bytes(d) == 164 && ratrac9_frame_samples(d) == 64);
+   CHECK(ratrac9_superframe_bytes(d) == AT9_SUPERFRAME && ratrac9_frame_samples(d) == 64);
    for (i = 0; i < 8; i++) {
-      size_t used;
-      CHECK(ratrac9_decode_f32(d, at9_data + i * 164, 164, frame, true, &used) == 0);
+      size_t used = 0;
+      /* A superframe's frames follow one another; the next superframe is at its place */
+      if (i % 4 == 0)
+         at = (i / 4) * AT9_SUPERFRAME;
+      CHECK(ratrac9_decode_f32(d, at9_data + at, (i / 4 + 1) * AT9_SUPERFRAME - at, frame, true,
+                  &used) == 0);
+      at += used;
       memcpy(&want[0][i * 64], frame, 64 * sizeof(float));
       memcpy(&want[1][i * 64], frame + 64, 64 * sizeof(float));
    }

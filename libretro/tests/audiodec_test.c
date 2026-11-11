@@ -66,13 +66,17 @@ static void test_at9(int word) {
    CHECK(info.channels == 2 && info.sampling_rate == 48000 && info.super_frame_size == SUPERFRAME);
    CHECK(info.frames_in_super_frame == 4 && info.frame_samples == 64);
    for (sf = 0; sf < 2; sf++) {
+      size_t at = 0;
       for (f = 0; f < 4; f++) {
-         size_t used;
-         const uint8_t *in = at9_data + sf * SUPERFRAME + f * 164;
+         size_t used = 0;
+         const uint8_t *in = at9_data + sf * SUPERFRAME + at;
          if (word == AUDIODEC_WORD_FLOAT)
-            CHECK(ratrac9_decode_f32(d, in, 164, want.f32 + f * 128, false, &used) == 0);
+            CHECK(ratrac9_decode_f32(d, in, SUPERFRAME - at, want.f32 + f * 128, false, &used) ==
+                  0);
          else
-            CHECK(ratrac9_decode_s16(d, in, 164, want.s16 + f * 128, false, &used) == 0);
+            CHECK(ratrac9_decode_s16(d, in, SUPERFRAME - at, want.s16 + f * 128, false, &used) ==
+                  0);
+         at += used;
       }
       au.size = sizeof(au);
       au.au = (void *)(at9_data + sf * SUPERFRAME);

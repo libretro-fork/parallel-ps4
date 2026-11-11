@@ -152,26 +152,25 @@ static decoded_t decode_at9(slot_t* slot, const uint8_t* au, size_t au_size, uin
     const uint32_t frames = ratrac9_frames_per_superframe(at9);
     const size_t frame_out = (size_t)ratrac9_frame_samples(at9) * ratrac9_channels(at9) *
                              (slot->float_out ? sizeof(float) : sizeof(int16_t));
-    const size_t frame_bytes = ratrac9_frame_bytes(at9);
-    size_t produced = 0;
+    size_t offset = 0, produced = 0;
     uint32_t frame;
     if (au_size < superframe)
         return result_of(STATUS_PARTIAL, 0, 0);
     if (frame_out * frames > pcm_size)
         return result_of(STATUS_NO_ROOM, 0, 0);
-    /* A frame has its place in the superframe whatever it used of it */
+    /* The frames follow one another byte for byte; the superframe is filled out after */
     for (frame = 0; frame < frames; frame++) {
         size_t used = 0;
-        const uint8_t* in = au + (size_t)frame * frame_bytes;
         const int result =
-            slot->float_out ? ratrac9_decode_f32(at9, in, frame_bytes,
+            slot->float_out ? ratrac9_decode_f32(at9, au + offset, superframe - offset,
                                                  (float*)(void*)(pcm + produced), false, &used)
-                            : ratrac9_decode_s16(at9, in, frame_bytes,
+                            : ratrac9_decode_s16(at9, au + offset, superframe - offset,
                                                  (int16_t*)(void*)(pcm + produced), false, &used);
-        if (result < 0) {
+        if (result < 0 || used == 0 || offset + used > superframe) {
             ratrac9_reset(at9);
             return result_of(STATUS_INVALID, 0, 0);
         }
+        offset += used;
         produced += frame_out;
     }
     return result_of(STATUS_OK, superframe, produced);
