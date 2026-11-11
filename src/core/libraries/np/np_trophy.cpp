@@ -369,7 +369,10 @@ int PS4_SYSV_ABI sceNpTrophyGetGameIcon(OrbisNpTrophyContext context, OrbisNpTro
 
     auto icon_file = ctx.icons_dir / "ICON0.PNG";
 
-    Common::FS::IOFile icon(icon_file, Common::FS::FileAccessMode::Read);
+    // Mapped: one copy out of the mapping into the game's buffer, which the memory tracker's
+    // fault handler serves where a read() into it would fail
+    Common::FS::IOFile icon(icon_file, Common::FS::FileAccessMode::Read,
+                            Common::FS::FileHint::Mapped);
     if (!icon.IsOpen()) {
         LOG_ERROR(Lib_NpTrophy, "Failed to open trophy icon file: {}", icon_file.string());
         return ORBIS_NP_TROPHY_ERROR_ICON_FILE_NOT_FOUND;
@@ -686,7 +689,8 @@ int PS4_SYSV_ABI sceNpTrophyGetTrophyIcon(OrbisNpTrophyContext context, OrbisNpT
     const std::string icon_name = fmt::format("TROP{:03d}.PNG", trophyId);
     const auto icon_path = ctx.icons_dir / icon_name;
 
-    Common::FS::IOFile icon(icon_path, Common::FS::FileAccessMode::Read);
+    Common::FS::IOFile icon(icon_path, Common::FS::FileAccessMode::Read,
+                            Common::FS::FileHint::Mapped);
     if (!icon.IsOpen()) {
         LOG_ERROR(Lib_NpTrophy, "Failed to open trophy icon: {}", icon_path.string());
         return ORBIS_NP_TROPHY_ERROR_ICON_FILE_NOT_FOUND;

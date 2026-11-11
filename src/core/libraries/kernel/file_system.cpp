@@ -435,8 +435,10 @@ s64 PS4_SYSV_ABI sceKernelWrite(s32 fd, const void* buf, u64 nbytes) {
 }
 
 // For a file read with read(): the guest's buffer may be a page the memory tracker protects,
-// which read() fails on with EFAULT, so it goes through here and is copied in.
-static thread_local std::vector<u8> file_buf{};
+// which read() fails on with EFAULT, so it goes through here and is copied in, a chunk at a
+// time through a buffer of fixed size: a read never allocates, however large.
+static constexpr u64 FileBounceSize = 256_KB;
+static thread_local std::unique_ptr<u8[]> file_buf{};
 
 s64 ReadFile(Core::FileSys::File* file, void* buf, u64 nbytes) {
     const auto* memory = Core::Memory::Instance();
@@ -448,15 +450,25 @@ s64 ReadFile(Core::FileSys::File* file, void* buf, u64 nbytes) {
         // protected page the tracker's fault handler serves
         return file->Read(buf, nbytes);
     }
-    if (file_buf.size() < nbytes) {
-        file_buf.resize(nbytes);
+    if (!file_buf) {
+        // Once per thread, on its first read of such a file
+        file_buf = std::make_unique_for_overwrite<u8[]>(FileBounceSize);
     }
-    s64 bytes = file->Read(file_buf.data(), nbytes);
-    if (bytes < 0) {
-        return bytes;
+    u8* dst = static_cast<u8*>(buf);
+    s64 total = 0;
+    while (static_cast<u64>(total) < nbytes) {
+        const u64 chunk = std::min<u64>(nbytes - total, FileBounceSize);
+        const s64 bytes = file->Read(file_buf.get(), chunk);
+        if (bytes < 0) {
+            return total > 0 ? total : bytes;
+        }
+        std::memcpy(dst + total, file_buf.get(), bytes);
+        total += bytes;
+        if (static_cast<u64>(bytes) < chunk) {
+            break; // end of file
+        }
     }
-    std::memcpy(buf, file_buf.data(), bytes);
-    return bytes;
+    return total;
 }
 
 s64 PS4_SYSV_ABI readv(s32 fd, const OrbisKernelIovec* iov, s32 iovcnt) {
