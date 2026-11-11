@@ -4,6 +4,7 @@
 #pragma once
 
 #include <atomic>
+#include <memory>
 #include <optional>
 #include <type_traits>
 #include <utility>
@@ -37,7 +38,8 @@ public:
     auto Run(F&& func) -> std::invoke_result_t<F&> {
         using R = std::invoke_result_t<F&>;
         if constexpr (std::is_void_v<R>) {
-            RunErased(&func, [](void* f) { (*static_cast<std::remove_reference_t<F>*>(f))(); });
+            RunErased(const_cast<void*>(static_cast<const void*>(std::addressof(func))),
+                      [](void* f) { (*static_cast<std::remove_reference_t<F>*>(f))(); });
         } else {
             std::optional<R> result;
             auto call = [&] { result.emplace(func()); };

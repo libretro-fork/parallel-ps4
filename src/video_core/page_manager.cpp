@@ -3,8 +3,8 @@
 
 #include <algorithm>
 #include <utility>
-#include "common/adaptive_mutex.h"
 #include "common/assert.h"
+#include "common/combiner.h"
 #include "common/div_ceil.h"
 #include "common/error.h"
 #include "common/multi_level_page_table.h"
@@ -18,7 +18,6 @@
 
 #ifndef _WIN64
 #include <sys/mman.h>
-#include "common/adaptive_mutex.h"
 #else
 #include <windows.h>
 #endif
@@ -111,10 +110,24 @@ struct PageManager::Impl {
         const size_t start_page = begin >> PM_PAGE_BITS;
         const size_t end_page = end >> PM_PAGE_BITS;
         cached_pages.reserve(start_page, end_page);
-        locks.reserve(start_page, end_page);
     }
 
+    /// The page states, and the protection that follows them, change one call at a time here:
+    /// a state change and its (un)protect are one step to any other.
     void UpdatePageWatchers(VAddr addr, u64 size, PageOp write_op) {
+        combiner.Run([&] { UpdatePageWatchersOwned(addr, size, write_op); });
+    }
+
+    void UpdatePageWatchersForRegion(VAddr base_addr, const Bounds& bounds,
+                                     const RegionBits& write_mask, const RegionBits& read_mask,
+                                     PageOp write_op, PageOp read_op) {
+        combiner.Run([&] {
+            UpdatePageWatchersForRegionOwned(base_addr, bounds, write_mask, read_mask, write_op,
+                                             read_op);
+        });
+    }
+
+    void UpdatePageWatchersOwned(VAddr addr, u64 size, PageOp write_op) {
         const u64 page_start = addr >> PM_PAGE_BITS;
         const u64 page_end = Common::DivCeil(addr + size, PM_PAGE_SIZE);
 
@@ -147,8 +160,6 @@ struct PageManager::Impl {
                 continue;
             }
 
-            locks[page].lock();
-
             const auto old_perms = state->Perms();
             if (page == page_start) {
                 perms = old_perms;
@@ -178,17 +189,11 @@ struct PageManager::Impl {
 
         // Add pending (un)protect action
         release_pending();
-
-        for (u64 page = page_start; page != page_end; ++page) {
-            if (auto* lock = locks.find(page)) {
-                lock->unlock();
-            }
-        }
     }
 
-    void UpdatePageWatchersForRegion(VAddr base_addr, const Bounds& bounds,
-                                     const RegionBits& write_mask, const RegionBits& read_mask,
-                                     PageOp write_op, PageOp read_op) {
+    void UpdatePageWatchersForRegionOwned(VAddr base_addr, const Bounds& bounds,
+                                          const RegionBits& write_mask, const RegionBits& read_mask,
+                                          PageOp write_op, PageOp read_op) {
         const u64 base_page = base_addr >> PM_PAGE_BITS;
         const u64 page_start = bounds.start_word * PAGES_PER_WORD + bounds.start_page;
         const u64 page_end = bounds.end_word * PAGES_PER_WORD + bounds.end_page + 1;
@@ -211,8 +216,6 @@ struct PageManager::Impl {
             if (!state) {
                 continue;
             }
-
-            locks[base_page + page].lock();
 
             const auto old_perms = state->Perms();
             if (page == page_start) {
@@ -247,12 +250,6 @@ struct PageManager::Impl {
 
         // Add pending (un)protect action
         release_pending();
-
-        for (u64 page = page_start; page != page_end; ++page) {
-            if (auto* lock = locks.find(base_page + page)) {
-                lock->unlock();
-            }
-        }
     }
 
     struct PageTraits {
@@ -263,18 +260,7 @@ struct PageManager::Impl {
         static constexpr bool NULL_CHECK = false;
     };
     Common::MultiLevelPageTable<PageTraits> cached_pages;
-    struct MutexTraits {
-#ifdef PTHREAD_ADAPTIVE_MUTEX_INITIALIZER_NP
-        using Entry = Common::AdaptiveMutex;
-#else
-        using Entry = std::mutex;
-#endif
-        static constexpr size_t ADDRESS_SPACE_BITS = ADDRESS_BITS;
-        static constexpr size_t L1_BITS = 16;
-        static constexpr size_t PAGE_BITS = PM_PAGE_BITS;
-        static constexpr bool NULL_CHECK = false;
-    };
-    Common::MultiLevelPageTable<MutexTraits> locks;
+    Common::Combiner combiner;
 };
 
 #ifdef __linux__

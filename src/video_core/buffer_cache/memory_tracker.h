@@ -4,6 +4,7 @@
 #pragma once
 
 #include <algorithm>
+#include <atomic>
 #include <deque>
 #include <vector>
 
@@ -69,15 +70,14 @@ public:
         }
         bool should_flush = false;
         IteratePages(cpu_addr, size, [&should_flush](RegionManager* manager, u64 offset, u64 size) {
-            const auto bounds = manager->GetBounds(offset, size);
-            manager->Lock(bounds);
-            const bool modified = manager->template IsRegionModified<Type::GPU>(offset, size);
-            if (!modified) {
-                manager->template ChangeRegionState<StateOp::Set, StateOp::None, false>(offset,
-                                                                                        size);
-            }
-            should_flush |= modified;
-            manager->Unlock(bounds);
+            manager->Exclusive([&] {
+                const bool modified = manager->template IsRegionModified<Type::GPU>(offset, size);
+                if (!modified) {
+                    manager->template ChangeRegionState<StateOp::Set, StateOp::None, false>(offset,
+                                                                                            size);
+                }
+                should_flush |= modified;
+            });
         });
         if (should_flush) {
             on_flush();
@@ -119,7 +119,7 @@ private:
         u64 page_offset = cpu_address & HIGHER_PAGE_MASK;
         while (remaining_size > 0) {
             const u64 copy_amount = std::min(HIGHER_PAGE_SIZE - page_offset, remaining_size);
-            if (auto* region = top_tier[page_index]; region) {
+            if (auto* region = top_tier[page_index].load(std::memory_order_acquire); region) {
                 if constexpr (BOOL_BREAK) {
                     if (func(region, page_offset, copy_amount)) {
                         return true;
@@ -150,6 +150,8 @@ private:
             manager_pool.emplace_back();
             auto& last_pool = manager_pool.back();
             for (size_t i = 0; i < MANAGER_POOL_SIZE; i++) {
+                // Made anew over the default one, which is ended first
+                std::destroy_at(&last_pool[i]);
                 std::construct_at(&last_pool[i], tracker, 0);
                 free_managers.push_back(&last_pool[i]);
             }
@@ -157,7 +159,8 @@ private:
         auto* new_manager = free_managers.back();
         new_manager->SetCpuAddress(base_cpu_addr);
         free_managers.pop_back();
-        top_tier[page_index] = new_manager;
+        // Published once made: the fault handler's thread reads the table meanwhile
+        top_tier[page_index].store(new_manager, std::memory_order_release);
         return new_manager;
     }
 
@@ -165,7 +168,9 @@ private:
     const u32 readbacks_mode;
     std::deque<std::array<RegionManager, MANAGER_POOL_SIZE>> manager_pool;
     std::vector<RegionManager*> free_managers;
-    std::array<RegionManager*, NUM_HIGH_PAGES> top_tier{};
+    /// Made by the GPU thread (the regions are made only where it marks or uploads), read by
+    /// any.
+    std::array<std::atomic<RegionManager*>, NUM_HIGH_PAGES> top_tier{};
 };
 
 } // namespace VideoCore

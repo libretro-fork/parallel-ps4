@@ -5,19 +5,13 @@
 
 #include <utility>
 
-#include "common/adaptive_mutex.h"
+#include "common/combiner.h"
 #include "common/types.h"
 #include "core/emulator_settings.h"
 #include "video_core/buffer_cache/region_definitions.h"
 #include "video_core/page_manager.h"
 
 namespace VideoCore {
-
-#ifdef PTHREAD_ADAPTIVE_MUTEX_INITIALIZER_NP
-using LockType = Common::AdaptiveMutex;
-#else
-using LockType = std::mutex;
-#endif
 
 /**
  * Allows tracking CPU and GPU modification of pages in a contigious virtual address region.
@@ -90,24 +84,25 @@ public:
         RegionBits write_prot;
         RegionBits read_prot;
         Bounds watcher_bounds = MIN_BOUNDS;
+        const auto change = [&] {
+            IterateWords(bounds, [&](u64 index, u64 mask) {
+                update_watchers |= UpdateProtection<cpu_op, gpu_op>(write_prot, read_prot,
+                                                                    watcher_bounds, index, mask);
+            });
+            const auto write_op = GetPageOp<Type::CPU>(cpu_op);
+            const auto read_op = GetPageOp<Type::GPU>(gpu_op);
+            update_watchers &= write_op != PageOp::None || read_op != PageOp::None;
+            if (update_watchers) {
+                tracker->UpdatePageWatchersForRegion(cpu_addr, watcher_bounds, write_prot,
+                                                     read_prot, write_op, read_op);
+            }
+            IterateWords(bounds,
+                         [&](u64 index, u64 mask) { UpdateState<cpu_op, gpu_op>(index, mask); });
+        };
         if constexpr (locked) {
-            mutex.lock();
-        }
-        IterateWords(bounds, [&](u64 index, u64 mask) {
-            update_watchers |= UpdateProtection<cpu_op, gpu_op>(write_prot, read_prot,
-                                                                watcher_bounds, index, mask);
-        });
-        const auto write_op = GetPageOp<Type::CPU>(cpu_op);
-        const auto read_op = GetPageOp<Type::GPU>(gpu_op);
-        update_watchers &= write_op != PageOp::None || read_op != PageOp::None;
-        if (update_watchers) {
-            tracker->UpdatePageWatchersForRegion(cpu_addr, watcher_bounds, write_prot, read_prot,
-                                                 write_op, read_op);
-        }
-        IterateWords(bounds,
-                     [&](u64 index, u64 mask) { UpdateState<cpu_op, gpu_op>(index, mask); });
-        if constexpr (locked) {
-            mutex.unlock();
+            combiner.Run(change);
+        } else {
+            change();
         }
     }
 
@@ -124,41 +119,43 @@ public:
         u64 start_page{};
         u64 end_page{};
         Bounds watcher_bounds = MIN_BOUNDS;
-        if constexpr (locked) {
-            mutex.lock();
-        }
-        IterateWords(bounds, [&](u64 index, u64 mask) {
-            const u64 base_page = index * PAGES_PER_WORD;
-            const u64 word = state[index] & mask;
-            update_watchers |= UpdateProtection<cpu_op, gpu_op>(write_prot, read_prot,
-                                                                watcher_bounds, index, mask);
-            IteratePages(word, [&](u64 pages_offset, u64 pages_size) {
-                if (end_page == base_page + pages_offset) {
-                    end_page += pages_size;
-                    return;
-                }
-                if (end_page) {
-                    func(cpu_addr + start_page * BYTES_PER_PAGE,
-                         (end_page - start_page) * BYTES_PER_PAGE);
-                }
-                start_page = base_page + pages_offset;
-                end_page = start_page + pages_size;
+        const auto change = [&] {
+            IterateWords(bounds, [&](u64 index, u64 mask) {
+                const u64 base_page = index * PAGES_PER_WORD;
+                const u64 word = state[index] & mask;
+                update_watchers |= UpdateProtection<cpu_op, gpu_op>(write_prot, read_prot,
+                                                                    watcher_bounds, index, mask);
+                IteratePages(word, [&](u64 pages_offset, u64 pages_size) {
+                    if (end_page == base_page + pages_offset) {
+                        end_page += pages_size;
+                        return;
+                    }
+                    if (end_page) {
+                        func(cpu_addr + start_page * BYTES_PER_PAGE,
+                             (end_page - start_page) * BYTES_PER_PAGE);
+                    }
+                    start_page = base_page + pages_offset;
+                    end_page = start_page + pages_size;
+                });
             });
-        });
-        if (end_page) {
-            func(cpu_addr + start_page * BYTES_PER_PAGE, (end_page - start_page) * BYTES_PER_PAGE);
-        }
-        const auto write_op = GetPageOp<Type::CPU>(cpu_op);
-        const auto read_op = GetPageOp<Type::GPU>(gpu_op);
-        update_watchers &= write_op != PageOp::None || read_op != PageOp::None;
-        if (update_watchers) {
-            tracker->UpdatePageWatchersForRegion(cpu_addr, watcher_bounds, write_prot, read_prot,
-                                                 write_op, read_op);
-        }
-        IterateWords(bounds,
-                     [&](u64 index, u64 mask) { UpdateState<cpu_op, gpu_op>(index, mask); });
+            if (end_page) {
+                func(cpu_addr + start_page * BYTES_PER_PAGE,
+                     (end_page - start_page) * BYTES_PER_PAGE);
+            }
+            const auto write_op = GetPageOp<Type::CPU>(cpu_op);
+            const auto read_op = GetPageOp<Type::GPU>(gpu_op);
+            update_watchers &= write_op != PageOp::None || read_op != PageOp::None;
+            if (update_watchers) {
+                tracker->UpdatePageWatchersForRegion(cpu_addr, watcher_bounds, write_prot,
+                                                     read_prot, write_op, read_op);
+            }
+            IterateWords(bounds,
+                         [&](u64 index, u64 mask) { UpdateState<cpu_op, gpu_op>(index, mask); });
+        };
         if constexpr (locked) {
-            mutex.unlock();
+            combiner.Run(change);
+        } else {
+            change();
         }
     }
 
@@ -182,12 +179,11 @@ public:
         }
     }
 
-    void Lock(const Bounds& bounds) noexcept {
-        mutex.lock();
-    }
-
-    void Unlock(const Bounds& bounds) noexcept {
-        mutex.unlock();
+    /// Runs @func with no other change to this region at the same time; it may make the
+    /// unlocked (locked = false) calls.
+    template <typename F>
+    auto Exclusive(F&& func) {
+        return combiner.Run(std::forward<F>(func));
     }
 
 private:
@@ -334,7 +330,8 @@ private:
     u32 readbacks_mode;
     RegionBits cpu;
     RegionBits gpu;
-    LockType mutex;
+    // The region's changes run one at a time here
+    Common::Combiner combiner;
 };
 
 } // namespace VideoCore
