@@ -4,11 +4,14 @@
 #pragma once
 
 #include <array>
-#include <mutex>
 #include <optional>
+#include <type_traits>
 #include <utility>
 
+#include <rthreads/retro_seqlock.h>
+
 #include "common/assert.h"
+#include "common/combiner.h"
 #include "common/ring_buffer_queue.h"
 #include "core/libraries/pad/pad.h"
 #include "core/libraries/system/userservice.h"
@@ -105,7 +108,7 @@ public:
     s32 user_id = Libraries::UserService::ORBIS_USER_SERVICE_USER_ID_INVALID;
 
 private:
-    // m_state_mutex must be held by the caller.
+    // Run inside m_combiner.
     void PushStateLocked(u64 timestamp = 0);
     void UpdateOrientationLocked(u64 timestamp);
 
@@ -116,7 +119,11 @@ private:
 
     State m_state;
 
-    std::mutex m_state_mutex;
+    /// What changes the state, and the history's reads, run one at a time in m_combiner;
+    /// ReadState takes the state as last pushed, m_published, under m_published_seq.
+    Common::Combiner m_combiner;
+    State m_published;
+    retro_seqlock_t m_published_seq{};
     RingBufferQueue<State> m_states_queue;
 };
 

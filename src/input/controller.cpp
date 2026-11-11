@@ -4,7 +4,6 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
-#include <mutex>
 #include <utility>
 
 #include "common/logging/log.h"
@@ -57,65 +56,78 @@ void CalculateOrientation(const Libraries::Pad::OrbisFVector3& angular_velocity,
 
 } // namespace
 
-GameController::GameController() : m_states_queue(64) {}
+// Copied out of the seqlock as plain memory
+static_assert(std::is_trivially_copyable_v<State>);
+
+GameController::GameController() : m_states_queue(64) {
+    retro_seqlock_init(&m_published_seq);
+}
 
 State GameController::ReadState() {
-    std::lock_guard lock{m_state_mutex};
-    return m_state;
+    State state;
+    int seq;
+    do {
+        seq = retro_seqlock_read_begin(&m_published_seq);
+        state = m_published;
+    } while (retro_seqlock_read_retry(&m_published_seq, seq));
+    return state;
 }
 
 int GameController::ReadStates(State* states, int states_num) {
-    std::lock_guard lock{m_state_mutex};
-    if (states_num <= 0) {
-        return 0;
-    }
-
-    if (!m_state.connected) {
-        states[0] = m_state;
-        return 1;
-    }
-
-    if (states_num == 1) {
-        // Retained history can make a later multi-sample read return up to 64 stale reports, so
-        // mixed single- and multi-sample reads require dedicated tests.
-        states[0] = m_state;
-        return 1;
-    }
-
-    int read_count = 0;
-    while (read_count < states_num) {
-        auto state = m_states_queue.Pop();
-        if (!state) {
-            break;
+    return m_combiner.Run([&]() -> int {
+        if (states_num <= 0) {
+            return 0;
         }
-        states[read_count++] = std::move(*state);
-    }
-    return read_count;
+
+        if (!m_state.connected) {
+            states[0] = m_state;
+            return 1;
+        }
+
+        if (states_num == 1) {
+            // Retained history can make a later multi-sample read return up to 64 stale reports, so
+            // mixed single- and multi-sample reads require dedicated tests.
+            states[0] = m_state;
+            return 1;
+        }
+
+        int read_count = 0;
+        while (read_count < states_num) {
+            auto state = m_states_queue.Pop();
+            if (!state) {
+                break;
+            }
+            states[read_count++] = std::move(*state);
+        }
+        return read_count;
+    });
 }
 
 void GameController::Button(OrbisPadButtonDataOffset button, bool is_pressed) {
-    std::lock_guard lock{m_state_mutex};
-    m_state.OnButton(button, is_pressed);
-    PushStateLocked();
+    m_combiner.Run([&] {
+        m_state.OnButton(button, is_pressed);
+        PushStateLocked();
+    });
 }
 
 void GameController::Axis(Input::Axis axis, int value, bool smooth) {
-    std::lock_guard lock{m_state_mutex};
-    const u64 timestamp = Libraries::Kernel::sceKernelGetProcessTime();
-    m_state.OnAxis(axis, value, timestamp, smooth);
-    PushStateLocked(timestamp);
+    m_combiner.Run([&] {
+        const u64 timestamp = Libraries::Kernel::sceKernelGetProcessTime();
+        m_state.OnAxis(axis, value, timestamp, smooth);
+        PushStateLocked(timestamp);
+    });
 }
 
 void GameController::PollState() {
-    std::lock_guard lock{m_state_mutex};
-    PushStateLocked();
+    m_combiner.Run([&] { PushStateLocked(); });
 }
 
 void GameController::ResetOrientation() {
-    std::lock_guard lock{m_state_mutex};
-    m_state.orientation = {0.0f, 0.0f, 0.0f, 1.0f};
-    m_last_orientation_update = 0;
-    PushStateLocked();
+    m_combiner.Run([&] {
+        m_state.orientation = {0.0f, 0.0f, 0.0f, 1.0f};
+        m_last_orientation_update = 0;
+        PushStateLocked();
+    });
 }
 
 void GameController::SetTouchpadState(int touch_index, bool touch_down, float x, float y) {
@@ -123,53 +135,56 @@ void GameController::SetTouchpadState(int touch_index, bool touch_down, float x,
         return;
     }
 
-    std::lock_guard lock{m_state_mutex};
-    const u64 timestamp = Libraries::Kernel::sceKernelGetProcessTime();
-    const bool was_pressed = m_state.touchpad[0].state || m_state.touchpad[1].state;
-    auto& touch = m_state.touchpad[touch_index];
-    if (touch_down && !touch.state) {
-        touch.ID = m_next_touch_id;
-        m_next_touch_id = m_next_touch_id == 127 ? 1 : m_next_touch_id + 1;
-    }
-    m_state.OnTouchpad(touch_index, touch_down, x, y);
-    const bool is_pressed = m_state.touchpad[0].state || m_state.touchpad[1].state;
-    if (!was_pressed && is_pressed) {
-        m_touch_down_timestamp = timestamp;
-    } else if (was_pressed && !is_pressed) {
-        m_touch_down_timestamp = 0;
-    }
-    PushStateLocked(timestamp);
+    m_combiner.Run([&] {
+        const u64 timestamp = Libraries::Kernel::sceKernelGetProcessTime();
+        const bool was_pressed = m_state.touchpad[0].state || m_state.touchpad[1].state;
+        auto& touch = m_state.touchpad[touch_index];
+        if (touch_down && !touch.state) {
+            touch.ID = m_next_touch_id;
+            m_next_touch_id = m_next_touch_id == 127 ? 1 : m_next_touch_id + 1;
+        }
+        m_state.OnTouchpad(touch_index, touch_down, x, y);
+        const bool is_pressed = m_state.touchpad[0].state || m_state.touchpad[1].state;
+        if (!was_pressed && is_pressed) {
+            m_touch_down_timestamp = timestamp;
+        } else if (was_pressed && !is_pressed) {
+            m_touch_down_timestamp = 0;
+        }
+        PushStateLocked(timestamp);
+    });
 }
 
 void GameController::ConnectController() {
-    std::lock_guard lock{m_state_mutex};
-    m_states_queue.Clear();
-    if (!m_state.connected) {
-        ++m_state.connected_count;
-        if (m_state.connected_count == 0) {
-            m_state.connected_count = 1;
+    m_combiner.Run([&] {
+        m_states_queue.Clear();
+        if (!m_state.connected) {
+            ++m_state.connected_count;
+            if (m_state.connected_count == 0) {
+                m_state.connected_count = 1;
+            }
         }
-    }
-    m_state.connected = true;
-    m_last_orientation_update = 0;
-    PushStateLocked();
+        m_state.connected = true;
+        m_last_orientation_update = 0;
+        PushStateLocked();
+    });
 }
 
 void GameController::DisconnectController() {
-    std::lock_guard lock{m_state_mutex};
-    m_states_queue.Clear();
+    m_combiner.Run([&] {
+        m_states_queue.Clear();
 
-    const u8 connected_count = m_state.connected_count;
-    m_state = {};
-    m_state.connected_count = connected_count;
-    std::fill(gyro_buf, gyro_buf + 3, 0.0f);
-    std::fill(accel_buf, accel_buf + 3, 0.0f);
-    accel_buf[1] = 9.81f;
-    m_next_touch_id = 1;
-    m_touch_down_timestamp = 0;
-    m_state.connected = false;
-    m_last_orientation_update = 0;
-    PushStateLocked();
+        const u8 connected_count = m_state.connected_count;
+        m_state = {};
+        m_state.connected_count = connected_count;
+        std::fill(gyro_buf, gyro_buf + 3, 0.0f);
+        std::fill(accel_buf, accel_buf + 3, 0.0f);
+        accel_buf[1] = 9.81f;
+        m_next_touch_id = 1;
+        m_touch_down_timestamp = 0;
+        m_state.connected = false;
+        m_last_orientation_update = 0;
+        PushStateLocked();
+    });
 }
 
 void GameController::UpdateOrientationLocked(u64 timestamp) {
@@ -197,6 +212,9 @@ void GameController::PushStateLocked(u64 timestamp) {
     m_state.touch_time_since_held_down =
         m_touch_down_timestamp == 0 ? 0 : timestamp - m_touch_down_timestamp;
     m_states_queue.Push(m_state);
+    retro_seqlock_write_begin(&m_published_seq);
+    m_published = m_state;
+    retro_seqlock_write_end(&m_published_seq);
 }
 
 // The light bar's colour, as the game set it, for the game to read back: the frontend has no
