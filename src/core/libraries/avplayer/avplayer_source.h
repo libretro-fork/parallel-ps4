@@ -132,7 +132,18 @@ public:
     bool Init(size_t count) {
         Free();
         m_live = retro_waitable_spsc_init(&m_queue, std::max<size_t>(count, 1) * sizeof(T));
+        m_capacity = m_live ? retro_spsc_write_avail(&m_queue.queue) : 0;
         return m_live;
+    }
+
+    /// The producer's: parks until at most @count records are left, the ring is closed or
+    /// @timeout_us has gone by; a record taken wakes it.
+    void WaitDownTo(size_t count, int64_t timeout_us) {
+        if (!m_live || Size() <= count || retro_waitable_spsc_cancelled(&m_queue)) {
+            return;
+        }
+        const size_t room = m_capacity > count * sizeof(T) ? m_capacity - count * sizeof(T) : 0;
+        retro_waitable_spsc_wait_writable(&m_queue, room, timeout_us);
     }
 
     void Free() {
@@ -201,6 +212,7 @@ public:
 
 private:
     static constexpr int64_t WaitBound = 1000000; // a wake comes first; this only re-checks
+    size_t m_capacity = 0;                        // bytes
 
     retro_waitable_spsc_t m_queue{};
     bool m_live = false;

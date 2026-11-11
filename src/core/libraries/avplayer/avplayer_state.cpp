@@ -235,12 +235,20 @@ void AvPlayerState::AvControllerThread(std::stop_token stop) {
     using std::chrono::milliseconds;
     Common::SetCurrentThreadName("shadPS4:AvController");
 
+    // An event wakes the thread at once; the buffering state is looked at every 5 ms, as it was
+    const std::stop_callback wake{stop, [this] { m_event_ready.Notify(); }};
     while (!stop.stop_requested()) {
         if (!m_event_queue.Empty()) {
             ProcessEvent();
             continue;
         }
-        std::this_thread::sleep_for(milliseconds(5));
+        const int key = retro_eventcount_prepare_wait(m_event_ready.get());
+        if (!m_event_queue.Empty() || stop.stop_requested()) {
+            retro_eventcount_cancel_wait(m_event_ready.get());
+            continue;
+        }
+        retro_eventcount_commit_wait_timeout(m_event_ready.get(), key,
+                                             std::chrono::microseconds(milliseconds(5)).count());
         UpdateBufferingState();
     }
 }
@@ -253,6 +261,7 @@ void AvPlayerState::AddSourceEvent() {
         })) {
         LOG_ERROR(Lib_AvPlayer, "The event queue is full: an event is dropped");
     }
+    m_event_ready.Notify();
 }
 
 void AvPlayerState::WarningEvent(s32 id) {
@@ -265,6 +274,7 @@ void AvPlayerState::WarningEvent(s32 id) {
         })) {
         LOG_ERROR(Lib_AvPlayer, "The event queue is full: an event is dropped");
     }
+    m_event_ready.Notify();
 }
 
 // Called inside GAME thread

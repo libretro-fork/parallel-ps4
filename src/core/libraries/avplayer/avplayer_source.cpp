@@ -553,7 +553,9 @@ void AvPlayerSource::DemuxerThread(std::stop_token stop) {
     while (!stop.stop_requested()) {
         if (m_video_packets.Size() > 30 &&
             (!m_audio_stream_index.has_value() || m_audio_packets.Size() > 8)) {
-            std::this_thread::sleep_for(milliseconds(5));
+            // The video decoder taking a packet wakes it; the audio side is looked at again
+            // within 5 ms, as it was
+            m_video_packets.WaitDownTo(30, 5000);
             continue;
         }
         // The next sample's bytes are put in place first, for a file that is not mapped

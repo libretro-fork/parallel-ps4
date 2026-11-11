@@ -9,6 +9,7 @@
 #include <optional>
 #include <shared_mutex>
 #include <string_view>
+#include "common/event_count.h"
 #include "common/event_mutex.h"
 #include "common/shared_first_mutex.h"
 
@@ -94,6 +95,9 @@ private:
     Common::EventMutex m_event_handler_mutex{};
     Kernel::Thread m_controller_thread{};
     MpscRing<AvPlayerEvent, 64> m_event_queue{};
+    /// Notified on every event pushed: the controller thread parks here between its looks at
+    /// the buffering state.
+    Common::EventCount m_event_ready;
 };
 
 } // namespace Libraries::AvPlayer
