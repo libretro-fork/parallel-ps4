@@ -30,6 +30,8 @@ static Common::Log::Class ToClass(c_log_class log_class) {
         return Common::Log::Class::Loader;
     case C_LOG_NP_HANDLER:
         return Common::Log::Class::NpHandler;
+    case C_LOG_RENDER_VULKAN:
+        return Common::Log::Class::Render_Vulkan;
     }
     return Common::Log::Class::Common;
 }

@@ -35,6 +35,9 @@ void Semaphore::Refresh() {
     do {
         this_tick = static_cast<u64>(retro_atomic_load_acquire_64(&gpu_tick));
         auto [counter_result, cntr] = instance.GetDevice().getSemaphoreCounterValue(*semaphore);
+        if (counter_result == vk::Result::eErrorDeviceLost) {
+            instance.ReportDeviceLost();
+        }
         ASSERT_MSG(counter_result == vk::Result::eSuccess,
                    "Failed to get master semaphore value: {}", vk::to_string(counter_result));
         counter = cntr;

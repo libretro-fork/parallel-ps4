@@ -21,7 +21,8 @@ enum c_log_class {
     C_LOG_LIB_HTTP,
     C_LOG_LIB_ULT,
     C_LOG_LOADER,
-    C_LOG_NP_HANDLER
+    C_LOG_NP_HANDLER,
+    C_LOG_RENDER_VULKAN
 };
 
 /* Same order as Common::Log::Level. */

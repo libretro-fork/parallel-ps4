@@ -481,6 +481,9 @@ public:
     /// Returns the amount of memory used.
     [[nodiscard]] u64 GetDeviceMemoryUsage() const;
 
+    /// The driver's account of a device it has lost, into the log (vk_device_fault.h)
+    void ReportDeviceLost() const;
+
     /// Returns the total memory budget available to the device.
     [[nodiscard]] u64 GetTotalMemoryBudget() const {
         return total_memory_budget;
@@ -563,6 +566,7 @@ private:
     bool image_view_min_lod{};
     bool shader_clock{};
     bool supports_memory_budget{};
+    bool device_fault{};
     bool external_memory_export{};
     bool supports_block_texel_view{};
     u64 total_memory_budget{};

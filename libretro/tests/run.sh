@@ -43,6 +43,13 @@ for san in address,undefined thread; do
         src/core/libraries/audiodec/audiodec.c $L/formats/atrac9/ratrac9.c \
         $L/formats/mp3/rmp3.c $L/formats/aac/raac.c -o "$OUT/$name" -lm
     "$OUT/$name"
+    # What is said of a lost GPU device, against a driver made up for it
+    name=vk_device_fault_test-$(echo $san | tr , -)
+    $CC -std=c89 -O1 -g -Wall -Wdeclaration-after-statement -Wno-long-long \
+        -fno-omit-frame-pointer -fsanitize=$san -isystem externals/vulkan-headers/include -Isrc \
+        -I$L/include libretro/tests/vk_device_fault_test.c \
+        src/video_core/renderer_vulkan/vk_device_fault.c -o "$OUT/$name"
+    "$OUT/$name"
     name=vk_heap_test-$(echo $san | tr , -)
     $CC -std=c89 -pedantic -O1 -g -Wall -Wdeclaration-after-statement -Wno-long-long \
         -fno-omit-frame-pointer -fsanitize=$san -isystem externals/vulkan-headers/include -Isrc \
