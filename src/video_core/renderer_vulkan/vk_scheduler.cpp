@@ -11,16 +11,23 @@
 
 namespace Vulkan {
 
-std::mutex Scheduler::submit_mutex;
+Common::Combiner Scheduler::submit_combiner;
 
 Scheduler::Scheduler(const Instance& instance)
     : instance{instance}, work_semaphore{instance}, command_pool{instance, &work_semaphore} {
+    retro_eventcount_init(&priority_pending_ops_ec);
     BeginSession();
     priority_pending_ops_thread =
         std::jthread(std::bind_front(&Scheduler::PriorityPendingOpsThread, this));
 }
 
-Scheduler::~Scheduler() = default;
+Scheduler::~Scheduler() {
+    priority_pending_ops_thread.request_stop();
+    if (priority_pending_ops_thread.joinable()) {
+        priority_pending_ops_thread.join();
+    }
+    retro_eventcount_free(&priority_pending_ops_ec);
+}
 
 void Scheduler::BeginRendering(const RenderState& new_state) {
     if (is_rendering && render_state == new_state) {
@@ -126,11 +133,30 @@ void Scheduler::Wait(u64 tick) {
 }
 
 void Scheduler::PopPendingOperations() {
-    std::unique_lock lk(pending_ops_mutex);
+    if (pending_runner.load(std::memory_order_relaxed) == std::this_thread::get_id()) {
+        // From an operation being run
+        RunPendingOperations();
+        return;
+    }
+    pending_combiner.Run([this] {
+        pending_runner.store(std::this_thread::get_id(), std::memory_order_relaxed);
+        RunPendingOperations();
+        pending_runner.store({}, std::memory_order_relaxed);
+    });
+}
+
+void Scheduler::RunPendingOperations() {
     work_semaphore.Refresh();
-    while (!pending_ops.empty() && work_semaphore.IsFree(pending_ops.front().gpu_tick)) {
-        pending_ops.front().callback();
-        pending_ops.pop();
+    pending_ops.Take();
+    while (PendingOp* op = pending_ops.Front()) {
+        if (!work_semaphore.IsFree(op->gpu_tick)) {
+            break;
+        }
+        // Off the list before it runs, in case it runs the list again
+        pending_ops.Pop();
+        op->callback();
+        delete op;
+        pending_ops.Take();
     }
 }
 
@@ -168,85 +194,90 @@ void Scheduler::EndSession() {
 }
 
 void Scheduler::SubmitExecution(SubmitInfo& info) {
-    std::scoped_lock lk{submit_mutex};
-    const u64 signal_value = work_semaphore.NextTick();
+    submit_combiner.Run([&] {
+        const u64 signal_value = work_semaphore.NextTick();
 
-    if (on_submit) {
-        on_submit(info);
-    }
-
-    EndSession();
-
-    std::vector<vk::CommandBuffer> cmd_buffers;
-    cmd_buffers.reserve(sessions.size() * 2);
-
-    for (const auto& session : sessions) {
-        if (session.upload) {
-            cmd_buffers.push_back(session.upload);
+        if (on_submit) {
+            on_submit(info);
         }
-        cmd_buffers.push_back(session.primary);
-    }
-    sessions.clear();
 
-    const vk::Semaphore timeline = work_semaphore.Handle();
-    info.AddSignal(timeline, signal_value);
+        EndSession();
 
-    std::array<vk::PipelineStageFlags, std::tuple_size_v<decltype(info.wait_semas)>>
-        wait_stage_masks;
-    wait_stage_masks.fill(vk::PipelineStageFlagBits::eAllCommands);
+        std::vector<vk::CommandBuffer> cmd_buffers;
+        cmd_buffers.reserve(sessions.size() * 2);
 
-    const vk::TimelineSemaphoreSubmitInfo timeline_si = {
-        .waitSemaphoreValueCount = info.num_wait_semas,
-        .pWaitSemaphoreValues = info.wait_ticks.data(),
-        .signalSemaphoreValueCount = info.num_signal_semas,
-        .pSignalSemaphoreValues = info.signal_ticks.data(),
-    };
+        for (const auto& session : sessions) {
+            if (session.upload) {
+                cmd_buffers.push_back(session.upload);
+            }
+            cmd_buffers.push_back(session.primary);
+        }
+        sessions.clear();
 
-    const vk::SubmitInfo submit_info = {
-        .pNext = &timeline_si,
-        .waitSemaphoreCount = info.num_wait_semas,
-        .pWaitSemaphores = info.wait_semas.data(),
-        .pWaitDstStageMask = wait_stage_masks.data(),
-        .commandBufferCount = static_cast<u32>(cmd_buffers.size()),
-        .pCommandBuffers = cmd_buffers.data(),
-        .signalSemaphoreCount = info.num_signal_semas,
-        .pSignalSemaphores = info.signal_semas.data(),
-    };
+        const vk::Semaphore timeline = work_semaphore.Handle();
+        info.AddSignal(timeline, signal_value);
 
-    ImGui::Core::TextureManager::Submit();
-    auto submit_result = instance.GetGraphicsQueue().submit(submit_info, info.fence);
-    ASSERT_MSG(submit_result != vk::Result::eErrorDeviceLost, "Device lost during submit");
+        std::array<vk::PipelineStageFlags, std::tuple_size_v<decltype(info.wait_semas)>>
+            wait_stage_masks;
+        wait_stage_masks.fill(vk::PipelineStageFlagBits::eAllCommands);
 
-    work_semaphore.Refresh();
-    BeginSession();
+        const vk::TimelineSemaphoreSubmitInfo timeline_si = {
+            .waitSemaphoreValueCount = info.num_wait_semas,
+            .pWaitSemaphoreValues = info.wait_ticks.data(),
+            .signalSemaphoreValueCount = info.num_signal_semas,
+            .pSignalSemaphoreValues = info.signal_ticks.data(),
+        };
 
-    // Apply pending operations
-    PopPendingOperations();
+        const vk::SubmitInfo submit_info = {
+            .pNext = &timeline_si,
+            .waitSemaphoreCount = info.num_wait_semas,
+            .pWaitSemaphores = info.wait_semas.data(),
+            .pWaitDstStageMask = wait_stage_masks.data(),
+            .commandBufferCount = static_cast<u32>(cmd_buffers.size()),
+            .pCommandBuffers = cmd_buffers.data(),
+            .signalSemaphoreCount = info.num_signal_semas,
+            .pSignalSemaphores = info.signal_semas.data(),
+        };
+
+        ImGui::Core::TextureManager::Submit();
+        auto submit_result = instance.GetGraphicsQueue().submit(submit_info, info.fence);
+        ASSERT_MSG(submit_result != vk::Result::eErrorDeviceLost, "Device lost during submit");
+
+        work_semaphore.Refresh();
+        BeginSession();
+
+        // Apply pending operations
+        PopPendingOperations();
+    });
 }
 
 void Scheduler::PriorityPendingOpsThread(std::stop_token stoken) {
     Common::SetCurrentThreadName("shadPS4:GpuSchedPriorityPendingOpsRunner");
 
+    // A stop wakes the wait below
+    const std::stop_callback wake{stoken,
+                                  [this] { retro_eventcount_notify(&priority_pending_ops_ec); }};
     while (!stoken.stop_requested()) {
-        PendingOp op;
-        {
-            std::unique_lock lk(priority_pending_ops_mutex);
-            priority_pending_ops_cv.wait(lk, stoken,
-                                         [this] { return !priority_pending_ops.empty(); });
-            if (stoken.stop_requested()) {
-                break;
+        priority_pending_ops.Take();
+        PendingOp* op = priority_pending_ops.Pop();
+        if (!op) {
+            const int key = retro_eventcount_prepare_wait(&priority_pending_ops_ec);
+            if (!mpsc_stack_empty(&priority_pending_ops.incoming) || stoken.stop_requested()) {
+                retro_eventcount_cancel_wait(&priority_pending_ops_ec);
+                continue;
             }
-
-            op = std::move(priority_pending_ops.front());
-            priority_pending_ops.pop();
+            retro_eventcount_commit_wait(&priority_pending_ops_ec, key);
+            continue;
         }
 
-        work_semaphore.Wait(op.gpu_tick);
+        work_semaphore.Wait(op->gpu_tick);
         if (stoken.stop_requested()) {
+            delete op;
             break;
         }
 
-        op.callback();
+        op->callback();
+        delete op;
     }
 }
 

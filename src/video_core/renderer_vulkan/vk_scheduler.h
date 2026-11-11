@@ -3,11 +3,13 @@
 
 #pragma once
 
-#include <condition_variable>
-#include <mutex>
+#include <atomic>
 #include <thread>
-#include <queue>
 
+#include <queues/mpsc_stack.h>
+#include <rthreads/retro_eventcount.h>
+
+#include "common/combiner.h"
 #include "common/interval_set.h"
 #include "common/unique_function.h"
 #include "video_core/amdgpu/regs_color.h"
@@ -427,21 +429,19 @@ public:
     /// Defers an operation until the gpu has reached the current cpu tick.
     /// Will be run when submitting or calling PopPendingOperations.
     void DeferOperation(Common::UniqueFunction<void>&& func) {
-        std::unique_lock lk(pending_ops_mutex);
-        pending_ops.emplace(std::move(func), CurrentTick());
+        pending_ops.Push(new PendingOp{{}, std::move(func), CurrentTick()});
     }
 
     /// Defers an operation until the gpu has reached the current cpu tick.
     /// Runs as soon as possible in another thread.
     void DeferPriorityOperation(Common::UniqueFunction<void>&& func) {
-        {
-            std::unique_lock lk(priority_pending_ops_mutex);
-            priority_pending_ops.emplace(std::move(func), CurrentTick());
-        }
-        priority_pending_ops_cv.notify_one();
+        priority_pending_ops.Push(new PendingOp{{}, std::move(func), CurrentTick()});
+        retro_eventcount_notify(&priority_pending_ops_ec);
     }
 
-    static std::mutex submit_mutex;
+    /// The submissions to the device's queue, which Vulkan has used by one thread at a time,
+    /// run one at a time here, from every scheduler.
+    static Common::Combiner submit_combiner;
 
 private:
     void EndSession();
@@ -449,6 +449,7 @@ private:
     void SubmitExecution(SubmitInfo& info);
 
     void PriorityPendingOpsThread(std::stop_token stoken);
+    void RunPendingOperations();
 
 private:
     const Instance& instance;
@@ -462,16 +463,65 @@ private:
         vk::CommandBuffer primary{};
     };
     std::vector<Session> sessions;
-    std::condition_variable_any event_cv;
     struct PendingOp {
+        mpsc_stack_node_t node; // first: the stack links operations through it
         Common::UniqueFunction<void> callback;
         u64 gpu_tick;
     };
-    std::queue<PendingOp> pending_ops;
-    std::recursive_mutex pending_ops_mutex;
-    std::queue<PendingOp> priority_pending_ops;
-    std::mutex priority_pending_ops_mutex;
-    std::condition_variable_any priority_pending_ops_cv;
+    /// Operations in order: pushed by any thread onto a lock-free stack, taken oldest first
+    /// into a list that only the one running them touches.
+    struct PendingOps {
+        mpsc_stack_t incoming{};
+        PendingOp* head{};
+        PendingOp* tail{};
+
+        PendingOps() {
+            mpsc_stack_init(&incoming);
+        }
+        ~PendingOps() {
+            Take();
+            while (PendingOp* op = Pop()) {
+                delete op;
+            }
+        }
+        void Push(PendingOp* op) {
+            mpsc_stack_push(&incoming, &op->node);
+        }
+        void Take() {
+            mpsc_stack_node_t* node = mpsc_stack_reverse(mpsc_stack_drain(&incoming));
+            if (!node) {
+                return;
+            }
+            if (tail) {
+                tail->node.next = node;
+            } else {
+                head = reinterpret_cast<PendingOp*>(node);
+            }
+            for (; node; node = node->next) {
+                tail = reinterpret_cast<PendingOp*>(node);
+            }
+        }
+        PendingOp* Front() const {
+            return head;
+        }
+        PendingOp* Pop() {
+            PendingOp* op = head;
+            if (op) {
+                head = reinterpret_cast<PendingOp*>(op->node.next);
+                if (!head) {
+                    tail = nullptr;
+                }
+            }
+            return op;
+        }
+    };
+    /// PopPendingOperations runs one at a time, in pending_combiner; an operation that calls it
+    /// again runs it there and then, as the recursive mutex allowed.
+    PendingOps pending_ops;
+    Common::Combiner pending_combiner;
+    std::atomic<std::thread::id> pending_runner{};
+    PendingOps priority_pending_ops;
+    retro_eventcount_t priority_pending_ops_ec{};
     std::jthread priority_pending_ops_thread;
     RenderState render_state;
     bool is_rendering = false;
