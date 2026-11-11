@@ -205,6 +205,8 @@ static unsigned pump_clip(unsigned frames)
       }
    }
    n = clip_left < frames ? clip_left : frames;
+   if (!n) /* no clip: there is no pointer to step */
+      return 0;
    for (i = 0; i < n * 2; i++)
       pump_sum[i] += (int32_t)(clip_play[i] * clip_play_gain);
    clip_play += n * 2;
