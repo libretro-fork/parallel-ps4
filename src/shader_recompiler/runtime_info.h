@@ -210,9 +210,7 @@ struct HwFragmentRuntimeInfo {
     u32 dual_source_blending : 1;
     u32 clip_distance_emulation : 1;
     u32 depth_before_shader : 1;
-    /// Fewer colour samples than depth samples: the shader runs once for a pixel, as sample 0
-    u32 one_colour_fragment : 1;
-    u32 : 11;
+    u32 : 12;
 
     bool operator==(const HwFragmentRuntimeInfo& other) const noexcept {
         return std::ranges::equal(color_buffers, other.color_buffers) &&
@@ -223,7 +221,6 @@ struct HwFragmentRuntimeInfo {
                dual_source_blending == other.dual_source_blending &&
                clip_distance_emulation == other.clip_distance_emulation &&
                depth_before_shader == other.depth_before_shader &&
-               one_colour_fragment == other.one_colour_fragment &&
                std::ranges::equal(inputs.begin(), inputs.begin() + num_inputs, other.inputs.begin(),
                                   other.inputs.begin() + num_inputs);
     }

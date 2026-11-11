@@ -175,30 +175,6 @@ const Shader::RuntimeInfo& PipelineCache::BuildRuntimeInfo(HwStage stage, SwStag
             regs.ps_input_addr.sample_coverage_ena && regs.ps_input_ena.sample_coverage_ena
                 ? regs.aa_config.NumSamples()
                 : 1;
-        // One colour sample under two of depth (the PS4's EQAA; Sekiro's checkerboard on a Pro)
-        // where the GPU renders them as they are: the PS4 shades each colour fragment, so a
-        // shader that asks to run for each sample runs once, as sample 0. Left to run for each
-        // sample it has no colour sample to write the second to, which VK_NV_framebuffer_
-        // mixed_samples forbids and which lost the GPU device (a write to address nothing).
-        {
-            const bool db_enabled =
-                regs.depth_buffer.DepthValid() || regs.depth_buffer.StencilValid();
-            const u32 depth_samples = db_enabled ? regs.depth_buffer.NumSamples() : 1;
-            u32 colour_samples = 0;
-            bool same = true;
-            const bool no_colour =
-                regs.color_control.mode == AmdGpu::ColorControl::OperationMode::Disable;
-            for (u32 cb = 0; cb < AmdGpu::NUM_COLOR_BUFFERS && !no_colour; ++cb) {
-                const auto& col_buf = regs.color_buffers[cb];
-                if (!col_buf || !regs.color_target_mask.GetMask(cb)) {
-                    continue;
-                }
-                same &= colour_samples == 0 || colour_samples == col_buf.NumSamples();
-                colour_samples = col_buf.NumSamples();
-            }
-            info.hw.fs.one_colour_fragment = instance.IsMixedDepthSamplesSupported() && same &&
-                                             colour_samples != 0 && colour_samples < depth_samples;
-        }
         info.hw.fs.z_export_format = regs.z_export_format;
         u8 stencil_ref_export_enable = regs.depth_shader_control.stencil_op_val_export_enable |
                                        regs.depth_shader_control.stencil_test_val_export_enable;
@@ -540,8 +516,22 @@ bool PipelineCache::RefreshGraphicsKey() {
     // Force all color samples to match depth samples to avoid unsupported MSAA configuration
     if (color_samples != 0) {
         const bool depth_mismatch = db_enabled && color_samples != key.depth_samples;
+        // A fragment shader that runs once for each sample (it reads the sample's number, or an
+        // input taken at the sample) writes a colour for each. With fewer colour samples than
+        // depth samples (what VK_NV_framebuffer_mixed_samples allows, and forbids together with
+        // sample shading) the samples past the colour target's have nowhere to go: Sekiro's
+        // checkerboard pass, one colour sample over two of depth, lost the GPU device that way
+        // with a write to address nothing. Such a pass gets as many colour samples as depth.
+        const auto* fs_info = infos[static_cast<u32>(Shader::SwStage::Fragment)];
+        const bool per_sample =
+            regs.ps_input_addr.persp_sample_ena || regs.ps_input_addr.linear_sample_ena ||
+            (fs_info && (fs_info->loads.Get(Shader::IR::Attribute::SampleIndex) ||
+                         fs_info->loads.Get(Shader::IR::Attribute::BaryCoordNoPerspSample) ||
+                         fs_info->loads.Get(Shader::IR::Attribute::BaryCoordSmoothSample)));
         if (!all_color_samples_same && !instance.IsMixedAnySamplesSupported() ||
-            all_color_samples_same && depth_mismatch && !instance.IsMixedDepthSamplesSupported()) {
+            all_color_samples_same && depth_mismatch &&
+                (!instance.IsMixedDepthSamplesSupported() ||
+                 (per_sample && color_samples < key.depth_samples))) {
             key.color_samples.fill(key.depth_samples);
             key.num_samples = key.depth_samples;
         }
