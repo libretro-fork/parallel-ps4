@@ -4,6 +4,7 @@
 #pragma once
 
 #include <algorithm>
+#include <array>
 #include <optional>
 
 #include "common/combiner.h"
@@ -174,6 +175,11 @@ public:
     VAddr track_addr = 0;
     VAddr track_addr_end = 0;
     ImageId depth_id{};
+    /// The sample positions a depth buffer was last drawn with, when they were the game's own:
+    /// side of the pixel block (0: Vulkan's positions), samples, and x, y in sixteenths
+    u8 sample_locs_grid{};
+    u8 sample_locs_samples{};
+    std::array<u8, 64> sample_locs{};
     u64 depth_uid{};
 
     vk::ImageUsageFlags usage_flags;

@@ -158,6 +158,15 @@ GraphicsPipeline::GraphicsPipeline(
     if (instance.IsDynamicColorWriteMaskSupported()) {
         dynamic_states.push_back(vk::DynamicState::eColorWriteMaskEXT);
     }
+    // The positions themselves are dynamic state, set before a draw
+    const vk::PipelineSampleLocationsStateCreateInfoEXT sample_locations = {
+        .sampleLocationsEnable = true,
+    };
+    auto multisampling = sdata.multisampling;
+    if (key.sample_locations) {
+        multisampling.pNext = &sample_locations;
+        dynamic_states.push_back(vk::DynamicState::eSampleLocationsEXT);
+    }
     if (instance.IsVertexInputDynamicState()) {
         dynamic_states.push_back(vk::DynamicState::eVertexInputEXT);
     } else if (!sdata.vertex_bindings.empty()) {
@@ -405,7 +414,7 @@ GraphicsPipeline::GraphicsPipeline(
         .pTessellationState = &tessellation_state,
         .pViewportState = &viewport_info,
         .pRasterizationState = &raster_chain.get(),
-        .pMultisampleState = &sdata.multisampling,
+        .pMultisampleState = &multisampling,
         .pDepthStencilState =
             !instance.IsExtendedDynamicState3Supported() ? &depth_stencil_info : nullptr,
         .pColorBlendState = &color_blending,

@@ -76,6 +76,10 @@ $CC -std=c89 -O1 -g -Wall -fsanitize=address,undefined -isystem externals/vulkan
     libretro/tests/tiling_device_test.c src/video_core/host_shaders/host_spirv.c \
     -o "$OUT/tiling_device_test" -ldl
 ASAN_OPTIONS=detect_leaks=0 "$OUT/tiling_device_test"
+# The game's sample position registers as positions
+$CC -std=c89 -O1 -g -Wall -fsanitize=address,undefined -Isrc -I$L/include \
+    libretro/tests/sample_locs_test.c src/video_core/amdgpu/sample_locs.c -o "$OUT/sample_locs_test"
+"$OUT/sample_locs_test"
 # The depth-to-colour shader on a real device: each sample of a depth buffer's depth and stencil
 # comes out as the colour it should
 $CC -std=c89 -O1 -g -Wall -fsanitize=address,undefined -isystem externals/vulkan-headers/include \

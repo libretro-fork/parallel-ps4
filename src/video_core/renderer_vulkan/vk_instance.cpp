@@ -9,6 +9,7 @@
 #include <cstring>
 #include "common/assert.h"
 #include "common/types.h"
+#include "core/emulator_settings.h"
 #include "imgui/renderer/imgui_core.h"
 #include "libretro/libretro_bridge.h"
 #include "video_core/renderer_vulkan/liverpool_to_vk.h"
@@ -330,6 +331,32 @@ bool Instance::CreateDevice() {
     amd_gcn_shader = add_extension(VK_AMD_GCN_SHADER_EXTENSION_NAME);
     amd_shader_trinary_minmax = add_extension(VK_AMD_SHADER_TRINARY_MINMAX_EXTENSION_NAME);
     nv_framebuffer_mixed_samples = add_extension(VK_NV_FRAMEBUFFER_MIXED_SAMPLES_EXTENSION_NAME);
+    if (emu_settings_get_sample_positions() &&
+        add_extension(VK_EXT_SAMPLE_LOCATIONS_EXTENSION_NAME)) {
+        const auto chain =
+            physical_device.getProperties2<vk::PhysicalDeviceProperties2,
+                                           vk::PhysicalDeviceSampleLocationsPropertiesEXT>();
+        const auto& props = chain.get<vk::PhysicalDeviceSampleLocationsPropertiesEXT>();
+        // Sixteenths of a pixel, anywhere in the pixel, is what the game's registers hold
+        if (props.sampleLocationSubPixelBits >= 4 &&
+            props.sampleLocationCoordinateRange[0] <= 0.0f &&
+            props.sampleLocationCoordinateRange[1] >= 0.9375f) {
+            // The block of pixels the positions can vary over, for 2, 4 and 8 samples
+            for (u32 i = 1; i < sample_location_grids.size(); ++i) {
+                const auto count = static_cast<vk::SampleCountFlagBits>(1u << i);
+                if (!(props.sampleLocationSampleCounts & count)) {
+                    continue;
+                }
+                const auto grid =
+                    physical_device.getMultisamplePropertiesEXT(count).maxSampleLocationGridSize;
+                sample_location_grids[i] = std::min({grid.width, grid.height, 2u});
+            }
+        }
+        LOG_INFO(Render_Vulkan, "Sample locations: counts {}, grid {}x{}, {} sub-pixel bits",
+                 vk::to_string(props.sampleLocationSampleCounts),
+                 props.maxSampleLocationGridSize.width, props.maxSampleLocationGridSize.height,
+                 props.sampleLocationSubPixelBits);
+    }
     amd_mixed_attachment_samples = add_extension(VK_AMD_MIXED_ATTACHMENT_SAMPLES_EXTENSION_NAME);
     shader_atomic_float = add_extension(VK_EXT_SHADER_ATOMIC_FLOAT_EXTENSION_NAME);
     shader_atomic_float2 = add_extension(VK_EXT_SHADER_ATOMIC_FLOAT_2_EXTENSION_NAME);

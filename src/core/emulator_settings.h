@@ -154,6 +154,7 @@ enum emu_settings_section {
     EMU_SETTING(direct_memory_access_enabled, "direct_memory_access_enabled", GPU, BOOL, false,    \
                 OVR, GEN)                                                                          \
     EMU_SETTING(dump_shaders, "dump_shaders", GPU, BOOL, false, OVR, GEN)                          \
+    EMU_SETTING(sample_positions, "sample_positions", GPU, BOOL, true, OVR, GEN)                   \
     EMU_SETTING(patch_shaders, "patch_shaders", GPU, BOOL, false, OVR, GEN)                        \
     EMU_SETTING(vblank_frequency, "vblank_frequency", GPU, UINT, 60, OVR, CUSTOM)                  \
     EMU_SETTING(full_screen, "full_screen", GPU, BOOL, false, OVR, GEN)                            \

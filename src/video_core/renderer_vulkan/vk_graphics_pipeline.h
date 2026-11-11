@@ -47,6 +47,7 @@ struct GraphicsPipelineKey {
         AmdGpu::DepthBuffer::ZFormat z_format : 2;
         AmdGpu::DepthBuffer::StencilFormat stencil_format : 1;
         u32 depth_clamp_enable : 1;
+        u32 sample_locations : 1; // the game's own sample positions, set before each draw
     };
     struct {
         AmdGpu::PrimitiveType prim_type : 5;

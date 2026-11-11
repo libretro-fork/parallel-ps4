@@ -172,6 +172,31 @@ bool Runtime::Transit(VideoCore::Image* image, vk::ImageLayout dst_layout,
                       std::optional<VideoCore::SubresourceRange> subres_range) {
     const size_t prev_num_barriers = static_cast<size_t>(image_barriers.size());
     image->GetBarriers(image_barriers, dst_layout, dst_access, dst_stage, subres_range);
+    if (image->sample_locs_grid && image_barriers.size() != prev_num_barriers &&
+        num_barrier_sample_locs < barrier_sample_locs.size()) {
+        auto& entry = barrier_sample_locs[num_barrier_sample_locs];
+        const u32 grid = image->sample_locs_grid;
+        const u32 count = grid * grid * image->sample_locs_samples;
+        for (u32 i = 0; i < count; ++i) {
+            entry.locations[i] = vk::SampleLocationEXT{image->sample_locs[i * 2] / 16.0f,
+                                                       image->sample_locs[i * 2 + 1] / 16.0f};
+        }
+        entry.info = vk::SampleLocationsInfoEXT{
+            .sampleLocationsPerPixel =
+                static_cast<vk::SampleCountFlagBits>(image->sample_locs_samples),
+            .sampleLocationGridSize = {grid, grid},
+            .sampleLocationsCount = count,
+            .pSampleLocations = entry.locations.data(),
+        };
+        bool used = false;
+        for (size_t i = prev_num_barriers; i < image_barriers.size(); ++i) {
+            if (image_barriers[i].oldLayout != image_barriers[i].newLayout) {
+                image_barriers[i].pNext = &entry.info;
+                used = true;
+            }
+        }
+        num_barrier_sample_locs += used;
+    }
     return image_barriers.size() != prev_num_barriers;
 }
 
@@ -939,6 +964,7 @@ void Runtime::FlushBarriers() {
     memory_barrier.srcAccessMask = vk::AccessFlagBits2::eNone;
 
     image_barriers.clear();
+    num_barrier_sample_locs = 0;
     for (auto& resource : resources) {
         resource.read_ranges.Clear();
         resource.write_ranges.Clear();

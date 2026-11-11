@@ -13,6 +13,7 @@
 #include "shader_recompiler/recompiler.h"
 #include "shader_recompiler/runtime_info.h"
 #include "video_core/amdgpu/liverpool.h"
+#include "video_core/amdgpu/sample_locs.h"
 #include "video_core/cache_storage.h"
 #include "video_core/renderer_vulkan/liverpool_to_vk.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
@@ -535,6 +536,15 @@ bool PipelineCache::RefreshGraphicsKey() {
             key.color_samples.fill(key.depth_samples);
             key.num_samples = key.depth_samples;
         }
+    }
+
+    // A pass whose samples the game has moved (a checkerboard does, from row to row and frame
+    // to frame) gets them where the game put them, on a device that can
+    key.sample_locations = 0;
+    if (const u32 grid = key.num_samples > 1 ? instance.SampleLocationGrid(key.num_samples) : 0) {
+        u8 locs[AMDGPU_SAMPLE_LOCS_MAX];
+        key.sample_locations =
+            amdgpu_sample_locs(regs.aa_sample_locs, key.num_samples, grid, locs) != 0;
     }
 
     return true;

@@ -8,6 +8,7 @@
 #include "shader_recompiler/resource.h"
 #include "shader_recompiler/runtime_info.h"
 #include "video_core/amdgpu/liverpool.h"
+#include "video_core/amdgpu/sample_locs.h"
 #include "video_core/buffer_cache/buffer.h"
 #include "video_core/buffer_cache/buffer_cache.h"
 #include "video_core/renderer_vulkan/liverpool_to_vk.h"
@@ -1220,6 +1221,14 @@ RenderState Rasterizer::BeginRendering(const GraphicsPipeline* pipeline) {
         const auto htile_address = regs.depth_htile_data_base.GetAddress();
         const auto& image_view = texture_cache.FindDepthTarget(image_id, desc);
         auto& image = texture_cache.GetImage(image_id);
+        // What the samples' positions are from here on goes with the buffer's layout changes
+        image.sample_locs_grid = 0;
+        if (key.sample_locations) {
+            image.sample_locs_grid = static_cast<u8>(amdgpu_sample_locs(
+                regs.aa_sample_locs, key.num_samples, instance.SampleLocationGrid(key.num_samples),
+                image.sample_locs.data()));
+            image.sample_locs_samples = key.num_samples;
+        }
 
         const auto slice = image_view.info.range.base.layer;
         const bool is_depth_clear =
@@ -1489,6 +1498,14 @@ void Rasterizer::UpdateDynamicState(const GraphicsPipeline* pipeline, const bool
     UpdateColorBlendingState(pipeline);
 
     auto& dynamic_state = scheduler.GetDynamicState();
+    if (const auto& key = pipeline->GetGraphicsKey(); key.sample_locations) {
+        u8 locs[AMDGPU_SAMPLE_LOCS_MAX];
+        if (const u32 grid =
+                amdgpu_sample_locs(liverpool->regs.aa_sample_locs, key.num_samples,
+                                   instance.SampleLocationGrid(key.num_samples), locs)) {
+            dynamic_state.SetSampleLocations(static_cast<u8>(grid), key.num_samples, locs);
+        }
+    }
     dynamic_state.Commit(instance, scheduler.CommandBuffer());
 }
 

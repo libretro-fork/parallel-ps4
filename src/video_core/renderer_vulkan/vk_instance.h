@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include <array>
+#include <bit>
 #include <memory>
 #include <span>
 #include <unordered_map>
@@ -249,6 +251,14 @@ public:
     /// VK_AMD_mixed_attachment_samples is supported
     bool IsMixedDepthSamplesSupported() const {
         return nv_framebuffer_mixed_samples || amd_mixed_attachment_samples;
+    }
+
+    /// The side of the pixel block over which a pass of @num_samples can be given its own
+    /// sample positions (VK_EXT_sample_locations); 0 when it cannot be given any
+    u32 SampleLocationGrid(u32 num_samples) const {
+        return num_samples == 2 || num_samples == 4 || num_samples == 8
+                   ? sample_location_grids[std::countr_zero(num_samples)]
+                   : 0;
     }
 
     /// Returns true if VK_AMD_mixed_attachment_samples is supported
@@ -563,6 +573,7 @@ private:
     bool amd_gcn_shader{};
     bool amd_shader_trinary_minmax{};
     bool nv_framebuffer_mixed_samples{};
+    std::array<u32, 4> sample_location_grids{};
     bool amd_mixed_attachment_samples{};
     bool shader_atomic_float{};
     bool shader_atomic_float2{};

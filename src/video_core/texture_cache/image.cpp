@@ -137,6 +137,11 @@ Image::Image(const Vulkan::Instance& instance, Vulkan::Runtime& runtime_,
 
     usage_flags = ImageUsageFlags(instance, info);
     format_features = FormatFeatureFlags(usage_flags);
+    if (info.props.is_depth && info.num_samples > 1 &&
+        instance.SampleLocationGrid(info.num_samples)) {
+        // A pass that moves its samples needs this of its depth buffer
+        flags |= vk::ImageCreateFlagBits::eSampleLocationsCompatibleDepthEXT;
+    }
     if (info.props.is_depth) {
         aspect_mask = vk::ImageAspectFlagBits::eDepth;
         if (info.props.has_stencil) {

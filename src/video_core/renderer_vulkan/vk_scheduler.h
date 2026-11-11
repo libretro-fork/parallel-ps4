@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include <array>
+#include <cstring>
 #include <thread>
 
 #include <queues/mpsc_stack.h>
@@ -124,6 +126,7 @@ struct DynamicState {
         bool color_write_masks : 1;
         bool line_width : 1;
         bool feedback_loop_enabled : 1;
+        bool sample_locations : 1;
     } dirty_state{};
 
     Viewports viewports{};
@@ -161,6 +164,11 @@ struct DynamicState {
     ColorWriteMasks color_write_masks{};
     float line_width{};
     bool feedback_loop_enabled{};
+    /// The game's sample positions: side of the pixel block they repeat over (0: none set),
+    /// samples in a pixel, and an x and a y for each in sixteenths of a pixel
+    u8 sample_locs_grid{};
+    u8 sample_locs_samples{};
+    std::array<u8, 64> sample_locs{};
 
     /// Commits the dynamic state to the provided command buffer.
     void Commit(const Instance& instance, const vk::CommandBuffer& cmdbuf);
@@ -334,6 +342,17 @@ struct DynamicState {
         if (line_width != width) {
             line_width = width;
             dirty_state.line_width = true;
+        }
+    }
+
+    void SetSampleLocations(u8 grid, u8 samples, const u8* locs) {
+        const size_t bytes = size_t(grid) * grid * samples * 2;
+        if (sample_locs_grid != grid || sample_locs_samples != samples ||
+            std::memcmp(sample_locs.data(), locs, bytes) != 0) {
+            sample_locs_grid = grid;
+            sample_locs_samples = samples;
+            std::memcpy(sample_locs.data(), locs, bytes);
+            dirty_state.sample_locations = true;
         }
     }
 

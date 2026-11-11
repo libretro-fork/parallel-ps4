@@ -148,7 +148,10 @@ union Regs {
         StreamOutBufferConfig vgt_strmout_buffer_config;
         INSERT_PADDING_WORDS(17);
         AaConfig aa_config;
-        INSERT_PADDING_WORDS(31);
+        INSERT_PADDING_WORDS(5);
+        u32 aa_sample_locs[16]; // four words for each pixel of a 2x2 block: X0Y0, X1Y0, X0Y1, X1Y1
+        u32 aa_mask[2];
+        INSERT_PADDING_WORDS(8);
         ColorBuffer color_buffers[NUM_COLOR_BUFFERS];
         INSERT_PADDING_WORDS(7343);
         StreamOutControl cp_strmout_cntl;

@@ -440,6 +440,21 @@ void DynamicState::Commit(const Instance& instance, const vk::CommandBuffer& cmd
         dirty_state.line_width = false;
         cmdbuf.setLineWidth(line_width);
     }
+    if (dirty_state.sample_locations && sample_locs_grid) {
+        dirty_state.sample_locations = false;
+        std::array<vk::SampleLocationEXT, 32> locations;
+        const u32 count = u32(sample_locs_grid) * sample_locs_grid * sample_locs_samples;
+        for (u32 i = 0; i < count; ++i) {
+            locations[i] =
+                vk::SampleLocationEXT{sample_locs[i * 2] / 16.0f, sample_locs[i * 2 + 1] / 16.0f};
+        }
+        cmdbuf.setSampleLocationsEXT(vk::SampleLocationsInfoEXT{
+            .sampleLocationsPerPixel = static_cast<vk::SampleCountFlagBits>(sample_locs_samples),
+            .sampleLocationGridSize = {sample_locs_grid, sample_locs_grid},
+            .sampleLocationsCount = count,
+            .pSampleLocations = locations.data(),
+        });
+    }
     if (dirty_state.feedback_loop_enabled && instance.IsAttachmentFeedbackLoopLayoutSupported()) {
         dirty_state.feedback_loop_enabled = false;
         cmdbuf.setAttachmentFeedbackLoopEnableEXT(feedback_loop_enabled

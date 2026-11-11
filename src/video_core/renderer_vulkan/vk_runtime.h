@@ -102,6 +102,14 @@ private:
     BufferBarriers* resource{};
     std::vector<BufferBarriers> resources;
     VideoCore::Image::Barriers image_barriers;
+    /// The sample positions that go with a pending layout change of a depth buffer last drawn
+    /// with the game's own; without them the change leaves its contents undefined
+    struct BarrierSampleLocs {
+        vk::SampleLocationsInfoEXT info;
+        std::array<vk::SampleLocationEXT, 32> locations;
+    };
+    std::array<BarrierSampleLocs, 16> barrier_sample_locs;
+    u32 num_barrier_sample_locs{};
     vk::MemoryBarrier2 memory_barrier{};
 };
 
