@@ -3,246 +3,182 @@
 
 #pragma once
 
+#include <array>
 #include <atomic>
-#include <condition_variable>
 #include <cstddef>
-#include <memory>
-#include <mutex>
-#include "common/polyfill_thread.h"
+#include <stop_token>
+#include <utility>
+
+#include <rthreads/retro_eventcount.h>
 
 namespace Common {
 
 namespace detail {
 constexpr std::size_t DefaultCapacity = 0x1000;
-} // namespace detail
 
-template <typename T, std::size_t Capacity = detail::DefaultCapacity>
-class SPSCQueue {
+/// A bounded queue any number of threads push to and pop from, with no lock (Vyukov's: each
+/// cell carries a sequence number that says whose turn it is). The waits park on a
+/// retro_eventcount: one for something to pop, one for room to push.
+template <typename T, std::size_t Capacity>
+class BoundedQueue {
     static_assert((Capacity & (Capacity - 1)) == 0, "Capacity must be a power of two.");
 
 public:
+    BoundedQueue() {
+        for (std::size_t i = 0; i < Capacity; ++i) {
+            m_cells[i].seq.store(i, std::memory_order::relaxed);
+        }
+        retro_eventcount_init(&m_readable);
+        retro_eventcount_init(&m_writable);
+    }
+    ~BoundedQueue() {
+        retro_eventcount_free(&m_writable);
+        retro_eventcount_free(&m_readable);
+    }
+    BoundedQueue(const BoundedQueue&) = delete;
+    BoundedQueue& operator=(const BoundedQueue&) = delete;
+
     template <typename... Args>
     bool TryEmplace(Args&&... args) {
-        return Emplace<PushMode::Try>(std::forward<Args>(args)...);
+        if (!TryPush(std::forward<Args>(args)...)) {
+            return false;
+        }
+        retro_eventcount_notify(&m_readable);
+        return true;
     }
 
     template <typename... Args>
     void EmplaceWait(Args&&... args) {
-        Emplace<PushMode::Wait>(std::forward<Args>(args)...);
+        while (!TryPush(std::forward<Args>(args)...)) {
+            const int key = retro_eventcount_prepare_wait(&m_writable);
+            if (!Full()) {
+                retro_eventcount_cancel_wait(&m_writable);
+                continue;
+            }
+            retro_eventcount_commit_wait(&m_writable, key);
+        }
+        retro_eventcount_notify(&m_readable);
     }
 
     bool TryPop(T& t) {
-        return Pop<PopMode::Try>(t);
+        if (!TryTake(t)) {
+            return false;
+        }
+        retro_eventcount_notify(&m_writable);
+        return true;
     }
 
     void PopWait(T& t) {
-        Pop<PopMode::Wait>(t);
+        PopWait(t, std::stop_token{});
     }
 
-    void PopWait(T& t, std::stop_token stop_token) {
-        Pop<PopMode::WaitWithStopToken>(t, stop_token);
+    /// False if @stop_token was stopped first.
+    bool PopWait(T& t, std::stop_token stop_token) {
+        // A stop wakes the wait below
+        const std::stop_callback wake{stop_token, [this] { retro_eventcount_notify(&m_readable); }};
+        while (!TryTake(t)) {
+            if (stop_token.stop_requested()) {
+                return false;
+            }
+            const int key = retro_eventcount_prepare_wait(&m_readable);
+            if (!Empty() || stop_token.stop_requested()) {
+                retro_eventcount_cancel_wait(&m_readable);
+                continue;
+            }
+            retro_eventcount_commit_wait(&m_readable, key);
+        }
+        retro_eventcount_notify(&m_writable);
+        return true;
     }
 
     T PopWait() {
         T t;
-        Pop<PopMode::Wait>(t);
+        PopWait(t);
         return t;
     }
 
     T PopWait(std::stop_token stop_token) {
         T t;
-        Pop<PopMode::WaitWithStopToken>(t, stop_token);
+        PopWait(t, stop_token);
         return t;
     }
 
 private:
-    enum class PushMode {
-        Try,
-        Wait,
-        Count,
+    struct Cell {
+        std::atomic_size_t seq;
+        T data;
     };
 
-    enum class PopMode {
-        Try,
-        Wait,
-        WaitWithStopToken,
-        Count,
-    };
-
-    template <PushMode Mode, typename... Args>
-    bool Emplace(Args&&... args) {
-        const std::size_t write_index = m_write_index.load(std::memory_order::relaxed);
-
-        if constexpr (Mode == PushMode::Try) {
-            // Check if we have free slots to write to.
-            if ((write_index - m_read_index.load(std::memory_order::acquire)) == Capacity) {
-                return false;
+    template <typename... Args>
+    bool TryPush(Args&&... args) {
+        std::size_t pos = m_write_index.load(std::memory_order::relaxed);
+        Cell* cell;
+        for (;;) {
+            cell = &m_cells[pos & (Capacity - 1)];
+            const std::size_t seq = cell->seq.load(std::memory_order::acquire);
+            const auto diff = static_cast<std::ptrdiff_t>(seq - pos);
+            if (diff == 0) {
+                if (m_write_index.compare_exchange_weak(pos, pos + 1, std::memory_order::relaxed)) {
+                    break;
+                }
+            } else if (diff < 0) {
+                return false; // full
+            } else {
+                pos = m_write_index.load(std::memory_order::relaxed);
             }
-        } else if constexpr (Mode == PushMode::Wait) {
-            // Wait until we have free slots to write to.
-            std::unique_lock lock{producer_cv_mutex};
-            producer_cv.wait(lock, [this, write_index] {
-                return (write_index - m_read_index.load(std::memory_order::acquire)) < Capacity;
-            });
-        } else {
-            static_assert(Mode < PushMode::Count, "Invalid PushMode.");
         }
-
-        // Determine the position to write to.
-        const std::size_t pos = write_index % Capacity;
-
-        // Emplace into the queue.
-        new (std::addressof(m_data[pos])) T(std::forward<Args>(args)...);
-
-        // Increment the write index.
-        ++m_write_index;
-
-        // Notify the consumer that we have pushed into the queue.
-        std::scoped_lock lock{consumer_cv_mutex};
-        consumer_cv.notify_one();
-
+        cell->data = T(std::forward<Args>(args)...);
+        cell->seq.store(pos + 1, std::memory_order::release);
         return true;
     }
 
-    template <PopMode Mode>
-    bool Pop(T& t, [[maybe_unused]] std::stop_token stop_token = {}) {
-        const std::size_t read_index = m_read_index.load(std::memory_order::relaxed);
-
-        if constexpr (Mode == PopMode::Try) {
-            // Check if the queue is empty.
-            if (read_index == m_write_index.load(std::memory_order::acquire)) {
-                return false;
+    bool TryTake(T& t) {
+        std::size_t pos = m_read_index.load(std::memory_order::relaxed);
+        Cell* cell;
+        for (;;) {
+            cell = &m_cells[pos & (Capacity - 1)];
+            const std::size_t seq = cell->seq.load(std::memory_order::acquire);
+            const auto diff = static_cast<std::ptrdiff_t>(seq - (pos + 1));
+            if (diff == 0) {
+                if (m_read_index.compare_exchange_weak(pos, pos + 1, std::memory_order::relaxed)) {
+                    break;
+                }
+            } else if (diff < 0) {
+                return false; // empty
+            } else {
+                pos = m_read_index.load(std::memory_order::relaxed);
             }
-        } else if constexpr (Mode == PopMode::Wait) {
-            // Wait until the queue is not empty.
-            std::unique_lock lock{consumer_cv_mutex};
-            consumer_cv.wait(lock, [this, read_index] {
-                return read_index != m_write_index.load(std::memory_order::acquire);
-            });
-        } else if constexpr (Mode == PopMode::WaitWithStopToken) {
-            // Wait until the queue is not empty.
-            std::unique_lock lock{consumer_cv_mutex};
-            Common::CondvarWait(consumer_cv, lock, stop_token, [this, read_index] {
-                return read_index != m_write_index.load(std::memory_order::acquire);
-            });
-            if (stop_token.stop_requested()) {
-                return false;
-            }
-        } else {
-            static_assert(Mode < PopMode::Count, "Invalid PopMode.");
         }
-
-        // Determine the position to read from.
-        const std::size_t pos = read_index % Capacity;
-
-        // Pop the data off the queue, moving it.
-        t = std::move(m_data[pos]);
-
-        // Increment the read index.
-        ++m_read_index;
-
-        // Notify the producer that we have popped off the queue.
-        std::scoped_lock lock{producer_cv_mutex};
-        producer_cv.notify_one();
-
+        t = std::move(cell->data);
+        cell->data = T{}; // what it held is released now, not when the cell is next written
+        cell->seq.store(pos + Capacity, std::memory_order::release);
         return true;
+    }
+
+    bool Empty() const {
+        const std::size_t pos = m_read_index.load(std::memory_order::relaxed);
+        return m_cells[pos & (Capacity - 1)].seq.load(std::memory_order::acquire) != pos + 1;
+    }
+
+    bool Full() const {
+        const std::size_t pos = m_write_index.load(std::memory_order::relaxed);
+        return m_cells[pos & (Capacity - 1)].seq.load(std::memory_order::acquire) != pos;
     }
 
     alignas(128) std::atomic_size_t m_read_index{0};
     alignas(128) std::atomic_size_t m_write_index{0};
-
-    std::array<T, Capacity> m_data;
-
-    std::condition_variable_any producer_cv;
-    std::mutex producer_cv_mutex;
-    std::condition_variable_any consumer_cv;
-    std::mutex consumer_cv_mutex;
+    alignas(128) std::array<Cell, Capacity> m_cells;
+    retro_eventcount_t m_readable{};
+    retro_eventcount_t m_writable{};
 };
+} // namespace detail
 
+// The three are the same queue now: it takes any number of threads on either side.
 template <typename T, std::size_t Capacity = detail::DefaultCapacity>
-class MPSCQueue {
-public:
-    template <typename... Args>
-    bool TryEmplace(Args&&... args) {
-        std::scoped_lock lock{write_mutex};
-        return spsc_queue.TryEmplace(std::forward<Args>(args)...);
-    }
-
-    template <typename... Args>
-    void EmplaceWait(Args&&... args) {
-        std::scoped_lock lock{write_mutex};
-        spsc_queue.EmplaceWait(std::forward<Args>(args)...);
-    }
-
-    bool TryPop(T& t) {
-        return spsc_queue.TryPop(t);
-    }
-
-    void PopWait(T& t) {
-        spsc_queue.PopWait(t);
-    }
-
-    void PopWait(T& t, std::stop_token stop_token) {
-        spsc_queue.PopWait(t, stop_token);
-    }
-
-    T PopWait() {
-        return spsc_queue.PopWait();
-    }
-
-    T PopWait(std::stop_token stop_token) {
-        return spsc_queue.PopWait(stop_token);
-    }
-
-private:
-    SPSCQueue<T, Capacity> spsc_queue;
-    std::mutex write_mutex;
-};
-
+using SPSCQueue = detail::BoundedQueue<T, Capacity>;
 template <typename T, std::size_t Capacity = detail::DefaultCapacity>
-class MPMCQueue {
-public:
-    template <typename... Args>
-    bool TryEmplace(Args&&... args) {
-        std::scoped_lock lock{write_mutex};
-        return spsc_queue.TryEmplace(std::forward<Args>(args)...);
-    }
-
-    template <typename... Args>
-    void EmplaceWait(Args&&... args) {
-        std::scoped_lock lock{write_mutex};
-        spsc_queue.EmplaceWait(std::forward<Args>(args)...);
-    }
-
-    bool TryPop(T& t) {
-        std::scoped_lock lock{read_mutex};
-        return spsc_queue.TryPop(t);
-    }
-
-    void PopWait(T& t) {
-        std::scoped_lock lock{read_mutex};
-        spsc_queue.PopWait(t);
-    }
-
-    void PopWait(T& t, std::stop_token stop_token) {
-        std::scoped_lock lock{read_mutex};
-        spsc_queue.PopWait(t, stop_token);
-    }
-
-    T PopWait() {
-        std::scoped_lock lock{read_mutex};
-        return spsc_queue.PopWait();
-    }
-
-    T PopWait(std::stop_token stop_token) {
-        std::scoped_lock lock{read_mutex};
-        return spsc_queue.PopWait(stop_token);
-    }
-
-private:
-    SPSCQueue<T, Capacity> spsc_queue;
-    std::mutex write_mutex;
-    std::mutex read_mutex;
-};
+using MPSCQueue = detail::BoundedQueue<T, Capacity>;
+template <typename T, std::size_t Capacity = detail::DefaultCapacity>
+using MPMCQueue = detail::BoundedQueue<T, Capacity>;
 
 } // namespace Common

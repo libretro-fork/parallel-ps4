@@ -30,14 +30,9 @@ bool AjmContext::IsRegistered(AjmCodecType type) const {
 }
 
 s32 AjmContext::BatchCancel(const u32 batch_id) {
-    std::shared_ptr<AjmBatch> batch{};
-    {
-        std::shared_lock guard(batches_mutex);
-        const auto p_batch = batches.Get(batch_id);
-        if (p_batch == nullptr) {
-            return ORBIS_AJM_ERROR_INVALID_BATCH;
-        }
-        batch = *p_batch;
+    const auto batch = batch_id - 1 < batches.size() ? batches.Get(batch_id - 1) : nullptr;
+    if (batch == nullptr) {
+        return ORBIS_AJM_ERROR_INVALID_BATCH;
     }
 
     if (batch->processed) {
@@ -82,13 +77,9 @@ void AjmContext::ProcessBatch(u32 id, std::span<AjmJob> jobs) {
         if (job.instance_id == AJM_INSTANCE_STATISTICS) {
             AjmInstanceStatistics::Getinstance().ExecuteJob(job);
         } else {
-            std::shared_ptr<AjmInstance> instance;
-            {
-                std::shared_lock lock(instances_mutex);
-                auto* p_instance = instances.Get(job.instance_id & INSTANCE_ID_MASK);
-                ASSERT_MSG(p_instance != nullptr, "Attempting to execute job on null instance");
-                instance = *p_instance;
-            }
+            const u32 index = (job.instance_id & INSTANCE_ID_MASK) - 1;
+            const auto instance = index < instances.size() ? instances.Get(index) : nullptr;
+            ASSERT_MSG(instance != nullptr, "Attempting to execute job on null instance");
 
             instance->ExecuteJob(job);
         }
@@ -96,14 +87,9 @@ void AjmContext::ProcessBatch(u32 id, std::span<AjmJob> jobs) {
 }
 
 s32 AjmContext::BatchWait(const u32 batch_id, const u32 timeout, AjmBatchError* const batch_error) {
-    std::shared_ptr<AjmBatch> batch{};
-    {
-        std::shared_lock guard(batches_mutex);
-        const auto p_batch = batches.Get(batch_id);
-        if (p_batch == nullptr) {
-            return ORBIS_AJM_ERROR_INVALID_BATCH;
-        }
-        batch = *p_batch;
+    const auto batch = batch_id - 1 < batches.size() ? batches.Get(batch_id - 1) : nullptr;
+    if (batch == nullptr) {
+        return ORBIS_AJM_ERROR_INVALID_BATCH;
     }
 
     bool expected = false;
@@ -118,10 +104,7 @@ s32 AjmContext::BatchWait(const u32 batch_id, const u32 timeout, AjmBatchError* 
         return ORBIS_AJM_ERROR_IN_PROGRESS;
     }
 
-    {
-        std::unique_lock guard(batches_mutex);
-        batches.Destroy(batch_id);
-    }
+    batches.Take(batch_id - 1);
 
     if (batch->canceled) {
         return ORBIS_AJM_ERROR_CANCELLED;
@@ -138,15 +121,11 @@ int AjmContext::BatchStartBuffer(u8* p_batch, u32 batch_size, const int priority
     }
 
     const auto batch_info = AjmBatch::FromBatchBuffer({p_batch, batch_size});
-    std::optional<u32> batch_id;
-    {
-        std::unique_lock guard(batches_mutex);
-        batch_id = batches.Create(batch_info);
-    }
-    if (!batch_id.has_value()) {
+    const auto slot = batches.Insert(batch_info);
+    if (!slot.has_value()) {
         return ORBIS_AJM_ERROR_OUT_OF_MEMORY;
     }
-    *out_batch_id = batch_id.value();
+    *out_batch_id = static_cast<u32>(*slot) + 1;
     batch_info->id = *out_batch_id;
 
     if (!batch_info->jobs.empty()) {
@@ -169,23 +148,19 @@ s32 AjmContext::InstanceCreate(AjmCodecType codec_type, AjmInstanceFlags flags, 
     if (!IsRegistered(codec_type)) {
         return ORBIS_AJM_ERROR_CODEC_NOT_REGISTERED;
     }
-    std::optional<u32> opt_index;
-    {
-        std::unique_lock lock(instances_mutex);
-        opt_index = instances.Create(std::move(std::make_unique<AjmInstance>(codec_type, flags)));
-    }
-    if (!opt_index.has_value()) {
+    const auto slot = instances.Insert(std::make_shared<AjmInstance>(codec_type, flags));
+    if (!slot.has_value()) {
         return ORBIS_AJM_ERROR_OUT_OF_RESOURCES;
     }
-    *out_instance = opt_index.value() | (static_cast<u32>(codec_type) << 14);
+    *out_instance = (static_cast<u32>(*slot) + 1) | (static_cast<u32>(codec_type) << 14);
 
     LOG_INFO(Lib_Ajm, "instance = {}", *out_instance);
     return ORBIS_OK;
 }
 
 s32 AjmContext::InstanceDestroy(u32 instance_id) {
-    std::unique_lock lock(instances_mutex);
-    if (!instances.Destroy(instance_id & INSTANCE_ID_MASK)) {
+    const u32 index = (instance_id & INSTANCE_ID_MASK) - 1;
+    if (index >= instances.size() || !instances.Take(index)) {
         return ORBIS_AJM_ERROR_INVALID_INSTANCE;
     }
     return ORBIS_OK;

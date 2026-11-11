@@ -4,7 +4,7 @@
 #pragma once
 
 #include "common/bounded_threadsafe_queue.h"
-#include "common/slot_array.h"
+#include "common/shared_slots.h"
 #include "common/types.h"
 #include "core/libraries/ajm/ajm.h"
 #include "core/libraries/ajm/ajm_batch.h"
@@ -12,7 +12,6 @@
 
 #include <array>
 #include <memory>
-#include <shared_mutex>
 #include <span>
 #include <thread>
 #include <utility>
@@ -44,11 +43,9 @@ private:
 
     std::array<bool, NumAjmCodecs> registered_codecs{};
 
-    std::shared_mutex instances_mutex;
-    Common::SlotArray<u32, std::shared_ptr<AjmInstance>, MaxInstances, 1> instances;
-
-    std::shared_mutex batches_mutex;
-    Common::SlotArray<u32, std::shared_ptr<AjmBatch>, MaxBatches, 1> batches;
+    // Ids from 1: slot id - 1. Read, filled and emptied by any thread with no lock.
+    Common::SharedSlots<AjmInstance, MaxInstances - 1> instances;
+    Common::SharedSlots<AjmBatch, MaxBatches - 1> batches;
 
     std::jthread worker_thread{};
     Common::MPSCQueue<std::shared_ptr<AjmBatch>> batch_queue;

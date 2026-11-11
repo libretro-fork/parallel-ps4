@@ -7,6 +7,7 @@
 #include <atomic>
 #include <cstddef>
 #include <memory>
+#include <optional>
 
 #include <queues/retro_retire.h>
 
@@ -68,6 +69,24 @@ public:
         return true;
     }
 
+    /// Puts @object in an empty slot, looking from where the last insert left off.
+    /// @return the slot, or nothing if all are full.
+    std::optional<size_t> Insert(std::shared_ptr<T> object) {
+        auto* holder = new Holder{{}, std::move(object)};
+        const size_t start = next.load(std::memory_order_relaxed);
+        for (size_t n = 0; n < N; ++n) {
+            const size_t index = (start + n) % N;
+            Holder* expected = nullptr;
+            if (slots[index].compare_exchange_strong(expected, holder, std::memory_order_acq_rel)) {
+                next.store((index + 1) % N, std::memory_order_relaxed);
+                retro_retire(&retire, nullptr, Free);
+                return index;
+            }
+        }
+        delete holder;
+        return std::nullopt;
+    }
+
     /// Empties slot @index. @return what it held, or null.
     std::shared_ptr<T> Take(size_t index) {
         Holder* holder = slots[index].exchange(nullptr, std::memory_order_acq_rel);
@@ -90,6 +109,7 @@ private:
     }
 
     std::array<std::atomic<Holder*>, N> slots{};
+    std::atomic<size_t> next{0};
     retro_retire_t retire{};
 };
 
