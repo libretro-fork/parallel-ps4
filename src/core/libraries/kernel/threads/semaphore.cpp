@@ -1,14 +1,14 @@
 // SPDX-FileCopyrightText: Copyright 2024-2026 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
-#include <condition_variable>
 #include <limits>
 #include <list>
-#include <mutex>
+#include <optional>
 #include <semaphore>
 
 #include "core/libraries/kernel/sync/semaphore.h"
 
+#include "common/combiner.h"
 #include "common/logging/log.h"
 #include "common/slot_vector.h"
 #include "core/libraries/kernel/kernel.h"
@@ -26,7 +26,8 @@ struct PthreadSem {
     explicit PthreadSem(s32 value_) : value{value_} {}
 
     std::atomic<s32> value;
-    std::mutex wait_mutex;
+    // waiters changes one call at a time here
+    Common::Combiner waiters_combiner;
     std::list<Pthread*> waiters;
 };
 
@@ -87,20 +88,26 @@ static s32 PthreadSemWait(PthreadSem* sem, const OrbisKernelTimespec* abstime, u
         bool cancel_before_wait = false;
         {
             ScopedPthreadCritical critical{curthread};
-            std::scoped_lock lock{sem->wait_mutex};
-            if (PthreadSemTryAcquire(sem)) {
-                return 0;
-            }
+            const bool acquired = sem->waiters_combiner.Run([&] {
+                if (PthreadSemTryAcquire(sem)) {
+                    return true;
+                }
 
-            // This is the host equivalent of entering a cancellation-point umtx wait. Resetting
-            // the predicate and publishing the waiter are serialized with sem_post.
-            curthread->cancel_point = true;
-            curthread->ClearWake();
-            if (curthread->ShouldCancel()) {
-                curthread->cancel_point = false;
-                cancel_before_wait = true;
-            } else {
-                sem->waiters.push_back(curthread);
+                // This is the host equivalent of entering a cancellation-point umtx wait.
+                // Resetting the predicate and publishing the waiter are serialized with
+                // sem_post.
+                curthread->cancel_point = true;
+                curthread->ClearWake();
+                if (curthread->ShouldCancel()) {
+                    curthread->cancel_point = false;
+                    cancel_before_wait = true;
+                } else {
+                    sem->waiters.push_back(curthread);
+                }
+                return false;
+            });
+            if (acquired) {
+                return 0;
             }
         }
         if (cancel_before_wait) {
@@ -131,9 +138,10 @@ static s32 PthreadSemWait(PthreadSem* sem, const OrbisKernelTimespec* abstime, u
 
         {
             ScopedPthreadCritical critical{curthread};
-            std::scoped_lock lock{sem->wait_mutex};
-            sem->waiters.remove(curthread);
-            curthread->cancel_point = false;
+            sem->waiters_combiner.Run([&] {
+                sem->waiters.remove(curthread);
+                curthread->cancel_point = false;
+            });
         }
 
         // A post racing the timeout wins if its token is still available, as in libkernel's
@@ -157,33 +165,55 @@ public:
     ~OrbisSem() = default;
 
     s32 Wait(bool can_block, s32 need_count, u32* timeout) {
-        std::unique_lock lk{mutex};
-        if (token_count >= need_count) {
-            token_count -= need_count;
-            return ORBIS_OK;
-        }
-        if (!can_block) {
-            return ORBIS_KERNEL_ERROR_EBUSY;
-        }
+        // The combiner may run this on another thread: the caller is named here
+        Pthread* const curthread = g_curthread;
+        std::optional<WaitingThread> waiter;
+        WaitList::iterator it;
+        const s32 early = combiner.Run([&]() -> s32 {
+            if (token_count >= need_count) {
+                token_count -= need_count;
+                return ORBIS_OK;
+            }
+            if (!can_block) {
+                return ORBIS_KERNEL_ERROR_EBUSY;
+            }
 
-        if (timeout && *timeout == 0) {
-            return ORBIS_KERNEL_ERROR_ETIMEDOUT;
-        }
+            if (timeout && *timeout == 0) {
+                return ORBIS_KERNEL_ERROR_ETIMEDOUT;
+            }
 
-        // Create waiting thread object and add it into the list of waiters.
-        WaitingThread waiter{need_count, is_fifo};
-        const auto it = AddWaiter(&waiter);
+            // Create waiting thread object and add it into the list of waiters.
+            waiter.emplace(need_count, is_fifo, curthread);
+            it = AddWaiter(&*waiter);
+            return 1; // waits
+        });
+        if (early != 1) {
+            return early;
+        }
 
         // Perform the wait.
-        const s32 result = waiter.Wait(lk, timeout);
-        if (result == ORBIS_KERNEL_ERROR_ETIMEDOUT) {
-            wait_list.erase(it);
-        }
-        return result;
+        const s64 waited = waiter->Wait(timeout);
+        return combiner.Run([&] {
+            if (timeout) {
+                if (waiter->was_signaled) {
+                    *timeout -= waited;
+                } else {
+                    *timeout = 0;
+                }
+            }
+            const s32 result = waiter->GetResult();
+            if (result == ORBIS_KERNEL_ERROR_ETIMEDOUT) {
+                wait_list.erase(it);
+            }
+            return result;
+        });
     }
 
     bool Signal(s32 signal_count) {
-        std::scoped_lock lk{mutex};
+        return combiner.Run([&] { return SignalOwned(signal_count); });
+    }
+
+    bool SignalOwned(s32 signal_count) {
         if (token_count + signal_count > max_count) {
             return false;
         }
@@ -206,26 +236,28 @@ public:
     }
 
     s32 Cancel(s32 set_count, s32* num_waiters) {
-        std::scoped_lock lk{mutex};
-        if (num_waiters) {
-            *num_waiters = static_cast<s32>(wait_list.size());
-        }
-        for (auto* waiter : wait_list) {
-            waiter->was_canceled = true;
-            waiter->sem.release();
-        }
-        wait_list.clear();
-        token_count = set_count < 0 ? init_count : set_count;
-        return ORBIS_OK;
+        return combiner.Run([&] {
+            if (num_waiters) {
+                *num_waiters = static_cast<s32>(wait_list.size());
+            }
+            for (auto* waiter : wait_list) {
+                waiter->was_canceled = true;
+                waiter->sem.release();
+            }
+            wait_list.clear();
+            token_count = set_count < 0 ? init_count : set_count;
+            return ORBIS_OK;
+        });
     }
 
     void Delete() {
-        std::scoped_lock lk{mutex};
-        for (auto* waiter : wait_list) {
-            waiter->was_deleted = true;
-            waiter->sem.release();
-        }
-        wait_list.clear();
+        combiner.Run([&] {
+            for (auto* waiter : wait_list) {
+                waiter->was_deleted = true;
+                waiter->sem.release();
+            }
+            wait_list.clear();
+        });
     }
 
 public:
@@ -238,14 +270,14 @@ public:
         bool was_deleted{};
         bool was_canceled{};
 
-        explicit WaitingThread(s32 need_count, bool is_fifo)
+        explicit WaitingThread(s32 need_count, bool is_fifo, Pthread* thread)
             : sem{0}, priority{0}, need_count{need_count} {
             // Retrieve calling thread priority for sorting into waiting threads list.
             if (!is_fifo) {
-                priority = g_curthread->attr.prio;
+                priority = thread->attr.prio;
             }
 
-            thr_name = g_curthread->name;
+            thr_name = thread->name;
         }
 
         [[nodiscard]] s32 GetResult() const {
@@ -261,27 +293,18 @@ public:
             return ORBIS_KERNEL_ERROR_ETIMEDOUT;
         }
 
-        s32 Wait(std::unique_lock<std::mutex>& lk, u32* timeout) {
-            lk.unlock();
+        /// Blocks until woken or out of time. @return the microseconds it waited.
+        s64 Wait(const u32* timeout) {
             if (!timeout) {
                 // Wait indefinitely until we are woken up.
                 sem.acquire();
-                lk.lock();
-            } else {
-                // Wait until timeout runs out, recording how much remaining time there was.
-                const auto start = std::chrono::high_resolution_clock::now();
-                sem.try_acquire_for(std::chrono::microseconds(*timeout));
-                const auto end = std::chrono::high_resolution_clock::now();
-                const auto time =
-                    std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
-                lk.lock();
-                if (was_signaled) {
-                    *timeout -= time;
-                } else {
-                    *timeout = 0;
-                }
+                return 0;
             }
-            return GetResult();
+            // Wait until timeout runs out, recording how much time it took.
+            const auto start = std::chrono::high_resolution_clock::now();
+            sem.try_acquire_for(std::chrono::microseconds(*timeout));
+            const auto end = std::chrono::high_resolution_clock::now();
+            return std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
         }
     };
 
@@ -304,7 +327,8 @@ public:
     WaitList wait_list;
     std::string name;
     std::atomic<s32> token_count;
-    std::mutex mutex;
+    // The count and the waiters change one call at a time here
+    Common::Combiner combiner;
     s32 max_count;
     s32 init_count;
     bool is_fifo;
@@ -438,15 +462,14 @@ s32 PS4_SYSV_ABI posix_sem_post(PthreadSem** sem) {
         }
     } while (!(*sem)->value.compare_exchange_weak(current, current + 1));
 
-    {
-        std::scoped_lock lock{(*sem)->wait_mutex};
+    (*sem)->waiters_combiner.Run([&] {
         // libkernel wakes every waiter after incrementing the value. Only waiters that win the
         // value CAS return; the rest publish themselves again and continue waiting.
         for (Pthread* waiter : (*sem)->waiters) {
             waiter->wake_sema.release();
         }
         (*sem)->waiters.clear();
-    }
+    });
     return 0;
 }
 

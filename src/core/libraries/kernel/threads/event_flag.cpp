@@ -1,12 +1,15 @@
 // SPDX-FileCopyrightText: Copyright 2024-2026 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
-#include <condition_variable>
+#include <atomic>
+#include <chrono>
 #include <list>
-#include <mutex>
 #include <thread>
 
+#include <rthreads/retro_eventcount.h>
+
 #include "common/assert.h"
+#include "common/combiner.h"
 #include "common/logging/log.h"
 #include "core/libraries/kernel/orbis_error.h"
 #include "core/libraries/libs.h"
@@ -35,7 +38,8 @@ public:
     enum class QueueMode { Fifo, ThreadPrio };
 
     struct Waiter {
-        std::condition_variable cv{};
+        /// Set, after the flags below, once any of them is; the waiter parks on m_wake_ec
+        std::atomic<bool> woken{false};
 
         u64 bits{};
         WaitMode wait_mode{};
@@ -53,18 +57,30 @@ public:
 
     EventFlagInternal(const std::string& name, ThreadMode thread_mode, QueueMode queue_mode,
                       u64 bits)
-        : m_name(name), m_thread_mode(thread_mode), m_queue_mode(queue_mode), m_bits(bits) {}
+        : m_name(name), m_thread_mode(thread_mode), m_queue_mode(queue_mode), m_bits(bits) {
+        retro_eventcount_init(&m_wake_ec);
+    }
 
     ~EventFlagInternal() {
-        std::unique_lock lock{m_mutex};
-        m_deleted = true;
+        m_combiner.Run([&] {
+            m_deleted = true;
 
-        for (auto* w : m_waiters) {
-            w->deleted = true;
-            w->cv.notify_one();
+            for (auto* w : m_waiters) {
+                w->deleted = true;
+                Wake(*w);
+            }
+        });
+
+        // Until every waiter has left
+        for (;;) {
+            const int key = retro_eventcount_prepare_wait(&m_wake_ec);
+            if (m_waiter_count.load(std::memory_order_acquire) == 0) {
+                retro_eventcount_cancel_wait(&m_wake_ec);
+                break;
+            }
+            retro_eventcount_commit_wait(&m_wake_ec, key);
         }
-
-        m_destroy_cv.wait(lock, [&] { return m_waiters.empty(); });
+        retro_eventcount_free(&m_wake_ec);
     }
 
     bool ConditionMet(const Waiter& waiter) const {
@@ -88,6 +104,7 @@ public:
     }
 
     void AddWaiter(Waiter& waiter) {
+        m_waiter_count.fetch_add(1, std::memory_order_relaxed);
         if (m_queue_mode == QueueMode::Fifo) {
             m_waiters.push_back(&waiter);
             return;
@@ -102,22 +119,17 @@ public:
 
     void RemoveWaiter(Waiter& waiter) {
         m_waiters.remove(&waiter);
-        if (m_deleted && m_waiters.empty()) {
-            m_destroy_cv.notify_one();
+        if (m_waiter_count.fetch_sub(1, std::memory_order_release) == 1 && m_deleted) {
+            retro_eventcount_notify(&m_wake_ec);
         }
     }
 
+    void Wake(Waiter& waiter) {
+        waiter.woken.store(true, std::memory_order_release);
+        retro_eventcount_notify(&m_wake_ec);
+    }
+
     int Wait(u64 bits, WaitMode wait_mode, ClearMode clear_mode, u64* result, u32* ptr_micros) {
-        std::unique_lock lock{m_mutex};
-
-        if (m_deleted) {
-            return ORBIS_KERNEL_ERROR_EACCES;
-        }
-
-        if (m_thread_mode == ThreadMode::Single && !m_waiters.empty()) {
-            return ORBIS_KERNEL_ERROR_EPERM;
-        }
-
         Waiter waiter{
             .bits = bits,
             .wait_mode = wait_mode,
@@ -125,56 +137,83 @@ public:
             .priority = g_curthread->attr.prio,
         };
 
-        if (ConditionMet(waiter)) {
-            if (result)
-                *result = m_bits;
+        constexpr int Waits = 1;
+        const int early = m_combiner.Run([&] {
+            if (m_deleted) {
+                return ORBIS_KERNEL_ERROR_EACCES;
+            }
 
-            ApplyClear(waiter);
-            return ORBIS_OK;
+            if (m_thread_mode == ThreadMode::Single && !m_waiters.empty()) {
+                return ORBIS_KERNEL_ERROR_EPERM;
+            }
+
+            if (ConditionMet(waiter)) {
+                if (result)
+                    *result = m_bits;
+
+                ApplyClear(waiter);
+                return ORBIS_OK;
+            }
+
+            AddWaiter(waiter);
+            return Waits;
+        });
+        if (early != Waits) {
+            return early;
         }
 
-        AddWaiter(waiter);
+        const bool infinite = ptr_micros == nullptr;
+        const auto deadline = std::chrono::steady_clock::now() +
+                              std::chrono::microseconds(infinite ? 0 : *ptr_micros);
 
-        u32 timeout = 0;
-        bool infinite = ptr_micros == nullptr;
+        // Until woken, or out of time
+        bool out_of_time = false;
+        while (!waiter.woken.load(std::memory_order_acquire)) {
+            const int key = retro_eventcount_prepare_wait(&m_wake_ec);
+            if (waiter.woken.load(std::memory_order_acquire)) {
+                retro_eventcount_cancel_wait(&m_wake_ec);
+                break;
+            }
+            if (infinite) {
+                retro_eventcount_commit_wait(&m_wake_ec, key);
+                continue;
+            }
+            const auto left = std::chrono::ceil<std::chrono::microseconds>(
+                deadline - std::chrono::steady_clock::now());
+            if (left.count() <= 0) {
+                retro_eventcount_cancel_wait(&m_wake_ec);
+                out_of_time = true;
+                break;
+            }
+            retro_eventcount_commit_wait_timeout(&m_wake_ec, key, left.count());
+        }
 
-        if (!infinite)
-            timeout = *ptr_micros;
+        return m_combiner.Run([&] {
+            RemoveWaiter(waiter);
 
-        auto wake = [&] {
-            return waiter.ready || waiter.canceled || waiter.deleted || waiter.timed_out;
-        };
-
-        if (infinite) {
-            waiter.cv.wait(lock, wake);
-        } else {
-            if (!waiter.cv.wait_for(lock, std::chrono::microseconds(timeout), wake)) {
-
-                RemoveWaiter(waiter);
-
+            // Woken meanwhile: that stands
+            if (out_of_time && !waiter.woken.load(std::memory_order_relaxed)) {
                 if (result)
                     *result = m_bits;
 
                 *ptr_micros = 0;
                 return ORBIS_KERNEL_ERROR_ETIMEDOUT;
             }
-        }
 
-        RemoveWaiter(waiter);
+            if (result)
+                *result = waiter.result;
 
-        if (result)
-            *result = waiter.result;
+            if (waiter.canceled)
+                return ORBIS_KERNEL_ERROR_ECANCELED;
 
-        if (waiter.canceled)
-            return ORBIS_KERNEL_ERROR_ECANCELED;
+            if (waiter.deleted)
+                return ORBIS_KERNEL_ERROR_EACCES;
 
-        if (waiter.deleted)
-            return ORBIS_KERNEL_ERROR_EACCES;
+            if (waiter.timed_out)
+                return ORBIS_KERNEL_ERROR_ETIMEDOUT;
 
-        if (waiter.timed_out)
-            return ORBIS_KERNEL_ERROR_ETIMEDOUT;
-
-        return ORBIS_OK;
+            return ORBIS_OK;
+        });
     }
 
     int Poll(u64 bits, WaitMode wait_mode, ClearMode clear_mode, u64* result) {
@@ -188,50 +227,51 @@ public:
     }
 
     void Set(u64 bits) {
-        std::unique_lock lock{m_mutex};
+        m_combiner.Run([&] {
+            m_bits |= bits;
 
-        m_bits |= bits;
+            for (auto it : m_waiters) {
+                Waiter* waiter = it;
 
-        for (auto it : m_waiters) {
-            Waiter* waiter = it;
+                if (!ConditionMet(*waiter)) {
+                    continue;
+                }
 
-            if (!ConditionMet(*waiter)) {
-                continue;
+                waiter->result = m_bits;
+                ApplyClear(*waiter);
+
+                waiter->ready = true;
+                Wake(*waiter);
             }
-
-            waiter->result = m_bits;
-            ApplyClear(*waiter);
-
-            waiter->ready = true;
-            waiter->cv.notify_one();
-        }
+        });
     }
 
     void Clear(u64 bits) {
-        std::scoped_lock lock(m_mutex);
-        m_bits &= bits;
+        m_combiner.Run([&] { m_bits &= bits; });
     }
 
     void Cancel(u64 pattern, int* num_waiters) {
-        std::scoped_lock lock(m_mutex);
+        m_combiner.Run([&] {
+            if (num_waiters)
+                *num_waiters = static_cast<int>(m_waiters.size());
 
-        if (num_waiters)
-            *num_waiters = static_cast<int>(m_waiters.size());
+            m_bits = pattern;
 
-        m_bits = pattern;
-
-        for (Waiter* waiter : m_waiters) {
-            waiter->result = pattern;
-            waiter->canceled = true;
-            waiter->cv.notify_one();
-        }
+            for (Waiter* waiter : m_waiters) {
+                waiter->result = pattern;
+                waiter->canceled = true;
+                Wake(*waiter);
+            }
+        });
     }
 
 private:
-    std::mutex m_mutex;
+    // The bits and the waiters change one call at a time here; the waiters park on m_wake_ec
+    Common::Combiner m_combiner;
+    retro_eventcount_t m_wake_ec{};
+    std::atomic<u32> m_waiter_count{0};
 
     std::list<Waiter*> m_waiters;
-    std::condition_variable m_destroy_cv;
 
     std::string m_name;
 
