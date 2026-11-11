@@ -4,7 +4,6 @@
 #pragma once
 
 #include <atomic>
-#include <mutex>
 #include <optional>
 #include <thread>
 #include <unordered_set>
@@ -383,10 +382,7 @@ private:
 
     /// Removes image from the cache and schedules it for deletion.
     void FreeImage(ImageId image_id) {
-        {
-            std::scoped_lock lk{slot_images[image_id].mutex};
-            UntrackImage(image_id);
-        }
+        slot_images[image_id].combiner.Run([&] { UntrackImage(image_id); });
         UnregisterImage(image_id);
         DeleteImage(image_id);
     }
@@ -423,7 +419,8 @@ private:
     Common::LRUCache<Image> image_lru_cache;
     Common::LRUCache<Sampler> sampler_lru_cache;
     const bool readback_linear_images;
-    std::mutex download_images_mutex;
+    // download_images changes one at a time here
+    Common::Combiner download_images_combiner;
     u64_map_t surface_metas{}; // VAddr -> MetaDataInfo
 
     MetaDataInfo* FindMeta(VAddr address) const {

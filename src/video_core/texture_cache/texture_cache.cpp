@@ -102,13 +102,14 @@ TextureCache::~TextureCache() {
 }
 
 void TextureCache::ProcessDownloadImages() {
-    std::unique_lock lk{download_images_mutex};
-    size_t pos = 0;
-    u64 index;
-    while (u64_map_next(&download_images, &pos, &index)) {
-        DownloadImageMemory(ImageId{static_cast<u32>(index)}, DownloadMemoryFlags::Sync);
-    }
-    u64_map_clear(&download_images);
+    download_images_combiner.Run([&] {
+        size_t pos = 0;
+        u64 index;
+        while (u64_map_next(&download_images, &pos, &index)) {
+            DownloadImageMemory(ImageId{static_cast<u32>(index)}, DownloadMemoryFlags::Sync);
+        }
+        u64_map_clear(&download_images);
+    });
 }
 
 void TextureCache::DownloadImageMemory(ImageId image_id, DownloadMemoryFlags flags) {
@@ -200,31 +201,32 @@ void TextureCache::InvalidateMemory(VAddr addr, size_t size) {
 
     for (const auto image_id : image_ids) {
         Image& image = slot_images[image_id];
-        std::scoped_lock lk{image.mutex};
-
-        const auto image_begin = image.info.guest_address;
-        const auto image_end = image.info.guest_address + image.info.guest_size;
-        if (image.Overlaps(addr, size)) {
-            // Modified region overlaps image, so the image was definitely accessed by this fault.
-            // Untrack the image, so that the range is unprotected and the guest can write freely.
-            image.flags |= ImageFlagBits::CpuDirty;
-            UntrackImage(image_id);
-        } else if (pages_end < image_end) {
-            // This page access may or may not modify the image.
-            // We should not mark it as dirty now. If it really was modified
-            // it will receive more invalidations on its other pages.
-            // Remove tracking from this page only.
-            UntrackImageHead(image_id);
-        } else if (image_begin < pages_start) {
-            // This page access does not modify the image but the page should be untracked.
-            // We should not mark this image as dirty now. If it really was modified
-            // it will receive more invalidations on its other pages.
-            UntrackImageTail(image_id);
-        } else {
-            // Image begins and ends on this page so it can not receive any more invalidations.
-            // We will check it's hash later to see if it really was modified.
-            MarkAsMaybeDirty(image_id, image);
-        }
+        image.combiner.Run([&] {
+            const auto image_begin = image.info.guest_address;
+            const auto image_end = image.info.guest_address + image.info.guest_size;
+            if (image.Overlaps(addr, size)) {
+                // Modified region overlaps image, so the image was definitely accessed by this
+                // fault. Untrack the image, so that the range is unprotected and the guest can
+                // write freely.
+                image.flags |= ImageFlagBits::CpuDirty;
+                UntrackImage(image_id);
+            } else if (pages_end < image_end) {
+                // This page access may or may not modify the image.
+                // We should not mark it as dirty now. If it really was modified
+                // it will receive more invalidations on its other pages.
+                // Remove tracking from this page only.
+                UntrackImageHead(image_id);
+            } else if (image_begin < pages_start) {
+                // This page access does not modify the image but the page should be untracked.
+                // We should not mark this image as dirty now. If it really was modified
+                // it will receive more invalidations on its other pages.
+                UntrackImageTail(image_id);
+            } else {
+                // Image begins and ends on this page so it can not receive any more invalidations.
+                // We will check it's hash later to see if it really was modified.
+                MarkAsMaybeDirty(image_id, image);
+            }
+        });
     }
 }
 
@@ -738,8 +740,8 @@ ImageView& TextureCache::FindTexture(ImageId image_id, const ImageDesc& desc) {
         image.flags |= ImageFlagBits::GpuModified;
         if (readback_linear_images && (!image.info.props.is_tiled || image.info.size.width <= 8) &&
             image.info.guest_address != 0) {
-            std::unique_lock lk{download_images_mutex};
-            u64_map_insert(&download_images, image_id.index, nullptr);
+            download_images_combiner.Run(
+                [&] { u64_map_insert(&download_images, image_id.index, nullptr); });
         }
     }
     UpdateImage(image_id);
@@ -776,8 +778,8 @@ ImageView& TextureCache::FindRenderTarget(ImageId image_id, const ImageDesc& des
     Image& image = slot_images[image_id];
     image.flags |= ImageFlagBits::GpuModified;
     if (readback_linear_images && (!image.info.props.is_tiled || image.info.size.width <= 8)) {
-        std::unique_lock lk{download_images_mutex};
-        u64_map_insert(&download_images, image_id.index, nullptr);
+        download_images_combiner.Run(
+            [&] { u64_map_insert(&download_images, image_id.index, nullptr); });
     }
     image.usage.render_target = 1u;
     UpdateImage(image_id);
@@ -1013,21 +1015,22 @@ void TextureCache::TrackImage(ImageId image_id) {
         return;
     }
 
-    std::scoped_lock lk{image.mutex};
-    if (image.IsUntracked()) {
-        page_manager.UpdatePageWatchers(image_begin, image.info.guest_size, PageOp::Track);
-    } else {
-        if (image_begin < image.track_addr) {
-            page_manager.UpdatePageWatchers(image_begin, image.track_addr - image_begin,
-                                            PageOp::Track);
+    image.combiner.Run([&] {
+        if (image.IsUntracked()) {
+            page_manager.UpdatePageWatchers(image_begin, image.info.guest_size, PageOp::Track);
+        } else {
+            if (image_begin < image.track_addr) {
+                page_manager.UpdatePageWatchers(image_begin, image.track_addr - image_begin,
+                                                PageOp::Track);
+            }
+            if (image.track_addr_end < image_end) {
+                page_manager.UpdatePageWatchers(image.track_addr_end,
+                                                image_end - image.track_addr_end, PageOp::Track);
+            }
         }
-        if (image.track_addr_end < image_end) {
-            page_manager.UpdatePageWatchers(image.track_addr_end, image_end - image.track_addr_end,
-                                            PageOp::Track);
-        }
-    }
-    image.track_addr = image_begin;
-    image.track_addr_end = image_end;
+        image.track_addr = image_begin;
+        image.track_addr_end = image_end;
+    });
 }
 
 void TextureCache::UntrackImage(ImageId image_id) {
@@ -1256,10 +1259,7 @@ void TextureCache::DeleteImage(ImageId image_id) {
         UnregisterMeta(meta_info.htile_addr, image.image_uid);
     }
 
-    {
-        std::unique_lock lk{download_images_mutex};
-        u64_map_erase(&download_images, image_id.index);
-    }
+    download_images_combiner.Run([&] { u64_map_erase(&download_images, image_id.index); });
 
     // Reclaim image and any image views it references.
     scheduler.DeferOperation([this, image_id] {

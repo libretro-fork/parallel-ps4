@@ -1295,15 +1295,12 @@ bool Rasterizer::IsMapped(VAddr addr, u64 size) {
         // Memory range wrapped the address space, cannot be mapped.
         return false;
     }
-    Common::RecursiveSharedLock lock{mapped_ranges_mutex};
-    return mapped_ranges.Contains(addr, addr + size);
+    return mapped_ranges.Read(
+        [&](const IntervalList<>& ranges) { return ranges.Contains(addr, addr + size); });
 }
 
 void Rasterizer::MapMemory(VAddr addr, u64 size) {
-    {
-        std::scoped_lock lock{mapped_ranges_mutex};
-        mapped_ranges.Add(Interval{addr, addr + size});
-    }
+    mapped_ranges.Update([&](IntervalList<>& ranges) { ranges.Add(Interval{addr, addr + size}); });
 }
 
 void Rasterizer::RegisterMemory(VAddr addr, u64 size) {
@@ -1313,10 +1310,7 @@ void Rasterizer::RegisterMemory(VAddr addr, u64 size) {
 void Rasterizer::UnmapMemory(VAddr addr, u64 size) {
     buffer_cache.InvalidateMemory(addr, size);
     texture_cache.UnmapMemory(addr, size);
-    {
-        std::scoped_lock lock{mapped_ranges_mutex};
-        mapped_ranges.Subtract(addr, addr + size);
-    }
+    mapped_ranges.Update([&](IntervalList<>& ranges) { ranges.Subtract(addr, addr + size); });
 }
 
 void Rasterizer::UpdateDynamicState(const GraphicsPipeline* pipeline, const bool is_indexed) const {

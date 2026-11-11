@@ -4,8 +4,8 @@
 #pragma once
 
 #include "common/interval_set.h"
+#include "common/published.h"
 #include "common/recursive_lock.h"
-#include "common/shared_first_mutex.h"
 #include "video_core/buffer_cache/buffer_cache.h"
 #include "video_core/page_manager.h"
 #include "video_core/renderer_vulkan/vk_pipeline_cache.h"
@@ -135,8 +135,8 @@ private:
     VideoCore::TextureCache texture_cache;
     AmdGpu::Liverpool* liverpool;
     Core::MemoryManager* memory;
-    IntervalList<> mapped_ranges; // sorted, merged
-    Common::SharedFirstMutex mapped_ranges_mutex;
+    // sorted, merged; read on every access check, changed on a map or unmap
+    Common::Published<IntervalList<>> mapped_ranges;
     PipelineCache pipeline_cache;
     const bool host_markers_enabled;
     const bool guest_markers_enabled;

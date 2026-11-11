@@ -3,8 +3,7 @@
 
 #pragma once
 
-#include <condition_variable>
-
+#include "common/bounded_threadsafe_queue.h"
 #include "core/libraries/videoout/buffer.h"
 #include "imgui/imgui_texture.h"
 #include "libretro/libretro_bridge.h"
@@ -118,11 +117,10 @@ private:
     VideoCore::TextureCache& texture_cache;
     vk::UniqueCommandPool command_pool;
     std::vector<Frame> present_frames;
-    std::queue<Frame*> free_queue;
+    // The frames free to draw into: the swapchain's image count at most, far below the
+    // capacity
+    Common::MPMCQueue<Frame*, 64> free_queue;
     Frame* last_submit_frame;
-    std::mutex free_mutex;
-    std::condition_variable free_cv;
-    std::condition_variable_any frame_cv;
     std::optional<ImGui::RefCountedTexture> splash_img;
     std::vector<VAddr> vo_buffers_addr;
 };

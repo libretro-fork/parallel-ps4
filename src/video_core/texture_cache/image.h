@@ -4,9 +4,9 @@
 #pragma once
 
 #include <algorithm>
-#include <mutex>
 #include <optional>
 
+#include "common/combiner.h"
 #include "common/enum.h"
 #include "common/incremental_id.h"
 #include "common/lru_cache.h"
@@ -159,7 +159,9 @@ struct Image : public Common::LRUNode<> {
 public:
     Vulkan::Runtime* runtime;
     Common::SlotVector<ImageView>* slot_image_views;
-    std::mutex mutex;
+    // The image's tracking changes one at a time here (the fault handler's thread and the GPU
+    // thread both change it)
+    Common::Combiner combiner;
     ImageInfo info;
     u32 scale_num = 1;
     u32 scale_den = 1;

@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright 2024-2026 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include "common/combiner.h"
 #include "common/elf_info.h"
 #include "common/io_file.h"
 #include "common/path_util.h"
@@ -142,7 +143,7 @@ struct FrameReadback {
 // The libretro core reads every frame back, and a buffer made for each one cost more than the
 // copy it was made for: at 3840x2160 the device ran out of memory. The buffers are kept and
 // used again. The list is never destroyed: it would outlive the device it belongs to.
-static std::mutex frame_readbacks_mutex;
+static Common::Combiner frame_readbacks_combiner; // the list changes one call at a time
 static std::vector<std::shared_ptr<FrameReadback>>& FrameReadbacks() {
     static auto* const readbacks = new std::vector<std::shared_ptr<FrameReadback>>;
     return *readbacks;
@@ -150,8 +151,7 @@ static std::vector<std::shared_ptr<FrameReadback>>& FrameReadbacks() {
 
 static std::shared_ptr<FrameReadback> TakeFrameReadback(const Instance& instance, const u32 width,
                                                         const u32 height) {
-    {
-        std::scoped_lock lock{frame_readbacks_mutex};
+    auto kept = frame_readbacks_combiner.Run([&]() -> std::shared_ptr<FrameReadback> {
         auto& readbacks = FrameReadbacks();
         for (auto it = readbacks.begin(); it != readbacks.end(); ++it) {
             if ((*it)->width == width && (*it)->height == height) {
@@ -160,6 +160,10 @@ static std::shared_ptr<FrameReadback> TakeFrameReadback(const Instance& instance
                 return readback;
             }
         }
+        return nullptr;
+    });
+    if (kept) {
+        return kept;
     }
     return std::make_shared<FrameReadback>(instance, width, height);
 }
@@ -169,8 +173,7 @@ static std::shared_ptr<FrameReadback> TakeFrameReadback(const Instance& instance
 static void ReturnFrameReadback(std::shared_ptr<FrameReadback> readback) {
     static constexpr std::size_t MaxKept = 4;
     std::vector<std::shared_ptr<FrameReadback>> dropped;
-    {
-        std::scoped_lock lock{frame_readbacks_mutex};
+    frame_readbacks_combiner.Run([&] {
         auto& readbacks = FrameReadbacks();
         std::erase_if(readbacks, [&](auto& kept) {
             if (kept->width == readback->width && kept->height == readback->height) {
@@ -182,7 +185,7 @@ static void ReturnFrameReadback(std::shared_ptr<FrameReadback> readback) {
         if (readbacks.size() < MaxKept) {
             readbacks.push_back(std::move(readback));
         }
-    }
+    });
 }
 
 static void CopyImageToReadback(const vk::CommandBuffer& cmdbuf, const vk::Image image,
@@ -223,7 +226,7 @@ Presenter::Presenter(Frontend::Window& window_, AmdGpu::Liverpool* liverpool_)
         auto fence = Check<"create present done fence">(
             device.createFence({.flags = vk::FenceCreateFlagBits::eSignaled}));
         frame.present_done = fence;
-        free_queue.push(&frame);
+        free_queue.TryEmplace(&frame);
     }
 
     pp_pass.Create(device, swapchain.GetSurfaceFormat().format);
@@ -542,9 +545,7 @@ void Presenter::Present(Frame* frame, bool is_reusing_frame, bool is_game_frame)
     const auto free_frame = [&] {
         if (!is_reusing_frame) {
             last_submit_frame = frame;
-            std::scoped_lock fl{free_mutex};
-            free_queue.push(frame);
-            free_cv.notify_one();
+            free_queue.TryEmplace(frame);
         }
     };
 
@@ -780,16 +781,7 @@ void Presenter::Present(Frame* frame, bool is_reusing_frame, bool is_game_frame)
 
 Frame* Presenter::GetRenderFrame() {
     // Wait for free presentation frames
-    Frame* frame;
-    {
-        std::unique_lock lock{free_mutex};
-        free_cv.wait(lock, [this] { return !free_queue.empty(); });
-        LOG_DEBUG(Render_Vulkan, "Got render frame, remaining {}", free_queue.size() - 1);
-
-        // Take the frame from the queue
-        frame = free_queue.front();
-        free_queue.pop();
-    }
+    Frame* frame = free_queue.PopWait();
 
     const vk::Device device = instance.GetDevice();
     vk::Result result{};
