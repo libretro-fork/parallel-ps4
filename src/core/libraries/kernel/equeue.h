@@ -183,11 +183,14 @@ public:
         return !m_small_timers.empty();
     }
     bool RemoveSmallTimer(u64 id) {
-        if (HasSmallTimer()) {
+        bool removed = false;
+        {
             std::scoped_lock lock{m_mutex};
-            return m_small_timers.erase(id) > 0;
+            removed = m_small_timers.erase(id) > 0;
         }
-        return false;
+        // A waiter sleeping toward this timer looks again
+        m_cond.notify_all();
+        return removed;
     }
 
     int WaitForSmallTimer(OrbisKernelEvent* ev, int num, u32 micros);

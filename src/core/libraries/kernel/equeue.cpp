@@ -243,7 +243,7 @@ bool EqueueInternal::AddEvent(EqueueEvent& event) {
             old_event.event.data = event.event.data;
             CheckIoEvent(old_event);
             if (old_event.IsTriggered()) {
-                m_cond.notify_one();
+                m_cond.notify_all();
             }
             return true;
         }
@@ -255,7 +255,7 @@ bool EqueueInternal::AddEvent(EqueueEvent& event) {
         m_events.emplace_back(std::move(event));
 
         if (is_triggered) {
-            m_cond.notify_one();
+            m_cond.notify_all();
         }
     }
 
@@ -391,7 +391,7 @@ bool EqueueInternal::TriggerEvent(u64 ident, s16 filter, void* trigger_data) {
             }
         }
     }
-    m_cond.notify_one();
+    m_cond.notify_all();
     return has_found;
 }
 
@@ -531,38 +531,56 @@ bool EqueueInternal::AddSmallTimer(EqueueEvent& ev) {
         std::scoped_lock lock{m_mutex};
         m_small_timers[st.event.ident] = std::move(st);
     }
+    // A waiter sleeping toward a later timer looks again
+    m_cond.notify_all();
     return true;
 }
 
 int EqueueInternal::WaitForSmallTimer(OrbisKernelEvent* ev, int num, u32 micros) {
     ASSERT(num >= 1);
+    using Clock = std::chrono::steady_clock;
 
-    auto curr_clock = std::chrono::steady_clock::now();
-    const auto wait_end_us = (micros == 0) ? std::chrono::steady_clock::time_point::max()
-                                           : curr_clock + std::chrono::microseconds{micros};
-    int count = 0;
-    do {
-        curr_clock = std::chrono::steady_clock::now();
-        {
-            std::scoped_lock lock{m_mutex};
-            for (auto it = m_small_timers.begin(); it != m_small_timers.end() && count < num;) {
-                const SmallTimer& st = it->second;
-
-                if (curr_clock - st.added >= st.interval) {
-                    ev[count++] = st.event;
-                    it = m_small_timers.erase(it);
-                } else {
-                    ++it;
-                }
+    // The thread sleeps until the first timer is due (or the wait's end), and turns the last
+    // stretch over to yields, where a timed sleep may oversleep: a timer added or removed
+    // meanwhile wakes it to look again. It spun on yields for the whole wait.
+#ifdef _WIN32
+    constexpr auto spin_window = std::chrono::milliseconds(1);
+#else
+    constexpr auto spin_window = std::chrono::microseconds(200);
+#endif
+    const auto wait_end =
+        (micros == 0) ? Clock::time_point::max() : Clock::now() + std::chrono::microseconds{micros};
+    std::unique_lock lock{m_mutex};
+    for (;;) {
+        const auto now = Clock::now();
+        int count = 0;
+        auto first_due = Clock::time_point::max();
+        for (auto it = m_small_timers.begin(); it != m_small_timers.end() && count < num;) {
+            const SmallTimer& st = it->second;
+            const auto due = st.added + st.interval;
+            if (now >= due) {
+                ev[count++] = st.event;
+                it = m_small_timers.erase(it);
+            } else {
+                first_due = std::min(first_due, due);
+                ++it;
             }
-
-            if (count > 0)
-                return count;
         }
-        std::this_thread::yield();
-    } while (curr_clock < wait_end_us);
-
-    return 0;
+        if (count > 0) {
+            return count;
+        }
+        if (now >= wait_end) {
+            return 0;
+        }
+        const auto until = std::min(first_due, wait_end);
+        if (until - now > spin_window) {
+            m_cond.wait_until(lock, until - spin_window);
+        } else {
+            lock.unlock();
+            std::this_thread::yield();
+            lock.lock();
+        }
+    }
 }
 
 bool EqueueInternal::EventExists(u64 id, s16 filter) {
