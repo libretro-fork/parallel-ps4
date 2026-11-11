@@ -15,15 +15,13 @@
 #include "common/types.h"
 #include "video_core/renderer_vulkan/vk_common.h"
 
+struct vk_heap_span;
+
 namespace Vulkan {
 class Instance;
+class MemoryAllocator;
 class Scheduler;
 } // namespace Vulkan
-
-VK_DEFINE_HANDLE(VmaAllocation)
-VK_DEFINE_HANDLE(VmaAllocator)
-
-struct VmaAllocationInfo;
 
 namespace VideoCore {
 
@@ -45,7 +43,7 @@ constexpr vk::BufferUsageFlags AllFlags =
     ReadFlags | vk::BufferUsageFlagBits::eTransferDst | vk::BufferUsageFlagBits::eStorageBuffer;
 
 struct UniqueBuffer {
-    explicit UniqueBuffer(vk::Device device, VmaAllocator allocator);
+    explicit UniqueBuffer(vk::Device device, Vulkan::MemoryAllocator* allocator);
     ~UniqueBuffer();
 
     UniqueBuffer(const UniqueBuffer&) = delete;
@@ -54,8 +52,8 @@ struct UniqueBuffer {
     UniqueBuffer(UniqueBuffer&& other) noexcept
         : device{other.device}, buffer{std::exchange(other.buffer, VK_NULL_HANDLE)},
           bda_addr{std::exchange(other.bda_addr, 0)},
-          allocator{std::exchange(other.allocator, VK_NULL_HANDLE)},
-          allocation{std::exchange(other.allocation, VK_NULL_HANDLE)} {}
+          allocator{std::exchange(other.allocator, nullptr)},
+          allocation{std::exchange(other.allocation, nullptr)} {}
 
     UniqueBuffer& operator=(UniqueBuffer&& other) noexcept {
         if (this != &other) {
@@ -63,22 +61,21 @@ struct UniqueBuffer {
             device = other.device;
             buffer = std::exchange(other.buffer, VK_NULL_HANDLE);
             bda_addr = std::exchange(other.bda_addr, 0);
-            allocator = std::exchange(other.allocator, VK_NULL_HANDLE);
-            allocation = std::exchange(other.allocation, VK_NULL_HANDLE);
+            allocator = std::exchange(other.allocator, nullptr);
+            allocation = std::exchange(other.allocation, nullptr);
         }
         return *this;
     }
 
-    void Create(vk::BufferCreateInfo& buffer_ci, MemoryType mem_type,
-                VmaAllocationInfo* out_alloc_info);
+    void Create(vk::BufferCreateInfo& buffer_ci, MemoryType mem_type);
 
     void Destroy();
 
     vk::Device device;
     vk::Buffer buffer{};
     vk::DeviceAddress bda_addr{};
-    VmaAllocator allocator;
-    VmaAllocation allocation{};
+    Vulkan::MemoryAllocator* allocator;
+    vk_heap_span* allocation{};
 };
 
 struct Buffer {

@@ -260,7 +260,6 @@ if (ENABLE_SYSTEM_LIBRARIES)
     list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
     find_package(fmt 12.0.0 CONFIG)
     find_package(VulkanHeaders 1.4.330 CONFIG)
-    find_package(VulkanMemoryAllocator 3.1.0 CONFIG)
     find_package(xbyak 7.07 CONFIG)
     find_package(Zydis 5.0.0 MODULE)
     list(POP_BACK CMAKE_MODULE_PATH)
@@ -1211,8 +1210,12 @@ set(VIDEO_CORE src/video_core/amdgpu/cb_db_extent.h
                src/video_core/renderer_vulkan/vk_compute_pipeline.h
                src/video_core/renderer_vulkan/vk_graphics_pipeline.cpp
                src/video_core/renderer_vulkan/vk_graphics_pipeline.h
+               src/video_core/renderer_vulkan/vk_heap.c
+               src/video_core/renderer_vulkan/vk_heap.h
                src/video_core/renderer_vulkan/vk_instance.cpp
                src/video_core/renderer_vulkan/vk_instance.h
+               src/video_core/renderer_vulkan/vk_memory.cpp
+               src/video_core/renderer_vulkan/vk_memory.h
                src/video_core/renderer_vulkan/vk_pipeline_cache.cpp
                src/video_core/renderer_vulkan/vk_pipeline_cache.h
                src/video_core/renderer_vulkan/vk_pipeline_common.cpp
@@ -1487,7 +1490,7 @@ endif()
 create_target_directory_groups(shadps4)
 
 target_link_libraries(shadps4 PRIVATE fmt::fmt xbyak::xbyak Dear_ImGui gcn)
-target_link_libraries(shadps4 PRIVATE GPUOpen::VulkanMemoryAllocator sirit Vulkan::Headers Zydis::Zydis)
+target_link_libraries(shadps4 PRIVATE sirit Vulkan::Headers Zydis::Zydis)
 
 if (ENABLE_FEX_GUEST_CPU)
     target_compile_definitions(shadps4 PRIVATE SHADPS4_ENABLE_FEX_GUEST_CPU=1)

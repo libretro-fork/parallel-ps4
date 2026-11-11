@@ -13,9 +13,8 @@
 #include "libretro/libretro_bridge.h"
 #include "video_core/renderer_vulkan/liverpool_to_vk.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
+#include "video_core/renderer_vulkan/vk_memory.h"
 #include "video_core/renderer_vulkan/vk_platform.h"
-
-#include <vk_mem_alloc.h>
 
 namespace Vulkan {
 
@@ -196,7 +195,7 @@ Instance::Instance(s32 physical_device_index, bool enable_validation, bool enabl
 
 Instance::~Instance() {
     ImGui::Core::Shutdown(GetDevice());
-    vmaDestroyAllocator(allocator);
+    allocator.reset();
 }
 
 std::string Instance::GetDriverVersionName() {
@@ -626,25 +625,9 @@ bool Instance::CreateDevice() {
 }
 
 void Instance::CreateAllocator() {
-    const VmaVulkanFunctions functions = {
-        .vkGetInstanceProcAddr = VULKAN_HPP_DEFAULT_DISPATCHER.vkGetInstanceProcAddr,
-        .vkGetDeviceProcAddr = VULKAN_HPP_DEFAULT_DISPATCHER.vkGetDeviceProcAddr,
-    };
-
-    const VmaAllocatorCreateInfo allocator_info = {
-        .flags = VMA_ALLOCATOR_CREATE_BUFFER_DEVICE_ADDRESS_BIT,
-        .physicalDevice = physical_device,
-        .device = *device,
-        .pVulkanFunctions = &functions,
-        .instance = *instance,
-        .vulkanApiVersion = TargetVulkanApiVersion,
-    };
-
-    const VkResult result = vmaCreateAllocator(&allocator_info, &allocator);
-    if (result != VK_SUCCESS) {
-        UNREACHABLE_MSG("Failed to initialize VMA with error {}",
-                        vk::to_string(vk::Result{result}));
-    }
+    allocator = std::make_unique<MemoryAllocator>(
+        physical_device, *device, physical_device.getMemoryProperties(), properties.limits,
+        vk12_features.bufferDeviceAddress, supports_memory_budget);
 }
 
 void Instance::CollectDeviceParameters() {

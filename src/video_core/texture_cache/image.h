@@ -22,8 +22,11 @@ class Instance;
 class Runtime;
 } // namespace Vulkan
 
-VK_DEFINE_HANDLE(VmaAllocation)
-VK_DEFINE_HANDLE(VmaAllocator)
+struct vk_heap_span;
+
+namespace Vulkan {
+class MemoryAllocator;
+}
 
 namespace VideoCore {
 
@@ -41,7 +44,7 @@ DECLARE_ENUM_FLAG_OPERATORS(ImageFlagBits)
 
 struct UniqueImage {
     explicit UniqueImage() = default;
-    explicit UniqueImage(vk::Device device, VmaAllocator allocator)
+    explicit UniqueImage(vk::Device device, Vulkan::MemoryAllocator* allocator)
         : device{device}, allocator{allocator} {}
     ~UniqueImage();
 
@@ -49,14 +52,14 @@ struct UniqueImage {
     UniqueImage& operator=(const UniqueImage&) = delete;
 
     UniqueImage(UniqueImage&& other)
-        : allocator{std::exchange(other.allocator, VK_NULL_HANDLE)},
-          allocation{std::exchange(other.allocation, VK_NULL_HANDLE)},
+        : allocator{std::exchange(other.allocator, nullptr)},
+          allocation{std::exchange(other.allocation, nullptr)},
           image{std::exchange(other.image, VK_NULL_HANDLE)}, image_ci{std::move(other.image_ci)},
           size_bytes{std::exchange(other.size_bytes, 0)} {}
     UniqueImage& operator=(UniqueImage&& other) {
         image = std::exchange(other.image, VK_NULL_HANDLE);
-        allocator = std::exchange(other.allocator, VK_NULL_HANDLE);
-        allocation = std::exchange(other.allocation, VK_NULL_HANDLE);
+        allocator = std::exchange(other.allocator, nullptr);
+        allocation = std::exchange(other.allocation, nullptr);
         image_ci = std::move(other.image_ci);
         size_bytes = std::exchange(other.size_bytes, 0);
         return *this;
@@ -76,8 +79,8 @@ struct UniqueImage {
 
 public:
     vk::Device device{};
-    VmaAllocator allocator{};
-    VmaAllocation allocation{};
+    Vulkan::MemoryAllocator* allocator{};
+    vk_heap_span* allocation{};
     vk::Image image{};
     vk::ImageCreateInfo image_ci{};
     vk::DeviceSize size_bytes{};

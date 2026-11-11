@@ -28,11 +28,6 @@ if (NOT TARGET Vulkan::Headers)
     set(VulkanHeaders_VERSION "1.4.330")
 endif()
 
-# VMA
-if (NOT TARGET GPUOpen::VulkanMemoryAllocator)
-    add_subdirectory(vma)
-endif()
-
 # Xbyak
 if (NOT TARGET xbyak::xbyak)
     add_subdirectory(xbyak)

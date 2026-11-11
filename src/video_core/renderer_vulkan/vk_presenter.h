@@ -18,6 +18,8 @@ namespace Frontend {
 class Window;
 }
 
+struct vk_heap_span;
+
 namespace AmdGpu {
 struct Liverpool;
 }
@@ -27,7 +29,7 @@ namespace Vulkan {
 struct Frame {
     u32 width;
     u32 height;
-    VmaAllocation allocation;
+    vk_heap_span* allocation;
     vk::Image image;
     vk::ImageView image_view;
     vk::Fence present_done;

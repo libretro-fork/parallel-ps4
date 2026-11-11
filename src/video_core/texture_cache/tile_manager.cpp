@@ -10,7 +10,6 @@
 #include "video_core/texture_cache/image_view.h"
 #include "video_core/texture_cache/tile_manager.h"
 
-#include <vk_mem_alloc.h>
 #include "common/enum_names.h"
 
 namespace VideoCore {

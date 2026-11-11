@@ -7,10 +7,9 @@
 #include "common/assert.h"
 #include "video_core/buffer_cache/buffer.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
+#include "video_core/renderer_vulkan/vk_memory.h"
 #include "video_core/renderer_vulkan/vk_platform.h"
 #include "video_core/renderer_vulkan/vk_scheduler.h"
-
-#include <vk_mem_alloc.h>
 
 namespace VideoCore {
 
@@ -31,39 +30,21 @@ std::string_view BufferTypeName(MemoryType type) {
     }
 }
 
-[[nodiscard]] VkMemoryPropertyFlags MemoryUsagePreferredVmaFlags(MemoryType type) {
-    return type != MemoryType::DeviceLocal ? VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
-                                           : VkMemoryPropertyFlagBits{};
-}
-
-[[nodiscard]] VmaAllocationCreateFlags MemoryUsageVmaFlags(MemoryType type) {
+[[nodiscard]] Vulkan::MemoryUsage MemoryUsageOf(MemoryType type) {
     switch (type) {
     case MemoryType::HostUncached:
-    case MemoryType::Stream:
-        return VMA_ALLOCATION_CREATE_MAPPED_BIT |
-               VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT;
+        return Vulkan::MemoryUsage::Upload;
     case MemoryType::HostCached:
-        return VMA_ALLOCATION_CREATE_MAPPED_BIT | VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT;
+        return Vulkan::MemoryUsage::Download;
+    case MemoryType::Stream:
+        return Vulkan::MemoryUsage::Stream;
     case MemoryType::DeviceLocal:
     default:
-        return {};
+        return Vulkan::MemoryUsage::DeviceLocal;
     }
 }
 
-[[nodiscard]] VmaMemoryUsage MemoryUsageVma(MemoryType type) {
-    switch (type) {
-    case MemoryType::DeviceLocal:
-    case MemoryType::Stream:
-        return VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE;
-    case MemoryType::HostUncached:
-    case MemoryType::HostCached:
-        return VMA_MEMORY_USAGE_AUTO_PREFER_HOST;
-    default:
-        return VMA_MEMORY_USAGE_UNKNOWN;
-    }
-}
-
-UniqueBuffer::UniqueBuffer(vk::Device device_, VmaAllocator allocator_)
+UniqueBuffer::UniqueBuffer(vk::Device device_, Vulkan::MemoryAllocator* allocator_)
     : device{device_}, allocator{allocator_} {}
 
 UniqueBuffer::~UniqueBuffer() {
@@ -72,45 +53,29 @@ UniqueBuffer::~UniqueBuffer() {
 
 void UniqueBuffer::Destroy() {
     if (allocation) {
-        vmaDestroyBuffer(allocator, buffer, allocation);
+        allocator->DestroyBuffer(buffer, allocation);
     } else if (buffer) {
         device.destroyBuffer(buffer);
     }
     buffer = VK_NULL_HANDLE;
-    allocation = VK_NULL_HANDLE;
+    allocation = nullptr;
     bda_addr = 0;
 }
 
-void UniqueBuffer::Create(vk::BufferCreateInfo& buffer_ci, MemoryType mem_type,
-                          VmaAllocationInfo* out_alloc_info) {
+void UniqueBuffer::Create(vk::BufferCreateInfo& buffer_ci, MemoryType mem_type) {
     const bool with_bda = bool(buffer_ci.usage & vk::BufferUsageFlagBits::eShaderDeviceAddress);
     if (mem_type != MemoryType::Sparse) {
-        const VmaAllocationCreateFlags bda_flag =
-            with_bda ? VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT : 0;
-        VmaAllocationCreateInfo alloc_ci = {
-            .flags =
-                VMA_ALLOCATION_CREATE_WITHIN_BUDGET_BIT | bda_flag | MemoryUsageVmaFlags(mem_type),
-            .usage = MemoryUsageVma(mem_type),
-            .requiredFlags = 0,
-            .preferredFlags = MemoryUsagePreferredVmaFlags(mem_type),
-            .pool = VK_NULL_HANDLE,
-            .pUserData = nullptr,
-        };
-
-        const VkBufferCreateInfo buffer_ci_unsafe = static_cast<VkBufferCreateInfo>(buffer_ci);
-        VkBuffer unsafe_buffer{};
-        VkResult result = vmaCreateBuffer(allocator, &buffer_ci_unsafe, &alloc_ci, &unsafe_buffer,
-                                          &allocation, out_alloc_info);
-        if (result == VK_ERROR_OUT_OF_DEVICE_MEMORY) {
-            alloc_ci.flags &= ~VMA_ALLOCATION_CREATE_WITHIN_BUDGET_BIT;
+        // A buffer with a device address gets memory of its own, as it did under VMA
+        const auto usage = MemoryUsageOf(mem_type);
+        vk::Result result =
+            allocator->CreateBuffer(buffer_ci, usage, with_bda, true, buffer, allocation);
+        if (result == vk::Result::eErrorOutOfDeviceMemory) {
             LOG_WARNING(Render_Vulkan, "Allocating buffer of size {} bytes over budget.",
                         buffer_ci.size);
-            result = vmaCreateBuffer(allocator, &buffer_ci_unsafe, &alloc_ci, &unsafe_buffer,
-                                     &allocation, out_alloc_info);
+            result = allocator->CreateBuffer(buffer_ci, usage, with_bda, false, buffer, allocation);
         }
-        ASSERT_MSG(result == VK_SUCCESS, "Failed allocating buffer with error {}",
-                   vk::to_string(vk::Result{result}));
-        buffer = vk::Buffer{unsafe_buffer};
+        ASSERT_MSG(result == vk::Result::eSuccess, "Failed allocating buffer with error {}",
+                   vk::to_string(result));
     } else {
         // The libretro core's Buffer sets the flags itself where the device has no sparse
         // residency
@@ -149,8 +114,7 @@ Buffer::Buffer(const Vulkan::Instance& instance, VAddr cpu_addr_, u64 size_bytes
     if (mem_type == MemoryType::Sparse && !instance.IsSparseResidencyBufferSupported()) {
         buffer_ci.flags |= vk::BufferCreateFlagBits::eSparseBinding;
     }
-    VmaAllocationInfo alloc_info{};
-    buffer.Create(buffer_ci, mem_type, &alloc_info);
+    buffer.Create(buffer_ci, mem_type);
 
     const auto device = instance.GetDevice();
     if (!debug_name.empty()) {
@@ -160,13 +124,11 @@ Buffer::Buffer(const Vulkan::Instance& instance, VAddr cpu_addr_, u64 size_bytes
     }
 
     if (mem_type != MemoryType::Sparse) {
-        VkMemoryPropertyFlags property_flags{};
-        vmaGetAllocationMemoryProperties(instance.GetAllocator(), buffer.allocation,
-                                         &property_flags);
-        if (alloc_info.pMappedData) {
-            mapped_data = std::span<u8>{std::bit_cast<u8*>(alloc_info.pMappedData), size_bytes};
+        // Lent by the heap: the block's one mapping, at this buffer's offset
+        if (buffer.allocation->mapped) {
+            mapped_data = std::span<u8>{static_cast<u8*>(buffer.allocation->mapped), size_bytes};
         }
-        is_coherent = property_flags & VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+        is_coherent = buffer.allocation->flags & VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
     }
 }
 
@@ -174,14 +136,14 @@ void Buffer::Flush(u64 offset, u64 size) {
     if (mapped_data.empty() || is_coherent) {
         return;
     }
-    vmaFlushAllocation(buffer.allocator, buffer.allocation, offset, size);
+    buffer.allocator->Flush(buffer.allocation, offset, size);
 }
 
 void Buffer::Invalidate(u64 offset, u64 size) {
     if (mapped_data.empty() || is_coherent) {
         return;
     }
-    vmaInvalidateAllocation(buffer.allocator, buffer.allocation, offset, size);
+    buffer.allocator->Invalidate(buffer.allocation, offset, size);
 }
 
 constexpr u64 WATCHES_INITIAL_RESERVE = 0x100;

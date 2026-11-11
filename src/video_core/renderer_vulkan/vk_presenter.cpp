@@ -18,6 +18,7 @@
 #include "imgui/renderer/imgui_impl_vulkan.h"
 #include "imgui/shadnet_notifications_layer.h"
 #include "video_core/buffer_cache/buffer.h"
+#include "video_core/renderer_vulkan/vk_memory.h"
 #include "video_core/renderer_vulkan/vk_platform.h"
 #include "video_core/renderer_vulkan/vk_presenter.h"
 #include "video_core/renderer_vulkan/vk_rasterizer.h"
@@ -42,7 +43,6 @@
 #include <system_error>
 #include <vector>
 #include <imgui.h>
-#include <vk_mem_alloc.h>
 #include "libretro/libretro_bridge.h"
 
 namespace Vulkan {
@@ -252,7 +252,7 @@ Presenter::~Presenter() {
 
     const vk::Device device = instance.GetDevice();
     for (auto& frame : present_frames) {
-        vmaDestroyImage(instance.GetAllocator(), frame.image, frame.allocation);
+        instance.GetAllocator()->DestroyImage(frame.image, frame.allocation);
         device.destroyImageView(frame.image_view);
         device.destroyFence(frame.present_done);
     }
@@ -271,7 +271,7 @@ void Presenter::RecreateFrame(Frame* frame, u32 width, u32 height) {
         device.destroyImageView(frame->image_view);
     }
     if (frame->image) {
-        vmaDestroyImage(instance.GetAllocator(), frame->image, frame->allocation);
+        instance.GetAllocator()->DestroyImage(frame->image, frame->allocation);
     }
 
     const vk::Format format = swapchain.GetSurfaceFormat().format;
@@ -287,26 +287,13 @@ void Presenter::RecreateFrame(Frame* frame, u32 width, u32 height) {
                  vk::ImageUsageFlagBits::eTransferSrc | vk::ImageUsageFlagBits::eSampled,
     };
 
-    const VmaAllocationCreateInfo alloc_info = {
-        .flags = VMA_ALLOCATION_CREATE_WITHIN_BUDGET_BIT,
-        .usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE,
-        .requiredFlags = 0,
-        .preferredFlags = 0,
-        .pool = VK_NULL_HANDLE,
-        .pUserData = nullptr,
-    };
-
-    VkImage unsafe_image{};
-    VkImageCreateInfo unsafe_image_info = static_cast<VkImageCreateInfo>(image_info);
-
-    VkResult result = vmaCreateImage(instance.GetAllocator(), &unsafe_image_info, &alloc_info,
-                                     &unsafe_image, &frame->allocation, nullptr);
-    if (result != VK_SUCCESS) [[unlikely]] {
+    const vk::Result result =
+        instance.GetAllocator()->CreateImage(image_info, true, frame->image, frame->allocation);
+    if (result != vk::Result::eSuccess) [[unlikely]] {
         LOG_CRITICAL(Render_Vulkan, "Failed allocating texture with error {}",
-                     vk::to_string(vk::Result{result}));
+                     vk::to_string(result));
         UNREACHABLE();
     }
-    frame->image = vk::Image{unsafe_image};
     SetObjectName(device, frame->image, "Frame image #{}", frame->id);
 
     const vk::ImageViewCreateInfo view_info = {

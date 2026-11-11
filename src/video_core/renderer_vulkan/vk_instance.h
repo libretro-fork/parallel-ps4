@@ -3,14 +3,15 @@
 
 #pragma once
 
+#include <memory>
 #include <span>
 #include <unordered_map>
 
 #include "video_core/renderer_vulkan/vk_platform.h"
 
-VK_DEFINE_HANDLE(VmaAllocator)
-
 namespace Vulkan {
+
+class MemoryAllocator;
 
 class Instance {
 public:
@@ -40,9 +41,9 @@ public:
         return *device;
     }
 
-    /// Returns the VMA allocator handle
-    VmaAllocator GetAllocator() const {
-        return allocator;
+    /// Returns the device memory allocator
+    MemoryAllocator* GetAllocator() const {
+        return allocator.get();
     }
 
     /// Returns a list of the available physical devices
@@ -492,7 +493,7 @@ private:
     /// Creates the logical device opportunistically enabling extensions
     bool CreateDevice();
 
-    /// Creates the VMA allocator handle
+    /// Creates the device memory allocator
     void CreateAllocator();
 
     /// Collects various information from the device.
@@ -528,7 +529,7 @@ private:
     vk::DriverIdKHR driver_id;
     vk::UniqueDebugUtilsMessengerEXT debug_callback{};
     std::string vendor_name;
-    VmaAllocator allocator{};
+    std::unique_ptr<MemoryAllocator> allocator;
     vk::Queue present_queue;
     vk::Queue graphics_queue;
     std::vector<vk::PhysicalDevice> physical_devices;

@@ -18,6 +18,3 @@
 #pragma clang diagnostic ignored "-Wunused-value"
 #include <vulkan/vulkan.hpp>
 #pragma clang diagnostic pop
-
-#define VMA_STATIC_VULKAN_FUNCTIONS 0
-#define VMA_DYNAMIC_VULKAN_FUNCTIONS 1

@@ -17,4 +17,15 @@ for san in address,undefined thread; do
         libretro/tests/audio_mix_test.c libretro/audio_mix.c $COMMON \
         -o "$OUT/$name" -lpthread -lm
     "$OUT/$name"
+    name=vk_heap_test-$(echo $san | tr , -)
+    $CC -std=c89 -pedantic -O1 -g -Wall -Wdeclaration-after-statement -Wno-long-long \
+        -fno-omit-frame-pointer -fsanitize=$san -isystem externals/vulkan-headers/include -Isrc \
+        libretro/tests/vk_heap_test.c src/video_core/renderer_vulkan/vk_heap.c -o "$OUT/$name"
+    "$OUT/$name"
 done
+# The heap on a real device (lavapipe where there is no GPU), with the validation layer when
+# it is installed; skipped with no Vulkan
+$CC -std=c89 -O1 -g -Wall -fsanitize=address,undefined -isystem externals/vulkan-headers/include \
+    -Isrc libretro/tests/vk_heap_device_test.c src/video_core/renderer_vulkan/vk_heap.c \
+    -o "$OUT/vk_heap_device_test" -ldl
+ASAN_OPTIONS=detect_leaks=0 "$OUT/vk_heap_device_test"

@@ -5,12 +5,11 @@
 #include "common/assert.h"
 #include "video_core/renderer_vulkan/liverpool_to_vk.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
+#include "video_core/renderer_vulkan/vk_memory.h"
 #include "video_core/renderer_vulkan/vk_runtime.h"
 #include "video_core/renderer_vulkan/vk_scheduler.h"
 #include "video_core/texture_cache/blit_helper.h"
 #include "video_core/texture_cache/image.h"
-
-#include <vk_mem_alloc.h>
 
 namespace VideoCore {
 
@@ -88,13 +87,13 @@ static vk::FormatFeatureFlags2 FormatFeatureFlags(const vk::ImageUsageFlags usag
 
 UniqueImage::~UniqueImage() {
     if (image) {
-        vmaDestroyImage(allocator, image, allocation);
+        allocator->DestroyImage(image, allocation);
     }
 }
 
 void UniqueImage::Destroy() {
     if (image) {
-        vmaDestroyImage(allocator, image, allocation);
+        allocator->DestroyImage(image, allocation);
         image = vk::Image{};
         allocation = {};
     }
@@ -103,31 +102,15 @@ void UniqueImage::Destroy() {
 void UniqueImage::Create(const vk::ImageCreateInfo& image_ci) {
     this->image_ci = image_ci;
     ASSERT(!image);
-    VmaAllocationCreateInfo alloc_ci = {
-        .flags = VMA_ALLOCATION_CREATE_WITHIN_BUDGET_BIT,
-        .usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE,
-        .requiredFlags = 0,
-        .preferredFlags = 0,
-        .pool = VK_NULL_HANDLE,
-        .pUserData = nullptr,
-    };
-
-    const VkImageCreateInfo image_ci_unsafe = static_cast<VkImageCreateInfo>(image_ci);
-    VkImage unsafe_image{};
-    VmaAllocationInfo alloc_info{};
-    VkResult result = vmaCreateImage(allocator, &image_ci_unsafe, &alloc_ci, &unsafe_image,
-                                     &allocation, &alloc_info);
-    if (result == VK_ERROR_OUT_OF_DEVICE_MEMORY) {
-        alloc_ci.flags &= ~VMA_ALLOCATION_CREATE_WITHIN_BUDGET_BIT;
-        LOG_WARNING(Render_Vulkan, "Allocating image of size {} bytes over budget.",
-                    alloc_info.size);
-        result = vmaCreateImage(allocator, &image_ci_unsafe, &alloc_ci, &unsafe_image, &allocation,
-                                &alloc_info);
+    vk::Result result = allocator->CreateImage(image_ci, true, image, allocation);
+    if (result == vk::Result::eErrorOutOfDeviceMemory) {
+        LOG_WARNING(Render_Vulkan, "Allocating image of {}x{}x{} over budget.",
+                    image_ci.extent.width, image_ci.extent.height, image_ci.extent.depth);
+        result = allocator->CreateImage(image_ci, false, image, allocation);
     }
-    ASSERT_MSG(result == VK_SUCCESS, "Failed allocating image with error {}",
-               vk::to_string(vk::Result{result}));
-    image = vk::Image{unsafe_image};
-    size_bytes = alloc_info.size;
+    ASSERT_MSG(result == vk::Result::eSuccess, "Failed allocating image with error {}",
+               vk::to_string(result));
+    size_bytes = allocation->size;
 }
 
 Image::Image(const Vulkan::Instance& instance, Vulkan::Runtime& runtime_,
