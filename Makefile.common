@@ -8,7 +8,7 @@
 # and takes these options:
 #
 #   LIBRETRO_X86_64_PARTS=<dir>  aarch64: carry box64 and the x86-64 build
-#                                (box64, shadps4_libretro_host, shadps4_libretro.so)
+#                                (box64, parallel_ps4_libretro_host, parallel_ps4_libretro.so)
 #   ENABLE_FEX_GUEST_CPU=1       aarch64: run the game's code through FEXCore, with
 #   FEXCORE_GUEST_CPU_SOURCE_DIR=<dir> FEXCORE_GUEST_CPU_BUILD_DIR=<dir>
 #                                FEX built on its own (.ci/build-fex.sh)
@@ -87,7 +87,7 @@ $(OBJ_DIR)/src/imgui/renderer/font_data.cpp.o: $(FONTS)
 # Linux: the launcher of the emulator's process (libretro/host_main.c), built
 # for the target and carried in the core as an array.
 ifeq ($(OS_LINUX),1)
-LIBRETRO_HOST      := $(OBJ_DIR)/gen/shadps4_libretro_host
+LIBRETRO_HOST      := $(OBJ_DIR)/gen/parallel_ps4_libretro_host
 LIBRETRO_HOST_BLOB := $(OBJ_DIR)/gen/libretro_host_blob.c
 $(LIBRETRO_HOST): libretro/host_main.c
 	@mkdir -p $(@D)
@@ -104,7 +104,7 @@ ifneq ($(LIBRETRO_X86_64_PARTS),)
 ifneq ($(ARCH_ARM64),1)
 $(error LIBRETRO_X86_64_PARTS is for the aarch64 core)
 endif
-X86_64_PARTS := box64 shadps4_libretro_host shadps4_libretro.so
+X86_64_PARTS := box64 parallel_ps4_libretro_host parallel_ps4_libretro.so
 X86_64_PARTS_FILES := $(addprefix $(LIBRETRO_X86_64_PARTS)/,$(X86_64_PARTS))
 $(foreach f,$(X86_64_PARTS_FILES),$(if $(wildcard $(f)),,$(error $(f) is missing)))
 X86_64_PARTS_ASM := $(GEN_DIR)/libretro_x86_64_parts.S

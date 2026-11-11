@@ -2,7 +2,7 @@ DEBUG = 0
 LINK_STATIC_LIBCPLUSPLUS = 1
 LTO ?=
 
-TARGET_NAME := shadps4
+TARGET_NAME := parallel_ps4
 
 # The libraries are git submodules. A checkout made without them (a clone
 # without --recursive, or one older than a submodule) fetches them here, on the

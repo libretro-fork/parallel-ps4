@@ -22,7 +22,7 @@ variables:
 
 .core-defs:
   variables:
-    CORENAME: shadps4
+    CORENAME: parallel_ps4
 
 include:
   # Linux

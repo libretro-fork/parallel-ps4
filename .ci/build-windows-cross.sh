@@ -11,7 +11,7 @@
 #
 #   BUILD_DIR=build/windows-x86_64 NUMPROC=8 .ci/build-windows-cross.sh
 #
-# leaves the core at $BUILD_DIR/shadps4_libretro.dll.
+# leaves the core at $BUILD_DIR/parallel_ps4_libretro.dll.
 
 set -euo pipefail
 
@@ -167,6 +167,6 @@ export LIB="$MSVC/crt/lib/x86_64;$MSVC/sdk/lib/um/x86_64;$MSVC/sdk/lib/ucrt/x86_
 cmake --build "$BUILD_DIR" -- -j "$NUMPROC" ${SHAD_CROSS_KEEP_GOING:+-k 0}
 # CMake leaves the core in the build directory itself; moved there if a later
 # layout puts it deeper
-BUILT=$(find "$BUILD_DIR" -name shadps4_libretro.dll | head -1)
-[ "$BUILT" -ef "$BUILD_DIR/shadps4_libretro.dll" ] || mv "$BUILT" "$BUILD_DIR/shadps4_libretro.dll"
-file "$BUILD_DIR/shadps4_libretro.dll"
+BUILT=$(find "$BUILD_DIR" -name parallel_ps4_libretro.dll | head -1)
+[ "$BUILT" -ef "$BUILD_DIR/parallel_ps4_libretro.dll" ] || mv "$BUILT" "$BUILD_DIR/parallel_ps4_libretro.dll"
+file "$BUILD_DIR/parallel_ps4_libretro.dll"

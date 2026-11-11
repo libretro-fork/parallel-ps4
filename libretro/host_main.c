@@ -4,7 +4,7 @@
 // The launcher of the libretro core's emulator process, where there is no rundll32. It is
 // built into the core, which runs it from memory (libretro_core.cpp):
 //
-//   shadps4_libretro_host <path of the core> <descriptor of the shared memory>
+//   parallel_ps4_libretro_host <path of the core> <descriptor of the shared memory>
 //
 // It loads the core and calls its retro_host_main (host.cpp). An executable of its own gives
 // the emulator what the frontend's process cannot: an address space with nothing in the
@@ -22,7 +22,7 @@
 
 int main(int argc, char** argv) {
     if (argc < 3) {
-        fprintf(stderr, "shadps4_libretro_host is started by the shadPS4 libretro core\n");
+        fprintf(stderr, "parallel_ps4_libretro_host is started by the shadPS4 libretro core\n");
         return 2;
     }
 
@@ -48,12 +48,12 @@ int main(int argc, char** argv) {
 
     void* core = dlopen(argv[1], RTLD_NOW | RTLD_LOCAL);
     if (!core) {
-        fprintf(stderr, "shadps4_libretro_host: %s\n", dlerror());
+        fprintf(stderr, "parallel_ps4_libretro_host: %s\n", dlerror());
         return 2;
     }
     int (*host_main)(const char*) = (int (*)(const char*))dlsym(core, "retro_host_main");
     if (!host_main) {
-        fprintf(stderr, "shadps4_libretro_host: %s\n", dlerror());
+        fprintf(stderr, "parallel_ps4_libretro_host: %s\n", dlerror());
         return 2;
     }
     return host_main(argv[2]);

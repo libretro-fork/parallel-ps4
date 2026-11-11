@@ -50,22 +50,22 @@ jobs:
     - name: Collect
       run: |
         mkdir out
-        cp "$(find build -name 'shadps4_libretro.so' | head -1)" out/
-        cp libretro/shadps4_libretro.info out/
+        cp "$(find build -name 'parallel_ps4_libretro.so' | head -1)" out/
+        cp libretro/parallel_ps4_libretro.info out/
         ls -la out
-        nm -D --defined-only out/shadps4_libretro.so | grep -c ' retro_'
+        nm -D --defined-only out/parallel_ps4_libretro.so | grep -c ' retro_'
         # What the aarch64 core carries: this build and its launcher, which it starts
         # through box64, without their debugging information
         mkdir parts
-        cp out/shadps4_libretro.so parts/
-        cp "$(find build -name 'shadps4_libretro_host' -type f | head -1)" parts/
-        strip --strip-unneeded parts/shadps4_libretro.so parts/shadps4_libretro_host
-        readelf -d parts/shadps4_libretro.so | grep NEEDED
+        cp out/parallel_ps4_libretro.so parts/
+        cp "$(find build -name 'parallel_ps4_libretro_host' -type f | head -1)" parts/
+        strip --strip-unneeded parts/parallel_ps4_libretro.so parts/parallel_ps4_libretro_host
+        readelf -d parts/parallel_ps4_libretro.so | grep NEEDED
         ls -la parts
 
     - uses: actions/upload-artifact@v7
       with:
-        name: shadps4_libretro-linux-x86_64
+        name: parallel_ps4_libretro-linux-x86_64
         path: out/
 
     - uses: actions/upload-artifact@v7
@@ -119,15 +119,15 @@ jobs:
     - name: Collect
       run: |
         mkdir out
-        cp "$(find build -name 'shadps4_libretro.so' | head -1)" out/
-        cp libretro/shadps4_libretro.info out/
-        strip --strip-unneeded out/shadps4_libretro.so
+        cp "$(find build -name 'parallel_ps4_libretro.so' | head -1)" out/
+        cp libretro/parallel_ps4_libretro.info out/
+        strip --strip-unneeded out/parallel_ps4_libretro.so
         ls -la out
-        nm -D --defined-only out/shadps4_libretro.so | grep -c ' retro_'
+        nm -D --defined-only out/parallel_ps4_libretro.so | grep -c ' retro_'
 
     - uses: actions/upload-artifact@v7
       with:
-        name: shadps4_libretro-linux-aarch64-box64
+        name: parallel_ps4_libretro-linux-aarch64-box64
         path: out/
 
   # The aarch64 core with the game's code run through FEXCore in its own process, in
@@ -182,18 +182,18 @@ jobs:
     - name: Collect
       run: |
         mkdir out
-        cp "$(find build -name 'shadps4_libretro.so' | head -1)" out/
-        cp libretro/shadps4_libretro.info out/
+        cp "$(find build -name 'parallel_ps4_libretro.so' | head -1)" out/
+        cp libretro/parallel_ps4_libretro.info out/
         # With its symbols, for backtraces of crashes on the test machine
-        mkdir symbols && cp out/shadps4_libretro.so symbols/
-        strip --strip-unneeded out/shadps4_libretro.so
+        mkdir symbols && cp out/parallel_ps4_libretro.so symbols/
+        strip --strip-unneeded out/parallel_ps4_libretro.so
         ls -la out
         # The frontend loads the core with dlopen: no static TLS
-        ! readelf -dW out/shadps4_libretro.so | grep -q STATIC_TLS
+        ! readelf -dW out/parallel_ps4_libretro.so | grep -q STATIC_TLS
 
     - uses: actions/upload-artifact@v7
       with:
-        name: shadps4_libretro-linux-aarch64
+        name: parallel_ps4_libretro-linux-aarch64
         path: out/
 
     - uses: actions/upload-artifact@v7
@@ -284,13 +284,13 @@ jobs:
       shell: bash
       run: |
         mkdir out
-        cp "$(find build -name 'shadps4_libretro.dll' | head -1)" out/
-        cp libretro/shadps4_libretro.info out/
+        cp "$(find build -name 'parallel_ps4_libretro.dll' | head -1)" out/
+        cp libretro/parallel_ps4_libretro.info out/
         ls -la out
 
     - uses: actions/upload-artifact@v7
       with:
-        name: shadps4_libretro-windows-x86_64
+        name: parallel_ps4_libretro-windows-x86_64
         path: out/
 
   # The test build release: a build of all three platforms on the branch named by the
@@ -311,7 +311,7 @@ jobs:
 
     - uses: actions/download-artifact@v8
       with:
-        pattern: shadps4_libretro-*
+        pattern: parallel_ps4_libretro-*
         path: artifacts
 
     - name: Zip

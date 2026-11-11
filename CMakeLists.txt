@@ -1354,7 +1354,7 @@ add_library(shadps4 MODULE
     src/emulator.h
     src/frontend_window.h
 )
-set_target_properties(shadps4 PROPERTIES PREFIX "" OUTPUT_NAME "shadps4_libretro")
+set_target_properties(shadps4 PROPERTIES PREFIX "" OUTPUT_NAME "parallel_ps4_libretro")
 
 # The parts of libretro-common the core uses, a plain copy of RetroArch's
 # (libretro/libretro-common). Its headers come after the core's own.
@@ -1444,16 +1444,16 @@ if (UNIX AND NOT APPLE)
 
     # The launcher of the emulator's process, built first and carried in the core
     # as an array (libretro/host_main.c, libretro/embed_host.cmake).
-    add_executable(shadps4_libretro_host libretro/host_main.c)
-    target_link_libraries(shadps4_libretro_host PRIVATE ${CMAKE_DL_LIBS})
+    add_executable(parallel_ps4_libretro_host libretro/host_main.c)
+    target_link_libraries(parallel_ps4_libretro_host PRIVATE ${CMAKE_DL_LIBS})
     set(LIBRETRO_HOST_BLOB "${CMAKE_CURRENT_BINARY_DIR}/libretro_host_blob.c")
     add_custom_command(
         OUTPUT "${LIBRETRO_HOST_BLOB}"
         COMMAND ${CMAKE_COMMAND}
-                -DINPUT=$<TARGET_FILE:shadps4_libretro_host>
+                -DINPUT=$<TARGET_FILE:parallel_ps4_libretro_host>
                 -DOUTPUT=${LIBRETRO_HOST_BLOB}
                 -P ${CMAKE_CURRENT_SOURCE_DIR}/libretro/embed_host.cmake
-        DEPENDS shadps4_libretro_host ${CMAKE_CURRENT_SOURCE_DIR}/libretro/embed_host.cmake
+        DEPENDS parallel_ps4_libretro_host ${CMAKE_CURRENT_SOURCE_DIR}/libretro/embed_host.cmake
         VERBATIM)
     target_sources(shadps4 PRIVATE "${LIBRETRO_HOST_BLOB}")
 
@@ -1464,12 +1464,12 @@ if (UNIX AND NOT APPLE)
     # On aarch64 the core carries the x86-64 emulator and box64, which it writes into
     # the frontend's system directory and starts its emulator process through
     # (libretro_core.cpp). LIBRETRO_X86_64_PARTS is a directory with box64, the x86-64
-    # build's shadps4_libretro_host and its shadps4_libretro.so.
+    # build's parallel_ps4_libretro_host and its parallel_ps4_libretro.so.
     set(LIBRETRO_X86_64_PARTS "" CACHE PATH "box64 and the x86-64 build, for the aarch64 core")
     if (ARCHITECTURE STREQUAL "arm64" AND LIBRETRO_X86_64_PARTS)
         set(LIBRETRO_PARTS_ASM "${CMAKE_CURRENT_BINARY_DIR}/libretro_x86_64_parts.S")
         set(LIBRETRO_PARTS_TEXT ".section .rodata\n")
-        foreach (part box64 shadps4_libretro_host shadps4_libretro.so)
+        foreach (part box64 parallel_ps4_libretro_host parallel_ps4_libretro.so)
             if (NOT EXISTS "${LIBRETRO_X86_64_PARTS}/${part}")
                 message(FATAL_ERROR "${LIBRETRO_X86_64_PARTS}/${part} is missing")
             endif()
@@ -1482,7 +1482,7 @@ if (UNIX AND NOT APPLE)
         string(APPEND LIBRETRO_PARTS_TEXT ".section .note.GNU-stack,\"\",%progbits\n")
         file(WRITE "${LIBRETRO_PARTS_ASM}" "${LIBRETRO_PARTS_TEXT}")
         set_source_files_properties("${LIBRETRO_PARTS_ASM}" PROPERTIES OBJECT_DEPENDS
-            "${LIBRETRO_X86_64_PARTS}/box64;${LIBRETRO_X86_64_PARTS}/shadps4_libretro_host;${LIBRETRO_X86_64_PARTS}/shadps4_libretro.so")
+            "${LIBRETRO_X86_64_PARTS}/box64;${LIBRETRO_X86_64_PARTS}/parallel_ps4_libretro_host;${LIBRETRO_X86_64_PARTS}/parallel_ps4_libretro.so")
         target_sources(shadps4 PRIVATE "${LIBRETRO_PARTS_ASM}")
         target_compile_definitions(shadps4 PRIVATE LIBRETRO_X86_64_PARTS)
     endif()

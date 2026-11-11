@@ -365,7 +365,7 @@ bool InstallPkg(PkgInstallJob& job, const std::filesystem::path& pkg,
     Libretro::PkgReader reader;
     std::string error;
     if (!reader.Open(pkg, Libretro::PkgKeysFile(Utf8Path(user_dir)), error)) {
-        job.error = "shadPS4: the PKG cannot be read: " + error;
+        job.error = "ParaLLEl PS4: the PKG cannot be read: " + error;
         return false;
     }
     const auto files = reader.Files();
@@ -376,7 +376,7 @@ bool InstallPkg(PkgInstallJob& job, const std::filesystem::path& pkg,
     Common::FS::CreateDirectories(dir.parent_path());
     const s64 space = Common::FS::FreeSpace(dir.parent_path());
     if (space >= 0 && static_cast<u64>(space) < total) {
-        job.error = "shadPS4: installing " + Utf8String(pkg.filename()) + " needs " +
+        job.error = "ParaLLEl PS4: installing " + Utf8String(pkg.filename()) + " needs " +
                     std::to_string(total >> 20) + " MiB, and there are " +
                     std::to_string(space >> 20) + " MiB free";
         return false;
@@ -398,7 +398,7 @@ bool InstallPkg(PkgInstallJob& job, const std::filesystem::path& pkg,
         bool written = out.IsOpen();
         for (u64 at = 0; written && at < node->size;) {
             if (job.cancel.load(std::memory_order_relaxed)) {
-                job.error = "shadPS4: the install was stopped";
+                job.error = "ParaLLEl PS4: the install was stopped";
                 return false;
             }
             const u64 read = reader.Read(*node, at, buffer.size(), buffer.data());
@@ -411,7 +411,7 @@ bool InstallPkg(PkgInstallJob& job, const std::filesystem::path& pkg,
             done += read;
         }
         if (!written) {
-            job.error = "shadPS4: " + Utf8String(target) + " could not be written";
+            job.error = "ParaLLEl PS4: " + Utf8String(target) + " could not be written";
             return false;
         }
         if (total) {
@@ -474,7 +474,7 @@ bool InstallPkgContent(PkgInstallJob& job) {
     }
     boot = Utf8String(game_dir / "eboot.bin");
     if (boot.size() >= Libretro::PATH_BYTES) {
-        job.error = "shadPS4: the installed game's path is too long";
+        job.error = "ParaLLEl PS4: the installed game's path is too long";
         return false;
     }
     return true;
@@ -505,17 +505,17 @@ bool FindPkgContent(const std::string& game, const std::string& user_dir, std::s
     std::string error;
     if (!Libretro::LoadPkgKeys(Libretro::PkgKeysFile(Utf8Path(user_dir)), keys,
                                error)) {
-        Notify(("shadPS4: " + error).c_str());
+        Notify(("ParaLLEl PS4: " + error).c_str());
         return false;
     }
     const std::filesystem::path game_path = Utf8Path(game);
     Libretro::PkgSummary summary;
     if (!Libretro::ReadPkgSummary(game_path, summary, error)) {
-        Notify(("shadPS4: the PKG cannot be read: " + error).c_str());
+        Notify(("ParaLLEl PS4: the PKG cannot be read: " + error).c_str());
         return false;
     }
     if (summary.category == "gp" || summary.category == "ac") {
-        Notify("shadPS4: this PKG is an update or additional content; load the game's PKG, the "
+        Notify("ParaLLEl PS4: this PKG is an update or additional content; load the game's PKG, the "
                "others are taken from beside it");
         return false;
     }
@@ -579,7 +579,7 @@ std::wstring ModulePath() {
 bool CreateShared(std::string& argument) {
     static unsigned counter = 0;
     char name[96];
-    std::snprintf(name, sizeof(name), "Local\\shadps4_libretro_%lu_%u",
+    std::snprintf(name, sizeof(name), "Local\\parallel_ps4_libretro_%lu_%u",
                   static_cast<unsigned long>(GetCurrentProcessId()), ++counter);
     const ULONGLONG size = Libretro::SHARED_BYTES;
     shared_mapping =
@@ -693,7 +693,7 @@ std::string ModulePath() {
 
 bool CreateShared(std::string& argument) {
     // Without MFD_CLOEXEC: the emulator's process inherits the descriptor.
-    shared_fd = memfd_create("shadps4_libretro_shared", 0);
+    shared_fd = memfd_create("parallel_ps4_libretro_shared", 0);
     if (shared_fd < 0 || ftruncate(shared_fd, static_cast<off_t>(Libretro::SHARED_BYTES)) != 0) {
         return false;
     }
@@ -722,7 +722,7 @@ void DestroyShared() {
 // The launcher as a file in memory, opened only for reading - a file open for writing cannot
 // be run.
 int LauncherDescriptor() {
-    const int fd = memfd_create("shadps4_libretro_host", 0);
+    const int fd = memfd_create("parallel_ps4_libretro_host", 0);
     if (fd < 0) {
         return -1;
     }
@@ -749,8 +749,8 @@ int LauncherDescriptor() {
 #ifdef LIBRETRO_X86_64_PARTS
 // box64 and the x86-64 build of the core, carried in this one (CMakeLists.txt)
 extern "C" const unsigned char g_part_box64[], g_part_box64_end[];
-extern "C" const unsigned char g_part_shadps4_libretro_host[], g_part_shadps4_libretro_host_end[];
-extern "C" const unsigned char g_part_shadps4_libretro_so[], g_part_shadps4_libretro_so_end[];
+extern "C" const unsigned char g_part_parallel_ps4_libretro_host[], g_part_parallel_ps4_libretro_host_end[];
+extern "C" const unsigned char g_part_parallel_ps4_libretro_so[], g_part_parallel_ps4_libretro_so_end[];
 #endif
 
 // Writes what the core carries into dir, unless the files there are from this very build,
@@ -768,8 +768,8 @@ bool WriteParts(const std::string& dir) {
         const unsigned char* end;
     } parts[] = {
         {"box64", g_part_box64, g_part_box64_end},
-        {"shadps4_libretro_host", g_part_shadps4_libretro_host, g_part_shadps4_libretro_host_end},
-        {"shadps4_libretro.so", g_part_shadps4_libretro_so, g_part_shadps4_libretro_so_end},
+        {"parallel_ps4_libretro_host", g_part_parallel_ps4_libretro_host, g_part_parallel_ps4_libretro_host_end},
+        {"parallel_ps4_libretro.so", g_part_parallel_ps4_libretro_so, g_part_parallel_ps4_libretro_so_end},
     };
     for (const auto& part : parts) {
         const std::string path = dir + part.name;
@@ -809,8 +809,8 @@ bool StartEmulator(const std::string& argument) {
         return false;
     }
     std::string box64 = dir + "box64";
-    std::string launcher = dir + "shadps4_libretro_host";
-    std::string module = dir + "shadps4_libretro.so";
+    std::string launcher = dir + "parallel_ps4_libretro_host";
+    std::string module = dir + "parallel_ps4_libretro.so";
 
     // The frontend's environment. With Exact CPU Flags box64 computes the flags exactly
     // (SAFEFLAGS=2): with its faster default Sonic Mania's music, which the game decodes
@@ -859,7 +859,7 @@ bool StartEmulator(const std::string& argument) {
     char launcher_path[64];
     std::snprintf(launcher_path, sizeof(launcher_path), "/proc/self/fd/%d", launcher);
 
-    std::string name = "shadps4_libretro_host";
+    std::string name = "parallel_ps4_libretro_host";
     std::string module_argument = module;
     std::string shared_argument = argument;
     char* const arguments[] = {name.data(), module_argument.data(), shared_argument.data(),
@@ -1192,7 +1192,7 @@ RETRO_API void retro_deinit(void) {}
 
 RETRO_API void retro_get_system_info(struct retro_system_info* info) {
     std::memset(info, 0, sizeof(*info));
-    info->library_name = "shadPS4";
+    info->library_name = "ParaLLEl PS4";
     info->library_version = Common::g_version;
     info->valid_extensions = "bin|pkg";
     info->need_fullpath = true;
@@ -1228,7 +1228,7 @@ RETRO_API void retro_reset(void) {
     retro_game_info game{};
     game.path = path.c_str();
     if (!retro_load_game(&game)) {
-        Notify("shadPS4: the game could not be started again; see the log");
+        Notify("ParaLLEl PS4: the game could not be started again; see the log");
     }
 }
 
@@ -1369,7 +1369,7 @@ RETRO_API bool retro_load_game(const struct retro_game_info* game) {
                 return false;
             }
             pkg_install = job;
-            NotifyProgress("shadPS4: installing the PKG", 0);
+            NotifyProgress("ParaLLEl PS4: installing the PKG", 0);
             return true;
         }
     }
@@ -1411,7 +1411,7 @@ static void PollPkgInstall() {
         if (percent / 5 != job.told_percent / 5) {
             job.told_percent = percent;
             char text[96];
-            std::snprintf(text, sizeof(text), "shadPS4: installing the PKG, %d %%", percent);
+            std::snprintf(text, sizeof(text), "ParaLLEl PS4: installing the PKG, %d %%", percent);
             NotifyProgress(text, percent);
         }
         return;
@@ -1468,13 +1468,13 @@ RETRO_API void retro_run(void) {
             char text[160];
             if (crashed) {
                 std::snprintf(text, sizeof(text),
-                              "shadPS4: the emulator stopped unexpectedly (%d); see shadps4.log",
+                              "ParaLLEl PS4: the emulator stopped unexpectedly (%d); see shadps4.log",
                               code);
                 Notify(text);
             } else if (code != 0) {
                 // The game ended itself, with an error of its own: not the emulator's crash.
                 std::snprintf(text, sizeof(text),
-                              "shadPS4: the game ended with an error (%d); see shadps4.log", code);
+                              "ParaLLEl PS4: the game ended with an error (%d); see shadps4.log", code);
                 Notify(text);
             } else {
                 Log(RETRO_LOG_INFO, "The emulator ended");
@@ -1498,7 +1498,7 @@ RETRO_API void retro_run(void) {
                 gpu_failure_told = true;
                 char text[320];
                 std::snprintf(text, sizeof(text),
-                              "shadPS4: no picture on the GPU (%s). Turn the core option GPU "
+                              "ParaLLEl PS4: no picture on the GPU (%s). Turn the core option GPU "
                               "Frame Hand-over off and start the game again.",
                               failure);
                 Notify(text);

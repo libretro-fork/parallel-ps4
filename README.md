@@ -10,14 +10,14 @@ The core is experimental: it is at the stage of first tests, and games may not s
 
 Builds for Windows, Linux (x86_64) and Linux on ARM (aarch64) are on the [Releases](https://github.com/WizzardSK/shadps4-libretro/releases) page, replaced by every full CI build of the release branch.
 
-- **Windows:** `shadps4_libretro.dll`, Windows 10 or newer.
-- **Linux:** `shadps4_libretro.so`, glibc 2.39 or newer.
+- **Windows:** `parallel_ps4_libretro.dll`, Windows 10 or newer.
+- **Linux:** `parallel_ps4_libretro.so`, glibc 2.39 or newer.
 
-Put the core into RetroArch's `cores` folder and `shadps4_libretro.info` into its `info` folder.
+Put the core into RetroArch's `cores` folder and `parallel_ps4_libretro.info` into its `info` folder. The core was called `shadps4_libretro` before; its folder in `system/` is still `shadPS4/`, so what is there is kept.
 
 On Windows and on Linux x86_64 the emulator runs the game's code directly on the host CPU and has no recompiler, so it needs a 64-bit x86 CPU, with AVX2.
 
-- **Linux on ARM (aarch64), experimental:** `shadps4_libretro.so` for an ARM frontend is the emulator built for ARM, with [FEX](https://github.com/FEX-Emu/FEX)'s CPU core (FEXCore) inside it running the game's x86-64 code; nothing else is needed. The port is the one of [Bachata S4](https://github.com/zenithblue-oss/shadps4-arm64), taken over with fixes for a core that is loaded into a frontend. It needs glibc, a GPU with Vulkan 1.3 and a 48-bit address space. Tried on one machine (Snapdragon 7c, Adreno 618 with Turnip): Sonic Mania plays at full speed and Horizon Chase Turbo at about 22 frames a second, held back by the GPU. Where the emulator's own `libSceAvPlayer` or `libSceFont` would call back into the game, dumped modules are needed on ARM, as those calls are not run through FEX yet. Not on Android. The earlier ARM core, which carried box64 and the x86-64 build of the emulator and translated all of it, can still be built (`box64core` in the CI workflow); it is not in the releases.
+- **Linux on ARM (aarch64), experimental:** `parallel_ps4_libretro.so` for an ARM frontend is the emulator built for ARM, with [FEX](https://github.com/FEX-Emu/FEX)'s CPU core (FEXCore) inside it running the game's x86-64 code; nothing else is needed. The port is the one of [Bachata S4](https://github.com/zenithblue-oss/shadps4-arm64), taken over with fixes for a core that is loaded into a frontend. It needs glibc, a GPU with Vulkan 1.3 and a 48-bit address space. Tried on one machine (Snapdragon 7c, Adreno 618 with Turnip): Sonic Mania plays at full speed and Horizon Chase Turbo at about 22 frames a second, held back by the GPU. Where the emulator's own `libSceAvPlayer` or `libSceFont` would call back into the game, dumped modules are needed on ARM, as those calls are not run through FEX yet. Not on Android. The earlier ARM core, which carried box64 and the x86-64 build of the emulator and translated all of it, can still be built (`box64core` in the CI workflow); it is not in the releases.
 
 ## Video
 

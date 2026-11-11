@@ -24,7 +24,7 @@ jobs:
             git config --global --add safe.directory "*"
             BUILD_DIR=build/windows-x86_64 NUMPROC=$(nproc) .ci/build-windows-cross.sh
           ' 2>&1 | tee build.log | grep -E "error|FAILED|warning: unknown|CMake Error|^\+ |case links|PE32|ninja:" | tail -200
-          test -f build/windows-x86_64/shadps4_libretro.dll
+          test -f build/windows-x86_64/parallel_ps4_libretro.dll
       - uses: actions/upload-artifact@v7
         if: always()
         with:
@@ -32,5 +32,5 @@ jobs:
           path: build.log
       - uses: actions/upload-artifact@v7
         with:
-          name: shadps4_libretro-windows-x86_64-gitlab
-          path: build/windows-x86_64/shadps4_libretro.dll
+          name: parallel_ps4_libretro-windows-x86_64-gitlab
+          path: build/windows-x86_64/parallel_ps4_libretro.dll

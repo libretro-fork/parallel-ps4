@@ -338,7 +338,7 @@ int RunEmulator(const char* argument) {
     user_manager_load();
 
     auto* emulator = Common::Singleton<Core::Emulator>::Instance();
-    emulator->executableName = "shadps4_libretro";
+    emulator->executableName = "parallel_ps4_libretro";
     emulator->Run(eboot);
     return 0;
 }

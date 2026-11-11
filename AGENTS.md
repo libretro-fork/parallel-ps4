@@ -211,7 +211,7 @@ Not there yet, in the core's own glue. These are debts, not precedent:
 - Every commit and patch is authored `LibretroAdmin <libretroadmin@users.noreply.github.com>`, with no `Co-Authored-By` or other agent attribution trailers.
 - Deliver each patch as soon as it is ready and has passed its gates, not batched at the end. When the developer says a set is merged, the next delivery holds only the new patches.
 - Commands given to the developer are bare and runnable: HTTPS remotes, no placeholder variables, no invented paths in front of file names.
-- Core `.info` file changes go to the libretro-super repository (`dist/info/shadps4_libretro.info`) as well as the copy in `libretro/`.
+- Core `.info` file changes go to the libretro-super repository (`dist/info/parallel_ps4_libretro.info`) as well as the copy in `libretro/`.
 
 ## Libretro pitfalls already hit in the other cores
 

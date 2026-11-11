@@ -1,8 +1,8 @@
 # Software Information
-display_name = "Sony - PlayStation 4 (shadPS4)"
+display_name = "Sony - PlayStation 4 (ParaLLEl PS4)"
 authors = "shadPS4 Emulator Project"
 supported_extensions = "bin|pkg"
-corename = "shadPS4"
+corename = "ParaLLEl PS4"
 categories = "Emulator"
 license = "GPLv2+"
 permissions = ""

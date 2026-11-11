@@ -129,7 +129,7 @@ void Initialize(const ::Vulkan::Instance& instance, const Frontend::Window& wind
 
     ::Core::Devtools::Layer::SetupSettings();
     platform_window = &window;
-    io.BackendPlatformName = "shadps4_libretro";
+    io.BackendPlatformName = "parallel_ps4_libretro";
 
     const Vulkan::InitInfo vk_info{
         .instance = instance.GetInstance(),
