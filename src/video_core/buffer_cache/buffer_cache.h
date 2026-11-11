@@ -121,6 +121,13 @@ public:
     /// Return true when a region is modified from the GPU
     [[nodiscard]] bool IsRegionGpuModified(VAddr addr, size_t size);
 
+    /// True if the GPU wrote any of these very bytes (not: any byte of their pages)
+    [[nodiscard]] bool IsRangeGpuWritten(VAddr addr, size_t size) const {
+        bool written = false;
+        gpu_modified_ranges.ForEachInRange(addr, size, [&](VAddr, VAddr) { written = true; });
+        return written;
+    }
+
     /// Mark region as modified from the GPU
     void MarkRegionAsGpuModified(VAddr addr, size_t size);
 

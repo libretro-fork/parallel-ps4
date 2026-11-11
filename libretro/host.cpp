@@ -46,6 +46,7 @@
 #include "libretro.h"
 #include "libretro_bridge.h"
 #include "shared_state.h"
+#include "video_core/renderer_vulkan/vk_vertex_capture.h"
 #include "video_core/texture_cache/texture_cache.h"
 
 #ifdef _WIN32
@@ -109,6 +110,13 @@ constexpr const char* trophy_sides[] = {"left", "right", "top", "bottom"};
 // which upstream's IPC changes the same way.
 void ApplyLiveOptions() {
     const auto& live = shared->live;
+    // Switched on (not: still on): one capture
+    static bool capturing = false;
+    const bool capture = retro_atomic_load_seq_cst_int(&live.vertex_capture) != 0;
+    if (capture && !capturing) {
+        Vulkan::VertexCapture::Request();
+    }
+    capturing = capture;
     emu_settings_set_volume_slider(static_cast<std::int32_t>(retro_atomic_load_seq_cst_int(&live.volume)), false);
     emu_settings_set_show_fps_counter(static_cast<std::uint32_t>(retro_atomic_load_seq_cst_int(&live.show_fps)) != 0, false);
     Overlay::SetSimpleFps(static_cast<std::uint32_t>(retro_atomic_load_seq_cst_int(&live.show_fps)) != 0);

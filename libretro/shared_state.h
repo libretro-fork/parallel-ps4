@@ -19,7 +19,7 @@
 namespace Libretro {
 
 inline constexpr std::uint32_t SHARED_MAGIC = 0x34505368; // "hSP4"
-inline constexpr std::uint32_t SHARED_VERSION = 14;
+inline constexpr std::uint32_t SHARED_VERSION = 15;
 
 inline constexpr std::uint32_t MAX_WIDTH = 3840;
 inline constexpr std::uint32_t MAX_HEIGHT = 2160;
@@ -102,6 +102,7 @@ struct SharedOptions {
     std::uint32_t readbacks;
     std::uint32_t direct_memory_access;
     std::uint32_t show_fps;
+    std::uint32_t vertex_capture;
     std::int32_t volume;
     /// How many of the frontend's ports are connected as pads, 1 to MAX_PADS.
     std::uint32_t pads;
@@ -161,6 +162,8 @@ struct SharedState {
         retro_atomic_int_t trophy_popup;
         retro_atomic_int_t trophy_side;
         retro_atomic_int_t trophy_seconds;
+        /// Diagnostics: switched on, the emulator captures a frame's vertex inputs
+        retro_atomic_int_t vertex_capture;
     } live;
     retro_atomic_int_t options_serial;
 

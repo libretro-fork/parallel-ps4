@@ -239,6 +239,7 @@ void ReadCoreOptions(Libretro::SharedOptions& options) {
     options.readbacks = readbacks == "precise" ? 2 : readbacks == "relaxed" ? 1 : 0;
     options.direct_memory_access = enabled("shadps4_direct_memory_access", "disabled");
     options.show_fps = enabled("shadps4_show_fps", "disabled");
+    options.vertex_capture = enabled("shadps4_vertex_capture", "disabled");
     options.volume = std::clamp(std::atoi(OptionValue("shadps4_volume", "100").c_str()), 0, 500);
     options.pads = static_cast<uint32_t>(std::clamp(
         std::atoi(OptionValue("shadps4_controllers", "1").c_str()), 1,
@@ -1459,6 +1460,7 @@ RETRO_API void retro_run(void) {
         ReadCoreOptions(options);
         auto& live = shared->live;
         (void)retro_atomic_exchange_int(&live.show_fps, options.show_fps);
+        (void)retro_atomic_exchange_int(&live.vertex_capture, options.vertex_capture);
         (void)retro_atomic_exchange_int(&live.volume, options.volume);
         (void)retro_atomic_exchange_int(&live.trophy_popup, options.trophy_popup);
         (void)retro_atomic_exchange_int(&live.trophy_side, options.trophy_side);

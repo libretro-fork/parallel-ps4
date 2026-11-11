@@ -34,3 +34,7 @@ $CC -std=c89 -O1 -g -Wall -fsanitize=address,undefined -isystem externals/vulkan
     -Isrc libretro/tests/vk_heap_device_test.c src/video_core/renderer_vulkan/vk_heap.c \
     -o "$OUT/vk_heap_device_test" -ldl
 ASAN_OPTIONS=detect_leaks=0 "$OUT/vk_heap_device_test"
+# The vertex capture's report on a capture it makes itself, a mesh of each kind in it
+$CC -std=c89 -pedantic -O1 -g -Wall -Wno-long-long -fsanitize=address,undefined \
+    tools/vertex_capture_report.c -o "$OUT/vertex_capture_report" -lm
+ASAN_OPTIONS=detect_leaks=0 "$OUT/vertex_capture_report" --selftest

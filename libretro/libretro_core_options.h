@@ -395,6 +395,20 @@ struct retro_core_option_v2_definition option_defs_us[] = {
         "disabled"
     },
     {
+        "shadps4_vertex_capture",
+        "Capture Vertex Inputs (diagnostics)",
+        NULL,
+        "Switching this on writes the vertex inputs of about one frame's draws to vertex_capture.bin in the log directory, for tools/vertex_capture_report: do it while a mesh is drawn broken, then switch it off again. Switching it on again captures anew.",
+        NULL,
+        "video",
+        {
+            { "disabled", NULL },
+            { "enabled",  NULL },
+            { NULL, NULL },
+        },
+        "disabled"
+    },
+    {
         "shadps4_show_fps",
         "Show FPS Counter",
         NULL,

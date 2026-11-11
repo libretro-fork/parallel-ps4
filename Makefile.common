@@ -298,7 +298,7 @@ CORE_SOURCES_CXX += $(addprefix src/video_core/renderer_vulkan/,liverpool_to_vk.
 	vk_pipeline_cache.cpp vk_pipeline_common.cpp vk_pipeline_serialization.cpp vk_platform.cpp \
 	vk_presenter.cpp vk_rasterizer.cpp vk_resource_pool.cpp vk_runtime.cpp vk_scheduler.cpp \
 	vk_semaphore.cpp vk_shader_hle.cpp vk_shader_util.cpp vk_staging_buffer_pool.cpp \
-	vk_swapchain.cpp)
+	vk_swapchain.cpp vk_vertex_capture.cpp)
 CORE_SOURCES_CXX += $(addprefix src/video_core/texture_cache/,blit_helper.cpp \
 	host_compatibility.cpp image.cpp image_info.cpp image_view.cpp sampler.cpp texture_cache.cpp \
 	tile_manager.cpp)

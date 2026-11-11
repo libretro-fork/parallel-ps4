@@ -17,6 +17,7 @@
 #include "video_core/renderer_vulkan/vk_runtime.h"
 #include "video_core/renderer_vulkan/vk_scheduler.h"
 #include "video_core/renderer_vulkan/vk_shader_hle.h"
+#include "video_core/renderer_vulkan/vk_vertex_capture.h"
 #include "video_core/texture_cache/image_view.h"
 #include "video_core/texture_cache/texture_cache.h"
 
@@ -393,6 +394,7 @@ void Rasterizer::Finish() {
 }
 
 void Rasterizer::OnSubmit() {
+    VertexCapture::OnSubmit();
     buffer_cache.TickFrame();
     texture_cache.ProcessDownloadImages();
     texture_cache.RunGarbageCollector();
@@ -524,6 +526,55 @@ void Rasterizer::BindVertexBuffers(const GraphicsPipeline* pipeline) {
         }
         host_sizes.push_back(buffer.GetSize());
         host_strides.push_back(buffer.GetStride());
+    }
+
+    if (VertexCapture::Active()) [[unlikely]] {
+        // Asked for from the core's options: what this draw's vertex inputs hold, in the
+        // game's memory and as the GPU is given them (vk_vertex_capture.h)
+        VertexInputs<VertexCapture::Binding> captured;
+        for (u32 i = 0; i < guest_buffers.size(); ++i) {
+            const auto& buffer = guest_buffers[i];
+            const bool present = buffer.base_address != 0 && buffer.GetSize() > 0;
+            u32 flags = bindings[i].inputRate == vk::VertexInputRate::eInstance
+                            ? VertexCapture::BindingPerInstance
+                            : 0;
+            if (present && buffer_cache.IsRangeGpuWritten(buffer.base_address, buffer.GetSize())) {
+                flags |= VertexCapture::BindingGpuWritten;
+            }
+            if (present && host_buffers[i] == buffer_cache.GetStreamBuffer().Handle()) {
+                flags |= VertexCapture::BindingStreamBuffer;
+            }
+            captured.push_back({attributes[i].location, static_cast<u32>(attributes[i].format),
+                                buffer.GetStride(), flags, buffer.base_address, buffer.GetSize()});
+        }
+        const u32 draw =
+            VertexCapture::Draw(static_cast<u32>(regs.primitive_type), regs.num_indices,
+                                regs.num_instances.NumInstances(), captured);
+        auto& staging_pool = runtime.GetStagingPool();
+        for (const auto& range : ranges_merged) {
+            const u64 size = memory->ClampRangeSize(range.base_address, range.GetSize());
+            if (size == 0 || size > 64_MB ||
+                !VertexCapture::Wants(range.base_address, size,
+                                      buffer_cache.IsRangeGpuWritten(range.base_address, size))) {
+                continue;
+            }
+            // The GPU's copy first: read back from where the draw reads it, once the GPU has
+            // got this far
+            const auto readback =
+                staging_pool.Request(size, VideoCore::MemoryType::HostCached, 16, true);
+            const vk::BufferCopy copy{range.offset, readback.offset, size};
+            runtime.CopyBuffer(range.buffer, readback.buffer, {&copy, 1});
+            VertexCapture::HostPending();
+            scheduler.DeferOperation(
+                [&staging_pool, readback, draw, address = range.base_address, size] {
+                    readback.Invalidate();
+                    VertexCapture::Host(draw, address, readback.mapped, size);
+                    staging_pool.FreeDeferred(readback);
+                });
+            const auto guest = staging_pool.Request(size, VideoCore::MemoryType::HostCached);
+            memory->CopySparseMemory(range.base_address, guest.mapped, size);
+            VertexCapture::Guest(draw, range.base_address, guest.mapped, size);
+        }
     }
 
     const auto cmdbuf = scheduler.CommandBuffer();
