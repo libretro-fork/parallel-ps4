@@ -626,6 +626,16 @@ void Translator::V_MAD_LEGACY_F32(const GcnInst& inst) {
     SetDst(inst.dst[0], ir.FPAdd(LegacyMul(src0, src1), src2));
 }
 
+// The _CLAMP instructions give +-max_float where the result is an infinity, and nothing else:
+// a NaN stays a NaN, as on the PS4's GPU. An FClamp of a NaN is undefined in SPIR-V, and came
+// out as one bound or the other by driver.
+IR::F32 Translator::ClampInfToMax(const IR::F32& value) {
+    constexpr float max = std::numeric_limits<float>::max();
+    const IR::F32 signed_max{
+        ir.Select(ir.FPLessThan(value, ir.Imm32(0.0f)), ir.Imm32(-max), ir.Imm32(max))};
+    return IR::F32{ir.Select(ir.FPIsInf(value), signed_max, value)};
+}
+
 void Translator::V_MUL_I32_I24(const GcnInst& inst, bool is_signed) {
     const IR::U32 src0{
         ir.BitFieldExtract(GetSrc(inst.src[0]), ir.Imm32(0), ir.Imm32(24), is_signed)};
@@ -1049,10 +1059,7 @@ void Translator::V_EXP_F32(const GcnInst& inst) {
 
 void Translator::V_LOG_CLAMP_F32(const GcnInst& inst) {
     const IR::F32 src0{GetSrc<IR::F32>(inst.src[0])};
-    const IR::F32 result{ir.FPLog2(src0)};
-    const IR::F32 max_val{ir.Imm32(std::numeric_limits<float>::max())};
-    const IR::F32 min_val{ir.Imm32(-std::numeric_limits<float>::max())};
-    SetDst(inst.dst[0], ir.FPClamp(result, min_val, max_val));
+    SetDst(inst.dst[0], ClampInfToMax(IR::F32{ir.FPLog2(src0)}));
 }
 
 void Translator::V_LOG_F32(const GcnInst& inst) {
@@ -1102,18 +1109,12 @@ void Translator::V_RSQ_F32(const GcnInst& inst) {
 
 void Translator::V_RCP_CLAMP_F32(const GcnInst& inst) {
     const IR::F32 src0{GetSrc<IR::F32>(inst.src[0])};
-    const IR::F32 result{ir.FPRecip(src0)};
-    const IR::F32 max_val{ir.Imm32(std::numeric_limits<float>::max())};
-    const IR::F32 min_val{ir.Imm32(-std::numeric_limits<float>::max())};
-    SetDst(inst.dst[0], ir.FPClamp(result, min_val, max_val));
+    SetDst(inst.dst[0], ClampInfToMax(IR::F32{ir.FPRecip(src0)}));
 }
 
 void Translator::V_RSQ_CLAMP_F32(const GcnInst& inst) {
     const IR::F32 src0{GetSrc<IR::F32>(inst.src[0])};
-    const IR::F32 result{ir.FPRecipSqrt(src0)};
-    const IR::F32 max_val{ir.Imm32(std::numeric_limits<float>::max())};
-    const IR::F32 min_val{ir.Imm32(-std::numeric_limits<float>::max())};
-    SetDst(inst.dst[0], ir.FPClamp(result, min_val, max_val));
+    SetDst(inst.dst[0], ClampInfToMax(IR::F32{ir.FPRecipSqrt(src0)}));
 }
 
 void Translator::V_SQRT_F32(const GcnInst& inst) {

@@ -234,7 +234,8 @@ constexpr ArrayMode GetArrayMode(TileMode tile_mode) {
     case TileMode::DisplayLinearGeneral:
         return ArrayMode::ArrayLinearGeneral;
     default:
-        UNREACHABLE_MSG("Unknown tile mode = {}", u32(tile_mode));
+        // A stale or garbage descriptor: not a reason to end the game
+        return ArrayMode::Array2DTiledThin1;
     }
 }
 
@@ -273,7 +274,7 @@ constexpr MicroTileMode GetMicroTileMode(TileMode tile_mode) {
     case TileMode::Thick3DXThick:
         return MicroTileMode::Thick;
     default:
-        UNREACHABLE_MSG("Unknown tile mode = {}", u32(tile_mode));
+        return MicroTileMode::Display; // as GetArrayMode: a garbage descriptor
     }
 }
 

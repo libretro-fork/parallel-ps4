@@ -1,6 +1,8 @@
 // SPDX-FileCopyrightText: Copyright 2024-2026 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include <array>
+#include <cstring>
 #include <unordered_map>
 #include <queue>
 #include "common/flat_map.h"
@@ -9,6 +11,7 @@
 #define XBYAK64
 #define XBYAK64_GCC
 #endif
+#include <encodings/xxh3.h>
 #include <xbyak/xbyak.h>
 #ifdef ARCH_X86_64
 #include <xbyak/xbyak_util.h>
@@ -41,10 +44,49 @@ static const u8* g_srt_codegen_start = nullptr;
 
 namespace Shader {
 
+// The walkers kept, by their code. The permutations of a program have the same walker, and
+// each kept a copy of its own: with the hundreds of permutations a material shader gets, the
+// 32 MB of code could run out in a long session, and the game stopped ("code is too big";
+// doax3-scarlet-pc, from The Order). A walker is straight-line code with nothing in it that
+// depends on where it is, so one copy serves them all. A fixed table: nothing is allocated.
+struct KeptWalker {
+    u64 hash;
+    const u8* code;
+    u64 size;
+};
+static std::array<KeptWalker, 16384> g_srt_walkers{};
+
+static u64 WalkerHash(const u8* code, size_t size) {
+    return xxh3_64(code, size, 0) | 1; // 0 is an empty slot
+}
+
+/// The kept walker with this code, or null after keeping this one (when there is room).
+static const u8* FindOrKeepWalker(const u8* code, size_t size) {
+    const u64 hash = WalkerHash(code, size);
+    for (u64 probe = 0; probe < 32; ++probe) {
+        KeptWalker& kept = g_srt_walkers[(hash + probe) % g_srt_walkers.size()];
+        if (kept.hash == 0) {
+            kept = {hash, code, size};
+            return nullptr;
+        }
+        // One the fault handler has patched no longer has its code: not reused
+        if (kept.hash == hash && kept.size == size && kept.code != code &&
+            std::memcmp(kept.code, code, size) == 0) {
+            return kept.code;
+        }
+    }
+    return nullptr;
+}
+
 PFN_SrtWalker RegisterWalkerCode(const u8* ptr, size_t size) {
+    const size_t start = g_srt_codegen.getSize();
     const auto func_addr = (PFN_SrtWalker)g_srt_codegen.getCurr();
     g_srt_codegen.db(ptr, size);
     g_srt_codegen.ready();
+    if (const u8* kept = FindOrKeepWalker(reinterpret_cast<const u8*>(func_addr), size)) {
+        g_srt_codegen.setSize(start);
+        return reinterpret_cast<PFN_SrtWalker>(const_cast<u8*>(kept));
+    }
     return func_addr;
 }
 
@@ -662,6 +704,7 @@ static void GenerateSrtProgram(Info& info, PassInfo& pass_info) {
         signals->RegisterAccessViolationHandler(SrtWalkerSignalHandler, priority);
     }
 
+    const size_t walker_start = c.getSize();
     info.srt_info.walker_func = c.getCurr<PFN_SrtWalker>();
     pass_info.dst_off_dw = NUM_USER_DATA_REGS;
     ASSERT(pass_info.dst_off_dw == info.srt_info.flattened_bufsize_dw);
@@ -675,6 +718,12 @@ static void GenerateSrtProgram(Info& info, PassInfo& pass_info) {
 
     info.srt_info.walker_func_size =
         c.getCurr() - reinterpret_cast<const u8*>(info.srt_info.walker_func);
+    // Another permutation's identical walker is used, and this copy is dropped
+    if (const u8* kept = FindOrKeepWalker(reinterpret_cast<const u8*>(info.srt_info.walker_func),
+                                          info.srt_info.walker_func_size)) {
+        c.setSize(walker_start);
+        info.srt_info.walker_func = reinterpret_cast<PFN_SrtWalker>(const_cast<u8*>(kept));
+    }
 
     if (emu_settings_get_dump_shaders()) {
         DumpSrtProgram(info, reinterpret_cast<const u8*>(info.srt_info.walker_func),

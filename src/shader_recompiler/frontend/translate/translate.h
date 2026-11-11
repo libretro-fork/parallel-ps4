@@ -383,6 +383,7 @@ private:
     IR::U32 GetCarryIn(const GcnInst& inst);
     void SetCarryOut(const GcnInst& inst, const IR::U1& carry);
     IR::F32 LegacyMul(const IR::F32& a, const IR::F32& b);
+    IR::F32 ClampInfToMax(const IR::F32& value);
     IR::U32 VMovRelSHelper(u32 src_vgprno, const IR::U32 m0);
     void VMovRelDHelper(u32 dst_vgprno, const IR::U32 src_val, const IR::U32 m0);
 
