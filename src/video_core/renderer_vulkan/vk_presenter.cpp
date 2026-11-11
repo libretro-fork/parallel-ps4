@@ -18,6 +18,7 @@
 #include "imgui/renderer/imgui_impl_vulkan.h"
 #include "imgui/shadnet_notifications_layer.h"
 #include "video_core/buffer_cache/buffer.h"
+#include "video_core/renderer_vulkan/frame_notes.h"
 #include "video_core/renderer_vulkan/vk_memory.h"
 #include "video_core/renderer_vulkan/vk_platform.h"
 #include "video_core/renderer_vulkan/vk_presenter.h"
@@ -396,6 +397,13 @@ Frame* Presenter::PrepareFrame(const Libraries::VideoOut::BufferAttributeGroup& 
                                VAddr cpu_address) {
     // A frame of the game's is done: a vertex capture counts them
     VertexCapture::OnFlip();
+    // With Dump Shaders on, what is recorded for the GPU during a frame is written out
+    // every so many frames, next to the shaders
+    if (emu_settings_get_dump_shaders()) {
+        static const std::string dir =
+            (Common::FS::GetUserPath(Common::FS::PathType::ShaderDir) / "dumps").string();
+        frame_notes_flip(dir.c_str());
+    }
 
     auto desc = VideoCore::TextureCache::ImageDesc{attribute, cpu_address};
     const auto image_id = texture_cache.FindImage(desc);

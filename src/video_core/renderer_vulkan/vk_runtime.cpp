@@ -884,6 +884,10 @@ void Runtime::SetBackingSamples(VideoCore::Image* image, u32 num_samples, bool c
         });
         FlushBarriers();
 
+        instance.Mark(scheduler.CommandBuffer(),
+                      "samples copy: image at, from samples, to samples, w|h<<16",
+                      info.guest_address, backing->num_samples, new_backing->num_samples,
+                      u64(image->HostSize().width) | u64(image->HostSize().height) << 16);
         // Copy between ms and non ms backing images
         blit_helper->CopyBetweenMsImages(
             image->HostSize().width, image->HostSize().height, new_backing->num_samples, info.pixel_format,

@@ -57,8 +57,33 @@ Rasterizer::Rasterizer(const Instance& instance_, Scheduler& scheduler_, Runtime
 
 Rasterizer::~Rasterizer() = default;
 
+/// The 32 bits of a register
+template <typename T>
+static u32 Raw(const T& reg) {
+    u32 raw;
+    static_assert(sizeof(T) == sizeof(raw));
+    std::memcpy(&raw, &reg, sizeof(raw));
+    return raw;
+}
+
 bool Rasterizer::FilterDraw() {
     const auto& regs = liverpool->regs;
+    // Every draw the game asks for, before anything is made of it
+    instance.Note("draw asked: vertex shader|pixel shader<<32, db render control|db "
+                  "eqaa<<32, aa config|colour control<<32, depth control|ps input ena<<40|ps "
+                  "input addr<<52",
+                  u64(regs.vs_program.Address<VAddr>() & 0xffffffffu) |
+                      u64(regs.ps_program.Address<VAddr>() & 0xffffffffu) << 32,
+                  u64(Raw(regs.depth_render_control)) | u64(regs.db_eqaa) << 32,
+                  u64(Raw(regs.aa_config)) | u64(Raw(regs.color_control)) << 32,
+                  u64(Raw(regs.depth_control)) | u64(Raw(regs.ps_input_ena) & 0xfff) << 40 |
+                      u64(Raw(regs.ps_input_addr) & 0xfff) << 52);
+    instance.Note("draw asked 2: aa mask 0|1<<32, sample positions X0Y0|X0Y1<<32, target "
+                  "mask|shader mask<<32, indices|primitive<<32",
+                  u64(regs.aa_mask[0]) | u64(regs.aa_mask[1]) << 32,
+                  u64(regs.aa_sample_locs[0]) | u64(regs.aa_sample_locs[8]) << 32,
+                  u64(Raw(regs.color_target_mask)) | u64(Raw(regs.color_shader_mask)) << 32,
+                  u64(regs.num_indices) | u64(regs.primitive_type) << 32);
     if (regs.color_control.mode == AmdGpu::ColorControl::OperationMode::EliminateFastClear) {
         // Clears the render target if FCE is launched before any draws
         EliminateFastClear();
@@ -1018,6 +1043,7 @@ void Rasterizer::BindTextures(const Shader::Info& stage, Shader::Backend::Bindin
             }
 
             image_id = texture_cache.FindImage(desc);
+            const auto found_id = image_id;
             auto* image = &texture_cache.GetImage(image_id);
             if (auto depth_image_id = texture_cache.GetAssociatedDepth(*image)) {
                 // If this image has an associated depth image, it's a stencil attachment.
@@ -1031,6 +1057,27 @@ void Rasterizer::BindTextures(const Shader::Info& stage, Shader::Backend::Bindin
                 image->binding.force_general |= image_desc.is_written;
             }
             image->binding.is_bound = 1u;
+            instance.Note("texture: asked at, format|samples<<16|type<<20|storage<<24|levels<<28|"
+                          "w<<32|h<<48, bound image at, format|samples<<16|backing samples<<20|is "
+                          "the depth buffer of its stencil<<24|flags<<32",
+                          desc.info.guest_address,
+                          u64(desc.info.pixel_format) | u64(desc.info.num_samples) << 16 |
+                              u64(desc.view_info.type) << 20 | u64(image_desc.is_written) << 24 |
+                              u64(desc.info.resources.levels) << 28 |
+                              u64(desc.info.size.width) << 32 | u64(desc.info.size.height) << 48,
+                          image->info.guest_address,
+                          u64(image->info.pixel_format) | u64(image->info.num_samples) << 16 |
+                              u64(image->backing ? image->backing->num_samples : 0) << 20 |
+                              u64(image_id != found_id) << 24 | u64(image->flags) << 32);
+            instance.Note(
+                "texture 2: stage|shader<<32, image number|number found<<32, w|h<<16|levels<<32|"
+                "layers<<40, size in the game's memory|asked size<<32",
+                static_cast<u64>(stage.sw_stage) | (stage.pgm_hash & 0xffffffffu) << 32,
+                u64(image_id.index) | u64(found_id.index) << 32,
+                u64(image->info.size.width) | u64(image->info.size.height) << 16 |
+                    u64(image->info.resources.levels) << 32 |
+                    u64(image->info.resources.layers) << 40,
+                u64(image->info.guest_size) | u64(desc.info.guest_size) << 32);
         }
 
         image_descriptor_array_sizes.push_back(num_bindings);
@@ -1211,6 +1258,9 @@ RenderState Rasterizer::BeginRendering(const GraphicsPipeline* pipeline) {
                       u64(image->info.pixel_format) | u64(image->backing->num_samples) << 16 |
                           u64(attachment.image_layout) << 32,
                       u64(image->HostSize().width) | u64(image->HostSize().height) << 16);
+        instance.Note("colour target 2: index, attributes|image number<<32, cmask at, fmask at", cb,
+                      u64(col_buf.attrib.raw) | u64(image_id.index) << 32, col_buf.CmaskAddress(),
+                      col_buf.FmaskAddress());
     }
     for (u32 cb = state.num_color_attachments; cb < state.color_attachments.size(); ++cb) {
         state.color_attachments[cb] = {};
@@ -1268,6 +1318,12 @@ RenderState Rasterizer::BeginRendering(const GraphicsPipeline* pipeline) {
         attachment.image_layout = image.backing->state.layout;
         attachment.clear_value = {};
         attachment.is_clear = 0;
+        instance.Note("depth target 2: z info|stencil info<<32, depth read at, stencil read at, "
+                      "image number|htile at<<32",
+                      u64(Raw(regs.depth_buffer.z_info)) | u64(Raw(regs.depth_buffer.stencil_info))
+                                                               << 32,
+                      regs.depth_buffer.DepthAddress(), regs.depth_buffer.StencilAddress(),
+                      u64(image_id.index) | u64(htile_address) << 32);
 
         // Only the planes the image has: the game may name a stencil format for a depth buffer
         // made without one (and the other way round), and a pass that wrote to a plane that is

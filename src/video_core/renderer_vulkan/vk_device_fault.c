@@ -43,6 +43,11 @@ typedef struct fault_mark {
 
 static fault_mark marks[MARKS];
 static unsigned long mark_seq;
+static void (*mark_sink)(const char* what, const uint64_t* v);
+
+void vk_device_fault_sink(void (*sink)(const char* what, const uint64_t* v)) {
+    mark_sink = sink;
+}
 
 const void* vk_device_fault_mark(const char* what, uint64_t a, uint64_t b, uint64_t c, uint64_t d) {
     fault_mark* m = &marks[mark_seq % MARKS];
@@ -52,6 +57,8 @@ const void* vk_device_fault_mark(const char* what, uint64_t a, uint64_t b, uint6
     m->v[2] = c;
     m->v[3] = d;
     m->seq = ++mark_seq;
+    if (mark_sink)
+        mark_sink(what, m->v);
     return m;
 }
 

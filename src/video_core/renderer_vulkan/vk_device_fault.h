@@ -25,6 +25,10 @@ extern "C" {
  * last the GPU reached. For the one thread that records. */
 const void* vk_device_fault_mark(const char* what, uint64_t a, uint64_t b, uint64_t c, uint64_t d);
 
+/* Each note from here on is also given to @sink (what it is and its four
+ * numbers), on the thread that records; null ends that. */
+void vk_device_fault_sink(void (*sink)(const char* what, const uint64_t* v));
+
 /* @get: the device's vkGetDeviceFaultInfoEXT, or null where the device has
  * not the extension. @checkpoints: its vkGetQueueCheckpointDataNV for
  * @queue, or null. */

@@ -100,7 +100,7 @@ union Regs {
         u32 draw_initiator;
         INSERT_PADDING_WORDS(3);
         DepthControl depth_control;
-        INSERT_PADDING_WORDS(1);
+        u32 db_eqaa;
         ColorControl color_control;
         DepthShaderControl depth_shader_control;
         ClipperControl clipper_control;
