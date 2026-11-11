@@ -6,6 +6,7 @@
 # with ThreadSanitizer. Run from the repository's root: sh libretro/tests/run.sh
 set -e
 CC=${CC:-cc}
+CXX=${CXX:-c++}
 OUT=${OUT:-build-tests}
 L=libretro/libretro-common
 COMMON="$L/queues/retro_spsc.c $L/queues/retro_waitable_spsc.c $L/rthreads/retro_eventcount.c
@@ -21,6 +22,14 @@ for san in address,undefined thread; do
     $CC -O1 -g -Wall -fno-omit-frame-pointer -fsanitize=$san -Isrc -I$L/include \
         libretro/tests/write_snapshots_test.c src/video_core/buffer_cache/write_snapshots.c \
         $L/rthreads/rthreads.c -o "$OUT/$name" -lpthread
+    "$OUT/$name"
+    # libSceUlt's objects: C++, on the core's own lock-free primitives
+    name=ult_sync_test-$(echo $san | tr , -)
+    for c in rthreads/retro_eventcount.c rthreads/rthreads.c features/features_cpu.c; do
+        $CC -O1 -g -fsanitize=$san -I$L/include -c $L/$c -o "$OUT/ult_$(basename $c).o"
+    done
+    $CXX -std=c++20 -O1 -g -Wall -fno-omit-frame-pointer -fsanitize=$san -Isrc -I$L/include \
+        libretro/tests/ult_sync_test.cpp "$OUT"/ult_*.o -o "$OUT/$name" -lpthread
     "$OUT/$name"
     name=vk_heap_test-$(echo $san | tr , -)
     $CC -std=c89 -pedantic -O1 -g -Wall -Wdeclaration-after-statement -Wno-long-long \

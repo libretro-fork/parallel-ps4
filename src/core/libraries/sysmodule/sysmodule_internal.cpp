@@ -26,6 +26,7 @@
 #include "core/libraries/sysmodule/sysmodule_internal.h"
 #include "core/libraries/sysmodule/sysmodule_table.h"
 #include "core/libraries/system_gesture/system_gesture.h"
+#include "core/libraries/ult/ult.h"
 #include "core/linker.h"
 #include "emulator.h"
 
@@ -217,7 +218,7 @@ s32 loadModuleInternal(s32 index, s32 argc, const void* argv, s32* res_out) {
         static s32 stub_handle = 100;
         constexpr auto ModulesToLoad = std::to_array<Core::SysModules>(
             {{"libSceNgs2.sprx", &Libraries::Ngs2::RegisterLib},
-             {"libSceUlt.sprx", nullptr},
+             {"libSceUlt.sprx", &Libraries::Ult::RegisterLib},
              {"libSceAvPlayer.sprx", &Libraries::AvPlayer::RegisterLib},
              {"libSceAvPlayerStreaming.sprx", nullptr},
              {"libSceRtc.sprx", &Libraries::Rtc::RegisterLib},

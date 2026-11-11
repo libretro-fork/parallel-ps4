@@ -240,6 +240,7 @@ CORE_SOURCES_CXX += $(addprefix src/core/libraries/system/,commondialog.cpp msgd
 	msgdialog_ui.cpp systemservice.cpp userservice.cpp)
 CORE_SOURCES_CXX += $(addprefix src/core/libraries/system_gesture/,system_gesture.cpp)
 CORE_SOURCES_CXX += $(addprefix src/core/libraries/ulobjmgr/,ulobjmgr.cpp)
+CORE_SOURCES_CXX += $(addprefix src/core/libraries/ult/,ult.cpp)
 CORE_SOURCES_CXX += $(addprefix src/core/libraries/usbd/emulated/,dimensions.cpp infinity.cpp \
 	skylander.cpp)
 CORE_SOURCES_CXX += $(addprefix src/core/libraries/usbd/,usbd.cpp usbstorage.cpp)
