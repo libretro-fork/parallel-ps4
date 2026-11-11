@@ -4,6 +4,7 @@
 #include <iostream>
 
 #include "common/assert.h"
+#include "common/io_file.h"
 #include "common/path_util.h"
 #include "common/singleton.h"
 #include "core/emulator_settings.h"
@@ -104,7 +105,7 @@ SaveInstance::SaveInstance(int slot_num, Libraries::UserService::OrbisUserServic
 
     mount_point = "/savedata" + std::to_string(slot_num);
 
-    this->exists = fs::exists(param_sfo_path);
+    this->exists = Common::FS::Exists(param_sfo_path);
     this->mounted = g_mnt->GetMount(mount_point) != nullptr;
 }
 
@@ -146,14 +147,14 @@ void SaveInstance::SetupAndMount(bool read_only, bool copy_icon, bool ignore_cor
     if (mounted) {
         UNREACHABLE_MSG("Save instance is already mounted");
     }
-    this->exists = fs::exists(param_sfo_path); // check again just in case
+    this->exists = Common::FS::Exists(param_sfo_path); // check again just in case
     if (!exists) {
         CreateFiles();
         if (copy_icon) {
             if (auto bytes = g_mnt->ReadFile("/app0/sce_sys/save_data.png")) {
                 auto output_icon = GetIconPath();
-                if (fs::exists(output_icon)) {
-                    fs::remove(output_icon);
+                if (Common::FS::Exists(output_icon)) {
+                    Common::FS::Remove(output_icon);
                 }
                 Common::FS::IOFile::WriteBytes(output_icon, bytes->Bytes());
             }
@@ -161,7 +162,7 @@ void SaveInstance::SetupAndMount(bool read_only, bool copy_icon, bool ignore_cor
         exists = true;
     } else {
         std::optional<fs::filesystem_error> err;
-        if (!ignore_corrupt && fs::exists(corrupt_file_path)) {
+        if (!ignore_corrupt && Common::FS::Exists(corrupt_file_path)) {
             err = fs::filesystem_error("Corrupted save data", corrupt_file_path,
                                        std::make_error_code(std::errc::illegal_byte_sequence));
         } else if (!param_sfo.Open(param_sfo_path)) {
@@ -203,13 +204,13 @@ void SaveInstance::Umount() {
     }
     param_sfo = PSF();
 
-    fs::remove(corrupt_file_path);
+    Common::FS::Remove(corrupt_file_path);
     g_mnt->Unmount(mount_point);
 }
 
 void SaveInstance::CreateFiles() {
     const auto sce_sys_dir = save_path / sce_sys;
-    fs::create_directories(sce_sys_dir);
+    Common::FS::CreateDirectories(sce_sys_dir);
 
     SetupDefaultParamSFO(param_sfo, dir_name, game_serial);
     param_sfo.AddBinary(std::string{SaveParams::SAVEDATA_BLOCKS}, max_blocks, true);

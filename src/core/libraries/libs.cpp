@@ -3,6 +3,7 @@
 
 #include "common/arch.h"
 #include "common/elf_info.h"
+#include "common/io_file.h"
 #include "common/path_util.h"
 #include "common/singleton.h"
 #include "core/emulator_settings.h"
@@ -216,12 +217,12 @@ void InitHLELibs(Core::Loader::SymbolsResolver* sym) {
             if (mod.module_name == "libSceGnmDriver.sprx") {
                 auto lle_file = Kernel::sceKernelIsNeoMode() ? "libSceGnmDriverForNeoMode.sprx"
                                                              : mod.module_name;
-                if (std::filesystem::exists(game_specific_modules_path / lle_file)) {
+                if (Common::FS::Exists(game_specific_modules_path / lle_file)) {
                     LOG_WARNING(Loader, "{} LLEd", lle_file);
                 } else {
                     mod.callback(sym);
                 }
-            } else if (std::filesystem::exists(game_specific_modules_path / mod.module_name)) {
+            } else if (Common::FS::Exists(game_specific_modules_path / mod.module_name)) {
                 LOG_WARNING(Loader, "{} LLEd", mod.module_name);
             } else {
                 mod.callback(sym);

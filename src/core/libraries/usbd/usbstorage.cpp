@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "common/alignment.h"
+#include "common/io_file.h"
 #include "common/logging/log.h"
 #include "common/path_util.h"
 #include "core/libraries/error_codes.h"
@@ -181,7 +182,7 @@ static s32 PS4_SYSV_ABI sceUsbStorageGetDeviceList(u32* device_ids, u32* count) 
 
     const auto usb_path = GetUsbMountPath(0);
     std::error_code ec;
-    const bool usb_exists = std::filesystem::exists(usb_path, ec);
+    const bool usb_exists = Common::FS::Exists(usb_path);
 
     if (!usb_exists) {
         *count = 0;
@@ -207,7 +208,7 @@ static s32 PS4_SYSV_ABI sceUsbStorageGetDeviceInfo(u32 device_id, OrbisUsbStorag
 
     const auto usb_path = GetUsbMountPath(device_id);
     std::error_code ec;
-    if (!std::filesystem::exists(usb_path, ec)) {
+    if (!Common::FS::Exists(usb_path)) {
         LOG_ERROR(Lib_Usbd, "USB device {} mount path does not exist", device_id);
         return ORBIS_AUTO_MOUNTER_ERROR_NOENT;
     }
@@ -239,7 +240,7 @@ static s32 PS4_SYSV_ABI sceUsbStorageIsExist(u32 device_id) {
         return 0;
     }
     std::error_code ec;
-    return std::filesystem::exists(GetUsbMountPath(device_id), ec) ? 1 : 0;
+    return Common::FS::Exists(GetUsbMountPath(device_id)) ? 1 : 0;
 }
 
 static s32 PS4_SYSV_ABI sceUsbStorageRequestMapWSB(u32 device_id, const char* subpath, s32 flags,
@@ -299,19 +300,16 @@ static s32 PS4_SYSV_ABI sceUsbStorageGetdentsOpen(u32 device_id, s32* out_fd, u6
 
     const auto mount_usb_dir = GetUsbMountPath(device_id);
     std::error_code ec;
-    if (!std::filesystem::exists(mount_usb_dir, ec)) {
-        std::filesystem::create_directories(mount_usb_dir, ec);
+    if (!Common::FS::Exists(mount_usb_dir)) {
+        Common::FS::CreateDirectories(mount_usb_dir);
     }
 
     UsbGetdentsState state;
-    for (const auto& entry : std::filesystem::directory_iterator(mount_usb_dir, ec)) {
-        const auto filename = entry.path().filename().string();
-        if (filename.empty() || filename[0] == '.') {
-            continue;
+    Common::FS::ForEachEntry(mount_usb_dir, [&](std::string_view name, bool is_dir) {
+        if (!name.empty() && name[0] != '.') {
+            state.items.push_back({std::string{name}, is_dir});
         }
-        const bool is_dir = entry.is_directory(ec);
-        state.items.push_back({filename, is_dir});
-    }
+    });
 
     std::scoped_lock lock(g_usb_getdents_mutex);
     const s32 fd = g_usb_next_fd++;

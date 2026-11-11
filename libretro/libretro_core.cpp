@@ -351,7 +351,7 @@ bool InstallPkg(PkgInstallJob& job, const std::filesystem::path& pkg,
     std::error_code ec;
     const auto marker = dir / ".libretro_pkg";
     const std::string stamp = Utf8String(pkg.filename()) + "\n" +
-                              std::to_string(std::filesystem::file_size(pkg, ec)) + "\n";
+                              std::to_string(Common::FS::FileSize(pkg)) + "\n";
     if (filestream_matches_buf(Utf8String(marker).c_str(), stamp.data(), stamp.size())) {
         Log(RETRO_LOG_INFO, "%s is installed in %s", Utf8String(pkg).c_str(),
             Utf8String(dir).c_str());
@@ -369,12 +369,12 @@ bool InstallPkg(PkgInstallJob& job, const std::filesystem::path& pkg,
     for (const auto& rel : files) {
         total += reader.Find(rel)->size;
     }
-    std::filesystem::create_directories(dir.parent_path(), ec);
-    const auto space = std::filesystem::space(dir.parent_path(), ec);
-    if (!ec && space.available < total) {
+    Common::FS::CreateDirectories(dir.parent_path());
+    const s64 space = Common::FS::FreeSpace(dir.parent_path());
+    if (space >= 0 && static_cast<u64>(space) < total) {
         job.error = "shadPS4: installing " + Utf8String(pkg.filename()) + " needs " +
                     std::to_string(total >> 20) + " MiB, and there are " +
-                    std::to_string(space.available >> 20) + " MiB free";
+                    std::to_string(space >> 20) + " MiB free";
         return false;
     }
 
@@ -387,7 +387,7 @@ bool InstallPkg(PkgInstallJob& job, const std::filesystem::path& pkg,
     for (const auto& rel : files) {
         const auto* node = reader.Find(rel);
         const auto target = dir / Utf8Path(rel);
-        std::filesystem::create_directories(target.parent_path(), ec);
+        Common::FS::CreateDirectories(target.parent_path());
         // Written front to back once, with no stdio buffer between
         const Common::FS::IOFile out(target, Common::FS::FileAccessMode::Create,
                                      Common::FS::FileHint::Sequential);
@@ -443,7 +443,7 @@ bool InstallPkgContent(PkgInstallJob& job) {
         if (!InstallPkg(job, Utf8Path(update), update_dir, user_dir)) {
             return false;
         }
-    } else if (std::filesystem::exists(update_dir / ".libretro_pkg", ec)) {
+    } else if (Common::FS::Exists(update_dir / ".libretro_pkg")) {
         // An update this core installed whose PKG is gone.
         Log(RETRO_LOG_INFO, "The update's PKG is gone: %s removed", Utf8String(update_dir).c_str());
         Common::FS::RemoveAll(update_dir);
@@ -520,16 +520,17 @@ bool FindPkgContent(const std::string& game, const std::string& user_dir, std::s
     title_id = summary.title_id;
 
     std::string update_version;
-    std::error_code ec;
-    for (const auto& entry : std::filesystem::directory_iterator(game_path.parent_path(), ec)) {
-        const std::string path = Utf8String(entry.path());
-        if (!entry.is_regular_file(ec) || !IsPkgPath(path) || entry.path() == game_path) {
-            continue;
+    const auto game_dir = game_path.parent_path();
+    Common::FS::ForEachEntry(game_dir, [&](std::string_view name, bool is_dir) {
+        const auto entry = game_dir / Utf8Path(std::string{name});
+        const std::string path = Utf8String(entry);
+        if (is_dir || !IsPkgPath(path) || entry == game_path) {
+            return;
         }
         Libretro::PkgSummary other;
-        if (!Libretro::ReadPkgSummary(entry.path(), other, error) ||
+        if (!Libretro::ReadPkgSummary(entry, other, error) ||
             other.title_id != summary.title_id) {
-            continue;
+            return;
         }
         if (other.category == "gp" && (update.empty() || other.app_ver > update_version)) {
             update = path;
@@ -542,7 +543,7 @@ bool FindPkgContent(const std::string& game, const std::string& user_dir, std::s
                 Log(RETRO_LOG_WARN, "Too many additional contents: %s left out", path.c_str());
             }
         }
-    }
+    });
     if (!update.empty()) {
         if (update.size() >= Libretro::PATH_BYTES) {
             Log(RETRO_LOG_WARN, "The update's path is too long: %s left out", update.c_str());

@@ -56,8 +56,8 @@ static void DumpSrtProgram(const Shader::Info& info, const u8* code, size_t code
     using namespace Common::FS;
 
     const auto dump_dir = GetUserPath(PathType::ShaderDir) / "dumps";
-    if (!std::filesystem::exists(dump_dir)) {
-        std::filesystem::create_directories(dump_dir);
+    if (!Common::FS::Exists(dump_dir)) {
+        Common::FS::CreateDirectories(dump_dir);
     }
     const auto filename = fmt::format("{}_{:#018x}.srtprogram.txt", info.hw_stage, info.pgm_hash);
     const auto file = IOFile{dump_dir / filename, FileAccessMode::Create};

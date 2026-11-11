@@ -204,7 +204,7 @@ inline std::string RunDisassembler(const std::string& disassembler_cli, const T&
                 shader_dis = "Could not disassemble shader";
             }
 
-            std::filesystem::remove(bin_path);
+            Common::FS::Remove(bin_path);
         }
     }
 

@@ -289,6 +289,14 @@ bool IsDirectory(const std::filesystem::path& path);
 bool IsFile(const std::filesystem::path& path);
 /// Makes the directory @path and any of its parents that are missing; true when it is there.
 bool CreateDirectories(const std::filesystem::path& path);
+/// The size of the file @path in bytes, or -1.
+s64 FileSize(const std::filesystem::path& path);
+/// True when the directory @dir holds nothing (files whose names start with a dot not counted).
+bool IsEmptyDirectory(const std::filesystem::path& dir);
+/// The bytes free for the caller on the volume holding @path, or -1.
+s64 FreeSpace(const std::filesystem::path& path);
+/// Removes the file @path; true when it was removed.
+bool Remove(const std::filesystem::path& path);
 /// Removes @path: a file, or a directory with everything in it, without following links.
 /// True when nothing is left there, including when there was nothing to begin with.
 bool RemoveAll(const std::filesystem::path& path);

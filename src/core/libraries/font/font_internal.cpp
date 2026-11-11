@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright 2024-2026 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include "common/io_file.h"
 #include "font_internal.h"
 
 #include <array>
@@ -361,19 +362,19 @@ static std::optional<std::filesystem::path> ResolveKnownSysFontAliasImpl(
         std::error_code ec;
         {
             const auto candidate = sysfonts_dir / file_path;
-            if (std::filesystem::exists(candidate, ec)) {
+            if (Common::FS::Exists(candidate)) {
                 return candidate;
             }
         }
         {
             const auto candidate = sysfonts_dir / "font" / file_path;
-            if (std::filesystem::exists(candidate, ec)) {
+            if (Common::FS::Exists(candidate)) {
                 return candidate;
             }
         }
         {
             const auto candidate = sysfonts_dir / "font2" / file_path;
-            if (std::filesystem::exists(candidate, ec)) {
+            if (Common::FS::Exists(candidate)) {
                 return candidate;
             }
         }
@@ -1921,28 +1922,19 @@ BuiltinSystemFontSelection BuildBuiltinSystemFontSelection(u32 font_set_type) {
 }
 
 static bool DirectoryContainsAnyFontFiles(const std::filesystem::path& dir) {
-    std::error_code ec;
-    if (!std::filesystem::is_directory(dir, ec)) {
-        return false;
-    }
-    for (const auto& entry : std::filesystem::directory_iterator(dir, ec)) {
-        if (ec) {
-            return false;
+    bool found = false;
+    Common::FS::ForEachEntry(dir, [&](std::string_view name, bool is_dir) {
+        const auto dot = name.rfind('.');
+        if (found || is_dir || dot == std::string_view::npos) {
+            return;
         }
-        if (!entry.is_regular_file(ec) || ec) {
-            continue;
-        }
-        const auto ext = entry.path().extension().string();
         std::string lower;
-        lower.reserve(ext.size());
-        for (const char c : ext) {
+        for (const char c : name.substr(dot)) {
             lower.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(c))));
         }
-        if (lower == ".otf" || lower == ".ttf" || lower == ".ttc" || lower == ".otc") {
-            return true;
-        }
-    }
-    return false;
+        found = lower == ".otf" || lower == ".ttf" || lower == ".ttc" || lower == ".otc";
+    });
+    return found;
 }
 
 static std::filesystem::path GetSysFontBaseDirImpl(bool log_errors) {
@@ -1954,7 +1946,7 @@ static std::filesystem::path GetSysFontBaseDirImpl(bool log_errors) {
         }
         return {};
     }
-    if (std::filesystem::is_directory(base, ec)) {
+    if (Common::FS::IsDirectory(base)) {
         const auto font_dir = base / "font";
         const auto font2_dir = base / "font2";
         if (DirectoryContainsAnyFontFiles(base) || DirectoryContainsAnyFontFiles(font_dir) ||
@@ -1970,7 +1962,7 @@ static std::filesystem::path GetSysFontBaseDirImpl(bool log_errors) {
         }
         return {};
     }
-    if (std::filesystem::is_regular_file(base, ec)) {
+    if (Common::FS::IsFile(base)) {
         return base.parent_path();
     }
     if (log_errors) {
@@ -1991,7 +1983,7 @@ static std::filesystem::path ResolveSystemFontPathCandidate(const std::filesyste
     }
     std::error_code ec;
     const auto is_file = [&](const std::filesystem::path& p) -> bool {
-        return std::filesystem::is_regular_file(p, ec) && !ec;
+        return Common::FS::IsFile(p) && !ec;
     };
 
     const auto direct = base_dir / filename;
@@ -2105,13 +2097,13 @@ bool LoadFontFileWithSubfont(const std::filesystem::path& path, FontBlob& out_by
     const auto file_name = path.filename();
     if (!file_name.empty() && parent_name != "font" && parent_name != "font2") {
         const auto cand_font = parent / "font" / file_name;
-        if (std::filesystem::is_regular_file(cand_font, ec) && !ec) {
+        if (Common::FS::IsFile(cand_font) && !ec) {
             if (try_load(cand_font)) {
                 return true;
             }
         }
         const auto cand_font2 = parent / "font2" / file_name;
-        if (std::filesystem::is_regular_file(cand_font2, ec) && !ec) {
+        if (Common::FS::IsFile(cand_font2) && !ec) {
             if (try_load(cand_font2)) {
                 return true;
             }
@@ -2121,7 +2113,7 @@ bool LoadFontFileWithSubfont(const std::filesystem::path& path, FontBlob& out_by
     if (!file_name.empty() && (parent_name == "font" || parent_name == "font2")) {
         const auto container = parent.parent_path();
         const auto sibling = container / ((parent_name == "font") ? "font2" : "font") / file_name;
-        if (std::filesystem::is_regular_file(sibling, ec) && !ec) {
+        if (Common::FS::IsFile(sibling) && !ec) {
             return try_load(sibling);
         }
     }

@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright 2024-2026 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include "common/io_file.h"
 #include "save_memory.h"
 
 #include <condition_variable>
@@ -51,7 +52,7 @@ void PersistMemory(u32 slot_id, bool lock) {
     }
     auto& data = g_attached_slots[slot_id];
     auto memoryPath = data.folder_path / FilenameSaveDataMemory;
-    fs::create_directories(memoryPath.parent_path());
+    Common::FS::CreateDirectories(memoryPath.parent_path());
 
     int n = 0;
     std::string errMsg;
@@ -116,19 +117,19 @@ size_t SetupSaveMemory(Libraries::UserService::OrbisUserServiceUserId user_id, u
     SaveInstance::SetupDefaultParamSFO(data.sfo, GetSaveDir(slot_id), std::string{game_serial});
 
     auto param_sfo_path = SaveInstance::GetParamSFOPath(save_dir);
-    if (!fs::exists(param_sfo_path)) {
+    if (!Common::FS::Exists(param_sfo_path)) {
         return 0;
     }
 
-    if (!data.sfo.Open(param_sfo_path) || fs::exists(save_dir / CorruptFileName)) {
+    if (!data.sfo.Open(param_sfo_path) || Common::FS::Exists(save_dir / CorruptFileName)) {
         if (!Backup::Restore(save_dir)) { // Could not restore the backup
             return 0;
         }
     }
 
     const auto memory = save_dir / FilenameSaveDataMemory;
-    if (fs::exists(memory)) {
-        return fs::file_size(memory);
+    if (const s64 size = Common::FS::FileSize(memory); size > 0) {
+        return static_cast<size_t>(size);
     }
 
     return 0;
@@ -139,13 +140,13 @@ void SetIcon(u32 slot_id, void* buf, size_t buf_size) {
     const auto& data = g_attached_slots[slot_id];
     const auto icon_path = data.folder_path / sce_sys / "icon0.png";
     if (buf == nullptr) {
-        if (fs::exists(icon_path)) {
-            fs::remove(icon_path);
+        if (Common::FS::Exists(icon_path)) {
+            Common::FS::Remove(icon_path);
         }
         // Read the source through the mount stack so archive-backed base
         // games can seed save-slot icons too.
         if (auto bytes = g_mnt->ReadFile("/app0/sce_sys/save_data.png")) {
-            fs::create_directories(icon_path.parent_path());
+            Common::FS::CreateDirectories(icon_path.parent_path());
             IOFile::WriteBytes(icon_path, bytes->Bytes());
         }
     } else {
@@ -174,7 +175,7 @@ void SaveSFO(u32 slot_id) {
     std::lock_guard lck{g_slot_mtx};
     const auto& data = g_attached_slots[slot_id];
     const auto sfo_path = SaveInstance::GetParamSFOPath(data.folder_path);
-    fs::create_directories(sfo_path.parent_path());
+    Common::FS::CreateDirectories(sfo_path.parent_path());
     const bool ok = data.sfo.Encode(sfo_path);
     if (!ok) {
         LOG_ERROR(Lib_SaveData, "Failed to encode param.sfo");

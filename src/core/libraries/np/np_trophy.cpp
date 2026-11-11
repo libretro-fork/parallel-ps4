@@ -6,6 +6,7 @@
 #include <unordered_map>
 #include <fmt/format.h>
 #include "common/elf_info.h"
+#include "common/io_file.h"
 #include "common/logging/log.h"
 #include "common/path_util.h"
 #include "common/slot_vector.h"
@@ -68,7 +69,7 @@ static std::filesystem::path GetTrophyXmlPath(const std::filesystem::path& xml_d
     // Try the exact language file first.
     if (system_language >= 0 && system_language < static_cast<int>(s_language_xml_names.size())) {
         auto lang_path = xml_dir / s_language_xml_names[system_language];
-        if (std::filesystem::exists(lang_path)) {
+        if (Common::FS::Exists(lang_path)) {
             return lang_path;
         }
     }
@@ -905,7 +906,7 @@ int PS4_SYSV_ABI sceNpTrophyRegisterContext(OrbisNpTrophyContext context,
         ctx.icons_dir = trophy_base / "Icons";
         ctx.trophy_xml_path = GetTrophyXmlPath(ctx.xml_dir, emu_settings_get_console_language());
 
-        if (!std::filesystem::exists(ctx.trophy_xml_path)) {
+        if (!Common::FS::Exists(ctx.trophy_xml_path)) {
             LOG_ERROR(Lib_NpTrophy, "Could not find trophy files.");
             // Stub success here to prevent issues specific to missing a trophy key.
         }

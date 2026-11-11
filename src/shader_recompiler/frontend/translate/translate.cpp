@@ -1178,8 +1178,8 @@ void Translator::EmitFetch(const GcnInst& inst) {
     if (emu_settings_get_dump_shaders()) {
         using namespace Common::FS;
         const auto dump_dir = GetUserPath(PathType::ShaderDir) / "dumps";
-        if (!std::filesystem::exists(dump_dir)) {
-            std::filesystem::create_directories(dump_dir);
+        if (!Common::FS::Exists(dump_dir)) {
+            Common::FS::CreateDirectories(dump_dir);
         }
         const auto filename = fmt::format("vs_{:#018x}.fetch.bin", info.pgm_hash);
         const auto file = IOFile{dump_dir / filename, FileAccessMode::Create};

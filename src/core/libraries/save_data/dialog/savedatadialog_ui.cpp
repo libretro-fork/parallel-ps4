@@ -4,6 +4,7 @@
 #include <fmt/chrono.h>
 #include <imgui.h>
 #include "common/enum_names.h"
+#include "common/io_file.h"
 
 #include "common/elf_info.h"
 #include "common/singleton.h"
@@ -91,7 +92,7 @@ SaveDialogState::SaveDialogState(const OrbisSaveDataDialogParam& param) {
             auto dir_path = SaveInstance::MakeDirSavePath(user_id, title_id, dir_name);
 
             auto param_sfo_path = dir_path / "sce_sys" / "param.sfo";
-            if (!std::filesystem::exists(param_sfo_path)) {
+            if (!Common::FS::Exists(param_sfo_path)) {
                 continue;
             }
 
@@ -106,11 +107,11 @@ SaveDialogState::SaveDialogState(const OrbisSaveDataDialogParam& param) {
 
             auto icon_path = dir_path / "sce_sys" / "icon0.png";
             RefCountedTexture icon;
-            if (std::filesystem::exists(icon_path)) {
+            if (Common::FS::Exists(icon_path)) {
                 icon = RefCountedTexture::DecodePngFile(icon_path);
             }
 
-            bool is_corrupted = std::filesystem::exists(dir_path / "sce_sys" / "corrupted");
+            bool is_corrupted = Common::FS::Exists(dir_path / "sce_sys" / "corrupted");
 
             this->save_list.emplace_back(Item{
                 .dir_name = std::string{dir_name},

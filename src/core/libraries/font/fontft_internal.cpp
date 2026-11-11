@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright 2024 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include "common/io_file.h"
 #include "core/libraries/font/fontft_internal.h"
 
 #include <algorithm>
@@ -2918,7 +2919,7 @@ s32 PS4_SYSV_ABI LibraryOpenFontMemoryStub(void* library, u32 mode, const void* 
                 continue;
             }
 
-            if (!std::filesystem::exists(cand_path, ec) || ec) {
+            if (!Common::FS::Exists(cand_path) || ec) {
                 continue;
             }
             attempted_open = true;

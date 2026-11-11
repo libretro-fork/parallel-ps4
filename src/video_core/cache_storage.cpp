@@ -3,6 +3,7 @@
 
 #include "common/elf_info.h"
 #include "common/io_file.h"
+#include "common/path_util.h"
 #include "common/thread.h"
 #include "core/emulator_settings.h"
 
@@ -106,8 +107,8 @@ void DataBase::Open() {
 
     using namespace Common::FS;
     cache_path = GetUserPath(PathType::CacheDir) / game_info.GameSerial();
-    if (!std::filesystem::exists(cache_path)) {
-        std::filesystem::create_directories(cache_path);
+    if (!Common::FS::Exists(cache_path)) {
+        Common::FS::CreateDirectories(cache_path);
     }
 
     mpsc_stack_init(&g_pending);
@@ -170,13 +171,14 @@ std::optional<Common::FS::FileView> DataBase::Load(BlobType type, const std::str
 void DataBase::ForEachBlob(BlobType type,
                            const std::function<void(std::span<const u8> data)>& func) {
     const auto& ext = GetBlobFileExtension(type);
-    for (const auto& file_name : std::filesystem::directory_iterator{cache_path}) {
-        if (file_name.path().extension().string().ends_with(ext)) {
-            if (const auto view = Common::FS::FileView::Map(file_name.path())) {
+    Common::FS::ForEachEntry(cache_path, [&](std::string_view name, bool is_dir) {
+        if (!is_dir && name.ends_with(ext)) {
+            if (const auto view =
+                    Common::FS::FileView::Map(cache_path / Common::FS::PathFromUTF8String(name))) {
                 func(view->Bytes());
             }
         }
-    }
+    });
 }
 
 } // namespace Storage

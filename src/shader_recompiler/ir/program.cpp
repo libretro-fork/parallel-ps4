@@ -24,8 +24,8 @@ void DumpProgram(const Program& program, const Info& info, const std::string& ty
     }
 
     const auto dump_dir = GetUserPath(PathType::ShaderDir) / "dumps";
-    if (!std::filesystem::exists(dump_dir)) {
-        std::filesystem::create_directories(dump_dir);
+    if (!Common::FS::Exists(dump_dir)) {
+        Common::FS::CreateDirectories(dump_dir);
     }
     const auto ir_filename =
         fmt::format("{}_{:#018x}.{}irprogram.txt", info.hw_stage, info.pgm_hash, type);

@@ -513,6 +513,22 @@ bool CreateDirectories(const fs::path& path) {
     return path_mkdir(PathToUTF8String(path).c_str());
 }
 
+s64 FileSize(const fs::path& path) {
+    return path_get_size(PathToUTF8String(path).c_str());
+}
+
+bool IsEmptyDirectory(const fs::path& dir) {
+    return path_is_empty_directory(PathToUTF8String(dir).c_str());
+}
+
+s64 FreeSpace(const fs::path& path) {
+    return path_get_free_space(PathToUTF8String(path).c_str());
+}
+
+bool Remove(const fs::path& path) {
+    return filestream_delete(PathToUTF8String(path).c_str()) == 0;
+}
+
 bool RemoveAll(const fs::path& path) {
     return path_remove_tree(PathToUTF8String(path).c_str());
 }

@@ -199,7 +199,7 @@ std::map<s32, std::string> ExtractTrophies(std::string_view npbind_guest,
         // Extract the actual trophies if they're not extracted yet.
         const auto& trophy_output_dir =
             Common::FS::GetUserPath(Common::FS::PathType::TrophyDir) / np_comm_id;
-        if (!std::filesystem::exists(trophy_output_dir)) {
+        if (!Common::FS::Exists(trophy_output_dir)) {
             const std::string entry_guest = std::string(trophy_dir_guest) + "/" + entry.name;
             // Mapped where it lies, or decoded out of an archive
             const auto trp_bytes = mnt->ReadFile(entry_guest);
@@ -215,7 +215,7 @@ std::map<s32, std::string> ExtractTrophies(std::string_view npbind_guest,
                 const auto base_source = mnt->GetHostPath(
                     entry_guest, nullptr, Core::FileSys::MntPoints::HostPathType::Base);
                 if (!base_source.empty() && base_source != trp_source &&
-                    std::filesystem::is_regular_file(base_source)) {
+                    Common::FS::IsFile(base_source)) {
                     LOG_WARNING(Loader, "Retrying trophy extraction with base game file {}",
                                 base_source.string());
                     ok = trp.Extract(base_source, np_comm_id, trophy_output_dir);
@@ -236,15 +236,13 @@ std::map<s32, std::string> ExtractTrophies(std::string_view npbind_guest,
             auto const user_trophy_file = Common::FS::PathFromCString(emu_settings_get_home_dir) /
                                           std::to_string(user.user_id) / "trophy" /
                                           (np_comm_id + ".xml");
-            if (!std::filesystem::exists(user_trophy_file)) {
+            if (!Common::FS::Exists(user_trophy_file)) {
                 auto temp = user_trophy_file.parent_path();
-                std::filesystem::create_directories(temp);
-                std::error_code ec;
+                Common::FS::CreateDirectories(temp);
                 const auto tropconf = trophy_output_dir / "Xml" / "TROPCONF.XML";
-                std::filesystem::copy_file(tropconf, user_trophy_file, ec);
-                if (ec) {
-                    LOG_ERROR(Loader, "Failed to copy {} to {}: {}", tropconf.string(),
-                              user_trophy_file.string(), ec.message());
+                if (!Common::FS::CopyFile(tropconf, user_trophy_file)) {
+                    LOG_ERROR(Loader, "Failed to copy {} to {}", tropconf.string(),
+                              user_trophy_file.string());
                 }
             }
         }
@@ -266,7 +264,7 @@ void Emulator::Run(std::filesystem::path file, std::vector<std::string> args,
         Debugger::WaitForDebuggerAttach();
     }
 
-    if (std::filesystem::is_directory(file)) {
+    if (Common::FS::IsDirectory(file)) {
         file /= "eboot.bin";
     }
 
@@ -291,7 +289,7 @@ void Emulator::Run(std::filesystem::path file, std::vector<std::string> args,
             }
         }
         // Only treat it as an archive if the .zar element is a real file.
-        if (found && !std::filesystem::is_regular_file(archive_path)) {
+        if (found && !Common::FS::IsFile(archive_path)) {
             found = false;
         }
         if (found && archive_inner.empty()) {
@@ -524,7 +522,7 @@ void Emulator::Run(std::filesystem::path file, std::vector<std::string> args,
 
     const auto mods_folder = FileSys::OverlayPath(game_folder, "-mods");
 
-    if (std::filesystem::exists(mods_folder) && !std::filesystem::is_empty(mods_folder)) {
+    if (Common::FS::Exists(mods_folder) && !Common::FS::IsEmptyDirectory(mods_folder)) {
         LOG_INFO(Loader, "Files found in game mods folder");
     }
 
@@ -563,25 +561,25 @@ void Emulator::Run(std::filesystem::path file, std::vector<std::string> args,
 
     // Mounting temp folders
     const auto& mount_temp_dir = Common::FS::GetUserPath(Common::FS::PathType::TempDataDir) / id;
-    std::filesystem::create_directory(mount_temp_dir);
+    Common::FS::CreateDirectories(mount_temp_dir);
     mnt->Mount(mount_temp_dir, "/temp");
 
     const auto& mount_download_dir =
         Common::FS::GetUserPath(Common::FS::PathType::DownloadDir) / id;
-    if (!std::filesystem::exists(mount_download_dir)) {
-        std::filesystem::create_directory(mount_download_dir);
+    if (!Common::FS::Exists(mount_download_dir)) {
+        Common::FS::CreateDirectories(mount_download_dir);
     }
     mnt->Mount(mount_download_dir, "/download0");
 
     const auto mount_usb_dir = Libraries::UsbStorage::GetUsbMountPath();
     std::error_code ec_usb;
-    std::filesystem::create_directories(mount_usb_dir, ec_usb);
+    Common::FS::CreateDirectories(mount_usb_dir);
     mnt->Mount(mount_usb_dir, "/mnt/usb0");
 
     // Mount system fonts
     const auto& fonts_dir = Common::FS::PathFromCString(emu_settings_get_font_dir);
-    if (!std::filesystem::exists(fonts_dir)) {
-        std::filesystem::create_directory(fonts_dir);
+    if (!Common::FS::Exists(fonts_dir)) {
+        Common::FS::CreateDirectories(fonts_dir);
     }
 
     // Fonts are mounted into the sandboxed system directory, construct the appropriate path.
@@ -589,16 +587,16 @@ void Emulator::Run(std::filesystem::path file, std::vector<std::string> args,
     std::string guest_font_dir = "/";
     guest_font_dir.append(sandbox_root).append("/common/font");
     const auto& host_font_dir = fonts_dir / "font";
-    if (!std::filesystem::exists(host_font_dir)) {
-        std::filesystem::create_directory(host_font_dir);
+    if (!Common::FS::Exists(host_font_dir)) {
+        Common::FS::CreateDirectories(host_font_dir);
     }
     mnt->Mount(host_font_dir, guest_font_dir);
 
     // There is a second font directory, mount that too.
     guest_font_dir.append("2");
     const auto& host_font2_dir = fonts_dir / "font2";
-    if (!std::filesystem::exists(host_font2_dir)) {
-        std::filesystem::create_directory(host_font2_dir);
+    if (!Common::FS::Exists(host_font2_dir)) {
+        Common::FS::CreateDirectories(host_font2_dir);
     }
     mnt->Mount(host_font2_dir, guest_font_dir);
 
@@ -607,7 +605,8 @@ void Emulator::Run(std::filesystem::path file, std::vector<std::string> args,
         mnt->Mount(mount_pair.first, mount_pair.second);
     }
 
-    if (std::filesystem::is_empty(host_font_dir) || std::filesystem::is_empty(host_font2_dir)) {
+    if (Common::FS::IsEmptyDirectory(host_font_dir) ||
+        Common::FS::IsEmptyDirectory(host_font2_dir)) {
         LOG_WARNING(Loader, "No dumped system fonts, expect missing text or instability");
     }
 
@@ -650,7 +649,7 @@ void Emulator::Restart(std::filesystem::path eboot_path,
     auto& game_info = Common::ElfInfo::Instance();
     const auto& game_folder = game_info.GetGameFolder();
     const bool from_archive =
-        std::filesystem::is_regular_file(game_folder) &&
+        Common::FS::IsFile(game_folder) &&
         (game_folder.extension() == ".zar" || game_folder.extension() == ".pkg");
 
     args.push_back("--log-append");

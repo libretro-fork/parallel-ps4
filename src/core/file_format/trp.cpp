@@ -85,9 +85,9 @@ bool TRP::Extract(std::span<const u8> trp, std::string npCommId,
 
         s64 seekPos = sizeof(TrpHeader);
         std::error_code dir_ec;
-        std::filesystem::create_directories(outputPath / "Icons", dir_ec);
+        Common::FS::CreateDirectories(outputPath / "Icons");
         if (!dir_ec) {
-            std::filesystem::create_directories(outputPath / "Xml", dir_ec);
+            Common::FS::CreateDirectories(outputPath / "Xml");
         }
         if (dir_ec) {
             LOG_ERROR(Common_Filesystem, "Failed to create output directories for {}: {}", npCommId,

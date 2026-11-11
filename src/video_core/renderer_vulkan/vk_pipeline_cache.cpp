@@ -793,8 +793,8 @@ void PipelineCache::DumpShader(std::span<const u32> code, u64 hash, Shader::HwSt
 
     using namespace Common::FS;
     const auto dump_dir = GetUserPath(PathType::ShaderDir) / "dumps";
-    if (!std::filesystem::exists(dump_dir)) {
-        std::filesystem::create_directories(dump_dir);
+    if (!Common::FS::Exists(dump_dir)) {
+        Common::FS::CreateDirectories(dump_dir);
     }
     const auto filename = fmt::format("{}.{}", GetShaderName(stage, hash, perm_idx), ext);
     const auto file = IOFile{dump_dir / filename, FileAccessMode::Create};
@@ -807,12 +807,12 @@ std::optional<Common::FS::FileView> PipelineCache::GetShaderPatch(u64 hash, Shad
 
     using namespace Common::FS;
     const auto patch_dir = GetUserPath(PathType::ShaderDir) / "patch";
-    if (!std::filesystem::exists(patch_dir)) {
-        std::filesystem::create_directories(patch_dir);
+    if (!Common::FS::Exists(patch_dir)) {
+        Common::FS::CreateDirectories(patch_dir);
     }
     const auto filename = fmt::format("{}.{}", GetShaderName(stage, hash, perm_idx), ext);
     const auto filepath = patch_dir / filename;
-    if (!std::filesystem::exists(filepath)) {
+    if (!Common::FS::Exists(filepath)) {
         return {};
     }
     // Mapped where it lies: a mapping starts on a page, so the words are aligned

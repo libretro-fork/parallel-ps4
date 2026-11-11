@@ -419,11 +419,11 @@ private:
             if (mnt) {
                 host_path = mnt->GetHostPath(resolved_guest_path);
             }
-            if (host_path.empty() || !std::filesystem::exists(host_path)) {
+            if (host_path.empty() || !Common::FS::Exists(host_path)) {
                 host_path = resolved_guest_path;
             }
 
-            if (!std::filesystem::exists(host_path)) {
+            if (!Common::FS::Exists(host_path)) {
                 LOG_ERROR(Lib_AudioOut, "Music file does not exist: {}", host_path.string());
                 break;
             }

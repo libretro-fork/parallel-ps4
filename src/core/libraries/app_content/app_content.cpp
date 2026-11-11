@@ -14,6 +14,7 @@
 #include "app_content.h"
 #include "common/assert.h"
 #include "common/elf_info.h"
+#include "common/io_file.h"
 #include "common/logging/log.h"
 #include "common/path_util.h"
 #include "common/singleton.h"
@@ -49,15 +50,11 @@ static s32 addcont_count = 0;
 static std::vector<std::filesystem::path> LibretroAddcont(const std::filesystem::path& dir,
                                                           bool with_beside) {
     std::vector<std::filesystem::path> contents;
-    std::error_code ec;
-    if (std::filesystem::is_directory(dir, ec)) {
-        for (const auto& entry : std::filesystem::directory_iterator(dir, ec)) {
-            const auto extension = entry.path().extension();
-            if (entry.is_directory() || extension == ".zar" || extension == ".pkg") {
-                contents.push_back(entry.path());
-            }
+    Common::FS::ForEachEntry(dir, [&](std::string_view name, bool is_dir) {
+        if (is_dir || name.ends_with(".zar") || name.ends_with(".pkg")) {
+            contents.push_back(dir / Common::FS::PathFromUTF8String(name));
         }
-    }
+    });
     if (with_beside) {
         const auto& beside = Core::FileSys::MntPoints::libretro_addcont;
         contents.insert(contents.end(), beside.begin(), beside.end());
@@ -496,7 +493,7 @@ static void LoadLicenses(std::string_view service_id, u32 service_label) {
     std::filesystem::path ridx_path = licenses_dir / fmt::format("{}.idx", service_id);
     std::filesystem::path rifa_path = licenses_dir / fmt::format("{}.rif", service_id);
 
-    if (!std::filesystem::exists(ridx_path) || !std::filesystem::exists(rifa_path)) {
+    if (!Common::FS::Exists(ridx_path) || !Common::FS::Exists(rifa_path)) {
         return;
     }
 
@@ -574,7 +571,7 @@ int PS4_SYSV_ABI sceAppContentInitialize(const OrbisAppContentInitParam* initPar
         }
         // The game's own folder is looked at even when it does not exist: the PKGs
         // beside the game's PKG count as its additional content.
-        if (!path.empty() && (srv.service_label == 0 || std::filesystem::exists(path))) {
+        if (!path.empty() && (srv.service_label == 0 || Common::FS::Exists(path))) {
             if (std::ranges::find(addon_paths, path) == addon_paths.end()) {
                 addon_paths.push_back(path);
             }

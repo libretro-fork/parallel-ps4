@@ -6,6 +6,7 @@
 #include <sstream>
 #include <string>
 #include "common/elf_info.h"
+#include "common/io_file.h"
 #include "common/logging/log.h"
 #include "common/patch_index.h"
 #include "common/path_util.h"
@@ -224,36 +225,35 @@ void OnGameLoaded() {
     if (!patch_file.empty()) {
 
         auto file_path = (patch_dir / patch_file).native();
-        if (std::filesystem::exists(patch_file)) {
+        if (Common::FS::Exists(patch_file)) {
             ApplyPatchesFromXML(patch_file);
         } else {
             ApplyPatchesFromXML(file_path);
         }
     } else if (EmulatorState::GetInstance()->IsAutoPatchesLoadEnabled()) {
-        for (auto const& repo : std::filesystem::directory_iterator(patch_dir)) {
-            if (!repo.is_directory()) {
-                continue;
+        Common::FS::ForEachEntry(patch_dir, [&](std::string_view name, bool is_dir) {
+            if (!is_dir) {
+                return;
             }
+            const auto repo = patch_dir / Common::FS::PathFromUTF8String(name);
+            const auto files_json_path = repo / "files.json";
 
-            const auto files_json_path = repo.path() / "files.json";
-
-            if (!std::filesystem::is_regular_file(files_json_path)) {
-                LOG_ERROR(Loader, "The folder '{}' does not contain the files.json file.",
-                          repo.path().filename().string());
-                continue;
+            if (!Common::FS::IsFile(files_json_path)) {
+                LOG_ERROR(Loader, "The folder '{}' does not contain the files.json file.", name);
+                return;
             }
 
             char patch_name[1024];
             if (!patch_index_find(Common::FS::PathToUTF8String(files_json_path).c_str(),
                                   g_game_serial.c_str(), patch_name, sizeof(patch_name))) {
-                continue;
+                return;
             }
             const std::filesystem::path game_patch_file =
-                repo.path() / std::u8string_view(reinterpret_cast<const char8_t*>(patch_name));
-            if (std::filesystem::exists(game_patch_file)) {
+                repo / std::u8string_view(reinterpret_cast<const char8_t*>(patch_name));
+            if (Common::FS::Exists(game_patch_file)) {
                 ApplyPatchesFromXML(game_patch_file);
             }
-        }
+        });
     }
     ApplyPendingPatches();
 }

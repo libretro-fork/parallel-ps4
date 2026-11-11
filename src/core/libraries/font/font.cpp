@@ -25,6 +25,7 @@
 #include <unordered_set>
 #include <vector>
 #include <fmt/format.h>
+#include "common/io_file.h"
 #include "common/logging/log.h"
 #include "common/path_util.h"
 #include "core/emulator_settings.h"
@@ -507,7 +508,7 @@ static std::filesystem::path ResolveServedPath(const std::filesystem::path& p) {
         return {};
     }
     std::error_code ec;
-    if (std::filesystem::is_regular_file(p, ec) && !ec) {
+    if (Common::FS::IsFile(p) && !ec) {
         return p;
     }
     const auto parent = p.parent_path();
@@ -516,16 +517,16 @@ static std::filesystem::path ResolveServedPath(const std::filesystem::path& p) {
     if (!file_name.empty() && (parent_name == "font" || parent_name == "font2")) {
         const auto container = parent.parent_path();
         const auto sibling = container / ((parent_name == "font") ? "font2" : "font") / file_name;
-        if (std::filesystem::is_regular_file(sibling, ec) && !ec) {
+        if (Common::FS::IsFile(sibling) && !ec) {
             return sibling;
         }
     } else {
         const auto in_font2_dir = parent / "font2" / file_name;
-        if (std::filesystem::is_regular_file(in_font2_dir, ec) && !ec) {
+        if (Common::FS::IsFile(in_font2_dir) && !ec) {
             return in_font2_dir;
         }
         const auto in_font_dir = parent / "font" / file_name;
-        if (std::filesystem::is_regular_file(in_font_dir, ec) && !ec) {
+        if (Common::FS::IsFile(in_font_dir) && !ec) {
             return in_font_dir;
         }
     }
@@ -4275,19 +4276,19 @@ s32 PS4_SYSV_ABI sceFontOpenFontSet(OrbisFontLib library, u32 fontSetType, u32 o
                 std::error_code ec;
                 {
                     const auto candidate = base_dir / file_path;
-                    if (std::filesystem::exists(candidate, ec)) {
+                    if (Common::FS::Exists(candidate)) {
                         return candidate;
                     }
                 }
                 {
                     const auto candidate = base_dir / "font" / file_path;
-                    if (std::filesystem::exists(candidate, ec)) {
+                    if (Common::FS::Exists(candidate)) {
                         return candidate;
                     }
                 }
                 {
                     const auto candidate = base_dir / "font2" / file_path;
-                    if (std::filesystem::exists(candidate, ec)) {
+                    if (Common::FS::Exists(candidate)) {
                         return candidate;
                     }
                 }
@@ -4300,7 +4301,7 @@ s32 PS4_SYSV_ABI sceFontOpenFontSet(OrbisFontLib library, u32 fontSetType, u32 o
                     return std::nullopt;
                 }
                 std::error_code ec;
-                if (std::filesystem::exists(candidate, ec)) {
+                if (Common::FS::Exists(candidate)) {
                     return candidate;
                 }
 
@@ -4599,12 +4600,9 @@ s32 PS4_SYSV_ABI sceFontOpenFontSet(OrbisFontLib library, u32 fontSetType, u32 o
                     return std::nullopt;
                 }
                 u32 open_arg4 = 0;
-                {
-                    std::error_code ec;
-                    const auto sz = std::filesystem::file_size(served_path, ec);
-                    if (!ec && sz <= static_cast<std::uintmax_t>(std::numeric_limits<u32>::max())) {
-                        open_arg4 = static_cast<u32>(sz);
-                    }
+                if (const s64 sz = Common::FS::FileSize(served_path);
+                    sz >= 0 && sz <= static_cast<s64>(std::numeric_limits<u32>::max())) {
+                    open_arg4 = static_cast<u32>(sz);
                 }
                 LOG_INFO(Lib_Font, "OpenFontSet: stage=sysfonts_entry_begin");
                 const s32 unique_id = StableUniqueIdFor(host_path_str);

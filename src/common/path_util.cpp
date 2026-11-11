@@ -6,6 +6,7 @@
 
 #include <streams/file_stream.h>
 
+#include "common/io_file.h"
 #include "common/logging/log.h"
 #include "common/path_util.h"
 #include "common/scope_exit.h"
@@ -100,10 +101,10 @@ static std::unordered_map<PathType, fs::path> MakeUserPaths() {
     // Try the portable user directory first.
     auto user_dir = std::filesystem::current_path() / PORTABLE_DIR;
     if (!libretro_user_dir.empty()) {
-        std::filesystem::create_directories(libretro_user_dir);
+        Common::FS::CreateDirectories(libretro_user_dir);
         user_dir = libretro_user_dir;
     }
-    if (!std::filesystem::exists(user_dir)) {
+    if (!Common::FS::Exists(user_dir)) {
         // If it doesn't exist, use the standard path for the platform instead.
         // NOTE: On Windows we currently just create the portable directory instead.
 #ifdef __APPLE__
@@ -126,7 +127,7 @@ static std::unordered_map<PathType, fs::path> MakeUserPaths() {
     std::unordered_map<PathType, fs::path> paths;
 
     const auto create_path = [&](PathType shad_path, const fs::path& new_path) {
-        std::filesystem::create_directory(new_path);
+        Common::FS::CreateDirectories(new_path);
         paths.insert_or_assign(shad_path, new_path);
     };
 
@@ -225,7 +226,7 @@ std::string GetUserPathString(PathType shad_path) {
 }
 
 void SetUserPath(PathType shad_path, const fs::path& new_path) {
-    if (!std::filesystem::is_directory(new_path)) {
+    if (!Common::FS::IsDirectory(new_path)) {
         LOG_ERROR(Common_Filesystem, "Filesystem object at new_path={} is not a directory",
                   PathToUTF8String(new_path));
         return;
@@ -238,11 +239,11 @@ std::optional<fs::path> FindGameByID(const fs::path& dir, const std::string& gam
                                      int max_depth) {
     const auto boot_path_for = [](const fs::path& root) -> std::optional<fs::path> {
         std::error_code ec;
-        if (fs::is_directory(root, ec) && !ec) {
-            if (!fs::exists(root / "sce_sys" / "param.sfo")) {
+        if (Common::FS::IsDirectory(root) && !ec) {
+            if (!Common::FS::Exists(root / "sce_sys" / "param.sfo")) {
                 return std::nullopt;
             }
-            if (auto eboot_path = root / "eboot.bin"; fs::exists(eboot_path)) {
+            if (auto eboot_path = root / "eboot.bin"; Common::FS::Exists(eboot_path)) {
                 return eboot_path;
             }
             return std::nullopt;
@@ -281,18 +282,13 @@ std::optional<fs::path> FindGameByID(const fs::path& dir, const std::string& gam
     }
 
     // Recursively search subdirectories
-    std::error_code ec;
-    for (const auto& entry : fs::directory_iterator(dir, ec)) {
-        std::error_code entry_ec;
-        if (!entry.is_directory(entry_ec) || entry_ec) {
-            continue;
+    std::optional<fs::path> found;
+    ForEachEntry(dir, [&](std::string_view name, bool is_dir) {
+        if (is_dir && !found) {
+            found = FindGameByID(dir / PathFromUTF8String(name), game_id, max_depth - 1);
         }
-        if (auto found = FindGameByID(entry.path(), game_id, max_depth - 1)) {
-            return found;
-        }
-    }
-
-    return std::nullopt;
+    });
+    return found;
 }
 
 } // namespace Common::FS

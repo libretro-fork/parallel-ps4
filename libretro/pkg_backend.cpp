@@ -6,6 +6,7 @@
 #include <map>
 #include <system_error>
 
+#include "common/io_file.h"
 #include "common/logging/log.h"
 #include "common/path_util.h"
 #include "pkg_backend.h"
@@ -72,7 +73,7 @@ bool NodeStat(const std::filesystem::path& pkg_path, const PkgReader::Node* node
 
 bool IsPkgFile(const std::filesystem::path& path) {
     std::error_code ec;
-    return path.extension() == ".pkg" && std::filesystem::is_regular_file(path, ec) && !ec;
+    return path.extension() == ".pkg" && Common::FS::IsFile(path) && !ec;
 }
 
 PkgFile::PkgFile(std::shared_ptr<PkgReader> reader_, const PkgReader::Node* node_)

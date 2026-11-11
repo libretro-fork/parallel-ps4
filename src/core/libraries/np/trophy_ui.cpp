@@ -81,7 +81,7 @@ void PreloadTrophySound() {
     const auto dir = Common::FS::GetUserPath(Common::FS::PathType::CustomTrophy);
     const auto mp3_path = dir / "trophy.mp3";
     const auto wav_path = dir / "trophy.wav";
-    if (fs::exists(mp3_path)) {
+    if (Common::FS::Exists(mp3_path)) {
         const auto bytes = Common::FS::FileView::Map(mp3_path);
         Common::AudioFile::Pcm pcm;
         if (bytes && Common::AudioFile::DecodeMp3(bytes->data(), bytes->size(), pcm) &&
@@ -97,7 +97,7 @@ void PreloadTrophySound() {
     u64 frames = 0;
     u32 channels = 0;
     u32 hz = 0;
-    if (fs::exists(wav_path)) {
+    if (Common::FS::Exists(wav_path)) {
         const auto bytes = Common::FS::FileView::Map(wav_path);
         if (bytes && ParseWav(bytes->data(), bytes->size(), &samples, &frames, &channels, &hz)) {
             ResampleTrophySound(samples, frames, channels, hz);
@@ -124,7 +124,7 @@ TrophyUI::TrophyUI(const std::filesystem::path& trophyIconPath, const std::strin
     side = emu_settings_get_trophy_notification_side();
     trophy_timer = emu_settings_get_trophy_notification_duration();
 
-    if (std::filesystem::exists(trophyIconPath)) {
+    if (Common::FS::Exists(trophyIconPath)) {
         trophy_icon = RefCountedTexture::DecodePngFile(trophyIconPath);
     } else {
         LOG_ERROR(Lib_NpTrophy, "Couldnt load trophy icon at {}",
@@ -146,13 +146,13 @@ TrophyUI::TrophyUI(const std::filesystem::path& trophyIconPath, const std::strin
     const auto CustomTrophy_Dir = Common::FS::GetUserPath(Common::FS::PathType::CustomTrophy);
     std::string customPath;
 
-    if (trophy_type == "P" && fs::exists(CustomTrophy_Dir / "platinum.png")) {
+    if (trophy_type == "P" && Common::FS::Exists(CustomTrophy_Dir / "platinum.png")) {
         customPath = (CustomTrophy_Dir / "platinum.png").string();
-    } else if (trophy_type == "G" && fs::exists(CustomTrophy_Dir / "gold.png")) {
+    } else if (trophy_type == "G" && Common::FS::Exists(CustomTrophy_Dir / "gold.png")) {
         customPath = (CustomTrophy_Dir / "gold.png").string();
-    } else if (trophy_type == "S" && fs::exists(CustomTrophy_Dir / "silver.png")) {
+    } else if (trophy_type == "S" && Common::FS::Exists(CustomTrophy_Dir / "silver.png")) {
         customPath = (CustomTrophy_Dir / "silver.png").string();
-    } else if (trophy_type == "B" && fs::exists(CustomTrophy_Dir / "bronze.png")) {
+    } else if (trophy_type == "B" && Common::FS::Exists(CustomTrophy_Dir / "bronze.png")) {
         customPath = (CustomTrophy_Dir / "bronze.png").string();
     }
 

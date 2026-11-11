@@ -5,6 +5,7 @@
 #include "common/arch.h"
 #include "common/assert.h"
 #include "common/elf_info.h"
+#include "common/io_file.h"
 #include "common/logging/formatter.h"
 #include "common/logging/log.h"
 #include "common/path_util.h"
@@ -504,7 +505,7 @@ void Linker::Execute(const std::vector<std::string>& args) {
     const auto& libc_internal_path =
         Common::FS::PathFromCString(emu_settings_get_sys_modules_dir) / "libSceLibcInternal.sprx";
     bool has_libcinternal = false;
-    if (std::filesystem::exists(libc_internal_path)) {
+    if (Common::FS::Exists(libc_internal_path)) {
         LoadModule(libc_internal_path);
         has_libcinternal = true;
     } else {
@@ -610,19 +611,19 @@ void Linker::Execute(const std::vector<std::string>& args) {
         std::string_view id = Common::ElfInfo::Instance().GameSerial();
         const auto& custom_mod_directory =
             Common::FS::GetUserPath(Common::FS::PathType::CustomModulesDir) / id;
-        if (!std::filesystem::exists(custom_mod_directory)) {
-            std::filesystem::create_directory(custom_mod_directory);
+        if (!Common::FS::Exists(custom_mod_directory)) {
+            Common::FS::CreateDirectories(custom_mod_directory);
         }
-        for (const auto& entry : std::filesystem::directory_iterator(custom_mod_directory)) {
-            if (entry.is_regular_file()) {
-                LOG_INFO(Core_Linker, "Loading custom module: {}",
-                         fmt::UTF(entry.path().u8string()));
-                if (LoadAndStartModule(entry.path(), 0, nullptr, nullptr) == -1) {
-                    LOG_ERROR(Core_Linker, "Failed to load custom module: {}",
-                              fmt::UTF(entry.path().u8string()));
-                }
+        Common::FS::ForEachEntry(custom_mod_directory, [&](std::string_view name, bool is_dir) {
+            if (is_dir) {
+                return;
             }
-        }
+            const auto module = custom_mod_directory / Common::FS::PathFromUTF8String(name);
+            LOG_INFO(Core_Linker, "Loading custom module: {}", name);
+            if (LoadAndStartModule(module, 0, nullptr, nullptr) == -1) {
+                LOG_ERROR(Core_Linker, "Failed to load custom module: {}", name);
+            }
+        });
 
         // Simulate libSceGnmDriver initialization, which maps a chunk of direct memory.
         // Some games fail without accurately emulating this behavior.
@@ -659,7 +660,7 @@ s32 Linker::LoadModule(const std::filesystem::path& elf_name, bool is_dynamic) {
         handle = mnt->Open(as_guest, /*writable=*/false);
     }
     if (!handle) {
-        if (!std::filesystem::exists(elf_name)) {
+        if (!Common::FS::Exists(elf_name)) {
             LOG_ERROR(Core_Linker, "Provided file {} does not exist", elf_name.string());
             return -1;
         }
@@ -1040,12 +1041,12 @@ void Linker::CallAppHeapFree(void* pointer) {
 void Linker::DebugDump() {
     const auto& log_dir = Common::FS::GetUserPath(Common::FS::PathType::LogDir);
     const std::filesystem::path debug(log_dir / "debugdump");
-    std::filesystem::create_directory(debug);
+    Common::FS::CreateDirectories(debug);
     for (const auto& m : m_modules) {
         Module* module = m.get();
         auto& elf = module->elf;
         const std::filesystem::path filepath(debug / module->file.stem());
-        std::filesystem::create_directory(filepath);
+        Common::FS::CreateDirectories(filepath);
         module->import_sym.DebugDump(filepath / "imports.txt");
         module->export_sym.DebugDump(filepath / "exports.txt");
         if (elf.IsSelfFile()) {

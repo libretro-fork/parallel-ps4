@@ -3,6 +3,7 @@
 
 #include "common/assert.h"
 #include "common/elf_info.h"
+#include "common/io_file.h"
 #include "common/logging/log.h"
 #include "common/path_util.h"
 #include "core/emulator_settings.h"
@@ -195,7 +196,7 @@ s32 loadModuleInternal(s32 index, s32 argc, const void* argv, s32* res_out) {
         if (!game_info->GameSerial().empty()) {
             const auto& game_specific_module_path =
                 sys_module_path / game_info->GameSerial() / mod_name;
-            if (std::filesystem::exists(game_specific_module_path)) {
+            if (Common::FS::Exists(game_specific_module_path)) {
                 // The requested module is present in the game-specific sys_modules, load it.
                 LOG_INFO(Loader, "Loading {} from game serial file {}", mod_name,
                          game_info->GameSerial());
@@ -266,7 +267,7 @@ s32 loadModuleInternal(s32 index, s32 argc, const void* argv, s32* res_out) {
 
         // Allowed module, check if it exists
         const auto& module_path = sys_module_path / mod_name;
-        if (std::filesystem::exists(module_path)) {
+        if (Common::FS::Exists(module_path)) {
             LOG_INFO(Loader, "Loading {}", mod_name);
             s32 handle = linker->LoadAndStartModule(module_path, argc, argv, &start_result);
             ASSERT_MSG(handle >= 0, "Failed to load module {}", mod_name);
