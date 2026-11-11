@@ -55,12 +55,14 @@ extern "C" {
 #define NGS2_WAVE_VAG 0x1cu
 #define NGS2_WAVE_ATRAC9 0x40u
 
-#define NGS2_EVENT_PLAY 1u
-#define NGS2_EVENT_STOP 2u
-#define NGS2_EVENT_STOP_IMM 4u
-#define NGS2_EVENT_KILL 8u
-#define NGS2_EVENT_PAUSE 16u
-#define NGS2_EVENT_RESUME 32u
+/* A PS4 game numbers the events; the bit each has in later versions of the
+ * library is one shifted by that number */
+#define NGS2_EVENT_PLAY 0u
+#define NGS2_EVENT_STOP 1u
+#define NGS2_EVENT_STOP_IMM 2u
+#define NGS2_EVENT_KILL 3u
+#define NGS2_EVENT_PAUSE 4u
+#define NGS2_EVENT_RESUME 5u
 
 #define NGS2_STATE_INUSE 1u
 #define NGS2_STATE_PLAYING 2u

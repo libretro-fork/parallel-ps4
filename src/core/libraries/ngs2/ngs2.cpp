@@ -870,8 +870,15 @@ s32 PS4_SYSV_ABI sceNgs2VoiceControl(OrbisNgs2Handle voiceHandle,
     const s32 result =
         ngs2_voice_control(voice, reinterpret_cast<const ngs2_param_header*>(paramList));
     if (result != ORBIS_OK) {
-        LOG_ERROR(Lib_Ngs2, "voice {} of rack {:#x}: {:#x}", ngs2_voice_index(voice),
-                  ngs2_rack_description(ngs2_voice_rack(voice))->rack_id, static_cast<u32>(result));
+        // The list's first parameter and its first word, to tell which call of the game's it was
+        const OrbisNgs2VoiceParamHeader* param = paramList;
+        u32 word = 0;
+        if (param && param->size >= 12) {
+            std::memcpy(&word, param + 1, sizeof(word));
+        }
+        LOG_ERROR(Lib_Ngs2, "voice {} of rack {:#x}: {:#x} (list starts with {:#x}, {:#x})",
+                  ngs2_voice_index(voice), ngs2_rack_description(ngs2_voice_rack(voice))->rack_id,
+                  static_cast<u32>(result), param ? param->id : 0, word);
     }
     return result;
 }

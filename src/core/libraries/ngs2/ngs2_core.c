@@ -1542,8 +1542,7 @@ static int common_param(ngs2_voice* v, const ngs2_param_header* p) {
         if (p->size < 12)
             return NGS2_ERROR_INVALID_VOICE_CONTROL_SIZE;
         event = rd32(p, 8);
-        if (event != NGS2_EVENT_PLAY && event != NGS2_EVENT_STOP && event != NGS2_EVENT_STOP_IMM &&
-            event != NGS2_EVENT_KILL && event != NGS2_EVENT_PAUSE && event != NGS2_EVENT_RESUME)
+        if (event > NGS2_EVENT_RESUME)
             return NGS2_ERROR_INVALID_EVENT_TYPE;
         voice_event(v, event);
         return NGS2_OK;
