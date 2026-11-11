@@ -9,6 +9,7 @@
 
 namespace Libretro {
 struct SharedState;
+class SharedWake;
 }
 
 // The picture handed to the frontend on the GPU, in the frontend's process (gpu_frames.cpp):
@@ -21,9 +22,9 @@ namespace Libretro::GpuFrames {
 /// picture then goes through system memory, as it does without this.
 bool Request(retro_environment_t environment, retro_log_printf_t log);
 
-/// The memory shared with the emulator, in which it is told which GPU the frontend is on.
-/// nullptr once that memory is gone.
-void SetShared(SharedState* shared);
+/// The memory shared with the emulator, in which it is told which GPU the frontend is on, and
+/// the wake that tells it. nullptr once that memory is gone.
+void SetShared(SharedState* shared, SharedWake* wake);
 
 /// Takes what the emulator has handed over about its images: on Linux over the socket, on
 /// Windows in the shared memory, with handles to duplicate from the emulator's process.

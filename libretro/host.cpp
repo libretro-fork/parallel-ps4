@@ -57,6 +57,8 @@
 namespace {
 
 Libretro::SharedState* shared = nullptr;
+// This process's handles on the wakes in the shared memory
+Libretro::SharedWakes wakes;
 
 // The renderer has drawn: the emulator is up, its controllers made.
 std::atomic<bool> frame_seen{false};
@@ -116,16 +118,24 @@ void ApplyLiveOptions() {
         static_cast<double>(live.trophy_seconds.load()), false);
 }
 
-// Ends the process on the core's word, and applies the options changed meanwhile
+// Ends the process on the core's word, and applies the options changed meanwhile. Parked
+// until the core writes either.
 void WatchQuit() {
     std::uint32_t serial = 0;
-    while (!shared->quit.load(std::memory_order_acquire)) {
+    for (;;) {
+        const int key = wakes.control.Prepare();
+        if (shared->quit.load(std::memory_order_acquire)) {
+            wakes.control.Cancel();
+            break;
+        }
         const std::uint32_t now = shared->options_serial.load(std::memory_order_acquire);
         if (now != serial) {
+            wakes.control.Cancel();
             serial = now;
             ApplyLiveOptions();
+            continue;
         }
-        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        wakes.control.Wait(key);
     }
     std::quick_exit(0);
 }
@@ -133,27 +143,30 @@ void WatchQuit() {
 // What the sources have, summed, into the ring the core plays from. A source
 // that has less than another contributes silence for the difference.
 void PumpAudio() {
-  for (;;) {
-    std::this_thread::sleep_for(std::chrono::milliseconds(2));
-
-    const std::uint32_t written =
-        shared->audio_written.load(std::memory_order_relaxed);
-    const std::uint32_t read =
-        shared->audio_read.load(std::memory_order_acquire);
-    // Up to the target and no further: what the sources have beyond it stays in
-    // their inputs, where the game's audio threads wait for it to be taken.
-    const std::uint32_t queued = written - read;
-    const std::uint32_t wanted =
-        queued < Libretro::AUDIO_RING_TARGET_FRAMES
-            ? Libretro::AUDIO_RING_TARGET_FRAMES - queued
-            : 0;
-    if (wanted == 0) {
-      continue;
+    for (;;) {
+        // The window opens first: a read by the core or a source's commit from here on wakes
+        // the wait below, whatever the mix found
+        const int key = wakes.audio.Prepare();
+        const std::uint32_t written = shared->audio_written.load(std::memory_order_relaxed);
+        const std::uint32_t read = shared->audio_read.load(std::memory_order_acquire);
+        // Up to the target and no further: what the sources have beyond it stays in
+        // their inputs, where the game's audio threads wait for it to be taken.
+        const std::uint32_t queued = written - read;
+        const std::uint32_t wanted = queued < Libretro::AUDIO_RING_TARGET_FRAMES
+                                         ? Libretro::AUDIO_RING_TARGET_FRAMES - queued
+                                         : 0;
+        const std::uint32_t frames =
+            wanted ? audio_mix_pump(shared->audio, Libretro::AUDIO_RING_FRAMES - 1, written, wanted)
+                   : 0;
+        if (frames) {
+            wakes.audio.Cancel();
+            shared->audio_written.store(written + frames, std::memory_order_release);
+            continue;
+        }
+        // The ring is as full as it should be, or the sources have nothing: until the core
+        // takes frames or a source hands some over
+        wakes.audio.Wait(key);
     }
-    const std::uint32_t frames = audio_mix_pump(
-        shared->audio, Libretro::AUDIO_RING_FRAMES - 1, written, wanted);
-    shared->audio_written.store(written + frames, std::memory_order_release);
-  }
 }
 
 // The frontend's ports onto the controllers. Only what changed: every call
@@ -166,7 +179,8 @@ void PumpAudio() {
 //
 // Each connected controller also reports its state every 4 ms whether or not it
 // changed, as a pad does: a game reading several states at once gets the
-// history it expects.
+// history it expects. Between reports the thread is parked until the core writes
+// a change, which it hands on at once.
 void PumpInput() {
     using Libraries::Pad::OrbisPadButtonDataOffset;
     static constexpr OrbisPadButtonDataOffset buttons[] = {
@@ -191,17 +205,41 @@ void PumpInput() {
     }
     const std::uint32_t pads = std::clamp<std::uint32_t>(shared->options.pads, 1, Libretro::MAX_PADS);
     bool others_connected = false;
-    bool report = false;
+    // The reports keep to real time: each due a period after the one before, not after the
+    // wait that led to it
+    constexpr auto report_period = std::chrono::milliseconds(4);
+    auto next_report = std::chrono::steady_clock::now() + report_period;
 
     for (;;) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(2));
-        report = !report;
+        // Until the next report, or the core's next change. The window opens before the
+        // state is read, so a change written from here on cuts the wait short.
+        const auto wait = [&](int key) {
+            const auto left = std::chrono::duration_cast<std::chrono::microseconds>(
+                next_report - std::chrono::steady_clock::now());
+            if (left.count() > 0) {
+                wakes.input.Wait(key, left.count());
+            } else {
+                wakes.input.Cancel();
+            }
+        };
+        const int key = wakes.input.Prepare();
+        bool report = false;
+        if (const auto now = std::chrono::steady_clock::now(); now >= next_report) {
+            report = true;
+            next_report += report_period;
+            // Fallen behind by more than a period (the thread was not run): from now
+            if (next_report <= now) {
+                next_report = now + report_period;
+            }
+        }
         if (!frame_seen) {
+            wait(key);
             continue;
         }
         auto& controllers = *Common::Singleton<Input::GameControllers>::Instance();
         // Not before the emulator has logged the first controller in.
         if (!controllers[0] || controllers[0]->user_id < 0) {
+            wait(key);
             continue;
         }
         if (!others_connected) {
@@ -253,6 +291,7 @@ void PumpInput() {
               controller->PollState();
             }
         }
+        wait(key);
     }
 }
 
@@ -263,6 +302,7 @@ int RunEmulator(const char* argument) {
     if (!shared) {
         return 2;
     }
+    wakes.Attach(shared, argument);
 
     const std::filesystem::path eboot{
         std::u8string_view(reinterpret_cast<const char8_t*>(shared->eboot_path))};
@@ -286,6 +326,7 @@ int RunEmulator(const char* argument) {
     if (!audio_mix_init()) {
       LOG_CRITICAL(Lib_AudioOut, "No memory for the core's audio mix");
     }
+    audio_mix_set_wake([](void*) { wakes.audio.Notify(); }, nullptr);
     std::thread(PumpAudio).detach();
     std::thread(PumpInput).detach();
 
@@ -372,9 +413,18 @@ bool FrontendGpu(std::uint8_t* device_uuid) {
         return false;
     }
     // The frontend makes its device right after the game is loaded, and the emulator gets here
-    // about as soon: five seconds is far more than the frontend takes.
-    for (int attempt = 0; attempt < 500 && shared->frontend_gpu.load() == 0; ++attempt) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    // about as soon: five seconds is far more than the frontend takes. Parked until the core
+    // writes it.
+    const auto give_up = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    for (;;) {
+        const int key = wakes.control.Prepare();
+        const auto left = std::chrono::duration_cast<std::chrono::microseconds>(
+            give_up - std::chrono::steady_clock::now());
+        if (shared->frontend_gpu.load() != 0 || left.count() <= 0) {
+            wakes.control.Cancel();
+            break;
+        }
+        wakes.control.Wait(key, left.count());
     }
     if (shared->frontend_gpu.load() != 1) {
         LOG_WARNING(Render_Vulkan, "The frontend's GPU is not known");
@@ -456,17 +506,27 @@ bool GpuFramesActive() {
 std::uint32_t AcquireImage() {
     // Up to a tenth of a second: the frontend holds one image and the newest is kept for it,
     // which leaves three for frames being drawn. After that the wait is given up, and an image
-    // still being drawn is drawn over rather than the picture stopping.
-    for (int attempt = 0; attempt < 100; ++attempt) {
+    // still being drawn is drawn over rather than the picture stopping. Parked until the core
+    // lets go of the image it held or a frame being drawn is published.
+    const auto give_up = std::chrono::steady_clock::now() + std::chrono::milliseconds(100);
+    for (;;) {
+        const int key = wakes.frame.Prepare();
         const std::uint32_t latest = shared->frame_latest.load();
         const std::uint32_t newest = latest == 0 ? FRAME_SLOT_NONE : latest & FRAME_SLOT_MASK;
         const std::uint32_t held = shared->frame_held.load();
         for (std::uint32_t image = 0; image < FRAME_IMAGES; ++image) {
             if (image != newest && image != held && !image_in_flight[image].exchange(true)) {
+                wakes.frame.Cancel();
                 return image;
             }
         }
-        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        const auto left = std::chrono::duration_cast<std::chrono::microseconds>(
+            give_up - std::chrono::steady_clock::now());
+        if (left.count() <= 0) {
+            wakes.frame.Cancel();
+            break;
+        }
+        wakes.frame.Wait(key, left.count());
     }
     const std::uint32_t latest = shared->frame_latest.load();
     const std::uint32_t newest = latest == 0 ? FRAME_SLOT_NONE : latest & FRAME_SLOT_MASK;
@@ -488,6 +548,8 @@ void PushImage(std::uint32_t image, std::uint32_t width, std::uint32_t height) {
     const std::uint32_t latest = shared->frame_latest.load();
     shared->frame_latest.store((((latest >> FRAME_SLOT_BITS) + 1) << FRAME_SLOT_BITS) | image);
     image_in_flight[image] = false;
+    // An image is free again for a frame that waits for one
+    wakes.frame.Notify();
     frame_seen = true;
 }
 

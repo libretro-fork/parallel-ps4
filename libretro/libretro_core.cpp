@@ -92,6 +92,8 @@ constexpr int kSampleRate = 48000;
 constexpr int kAudioFrames = kSampleRate / 60;
 
 SharedState* shared = nullptr;
+// This process's handles on the wakes in the shared memory
+Libretro::SharedWakes wakes;
 bool emulator_running = false;
 bool shutdown_requested = false;
 
@@ -591,6 +593,7 @@ bool CreateShared(std::string& argument) {
 }
 
 void DestroyShared() {
+    wakes.Detach();
     if (shared) {
         UnmapViewOfFile(shared);
         shared = nullptr;
@@ -703,6 +706,7 @@ bool CreateShared(std::string& argument) {
 }
 
 void DestroyShared() {
+    wakes.Detach();
     if (shared) {
         munmap(shared, Libretro::SHARED_BYTES);
         shared = nullptr;
@@ -936,6 +940,14 @@ void SendInput() {
         {RETRO_DEVICE_ID_JOYPAD_START, OrbisPadButtonDataOffset::Options},
         {RETRO_DEVICE_ID_JOYPAD_SELECT, OrbisPadButtonDataOffset::TouchPad},
     };
+    // The emulator is woken only when something changed
+    bool changed = false;
+    const auto put = [&changed](std::atomic<uint32_t>& at, uint32_t value) {
+        if (at.load(std::memory_order_relaxed) != value) {
+            at.store(value, std::memory_order_release);
+            changed = true;
+        }
+    };
     for (unsigned pad = 0; pad < shared->options.pads && pad < Libretro::MAX_PADS; ++pad) {
         uint32_t held = 0;
         for (const auto& entry : buttons) {
@@ -943,7 +955,7 @@ void SendInput() {
                 held |= static_cast<uint32_t>(entry.button);
             }
         }
-        shared->buttons[pad].store(held, std::memory_order_release);
+        put(shared->buttons[pad], held);
 
         // libretro's -0x8000..0x7fff to the pad's 0..255.
         const auto stick = [pad](unsigned index, unsigned id) -> uint32_t {
@@ -951,14 +963,14 @@ void SendInput() {
             return static_cast<uint32_t>(std::clamp((raw + 0x8000) * 255 / 0xffff, 0, 255));
         };
         auto& axes = shared->axes[pad];
-        axes[Libretro::SHARED_AXIS_LEFT_X] =
-            stick(RETRO_DEVICE_INDEX_ANALOG_LEFT, RETRO_DEVICE_ID_ANALOG_X);
-        axes[Libretro::SHARED_AXIS_LEFT_Y] =
-            stick(RETRO_DEVICE_INDEX_ANALOG_LEFT, RETRO_DEVICE_ID_ANALOG_Y);
-        axes[Libretro::SHARED_AXIS_RIGHT_X] =
-            stick(RETRO_DEVICE_INDEX_ANALOG_RIGHT, RETRO_DEVICE_ID_ANALOG_X);
-        axes[Libretro::SHARED_AXIS_RIGHT_Y] =
-            stick(RETRO_DEVICE_INDEX_ANALOG_RIGHT, RETRO_DEVICE_ID_ANALOG_Y);
+        put(axes[Libretro::SHARED_AXIS_LEFT_X],
+            stick(RETRO_DEVICE_INDEX_ANALOG_LEFT, RETRO_DEVICE_ID_ANALOG_X));
+        put(axes[Libretro::SHARED_AXIS_LEFT_Y],
+            stick(RETRO_DEVICE_INDEX_ANALOG_LEFT, RETRO_DEVICE_ID_ANALOG_Y));
+        put(axes[Libretro::SHARED_AXIS_RIGHT_X],
+            stick(RETRO_DEVICE_INDEX_ANALOG_RIGHT, RETRO_DEVICE_ID_ANALOG_X));
+        put(axes[Libretro::SHARED_AXIS_RIGHT_Y],
+            stick(RETRO_DEVICE_INDEX_ANALOG_RIGHT, RETRO_DEVICE_ID_ANALOG_Y));
 
         // Triggers: analog where the frontend has it, else the digital button.
         const auto trigger = [pad](unsigned id) -> uint32_t {
@@ -969,8 +981,11 @@ void SendInput() {
             }
             return static_cast<uint32_t>(std::clamp(raw * 255 / 0x7fff, 0, 255));
         };
-        axes[Libretro::SHARED_AXIS_TRIGGER_LEFT] = trigger(RETRO_DEVICE_ID_JOYPAD_L2);
-        axes[Libretro::SHARED_AXIS_TRIGGER_RIGHT] = trigger(RETRO_DEVICE_ID_JOYPAD_R2);
+        put(axes[Libretro::SHARED_AXIS_TRIGGER_LEFT], trigger(RETRO_DEVICE_ID_JOYPAD_L2));
+        put(axes[Libretro::SHARED_AXIS_TRIGGER_RIGHT], trigger(RETRO_DEVICE_ID_JOYPAD_R2));
+    }
+    if (changed) {
+        wakes.input.Notify();
     }
 }
 
@@ -1009,7 +1024,10 @@ void TakeFrame() {
         if (slot >= (gpu_frames ? Libretro::FRAME_IMAGES : Libretro::FRAME_SLOTS)) {
             return;
         }
-        shared->frame_held.store(slot);
+        if (shared->frame_held.exchange(slot) != slot) {
+            // The image it held is free for the emulator to draw into
+            wakes.frame.Notify();
+        }
         if (shared->frame_latest.load() != latest) {
             continue;
         }
@@ -1034,18 +1052,33 @@ void TakeFrame() {
     }
 }
 
-// One frame's worth of sound out of the ring; what is not there is silence.
-void TakeAudio(int16_t* out) {
-    const uint32_t read = shared->audio_read.load(std::memory_order_relaxed);
-    const uint32_t written = shared->audio_written.load(std::memory_order_acquire);
-    const uint32_t frames = std::min<uint32_t>(written - read, kAudioFrames);
-    for (uint32_t i = 0; i < frames; ++i) {
-        const uint32_t at = (read + i) & (Libretro::AUDIO_RING_FRAMES - 1);
-        out[i * 2 + 0] = shared->audio[at * 2 + 0];
-        out[i * 2 + 1] = shared->audio[at * 2 + 1];
+// One frame's worth of sound to the frontend, lent from the ring where it lies (in two pieces
+// where the ring wraps); what is not there is silence. The emulator writes no further than the
+// read index, which moves only once the frontend has taken the frames.
+void SendAudio() {
+    static const int16_t silence[kAudioFrames * 2] = {};
+    uint32_t frames = 0;
+    if (shared) {
+        const uint32_t read = shared->audio_read.load(std::memory_order_relaxed);
+        const uint32_t written = shared->audio_written.load(std::memory_order_acquire);
+        frames = std::min<uint32_t>(written - read, kAudioFrames);
+        const uint32_t at = read & (Libretro::AUDIO_RING_FRAMES - 1);
+        const uint32_t first = std::min<uint32_t>(frames, Libretro::AUDIO_RING_FRAMES - at);
+        if (first) {
+            audio_batch_cb(shared->audio + at * 2, first);
+        }
+        if (frames > first) {
+            audio_batch_cb(shared->audio, frames - first);
+        }
+        if (frames) {
+            shared->audio_read.store(read + frames, std::memory_order_release);
+            // Room in the ring: the emulator mixes more
+            wakes.audio.Notify();
+        }
     }
-    std::memset(out + frames * 2, 0, (kAudioFrames - frames) * 2 * sizeof(int16_t));
-    shared->audio_read.store(read + frames, std::memory_order_release);
+    if (frames < static_cast<uint32_t>(kAudioFrames)) {
+        audio_batch_cb(silence, kAudioFrames - frames);
+    }
 }
 
 // The names of the pad's buttons and sticks, for the ports that are controllers: what the
@@ -1190,6 +1223,11 @@ static bool StartGame(const std::string& boot_path, const std::string& user_dir,
     // New memory is zeroed: the counters and flags start there.
     shared->magic = Libretro::SHARED_MAGIC;
     shared->version = Libretro::SHARED_VERSION;
+    retro_shared_eventcount_init(&shared->wake_control);
+    retro_shared_eventcount_init(&shared->wake_input);
+    retro_shared_eventcount_init(&shared->wake_frame);
+    retro_shared_eventcount_init(&shared->wake_audio);
+    wakes.Attach(shared, argument);
     std::strcpy(shared->eboot_path, boot_path.c_str());
     std::strcpy(shared->user_dir, user_dir.c_str());
     std::strcpy(shared->update_path, update_path.c_str());
@@ -1205,13 +1243,13 @@ static bool StartGame(const std::string& boot_path, const std::string& user_dir,
     // The images come through the shared memory.
     if (shared->options.gpu_frames != 0 && Libretro::GpuFrames::Request(environ_cb, log_cb)) {
         gpu_frames = true;
-        Libretro::GpuFrames::SetShared(shared);
+        Libretro::GpuFrames::SetShared(shared, &wakes.control);
     }
     shared->options.gpu_frames = gpu_frames ? 1 : 0;
 #else
     if (shared->options.gpu_frames != 0 && Libretro::GpuFrames::Request(environ_cb, log_cb)) {
         gpu_frames = true;
-        Libretro::GpuFrames::SetShared(shared);
+        Libretro::GpuFrames::SetShared(shared, &wakes.control);
         int pair[2];
         if (socketpair(AF_UNIX, SOCK_SEQPACKET, 0, pair) == 0) {
             gpu_socket = pair[0];
@@ -1325,12 +1363,13 @@ RETRO_API void retro_unload_game(void) {
     StopPkgInstall();
     if (shared) {
         shared->quit.store(1, std::memory_order_release);
+        wakes.control.Notify();
     }
     StopEmulator();
     // The frame shown was in the shared memory, or one of the emulator's images.
     shown_frame = nullptr;
     Libretro::GpuFrames::Close();
-    Libretro::GpuFrames::SetShared(nullptr);
+    Libretro::GpuFrames::SetShared(nullptr, nullptr);
 #ifndef _WIN32
     if (gpu_socket >= 0) {
         close(gpu_socket);
@@ -1374,8 +1413,6 @@ static void PollPkgInstall() {
 }
 
 RETRO_API void retro_run(void) {
-    static int16_t sound[kAudioFrames * 2];
-
     if (input_poll_cb) {
         input_poll_cb();
     }
@@ -1397,6 +1434,7 @@ RETRO_API void retro_run(void) {
         live.trophy_side.store(options.trophy_side);
         live.trophy_seconds.store(options.trophy_seconds);
         shared->options_serial.fetch_add(1, std::memory_order_release);
+        wakes.control.Notify();
     }
 
     if (shared) {
@@ -1446,9 +1484,6 @@ RETRO_API void retro_run(void) {
             }
         }
         TakeFrame();
-        TakeAudio(sound);
-    } else {
-        std::memset(sound, 0, sizeof(sound));
     }
 
     if (video_cb && gpu_frames) {
@@ -1471,7 +1506,7 @@ RETRO_API void retro_run(void) {
         video_cb(shown_frame, shown_width, shown_height, shown_width * sizeof(uint32_t));
     }
     if (audio_batch_cb) {
-        audio_batch_cb(sound, kAudioFrames);
+        SendAudio();
     }
 }
 

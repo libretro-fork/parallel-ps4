@@ -3,9 +3,15 @@
 
 #pragma once
 
+#include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <string>
+#include <thread>
+
+#include <rthreads/retro_shared_eventcount.h>
 
 // The memory the libretro core (libretro_core.cpp, in the frontend's process) shares with the
 // emulator it runs in a process of its own (host.cpp). One block: this header, then three
@@ -13,7 +19,7 @@
 namespace Libretro {
 
 inline constexpr std::uint32_t SHARED_MAGIC = 0x34505368; // "hSP4"
-inline constexpr std::uint32_t SHARED_VERSION = 12;
+inline constexpr std::uint32_t SHARED_VERSION = 13;
 
 inline constexpr std::uint32_t MAX_WIDTH = 3840;
 inline constexpr std::uint32_t MAX_HEIGHT = 2160;
@@ -119,6 +125,17 @@ struct SharedState {
     std::uint32_t magic;
     std::uint32_t version;
 
+    /// What each side parks on until the other has written (retro_shared_eventcount.h), in
+    /// place of waking on a timer. Each is notified after what it names is written.
+    /// wake_control: quit, options_serial and frontend_gpu (the core).
+    /// wake_input: buttons and axes (the core, when they change).
+    /// wake_frame: frame_held (the core), an image no longer being drawn (the emulator).
+    /// wake_audio: audio_read (the core), a source's sound handed to the mix (the emulator).
+    retro_shared_eventcount_t wake_control;
+    retro_shared_eventcount_t wake_input;
+    retro_shared_eventcount_t wake_frame;
+    retro_shared_eventcount_t wake_audio;
+
     // Written by the core before the emulator is started.
     char eboot_path[PATH_BYTES]; // UTF-8
     char user_dir[PATH_BYTES];   // UTF-8
@@ -191,6 +208,85 @@ struct SharedState {
 
 inline constexpr std::size_t SHARED_FRAMES_OFFSET = (sizeof(SharedState) + 4095) & ~std::size_t{4095};
 inline constexpr std::size_t SHARED_BYTES = SHARED_FRAMES_OFFSET + FRAME_SLOTS * FRAME_BYTES;
+
+/// One process's handle onto a wake in the shared memory.
+class SharedWake {
+public:
+    SharedWake() = default;
+    SharedWake(const SharedWake&) = delete;
+    SharedWake& operator=(const SharedWake&) = delete;
+    ~SharedWake() {
+        Detach();
+    }
+
+    /// @name is the same in both processes (Windows names a semaphore with it).
+    bool Attach(retro_shared_eventcount_t* state, const std::string& name) {
+        Detach();
+        attached = retro_shared_eventcount_attach(&handle, state, name.c_str());
+        return attached;
+    }
+    void Detach() {
+        if (attached) {
+            retro_shared_eventcount_detach(&handle);
+            attached = false;
+        }
+    }
+
+    void Notify() {
+        if (attached) {
+            retro_shared_eventcount_notify(&handle);
+        }
+    }
+    /// The wait's window opens here: look at what is waited for after this, then Cancel or
+    /// Wait.
+    int Prepare() {
+        return attached ? retro_shared_eventcount_prepare_wait(&handle) : 0;
+    }
+    void Cancel() {
+        if (attached) {
+            retro_shared_eventcount_cancel_wait(&handle);
+        }
+    }
+    /// Until a Notify after the Prepare, or @timeout_us (negative: no limit). Without a wake
+    /// between the processes on this platform it sleeps a millisecond at most, and the caller
+    /// looks again, as before there were wakes.
+    void Wait(int key, std::int64_t timeout_us = -1) {
+        if (!attached) {
+            const std::int64_t us = timeout_us < 0 ? 1000 : std::min<std::int64_t>(timeout_us, 1000);
+            std::this_thread::sleep_for(std::chrono::microseconds(us));
+        } else if (timeout_us < 0) {
+            retro_shared_eventcount_commit_wait(&handle, key);
+        } else {
+            retro_shared_eventcount_commit_wait_timeout(&handle, key, timeout_us);
+        }
+    }
+
+private:
+    retro_shared_eventcount_handle_t handle{};
+    bool attached = false;
+};
+
+/// The four wakes of a SharedState, attached in this process. @name is the shared memory's
+/// name on Windows (one per session); elsewhere it is not used.
+struct SharedWakes {
+    SharedWake control;
+    SharedWake input;
+    SharedWake frame;
+    SharedWake audio;
+
+    void Attach(SharedState* state, const std::string& name) {
+        control.Attach(&state->wake_control, name + "_control");
+        input.Attach(&state->wake_input, name + "_input");
+        frame.Attach(&state->wake_frame, name + "_frame");
+        audio.Attach(&state->wake_audio, name + "_audio");
+    }
+    void Detach() {
+        control.Detach();
+        input.Detach();
+        frame.Detach();
+        audio.Detach();
+    }
+};
 
 inline std::uint8_t* SharedFrame(SharedState* state, std::uint32_t slot) {
     return reinterpret_cast<std::uint8_t*>(state) + SHARED_FRAMES_OFFSET + slot * FRAME_BYTES;

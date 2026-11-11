@@ -52,6 +52,10 @@ unsigned audio_mix_input_reserve(audio_mix_input_t* in, int16_t** ptr, unsigned 
 /* Hands @frames written at the last reserve to the mixing thread. */
 void audio_mix_input_commit(audio_mix_input_t* in, unsigned frames);
 
+/* @wake(@ctx) is called after every commit and every clip started, from the source's thread:
+ * the mixing thread parks on it when it has nothing to mix. Set once, before any source runs. */
+void audio_mix_set_wake(void (*wake)(void*), void* ctx);
+
 /* Mixing thread only: sums up to @frames of every open input into @ring (16-bit stereo,
  * @ring_mask + 1 frames, a power of two) from frame index @at. An input with fewer frames
  * than another adds silence for the difference. Returns the frames written. */

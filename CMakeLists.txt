@@ -1403,6 +1403,7 @@ set(LIBRETRO_COMMON_SOURCES
     ${LIBRETRO_COMMON_DIR}/queues/retro_spsc.c
     ${LIBRETRO_COMMON_DIR}/queues/retro_waitable_spsc.c
     ${LIBRETRO_COMMON_DIR}/rthreads/retro_eventcount.c
+    ${LIBRETRO_COMMON_DIR}/rthreads/retro_shared_eventcount.c
     ${LIBRETRO_COMMON_DIR}/rthreads/rthreads.c
     ${LIBRETRO_COMMON_DIR}/streams/file_stream.c
     ${LIBRETRO_COMMON_DIR}/streams/interface_stream.c

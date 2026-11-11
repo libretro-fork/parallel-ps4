@@ -405,7 +405,8 @@ LRC_SOURCES_C += $(addprefix $(LRC_DIR)/lists/,string_list.c)
 LRC_SOURCES_C += $(addprefix $(LRC_DIR)/net/,net_compat.c net_http.c net_socket.c \
 	net_socket_ssl_retro.c net_upnp.c)
 LRC_SOURCES_C += $(addprefix $(LRC_DIR)/queues/,retro_spsc.c retro_waitable_spsc.c)
-LRC_SOURCES_C += $(addprefix $(LRC_DIR)/rthreads/,retro_eventcount.c rthreads.c)
+LRC_SOURCES_C += $(addprefix $(LRC_DIR)/rthreads/,retro_eventcount.c retro_shared_eventcount.c \
+	rthreads.c)
 LRC_SOURCES_C += $(addprefix $(LRC_DIR)/streams/,file_stream.c interface_stream.c \
 	memory_stream.c trans_stream.c trans_stream_deflate.c trans_stream_pipe.c)
 LRC_SOURCES_C += $(addprefix $(LRC_DIR)/string/,rstrtod.c stdstring.c)

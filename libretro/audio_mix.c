@@ -30,6 +30,10 @@ struct audio_mix_input
 
 static struct audio_mix_input inputs[AUDIO_MIX_INPUTS];
 
+/* Who the mixing thread waits on, told of every commit and clip */
+static void (*mix_wake)(void*);
+static void* mix_wake_ctx;
+
 /* The clip: published by its caller with a serial the mixing thread checks before and after
  * it reads the fields, so a clip started again while being read is taken on the next pass. */
 static retro_atomic_size_t clip_frames; /* the frames' address */
@@ -131,10 +135,18 @@ unsigned audio_mix_input_reserve(audio_mix_input_t* in, int16_t** ptr, unsigned 
    return got < frames ? got : frames;
 }
 
+void audio_mix_set_wake(void (*wake)(void*), void* ctx)
+{
+   mix_wake_ctx = ctx;
+   mix_wake     = wake;
+}
+
 void audio_mix_input_commit(audio_mix_input_t* in, unsigned frames)
 {
    retro_spsc_write_end(&in->ring.queue, (size_t)frames * FRAME_BYTES);
    retro_waitable_spsc_notify_readable(&in->ring);
+   if (mix_wake)
+      mix_wake(mix_wake_ctx);
 }
 
 /* Adds what one input has, up to @frames, to the sums. Returns how many frames it had. */
@@ -169,6 +181,8 @@ void audio_mix_play_clip(const int16_t* frames, unsigned count, float gain)
    retro_atomic_store_relaxed_int(&clip_count, (int)count);
    retro_atomic_store_relaxed_int(&clip_gain_milli, (int)(gain * 1000.0f));
    retro_atomic_fetch_add_int(&clip_serial, 1);
+   if (mix_wake)
+      mix_wake(mix_wake_ctx);
 }
 
 /* Takes a newly started clip, and adds what is left of the playing one to the sums. Returns

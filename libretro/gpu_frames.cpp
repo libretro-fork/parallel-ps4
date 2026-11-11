@@ -70,6 +70,7 @@ void CloseMemoryHandle(MemoryHandle handle) {
 retro_environment_t environment_cb = nullptr;
 retro_log_printf_t log_cb = nullptr;
 SharedState* shared_state = nullptr;
+SharedWake* shared_wake = nullptr;
 
 // The frontend's Vulkan, between context_reset and context_destroy.
 const retro_hw_render_interface_vulkan* vulkan = nullptr;
@@ -206,6 +207,9 @@ void TellFrontendGpu() {
         shared_state->frontend_gpu.store(1);
     } else {
         shared_state->frontend_gpu.store(2);
+    }
+    if (shared_wake) {
+        shared_wake->Notify();
     }
 }
 
@@ -577,8 +581,9 @@ bool Request(retro_environment_t environment, retro_log_printf_t log) {
     return true;
 }
 
-void SetShared(SharedState* shared) {
+void SetShared(SharedState* shared, SharedWake* wake) {
     shared_state = shared;
+    shared_wake = wake;
 }
 
 #if defined(_WIN32)
@@ -701,7 +706,7 @@ namespace Libretro::GpuFrames {
 bool Request(retro_environment_t, retro_log_printf_t) {
     return false;
 }
-void SetShared(SharedState*) {}
+void SetShared(SharedState*, SharedWake*) {}
 void Receive(int, void*) {}
 void Show(retro_video_refresh_t, std::uint32_t, bool, unsigned, unsigned) {}
 const char* Failure() {
