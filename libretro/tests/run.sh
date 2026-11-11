@@ -34,8 +34,15 @@ for san in address,undefined thread; do
     # libSceNgs2's engine: C89, the grains it renders against what they have to be
     name=ngs2_core_test-$(echo $san | tr , -)
     $CC -std=c89 -O1 -g -Wall -Wdeclaration-after-statement -fno-omit-frame-pointer \
-        -fsanitize=$san -Isrc -I$L/include libretro/tests/ngs2_core_test.c \
+        -fsanitize=$san -Isrc -Ilibretro/tests -I$L/include libretro/tests/ngs2_core_test.c \
         src/core/libraries/ngs2/ngs2_core.c $L/formats/atrac9/ratrac9.c -o "$OUT/$name" -lm
+    "$OUT/$name"
+    # libSceAudiodec, as a game calls it
+    name=audiodec_test-$(echo $san | tr , -)
+    $CC -std=c89 -O1 -g -Wall -Wdeclaration-after-statement -fno-omit-frame-pointer \
+        -fsanitize=$san -Isrc -Ilibretro/tests -I$L/include libretro/tests/audiodec_test.c \
+        src/core/libraries/audiodec/audiodec.c $L/formats/atrac9/ratrac9.c \
+        $L/formats/mp3/rmp3.c $L/formats/aac/raac.c -o "$OUT/$name" -lm
     "$OUT/$name"
     name=vk_heap_test-$(echo $san | tr , -)
     $CC -std=c89 -pedantic -O1 -g -Wall -Wdeclaration-after-statement -Wno-long-long \

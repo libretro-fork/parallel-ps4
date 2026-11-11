@@ -20,6 +20,8 @@ static Common::Log::Class ToClass(c_log_class log_class) {
         return Common::Log::Class::Config;
     case C_LOG_KEY_MANAGER:
         return Common::Log::Class::KeyManager;
+    case C_LOG_LIB_AUDIODEC:
+        return Common::Log::Class::Lib_Audiodec;
     case C_LOG_LIB_HTTP:
         return Common::Log::Class::Lib_Http;
     case C_LOG_LOADER:

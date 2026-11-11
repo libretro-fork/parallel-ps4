@@ -35,6 +35,16 @@ namespace Libraries::SysModule {
 
 bool g_need_scelibc = false, g_need_fios2 = false;
 
+// libSceAudiodec is C (audiodec.c): its functions are given to the game here
+static void RegisterAudiodec(Core::Loader::SymbolsResolver* sym) {
+    LIB_FUNCTION("VjhsmxpcezI", "libSceAudiodec", 1, "libSceAudiodec", sceAudiodecInitLibrary);
+    LIB_FUNCTION("h5jSB2QIDV0", "libSceAudiodec", 1, "libSceAudiodec", sceAudiodecTermLibrary);
+    LIB_FUNCTION("O3f1sLMWRvs", "libSceAudiodec", 1, "libSceAudiodec", sceAudiodecCreateDecoder);
+    LIB_FUNCTION("Tp+ZEy69mLk", "libSceAudiodec", 1, "libSceAudiodec", sceAudiodecDeleteDecoder);
+    LIB_FUNCTION("6Vf9WTLDoss", "libSceAudiodec", 1, "libSceAudiodec", sceAudiodecClearContext);
+    LIB_FUNCTION("KHXHMDLkILw", "libSceAudiodec", 1, "libSceAudiodec", sceAudiodecDecode);
+}
+
 s32 getModuleHandle(s32 id, s32* handle) {
     if (id == 0) {
         return ORBIS_SYSMODULE_INVALID_ID;
@@ -231,7 +241,7 @@ s32 loadModuleInternal(s32 index, s32 argc, const void* argv, s32* res_out) {
              {"libSceJson2.sprx", nullptr},
              {"libSceCesCs.sprx", nullptr},
              {"libSceAt9Enc.sprx", nullptr},
-             {"libSceAudiodec.sprx", &Libraries::Audiodec::RegisterLib},
+             {"libSceAudiodec.sprx", &RegisterAudiodec},
              {"libSceAudiodecCpu.sprx", nullptr},
              {"libSceAudiodecCpuDdp.sprx", nullptr},
              {"libSceAudiodecCpuM4aac.sprx", nullptr},

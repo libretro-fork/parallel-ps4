@@ -241,7 +241,6 @@ CORE_SOURCES_CXX += $(addprefix src/core/libraries/system/,commondialog.cpp msgd
 CORE_SOURCES_CXX += $(addprefix src/core/libraries/system_gesture/,system_gesture.cpp)
 CORE_SOURCES_CXX += $(addprefix src/core/libraries/ulobjmgr/,ulobjmgr.cpp)
 CORE_SOURCES_CXX += $(addprefix src/core/libraries/ult/,ult.cpp)
-CORE_SOURCES_CXX += $(addprefix src/core/libraries/audiodec/,audiodec.cpp)
 CORE_SOURCES_CXX += $(addprefix src/core/libraries/usbd/emulated/,dimensions.cpp infinity.cpp \
 	skylander.cpp)
 CORE_SOURCES_CXX += $(addprefix src/core/libraries/usbd/,usbd.cpp usbstorage.cpp)
@@ -311,6 +310,7 @@ CORE_SOURCES_C += $(addprefix src/common/,enum_names.c json_util.c key_manager.c
 CORE_SOURCES_C += $(addprefix src/core/,emulator_settings.c user_manager.c)
 CORE_SOURCES_C += $(addprefix src/core/libraries/network/,host_override.c)
 CORE_SOURCES_C += $(addprefix src/core/libraries/ngs2/,ngs2_core.c)
+CORE_SOURCES_C += $(addprefix src/core/libraries/audiodec/,audiodec.c)
 CORE_SOURCES_C += $(addprefix src/core/libraries/np/np_handler/,np_invitation_json.c)
 CORE_SOURCES_C += $(addprefix src/shadnet/,pb_wire.c shadnet_msg.c)
 CORE_SOURCES_C += $(addprefix src/video_core/host_shaders/,host_spirv.c)
