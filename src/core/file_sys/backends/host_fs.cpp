@@ -3,6 +3,9 @@
 
 #include <system_error>
 
+#include <retro_dirent.h>
+
+#include "common/path_util.h"
 #include "common/string_util.h"
 #include "core/file_sys/backends/host_fs.h"
 #include "core/file_sys/fs.h"
@@ -99,30 +102,40 @@ void HostFile::Stat(FileStat& out) {
     out = info ? MakeFileStat(*info, m_inode) : FileStat{};
 }
 
-HostDirectory::HostDirectory(const std::filesystem::path& root) : m_root(root) {
-    std::error_code ec;
-    m_it = std::filesystem::directory_iterator(m_root, ec);
-    m_end = std::filesystem::directory_iterator{};
+HostDirectory::HostDirectory(const std::filesystem::path& root)
+    : m_root(Common::FS::PathToUTF8String(root)) {
+    m_dir = retro_opendir_include_hidden(m_root.c_str(), true);
+}
+
+HostDirectory::~HostDirectory() {
+    if (m_dir) {
+        retro_closedir(m_dir);
+    }
 }
 
 bool HostDirectory::Next(DirEntry& out) {
-    if (m_it == m_end) {
-        return false;
+    while (m_dir && retro_readdir(m_dir)) {
+        const std::string_view name = retro_dirent_get_name(m_dir);
+        if (name == "." || name == "..") {
+            continue;
+        }
+        out.name = name;
+        out.is_directory = retro_dirent_is_dir(m_dir, nullptr);
+        // The size from what the listing already has (the find data on Windows)
+        int64_t size = 0;
+        out.size = (out.is_directory || !retro_dirent_stat(m_dir, &size, nullptr))
+                       ? 0
+                       : static_cast<u64>(size);
+        return true;
     }
-
-    const auto& entry = *m_it;
-    std::error_code ec;
-    out.name = entry.path().filename().string();
-    out.is_directory = entry.is_directory(ec);
-    out.size = out.is_directory ? 0 : entry.file_size(ec);
-
-    ++m_it;
-    return true;
+    return false;
 }
 
 void HostDirectory::Rewind() {
-    std::error_code ec;
-    m_it = std::filesystem::directory_iterator(m_root, ec);
+    if (m_dir) {
+        retro_closedir(m_dir);
+    }
+    m_dir = retro_opendir_include_hidden(m_root.c_str(), true);
 }
 
 HostFsBackend::HostFsBackend(std::filesystem::path root, bool read_only)
@@ -137,8 +150,7 @@ std::filesystem::path HostFsBackend::Resolve(std::string_view rel_path) const {
     if constexpr (!NeedsCaseInsensitiveSearch) {
         return direct;
     } else {
-        std::error_code ec;
-        if (std::filesystem::exists(direct, ec)) {
+        if (Common::FS::Exists(direct)) {
             return direct;
         }
         return ResolveCaseInsensitive(rel_path).value_or(std::move(direct));
@@ -151,7 +163,6 @@ std::optional<std::filesystem::path> HostFsBackend::ResolveCaseInsensitive(
 
     std::filesystem::path current = m_root;
     std::string prefix;
-    std::error_code ec;
 
     for (const auto& part : std::filesystem::path(rel_path)) {
         const std::string part_str = part.string();
@@ -168,40 +179,34 @@ std::optional<std::filesystem::path> HostFsBackend::ResolveCaseInsensitive(
             continue;
         }
 
-        if (std::filesystem::path candidate = current / part_str;
-            std::filesystem::exists(candidate, ec)) {
+        if (std::filesystem::path candidate = current / part_str; Common::FS::Exists(candidate)) {
             current = std::move(candidate);
             m_case_cache.emplace(prefix, current);
             continue;
         }
 
         const std::string part_low = Common::ToLower(part_str);
-        bool found = false;
-        for (const auto& entry : std::filesystem::directory_iterator(current, ec)) {
-            const auto name = entry.path().filename();
-            if (Common::ToLower(name.string()) != part_low) {
-                continue;
+        std::string match;
+        Common::FS::ForEachEntry(current, [&](std::string_view name, bool) {
+            if (match.empty() && Common::ToLower(std::string{name}) == part_low) {
+                match = name;
             }
-            current /= name;
-            m_case_cache.emplace(prefix, current);
-            found = true;
-            break;
-        }
-        if (!found) {
+        });
+        if (match.empty()) {
             return std::nullopt;
         }
+        current /= Common::FS::PathFromUTF8String(match);
+        m_case_cache.emplace(prefix, current);
     }
     return current;
 }
 
 bool HostFsBackend::Exists(std::string_view rel_path) {
-    std::error_code ec;
-    return std::filesystem::exists(Resolve(rel_path), ec);
+    return Common::FS::Exists(Resolve(rel_path));
 }
 
 bool HostFsBackend::IsDirectory(std::string_view rel_path) {
-    std::error_code ec;
-    return std::filesystem::is_directory(Resolve(rel_path), ec);
+    return Common::FS::IsDirectory(Resolve(rel_path));
 }
 
 bool HostFsBackend::Stat(std::string_view rel_path, FileStat& out) {
@@ -224,8 +229,7 @@ std::unique_ptr<IFile> HostFsBackend::Open(std::string_view rel_path,
         return nullptr;
     }
     const auto path = Resolve(rel_path);
-    std::error_code ec;
-    if (mode != Common::FS::FileAccessMode::Create && !std::filesystem::is_regular_file(path, ec)) {
+    if (mode != Common::FS::FileAccessMode::Create && !Common::FS::IsFile(path)) {
         return nullptr;
     }
     auto handle = std::make_unique<HostFile>(path, mode, m_read_only || !writable);
@@ -237,8 +241,7 @@ std::unique_ptr<IFile> HostFsBackend::Open(std::string_view rel_path,
 
 std::unique_ptr<IDirectory> HostFsBackend::OpenDir(std::string_view rel_path) {
     const auto path = Resolve(rel_path);
-    std::error_code ec;
-    if (!std::filesystem::is_directory(path, ec)) {
+    if (!Common::FS::IsDirectory(path)) {
         return nullptr;
     }
     return std::make_unique<HostDirectory>(path);

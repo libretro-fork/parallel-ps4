@@ -6,6 +6,7 @@
 #include <unordered_set>
 #include "common/assert.h"
 #include "common/logging/log.h"
+#include "common/path_util.h"
 #include "common/string_util.h"
 #include "core/file_sys/backends/host_fs.h"
 #include "core/file_sys/backends/zarchive_fs.h"
@@ -76,18 +77,18 @@ std::optional<std::filesystem::path> BaseGameFromOverlay(const std::filesystem::
 }
 
 std::optional<std::filesystem::path> ResolveGameRoot(const std::filesystem::path& root) {
-    if (std::filesystem::is_directory(root)) {
+    if (Common::FS::IsDirectory(root)) {
         return root;
     }
     if (Libretro::IsPkgFile(root)) {
         return root;
     }
-    if (root.extension() == ".zar" && std::filesystem::is_regular_file(root)) {
+    if (root.extension() == ".zar" && Common::FS::IsFile(root)) {
         return root;
     }
     std::filesystem::path with_ext = root;
     with_ext += ".zar";
-    if (std::filesystem::is_regular_file(with_ext)) {
+    if (Common::FS::IsFile(with_ext)) {
         return with_ext;
     }
     return std::nullopt;
@@ -95,7 +96,7 @@ std::optional<std::filesystem::path> ResolveGameRoot(const std::filesystem::path
 
 std::shared_ptr<IBackend> MntPoints::CreateBackend(const std::filesystem::path& host_path,
                                                    bool read_only) {
-    if (std::filesystem::is_directory(host_path)) {
+    if (Common::FS::IsDirectory(host_path)) {
         return std::make_shared<HostFsBackend>(host_path, read_only);
     }
     if (Libretro::IsPkgFile(host_path)) {
@@ -103,7 +104,7 @@ std::shared_ptr<IBackend> MntPoints::CreateBackend(const std::filesystem::path& 
         return backend->IsOpen() ? backend : nullptr;
     }
     const auto try_zar = [](const std::filesystem::path& zar) -> std::shared_ptr<IBackend> {
-        if (std::filesystem::is_regular_file(zar) && zar.extension() == ".zar") {
+        if (Common::FS::IsFile(zar) && zar.extension() == ".zar") {
             auto backend = std::make_shared<ZArchiveBackend>(zar);
             if (backend->IsOpen()) {
                 return backend;
@@ -240,7 +241,7 @@ std::filesystem::path MntPoints::GetHostPath(std::string_view path, bool* is_rea
 
     // Update folder is either mount + "-UPDATE" or mount + "-patch"
     std::filesystem::path patch_path = OverlayPath(mount->host_path, "-UPDATE");
-    if (!std::filesystem::exists(patch_path)) {
+    if (!Common::FS::Exists(patch_path)) {
         patch_path = OverlayPath(mount->host_path, "-patch");
     }
     if (!libretro_update.empty()) {
@@ -276,13 +277,12 @@ std::filesystem::path MntPoints::GetHostPath(std::string_view path, bool* is_rea
     }
 
     if ((corrected_path.starts_with("/app0") || corrected_path.starts_with("/hostapp")) &&
-        path_type != HostPathType::Base && std::filesystem::exists(mods_path)) {
+        path_type != HostPathType::Base && Common::FS::Exists(mods_path)) {
         return mods_path;
     }
 
     if ((corrected_path.starts_with("/app0") || corrected_path.starts_with("/hostapp")) &&
-        path_type != HostPathType::Base && !ignore_game_patches &&
-        std::filesystem::exists(patch_path)) {
+        path_type != HostPathType::Base && !ignore_game_patches && Common::FS::Exists(patch_path)) {
         return patch_path;
     }
 
@@ -296,13 +296,7 @@ std::filesystem::path MntPoints::GetHostPath(std::string_view path, bool* is_rea
         std::scoped_lock lk{m_mutex};
         path_parts.clear();
         auto current_path = host_path;
-        std::error_code ec;
-        while (!current_path.empty() && !std::filesystem::exists(current_path, ec)) {
-            if (ec) {
-                LOG_ERROR(Kernel_Fs, "fs::exists returned {}", ec.message());
-                current_path = "";
-                break;
-            }
+        while (!current_path.empty() && !Common::FS::Exists(current_path)) {
             // We have probably cached this if it's a folder.
             if (auto it = path_cache.find(current_path); it != path_cache.end()) {
                 current_path = it->second;
@@ -324,30 +318,23 @@ std::filesystem::path MntPoints::GetHostPath(std::string_view path, bool* is_rea
                     path_parts.pop_back();
                 };
                 // Can happen when the mismatch is in upper folder.
-                std::error_code ec;
-                if (std::filesystem::exists(current_path / part, ec)) {
+                if (Common::FS::Exists(current_path / part)) {
                     add_match(part);
                     continue;
-                } else if (ec) {
-                    LOG_ERROR(Kernel_Fs, "fs::exists returned {}", ec.message());
                 }
                 const auto part_low = Common::ToLower(part.string());
-                bool found_match = false;
-                for (const auto& path : std::filesystem::directory_iterator(current_path)) {
-                    const auto candidate = path.path().filename();
-                    const auto filename = Common::ToLower(candidate.string());
-                    // Check if a filename matches in case insensitive manner.
-                    if (filename != part_low) {
-                        continue;
+                // A name that matches in a case insensitive manner
+                std::string candidate;
+                Common::FS::ForEachEntry(current_path, [&](std::string_view name, bool) {
+                    if (candidate.empty() && Common::ToLower(std::string{name}) == part_low) {
+                        candidate = name;
                     }
-                    // We found a match, record the actual path in the cache.
-                    add_match(candidate);
-                    found_match = true;
-                    break;
-                }
-                if (!found_match) {
+                });
+                if (candidate.empty()) {
                     return std::optional<std::filesystem::path>({});
                 }
+                // Record the actual path in the cache.
+                add_match(Common::FS::PathFromUTF8String(candidate));
             }
         }
         return std::optional<std::filesystem::path>(current_path);

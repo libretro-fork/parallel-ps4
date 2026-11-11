@@ -17,6 +17,8 @@
 #include <ranges>
 #include <thread>
 #include <vector>
+#include <file/file_path.h>
+#include <vfs/vfs_implementation.h>
 #include "common/enum_names.h"
 
 #include "common/assert.h"
@@ -699,13 +701,21 @@ s32 PS4_SYSV_ABI posix_mkdir(const char* path, u16 mode) {
         return -1;
     }
 
-    std::error_code ec;
-    if (dir_name.empty() || !fs::create_directory(dir_name, ec)) {
-        if (ec == std::errc::no_such_file_or_directory) {
+    if (dir_name.empty()) {
+        *__Error() = POSIX_ENOENT;
+        return -1;
+    }
+    errno = 0;
+    const int made = retro_vfs_mkdir_impl(Common::FS::PathToUTF8String(dir_name).c_str());
+    if (made != 0) {
+        const int error = errno;
+        if (made == -2) {
+            *__Error() = POSIX_EEXIST;
+        } else if (!Common::FS::IsDirectory(dir_name.parent_path())) {
             *__Error() = POSIX_ENOENT;
-            return -1;
+        } else {
+            *__Error() = (error == EACCES || error == EPERM) ? POSIX_EACCES : POSIX_EIO;
         }
-        *__Error() = (ec.value() == EACCES || ec.value() == EPERM) ? POSIX_EACCES : POSIX_EIO;
         return -1;
     }
 
@@ -753,26 +763,27 @@ s32 PS4_SYSV_ABI posix_rmdir(const char* path) {
         return -1;
     }
 
-    std::error_code ec;
-    if (dir_name.empty() || !fs::exists(dir_name, ec)) {
+    if (dir_name.empty() || !Common::FS::Exists(dir_name)) {
         *__Error() = POSIX_ENOENT;
         return -1;
     }
 
-    if (!fs::is_directory(dir_name, ec)) {
+    if (!Common::FS::IsDirectory(dir_name)) {
         *__Error() = POSIX_ENOTDIR;
         return -1;
     }
 
-    fs::remove(dir_name, ec);
-
-    if (ec == std::errc::directory_not_empty) {
-        *__Error() = POSIX_ENOTEMPTY;
-        return -1;
-    }
-    if (ec) {
-        LOG_ERROR(Kernel_Fs, "remove failed: {}", ec.message());
-        *__Error() = (ec.value() == EACCES || ec.value() == EPERM) ? POSIX_EACCES : POSIX_EIO;
+    errno = 0;
+    if (!path_rmdir(Common::FS::PathToUTF8String(dir_name).c_str())) {
+        const int error = errno;
+        bool empty = true;
+        Common::FS::ForEachEntry(dir_name, [&](std::string_view, bool) { empty = false; });
+        if (!empty) {
+            *__Error() = POSIX_ENOTEMPTY;
+            return -1;
+        }
+        LOG_ERROR(Kernel_Fs, "rmdir failed: errno {}", error);
+        *__Error() = (error == EACCES || error == EPERM) ? POSIX_EACCES : POSIX_EIO;
         return -1;
     }
     return ORBIS_OK;
@@ -839,22 +850,14 @@ s32 PS4_SYSV_ABI posix_stat(const char* path, OrbisKernelStat* sb) {
         return ORBIS_OK;
     }
 
-    // get the difference between file clock and system clock
-    const auto now_sys = std::chrono::system_clock::now();
-    const auto now_file = fs::file_time_type::clock::now();
-    // calculate the file modified time
-    std::error_code ec;
-    const auto mtime =
-        fs::exists(path_name, ec) ? fs::last_write_time(path_name, ec) : fs::file_time_type{};
-    const auto mtimestamp = now_sys + (mtime - now_file);
-
     if (is_dir) {
         sb->st_mode = 0000777u | 0040000u;
         sb->st_size = 65536;
         sb->st_blksize = 65536;
         sb->st_blocks = 128;
-        sb->st_mtim.tv_sec =
-            std::chrono::duration_cast<std::chrono::seconds>(mtimestamp.time_since_epoch()).count();
+        if (const auto info = Common::FS::GetFileInfo(path_name)) {
+            sb->st_mtim.tv_sec = info->mtime_sec;
+        }
         // TODO incomplete
     } else {
         sb->st_mode = 0000777u | 0100000u;
@@ -877,10 +880,8 @@ s32 PS4_SYSV_ABI posix_stat(const char* path, OrbisKernelStat* sb) {
             sb->st_atim.tv_nsec = fst.atime_nsec;
             sb->st_ctim.tv_sec = fst.ctime_sec;
             sb->st_ctim.tv_nsec = fst.ctime_nsec;
-        } else {
-            sb->st_mtim.tv_sec =
-                std::chrono::duration_cast<std::chrono::seconds>(mtimestamp.time_since_epoch())
-                    .count();
+        } else if (const auto info = Common::FS::GetFileInfo(path_name)) {
+            sb->st_mtim.tv_sec = info->mtime_sec;
         }
         sb->st_blksize = 512;
         sb->st_blocks = (sb->st_size + 511) / 512;
@@ -1096,10 +1097,13 @@ s32 PS4_SYSV_ABI posix_truncate(const char* path, s64 length) {
         return -1;
     }
 
-    std::error_code ec;
-    fs::resize_file(host_path, static_cast<u64>(length), ec);
-    if (ec) {
-        *__Error() = NativeToPosixErrno(ec.value());
+    Common::FS::IOFile file;
+    if (const int error = file.Open(host_path, Common::FS::FileAccessMode::ReadWrite); error != 0) {
+        *__Error() = NativeToPosixErrno(error);
+        return -1;
+    }
+    if (!file.SetSize(static_cast<u64>(length))) {
+        *__Error() = POSIX_EIO;
         return -1;
     }
     return 0;
@@ -1142,10 +1146,9 @@ s32 PS4_SYSV_ABI posix_chmod(const char* path, u32 mode) {
         return -1;
     }
 
-    std::error_code ec;
-    fs::permissions(host_path, static_cast<fs::perms>(mode & 07777), ec);
-    if (ec) {
-        *__Error() = NativeToPosixErrno(ec.value());
+    // What a host keeps of a mode: whether the file can be written
+    if (!path_set_readonly(Common::FS::PathToUTF8String(host_path).c_str(), (mode & 0222) == 0)) {
+        *__Error() = Common::FS::Exists(host_path) ? POSIX_EIO : POSIX_ENOENT;
         return -1;
     }
     return 0;
@@ -1187,10 +1190,9 @@ s32 PS4_SYSV_ABI posix_fchmod(s32 fd, u32 mode) {
         return -1;
     }
 
-    std::error_code ec;
-    fs::permissions(file->m_host_name, static_cast<fs::perms>(mode & 07777), ec);
-    if (ec) {
-        *__Error() = NativeToPosixErrno(ec.value());
+    if (!path_set_readonly(Common::FS::PathToUTF8String(file->m_host_name).c_str(),
+                           (mode & 0222) == 0)) {
+        *__Error() = POSIX_EIO;
         return -1;
     }
 
@@ -1935,7 +1937,7 @@ s32 PS4_SYSV_ABI posix_unlink(const char* path) {
         return -1;
     }
 
-    if (fs::is_directory(host_path)) {
+    if (Common::FS::IsDirectory(host_path)) {
         *__Error() = POSIX_EPERM;
         return -1;
     }

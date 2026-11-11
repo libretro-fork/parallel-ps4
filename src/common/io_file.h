@@ -285,6 +285,8 @@ bool CopyFile(const std::filesystem::path& from, const std::filesystem::path& to
 /// True when there is something at @path.
 bool Exists(const std::filesystem::path& path);
 bool IsDirectory(const std::filesystem::path& path);
+/// True when @path is there and is not a directory.
+bool IsFile(const std::filesystem::path& path);
 /// Makes the directory @path and any of its parents that are missing; true when it is there.
 bool CreateDirectories(const std::filesystem::path& path);
 /// Removes @path: a file, or a directory with everything in it, without following links.

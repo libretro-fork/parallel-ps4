@@ -53,8 +53,7 @@ std::optional<u32> GetGuestInode(const FileIdentity& identity) {
 }
 
 bool IsZArchiveFile(const std::filesystem::path& path) {
-    std::error_code ec;
-    return path.extension() == ".zar" && std::filesystem::is_regular_file(path, ec) && !ec;
+    return path.extension() == ".zar" && Common::FS::IsFile(path);
 }
 
 std::filesystem::path StripZArchiveExtension(const std::filesystem::path& path) {
@@ -109,8 +108,7 @@ std::optional<std::filesystem::path> ResolveGameFilePath(const std::filesystem::
     // Directory-backed: just hand back the real path if the file exists.
     if (const auto host_root = backend->RootHostPath()) {
         const std::filesystem::path full_path = *host_root / rel_path;
-        std::error_code ec;
-        if (std::filesystem::is_regular_file(full_path, ec) && !ec) {
+        if (Common::FS::IsFile(full_path)) {
             return full_path;
         }
         return std::nullopt;
@@ -122,13 +120,14 @@ std::optional<std::filesystem::path> ResolveGameFilePath(const std::filesystem::
         Common::FS::GetUserPath(Common::FS::PathType::CacheDir) / "zar_meta" / archive_key;
     const std::filesystem::path dest = cache_dir / std::filesystem::path(rel_path);
 
-    std::error_code ec;
-    const auto archive_time = std::filesystem::last_write_time(backend->RootPath(), ec);
-    if (!ec && std::filesystem::is_regular_file(dest, ec) && !ec) {
-        const auto dest_time = std::filesystem::last_write_time(dest, ec);
-        if (!ec && dest_time >= archive_time) {
-            return dest;
-        }
+    // An extraction no older than the archive is used as it is
+    const std::string dest_utf8 = Common::FS::PathToUTF8String(dest);
+    int64_t archive_time = 0;
+    int64_t dest_time = 0;
+    if (path_get_mtime(Common::FS::PathToUTF8String(backend->RootPath()).c_str(), &archive_time) &&
+        Common::FS::IsFile(dest) && path_get_mtime(dest_utf8.c_str(), &dest_time) &&
+        dest_time >= archive_time) {
+        return dest;
     }
 
     const auto data = backend->ReadFile(rel_path);
@@ -136,11 +135,9 @@ std::optional<std::filesystem::path> ResolveGameFilePath(const std::filesystem::
         return std::nullopt;
     }
 
-    std::error_code mkdir_ec;
-    std::filesystem::create_directories(dest.parent_path(), mkdir_ec);
+    Common::FS::CreateDirectories(dest.parent_path());
 
-    if (!filestream_write_file(Common::FS::PathToUTF8String(dest).c_str(), data->data(),
-                               static_cast<s64>(data->size()))) {
+    if (!filestream_write_file(dest_utf8.c_str(), data->data(), static_cast<s64>(data->size()))) {
         LOG_ERROR(Common_Filesystem, "Failed to write the archive extraction: {}", dest.string());
         return std::nullopt;
     }

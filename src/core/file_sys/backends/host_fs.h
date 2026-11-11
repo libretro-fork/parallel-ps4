@@ -13,6 +13,8 @@
 #include "common/io_file.h"
 #include "core/file_sys/ifile.h"
 
+struct RDIR; // libretro-common, retro_dirent.h
+
 namespace Core::FileSys {
 
 /// IFile implementation backed by a real host file.
@@ -67,15 +69,14 @@ private:
 class HostDirectory final : public IDirectory {
 public:
     explicit HostDirectory(const std::filesystem::path& root);
-    ~HostDirectory() override = default;
+    ~HostDirectory() override;
 
     bool Next(DirEntry& out) override;
     void Rewind() override;
 
 private:
-    std::filesystem::path m_root;
-    std::filesystem::directory_iterator m_it;
-    std::filesystem::directory_iterator m_end;
+    std::string m_root; // UTF-8
+    RDIR* m_dir{};
 };
 
 class HostFsBackend final : public IBackend {
