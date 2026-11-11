@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "common/alignment.h"
+#include "common/combiner.h"
 #include "common/io_file.h"
 #include "common/logging/log.h"
 #include "common/path_util.h"
@@ -80,7 +81,7 @@ struct UsbGetdentsState {
     size_t current_index = 0;
 };
 
-static std::mutex g_usb_getdents_mutex;
+static Common::Combiner g_usb_getdents_mutex;
 static std::unordered_map<s32, UsbGetdentsState> g_usb_getdents_table;
 static s32 g_usb_next_fd = 1;
 
@@ -311,17 +312,18 @@ static s32 PS4_SYSV_ABI sceUsbStorageGetdentsOpen(u32 device_id, s32* out_fd, u6
         }
     });
 
-    std::scoped_lock lock(g_usb_getdents_mutex);
-    const s32 fd = g_usb_next_fd++;
-    const size_t count = state.items.size();
-    g_usb_getdents_table[fd] = std::move(state);
+    return g_usb_getdents_mutex.Run([&]() -> s32 {
+        const s32 fd = g_usb_next_fd++;
+        const size_t count = state.items.size();
+        g_usb_getdents_table[fd] = std::move(state);
 
-    *out_fd = fd;
-    *out_bufsize = 0x8000; // 32 KB buffer
+        *out_fd = fd;
+        *out_bufsize = 0x8000; // 32 KB buffer
 
-    LOG_INFO(Lib_Usbd, "opened getdents fd = {} for device {}, found {} entries", fd, device_id,
-             count);
-    return ORBIS_OK;
+        LOG_INFO(Lib_Usbd, "opened getdents fd = {} for device {}, found {} entries", fd, device_id,
+                 count);
+        return ORBIS_OK;
+    });
 }
 
 static s32 PS4_SYSV_ABI sceUsbStorageGetdentsRead(s32 fd, void* buffer, u64 bufsize,
@@ -331,53 +333,55 @@ static s32 PS4_SYSV_ABI sceUsbStorageGetdentsRead(s32 fd, void* buffer, u64 bufs
         return ORBIS_AUTO_MOUNTER_ERROR_INVAL;
     }
 
-    std::scoped_lock lock(g_usb_getdents_mutex);
-    auto it = g_usb_getdents_table.find(fd);
-    if (it == g_usb_getdents_table.end()) {
-        LOG_ERROR(Lib_Usbd, "invalid fd {}", fd);
-        *out_bytes_read = 0;
-        return ORBIS_AUTO_MOUNTER_ERROR_NOTSUP;
-    }
-
-    auto& state = it->second;
-    u64 bytes_written = 0;
-
-    while (state.current_index < state.items.size()) {
-        const auto& item = state.items[state.current_index];
-        const u16 namlen = static_cast<u16>(std::min<size_t>(item.name.size(), 255));
-        const u16 reclen = static_cast<u16>(Common::AlignUp<size_t>(8 + namlen + 1, 8));
-
-        if (bytes_written + reclen > bufsize) {
-            break;
+    return g_usb_getdents_mutex.Run([&]() -> s32 {
+        auto it = g_usb_getdents_table.find(fd);
+        if (it == g_usb_getdents_table.end()) {
+            LOG_ERROR(Lib_Usbd, "invalid fd {}", fd);
+            *out_bytes_read = 0;
+            return ORBIS_AUTO_MOUNTER_ERROR_NOTSUP;
         }
 
-        auto* entry =
-            reinterpret_cast<OrbisUsbStorageDirent*>(static_cast<u8*>(buffer) + bytes_written);
-        std::memset(entry, 0, reclen);
-        entry->d_fileno = static_cast<u32>(state.current_index + 1);
-        entry->d_reclen = reclen;
-        entry->d_type = item.is_directory ? 4 : 8; // 4 = DT_DIR, 8 = DT_REG
-        entry->d_namlen = static_cast<u8>(namlen);
-        std::memcpy(entry->d_name, item.name.data(), namlen);
-        entry->d_name[namlen] = '\0';
+        auto& state = it->second;
+        u64 bytes_written = 0;
 
-        LOG_TRACE(Lib_Usbd, "entry: '{}', type = {}", item.name, entry->d_type);
+        while (state.current_index < state.items.size()) {
+            const auto& item = state.items[state.current_index];
+            const u16 namlen = static_cast<u16>(std::min<size_t>(item.name.size(), 255));
+            const u16 reclen = static_cast<u16>(Common::AlignUp<size_t>(8 + namlen + 1, 8));
 
-        bytes_written += reclen;
-        state.current_index++;
-    }
+            if (bytes_written + reclen > bufsize) {
+                break;
+            }
 
-    *out_bytes_read = bytes_written;
-    LOG_DEBUG(Lib_Usbd, "fd = {}, returned {} bytes ({}/{} entries)", fd, bytes_written,
-              state.current_index, state.items.size());
-    return ORBIS_OK;
+            auto* entry =
+                reinterpret_cast<OrbisUsbStorageDirent*>(static_cast<u8*>(buffer) + bytes_written);
+            std::memset(entry, 0, reclen);
+            entry->d_fileno = static_cast<u32>(state.current_index + 1);
+            entry->d_reclen = reclen;
+            entry->d_type = item.is_directory ? 4 : 8; // 4 = DT_DIR, 8 = DT_REG
+            entry->d_namlen = static_cast<u8>(namlen);
+            std::memcpy(entry->d_name, item.name.data(), namlen);
+            entry->d_name[namlen] = '\0';
+
+            LOG_TRACE(Lib_Usbd, "entry: '{}', type = {}", item.name, entry->d_type);
+
+            bytes_written += reclen;
+            state.current_index++;
+        }
+
+        *out_bytes_read = bytes_written;
+        LOG_DEBUG(Lib_Usbd, "fd = {}, returned {} bytes ({}/{} entries)", fd, bytes_written,
+                  state.current_index, state.items.size());
+        return ORBIS_OK;
+    });
 }
 
 static s32 PS4_SYSV_ABI sceUsbStorageGetdentsClose(s32 fd) {
-    std::scoped_lock lock(g_usb_getdents_mutex);
-    g_usb_getdents_table.erase(fd);
-    LOG_DEBUG(Lib_Usbd, "closed fd = {}", fd);
-    return ORBIS_OK;
+    return g_usb_getdents_mutex.Run([&]() -> s32 {
+        g_usb_getdents_table.erase(fd);
+        LOG_DEBUG(Lib_Usbd, "closed fd = {}", fd);
+        return ORBIS_OK;
+    });
 }
 
 void RegisterLib(Core::Loader::SymbolsResolver* sym) {

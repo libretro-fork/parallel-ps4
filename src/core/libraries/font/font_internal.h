@@ -31,6 +31,7 @@
 
 #include <fmt/format.h>
 
+#include "common/combiner.h"
 #include "common/io_file.h"
 #include "common/logging/log.h"
 #include "common/singleton.h"
@@ -841,7 +842,7 @@ extern std::unordered_map<Libraries::Font::OrbisFontLib, LibraryState> g_library
 extern std::unordered_map<Libraries::Font::OrbisFontRenderSurface*,
                           const Libraries::Font::OrbisFontStyleFrame*>
     g_style_for_surface;
-extern std::mutex g_generated_glyph_mutex;
+extern Common::Combiner g_generated_glyph_mutex;
 extern std::unordered_set<Libraries::Font::OrbisFontGlyph> g_generated_glyphs;
 
 extern void* g_allocator_vtbl_stub[4];

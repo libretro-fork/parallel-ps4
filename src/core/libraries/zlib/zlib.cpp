@@ -1,14 +1,14 @@
 // SPDX-FileCopyrightText: Copyright 2024 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
-#include <condition_variable>
-#include <mutex>
 #include <stop_token>
 #include <unordered_map>
 #include <queue>
 
 #include <encodings/deflate.h>
 
+#include "common/combiner.h"
+#include "common/event_count.h"
 #include "common/logging/log.h"
 #include "common/thread.h"
 #include "core/libraries/kernel/threads.h"
@@ -33,11 +33,11 @@ struct InflateResult {
 
 static Kernel::Thread task_thread;
 
-static std::mutex mutex;
+static Common::Combiner mutex;
 static std::queue<InflateTask> task_queue;
-static std::condition_variable_any task_queue_cv;
+static Common::EventCount task_queue_cv;
 static std::queue<u64> done_queue;
-static std::condition_variable_any done_queue_cv;
+static Common::EventCount done_queue_cv;
 static std::unordered_map<u64, InflateResult> results;
 static u64 next_request_id;
 
@@ -50,13 +50,23 @@ void ZlibTaskThread(const std::stop_token& stop) {
     while (!stop.stop_requested()) {
         InflateTask task;
         {
-            // Lock and pop from the task queue, unless stop has been requested.
-            std::unique_lock lock(mutex);
-            if (!task_queue_cv.wait(lock, stop, [&] { return !task_queue.empty(); })) {
+            // Pop from the task queue, unless stop has been requested.
+            const std::stop_callback wake{stop, [] { task_queue_cv.Notify(); }};
+            bool got = false;
+            task_queue_cv.Wait([&] {
+                got = mutex.Run([&] {
+                    if (task_queue.empty()) {
+                        return false;
+                    }
+                    task = task_queue.front();
+                    task_queue.pop();
+                    return true;
+                });
+                return got || stop.stop_requested();
+            });
+            if (!got) {
                 break;
             }
-            task = task_queue.front();
-            task_queue.pop();
         }
 
         // A zlib stream (RFC 1950), whole, into the game's buffer: what uncompress() does.
@@ -79,19 +89,20 @@ void ZlibTaskThread(const std::stop_token& stop) {
 
         {
             // Lock, insert the new result, and push the finished request ID to the done queue.
-            std::unique_lock lock(mutex);
-            results[task.request_id] = InflateResult{
-                .length = static_cast<u32>(decompressed_length),
-                // Suspended with input left: the output is full. With none left, the stream
-                // ends early, which uncompress() reports as bad data.
-                .status = ret == RDEFLATE_PROCESS_END ? ORBIS_OK
-                          : ret == RDEFLATE_PROCESS_NEXT && consumed < task.src_length
-                              ? ORBIS_ZLIB_ERROR_NOSPACE
-                              : ORBIS_ZLIB_ERROR_FATAL,
-            };
-            done_queue.push(task.request_id);
+            mutex.Run([&] {
+                results[task.request_id] = InflateResult{
+                    .length = static_cast<u32>(decompressed_length),
+                    // Suspended with input left: the output is full. With none left, the stream
+                    // ends early, which uncompress() reports as bad data.
+                    .status = ret == RDEFLATE_PROCESS_END ? ORBIS_OK
+                              : ret == RDEFLATE_PROCESS_NEXT && consumed < task.src_length
+                                  ? ORBIS_ZLIB_ERROR_NOSPACE
+                                  : ORBIS_ZLIB_ERROR_FATAL,
+                };
+                done_queue.push(task.request_id);
+            });
         }
-        done_queue_cv.notify_one();
+        done_queue_cv.Notify();
     }
     rinflate_free(inflater);
 }
@@ -123,8 +134,7 @@ s32 PS4_SYSV_ABI sceZlibInflate(const void* src, u32 src_len, void* dst, u32 dst
         return ORBIS_ZLIB_ERROR_INVALID;
     }
 
-    {
-        std::unique_lock lock(mutex);
+    mutex.Run([&] {
         *request_id = next_request_id++;
         task_queue.emplace(InflateTask{
             .request_id = *request_id,
@@ -133,8 +143,8 @@ s32 PS4_SYSV_ABI sceZlibInflate(const void* src, u32 src_len, void* dst, u32 dst
             .dst = dst,
             .dst_length = dst_len,
         });
-        task_queue_cv.notify_one();
-    }
+        task_queue_cv.Notify();
+    });
     return ORBIS_OK;
 }
 
@@ -149,17 +159,40 @@ s32 PS4_SYSV_ABI sceZlibWaitForDone(u64* request_id, const u32* timeout) {
 
     {
         // Pop from the done queue, unless the timeout is reached.
-        std::unique_lock lock(mutex);
-        const auto pred = [] { return !done_queue.empty(); };
-        if (timeout) {
-            if (!done_queue_cv.wait_for(lock, std::chrono::milliseconds(*timeout), pred)) {
+        const auto take = [&] {
+            return mutex.Run([&] {
+                if (done_queue.empty()) {
+                    return false;
+                }
+                *request_id = done_queue.front();
+                done_queue.pop();
+                return true;
+            });
+        };
+        const auto deadline =
+            std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout ? *timeout : 0);
+        while (!take()) {
+            const int key = retro_eventcount_prepare_wait(done_queue_cv.get());
+            if (take()) {
+                retro_eventcount_cancel_wait(done_queue_cv.get());
+                break;
+            }
+            if (!timeout) {
+                retro_eventcount_commit_wait(done_queue_cv.get(), key);
+                continue;
+            }
+            const auto left = std::chrono::ceil<std::chrono::microseconds>(
+                                  deadline - std::chrono::steady_clock::now())
+                                  .count();
+            if (left <= 0) {
+                retro_eventcount_cancel_wait(done_queue_cv.get());
+                if (take()) {
+                    break;
+                }
                 return ORBIS_ZLIB_ERROR_TIMEDOUT;
             }
-        } else {
-            done_queue_cv.wait(lock, pred);
+            retro_eventcount_commit_wait_timeout(done_queue_cv.get(), key, left);
         }
-        *request_id = done_queue.front();
-        done_queue.pop();
     }
     return ORBIS_OK;
 }
@@ -173,16 +206,15 @@ s32 PS4_SYSV_ABI sceZlibGetResult(const u64 request_id, u32* dst_length, s32* st
         return ORBIS_ZLIB_ERROR_INVALID;
     }
 
-    {
-        std::unique_lock lock(mutex);
+    return mutex.Run([&] {
         if (!results.contains(request_id)) {
             return ORBIS_ZLIB_ERROR_NOT_FOUND;
         }
         const auto result = results[request_id];
         *dst_length = result.length;
         *status = result.status;
-    }
-    return ORBIS_OK;
+        return ORBIS_OK;
+    });
 }
 
 s32 PS4_SYSV_ABI sceZlibFinalize() {

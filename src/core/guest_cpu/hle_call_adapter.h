@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 #pragma once
 
+#include "common/combiner.h"
 #include "common/logging/log.h"
 #include "common/types.h"
 #include "guest_cpu.h"
@@ -86,7 +87,7 @@ public:
     [[nodiscard]] std::shared_ptr<HleCallAdapter> Find(u64 operation) const;
 
 private:
-    mutable std::shared_mutex registry_mutex;
+    mutable Common::Combiner registry_mutex;
     u64 next_operation{1};
     std::vector<std::shared_ptr<HleCallAdapter>> adapters;
 };
@@ -119,7 +120,7 @@ private:
         std::size_t size{};
     };
 
-    mutable std::mutex allocator_mutex;
+    mutable Common::Combiner allocator_mutex;
     std::vector<Allocation> allocations;
     std::vector<GuestExecutionRange> executable_ranges;
     std::unordered_map<u64, u64> veneers;

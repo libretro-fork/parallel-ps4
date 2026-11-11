@@ -159,46 +159,47 @@ std::filesystem::path HostFsBackend::Resolve(std::string_view rel_path) const {
 
 std::optional<std::filesystem::path> HostFsBackend::ResolveCaseInsensitive(
     std::string_view rel_path) const {
-    std::scoped_lock lk{m_case_cache_mutex};
+    return m_case_cache_mutex.Run([&]() -> std::optional<std::filesystem::path> {
+        std::filesystem::path current = m_root;
+        std::string prefix;
 
-    std::filesystem::path current = m_root;
-    std::string prefix;
-
-    for (const auto& part : std::filesystem::path(rel_path)) {
-        const std::string part_str = part.string();
-        if (part_str.empty() || part_str == ".") {
-            continue;
-        }
-        if (!prefix.empty()) {
-            prefix += '/';
-        }
-        prefix += Common::ToLower(part_str);
-
-        if (const auto it = m_case_cache.find(prefix); it != m_case_cache.end()) {
-            current = it->second;
-            continue;
-        }
-
-        if (std::filesystem::path candidate = current / part_str; Common::FS::Exists(candidate)) {
-            current = std::move(candidate);
-            m_case_cache.emplace(prefix, current);
-            continue;
-        }
-
-        const std::string part_low = Common::ToLower(part_str);
-        std::string match;
-        Common::FS::ForEachEntry(current, [&](std::string_view name, bool) {
-            if (match.empty() && Common::ToLower(std::string{name}) == part_low) {
-                match = name;
+        for (const auto& part : std::filesystem::path(rel_path)) {
+            const std::string part_str = part.string();
+            if (part_str.empty() || part_str == ".") {
+                continue;
             }
-        });
-        if (match.empty()) {
-            return std::nullopt;
+            if (!prefix.empty()) {
+                prefix += '/';
+            }
+            prefix += Common::ToLower(part_str);
+
+            if (const auto it = m_case_cache.find(prefix); it != m_case_cache.end()) {
+                current = it->second;
+                continue;
+            }
+
+            if (std::filesystem::path candidate = current / part_str;
+                Common::FS::Exists(candidate)) {
+                current = std::move(candidate);
+                m_case_cache.emplace(prefix, current);
+                continue;
+            }
+
+            const std::string part_low = Common::ToLower(part_str);
+            std::string match;
+            Common::FS::ForEachEntry(current, [&](std::string_view name, bool) {
+                if (match.empty() && Common::ToLower(std::string{name}) == part_low) {
+                    match = name;
+                }
+            });
+            if (match.empty()) {
+                return std::nullopt;
+            }
+            current /= Common::FS::PathFromUTF8String(match);
+            m_case_cache.emplace(prefix, current);
         }
-        current /= Common::FS::PathFromUTF8String(match);
-        m_case_cache.emplace(prefix, current);
-    }
-    return current;
+        return current;
+    });
 }
 
 bool HostFsBackend::Exists(std::string_view rel_path) {

@@ -130,12 +130,13 @@ void L::DrawAdvanced() {
 
     if (DebugState.should_show_frame_dump && DebugState.waiting_reg_dumps.empty()) {
         DebugState.should_show_frame_dump = false;
-        std::unique_lock lock{DebugState.frame_dump_list_mutex};
-        while (!DebugState.frame_dump_list.empty()) {
-            const auto& frame_dump = DebugState.frame_dump_list.back();
-            frame_viewers.emplace_back(frame_dump);
-            DebugState.frame_dump_list.pop_back();
-        }
+        DebugState.frame_dump_list_mutex.Run([&] {
+            while (!DebugState.frame_dump_list.empty()) {
+                const auto& frame_dump = DebugState.frame_dump_list.back();
+                frame_viewers.emplace_back(frame_dump);
+                DebugState.frame_dump_list.pop_back();
+            }
+        });
         static bool first_time = true;
         if (first_time) {
             first_time = false;

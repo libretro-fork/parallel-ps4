@@ -804,36 +804,37 @@ u64 PkgReader::Read(const Node& node, u64 offset, u64 size, void* dst) {
         return 0;
     }
     size = std::min(size, node.size - offset);
-    std::scoped_lock lock{mutex};
-    u8* out = static_cast<u8*>(dst);
-    if (node.entry) {
-        return ReadEntry(node, offset, size, out);
-    }
-    u64 done = 0;
-    while (done < size) {
-        const u64 at = offset + done;
-        const u64 index = at / BlockSize;
-        if (index >= node.blocks) {
-            break;
+    return mutex.Run([&]() -> u64 {
+        u8* out = static_cast<u8*>(dst);
+        if (node.entry) {
+            return ReadEntry(node, offset, size, out);
         }
-        const u32 block = node.first_block + static_cast<u32>(index);
-        const u64 within = at % BlockSize;
-        const u64 count = std::min(size - done, BlockSize - within);
-        if (count == BlockSize) {
-            // A whole block: decoded straight into the caller's memory, past the cache
-            if (!DecodeBlock(block, out + done)) {
+        u64 done = 0;
+        while (done < size) {
+            const u64 at = offset + done;
+            const u64 index = at / BlockSize;
+            if (index >= node.blocks) {
                 break;
             }
-        } else {
-            const u8* cached = Block(block);
-            if (!cached) {
-                break;
+            const u32 block = node.first_block + static_cast<u32>(index);
+            const u64 within = at % BlockSize;
+            const u64 count = std::min(size - done, BlockSize - within);
+            if (count == BlockSize) {
+                // A whole block: decoded straight into the caller's memory, past the cache
+                if (!DecodeBlock(block, out + done)) {
+                    break;
+                }
+            } else {
+                const u8* cached = Block(block);
+                if (!cached) {
+                    break;
+                }
+                std::memcpy(out + done, cached + within, count);
             }
-            std::memcpy(out + done, cached + within, count);
+            done += count;
         }
-        done += count;
-    }
-    return done;
+        return done;
+    });
 }
 
 } // namespace Libretro

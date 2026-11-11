@@ -10,6 +10,7 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include "common/combiner.h"
 #include "common/io_file.h"
 #include "core/file_sys/ifile.h"
 
@@ -111,7 +112,7 @@ private:
     std::optional<std::filesystem::path> ResolveCaseInsensitive(std::string_view rel_path) const;
     std::filesystem::path m_root;
     bool m_read_only;
-    mutable std::mutex m_case_cache_mutex;
+    mutable Common::Combiner m_case_cache_mutex;
     mutable std::unordered_map<std::string, std::filesystem::path> m_case_cache;
 };
 

@@ -10,6 +10,7 @@
 #include <cstdint>
 #include <imgui.h>
 
+#include "common/combiner.h"
 #include "common/path_util.h"
 #include "common/quick_exit.h"
 #include "core/debug_state.h"
@@ -35,7 +36,7 @@ static std::vector<ImGui::Layer*> layers;
 // Using deque to keep the order of changes in case a Layer is removed then added again between
 // frames.
 static std::deque<std::pair<bool, ImGui::Layer*>> change_layers{};
-static std::mutex change_layers_mutex{};
+static Common::Combiner change_layers_mutex{};
 
 static ImGuiID dock_id;
 
@@ -219,8 +220,7 @@ static void PlatformNewFrame(bool is_reusing_frame) {
 }
 
 ImGuiID NewFrame(bool is_reusing_frame) {
-    {
-        std::scoped_lock lock{change_layers_mutex};
+    change_layers_mutex.Run([&] {
         while (!change_layers.empty()) {
             const auto [to_be_added, layer] = change_layers.front();
             if (to_be_added) {
@@ -231,7 +231,7 @@ ImGuiID NewFrame(bool is_reusing_frame) {
             }
             change_layers.pop_front();
         }
-    }
+    });
 
     PlatformNewFrame(is_reusing_frame);
     ImGui::NewFrame();
@@ -299,13 +299,11 @@ bool MustKeepDrawing() {
 } // namespace Core
 
 void Layer::AddLayer(Layer* layer) {
-    std::scoped_lock lock{change_layers_mutex};
-    change_layers.emplace_back(true, layer);
+    change_layers_mutex.Run([&] { change_layers.emplace_back(true, layer); });
 }
 
 void Layer::RemoveLayer(Layer* layer) {
-    std::scoped_lock lock{change_layers_mutex};
-    change_layers.emplace_back(false, layer);
+    change_layers_mutex.Run([&] { change_layers.emplace_back(false, layer); });
 }
 
 } // namespace ImGui

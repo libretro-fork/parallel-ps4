@@ -9,6 +9,7 @@
 #include <mutex>
 #include <queue>
 
+#include "common/combiner.h"
 #include "common/io_file.h"
 #include "core/libraries/usbd/usb_backend.h"
 
@@ -58,7 +59,7 @@ public:
     u8 LoadSkylander(u8* buf, Common::FS::IOFile file);
 
 protected:
-    std::mutex sky_mutex;
+    Common::Combiner sky_mutex;
 
 private:
     static bool IsSkylanderNumberValid(u8 sky_num);

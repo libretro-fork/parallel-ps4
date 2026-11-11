@@ -37,38 +37,38 @@ void PS4_SYSV_ABI AvPlayer::DeallocateTexture(void* handle, void* memory) {
 
 int PS4_SYSV_ABI AvPlayer::OpenFile(void* handle, const char* filename) {
     auto const self = reinterpret_cast<AvPlayer*>(handle);
-    std::lock_guard guard(self->m_file_io_mutex);
-
-    const auto open = self->m_init_data_original.file_replacement.open;
-    const auto ptr = self->m_init_data_original.file_replacement.object_ptr;
-    return open(ptr, filename);
+    return self->m_file_io_mutex.Run([&]() -> int {
+        const auto open = self->m_init_data_original.file_replacement.open;
+        const auto ptr = self->m_init_data_original.file_replacement.object_ptr;
+        return open(ptr, filename);
+    });
 }
 
 int PS4_SYSV_ABI AvPlayer::CloseFile(void* handle) {
     auto const self = reinterpret_cast<AvPlayer*>(handle);
-    std::lock_guard guard(self->m_file_io_mutex);
-
-    const auto close = self->m_init_data_original.file_replacement.close;
-    const auto ptr = self->m_init_data_original.file_replacement.object_ptr;
-    return close(ptr);
+    return self->m_file_io_mutex.Run([&]() -> int {
+        const auto close = self->m_init_data_original.file_replacement.close;
+        const auto ptr = self->m_init_data_original.file_replacement.object_ptr;
+        return close(ptr);
+    });
 }
 
 int PS4_SYSV_ABI AvPlayer::ReadOffsetFile(void* handle, u8* buffer, u64 position, u32 length) {
     auto const self = reinterpret_cast<AvPlayer*>(handle);
-    std::lock_guard guard(self->m_file_io_mutex);
-
-    const auto read_offset = self->m_init_data_original.file_replacement.read_offset;
-    const auto ptr = self->m_init_data_original.file_replacement.object_ptr;
-    return read_offset(ptr, buffer, position, length);
+    return self->m_file_io_mutex.Run([&]() -> int {
+        const auto read_offset = self->m_init_data_original.file_replacement.read_offset;
+        const auto ptr = self->m_init_data_original.file_replacement.object_ptr;
+        return read_offset(ptr, buffer, position, length);
+    });
 }
 
 u64 PS4_SYSV_ABI AvPlayer::SizeFile(void* handle) {
     auto const self = reinterpret_cast<AvPlayer*>(handle);
-    std::lock_guard guard(self->m_file_io_mutex);
-
-    const auto size = self->m_init_data_original.file_replacement.size;
-    const auto ptr = self->m_init_data_original.file_replacement.object_ptr;
-    return size(ptr);
+    return self->m_file_io_mutex.Run([&]() -> u64 {
+        const auto size = self->m_init_data_original.file_replacement.size;
+        const auto ptr = self->m_init_data_original.file_replacement.object_ptr;
+        return size(ptr);
+    });
 }
 
 AvPlayerInitData AvPlayer::StubInitData(const AvPlayerInitData& data) {

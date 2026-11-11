@@ -8,6 +8,7 @@
 #include <mutex>
 #include <string>
 #include <vector>
+#include "common/combiner.h"
 #include "common/elf_info.h"
 #include "common/io_file.h"
 #include "common/path_util.h"
@@ -49,24 +50,23 @@ public:
         if (name == "eboot.bin") {
             return;
         }
-        std::scoped_lock lock(modules_mutex);
-        modules.push_back({name, IsSystemModule(path), true});
+        modules_mutex.Run([&] { modules.push_back({name, IsSystemModule(path), true}); });
     }
 
     static void AddModule(std::string name) {
         name = name + ".prx";
-        std::scoped_lock lock(modules_mutex);
+        modules_mutex.Run([&] {
+            bool is_sys_module = IsSystemModule(name);
+            bool is_lle = false;
+            auto it = std::find_if(modules.begin(), modules.end(),
+                                   [&name, is_sys_module, is_lle](const ModuleInfo& entry) {
+                                       return entry.name == name && !entry.is_lle;
+                                   });
 
-        bool is_sys_module = IsSystemModule(name);
-        bool is_lle = false;
-        auto it = std::find_if(modules.begin(), modules.end(),
-                               [&name, is_sys_module, is_lle](const ModuleInfo& entry) {
-                                   return entry.name == name && !entry.is_lle;
-                               });
-
-        if (it == modules.end()) {
-            modules.push_back({name, is_sys_module, is_lle});
-        }
+            if (it == modules.end()) {
+                modules.push_back({name, is_sys_module, is_lle});
+            }
+        });
     }
 
 private:
@@ -76,7 +76,7 @@ private:
         bool is_lle;
     };
 
-    static inline std::mutex modules_mutex;
+    static inline Common::Combiner modules_mutex;
 
     static inline std::vector<ModuleInfo> modules;
 };

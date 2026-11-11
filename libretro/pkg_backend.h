@@ -6,6 +6,7 @@
 
 #pragma once
 
+#include "common/combiner.h"
 #include <filesystem>
 #include <memory>
 #include <mutex>
@@ -47,7 +48,7 @@ public:
 private:
     std::shared_ptr<PkgReader> reader;
     const PkgReader::Node* node;
-    mutable std::mutex position_mutex;
+    mutable Common::Combiner position_mutex;
     u64 position = 0;
 };
 

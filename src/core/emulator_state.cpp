@@ -4,22 +4,22 @@
 #include "emulator_state.h"
 
 std::shared_ptr<EmulatorState> EmulatorState::s_instance = nullptr;
-std::mutex EmulatorState::s_mutex;
+Common::Combiner EmulatorState::s_mutex;
 
 EmulatorState::EmulatorState() {}
 
 EmulatorState::~EmulatorState() {}
 
 std::shared_ptr<EmulatorState> EmulatorState::GetInstance() {
-    std::lock_guard<std::mutex> lock(s_mutex);
-    if (!s_instance)
-        s_instance = std::make_shared<EmulatorState>();
-    return s_instance;
+    return s_mutex.Run([&]() -> std::shared_ptr<EmulatorState> {
+        if (!s_instance)
+            s_instance = std::make_shared<EmulatorState>();
+        return s_instance;
+    });
 }
 
 void EmulatorState::SetInstance(std::shared_ptr<EmulatorState> instance) {
-    std::lock_guard<std::mutex> lock(s_mutex);
-    s_instance = instance;
+    s_mutex.Run([&] { s_instance = instance; });
 }
 
 bool EmulatorState::IsGameRunning() const {

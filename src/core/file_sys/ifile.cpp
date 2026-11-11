@@ -8,6 +8,7 @@
 #include <file/file_path.h>
 #include <streams/file_stream.h>
 
+#include "common/combiner.h"
 #include "common/hash.h"
 #include "common/logging/log.h"
 #include "common/path_util.h"
@@ -35,21 +36,22 @@ struct FileIdentityHash {
 } // namespace
 
 std::optional<u32> GetGuestInode(const FileIdentity& identity) {
-    static std::mutex mutex;
+    static Common::Combiner mutex;
     static std::unordered_map<FileIdentity, u32, FileIdentityHash> inodes;
     static u32 next_inode = 1;
 
-    std::scoped_lock lk{mutex};
-    if (const auto it = inodes.find(identity); it != inodes.end()) {
-        return it->second;
-    }
-    if (next_inode == 0) {
-        LOG_ERROR(Kernel_Fs, "Out of guest inode numbers");
-        return std::nullopt;
-    }
-    const u32 inode = next_inode++;
-    inodes.emplace(identity, inode);
-    return inode;
+    return mutex.Run([&]() -> std::optional<u32> {
+        if (const auto it = inodes.find(identity); it != inodes.end()) {
+            return it->second;
+        }
+        if (next_inode == 0) {
+            LOG_ERROR(Kernel_Fs, "Out of guest inode numbers");
+            return std::nullopt;
+        }
+        const u32 inode = next_inode++;
+        inodes.emplace(identity, inode);
+        return inode;
+    });
 }
 
 bool IsZArchiveFile(const std::filesystem::path& path) {

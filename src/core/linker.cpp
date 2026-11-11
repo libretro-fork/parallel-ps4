@@ -292,35 +292,36 @@ void SetGuestIntegerArguments(GuestExecutionRequest& request,
 } // namespace
 
 std::optional<GuestExecutionFailure> Linker::InitializeFexRuntime() {
-    std::scoped_lock lock{m_fex_runtime_mutex};
-    if (m_fex_backend != nullptr) return std::nullopt;
+    return m_fex_runtime_mutex.Run([&]() -> std::optional<GuestExecutionFailure> {
+        if (m_fex_backend != nullptr)
+            return std::nullopt;
 
-    auto& registry = m_hle_symbols.GetHleCallRegistry();
-    if (m_fex_exit_veneer == 0) {
-        const auto adapter = registry.Register(GuestCpu::MakeHleCallAdapter(ProgramExitFunc),
-                                               "bachata.program_exit");
-        if (adapter == nullptr) {
-            return GuestExecutionFailure{GuestExecutionStage::Execute, EIO};
+        auto& registry = m_hle_symbols.GetHleCallRegistry();
+        if (m_fex_exit_veneer == 0) {
+            const auto adapter = registry.Register(GuestCpu::MakeHleCallAdapter(ProgramExitFunc),
+                                                   "bachata.program_exit");
+            if (adapter == nullptr) {
+                return GuestExecutionFailure{GuestExecutionStage::Execute, EIO};
+            }
+            const auto veneer = m_hle_veneers->Allocate(*adapter);
+            if (const auto* failure = std::get_if<GuestCpu::HleVeneerFailure>(&veneer)) {
+                return GuestExecutionFailure{GuestExecutionStage::Mapping, failure->error};
+            }
+            m_fex_exit_veneer = std::get<u64>(veneer);
         }
-        const auto veneer = m_hle_veneers->Allocate(*adapter);
-        if (const auto* failure = std::get_if<GuestCpu::HleVeneerFailure>(&veneer)) {
-            return GuestExecutionFailure{GuestExecutionStage::Mapping, failure->error};
-        }
-        m_fex_exit_veneer = std::get<u64>(veneer);
-    }
 
-    m_fex_exec_query = {memory, m_hle_veneers.get()};
-    m_fex_bridge = std::make_unique<GuestCpu::HleGuestBridge>(
-        registry, ValidateGuestMemory, memory, ReportGuestHleFailure, nullptr,
-        QueryGuestExecutableMemory, &m_fex_exec_query);
-    auto backend = FexGuestCpuBackend::Create(*m_fex_bridge);
-    if (const auto* failure = std::get_if<GuestExecutionFailure>(&backend)) {
-        m_fex_bridge.reset();
-        return *failure;
-    }
-    m_fex_backend =
-        std::move(std::get<std::unique_ptr<FexGuestCpuBackend>>(backend));
-    return std::nullopt;
+        m_fex_exec_query = {memory, m_hle_veneers.get()};
+        m_fex_bridge = std::make_unique<GuestCpu::HleGuestBridge>(
+            registry, ValidateGuestMemory, memory, ReportGuestHleFailure, nullptr,
+            QueryGuestExecutableMemory, &m_fex_exec_query);
+        auto backend = FexGuestCpuBackend::Create(*m_fex_bridge);
+        if (const auto* failure = std::get_if<GuestExecutionFailure>(&backend)) {
+            m_fex_bridge.reset();
+            return *failure;
+        }
+        m_fex_backend = std::move(std::get<std::unique_ptr<FexGuestCpuBackend>>(backend));
+        return std::nullopt;
+    });
 }
 
 Linker::GuestFunctionResult Linker::RunGuestFunction(VAddr entry,
@@ -405,17 +406,20 @@ Linker::GuestFunctionResult Linker::RunGuestFunction(VAddr entry,
 
 VAddr Linker::AllocateHleVeneer(std::shared_ptr<GuestCpu::HleCallAdapter> adapter,
                                 std::string_view name) {
-    std::scoped_lock lock{m_fex_runtime_mutex};
-    const auto registered = m_hle_symbols.GetHleCallRegistry().Register(std::move(adapter), name);
-    if (registered == nullptr) {
-        return 0;
-    }
-    const auto veneer = m_hle_veneers->Allocate(*registered);
-    if (const auto* failure = std::get_if<GuestCpu::HleVeneerFailure>(&veneer)) {
-        LOG_ERROR(Core_Linker, "Unable to allocate an HLE veneer for {}: {}", name, failure->error);
-        return 0;
-    }
-    return std::get<u64>(veneer);
+    return m_fex_runtime_mutex.Run([&]() -> VAddr {
+        const auto registered =
+            m_hle_symbols.GetHleCallRegistry().Register(std::move(adapter), name);
+        if (registered == nullptr) {
+            return 0;
+        }
+        const auto veneer = m_hle_veneers->Allocate(*registered);
+        if (const auto* failure = std::get_if<GuestCpu::HleVeneerFailure>(&veneer)) {
+            LOG_ERROR(Core_Linker, "Unable to allocate an HLE veneer for {}: {}", name,
+                      failure->error);
+            return 0;
+        }
+        return std::get<u64>(veneer);
+    });
 }
 
 Linker::GuestFunctionResult Linker::RunGuestMain(EntryParams* params) {
@@ -652,40 +656,42 @@ void Linker::Execute(const std::vector<std::string>& args) {
 }
 
 s32 Linker::LoadModule(const std::filesystem::path& elf_name, bool is_dynamic) {
-    std::scoped_lock lk{mutex};
-    auto* mnt = Common::Singleton<Core::FileSys::MntPoints>::Instance();
-    const std::string as_guest = elf_name.generic_string();
-    std::unique_ptr<Core::FileSys::IFile> handle;
-    if (!as_guest.empty() && as_guest.front() == '/') {
-        handle = mnt->Open(as_guest, /*writable=*/false);
-    }
-    if (!handle) {
-        if (!Common::FS::Exists(elf_name)) {
-            LOG_ERROR(Core_Linker, "Provided file {} does not exist", elf_name.string());
-            return -1;
+    return mutex.Run([&]() -> s32 {
+        auto* mnt = Common::Singleton<Core::FileSys::MntPoints>::Instance();
+        const std::string as_guest = elf_name.generic_string();
+        std::unique_ptr<Core::FileSys::IFile> handle;
+        if (!as_guest.empty() && as_guest.front() == '/') {
+            handle = mnt->Open(as_guest, /*writable=*/false);
         }
-        auto host = std::make_unique<Core::FileSys::HostFile>(
-            elf_name, Common::FS::FileAccessMode::Read, /*read_only=*/true);
-        if (!host->IsOpen()) {
-            LOG_ERROR(Core_Linker, "Provided file {} could not be opened", elf_name.string());
-            return -1;
+        if (!handle) {
+            if (!Common::FS::Exists(elf_name)) {
+                LOG_ERROR(Core_Linker, "Provided file {} does not exist", elf_name.string());
+                return -1;
+            }
+            auto host = std::make_unique<Core::FileSys::HostFile>(
+                elf_name, Common::FS::FileAccessMode::Read, /*read_only=*/true);
+            if (!host->IsOpen()) {
+                LOG_ERROR(Core_Linker, "Provided file {} could not be opened", elf_name.string());
+                return -1;
+            }
+            handle = std::move(host);
         }
-        handle = std::move(host);
-    }
 
-    s32 mod_id = m_modules.size();
-    auto module =
-        std::make_unique<Module>(memory, elf_name, std::move(handle), max_tls_index, mod_id);
-    ASSERT_MSG(module->IsValid(),
-               "Provided file {} is not valid ELF file. This usually indicated a corrupted dump.",
-               elf_name.string());
+        s32 mod_id = m_modules.size();
+        auto module =
+            std::make_unique<Module>(memory, elf_name, std::move(handle), max_tls_index, mod_id);
+        ASSERT_MSG(
+            module->IsValid(),
+            "Provided file {} is not valid ELF file. This usually indicated a corrupted dump.",
+            elf_name.string());
 
-    num_static_modules += !is_dynamic;
-    m_modules.emplace_back(std::move(module));
+        num_static_modules += !is_dynamic;
+        m_modules.emplace_back(std::move(module));
 
-    Core::Devtools::Widget::ModuleList::AddModule(elf_name.filename().string(), elf_name);
+        Core::Devtools::Widget::ModuleList::AddModule(elf_name.filename().string(), elf_name);
 
-    return mod_id;
+        return mod_id;
+    });
 }
 
 s32 Linker::LoadAndStartModule(const std::filesystem::path& path, u64 args, const void* argp,
@@ -930,43 +936,43 @@ bool Linker::Resolve(const std::string& name, Loader::SymbolType sym_type, Modul
 }
 
 void* Linker::TlsGetAddr(u64 module_index, u64 offset) {
-    std::scoped_lock lk{mutex};
+    return mutex.Run([&]() -> void* {
+        DtvEntry* dtv_table = GetTcbBase()->tcb_dtv;
+        if (dtv_table[0].counter != dtv_generation_counter) {
+            // Generation counter changed, a dynamic module was either loaded or unloaded.
+            const u32 old_num_dtvs = dtv_table[1].counter;
+            ASSERT_MSG(max_tls_index > old_num_dtvs, "Module unloading unsupported");
+            // Module was loaded, increase DTV table size.
+            DtvEntry* new_dtv_table = new DtvEntry[max_tls_index + 2]{};
+            std::memcpy(new_dtv_table + 2, dtv_table + 2, old_num_dtvs * sizeof(DtvEntry));
+            new_dtv_table[0].counter = dtv_generation_counter;
+            new_dtv_table[1].counter = max_tls_index;
+            delete[] dtv_table;
 
-    DtvEntry* dtv_table = GetTcbBase()->tcb_dtv;
-    if (dtv_table[0].counter != dtv_generation_counter) {
-        // Generation counter changed, a dynamic module was either loaded or unloaded.
-        const u32 old_num_dtvs = dtv_table[1].counter;
-        ASSERT_MSG(max_tls_index > old_num_dtvs, "Module unloading unsupported");
-        // Module was loaded, increase DTV table size.
-        DtvEntry* new_dtv_table = new DtvEntry[max_tls_index + 2]{};
-        std::memcpy(new_dtv_table + 2, dtv_table + 2, old_num_dtvs * sizeof(DtvEntry));
-        new_dtv_table[0].counter = dtv_generation_counter;
-        new_dtv_table[1].counter = max_tls_index;
-        delete[] dtv_table;
-
-        // Update TCB pointer.
-        GetTcbBase()->tcb_dtv = new_dtv_table;
-        dtv_table = new_dtv_table;
-    }
-
-    u8* addr = dtv_table[module_index + 1].pointer;
-    Module* module = m_modules[module_index - 1].get();
-    if (!addr) {
-        // Module was just loaded by above code. Allocate TLS block for it.
-        const u32 init_image_size = module->tls.init_image_size;
-        u8* dest{};
-        if (heap_api && heap_api->heap_malloc) {
-            dest = reinterpret_cast<u8*>(CallAppHeapMalloc(module->tls.image_size));
-        } else {
-            dest = reinterpret_cast<u8*>(std::malloc(module->tls.image_size));
+            // Update TCB pointer.
+            GetTcbBase()->tcb_dtv = new_dtv_table;
+            dtv_table = new_dtv_table;
         }
-        const u8* src = reinterpret_cast<const u8*>(module->tls.image_virtual_addr);
-        std::memcpy(dest, src, init_image_size);
-        std::memset(dest + init_image_size, 0, module->tls.image_size - init_image_size);
-        dtv_table[module_index + 1].pointer = dest;
-        addr = dest;
-    }
-    return addr + offset;
+
+        u8* addr = dtv_table[module_index + 1].pointer;
+        Module* module = m_modules[module_index - 1].get();
+        if (!addr) {
+            // Module was just loaded by above code. Allocate TLS block for it.
+            const u32 init_image_size = module->tls.init_image_size;
+            u8* dest{};
+            if (heap_api && heap_api->heap_malloc) {
+                dest = reinterpret_cast<u8*>(CallAppHeapMalloc(module->tls.image_size));
+            } else {
+                dest = reinterpret_cast<u8*>(std::malloc(module->tls.image_size));
+            }
+            const u8* src = reinterpret_cast<const u8*>(module->tls.image_virtual_addr);
+            std::memcpy(dest, src, init_image_size);
+            std::memset(dest + init_image_size, 0, module->tls.image_size - init_image_size);
+            dtv_table[module_index + 1].pointer = dest;
+            addr = dest;
+        }
+        return addr + offset;
+    });
 }
 
 void* Linker::AllocateTlsForThread(bool is_primary) {

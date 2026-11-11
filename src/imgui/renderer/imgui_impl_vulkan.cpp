@@ -8,6 +8,7 @@
 #include <cstdio>
 #include <mutex>
 #include <vector>
+#include "common/combiner.h"
 
 #include <imgui.h>
 
@@ -64,7 +65,7 @@ struct VkData {
     vk::ShaderModule shader_module_vert{};
     vk::ShaderModule shader_module_frag{};
 
-    std::mutex command_pool_mutex;
+    Common::Combiner command_pool_mutex;
     vk::CommandPool command_pool{};
     vk::Sampler simple_sampler{};
 
@@ -277,10 +278,8 @@ bool UploadTextureData::Uploaded() {
     fence = VK_NULL_HANDLE;
     v.device.destroyBuffer(upload_buffer, v.allocator);
     v.device.freeMemory(upload_buffer_memory, v.allocator);
-    {
-        std::unique_lock lk(bd->command_pool_mutex);
-        v.device.freeCommandBuffers(bd->command_pool, {command_buffer});
-    }
+    bd->command_pool_mutex.Run(
+        [&] { v.device.freeCommandBuffers(bd->command_pool, {command_buffer}); });
     upload_buffer = VK_NULL_HANDLE;
     upload_buffer_memory = VK_NULL_HANDLE;
     return true;
@@ -403,8 +402,7 @@ UploadTextureData UploadTexture(vk::Format format, u32 width, u32 height, size_t
     const InitInfo& v = bd->init_info;
 
     UploadTextureData info{};
-    {
-        std::unique_lock lk(bd->command_pool_mutex);
+    bd->command_pool_mutex.Run([&] {
         info.command_buffer =
             CheckVkResult(v.device.allocateCommandBuffers(vk::CommandBufferAllocateInfo{
                               .commandPool = bd->command_pool,
@@ -414,7 +412,7 @@ UploadTextureData UploadTexture(vk::Format format, u32 width, u32 height, size_t
         CheckVkErr(info.command_buffer.begin(vk::CommandBufferBeginInfo{
             .flags = vk::CommandBufferUsageFlagBits::eOneTimeSubmit,
         }));
-    }
+    });
 
     // Create Image
     {
@@ -497,10 +495,8 @@ UploadTextureData UploadTexture(vk::Format format, u32 width, u32 height, size_t
         if (!filled) {
             // Nothing recorded yet: the command buffer and the buffers go back
             CheckVkErr(info.command_buffer.end());
-            {
-                std::unique_lock lk(bd->command_pool_mutex);
-                v.device.freeCommandBuffers(bd->command_pool, {info.command_buffer});
-            }
+            bd->command_pool_mutex.Run(
+                [&] { v.device.freeCommandBuffers(bd->command_pool, {info.command_buffer}); });
             v.device.destroyBuffer(info.upload_buffer, v.allocator);
             v.device.freeMemory(info.upload_buffer_memory, v.allocator);
             RemoveTexture(info.im_texture);
@@ -1245,8 +1241,9 @@ bool CreateDeviceObjects() {
             .flags = vk::CommandPoolCreateFlagBits::eResetCommandBuffer,
             .queueFamilyIndex = v.queue_family,
         };
-        std::unique_lock lk(bd->command_pool_mutex);
-        bd->command_pool = CheckVkResult(v.device.createCommandPool(info, v.allocator));
+        bd->command_pool_mutex.Run([&] {
+            bd->command_pool = CheckVkResult(v.device.createCommandPool(info, v.allocator));
+        });
     }
 
     if (!bd->simple_sampler) {
@@ -1283,9 +1280,10 @@ void ImGuiImplVulkanDestroyDeviceObjects() {
         DestroyStagingBuffers(buffers);
     }
     if (bd->command_pool) {
-        std::unique_lock lk(bd->command_pool_mutex);
-        v.device.destroyCommandPool(bd->command_pool, v.allocator);
-        bd->command_pool = VK_NULL_HANDLE;
+        bd->command_pool_mutex.Run([&] {
+            v.device.destroyCommandPool(bd->command_pool, v.allocator);
+            bd->command_pool = VK_NULL_HANDLE;
+        });
     }
     if (bd->shader_module_vert) {
         v.device.destroyShaderModule(bd->shader_module_vert, v.allocator);

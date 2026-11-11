@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 #pragma once
 
+#include "common/combiner.h"
 #include "core/fex/fex_guest_engine.h"
 #include "hle_call_adapter.h"
 
@@ -49,7 +50,7 @@ private:
     void* reporter_context;
     ExecutableRangeQuery executable_query;
     void* executable_query_context;
-    mutable std::shared_mutex host_range_mutex;
+    mutable Common::Combiner host_range_mutex;
     std::vector<HostRange> host_ranges;
 };
 

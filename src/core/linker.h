@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <mutex>
 #include <vector>
+#include "common/combiner.h"
 #include "core/libraries/kernel/threads.h"
 #include "core/module.h"
 #ifdef SHADPS4_ENABLE_FEX_GUEST_CPU
@@ -129,25 +130,26 @@ public:
     }
 
     void RelocateAnyImports(Module* m) {
-        std::scoped_lock lk{mutex};
-
-        Relocate(m);
-        const auto exports = m->GetExportModules();
-        for (auto& export_mod : exports) {
-            for (auto& module : m_modules) {
-                const auto imports = module->GetImportModules();
-                if (std::ranges::contains(imports, export_mod.name, &ModuleInfo::name)) {
-                    Relocate(module.get());
+        mutex.Run([&] {
+            Relocate(m);
+            const auto exports = m->GetExportModules();
+            for (auto& export_mod : exports) {
+                for (auto& module : m_modules) {
+                    const auto imports = module->GetImportModules();
+                    if (std::ranges::contains(imports, export_mod.name, &ModuleInfo::name)) {
+                        Relocate(module.get());
+                    }
                 }
             }
-        }
+        });
     }
 
     void RelocateAllImports() {
-        std::scoped_lock lk{mutex};
-        for (auto& module : m_modules) {
-            Relocate(module.get());
-        }
+        mutex.Run([&] {
+            for (auto& module : m_modules) {
+                Relocate(module.get());
+            }
+        });
     }
 
     void LoadLibcInternal() {
@@ -198,7 +200,7 @@ private:
 #endif
     MemoryManager* memory;
     Libraries::Kernel::Thread main_thread;
-    std::mutex mutex;
+    Common::Combiner mutex;
     u32 dtv_generation_counter{1};
     size_t static_tls_size{};
     u32 max_tls_index{};
@@ -213,7 +215,7 @@ private:
     std::unique_ptr<GuestCpu::HleVeneerAllocator> m_hle_veneers;
     std::unique_ptr<GuestCpu::HleGuestBridge> m_fex_bridge;
     std::unique_ptr<FexGuestCpuBackend> m_fex_backend;
-    std::mutex m_fex_runtime_mutex;
+    Common::Combiner m_fex_runtime_mutex;
     VAddr m_fex_exit_veneer{};
 #endif
 };

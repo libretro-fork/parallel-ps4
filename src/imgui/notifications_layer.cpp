@@ -8,6 +8,7 @@
 #include <imgui.h>
 #include <queue>
 
+#include "common/combiner.h"
 #include "common/embedded_resources.h"
 #include "imgui/imgui_std.h"
 #include "notifications_layer.h"
@@ -16,7 +17,7 @@ namespace shadNotifications {
 
 std::optional<NotificationsUI> current_notif;
 std::queue<NotificationInfo> notif_queue;
-std::mutex queueMtx;
+Common::Combiner queueMtx;
 
 const std::map<shadNotifications::stockIcons, std::string> iconMap = {
     {shadNotifications::stockIcons::shadPS4, "src/resources/shadps4.png"},
@@ -118,14 +119,15 @@ void NotificationsUI::Draw() {
     ImGui::End();
 
     if (currentInfo.timer <= 0) {
-        std::lock_guard<std::mutex> lock(queueMtx);
-        if (!notif_queue.empty()) {
-            NotificationInfo next = notif_queue.front();
-            notif_queue.pop();
-            current_notif.emplace(next);
-        } else {
-            current_notif.reset();
-        }
+        queueMtx.Run([&] {
+            if (!notif_queue.empty()) {
+                NotificationInfo next = notif_queue.front();
+                notif_queue.pop();
+                current_notif.emplace(next);
+            } else {
+                current_notif.reset();
+            }
+        });
     }
 }
 
@@ -145,20 +147,20 @@ void QueueNotification(std::string message, float timer, position pos, stockIcon
 
 void QueueNotification(std::string message, float timer, position pos, Common::FS::FileView pngData,
                        bool addBackground) {
-    std::lock_guard<std::mutex> lock(queueMtx);
+    queueMtx.Run([&] {
+        NotificationInfo info;
+        info.message = message;
+        info.timer = timer;
+        info.pos = pos;
+        info.icon = ImGui::RefCountedTexture::DecodePngTexture(std::move(pngData));
+        info.addIconBackground = addBackground;
 
-    NotificationInfo info;
-    info.message = message;
-    info.timer = timer;
-    info.pos = pos;
-    info.icon = ImGui::RefCountedTexture::DecodePngTexture(std::move(pngData));
-    info.addIconBackground = addBackground;
-
-    if (!current_notif.has_value()) {
-        current_notif.emplace(info);
-    } else {
-        notif_queue.push(info);
-    }
+        if (!current_notif.has_value()) {
+            current_notif.emplace(info);
+        } else {
+            notif_queue.push(info);
+        }
+    });
 }
 
 } // namespace shadNotifications

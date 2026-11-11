@@ -50,56 +50,62 @@ static void ResumeThread(ThreadID id) {
 }
 
 void DebugStateImpl::AddCurrentThreadToGuestList() {
-    std::lock_guard lock{guest_threads_mutex};
+    // The caller's id, taken here: the combiner may run this on another thread
     const ThreadID id = ThisThreadID();
-    guest_threads.push_back(id);
+    guest_threads_mutex.Run([&] { guest_threads.push_back(id); });
 }
 
 void DebugStateImpl::RemoveCurrentThreadFromGuestList() {
-    std::lock_guard lock{guest_threads_mutex};
     const ThreadID id = ThisThreadID();
-    std::erase_if(guest_threads, [&](const ThreadID& v) { return v == id; });
+    guest_threads_mutex.Run(
+        [&] { std::erase_if(guest_threads, [&](const ThreadID& v) { return v == id; }); });
 }
 
 void DebugStateImpl::PauseGuestThreads() {
     using namespace Libraries::MsgDialog;
-    std::unique_lock lock{guest_threads_mutex};
-    if (is_guest_threads_paused) {
+    bool self_guest = false;
+    // The caller, not whichever thread runs the combiner
+    const ThreadID self_id = ThisThreadID();
+    const bool already = guest_threads_mutex.Run([&] {
+        if (is_guest_threads_paused) {
+            return true;
+        }
+        if (ShouldPauseInSubmit()) {
+            waiting_submit_pause = false;
+            should_show_frame_dump = true;
+        }
+        for (const auto& id : guest_threads) {
+            if (id == self_id) {
+                self_guest = true;
+            } else {
+                PauseThread(id);
+            }
+        }
+        pause_time = Libraries::Kernel::Dev::GetClock()->GetUptime();
+        is_guest_threads_paused = true;
+        return false;
+    });
+    if (already) {
         return;
     }
-    if (ShouldPauseInSubmit()) {
-        waiting_submit_pause = false;
-        should_show_frame_dump = true;
-    }
-    bool self_guest = false;
-    ThreadID self_id = ThisThreadID();
-    for (const auto& id : guest_threads) {
-        if (id == self_id) {
-            self_guest = true;
-        } else {
-            PauseThread(id);
-        }
-    }
-    pause_time = Libraries::Kernel::Dev::GetClock()->GetUptime();
-    is_guest_threads_paused = true;
-    lock.unlock();
     if (self_guest) {
         PauseThread(self_id);
     }
 }
 
 void DebugStateImpl::ResumeGuestThreads() {
-    std::lock_guard lock{guest_threads_mutex};
-    if (!is_guest_threads_paused) {
-        return;
-    }
+    guest_threads_mutex.Run([&] {
+        if (!is_guest_threads_paused) {
+            return;
+        }
 
-    u64 delta_time = Libraries::Kernel::Dev::GetClock()->GetUptime() - pause_time;
-    Libraries::Kernel::Dev::GetInitialPtc() += delta_time;
-    for (const auto& id : guest_threads) {
-        ResumeThread(id);
-    }
-    is_guest_threads_paused = false;
+        u64 delta_time = Libraries::Kernel::Dev::GetClock()->GetUptime() - pause_time;
+        Libraries::Kernel::Dev::GetInitialPtc() += delta_time;
+        for (const auto& id : guest_threads) {
+            ResumeThread(id);
+        }
+        is_guest_threads_paused = false;
+    });
 }
 
 void DebugStateImpl::RequestFrameDump(s32 count) {
@@ -116,36 +122,38 @@ void DebugStateImpl::RequestFrameDump(s32 count) {
 
 void DebugStateImpl::PushQueueDump(QueueDump dump) {
     ASSERT(DumpingCurrentFrame());
-    std::unique_lock lock{frame_dump_list_mutex};
-    auto& frame = GetFrameDump();
-    { // Find draw calls
-        auto data = std::span{dump.data};
-        auto initial_data = data.data();
-        while (!data.empty()) {
-            const auto* header = reinterpret_cast<const AmdGpu::PM4Type3Header*>(data.data());
-            const auto type = header->type;
-            if (type == 2) {
-                data = data.subspan(1);
-            } else if (type != 3) {
-                UNREACHABLE();
+    frame_dump_list_mutex.Run([&] {
+        auto& frame = GetFrameDump();
+        { // Find draw calls
+            auto data = std::span{dump.data};
+            auto initial_data = data.data();
+            while (!data.empty()) {
+                const auto* header = reinterpret_cast<const AmdGpu::PM4Type3Header*>(data.data());
+                const auto type = header->type;
+                if (type == 2) {
+                    data = data.subspan(1);
+                } else if (type != 3) {
+                    UNREACHABLE();
+                }
+                const AmdGpu::PM4ItOpcode opcode = header->opcode;
+                if (Core::Devtools::Widget::IsDrawCall(opcode)) {
+                    const auto offset = reinterpret_cast<uintptr_t>(header) -
+                                        reinterpret_cast<uintptr_t>(initial_data);
+                    const auto addr = dump.base_addr + offset;
+                    waiting_reg_dumps.emplace(addr, &frame);
+                    waiting_reg_dumps_dbg.emplace(
+                        addr,
+                        fmt::format("#{} h({}) queue {} {} {}",
+                                    frame_dump_list.size() - gnm_frame_dump_request_count, addr,
+                                    enum_name(&enum_names_DebugStateType_QueueType,
+                                              static_cast<s64>(dump.type)),
+                                    dump.submit_num, dump.num2));
+                }
+                data = data.subspan(header->NumWords() + 1);
             }
-            const AmdGpu::PM4ItOpcode opcode = header->opcode;
-            if (Core::Devtools::Widget::IsDrawCall(opcode)) {
-                const auto offset =
-                    reinterpret_cast<uintptr_t>(header) - reinterpret_cast<uintptr_t>(initial_data);
-                const auto addr = dump.base_addr + offset;
-                waiting_reg_dumps.emplace(addr, &frame);
-                waiting_reg_dumps_dbg.emplace(
-                    addr, fmt::format("#{} h({}) queue {} {} {}",
-                                      frame_dump_list.size() - gnm_frame_dump_request_count, addr,
-                                      enum_name(&enum_names_DebugStateType_QueueType,
-                                                static_cast<s64>(dump.type)),
-                                      dump.submit_num, dump.num2));
-            }
-            data = data.subspan(header->NumWords() + 1);
         }
-    }
-    frame.queues.push_back(std::move(dump));
+        frame.queues.push_back(std::move(dump));
+    });
 }
 
 std::optional<RegDump*> DebugStateImpl::GetRegDump(uintptr_t base_addr, uintptr_t header_addr) {
@@ -161,52 +169,52 @@ std::optional<RegDump*> DebugStateImpl::GetRegDump(uintptr_t base_addr, uintptr_
 
 void DebugStateImpl::PushRegsDump(uintptr_t base_addr, uintptr_t header_addr,
                                   const AmdGpu::Regs& regs) {
-    std::scoped_lock lock{frame_dump_list_mutex};
+    frame_dump_list_mutex.Run([&] {
+        auto dump = GetRegDump(base_addr, header_addr);
+        if (!dump) {
+            return;
+        }
 
-    auto dump = GetRegDump(base_addr, header_addr);
-    if (!dump) {
-        return;
-    }
+        (*dump)->regs = regs;
 
-    (*dump)->regs = regs;
-
-    for (int i = 0; i < RegDump::MaxShaderStages; i++) {
-        if ((*dump)->regs.stage_enable.IsStageEnabled(i)) {
-            auto stage = (*dump)->regs.ProgramForStage(i);
-            if (stage->address) {
-                const auto params = AmdGpu::GetParams(*stage);
-                (*dump)->stages[i] = PipelineShaderProgramDump{
-                    .name = Vulkan::PipelineCache::GetShaderName(Shader::StageFromIndex(i),
-                                                                 params.hash),
-                    .hash = params.hash,
-                    .user_data = *stage,
-                    .code = std::vector<u32>{params.code.begin(), params.code.end()},
-                };
+        for (int i = 0; i < RegDump::MaxShaderStages; i++) {
+            if ((*dump)->regs.stage_enable.IsStageEnabled(i)) {
+                auto stage = (*dump)->regs.ProgramForStage(i);
+                if (stage->address) {
+                    const auto params = AmdGpu::GetParams(*stage);
+                    (*dump)->stages[i] = PipelineShaderProgramDump{
+                        .name = Vulkan::PipelineCache::GetShaderName(Shader::StageFromIndex(i),
+                                                                     params.hash),
+                        .hash = params.hash,
+                        .user_data = *stage,
+                        .code = std::vector<u32>{params.code.begin(), params.code.end()},
+                    };
+                }
             }
         }
-    }
+    });
 }
 
 void DebugStateImpl::PushRegsDumpCompute(uintptr_t base_addr, uintptr_t header_addr,
                                          const CsState& cs_state) {
-    std::scoped_lock lock{frame_dump_list_mutex};
+    frame_dump_list_mutex.Run([&] {
+        auto dump = GetRegDump(base_addr, header_addr);
+        if (!dump) {
+            return;
+        }
 
-    auto dump = GetRegDump(base_addr, header_addr);
-    if (!dump) {
-        return;
-    }
+        (*dump)->is_compute = true;
+        auto& cs = (*dump)->regs.cs_program;
+        cs = cs_state;
 
-    (*dump)->is_compute = true;
-    auto& cs = (*dump)->regs.cs_program;
-    cs = cs_state;
-
-    const auto params = AmdGpu::GetParams(cs);
-    (*dump)->cs_data = PipelineComputerProgramDump{
-        .name = Vulkan::PipelineCache::GetShaderName(Shader::HwStage::Compute, params.hash),
-        .hash = params.hash,
-        .cs_program = cs,
-        .code = std::vector<u32>{params.code.begin(), params.code.end()},
-    };
+        const auto params = AmdGpu::GetParams(cs);
+        (*dump)->cs_data = PipelineComputerProgramDump{
+            .name = Vulkan::PipelineCache::GetShaderName(Shader::HwStage::Compute, params.hash),
+            .hash = params.hash,
+            .cs_program = cs,
+            .code = std::vector<u32>{params.code.begin(), params.code.end()},
+        };
+    });
 }
 
 void DebugStateImpl::CollectShader(const std::string& name, Shader::SwStage l_stage,

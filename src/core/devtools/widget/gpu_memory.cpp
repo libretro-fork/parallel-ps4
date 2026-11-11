@@ -35,10 +35,7 @@ void GpuMemoryViewer::Draw() {
     last_drawn_ms.store(NowMs(), std::memory_order_relaxed);
 
     std::map<std::string, GpuMemoryGroup> snapshot;
-    {
-        std::scoped_lock lock{mutex};
-        snapshot = groups;
-    }
+    mutex.Run([&] { snapshot = groups; });
 
     if (snapshot.empty()) {
         TextDisabled("Nothing published yet");

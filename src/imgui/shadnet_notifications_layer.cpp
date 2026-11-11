@@ -9,6 +9,7 @@
 
 #include <imgui.h>
 
+#include "common/combiner.h"
 #include "common/types.h"
 #include "imgui/imgui_layer.h"
 #include "imgui/shadnet_notifications_layer.h"
@@ -28,7 +29,7 @@ struct Toast {
 
 constexpr std::size_t max_history = 100;
 
-std::mutex g_mutex;
+Common::Combiner g_mutex;
 std::deque<Toast> g_toasts;
 std::deque<HistoryEntry> g_history;
 std::size_t g_total = 0; // monotonic count of all pushes
@@ -53,8 +54,7 @@ class ShadNetNotificationsUI final : public ImGui::Layer {
 public:
     void Draw() override;
     bool ShouldKeepDrawing() override {
-        std::lock_guard lock(g_mutex);
-        return !g_toasts.empty();
+        return g_mutex.Run([&]() -> bool { return !g_toasts.empty(); });
     }
 };
 
@@ -79,36 +79,34 @@ KindDisplay DisplayOf(Kind kind) {
 }
 
 void Push(Kind kind, std::string text) {
-    std::lock_guard lock(g_mutex);
-    g_toasts.push_back({kind, text, 0.0f});
-    while (g_toasts.size() > kMaxToasts) {
-        g_toasts.pop_front();
-    }
-    g_history.push_back({kind, std::move(text), NowHMS()});
-    while (g_history.size() > max_history) {
-        g_history.pop_front();
-    }
-    ++g_total;
+    g_mutex.Run([&] {
+        g_toasts.push_back({kind, text, 0.0f});
+        while (g_toasts.size() > kMaxToasts) {
+            g_toasts.pop_front();
+        }
+        g_history.push_back({kind, std::move(text), NowHMS()});
+        while (g_history.size() > max_history) {
+            g_history.pop_front();
+        }
+        ++g_total;
+    });
 }
 
 std::vector<HistoryEntry> GetHistory() {
-    std::lock_guard lock(g_mutex);
-    return {g_history.begin(), g_history.end()};
+    return g_mutex.Run(
+        [&]() -> std::vector<HistoryEntry> { return {g_history.begin(), g_history.end()}; });
 }
 
 void ClearHistory() {
-    std::lock_guard lock(g_mutex);
-    g_history.clear();
+    g_mutex.Run([&] { g_history.clear(); });
 }
 
 std::size_t UnreadCount() {
-    std::lock_guard lock(g_mutex);
-    return g_total - g_seen;
+    return g_mutex.Run([&]() -> std::size_t { return g_total - g_seen; });
 }
 
 void MarkRead() {
-    std::lock_guard lock(g_mutex);
-    g_seen = g_total;
+    g_mutex.Run([&] { g_seen = g_total; });
 }
 
 void Register() {
@@ -122,8 +120,7 @@ void ShadNetNotificationsUI::Draw() {
     auto& io = ImGui::GetIO();
 
     std::vector<Toast> snapshot;
-    {
-        std::lock_guard lock(g_mutex);
+    g_mutex.Run([&] {
         for (auto& t : g_toasts) {
             t.age += io.DeltaTime;
         }
@@ -131,7 +128,7 @@ void ShadNetNotificationsUI::Draw() {
             g_toasts.pop_front();
         }
         snapshot.assign(g_toasts.begin(), g_toasts.end());
-    }
+    });
     if (snapshot.empty()) {
         return;
     }

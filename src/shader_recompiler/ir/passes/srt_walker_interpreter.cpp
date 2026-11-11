@@ -8,6 +8,7 @@
 // fault handler makes it.
 
 #include "common/arch.h"
+#include "common/combiner.h"
 
 #if defined(__aarch64__) && defined(__linux__)
 
@@ -130,19 +131,20 @@ Program Decode(const u8* code) {
     }
 }
 
-std::shared_mutex programs_mutex;
+Common::Combiner programs_mutex;
 std::unordered_map<const void*, Program> programs;
 
 const Program& GetProgram(const void* code) {
-    {
-        std::shared_lock lock{programs_mutex};
-        if (const auto it = programs.find(code); it != programs.end()) {
-            return it->second;
-        }
+    if (const Program* found = programs_mutex.Run([&]() -> const Program* {
+            const auto it = programs.find(code);
+            return it != programs.end() ? &it->second : nullptr;
+        })) {
+        return *found;
     }
     Program program = Decode(static_cast<const u8*>(code));
-    std::unique_lock lock{programs_mutex};
-    return programs.try_emplace(code, std::move(program)).first->second;
+    return programs_mutex.Run([&]() -> const Program& {
+        return programs.try_emplace(code, std::move(program)).first->second;
+    });
 }
 
 bool SafeLoadFaultHandler(void* context, void*) {

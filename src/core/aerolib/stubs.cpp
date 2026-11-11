@@ -8,6 +8,7 @@
 
 #include <xbyak/xbyak.h>
 
+#include "common/combiner.h"
 #include "common/logging/log.h"
 #include "core/aerolib/aerolib.h"
 #include "core/aerolib/stubs.h"
@@ -26,7 +27,7 @@ struct StubEntry {
 };
 
 static std::vector<StubEntry> g_stub_entries;
-static std::mutex g_stub_mutex;
+static Common::Combiner g_stub_mutex;
 
 static u64 PS4_SYSV_ABI CommonStub(u64 index) {
     const auto& e = g_stub_entries[index];
@@ -41,43 +42,44 @@ static u64 PS4_SYSV_ABI CommonStub(u64 index) {
 }
 
 u64 GetStub(const char* nid) {
-    std::scoped_lock lock{g_stub_mutex};
-
-    if (g_stub_entries.empty()) {
-        g_stub_entries.reserve(500);
-    }
-
-    const u64 index = g_stub_entries.size();
-
-    StubEntry e;
-    if (const auto* entry = FindByNid(nid)) {
-        if (auto const& it = std::ranges::find_if(
-                g_stub_entries, [entry](StubEntry const& en) { return en.nid && en.nid == entry; });
-            it != g_stub_entries.end()) {
-            return reinterpret_cast<u64>(it->code->getCode());
+    return g_stub_mutex.Run([&]() -> u64 {
+        if (g_stub_entries.empty()) {
+            g_stub_entries.reserve(500);
         }
-        e.nid = entry;
-    } else {
-        e.nid_unknown = nid;
-    }
 
-    e.code = std::make_unique<Xbyak::CodeGenerator>(32, Xbyak::AutoGrow);
+        const u64 index = g_stub_entries.size();
+
+        StubEntry e;
+        if (const auto* entry = FindByNid(nid)) {
+            if (auto const& it = std::ranges::find_if(
+                    g_stub_entries,
+                    [entry](StubEntry const& en) { return en.nid && en.nid == entry; });
+                it != g_stub_entries.end()) {
+                return reinterpret_cast<u64>(it->code->getCode());
+            }
+            e.nid = entry;
+        } else {
+            e.nid_unknown = nid;
+        }
+
+        e.code = std::make_unique<Xbyak::CodeGenerator>(32, Xbyak::AutoGrow);
 #ifdef ARCH_X86_64
-    e.code->mov(e.code->rdi, index);
-    e.code->mov(e.code->rax, reinterpret_cast<u64>(&CommonStub));
-    e.code->jmp(e.code->rax);
+        e.code->mov(e.code->rdi, index);
+        e.code->mov(e.code->rax, reinterpret_cast<u64>(&CommonStub));
+        e.code->jmp(e.code->rax);
 #else
-    // The same three instructions as bytes: the stub is the guest's code, x86-64
-    // on any host, and Xbyak's registers exist only on an x86 host.
-    const u64 target = reinterpret_cast<u64>(&CommonStub);
-    e.code->db(0x48), e.code->db(0xBF), e.code->dq(index); // mov rdi, index
-    e.code->db(0x48), e.code->db(0xB8), e.code->dq(target); // mov rax, &CommonStub
-    e.code->db(0xFF), e.code->db(0xE0); // jmp rax
+        // The same three instructions as bytes: the stub is the guest's code, x86-64
+        // on any host, and Xbyak's registers exist only on an x86 host.
+        const u64 target = reinterpret_cast<u64>(&CommonStub);
+        e.code->db(0x48), e.code->db(0xBF), e.code->dq(index);  // mov rdi, index
+        e.code->db(0x48), e.code->db(0xB8), e.code->dq(target); // mov rax, &CommonStub
+        e.code->db(0xFF), e.code->db(0xE0);                     // jmp rax
 #endif
-    e.code->ready();
+        e.code->ready();
 
-    g_stub_entries.push_back(std::move(e));
-    return reinterpret_cast<u64>(g_stub_entries.back().code->getCode());
+        g_stub_entries.push_back(std::move(e));
+        return reinterpret_cast<u64>(g_stub_entries.back().code->getCode());
+    });
 }
 
 } // namespace Core::AeroLib

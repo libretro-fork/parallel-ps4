@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include <cstdlib>
+#include "common/combiner.h"
 #include "common/elf_info.h"
 #include "common/quick_exit.h"
 #include "common/singleton.h"
@@ -18,7 +19,7 @@ namespace Libraries::SystemService {
 
 bool g_splash_status{true};
 std::queue<OrbisSystemServiceEvent> g_event_queue;
-std::mutex g_event_queue_mutex;
+Common::Combiner g_event_queue_mutex;
 s32 g_sdk_version{};
 
 bool IsSplashVisible() {
@@ -1783,14 +1784,15 @@ s32 PS4_SYSV_ABI sceSystemServiceGetStatus(OrbisSystemServiceStatus* status) {
         return ORBIS_SYSTEM_SERVICE_ERROR_PARAMETER;
     }
 
-    std::lock_guard<std::mutex> lock(g_event_queue_mutex);
-    status->event_num = static_cast<s32>(g_event_queue.size());
-    status->is_system_ui_overlaid = false;
-    status->is_in_background_execution = false;
-    status->is_cpu_mode7_cpu_normal = true;
-    status->is_game_live_streaming_on_air = false;
-    status->is_out_of_vr_play_area = false;
-    return ORBIS_OK;
+    return g_event_queue_mutex.Run([&]() -> s32 {
+        status->event_num = static_cast<s32>(g_event_queue.size());
+        status->is_system_ui_overlaid = false;
+        status->is_in_background_execution = false;
+        status->is_cpu_mode7_cpu_normal = true;
+        status->is_game_live_streaming_on_air = false;
+        status->is_out_of_vr_play_area = false;
+        return ORBIS_OK;
+    });
 }
 
 int PS4_SYSV_ABI sceSystemServiceGetTitleWorkaroundInfo() {
@@ -2018,16 +2020,17 @@ s32 PS4_SYSV_ABI sceSystemServiceReceiveEvent(OrbisSystemServiceEvent* event) {
         return ORBIS_SYSTEM_SERVICE_ERROR_PARAMETER;
     }
 
-    std::lock_guard<std::mutex> lock(g_event_queue_mutex);
-    if (g_event_queue.empty()) {
-        return ORBIS_SYSTEM_SERVICE_ERROR_NO_EVENT;
-    }
+    return g_event_queue_mutex.Run([&]() -> s32 {
+        if (g_event_queue.empty()) {
+            return ORBIS_SYSTEM_SERVICE_ERROR_NO_EVENT;
+        }
 
-    *event = g_event_queue.front();
-    g_event_queue.pop();
-    LOG_DEBUG(Lib_SystemService, "delivered event type={:#x} ({} still queued)",
-              static_cast<u32>(event->event_type), g_event_queue.size());
-    return ORBIS_OK;
+        *event = g_event_queue.front();
+        g_event_queue.pop();
+        LOG_DEBUG(Lib_SystemService, "delivered event type={:#x} ({} still queued)",
+                  static_cast<u32>(event->event_type), g_event_queue.size());
+        return ORBIS_OK;
+    });
 }
 
 int PS4_SYSV_ABI sceSystemServiceReenableMusicPlayer() {
@@ -2496,8 +2499,7 @@ int PS4_SYSV_ABI Func_CB5E885E225F69F0() {
 }
 
 void PushSystemServiceEvent(const OrbisSystemServiceEvent& event) {
-    std::lock_guard<std::mutex> lock(g_event_queue_mutex);
-    g_event_queue.push(event);
+    g_event_queue_mutex.Run([&] { g_event_queue.push(event); });
 }
 
 void RegisterLib(Core::Loader::SymbolsResolver* sym) {

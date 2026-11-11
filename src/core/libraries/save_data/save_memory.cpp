@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright 2024-2026 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include "common/combiner.h"
 #include "common/io_file.h"
 #include "save_memory.h"
 
@@ -42,14 +43,21 @@ struct SlotData {
     size_t memory_cache_size{};
 };
 
-static std::mutex g_slot_mtx;
+static Common::Combiner g_slot_mtx;
 static std::unordered_map<u32, SlotData> g_attached_slots;
 
+static void PersistMemoryOwned(u32 slot_id);
+
 void PersistMemory(u32 slot_id, bool lock) {
-    std::unique_lock lck{g_slot_mtx, std::defer_lock};
+    // With lock false the caller already runs in g_slot_mtx
     if (lock) {
-        lck.lock();
+        g_slot_mtx.Run([&] { PersistMemoryOwned(slot_id); });
+    } else {
+        PersistMemoryOwned(slot_id);
     }
+}
+
+static void PersistMemoryOwned(u32 slot_id) {
     auto& data = g_attached_slots[slot_id];
     auto memoryPath = data.folder_path / FilenameSaveDataMemory;
     Common::FS::CreateDirectories(memoryPath.parent_path());
@@ -100,120 +108,127 @@ std::filesystem::path GetSavePath(Libraries::UserService::OrbisUserServiceUserId
 
 size_t SetupSaveMemory(Libraries::UserService::OrbisUserServiceUserId user_id, u32 slot_id,
                        std::string_view game_serial, size_t memory_size) {
-    std::lock_guard lck{g_slot_mtx};
+    return g_slot_mtx.Run([&]() -> size_t {
+        const auto save_dir = GetSavePath(user_id, slot_id, game_serial);
 
-    const auto save_dir = GetSavePath(user_id, slot_id, game_serial);
+        auto& data = g_attached_slots[slot_id];
+        data = SlotData{
+            .user_id = user_id,
+            .game_serial = std::string{game_serial},
+            .folder_path = save_dir,
+            .sfo = {},
+            .memory_cache = {},
+            .memory_cache_size = memory_size,
+        };
 
-    auto& data = g_attached_slots[slot_id];
-    data = SlotData{
-        .user_id = user_id,
-        .game_serial = std::string{game_serial},
-        .folder_path = save_dir,
-        .sfo = {},
-        .memory_cache = {},
-        .memory_cache_size = memory_size,
-    };
+        SaveInstance::SetupDefaultParamSFO(data.sfo, GetSaveDir(slot_id), std::string{game_serial});
 
-    SaveInstance::SetupDefaultParamSFO(data.sfo, GetSaveDir(slot_id), std::string{game_serial});
-
-    auto param_sfo_path = SaveInstance::GetParamSFOPath(save_dir);
-    if (!Common::FS::Exists(param_sfo_path)) {
-        return 0;
-    }
-
-    if (!data.sfo.Open(param_sfo_path) || Common::FS::Exists(save_dir / CorruptFileName)) {
-        if (!Backup::Restore(save_dir)) { // Could not restore the backup
+        auto param_sfo_path = SaveInstance::GetParamSFOPath(save_dir);
+        if (!Common::FS::Exists(param_sfo_path)) {
             return 0;
         }
-    }
 
-    const auto memory = save_dir / FilenameSaveDataMemory;
-    if (const s64 size = Common::FS::FileSize(memory); size > 0) {
-        return static_cast<size_t>(size);
-    }
+        if (!data.sfo.Open(param_sfo_path) || Common::FS::Exists(save_dir / CorruptFileName)) {
+            if (!Backup::Restore(save_dir)) { // Could not restore the backup
+                return 0;
+            }
+        }
 
-    return 0;
+        const auto memory = save_dir / FilenameSaveDataMemory;
+        if (const s64 size = Common::FS::FileSize(memory); size > 0) {
+            return static_cast<size_t>(size);
+        }
+
+        return 0;
+    });
 }
 
 void SetIcon(u32 slot_id, void* buf, size_t buf_size) {
-    std::lock_guard lck{g_slot_mtx};
-    const auto& data = g_attached_slots[slot_id];
-    const auto icon_path = data.folder_path / sce_sys / "icon0.png";
-    if (buf == nullptr) {
-        if (Common::FS::Exists(icon_path)) {
-            Common::FS::Remove(icon_path);
+    g_slot_mtx.Run([&] {
+        const auto& data = g_attached_slots[slot_id];
+        const auto icon_path = data.folder_path / sce_sys / "icon0.png";
+        if (buf == nullptr) {
+            if (Common::FS::Exists(icon_path)) {
+                Common::FS::Remove(icon_path);
+            }
+            // Read the source through the mount stack so archive-backed base
+            // games can seed save-slot icons too.
+            if (auto bytes = g_mnt->ReadFile("/app0/sce_sys/save_data.png")) {
+                Common::FS::CreateDirectories(icon_path.parent_path());
+                IOFile::WriteBytes(icon_path, bytes->Bytes());
+            }
+        } else {
+            IOFile::WriteBytes(icon_path,
+                               std::span<const u8>{static_cast<const u8*>(buf), buf_size});
         }
-        // Read the source through the mount stack so archive-backed base
-        // games can seed save-slot icons too.
-        if (auto bytes = g_mnt->ReadFile("/app0/sce_sys/save_data.png")) {
-            Common::FS::CreateDirectories(icon_path.parent_path());
-            IOFile::WriteBytes(icon_path, bytes->Bytes());
-        }
-    } else {
-        IOFile::WriteBytes(icon_path, std::span<const u8>{static_cast<const u8*>(buf), buf_size});
-    }
+    });
 }
 
 bool IsSaveMemoryInitialized(u32 slot_id) {
-    std::lock_guard lck{g_slot_mtx};
-    return g_attached_slots.contains(slot_id);
+    return g_slot_mtx.Run([&]() -> bool { return g_attached_slots.contains(slot_id); });
 }
 
 PSF& GetParamSFO(u32 slot_id) {
-    std::lock_guard lck{g_slot_mtx};
-    auto& data = g_attached_slots[slot_id];
-    return data.sfo;
+    return g_slot_mtx.Run([&]() -> PSF& {
+        auto& data = g_attached_slots[slot_id];
+        return data.sfo;
+    });
 }
 
 std::optional<Common::FS::FileView> GetIcon(u32 slot_id) {
-    std::lock_guard lck{g_slot_mtx};
-    auto& data = g_attached_slots[slot_id];
-    return Common::FS::FileView::Map(data.folder_path / sce_sys / "icon0.png");
+    return g_slot_mtx.Run([&]() -> std::optional<Common::FS::FileView> {
+        auto& data = g_attached_slots[slot_id];
+        return Common::FS::FileView::Map(data.folder_path / sce_sys / "icon0.png");
+    });
 }
 
 void SaveSFO(u32 slot_id) {
-    std::lock_guard lck{g_slot_mtx};
-    const auto& data = g_attached_slots[slot_id];
-    const auto sfo_path = SaveInstance::GetParamSFOPath(data.folder_path);
-    Common::FS::CreateDirectories(sfo_path.parent_path());
-    const bool ok = data.sfo.Encode(sfo_path);
-    if (!ok) {
-        LOG_ERROR(Lib_SaveData, "Failed to encode param.sfo");
-        throw std::filesystem::filesystem_error("Failed to write param.sfo", sfo_path,
-                                                std::make_error_code(std::errc::permission_denied));
-    }
+    g_slot_mtx.Run([&] {
+        const auto& data = g_attached_slots[slot_id];
+        const auto sfo_path = SaveInstance::GetParamSFOPath(data.folder_path);
+        Common::FS::CreateDirectories(sfo_path.parent_path());
+        const bool ok = data.sfo.Encode(sfo_path);
+        if (!ok) {
+            LOG_ERROR(Lib_SaveData, "Failed to encode param.sfo");
+            throw std::filesystem::filesystem_error(
+                "Failed to write param.sfo", sfo_path,
+                std::make_error_code(std::errc::permission_denied));
+        }
+    });
 }
 
 void ReadMemory(u32 slot_id, void* buf, size_t buf_size, int64_t offset) {
-    std::lock_guard lk{g_slot_mtx};
-    auto& data = g_attached_slots[slot_id];
-    auto& memory = data.memory_cache;
-    if (memory.empty()) { // Load file
-        memory.resize(data.memory_cache_size);
-        IOFile f{data.folder_path / FilenameSaveDataMemory, Common::FS::FileAccessMode::Read,
-                 Common::FS::FileHint::Sequential};
-        if (f.IsOpen()) {
-            f.Seek(0);
-            f.ReadSpan(std::span{memory});
+    g_slot_mtx.Run([&] {
+        auto& data = g_attached_slots[slot_id];
+        auto& memory = data.memory_cache;
+        if (memory.empty()) { // Load file
+            memory.resize(data.memory_cache_size);
+            IOFile f{data.folder_path / FilenameSaveDataMemory, Common::FS::FileAccessMode::Read,
+                     Common::FS::FileHint::Sequential};
+            if (f.IsOpen()) {
+                f.Seek(0);
+                f.ReadSpan(std::span{memory});
+            }
         }
-    }
-    s64 read_size = buf_size;
-    if (read_size + offset > memory.size()) {
-        read_size = memory.size() - offset;
-    }
-    std::memcpy(buf, memory.data() + offset, read_size);
+        s64 read_size = buf_size;
+        if (read_size + offset > memory.size()) {
+            read_size = memory.size() - offset;
+        }
+        std::memcpy(buf, memory.data() + offset, read_size);
+    });
 }
 
 void WriteMemory(u32 slot_id, void* buf, size_t buf_size, int64_t offset) {
-    std::lock_guard lk{g_slot_mtx};
-    auto& data = g_attached_slots[slot_id];
-    auto& memory = data.memory_cache;
-    if (offset + buf_size > memory.size()) {
-        memory.resize(offset + buf_size);
-    }
-    std::memcpy(memory.data() + offset, buf, buf_size);
-    PersistMemory(slot_id, false);
-    Backup::NewRequest(data.user_id, data.game_serial, GetSaveDir(slot_id),
-                       Backup::OrbisSaveDataEventType::__DO_NOT_SAVE);
+    g_slot_mtx.Run([&] {
+        auto& data = g_attached_slots[slot_id];
+        auto& memory = data.memory_cache;
+        if (offset + buf_size > memory.size()) {
+            memory.resize(offset + buf_size);
+        }
+        std::memcpy(memory.data() + offset, buf, buf_size);
+        PersistMemory(slot_id, false);
+        Backup::NewRequest(data.user_id, data.game_serial, GetSaveDir(slot_id),
+                           Backup::OrbisSaveDataEventType::__DO_NOT_SAVE);
+    });
 }
 } // namespace Libraries::SaveData::SaveMemory

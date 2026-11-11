@@ -10,6 +10,7 @@
 #include <optional>
 #include <queue>
 
+#include "common/combiner.h"
 #include "common/io_file.h"
 #include "core/libraries/usbd/usb_backend.h"
 
@@ -53,7 +54,7 @@ public:
                             u8 position);
 
 protected:
-    std::mutex infinity_mutex;
+    Common::Combiner infinity_mutex;
     std::array<InfinityFigure, MAX_INFINITY_FIGURES> infinity_figures;
 
 private:

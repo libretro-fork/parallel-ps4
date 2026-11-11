@@ -10,6 +10,7 @@
 #include <vector>
 #include <queue>
 
+#include "common/combiner.h"
 #include "common/types.h"
 #include "shader_recompiler/runtime_info.h"
 #include "video_core/amdgpu/regs.h"
@@ -137,7 +138,7 @@ class DebugStateImpl {
 
     std::queue<std::string> debug_message_popup;
 
-    std::mutex guest_threads_mutex{};
+    Common::Combiner guest_threads_mutex{};
     std::vector<ThreadID> guest_threads{};
     std::atomic_bool is_guest_threads_paused = false;
     u64 pause_time{};
@@ -157,7 +158,7 @@ class DebugStateImpl {
     bool waiting_submit_pause = false;
     bool should_show_frame_dump = false;
 
-    std::shared_mutex frame_dump_list_mutex;
+    Common::Combiner frame_dump_list_mutex;
     std::vector<FrameDump> frame_dump_list{};
 
     std::vector<ShaderDump> shader_dump_list{};
@@ -237,8 +238,7 @@ public:
     }
 
     bool DumpingCurrentReg() {
-        std::shared_lock lock{frame_dump_list_mutex};
-        return !waiting_reg_dumps.empty();
+        return frame_dump_list_mutex.Run([&]() -> bool { return !waiting_reg_dumps.empty(); });
     }
 
     bool ShouldPauseInSubmit() const {

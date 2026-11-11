@@ -3,6 +3,7 @@
 
 #include <mutex>
 
+#include "common/combiner.h"
 #include "common/elf_info.h"
 #include "common/logging/log.h"
 #include "core/libraries/error_codes.h"
@@ -16,7 +17,7 @@
 
 namespace Libraries::SysModule {
 
-static std::mutex g_mutex{};
+static Common::Combiner g_mutex{};
 
 s32 PS4_SYSV_ABI sceSysmoduleGetModuleHandleInternal(OrbisSysModuleInternal id, s32* handle) {
     LOG_INFO(Lib_SysModule, "called");
@@ -24,8 +25,7 @@ s32 PS4_SYSV_ABI sceSysmoduleGetModuleHandleInternal(OrbisSysModuleInternal id, 
         return ORBIS_SYSMODULE_INVALID_ID;
     }
 
-    std::scoped_lock lk{g_mutex};
-    return getModuleHandle(id, handle);
+    return g_mutex.Run([&]() -> s32 { return getModuleHandle(id, handle); });
 }
 
 s32 PS4_SYSV_ABI sceSysmoduleGetModuleInfoForUnwind(VAddr addr, s32 flags,
@@ -57,8 +57,7 @@ s32 PS4_SYSV_ABI sceSysmoduleIsLoaded(OrbisSysModule id) {
         return ORBIS_SYSMODULE_INVALID_ID;
     }
 
-    std::scoped_lock lk{g_mutex};
-    return getModuleHandle(id, nullptr);
+    return g_mutex.Run([&]() -> s32 { return getModuleHandle(id, nullptr); });
 }
 
 s32 PS4_SYSV_ABI sceSysmoduleIsLoadedInternal(OrbisSysModuleInternal id) {
@@ -66,8 +65,7 @@ s32 PS4_SYSV_ABI sceSysmoduleIsLoadedInternal(OrbisSysModuleInternal id) {
         return ORBIS_SYSMODULE_INVALID_ID;
     }
 
-    std::scoped_lock lk{g_mutex};
-    return getModuleHandle(id, nullptr);
+    return g_mutex.Run([&]() -> s32 { return getModuleHandle(id, nullptr); });
 }
 
 s32 PS4_SYSV_ABI sceSysmoduleLoadModule(OrbisSysModule id) {
@@ -78,10 +76,7 @@ s32 PS4_SYSV_ABI sceSysmoduleLoadModule(OrbisSysModule id) {
     }
 
     // Only locks for internal loadModule call.
-    {
-        std::scoped_lock lk{g_mutex};
-        result = loadModule(id, 0, nullptr, nullptr);
-    }
+    g_mutex.Run([&] { result = loadModule(id, 0, nullptr, nullptr); });
 
     if (result == ORBIS_KERNEL_ERROR_ESTART) {
         s32 sdk_ver = 0;
@@ -114,8 +109,7 @@ s32 PS4_SYSV_ABI sceSysmoduleLoadModuleInternal(OrbisSysModuleInternal id) {
     if (id == 0x80000039) {
         return loadModule(id, 0, nullptr, nullptr);
     }
-    std::scoped_lock lk{g_mutex};
-    return loadModule(id, 0, nullptr, nullptr);
+    return g_mutex.Run([&]() -> s32 { return loadModule(id, 0, nullptr, nullptr); });
 }
 
 s32 PS4_SYSV_ABI sceSysmoduleLoadModuleInternalWithArg(OrbisSysModuleInternal id, s32 argc,
@@ -130,8 +124,7 @@ s32 PS4_SYSV_ABI sceSysmoduleLoadModuleInternalWithArg(OrbisSysModuleInternal id
         return ORBIS_SYSMODULE_INVALID_ID;
     }
 
-    std::scoped_lock lk{g_mutex};
-    return loadModule(id, argc, argv, res_out);
+    return g_mutex.Run([&]() -> s32 { return loadModule(id, argc, argv, res_out); });
 }
 
 s32 PS4_SYSV_ABI sceSysmoduleMapLibcForLibkernel() {
@@ -150,8 +143,7 @@ s32 PS4_SYSV_ABI sceSysmoduleUnloadModule(OrbisSysModule id) {
         return ORBIS_SYSMODULE_INVALID_ID;
     }
 
-    std::scoped_lock lk{g_mutex};
-    return unloadModule(id, 0, nullptr, nullptr, false);
+    return g_mutex.Run([&]() -> s32 { return unloadModule(id, 0, nullptr, nullptr, false); });
 }
 
 s32 PS4_SYSV_ABI sceSysmoduleUnloadModuleByNameInternal() {

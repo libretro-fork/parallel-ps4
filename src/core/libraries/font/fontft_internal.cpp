@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright 2024 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include "common/combiner.h"
 #include "common/io_file.h"
 #include "core/libraries/font/fontft_internal.h"
 
@@ -2006,22 +2007,24 @@ s32 RenderCharGlyphImageCore(Libraries::Font::OrbisFontHandle fontHandle, u32 co
     }
 
     {
-        static std::mutex s_mutex;
+        static Common::Combiner s_mutex;
         static std::unordered_map<Libraries::Font::OrbisFontHandle, int> s_counts;
-        std::scoped_lock lock(s_mutex);
-        int& count = s_counts[fontHandle];
-        const bool force_diag = (code == 0x000Au) || (code == 0x000Du) || (code == 0x25B3u);
-        if (force_diag || count < 5) {
-            if (!force_diag) {
-                ++count;
+        s_mutex.Run([&] {
+            int& count = s_counts[fontHandle];
+            const bool force_diag = (code == 0x000Au) || (code == 0x000Du) || (code == 0x25B3u);
+            if (force_diag || count < 5) {
+                if (!force_diag) {
+                    ++count;
+                }
+                LOG_DEBUG(
+                    Lib_Font,
+                    "SysfontRender: handle={} code=U+{:04X} mapped=U+{:04X} font_id={} "
+                    "scale_unit={} dpi_x={} dpi_y={} scale_w={} scale_h={} sys_scale_factor={} "
+                    "shift_y_units={}",
+                    static_cast<const void*>(fontHandle), code, mapped_code, font_id, scale_unit,
+                    dpi_x, dpi_y, scale_x_in, scale_y_in, sys_scale_factor, shift_y_units);
             }
-            LOG_DEBUG(Lib_Font,
-                      "SysfontRender: handle={} code=U+{:04X} mapped=U+{:04X} font_id={} "
-                      "scale_unit={} dpi_x={} dpi_y={} scale_w={} scale_h={} sys_scale_factor={} "
-                      "shift_y_units={}",
-                      static_cast<const void*>(fontHandle), code, mapped_code, font_id, scale_unit,
-                      dpi_x, dpi_y, scale_x_in, scale_y_in, sys_scale_factor, shift_y_units);
-        }
+        });
     }
 
     void* font_obj_void = nullptr;
@@ -2577,29 +2580,30 @@ static bool ReadUnitsPerEm(const u8* data, std::size_t size, u32 base, u16& out_
     return out_units != 0;
 }
 
-static std::mutex g_font_obj_sidecars_mutex;
+static Common::Combiner g_font_obj_sidecars_mutex;
 static std::unordered_map<const FontObj*, FontObjSidecar> g_font_obj_sidecars;
 
 static void SetFontObjSidecar(const FontObj* obj, FontObjSidecar sidecar) {
     if (!obj) {
         return;
     }
-    std::lock_guard lock(g_font_obj_sidecars_mutex);
-    g_font_obj_sidecars.insert_or_assign(obj, std::move(sidecar));
+    g_font_obj_sidecars_mutex.Run(
+        [&] { g_font_obj_sidecars.insert_or_assign(obj, std::move(sidecar)); });
 }
 
 static std::optional<FontObjSidecar> TakeFontObjSidecar(const FontObj* obj) {
     if (!obj) {
         return std::nullopt;
     }
-    std::lock_guard lock(g_font_obj_sidecars_mutex);
-    auto it = g_font_obj_sidecars.find(obj);
-    if (it == g_font_obj_sidecars.end()) {
-        return std::nullopt;
-    }
-    FontObjSidecar out = std::move(it->second);
-    g_font_obj_sidecars.erase(it);
-    return out;
+    return g_font_obj_sidecars_mutex.Run([&]() -> std::optional<FontObjSidecar> {
+        auto it = g_font_obj_sidecars.find(obj);
+        if (it == g_font_obj_sidecars.end()) {
+            return std::nullopt;
+        }
+        FontObjSidecar out = std::move(it->second);
+        g_font_obj_sidecars.erase(it);
+        return out;
+    });
 }
 
 } // namespace

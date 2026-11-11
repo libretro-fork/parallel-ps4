@@ -1092,27 +1092,27 @@ s32 PS4_SYSV_ABI sceAudio3dPortOpen(const Libraries::UserService::OrbisUserServi
         effective.max_objects = 0x200;
     }
 
-    std::scoped_lock lock{state->ports_mutex};
-
-    OrbisAudio3dPortId id = ORBIS_AUDIO3D_PORT_INVALID;
-    for (OrbisAudio3dPortId i = 0; i < MaxPorts; i++) {
-        if (!state->ports.contains(i)) {
-            id = i;
-            break;
+    return state->ports_mutex.Run([&]() -> s32 {
+        OrbisAudio3dPortId id = ORBIS_AUDIO3D_PORT_INVALID;
+        for (OrbisAudio3dPortId i = 0; i < MaxPorts; i++) {
+            if (!state->ports.contains(i)) {
+                id = i;
+                break;
+            }
         }
-    }
 
-    if (id == ORBIS_AUDIO3D_PORT_INVALID) {
-        LOG_ERROR(Lib_Audio3d, "no free ports");
-        return ORBIS_AUDIO3D_ERROR_OUT_OF_RESOURCES;
-    }
+        if (id == ORBIS_AUDIO3D_PORT_INVALID) {
+            LOG_ERROR(Lib_Audio3d, "no free ports");
+            return ORBIS_AUDIO3D_ERROR_OUT_OF_RESOURCES;
+        }
 
-    auto& port = state->ports.try_emplace(id).first->second;
-    port.parameters = effective;
+        auto& port = state->ports.try_emplace(id).first->second;
+        port.parameters = effective;
 
-    *port_id = id;
+        *port_id = id;
 
-    return ORBIS_OK;
+        return ORBIS_OK;
+    });
 }
 
 s32 PS4_SYSV_ABI sceAudio3dPortPush(const OrbisAudio3dPortId port_id,

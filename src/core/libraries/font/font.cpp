@@ -25,6 +25,7 @@
 #include <unordered_set>
 #include <vector>
 #include <fmt/format.h>
+#include "common/combiner.h"
 #include "common/io_file.h"
 #include "common/logging/log.h"
 #include "common/path_util.h"
@@ -5157,18 +5158,19 @@ s32 PS4_SYSV_ABI sceFontRenderCharGlyphImage(OrbisFontHandle fontHandle, u32 cod
 
         const float y_used = y + baseline_add;
         {
-            static std::mutex s_baseline_log_mutex;
+            static Common::Combiner s_baseline_log_mutex;
             static std::unordered_map<OrbisFontHandle, int> s_baseline_log_counts;
-            std::lock_guard<std::mutex> lock(s_baseline_log_mutex);
-            int& count = s_baseline_log_counts[fontHandle];
-            if (count < 5) {
-                LOG_DEBUG(Lib_Font,
-                          "RenderBaseline: handle={} code=U+{:04X} y_in={} baseline_add={} "
-                          "y_used={} pre_rc={}",
-                          static_cast<const void*>(fontHandle), code, y, baseline_add, y_used,
-                          pre_rc);
-                ++count;
-            }
+            s_baseline_log_mutex.Run([&] {
+                int& count = s_baseline_log_counts[fontHandle];
+                if (count < 5) {
+                    LOG_DEBUG(Lib_Font,
+                              "RenderBaseline: handle={} code=U+{:04X} y_in={} baseline_add={} "
+                              "y_used={} pre_rc={}",
+                              static_cast<const void*>(fontHandle), code, y, baseline_add, y_used,
+                              pre_rc);
+                    ++count;
+                }
+            });
         }
 
         CachedStyleSetDirectionWord(font->cached_style, 1);

@@ -5,6 +5,7 @@
 
 #include <memory>
 #include <mutex>
+#include "common/combiner.h"
 
 class EmulatorState {
 public:
@@ -23,7 +24,7 @@ public:
 
 private:
     static std::shared_ptr<EmulatorState> s_instance;
-    static std::mutex s_mutex;
+    static Common::Combiner s_mutex;
 
     // state variables
     bool m_running = false;

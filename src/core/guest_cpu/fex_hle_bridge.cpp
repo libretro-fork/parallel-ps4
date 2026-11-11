@@ -153,15 +153,17 @@ bool HleGuestBridge::PublishHostRange(void* context, std::uintptr_t address, std
     }
     auto* bridge = static_cast<HleGuestBridge*>(context);
     const HostRange range{address, address + size, writable};
-    std::unique_lock lock{bridge->host_range_mutex};
-    const bool overlaps = std::ranges::any_of(bridge->host_ranges, [&](const HostRange& existing) {
-        return range.begin < existing.end && existing.begin < range.end;
+    return bridge->host_range_mutex.Run([&]() -> bool {
+        const bool overlaps =
+            std::ranges::any_of(bridge->host_ranges, [&](const HostRange& existing) {
+                return range.begin < existing.end && existing.begin < range.end;
+            });
+        if (overlaps) {
+            return false;
+        }
+        bridge->host_ranges.push_back(range);
+        return true;
     });
-    if (overlaps) {
-        return false;
-    }
-    bridge->host_ranges.push_back(range);
-    return true;
 }
 
 bool HleGuestBridge::RevokeHostRange(void* context, std::uintptr_t address) {
@@ -169,13 +171,14 @@ bool HleGuestBridge::RevokeHostRange(void* context, std::uintptr_t address) {
         return false;
     }
     auto* bridge = static_cast<HleGuestBridge*>(context);
-    std::unique_lock lock{bridge->host_range_mutex};
-    const auto range = std::ranges::find(bridge->host_ranges, address, &HostRange::begin);
-    if (range == bridge->host_ranges.end()) {
-        return false;
-    }
-    bridge->host_ranges.erase(range);
-    return true;
+    return bridge->host_range_mutex.Run([&]() -> bool {
+        const auto range = std::ranges::find(bridge->host_ranges, address, &HostRange::begin);
+        if (range == bridge->host_ranges.end()) {
+            return false;
+        }
+        bridge->host_ranges.erase(range);
+        return true;
+    });
 }
 
 bool HleGuestBridge::ValidatePublishedHostRange(std::uintptr_t address, std::size_t size,
@@ -184,9 +187,10 @@ bool HleGuestBridge::ValidatePublishedHostRange(std::uintptr_t address, std::siz
         return false;
     }
     const auto end = address + size;
-    std::shared_lock lock{host_range_mutex};
-    return std::ranges::any_of(host_ranges, [&](const HostRange& range) {
-        return range.begin <= address && end <= range.end && (!writable || range.writable);
+    return host_range_mutex.Run([&]() -> bool {
+        return std::ranges::any_of(host_ranges, [&](const HostRange& range) {
+            return range.begin <= address && end <= range.end && (!writable || range.writable);
+        });
     });
 }
 

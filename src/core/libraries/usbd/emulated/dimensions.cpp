@@ -32,50 +32,50 @@ void DimensionsToypad::LoadFigure(std::string file_name, u8 pad, u8 index) {
 
 u32 DimensionsToypad::LoadDimensionsFigure(const std::array<u8, 0x2D * 0x04>& buf,
                                            Common::FS::IOFile file, u8 pad, u8 index) {
-    std::lock_guard lock(m_dimensions_mutex);
+    return m_dimensions_mutex.Run([&]() -> u32 {
+        const u32 id = GetFigureId(buf);
 
-    const u32 id = GetFigureId(buf);
+        DimensionsFigure& figure = GetFigureByIndex(index);
+        figure.dimFile = std::move(file);
+        figure.id = id;
+        figure.pad = pad;
+        figure.index = index + 1;
+        figure.data = buf;
+        // When a figure is added to the toypad, respond to the game with the pad they were added
+        // to, their index, the direction (0x00 in byte 6 for added) and their UID
+        std::array<u8, 32> figureChangeResponse = {0x56,   0x0b,   figure.pad, 0x00,   figure.index,
+                                                   0x00,   buf[0], buf[1],     buf[2], buf[4],
+                                                   buf[5], buf[6], buf[7]};
+        figureChangeResponse[13] = GenerateChecksum(figureChangeResponse, 13);
+        m_figure_added_removed_responses.push(figureChangeResponse);
 
-    DimensionsFigure& figure = GetFigureByIndex(index);
-    figure.dimFile = std::move(file);
-    figure.id = id;
-    figure.pad = pad;
-    figure.index = index + 1;
-    figure.data = buf;
-    // When a figure is added to the toypad, respond to the game with the pad they were added to,
-    // their index, the direction (0x00 in byte 6 for added) and their UID
-    std::array<u8, 32> figureChangeResponse = {0x56,   0x0b,   figure.pad, 0x00,   figure.index,
-                                               0x00,   buf[0], buf[1],     buf[2], buf[4],
-                                               buf[5], buf[6], buf[7]};
-    figureChangeResponse[13] = GenerateChecksum(figureChangeResponse, 13);
-    m_figure_added_removed_responses.push(figureChangeResponse);
-
-    return id;
+        return id;
+    });
 }
 
 void DimensionsToypad::RemoveFigure(u8 pad, u8 index, bool fullRemove) {
-    std::lock_guard lock(m_dimensions_mutex);
+    m_dimensions_mutex.Run([&] {
+        DimensionsFigure& figure = GetFigureByIndex(index);
+        if (figure.index == 255)
+            return;
 
-    DimensionsFigure& figure = GetFigureByIndex(index);
-    if (figure.index == 255)
-        return;
+        // When a figure is removed from the toypad, respond to the game with the pad they were
+        // removed from, their index, the direction (0x01 in byte 6 for removed) and their UID
+        if (fullRemove) {
+            std::array<u8, 32> figureChangeResponse = {
+                0x56,           0x0b,           figure.pad,     0x00,           figure.index,
+                0x01,           figure.data[0], figure.data[1], figure.data[2], figure.data[4],
+                figure.data[5], figure.data[6], figure.data[7]};
+            figureChangeResponse[13] = GenerateChecksum(figureChangeResponse, 13);
+            m_figure_added_removed_responses.push(figureChangeResponse);
+            figure.Save();
+            figure.dimFile.Close();
+        }
 
-    // When a figure is removed from the toypad, respond to the game with the pad they were removed
-    // from, their index, the direction (0x01 in byte 6 for removed) and their UID
-    if (fullRemove) {
-        std::array<u8, 32> figureChangeResponse = {
-            0x56,           0x0b,           figure.pad,     0x00,           figure.index,
-            0x01,           figure.data[0], figure.data[1], figure.data[2], figure.data[4],
-            figure.data[5], figure.data[6], figure.data[7]};
-        figureChangeResponse[13] = GenerateChecksum(figureChangeResponse, 13);
-        m_figure_added_removed_responses.push(figureChangeResponse);
-        figure.Save();
-        figure.dimFile.Close();
-    }
-
-    figure.index = 255;
-    figure.pad = 255;
-    figure.id = 0;
+        figure.index = 255;
+        figure.pad = 255;
+        figure.id = 0;
+    });
 }
 
 void DimensionsToypad::MoveFigure(u8 new_pad, u8 new_index, u8 old_pad, u8 old_index) {
@@ -100,38 +100,38 @@ void DimensionsToypad::MoveFigure(u8 new_pad, u8 new_index, u8 old_pad, u8 old_i
 }
 
 void DimensionsToypad::TempRemoveFigure(u8 index) {
-    std::lock_guard lock(m_dimensions_mutex);
+    m_dimensions_mutex.Run([&] {
+        DimensionsFigure& figure = GetFigureByIndex(index);
+        if (figure.index == 255)
+            return;
 
-    DimensionsFigure& figure = GetFigureByIndex(index);
-    if (figure.index == 255)
-        return;
+        // Send a response to the game that the figure has been "Picked up" from existing slot,
+        // until either the movement is cancelled, or user chooses a space to move to
+        std::array<u8, 32> figureChangeResponse = {
+            0x56,           0x0b,           figure.pad,     0x00,           figure.index,
+            0x01,           figure.data[0], figure.data[1], figure.data[2], figure.data[4],
+            figure.data[5], figure.data[6], figure.data[7]};
 
-    // Send a response to the game that the figure has been "Picked up" from existing slot,
-    // until either the movement is cancelled, or user chooses a space to move to
-    std::array<u8, 32> figureChangeResponse = {
-        0x56,           0x0b,           figure.pad,     0x00,           figure.index,
-        0x01,           figure.data[0], figure.data[1], figure.data[2], figure.data[4],
-        figure.data[5], figure.data[6], figure.data[7]};
-
-    figureChangeResponse[13] = GenerateChecksum(figureChangeResponse, 13);
-    m_figure_added_removed_responses.push(figureChangeResponse);
+        figureChangeResponse[13] = GenerateChecksum(figureChangeResponse, 13);
+        m_figure_added_removed_responses.push(figureChangeResponse);
+    });
 }
 
 void DimensionsToypad::CancelRemoveFigure(u8 index) {
-    std::lock_guard lock(m_dimensions_mutex);
+    m_dimensions_mutex.Run([&] {
+        DimensionsFigure& figure = GetFigureByIndex(index);
+        if (figure.index == 255)
+            return;
 
-    DimensionsFigure& figure = GetFigureByIndex(index);
-    if (figure.index == 255)
-        return;
+        // Cancel the previous movement of the figure
+        std::array<u8, 32> figureChangeResponse = {
+            0x56,           0x0b,           figure.pad,     0x00,           figure.index,
+            0x00,           figure.data[0], figure.data[1], figure.data[2], figure.data[4],
+            figure.data[5], figure.data[6], figure.data[7]};
 
-    // Cancel the previous movement of the figure
-    std::array<u8, 32> figureChangeResponse = {
-        0x56,           0x0b,           figure.pad,     0x00,           figure.index,
-        0x00,           figure.data[0], figure.data[1], figure.data[2], figure.data[4],
-        figure.data[5], figure.data[6], figure.data[7]};
-
-    figureChangeResponse[13] = GenerateChecksum(figureChangeResponse, 13);
-    m_figure_added_removed_responses.push(figureChangeResponse);
+        figureChangeResponse[13] = GenerateChecksum(figureChangeResponse, 13);
+        m_figure_added_removed_responses.push(figureChangeResponse);
+    });
 }
 
 u8 DimensionsToypad::GenerateChecksum(const std::array<u8, 32>& data, u32 num_of_bytes) {
@@ -404,50 +404,50 @@ void DimensionsToypad::GetChallengeResponse(const u8* buf, u8 sequence,
 }
 
 void DimensionsToypad::QueryBlock(u8 index, u8 page, std::array<u8, 32>& reply_buf, u8 sequence) {
-    std::lock_guard lock(m_dimensions_mutex);
+    m_dimensions_mutex.Run([&] {
+        reply_buf[0] = 0x55;
+        reply_buf[1] = 0x12;
+        reply_buf[2] = sequence;
+        reply_buf[3] = 0x00;
 
-    reply_buf[0] = 0x55;
-    reply_buf[1] = 0x12;
-    reply_buf[2] = sequence;
-    reply_buf[3] = 0x00;
+        // Index from game begins at 1 rather than 0, so minus 1 here
+        if (const u8 figure_index = index - 1; figure_index < MAX_DIMENSIONS_FIGURES) {
+            const DimensionsFigure& figure = GetFigureByIndex(figure_index);
 
-    // Index from game begins at 1 rather than 0, so minus 1 here
-    if (const u8 figure_index = index - 1; figure_index < MAX_DIMENSIONS_FIGURES) {
-        const DimensionsFigure& figure = GetFigureByIndex(figure_index);
-
-        // Query 4 pages of 4 bytes from the figure, copy this to the response
-        if (figure.index != 255 && (4 * page) < ((0x2D * 4) - 16)) {
-            std::memcpy(&reply_buf[4], figure.data.data() + (4 * page), 16);
+            // Query 4 pages of 4 bytes from the figure, copy this to the response
+            if (figure.index != 255 && (4 * page) < ((0x2D * 4) - 16)) {
+                std::memcpy(&reply_buf[4], figure.data.data() + (4 * page), 16);
+            }
         }
-    }
-    reply_buf[20] = GenerateChecksum(reply_buf, 20);
+        reply_buf[20] = GenerateChecksum(reply_buf, 20);
+    });
 }
 
 void DimensionsToypad::WriteBlock(u8 index, u8 page, const u8* to_write_buf,
                                   std::array<u8, 32>& reply_buf, u8 sequence) {
-    std::lock_guard lock(m_dimensions_mutex);
+    m_dimensions_mutex.Run([&] {
+        reply_buf[0] = 0x55;
+        reply_buf[1] = 0x02;
+        reply_buf[2] = sequence;
+        reply_buf[3] = 0x00;
 
-    reply_buf[0] = 0x55;
-    reply_buf[1] = 0x02;
-    reply_buf[2] = sequence;
-    reply_buf[3] = 0x00;
+        // Index from game begins at 1 rather than 0, so minus 1 here
+        if (const u8 figure_index = index - 1; figure_index < MAX_DIMENSIONS_FIGURES) {
+            DimensionsFigure& figure = GetFigureByIndex(figure_index);
 
-    // Index from game begins at 1 rather than 0, so minus 1 here
-    if (const u8 figure_index = index - 1; figure_index < MAX_DIMENSIONS_FIGURES) {
-        DimensionsFigure& figure = GetFigureByIndex(figure_index);
-
-        // Copy 4 bytes to the page on the figure requested by the game
-        if (figure.index != 255 && page < 0x2D) {
-            // Id is written to page 36
-            if (page == 36) {
-                figure.id = u32(to_write_buf[0]) | (u32(to_write_buf[1]) << 8) |
-                            (u32(to_write_buf[2]) << 16) | (u32(to_write_buf[3]) << 24);
+            // Copy 4 bytes to the page on the figure requested by the game
+            if (figure.index != 255 && page < 0x2D) {
+                // Id is written to page 36
+                if (page == 36) {
+                    figure.id = u32(to_write_buf[0]) | (u32(to_write_buf[1]) << 8) |
+                                (u32(to_write_buf[2]) << 16) | (u32(to_write_buf[3]) << 24);
+                }
+                std::memcpy(figure.data.data() + (page * 4), to_write_buf, 4);
+                figure.Save();
             }
-            std::memcpy(figure.data.data() + (page * 4), to_write_buf, 4);
-            figure.Save();
         }
-    }
-    reply_buf[4] = GenerateChecksum(reply_buf, 4);
+        reply_buf[4] = GenerateChecksum(reply_buf, 4);
+    });
 }
 
 void DimensionsToypad::GetModel(const u8* buf, u8 sequence, std::array<u8, 32>& reply_buf) {
@@ -480,15 +480,15 @@ void DimensionsToypad::GetModel(const u8* buf, u8 sequence, std::array<u8, 32>& 
 }
 
 std::optional<std::array<u8, 32>> DimensionsToypad::PopAddedRemovedResponse() {
-    std::lock_guard lock(m_dimensions_mutex);
+    return m_dimensions_mutex.Run([&]() -> std::optional<std::array<u8, 32>> {
+        if (m_figure_added_removed_responses.empty()) {
+            return std::nullopt;
+        }
 
-    if (m_figure_added_removed_responses.empty()) {
-        return std::nullopt;
-    }
-
-    std::array<u8, 32> response = m_figure_added_removed_responses.front();
-    m_figure_added_removed_responses.pop();
-    return response;
+        std::array<u8, 32> response = m_figure_added_removed_responses.front();
+        m_figure_added_removed_responses.pop();
+        return response;
+    });
 }
 
 libusb_endpoint_descriptor* DimensionsBackend::FillEndpointDescriptorPair() {
@@ -519,19 +519,20 @@ libusb_transfer_status DimensionsBackend::HandleAsyncTransfer(libusb_transfer* t
         // response from a previous write
         bool responded = false;
         while (!responded) {
-            std::lock_guard lock(m_query_mutex);
-            std::optional<std::array<u8, 32>> response =
-                m_dimensions_toypad->PopAddedRemovedResponse();
-            if (response) {
-                std::memcpy(transfer->buffer, response.value().data(), 0x20);
-                transfer->length = 32;
-                responded = true;
-            } else if (!m_queries.empty()) {
-                std::memcpy(transfer->buffer, m_queries.front().data(), 0x20);
-                transfer->length = 32;
-                m_queries.pop();
-                responded = true;
-            }
+            m_query_mutex.Run([&] {
+                std::optional<std::array<u8, 32>> response =
+                    m_dimensions_toypad->PopAddedRemovedResponse();
+                if (response) {
+                    std::memcpy(transfer->buffer, response.value().data(), 0x20);
+                    transfer->length = 32;
+                    responded = true;
+                } else if (!m_queries.empty()) {
+                    std::memcpy(transfer->buffer, m_queries.front().data(), 0x20);
+                    transfer->length = 32;
+                    m_queries.pop();
+                    responded = true;
+                }
+            });
         }
         break;
     }
@@ -611,8 +612,7 @@ libusb_transfer_status DimensionsBackend::HandleAsyncTransfer(libusb_transfer* t
             break;
         }
         }
-        std::lock_guard lock(m_query_mutex);
-        m_queries.push(q_result);
+        m_query_mutex.Run([&] { m_queries.push(q_result); });
         break;
     }
     default:

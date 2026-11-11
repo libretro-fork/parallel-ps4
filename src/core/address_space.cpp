@@ -8,6 +8,7 @@
 #include "common/alignment.h"
 #include "common/arch.h"
 #include "common/assert.h"
+#include "common/combiner.h"
 #include "common/elf_info.h"
 #include "common/error.h"
 #include "core/address_space.h"
@@ -436,26 +437,27 @@ struct AddressSpace::Impl {
     }
 
     void* Map(VAddr virtual_addr, PAddr phys_addr, u64 size, ULONG prot, s32 fd = -1) {
-        std::scoped_lock lk{mutex};
-        // Get a pointer to the region containing virtual_addr
-        auto it = std::prev(regions.upper_bound(virtual_addr));
+        return mutex.Run([&]() -> void* {
+            // Get a pointer to the region containing virtual_addr
+            auto it = std::prev(regions.upper_bound(virtual_addr));
 
-        // If needed, split surrounding regions to create a placeholder
-        if (it->first != virtual_addr || it->second.size != size) {
-            SplitRegion(virtual_addr, size);
-            it = std::prev(regions.upper_bound(virtual_addr));
-        }
+            // If needed, split surrounding regions to create a placeholder
+            if (it->first != virtual_addr || it->second.size != size) {
+                SplitRegion(virtual_addr, size);
+                it = std::prev(regions.upper_bound(virtual_addr));
+            }
 
-        // Get the address and region for this range.
-        auto& [base, region] = *it;
-        ASSERT_MSG(!region.is_mapped, "Cannot overwrite mapped region");
+            // Get the address and region for this range.
+            auto& [base, region] = *it;
+            ASSERT_MSG(!region.is_mapped, "Cannot overwrite mapped region");
 
-        // Now we have a region matching the requested region, perform the actual mapping.
-        region.is_mapped = true;
-        region.phys_base = phys_addr;
-        region.prot = prot;
-        region.fd = fd;
-        return MapRegion(&region);
+            // Now we have a region matching the requested region, perform the actual mapping.
+            region.is_mapped = true;
+            region.phys_base = phys_addr;
+            region.prot = prot;
+            region.fd = fd;
+            return MapRegion(&region);
+        });
     }
 
     void CoalesceFreeRegions(VAddr virtual_addr) {
@@ -505,104 +507,109 @@ struct AddressSpace::Impl {
     }
 
     VAddr Unmap(VAddr virtual_addr, u64* size) {
-        std::scoped_lock lk{mutex};
-        // Loop through all regions in the requested range
-        u64 remaining_size = *size;
-        VAddr current_addr = virtual_addr;
-        while (remaining_size > 0) {
-            // Get a pointer to the region containing virtual_addr
-            auto it = std::prev(regions.upper_bound(current_addr));
+        return mutex.Run([&]() -> VAddr {
+            // Loop through all regions in the requested range
+            u64 remaining_size = *size;
+            VAddr current_addr = virtual_addr;
+            while (remaining_size > 0) {
+                // Get a pointer to the region containing virtual_addr
+                auto it = std::prev(regions.upper_bound(current_addr));
 
-            // If necessary, split regions to ensure a valid unmap.
-            // To prevent complication, ensure size is within the bounds of the current region.
-            u64 base_offset = current_addr - it->second.base;
-            u64 size_to_unmap = std::min<u64>(it->second.size - base_offset, remaining_size);
-            if (current_addr != it->second.base || size_to_unmap != it->second.size) {
-                SplitRegion(current_addr, size_to_unmap);
-                it = std::prev(regions.upper_bound(current_addr));
+                // If necessary, split regions to ensure a valid unmap.
+                // To prevent complication, ensure size is within the bounds of the current region.
+                u64 base_offset = current_addr - it->second.base;
+                u64 size_to_unmap = std::min<u64>(it->second.size - base_offset, remaining_size);
+                if (current_addr != it->second.base || size_to_unmap != it->second.size) {
+                    SplitRegion(current_addr, size_to_unmap);
+                    it = std::prev(regions.upper_bound(current_addr));
+                }
+
+                // Get the address and region corresponding to this range.
+                auto& [base, region] = *it;
+
+                // Unmap the region if it was previously mapped
+                if (region.is_mapped) {
+                    UnmapRegion(&region);
+                }
+
+                // Update region data
+                region.is_mapped = false;
+                region.fd = -1;
+                region.phys_base = -1;
+                region.prot = PAGE_NOACCESS;
+
+                // Update loop variables
+                remaining_size -= size_to_unmap;
+                current_addr += size_to_unmap;
             }
 
-            // Get the address and region corresponding to this range.
-            auto& [base, region] = *it;
+            // Coalesce any free space produced from these unmaps.
+            CoalesceFreeRegions(virtual_addr);
 
-            // Unmap the region if it was previously mapped
-            if (region.is_mapped) {
-                UnmapRegion(&region);
-            }
-
-            // Update region data
-            region.is_mapped = false;
-            region.fd = -1;
-            region.phys_base = -1;
-            region.prot = PAGE_NOACCESS;
-
-            // Update loop variables
-            remaining_size -= size_to_unmap;
-            current_addr += size_to_unmap;
-        }
-
-        // Coalesce any free space produced from these unmaps.
-        CoalesceFreeRegions(virtual_addr);
-
-        return virtual_addr;
+            return virtual_addr;
+        });
     }
 
     void Protect(VAddr virtual_addr, u64 size, bool read, bool write, bool execute) {
-        std::scoped_lock lk{mutex};
-        DWORD new_flags{};
+        mutex.Run([&] {
+            DWORD new_flags{};
 
-        if (write && !read) {
-            // While write-only CPU protection isn't possible, write-only GPU protection is.
-            LOG_WARNING(Core, "Converting write-only protection to read-write");
-        }
+            if (write && !read) {
+                // While write-only CPU protection isn't possible, write-only GPU protection is.
+                LOG_WARNING(Core, "Converting write-only protection to read-write");
+            }
 
-        // All cases involving execute permissions have separate permissions.
-        if (execute) {
-            // If there's some form of write protection requested, provide read-write permissions.
-            if (write) {
-                new_flags = PAGE_EXECUTE_READWRITE;
-            } else if (read && !write) {
-                new_flags = PAGE_EXECUTE_READ;
+            // All cases involving execute permissions have separate permissions.
+            if (execute) {
+                // If there's some form of write protection requested, provide read-write
+                // permissions.
+                if (write) {
+                    new_flags = PAGE_EXECUTE_READWRITE;
+                } else if (read && !write) {
+                    new_flags = PAGE_EXECUTE_READ;
+                } else {
+                    new_flags = PAGE_EXECUTE;
+                }
             } else {
-                new_flags = PAGE_EXECUTE;
+                if (write) {
+                    new_flags = PAGE_READWRITE;
+                } else if (read && !write) {
+                    new_flags = PAGE_READONLY;
+                } else {
+                    new_flags = PAGE_NOACCESS;
+                }
             }
-        } else {
-            if (write) {
-                new_flags = PAGE_READWRITE;
-            } else if (read && !write) {
-                new_flags = PAGE_READONLY;
-            } else {
-                new_flags = PAGE_NOACCESS;
-            }
-        }
 
-        // If no flags are assigned, then something's gone wrong.
-        if (new_flags == 0) {
-            LOG_CRITICAL(Core,
-                         "Unsupported protection flag combination for address {:#x}, size {}, "
-                         "read={}, write={}, execute={}",
-                         virtual_addr, size, read, write, execute);
-            return;
-        }
+            // If no flags are assigned, then something's gone wrong.
+            if (new_flags == 0) {
+                LOG_CRITICAL(Core,
+                             "Unsupported protection flag combination for address {:#x}, size {}, "
+                             "read={}, write={}, execute={}",
+                             virtual_addr, size, read, write, execute);
+                return;
+            }
 
-        const VAddr virtual_end = virtual_addr + size;
-        auto it = --regions.upper_bound(virtual_addr);
-        ASSERT_MSG(it != regions.end(), "addr {:#x} out of bounds", virtual_addr);
-        for (; it->first < virtual_end; it++) {
-            if (!it->second.is_mapped) {
-                continue;
+            const VAddr virtual_end = virtual_addr + size;
+            auto it = --regions.upper_bound(virtual_addr);
+            ASSERT_MSG(it != regions.end(), "addr {:#x} out of bounds", virtual_addr);
+            for (; it->first < virtual_end; it++) {
+                if (!it->second.is_mapped) {
+                    continue;
+                }
+                const auto& region = it->second;
+                const u64 range_addr = std::max(region.base, virtual_addr);
+                const u64 range_size =
+                    std::min(region.base + region.size, virtual_end) - range_addr;
+                DWORD old_flags{};
+                if (!VirtualProtectEx(process, LPVOID(range_addr), range_size, new_flags,
+                                      &old_flags)) {
+                    UNREACHABLE_MSG(
+                        "Failed to change virtual memory protection for address {:#x}, size "
+                        "{:#x}, error {}",
+                        virtual_addr, size, Common::GetLastErrorMsg());
+                }
             }
-            const auto& region = it->second;
-            const u64 range_addr = std::max(region.base, virtual_addr);
-            const u64 range_size = std::min(region.base + region.size, virtual_end) - range_addr;
-            DWORD old_flags{};
-            if (!VirtualProtectEx(process, LPVOID(range_addr), range_size, new_flags, &old_flags)) {
-                UNREACHABLE_MSG(
-                    "Failed to change virtual memory protection for address {:#x}, size "
-                    "{:#x}, error {}",
-                    virtual_addr, size, Common::GetLastErrorMsg());
-            }
-        }
+        });
     }
 
     IntervalList<> GetUsableRegions() {
@@ -614,7 +621,7 @@ struct AddressSpace::Impl {
         return reserved_regions;
     }
 
-    std::mutex mutex;
+    Common::Combiner mutex;
     HANDLE process{};
     HANDLE backing_handle{};
     u8* backing_base{};

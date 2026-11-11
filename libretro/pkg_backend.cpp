@@ -6,6 +6,7 @@
 #include <map>
 #include <system_error>
 
+#include "common/combiner.h"
 #include "common/io_file.h"
 #include "common/logging/log.h"
 #include "common/path_util.h"
@@ -18,22 +19,23 @@ namespace {
 // One reader per PKG while anything uses it: a PKG is mounted more than once (the game,
 // a look at an additional content's param.sfo, its mount), and opening one reads its PFS.
 std::shared_ptr<PkgReader> SharedReader(const std::filesystem::path& path) {
-    static std::mutex mutex;
+    static Common::Combiner mutex;
     static std::map<std::filesystem::path, std::weak_ptr<PkgReader>> readers;
-    std::scoped_lock lock{mutex};
-    if (auto reader = readers[path].lock()) {
+    return mutex.Run([&]() -> std::shared_ptr<PkgReader> {
+        if (auto reader = readers[path].lock()) {
+            return reader;
+        }
+        auto reader = std::make_shared<PkgReader>();
+        std::string error;
+        const auto keys = PkgKeysFile(Common::FS::GetUserPath(Common::FS::PathType::UserDir));
+        if (!reader->Open(path, keys, error)) {
+            LOG_ERROR(Loader, "PKG {} cannot be read: {}", path.string(), error);
+            return nullptr;
+        }
+        LOG_INFO(Loader, "PKG {}: {} files, read in place", path.string(), reader->Files().size());
+        readers[path] = reader;
         return reader;
-    }
-    auto reader = std::make_shared<PkgReader>();
-    std::string error;
-    const auto keys = PkgKeysFile(Common::FS::GetUserPath(Common::FS::PathType::UserDir));
-    if (!reader->Open(path, keys, error)) {
-        LOG_ERROR(Loader, "PKG {} cannot be read: {}", path.string(), error);
-        return nullptr;
-    }
-    LOG_INFO(Loader, "PKG {}: {} files, read in place", path.string(), reader->Files().size());
-    readers[path] = reader;
-    return reader;
+    });
 }
 
 // As the .zar backend does: the times are the PKG's, and the inode is the guest inode of
@@ -80,10 +82,11 @@ PkgFile::PkgFile(std::shared_ptr<PkgReader> reader_, const PkgReader::Node* node
     : reader(std::move(reader_)), node(node_) {}
 
 s64 PkgFile::Read(void* dst, u64 size) {
-    std::scoped_lock lock{position_mutex};
-    const u64 read = reader->Read(*node, position, size, dst);
-    position += read;
-    return static_cast<s64>(read);
+    return position_mutex.Run([&]() -> s64 {
+        const u64 read = reader->Read(*node, position, size, dst);
+        position += read;
+        return static_cast<s64>(read);
+    });
 }
 
 s64 PkgFile::Write(const void*, u64) {
@@ -91,23 +94,25 @@ s64 PkgFile::Write(const void*, u64) {
 }
 
 bool PkgFile::Seek(s64 offset, Common::FS::SeekOrigin origin) {
-    std::scoped_lock lock{position_mutex};
-    s64 base = 0;
-    if (origin == Common::FS::SeekOrigin::CurrentPosition) {
-        base = static_cast<s64>(position);
-    } else if (origin == Common::FS::SeekOrigin::End) {
-        base = static_cast<s64>(node->size);
-    }
-    if (base + offset < 0) {
-        return false;
-    }
-    position = static_cast<u64>(base + offset);
-    return true;
+    return position_mutex.Run([&]() -> bool {
+        s64 base = 0;
+        if (origin == Common::FS::SeekOrigin::CurrentPosition) {
+            base = static_cast<s64>(position);
+        } else if (origin == Common::FS::SeekOrigin::End) {
+            base = static_cast<s64>(node->size);
+        }
+        if (base + offset < 0) {
+            return false;
+        }
+        position = static_cast<u64>(base + offset);
+        return true;
+    });
 }
 
 u64 PkgFile::Tell() const {
-    std::scoped_lock lock{position_mutex};
-    return position;
+    return position_mutex.Run([&]() -> u64 {
+        return position;
+    });
 }
 
 u64 PkgFile::Size() const {

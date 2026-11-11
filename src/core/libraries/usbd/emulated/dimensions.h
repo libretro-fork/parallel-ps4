@@ -10,6 +10,7 @@
 #include <optional>
 #include <queue>
 
+#include "common/combiner.h"
 #include "common/io_file.h"
 #include "core/libraries/usbd/usb_backend.h"
 
@@ -54,7 +55,7 @@ public:
                              u8 pad, u8 index);
 
 protected:
-    std::mutex m_dimensions_mutex;
+    Common::Combiner m_dimensions_mutex;
     std::array<DimensionsFigure, MAX_DIMENSIONS_FIGURES> m_figures{};
 
 private:
@@ -99,7 +100,7 @@ protected:
         return m_dimensions_toypad;
     }
 
-    std::mutex m_query_mutex;
+    Common::Combiner m_query_mutex;
     std::queue<std::array<u8, 32>> m_queries;
 
 private:

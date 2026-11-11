@@ -22,6 +22,7 @@
 #include "common/alignment.h"
 #include "common/arch.h"
 #include "common/assert.h"
+#include "common/combiner.h"
 #include "common/decoder.h"
 #include "common/embedded_resources.h"
 #include "common/signal_context.h"
@@ -798,7 +799,7 @@ static std::once_flag init_flag;
 
 struct PatchModule {
     /// Mutex controlling access to module code regions.
-    std::mutex mutex{};
+    Common::Combiner mutex{};
 
     /// Start of the module.
     u8* start;
@@ -1137,14 +1138,14 @@ static bool TryPatchJit(void* code_address) {
         return false;
     }
 
-    std::unique_lock lock{module->mutex};
+    return module->mutex.Run([&]() -> bool {
+        // Return early if already patched, in case multiple threads signaled at the same time.
+        if (std::ranges::find(module->patched, code) != module->patched.end()) {
+            return true;
+        }
 
-    // Return early if already patched, in case multiple threads signaled at the same time.
-    if (std::ranges::find(module->patched, code) != module->patched.end()) {
-        return true;
-    }
-
-    return TryPatch(code, module).first;
+        return TryPatch(code, module).first;
+    });
 }
 
 static void TryPatchAot(void* code_address, u64 code_size) {
@@ -1154,12 +1155,12 @@ static void TryPatchAot(void* code_address, u64 code_size) {
         return;
     }
 
-    std::unique_lock lock{module->mutex};
-
-    const auto* end = code + code_size;
-    while (code < end) {
-        code += TryPatch(code, module, false).second;
-    }
+    module->mutex.Run([&] {
+        const auto* end = code + code_size;
+        while (code < end) {
+            code += TryPatch(code, module, false).second;
+        }
+    });
 }
 
 // ============================================================================
@@ -1864,519 +1865,528 @@ static RedZonePatchResult PatchSegmentStatically(u64 segment_addr, u64 segment_s
     const auto unique_end = std::ranges::unique(starts).begin();
     starts.erase(unique_end, starts.end());
 
-    std::unique_lock lock{module->mutex};
-    for (size_t function_index = 0; function_index < starts.size(); ++function_index) {
-        const uintptr_t function_start = starts[function_index];
-        const uintptr_t function_end =
-            function_index + 1 < starts.size() ? starts[function_index + 1] : segment_end;
-        if (function_end <= function_start) {
-            continue;
-        }
-
-        ++result.function_count;
-        auto function = DecodeFunction(function_start, function_end, segment_addr, segment_end);
-        if (red_zone_protection) {
-            AnalyzeRedZoneLiveness(function);
-        }
-        result.instruction_count += function.instructions.size();
-        if (covered_ranges != nullptr) {
-            // Functions and their instructions are visited in address order.
-            for (const auto& [address, decoded] : function.instructions) {
-                const uintptr_t end = address + decoded.instruction.length;
-                if (!covered_ranges->empty() && address <= covered_ranges->back().second) {
-                    covered_ranges->back().second = std::max(covered_ranges->back().second, end);
-                } else {
-                    covered_ranges->emplace_back(address, end);
-                }
-            }
-        }
-
-        std::map<uintptr_t, InstructionRewrite> rewrite_sites;
-
-        // Apply existing instruction substitutions ahead of time now that only verified
-        // instruction boundaries are being visited. Short trampoline patches are combined with
-        // the relocation pass below.
-        for (auto& [address, decoded] : function.instructions) {
-            const PatchInfo* matching_patch = FindMatchingPatch(decoded);
-            const auto [patched, _] = TryPatch(reinterpret_cast<u8*>(address), module);
-            result.inplace_cpu_patch_instruction_count += patched;
-            if (IsInPlaceMemoryPatch(decoded.instruction.mnemonic)) {
-                const RedZoneMask red_zone_live = decoded.red_zone_live;
-                decoded = DecodeCodeInstruction(address, function_end);
-                decoded.red_zone_live = red_zone_live;
-            } else if (patched) {
-                decoded = DecodeCodeInstruction(address, function_end);
-                decoded.accesses_memory = false;
-            } else if (matching_patch != nullptr && matching_patch->trampoline) {
-                rewrite_sites.emplace(address, InstructionRewrite{.cpu_patch = matching_patch});
-                ++result.cpu_patch_instruction_count;
-            }
-        }
-
-        if (red_zone_protection && function.uses_red_zone) {
-            ++result.red_zone_function_count;
-            result.indirect_red_zone_function_count += function.has_indirect_branch;
-            for (const auto& [address, decoded] : function.instructions) {
-                if (!decoded.accesses_memory || !decoded.red_zone_live.any() ||
-                    rewrite_sites.contains(address)) {
-                    continue;
-                }
-                ++result.memory_instruction_count;
-                if (decoded.instruction.length < NearJumpSize) {
-                    ++result.short_memory_instruction_count;
-                }
-                if (decoded.instruction.meta.category == ZYDIS_CATEGORY_CALL &&
-                    decoded.operands[0].type == ZYDIS_OPERAND_TYPE_MEMORY &&
-                    decoded.operands[0].size == sizeof(uintptr_t) * CHAR_BIT &&
-                    !IsStackPointerRegister(decoded.operands[0].mem.base) &&
-                    !IsStackPointerRegister(decoded.operands[0].mem.index)) {
-                    rewrite_sites[address] = {
-                        .protect_red_zone = true,
-                        .protected_indirect_call = true,
-                    };
-                    continue;
-                }
-                if (decoded.uses_stack_pointer && !decoded.replaces_stack_pointer) {
-                    ++result.stack_dependent_memory_instruction_count;
-                    continue;
-                }
-                if (decoded.instruction.meta.category == ZYDIS_CATEGORY_CALL ||
-                    IsControlFlowTerminator(decoded.instruction)) {
-                    ++result.control_flow_memory_instruction_count;
-                    continue;
-                }
-                rewrite_sites[address].protect_red_zone = true;
-            }
-        }
-        if (rewrite_sites.empty()) {
-            continue;
-        }
-
-        struct RelocationSpan {
-            std::vector<const DecodedCodeInstruction*> instructions;
-            uintptr_t patch_start{};
-            uintptr_t continuation{};
-            size_t patch_size{};
-        };
-
-        const auto emit_span = [&](const RelocationSpan& span) -> std::optional<size_t> {
-            const size_t trampoline_offset = module->trampoline_gen.getSize();
-            if (module->trampoline_exhausted) {
-                return std::nullopt;
-            }
-            try {
-                for (const auto* decoded : span.instructions) {
-                    const auto rewrite = rewrite_sites.find(decoded->address);
-                    const bool protected_indirect_call =
-                        rewrite != rewrite_sites.end() && rewrite->second.protected_indirect_call;
-                    const bool protect_red_zone = rewrite != rewrite_sites.end() &&
-                                                  rewrite->second.protect_red_zone &&
-                                                  !protected_indirect_call;
-                    if (protect_red_zone) {
-                        module->trampoline_gen.lea(rsp, ptr[rsp - GuestRedZoneSize]);
-                    }
-                    if (protected_indirect_call) {
-                        if (!GenerateProtectedIndirectCall(*decoded, module->trampoline_gen)) {
-                            module->trampoline_gen.setSize(trampoline_offset);
-                            return std::nullopt;
-                        }
-                    } else if (rewrite != rewrite_sites.end() &&
-                               rewrite->second.cpu_patch != nullptr) {
-                        rewrite->second.cpu_patch->generator(
-                            reinterpret_cast<void*>(decoded->address), decoded->instruction,
-                            decoded->operands.data(), module->trampoline_gen);
-                    } else if (!EncodeRelocatedInstruction(*decoded, module->trampoline_gen)) {
-                        module->trampoline_gen.setSize(trampoline_offset);
-                        return std::nullopt;
-                    }
-                    if (protect_red_zone && !decoded->replaces_stack_pointer) {
-                        module->trampoline_gen.lea(rsp, ptr[rsp + GuestRedZoneSize]);
-                    }
-                }
-                module->trampoline_gen.jmp(reinterpret_cast<void*>(span.continuation));
-            } catch (const Xbyak::Error& error) {
-                module->trampoline_gen.setSize(trampoline_offset);
-                if (HandleTrampolineError(module, error)) {
-                    return std::nullopt;
-                }
-                throw;
-            }
-            return trampoline_offset;
-        };
-
-        const auto record_rewrites = [&](const RelocationSpan& span) {
-            for (const auto* decoded : span.instructions) {
-                const auto rewrite = rewrite_sites.find(decoded->address);
-                if (rewrite == rewrite_sites.end()) {
-                    continue;
-                }
-                if (rewrite->second.protect_red_zone) {
-                    ++result.patched_memory_instruction_count;
-                }
-                if (rewrite->second.cpu_patch != nullptr) {
-                    ++result.patched_cpu_patch_instruction_count;
-                }
-                module->patched.insert(reinterpret_cast<u8*>(decoded->address));
-            }
-        };
-
-        std::vector<std::pair<uintptr_t, uintptr_t>> patched_spans;
-        std::vector<uintptr_t> relay_slots;
-        std::vector<uintptr_t> short_relay_slots;
-        std::vector<uintptr_t> unresolved_sites;
-        uintptr_t covered_until{};
-        for (auto site_it = rewrite_sites.begin(); site_it != rewrite_sites.end(); ++site_it) {
-            const uintptr_t site = site_it->first;
-            if (site < covered_until) {
+    return module->mutex.Run([&]() -> RedZonePatchResult {
+        for (size_t function_index = 0; function_index < starts.size(); ++function_index) {
+            const uintptr_t function_start = starts[function_index];
+            const uintptr_t function_end =
+                function_index + 1 < starts.size() ? starts[function_index + 1] : segment_end;
+            if (function_end <= function_start) {
                 continue;
             }
 
-            const auto collect_forward_span = [&]() -> std::optional<RelocationSpan> {
-                RelocationSpan span{.patch_start = site, .continuation = site};
-                while (span.patch_size < NearJumpSize) {
-                    const auto decoded_it = function.instructions.find(span.continuation);
-                    if (decoded_it == function.instructions.end() ||
-                        (span.continuation != site &&
-                         function.branch_targets.contains(span.continuation))) {
-                        return std::nullopt;
-                    }
-
-                    const auto& decoded = decoded_it->second;
-                    span.instructions.push_back(&decoded);
-                    span.patch_size += decoded.instruction.length;
-                    span.continuation += decoded.instruction.length;
-                    if (span.patch_size < NearJumpSize &&
-                        IsControlFlowTerminator(decoded.instruction)) {
-                        return std::nullopt;
+            ++result.function_count;
+            auto function = DecodeFunction(function_start, function_end, segment_addr, segment_end);
+            if (red_zone_protection) {
+                AnalyzeRedZoneLiveness(function);
+            }
+            result.instruction_count += function.instructions.size();
+            if (covered_ranges != nullptr) {
+                // Functions and their instructions are visited in address order.
+                for (const auto& [address, decoded] : function.instructions) {
+                    const uintptr_t end = address + decoded.instruction.length;
+                    if (!covered_ranges->empty() && address <= covered_ranges->back().second) {
+                        covered_ranges->back().second =
+                            std::max(covered_ranges->back().second, end);
+                    } else {
+                        covered_ranges->emplace_back(address, end);
                     }
                 }
-                return span;
+            }
+
+            std::map<uintptr_t, InstructionRewrite> rewrite_sites;
+
+            // Apply existing instruction substitutions ahead of time now that only verified
+            // instruction boundaries are being visited. Short trampoline patches are combined with
+            // the relocation pass below.
+            for (auto& [address, decoded] : function.instructions) {
+                const PatchInfo* matching_patch = FindMatchingPatch(decoded);
+                const auto [patched, _] = TryPatch(reinterpret_cast<u8*>(address), module);
+                result.inplace_cpu_patch_instruction_count += patched;
+                if (IsInPlaceMemoryPatch(decoded.instruction.mnemonic)) {
+                    const RedZoneMask red_zone_live = decoded.red_zone_live;
+                    decoded = DecodeCodeInstruction(address, function_end);
+                    decoded.red_zone_live = red_zone_live;
+                } else if (patched) {
+                    decoded = DecodeCodeInstruction(address, function_end);
+                    decoded.accesses_memory = false;
+                } else if (matching_patch != nullptr && matching_patch->trampoline) {
+                    rewrite_sites.emplace(address, InstructionRewrite{.cpu_patch = matching_patch});
+                    ++result.cpu_patch_instruction_count;
+                }
+            }
+
+            if (red_zone_protection && function.uses_red_zone) {
+                ++result.red_zone_function_count;
+                result.indirect_red_zone_function_count += function.has_indirect_branch;
+                for (const auto& [address, decoded] : function.instructions) {
+                    if (!decoded.accesses_memory || !decoded.red_zone_live.any() ||
+                        rewrite_sites.contains(address)) {
+                        continue;
+                    }
+                    ++result.memory_instruction_count;
+                    if (decoded.instruction.length < NearJumpSize) {
+                        ++result.short_memory_instruction_count;
+                    }
+                    if (decoded.instruction.meta.category == ZYDIS_CATEGORY_CALL &&
+                        decoded.operands[0].type == ZYDIS_OPERAND_TYPE_MEMORY &&
+                        decoded.operands[0].size == sizeof(uintptr_t) * CHAR_BIT &&
+                        !IsStackPointerRegister(decoded.operands[0].mem.base) &&
+                        !IsStackPointerRegister(decoded.operands[0].mem.index)) {
+                        rewrite_sites[address] = {
+                            .protect_red_zone = true,
+                            .protected_indirect_call = true,
+                        };
+                        continue;
+                    }
+                    if (decoded.uses_stack_pointer && !decoded.replaces_stack_pointer) {
+                        ++result.stack_dependent_memory_instruction_count;
+                        continue;
+                    }
+                    if (decoded.instruction.meta.category == ZYDIS_CATEGORY_CALL ||
+                        IsControlFlowTerminator(decoded.instruction)) {
+                        ++result.control_flow_memory_instruction_count;
+                        continue;
+                    }
+                    rewrite_sites[address].protect_red_zone = true;
+                }
+            }
+            if (rewrite_sites.empty()) {
+                continue;
+            }
+
+            struct RelocationSpan {
+                std::vector<const DecodedCodeInstruction*> instructions;
+                uintptr_t patch_start{};
+                uintptr_t continuation{};
+                size_t patch_size{};
             };
 
-            const auto collect_backward_span = [&]() -> std::optional<RelocationSpan> {
+            const auto emit_span = [&](const RelocationSpan& span) -> std::optional<size_t> {
+                const size_t trampoline_offset = module->trampoline_gen.getSize();
+                if (module->trampoline_exhausted) {
+                    return std::nullopt;
+                }
+                try {
+                    for (const auto* decoded : span.instructions) {
+                        const auto rewrite = rewrite_sites.find(decoded->address);
+                        const bool protected_indirect_call =
+                            rewrite != rewrite_sites.end() &&
+                            rewrite->second.protected_indirect_call;
+                        const bool protect_red_zone = rewrite != rewrite_sites.end() &&
+                                                      rewrite->second.protect_red_zone &&
+                                                      !protected_indirect_call;
+                        if (protect_red_zone) {
+                            module->trampoline_gen.lea(rsp, ptr[rsp - GuestRedZoneSize]);
+                        }
+                        if (protected_indirect_call) {
+                            if (!GenerateProtectedIndirectCall(*decoded, module->trampoline_gen)) {
+                                module->trampoline_gen.setSize(trampoline_offset);
+                                return std::nullopt;
+                            }
+                        } else if (rewrite != rewrite_sites.end() &&
+                                   rewrite->second.cpu_patch != nullptr) {
+                            rewrite->second.cpu_patch->generator(
+                                reinterpret_cast<void*>(decoded->address), decoded->instruction,
+                                decoded->operands.data(), module->trampoline_gen);
+                        } else if (!EncodeRelocatedInstruction(*decoded, module->trampoline_gen)) {
+                            module->trampoline_gen.setSize(trampoline_offset);
+                            return std::nullopt;
+                        }
+                        if (protect_red_zone && !decoded->replaces_stack_pointer) {
+                            module->trampoline_gen.lea(rsp, ptr[rsp + GuestRedZoneSize]);
+                        }
+                    }
+                    module->trampoline_gen.jmp(reinterpret_cast<void*>(span.continuation));
+                } catch (const Xbyak::Error& error) {
+                    module->trampoline_gen.setSize(trampoline_offset);
+                    if (HandleTrampolineError(module, error)) {
+                        return std::nullopt;
+                    }
+                    throw;
+                }
+                return trampoline_offset;
+            };
+
+            const auto record_rewrites = [&](const RelocationSpan& span) {
+                for (const auto* decoded : span.instructions) {
+                    const auto rewrite = rewrite_sites.find(decoded->address);
+                    if (rewrite == rewrite_sites.end()) {
+                        continue;
+                    }
+                    if (rewrite->second.protect_red_zone) {
+                        ++result.patched_memory_instruction_count;
+                    }
+                    if (rewrite->second.cpu_patch != nullptr) {
+                        ++result.patched_cpu_patch_instruction_count;
+                    }
+                    module->patched.insert(reinterpret_cast<u8*>(decoded->address));
+                }
+            };
+
+            std::vector<std::pair<uintptr_t, uintptr_t>> patched_spans;
+            std::vector<uintptr_t> relay_slots;
+            std::vector<uintptr_t> short_relay_slots;
+            std::vector<uintptr_t> unresolved_sites;
+            uintptr_t covered_until{};
+            for (auto site_it = rewrite_sites.begin(); site_it != rewrite_sites.end(); ++site_it) {
+                const uintptr_t site = site_it->first;
+                if (site < covered_until) {
+                    continue;
+                }
+
+                const auto collect_forward_span = [&]() -> std::optional<RelocationSpan> {
+                    RelocationSpan span{.patch_start = site, .continuation = site};
+                    while (span.patch_size < NearJumpSize) {
+                        const auto decoded_it = function.instructions.find(span.continuation);
+                        if (decoded_it == function.instructions.end() ||
+                            (span.continuation != site &&
+                             function.branch_targets.contains(span.continuation))) {
+                            return std::nullopt;
+                        }
+
+                        const auto& decoded = decoded_it->second;
+                        span.instructions.push_back(&decoded);
+                        span.patch_size += decoded.instruction.length;
+                        span.continuation += decoded.instruction.length;
+                        if (span.patch_size < NearJumpSize &&
+                            IsControlFlowTerminator(decoded.instruction)) {
+                            return std::nullopt;
+                        }
+                    }
+                    return span;
+                };
+
+                const auto collect_backward_span = [&]() -> std::optional<RelocationSpan> {
+                    const auto site_instruction = function.instructions.find(site);
+                    ASSERT(site_instruction != function.instructions.end());
+                    RelocationSpan span{
+                        .instructions = {&site_instruction->second},
+                        .patch_start = site,
+                        .continuation = site + site_instruction->second.instruction.length,
+                        .patch_size = site_instruction->second.instruction.length,
+                    };
+
+                    while (span.patch_size < NearJumpSize) {
+                        const auto previous_end =
+                            function.instructions.lower_bound(span.patch_start);
+                        if (previous_end == function.instructions.begin() ||
+                            function.branch_targets.contains(span.patch_start)) {
+                            return std::nullopt;
+                        }
+
+                        const auto previous = std::prev(previous_end);
+                        const auto& decoded = previous->second;
+                        if (previous->first + decoded.instruction.length != span.patch_start ||
+                            previous->first < covered_until ||
+                            IsControlFlowTerminator(decoded.instruction)) {
+                            return std::nullopt;
+                        }
+
+                        span.instructions.insert(span.instructions.begin(), &decoded);
+                        span.patch_start = previous->first;
+                        span.patch_size += decoded.instruction.length;
+                    }
+                    return span;
+                };
+
+                std::optional<RelocationSpan> selected_span;
+                std::optional<size_t> trampoline_offset;
+                const auto& site_instruction = function.instructions.at(site);
+                const bool can_relocate_neighbors = !function.has_indirect_branch;
+                if (can_relocate_neighbors || site_instruction.instruction.length >= NearJumpSize) {
+                    auto forward_span = collect_forward_span();
+                    if (forward_span) {
+                        trampoline_offset = emit_span(*forward_span);
+                        if (trampoline_offset) {
+                            selected_span = std::move(forward_span);
+                        }
+                    }
+                }
+                if (!selected_span && can_relocate_neighbors) {
+                    if (auto backward_span = collect_backward_span()) {
+                        trampoline_offset = emit_span(*backward_span);
+                        if (trampoline_offset) {
+                            selected_span = std::move(backward_span);
+                        }
+                    }
+                }
+                if (!selected_span) {
+                    unresolved_sites.push_back(site);
+                    continue;
+                }
+
+                const auto& span = *selected_span;
+                const auto* trampoline = module->trampoline_gen.getCode() + *trampoline_offset;
+
+                auto& patch_gen = module->patch_gen;
+                patch_gen.reset();
+                patch_gen.setSize(span.patch_start -
+                                  reinterpret_cast<uintptr_t>(patch_gen.getCode()));
+                patch_gen.jmp(trampoline, Xbyak::CodeGenerator::LabelType::T_NEAR);
+                patch_gen.nop(span.patch_size - NearJumpSize);
+
+                record_rewrites(span);
+                patched_spans.emplace_back(span.patch_start, span.continuation);
+                if (span.patch_size >= NearJumpSize * 2) {
+                    relay_slots.push_back(span.patch_start + NearJumpSize);
+                }
+                if (span.patch_size >= NearJumpSize + ShortJumpSize) {
+                    short_relay_slots.push_back(span.patch_start + NearJumpSize);
+                }
+                covered_until = span.continuation;
+            }
+
+            const auto record_unsupported = [&](uintptr_t site) {
+                const auto& rewrite = rewrite_sites.at(site);
+                if (rewrite.cpu_patch != nullptr) {
+                    ++result.unsupported_cpu_patch_instruction_count;
+                }
+                if (rewrite.protect_red_zone) {
+                    ++result.unrelocatable_memory_instruction_count;
+                }
+            };
+            const auto overlaps_patched_span = [&patched_spans](uintptr_t start, uintptr_t end) {
+                return std::ranges::any_of(patched_spans, [start, end](const auto& patched) {
+                    return start < patched.second && patched.first < end;
+                });
+            };
+
+            for (const uintptr_t site : unresolved_sites) {
+                if (module->patched.contains(reinterpret_cast<u8*>(site))) {
+                    continue;
+                }
+
                 const auto site_instruction = function.instructions.find(site);
                 ASSERT(site_instruction != function.instructions.end());
-                RelocationSpan span{
+                if (function.has_indirect_branch ||
+                    site_instruction->second.instruction.length < ShortJumpSize) {
+                    record_unsupported(site);
+                    continue;
+                }
+
+                const RelocationSpan site_span{
                     .instructions = {&site_instruction->second},
                     .patch_start = site,
                     .continuation = site + site_instruction->second.instruction.length,
                     .patch_size = site_instruction->second.instruction.length,
                 };
-
-                while (span.patch_size < NearJumpSize) {
-                    const auto previous_end = function.instructions.lower_bound(span.patch_start);
-                    if (previous_end == function.instructions.begin() ||
-                        function.branch_targets.contains(span.patch_start)) {
-                        return std::nullopt;
-                    }
-
-                    const auto previous = std::prev(previous_end);
-                    const auto& decoded = previous->second;
-                    if (previous->first + decoded.instruction.length != span.patch_start ||
-                        previous->first < covered_until ||
-                        IsControlFlowTerminator(decoded.instruction)) {
-                        return std::nullopt;
-                    }
-
-                    span.instructions.insert(span.instructions.begin(), &decoded);
-                    span.patch_start = previous->first;
-                    span.patch_size += decoded.instruction.length;
+                const size_t trampoline_start = module->trampoline_gen.getSize();
+                const auto site_trampoline_offset = emit_span(site_span);
+                if (!site_trampoline_offset) {
+                    record_unsupported(site);
+                    continue;
                 }
-                return span;
-            };
 
-            std::optional<RelocationSpan> selected_span;
-            std::optional<size_t> trampoline_offset;
-            const auto& site_instruction = function.instructions.at(site);
-            const bool can_relocate_neighbors = !function.has_indirect_branch;
-            if (can_relocate_neighbors || site_instruction.instruction.length >= NearJumpSize) {
-                auto forward_span = collect_forward_span();
-                if (forward_span) {
-                    trampoline_offset = emit_span(*forward_span);
-                    if (trampoline_offset) {
-                        selected_span = std::move(forward_span);
+                constexpr s64 ShortJumpMin = std::numeric_limits<s8>::min();
+                constexpr s64 ShortJumpMax = std::numeric_limits<s8>::max();
+                const auto relay_slot =
+                    std::ranges::find_if(relay_slots, [site](uintptr_t address) {
+                        const s64 displacement =
+                            static_cast<s64>(address) - static_cast<s64>(site + ShortJumpSize);
+                        return displacement >= ShortJumpMin && displacement <= ShortJumpMax;
+                    });
+                if (relay_slot != relay_slots.end()) {
+                    const auto* site_trampoline =
+                        module->trampoline_gen.getCode() + *site_trampoline_offset;
+
+                    auto& patch_gen = module->patch_gen;
+                    patch_gen.reset();
+                    patch_gen.setSize(*relay_slot -
+                                      reinterpret_cast<uintptr_t>(patch_gen.getCode()));
+                    patch_gen.jmp(site_trampoline, Xbyak::CodeGenerator::LabelType::T_NEAR);
+
+                    patch_gen.reset();
+                    patch_gen.setSize(site - reinterpret_cast<uintptr_t>(patch_gen.getCode()));
+                    patch_gen.jmp(reinterpret_cast<void*>(*relay_slot),
+                                  Xbyak::CodeGenerator::LabelType::T_SHORT);
+                    patch_gen.nop(site_span.patch_size - ShortJumpSize);
+
+                    record_rewrites(site_span);
+                    patched_spans.emplace_back(site_span.patch_start, site_span.continuation);
+                    std::erase(short_relay_slots, *relay_slot);
+                    relay_slots.erase(relay_slot);
+                    continue;
+                }
+
+                const auto find_host = [&](uintptr_t short_jump_address) {
+                    std::pair<std::optional<RelocationSpan>, std::optional<size_t>> result;
+                    const s64 minimum_host = static_cast<s64>(short_jump_address) +
+                                             static_cast<s64>(ShortJumpSize) -
+                                             static_cast<s64>(NearJumpSize) + ShortJumpMin;
+                    const s64 maximum_host = static_cast<s64>(short_jump_address) +
+                                             static_cast<s64>(ShortJumpSize) -
+                                             static_cast<s64>(NearJumpSize) + ShortJumpMax;
+
+                    auto candidate = function.instructions.lower_bound(
+                        static_cast<uintptr_t>(std::max<s64>(minimum_host, 0)));
+                    for (; candidate != function.instructions.end() &&
+                           static_cast<s64>(candidate->first) <= maximum_host;
+                         ++candidate) {
+                        RelocationSpan span{.patch_start = candidate->first,
+                                            .continuation = candidate->first};
+                        while (span.patch_size < NearJumpSize * 2) {
+                            const auto instruction = function.instructions.find(span.continuation);
+                            if (instruction == function.instructions.end() ||
+                                (span.continuation != span.patch_start &&
+                                 function.branch_targets.contains(span.continuation))) {
+                                span.instructions.clear();
+                                break;
+                            }
+                            span.instructions.push_back(&instruction->second);
+                            span.patch_size += instruction->second.instruction.length;
+                            span.continuation += instruction->second.instruction.length;
+                            if (span.patch_size < NearJumpSize * 2 &&
+                                IsControlFlowTerminator(instruction->second.instruction)) {
+                                span.instructions.clear();
+                                break;
+                            }
+                        }
+                        if (span.instructions.empty() ||
+                            !(span.continuation <= site ||
+                              span.patch_start >= site_span.continuation) ||
+                            overlaps_patched_span(span.patch_start, span.continuation)) {
+                            continue;
+                        }
+
+                        const uintptr_t relay_address = span.patch_start + NearJumpSize;
+                        const s64 displacement =
+                            static_cast<s64>(relay_address) -
+                            static_cast<s64>(short_jump_address + ShortJumpSize);
+                        if (displacement < ShortJumpMin || displacement > ShortJumpMax) {
+                            continue;
+                        }
+
+                        const auto offset = emit_span(span);
+                        if (!offset) {
+                            continue;
+                        }
+                        result.first = std::move(span);
+                        result.second = offset;
+                        break;
+                    }
+                    return result;
+                };
+
+                auto [host_span, host_trampoline_offset] = find_host(site);
+                std::optional<uintptr_t> final_relay_slot;
+                uintptr_t final_short_jump = site;
+                std::map<uintptr_t, uintptr_t> relay_parent{{site, site}};
+                std::vector<uintptr_t> relay_queue{site};
+                for (size_t queue_index = 0;
+                     !host_span && !final_relay_slot && queue_index < relay_queue.size();
+                     ++queue_index) {
+                    const uintptr_t current = relay_queue[queue_index];
+                    if (current != site) {
+                        if (std::ranges::find(relay_slots, current) != relay_slots.end()) {
+                            final_relay_slot = current;
+                            final_short_jump = relay_parent.at(current);
+                            break;
+                        }
+                        const auto near_slot =
+                            std::ranges::find_if(relay_slots, [current](uintptr_t address) {
+                                const s64 displacement = static_cast<s64>(address) -
+                                                         static_cast<s64>(current + ShortJumpSize);
+                                return address != current && displacement >= ShortJumpMin &&
+                                       displacement <= ShortJumpMax;
+                            });
+                        if (near_slot != relay_slots.end()) {
+                            final_relay_slot = *near_slot;
+                            final_short_jump = current;
+                            break;
+                        }
+
+                        auto bridge_host = find_host(current);
+                        if (bridge_host.first) {
+                            host_span = std::move(bridge_host.first);
+                            host_trampoline_offset = bridge_host.second;
+                            final_short_jump = current;
+                            break;
+                        }
+                    }
+
+                    for (const uintptr_t slot : short_relay_slots) {
+                        if (relay_parent.contains(slot)) {
+                            continue;
+                        }
+                        const s64 displacement =
+                            static_cast<s64>(slot) - static_cast<s64>(current + ShortJumpSize);
+                        if (displacement < ShortJumpMin || displacement > ShortJumpMax) {
+                            continue;
+                        }
+                        relay_parent.emplace(slot, current);
+                        relay_queue.push_back(slot);
                     }
                 }
-            }
-            if (!selected_span && can_relocate_neighbors) {
-                if (auto backward_span = collect_backward_span()) {
-                    trampoline_offset = emit_span(*backward_span);
-                    if (trampoline_offset) {
-                        selected_span = std::move(backward_span);
-                    }
+
+                if (!host_span && !final_relay_slot) {
+                    module->trampoline_gen.setSize(trampoline_start);
+                    record_unsupported(site);
+                    continue;
                 }
-            }
-            if (!selected_span) {
-                unresolved_sites.push_back(site);
-                continue;
-            }
 
-            const auto& span = *selected_span;
-            const auto* trampoline = module->trampoline_gen.getCode() + *trampoline_offset;
-
-            auto& patch_gen = module->patch_gen;
-            patch_gen.reset();
-            patch_gen.setSize(span.patch_start - reinterpret_cast<uintptr_t>(patch_gen.getCode()));
-            patch_gen.jmp(trampoline, Xbyak::CodeGenerator::LabelType::T_NEAR);
-            patch_gen.nop(span.patch_size - NearJumpSize);
-
-            record_rewrites(span);
-            patched_spans.emplace_back(span.patch_start, span.continuation);
-            if (span.patch_size >= NearJumpSize * 2) {
-                relay_slots.push_back(span.patch_start + NearJumpSize);
-            }
-            if (span.patch_size >= NearJumpSize + ShortJumpSize) {
-                short_relay_slots.push_back(span.patch_start + NearJumpSize);
-            }
-            covered_until = span.continuation;
-        }
-
-        const auto record_unsupported = [&](uintptr_t site) {
-            const auto& rewrite = rewrite_sites.at(site);
-            if (rewrite.cpu_patch != nullptr) {
-                ++result.unsupported_cpu_patch_instruction_count;
-            }
-            if (rewrite.protect_red_zone) {
-                ++result.unrelocatable_memory_instruction_count;
-            }
-        };
-        const auto overlaps_patched_span = [&patched_spans](uintptr_t start, uintptr_t end) {
-            return std::ranges::any_of(patched_spans, [start, end](const auto& patched) {
-                return start < patched.second && patched.first < end;
-            });
-        };
-
-        for (const uintptr_t site : unresolved_sites) {
-            if (module->patched.contains(reinterpret_cast<u8*>(site))) {
-                continue;
-            }
-
-            const auto site_instruction = function.instructions.find(site);
-            ASSERT(site_instruction != function.instructions.end());
-            if (function.has_indirect_branch ||
-                site_instruction->second.instruction.length < ShortJumpSize) {
-                record_unsupported(site);
-                continue;
-            }
-
-            const RelocationSpan site_span{
-                .instructions = {&site_instruction->second},
-                .patch_start = site,
-                .continuation = site + site_instruction->second.instruction.length,
-                .patch_size = site_instruction->second.instruction.length,
-            };
-            const size_t trampoline_start = module->trampoline_gen.getSize();
-            const auto site_trampoline_offset = emit_span(site_span);
-            if (!site_trampoline_offset) {
-                record_unsupported(site);
-                continue;
-            }
-
-            constexpr s64 ShortJumpMin = std::numeric_limits<s8>::min();
-            constexpr s64 ShortJumpMax = std::numeric_limits<s8>::max();
-            const auto relay_slot = std::ranges::find_if(relay_slots, [site](uintptr_t address) {
-                const s64 displacement =
-                    static_cast<s64>(address) - static_cast<s64>(site + ShortJumpSize);
-                return displacement >= ShortJumpMin && displacement <= ShortJumpMax;
-            });
-            if (relay_slot != relay_slots.end()) {
                 const auto* site_trampoline =
                     module->trampoline_gen.getCode() + *site_trampoline_offset;
-
                 auto& patch_gen = module->patch_gen;
-                patch_gen.reset();
-                patch_gen.setSize(*relay_slot - reinterpret_cast<uintptr_t>(patch_gen.getCode()));
-                patch_gen.jmp(site_trampoline, Xbyak::CodeGenerator::LabelType::T_NEAR);
+                uintptr_t relay_address{};
+                if (final_relay_slot) {
+                    relay_address = *final_relay_slot;
+                    patch_gen.reset();
+                    patch_gen.setSize(relay_address -
+                                      reinterpret_cast<uintptr_t>(patch_gen.getCode()));
+                    patch_gen.jmp(site_trampoline, Xbyak::CodeGenerator::LabelType::T_NEAR);
+                    std::erase(relay_slots, relay_address);
+                    std::erase(short_relay_slots, relay_address);
+                } else {
+                    ASSERT(host_span && host_trampoline_offset);
+                    const auto* host_trampoline =
+                        module->trampoline_gen.getCode() + *host_trampoline_offset;
+                    relay_address = host_span->patch_start + NearJumpSize;
+
+                    patch_gen.reset();
+                    patch_gen.setSize(host_span->patch_start -
+                                      reinterpret_cast<uintptr_t>(patch_gen.getCode()));
+                    patch_gen.jmp(host_trampoline, Xbyak::CodeGenerator::LabelType::T_NEAR);
+                    patch_gen.jmp(site_trampoline, Xbyak::CodeGenerator::LabelType::T_NEAR);
+                    patch_gen.nop(host_span->patch_size - NearJumpSize * 2);
+                }
+
+                uintptr_t jump_target = relay_address;
+                while (final_short_jump != site) {
+                    patch_gen.reset();
+                    patch_gen.setSize(final_short_jump -
+                                      reinterpret_cast<uintptr_t>(patch_gen.getCode()));
+                    patch_gen.jmp(reinterpret_cast<void*>(jump_target),
+                                  Xbyak::CodeGenerator::LabelType::T_SHORT);
+                    jump_target = final_short_jump;
+                    const auto parent = relay_parent.find(final_short_jump);
+                    ASSERT(parent != relay_parent.end());
+                    final_short_jump = parent->second;
+                    std::erase(relay_slots, jump_target);
+                    std::erase(short_relay_slots, jump_target);
+                }
 
                 patch_gen.reset();
                 patch_gen.setSize(site - reinterpret_cast<uintptr_t>(patch_gen.getCode()));
-                patch_gen.jmp(reinterpret_cast<void*>(*relay_slot),
+                patch_gen.jmp(reinterpret_cast<void*>(jump_target),
                               Xbyak::CodeGenerator::LabelType::T_SHORT);
                 patch_gen.nop(site_span.patch_size - ShortJumpSize);
 
+                if (host_span) {
+                    record_rewrites(*host_span);
+                    patched_spans.emplace_back(host_span->patch_start, host_span->continuation);
+                    if (host_span->patch_size >= NearJumpSize * 3) {
+                        relay_slots.push_back(host_span->patch_start + NearJumpSize * 2);
+                    }
+                    if (host_span->patch_size >= NearJumpSize * 2 + ShortJumpSize) {
+                        short_relay_slots.push_back(host_span->patch_start + NearJumpSize * 2);
+                    }
+                }
                 record_rewrites(site_span);
                 patched_spans.emplace_back(site_span.patch_start, site_span.continuation);
-                std::erase(short_relay_slots, *relay_slot);
-                relay_slots.erase(relay_slot);
-                continue;
             }
-
-            const auto find_host = [&](uintptr_t short_jump_address) {
-                std::pair<std::optional<RelocationSpan>, std::optional<size_t>> result;
-                const s64 minimum_host = static_cast<s64>(short_jump_address) +
-                                         static_cast<s64>(ShortJumpSize) -
-                                         static_cast<s64>(NearJumpSize) + ShortJumpMin;
-                const s64 maximum_host = static_cast<s64>(short_jump_address) +
-                                         static_cast<s64>(ShortJumpSize) -
-                                         static_cast<s64>(NearJumpSize) + ShortJumpMax;
-
-                auto candidate = function.instructions.lower_bound(
-                    static_cast<uintptr_t>(std::max<s64>(minimum_host, 0)));
-                for (; candidate != function.instructions.end() &&
-                       static_cast<s64>(candidate->first) <= maximum_host;
-                     ++candidate) {
-                    RelocationSpan span{.patch_start = candidate->first,
-                                        .continuation = candidate->first};
-                    while (span.patch_size < NearJumpSize * 2) {
-                        const auto instruction = function.instructions.find(span.continuation);
-                        if (instruction == function.instructions.end() ||
-                            (span.continuation != span.patch_start &&
-                             function.branch_targets.contains(span.continuation))) {
-                            span.instructions.clear();
-                            break;
-                        }
-                        span.instructions.push_back(&instruction->second);
-                        span.patch_size += instruction->second.instruction.length;
-                        span.continuation += instruction->second.instruction.length;
-                        if (span.patch_size < NearJumpSize * 2 &&
-                            IsControlFlowTerminator(instruction->second.instruction)) {
-                            span.instructions.clear();
-                            break;
-                        }
-                    }
-                    if (span.instructions.empty() ||
-                        !(span.continuation <= site ||
-                          span.patch_start >= site_span.continuation) ||
-                        overlaps_patched_span(span.patch_start, span.continuation)) {
-                        continue;
-                    }
-
-                    const uintptr_t relay_address = span.patch_start + NearJumpSize;
-                    const s64 displacement = static_cast<s64>(relay_address) -
-                                             static_cast<s64>(short_jump_address + ShortJumpSize);
-                    if (displacement < ShortJumpMin || displacement > ShortJumpMax) {
-                        continue;
-                    }
-
-                    const auto offset = emit_span(span);
-                    if (!offset) {
-                        continue;
-                    }
-                    result.first = std::move(span);
-                    result.second = offset;
-                    break;
-                }
-                return result;
-            };
-
-            auto [host_span, host_trampoline_offset] = find_host(site);
-            std::optional<uintptr_t> final_relay_slot;
-            uintptr_t final_short_jump = site;
-            std::map<uintptr_t, uintptr_t> relay_parent{{site, site}};
-            std::vector<uintptr_t> relay_queue{site};
-            for (size_t queue_index = 0;
-                 !host_span && !final_relay_slot && queue_index < relay_queue.size();
-                 ++queue_index) {
-                const uintptr_t current = relay_queue[queue_index];
-                if (current != site) {
-                    if (std::ranges::find(relay_slots, current) != relay_slots.end()) {
-                        final_relay_slot = current;
-                        final_short_jump = relay_parent.at(current);
-                        break;
-                    }
-                    const auto near_slot =
-                        std::ranges::find_if(relay_slots, [current](uintptr_t address) {
-                            const s64 displacement = static_cast<s64>(address) -
-                                                     static_cast<s64>(current + ShortJumpSize);
-                            return address != current && displacement >= ShortJumpMin &&
-                                   displacement <= ShortJumpMax;
-                        });
-                    if (near_slot != relay_slots.end()) {
-                        final_relay_slot = *near_slot;
-                        final_short_jump = current;
-                        break;
-                    }
-
-                    auto bridge_host = find_host(current);
-                    if (bridge_host.first) {
-                        host_span = std::move(bridge_host.first);
-                        host_trampoline_offset = bridge_host.second;
-                        final_short_jump = current;
-                        break;
-                    }
-                }
-
-                for (const uintptr_t slot : short_relay_slots) {
-                    if (relay_parent.contains(slot)) {
-                        continue;
-                    }
-                    const s64 displacement =
-                        static_cast<s64>(slot) - static_cast<s64>(current + ShortJumpSize);
-                    if (displacement < ShortJumpMin || displacement > ShortJumpMax) {
-                        continue;
-                    }
-                    relay_parent.emplace(slot, current);
-                    relay_queue.push_back(slot);
-                }
-            }
-
-            if (!host_span && !final_relay_slot) {
-                module->trampoline_gen.setSize(trampoline_start);
-                record_unsupported(site);
-                continue;
-            }
-
-            const auto* site_trampoline =
-                module->trampoline_gen.getCode() + *site_trampoline_offset;
-            auto& patch_gen = module->patch_gen;
-            uintptr_t relay_address{};
-            if (final_relay_slot) {
-                relay_address = *final_relay_slot;
-                patch_gen.reset();
-                patch_gen.setSize(relay_address - reinterpret_cast<uintptr_t>(patch_gen.getCode()));
-                patch_gen.jmp(site_trampoline, Xbyak::CodeGenerator::LabelType::T_NEAR);
-                std::erase(relay_slots, relay_address);
-                std::erase(short_relay_slots, relay_address);
-            } else {
-                ASSERT(host_span && host_trampoline_offset);
-                const auto* host_trampoline =
-                    module->trampoline_gen.getCode() + *host_trampoline_offset;
-                relay_address = host_span->patch_start + NearJumpSize;
-
-                patch_gen.reset();
-                patch_gen.setSize(host_span->patch_start -
-                                  reinterpret_cast<uintptr_t>(patch_gen.getCode()));
-                patch_gen.jmp(host_trampoline, Xbyak::CodeGenerator::LabelType::T_NEAR);
-                patch_gen.jmp(site_trampoline, Xbyak::CodeGenerator::LabelType::T_NEAR);
-                patch_gen.nop(host_span->patch_size - NearJumpSize * 2);
-            }
-
-            uintptr_t jump_target = relay_address;
-            while (final_short_jump != site) {
-                patch_gen.reset();
-                patch_gen.setSize(final_short_jump -
-                                  reinterpret_cast<uintptr_t>(patch_gen.getCode()));
-                patch_gen.jmp(reinterpret_cast<void*>(jump_target),
-                              Xbyak::CodeGenerator::LabelType::T_SHORT);
-                jump_target = final_short_jump;
-                const auto parent = relay_parent.find(final_short_jump);
-                ASSERT(parent != relay_parent.end());
-                final_short_jump = parent->second;
-                std::erase(relay_slots, jump_target);
-                std::erase(short_relay_slots, jump_target);
-            }
-
-            patch_gen.reset();
-            patch_gen.setSize(site - reinterpret_cast<uintptr_t>(patch_gen.getCode()));
-            patch_gen.jmp(reinterpret_cast<void*>(jump_target),
-                          Xbyak::CodeGenerator::LabelType::T_SHORT);
-            patch_gen.nop(site_span.patch_size - ShortJumpSize);
-
-            if (host_span) {
-                record_rewrites(*host_span);
-                patched_spans.emplace_back(host_span->patch_start, host_span->continuation);
-                if (host_span->patch_size >= NearJumpSize * 3) {
-                    relay_slots.push_back(host_span->patch_start + NearJumpSize * 2);
-                }
-                if (host_span->patch_size >= NearJumpSize * 2 + ShortJumpSize) {
-                    short_relay_slots.push_back(host_span->patch_start + NearJumpSize * 2);
-                }
-            }
-            record_rewrites(site_span);
-            patched_spans.emplace_back(site_span.patch_start, site_span.continuation);
         }
-    }
-    return result;
+        return result;
+    });
 }
 
 /// Returns the start of the SSE4a instruction whose opcode is at the given address, or null if
@@ -2424,41 +2434,42 @@ static void PatchUncoveredCpuInstructions(u64 segment_addr, const AddressRanges&
     if (module == nullptr) {
         return;
     }
-    std::unique_lock lock{module->mutex};
-
-    const auto patch_gap = [&](uintptr_t gap_start, uintptr_t gap_end) {
-        auto* const lower_bound = reinterpret_cast<u8*>(gap_start);
-        for (uintptr_t address = gap_start; address + 2 <= gap_end; ++address) {
-            u8* start = FindSSE4aInstructionStart(reinterpret_cast<u8*>(address), lower_bound);
+    module->mutex.Run([&] {
+        const auto patch_gap = [&](uintptr_t gap_start, uintptr_t gap_end) {
+            auto* const lower_bound = reinterpret_cast<u8*>(gap_start);
+            for (uintptr_t address = gap_start; address + 2 <= gap_end; ++address) {
+                u8* start = FindSSE4aInstructionStart(reinterpret_cast<u8*>(address), lower_bound);
 #if defined(__APPLE__)
-            if (start == nullptr) {
-                start =
-                    FindScalarCompareInstructionStart(reinterpret_cast<u8*>(address), lower_bound);
-            }
+                if (start == nullptr) {
+                    start = FindScalarCompareInstructionStart(reinterpret_cast<u8*>(address),
+                                                              lower_bound);
+                }
 #endif
-            if (start == nullptr) {
-                continue;
+                if (start == nullptr) {
+                    continue;
+                }
+                const auto decoded =
+                    DecodeCodeInstruction(reinterpret_cast<uintptr_t>(start), gap_end);
+                if (decoded.instruction.length == 0 || FindMatchingPatch(decoded) == nullptr) {
+                    continue;
+                }
+                if (TryPatch(start, module).first) {
+                    ++result.uncovered_inplace_cpu_patch_instruction_count;
+                } else if (!IsInPlaceMemoryPatch(decoded.instruction.mnemonic)) {
+                    ++result.uncovered_unsupported_cpu_patch_instruction_count;
+                }
+                address = decoded.address + decoded.instruction.length - 1;
             }
-            const auto decoded = DecodeCodeInstruction(reinterpret_cast<uintptr_t>(start), gap_end);
-            if (decoded.instruction.length == 0 || FindMatchingPatch(decoded) == nullptr) {
-                continue;
-            }
-            if (TryPatch(start, module).first) {
-                ++result.uncovered_inplace_cpu_patch_instruction_count;
-            } else if (!IsInPlaceMemoryPatch(decoded.instruction.mnemonic)) {
-                ++result.uncovered_unsupported_cpu_patch_instruction_count;
-            }
-            address = decoded.address + decoded.instruction.length - 1;
-        }
-    };
+        };
 
-    uintptr_t cursor = segment_addr;
-    for (const auto& [range_start, range_end] : covered_ranges) {
-        if (range_start > cursor) {
-            patch_gap(cursor, range_start);
+        uintptr_t cursor = segment_addr;
+        for (const auto& [range_start, range_end] : covered_ranges) {
+            if (range_start > cursor) {
+                patch_gap(cursor, range_start);
+            }
+            cursor = std::max(cursor, range_end);
         }
-        cursor = std::max(cursor, range_end);
-    }
+    });
 }
 
 RedZonePatchResult PatchRedZoneMemoryInstructions(u64 segment_addr, u64 segment_size,

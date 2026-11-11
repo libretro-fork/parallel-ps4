@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "common/combiner.h"
 #include "core/libraries/avplayer/avplayer.h"
 #include "core/libraries/avplayer/avplayer_state.h"
 
@@ -51,7 +52,7 @@ private:
 
     AvPlayerInitData m_init_data{};
     AvPlayerInitData m_init_data_original{};
-    std::mutex m_file_io_mutex{};
+    Common::Combiner m_file_io_mutex{};
 
     std::unique_ptr<AvPlayerState> m_state{};
 };

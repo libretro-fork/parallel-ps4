@@ -16,86 +16,88 @@ void SkylanderPortal::LoadFigure(std::string file_name, u8 pad, u8 slot) {
 }
 
 void SkylanderPortal::RemoveFigure(u8 pad, u8 slot, bool full_remove) {
-    std::lock_guard lock(sky_mutex);
-    auto& thesky = skylanders[ui_skylanders[slot]];
+    sky_mutex.Run([&] {
+        auto& thesky = skylanders[ui_skylanders[slot]];
 
-    if (thesky.status & 1) {
-        thesky.status = 2;
-        thesky.queued_status.push(Skylander::REMOVING);
-        thesky.queued_status.push(Skylander::REMOVED);
-        thesky.Save();
-        thesky.skyFile.Close();
-    }
+        if (thesky.status & 1) {
+            thesky.status = 2;
+            thesky.queued_status.push(Skylander::REMOVING);
+            thesky.queued_status.push(Skylander::REMOVED);
+            thesky.Save();
+            thesky.skyFile.Close();
+        }
+    });
 }
 
 u8 SkylanderPortal::LoadSkylander(u8* buf, Common::FS::IOFile file) {
-    std::lock_guard lock(sky_mutex);
+    return sky_mutex.Run([&]() -> u8 {
+        u32 skySerial = 0;
+        for (int i = 3; i > -1; i--) {
+            skySerial <<= 8;
+            skySerial |= buf[i];
+        }
+        u8 foundSlot = 0xFF;
 
-    u32 skySerial = 0;
-    for (int i = 3; i > -1; i--) {
-        skySerial <<= 8;
-        skySerial |= buf[i];
-    }
-    u8 foundSlot = 0xFF;
+        // mimics spot retaining on the portal
+        for (auto i = 0; i < MAX_SKYLANDERS; i++) {
+            if ((skylanders[i].status & 1) == 0) {
+                if (skylanders[i].last_id == skySerial) {
+                    foundSlot = i;
+                    break;
+                }
 
-    // mimics spot retaining on the portal
-    for (auto i = 0; i < MAX_SKYLANDERS; i++) {
-        if ((skylanders[i].status & 1) == 0) {
-            if (skylanders[i].last_id == skySerial) {
-                foundSlot = i;
-                break;
-            }
-
-            if (i < foundSlot) {
-                foundSlot = i;
+                if (i < foundSlot) {
+                    foundSlot = i;
+                }
             }
         }
-    }
 
-    if (foundSlot != 0xFF) {
-        auto& skylander = skylanders[foundSlot];
-        memcpy(skylander.data.data(), buf, skylander.data.size());
-        skylander.skyFile = std::move(file);
-        skylander.status = Skylander::ADDED;
-        skylander.queued_status.push(Skylander::ADDED);
-        skylander.queued_status.push(Skylander::READY);
-        skylander.last_id = skySerial;
-    }
-    return foundSlot;
+        if (foundSlot != 0xFF) {
+            auto& skylander = skylanders[foundSlot];
+            memcpy(skylander.data.data(), buf, skylander.data.size());
+            skylander.skyFile = std::move(file);
+            skylander.status = Skylander::ADDED;
+            skylander.queued_status.push(Skylander::ADDED);
+            skylander.queued_status.push(Skylander::READY);
+            skylander.last_id = skySerial;
+        }
+        return foundSlot;
+    });
 }
 
 void SkylanderPortal::Activate() {
-    const std::lock_guard lock(sky_mutex);
-    if (m_activated) {
-        // If the portal was already active no change is needed
-        return;
-    }
-
-    // If not we need to advertise change to all the figures present on the portal
-    for (auto& s : skylanders) {
-        if (s.status & 1) {
-            s.queued_status.push(Skylander::ADDED);
-            s.queued_status.push(Skylander::READY);
+    sky_mutex.Run([&] {
+        if (m_activated) {
+            // If the portal was already active no change is needed
+            return;
         }
-    }
 
-    m_activated = true;
+        // If not we need to advertise change to all the figures present on the portal
+        for (auto& s : skylanders) {
+            if (s.status & 1) {
+                s.queued_status.push(Skylander::ADDED);
+                s.queued_status.push(Skylander::READY);
+            }
+        }
+
+        m_activated = true;
+    });
 }
 
 void SkylanderPortal::Deactivate() {
-    const std::lock_guard lock(sky_mutex);
+    sky_mutex.Run([&] {
+        for (auto& s : skylanders) {
+            // check if at the end of the updates there would be a figure on the portal
+            if (!s.queued_status.empty()) {
+                s.status = s.queued_status.back();
+                s.queued_status = std::queue<u8>();
+            }
 
-    for (auto& s : skylanders) {
-        // check if at the end of the updates there would be a figure on the portal
-        if (!s.queued_status.empty()) {
-            s.status = s.queued_status.back();
-            s.queued_status = std::queue<u8>();
+            s.status &= 1;
         }
 
-        s.status &= 1;
-    }
-
-    m_activated = false;
+        m_activated = false;
+    });
 }
 
 // Side:
@@ -104,97 +106,99 @@ void SkylanderPortal::Deactivate() {
 // 0x02 = left
 // 0x03 = trap
 void SkylanderPortal::SetLEDs(u8 side, u8 red, u8 green, u8 blue) {
-    const std::lock_guard lock(sky_mutex);
-    if (side == 0x00) {
-        m_color_right.red = red;
-        m_color_right.green = green;
-        m_color_right.blue = blue;
-    } else if (side == 0x01) {
-        m_color_right.red = red;
-        m_color_right.green = green;
-        m_color_right.blue = blue;
+    sky_mutex.Run([&] {
+        if (side == 0x00) {
+            m_color_right.red = red;
+            m_color_right.green = green;
+            m_color_right.blue = blue;
+        } else if (side == 0x01) {
+            m_color_right.red = red;
+            m_color_right.green = green;
+            m_color_right.blue = blue;
 
-        m_color_left.red = red;
-        m_color_left.green = green;
-        m_color_left.blue = blue;
-    } else if (side == 0x02) {
-        m_color_left.red = red;
-        m_color_left.green = green;
-        m_color_left.blue = blue;
-    } else if (side == 0x03) {
-        m_color_trap.red = red;
-        m_color_trap.green = green;
-        m_color_trap.blue = blue;
-    }
+            m_color_left.red = red;
+            m_color_left.green = green;
+            m_color_left.blue = blue;
+        } else if (side == 0x02) {
+            m_color_left.red = red;
+            m_color_left.green = green;
+            m_color_left.blue = blue;
+        } else if (side == 0x03) {
+            m_color_trap.red = red;
+            m_color_trap.green = green;
+            m_color_trap.blue = blue;
+        }
+    });
 }
 
 std::array<u8, 64> SkylanderPortal::GetStatus() {
-    const std::lock_guard lock(sky_mutex);
+    return sky_mutex.Run([&]() -> std::array<u8, 64> {
+        u32 status = 0;
+        u8 active = 0x00;
 
-    u32 status = 0;
-    u8 active = 0x00;
-
-    if (m_activated) {
-        active = 0x01;
-    }
-
-    for (int i = MAX_SKYLANDERS - 1; i >= 0; i--) {
-        auto& s = skylanders[i];
-
-        if (!s.queued_status.empty()) {
-            s.status = s.queued_status.front();
-            s.queued_status.pop();
+        if (m_activated) {
+            active = 0x01;
         }
-        status <<= 2;
-        status |= s.status;
-    }
 
-    std::array<u8, 64> interrupt_response = {0x53,   0x00, 0x00, 0x00, 0x00, m_interrupt_counter++,
-                                             active, 0x00, 0x00, 0x00, 0x00, 0x00,
-                                             0x00,   0x00, 0x00, 0x00, 0x00, 0x00,
-                                             0x00,   0x00, 0x00, 0x00, 0x00, 0x00,
-                                             0x00,   0x00, 0x00, 0x00, 0x00, 0x00,
-                                             0x00,   0x00};
-    memcpy(&interrupt_response[1], &status, sizeof(status));
-    return interrupt_response;
+        for (int i = MAX_SKYLANDERS - 1; i >= 0; i--) {
+            auto& s = skylanders[i];
+
+            if (!s.queued_status.empty()) {
+                s.status = s.queued_status.front();
+                s.queued_status.pop();
+            }
+            status <<= 2;
+            status |= s.status;
+        }
+
+        std::array<u8, 64> interrupt_response = {
+            0x53,   0x00, 0x00, 0x00, 0x00, m_interrupt_counter++,
+            active, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00,   0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00,   0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00,   0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00,   0x00};
+        memcpy(&interrupt_response[1], &status, sizeof(status));
+        return interrupt_response;
+    });
 }
 
 void SkylanderPortal::QueryBlock(u8 sky_num, u8 block, u8* reply_buf) {
     if (!IsSkylanderNumberValid(sky_num) || !IsBlockNumberValid(block))
         return;
 
-    std::lock_guard lock(sky_mutex);
+    sky_mutex.Run([&] {
+        const auto& skylander = skylanders[sky_num];
 
-    const auto& skylander = skylanders[sky_num];
-
-    reply_buf[0] = 'Q';
-    reply_buf[2] = block;
-    if (skylander.status & Skylander::READY) {
-        reply_buf[1] = (0x10 | sky_num);
-        memcpy(reply_buf + 3, skylander.data.data() + (16 * block), 16);
-    } else {
-        reply_buf[1] = 0x01;
-    }
+        reply_buf[0] = 'Q';
+        reply_buf[2] = block;
+        if (skylander.status & Skylander::READY) {
+            reply_buf[1] = (0x10 | sky_num);
+            memcpy(reply_buf + 3, skylander.data.data() + (16 * block), 16);
+        } else {
+            reply_buf[1] = 0x01;
+        }
+    });
 }
 
 void SkylanderPortal::WriteBlock(u8 sky_num, u8 block, const u8* to_write_buf, u8* reply_buf) {
     if (!IsSkylanderNumberValid(sky_num) || !IsBlockNumberValid(block))
         return;
 
-    std::lock_guard lock(sky_mutex);
+    sky_mutex.Run([&] {
+        auto& skylander = skylanders[sky_num];
 
-    auto& skylander = skylanders[sky_num];
+        reply_buf[0] = 'W';
+        reply_buf[2] = block;
 
-    reply_buf[0] = 'W';
-    reply_buf[2] = block;
-
-    if (skylander.status & 1) {
-        reply_buf[1] = (0x10 | sky_num);
-        memcpy(skylander.data.data() + (block * 16), to_write_buf, 16);
-        skylander.Save();
-    } else {
-        reply_buf[1] = 0x01;
-    }
+        if (skylander.status & 1) {
+            reply_buf[1] = (0x10 | sky_num);
+            memcpy(skylander.data.data() + (block * 16), to_write_buf, 16);
+            skylander.Save();
+        } else {
+            reply_buf[1] = 0x01;
+        }
+    });
 }
 
 bool SkylanderPortal::IsSkylanderNumberValid(u8 sky_num) {

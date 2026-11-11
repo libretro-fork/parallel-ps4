@@ -9,6 +9,7 @@
 #include <vector>
 #include <queue>
 
+#include "common/combiner.h"
 #include "common/types.h"
 #include "core/libraries/audio/audioout.h"
 
@@ -131,7 +132,7 @@ struct Port {
 };
 
 struct Audio3dState {
-    std::mutex ports_mutex;
+    Common::Combiner ports_mutex;
     std::unordered_map<OrbisAudio3dPortId, Port> ports;
 };
 

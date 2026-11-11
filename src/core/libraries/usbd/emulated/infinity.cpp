@@ -17,52 +17,55 @@ void InfinityBase::LoadFigure(std::string file_name, u8 pad, u8 slot) {
 }
 
 void InfinityBase::RemoveFigure(u8 pad, u8 slot, bool full_remove) {
-    std::lock_guard lock(infinity_mutex);
-    InfinityFigure& figure = infinity_figures[slot];
+    infinity_mutex.Run([&] {
+        InfinityFigure& figure = infinity_figures[slot];
 
-    if (!figure.present) {
-        return;
-    }
+        if (!figure.present) {
+            return;
+        }
 
-    slot = DeriveFigurePosition(slot);
-    if (slot == 0) {
-        return;
-    }
+        slot = DeriveFigurePosition(slot);
+        if (slot == 0) {
+            return;
+        }
 
-    figure.present = false;
+        figure.present = false;
 
-    std::array<u8, 32> figure_change_response = {0xab, 0x04, slot, 0x09, figure.order_added, 0x01};
-    figure_change_response[6] = GenerateChecksum(figure_change_response, 6);
-    m_figure_added_removed_responses.push(figure_change_response);
+        std::array<u8, 32> figure_change_response = {0xab, 0x04, slot, 0x09, figure.order_added,
+                                                     0x01};
+        figure_change_response[6] = GenerateChecksum(figure_change_response, 6);
+        m_figure_added_removed_responses.push(figure_change_response);
 
-    figure.Save();
-    figure.infFile.Close();
+        figure.Save();
+        figure.infFile.Close();
+    });
 }
 
 void InfinityBase::LoadInfinityFigure(const std::array<u8, INFINITY_FIGURE_SIZE>& buf,
                                       Common::FS::IOFile file, u8 position) {
-    std::lock_guard lock(infinity_mutex);
-    u8 order_added;
+    infinity_mutex.Run([&] {
+        u8 order_added;
 
-    InfinityFigure& figure = infinity_figures[position];
+        InfinityFigure& figure = infinity_figures[position];
 
-    figure.infFile = std::move(file);
-    memcpy(figure.data.data(), buf.data(), figure.data.size());
-    figure.present = true;
-    if (figure.order_added == 255) {
-        figure.order_added = m_figure_order;
-        m_figure_order++;
-    }
-    order_added = figure.order_added;
+        figure.infFile = std::move(file);
+        memcpy(figure.data.data(), buf.data(), figure.data.size());
+        figure.present = true;
+        if (figure.order_added == 255) {
+            figure.order_added = m_figure_order;
+            m_figure_order++;
+        }
+        order_added = figure.order_added;
 
-    position = DeriveFigurePosition(position);
-    if (position == 0) {
-        return;
-    }
+        position = DeriveFigurePosition(position);
+        if (position == 0) {
+            return;
+        }
 
-    std::array<u8, 32> figure_change_response = {0xab, 0x04, position, 0x09, order_added, 0x00};
-    figure_change_response[6] = GenerateChecksum(figure_change_response, 6);
-    m_figure_added_removed_responses.push(figure_change_response);
+        std::array<u8, 32> figure_change_response = {0xab, 0x04, position, 0x09, order_added, 0x00};
+        figure_change_response[6] = GenerateChecksum(figure_change_response, 6);
+        m_figure_added_removed_responses.push(figure_change_response);
+    });
 }
 
 void InfinityBase::GetBlankResponse(u8 sequence, std::array<u8, 32>& reply_buf) {
@@ -112,53 +115,53 @@ void InfinityBase::GetPresentFigures(u8 sequence, std::array<u8, 32>& reply_buf)
 }
 
 void InfinityBase::QueryBlock(u8 fig_num, u8 block, std::array<u8, 32>& reply_buf, u8 sequence) {
-    std::lock_guard lock(infinity_mutex);
+    infinity_mutex.Run([&] {
+        InfinityFigure& figure = GetFigureByOrder(fig_num);
 
-    InfinityFigure& figure = GetFigureByOrder(fig_num);
-
-    reply_buf[0] = 0xaa;
-    reply_buf[1] = 0x12;
-    reply_buf[2] = sequence;
-    reply_buf[3] = 0x00;
-    const u8 file_block = (block == 0) ? 1 : (block * 4);
-    if (figure.present && file_block < 20) {
-        memcpy(&reply_buf[4], figure.data.data() + (16 * file_block), 16);
-    }
-    reply_buf[20] = GenerateChecksum(reply_buf, 20);
+        reply_buf[0] = 0xaa;
+        reply_buf[1] = 0x12;
+        reply_buf[2] = sequence;
+        reply_buf[3] = 0x00;
+        const u8 file_block = (block == 0) ? 1 : (block * 4);
+        if (figure.present && file_block < 20) {
+            memcpy(&reply_buf[4], figure.data.data() + (16 * file_block), 16);
+        }
+        reply_buf[20] = GenerateChecksum(reply_buf, 20);
+    });
 }
 
 void InfinityBase::WriteBlock(u8 fig_num, u8 block, const u8* to_write_buf,
                               std::array<u8, 32>& reply_buf, u8 sequence) {
-    std::lock_guard lock(infinity_mutex);
+    infinity_mutex.Run([&] {
+        InfinityFigure& figure = GetFigureByOrder(fig_num);
 
-    InfinityFigure& figure = GetFigureByOrder(fig_num);
-
-    reply_buf[0] = 0xaa;
-    reply_buf[1] = 0x02;
-    reply_buf[2] = sequence;
-    reply_buf[3] = 0x00;
-    const u8 file_block = (block == 0) ? 1 : (block * 4);
-    if (figure.present && file_block < 20) {
-        memcpy(figure.data.data() + (file_block * 16), to_write_buf, 16);
-        figure.Save();
-    }
-    reply_buf[4] = GenerateChecksum(reply_buf, 4);
+        reply_buf[0] = 0xaa;
+        reply_buf[1] = 0x02;
+        reply_buf[2] = sequence;
+        reply_buf[3] = 0x00;
+        const u8 file_block = (block == 0) ? 1 : (block * 4);
+        if (figure.present && file_block < 20) {
+            memcpy(figure.data.data() + (file_block * 16), to_write_buf, 16);
+            figure.Save();
+        }
+        reply_buf[4] = GenerateChecksum(reply_buf, 4);
+    });
 }
 
 void InfinityBase::GetFigureIdentifier(u8 fig_num, u8 sequence, std::array<u8, 32>& reply_buf) {
-    std::lock_guard lock(infinity_mutex);
+    infinity_mutex.Run([&] {
+        InfinityFigure& figure = GetFigureByOrder(fig_num);
 
-    InfinityFigure& figure = GetFigureByOrder(fig_num);
+        reply_buf[0] = 0xaa;
+        reply_buf[1] = 0x09;
+        reply_buf[2] = sequence;
+        reply_buf[3] = 0x00;
 
-    reply_buf[0] = 0xaa;
-    reply_buf[1] = 0x09;
-    reply_buf[2] = sequence;
-    reply_buf[3] = 0x00;
-
-    if (figure.present) {
-        memcpy(&reply_buf[4], figure.data.data(), 7);
-    }
-    reply_buf[11] = GenerateChecksum(reply_buf, 11);
+        if (figure.present) {
+            memcpy(&reply_buf[4], figure.data.data(), 7);
+        }
+        reply_buf[11] = GenerateChecksum(reply_buf, 11);
+    });
 }
 
 std::optional<std::array<u8, 32>> InfinityBase::PopAddedRemovedResponse() {

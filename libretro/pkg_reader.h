@@ -22,6 +22,7 @@
 
 #include <crypto/crypto.h>
 
+#include "common/combiner.h"
 #include "common/io_file.h"
 #include "common/types.h"
 
@@ -111,7 +112,7 @@ private:
     // The PKG, mapped: its sectors are decrypted from where they lie.
     Common::FS::IOFile file;
     std::span<const u8> image;
-    std::mutex mutex;
+    Common::Combiner mutex;
     // XTS-AES's data and tweak keys, expanded once: per sector only the tweak changes
     aes_ctx xts_data{};
     aes_ctx xts_tweak{};

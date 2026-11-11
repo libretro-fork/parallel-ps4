@@ -25,6 +25,7 @@
 #include <rthreads/retro_eventcount.h>
 #include <streams/file_stream.h>
 
+#include "common/combiner.h"
 #include "common/logging/log.h"
 #include "common/path_util.h"
 #include "common/quick_exit.h"
@@ -67,7 +68,7 @@ std::atomic<bool> g_stop{false};
 retro_eventcount_t g_writer_ec{};
 retro_eventcount_t g_flush_ec{};
 std::thread g_writer;
-std::mutex g_control; // Setup/Shutdown only
+Common::Combiner g_control; // Setup/Shutdown only
 
 // Settings the writer reads.
 std::atomic<bool> g_sync{true};
@@ -446,23 +447,24 @@ void Setup(std::string_view shadps4_filename) {
         Common::AtQuickExit(Flush);
     });
 
-    std::scoped_lock lock{g_control};
-    InitRing();
-    if (g_running.load(std::memory_order_acquire)) {
-        return;
-    }
+    g_control.Run([&] {
+        InitRing();
+        if (g_running.load(std::memory_order_acquire)) {
+            return;
+        }
 #ifdef _WIN32
-    g_debugger_console = std::string_view(emu_settings_get_log_type()) != "wincolor";
+        g_debugger_console = std::string_view(emu_settings_get_log_type()) != "wincolor";
 #endif
-    g_size_limit.store(emu_settings_get_log_size_limit(), std::memory_order_relaxed);
-    UpdateSinks();
+        g_size_limit.store(emu_settings_get_log_size_limit(), std::memory_order_relaxed);
+        UpdateSinks();
 
-    // The writer starts with nothing queued, so it can own the files from here on.
-    g_w.main = OpenFile(
-        (GetUserPath(Common::FS::PathType::LogDir) / shadps4_filename).string().c_str(), false);
-    g_stop.store(false, std::memory_order_relaxed);
-    g_writer = std::thread(WriterLoop);
-    g_running.store(true, std::memory_order_release);
+        // The writer starts with nothing queued, so it can own the files from here on.
+        g_w.main = OpenFile(
+            (GetUserPath(Common::FS::PathType::LogDir) / shadps4_filename).string().c_str(), false);
+        g_stop.store(false, std::memory_order_relaxed);
+        g_writer = std::thread(WriterLoop);
+        g_running.store(true, std::memory_order_release);
+    });
 }
 
 void Switch(std::string_view game_filename, bool append_log) {
@@ -478,13 +480,14 @@ void Switch(std::string_view game_filename, bool append_log) {
 }
 
 void Shutdown() {
-    std::scoped_lock lock{g_control};
-    if (!g_running.exchange(false, std::memory_order_acq_rel)) {
-        return;
-    }
-    g_stop.store(true, std::memory_order_release);
-    retro_eventcount_notify(&g_writer_ec);
-    g_writer.join();
+    g_control.Run([&] {
+        if (!g_running.exchange(false, std::memory_order_acq_rel)) {
+            return;
+        }
+        g_stop.store(true, std::memory_order_release);
+        retro_eventcount_notify(&g_writer_ec);
+        g_writer.join();
+    });
 }
 
 void Flush() {

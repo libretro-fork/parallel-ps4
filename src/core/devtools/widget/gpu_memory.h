@@ -11,6 +11,7 @@
 #include <utility>
 #include <vector>
 
+#include "common/combiner.h"
 #include "common/types.h"
 
 namespace Core::Devtools::Widget {
@@ -40,8 +41,7 @@ public:
 
     static void Publish(GpuMemoryGroup group) {
         std::string name = group.name;
-        std::scoped_lock lock{mutex};
-        groups.insert_or_assign(std::move(name), std::move(group));
+        mutex.Run([&] { groups.insert_or_assign(std::move(name), std::move(group)); });
     }
 
 private:
@@ -53,7 +53,7 @@ private:
     }
 
     static inline std::atomic<s64> last_drawn_ms{0};
-    static inline std::mutex mutex;
+    static inline Common::Combiner mutex;
     static inline std::map<std::string, GpuMemoryGroup> groups;
 };
 

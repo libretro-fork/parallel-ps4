@@ -10,6 +10,7 @@
 
 #include <imgui.h>
 
+#include "common/combiner.h"
 #include "common/types.h"
 #include "core/libraries/np/np_handler/np_handler.h"
 #include "imgui/imgui_layer.h"
@@ -37,7 +38,7 @@ struct Prompt {
 constexpr std::size_t kMaxPrompts = 4;    // oldest dropped beyond this
 constexpr float kFocusHoldSeconds = 0.6f; // hold Share/Back this long to focus the prompt
 
-std::mutex g_mutex;
+Common::Combiner g_mutex;
 std::deque<Prompt> g_prompts;
 
 bool g_focused = false;
@@ -48,28 +49,29 @@ class InvitationPromptUI final : public ImGui::Layer {
 public:
     void Draw() override;
     bool ShouldKeepDrawing() override {
-        std::lock_guard lock(g_mutex);
-        return !g_prompts.empty();
+        return g_mutex.Run([&]() -> bool { return !g_prompts.empty(); });
     }
 };
 
 InvitationPromptUI g_layer;
 
 void SetState(const std::string& invitation_id, State state) {
-    std::lock_guard lock(g_mutex);
-    for (auto& p : g_prompts) {
-        if (p.invitation_id == invitation_id) {
-            p.state = state;
+    g_mutex.Run([&] {
+        for (auto& p : g_prompts) {
+            if (p.invitation_id == invitation_id) {
+                p.state = state;
+            }
         }
-    }
+    });
 }
 
 void Remove(const std::string& invitation_id) {
-    std::lock_guard lock(g_mutex);
-    g_prompts.erase(
-        std::remove_if(g_prompts.begin(), g_prompts.end(),
-                       [&](const Prompt& p) { return p.invitation_id == invitation_id; }),
-        g_prompts.end());
+    g_mutex.Run([&] {
+        g_prompts.erase(
+            std::remove_if(g_prompts.begin(), g_prompts.end(),
+                           [&](const Prompt& p) { return p.invitation_id == invitation_id; }),
+            g_prompts.end());
+    });
 }
 
 // Accept/Decline hit the shadNet server (blocking HTTP inside NpHandler), so they run on a
@@ -119,17 +121,18 @@ void SetFocused(bool focused) {
 } // namespace
 
 void Push(s32 user_id, std::string invitation_id, std::string session_id, std::string from_npid) {
-    std::lock_guard lock(g_mutex);
-    // A re-sent invite replaces the older prompt rather than stacking a duplicate.
-    g_prompts.erase(
-        std::remove_if(g_prompts.begin(), g_prompts.end(),
-                       [&](const Prompt& p) { return p.invitation_id == invitation_id; }),
-        g_prompts.end());
-    g_prompts.push_back(
-        {user_id, std::move(invitation_id), std::move(session_id), std::move(from_npid)});
-    while (g_prompts.size() > kMaxPrompts) {
-        g_prompts.pop_front();
-    }
+    g_mutex.Run([&] {
+        // A re-sent invite replaces the older prompt rather than stacking a duplicate.
+        g_prompts.erase(
+            std::remove_if(g_prompts.begin(), g_prompts.end(),
+                           [&](const Prompt& p) { return p.invitation_id == invitation_id; }),
+            g_prompts.end());
+        g_prompts.push_back(
+            {user_id, std::move(invitation_id), std::move(session_id), std::move(from_npid)});
+        while (g_prompts.size() > kMaxPrompts) {
+            g_prompts.pop_front();
+        }
+    });
 }
 
 void Dismiss(const std::string& invitation_id) {
@@ -147,10 +150,7 @@ void Unregister() {
 
 void InvitationPromptUI::Draw() {
     std::vector<Prompt> snapshot;
-    {
-        std::lock_guard lock(g_mutex);
-        snapshot.assign(g_prompts.begin(), g_prompts.end());
-    }
+    g_mutex.Run([&] { snapshot.assign(g_prompts.begin(), g_prompts.end()); });
 
     if (snapshot.empty()) {
         SetFocused(false);

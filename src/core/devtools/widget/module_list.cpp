@@ -25,28 +25,29 @@ void ModuleList::Draw() {
         TableSetupColumn("Modulname", ImGuiTableColumnFlags_WidthStretch);
         TableHeadersRow();
 
-        std::scoped_lock lock(modules_mutex);
-        for (const auto& module : modules) {
-            TableNextRow();
+        modules_mutex.Run([&] {
+            for (const auto& module : modules) {
+                TableNextRow();
 
-            TableSetColumnIndex(0);
-            TextUnformatted(module.name.c_str());
+                TableSetColumnIndex(0);
+                TextUnformatted(module.name.c_str());
 
-            TableSetColumnIndex(1);
-            if (module.is_sys_module) {
-                TextColored({0.2f, 0.6f, 0.8f, 1.0f}, "System Module");
-            } else {
-                TextColored({0.8f, 0.4f, 0.2f, 1.0f}, "Game Module");
+                TableSetColumnIndex(1);
+                if (module.is_sys_module) {
+                    TextColored({0.2f, 0.6f, 0.8f, 1.0f}, "System Module");
+                } else {
+                    TextColored({0.8f, 0.4f, 0.2f, 1.0f}, "Game Module");
+                }
+
+                TableSetColumnIndex(2);
+                if (module.is_lle) {
+                    TextColored({0.4f, 0.7f, 0.4f, 1.0f}, "LLE");
+                } else {
+                    TextColored({0.7f, 0.4f, 0.5f, 1.0f}, "HLE");
+                }
             }
-
-            TableSetColumnIndex(2);
-            if (module.is_lle) {
-                TextColored({0.4f, 0.7f, 0.4f, 1.0f}, "LLE");
-            } else {
-                TextColored({0.7f, 0.4f, 0.5f, 1.0f}, "HLE");
-            }
-        }
-        EndTable();
+            EndTable();
+        });
     }
 
     End();

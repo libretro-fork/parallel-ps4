@@ -40,6 +40,11 @@ public:
         if constexpr (std::is_void_v<R>) {
             RunErased(const_cast<void*>(static_cast<const void*>(std::addressof(func))),
                       [](void* f) { (*static_cast<std::remove_reference_t<F>*>(f))(); });
+        } else if constexpr (std::is_reference_v<R>) {
+            std::remove_reference_t<R>* result = nullptr;
+            auto call = [&] { result = std::addressof(func()); };
+            RunErased(&call, [](void* f) { (*static_cast<decltype(call)*>(f))(); });
+            return static_cast<R>(*result);
         } else {
             std::optional<R> result;
             auto call = [&] { result.emplace(func()); };
