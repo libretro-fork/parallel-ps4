@@ -24,6 +24,8 @@ static Common::Log::Class ToClass(c_log_class log_class) {
         return Common::Log::Class::Lib_Audiodec;
     case C_LOG_LIB_HTTP:
         return Common::Log::Class::Lib_Http;
+    case C_LOG_LIB_ULT:
+        return Common::Log::Class::Lib_Ult;
     case C_LOG_LOADER:
         return Common::Log::Class::Loader;
     case C_LOG_NP_HANDLER:

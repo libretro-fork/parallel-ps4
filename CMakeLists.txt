@@ -727,7 +727,8 @@ set(MISC_LIBS  src/core/libraries/screenshot/screenshot.cpp
                src/core/libraries/ulobjmgr/ulobjmgr.h
                src/core/libraries/audiodec/audiodec.c
                src/core/libraries/audiodec/audiodec.h
-               src/core/libraries/ult/ult.cpp
+               src/core/libraries/ult/ult.c
+               src/core/libraries/ult/ult_sync.c
                src/core/libraries/ult/ult.h
                src/core/libraries/ult/ult_sync.h
                src/core/libraries/signin_dialog/signindialog.cpp

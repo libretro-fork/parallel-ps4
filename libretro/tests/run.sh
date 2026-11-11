@@ -23,13 +23,12 @@ for san in address,undefined thread; do
         libretro/tests/write_snapshots_test.c src/video_core/buffer_cache/write_snapshots.c \
         $L/rthreads/rthreads.c -o "$OUT/$name" -lpthread
     "$OUT/$name"
-    # libSceUlt's objects: C++, on the core's own lock-free primitives
+    # libSceUlt's objects: C89, on libretro-common's lock-free primitives
     name=ult_sync_test-$(echo $san | tr , -)
-    for c in rthreads/retro_eventcount.c rthreads/rthreads.c features/features_cpu.c; do
-        $CC -O1 -g -fsanitize=$san -I$L/include -c $L/$c -o "$OUT/ult_$(basename $c).o"
-    done
-    $CXX -std=c++20 -O1 -g -Wall -fno-omit-frame-pointer -fsanitize=$san -Isrc -I$L/include \
-        libretro/tests/ult_sync_test.cpp "$OUT"/ult_*.o -o "$OUT/$name" -lpthread
+    $CC -std=gnu89 -O1 -g -Wall -Wdeclaration-after-statement -fno-omit-frame-pointer \
+        -fsanitize=$san -Isrc -I$L/include libretro/tests/ult_sync_test.c \
+        src/core/libraries/ult/ult_sync.c $L/rthreads/retro_eventcount.c $L/rthreads/rthreads.c \
+        $L/features/features_cpu.c -o "$OUT/$name" -lpthread
     "$OUT/$name"
     # libSceNgs2's engine: C89, the grains it renders against what they have to be
     name=ngs2_core_test-$(echo $san | tr , -)

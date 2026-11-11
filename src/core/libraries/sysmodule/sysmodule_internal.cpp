@@ -8,6 +8,7 @@
 #include "common/path_util.h"
 #include "core/emulator_settings.h"
 #include "core/file_sys/fs.h"
+#include "core/guest_call.h"
 #include "core/libraries/audiodec/audiodec.h"
 #include "core/libraries/avplayer/avplayer.h"
 #include "core/libraries/disc_map/disc_map.h"
@@ -16,6 +17,8 @@
 #include "core/libraries/jpeg/jpegenc.h"
 #include "core/libraries/kernel/kernel.h"
 #include "core/libraries/kernel/orbis_error.h"
+#include "core/libraries/kernel/threads.h"
+#include "core/libraries/kernel/threads/pthread.h"
 #include "core/libraries/libc_internal/libc_internal.h"
 #include "core/libraries/libpng/pngdec.h"
 #include "core/libraries/libpng/pngenc.h"
@@ -31,9 +34,113 @@
 #include "core/linker.h"
 #include "emulator.h"
 
+namespace Libraries::Kernel {
+void PS4_SYSV_ABI sched_yield();
+}
+
 namespace Libraries::SysModule {
 
 bool g_need_scelibc = false, g_need_fios2 = false;
+
+// libSceUlt is C (ult.c): the game's threads it needs, and its functions given to the game
+
+static int UltThreadCreate(void** thread, void* arg, const char* name) {
+    Kernel::PthreadT created{};
+    if (Kernel::posix_pthread_create_name_np(&created, nullptr, ult_run_ulthread, arg, name) != 0) {
+        return 0;
+    }
+    *thread = created;
+    return 1;
+}
+
+static void UltThreadJoin(void* thread) {
+    Kernel::posix_pthread_join(static_cast<Kernel::PthreadT>(thread), nullptr);
+}
+
+static void UltThreadExit() {
+    Kernel::posix_pthread_exit(nullptr);
+}
+
+static void UltYield() {
+    Kernel::sched_yield();
+}
+
+static thread_local void* ult_self = nullptr;
+
+static void* UltSelfGet() {
+    return ult_self;
+}
+
+static void UltSelfSet(void* value) {
+    ult_self = value;
+}
+
+static s32 UltCallEntry(ult_entry entry, u64 arg) {
+    return Core::CallGuest(reinterpret_cast<s32 PS4_SYSV_ABI (*)(u64)>(entry), arg);
+}
+
+static void RegisterUlt(Core::Loader::SymbolsResolver* sym) {
+    static const ult_host host = {UltThreadCreate, UltThreadJoin, UltThreadExit, UltYield,
+                                  UltSelfGet,      UltSelfSet,    UltCallEntry};
+    ult_set_host(&host);
+
+    LIB_FUNCTION("hZIg1EWGsHM", "libSceUlt", 1, "libSceUlt", sceUltInitialize);
+    LIB_FUNCTION("d-kSG2fLrvI", "libSceUlt", 1, "libSceUlt", sceUltFinalize);
+    LIB_FUNCTION("LuLTRt0rfTw", "libSceUlt", 1, "libSceUlt",
+                 _sceUltOptParamInitialize); // _sceUltWaitingQueueResourcePoolOptParamInitialize
+    LIB_FUNCTION("WIWV1Qd7PFU", "libSceUlt", 1, "libSceUlt",
+                 sceUltWaitingQueueResourcePoolGetWorkAreaSize);
+    LIB_FUNCTION("YiHujOG9vXY", "libSceUlt", 1, "libSceUlt", _sceUltWaitingQueueResourcePoolCreate);
+    LIB_FUNCTION("or55417wcDk", "libSceUlt", 1, "libSceUlt", sceUltWaitingQueueResourcePoolDestroy);
+    LIB_FUNCTION("6gYjd50q0CE", "libSceUlt", 1, "libSceUlt",
+                 _sceUltOptParamInitialize); // _sceUltQueueDataResourcePoolOptParamInitialize
+    LIB_FUNCTION("evj9YPkS8s4", "libSceUlt", 1, "libSceUlt",
+                 sceUltQueueDataResourcePoolGetWorkAreaSize);
+    LIB_FUNCTION("TFHm6-N6vks", "libSceUlt", 1, "libSceUlt", _sceUltQueueDataResourcePoolCreate);
+    LIB_FUNCTION("dh11uAUWNyM", "libSceUlt", 1, "libSceUlt", sceUltQueueDataResourcePoolDestroy);
+    LIB_FUNCTION("TkASc9I-xX0", "libSceUlt", 1, "libSceUlt",
+                 _sceUltOptParamInitialize); // _sceUltQueueOptParamInitialize
+    LIB_FUNCTION("9Y5keOvb6ok", "libSceUlt", 1, "libSceUlt", _sceUltQueueCreate);
+    LIB_FUNCTION("PP9nZxpSKLY", "libSceUlt", 1, "libSceUlt", sceUltQueueDestroy);
+    LIB_FUNCTION("dUwpX3e5NDE", "libSceUlt", 1, "libSceUlt", sceUltQueuePush);
+    LIB_FUNCTION("6Mc2Xs7pI1I", "libSceUlt", 1, "libSceUlt", sceUltQueueTryPush);
+    LIB_FUNCTION("RVSq2tsm2yw", "libSceUlt", 1, "libSceUlt", sceUltQueuePop);
+    LIB_FUNCTION("uZz3ci7XYqc", "libSceUlt", 1, "libSceUlt", sceUltQueueTryPop);
+    LIB_FUNCTION("V2u3WLrwh64", "libSceUlt", 1, "libSceUlt",
+                 _sceUltUlthreadRuntimeOptParamInitialize);
+    LIB_FUNCTION("grs2pbc2awM", "libSceUlt", 1, "libSceUlt", sceUltUlthreadRuntimeGetWorkAreaSize);
+    LIB_FUNCTION("jw9FkZBXo-g", "libSceUlt", 1, "libSceUlt", _sceUltUlthreadRuntimeCreate);
+    LIB_FUNCTION("-gxcs521SvA", "libSceUlt", 1, "libSceUlt", sceUltUlthreadRuntimeDestroy);
+    LIB_FUNCTION("vIuen2qlRmo", "libSceUlt", 1, "libSceUlt",
+                 _sceUltOptParamInitialize); // _sceUltUlthreadOptParamInitialize
+    LIB_FUNCTION("znI3q8S7KQ4", "libSceUlt", 1, "libSceUlt", _sceUltUlthreadCreate);
+    LIB_FUNCTION("gCeAI57LGgI", "libSceUlt", 1, "libSceUlt", sceUltUlthreadJoin);
+    LIB_FUNCTION("DsW+3FTXL0Q", "libSceUlt", 1, "libSceUlt", sceUltUlthreadTryJoin);
+    LIB_FUNCTION("kF--s3xZjco", "libSceUlt", 1, "libSceUlt", sceUltUlthreadExit);
+    LIB_FUNCTION("HFd-lpjGxJA", "libSceUlt", 1, "libSceUlt", sceUltUlthreadYield);
+    LIB_FUNCTION("xOQ9oACobA4", "libSceUlt", 1, "libSceUlt", sceUltUlthreadGetSelf);
+    LIB_FUNCTION("1+8t9aHLiz8", "libSceUlt", 1, "libSceUlt",
+                 _sceUltOptParamInitialize); // _sceUltMutexOptParamInitialize
+    LIB_FUNCTION("mmt8Sa6tL6c", "libSceUlt", 1, "libSceUlt", _sceUltMutexCreate);
+    LIB_FUNCTION("jW+HnafeS3Y", "libSceUlt", 1, "libSceUlt", sceUltMutexDestroy);
+    LIB_FUNCTION("8hEGkR1pfr8", "libSceUlt", 1, "libSceUlt", sceUltMutexLock);
+    LIB_FUNCTION("jOsUG0BJI-Y", "libSceUlt", 1, "libSceUlt", sceUltMutexTryLock);
+    LIB_FUNCTION("h0XebKiMBtk", "libSceUlt", 1, "libSceUlt", sceUltMutexUnlock);
+    LIB_FUNCTION("NPRRPNKDBN0", "libSceUlt", 1, "libSceUlt",
+                 _sceUltOptParamInitialize); // _sceUltSemaphoreOptParamInitialize
+    LIB_FUNCTION("h5QlIYj+Ro8", "libSceUlt", 1, "libSceUlt", _sceUltSemaphoreCreate);
+    LIB_FUNCTION("izXyehpoZGo", "libSceUlt", 1, "libSceUlt", sceUltSemaphoreDestroy);
+    LIB_FUNCTION("QAH1ofI97vU", "libSceUlt", 1, "libSceUlt", sceUltSemaphoreAcquire);
+    LIB_FUNCTION("HA1Ldbi3lPY", "libSceUlt", 1, "libSceUlt", sceUltSemaphoreTryAcquire);
+    LIB_FUNCTION("lbtk5X1mecw", "libSceUlt", 1, "libSceUlt", sceUltSemaphoreRelease);
+    LIB_FUNCTION("RVmEia0vXMI", "libSceUlt", 1, "libSceUlt",
+                 _sceUltOptParamInitialize); // _sceUltConditionVariableOptParamInitialize
+    LIB_FUNCTION("jnKaHGkrxZ4", "libSceUlt", 1, "libSceUlt", _sceUltConditionVariableCreate);
+    LIB_FUNCTION("xrmmI832R4U", "libSceUlt", 1, "libSceUlt", sceUltConditionVariableDestroy);
+    LIB_FUNCTION("5xGAHCxA8M0", "libSceUlt", 1, "libSceUlt", sceUltConditionVariableWait);
+    LIB_FUNCTION("JTw1cAVkuc0", "libSceUlt", 1, "libSceUlt", sceUltConditionVariableSignal);
+    LIB_FUNCTION("byiceqcMvV0", "libSceUlt", 1, "libSceUlt", sceUltConditionVariableSignalAll);
+}
 
 // libSceAudiodec is C (audiodec.c): its functions are given to the game here
 static void RegisterAudiodec(Core::Loader::SymbolsResolver* sym) {
@@ -229,7 +336,7 @@ s32 loadModuleInternal(s32 index, s32 argc, const void* argv, s32* res_out) {
         static s32 stub_handle = 100;
         constexpr auto ModulesToLoad = std::to_array<Core::SysModules>(
             {{"libSceNgs2.sprx", &Libraries::Ngs2::RegisterLib},
-             {"libSceUlt.sprx", &Libraries::Ult::RegisterLib},
+             {"libSceUlt.sprx", &RegisterUlt},
              {"libSceAvPlayer.sprx", &Libraries::AvPlayer::RegisterLib},
              {"libSceAvPlayerStreaming.sprx", nullptr},
              {"libSceRtc.sprx", &Libraries::Rtc::RegisterLib},

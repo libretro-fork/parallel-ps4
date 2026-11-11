@@ -19,6 +19,7 @@ enum c_log_class {
     C_LOG_KEY_MANAGER,
     C_LOG_LIB_AUDIODEC,
     C_LOG_LIB_HTTP,
+    C_LOG_LIB_ULT,
     C_LOG_LOADER,
     C_LOG_NP_HANDLER
 };
