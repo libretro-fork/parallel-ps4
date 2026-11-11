@@ -47,56 +47,79 @@ static std::span<const u32> NextPacket(std::span<const u32> span, size_t offset)
 
 Liverpool::Liverpool() : guest_markers_enabled{emu_settings_get_vkguest_markers()} {
     num_counter_pairs = Libraries::Kernel::sceKernelIsNeoMode() ? 16 : 8;
+    mpsc_stack_init(&commands);
+    retro_eventcount_init(&work_ec);
+    retro_eventcount_init(&idle_ec);
+    retro_eventcount_init(&command_done_ec);
     process_thread = std::jthread{std::bind_front(&Liverpool::Process, this)};
 }
 
 Liverpool::~Liverpool() {
     process_thread.request_stop();
     process_thread.join();
-    while (!ce_submits.empty()) {
-        ce_submits.front().destroy();
-        ce_submits.pop();
-    }
-    for (auto& queue : mapped_queues) {
-        while (!queue.submits.empty()) {
-            queue.submits.front().destroy();
-            queue.submits.pop();
+    auto destroy_all = [](TaskQueue& queue) {
+        queue.Take();
+        while (!queue.Empty()) {
+            const Task::Handle task = queue.Front();
+            queue.Pop();
+            task.destroy();
         }
+    };
+    destroy_all(ce_submits);
+    for (auto& queue : mapped_queues) {
+        destroy_all(queue.submits);
+    }
+    // Commands nobody will run: only the allocated ones are left, as a sender that waits
+    // for its command does so before the GPU thread is stopped
+    for (mpsc_stack_node_t* node = mpsc_stack_drain(&commands); node;) {
+        auto* command = reinterpret_cast<Command*>(node);
+        node = node->next;
+        if (!command->done) {
+            delete command;
+        }
+    }
+    retro_eventcount_free(&command_done_ec);
+    retro_eventcount_free(&idle_ec);
+    retro_eventcount_free(&work_ec);
+}
+
+void Liverpool::SubmitFinished() {
+    if (num_submits.fetch_sub(1) == 1) {
+        retro_eventcount_notify(&idle_ec);
     }
 }
 
 void Liverpool::ProcessCeQueue() {
-    auto& queue = mapped_queues[GfxQueueId];
-    Task::Handle task{};
-    {
-        std::scoped_lock lock{queue.m_access};
-        if (ce_submits.empty()) {
-            return;
-        }
-        task = ce_submits.front();
+    ce_submits.Take();
+    if (ce_submits.Empty()) {
+        return;
     }
+    const Task::Handle task = ce_submits.Front();
     task.resume();
     if (task.done()) {
+        ce_submits.Pop();
         task.destroy();
-        std::scoped_lock lock{queue.m_access};
-        ce_submits.pop();
-        --num_submits;
-        std::scoped_lock lock2{submit_mutex};
-        submit_cv.notify_all();
+        SubmitFinished();
     }
 }
 
 void Liverpool::ProcessCommands() {
     // Process incoming commands with high priority
-    while (num_commands) {
-        Common::UniqueFunction<void> callback{};
-        {
-            std::scoped_lock lk{submit_mutex};
-            callback = std::move(command_queue.front());
-            command_queue.pop();
-            --num_commands;
+    while (num_commands.load(std::memory_order_relaxed)) {
+        mpsc_stack_node_t* node = mpsc_stack_reverse(mpsc_stack_drain(&commands));
+        while (node) {
+            auto* command = reinterpret_cast<Command*>(node);
+            node = node->next;
+            command->func();
+            num_commands.fetch_sub(1, std::memory_order_relaxed);
+            if (std::atomic<bool>* done = command->done) {
+                // The sender's: it may be gone as soon as done is set
+                done->store(true, std::memory_order_release);
+                retro_eventcount_notify(&command_done_ec);
+            } else {
+                delete command;
+            }
         }
-        callback();
     }
 }
 
@@ -107,11 +130,21 @@ void Liverpool::Process(std::stop_token stoken) {
     gpu_tid = gettid();
 #endif
 
+    // A stop wakes the thread wherever it parks on work_ec
+    const std::stop_callback wake_on_stop{stoken, [this] { retro_eventcount_notify(&work_ec); }};
+    const auto has_work = [&] {
+        return num_commands.load() || num_submits.load() ||
+               submit_done.load(std::memory_order_acquire) || stoken.stop_requested();
+    };
+
     while (!stoken.stop_requested()) {
-        {
-            std::unique_lock lk{submit_mutex};
-            Common::CondvarWait(submit_cv, lk, stoken,
-                                [this] { return num_commands || num_submits || submit_done; });
+        while (!has_work()) {
+            const int key = retro_eventcount_prepare_wait(&work_ec);
+            if (has_work()) {
+                retro_eventcount_cancel_wait(&work_ec);
+                break;
+            }
+            retro_eventcount_commit_wait(&work_ec, key);
         }
         if (stoken.stop_requested()) {
             break;
@@ -123,38 +156,29 @@ void Liverpool::Process(std::stop_token stoken) {
             ProcessCommands();
             ProcessCeQueue();
 
-            curr_qid = (curr_qid + 1) % num_mapped_queues;
+            curr_qid = (curr_qid + 1) % num_mapped_queues.load(std::memory_order_acquire);
 
             auto& queue = mapped_queues[curr_qid];
 
-            Task::Handle task{};
-            {
-                std::scoped_lock lock{queue.m_access};
-                if (queue.submits.empty()) {
-                    continue;
-                }
-                task = queue.submits.front();
+            queue.submits.Take();
+            if (queue.submits.Empty()) {
+                continue;
             }
+            const Task::Handle task = queue.submits.Front();
             task.resume();
 
             if (task.done()) {
+                queue.submits.Pop();
                 task.destroy();
-
-                std::scoped_lock lock{queue.m_access};
-                queue.submits.pop();
-
-                --num_submits;
-                std::scoped_lock lock2{submit_mutex};
-                submit_cv.notify_all();
+                SubmitFinished();
             }
         }
 
-        if (submit_done) {
+        if (submit_done.exchange(false, std::memory_order_acquire)) {
             if (rasterizer) {
                 rasterizer->OnSubmit();
                 rasterizer->Flush();
             }
-            submit_done = false;
         }
 
         Platform::IrqC::Instance()->Signal(Platform::InterruptId::GpuIdle);
@@ -804,8 +828,12 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb) {
                 // there are no other submits to yield to we can sleep the thread
                 // instead and allow other tasks to run.
                 const u64* wait_addr = wait_reg_mem->Address<u64*>();
-                if (vo_port->IsVoLabel(wait_addr) &&
-                    num_submits == mapped_queues[GfxQueueId].submits.size()) {
+                if (vo_port->IsVoLabel(wait_addr) && [this] {
+                        // Everything submitted so far is in the GFX queue
+                        TaskQueue& gfx_submits = mapped_queues[GfxQueueId].submits;
+                        gfx_submits.Take();
+                        return num_submits.load() == gfx_submits.size;
+                    }()) {
                     vo_port->WaitVoLabel([&] { return wait_reg_mem->Test(regs.reg_array); });
                     break;
                 }
@@ -1190,16 +1218,14 @@ void Liverpool::SubmitGfx(std::span<const u32> dcb, std::span<const u32> ccb) {
     }
 
     auto task = ProcessGraphics(dcb);
-    {
-        std::scoped_lock lock{submit_mutex, queue.m_access};
-        if (!ccb.empty()) {
-            ce_submits.emplace(ProcessCeUpdate(ccb).handle);
-            ++num_submits;
-        }
-        queue.submits.emplace(task.handle);
-        ++num_submits;
-        submit_cv.notify_one();
+    // Counted before it is visible, so the GPU thread never takes num_submits below zero
+    if (!ccb.empty()) {
+        num_submits.fetch_add(1);
+        ce_submits.Push(ProcessCeUpdate(ccb).handle);
     }
+    num_submits.fetch_add(1);
+    queue.submits.Push(task.handle);
+    retro_eventcount_notify(&work_ec);
 }
 
 void Liverpool::SubmitAsc(u32 gnm_vqid, std::span<const u32> acb) {
@@ -1208,15 +1234,13 @@ void Liverpool::SubmitAsc(u32 gnm_vqid, std::span<const u32> acb) {
 
     const auto vqid = gnm_vqid - 1;
     const auto& task = ProcessCompute(acb, vqid);
-    {
-        std::scoped_lock lock{queue.m_access};
-        queue.submits.emplace(task.handle);
+    u32 mapped = num_mapped_queues.load(std::memory_order_relaxed);
+    while (mapped < gnm_vqid + 1 && !num_mapped_queues.compare_exchange_weak(
+                                        mapped, gnm_vqid + 1, std::memory_order_release)) {
     }
-
-    std::scoped_lock lk{submit_mutex};
-    num_mapped_queues = std::max(num_mapped_queues, gnm_vqid + 1);
-    ++num_submits;
-    submit_cv.notify_one();
+    num_submits.fetch_add(1);
+    queue.submits.Push(task.handle);
+    retro_eventcount_notify(&work_ec);
 }
 
 } // namespace AmdGpu

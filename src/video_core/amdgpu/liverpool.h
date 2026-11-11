@@ -3,15 +3,16 @@
 
 #pragma once
 
-#include <condition_variable>
+#include <atomic>
 #include <coroutine>
+#include <cstddef>
 #include <exception>
-#include <mutex>
-#include <semaphore>
 #include <span>
 #include <thread>
 #include <vector>
-#include <queue>
+
+#include <queues/mpsc_stack.h>
+#include <rthreads/retro_eventcount.h>
 
 #include "common/assert.h"
 #include "common/slot_vector.h"
@@ -72,16 +73,21 @@ public:
     void SubmitAsc(u32 gnm_vqid, std::span<const u32> acb);
 
     void SubmitDone() noexcept {
-        std::scoped_lock lk{submit_mutex};
         mapped_queues[GfxQueueId].ccb_buffer_offset = 0;
         mapped_queues[GfxQueueId].dcb_buffer_offset = 0;
-        submit_done = true;
-        submit_cv.notify_one();
+        submit_done.store(true, std::memory_order_release);
+        retro_eventcount_notify(&work_ec);
     }
 
     void WaitGpuIdle() noexcept {
-        std::unique_lock lk{submit_mutex};
-        submit_cv.wait(lk, [this] { return num_submits == 0; });
+        for (;;) {
+            const int key = retro_eventcount_prepare_wait(&idle_ec);
+            if (num_submits.load() == 0) {
+                retro_eventcount_cancel_wait(&idle_ec);
+                return;
+            }
+            retro_eventcount_commit_wait(&idle_ec, key);
+        }
     }
 
     bool IsGpuIdle() const {
@@ -96,31 +102,30 @@ public:
         rasterizer = rasterizer_;
     }
 
+    /// Runs @func on the GPU thread, before its next submission; with @wait_done, waits until
+    /// it has run. Any thread; pushed onto a lock-free stack.
     template <bool wait_done = false>
     void SendCommand(auto&& func) {
         if constexpr (wait_done) {
-            std::binary_semaphore sem{0};
-            {
-                std::scoped_lock lk{submit_mutex};
-                command_queue.emplace([&sem, &func] {
-                    func();
-                    sem.release();
-                });
-                ++num_commands;
-                submit_cv.notify_one();
+            // On this thread's stack until it has run
+            std::atomic<bool> done{false};
+            Command command{{}, Common::UniqueFunction<void>{[&func] { func(); }}, &done};
+            PushCommand(&command);
+            for (;;) {
+                const int key = retro_eventcount_prepare_wait(&command_done_ec);
+                if (done.load(std::memory_order_acquire)) {
+                    retro_eventcount_cancel_wait(&command_done_ec);
+                    break;
+                }
+                retro_eventcount_commit_wait(&command_done_ec, key);
             }
-            sem.acquire();
         } else {
-            std::scoped_lock lk{submit_mutex};
-            command_queue.emplace(std::move(func));
-            ++num_commands;
-            submit_cv.notify_one();
+            PushCommand(new Command{{}, Common::UniqueFunction<void>{std::move(func)}, nullptr});
         }
     }
 
     void ReserveCopyBufferSpace() {
         GpuQueue& gfx_queue = mapped_queues[GfxQueueId];
-        std::scoped_lock lk(gfx_queue.m_access);
         constexpr size_t GfxReservedSize = 2_MB >> 2;
         gfx_queue.ccb_buffer.reserve(GfxReservedSize);
         gfx_queue.dcb_buffer.reserve(GfxReservedSize);
@@ -154,6 +159,9 @@ public:
 private:
     struct Task {
         struct promise_type {
+            // Links the task into a queue's lock-free stack (TaskQueue)
+            mpsc_stack_node_t node{};
+
             auto get_return_object() {
                 Task task{};
                 task.handle = std::coroutine_handle<promise_type>::from_promise(*this);
@@ -193,20 +201,83 @@ private:
 
     void ProcessCommands();
     void ProcessCeQueue();
+    /// One submission fewer; the last wakes WaitGpuIdle.
+    void SubmitFinished();
     void Process(std::stop_token stoken);
 
+    /// Submissions in order: pushed by any thread onto a lock-free stack, and taken by the GPU
+    /// thread into a list of its own, oldest first, which only it touches.
+    struct TaskQueue {
+        mpsc_stack_t incoming{};
+        mpsc_stack_node_t* head{};
+        mpsc_stack_node_t* tail{};
+        size_t size{};
+
+        TaskQueue() {
+            mpsc_stack_init(&incoming);
+        }
+        void Push(Task::Handle handle) {
+            mpsc_stack_push(&incoming, &handle.promise().node);
+        }
+        /// GPU thread: what was pushed since, onto the end of its list.
+        void Take() {
+            mpsc_stack_node_t* node = mpsc_stack_drain(&incoming);
+            if (!node) {
+                return;
+            }
+            node = mpsc_stack_reverse(node);
+            if (tail) {
+                tail->next = node;
+            } else {
+                head = node;
+            }
+            for (; node; node = node->next) {
+                tail = node;
+                ++size;
+            }
+        }
+        bool Empty() const {
+            return head == nullptr;
+        }
+        Task::Handle Front() const {
+            auto* promise = reinterpret_cast<Task::promise_type*>(
+                reinterpret_cast<char*>(head) - offsetof(Task::promise_type, node));
+            return Task::Handle::from_promise(*promise);
+        }
+        void Pop() {
+            head = head->next;
+            if (!head) {
+                tail = nullptr;
+            }
+            --size;
+        }
+    };
+
     struct GpuQueue {
-        std::mutex m_access{};
         std::atomic<u32> dcb_buffer_offset;
         std::atomic<u32> ccb_buffer_offset;
         std::vector<u32> dcb_buffer;
         std::vector<u32> ccb_buffer;
-        std::queue<Task::Handle> submits{};
+        TaskQueue submits{};
         ComputeProgram cs_state{};
     };
     std::array<GpuQueue, NumTotalQueues> mapped_queues{};
-    std::queue<Task::Handle> ce_submits;
-    u32 num_mapped_queues{1u}; // GFX is always available
+    TaskQueue ce_submits;
+    std::atomic<u32> num_mapped_queues{1u}; // GFX is always available
+
+    /// A function for the GPU thread to run (SendCommand)
+    struct Command {
+        mpsc_stack_node_t node; // first: the stack links commands through it
+        Common::UniqueFunction<void> func;
+        /// Set once it has run, where the sender waits; else the command was allocated and
+        /// is deleted once it has run.
+        std::atomic<bool>* done;
+    };
+    void PushCommand(Command* command) {
+        num_commands.fetch_add(1, std::memory_order_relaxed);
+        mpsc_stack_push(&commands, &command->node);
+        retro_eventcount_notify(&work_ec);
+    }
 
     VAddr indirect_args_addr{};
     u32 num_counter_pairs{};
@@ -230,9 +301,12 @@ private:
     std::atomic<u32> num_submits{};
     std::atomic<u32> num_commands{};
     std::atomic<bool> submit_done{};
-    std::mutex submit_mutex;
-    std::condition_variable_any submit_cv;
-    std::queue<Common::UniqueFunction<void>> command_queue{};
+    mpsc_stack_t commands{};
+    /// The GPU thread parks on work_ec until there is something to do; WaitGpuIdle on
+    /// idle_ec until num_submits is 0; SendCommand<true> on command_done_ec until it has run.
+    retro_eventcount_t work_ec{};
+    retro_eventcount_t idle_ec{};
+    retro_eventcount_t command_done_ec{};
     std::thread::id gpu_id;
 #ifdef __linux__
     u32 gpu_tid;
