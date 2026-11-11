@@ -277,9 +277,6 @@ private:
     std::span<const u8> bytes;
 };
 
-/// Copies the file at @from to @to through the VFS, which clones it where the file system can.
-bool CopyFile(const std::filesystem::path& from, const std::filesystem::path& to);
-
 // Files and directories through libretro-common (file/file_path.h, retro_dirent.h)
 
 /// True when there is something at @path.

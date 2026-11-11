@@ -1361,6 +1361,7 @@ set_target_properties(shadps4 PROPERTIES PREFIX "" OUTPUT_NAME "shadps4_libretro
 set(LIBRETRO_COMMON_DIR ${CMAKE_CURRENT_SOURCE_DIR}/libretro/libretro-common)
 set(LIBRETRO_COMMON_SOURCES
     ${LIBRETRO_COMMON_DIR}/compat/compat_posix_string.c
+    ${LIBRETRO_COMMON_DIR}/compat/fopen_utf8.c
     ${LIBRETRO_COMMON_DIR}/compat/compat_strcasestr.c
     ${LIBRETRO_COMMON_DIR}/compat/compat_strl.c
     ${LIBRETRO_COMMON_DIR}/crypto/crypto.c

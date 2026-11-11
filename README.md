@@ -116,6 +116,8 @@ Or with the static Makefile, which needs no CMake (`nproc` jobs; the objects go 
 make -j$(nproc) CC=clang CXX=clang++
 ```
 
+On Windows, the same in an MSYS2 UCRT64, MINGW64 or CLANG64 shell, with `make -j$(nproc)` (the shell's own gcc or clang); a cross build from Linux needs only `CC` and `CXX` set to a MinGW-w64 compiler.
+
 It takes `DEBUG=1`, `LTO=-flto`, `SANITIZER=address`, and for an aarch64 build `LIBRETRO_X86_64_PARTS=<dir>` (box64 and the x86-64 build) or `ENABLE_FEX_GUEST_CPU=1` with `FEXCORE_GUEST_CPU_SOURCE_DIR` and `FEXCORE_GUEST_CPU_BUILD_DIR`, as the CMake options of the same names. The source lists in `Makefile.common` follow `CMakeLists.txt`.
 
 The CI workflow `.github/workflows/libretro.yml` builds both platforms. `.gitlab-ci.yml` is the recipe for libretro's buildbot, and `.github/workflows/gitlab-preflight.yml` replays it.

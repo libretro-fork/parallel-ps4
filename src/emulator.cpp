@@ -240,7 +240,7 @@ std::map<s32, std::string> ExtractTrophies(std::string_view npbind_guest,
                 auto temp = user_trophy_file.parent_path();
                 Common::FS::CreateDirectories(temp);
                 const auto tropconf = trophy_output_dir / "Xml" / "TROPCONF.XML";
-                if (!Common::FS::CopyFile(tropconf, user_trophy_file)) {
+                if (!Common::FS::CopyAll(tropconf, user_trophy_file)) {
                     LOG_ERROR(Loader, "Failed to copy {} to {}", tropconf.string(),
                               user_trophy_file.string());
                 }

@@ -482,20 +482,6 @@ std::optional<FileView> FileView::Map(const fs::path& path) {
     return view;
 }
 
-bool CopyFile(const fs::path& from, const fs::path& to) {
-    retro_vfs_copy_handle* copy = filestream_copy_begin(
-        PathToUTF8String(from).c_str(), PathToUTF8String(to).c_str(), RETRO_VFS_COPY_OVERWRITE);
-    if (!copy) {
-        return false;
-    }
-    s64 done = 0;
-    s64 total = 0;
-    while (filestream_copy_step(copy, std::numeric_limits<s64>::max(), &done, &total) ==
-           RETRO_VFS_COPY_RUNNING) {
-    }
-    return filestream_copy_close(copy) == 0;
-}
-
 bool Exists(const fs::path& path) {
     return path_is_valid(PathToUTF8String(path).c_str());
 }

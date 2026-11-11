@@ -3,7 +3,7 @@
 # switches used here:
 #
 #   ARCH_X86_64 / ARCH_ARM64     target architecture
-#   OS_LINUX                     target OS
+#   OS_LINUX / OS_WIN            target OS
 #
 # and takes these options:
 #
@@ -61,7 +61,7 @@ $(EMBEDDED_RESOURCES_C): $(EMBEDDED_RESOURCES) libretro/embed.sh
 
 # The ImGui fonts, packed by ImGui's own tool built for the build machine
 # (src/imgui/renderer/CMakeLists.txt); font_data.cpp includes them.
-FONT_TOOL := $(GEN_DIR)/binary_to_compressed_c
+FONT_TOOL := $(GEN_DIR)/binary_to_compressed_c$(HOST_EXE)
 $(FONT_TOOL): $(EXT_DIR)/imgui/misc/fonts/binary_to_compressed_c.cpp
 	@mkdir -p $(@D)
 	$(HOSTCXX) -O2 $< -o $@
@@ -380,7 +380,7 @@ endif
 # libretro-common
 # ----------------------------------------------------------------------------
 LRC_SOURCES_C :=
-LRC_SOURCES_C += $(addprefix $(LRC_DIR)/compat/,compat_posix_string.c \
+LRC_SOURCES_C += $(addprefix $(LRC_DIR)/compat/,compat_posix_string.c fopen_utf8.c \
 	compat_strcasestr.c compat_strl.c)
 LRC_SOURCES_C += $(addprefix $(LRC_DIR)/crypto/,crypto.c kdf.c pk.c x509.c)
 LRC_SOURCES_C += $(addprefix $(LRC_DIR)/encodings/,encoding_base64.c \
@@ -461,6 +461,12 @@ ifeq ($(OS_LINUX),1)
    LIBUSB_SOURCES_C += $(addprefix $(LIBUSB_DIR)/os/,linux_usbfs.c linux_netlink.c \
 	events_posix.c threads_posix.c)
 endif
+ifeq ($(OS_WIN),1)
+   LIBUSB_SOURCES_C += $(addprefix $(LIBUSB_DIR)/os/,threads_windows.c windows_common.c \
+	windows_usbdk.c windows_winusb.c events_windows.c)
+endif
 LIBUSB_FLAGS := -Ilibretro/libusb-config -I$(LIBUSB_DIR) -I$(LIBUSB_DIR)/os -w
+# libusb's Windows backend uses windows.h's min and max
+LIBUSB_FLAGS += -UNOMINMAX
 
 LIB_GROUPS := CORE LRC FMT IMGUI SIRIT ZYDIS ZYCORE LIBUSB

@@ -25,14 +25,35 @@ ifeq ($(ECHO),1)
    E := 1
 endif
 
-# Linux only: Windows builds through CMake with clang for the MSVC ABI
-# (.ci/build-windows-cross.sh), which the sources are written for.
+# Windows is recognised from the environment every Windows shell sets (all
+# MSYS2 environments included, whatever uname -s reports there) or from a
+# MinGW-w64 compiler, so a cross build needs only CC/CXX.
 ifeq ($(platform),)
    platform = unix
+   ifeq ($(OS),Windows_NT)
+      platform = win
+   else ifneq (,$(findstring mingw,$(shell $(CC) -dumpmachine 2>/dev/null)))
+      platform = win
+   endif
+endif
+
+# make's built-in default compiler is cc, which MinGW-w64 does not ship.
+ifeq ($(platform),win)
+   ifeq ($(origin CC),default)
+      CC := gcc
+   endif
+   ifeq ($(origin CXX),default)
+      CXX := g++
+   endif
 endif
 
 # The ImGui fonts are packed by a tool built for, and run on, the build machine.
-HOSTCXX ?= c++
+ifeq ($(OS),Windows_NT)
+   HOSTCXX ?= g++
+   HOST_EXE := .exe
+else
+   HOSTCXX ?= c++
+endif
 
 # ----------------------------------------------------------------------------
 # Target architecture: taken from the compiler, not the host, so a cross build
@@ -78,8 +99,21 @@ ifeq ($(platform),unix)
    endif
    LIBS += -luuid -lpthread -ldl -lrt
 
+# Windows (MinGW-w64: MSYS2's UCRT64, MINGW64 or CLANG64, or a cross build). The
+# emulator's process is started through rundll32, so there is no launcher to build.
+else ifeq ($(platform),win)
+   OS_WIN := 1
+   TARGET := $(TARGET_NAME)_libretro.dll
+   # Only what RETRO_API marks dllexport is exported
+   SHARED := -shared -Wl,--no-undefined
+   # Windows 10 RS5, as the CMake build
+   FLAGS  += -DNTDDI_VERSION=0x0A000006 -D_WIN32_WINNT=0x0A00 -DWINVER=0x0A00 \
+	-DNOMINMAX -DWIN32_LEAN_AND_MEAN
+   LDFLAGS += -static-libgcc -static-libstdc++ -static
+   LIBS += -lmincore -lwbemuuid -lws2_32 -liphlpapi -lole32 -loleaut32 -luuid -lshell32 \
+	-luser32 -ladvapi32 -lsetupapi -lbcrypt -lsynchronization -lntdll -lkernel32 -lpthread
 else
-   $(error Unsupported platform '$(platform)': the core builds for unix (Linux))
+   $(error Unsupported platform '$(platform)': the core builds for unix (Linux) and win)
 endif
 
 GEN_DIR := obj/gen
@@ -93,9 +127,12 @@ include Makefile.common
 ifeq ($(OS_LINUX),1)
    FLAGS += -D_FILE_OFFSET_BITS=64
 endif
-# files read through their mapping (filestream_get_mapped_ptr, _view). In
-# every translation unit: libretro-common's vfs.h lays its file out by it
-FLAGS += -DHAVE_MMAP
+# files read through their mapping (filestream_get_mapped_ptr, _view): mmap
+# where there is one, Windows through its own path without it. In every
+# translation unit: libretro-common's vfs.h lays its file out by it
+ifneq ($(OS_WIN),1)
+   FLAGS += -DHAVE_MMAP
+endif
 ifeq ($(ARCH_X86_64),1)
    # AVX2 and the like, while still running on most CPUs in use
    FLAGS += -march=x86-64-v3
@@ -159,9 +196,20 @@ all: $(TARGET)
 
 -include $(DEPS)
 
+# The object list outgrows the 32 KiB Windows command line, so there the
+# linker reads it from a response file ($(file) needs GNU make 4.0).
+ifeq ($(OS_WIN),1)
+LINK_OBJECTS = @$(OBJ_DIR)/link-objects.rsp
+else
+LINK_OBJECTS = $(OBJECTS)
+endif
+
 $(TARGET): $(OBJECTS)
 	@$(if $(E),echo LD $@,)
-	$(CXX) -o $@ $(OBJECTS) $(LDFLAGS) $(LIBS)
+ifeq ($(OS_WIN),1)
+	$(file >$(OBJ_DIR)/link-objects.rsp,$(OBJECTS))
+endif
+	$(CXX) -o $@ $(LINK_OBJECTS) $(LDFLAGS) $(LIBS)
 
 $(OBJ_DIR)/%.c.o: %.c
 	@mkdir -p $(@D)
