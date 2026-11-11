@@ -252,7 +252,8 @@ void ReadCoreOptions(Libretro::SharedOptions& options) {
     options.readback_linear_images = enabled("shadps4_readback_linear_images", "disabled");
     options.shader_cache = enabled("shadps4_shader_cache", "disabled");
     options.copy_gpu_buffers = enabled("shadps4_copy_gpu_buffers", "enabled");
-    options.gpu_frames = enabled("shadps4_gpu_frames", "disabled");
+    // The picture is handed over on the GPU wherever the frontend gives a Vulkan context
+    options.gpu_frames = 1;
     options.gpu_socket = -1;
     options.trophy_popup = enabled("shadps4_trophy_notifications", "enabled");
     const std::string side = OptionValue("shadps4_trophy_position", "right");
@@ -1030,6 +1031,13 @@ void ApplyRumble() {
     }
 }
 
+// With a Vulkan context: the emulator's images could not be shared, and its frames come
+// through the shared memory to be uploaded.
+bool GpuUploads() {
+    return shared &&
+           shared->gpu_frames_state.load(std::memory_order_acquire) == Libretro::GPU_FRAMES_FAILED;
+}
+
 // The newest frame, if there is one newer than the one shown. A frame stays whole until the
 // emulator begins the second one after it, so the copy is taken only if nothing was published
 // while it was made; else the newer one is tried.
@@ -1042,7 +1050,8 @@ void TakeFrame() {
         // Held first, then looked at again: once the slot is held and still the newest, the
         // emulator does not write into it, and it is shown from where it is.
         const uint32_t slot = latest & Libretro::FRAME_SLOT_MASK;
-        if (slot >= (gpu_frames ? Libretro::FRAME_IMAGES : Libretro::FRAME_SLOTS)) {
+        const bool images = gpu_frames && !GpuUploads();
+        if (slot >= (images ? Libretro::FRAME_IMAGES : Libretro::FRAME_SLOTS)) {
             return;
         }
         if (shared->frame_held.exchange(slot) != slot) {
@@ -1058,7 +1067,7 @@ void TakeFrame() {
             height > Libretro::MAX_HEIGHT) {
             return;
         }
-        if (gpu_frames) {
+        if (images) {
             shown_image = slot;
         } else {
             shown_frame = Libretro::SharedFrame(shared, slot);
@@ -1493,21 +1502,29 @@ RETRO_API void retro_run(void) {
 #else
             Libretro::GpuFrames::Receive(gpu_socket, nullptr);
 #endif
-            if (const char* failure = Libretro::GpuFrames::Failure();
-                failure && !gpu_failure_told) {
+            // Either side can find the images cannot be shared: the picture is uploaded from
+            // the shared memory then, and the log says why
+            if (!gpu_failure_told && GpuUploads()) {
                 gpu_failure_told = true;
-                char text[320];
-                std::snprintf(text, sizeof(text),
-                              "ParaLLEl PS4: no picture on the GPU (%s). Turn the core option GPU "
-                              "Frame Hand-over off and start the game again.",
-                              failure);
-                Notify(text);
+                const char* failure = Libretro::GpuFrames::Failure();
+                Log(RETRO_LOG_WARN,
+                    "The emulator's images cannot be shared with the frontend (%s): each frame "
+                    "is uploaded from system memory",
+                    failure ? failure : "see the emulator's log");
             }
         }
         TakeFrame();
     }
 
-    if (video_cb && gpu_frames) {
+    if (video_cb && gpu_frames && GpuUploads()) {
+        // The images could not be shared: the frame in the shared memory, uploaded
+        if (shown_frame) {
+            AnnounceSize(shown_width, shown_height);
+            Libretro::GpuFrames::ShowPixels(video_cb, shown_frame, shown_width, shown_height);
+        } else {
+            video_cb(nullptr, output_width, output_height, 0);
+        }
+    } else if (video_cb && gpu_frames) {
         if (shown_width == 0 || shown_height == 0) {
             shown_width = output_width;
             shown_height = output_height;

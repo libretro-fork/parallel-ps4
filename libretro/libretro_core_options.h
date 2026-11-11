@@ -381,22 +381,6 @@ struct retro_core_option_v2_definition option_defs_us[] = {
     },
 #endif
     {
-        // Off by default: when it cannot be done there is no picture at all, as a frontend
-        // that was asked for a Vulkan context takes no other kind of frame.
-        "shadps4_gpu_frames",
-        "GPU Frame Hand-over",
-        NULL,
-        "Shows the finished frames straight from the GPU in place of copying each one through system memory, which costs less at high output resolutions. Needs the frontend's Vulkan video driver. Where it cannot be done the picture stays black and a message says so.",
-        NULL,
-        "video",
-        {
-            { "disabled", NULL },
-            { "enabled", NULL },
-            { NULL, NULL },
-        },
-        "disabled"
-    },
-    {
         "shadps4_shader_cache",
         "Shader Cache",
         NULL,

@@ -501,7 +501,17 @@ bool ShareImages(const std::uint64_t* memory_handles, std::uint32_t count, std::
 }
 
 bool GpuFramesActive() {
-    return gpu_frames_active;
+    // Until either side finds the images cannot be shared
+    return gpu_frames_active &&
+           shared->gpu_frames_state.load(std::memory_order_acquire) != GPU_FRAMES_FAILED;
+}
+
+void GpuFramesFailed(const char* why) {
+    if (!GpuFramesWanted() ||
+        shared->gpu_frames_state.exchange(GPU_FRAMES_FAILED) == GPU_FRAMES_FAILED) {
+        return;
+    }
+    LOG_WARNING(Render_Vulkan, "The picture goes through system memory: {}", why);
 }
 
 std::uint32_t AcquireImage() {

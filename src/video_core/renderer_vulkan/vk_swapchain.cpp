@@ -98,8 +98,11 @@ bool Swapchain::CreateSharedImages() {
 #if defined(__linux__) || defined(_WIN32)
     // Once only: the images' descriptors are sent to the frontend once, and the picture's size
     // does not change while a game runs.
-    if (!Libretro::GpuFramesWanted() || Libretro::GpuFramesActive() ||
-        !instance.IsExternalMemoryExportSupported()) {
+    if (!Libretro::GpuFramesWanted() || Libretro::GpuFramesActive()) {
+        return false;
+    }
+    if (!instance.IsExternalMemoryExportSupported()) {
+        Libretro::GpuFramesFailed("the emulator's Vulkan device cannot export memory");
         return false;
     }
     const vk::Device device = instance.GetDevice();
@@ -119,6 +122,7 @@ bool Swapchain::CreateSharedImages() {
     std::vector<u64> sizes;
     u32 memory_type = std::numeric_limits<u32>::max();
     const auto give_up = [&] {
+        Libretro::GpuFramesFailed("the images for the frontend could not be made or sent");
         for (const u64 handle : handles) {
             Libretro::CloseImageMemory(handle);
         }

@@ -19,7 +19,7 @@
 namespace Libretro {
 
 inline constexpr std::uint32_t SHARED_MAGIC = 0x34505368; // "hSP4"
-inline constexpr std::uint32_t SHARED_VERSION = 13;
+inline constexpr std::uint32_t SHARED_VERSION = 14;
 
 inline constexpr std::uint32_t MAX_WIDTH = 3840;
 inline constexpr std::uint32_t MAX_HEIGHT = 2160;
@@ -31,6 +31,10 @@ inline constexpr std::uint32_t FRAME_SLOTS = 3;
 /// The emulator's images when the picture is handed over on the GPU (gpu_frames.h): the same
 /// three, and two more for frames that are drawn but not finished by the GPU yet.
 inline constexpr std::uint32_t FRAME_IMAGES = 5;
+/// SharedState::gpu_frames_state
+inline constexpr std::uint32_t GPU_FRAMES_PENDING = 0;
+inline constexpr std::uint32_t GPU_FRAMES_SHOWN = 1;
+inline constexpr std::uint32_t GPU_FRAMES_FAILED = 2;
 /// frame_held when the core is showing none.
 inline constexpr std::uint32_t FRAME_SLOT_NONE = 7;
 /// frame_latest is the number of frames published shifted by this, plus the newest one's slot.
@@ -198,6 +202,12 @@ struct SharedState {
     std::atomic<std::uint32_t> gpu_images_ready;
     GpuImagesMessage gpu_images;
     std::uint64_t gpu_image_handles[FRAME_IMAGES];
+
+    /// With gpu_frames: GPU_FRAMES_PENDING until the core has imported the emulator's images
+    /// (GPU_FRAMES_SHOWN), or either side found they cannot be shared (GPU_FRAMES_FAILED): the
+    /// emulator then reads each frame back into this memory, as without gpu_frames, and the
+    /// core uploads it into an image of the frontend's device.
+    std::atomic<std::uint32_t> gpu_frames_state;
 
     /// A ring of interleaved 16-bit stereo, one writer (the emulator) and one reader (the core).
     /// The indices count frames and only grow; a position is index & (AUDIO_RING_FRAMES - 1).

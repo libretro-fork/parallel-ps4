@@ -60,6 +60,9 @@ bool ShareImages(const std::uint64_t* memory_handles, std::uint32_t count, std::
 
 /// Whether the images were shared: finished frames are published with PushImage, not PushFrame.
 bool GpuFramesActive();
+/// The emulator's images cannot be shared with the frontend: frames are read back into the
+/// shared memory from now on, and the core is told why.
+void GpuFramesFailed(const char* why);
 
 /// The image to draw the next frame into: not the newest one published, not the one the core
 /// is showing, and not one still being drawn. Waits a moment when all are taken.

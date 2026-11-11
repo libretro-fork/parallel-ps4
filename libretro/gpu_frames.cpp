@@ -104,7 +104,50 @@ struct {
     PFN_vkCreateImageView CreateImageView;
     PFN_vkDestroyImageView DestroyImageView;
     PFN_vkDeviceWaitIdle DeviceWaitIdle;
+    // The uploads, where the images cannot be shared
+    PFN_vkCreateBuffer CreateBuffer;
+    PFN_vkDestroyBuffer DestroyBuffer;
+    PFN_vkGetBufferMemoryRequirements GetBufferMemoryRequirements;
+    PFN_vkGetImageMemoryRequirements GetImageMemoryRequirements;
+    PFN_vkBindBufferMemory BindBufferMemory;
+    PFN_vkMapMemory MapMemory;
+    PFN_vkCreateCommandPool CreateCommandPool;
+    PFN_vkDestroyCommandPool DestroyCommandPool;
+    PFN_vkAllocateCommandBuffers AllocateCommandBuffers;
+    PFN_vkBeginCommandBuffer BeginCommandBuffer;
+    PFN_vkEndCommandBuffer EndCommandBuffer;
+    PFN_vkCmdPipelineBarrier CmdPipelineBarrier;
+    PFN_vkCmdCopyBufferToImage CmdCopyBufferToImage;
+    PFN_vkQueueSubmit QueueSubmit;
+    PFN_vkCreateSemaphore CreateSemaphore;
+    PFN_vkDestroySemaphore DestroySemaphore;
+    PFN_vkCreateFence CreateFence;
+    PFN_vkDestroyFence DestroyFence;
+    PFN_vkWaitForFences WaitForFences;
+    PFN_vkResetFences ResetFences;
 } device_calls{};
+
+// Where the emulator's images cannot be shared with the frontend's device (another GPU or
+// driver, or no memory import): each frame, read back into the shared memory, is uploaded into
+// an image of the frontend's device and handed over as one, one per frame the frontend has in
+// flight (its sync index), as a frontend that was given a Vulkan context draws no other kind.
+struct Upload {
+    VkBuffer buffer = VK_NULL_HANDLE;
+    VkDeviceMemory buffer_memory = VK_NULL_HANDLE;
+    void* mapped = nullptr;
+    VkImage image = VK_NULL_HANDLE;
+    VkDeviceMemory image_memory = VK_NULL_HANDLE;
+    VkCommandBuffer commands = VK_NULL_HANDLE;
+    VkSemaphore done = VK_NULL_HANDLE;
+    VkFence fence = VK_NULL_HANDLE;
+    bool submitted = false;
+    unsigned width = 0;
+    unsigned height = 0;
+    retro_vulkan_image shown{};
+};
+constexpr std::uint32_t MAX_UPLOADS = 8;
+Upload uploads[MAX_UPLOADS];
+VkCommandPool upload_pool = VK_NULL_HANDLE;
 
 void Log(retro_log_level level, const char* format, ...) {
     char text[512];
@@ -123,7 +166,12 @@ void Fail(const char* format, ...) {
     std::vsnprintf(failure_text, sizeof(failure_text), format, arguments);
     va_end(arguments);
     failure = failure_text;
-    Log(RETRO_LOG_ERROR, "The picture cannot be handed over on the GPU: %s", failure_text);
+    Log(RETRO_LOG_WARN, "The picture cannot be handed over on the GPU, so it goes through system "
+                        "memory: %s", failure_text);
+    // The emulator reads its frames back from now on, and they are uploaded here
+    if (shared_state) {
+        shared_state->gpu_frames_state.store(GPU_FRAMES_FAILED, std::memory_order_release);
+    }
 }
 
 void CloseMemoryHandles() {
@@ -133,6 +181,200 @@ void CloseMemoryHandles() {
             handle = NO_HANDLE;
         }
     }
+}
+
+void DestroyUploads() {
+    if (!vulkan) {
+        return;
+    }
+    bool any = upload_pool != VK_NULL_HANDLE;
+    if (any && device_calls.DeviceWaitIdle) {
+        vulkan->lock_queue(vulkan->handle);
+        device_calls.DeviceWaitIdle(vulkan->device);
+        vulkan->unlock_queue(vulkan->handle);
+    }
+    for (Upload& upload : uploads) {
+        if (upload.shown.image_view != VK_NULL_HANDLE) {
+            device_calls.DestroyImageView(vulkan->device, upload.shown.image_view, nullptr);
+        }
+        if (upload.image != VK_NULL_HANDLE) {
+            device_calls.DestroyImage(vulkan->device, upload.image, nullptr);
+        }
+        if (upload.image_memory != VK_NULL_HANDLE) {
+            device_calls.FreeMemory(vulkan->device, upload.image_memory, nullptr);
+        }
+        if (upload.buffer != VK_NULL_HANDLE) {
+            device_calls.DestroyBuffer(vulkan->device, upload.buffer, nullptr);
+        }
+        if (upload.buffer_memory != VK_NULL_HANDLE) {
+            device_calls.FreeMemory(vulkan->device, upload.buffer_memory, nullptr);
+        }
+        if (upload.done != VK_NULL_HANDLE) {
+            device_calls.DestroySemaphore(vulkan->device, upload.done, nullptr);
+        }
+        if (upload.fence != VK_NULL_HANDLE) {
+            device_calls.DestroyFence(vulkan->device, upload.fence, nullptr);
+        }
+        upload = {};
+    }
+    if (upload_pool != VK_NULL_HANDLE) {
+        device_calls.DestroyCommandPool(vulkan->device, upload_pool, nullptr);
+        upload_pool = VK_NULL_HANDLE;
+    }
+}
+
+// A memory type of the frontend's GPU with these properties, or UINT32_MAX
+std::uint32_t MemoryType(std::uint32_t allowed, VkMemoryPropertyFlags wanted) {
+    const auto get_properties = reinterpret_cast<PFN_vkGetPhysicalDeviceMemoryProperties>(
+        vulkan->get_instance_proc_addr(vulkan->instance, "vkGetPhysicalDeviceMemoryProperties"));
+    if (!get_properties) {
+        return UINT32_MAX;
+    }
+    VkPhysicalDeviceMemoryProperties properties{};
+    get_properties(vulkan->gpu, &properties);
+    for (std::uint32_t type = 0; type < properties.memoryTypeCount; ++type) {
+        if ((allowed & (1u << type)) &&
+            (properties.memoryTypes[type].propertyFlags & wanted) == wanted) {
+            return type;
+        }
+    }
+    return UINT32_MAX;
+}
+
+// The staging buffer, the image and the commands of one upload slot, for frames of this size.
+// Made when the size changes, which is when the game's resolution does.
+bool MakeUpload(Upload& upload, unsigned width, unsigned height) {
+    if (upload.image != VK_NULL_HANDLE && upload.width == width && upload.height == height) {
+        return true;
+    }
+    if (upload.submitted) {
+        device_calls.WaitForFences(vulkan->device, 1, &upload.fence, VK_TRUE, UINT64_MAX);
+        upload.submitted = false;
+    }
+    if (upload.shown.image_view != VK_NULL_HANDLE) {
+        device_calls.DestroyImageView(vulkan->device, upload.shown.image_view, nullptr);
+        upload.shown.image_view = VK_NULL_HANDLE;
+    }
+    if (upload.image != VK_NULL_HANDLE) {
+        device_calls.DestroyImage(vulkan->device, upload.image, nullptr);
+        upload.image = VK_NULL_HANDLE;
+    }
+    if (upload.image_memory != VK_NULL_HANDLE) {
+        device_calls.FreeMemory(vulkan->device, upload.image_memory, nullptr);
+        upload.image_memory = VK_NULL_HANDLE;
+    }
+    if (upload.buffer != VK_NULL_HANDLE) {
+        device_calls.DestroyBuffer(vulkan->device, upload.buffer, nullptr);
+        upload.buffer = VK_NULL_HANDLE;
+    }
+    if (upload.buffer_memory != VK_NULL_HANDLE) {
+        device_calls.FreeMemory(vulkan->device, upload.buffer_memory, nullptr);
+        upload.buffer_memory = VK_NULL_HANDLE;
+        upload.mapped = nullptr;
+    }
+    const VkDevice device = vulkan->device;
+    const VkDeviceSize bytes = static_cast<VkDeviceSize>(width) * height * 4;
+
+    if (upload_pool == VK_NULL_HANDLE) {
+        VkCommandPoolCreateInfo pool_info{};
+        pool_info.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+        pool_info.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+        pool_info.queueFamilyIndex = vulkan->queue_index;
+        if (device_calls.CreateCommandPool(device, &pool_info, nullptr, &upload_pool) !=
+            VK_SUCCESS) {
+            return false;
+        }
+    }
+    if (upload.commands == VK_NULL_HANDLE) {
+        VkCommandBufferAllocateInfo allocate{};
+        allocate.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+        allocate.commandPool = upload_pool;
+        allocate.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+        allocate.commandBufferCount = 1;
+        VkSemaphoreCreateInfo semaphore_info{};
+        semaphore_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+        VkFenceCreateInfo fence_info{};
+        fence_info.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+        if (device_calls.AllocateCommandBuffers(device, &allocate, &upload.commands) !=
+                VK_SUCCESS ||
+            device_calls.CreateSemaphore(device, &semaphore_info, nullptr, &upload.done) !=
+                VK_SUCCESS ||
+            device_calls.CreateFence(device, &fence_info, nullptr, &upload.fence) != VK_SUCCESS) {
+            return false;
+        }
+    }
+
+    VkBufferCreateInfo buffer_info{};
+    buffer_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    buffer_info.size = bytes;
+    buffer_info.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+    buffer_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    if (device_calls.CreateBuffer(device, &buffer_info, nullptr, &upload.buffer) != VK_SUCCESS) {
+        return false;
+    }
+    VkMemoryRequirements requirements{};
+    device_calls.GetBufferMemoryRequirements(device, upload.buffer, &requirements);
+    VkMemoryAllocateInfo memory_info{};
+    memory_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    memory_info.allocationSize = requirements.size;
+    memory_info.memoryTypeIndex =
+        MemoryType(requirements.memoryTypeBits,
+                   VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+    if (memory_info.memoryTypeIndex == UINT32_MAX ||
+        device_calls.AllocateMemory(device, &memory_info, nullptr, &upload.buffer_memory) !=
+            VK_SUCCESS ||
+        device_calls.BindBufferMemory(device, upload.buffer, upload.buffer_memory, 0) !=
+            VK_SUCCESS ||
+        device_calls.MapMemory(device, upload.buffer_memory, 0, VK_WHOLE_SIZE, 0,
+                               &upload.mapped) != VK_SUCCESS) {
+        return false;
+    }
+
+    // The shared memory's frames are XRGB8888: B, G, R, X in memory
+    VkImageCreateInfo image_info{};
+    image_info.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+    image_info.imageType = VK_IMAGE_TYPE_2D;
+    image_info.format = VK_FORMAT_B8G8R8A8_UNORM;
+    image_info.extent = {width, height, 1};
+    image_info.mipLevels = 1;
+    image_info.arrayLayers = 1;
+    image_info.samples = VK_SAMPLE_COUNT_1_BIT;
+    image_info.tiling = VK_IMAGE_TILING_OPTIMAL;
+    image_info.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+                       VK_IMAGE_USAGE_SAMPLED_BIT;
+    image_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    image_info.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    if (device_calls.CreateImage(device, &image_info, nullptr, &upload.image) != VK_SUCCESS) {
+        return false;
+    }
+    device_calls.GetImageMemoryRequirements(device, upload.image, &requirements);
+    memory_info.allocationSize = requirements.size;
+    memory_info.memoryTypeIndex =
+        MemoryType(requirements.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    if (memory_info.memoryTypeIndex == UINT32_MAX ||
+        device_calls.AllocateMemory(device, &memory_info, nullptr, &upload.image_memory) !=
+            VK_SUCCESS ||
+        device_calls.BindImageMemory(device, upload.image, upload.image_memory, 0) !=
+            VK_SUCCESS) {
+        return false;
+    }
+    VkImageViewCreateInfo& view = upload.shown.create_info;
+    view = {};
+    view.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+    view.image = upload.image;
+    view.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    view.format = image_info.format;
+    view.components = {VK_COMPONENT_SWIZZLE_R, VK_COMPONENT_SWIZZLE_G, VK_COMPONENT_SWIZZLE_B,
+                       VK_COMPONENT_SWIZZLE_ONE};
+    view.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+    if (device_calls.CreateImageView(device, &view, nullptr, &upload.shown.image_view) !=
+        VK_SUCCESS) {
+        return false;
+    }
+    upload.shown.image_layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    upload.width = width;
+    upload.height = height;
+    return true;
 }
 
 // With the device still there: the frontend may be drawing the last image shown.
@@ -315,6 +557,9 @@ void Import() {
         entry.shown.image_layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
     }
     imported = true;
+    if (shared_state) {
+        shared_state->gpu_frames_state.store(GPU_FRAMES_SHOWN, std::memory_order_release);
+    }
     Log(RETRO_LOG_INFO, "The picture is handed over on the GPU: %u images of %ux%u", message.count,
         message.width, message.height);
 }
@@ -344,6 +589,28 @@ void ContextReset() {
     device_calls.DestroyImageView =
         reinterpret_cast<PFN_vkDestroyImageView>(load("vkDestroyImageView"));
     device_calls.DeviceWaitIdle = reinterpret_cast<PFN_vkDeviceWaitIdle>(load("vkDeviceWaitIdle"));
+#define LOAD_UPLOAD_CALL(name) device_calls.name = reinterpret_cast<PFN_vk##name>(load("vk" #name))
+    LOAD_UPLOAD_CALL(CreateBuffer);
+    LOAD_UPLOAD_CALL(DestroyBuffer);
+    LOAD_UPLOAD_CALL(GetBufferMemoryRequirements);
+    LOAD_UPLOAD_CALL(GetImageMemoryRequirements);
+    LOAD_UPLOAD_CALL(BindBufferMemory);
+    LOAD_UPLOAD_CALL(MapMemory);
+    LOAD_UPLOAD_CALL(CreateCommandPool);
+    LOAD_UPLOAD_CALL(DestroyCommandPool);
+    LOAD_UPLOAD_CALL(AllocateCommandBuffers);
+    LOAD_UPLOAD_CALL(BeginCommandBuffer);
+    LOAD_UPLOAD_CALL(EndCommandBuffer);
+    LOAD_UPLOAD_CALL(CmdPipelineBarrier);
+    LOAD_UPLOAD_CALL(CmdCopyBufferToImage);
+    LOAD_UPLOAD_CALL(QueueSubmit);
+    LOAD_UPLOAD_CALL(CreateSemaphore);
+    LOAD_UPLOAD_CALL(DestroySemaphore);
+    LOAD_UPLOAD_CALL(CreateFence);
+    LOAD_UPLOAD_CALL(DestroyFence);
+    LOAD_UPLOAD_CALL(WaitForFences);
+    LOAD_UPLOAD_CALL(ResetFences);
+#undef LOAD_UPLOAD_CALL
     if (!device_calls.CreateImage || !device_calls.DestroyImage || !device_calls.AllocateMemory ||
         !device_calls.FreeMemory || !device_calls.BindImageMemory ||
         !device_calls.CreateImageView || !device_calls.DestroyImageView) {
@@ -357,6 +624,7 @@ void ContextReset() {
 }
 
 void ContextDestroy() {
+    DestroyUploads();
     DestroyImported();
     vulkan = nullptr;
     // What the device was made with goes with it. A reset keeps the frontend's device, and the
@@ -475,8 +743,8 @@ bool CreateDevice2(retro_vulkan_context* context, VkInstance instance, VkPhysica
     if (!PickGpu(get_instance_proc_addr, instance, surface, gpu, family)) {
         return false;
     }
-    // Without the extension the device is still made: Failure() tells the user why the
-    // picture stays black, which a load that fails here would not.
+    // Without the extension the device is still made: the picture is then uploaded from the
+    // shared memory instead (ShowPixels).
     const char* extensions[] = {MEMORY_EXTENSION};
     memory_import_enabled = HasExtension(get_instance_proc_addr, instance, gpu, extensions[0]);
 
@@ -546,14 +814,8 @@ bool Request(retro_environment_t environment, retro_log_printf_t log) {
     log_cb = log;
     failure = nullptr;
 
-    unsigned preferred = RETRO_HW_CONTEXT_NONE;
-    if (environment(RETRO_ENVIRONMENT_GET_PREFERRED_HW_RENDER, &preferred) &&
-        preferred != RETRO_HW_CONTEXT_VULKAN) {
-        Log(RETRO_LOG_INFO, "The frontend's video driver is not Vulkan: the picture goes "
-                            "through system memory");
-        return false;
-    }
-
+    // Asked for whatever the frontend's video driver is: a frontend that can switch to its
+    // Vulkan driver does, as for any core that draws with Vulkan.
     static retro_hw_render_callback hw_render{};
     hw_render = {};
     hw_render.context_type = RETRO_HW_CONTEXT_VULKAN;
@@ -684,11 +946,92 @@ void Show(retro_video_refresh_t video, std::uint32_t slot, bool have_frame, unsi
     video(RETRO_HW_FRAME_BUFFER_VALID, width, height, 0);
 }
 
+void ShowPixels(retro_video_refresh_t video, const void* pixels, unsigned width,
+                unsigned height) {
+    if (!video) {
+        return;
+    }
+    if (!vulkan || !pixels || width == 0 || height == 0) {
+        video(nullptr, width, height, 0);
+        return;
+    }
+    const std::uint32_t index = vulkan->get_sync_index(vulkan->handle) % MAX_UPLOADS;
+    Upload& upload = uploads[index];
+    // The slot's last upload, a frame the frontend has in flight at most ago: done by now as
+    // a rule, so this does not wait
+    if (upload.submitted) {
+        device_calls.WaitForFences(vulkan->device, 1, &upload.fence, VK_TRUE, UINT64_MAX);
+        upload.submitted = false;
+    }
+    if (!MakeUpload(upload, width, height)) {
+        Log(RETRO_LOG_ERROR, "No image to upload the picture into (%ux%u)", width, height);
+        video(nullptr, width, height, 0);
+        return;
+    }
+    std::memcpy(upload.mapped, pixels, static_cast<std::size_t>(width) * height * 4);
+
+    VkCommandBufferBeginInfo begin{};
+    begin.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    device_calls.BeginCommandBuffer(upload.commands, &begin);
+    VkImageMemoryBarrier barrier{};
+    barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    barrier.srcAccessMask = 0;
+    barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    // All of it is written again: what it held does not matter
+    barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.image = upload.image;
+    barrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+    device_calls.CmdPipelineBarrier(upload.commands, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                                    VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1,
+                                    &barrier);
+    VkBufferImageCopy region{};
+    region.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+    region.imageExtent = {width, height, 1};
+    device_calls.CmdCopyBufferToImage(upload.commands, upload.buffer, upload.image,
+                                      VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
+    barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+    barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    barrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    device_calls.CmdPipelineBarrier(upload.commands, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                                    VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, nullptr, 0,
+                                    nullptr, 1, &barrier);
+    device_calls.EndCommandBuffer(upload.commands);
+
+    VkSubmitInfo submit{};
+    submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submit.commandBufferCount = 1;
+    submit.pCommandBuffers = &upload.commands;
+    submit.signalSemaphoreCount = 1;
+    submit.pSignalSemaphores = &upload.done;
+    device_calls.ResetFences(vulkan->device, 1, &upload.fence);
+    vulkan->lock_queue(vulkan->handle);
+    const VkResult result = device_calls.QueueSubmit(vulkan->queue, 1, &submit, upload.fence);
+    vulkan->unlock_queue(vulkan->handle);
+    if (result != VK_SUCCESS) {
+        video(nullptr, width, height, 0);
+        return;
+    }
+    upload.submitted = true;
+    // The frontend waits for the upload before it samples the image
+    vulkan->set_image(vulkan->handle, &upload.shown, 1, &upload.done, VK_QUEUE_FAMILY_IGNORED);
+    video(RETRO_HW_FRAME_BUFFER_VALID, width, height, 0);
+}
+
+bool Shared() {
+    return imported;
+}
+
 const char* Failure() {
     return failure;
 }
 
 void Close() {
+    DestroyUploads();
     DestroyImported();
     CloseMemoryHandles();
     have_message = false;
@@ -709,6 +1052,10 @@ bool Request(retro_environment_t, retro_log_printf_t) {
 void SetShared(SharedState*, SharedWake*) {}
 void Receive(int, void*) {}
 void Show(retro_video_refresh_t, std::uint32_t, bool, unsigned, unsigned) {}
+void ShowPixels(retro_video_refresh_t, const void*, unsigned, unsigned) {}
+bool Shared() {
+    return false;
+}
 const char* Failure() {
     return nullptr;
 }
