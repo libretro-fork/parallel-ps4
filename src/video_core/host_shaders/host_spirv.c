@@ -1071,6 +1071,7 @@ size_t host_spirv_tiling_comp(uint32_t* out, size_t cap, unsigned bits_per_pixel
     uint32_t linear_data, mip_t, members[4], mips_t, info_t, info, uni_u32, sb_block;
     uint32_t texel_var, mip_var, mip_size_var, global_id, num_mips, header, cond, body, cont;
     uint32_t merge, more, next_mip, texel, mip, pitch_height, pitch, height, x, y, slice;
+    uint32_t in_mips, done, in_data, done_data, inside;
     uint32_t tiled_offset, micro, macro, is_micro, i;
     spv_module_t module, *m = &module;
 
@@ -1195,9 +1196,24 @@ size_t host_spirv_tiling_comp(uint32_t* out, size_t cap, unsigned bits_per_pixel
 
     texel = load(m, m->t_u32, texel_var);
     mip = load(m, m->t_u32, mip_var);
+    /* A texel past the last mip has no place in the image: nothing is read or
+     * written for it. (Its mip's words would be whatever is after the mips, and
+     * its place in the tiled data anywhere at all: a write there took the GPU
+     * device down.) */
+    in_mips = spv_id(m);
+    done = spv_id(m);
+    inside = op2(m, SpvOpULessThan, m->t_bool, mip, num_mips);
+    opv(m, SpvOpSelectionMerge, 2, done, (uint32_t)SpvSelectionControlMaskNone);
+    opv(m, SpvOpBranchConditional, 3, inside, in_mips, done);
+    label(m, in_mips);
     pitch_height = MIP_WORD(mip, 1);
+    /* No division by nothing for a mip with no pitch or height */
     pitch = u_andk(m, pitch_height, 0xffffu);
+    pitch = op3(m, SpvOpSelect, m->t_u32, op2(m, SpvOpIEqual, m->t_bool, pitch, k_u32(m, 0)),
+                k_u32(m, 1), pitch);
     height = u_shrk(m, pitch_height, 16);
+    height = op3(m, SpvOpSelect, m->t_u32, op2(m, SpvOpIEqual, m->t_bool, height, k_u32(m, 0)),
+                 k_u32(m, 1), height);
     x = u_mod(m, texel, pitch);
     y = u_mod(m, u_div(m, texel, pitch), height);
     slice = u_div(m, texel, u_mul(m, pitch, height));
@@ -1218,6 +1234,16 @@ size_t host_spirv_tiling_comp(uint32_t* out, size_t cap, unsigned bits_per_pixel
     }
 #undef INFO_WORD
 #undef MIP_WORD
+
+    /* Nor for a place past the end of the tiled data that is bound */
+    in_data = spv_id(m);
+    done_data = spv_id(m);
+    inside = word_access ? u_shrk(m, tiled_offset, 2) : u_divk(m, tiled_offset, bytes_per_pixel);
+    inside = op2(m, SpvOpULessThan, m->t_bool, inside,
+                 op2(m, SpvOpArrayLength, m->t_u32, tiled_data, 0));
+    opv(m, SpvOpSelectionMerge, 2, done_data, (uint32_t)SpvSelectionControlMaskNone);
+    opv(m, SpvOpBranchConditional, 3, inside, in_data, done_data);
+    label(m, in_data);
 
     if (word_access) {
         /* The texel inside its 32-bit word, put into the other buffer's word
@@ -1250,6 +1276,10 @@ size_t host_spirv_tiling_comp(uint32_t* out, size_t cap, unsigned bits_per_pixel
         else
             store(m, linear_ptr, load(m, block_t, tiled_ptr));
     }
+    opv(m, SpvOpBranch, 1, done_data);
+    label(m, done_data);
+    opv(m, SpvOpBranch, 1, done);
+    label(m, done);
     compute_mode(m);
     return spv_end(m, SpvExecutionModelGLCompute, out, cap);
 }

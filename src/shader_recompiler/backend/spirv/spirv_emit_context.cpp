@@ -1189,6 +1189,10 @@ Id EmitContext::DefineUfloatM5ToFloat32(u32 mantissa_bits, const std::string_vie
     return func;
 }
 
+// The guest's address space as the buffer cache has it (BufferCache::ADDRESS_SPACE_BITS): the
+// page table and the fault buffer have a page for every address below this and none above
+static constexpr u64 GUEST_ADDRESS_SPACE_BITS = 40;
+
 Id EmitContext::DefineGetBdaPointer() {
     const auto caching_pagebits{Constant(U64, static_cast<u64>(profile.sparse_page_shift))};
     const auto caching_pagemask{
@@ -1198,11 +1202,24 @@ Id EmitContext::DefineGetBdaPointer() {
     const auto func{OpFunction(U64, spv::FunctionControlMask::MaskNone, func_type)};
     const auto address{OpFunctionParameter(U64)};
     Name(func, "get_bda_pointer");
-    AddLabel();
+    const auto entry_label{AddLabel()};
 
+    const auto lookup_label{OpLabel()};
     const auto fault_label{OpLabel()};
     const auto available_label{OpLabel()};
     const auto merge_label{OpLabel()};
+    const auto end_label{OpLabel()};
+
+    // An address outside the guest's address space (what a shader takes for a pointer need not
+    // be one) has no page in the table and no bit in the fault buffer: looking it up read past
+    // the table, and marking the fault wrote past the fault buffer, which lost the GPU device
+    // ("write to an invalid address"; Sekiro after its intro movie). It reads as nothing.
+    const auto in_space{
+        OpIEqual(U1[1], OpShiftRightLogical(U64, address, Constant(U64, GUEST_ADDRESS_SPACE_BITS)),
+                 u64_zero_value)};
+    OpSelectionMerge(end_label, spv::SelectionControlMask::MaskNone);
+    OpBranchConditional(in_space, lookup_label, end_label);
+    AddLabel(lookup_label);
 
     // Get page BDA
     const auto page{OpShiftRightLogical(U64, address, caching_pagebits)};
@@ -1242,7 +1259,11 @@ Id EmitContext::DefineGetBdaPointer() {
 
     // Merge
     AddLabel(merge_label);
-    const auto result{OpPhi(U64, addr, available_label, fallback_result, fault_label)};
+    const auto looked_up{OpPhi(U64, addr, available_label, fallback_result, fault_label)};
+    OpBranch(end_label);
+
+    AddLabel(end_label);
+    const auto result{OpPhi(U64, looked_up, merge_label, u64_zero_value, entry_label)};
     OpReturnValue(result);
     OpFunctionEnd();
     return func;

@@ -633,6 +633,13 @@ bool BufferCache::SynchronizeMemoryFromImage(const Buffer* arena, VAddr device_a
                "Texel buffer aliases image subresources {:x} : {:x}", device_addr,
                image.info.guest_address);
     const u64 arena_offset = arena->Offset(device_addr);
+    // The tiler writes the whole image, which may be more than the range that was asked for:
+    // an image that runs past the arena is left, and all of it is backed before it is written
+    if (arena_offset + image.info.guest_size > arena->size_bytes) {
+        return false;
+    }
+    EnsureResident(arena, device_addr >> block_shift,
+                   (device_addr + image.info.guest_size - 1) >> block_shift);
     Common::SmallVector<vk::BufferImageCopy, 8> buffer_copies;
     for (u32 mip = 0; mip < image.info.resources.levels; mip++) {
         const auto& mip_info = image.info.mips_layout[mip];
