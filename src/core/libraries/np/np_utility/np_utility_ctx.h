@@ -2,10 +2,11 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #pragma once
 
-#include <condition_variable>
 #include <mutex>
 #include <optional>
 
+#include "common/combiner.h"
+#include "common/event_count.h"
 #include "common/types.h"
 #include "core/libraries/np/np_types.h"
 
@@ -27,8 +28,8 @@ struct LookupTitleCtx {
 };
 
 struct LookupRequestCtx {
-    std::mutex mutex;
-    std::condition_variable cv;
+    Common::Combiner mutex;
+    Common::EventCount cv; // notified once the result is set
     std::optional<s32> result;
 
     s32 titleCtxId = 0;
@@ -38,25 +39,25 @@ struct LookupRequestCtx {
     std::optional<LookupTimeouts> timeouts;
 
     void SetResult(s32 r) {
-        {
-            std::lock_guard lock(mutex);
-            if (result.has_value()) {
-                return;
-            }
-            result = r;
+        if (mutex.Run([&] {
+                if (result.has_value()) {
+                    return true;
+                }
+                result = r;
+                return false;
+            })) {
+            return;
         }
-        cv.notify_all();
+        cv.Notify();
     }
 
     bool HasResult() {
-        std::lock_guard lock(mutex);
-        return result.has_value();
+        return mutex.Run([&]() -> bool { return result.has_value(); });
     }
 
     s32 Wait() {
-        std::unique_lock lock(mutex);
-        cv.wait(lock, [this] { return result.has_value(); });
-        return *result;
+        cv.Wait([this] { return mutex.Run([this] { return result.has_value(); }); });
+        return mutex.Run([this] { return *result; });
     }
 };
 

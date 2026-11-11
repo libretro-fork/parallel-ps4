@@ -10,6 +10,7 @@
 #include <queue>
 
 #include "common/combiner.h"
+#include "common/event_mutex.h"
 #include "common/types.h"
 #include "core/libraries/audio/audioout.h"
 
@@ -115,7 +116,7 @@ struct AssociatedAudioOutPort {
 };
 
 struct Port {
-    mutable std::recursive_mutex mutex;
+    mutable Common::RecursiveEventMutex mutex;
     OrbisAudio3dOpenParameters parameters{};
     // Opened lazily on the first sceAudio3dPortPush call.
     s32 audio_out_handle{-1};

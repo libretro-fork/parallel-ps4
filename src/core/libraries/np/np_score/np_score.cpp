@@ -5,6 +5,7 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include "common/combiner.h"
 #include "common/elf_info.h"
 #include "common/logging/log.h"
 #include "core/libraries/error_codes.h"
@@ -27,7 +28,7 @@ struct ScoreTitleCtx {
     OrbisNpScorePcId pcId = 0;
 };
 
-static std::mutex g_mutex;
+static Common::Combiner g_mutex;
 static std::map<OrbisNpScoreTitleCtxId, ScoreTitleCtx> g_title_ctxs;
 static std::map<OrbisNpScoreRequestId, std::shared_ptr<ScoreRequestCtx>> g_requests;
 static OrbisNpScoreTitleCtxId g_next_ctx_id = 1;
@@ -46,16 +47,18 @@ static std::shared_ptr<ScoreRequestCtx> LookupRequestUnlocked(OrbisNpScoreReques
 }
 
 static bool IsRequestAborted(const std::shared_ptr<ScoreRequestCtx>& req) {
-    std::lock_guard lock(req->mutex);
-    return req->result.has_value() && *req->result == ORBIS_NP_COMMUNITY_ERROR_ABORTED;
+    return req->mutex.Run([&]() -> bool {
+        return req->result.has_value() && *req->result == ORBIS_NP_COMMUNITY_ERROR_ABORTED;
+    });
 }
 
 static s32 ServiceLabelForRequest(const std::shared_ptr<ScoreRequestCtx>& req) {
     if (!req)
         return 0;
-    std::lock_guard lock(g_mutex);
-    auto* tc = LookupTitleCtxUnlocked(req->titleCtxId);
-    return tc != nullptr ? tc->serviceLabel : 0;
+    return g_mutex.Run([&]() -> s32 {
+        auto* tc = LookupTitleCtxUnlocked(req->titleCtxId);
+        return tc != nullptr ? tc->serviceLabel : 0;
+    });
 }
 
 //***********************************
@@ -71,18 +74,20 @@ s32 PS4_SYSV_ABI sceNpScoreCreateNpTitleCtx(OrbisNpServiceLabel serviceLabel,
         LOG_ERROR(Lib_NpScore, "selfNpId is null");
         return ORBIS_NP_COMMUNITY_ERROR_INSUFFICIENT_ARGUMENT;
     }
-    std::lock_guard lock(g_mutex);
-    if (static_cast<s32>(g_title_ctxs.size()) >= ORBIS_NP_SCORE_MAX_CTX_NUM) {
-        LOG_ERROR(Lib_NpScore, "Too many title contexts already exist ({})", g_title_ctxs.size());
-        return ORBIS_NP_COMMUNITY_ERROR_TOO_MANY_OBJECTS;
-    }
-    const s32 userId =
-        Libraries::Np::NpHandler::GetInstance().GetUserIdByOnlineId(selfNpId->handle);
-    const OrbisNpScoreTitleCtxId id = g_next_ctx_id++;
-    g_title_ctxs[id] = ScoreTitleCtx{.serviceLabel = serviceLabel, .userId = userId};
-    LOG_INFO(Lib_NpScore, "CreateNpTitleCtx id={} serviceLabel={} userId={}", id, serviceLabel,
-             userId);
-    return id;
+    return g_mutex.Run([&]() -> s32 {
+        if (static_cast<s32>(g_title_ctxs.size()) >= ORBIS_NP_SCORE_MAX_CTX_NUM) {
+            LOG_ERROR(Lib_NpScore, "Too many title contexts already exist ({})",
+                      g_title_ctxs.size());
+            return ORBIS_NP_COMMUNITY_ERROR_TOO_MANY_OBJECTS;
+        }
+        const s32 userId =
+            Libraries::Np::NpHandler::GetInstance().GetUserIdByOnlineId(selfNpId->handle);
+        const OrbisNpScoreTitleCtxId id = g_next_ctx_id++;
+        g_title_ctxs[id] = ScoreTitleCtx{.serviceLabel = serviceLabel, .userId = userId};
+        LOG_INFO(Lib_NpScore, "CreateNpTitleCtx id={} serviceLabel={} userId={}", id, serviceLabel,
+                 userId);
+        return id;
+    });
 }
 
 s32 PS4_SYSV_ABI sceNpScoreCreateNpTitleCtxA(OrbisNpServiceLabel npServiceLabel,
@@ -96,82 +101,84 @@ s32 PS4_SYSV_ABI sceNpScoreCreateNpTitleCtxA(OrbisNpServiceLabel npServiceLabel,
         LOG_ERROR(Lib_NpScore, "invalid serviceLabel");
         return ORBIS_NP_COMMUNITY_ERROR_INVALID_ARGUMENT;
     }
-    std::lock_guard lock(g_mutex);
-    if (static_cast<s32>(g_title_ctxs.size()) >= ORBIS_NP_SCORE_MAX_CTX_NUM) {
-        LOG_ERROR(Lib_NpScore, "Too many title contexts already exist ({})", g_title_ctxs.size());
-        return ORBIS_NP_COMMUNITY_ERROR_TOO_MANY_OBJECTS;
-    }
-    const OrbisNpScoreTitleCtxId id = g_next_ctx_id++;
-    g_title_ctxs[id] = ScoreTitleCtx{.serviceLabel = npServiceLabel, .userId = selfId};
-    LOG_INFO(Lib_NpScore, "CreateNpTitleCtxA id={} serviceLabel={} userId={}", id, npServiceLabel,
-             selfId);
-    return id;
+    return g_mutex.Run([&]() -> s32 {
+        if (static_cast<s32>(g_title_ctxs.size()) >= ORBIS_NP_SCORE_MAX_CTX_NUM) {
+            LOG_ERROR(Lib_NpScore, "Too many title contexts already exist ({})",
+                      g_title_ctxs.size());
+            return ORBIS_NP_COMMUNITY_ERROR_TOO_MANY_OBJECTS;
+        }
+        const OrbisNpScoreTitleCtxId id = g_next_ctx_id++;
+        g_title_ctxs[id] = ScoreTitleCtx{.serviceLabel = npServiceLabel, .userId = selfId};
+        LOG_INFO(Lib_NpScore, "CreateNpTitleCtxA id={} serviceLabel={} userId={}", id,
+                 npServiceLabel, selfId);
+        return id;
+    });
 }
 
 s32 PS4_SYSV_ABI sceNpScoreDeleteNpTitleCtx(s32 titleCtxId) {
-    std::lock_guard lock(g_mutex);
-    if (!g_title_ctxs.contains(titleCtxId)) {
-        LOG_ERROR(Lib_NpScore, "invalid titleCtxId {}", titleCtxId);
-        return ORBIS_NP_COMMUNITY_ERROR_INVALID_ID;
-    }
-
-    for (auto it = g_requests.begin(); it != g_requests.end();) {
-        if (it->second->titleCtxId == titleCtxId) {
-            it->second->SetResult(ORBIS_NP_COMMUNITY_ERROR_ABORTED);
-            it = g_requests.erase(it);
-        } else {
-            ++it;
+    return g_mutex.Run([&]() -> s32 {
+        if (!g_title_ctxs.contains(titleCtxId)) {
+            LOG_ERROR(Lib_NpScore, "invalid titleCtxId {}", titleCtxId);
+            return ORBIS_NP_COMMUNITY_ERROR_INVALID_ID;
         }
-    }
-    g_title_ctxs.erase(titleCtxId);
-    LOG_INFO(Lib_NpScore, "DeleteNpTitleCtx id={}", titleCtxId);
-    return ORBIS_OK;
+
+        for (auto it = g_requests.begin(); it != g_requests.end();) {
+            if (it->second->titleCtxId == titleCtxId) {
+                it->second->SetResult(ORBIS_NP_COMMUNITY_ERROR_ABORTED);
+                it = g_requests.erase(it);
+            } else {
+                ++it;
+            }
+        }
+        g_title_ctxs.erase(titleCtxId);
+        LOG_INFO(Lib_NpScore, "DeleteNpTitleCtx id={}", titleCtxId);
+        return ORBIS_OK;
+    });
 }
 
 //***********************************
 // Request management functions
 //***********************************
 s32 PS4_SYSV_ABI sceNpScoreCreateRequest(s32 titleCtxId) {
-    std::lock_guard lock(g_mutex);
-    auto* tc = LookupTitleCtxUnlocked(titleCtxId);
-    if (!tc) {
-        LOG_ERROR(Lib_NpScore, "invalid titleCtxId {}", titleCtxId);
-        return ORBIS_NP_COMMUNITY_ERROR_INVALID_ID;
-    }
-    if (static_cast<s32>(g_requests.size()) >= ORBIS_NP_SCORE_MAX_CTX_NUM) {
-        LOG_ERROR(Lib_NpScore, "too many requests ({})", g_requests.size());
-        return ORBIS_NP_COMMUNITY_ERROR_TOO_MANY_OBJECTS;
-    }
-    const OrbisNpScoreRequestId id = g_next_req_id++;
-    auto req = std::make_shared<ScoreRequestCtx>();
-    req->titleCtxId = titleCtxId;
-    req->userId = tc->userId;
-    req->pcId = tc->pcId;
-    g_requests[id] = std::move(req);
-    LOG_INFO(Lib_NpScore, "CreateRequest id={} titleCtxId={}", id, titleCtxId);
-    return id;
+    return g_mutex.Run([&]() -> s32 {
+        auto* tc = LookupTitleCtxUnlocked(titleCtxId);
+        if (!tc) {
+            LOG_ERROR(Lib_NpScore, "invalid titleCtxId {}", titleCtxId);
+            return ORBIS_NP_COMMUNITY_ERROR_INVALID_ID;
+        }
+        if (static_cast<s32>(g_requests.size()) >= ORBIS_NP_SCORE_MAX_CTX_NUM) {
+            LOG_ERROR(Lib_NpScore, "too many requests ({})", g_requests.size());
+            return ORBIS_NP_COMMUNITY_ERROR_TOO_MANY_OBJECTS;
+        }
+        const OrbisNpScoreRequestId id = g_next_req_id++;
+        auto req = std::make_shared<ScoreRequestCtx>();
+        req->titleCtxId = titleCtxId;
+        req->userId = tc->userId;
+        req->pcId = tc->pcId;
+        g_requests[id] = std::move(req);
+        LOG_INFO(Lib_NpScore, "CreateRequest id={} titleCtxId={}", id, titleCtxId);
+        return id;
+    });
 }
 
 s32 PS4_SYSV_ABI sceNpScoreDeleteRequest(s32 reqId) {
     LOG_INFO(Lib_NpScore, "DeleteRequest reqId={}", reqId);
-    std::lock_guard lock(g_mutex);
-    auto req = LookupRequestUnlocked(reqId);
-    if (!req) {
-        LOG_ERROR(Lib_NpScore, "invalid reqId {}", reqId);
-        return ORBIS_NP_COMMUNITY_ERROR_INVALID_ID;
-    }
-    req->SetResult(ORBIS_NP_COMMUNITY_ERROR_ABORTED);
-    g_requests.erase(reqId);
-    return ORBIS_OK;
+    return g_mutex.Run([&]() -> s32 {
+        auto req = LookupRequestUnlocked(reqId);
+        if (!req) {
+            LOG_ERROR(Lib_NpScore, "invalid reqId {}", reqId);
+            return ORBIS_NP_COMMUNITY_ERROR_INVALID_ID;
+        }
+        req->SetResult(ORBIS_NP_COMMUNITY_ERROR_ABORTED);
+        g_requests.erase(reqId);
+        return ORBIS_OK;
+    });
 }
 
 s32 PS4_SYSV_ABI sceNpScoreAbortRequest(s32 reqId) {
     LOG_INFO(Lib_NpScore, "AbortRequest reqId={}", reqId);
     std::shared_ptr<ScoreRequestCtx> req;
-    {
-        std::lock_guard lock(g_mutex);
-        req = LookupRequestUnlocked(reqId);
-    }
+    g_mutex.Run([&] { req = LookupRequestUnlocked(reqId); });
     if (!req) {
         LOG_ERROR(Lib_NpScore, "invalid reqId {}", reqId);
         return ORBIS_NP_COMMUNITY_ERROR_INVALID_ID;
@@ -188,43 +195,37 @@ s32 PS4_SYSV_ABI sceNpScorePollAsync(s32 reqId, s32* result) {
     //   return 1  = async op still in flight
     //   return <0 = this poll call itself failed (e.g. invalid reqId)
     std::shared_ptr<ScoreRequestCtx> req;
-    {
-        std::lock_guard lock(g_mutex);
-        req = LookupRequestUnlocked(reqId);
-    }
+    g_mutex.Run([&] { req = LookupRequestUnlocked(reqId); });
     if (!req) {
         LOG_ERROR(Lib_NpScore, "PollAsync invalid reqId {}", reqId);
         return ORBIS_NP_COMMUNITY_ERROR_INVALID_ID;
     }
-    std::lock_guard rlock(req->mutex);
-    if (!req->result.has_value()) {
-        return 1; // still running
-    }
-    if (result != nullptr) {
-        *result = *req->result;
-    }
-    LOG_INFO(Lib_NpScore, "PollAsync reqId={} completed (result={:#x})", reqId, *req->result);
-    return 0;
+    return req->mutex.Run([&]() -> s32 {
+        if (!req->result.has_value()) {
+            return 1; // still running
+        }
+        if (result != nullptr) {
+            *result = *req->result;
+        }
+        LOG_INFO(Lib_NpScore, "PollAsync reqId={} completed (result={:#x})", reqId, *req->result);
+        return 0;
+    });
 }
 
 s32 PS4_SYSV_ABI sceNpScoreWaitAsync(s32 reqId, s32* result) {
     // Block until the async op finishes. Shape mirrors PollAsync but waits on
     // the request's cv instead of bailing out if result isn't set yet.
     std::shared_ptr<ScoreRequestCtx> req;
-    {
-        std::lock_guard lock(g_mutex);
-        req = LookupRequestUnlocked(reqId);
-    }
+    g_mutex.Run([&] { req = LookupRequestUnlocked(reqId); });
     if (!req) {
         LOG_ERROR(Lib_NpScore, "WaitAsync invalid reqId {}", reqId);
         return ORBIS_NP_COMMUNITY_ERROR_INVALID_ID;
     }
-    std::unique_lock rlock(req->mutex);
-    req->cv.wait(rlock, [&] { return req->result.has_value(); });
+    const s32 res = req->Wait();
     if (result != nullptr) {
-        *result = *req->result;
+        *result = res;
     }
-    LOG_INFO(Lib_NpScore, "WaitAsync reqId={} completed (result={:#x})", reqId, *req->result);
+    LOG_INFO(Lib_NpScore, "WaitAsync reqId={} completed (result={:#x})", reqId, res);
     return 0;
 }
 
@@ -253,16 +254,18 @@ s32 PS4_SYSV_ABI sceNpScoreRecordScore(s32 reqId, OrbisNpScoreBoardId boardId,
     }
 
     std::shared_ptr<ScoreRequestCtx> req;
-    {
-        std::lock_guard lock(g_mutex);
-        req = LookupRequestUnlocked(reqId);
-        if (!req) {
-            LOG_ERROR(Lib_NpScore, "invalid reqId {}", reqId);
-            return ORBIS_NP_COMMUNITY_ERROR_INVALID_ID;
-        }
-        if (IsRequestAborted(req)) {
-            return ORBIS_NP_COMMUNITY_ERROR_ABORTED;
-        }
+    if (auto returned = g_mutex.Run([&]() -> std::optional<s32> {
+            req = LookupRequestUnlocked(reqId);
+            if (!req) {
+                LOG_ERROR(Lib_NpScore, "invalid reqId {}", reqId);
+                return std::optional<s32>{ORBIS_NP_COMMUNITY_ERROR_INVALID_ID};
+            }
+            if (IsRequestAborted(req)) {
+                return std::optional<s32>{ORBIS_NP_COMMUNITY_ERROR_ABORTED};
+            }
+            return std::nullopt;
+        })) {
+        return *returned;
     }
 
     // Stash the caller's tmpRank pointer so the reply handler can write to it.
@@ -306,16 +309,18 @@ s32 PS4_SYSV_ABI sceNpScoreRecordScoreAsync(s32 reqId, OrbisNpScoreBoardId board
     }
 
     std::shared_ptr<ScoreRequestCtx> req;
-    {
-        std::lock_guard lock(g_mutex);
-        req = LookupRequestUnlocked(reqId);
-        if (!req) {
-            LOG_ERROR(Lib_NpScore, "invalid reqId {}", reqId);
-            return ORBIS_NP_COMMUNITY_ERROR_INVALID_ID;
-        }
-        if (IsRequestAborted(req)) {
-            return ORBIS_NP_COMMUNITY_ERROR_ABORTED;
-        }
+    if (auto returned = g_mutex.Run([&]() -> std::optional<s32> {
+            req = LookupRequestUnlocked(reqId);
+            if (!req) {
+                LOG_ERROR(Lib_NpScore, "invalid reqId {}", reqId);
+                return std::optional<s32>{ORBIS_NP_COMMUNITY_ERROR_INVALID_ID};
+            }
+            if (IsRequestAborted(req)) {
+                return std::optional<s32>{ORBIS_NP_COMMUNITY_ERROR_ABORTED};
+            }
+            return std::nullopt;
+        })) {
+        return *returned;
     }
 
     // Stash the caller's tmpRank pointer so the reply handler can write to it.
@@ -409,16 +414,18 @@ static int GetRankingByRangeImpl(s32 reqId, OrbisNpScoreBoardId boardId,
     }
 
     std::shared_ptr<ScoreRequestCtx> req;
-    {
-        std::lock_guard lock(g_mutex);
-        req = LookupRequestUnlocked(reqId);
-        if (!req) {
-            LOG_ERROR(Lib_NpScore, "invalid reqId {}", reqId);
-            return ORBIS_NP_COMMUNITY_ERROR_INVALID_ID;
-        }
-        if (IsRequestAborted(req)) {
-            return ORBIS_NP_COMMUNITY_ERROR_ABORTED;
-        }
+    if (auto returned = g_mutex.Run([&]() -> std::optional<int> {
+            req = LookupRequestUnlocked(reqId);
+            if (!req) {
+                LOG_ERROR(Lib_NpScore, "invalid reqId {}", reqId);
+                return std::optional<int>{ORBIS_NP_COMMUNITY_ERROR_INVALID_ID};
+            }
+            if (IsRequestAborted(req)) {
+                return std::optional<int>{ORBIS_NP_COMMUNITY_ERROR_ABORTED};
+            }
+            return std::nullopt;
+        })) {
+        return *returned;
     }
 
     s32 dispatch_err;
@@ -552,16 +559,18 @@ static int GetRankingByNpIdImpl(s32 reqId, OrbisNpScoreBoardId boardId, const Or
     }
 
     std::shared_ptr<ScoreRequestCtx> req;
-    {
-        std::lock_guard lock(g_mutex);
-        req = LookupRequestUnlocked(reqId);
-        if (!req) {
-            LOG_ERROR(Lib_NpScore, "invalid reqId {}", reqId);
-            return ORBIS_NP_COMMUNITY_ERROR_INVALID_ID;
-        }
-        if (IsRequestAborted(req)) {
-            return ORBIS_NP_COMMUNITY_ERROR_ABORTED;
-        }
+    if (auto returned = g_mutex.Run([&]() -> std::optional<int> {
+            req = LookupRequestUnlocked(reqId);
+            if (!req) {
+                LOG_ERROR(Lib_NpScore, "invalid reqId {}", reqId);
+                return std::optional<int>{ORBIS_NP_COMMUNITY_ERROR_INVALID_ID};
+            }
+            if (IsRequestAborted(req)) {
+                return std::optional<int>{ORBIS_NP_COMMUNITY_ERROR_ABORTED};
+            }
+            return std::nullopt;
+        })) {
+        return *returned;
     }
 
     std::vector<std::string> npIds;
@@ -672,13 +681,15 @@ static int GetRankingByAccountIdImpl(s32 reqId, OrbisNpScoreBoardId boardId,
     }
 
     std::shared_ptr<ScoreRequestCtx> req;
-    {
-        std::lock_guard lock(g_mutex);
-        req = LookupRequestUnlocked(reqId);
-        if (!req)
-            return ORBIS_NP_COMMUNITY_ERROR_INVALID_ID;
-        if (IsRequestAborted(req))
-            return ORBIS_NP_COMMUNITY_ERROR_ABORTED;
+    if (auto returned = g_mutex.Run([&]() -> std::optional<int> {
+            req = LookupRequestUnlocked(reqId);
+            if (!req)
+                return std::optional<int>{ORBIS_NP_COMMUNITY_ERROR_INVALID_ID};
+            if (IsRequestAborted(req))
+                return std::optional<int>{ORBIS_NP_COMMUNITY_ERROR_ABORTED};
+            return std::nullopt;
+        })) {
+        return *returned;
     }
 
     std::vector<u64> accountIds;
@@ -818,16 +829,18 @@ static int GetFriendsRankingImpl(s32 reqId, OrbisNpScoreBoardId boardId, s32 inc
     }
 
     std::shared_ptr<ScoreRequestCtx> req;
-    {
-        std::lock_guard lock(g_mutex);
-        req = LookupRequestUnlocked(reqId);
-        if (!req) {
-            LOG_ERROR(Lib_NpScore, "invalid reqId {}", reqId);
-            return ORBIS_NP_COMMUNITY_ERROR_INVALID_ID;
-        }
-        if (IsRequestAborted(req)) {
-            return ORBIS_NP_COMMUNITY_ERROR_ABORTED;
-        }
+    if (auto returned = g_mutex.Run([&]() -> std::optional<int> {
+            req = LookupRequestUnlocked(reqId);
+            if (!req) {
+                LOG_ERROR(Lib_NpScore, "invalid reqId {}", reqId);
+                return std::optional<int>{ORBIS_NP_COMMUNITY_ERROR_INVALID_ID};
+            }
+            if (IsRequestAborted(req)) {
+                return std::optional<int>{ORBIS_NP_COMMUNITY_ERROR_ABORTED};
+            }
+            return std::nullopt;
+        })) {
+        return *returned;
     }
 
     s32 dispatch_err;
@@ -976,16 +989,18 @@ static int GetRankingByNpIdPcIdImpl(s32 reqId, OrbisNpScoreBoardId boardId,
     }
 
     std::shared_ptr<ScoreRequestCtx> req;
-    {
-        std::lock_guard lock(g_mutex);
-        req = LookupRequestUnlocked(reqId);
-        if (!req) {
-            LOG_ERROR(Lib_NpScore, "invalid reqId {}", reqId);
-            return ORBIS_NP_COMMUNITY_ERROR_INVALID_ID;
-        }
-        if (IsRequestAborted(req)) {
-            return ORBIS_NP_COMMUNITY_ERROR_ABORTED;
-        }
+    if (auto returned = g_mutex.Run([&]() -> std::optional<int> {
+            req = LookupRequestUnlocked(reqId);
+            if (!req) {
+                LOG_ERROR(Lib_NpScore, "invalid reqId {}", reqId);
+                return std::optional<int>{ORBIS_NP_COMMUNITY_ERROR_INVALID_ID};
+            }
+            if (IsRequestAborted(req)) {
+                return std::optional<int>{ORBIS_NP_COMMUNITY_ERROR_ABORTED};
+            }
+            return std::nullopt;
+        })) {
+        return *returned;
     }
 
     std::vector<std::string> npIds;
@@ -1093,13 +1108,15 @@ static int GetRankingByAccountIdPcIdImpl(s32 reqId, OrbisNpScoreBoardId boardId,
     }
 
     std::shared_ptr<ScoreRequestCtx> req;
-    {
-        std::lock_guard lock(g_mutex);
-        req = LookupRequestUnlocked(reqId);
-        if (!req)
-            return ORBIS_NP_COMMUNITY_ERROR_INVALID_ID;
-        if (IsRequestAborted(req))
-            return ORBIS_NP_COMMUNITY_ERROR_ABORTED;
+    if (auto returned = g_mutex.Run([&]() -> std::optional<int> {
+            req = LookupRequestUnlocked(reqId);
+            if (!req)
+                return std::optional<int>{ORBIS_NP_COMMUNITY_ERROR_INVALID_ID};
+            if (IsRequestAborted(req))
+                return std::optional<int>{ORBIS_NP_COMMUNITY_ERROR_ABORTED};
+            return std::nullopt;
+        })) {
+        return *returned;
     }
 
     std::vector<u64> accountIds;
@@ -1178,16 +1195,18 @@ static int GetBoardInfoImpl(s32 reqId, OrbisNpScoreBoardId boardId,
     }
 
     std::shared_ptr<ScoreRequestCtx> req;
-    {
-        std::lock_guard lock(g_mutex);
-        req = LookupRequestUnlocked(reqId);
-        if (!req) {
-            LOG_ERROR(Lib_NpScore, "invalid reqId {}", reqId);
-            return ORBIS_NP_COMMUNITY_ERROR_INVALID_ID;
-        }
-        if (IsRequestAborted(req)) {
-            return ORBIS_NP_COMMUNITY_ERROR_ABORTED;
-        }
+    if (auto returned = g_mutex.Run([&]() -> std::optional<int> {
+            req = LookupRequestUnlocked(reqId);
+            if (!req) {
+                LOG_ERROR(Lib_NpScore, "invalid reqId {}", reqId);
+                return std::optional<int>{ORBIS_NP_COMMUNITY_ERROR_INVALID_ID};
+            }
+            if (IsRequestAborted(req)) {
+                return std::optional<int>{ORBIS_NP_COMMUNITY_ERROR_ABORTED};
+            }
+            return std::nullopt;
+        })) {
+        return *returned;
     }
 
     if (boardInfo == nullptr) {
@@ -1238,16 +1257,18 @@ static int GetGameDataImpl(s32 reqId, OrbisNpScoreBoardId boardId, const OrbisNp
     }
 
     std::shared_ptr<ScoreRequestCtx> req;
-    {
-        std::lock_guard lock(g_mutex);
-        req = LookupRequestUnlocked(reqId);
-        if (!req) {
-            LOG_ERROR(Lib_NpScore, "invalid reqId {}", reqId);
-            return ORBIS_NP_COMMUNITY_ERROR_INVALID_ID;
-        }
-        if (IsRequestAborted(req)) {
-            return ORBIS_NP_COMMUNITY_ERROR_ABORTED;
-        }
+    if (auto returned = g_mutex.Run([&]() -> std::optional<int> {
+            req = LookupRequestUnlocked(reqId);
+            if (!req) {
+                LOG_ERROR(Lib_NpScore, "invalid reqId {}", reqId);
+                return std::optional<int>{ORBIS_NP_COMMUNITY_ERROR_INVALID_ID};
+            }
+            if (IsRequestAborted(req)) {
+                return std::optional<int>{ORBIS_NP_COMMUNITY_ERROR_ABORTED};
+            }
+            return std::nullopt;
+        })) {
+        return *returned;
     }
 
     const std::string npIdStr(npId->handle.data,
@@ -1285,16 +1306,18 @@ static int GetGameDataByAccountIdImpl(s32 reqId, OrbisNpScoreBoardId boardId,
     }
 
     std::shared_ptr<ScoreRequestCtx> req;
-    {
-        std::lock_guard lock(g_mutex);
-        req = LookupRequestUnlocked(reqId);
-        if (!req) {
-            LOG_ERROR(Lib_NpScore, "invalid reqId {}", reqId);
-            return ORBIS_NP_COMMUNITY_ERROR_INVALID_ID;
-        }
-        if (IsRequestAborted(req)) {
-            return ORBIS_NP_COMMUNITY_ERROR_ABORTED;
-        }
+    if (auto returned = g_mutex.Run([&]() -> std::optional<int> {
+            req = LookupRequestUnlocked(reqId);
+            if (!req) {
+                LOG_ERROR(Lib_NpScore, "invalid reqId {}", reqId);
+                return std::optional<int>{ORBIS_NP_COMMUNITY_ERROR_INVALID_ID};
+            }
+            if (IsRequestAborted(req)) {
+                return std::optional<int>{ORBIS_NP_COMMUNITY_ERROR_ABORTED};
+            }
+            return std::nullopt;
+        })) {
+        return *returned;
     }
 
     const s32 pcId = req->pcId;
@@ -1381,16 +1404,18 @@ static int RecordGameDataImpl(s32 reqId, OrbisNpScoreBoardId boardId, OrbisNpSco
     }
 
     std::shared_ptr<ScoreRequestCtx> req;
-    {
-        std::lock_guard lock(g_mutex);
-        req = LookupRequestUnlocked(reqId);
-        if (!req) {
-            LOG_ERROR(Lib_NpScore, "invalid reqId {}", reqId);
-            return ORBIS_NP_COMMUNITY_ERROR_INVALID_ID;
-        }
-        if (IsRequestAborted(req)) {
-            return ORBIS_NP_COMMUNITY_ERROR_ABORTED;
-        }
+    if (auto returned = g_mutex.Run([&]() -> std::optional<int> {
+            req = LookupRequestUnlocked(reqId);
+            if (!req) {
+                LOG_ERROR(Lib_NpScore, "invalid reqId {}", reqId);
+                return std::optional<int>{ORBIS_NP_COMMUNITY_ERROR_INVALID_ID};
+            }
+            if (IsRequestAborted(req)) {
+                return std::optional<int>{ORBIS_NP_COMMUNITY_ERROR_ABORTED};
+            }
+            return std::nullopt;
+        })) {
+        return *returned;
     }
 
     const s32 pcId = req->pcId;
@@ -1439,16 +1464,18 @@ static int CensorCommentImpl(s32 reqId, const char* comment, void* option, bool 
     }
 
     std::shared_ptr<ScoreRequestCtx> req;
-    {
-        std::lock_guard lock(g_mutex);
-        req = LookupRequestUnlocked(reqId);
-        if (!req) {
-            LOG_ERROR(Lib_NpScore, "invalid reqId {}", reqId);
-            return ORBIS_NP_COMMUNITY_ERROR_INVALID_ID;
-        }
-        if (IsRequestAborted(req)) {
-            return ORBIS_NP_COMMUNITY_ERROR_ABORTED;
-        }
+    if (auto returned = g_mutex.Run([&]() -> std::optional<int> {
+            req = LookupRequestUnlocked(reqId);
+            if (!req) {
+                LOG_ERROR(Lib_NpScore, "invalid reqId {}", reqId);
+                return std::optional<int>{ORBIS_NP_COMMUNITY_ERROR_INVALID_ID};
+            }
+            if (IsRequestAborted(req)) {
+                return std::optional<int>{ORBIS_NP_COMMUNITY_ERROR_ABORTED};
+            }
+            return std::nullopt;
+        })) {
+        return *returned;
     }
 
     constexpr size_t probe = ORBIS_NP_SCORE_CENSOR_COMMENT_MAXLEN + 1;
@@ -1500,16 +1527,18 @@ static int SanitizeCommentImpl(s32 reqId, const char* comment, char* sanitizedCo
     }
 
     std::shared_ptr<ScoreRequestCtx> req;
-    {
-        std::lock_guard lock(g_mutex);
-        req = LookupRequestUnlocked(reqId);
-        if (!req) {
-            LOG_ERROR(Lib_NpScore, "invalid reqId {}", reqId);
-            return ORBIS_NP_COMMUNITY_ERROR_INVALID_ID;
-        }
-        if (IsRequestAborted(req)) {
-            return ORBIS_NP_COMMUNITY_ERROR_ABORTED;
-        }
+    if (auto returned = g_mutex.Run([&]() -> std::optional<int> {
+            req = LookupRequestUnlocked(reqId);
+            if (!req) {
+                LOG_ERROR(Lib_NpScore, "invalid reqId {}", reqId);
+                return std::optional<int>{ORBIS_NP_COMMUNITY_ERROR_INVALID_ID};
+            }
+            if (IsRequestAborted(req)) {
+                return std::optional<int>{ORBIS_NP_COMMUNITY_ERROR_ABORTED};
+            }
+            return std::nullopt;
+        })) {
+        return *returned;
     }
 
     constexpr size_t probe = ORBIS_NP_SCORE_SANITIZE_COMMENT_MAXLEN + 1;
@@ -1554,26 +1583,26 @@ s32 PS4_SYSV_ABI sceNpScoreSetPlayerCharacterId(s32 ctxId, OrbisNpScorePcId pcId
         LOG_ERROR(Lib_NpScore, "SetPlayerCharacterId: pcId={} < 0", pcId);
         return ORBIS_NP_COMMUNITY_ERROR_INVALID_ARGUMENT;
     }
-    std::lock_guard lock(g_mutex);
+    return g_mutex.Run([&]() -> s32 {
+        // Try title-ctx pool first. Setting it here updates the default that
+        // subsequent CreateRequest will inherit.
+        if (auto* tc = LookupTitleCtxUnlocked(ctxId)) {
+            tc->pcId = pcId;
+            LOG_INFO(Lib_NpScore, "SetPlayerCharacterId: titleCtxId={} pcId={}", ctxId, pcId);
+            return ORBIS_OK;
+        }
 
-    // Try title-ctx pool first. Setting it here updates the default that
-    // subsequent CreateRequest will inherit.
-    if (auto* tc = LookupTitleCtxUnlocked(ctxId)) {
-        tc->pcId = pcId;
-        LOG_INFO(Lib_NpScore, "SetPlayerCharacterId: titleCtxId={} pcId={}", ctxId, pcId);
-        return ORBIS_OK;
-    }
+        // Fall through to the request pool. Setting it here only affects
+        // operations dispatched on this specific request
+        if (auto req = LookupRequestUnlocked(ctxId)) {
+            req->pcId = pcId;
+            LOG_INFO(Lib_NpScore, "SetPlayerCharacterId: reqId={} pcId={}", ctxId, pcId);
+            return ORBIS_OK;
+        }
 
-    // Fall through to the request pool. Setting it here only affects
-    // operations dispatched on this specific request
-    if (auto req = LookupRequestUnlocked(ctxId)) {
-        req->pcId = pcId;
-        LOG_INFO(Lib_NpScore, "SetPlayerCharacterId: reqId={} pcId={}", ctxId, pcId);
-        return ORBIS_OK;
-    }
-
-    LOG_ERROR(Lib_NpScore, "SetPlayerCharacterId: invalid id {}", ctxId);
-    return ORBIS_NP_COMMUNITY_ERROR_INVALID_ID;
+        LOG_ERROR(Lib_NpScore, "SetPlayerCharacterId: invalid id {}", ctxId);
+        return ORBIS_NP_COMMUNITY_ERROR_INVALID_ID;
+    });
 }
 
 //***********************************

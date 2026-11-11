@@ -19,6 +19,7 @@
 #include <map>
 #include <mutex>
 #include <optional>
+#include "common/combiner.h"
 
 #include "core/net/p2p_crypto.h"
 #include "core/net/p2p_transport.h"
@@ -69,7 +70,7 @@ private:
         int references = 1;
     };
 
-    mutable std::mutex mutex;
+    mutable Common::Combiner mutex;
     std::map<Endpoint, Installed> peer_keys;
     std::optional<P2PKey> wildcard_key;
     std::optional<P2PKey> default_key;
@@ -101,7 +102,7 @@ private:
     std::shared_ptr<Keyring> keyring;
     BroadcastObserver broadcast_observer;
     std::atomic<int> reported_broadcasts{0};
-    std::mutex pseudo_mutex;
+    Common::Combiner pseudo_mutex;
     std::map<Endpoint, PseudoHeader> pseudo_cache;
 };
 

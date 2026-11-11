@@ -13,6 +13,7 @@
 
 #include <fmt/format.h>
 
+#include "common/combiner.h"
 #include "common/logging/log.h"
 #include "core/libraries/net/net.h"
 #include "core/libraries/net/net_error.h"
@@ -195,10 +196,9 @@ std::string_view ShortName(std::string_view signature) {
 }
 
 u64 CountFailure(std::string_view function, int e) {
-    static std::mutex mutex;
+    static Common::Combiner mutex;
     static std::map<std::pair<std::string, int>, u64> counts;
-    std::scoped_lock lock{mutex};
-    return ++counts[{std::string{function}, e}];
+    return mutex.Run([&]() -> u64 { return ++counts[{std::string{function}, e}]; });
 }
 
 } // namespace
@@ -251,21 +251,22 @@ struct Traffic {
     std::set<std::string> peers;
 };
 
-std::mutex g_traffic_mutex;
+Common::Combiner g_traffic_mutex;
 std::map<OrbisNetId, Traffic> g_traffic; // guarded by g_traffic_mutex
 
 } // namespace
 
 void CountTraffic(OrbisNetId s, bool sent, s64 bytes) {
-    std::scoped_lock lock{g_traffic_mutex};
-    auto& t = g_traffic[s];
-    if (sent) {
-        t.sent_bytes += static_cast<u64>(bytes);
-        ++t.sent_calls;
-    } else {
-        t.received_bytes += static_cast<u64>(bytes);
-        ++t.received_calls;
-    }
+    g_traffic_mutex.Run([&] {
+        auto& t = g_traffic[s];
+        if (sent) {
+            t.sent_bytes += static_cast<u64>(bytes);
+            ++t.sent_calls;
+        } else {
+            t.received_bytes += static_cast<u64>(bytes);
+            ++t.received_calls;
+        }
+    });
 }
 
 void NoteP2PPeer(OrbisNetId s, bool sent, const OrbisNetSockaddr* addr, u32 len) {
@@ -280,26 +281,27 @@ void NoteP2PPeer(OrbisNetId s, bool sent, const OrbisNetSockaddr* addr, u32 len)
     }
     constexpr size_t MaxPeers = 16;
     const std::string text = FormatSockaddr(addr, len);
-    {
-        std::scoped_lock lock{g_traffic_mutex};
-        auto& peers = g_traffic[s].peers;
-        if (peers.size() >= MaxPeers || !peers.insert((sent ? "> " : "< ") + text).second) {
-            return;
-        }
+    if (g_traffic_mutex.Run([&] {
+            auto& peers = g_traffic[s].peers;
+            if (peers.size() >= MaxPeers || !peers.insert((sent ? "> " : "< ") + text).second) {
+                return true;
+            }
+            return false;
+        })) {
+        return;
     }
     LOG_INFO(Lib_Net, "socket {}: first P2P packet {} {}", s, sent ? "to" : "from", text);
 }
 
 void LogSocketClosed(OrbisNetId s) {
     Traffic t;
-    {
-        std::scoped_lock lock{g_traffic_mutex};
+    g_traffic_mutex.Run([&] {
         const auto it = g_traffic.find(s);
         if (it != g_traffic.end()) {
             t = it->second;
             g_traffic.erase(it);
         }
-    }
+    });
     LOG_DEBUG(Lib_Net, "socket {} closed: sent {} bytes in {} calls, received {} bytes in {} calls",
               s, t.sent_bytes, t.sent_calls, t.received_bytes, t.received_calls);
 }

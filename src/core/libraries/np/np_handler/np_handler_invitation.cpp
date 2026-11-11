@@ -149,30 +149,30 @@ void NpHandler::PostSessionInvitationEvent(s32 user_id, const std::string& sessi
 }
 
 std::vector<NpHandler::PendingInvitation> NpHandler::GetPendingInvitations(s32 user_id) const {
-    std::lock_guard lk(m_mutex_pending_invites);
-    const auto it = m_pending_invites.find(user_id);
-    if (it == m_pending_invites.end()) {
-        return {};
-    }
-    const auto now = std::chrono::duration_cast<std::chrono::milliseconds>(
-                         std::chrono::system_clock::now().time_since_epoch())
-                         .count();
-    std::vector<PendingInvitation> out;
-    out.reserve(it->second.size());
-    for (const auto& p : it->second) {
-        if (p.valid_until == 0 || now <= p.valid_until) {
-            out.push_back(p);
+    return m_mutex_pending_invites.Run([&]() -> std::vector<NpHandler::PendingInvitation> {
+        const auto it = m_pending_invites.find(user_id);
+        if (it == m_pending_invites.end()) {
+            return {};
         }
-    }
-    return out;
+        const auto now = std::chrono::duration_cast<std::chrono::milliseconds>(
+                             std::chrono::system_clock::now().time_since_epoch())
+                             .count();
+        std::vector<PendingInvitation> out;
+        out.reserve(it->second.size());
+        for (const auto& p : it->second) {
+            if (p.valid_until == 0 || now <= p.valid_until) {
+                out.push_back(p);
+            }
+        }
+        return out;
+    });
 }
 
 bool NpHandler::AcceptSessionInvitation(s32 user_id, const std::string& invitation_id) {
     // Pull the matching stashed invite (and drop it).
     PendingInvitation inv;
     bool found = false;
-    {
-        std::lock_guard lk(m_mutex_pending_invites);
+    m_mutex_pending_invites.Run([&] {
         const auto mit = m_pending_invites.find(user_id);
         if (mit != m_pending_invites.end()) {
             auto& v = mit->second;
@@ -185,7 +185,7 @@ bool NpHandler::AcceptSessionInvitation(s32 user_id, const std::string& invitati
                 }
             }
         }
-    }
+    });
     // Whatever surface handled it (RECV dialog or the emulator prompt), retire the other one.
     ImGui::InvitationPrompt::Dismiss(invitation_id);
     if (!found) {
@@ -202,17 +202,18 @@ bool NpHandler::AcceptSessionInvitation(s32 user_id, const std::string& invitati
 
 void NpHandler::DeclineSessionInvitation(s32 user_id, const std::string& invitation_id) {
     ImGui::InvitationPrompt::Dismiss(invitation_id);
-    std::lock_guard lock(m_mutex_pending_invites);
-    auto uit = m_pending_invites.find(user_id);
-    if (uit == m_pending_invites.end()) {
-        return;
-    }
-    auto& v = uit->second;
-    v.erase(std::remove_if(
-                v.begin(), v.end(),
-                [&](const PendingInvitation& p) { return p.invitation_id == invitation_id; }),
-            v.end());
-    LOG_INFO(NpHandler, "dismissed '{}' for user_id={}", invitation_id, user_id);
+    m_mutex_pending_invites.Run([&] {
+        auto uit = m_pending_invites.find(user_id);
+        if (uit == m_pending_invites.end()) {
+            return;
+        }
+        auto& v = uit->second;
+        v.erase(std::remove_if(
+                    v.begin(), v.end(),
+                    [&](const PendingInvitation& p) { return p.invitation_id == invitation_id; }),
+                v.end());
+        LOG_INFO(NpHandler, "dismissed '{}' for user_id={}", invitation_id, user_id);
+    });
 }
 
 } // namespace Libraries::Np

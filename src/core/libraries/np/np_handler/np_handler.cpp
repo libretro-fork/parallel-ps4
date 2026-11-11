@@ -55,25 +55,22 @@ NpMatching2::NpMatching2State& NpHandler::GetMatching2State() {
 NpHandler::Matching2CacheGuard NpHandler::LockMatching2Cache(
     NpMatching2::OrbisNpMatching2ContextId ctx_id) {
     std::shared_ptr<NpMatching2::Matching2ContextCache> cache;
-    {
-        std::lock_guard lock(m_mutex_matching2_cache);
+    m_mutex_matching2_cache.Run([&] {
         auto& entry = m_matching2_cache[ctx_id];
         if (!entry) {
             entry = std::make_shared<NpMatching2::Matching2ContextCache>();
         }
         cache = entry;
-    }
+    });
     return Matching2CacheGuard(std::move(cache));
 }
 
 void NpHandler::ResetMatching2Cache(NpMatching2::OrbisNpMatching2ContextId ctx_id) {
-    std::lock_guard lock(m_mutex_matching2_cache);
-    m_matching2_cache.erase(ctx_id);
+    m_mutex_matching2_cache.Run([&] { m_matching2_cache.erase(ctx_id); });
 }
 
 void NpHandler::ResetMatching2Caches() {
-    std::lock_guard lock(m_mutex_matching2_cache);
-    m_matching2_cache.clear();
+    m_mutex_matching2_cache.Run([&] { m_matching2_cache.clear(); });
 }
 
 std::pair<std::string, u16> NpHandler::ParseServerAddress() const {
@@ -105,10 +102,12 @@ bool NpHandler::ConnectUserById(s32 user_id) {
     if (!emu_settings_is_shadnet_enabled())
         return false;
 
-    {
-        std::lock_guard lock(m_mutex_clients);
-        if (m_clients.find(user_id) != m_clients.end())
-            return false; // already connected
+    if (auto returned = m_mutex_clients.Run([&]() -> std::optional<bool> {
+            if (m_clients.find(user_id) != m_clients.end())
+                return std::optional<bool>{false}; // already connected
+            return std::nullopt;
+        })) {
+        return *returned;
     }
 
     const struct user* u = user_manager_get_by_id(user_id);
@@ -217,18 +216,14 @@ void NpHandler::Shutdown() {
     m_worker_running = false;
 
     // Stop any pending reconnect retries.
-    {
-        std::lock_guard lock(m_mutex_clients);
-        m_reconnect.clear();
-    }
+    m_mutex_clients.Run([&] { m_reconnect.clear(); });
 
     // Collect user IDs to disconnect (avoid holding m_mutex_clients during Stop)
     std::vector<s32> ids;
-    {
-        std::lock_guard lock(m_mutex_clients);
+    m_mutex_clients.Run([&] {
         for (auto& [uid, _] : m_clients)
             ids.push_back(uid);
-    }
+    });
     for (s32 uid : ids)
         DisconnectUser(uid);
 
@@ -344,9 +339,10 @@ bool NpHandler::ConnectUser(s32 user_id, const std::string& host, u16 port, cons
     {
         OrbisNpId np_id{};
         SetNpId(np_id, npid);
-        std::lock_guard lock(m_mutex_clients);
-        m_np_ids[user_id] = np_id;
-        m_clients[user_id] = std::move(client);
+        m_mutex_clients.Run([&] {
+            m_np_ids[user_id] = np_id;
+            m_clients[user_id] = std::move(client);
+        });
     }
 
     FireStateCallback(user_id, NpManager::OrbisNpState::SignedIn);
@@ -355,17 +351,17 @@ bool NpHandler::ConnectUser(s32 user_id, const std::string& host, u16 port, cons
 
 void NpHandler::SetAppearOffline(bool enable) {
     m_appear_offline = enable;
-    std::lock_guard lock(m_mutex_clients);
-    for (auto& [uid, client] : m_clients) {
-        if (client)
-            client->SetAppearOffline(enable); // sends the toggle to connected sessions
-    }
+    m_mutex_clients.Run([&] {
+        for (auto& [uid, client] : m_clients) {
+            if (client)
+                client->SetAppearOffline(enable); // sends the toggle to connected sessions
+        }
+    });
 }
 
 void NpHandler::FailPendingRequests(s32 user_id, s32 error_code) {
     size_t failed = 0;
-    {
-        std::lock_guard lock(m_mutex_pending_tus);
+    m_mutex_pending_tus.Run([&] {
         for (auto it = m_pending_tus.begin(); it != m_pending_tus.end();) {
             if (it->second.user_id == user_id) {
                 if (it->second.req) {
@@ -377,9 +373,8 @@ void NpHandler::FailPendingRequests(s32 user_id, s32 error_code) {
                 ++it;
             }
         }
-    }
-    {
-        std::lock_guard lock(m_mutex_pending_score);
+    });
+    m_mutex_pending_score.Run([&] {
         for (auto it = m_pending_score.begin(); it != m_pending_score.end();) {
             if (it->second.user_id == user_id) {
                 if (it->second.req) {
@@ -391,9 +386,8 @@ void NpHandler::FailPendingRequests(s32 user_id, s32 error_code) {
                 ++it;
             }
         }
-    }
-    {
-        std::lock_guard lock(m_mutex_pending_auth);
+    });
+    m_mutex_pending_auth.Run([&] {
         for (auto it = m_pending_auth.begin(); it != m_pending_auth.end();) {
             if (it->second.user_id == user_id) {
                 if (it->second.req) {
@@ -405,9 +399,8 @@ void NpHandler::FailPendingRequests(s32 user_id, s32 error_code) {
                 ++it;
             }
         }
-    }
-    {
-        std::lock_guard lock(m_mutex_pending_lookup);
+    });
+    m_mutex_pending_lookup.Run([&] {
         for (auto it = m_pending_lookup.begin(); it != m_pending_lookup.end();) {
             if (it->second.user_id == user_id) {
                 if (it->second.on_result) {
@@ -419,7 +412,7 @@ void NpHandler::FailPendingRequests(s32 user_id, s32 error_code) {
                 ++it;
             }
         }
-    }
+    });
     if (failed > 0) {
         LOG_WARNING(NpHandler, "user_id={} failed {} pending request(s) with {:#x}", user_id,
                     failed, static_cast<u32>(error_code));
@@ -428,18 +421,17 @@ void NpHandler::FailPendingRequests(s32 user_id, s32 error_code) {
 
 void NpHandler::DisconnectUser(s32 user_id) {
     std::shared_ptr<ShadNet::ShadNetClient> client;
-    {
-        std::lock_guard lock(m_mutex_clients);
-        auto it = m_clients.find(user_id);
-        if (it == m_clients.end())
-            return;
-        client = std::move(it->second);
-        m_clients.erase(it);
+    if (m_mutex_clients.Run([&] {
+            auto it = m_clients.find(user_id);
+            if (it == m_clients.end())
+                return true;
+            client = std::move(it->second);
+            m_clients.erase(it);
+            return false;
+        })) {
+        return;
     }
-    {
-        std::lock_guard lock(m_mutex_friend_state);
-        m_friend_state.erase(user_id);
-    }
+    m_mutex_friend_state.Run([&] { m_friend_state.erase(user_id); });
     client->Stop();
     // The reader thread is joined, so no reply can race us: complete every
     // in-flight request now, or PollAsync spins and WaitAsync blocks forever.
@@ -454,10 +446,9 @@ void NpHandler::OnUserLoggedIn(s32 user_id) {
 }
 
 void NpHandler::OnUserLoggedOut(s32 user_id) {
-    {
-        std::lock_guard lock(m_mutex_clients);
+    m_mutex_clients.Run([&] {
         m_reconnect.erase(user_id); // do not auto-reconnect
-    }
+    });
     DisconnectUser(user_id);
 }
 
@@ -469,13 +460,12 @@ void NpHandler::WorkerThread() {
 
         // Collect ids of dropped clients
         std::vector<s32> dropped;
-        {
-            std::lock_guard lock(m_mutex_clients);
+        m_mutex_clients.Run([&] {
             for (auto& [uid, client] : m_clients) {
                 if (!client->IsConnected())
                     dropped.push_back(uid);
             }
-        }
+        });
 
         for (s32 uid : dropped) {
             LOG_WARNING(NpHandler, "user_id={} connection dropped (network); will retry", uid);
@@ -491,10 +481,11 @@ void NpHandler::MarkForReconnect(s32 user_id) {
     if (!emu_settings_is_shadnet_enabled())
         return; // offline mode: nothing to reconnect to
     constexpr auto kInitialBackoff = std::chrono::milliseconds(2000);
-    std::lock_guard lock(m_mutex_clients);
-    auto& st = m_reconnect[user_id];
-    st.backoff = kInitialBackoff;
-    st.next_attempt = std::chrono::steady_clock::now() + st.backoff;
+    m_mutex_clients.Run([&] {
+        auto& st = m_reconnect[user_id];
+        st.backoff = kInitialBackoff;
+        st.next_attempt = std::chrono::steady_clock::now() + st.backoff;
+    });
 }
 
 void NpHandler::TryReconnect() {
@@ -502,55 +493,57 @@ void NpHandler::TryReconnect() {
     const auto now = std::chrono::steady_clock::now();
 
     std::vector<s32> due;
-    {
-        std::lock_guard lock(m_mutex_clients);
+    m_mutex_clients.Run([&] {
         for (auto& [uid, st] : m_reconnect) {
             if (m_clients.count(uid) || now >= st.next_attempt)
                 due.push_back(uid);
         }
-    }
+    });
 
     for (s32 uid : due) {
         if (!m_worker_running)
             return;
         if (!emu_settings_is_shadnet_enabled()) {
-            std::lock_guard lock(m_mutex_clients);
-            m_reconnect.erase(uid);
+            m_mutex_clients.Run([&] { m_reconnect.erase(uid); });
             continue;
         }
         // ConnectUserById locks m_mutex_clients internally; call it unlocked.
         const bool ok = ConnectUserById(uid);
-        std::lock_guard lock(m_mutex_clients);
-        if (ok || m_clients.count(uid)) {
-            m_reconnect.erase(uid);
-            LOG_INFO(NpHandler, "user_id={} reconnected to shadNet", uid);
-        } else if (auto it = m_reconnect.find(uid); it != m_reconnect.end()) {
-            it->second.backoff = std::min(it->second.backoff * 2, kMaxBackoff);
-            it->second.next_attempt = std::chrono::steady_clock::now() + it->second.backoff;
-            LOG_DEBUG(NpHandler, "user_id={} reconnect failed; next attempt in {}ms", uid,
-                      it->second.backoff.count());
-        }
+        m_mutex_clients.Run([&] {
+            if (ok || m_clients.count(uid)) {
+                m_reconnect.erase(uid);
+                LOG_INFO(NpHandler, "user_id={} reconnected to shadNet", uid);
+            } else if (auto it = m_reconnect.find(uid); it != m_reconnect.end()) {
+                it->second.backoff = std::min(it->second.backoff * 2, kMaxBackoff);
+                it->second.next_attempt = std::chrono::steady_clock::now() + it->second.backoff;
+                LOG_DEBUG(NpHandler, "user_id={} reconnect failed; next attempt in {}ms", uid,
+                          it->second.backoff.count());
+            }
+        });
     }
 }
 
 bool NpHandler::IsPsnSignedIn(s32 user_id) const {
-    std::lock_guard lock(m_mutex_clients);
-    auto it = m_clients.find(user_id);
-    return it != m_clients.end() && it->second->IsAuthenticated();
+    return m_mutex_clients.Run([&]() -> bool {
+        auto it = m_clients.find(user_id);
+        return it != m_clients.end() && it->second->IsAuthenticated();
+    });
 }
 
 bool NpHandler::IsAnySignedIn() const {
-    std::lock_guard lock(m_mutex_clients);
-    for (auto& [_, client] : m_clients)
-        if (client->IsAuthenticated())
-            return true;
-    return false;
+    return m_mutex_clients.Run([&]() -> bool {
+        for (auto& [_, client] : m_clients)
+            if (client->IsAuthenticated())
+                return true;
+        return false;
+    });
 }
 
 OrbisNpId NpHandler::GetNpId(s32 user_id) const {
-    std::lock_guard lock(m_mutex_clients);
-    auto it = m_np_ids.find(user_id);
-    return it != m_np_ids.end() ? it->second : OrbisNpId{};
+    return m_mutex_clients.Run([&]() -> OrbisNpId {
+        auto it = m_np_ids.find(user_id);
+        return it != m_np_ids.end() ? it->second : OrbisNpId{};
+    });
 }
 
 OrbisNpOnlineId NpHandler::GetOnlineId(s32 user_id) const {
@@ -558,78 +551,88 @@ OrbisNpOnlineId NpHandler::GetOnlineId(s32 user_id) const {
 }
 
 std::string NpHandler::GetAvatarUrl(s32 user_id) const {
-    std::lock_guard lock(m_mutex_clients);
-    auto it = m_clients.find(user_id);
-    return it != m_clients.end() ? it->second->GetAvatarUrl() : std::string{};
+    return m_mutex_clients.Run([&]() -> std::string {
+        auto it = m_clients.find(user_id);
+        return it != m_clients.end() ? it->second->GetAvatarUrl() : std::string{};
+    });
 }
 
 OrbisNpAccountId NpHandler::GetAccountId(s32 user_id) const {
-    std::lock_guard lock(m_mutex_clients);
-    auto it = m_clients.find(user_id);
-    return it != m_clients.end() ? static_cast<OrbisNpAccountId>(it->second->GetUserId()) : 0;
+    return m_mutex_clients.Run([&]() -> OrbisNpAccountId {
+        auto it = m_clients.find(user_id);
+        return it != m_clients.end() ? static_cast<OrbisNpAccountId>(it->second->GetUserId()) : 0;
+    });
 }
 
 std::string NpHandler::GetBearerToken(s32 user_id) const {
-    std::lock_guard lock(m_mutex_clients);
-    auto it = m_clients.find(user_id);
-    return it != m_clients.end() ? it->second->GetBearerToken() : std::string{};
+    return m_mutex_clients.Run([&]() -> std::string {
+        auto it = m_clients.find(user_id);
+        return it != m_clients.end() ? it->second->GetBearerToken() : std::string{};
+    });
 }
 
 u32 NpHandler::GetLocalIpAddr(s32 user_id) const {
-    std::lock_guard lock(m_mutex_clients);
-    auto it = m_clients.find(user_id);
-    return it != m_clients.end() ? it->second->GetAddrLocal() : 0;
+    return m_mutex_clients.Run([&]() -> u32 {
+        auto it = m_clients.find(user_id);
+        return it != m_clients.end() ? it->second->GetAddrLocal() : 0;
+    });
 }
 
 s32 NpHandler::GetUserIdByAccountId(u64 account_id) const {
-    std::lock_guard lock(m_mutex_clients);
-    for (auto& [uid, client] : m_clients) {
-        if (static_cast<u64>(client->GetUserId()) == account_id)
-            return uid;
-    }
-    return -1;
+    return m_mutex_clients.Run([&]() -> s32 {
+        for (auto& [uid, client] : m_clients) {
+            if (static_cast<u64>(client->GetUserId()) == account_id)
+                return uid;
+        }
+        return -1;
+    });
 }
 
 s32 NpHandler::GetUserIdByOnlineId(const OrbisNpOnlineId& online_id) const {
-    std::lock_guard lock(m_mutex_clients);
-    for (auto& [uid, np_id] : m_np_ids) {
-        if (strncmp(np_id.handle.data, online_id.data, ORBIS_NP_ONLINEID_MAX_LENGTH) == 0)
-            return uid;
-    }
-    return -1;
+    return m_mutex_clients.Run([&]() -> s32 {
+        for (auto& [uid, np_id] : m_np_ids) {
+            if (strncmp(np_id.handle.data, online_id.data, ORBIS_NP_ONLINEID_MAX_LENGTH) == 0)
+                return uid;
+        }
+        return -1;
+    });
 }
 
 std::vector<s32> NpHandler::GetConnectedUsers() const {
     std::vector<s32> out;
-    std::lock_guard lock(m_mutex_clients);
-    out.reserve(m_clients.size());
-    for (const auto& [uid, c] : m_clients) {
-        out.push_back(uid);
-    }
-    return out;
+    return m_mutex_clients.Run([&]() -> std::vector<s32> {
+        out.reserve(m_clients.size());
+        for (const auto& [uid, c] : m_clients) {
+            out.push_back(uid);
+        }
+        return out;
+    });
 }
 
 // state callbacks
 s32 NpHandler::RegisterStateCallback(StateCallback cb, void* userdata) {
-    std::lock_guard lock(m_mutex_cbs);
-    const s32 h = m_next_handle++;
-    m_state_cbs.push_back({h, std::move(cb), userdata});
-    return h;
+    return m_mutex_cbs.Run([&]() -> s32 {
+        const s32 h = m_next_handle++;
+        m_state_cbs.push_back({h, std::move(cb), userdata});
+        return h;
+    });
 }
 
 void NpHandler::UnregisterStateCallback(s32 handle) {
-    std::lock_guard lock(m_mutex_cbs);
-    m_state_cbs.erase(std::remove_if(m_state_cbs.begin(), m_state_cbs.end(),
-                                     [handle](const CbEntry& e) { return e.handle == handle; }),
-                      m_state_cbs.end());
+    m_mutex_cbs.Run([&] {
+        m_state_cbs.erase(std::remove_if(m_state_cbs.begin(), m_state_cbs.end(),
+                                         [handle](const CbEntry& e) { return e.handle == handle; }),
+                          m_state_cbs.end());
+    });
 }
 
 void NpHandler::FireStateCallback(s32 user_id, NpManager::OrbisNpState state) {
-    std::lock_guard lock(m_mutex_cbs);
-    for (const auto& e : m_state_cbs) {
-        if (e.cb)
-            e.cb(user_id, state);
-    }
+    m_mutex_cbs.Run([&] {
+        for (const auto& e : m_state_cbs) {
+            if (e.cb)
+                e.cb(user_id, state);
+        }
+    });
 }
 
 // A usable NP Communication ID is the 12-char "NPWRxxxxx_00" form. An empty or
@@ -687,17 +690,19 @@ void NpHandler::ResolveOnlineId(
     std::function<void(s32 result, u64 account_id, const std::string& canonical_online_id)>
         on_result) {
     std::shared_ptr<ShadNet::ShadNetClient> client;
-    {
-        std::lock_guard lock(m_mutex_clients);
-        auto it = m_clients.find(user_id);
-        if (it == m_clients.end()) {
-            LOG_WARNING(NpHandler, "No shadNet session for user_id={}", user_id);
-            if (on_result) {
-                on_result(ORBIS_NP_ERROR_SIGNED_OUT, 0, {});
+    if (m_mutex_clients.Run([&] {
+            auto it = m_clients.find(user_id);
+            if (it == m_clients.end()) {
+                LOG_WARNING(NpHandler, "No shadNet session for user_id={}", user_id);
+                if (on_result) {
+                    on_result(ORBIS_NP_ERROR_SIGNED_OUT, 0, {});
+                }
+                return true;
             }
-            return;
-        }
-        client = it->second;
+            client = it->second;
+            return false;
+        })) {
+        return;
     }
     if (!client || !client->IsAuthenticated()) {
         LOG_WARNING(NpHandler, "user_id={} not authenticated", user_id);
@@ -715,11 +720,12 @@ void NpHandler::ResolveOnlineId(
 
     const u64 pkt_id = client->LookupOnlineId(online_id);
     if (on_result) {
-        std::lock_guard lock(m_mutex_pending_lookup);
-        PendingLookupRequest pending;
-        pending.user_id = user_id;
-        pending.on_result = std::move(on_result);
-        m_pending_lookup.emplace(pkt_id, std::move(pending));
+        m_mutex_pending_lookup.Run([&] {
+            PendingLookupRequest pending;
+            pending.user_id = user_id;
+            pending.on_result = std::move(on_result);
+            m_pending_lookup.emplace(pkt_id, std::move(pending));
+        });
     }
     LOG_INFO(NpHandler, "user_id={} onlineId='{}' pkt_id={}", user_id, online_id, pkt_id);
 }
@@ -727,14 +733,16 @@ void NpHandler::ResolveOnlineId(
 void NpHandler::OnLookupReply(s32 user_id, ShadNet::CommandType /*cmd*/, u64 pkt_id,
                               ShadNet::ErrorType error, const std::vector<u8>& body) {
     std::function<void(s32, u64, const std::string&)> on_result;
-    {
-        std::lock_guard lock(m_mutex_pending_lookup);
-        auto it = m_pending_lookup.find(pkt_id);
-        if (it == m_pending_lookup.end()) {
-            return; // no waiter (already flushed by a disconnect, or a stray reply)
-        }
-        on_result = std::move(it->second.on_result);
-        m_pending_lookup.erase(it);
+    if (m_mutex_pending_lookup.Run([&] {
+            auto it = m_pending_lookup.find(pkt_id);
+            if (it == m_pending_lookup.end()) {
+                return true; // no waiter (already flushed by a disconnect, or a stray reply)
+            }
+            on_result = std::move(it->second.on_result);
+            m_pending_lookup.erase(it);
+            return false;
+        })) {
+        return;
     }
     if (!on_result) {
         return;
@@ -785,10 +793,7 @@ void NpHandler::OnLookupReply(s32 user_id, ShadNet::CommandType /*cmd*/, u64 pkt
 
 void NpHandler::OnClientRejected(s32 user_id, const ShadNet::NotifyClientRejected& n) {
     emu_settings_set_shadnet_session_disabled(true);
-    {
-        std::lock_guard lock(m_mutex_clients);
-        m_reconnect.erase(user_id);
-    }
+    m_mutex_clients.Run([&] { m_reconnect.erase(user_id); });
     const std::string text =
         n.message.empty() ? std::string("The shadNet server doesn't accept this shadPS4 build. "
                                         "Online features are off for this session.")

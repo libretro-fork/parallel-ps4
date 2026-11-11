@@ -8,8 +8,10 @@
 #include <deque>
 #include <string>
 #include <string_view>
+#include "common/combiner.h"
 #include "common/elf_info.h"
 #include "common/enum_names.h"
+#include "common/event_mutex.h"
 #include "core/emulator_settings.h"
 #include "core/libraries/kernel/process.h"
 #include "core/libraries/kernel/time.h"
@@ -20,7 +22,7 @@
 
 namespace Libraries::Np::NpWebApi {
 
-static std::recursive_mutex g_global_mutex;
+static Common::RecursiveEventMutex g_global_mutex;
 static std::map<s32, OrbisNpWebApiContext*> g_contexts;
 static s32 g_library_context_count = 0;
 
@@ -2091,7 +2093,7 @@ using ExtdCbA = PS4_SYSV_ABI void (*)(s32, s32, const char*, OrbisNpServiceLabel
                                       const OrbisNpWebApiPushEventDataType*, const char*, u64,
                                       const OrbisNpWebApiExtdPushEventExtdData*, u64, void*);
 
-std::mutex g_push_mutex;
+Common::Combiner g_push_mutex;
 std::deque<PushEventInput> g_push_queue;
 
 template <typename Filter>
@@ -2115,19 +2117,20 @@ bool filterMatches(const Filter* flt, const std::string& evServiceName, bool evH
 
 // Network-thread hand-off only,the event is dispatched later from DrainPushEvents.
 void EnqueuePushEvent(const PushEventInput& ev) {
-    std::scoped_lock lk{g_push_mutex};
-    g_push_queue.push_back(ev);
+    g_push_mutex.Run([&] { g_push_queue.push_back(ev); });
 }
 
 // Runs on the game thread from sceNpCheckCallback
 void DrainPushEvents() {
     std::deque<PushEventInput> local;
-    {
-        std::scoped_lock lk{g_push_mutex};
-        if (g_push_queue.empty()) {
-            return;
-        }
-        local.swap(g_push_queue);
+    if (g_push_mutex.Run([&] {
+            if (g_push_queue.empty()) {
+                return true;
+            }
+            local.swap(g_push_queue);
+            return false;
+        })) {
+        return;
     }
 
     for (const PushEventInput& ev : local) {

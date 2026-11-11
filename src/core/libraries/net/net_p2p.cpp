@@ -13,6 +13,7 @@
 #include <vector>
 #include <fmt/format.h>
 
+#include "common/combiner.h"
 #include "common/logging/log.h"
 #include "core/libraries/net/net.h"
 #include "core/libraries/net/net_log.h"
@@ -44,7 +45,7 @@ size_t ClassifySignaling(std::span<const u8> packet) {
 }
 
 struct P2PState {
-    std::mutex mutex;
+    Common::Combiner mutex;
     std::shared_ptr<P2P::Transport> transport;
     std::shared_ptr<P2P::Keyring> keyring = std::make_shared<P2P::Keyring>();
     u16 configured_port = 3658; // host order
@@ -136,8 +137,7 @@ std::shared_ptr<P2P::Transport> RunningTransport() {
     const auto hooks = GetSystemHooks();
     std::shared_ptr<P2P::Transport> transport;
     u16 started = 0;
-    {
-        std::scoped_lock lock{state.mutex};
+    state.mutex.Run([&] {
         const auto now = std::chrono::steady_clock::now();
         if (!state.transport && now >= state.retry_after) {
             started = StartLocked(state, PortToBind(state, hooks), true);
@@ -146,7 +146,7 @@ std::shared_ptr<P2P::Transport> RunningTransport() {
             }
         }
         transport = state.transport;
-    }
+    });
     if (started != 0 && hooks.p2p_started) {
         hooks.p2p_started(started);
     }
@@ -194,23 +194,23 @@ int ChannelRecvFrom(size_t channel, void* buf, u32 len, u32* from_addr, u16* fro
 
 void ConfigureP2P(u16 udp_port, u32 advertised_addr) {
     auto& state = P2PStateInstance();
-    std::scoped_lock lock{state.mutex};
-    state.configured_port = udp_port;
-    state.advertised_addr = advertised_addr;
-    const u32 ip = sceNetNtohl(advertised_addr);
-    LOG_INFO(Lib_Net, "P2P configured: UDP port {}, advertised address {}.{}.{}.{}", udp_port,
-             ip >> 24, (ip >> 16) & 0xff, (ip >> 8) & 0xff, ip & 0xff);
+    state.mutex.Run([&] {
+        state.configured_port = udp_port;
+        state.advertised_addr = advertised_addr;
+        const u32 ip = sceNetNtohl(advertised_addr);
+        LOG_INFO(Lib_Net, "P2P configured: UDP port {}, advertised address {}.{}.{}.{}", udp_port,
+                 ip >> 24, (ip >> 16) & 0xff, (ip >> 8) & 0xff, ip & 0xff);
+    });
 }
 
 u16 StartP2P(u16 udp_port) {
     StopP2P();
     auto& state = P2PStateInstance();
     u16 started = 0;
-    {
-        std::scoped_lock lock{state.mutex};
+    state.mutex.Run([&] {
         started = StartLocked(state, udp_port, false);
         state.retry_after = {};
-    }
+    });
     const auto hooks = GetSystemHooks();
     if (started != 0 && hooks.p2p_started) {
         hooks.p2p_started(started);
@@ -221,15 +221,14 @@ u16 StartP2P(u16 udp_port) {
 void StopP2P() {
     auto& state = P2PStateInstance();
     u16 stopped = 0;
-    {
-        std::scoped_lock lock{state.mutex};
+    state.mutex.Run([&] {
         if (state.transport) {
             stopped = state.transport->BoundPort();
         }
         state.transport.reset();
         state.retry_after = {};
         Core::Net::SetP2PTransport(AF_INET, nullptr);
-    }
+    });
     if (stopped != 0) {
         LOG_INFO(Lib_Net, "P2P transport on UDP port {} stopped", stopped);
     }
@@ -241,8 +240,7 @@ void StopP2P() {
 
 std::shared_ptr<P2P::Keyring> GetP2PKeyring() {
     auto& state = P2PStateInstance();
-    std::scoped_lock lock{state.mutex};
-    return state.keyring;
+    return state.mutex.Run([&]() -> std::shared_ptr<P2P::Keyring> { return state.keyring; });
 }
 
 bool EnsureP2PTransport() {
@@ -251,29 +249,26 @@ bool EnsureP2PTransport() {
 
 bool P2PTransportIsReady() {
     auto& state = P2PStateInstance();
-    std::scoped_lock lock{state.mutex};
-    return state.transport != nullptr;
+    return state.mutex.Run([&]() -> bool { return state.transport != nullptr; });
 }
 
 u16 GetP2PConfiguredPort() {
     const auto hooks = GetSystemHooks();
     auto& state = P2PStateInstance();
-    std::scoped_lock lock{state.mutex};
-    return PortToBind(state, hooks);
+    return state.mutex.Run([&]() -> u16 { return PortToBind(state, hooks); });
 }
 
 u16 GetP2PBoundPort() {
     auto& state = P2PStateInstance();
-    std::scoped_lock lock{state.mutex};
-    return state.transport ? state.transport->BoundPort() : 0;
+    return state.mutex.Run(
+        [&]() -> u16 { return state.transport ? state.transport->BoundPort() : 0; });
 }
 
 u32 GetP2PAdvertisedAddr() {
     u32 configured = 0;
     {
         auto& state = P2PStateInstance();
-        std::scoped_lock lock{state.mutex};
-        configured = state.advertised_addr;
+        state.mutex.Run([&] { configured = state.advertised_addr; });
     }
     if (configured != 0) {
         return configured;

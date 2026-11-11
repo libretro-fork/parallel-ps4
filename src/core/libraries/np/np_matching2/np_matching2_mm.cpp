@@ -14,6 +14,8 @@
 #include <vector>
 #include <fmt/format.h>
 
+#include "common/combiner.h"
+#include "common/event_mutex.h"
 #include "common/logging/log.h"
 #include "core/libraries/net/net.h"
 #include "core/libraries/net/net_p2p.h"
@@ -52,16 +54,16 @@ struct PendingRequest {
 
 struct MmClientState {
     std::shared_ptr<ShadNet::ShadNetClient> client;
-    std::mutex mutex;
+    Common::Combiner mutex;
     u32 server_addr = 0;
     u16 server_udp_port = 0;
     bool matching2_enabled = false;
 
-    std::mutex pending_mutex;
+    Common::Combiner pending_mutex;
     std::map<u64, PendingRequest> pending;
 
-    std::mutex sig_mutex;
-    std::condition_variable sig_cv;
+    Common::EventMutex sig_mutex;
+    Common::EventCondition sig_cv;
     std::map<u64, std::pair<ShadNet::ErrorType, std::vector<u8>>> sig_replies;
 };
 
@@ -76,8 +78,7 @@ u32 IpStringToAddr(std::string_view ip) {
 }
 
 bool IsMatching2BackendDisabled() {
-    std::lock_guard lock(g_mm.mutex);
-    return !g_mm.matching2_enabled;
+    return g_mm.mutex.Run([&]() -> bool { return !g_mm.matching2_enabled; });
 }
 
 bool IsContextLifecycleEvent(OrbisNpMatching2Event event) {
@@ -824,16 +825,19 @@ void OnMatchingReply(ShadNet::CommandType cmd, u64 pkt_id, ShadNet::ErrorType er
     }
 
     PendingRequest pr;
-    {
-        std::lock_guard lock(g_mm.pending_mutex);
-        auto it = g_mm.pending.find(pkt_id);
-        if (it == g_mm.pending.end()) {
-            LOG_WARNING(Lib_NpMatching2, "reply pkt_id={} cmd={} has no pending entry (have {})",
-                        pkt_id, static_cast<u16>(cmd), g_mm.pending.size());
-            return;
-        }
-        pr = it->second;
-        g_mm.pending.erase(it);
+    if (g_mm.pending_mutex.Run([&] {
+            auto it = g_mm.pending.find(pkt_id);
+            if (it == g_mm.pending.end()) {
+                LOG_WARNING(Lib_NpMatching2,
+                            "reply pkt_id={} cmd={} has no pending entry (have {})", pkt_id,
+                            static_cast<u16>(cmd), g_mm.pending.size());
+                return true;
+            }
+            pr = it->second;
+            g_mm.pending.erase(it);
+            return false;
+        })) {
+        return;
     }
     LOG_DEBUG(Lib_NpMatching2, "reply pkt_id={} cmd={} -> ctx={} reqId={} event={:#x}", pkt_id,
               static_cast<u16>(cmd), pr.ctx_id, pr.req_id, static_cast<u16>(pr.req_event));
@@ -845,8 +849,7 @@ void SetMmShadNetClient(std::shared_ptr<ShadNet::ShadNetClient> client,
     u32 server_addr = 0;
     u16 server_udp_port = 0;
     bool matching2_enabled = false;
-    {
-        std::lock_guard lock(g_mm.mutex);
+    g_mm.mutex.Run([&] {
         g_mm.client = client;
         g_mm.matching2_enabled = client ? client->IsMatching2Enabled() : false;
         matching2_enabled = g_mm.matching2_enabled;
@@ -858,7 +861,7 @@ void SetMmShadNetClient(std::shared_ptr<ShadNet::ShadNetClient> client,
             matching2_enabled ? Libraries::Net::sceNetHtons(static_cast<u16>(tcp_port + 1)) : 0;
         server_addr = g_mm.server_addr;
         server_udp_port = g_mm.server_udp_port;
-    }
+    });
     LOG_INFO(Lib_NpMatching2, "ShadNet features: matching2_enabled={}", matching2_enabled);
     Net::UPnPClient::Instance().SetP2PFeaturesEnabled(matching2_enabled);
 
@@ -893,13 +896,12 @@ void SetMmShadNetClient(std::shared_ptr<ShadNet::ShadNetClient> client,
 
 void ClearMmShadNetClient() {
     std::shared_ptr<ShadNet::ShadNetClient> old_client;
-    {
-        std::lock_guard lock(g_mm.mutex);
+    g_mm.mutex.Run([&] {
         old_client = std::move(g_mm.client);
         g_mm.server_addr = 0;
         g_mm.server_udp_port = 0;
         g_mm.matching2_enabled = false;
-    }
+    });
     Net::UPnPClient::Instance().SetP2PFeaturesEnabled(false);
     if (old_client) {
         old_client->onRoomEvent = nullptr;
@@ -910,16 +912,12 @@ void ClearMmShadNetClient() {
     NpSignaling::Transport::SetMatching2Enabled(false);
     NpSignaling::Transport::SetMmServerEndpoint(0, 0);
     StopMatching2SignalingRuntime();
-    {
-        std::lock_guard lock(g_mm.pending_mutex);
-        g_mm.pending.clear();
-    }
+    g_mm.pending_mutex.Run([&] { g_mm.pending.clear(); });
     g_mm.sig_cv.notify_all();
 }
 
 bool IsMmClientRunning() {
-    std::lock_guard lock(g_mm.mutex);
-    return g_mm.client && g_mm.client->IsAuthenticated();
+    return g_mm.mutex.Run([&]() -> bool { return g_mm.client && g_mm.client->IsAuthenticated(); });
 }
 
 void MmContextStart(OrbisNpMatching2ContextId ctx_id) {
@@ -943,10 +941,7 @@ s32 MmSubmitRequest(OrbisNpMatching2ContextId ctx_id, OrbisNpMatching2RequestId 
                     OrbisNpMatching2Event req_event, MmCommand cmd, const std::vector<u8>& payload,
                     bool a_variant) {
     std::shared_ptr<ShadNet::ShadNetClient> client;
-    {
-        std::lock_guard lock(g_mm.mutex);
-        client = g_mm.client;
-    }
+    g_mm.mutex.Run([&] { client = g_mm.client; });
     if (!client || !client->IsAuthenticated()) {
         LOG_ERROR(Lib_NpMatching2, "cmd={} not connected", static_cast<u16>(cmd));
         return ORBIS_NP_MATCHING2_ERROR_INVALID_CONTEXT_ID;
@@ -1007,11 +1002,10 @@ s32 MmSubmitRequest(OrbisNpMatching2ContextId ctx_id, OrbisNpMatching2RequestId 
              reinterpret_cast<std::uintptr_t>(request_cb.callback), fmt::ptr(request_cb.arg));
 
     const u64 pkt_id = client->SubmitRequest(static_cast<ShadNet::CommandType>(cmd), payload);
-    {
-        std::lock_guard lock(g_mm.pending_mutex);
+    g_mm.pending_mutex.Run([&] {
         g_mm.pending[pkt_id] = {ctx_id,        req_id, req_event, a_variant, request_cb.callback,
                                 request_cb.arg};
-    }
+    });
     LOG_DEBUG(Lib_NpMatching2, "submit cmd={} pkt_id={} ctx={} reqId={}", static_cast<u16>(cmd),
               pkt_id, ctx_id, req_id);
     return ORBIS_OK;
@@ -1446,13 +1440,11 @@ s32 MmKickoutRoomMember(OrbisNpMatching2ContextId ctx_id, OrbisNpMatching2Reques
 }
 
 u32 GetMmServerAddr() {
-    std::lock_guard lock(g_mm.mutex);
-    return g_mm.server_addr;
+    return g_mm.mutex.Run([&]() -> u32 { return g_mm.server_addr; });
 }
 
 u16 GetMmServerUdpPort() {
-    std::lock_guard lock(g_mm.mutex);
-    return g_mm.server_udp_port;
+    return g_mm.mutex.Run([&]() -> u16 { return g_mm.server_udp_port; });
 }
 
 bool RequestSignalingInfos(std::string_view target_online_id, u32* out_addr, u16* out_port) {
@@ -1463,10 +1455,7 @@ bool RequestSignalingInfos(std::string_view target_online_id, u32* out_addr, u16
         return false;
     }
     std::shared_ptr<ShadNet::ShadNetClient> client;
-    {
-        std::lock_guard lock(g_mm.mutex);
-        client = g_mm.client;
-    }
+    g_mm.mutex.Run([&] { client = g_mm.client; });
     if (!client || !client->IsAuthenticated()) {
         return false;
     }

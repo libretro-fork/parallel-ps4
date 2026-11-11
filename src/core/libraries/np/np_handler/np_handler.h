@@ -17,6 +17,8 @@
 #include <utility>
 #include <vector>
 
+#include "common/combiner.h"
+#include "common/event_mutex.h"
 #include "common/types.h"
 #include "core/libraries/np/np_auth/np_auth_ctx.h"
 #include "core/libraries/np/np_manager.h"
@@ -68,7 +70,7 @@ public:
             : m_cache(std::move(cache)), m_lock(m_cache->mutex) {}
 
         std::shared_ptr<NpMatching2::Matching2ContextCache> m_cache;
-        std::unique_lock<std::recursive_mutex> m_lock;
+        std::unique_lock<Common::RecursiveEventMutex> m_lock;
     };
 
     static NpHandler& GetInstance();
@@ -441,7 +443,7 @@ private:
     std::atomic<bool> m_appear_offline{false};
 
     // Per-user client map
-    mutable std::mutex m_mutex_clients;
+    mutable Common::Combiner m_mutex_clients;
     std::map<s32, std::shared_ptr<ShadNet::ShadNetClient>> m_clients;
     // Per-user NP ID built once from shadnet_npid after login.
     std::map<s32, OrbisNpId> m_np_ids;
@@ -467,11 +469,11 @@ private:
         u32* totalRecord = nullptr;
         u64 arrayNum = 0;
     };
-    mutable std::mutex m_mutex_pending_score;
+    mutable Common::Combiner m_mutex_pending_score;
     std::map<u64, PendingScoreRequest> m_pending_score;
 
     // Callbacks awaiting a SyncTrophies reply, keyed by packet id.
-    std::mutex m_mutex_pending_trophy;
+    Common::Combiner m_mutex_pending_trophy;
     std::map<u64, std::function<void(const std::vector<std::pair<s32, u64>>&)>> m_pending_trophy;
     void OnTrophyReply(s32 user_id, ShadNet::CommandType cmd, u64 pkt_id, ShadNet::ErrorType error,
                        const std::vector<u8>& body);
@@ -482,7 +484,7 @@ private:
         std::function<void(s32 result, u64 account_id, const std::string& canonical_online_id)>
             on_result;
     };
-    mutable std::mutex m_mutex_pending_lookup;
+    mutable Common::Combiner m_mutex_pending_lookup;
     std::map<u64, PendingLookupRequest> m_pending_lookup;
     void OnLookupReply(s32 user_id, ShadNet::CommandType cmd, u64 pkt_id, ShadNet::ErrorType error,
                        const std::vector<u8>& body);
@@ -508,14 +510,14 @@ private:
         u32* totalOut = nullptr;                             // friends total
         u64 arrayNum = 0;                                    // expected entry count
     };
-    mutable std::mutex m_mutex_pending_tus;
+    mutable Common::Combiner m_mutex_pending_tus;
     std::map<u64, PendingTusRequest> m_pending_tus;
 
     struct PendingAuthRequest {
         std::shared_ptr<NpAuth::AuthRequestCtx> req;
         s32 user_id = -1;
     };
-    mutable std::mutex m_mutex_pending_auth;
+    mutable Common::Combiner m_mutex_pending_auth;
     std::map<u64, PendingAuthRequest> m_pending_auth;
     void OnAuthReply(s32 user_id, ShadNet::CommandType cmd, u64 pkt_id, ShadNet::ErrorType error,
                      const std::vector<u8>& body);
@@ -532,7 +534,7 @@ private:
     };
     std::unordered_map<s32, ReconnectState> m_reconnect;
 
-    mutable std::mutex m_mutex_pending_invites;
+    mutable Common::Combiner m_mutex_pending_invites;
     std::unordered_map<s32, std::vector<PendingInvitation>> m_pending_invites;
 
     // State callbacks
@@ -541,15 +543,15 @@ private:
         StateCallback cb;
         void* userdata;
     };
-    mutable std::mutex m_mutex_cbs;
+    mutable Common::Combiner m_mutex_cbs;
     std::vector<CbEntry> m_state_cbs;
     s32 m_next_handle{1};
 
     // Friend state per user, seeded from LoginReply and updated by notifications/actions.
-    mutable std::mutex m_mutex_friend_state;
+    mutable Common::Combiner m_mutex_friend_state;
     std::map<s32, FriendListSnapshot> m_friend_state;
 
-    mutable std::mutex m_mutex_matching2_cache;
+    mutable Common::Combiner m_mutex_matching2_cache;
     std::map<NpMatching2::OrbisNpMatching2ContextId,
              std::shared_ptr<NpMatching2::Matching2ContextCache>>
         m_matching2_cache;

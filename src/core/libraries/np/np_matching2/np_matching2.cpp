@@ -312,8 +312,7 @@ int PS4_SYSV_ABI sceNpMatching2Terminate() {
     NpHandler::GetInstance().GetMatching2ContextManager().Reset();
     {
         auto& state = NpHandler::GetInstance().GetMatching2State();
-        std::lock_guard lock(state.mutex);
-        state.next_request_id = 1;
+        state.mutex.Run([&] { state.next_request_id = 1; });
     }
     SignalingHandler::ReleaseContextRef();
 

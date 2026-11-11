@@ -10,6 +10,7 @@
 #include <string_view>
 #include <fmt/format.h>
 #include "common/alignment.h"
+#include "common/event_mutex.h"
 #include "common/logging/log.h"
 #include "common/singleton.h"
 #include "core/libraries/error_codes.h"
@@ -292,7 +293,7 @@ static void DispatchThreadMain() {
     for (;;) {
         QueuedDispatch dispatch;
         {
-            std::unique_lock<std::mutex> lock(state.dispatch_mutex);
+            std::unique_lock<Common::EventMutex> lock(state.dispatch_mutex);
             for (;;) {
                 if (state.dispatch_stop) {
                     return;
@@ -338,21 +339,21 @@ static PS4_SYSV_ABI void* DispatchThreadFunc(void*) {
 
 static void StartDispatchThread(s32 priority, u64 affinity_mask, u64 stack_size) {
     auto& state = NpHandler::GetInstance().GetSignalingState();
-    std::lock_guard<std::mutex> lock(state.dispatch_mutex);
-    state.dispatch_stop = false;
-    if (!state.dispatch_thread) {
-        NpCommon::sceNpCreateThread(&state.dispatch_thread, DispatchThreadFunc, nullptr, priority,
-                                    stack_size, affinity_mask, "SceNpSignalingMain");
-    }
+    state.dispatch_mutex.Run([&] {
+        state.dispatch_stop = false;
+        if (!state.dispatch_thread) {
+            NpCommon::sceNpCreateThread(&state.dispatch_thread, DispatchThreadFunc, nullptr,
+                                        priority, stack_size, affinity_mask, "SceNpSignalingMain");
+        }
+    });
 }
 
 static void StopDispatchThread() {
     auto& state = NpHandler::GetInstance().GetSignalingState();
-    {
-        std::lock_guard<std::mutex> lock(state.dispatch_mutex);
+    state.dispatch_mutex.Run([&] {
         state.dispatch_stop = true;
         state.dispatch_queue.clear();
-    }
+    });
     state.dispatch_cv.notify_all();
     if (state.dispatch_thread) {
         NpCommon::sceNpJoinThread(state.dispatch_thread, nullptr);

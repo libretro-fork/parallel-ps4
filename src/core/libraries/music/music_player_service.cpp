@@ -14,6 +14,8 @@
 #include <queue>
 
 #include "common/audio_file.h"
+#include "common/combiner.h"
+#include "common/event_mutex.h"
 #include "common/io_file.h"
 #include "common/logging/log.h"
 #include "common/singleton.h"
@@ -34,18 +36,20 @@ public:
     }
 
     void SetTrackList(const std::vector<std::string>& tracks) {
-        std::scoped_lock lock(m_mutex);
-        m_tracks = tracks;
-        m_tracklists[0] = tracks;
-        m_tracklist_version++;
+        m_mutex.Run([&] {
+            m_tracks = tracks;
+            m_tracklists[0] = tracks;
+            m_tracklist_version++;
+        });
     }
 
     void ClearTracks() {
         StopPlayback();
-        std::scoped_lock lock(m_mutex);
-        m_tracks.clear();
-        m_tracklists.clear();
-        m_tracklist_version++;
+        m_mutex.Run([&] {
+            m_tracks.clear();
+            m_tracklists.clear();
+            m_tracklist_version++;
+        });
     }
 
     s32 SetUsbStorageDeviceInfo(const OrbisMusicPlayerUsbDeviceInfo* devices, u32 count) {
@@ -55,54 +59,57 @@ public:
             return ORBIS_MUSIC_PLAYER_SERVICE_ERROR_INVALID_PARAMETER;
         }
 
-        std::scoped_lock lock(m_mutex);
-        m_usb_devices.clear();
+        return m_mutex.Run([&]() -> s32 {
+            m_usb_devices.clear();
 
-        for (u32 i = 0; i < count; ++i) {
-            const auto& dev = devices[i];
-            if (dev.serial_number_len > 255) {
-                LOG_ERROR(Lib_AudioOut, "device[{}] serial_number_len {} > 255", i,
-                          dev.serial_number_len);
-                return ORBIS_MUSIC_PLAYER_SERVICE_ERROR_INVALID_PARAMETER;
+            for (u32 i = 0; i < count; ++i) {
+                const auto& dev = devices[i];
+                if (dev.serial_number_len > 255) {
+                    LOG_ERROR(Lib_AudioOut, "device[{}] serial_number_len {} > 255", i,
+                              dev.serial_number_len);
+                    return ORBIS_MUSIC_PLAYER_SERVICE_ERROR_INVALID_PARAMETER;
+                }
+                size_t str_len = strnlen(dev.serial_number, sizeof(dev.serial_number));
+                if (str_len > dev.serial_number_len) {
+                    LOG_ERROR(Lib_AudioOut, "device[{}] strlen {} > serial_number_len {}", i,
+                              str_len, dev.serial_number_len);
+                    return ORBIS_MUSIC_PLAYER_SERVICE_ERROR_INVALID_PARAMETER;
+                }
+                std::string serial(dev.serial_number, str_len);
+                LOG_INFO(Lib_AudioOut, "registered USB device_id {} with serial '{}'",
+                         dev.device_id, serial);
+                m_usb_devices[serial] = dev.device_id;
             }
-            size_t str_len = strnlen(dev.serial_number, sizeof(dev.serial_number));
-            if (str_len > dev.serial_number_len) {
-                LOG_ERROR(Lib_AudioOut, "device[{}] strlen {} > serial_number_len {}", i, str_len,
-                          dev.serial_number_len);
-                return ORBIS_MUSIC_PLAYER_SERVICE_ERROR_INVALID_PARAMETER;
-            }
-            std::string serial(dev.serial_number, str_len);
-            LOG_INFO(Lib_AudioOut, "registered USB device_id {} with serial '{}'", dev.device_id,
-                     serial);
-            m_usb_devices[serial] = dev.device_id;
-        }
 
-        return ORBIS_OK;
+            return ORBIS_OK;
+        });
     }
 
     s32 BeginTransaction() {
-        std::scoped_lock lock(m_mutex);
-        if (m_in_transaction.load()) {
-            LOG_ERROR(Lib_AudioOut, "BeginTransaction: already in transaction");
-            return ORBIS_MUSIC_PLAYER_SERVICE_ERROR_ALREADY_IN_TRANSACTION;
-        }
-        m_in_transaction = true;
-        return ORBIS_OK;
+        return m_mutex.Run([&]() -> s32 {
+            if (m_in_transaction.load()) {
+                LOG_ERROR(Lib_AudioOut, "BeginTransaction: already in transaction");
+                return ORBIS_MUSIC_PLAYER_SERVICE_ERROR_ALREADY_IN_TRANSACTION;
+            }
+            m_in_transaction = true;
+            return ORBIS_OK;
+        });
     }
 
     s32 EndTransaction() {
-        std::scoped_lock lock(m_mutex);
-        if (!m_in_transaction.load()) {
-            LOG_ERROR(Lib_AudioOut, "EndTransaction: not in transaction");
-            return ORBIS_MUSIC_PLAYER_SERVICE_ERROR_NOT_IN_TRANSACTION;
-        }
-        m_in_transaction = false;
-        m_tracklist_version++;
-        auto it = m_tracklists.find(0);
-        if (it != m_tracklists.end()) {
-            m_tracks = it->second;
-        }
-        return ORBIS_OK;
+        return m_mutex.Run([&]() -> s32 {
+            if (!m_in_transaction.load()) {
+                LOG_ERROR(Lib_AudioOut, "EndTransaction: not in transaction");
+                return ORBIS_MUSIC_PLAYER_SERVICE_ERROR_NOT_IN_TRANSACTION;
+            }
+            m_in_transaction = false;
+            m_tracklist_version++;
+            auto it = m_tracklists.find(0);
+            if (it != m_tracklists.end()) {
+                m_tracks = it->second;
+            }
+            return ORBIS_OK;
+        });
     }
 
     s32 CreateTrackList(u32 tracklist_id) {
@@ -110,13 +117,14 @@ public:
             LOG_ERROR(Lib_AudioOut, "CreateTrackList: invalid tracklist_id={}", tracklist_id);
             return ORBIS_MUSIC_PLAYER_SERVICE_ERROR_INVALID_PARAMETER;
         }
-        std::scoped_lock lock(m_mutex);
-        if (!m_in_transaction.load()) {
-            LOG_ERROR(Lib_AudioOut, "CreateTrackList: not in transaction");
-            return ORBIS_MUSIC_PLAYER_SERVICE_ERROR_NOT_IN_TRANSACTION;
-        }
-        m_tracklists[tracklist_id].clear();
-        return ORBIS_OK;
+        return m_mutex.Run([&]() -> s32 {
+            if (!m_in_transaction.load()) {
+                LOG_ERROR(Lib_AudioOut, "CreateTrackList: not in transaction");
+                return ORBIS_MUSIC_PLAYER_SERVICE_ERROR_NOT_IN_TRANSACTION;
+            }
+            m_tracklists[tracklist_id].clear();
+            return ORBIS_OK;
+        });
     }
 
     s32 RemoveTrackList(u32 tracklist_id) {
@@ -124,16 +132,17 @@ public:
             LOG_ERROR(Lib_AudioOut, "RemoveTrackList: invalid tracklist_id={}", tracklist_id);
             return ORBIS_MUSIC_PLAYER_SERVICE_ERROR_INVALID_PARAMETER;
         }
-        std::scoped_lock lock(m_mutex);
-        if (!m_in_transaction.load()) {
-            LOG_ERROR(Lib_AudioOut, "RemoveTrackList: not in transaction");
-            return ORBIS_MUSIC_PLAYER_SERVICE_ERROR_NOT_IN_TRANSACTION;
-        }
-        m_tracklists.erase(tracklist_id);
-        if (tracklist_id == 0) {
-            m_tracks.clear();
-        }
-        return ORBIS_OK;
+        return m_mutex.Run([&]() -> s32 {
+            if (!m_in_transaction.load()) {
+                LOG_ERROR(Lib_AudioOut, "RemoveTrackList: not in transaction");
+                return ORBIS_MUSIC_PLAYER_SERVICE_ERROR_NOT_IN_TRANSACTION;
+            }
+            m_tracklists.erase(tracklist_id);
+            if (tracklist_id == 0) {
+                m_tracks.clear();
+            }
+            return ORBIS_OK;
+        });
     }
 
     s32 InsertTrackEntry(u32 tracklist_id, u32 track_index, const std::string& uri) {
@@ -142,18 +151,19 @@ public:
                       tracklist_id, track_index);
             return ORBIS_MUSIC_PLAYER_SERVICE_ERROR_INVALID_PARAMETER;
         }
-        std::scoped_lock lock(m_mutex);
-        if (!m_in_transaction.load()) {
-            LOG_ERROR(Lib_AudioOut, "InsertTrackEntry: not in transaction");
-            return ORBIS_MUSIC_PLAYER_SERVICE_ERROR_NOT_IN_TRANSACTION;
-        }
-        auto& list = m_tracklists[tracklist_id];
-        if (track_index < list.size()) {
-            list.insert(list.begin() + track_index, uri);
-        } else {
-            list.push_back(uri);
-        }
-        return ORBIS_OK;
+        return m_mutex.Run([&]() -> s32 {
+            if (!m_in_transaction.load()) {
+                LOG_ERROR(Lib_AudioOut, "InsertTrackEntry: not in transaction");
+                return ORBIS_MUSIC_PLAYER_SERVICE_ERROR_NOT_IN_TRANSACTION;
+            }
+            auto& list = m_tracklists[tracklist_id];
+            if (track_index < list.size()) {
+                list.insert(list.begin() + track_index, uri);
+            } else {
+                list.push_back(uri);
+            }
+            return ORBIS_OK;
+        });
     }
 
     s32 RemoveTrackEntry(u32 tracklist_id, u32 track_index) {
@@ -162,16 +172,17 @@ public:
                       tracklist_id, track_index);
             return ORBIS_MUSIC_PLAYER_SERVICE_ERROR_INVALID_PARAMETER;
         }
-        std::scoped_lock lock(m_mutex);
-        if (!m_in_transaction.load()) {
-            LOG_ERROR(Lib_AudioOut, "RemoveTrackEntry: not in transaction");
-            return ORBIS_MUSIC_PLAYER_SERVICE_ERROR_NOT_IN_TRANSACTION;
-        }
-        auto it = m_tracklists.find(tracklist_id);
-        if (it != m_tracklists.end() && track_index < it->second.size()) {
-            it->second.erase(it->second.begin() + track_index);
-        }
-        return ORBIS_OK;
+        return m_mutex.Run([&]() -> s32 {
+            if (!m_in_transaction.load()) {
+                LOG_ERROR(Lib_AudioOut, "RemoveTrackEntry: not in transaction");
+                return ORBIS_MUSIC_PLAYER_SERVICE_ERROR_NOT_IN_TRANSACTION;
+            }
+            auto it = m_tracklists.find(tracklist_id);
+            if (it != m_tracklists.end() && track_index < it->second.size()) {
+                it->second.erase(it->second.begin() + track_index);
+            }
+            return ORBIS_OK;
+        });
     }
 
     u64 GetTrackListVersion() const {
@@ -179,8 +190,7 @@ public:
     }
 
     u32 GetTrackCount() {
-        std::scoped_lock lock(m_mutex);
-        return static_cast<u32>(m_tracks.size());
+        return m_mutex.Run([&]() -> u32 { return static_cast<u32>(m_tracks.size()); });
     }
 
     struct MusicEvent {
@@ -189,9 +199,10 @@ public:
     };
 
     void PushEvent(u32 event_id, u32 track_index) {
-        std::scoped_lock lock(m_event_mutex);
-        m_event_queue.push({event_id, track_index});
-        m_event_cv.notify_one();
+        m_event_mutex.Run([&] {
+            m_event_queue.push({event_id, track_index});
+            m_event_cv.notify_one();
+        });
     }
 
     bool PopEvent(MusicEvent& ev, u32 timeout_ms = 50) {
@@ -206,19 +217,20 @@ public:
     }
 
     void Play(u32 track_index, u64 start_time_ms) {
-        std::scoped_lock control_lock(m_control_mutex);
-        PlayLocked(track_index, start_time_ms);
+        m_control_mutex.Run([&] { PlayLocked(track_index, start_time_ms); });
     }
 
     void PlayLocked(u32 track_index, u64 start_time_ms) {
         StopPlaybackInternal();
 
-        {
-            std::scoped_lock lock(m_mutex);
-            if (track_index >= m_tracks.size()) {
-                return;
-            }
-            m_current_track_idx = track_index;
+        if (m_mutex.Run([&] {
+                if (track_index >= m_tracks.size()) {
+                    return true;
+                }
+                m_current_track_idx = track_index;
+                return false;
+            })) {
+            return;
         }
 
         m_stop_requested = false;
@@ -233,8 +245,7 @@ public:
     }
 
     void StopPlayback() {
-        std::scoped_lock control_lock(m_control_mutex);
-        StopPlaybackInternal();
+        m_control_mutex.Run([&] { StopPlaybackInternal(); });
     }
 
     void StopPlaybackInternal() {
@@ -270,49 +281,53 @@ public:
     }
 
     void PlayOrSeek(u32 track_index, u64 start_time_ms) {
-        std::scoped_lock control_lock(m_control_mutex);
-        if (IsTrackActive(track_index)) {
-            if (start_time_ms > 0) {
-                Seek(start_time_ms);
+        m_control_mutex.Run([&] {
+            if (IsTrackActive(track_index)) {
+                if (start_time_ms > 0) {
+                    Seek(start_time_ms);
+                }
+                Unpause();
+            } else {
+                PlayLocked(track_index, start_time_ms);
             }
-            Unpause();
-        } else {
-            PlayLocked(track_index, start_time_ms);
-        }
+        });
     }
 
     void SeekTrack(u32 track_index, u64 time_ms) {
-        std::scoped_lock control_lock(m_control_mutex);
-        if (IsTrackActive(track_index)) {
-            Seek(time_ms);
-        } else {
-            PlayLocked(track_index, time_ms);
-        }
+        m_control_mutex.Run([&] {
+            if (IsTrackActive(track_index)) {
+                Seek(time_ms);
+            } else {
+                PlayLocked(track_index, time_ms);
+            }
+        });
     }
 
     void NextTrack() {
-        std::scoped_lock control_lock(m_control_mutex);
-        u32 count = GetTrackCount();
-        if (count > 0) {
-            u32 cur = m_current_track_idx.load();
-            u32 next_idx = (cur + 1) % count;
-            if (m_shuffle_mode.load() == 1 && count > 1) {
-                for (int retry = 0; retry < 10 && next_idx == cur; ++retry) {
-                    next_idx = static_cast<u32>(rand() % count);
+        m_control_mutex.Run([&] {
+            u32 count = GetTrackCount();
+            if (count > 0) {
+                u32 cur = m_current_track_idx.load();
+                u32 next_idx = (cur + 1) % count;
+                if (m_shuffle_mode.load() == 1 && count > 1) {
+                    for (int retry = 0; retry < 10 && next_idx == cur; ++retry) {
+                        next_idx = static_cast<u32>(rand() % count);
+                    }
                 }
+                PlayLocked(next_idx, 0);
             }
-            PlayLocked(next_idx, 0);
-        }
+        });
     }
 
     void PreviousTrack() {
-        std::scoped_lock control_lock(m_control_mutex);
-        u32 count = GetTrackCount();
-        if (count > 0) {
-            u32 cur = m_current_track_idx.load();
-            u32 prev_idx = (cur > 0) ? (cur - 1) : 0;
-            PlayLocked(prev_idx, 0);
-        }
+        m_control_mutex.Run([&] {
+            u32 count = GetTrackCount();
+            if (count > 0) {
+                u32 cur = m_current_track_idx.load();
+                u32 prev_idx = (cur > 0) ? (cur - 1) : 0;
+                PlayLocked(prev_idx, 0);
+            }
+        });
     }
 
     void SetVolume(int vol) {
@@ -367,14 +382,16 @@ private:
 
         while (!m_stop_requested.load()) {
             std::string guest_path;
-            {
-                std::scoped_lock lock(m_mutex);
+            const bool have_track = m_mutex.Run([&] {
                 if (track_idx < m_tracks.size()) {
                     guest_path = m_tracks[track_idx];
                     m_current_track_idx = track_idx;
-                } else {
-                    break;
+                    return true;
                 }
+                return false;
+            });
+            if (!have_track) {
+                break;
             }
 
             auto scheme_pos = guest_path.find("://");
@@ -402,8 +419,7 @@ private:
             guest_path = std::move(decoded_path);
 
             std::string resolved_guest_path = guest_path;
-            {
-                std::scoped_lock lock(m_mutex);
+            m_mutex.Run([&] {
                 for (const auto& [serial, device_id] : m_usb_devices) {
                     std::string prefix = "/" + serial + "/";
                     if (guest_path.starts_with(prefix)) {
@@ -412,7 +428,7 @@ private:
                         break;
                     }
                 }
-            }
+            });
 
             auto* mnt = Common::Singleton<Core::FileSys::MntPoints>::Instance();
             std::filesystem::path host_path;
@@ -576,8 +592,8 @@ private:
         }
     }
 
-    std::mutex m_control_mutex;
-    std::mutex m_mutex;
+    Common::Combiner m_control_mutex;
+    Common::Combiner m_mutex;
     std::vector<std::string> m_tracks;
     std::atomic<u32> m_play_state{0};
     std::atomic<u32> m_current_track_idx{0};
@@ -590,8 +606,8 @@ private:
     std::atomic<bool> m_pause_requested{false};
     std::atomic<s64> m_seek_offset_ms{-1};
     std::thread m_worker_thread;
-    std::mutex m_event_mutex;
-    std::condition_variable m_event_cv;
+    Common::EventMutex m_event_mutex;
+    Common::EventCondition m_event_cv;
     std::queue<MusicEvent> m_event_queue;
     std::unordered_map<u32, std::vector<std::string>> m_tracklists;
     std::unordered_map<std::string, u32> m_usb_devices;

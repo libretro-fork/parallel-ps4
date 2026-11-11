@@ -6,6 +6,7 @@
 #include <atomic>
 #include <memory>
 #include <optional>
+#include <thread>
 #include <type_traits>
 #include <utility>
 
@@ -20,7 +21,8 @@ namespace Common {
 /// A caller pushes its request (on its own stack: nothing is allocated) onto a lock-free
 /// mpsc_stack and then tries to become the combiner. The one that does runs every request
 /// queued, its own and the others', oldest first, until none is left; the others park on a
-/// retro_eventcount until theirs has run. A function must not hand work to the same Combiner.
+/// retro_eventcount until theirs has run. A function that hands work to the same Combiner from
+/// inside it has it run there and then, as a recursive mutex would.
 class Combiner {
 public:
     Combiner() {
@@ -62,6 +64,11 @@ private:
     };
 
     void RunErased(void* ctx, void (*call)(void*)) {
+        // From inside a function this Combiner runs: it holds the Combiner already
+        if (owner.load(std::memory_order_relaxed) == std::this_thread::get_id()) {
+            call(ctx);
+            return;
+        }
         Request request{{}, call, ctx, false};
         mpsc_stack_push(&pending, &request.node);
         // Pairs with Combine's fence: a push that loses the race for busy is seen there
@@ -90,6 +97,7 @@ private:
         for (;;) {
             mpsc_stack_node_t* node = mpsc_stack_reverse(mpsc_stack_drain(&pending));
             const bool ran = node != nullptr;
+            owner.store(std::this_thread::get_id(), std::memory_order_relaxed);
             while (node) {
                 auto* request = reinterpret_cast<Request*>(node);
                 node = node->next;
@@ -97,6 +105,7 @@ private:
                 // The caller's: it may be gone as soon as done is set
                 request->done.store(true, std::memory_order_release);
             }
+            owner.store(std::thread::id{}, std::memory_order_relaxed);
             if (ran) {
                 retro_eventcount_notify(&done_ec);
             }
@@ -111,6 +120,8 @@ private:
 
     mpsc_stack_t pending{};
     std::atomic<bool> busy{false};
+    /// The thread running the functions, while it does
+    std::atomic<std::thread::id> owner{};
     retro_eventcount_t done_ec{};
 };
 

@@ -4,6 +4,7 @@
 #pragma once
 
 #include <mutex>
+#include "common/combiner.h"
 #include "common/types.h"
 
 namespace Libraries::NetCtl {
@@ -34,6 +35,6 @@ public:
 public:
     std::array<NetCtlCallbackForNpToolkit, 8> nptool_callbacks{};
     std::array<NetCtlCallback, 8> callbacks{};
-    std::mutex m_mutex;
+    Common::Combiner m_mutex;
 };
 } // namespace Libraries::NetCtl

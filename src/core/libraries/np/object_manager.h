@@ -5,54 +5,56 @@
 #include <array>
 #include <mutex>
 #include <ranges>
+#include "common/combiner.h"
 
 template <typename T, size_t N, int INVALID_OBJECT_ID_ERROR, int OBJECT_NOT_FOUND_ERROR,
           int MAX_OBJECTS_ERROR>
 struct ObjectManager {
     s32 GetObject(int objectId, T** out) {
-        std::scoped_lock lk{mutex};
-        if (objectId < 1 || objectId > N) {
-            return INVALID_OBJECT_ID_ERROR;
-        }
-        auto obj = objects[objectId - 1];
-        if (!obj) {
-            return OBJECT_NOT_FOUND_ERROR;
-        }
-        *out = obj;
-        return ORBIS_OK;
+        return mutex.Run([&]() -> s32 {
+            if (objectId < 1 || objectId > N) {
+                return INVALID_OBJECT_ID_ERROR;
+            }
+            auto obj = objects[objectId - 1];
+            if (!obj) {
+                return OBJECT_NOT_FOUND_ERROR;
+            }
+            *out = obj;
+            return ORBIS_OK;
+        });
     }
 
     template <typename... Args>
     s32 CreateObject(Args&&... args) {
-        std::scoped_lock lk{mutex};
+        return mutex.Run([&]() -> s32 {
+            if (auto slot = std::ranges::find(objects, nullptr); slot != objects.end()) {
+                *slot = new T{args...};
 
-        if (auto slot = std::ranges::find(objects, nullptr); slot != objects.end()) {
-            *slot = new T{args...};
+                return std::ranges::distance(objects.begin(), slot) + 1;
+            }
 
-            return std::ranges::distance(objects.begin(), slot) + 1;
-        }
-
-        return MAX_OBJECTS_ERROR;
+            return MAX_OBJECTS_ERROR;
+        });
     }
 
     s32 DeleteObject(int objectId) {
-        std::scoped_lock lk{mutex};
+        return mutex.Run([&]() -> s32 {
+            if (objectId < 1 || objectId > N) {
+                return INVALID_OBJECT_ID_ERROR;
+            }
+            auto obj = objects[objectId - 1];
+            if (!obj) {
+                return OBJECT_NOT_FOUND_ERROR;
+            }
 
-        if (objectId < 1 || objectId > N) {
-            return INVALID_OBJECT_ID_ERROR;
-        }
-        auto obj = objects[objectId - 1];
-        if (!obj) {
-            return OBJECT_NOT_FOUND_ERROR;
-        }
+            delete obj;
+            objects[objectId - 1] = nullptr;
 
-        delete obj;
-        objects[objectId - 1] = nullptr;
-
-        return ORBIS_OK;
+            return ORBIS_OK;
+        });
     }
 
 private:
-    std::mutex mutex;
+    Common::Combiner mutex;
     std::array<T*, N> objects = {nullptr};
 };

@@ -7,6 +7,7 @@
 #include <string>
 #include <utility>
 #include <vector>
+#include "common/event_mutex.h"
 #include "common/logging/log.h"
 #include "core/libraries/error_codes.h"
 #include "core/libraries/libs.h"
@@ -32,7 +33,7 @@ struct OrbisNpWebApiContext {
     s32 userCount;
     s32 libCtxId;
     s32 libHttpCtxId;
-    std::recursive_mutex contextLock;
+    Common::RecursiveEventMutex contextLock;
     std::map<s32, OrbisNpWebApiUserContext*> userContexts;
     std::map<s32, OrbisNpWebApiHandle*> handles;
     std::map<s32, OrbisNpWebApiTimerHandle*> timerHandles;

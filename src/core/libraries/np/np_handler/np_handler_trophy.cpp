@@ -19,14 +19,16 @@ namespace Libraries::Np {
 
 void NpHandler::ReportTrophyUnlock(s32 user_id, s32 service_label, s32 trophy_id, u64 timestamp) {
     std::shared_ptr<ShadNet::ShadNetClient> client;
-    {
-        std::lock_guard lock(m_mutex_clients);
-        auto it = m_clients.find(user_id);
-        if (it == m_clients.end()) {
-            LOG_DEBUG(NpHandler, "no shadNet session for user_id={}; skipping", user_id);
-            return;
-        }
-        client = it->second;
+    if (m_mutex_clients.Run([&] {
+            auto it = m_clients.find(user_id);
+            if (it == m_clients.end()) {
+                LOG_DEBUG(NpHandler, "no shadNet session for user_id={}; skipping", user_id);
+                return true;
+            }
+            client = it->second;
+            return false;
+        })) {
+        return;
     }
     if (!client) {
         LOG_DEBUG(NpHandler, "null client for user_id={}; skipping", user_id);
@@ -62,14 +64,16 @@ void NpHandler::SyncTrophies(
     s32 user_id, s32 service_label, const std::vector<std::pair<s32, u64>>& local_trophies,
     std::function<void(const std::vector<std::pair<s32, u64>>&)> on_merged) {
     std::shared_ptr<ShadNet::ShadNetClient> client;
-    {
-        std::lock_guard lock(m_mutex_clients);
-        auto it = m_clients.find(user_id);
-        if (it == m_clients.end()) {
-            LOG_DEBUG(NpHandler, "no shadNet session for user_id={}; skipping", user_id);
-            return;
-        }
-        client = it->second;
+    if (m_mutex_clients.Run([&] {
+            auto it = m_clients.find(user_id);
+            if (it == m_clients.end()) {
+                LOG_DEBUG(NpHandler, "no shadNet session for user_id={}; skipping", user_id);
+                return true;
+            }
+            client = it->second;
+            return false;
+        })) {
+        return;
     }
     if (!client) {
         LOG_DEBUG(NpHandler, "null client for user_id={}; skipping", user_id);
@@ -94,8 +98,7 @@ void NpHandler::SyncTrophies(
 
     const u64 pkt_id = client->SyncTrophies(com_id, local_trophies);
     if (on_merged) {
-        std::lock_guard lock(m_mutex_pending_trophy);
-        m_pending_trophy.emplace(pkt_id, std::move(on_merged));
+        m_mutex_pending_trophy.Run([&] { m_pending_trophy.emplace(pkt_id, std::move(on_merged)); });
     }
     LOG_INFO(NpHandler, "user_id={} uploading {} com_id='{}' pkt_id={}", user_id,
              local_trophies.size(), com_id, pkt_id);
@@ -114,13 +117,15 @@ void NpHandler::OnTrophyReply(s32 user_id, ShadNet::CommandType cmd, u64 pkt_id,
         return;
 
     std::function<void(const std::vector<std::pair<s32, u64>>&)> on_merged;
-    {
-        std::lock_guard lock(m_mutex_pending_trophy);
-        auto it = m_pending_trophy.find(pkt_id);
-        if (it == m_pending_trophy.end())
-            return;
-        on_merged = std::move(it->second);
-        m_pending_trophy.erase(it);
+    if (m_mutex_pending_trophy.Run([&] {
+            auto it = m_pending_trophy.find(pkt_id);
+            if (it == m_pending_trophy.end())
+                return true;
+            on_merged = std::move(it->second);
+            m_pending_trophy.erase(it);
+            return false;
+        })) {
+        return;
     }
 
     if (error != ShadNet::ErrorType::NoError) {

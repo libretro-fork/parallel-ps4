@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include <mutex>
+#include "common/combiner.h"
 #include "common/logging/log.h"
 #include "core/libraries/error_codes.h"
 #include "core/libraries/libs.h"
@@ -12,16 +13,17 @@
 namespace Libraries::Np::NpPartner {
 
 static bool g_library_init = false;
-std::mutex g_library_mutex{};
+Common::Combiner g_library_mutex{};
 
 s32 PS4_SYSV_ABI sceNpEAAccessTerminate() {
     LOG_ERROR(Lib_NpPartner, "(STUBBED) called");
     if (!g_library_init) {
         return ORBIS_NP_PARTNER_ERROR_NOT_INITIALIZED;
     }
-    std::scoped_lock lk{g_library_mutex};
-    g_library_init = false;
-    return ORBIS_OK;
+    return g_library_mutex.Run([&]() -> s32 {
+        g_library_init = false;
+        return ORBIS_OK;
+    });
 }
 
 s32 PS4_SYSV_ABI sceNpHasEAAccessSubscriptionAbortRequest() {
@@ -49,13 +51,14 @@ s32 PS4_SYSV_ABI sceNpHasEAAccessSubscription(UserService::OrbisUserServiceUserI
     if (result == nullptr) {
         return ORBIS_NP_PARTNER_ERROR_INVALID_ARGUMENT;
     }
-    std::scoped_lock lk{g_library_mutex};
-    // In the real library, this creates and sends a request that checks for EA subscription,
-    // then waits for the request to return a response, and returns that response.
-    // NP signed out likely returns an error, but I haven't figured out the error code yet.
-    // For now, stub having no subscription.
-    *result = false;
-    return ORBIS_OK;
+    return g_library_mutex.Run([&]() -> s32 {
+        // In the real library, this creates and sends a request that checks for EA subscription,
+        // then waits for the request to return a response, and returns that response.
+        // NP signed out likely returns an error, but I haven't figured out the error code yet.
+        // For now, stub having no subscription.
+        *result = false;
+        return ORBIS_OK;
+    });
 }
 
 void RegisterLib(Core::Loader::SymbolsResolver* sym) {

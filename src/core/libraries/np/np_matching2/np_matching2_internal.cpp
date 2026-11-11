@@ -1359,140 +1359,147 @@ s32 ContextManager::CreateContext(const OrbisNpId* owner_np_id, OrbisNpServiceLa
         return ORBIS_NP_MATCHING2_ERROR_INVALID_ARGUMENT;
     }
 
-    std::lock_guard lock(m_mutex);
-
-    OrbisNpMatching2ContextId id = 0;
-    for (u32 i = 0; i < kMaxContexts; ++i) {
-        const OrbisNpMatching2ContextId candidate =
-            static_cast<OrbisNpMatching2ContextId>(((m_next_id - 1 + i) % kMaxContexts) + 1);
-        if (!m_contexts[candidate]) {
-            id = candidate;
-            break;
+    return m_mutex.Run([&]() -> s32 {
+        OrbisNpMatching2ContextId id = 0;
+        for (u32 i = 0; i < kMaxContexts; ++i) {
+            const OrbisNpMatching2ContextId candidate =
+                static_cast<OrbisNpMatching2ContextId>(((m_next_id - 1 + i) % kMaxContexts) + 1);
+            if (!m_contexts[candidate]) {
+                id = candidate;
+                break;
+            }
         }
-    }
-    if (id == 0) {
-        return ORBIS_NP_MATCHING2_ERROR_CONTEXT_MAX;
-    }
-    m_next_id = static_cast<OrbisNpMatching2ContextId>((id % kMaxContexts) + 1);
+        if (id == 0) {
+            return ORBIS_NP_MATCHING2_ERROR_CONTEXT_MAX;
+        }
+        m_next_id = static_cast<OrbisNpMatching2ContextId>((id % kMaxContexts) + 1);
 
-    auto ctx = std::make_shared<ContextObject>();
-    NpHandler::GetInstance().ResetMatching2Cache(id);
-    ctx->ctx_id = id;
-    ctx->a_variant = a_variant;
-    ctx->service_label = service_label;
-    NpHandler::GetInstance().LockMatching2Cache(id)->Reset();
-    if (owner_np_id) {
-        ctx->owner_np_id = *owner_np_id;
-        ctx->online_id = owner_np_id->handle;
-    }
-    ctx->context_callback = m_pending_context_callback;
-    ctx->context_callback_arg = m_pending_context_callback_arg;
-    m_contexts[id] = ctx;
+        auto ctx = std::make_shared<ContextObject>();
+        NpHandler::GetInstance().ResetMatching2Cache(id);
+        ctx->ctx_id = id;
+        ctx->a_variant = a_variant;
+        ctx->service_label = service_label;
+        NpHandler::GetInstance().LockMatching2Cache(id)->Reset();
+        if (owner_np_id) {
+            ctx->owner_np_id = *owner_np_id;
+            ctx->online_id = owner_np_id->handle;
+        }
+        ctx->context_callback = m_pending_context_callback;
+        ctx->context_callback_arg = m_pending_context_callback_arg;
+        m_contexts[id] = ctx;
 
-    *out_ctx_id = id;
-    LOG_INFO(Lib_NpMatching2, "context{} created: id={} online_id={} serviceLabel={:#x}",
-             a_variant ? "A" : "", id, ctx->online_id.data, service_label);
-    return ORBIS_OK;
+        *out_ctx_id = id;
+        LOG_INFO(Lib_NpMatching2, "context{} created: id={} online_id={} serviceLabel={:#x}",
+                 a_variant ? "A" : "", id, ctx->online_id.data, service_label);
+        return ORBIS_OK;
+    });
 }
 
 std::shared_ptr<ContextObject> ContextManager::Get(OrbisNpMatching2ContextId ctx_id) {
-    std::lock_guard lock(m_mutex);
-    return GetLocked(ctx_id);
+    return m_mutex.Run([&]() -> std::shared_ptr<ContextObject> { return GetLocked(ctx_id); });
 }
 
 bool ContextManager::Destroy(OrbisNpMatching2ContextId ctx_id) {
-    std::lock_guard lock(m_mutex);
-    auto ctx = GetLocked(ctx_id);
-    if (!ctx) {
-        return false;
-    }
-    if (ctx->stop_pending) {
-        ctx->destroy_pending = true;
-        LOG_INFO(Lib_NpMatching2, "context destroy deferred until stop callback: id={}", ctx_id);
+    return m_mutex.Run([&]() -> bool {
+        auto ctx = GetLocked(ctx_id);
+        if (!ctx) {
+            return false;
+        }
+        if (ctx->stop_pending) {
+            ctx->destroy_pending = true;
+            LOG_INFO(Lib_NpMatching2, "context destroy deferred until stop callback: id={}",
+                     ctx_id);
+            return true;
+        }
+        NpHandler::GetInstance().ResetMatching2Cache(ctx_id);
+        m_contexts[ctx_id].reset();
+        LOG_INFO(Lib_NpMatching2, "context destroyed: id={}", ctx_id);
         return true;
-    }
-    NpHandler::GetInstance().ResetMatching2Cache(ctx_id);
-    m_contexts[ctx_id].reset();
-    LOG_INFO(Lib_NpMatching2, "context destroyed: id={}", ctx_id);
-    return true;
+    });
 }
 
 void ContextManager::CompleteStop(OrbisNpMatching2ContextId ctx_id,
                                   const std::shared_ptr<ContextObject>& expected_context) {
-    std::lock_guard lock(m_mutex);
-    auto ctx = GetLocked(ctx_id);
-    if (!ctx || ctx != expected_context) {
-        return;
-    }
-    ctx->stop_pending = false;
-    if (!ctx->destroy_pending) {
-        return;
-    }
-    NpHandler::GetInstance().ResetMatching2Cache(ctx_id);
-    m_contexts[ctx_id].reset();
-    LOG_INFO(Lib_NpMatching2, "context destroyed after stop callback: id={}", ctx_id);
+    m_mutex.Run([&] {
+        auto ctx = GetLocked(ctx_id);
+        if (!ctx || ctx != expected_context) {
+            return;
+        }
+        ctx->stop_pending = false;
+        if (!ctx->destroy_pending) {
+            return;
+        }
+        NpHandler::GetInstance().ResetMatching2Cache(ctx_id);
+        m_contexts[ctx_id].reset();
+        LOG_INFO(Lib_NpMatching2, "context destroyed after stop callback: id={}", ctx_id);
+    });
 }
 
 s32 ContextManager::Start(OrbisNpMatching2ContextId ctx_id) {
-    std::lock_guard lock(m_mutex);
-    auto ctx = GetLocked(ctx_id);
-    if (!ctx) {
-        return ORBIS_NP_MATCHING2_ERROR_INVALID_CONTEXT_ID;
-    }
-    if (ctx->started) {
-        return ORBIS_NP_MATCHING2_ERROR_CONTEXT_ALREADY_STARTED;
-    }
-    ctx->started = true;
-    ctx->stop_pending = false;
-    ctx->destroy_pending = false;
-    LOG_INFO(Lib_NpMatching2, "context started: id={}", ctx_id);
-    return ORBIS_OK;
+    return m_mutex.Run([&]() -> s32 {
+        auto ctx = GetLocked(ctx_id);
+        if (!ctx) {
+            return ORBIS_NP_MATCHING2_ERROR_INVALID_CONTEXT_ID;
+        }
+        if (ctx->started) {
+            return ORBIS_NP_MATCHING2_ERROR_CONTEXT_ALREADY_STARTED;
+        }
+        ctx->started = true;
+        ctx->stop_pending = false;
+        ctx->destroy_pending = false;
+        LOG_INFO(Lib_NpMatching2, "context started: id={}", ctx_id);
+        return ORBIS_OK;
+    });
 }
 
 s32 ContextManager::Stop(OrbisNpMatching2ContextId ctx_id) {
-    std::lock_guard lock(m_mutex);
-    auto ctx = GetLocked(ctx_id);
-    if (!ctx) {
-        return ORBIS_NP_MATCHING2_ERROR_INVALID_CONTEXT_ID;
-    }
-    if (!ctx->started) {
-        return ORBIS_NP_MATCHING2_ERROR_CONTEXT_NOT_STARTED;
-    }
-    ctx->started = false;
-    ctx->stop_pending = true;
-    LOG_INFO(Lib_NpMatching2, "context stopped: id={}", ctx_id);
-    return ORBIS_OK;
+    return m_mutex.Run([&]() -> s32 {
+        auto ctx = GetLocked(ctx_id);
+        if (!ctx) {
+            return ORBIS_NP_MATCHING2_ERROR_INVALID_CONTEXT_ID;
+        }
+        if (!ctx->started) {
+            return ORBIS_NP_MATCHING2_ERROR_CONTEXT_NOT_STARTED;
+        }
+        ctx->started = false;
+        ctx->stop_pending = true;
+        LOG_INFO(Lib_NpMatching2, "context stopped: id={}", ctx_id);
+        return ORBIS_OK;
+    });
 }
 
 void ContextManager::ApplyContextCallback(OrbisNpMatching2ContextCallback callback, void* arg) {
-    std::lock_guard lock(m_mutex);
-    m_pending_context_callback = callback;
-    m_pending_context_callback_arg = arg;
-    for (u32 id = 1; id <= kMaxContexts; ++id) {
-        if (m_contexts[id]) {
-            m_contexts[id]->context_callback = callback;
-            m_contexts[id]->context_callback_arg = arg;
+    m_mutex.Run([&] {
+        m_pending_context_callback = callback;
+        m_pending_context_callback_arg = arg;
+        for (u32 id = 1; id <= kMaxContexts; ++id) {
+            if (m_contexts[id]) {
+                m_contexts[id]->context_callback = callback;
+                m_contexts[id]->context_callback_arg = arg;
+            }
         }
-    }
+    });
 }
 
 void ContextManager::Reset() {
-    std::lock_guard lock(m_mutex);
-    m_contexts = {};
-    NpHandler::GetInstance().ResetMatching2Caches();
-    m_next_id = 1;
-    m_pending_context_callback = nullptr;
-    m_pending_context_callback_arg = nullptr;
+    m_mutex.Run([&] {
+        m_contexts = {};
+        NpHandler::GetInstance().ResetMatching2Caches();
+        m_next_id = 1;
+        m_pending_context_callback = nullptr;
+        m_pending_context_callback_arg = nullptr;
+    });
 }
 
 OrbisNpMatching2RequestId AllocRequestId() {
     auto& state = NpHandler::GetInstance().GetMatching2State();
-    std::lock_guard lock(state.mutex);
-    const OrbisNpMatching2RequestId id = state.next_request_id++;
-    if (state.next_request_id == 0) {
-        state.next_request_id = 1;
-    }
-    return id;
+    return state.mutex.Run([&]() -> OrbisNpMatching2RequestId {
+        const OrbisNpMatching2RequestId id = state.next_request_id++;
+        if (state.next_request_id == 0) {
+            state.next_request_id = 1;
+        }
+        return id;
+    });
 }
 
 bool IsInitialized() {
@@ -1804,8 +1811,7 @@ void TermEventDispatcher() {
         NpCommon::sceNpJoinThread(state.dispatch_thread, nullptr);
         state.dispatch_thread = nullptr;
     }
-    std::lock_guard lock(state.queue_mutex);
-    state.pending_events.clear();
+    state.queue_mutex.Run([&] { state.pending_events.clear(); });
 }
 
 void ScheduleEvent(PendingEvent ev) {
@@ -1815,10 +1821,7 @@ void ScheduleEvent(PendingEvent ev) {
         return;
     }
     auto& state = NpHandler::GetInstance().GetMatching2State();
-    {
-        std::lock_guard lock(state.queue_mutex);
-        state.pending_events.push_back(std::move(ev));
-    }
+    state.queue_mutex.Run([&] { state.pending_events.push_back(std::move(ev)); });
     state.queue_cv.notify_all();
 }
 

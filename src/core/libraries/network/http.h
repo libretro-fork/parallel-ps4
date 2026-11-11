@@ -4,6 +4,8 @@
 #pragma once
 
 #include <mutex>
+#include "common/combiner.h"
+#include "common/event_mutex.h"
 #include "common/types.h"
 #include "core/libraries/network/ssl.h"
 
@@ -88,7 +90,7 @@ struct HttpRequestInternal {
     int state;          // +0x20
     int errorCode;      // +0x28
     int httpStatusCode; // +0x20C
-    std::mutex m_mutex;
+    Common::EventMutex m_mutex;
 };
 
 // Memory pool statistics

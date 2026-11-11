@@ -26,14 +26,16 @@ s32 NpHandler::RecordScore(s32 user_id, s32 service_label, u32 boardId, s32 pcId
                            size_t gameInfoSize, std::shared_ptr<NpScore::ScoreRequestCtx> req) {
     // Look up the user's shadNet session.
     std::shared_ptr<ShadNet::ShadNetClient> client;
-    {
-        std::lock_guard lock(m_mutex_clients);
-        auto it = m_clients.find(user_id);
-        if (it == m_clients.end()) {
-            LOG_WARNING(NpHandler, "user_id={} not connected", user_id);
-            return ORBIS_NP_ERROR_SIGNED_OUT;
-        }
-        client = it->second;
+    if (auto returned = m_mutex_clients.Run([&]() -> std::optional<s32> {
+            auto it = m_clients.find(user_id);
+            if (it == m_clients.end()) {
+                LOG_WARNING(NpHandler, "user_id={} not connected", user_id);
+                return std::optional<s32>{ORBIS_NP_ERROR_SIGNED_OUT};
+            }
+            client = it->second;
+            return std::nullopt;
+        })) {
+        return *returned;
     }
     if (!client->IsAuthenticated()) {
         LOG_WARNING(NpHandler, "user_id={} not authenticated", user_id);
@@ -71,14 +73,13 @@ s32 NpHandler::RecordScore(s32 user_id, s32 service_label, u32 boardId, s32 pcId
     payload.insert(payload.end(), proto_bytes.begin(), proto_bytes.end());
 
     const u64 pkt_id = client->SubmitRequest(ShadNet::CommandType::RecordScore, payload);
-    {
-        std::lock_guard lock(m_mutex_pending_score);
+    m_mutex_pending_score.Run([&] {
         PendingScoreRequest pending;
         pending.req = std::move(req);
         pending.cmd = ShadNet::CommandType::RecordScore;
         pending.user_id = user_id;
         m_pending_score.emplace(pkt_id, std::move(pending));
-    }
+    });
     LOG_INFO(NpHandler,
              "user_id={} service_label={} board={} pcId={} score={} commentLen={} "
              "gameInfoSize={} pkt_id={} com_id='{}'",
@@ -91,14 +92,16 @@ s32 NpHandler::RecordGameData(s32 user_id, s32 service_label, u32 boardId, s32 p
                               const u8* data, size_t size,
                               std::shared_ptr<NpScore::ScoreRequestCtx> req) {
     std::shared_ptr<ShadNet::ShadNetClient> client;
-    {
-        std::lock_guard lock(m_mutex_clients);
-        auto it = m_clients.find(user_id);
-        if (it == m_clients.end()) {
-            LOG_WARNING(NpHandler, "user_id={} not connected", user_id);
-            return ORBIS_NP_ERROR_SIGNED_OUT;
-        }
-        client = it->second;
+    if (auto returned = m_mutex_clients.Run([&]() -> std::optional<s32> {
+            auto it = m_clients.find(user_id);
+            if (it == m_clients.end()) {
+                LOG_WARNING(NpHandler, "user_id={} not connected", user_id);
+                return std::optional<s32>{ORBIS_NP_ERROR_SIGNED_OUT};
+            }
+            client = it->second;
+            return std::nullopt;
+        })) {
+        return *returned;
     }
     if (!client->IsAuthenticated()) {
         LOG_WARNING(NpHandler, "user_id={} not authenticated", user_id);
@@ -133,14 +136,13 @@ s32 NpHandler::RecordGameData(s32 user_id, s32 service_label, u32 boardId, s32 p
     }
 
     const u64 pkt_id = client->SubmitRequest(ShadNet::CommandType::RecordScoreData, payload);
-    {
-        std::lock_guard lock(m_mutex_pending_score);
+    m_mutex_pending_score.Run([&] {
         PendingScoreRequest pending;
         pending.req = std::move(req);
         pending.cmd = ShadNet::CommandType::RecordScoreData;
         pending.user_id = user_id;
         m_pending_score.emplace(pkt_id, std::move(pending));
-    }
+    });
     LOG_INFO(NpHandler,
              "user_id={} service_label={} board={} pcId={} score={} dataSize={} "
              "pkt_id={} com_id='{}'",
@@ -152,14 +154,16 @@ s32 NpHandler::GetGameData(s32 user_id, s32 service_label, u32 boardId, const st
                            s32 pcId, void* dataOut, u64 recvSize, u64* totalSizeOut,
                            std::shared_ptr<NpScore::ScoreRequestCtx> req) {
     std::shared_ptr<ShadNet::ShadNetClient> client;
-    {
-        std::lock_guard lock(m_mutex_clients);
-        auto it = m_clients.find(user_id);
-        if (it == m_clients.end()) {
-            LOG_WARNING(NpHandler, "user_id={} not connected", user_id);
-            return ORBIS_NP_ERROR_SIGNED_OUT;
-        }
-        client = it->second;
+    if (auto returned = m_mutex_clients.Run([&]() -> std::optional<s32> {
+            auto it = m_clients.find(user_id);
+            if (it == m_clients.end()) {
+                LOG_WARNING(NpHandler, "user_id={} not connected", user_id);
+                return std::optional<s32>{ORBIS_NP_ERROR_SIGNED_OUT};
+            }
+            client = it->second;
+            return std::nullopt;
+        })) {
+        return *returned;
     }
     if (!client->IsAuthenticated()) {
         LOG_WARNING(NpHandler, "user_id={} not authenticated", user_id);
@@ -191,8 +195,7 @@ s32 NpHandler::GetGameData(s32 user_id, s32 service_label, u32 boardId, const st
     payload.insert(payload.end(), proto_bytes.begin(), proto_bytes.end());
 
     const u64 pkt_id = client->SubmitRequest(ShadNet::CommandType::GetScoreData, payload);
-    {
-        std::lock_guard lock(m_mutex_pending_score);
+    m_mutex_pending_score.Run([&] {
         PendingScoreRequest pending;
         pending.req = std::move(req);
         pending.cmd = ShadNet::CommandType::GetScoreData;
@@ -201,7 +204,7 @@ s32 NpHandler::GetGameData(s32 user_id, s32 service_label, u32 boardId, const st
         pending.totalSizeOut = totalSizeOut;
         pending.user_id = user_id;
         m_pending_score.emplace(pkt_id, std::move(pending));
-    }
+    });
     LOG_INFO(NpHandler,
              "user_id={} service_label={} board={} npId='{}' pcId={} recvSize={} "
              "pkt_id={} com_id='{}'",
@@ -213,14 +216,16 @@ s32 NpHandler::GetGameDataByAccountId(s32 user_id, s32 service_label, u32 boardI
                                       s32 pcId, void* dataOut, u64 recvSize, u64* totalSizeOut,
                                       std::shared_ptr<NpScore::ScoreRequestCtx> req) {
     std::shared_ptr<ShadNet::ShadNetClient> client;
-    {
-        std::lock_guard lock(m_mutex_clients);
-        auto it = m_clients.find(user_id);
-        if (it == m_clients.end()) {
-            LOG_WARNING(NpHandler, "user_id={} not connected", user_id);
-            return ORBIS_NP_ERROR_SIGNED_OUT;
-        }
-        client = it->second;
+    if (auto returned = m_mutex_clients.Run([&]() -> std::optional<s32> {
+            auto it = m_clients.find(user_id);
+            if (it == m_clients.end()) {
+                LOG_WARNING(NpHandler, "user_id={} not connected", user_id);
+                return std::optional<s32>{ORBIS_NP_ERROR_SIGNED_OUT};
+            }
+            client = it->second;
+            return std::nullopt;
+        })) {
+        return *returned;
     }
     if (!client->IsAuthenticated()) {
         LOG_WARNING(NpHandler, "user_id={} not authenticated", user_id);
@@ -253,8 +258,7 @@ s32 NpHandler::GetGameDataByAccountId(s32 user_id, s32 service_label, u32 boardI
 
     const u64 pkt_id =
         client->SubmitRequest(ShadNet::CommandType::GetScoreGameDataByAccId, payload);
-    {
-        std::lock_guard lock(m_mutex_pending_score);
+    m_mutex_pending_score.Run([&] {
         PendingScoreRequest pending;
         pending.req = std::move(req);
         pending.cmd = ShadNet::CommandType::GetScoreGameDataByAccId;
@@ -263,7 +267,7 @@ s32 NpHandler::GetGameDataByAccountId(s32 user_id, s32 service_label, u32 boardI
         pending.totalSizeOut = totalSizeOut;
         pending.user_id = user_id;
         m_pending_score.emplace(pkt_id, std::move(pending));
-    }
+    });
     LOG_INFO(NpHandler,
              "user_id={} service_label={} board={} accountId={} pcId={} "
              "recvSize={} pkt_id={} com_id='{}'",
@@ -275,14 +279,16 @@ s32 NpHandler::GetBoardInfo(s32 user_id, s32 service_label, u32 boardId,
                             NpScore::OrbisNpScoreBoardInfo* boardInfo,
                             std::shared_ptr<NpScore::ScoreRequestCtx> req) {
     std::shared_ptr<ShadNet::ShadNetClient> client;
-    {
-        std::lock_guard lock(m_mutex_clients);
-        auto it = m_clients.find(user_id);
-        if (it == m_clients.end()) {
-            LOG_WARNING(NpHandler, "user_id={} not connected", user_id);
-            return ORBIS_NP_ERROR_SIGNED_OUT;
-        }
-        client = it->second;
+    if (auto returned = m_mutex_clients.Run([&]() -> std::optional<s32> {
+            auto it = m_clients.find(user_id);
+            if (it == m_clients.end()) {
+                LOG_WARNING(NpHandler, "user_id={} not connected", user_id);
+                return std::optional<s32>{ORBIS_NP_ERROR_SIGNED_OUT};
+            }
+            client = it->second;
+            return std::nullopt;
+        })) {
+        return *returned;
     }
     if (!client->IsAuthenticated()) {
         LOG_WARNING(NpHandler, "user_id={} not authenticated", user_id);
@@ -304,15 +310,14 @@ s32 NpHandler::GetBoardInfo(s32 user_id, s32 service_label, u32 boardId,
     payload.push_back(static_cast<u8>(boardId >> 24));
 
     const u64 pkt_id = client->SubmitRequest(ShadNet::CommandType::GetBoardInfos, payload);
-    {
-        std::lock_guard lock(m_mutex_pending_score);
+    m_mutex_pending_score.Run([&] {
         PendingScoreRequest pending;
         pending.req = std::move(req);
         pending.cmd = ShadNet::CommandType::GetBoardInfos;
         pending.boardInfo = boardInfo;
         pending.user_id = user_id;
         m_pending_score.emplace(pkt_id, std::move(pending));
-    }
+    });
     LOG_INFO(NpHandler, "user_id={} service_label={} board={} pkt_id={} com_id='{}'", user_id,
              service_label, boardId, pkt_id, com_id);
     return ORBIS_OK;
@@ -334,14 +339,16 @@ s32 NpHandler::GetRankingByNpId(s32 user_id, s32 service_label, u32 boardId,
 
     // Look up the user's session.
     std::shared_ptr<ShadNet::ShadNetClient> client;
-    {
-        std::lock_guard lock(m_mutex_clients);
-        auto it = m_clients.find(user_id);
-        if (it == m_clients.end()) {
-            LOG_WARNING(NpHandler, "user_id={} not connected", user_id);
-            return ORBIS_NP_ERROR_SIGNED_OUT;
-        }
-        client = it->second;
+    if (auto returned = m_mutex_clients.Run([&]() -> std::optional<s32> {
+            auto it = m_clients.find(user_id);
+            if (it == m_clients.end()) {
+                LOG_WARNING(NpHandler, "user_id={} not connected", user_id);
+                return std::optional<s32>{ORBIS_NP_ERROR_SIGNED_OUT};
+            }
+            client = it->second;
+            return std::nullopt;
+        })) {
+        return *returned;
     }
     if (!client->IsAuthenticated()) {
         LOG_WARNING(NpHandler, "user_id={} not authenticated", user_id);
@@ -379,8 +386,7 @@ s32 NpHandler::GetRankingByNpId(s32 user_id, s32 service_label, u32 boardId,
     payload.insert(payload.end(), proto_bytes.begin(), proto_bytes.end());
 
     const u64 pkt_id = client->SubmitRequest(ShadNet::CommandType::GetScoreNpid, payload);
-    {
-        std::lock_guard lock(m_mutex_pending_score);
+    m_mutex_pending_score.Run([&] {
         PendingScoreRequest pending;
         pending.req = std::move(req);
         pending.cmd = ShadNet::CommandType::GetScoreNpid;
@@ -393,7 +399,7 @@ s32 NpHandler::GetRankingByNpId(s32 user_id, s32 service_label, u32 boardId,
         pending.arrayNum = npIds.size();
         pending.user_id = user_id;
         m_pending_score.emplace(pkt_id, std::move(pending));
-    }
+    });
     LOG_INFO(NpHandler,
              "user_id={} service_label={} board={} npIdCount={} "
              "withPcId={} withComment={} withGameInfo={} pkt_id={} com_id='{}'",
@@ -409,14 +415,16 @@ s32 NpHandler::GetRankingByRange(s32 user_id, s32 service_label, u32 boardId, u3
                                  Libraries::Rtc::OrbisRtcTick* lastSortDate, u32* totalRecord,
                                  std::shared_ptr<NpScore::ScoreRequestCtx> req) {
     std::shared_ptr<ShadNet::ShadNetClient> client;
-    {
-        std::lock_guard lock(m_mutex_clients);
-        auto it = m_clients.find(user_id);
-        if (it == m_clients.end()) {
-            LOG_WARNING(NpHandler, "user_id={} not connected", user_id);
-            return ORBIS_NP_ERROR_SIGNED_OUT;
-        }
-        client = it->second;
+    if (auto returned = m_mutex_clients.Run([&]() -> std::optional<s32> {
+            auto it = m_clients.find(user_id);
+            if (it == m_clients.end()) {
+                LOG_WARNING(NpHandler, "user_id={} not connected", user_id);
+                return std::optional<s32>{ORBIS_NP_ERROR_SIGNED_OUT};
+            }
+            client = it->second;
+            return std::nullopt;
+        })) {
+        return *returned;
     }
     if (!client->IsAuthenticated()) {
         LOG_WARNING(NpHandler, "user_id={} not authenticated", user_id);
@@ -450,8 +458,7 @@ s32 NpHandler::GetRankingByRange(s32 user_id, s32 service_label, u32 boardId, u3
     payload.insert(payload.end(), proto_bytes.begin(), proto_bytes.end());
 
     const u64 pkt_id = client->SubmitRequest(ShadNet::CommandType::GetScoreRange, payload);
-    {
-        std::lock_guard lock(m_mutex_pending_score);
+    m_mutex_pending_score.Run([&] {
         PendingScoreRequest pending;
         pending.req = std::move(req);
         pending.cmd = ShadNet::CommandType::GetScoreRange;
@@ -463,7 +470,7 @@ s32 NpHandler::GetRankingByRange(s32 user_id, s32 service_label, u32 boardId, u3
         pending.arrayNum = arrayNum;
         pending.user_id = user_id;
         m_pending_score.emplace(pkt_id, std::move(pending));
-    }
+    });
     LOG_INFO(NpHandler,
              "user_id={} service_label={} board={} startRank={} numRanks={} "
              "withComment={} withGameInfo={} pkt_id={} com_id='{}'",
@@ -479,14 +486,16 @@ s32 NpHandler::GetRankingByRangeA(s32 user_id, s32 service_label, u32 boardId, u
                                   Libraries::Rtc::OrbisRtcTick* lastSortDate, u32* totalRecord,
                                   std::shared_ptr<NpScore::ScoreRequestCtx> req) {
     std::shared_ptr<ShadNet::ShadNetClient> client;
-    {
-        std::lock_guard lock(m_mutex_clients);
-        auto it = m_clients.find(user_id);
-        if (it == m_clients.end()) {
-            LOG_WARNING(NpHandler, "user_id={} not connected", user_id);
-            return ORBIS_NP_ERROR_SIGNED_OUT;
-        }
-        client = it->second;
+    if (auto returned = m_mutex_clients.Run([&]() -> std::optional<s32> {
+            auto it = m_clients.find(user_id);
+            if (it == m_clients.end()) {
+                LOG_WARNING(NpHandler, "user_id={} not connected", user_id);
+                return std::optional<s32>{ORBIS_NP_ERROR_SIGNED_OUT};
+            }
+            client = it->second;
+            return std::nullopt;
+        })) {
+        return *returned;
     }
     if (!client->IsAuthenticated()) {
         LOG_WARNING(NpHandler, "user_id={} not authenticated", user_id);
@@ -520,8 +529,7 @@ s32 NpHandler::GetRankingByRangeA(s32 user_id, s32 service_label, u32 boardId, u
     payload.insert(payload.end(), proto_bytes.begin(), proto_bytes.end());
 
     const u64 pkt_id = client->SubmitRequest(ShadNet::CommandType::GetScoreRange, payload);
-    {
-        std::lock_guard lock(m_mutex_pending_score);
+    m_mutex_pending_score.Run([&] {
         PendingScoreRequest pending;
         pending.req = std::move(req);
         pending.cmd = ShadNet::CommandType::GetScoreRange;
@@ -533,7 +541,7 @@ s32 NpHandler::GetRankingByRangeA(s32 user_id, s32 service_label, u32 boardId, u
         pending.arrayNum = arrayNum;
         pending.user_id = user_id;
         m_pending_score.emplace(pkt_id, std::move(pending));
-    }
+    });
     LOG_INFO(NpHandler,
              "user_id={} service_label={} board={} startRank={} numRanks={} "
              "withComment={} withGameInfo={} pkt_id={} com_id='{}'",
@@ -551,14 +559,16 @@ s32 NpHandler::GetRankingByAccountId(s32 user_id, s32 service_label, u32 boardId
                                      Libraries::Rtc::OrbisRtcTick* lastSortDate, u32* totalRecord,
                                      std::shared_ptr<NpScore::ScoreRequestCtx> req) {
     std::shared_ptr<ShadNet::ShadNetClient> client;
-    {
-        std::lock_guard lock(m_mutex_clients);
-        auto it = m_clients.find(user_id);
-        if (it == m_clients.end()) {
-            LOG_WARNING(NpHandler, "user_id={} not connected", user_id);
-            return ORBIS_NP_ERROR_SIGNED_OUT;
-        }
-        client = it->second;
+    if (auto returned = m_mutex_clients.Run([&]() -> std::optional<s32> {
+            auto it = m_clients.find(user_id);
+            if (it == m_clients.end()) {
+                LOG_WARNING(NpHandler, "user_id={} not connected", user_id);
+                return std::optional<s32>{ORBIS_NP_ERROR_SIGNED_OUT};
+            }
+            client = it->second;
+            return std::nullopt;
+        })) {
+        return *returned;
     }
     if (!client->IsAuthenticated()) {
         return ORBIS_NP_COMMUNITY_ERROR_NO_LOGIN;
@@ -596,8 +606,7 @@ s32 NpHandler::GetRankingByAccountId(s32 user_id, s32 service_label, u32 boardId
     payload.insert(payload.end(), proto_bytes.begin(), proto_bytes.end());
 
     const u64 pkt_id = client->SubmitRequest(ShadNet::CommandType::GetScoreAccountId, payload);
-    {
-        std::lock_guard lock(m_mutex_pending_score);
+    m_mutex_pending_score.Run([&] {
         PendingScoreRequest pending;
         pending.req = std::move(req);
         pending.cmd = ShadNet::CommandType::GetScoreAccountId;
@@ -609,7 +618,7 @@ s32 NpHandler::GetRankingByAccountId(s32 user_id, s32 service_label, u32 boardId
         pending.arrayNum = accountIds.size();
         pending.user_id = user_id;
         m_pending_score.emplace(pkt_id, std::move(pending));
-    }
+    });
     LOG_INFO(NpHandler,
              "user_id={} service_label={} board={} accountIdCount={} "
              "withComment={} withGameInfo={} pkt_id={} com_id='{}'",
@@ -625,14 +634,16 @@ s32 NpHandler::GetFriendsRanking(s32 user_id, s32 service_label, u32 boardId, bo
                                  Libraries::Rtc::OrbisRtcTick* lastSortDate, u32* totalRecord,
                                  std::shared_ptr<NpScore::ScoreRequestCtx> req) {
     std::shared_ptr<ShadNet::ShadNetClient> client;
-    {
-        std::lock_guard lock(m_mutex_clients);
-        auto it = m_clients.find(user_id);
-        if (it == m_clients.end()) {
-            LOG_WARNING(NpHandler, "user_id={} not connected", user_id);
-            return ORBIS_NP_ERROR_SIGNED_OUT;
-        }
-        client = it->second;
+    if (auto returned = m_mutex_clients.Run([&]() -> std::optional<s32> {
+            auto it = m_clients.find(user_id);
+            if (it == m_clients.end()) {
+                LOG_WARNING(NpHandler, "user_id={} not connected", user_id);
+                return std::optional<s32>{ORBIS_NP_ERROR_SIGNED_OUT};
+            }
+            client = it->second;
+            return std::nullopt;
+        })) {
+        return *returned;
     }
     if (!client->IsAuthenticated()) {
         LOG_WARNING(NpHandler, "user_id={} not authenticated", user_id);
@@ -666,8 +677,7 @@ s32 NpHandler::GetFriendsRanking(s32 user_id, s32 service_label, u32 boardId, bo
     payload.insert(payload.end(), proto_bytes.begin(), proto_bytes.end());
 
     const u64 pkt_id = client->SubmitRequest(ShadNet::CommandType::GetScoreFriends, payload);
-    {
-        std::lock_guard lock(m_mutex_pending_score);
+    m_mutex_pending_score.Run([&] {
         PendingScoreRequest pending;
         pending.req = std::move(req);
         pending.cmd = ShadNet::CommandType::GetScoreFriends;
@@ -679,7 +689,7 @@ s32 NpHandler::GetFriendsRanking(s32 user_id, s32 service_label, u32 boardId, bo
         pending.arrayNum = arrayNum;
         pending.user_id = user_id;
         m_pending_score.emplace(pkt_id, std::move(pending));
-    }
+    });
     LOG_INFO(NpHandler,
              "user_id={} service_label={} board={} includeSelf={} "
              "arrayNum={} withComment={} withGameInfo={} pkt_id={} com_id='{}'",
@@ -695,14 +705,16 @@ s32 NpHandler::GetFriendsRankingA(s32 user_id, s32 service_label, u32 boardId, b
                                   Libraries::Rtc::OrbisRtcTick* lastSortDate, u32* totalRecord,
                                   std::shared_ptr<NpScore::ScoreRequestCtx> req) {
     std::shared_ptr<ShadNet::ShadNetClient> client;
-    {
-        std::lock_guard lock(m_mutex_clients);
-        auto it = m_clients.find(user_id);
-        if (it == m_clients.end()) {
-            LOG_WARNING(NpHandler, "user_id={} not connected", user_id);
-            return ORBIS_NP_ERROR_SIGNED_OUT;
-        }
-        client = it->second;
+    if (auto returned = m_mutex_clients.Run([&]() -> std::optional<s32> {
+            auto it = m_clients.find(user_id);
+            if (it == m_clients.end()) {
+                LOG_WARNING(NpHandler, "user_id={} not connected", user_id);
+                return std::optional<s32>{ORBIS_NP_ERROR_SIGNED_OUT};
+            }
+            client = it->second;
+            return std::nullopt;
+        })) {
+        return *returned;
     }
     if (!client->IsAuthenticated()) {
         LOG_WARNING(NpHandler, "user_id={} not authenticated", user_id);
@@ -736,8 +748,7 @@ s32 NpHandler::GetFriendsRankingA(s32 user_id, s32 service_label, u32 boardId, b
     payload.insert(payload.end(), proto_bytes.begin(), proto_bytes.end());
 
     const u64 pkt_id = client->SubmitRequest(ShadNet::CommandType::GetScoreFriends, payload);
-    {
-        std::lock_guard lock(m_mutex_pending_score);
+    m_mutex_pending_score.Run([&] {
         PendingScoreRequest pending;
         pending.req = std::move(req);
         pending.cmd = ShadNet::CommandType::GetScoreFriends;
@@ -749,7 +760,7 @@ s32 NpHandler::GetFriendsRankingA(s32 user_id, s32 service_label, u32 boardId, b
         pending.arrayNum = arrayNum;
         pending.user_id = user_id;
         m_pending_score.emplace(pkt_id, std::move(pending));
-    }
+    });
     LOG_INFO(NpHandler,
              "user_id={} service_label={} board={} includeSelf={} "
              "arrayNum={} withComment={} withGameInfo={} pkt_id={} com_id='{}'",
@@ -957,16 +968,18 @@ static u32 FillRankArrayFromProto(const shadnet_GetScoreResponse& resp,
 void NpHandler::OnScoreReply(s32 user_id, ShadNet::CommandType cmd, u64 pkt_id,
                              ShadNet::ErrorType error, const std::vector<u8>& body) {
     PendingScoreRequest pending;
-    {
-        std::lock_guard lock(m_mutex_pending_score);
-        auto it = m_pending_score.find(pkt_id);
-        if (it == m_pending_score.end()) {
-            LOG_WARNING(NpHandler, "no pending request for pkt_id={} cmd={}", pkt_id,
-                        static_cast<int>(cmd));
-            return;
-        }
-        pending = std::move(it->second);
-        m_pending_score.erase(it);
+    if (m_mutex_pending_score.Run([&] {
+            auto it = m_pending_score.find(pkt_id);
+            if (it == m_pending_score.end()) {
+                LOG_WARNING(NpHandler, "no pending request for pkt_id={} cmd={}", pkt_id,
+                            static_cast<int>(cmd));
+                return true;
+            }
+            pending = std::move(it->second);
+            m_pending_score.erase(it);
+            return false;
+        })) {
+        return;
     }
     auto& req = pending.req;
 

@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright 2024 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include "common/combiner.h"
 #include "common/logging/log.h"
 #include "core/libraries/error_codes.h"
 #include "core/libraries/libs.h"
@@ -12,7 +13,7 @@
 
 namespace Libraries::Http2 {
 
-std::mutex g_http2_mutex;
+Common::Combiner g_http2_mutex;
 std::map<s32, s32> requests_to_connections{};
 
 s32 PS4_SYSV_ABI sceHttp2AbortRequest(s32 req_id) {
@@ -67,26 +68,27 @@ s32 PS4_SYSV_ABI sceHttp2CreateCookieBox() {
 s32 PS4_SYSV_ABI sceHttp2CreateRequestWithURL(s32 tmpl_id, const char* method, const char* url,
                                               u64 content_length) {
     LOG_ERROR(Lib_Http2, "(STUBBED) called");
-    std::lock_guard<std::mutex> lock(g_http2_mutex);
-    // Http1 has a connection thing to go through first
-    s32 conn_id = Libraries::Http::sceHttpCreateConnectionWithURL(tmpl_id, url, true);
-    if (conn_id < 0) {
-        LOG_ERROR(Lib_Http2, "Failed to create HTTP connection, error = {:#x}", conn_id);
-        return conn_id;
-    }
-    s32 req_id =
-        Libraries::Http::sceHttpCreateRequestWithURL2(conn_id, method, url, content_length);
-    if (req_id < 0) {
-        LOG_ERROR(Lib_Http2, "Failed to create HTTP request, error = {:#x}", req_id);
-        const s32 del_result = Libraries::Http::sceHttpDeleteConnection(conn_id);
-        if (del_result < 0) {
-            LOG_ERROR(Lib_Http2, "Failed to clean up HTTP connection {}, error = {:#x}", conn_id,
-                      del_result);
+    return g_http2_mutex.Run([&]() -> s32 {
+        // Http1 has a connection thing to go through first
+        s32 conn_id = Libraries::Http::sceHttpCreateConnectionWithURL(tmpl_id, url, true);
+        if (conn_id < 0) {
+            LOG_ERROR(Lib_Http2, "Failed to create HTTP connection, error = {:#x}", conn_id);
+            return conn_id;
         }
+        s32 req_id =
+            Libraries::Http::sceHttpCreateRequestWithURL2(conn_id, method, url, content_length);
+        if (req_id < 0) {
+            LOG_ERROR(Lib_Http2, "Failed to create HTTP request, error = {:#x}", req_id);
+            const s32 del_result = Libraries::Http::sceHttpDeleteConnection(conn_id);
+            if (del_result < 0) {
+                LOG_ERROR(Lib_Http2, "Failed to clean up HTTP connection {}, error = {:#x}",
+                          conn_id, del_result);
+            }
+            return req_id;
+        }
+        requests_to_connections[req_id] = conn_id;
         return req_id;
-    }
-    requests_to_connections[req_id] = conn_id;
-    return req_id;
+    });
 }
 
 s32 PS4_SYSV_ABI sceHttp2CreateTemplate(s32 ctx_id, const char* user_agent, s32 http_ver,
@@ -107,27 +109,28 @@ s32 PS4_SYSV_ABI sceHttp2DeleteCookieBox() {
 
 s32 PS4_SYSV_ABI sceHttp2DeleteRequest(s32 req_id) {
     LOG_ERROR(Lib_Http2, "(STUBBED) called");
-    std::lock_guard<std::mutex> lock(g_http2_mutex);
-    const s32 result = Libraries::Http::sceHttpDeleteRequest(req_id);
-    if (result < 0) {
-        LOG_ERROR(Lib_Http2, "Failed to delete HTTP request, error = {:#x}", result);
-        return result;
-    }
-    const auto it = requests_to_connections.find(req_id);
-    if (it == requests_to_connections.end()) {
-        LOG_DEBUG(Lib_Http2, "No connection tracked for request {}", req_id);
+    return g_http2_mutex.Run([&]() -> s32 {
+        const s32 result = Libraries::Http::sceHttpDeleteRequest(req_id);
+        if (result < 0) {
+            LOG_ERROR(Lib_Http2, "Failed to delete HTTP request, error = {:#x}", result);
+            return result;
+        }
+        const auto it = requests_to_connections.find(req_id);
+        if (it == requests_to_connections.end()) {
+            LOG_DEBUG(Lib_Http2, "No connection tracked for request {}", req_id);
+            return ORBIS_OK;
+        }
+        const s32 conn_id = it->second;
+        requests_to_connections.erase(it);
+
+        const s32 conn_result = Libraries::Http::sceHttpDeleteConnection(conn_id);
+        if (conn_result < 0) {
+
+            LOG_ERROR(Lib_Http2, "Failed to delete HTTP connection, error = {:#x}", conn_result);
+            return conn_result;
+        }
         return ORBIS_OK;
-    }
-    const s32 conn_id = it->second;
-    requests_to_connections.erase(it);
-
-    const s32 conn_result = Libraries::Http::sceHttpDeleteConnection(conn_id);
-    if (conn_result < 0) {
-
-        LOG_ERROR(Lib_Http2, "Failed to delete HTTP connection, error = {:#x}", conn_result);
-        return conn_result;
-    }
-    return ORBIS_OK;
+    });
 }
 
 s32 PS4_SYSV_ABI sceHttp2DeleteTemplate(s32 tmpl_id) {

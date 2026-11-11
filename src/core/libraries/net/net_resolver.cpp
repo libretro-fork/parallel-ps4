@@ -13,6 +13,7 @@
 
 #include <fmt/format.h>
 
+#include "common/combiner.h"
 #include "common/logging/log.h"
 #include "core/libraries/net/net_error.h"
 #include "core/libraries/net/net_log.h"
@@ -36,7 +37,7 @@ enum class LookupKind { Ntoa = 0, Aton = 1 };
 struct Resolver {
     std::string name;
 
-    std::mutex mutex; // guards everything below
+    Common::Combiner mutex; // guards everything below
     bool running = false;
     bool destroyed = false;
     u64 lookup = 0; // bumped to orphan a running async lookup
@@ -44,22 +45,20 @@ struct Resolver {
     std::array<bool, 2> pending_abort{}; // indexed by LookupKind
 };
 
-std::mutex g_mutex;
+Common::Combiner g_mutex;
 std::unordered_map<s32, std::shared_ptr<Resolver>> g_resolvers;
 std::function<bool()> g_is_online;
 
 std::shared_ptr<Resolver> Find(s32 id) {
-    std::scoped_lock lock{g_mutex};
-    const auto it = g_resolvers.find(id);
-    return it != g_resolvers.end() ? it->second : nullptr;
+    return g_mutex.Run([&]() -> std::shared_ptr<Resolver> {
+        const auto it = g_resolvers.find(id);
+        return it != g_resolvers.end() ? it->second : nullptr;
+    });
 }
 
 bool IsOnline() {
     std::function<bool()> check;
-    {
-        std::scoped_lock lock{g_mutex};
-        check = g_is_online;
-    }
+    g_mutex.Run([&] { check = g_is_online; });
     return !check || check();
 }
 
@@ -141,26 +140,28 @@ s32 CreateResolver(std::string name) {
     const auto id = static_cast<s32>(r.value);
     auto resolver = std::make_shared<Resolver>();
     resolver->name = std::move(name);
-    std::scoped_lock lock{g_mutex};
-    g_resolvers[id] = std::move(resolver);
-    return id;
+    return g_mutex.Run([&]() -> s32 {
+        g_resolvers[id] = std::move(resolver);
+        return id;
+    });
 }
 
 int DestroyResolver(s32 id) {
     std::shared_ptr<Resolver> resolver;
-    {
-        std::scoped_lock lock{g_mutex};
-        const auto it = g_resolvers.find(id);
-        if (it == g_resolvers.end()) {
-            return ORBIS_NET_EBADF;
-        }
-        resolver = std::move(it->second);
-        g_resolvers.erase(it);
+    if (auto returned = g_mutex.Run([&]() -> std::optional<int> {
+            const auto it = g_resolvers.find(id);
+            if (it == g_resolvers.end()) {
+                return std::optional<int>{ORBIS_NET_EBADF};
+            }
+            resolver = std::move(it->second);
+            g_resolvers.erase(it);
+            return std::nullopt;
+        })) {
+        return *returned;
     }
-    {
-        std::scoped_lock lock{resolver->mutex};
+    resolver->mutex.Run([&] {
         resolver->destroyed = true; // keeps a running lookup from writing guest memory
-    }
+    });
     Core::Net::ReleaseExternalId(id);
     return 0;
 }
@@ -170,23 +171,24 @@ int AbortResolver(s32 id, u32 flags) {
     if (!resolver) {
         return ORBIS_NET_EBADF;
     }
-    std::scoped_lock lock{resolver->mutex};
-    if (resolver->running) {
-        ++resolver->lookup; // orphan the running thread
-        resolver->running = false;
-        resolver->status = ORBIS_NET_ERROR_EINTR;
-        Core::Net::SignalExternal(id, true);
-        LOG_DEBUG(Lib_Net, "resolver {}: running lookup aborted", id);
+    return resolver->mutex.Run([&]() -> int {
+        if (resolver->running) {
+            ++resolver->lookup; // orphan the running thread
+            resolver->running = false;
+            resolver->status = ORBIS_NET_ERROR_EINTR;
+            Core::Net::SignalExternal(id, true);
+            LOG_DEBUG(Lib_Net, "resolver {}: running lookup aborted", id);
+            return 0;
+        }
+        LOG_DEBUG(Lib_Net, "resolver {}: abort with nothing running, flags {:#x}", id, flags);
+        if (flags & ORBIS_NET_RESOLVER_ABORT_FLAG_NTOA_PRESERVATION) {
+            resolver->pending_abort[static_cast<size_t>(LookupKind::Ntoa)] = true;
+        }
+        if (flags & ORBIS_NET_RESOLVER_ABORT_FLAG_ATON_PRESERVATION) {
+            resolver->pending_abort[static_cast<size_t>(LookupKind::Aton)] = true;
+        }
         return 0;
-    }
-    LOG_DEBUG(Lib_Net, "resolver {}: abort with nothing running, flags {:#x}", id, flags);
-    if (flags & ORBIS_NET_RESOLVER_ABORT_FLAG_NTOA_PRESERVATION) {
-        resolver->pending_abort[static_cast<size_t>(LookupKind::Ntoa)] = true;
-    }
-    if (flags & ORBIS_NET_RESOLVER_ABORT_FLAG_ATON_PRESERVATION) {
-        resolver->pending_abort[static_cast<size_t>(LookupKind::Aton)] = true;
-    }
-    return 0;
+    });
 }
 
 namespace {
@@ -198,43 +200,47 @@ s32 RunLookup(s32 id, LookupKind kind, bool async, Work work, Deliver deliver) {
         return ORBIS_NET_ERROR_EBADF;
     }
     u64 lookup = 0;
-    {
-        std::scoped_lock lock{resolver->mutex};
-        if (resolver->running) {
-            return ORBIS_NET_ERROR_RESOLVER_EBUSY;
-        }
-        if (std::exchange(resolver->pending_abort[static_cast<size_t>(kind)], false)) {
-            LOG_DEBUG(Lib_Net, "resolver {}: lookup fails with a preserved abort", id);
-            resolver->status = ORBIS_NET_ERROR_EINTR;
-            return ORBIS_NET_ERROR_EINTR;
-        }
-        if (async) {
-            resolver->running = true;
-            resolver->status = 0;
-            lookup = ++resolver->lookup;
-        }
+    if (auto returned = resolver->mutex.Run([&]() -> std::optional<s32> {
+            if (resolver->running) {
+                return std::optional<s32>{ORBIS_NET_ERROR_RESOLVER_EBUSY};
+            }
+            if (std::exchange(resolver->pending_abort[static_cast<size_t>(kind)], false)) {
+                LOG_DEBUG(Lib_Net, "resolver {}: lookup fails with a preserved abort", id);
+                resolver->status = ORBIS_NET_ERROR_EINTR;
+                return std::optional<s32>{ORBIS_NET_ERROR_EINTR};
+            }
+            if (async) {
+                resolver->running = true;
+                resolver->status = 0;
+                lookup = ++resolver->lookup;
+            }
+            return std::nullopt;
+        })) {
+        return *returned;
     }
     if (!async) {
         auto [status, result] = work();
-        std::scoped_lock lock{resolver->mutex};
-        if (status == 0) {
-            status = deliver(result);
-        }
-        resolver->status = status;
-        return status;
+        return resolver->mutex.Run([&, status = status, result = std::move(result)]() mutable {
+            if (status == 0) {
+                status = deliver(result);
+            }
+            resolver->status = status;
+            return status;
+        });
     }
     std::thread([resolver, id, lookup, work = std::move(work), deliver = std::move(deliver)] {
         auto [status, result] = work();
-        std::scoped_lock lock{resolver->mutex};
-        if (resolver->destroyed || resolver->lookup != lookup) {
-            return; // stale, the id may have been reused
-        }
-        if (status == 0) {
-            status = deliver(result);
-        }
-        resolver->status = status;
-        resolver->running = false;
-        Core::Net::SignalExternal(id);
+        resolver->mutex.Run([&, status = status, result = std::move(result)]() mutable {
+            if (resolver->destroyed || resolver->lookup != lookup) {
+                return; // stale, the id may have been reused
+            }
+            if (status == 0) {
+                status = deliver(result);
+            }
+            resolver->status = status;
+            resolver->running = false;
+            Core::Net::SignalExternal(id);
+        });
     }).detach();
     return 0;
 }
@@ -337,14 +343,14 @@ int ResolverGetError(s32 id, s32* status) {
     if (!resolver) {
         return ORBIS_NET_EBADF;
     }
-    std::scoped_lock lock{resolver->mutex};
-    *status = resolver->status;
-    return 0;
+    return resolver->mutex.Run([&]() -> int {
+        *status = resolver->status;
+        return 0;
+    });
 }
 
 void SetResolverOnlineCheck(std::function<bool()> is_online) {
-    std::scoped_lock lock{g_mutex};
-    g_is_online = std::move(is_online);
+    g_mutex.Run([&] { g_is_online = std::move(is_online); });
 }
 
 } // namespace Libraries::Net

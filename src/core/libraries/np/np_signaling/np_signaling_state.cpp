@@ -9,6 +9,7 @@
 #include <string>
 #include <string_view>
 
+#include "common/event_mutex.h"
 #include "common/logging/log.h"
 #include "common/singleton.h"
 #include "core/libraries/error_codes.h"
@@ -570,7 +571,7 @@ static void StageBasicCallbackLocked(const NpSignalingContext& ctx, s32 ctx_id, 
     dispatch.callback = ctx.callback;
     dispatch.callback_arg = ctx.callback_arg;
     {
-        std::lock_guard<std::mutex> dlock(
+        std::lock_guard<Common::EventMutex> dlock(
             NpHandler::GetInstance().GetSignalingState().dispatch_mutex);
         if (NpHandler::GetInstance().GetSignalingState().dispatch_stop) {
             return;

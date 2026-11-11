@@ -4,6 +4,7 @@
 #pragma once
 
 #include <mutex>
+#include "common/combiner.h"
 #include "common/types.h"
 
 namespace Libraries::Net {
@@ -24,7 +25,7 @@ private:
     std::string ip{};
     u32 external_ip{0};
     u32 nat_type{0};
-    std::mutex m_mutex;
+    Common::Combiner m_mutex;
 
 public:
     const std::array<u8, 6>& GetEthernetAddr() const;

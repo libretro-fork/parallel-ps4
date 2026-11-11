@@ -166,8 +166,7 @@ Transport::~Transport() {
 }
 
 void Transport::SetOutgoingLossForTesting(double probability) {
-    std::scoped_lock lock{mutex_};
-    loss_for_testing_ = probability;
+    mutex_.Run([&] { loss_for_testing_ = probability; });
 }
 
 std::shared_ptr<DatagramSocket> Transport::CreateDatagram() {
@@ -179,30 +178,29 @@ std::shared_ptr<StreamSocket> Transport::CreateStream() {
 }
 
 Error Transport::SendSignaling(std::span<const u8> data, const Endpoint& to) {
-    std::scoped_lock lock{mutex_};
-    return SendPacket(codec_->EncodeSignaling(data, to), to);
+    return mutex_.Run([&]() -> Error { return SendPacket(codec_->EncodeSignaling(data, to), to); });
 }
 
 bool Transport::RecvSignaling(size_t channel, std::vector<u8>* data, Endpoint* from) {
-    std::scoped_lock lock{mutex_};
-    if (channel >= signaling_.size() || signaling_[channel].empty()) {
-        return false;
-    }
-    auto& queue = signaling_[channel];
-    *data = std::move(queue.front().first);
-    *from = queue.front().second;
-    queue.pop_front();
-    return true;
+    return mutex_.Run([&]() -> bool {
+        if (channel >= signaling_.size() || signaling_[channel].empty()) {
+            return false;
+        }
+        auto& queue = signaling_[channel];
+        *data = std::move(queue.front().first);
+        *from = queue.front().second;
+        queue.pop_front();
+        return true;
+    });
 }
 
 void Transport::ThreadMain() {
     while (!stop_.load()) {
         std::optional<Clock::time_point> deadline;
-        {
-            std::scoped_lock lock{mutex_};
+        mutex_.Run([&] {
             deadline = EarliestDeadline();
             sleeping_until_ = deadline.value_or(Clock::time_point::max());
-        }
+        });
         const auto result = Host::WaitOne(socket_, Host::Readable, kick_, deadline);
         if (stop_.load()) {
             return;
@@ -211,21 +209,24 @@ void Transport::ThreadMain() {
             kick_.Drain();
         }
 
-        std::scoped_lock lock{mutex_};
-        sleeping_until_ = Clock::time_point::min();
-        const auto now = Clock::now();
-        for (int i = 0; i < 1024; ++i) { // don't starve timers
-            sockaddr_storage from{};
-            socklen_t from_len = sizeof(from);
-            const auto r = Host::RecvFrom(socket_, receive_buffer_.data(), receive_buffer_.size(),
-                                          0, reinterpret_cast<sockaddr*>(&from), &from_len);
-            if (r.error != Error::Ok) {
-                break;
+        mutex_.Run([&] {
+            sleeping_until_ = Clock::time_point::min();
+            const auto now = Clock::now();
+            for (int i = 0; i < 1024; ++i) { // don't starve timers
+                sockaddr_storage from{};
+                socklen_t from_len = sizeof(from);
+                const auto r =
+                    Host::RecvFrom(socket_, receive_buffer_.data(), receive_buffer_.size(), 0,
+                                   reinterpret_cast<sockaddr*>(&from), &from_len);
+                if (r.error != Error::Ok) {
+                    break;
+                }
+                HandlePacket({receive_buffer_.data(), static_cast<size_t>(r.value)},
+                             Endpoint::FromSockaddr(reinterpret_cast<sockaddr*>(&from), from_len),
+                             now);
             }
-            HandlePacket({receive_buffer_.data(), static_cast<size_t>(r.value)},
-                         Endpoint::FromSockaddr(reinterpret_cast<sockaddr*>(&from), from_len), now);
-        }
-        RunTimers(now);
+            RunTimers(now);
+        });
     }
 }
 
@@ -454,8 +455,7 @@ DatagramSocket::~DatagramSocket() {
 }
 
 Error DatagramSocket::Bind(u16 vport) {
-    std::scoped_lock lock{transport_->mutex_};
-    return BindLocked(vport);
+    return transport_->mutex_.Run([&]() -> Error { return BindLocked(vport); });
 }
 
 Error DatagramSocket::BindLocked(u16 vport) {
@@ -477,82 +477,85 @@ Error DatagramSocket::BindLocked(u16 vport) {
 }
 
 Error DatagramSocket::SetPeer(const Endpoint& peer, u16 vport) {
-    std::scoped_lock lock{transport_->mutex_};
-    if (vport == 0) {
-        return Error::AddrNotAvail;
-    }
-    peer_ = std::pair{peer, vport};
-    if (binding_) {
-        binding_->peer = peer_;
-    }
-    return Error::Ok;
+    return transport_->mutex_.Run([&]() -> Error {
+        if (vport == 0) {
+            return Error::AddrNotAvail;
+        }
+        peer_ = std::pair{peer, vport};
+        if (binding_) {
+            binding_->peer = peer_;
+        }
+        return Error::Ok;
+    });
 }
 
 void DatagramSocket::SetProtection(Protection protection) {
-    std::scoped_lock lock{transport_->mutex_};
-    protection_ = protection;
+    transport_->mutex_.Run([&] { protection_ = protection; });
 }
 
 IoResult DatagramSocket::SendTo(std::span<const u8> data, const Endpoint* to, u16 to_vport,
                                 Protection extra) {
-    std::scoped_lock lock{transport_->mutex_};
-    if (!binding_ && BindLocked(0) != Error::Ok) { // implicit bind
-        return {0, Error::AddrNotAvail};
-    }
-    if (to == nullptr) {
-        if (!peer_) {
-            return {0, Error::DestAddrReq};
+    return transport_->mutex_.Run([&]() -> IoResult {
+        if (!binding_ && BindLocked(0) != Error::Ok) { // implicit bind
+            return {0, Error::AddrNotAvail};
         }
-        to = &peer_->first;
-        to_vport = peer_->second;
-    }
-    if (to_vport == 0) {
-        return {0, Error::AddrNotAvail};
-    }
-    const Protection protection{protection_.crypto || extra.crypto,
-                                protection_.signature || extra.signature};
-    const auto packet =
-        transport_->codec_->EncodeDatagram(binding_->vport, to_vport, data, *to, protection);
-    const Error e = transport_->SendPacket(packet, *to);
-    if (e == Error::WouldBlock || e == Error::NoBufs) {
-        // PS4 drops instead of returning ENOBUFS
-        return {data.size(), Error::Ok};
-    }
-    return e == Error::Ok ? IoResult{data.size(), Error::Ok} : IoResult{0, e};
+        if (to == nullptr) {
+            if (!peer_) {
+                return {0, Error::DestAddrReq};
+            }
+            to = &peer_->first;
+            to_vport = peer_->second;
+        }
+        if (to_vport == 0) {
+            return {0, Error::AddrNotAvail};
+        }
+        const Protection protection{protection_.crypto || extra.crypto,
+                                    protection_.signature || extra.signature};
+        const auto packet =
+            transport_->codec_->EncodeDatagram(binding_->vport, to_vport, data, *to, protection);
+        const Error e = transport_->SendPacket(packet, *to);
+        if (e == Error::WouldBlock || e == Error::NoBufs) {
+            // PS4 drops instead of returning ENOBUFS
+            return {data.size(), Error::Ok};
+        }
+        return e == Error::Ok ? IoResult{data.size(), Error::Ok} : IoResult{0, e};
+    });
 }
 
 IoResult DatagramSocket::RecvFrom(std::span<u8> out, bool peek, Endpoint* from, u16* from_vport) {
-    std::scoped_lock lock{transport_->mutex_};
-    if (!binding_ || binding_->queue.empty()) {
-        return {0, Error::WouldBlock};
-    }
-    auto& packet = binding_->queue.front();
-    const size_t n = std::min(out.size(), packet.payload.size()); // rest is discarded
-    std::copy_n(packet.payload.begin(), n, out.begin());
-    if (from) {
-        *from = packet.from;
-    }
-    if (from_vport) {
-        *from_vport = packet.src_vport;
-    }
-    if (!peek) {
-        binding_->bytes -= packet.payload.size();
-        binding_->queue.pop_front();
-        if (binding_->queue.empty()) {
-            readiness_->readable.Set(false);
+    return transport_->mutex_.Run([&]() -> IoResult {
+        if (!binding_ || binding_->queue.empty()) {
+            return {0, Error::WouldBlock};
         }
-    }
-    return {n, Error::Ok};
+        auto& packet = binding_->queue.front();
+        const size_t n = std::min(out.size(), packet.payload.size()); // rest is discarded
+        std::copy_n(packet.payload.begin(), n, out.begin());
+        if (from) {
+            *from = packet.from;
+        }
+        if (from_vport) {
+            *from_vport = packet.src_vport;
+        }
+        if (!peek) {
+            binding_->bytes -= packet.payload.size();
+            binding_->queue.pop_front();
+            if (binding_->queue.empty()) {
+                readiness_->readable.Set(false);
+            }
+        }
+        return {n, Error::Ok};
+    });
 }
 
 u32 DatagramSocket::Events() const {
-    std::scoped_lock lock{transport_->mutex_};
-    return Host::EvOut | (binding_ && !binding_->queue.empty() ? static_cast<u32>(Host::EvIn) : 0u);
+    return transport_->mutex_.Run([&]() -> u32 {
+        return Host::EvOut |
+               (binding_ && !binding_->queue.empty() ? static_cast<u32>(Host::EvIn) : 0u);
+    });
 }
 
 u16 DatagramSocket::BoundVport() const {
-    std::scoped_lock lock{transport_->mutex_};
-    return binding_ ? binding_->vport : 0;
+    return transport_->mutex_.Run([&]() -> u16 { return binding_ ? binding_->vport : 0; });
 }
 
 u16 DatagramSocket::TransportPort() const {
@@ -560,30 +563,31 @@ u16 DatagramSocket::TransportPort() const {
 }
 
 bool DatagramSocket::GetPeer(Endpoint* peer, u16* peer_vport) const {
-    std::scoped_lock lock{transport_->mutex_};
-    if (!peer_) {
-        return false;
-    }
-    *peer = peer_->first;
-    *peer_vport = peer_->second;
-    return true;
+    return transport_->mutex_.Run([&]() -> bool {
+        if (!peer_) {
+            return false;
+        }
+        *peer = peer_->first;
+        *peer_vport = peer_->second;
+        return true;
+    });
 }
 
 Protection DatagramSocket::GetProtection() const {
-    std::scoped_lock lock{transport_->mutex_};
-    return protection_;
+    return transport_->mutex_.Run([&]() -> Protection { return protection_; });
 }
 
 void DatagramSocket::Close() {
-    std::scoped_lock lock{transport_->mutex_};
-    if (!binding_) {
-        return;
-    }
-    const auto it = transport_->datagram_bindings_.find(binding_->vport);
-    if (it != transport_->datagram_bindings_.end() && it->second == binding_) {
-        transport_->datagram_bindings_.erase(it);
-    }
-    binding_.reset();
+    transport_->mutex_.Run([&] {
+        if (!binding_) {
+            return;
+        }
+        const auto it = transport_->datagram_bindings_.find(binding_->vport);
+        if (it != transport_->datagram_bindings_.end() && it->second == binding_) {
+            transport_->datagram_bindings_.erase(it);
+        }
+        binding_.reset();
+    });
 }
 
 StreamSocket::StreamSocket(std::shared_ptr<Transport> transport,
@@ -596,13 +600,11 @@ StreamSocket::~StreamSocket() {
 }
 
 void StreamSocket::SetProtection(Protection protection) {
-    std::scoped_lock lock{transport_->mutex_};
-    protection_ = protection;
+    transport_->mutex_.Run([&] { protection_ = protection; });
 }
 
 Error StreamSocket::Bind(u16 vport) {
-    std::scoped_lock lock{transport_->mutex_};
-    return BindLocked(vport);
+    return transport_->mutex_.Run([&]() -> Error { return BindLocked(vport); });
 }
 
 Error StreamSocket::BindLocked(u16 vport) {
@@ -622,236 +624,248 @@ Error StreamSocket::BindLocked(u16 vport) {
 }
 
 Error StreamSocket::Listen(int backlog) {
-    std::scoped_lock lock{transport_->mutex_};
-    if (connection_ || closed_) {
-        return Error::Inval;
-    }
-    if (bound_vport_ == 0 && BindLocked(0) != Error::Ok) {
-        return Error::AddrNotAvail;
-    }
-    const int clamped = std::clamp(backlog, 1, transport_->config_.max_backlog);
-    if (listener_) {
+    return transport_->mutex_.Run([&]() -> Error {
+        if (connection_ || closed_) {
+            return Error::Inval;
+        }
+        if (bound_vport_ == 0 && BindLocked(0) != Error::Ok) {
+            return Error::AddrNotAvail;
+        }
+        const int clamped = std::clamp(backlog, 1, transport_->config_.max_backlog);
+        if (listener_) {
+            listener_->backlog = clamped;
+            return Error::Ok;
+        }
+        listener_ = std::make_shared<ListenerState>();
+        listener_->vport = bound_vport_;
         listener_->backlog = clamped;
+        listener_->protection = protection_;
+        listener_->readiness = readiness_;
+        transport_->listeners_[bound_vport_] = listener_;
         return Error::Ok;
-    }
-    listener_ = std::make_shared<ListenerState>();
-    listener_->vport = bound_vport_;
-    listener_->backlog = clamped;
-    listener_->protection = protection_;
-    listener_->readiness = readiness_;
-    transport_->listeners_[bound_vport_] = listener_;
-    return Error::Ok;
+    });
 }
 
 Error StreamSocket::Connect(const Endpoint& peer, u16 peer_vport) {
-    std::scoped_lock lock{transport_->mutex_};
-    if (listener_ || closed_) {
-        return Error::Inval;
-    }
-    if (connection_) {
-        const TcpState state = connection_->tcp->State();
-        return state == TcpState::SynSent || state == TcpState::SynReceived ? Error::Already
-                                                                            : Error::IsConn;
-    }
-    if (peer_vport == 0) {
-        return Error::AddrNotAvail;
-    }
-    if (bound_vport_ == 0 && BindLocked(0) != Error::Ok) {
-        return Error::AddrNotAvail;
-    }
-    const ConnectionKey key{peer, peer_vport, bound_vport_};
-    if (transport_->connections_.contains(key)) {
-        return Error::AddrInUse; // e.g. old connection in TIME-WAIT
-    }
-    connection_ = transport_->NewConnection(key, protection_, readiness_);
-    connection_->released = false;
-    connection_->tcp->Connect(Clock::now());
-    transport_->Update(connection_);
-    transport_->Reschedule(*connection_);
-    return Error::InProgress;
+    return transport_->mutex_.Run([&]() -> Error {
+        if (listener_ || closed_) {
+            return Error::Inval;
+        }
+        if (connection_) {
+            const TcpState state = connection_->tcp->State();
+            return state == TcpState::SynSent || state == TcpState::SynReceived ? Error::Already
+                                                                                : Error::IsConn;
+        }
+        if (peer_vport == 0) {
+            return Error::AddrNotAvail;
+        }
+        if (bound_vport_ == 0 && BindLocked(0) != Error::Ok) {
+            return Error::AddrNotAvail;
+        }
+        const ConnectionKey key{peer, peer_vport, bound_vport_};
+        if (transport_->connections_.contains(key)) {
+            return Error::AddrInUse; // e.g. old connection in TIME-WAIT
+        }
+        connection_ = transport_->NewConnection(key, protection_, readiness_);
+        connection_->released = false;
+        connection_->tcp->Connect(Clock::now());
+        transport_->Update(connection_);
+        transport_->Reschedule(*connection_);
+        return Error::InProgress;
+    });
 }
 
 Error StreamSocket::ConnectResult() const {
-    std::scoped_lock lock{transport_->mutex_};
-    if (!connection_) {
-        return Error::NotConn;
-    }
-    const TcpConnection& tcp = *connection_->tcp;
-    if (tcp.PendingError() != Error::Ok) {
-        return tcp.PendingError();
-    }
-    switch (tcp.State()) {
-    case TcpState::SynSent:
-    case TcpState::SynReceived:
-        return Error::InProgress;
-    case TcpState::Closed:
-        return Error::NotConn;
-    default:
-        return Error::Ok;
-    }
+    return transport_->mutex_.Run([&]() -> Error {
+        if (!connection_) {
+            return Error::NotConn;
+        }
+        const TcpConnection& tcp = *connection_->tcp;
+        if (tcp.PendingError() != Error::Ok) {
+            return tcp.PendingError();
+        }
+        switch (tcp.State()) {
+        case TcpState::SynSent:
+        case TcpState::SynReceived:
+            return Error::InProgress;
+        case TcpState::Closed:
+            return Error::NotConn;
+        default:
+            return Error::Ok;
+        }
+    });
 }
 
 std::shared_ptr<StreamSocket> StreamSocket::Accept(Endpoint* peer, u16* peer_vport, Error* error) {
-    std::scoped_lock lock{transport_->mutex_};
-    if (!listener_) {
-        *error = Error::Inval;
-        return nullptr;
-    }
-    if (listener_->accept_queue.empty()) {
-        *error = Error::WouldBlock;
-        return nullptr;
-    }
-    auto connection = std::move(listener_->accept_queue.front());
-    listener_->accept_queue.pop_front();
-    if (listener_->accept_queue.empty()) {
-        readiness_->readable.Set(false);
-    }
-    connection->released = false;
-    std::shared_ptr<StreamSocket> accepted(new StreamSocket(transport_, connection->readiness));
-    accepted->protection_ = connection->protection;
-    accepted->bound_vport_ = connection->key.local_vport; // listener owns the vport
-    accepted->connection_ = connection;
-    if (peer) {
-        *peer = connection->key.peer;
-    }
-    if (peer_vport) {
-        *peer_vport = connection->key.peer_vport;
-    }
-    transport_->Update(connection);
-    *error = Error::Ok;
-    return accepted;
+    return transport_->mutex_.Run([&]() -> std::shared_ptr<StreamSocket> {
+        if (!listener_) {
+            *error = Error::Inval;
+            return nullptr;
+        }
+        if (listener_->accept_queue.empty()) {
+            *error = Error::WouldBlock;
+            return nullptr;
+        }
+        auto connection = std::move(listener_->accept_queue.front());
+        listener_->accept_queue.pop_front();
+        if (listener_->accept_queue.empty()) {
+            readiness_->readable.Set(false);
+        }
+        connection->released = false;
+        std::shared_ptr<StreamSocket> accepted(new StreamSocket(transport_, connection->readiness));
+        accepted->protection_ = connection->protection;
+        accepted->bound_vport_ = connection->key.local_vport; // listener owns the vport
+        accepted->connection_ = connection;
+        if (peer) {
+            *peer = connection->key.peer;
+        }
+        if (peer_vport) {
+            *peer_vport = connection->key.peer_vport;
+        }
+        transport_->Update(connection);
+        *error = Error::Ok;
+        return accepted;
+    });
 }
 
 IoResult StreamSocket::Send(std::span<const u8> data) {
-    std::scoped_lock lock{transport_->mutex_};
-    if (!connection_) {
-        return {0, Error::NotConn};
-    }
-    const auto r = connection_->tcp->Send(data, Clock::now());
-    transport_->Update(connection_);
-    transport_->Reschedule(*connection_);
-    return {r.bytes, r.error};
+    return transport_->mutex_.Run([&]() -> IoResult {
+        if (!connection_) {
+            return {0, Error::NotConn};
+        }
+        const auto r = connection_->tcp->Send(data, Clock::now());
+        transport_->Update(connection_);
+        transport_->Reschedule(*connection_);
+        return {r.bytes, r.error};
+    });
 }
 
 IoResult StreamSocket::Recv(std::span<u8> out, bool peek) {
-    std::scoped_lock lock{transport_->mutex_};
-    if (!connection_) {
-        return {0, Error::NotConn};
-    }
-    if (read_shutdown_) {
-        return {0, Error::Ok};
-    }
-    const auto r = connection_->tcp->Recv(out, peek, Clock::now());
-    transport_->Update(connection_);
-    return {r.bytes, r.error};
+    return transport_->mutex_.Run([&]() -> IoResult {
+        if (!connection_) {
+            return {0, Error::NotConn};
+        }
+        if (read_shutdown_) {
+            return {0, Error::Ok};
+        }
+        const auto r = connection_->tcp->Recv(out, peek, Clock::now());
+        transport_->Update(connection_);
+        return {r.bytes, r.error};
+    });
 }
 
 Error StreamSocket::Shutdown(int how) {
-    std::scoped_lock lock{transport_->mutex_};
-    if (!connection_) {
-        return Error::NotConn;
-    }
-    if (how < 0 || how > 2) {
-        return Error::Inval;
-    }
-    if (how != 1) {
-        read_shutdown_ = true;
-        readiness_->readable.Set(true); // reads return EOF now
-    }
-    if (how != 0) {
-        connection_->tcp->Shutdown(Clock::now());
-        transport_->Update(connection_);
-        transport_->Reschedule(*connection_);
-    }
-    return Error::Ok;
+    return transport_->mutex_.Run([&]() -> Error {
+        if (!connection_) {
+            return Error::NotConn;
+        }
+        if (how < 0 || how > 2) {
+            return Error::Inval;
+        }
+        if (how != 1) {
+            read_shutdown_ = true;
+            readiness_->readable.Set(true); // reads return EOF now
+        }
+        if (how != 0) {
+            connection_->tcp->Shutdown(Clock::now());
+            transport_->Update(connection_);
+            transport_->Reschedule(*connection_);
+        }
+        return Error::Ok;
+    });
 }
 
 void StreamSocket::Close() {
-    std::scoped_lock lock{transport_->mutex_};
-    if (closed_) {
-        return;
-    }
-    closed_ = true;
-    if (listener_) {
-        listener_->closed = true;
-        const auto it = transport_->listeners_.find(listener_->vport);
-        if (it != transport_->listeners_.end() && it->second == listener_) {
-            transport_->listeners_.erase(it);
+    transport_->mutex_.Run([&] {
+        if (closed_) {
+            return;
         }
-        for (const auto& pending : listener_->accept_queue) {
-            pending->tcp->Abort(); // reset unaccepted, like BSD
-            transport_->Update(pending);
+        closed_ = true;
+        if (listener_) {
+            listener_->closed = true;
+            const auto it = transport_->listeners_.find(listener_->vport);
+            if (it != transport_->listeners_.end() && it->second == listener_) {
+                transport_->listeners_.erase(it);
+            }
+            for (const auto& pending : listener_->accept_queue) {
+                pending->tcp->Abort(); // reset unaccepted, like BSD
+                transport_->Update(pending);
+            }
+            listener_->accept_queue.clear();
+            listener_.reset();
         }
-        listener_->accept_queue.clear();
-        listener_.reset();
-    }
-    if (connection_) {
-        connection_->released = true;
-        connection_->tcp->Close(Clock::now()); // FIN, or RST if data is unread
-        transport_->Update(connection_);
-        transport_->Reschedule(*connection_);
-        connection_.reset();
-    }
-    if (owns_vport_) {
-        auto& count = transport_->stream_vports_in_use_[bound_vport_];
-        if (--count <= 0) {
-            transport_->stream_vports_in_use_.erase(bound_vport_);
+        if (connection_) {
+            connection_->released = true;
+            connection_->tcp->Close(Clock::now()); // FIN, or RST if data is unread
+            transport_->Update(connection_);
+            transport_->Reschedule(*connection_);
+            connection_.reset();
         }
-        owns_vport_ = false;
-    }
+        if (owns_vport_) {
+            auto& count = transport_->stream_vports_in_use_[bound_vport_];
+            if (--count <= 0) {
+                transport_->stream_vports_in_use_.erase(bound_vport_);
+            }
+            owns_vport_ = false;
+        }
+    });
 }
 
 void StreamSocket::Abort() {
-    std::scoped_lock lock{transport_->mutex_};
-    if (connection_) {
-        connection_->tcp->Abort();
-        transport_->Update(connection_);
-    }
+    transport_->mutex_.Run([&] {
+        if (connection_) {
+            connection_->tcp->Abort();
+            transport_->Update(connection_);
+        }
+    });
 }
 
 u32 StreamSocket::Events() const {
-    std::scoped_lock lock{transport_->mutex_};
-    if (listener_) {
-        return listener_->accept_queue.empty() ? 0u : static_cast<u32>(Host::EvIn);
-    }
-    if (!connection_) {
-        return 0;
-    }
-    const TcpConnection& tcp = *connection_->tcp;
-    u32 events = 0;
-    if (tcp.Readable() || read_shutdown_) {
-        events |= Host::EvIn;
-    }
-    if (tcp.Writable()) {
-        events |= Host::EvOut;
-    }
-    if (tcp.PendingError() != Error::Ok) {
-        events |= Host::EvErr;
-    }
-    if (tcp.State() == TcpState::Closed || tcp.State() == TcpState::TimeWait || tcp.ReceivedFin()) {
-        events |= Host::EvHup; // TODO: peer FIN alone is RDHUP on Linux, not HUP
-    }
-    return events;
+    return transport_->mutex_.Run([&]() -> u32 {
+        if (listener_) {
+            return listener_->accept_queue.empty() ? 0u : static_cast<u32>(Host::EvIn);
+        }
+        if (!connection_) {
+            return 0;
+        }
+        const TcpConnection& tcp = *connection_->tcp;
+        u32 events = 0;
+        if (tcp.Readable() || read_shutdown_) {
+            events |= Host::EvIn;
+        }
+        if (tcp.Writable()) {
+            events |= Host::EvOut;
+        }
+        if (tcp.PendingError() != Error::Ok) {
+            events |= Host::EvErr;
+        }
+        if (tcp.State() == TcpState::Closed || tcp.State() == TcpState::TimeWait ||
+            tcp.ReceivedFin()) {
+            events |= Host::EvHup; // TODO: peer FIN alone is RDHUP on Linux, not HUP
+        }
+        return events;
+    });
 }
 
 std::optional<TcpState> StreamSocket::State() const {
-    std::scoped_lock lock{transport_->mutex_};
-    return connection_ ? std::optional{connection_->tcp->State()} : std::nullopt;
+    return transport_->mutex_.Run([&]() -> std::optional<TcpState> {
+        return connection_ ? std::optional{connection_->tcp->State()} : std::nullopt;
+    });
 }
 
 bool StreamSocket::GetPeer(Endpoint* peer, u16* peer_vport) const {
-    std::scoped_lock lock{transport_->mutex_};
-    if (!connection_) {
-        return false;
-    }
-    *peer = connection_->key.peer;
-    *peer_vport = connection_->key.peer_vport;
-    return true;
+    return transport_->mutex_.Run([&]() -> bool {
+        if (!connection_) {
+            return false;
+        }
+        *peer = connection_->key.peer;
+        *peer_vport = connection_->key.peer_vport;
+        return true;
+    });
 }
 
 u16 StreamSocket::BoundVport() const {
-    std::scoped_lock lock{transport_->mutex_};
-    return bound_vport_;
+    return transport_->mutex_.Run([&]() -> u16 { return bound_vport_; });
 }
 
 u16 StreamSocket::TransportPort() const {
@@ -859,8 +873,7 @@ u16 StreamSocket::TransportPort() const {
 }
 
 Protection StreamSocket::GetProtection() const {
-    std::scoped_lock lock{transport_->mutex_};
-    return protection_;
+    return transport_->mutex_.Run([&]() -> Protection { return protection_; });
 }
 
 } // namespace Core::Net::P2P

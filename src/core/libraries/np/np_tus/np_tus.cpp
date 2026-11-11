@@ -5,6 +5,7 @@
 #include <cstring>
 #include <map>
 #include <fmt/format.h>
+#include "common/combiner.h"
 #include "common/logging/log.h"
 #include "core/libraries/error_codes.h"
 #include "core/libraries/libs.h"
@@ -60,54 +61,58 @@ constexpr u64 TssMaxSize = 64 * 1024U;
 constexpr s32 TssMaxSlotId = 15;
 constexpr int TusMaxUsersPerRequest = 101;
 
-static std::mutex g_mutex;
+static Common::Combiner g_mutex;
 static std::map<int, NpTusTitleContext> g_title_ctxs;
 static std::map<int, NpTusRequest> g_requests;
 
 static s32 FakeAsyncComplete(int reqId,
                              s32 result = ORBIS_OK) { // temp function to complete async requests
-    std::lock_guard lock(g_mutex);
-    auto it = g_requests.find(reqId);
-    if (it == g_requests.end()) {
-        return ORBIS_NP_COMMUNITY_ERROR_INVALID_ID;
-    }
-    auto ctx = std::make_shared<TusRequestCtx>();
-    ctx->SetResult(result);
-    it->second.ctx = std::move(ctx);
-    return ORBIS_OK;
+    return g_mutex.Run([&]() -> s32 {
+        auto it = g_requests.find(reqId);
+        if (it == g_requests.end()) {
+            return ORBIS_NP_COMMUNITY_ERROR_INVALID_ID;
+        }
+        auto ctx = std::make_shared<TusRequestCtx>();
+        ctx->SetResult(result);
+        it->second.ctx = std::move(ctx);
+        return ORBIS_OK;
+    });
 }
 static int g_next_ctx_id = 1; // 0 stays invalid
 static int g_next_req_id = 1;
 
 s32 GetRequest(int requestId, NpTusRequest** out) {
-    std::lock_guard lock(g_mutex);
-    auto it = g_requests.find(requestId);
-    if (it == g_requests.end()) {
-        LOG_ERROR(Lib_NpTus, "Invalid requestId {}", requestId);
-        return ORBIS_NP_COMMUNITY_ERROR_INVALID_ID;
-    }
-    *out = &it->second;
-    return ORBIS_OK;
+    return g_mutex.Run([&]() -> s32 {
+        auto it = g_requests.find(requestId);
+        if (it == g_requests.end()) {
+            LOG_ERROR(Lib_NpTus, "Invalid requestId {}", requestId);
+            return ORBIS_NP_COMMUNITY_ERROR_INVALID_ID;
+        }
+        *out = &it->second;
+        return ORBIS_OK;
+    });
 }
 static s32 ResolveTus(int requestId, NpTusRequest** req_out, u32* svc_out, s32* uid_out,
                       std::string* selfNpId_out) {
     OrbisNpId selfNp{};
-    {
-        std::lock_guard lock(g_mutex);
-        auto rit = g_requests.find(requestId);
-        if (rit == g_requests.end()) {
-            LOG_ERROR(Lib_NpTus, "Invalid requestId {}", requestId);
-            return ORBIS_NP_COMMUNITY_ERROR_INVALID_ID;
-        }
-        auto cit = g_title_ctxs.find(rit->second.titleCtxId);
-        if (cit == g_title_ctxs.end()) {
-            LOG_ERROR(Lib_NpTus, " Invalid titleCtxId {} for request {}", rit->second.titleCtxId,
-                      requestId);
-            return ORBIS_NP_COMMUNITY_ERROR_INVALID_ID;
-        }
-        *req_out = &rit->second;
-        *svc_out = cit->second.serviceLabel;
-        selfNp = cit->second.npId;
+    if (auto returned = g_mutex.Run([&]() -> std::optional<s32> {
+            auto rit = g_requests.find(requestId);
+            if (rit == g_requests.end()) {
+                LOG_ERROR(Lib_NpTus, "Invalid requestId {}", requestId);
+                return std::optional<s32>{ORBIS_NP_COMMUNITY_ERROR_INVALID_ID};
+            }
+            auto cit = g_title_ctxs.find(rit->second.titleCtxId);
+            if (cit == g_title_ctxs.end()) {
+                LOG_ERROR(Lib_NpTus, " Invalid titleCtxId {} for request {}",
+                          rit->second.titleCtxId, requestId);
+                return std::optional<s32>{ORBIS_NP_COMMUNITY_ERROR_INVALID_ID};
+            }
+            *req_out = &rit->second;
+            *svc_out = cit->second.serviceLabel;
+            selfNp = cit->second.npId;
+            return std::nullopt;
+        })) {
+        return *returned;
     }
     *uid_out = Libraries::Np::NpHandler::GetInstance().GetUserIdByOnlineId(selfNp.handle);
     if (selfNpId_out) {
@@ -130,17 +135,18 @@ s32 PS4_SYSV_ABI sceNpTusCreateNpTitleCtx(OrbisNpServiceLabel serviceLabel, Orbi
     }
     LOG_INFO(Lib_NpTus, "serviceLabel = {}, npId->data = {}", serviceLabel, npId->handle.data);
 
-    std::lock_guard lock(g_mutex);
-    if (g_title_ctxs.size() >= TusMaxTitleCtx) {
-        LOG_ERROR(Lib_NpTus, "Max title contexts reached");
-        return ORBIS_NP_COMMUNITY_ERROR_TOO_MANY_OBJECTS;
-    }
-    const int id = g_next_ctx_id++;
-    NpTusTitleContext tc;
-    tc.serviceLabel = serviceLabel;
-    tc.npId = *npId;
-    g_title_ctxs.emplace(id, tc);
-    return id;
+    return g_mutex.Run([&]() -> s32 {
+        if (g_title_ctxs.size() >= TusMaxTitleCtx) {
+            LOG_ERROR(Lib_NpTus, "Max title contexts reached");
+            return ORBIS_NP_COMMUNITY_ERROR_TOO_MANY_OBJECTS;
+        }
+        const int id = g_next_ctx_id++;
+        NpTusTitleContext tc;
+        tc.serviceLabel = serviceLabel;
+        tc.npId = *npId;
+        g_title_ctxs.emplace(id, tc);
+        return id;
+    });
 }
 
 s32 PS4_SYSV_ABI sceNpTssCreateNpTitleCtx(OrbisNpServiceLabel serviceLabel, OrbisNpId* npId) {
@@ -170,27 +176,29 @@ s32 PS4_SYSV_ABI sceNpTssCreateNpTitleCtxA(OrbisNpServiceLabel serviceLabel,
 s32 PS4_SYSV_ABI sceNpTusDeleteNpTitleCtx(int ctxId) {
     LOG_INFO(Lib_NpTus, "ctxId = {}", ctxId);
 
-    std::lock_guard lock(g_mutex);
-    auto it = g_title_ctxs.find(ctxId);
-    if (it == g_title_ctxs.end()) {
-        LOG_ERROR(Lib_NpTus, "Invalid ctxId {}", ctxId);
-        return ORBIS_NP_COMMUNITY_ERROR_INVALID_ID;
-    }
-
-    for (auto rit = g_requests.begin(); rit != g_requests.end();) {
-        if (rit->second.titleCtxId == ctxId) {
-            if (rit->second.ctx) {
-                LOG_ERROR(Lib_NpTus, "Cannot delete title context {}: request {} is still active",
-                          ctxId, rit->first);
-                rit->second.ctx->SetResult(ORBIS_NP_COMMUNITY_ERROR_ABORTED);
-            }
-            rit = g_requests.erase(rit);
-        } else {
-            ++rit;
+    return g_mutex.Run([&]() -> s32 {
+        auto it = g_title_ctxs.find(ctxId);
+        if (it == g_title_ctxs.end()) {
+            LOG_ERROR(Lib_NpTus, "Invalid ctxId {}", ctxId);
+            return ORBIS_NP_COMMUNITY_ERROR_INVALID_ID;
         }
-    }
-    g_title_ctxs.erase(it);
-    return ORBIS_OK;
+
+        for (auto rit = g_requests.begin(); rit != g_requests.end();) {
+            if (rit->second.titleCtxId == ctxId) {
+                if (rit->second.ctx) {
+                    LOG_ERROR(Lib_NpTus,
+                              "Cannot delete title context {}: request {} is still active", ctxId,
+                              rit->first);
+                    rit->second.ctx->SetResult(ORBIS_NP_COMMUNITY_ERROR_ABORTED);
+                }
+                rit = g_requests.erase(rit);
+            } else {
+                ++rit;
+            }
+        }
+        g_title_ctxs.erase(it);
+        return ORBIS_OK;
+    });
 }
 
 //***********************************
@@ -199,53 +207,57 @@ s32 PS4_SYSV_ABI sceNpTusDeleteNpTitleCtx(int ctxId) {
 s32 PS4_SYSV_ABI sceNpTusCreateRequest(int libCtxId) {
     LOG_INFO(Lib_NpTus, "libCtxId = {}", libCtxId);
 
-    std::lock_guard lock(g_mutex);
-    if (!g_title_ctxs.count(libCtxId)) {
-        LOG_ERROR(Lib_NpTus, "Invalid libCtxId {}", libCtxId);
-        return ORBIS_NP_COMMUNITY_ERROR_INVALID_ID;
-    }
-    if (g_requests.size() >= TusMaxRequests) {
-        LOG_ERROR(Lib_NpTus, "Max requests reached");
-        return ORBIS_NP_COMMUNITY_ERROR_TOO_MANY_OBJECTS;
-    }
-    const int id = g_next_req_id++;
-    NpTusRequest r;
-    r.titleCtxId = libCtxId;
-    g_requests.emplace(id, std::move(r));
-    return id;
+    return g_mutex.Run([&]() -> s32 {
+        if (!g_title_ctxs.count(libCtxId)) {
+            LOG_ERROR(Lib_NpTus, "Invalid libCtxId {}", libCtxId);
+            return ORBIS_NP_COMMUNITY_ERROR_INVALID_ID;
+        }
+        if (g_requests.size() >= TusMaxRequests) {
+            LOG_ERROR(Lib_NpTus, "Max requests reached");
+            return ORBIS_NP_COMMUNITY_ERROR_TOO_MANY_OBJECTS;
+        }
+        const int id = g_next_req_id++;
+        NpTusRequest r;
+        r.titleCtxId = libCtxId;
+        g_requests.emplace(id, std::move(r));
+        return id;
+    });
 }
 
 s32 PS4_SYSV_ABI sceNpTusDeleteRequest(int requestId) {
     LOG_INFO(Lib_NpTus, "requestId = {:#x}", requestId);
 
-    std::lock_guard lock(g_mutex);
-    auto it = g_requests.find(requestId);
-    if (it == g_requests.end()) {
-        LOG_ERROR(Lib_NpTus, "Invalid requestId {}", requestId);
-        return ORBIS_NP_COMMUNITY_ERROR_INVALID_ID;
-    }
-    if (it->second.ctx) {
-        if (!it->second.ctx->HasResult()) {
-            LOG_INFO(Lib_NpTus, "request {} still in flight, aborting it", requestId);
+    return g_mutex.Run([&]() -> s32 {
+        auto it = g_requests.find(requestId);
+        if (it == g_requests.end()) {
+            LOG_ERROR(Lib_NpTus, "Invalid requestId {}", requestId);
+            return ORBIS_NP_COMMUNITY_ERROR_INVALID_ID;
         }
-        it->second.ctx->SetResult(ORBIS_NP_COMMUNITY_ERROR_ABORTED);
-    }
-    g_requests.erase(it);
-    return ORBIS_OK;
+        if (it->second.ctx) {
+            if (!it->second.ctx->HasResult()) {
+                LOG_INFO(Lib_NpTus, "request {} still in flight, aborting it", requestId);
+            }
+            it->second.ctx->SetResult(ORBIS_NP_COMMUNITY_ERROR_ABORTED);
+        }
+        g_requests.erase(it);
+        return ORBIS_OK;
+    });
 }
 
 s32 PS4_SYSV_ABI sceNpTusAbortRequest(int reqId) {
     LOG_INFO(Lib_NpTus, "reqId = {:#x}", reqId);
 
     std::shared_ptr<TusRequestCtx> ctx;
-    {
-        std::lock_guard lock(g_mutex);
-        auto it = g_requests.find(reqId);
-        if (it == g_requests.end()) {
-            LOG_ERROR(Lib_NpTus, "Invalid requestId {}", reqId);
-            return ORBIS_NP_COMMUNITY_ERROR_INVALID_ID;
-        }
-        ctx = it->second.ctx;
+    if (auto returned = g_mutex.Run([&]() -> std::optional<s32> {
+            auto it = g_requests.find(reqId);
+            if (it == g_requests.end()) {
+                LOG_ERROR(Lib_NpTus, "Invalid requestId {}", reqId);
+                return std::optional<s32>{ORBIS_NP_COMMUNITY_ERROR_INVALID_ID};
+            }
+            ctx = it->second.ctx;
+            return std::nullopt;
+        })) {
+        return *returned;
     }
     if (ctx) {
         ctx->SetResult(ORBIS_NP_COMMUNITY_ERROR_ABORTED);
@@ -260,14 +272,16 @@ s32 PS4_SYSV_ABI sceNpTusPollAsync(int reqId, int* result) {
     LOG_INFO(Lib_NpTus, "reqId = {:#x}", reqId);
 
     std::shared_ptr<TusRequestCtx> ctx;
-    {
-        std::lock_guard glock(g_mutex);
-        auto it = g_requests.find(reqId);
-        if (it == g_requests.end()) {
-            LOG_ERROR(Lib_NpTus, "Invalid requestId {}", reqId);
-            return ORBIS_NP_COMMUNITY_ERROR_INVALID_ID;
-        }
-        ctx = it->second.ctx;
+    if (auto returned = g_mutex.Run([&]() -> std::optional<s32> {
+            auto it = g_requests.find(reqId);
+            if (it == g_requests.end()) {
+                LOG_ERROR(Lib_NpTus, "Invalid requestId {}", reqId);
+                return std::optional<s32>{ORBIS_NP_COMMUNITY_ERROR_INVALID_ID};
+            }
+            ctx = it->second.ctx;
+            return std::nullopt;
+        })) {
+        return *returned;
     }
 
     if (!ctx) {
@@ -275,35 +289,38 @@ s32 PS4_SYSV_ABI sceNpTusPollAsync(int reqId, int* result) {
         return 1;
     }
 
-    std::lock_guard lock(ctx->mutex);
-    if (!ctx->result.has_value()) {
-        return 1; // still running
-    }
-    const s32 res = *ctx->result;
-    if (result) {
-        *result = res;
-    }
-    if (res < 0) {
-        LOG_ERROR(Lib_NpTus, "reqId = {:#x} finished with error {:#x}", reqId,
-                  static_cast<u32>(res));
-    } else {
-        LOG_DEBUG(Lib_NpTus, "reqId = {:#x} finished, result = {}", reqId, res);
-    }
-    return 0;
+    return ctx->mutex.Run([&]() -> s32 {
+        if (!ctx->result.has_value()) {
+            return 1; // still running
+        }
+        const s32 res = *ctx->result;
+        if (result) {
+            *result = res;
+        }
+        if (res < 0) {
+            LOG_ERROR(Lib_NpTus, "reqId = {:#x} finished with error {:#x}", reqId,
+                      static_cast<u32>(res));
+        } else {
+            LOG_DEBUG(Lib_NpTus, "reqId = {:#x} finished, result = {}", reqId, res);
+        }
+        return 0;
+    });
 }
 
 s32 PS4_SYSV_ABI sceNpTusWaitAsync(int reqId, int* result) {
     LOG_INFO(Lib_NpTus, "reqId = {:#x}", reqId);
 
     std::shared_ptr<TusRequestCtx> ctx;
-    {
-        std::lock_guard glock(g_mutex);
-        auto it = g_requests.find(reqId);
-        if (it == g_requests.end()) {
-            LOG_ERROR(Lib_NpTus, "Invalid requestId {}", reqId);
-            return ORBIS_NP_COMMUNITY_ERROR_INVALID_ID;
-        }
-        ctx = it->second.ctx;
+    if (auto returned = g_mutex.Run([&]() -> std::optional<s32> {
+            auto it = g_requests.find(reqId);
+            if (it == g_requests.end()) {
+                LOG_ERROR(Lib_NpTus, "Invalid requestId {}", reqId);
+                return std::optional<s32>{ORBIS_NP_COMMUNITY_ERROR_INVALID_ID};
+            }
+            ctx = it->second.ctx;
+            return std::nullopt;
+        })) {
+        return *returned;
     }
 
     if (!ctx) {
@@ -311,9 +328,7 @@ s32 PS4_SYSV_ABI sceNpTusWaitAsync(int reqId, int* result) {
         return ORBIS_NP_COMMUNITY_ERROR_INVALID_ARGUMENT;
     }
 
-    std::unique_lock lock(ctx->mutex);
-    ctx->cv.wait(lock, [&] { return ctx->result.has_value(); });
-    const s32 res = *ctx->result;
+    const s32 res = ctx->Wait();
     if (result) {
         *result = res;
     }
@@ -724,8 +739,7 @@ s32 PS4_SYSV_ABI sceNpTusGetDataAAsync(int reqId, OrbisNpAccountId targetAccount
 
     const s64 account = static_cast<s64>(targetAccountId);
     u64 offset = 0;
-    {
-        std::lock_guard lock(g_mutex);
+    g_mutex.Run([&] {
         if (!req->xfer.SameTarget(slotId, account, std::string())) {
             req->xfer.Begin(slotId, account, std::string());
         }
@@ -733,7 +747,7 @@ s32 PS4_SYSV_ABI sceNpTusGetDataAAsync(int reqId, OrbisNpAccountId targetAccount
         if (data) {
             req->xfer.recvOffset += recvSize;
         }
-    }
+    });
 
     auto ctx = std::make_shared<TusRequestCtx>();
     req->ctx = ctx;
@@ -782,8 +796,7 @@ s32 PS4_SYSV_ABI sceNpTusSetDataAAsync(int reqId, OrbisNpAccountId targetAccount
     std::vector<u8> blob;
     std::vector<u8> infoBytes;
     bool complete = false;
-    {
-        std::lock_guard lock(g_mutex);
+    g_mutex.Run([&] {
         auto& x = req->xfer;
         if (!x.SameTarget(slotId, account, std::string())) {
             x.Begin(slotId, account, std::string());
@@ -803,7 +816,7 @@ s32 PS4_SYSV_ABI sceNpTusSetDataAAsync(int reqId, OrbisNpAccountId targetAccount
             complete = true;
             x = NpTusDataXfer{};
         }
-    }
+    });
 
     auto ctx = std::make_shared<TusRequestCtx>();
     req->ctx = ctx;
@@ -865,8 +878,7 @@ s32 PS4_SYSV_ABI sceNpTusGetDataAVUserAsync(int reqId,
     }
 
     u64 offset = 0;
-    {
-        std::lock_guard lock(g_mutex);
+    g_mutex.Run([&] {
         if (!req->xfer.SameTarget(slotId, 0, virtualUser)) {
             req->xfer.Begin(slotId, 0, virtualUser);
         }
@@ -874,7 +886,7 @@ s32 PS4_SYSV_ABI sceNpTusGetDataAVUserAsync(int reqId,
         if (data) {
             req->xfer.recvOffset += recvSize;
         }
-    }
+    });
 
     auto ctx = std::make_shared<TusRequestCtx>();
     req->ctx = ctx;
@@ -928,8 +940,7 @@ s32 PS4_SYSV_ABI sceNpTusSetDataAVUserAsync(
     std::vector<u8> blob;
     std::vector<u8> infoBytes;
     bool complete = false;
-    {
-        std::lock_guard lock(g_mutex);
+    g_mutex.Run([&] {
         auto& x = req->xfer;
         if (!x.SameTarget(slotId, 0, virtualUser)) {
             x.Begin(slotId, 0, virtualUser);
@@ -948,7 +959,7 @@ s32 PS4_SYSV_ABI sceNpTusSetDataAVUserAsync(
             complete = true;
             x = NpTusDataXfer{};
         }
-    }
+    });
 
     auto ctx = std::make_shared<TusRequestCtx>();
     req->ctx = ctx;
@@ -1152,8 +1163,7 @@ s32 PS4_SYSV_ABI sceNpTusGetDataAsync(int reqId, const OrbisNpId* targetNpId, s3
         (targetNpId && targetNpId->handle.data[0]) ? std::string(targetNpId->handle.data) : self;
 
     u64 offset = 0;
-    {
-        std::lock_guard lock(g_mutex);
+    g_mutex.Run([&] {
         if (!req->xfer.SameTarget(slotId, 0, owner)) {
             req->xfer.Begin(slotId, 0, owner);
         }
@@ -1161,7 +1171,7 @@ s32 PS4_SYSV_ABI sceNpTusGetDataAsync(int reqId, const OrbisNpId* targetNpId, s3
         if (data) {
             req->xfer.recvOffset += recvSize;
         }
-    }
+    });
 
     auto ctx = std::make_shared<TusRequestCtx>();
     req->ctx = ctx;
@@ -1214,8 +1224,7 @@ s32 PS4_SYSV_ABI sceNpTusGetDataVUserAsync(int reqId,
     }
 
     u64 offset = 0;
-    {
-        std::lock_guard lock(g_mutex);
+    g_mutex.Run([&] {
         if (!req->xfer.SameTarget(slotId, 0, virtualUser)) {
             req->xfer.Begin(slotId, 0, virtualUser);
         }
@@ -1223,7 +1232,7 @@ s32 PS4_SYSV_ABI sceNpTusGetDataVUserAsync(int reqId,
         if (data) {
             req->xfer.recvOffset += recvSize;
         }
-    }
+    });
 
     auto ctx = std::make_shared<TusRequestCtx>();
     req->ctx = ctx;
@@ -1551,8 +1560,7 @@ s32 PS4_SYSV_ABI sceNpTusSetDataAsync(int reqId, const OrbisNpId* targetNpId, s3
     std::vector<u8> blob;
     std::vector<u8> infoBytes;
     bool complete = false;
-    {
-        std::lock_guard lock(g_mutex);
+    g_mutex.Run([&] {
         auto& x = req->xfer;
         if (!x.SameTarget(slotId, 0, owner)) {
             x.Begin(slotId, 0, owner);
@@ -1571,7 +1579,7 @@ s32 PS4_SYSV_ABI sceNpTusSetDataAsync(int reqId, const OrbisNpId* targetNpId, s3
             complete = true;
             x = NpTusDataXfer{};
         }
-    }
+    });
 
     auto ctx = std::make_shared<TusRequestCtx>();
     req->ctx = ctx;
@@ -1636,8 +1644,7 @@ s32 PS4_SYSV_ABI sceNpTusSetDataVUserAsync(int reqId,
     std::vector<u8> blob;
     std::vector<u8> infoBytes;
     bool complete = false;
-    {
-        std::lock_guard lock(g_mutex);
+    g_mutex.Run([&] {
         auto& x = req->xfer;
         if (!x.SameTarget(slotId, 0, virtualUser)) {
             x.Begin(slotId, 0, virtualUser);
@@ -1656,7 +1663,7 @@ s32 PS4_SYSV_ABI sceNpTusSetDataVUserAsync(int reqId,
             complete = true;
             x = NpTusDataXfer{};
         }
-    }
+    });
 
     auto ctx = std::make_shared<TusRequestCtx>();
     req->ctx = ctx;
@@ -3825,8 +3832,7 @@ s32 PS4_SYSV_ABI sceNpTusGetDataForCrossSaveAsync(int reqId, OrbisNpAccountId ta
 
     const s64 account = static_cast<s64>(targetAccountId);
     u64 offset = 0;
-    {
-        std::lock_guard lock(g_mutex);
+    g_mutex.Run([&] {
         if (!req->xfer.SameTarget(slotId, account, std::string())) {
             req->xfer.Begin(slotId, account, std::string());
         }
@@ -3834,7 +3840,7 @@ s32 PS4_SYSV_ABI sceNpTusGetDataForCrossSaveAsync(int reqId, OrbisNpAccountId ta
         if (data) {
             req->xfer.recvOffset += recvSize;
         }
-    }
+    });
 
     auto ctx = std::make_shared<TusRequestCtx>();
     req->ctx = ctx;
@@ -3905,8 +3911,7 @@ sceNpTusGetDataForCrossSaveVUserAsync(int reqId, const OrbisNpTusVirtualUserId* 
     }
 
     u64 offset = 0;
-    {
-        std::lock_guard lock(g_mutex);
+    g_mutex.Run([&] {
         if (!req->xfer.SameTarget(slotId, 0, virtualUser)) {
             req->xfer.Begin(slotId, 0, virtualUser);
         }
@@ -3914,7 +3919,7 @@ sceNpTusGetDataForCrossSaveVUserAsync(int reqId, const OrbisNpTusVirtualUserId* 
         if (data) {
             req->xfer.recvOffset += recvSize;
         }
-    }
+    });
 
     auto ctx = std::make_shared<TusRequestCtx>();
     req->ctx = ctx;
@@ -4912,8 +4917,7 @@ s32 PS4_SYSV_ABI sceNpTssGetDataAsync(int reqId, s32 slotId, OrbisNpTssDataStatu
     }
 
     u64 startOffset = offset;
-    {
-        std::lock_guard lock(g_mutex);
+    g_mutex.Run([&] {
         if (!req->xfer.SameTarget(slotId, 0, std::string())) {
             req->xfer.Begin(slotId, 0, std::string());
         } else if (!hasOffset) {
@@ -4923,7 +4927,7 @@ s32 PS4_SYSV_ABI sceNpTssGetDataAsync(int reqId, s32 slotId, OrbisNpTssDataStatu
         if (data) {
             req->xfer.recvOffset += recvSize;
         }
-    }
+    });
 
     auto ctx = std::make_shared<TusRequestCtx>();
     req->ctx = ctx;

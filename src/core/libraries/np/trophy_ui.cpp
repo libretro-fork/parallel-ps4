@@ -13,6 +13,7 @@
 #define MINIMP3_IMPLEMENTATION
 
 #include "common/audio_file.h"
+#include "common/combiner.h"
 #include "common/embedded_resources.h"
 #include "common/io_file.h"
 #include "common/logging/formatter.h"
@@ -113,7 +114,7 @@ void PreloadTrophySound() {
     }
 }
 std::queue<TrophyInfo> trophy_queue;
-std::mutex queueMtx;
+Common::Combiner queueMtx;
 std::string side = "right";
 double trophy_timer;
 
@@ -312,47 +313,48 @@ void TrophyUI::Draw() {
     PopStyleVar();
 
     if (trophy_timer <= 0) {
-        std::lock_guard<std::mutex> lock(queueMtx);
-        if (!trophy_queue.empty()) {
-            TrophyInfo next_trophy = trophy_queue.front();
-            trophy_queue.pop();
-            current_trophy_ui.emplace(next_trophy.trophy_icon_path, next_trophy.trophy_name,
-                                      next_trophy.trophy_type);
-        } else {
-            current_trophy_ui.reset();
-        }
+        queueMtx.Run([&] {
+            if (!trophy_queue.empty()) {
+                TrophyInfo next_trophy = trophy_queue.front();
+                trophy_queue.pop();
+                current_trophy_ui.emplace(next_trophy.trophy_icon_path, next_trophy.trophy_name,
+                                          next_trophy.trophy_type);
+            } else {
+                current_trophy_ui.reset();
+            }
+        });
     }
 }
 
 void AddTrophyToQueue(const std::filesystem::path& trophyIconPath, const std::string& trophyName,
                       const std::string_view& rarity) {
-    std::lock_guard<std::mutex> lock(queueMtx);
+    queueMtx.Run([&] {
+        if (emu_settings_get_trophy_popup_disabled()) {
+            return;
+        } else if (current_trophy_ui.has_value()) {
+            current_trophy_ui.reset();
+        }
 
-    if (emu_settings_get_trophy_popup_disabled()) {
-        return;
-    } else if (current_trophy_ui.has_value()) {
-        current_trophy_ui.reset();
-    }
+        TrophyInfo new_trophy;
+        new_trophy.trophy_icon_path = trophyIconPath;
+        new_trophy.trophy_name = trophyName;
+        new_trophy.trophy_type = rarity;
+        trophy_queue.push(new_trophy);
 
-    TrophyInfo new_trophy;
-    new_trophy.trophy_icon_path = trophyIconPath;
-    new_trophy.trophy_name = trophyName;
-    new_trophy.trophy_type = rarity;
-    trophy_queue.push(new_trophy);
-
-    if (!current_trophy_ui.has_value()) {
+        if (!current_trophy_ui.has_value()) {
 #ifdef ENABLE_QT_GUI
-        BackgroundMusicPlayer::getInstance().stopMusic();
+            BackgroundMusicPlayer::getInstance().stopMusic();
 #endif
-        // Resetting the animation for the next trophy
-        elapsed_time = 0.0f;                // Resetting animation time
-        fade_opacity = 0.0f;                // Starts invisible
-        start_pos = ImVec2(1280.0f, 50.0f); // Starts off screen, right
-        TrophyInfo next_trophy = trophy_queue.front();
-        trophy_queue.pop();
-        current_trophy_ui.emplace(next_trophy.trophy_icon_path, next_trophy.trophy_name,
-                                  next_trophy.trophy_type);
-    }
+            // Resetting the animation for the next trophy
+            elapsed_time = 0.0f;                // Resetting animation time
+            fade_opacity = 0.0f;                // Starts invisible
+            start_pos = ImVec2(1280.0f, 50.0f); // Starts off screen, right
+            TrophyInfo next_trophy = trophy_queue.front();
+            trophy_queue.pop();
+            current_trophy_ui.emplace(next_trophy.trophy_icon_path, next_trophy.trophy_name,
+                                      next_trophy.trophy_type);
+        }
+    });
 }
 
 } // namespace Libraries::Np::NpTrophy

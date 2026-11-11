@@ -6,6 +6,7 @@
 #include <memory>
 #include <mutex>
 #include <string>
+#include "common/combiner.h"
 #include "common/logging/log.h"
 #include "core/emulator_settings.h"
 #include "core/libraries/error_codes.h"
@@ -20,7 +21,7 @@
 namespace Libraries::Np::NpAuth {
 
 static bool g_shadnet_enabled = false;
-static std::mutex g_auth_request_mutex;
+static Common::Combiner g_auth_request_mutex;
 static constexpr s32 ORBIS_NP_AUTH_POLL_ASYNC_RET_FINISHED = 0;
 static constexpr s32 ORBIS_NP_AUTH_POLL_ASYNC_RET_RUNNING = 1;
 static constexpr u32 ORBIS_NP_AUTH_TIMEOUT_NO_EFFECT = 0;
@@ -34,19 +35,20 @@ struct NpAuthRequest {
 static std::map<s32, NpAuthRequest> g_auth_requests;
 
 s32 CreateNpAuthRequest(bool async) {
-    std::scoped_lock lk{g_auth_request_mutex};
-    if (g_auth_requests.size() == ORBIS_NP_AUTH_REQUEST_LIMIT) {
-        LOG_ERROR(Lib_NpAuth, "request limit reached, cannot create new request");
-        return ORBIS_NP_AUTH_ERROR_REQUEST_MAX;
-    }
+    return g_auth_request_mutex.Run([&]() -> s32 {
+        if (g_auth_requests.size() == ORBIS_NP_AUTH_REQUEST_LIMIT) {
+            LOG_ERROR(Lib_NpAuth, "request limit reached, cannot create new request");
+            return ORBIS_NP_AUTH_ERROR_REQUEST_MAX;
+        }
 
-    s32 req_id = ORBIS_NP_AUTH_REQUEST_ID_OFFSET + 1;
-    while (g_auth_requests.contains(req_id)) {
-        req_id++;
-    }
-    g_auth_requests[req_id].async = async;
-    LOG_DEBUG(Lib_NpAuth, "called, async = {}", async);
-    return req_id;
+        s32 req_id = ORBIS_NP_AUTH_REQUEST_ID_OFFSET + 1;
+        while (g_auth_requests.contains(req_id)) {
+            req_id++;
+        }
+        g_auth_requests[req_id].async = async;
+        LOG_DEBUG(Lib_NpAuth, "called, async = {}", async);
+        return req_id;
+    });
 }
 
 s32 PS4_SYSV_ABI sceNpAuthCreateRequest() {
@@ -81,23 +83,24 @@ static s32 FindRequest(s32 req_id, NpAuthRequest** request) {
 }
 
 static s32 StartRequest(s32 req_id, bool* async, std::shared_ptr<AuthRequestCtx>* ctx) {
-    std::scoped_lock lk{g_auth_request_mutex};
-    NpAuthRequest* request = nullptr;
-    if (const s32 error = FindRequest(req_id, &request); error != ORBIS_OK) {
-        return error;
-    }
-    if (request->ctx) {
-        LOG_ERROR(Lib_NpAuth, "request already started: {}", req_id);
-        return ORBIS_NP_AUTH_ERROR_INVALID_ARGUMENT;
-    }
-    if (request->aborted) {
-        LOG_ERROR(Lib_NpAuth, "request already aborted: {}", req_id);
-        return ORBIS_NP_AUTH_ERROR_ABORTED;
-    }
-    request->ctx = std::make_shared<AuthRequestCtx>();
-    *async = request->async;
-    *ctx = request->ctx;
-    return ORBIS_OK;
+    return g_auth_request_mutex.Run([&]() -> s32 {
+        NpAuthRequest* request = nullptr;
+        if (const s32 error = FindRequest(req_id, &request); error != ORBIS_OK) {
+            return error;
+        }
+        if (request->ctx) {
+            LOG_ERROR(Lib_NpAuth, "request already started: {}", req_id);
+            return ORBIS_NP_AUTH_ERROR_INVALID_ARGUMENT;
+        }
+        if (request->aborted) {
+            LOG_ERROR(Lib_NpAuth, "request already aborted: {}", req_id);
+            return ORBIS_NP_AUTH_ERROR_ABORTED;
+        }
+        request->ctx = std::make_shared<AuthRequestCtx>();
+        *async = request->async;
+        *ctx = request->ctx;
+        return ORBIS_OK;
+    });
 }
 
 // Async requests report the outcome through PollAsync/WaitAsync, sync requests block for it.
@@ -218,38 +221,41 @@ s32 PS4_SYSV_ABI sceNpAuthSetTimeout(s32 req_id, s32 resolve_retry, u32 resolve_
         return ORBIS_NP_AUTH_ERROR_INVALID_ARGUMENT;
     }
 
-    std::scoped_lock lk{g_auth_request_mutex};
-    NpAuthRequest* request = nullptr;
-    return FindRequest(req_id, &request);
+    return g_auth_request_mutex.Run([&]() -> s32 {
+        NpAuthRequest* request = nullptr;
+        return FindRequest(req_id, &request);
+    });
 }
 
 s32 PS4_SYSV_ABI sceNpAuthAbortRequest(s32 req_id) {
     LOG_DEBUG(Lib_NpAuth, "called req_id = {:#x}", req_id);
 
-    std::scoped_lock lk{g_auth_request_mutex};
-    NpAuthRequest* request = nullptr;
-    if (const s32 error = FindRequest(req_id, &request); error != ORBIS_OK) {
-        return error;
-    }
-    if (request->ctx) {
-        request->ctx->SetResult(ORBIS_NP_AUTH_ERROR_ABORTED);
-    } else {
-        request->aborted = true;
-    }
-    return ORBIS_OK;
+    return g_auth_request_mutex.Run([&]() -> s32 {
+        NpAuthRequest* request = nullptr;
+        if (const s32 error = FindRequest(req_id, &request); error != ORBIS_OK) {
+            return error;
+        }
+        if (request->ctx) {
+            request->ctx->SetResult(ORBIS_NP_AUTH_ERROR_ABORTED);
+        } else {
+            request->aborted = true;
+        }
+        return ORBIS_OK;
+    });
 }
 
 static s32 FindAsyncRequest(s32 req_id, std::shared_ptr<AuthRequestCtx>* ctx) {
-    std::scoped_lock lk{g_auth_request_mutex};
-    NpAuthRequest* request = nullptr;
-    if (const s32 error = FindRequest(req_id, &request); error != ORBIS_OK) {
-        return error;
-    }
-    if (!request->async || !request->ctx) {
-        return ORBIS_NP_AUTH_ERROR_INVALID_ID;
-    }
-    *ctx = request->ctx;
-    return ORBIS_OK;
+    return g_auth_request_mutex.Run([&]() -> s32 {
+        NpAuthRequest* request = nullptr;
+        if (const s32 error = FindRequest(req_id, &request); error != ORBIS_OK) {
+            return error;
+        }
+        if (!request->async || !request->ctx) {
+            return ORBIS_NP_AUTH_ERROR_INVALID_ID;
+        }
+        *ctx = request->ctx;
+        return ORBIS_OK;
+    });
 }
 
 s32 PS4_SYSV_ABI sceNpAuthWaitAsync(s32 req_id, s32* result) {
@@ -277,29 +283,31 @@ s32 PS4_SYSV_ABI sceNpAuthPollAsync(s32 req_id, s32* result) {
     if (const s32 error = FindAsyncRequest(req_id, &ctx); error != ORBIS_OK) {
         return error;
     }
-    std::scoped_lock lock{ctx->mutex};
-    if (!ctx->result.has_value()) {
-        return ORBIS_NP_AUTH_POLL_ASYNC_RET_RUNNING;
-    }
-    *result = *ctx->result;
-    LOG_DEBUG(Lib_NpAuth, "called req_id = {:#x}, returning result = {:#x}", req_id,
-              static_cast<u32>(*result));
-    return ORBIS_NP_AUTH_POLL_ASYNC_RET_FINISHED;
+    return ctx->mutex.Run([&]() -> s32 {
+        if (!ctx->result.has_value()) {
+            return ORBIS_NP_AUTH_POLL_ASYNC_RET_RUNNING;
+        }
+        *result = *ctx->result;
+        LOG_DEBUG(Lib_NpAuth, "called req_id = {:#x}, returning result = {:#x}", req_id,
+                  static_cast<u32>(*result));
+        return ORBIS_NP_AUTH_POLL_ASYNC_RET_FINISHED;
+    });
 }
 
 s32 PS4_SYSV_ABI sceNpAuthDeleteRequest(s32 req_id) {
     LOG_DEBUG(Lib_NpAuth, "called req_id = {:#x}", req_id);
 
-    std::scoped_lock lk{g_auth_request_mutex};
-    NpAuthRequest* request = nullptr;
-    if (const s32 error = FindRequest(req_id, &request); error != ORBIS_OK) {
-        return error;
-    }
-    if (request->ctx) {
-        request->ctx->SetResult(ORBIS_NP_AUTH_ERROR_ABORTED);
-    }
-    g_auth_requests.erase(req_id);
-    return ORBIS_OK;
+    return g_auth_request_mutex.Run([&]() -> s32 {
+        NpAuthRequest* request = nullptr;
+        if (const s32 error = FindRequest(req_id, &request); error != ORBIS_OK) {
+            return error;
+        }
+        if (request->ctx) {
+            request->ctx->SetResult(ORBIS_NP_AUTH_ERROR_ABORTED);
+        }
+        g_auth_requests.erase(req_id);
+        return ORBIS_OK;
+    });
 }
 
 // TODO  token code taken from old np auth implementation, needs to be reworked to use shadnet and

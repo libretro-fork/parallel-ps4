@@ -14,6 +14,8 @@
 #include <unordered_map>
 #include <vector>
 
+#include "common/combiner.h"
+#include "common/event_mutex.h"
 #include "common/types.h"
 #include "core/libraries/kernel/threads.h"
 #include "core/libraries/np/np_common.h"
@@ -196,8 +198,8 @@ struct NpSignalingContext {
 
     std::atomic<u32> ext_addr{0};
     std::atomic<u16> ext_port{0};
-    std::mutex stun_mutex{};
-    std::condition_variable stun_cv{};
+    Common::EventMutex stun_mutex{};
+    Common::EventCondition stun_cv{};
 
     s64 activate_budget_us{0};
     s64 activate_last_update_us{0};
@@ -265,19 +267,19 @@ struct NpSignalingState {
     u32 transport_id_seed = 0;
     bool initialized = false;
 
-    std::recursive_mutex mutex;
+    Common::RecursiveEventMutex mutex;
 
     std::multimap<std::chrono::steady_clock::time_point, QueuedDispatch> dispatch_queue;
-    std::mutex dispatch_mutex;
-    std::condition_variable dispatch_cv;
+    Common::EventMutex dispatch_mutex;
+    Common::EventCondition dispatch_cv;
     Libraries::Kernel::PthreadT dispatch_thread = nullptr;
     bool dispatch_stop = false;
 
     std::atomic<bool> runtime_stop{false};
-    std::mutex runtime_thread_mutex;
+    Common::Combiner runtime_thread_mutex;
     std::thread runtime_thread;
-    std::mutex activation_mutex;
-    std::condition_variable activation_cv;
+    Common::EventMutex activation_mutex;
+    Common::EventCondition activation_cv;
     std::thread activation_thread;
     u32 context_refs = 0;
 
@@ -301,7 +303,7 @@ struct SignalingMutexGuard {
     SignalingMutexGuard& operator=(const SignalingMutexGuard&) = delete;
 
 private:
-    std::unique_lock<std::recursive_mutex> lock;
+    std::unique_lock<Common::RecursiveEventMutex> lock;
 };
 
 long long NowMs();

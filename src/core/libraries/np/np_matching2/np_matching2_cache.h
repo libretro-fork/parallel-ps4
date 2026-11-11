@@ -7,6 +7,7 @@
 #include <mutex>
 #include <vector>
 
+#include "common/event_mutex.h"
 #include "common/types.h"
 #include "core/libraries/np/np_matching2/np_matching2.h"
 #include "core/libraries/np/np_types.h"
@@ -71,7 +72,7 @@ struct RoomCache {
 };
 
 struct Matching2ContextCache {
-    mutable std::recursive_mutex mutex;
+    mutable Common::RecursiveEventMutex mutex;
     std::map<OrbisNpMatching2RoomMemberId, PeerInfo> peers;
     std::map<OrbisNpMatching2RoomId, RoomCache> rooms;
 

@@ -42,38 +42,43 @@ s32 NpHandler::RequestAuthorizationCode(s32 user_id, const std::string& client_i
                                         const std::string& scope,
                                         std::shared_ptr<NpAuth::AuthRequestCtx> ctx) {
     std::shared_ptr<ShadNet::ShadNetClient> client;
-    {
-        std::lock_guard lock(m_mutex_clients);
-        auto it = m_clients.find(user_id);
-        if (it == m_clients.end()) {
-            return ORBIS_NP_ERROR_SIGNED_OUT;
-        }
-        client = it->second;
+    if (auto returned = m_mutex_clients.Run([&]() -> std::optional<s32> {
+            auto it = m_clients.find(user_id);
+            if (it == m_clients.end()) {
+                return std::optional<s32>{ORBIS_NP_ERROR_SIGNED_OUT};
+            }
+            client = it->second;
+            return std::nullopt;
+        })) {
+        return *returned;
     }
     if (!client || !client->IsAuthenticated()) {
         return ORBIS_NP_ERROR_SIGNED_OUT;
     }
-    std::lock_guard lock(m_mutex_pending_auth);
-    const u64 pkt_id = client->GetAuthorizationCode(client_id, scope);
-    PendingAuthRequest p;
-    p.req = std::move(ctx);
-    p.user_id = user_id;
-    m_pending_auth.emplace(pkt_id, std::move(p));
-    LOG_INFO(NpHandler, "user_id={} client_id='{}' pkt_id={}", user_id, client_id, pkt_id);
-    return ORBIS_OK;
+    return m_mutex_pending_auth.Run([&]() -> s32 {
+        const u64 pkt_id = client->GetAuthorizationCode(client_id, scope);
+        PendingAuthRequest p;
+        p.req = std::move(ctx);
+        p.user_id = user_id;
+        m_pending_auth.emplace(pkt_id, std::move(p));
+        LOG_INFO(NpHandler, "user_id={} client_id='{}' pkt_id={}", user_id, client_id, pkt_id);
+        return ORBIS_OK;
+    });
 }
 
 void NpHandler::OnAuthReply(s32 user_id, ShadNet::CommandType /*cmd*/, u64 pkt_id,
                             ShadNet::ErrorType error, const std::vector<u8>& body) {
     std::shared_ptr<NpAuth::AuthRequestCtx> req;
-    {
-        std::lock_guard lock(m_mutex_pending_auth);
-        auto it = m_pending_auth.find(pkt_id);
-        if (it == m_pending_auth.end()) {
-            return;
-        }
-        req = std::move(it->second.req);
-        m_pending_auth.erase(it);
+    if (m_mutex_pending_auth.Run([&] {
+            auto it = m_pending_auth.find(pkt_id);
+            if (it == m_pending_auth.end()) {
+                return true;
+            }
+            req = std::move(it->second.req);
+            m_pending_auth.erase(it);
+            return false;
+        })) {
+        return;
     }
     if (!req) {
         return;

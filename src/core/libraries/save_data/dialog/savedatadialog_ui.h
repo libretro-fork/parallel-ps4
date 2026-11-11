@@ -6,6 +6,7 @@
 #include <mutex>
 #include <variant>
 #include <vector>
+#include "common/event_mutex.h"
 
 #include "core/file_format/psf.h"
 #include "core/libraries/save_data/savedata.h"
@@ -291,7 +292,7 @@ class SaveDialogUi final : public ImGui::Layer {
     CommonDialog::Status* status{};
     SaveDialogResult* result{};
 
-    std::recursive_mutex draw_mutex{};
+    Common::RecursiveEventMutex draw_mutex{};
 
 public:
     explicit SaveDialogUi(SaveDialogState* state = nullptr, CommonDialog::Status* status = nullptr,

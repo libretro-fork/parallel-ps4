@@ -22,6 +22,7 @@
 #include <vector>
 #include <fmt/format.h>
 
+#include "common/combiner.h"
 #include "common/logging/log.h"
 #include "core/libraries/error_codes.h"
 #include "core/libraries/kernel/orbis_error.h"
@@ -56,7 +57,7 @@ struct Pool {
     s32 size = 0;
     s32 users = 0; // ENOTEMPTY on destroy
 };
-std::mutex g_pools_mutex;
+Common::Combiner g_pools_mutex;
 std::array<Pool, MaxPools> g_pools{};
 std::unordered_map<OrbisNetId, s32> g_resolver_pools; // resolver id -> memory id
 
@@ -73,12 +74,13 @@ s32 CheckPoolId(s32 memid, const std::source_location where = std::source_locati
     if (memid == 0) {
         return ORBIS_NET_EINVAL;
     }
-    std::scoped_lock lock{g_pools_mutex};
-    if (FindPool(memid) == nullptr) {
-        LOG_ERROR(Lib_Net, "{}: unknown memory pool id {}", where.function_name(), memid);
-        return ORBIS_NET_EBADF;
-    }
-    return 0;
+    return g_pools_mutex.Run([&]() -> s32 {
+        if (FindPool(memid) == nullptr) {
+            LOG_ERROR(Lib_Net, "{}: unknown memory pool id {}", where.function_name(), memid);
+            return ORBIS_NET_EBADF;
+        }
+        return 0;
+    });
 }
 
 bool IsEpoll(OrbisNetId id) {
@@ -394,7 +396,7 @@ P2PKind KindOf(const Core::Net::SocketInfo& info) {
     return info.type == SOCK_STREAM ? P2PKind::Stream : P2PKind::Datagram;
 }
 
-std::mutex g_hooks_mutex;
+Common::Combiner g_hooks_mutex;
 SystemHooks g_hooks;
 
 s32 ResolverReturn(s32 code) {
@@ -1330,7 +1332,7 @@ s32 PS4_SYSV_ABI sceNetGetArpInfo() {
 }
 
 namespace {
-std::mutex g_dns_mutex;
+Common::Combiner g_dns_mutex;
 std::array<u32, 2> g_dns_override{};
 std::array<u8, 32> g_dns6_override{};
 
@@ -1345,10 +1347,7 @@ s32 PS4_SYSV_ABI sceNetGetDnsInfo(u32* info, s32 flags) {
         return SetErrno(ORBIS_NET_EINVAL);
     }
     std::array<u32, 2> servers{};
-    {
-        std::scoped_lock lock{g_dns_mutex};
-        servers = g_dns_override;
-    }
+    g_dns_mutex.Run([&] { servers = g_dns_override; });
     if (servers[0] == 0) {
         // What sceNetCtlGetInfo reports, while online.
         const auto hooks = GetSystemHooks();
@@ -1367,10 +1366,9 @@ s32 PS4_SYSV_ABI sceNetGetDns6Info(u8* info, s32 flags) {
         return SetErrno(ORBIS_NET_EINVAL);
     }
     std::array<u8, 32> servers{};
-    {
-        std::scoped_lock lock{g_dns_mutex};
+    g_dns_mutex.Run([&] {
         servers = g_dns6_override; // no IPv6 servers otherwise
-    }
+    });
     std::memcpy(info, servers.data(), servers.size());
     const std::span<const u8> view{servers};
     return IsZero(view.first(16)) ? 0 : IsZero(view.last(16)) ? 1 : 2;
@@ -1381,21 +1379,24 @@ s32 PS4_SYSV_ABI sceNetSetDnsInfo(const u32* info, s32 flags) {
     if (flags != 0 || (info != nullptr && info[0] == 0)) {
         return SetErrno(ORBIS_NET_EINVAL);
     }
-    std::scoped_lock lock{g_dns_mutex};
-    g_dns_override = info != nullptr ? std::array<u32, 2>{info[0], info[1]} : std::array<u32, 2>{};
-    return ORBIS_OK;
+    return g_dns_mutex.Run([&]() -> s32 {
+        g_dns_override =
+            info != nullptr ? std::array<u32, 2>{info[0], info[1]} : std::array<u32, 2>{};
+        return ORBIS_OK;
+    });
 }
 
 s32 PS4_SYSV_ABI sceNetSetDns6Info(const u8* info, s32 flags) {
     if (flags != 0 || (info != nullptr && IsZero({info, 16}))) {
         return SetErrno(ORBIS_NET_EINVAL);
     }
-    std::scoped_lock lock{g_dns_mutex};
-    g_dns6_override = {};
-    if (info != nullptr) {
-        std::memcpy(g_dns6_override.data(), info, g_dns6_override.size());
-    }
-    return ORBIS_OK;
+    return g_dns_mutex.Run([&]() -> s32 {
+        g_dns6_override = {};
+        if (info != nullptr) {
+            std::memcpy(g_dns6_override.data(), info, g_dns6_override.size());
+        }
+        return ORBIS_OK;
+    });
 }
 
 s32 PS4_SYSV_ABI sceNetGetIfList() {
@@ -1438,17 +1439,18 @@ s32 PS4_SYSV_ABI sceNetGetMacAddress(OrbisNetEtherAddr* addr, s32 flags) {
 }
 
 s32 PS4_SYSV_ABI sceNetGetMemoryPoolStats(s32 memid, OrbisNetMemoryPoolStats* stat) {
-    std::scoped_lock lock{g_pools_mutex};
-    const Pool* pool = FindPool(memid);
-    if (pool == nullptr) {
-        return SetErrno(ORBIS_NET_EBADF);
-    }
-    if (stat == nullptr) {
-        return SetErrno(ORBIS_NET_EINVAL);
-    }
-    *stat = {};
-    stat->pool_size = static_cast<u64>(pool->size);
-    return ORBIS_OK;
+    return g_pools_mutex.Run([&]() -> s32 {
+        const Pool* pool = FindPool(memid);
+        if (pool == nullptr) {
+            return SetErrno(ORBIS_NET_EBADF);
+        }
+        if (stat == nullptr) {
+            return SetErrno(ORBIS_NET_EINVAL);
+        }
+        *stat = {};
+        stat->pool_size = static_cast<u64>(pool->size);
+        return ORBIS_OK;
+    });
 }
 
 s32 PS4_SYSV_ABI sceNetGetNameToIndex() {
@@ -1486,11 +1488,12 @@ s32 PS4_SYSV_ABI sceNetGetRandom(u32* out) {
     if (out == nullptr) {
         return SetErrno(ORBIS_NET_EINVAL);
     }
-    static std::mutex mutex;
+    static Common::Combiner mutex;
     static std::mt19937 rng{std::random_device{}()};
-    std::scoped_lock lock{mutex};
-    *out = static_cast<u32>(rng());
-    return ORBIS_OK;
+    return mutex.Run([&]() -> s32 {
+        *out = static_cast<u32>(rng());
+        return ORBIS_OK;
+    });
 }
 
 s32 PS4_SYSV_ABI sceNetGetRouteInfo() {
@@ -1922,28 +1925,30 @@ s32 PS4_SYSV_ABI sceNetPoolCreate(const char* name, s32 size, s32 flags) {
     if (flags != 0 || size < MinPoolSize) {
         return ORBIS_NET_ERROR_EINVAL;
     }
-    std::scoped_lock lock{g_pools_mutex};
-    for (size_t i = 0; i < g_pools.size(); ++i) {
-        if (!g_pools[i].in_use) {
-            g_pools[i] = {true, size, 0};
-            return FirstPoolId + static_cast<s32>(i);
+    return g_pools_mutex.Run([&]() -> s32 {
+        for (size_t i = 0; i < g_pools.size(); ++i) {
+            if (!g_pools[i].in_use) {
+                g_pools[i] = {true, size, 0};
+                return FirstPoolId + static_cast<s32>(i);
+            }
         }
-    }
-    return ORBIS_NET_ERROR_ENFILE;
+        return ORBIS_NET_ERROR_ENFILE;
+    });
 }
 
 s32 PS4_SYSV_ABI sceNetPoolDestroy(s32 pool_id) {
     LOG_INFO(Lib_Net, "pool_id = {}", pool_id);
-    std::scoped_lock lock{g_pools_mutex};
-    Pool* pool = FindPool(pool_id);
-    if (pool == nullptr) {
-        return ORBIS_NET_ERROR_EBADF;
-    }
-    if (pool->users > 0) {
-        return ORBIS_NET_ERROR_ENOTEMPTY;
-    }
-    *pool = {};
-    return ORBIS_OK;
+    return g_pools_mutex.Run([&]() -> s32 {
+        Pool* pool = FindPool(pool_id);
+        if (pool == nullptr) {
+            return ORBIS_NET_ERROR_EBADF;
+        }
+        if (pool->users > 0) {
+            return ORBIS_NET_ERROR_ENOTEMPTY;
+        }
+        *pool = {};
+        return ORBIS_OK;
+    });
 }
 
 s32 PS4_SYSV_ABI sceNetPppoeStart() {
@@ -2092,13 +2097,14 @@ s32 PS4_SYSV_ABI sceNetResolverConnectDestroy() {
 }
 
 void ReleaseResolverPool(OrbisNetId rid) {
-    std::scoped_lock lock{g_pools_mutex};
-    if (const auto it = g_resolver_pools.find(rid); it != g_resolver_pools.end()) {
-        if (Pool* pool = FindPool(it->second)) {
-            --pool->users;
+    g_pools_mutex.Run([&] {
+        if (const auto it = g_resolver_pools.find(rid); it != g_resolver_pools.end()) {
+            if (Pool* pool = FindPool(it->second)) {
+                --pool->users;
+            }
+            g_resolver_pools.erase(it);
         }
-        g_resolver_pools.erase(it);
-    }
+    });
 }
 
 OrbisNetId PS4_SYSV_ABI sceNetResolverCreate(const char* name, s32 poolid, s32 flags) {
@@ -2111,20 +2117,21 @@ OrbisNetId PS4_SYSV_ABI sceNetResolverCreate(const char* name, s32 poolid, s32 f
         strnlen(name, ORBIS_NET_DEBUG_NAME_LEN_MAX + 1) > ORBIS_NET_DEBUG_NAME_LEN_MAX) {
         return SetErrno(ORBIS_NET_ENAMETOOLONG);
     }
-    std::scoped_lock lock{g_pools_mutex};
-    Pool* pool = FindPool(poolid);
-    if (pool == nullptr) {
-        LOG_ERROR(Lib_Net, "unknown memory pool id {}", poolid);
-        return SetErrno(ORBIS_NET_EBADF);
-    }
-    const s32 id = CreateResolver(name != nullptr ? name : "");
-    if (id < 0) {
-        return SetErrno(-id);
-    }
-    // The resolver holds its pool until destroyed.
-    ++pool->users;
-    g_resolver_pools[id] = poolid;
-    return id;
+    return g_pools_mutex.Run([&]() -> OrbisNetId {
+        Pool* pool = FindPool(poolid);
+        if (pool == nullptr) {
+            LOG_ERROR(Lib_Net, "unknown memory pool id {}", poolid);
+            return SetErrno(ORBIS_NET_EBADF);
+        }
+        const s32 id = CreateResolver(name != nullptr ? name : "");
+        if (id < 0) {
+            return SetErrno(-id);
+        }
+        // The resolver holds its pool until destroyed.
+        ++pool->users;
+        g_resolver_pools[id] = poolid;
+        return id;
+    });
 }
 
 s32 PS4_SYSV_ABI sceNetResolverDestroy(OrbisNetId rid) {
@@ -2815,14 +2822,12 @@ void SetKernelErrnoHook(void (*hook)(int orbis_errno)) {
 }
 
 SystemHooks GetSystemHooks() {
-    std::scoped_lock lock{g_hooks_mutex};
-    return g_hooks;
+    return g_hooks_mutex.Run([&]() -> SystemHooks { return g_hooks; });
 }
 
 void SetSystemHooks(SystemHooks hooks) {
     SetResolverOnlineCheck(hooks.is_online);
-    std::scoped_lock lock{g_hooks_mutex};
-    g_hooks = std::move(hooks);
+    g_hooks_mutex.Run([&] { g_hooks = std::move(hooks); });
 }
 
 void RegisterLib(Core::Loader::SymbolsResolver* sym) {

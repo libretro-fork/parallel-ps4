@@ -46,13 +46,15 @@ s32 NpHandler::TusGetMultiSlotVariable(
     std::shared_ptr<NpTus::TusRequestCtx> ctx, NpTus::OrbisNpTusVariableA* variablesAOut,
     s64 ownerAccountId, NpTus::OrbisNpTusVariableForCrossSave* variablesCSOut) {
     std::shared_ptr<ShadNet::ShadNetClient> client;
-    {
-        std::lock_guard lock(m_mutex_clients);
-        auto it = m_clients.find(user_id);
-        if (it == m_clients.end()) {
-            return ORBIS_NP_ERROR_SIGNED_OUT;
-        }
-        client = it->second;
+    if (auto returned = m_mutex_clients.Run([&]() -> std::optional<s32> {
+            auto it = m_clients.find(user_id);
+            if (it == m_clients.end()) {
+                return std::optional<s32>{ORBIS_NP_ERROR_SIGNED_OUT};
+            }
+            client = it->second;
+            return std::nullopt;
+        })) {
+        return *returned;
     }
     shadnet_TusGetMultiSlotVariableRequest proto{};
     ShadNet::Builder proto_build;
@@ -74,17 +76,18 @@ s32 NpHandler::TusGetMultiSlotVariable(
     }
     const u64 pkt_id = client->SubmitRequest(ShadNet::CommandType::TusGetMultiSlotVariable,
                                              BuildTusPayload(com_id, Encode(proto)));
-    std::lock_guard lock(m_mutex_pending_tus);
-    PendingTusRequest p;
-    p.req = std::move(ctx);
-    p.cmd = ShadNet::CommandType::TusGetMultiSlotVariable;
-    p.variableArray = variablesOut;
-    p.variableArrayA = variablesAOut;
-    p.variableArrayCS = variablesCSOut;
-    p.arrayNum = arrayNum;
-    p.user_id = user_id;
-    m_pending_tus.emplace(pkt_id, std::move(p));
-    return ORBIS_OK;
+    return m_mutex_pending_tus.Run([&]() -> s32 {
+        PendingTusRequest p;
+        p.req = std::move(ctx);
+        p.cmd = ShadNet::CommandType::TusGetMultiSlotVariable;
+        p.variableArray = variablesOut;
+        p.variableArrayA = variablesAOut;
+        p.variableArrayCS = variablesCSOut;
+        p.arrayNum = arrayNum;
+        p.user_id = user_id;
+        m_pending_tus.emplace(pkt_id, std::move(p));
+        return ORBIS_OK;
+    });
 }
 
 s32 NpHandler::TusSetMultiSlotVariable(s32 user_id, s32 service_label, const std::string& ownerNpId,
@@ -94,13 +97,15 @@ s32 NpHandler::TusSetMultiSlotVariable(s32 user_id, s32 service_label, const std
                                        std::shared_ptr<NpTus::TusRequestCtx> ctx,
                                        s64 ownerAccountId) {
     std::shared_ptr<ShadNet::ShadNetClient> client;
-    {
-        std::lock_guard lock(m_mutex_clients);
-        auto it = m_clients.find(user_id);
-        if (it == m_clients.end()) {
-            return ORBIS_NP_ERROR_SIGNED_OUT;
-        }
-        client = it->second;
+    if (auto returned = m_mutex_clients.Run([&]() -> std::optional<s32> {
+            auto it = m_clients.find(user_id);
+            if (it == m_clients.end()) {
+                return std::optional<s32>{ORBIS_NP_ERROR_SIGNED_OUT};
+            }
+            client = it->second;
+            return std::nullopt;
+        })) {
+        return *returned;
     }
     shadnet_TusSetMultiSlotVariableRequest proto{};
     ShadNet::Builder proto_build;
@@ -126,13 +131,14 @@ s32 NpHandler::TusSetMultiSlotVariable(s32 user_id, s32 service_label, const std
     }
     const u64 pkt_id = client->SubmitRequest(ShadNet::CommandType::TusSetMultiSlotVariable,
                                              BuildTusPayload(com_id, Encode(proto)));
-    std::lock_guard lock(m_mutex_pending_tus);
-    PendingTusRequest p;
-    p.req = std::move(ctx);
-    p.cmd = ShadNet::CommandType::TusSetMultiSlotVariable;
-    p.user_id = user_id;
-    m_pending_tus.emplace(pkt_id, std::move(p));
-    return ORBIS_OK;
+    return m_mutex_pending_tus.Run([&]() -> s32 {
+        PendingTusRequest p;
+        p.req = std::move(ctx);
+        p.cmd = ShadNet::CommandType::TusSetMultiSlotVariable;
+        p.user_id = user_id;
+        m_pending_tus.emplace(pkt_id, std::move(p));
+        return ORBIS_OK;
+    });
 }
 
 s32 NpHandler::TssGetData(s32 user_id, s32 service_label, s32 slotId, bool hasOffset, u64 offset,
@@ -141,13 +147,15 @@ s32 NpHandler::TssGetData(s32 user_id, s32 service_label, s32 slotId, bool hasOf
                           u64 dataCap, std::shared_ptr<NpTus::TusRequestCtx> ctx,
                           u64* contentLengthOut) {
     std::shared_ptr<ShadNet::ShadNetClient> client;
-    {
-        std::lock_guard lock(m_mutex_clients);
-        auto it = m_clients.find(user_id);
-        if (it == m_clients.end()) {
-            return ORBIS_NP_ERROR_SIGNED_OUT;
-        }
-        client = it->second;
+    if (auto returned = m_mutex_clients.Run([&]() -> std::optional<s32> {
+            auto it = m_clients.find(user_id);
+            if (it == m_clients.end()) {
+                return std::optional<s32>{ORBIS_NP_ERROR_SIGNED_OUT};
+            }
+            client = it->second;
+            return std::nullopt;
+        })) {
+        return *returned;
     }
     shadnet_TssGetDataRequest proto{};
     proto.slotId = slotId;
@@ -170,17 +178,18 @@ s32 NpHandler::TssGetData(s32 user_id, s32 service_label, s32 slotId, bool hasOf
     }
     const u64 pkt_id = client->SubmitRequest(ShadNet::CommandType::TssGetData,
                                              BuildTusPayload(com_id, Encode(proto)));
-    std::lock_guard lock(m_mutex_pending_tus);
-    PendingTusRequest p;
-    p.req = std::move(ctx);
-    p.cmd = ShadNet::CommandType::TssGetData;
-    p.user_id = user_id;
-    p.tssStatusOut = statusOut;
-    p.tssContentLengthOut = contentLengthOut;
-    p.dataOut = dataOut;
-    p.dataCap = dataCap;
-    m_pending_tus.emplace(pkt_id, std::move(p));
-    return ORBIS_OK;
+    return m_mutex_pending_tus.Run([&]() -> s32 {
+        PendingTusRequest p;
+        p.req = std::move(ctx);
+        p.cmd = ShadNet::CommandType::TssGetData;
+        p.user_id = user_id;
+        p.tssStatusOut = statusOut;
+        p.tssContentLengthOut = contentLengthOut;
+        p.dataOut = dataOut;
+        p.dataCap = dataCap;
+        m_pending_tus.emplace(pkt_id, std::move(p));
+        return ORBIS_OK;
+    });
 }
 
 s32 NpHandler::TusGetData(s32 user_id, s32 service_label, const std::string& ownerNpId,
@@ -190,13 +199,15 @@ s32 NpHandler::TusGetData(s32 user_id, s32 service_label, const std::string& own
                           NpTus::OrbisNpTusDataStatus* statusOut,
                           NpTus::OrbisNpTusDataStatusForCrossSave* statusCSOut) {
     std::shared_ptr<ShadNet::ShadNetClient> client;
-    {
-        std::lock_guard lock(m_mutex_clients);
-        auto it = m_clients.find(user_id);
-        if (it == m_clients.end()) {
-            return ORBIS_NP_ERROR_SIGNED_OUT;
-        }
-        client = it->second;
+    if (auto returned = m_mutex_clients.Run([&]() -> std::optional<s32> {
+            auto it = m_clients.find(user_id);
+            if (it == m_clients.end()) {
+                return std::optional<s32>{ORBIS_NP_ERROR_SIGNED_OUT};
+            }
+            client = it->second;
+            return std::nullopt;
+        })) {
+        return *returned;
     }
     shadnet_TusGetDataRequest proto{};
     proto.ownerNpId = Bytes(ownerNpId);
@@ -216,21 +227,22 @@ s32 NpHandler::TusGetData(s32 user_id, s32 service_label, const std::string& own
     }
     const u64 pkt_id = client->SubmitRequest(ShadNet::CommandType::TusGetData,
                                              BuildTusPayload(com_id, Encode(proto)));
-    std::lock_guard lock(m_mutex_pending_tus);
-    PendingTusRequest p;
-    p.req = std::move(ctx);
-    p.cmd = ShadNet::CommandType::TusGetData;
-    p.user_id = user_id;
-    p.statusArrayA = statusAOut;
-    p.statusArray = statusOut;
-    p.statusArrayCS = statusCSOut;
-    p.statusCap = statusCap;
-    p.dataOut = dataOut;
-    p.dataCap = dataCap;
-    p.dataOffset = dataOffset;
-    p.arrayNum = 1;
-    m_pending_tus.emplace(pkt_id, std::move(p));
-    return ORBIS_OK;
+    return m_mutex_pending_tus.Run([&]() -> s32 {
+        PendingTusRequest p;
+        p.req = std::move(ctx);
+        p.cmd = ShadNet::CommandType::TusGetData;
+        p.user_id = user_id;
+        p.statusArrayA = statusAOut;
+        p.statusArray = statusOut;
+        p.statusArrayCS = statusCSOut;
+        p.statusCap = statusCap;
+        p.dataOut = dataOut;
+        p.dataCap = dataCap;
+        p.dataOffset = dataOffset;
+        p.arrayNum = 1;
+        m_pending_tus.emplace(pkt_id, std::move(p));
+        return ORBIS_OK;
+    });
 }
 
 s32 NpHandler::TusDeleteMultiSlotData(s32 user_id, s32 service_label, const std::string& ownerNpId,
@@ -238,13 +250,15 @@ s32 NpHandler::TusDeleteMultiSlotData(s32 user_id, s32 service_label, const std:
                                       const std::vector<s32>& slotIds,
                                       std::shared_ptr<NpTus::TusRequestCtx> ctx) {
     std::shared_ptr<ShadNet::ShadNetClient> client;
-    {
-        std::lock_guard lock(m_mutex_clients);
-        auto it = m_clients.find(user_id);
-        if (it == m_clients.end()) {
-            return ORBIS_NP_ERROR_SIGNED_OUT;
-        }
-        client = it->second;
+    if (auto returned = m_mutex_clients.Run([&]() -> std::optional<s32> {
+            auto it = m_clients.find(user_id);
+            if (it == m_clients.end()) {
+                return std::optional<s32>{ORBIS_NP_ERROR_SIGNED_OUT};
+            }
+            client = it->second;
+            return std::nullopt;
+        })) {
+        return *returned;
     }
     shadnet_TusDeleteMultiSlotDataRequest proto{};
     ShadNet::Builder proto_build;
@@ -266,13 +280,14 @@ s32 NpHandler::TusDeleteMultiSlotData(s32 user_id, s32 service_label, const std:
     }
     const u64 pkt_id = client->SubmitRequest(ShadNet::CommandType::TusDeleteMultiSlotData,
                                              BuildTusPayload(com_id, Encode(proto)));
-    std::lock_guard lock(m_mutex_pending_tus);
-    PendingTusRequest p;
-    p.req = std::move(ctx);
-    p.cmd = ShadNet::CommandType::TusDeleteMultiSlotData;
-    p.user_id = user_id;
-    m_pending_tus.emplace(pkt_id, std::move(p));
-    return ORBIS_OK;
+    return m_mutex_pending_tus.Run([&]() -> s32 {
+        PendingTusRequest p;
+        p.req = std::move(ctx);
+        p.cmd = ShadNet::CommandType::TusDeleteMultiSlotData;
+        p.user_id = user_id;
+        m_pending_tus.emplace(pkt_id, std::move(p));
+        return ORBIS_OK;
+    });
 }
 
 s32 NpHandler::TusDeleteMultiSlotVariable(s32 user_id, s32 service_label,
@@ -281,13 +296,15 @@ s32 NpHandler::TusDeleteMultiSlotVariable(s32 user_id, s32 service_label,
                                           const std::vector<s32>& slotIds,
                                           std::shared_ptr<NpTus::TusRequestCtx> ctx) {
     std::shared_ptr<ShadNet::ShadNetClient> client;
-    {
-        std::lock_guard lock(m_mutex_clients);
-        auto it = m_clients.find(user_id);
-        if (it == m_clients.end()) {
-            return ORBIS_NP_ERROR_SIGNED_OUT;
-        }
-        client = it->second;
+    if (auto returned = m_mutex_clients.Run([&]() -> std::optional<s32> {
+            auto it = m_clients.find(user_id);
+            if (it == m_clients.end()) {
+                return std::optional<s32>{ORBIS_NP_ERROR_SIGNED_OUT};
+            }
+            client = it->second;
+            return std::nullopt;
+        })) {
+        return *returned;
     }
     shadnet_TusDeleteMultiSlotVariableRequest proto{};
     ShadNet::Builder proto_build;
@@ -309,13 +326,14 @@ s32 NpHandler::TusDeleteMultiSlotVariable(s32 user_id, s32 service_label,
     }
     const u64 pkt_id = client->SubmitRequest(ShadNet::CommandType::TusDeleteMultiSlotVariable,
                                              BuildTusPayload(com_id, Encode(proto)));
-    std::lock_guard lock(m_mutex_pending_tus);
-    PendingTusRequest p;
-    p.req = std::move(ctx);
-    p.cmd = ShadNet::CommandType::TusDeleteMultiSlotVariable;
-    p.user_id = user_id;
-    m_pending_tus.emplace(pkt_id, std::move(p));
-    return ORBIS_OK;
+    return m_mutex_pending_tus.Run([&]() -> s32 {
+        PendingTusRequest p;
+        p.req = std::move(ctx);
+        p.cmd = ShadNet::CommandType::TusDeleteMultiSlotVariable;
+        p.user_id = user_id;
+        m_pending_tus.emplace(pkt_id, std::move(p));
+        return ORBIS_OK;
+    });
 }
 
 s32 NpHandler::TusGetMultiUserDataStatus(s32 user_id, s32 service_label, s32 slotId,
@@ -327,13 +345,15 @@ s32 NpHandler::TusGetMultiUserDataStatus(s32 user_id, s32 service_label, s32 slo
                                          std::shared_ptr<NpTus::TusRequestCtx> ctx,
                                          NpTus::OrbisNpTusDataStatusForCrossSave* statusCSOut) {
     std::shared_ptr<ShadNet::ShadNetClient> client;
-    {
-        std::lock_guard lock(m_mutex_clients);
-        auto it = m_clients.find(user_id);
-        if (it == m_clients.end()) {
-            return ORBIS_NP_ERROR_SIGNED_OUT;
-        }
-        client = it->second;
+    if (auto returned = m_mutex_clients.Run([&]() -> std::optional<s32> {
+            auto it = m_clients.find(user_id);
+            if (it == m_clients.end()) {
+                return std::optional<s32>{ORBIS_NP_ERROR_SIGNED_OUT};
+            }
+            client = it->second;
+            return std::nullopt;
+        })) {
+        return *returned;
     }
     shadnet_TusGetMultiUserDataStatusRequest proto{};
     ShadNet::Builder proto_build;
@@ -353,17 +373,18 @@ s32 NpHandler::TusGetMultiUserDataStatus(s32 user_id, s32 service_label, s32 slo
     }
     const u64 pkt_id = client->SubmitRequest(ShadNet::CommandType::TusGetMultiUserDataStatus,
                                              BuildTusPayload(com_id, Encode(proto)));
-    std::lock_guard lock(m_mutex_pending_tus);
-    PendingTusRequest p;
-    p.req = std::move(ctx);
-    p.cmd = ShadNet::CommandType::TusGetMultiUserDataStatus;
-    p.user_id = user_id;
-    p.statusArray = statusOut;
-    p.statusArrayA = statusAOut;
-    p.statusArrayCS = statusCSOut;
-    p.arrayNum = arrayNum;
-    m_pending_tus.emplace(pkt_id, std::move(p));
-    return ORBIS_OK;
+    return m_mutex_pending_tus.Run([&]() -> s32 {
+        PendingTusRequest p;
+        p.req = std::move(ctx);
+        p.cmd = ShadNet::CommandType::TusGetMultiUserDataStatus;
+        p.user_id = user_id;
+        p.statusArray = statusOut;
+        p.statusArrayA = statusAOut;
+        p.statusArrayCS = statusCSOut;
+        p.arrayNum = arrayNum;
+        m_pending_tus.emplace(pkt_id, std::move(p));
+        return ORBIS_OK;
+    });
 }
 
 s32 NpHandler::TusGetMultiUserVariable(s32 user_id, s32 service_label, s32 slotId,
@@ -375,13 +396,15 @@ s32 NpHandler::TusGetMultiUserVariable(s32 user_id, s32 service_label, s32 slotI
                                        std::shared_ptr<NpTus::TusRequestCtx> ctx,
                                        NpTus::OrbisNpTusVariableForCrossSave* variablesCSOut) {
     std::shared_ptr<ShadNet::ShadNetClient> client;
-    {
-        std::lock_guard lock(m_mutex_clients);
-        auto it = m_clients.find(user_id);
-        if (it == m_clients.end()) {
-            return ORBIS_NP_ERROR_SIGNED_OUT;
-        }
-        client = it->second;
+    if (auto returned = m_mutex_clients.Run([&]() -> std::optional<s32> {
+            auto it = m_clients.find(user_id);
+            if (it == m_clients.end()) {
+                return std::optional<s32>{ORBIS_NP_ERROR_SIGNED_OUT};
+            }
+            client = it->second;
+            return std::nullopt;
+        })) {
+        return *returned;
     }
     shadnet_TusGetMultiUserVariableRequest proto{};
     ShadNet::Builder proto_build;
@@ -401,17 +424,18 @@ s32 NpHandler::TusGetMultiUserVariable(s32 user_id, s32 service_label, s32 slotI
     }
     const u64 pkt_id = client->SubmitRequest(ShadNet::CommandType::TusGetMultiUserVariable,
                                              BuildTusPayload(com_id, Encode(proto)));
-    std::lock_guard lock(m_mutex_pending_tus);
-    PendingTusRequest p;
-    p.req = std::move(ctx);
-    p.cmd = ShadNet::CommandType::TusGetMultiUserVariable;
-    p.user_id = user_id;
-    p.variableArray = variablesOut;
-    p.variableArrayA = variablesAOut;
-    p.variableArrayCS = variablesCSOut;
-    p.arrayNum = arrayNum;
-    m_pending_tus.emplace(pkt_id, std::move(p));
-    return ORBIS_OK;
+    return m_mutex_pending_tus.Run([&]() -> s32 {
+        PendingTusRequest p;
+        p.req = std::move(ctx);
+        p.cmd = ShadNet::CommandType::TusGetMultiUserVariable;
+        p.user_id = user_id;
+        p.variableArray = variablesOut;
+        p.variableArrayA = variablesAOut;
+        p.variableArrayCS = variablesCSOut;
+        p.arrayNum = arrayNum;
+        m_pending_tus.emplace(pkt_id, std::move(p));
+        return ORBIS_OK;
+    });
 }
 
 s32 NpHandler::TusTryAndSetVariable(s32 user_id, s32 service_label, const std::string& ownerNpId,
@@ -424,13 +448,15 @@ s32 NpHandler::TusTryAndSetVariable(s32 user_id, s32 service_label, const std::s
                                     std::shared_ptr<NpTus::TusRequestCtx> ctx,
                                     NpTus::OrbisNpTusVariableForCrossSave* variableCSOut) {
     std::shared_ptr<ShadNet::ShadNetClient> client;
-    {
-        std::lock_guard lock(m_mutex_clients);
-        auto it = m_clients.find(user_id);
-        if (it == m_clients.end()) {
-            return ORBIS_NP_ERROR_SIGNED_OUT;
-        }
-        client = it->second;
+    if (auto returned = m_mutex_clients.Run([&]() -> std::optional<s32> {
+            auto it = m_clients.find(user_id);
+            if (it == m_clients.end()) {
+                return std::optional<s32>{ORBIS_NP_ERROR_SIGNED_OUT};
+            }
+            client = it->second;
+            return std::nullopt;
+        })) {
+        return *returned;
     }
     shadnet_TusTryAndSetVariableRequest proto{};
     proto.ownerNpId = Bytes(ownerNpId);
@@ -467,17 +493,18 @@ s32 NpHandler::TusTryAndSetVariable(s32 user_id, s32 service_label, const std::s
     }
     const u64 pkt_id = client->SubmitRequest(ShadNet::CommandType::TusTryAndSetVariable,
                                              BuildTusPayload(com_id, Encode(proto)));
-    std::lock_guard lock(m_mutex_pending_tus);
-    PendingTusRequest p;
-    p.req = std::move(ctx);
-    p.cmd = ShadNet::CommandType::TusTryAndSetVariable;
-    p.user_id = user_id;
-    p.variableArray = variableOut;
-    p.variableArrayA = variableAOut;
-    p.variableArrayCS = variableCSOut;
-    p.arrayNum = 1;
-    m_pending_tus.emplace(pkt_id, std::move(p));
-    return ORBIS_OK;
+    return m_mutex_pending_tus.Run([&]() -> s32 {
+        PendingTusRequest p;
+        p.req = std::move(ctx);
+        p.cmd = ShadNet::CommandType::TusTryAndSetVariable;
+        p.user_id = user_id;
+        p.variableArray = variableOut;
+        p.variableArrayA = variableAOut;
+        p.variableArrayCS = variableCSOut;
+        p.arrayNum = 1;
+        m_pending_tus.emplace(pkt_id, std::move(p));
+        return ORBIS_OK;
+    });
 }
 
 s32 NpHandler::TusAddAndGetVariable(s32 user_id, s32 service_label, const std::string& ownerNpId,
@@ -489,13 +516,15 @@ s32 NpHandler::TusAddAndGetVariable(s32 user_id, s32 service_label, const std::s
                                     std::shared_ptr<NpTus::TusRequestCtx> ctx,
                                     NpTus::OrbisNpTusVariableForCrossSave* variableCSOut) {
     std::shared_ptr<ShadNet::ShadNetClient> client;
-    {
-        std::lock_guard lock(m_mutex_clients);
-        auto it = m_clients.find(user_id);
-        if (it == m_clients.end()) {
-            return ORBIS_NP_ERROR_SIGNED_OUT;
-        }
-        client = it->second;
+    if (auto returned = m_mutex_clients.Run([&]() -> std::optional<s32> {
+            auto it = m_clients.find(user_id);
+            if (it == m_clients.end()) {
+                return std::optional<s32>{ORBIS_NP_ERROR_SIGNED_OUT};
+            }
+            client = it->second;
+            return std::nullopt;
+        })) {
+        return *returned;
     }
     shadnet_TusAddAndGetVariableRequest proto{};
     proto.ownerNpId = Bytes(ownerNpId);
@@ -526,17 +555,18 @@ s32 NpHandler::TusAddAndGetVariable(s32 user_id, s32 service_label, const std::s
     }
     const u64 pkt_id = client->SubmitRequest(ShadNet::CommandType::TusAddAndGetVariable,
                                              BuildTusPayload(com_id, Encode(proto)));
-    std::lock_guard lock(m_mutex_pending_tus);
-    PendingTusRequest p;
-    p.req = std::move(ctx);
-    p.cmd = ShadNet::CommandType::TusAddAndGetVariable;
-    p.user_id = user_id;
-    p.variableArray = variableOut;
-    p.variableArrayA = variableAOut;
-    p.variableArrayCS = variableCSOut;
-    p.arrayNum = 1;
-    m_pending_tus.emplace(pkt_id, std::move(p));
-    return ORBIS_OK;
+    return m_mutex_pending_tus.Run([&]() -> s32 {
+        PendingTusRequest p;
+        p.req = std::move(ctx);
+        p.cmd = ShadNet::CommandType::TusAddAndGetVariable;
+        p.user_id = user_id;
+        p.variableArray = variableOut;
+        p.variableArrayA = variableAOut;
+        p.variableArrayCS = variableCSOut;
+        p.arrayNum = 1;
+        m_pending_tus.emplace(pkt_id, std::move(p));
+        return ORBIS_OK;
+    });
 }
 
 s32 NpHandler::TusGetFriendsDataStatus(s32 user_id, s32 service_label, s32 slotId, bool includeSelf,
@@ -547,13 +577,15 @@ s32 NpHandler::TusGetFriendsDataStatus(s32 user_id, s32 service_label, s32 slotI
                                        u32* hitsOut,
                                        NpTus::OrbisNpTusDataStatusForCrossSave* statusCSOut) {
     std::shared_ptr<ShadNet::ShadNetClient> client;
-    {
-        std::lock_guard lock(m_mutex_clients);
-        auto it = m_clients.find(user_id);
-        if (it == m_clients.end()) {
-            return ORBIS_NP_ERROR_SIGNED_OUT;
-        }
-        client = it->second;
+    if (auto returned = m_mutex_clients.Run([&]() -> std::optional<s32> {
+            auto it = m_clients.find(user_id);
+            if (it == m_clients.end()) {
+                return std::optional<s32>{ORBIS_NP_ERROR_SIGNED_OUT};
+            }
+            client = it->second;
+            return std::nullopt;
+        })) {
+        return *returned;
     }
     // Always targets the caller's own friend list, so there is no owner field.
     shadnet_TusGetFriendsDataStatusRequest proto{};
@@ -568,18 +600,19 @@ s32 NpHandler::TusGetFriendsDataStatus(s32 user_id, s32 service_label, s32 slotI
     }
     const u64 pkt_id = client->SubmitRequest(ShadNet::CommandType::TusGetFriendsDataStatus,
                                              BuildTusPayload(com_id, Encode(proto)));
-    std::lock_guard lock(m_mutex_pending_tus);
-    PendingTusRequest p;
-    p.req = std::move(ctx);
-    p.cmd = ShadNet::CommandType::TusGetFriendsDataStatus;
-    p.user_id = user_id;
-    p.statusArray = statusOut;
-    p.statusArrayA = statusAOut;
-    p.statusArrayCS = statusCSOut;
-    p.arrayNum = arrayNum;
-    p.totalOut = hitsOut;
-    m_pending_tus.emplace(pkt_id, std::move(p));
-    return ORBIS_OK;
+    return m_mutex_pending_tus.Run([&]() -> s32 {
+        PendingTusRequest p;
+        p.req = std::move(ctx);
+        p.cmd = ShadNet::CommandType::TusGetFriendsDataStatus;
+        p.user_id = user_id;
+        p.statusArray = statusOut;
+        p.statusArrayA = statusAOut;
+        p.statusArrayCS = statusCSOut;
+        p.arrayNum = arrayNum;
+        p.totalOut = hitsOut;
+        m_pending_tus.emplace(pkt_id, std::move(p));
+        return ORBIS_OK;
+    });
 }
 
 s32 NpHandler::TusGetFriendsVariable(s32 user_id, s32 service_label, s32 slotId, bool includeSelf,
@@ -589,13 +622,15 @@ s32 NpHandler::TusGetFriendsVariable(s32 user_id, s32 service_label, s32 slotId,
                                      u32* hitsOut,
                                      NpTus::OrbisNpTusVariableForCrossSave* variablesCSOut) {
     std::shared_ptr<ShadNet::ShadNetClient> client;
-    {
-        std::lock_guard lock(m_mutex_clients);
-        auto it = m_clients.find(user_id);
-        if (it == m_clients.end()) {
-            return ORBIS_NP_ERROR_SIGNED_OUT;
-        }
-        client = it->second;
+    if (auto returned = m_mutex_clients.Run([&]() -> std::optional<s32> {
+            auto it = m_clients.find(user_id);
+            if (it == m_clients.end()) {
+                return std::optional<s32>{ORBIS_NP_ERROR_SIGNED_OUT};
+            }
+            client = it->second;
+            return std::nullopt;
+        })) {
+        return *returned;
     }
     // Always targets the caller's own friend list, so there is no owner field.
     shadnet_TusGetFriendsVariableRequest proto{};
@@ -610,18 +645,19 @@ s32 NpHandler::TusGetFriendsVariable(s32 user_id, s32 service_label, s32 slotId,
     }
     const u64 pkt_id = client->SubmitRequest(ShadNet::CommandType::TusGetFriendsVariable,
                                              BuildTusPayload(com_id, Encode(proto)));
-    std::lock_guard lock(m_mutex_pending_tus);
-    PendingTusRequest p;
-    p.req = std::move(ctx);
-    p.cmd = ShadNet::CommandType::TusGetFriendsVariable;
-    p.user_id = user_id;
-    p.variableArray = variablesOut;
-    p.variableArrayA = variablesAOut;
-    p.variableArrayCS = variablesCSOut;
-    p.arrayNum = arrayNum;
-    p.totalOut = hitsOut;
-    m_pending_tus.emplace(pkt_id, std::move(p));
-    return ORBIS_OK;
+    return m_mutex_pending_tus.Run([&]() -> s32 {
+        PendingTusRequest p;
+        p.req = std::move(ctx);
+        p.cmd = ShadNet::CommandType::TusGetFriendsVariable;
+        p.user_id = user_id;
+        p.variableArray = variablesOut;
+        p.variableArrayA = variablesAOut;
+        p.variableArrayCS = variablesCSOut;
+        p.arrayNum = arrayNum;
+        p.totalOut = hitsOut;
+        m_pending_tus.emplace(pkt_id, std::move(p));
+        return ORBIS_OK;
+    });
 }
 
 s32 NpHandler::TusGetMultiSlotDataStatus(s32 user_id, s32 service_label,
@@ -633,13 +669,15 @@ s32 NpHandler::TusGetMultiSlotDataStatus(s32 user_id, s32 service_label,
                                          std::shared_ptr<NpTus::TusRequestCtx> ctx,
                                          NpTus::OrbisNpTusDataStatusForCrossSave* statusCSOut) {
     std::shared_ptr<ShadNet::ShadNetClient> client;
-    {
-        std::lock_guard lock(m_mutex_clients);
-        auto it = m_clients.find(user_id);
-        if (it == m_clients.end()) {
-            return ORBIS_NP_ERROR_SIGNED_OUT;
-        }
-        client = it->second;
+    if (auto returned = m_mutex_clients.Run([&]() -> std::optional<s32> {
+            auto it = m_clients.find(user_id);
+            if (it == m_clients.end()) {
+                return std::optional<s32>{ORBIS_NP_ERROR_SIGNED_OUT};
+            }
+            client = it->second;
+            return std::nullopt;
+        })) {
+        return *returned;
     }
     shadnet_TusGetMultiSlotDataStatusRequest proto{};
     ShadNet::Builder proto_build;
@@ -661,17 +699,18 @@ s32 NpHandler::TusGetMultiSlotDataStatus(s32 user_id, s32 service_label,
     }
     const u64 pkt_id = client->SubmitRequest(ShadNet::CommandType::TusGetMultiSlotDataStatus,
                                              BuildTusPayload(com_id, Encode(proto)));
-    std::lock_guard lock(m_mutex_pending_tus);
-    PendingTusRequest p;
-    p.req = std::move(ctx);
-    p.cmd = ShadNet::CommandType::TusGetMultiSlotDataStatus;
-    p.user_id = user_id;
-    p.statusArray = statusOut;
-    p.statusArrayA = statusAOut;
-    p.statusArrayCS = statusCSOut;
-    p.arrayNum = arrayNum;
-    m_pending_tus.emplace(pkt_id, std::move(p));
-    return ORBIS_OK;
+    return m_mutex_pending_tus.Run([&]() -> s32 {
+        PendingTusRequest p;
+        p.req = std::move(ctx);
+        p.cmd = ShadNet::CommandType::TusGetMultiSlotDataStatus;
+        p.user_id = user_id;
+        p.statusArray = statusOut;
+        p.statusArrayA = statusAOut;
+        p.statusArrayCS = statusCSOut;
+        p.arrayNum = arrayNum;
+        m_pending_tus.emplace(pkt_id, std::move(p));
+        return ORBIS_OK;
+    });
 }
 
 s32 NpHandler::TusSetData(s32 user_id, s32 service_label, const std::string& ownerNpId,
@@ -681,13 +720,15 @@ s32 NpHandler::TusSetData(s32 user_id, s32 service_label, const std::string& own
                           const std::string& isLastChangedAuthorNpId, bool hasDateCheck,
                           u64 isLastChangedDate, std::shared_ptr<NpTus::TusRequestCtx> ctx) {
     std::shared_ptr<ShadNet::ShadNetClient> client;
-    {
-        std::lock_guard lock(m_mutex_clients);
-        auto it = m_clients.find(user_id);
-        if (it == m_clients.end()) {
-            return ORBIS_NP_ERROR_SIGNED_OUT;
-        }
-        client = it->second;
+    if (auto returned = m_mutex_clients.Run([&]() -> std::optional<s32> {
+            auto it = m_clients.find(user_id);
+            if (it == m_clients.end()) {
+                return std::optional<s32>{ORBIS_NP_ERROR_SIGNED_OUT};
+            }
+            client = it->second;
+            return std::nullopt;
+        })) {
+        return *returned;
     }
     shadnet_TusSetDataRequest proto{};
     proto.ownerNpId = Bytes(ownerNpId);
@@ -721,28 +762,31 @@ s32 NpHandler::TusSetData(s32 user_id, s32 service_label, const std::string& own
     }
     const u64 pkt_id = client->SubmitRequest(ShadNet::CommandType::TusSetData,
                                              BuildTusPayload(com_id, Encode(proto)));
-    std::lock_guard lock(m_mutex_pending_tus);
-    PendingTusRequest p;
-    p.req = std::move(ctx);
-    p.cmd = ShadNet::CommandType::TusSetData;
-    p.user_id = user_id;
-    m_pending_tus.emplace(pkt_id, std::move(p));
-    return ORBIS_OK;
+    return m_mutex_pending_tus.Run([&]() -> s32 {
+        PendingTusRequest p;
+        p.req = std::move(ctx);
+        p.cmd = ShadNet::CommandType::TusSetData;
+        p.user_id = user_id;
+        m_pending_tus.emplace(pkt_id, std::move(p));
+        return ORBIS_OK;
+    });
 }
 
 void NpHandler::OnTusReply(s32 user_id, ShadNet::CommandType cmd, u64 pkt_id,
                            ShadNet::ErrorType error, const std::vector<u8>& body) {
     PendingTusRequest pending;
-    {
-        std::lock_guard lock(m_mutex_pending_tus);
-        auto it = m_pending_tus.find(pkt_id);
-        if (it == m_pending_tus.end()) {
-            LOG_WARNING(NpHandler, "no pending request for pkt_id={} cmd={}", pkt_id,
-                        static_cast<int>(cmd));
-            return;
-        }
-        pending = std::move(it->second);
-        m_pending_tus.erase(it);
+    if (m_mutex_pending_tus.Run([&] {
+            auto it = m_pending_tus.find(pkt_id);
+            if (it == m_pending_tus.end()) {
+                LOG_WARNING(NpHandler, "no pending request for pkt_id={} cmd={}", pkt_id,
+                            static_cast<int>(cmd));
+                return true;
+            }
+            pending = std::move(it->second);
+            m_pending_tus.erase(it);
+            return false;
+        })) {
+        return;
     }
     auto& req = pending.req;
 

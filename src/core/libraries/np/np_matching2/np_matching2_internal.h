@@ -13,6 +13,8 @@
 #include <string>
 #include <vector>
 
+#include "common/combiner.h"
+#include "common/event_mutex.h"
 #include "common/types.h"
 #include "core/libraries/kernel/threads.h"
 #include "core/libraries/np/np_matching2/np_matching2.h"
@@ -240,7 +242,7 @@ private:
     ContextManager() = default;
     std::shared_ptr<ContextObject> GetLocked(OrbisNpMatching2ContextId ctx_id);
 
-    std::mutex m_mutex;
+    Common::Combiner m_mutex;
     std::array<std::shared_ptr<ContextObject>, kMaxContexts + 1> m_contexts{};
     OrbisNpMatching2ContextId m_next_id = 1;
 
@@ -295,11 +297,11 @@ struct NpMatching2State {
     std::atomic<bool> initialized = false;
 
     OrbisNpMatching2RequestId next_request_id = 1;
-    std::mutex mutex;
+    Common::Combiner mutex;
 
     Kernel::PthreadT dispatch_thread = nullptr;
-    std::mutex queue_mutex;
-    std::condition_variable queue_cv;
+    Common::EventMutex queue_mutex;
+    Common::EventCondition queue_cv;
     std::vector<PendingEvent> pending_events;
     std::atomic<bool> dispatch_running{false};
 };

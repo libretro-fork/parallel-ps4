@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright 2026 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include "common/event_mutex.h"
 #include "core/libraries/kernel/time.h"
 #include "core/libraries/np/np_web_api2/np_web_api2.h"
 #include "core/libraries/np/np_web_api2/np_web_api2_internal.h"
@@ -189,7 +190,7 @@ private:
     } type;
     u64 pool_size{};
     bool deleting{};
-    std::recursive_mutex lock{};
+    Common::RecursiveEventMutex lock{};
     std::string name{};
     std::map<s32, UserContext*> user_contexts{};
     std::map<s32, PushEventHandle*> push_event_handles{};

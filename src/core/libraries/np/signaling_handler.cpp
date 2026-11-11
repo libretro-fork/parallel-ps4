@@ -1316,26 +1316,30 @@ void ActivationThreadMain() {
 
 void Start() {
     auto& state = NpHandler::GetInstance().GetSignalingState();
-    std::lock_guard lock(state.runtime_thread_mutex);
-    if (state.runtime_thread.joinable()) {
-        LOG_DEBUG(Lib_NpSignaling, "Signaling runtime already started refs={}", state.context_refs);
-        return;
-    }
-    state.runtime_stop.store(false, std::memory_order_relaxed);
-    LOG_DEBUG(Lib_NpSignaling, "Signaling runtime starting refs={}", state.context_refs);
-    state.runtime_thread = std::thread(ThreadMain);
-    state.activation_thread = std::thread(ActivationThreadMain);
+    state.runtime_thread_mutex.Run([&] {
+        if (state.runtime_thread.joinable()) {
+            LOG_DEBUG(Lib_NpSignaling, "Signaling runtime already started refs={}",
+                      state.context_refs);
+            return;
+        }
+        state.runtime_stop.store(false, std::memory_order_relaxed);
+        LOG_DEBUG(Lib_NpSignaling, "Signaling runtime starting refs={}", state.context_refs);
+        state.runtime_thread = std::thread(ThreadMain);
+        state.activation_thread = std::thread(ActivationThreadMain);
+    });
 }
 
 void Stop() {
     auto& state = NpHandler::GetInstance().GetSignalingState();
-    {
-        std::lock_guard lock(state.runtime_thread_mutex);
-        if (state.context_refs > 0) {
-            return;
-        }
-        state.runtime_stop.store(true, std::memory_order_relaxed);
-        state.activation_cv.notify_all();
+    if (state.runtime_thread_mutex.Run([&] {
+            if (state.context_refs > 0) {
+                return true;
+            }
+            state.runtime_stop.store(true, std::memory_order_relaxed);
+            state.activation_cv.notify_all();
+            return false;
+        })) {
+        return;
     }
     if (state.runtime_thread.joinable()) {
         state.runtime_thread.join();
@@ -1348,10 +1352,7 @@ void Stop() {
 void AddContextRef() {
     auto& state = NpHandler::GetInstance().GetSignalingState();
     u32 refs = 0;
-    {
-        std::lock_guard lock(state.runtime_thread_mutex);
-        refs = ++state.context_refs;
-    }
+    state.runtime_thread_mutex.Run([&] { refs = ++state.context_refs; });
     LOG_DEBUG(Lib_NpSignaling, "Signaling runtime ref added refs={}", refs);
     Start();
 }
@@ -1360,14 +1361,13 @@ void ReleaseContextRef() {
     auto& state = NpHandler::GetInstance().GetSignalingState();
     bool should_stop = false;
     u32 refs = 0;
-    {
-        std::lock_guard lock(state.runtime_thread_mutex);
+    state.runtime_thread_mutex.Run([&] {
         if (state.context_refs > 0) {
             --state.context_refs;
         }
         refs = state.context_refs;
         should_stop = state.context_refs == 0;
-    }
+    });
     LOG_DEBUG(Lib_NpSignaling, "Signaling runtime ref released refs={}", refs);
     if (should_stop) {
         Stop();

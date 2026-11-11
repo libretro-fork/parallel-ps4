@@ -10,86 +10,83 @@ namespace Core::Net::P2P {
 using namespace Wire;
 
 void Keyring::AddPeerKey(const Endpoint& peer, const KeyEntry& entry) {
-    std::scoped_lock lock{mutex};
-    const auto it = peer_keys.find(peer);
-    if (it != peer_keys.end() && it->second.entry.key == entry.key) {
-        ++it->second.references;
-    } else {
-        peer_keys[peer] = {entry, 1};
-    }
+    mutex.Run([&] {
+        const auto it = peer_keys.find(peer);
+        if (it != peer_keys.end() && it->second.entry.key == entry.key) {
+            ++it->second.references;
+        } else {
+            peer_keys[peer] = {entry, 1};
+        }
+    });
 }
 
 bool Keyring::ReleasePeerKey(const Endpoint& peer, const P2PKey& key, u8 id) {
-    std::scoped_lock lock{mutex};
-    const auto it = peer_keys.find(peer);
-    if (it == peer_keys.end() || !(it->second.entry.key == key) || it->second.entry.id != id) {
-        return false;
-    }
-    if (--it->second.references == 0) {
-        peer_keys.erase(it);
-    }
-    return true;
+    return mutex.Run([&]() -> bool {
+        const auto it = peer_keys.find(peer);
+        if (it == peer_keys.end() || !(it->second.entry.key == key) || it->second.entry.id != id) {
+            return false;
+        }
+        if (--it->second.references == 0) {
+            peer_keys.erase(it);
+        }
+        return true;
+    });
 }
 
 void Keyring::RemoveKeysWithId(u8 id) {
-    std::scoped_lock lock{mutex};
-    std::erase_if(peer_keys, [id](const auto& entry) { return entry.second.entry.id == id; });
+    mutex.Run([&] {
+        std::erase_if(peer_keys, [id](const auto& entry) { return entry.second.entry.id == id; });
+    });
 }
 
 void Keyring::SetPeerKey(const Endpoint& peer, const P2PKey& key) {
-    std::scoped_lock lock{mutex};
-    peer_keys[peer] = {KeyEntry{key}, 1};
+    mutex.Run([&] { peer_keys[peer] = {KeyEntry{key}, 1}; });
 }
 
 void Keyring::RemovePeerKey(const Endpoint& peer) {
-    std::scoped_lock lock{mutex};
-    peer_keys.erase(peer);
+    mutex.Run([&] { peer_keys.erase(peer); });
 }
 
 void Keyring::SetWildcardKey(std::optional<P2PKey> key) {
-    std::scoped_lock lock{mutex};
-    wildcard_key = key;
+    mutex.Run([&] { wildcard_key = key; });
 }
 
 std::optional<P2PKey> Keyring::GetWildcardKey() const {
-    std::scoped_lock lock{mutex};
-    return wildcard_key;
+    return mutex.Run([&]() -> std::optional<P2PKey> { return wildcard_key; });
 }
 
 void Keyring::SetDefaultKey(std::optional<P2PKey> key) {
-    std::scoped_lock lock{mutex};
-    default_key = key;
+    mutex.Run([&] { default_key = key; });
 }
 
 std::optional<P2PKey> Keyring::GetDefaultKey() const {
-    std::scoped_lock lock{mutex};
-    return default_key;
+    return mutex.Run([&]() -> std::optional<P2PKey> { return default_key; });
 }
 
 std::optional<P2PKey> Keyring::Find(const Endpoint& peer) const {
-    std::scoped_lock lock{mutex};
-    if (const auto it = peer_keys.find(peer); it != peer_keys.end()) {
-        return it->second.entry.key;
-    }
-    return wildcard_key ? wildcard_key : default_key;
+    return mutex.Run([&]() -> std::optional<P2PKey> {
+        if (const auto it = peer_keys.find(peer); it != peer_keys.end()) {
+            return it->second.entry.key;
+        }
+        return wildcard_key ? wildcard_key : default_key;
+    });
 }
 
 std::optional<KeyEntry> Keyring::FindPeerEntry(const Endpoint& peer) const {
-    std::scoped_lock lock{mutex};
-    if (const auto it = peer_keys.find(peer); it != peer_keys.end()) {
-        return it->second.entry;
-    }
-    return std::nullopt;
+    return mutex.Run([&]() -> std::optional<KeyEntry> {
+        if (const auto it = peer_keys.find(peer); it != peer_keys.end()) {
+            return it->second.entry;
+        }
+        return std::nullopt;
+    });
 }
 
 void Keyring::SetCommunicationId(std::optional<CommunicationId> id) {
-    std::scoped_lock lock{mutex};
-    communication_id = id;
+    mutex.Run([&] { communication_id = id; });
 }
 
 std::optional<CommunicationId> Keyring::GetCommunicationId() const {
-    std::scoped_lock lock{mutex};
-    return communication_id;
+    return mutex.Run([&]() -> std::optional<CommunicationId> { return communication_id; });
 }
 
 FramingCodec::FramingCodec(std::shared_ptr<Keyring> keyring, BroadcastObserver broadcast_observer)
@@ -231,36 +228,39 @@ std::vector<u8> FramingCodec::EncodeSignaling(std::span<const u8> data, const En
 }
 
 PseudoHeader FramingCodec::StreamPseudoHeader(const Endpoint& peer) {
-    std::scoped_lock lock{pseudo_mutex};
-    if (const auto it = pseudo_cache.find(peer); it != pseudo_cache.end()) {
-        return it->second;
-    }
-    PseudoHeader pseudo;
-    pseudo.family = peer.Family();
-    const bool v6 = peer.Family() == AF_INET6;
-    const size_t size = v6 ? 16 : 4;
-    const auto address_of = [v6](const sockaddr_storage& ss) -> const void* {
-        return v6 ? static_cast<const void*>(&reinterpret_cast<const sockaddr_in6*>(&ss)->sin6_addr)
-                  : static_cast<const void*>(&reinterpret_cast<const sockaddr_in*>(&ss)->sin_addr);
-    };
-    std::memcpy(pseudo.remote.data(), address_of(peer.addr), size);
-
-    Host::Error error;
-    const auto probe = Host::CreateSocket(peer.Family(), SOCK_DGRAM, 0, &error);
-    if (probe != Host::InvalidSocket) {
-        sockaddr_storage local{};
-        socklen_t local_len = sizeof(local);
-        if (Host::Connect(probe, peer.Sockaddr(), peer.Length()) == Host::Error::Ok &&
-            getsockname(probe, reinterpret_cast<sockaddr*>(&local), &local_len) == 0) {
-            std::memcpy(pseudo.local.data(), address_of(local), size);
+    return pseudo_mutex.Run([&]() -> PseudoHeader {
+        if (const auto it = pseudo_cache.find(peer); it != pseudo_cache.end()) {
+            return it->second;
         }
-        Host::CloseSocket(probe);
-    }
-    if (pseudo_cache.size() >= 256) {
-        pseudo_cache.clear();
-    }
-    pseudo_cache.emplace(peer, pseudo);
-    return pseudo;
+        PseudoHeader pseudo;
+        pseudo.family = peer.Family();
+        const bool v6 = peer.Family() == AF_INET6;
+        const size_t size = v6 ? 16 : 4;
+        const auto address_of = [v6](const sockaddr_storage& ss) -> const void* {
+            return v6 ? static_cast<const void*>(
+                            &reinterpret_cast<const sockaddr_in6*>(&ss)->sin6_addr)
+                      : static_cast<const void*>(
+                            &reinterpret_cast<const sockaddr_in*>(&ss)->sin_addr);
+        };
+        std::memcpy(pseudo.remote.data(), address_of(peer.addr), size);
+
+        Host::Error error;
+        const auto probe = Host::CreateSocket(peer.Family(), SOCK_DGRAM, 0, &error);
+        if (probe != Host::InvalidSocket) {
+            sockaddr_storage local{};
+            socklen_t local_len = sizeof(local);
+            if (Host::Connect(probe, peer.Sockaddr(), peer.Length()) == Host::Error::Ok &&
+                getsockname(probe, reinterpret_cast<sockaddr*>(&local), &local_len) == 0) {
+                std::memcpy(pseudo.local.data(), address_of(local), size);
+            }
+            Host::CloseSocket(probe);
+        }
+        if (pseudo_cache.size() >= 256) {
+            pseudo_cache.clear();
+        }
+        pseudo_cache.emplace(peer, pseudo);
+        return pseudo;
+    });
 }
 
 } // namespace Core::Net::P2P

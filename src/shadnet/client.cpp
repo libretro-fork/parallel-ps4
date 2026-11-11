@@ -85,10 +85,7 @@ void ShadNetClient::Stop() {
         m_sem_authenticated.release();
     } catch (...) {
     }
-    {
-        std::lock_guard lock(m_mutex_send_queue);
-        m_cv_send_queue.notify_all();
-    }
+    m_mutex_send_queue.Run([&] { m_cv_send_queue.notify_all(); });
     DoDisconnect();
     if (m_thread_connect.joinable())
         m_thread_connect.join();
@@ -99,20 +96,24 @@ void ShadNetClient::Stop() {
 }
 
 ShadNetState ShadNetClient::WaitForConnection() {
-    {
-        std::lock_guard lock(m_mutex_connected);
-        if (m_connected)
-            return ShadNetState::Ok;
+    if (auto returned = m_mutex_connected.Run([&]() -> std::optional<ShadNetState> {
+            if (m_connected)
+                return std::optional<ShadNetState>{ShadNetState::Ok};
+            return std::nullopt;
+        })) {
+        return *returned;
     }
     m_sem_connected.acquire();
     return m_connected ? ShadNetState::Ok : m_state.load();
 }
 
 ShadNetState ShadNetClient::WaitForAuthenticated() {
-    {
-        std::lock_guard lock(m_mutex_authenticated);
-        if (m_authenticated)
-            return ShadNetState::Ok;
+    if (auto returned = m_mutex_authenticated.Run([&]() -> std::optional<ShadNetState> {
+            if (m_authenticated)
+                return std::optional<ShadNetState>{ShadNetState::Ok};
+            return std::nullopt;
+        })) {
+        return *returned;
     }
     m_sem_authenticated.acquire();
     return m_authenticated ? ShadNetState::Ok : m_state.load();
@@ -147,20 +148,19 @@ bool ShadNetClient::IsMatching2Enabled() const {
 }
 
 u32 ShadNetClient::GetNumFriends() const {
-    std::lock_guard lock(m_mutex_friends);
-    return static_cast<u32>(m_friends.size());
+    return m_mutex_friends.Run([&]() -> u32 { return static_cast<u32>(m_friends.size()); });
 }
 
 std::optional<std::string> ShadNetClient::GetFriendNpid(u32 index) const {
-    std::lock_guard lock(m_mutex_friends);
-    if (index >= m_friends.size())
-        return std::nullopt;
-    return m_friends[index].npid;
+    return m_mutex_friends.Run([&]() -> std::optional<std::string> {
+        if (index >= m_friends.size())
+            return std::nullopt;
+        return m_friends[index].npid;
+    });
 }
 
 std::string ShadNetClient::GetBearerToken() const {
-    std::lock_guard lock(m_mutex_bearer);
-    return m_bearer_token;
+    return m_mutex_bearer.Run([&]() -> std::string { return m_bearer_token; });
 }
 
 // Threading
@@ -468,19 +468,20 @@ bool ShadNetClient::RecvN(u8* buf, u32 n) {
 }
 
 bool ShadNetClient::SendAll(const std::vector<u8>& data) {
-    std::lock_guard lock(m_mutex_send_direct);
-    int sent = 0;
-    const int total = static_cast<int>(data.size());
-    while (sent < total) {
-        const int r = static_cast<int>(
-            ::send(m_sock, reinterpret_cast<const char*>(data.data() + sent), total - sent, 0));
-        if (r < 0) {
-            LOG_ERROR(ShadNet, "send() failed");
-            return false;
+    return m_mutex_send_direct.Run([&]() -> bool {
+        int sent = 0;
+        const int total = static_cast<int>(data.size());
+        while (sent < total) {
+            const int r = static_cast<int>(
+                ::send(m_sock, reinterpret_cast<const char*>(data.data() + sent), total - sent, 0));
+            if (r < 0) {
+                LOG_ERROR(ShadNet, "send() failed");
+                return false;
+            }
+            sent += r;
         }
-        sent += r;
-    }
-    return true;
+        return true;
+    });
 }
 
 std::vector<u8> ShadNetClient::BuildPacket(CommandType cmd, u64 id,
@@ -498,10 +499,7 @@ std::vector<u8> ShadNetClient::BuildPacket(CommandType cmd, u64 id,
 u64 ShadNetClient::SubmitRequest(CommandType cmd, const std::vector<u8>& payload) {
     const u64 pkt_id = m_pkt_counter.fetch_add(1);
     auto pkt = BuildPacket(cmd, pkt_id, payload);
-    {
-        std::lock_guard lock(m_mutex_send_queue);
-        m_send_queue.push_back(std::move(pkt));
-    }
+    m_mutex_send_queue.Run([&] { m_send_queue.push_back(std::move(pkt)); });
     m_cv_send_queue.notify_all();
     return pkt_id;
 }
@@ -615,10 +613,7 @@ bool ShadNetClient::RequestServerFeatures() {
     const u64 pkt_id = m_pkt_counter.fetch_add(1);
     std::vector<u8> empty_payload;
     std::vector<u8> pkt = BuildPacket(CommandType::GetServerFeatures, pkt_id, empty_payload);
-    {
-        std::lock_guard lock(m_mutex_send_queue);
-        m_send_queue.push_back(std::move(pkt));
-    }
+    m_mutex_send_queue.Run([&] { m_send_queue.push_back(std::move(pkt)); });
     m_cv_send_queue.notify_one();
     LOG_DEBUG(ShadNet, "GetServerFeatures request fired pkt_id={}", pkt_id);
     return true;
@@ -703,10 +698,7 @@ void ShadNetClient::HandleLoginReply(const std::vector<u8>& payload) {
 
                 m_avatar_url = res.avatarUrl;
                 m_user_id = res.userId;
-                {
-                    std::lock_guard lock(m_mutex_friends);
-                    m_friends = res.friends;
-                }
+                m_mutex_friends.Run([&] { m_friends = res.friends; });
                 m_authenticated = true;
                 LOG_INFO(ShadNet, "Logged in npid='{}' userId={} friends={}", m_npid, m_user_id,
                          m_friends.size());
@@ -714,10 +706,7 @@ void ShadNetClient::HandleLoginReply(const std::vector<u8>& payload) {
                 const u64 pkt_id = m_pkt_counter.fetch_add(1);
                 std::vector<u8> empty_payload;
                 std::vector<u8> pkt = BuildPacket(CommandType::GetToken, pkt_id, empty_payload);
-                {
-                    std::lock_guard lock(m_mutex_send_queue);
-                    m_send_queue.push_back(std::move(pkt));
-                }
+                m_mutex_send_queue.Run([&] { m_send_queue.push_back(std::move(pkt)); });
                 m_cv_send_queue.notify_one();
                 LOG_DEBUG(ShadNet, "GetToken request fired pkt_id={}", pkt_id);
             } else {
@@ -776,10 +765,7 @@ void ShadNetClient::HandleGetTokenReply(const std::vector<u8>& payload) {
         RequestServerFeatures();
         return;
     }
-    {
-        std::lock_guard lock(m_mutex_bearer);
-        m_bearer_token = Str(pb.token);
-    }
+    m_mutex_bearer.Run([&] { m_bearer_token = Str(pb.token); });
     LOG_INFO(ShadNet, "Bearer token captured ({} chars) for accountID={} canonical npid='{}'",
              pb.token.size, pb.user_id, View(pb.npid));
     RequestServerFeatures();

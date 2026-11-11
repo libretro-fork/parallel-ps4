@@ -13,6 +13,8 @@
 #include <thread>
 #include <utility>
 #include <vector>
+#include "common/combiner.h"
+#include "common/event_mutex.h"
 #include "common/types.h"
 #ifdef _WIN32
 #include <winsock2.h>
@@ -416,21 +418,21 @@ private:
 
     std::binary_semaphore m_sem_connected{0};
     std::binary_semaphore m_sem_authenticated{0};
-    std::mutex m_mutex_connected;
-    std::mutex m_mutex_authenticated;
+    Common::Combiner m_mutex_connected;
+    Common::Combiner m_mutex_authenticated;
 
     std::thread m_thread_connect;
     std::thread m_thread_reader;
     std::thread m_thread_writer;
 
-    std::mutex m_mutex_send_direct;
-    std::mutex m_mutex_send_queue;
-    std::condition_variable m_cv_send_queue;
+    Common::Combiner m_mutex_send_direct;
+    Common::EventMutex m_mutex_send_queue;
+    Common::EventCondition m_cv_send_queue;
     std::vector<std::vector<u8>> m_send_queue;
 
     std::string m_avatar_url;
     u64 m_user_id = 0;
-    mutable std::mutex m_mutex_bearer;
+    mutable Common::Combiner m_mutex_bearer;
     std::string m_bearer_token;
     std::atomic<u32> m_addr_local{0};
     std::atomic<u32> m_addr_server{0};
@@ -439,7 +441,7 @@ private:
     std::atomic<bool> m_trophies_enabled{false};
     std::atomic<bool> m_server_features_received{false};
 
-    mutable std::mutex m_mutex_friends;
+    mutable Common::Combiner m_mutex_friends;
     std::vector<FriendEntry> m_friends;
 
     std::atomic<u64> m_pkt_counter{1};

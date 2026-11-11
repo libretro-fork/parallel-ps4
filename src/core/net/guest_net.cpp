@@ -11,6 +11,7 @@
 #include <utility>
 #include <variant>
 #include <vector>
+#include "common/combiner.h"
 
 #include "core/net/guest_net.h"
 #include "core/net/p2p_transport.h"
@@ -94,18 +95,18 @@ struct GuestSocket {
     std::atomic<bool> connected{false};     // also set while connecting
     std::atomic<bool> listening{false};
 
-    std::mutex attr_mutex;
+    Common::Combiner attr_mutex;
     SocketAttributes attributes;
 
     // Guarded by wait_mutex.
-    std::mutex wait_mutex;
+    Common::Combiner wait_mutex;
     std::vector<Waiter*> waiters;
     std::array<bool, 2> pending_abort{}; // preserved aborts, by Side
     bool send_again = false;             // SND_PRESERVATION_AGAIN
     bool closing = false;
 
     // Guarded by reg_mutex. Lock order: GuestEpoll::mutex first.
-    std::mutex reg_mutex;
+    Common::Combiner reg_mutex;
     bool closed = false;
     std::vector<std::weak_ptr<GuestEpoll>> epolls;
 };
@@ -123,7 +124,7 @@ struct GuestEpoll {
     };
 
     Host::HostEpoll host;
-    std::mutex mutex;
+    Common::Combiner mutex;
     std::unordered_map<s32, Registration> regs;
     std::vector<Waiter*> waiters;
     int flagged_waiters = 0;
@@ -143,7 +144,7 @@ struct ExternalObject {
     std::atomic<bool> signaled{false};
     std::atomic<bool> hangup{false};
 
-    std::mutex reg_mutex;
+    Common::Combiner reg_mutex;
     bool closed = false;
     std::vector<std::weak_ptr<GuestEpoll>> epolls;
 };
@@ -156,87 +157,94 @@ public:
     NetResult Insert(Object object) {
         // Epolls don't count towards the limit.
         const bool counted = !std::holds_alternative<std::shared_ptr<GuestEpoll>>(object);
-        {
-            std::scoped_lock lock{mutex_};
-            if (counted && counted_ >= MaxSockets) {
-                return NetResult::Fail(Error::MFile);
-            }
-            counted_ += counted ? 1 : 0; // reserve the slot
+        if (auto returned = mutex_.Run([&]() -> std::optional<NetResult> {
+                if (counted && counted_ >= MaxSockets) {
+                    return std::optional<NetResult>{NetResult::Fail(Error::MFile)};
+                }
+                counted_ += counted ? 1 : 0; // reserve the slot
+                return std::nullopt;
+            })) {
+            return *returned;
         }
         const s32 id = Allocate();
-        std::scoped_lock lock{mutex_};
-        if (id < 0) {
-            counted_ -= counted ? 1 : 0;
-            return NetResult::Fail(Error::NFile);
-        }
-        objects_[id] = {std::move(object), counted};
-        return NetResult::Ok(id);
+        return mutex_.Run([&]() -> NetResult {
+            if (id < 0) {
+                counted_ -= counted ? 1 : 0;
+                return NetResult::Fail(Error::NFile);
+            }
+            objects_[id] = {std::move(object), counted};
+            return NetResult::Ok(id);
+        });
     }
 
     template <typename T>
     std::shared_ptr<T> Get(s32 id) const {
-        std::scoped_lock lock{mutex_};
-        const auto it = objects_.find(id);
-        if (it == objects_.end()) {
-            return nullptr;
-        }
-        const auto* object = std::get_if<std::shared_ptr<T>>(&it->second.object);
-        return object ? *object : nullptr;
+        return mutex_.Run([&]() -> std::shared_ptr<T> {
+            const auto it = objects_.find(id);
+            if (it == objects_.end()) {
+                return nullptr;
+            }
+            const auto* object = std::get_if<std::shared_ptr<T>>(&it->second.object);
+            return object ? *object : nullptr;
+        });
     }
 
     template <typename T>
     std::shared_ptr<T> Remove(s32 id) {
         std::shared_ptr<T> removed;
-        {
-            std::scoped_lock lock{mutex_};
-            const auto it = objects_.find(id);
-            if (it == objects_.end()) {
-                return nullptr;
-            }
-            auto* object = std::get_if<std::shared_ptr<T>>(&it->second.object);
-            if (object == nullptr) {
-                return nullptr;
-            }
-            removed = std::move(*object);
-            counted_ -= it->second.counted ? 1 : 0;
-            objects_.erase(it);
+        if (auto returned = mutex_.Run([&]() -> std::optional<std::shared_ptr<T>> {
+                const auto it = objects_.find(id);
+                if (it == objects_.end()) {
+                    return std::optional<std::shared_ptr<T>>{nullptr};
+                }
+                auto* object = std::get_if<std::shared_ptr<T>>(&it->second.object);
+                if (object == nullptr) {
+                    return std::optional<std::shared_ptr<T>>{nullptr};
+                }
+                removed = std::move(*object);
+                counted_ -= it->second.counted ? 1 : 0;
+                objects_.erase(it);
+                return std::nullopt;
+            })) {
+            return *returned;
         }
         Release(id);
         return removed;
     }
 
     std::optional<NetObjectKind> Kind(s32 id) const {
-        std::scoped_lock lock{mutex_};
-        const auto it = objects_.find(id);
-        if (it == objects_.end()) {
-            return std::nullopt;
-        }
-        switch (it->second.object.index()) {
-        case 0:
-            return NetObjectKind::Socket;
-        case 1:
-            return NetObjectKind::Epoll;
-        default:
-            return NetObjectKind::External;
-        }
+        return mutex_.Run([&]() -> std::optional<NetObjectKind> {
+            const auto it = objects_.find(id);
+            if (it == objects_.end()) {
+                return std::nullopt;
+            }
+            switch (it->second.object.index()) {
+            case 0:
+                return NetObjectKind::Socket;
+            case 1:
+                return NetObjectKind::Epoll;
+            default:
+                return NetObjectKind::External;
+            }
+        });
     }
 
     template <typename T>
     std::vector<s32> Ids() const {
         std::vector<s32> ids;
-        std::scoped_lock lock{mutex_};
-        for (const auto& [id, entry] : objects_) {
-            if (std::holds_alternative<std::shared_ptr<T>>(entry.object)) {
-                ids.push_back(id);
+        return mutex_.Run([&]() -> std::vector<s32> {
+            for (const auto& [id, entry] : objects_) {
+                if (std::holds_alternative<std::shared_ptr<T>>(entry.object)) {
+                    ids.push_back(id);
+                }
             }
-        }
-        std::sort(ids.begin(), ids.end());
-        return ids;
+            std::sort(ids.begin(), ids.end());
+            return ids;
+        });
     }
 
     void SetAllocator(IdAllocator allocator) {
-        std::scoped_lock lock{alloc_mutex_};
-        allocator_ = std::move(allocator);
+        alloc_mutex_.Run([&] { allocator_ = std::move(allocator); });
     }
 
 private:
@@ -246,37 +254,43 @@ private:
     };
 
     s32 Allocate() {
-        std::unique_lock lock{alloc_mutex_};
-        if (allocator_.allocate) {
-            const auto allocate = allocator_.allocate;
-            lock.unlock();
-            return allocate();
-        }
-        auto it = std::find(used_.begin() + 1, used_.end(), false);
-        if (it == used_.end()) {
-            used_.push_back(false);
-            it = used_.end() - 1;
-        }
-        *it = true;
-        return static_cast<s32>(it - used_.begin());
+        decltype(allocator_.allocate) allocate{};
+        const s32 id = alloc_mutex_.Run([&]() -> s32 {
+            if (allocator_.allocate) {
+                allocate = allocator_.allocate;
+                return -1;
+            }
+            auto it = std::find(used_.begin() + 1, used_.end(), false);
+            if (it == used_.end()) {
+                used_.push_back(false);
+                it = used_.end() - 1;
+            }
+            *it = true;
+            return static_cast<s32>(it - used_.begin());
+        });
+        // The game's allocator runs outside
+        return allocate ? allocate() : id;
     }
 
     void Release(s32 id) {
-        std::unique_lock lock{alloc_mutex_};
-        if (allocator_.release) {
-            const auto release = allocator_.release;
-            lock.unlock();
+        decltype(allocator_.release) release{};
+        alloc_mutex_.Run([&] {
+            if (allocator_.release) {
+                release = allocator_.release;
+            } else if (static_cast<size_t>(id) < used_.size()) {
+                used_[static_cast<size_t>(id)] = false;
+            }
+        });
+        if (release) {
             release(id);
-        } else if (static_cast<size_t>(id) < used_.size()) {
-            used_[static_cast<size_t>(id)] = false;
         }
     }
 
-    mutable std::mutex mutex_;
+    mutable Common::Combiner mutex_;
     std::unordered_map<s32, Entry> objects_;
     int counted_ = 0;
 
-    std::mutex alloc_mutex_;
+    Common::Combiner alloc_mutex_;
     IdAllocator allocator_;
     std::vector<bool> used_{true}; // id 0 is never used
 };
@@ -284,7 +298,7 @@ private:
 ObjectTable g_objects;
 std::atomic<u32> g_next_generation{1};
 
-std::mutex g_p2p_mutex;
+Common::Combiner g_p2p_mutex;
 std::shared_ptr<P2P::Transport> g_p2p_transports[2];
 constexpr u64 WritableHandleBit = 1ull << 31;
 
@@ -306,8 +320,8 @@ std::pair<Host::NativeSocket, u32> WaitTarget(const GuestSocket& s, u32 interest
 }
 
 bool ConsumePendingAbort(GuestSocket& s, Side side) {
-    std::scoped_lock lock{s.wait_mutex};
-    return std::exchange(s.pending_abort[static_cast<size_t>(side)], false);
+    return s.wait_mutex.Run(
+        [&]() -> bool { return std::exchange(s.pending_abort[static_cast<size_t>(side)], false); });
 }
 
 class WaitScope {
@@ -319,21 +333,21 @@ public:
             entry_error_ = Error::NoBufs;
             return;
         }
-        std::scoped_lock lock{s_.wait_mutex};
-        waiter_.wake->Drain(); // stale signal from a previous call
-        if (s_.closing) {
-            entry_error_ = Error::BadF;
-        } else if (std::exchange(s_.pending_abort[static_cast<size_t>(side)], false)) {
-            entry_error_ = AbortedError;
-        } else {
-            s_.waiters.push_back(&waiter_);
-            registered_ = true;
-        }
+        s_.wait_mutex.Run([&] {
+            waiter_.wake->Drain(); // stale signal from a previous call
+            if (s_.closing) {
+                entry_error_ = Error::BadF;
+            } else if (std::exchange(s_.pending_abort[static_cast<size_t>(side)], false)) {
+                entry_error_ = AbortedError;
+            } else {
+                s_.waiters.push_back(&waiter_);
+                registered_ = true;
+            }
+        });
     }
     ~WaitScope() {
         if (registered_) {
-            std::scoped_lock lock{s_.wait_mutex};
-            std::erase(s_.waiters, &waiter_);
+            s_.wait_mutex.Run([&] { std::erase(s_.waiters, &waiter_); });
         }
     }
     WaitScope(const WaitScope&) = delete;
@@ -343,8 +357,7 @@ public:
         return entry_error_;
     }
     bool Interrupted() {
-        std::scoped_lock lock{s_.wait_mutex};
-        return waiter_.aborted;
+        return s_.wait_mutex.Run([&]() -> bool { return waiter_.aborted; });
     }
     const Host::WakeHandle& Wake() const {
         return *waiter_.wake;
@@ -416,10 +429,11 @@ NetResult SendAll(GuestSocket& s, size_t len, bool blocking, bool stream, SendSo
                                         [&] { return send_some(sent); });
         if (r.error != Error::Ok) {
             if (r.error == AbortedError) {
-                std::scoped_lock lock{s.wait_mutex};
-                if (std::exchange(s.send_again, false) && sent > 0) {
-                    s.pending_abort[static_cast<size_t>(Side::Send)] = true;
-                }
+                s.wait_mutex.Run([&] {
+                    if (std::exchange(s.send_again, false) && sent > 0) {
+                        s.pending_abort[static_cast<size_t>(Side::Send)] = true;
+                    }
+                });
             }
             return sent > 0 ? NetResult::Ok(static_cast<s64>(sent)) : r;
         }
@@ -510,8 +524,9 @@ Error HostUnregister(GuestEpoll& ep, GuestSocket& s, const GuestEpoll::Registrat
 }
 
 std::shared_ptr<P2P::Transport> P2PTransportFor(int family) {
-    std::scoped_lock lock{g_p2p_mutex};
-    return g_p2p_transports[family == AF_INET6 ? 1 : 0];
+    return g_p2p_mutex.Run([&]() -> std::shared_ptr<P2P::Transport> {
+        return g_p2p_transports[family == AF_INET6 ? 1 : 0];
+    });
 }
 
 } // namespace
@@ -561,24 +576,24 @@ NetResult ReleaseExternalId(s32 id) {
         return NetResult::Fail(Error::BadF);
     }
     std::vector<std::weak_ptr<GuestEpoll>> epolls;
-    {
-        std::scoped_lock lock{x->reg_mutex};
+    x->reg_mutex.Run([&] {
         x->closed = true;
         epolls.swap(x->epolls);
-    }
+    });
     for (const auto& weak : epolls) {
         const auto ep = weak.lock();
         if (!ep) {
             continue;
         }
-        std::scoped_lock lock{ep->mutex};
-        const auto it = ep->regs.find(id);
-        if (it != ep->regs.end() && it->second.generation == x->generation) {
-            if (it->second.armed) {
-                ep->host.Remove(x->done.PollHandle());
+        ep->mutex.Run([&] {
+            const auto it = ep->regs.find(id);
+            if (it != ep->regs.end() && it->second.generation == x->generation) {
+                if (it->second.armed) {
+                    ep->host.Remove(x->done.PollHandle());
+                }
+                ep->regs.erase(it);
             }
-            ep->regs.erase(it);
-        }
+        });
     }
     return NetResult::Ok();
 }
@@ -773,10 +788,7 @@ NetResult SocketAccept(s32 id, sockaddr* addr, socklen_t* len) {
     c->connect_timeout_us = s->connect_timeout_us.load();
     c->accept_timeout_us = s->accept_timeout_us.load();
     c->connected = true;
-    {
-        std::scoped_lock lock{s->attr_mutex};
-        c->attributes = s->attributes;
-    }
+    s->attr_mutex.Run([&] { c->attributes = s->attributes; });
     return g_objects.Insert(std::move(c));
 }
 
@@ -935,9 +947,10 @@ NetResult SocketGetAttributes(s32 id, SocketAttributes* out) {
     if (!s) {
         return NetResult::Fail(Error::BadF);
     }
-    std::scoped_lock lock{s->attr_mutex};
-    *out = s->attributes;
-    return NetResult::Ok();
+    return s->attr_mutex.Run([&]() -> NetResult {
+        *out = s->attributes;
+        return NetResult::Ok();
+    });
 }
 
 NetResult SocketUpdateAttributes(s32 id, const std::function<void(SocketAttributes&)>& update) {
@@ -945,9 +958,10 @@ NetResult SocketUpdateAttributes(s32 id, const std::function<void(SocketAttribut
     if (!s) {
         return NetResult::Fail(Error::BadF);
     }
-    std::scoped_lock lock{s->attr_mutex};
-    update(s->attributes);
-    return NetResult::Ok();
+    return s->attr_mutex.Run([&]() -> NetResult {
+        update(s->attributes);
+        return NetResult::Ok();
+    });
 }
 
 NetResult SocketBytesReadable(s32 id) {
@@ -1033,49 +1047,48 @@ NetResult SocketAbort(s32 id, u32 flags) {
     bool hangup = false;
     {
         std::vector<std::weak_ptr<GuestEpoll>> epolls;
-        {
-            std::scoped_lock lock{s->reg_mutex};
-            epolls = s->epolls;
-        }
+        s->reg_mutex.Run([&] { epolls = s->epolls; });
         for (const auto& weak : epolls) {
             const auto ep = weak.lock();
             if (!ep) {
                 continue;
             }
-            std::scoped_lock lock{ep->mutex};
-            const auto it = ep->regs.find(id);
-            if (ep->destroyed || ep->waiters.empty() || it == ep->regs.end() ||
-                it->second.generation != s->generation) {
-                continue;
-            }
-            ep->pending_hups.emplace_back(id, s->generation);
-            ep->host.Wake();
-            hangup = true;
+            ep->mutex.Run([&] {
+                const auto it = ep->regs.find(id);
+                if (ep->destroyed || ep->waiters.empty() || it == ep->regs.end() ||
+                    it->second.generation != s->generation) {
+                    return;
+                }
+                ep->pending_hups.emplace_back(id, s->generation);
+                ep->host.Wake();
+                hangup = true;
+            });
         }
     }
 
     // Abort doesn't touch queued data.
-    std::scoped_lock lock{s->wait_mutex};
-    const auto blocked = InterruptWaiters(*s);
-    bool preserved = false;
-    const bool send_again = (flags & kSocketAbortPreserveSendAgain) != 0;
-    if ((flags & kSocketAbortPreserveRecv) && !blocked[static_cast<size_t>(Side::Recv)]) {
-        s->pending_abort[static_cast<size_t>(Side::Recv)] = true;
-        preserved = true;
-    }
-    if ((flags & kSocketAbortPreserveSend) || send_again) {
-        if (!blocked[static_cast<size_t>(Side::Send)]) {
-            s->pending_abort[static_cast<size_t>(Side::Send)] = true;
+    return s->wait_mutex.Run([&]() -> NetResult {
+        const auto blocked = InterruptWaiters(*s);
+        bool preserved = false;
+        const bool send_again = (flags & kSocketAbortPreserveSendAgain) != 0;
+        if ((flags & kSocketAbortPreserveRecv) && !blocked[static_cast<size_t>(Side::Recv)]) {
+            s->pending_abort[static_cast<size_t>(Side::Recv)] = true;
             preserved = true;
-        } else if (send_again) {
-            s->send_again = true; // resolved in SendAll
         }
-    }
-    // Nothing to abort: ENOTBLK (PS4 behaviour).
-    if (!blocked[0] && !blocked[1] && !preserved && !hangup) {
-        return NetResult::Fail(Error::NotBlk);
-    }
-    return NetResult::Ok();
+        if ((flags & kSocketAbortPreserveSend) || send_again) {
+            if (!blocked[static_cast<size_t>(Side::Send)]) {
+                s->pending_abort[static_cast<size_t>(Side::Send)] = true;
+                preserved = true;
+            } else if (send_again) {
+                s->send_again = true; // resolved in SendAll
+            }
+        }
+        // Nothing to abort: ENOTBLK (PS4 behaviour).
+        if (!blocked[0] && !blocked[1] && !preserved && !hangup) {
+            return NetResult::Fail(Error::NotBlk);
+        }
+        return NetResult::Ok();
+    });
 }
 
 NetResult SocketClose(s32 id) {
@@ -1085,36 +1098,34 @@ NetResult SocketClose(s32 id) {
     }
     // Wake blocked threads. The host socket is closed when the last reference drops.
     // BSD would leave a recv blocked across close, we wake it on purpose.
-    {
-        std::scoped_lock lock{s->wait_mutex};
+    s->wait_mutex.Run([&] {
         s->closing = true;
         InterruptWaiters(*s);
-    }
+    });
 
     std::vector<std::weak_ptr<GuestEpoll>> epolls;
-    {
-        std::scoped_lock lock{s->reg_mutex};
+    s->reg_mutex.Run([&] {
         s->closed = true; // blocks later EpollControl(Add)
         epolls.swap(s->epolls);
-    }
+    });
     for (const auto& weak : epolls) {
         const auto ep = weak.lock();
         if (!ep) {
             continue;
         }
-        std::scoped_lock lock{ep->mutex};
-        const auto it = ep->regs.find(id);
-        if (it != ep->regs.end() && it->second.generation == s->generation) {
-            HostUnregister(*ep, *s, it->second);
-            ep->regs.erase(it);
-        }
+        ep->mutex.Run([&] {
+            const auto it = ep->regs.find(id);
+            if (it != ep->regs.end() && it->second.generation == s->generation) {
+                HostUnregister(*ep, *s, it->second);
+                ep->regs.erase(it);
+            }
+        });
     }
     return NetResult::Ok();
 }
 
 void SetP2PTransport(int family, std::shared_ptr<P2P::Transport> transport) {
-    std::scoped_lock lock{g_p2p_mutex};
-    g_p2p_transports[family == AF_INET6 ? 1 : 0] = std::move(transport);
+    g_p2p_mutex.Run([&] { g_p2p_transports[family == AF_INET6 ? 1 : 0] = std::move(transport); });
 }
 
 NetResult P2PSocketCreate(int family, bool stream) {
@@ -1245,10 +1256,7 @@ NetResult P2PSocketAccept(s32 id, P2P::Endpoint* peer, u16* peer_vport) {
     auto c = std::make_shared<GuestSocket>(std::move(child), g_next_generation.fetch_add(1));
     c->nonblocking = s->nonblocking.load();
     c->connected = true;
-    {
-        std::scoped_lock lock{s->attr_mutex};
-        c->attributes = s->attributes;
-    }
+    s->attr_mutex.Run([&] { c->attributes = s->attributes; });
     return g_objects.Insert(std::move(c));
 }
 
@@ -1331,67 +1339,69 @@ namespace {
 
 NetResult ExternalEpollControl(GuestEpoll& ep, const std::shared_ptr<GuestEpoll>& ep_ref, s32 id,
                                ExternalObject& x, EpollOp op, u32 events, u64 data) {
-    std::scoped_lock ep_lock{ep.mutex};
-    std::scoped_lock x_lock{x.reg_mutex};
-    if (x.closed) {
-        return NetResult::Fail(Error::BadF);
-    }
-    const auto it = ep.regs.find(id);
-    const bool exists = it != ep.regs.end();
-    switch (op) {
-    case EpollOp::Add: {
-        if (exists) {
-            return NetResult::Fail(Error::Exist);
-        }
-        const bool arm = (events & Host::EvIn) != 0;
-        if (arm) {
-            const auto tag = MakeTag(id, x.generation);
-            if (const Error e = ep.host.Add(x.done.PollHandle(), tag, Host::EvIn, 0);
-                e != Error::Ok) {
-                return NetResult::Fail(e);
+    return ep.mutex.Run([&]() -> NetResult {
+        return x.reg_mutex.Run([&] {
+            if (x.closed) {
+                return NetResult::Fail(Error::BadF);
             }
-        }
-        ep.regs.emplace(
-            id, GuestEpoll::Registration{x.generation, data, events, false, false, true, arm});
-        x.epolls.push_back(ep_ref);
-        return NetResult::Ok();
-    }
-    case EpollOp::Modify: {
-        if (!exists) {
-            return NetResult::Fail(Error::NoEnt);
-        }
-        auto& reg = it->second;
-        const bool want = (events & Host::EvIn) != 0 && !reg.reported;
-        if (want && !reg.armed) {
-            const auto tag = MakeTag(id, x.generation);
-            if (const Error e = ep.host.Add(x.done.PollHandle(), tag, Host::EvIn, 0);
-                e != Error::Ok) {
-                return NetResult::Fail(e);
+            const auto it = ep.regs.find(id);
+            const bool exists = it != ep.regs.end();
+            switch (op) {
+            case EpollOp::Add: {
+                if (exists) {
+                    return NetResult::Fail(Error::Exist);
+                }
+                const bool arm = (events & Host::EvIn) != 0;
+                if (arm) {
+                    const auto tag = MakeTag(id, x.generation);
+                    if (const Error e = ep.host.Add(x.done.PollHandle(), tag, Host::EvIn, 0);
+                        e != Error::Ok) {
+                        return NetResult::Fail(e);
+                    }
+                }
+                ep.regs.emplace(id, GuestEpoll::Registration{x.generation, data, events, false,
+                                                             false, true, arm});
+                x.epolls.push_back(ep_ref);
+                return NetResult::Ok();
             }
-            reg.armed = true;
-        } else if (!want && reg.armed) {
-            ep.host.Remove(x.done.PollHandle());
-            reg.armed = false;
-        }
-        reg.data = data;
-        reg.events = events;
-        return NetResult::Ok();
-    }
-    case EpollOp::Delete:
-        if (!exists) {
-            return NetResult::Fail(Error::NoEnt);
-        }
-        if (it->second.armed) {
-            ep.host.Remove(x.done.PollHandle());
-        }
-        ep.regs.erase(it);
-        std::erase_if(x.epolls, [&](const std::weak_ptr<GuestEpoll>& w) {
-            const auto p = w.lock();
-            return !p || p == ep_ref;
+            case EpollOp::Modify: {
+                if (!exists) {
+                    return NetResult::Fail(Error::NoEnt);
+                }
+                auto& reg = it->second;
+                const bool want = (events & Host::EvIn) != 0 && !reg.reported;
+                if (want && !reg.armed) {
+                    const auto tag = MakeTag(id, x.generation);
+                    if (const Error e = ep.host.Add(x.done.PollHandle(), tag, Host::EvIn, 0);
+                        e != Error::Ok) {
+                        return NetResult::Fail(e);
+                    }
+                    reg.armed = true;
+                } else if (!want && reg.armed) {
+                    ep.host.Remove(x.done.PollHandle());
+                    reg.armed = false;
+                }
+                reg.data = data;
+                reg.events = events;
+                return NetResult::Ok();
+            }
+            case EpollOp::Delete:
+                if (!exists) {
+                    return NetResult::Fail(Error::NoEnt);
+                }
+                if (it->second.armed) {
+                    ep.host.Remove(x.done.PollHandle());
+                }
+                ep.regs.erase(it);
+                std::erase_if(x.epolls, [&](const std::weak_ptr<GuestEpoll>& w) {
+                    const auto p = w.lock();
+                    return !p || p == ep_ref;
+                });
+                return NetResult::Ok();
+            }
+            return NetResult::Fail(Error::Inval);
         });
-        return NetResult::Ok();
-    }
-    return NetResult::Fail(Error::Inval);
+    });
 }
 
 } // namespace
@@ -1409,52 +1419,55 @@ static NetResult EpollControlOn(const std::shared_ptr<GuestEpoll>& ep, EpollOp o
         return NetResult::Fail(Error::BadF);
     }
 
-    std::scoped_lock ep_lock{ep->mutex};
-    std::scoped_lock s_lock{s->reg_mutex};
-    if (s->closed) {
-        return NetResult::Fail(Error::BadF);
-    }
-    const auto it = ep->regs.find(socket_id);
-    const bool exists = it != ep->regs.end();
+    return ep->mutex.Run([&]() -> NetResult {
+        return s->reg_mutex.Run([&] {
+            if (s->closed) {
+                return NetResult::Fail(Error::BadF);
+            }
+            const auto it = ep->regs.find(socket_id);
+            const bool exists = it != ep->regs.end();
 
-    switch (op) {
-    case EpollOp::Add: {
-        if (exists) {
-            return NetResult::Fail(Error::Exist);
-        }
-        GuestEpoll::Registration reg{s->generation, data, events, s->IsP2P(), false, false, false};
-        const Error e = HostRegister(*ep, socket_id, *s, events, flags, reg);
-        if (e == Error::Ok) {
-            ep->regs.emplace(socket_id, reg);
-            s->epolls.push_back(ep);
-        }
-        return FromError(e);
-    }
-    case EpollOp::Modify: {
-        if (!exists) {
-            return NetResult::Fail(Error::NoEnt);
-        }
-        const Error e = HostModify(*ep, socket_id, *s, events, flags, it->second);
-        if (e == Error::Ok) {
-            it->second.data = data;
-            it->second.events = events;
-        }
-        return FromError(e);
-    }
-    case EpollOp::Delete: {
-        if (!exists) {
-            return NetResult::Fail(Error::NoEnt);
-        }
-        const Error e = HostUnregister(*ep, *s, it->second);
-        ep->regs.erase(it);
-        std::erase_if(s->epolls, [&](const std::weak_ptr<GuestEpoll>& w) {
-            const auto p = w.lock();
-            return !p || p == ep;
+            switch (op) {
+            case EpollOp::Add: {
+                if (exists) {
+                    return NetResult::Fail(Error::Exist);
+                }
+                GuestEpoll::Registration reg{s->generation, data,  events, s->IsP2P(),
+                                             false,         false, false};
+                const Error e = HostRegister(*ep, socket_id, *s, events, flags, reg);
+                if (e == Error::Ok) {
+                    ep->regs.emplace(socket_id, reg);
+                    s->epolls.push_back(ep);
+                }
+                return FromError(e);
+            }
+            case EpollOp::Modify: {
+                if (!exists) {
+                    return NetResult::Fail(Error::NoEnt);
+                }
+                const Error e = HostModify(*ep, socket_id, *s, events, flags, it->second);
+                if (e == Error::Ok) {
+                    it->second.data = data;
+                    it->second.events = events;
+                }
+                return FromError(e);
+            }
+            case EpollOp::Delete: {
+                if (!exists) {
+                    return NetResult::Fail(Error::NoEnt);
+                }
+                const Error e = HostUnregister(*ep, *s, it->second);
+                ep->regs.erase(it);
+                std::erase_if(s->epolls, [&](const std::weak_ptr<GuestEpoll>& w) {
+                    const auto p = w.lock();
+                    return !p || p == ep;
+                });
+                return FromError(e);
+            }
+            }
+            return NetResult::Fail(Error::Inval);
         });
-        return FromError(e);
-    }
-    }
-    return NetResult::Fail(Error::Inval);
+    });
 }
 
 NetResult EpollControl(s32 eid, EpollOp op, s32 socket_id, u32 events, u32 flags, u64 data) {
@@ -1478,25 +1491,28 @@ static NetResult EpollWaitOn(const std::shared_ptr<GuestEpoll>& ep, std::span<Gu
 
     // The wake handle is drained once every interrupted wait has left.
     Waiter me{};
-    {
-        std::scoped_lock lock{ep->mutex};
-        if (ep->destroyed) {
-            return NetResult::Fail(Error::BadF);
-        }
-        if (std::exchange(ep->pending_abort, false)) {
-            return NetResult::Fail(AbortedError);
-        }
-        ep->waiters.push_back(&me);
+    if (auto returned = ep->mutex.Run([&]() -> std::optional<NetResult> {
+            if (ep->destroyed) {
+                return std::optional<NetResult>{NetResult::Fail(Error::BadF)};
+            }
+            if (std::exchange(ep->pending_abort, false)) {
+                return std::optional<NetResult>{NetResult::Fail(AbortedError)};
+            }
+            ep->waiters.push_back(&me);
+            return std::nullopt;
+        })) {
+        return *returned;
     }
     struct Unregister {
         GuestEpoll& ep;
         Waiter& me;
         ~Unregister() {
-            std::scoped_lock lock{ep.mutex};
-            std::erase(ep.waiters, &me);
-            if (me.aborted && --ep.flagged_waiters == 0 && ep.WakeIdle()) {
-                ep.host.DrainWake();
-            }
+            ep.mutex.Run([&] {
+                std::erase(ep.waiters, &me);
+                if (me.aborted && --ep.flagged_waiters == 0 && ep.WakeIdle()) {
+                    ep.host.DrainWake();
+                }
+            });
         }
     } unregister{*ep, me};
     // Called with ep->mutex held.
@@ -1526,24 +1542,25 @@ static NetResult EpollWaitOn(const std::shared_ptr<GuestEpoll>& ep, std::span<Gu
     };
 
     for (;;) {
-        {
-            std::scoped_lock lock{ep->mutex};
-            if (me.aborted) {
-                return NetResult::Fail(AbortedError);
-            }
-            if (!ep->pending_hups.empty()) {
-                if (const size_t n = add_hangups(0); n > 0) {
-                    return NetResult::Ok(static_cast<s64>(n));
+        if (auto returned = ep->mutex.Run([&]() -> std::optional<NetResult> {
+                if (me.aborted) {
+                    return std::optional<NetResult>{NetResult::Fail(AbortedError)};
                 }
-            }
+                if (!ep->pending_hups.empty()) {
+                    if (const size_t n = add_hangups(0); n > 0) {
+                        return std::optional<NetResult>{NetResult::Ok(static_cast<s64>(n))};
+                    }
+                }
+                return std::nullopt;
+            })) {
+            return *returned;
         }
         const auto r = ep->host.Wait(host_out, deadline);
         if (r.error != Error::Ok) {
             return NetResult::Fail(r.error);
         }
         size_t n = 0;
-        {
-            std::scoped_lock lock{ep->mutex};
+        ep->mutex.Run([&] {
             for (s32 i = 0; i < r.count; ++i) {
                 const auto socket_id = static_cast<s32>(host_out[i].tag & 0x7fffffffu);
                 const auto generation = static_cast<u32>(host_out[i].tag >> 32);
@@ -1591,7 +1608,7 @@ static NetResult EpollWaitOn(const std::shared_ptr<GuestEpoll>& ep, std::span<Gu
             if (!ep->pending_hups.empty()) {
                 n = add_hangups(n);
             }
-        }
+        });
         if (n > 0) {
             return NetResult::Ok(static_cast<s64>(n));
         }
@@ -1629,15 +1646,16 @@ NetResult EpollAbort(s32 eid, u32 flags) {
     if (!ep) {
         return NetResult::Fail(Error::BadF);
     }
-    std::scoped_lock lock{ep->mutex};
-    if (InterruptEpollWaiters(*ep)) {
-        return NetResult::Ok();
-    }
-    if (flags & kEpollAbortPreserve) {
-        ep->pending_abort = true;
-        return NetResult::Ok();
-    }
-    return NetResult::Fail(Error::NotBlk);
+    return ep->mutex.Run([&]() -> NetResult {
+        if (InterruptEpollWaiters(*ep)) {
+            return NetResult::Ok();
+        }
+        if (flags & kEpollAbortPreserve) {
+            ep->pending_abort = true;
+            return NetResult::Ok();
+        }
+        return NetResult::Fail(Error::NotBlk);
+    });
 }
 
 NetResult EpollDestroy(s32 eid) {
@@ -1646,10 +1664,11 @@ NetResult EpollDestroy(s32 eid) {
         return NetResult::Fail(Error::BadF);
     }
     // Waiters hold a reference, so the host epoll is freed after the last one returns.
-    std::scoped_lock lock{ep->mutex};
-    ep->destroyed = true;
-    InterruptEpollWaiters(*ep);
-    return NetResult::Ok();
+    return ep->mutex.Run([&]() -> NetResult {
+        ep->destroyed = true;
+        InterruptEpollWaiters(*ep);
+        return NetResult::Ok();
+    });
 }
 
 NetResult SocketSelect(std::span<SelectEntry> entries, s64 timeout_us) {

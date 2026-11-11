@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "common/event_mutex.h"
 #include "core/file_sys/devices/base_device.h"
 
 #include <mutex>
@@ -15,7 +16,7 @@ class Logger final : BaseDevice {
     std::string prefix;
     bool is_err;
 
-    std::recursive_mutex mtx;
+    Common::RecursiveEventMutex mtx;
     std::vector<char> buffer;
 
 public:

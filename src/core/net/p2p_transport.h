@@ -12,6 +12,7 @@
 #include <memory>
 #include <mutex>
 #include <thread>
+#include "common/combiner.h"
 
 #include "core/net/p2p_tcp.h"
 
@@ -234,7 +235,7 @@ private:
     Host::NativeSocket socket_ = Host::InvalidSocket;
     u16 bound_port_ = 0;
 
-    mutable std::mutex mutex_;
+    mutable Common::Combiner mutex_;
     std::map<u16, std::shared_ptr<DatagramBinding>> datagram_bindings_;
     std::map<u16, std::shared_ptr<ListenerState>> listeners_;
     std::map<ConnectionKey, std::shared_ptr<Connection>> connections_;

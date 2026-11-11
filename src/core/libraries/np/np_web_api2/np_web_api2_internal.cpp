@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright 2026 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include "common/combiner.h"
 #include "common/logging/log.h"
 #include "core/emulator_settings.h"
 #include "core/libraries/kernel/time.h"
@@ -16,48 +17,48 @@
 
 namespace Libraries::Np::NpWebApi2 {
 
-std::recursive_mutex g_mutex{};
+Common::Combiner g_mutex; // runs a nested call in place, as the recursive mutex did
 s32 g_current_lib_context_id{};
 std::map<s32, LibraryContext*> g_lib_contexts{};
 u64 g_last_timeout_check{};
 
 s32 createLibraryContext(s32 http_ctx_id, s32 type, u64 pool_size, const char* name) {
-    std::scoped_lock lk{g_mutex};
-
-    if (g_lib_contexts.size() >= 0x8000) {
-        LOG_ERROR(Lib_NpWebApi2, "Too many library contexts");
-        return ORBIS_NP_WEBAPI2_ERROR_LIB_CONTEXT_MAX;
-    }
-
-    do {
-        g_current_lib_context_id++;
-        if (g_current_lib_context_id >= 0x8000) {
-            g_current_lib_context_id = 1;
+    return g_mutex.Run([&]() -> s32 {
+        if (g_lib_contexts.size() >= 0x8000) {
+            LOG_ERROR(Lib_NpWebApi2, "Too many library contexts");
+            return ORBIS_NP_WEBAPI2_ERROR_LIB_CONTEXT_MAX;
         }
-    } while (g_lib_contexts.contains(g_current_lib_context_id));
 
-    if (!name) {
-        g_lib_contexts[g_current_lib_context_id] =
-            new LibraryContext(g_current_lib_context_id, type, http_ctx_id, pool_size);
-    } else {
-        g_lib_contexts[g_current_lib_context_id] =
-            new LibraryContext(g_current_lib_context_id, type, http_ctx_id, pool_size, name);
-    }
-    return g_current_lib_context_id;
+        do {
+            g_current_lib_context_id++;
+            if (g_current_lib_context_id >= 0x8000) {
+                g_current_lib_context_id = 1;
+            }
+        } while (g_lib_contexts.contains(g_current_lib_context_id));
+
+        if (!name) {
+            g_lib_contexts[g_current_lib_context_id] =
+                new LibraryContext(g_current_lib_context_id, type, http_ctx_id, pool_size);
+        } else {
+            g_lib_contexts[g_current_lib_context_id] =
+                new LibraryContext(g_current_lib_context_id, type, http_ctx_id, pool_size, name);
+        }
+        return g_current_lib_context_id;
+    });
 }
 
 LibraryContext* getLibraryContext(s32 lib_ctx_id) {
-    std::scoped_lock lk{g_mutex};
-
-    if (!g_lib_contexts.contains(lib_ctx_id)) {
-        return nullptr;
-    }
-    LibraryContext* lib_ctx = g_lib_contexts.at(lib_ctx_id);
-    if (lib_ctx->IsDeleted()) {
-        return nullptr;
-    }
-    lib_ctx->AddUser();
-    return lib_ctx;
+    return g_mutex.Run([&]() -> LibraryContext* {
+        if (!g_lib_contexts.contains(lib_ctx_id)) {
+            return nullptr;
+        }
+        LibraryContext* lib_ctx = g_lib_contexts.at(lib_ctx_id);
+        if (lib_ctx->IsDeleted()) {
+            return nullptr;
+        }
+        lib_ctx->AddUser();
+        return lib_ctx;
+    });
 }
 
 s32 getMemoryPoolStats(s32 lib_ctx_id, OrbisNpWebApi2MemoryPoolStats* stats) {
@@ -213,9 +214,7 @@ s32 terminateLibraryContext(s32 lib_ctx_id) {
     lib_ctx->Unlock();
     lib_ctx->RemoveUser();
 
-    g_mutex.lock();
-    g_lib_contexts.erase(lib_ctx_id);
-    g_mutex.unlock();
+    g_mutex.Run([&] { g_lib_contexts.erase(lib_ctx_id); });
 
     lib_ctx->DeleteAllPushEventHandles();
     lib_ctx->DeleteAllPushEventFilters();
@@ -922,11 +921,12 @@ void checkTimeout() {
         return;
     }
 
-    std::scoped_lock lk{g_mutex};
-    g_last_timeout_check = current_time;
-    for (auto& [lib_ctx_id, lib_ctx] : g_lib_contexts) {
-        lib_ctx->CheckTimeout();
-    }
+    g_mutex.Run([&] {
+        g_last_timeout_check = current_time;
+        for (auto& [lib_ctx_id, lib_ctx] : g_lib_contexts) {
+            lib_ctx->CheckTimeout();
+        }
+    });
 }
 
 }; // namespace Libraries::Np::NpWebApi2

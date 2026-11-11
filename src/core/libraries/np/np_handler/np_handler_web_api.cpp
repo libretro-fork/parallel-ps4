@@ -44,10 +44,12 @@ void NpHandler::OnWebApiPushEvent(s32 user_id, const ShadNet::NotifyWebApiPushEv
         ev.hasTo = true;
         if (n.toNpid.empty()) {
             // e.g. friendlist events carry no toNpid; the recipient is still us.
-            std::lock_guard lock(m_mutex_clients);
-            if (const auto it = m_np_ids.find(user_id); it != m_np_ids.end()) {
-                std::memcpy(ev.toOnlineId.data, it->second.handle.data, sizeof(ev.toOnlineId.data));
-            }
+            m_mutex_clients.Run([&] {
+                if (const auto it = m_np_ids.find(user_id); it != m_np_ids.end()) {
+                    std::memcpy(ev.toOnlineId.data, it->second.handle.data,
+                                sizeof(ev.toOnlineId.data));
+                }
+            });
         }
     }
     NpWebApi::EnqueuePushEvent(ev);
@@ -67,8 +69,7 @@ void NpHandler::OnWebApiPushEvent(s32 user_id, const ShadNet::NotifyWebApiPushEv
             }
         }
         if (!session_id.empty()) {
-            {
-                std::lock_guard lk(m_mutex_pending_invites);
+            m_mutex_pending_invites.Run([&] {
                 auto& v = m_pending_invites[user_id];
                 v.erase(std::remove_if(v.begin(), v.end(),
                                        [&](const PendingInvitation& p) {
@@ -78,7 +79,7 @@ void NpHandler::OnWebApiPushEvent(s32 user_id, const ShadNet::NotifyWebApiPushEv
                 PendingInvitation inv{session_id, invitation_id, n.fromNpid, n.toNpid, valid_until};
                 inv.from_account_id = ev.fromAccountId;
                 v.push_back(std::move(inv));
-            }
+            });
             ImGui::InvitationPrompt::Push(user_id, invitation_id, session_id, n.fromNpid);
         }
     }
