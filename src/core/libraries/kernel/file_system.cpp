@@ -1524,6 +1524,23 @@ s64 PS4_SYSV_ABI posix_preadv(s32 fd, OrbisKernelIovec* iov, s32 iovcnt, s64 off
             return -1;
         }
 
+        // A mapped file is read where it lies, at the offset: no seek away and back
+        if (const auto* host = file->GetHostFile()) {
+            if (const auto bytes = host->Mapped(); !bytes.empty()) {
+                const auto* memory = Core::Memory::Instance();
+                u64 at = static_cast<u64>(offset);
+                s64 total_read = 0;
+                for (s32 i = 0; i < iovcnt && at < bytes.size(); i++) {
+                    const u64 n = std::min<u64>(iov[i].iov_len, bytes.size() - at);
+                    memory->InvalidateMemory(reinterpret_cast<VAddr>(iov[i].iov_base), n);
+                    std::memcpy(iov[i].iov_base, bytes.data() + at, n);
+                    at += n;
+                    total_read += static_cast<s64>(n);
+                }
+                return total_read;
+            }
+        }
+
         const s64 pos = file->Tell();
         SCOPE_EXIT {
             file->Seek(pos);
