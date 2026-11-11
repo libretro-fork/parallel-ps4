@@ -17,9 +17,19 @@
 extern "C" {
 #endif
 
+/* Notes what is about to be recorded for the GPU (a compute dispatch, a
+ * tiling, a copy into a buffer), with up to four numbers that say which: the
+ * last of these are in the report of a lost device. @what is a string that
+ * lasts. Returns the note's address, the marker for a checkpoint
+ * (VK_NV_device_diagnostic_checkpoints) that the report then names as the
+ * last the GPU reached. For the one thread that records. */
+const void* vk_device_fault_mark(const char* what, uint64_t a, uint64_t b, uint64_t c, uint64_t d);
+
 /* @get: the device's vkGetDeviceFaultInfoEXT, or null where the device has
- * not the extension, which is then all that is said. */
-void vk_device_fault_report(VkDevice device, PFN_vkGetDeviceFaultInfoEXT get);
+ * not the extension. @checkpoints: its vkGetQueueCheckpointDataNV for
+ * @queue, or null. */
+void vk_device_fault_report(VkDevice device, PFN_vkGetDeviceFaultInfoEXT get, VkQueue queue,
+                            PFN_vkGetQueueCheckpointDataNV checkpoints);
 
 #ifdef __cplusplus
 }

@@ -368,6 +368,8 @@ bool Instance::CreateDevice() {
     supports_memory_budget = add_extension(VK_EXT_MEMORY_BUDGET_EXTENSION_NAME);
     // What the driver has to say of a device it loses (ReportDeviceLost)
     device_fault = add_extension(VK_EXT_DEVICE_FAULT_EXTENSION_NAME);
+    // And how far the GPU had got (Mark)
+    device_checkpoints = add_extension(VK_NV_DEVICE_DIAGNOSTIC_CHECKPOINTS_EXTENSION_NAME);
 #if defined(__linux__)
     // The picture handed to the frontend on the GPU (libretro/gpu_frames.h).
     external_memory_export = add_extension(VK_KHR_EXTERNAL_MEMORY_FD_EXTENSION_NAME);
@@ -766,7 +768,16 @@ void Instance::CollectToolingInfo() const {
 
 void Instance::ReportDeviceLost() const {
     vk_device_fault_report(
-        *device, device_fault ? VULKAN_HPP_DEFAULT_DISPATCHER.vkGetDeviceFaultInfoEXT : nullptr);
+        *device, device_fault ? VULKAN_HPP_DEFAULT_DISPATCHER.vkGetDeviceFaultInfoEXT : nullptr,
+        graphics_queue,
+        device_checkpoints ? VULKAN_HPP_DEFAULT_DISPATCHER.vkGetQueueCheckpointDataNV : nullptr);
+}
+
+void Instance::Mark(vk::CommandBuffer cmdbuf, const char* what, u64 a, u64 b, u64 c, u64 d) const {
+    const void* const mark = vk_device_fault_mark(what, a, b, c, d);
+    if (device_checkpoints) {
+        cmdbuf.setCheckpointNV(mark);
+    }
 }
 
 u64 Instance::GetDeviceMemoryUsage() const {

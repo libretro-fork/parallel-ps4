@@ -346,6 +346,8 @@ void Rasterizer::DispatchDirect() {
 
     const auto cmdbuf = scheduler.CommandBuffer();
     cmdbuf.bindPipeline(vk::PipelineBindPoint::eCompute, pipeline->Handle());
+    instance.Mark(cmdbuf, "dispatch: shader, x, y, z", cs.pgm_hash, cs_program.dim_x,
+                  cs_program.dim_y, cs_program.dim_z);
     cmdbuf.dispatch(cs_program.dim_x, cs_program.dim_y, cs_program.dim_z);
     DebugState.IncDispatch();
 
@@ -379,6 +381,8 @@ void Rasterizer::DispatchIndirect(VAddr address, u32 offset, u32 size) {
 
     const auto cmdbuf = scheduler.CommandBuffer();
     cmdbuf.bindPipeline(vk::PipelineBindPoint::eCompute, pipeline->Handle());
+    instance.Mark(cmdbuf, "indirect dispatch: shader, arguments at",
+                  pipeline->GetStage(Shader::SwStage::Compute).pgm_hash, address + offset);
     cmdbuf.dispatchIndirect(buffer->Handle(), base);
     DebugState.IncDispatch();
 

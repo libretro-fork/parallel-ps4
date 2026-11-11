@@ -122,6 +122,9 @@ void Runtime::CopyBuffer(const VideoCore::Buffer* src, const VideoCore::Buffer* 
     }
 
     const auto cmdbuf = scheduler.CommandBuffer();
+    instance.Mark(cmdbuf, "buffer copy: to buffer of size, first offset, first size, copies",
+                  dst->SizeBytes(), copies.empty() ? 0 : copies[0].dstOffset,
+                  copies.empty() ? 0 : copies[0].size, copies.size());
     cmdbuf.copyBuffer(src->Handle(), dst->Handle(), copies);
 
     for (const auto& copy : copies) {
@@ -140,6 +143,8 @@ void Runtime::FillBuffer(const VideoCore::Buffer* dst, u64 offset, u64 size, u32
     }
 
     const auto cmdbuf = scheduler.CommandBuffer();
+    instance.Mark(cmdbuf, "buffer fill: buffer of size, offset, size, value", dst->SizeBytes(),
+                  offset, size, value);
     cmdbuf.fillBuffer(dst->Handle(), offset, size, value);
 
     AccessBuffer(dst, offset, size, vk::PipelineStageFlagBits2::eClear,
@@ -214,6 +219,11 @@ void Runtime::DownloadImage(VideoCore::Image* src, const VideoCore::Buffer* dst,
     }
 
     auto cmdbuf = scheduler.CommandBuffer();
+    instance.Mark(cmdbuf, "image to buffer: image at, size, w|h<<16|d<<32, buffer of size",
+                  src->info.guest_address, src->info.guest_size,
+                  u64(src->info.size.width) | u64(src->info.size.height) << 16 |
+                      u64(src->info.size.depth) << 32,
+                  dst->SizeBytes());
     cmdbuf.copyImageToBuffer(src->GetImage(), vk::ImageLayout::eTransferSrcOptimal, dst->Handle(),
                              download_copies);
 

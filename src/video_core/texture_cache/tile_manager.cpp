@@ -231,6 +231,10 @@ std::pair<const Buffer*, u64> TileManager::DetileImage(const VideoCore::Buffer* 
     cmdbuf.pushDescriptorSetKHR(vk::PipelineBindPoint::eCompute, *pl_layout, 0, set_writes);
 
     const auto dim_x = (info.guest_size / (info.num_bits / 8)) / 64;
+    instance.Mark(cmdbuf, "detile: image at, size, mode|bits<<8|mips<<16, w|h<<16|d<<32",
+                  info.guest_address, info.guest_size,
+                  u64(info.tile_mode) | u64(info.num_bits) << 8 | u64(info.resources.levels) << 16,
+                  u64(info.size.width) | u64(info.size.height) << 16 | u64(info.size.depth) << 32);
     cmdbuf.dispatch(dim_x, 1, 1);
 
     runtime.AccessBuffer(staging.buffer, staging.offset, info.guest_size,
@@ -323,6 +327,10 @@ void TileManager::TileImage(Image& in_image, std::span<vk::BufferImageCopy> buff
     cmdbuf.pushDescriptorSetKHR(vk::PipelineBindPoint::eCompute, *pl_layout, 0, set_writes);
 
     const auto dim_x = (info.guest_size / (info.num_bits / 8)) / 64;
+    instance.Mark(cmdbuf, "tile: image at, size, mode|bits<<8|mips<<16, w|h<<16|d<<32",
+                  info.guest_address, info.guest_size,
+                  u64(info.tile_mode) | u64(info.num_bits) << 8 | u64(params.num_mips) << 16,
+                  u64(info.size.width) | u64(info.size.height) << 16 | u64(info.size.depth) << 32);
     cmdbuf.dispatch(dim_x, 1, 1);
 
     runtime.AccessBuffer(staging.buffer, staging.offset, info.guest_size,

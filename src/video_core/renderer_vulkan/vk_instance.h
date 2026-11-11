@@ -484,6 +484,12 @@ public:
     /// The driver's account of a device it has lost, into the log (vk_device_fault.h)
     void ReportDeviceLost() const;
 
+    /// Notes an operation about to be recorded into @cmdbuf, for that report: what it is and
+    /// numbers that say which. Where the driver keeps checkpoints the report names the last
+    /// the GPU reached.
+    void Mark(vk::CommandBuffer cmdbuf, const char* what, u64 a = 0, u64 b = 0, u64 c = 0,
+              u64 d = 0) const;
+
     /// Returns the total memory budget available to the device.
     [[nodiscard]] u64 GetTotalMemoryBudget() const {
         return total_memory_budget;
@@ -567,6 +573,7 @@ private:
     bool shader_clock{};
     bool supports_memory_budget{};
     bool device_fault{};
+    bool device_checkpoints{};
     bool external_memory_export{};
     bool supports_block_texel_view{};
     u64 total_memory_budget{};

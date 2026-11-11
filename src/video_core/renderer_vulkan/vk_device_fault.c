@@ -29,7 +29,76 @@ static const char* address_type(VkDeviceFaultAddressTypeEXT type) {
     }
 }
 
-void vk_device_fault_report(VkDevice device, PFN_vkGetDeviceFaultInfoEXT get) {
+#define MARKS 256u
+#define MARKS_SAID 32u
+#define CHECKPOINTS 16u
+
+typedef struct fault_mark {
+    const char* what;
+    uint64_t v[4];
+    unsigned long seq;
+} fault_mark;
+
+static fault_mark marks[MARKS];
+static unsigned long mark_seq;
+
+const void* vk_device_fault_mark(const char* what, uint64_t a, uint64_t b, uint64_t c, uint64_t d) {
+    fault_mark* m = &marks[mark_seq % MARKS];
+    m->what = what;
+    m->v[0] = a;
+    m->v[1] = b;
+    m->v[2] = c;
+    m->v[3] = d;
+    m->seq = ++mark_seq;
+    return m;
+}
+
+static void say_mark(const char* lead, const fault_mark* m) {
+    c_log(C_LOG_RENDER_VULKAN, C_LOG_LEVEL_CRITICAL, "vk_device_fault_report",
+          "  %s#%lu %s 0x%lx%08lx 0x%lx%08lx 0x%lx%08lx 0x%lx%08lx", lead, m->seq, m->what,
+          (unsigned long)(m->v[0] >> 32), (unsigned long)(m->v[0] & 0xffffffffu),
+          (unsigned long)(m->v[1] >> 32), (unsigned long)(m->v[1] & 0xffffffffu),
+          (unsigned long)(m->v[2] >> 32), (unsigned long)(m->v[2] & 0xffffffffu),
+          (unsigned long)(m->v[3] >> 32), (unsigned long)(m->v[3] & 0xffffffffu));
+}
+
+/* What the GPU had got to, and what was recorded for it last */
+static void say_marks(VkQueue queue, PFN_vkGetQueueCheckpointDataNV checkpoints) {
+    unsigned long last = mark_seq, from, n;
+    if (checkpoints) {
+        VkCheckpointDataNV data[CHECKPOINTS];
+        uint32_t count = CHECKPOINTS, i;
+        memset(data, 0, sizeof(data));
+        for (i = 0; i < CHECKPOINTS; i++)
+            data[i].sType = VK_STRUCTURE_TYPE_CHECKPOINT_DATA_NV;
+        checkpoints(queue, &count, data);
+        for (i = 0; i < count && i < CHECKPOINTS; i++) {
+            const fault_mark* m = (const fault_mark*)data[i].pCheckpointMarker;
+            const char* lead =
+                data[i].stage == VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT      ? "the GPU had begun "
+                : data[i].stage == VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT ? "the GPU had finished "
+                                                                        : "the GPU was at ";
+            if (m >= marks && m < marks + MARKS)
+                say_mark(lead, m);
+        }
+        if (!count)
+            c_log(C_LOG_RENDER_VULKAN, C_LOG_LEVEL_CRITICAL, "vk_device_fault_report",
+                  "  the driver names no checkpoint the GPU reached");
+    }
+    from = last > MARKS_SAID ? last - MARKS_SAID : 0;
+    for (n = from; n < last; n++)
+        say_mark("recorded ", &marks[n % MARKS]);
+}
+
+static void say_fault(VkDevice device, PFN_vkGetDeviceFaultInfoEXT get);
+
+void vk_device_fault_report(VkDevice device, PFN_vkGetDeviceFaultInfoEXT get, VkQueue queue,
+                            PFN_vkGetQueueCheckpointDataNV checkpoints) {
+    say_fault(device, get);
+    say_marks(queue, checkpoints);
+}
+
+static void say_fault(VkDevice device, PFN_vkGetDeviceFaultInfoEXT get) {
     VkDeviceFaultCountsEXT counts;
     VkDeviceFaultInfoEXT info;
     VkResult result;
