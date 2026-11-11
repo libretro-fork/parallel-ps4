@@ -159,6 +159,18 @@ public:
         }
     }
 
+    /// Calls func(address, size) for each run of pages in the range that hold bytes the GPU
+    /// wrote and that the CPU has not written to since they were last uploaded.
+    void ForEachGpuKeptRange(u64 offset, u64 size, auto&& func) {
+        IterateWords(GetBounds(offset, size), [&](u64 index, u64 mask) {
+            const u64 word = gpu[index] & ~cpu[index] & mask;
+            IteratePages(word, [&](u64 pages_offset, u64 pages_size) {
+                func(cpu_addr + (index * PAGES_PER_WORD + pages_offset) * BYTES_PER_PAGE,
+                     pages_size * BYTES_PER_PAGE);
+            });
+        });
+    }
+
     template <Type type>
     bool IsRegionModified(u64 offset, u64 size) noexcept {
         const auto& state = GetRegionBits<type>();

@@ -17,6 +17,11 @@ for san in address,undefined thread; do
         libretro/tests/audio_mix_test.c libretro/audio_mix.c $COMMON \
         -o "$OUT/$name" -lpthread -lm
     "$OUT/$name"
+    name=write_snapshots_test-$(echo $san | tr , -)
+    $CC -O1 -g -Wall -fno-omit-frame-pointer -fsanitize=$san -Isrc -I$L/include \
+        libretro/tests/write_snapshots_test.c src/video_core/buffer_cache/write_snapshots.c \
+        $L/rthreads/rthreads.c -o "$OUT/$name" -lpthread
+    "$OUT/$name"
     name=vk_heap_test-$(echo $san | tr , -)
     $CC -std=c89 -pedantic -O1 -g -Wall -Wdeclaration-after-statement -Wno-long-long \
         -fno-omit-frame-pointer -fsanitize=$san -isystem externals/vulkan-headers/include -Isrc \

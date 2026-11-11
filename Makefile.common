@@ -312,6 +312,7 @@ CORE_SOURCES_C += $(addprefix src/core/libraries/np/np_handler/,np_invitation_js
 CORE_SOURCES_C += $(addprefix src/shadnet/,pb_wire.c shadnet_msg.c)
 CORE_SOURCES_C += $(addprefix src/video_core/host_shaders/,host_spirv.c)
 CORE_SOURCES_C += $(addprefix src/video_core/renderer_vulkan/,vk_heap.c)
+CORE_SOURCES_C += $(addprefix src/video_core/buffer_cache/,write_snapshots.c)
 
 CORE_SOURCES_CXX += $(SCM_REV_CPP)
 CORE_SOURCES_CXX += $(addprefix libretro/,gpu_frames.cpp host.cpp libretro_core.cpp \

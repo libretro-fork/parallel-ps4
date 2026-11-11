@@ -17,6 +17,8 @@
 #include "video_core/renderer_vulkan/vk_semaphore.h"
 #include "video_core/texture_cache/image.h"
 
+struct write_snapshots;
+
 namespace AmdGpu {
 struct Liverpool;
 }
@@ -160,6 +162,8 @@ private:
     AmdGpu::Liverpool* liverpool;
     Core::MemoryManager* memory;
     TextureCache& texture_cache;
+    /// Pages as they were before the guest wrote where the GPU has written too (readbacks off)
+    ::write_snapshots* snapshots{};
     std::unique_ptr<MemoryTracker> memory_tracker;
 
     StreamBuffer stream_buffer;

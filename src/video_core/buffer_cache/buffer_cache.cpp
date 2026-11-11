@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include <algorithm>
+#include <array>
 #include <bit>
 #include "common/enum_names.h"
 
@@ -69,7 +70,10 @@ BufferCache::BufferCache(const Vulkan::Instance& instance_, Vulkan::Scheduler& s
     : instance{instance_}, scheduler{scheduler_}, runtime{runtime_},
       staging_pool{runtime_.GetStagingPool()}, liverpool{liverpool_},
       memory{Core::Memory::Instance()}, texture_cache{texture_cache_},
-      memory_tracker{std::make_unique<MemoryTracker>(tracker)},
+      snapshots{emu_settings_get_readbacks_mode() == EMU_READBACKS_DISABLED
+                    ? write_snapshots_create()
+                    : nullptr},
+      memory_tracker{std::make_unique<MemoryTracker>(tracker, snapshots)},
       stream_buffer{instance, scheduler, MemoryType::Stream, STREAM_BUFFER_SIZE},
       gds_buffer{instance, 0, GDS_BUFFER_SIZE, MemoryType::Stream, "GDS Buffer"},
       memory_semaphore{instance} {
@@ -143,7 +147,10 @@ BufferCache::BufferCache(const Vulkan::Instance& instance_, Vulkan::Scheduler& s
     }
 }
 
-BufferCache::~BufferCache() = default;
+BufferCache::~BufferCache() {
+    memory_tracker.reset();
+    write_snapshots_destroy(snapshots);
+}
 
 void BufferCache::TickFrame() {
     if (std::exchange(fault_process_pending, false)) {
@@ -509,10 +516,70 @@ bool BufferCache::SynchronizeMemory(const Buffer* arena, VAddr device_addr, u32 
                                     bool is_written, bool is_texel_buffer) {
     Common::SmallVector<vk::BufferCopy, 4> copies;
     size_t total_size_bytes{};
-    memory_tracker->ForEachUploadRange(device_addr, size, is_written, [&](u64 addr, u64 size) {
+    const auto upload = [&](u64 addr, u64 size) {
         copies.emplace_back(total_size_bytes, addr, size);
         total_size_bytes += size;
+    };
+    struct Range {
+        VAddr addr;
+        u64 size;
+        u64 cutoff;
+    };
+    Common::SmallVector<Range, 4> ranges;
+    memory_tracker->ForEachUploadRange(device_addr, size, is_written, [&](u64 addr, u64 size) {
+        if (!snapshots) {
+            upload(addr, size);
+            return;
+        }
+        // Read where the pages are being tracked again: a snapshot older than this is of a
+        // write before that, one newer is for the pages' next upload
+        ranges.emplace_back(addr, size, write_snapshots_cutoff(snapshots));
     });
+    // Readbacks off: the bytes the GPU wrote are only in the arena, and guest memory has stale
+    // ones beneath them. A page the guest wrote to elsewhere is uploaded around them; of the
+    // GPU's bytes, only those the guest changed since the page was kept (write_snapshots.h)
+    // are, so the rest stay as the GPU left them. The pages are tracked by now: a write from
+    // here on faults and is for the next upload.
+    for (const Range& range : ranges) {
+        VAddr done = range.addr;
+        gpu_modified_ranges.ForEachInRange(
+            range.addr, range.size, [&](VAddr gpu_start, VAddr gpu_end) {
+                if (gpu_start > done) {
+                    upload(done, gpu_start - done);
+                }
+                done = gpu_end;
+                for (VAddr page = Common::AlignDown(gpu_start, u64{WRITE_SNAPSHOT_PAGE});
+                     page < gpu_end; page += WRITE_SNAPSHOT_PAGE) {
+                    const VAddr start = std::max(gpu_start, page);
+                    const VAddr end = std::min<VAddr>(gpu_end, page + WRITE_SNAPSHOT_PAGE);
+                    u32 slot;
+                    const u8* before = write_snapshots_claim(snapshots, page, range.cutoff, &slot);
+                    if (!before) {
+                        // Nothing to tell them apart by: the guest's, as it always was
+                        upload(start, end - start);
+                        continue;
+                    }
+                    std::array<u8, WRITE_SNAPSHOT_PAGE> now;
+                    memory->CopySparseMemory(page, now.data(), now.size());
+                    struct Runs {
+                        decltype(upload)& upload;
+                        VAddr page;
+                    } runs{upload, page};
+                    write_snapshots_changed(
+                        now.data(), before, static_cast<u32>(start - page),
+                        static_cast<u32>(end - page),
+                        [](void* ctx, u32 begin, u32 size) {
+                            auto* runs = static_cast<Runs*>(ctx);
+                            runs->upload(runs->page + begin, size);
+                        },
+                        &runs);
+                    write_snapshots_release(snapshots, slot);
+                }
+            });
+        if (done < range.addr + range.size) {
+            upload(done, range.addr + range.size - done);
+        }
+    }
     if (!copies.empty()) {
         const auto staging = staging_pool.Request(total_size_bytes, MemoryType::HostUncached);
         for (auto& copy : copies) {

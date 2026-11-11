@@ -10,6 +10,7 @@
 #include <retro_atomic.h>
 #include "common/types.h"
 #include "video_core/buffer_cache/region_manager.h"
+#include "video_core/buffer_cache/write_snapshots.h"
 
 namespace VideoCore {
 
@@ -20,8 +21,9 @@ public:
     static constexpr u64 MANAGER_POOL_SIZE = 32;
 
 public:
-    explicit MemoryTracker(PageManager& tracker_)
-        : tracker{&tracker_}, readbacks_mode{emu_settings_get_readbacks_mode()} {}
+    explicit MemoryTracker(PageManager& tracker_, write_snapshots_t* snapshots_)
+        : tracker{&tracker_}, snapshots{snapshots_},
+          readbacks_mode{emu_settings_get_readbacks_mode()} {}
     ~MemoryTracker() = default;
 
     /// Returns true if a region has been modified from the GPU
@@ -66,6 +68,25 @@ public:
     /// Removes all protection from a page and ensures GPU data has been flushed if requested
     void InvalidateRegion(VAddr cpu_addr, u64 size, auto&& on_flush) noexcept {
         if (readbacks_mode == EMU_READBACKS_DISABLED) {
+            // A write the guest is about to make (a fault: a page or two), where the GPU has
+            // written too: the pages are kept as they are now, so that their upload can tell
+            // what the guest changed from the GPU's bytes it left alone. In the region's
+            // Exclusive, which is what orders a snapshot against the page's upload.
+            if (snapshots && size <= BYTES_PER_PAGE && IsRegionGpuModified(cpu_addr, size)) {
+                IteratePages(cpu_addr, size, [this](RegionManager* manager, u64 offset, u64 size) {
+                    manager->Exclusive([&] {
+                        manager->ForEachGpuKeptRange(offset, size, [this](VAddr addr, u64 bytes) {
+                            for (VAddr page = addr; page < addr + bytes; page += BYTES_PER_PAGE) {
+                                write_snapshots_take(snapshots, page,
+                                                     reinterpret_cast<const void*>(page));
+                            }
+                        });
+                        manager->template ChangeRegionState<StateOp::Set, StateOp::None, false>(
+                            offset, size);
+                    });
+                });
+                return;
+            }
             return MarkRegionAsCpuModified(cpu_addr, size);
         }
         bool should_flush = false;
@@ -167,6 +188,7 @@ private:
     }
 
     PageManager* tracker;
+    write_snapshots_t* snapshots;
     const u32 readbacks_mode;
     std::deque<std::array<RegionManager, MANAGER_POOL_SIZE>> manager_pool;
     std::vector<RegionManager*> free_managers;
