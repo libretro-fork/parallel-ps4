@@ -161,6 +161,8 @@ std::string_view NameOf(Class log_class) {
         return "Lib.Fiber";
     case Class::Lib_Ult:
         return "Lib.Ult";
+    case Class::Lib_Audiodec:
+        return "Lib.Audiodec";
     case Class::Lib_Vdec2:
         return "Lib.Vdec2";
     case Class::Lib_Vdecsw:

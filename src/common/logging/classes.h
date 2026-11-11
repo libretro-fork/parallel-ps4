@@ -89,6 +89,7 @@ enum class Class {
     Lib_SharePlay,           ///< The LibSceSharePlay implemenation
     Lib_Fiber,               ///< The LibSceFiber implementation.
     Lib_Ult,                 ///< The LibSceUlt implementation.
+    Lib_Audiodec,            ///< The LibSceAudiodec implementation.
     Lib_Vdec2,               ///< The LibSceVideodec2 implementation.
     Lib_Vdecsw,              ///< The LibSceVdecsw implementation.
     Lib_Videodec,            ///< The LibSceVideodec implementation.
