@@ -53,6 +53,12 @@ public:
         return *stages[u32(stage)];
     }
 
+    /// The hash of the guest's shader at @stage, 0 where the pipeline has none
+    u64 StageHash(Shader::SwStage stage) const noexcept {
+        const auto* info = stages[u32(stage)];
+        return info ? info->pgm_hash : 0;
+    }
+
     bool IsCompute() const {
         return is_compute;
     }

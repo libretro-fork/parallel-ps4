@@ -224,6 +224,9 @@ void Rasterizer::Draw(bool is_indexed, u32 index_offset) {
 
     const auto cmdbuf = scheduler.CommandBuffer();
     cmdbuf.bindPipeline(vk::PipelineBindPoint::eGraphics, pipeline->Handle());
+    instance.Mark(cmdbuf, "draw: vertex shader, fragment shader, indices|indexed<<32, instances",
+                  vs_info.pgm_hash, pipeline->StageHash(Shader::SwStage::Fragment),
+                  u64(regs.num_indices) | u64(is_indexed) << 32, regs.num_instances.NumInstances());
 
     if (is_indexed) {
         cmdbuf.drawIndexed(regs.num_indices, regs.num_instances.NumInstances(), 0,
@@ -292,6 +295,9 @@ void Rasterizer::DrawIndirect(bool is_indexed, VAddr arg_address, u32 offset, u3
 
     const auto cmdbuf = scheduler.CommandBuffer();
     cmdbuf.bindPipeline(vk::PipelineBindPoint::eGraphics, pipeline->Handle());
+    instance.Mark(cmdbuf, "indirect draw: vertex shader, fragment shader, arguments at, count",
+                  pipeline->StageHash(Shader::SwStage::Vertex),
+                  pipeline->StageHash(Shader::SwStage::Fragment), arg_address + offset, max_count);
 
     if (is_indexed) {
         ASSERT(sizeof(VkDrawIndexedIndirectCommand) == stride);

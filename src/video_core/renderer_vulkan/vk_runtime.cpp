@@ -159,6 +159,8 @@ void Runtime::InlineData(VideoCore::Buffer* dst, u64 offset, u32 value) {
     }
 
     const auto cmdbuf = scheduler.CommandBuffer();
+    instance.Mark(cmdbuf, "buffer word: buffer of size, offset, value", dst->SizeBytes(), offset,
+                  value);
     cmdbuf.updateBuffer(dst->Handle(), offset, sizeof(value), &value);
 
     AccessBuffer(dst, offset, sizeof(value), vk::PipelineStageFlagBits2::eCopy,
@@ -190,6 +192,11 @@ void Runtime::UploadImage(VideoCore::Image* dst, const VideoCore::Buffer* src,
     }
 
     const auto cmdbuf = scheduler.CommandBuffer();
+    instance.Mark(cmdbuf, "buffer to image: image at, size, w|h<<16|d<<32, copies|buffer size<<8",
+                  dst->info.guest_address, dst->info.guest_size,
+                  u64(dst->info.size.width) | u64(dst->info.size.height) << 16 |
+                      u64(dst->info.size.depth) << 32,
+                  u64(upload_copies.size()) | u64(src->SizeBytes()) << 8);
     cmdbuf.copyBufferToImage(src->Handle(), dst->GetImage(), vk::ImageLayout::eTransferDstOptimal,
                              upload_copies);
 
@@ -276,6 +283,12 @@ bool Runtime::BlitScaled(VideoCore::Image* src, VideoCore::Image* dst, u32 dst_m
     if (needs_flush) {
         FlushBarriers();
     }
+    instance.Mark(scheduler.CommandBuffer(), "blit: from image at, to image at, from w|h, to w|h",
+                  src->info.guest_address, dst->info.guest_address,
+                  u64(src->info.size.width) | u64(src->info.size.height) << 16 |
+                      u64(src->info.size.depth) << 32,
+                  u64(dst->info.size.width) | u64(dst->info.size.height) << 16 |
+                      u64(dst->info.size.depth) << 32);
     scheduler.CommandBuffer().blitImage(
         src->GetImage(), vk::ImageLayout::eTransferSrcOptimal, dst->GetImage(),
         vk::ImageLayout::eTransferDstOptimal, regions,
@@ -381,6 +394,12 @@ void Runtime::CopyImage(VideoCore::Image* src, VideoCore::Image* dst) {
     }
 
     auto cmdbuf = scheduler.CommandBuffer();
+    instance.Mark(cmdbuf, "image copy: from image at, to image at, from w|h, to w|h",
+                  src->info.guest_address, dst->info.guest_address,
+                  u64(src->info.size.width) | u64(src->info.size.height) << 16 |
+                      u64(src->info.size.depth) << 32,
+                  u64(dst->info.size.width) | u64(dst->info.size.height) << 16 |
+                      u64(dst->info.size.depth) << 32);
     cmdbuf.copyImage(src->GetImage(), vk::ImageLayout::eTransferSrcOptimal, dst->GetImage(),
                      vk::ImageLayout::eTransferDstOptimal, regions);
 
@@ -437,6 +456,12 @@ void Runtime::CopyImageWithBuffer(VideoCore::Image* src, VideoCore::Image* dst,
     }
 
     auto cmdbuf = scheduler.CommandBuffer();
+    instance.Mark(cmdbuf, "image copy through buffer: from image at, to image at, from w|h, to w|h",
+                  src->info.guest_address, dst->info.guest_address,
+                  u64(src->info.size.width) | u64(src->info.size.height) << 16 |
+                      u64(src->info.size.depth) << 32,
+                  u64(dst->info.size.width) | u64(dst->info.size.height) << 16 |
+                      u64(dst->info.size.depth) << 32);
     cmdbuf.copyImageToBuffer(src->GetImage(), vk::ImageLayout::eTransferSrcOptimal,
                              buffer->Handle(), buffer_copies);
 
@@ -511,6 +536,12 @@ void Runtime::CopyMip(VideoCore::Image* src, VideoCore::Image* dst, u32 mip, u32
     }
 
     const auto cmdbuf = scheduler.CommandBuffer();
+    instance.Mark(cmdbuf, "mip copy: from image at, to image at, from w|h, to w|h",
+                  src->info.guest_address, dst->info.guest_address,
+                  u64(src->info.size.width) | u64(src->info.size.height) << 16 |
+                      u64(src->info.size.depth) << 32,
+                  u64(dst->info.size.width) | u64(dst->info.size.height) << 16 |
+                      u64(dst->info.size.depth) << 32);
     cmdbuf.copyImage(src->GetImage(), vk::ImageLayout::eTransferSrcOptimal, dst->GetImage(),
                      vk::ImageLayout::eTransferDstOptimal, image_copy);
 
@@ -595,6 +626,12 @@ void Runtime::CopyDepthStencil(VideoCore::Image* src, VideoCore::Image* dst,
     };
 
     const auto cmdbuf = scheduler.CommandBuffer();
+    instance.Mark(cmdbuf, "depth copy: from image at, to image at, from w|h, to w|h",
+                  src->info.guest_address, dst->info.guest_address,
+                  u64(src->info.size.width) | u64(src->info.size.height) << 16 |
+                      u64(src->info.size.depth) << 32,
+                  u64(dst->info.size.width) | u64(dst->info.size.height) << 16 |
+                      u64(dst->info.size.depth) << 32);
     cmdbuf.copyImage(src->GetImage(), vk::ImageLayout::eTransferSrcOptimal, dst->GetImage(),
                      vk::ImageLayout::eTransferDstOptimal, region);
 
@@ -644,6 +681,12 @@ void Runtime::ResolveImage(VideoCore::Image* src, VideoCore::Image* dst,
             .dstOffset = {0, 0, 0},
             .extent = {src->HostSize().width, src->HostSize().height, 1},
         };
+        instance.Mark(cmdbuf, "resolve by copy: from image at, to image at, from w|h, to w|h",
+                      src->info.guest_address, dst->info.guest_address,
+                      u64(src->info.size.width) | u64(src->info.size.height) << 16 |
+                          u64(src->info.size.depth) << 32,
+                      u64(dst->info.size.width) | u64(dst->info.size.height) << 16 |
+                          u64(dst->info.size.depth) << 32);
         cmdbuf.copyImage(src->GetImage(), vk::ImageLayout::eTransferSrcOptimal, dst->GetImage(),
                          vk::ImageLayout::eTransferDstOptimal, region);
     } else {
@@ -664,6 +707,12 @@ void Runtime::ResolveImage(VideoCore::Image* src, VideoCore::Image* dst,
             .dstOffset = {0, 0, 0},
             .extent = {src->HostSize().width, src->HostSize().height, 1},
         };
+        instance.Mark(cmdbuf, "resolve: from image at, to image at, from w|h, to w|h",
+                      src->info.guest_address, dst->info.guest_address,
+                      u64(src->info.size.width) | u64(src->info.size.height) << 16 |
+                          u64(src->info.size.depth) << 32,
+                      u64(dst->info.size.width) | u64(dst->info.size.height) << 16 |
+                          u64(dst->info.size.depth) << 32);
         cmdbuf.resolveImage(src->GetImage(), vk::ImageLayout::eTransferSrcOptimal, dst->GetImage(),
                             vk::ImageLayout::eTransferDstOptimal, region);
     }
@@ -691,6 +740,10 @@ void Runtime::ClearImage(VideoCore::Image* dst, const VideoCore::SubresourceRang
         .layerCount = range.extent.layers,
     };
     const auto cmdbuf = scheduler.CommandBuffer();
+    instance.Mark(cmdbuf, "clear: image at, size, w|h<<16|d<<32", dst->info.guest_address,
+                  dst->info.guest_size,
+                  u64(dst->info.size.width) | u64(dst->info.size.height) << 16 |
+                      u64(dst->info.size.depth) << 32);
     cmdbuf.clearColorImage(dst->GetImage(), vk::ImageLayout::eTransferDstOptimal, clear_value.color,
                            vk_range);
 

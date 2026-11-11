@@ -81,6 +81,11 @@ void Scheduler::BeginRendering(const RenderState& new_state) {
         .pStencilAttachment = db.has_stencil ? &stencil_attachment : nullptr,
     };
 
+    instance.Mark(CommandBuffer(), "render pass: w, h, colours|depth<<8|stencil<<9, layers",
+                  render_state.width, render_state.height,
+                  u64(render_state.num_color_attachments) | u64(db.has_depth) << 8 |
+                      u64(db.has_stencil) << 9,
+                  render_state.num_layers);
     CommandBuffer().beginRendering(rendering_info);
 }
 

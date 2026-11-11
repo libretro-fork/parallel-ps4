@@ -111,11 +111,13 @@ int main(void) {
       skipped = 0;
       fail_with = VK_ERROR_DEVICE_LOST;
       vk_device_fault_report((VkDevice)0, fake_get, (VkQueue)0, fake_checkpoints);
-      /* After the line on the fault: two checkpoints, then the last 32 marks */
+      /* After the line on the fault: two checkpoints, then what was recorded from there on */
       CHECK(strstr(lines[0], "the GPU had begun #301 many 0x00000012b"));
       CHECK(strstr(lines[0], "0x700000009"));
       CHECK(strstr(lines[1], "the GPU had finished #300 many 0x00000012a"));
-      CHECK(strstr(lines[2], "recorded #270 many 0x00000010c"));
+      /* from the earlier of the two the GPU reached on */
+      CHECK(strstr(lines[2], "then #300 many 0x00000012a"));
+      CHECK(strstr(lines[3], "then #301 many 0x00000012b"));
       keep_from = 0;
    }
    if (failures) {

@@ -29,8 +29,9 @@ static const char* address_type(VkDeviceFaultAddressTypeEXT type) {
     }
 }
 
-#define MARKS 256u
-#define MARKS_SAID 32u
+#define MARKS 4096u
+#define MARKS_AFTER 160u /* said after the last the GPU reached */
+#define MARKS_LAST 16u
 #define CHECKPOINTS 16u
 
 typedef struct fault_mark {
@@ -64,7 +65,7 @@ static void say_mark(const char* lead, const fault_mark* m) {
 
 /* What the GPU had got to, and what was recorded for it last */
 static void say_marks(VkQueue queue, PFN_vkGetQueueCheckpointDataNV checkpoints) {
-    unsigned long last = mark_seq, from, n;
+    unsigned long last = mark_seq, from, to, n, reached_low = 0, reached_high = 0;
     if (checkpoints) {
         VkCheckpointDataNV data[CHECKPOINTS];
         uint32_t count = CHECKPOINTS, i;
@@ -78,14 +79,31 @@ static void say_marks(VkQueue queue, PFN_vkGetQueueCheckpointDataNV checkpoints)
                 data[i].stage == VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT      ? "the GPU had begun "
                 : data[i].stage == VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT ? "the GPU had finished "
                                                                         : "the GPU was at ";
-            if (m >= marks && m < marks + MARKS)
+            if (m >= marks && m < marks + MARKS) {
                 say_mark(lead, m);
+                if (!reached_low || m->seq < reached_low)
+                    reached_low = m->seq;
+                if (m->seq > reached_high)
+                    reached_high = m->seq;
+            }
         }
         if (!count)
             c_log(C_LOG_RENDER_VULKAN, C_LOG_LEVEL_CRITICAL, "vk_device_fault_report",
                   "  the driver names no checkpoint the GPU reached");
     }
-    from = last > MARKS_SAID ? last - MARKS_SAID : 0;
+    /* What was recorded from the last the GPU reached on: the one it stopped in is the first
+     * of these, or what came between it and the next */
+    if (reached_low && last - reached_low < MARKS) {
+        from = reached_low - 1;
+        to = reached_high + MARKS_AFTER < last ? reached_high + MARKS_AFTER : last;
+        for (n = from; n < to; n++)
+            say_mark("then ", &marks[n % MARKS]);
+    } else {
+        to = 0;
+    }
+    from = last > MARKS_LAST ? last - MARKS_LAST : 0;
+    if (from < to)
+        from = to;
     for (n = from; n < last; n++)
         say_mark("recorded ", &marks[n % MARKS]);
 }
