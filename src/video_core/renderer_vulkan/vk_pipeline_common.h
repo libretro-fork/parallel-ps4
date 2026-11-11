@@ -53,6 +53,11 @@ public:
         return *stages[u32(stage)];
     }
 
+    /// The guest's shader at @stage, null where the pipeline has none
+    const Shader::Info* StageInfo(Shader::SwStage stage) const noexcept {
+        return stages[u32(stage)];
+    }
+
     /// The hash of the guest's shader at @stage, 0 where the pipeline has none
     u64 StageHash(Shader::SwStage stage) const noexcept {
         const auto* info = stages[u32(stage)];

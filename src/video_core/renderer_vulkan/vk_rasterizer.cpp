@@ -224,6 +224,18 @@ void Rasterizer::Draw(bool is_indexed, u32 index_offset) {
 
     const auto cmdbuf = scheduler.CommandBuffer();
     cmdbuf.bindPipeline(vk::PipelineBindPoint::eGraphics, pipeline->Handle());
+    if (const auto* fs = pipeline->StageInfo(Shader::SwStage::Fragment)) {
+        u64 written_buffers = 0, written_images = 0;
+        for (const auto& buffer : fs->buffers) {
+            written_buffers += buffer.is_written;
+        }
+        for (const auto& image : fs->images) {
+            written_images += image.is_written;
+        }
+        instance.Note("fragment shader: buffers|written<<16, images|written<<16, reads memory",
+                      u64(fs->buffers.size()) | written_buffers << 16,
+                      u64(fs->images.size()) | written_images << 16, fs->uses_dma);
+    }
     instance.Mark(cmdbuf, "draw: vertex shader, fragment shader, indices|indexed<<32, instances",
                   vs_info.pgm_hash, pipeline->StageHash(Shader::SwStage::Fragment),
                   u64(regs.num_indices) | u64(is_indexed) << 32, regs.num_instances.NumInstances());
@@ -1192,6 +1204,11 @@ RenderState Rasterizer::BeginRendering(const GraphicsPipeline* pipeline) {
         attachment.is_clear = is_clear;
 
         image->usage.render_target = 1u;
+        instance.Note("colour target: index, image at, format|samples<<16|layout<<32, w|h<<16", cb,
+                      image->info.guest_address,
+                      u64(image->info.pixel_format) | u64(image->backing->num_samples) << 16 |
+                          u64(attachment.image_layout) << 32,
+                      u64(image->HostSize().width) | u64(image->HostSize().height) << 16);
     }
     for (u32 cb = state.num_color_attachments; cb < state.color_attachments.size(); ++cb) {
         state.color_attachments[cb] = {};
@@ -1242,12 +1259,28 @@ RenderState Rasterizer::BeginRendering(const GraphicsPipeline* pipeline) {
         attachment.clear_value = {};
         attachment.is_clear = 0;
 
-        if (regs.depth_buffer.DepthValid()) {
+        // Only the planes the image has: the game may name a stencil format for a depth buffer
+        // made without one (and the other way round), and a pass that wrote to a plane that is
+        // not there lost the GPU device with a write to address nothing
+        const bool image_has_depth =
+            static_cast<bool>(image.aspect_mask & vk::ImageAspectFlagBits::eDepth);
+        const bool image_has_stencil =
+            static_cast<bool>(image.aspect_mask & vk::ImageAspectFlagBits::eStencil);
+        instance.Note("depth target: image at, format|samples<<16|layout<<32, w|h<<16, asked "
+                      "depth|stencil<<1|has depth<<2|has stencil<<3",
+                      image.info.guest_address,
+                      u64(image.info.pixel_format) | u64(image.backing->num_samples) << 16 |
+                          u64(attachment.image_layout) << 32,
+                      u64(image.HostSize().width) | u64(image.HostSize().height) << 16,
+                      u64(regs.depth_buffer.DepthValid()) |
+                          u64(regs.depth_buffer.StencilValid()) << 1 | u64(image_has_depth) << 2 |
+                          u64(image_has_stencil) << 3);
+        if (regs.depth_buffer.DepthValid() && image_has_depth) {
             attachment.clear_value[0] = is_depth_clear ? std::bit_cast<u32>(regs.depth_clear) : 0u;
             attachment.has_depth = true;
             attachment.depth_clear = is_depth_clear;
         }
-        if (regs.depth_buffer.StencilValid()) {
+        if (regs.depth_buffer.StencilValid() && image_has_stencil) {
             attachment.clear_value[1] = is_stencil_clear ? regs.stencil_clear : 0u;
             attachment.has_stencil = true;
             attachment.stencil_clear = is_stencil_clear;

@@ -115,9 +115,9 @@ int main(void) {
       CHECK(strstr(lines[0], "the GPU had begun #301 many 0x00000012b"));
       CHECK(strstr(lines[0], "0x700000009"));
       CHECK(strstr(lines[1], "the GPU had finished #300 many 0x00000012a"));
-      /* from the earlier of the two the GPU reached on */
-      CHECK(strstr(lines[2], "then #300 many 0x00000012a"));
-      CHECK(strstr(lines[3], "then #301 many 0x00000012b"));
+      /* from 24 before the earlier of the two the GPU reached on */
+      CHECK(strstr(lines[2], "then #276 many 0x000000112"));
+      CHECK(strstr(lines[3], "then #277 many 0x000000113"));
       keep_from = 0;
    }
    if (failures) {

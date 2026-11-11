@@ -32,6 +32,7 @@ static const char* address_type(VkDeviceFaultAddressTypeEXT type) {
 #define MARKS 4096u
 #define MARKS_AFTER 160u /* said after the last the GPU reached */
 #define MARKS_LAST 16u
+#define MARKS_BEFORE 24u
 #define CHECKPOINTS 16u
 
 typedef struct fault_mark {
@@ -94,7 +95,8 @@ static void say_marks(VkQueue queue, PFN_vkGetQueueCheckpointDataNV checkpoints)
     /* What was recorded from the last the GPU reached on: the one it stopped in is the first
      * of these, or what came between it and the next */
     if (reached_low && last - reached_low < MARKS) {
-        from = reached_low - 1;
+        /* with what led up to it: the targets and the pass it is in */
+        from = reached_low > MARKS_BEFORE ? reached_low - 1 - MARKS_BEFORE : 0;
         to = reached_high + MARKS_AFTER < last ? reached_high + MARKS_AFTER : last;
         for (n = from; n < to; n++)
             say_mark("then ", &marks[n % MARKS]);

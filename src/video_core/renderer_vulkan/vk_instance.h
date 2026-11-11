@@ -490,6 +490,9 @@ public:
     void Mark(vk::CommandBuffer cmdbuf, const char* what, u64 a = 0, u64 b = 0, u64 c = 0,
               u64 d = 0) const;
 
+    /// The same for what is not a command of its own (what the next one works on)
+    void Note(const char* what, u64 a = 0, u64 b = 0, u64 c = 0, u64 d = 0) const;
+
     /// Returns the total memory budget available to the device.
     [[nodiscard]] u64 GetTotalMemoryBudget() const {
         return total_memory_budget;
