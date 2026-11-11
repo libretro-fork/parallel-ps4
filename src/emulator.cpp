@@ -14,6 +14,7 @@
 #include <streams/file_stream.h>
 
 #include "common/elf_info.h"
+#include "common/event_mutex.h"
 #include "common/io_file.h"
 #include "common/logging/log.h"
 #include "common/memory_patcher.h"
@@ -66,7 +67,7 @@ extern char const* g_environment[64];
 
 namespace Core {
 
-std::mutex exit_mutex{};
+Common::EventMutex exit_mutex{};
 
 Emulator::Emulator() {
     // Initialize NT API functions, set high priority and disable WER

@@ -11,6 +11,7 @@
 #include <utility>
 #include <vector>
 #include <imgui_internal.h>
+#include "common/event_mutex.h"
 #include "core/libraries/ime/ime_kb_layout.h"
 #include "core/libraries/ime/ime_ui_shared.h"
 #include "core/libraries/pad/pad.h"
@@ -102,7 +103,7 @@ ImeState& ImeState::operator=(ImeState&& other) noexcept {
 }
 
 void ImeState::SendEvent(OrbisImeEvent* event) {
-    std::unique_lock<std::mutex> lock{queue_mutex};
+    std::unique_lock<Common::EventMutex> lock{queue_mutex};
     event_queue.push(*event);
 }
 
@@ -363,7 +364,7 @@ ImeUi& ImeUi::operator=(ImeUi&& other) {
 }
 
 void ImeUi::Draw() {
-    std::unique_lock<std::mutex> lock{draw_mutex};
+    std::unique_lock<Common::EventMutex> lock{draw_mutex};
 
     if (!state) {
         return;

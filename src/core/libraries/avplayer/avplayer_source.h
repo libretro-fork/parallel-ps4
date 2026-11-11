@@ -16,6 +16,7 @@
 #include <vector>
 
 #include "common/assert.h"
+#include "common/event_mutex.h"
 #include "core/libraries/avplayer/avplayer.h"
 #include "core/libraries/avplayer/avplayer_common.h"
 #include "core/libraries/avplayer/avplayer_data_streamer.h"
@@ -295,7 +296,7 @@ private:
     std::optional<s32> m_video_stream_index{};
     std::optional<s32> m_audio_stream_index{};
 
-    std::mutex m_state_mutex{};
+    Common::EventMutex m_state_mutex{};
     Kernel::Thread m_demuxer_thread{};
     Kernel::Thread m_video_decoder_thread{};
     Kernel::Thread m_audio_decoder_thread{};

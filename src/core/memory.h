@@ -8,6 +8,7 @@
 #include <string>
 #include <string_view>
 #include "common/enum.h"
+#include "common/event_mutex.h"
 #include "common/shared_first_mutex.h"
 #include "common/singleton.h"
 #include "common/types.h"
@@ -367,7 +368,7 @@ private:
     PhysMap fmem_map;
     VMAMap vma_map;
     Common::SharedFirstMutex mutex{};
-    std::mutex unmap_mutex{};
+    Common::EventMutex unmap_mutex{};
 #ifdef SHADPS4_ENABLE_FEX_GUEST_CPU
     MemoryMapGeneration mapping_generation{};
 #endif

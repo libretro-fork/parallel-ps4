@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 
+#include "common/event_mutex.h"
 #include "fex_guest_engine.h"
 
 // Ucontext layout only — do not include pthread.h here. pthread → semaphore →
@@ -306,8 +307,8 @@ public:
   }
 
 private:
-  static inline std::mutex Mutex;
-  static inline size_t Users {};
+    static inline Common::EventMutex Mutex;
+    static inline size_t Users{};
 };
 
 class Mapping final {
@@ -835,7 +836,7 @@ private:
   static thread_local InvocationState* ActiveInvocation;
 
   GuestBridge& Bridge;
-  std::mutex RangesMutex;
+  Common::EventMutex RangesMutex;
   std::unordered_map<FEXCore::Core::InternalThreadState*, std::vector<GuestExecutionRange>> ExecutableRanges;
 };
 
@@ -1297,7 +1298,7 @@ public:
   size_t PageSize {};
   bool ConfigInitialized {};
   bool Ran {};
-  std::mutex ThreadsMutex;
+  Common::EventMutex ThreadsMutex;
   std::unordered_set<Thread*> Threads;
 };
 

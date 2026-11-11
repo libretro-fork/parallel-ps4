@@ -9,6 +9,8 @@
 #include <optional>
 #include <shared_mutex>
 #include <string_view>
+#include "common/event_mutex.h"
+#include "common/shared_first_mutex.h"
 
 #include "core/libraries/avplayer/avplayer.h"
 #include "core/libraries/avplayer/avplayer_source.h"
@@ -87,9 +89,9 @@ private:
     u32 m_thread_affinity;
     std::atomic_uint32_t m_some_event_result{};
 
-    std::shared_mutex m_source_mutex{};
-    std::mutex m_state_machine_mutex{};
-    std::mutex m_event_handler_mutex{};
+    Common::SharedFirstMutex m_source_mutex{};
+    Common::EventMutex m_state_machine_mutex{};
+    Common::EventMutex m_event_handler_mutex{};
     Kernel::Thread m_controller_thread{};
     MpscRing<AvPlayerEvent, 64> m_event_queue{};
 };

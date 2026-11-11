@@ -6,6 +6,7 @@
 #include <mutex>
 #include <span>
 #include <vector>
+#include "common/event_mutex.h"
 #include "common/io_file.h"
 #include "core/libraries/playgo/playgo_types.h"
 
@@ -117,11 +118,11 @@ public:
     PlaygoHeader& GetPlaygoHeader() {
         return playgoHeader;
     }
-    std::mutex& GetSpeedMutex() {
+    Common::EventMutex& GetSpeedMutex() {
         return speed_mutex;
     }
 
 private:
     PlaygoHeader playgoHeader;
-    std::mutex speed_mutex;
+    Common::EventMutex speed_mutex;
 };

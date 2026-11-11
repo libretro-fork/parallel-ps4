@@ -10,6 +10,7 @@
 #include <formats/rpng.h>
 #include <imgui.h>
 #include "common/assert.h"
+#include "common/event_mutex.h"
 #include "common/io_file.h"
 #include "common/polyfill_thread.h"
 #include "common/thread.h"
@@ -121,12 +122,12 @@ struct UploadJob {
 
 static bool g_is_worker_running = false;
 static std::jthread g_worker_thread;
-static std::condition_variable g_worker_cv;
+static Common::EventCondition g_worker_cv;
 
-static std::mutex g_job_list_mtx;
+static Common::EventMutex g_job_list_mtx;
 static std::deque<Job> g_job_list;
 
-static std::mutex g_upload_mtx;
+static Common::EventMutex g_upload_mtx;
 static std::deque<UploadJob> g_upload_list;
 
 namespace Core::TextureManager {
@@ -143,7 +144,7 @@ Inner::~Inner() {
 
 void WorkerLoop() {
     Common::SetCurrentThreadName("shadPS4:ImGuiTextureManager");
-    std::mutex mtx;
+    Common::EventMutex mtx;
     while (g_is_worker_running) {
         std::unique_lock lk{mtx};
         g_worker_cv.wait(lk);

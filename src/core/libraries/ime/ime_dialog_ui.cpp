@@ -14,6 +14,7 @@
 #include <imgui_internal.h>
 
 #include "common/assert.h"
+#include "common/event_mutex.h"
 #include "common/logging/log.h"
 #include "core/debug_state.h"
 #include "core/libraries/error_codes.h"
@@ -654,7 +655,7 @@ void ImeDialogUi::FinishDialog(OrbisImeDialogEndStatus endstatus, bool restore_o
 }
 
 void ImeDialogUi::Draw() {
-    std::unique_lock<std::mutex> lock{draw_mutex};
+    std::unique_lock<Common::EventMutex> lock{draw_mutex};
 
     if (!state) {
         return;

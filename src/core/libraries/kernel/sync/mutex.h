@@ -5,6 +5,7 @@
 
 #include <chrono>
 
+#include "common/event_mutex.h"
 #include "common/types.h"
 
 #ifdef _WIN64
@@ -73,7 +74,7 @@ private:
 #ifdef _WIN64
     HANDLE mtx;
 #else
-    std::timed_mutex mtx;
+    Common::EventMutex mtx;
 #endif
 };
 

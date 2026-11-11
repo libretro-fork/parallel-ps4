@@ -7,6 +7,7 @@
 #include <vector>
 #include <imgui.h>
 #include "common/cstring.h"
+#include "common/event_mutex.h"
 #include "common/types.h"
 #include "core/libraries/ime/ime_dialog.h"
 #include "core/libraries/ime/ime_kb_layout.h"
@@ -163,7 +164,7 @@ class ImeDialogUi final : public ImGui::Layer {
     Libraries::Ime::ImeKbLayoutSelection last_nav_layout_selection{};
     bool nav_layout_selection_initialized = false;
     Libraries::Ime::ImeKbLayoutFamily kb_alpha_family = Libraries::Ime::ImeKbLayoutFamily::Latin;
-    std::mutex draw_mutex;
+    Common::EventMutex draw_mutex;
 
 public:
     explicit ImeDialogUi(ImeDialogState* state = nullptr, OrbisImeDialogStatus* status = nullptr,

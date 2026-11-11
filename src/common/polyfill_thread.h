@@ -7,6 +7,9 @@
 
 #pragma once
 
+#include <chrono>
+#include <rthreads/retro_eventcount.h>
+
 #include <version>
 
 #ifdef __cpp_lib_jthread
@@ -26,12 +29,35 @@ void CondvarWait(Condvar& cv, std::unique_lock<Lock>& lk, std::stop_token token,
 
 template <typename Rep, typename Period>
 bool StoppableTimedWait(std::stop_token token, const std::chrono::duration<Rep, Period>& rel_time) {
-    std::condition_variable_any cv;
-    std::mutex m;
-
-    // Perform the timed wait.
-    std::unique_lock lk{m};
-    return !cv.wait_for(lk, token, rel_time, [&] { return token.stop_requested(); });
+    // Parks on a retro_eventcount that a stop notifies: no mutex, no condition variable
+    if (token.stop_requested()) {
+        return false;
+    }
+    retro_eventcount_t ec;
+    retro_eventcount_init(&ec);
+    bool stopped;
+    {
+        std::stop_callback wake{token, [&ec] { retro_eventcount_notify(&ec); }};
+        const auto deadline = std::chrono::steady_clock::now() + rel_time;
+        for (;;) {
+            const int key = retro_eventcount_prepare_wait(&ec);
+            if (token.stop_requested()) {
+                retro_eventcount_cancel_wait(&ec);
+                break;
+            }
+            const auto left = std::chrono::ceil<std::chrono::microseconds>(
+                                  deadline - std::chrono::steady_clock::now())
+                                  .count();
+            if (left <= 0) {
+                retro_eventcount_cancel_wait(&ec);
+                break;
+            }
+            retro_eventcount_commit_wait_timeout(&ec, key, left);
+        }
+        stopped = token.stop_requested();
+    }
+    retro_eventcount_free(&ec);
+    return !stopped;
 }
 
 } // namespace Common
@@ -350,26 +376,35 @@ void CondvarWait(Condvar& cv, std::unique_lock<Lock>& lk, std::stop_token token,
 
 template <typename Rep, typename Period>
 bool StoppableTimedWait(std::stop_token token, const std::chrono::duration<Rep, Period>& rel_time) {
+    // Parks on a retro_eventcount that a stop notifies: no mutex, no condition variable
     if (token.stop_requested()) {
         return false;
     }
-
-    bool stop_requested = false;
-    std::condition_variable cv;
-    std::mutex m;
-
-    std::stop_callback cb(token, [&] {
-        // Wake up the waiting thread.
-        {
-            std::scoped_lock lk{m};
-            stop_requested = true;
+    retro_eventcount_t ec;
+    retro_eventcount_init(&ec);
+    bool stopped;
+    {
+        std::stop_callback wake{token, [&ec] { retro_eventcount_notify(&ec); }};
+        const auto deadline = std::chrono::steady_clock::now() + rel_time;
+        for (;;) {
+            const int key = retro_eventcount_prepare_wait(&ec);
+            if (token.stop_requested()) {
+                retro_eventcount_cancel_wait(&ec);
+                break;
+            }
+            const auto left = std::chrono::ceil<std::chrono::microseconds>(
+                                  deadline - std::chrono::steady_clock::now())
+                                  .count();
+            if (left <= 0) {
+                retro_eventcount_cancel_wait(&ec);
+                break;
+            }
+            retro_eventcount_commit_wait_timeout(&ec, key, left);
         }
-        cv.notify_one();
-    });
-
-    // Perform the timed wait.
-    std::unique_lock lk{m};
-    return !cv.wait_for(lk, rel_time, [&] { return stop_requested; });
+        stopped = token.stop_requested();
+    }
+    retro_eventcount_free(&ec);
+    return !stopped;
 }
 
 } // namespace Common

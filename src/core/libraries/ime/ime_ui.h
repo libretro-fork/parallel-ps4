@@ -9,6 +9,7 @@
 #include "imgui/imgui_layer.h"
 
 #include "common/cstring.h"
+#include "common/event_mutex.h"
 #include "common/types.h"
 
 #include "core/libraries/ime/ime_kb_layout.h"
@@ -35,7 +36,7 @@ class ImeState {
     bool caret_dirty = false;
 
     std::queue<OrbisImeEvent> event_queue;
-    std::mutex queue_mutex;
+    Common::EventMutex queue_mutex;
 
 public:
     ImeState(const OrbisImeParam* param = nullptr, const OrbisImeParamExtended* extended = nullptr);
@@ -132,7 +133,7 @@ class ImeUi : public ImGui::Layer {
     ImeKbLayoutSelection last_nav_layout_selection{};
     bool nav_layout_selection_initialized = false;
     ImeKbLayoutFamily kb_alpha_family = ImeKbLayoutFamily::Latin;
-    std::mutex draw_mutex;
+    Common::EventMutex draw_mutex;
 
 public:
     explicit ImeUi(ImeState* state = nullptr, const OrbisImeParam* param = nullptr,

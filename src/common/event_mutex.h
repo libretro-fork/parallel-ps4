@@ -4,6 +4,7 @@
 #pragma once
 
 #include <atomic>
+#include <chrono>
 
 #include <rthreads/retro_eventcount.h>
 
@@ -43,6 +44,30 @@ public:
     void unlock() {
         held.store(false, std::memory_order_release);
         retro_eventcount_notify(&released);
+    }
+
+    template <typename Clock, typename Duration>
+    bool try_lock_until(const std::chrono::time_point<Clock, Duration>& until) {
+        while (!try_lock()) {
+            const int key = retro_eventcount_prepare_wait(&released);
+            if (try_lock()) {
+                retro_eventcount_cancel_wait(&released);
+                return true;
+            }
+            const auto left =
+                std::chrono::ceil<std::chrono::microseconds>(until - Clock::now()).count();
+            if (left <= 0) {
+                retro_eventcount_cancel_wait(&released);
+                return try_lock();
+            }
+            retro_eventcount_commit_wait_timeout(&released, key, left);
+        }
+        return true;
+    }
+
+    template <typename Rep, typename Period>
+    bool try_lock_for(const std::chrono::duration<Rep, Period>& rel) {
+        return try_lock_until(std::chrono::steady_clock::now() + rel);
     }
 
     /// @func with the mutex held, for state a Common::EventCondition waits on.

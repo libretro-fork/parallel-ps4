@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cstring>
 #include <queue>
+#include "common/event_mutex.h"
 #include "common/logging/log.h"
 #include "core/libraries/ime/ime.h"
 #include "core/libraries/ime/ime_dialog.h"
@@ -238,7 +239,7 @@ public:
             return Error::INTERNAL;
         }
 
-        std::unique_lock<std::mutex> lock{g_ime_state->queue_mutex};
+        std::unique_lock<Common::EventMutex> lock{g_ime_state->queue_mutex};
 
         while (!g_ime_state->event_queue.empty()) {
             OrbisImeEvent event = g_ime_state->event_queue.front();
