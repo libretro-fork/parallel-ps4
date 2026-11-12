@@ -126,6 +126,9 @@ bool gpu_failure_told = false;
 // white is where SDR white goes.
 bool hdr_output = false;
 unsigned hdr_paper_white = 203;
+// The brightest and darkest it shows, which an HDR game tone maps to
+float hdr_max_nits = 1000.0f;
+float hdr_min_nits = 0.01f;
 uint32_t shown_image = 0;
 // The core's end of the socket the images' descriptors come over, and the emulator's until it
 // is started.
@@ -263,6 +266,8 @@ void ReadCoreOptions(Libretro::SharedOptions& options) {
     options.copy_gpu_buffers = enabled("shadps4_copy_gpu_buffers", "enabled");
     options.hdr_output = hdr_output ? 1 : 0;
     options.hdr_paper_white = hdr_paper_white;
+    options.hdr_max_nits = hdr_max_nits;
+    options.hdr_min_nits = hdr_min_nits;
     // The picture is handed over on the GPU wherever the frontend gives a Vulkan context
     options.gpu_frames = 1;
     options.gpu_socket = -1;
@@ -1343,43 +1348,50 @@ static bool StartGame(const std::string& boot_path, const std::string& user_dir,
 // whenever the frontend refuses it, XRGB8888 as always. Only asked here: a
 // pixel format is set once, at load.
 static void NegotiateHdr() {
-  hdr_output = false;
-  hdr_paper_white = 203;
-  if (OptionValue("shadps4_hdr", "disabled") == "enabled") {
-    struct retro_hdr_metadata metadata {};
-    metadata.version = 1;
-    metadata.size = sizeof(metadata);
-    if (!environ_cb(RETRO_ENVIRONMENT_GET_HDR_METADATA, &metadata)) {
-      Log(RETRO_LOG_WARN,
-          "HDR Output: the frontend does not say whether it shows HDR");
-    } else if (metadata.output_mode == 0) {
-      Log(RETRO_LOG_WARN,
-          "HDR Output: the frontend's output is SDR (its HDR is off)");
-    } else if ((metadata.source_formats &
-                RETRO_HDR_SOURCE_FORMAT_HDR10_2101010) == 0) {
-      Log(RETRO_LOG_WARN,
-          "HDR Output: the frontend does not take HDR10 frames");
-    } else {
-      enum retro_pixel_format hdr10 = RETRO_PIXEL_FORMAT_HDR10_2101010;
-      if (environ_cb(RETRO_ENVIRONMENT_SET_PIXEL_FORMAT, &hdr10)) {
-        hdr_output = true;
-        if (metadata.paper_white_nits >= 80.0f &&
-            metadata.paper_white_nits <= 1000.0f) {
-          hdr_paper_white =
-              static_cast<unsigned>(metadata.paper_white_nits + 0.5f);
+    hdr_output = false;
+    hdr_paper_white = 203;
+    hdr_max_nits = 1000.0f;
+    hdr_min_nits = 0.01f;
+    if (OptionValue("shadps4_hdr", "disabled") == "enabled") {
+        struct retro_hdr_metadata metadata {};
+        metadata.version = 1;
+        metadata.size = sizeof(metadata);
+        if (!environ_cb(RETRO_ENVIRONMENT_GET_HDR_METADATA, &metadata)) {
+            Log(RETRO_LOG_WARN, "HDR Output: the frontend does not say whether it shows HDR");
+        } else if (metadata.output_mode == 0) {
+            Log(RETRO_LOG_WARN, "HDR Output: the frontend's output is SDR (its HDR is off)");
+        } else if ((metadata.source_formats & RETRO_HDR_SOURCE_FORMAT_HDR10_2101010) == 0) {
+            Log(RETRO_LOG_WARN, "HDR Output: the frontend does not take HDR10 frames");
+        } else {
+            enum retro_pixel_format hdr10 = RETRO_PIXEL_FORMAT_HDR10_2101010;
+            if (environ_cb(RETRO_ENVIRONMENT_SET_PIXEL_FORMAT, &hdr10)) {
+                hdr_output = true;
+                if (metadata.paper_white_nits >= 80.0f && metadata.paper_white_nits <= 1000.0f) {
+                    hdr_paper_white = static_cast<unsigned>(metadata.paper_white_nits + 0.5f);
+                }
+                // The frontend's target peak (its display-peak setting included); zero or
+                // nonsense leaves the PS4's own default
+                if (metadata.max_nits >= static_cast<float>(hdr_paper_white) &&
+                    metadata.max_nits <= 10000.0f) {
+                    hdr_max_nits = metadata.max_nits;
+                }
+                if (metadata.min_nits >= 0.0f && metadata.min_nits < 1.0f) {
+                    hdr_min_nits = metadata.min_nits;
+                }
+                Log(RETRO_LOG_INFO,
+                    "HDR Output: HDR10, SDR white at %u nits, peak %.0f nits, black %.4f nits",
+                    hdr_paper_white, static_cast<double>(hdr_max_nits),
+                    static_cast<double>(hdr_min_nits));
+            } else {
+                Log(RETRO_LOG_WARN, "HDR Output: the frontend refused HDR10 frames");
+            }
         }
-        Log(RETRO_LOG_INFO, "HDR Output: HDR10, SDR white at %u nits",
-            hdr_paper_white);
-      } else {
-        Log(RETRO_LOG_WARN, "HDR Output: the frontend refused HDR10 frames");
-      }
     }
-  }
-  if (!hdr_output) {
-    enum retro_pixel_format format = RETRO_PIXEL_FORMAT_XRGB8888;
-    environ_cb(RETRO_ENVIRONMENT_SET_PIXEL_FORMAT, &format);
-  }
-  Libretro::GpuFrames::SetTenBitPixels(hdr_output);
+    if (!hdr_output) {
+        enum retro_pixel_format format = RETRO_PIXEL_FORMAT_XRGB8888;
+        environ_cb(RETRO_ENVIRONMENT_SET_PIXEL_FORMAT, &format);
+    }
+    Libretro::GpuFrames::SetTenBitPixels(hdr_output);
 }
 
 RETRO_API bool retro_load_game(const struct retro_game_info* game) {

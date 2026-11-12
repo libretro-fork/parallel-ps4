@@ -615,6 +615,8 @@ void ApplyCoreOptions() {
     emu_settings_set_copy_gpu_buffers(options.copy_gpu_buffers != 0, false);
     emu_settings_set_hdr_allowed(options.hdr_output != 0, false);
     emu_settings_set_hdr_paper_white(options.hdr_paper_white, false);
+    emu_settings_set_hdr_max_nits(options.hdr_max_nits, false);
+    emu_settings_set_hdr_min_nits(options.hdr_min_nits, false);
     emu_settings_set_trophy_popup_disabled(options.trophy_popup == 0, false);
     emu_settings_set_trophy_notification_side(
         trophy_sides[std::min(options.trophy_side, 3u)], false);

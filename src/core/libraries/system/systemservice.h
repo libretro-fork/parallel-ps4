@@ -479,7 +479,13 @@ s32 PS4_SYSV_ABI
 sceSystemServiceGetDisplaySafeAreaInfo(OrbisSystemServiceDisplaySafeAreaInfo* info);
 int PS4_SYSV_ABI sceSystemServiceGetEventForDaemon();
 int PS4_SYSV_ABI sceSystemServiceGetGpuLoadEmulationMode();
-int PS4_SYSV_ABI sceSystemServiceGetHdrToneMapLuminance();
+struct OrbisSystemServiceHdrToneMapLuminance {
+    float max_full_frame_tone_map_luminance;
+    float max_tone_map_luminance;
+    float min_tone_map_luminance;
+};
+int PS4_SYSV_ABI
+sceSystemServiceGetHdrToneMapLuminance(OrbisSystemServiceHdrToneMapLuminance* luminance);
 int PS4_SYSV_ABI sceSystemServiceGetLocalProcessStatusList();
 int PS4_SYSV_ABI sceSystemServiceGetParentSocket();
 int PS4_SYSV_ABI sceSystemServiceGetParentSocketForPsmKit();

@@ -1747,8 +1747,19 @@ int PS4_SYSV_ABI sceSystemServiceGetGpuLoadEmulationMode() {
     return ORBIS_OK;
 }
 
-int PS4_SYSV_ABI sceSystemServiceGetHdrToneMapLuminance() {
-    LOG_ERROR(Lib_SystemService, "(STUBBED) called");
+// What an HDR game tone maps to: the brightest and darkest the frontend shows (HDR Output), in
+// nits. It was a stub that left the game's struct as it found it, so a game read whatever was
+// in its memory for a peak. The full-frame peak is given the peak too: the frontend does not
+// say what a display holds over the whole screen.
+int PS4_SYSV_ABI
+sceSystemServiceGetHdrToneMapLuminance(OrbisSystemServiceHdrToneMapLuminance* luminance) {
+    if (luminance == nullptr) {
+        return ORBIS_SYSTEM_SERVICE_ERROR_PARAMETER;
+    }
+    const float peak = static_cast<float>(emu_settings_get_hdr_max_nits());
+    luminance->max_full_frame_tone_map_luminance = peak;
+    luminance->max_tone_map_luminance = peak;
+    luminance->min_tone_map_luminance = static_cast<float>(emu_settings_get_hdr_min_nits());
     return ORBIS_OK;
 }
 

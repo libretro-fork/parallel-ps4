@@ -19,7 +19,7 @@
 namespace Libretro {
 
 inline constexpr std::uint32_t SHARED_MAGIC = 0x34505368; // "hSP4"
-inline constexpr std::uint32_t SHARED_VERSION = 16;
+inline constexpr std::uint32_t SHARED_VERSION = 17;
 
 inline constexpr std::uint32_t MAX_WIDTH = 3840;
 inline constexpr std::uint32_t MAX_HEIGHT = 2160;
@@ -120,6 +120,10 @@ struct SharedOptions {
     std::uint32_t hdr_output;
     /// Where SDR white goes in it, in nits (the frontend's paper white).
     std::uint32_t hdr_paper_white;
+    /// The brightest and darkest the frontend shows, in nits: what a game is told to tone map
+    /// to (sceSystemServiceGetHdrToneMapLuminance).
+    float hdr_max_nits;
+    float hdr_min_nits;
     /// The picture is handed over on the GPU: the frontend gave the core a Vulkan context.
     std::uint32_t gpu_frames;
     /// Linux: the emulator's end of the socket its images' descriptors go over, as a
