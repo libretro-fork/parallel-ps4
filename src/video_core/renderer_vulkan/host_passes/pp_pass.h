@@ -18,6 +18,8 @@ public:
         float gamma = 1.0f;
         u32 hdr = 0;
         u32 srgb_input = 0;
+        // Above 0: the picture goes out as PQ Rec.2020, SDR white at this much of 10000 nits
+        float pq_white = 0.0f;
     };
 
     void Create(vk::Device device, vk::Format surface_format);

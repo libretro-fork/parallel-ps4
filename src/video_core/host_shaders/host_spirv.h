@@ -27,9 +27,17 @@ RETRO_BEGIN_DECLS
 size_t host_spirv_fs_tri_vert(uint32_t* out, size_t cap);
 
 /* The output picture: sampler at binding 0, push constants
- * { float gamma; uint hdr; uint srgb_input; }. sRGB-encodes linear colour
- * (decoding sRGB input first when asked), or passes HDR through. */
+ * { float gamma; uint hdr; uint srgb_input; float pq_white; }. sRGB-encodes
+ * linear colour (decoding sRGB input first when asked), or, when pq_white is
+ * above 0, encodes it as PQ Rec.2020 with SDR white at pq_white (of 10000
+ * nits), or passes HDR (already PQ) through. */
 size_t host_spirv_post_process_frag(uint32_t* out, size_t cap);
+
+/* ImGui's fragment shader for an HDR (PQ) frontend: its sRGB-encoded colour
+ * times the texture at binding 0, as PQ Rec.2020 with SDR white at @white
+ * (of 10000 nits). The input is ImGui's: location 0, struct { vec4 Color;
+ * vec2 UV; }. */
+size_t host_spirv_imgui_pq_frag(uint32_t* out, size_t cap, float white);
 
 /* Depth from a colour texture's component for the current sample: texture
  * at binding 0, uv at location 0 */

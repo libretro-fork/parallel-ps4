@@ -4,6 +4,7 @@
 #pragma once
 
 #include "common/bounded_threadsafe_queue.h"
+#include "core/emulator_settings.h"
 #include "core/libraries/videoout/buffer.h"
 #include "imgui/imgui_texture.h"
 #include "libretro/libretro_bridge.h"
@@ -66,9 +67,10 @@ public:
         return *rasterizer.get();
     }
 
-    // The frontend is handed 8-bit XRGB8888: the game is told there is no HDR output.
+    // HDR Output (libretro core option), with a frontend that takes HDR10: the game is told
+    // the display shows HDR
     bool IsHDRSupported() const {
-        return false;
+        return emu_settings_get_hdr_allowed();
     }
 
     VideoCore::Image& RegisterVideoOutSurface(
@@ -85,8 +87,9 @@ public:
 
     bool IsVideoOutSurface(const AmdGpu::ColorBuffer& color_buffer) const;
 
+    /// @game_hdr: the game set its output to HDR (Bt2020PQ): its buffer holds PQ already
     Frame* PrepareFrame(const Libraries::VideoOut::BufferAttributeGroup& attribute,
-                        VAddr cpu_address);
+                        VAddr cpu_address, bool game_hdr);
 
     Frame* PrepareBlankFrame(bool present_thread);
 

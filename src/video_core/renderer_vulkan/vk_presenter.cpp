@@ -133,6 +133,8 @@ static vk::Rect2D FitImage(s32 frame_width, s32 frame_height, s32 swapchain_widt
 // A finished frame read back for the frontend, as XRGB8888. A frame of ten bits a channel is
 // narrowed to it first, on the GPU, into an image of the readback's own: the one place the
 // picture loses its last two bits, and only for a frontend that cannot share the images.
+// With HDR Output the frame is read back whole, ten bits a channel (Libretro::PushFrame puts
+// it in XRGB2101010's order).
 struct FrameReadback {
     VideoCore::Buffer buffer;
     u32 width{};
@@ -145,7 +147,7 @@ struct FrameReadback {
         : buffer{instance, 0, static_cast<u64>(width_) * static_cast<u64>(height_) * 4,
                  VideoCore::MemoryType::HostCached},
           width{width_}, height{height_} {
-        if (format == vk::Format::eB8G8R8A8Unorm) {
+        if (format == vk::Format::eB8G8R8A8Unorm || emu_settings_get_hdr_allowed()) {
             return;
         }
         const vk::ImageCreateInfo image_info = {
@@ -396,6 +398,8 @@ void Presenter::RecreateFrame(Frame* frame, u32 width, u32 height) {
     frame->height = height;
 
     frame->imgui_texture = ImGui::Vulkan::AddTexture(view, vk::ImageLayout::eShaderReadOnlyOptimal);
+    // The output pass has put it in the output's form already
+    frame->imgui_texture->output = true;
 }
 
 Frame* Presenter::PrepareLastFrame() {
@@ -474,7 +478,7 @@ static vk::Format GetFrameViewFormat(const Libraries::VideoOut::PixelFormat form
 }
 
 Frame* Presenter::PrepareFrame(const Libraries::VideoOut::BufferAttributeGroup& attribute,
-                               VAddr cpu_address) {
+                               VAddr cpu_address, bool game_hdr) {
     // A frame of the game's is done: a vertex capture counts them
     VertexCapture::OnFlip();
     // With Dump Shaders on, what is recorded for the GPU during a frame is written out
@@ -542,6 +546,12 @@ Frame* Presenter::PrepareFrame(const Libraries::VideoOut::BufferAttributeGroup& 
     // the post process pass still sRGB encoded and has to be decoded there instead.
     pp_settings.srgb_input =
         attribute.attrib.pixel_format == Libraries::VideoOut::PixelFormat::A2R10G10B10Srgb;
+    // HDR Output: a game's own HDR (PQ in a ten-bit buffer) goes through as it is; any other
+    // picture is turned into PQ, its white at the frontend's paper white
+    const bool hdr_output = IsHDRSupported();
+    pp_settings.hdr = hdr_output && game_hdr;
+    pp_settings.pq_white =
+        hdr_output ? static_cast<float>(emu_settings_get_hdr_paper_white()) / 10000.0f : 0.0f;
     pp_pass.Render(cmdbuf, image_view, image_size, *frame, pp_settings);
 
     DebugState.game_resolution = {image_size.width, image_size.height};

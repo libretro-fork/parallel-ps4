@@ -79,6 +79,10 @@ ASAN_OPTIONS=detect_leaks=0 "$OUT/tiling_device_test"
 # libretro's analog values to the pad's bytes, rounded, a stick at rest centred
 $CC -std=c89 -O1 -g -Wall -Wno-unused-function -fsanitize=address,undefined \
     libretro/tests/pad_scale_test.c -o "$OUT/pad_scale_test"
+# Ten-bit frames read back, put in libretro's order for HDR10
+$CC -std=c89 -pedantic -O1 -g -Wall -fsanitize=address,undefined \
+    libretro/tests/pixel_order_test.c -o "$OUT/pixel_order_test"
+"$OUT/pixel_order_test"
 "$OUT/pad_scale_test"
 # Copy GPU Buffers' room: a frame's copies are kept until the GPU thread is done with them
 $CC -std=c89 -O1 -g -Wall -fsanitize=address,undefined -Isrc -I$L/include \
@@ -100,6 +104,12 @@ $CC -std=c89 -O1 -g -Wall -fsanitize=address,undefined -isystem externals/vulkan
     libretro/tests/depth_to_color_device_test.c src/video_core/host_shaders/host_spirv.c \
     -o "$OUT/depth_to_color_device_test" -ldl
 ASAN_OPTIONS=detect_leaks=0 "$OUT/depth_to_color_device_test"
+# The output pass on a device: SDR unchanged, PQ for an HDR frontend, a game's HDR passed through
+$CC -std=c89 -O1 -g -Wall -fsanitize=address,undefined -isystem externals/vulkan-headers/include \
+    -isystem externals/sirit/externals/SPIRV-Headers/include -Isrc -I$L/include \
+    libretro/tests/pq_output_device_test.c src/video_core/host_shaders/host_spirv.c \
+    -o "$OUT/pq_output_device_test" -ldl -lm
+ASAN_OPTIONS=detect_leaks=0 "$OUT/pq_output_device_test"
 # The vertex capture's report on a capture it makes itself, a mesh of each kind in it
 $CC -std=c89 -pedantic -O1 -g -Wall -Wno-long-long -fsanitize=address,undefined \
     tools/vertex_capture_report.c -o "$OUT/vertex_capture_report" -lm

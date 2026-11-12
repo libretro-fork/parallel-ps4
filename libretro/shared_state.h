@@ -19,7 +19,7 @@
 namespace Libretro {
 
 inline constexpr std::uint32_t SHARED_MAGIC = 0x34505368; // "hSP4"
-inline constexpr std::uint32_t SHARED_VERSION = 15;
+inline constexpr std::uint32_t SHARED_VERSION = 16;
 
 inline constexpr std::uint32_t MAX_WIDTH = 3840;
 inline constexpr std::uint32_t MAX_HEIGHT = 2160;
@@ -114,6 +114,12 @@ struct SharedOptions {
     std::uint32_t dump_shaders;
     std::uint32_t sample_positions;
     std::uint32_t copy_gpu_buffers;
+    /// The frontend takes HDR10 (PQ Rec.2020,
+    /// RETRO_PIXEL_FORMAT_HDR10_2101010): the picture goes out as PQ, and
+    /// frames read back are XRGB2101010. Fixed for the session.
+    std::uint32_t hdr_output;
+    /// Where SDR white goes in it, in nits (the frontend's paper white).
+    std::uint32_t hdr_paper_white;
     /// The picture is handed over on the GPU: the frontend gave the core a Vulkan context.
     std::uint32_t gpu_frames;
     /// Linux: the emulator's end of the socket its images' descriptors go over, as a

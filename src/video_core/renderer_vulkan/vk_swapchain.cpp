@@ -5,6 +5,7 @@
 #include <limits>
 #include "common/assert.h"
 #include "common/logging/log.h"
+#include "core/emulator_settings.h"
 #include "frontend_window.h"
 #include "imgui/renderer/imgui_core.h"
 #include "libretro/libretro_bridge.h"
@@ -33,6 +34,12 @@ Swapchain::Swapchain(const Instance& instance_, const Frontend::Window& window_)
                                 ? vk::Format::eA2B10G10R10UnormPack32
                                 : vk::Format::eB8G8R8A8Unorm;
     surface_format.colorSpace = vk::ColorSpaceKHR::eSrgbNonlinear;
+    // HDR10 is ten bits a channel, which Vulkan requires of every device; without them PQ
+    // would not fit
+    if (emu_settings_get_hdr_allowed() &&
+        surface_format.format != vk::Format::eA2B10G10R10UnormPack32) {
+        LOG_ERROR(Render_Vulkan, "HDR Output without ten-bit frames: the picture will be wrong");
+    }
 
     Create(window.GetWidth(), window.GetHeight());
     ImGui::Core::Initialize(instance, window, image_count, surface_format.format);

@@ -512,10 +512,79 @@ static uint32_t splat3(spv_module_t* m, uint32_t v) {
     return op3(m, SpvOpCompositeConstruct, m->t_f32x3, v, v, v);
 }
 
+static uint32_t vec3k(spv_module_t* m, float x, float y, float z) {
+    return op3(m, SpvOpCompositeConstruct, m->t_f32x3, k_f32(m, x), k_f32(m, y), k_f32(m, z));
+}
+
+/* sRGB-encoded to linear, per component (IEC 61966-2-1):
+ * mix(pow(max(rgb + b, 0) / a, 2.4), rgb / d, rgb < d * cutoff) */
+static uint32_t srgb_decode(spv_module_t* m, uint32_t rgb) {
+    const float cutoff = 0.0031308f, a = 1.055f, b = 0.055f, d = 12.92f;
+    uint32_t args[2], dg_pow, dg_lin;
+    args[0] = op2(m, SpvOpFAdd, m->t_f32x3, rgb, splat3(m, k_f32(m, b)));
+    args[1] = splat3(m, k_f32(m, 0.0f));
+    args[0] = op2(m, SpvOpFDiv, m->t_f32x3, ext(m, m->t_f32x3, GLSLstd450FMax, 2, args),
+                  splat3(m, k_f32(m, a)));
+    args[1] = splat3(m, k_f32(m, 2.4f));
+    dg_pow = ext(m, m->t_f32x3, GLSLstd450Pow, 2, args);
+    dg_lin = op2(m, SpvOpFDiv, m->t_f32x3, rgb, splat3(m, k_f32(m, d)));
+    return op3(m, SpvOpSelect, m->t_f32x3,
+               op2(m, SpvOpFOrdLessThan, m->t_bool3, rgb, splat3(m, k_f32(m, d * cutoff))), dg_lin,
+               dg_pow);
+}
+
+/* Linear Rec.709, 1.0 being SDR white, to PQ-encoded Rec.2020 (SMPTE ST 2084), with SDR
+ * white at @white of the 10000 nits PQ's 1.0 stands for */
+static uint32_t pq_encode_709(spv_module_t* m, uint32_t rgb, uint32_t white) {
+    const float m1 = 0.1593017578125f, m2 = 78.84375f;
+    const float c1 = 0.8359375f, c2 = 18.8515625f, c3 = 18.6875f;
+    uint32_t r, g, b, y, p, args[3];
+    /* BT.2087 Rec.709 to Rec.2020, linear light */
+    r = op2(m, SpvOpDot, m->t_f32, rgb, vec3k(m, 0.6274040f, 0.3292820f, 0.0433136f));
+    g = op2(m, SpvOpDot, m->t_f32, rgb, vec3k(m, 0.0690970f, 0.9195400f, 0.0113612f));
+    b = op2(m, SpvOpDot, m->t_f32, rgb, vec3k(m, 0.0163916f, 0.0880132f, 0.8955950f));
+    y = op2(m, SpvOpVectorTimesScalar, m->t_f32x3,
+            op3(m, SpvOpCompositeConstruct, m->t_f32x3, r, g, b), white);
+    args[0] = y;
+    args[1] = splat3(m, k_f32(m, 0.0f));
+    args[2] = splat3(m, k_f32(m, 1.0f));
+    y = ext(m, m->t_f32x3, GLSLstd450FClamp, 3, args);
+    /* ((c1 + c2 * y^m1) / (1 + c3 * y^m1))^m2 */
+    args[0] = y;
+    args[1] = splat3(m, k_f32(m, m1));
+    p = ext(m, m->t_f32x3, GLSLstd450Pow, 2, args);
+    args[0] = op2(m, SpvOpFDiv, m->t_f32x3,
+                  op2(m, SpvOpFAdd, m->t_f32x3, splat3(m, k_f32(m, c1)),
+                      op2(m, SpvOpVectorTimesScalar, m->t_f32x3, p, k_f32(m, c2))),
+                  op2(m, SpvOpFAdd, m->t_f32x3, splat3(m, k_f32(m, 1.0f)),
+                      op2(m, SpvOpVectorTimesScalar, m->t_f32x3, p, k_f32(m, c3))));
+    args[1] = splat3(m, k_f32(m, m2));
+    return ext(m, m->t_f32x3, GLSLstd450Pow, 2, args);
+}
+
+static uint32_t with_alpha(spv_module_t* m, uint32_t rgb, uint32_t alpha) {
+    uint32_t args[4];
+    args[0] = op2(m, SpvOpCompositeExtract, m->t_f32, rgb, 0);
+    args[1] = op2(m, SpvOpCompositeExtract, m->t_f32, rgb, 1);
+    args[2] = op2(m, SpvOpCompositeExtract, m->t_f32, rgb, 2);
+    args[3] = alpha;
+    return opn(m, SpvOpCompositeConstruct, m->t_f32x4, 4, args);
+}
+
+static uint32_t rgb_of(spv_module_t* m, uint32_t v4) {
+    uint32_t shuffle[5];
+    shuffle[0] = v4;
+    shuffle[1] = v4;
+    shuffle[2] = 0;
+    shuffle[3] = 1;
+    shuffle[4] = 2;
+    return opn(m, SpvOpVectorShuffle, m->t_f32x3, 5, shuffle);
+}
+
 size_t host_spirv_post_process_frag(uint32_t* out, size_t cap) {
-    uint32_t uv, color, image_t, sampled_t, tex, settings_t, settings, members[3];
-    uint32_t pc_f32, pc_u32, gamma, hdr, srgb_input, linear, rgb, alpha, args[4];
-    uint32_t dg_pow, dg_lin, dg, in, exponent, g_pow, g_lin, g, sdr, shuffle[5];
+    uint32_t uv, color, image_t, sampled_t, tex, settings_t, settings, members[4];
+    uint32_t pc_f32, pc_u32, gamma, hdr, srgb_input, pq_white, pq, linear, rgb, alpha, args[4];
+    uint32_t in, exponent, g_pow, g_lin, g, sdr, pq_out, t_bool4;
     const float cutoff = 0.0031308f, a = 1.055f, b = 0.055f, d = 12.92f;
     spv_module_t module, *m = &module;
     spv_begin(m);
@@ -525,15 +594,18 @@ size_t host_spirv_post_process_frag(uint32_t* out, size_t cap) {
     sampled_t = t1(m, SpvOpTypeSampledImage, image_t);
     tex = spv_binding(m, SpvStorageClassUniformConstant, sampled_t, 0);
 
-    /* push_constant { float gamma; bool hdr; bool srgb_input; }, the bools as uints */
+    /* push_constant { float gamma; bool hdr; bool srgb_input; float pq_white; }, the bools
+     * as uints */
     members[0] = m->t_f32;
     members[1] = m->t_u32;
     members[2] = m->t_u32;
-    settings_t = spv_type_own(m, SpvOpTypeStruct, 3, members);
+    members[3] = m->t_f32;
+    settings_t = spv_type_own(m, SpvOpTypeStruct, 4, members);
     spv_decorate(m, settings_t, SpvDecorationBlock, 0, 0);
     spv_member_offset(m, settings_t, 0, 0);
     spv_member_offset(m, settings_t, 1, 4);
     spv_member_offset(m, settings_t, 2, 8);
+    spv_member_offset(m, settings_t, 3, 12);
     settings = spv_global(m, SpvStorageClassPushConstant, settings_t);
 
     spv_main(m);
@@ -546,31 +618,17 @@ size_t host_spirv_post_process_frag(uint32_t* out, size_t cap) {
     srgb_input = op2(m, SpvOpINotEqual, m->t_bool,
                      load(m, m->t_u32, op2(m, SpvOpAccessChain, pc_u32, settings, k_s32(m, 2))),
                      k_u32(m, 0));
+    pq_white = load(m, m->t_f32, op2(m, SpvOpAccessChain, pc_f32, settings, k_s32(m, 3)));
+    pq = op2(m, SpvOpFOrdGreaterThan, m->t_bool, pq_white, k_f32(m, 0.0f));
 
     linear = op2(m, SpvOpImageSampleImplicitLod, m->t_f32x4, load(m, sampled_t, tex),
                  load(m, m->t_f32x2, uv));
-    shuffle[0] = linear;
-    shuffle[1] = linear;
-    shuffle[2] = 0;
-    shuffle[3] = 1;
-    shuffle[4] = 2;
-    rgb = opn(m, SpvOpVectorShuffle, m->t_f32x3, 5, shuffle);
+    rgb = rgb_of(m, linear);
     alpha = op2(m, SpvOpCompositeExtract, m->t_f32, linear, 3);
 
-    /* degamma(rgb) = mix(pow(max(rgb + b, 0) / a, 2.4), rgb / d, rgb < d * cutoff) */
-    args[0] = op2(m, SpvOpFAdd, m->t_f32x3, rgb, splat3(m, k_f32(m, b)));
-    args[1] = splat3(m, k_f32(m, 0.0f));
-    args[0] = op2(m, SpvOpFDiv, m->t_f32x3, ext(m, m->t_f32x3, GLSLstd450FMax, 2, args),
-                  splat3(m, k_f32(m, a)));
-    args[1] = splat3(m, k_f32(m, 2.4f));
-    dg_pow = ext(m, m->t_f32x3, GLSLstd450Pow, 2, args);
-    dg_lin = op2(m, SpvOpFDiv, m->t_f32x3, rgb, splat3(m, k_f32(m, d)));
-    dg = op3(m, SpvOpSelect, m->t_f32x3,
-             op2(m, SpvOpFOrdLessThan, m->t_bool3, rgb, splat3(m, k_f32(m, d * cutoff))), dg_lin,
-             dg_pow);
     in = op3(m, SpvOpSelect, m->t_f32x3,
-             op3(m, SpvOpCompositeConstruct, m->t_bool3, srgb_input, srgb_input, srgb_input), dg,
-             rgb);
+             op3(m, SpvOpCompositeConstruct, m->t_bool3, srgb_input, srgb_input, srgb_input),
+             srgb_decode(m, rgb), rgb);
 
     /* gamma(rgb) = mix(a * pow(rgb, 1 / (2.4 + 1 - gamma)) - b, d * rgb / gamma,
      *                  rgb < cutoff) */
@@ -586,16 +644,48 @@ size_t host_spirv_post_process_frag(uint32_t* out, size_t cap) {
                 op2(m, SpvOpVectorTimesScalar, m->t_f32x3, in, k_f32(m, d)), splat3(m, gamma));
     g = op3(m, SpvOpSelect, m->t_f32x3,
             op2(m, SpvOpFOrdLessThan, m->t_bool3, in, splat3(m, k_f32(m, cutoff))), g_lin, g_pow);
-    args[0] = op2(m, SpvOpCompositeExtract, m->t_f32, g, 0);
-    args[1] = op2(m, SpvOpCompositeExtract, m->t_f32, g, 1);
-    args[2] = op2(m, SpvOpCompositeExtract, m->t_f32, g, 2);
-    args[3] = alpha;
-    sdr = opn(m, SpvOpCompositeConstruct, m->t_f32x4, 4, args);
+    sdr = with_alpha(m, g, alpha);
+
+    /* For an HDR frontend: the same linear colour as PQ, SDR white at pq_white */
+    pq_out = with_alpha(m, pq_encode_709(m, in, pq_white), alpha);
+
+    t_bool4 = t2(m, SpvOpTypeVector, m->t_bool, 4);
+    args[0] = args[1] = args[2] = args[3] = pq;
+    sdr = op3(m, SpvOpSelect, m->t_f32x4, opn(m, SpvOpCompositeConstruct, t_bool4, 4, args), pq_out,
+              sdr);
     args[0] = args[1] = args[2] = args[3] = hdr;
     store(m, color,
-          op3(m, SpvOpSelect, m->t_f32x4,
-              opn(m, SpvOpCompositeConstruct, t2(m, SpvOpTypeVector, m->t_bool, 4), 4, args),
-              linear, sdr));
+          op3(m, SpvOpSelect, m->t_f32x4, opn(m, SpvOpCompositeConstruct, t_bool4, 4, args), linear,
+              sdr));
+    spv_mode(m, SpvExecutionModeOriginUpperLeft, 0, NULL);
+    return spv_end(m, SpvExecutionModelFragment, out, cap);
+}
+
+size_t host_spirv_imgui_pq_frag(uint32_t* out, size_t cap, float white) {
+    uint32_t in_t, in_var, color, image_t, sampled_t, tex, members[2], in_f32x4, in_f32x2;
+    uint32_t vcolor, vuv, c;
+    spv_module_t module, *m = &module;
+    spv_begin(m);
+    /* layout(location = 0) in struct { vec4 Color; vec2 UV; } In; as ImGui's vertex
+     * shader writes it */
+    members[0] = m->t_f32x4;
+    members[1] = m->t_f32x2;
+    in_t = spv_type_own(m, SpvOpTypeStruct, 2, members);
+    in_var = spv_io(m, SpvStorageClassInput, in_t, 0);
+    color = spv_io(m, SpvStorageClassOutput, m->t_f32x4, 0);
+    image_t = t_image(m, m->t_f32, 0);
+    sampled_t = t1(m, SpvOpTypeSampledImage, image_t);
+    tex = spv_binding(m, SpvStorageClassUniformConstant, sampled_t, 0);
+    spv_main(m);
+    in_f32x4 = t_ptr(m, SpvStorageClassInput, m->t_f32x4);
+    in_f32x2 = t_ptr(m, SpvStorageClassInput, m->t_f32x2);
+    vcolor = load(m, m->t_f32x4, op2(m, SpvOpAccessChain, in_f32x4, in_var, k_s32(m, 0)));
+    vuv = load(m, m->t_f32x2, op2(m, SpvOpAccessChain, in_f32x2, in_var, k_s32(m, 1)));
+    c = op2(m, SpvOpFMul, m->t_f32x4, vcolor,
+            op2(m, SpvOpImageSampleImplicitLod, m->t_f32x4, load(m, sampled_t, tex), vuv));
+    store(m, color,
+          with_alpha(m, pq_encode_709(m, srgb_decode(m, rgb_of(m, c)), k_f32(m, white)),
+                     op2(m, SpvOpCompositeExtract, m->t_f32, c, 3)));
     spv_mode(m, SpvExecutionModeOriginUpperLeft, 0, NULL);
     return spv_end(m, SpvExecutionModelFragment, out, cap);
 }

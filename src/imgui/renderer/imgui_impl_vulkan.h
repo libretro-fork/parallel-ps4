@@ -13,6 +13,8 @@ struct ImDrawData;
 namespace ImGui {
 struct Texture {
     vk::DescriptorSet descriptor_set{nullptr};
+    // Holds the picture in the output's own form (with HDR Output, PQ): drawn as it is
+    bool output{false};
 };
 } // namespace ImGui
 

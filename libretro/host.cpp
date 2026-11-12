@@ -28,11 +28,11 @@
 #include <thread>
 #include <vector>
 
-#include "common/quick_exit.h"
 #include "audio_mix.h"
 #include "common/key_manager.h"
 #include "common/logging/log.h"
 #include "common/path_util.h"
+#include "common/quick_exit.h"
 #include "common/singleton.h"
 #include "core/devtools/layer.h"
 #include "core/emulator_settings.h"
@@ -46,6 +46,7 @@
 #include "input/controller.h"
 #include "libretro.h"
 #include "libretro_bridge.h"
+#include "pixel_order.h"
 #include "shared_state.h"
 #include "video_core/renderer_vulkan/vk_vertex_capture.h"
 #include "video_core/texture_cache/texture_cache.h"
@@ -406,7 +407,16 @@ void PushFrame(const void* pixels, std::uint32_t width, std::uint32_t height) {
     }
     shared->frame_size[slot].width = width;
     shared->frame_size[slot].height = height;
-    std::memcpy(SharedFrame(shared, slot), pixels, static_cast<std::size_t>(width) * height * 4);
+    const std::size_t count = static_cast<std::size_t>(width) * height;
+    if (shared->options.hdr_output != 0) {
+      // The frames are A2B10G10R10; libretro's HDR10 has R and B the other way
+      // round
+      pixel_order_xrgb2101010(
+          reinterpret_cast<std::uint32_t *>(SharedFrame(shared, slot)),
+          static_cast<const std::uint32_t *>(pixels), count);
+    } else {
+      std::memcpy(SharedFrame(shared, slot), pixels, count * 4);
+    }
     (void)retro_atomic_exchange_int(&shared->frame_latest, (((latest >> FRAME_SLOT_BITS) + 1) << FRAME_SLOT_BITS) | slot);
     (void)retro_atomic_exchange_int(&frame_seen, 1);
 }
@@ -603,6 +613,8 @@ void ApplyCoreOptions() {
     emu_settings_set_dump_shaders(options.dump_shaders != 0, false);
     emu_settings_set_sample_positions(options.sample_positions != 0, false);
     emu_settings_set_copy_gpu_buffers(options.copy_gpu_buffers != 0, false);
+    emu_settings_set_hdr_allowed(options.hdr_output != 0, false);
+    emu_settings_set_hdr_paper_white(options.hdr_paper_white, false);
     emu_settings_set_trophy_popup_disabled(options.trophy_popup == 0, false);
     emu_settings_set_trophy_notification_side(
         trophy_sides[std::min(options.trophy_side, 3u)], false);

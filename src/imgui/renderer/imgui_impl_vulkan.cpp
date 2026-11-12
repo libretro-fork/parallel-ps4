@@ -9,6 +9,8 @@
 #include <mutex>
 #include <vector>
 #include "common/combiner.h"
+#include "core/emulator_settings.h"
+#include "video_core/host_shaders/host_spirv.h"
 
 #include <imgui.h>
 
@@ -64,6 +66,10 @@ struct VkData {
     vk::Pipeline pipeline{};
     vk::ShaderModule shader_module_vert{};
     vk::ShaderModule shader_module_frag{};
+    // HDR Output: what ImGui draws is turned into PQ, all but the game's picture, which is in
+    // the output's form already (Texture::output)
+    vk::Pipeline pipeline_pq{};
+    vk::ShaderModule shader_module_frag_pq{};
 
     Common::Combiner command_pool_mutex;
     vk::CommandPool command_pool{};
@@ -667,9 +673,13 @@ void RenderDrawData(ImDrawData& draw_data, vk::CommandBuffer command_buffer,
 
     VkData* bd = GetBackendData();
     const InitInfo& v = bd->init_info;
+    // HDR Output: each draw takes the PQ pipeline, unless it draws the output picture
+    vk::Pipeline pq_pipeline{};
     if (pipeline == VK_NULL_HANDLE) {
         pipeline = bd->pipeline;
+        pq_pipeline = bd->pipeline_pq;
     }
+    vk::Pipeline bound = pipeline;
 
     // Allocate array to store enough vertex/index buffers
     WindowRenderBuffers& wrb = bd->render_buffers;
@@ -743,6 +753,7 @@ void RenderDrawData(ImDrawData& draw_data, vk::CommandBuffer command_buffer,
                 // request the renderer to reset render state.)
                 if (pcmd->UserCallback == ImDrawCallback_ResetRenderState) {
                     SetupRenderState(draw_data, pipeline, command_buffer, frb, fb_width, fb_height);
+                    bound = pipeline;
                 } else {
                     pcmd->UserCallback(cmd_list, pcmd);
                 }
@@ -781,6 +792,15 @@ void RenderDrawData(ImDrawData& draw_data, vk::CommandBuffer command_buffer,
                     },
                 };
                 command_buffer.setScissor(0, 1, &scissor);
+
+                if (pq_pipeline) {
+                    const vk::Pipeline wanted = pcmd->GetTexID()->output ? pipeline : pq_pipeline;
+                    if (wanted != bound) {
+                        // The layout, push constants and buffers are the same for both
+                        command_buffer.bindPipeline(vk::PipelineBindPoint::eGraphics, wanted);
+                        bound = wanted;
+                    }
+                }
 
                 // Bind DescriptorSet with font or user texture
                 vk::DescriptorSet desc_set[1]{pcmd->GetTexID()->descriptor_set};
@@ -1036,11 +1056,22 @@ static void CreateShaderModules(vk::Device device, const vk::AllocationCallbacks
         };
         bd->shader_module_frag = CheckVkResult(device.createShaderModule(frag_info, allocator));
     }
+    if (bd->shader_module_frag_pq == VK_NULL_HANDLE && emu_settings_get_hdr_allowed()) {
+        std::vector<u32> words(HOST_SPIRV_MAX_WORDS);
+        const float white = static_cast<float>(emu_settings_get_hdr_paper_white()) / 10000.0f;
+        const size_t n = host_spirv_imgui_pq_frag(words.data(), words.size(), white);
+        IM_ASSERT(n != 0);
+        vk::ShaderModuleCreateInfo frag_info{
+            .codeSize = n * sizeof(u32),
+            .pCode = words.data(),
+        };
+        bd->shader_module_frag_pq = CheckVkResult(device.createShaderModule(frag_info, allocator));
+    }
 }
 
 static void CreatePipeline(vk::Device device, const vk::AllocationCallbacks* allocator,
                            vk::PipelineCache pipeline_cache, vk::RenderPass render_pass,
-                           vk::Pipeline* pipeline, uint32_t subpass) {
+                           vk::Pipeline* pipeline, uint32_t subpass, bool pq = false) {
     VkData* bd = GetBackendData();
     const InitInfo& v = bd->init_info;
 
@@ -1054,7 +1085,7 @@ static void CreatePipeline(vk::Device device, const vk::AllocationCallbacks* all
         },
         {
             .stage = vk::ShaderStageFlagBits::eFragment,
-            .module = bd->shader_module_frag,
+            .module = pq ? bd->shader_module_frag_pq : bd->shader_module_frag,
             .pName = "main",
         },
     };
@@ -1235,6 +1266,10 @@ bool CreateDeviceObjects() {
     }
 
     CreatePipeline(v.device, v.allocator, v.pipeline_cache, nullptr, &bd->pipeline, v.subpass);
+    if (bd->shader_module_frag_pq) {
+        CreatePipeline(v.device, v.allocator, v.pipeline_cache, nullptr, &bd->pipeline_pq,
+                       v.subpass, true);
+    }
 
     if (bd->command_pool == VK_NULL_HANDLE) {
         vk::CommandPoolCreateInfo info{
@@ -1293,6 +1328,10 @@ void ImGuiImplVulkanDestroyDeviceObjects() {
         v.device.destroyShaderModule(bd->shader_module_frag, v.allocator);
         bd->shader_module_frag = VK_NULL_HANDLE;
     }
+    if (bd->shader_module_frag_pq) {
+        v.device.destroyShaderModule(bd->shader_module_frag_pq, v.allocator);
+        bd->shader_module_frag_pq = VK_NULL_HANDLE;
+    }
     if (bd->simple_sampler) {
         v.device.destroySampler(bd->simple_sampler, v.allocator);
         bd->simple_sampler = VK_NULL_HANDLE;
@@ -1312,6 +1351,10 @@ void ImGuiImplVulkanDestroyDeviceObjects() {
     if (bd->pipeline) {
         v.device.destroyPipeline(bd->pipeline, v.allocator);
         bd->pipeline = VK_NULL_HANDLE;
+    }
+    if (bd->pipeline_pq) {
+        v.device.destroyPipeline(bd->pipeline_pq, v.allocator);
+        bd->pipeline_pq = VK_NULL_HANDLE;
     }
 }
 
@@ -1368,6 +1411,12 @@ void OnSurfaceFormatChange(vk::Format surface_format) {
             bd->pipeline = VK_NULL_HANDLE;
             CreatePipeline(v.device, v.allocator, v.pipeline_cache, nullptr, &bd->pipeline,
                            v.subpass);
+        }
+        if (bd->pipeline_pq) {
+            v.device.destroyPipeline(bd->pipeline_pq, v.allocator);
+            bd->pipeline_pq = VK_NULL_HANDLE;
+            CreatePipeline(v.device, v.allocator, v.pipeline_cache, nullptr, &bd->pipeline_pq,
+                           v.subpass, true);
         }
     }
 }

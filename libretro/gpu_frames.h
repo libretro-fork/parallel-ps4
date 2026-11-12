@@ -35,9 +35,14 @@ void Receive(int socket, void* emulator_process);
 void Show(retro_video_refresh_t video, std::uint32_t slot, bool have_frame, unsigned width,
           unsigned height);
 
-/// Where the images cannot be shared: a frame read back into the shared memory (XRGB8888,
-/// width * 4 bytes a row), uploaded into an image of the frontend's device and shown from there.
+/// Where the images cannot be shared: a frame read back into the shared memory
+/// (XRGB8888, or XRGB2101010 after SetTenBitPixels; width * 4 bytes a row),
+/// uploaded into an image of the frontend's device and shown from there.
 void ShowPixels(retro_video_refresh_t video, const void* pixels, unsigned width, unsigned height);
+
+/// The frames in the shared memory are XRGB2101010 (HDR10) instead of XRGB8888:
+/// set in retro_load_game, before any is shown.
+void SetTenBitPixels(bool ten_bit);
 
 /// The emulator's images are imported, and frames are shown from them.
 bool Shared();

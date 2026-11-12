@@ -121,6 +121,11 @@ uint32_t shown_latest = 0;
 // the frame shown is one of the emulator's images in place of a slot of the shared memory.
 bool gpu_frames = false;
 bool gpu_failure_told = false;
+// HDR output (core option HDR Output): settled in retro_load_game, by what the
+// frontend takes, and fixed until the content is closed. The frontend's paper
+// white is where SDR white goes.
+bool hdr_output = false;
+unsigned hdr_paper_white = 203;
 uint32_t shown_image = 0;
 // The core's end of the socket the images' descriptors come over, and the emulator's until it
 // is started.
@@ -256,6 +261,8 @@ void ReadCoreOptions(Libretro::SharedOptions& options) {
     options.dump_shaders = enabled("shadps4_dump_shaders", "disabled");
     options.sample_positions = enabled("shadps4_game_sample_positions", "disabled");
     options.copy_gpu_buffers = enabled("shadps4_copy_gpu_buffers", "enabled");
+    options.hdr_output = hdr_output ? 1 : 0;
+    options.hdr_paper_white = hdr_paper_white;
     // The picture is handed over on the GPU wherever the frontend gives a Vulkan context
     options.gpu_frames = 1;
     options.gpu_socket = -1;
@@ -1331,6 +1338,50 @@ static bool StartGame(const std::string& boot_path, const std::string& user_dir,
     return true;
 }
 
+// With HDR Output on, and a frontend that presents HDR (PQ or scRGB) and takes
+// HDR10 frames, the picture goes out as HDR10: PQ Rec.2020. Otherwise, and
+// whenever the frontend refuses it, XRGB8888 as always. Only asked here: a
+// pixel format is set once, at load.
+static void NegotiateHdr() {
+  hdr_output = false;
+  hdr_paper_white = 203;
+  if (OptionValue("shadps4_hdr", "disabled") == "enabled") {
+    struct retro_hdr_metadata metadata {};
+    metadata.version = 1;
+    metadata.size = sizeof(metadata);
+    if (!environ_cb(RETRO_ENVIRONMENT_GET_HDR_METADATA, &metadata)) {
+      Log(RETRO_LOG_WARN,
+          "HDR Output: the frontend does not say whether it shows HDR");
+    } else if (metadata.output_mode == 0) {
+      Log(RETRO_LOG_WARN,
+          "HDR Output: the frontend's output is SDR (its HDR is off)");
+    } else if ((metadata.source_formats &
+                RETRO_HDR_SOURCE_FORMAT_HDR10_2101010) == 0) {
+      Log(RETRO_LOG_WARN,
+          "HDR Output: the frontend does not take HDR10 frames");
+    } else {
+      enum retro_pixel_format hdr10 = RETRO_PIXEL_FORMAT_HDR10_2101010;
+      if (environ_cb(RETRO_ENVIRONMENT_SET_PIXEL_FORMAT, &hdr10)) {
+        hdr_output = true;
+        if (metadata.paper_white_nits >= 80.0f &&
+            metadata.paper_white_nits <= 1000.0f) {
+          hdr_paper_white =
+              static_cast<unsigned>(metadata.paper_white_nits + 0.5f);
+        }
+        Log(RETRO_LOG_INFO, "HDR Output: HDR10, SDR white at %u nits",
+            hdr_paper_white);
+      } else {
+        Log(RETRO_LOG_WARN, "HDR Output: the frontend refused HDR10 frames");
+      }
+    }
+  }
+  if (!hdr_output) {
+    enum retro_pixel_format format = RETRO_PIXEL_FORMAT_XRGB8888;
+    environ_cb(RETRO_ENVIRONMENT_SET_PIXEL_FORMAT, &format);
+  }
+  Libretro::GpuFrames::SetTenBitPixels(hdr_output);
+}
+
 RETRO_API bool retro_load_game(const struct retro_game_info* game) {
     if (!game || !game->path || !*game->path) {
         Log(RETRO_LOG_ERROR, "No content: load a game's eboot.bin or PKG");
@@ -1347,8 +1398,7 @@ RETRO_API bool retro_load_game(const struct retro_game_info* game) {
         return false;
     }
 
-    enum retro_pixel_format format = RETRO_PIXEL_FORMAT_XRGB8888;
-    environ_cb(RETRO_ENVIRONMENT_SET_PIXEL_FORMAT, &format);
+    NegotiateHdr();
     if (!environ_cb(RETRO_ENVIRONMENT_GET_RUMBLE_INTERFACE, &rumble)) {
         rumble = {};
     }

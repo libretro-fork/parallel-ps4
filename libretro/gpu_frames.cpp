@@ -242,8 +242,11 @@ std::uint32_t MemoryType(std::uint32_t allowed, VkMemoryPropertyFlags wanted) {
     return UINT32_MAX;
 }
 
-// The staging buffer, the image and the commands of one upload slot, for frames of this size.
-// Made when the size changes, which is when the game's resolution does.
+// The staging buffer, the image and the commands of one upload slot, for frames
+// of this size. Made when the size changes, which is when the game's resolution
+// does. The shared memory's frames are XRGB2101010 (HDR10), not XRGB8888
+bool ten_bit_pixels = false;
+
 bool MakeUpload(Upload& upload, unsigned width, unsigned height) {
     if (upload.image != VK_NULL_HANDLE && upload.width == width && upload.height == height) {
         return true;
@@ -331,11 +334,13 @@ bool MakeUpload(Upload& upload, unsigned width, unsigned height) {
         return false;
     }
 
-    // The shared memory's frames are XRGB8888: B, G, R, X in memory
+    // The shared memory's frames are XRGB8888: B, G, R, X in memory; or
+    // XRGB2101010, a 32-bit word of B in bits 0-9, G in 10-19, R in 20-29
     VkImageCreateInfo image_info{};
     image_info.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
     image_info.imageType = VK_IMAGE_TYPE_2D;
-    image_info.format = VK_FORMAT_B8G8R8A8_UNORM;
+    image_info.format = ten_bit_pixels ? VK_FORMAT_A2R10G10B10_UNORM_PACK32
+                                       : VK_FORMAT_B8G8R8A8_UNORM;
     image_info.extent = {width, height, 1};
     image_info.mipLevels = 1;
     image_info.arrayLayers = 1;
@@ -947,6 +952,8 @@ void Show(retro_video_refresh_t video, std::uint32_t slot, bool have_frame, unsi
     video(RETRO_HW_FRAME_BUFFER_VALID, width, height, 0);
 }
 
+void SetTenBitPixels(bool ten_bit) { ten_bit_pixels = ten_bit; }
+
 void ShowPixels(retro_video_refresh_t video, const void* pixels, unsigned width,
                 unsigned height) {
     if (!video) {
@@ -1054,6 +1061,7 @@ void SetShared(SharedState*, SharedWake*) {}
 void Receive(int, void*) {}
 void Show(retro_video_refresh_t, std::uint32_t, bool, unsigned, unsigned) {}
 void ShowPixels(retro_video_refresh_t, const void*, unsigned, unsigned) {}
+void SetTenBitPixels(bool) {}
 bool Shared() {
     return false;
 }

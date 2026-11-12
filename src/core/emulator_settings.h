@@ -161,6 +161,7 @@ enum emu_settings_section {
     EMU_SETTING(full_screen_mode, "full_screen_mode", GPU, STRING, "Windowed", OVR, GEN)           \
     EMU_SETTING(present_mode, "present_mode", GPU, STRING, "Mailbox", OVR, GEN)                    \
     EMU_SETTING(hdr_allowed, "hdr_allowed", GPU, BOOL, false, OVR, GEN)                            \
+    EMU_SETTING(hdr_paper_white, "hdr_paper_white", GPU, UINT, 203, OVR, GEN)                      \
     EMU_SETTING(userfaultfd, "userfaultfd", GPU, BOOL, false, OVR, GEN)                            \
     EMU_SETTING(inline_fetch_shader, "inline_fetch_shader", GPU, BOOL, false, OVR, GEN)            \
     EMU_SETTING(fast_shader_math, "fast_shader_math", GPU, BOOL, false, OVR, GEN)                  \
