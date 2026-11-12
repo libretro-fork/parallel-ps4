@@ -2,9 +2,11 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <chrono>
 #include <condition_variable>
+#include <cstring>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -13,7 +15,7 @@
 #include <queue>
 
 #include <retro_atomic.h>
-#include "common/audio_file.h"
+#include "common/audio_stream.h"
 #include "common/combiner.h"
 #include "common/event_mutex.h"
 #include "common/io_file.h"
@@ -447,66 +449,100 @@ private:
                 break;
             }
 
-            Common::AudioFile::Pcm pcm;
-            bool decoded = false;
-
             std::string ext = host_path.extension().string();
             std::transform(ext.begin(), ext.end(), ext.begin(),
                            [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-            if (ext == ".flac" || ext == ".mp3" || ext == ".aac" || ext == ".m4a" ||
-                ext == ".mp4") {
-                // Mapped and decoded where it lies, into one buffer the mix resamples from.
-                const auto bytes = Common::FS::FileView::Map(host_path);
-                const u8* data = bytes ? bytes->data() : nullptr;
-                const size_t size = bytes ? bytes->size() : 0;
-                if (ext == ".flac") {
-                    decoded = Common::AudioFile::DecodeFlac(data, size, pcm);
-                } else if (ext == ".mp3") {
-                    decoded = Common::AudioFile::DecodeMp3(data, size, pcm);
-                } else if (ext == ".aac") {
-                    decoded = Common::AudioFile::DecodeAdts(data, size, pcm);
-                } else {
-                    decoded = Common::AudioFile::DecodeMp4(data, size, pcm);
-                }
+            audio_stream_kind kind;
+            if (ext == ".flac") {
+                kind = AUDIO_STREAM_FLAC;
+            } else if (ext == ".mp3") {
+                kind = AUDIO_STREAM_MP3;
+            } else if (ext == ".aac") {
+                kind = AUDIO_STREAM_ADTS;
+            } else if (ext == ".m4a" || ext == ".mp4") {
+                kind = AUDIO_STREAM_MP4;
+            } else {
+                LOG_ERROR(Lib_AudioOut, "Not a format the music player decodes: {}",
+                          host_path.string());
+                break;
             }
-
-            if (!decoded) {
+            // Mapped, and decoded where it lies a block at a time as it is played: the track is
+            // never held decoded whole, and its samples reach the mix as floats.
+            const auto bytes = Common::FS::FileView::Map(host_path);
+            audio_stream_t* stream =
+                bytes ? audio_stream_open(bytes->data(), bytes->size(), kind) : nullptr;
+            if (!stream) {
                 LOG_ERROR(Lib_AudioOut, "Failed to decode audio file: {}", host_path.string());
                 break;
             }
-
-            const u64 total_frames = pcm.Frames();
-            u64 total_duration = total_frames * 1000 / pcm.hz;
+            const unsigned hz = audio_stream_rate(stream);
+            const unsigned channels = audio_stream_channels(stream);
+            const u64 total_frames = audio_stream_frames(stream);
+            u64 total_duration = total_frames * 1000 / hz;
             (void)retro_atomic_exchange_64(&m_total_duration_ms, total_duration);
 
             if (retro_atomic_load_seq_cst_int(&m_stop_requested) != 0) {
+                audio_stream_close(stream);
                 break;
             }
 
             // The track goes to the frontend through the core's mix, resampled to its 48 kHz
-            // straight from the decoded buffer into the input's ring.
-            if (pcm.channels > 2) {
-                LOG_ERROR(Lib_AudioOut, "Music with {} channels is not played", pcm.channels);
+            // straight from the window it is decoded into, into the input's ring.
+            if (channels > 2) {
+                LOG_ERROR(Lib_AudioOut, "Music with {} channels is not played", channels);
+                audio_stream_close(stream);
                 break;
             }
             audio_mix_input_t* input = audio_mix_input_open();
             if (!input) {
                 LOG_ERROR(Lib_AudioOut, "No input left in the core's mix for music");
+                audio_stream_close(stream);
                 break;
             }
             audio_mix_resampler_t resampler;
-            audio_mix_resampler_init(&resampler, static_cast<unsigned>(pcm.hz),
-                                     static_cast<unsigned>(pcm.channels));
-            const auto frame_at = [&](u64 ms) {
-                return std::min<u64>(ms * pcm.hz / 1000, total_frames) << 32;
+            audio_mix_resampler_init(&resampler, hz, channels);
+
+            // The window: frames [base, base + have) of the track, and the position in it
+            // (32.32). The resampler reads a few frames either side of the position, so a window
+            // is decoded on into only once nothing more can be written from it, and keeps the
+            // frames behind the position when it moves on.
+            float* const window = m_window.data();
+            u64 base = 0;
+            u64 have = 0;
+            u64 rel = 0;
+            bool eof = false;
+            const auto seek_to = [&](u64 ms) {
+                const u64 frame = std::min<u64>(ms * hz / 1000, total_frames);
+                const u64 start =
+                    frame > AUDIO_MIX_RESAMPLE_BEHIND ? frame - AUDIO_MIX_RESAMPLE_BEHIND : 0;
+                eof = !audio_stream_seek(stream, start);
+                base = start;
+                have = 0;
+                rel = (frame - start) << 32;
             };
-            u64 pos = start_time_ms > 0 && total_duration > 0 ? frame_at(start_time_ms) : 0;
+            const auto decode_on = [&] {
+                const u64 at = rel >> 32;
+                const u64 keep_from = std::min(
+                    have, at > AUDIO_MIX_RESAMPLE_BEHIND ? at - AUDIO_MIX_RESAMPLE_BEHIND : u64{0});
+                std::memmove(window, window + keep_from * channels,
+                             static_cast<size_t>(have - keep_from) * channels * sizeof(float));
+                have -= keep_from;
+                base += keep_from;
+                rel -= keep_from << 32;
+                const size_t want = static_cast<size_t>(WindowFrames - have);
+                const size_t got = audio_stream_read(stream, window + have * channels, want);
+                have += got;
+                eof = got < want;
+            };
+            if (start_time_ms > 0 && total_duration > 0) {
+                seek_to(start_time_ms);
+            }
 
             constexpr unsigned chunk_frames = 1024;
             while (retro_atomic_load_seq_cst_int(&m_stop_requested) == 0) {
                 s64 seek_target = static_cast<s64>(retro_atomic_exchange_64(&m_seek_offset_ms, -1));
                 if (seek_target >= 0) {
-                    pos = frame_at(static_cast<u64>(seek_target));
+                    seek_to(static_cast<u64>(seek_target));
                     (void)retro_atomic_exchange_64(&m_current_time_ms,
                                                    static_cast<u64>(seek_target));
                 }
@@ -516,7 +552,7 @@ private:
                     continue;
                 }
 
-                if ((pos >> 32) >= total_frames) {
+                if (eof && (rel >> 32) >= have) {
                     break;
                 }
                 // Bounded, so stop, pause and seek are seen while the frontend takes nothing.
@@ -527,24 +563,40 @@ private:
                 const float vol = (retro_atomic_load_seq_cst_int(&m_volume) / 25.0f) *
                                   (emu_settings_get_volume_slider() * 0.01f);
                 unsigned done = 0;
-                while (done < chunk_frames) {
+                bool ended = false;
+                while (done < chunk_frames && !ended) {
                     float* dst = nullptr;
                     const unsigned room = audio_mix_input_reserve(input, &dst, chunk_frames - done);
                     if (room == 0) {
                         break;
                     }
-                    const unsigned got = audio_mix_resample(&resampler, pcm.Data(), total_frames,
-                                                            &pos, dst, room, vol);
-                    audio_mix_input_commit(input, got);
-                    done += got;
-                    if (got < room) {
-                        break; // the track has ended
+                    unsigned wrote = 0;
+                    while (wrote < room) {
+                        // At the track's end the last frames are read with silence past them
+                        const unsigned ready =
+                            eof ? room - wrote
+                                : audio_mix_resample_ready(&resampler, rel, have, room - wrote);
+                        if (ready == 0) {
+                            decode_on();
+                            continue;
+                        }
+                        const unsigned got = audio_mix_resample_f32(&resampler, window, have, &rel,
+                                                                    dst + wrote * 2, ready, vol);
+                        wrote += got;
+                        if (got < ready) {
+                            ended = true; // the track has ended
+                            break;
+                        }
                     }
+                    audio_mix_input_commit(input, wrote);
+                    done += wrote;
                 }
-                (void)retro_atomic_exchange_64(&m_current_time_ms, (pos >> 32) * 1000 / pcm.hz);
+                (void)retro_atomic_exchange_64(&m_current_time_ms,
+                                               (base + (rel >> 32)) * 1000 / hz);
             }
 
             audio_mix_input_close(input);
+            audio_stream_close(stream);
 
             if (retro_atomic_load_seq_cst_int(&m_stop_requested) != 0) {
                 break;
@@ -609,6 +661,10 @@ private:
     retro_atomic_int_t m_stop_requested{0};
     retro_atomic_int_t m_pause_requested{0};
     retro_atomic_64_t m_seek_offset_ms{-1};
+    // The track decoded a block at a time, for the playback thread alone: made with the player,
+    // so playing allocates nothing for it
+    static constexpr u64 WindowFrames = 8192;
+    std::array<float, WindowFrames * 2> m_window{};
     std::thread m_worker_thread;
     Common::EventMutex m_event_mutex;
     Common::EventCondition m_event_cv;

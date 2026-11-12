@@ -79,6 +79,30 @@ ASAN_OPTIONS=detect_leaks=0 "$OUT/tiling_device_test"
 # libretro's analog values to the pad's bytes, rounded, a stick at rest centred
 $CC -std=c89 -O1 -g -Wall -Wno-unused-function -fsanitize=address,undefined \
     libretro/tests/pad_scale_test.c -o "$OUT/pad_scale_test"
+# The music player's block decoder, on a sine made by ffmpeg in each format it plays (an MP3
+# with its tag frame and one without); skipped with no ffmpeg
+$CC -std=c89 -D_POSIX_C_SOURCE=200809L -DHAVE_RAAC -O1 -g -Wall -fsanitize=address,undefined \
+    -Isrc -I$L/include libretro/tests/audio_stream_test.c src/common/audio_stream.c \
+    $L/formats/mp3/rmp3.c $L/formats/flac/rflac.c $L/formats/aac/raac.c \
+    $L/formats/mp4/rmp4_audio.c $L/formats/mp4/rmp4.c $L/features/features_cpu.c \
+    -o "$OUT/audio_stream_test" -lm
+if command -v ffmpeg >/dev/null 2>&1; then
+    sine="sine=frequency=440:duration=7"
+    ffmpeg -loglevel error -y -f lavfi -i "$sine:sample_rate=44100" -ac 2 -sample_fmt s32 \
+        -c:a flac "$OUT/sine.flac"
+    ffmpeg -loglevel error -y -f lavfi -i "$sine:sample_rate=44100" -ac 2 -c:a libmp3lame \
+        -b:a 192k "$OUT/sine.mp3"
+    ffmpeg -loglevel error -y -f lavfi -i "$sine:sample_rate=32000" -ac 1 -c:a libmp3lame \
+        -write_xing 0 "$OUT/sine_notag.mp3"
+    ffmpeg -loglevel error -y -f lavfi -i "$sine:sample_rate=48000" -ac 2 -c:a aac -b:a 160k \
+        -f adts "$OUT/sine.aac"
+    ffmpeg -loglevel error -y -f lavfi -i "$sine:sample_rate=48000" -ac 1 -c:a aac \
+        "$OUT/sine.m4a"
+    "$OUT/audio_stream_test" "$OUT/sine.flac" "$OUT/sine.mp3" "$OUT/sine_notag.mp3" \
+        "$OUT/sine.aac" "$OUT/sine.m4a"
+else
+    "$OUT/audio_stream_test"
+fi
 # Ten-bit frames read back, put in libretro's order for HDR10
 $CC -std=c89 -pedantic -O1 -g -Wall -fsanitize=address,undefined \
     libretro/tests/pixel_order_test.c -o "$OUT/pixel_order_test"

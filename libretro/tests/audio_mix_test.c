@@ -225,6 +225,78 @@ static void test_resample(void)
    }
 }
 
+/* A source decoded a block at a time into a small window, as the music player does
+ * (audio_mix_resample_ready, AUDIO_MIX_RESAMPLE_BEHIND): the output is the same, sample for
+ * sample, as resampling the whole source at once */
+#define WIN_SRC 20000
+#define WIN_FRAMES 1000
+static int window_matches(unsigned hz, unsigned ch, unsigned block)
+{
+   static float src[WIN_SRC * 2], window[WIN_FRAMES * 2];
+   static float whole[50000 * 2], part[50000 * 2];
+   audio_mix_resampler_t r;
+   uint64_t pos = 0, rel = 0, base = 0, have = 0, fed = 0;
+   unsigned i, n_whole, n_part = 0;
+   int eof = 0;
+   for (i = 0; i < WIN_SRC * ch; i++)
+      src[i] = 0.5f * (float)sin(i * 0.0137) + 0.01f * (float)((i * 2654435761u) >> 24) / 256.0f;
+   audio_mix_resampler_init(&r, hz, ch);
+   n_whole = audio_mix_resample_f32(&r, src, WIN_SRC, &pos, whole, 50000, 0.8f);
+   for (;;)
+   {
+      unsigned ready = eof ? 50000 - n_part
+                           : audio_mix_resample_ready(&r, rel, have, block);
+      unsigned got;
+      if (ready == 0)
+      {
+         /* decode on: the frames behind the position kept, the window filled */
+         uint64_t at   = rel >> 32;
+         uint64_t keep = at > AUDIO_MIX_RESAMPLE_BEHIND ? at - AUDIO_MIX_RESAMPLE_BEHIND : 0;
+         uint64_t want, take;
+         if (keep > have)
+            keep = have;
+         memmove(window, window + keep * ch, (size_t)(have - keep) * ch * sizeof(float));
+         have -= keep;
+         base += keep;
+         rel -= keep << 32;
+         want = WIN_FRAMES - have;
+         take = WIN_SRC - fed < want ? WIN_SRC - fed : want;
+         memcpy(window + have * ch, src + fed * ch, (size_t)take * ch * sizeof(float));
+         fed += take;
+         have += take;
+         eof = take < want;
+         continue;
+      }
+      got = audio_mix_resample_f32(&r, window, have, &rel, part + n_part * 2, ready, 0.8f);
+      n_part += got;
+      if (got < ready)
+         break;
+   }
+   (void)base;
+   if (n_part != n_whole)
+   {
+      printf("  %u Hz, %u channels: %u frames from the window, %u at once\n", hz, ch, n_part,
+             n_whole);
+      return 0;
+   }
+   for (i = 0; i < n_whole * 2; i++)
+      if (part[i] != whole[i])
+      {
+         printf("  %u Hz, %u channels: frame %u differs\n", hz, ch, i / 2);
+         return 0;
+      }
+   return 1;
+}
+
+static void test_resample_window(void)
+{
+   CHECK(window_matches(44100, 2, 1024), "a window, 44.1 kHz stereo");
+   CHECK(window_matches(48000, 2, 333), "a window, 48 kHz stereo");
+   CHECK(window_matches(22050, 1, 1024), "a window, 22.05 kHz mono");
+   CHECK(window_matches(96000, 2, 1024), "a window, 96 kHz (the cutoff lowered)");
+   CHECK(window_matches(32000, 1, 7), "a window, 32 kHz mono, small writes");
+}
+
 /* A producer writes a counting sequence in port-sized buffers, waiting for room; the main
  * thread mixes until all of it has arrived. */
 #define BUFFER_FRAMES 1024
@@ -295,6 +367,7 @@ int main(void)
    test_pool();
    test_clip();
    test_resample();
+   test_resample_window();
    test_stream();
    if (failures)
       return 1;

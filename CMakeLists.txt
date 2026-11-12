@@ -806,8 +806,8 @@ set(COMMON src/common/c_bridge.cpp
            src/common/alignment.h
            src/common/arch.h
            src/common/assert.cpp
-           src/common/audio_file.cpp
-           src/common/audio_file.h
+           src/common/audio_stream.c
+           src/common/audio_stream.h
            src/common/xml.cpp
            src/common/xml.h
            src/common/assert.h

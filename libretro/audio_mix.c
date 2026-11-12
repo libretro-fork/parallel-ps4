@@ -285,7 +285,10 @@ static unsigned resample(const audio_mix_resampler_t* r, const int16_t* s16, con
    for (n = 0; n < out_frames; n++)
    {
       uint64_t idx = p >> 32;
-      float frac   = (float)(p & 0xffffffffu) / 4294967296.0f;
+      /* The fraction's top 24 bits, which a float holds exactly: below 1 always. All 32
+       * rounded to a float could come to 1.0 (from 0xffffff80 up), and the phase past the
+       * table's last row. */
+      float frac   = (float)((uint32_t)(p & 0xffffffffu) >> 8) / 16777216.0f;
       float l      = 0.0f;
       float rr     = 0.0f;
       unsigned t;
@@ -346,6 +349,23 @@ unsigned audio_mix_resample_f32(const audio_mix_resampler_t* r, const float* src
                                 unsigned out_frames, float gain)
 {
    return resample(r, NULL, src, 32768.0f, src_frames, pos, out, out_frames, gain);
+}
+
+typedef char audio_mix_behind_is_sinc_half[AUDIO_MIX_RESAMPLE_BEHIND == SINC_HALF ? 1 : -1];
+
+unsigned audio_mix_resample_ready(const audio_mix_resampler_t* r, uint64_t pos,
+                                  uint64_t src_frames, unsigned out_frames)
+{
+   /* The last tap reads SINC_TAPS - 1 - SINC_HALF frames ahead of the position */
+   const uint64_t ahead = SINC_TAPS - 1 - SINC_HALF;
+   uint64_t limit, n;
+   if (src_frames <= ahead)
+      return 0;
+   limit = (src_frames - ahead) << 32; /* positions below this have every tap inside */
+   if (pos >= limit)
+      return 0;
+   n = (limit - pos + r->step - 1) / r->step;
+   return n < out_frames ? (unsigned)n : out_frames;
 }
 
 /* The console's fold of 7.1 to stereo: front at full level, centre and both surround pairs at

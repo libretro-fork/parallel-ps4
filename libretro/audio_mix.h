@@ -89,6 +89,15 @@ unsigned audio_mix_resample_f32(const audio_mix_resampler_t* r, const float* src
                                 uint64_t src_frames, uint64_t* pos, float* out,
                                 unsigned out_frames, float gain);
 
+/* For a source decoded a block at a time into a window of @src_frames: how many frames can
+ * be written from *@pos (32.32) with every tap inside the window, at most @out_frames. A
+ * frame of a window that is not the source's end must not be read past it as silence.
+ * AUDIO_MIX_RESAMPLE_BEHIND frames before the position are read too, and must be kept when
+ * the window moves on. */
+#define AUDIO_MIX_RESAMPLE_BEHIND 7
+unsigned audio_mix_resample_ready(const audio_mix_resampler_t* r, uint64_t pos,
+                                  uint64_t src_frames, unsigned out_frames);
+
 /* Conversion of what a source has into the input's format, with a gain applied
  * (1.0 = unchanged). @channels is 1, 2 or 8; eight are folded to stereo the way the console
  * does for stereo output. */
