@@ -130,7 +130,7 @@ bool TextureCache::DumpImagePixels(ImageId image_id, u32 seq) {
     if (bpp == 0 || bpp > 16 || width == 0 || height == 0) {
         return false;
     }
-    const u32 step = (std::max(width, height) + 255) / 256;
+    const u32 step = (std::max(width, height) + 127) / 128;
     char path[4096];
     if (!frame_notes_image_path(path, sizeof(path), seq,
                                 static_cast<unsigned long>(info.guest_address >> 32),

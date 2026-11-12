@@ -400,8 +400,14 @@ Frame* Presenter::PrepareFrame(const Libraries::VideoOut::BufferAttributeGroup& 
     // With Dump Shaders on, what is recorded for the GPU during a frame is written out
     // every so many frames, next to the shaders
     if (emu_settings_get_dump_shaders()) {
-        static const std::string dir =
-            (Common::FS::GetUserPath(Common::FS::PathType::ShaderDir) / "dumps").string();
+        // In a folder of their own, so that they can be sent without the shaders
+        static const std::string dir = [] {
+            const auto path = Common::FS::GetUserPath(Common::FS::PathType::ShaderDir) / "frames";
+            if (!Common::FS::Exists(path)) {
+                Common::FS::CreateDirectories(path);
+            }
+            return path.string();
+        }();
         frame_notes_flip(dir.c_str());
     }
 
