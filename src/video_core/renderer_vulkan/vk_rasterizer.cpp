@@ -11,6 +11,7 @@
 #include "video_core/amdgpu/sample_locs.h"
 #include "video_core/buffer_cache/buffer.h"
 #include "video_core/buffer_cache/buffer_cache.h"
+#include "video_core/renderer_vulkan/frame_notes.h"
 #include "video_core/renderer_vulkan/liverpool_to_vk.h"
 #include "video_core/renderer_vulkan/vk_device_fault.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
@@ -57,6 +58,10 @@ Rasterizer::Rasterizer(const Instance& instance_, Scheduler& scheduler_, Runtime
 }
 
 Rasterizer::~Rasterizer() = default;
+
+/// While a frame's notes are being written out: the images the draw or dispatch being set up
+/// reads as textures, whose pixels are read back once it is recorded
+static Common::StaticVector<u32, 64> capture_textures;
 
 /// The 32 bits of a register
 template <typename T>
@@ -330,6 +335,9 @@ void Rasterizer::Draw(bool is_indexed, u32 index_offset) {
     DebugState.IncDrawCall();
 
     ResetBindings(false);
+    if (!capture_textures.empty()) [[unlikely]] {
+        DumpCapturedTextures();
+    }
 }
 
 void Rasterizer::DrawIndirect(bool is_indexed, VAddr arg_address, u32 offset, u32 stride,
@@ -414,6 +422,9 @@ void Rasterizer::DrawIndirect(bool is_indexed, VAddr arg_address, u32 offset, u3
     }
 
     ResetBindings(false);
+    if (!capture_textures.empty()) [[unlikely]] {
+        DumpCapturedTextures();
+    }
 }
 
 void Rasterizer::DispatchDirect() {
@@ -450,6 +461,9 @@ void Rasterizer::DispatchDirect() {
     DebugState.IncDispatch();
 
     ResetBindings(true);
+    if (!capture_textures.empty()) [[unlikely]] {
+        DumpCapturedTextures();
+    }
 }
 
 void Rasterizer::DispatchIndirect(VAddr address, u32 offset, u32 size) {
@@ -485,6 +499,9 @@ void Rasterizer::DispatchIndirect(VAddr address, u32 offset, u32 size) {
     DebugState.IncDispatch();
 
     ResetBindings(true);
+    if (!capture_textures.empty()) [[unlikely]] {
+        DumpCapturedTextures();
+    }
 }
 
 u64 Rasterizer::Flush() {
@@ -775,6 +792,35 @@ void Rasterizer::BindIndexBuffer(u32 index_offset, bool is_indirect) {
     } else {
         cmdbuf.bindIndexBuffer(index_buffer, buffer_offset, index_type);
     }
+}
+
+void Rasterizer::DumpCapturedTextures() {
+    // Each image once in a frame, as it is when a shader first reads it
+    static std::array<u32, 512> seen;
+    static u32 num_seen;
+    static unsigned long frame;
+    const unsigned long now = frame_notes_frame();
+    if (now != frame) {
+        frame = now;
+        num_seen = 0;
+    }
+    for (const u32 index : capture_textures) {
+        if (now == 0 || num_seen == seen.size() ||
+            std::find(seen.begin(), seen.begin() + num_seen, index) != seen.begin() + num_seen) {
+            continue;
+        }
+        seen[num_seen] = index;
+        const VideoCore::ImageId image_id{index};
+        if (texture_cache.DumpImagePixels(image_id, num_seen)) {
+            const auto& image = texture_cache.GetImage(image_id);
+            instance.Note("pixels written: image at, number in the file's name, format, "
+                          "w|h<<16",
+                          image.info.guest_address, num_seen, u64(image.info.pixel_format),
+                          u64(image.HostSize().width) | u64(image.HostSize().height) << 16);
+        }
+        ++num_seen;
+    }
+    capture_textures.clear();
 }
 
 void Rasterizer::ResetBindings(bool is_compute) {
@@ -1110,6 +1156,10 @@ void Rasterizer::BindTextures(const Shader::Info& stage, Shader::Backend::Bindin
                 image->binding.force_general |= image_desc.is_written;
             }
             image->binding.is_bound = 1u;
+            if (vk_device_fault_sinking() &&
+                capture_textures.size() < capture_textures.capacity()) {
+                capture_textures.push_back(image_id.index);
+            }
             instance.Note("texture: asked at, format|samples<<16|type<<20|storage<<24|levels<<28|"
                           "w<<32|h<<48, bound image at, format|samples<<16|backing samples<<20|is "
                           "the depth buffer of its stencil<<24|flags<<32",

@@ -6,6 +6,7 @@
 #include <encodings/xxh3.h>
 
 #include <retro_atomic.h>
+#include <streams/file_stream.h>
 #include "common/assert.h"
 #include "common/div_ceil.h"
 #include "common/hash.h"
@@ -13,6 +14,7 @@
 #include "core/memory.h"
 #include "video_core/buffer_cache/buffer_cache.h"
 #include "video_core/page_manager.h"
+#include "video_core/renderer_vulkan/frame_notes.h"
 #include "video_core/renderer_vulkan/liverpool_to_vk.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_runtime.h"
@@ -111,6 +113,66 @@ void TextureCache::ProcessDownloadImages() {
         }
         u64_map_clear(&download_images);
     });
+}
+
+bool TextureCache::DumpImagePixels(ImageId image_id, u32 seq) {
+    Image& image = slot_images[image_id];
+    const auto& info = image.info;
+    if (!image.backing || info.num_samples != 1 || info.props.is_block || info.props.is_volume ||
+        False(image.flags & ImageFlagBits::GpuModified)) {
+        return false;
+    }
+    const bool is_depth = info.props.is_depth;
+    const u32 bpp =
+        is_depth ? (info.pixel_format == vk::Format::eD16Unorm ? 2 : 4) : info.num_bits / 8;
+    const u32 width = image.HostSize().width;
+    const u32 height = image.HostSize().height;
+    if (bpp == 0 || bpp > 16 || width == 0 || height == 0) {
+        return false;
+    }
+    const u32 step = (std::max(width, height) + 255) / 256;
+    char path[4096];
+    if (!frame_notes_image_path(path, sizeof(path), seq,
+                                static_cast<unsigned long>(info.guest_address >> 32),
+                                static_cast<unsigned long>(info.guest_address & 0xffffffffu),
+                                static_cast<unsigned>(info.pixel_format), width, height, step)) {
+        return false;
+    }
+    // Room to spare: a depth and stencil format counts more bytes for a texel than are copied
+    const auto download = runtime.GetStagingPool().Request(
+        u64(width) * height * (is_depth ? 8 : bpp), MemoryType::HostCached, 16);
+    vk::BufferImageCopy copy{
+        .bufferOffset = download.offset,
+        .imageSubresource{
+            .aspectMask =
+                is_depth ? vk::ImageAspectFlagBits::eDepth : vk::ImageAspectFlagBits::eColor,
+            .mipLevel = 0,
+            .baseArrayLayer = 0,
+            .layerCount = 1,
+        },
+        .imageOffset = {0, 0, 0},
+        .imageExtent = {width, height, 1},
+    };
+    runtime.DownloadImage(&image, download.buffer, std::span{&copy, 1});
+    scheduler.Finish();
+    download.Invalidate();
+
+    RFILE* const file =
+        filestream_open(path, RETRO_VFS_FILE_ACCESS_WRITE, RETRO_VFS_FILE_ACCESS_HINT_NONE);
+    if (!file) {
+        return false;
+    }
+    std::array<u8, 256 * 16> row;
+    for (u32 y = 0; y < height; y += step) {
+        u32 used = 0;
+        for (u32 x = 0; x < width; x += step) {
+            std::memcpy(row.data() + used, download.mapped + (u64(y) * width + x) * bpp, bpp);
+            used += bpp;
+        }
+        filestream_write(file, row.data(), used);
+    }
+    filestream_close(file);
+    return true;
 }
 
 void TextureCache::DownloadImageMemory(ImageId image_id, DownloadMemoryFlags flags) {

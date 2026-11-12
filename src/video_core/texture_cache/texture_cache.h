@@ -135,6 +135,10 @@ public:
     /// Schedules a copy of pending images for download back to CPU memory.
     void ProcessDownloadImages();
 
+    /// A diagnostic, for a frame being written out (frame_notes.h): the image's pixels as
+    /// the GPU has them now, thinned, into a file of their own. Waits for the GPU.
+    bool DumpImagePixels(ImageId image_id, u32 seq);
+
     /// Retrieves the image handle of the image with the provided attributes.
     [[nodiscard]] ImageId FindImage(ImageDesc& desc, bool exact_fmt = false);
 
