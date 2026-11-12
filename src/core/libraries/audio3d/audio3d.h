@@ -238,12 +238,13 @@ struct Port {
     OrbisAudio3dObjectId next_object_id{0};
     // Bed audio queue
     FixedQueue<AudioData> bed_queue;
-    // Mixed stereo frames ready to be consumed by sceAudio3dPortPush.
+    // Mixed frames ready to be consumed by sceAudio3dPortPush: stereo, or 7.1 with surround
     FixedQueue<AudioData> mixed_queue;
-    // The blocks queued sound is kept in: a bed's, up to 8 channels, and the rest (objects'
-    // mono sound and the stereo mix), made when the port opens
+    // The blocks queued sound is kept in, made when the port opens: a bed's, up to 8
+    // channels, objects' mono sound, and the mix's
     BlockPool bed_pool;
     BlockPool sample_pool;
+    BlockPool mix_pool;
 };
 
 struct Audio3dState {

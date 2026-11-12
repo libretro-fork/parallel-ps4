@@ -14,16 +14,22 @@
 #include "core/libraries/audio3d/audio3d_error.h"
 #include "core/libraries/error_codes.h"
 #include "core/libraries/libs.h"
+#include "libretro/audio_mix.h"
 
 namespace Libraries::Audio3d {
 
 static constexpr u32 AUDIO3D_SAMPLE_RATE = 48000;
 
 // The port the mix is played through, which the game never sees: float, so that the mix
-// reaches the core's own mix whole and is rounded to 16 bits once, there.
-static constexpr AudioOut::OrbisAudioOutParamFormat AUDIO3D_OUTPUT_FORMAT =
-    AudioOut::OrbisAudioOutParamFormat::FloatStereo;
-static constexpr u32 AUDIO3D_OUTPUT_NUM_CHANNELS = 2;
+// reaches the core's own mix whole. 7.1 where the core's mix is surround (the frontend takes
+// it): a bed of 6 or 8 channels then goes through unfolded. Stereo otherwise.
+static u32 OutputChannels() {
+    return audio_mix_channels() == 8 ? 8 : 2;
+}
+static AudioOut::OrbisAudioOutParamFormat OutputFormat() {
+    return OutputChannels() == 8 ? AudioOut::OrbisAudioOutParamFormat::Float_8CH
+                                 : AudioOut::OrbisAudioOutParamFormat::FloatStereo;
+}
 
 static constexpr float DOWNMIX_FRONT = 1.0f;
 static constexpr float DOWNMIX_CENTER = 0.7071f;
@@ -604,12 +610,12 @@ s32 PS4_SYSV_ABI sceAudio3dObjectUnreserve(const OrbisAudio3dPortId port_id,
 
 static u32 ProcessMixQueue(Port& port) {
     const u32 granularity = port.parameters.granularity;
-    const u32 out_samples = granularity * AUDIO3D_OUTPUT_NUM_CHANNELS;
+    const u32 out_channels = OutputChannels();
+    const u32 out_samples = granularity * out_channels;
 
     // ---- FLOAT MIX BUFFER ----
-    u8* const mix_block = out_samples * sizeof(float) <= port.sample_pool.BlockBytes()
-                              ? port.sample_pool.Take()
-                              : nullptr;
+    u8* const mix_block =
+        out_samples * sizeof(float) <= port.mix_pool.BlockBytes() ? port.mix_pool.Take() : nullptr;
     if (!mix_block)
         return ORBIS_AUDIO3D_ERROR_OUT_OF_MEMORY;
     float* mix_float = reinterpret_cast<float*>(mix_block);
@@ -632,6 +638,32 @@ static u32 ProcessMixQueue(Port& port) {
 
         const u32 frames = std::min(granularity, data.num_samples);
         const u32 channels = data.num_channels;
+
+        // 7.1 out: each channel to its own place, as the console's order has them (front
+        // pair, centre, LFE, then the surround pairs; a 5.1 bed's surround pair is the first),
+        // mono to the front pair as in stereo
+        if (out_channels == 8) {
+            const bool is_s16 = data.format == OrbisAudio3dFormat::ORBIS_AUDIO3D_FORMAT_S16;
+            const s16* src16 = reinterpret_cast<const s16*>(data.sample_buffer);
+            const float* srcf = reinterpret_cast<const float*>(data.sample_buffer);
+            const auto sample = [&](const u32 i, const u32 c) {
+                return is_s16 ? src16[i * channels + c] / 32768.0f : srcf[i * channels + c];
+            };
+            for (u32 i = 0; i < frames; i++) {
+                float* out = mix_float + i * 8;
+                if (channels == 1) {
+                    const float v = sample(i, 0) * gain;
+                    out[0] += v;
+                    out[1] += v;
+                } else {
+                    for (u32 c = 0; c < std::min(channels, 8u); c++) {
+                        out[c] += sample(i, c) * gain;
+                    }
+                }
+            }
+            Release(data);
+            return;
+        }
 
         if (data.format == OrbisAudio3dFormat::ORBIS_AUDIO3D_FORMAT_S16) {
             const s16* src = reinterpret_cast<const s16*>(data.sample_buffer);
@@ -738,9 +770,9 @@ static u32 ProcessMixQueue(Port& port) {
     // Handed on as it is: no second buffer, and no cut to 16 bits here (it was cut towards
     // zero, at a scale of 32767 where the rest of the sound path uses 32768)
     port.mixed_queue.push_back(AudioData{.sample_buffer = mix_block,
-                                         .pool = &port.sample_pool,
+                                         .pool = &port.mix_pool,
                                          .num_samples = granularity,
-                                         .num_channels = AUDIO3D_OUTPUT_NUM_CHANNELS,
+                                         .num_channels = out_channels,
                                          .format = OrbisAudio3dFormat::ORBIS_AUDIO3D_FORMAT_FLOAT});
 
     std::erase_if(port.objects, [](const auto& kv) {
@@ -880,7 +912,7 @@ s32 PS4_SYSV_ABI sceAudio3dPortFlush(const OrbisAudio3dPortId port_id) {
 
     if (port.audio_out_handle < 0) {
         AudioOut::OrbisAudioOutParamExtendedInformation ext_info{};
-        ext_info.data_format.Assign(AUDIO3D_OUTPUT_FORMAT);
+        ext_info.data_format.Assign(OutputFormat());
         port.audio_out_handle =
             AudioOut::sceAudioOutOpen(0xFF, AudioOut::OrbisAudioOutPort::Audio3d, 0,
                                       port.parameters.granularity, AUDIO3D_SAMPLE_RATE, ext_info);
@@ -1139,8 +1171,8 @@ s32 PS4_SYSV_ABI sceAudio3dPortOpen(const Libraries::UserService::OrbisUserServi
         port.bed_queue.Init(depth);
         port.mixed_queue.Init(depth);
         port.bed_pool.Init(granularity * 8 * sizeof(float), depth);
-        port.sample_pool.Init(granularity * AUDIO3D_OUTPUT_NUM_CHANNELS * sizeof(float),
-                              depth * effective.max_objects + depth + 4);
+        port.sample_pool.Init(granularity * sizeof(float), depth * effective.max_objects + 4);
+        port.mix_pool.Init(granularity * OutputChannels() * sizeof(float), depth + 4);
 
         *port_id = id;
 
@@ -1175,7 +1207,7 @@ s32 PS4_SYSV_ABI sceAudio3dPortPush(const OrbisAudio3dPortId port_id,
 
     if (port.audio_out_handle < 0) {
         AudioOut::OrbisAudioOutParamExtendedInformation ext_info{};
-        ext_info.data_format.Assign(AUDIO3D_OUTPUT_FORMAT);
+        ext_info.data_format.Assign(OutputFormat());
 
         port.audio_out_handle =
             AudioOut::sceAudioOutOpen(0xFF, AudioOut::OrbisAudioOutPort::Audio3d, 0,
