@@ -249,8 +249,8 @@ void BlitHelper::CopyBetweenMsImages(u32 width, u32 height, u32 num_samples,
 
 void BlitHelper::CopyDepthToColor(u32 width, u32 height, u32 dst_samples, vk::Format src_format,
                                   vk::Format dst_format, bool src_msaa, bool stencil, bool uint_out,
-                                  u32 sample, vk::Image source, u32 src_layer, vk::Image dest,
-                                  u32 dst_layer) {
+                                  vk::ColorComponentFlags write_mask, u32 sample, vk::Image source,
+                                  u32 src_layer, vk::Image dest, u32 dst_layer) {
     const vk::ImageViewUsageCreateInfo src_usage_ci{.usage = vk::ImageUsageFlagBits::eSampled};
     const vk::ImageViewCreateInfo src_view_ci = {
         .pNext = &src_usage_ci,
@@ -319,7 +319,8 @@ void BlitHelper::CopyDepthToColor(u32 width, u32 height, u32 dst_samples, vk::Fo
     cmdbuf.pushDescriptorSetKHR(vk::PipelineBindPoint::eGraphics, *single_texture_pl_layout, 0U,
                                 texture_write);
 
-    const DepthToColorKey key{dst_samples, dst_format, sample, src_msaa, stencil, uint_out};
+    const DepthToColorKey key{dst_samples, dst_format, sample,  static_cast<u32>(write_mask),
+                              src_msaa,    stencil,    uint_out};
     auto it = std::ranges::find(depth_to_color_pl, key,
                                 &std::pair<DepthToColorKey, vk::UniquePipeline>::first);
     if (it == depth_to_color_pl.end()) {
@@ -583,8 +584,7 @@ void BlitHelper::CreateDepthToColorPipeline(const DepthToColorKey& key) {
 
     const vk::PipelineColorBlendAttachmentState attachment = {
         .blendEnable = false,
-        .colorWriteMask = vk::ColorComponentFlagBits::eR | vk::ColorComponentFlagBits::eG |
-                          vk::ColorComponentFlagBits::eB | vk::ColorComponentFlagBits::eA,
+        .colorWriteMask = vk::ColorComponentFlags{key.write_mask},
     };
 
     const vk::PipelineColorBlendStateCreateInfo color_blending = {

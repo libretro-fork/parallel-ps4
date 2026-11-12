@@ -665,14 +665,15 @@ void Runtime::CopyDepthStencil(VideoCore::Image* src, VideoCore::Image* dst,
 }
 
 void Runtime::CopyDepthToColor(VideoCore::Image* src, VideoCore::Image* dst, bool stencil,
-                               bool uint_out, u32 sample, u32 src_layer, u32 dst_layer) {
+                               bool uint_out, vk::ColorComponentFlags write_mask, u32 sample,
+                               u32 src_layer, u32 dst_layer) {
     const auto plane =
         stencil ? vk::ImageAspectFlagBits::eStencil : vk::ImageAspectFlagBits::eDepth;
     if (!(src->aspect_mask & plane) || !(dst->aspect_mask & vk::ImageAspectFlagBits::eColor)) {
         return;
     }
-    // All of the target is written, so what its other backing held is not carried over
-    SetBackingSamples(dst, dst->info.num_samples, false);
+    // Channels outside the mask keep what they hold
+    SetBackingSamples(dst, dst->info.num_samples);
     scheduler.EndRendering();
 
     bool needs_flush =
@@ -697,8 +698,8 @@ void Runtime::CopyDepthToColor(VideoCore::Image* src, VideoCore::Image* dst, boo
                   u64(width) | u64(height) << 16);
     blit_helper->CopyDepthToColor(width, height, dst->backing->num_samples, src->info.pixel_format,
                                   dst->info.pixel_format, src_samples > 1, stencil, uint_out,
-                                  std::min(sample, src_samples - 1), src->GetImage(), src_layer,
-                                  dst->GetImage(), dst_layer);
+                                  write_mask, std::min(sample, src_samples - 1), src->GetImage(),
+                                  src_layer, dst->GetImage(), dst_layer);
 
     dst->flags |= VideoCore::ImageFlagBits::GpuModified;
     dst->flags &= ~VideoCore::ImageFlagBits::Dirty;

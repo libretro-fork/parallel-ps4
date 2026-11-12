@@ -34,8 +34,8 @@ public:
     /// One plane of a depth buffer, from one of its samples, into a colour image
     void CopyDepthToColor(u32 width, u32 height, u32 dst_samples, vk::Format src_format,
                           vk::Format dst_format, bool src_msaa, bool stencil, bool uint_out,
-                          u32 sample, vk::Image source, u32 src_layer, vk::Image dest,
-                          u32 dst_layer);
+                          vk::ColorComponentFlags write_mask, u32 sample, vk::Image source,
+                          u32 src_layer, vk::Image dest, u32 dst_layer);
 
 private:
     void CreateShaders();
@@ -52,6 +52,7 @@ private:
         u32 dst_samples;
         vk::Format attachment_format;
         u32 sample;
+        u32 write_mask;
         bool src_msaa;
         bool stencil;
         bool uint_out;

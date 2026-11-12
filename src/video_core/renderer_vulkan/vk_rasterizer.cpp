@@ -154,16 +154,23 @@ bool Rasterizer::FilterDraw() {
     }
 
     const auto& db_control = regs.depth_render_control;
-    if ((db_control.depth_copy || db_control.stencil_copy) && regs.color_buffers[0]) {
+    if ((db_control.depth_copy || db_control.stencil_copy) && regs.color_buffers[0] &&
+        regs.depth_buffer.NumSamples() > 1) {
         // The depth block writes what it reads to the first colour target in place of the
-        // pixel shader's colour: how a game turns a depth buffer, or one sample of it, into
-        // a texture it can read. An integer target takes stencil, any other depth.
-        const bool to_integer = AmdGpu::IsInteger(regs.color_buffers[0].GetNumberFmt());
-        const bool is_stencil = db_control.stencil_copy && (to_integer || !db_control.depth_copy);
-        if (is_stencil ? regs.depth_buffer.StencilValid() : regs.depth_buffer.DepthValid()) {
-            DepthToColor(is_stencil, db_control.copy_sample);
-            return false;
+        // pixel shader's colour: how a game turns one sample of a multisampled depth buffer
+        // into a texture it can read. Depth is the colour's red and stencil its green, and
+        // the target's write mask says which of the two the game is after; nothing but the
+        // channels in the mask is written. A depth buffer of one sample is left as it was
+        // before this was known (the draw runs with its own shader): Sekiro on a base PS4
+        // lost its picture with the copy done there, for a reason not yet found.
+        const u32 mask = regs.color_target_mask.GetMask(0);
+        const bool want_depth = db_control.depth_copy && (mask & 1);
+        const bool want_stencil = db_control.stencil_copy && (mask & 2);
+        if (want_depth ? regs.depth_buffer.DepthValid()
+                       : want_stencil && regs.depth_buffer.StencilValid()) {
+            DepthToColor(!want_depth, db_control.copy_sample);
         }
+        return false;
     }
 
     const bool cb_disabled =
@@ -1478,8 +1485,11 @@ void Rasterizer::DepthToColor(bool is_stencil, u32 sample) {
     ScopeMarkerBegin(fmt::format("DepthToColor:D={:#x}:C={:#x}:stencil={}:sample={}",
                                  depth_image.info.guest_address, color_image.info.guest_address,
                                  is_stencil, sample));
+    // The channels of the image the game's mask stands for
+    const auto write_mask =
+        vk::ColorComponentFlags{col_buf.Swizzle().ApplyMask(regs.color_target_mask.GetMask(0))};
     runtime.CopyDepthToColor(&depth_image, &color_image, is_stencil,
-                             AmdGpu::IsInteger(col_buf.GetNumberFmt()), sample,
+                             AmdGpu::IsInteger(col_buf.GetNumberFmt()), write_mask, sample,
                              regs.depth_view.slice_start, color_view.info.range.base.layer);
     ScopeMarkerEnd();
 }

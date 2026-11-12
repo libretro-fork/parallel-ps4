@@ -73,7 +73,8 @@ public:
 
     /// One plane of a depth buffer, from one of its samples, into a colour image
     void CopyDepthToColor(VideoCore::Image* src, VideoCore::Image* dst, bool stencil, bool uint_out,
-                          u32 sample, u32 src_layer, u32 dst_layer);
+                          vk::ColorComponentFlags write_mask, u32 sample, u32 src_layer,
+                          u32 dst_layer);
 
     void SetBackingSamples(VideoCore::Image* image, u32 num_samples, bool copy_backing = true);
 

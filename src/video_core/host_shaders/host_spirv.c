@@ -701,10 +701,11 @@ size_t host_spirv_depth_to_color_frag(uint32_t* out, size_t cap, int msaa, int s
                     k_f32(m, 1.0f / 255.0f));
     else if (!stencil && uint_out)
         value = op1(m, SpvOpBitcast, m->t_u32, value);
+    /* In every component: the target's write mask picks where it goes */
     parts[0] = value;
-    parts[1] = uint_out ? k_u32(m, 0) : k_f32(m, 0.0f);
-    parts[2] = parts[1];
-    parts[3] = parts[1];
+    parts[1] = value;
+    parts[2] = value;
+    parts[3] = value;
     store(m, out_color, opn(m, SpvOpCompositeConstruct, out_t, 4, parts));
     spv_mode(m, SpvExecutionModeOriginUpperLeft, 0, NULL);
     return spv_end(m, SpvExecutionModelFragment, out, cap);
