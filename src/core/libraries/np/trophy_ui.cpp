@@ -1,18 +1,21 @@
 // SPDX-FileCopyrightText: Copyright 2025-2026 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include <algorithm>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <mutex>
+#include <type_traits>
+#include <vector>
 #include <fmt/format.h>
+#include <formats/rmp3.h>
 #include <imgui.h>
 #include <imgui/imgui_std.h>
 #include <queue>
 
 #define MINIMP3_IMPLEMENTATION
 
-#include "common/audio_file.h"
 #include "common/combiner.h"
 #include "common/embedded_resources.h"
 #include "common/io_file.h"
@@ -29,8 +32,8 @@ namespace Libraries::Np::NpTrophy {
 
 std::optional<TrophyUI> current_trophy_ui;
 
-// The trophy sound, as the core's mix plays it: 16-bit stereo at 48 kHz, made once when the
-// emulator starts and borrowed by the mix each time a trophy is unlocked.
+// The trophy sound, as the core's mix plays it: stereo at 48 kHz in the mix's format, made once
+// when the emulator starts and borrowed by the mix each time a trophy is unlocked.
 static std::vector<float> trophy_sound;
 
 // 16-bit PCM in a RIFF/WAVE file, 1 or 2 channels: where its samples are, read in place.
@@ -67,14 +70,52 @@ static bool ParseWav(const u8* data, size_t size, const s16** samples, u64* fram
     return false;
 }
 
-static void ResampleTrophySound(const s16* samples, u64 frames, u32 channels, u32 hz) {
+// A 16-bit file (a WAV) or a decoder's float output, resampled into the sound once
+template <typename Sample>
+static void ResampleTrophySound(const Sample* samples, u64 frames, u32 channels, u32 hz) {
     audio_mix_resampler_t r;
     audio_mix_resampler_init(&r, hz, channels);
     trophy_sound.resize(static_cast<size_t>(((frames * 48000) / hz + 1) * 2));
     u64 pos = 0;
-    const unsigned out = audio_mix_resample(&r, samples, frames, &pos, trophy_sound.data(),
-                                            static_cast<unsigned>(trophy_sound.size() / 2), 1.0f);
+    const unsigned room = static_cast<unsigned>(trophy_sound.size() / 2);
+    unsigned out;
+    if constexpr (std::is_same_v<Sample, float>) {
+        out = audio_mix_resample_f32(&r, samples, frames, &pos, trophy_sound.data(), room, 1.0f);
+    } else {
+        out = audio_mix_resample(&r, samples, frames, &pos, trophy_sound.data(), room, 1.0f);
+    }
     trophy_sound.resize(static_cast<size_t>(out) * 2);
+}
+
+// An MP3 decoded to float, as rmp3 makes it, so that the sound is rounded to 16 bits once, in
+// the mix, and not first here as well
+static bool DecodeMp3F32(const u8* data, size_t size, std::vector<float>& pcm, u32* channels,
+                         u32* hz) {
+    rmp3 mp3;
+    if (!rmp3_init_memory(&mp3, data, size)) {
+        return false;
+    }
+    *channels = mp3.channels;
+    *hz = mp3.sampleRate;
+    bool ok = (*channels == 1 || *channels == 2) && *hz > 0;
+    if (ok) {
+        // Short: the length at 128 kbit/s, grown while the stream goes on
+        u64 room = mp3.totalFrames ? mp3.totalFrames + 1
+                                   : std::max<u64>(static_cast<u64>(size) * *hz / 16000, 4096);
+        u64 frames = 0;
+        for (;;) {
+            pcm.resize(static_cast<size_t>(room * *channels));
+            frames += rmp3_read_f32(&mp3, room - frames, pcm.data() + frames * *channels);
+            if (frames < room) {
+                break;
+            }
+            room *= 2;
+        }
+        pcm.resize(static_cast<size_t>(frames * *channels));
+        ok = frames > 0;
+    }
+    rmp3_uninit(&mp3);
+    return ok;
 }
 
 void PreloadTrophySound() {
@@ -84,10 +125,11 @@ void PreloadTrophySound() {
     const auto wav_path = dir / "trophy.wav";
     if (Common::FS::Exists(mp3_path)) {
         const auto bytes = Common::FS::FileView::Map(mp3_path);
-        Common::AudioFile::Pcm pcm;
-        if (bytes && Common::AudioFile::DecodeMp3(bytes->data(), bytes->size(), pcm) &&
-            (pcm.channels == 1 || pcm.channels == 2)) {
-            ResampleTrophySound(pcm.Data(), pcm.Frames(), pcm.channels, pcm.hz);
+        std::vector<float> pcm;
+        u32 channels = 0;
+        u32 hz = 0;
+        if (bytes && DecodeMp3F32(bytes->data(), bytes->size(), pcm, &channels, &hz)) {
+            ResampleTrophySound(pcm.data(), pcm.size() / channels, channels, hz);
         } else {
             LOG_ERROR(Lib_NpTrophy, "Could not decode the custom trophy sound {}",
                       fmt::UTF(mp3_path.u8string()));

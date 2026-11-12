@@ -272,14 +272,16 @@ void audio_mix_resampler_init(audio_mix_resampler_t* r, unsigned src_hz, unsigne
    r->channels = channels == 1 ? 1 : 2;
 }
 
-unsigned audio_mix_resample(const audio_mix_resampler_t* r, const int16_t* src,
-                            uint64_t src_frames, uint64_t* pos, float* out,
-                            unsigned out_frames, float gain)
+/* The source is 16-bit (@s16) or float in -1..1 (@f32, scaled to 16-bit steps by @scale) */
+static unsigned resample(const audio_mix_resampler_t* r, const int16_t* s16, const float* f32,
+                         float scale, uint64_t src_frames, uint64_t* pos, float* out,
+                         unsigned out_frames, float gain)
 {
    unsigned n;
    unsigned ch   = r->channels;
    uint64_t p    = *pos;
    float row[SINC_TAPS];
+   gain *= scale;
    for (n = 0; n < out_frames; n++)
    {
       uint64_t idx = p >> 32;
@@ -308,19 +310,21 @@ unsigned audio_mix_resample(const audio_mix_resampler_t* r, const int16_t* src,
       for (t = 0; t < SINC_TAPS; t++)
       {
          int64_t at = (int64_t)idx + (int)t - SINC_HALF;
+         float a, b;
          if (at < 0 || (uint64_t)at >= src_frames)
             continue;
          if (ch == 1)
          {
-            float v = src[at] * row[t];
-            l += v;
-            rr += v;
+            a = s16 ? s16[at] : f32[at];
+            b = a;
          }
          else
          {
-            l += src[at * 2 + 0] * row[t];
-            rr += src[at * 2 + 1] * row[t];
+            a = s16 ? s16[at * 2 + 0] : f32[at * 2 + 0];
+            b = s16 ? s16[at * 2 + 1] : f32[at * 2 + 1];
          }
+         l += a * row[t];
+         rr += b * row[t];
       }
       out[n * 2 + 0] = l * gain;
       out[n * 2 + 1] = rr * gain;
@@ -328,6 +332,20 @@ unsigned audio_mix_resample(const audio_mix_resampler_t* r, const int16_t* src,
    }
    *pos = p;
    return n;
+}
+
+unsigned audio_mix_resample(const audio_mix_resampler_t* r, const int16_t* src,
+                            uint64_t src_frames, uint64_t* pos, float* out,
+                            unsigned out_frames, float gain)
+{
+   return resample(r, src, NULL, 1.0f, src_frames, pos, out, out_frames, gain);
+}
+
+unsigned audio_mix_resample_f32(const audio_mix_resampler_t* r, const float* src,
+                                uint64_t src_frames, uint64_t* pos, float* out,
+                                unsigned out_frames, float gain)
+{
+   return resample(r, NULL, src, 32768.0f, src_frames, pos, out, out_frames, gain);
 }
 
 /* The console's fold of 7.1 to stereo: front at full level, centre and both surround pairs at

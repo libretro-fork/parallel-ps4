@@ -208,6 +208,21 @@ static void test_resample(void)
       if (out[i * 2] < 4995 || out[i * 2] > 5005 || out[i * 2 + 1] != out[i * 2])
          dc = 0;
    CHECK(n == 2000 && dc, "96 kHz mono halves, level and gain kept");
+
+   {
+      /* From float: scaled to 16-bit steps, and not rounded on the way */
+      static float fsrc[2000 * 2];
+      for (i = 0; i < 2000 * 2; i++)
+         fsrc[i] = (float)(i & 1 ? -0.25 : 0.25) + 0.3f / 32768.0f;
+      audio_mix_resampler_init(&r, 48000, 2);
+      pos   = 0;
+      n     = audio_mix_resample_f32(&r, fsrc, 2000, &pos, out, 5000, 1.0f);
+      exact = 1;
+      for (i = 0; i < n * 2; i++)
+         if (!near(out[i], (i & 1 ? -8192.0f : 8192.0f) + 0.3f))
+            exact = 0;
+      CHECK(n == 2000 && exact, "float source scaled, its fraction of a step kept");
+   }
 }
 
 /* A producer writes a counting sequence in port-sized buffers, waiting for room; the main

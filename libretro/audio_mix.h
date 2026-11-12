@@ -84,6 +84,10 @@ void audio_mix_resampler_init(audio_mix_resampler_t* r, unsigned src_hz, unsigne
 unsigned audio_mix_resample(const audio_mix_resampler_t* r, const int16_t* src,
                             uint64_t src_frames, uint64_t* pos, float* out,
                             unsigned out_frames, float gain);
+/* The same from a float source, -1..1: a decoder's own output, not rounded to 16 bits first */
+unsigned audio_mix_resample_f32(const audio_mix_resampler_t* r, const float* src,
+                                uint64_t src_frames, uint64_t* pos, float* out,
+                                unsigned out_frames, float gain);
 
 /* Conversion of what a source has into the input's format, with a gain applied
  * (1.0 = unchanged). @channels is 1, 2 or 8; eight are folded to stereo the way the console
