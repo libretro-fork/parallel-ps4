@@ -19,8 +19,10 @@ namespace Libraries::Audio3d {
 
 static constexpr u32 AUDIO3D_SAMPLE_RATE = 48000;
 
+// The port the mix is played through, which the game never sees: float, so that the mix
+// reaches the core's own mix whole and is rounded to 16 bits once, there.
 static constexpr AudioOut::OrbisAudioOutParamFormat AUDIO3D_OUTPUT_FORMAT =
-    AudioOut::OrbisAudioOutParamFormat::S16Stereo;
+    AudioOut::OrbisAudioOutParamFormat::FloatStereo;
 static constexpr u32 AUDIO3D_OUTPUT_NUM_CHANNELS = 2;
 
 static constexpr float DOWNMIX_FRONT = 1.0f;
@@ -704,24 +706,12 @@ static u32 ProcessMixQueue(Port& port) {
         mix_in(obj.pcm_queue, gain);
     }
 
-    s16* mix_s16 = static_cast<s16*>(std::malloc(out_samples * sizeof(s16)));
-
-    if (!mix_s16) {
-        std::free(mix_float);
-        return ORBIS_AUDIO3D_ERROR_OUT_OF_MEMORY;
-    }
-
-    for (u32 i = 0; i < out_samples; i++) {
-        float v = std::clamp(mix_float[i], -1.0f, 1.0f);
-        mix_s16[i] = static_cast<s16>(v * 32767.0f);
-    }
-
-    std::free(mix_float);
-
-    port.mixed_queue.push_back(AudioData{.sample_buffer = reinterpret_cast<u8*>(mix_s16),
+    // Handed on as it is: no second buffer, and no cut to 16 bits here (it was cut towards
+    // zero, at a scale of 32767 where the rest of the sound path uses 32768)
+    port.mixed_queue.push_back(AudioData{.sample_buffer = reinterpret_cast<u8*>(mix_float),
                                          .num_samples = granularity,
                                          .num_channels = AUDIO3D_OUTPUT_NUM_CHANNELS,
-                                         .format = OrbisAudio3dFormat::ORBIS_AUDIO3D_FORMAT_S16});
+                                         .format = OrbisAudio3dFormat::ORBIS_AUDIO3D_FORMAT_FLOAT});
 
     std::erase_if(port.objects, [](const auto& kv) {
         return kv.second.unreserved && kv.second.pcm_queue.empty();

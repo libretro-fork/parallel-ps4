@@ -9,7 +9,10 @@
 
 #include "audio_mix.h"
 
-#define FRAME_BYTES 4
+/* A frame in an input: two floats. A source's sound stays at full precision until the mix is
+ * made, and is rounded to 16 bits once, there: not once by each source and again after the
+ * sum, and never cut towards zero. */
+#define FRAME_BYTES 8
 
 /* An input's life: free in the pool, open to its source, or closed by its source and not yet
  * emptied by the mixing thread. Only the source moves FREE to OPEN (by CAS, sources open from
@@ -42,7 +45,7 @@ static retro_atomic_int_t clip_gain_milli;
 static retro_atomic_int_t clip_serial;
 /* The mixing thread's own: the clip it plays and how far it is. */
 static int clip_seen;
-static const int16_t* clip_play;
+static const float* clip_play;
 static unsigned clip_left;
 static float clip_play_gain;
 
@@ -54,7 +57,7 @@ static float clip_play_gain;
 static float sinc_table[SINC_PHASES + 1][SINC_TAPS];
 /* The mixing thread's sums: one chunk of stereo frames. */
 #define PUMP_FRAMES 1024
-static int32_t pump_sum[PUMP_FRAMES * 2];
+static float pump_sum[PUMP_FRAMES * 2];
 
 static double sinc_kernel(double x, double cutoff)
 {
@@ -126,12 +129,12 @@ int audio_mix_input_wait(audio_mix_input_t* in, unsigned frames, int64_t timeout
    return retro_waitable_spsc_wait_writable(&in->ring, want, timeout_us) ? 1 : 0;
 }
 
-unsigned audio_mix_input_reserve(audio_mix_input_t* in, int16_t** ptr, unsigned frames)
+unsigned audio_mix_input_reserve(audio_mix_input_t* in, float** ptr, unsigned frames)
 {
    void* span   = NULL;
    size_t bytes = retro_spsc_write_begin(&in->ring.queue, &span);
    unsigned got = (unsigned)(bytes / FRAME_BYTES);
-   *ptr         = (int16_t*)span;
+   *ptr         = (float*)span;
    return got < frames ? got : frames;
 }
 
@@ -158,8 +161,8 @@ static unsigned pump_add(struct audio_mix_input* in, unsigned frames)
       const void* span = NULL;
       size_t bytes     = retro_spsc_read_begin(&in->ring.queue, &span);
       unsigned got     = (unsigned)(bytes / FRAME_BYTES);
-      const int16_t* s = (const int16_t*)span;
-      int32_t* sum     = pump_sum + done * 2;
+      const float* s   = (const float*)span;
+      float* sum       = pump_sum + done * 2;
       unsigned i;
       if (got == 0)
          break;
@@ -175,7 +178,7 @@ static unsigned pump_add(struct audio_mix_input* in, unsigned frames)
    return done;
 }
 
-void audio_mix_play_clip(const int16_t* frames, unsigned count, float gain)
+void audio_mix_play_clip(const float* frames, unsigned count, float gain)
 {
    retro_atomic_store_relaxed_size(&clip_frames, (size_t)frames);
    retro_atomic_store_relaxed_int(&clip_count, (int)count);
@@ -193,7 +196,7 @@ static unsigned pump_clip(unsigned frames)
    int serial = retro_atomic_load_acquire_int(&clip_serial);
    if (serial != clip_seen)
    {
-      const int16_t* f = (const int16_t*)retro_atomic_load_relaxed_size(&clip_frames);
+      const float* f   = (const float*)retro_atomic_load_relaxed_size(&clip_frames);
       unsigned count   = (unsigned)retro_atomic_load_relaxed_int(&clip_count);
       float gain       = retro_atomic_load_relaxed_int(&clip_gain_milli) / 1000.0f;
       if (retro_atomic_load_acquire_int(&clip_serial) == serial)
@@ -208,10 +211,22 @@ static unsigned pump_clip(unsigned frames)
    if (!n) /* no clip: there is no pointer to step */
       return 0;
    for (i = 0; i < n * 2; i++)
-      pump_sum[i] += (int32_t)(clip_play[i] * clip_play_gain);
+      pump_sum[i] += clip_play[i] * clip_play_gain;
    clip_play += n * 2;
    clip_left -= n;
    return n;
+}
+
+/* The one rounding to 16 bits: to the nearest step, halves away from zero, and clamped.
+ * Not cut towards zero, which makes the step around silence twice as wide as the others and
+ * pulls every sample a little towards zero (distortion that is loudest in quiet passages). */
+static int16_t round_s16(float v)
+{
+   if (v >= 32766.5f)
+      return 32767;
+   if (v <= -32767.5f)
+      return -32768;
+   return (int16_t)(v < 0.0f ? v - 0.5f : v + 0.5f);
 }
 
 unsigned audio_mix_pump(int16_t* ring, uint32_t ring_mask, uint32_t at, unsigned frames)
@@ -243,22 +258,11 @@ unsigned audio_mix_pump(int16_t* ring, uint32_t ring_mask, uint32_t at, unsigned
 
    for (i = 0; i < most; i++)
    {
-      uint32_t pos = ((at + i) & ring_mask) * 2;
-      int32_t l    = pump_sum[i * 2 + 0];
-      int32_t r    = pump_sum[i * 2 + 1];
-      ring[pos + 0] = (int16_t)(l < -32768 ? -32768 : (l > 32767 ? 32767 : l));
-      ring[pos + 1] = (int16_t)(r < -32768 ? -32768 : (r > 32767 ? 32767 : r));
+      uint32_t pos  = ((at + i) & ring_mask) * 2;
+      ring[pos + 0] = round_s16(pump_sum[i * 2 + 0]);
+      ring[pos + 1] = round_s16(pump_sum[i * 2 + 1]);
    }
    return most;
-}
-
-static int16_t clamp_s16(float v)
-{
-   if (v > 32767.0f)
-      return 32767;
-   if (v < -32768.0f)
-      return -32768;
-   return (int16_t)v;
 }
 
 void audio_mix_resampler_init(audio_mix_resampler_t* r, unsigned src_hz, unsigned channels)
@@ -269,7 +273,7 @@ void audio_mix_resampler_init(audio_mix_resampler_t* r, unsigned src_hz, unsigne
 }
 
 unsigned audio_mix_resample(const audio_mix_resampler_t* r, const int16_t* src,
-                            uint64_t src_frames, uint64_t* pos, int16_t* out,
+                            uint64_t src_frames, uint64_t* pos, float* out,
                             unsigned out_frames, float gain)
 {
    unsigned n;
@@ -318,8 +322,8 @@ unsigned audio_mix_resample(const audio_mix_resampler_t* r, const int16_t* src,
             rr += src[at * 2 + 1] * row[t];
          }
       }
-      out[n * 2 + 0] = clamp_s16(l * gain);
-      out[n * 2 + 1] = clamp_s16(rr * gain);
+      out[n * 2 + 0] = l * gain;
+      out[n * 2 + 1] = rr * gain;
       p += r->step;
    }
    *pos = p;
@@ -332,7 +336,7 @@ unsigned audio_mix_resample(const audio_mix_resampler_t* r, const int16_t* src,
 #define FOLD_CENTER 0.7071f
 #define FOLD_SURROUND 0.7071f
 
-void audio_mix_convert_s16(int16_t* dst, const int16_t* src, unsigned frames, unsigned channels,
+void audio_mix_convert_s16(float* dst, const int16_t* src, unsigned frames, unsigned channels,
                            float gain)
 {
    unsigned i;
@@ -340,18 +344,15 @@ void audio_mix_convert_s16(int16_t* dst, const int16_t* src, unsigned frames, un
    {
       for (i = 0; i < frames; i++)
       {
-         int16_t v      = clamp_s16(src[i] * gain);
+         float v        = src[i] * gain;
          dst[i * 2 + 0] = v;
          dst[i * 2 + 1] = v;
       }
    }
    else if (channels == 2)
    {
-      if (gain == 1.0f)
-         memcpy(dst, src, (size_t)frames * FRAME_BYTES);
-      else
-         for (i = 0; i < frames * 2; i++)
-            dst[i] = clamp_s16(src[i] * gain);
+      for (i = 0; i < frames * 2; i++)
+         dst[i] = src[i] * gain;
    }
    else
    {
@@ -359,13 +360,15 @@ void audio_mix_convert_s16(int16_t* dst, const int16_t* src, unsigned frames, un
       {
          const int16_t* s = src + i * 8;
          float c          = FOLD_CENTER * s[2];
-         dst[i * 2 + 0] = clamp_s16((s[0] + c + FOLD_SURROUND * (s[4] + s[6])) * gain);
-         dst[i * 2 + 1] = clamp_s16((s[1] + c + FOLD_SURROUND * (s[5] + s[7])) * gain);
+         dst[i * 2 + 0]   = (s[0] + c + FOLD_SURROUND * (s[4] + s[6])) * gain;
+         dst[i * 2 + 1]   = (s[1] + c + FOLD_SURROUND * (s[5] + s[7])) * gain;
       }
    }
 }
 
-void audio_mix_convert_f32(int16_t* dst, const float* src, unsigned frames, unsigned channels,
+/* Float sound is -1..1; the mix counts in 16-bit steps, so it is scaled by 32768, the inverse
+ * of how a 16-bit sample is read as float. */
+void audio_mix_convert_f32(float* dst, const float* src, unsigned frames, unsigned channels,
                            float gain)
 {
    unsigned i;
@@ -374,7 +377,7 @@ void audio_mix_convert_f32(int16_t* dst, const float* src, unsigned frames, unsi
    {
       for (i = 0; i < frames; i++)
       {
-         int16_t v      = clamp_s16(src[i] * g);
+         float v        = src[i] * g;
          dst[i * 2 + 0] = v;
          dst[i * 2 + 1] = v;
       }
@@ -382,7 +385,7 @@ void audio_mix_convert_f32(int16_t* dst, const float* src, unsigned frames, unsi
    else if (channels == 2)
    {
       for (i = 0; i < frames * 2; i++)
-         dst[i] = clamp_s16(src[i] * g);
+         dst[i] = src[i] * g;
    }
    else
    {
@@ -390,8 +393,8 @@ void audio_mix_convert_f32(int16_t* dst, const float* src, unsigned frames, unsi
       {
          const float* s = src + i * 8;
          float c        = FOLD_CENTER * s[2];
-         dst[i * 2 + 0] = clamp_s16((s[0] + c + FOLD_SURROUND * (s[4] + s[6])) * g);
-         dst[i * 2 + 1] = clamp_s16((s[1] + c + FOLD_SURROUND * (s[5] + s[7])) * g);
+         dst[i * 2 + 0] = (s[0] + c + FOLD_SURROUND * (s[4] + s[6])) * g;
+         dst[i * 2 + 1] = (s[1] + c + FOLD_SURROUND * (s[5] + s[7])) * g;
       }
    }
 }

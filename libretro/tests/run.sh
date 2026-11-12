@@ -76,6 +76,10 @@ $CC -std=c89 -O1 -g -Wall -fsanitize=address,undefined -isystem externals/vulkan
     libretro/tests/tiling_device_test.c src/video_core/host_shaders/host_spirv.c \
     -o "$OUT/tiling_device_test" -ldl
 ASAN_OPTIONS=detect_leaks=0 "$OUT/tiling_device_test"
+# libretro's analog values to the pad's bytes, rounded, a stick at rest centred
+$CC -std=c89 -O1 -g -Wall -Wno-unused-function -fsanitize=address,undefined \
+    libretro/tests/pad_scale_test.c -o "$OUT/pad_scale_test"
+"$OUT/pad_scale_test"
 # The game's sample position registers as positions
 $CC -std=c89 -O1 -g -Wall -fsanitize=address,undefined -Isrc -I$L/include \
     libretro/tests/sample_locs_test.c src/video_core/amdgpu/sample_locs.c -o "$OUT/sample_locs_test"

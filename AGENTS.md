@@ -184,6 +184,24 @@ Not there yet, in the core's own glue. These are debts, not precedent:
 - **Rendering design:** zero-copy, no CPU-GPU round trips, the smallest exact formats, buffers and caches sized from the driver's real VRAM budget and never paged, no CPU waits on the GPU except true readbacks (rings and polled fences instead), tile-GPU friendly passes (load/store don't-care where the content is dead, no needless clears, no mid-pass readback), fewer state changes and draws. Measure stutter as max and 99th percentile frame time with GPU timestamps, not averages.
 - **A game's progress is the measure.** A faster `retro_run` that presents an old frame again, skips guest work or slows the game's time is not faster. Count new pictures and the game's progress alongside frame times.
 
+## Quantization
+
+Look for it in every change, in audio, video, textures, input and any conversion: precision lost by the core's own handling, not by the console's. What the console itself does to the guest's data (a texture format's bits, the library output a game reads back) is emulation and is matched exactly; everything the core adds on the way to the frontend loses nothing it does not have to.
+
+- **Round, never cut.** A float or wider value made narrower is rounded to the nearest step (halves away from zero, or to even) and clamped. A plain cast or an integer divide cuts towards zero or down: the step around zero gets twice as wide, everything leans one way, and a centred value lands off centre (a stick at rest read as 127 instead of 128).
+- **Quantize once, at the end.** Keep full precision (float, or integers with headroom) through every stage and narrow once, where the format is fixed: the frontend's 16-bit audio, its 8-bit picture. A source rounded on its own and again after it is mixed, a level applied to already narrowed samples, a picture taken to 8 bits and filtered again, each adds an error the last step cannot take back.
+- **One scale per format.** A 16-bit sample read as float is divided by 32768 and written back multiplied by 32768. Two scales on one path (32767 one way, 32768 the other) are a level change and a lopsided clip.
+- **Never narrower than the source.** A game that renders or outputs 10 bits, or a float sound, keeps that depth up to the frontend where the frontend can take it; a fallback to a narrower format is a fallback, said so in a comment.
+- **Wider integers from narrower ones by repeating the bits** (`x * 0x101`, `(x << 3) | (x >> 2)`), not by shifting alone: a shift alone never reaches full scale.
+- **Dither is a decision**, made where a narrowing is audible or visible (gradients, quiet audio) and said so; it is not left to chance and not added to digital silence.
+- **Tests show the rounding:** a value just over and just under half a step, both signs, the two ends, and a sum of two sources that each would round to nothing.
+
+Not there yet. These are debts, not precedent:
+
+1. A game's 10-bit output (`A2R10G10B10` and its sRGB and PQ forms) is drawn into an 8-bit frame (`vk_swapchain.cpp` makes every frame `B8G8R8A8Unorm`) and handed to the frontend at 8 bits; the GPU-frame path could hand a 10-bit image and narrow only on the readback path, which is `XRGB8888` by libretro's definition.
+2. `ngs2_core.c` writes a game's 16-bit output buffers at a scale of 32767, cut towards zero. That output is read by the game, so what Sony's library does there decides it, and it is not known.
+3. Music and the trophy sound are decoded to 16 bits before they are resampled; the decoders can give float.
+
 ## Testing
 
 - The emulator runs the game's code on an x86-64 CPU. On ARM (aarch64) the core is the emulator built for ARM with FEXCore inside it running the game's x86-64 code (the older box64 core can still be built); a change can be tried there, but say which build it was tried on.

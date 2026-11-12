@@ -2,10 +2,11 @@
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
 /* The core's audio mix (libretro/audio_mix.c), tested on its own: conversion and folding,
- * two sources summed and clamped, a source with fewer frames adding silence, ring wrap, a
+ * one rounding to 16 bits (to the nearest step, after the sum), two sources summed and clamped, a source with fewer frames adding silence, ring wrap, a
  * closed input going back to the pool, and a producer thread waiting for room while the
  * mixing thread takes frames, every sample arriving in order. */
 
+#include <math.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -34,14 +35,29 @@ static void write_frames(audio_mix_input_t* in, const int16_t* stereo, unsigned 
    unsigned done = 0;
    while (done < frames)
    {
-      int16_t* dst = NULL;
+      float* dst   = NULL;
       unsigned got = audio_mix_input_reserve(in, &dst, frames - done);
       if (got == 0)
          break;
-      memcpy(dst, stereo + done * 2, got * 4);
+      audio_mix_convert_s16(dst, stereo + done * 2, got, 2, 1.0f);
       audio_mix_input_commit(in, got);
       done += got;
    }
+}
+
+static void write_float(audio_mix_input_t* in, const float* stereo, unsigned frames)
+{
+   float* dst = NULL;
+   if (audio_mix_input_reserve(in, &dst, frames) == frames)
+   {
+      memcpy(dst, stereo, frames * 2 * sizeof(float));
+      audio_mix_input_commit(in, frames);
+   }
+}
+
+static int near(float a, float b)
+{
+   return fabsf(a - b) < 0.01f;
 }
 
 static void test_convert(void)
@@ -49,21 +65,54 @@ static void test_convert(void)
    int16_t src8[8] = {1000, 2000, 100, 9999, 10, 20, 30, 40};
    float f2[4]     = {0.5f, -0.5f, 2.0f, -2.0f};
    int16_t mono[2] = {123, -32768};
-   int16_t out[8];
+   float out[8];
 
    audio_mix_convert_s16(out, mono, 2, 1, 1.0f);
-   CHECK(out[0] == 123 && out[1] == 123 && out[2] == -32768 && out[3] == -32768, "mono s16");
+   CHECK(out[0] == 123.0f && out[1] == 123.0f && out[2] == -32768.0f && out[3] == -32768.0f,
+         "mono s16");
 
    audio_mix_convert_s16(out, src8, 1, 8, 1.0f);
    /* L = 1000 + 0.7071*100 + 0.7071*(10+30); R = 2000 + 70.71 + 0.7071*(20+40) */
-   CHECK(out[0] == 1098 && out[1] == 2113, "7.1 fold s16");
+   CHECK(near(out[0], 1098.994f) && near(out[1], 2113.136f), "7.1 fold s16, kept whole");
 
    audio_mix_convert_f32(out, f2, 2, 2, 1.0f);
-   CHECK(out[0] == 16384 && out[1] == -16384, "stereo f32");
-   CHECK(out[2] == 32767 && out[3] == -32768, "f32 clamp");
+   CHECK(out[0] == 16384.0f && out[1] == -16384.0f, "stereo f32");
+   CHECK(out[2] == 65536.0f && out[3] == -65536.0f, "f32 not clamped before the mix");
 
    audio_mix_convert_s16(out, mono, 1, 1, 0.5f);
-   CHECK(out[0] == 61, "gain");
+   CHECK(out[0] == 61.5f, "gain, kept whole");
+}
+
+/* What the sum is rounded to: the nearest step, halves away from zero, clamped. Cutting
+ * towards zero instead would make 0.6 and -0.6 silence, and rounding each source before the
+ * sum would make two sources of 0.6 silence too. */
+static void test_rounding(void)
+{
+   static const float a[10] = {0.4f, -0.4f, 0.6f, -0.6f, 1.5f, -1.5f, 32766.6f, -32768.4f,
+                               99999.0f, -99999.0f};
+   static const float half[2] = {0.6f, 0.6f};
+   audio_mix_input_t* ia = audio_mix_input_open();
+   audio_mix_input_t* ib = audio_mix_input_open();
+   unsigned n;
+   CHECK(ia && ib, "open two");
+
+   write_float(ia, a, 5);
+   n = audio_mix_pump(ring, RING_FRAMES - 1, 0, 1024);
+   CHECK(n == 5, "five frames");
+   CHECK(ring[0] == 0 && ring[1] == 0, "under half a step is silence");
+   CHECK(ring[2] == 1 && ring[3] == -1, "over half a step is a step, either sign");
+   CHECK(ring[4] == 2 && ring[5] == -2, "halves away from zero");
+   CHECK(ring[6] == 32767 && ring[7] == -32768, "the ends");
+   CHECK(ring[8] == 32767 && ring[9] == -32768, "clamped");
+
+   write_float(ia, half, 1);
+   write_float(ib, half, 1);
+   n = audio_mix_pump(ring, RING_FRAMES - 1, 0, 1024);
+   CHECK(n == 1 && ring[0] == 1 && ring[1] == 1, "rounded once, after the sum");
+
+   audio_mix_input_close(ia);
+   audio_mix_input_close(ib);
+   audio_mix_pump(ring, RING_FRAMES - 1, 0, 1024);
 }
 
 static void test_sum_and_close(void)
@@ -108,7 +157,7 @@ static void test_pool(void)
 
 static void test_clip(void)
 {
-   static const int16_t clip[6] = {100, -100, 200, -200, 300, -300};
+   static const float clip[6] = {100, -100, 200, -200, 300, -300};
    unsigned n;
    audio_mix_play_clip(clip, 3, 2.0f);
    n = audio_mix_pump(ring, RING_FRAMES - 1, 0, 2);
@@ -122,7 +171,7 @@ static void test_clip(void)
 static void test_resample(void)
 {
    static int16_t src[2000 * 2];
-   static int16_t out[5000 * 2];
+   static float out[5000 * 2];
    audio_mix_resampler_t r;
    uint64_t pos;
    unsigned i, n;
@@ -137,7 +186,7 @@ static void test_resample(void)
    pos = 0;
    n   = audio_mix_resample(&r, src, 2000, &pos, out, 5000, 1.0f);
    for (i = 0; i < n * 2; i++)
-      if (out[i] != src[i])
+      if (!near(out[i], src[i]))
          exact = 0;
    CHECK(n == 2000 && exact, "48 kHz passes through unchanged");
 
@@ -226,6 +275,7 @@ int main(void)
       return 1;
    }
    test_convert();
+   test_rounding();
    test_sum_and_close();
    test_pool();
    test_clip();

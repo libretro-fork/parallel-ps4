@@ -528,7 +528,7 @@ private:
                                   (emu_settings_get_volume_slider() * 0.01f);
                 unsigned done = 0;
                 while (done < chunk_frames) {
-                    s16* dst = nullptr;
+                    float* dst = nullptr;
                     const unsigned room = audio_mix_input_reserve(input, &dst, chunk_frames - done);
                     if (room == 0) {
                         break;

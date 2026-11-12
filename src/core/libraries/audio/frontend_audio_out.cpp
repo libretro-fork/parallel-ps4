@@ -25,7 +25,7 @@ constexpr u64 VOLUME_CHECK_INTERVAL_US = 50000;
 constexpr s64 FRONTEND_WAIT_US = 250000;
 
 // The libretro core plays a port by handing it to the frontend: what the game writes is
-// converted to 16-bit stereo, with the port's volume, straight into its input of the core's
+// converted to stereo, with the port's volume, straight into its input of the core's
 // mix (libretro/audio_mix.h). The port is paced by what the frontend takes, as a device would
 // pace it: it waits while more than about 32 ms of its sound is still queued.
 class FrontendPortBackend final : public PortBackend {
@@ -67,7 +67,7 @@ public:
         const u8* src = static_cast<const u8*>(ptr);
         u32 done = 0;
         while (done < buffer_frames) {
-            s16* dst = nullptr;
+            float* dst = nullptr;
             const u32 got = audio_mix_input_reserve(input, &dst, buffer_frames - done);
             if (got == 0) {
                 break;

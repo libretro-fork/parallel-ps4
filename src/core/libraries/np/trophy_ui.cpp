@@ -31,7 +31,7 @@ std::optional<TrophyUI> current_trophy_ui;
 
 // The trophy sound, as the core's mix plays it: 16-bit stereo at 48 kHz, made once when the
 // emulator starts and borrowed by the mix each time a trophy is unlocked.
-static std::vector<s16> trophy_sound;
+static std::vector<float> trophy_sound;
 
 // 16-bit PCM in a RIFF/WAVE file, 1 or 2 channels: where its samples are, read in place.
 static bool ParseWav(const u8* data, size_t size, const s16** samples, u64* frames, u32* channels,

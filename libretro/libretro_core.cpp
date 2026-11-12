@@ -47,6 +47,7 @@
 #include "common/io_file.h"
 #include "common/scm_rev.h"
 #include "core/libraries/pad/pad.h"
+#include "pad_scale.h"
 #include "libretro.h"
 #include "gpu_frames.h"
 #include "libretro_core_options.h"
@@ -982,10 +983,9 @@ void SendInput() {
         }
         put(shared->buttons[pad], held);
 
-        // libretro's -0x8000..0x7fff to the pad's 0..255.
+        // libretro's -0x8000..0x7fff to the pad's 0..255, rest at its centre (pad_scale.h)
         const auto stick = [pad](unsigned index, unsigned id) -> uint32_t {
-            const int raw = input_state_cb(pad, RETRO_DEVICE_ANALOG, index, id);
-            return static_cast<uint32_t>(std::clamp((raw + 0x8000) * 255 / 0xffff, 0, 255));
+            return pad_scale_stick(input_state_cb(pad, RETRO_DEVICE_ANALOG, index, id));
         };
         auto& axes = shared->axes[pad];
         put(axes[Libretro::SHARED_AXIS_LEFT_X],
@@ -1004,7 +1004,7 @@ void SendInput() {
             if (raw == 0 && input_state_cb(pad, RETRO_DEVICE_JOYPAD, 0, id)) {
                 raw = 0x7fff;
             }
-            return static_cast<uint32_t>(std::clamp(raw * 255 / 0x7fff, 0, 255));
+            return pad_scale_trigger(raw);
         };
         put(axes[Libretro::SHARED_AXIS_TRIGGER_LEFT], trigger(RETRO_DEVICE_ID_JOYPAD_L2));
         put(axes[Libretro::SHARED_AXIS_TRIGGER_RIGHT], trigger(RETRO_DEVICE_ID_JOYPAD_R2));
