@@ -59,6 +59,9 @@
  * round trip to move almost nothing; see the drain loop in
  * net_http_update(). */
 #define NET_HTTP_MIN_RECV_WINDOW    (32 * 1024)
+/* A chunk this long is handed to a spans sink where it was received,
+ * not slid down over the chunk header before it */
+#define NET_HTTP_SPAN_MIN           (16 * 1024)
 
 /* The receive buffer never grows past a maximal body plus one window.
  * Content-Length was already capped, but a close-delimited or chunked
@@ -258,7 +261,13 @@ typedef struct request
 struct http_t
 {
    net_http_sink_t sink;
+   net_http_sink_spans_t sink_spans;
    void *sink_data;
+   /* A chunked body held for a spans sink: the decoded runs, as
+    * offsets into response.data, in order */
+   size_t span_off[NET_HTTP_SINK_SPANS_MAX];
+   size_t span_len[NET_HTTP_SINK_SPANS_MAX];
+   unsigned span_count;
    /* The transport stage that failed (a literal such as
     * "ssl_connect_failed") and the library code that went with it,
     * for net_http_failure().  NULL/0 until something fails. */
@@ -326,6 +335,7 @@ struct http_connection_t
    char *auth;
    size_t contentlength; /* ptr alignment */
    net_http_sink_t sink;
+   net_http_sink_spans_t sink_spans;
    void *sink_data;
    net_http_source_t source;
    net_http_source_rewind_t source_rewind;
@@ -1009,8 +1019,19 @@ void net_http_connection_set_sink(struct http_connection_t *conn,
 {
    if (!conn)
       return;
-   conn->sink      = cb;
-   conn->sink_data = userdata;
+   conn->sink       = cb;
+   conn->sink_spans = NULL;
+   conn->sink_data  = userdata;
+}
+
+void net_http_connection_set_sink_spans(struct http_connection_t *conn,
+      net_http_sink_spans_t cb, void *userdata)
+{
+   if (!conn)
+      return;
+   conn->sink       = NULL;
+   conn->sink_spans = cb;
+   conn->sink_data  = userdata;
 }
 
 void net_http_connection_set_content(
@@ -1481,6 +1502,7 @@ struct http_t *net_http_new(struct http_connection_t *conn)
 
    state->response.status  = -1;
    state->sink                  = conn->sink;
+   state->sink_spans            = conn->sink_spans;
    state->sink_data             = conn->sink_data;
    state->response.owns_data    = true;
    state->response.owns_headers = true;
@@ -2241,7 +2263,18 @@ static bool net_http_list_has(const char *v, const char *tok, size_t toklen)
  * receive buffer is drained after every read. */
 static bool net_http_body_streams(const struct http_t *state)
 {
-   return state->sink || state->response.discard;
+   return state->sink || state->sink_spans || state->response.discard;
+}
+
+/* A streamed body stays in the receive buffer, where it was read (or
+ * de-chunked), until the window left behind it would fall below the
+ * floor: the sink then gets it in one piece of
+ * 32 KB or more instead of one piece per read, which over TLS or a
+ * slow link is a few hundred bytes to one record at a time.  Nothing
+ * is copied to hold it, and the buffer never grows for it. */
+static bool net_http_sink_due(const struct response *response)
+{
+   return response->buflen - response->pos < NET_HTTP_MIN_RECV_WINDOW;
 }
 
 static ssize_t net_http_receive_header(struct http_t *state, ssize_t len)
@@ -2521,8 +2554,9 @@ static ssize_t net_http_receive_header(struct http_t *state, ssize_t len)
 
    if (response->part >= P_BODY)
    {
-      len           = response->pos;
-      response->pos = 0;
+      len               = response->pos;
+      response->pos     = 0;
+      state->span_count = 0;
       /* With a sink the body never accumulates, so sizing the buffer
        * to Content-Length would allocate the very thing streaming
        * exists to avoid -- up to NET_HTTP_MAX_CONTENT_LENGTH of it,
@@ -2579,9 +2613,86 @@ static ssize_t net_http_receive_header(struct http_t *state, ssize_t len)
  *
  * A sink refusing the write (full disk, I/O error) aborts the
  * transfer the same way a transport failure would. */
+/* Spans are kept for a chunked body going to a spans sink */
+static bool net_http_spans_kept(const struct http_t *state)
+{
+   return      state->sink_spans
+          && !state->response.discard
+          &&  state->response.bodytype == T_CHUNK;
+}
+
+/* Records @len decoded bytes at offset @off of the receive buffer.
+ * They extend the last run when they follow it; a new run needs a
+ * free slot, which net_http_span_room() checked. */
+static bool net_http_span_add(struct http_t *state, size_t off, size_t len)
+{
+   unsigned n = state->span_count;
+   if (!len)
+      return true;
+   if (n && state->span_off[n - 1] + state->span_len[n - 1] == off)
+   {
+      state->span_len[n - 1] += len;
+      return true;
+   }
+   if (n >= NET_HTTP_SINK_SPANS_MAX)
+   {
+      state->err = true;
+      return false;
+   }
+   state->span_off[n] = off;
+   state->span_len[n] = len;
+   state->span_count  = n + 1;
+   return true;
+}
+
+/* Whether a chunk at offset @off may stay where it lies: a free slot
+ * for a new run, or a run it would extend */
+static bool net_http_span_room(const struct http_t *state, size_t off)
+{
+   unsigned n = state->span_count;
+   return n < NET_HTTP_SINK_SPANS_MAX
+       || state->span_off[n - 1] + state->span_len[n - 1] == off;
+}
+
 static bool net_http_sink_flush(struct http_t *state, size_t n)
 {
    struct response *response = (struct response*)&state->response;
+
+   if (state->sink_spans && !response->discard)
+   {
+      struct net_http_span spans[NET_HTTP_SINK_SPANS_MAX];
+      size_t   total = 0;
+      unsigned count = 0;
+      if (net_http_spans_kept(state))
+      {
+         /* The runs end where the decoded bytes end: @n */
+         for (; count < state->span_count; count++)
+         {
+            spans[count].data = response->data + state->span_off[count];
+            spans[count].len  = state->span_len[count];
+            total            += state->span_len[count];
+         }
+         state->span_count = 0;
+      }
+      else if (n)
+      {
+         spans[0].data = response->data;
+         spans[0].len  = n;
+         total         = n;
+         count         = 1;
+      }
+      if (!count)
+         return true;
+      if (!state->sink_spans(state->sink_data, spans, count))
+      {
+         net_http_log_transport_state(state, "sink_write_failed", -1);
+         state->err     = true;
+         response->part = P_DONE;
+         return false;
+      }
+      response->flushed += total;
+      return true;
+   }
 
    if (!n || response->discard)
       return true;
@@ -2605,7 +2716,34 @@ static bool net_http_receive_body(struct http_t *state, ssize_t newlen)
    if (newlen < 0 || state->err)
    {
       if (response->bodytype != T_FULL)
+      {
+         /* A Content-Length or chunked body cut short by the peer: the
+          * decoded bytes still held below the 32 KB floor arrived
+          * whole, so they reach the sink before the transfer fails.
+          * Held back, they were lost, and a download resumed from
+          * the file's end asked again for what it had received. */
+         if (newlen < 0 && net_http_body_streams(state))
+         {
+            /* Decoded bytes are data[0..pos) for an identity body and
+             * in the middle of a chunk (P_BODY, where len is what the
+             * chunk still owes), and data[0..len) between chunks
+             * (P_BODY_CHUNKLEN, where pos also covers the raw tail) */
+            size_t held = (     response->bodytype == T_CHUNK
+                           &&   response->part     != P_BODY)
+               ? response->len : response->pos;
+            if (held)
+               net_http_sink_flush(state, held);
+         }
          return false;
+      }
+      /* What is still held of a streamed body goes to the sink first */
+      if (net_http_body_streams(state) && response->pos)
+      {
+         if (!net_http_sink_flush(state, response->pos))
+            return false;
+         response->pos = 0;
+         response->len = 0;
+      }
       response->part       = P_DONE;
       /* The close that ended the body ended the connection too. */
       response->conn_close = true;
@@ -2684,12 +2822,18 @@ static bool net_http_receive_body(struct http_t *state, ssize_t newlen)
 
       if (response->part == P_BODY)
       {
-         /* Finish the chunk carried over from the previous call. */
+         /* Finish the chunk carried over from the previous call.  It
+          * was received behind the last run, which it extends. */
+         if (     net_http_spans_kept(state)
+               && !net_http_span_add(state, response->pos,
+                  (size_t)newlen < response->len
+                  ? (size_t)newlen : response->len))
+            return false;
          if ((size_t)newlen < response->len)
          {
             response->pos += newlen;
             response->len -= newlen;
-            if (net_http_body_streams(state))
+            if (net_http_body_streams(state) && net_http_sink_due(response))
             {
                if (!net_http_sink_flush(state, response->pos))
                   return false;
@@ -2795,18 +2939,38 @@ static bool net_http_receive_body(struct http_t *state, ssize_t newlen)
          if (avail < chunklen)
          {
             /* Chunk straddles the end of the raw region.  Move what
-             * we have and remember the outstanding remainder. */
-            if (avail && out != end)
-               memmove(out, end, avail);
+             * we have and remember the outstanding remainder.  For a
+             * spans sink a long chunk stays where it lies; the rest of
+             * it is received right behind. */
+            if (     net_http_spans_kept(state)
+                  && chunklen >= NET_HTTP_SPAN_MIN
+                  && net_http_span_room(state,
+                     (size_t)(end - response->data)))
+            {
+               if (!net_http_span_add(state,
+                        (size_t)(end - response->data), avail))
+                  return false;
+               out = end;
+            }
+            else
+            {
+               if (avail && out != end)
+                  memmove(out, end, avail);
+               if (     net_http_spans_kept(state)
+                     && !net_http_span_add(state,
+                        (size_t)(out - response->data), avail))
+                  return false;
+            }
             out           += avail;
             response->pos  = (size_t)(out - response->data);
             response->len  = chunklen - avail;
             response->part = P_BODY;
-            if (net_http_body_streams(state))
+            if (net_http_body_streams(state) && net_http_sink_due(response))
             {
                /* In P_BODY, pos is the decoded count and len is what
                 * is still outstanding in this chunk, so the decoded
-                * prefix can go and the next receive appends at 0. */
+                * prefix can go and the next receive appends at 0.
+                * Until then the next receive appends behind it. */
                if (!net_http_sink_flush(state, response->pos))
                   return false;
                response->pos = 0;
@@ -2814,8 +2978,25 @@ static bool net_http_receive_body(struct http_t *state, ssize_t newlen)
             goto check_grow;
          }
 
-         if (out != end)
-            memmove(out, end, chunklen);
+         if (     net_http_spans_kept(state)
+               && chunklen >= NET_HTTP_SPAN_MIN
+               && net_http_span_room(state, (size_t)(end - response->data)))
+         {
+            /* Left where it lies, for the spans sink */
+            if (!net_http_span_add(state,
+                     (size_t)(end - response->data), chunklen))
+               return false;
+            out = end;
+         }
+         else
+         {
+            if (out != end)
+               memmove(out, end, chunklen);
+            if (     net_http_spans_kept(state)
+                  && !net_http_span_add(state,
+                     (size_t)(out - response->data), chunklen))
+               return false;
+         }
          out += chunklen;
          in   = end + chunklen;
       }
@@ -2828,12 +3009,13 @@ static bool net_http_receive_body(struct http_t *state, ssize_t newlen)
          memmove(out, in, leftover);
       response->pos  = response->len + leftover;
       response->part = P_BODY_CHUNKLEN;
-      if (net_http_body_streams(state))
+      if (net_http_body_streams(state) && net_http_sink_due(response))
       {
          /* Decoded bytes sit at data[0..len) with the unconsumed raw
           * tail behind them; hand off the former and slide the tail
           * to the front so the invariant (len == decoded offset of
-          * the current chunklen line) still holds at 0. */
+          * the current chunklen line) still holds at 0.  Until then
+          * they stay where they are, as for a body kept whole. */
          if (!net_http_sink_flush(state, response->len))
             return false;
          if (leftover)
@@ -2856,7 +3038,7 @@ static bool net_http_receive_body(struct http_t *state, ssize_t newlen)
        * function, which sets P_DONE and shrinks the buffer. */
       response->pos += newlen;
       response->len  = response->pos;
-      if (net_http_body_streams(state))
+      if (net_http_body_streams(state) && net_http_sink_due(response))
       {
          if (!net_http_sink_flush(state, response->pos))
             return false;
@@ -2901,12 +3083,13 @@ static bool net_http_receive_body(struct http_t *state, ssize_t newlen)
          }
          return true;
       }
-      if (net_http_body_streams(state))
+      if (net_http_body_streams(state) && net_http_sink_due(response))
       {
          /* T_LEN's `len` is the outstanding count once streaming, so
           * decrement it by what we hand off; the "pos == len"
-          * completion test above keeps working unchanged.  The
-          * advertised total lives in content_len for progress. */
+          * completion test above keeps working unchanged, held bytes
+          * included.  The advertised total lives in content_len for
+          * progress. */
          if (!net_http_sink_flush(state, response->pos))
             return false;
          response->len -= response->pos;
@@ -3871,7 +4054,7 @@ uint8_t* net_http_data(struct http_t *state, size_t* len, bool accept_err)
    }
 
    /* Nothing was retained: the body went to the sink as it arrived. */
-   if (state->sink)
+   if (state->sink || state->sink_spans)
    {
       if (len)
          *len = 0;

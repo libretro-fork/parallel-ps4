@@ -200,6 +200,9 @@
 #endif
 
 #include <vfs/vfs_implementation.h>
+#ifdef VFS_HAVE_WRITEV
+#include <sys/uio.h>
+#endif
 #include <libretro.h>
 #if defined(HAVE_MMAP)
 #include <memmap.h>
@@ -717,6 +720,53 @@ int64_t retro_vfs_file_seek_internal(
  * Returns a pointer to an RFILE if opened successfully, otherwise NULL.
  **/
 
+/* Where positional I/O is had: see retro_vfs_file_read_at_impl.
+ * pread()/pwrite() are POSIX.1-2001 and on every Unix host whether or
+ * not the build maps files (Android's does not), so the hosts are named
+ * here rather than read off HAVE_MMAP. The PS4 toolchain is FreeBSD-
+ * derived and named out. */
+#if defined(VFS_HAVE_FILE_MAPPING) && defined(HAVE_MMAP) && !defined(_WIN32)
+#define VFS_POSITIONAL_POSIX 1
+#elif (defined(__linux__) || defined(__ANDROID__) || defined(__APPLE__) \
+      || defined(__FreeBSD__) || defined(__NetBSD__) \
+      || defined(__OpenBSD__) || defined(__DragonFly__) \
+      || defined(__HAIKU__) || defined(__QNX__) || defined(__sun)) \
+   && !defined(ORBIS) && !defined(__ORBIS__) && !defined(__PS4__) \
+   && !defined(__EMSCRIPTEN__)
+#define VFS_POSITIONAL_POSIX 1
+#elif defined(VFS_HAVE_AT_HANDLE) && !defined(_XBOX) && !defined(__WINRT__)
+/* Every NT, whatever _WIN32_WINNT the build names: the second handle
+ * is found at run time (vfs_positional_handle) */
+#define VFS_POSITIONAL_WIN32 1
+#endif
+
+#ifdef VFS_POSITIONAL_POSIX
+/* pread/pwrite at a 64-bit offset, as retro_vfs_fd_seek64 seeks:
+ * pread64 on 32-bit Android (off_t stays 32 bits there before API 24,
+ * and pread64 is declared from 21), otherwise off_t, refusing what a
+ * narrow one cannot hold - the caller then seeks, which reaches it. */
+#if defined(__ANDROID__) && !defined(__LP64__) \
+   && defined(__ANDROID_API__) && __ANDROID_API__ >= 21
+#define VFS_PREAD(fd, p, n, off)  pread64((fd), (p), (n), (off64_t)(off))
+#define VFS_PWRITE(fd, p, n, off) pwrite64((fd), (p), (n), (off64_t)(off))
+#define VFS_POSITIONAL_FITS(off, n) 1
+#else
+/* The offset's type on its way in; vfs_positional_off32_test builds
+ * this file with a 32-bit one to hold the refusal on a 64-bit host. */
+#ifndef VFS_POSITIONAL_OFF_T
+#define VFS_POSITIONAL_OFF_T off_t
+#endif
+#define VFS_PREAD(fd, p, n, off)  pread((fd), (p), (n), \
+   (VFS_POSITIONAL_OFF_T)(off))
+#define VFS_PWRITE(fd, p, n, off) pwrite((fd), (p), (n), \
+   (VFS_POSITIONAL_OFF_T)(off))
+#define VFS_POSITIONAL_FITS(off, n) \
+   (sizeof(VFS_POSITIONAL_OFF_T) >= sizeof(int64_t) \
+   || ((uint64_t)(off) <= (uint64_t)INT32_MAX \
+      && (uint64_t)(n) <= (uint64_t)INT32_MAX - (uint64_t)(off)))
+#endif
+#endif
+
 libretro_vfs_implementation_file *retro_vfs_file_open_impl(
       const char *path, unsigned mode, unsigned hints)
 {
@@ -1226,6 +1276,12 @@ libretro_vfs_implementation_file *retro_vfs_file_open_impl(
 
       retro_vfs_file_seek_internal(stream, 0, SEEK_SET);
    }
+   /* Appends (retro_vfs_file_write_at_impl) start at the end as opened */
+   retro_atomic_size_init(&stream->append_end,
+         stream->size > 0 ? (size_t)stream->size : 0);
+#ifdef VFS_HAVE_AT_HANDLE
+   retro_atomic_ptr_init(&stream->at_handle, NULL);
+#endif
    return stream;
 
 error:
@@ -1259,6 +1315,14 @@ int retro_vfs_file_close_impl(libretro_vfs_implementation_file *stream)
    {
       retro_vfs_file_close_nfs(stream);
       goto netend;
+   }
+#endif
+
+#ifdef VFS_POSITIONAL_WIN32
+   {
+      HANDLE at = (HANDLE)retro_atomic_load_acquire_ptr(&stream->at_handle);
+      if (at)
+         CloseHandle(at);
    }
 #endif
 
@@ -1982,6 +2046,334 @@ int64_t retro_vfs_file_write_impl(libretro_vfs_implementation_file *stream, cons
       stream->size = pos + ret;
 
    return ret;
+}
+
+/* Pieces handed to one writev(): within every POSIX IOV_MAX (16 at
+ * the least), and the stack array stays small */
+#define VFS_WRITEV_MAX 16
+
+int64_t retro_vfs_file_writev_impl(libretro_vfs_implementation_file *stream,
+      const struct retro_vfs_span *spans, size_t count)
+{
+   int64_t total = 0;
+   size_t  i     = 0;
+
+   if (!stream || (count && !spans))
+      return -1;
+
+#ifdef VFS_HAVE_WRITEV
+   if (     (stream->hints & RFILE_HINT_UNBUFFERED)
+         && stream->scheme == VFS_SCHEME_NONE)
+   {
+      int64_t pos = retro_vfs_file_tell_impl(stream);
+      while (i < count)
+      {
+         struct iovec iov[VFS_WRITEV_MAX];
+         size_t  n    = 0;
+         size_t  want = 0;
+         ssize_t put;
+
+         /* Empty pieces carry nothing; a piece past the per-call
+          * clamp goes on its own, through the write loop */
+         while (     i + n < count && n < VFS_WRITEV_MAX
+               &&    spans[i + n].len <= VFS_STDIO_IO_CHUNK_MAX
+               &&    want + spans[i + n].len <= VFS_STDIO_IO_CHUNK_MAX)
+         {
+            iov[n].iov_base = (void*)spans[i + n].data;
+            iov[n].iov_len  = spans[i + n].len;
+            want           += spans[i + n].len;
+            n++;
+         }
+         if (!n)
+         {
+            int64_t one = retro_vfs_file_write_impl(stream,
+                  spans[i].data, spans[i].len);
+            if (one < 0)
+               return total ? total : -1;
+            total += one;
+            if ((uint64_t)one < spans[i].len)
+               return total;
+            i++;
+            continue;
+         }
+         do
+         {
+            put = writev(stream->fd, iov, (int)n);
+         } while (put < 0 && errno == EINTR);
+         if (put < 0)
+            return total ? total : -1;
+         total += put;
+         if (pos >= 0 && pos + total > stream->size)
+            stream->size = pos + total;
+         if ((size_t)put < want)
+            return total;
+         i += n;
+      }
+      return total;
+   }
+#endif
+
+   /* One write per piece, through whatever this stream writes with */
+   for (; i < count; i++)
+   {
+      int64_t one;
+      if (!spans[i].len)
+         continue;
+      if ((one = retro_vfs_file_write_impl(stream, spans[i].data,
+                  spans[i].len)) < 0)
+         return total ? total : -1;
+      total += one;
+      if ((uint64_t)one < spans[i].len)
+         break;
+   }
+   return total;
+}
+
+/* Positional I/O: at an offset given with the call, leaving the stream's
+ * position alone, from any number of threads at once on one stream with
+ * no lock - pread()/pwrite() where there is one, a handle of the stream's
+ * own with OVERLAPPED offsets on Windows, the mapping where the stream is
+ * mapped. -1 where the platform or the stream's scheme (cdrom://, smb://,
+ * nfs://, SAF) has none: the caller seeks and reads under a lock of its
+ * own, as before. They act on the file itself: bytes written with
+ * retro_vfs_file_write_impl and not flushed yet are not seen. */
+#ifdef VFS_POSITIONAL_WIN32
+typedef HANDLE (WINAPI *vfs_reopen_file_t)(HANDLE, DWORD, DWORD, DWORD);
+
+/* The file @base is open on, opened again by @path: refused unless the
+ * volume and file index say it is the same file, so a rename or a
+ * replacement since the stream opened is never read instead. */
+static HANDLE vfs_positional_reopen_path(HANDLE base, const char *path)
+{
+   BY_HANDLE_FILE_INFORMATION a, b;
+   HANDLE   made;
+   wchar_t *wide;
+   if (!path || !GetFileInformationByHandle(base, &a)
+         || !(a.nFileIndexHigh | a.nFileIndexLow)
+         || !(wide = utf8_to_utf16_string_alloc(path)))
+      return INVALID_HANDLE_VALUE;
+   made = CreateFileW(wide, GENERIC_READ | GENERIC_WRITE,
+         FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING,
+         FILE_ATTRIBUTE_NORMAL, NULL);
+   if (made == INVALID_HANDLE_VALUE)
+      made = CreateFileW(wide, GENERIC_READ,
+            FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING,
+            FILE_ATTRIBUTE_NORMAL, NULL);
+   free(wide);
+   if (made == INVALID_HANDLE_VALUE)
+      return made;
+   if (     !GetFileInformationByHandle(made, &b)
+         || a.dwVolumeSerialNumber != b.dwVolumeSerialNumber
+         || a.nFileIndexHigh       != b.nFileIndexHigh
+         || a.nFileIndexLow        != b.nFileIndexLow)
+   {
+      CloseHandle(made);
+      return INVALID_HANDLE_VALUE;
+   }
+   return made;
+}
+
+/* The stream's second handle, made by whichever thread gets there
+ * first: ReOpenFile from Vista on, the stream's path checked against
+ * the handle before it, none on 9x/ME, whose ReadFile takes no offset
+ * on a file. */
+static HANDLE vfs_positional_handle(libretro_vfs_implementation_file *stream)
+{
+   HANDLE base, made;
+   HANDLE at = (HANDLE)retro_atomic_load_acquire_ptr(&stream->at_handle);
+   vfs_reopen_file_t reopen;
+   int    fd;
+   if (at)
+      return at;
+   if (GetVersion() & 0x80000000u)
+      return NULL;
+   fd = (stream->hints & RFILE_HINT_UNBUFFERED) ? stream->fd
+      : (stream->fp ? _fileno(stream->fp) : -1);
+   if (fd < 0)
+      return NULL;
+   base = (HANDLE)_get_osfhandle(fd);
+   if (base == INVALID_HANDLE_VALUE)
+      return NULL;
+#ifdef VFS_WIN32_FORCE_PATH_REOPEN
+   reopen = NULL;
+#else
+   reopen = (vfs_reopen_file_t)(void (*)(void))GetProcAddress(
+         GetModuleHandleA("kernel32.dll"), "ReOpenFile");
+#endif
+   if (reopen)
+   {
+      made = reopen(base, GENERIC_READ | GENERIC_WRITE,
+            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, 0);
+      if (made == INVALID_HANDLE_VALUE)
+         made = reopen(base, GENERIC_READ,
+               FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, 0);
+   }
+   else
+      made = vfs_positional_reopen_path(base, stream->orig_path);
+   if (made == INVALID_HANDLE_VALUE)
+      return NULL;
+   if (retro_atomic_cas_ptr(&stream->at_handle, NULL, made))
+      return made;
+   /* Another thread's is in: this one is not needed */
+   CloseHandle(made);
+   return (HANDLE)retro_atomic_load_acquire_ptr(&stream->at_handle);
+}
+#endif
+
+int64_t retro_vfs_file_read_at_impl(libretro_vfs_implementation_file *stream,
+      void *s, uint64_t len, int64_t offset)
+{
+   if (!stream || !s || offset < 0 || len > (uint64_t)INT64_MAX)
+      return -1;
+   if (stream->scheme != VFS_SCHEME_NONE)
+      return -1;
+
+#ifdef VFS_HAVE_FILE_MAPPING
+   if (     (stream->hints & RETRO_VFS_FILE_ACCESS_HINT_FREQUENT_ACCESS)
+         && stream->mapped)
+   {
+      if ((uint64_t)offset >= stream->mapsize)
+         return 0;
+      if (len > stream->mapsize - (uint64_t)offset)
+         len = stream->mapsize - (uint64_t)offset;
+      memcpy(s, &stream->mapped[offset], (size_t)len);
+      return (int64_t)len;
+   }
+#endif
+
+#if defined(VFS_POSITIONAL_POSIX)
+   {
+      uint8_t *p     = (uint8_t*)s;
+      uint64_t total = 0;
+      int fd         = (stream->hints & RFILE_HINT_UNBUFFERED) ? stream->fd
+         : (stream->fp ? fileno(stream->fp) : -1);
+      if (fd < 0 || !VFS_POSITIONAL_FITS(offset, len))
+         return -1;
+      while (len != 0)
+      {
+         size_t  _chunk = (len > VFS_STDIO_IO_CHUNK_MAX)
+               ? (size_t)VFS_STDIO_IO_CHUNK_MAX : (size_t)len;
+         ssize_t _got   = VFS_PREAD(fd, p, _chunk, offset + (int64_t)total);
+         if (_got < 0)
+            return (total != 0) ? (int64_t)total : -1;
+         if (_got == 0)
+            break;
+         total += (uint64_t)_got;
+         p     += _got;
+         len   -= (uint64_t)_got;
+      }
+      return (int64_t)total;
+   }
+#elif defined(VFS_POSITIONAL_WIN32)
+   {
+      uint8_t *p     = (uint8_t*)s;
+      uint64_t total = 0;
+      HANDLE at      = vfs_positional_handle(stream);
+      if (!at)
+         return -1;
+      while (len != 0)
+      {
+         OVERLAPPED ov;
+         DWORD _got     = 0;
+         DWORD _chunk   = (len > 0x40000000u) ? 0x40000000u : (DWORD)len;
+         uint64_t where = (uint64_t)offset + total;
+         memset(&ov, 0, sizeof(ov));
+         ov.Offset      = (DWORD)(where & 0xffffffffu);
+         ov.OffsetHigh  = (DWORD)(where >> 32);
+         if (!ReadFile(at, p, _chunk, &_got, &ov))
+         {
+            if (GetLastError() == ERROR_HANDLE_EOF)
+               break;
+            return (total != 0) ? (int64_t)total : -1;
+         }
+         if (_got == 0)
+            break;
+         total += _got;
+         p     += _got;
+         len   -= _got;
+      }
+      return (int64_t)total;
+   }
+#else
+   return -1;
+#endif
+}
+
+int64_t retro_vfs_file_write_at_impl(libretro_vfs_implementation_file *stream,
+      const void *s, uint64_t len, int64_t offset)
+{
+   if (!stream || !s || len > (uint64_t)INT64_MAX)
+      return -1;
+   if (stream->scheme != VFS_SCHEME_NONE)
+      return -1;
+#ifdef VFS_HAVE_FILE_MAPPING
+   /* A mapped stream is read-only */
+   if (     (stream->hints & RETRO_VFS_FILE_ACCESS_HINT_FREQUENT_ACCESS)
+         && stream->mapped)
+      return -1;
+#endif
+
+#if defined(VFS_POSITIONAL_POSIX) || defined(VFS_POSITIONAL_WIN32)
+   if (offset < 0)
+   {
+      /* An append: its place taken with one atomic add, so appends from
+       * several threads land one after another, whole, in some order */
+      if (len > (uint64_t)((size_t)-1))
+         return -1;
+      offset = (int64_t)retro_atomic_fetch_add_size(&stream->append_end,
+            (size_t)len);
+   }
+#endif
+
+#if defined(VFS_POSITIONAL_POSIX)
+   {
+      const uint8_t *p = (const uint8_t*)s;
+      uint64_t total   = 0;
+      int fd           = (stream->hints & RFILE_HINT_UNBUFFERED) ? stream->fd
+         : (stream->fp ? fileno(stream->fp) : -1);
+      if (fd < 0 || !VFS_POSITIONAL_FITS(offset, len))
+         return -1;
+      while (len != 0)
+      {
+         size_t  _chunk = (len > VFS_STDIO_IO_CHUNK_MAX)
+               ? (size_t)VFS_STDIO_IO_CHUNK_MAX : (size_t)len;
+         ssize_t _put   = VFS_PWRITE(fd, p, _chunk, offset + (int64_t)total);
+         if (_put <= 0)
+            return (total != 0) ? (int64_t)total : -1;
+         total += (uint64_t)_put;
+         p     += _put;
+         len   -= (uint64_t)_put;
+      }
+      return (int64_t)total;
+   }
+#elif defined(VFS_POSITIONAL_WIN32)
+   {
+      const uint8_t *p = (const uint8_t*)s;
+      uint64_t total   = 0;
+      HANDLE at        = vfs_positional_handle(stream);
+      if (!at)
+         return -1;
+      while (len != 0)
+      {
+         OVERLAPPED ov;
+         DWORD _put     = 0;
+         DWORD _chunk   = (len > 0x40000000u) ? 0x40000000u : (DWORD)len;
+         uint64_t where = (uint64_t)offset + total;
+         memset(&ov, 0, sizeof(ov));
+         ov.Offset      = (DWORD)(where & 0xffffffffu);
+         ov.OffsetHigh  = (DWORD)(where >> 32);
+         if (!WriteFile(at, p, _chunk, &_put, &ov) || _put == 0)
+            return (total != 0) ? (int64_t)total : -1;
+         total += _put;
+         p     += _put;
+         len   -= _put;
+      }
+      return (int64_t)total;
+   }
+#else
+   (void)offset;
+   return -1;
+#endif
 }
 
 int retro_vfs_file_flush_impl(libretro_vfs_implementation_file *stream)
@@ -3626,7 +4018,7 @@ static int vfs_copy_open_portable(struct retro_vfs_copy_handle *h, bool resume)
    h->out = retro_vfs_file_open_impl(h->dst,
          resume ? (RETRO_VFS_FILE_ACCESS_READ_WRITE | RETRO_VFS_FILE_ACCESS_UPDATE_EXISTING)
                 : RETRO_VFS_FILE_ACCESS_WRITE,
-         RETRO_VFS_FILE_ACCESS_HINT_NONE);
+         RETRO_VFS_FILE_ACCESS_HINT_SEQUENTIAL_BULK);
    if (!h->out)
       return -1;
    if (resume && h->done > 0)
