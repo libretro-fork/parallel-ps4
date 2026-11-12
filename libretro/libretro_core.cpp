@@ -86,6 +86,13 @@ retro_audio_sample_batch_t audio_batch_cb = nullptr;
 // The frontend's float batch, when it takes float sound (asked in retro_load_game): the mix
 // then reaches it unrounded, in place of the 16-bit batch
 retro_audio_sample_batch_float_t audio_batch_float_cb = nullptr;
+// Surround (core option Surround Sound, and a frontend that takes more channels): every block
+// of sound goes through these instead, stereo or 7.1 as it was mixed. The float one is set
+// when the frontend takes float too.
+retro_audio_sample_batch_multi_int16_t audio_multi_int16_cb = nullptr;
+retro_audio_sample_batch_multi_float_t audio_multi_float_cb = nullptr;
+// Frames of the oldest surround segment already handed over (libretro/audio_wide.h)
+std::uint32_t audio_wide_done = 0;
 retro_input_poll_t input_poll_cb = nullptr;
 retro_input_state_t input_state_cb = nullptr;
 retro_log_printf_t log_cb = nullptr;
@@ -267,7 +274,11 @@ void ReadCoreOptions(Libretro::SharedOptions& options) {
     options.dump_shaders = enabled("shadps4_dump_shaders", "disabled");
     options.sample_positions = enabled("shadps4_game_sample_positions", "disabled");
     options.copy_gpu_buffers = enabled("shadps4_copy_gpu_buffers", "enabled");
-    options.audio_float = audio_batch_float_cb ? 1 : 0;
+    options.audio_float = (audio_multi_int16_cb ? audio_multi_float_cb != nullptr
+                                                : audio_batch_float_cb != nullptr)
+                              ? 1
+                              : 0;
+    options.audio_channels = audio_multi_int16_cb ? 8 : 2;
     options.hdr_output = hdr_output ? 1 : 0;
     options.hdr_paper_white = hdr_paper_white;
     options.hdr_max_nits = hdr_max_nits;
@@ -1104,7 +1115,51 @@ void TakeFrame() {
 // One frame's worth of sound to the frontend, lent from the ring where it lies (in two pieces
 // where the ring wraps); what is not there is silence. The emulator writes no further than the
 // read index, which moves only once the frontend has taken the frames.
+// Surround: one frame's worth handed over a segment at a time, each where it lies in the wide
+// ring and with its own layout (libretro/audio_wide.h); what is not there is stereo silence.
+void SendAudioWide() {
+    static const int16_t silence[kAudioFrames * 2] = {};
+    static const float silence_f32[kAudioFrames * 2] = {};
+    const bool is_float = audio_multi_float_cb != nullptr;
+    uint32_t frames = 0;
+    if (shared) {
+        audio_wide_piece_t piece;
+        while (frames < static_cast<uint32_t>(kAudioFrames) &&
+               audio_wide_peek(shared->audio_wide, audio_wide_done, kAudioFrames - frames,
+                               &piece)) {
+            const unsigned layout =
+                piece.channels == 8 ? RETRO_AUDIO_LAYOUT_7_1 : RETRO_AUDIO_LAYOUT_STEREO;
+            if (is_float) {
+                audio_multi_float_cb(shared->audio_wide_f32 + piece.pos, piece.frames,
+                                     piece.channels, layout);
+            } else {
+                audio_multi_int16_cb(shared->audio_wide_s16 + piece.pos, piece.frames,
+                                     piece.channels, layout);
+            }
+            audio_wide_consume(shared->audio_wide, &audio_wide_done, piece.frames);
+            frames += piece.frames;
+        }
+        if (frames) {
+            const uint32_t read = static_cast<std::uint32_t>(retro_atomic_load_relaxed_int(&shared->audio_read));
+            retro_atomic_store_release_int(&shared->audio_read, read + frames);
+            // Room in the ring: the emulator mixes more
+            wakes.audio.Notify();
+        }
+    }
+    if (frames < static_cast<uint32_t>(kAudioFrames)) {
+        if (is_float) {
+            audio_multi_float_cb(silence_f32, kAudioFrames - frames, 2, RETRO_AUDIO_LAYOUT_STEREO);
+        } else {
+            audio_multi_int16_cb(silence, kAudioFrames - frames, 2, RETRO_AUDIO_LAYOUT_STEREO);
+        }
+    }
+}
+
 void SendAudio() {
+    if (audio_multi_int16_cb) {
+        SendAudioWide();
+        return;
+    }
     static const int16_t silence[kAudioFrames * 2] = {};
     static const float silence_f32[kAudioFrames * 2] = {};
     uint32_t frames = 0;
@@ -1290,6 +1345,7 @@ static bool StartGame(const std::string& boot_path, const std::string& user_dir,
     retro_shared_eventcount_init(&shared->wake_input);
     retro_shared_eventcount_init(&shared->wake_frame);
     retro_shared_eventcount_init(&shared->wake_audio);
+    audio_wide_init(shared->audio_wide);
     wakes.Attach(shared, argument);
     std::strcpy(shared->eboot_path, boot_path.c_str());
     std::strcpy(shared->user_dir, user_dir.c_str());
@@ -1437,8 +1493,23 @@ RETRO_API bool retro_load_game(const struct retro_game_info* game) {
             environ_cb(RETRO_ENVIRONMENT_GET_AUDIO_SAMPLE_BATCH_FLOAT, &float_audio)
                 ? float_audio.batch
                 : nullptr;
-        Log(RETRO_LOG_INFO, "Sound goes to the frontend as %s",
-            audio_batch_float_cb ? "float" : "16-bit");
+        // Surround, where the option allows and the frontend takes it: asked after float,
+        // so that its float entry is given when float was
+        audio_multi_int16_cb = nullptr;
+        audio_multi_float_cb = nullptr;
+        audio_wide_done = 0;
+        struct retro_audio_sample_multi_callback multi {};
+        if (OptionValue("shadps4_surround", "enabled") == "enabled" &&
+            environ_cb(RETRO_ENVIRONMENT_GET_AUDIO_SAMPLE_BATCH_MULTI, &multi) &&
+            multi.batch_int16) {
+            audio_multi_int16_cb = multi.batch_int16;
+            audio_multi_float_cb = multi.batch_float;
+        }
+        Log(RETRO_LOG_INFO, "Sound goes to the frontend as %s, %s",
+            (audio_multi_int16_cb ? audio_multi_float_cb != nullptr : audio_batch_float_cb != nullptr)
+                ? "float"
+                : "16-bit",
+            audio_multi_int16_cb ? "stereo or 7.1 as the game plays it" : "stereo");
     }
     if (!environ_cb(RETRO_ENVIRONMENT_GET_RUMBLE_INTERFACE, &rumble)) {
         rumble = {};
@@ -1484,8 +1555,10 @@ RETRO_API bool retro_load_game_special(unsigned, const struct retro_game_info*, 
 }
 
 RETRO_API void retro_unload_game(void) {
-    // The frontend's float batch is good until here
+    // The frontend's float and multichannel batches are good until here
     audio_batch_float_cb = nullptr;
+    audio_multi_int16_cb = nullptr;
+    audio_multi_float_cb = nullptr;
     StopPkgInstall();
     if (shared) {
         retro_atomic_store_release_int(&shared->quit, 1);

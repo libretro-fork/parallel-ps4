@@ -465,6 +465,22 @@ struct retro_core_option_v2_definition option_defs_us[] = {
          {NULL, NULL},
      },
      "disabled"},
+    {"shadps4_surround",
+     "Surround Sound",
+     NULL,
+     "A game's 7.1 sound goes to the frontend with all its channels, and stereo "
+     "as stereo; the frontend plays them on as many speakers as the device has "
+     "and folds the rest (RetroArch does). Off: the core folds 7.1 to stereo "
+     "itself, as the console does for stereo output. Takes effect when a game is "
+     "started.",
+     NULL,
+     "audio",
+     {
+         {"enabled", NULL},
+         {"disabled", NULL},
+         {NULL, NULL},
+     },
+     "enabled"},
     {"shadps4_volume",
      "Volume",
      NULL,

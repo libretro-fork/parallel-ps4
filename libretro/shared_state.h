@@ -13,13 +13,15 @@
 #include <rthreads/retro_shared_eventcount.h>
 #include <retro_atomic.h>
 
+#include "audio_wide.h"
+
 // The memory the libretro core (libretro_core.cpp, in the frontend's process) shares with the
 // emulator it runs in a process of its own (host.cpp). One block: this header, then three
 // frames.
 namespace Libretro {
 
 inline constexpr std::uint32_t SHARED_MAGIC = 0x34505368; // "hSP4"
-inline constexpr std::uint32_t SHARED_VERSION = 18;
+inline constexpr std::uint32_t SHARED_VERSION = 19;
 
 inline constexpr std::uint32_t MAX_WIDTH = 3840;
 inline constexpr std::uint32_t MAX_HEIGHT = 2160;
@@ -117,6 +119,10 @@ struct SharedOptions {
     /// The frontend takes float sound: the mix goes into audio_f32, unrounded, instead of
     /// audio. Fixed for the session.
     std::uint32_t audio_float;
+    /// 8: the frontend takes surround (RETRO_ENVIRONMENT_GET_AUDIO_SAMPLE_BATCH_MULTI). The mix
+    /// is 7.1 wide, and goes through audio_wide (the segments) and audio_wide_f32 or
+    /// audio_wide_s16 in place of the stereo rings. 2 otherwise. Fixed for the session.
+    std::uint32_t audio_channels;
     /// The frontend takes HDR10 (PQ Rec.2020,
     /// RETRO_PIXEL_FORMAT_HDR10_2101010): the picture goes out as PQ, and
     /// frames read back are XRGB2101010. Fixed for the session.
@@ -234,6 +240,14 @@ struct SharedState {
     std::int16_t audio[AUDIO_RING_FRAMES * 2];
     /// The same ring as float stereo, -1 to 1, used in its place with options.audio_float
     float audio_f32[AUDIO_RING_FRAMES * 2];
+
+    /// Surround (options.audio_channels 8): the segments of stereo and 7.1 the ring below holds
+    /// (libretro/audio_wide.h; set up by the core before the emulator starts), and the ring,
+    /// float or 16-bit as options.audio_float says. audio_written and audio_read count its
+    /// frames as they do the stereo ring's.
+    alignas(64) unsigned char audio_wide[AUDIO_WIDE_BYTES];
+    float audio_wide_f32[AUDIO_WIDE_RING_SAMPLES];
+    std::int16_t audio_wide_s16[AUDIO_WIDE_RING_SAMPLES];
 };
 
 inline constexpr std::size_t SHARED_FRAMES_OFFSET = (sizeof(SharedState) + 4095) & ~std::size_t{4095};

@@ -154,7 +154,50 @@ void WatchQuit() {
 
 // What the sources have, summed, into the ring the core plays from. A source
 // that has less than another contributes silence for the difference.
+// Surround: each chunk of the mix, stereo or 7.1 as what played in it was, a segment of the
+// wide ring (libretro/audio_wide.h), written where it lies
+void PumpAudioWide() {
+    audio_wide_writer_t writer{};
+    for (;;) {
+        const int key = wakes.audio.Prepare();
+        const std::uint32_t written = static_cast<std::uint32_t>(retro_atomic_load_relaxed_int(&shared->audio_written));
+        const std::uint32_t read = static_cast<std::uint32_t>(retro_atomic_load_acquire_int(&shared->audio_read));
+        const std::uint32_t queued = written - read;
+        std::uint32_t wanted = queued < Libretro::AUDIO_RING_TARGET_FRAMES
+                                   ? Libretro::AUDIO_RING_TARGET_FRAMES - queued
+                                   : 0;
+        wanted = audio_wide_room(shared->audio_wide, &writer, wanted);
+        unsigned channels = 2;
+        const std::uint32_t frames = wanted ? audio_mix_mix(wanted, &channels) : 0;
+        if (frames) {
+            wakes.audio.Cancel();
+            audio_wide_piece_t pieces[2];
+            unsigned n = 0;
+            audio_wide_plan(&writer, frames, channels, pieces, &n);
+            std::uint32_t first = 0;
+            for (unsigned i = 0; i < n; i++) {
+                if (shared->options.audio_float) {
+                    audio_mix_take_f32(shared->audio_wide_f32 + pieces[i].pos, first,
+                                       pieces[i].frames, channels);
+                } else {
+                    audio_mix_take_s16(shared->audio_wide_s16 + pieces[i].pos, first,
+                                       pieces[i].frames, channels);
+                }
+                first += pieces[i].frames;
+            }
+            audio_wide_publish(shared->audio_wide, &writer, pieces, n);
+            retro_atomic_store_release_int(&shared->audio_written, written + frames);
+            continue;
+        }
+        wakes.audio.Wait(key);
+    }
+}
+
 void PumpAudio() {
+    if (shared->options.audio_channels == 8) {
+        PumpAudioWide();
+        return;
+    }
     for (;;) {
         // The window opens first: a read by the core or a source's commit from here on wakes
         // the wait below, whatever the mix found
@@ -339,7 +382,7 @@ int RunEmulator(const char* argument) {
     }
 
     std::thread(WatchQuit).detach();
-    if (!audio_mix_init()) {
+    if (!audio_mix_init_channels(shared->options.audio_channels == 8 ? 8 : 2)) {
       LOG_CRITICAL(Lib_AudioOut, "No memory for the core's audio mix");
     }
     audio_mix_set_wake([](void*) { wakes.audio.Notify(); }, nullptr);

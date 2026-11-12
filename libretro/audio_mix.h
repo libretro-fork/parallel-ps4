@@ -3,8 +3,9 @@
 
 /* The sound the emulator hands the frontend: every source (an audio port, the trophy sound,
  * the music player) writes stereo at 48 kHz into an input of its own, as floats counted in
- * 16-bit steps (32767 is full scale), and one thread sums the inputs and rounds the sum to the
- * 16 bits of the ring the core plays from: one rounding, at the end. The console's audio is 48 kHz, so
+ * 16-bit steps (32768 is full scale), and one thread sums the inputs into the ring the core
+ * plays from: as float, or rounded to 16 bits there, once, at the end. With surround the mix
+ * is 7.1 wide, and a port of eight channels writes all eight. The console's audio is 48 kHz, so
  * nothing is resampled here; the frontend resamples to its device.
  *
  * Inputs come from a pool made once, at start: opening and closing one allocates nothing.
@@ -34,9 +35,18 @@ typedef struct audio_mix_input audio_mix_input_t;
 
 /* Makes the pool. Once, before any input is opened. Returns 0 when there is no memory. */
 int audio_mix_init(void);
+/* The same for a mix of @channels: 2, or 8 for surround (7.1), which lets a source open an
+ * input of eight channels. audio_mix_init is this with 2. */
+int audio_mix_init_channels(unsigned channels);
+/* What the mix was made for: 2, or 8 */
+unsigned audio_mix_channels(void);
 
 /* An input for a source, or NULL when all are open. */
 audio_mix_input_t* audio_mix_input_open(void);
+/* An input of @channels: 2, the frames of the input's reserve then being two floats, or 8 in
+ * a mix made for 8, eight floats in 7.1's order (front left, front right, centre, LFE, back
+ * left, back right, side left, side right). NULL for any other, or when all are open. */
+audio_mix_input_t* audio_mix_input_open_channels(unsigned channels);
 
 /* The source is done with the input: the mixing thread drops what it still holds and hands
  * the input back to the pool. The source does not touch it again. */
@@ -67,6 +77,16 @@ unsigned audio_mix_pump(int16_t* ring, uint32_t ring_mask, uint32_t at, unsigned
  * (RETRO_ENVIRONMENT_GET_AUDIO_SAMPLE_BATCH_FLOAT): nothing is rounded, and only a sum past
  * full scale is clamped. Use one or the other for the life of the mix. */
 unsigned audio_mix_pump_f32(float* ring, uint32_t ring_mask, uint32_t at, unsigned frames);
+
+/* Surround: sums up to @frames of every open input into the mixing thread's own sums and
+ * says how wide the result is, *@channels: 8 when an input of eight channels added frames,
+ * else 2 (an input of two is the front pair of an eight-channel result). Returns the frames.
+ * audio_mix_take_f32 and audio_mix_take_s16 then write @count of them from @first, at that
+ * width, to the frontend's scale: float -1 to 1, clamped past full scale and not rounded, or
+ * 16 bits, rounded to the nearest step and clamped. Mixing thread only. */
+unsigned audio_mix_mix(unsigned frames, unsigned* channels);
+void audio_mix_take_f32(float* dst, unsigned first, unsigned count, unsigned channels);
+void audio_mix_take_s16(int16_t* dst, unsigned first, unsigned count, unsigned channels);
 
 /* A sound played once over everything else, the trophy sound: @frames of stereo at 48 kHz in
  * the inputs' format, borrowed and read by the mixing thread as it plays them, so they stay untouched
@@ -110,6 +130,13 @@ void audio_mix_convert_s16(float* dst, const int16_t* src, unsigned frames, unsi
                            float gain);
 void audio_mix_convert_f32(float* dst, const float* src, unsigned frames, unsigned channels,
                            float gain);
+/* Eight channels into an input of eight, unfolded: output channel c is the source's
+ * @order[c], so that the console's order (either of its 7.1 orders) becomes the mix's, with
+ * its own gain, @gains[c] (in the mix's order) */
+void audio_mix_convert_s16_wide(float* dst, const int16_t* src, unsigned frames,
+                                const int* order, const float* gains);
+void audio_mix_convert_f32_wide(float* dst, const float* src, unsigned frames,
+                                const int* order, const float* gains);
 
 #ifdef __cplusplus
 }

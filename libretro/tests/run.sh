@@ -18,6 +18,18 @@ for san in address,undefined thread; do
         libretro/tests/audio_mix_test.c libretro/audio_mix.c $COMMON \
         -o "$OUT/$name" -lpthread -lm
     "$OUT/$name"
+    # The mix made for surround: 7.1 and stereo inputs, the result's width, both scales
+    name=audio_mix_wide_test-$(echo $san | tr , -)
+    $CC -std=gnu99 -O1 -g -Wall -fno-omit-frame-pointer -fsanitize=$san -I$L/include \
+        libretro/tests/audio_mix_wide_test.c libretro/audio_mix.c $COMMON \
+        -o "$OUT/$name" -lpthread -lm
+    "$OUT/$name"
+    # Surround's segments between the emulator and the core, on one thread and on two
+    name=audio_wide_test-$(echo $san | tr , -)
+    $CC -std=gnu99 -O1 -g -Wall -fno-omit-frame-pointer -fsanitize=$san -I$L/include \
+        libretro/tests/audio_wide_test.c libretro/audio_wide.c $L/rthreads/rthreads.c \
+        $L/features/features_cpu.c -o "$OUT/$name" -lpthread
+    "$OUT/$name"
     name=write_snapshots_test-$(echo $san | tr , -)
     $CC -O1 -g -Wall -fno-omit-frame-pointer -fsanitize=$san -Isrc -I$L/include \
         libretro/tests/write_snapshots_test.c src/video_core/buffer_cache/write_snapshots.c \

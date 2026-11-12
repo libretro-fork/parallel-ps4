@@ -321,7 +321,7 @@ CORE_SOURCES_C += $(addprefix src/video_core/buffer_cache/,write_snapshots.c)
 CORE_SOURCES_CXX += $(SCM_REV_CPP)
 CORE_SOURCES_CXX += $(addprefix libretro/,gpu_frames.cpp host.cpp libretro_core.cpp \
 	memory_export.cpp pkg_backend.cpp pkg_entries.cpp pkg_reader.cpp)
-CORE_SOURCES_C += libretro/audio_mix.c $(EMBEDDED_RESOURCES_C)
+CORE_SOURCES_C += libretro/audio_mix.c libretro/audio_wide.c $(EMBEDDED_RESOURCES_C)
 ifeq ($(OS_LINUX),1)
    CORE_SOURCES_C += $(LIBRETRO_HOST_BLOB)
 endif

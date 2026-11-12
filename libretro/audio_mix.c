@@ -9,10 +9,10 @@
 
 #include "audio_mix.h"
 
-/* A frame in an input: two floats. A source's sound stays at full precision until the mix is
- * made, and is rounded to 16 bits once, there: not once by each source and again after the
- * sum, and never cut towards zero. */
-#define FRAME_BYTES 8
+/* A frame in an input: a float a channel, two (stereo) or eight (7.1, with surround). A
+ * source's sound stays at full precision until the mix is made, and is rounded to 16 bits once,
+ * there, if at all: not once by each source and again after the sum, and never cut towards
+ * zero. */
 
 /* An input's life: free in the pool, open to its source, or closed by its source and not yet
  * emptied by the mixing thread. Only the source moves FREE to OPEN (by CAS, sources open from
@@ -29,6 +29,8 @@ struct audio_mix_input
 {
    retro_waitable_spsc_t ring;
    retro_atomic_int_t state;
+   unsigned channels;   /* 2, or 8: set by the source as it opens the input */
+   size_t frame_bytes;
 };
 
 static struct audio_mix_input inputs[AUDIO_MIX_INPUTS];
@@ -55,9 +57,14 @@ static float clip_play_gain;
 #define SINC_HALF 7
 #define SINC_PHASES 256
 static float sinc_table[SINC_PHASES + 1][SINC_TAPS];
-/* The mixing thread's sums: one chunk of stereo frames. */
+/* The mixing thread's sums: one chunk of frames, mix_channels floats apart (the first two
+ * front left and right, then the rest of 7.1 in the frontend's order). */
 #define PUMP_FRAMES 1024
-static float pump_sum[PUMP_FRAMES * 2];
+static float pump_sum[PUMP_FRAMES * 8];
+/* 2, or 8 with surround: the widest an input may be, set at init */
+static unsigned mix_channels = 2;
+/* An eight-channel input added frames to the last mix */
+static int pump_wide;
 
 static double sinc_kernel(double x, double cutoff)
 {
@@ -87,7 +94,13 @@ static void sinc_row(float* row, double frac, double cutoff)
 
 int audio_mix_init(void)
 {
+   return audio_mix_init_channels(2);
+}
+
+int audio_mix_init_channels(unsigned channels)
+{
    unsigned i;
+   mix_channels = channels == 8 ? 8 : 2;
    for (i = 0; i <= SINC_PHASES; i++)
       sinc_row(sinc_table[i], (double)i / SINC_PHASES, 1.0);
    retro_atomic_size_init(&clip_frames, 0);
@@ -97,7 +110,11 @@ int audio_mix_init(void)
    for (i = 0; i < AUDIO_MIX_INPUTS; i++)
    {
       retro_atomic_int_init(&inputs[i].state, INPUT_FREE);
-      if (!retro_waitable_spsc_init(&inputs[i].ring, AUDIO_MIX_INPUT_FRAMES * FRAME_BYTES))
+      inputs[i].channels    = 2;
+      inputs[i].frame_bytes = 2 * sizeof(float);
+      /* Room for the widest input the mix takes */
+      if (!retro_waitable_spsc_init(&inputs[i].ring,
+                                    AUDIO_MIX_INPUT_FRAMES * mix_channels * sizeof(float)))
          return 0;
    }
    return 1;
@@ -105,11 +122,29 @@ int audio_mix_init(void)
 
 audio_mix_input_t* audio_mix_input_open(void)
 {
+   return audio_mix_input_open_channels(2);
+}
+
+audio_mix_input_t* audio_mix_input_open_channels(unsigned channels)
+{
    unsigned i;
+   if (channels != 2 && !(channels == 8 && mix_channels == 8))
+      return NULL;
    for (i = 0; i < AUDIO_MIX_INPUTS; i++)
       if (retro_atomic_cas_int(&inputs[i].state, INPUT_FREE, INPUT_OPEN))
+      {
+         /* The mixing thread reads these once it sees frames, which the source commits
+          * after this, with release */
+         inputs[i].channels    = channels;
+         inputs[i].frame_bytes = channels * sizeof(float);
          return &inputs[i];
+      }
    return NULL;
+}
+
+unsigned audio_mix_channels(void)
+{
+   return mix_channels;
 }
 
 void audio_mix_input_close(audio_mix_input_t* in)
@@ -123,9 +158,9 @@ int audio_mix_input_wait(audio_mix_input_t* in, unsigned frames, int64_t timeout
    /* Room for @frames on top of the most that may stay queued, out of what the ring holds. */
    size_t capacity = retro_spsc_write_avail(&in->ring.queue) +
                      retro_spsc_read_avail(&in->ring.queue);
-   size_t want     = capacity - AUDIO_MIX_QUEUE_FRAMES * FRAME_BYTES;
-   if (frames * FRAME_BYTES > want)
-      want = frames * FRAME_BYTES;
+   size_t want     = capacity - AUDIO_MIX_QUEUE_FRAMES * in->frame_bytes;
+   if (frames * in->frame_bytes > want)
+      want = frames * in->frame_bytes;
    return retro_waitable_spsc_wait_writable(&in->ring, want, timeout_us) ? 1 : 0;
 }
 
@@ -133,7 +168,7 @@ unsigned audio_mix_input_reserve(audio_mix_input_t* in, float** ptr, unsigned fr
 {
    void* span   = NULL;
    size_t bytes = retro_spsc_write_begin(&in->ring.queue, &span);
-   unsigned got = (unsigned)(bytes / FRAME_BYTES);
+   unsigned got = (unsigned)(bytes / in->frame_bytes);
    *ptr         = (float*)span;
    return got < frames ? got : frames;
 }
@@ -146,7 +181,7 @@ void audio_mix_set_wake(void (*wake)(void*), void* ctx)
 
 void audio_mix_input_commit(audio_mix_input_t* in, unsigned frames)
 {
-   retro_spsc_write_end(&in->ring.queue, (size_t)frames * FRAME_BYTES);
+   retro_spsc_write_end(&in->ring.queue, (size_t)frames * in->frame_bytes);
    retro_waitable_spsc_notify_readable(&in->ring);
    if (mix_wake)
       mix_wake(mix_wake_ctx);
@@ -160,17 +195,24 @@ static unsigned pump_add(struct audio_mix_input* in, unsigned frames)
    {
       const void* span = NULL;
       size_t bytes     = retro_spsc_read_begin(&in->ring.queue, &span);
-      unsigned got     = (unsigned)(bytes / FRAME_BYTES);
+      unsigned got     = (unsigned)(bytes / in->frame_bytes);
       const float* s   = (const float*)span;
-      float* sum       = pump_sum + done * 2;
-      unsigned i;
+      float* sum       = pump_sum + done * mix_channels;
+      unsigned i, c;
       if (got == 0)
          break;
       if (got > frames - done)
          got = frames - done;
-      for (i = 0; i < got * 2; i++)
-         sum[i] += s[i];
-      retro_spsc_read_end(&in->ring.queue, (size_t)got * FRAME_BYTES);
+      if (in->channels == mix_channels)
+         for (i = 0; i < got * mix_channels; i++)
+            sum[i] += s[i];
+      else /* stereo into a wider mix: the front pair */
+         for (i = 0; i < got; i++)
+            for (c = 0; c < 2; c++)
+               sum[i * mix_channels + c] += s[i * 2 + c];
+      if (in->channels == 8)
+         pump_wide = 1;
+      retro_spsc_read_end(&in->ring.queue, (size_t)got * in->frame_bytes);
       done += got;
    }
    if (done)
@@ -210,8 +252,11 @@ static unsigned pump_clip(unsigned frames)
    n = clip_left < frames ? clip_left : frames;
    if (!n) /* no clip: there is no pointer to step */
       return 0;
-   for (i = 0; i < n * 2; i++)
-      pump_sum[i] += clip_play[i] * clip_play_gain;
+   for (i = 0; i < n; i++)
+   {
+      pump_sum[i * mix_channels + 0] += clip_play[i * 2 + 0] * clip_play_gain;
+      pump_sum[i * mix_channels + 1] += clip_play[i * 2 + 1] * clip_play_gain;
+   }
    clip_play += n * 2;
    clip_left -= n;
    return n;
@@ -236,7 +281,8 @@ static unsigned pump_mix(unsigned frames)
    unsigned most = 0;
    if (frames > PUMP_FRAMES)
       frames = PUMP_FRAMES;
-   memset(pump_sum, 0, frames * 2 * sizeof(pump_sum[0]));
+   memset(pump_sum, 0, frames * mix_channels * sizeof(pump_sum[0]));
+   pump_wide = 0;
    most = pump_clip(frames);
 
    for (i = 0; i < AUDIO_MIX_INPUTS; i++)
@@ -267,8 +313,8 @@ unsigned audio_mix_pump(int16_t* ring, uint32_t ring_mask, uint32_t at, unsigned
    for (i = 0; i < most; i++)
    {
       uint32_t pos  = ((at + i) & ring_mask) * 2;
-      ring[pos + 0] = round_s16(pump_sum[i * 2 + 0]);
-      ring[pos + 1] = round_s16(pump_sum[i * 2 + 1]);
+      ring[pos + 0] = round_s16(pump_sum[i * mix_channels + 0]);
+      ring[pos + 1] = round_s16(pump_sum[i * mix_channels + 1]);
    }
    return most;
 }
@@ -288,10 +334,35 @@ unsigned audio_mix_pump_f32(float* ring, uint32_t ring_mask, uint32_t at, unsign
    for (i = 0; i < most; i++)
    {
       uint32_t pos  = ((at + i) & ring_mask) * 2;
-      ring[pos + 0] = to_unit(pump_sum[i * 2 + 0]);
-      ring[pos + 1] = to_unit(pump_sum[i * 2 + 1]);
+      ring[pos + 0] = to_unit(pump_sum[i * mix_channels + 0]);
+      ring[pos + 1] = to_unit(pump_sum[i * mix_channels + 1]);
    }
    return most;
+}
+
+unsigned audio_mix_mix(unsigned frames, unsigned* channels)
+{
+   const unsigned most = pump_mix(frames);
+   *channels           = pump_wide ? 8 : 2;
+   return most;
+}
+
+void audio_mix_take_f32(float* dst, unsigned first, unsigned count, unsigned channels)
+{
+   unsigned i, c;
+   const float* sum = pump_sum + first * mix_channels;
+   for (i = 0; i < count; i++)
+      for (c = 0; c < channels; c++)
+         dst[i * channels + c] = to_unit(sum[i * mix_channels + c]);
+}
+
+void audio_mix_take_s16(int16_t* dst, unsigned first, unsigned count, unsigned channels)
+{
+   unsigned i, c;
+   const float* sum = pump_sum + first * mix_channels;
+   for (i = 0; i < count; i++)
+      for (c = 0; c < channels; c++)
+         dst[i * channels + c] = round_s16(sum[i * mix_channels + c]);
 }
 
 void audio_mix_resampler_init(audio_mix_resampler_t* r, unsigned src_hz, unsigned channels)
@@ -464,4 +535,25 @@ void audio_mix_convert_f32(float* dst, const float* src, unsigned frames, unsign
          dst[i * 2 + 1] = (s[1] + c + FOLD_SURROUND * (s[5] + s[7])) * g;
       }
    }
+}
+
+void audio_mix_convert_s16_wide(float* dst, const int16_t* src, unsigned frames,
+                                const int* order, const float* gains)
+{
+   unsigned i, c;
+   for (i = 0; i < frames; i++)
+      for (c = 0; c < 8; c++)
+         dst[i * 8 + c] = src[i * 8 + order[c]] * gains[c];
+}
+
+void audio_mix_convert_f32_wide(float* dst, const float* src, unsigned frames,
+                                const int* order, const float* gains)
+{
+   unsigned i, c;
+   float g[8];
+   for (c = 0; c < 8; c++)
+      g[c] = gains[c] * 32768.0f;
+   for (i = 0; i < frames; i++)
+      for (c = 0; c < 8; c++)
+         dst[i * 8 + c] = src[i * 8 + order[c]] * g[c];
 }

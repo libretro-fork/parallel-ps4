@@ -25,16 +25,24 @@ constexpr u64 VOLUME_CHECK_INTERVAL_US = 50000;
 constexpr s64 FRONTEND_WAIT_US = 250000;
 
 // The libretro core plays a port by handing it to the frontend: what the game writes is
-// converted to stereo, with the port's volume, straight into its input of the core's
-// mix (libretro/audio_mix.h). The port is paced by what the frontend takes, as a device would
-// pace it: it waits while more than about 32 ms of its sound is still queued.
+// converted, with the port's volume, straight into its input of the core's mix
+// (libretro/audio_mix.h): to stereo, or a port of eight channels as 7.1 where the mix is
+// surround (the frontend takes it), in the frontend's order. The port is paced by what the frontend
+// takes, as a device would pace it: it waits while more than about 32 ms of its sound is still
+// queued.
 class FrontendPortBackend final : public PortBackend {
 public:
     explicit FrontendPortBackend(const PortOut& port)
         : buffer_frames(port.buffer_frames), num_channels(port.format_info.num_channels),
-          is_float(port.format_info.is_float), input(audio_mix_input_open()) {
+          is_float(port.format_info.is_float),
+          wide(port.format_info.num_channels == 8 && audio_mix_channels() == 8),
+          order(port.format_info.channel_layout),
+          input(wide ? audio_mix_input_open_channels(8) : audio_mix_input_open()) {
         retro_atomic_store_relaxed_int(
             &gain, std::bit_cast<int>(emu_settings_get_volume_slider() * 0.01f));
+        for (auto& g : channel_gain) {
+            retro_atomic_store_relaxed_int(&g, std::bit_cast<int>(1.0f));
+        }
         if (!input) {
             LOG_ERROR(Lib_AudioOut, "No input left in the core's mix: port type {} is silent",
                       static_cast<int>(port.type));
@@ -46,8 +54,8 @@ public:
             input = nullptr;
             return;
         }
-        LOG_INFO(Lib_AudioOut, "Opened audio port type {} for the frontend ({} ch)",
-                 static_cast<int>(port.type), num_channels);
+        LOG_INFO(Lib_AudioOut, "Opened audio port type {} for the frontend ({} ch{})",
+                 static_cast<int>(port.type), num_channels, wide ? ", as 7.1" : "");
     }
 
     ~FrontendPortBackend() override {
@@ -73,7 +81,23 @@ public:
                 break;
             }
             const void* at = src + static_cast<size_t>(done) * num_channels * sample_bytes;
-            if (is_float) {
+            if (wide) {
+                // Each channel at its own volume, as the game set it, times the option's
+                const float slider = emu_settings_get_volume_slider() * 0.01f;
+                std::array<float, 8> gains;
+                for (u32 c = 0; c < 8; c++) {
+                    gains[c] = std::bit_cast<float>(
+                                   retro_atomic_load_relaxed_int(&channel_gain[order[c] & 7])) *
+                               slider;
+                }
+                if (is_float) {
+                    audio_mix_convert_f32_wide(dst, static_cast<const float*>(at), got,
+                                               order.data(), gains.data());
+                } else {
+                    audio_mix_convert_s16_wide(dst, static_cast<const s16*>(at), got, order.data(),
+                                               gains.data());
+                }
+            } else if (is_float) {
                 audio_mix_convert_f32(dst, static_cast<const float*>(at), got, num_channels, g);
             } else {
                 audio_mix_convert_s16(dst, static_cast<const s16*>(at), got, num_channels, g);
@@ -91,6 +115,11 @@ public:
                 std::max(max_channel_gain, static_cast<float>(ch_volumes[i]) * INV_VOLUME_0DB);
         }
         retro_atomic_store_relaxed_int(&game_gain, std::bit_cast<int>(max_channel_gain));
+        for (u32 i = 0; i < channels; i++) {
+            retro_atomic_store_relaxed_int(
+                &channel_gain[i],
+                std::bit_cast<int>(static_cast<float>(ch_volumes[i]) * INV_VOLUME_0DB));
+        }
         retro_atomic_store_relaxed_int(
             &gain, std::bit_cast<int>(max_channel_gain * emu_settings_get_volume_slider() * 0.01f));
     }
@@ -112,7 +141,13 @@ private:
     const u32 buffer_frames;
     const u32 num_channels;
     const bool is_float;
+    // Eight channels kept as 7.1: the mix is surround. The port's channels in the mix's order:
+    // channel c of the mix is the port's order[c] (the console has two 7.1 orders)
+    const bool wide;
+    const std::array<int, 8> order;
     audio_mix_input_t* input;
+    // Wide: each of the port's channels' volume as the game set it (its order)
+    std::array<retro_atomic_int_t, 8> channel_gain{};
     retro_atomic_int_t gain{1};
     retro_atomic_int_t game_gain{1};
     u64 last_volume_check_time{0};
