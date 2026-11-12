@@ -198,7 +198,7 @@ Look for it in every change, in audio, video, textures, input and any conversion
 
 Not there yet. These are debts, not precedent:
 
-1. A game's 10-bit output (`A2R10G10B10` and its sRGB and PQ forms) is drawn into an 8-bit frame (`vk_swapchain.cpp` makes every frame `B8G8R8A8Unorm`) and handed to the frontend at 8 bits; the GPU-frame path could hand a 10-bit image and narrow only on the readback path, which is `XRGB8888` by libretro's definition.
+1. A game's HDR output is not passed on: the core tells games there is no HDR display (`IsHDRSupported` in `vk_presenter.h`), so they choose their SDR picture. RetroArch takes HDR10 from a core (`RETRO_PIXEL_FORMAT_HDR10_2101010`, `RETRO_ENVIRONMENT_GET_HDR_METADATA`); passing it on means telling the game, encoding an SDR picture and the overlays to PQ when the game does not, and keeping the readback path in step. (The frames themselves are ten bits a channel; only a readback for a frontend that cannot share the images narrows them to `XRGB8888`.)
 2. `ngs2_core.c` writes a game's 16-bit output buffers at a scale of 32767, cut towards zero. That output is read by the game, so what Sony's library does there decides it, and it is not known.
 3. Music is decoded whole to 16 bits before it is resampled, a rounding before the mix's own. Decoding it whole to float instead would double the memory a track takes; the fix is to decode it a block at a time, as it is played, in float, which removes the whole-track buffer and the extra rounding together. (The trophy sound is decoded to float: it is short.)
 4. libretro-common's FLAC decoder takes a 24-bit stream to 16 bits by shifting, which rounds down, not to the nearest; a fix goes to RetroArch's libretro-common first.

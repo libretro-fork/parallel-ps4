@@ -130,16 +130,40 @@ static vk::Rect2D FitImage(s32 frame_width, s32 frame_height, s32 swapchain_widt
                          dst_rect.offset.x, dst_rect.offset.y);
 }
 
-// A finished frame read back for the frontend, as XRGB8888.
+// A finished frame read back for the frontend, as XRGB8888. A frame of ten bits a channel is
+// narrowed to it first, on the GPU, into an image of the readback's own: the one place the
+// picture loses its last two bits, and only for a frontend that cannot share the images.
 struct FrameReadback {
     VideoCore::Buffer buffer;
     u32 width{};
     u32 height{};
+    vk::Image narrow{};
+    MemoryAllocation narrow_allocation{};
 
-    FrameReadback(const Instance& instance, const u32 width_, const u32 height_)
+    FrameReadback(const Instance& instance, const u32 width_, const u32 height_,
+                  const vk::Format format)
         : buffer{instance, 0, static_cast<u64>(width_) * static_cast<u64>(height_) * 4,
                  VideoCore::MemoryType::HostCached},
-          width{width_}, height{height_} {}
+          width{width_}, height{height_} {
+        if (format == vk::Format::eB8G8R8A8Unorm) {
+            return;
+        }
+        const vk::ImageCreateInfo image_info = {
+            .imageType = vk::ImageType::e2D,
+            .format = vk::Format::eB8G8R8A8Unorm,
+            .extent = {width, height, 1},
+            .mipLevels = 1,
+            .arrayLayers = 1,
+            .samples = vk::SampleCountFlagBits::e1,
+            .tiling = vk::ImageTiling::eOptimal,
+            .usage = vk::ImageUsageFlagBits::eTransferDst | vk::ImageUsageFlagBits::eTransferSrc,
+        };
+        if (instance.GetAllocator()->CreateImage(image_info, false, narrow, narrow_allocation) !=
+            vk::Result::eSuccess) {
+            LOG_CRITICAL(Render_Vulkan, "No image to read a frame back through");
+            UNREACHABLE();
+        }
+    }
 };
 
 // The libretro core reads every frame back, and a buffer made for each one cost more than the
@@ -152,7 +176,7 @@ static std::vector<std::shared_ptr<FrameReadback>>& FrameReadbacks() {
 }
 
 static std::shared_ptr<FrameReadback> TakeFrameReadback(const Instance& instance, const u32 width,
-                                                        const u32 height) {
+                                                        const u32 height, const vk::Format format) {
     auto kept = frame_readbacks_combiner.Run([&]() -> std::shared_ptr<FrameReadback> {
         auto& readbacks = FrameReadbacks();
         for (auto it = readbacks.begin(); it != readbacks.end(); ++it) {
@@ -167,7 +191,7 @@ static std::shared_ptr<FrameReadback> TakeFrameReadback(const Instance& instance
     if (kept) {
         return kept;
     }
-    return std::make_shared<FrameReadback>(instance, width, height);
+    return std::make_shared<FrameReadback>(instance, width, height, format);
 }
 
 // Called where a frame's buffer used to be destroyed, once its frame has been handed over.
@@ -207,6 +231,62 @@ static void CopyImageToReadback(const vk::CommandBuffer& cmdbuf, const vk::Image
         .imageExtent = {readback.width, readback.height, 1},
     };
     cmdbuf.copyImageToBuffer(image, layout, readback.buffer.Handle(), copy_region);
+}
+
+// The ten-bit frame narrowed to the readback's XRGB8888 image, rounded to the nearest step
+// by the blit, and that copied to its buffer
+static void NarrowToReadback(const vk::CommandBuffer& cmdbuf, const vk::Image image,
+                             FrameReadback& readback) {
+    const vk::ImageSubresourceRange range = {
+        .aspectMask = vk::ImageAspectFlagBits::eColor,
+        .baseMipLevel = 0,
+        .levelCount = 1,
+        .baseArrayLayer = 0,
+        .layerCount = 1,
+    };
+    const vk::ImageMemoryBarrier to_dst = {
+        .srcAccessMask = vk::AccessFlagBits::eTransferRead,
+        .dstAccessMask = vk::AccessFlagBits::eTransferWrite,
+        .oldLayout = vk::ImageLayout::eUndefined,
+        .newLayout = vk::ImageLayout::eTransferDstOptimal,
+        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .image = readback.narrow,
+        .subresourceRange = range,
+    };
+    cmdbuf.pipelineBarrier(vk::PipelineStageFlagBits::eTransfer,
+                           vk::PipelineStageFlagBits::eTransfer, {}, {}, {}, to_dst);
+    const vk::ImageSubresourceLayers layers = {
+        .aspectMask = vk::ImageAspectFlagBits::eColor,
+        .mipLevel = 0,
+        .baseArrayLayer = 0,
+        .layerCount = 1,
+    };
+    const std::array<vk::Offset3D, 2> corners = {
+        vk::Offset3D{0, 0, 0},
+        vk::Offset3D{static_cast<s32>(readback.width), static_cast<s32>(readback.height), 1},
+    };
+    const vk::ImageBlit blit = {
+        .srcSubresource = layers,
+        .srcOffsets = corners,
+        .dstSubresource = layers,
+        .dstOffsets = corners,
+    };
+    cmdbuf.blitImage(image, vk::ImageLayout::eTransferSrcOptimal, readback.narrow,
+                     vk::ImageLayout::eTransferDstOptimal, blit, vk::Filter::eNearest);
+    const vk::ImageMemoryBarrier to_src = {
+        .srcAccessMask = vk::AccessFlagBits::eTransferWrite,
+        .dstAccessMask = vk::AccessFlagBits::eTransferRead,
+        .oldLayout = vk::ImageLayout::eTransferDstOptimal,
+        .newLayout = vk::ImageLayout::eTransferSrcOptimal,
+        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .image = readback.narrow,
+        .subresourceRange = range,
+    };
+    cmdbuf.pipelineBarrier(vk::PipelineStageFlagBits::eTransfer,
+                           vk::PipelineStageFlagBits::eTransfer, {}, {}, {}, to_src);
+    CopyImageToReadback(cmdbuf, readback.narrow, vk::ImageLayout::eTransferSrcOptimal, readback);
 }
 
 Presenter::Presenter(Frontend::Window& window_, AmdGpu::Liverpool* liverpool_)
@@ -693,7 +773,8 @@ void Presenter::Present(Frame* frame, bool is_reusing_frame, bool is_game_frame)
         // into a buffer that is used again - unless the frontend draws from the image itself.
         const bool read_back_frame = !Libretro::GpuFramesActive();
         if (read_back_frame) {
-            frame_readback = TakeFrameReadback(instance, extent.width, extent.height);
+            frame_readback = TakeFrameReadback(instance, extent.width, extent.height,
+                                               swapchain.GetSurfaceFormat().format);
             auto& readback = *frame_readback;
 
             const vk::ImageMemoryBarrier to_transfer{
@@ -716,8 +797,12 @@ void Presenter::Present(Frame* frame, bool is_reusing_frame, bool is_game_frame)
             cmdbuf.pipelineBarrier(vk::PipelineStageFlagBits::eColorAttachmentOutput,
                                    vk::PipelineStageFlagBits::eTransfer,
                                    vk::DependencyFlagBits::eByRegion, {}, {}, to_transfer);
-            CopyImageToReadback(cmdbuf, swapchain_image, vk::ImageLayout::eTransferSrcOptimal,
-                                readback);
+            if (readback.narrow) {
+                NarrowToReadback(cmdbuf, swapchain_image, readback);
+            } else {
+                CopyImageToReadback(cmdbuf, swapchain_image, vk::ImageLayout::eTransferSrcOptimal,
+                                    readback);
+            }
             read_back = true;
         }
 

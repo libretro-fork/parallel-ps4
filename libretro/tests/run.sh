@@ -84,6 +84,10 @@ $CC -std=c89 -O1 -g -Wall -Wno-unused-function -fsanitize=address,undefined \
 $CC -std=c89 -O1 -g -Wall -fsanitize=address,undefined -Isrc -I$L/include \
     libretro/tests/sample_locs_test.c src/video_core/amdgpu/sample_locs.c -o "$OUT/sample_locs_test"
 "$OUT/sample_locs_test"
+# The frames' ten-bit format on a device, and a readback's narrowing of it to XRGB8888
+$CC -std=c89 -O1 -g -Wall -fsanitize=address,undefined -isystem externals/vulkan-headers/include \
+    libretro/tests/frame_narrow_device_test.c -o "$OUT/frame_narrow_device_test" -ldl
+ASAN_OPTIONS=detect_leaks=0 "$OUT/frame_narrow_device_test"
 # The depth-to-colour shader on a real device: each sample of a depth buffer's depth and stencil
 # comes out as the colour it should
 $CC -std=c89 -O1 -g -Wall -fsanitize=address,undefined -isystem externals/vulkan-headers/include \

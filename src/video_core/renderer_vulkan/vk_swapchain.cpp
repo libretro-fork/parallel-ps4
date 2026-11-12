@@ -14,13 +14,24 @@
 namespace Vulkan {
 
 // The libretro core has no surface to present to: the "swapchain" is a few images of its own,
-// taken in turn, and the presenter reads each finished one back for the frontend. B8G8R8A8 is
-// the frontend's XRGB8888 byte for byte.
+// taken in turn, which the frontend draws from or the presenter reads back for it.
 static constexpr u32 OFFSCREEN_IMAGE_COUNT = 3;
 
 Swapchain::Swapchain(const Instance& instance_, const Frontend::Window& window_)
     : instance{instance_}, window{window_} {
-    surface_format.format = vk::Format::eB8G8R8A8Unorm;
+    // Ten bits a channel, so a game that outputs ten (A2R10G10B10) reaches the frontend with
+    // all of them: RetroArch draws from an image of any format. A frame read back for a
+    // frontend that cannot share the images is narrowed to its XRGB8888 there, once
+    // (vk_presenter.cpp). Eight bits where the device cannot draw to, blit from and sample
+    // the ten-bit format, which Vulkan requires of every device.
+    static constexpr vk::FormatFeatureFlags2 Needed =
+        vk::FormatFeatureFlagBits2::eColorAttachment |
+        vk::FormatFeatureFlagBits2::eColorAttachmentBlend |
+        vk::FormatFeatureFlagBits2::eSampledImage | vk::FormatFeatureFlagBits2::eBlitSrc |
+        vk::FormatFeatureFlagBits2::eTransferSrc | vk::FormatFeatureFlagBits2::eTransferDst;
+    surface_format.format = instance.IsFormatSupported(vk::Format::eA2B10G10R10UnormPack32, Needed)
+                                ? vk::Format::eA2B10G10R10UnormPack32
+                                : vk::Format::eB8G8R8A8Unorm;
     surface_format.colorSpace = vk::ColorSpaceKHR::eSrgbNonlinear;
 
     Create(window.GetWidth(), window.GetHeight());
@@ -117,6 +128,29 @@ bool Swapchain::CreateSharedImages() {
     const vk::ImageUsageFlags usage =
         vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eTransferSrc |
         vk::ImageUsageFlagBits::eTransferDst | vk::ImageUsageFlagBits::eSampled;
+    {
+        // Images of this format can be exported: else they are read back, as when sharing fails
+        const vk::PhysicalDeviceExternalImageFormatInfo external_format_info = {
+            .handleType = handle_type,
+        };
+        const vk::PhysicalDeviceImageFormatInfo2 format_info = {
+            .pNext = &external_format_info,
+            .format = surface_format.format,
+            .type = vk::ImageType::e2D,
+            .tiling = vk::ImageTiling::eOptimal,
+            .usage = usage,
+        };
+        vk::StructureChain<vk::ImageFormatProperties2, vk::ExternalImageFormatProperties> props;
+        const vk::Result result = instance.GetPhysicalDevice().getImageFormatProperties2(
+            &format_info, &props.get<vk::ImageFormatProperties2>());
+        if (result != vk::Result::eSuccess ||
+            !(props.get<vk::ExternalImageFormatProperties>()
+                  .externalMemoryProperties.externalMemoryFeatures &
+              vk::ExternalMemoryFeatureFlagBits::eExportable)) {
+            Libretro::GpuFramesFailed("the emulator's images cannot be exported in their format");
+            return false;
+        }
+    }
 
     std::vector<u64> handles;
     std::vector<u64> sizes;
