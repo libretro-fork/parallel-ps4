@@ -29,6 +29,10 @@ const void* vk_device_fault_mark(const char* what, uint64_t a, uint64_t b, uint6
  * numbers), on the thread that records; null ends that. */
 void vk_device_fault_sink(void (*sink)(const char* what, const uint64_t* v));
 
+/* Whether notes are being given to a sink: what is only worth gathering for
+ * one is gathered then */
+int vk_device_fault_sinking(void);
+
 /* @get: the device's vkGetDeviceFaultInfoEXT, or null where the device has
  * not the extension. @checkpoints: its vkGetQueueCheckpointDataNV for
  * @queue, or null. */

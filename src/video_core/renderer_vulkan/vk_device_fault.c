@@ -49,6 +49,10 @@ void vk_device_fault_sink(void (*sink)(const char* what, const uint64_t* v)) {
     mark_sink = sink;
 }
 
+int vk_device_fault_sinking(void) {
+    return mark_sink != NULL;
+}
+
 const void* vk_device_fault_mark(const char* what, uint64_t a, uint64_t b, uint64_t c, uint64_t d) {
     fault_mark* m = &marks[mark_seq % MARKS];
     m->what = what;

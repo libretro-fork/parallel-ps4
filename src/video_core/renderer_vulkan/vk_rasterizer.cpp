@@ -12,6 +12,7 @@
 #include "video_core/buffer_cache/buffer.h"
 #include "video_core/buffer_cache/buffer_cache.h"
 #include "video_core/renderer_vulkan/liverpool_to_vk.h"
+#include "video_core/renderer_vulkan/vk_device_fault.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_pipeline_cache.h"
 #include "video_core/renderer_vulkan/vk_rasterizer.h"
@@ -66,8 +67,53 @@ static u32 Raw(const T& reg) {
     return raw;
 }
 
+/// While a frame's notes are being written out: the registers a draw is asked with that
+/// changed since the draw before (all that are not zero, for the first), four to a note
+static void NoteRegisters(const Instance& instance, const AmdGpu::Regs& regs) {
+    static constexpr u32 Ranges[][2] = {
+        {AmdGpu::Regs::ContextRegWordOffset, 0x400},
+        {AmdGpu::Regs::UconfigRegWordOffset, 0x400},
+    };
+    static u32 seen[2][0x400];
+    static bool sinking;
+    if (!vk_device_fault_sinking()) {
+        sinking = false;
+        return;
+    }
+    if (!sinking) {
+        sinking = true;
+        std::memset(seen, 0, sizeof(seen));
+    }
+    u64 pairs[4];
+    u32 num = 0;
+    for (u32 r = 0; r < 2; ++r) {
+        for (u32 i = 0; i < Ranges[r][1]; ++i) {
+            const u32 index = Ranges[r][0] + i;
+            const u32 value = regs.reg_array[index];
+            if (value == seen[r][i]) {
+                continue;
+            }
+            seen[r][i] = value;
+            pairs[num++] = u64(index) | u64(value) << 32;
+            if (num == 4) {
+                instance.Note("registers: index|value<<32, four of them", pairs[0], pairs[1],
+                              pairs[2], pairs[3]);
+                num = 0;
+            }
+        }
+    }
+    if (num) {
+        for (u32 i = num; i < 4; ++i) {
+            pairs[i] = 0;
+        }
+        instance.Note("registers: index|value<<32, four of them", pairs[0], pairs[1], pairs[2],
+                      pairs[3]);
+    }
+}
+
 bool Rasterizer::FilterDraw() {
     const auto& regs = liverpool->regs;
+    NoteRegisters(instance, regs);
     // Every draw the game asks for, before anything is made of it
     instance.Note("draw asked: vertex shader|pixel shader<<32, db render control|db "
                   "eqaa<<32, aa config|colour control<<32, depth control|ps input ena<<40|ps "

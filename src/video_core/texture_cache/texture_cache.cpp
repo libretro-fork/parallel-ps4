@@ -873,7 +873,19 @@ void TextureCache::AssociateStencil(ImageId depth_id, const ImageInfo& depth_inf
 }
 
 void TextureCache::RefreshImage(Image& image) {
-    if (False(image.flags & ImageFlagBits::Dirty) || image.info.num_samples > 1) {
+    if (False(image.flags & ImageFlagBits::Dirty)) {
+        return;
+    }
+    if (image.info.num_samples > 1) {
+        // A multisampled image is not read from the game's memory. One nothing has drawn into
+        // yet holds whatever the GPU's memory held: zero is what a shader then reads from it
+        if (!image.info.props.is_depth && image.backing &&
+            False(image.flags & ImageFlagBits::GpuModified)) {
+            SubresourceRange range{};
+            range.extent.levels = 1;
+            range.extent.layers = image.info.resources.layers;
+            runtime.ClearImage(&image, range, vk::ClearValue{});
+        }
         return;
     }
     if (image.IsScaled()) {
