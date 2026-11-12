@@ -423,18 +423,18 @@ struct retro_core_option_v2_definition option_defs_us[] = {
         "disabled"
     },
     {
-        "shadps4_sample_positions",
-        "Game's Sample Positions",
+        "shadps4_game_sample_positions",
+        "Game's Sample Positions (experimental)",
         NULL,
-        "Where a game moves the samples of a multisampled pixel, the GPU is told to put them there (it needs VK_EXT_sample_locations). A PS4 Pro game that renders a checkerboard (Sekiro) depends on it for smooth edges. Switch off if a game that looked right stops doing so; takes effect when a game is started.",
+        "Where a game moves the samples of a multisampled pixel, the GPU is told to put them there (it needs VK_EXT_sample_locations). A PS4 Pro game that renders a checkerboard (Sekiro) depends on it for smooth edges. Not yet run on any GPU, so off unless switched on; takes effect when a game is started.",
         NULL,
         "video",
         {
-            { "enabled",  NULL },
             { "disabled", NULL },
+            { "enabled",  NULL },
             { NULL, NULL },
         },
-        "enabled"
+        "disabled"
     },
     {
         "shadps4_show_fps",

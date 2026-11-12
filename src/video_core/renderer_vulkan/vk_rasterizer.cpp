@@ -118,6 +118,7 @@ static void NoteRegisters(const Instance& instance, const AmdGpu::Regs& regs) {
 
 bool Rasterizer::FilterDraw() {
     const auto& regs = liverpool->regs;
+    frame_notes_draw();
     NoteRegisters(instance, regs);
     // Every draw the game asks for, before anything is made of it
     instance.Note("draw asked: vertex shader|pixel shader<<32, db render control|db "

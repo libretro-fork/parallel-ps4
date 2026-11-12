@@ -9,13 +9,14 @@
 #include "video_core/renderer_vulkan/frame_notes.h"
 #include "video_core/renderer_vulkan/vk_device_fault.h"
 
-#define EVERY 900u  /* frames from one written frame to the next */
-#define AT_MOST 3u  /* frames written in all */
-#define FIRST 1800u /* the first frame written: by then a game is past its logos */
+#define BUSY 400u  /* draws in a frame from which it counts as one of the game proper */
+#define APART 300u /* frames from one written frame to the next */
+#define AT_MOST 3u /* frames written in all */
 
 static RFILE* file;
 static unsigned long flips;
 static unsigned written;
+static unsigned long draws, last_written;
 static const char* frame_dir;
 
 static void note(const char* what, const uint64_t* v) {
@@ -33,16 +34,24 @@ void frame_notes_flip(const char* dir) {
         file = NULL;
     }
     ++flips;
-    if (dir && flips >= FIRST && flips % EVERY == 0 && written < AT_MOST && strlen(dir) < 3900) {
+    /* The frame after a busy one, so not a logo or a loading screen */
+    if (dir && draws >= BUSY && written < AT_MOST && (!written || flips - last_written >= APART) &&
+        strlen(dir) < 3900) {
         char path[4096];
         sprintf(path, "%s/frame_%05lu.txt", dir, flips);
         file = filestream_open(path, RETRO_VFS_FILE_ACCESS_WRITE, RETRO_VFS_FILE_ACCESS_HINT_NONE);
         if (file) {
             ++written;
+            last_written = flips;
             frame_dir = dir;
             vk_device_fault_sink(note);
         }
     }
+    draws = 0;
+}
+
+void frame_notes_draw(void) {
+    ++draws;
 }
 
 unsigned long frame_notes_frame(void) {
