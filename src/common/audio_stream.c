@@ -421,16 +421,26 @@ int audio_stream_seek(audio_stream_t* s, uint64_t frame) {
         rmp3_seek_to_frame(s->mp3, frame);
         s->pos = frame;
         return 1;
-    case AUDIO_STREAM_FLAC:
-        /* Forward to it, from the start when it is behind: the seek table's offset comes
-         * without the frame it is at. Only going back makes the decoder again. */
-        if (frame < s->pos) {
+    case AUDIO_STREAM_FLAC: {
+        /* From the stream's seek table, when it has one and its point is ahead of where the
+         * stream is or the frame is behind: input resumed at the point's byte, at the point's
+         * own frame. Else forward from where the stream is, or, behind it with no table, from
+         * the start, which makes the decoder again. Then decoded on to the frame. */
+        uint64_t offset = 0, point = 0;
+        if (rflac_seek_point(s->flac, frame, &offset, &point) == RFLAC_PROCESS_NEXT &&
+            offset < s->size && point <= frame && (point > s->pos || frame < s->pos)) {
+            rflac_seek_resumed(s->flac, point);
+            rflac_set_in(s->flac, s->data + offset, s->size - (size_t)offset);
+            rflac_set_eof(s->flac);
+            s->pos = point;
+        } else if (frame < s->pos) {
             if (!flac_start(s))
                 return 0;
             s->pos = 0;
         }
         skip(s, frame - s->pos);
         return 1;
+    }
     case AUDIO_STREAM_ADTS: {
         /* Whole ADTS frames are passed over by their headers, up to one access unit
          * before the frame: that one is decoded, to fill the decoder's overlap */

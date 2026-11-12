@@ -12,11 +12,12 @@
  * its first AAC track, its packets demuxed by rmp4 as they are needed.
  *
  * The file is read where it lies and must outlive the stream. Opening
- * allocates the decoder's state and reading allocates nothing. A seek
- * allocates nothing either, but in a FLAC when it goes back: rflac can only
- * be taken back to the start by making its state again (rflac_reset frees
- * it too). A seek forward in an MP3 or a FLAC decodes on from where the
- * stream is; back, from the start. */
+ * allocates the decoder's state and reading allocates nothing, nor does
+ * seeking, with one exception: a seek back in a FLAC with no seek table
+ * makes rflac's state again, its only way back to the start (rflac_reset
+ * frees it too). A FLAC's seek table is used where it has one; else a seek
+ * forward in an MP3 or a FLAC decodes on from where the stream is, and
+ * back, from the start. */
 
 #include <stddef.h>
 #include <stdint.h>

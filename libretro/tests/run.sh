@@ -103,8 +103,17 @@ if command -v ffmpeg >/dev/null 2>&1; then
         -f adts "$OUT/sine_sbr.aac"
     ffmpeg -loglevel error -y -f lavfi -i "$sine:sample_rate=22050" -ac 2 -c:a aac \
         "$OUT/sine_sbr.m4a"
-    "$OUT/audio_stream_test" "$OUT/sine.flac" "$OUT/sine.mp3" "$OUT/sine_notag.mp3" \
-        "$OUT/sine.aac" "$OUT/sine.m4a" "$OUT/sine_sbr.aac" "$OUT/sine_sbr.m4a"
+    files="$OUT/sine.flac $OUT/sine.mp3 $OUT/sine_notag.mp3 $OUT/sine.aac $OUT/sine.m4a"
+    files="$files $OUT/sine_sbr.aac $OUT/sine_sbr.m4a"
+    # A FLAC with a seek table, which seeks take a shortcut through (ffmpeg writes none)
+    if command -v flac >/dev/null 2>&1 && command -v metaflac >/dev/null 2>&1; then
+        ffmpeg -loglevel error -y -f lavfi -i "$sine:sample_rate=48000" -ac 2 -c:a pcm_s24le \
+            -fflags +bitexact "$OUT/sine24.wav"
+        flac --silent --force -S- -o "$OUT/sine_seektable.flac" "$OUT/sine24.wav"
+        metaflac --add-seekpoint=20x "$OUT/sine_seektable.flac"
+        files="$files $OUT/sine_seektable.flac"
+    fi
+    "$OUT/audio_stream_test" $files
 else
     "$OUT/audio_stream_test"
 fi
