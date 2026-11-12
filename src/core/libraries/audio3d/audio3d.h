@@ -92,8 +92,117 @@ struct OrbisAudio3dAttribute {
     u64 value_size;
 };
 
+// Fixed-size blocks out of one allocation made when a port opens, given back and taken again:
+// the sound the game hands over is never allocated for while it runs. Used under the port's
+// mutex.
+class BlockPool {
+public:
+    void Init(u32 block_bytes_, u32 count) {
+        block_bytes = block_bytes_;
+        storage.assign(static_cast<size_t>(block_bytes) * count, 0);
+        free_blocks.clear();
+        free_blocks.reserve(count);
+        for (u32 i = 0; i < count; i++) {
+            free_blocks.push_back(storage.data() + static_cast<size_t>(i) * block_bytes);
+        }
+    }
+    u8* Take() {
+        if (free_blocks.empty()) {
+            return nullptr;
+        }
+        u8* const block = free_blocks.back();
+        free_blocks.pop_back();
+        return block;
+    }
+    // Within the capacity reserved at Init: never allocates
+    void Give(u8* block) {
+        free_blocks.push_back(block);
+    }
+    u32 BlockBytes() const {
+        return block_bytes;
+    }
+
+private:
+    std::vector<u8> storage;
+    std::vector<u8*> free_blocks;
+    u32 block_bytes{};
+};
+
+// A queue of at most the capacity given at Init, in storage made then: pushing and popping
+// never allocate (a std::deque does, a chunk at a time, as it moves along). A popped slot is
+// kept as it is, so a slot that owns memory (a vector) keeps it for the next push.
+template <typename T>
+class FixedQueue {
+public:
+    void Init(u32 capacity) {
+        items.assign(capacity, T{});
+        head = 0;
+        count = 0;
+    }
+    u32 size() const {
+        return count;
+    }
+    bool empty() const {
+        return count == 0;
+    }
+    T& front() {
+        return items[head];
+    }
+    // The next slot, counted in; the caller fills it. Only below capacity.
+    T& push_slot() {
+        T& slot = items[(head + count) % items.size()];
+        ++count;
+        return slot;
+    }
+    void push_back(const T& item) {
+        push_slot() = item;
+    }
+    void pop_front() {
+        head = (head + 1) % static_cast<u32>(items.size());
+        --count;
+    }
+    void clear() {
+        head = 0;
+        count = 0;
+    }
+    bool full() const {
+        return count >= items.size();
+    }
+
+    class Iterator {
+    public:
+        Iterator(FixedQueue* q_, u32 i_) : q{q_}, i{i_} {}
+        T& operator*() const {
+            return q->items[(q->head + i) % q->items.size()];
+        }
+        Iterator& operator++() {
+            ++i;
+            return *this;
+        }
+        bool operator!=(const Iterator& other) const {
+            return i != other.i;
+        }
+
+    private:
+        FixedQueue* q;
+        u32 i;
+    };
+    Iterator begin() {
+        return Iterator{this, 0};
+    }
+    Iterator end() {
+        return Iterator{this, count};
+    }
+
+private:
+    std::vector<T> items;
+    u32 head{};
+    u32 count{};
+};
+
 struct AudioData {
     u8* sample_buffer;
+    BlockPool* pool{}; // where sample_buffer goes back to
     u32 num_samples;
     u32 num_channels{1}; // channels in sample_buffer
     OrbisAudio3dFormat format{
@@ -101,7 +210,7 @@ struct AudioData {
 };
 
 struct ObjectState {
-    std::deque<AudioData> pcm_queue;
+    FixedQueue<AudioData> pcm_queue;
     std::unordered_map<u32, std::vector<u8>> persistent_attributes;
     bool unreserved{false};
 };
@@ -112,7 +221,8 @@ struct AssociatedAudioOutPort {
     u32 buffer_bytes{0};
     u32 samples_per_buffer{0};
     bool is_float{false};
-    std::deque<std::vector<u8>> pending;
+    // Buffers of buffer_bytes each, made when the port is opened
+    FixedQueue<std::vector<u8>> pending;
 };
 
 struct Port {
@@ -127,9 +237,13 @@ struct Port {
     // increasing counter for generating unique object IDs within this port.
     OrbisAudio3dObjectId next_object_id{0};
     // Bed audio queue
-    std::deque<AudioData> bed_queue;
+    FixedQueue<AudioData> bed_queue;
     // Mixed stereo frames ready to be consumed by sceAudio3dPortPush.
-    std::deque<AudioData> mixed_queue;
+    FixedQueue<AudioData> mixed_queue;
+    // The blocks queued sound is kept in: a bed's, up to 8 channels, and the rest (objects'
+    // mono sound and the stereo mix), made when the port opens
+    BlockPool bed_pool;
+    BlockPool sample_pool;
 };
 
 struct Audio3dState {
