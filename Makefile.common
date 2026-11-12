@@ -402,7 +402,7 @@ LRC_SOURCES_C += $(addprefix $(LRC_DIR)/formats/h264/,rh264.c)
 LRC_SOURCES_C += $(addprefix $(LRC_DIR)/formats/h265/,rh265.c rh265_sps_crop.c)
 LRC_SOURCES_C += $(addprefix $(LRC_DIR)/formats/json/,rjson.c)
 LRC_SOURCES_C += $(addprefix $(LRC_DIR)/formats/mp3/,rmp3.c)
-LRC_SOURCES_C += $(addprefix $(LRC_DIR)/formats/mp4/,rmp4.c rmp4_audio.c)
+LRC_SOURCES_C += $(addprefix $(LRC_DIR)/formats/mp4/,rmp4.c)
 LRC_SOURCES_C += $(addprefix $(LRC_DIR)/formats/png/,rpng.c rpng_encode.c)
 LRC_SOURCES_C += $(addprefix $(LRC_DIR)/formats/xml/,rxml.c)
 LRC_SOURCES_C += $(addprefix $(LRC_DIR)/formats/zar/,zar.c)
@@ -424,8 +424,6 @@ LRC_SOURCES_C += $(addprefix $(LRC_DIR)/vfs/,vfs_implementation.c)
 LRC_FLAGS := -I$(LRC_DIR)/include
 # HTTPS through libretro-common's own TLS client
 $(OBJ_DIR)/$(LRC_DIR)/net/net_http.c.o: CFLAGS += -DHAVE_SSL -DHAVE_RETROSSL
-# AAC in MP4/M4A, for the music player
-$(OBJ_DIR)/$(LRC_DIR)/formats/mp4/rmp4_audio.c.o: CFLAGS += -DHAVE_RAAC
 # Zstandard-compressed blocks in ZArchive
 $(OBJ_DIR)/$(LRC_DIR)/formats/zar/zar.c.o: CFLAGS += -DHAVE_RZSTD
 

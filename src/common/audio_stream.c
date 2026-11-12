@@ -7,13 +7,17 @@
 #include <formats/raac.h>
 #include <formats/rflac.h>
 #include <formats/rmp3.h>
-#include <formats/rmp4_audio.h>
+#include <formats/rmp4.h>
 
 #include "common/audio_stream.h"
 
 /* Frames decoded and dropped at a time, to seek where a decoder can only
  * go forward from the start */
 #define SCRATCH_FRAMES 1024
+
+/* Access units an AAC seek decodes before the one it lands in, to fill the decoder's overlap
+ * and, with SBR, its filter banks' history */
+#define PRIME_UNITS 2
 
 struct audio_stream {
     enum audio_stream_kind kind;
@@ -22,6 +26,7 @@ struct audio_stream {
     unsigned channels;
     unsigned rate;
     uint64_t frames;
+    uint64_t pos;   /* the frame the next read starts at */
     float* scratch; /* SCRATCH_FRAMES frames */
 
     rmp3* mp3;
@@ -38,8 +43,11 @@ struct audio_stream {
     unsigned au_got;    /* frames the last access unit decoded to */
     unsigned au_used;   /* of those, handed out */
 
-    int16_t* pcm16; /* MP4: the whole track */
-    uint64_t at;    /* MP4: the next frame */
+    rmp4_t* mp4;
+    int track;          /* the AAC track played */
+    uint64_t edit_skip; /* frames its edit list trims from the start (the encoder's delay) */
+    uint64_t drop;      /* frames of what is decoded next still to be dropped */
+    int mp4_end;        /* a seek went past the last access unit */
 };
 
 /* -- MP3 --------------------------------------------------------------- */
@@ -211,33 +219,98 @@ static int adts_open(audio_stream_t* s) {
     return s->frames != 0;
 }
 
-/* -- MP4 --------------------------------------------------------------- */
+/* -- MP4 / M4A (AAC) -------------------------------------------------- */
 
-static int mp4_open(audio_stream_t* s) {
-    size_t frames = 0;
-    unsigned rate = 0;
-    unsigned chans = 0;
-    if (!rmp4_audio_decode(s->data, s->size, 0, &s->pcm16, &frames, &rate, &chans))
+/* The next access unit of the track decoded, held in the decoder, what is to be dropped of it
+ * passed over. 0 at the end. */
+static int mp4_decode(audio_stream_t* s) {
+    rmp4_packet pkt;
+    if (s->mp4_end)
         return 0;
-    s->frames = frames;
-    s->rate = rate;
-    s->channels = chans;
-    return s->pcm16 && frames && rate && chans;
+    while (rmp4_read_packet(s->mp4, &pkt) == 1) {
+        int got;
+        unsigned n;
+        if (pkt.track != s->track)
+            continue;
+        got = raac_decode(s->aac, pkt.data, pkt.size);
+        if (got < 0)
+            continue; /* a malformed access unit: the decoder goes on with the next */
+        s->au_got = (unsigned)got;
+        n = s->drop < s->au_got ? (unsigned)s->drop : s->au_got;
+        s->au_used = n;
+        s->drop -= n;
+        if (s->au_used < s->au_got)
+            return 1;
+    }
+    return 0;
 }
 
 static size_t mp4_read(audio_stream_t* s, float* out, size_t frames) {
-    size_t i, n;
-    const int16_t* src;
-    if (s->at >= s->frames)
+    size_t got = 0;
+    while (got < frames) {
+        size_t n;
+        if (s->au_used == s->au_got && !mp4_decode(s))
+            break;
+        n = s->au_got - s->au_used;
+        if (n > frames - got)
+            n = frames - got;
+        raac_copy_f32(s->aac, s->au_used, n, out + got * s->channels);
+        s->au_used += (unsigned)n;
+        got += n;
+    }
+    return got;
+}
+
+/* The next read starts at access unit @sample, @drop frames of what it decodes dropped */
+static void mp4_restart(audio_stream_t* s, uint32_t sample, uint64_t drop) {
+    raac_reset(s->aac);
+    s->au_got = 0;
+    s->au_used = 0;
+    s->drop = drop;
+    s->mp4_end = !rmp4_select_track_sample(s->mp4, s->track, sample);
+}
+
+static int mp4_open(audio_stream_t* s) {
+    const rmp4_track* t = NULL;
+    uint32_t samples = 0;
+    int i;
+    s->mp4 = rmp4_open_memory(s->data, s->size);
+    if (!s->mp4)
         return 0;
-    if (frames > s->frames - s->at)
-        frames = (size_t)(s->frames - s->at);
-    n = frames * s->channels;
-    src = s->pcm16 + s->at * s->channels;
-    for (i = 0; i < n; i++)
-        out[i] = (float)src[i] * (1.0f / 32768.0f);
-    s->at += frames;
-    return frames;
+    /* The first AAC track, as rmp4_audio_decode takes it (the core builds no other codec into
+     * rmp4_audio) */
+    for (i = 0; i < rmp4_num_tracks(s->mp4); i++) {
+        const rmp4_track* c = rmp4_get_track(s->mp4, i);
+        if (c && c->type == RMP4_TRACK_AUDIO && c->codec == RMP4_CODEC_AAC) {
+            t = c;
+            s->track = i;
+            break;
+        }
+    }
+    if (!t || !rmp4_track_pts(s->mp4, s->track, &samples) || samples == 0)
+        return 0;
+    s->aac = raac_open(t->codec_private, t->codec_private_size);
+    if (!s->aac)
+        return 0;
+    s->channels = raac_channels(s->aac);
+    s->rate = raac_sample_rate(s->aac);
+    s->frame_len = raac_frame_len(s->aac);
+    if (s->channels == 0 || s->rate == 0 || s->frame_len == 0)
+        return 0;
+    s->scratch = (float*)malloc(sizeof(float) * SCRATCH_FRAMES * s->channels);
+    if (!s->scratch)
+        return 0;
+    /* The edit list's trim is in the track's own rate, core-rate samples, and the output is
+     * at twice that under SBR: converted as rmp4_audio does */
+    s->edit_skip = t->media_skip;
+    if (t->sample_rate && s->rate != t->sample_rate)
+        s->edit_skip = (t->media_skip * s->rate + t->sample_rate / 2) / t->sample_rate;
+    s->frames = (uint64_t)samples * s->frame_len;
+    if (s->frames <= s->edit_skip)
+        return 0;
+    s->frames -= s->edit_skip;
+    mp4_restart(s, 0, s->edit_skip);
+    return !s->mp4_end;
 }
 
 /* -- The stream --------------------------------------------------------- */
@@ -285,7 +358,8 @@ void audio_stream_close(audio_stream_t* s) {
         rflac_free(s->flac);
     if (s->aac)
         raac_close(s->aac);
-    free(s->pcm16);
+    if (s->mp4)
+        rmp4_close(s->mp4);
     free(s->scratch);
     free(s);
 }
@@ -303,17 +377,23 @@ uint64_t audio_stream_frames(const audio_stream_t* s) {
 }
 
 size_t audio_stream_read(audio_stream_t* s, float* out, size_t frames) {
+    size_t got = 0;
     switch (s->kind) {
     case AUDIO_STREAM_MP3:
-        return (size_t)rmp3_read_f32(s->mp3, frames, out);
+        got = (size_t)rmp3_read_f32(s->mp3, frames, out);
+        break;
     case AUDIO_STREAM_FLAC:
-        return flac_read(s, out, frames);
+        got = flac_read(s, out, frames);
+        break;
     case AUDIO_STREAM_ADTS:
-        return adts_read(s, out, frames);
+        got = adts_read(s, out, frames);
+        break;
     case AUDIO_STREAM_MP4:
-        return mp4_read(s, out, frames);
+        got = mp4_read(s, out, frames);
+        break;
     }
-    return 0;
+    s->pos += got;
+    return got;
 }
 
 /* @frames decoded and dropped */
@@ -332,15 +412,24 @@ int audio_stream_seek(audio_stream_t* s, uint64_t frame) {
         frame = s->frames;
     switch (s->kind) {
     case AUDIO_STREAM_MP3:
-        /* rmp3 decodes forward from the start: the bit reservoir reaches back */
+        /* rmp3 decodes forward to it, from the start when it is behind: the bit reservoir
+         * reaches back */
+        if (frame >= s->pos) {
+            skip(s, frame - s->pos);
+            return 1;
+        }
         rmp3_seek_to_frame(s->mp3, frame);
+        s->pos = frame;
         return 1;
     case AUDIO_STREAM_FLAC:
-        /* The seek table's offset comes without the frame it is at, so forward from the
-         * start too */
-        if (!flac_start(s))
-            return 0;
-        skip(s, frame);
+        /* Forward to it, from the start when it is behind: the seek table's offset comes
+         * without the frame it is at. Only going back makes the decoder again. */
+        if (frame < s->pos) {
+            if (!flac_start(s))
+                return 0;
+            s->pos = 0;
+        }
+        skip(s, frame - s->pos);
         return 1;
     case AUDIO_STREAM_ADTS: {
         /* Whole ADTS frames are passed over by their headers, up to one access unit
@@ -353,7 +442,7 @@ int audio_stream_seek(audio_stream_t* s, uint64_t frame) {
             if (!adts_next_frame(s))
                 break;
             len = (uint64_t)s->au_blocks * s->frame_len;
-            if (at + len + s->frame_len > frame) {
+            if (at + len + (uint64_t)PRIME_UNITS * s->frame_len > frame) {
                 s->adts_pos = pos;
                 s->au_blocks = 0;
                 break;
@@ -361,12 +450,26 @@ int audio_stream_seek(audio_stream_t* s, uint64_t frame) {
             at += len;
         }
         s->au_blocks = 0;
+        s->pos = at;
         skip(s, frame - at);
         return 1;
     }
-    case AUDIO_STREAM_MP4:
-        s->at = frame;
+    case AUDIO_STREAM_MP4: {
+        /* To the access unit before the one the frame is in, which is decoded to fill the
+         * decoder's overlap, and the frames before it in those two dropped */
+        const uint64_t at = frame + s->edit_skip;
+        const uint64_t unit = at / s->frame_len;
+        const uint64_t start = unit > PRIME_UNITS ? unit - PRIME_UNITS : 0;
+        s->pos = frame;
+        if (frame >= s->frames) {
+            s->au_got = 0;
+            s->au_used = 0;
+            s->mp4_end = 1;
+            return 1;
+        }
+        mp4_restart(s, (uint32_t)start, at - start * s->frame_len);
         return 1;
+    }
     }
     return 0;
 }

@@ -7,15 +7,16 @@
 /* An audio file held in memory (an MP3, FLAC, ADTS AAC or MP4/M4A),
  * decoded a block at a time, as it is played, with libretro-common's
  * decoders: for sound that is not the console's own, the music player.
- * Samples come out as floats, -1 to 1, interleaved: MP3, FLAC and ADTS are
- * decoded straight to float and nothing is rounded to 16 bits on the way.
- * An MP4 is still decoded whole when it is opened, to 16 bits (rmp4_audio
- * has no block decode); its frames are handed out as floats all the same.
+ * Samples come out as floats, -1 to 1, interleaved, decoded straight to
+ * float: nothing is rounded to 16 bits on the way. An MP4 is played from
+ * its first AAC track, its packets demuxed by rmp4 as they are needed.
  *
  * The file is read where it lies and must outlive the stream. Opening
  * allocates the decoder's state and reading allocates nothing. A seek
- * allocates nothing either, but in a FLAC: rflac can only be taken back to
- * the start by making its state again (rflac_reset frees it too). */
+ * allocates nothing either, but in a FLAC when it goes back: rflac can only
+ * be taken back to the start by making its state again (rflac_reset frees
+ * it too). A seek forward in an MP3 or a FLAC decodes on from where the
+ * stream is; back, from the start. */
 
 #include <stddef.h>
 #include <stdint.h>

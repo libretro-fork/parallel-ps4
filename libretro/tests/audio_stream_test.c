@@ -6,12 +6,13 @@
  * ffmpeg, a sine in each format; skipped when there are none):
  *   - the length it gives is what it reads,
  *   - reading in blocks of any size gives the same samples as in one go,
- *   - a seek lands on the frame asked for: the samples after it are the
- *     ones a read from the start has there (exactly; within 1e-3 for AAC,
- *     whose decoder is primed with one access unit before the frame),
- *   - the samples are not rounded to 16 bits (a 24-bit FLAC, an MP3 and an
- *     AAC have samples off the 16-bit grid; an MP4 is decoded whole to 16
- *     bits and is not checked for it).
+ *   - a seek, forward or back, lands on the frame asked for: the samples
+ *     after it are the ones a read from the start has there (exactly;
+ *     within 1e-3 for AAC, ADTS or MP4, whose decoder is primed with two
+ *     access units before the frame; with SBR one is not enough),
+ *   - the samples are not rounded to 16 bits (a 24-bit FLAC, MP3 and AAC
+ *     have samples off the 16-bit grid),
+ *   - an MP4 gives the same samples as rmp4_audio's whole decode of it.
  *
  *   build-tests/audio_stream_test sine.flac sine.mp3 sine.aac sine.m4a */
 
@@ -19,6 +20,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+#include <formats/rmp4_audio.h>
 
 #include "../../src/common/audio_stream.h"
 
@@ -90,7 +93,8 @@ static void run(const char* name) {
     unsigned ch;
     float *whole, *blocks, *after;
     int off_grid = 0, same = 1;
-    static const double seeks[] = {0.0, 0.1, 0.37, 0.5, 0.93, 0.0};
+    /* forward from where the stream is, then back, to the start and to the middle */
+    static const double seeks[] = {0.0, 0.1, 0.37, 0.5, 0.93, 0.0, 0.6, 0.2};
     if (!data) {
         printf("FAIL %s: cannot read it\n", name);
         ++failures;
@@ -127,7 +131,8 @@ static void run(const char* name) {
     for (i = 0; i < sizeof(seeks) / sizeof(seeks[0]); i++) {
         const size_t at = (size_t)(seeks[i] * (double)got);
         const size_t want = got - at < 4096 ? got - at : 4096;
-        const float tolerance = kind == AUDIO_STREAM_ADTS ? 1e-3f : 0.0f;
+        const float tolerance =
+            kind == AUDIO_STREAM_ADTS || kind == AUDIO_STREAM_MP4 ? 1e-3f : 0.0f;
         size_t k, bad = 0;
         CHECK(audio_stream_seek(s, at), "seeks");
         n = audio_stream_read(s, after, want);
@@ -150,8 +155,24 @@ static void run(const char* name) {
             break;
         }
     }
-    if (kind != AUDIO_STREAM_MP4)
-        CHECK(off_grid, "samples are not rounded to 16 bits");
+    CHECK(off_grid, "samples are not rounded to 16 bits");
+    if (kind == AUDIO_STREAM_MP4) {
+        /* The same samples as rmp4_audio's whole decode of the file, its edit list honoured */
+        float* ref = NULL;
+        size_t ref_frames = 0, k, bad = 0;
+        unsigned rate = 0, chans = 0;
+        CHECK(rmp4_audio_decode_f32(data, size, 0, &ref, &ref_frames, &rate, &chans),
+              "rmp4_audio decodes it");
+        CHECK(ref_frames == got && chans == ch && rate == audio_stream_rate(s),
+              "as long as rmp4_audio's decode");
+        for (k = 0; ref && k < ref_frames * ch && k < got * ch; k++)
+            if (ref[k] != whole[k])
+                ++bad;
+        if (bad)
+            printf("  %lu samples differ from rmp4_audio's\n", (unsigned long)bad);
+        CHECK(bad == 0, "the same samples as rmp4_audio's decode");
+        free(ref);
+    }
     {
         double sum = 0.0;
         for (i = 0; i < got * ch; i++)

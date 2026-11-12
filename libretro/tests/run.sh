@@ -98,8 +98,13 @@ if command -v ffmpeg >/dev/null 2>&1; then
         -f adts "$OUT/sine.aac"
     ffmpeg -loglevel error -y -f lavfi -i "$sine:sample_rate=48000" -ac 1 -c:a aac \
         "$OUT/sine.m4a"
+    # 22.05 kHz AAC: decoded at twice the rate, as HE-AAC (SBR)
+    ffmpeg -loglevel error -y -f lavfi -i "$sine:sample_rate=22050" -ac 2 -c:a aac \
+        -f adts "$OUT/sine_sbr.aac"
+    ffmpeg -loglevel error -y -f lavfi -i "$sine:sample_rate=22050" -ac 2 -c:a aac \
+        "$OUT/sine_sbr.m4a"
     "$OUT/audio_stream_test" "$OUT/sine.flac" "$OUT/sine.mp3" "$OUT/sine_notag.mp3" \
-        "$OUT/sine.aac" "$OUT/sine.m4a"
+        "$OUT/sine.aac" "$OUT/sine.m4a" "$OUT/sine_sbr.aac" "$OUT/sine_sbr.m4a"
 else
     "$OUT/audio_stream_test"
 fi
