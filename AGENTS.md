@@ -172,9 +172,7 @@ Measure against what the work needs and what the hardware can do, not against th
 
 Not there yet, in the core's own glue. These are debts, not precedent:
 
-1. `libretro/host.cpp` polls with `sleep_for`: live options every 20 ms, the audio mix every 2 ms, the pads every 2 ms, the frontend's GPU in 10 ms steps for up to five seconds, a free frame image every 1 ms.
-2. `libretro/host.cpp` guards its audio stream list with `audio_mutex`.
-3. `StopEmulator` in `libretro/libretro_core.cpp` waits for the emulator's process to end in 10 ms `usleep` steps; it should wait on the process itself (a pidfd, `WaitForSingleObject`) with the same time limit.
+1. `StopEmulator` in `libretro/libretro_core.cpp` waits on the emulator's process through a pidfd (Linux 5.3 and later) and `WaitForSingleObject` on Windows; on an older Linux kernel, which has no pidfd, it still looks every 10 ms, for the same three seconds.
 
 ## Audio, video and pacing
 
@@ -201,7 +199,6 @@ Not there yet. These are debts, not precedent:
 1. HDR Output (core option, off by default) is not yet run on an HDR display. With it on and a frontend that takes HDR10, games are told the display shows HDR, a game's own PQ passes through the output pass, and any other picture and ImGui's overlays are encoded to PQ there (`host_spirv_post_process_frag`, `host_spirv_imgui_pq_frag`), SDR white at the frontend's paper white. A game is told the frontend's peak and black level (`sceSystemServiceGetHdrToneMapLuminance`, from `max_nits` and `min_nits`); the full-frame peak is given the peak too, since the frontend does not report one.
 2. `ngs2_core.c` writes a game's 16-bit output buffers at a scale of 32767, cut towards zero. That output is read by the game, so what Sony's library does there decides it, and it is not known.
 3. A FLAC with no seek table, seeked backwards, makes rflac's state again (its only way back to the start), so that seek allocates.
-4. libretro-common's FLAC decoder takes a 24-bit stream to 16 bits by shifting, which rounds down, not to the nearest; a fix goes to RetroArch's libretro-common first.
 
 ## Testing
 

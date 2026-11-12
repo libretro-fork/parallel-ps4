@@ -15,6 +15,7 @@
 #include <queue>
 
 #include <retro_atomic.h>
+#include <rthreads/retro_eventcount.h>
 #include "common/audio_stream.h"
 #include "common/combiner.h"
 #include "common/event_mutex.h"
@@ -256,6 +257,7 @@ public:
         (void)retro_atomic_exchange_int(&m_play_state, 0);
         (void)retro_atomic_exchange_64(&m_current_time_ms, 0);
         (void)retro_atomic_exchange_64(&m_total_duration_ms, 0);
+        retro_eventcount_notify(&m_control_ec);
 
         if (m_worker_thread.joinable()) {
             m_worker_thread.join();
@@ -270,11 +272,13 @@ public:
     void Unpause() {
         (void)retro_atomic_exchange_int(&m_pause_requested, 0);
         (void)retro_atomic_exchange_int(&m_play_state, 1);
+        retro_eventcount_notify(&m_control_ec);
     }
 
     void Seek(u64 time_ms) {
         (void)retro_atomic_exchange_64(&m_seek_offset_ms, static_cast<s64>(time_ms));
         (void)retro_atomic_exchange_64(&m_current_time_ms, time_ms);
+        retro_eventcount_notify(&m_control_ec);
     }
 
     bool IsTrackActive(u32 track_index) {
@@ -376,9 +380,12 @@ public:
     }
 
 private:
-    MusicPlayerManager() = default;
+    MusicPlayerManager() {
+        retro_eventcount_init(&m_control_ec);
+    }
     ~MusicPlayerManager() {
         StopPlayback();
+        retro_eventcount_free(&m_control_ec);
     }
 
     void PlaybackWorker(u32 start_track_index, u64 initial_start_time_ms) {
@@ -548,7 +555,15 @@ private:
                 }
 
                 if (retro_atomic_load_seq_cst_int(&m_pause_requested) != 0) {
-                    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+                    // Parked until unpaused, stopped or seeked, each of which notifies
+                    const int key = retro_eventcount_prepare_wait(&m_control_ec);
+                    if (retro_atomic_load_seq_cst_int(&m_pause_requested) != 0 &&
+                        retro_atomic_load_seq_cst_int(&m_stop_requested) == 0 &&
+                        static_cast<s64>(retro_atomic_load_acquire_64(&m_seek_offset_ms)) < 0) {
+                        retro_eventcount_commit_wait(&m_control_ec, key);
+                    } else {
+                        retro_eventcount_cancel_wait(&m_control_ec);
+                    }
                     continue;
                 }
 
@@ -646,6 +661,8 @@ private:
             (void)retro_atomic_exchange_64(&m_current_time_ms, 0);
             LOG_INFO(Lib_AudioOut, "Playback finished");
         }
+        // The event the thread's waits cached goes with it
+        retro_eventcount_thread_cleanup();
     }
 
     Common::Combiner m_control_mutex;
@@ -661,6 +678,8 @@ private:
     retro_atomic_int_t m_stop_requested{0};
     retro_atomic_int_t m_pause_requested{0};
     retro_atomic_64_t m_seek_offset_ms{-1};
+    // What a paused playback thread parks on: notified by unpause, stop and seek
+    retro_eventcount_t m_control_ec{};
     // The track decoded a block at a time, for the playback thread alone: made with the player,
     // so playing allocates nothing for it
     static constexpr u64 WindowFrames = 8192;
