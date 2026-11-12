@@ -83,6 +83,9 @@ using Libretro::SharedState;
 retro_environment_t environ_cb = nullptr;
 retro_video_refresh_t video_cb = nullptr;
 retro_audio_sample_batch_t audio_batch_cb = nullptr;
+// The frontend's float batch, when it takes float sound (asked in retro_load_game): the mix
+// then reaches it unrounded, in place of the 16-bit batch
+retro_audio_sample_batch_float_t audio_batch_float_cb = nullptr;
 retro_input_poll_t input_poll_cb = nullptr;
 retro_input_state_t input_state_cb = nullptr;
 retro_log_printf_t log_cb = nullptr;
@@ -264,6 +267,7 @@ void ReadCoreOptions(Libretro::SharedOptions& options) {
     options.dump_shaders = enabled("shadps4_dump_shaders", "disabled");
     options.sample_positions = enabled("shadps4_game_sample_positions", "disabled");
     options.copy_gpu_buffers = enabled("shadps4_copy_gpu_buffers", "enabled");
+    options.audio_float = audio_batch_float_cb ? 1 : 0;
     options.hdr_output = hdr_output ? 1 : 0;
     options.hdr_paper_white = hdr_paper_white;
     options.hdr_max_nits = hdr_max_nits;
@@ -1102,6 +1106,7 @@ void TakeFrame() {
 // read index, which moves only once the frontend has taken the frames.
 void SendAudio() {
     static const int16_t silence[kAudioFrames * 2] = {};
+    static const float silence_f32[kAudioFrames * 2] = {};
     uint32_t frames = 0;
     if (shared) {
         const uint32_t read = static_cast<std::uint32_t>(retro_atomic_load_relaxed_int(&shared->audio_read));
@@ -1109,11 +1114,20 @@ void SendAudio() {
         frames = std::min<uint32_t>(written - read, kAudioFrames);
         const uint32_t at = read & (Libretro::AUDIO_RING_FRAMES - 1);
         const uint32_t first = std::min<uint32_t>(frames, Libretro::AUDIO_RING_FRAMES - at);
-        if (first) {
-            audio_batch_cb(shared->audio + at * 2, first);
-        }
-        if (frames > first) {
-            audio_batch_cb(shared->audio, frames - first);
+        if (audio_batch_float_cb) {
+            if (first) {
+                audio_batch_float_cb(shared->audio_f32 + at * 2, first);
+            }
+            if (frames > first) {
+                audio_batch_float_cb(shared->audio_f32, frames - first);
+            }
+        } else {
+            if (first) {
+                audio_batch_cb(shared->audio + at * 2, first);
+            }
+            if (frames > first) {
+                audio_batch_cb(shared->audio, frames - first);
+            }
         }
         if (frames) {
             retro_atomic_store_release_int(&shared->audio_read, read + frames);
@@ -1122,7 +1136,11 @@ void SendAudio() {
         }
     }
     if (frames < static_cast<uint32_t>(kAudioFrames)) {
-        audio_batch_cb(silence, kAudioFrames - frames);
+        if (audio_batch_float_cb) {
+            audio_batch_float_cb(silence_f32, kAudioFrames - frames);
+        } else {
+            audio_batch_cb(silence, kAudioFrames - frames);
+        }
     }
 }
 
@@ -1411,6 +1429,17 @@ RETRO_API bool retro_load_game(const struct retro_game_info* game) {
     }
 
     NegotiateHdr();
+    // Float sound where the frontend takes it: the mix is then handed over as it is summed,
+    // with no rounding to 16 bits on the way
+    {
+        struct retro_audio_sample_float_callback float_audio {};
+        audio_batch_float_cb =
+            environ_cb(RETRO_ENVIRONMENT_GET_AUDIO_SAMPLE_BATCH_FLOAT, &float_audio)
+                ? float_audio.batch
+                : nullptr;
+        Log(RETRO_LOG_INFO, "Sound goes to the frontend as %s",
+            audio_batch_float_cb ? "float" : "16-bit");
+    }
     if (!environ_cb(RETRO_ENVIRONMENT_GET_RUMBLE_INTERFACE, &rumble)) {
         rumble = {};
     }
@@ -1455,6 +1484,8 @@ RETRO_API bool retro_load_game_special(unsigned, const struct retro_game_info*, 
 }
 
 RETRO_API void retro_unload_game(void) {
+    // The frontend's float batch is good until here
+    audio_batch_float_cb = nullptr;
     StopPkgInstall();
     if (shared) {
         retro_atomic_store_release_int(&shared->quit, 1);

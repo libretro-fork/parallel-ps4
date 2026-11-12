@@ -168,8 +168,11 @@ void PumpAudio() {
                                          ? Libretro::AUDIO_RING_TARGET_FRAMES - queued
                                          : 0;
         const std::uint32_t frames =
-            wanted ? audio_mix_pump(shared->audio, Libretro::AUDIO_RING_FRAMES - 1, written, wanted)
-                   : 0;
+            !wanted ? 0
+            : shared->options.audio_float
+                ? audio_mix_pump_f32(shared->audio_f32, Libretro::AUDIO_RING_FRAMES - 1, written,
+                                     wanted)
+                : audio_mix_pump(shared->audio, Libretro::AUDIO_RING_FRAMES - 1, written, wanted);
         if (frames) {
             wakes.audio.Cancel();
             retro_atomic_store_release_int(&shared->audio_written, written + frames);

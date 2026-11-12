@@ -229,7 +229,8 @@ static int16_t round_s16(float v)
    return (int16_t)(v < 0.0f ? v - 0.5f : v + 0.5f);
 }
 
-unsigned audio_mix_pump(int16_t* ring, uint32_t ring_mask, uint32_t at, unsigned frames)
+/* Every open input's frames, up to @frames, summed into pump_sum. Returns how many. */
+static unsigned pump_mix(unsigned frames)
 {
    unsigned i;
    unsigned most = 0;
@@ -256,11 +257,39 @@ unsigned audio_mix_pump(int16_t* ring, uint32_t ring_mask, uint32_t at, unsigned
       }
    }
 
+   return most;
+}
+
+unsigned audio_mix_pump(int16_t* ring, uint32_t ring_mask, uint32_t at, unsigned frames)
+{
+   unsigned i;
+   const unsigned most = pump_mix(frames);
    for (i = 0; i < most; i++)
    {
       uint32_t pos  = ((at + i) & ring_mask) * 2;
       ring[pos + 0] = round_s16(pump_sum[i * 2 + 0]);
       ring[pos + 1] = round_s16(pump_sum[i * 2 + 1]);
+   }
+   return most;
+}
+
+/* The sum to the frontend's float scale, -1 to 1: divided by the one scale, 32768, and
+ * clamped, as the 16-bit path clamps; not rounded */
+static float to_unit(float v)
+{
+   v *= 1.0f / 32768.0f;
+   return v > 1.0f ? 1.0f : v < -1.0f ? -1.0f : v;
+}
+
+unsigned audio_mix_pump_f32(float* ring, uint32_t ring_mask, uint32_t at, unsigned frames)
+{
+   unsigned i;
+   const unsigned most = pump_mix(frames);
+   for (i = 0; i < most; i++)
+   {
+      uint32_t pos  = ((at + i) & ring_mask) * 2;
+      ring[pos + 0] = to_unit(pump_sum[i * 2 + 0]);
+      ring[pos + 1] = to_unit(pump_sum[i * 2 + 1]);
    }
    return most;
 }

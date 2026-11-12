@@ -19,7 +19,7 @@
 namespace Libretro {
 
 inline constexpr std::uint32_t SHARED_MAGIC = 0x34505368; // "hSP4"
-inline constexpr std::uint32_t SHARED_VERSION = 17;
+inline constexpr std::uint32_t SHARED_VERSION = 18;
 
 inline constexpr std::uint32_t MAX_WIDTH = 3840;
 inline constexpr std::uint32_t MAX_HEIGHT = 2160;
@@ -114,6 +114,9 @@ struct SharedOptions {
     std::uint32_t dump_shaders;
     std::uint32_t sample_positions;
     std::uint32_t copy_gpu_buffers;
+    /// The frontend takes float sound: the mix goes into audio_f32, unrounded, instead of
+    /// audio. Fixed for the session.
+    std::uint32_t audio_float;
     /// The frontend takes HDR10 (PQ Rec.2020,
     /// RETRO_PIXEL_FORMAT_HDR10_2101010): the picture goes out as PQ, and
     /// frames read back are XRGB2101010. Fixed for the session.
@@ -229,6 +232,8 @@ struct SharedState {
     retro_atomic_int_t audio_written;
     retro_atomic_int_t audio_read;
     std::int16_t audio[AUDIO_RING_FRAMES * 2];
+    /// The same ring as float stereo, -1 to 1, used in its place with options.audio_float
+    float audio_f32[AUDIO_RING_FRAMES * 2];
 };
 
 inline constexpr std::size_t SHARED_FRAMES_OFFSET = (sizeof(SharedState) + 4095) & ~std::size_t{4095};

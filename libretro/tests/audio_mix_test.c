@@ -115,6 +115,38 @@ static void test_rounding(void)
    audio_mix_pump(ring, RING_FRAMES - 1, 0, 1024);
 }
 
+/* Float out: the sum at the frontend's scale, not rounded; clamped past full scale */
+static void test_float_out(void)
+{
+   static float fring[RING_FRAMES * 2];
+   static const float a[8] = {0.4f, -0.4f, 16384.25f, -16384.25f, 32767.5f, -32768.0f,
+                               99999.0f, -99999.0f};
+   static const float half[2] = {0.3f, 0.3f};
+   audio_mix_input_t* ia = audio_mix_input_open();
+   audio_mix_input_t* ib = audio_mix_input_open();
+   unsigned n;
+   CHECK(ia && ib, "open two");
+
+   write_float(ia, a, 4);
+   n = audio_mix_pump_f32(fring, RING_FRAMES - 1, 0, 1024);
+   CHECK(n == 4, "four frames");
+   CHECK(fring[0] == 0.4f / 32768.0f && fring[1] == -0.4f / 32768.0f,
+         "under half a step is kept, not silence");
+   CHECK(fring[2] == 16384.25f / 32768.0f && fring[3] == -16384.25f / 32768.0f,
+         "a fraction of a step is kept");
+   CHECK(fring[4] == 32767.5f / 32768.0f && fring[5] == -1.0f, "the ends");
+   CHECK(fring[6] == 1.0f && fring[7] == -1.0f, "clamped");
+
+   write_float(ia, half, 1);
+   write_float(ib, half, 1);
+   n = audio_mix_pump_f32(fring, RING_FRAMES - 1, 0, 1024);
+   CHECK(n == 1 && fring[0] == 0.6f / 32768.0f, "two sources under half a step add up");
+
+   audio_mix_input_close(ia);
+   audio_mix_input_close(ib);
+   audio_mix_pump_f32(fring, RING_FRAMES - 1, 0, 1024);
+}
+
 static void test_sum_and_close(void)
 {
    int16_t a[4]          = {30000, 1, 30000, 2};
@@ -363,6 +395,7 @@ int main(void)
    }
    test_convert();
    test_rounding();
+   test_float_out();
    test_sum_and_close();
    test_pool();
    test_clip();

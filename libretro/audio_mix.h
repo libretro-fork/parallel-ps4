@@ -63,6 +63,11 @@ void audio_mix_set_wake(void (*wake)(void*), void* ctx);
  * than another adds silence for the difference. Returns the frames written. */
 unsigned audio_mix_pump(int16_t* ring, uint32_t ring_mask, uint32_t at, unsigned frames);
 
+/* The same into a ring of float stereo, -1 to 1, for a frontend that takes float sound
+ * (RETRO_ENVIRONMENT_GET_AUDIO_SAMPLE_BATCH_FLOAT): nothing is rounded, and only a sum past
+ * full scale is clamped. Use one or the other for the life of the mix. */
+unsigned audio_mix_pump_f32(float* ring, uint32_t ring_mask, uint32_t at, unsigned frames);
+
 /* A sound played once over everything else, the trophy sound: @frames of stereo at 48 kHz in
  * the inputs' format, borrowed and read by the mixing thread as it plays them, so they stay untouched
  * for the life of the process. Playing it again starts it over. One caller thread. */
