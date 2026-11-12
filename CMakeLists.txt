@@ -1225,6 +1225,8 @@ set(VIDEO_CORE src/video_core/amdgpu/cb_db_extent.h
                src/video_core/renderer_vulkan/frame_notes.c
                src/video_core/renderer_vulkan/frame_notes.h
                src/video_core/amdgpu/sample_locs.c
+               src/video_core/amdgpu/cmd_copy_ring.c
+               src/video_core/amdgpu/cmd_copy_ring.h
                src/video_core/amdgpu/sample_locs.h
                src/video_core/renderer_vulkan/vk_device_fault.h
                src/video_core/renderer_vulkan/vk_heap.c

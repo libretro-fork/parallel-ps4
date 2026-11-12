@@ -19,6 +19,7 @@
 #include "common/types.h"
 #include "common/unique_function.h"
 #include "video_core/amdgpu/cb_db_extent.h"
+#include "video_core/amdgpu/cmd_copy_ring.h"
 #include "video_core/amdgpu/regs.h"
 
 namespace Vulkan {
@@ -73,8 +74,9 @@ public:
     void SubmitAsc(u32 gnm_vqid, std::span<const u32> acb);
 
     void SubmitDone() noexcept {
-        (void)retro_atomic_exchange_int(&mapped_queues[GfxQueueId].ccb_buffer_offset, 0);
-        (void)retro_atomic_exchange_int(&mapped_queues[GfxQueueId].dcb_buffer_offset, 0);
+        if (copy_ring) {
+            cmd_copy_ring_frame_done(copy_ring);
+        }
         retro_atomic_store_release_int(&submit_done, 1);
         retro_eventcount_notify(&work_ec);
     }
@@ -125,11 +127,12 @@ public:
     }
 
     void ReserveCopyBufferSpace() {
-        GpuQueue& gfx_queue = mapped_queues[GfxQueueId];
-        // In words. 2 MiB was less than Sekiro submits in a frame after a cutscene.
-        constexpr size_t GfxReservedSize = 16_MB >> 2;
-        gfx_queue.ccb_buffer.reserve(GfxReservedSize);
-        gfx_queue.dcb_buffer.reserve(GfxReservedSize);
+        // In words, a frame's worth each, three frames' room: the game can be two frames
+        // ahead of the GPU thread before a submission goes uncopied (cmd_copy_ring.h). 2 MiB
+        // was less than Sekiro submits in a frame after a cutscene.
+        constexpr size_t DcbWords = 16_MB >> 2;
+        constexpr size_t CcbWords = 4_MB >> 2;
+        copy_ring = cmd_copy_ring_new(DcbWords, CcbWords, 3);
     }
 
     inline ComputeProgram& GetCsRegs() {
@@ -255,15 +258,13 @@ private:
     };
 
     struct GpuQueue {
-        retro_atomic_int_t dcb_buffer_offset;
-        retro_atomic_int_t ccb_buffer_offset;
-        std::vector<u32> dcb_buffer;
-        std::vector<u32> ccb_buffer;
         TaskQueue submits{};
         ComputeProgram cs_state{};
     };
     std::array<GpuQueue, NumTotalQueues> mapped_queues{};
     TaskQueue ce_submits;
+    /// Copies of the game's graphics command buffers, with Copy GPU Buffers on
+    cmd_copy_ring_t* copy_ring{};
     retro_atomic_int_t num_mapped_queues{static_cast<int>(1u)}; // GFX is always available
 
     /// A function for the GPU thread to run (SendCommand)

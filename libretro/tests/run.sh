@@ -80,6 +80,11 @@ ASAN_OPTIONS=detect_leaks=0 "$OUT/tiling_device_test"
 $CC -std=c89 -O1 -g -Wall -Wno-unused-function -fsanitize=address,undefined \
     libretro/tests/pad_scale_test.c -o "$OUT/pad_scale_test"
 "$OUT/pad_scale_test"
+# Copy GPU Buffers' room: a frame's copies are kept until the GPU thread is done with them
+$CC -std=c89 -O1 -g -Wall -fsanitize=address,undefined -Isrc -I$L/include \
+    libretro/tests/cmd_copy_ring_test.c src/video_core/amdgpu/cmd_copy_ring.c \
+    -o "$OUT/cmd_copy_ring_test"
+"$OUT/cmd_copy_ring_test"
 # The game's sample position registers as positions
 $CC -std=c89 -O1 -g -Wall -fsanitize=address,undefined -Isrc -I$L/include \
     libretro/tests/sample_locs_test.c src/video_core/amdgpu/sample_locs.c -o "$OUT/sample_locs_test"

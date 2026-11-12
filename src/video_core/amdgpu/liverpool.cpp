@@ -70,6 +70,7 @@ Liverpool::~Liverpool() {
     for (auto& queue : mapped_queues) {
         destroy_all(queue.submits);
     }
+    cmd_copy_ring_free(copy_ring);
     // Commands nobody will run: only the allocated ones are left, as a sender that waits
     // for its command does so before the GPU thread is stopped
     for (mpsc_stack_node_t* node = mpsc_stack_drain(&commands); node;) {
@@ -100,6 +101,9 @@ void Liverpool::ProcessCeQueue() {
     if (task.done()) {
         ce_submits.Pop();
         task.destroy();
+        if (copy_ring) {
+            cmd_copy_ring_ce_finished(copy_ring);
+        }
         SubmitFinished();
     }
 }
@@ -175,6 +179,10 @@ void Liverpool::Process(std::stop_token stoken) {
             if (task.done()) {
                 queue.submits.Pop();
                 task.destroy();
+                // Its copies, if any, may be written over from here on
+                if (curr_qid == GfxQueueId && copy_ring) {
+                    cmd_copy_ring_gfx_finished(copy_ring);
+                }
                 SubmitFinished();
             }
         }
@@ -1184,53 +1192,16 @@ Liverpool::Task Liverpool::ProcessCompute(std::span<const u32> acb, u32 vqid) {
 }
 
 Liverpool::CmdBuffer Liverpool::CopyCmdBuffers(std::span<const u32> dcb, std::span<const u32> ccb) {
-    auto& queue = mapped_queues[GfxQueueId];
-    // More commands between two flips than the copies have room for (Sekiro after a cutscene):
-    // those past it are read where the game has them, as with the copying off, instead of the
-    // emulator stopping. The room cannot grow: the GPU thread reads the copies handed out.
-    if (queue.dcb_buffer.capacity() <
-            static_cast<u32>(retro_atomic_load_seq_cst_int(&queue.dcb_buffer_offset)) +
-                dcb.size() ||
-        queue.ccb_buffer.capacity() <
-            static_cast<u32>(retro_atomic_load_seq_cst_int(&queue.ccb_buffer_offset)) +
-                ccb.size()) {
+    // Into room the GPU thread is done with; with none free, read where the game has them, as
+    // with the copying off (cmd_copy_ring.h)
+    const u32* dcb_copy = nullptr;
+    const u32* ccb_copy = nullptr;
+    if (!copy_ring || !cmd_copy_ring_copy(copy_ring, dcb.data(), dcb.size(), ccb.data(), ccb.size(),
+                                          &dcb_copy, &ccb_copy)) {
         return std::make_pair(dcb, ccb);
     }
-
-    queue.dcb_buffer.resize(std::max(
-        queue.dcb_buffer.size(),
-        static_cast<u32>(retro_atomic_load_seq_cst_int(&queue.dcb_buffer_offset)) + dcb.size()));
-    queue.ccb_buffer.resize(std::max(
-        queue.ccb_buffer.size(),
-        static_cast<u32>(retro_atomic_load_seq_cst_int(&queue.ccb_buffer_offset)) + ccb.size()));
-
-    const u32 prev_dcb_buffer_offset =
-        static_cast<u32>(retro_atomic_load_seq_cst_int(&queue.dcb_buffer_offset));
-    const u32 prev_ccb_buffer_offset =
-        static_cast<u32>(retro_atomic_load_seq_cst_int(&queue.ccb_buffer_offset));
-    if (!dcb.empty()) {
-        std::memcpy(queue.dcb_buffer.data() +
-                        static_cast<u32>(retro_atomic_load_seq_cst_int(&queue.dcb_buffer_offset)),
-                    dcb.data(), dcb.size_bytes());
-        retro_atomic_fetch_add_int(&queue.dcb_buffer_offset, dcb.size());
-        dcb = std::span<const u32>{
-            queue.dcb_buffer.begin() + prev_dcb_buffer_offset,
-            queue.dcb_buffer.begin() +
-                static_cast<u32>(retro_atomic_load_seq_cst_int(&queue.dcb_buffer_offset))};
-    }
-
-    if (!ccb.empty()) {
-        std::memcpy(queue.ccb_buffer.data() +
-                        static_cast<u32>(retro_atomic_load_seq_cst_int(&queue.ccb_buffer_offset)),
-                    ccb.data(), ccb.size_bytes());
-        retro_atomic_fetch_add_int(&queue.ccb_buffer_offset, ccb.size());
-        ccb = std::span<const u32>{
-            queue.ccb_buffer.begin() + prev_ccb_buffer_offset,
-            queue.ccb_buffer.begin() +
-                static_cast<u32>(retro_atomic_load_seq_cst_int(&queue.ccb_buffer_offset))};
-    }
-
-    return std::make_pair(dcb, ccb);
+    return std::make_pair(std::span<const u32>{dcb_copy, dcb.size()},
+                          std::span<const u32>{ccb_copy, ccb.size()});
 }
 
 void Liverpool::SubmitGfx(std::span<const u32> dcb, std::span<const u32> ccb) {
@@ -1241,6 +1212,10 @@ void Liverpool::SubmitGfx(std::span<const u32> dcb, std::span<const u32> ccb) {
     }
 
     auto task = ProcessGraphics(dcb);
+    // Counted before the GPU thread can finish it, as everything below is
+    if (copy_ring) {
+        cmd_copy_ring_submitted(copy_ring, !ccb.empty());
+    }
     // Counted before it is visible, so the GPU thread never takes num_submits below zero
     if (!ccb.empty()) {
         retro_atomic_fetch_add_int(&num_submits, 1);
