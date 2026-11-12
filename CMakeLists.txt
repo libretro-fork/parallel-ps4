@@ -1357,7 +1357,6 @@ add_library(shadps4 MODULE
     libretro/gpu_frames.cpp
     libretro/gpu_frames.h
     libretro/host.cpp
-    libretro/libretro.h
     libretro/libretro_vulkan.h
     libretro/memory_export.cpp
     libretro/pkg_backend.cpp
