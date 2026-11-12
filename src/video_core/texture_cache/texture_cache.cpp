@@ -140,7 +140,7 @@ bool TextureCache::DumpImagePixels(ImageId image_id, u32 seq) {
     }
     // Room to spare: a depth and stencil format counts more bytes for a texel than are copied
     const auto download = runtime.GetStagingPool().Request(
-        u64(width) * height * (is_depth ? 8 : bpp), MemoryType::HostCached, 16);
+        u64(width) * height * (is_depth ? 8 : bpp), MemoryType::HostCached, 16, true);
     vk::BufferImageCopy copy{
         .bufferOffset = download.offset,
         .imageSubresource{
@@ -154,24 +154,29 @@ bool TextureCache::DumpImagePixels(ImageId image_id, u32 seq) {
         .imageExtent = {width, height, 1},
     };
     runtime.DownloadImage(&image, download.buffer, std::span{&copy, 1});
-    scheduler.Finish();
-    download.Invalidate();
 
-    RFILE* const file =
-        filestream_open(path, RETRO_VFS_FILE_ACCESS_WRITE, RETRO_VFS_FILE_ACCESS_HINT_NONE);
-    if (!file) {
-        return false;
-    }
-    std::array<u8, 256 * 16> row;
-    for (u32 y = 0; y < height; y += step) {
-        u32 used = 0;
-        for (u32 x = 0; x < width; x += step) {
-            std::memcpy(row.data() + used, download.mapped + (u64(y) * width + x) * bpp, bpp);
-            used += bpp;
+    // Written once the GPU has done the copy, in its own time. Waiting for it here would end
+    // the command buffer after every image: a frame of a hundred of them then counts as a
+    // hundred frames to everything that ages by submissions, and images still in use are
+    // taken for stale and dropped (Sekiro lost its picture for good after a written frame).
+    scheduler.DeferOperation([this, download, width, height, bpp, step, name = std::string{path}] {
+        download.Invalidate();
+        if (RFILE* const file = filestream_open(name.c_str(), RETRO_VFS_FILE_ACCESS_WRITE,
+                                                RETRO_VFS_FILE_ACCESS_HINT_NONE)) {
+            std::array<u8, 256 * 16> row;
+            for (u32 y = 0; y < height; y += step) {
+                u32 used = 0;
+                for (u32 x = 0; x < width; x += step) {
+                    std::memcpy(row.data() + used, download.mapped + (u64(y) * width + x) * bpp,
+                                bpp);
+                    used += bpp;
+                }
+                filestream_write(file, row.data(), used);
+            }
+            filestream_close(file);
         }
-        filestream_write(file, row.data(), used);
-    }
-    filestream_close(file);
+        runtime.GetStagingPool().FreeDeferred(download);
+    });
     return true;
 }
 
