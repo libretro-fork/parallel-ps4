@@ -338,22 +338,31 @@ static void vfs_unix_to_filetime(int64_t unix_s, FILETIME *ft)
 #endif
 
 #define RFILE_HINT_UNBUFFERED (1 << 8)
+/* opened both to read and to write ("w+b", "r+b") */
+#define RFILE_HINT_UPDATE     (1 << 12)
 
-/* A read-only stream on Windows NT opens a handle of its own rather
- * than a C runtime FILE, keeps its own position and a 64 KiB buffer,
- * and reads at offsets - with no CRT lock or buffer on the way, and its
- * reads at offsets on the same handle. VFS_WIN32_NO_NATIVE keeps the C
- * runtime; samples/file/vfs/vfs_native_bench.c times the two. */
+/* A stream on Windows NT opens a handle of its own rather than a C
+ * runtime FILE, keeps its own position and a 64 KiB buffer, and reads
+ * and writes at offsets - with no CRT lock or buffer on the way, and its
+ * reads and writes at offsets on the same handle. The buffer holds what
+ * was last read or a run of writes not yet in the file, never both.
+ * VFS_WIN32_NO_NATIVE keeps the C runtime;
+ * samples/file/vfs/vfs_native_bench.c times the two. */
 #if !defined(VFS_WIN32_NO_NATIVE) && defined(_WIN32) && !defined(_XBOX) \
    && !defined(__WINRT__) && defined(VFS_HAVE_AT_HANDLE)
 #define VFS_NATIVE 1
 #define RFILE_HINT_WIN32_NATIVE (1 << 9)
+#define RFILE_HINT_NATIVE_WRITE (1 << 10) /* opened to write */
+#define RFILE_HINT_NATIVE_READ  (1 << 11) /* opened to read */
 #ifndef INVALID_FILE_SIZE
 #define INVALID_FILE_SIZE ((DWORD)0xFFFFFFFF)
 #endif
 #define VFS_NATIVE_BUF          0x10000
 static bool    vfs_native_open(libretro_vfs_implementation_file *stream,
-      const char *path);
+      const char *path, unsigned mode);
+static int     vfs_native_flush(libretro_vfs_implementation_file *stream);
+static int64_t vfs_native_write(libretro_vfs_implementation_file *stream,
+      const void *s, uint64_t len);
 static int64_t vfs_native_seek(libretro_vfs_implementation_file *stream,
       int64_t offset, int whence);
 static int64_t vfs_native_read(libretro_vfs_implementation_file *stream,
@@ -551,6 +560,21 @@ static int64_t retro_vfs_fp_tell64(FILE *fp)
 #endif
 }
 
+/* Before acting on a stdio stream's descriptor: the writes stdio holds
+ * into the file, the stream's position returned for the caller to seek
+ * back to after, which drops what was read ahead. ftell counts that
+ * read-ahead on every C runtime; fflush writes what is held, though on
+ * msvcrt it drops the read-ahead without seeking back, and glibc's fseek
+ * to where the stream already is can keep a buffer it then serves reads
+ * from - so neither alone. -1 when the stream cannot. */
+static int64_t retro_vfs_fp_settle(FILE *fp)
+{
+   int64_t pos = retro_vfs_fp_tell64(fp);
+   if (pos < 0 || fflush(fp) != 0)
+      return -1;
+   return pos;
+}
+
 static int64_t retro_vfs_fd_seek64(int fd, int64_t offset, int whence)
 {
 #if defined(_WIN32) && (!defined(WINAPI_FAMILY) || defined(_CRT_USE_WINAPI_FAMILY_DESKTOP_APP))
@@ -689,7 +713,18 @@ int64_t retro_vfs_file_seek_internal(
       if (stream->scheme == VFS_SCHEME_NFS)
          return retro_vfs_file_seek_nfs(stream, offset, whence);
 #endif
-      return retro_vfs_fp_seek64(stream->fp, offset, whence);
+      if (retro_vfs_fp_seek64(stream->fp, offset, whence) != 0)
+      {
+         stream->stdio_pos = -1;
+         return -1;
+      }
+      if (whence == SEEK_SET)
+         stream->stdio_pos = offset;
+      else if (whence == SEEK_CUR && stream->stdio_pos >= 0)
+         stream->stdio_pos += offset;
+      else
+         stream->stdio_pos = -1;
+      return 0;
    }
 #ifdef VFS_HAVE_FILE_MAPPING
    /* Need to check stream->mapped because this function is
@@ -813,19 +848,29 @@ static int64_t vfs_win32_io(HANDLE h, HANDLE ev, void *s, uint64_t len,
 #endif
 
 #ifdef VFS_NATIVE
+/* Write streams as the C runtime opens them - "wb" and "w+b" create or
+ * truncate, "r+b" opens what is there - shared for reading and writing
+ * as it shares them; a read-only one also lets the file be renamed or
+ * deleted under it. Opened to read as well as write, so reads at offsets
+ * go through the handle itself. */
 static bool vfs_native_open(libretro_vfs_implementation_file *stream,
-      const char *path)
+      const char *path, unsigned mode)
 {
    wchar_t *wide;
    HANDLE   h;
    DWORD    hi = 0, lo;
    char    *buf;
+   bool     write   = mode != RETRO_VFS_FILE_ACCESS_READ;
+   DWORD    access  = write ? (GENERIC_READ | GENERIC_WRITE) : GENERIC_READ;
+   DWORD    share   = write ? (FILE_SHARE_READ | FILE_SHARE_WRITE)
+      : (FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE);
+   DWORD    create  = ((mode & RETRO_VFS_FILE_ACCESS_UPDATE_EXISTING)
+         || !write) ? OPEN_EXISTING : CREATE_ALWAYS;
    /* NT only: 9x's ReadFile takes no offset on a file */
    if ((GetVersion() & 0x80000000u) || !(wide = utf8_to_utf16_string_alloc(path)))
       return false;
-   h = CreateFileW(wide, GENERIC_READ,
-         FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL,
-         OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+   h = CreateFileW(wide, access, share, NULL, create, FILE_ATTRIBUTE_NORMAL,
+         NULL);
    free(wide);
    if (h == INVALID_HANDLE_VALUE)
       return false;
@@ -843,11 +888,99 @@ static bool vfs_native_open(libretro_vfs_implementation_file *stream,
    stream->nbuf_at   = 0;
    stream->nbuf_len  = 0;
    stream->nerr      = 0;
+   stream->ndirty    = 0;
    stream->hints    |= RFILE_HINT_WIN32_NATIVE;
+   /* "wb" alone is the one the C runtime will not read from */
+   if (mode != RETRO_VFS_FILE_ACCESS_WRITE)
+      stream->hints |= RFILE_HINT_NATIVE_READ;
+   if (write)
+      stream->hints |= RFILE_HINT_NATIVE_WRITE;
    return true;
 }
 
-/* As fseek: anywhere from 0, past the end included */
+/* The run of writes the buffer holds, into the file in one call. The
+ * buffer then holds those bytes as read; a run that does not all go in
+ * is dropped, and the stream's error set. */
+static int vfs_native_flush(libretro_vfs_implementation_file *stream)
+{
+   int64_t put;
+   if (!stream->ndirty)
+      return 0;
+   stream->ndirty = 0;
+   if (!stream->nbuf_len)
+      return 0;
+   put = vfs_win32_io(stream->fh, NULL, stream->buf, stream->nbuf_len,
+         stream->nbuf_at, true);
+   if (put == (int64_t)stream->nbuf_len)
+      return 0;
+   stream->nbuf_len = 0;
+   stream->nerr     = 1;
+   return -1;
+}
+
+/* Into the buffer where the write carries on from the run it holds,
+ * else the run goes to the file and a new one starts here; a write as
+ * large as the buffer goes straight to the file. */
+static int64_t vfs_native_write(libretro_vfs_implementation_file *stream,
+      const void *s, uint64_t len)
+{
+   const uint8_t *p     = (const uint8_t*)s;
+   uint64_t       total = 0;
+   if (!(stream->hints & RFILE_HINT_NATIVE_WRITE))
+   {
+      stream->nerr = 1;
+      return -1;
+   }
+   while (len != 0)
+   {
+      uint64_t at = stream->npos;
+      if (     stream->ndirty
+            && at == stream->nbuf_at + stream->nbuf_len
+            && stream->nbuf_len < VFS_NATIVE_BUF)
+      {
+         size_t n = VFS_NATIVE_BUF - stream->nbuf_len;
+         if ((uint64_t)n > len)
+            n = (size_t)len;
+         memcpy(stream->buf + stream->nbuf_len, p, n);
+         stream->nbuf_len += n;
+         stream->npos     += n;
+         p                += n;
+         total            += n;
+         len              -= n;
+         continue;
+      }
+      if (vfs_native_flush(stream) != 0)
+         break;
+      /* what was read from the buffer may be where this lands */
+      stream->nbuf_len = 0;
+      if (len >= VFS_NATIVE_BUF)
+      {
+         int64_t put = vfs_win32_io(stream->fh, NULL, (void*)p, len, at,
+               true);
+         if (put > 0)
+         {
+            stream->npos += (uint64_t)put;
+            total        += (uint64_t)put;
+            len          -= (uint64_t)put;
+         }
+         break;
+      }
+      stream->ndirty  = 1;
+      stream->nbuf_at = at;
+   }
+   if ((int64_t)stream->npos > stream->size)
+      stream->size = (int64_t)stream->npos;
+   if (len != 0)
+   {
+      stream->nerr = 1;
+      if (total == 0)
+         return -1;
+   }
+   return (int64_t)total;
+}
+
+/* As fseek: anywhere from 0, past the end included. The end counts the
+ * writes the buffer holds. */
 static int64_t vfs_native_seek(libretro_vfs_implementation_file *stream,
       int64_t offset, int whence)
 {
@@ -866,6 +999,9 @@ static int64_t vfs_native_seek(libretro_vfs_implementation_file *stream,
             if (lo == INVALID_FILE_SIZE && GetLastError() != NO_ERROR)
                return -1;
             base = (int64_t)(((uint64_t)hi << 32) | lo);
+            if (     stream->ndirty
+                  && (int64_t)(stream->nbuf_at + stream->nbuf_len) > base)
+               base = (int64_t)(stream->nbuf_at + stream->nbuf_len);
          }
          break;
       default:
@@ -890,6 +1026,14 @@ static int64_t vfs_native_read(libretro_vfs_implementation_file *stream,
 {
    uint8_t *p     = (uint8_t*)s;
    uint64_t total = 0;
+   if (!(stream->hints & RFILE_HINT_NATIVE_READ))
+   {
+      stream->nerr = 1;
+      return -1;
+   }
+   /* what was written goes to the file before anything is read back */
+   if (stream->ndirty && vfs_native_flush(stream) != 0)
+      return -1;
    while (len != 0)
    {
       uint64_t at = stream->npos;
@@ -967,6 +1111,44 @@ static int64_t vfs_native_read(libretro_vfs_implementation_file *stream,
       && (uint64_t)(n) <= (uint64_t)INT32_MAX - (uint64_t)(off)))
 #endif
 #endif
+
+/* Hosts whose stdio streams and descriptors fstat() answers for: a
+ * console's C library may stub it, and keeps the seek-and-tell probe */
+#if (defined(__linux__) || defined(__APPLE__) || defined(__FreeBSD__) \
+      || defined(__NetBSD__) || defined(__OpenBSD__) \
+      || defined(__DragonFly__) || defined(__HAIKU__)) \
+   && !defined(VITA) && !defined(PSP) && !defined(PS2) && !defined(ORBIS)
+#define VFS_OPEN_FSTAT 1
+#endif
+
+/* A file's size as just opened, in one system call or none: the native
+ * Windows stream read it opening, fstat() asks the descriptor. -1 where
+ * neither answers, and the caller seeks to the end and back. */
+static int64_t vfs_open_size(libretro_vfs_implementation_file *stream)
+{
+#ifdef VFS_NATIVE
+   if (stream->hints & RFILE_HINT_WIN32_NATIVE)
+      return stream->size;
+#endif
+#ifdef VFS_OPEN_FSTAT
+   if (stream->scheme == VFS_SCHEME_NONE)
+   {
+      struct stat st;
+      int         fd = stream->fd;
+      if (!(stream->hints & RFILE_HINT_UNBUFFERED))
+         fd = stream->fp ? fileno(stream->fp) : -1;
+#ifdef VFS_HAVE_FILE_MAPPING
+      /* a mapped stream's size is the mapping's */
+      else if (stream->hints & RETRO_VFS_FILE_ACCESS_HINT_FREQUENT_ACCESS)
+         return -1;
+#endif
+      if (fd >= 0 && fstat(fd, &st) == 0 && S_ISREG(st.st_mode))
+         return (int64_t)st.st_size;
+   }
+#endif
+   (void)stream;
+   return -1;
+}
 
 libretro_vfs_implementation_file *retro_vfs_file_open_impl(
       const char *path, unsigned mode, unsigned hints)
@@ -1125,6 +1307,9 @@ libretro_vfs_implementation_file *retro_vfs_file_open_impl(
       default:
          goto error;
    }
+   if (     mode != RETRO_VFS_FILE_ACCESS_READ
+         && mode != RETRO_VFS_FILE_ACCESS_WRITE)
+      stream->hints |= RFILE_HINT_UPDATE;
 
    if ((stream->hints & RFILE_HINT_UNBUFFERED) == 0)
    {
@@ -1184,10 +1369,9 @@ libretro_vfs_implementation_file *retro_vfs_file_open_impl(
 
          default:
 #ifdef VFS_NATIVE
-            if (     mode == RETRO_VFS_FILE_ACCESS_READ
-                  && !(stream->hints
+            if (     !(stream->hints
                      & RETRO_VFS_FILE_ACCESS_HINT_FREQUENT_ACCESS)
-                  && vfs_native_open(stream, path))
+                  && vfs_native_open(stream, path, mode))
                break;
 #endif
             if (!(fp = (FILE*)fopen_utf8(path, mode_str)))
@@ -1478,11 +1662,17 @@ libretro_vfs_implementation_file *retro_vfs_file_open_impl(
    if (     mode != RETRO_VFS_FILE_ACCESS_WRITE
          && mode != RETRO_VFS_FILE_ACCESS_READ_WRITE)
    {
-      retro_vfs_file_seek_internal(stream, 0, SEEK_END);
+      int64_t known = vfs_open_size(stream);
+      if (known >= 0)
+         stream->size = known;
+      else
+      {
+         retro_vfs_file_seek_internal(stream, 0, SEEK_END);
 
-      stream->size = retro_vfs_file_tell_impl(stream);
+         stream->size = retro_vfs_file_tell_impl(stream);
 
-      retro_vfs_file_seek_internal(stream, 0, SEEK_SET);
+         retro_vfs_file_seek_internal(stream, 0, SEEK_SET);
+      }
    }
    /* Appends (retro_vfs_file_write_at_impl) start at the end as opened */
    retro_atomic_size_init(&stream->append_end,
@@ -1548,6 +1738,8 @@ int retro_vfs_file_close_impl(libretro_vfs_implementation_file *stream)
 #ifdef VFS_NATIVE
    if (stream->hints & RFILE_HINT_WIN32_NATIVE)
    {
+      if (vfs_native_flush(stream) != 0)
+         result = -1;
       if (!CloseHandle(stream->fh))
          result = -1;
       stream->fh = NULL;
@@ -1873,14 +2065,30 @@ int retro_vfs_file_punch_hole_impl(libretro_vfs_implementation_file *stream,
       RETRO_FILE_ZERO_DATA_INFORMATION zero_info;
       DWORD                      returned = 0;
       HANDLE                     handle   = stream->fh;
+      int64_t                    fp_pos   = -1;
+      BOOL                       ok;
+#ifdef VFS_NATIVE
+      /* the range zeroed in the file, not in the buffer */
+      if (stream->hints & RFILE_HINT_WIN32_NATIVE)
+      {
+         if (vfs_native_flush(stream) != 0)
+            return -1;
+         stream->nbuf_len = 0;
+      }
+#endif
 
       if (!handle || handle == INVALID_HANDLE_VALUE)
       {
-         if (!stream->fp)
+         /* writes stdio still holds go in first, so the range is zero */
+         if (     !stream->fp
+               || (fp_pos = retro_vfs_fp_settle(stream->fp)) < 0)
             return -1;
          handle = (HANDLE)_get_osfhandle(_fileno(stream->fp));
          if (handle == INVALID_HANDLE_VALUE)
+         {
+            retro_vfs_fp_seek64(stream->fp, fp_pos, SEEK_SET);
             return -1;
+         }
       }
 
       /* The file has to be marked sparse before a zero-data range does
@@ -1894,10 +2102,11 @@ int retro_vfs_file_punch_hole_impl(libretro_vfs_implementation_file *stream,
       zero_info.FileOffset.QuadPart      = offset;
       zero_info.BeyondFinalZero.QuadPart = offset + len;
 
-      if (!DeviceIoControl(handle, RA_FSCTL_SET_ZERO_DATA, &zero_info,
-               sizeof(zero_info), NULL, 0, &returned, NULL))
-         return -1;
-      return 0;
+      ok = DeviceIoControl(handle, RA_FSCTL_SET_ZERO_DATA, &zero_info,
+            sizeof(zero_info), NULL, 0, &returned, NULL);
+      if (fp_pos >= 0)
+         retro_vfs_fp_seek64(stream->fp, fp_pos, SEEK_SET);
+      return ok ? 0 : -1;
    }
 /* fallocate() sits behind _GNU_SOURCE in glibc (it is gated on __USE_GNU),
  * so whether it is *declared* depends on the consumer's feature-test
@@ -1914,21 +2123,25 @@ int retro_vfs_file_punch_hole_impl(libretro_vfs_implementation_file *stream,
       && (!defined(__UCLIBC__) || (defined(__UCLIBC_LINUX_SPECIFIC__) \
          && defined(__UCLIBC_MAJOR__) && __UCLIBC_MAJOR__ >= 1))
    {
-      int fd = stream->fd;
+      int     fd     = stream->fd;
+      int64_t fp_pos = -1;
+      int     ok;
 
       if (fd < 0)
       {
-         if (!stream->fp)
+         /* writes stdio holds go in first, so the range is zero */
+         if (     !stream->fp
+               || (fp_pos = retro_vfs_fp_settle(stream->fp)) < 0)
             return -1;
          fd = fileno(stream->fp);
-         if (fd < 0)
-            return -1;
       }
 
-      if (fallocate(fd, FALLOC_FL_PUNCH_HOLE | FALLOC_FL_KEEP_SIZE,
-               (off_t)offset, (off_t)len) != 0)
-         return -1;
-      return 0;
+      ok =   fd >= 0
+          && fallocate(fd, FALLOC_FL_PUNCH_HOLE | FALLOC_FL_KEEP_SIZE,
+               (off_t)offset, (off_t)len) == 0;
+      if (fp_pos >= 0)
+         retro_vfs_fp_seek64(stream->fp, fp_pos, SEEK_SET);
+      return ok ? 0 : -1;
    }
 #else
    /* No hole punching on this platform. */
@@ -1941,7 +2154,30 @@ int retro_vfs_file_punch_hole_impl(libretro_vfs_implementation_file *stream,
 int64_t retro_vfs_file_truncate_impl(libretro_vfs_implementation_file *stream, int64_t len)
 {
    /* The descriptor itself on the descriptor path, the stream's below */
-   int fd = -1;
+   int     fd     = -1;
+   int     done   = 0;
+   int64_t fp_pos = -1; /* the stdio stream's, to go back to */
+#ifdef VFS_NATIVE
+   /* The handle's end moved to @len, after the writes the buffer holds;
+    * what it held as read may lie past the new end */
+   if (stream && (stream->hints & RFILE_HINT_WIN32_NATIVE))
+   {
+      LONG hi = (LONG)((uint64_t)len >> 32);
+      if (     len < 0
+            || !(stream->hints & RFILE_HINT_NATIVE_WRITE)
+            || vfs_native_flush(stream) != 0)
+         return -1;
+      stream->nbuf_len = 0;
+      SetLastError(NO_ERROR);
+      if (     (SetFilePointer(stream->fh, (LONG)(DWORD)(len & 0xffffffff), &hi,
+                  FILE_BEGIN) == INVALID_SET_FILE_POINTER
+               && GetLastError() != NO_ERROR)
+            || !SetEndOfFile(stream->fh))
+         return -1;
+      stream->size = len;
+      return 0;
+   }
+#endif
    if (stream)
    {
       if (stream->hints & RFILE_HINT_UNBUFFERED)
@@ -1953,7 +2189,9 @@ int64_t retro_vfs_file_truncate_impl(libretro_vfs_implementation_file *stream, i
 #endif
          fd = stream->fd;
       }
-      else if (stream->fp)
+      /* writes stdio still holds go in first, and are cut with the rest */
+      else if (stream->fp
+            && (fp_pos = retro_vfs_fp_settle(stream->fp)) >= 0)
 #ifdef _WIN32
          fd = _fileno(stream->fp);
 #elif !defined(VITA) && !defined(PSP) && !defined(PS2) && !defined(ORBIS)
@@ -1972,29 +2210,22 @@ int64_t retro_vfs_file_truncate_impl(libretro_vfs_implementation_file *stream, i
     * an error for larger lengths rather than silently truncating
     * the file. */
 #if defined(_MSC_VER) && _MSC_VER >= 1400
-   if (fd >= 0 && _chsize_s(fd, len) == 0)
-   {
-	   stream->size = len;
-	   return 0;
-   }
+   done = fd >= 0 && _chsize_s(fd, len) == 0;
 #else
-   if (fd >= 0 && len >= 0 && len <= (int64_t)LONG_MAX
-         && _chsize(fd, (long)len) == 0)
-   {
-	   stream->size = len;
-	   return 0;
-   }
+   done =   fd >= 0 && len >= 0 && len <= (int64_t)LONG_MAX
+         && _chsize(fd, (long)len) == 0;
 #endif
 #elif !defined(VITA) && !defined(PSP) && !defined(PS2) && !defined(ORBIS)
-   if (fd >= 0 && ftruncate(fd, (off_t)len) == 0)
-   {
-      stream->size = len;
-      return 0;
-   }
+   done = fd >= 0 && ftruncate(fd, (off_t)len) == 0;
 #else
    (void)fd;
 #endif
-   return -1;
+   if (fp_pos >= 0)
+      retro_vfs_fp_seek64(stream->fp, fp_pos, SEEK_SET);
+   if (!done)
+      return -1;
+   stream->size = len;
+   return 0;
 }
 
 int64_t retro_vfs_file_tell_impl(libretro_vfs_implementation_file *stream)
@@ -2020,7 +2251,9 @@ int64_t retro_vfs_file_tell_impl(libretro_vfs_implementation_file *stream)
       if (stream->scheme == VFS_SCHEME_NFS)
          return retro_vfs_file_tell_nfs(stream);
 #endif
-      return retro_vfs_fp_tell64(stream->fp);
+      if (stream->stdio_pos < 0)
+         stream->stdio_pos = retro_vfs_fp_tell64(stream->fp);
+      return stream->stdio_pos;
    }
 #ifdef VFS_HAVE_FILE_MAPPING
    /* Need to check stream->mapped because this function
@@ -2124,10 +2357,17 @@ int64_t retro_vfs_file_read_impl(libretro_vfs_implementation_file *stream,
             size_t _got   = fread(p, 1, _chunk, stream->fp);
             total        += _got;
             if (_got < _chunk)
+            {
+               /* past an error, where it stands is stdio's to say */
+               if (ferror(stream->fp))
+                  stream->stdio_pos = -1;
                break;
+            }
             p            += _got;
             len          -= _got;
          }
+         if (stream->stdio_pos >= 0)
+            stream->stdio_pos += (int64_t)total;
          return (int64_t)total;
       }
    }
@@ -2202,7 +2442,7 @@ int64_t retro_vfs_file_write_impl(libretro_vfs_implementation_file *stream, cons
 
 #ifdef VFS_NATIVE
    if (stream->hints & RFILE_HINT_WIN32_NATIVE)
-      return -1;                  /* read-only */
+      return vfs_native_write(stream, s, len);
 #endif
    if ((stream->hints & RFILE_HINT_UNBUFFERED) == 0)
    {
@@ -2226,6 +2466,8 @@ int64_t retro_vfs_file_write_impl(libretro_vfs_implementation_file *stream, cons
          return ret;
       }
 #endif
+      /* the position kept, so no tell per write; stdio asked once
+       * where it is not known */
       pos = retro_vfs_file_tell_impl(stream);
       /* Same int-typed stdio callback contract as the read side:
        * chunk so no single fwrite count exceeds what bionic takes. */
@@ -2244,6 +2486,9 @@ int64_t retro_vfs_file_write_impl(libretro_vfs_implementation_file *stream, cons
             len          -= _put;
          }
          ret = (ssize_t)total;
+         /* a short write leaves stdio's position its own to say */
+         stream->stdio_pos = (len != 0 || pos < 0) ? -1
+            : pos + (int64_t)total;
       }
 
       if (ret > 0 && pos + ret > stream->size)
@@ -2749,13 +2994,24 @@ int retro_vfs_file_flush_impl(libretro_vfs_implementation_file *stream)
 #endif
    /* A descriptor holds no bytes of its own to flush: what was
     * written is in the file already */
-   #ifdef VFS_NATIVE
+#ifdef VFS_NATIVE
    if (stream->hints & RFILE_HINT_WIN32_NATIVE)
-      return 0;                   /* nothing written */
+      return vfs_native_flush(stream);
 #endif
    if (stream->hints & RFILE_HINT_UNBUFFERED)
       return stream->fd >= 0 ? 0 : -1;
-   if (stream->fp && fflush(stream->fp) == 0)
+   if (!stream->fp)
+      return -1;
+   /* A stream that reads too keeps its position: msvcrt's fflush drops
+    * what was read ahead without seeking back */
+   if (stream->hints & RFILE_HINT_UPDATE)
+   {
+      int64_t pos = retro_vfs_fp_settle(stream->fp);
+      if (pos < 0 || retro_vfs_fp_seek64(stream->fp, pos, SEEK_SET) != 0)
+         return -1;
+      return 0;
+   }
+   if (fflush(stream->fp) == 0)
       return 0;
    return -1;
 }
