@@ -21,7 +21,7 @@
 namespace Libretro {
 
 inline constexpr std::uint32_t SHARED_MAGIC = 0x34505368; // "hSP4"
-inline constexpr std::uint32_t SHARED_VERSION = 19;
+inline constexpr std::uint32_t SHARED_VERSION = 20;
 
 inline constexpr std::uint32_t MAX_WIDTH = 3840;
 inline constexpr std::uint32_t MAX_HEIGHT = 2160;
@@ -191,6 +191,8 @@ struct SharedState {
     // Core to emulator, per pad.
     retro_atomic_int_t buttons[MAX_PADS];
     retro_atomic_int_t axes[MAX_PADS][SHARED_AXIS_COUNT];
+    /// The touchpad's two touch slots (libretro/touch_track.h: down, x and y in one word)
+    retro_atomic_int_t touch[MAX_PADS][2];
 
     // Emulator to core.
     /// A pad's motors, the small one in the low byte and the large one above it.

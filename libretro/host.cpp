@@ -47,6 +47,7 @@
 #include "libretro.h"
 #include "libretro_bridge.h"
 #include "pixel_order.h"
+#include "touch_track.h"
 #include "shared_state.h"
 #include "video_core/renderer_vulkan/vk_vertex_capture.h"
 #include "video_core/texture_cache/texture_cache.h"
@@ -257,6 +258,7 @@ void PumpInput() {
     };
 
     std::uint32_t held[Libretro::MAX_PADS] = {};
+    std::uint32_t touch_value[Libretro::MAX_PADS][2] = {};
     std::uint32_t axis_value[Libretro::MAX_PADS][Libretro::SHARED_AXIS_COUNT];
     for (auto& pad : axis_value) {
         std::fill(std::begin(pad), std::end(pad), ~0u);
@@ -344,6 +346,17 @@ void PumpInput() {
                 if (value != axis_value[pad][i]) {
                     axis_value[pad][i] = value;
                     controller->Axis(axes[i], static_cast<int>(value), false);
+                }
+            }
+            // The touchpad's slots: a change handed on, which queues a state of its own
+            for (int slot = 0; slot < 2; ++slot) {
+                const std::uint32_t word = static_cast<std::uint32_t>(
+                    retro_atomic_load_acquire_int(&shared->touch[pad][slot]));
+                if (word != touch_value[pad][slot]) {
+                    touch_value[pad][slot] = word;
+                    controller->SetTouchpadState(slot, (word & TOUCH_DOWN) != 0,
+                                                 TOUCH_X(word) / 32768.0f,
+                                                 TOUCH_Y(word) / 32768.0f);
                 }
             }
             if (report) {

@@ -48,6 +48,7 @@
 #include "common/scm_rev.h"
 #include "core/libraries/pad/pad.h"
 #include "pad_scale.h"
+#include "touch_track.h"
 #include "libretro.h"
 #include "gpu_frames.h"
 #include "libretro_core_options.h"
@@ -192,6 +193,8 @@ void AnnounceSize(unsigned width, unsigned height) {
 }
 
 struct retro_rumble_interface rumble {};
+// The frontend reads controllers' touchpads (RETRO_DEVICE_TOUCHPAD), asked at load
+bool touchpads = false;
 
 void Log(enum retro_log_level level, const char* fmt, ...) {
     char text[2048];
@@ -1010,6 +1013,27 @@ void SendInput() {
         }
         put(shared->buttons[pad], held);
 
+        // The touchpad: up to two fingers, each kept in the pad's slot it went down in
+        // (touch_track.h)
+        if (touchpads) {
+            static unsigned slots[Libretro::MAX_PADS][2];
+            unsigned fingers[2];
+            unsigned count = 0;
+            for (unsigned i = 0; i < 2; ++i) {
+                if (input_state_cb(pad, RETRO_DEVICE_TOUCHPAD, i,
+                                   RETRO_DEVICE_ID_POINTER_PRESSED)) {
+                    fingers[count++] = touch_word(
+                        touch_unit(input_state_cb(pad, RETRO_DEVICE_TOUCHPAD, i,
+                                                  RETRO_DEVICE_ID_POINTER_X)),
+                        touch_unit(input_state_cb(pad, RETRO_DEVICE_TOUCHPAD, i,
+                                                  RETRO_DEVICE_ID_POINTER_Y)));
+                }
+            }
+            touch_track(slots[pad], fingers, count);
+            put(shared->touch[pad][0], slots[pad][0]);
+            put(shared->touch[pad][1], slots[pad][1]);
+        }
+
         // libretro's -0x8000..0x7fff to the pad's 0..255, rest at its centre (pad_scale.h)
         const auto stick = [pad](unsigned index, unsigned id) -> uint32_t {
             return pad_scale_stick(input_state_cb(pad, RETRO_DEVICE_ANALOG, index, id));
@@ -1510,6 +1534,11 @@ RETRO_API bool retro_load_game(const struct retro_game_info* game) {
                 ? "float"
                 : "16-bit",
             audio_multi_int16_cb ? "stereo or 7.1 as the game plays it" : "stereo");
+    }
+    {
+        uint64_t caps = 0;
+        touchpads = environ_cb(RETRO_ENVIRONMENT_GET_INPUT_DEVICE_CAPABILITIES, &caps) &&
+                    (caps & (1ull << RETRO_DEVICE_TOUCHPAD)) != 0;
     }
     if (!environ_cb(RETRO_ENVIRONMENT_GET_RUMBLE_INTERFACE, &rumble)) {
         rumble = {};

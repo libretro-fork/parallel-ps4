@@ -91,6 +91,11 @@ ASAN_OPTIONS=detect_leaks=0 "$OUT/tiling_device_test"
 # libretro's analog values to the pad's bytes, rounded, a stick at rest centred
 $CC -std=c89 -O1 -g -Wall -Wno-unused-function -fsanitize=address,undefined \
     libretro/tests/pad_scale_test.c -o "$OUT/pad_scale_test"
+"$OUT/pad_scale_test"
+# The touchpad's fingers into the pad's two slots
+$CC -std=c89 -pedantic -O1 -g -Wall -fsanitize=address,undefined \
+    libretro/tests/touch_track_test.c -o "$OUT/touch_track_test"
+"$OUT/touch_track_test"
 # The music player's block decoder, on a sine made by ffmpeg in each format it plays (an MP3
 # with its tag frame and one without); skipped with no ffmpeg
 $CC -std=c89 -D_POSIX_C_SOURCE=200809L -DHAVE_RAAC -O1 -g -Wall -fsanitize=address,undefined \
