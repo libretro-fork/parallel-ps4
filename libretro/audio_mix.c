@@ -70,6 +70,12 @@ static float pump_sum[PUMP_FRAMES * 8];
 static unsigned mix_channels = 2;
 /* An eight-channel input added frames to the last mix */
 static int pump_wide;
+/* Each input's write count at the mix before the last (audio_mix_frame_ready), and at the last */
+static uint32_t mix_seen_write[AUDIO_MIX_INPUTS];
+static uint32_t mix_last_write[AUDIO_MIX_INPUTS];
+/* Told of every commit, in the sources' process (audio_mix_set_written) */
+static void (*written_fn)(void* ctx);
+static void* written_ctx;
 
 static double sinc_kernel(double x, double cutoff)
 {
@@ -240,6 +246,8 @@ void audio_mix_input_commit(audio_mix_input_t* in, unsigned frames)
    retro_atomic_store_release_int(&in->write,
                                   (int)((uint32_t)retro_atomic_load_relaxed_int(&in->write) +
                                         frames));
+   if (written_fn)
+      written_fn(written_ctx);
 }
 
 /* Adds what one input has, up to @frames, to the sums. Returns how many frames it had. */
@@ -428,22 +436,42 @@ unsigned audio_mix_pump_f32(float* ring, uint32_t ring_mask, uint32_t at, unsign
 unsigned audio_mix_mix(unsigned frames, unsigned* channels)
 {
    unsigned i;
-   /* As many as every input with sound has, up to @frames: a source behind by a few is
-    * waited for, not padded with silence (a gap: crackle). An input with none has nothing to
-    * wait for (stopped, or not started). */
+   const unsigned most = pump_mix(frames);
    for (i = 0; i < AUDIO_MIX_INPUTS; i++)
    {
       audio_mix_input_t* in = &shm->inputs[i];
-      if (retro_atomic_load_acquire_int(&in->state) == INPUT_OPEN)
-      {
-         const unsigned have = queued_frames(in);
-         if (have && have < frames)
-            frames = have;
-      }
+      /* Where each input's source had written to, for audio_mix_frame_ready */
+      mix_seen_write[i] = mix_last_write[i];
+      mix_last_write[i] = (uint32_t)retro_atomic_load_acquire_int(&in->write);
+      /* Surround while an eight-channel input is open, with sound this frame or not: the
+       * layout does not flip with each frame an input is silent (a pop as the frontend
+       * changes it) */
+      if (retro_atomic_load_acquire_int(&in->state) == INPUT_OPEN &&
+          retro_atomic_load_relaxed_int(&in->channels) == 8)
+         pump_wide = 1;
    }
-   frames    = pump_mix(frames);
    *channels = pump_wide ? 8 : 2;
-   return frames;
+   return most;
+}
+
+int audio_mix_frame_ready(unsigned frames)
+{
+   unsigned i;
+   for (i = 0; i < AUDIO_MIX_INPUTS; i++)
+   {
+      audio_mix_input_t* in = &shm->inputs[i];
+      if (retro_atomic_load_acquire_int(&in->state) == INPUT_OPEN &&
+          (uint32_t)retro_atomic_load_acquire_int(&in->write) != mix_seen_write[i] &&
+          queued_frames(in) < frames)
+         return 0;
+   }
+   return 1;
+}
+
+void audio_mix_set_written(void (*written)(void* ctx), void* ctx)
+{
+   written_ctx = ctx;
+   written_fn  = written;
 }
 
 void audio_mix_take_f32(float* dst, unsigned first, unsigned count, unsigned channels)

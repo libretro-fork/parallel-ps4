@@ -45,6 +45,13 @@ typedef struct game_clock {
     retro_atomic_int_t running;
     retro_atomic_64_t free_timers[GAME_CLOCK_TIMERS / 64]; /* a bit a timer, set if free */
     game_clock_timer_t timers[GAME_CLOCK_TIMERS];
+    /* The frame is wanted finished (game_clock_finish): its deadlines are not held back by
+     * threads running */
+    retro_atomic_int_t finishing;
+    /* The frame done, or 0 (game_clock_set_done), and who is told */
+    retro_atomic_int_t* done_frame;
+    void (*done)(void* ctx);
+    void* done_ctx;
 } game_clock_t;
 
 /* At time 0, no frame started (the time stands until the first), frames of
@@ -54,6 +61,21 @@ void game_clock_init(game_clock_t* clock, unsigned fps_num, unsigned fps_den);
 /* A frame starts (retro_run): the time moves to its start (the last frame's end), if the
  * game had not used all of the last one. The one thread that starts frames. */
 void game_clock_frame(game_clock_t* clock);
+
+/* The frame is done when the game's threads are all idle and none waits for a time within
+ * it: nothing more happens in it until something outside the game wakes a thread (the next
+ * frame, the GPU, input). Then *@done_frame is set to the frame's number (frames started)
+ * and @done(@ctx) is called, on the thread that made it so; a game thread running again sets
+ * it back to 0. @done_frame may be in memory another process reads. Set before the frames
+ * start. */
+void game_clock_set_done(game_clock_t* clock, retro_atomic_int_t* done_frame,
+                         void (*done)(void* ctx), void* ctx);
+
+/* The frontend wants the frame finished (it waits for its sound): from here until the next
+ * frame starts, the time moves to each deadline within the frame as soon as it is armed, and
+ * what is due fires, whoever is running. So a thread that never waits (a spin with no yield)
+ * does not hold the frame, and the frame's sleepers all get their time. */
+void game_clock_finish(game_clock_t* clock);
 
 /* The time now */
 uint64_t game_clock_now(game_clock_t* clock);

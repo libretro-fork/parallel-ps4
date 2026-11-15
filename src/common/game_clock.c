@@ -29,6 +29,17 @@ void game_clock_init(game_clock_t* clock, unsigned fps_num, unsigned fps_den) {
             clock->timers[i].oneshot = 0;
         }
     }
+    retro_atomic_int_init(&clock->finishing, 0);
+    clock->done_frame = 0;
+    clock->done = 0;
+    clock->done_ctx = 0;
+}
+
+void game_clock_set_done(game_clock_t* clock, retro_atomic_int_t* done_frame,
+                         void (*done)(void* ctx), void* ctx) {
+    clock->done = done;
+    clock->done_ctx = ctx;
+    clock->done_frame = done_frame;
 }
 
 /* The timers due at @now fire: each once, by whichever thread claims it */
@@ -64,12 +75,36 @@ static uint64_t game_clock_earliest(game_clock_t* clock) {
     return earliest;
 }
 
-/* All idle: the time moves to the earliest deadline, within the frame, and what is due fires */
+/* All idle: the time moves to the earliest deadline, within the frame, and what is due fires.
+ * The frame being finished: to each deadline within it in turn, all of them. */
 static void game_clock_skip(game_clock_t* clock) {
-    const uint64_t earliest = game_clock_earliest(clock);
+    uint64_t earliest = game_clock_earliest(clock);
+    uint64_t next;
     if (earliest)
         game_clock_advance(clock, earliest);
     game_clock_fire_due(clock, game_clock_now(clock));
+    while (retro_atomic_load_acquire_int(&clock->finishing) &&
+           (earliest = game_clock_earliest(clock)) != 0 &&
+           earliest <= game_clock_frame_end(clock)) {
+        game_clock_advance(clock, earliest);
+        game_clock_fire_due(clock, game_clock_now(clock));
+    }
+    /* Still nobody running, and nobody waiting for a time within the frame: it is done */
+    if (!clock->done_frame || retro_atomic_load_acquire_int(&clock->running) > 0)
+        return;
+    next = game_clock_earliest(clock);
+    if (next == 0 || next > game_clock_frame_end(clock)) {
+        retro_atomic_store_release_int(clock->done_frame, (int)game_clock_frames(clock));
+        /* A thread that went running meanwhile may have looked before the store: then it is
+         * taken back here (the store, then the count; its count, then the store's word) */
+        retro_atomic_thread_fence_seq_cst();
+        if (retro_atomic_load_seq_cst_int(&clock->running) > 0) {
+            retro_atomic_store_release_int(clock->done_frame, 0);
+            return;
+        }
+        if (clock->done)
+            clock->done(clock->done_ctx);
+    }
 }
 
 /* The time moves to @to if that is later: never back, whoever moves it */
@@ -91,6 +126,7 @@ void game_clock_frame(game_clock_t* clock) {
     clock->acc %= clock->fps_num;
     /* The end first: a thread that sees the new start may advance within the new frame */
     retro_atomic_store_release_64(&clock->frame_end, (int64_t)end);
+    retro_atomic_store_release_int(&clock->finishing, 0);
     game_clock_raise(clock, start);
     retro_atomic_fetch_add_64(&clock->frames, 1);
     /* Nobody running: the new frame's time is theirs to skip through at once */
@@ -137,8 +173,11 @@ static int game_clock_arm_ex(game_clock_t* clock, uint64_t deadline, void (*fire
                 t->ctx = ctx;
                 t->oneshot = oneshot;
                 retro_atomic_store_release_64(&t->deadline, (int64_t)deadline);
-                /* Due already, or the time moved past it while it was being armed */
-                if (deadline <= game_clock_now(clock))
+                /* Due already, or the time moved past it while it was being armed; or the frame
+                 * is being finished: the time goes to it now */
+                if (retro_atomic_load_acquire_int(&clock->finishing))
+                    game_clock_skip(clock);
+                else if (deadline <= game_clock_now(clock))
                     game_clock_fire_due(clock, game_clock_now(clock));
                 return (int)(w * 64 + bit);
             }
@@ -182,13 +221,21 @@ int game_clock_disarm(game_clock_t* clock, int timer) {
     return fired;
 }
 
+void game_clock_finish(game_clock_t* clock) {
+    retro_atomic_store_release_int(&clock->finishing, 1);
+    game_clock_skip(clock);
+}
+
 void game_clock_idle(game_clock_t* clock) {
     if (retro_atomic_fetch_sub_int(&clock->running, 1) == 1)
         game_clock_skip(clock);
 }
 
 void game_clock_busy(game_clock_t* clock) {
-    retro_atomic_fetch_add_int(&clock->running, 1);
+    retro_atomic_fetch_add_seq_cst_int(&clock->running, 1);
+    /* Running again: the frame is not done after all */
+    if (clock->done_frame && retro_atomic_load_seq_cst_int(clock->done_frame) != 0)
+        retro_atomic_store_release_int(clock->done_frame, 0);
 }
 
 int game_clock_running(game_clock_t* clock) {

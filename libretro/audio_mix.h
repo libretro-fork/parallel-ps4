@@ -114,13 +114,21 @@ unsigned audio_mix_pump_f32(float* ring, uint32_t ring_mask, uint32_t at, unsign
 
 /* Surround: sums up to @frames of every open input into the mixing thread's own sums and
  * says how wide the result is, *@channels: 8 when an input of eight channels added frames,
- * else 2 (an input of two is the front pair of an eight-channel result). Returns the frames,
- * as many as every input with sound has (no more than @frames): one behind by a few is
- * waited for, never padded with silence, so each input's sound is unbroken.
+ * else 2 (an input of two is the front pair of an eight-channel result). Returns the frames.
  * audio_mix_take_f32 and audio_mix_take_s16 then write @count of them from @first, at that
  * width, to the frontend's scale: float -1 to 1, clamped past full scale and not rounded, or
  * 16 bits, rounded to the nearest step and clamped. Mixing thread only. */
 unsigned audio_mix_mix(unsigned frames, unsigned* channels);
+
+/* Mixing thread: whether the frame's sound is in, @frames of every input whose source has
+ * written since the audio_mix_mix before the last: one that wrote in the last frame is waited
+ * for, even if its next writes wait on the game's time. An input not written to for a whole
+ * frame (stopped, or not started) is not. */
+int audio_mix_frame_ready(unsigned frames);
+
+/* In the sources' process: @written(@ctx) is called after every commit (to wake a mixer in
+ * the other process that waits for the frame's sound). Set before the sources start. */
+void audio_mix_set_written(void (*written)(void* ctx), void* ctx);
 void audio_mix_take_f32(float* dst, unsigned first, unsigned count, unsigned channels);
 void audio_mix_take_s16(int16_t* dst, unsigned first, unsigned count, unsigned channels);
 

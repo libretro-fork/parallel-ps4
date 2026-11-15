@@ -147,17 +147,31 @@ bool GameSemaWait(Sema& sema, u64 deadline) {
 }
 
 /// Waits on @ec until @ready() or the game's time reaches @deadline (0: none), as a game
-/// thread not counted running meanwhile: no host timeout, no wall clock (game_clock_wait).
-/// @return whether @ready() was what ended it.
+/// thread not counted running meanwhile (@counted: one that is counted): no host timeout, no
+/// wall clock (game_clock_wait). @return whether @ready() was what ended it.
 template <typename Ready>
-bool GameWait(retro_eventcount_t* ec, u64 deadline, Ready&& ready) {
+bool GameWaitAs(retro_eventcount_t* ec, u64 deadline, Ready&& ready, bool counted) {
     return game_clock_wait(
                GameClock(), ec, deadline,
                [](void* ctx) -> int {
                    return (*static_cast<std::remove_reference_t<Ready>*>(ctx))() ? 1 : 0;
                },
-               const_cast<void*>(static_cast<const void*>(std::addressof(ready))),
-               IsGameThread()) != 0;
+               const_cast<void*>(static_cast<const void*>(std::addressof(ready))), counted) != 0;
+}
+
+/// The same, for the calling thread as it is counted
+template <typename Ready>
+bool GameWait(retro_eventcount_t* ec, u64 deadline, Ready&& ready) {
+    return GameWaitAs(ec, deadline, ready, IsGameThread());
+}
+
+/// The same, for work the waiter hands to a service thread of the emulator (an AJM decode):
+/// the waiter stays counted running, as the work is its own, so the time does not skip past
+/// it, and its frame is not done before the work is.
+template <typename Ready>
+bool GameWaitRunning(retro_eventcount_t* ec, u64 deadline, Ready&& ready) {
+    (void)IsGameThread(); // one that yielded counts running again
+    return GameWaitAs(ec, deadline, ready, false);
 }
 
 namespace Dev {

@@ -17,8 +17,8 @@
 //
 // Picture: the emulator's renderer reads each finished frame back and puts it in the shared
 // memory; retro_run hands the newest one over as a software frame, from where it is.
-// Sound: the game's audio ports write into inputs in the shared memory; retro_run mixes up to
-// a frame of them, as much as every one with sound has: unbroken, never padded with silence.
+// Sound: the game's audio ports write into inputs in the shared memory; retro_run waits for
+// the frame's sound, as any core runs its frame to the end, and mixes exactly a frame of it.
 // Pads: the buttons, sticks and triggers of as many ports as the Controllers option says go
 // in, the motors come back.
 // Core options: read when a game is loaded and passed along; the emulator puts them on top of
@@ -112,6 +112,10 @@ SharedState* shared = nullptr;
 Libretro::SharedWakes wakes;
 bool emulator_running = false;
 bool shutdown_requested = false;
+// The emulator's process has ended: set by a thread blocked on it (WatchEmulator), so that a
+// retro_run waiting for the frame's sound is woken by the end itself, with no timeout
+retro_atomic_int_t emulator_gone;
+sthread_t* emulator_watch = nullptr;
 
 #ifdef _WIN32
 HANDLE shared_mapping = nullptr;
@@ -1114,6 +1118,92 @@ void StopEmulator() {
 
 #endif
 
+// Blocks on the emulator's process until it ends, however it ends, and wakes a retro_run
+// waiting for the frame's sound. On Linux it waits without reaping (WNOWAIT), which is left to
+// EmulatorEnded and StopEmulator; it returns as well once they have.
+#ifdef _WIN32
+static HANDLE watched_process = nullptr;
+#else
+static pid_t watched_pid = -1;
+#endif
+
+static void WatchEmulator(void*) {
+#ifdef _WIN32
+    WaitForSingleObject(watched_process, INFINITE);
+#else
+    siginfo_t info{};
+    while (waitid(P_PID, static_cast<id_t>(watched_pid), &info, WEXITED | WNOWAIT) < 0 &&
+           errno == EINTR) {
+    }
+#endif
+    retro_atomic_store_release_int(&emulator_gone, 1);
+    wakes.audio.Notify();
+}
+
+static void StartWatch() {
+    retro_atomic_store_release_int(&emulator_gone, 0);
+#ifdef _WIN32
+    if (!DuplicateHandle(GetCurrentProcess(), emulator_process, GetCurrentProcess(),
+                         &watched_process, SYNCHRONIZE, FALSE, 0)) {
+        watched_process = nullptr;
+        retro_atomic_store_release_int(&emulator_gone, 1);
+        return;
+    }
+#else
+    watched_pid = emulator_pid;
+#endif
+    emulator_watch = sthread_create(WatchEmulator, nullptr);
+    if (!emulator_watch) {
+        retro_atomic_store_release_int(&emulator_gone, 1);
+    }
+}
+
+// After StopEmulator: the process has ended, so the thread has returned or is about to
+static void StopWatch() {
+    if (emulator_watch) {
+        sthread_join(emulator_watch);
+        emulator_watch = nullptr;
+    }
+#ifdef _WIN32
+    if (watched_process) {
+        CloseHandle(watched_process);
+        watched_process = nullptr;
+    }
+#endif
+}
+
+// The frame's sound, before it is mixed: waited for, as any core runs a frame of its game to
+// the end in retro_run. Over once every source that has written since the last frame has a
+// frame of sound queued, or the game's frame is done without it (a source stopped: what it has
+// then is all there is), or the emulator has ended. While it is not in, the emulator finishes
+// the frame: its sleepers are woken at their deadlines in it even while other threads run, so
+// a thread that never waits cannot hold it. Woken by the emulator's writes into the mix's
+// inputs and by the frame being done; no timeout, no wall clock.
+static void WaitFrameSound() {
+    if (!shared || !emulator_running) {
+        return;
+    }
+    bool asked = false;
+    for (;;) {
+        const int key = wakes.audio.Prepare();
+        if (audio_mix_frame_ready(kAudioFrames) ||
+            retro_atomic_load_acquire_int(&shared->frame_done) ==
+                retro_atomic_load_relaxed_int(&shared->vblank_ticks) ||
+            retro_atomic_load_acquire_int(&emulator_gone) != 0) {
+            wakes.audio.Cancel();
+            return;
+        }
+        if (!asked) {
+            // Not in yet: the emulator finishes the frame, its sleepers all woken
+            asked = true;
+            retro_atomic_store_release_int(&shared->sound_wanted,
+                                           retro_atomic_load_relaxed_int(&shared->vblank_ticks));
+            wakes.vblank.Notify();
+        }
+        wakes.audio.Wait(key);
+    }
+}
+
 // ---- The frontend's side of the shared memory ----
 
 void SendInput() {
@@ -1319,15 +1409,12 @@ void SendAudio() {
     static float out_f32[kAudioFrames * 8];
     static int16_t out_s16[kAudioFrames * 8];
     unsigned channels = 2;
-    // The frame's sound: as much as every source has, up to a frame, unbroken. A source a few
-    // samples behind is waited for, not padded with silence, which the frontend would play
-    // as a gap; what it has left goes with the next frame.
-    unsigned frames = kAudioFrames;
-    if (shared) {
-        frames = audio_mix_mix(kAudioFrames, &channels);
-        if (frames == 0) {
-            return;
-        }
+    // Exactly a frame of sound, every run: retro_run waited for it (WaitFrameSound)
+    constexpr unsigned frames = kAudioFrames;
+    // Before the first frame the game's time has not started: no sound of it yet
+    const bool mixed = shared && retro_atomic_load_relaxed_int(&shared->vblank_ticks) != 0;
+    if (mixed) {
+        audio_mix_mix(frames, &channels);
     } else {
         std::memset(out_f32, 0, sizeof(out_f32));
         std::memset(out_s16, 0, sizeof(out_s16));
@@ -1336,12 +1423,12 @@ void SendAudio() {
         // Surround: the frame at the width the mix came to, 7.1 or stereo
         const unsigned layout = channels == 8 ? RETRO_AUDIO_LAYOUT_7_1 : RETRO_AUDIO_LAYOUT_STEREO;
         if (audio_multi_float_cb) {
-            if (shared) {
+            if (mixed) {
                 audio_mix_take_f32(out_f32, 0, frames, channels);
             }
             audio_multi_float_cb(out_f32, frames, channels, layout);
         } else {
-            if (shared) {
+            if (mixed) {
                 audio_mix_take_s16(out_s16, 0, frames, channels);
             }
             audio_multi_int16_cb(out_s16, frames, channels, layout);
@@ -1349,12 +1436,12 @@ void SendAudio() {
         return;
     }
     if (audio_batch_float_cb) {
-        if (shared) {
+        if (mixed) {
             audio_mix_take_f32(out_f32, 0, frames, 2);
         }
         audio_batch_float_cb(out_f32, frames);
     } else {
-        if (shared) {
+        if (mixed) {
             audio_mix_take_s16(out_s16, 0, frames, 2);
         }
         audio_batch_cb(out_s16, frames);
@@ -1582,6 +1669,7 @@ static bool StartGame(const std::string& boot_path, const std::string& user_dir,
         return false;
     }
     emulator_running = true;
+    StartWatch();
     return true;
 }
 
@@ -1741,6 +1829,7 @@ RETRO_API void retro_unload_game(void) {
         wakes.vblank.Notify();
     }
     StopEmulator();
+    StopWatch();
     // The frame shown was in the shared memory, or one of the emulator's images.
     shown_frame = nullptr;
     Libretro::GpuFrames::Close();
@@ -1900,6 +1989,7 @@ RETRO_API void retro_run(void) {
         video_cb(shown_frame, shown_width, shown_height, shown_width * sizeof(uint32_t));
     }
     if (audio_batch_cb) {
+        WaitFrameSound();
         SendAudio();
     }
     if (shared) {

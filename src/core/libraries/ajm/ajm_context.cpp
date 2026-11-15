@@ -103,13 +103,13 @@ s32 AjmContext::BatchWait(const u32 batch_id, const u32 timeout, AjmBatchError* 
         return ORBIS_AJM_ERROR_BUSY;
     }
 
-    // On the game's time, not counted running meanwhile
+    // On the game's time; counted running meanwhile, as the decode is its work
     const auto take = [&batch] { return retro_atomic_cas_int(&batch->finished, 1, 0); };
     if (timeout == ORBIS_AJM_WAIT_INFINITE) {
-        Kernel::GameWait(batch->finished_ec.get(), 0, take);
+        Kernel::GameWaitRunning(batch->finished_ec.get(), 0, take);
     } else if (!(timeout == 0
                      ? take()
-                     : Kernel::GameWait(
+                     : Kernel::GameWaitRunning(
                            batch->finished_ec.get(),
                            Kernel::GameDeadlineIn(static_cast<u64>(timeout) * 1'000'000), take))) {
         (void)retro_atomic_exchange_int(&batch->waiting, 0);
