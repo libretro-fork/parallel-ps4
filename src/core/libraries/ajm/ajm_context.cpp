@@ -12,6 +12,7 @@
 #include "core/libraries/ajm/ajm_instance_statistics.h"
 #include "core/libraries/ajm/ajm_mp3.h"
 #include "core/libraries/error_codes.h"
+#include "core/libraries/kernel/time.h"
 
 #include <span>
 #include <utility>
@@ -66,7 +67,8 @@ void AjmContext::WorkerThread(std::stop_token stop) {
             (retro_atomic_cas_int(&batch->processed, expected, true) ||
              ((expected = (retro_atomic_load_acquire_int(&batch->processed) != 0)), false));
             ProcessBatch(batch->id, batch->jobs);
-            batch->finished.release();
+            retro_atomic_store_release_int(&batch->finished, 1);
+            batch->finished_ec.Notify();
         }
     }
 }
@@ -101,9 +103,15 @@ s32 AjmContext::BatchWait(const u32 batch_id, const u32 timeout, AjmBatchError* 
         return ORBIS_AJM_ERROR_BUSY;
     }
 
+    // On the game's time, not counted running meanwhile
+    const auto take = [&batch] { return retro_atomic_cas_int(&batch->finished, 1, 0); };
     if (timeout == ORBIS_AJM_WAIT_INFINITE) {
-        batch->finished.acquire();
-    } else if (!batch->finished.try_acquire_for(std::chrono::milliseconds(timeout))) {
+        Kernel::GameWait(batch->finished_ec.get(), 0, take);
+    } else if (!(timeout == 0
+                     ? take()
+                     : Kernel::GameWait(
+                           batch->finished_ec.get(),
+                           Kernel::GameDeadlineIn(static_cast<u64>(timeout) * 1'000'000), take))) {
         (void)retro_atomic_exchange_int(&batch->waiting, 0);
         return ORBIS_AJM_ERROR_IN_PROGRESS;
     }
@@ -136,7 +144,7 @@ int AjmContext::BatchStartBuffer(u8* p_batch, u32 batch_size, const int priority
         batch_queue.EmplaceWait(batch_info);
     } else {
         // Empty batches are not submitted to the processor and are marked as finished
-        batch_info->finished.release();
+        retro_atomic_store_release_int(&batch_info->finished, 1);
     }
 
     return ORBIS_OK;

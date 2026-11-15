@@ -22,8 +22,18 @@ for san in address,undefined thread; do
         -o "$OUT/audio_pipeline_test" -lpthread -lm
     "$OUT/audio_pipeline_test"
 done
+# A game's sound on the game's time against the frame-locked mix (the real game_clock and
+# audio_mix): an engine sleeping to its buffers' deadlines, a render thread, and threads that
+# spin on sched_yield or wait on the engine's lock; a heavy frame. Every sample once, in order,
+# none padded, never more than a buffer behind (two seconds a case, four cases)
+for san in address,undefined thread; do
+    $CC -std=gnu89 -O1 -g -Wall -Wdeclaration-after-statement -fsanitize=$san -Isrc -I$L/include \
+        libretro/tests/audio_game_model_test.c libretro/audio_mix.c src/common/game_clock.c \
+        $COMMON $L/time/rtime.c -o "$OUT/audio_game_model_test" -lpthread -lm
+    "$OUT/audio_game_model_test"
+done
 # The frame-locked mix: exactly a frame of every source's sound a frame, in order, none
-# queued past a frame and a buffer, a source that stops going silent
+# queued past a frame and a buffer; a source that stops plays out what it had, unpadded
 $CC -std=gnu89 -O1 -g -Wall -Wdeclaration-after-statement -fsanitize=address,undefined \
     -I$L/include libretro/tests/audio_frame_test.c libretro/audio_mix.c $COMMON \
     -o "$OUT/audio_frame_test" -lpthread -lm

@@ -427,9 +427,23 @@ unsigned audio_mix_pump_f32(float* ring, uint32_t ring_mask, uint32_t at, unsign
 
 unsigned audio_mix_mix(unsigned frames, unsigned* channels)
 {
-   const unsigned most = pump_mix(frames);
-   *channels           = pump_wide ? 8 : 2;
-   return most;
+   unsigned i;
+   /* As many as every input with sound has, up to @frames: a source behind by a few is
+    * waited for, not padded with silence (a gap: crackle). An input with none has nothing to
+    * wait for (stopped, or not started). */
+   for (i = 0; i < AUDIO_MIX_INPUTS; i++)
+   {
+      audio_mix_input_t* in = &shm->inputs[i];
+      if (retro_atomic_load_acquire_int(&in->state) == INPUT_OPEN)
+      {
+         const unsigned have = queued_frames(in);
+         if (have && have < frames)
+            frames = have;
+      }
+   }
+   frames    = pump_mix(frames);
+   *channels = pump_wide ? 8 : 2;
+   return frames;
 }
 
 void audio_mix_take_f32(float* dst, unsigned first, unsigned count, unsigned channels)

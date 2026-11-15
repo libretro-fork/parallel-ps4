@@ -13,6 +13,7 @@
 #include "core/file_sys/fs.h"
 #include "core/guest_call.h"
 #include "core/libraries/error_codes.h"
+#include "core/libraries/kernel/time.h"
 #include "core/libraries/libs.h"
 #include "core/libraries/ngs2/ngs2.h"
 #include "core/libraries/ngs2/ngs2_core.h"
@@ -172,7 +173,9 @@ public:
             ++depth;
             return;
         }
-        free.Wait([&] { return retro_atomic_cas_ptr(&owner, nullptr, self); });
+        // Not counted running meanwhile: the time moves on for the thread that has it
+        Kernel::GameWait(free.get(), 0,
+                         [&] { return retro_atomic_cas_ptr(&owner, nullptr, self); });
         depth = 1;
     }
 

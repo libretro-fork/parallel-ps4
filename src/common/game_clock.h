@@ -7,6 +7,7 @@
 #include <stdint.h>
 
 #include <retro_atomic.h>
+#include <rthreads/retro_eventcount.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -89,6 +90,21 @@ void game_clock_busy(game_clock_t* clock);
 
 /* The game threads counted running */
 int game_clock_running(game_clock_t* clock);
+
+/* A counted game thread yields (sched_yield, usleep(0), a spin on a lock): it waits, on
+ * nothing the clock tracks, for another thread. It counts idle from here, through the yields
+ * that follow, until it next waits on something tracked or ends (game_clock_resume): the
+ * time is not held at the frame's start by a thread that only spins. @yielded is the
+ * thread's own, 0 to start. */
+void game_clock_yield(game_clock_t* clock, int* yielded);
+void game_clock_resume(game_clock_t* clock, int* yielded);
+
+/* Waits on @ec until @ready(@ctx) is nonzero or the game's time reaches @deadline (0: none),
+ * as a game thread (@counted) not counted running meanwhile: no host timeout, no wall clock.
+ * A timer of the game's clock wakes it at the deadline and hands it its count back.
+ * @return 1 if @ready ended it, 0 if the deadline did. */
+int game_clock_wait(game_clock_t* clock, retro_eventcount_t* ec, uint64_t deadline,
+                    int (*ready)(void* ctx), void* ctx, int counted);
 
 #ifdef __cplusplus
 }

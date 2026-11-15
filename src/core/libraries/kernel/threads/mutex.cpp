@@ -230,7 +230,7 @@ s32 PthreadMutex::Lock(const OrbisKernelTimespec* abstime, u64 usec) {
 
         count = m_yieldloops;
         while (count--) {
-            std::this_thread::yield();
+            GameYield();
             if (m_lock.try_lock()) {
                 retro_atomic_store_release_ptr(&m_owner, curthread);
                 return 0;
@@ -238,18 +238,19 @@ s32 PthreadMutex::Lock(const OrbisKernelTimespec* abstime, u64 usec) {
         }
     }
 
+    // Waited for on the game's time
     s32 ret = 0;
     if (abstime == nullptr) {
-        m_lock.lock();
+        m_lock.lock_until(0);
     } else if (abstime != THR_RELTIME && (abstime->tv_nsec < 0 || abstime->tv_nsec >= 1000000000))
         [[unlikely]] {
         ret = POSIX_EINVAL;
     } else {
-        if (abstime == THR_RELTIME) {
-            ret = m_lock.try_lock_for(std::chrono::microseconds(usec)) ? 0 : POSIX_ETIMEDOUT;
-        } else {
-            ret = m_lock.try_lock_until(abstime->TimePoint()) ? 0 : POSIX_ETIMEDOUT;
-        }
+        const u64 deadline = abstime == THR_RELTIME ? GameDeadlineIn(usec * 1000)
+                                                    : GameDeadline(abstime, ORBIS_CLOCK_REALTIME);
+        const bool taken = deadline == 0 || deadline <= GameNow() ? m_lock.try_lock()
+                                                                  : m_lock.lock_until(deadline);
+        ret = taken ? 0 : POSIX_ETIMEDOUT;
     }
     if (ret == 0) {
         retro_atomic_store_release_ptr(&m_owner, curthread);

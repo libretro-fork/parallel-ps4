@@ -8,7 +8,8 @@
  *     frame mixes exactly 800 frames, each source's samples in order, none lost or repeated,
  *     and neither ever has more than a frame and a buffer queued;
  *   - ready says no with more than a frame queued, yes again once the frame is taken;
- *   - a source that stops: silence for its part, the other's samples unchanged. */
+ *   - a source that stops: what it had left plays out with the other's (that frame as long
+ *     as it, not padded with silence), then the other's frames are whole again. */
 
 #include <stdio.h>
 #include <string.h>
@@ -98,19 +99,23 @@ int main(void)
              next_a - want_a > AUDIO_MIX_FRAME_FRAMES,
          "ready again once the frame is taken");
 
-   /* B stops: its part silent, A's unchanged */
+   /* B stops: what it has left plays out with A's (the frame as long as that, not padded),
+    * then A's frames are whole again, B's part silent */
    order_ok = 1;
-   for (f = 0; f < 3; f++)
+   for (f = 0; f < 4; f++)
    {
+      unsigned got;
+      const unsigned b_left = next_b - want_b;
       while (audio_mix_input_ready(a, 256, AUDIO_MIX_FRAME_FRAMES))
          write_counts(a, &next_a, 256, 0, 0.0f);
-      audio_mix_mix(AUDIO_MIX_FRAME_FRAMES, &ch);
-      audio_mix_take_s16(out, 0, AUDIO_MIX_FRAME_FRAMES, 2);
-      for (i = 0; i < AUDIO_MIX_FRAME_FRAMES; i++)
+      got = audio_mix_mix(AUDIO_MIX_FRAME_FRAMES, &ch);
+      if (got != (b_left && b_left < AUDIO_MIX_FRAME_FRAMES ? b_left : AUDIO_MIX_FRAME_FRAMES))
+         order_ok = 0;
+      audio_mix_take_s16(out, 0, got, 2);
+      for (i = 0; i < got; i++)
       {
          if (out[i * 2] != (int16_t)want_a++)
             order_ok = 0;
-         /* What B had queued plays out first, then silence */
          if (want_b < next_b)
          {
             if (out[i * 2 + 1] != (int16_t)want_b++)
@@ -120,7 +125,8 @@ int main(void)
             order_ok = 0;
       }
    }
-   CHECK(order_ok, "a source that stops: what it had, then silence; the other unchanged");
+   CHECK(order_ok, "a source that stops: what it had, with the other's, then whole frames of "
+                   "the other alone");
 
    audio_mix_input_close(a);
    audio_mix_input_close(b);

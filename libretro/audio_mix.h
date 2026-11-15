@@ -114,7 +114,9 @@ unsigned audio_mix_pump_f32(float* ring, uint32_t ring_mask, uint32_t at, unsign
 
 /* Surround: sums up to @frames of every open input into the mixing thread's own sums and
  * says how wide the result is, *@channels: 8 when an input of eight channels added frames,
- * else 2 (an input of two is the front pair of an eight-channel result). Returns the frames.
+ * else 2 (an input of two is the front pair of an eight-channel result). Returns the frames,
+ * as many as every input with sound has (no more than @frames): one behind by a few is
+ * waited for, never padded with silence, so each input's sound is unbroken.
  * audio_mix_take_f32 and audio_mix_take_s16 then write @count of them from @first, at that
  * width, to the frontend's scale: float -1 to 1, clamped past full scale and not rounded, or
  * 16 bits, rounded to the nearest step and clamped. Mixing thread only. */

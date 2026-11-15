@@ -194,3 +194,70 @@ void game_clock_busy(game_clock_t* clock) {
 int game_clock_running(game_clock_t* clock) {
     return retro_atomic_load_acquire_int(&clock->running);
 }
+
+void game_clock_yield(game_clock_t* clock, int* yielded) {
+    if (*yielded)
+        return;
+    *yielded = 1;
+    game_clock_idle(clock);
+}
+
+void game_clock_resume(game_clock_t* clock, int* yielded) {
+    if (!*yielded)
+        return;
+    *yielded = 0;
+    game_clock_busy(clock);
+}
+
+struct game_clock_wait_timer {
+    game_clock_t* clock;
+    retro_eventcount_t* ec;
+    retro_atomic_int_t fired;
+    int counted;
+};
+
+static void game_clock_wait_fire(void* ctx) {
+    struct game_clock_wait_timer* t = (struct game_clock_wait_timer*)ctx;
+    /* The woken thread counts as running from here: the time does not skip past it before it
+     * has run */
+    if (t->counted)
+        game_clock_busy(t->clock);
+    retro_atomic_store_release_int(&t->fired, 1);
+    retro_eventcount_notify(t->ec);
+}
+
+int game_clock_wait(game_clock_t* clock, retro_eventcount_t* ec, uint64_t deadline,
+                    int (*ready)(void* ctx), void* ctx, int counted) {
+    struct game_clock_wait_timer t;
+    int timer = -1, ok = 0, fired;
+    if (ready(ctx))
+        return 1;
+    if (deadline != 0 && deadline <= game_clock_now(clock))
+        return ready(ctx) ? 1 : 0;
+    t.clock = clock;
+    t.ec = ec;
+    retro_atomic_int_init(&t.fired, 0);
+    t.counted = counted;
+    if (deadline != 0)
+        timer = game_clock_arm(clock, deadline, game_clock_wait_fire, &t);
+    if (counted)
+        game_clock_idle(clock);
+    for (;;) {
+        const int key = retro_eventcount_prepare_wait(ec);
+        if (ready(ctx)) {
+            retro_eventcount_cancel_wait(ec);
+            ok = 1;
+            break;
+        }
+        if (retro_atomic_load_acquire_int(&t.fired)) {
+            retro_eventcount_cancel_wait(ec);
+            break;
+        }
+        retro_eventcount_commit_wait(ec, key);
+    }
+    /* A timer that fired handed this thread its count back */
+    fired = timer >= 0 && game_clock_disarm(clock, timer);
+    if (counted && !fired)
+        game_clock_busy(clock);
+    return ok;
+}

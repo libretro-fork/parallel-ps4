@@ -93,6 +93,36 @@ enum class PthreadMutexProt : u32 {
     Protect = 2,
 };
 
+/// A guest mutex's lock: a word taken by compare-and-swap, its waiters parked on the game's
+/// time (GameWait): counted idle while they wait, so the time moves on for the thread that
+/// holds it, and a timed lock times out on the game's time. No host lock, no wall clock.
+struct GameLock {
+    retro_atomic_int_t held;
+    retro_eventcount_t wake;
+
+    GameLock() {
+        retro_atomic_int_init(&held, 0);
+        retro_eventcount_init(&wake);
+    }
+    ~GameLock() {
+        retro_eventcount_free(&wake);
+    }
+    GameLock(const GameLock&) = delete;
+    GameLock& operator=(const GameLock&) = delete;
+
+    bool try_lock() {
+        return retro_atomic_cas_int(&held, 0, 1);
+    }
+    /// Until it is taken (true) or the game's time reaches @deadline (false; 0: never)
+    bool lock_until(u64 deadline) {
+        return GameWait(&wake, deadline, [this] { return try_lock(); });
+    }
+    void unlock() {
+        retro_atomic_store_release_int(&held, 0);
+        retro_eventcount_notify(&wake);
+    }
+};
+
 struct PthreadMutex {
     retro_atomic_ptr_t m_owner;
     int m_count;
@@ -101,7 +131,7 @@ struct PthreadMutex {
     PthreadMutexProt m_protocol;
     u64 : 64;
     PthreadMutexFlags m_flags;
-    TimedMutex m_lock;
+    GameLock m_lock;
     std::string name;
 
     [[nodiscard]] PthreadMutexType Type() const noexcept {
@@ -436,8 +466,12 @@ struct Pthread {
             WakeAll();
         }
         if (abstime == THR_RELTIME) {
-            return usec == 0 ? wake_sema.try_acquire_pending()
-                             : SleepUntil(GameDeadlineIn(usec * 1000));
+            if (usec == 0) {
+                // A sleep of nothing: a yield
+                GameYield();
+                return wake_sema.try_acquire_pending();
+            }
+            return SleepUntil(GameDeadlineIn(usec * 1000));
         }
         if (abstime != nullptr) {
             const u64 deadline = GameDeadline(abstime, static_cast<u32>(clock_id));

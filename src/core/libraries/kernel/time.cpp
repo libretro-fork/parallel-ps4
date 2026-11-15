@@ -61,25 +61,25 @@ static void GameTimespec(u64 base_ns, OrbisKernelTimespec* ts) {
 
 namespace {
 thread_local bool game_thread = false;
+thread_local int game_thread_yielded = 0;
 } // namespace
 
 bool IsGameThread() {
+    if (game_thread) {
+        game_clock_resume(&game_clock, &game_thread_yielded);
+    }
     return game_thread;
+}
+
+void GameYield() {
+    if (game_thread) {
+        game_clock_yield(&game_clock, &game_thread_yielded);
+    }
+    std::this_thread::yield();
 }
 
 void SetGameThread(bool counted) {
     game_thread = counted;
-}
-
-void Detail::GameWaitFire(void* ctx) {
-    auto* timer = static_cast<GameWaitTimer*>(ctx);
-    // The woken thread counts as running from here: the time does not skip past it before it
-    // has run
-    if (timer->counted) {
-        game_clock_busy(&game_clock);
-    }
-    retro_atomic_store_release_int(&timer->fired, 1);
-    retro_eventcount_notify(timer->ec);
 }
 
 u64 GameDeadline(const OrbisKernelTimespec* abstime, u32 clock_id) {
@@ -127,6 +127,8 @@ u64 PS4_SYSV_ABI sceKernelReadTsc() {
 static bool GuestSleep(u64 ns, u64* left, bool interruptible) {
     *left = 0;
     if (ns == 0) {
+        // A sleep of nothing: a yield
+        GameYield();
         return true;
     }
     const u64 deadline = GameDeadlineIn(ns);

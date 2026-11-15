@@ -449,11 +449,11 @@ PthreadT PS4_SYSV_ABI posix_pthread_self() {
 }
 
 void PS4_SYSV_ABI posix_pthread_yield() {
-    std::this_thread::yield();
+    GameYield();
 }
 
 void PS4_SYSV_ABI sched_yield() {
-    std::this_thread::yield();
+    GameYield();
 }
 
 int PS4_SYSV_ABI posix_getpid() {
@@ -485,10 +485,10 @@ int PS4_SYSV_ABI posix_pthread_once(PthreadOnce* once_control,
             if (retro_atomic_cas_int(&once_control->state,
                                      static_cast<int>(PthreadOnceState::InProgress),
                                      static_cast<int>(PthreadOnceState::Wait))) {
-                once_event.Wait(not_waiting);
+                GameWait(once_event.get(), 0, not_waiting);
             }
         } else if (state == PthreadOnceState::Wait) {
-            once_event.Wait(not_waiting);
+            GameWait(once_event.get(), 0, not_waiting);
         } else {
             return POSIX_EINVAL;
         }

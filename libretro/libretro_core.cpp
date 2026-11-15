@@ -17,8 +17,8 @@
 //
 // Picture: the emulator's renderer reads each finished frame back and puts it in the shared
 // memory; retro_run hands the newest one over as a software frame, from where it is.
-// Sound: the emulator mixes its audio ports into a ring; retro_run takes one frame's worth and
-// fills what is missing with silence.
+// Sound: the game's audio ports write into inputs in the shared memory; retro_run mixes up to
+// a frame of them, as much as every one with sound has: unbroken, never padded with silence.
 // Pads: the buttons, sticks and triggers of as many ports as the Controllers option says go
 // in, the motors come back.
 // Core options: read when a game is loaded and passed along; the emulator puts them on top of
@@ -1319,8 +1319,15 @@ void SendAudio() {
     static float out_f32[kAudioFrames * 8];
     static int16_t out_s16[kAudioFrames * 8];
     unsigned channels = 2;
+    // The frame's sound: as much as every source has, up to a frame, unbroken. A source a few
+    // samples behind is waited for, not padded with silence, which the frontend would play
+    // as a gap; what it has left goes with the next frame.
+    unsigned frames = kAudioFrames;
     if (shared) {
-        audio_mix_mix(kAudioFrames, &channels);
+        frames = audio_mix_mix(kAudioFrames, &channels);
+        if (frames == 0) {
+            return;
+        }
     } else {
         std::memset(out_f32, 0, sizeof(out_f32));
         std::memset(out_s16, 0, sizeof(out_s16));
@@ -1330,27 +1337,27 @@ void SendAudio() {
         const unsigned layout = channels == 8 ? RETRO_AUDIO_LAYOUT_7_1 : RETRO_AUDIO_LAYOUT_STEREO;
         if (audio_multi_float_cb) {
             if (shared) {
-                audio_mix_take_f32(out_f32, 0, kAudioFrames, channels);
+                audio_mix_take_f32(out_f32, 0, frames, channels);
             }
-            audio_multi_float_cb(out_f32, kAudioFrames, channels, layout);
+            audio_multi_float_cb(out_f32, frames, channels, layout);
         } else {
             if (shared) {
-                audio_mix_take_s16(out_s16, 0, kAudioFrames, channels);
+                audio_mix_take_s16(out_s16, 0, frames, channels);
             }
-            audio_multi_int16_cb(out_s16, kAudioFrames, channels, layout);
+            audio_multi_int16_cb(out_s16, frames, channels, layout);
         }
         return;
     }
     if (audio_batch_float_cb) {
         if (shared) {
-            audio_mix_take_f32(out_f32, 0, kAudioFrames, 2);
+            audio_mix_take_f32(out_f32, 0, frames, 2);
         }
-        audio_batch_float_cb(out_f32, kAudioFrames);
+        audio_batch_float_cb(out_f32, frames);
     } else {
         if (shared) {
-            audio_mix_take_s16(out_s16, 0, kAudioFrames, 2);
+            audio_mix_take_s16(out_s16, 0, frames, 2);
         }
-        audio_batch_cb(out_s16, kAudioFrames);
+        audio_batch_cb(out_s16, frames);
     }
 }
 

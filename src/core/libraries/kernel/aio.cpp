@@ -119,7 +119,7 @@ static OrbisKernelAioSubmitId Submit(const OrbisKernelAioRWRequest* req, u32 cou
     // An id comes round again after 511 submits; one still in flight then is waited out
     while (static_cast<s32>(retro_atomic_load_acquire_int(&batch.state)) ==
            ORBIS_KERNEL_AIO_STATE_PROCESSING) {
-        std::this_thread::yield();
+        GameYield();
     }
     for (u32 i = 0; i < count; i++) {
         req[i].result->state = ORBIS_KERNEL_AIO_STATE_PROCESSING;

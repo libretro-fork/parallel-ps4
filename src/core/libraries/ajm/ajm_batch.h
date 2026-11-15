@@ -7,12 +7,12 @@
 #include "common/types.h"
 #include "core/libraries/ajm/ajm.h"
 
+#include "common/event_count.h"
 #include "common/small_vector.h"
 
 #include <limits>
 #include <memory>
 #include <optional>
-#include <semaphore>
 #include <span>
 #include <vector>
 #include <retro_atomic.h>
@@ -53,7 +53,9 @@ struct AjmBatch {
     retro_atomic_int_t waiting{};
     retro_atomic_int_t canceled{};
     retro_atomic_int_t processed{};
-    std::binary_semaphore finished{0};
+    // Set once processed, taken by the one waiting: waited for on the game's time
+    retro_atomic_int_t finished{};
+    Common::EventCount finished_ec;
     Common::SmallVector<AjmJob, 16> jobs;
 
     static std::shared_ptr<AjmBatch> FromBatchBuffer(std::span<u8> buffer);

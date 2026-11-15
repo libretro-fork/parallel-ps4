@@ -4,6 +4,8 @@
 #pragma once
 
 #include <chrono>
+#include <memory>
+#include <type_traits>
 #include <rthreads/retro_eventcount.h>
 #include <sys/types.h>
 #include "common/assert.h"
@@ -93,18 +95,14 @@ u64 GameRealtimeNs();
 void GameSleepUntil(u64 deadline);
 
 /// Whether the calling thread is one of the game's that the game's time counts as running
-/// (game_clock_idle and game_clock_busy): set from its start to its end
+/// (game_clock_idle and game_clock_busy): set from its start to its end. Asked where the
+/// thread is about to wait or end: one that yielded counts running again from here.
 bool IsGameThread();
-void SetGameThread(bool counted);
 
-namespace Detail {
-struct GameWaitTimer {
-    retro_eventcount_t* ec;
-    retro_atomic_int_t fired;
-    bool counted;
-};
-void GameWaitFire(void* ctx);
-} // namespace Detail
+/// The calling thread yields (sched_yield, usleep(0), a spin on a lock): a game thread waits
+/// on nothing tracked, so it counts idle until it next waits or ends (game_clock_yield)
+void GameYield();
+void SetGameThread(bool counted);
 
 /// Takes from @sema (a Libraries::Kernel::Semaphore) until it has something (true) or the
 /// game's time reaches @deadline (false; 0: never), as a game thread not counted running
@@ -149,45 +147,17 @@ bool GameSemaWait(Sema& sema, u64 deadline) {
 }
 
 /// Waits on @ec until @ready() or the game's time reaches @deadline (0: none), as a game
-/// thread not counted running meanwhile: no host timeout, no wall clock. @return whether
-/// @ready() was what ended it.
+/// thread not counted running meanwhile: no host timeout, no wall clock (game_clock_wait).
+/// @return whether @ready() was what ended it.
 template <typename Ready>
 bool GameWait(retro_eventcount_t* ec, u64 deadline, Ready&& ready) {
-    if (ready()) {
-        return true;
-    }
-    game_clock_t* clock = GameClock();
-    if (deadline != 0 && deadline <= game_clock_now(clock)) {
-        return ready();
-    }
-    Detail::GameWaitTimer timer_ctx{ec, {}, IsGameThread()};
-    retro_atomic_int_init(&timer_ctx.fired, 0);
-    const int timer =
-        deadline != 0 ? game_clock_arm(clock, deadline, Detail::GameWaitFire, &timer_ctx) : -1;
-    ASSERT_MSG(deadline == 0 || timer >= 0, "All of the game's timers are armed");
-    if (timer_ctx.counted) {
-        game_clock_idle(clock);
-    }
-    bool ok = false;
-    for (;;) {
-        const int key = retro_eventcount_prepare_wait(ec);
-        if (ready()) {
-            retro_eventcount_cancel_wait(ec);
-            ok = true;
-            break;
-        }
-        if (retro_atomic_load_acquire_int(&timer_ctx.fired) != 0) {
-            retro_eventcount_cancel_wait(ec);
-            break;
-        }
-        retro_eventcount_commit_wait(ec, key);
-    }
-    // A timer that fired handed this thread its count back
-    const bool fired = timer >= 0 && game_clock_disarm(clock, timer) != 0;
-    if (timer_ctx.counted && !fired) {
-        game_clock_busy(clock);
-    }
-    return ok;
+    return game_clock_wait(
+               GameClock(), ec, deadline,
+               [](void* ctx) -> int {
+                   return (*static_cast<std::remove_reference_t<Ready>*>(ctx))() ? 1 : 0;
+               },
+               const_cast<void*>(static_cast<const void*>(std::addressof(ready))),
+               IsGameThread()) != 0;
 }
 
 namespace Dev {
