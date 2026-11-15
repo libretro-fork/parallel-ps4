@@ -39,7 +39,6 @@
 #include <iomanip>
 #include <limits>
 #include <memory>
-#include <mutex>
 #include <span>
 #include <sstream>
 #include <system_error>
