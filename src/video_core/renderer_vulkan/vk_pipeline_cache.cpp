@@ -9,6 +9,7 @@
 #include "common/thread_name.h"
 #include "core/debug_state.h"
 #include "core/emulator_settings.h"
+#include "core/memory.h"
 #include "shader_recompiler/backend/spirv/emit_spirv.h"
 #include "shader_recompiler/frontend/fetch_shader.h"
 #include "shader_recompiler/info.h"
@@ -38,11 +39,19 @@ struct PipelineCache::CompileJob {
     } kind{};
 
     // Discover, Program, Permutation, Check: the shader, with the user data copied as the draw
-    // had it, its code lent by the cache (Program::code)
+    // had it, and its code where the game has it (not copied). The binary info that follows
+    // the code, with the hash and CRC the draw saw, is looked at before and after the
+    // translation, through the backing page table (CodeUnchanged): code the game reused
+    // meanwhile is not translated, or what was made from it is thrown away, and the job goes
+    // again at a later draw.
     Shader::HwStage hw_stage{};
     Shader::SwStage sw_stage{};
     std::array<u32, Shader::ShaderParams::NumShaderUserData> user_data{};
     std::span<const u32> code;
+    VAddr code_info{};
+    u64 code_hash{};
+    u32 code_crc{};
+    bool code_changed{};
 
     // What the translation reads of the game's memory, taken at the draw (CaptureSnapshot)
     Shader::GuestSnapshot snapshot{};
@@ -883,6 +892,13 @@ vk::ShaderModule PipelineCache::CompileModule(Shader::Info& info, Shader::Runtim
 /// The drawing thread's half of a translation: what it will read of the game's memory, read
 /// now, at the draw (Shader::GuestSnapshot). @info is the shader's description with this
 /// draw's user data, its flat buffer refreshed (RefreshFlatBuf).
+bool PipelineCache::CodeUnchanged(const CompileJob& job) {
+    AmdGpu::BinaryInfo now{};
+    Core::Memory::Instance()->CopySparseMemory(job.code_info, reinterpret_cast<u8*>(&now),
+                                               sizeof(now));
+    return now.Valid() && now.shader_hash == job.code_hash && now.crc32 == job.code_crc;
+}
+
 void PipelineCache::CaptureSnapshot(CompileJob& job, const Shader::Info& info) {
     job.snap_flat = info.flattened_ud_buf;
     job.snap_walker = info.srt_walker_code;
@@ -919,12 +935,13 @@ PipelineCache::Result PipelineCache::GetProgram(HwStage hw_stage, SwStage sw_sta
         job->hw_stage = hw_stage;
         job->sw_stage = sw_stage;
         std::ranges::copy(params.user_data, job->user_data.begin());
-        // The code, copied once for the shader (one the pipeline cache gave has none yet),
-        // lent to every job of it
-        if (program->code.empty()) {
-            program->code.assign(params.code.begin(), params.code.end());
-        }
-        job->code = program->code;
+        // The game's code, borrowed, with what tells whether it is still the same
+        (void)program;
+        const auto& info = AmdGpu::SearchBinaryInfo(params.code.data());
+        job->code = params.code;
+        job->code_info = reinterpret_cast<VAddr>(&info);
+        job->code_hash = info.shader_hash;
+        job->code_crc = info.crc32;
         job->hash = params.hash;
         job->perm_idx = perm_idx;
         job->runtime = runtime_info;
@@ -939,13 +956,16 @@ PipelineCache::Result PipelineCache::GetProgram(HwStage hw_stage, SwStage sw_sta
     Program* program = FindProgram(params.hash);
     if (!program) {
         // Filed now, so that it is compiled once. The compiler thread first makes its walker
-        // (a discovery, which reads nothing of the game's), then, from a snapshot the next
-        // draw takes, translates it.
-        auto* placeholder = new Program(hw_stage, sw_stage, params);
-        placeholder->pending = true;
-        ptr_table_insert(&program_cache, params.hash, placeholder);
-        auto* job = make_job(CompileJob::Kind::Discover, 0, placeholder);
+        // (a discovery, which reads nothing of the game's but the code), then, from a snapshot
+        // the next draw takes, translates it.
+        program = new Program(hw_stage, sw_stage, params);
+        program->pending = true;
+        ptr_table_insert(&program_cache, params.hash, program);
+    }
+    if (program->pending && !program->discovery_submitted) {
+        auto* job = make_job(CompileJob::Kind::Discover, 0, program);
         job->snapshot.discover_only = true;
+        program->discovery_submitted = true;
         Submit(job);
         return pending();
     }
@@ -980,6 +1000,13 @@ PipelineCache::Result PipelineCache::GetProgram(HwStage hw_stage, SwStage sw_sta
         return pending();
     }
     if (it->pending) {
+        if (it->again) {
+            it->again = false;
+            auto* job = make_job(CompileJob::Kind::Permutation,
+                                 std::distance(program->modules.begin(), it), program);
+            CaptureSnapshot(*job, info);
+            Submit(job);
+        }
         return pending();
     }
 
@@ -1045,6 +1072,28 @@ void PipelineCache::CompilerThread(std::stop_token stop) {
 // The compiler thread's half: nothing here touches the tables
 void PipelineCache::RunJob(CompileJob& job) {
     const auto params = job.Params();
+    if (job.kind != CompileJob::Kind::Graphics && !CodeUnchanged(job)) {
+        job.code_changed = true; // the game has reused it: done again at a later draw
+        return;
+    }
+    RunJobOn(job, params);
+    if (job.kind != CompileJob::Kind::Graphics && !CodeUnchanged(job)) {
+        // Changed while it was being translated: what was made from it goes
+        job.code_changed = true;
+        if (job.module) {
+            instance.GetDevice().destroyShaderModule(job.module);
+            job.module = vk::ShaderModule{};
+        }
+        if (job.program) {
+            for (auto& module : job.program->modules) {
+                instance.GetDevice().destroyShaderModule(module.module);
+            }
+            job.program->modules.clear();
+        }
+    }
+}
+
+void PipelineCache::RunJobOn(CompileJob& job, const Shader::ShaderParams& params) {
     switch (job.kind) {
     case CompileJob::Kind::Discover: {
         job.program = std::make_unique<Program>(job.hw_stage, job.sw_stage, params);
@@ -1162,6 +1211,10 @@ void PipelineCache::FileJob(CompileJob& job) {
         // Its walker, for the next draw's snapshot (GetProgram)
         Program* placeholder = FindProgram(job.hash);
         ASSERT(placeholder && placeholder->pending && !placeholder->discovered);
+        if (job.code_changed) {
+            placeholder->discovery_submitted = false;
+            break;
+        }
         placeholder->info = std::move(job.program->info);
         placeholder->info.user_data = {};
         placeholder->discovered = true;
@@ -1170,6 +1223,10 @@ void PipelineCache::FileJob(CompileJob& job) {
     case CompileJob::Kind::Program: {
         Program* placeholder = FindProgram(job.hash);
         ASSERT(placeholder && placeholder->pending && placeholder->submitted);
+        if (job.code_changed) {
+            placeholder->submitted = false;
+            break;
+        }
         if (job.stale) {
             // Taken again at the next draw, with the walker this translation made
             placeholder->info = std::move(job.program->info);
@@ -1177,10 +1234,7 @@ void PipelineCache::FileJob(CompileJob& job) {
             placeholder->submitted = false;
             break;
         }
-        // The code stays with the cache's entry (the jobs to come borrow it)
-        auto code = std::move(placeholder->code);
         *placeholder = std::move(*job.program);
-        placeholder->code = std::move(code);
         // The specializations point at the description they were made from
         for (auto& module : placeholder->modules) {
             module.spec.info = &placeholder->info;
@@ -1193,6 +1247,10 @@ void PipelineCache::FileJob(CompileJob& job) {
         Program* program = FindProgram(job.hash);
         ASSERT(program && job.perm_idx < program->modules.size());
         auto& module = program->modules[job.perm_idx];
+        if (job.code_changed) {
+            module.again = true; // still pending: submitted again at the next draw
+            break;
+        }
         module.module = job.module;
         module.pending = false;
         RegisterShaderMeta(program->info, module.spec.fetch_shader_data, module.spec,
@@ -1200,6 +1258,14 @@ void PipelineCache::FileJob(CompileJob& job) {
         break;
     }
     case CompileJob::Kind::Check:
+        if (job.code_changed) {
+            // Checked again at a later draw
+            if (Program* program = FindProgram(job.hash);
+                program && job.perm_idx < program->modules.size()) {
+                program->modules[job.perm_idx].from_cache = true;
+            }
+            break;
+        }
         if (!job.same_spv || !job.same_walker || !job.same_resources) {
             ReplaceCachedPermutation(job);
         }

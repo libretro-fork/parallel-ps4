@@ -52,19 +52,20 @@ struct Program {
         bool from_cache = false;
         /// Being compiled on the compiler thread: module is not made yet
         bool pending = false;
+        /// Its compile found the game's code changed under it: compiled again at the next draw
+        bool again = false;
     };
     static constexpr size_t MaxPermutations = 8;
     using ModuleList = Common::SmallVector<Module, MaxPermutations>;
 
     Shader::Info info;
     ModuleList modules{};
-    /// The game's code, copied once, at the shader's first draw: what every translation of it
-    /// reads (lent to the compile jobs), never the game's memory, which may be reused by then
-    std::vector<u32> code;
     /// Being translated on the compiler thread: info and modules are not there yet
     bool pending = false;
-    /// While pending: the discovery is filed (info holds its walker), and the translation,
-    /// from a snapshot of the next draw's (Shader::GuestSnapshot), is submitted
+    /// While pending: the discovery is submitted, then filed (info holds its walker), then the
+    /// translation, from a snapshot of the next draw's (Shader::GuestSnapshot), submitted. A
+    /// job that found the game's code changed under it is submitted again at the next draw.
+    bool discovery_submitted = false;
     bool discovered = false;
     bool submitted = false;
 
@@ -145,6 +146,11 @@ private:
     /// Parks until the compiler thread finishes a job
     void WaitCompiled();
     void RunJob(CompileJob& job);
+    void RunJobOn(CompileJob& job, const Shader::ShaderParams& params);
+    /// Whether the game's code a job borrows is still what the draw saw: the binary info after
+    /// it, read through the backing page table (CopySparseMemory: what is no longer mapped
+    /// reads as zeros, nothing faults), its hash and CRC compared
+    static bool CodeUnchanged(const CompileJob& job);
     /// At the draw: what a job's translation reads of the game's memory
     static void CaptureSnapshot(CompileJob& job, const Shader::Info& info);
     void FileJob(CompileJob& job);
