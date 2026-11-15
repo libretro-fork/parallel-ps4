@@ -86,12 +86,23 @@ void DataBase::ProcessIO(void* arg) {
 
             auto path = db->cache_path / request->name;
             path.replace_extension(GetBlobFileExtension(request->type));
+            // Written aside and renamed into place: the emulator's process is ended when the
+            // content is closed, and a blob cut short by that was read back at the next start
+            // as a broken shader
+            auto part = path;
+            part += ".part";
             using namespace Common::FS;
-            const IOFile file{path, FileAccessMode::Create, FileHint::Sequential};
-            if (request->words.empty()) {
-                file.Write(request->bytes);
-            } else {
-                file.Write(request->words);
+            bool written = false;
+            {
+                const IOFile file{part, FileAccessMode::Create, FileHint::Sequential};
+                const u64 size =
+                    request->words.empty() ? request->bytes.size() : request->words.size();
+                written =
+                    file.IsOpen() && (request->words.empty() ? file.Write(request->bytes)
+                                                             : file.Write(request->words)) == size;
+            }
+            if (!written || !Rename(part, path)) {
+                Remove(part);
             }
             delete request;
         }
@@ -111,11 +122,34 @@ void DataBase::Open() {
         Common::FS::CreateDirectories(cache_path);
     }
 
+    // What a write cut short left behind
+    std::vector<std::string> parts;
+    ForEachEntry(cache_path, [&](std::string_view name, bool is_dir) {
+        if (!is_dir && name.ends_with(".part")) {
+            parts.emplace_back(name);
+        }
+    });
+    for (const auto& name : parts) {
+        Remove(cache_path / PathFromUTF8String(name));
+    }
+
     mpsc_stack_init(&g_pending);
     retro_eventcount_init(&g_work);
     retro_atomic_store_relaxed_int(&g_stop, 0);
     io_worker = sthread_create(ProcessIO, this);
     (void)retro_atomic_exchange_int(&opened, io_worker != nullptr);
+}
+
+void DataBase::Clear() {
+    std::vector<std::string> names;
+    Common::FS::ForEachEntry(cache_path, [&](std::string_view name, bool is_dir) {
+        if (!is_dir) {
+            names.emplace_back(name);
+        }
+    });
+    for (const auto& name : names) {
+        Common::FS::Remove(cache_path / Common::FS::PathFromUTF8String(name));
+    }
 }
 
 void DataBase::Close() {

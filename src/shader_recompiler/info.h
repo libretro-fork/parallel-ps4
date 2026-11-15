@@ -103,6 +103,9 @@ struct Info : InfoPersistent {
     std::span<const u32> user_data;
     std::vector<u32> flattened_ud_buf;
     PersistentSrtInfo srt_info;
+    /// The SRT walker's code as it was made (srt_info.walker_func runs a copy that the fault
+    /// handler may have rewritten since): what the pipeline cache keeps
+    std::vector<u8> srt_walker_code;
 
     AttributeFlags loads{};
     AttributeFlags stores{};

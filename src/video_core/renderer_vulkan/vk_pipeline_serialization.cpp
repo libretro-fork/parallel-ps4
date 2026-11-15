@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright 2025-2026 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include "common/scm_rev.h"
 #include "common/serdes.h"
 #include "core/emulator_settings.h"
 #include "shader_recompiler/frontend/fetch_shader.h"
@@ -13,7 +14,7 @@
 namespace Serialization {
 /* You should increment versions below once corresponding serialization scheme is changed. */
 static constexpr u32 ShaderBinaryVersion = 12u; // 12: _CLAMP, float atomic min/max, FMask reads
-static constexpr u32 ShaderMetaVersion = 6u;
+static constexpr u32 ShaderMetaVersion = 7u;    // 7: the whole Info, the walker as made
 static constexpr u32 PipelineKeyVersion = 3u;
 } // namespace Serialization
 
@@ -289,7 +290,7 @@ bool PipelineCache::LoadPipelineStage(Serialization::Archive& ar, size_t stage) 
             module = CompileSPV(spv, instance.GetDevice());
         }
     }
-    cached->InsertPermut(module, std::move(spec), perm_idx);
+    cached->InsertPermut(module, std::move(spec), perm_idx, true);
 
     infos[stage] = &cached->info;
     modules[stage] = module;
@@ -306,6 +307,37 @@ void PipelineCache::WarmUp() {
     }
 
     Storage::DataBase::Instance().Open();
+
+    // The shaders kept are the shader recompiler's output, and the rest of the renderer reads
+    // them as this build lays them out: a cache another build of the core made is started
+    // again, where it was read as if this one had made it (Bloodborne crashed in its own code
+    // on the shaders an earlier build had kept)
+    {
+        const std::string_view build =
+            Common::g_scm_rev[0] ? Common::g_scm_rev : Common::g_scm_date;
+        bool same_build = false;
+        {
+            // Let go before the files are removed: Windows keeps a mapped file
+            const auto stamp =
+                Storage::DataBase::Instance().Load(Storage::BlobType::ShaderProfile, "build");
+            same_build = stamp && stamp->size() == build.size() &&
+                         std::memcmp(stamp->data(), build.data(), build.size()) == 0;
+            if (stamp && !same_build) {
+                LOG_INFO(Render, "Pipeline cache made by another build: started again");
+            }
+        }
+        if (!same_build) {
+            Storage::DataBase::Instance().Clear();
+            std::vector<u8> new_build(build.begin(), build.end());
+            Storage::DataBase::Instance().Save(Storage::BlobType::ShaderProfile, "build",
+                                               std::move(new_build));
+            std::vector<u8> new_profile(sizeof(profile));
+            std::memcpy(new_profile.data(), &profile, sizeof(profile));
+            Storage::DataBase::Instance().Save(Storage::BlobType::ShaderProfile, "profile",
+                                               std::move(new_profile));
+            return;
+        }
+    }
 
     // Check if cache is compatible
     const auto profile_data =
@@ -380,12 +412,60 @@ void PipelineCache::Sync() {
 
 namespace Shader {
 
+// What the translation found besides InfoPersistent, kept so that a pipeline from the cache is
+// described as the one compiled was: field by field, as some hold padding or a map
+template <typename Io, typename InfoT>
+static void InfoExtras(Io&& io, InfoT& info) {
+    io(info.loads);
+    io(info.stores);
+    io(info.readconst_types);
+    io(info.uses_patches);
+    io(info.has_storage_images);
+    io(info.has_discard);
+    io(info.has_image_gather);
+    io(info.has_image_query);
+    io(info.has_flatbuf);
+    io(info.uses_buffer_atomic_float_min_max);
+    io(info.uses_image_atomic_float_min_max);
+    io(info.uses_lane_id);
+    io(info.uses_shader_clock);
+    io(info.uses_group_quad);
+    io(info.uses_group_shuffle);
+    io(info.uses_group_ballot);
+    io(info.shared_types);
+    io(info.uses_fp16);
+    io(info.uses_fp64);
+    io(info.uses_pack_10_11_11);
+    io(info.uses_unpack_10_11_11);
+    io(info.uses_buffer_int64_atomics);
+    io(info.uses_shared_int64_atomics);
+    io(info.stores_tess_level_outer);
+    io(info.stores_tess_level_inner);
+    io(info.translation_failed);
+    io(info.fs_interpolation);
+    io(info.gs_copy_data.num_attrs);
+    io(info.gs_copy_data.output_vertices);
+    io(info.gs_copy_data.num_comps);
+}
+
 void Info::Serialize(Serialization::Archive& ar) const {
     Serialization::Writer info{ar};
 
     info.Write(this, sizeof(InfoPersistent));
     info.Write(flattened_ud_buf);
-    srt_info.Serialize(ar);
+    // The walker as it was made, not as the fault handler may have rewritten it since
+    info.Write(&srt_info, sizeof(srt_info));
+    ASSERT(srt_walker_code.size() == srt_info.walker_func_size);
+    if (srt_info.walker_func_size) {
+        info.Write(srt_walker_code.data(), srt_walker_code.size());
+    }
+    InfoExtras([&](const auto& field) { info.Write(&field, sizeof(field)); }, *this);
+    info.Write(static_cast<u64>(gs_copy_data.attr_map.size()));
+    for (const auto& [key, value] : gs_copy_data.attr_map) {
+        info.Write(key);
+        info.Write(value.first);
+        info.Write(value.second);
+    }
 }
 
 bool Info::Deserialize(Serialization::Archive& ar) {
@@ -393,8 +473,27 @@ bool Info::Deserialize(Serialization::Archive& ar) {
 
     info.Read(this, sizeof(Shader::InfoPersistent));
     info.Read(flattened_ud_buf);
-
-    return srt_info.Deserialize(ar);
+    info.Read(&srt_info, sizeof(srt_info));
+    srt_info.walker_func = nullptr;
+    srt_walker_code.clear();
+    if (srt_info.walker_func_size) {
+        srt_walker_code.assign(ar.ReadPtr(), ar.ReadPtr() + srt_info.walker_func_size);
+        srt_info.walker_func = RegisterWalkerCode(ar.ReadPtr(), srt_info.walker_func_size);
+        ar.Advance(srt_info.walker_func_size);
+    }
+    InfoExtras([&](auto& field) { info.Read(&field, sizeof(field)); }, *this);
+    u64 attrs{};
+    info.Read(attrs);
+    gs_copy_data.attr_map.clear();
+    for (u64 i = 0; i < attrs; ++i) {
+        u32 key{};
+        std::pair<IR::Attribute, u32> value{};
+        info.Read(key);
+        info.Read(value.first);
+        info.Read(value.second);
+        gs_copy_data.attr_map.emplace(key, value);
+    }
+    return true;
 }
 
 void Gcn::FetchShaderData::Serialize(Serialization::Archive& ar) const {
@@ -414,28 +513,6 @@ bool Gcn::FetchShaderData::Deserialize(Serialization::Archive& ar) {
     fetch.Read(vertex_offset_sgpr);
     fetch.Read(instance_offset_sgpr);
     fetch.Read(attributes);
-
-    return true;
-}
-
-void PersistentSrtInfo::Serialize(Serialization::Archive& ar) const {
-    Serialization::Writer srt{ar};
-
-    srt.Write(this, sizeof(*this));
-    if (walker_func_size) {
-        srt.Write(reinterpret_cast<void*>(walker_func), walker_func_size);
-    }
-}
-
-bool PersistentSrtInfo::Deserialize(Serialization::Archive& ar) {
-    Serialization::Reader srt{ar};
-
-    srt.Read(this, sizeof(*this));
-
-    if (walker_func_size) {
-        walker_func = RegisterWalkerCode(ar.ReadPtr(), walker_func_size);
-        ar.Advance(walker_func_size);
-    }
 
     return true;
 }

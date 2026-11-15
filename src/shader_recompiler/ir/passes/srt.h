@@ -30,9 +30,6 @@ struct PersistentSrtInfo {
     PFN_SrtWalker walker_func{};
     size_t walker_func_size{};
     u32 flattened_bufsize_dw = 16; // NumUserDataRegs
-
-    void Serialize(Serialization::Archive& ar) const;
-    bool Deserialize(Serialization::Archive& ar);
 };
 
 } // namespace Shader

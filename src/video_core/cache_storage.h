@@ -32,6 +32,9 @@ public:
 
     void Open();
     void Close();
+    /// Removes every blob of the game's cache. Before anything is saved: not while the
+    /// writer has blobs to write.
+    void Clear();
     [[nodiscard]] bool IsOpened() const {
         return (retro_atomic_load_acquire_int(&opened) != 0);
     }

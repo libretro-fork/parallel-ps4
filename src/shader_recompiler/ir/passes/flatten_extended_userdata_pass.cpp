@@ -718,6 +718,12 @@ static void GenerateSrtProgram(Info& info, PassInfo& pass_info) {
 
     info.srt_info.walker_func_size =
         c.getCurr() - reinterpret_cast<const u8*>(info.srt_info.walker_func);
+    // The walker as made, for the pipeline cache: the fault handler rewrites the code it runs
+    // where a pointer was bad at that moment, and that rewrite must not be kept for later starts
+    {
+        const u8* const code = reinterpret_cast<const u8*>(info.srt_info.walker_func);
+        info.srt_walker_code.assign(code, code + info.srt_info.walker_func_size);
+    }
     // Another permutation's identical walker is used, and this copy is dropped
     if (const u8* kept = FindOrKeepWalker(reinterpret_cast<const u8*>(info.srt_info.walker_func),
                                           info.srt_info.walker_func_size)) {

@@ -44,6 +44,9 @@ struct Program {
     struct Module {
         vk::ShaderModule module;
         Shader::StageSpecialization spec;
+        /// Loaded from the pipeline cache, and not yet checked against a translation of the
+        /// game's shader (PipelineCache::CheckCachedPermutation)
+        bool from_cache = false;
     };
     static constexpr size_t MaxPermutations = 8;
     using ModuleList = Common::SmallVector<Module, MaxPermutations>;
@@ -59,10 +62,10 @@ struct Program {
         modules.emplace_back(module, std::move(spec));
     }
 
-    void InsertPermut(vk::ShaderModule module, Shader::StageSpecialization&& spec,
-                      size_t perm_idx) {
+    void InsertPermut(vk::ShaderModule module, Shader::StageSpecialization&& spec, size_t perm_idx,
+                      bool from_cache = false) {
         modules.resize(std::max(modules.size(), perm_idx + 1)); // <-- beware of realloc
-        modules[perm_idx] = {module, std::move(spec)};
+        modules[perm_idx] = {module, std::move(spec), from_cache};
     }
 };
 
@@ -114,6 +117,16 @@ private:
                                                        size_t perm_idx, std::string_view ext);
     /// The shader patch folder had files in it when the game started
     bool has_shader_patches = false;
+    /// The first use of a permutation the cache gave: the game's shader translated again and
+    /// compared with what the cache kept. Where they differ, the cache is not to be trusted:
+    /// the translation replaces it here, its pipelines are made again, and the cache is
+    /// started again at the next start.
+    vk::ShaderModule CheckCachedPermutation(Program& program, size_t perm_idx,
+                                            Shader::HwStage hw_stage, Shader::SwStage sw_stage,
+                                            const Shader::ShaderParams& params,
+                                            const Shader::RuntimeInfo& runtime_info,
+                                            Shader::Backend::Bindings start,
+                                            Shader::Backend::Bindings& binding);
     vk::ShaderModule CompileModule(Shader::Info& info, Shader::RuntimeInfo& runtime_info,
                                    const std::span<const u32>& code, size_t perm_idx,
                                    Shader::Backend::Bindings& binding);

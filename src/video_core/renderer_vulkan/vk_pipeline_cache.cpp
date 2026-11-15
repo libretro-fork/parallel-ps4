@@ -765,15 +765,98 @@ PipelineCache::Result PipelineCache::GetProgram(HwStage hw_stage, SwStage sw_sta
         RegisterShaderMeta(info, spec.fetch_shader_data, spec, perm_hash, perm_idx);
         program->AddPermut(module, std::move(spec));
     } else {
+        const auto start = binding;
         info.AddBindings(binding);
         module = it->module;
         perm_idx = std::distance(program->modules.begin(), it);
         perm_hash = HashCombine(params.hash, perm_idx);
+        if (it->from_cache) {
+            module = CheckCachedPermutation(*program, perm_idx, hw_stage, sw_stage, params,
+                                            runtime_info, start, binding);
+        }
     }
     if (auto& fetch = program->modules[perm_idx].spec.fetch_shader_data; !fetch.Empty()) {
         fetch_shader = &fetch;
     }
     return std::make_tuple(&program->info, module, perm_hash);
+}
+
+vk::ShaderModule PipelineCache::CheckCachedPermutation(
+    Program& program, size_t perm_idx, Shader::HwStage hw_stage, Shader::SwStage sw_stage,
+    const Shader::ShaderParams& params, const Shader::RuntimeInfo& runtime_info,
+    Shader::Backend::Bindings start, Shader::Backend::Bindings& binding) {
+    auto& cached = program.modules[perm_idx];
+    cached.from_cache = false;
+
+    // The translation as a compile of this permutation would make it
+    auto fresh = Shader::Info(hw_stage, sw_stage, params);
+    auto fresh_runtime = runtime_info;
+    auto fresh_binding = start;
+    const auto ir_program =
+        Shader::TranslateProgram(params.code, pools, fresh, fresh_runtime, profile);
+    auto spv = Shader::Backend::SPIRV::EmitSPIRV(profile, fresh_runtime, ir_program, fresh_binding);
+
+    const auto& kept = program.info;
+    const auto kept_spv = Storage::DataBase::Instance().Load(
+        Storage::BlobType::ShaderBinary, fmt::format("{:#018x}_{}", kept.pgm_hash, perm_idx));
+    const bool same_spv = kept_spv && kept_spv->size() == spv.size() * sizeof(u32) &&
+                          std::memcmp(kept_spv->data(), spv.data(), kept_spv->size()) == 0;
+    const bool same_walker =
+        fresh.srt_walker_code == kept.srt_walker_code &&
+        fresh.srt_info.flattened_bufsize_dw == kept.srt_info.flattened_bufsize_dw;
+    const bool same_resources =
+        fresh.buffers.size() == kept.buffers.size() && fresh.images.size() == kept.images.size() &&
+        fresh.samplers.size() == kept.samplers.size() &&
+        fresh.fmasks.size() == kept.fmasks.size() && fresh.uses_dma == kept.uses_dma &&
+        fresh.has_fetch_shader == kept.has_fetch_shader &&
+        fresh.fetch_shader_sgpr_base == kept.fetch_shader_sgpr_base;
+    if (same_spv && same_walker && same_resources) {
+        return cached.module;
+    }
+
+    LOG_WARNING(Render_Vulkan,
+                "Pipeline cache: {} shader {:#x} permutation {} differs from its translation "
+                "(SPIR-V {}, SRT walker {}, resources {}); the translation is used, and the cache "
+                "is started again at the next start",
+                hw_stage, kept.pgm_hash, perm_idx, same_spv ? "same" : "differs",
+                same_walker ? "same" : "differs", same_resources ? "same" : "differ");
+
+    // The cache is started again at the next start (WarmUp: another build's stamp)
+    Storage::DataBase::Instance().Save(Storage::BlobType::ShaderProfile, "build",
+                                       std::vector<u8>{'-'});
+
+    // The pipelines made with the kept permutation go, once the GPU is done with them
+    const u64 perm_hash = HashCombine(params.hash, perm_idx);
+    std::vector<std::pair<u64, GraphicsPipeline*>> stale;
+    size_t pos = 0;
+    while (auto* p = static_cast<GraphicsPipeline*>(ptr_table_next(&graphics_pipelines, &pos))) {
+        const auto& key = p->GetGraphicsKey();
+        if (std::ranges::find(key.stage_hashes, perm_hash) != key.stage_hashes.end()) {
+            stale.emplace_back(std::hash<GraphicsPipelineKey>{}(key), p);
+        }
+    }
+    for (const auto& [hash, p] : stale) {
+        ptr_table_erase(&graphics_pipelines, hash, p);
+        scheduler.DeferOperation([p] { delete p; });
+    }
+    if (auto* p = FindComputePipeline(ComputePipelineKey{perm_hash})) {
+        ptr_table_erase(&compute_pipelines, perm_hash, p);
+        scheduler.DeferOperation([p] { delete p; });
+    }
+
+    const vk::ShaderModule old_module = cached.module;
+    cached.module = CompileSPV(spv, instance.GetDevice());
+    scheduler.DeferOperation(
+        [device = instance.GetDevice(), old_module] { device.destroyShaderModule(old_module); });
+    // The permutations share the program's description: the translation's from now on
+    fresh.pgm_base = params.Base();
+    fresh.user_data = params.user_data;
+    program.info = std::move(fresh);
+    program.info.RefreshFlatBuf();
+    // The stages after this one bind after the translation's resources
+    binding = start;
+    program.info.AddBindings(binding);
+    return cached.module;
 }
 
 std::optional<vk::ShaderModule> PipelineCache::ReplaceShader(vk::ShaderModule module,
