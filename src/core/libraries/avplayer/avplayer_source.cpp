@@ -11,7 +11,7 @@
 #include <retro_atomic.h>
 #include "common/alignment.h"
 #include "common/singleton.h"
-#include "common/thread.h"
+#include "common/thread_name.h"
 #include "core/file_sys/fs.h"
 #include "core/libraries/avplayer/avplayer_error.h"
 #include "core/libraries/avplayer/avplayer_file_streamer.h"
@@ -540,7 +540,7 @@ bool AvPlayerSource::IsActive() {
 
 void AvPlayerSource::DemuxerThread(std::stop_token stop) {
     using namespace std::chrono;
-    Common::SetCurrentThreadName("shadPS4:AvDemuxer");
+    thread_name_set("shadPS4:AvDemuxer");
 
     if (!m_audio_stream_index.has_value() && !m_video_stream_index.has_value()) {
         LOG_WARNING(Lib_AvPlayer, "Could not start DEMUXER thread. No streams enabled.");
@@ -616,7 +616,7 @@ void AvPlayerSource::DemuxerThread(std::stop_token stop) {
 
 void AvPlayerSource::VideoDecoderThread(std::stop_token stop) {
     using namespace std::chrono;
-    Common::SetCurrentThreadName("shadPS4:AvVideoDecoder");
+    thread_name_set("shadPS4:AvVideoDecoder");
 
     if (!m_video_decoder) {
         return; // no video stream enabled
@@ -699,7 +699,7 @@ void AvPlayerSource::VideoDecoderThread(std::stop_token stop) {
 
 void AvPlayerSource::AudioDecoderThread(std::stop_token stop) {
     using namespace std::chrono;
-    Common::SetCurrentThreadName("shadPS4:AvAudioDecoder");
+    thread_name_set("shadPS4:AvAudioDecoder");
 
     if (!m_audio_decoder || !m_audio_stream_index) {
         return; // no audio stream enabled

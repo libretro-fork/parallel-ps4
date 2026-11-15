@@ -6,7 +6,7 @@
 #include "common/hash.h"
 #include "common/io_file.h"
 #include "common/path_util.h"
-#include "common/thread.h"
+#include "common/thread_name.h"
 #include "core/debug_state.h"
 #include "core/emulator_settings.h"
 #include "shader_recompiler/backend/spirv/emit_spirv.h"
@@ -927,7 +927,7 @@ void PipelineCache::Submit(CompileJob* job) {
 }
 
 void PipelineCache::CompilerThread(std::stop_token stop) {
-    Common::SetCurrentThreadName("shadPS4:ShaderCompiler");
+    thread_name_set("shadPS4:ShaderCompiler");
     const std::stop_callback wake{stop, [this] { retro_eventcount_notify(&compile_jobs_ec); }};
     while (!stop.stop_requested()) {
         const int key = retro_eventcount_prepare_wait(&compile_jobs_ec);

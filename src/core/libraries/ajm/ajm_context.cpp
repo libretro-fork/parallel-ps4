@@ -3,7 +3,7 @@
 
 #include "common/assert.h"
 #include "common/logging/log.h"
-#include "common/thread.h"
+#include "common/thread_name.h"
 #include "core/libraries/ajm/ajm.h"
 #include "core/libraries/ajm/ajm_at9.h"
 #include "core/libraries/ajm/ajm_context.h"
@@ -58,7 +58,7 @@ s32 AjmContext::ModuleRegister(AjmCodecType type) {
 }
 
 void AjmContext::WorkerThread(std::stop_token stop) {
-    Common::SetCurrentThreadName("shadPS4:AjmWorker");
+    thread_name_set("shadPS4:AjmWorker");
     while (!stop.stop_requested()) {
         auto batch = batch_queue.PopWait(stop);
         if (batch != nullptr && retro_atomic_load_seq_cst_int(&batch->canceled) == 0) {

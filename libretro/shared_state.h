@@ -22,7 +22,7 @@
 namespace Libretro {
 
 inline constexpr std::uint32_t SHARED_MAGIC = 0x34505368; // "hSP4"
-inline constexpr std::uint32_t SHARED_VERSION = 23;
+inline constexpr std::uint32_t SHARED_VERSION = 24;
 
 inline constexpr std::uint32_t MAX_WIDTH = 3840;
 inline constexpr std::uint32_t MAX_HEIGHT = 2160;
@@ -167,10 +167,17 @@ struct SharedState {
     /// wake_input: buttons and axes (the core, when they change).
     /// wake_frame: frame_held (the core), an image no longer being drawn (the emulator).
     /// wake_audio: audio_read (the core), a source's sound handed to the mix (the emulator).
+    /// wake_vblank: vblank_ticks (the core).
     retro_shared_eventcount_t wake_control;
     retro_shared_eventcount_t wake_input;
     retro_shared_eventcount_t wake_frame;
     retro_shared_eventcount_t wake_audio;
+    retro_shared_eventcount_t wake_vblank;
+
+    /// The frontend's frames: one more each retro_run, after its input is written. The
+    /// console's vblanks are counted from these (src/common/vblank_clock.h), not from a clock.
+    /// Written by the core only; it wraps.
+    retro_atomic_int_t vblank_ticks;
 
     // Written by the core before the emulator is started.
     char eboot_path[PATH_BYTES]; // UTF-8
@@ -328,25 +335,28 @@ private:
     bool attached = false;
 };
 
-/// The four wakes of a SharedState, attached in this process. @name is the shared memory's
+/// The five wakes of a SharedState, attached in this process. @name is the shared memory's
 /// name on Windows (one per session); elsewhere it is not used.
 struct SharedWakes {
     SharedWake control;
     SharedWake input;
     SharedWake frame;
     SharedWake audio;
+    SharedWake vblank;
 
     void Attach(SharedState* state, const std::string& name) {
         control.Attach(&state->wake_control, name + "_control");
         input.Attach(&state->wake_input, name + "_input");
         frame.Attach(&state->wake_frame, name + "_frame");
         audio.Attach(&state->wake_audio, name + "_audio");
+        vblank.Attach(&state->wake_vblank, name + "_vblank");
     }
     void Detach() {
         control.Detach();
         input.Detach();
         frame.Detach();
         audio.Detach();
+        vblank.Detach();
     }
 };
 

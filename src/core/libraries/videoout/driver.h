@@ -194,6 +194,9 @@ private:
     void DrawLastFrame();  // Used when there is no flip request
     void SubmitFlipInternal(VideoOutPort* port, s32 index, s64 flip_arg, bool is_eop = false);
     void PresentThread(std::stop_token token);
+    /// One of the console's vblanks: a flip taken if one is due, the vblank events, the status.
+    void Vblank();
+    Request ReceiveRequest();
     void ResetStatus();
 
     VideoOutPort main_port{};

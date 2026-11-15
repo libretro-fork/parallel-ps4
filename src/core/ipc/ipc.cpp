@@ -7,7 +7,7 @@
 #include <string>
 
 #include "common/memory_patcher.h"
-#include "common/thread.h"
+#include "common/thread_name.h"
 #include "common/types.h"
 #include "core/debug_state.h"
 #include "core/debugger.h"
@@ -71,7 +71,7 @@ void IPC::Init() {
     EmulatorState::GetInstance()->SetAutoPatchesLoadEnabled(false);
 
     input_thread = std::jthread([this] {
-        Common::SetCurrentThreadName("IPC Read thread");
+        thread_name_set("IPC Read thread");
         this->InputLoop();
     });
 

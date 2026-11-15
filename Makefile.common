@@ -133,7 +133,7 @@ CORE_SOURCES_CXX :=
 CORE_SOURCES_CXX += $(addprefix src/common/,assert.cpp c_bridge.cpp decoder.cpp \
 	embedded_resources.cpp error.cpp io_file.cpp memory_patcher.cpp native_clock.cpp ntapi.cpp number_utils.cpp \
 	path_util.cpp rdtsc.cpp signal_context.cpp slot_vector.cpp \
-	string_util.cpp thread.cpp xml.cpp)
+	string_util.cpp xml.cpp)
 CORE_SOURCES_CXX += $(addprefix src/common/logging/,classes.cpp log.cpp)
 CORE_SOURCES_CXX += $(addprefix src/core/,address_space.cpp debug_state.cpp debugger.cpp \
 	emulator_state.cpp linker.cpp memory.cpp module.cpp signals.cpp thread.cpp tls.cpp)
@@ -309,7 +309,8 @@ CORE_SOURCES_CXX += $(addprefix src/video_core/texture_cache/,blit_helper.cpp \
 
 CORE_SOURCES_C :=
 CORE_SOURCES_C += $(addprefix src/common/,audio_stream.c enum_names.c json_util.c key_manager.c \
-	node_pool.c patch_catalog.c patch_index.c ptr_table.c u64_map.c)
+	node_pool.c patch_catalog.c patch_index.c ptr_table.c thread_name.c u64_map.c \
+	vblank_clock.c)
 CORE_SOURCES_C += $(addprefix src/core/,emulator_settings.c user_manager.c)
 CORE_SOURCES_C += $(addprefix src/core/libraries/network/,host_override.c)
 CORE_SOURCES_C += $(addprefix src/core/libraries/ngs2/,ngs2_core.c ngs2_util.c)

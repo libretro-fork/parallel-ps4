@@ -16,7 +16,7 @@
 #include "common/logging/log.h"
 #include "common/path_util.h"
 #include "common/singleton.h"
-#include "common/thread.h"
+#include "common/thread_name.h"
 #include "core/file_sys/fs.h"
 #include "core/libraries/system/msgdialog_ui.h"
 #include "save_instance.h"

@@ -4,7 +4,7 @@
 #include "common/elf_info.h"
 #include "common/io_file.h"
 #include "common/path_util.h"
-#include "common/thread.h"
+#include "common/thread_name.h"
 #include "core/emulator_settings.h"
 
 #include "video_core/cache_storage.h"
@@ -62,7 +62,7 @@ constexpr std::string GetBlobFileExtension(BlobType type) {
 
 void DataBase::ProcessIO(void* arg) {
     const auto* db = static_cast<const DataBase*>(arg);
-    Common::SetCurrentThreadName("shadPS4:PipelineCacheIO");
+    thread_name_set("shadPS4:PipelineCacheIO");
 
     for (;;) {
         const int key = retro_eventcount_prepare_wait(&g_work);

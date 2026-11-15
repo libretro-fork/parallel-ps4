@@ -106,6 +106,18 @@ done
 $CC -std=c89 -O1 -g -Wall -Wdeclaration-after-statement -fsanitize=address,undefined \
     -Isrc -I$L/include libretro/tests/patch_catalog_test.c src/common/patch_catalog.c \
     $L/formats/xml/rxml.c -o "$OUT/patch_catalog_test"
+# The console's vblanks from the frontend's frames, at every rate, a stall, a rate change, the
+# wrap
+$CC -std=c89 -pedantic -O1 -g -Wall -Wdeclaration-after-statement -fsanitize=address,undefined \
+    -Isrc libretro/tests/vblank_clock_test.c src/common/vblank_clock.c -o "$OUT/vblank_clock_test"
+"$OUT/vblank_clock_test"
+# A thread's name, its own, on four threads
+for san in address,undefined thread; do
+    $CC -std=gnu89 -O1 -g -Wall -Wdeclaration-after-statement -fsanitize=$san -Isrc -I$L/include \
+        libretro/tests/thread_name_test.c src/common/thread_name.c $L/rthreads/rthreads.c \
+        $L/features/features_cpu.c -o "$OUT/thread_name_test" -lpthread
+    "$OUT/thread_name_test"
+done
 "$OUT/patch_catalog_test"
 "$OUT/touch_track_test"
 # The music player's block decoder, on a sine made by ffmpeg in each format it plays (an MP3

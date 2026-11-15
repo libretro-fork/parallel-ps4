@@ -12,7 +12,7 @@
 #include "common/assert.h"
 #include "common/logging/log.h"
 #include "common/singleton.h"
-#include "common/thread.h"
+#include "common/thread_name.h"
 #include "core/file_sys/fs.h"
 #include "core/libraries/kernel/equeue.h"
 #include "core/libraries/kernel/kernel.h"
@@ -120,7 +120,7 @@ private:
     }
 
     void Run(std::stop_token stop) {
-        Common::SetCurrentThreadName("shadPS4:KernelTimers");
+        thread_name_set("shadPS4:KernelTimers");
         std::stop_callback wake{stop, [this] { retro_eventcount_notify(&m_ec); }};
         while (!stop.stop_requested()) {
             ArmedTimer timer;

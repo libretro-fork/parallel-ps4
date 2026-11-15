@@ -6,12 +6,13 @@
 
 #include "common/assert.h"
 #include "common/native_clock.h"
-#include "common/thread.h"
 #include "core/libraries/kernel/kernel.h"
 #include "core/libraries/kernel/orbis_error.h"
 #include "core/libraries/kernel/posix_error.h"
 #include "core/libraries/kernel/time.h"
 #include "core/libraries/libs.h"
+
+#include <features/features_cpu.h>
 
 #ifdef _WIN64
 #include <windows.h>
@@ -51,18 +52,62 @@ u64 PS4_SYSV_ABI sceKernelReadTsc() {
     return clock->GetUptime();
 }
 
+// The game's own sleep. Uninterruptible: to a deadline on libretro-common's clock
+// (retro_sleep_until_us), never early. Interruptible (POSIX nanosleep, a cancellation point):
+// a host signal or APC cuts it short with EINTR and what is left, as the console's does.
+static bool GuestSleep(u64 ns, u64* left, bool interruptible) {
+    *left = 0;
+    if (!interruptible) {
+        retro_sleep_until_us(cpu_features_get_time_usec() +
+                             static_cast<retro_time_t>((ns + 999) / 1000));
+        return true;
+    }
+#ifdef _WIN32
+#ifndef CREATE_WAITABLE_TIMER_HIGH_RESOLUTION
+#define CREATE_WAITABLE_TIMER_HIGH_RESOLUTION 0x00000002
+#endif
+    // One high-resolution timer a thread, made the first time it sleeps, kept after
+    static thread_local HANDLE timer = CreateWaitableTimerExW(
+        nullptr, nullptr, CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, TIMER_ALL_ACCESS);
+    if (!timer) {
+        timer = CreateWaitableTimerW(nullptr, TRUE, nullptr);
+    }
+    const retro_time_t begin = cpu_features_get_time_usec();
+    LARGE_INTEGER due;
+    due.QuadPart = -static_cast<LONGLONG>(ns / 100);
+    if (!timer || !SetWaitableTimer(timer, &due, 0, nullptr, nullptr, FALSE)) {
+        return true;
+    }
+    if (WaitForSingleObjectEx(timer, INFINITE, TRUE) == WAIT_OBJECT_0) {
+        return true;
+    }
+    const u64 slept = static_cast<u64>(cpu_features_get_time_usec() - begin) * 1000;
+    *left = slept < ns ? ns - slept : 0;
+    return false;
+#else
+    timespec request{static_cast<time_t>(ns / 1'000'000'000),
+                     static_cast<long>(ns % 1'000'000'000)};
+    timespec remain{};
+    if (nanosleep(&request, &remain) == 0 || errno != EINTR) {
+        return true;
+    }
+    *left = static_cast<u64>(remain.tv_sec) * 1'000'000'000 + static_cast<u64>(remain.tv_nsec);
+    return false;
+#endif
+}
+
 static s32 posix_nanosleep_impl(const OrbisKernelTimespec* rqtp, OrbisKernelTimespec* rmtp,
                                 const bool interruptible) {
     if (!rqtp || rqtp->tv_sec < 0 || rqtp->tv_nsec < 0 || rqtp->tv_nsec >= 1'000'000'000) {
         SetPosixErrno(EINVAL);
         return -1;
     }
-    const auto duration = std::chrono::nanoseconds(rqtp->tv_sec * 1'000'000'000 + rqtp->tv_nsec);
-    std::chrono::nanoseconds remain;
-    const auto uninterrupted = Common::AccurateSleep(duration, &remain, interruptible);
+    u64 left;
+    const bool uninterrupted = GuestSleep(
+        static_cast<u64>(rqtp->tv_sec) * 1'000'000'000 + rqtp->tv_nsec, &left, interruptible);
     if (rmtp) {
-        rmtp->tv_sec = remain.count() / 1'000'000'000;
-        rmtp->tv_nsec = remain.count() % 1'000'000'000;
+        rmtp->tv_sec = left / 1'000'000'000;
+        rmtp->tv_nsec = left % 1'000'000'000;
     }
     if (!uninterrupted) {
         SetPosixErrno(EINTR);

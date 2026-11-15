@@ -14,7 +14,7 @@
 #include "common/event_mutex.h"
 #include "common/io_file.h"
 #include "common/polyfill_thread.h"
-#include "common/thread.h"
+#include "common/thread_name.h"
 #include "core/emulator_settings.h"
 #include "imgui_impl_vulkan.h"
 #include "texture_manager.h"
@@ -144,7 +144,7 @@ Inner::~Inner() {
 }
 
 void WorkerLoop() {
-    Common::SetCurrentThreadName("shadPS4:ImGuiTextureManager");
+    thread_name_set("shadPS4:ImGuiTextureManager");
     Common::EventMutex mtx;
     while (g_is_worker_running) {
         std::unique_lock lk{mtx};

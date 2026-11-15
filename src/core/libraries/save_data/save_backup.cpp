@@ -19,7 +19,7 @@
 #include "common/logging/log.h"
 #include "common/path_util.h"
 #include "common/polyfill_thread.h"
-#include "common/thread.h"
+#include "common/thread_name.h"
 
 constexpr std::string_view sce_sys = "sce_sys";               // system folder inside save
 constexpr std::string_view backup_dir = "sce_backup";         // backup folder
@@ -94,7 +94,7 @@ static void backup(const std::filesystem::path& dir_name) {
 }
 
 static void BackupThreadBody() {
-    Common::SetCurrentThreadName("shadPS4:SaveData:BackupThread");
+    thread_name_set("shadPS4:SaveData:BackupThread");
     while (static_cast<WorkerStatus>(retro_atomic_load_seq_cst_int(&g_backup_status)) !=
            WorkerStatus::Stopping) {
         (void)retro_atomic_exchange_int(&g_backup_status, static_cast<int>(WorkerStatus::Waiting));

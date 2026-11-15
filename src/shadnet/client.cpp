@@ -12,7 +12,7 @@
 #include "common/elf_info.h"
 #include "common/logging/log.h"
 #include "common/scm_rev.h"
-#include "common/thread.h"
+#include "common/thread_name.h"
 #include "shadnet/messages.h"
 
 #ifdef _WIN32
@@ -171,7 +171,7 @@ std::string ShadNetClient::GetBearerToken() const {
 // Threading
 
 void ShadNetClient::ConnectThread() {
-    Common::SetCurrentThreadName("ShadNet:Connect");
+    thread_name_set("ShadNet:Connect");
     bool connected = false;
     u32 backoff_ms = SHAD_CONNECT_RETRY_BACKOFF_MS;
     for (u32 attempt = 1;
@@ -237,7 +237,7 @@ bool ShadNetClient::OnReaderThread() {
 }
 
 void ShadNetClient::ReaderThread() {
-    Common::SetCurrentThreadName("ShadNet:Reader");
+    thread_name_set("ShadNet:Reader");
     t_reader_thread = true;
     while (retro_atomic_load_seq_cst_int(&m_terminate) == 0) {
         u8 hdr[SHAD_HEADER_SIZE];
@@ -281,7 +281,7 @@ void ShadNetClient::ReaderThread() {
 }
 
 void ShadNetClient::WriterThread() {
-    Common::SetCurrentThreadName("ShadNet:Writer");
+    thread_name_set("ShadNet:Writer");
     while (retro_atomic_load_seq_cst_int(&m_terminate) == 0) {
         std::unique_lock lock(m_mutex_send_queue);
         m_cv_send_queue.wait(lock, [&] {

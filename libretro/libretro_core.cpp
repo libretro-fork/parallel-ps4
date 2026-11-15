@@ -1544,6 +1544,7 @@ static bool StartGame(const std::string& boot_path, const std::string& user_dir,
     retro_shared_eventcount_init(&shared->wake_input);
     retro_shared_eventcount_init(&shared->wake_frame);
     retro_shared_eventcount_init(&shared->wake_audio);
+    retro_shared_eventcount_init(&shared->wake_vblank);
     audio_wide_init(shared->audio_wide);
     wakes.Attach(shared, argument);
     std::strcpy(shared->eboot_path, boot_path.c_str());
@@ -1773,6 +1774,7 @@ RETRO_API void retro_unload_game(void) {
     if (shared) {
         retro_atomic_store_release_int(&shared->quit, 1);
         wakes.control.Notify();
+        wakes.vblank.Notify();
     }
     StopEmulator();
     // The frame shown was in the shared memory, or one of the emulator's images.
@@ -1882,6 +1884,9 @@ RETRO_API void retro_run(void) {
         }
 
         SendInput();
+        // The console's vblank comes from this frame: after its input, so the game sees it
+        retro_atomic_fetch_add_int(&shared->vblank_ticks, 1);
+        wakes.vblank.Notify();
         ApplyRumble();
         if (gpu_frames) {
 #ifdef _WIN32

@@ -9,7 +9,7 @@
 #include "common/alignment.h"
 #include "common/assert.h"
 #include "common/logging/log.h"
-#include "common/thread.h"
+#include "common/thread_name.h"
 #include "video_utils.h"
 #include "videodec_error.h"
 
@@ -301,7 +301,7 @@ s32 VdecDecoder::Reset() {
 }
 
 void VdecDecoder::WorkerLoop() {
-    Common::SetCurrentThreadName("shadPS4:VdecswWorker");
+    thread_name_set("shadPS4:VdecswWorker");
     for (;;) {
         Command* cell = nullptr;
         WaitFor(&m_worker_ec, [&] {

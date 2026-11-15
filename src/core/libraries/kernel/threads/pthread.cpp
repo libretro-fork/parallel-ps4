@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include "common/assert.h"
-#include "common/thread.h"
+#include "common/thread_name.h"
 #ifdef _WIN32
 #include "common/ntapi.h"
 #else
@@ -291,7 +291,7 @@ static void* RunThread(void* arg) {
 #endif
     auto* curthread = static_cast<Pthread*>(arg);
     g_curthread = curthread;
-    Common::SetCurrentThreadName(curthread->name.c_str());
+    thread_name_set(curthread->name.c_str());
     DebugState.AddCurrentThreadToGuestList();
     Core::InitializeTLS();
 
@@ -565,8 +565,7 @@ int PS4_SYSV_ABI posix_pthread_rename_np(PthreadT thread, const char* name) {
     if (thread == g_curthread) {
         // If the requested thread is curthread, skip locking and reference logic.
         thread->name = name ? name : std::string{""};
-        Common::SetThreadName(reinterpret_cast<void*>(thread->native_thr->GetHandle()),
-                              thread->name.data());
+        thread_name_set(thread->name.c_str());
         if (name && False(thread->attr.flags & PthreadAttrFlags::StackUser)) {
             VAddr stack_addr = std::bit_cast<VAddr>(thread->attr.stackaddr_attr);
             memory->NameVirtualRange(stack_addr, thread->attr.stacksize_attr, name);
@@ -584,9 +583,9 @@ int PS4_SYSV_ABI posix_pthread_rename_np(PthreadT thread, const char* name) {
 
     // Set the thread and thread stack names.
     if (thread->state != PthreadState::Dead) {
+        // Another thread's: the name the log shows (thread->name); the system's name of the
+        // host thread is its own to set (thread_name_set names only the caller)
         thread->name = name ? name : std::string{""};
-        Common::SetThreadName(reinterpret_cast<void*>(thread->native_thr->GetHandle()),
-                              thread->name.data());
         if (name && False(thread->attr.flags & PthreadAttrFlags::StackUser)) {
             VAddr stack_addr = std::bit_cast<VAddr>(thread->attr.stackaddr_attr);
             memory->NameVirtualRange(stack_addr, thread->attr.stacksize_attr, name);

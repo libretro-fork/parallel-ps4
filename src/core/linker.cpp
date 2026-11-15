@@ -11,7 +11,7 @@
 #include "common/path_util.h"
 #include "common/singleton.h"
 #include "common/string_util.h"
-#include "common/thread.h"
+#include "common/thread_name.h"
 #include "core/aerolib/aerolib.h"
 #include "core/aerolib/stubs.h"
 #include "core/devtools/widget/module_list.h"
@@ -575,7 +575,10 @@ void Linker::Execute(const std::vector<std::string>& args) {
     memory->SetupMemoryRegions(fmem_size, use_extended_mem1, use_extended_mem2);
 
     main_thread.Run([this, module, &args, has_libcinternal](std::stop_token) {
-        Common::SetCurrentThreadName("Game:Main");
+        if (Libraries::Kernel::g_curthread) {
+            Libraries::Kernel::g_curthread->name = "Game:Main";
+        }
+        thread_name_set("Game:Main");
 
 #ifndef _WIN32 // Clear any existing signal mask for game threads.
         sigset_t emptyset;

@@ -4,6 +4,7 @@
 #pragma once
 
 #include <cstdint>
+#include <stop_token>
 
 // What the emulator calls in the libretro core's side of its own process (host.cpp), which
 // passes it on to the core in the frontend's process.
@@ -73,5 +74,12 @@ void PushImage(std::uint32_t image, std::uint32_t width, std::uint32_t height);
 
 /// A pad's motors, 0 to 255 each, as the game set them. The pad is the controller's index.
 void SetRumble(std::uint32_t pad, std::uint8_t small_motor, std::uint8_t large_motor);
+
+/// The frontend's frames so far, one a retro_run (shared_state.h, vblank_ticks); it wraps.
+std::uint32_t VblankTicks();
+/// Until the frontend's frames are past @seen, the emulator quits, or @stop is requested
+/// (which wakes it). Nothing is timed: it parks on the core's notify. @return false when
+/// stopped or quitting.
+bool WaitVblankTicks(std::uint32_t seen, const std::stop_token& stop);
 
 } // namespace Libretro

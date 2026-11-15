@@ -855,8 +855,10 @@ set(COMMON src/common/c_bridge.cpp
            src/common/string_literal.h
            src/common/string_util.cpp
            src/common/string_util.h
-           src/common/thread.cpp
-           src/common/thread.h
+           src/common/thread_name.c
+           src/common/thread_name.h
+           src/common/vblank_clock.c
+           src/common/vblank_clock.h
            src/common/types.h
            src/common/uint128.h
            src/common/unique_function.h

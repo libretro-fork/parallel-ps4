@@ -11,7 +11,7 @@
 
 #include <retro_atomic.h>
 #include "common/logging/log.h"
-#include "common/thread.h"
+#include "common/thread_name.h"
 #include "core/libraries/net/net.h"
 #include "core/libraries/np/np_common.h"
 #include "core/libraries/np/np_error.h"
@@ -1750,7 +1750,7 @@ void FireEvent(const PendingEvent& ev) {
 } // namespace
 
 PS4_SYSV_ABI void* EventDispatcherThreadMain(void*) {
-    Common::SetCurrentThreadName("Matching2:Dispatch");
+    thread_name_set("Matching2:Dispatch");
     auto& state = NpHandler::GetInstance().GetMatching2State();
     std::unique_lock lock(state.queue_mutex);
     while (retro_atomic_load_seq_cst_int(&state.dispatch_running) != 0) {

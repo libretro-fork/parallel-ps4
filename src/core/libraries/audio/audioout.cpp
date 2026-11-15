@@ -11,7 +11,6 @@
 #include "common/assert.h"
 #include "common/logging/log.h"
 #include "common/shared_slots.h"
-#include "common/thread.h"
 #include "core/emulator_settings.h"
 #include "core/libraries/audio/audioout.h"
 #include "core/libraries/audio/audioout_backend.h"
@@ -156,51 +155,16 @@ void AdjustVol() {
     }
 }
 
-PortOut::PortOut() {
-    retro_eventcount_init(&drained_ec);
-}
-
-PortOut::~PortOut() {
-    retro_eventcount_free(&drained_ec);
-}
-
 static void SetPortVolume(PortOut& port_ref, s32 flag, s32 vol_value);
 
-static void AudioOutputThread(std::shared_ptr<PortOut> port, const std::stop_token& stop) {
-    {
-        const auto thread_name = fmt::format("shadPS4:AudioOutputThread:{}", fmt::ptr(port.get()));
-        Common::SetCurrentThreadName(thread_name.c_str());
+/// Hands @ptr, a buffer of the port's, to its output. Among the port's writers.
+static bool OutputBuffer(PortOut& port, const void* ptr) {
+    if (retro_atomic_load_acquire_int(&port.closing) != 0) {
+        return false;
     }
-
-    Common::AccurateTimer timer(
-        std::chrono::nanoseconds(1000000000ULL * port->buffer_frames / port->sample_rate));
-
-    while (true) {
-        timer.Start();
-
-        if (!port->impl || stop.stop_requested()) {
-            break;
-        }
-
-        if (retro_atomic_load_acquire_int(&port->output_ready) != 0) {
-            port->impl->Output(port->output_buffer);
-            // moved from sceAudioOutOutput TOOD recheck
-            retro_atomic_store_relaxed_64(&port->last_output_time,
-                                          Kernel::sceKernelGetProcessTime());
-            retro_atomic_store_release_int(&port->output_ready, 0);
-            retro_eventcount_notify(&port->drained_ec);
-        }
-
-        if (stop.stop_requested()) {
-            break;
-        }
-
-        timer.End();
-    }
-
-    retro_atomic_store_release_int(&port->closing, 1);
-    retro_atomic_store_release_int(&port->output_ready, 0);
-    retro_eventcount_notify(&port->drained_ec);
+    port.impl->Output(const_cast<void*>(ptr));
+    retro_atomic_store_relaxed_64(&port.last_output_time, Kernel::sceKernelGetProcessTime());
+    return true;
 }
 
 /*
@@ -333,16 +297,6 @@ s32 PS4_SYSV_ABI sceAudioOutOpen(UserService::OrbisUserServiceUserId user_id,
                 throw std::runtime_error("Failed to create audio backend");
             }
 
-            // Allocate buffer
-            port->output_buffer = std::malloc(port->BufferSize());
-            if (!port->output_buffer) {
-                throw std::bad_alloc();
-            }
-
-            // Start output thread - pass shared_ptr by value to keep port alive
-            port->output_thread.Run(
-                [port](std::stop_token stop) { AudioOutputThread(port, stop); });
-
             // Set initial volume
             port->impl->SetVolume(port->volume);
 
@@ -399,18 +353,8 @@ s32 PS4_SYSV_ABI sceAudioOutClose(s32 handle) {
         return ORBIS_AUDIO_OUT_ERROR_NOT_OPENED;
     }
 
-    // Kick out any guest thread blocked in sceAudioOutOutput before joining.
+    // A call that comes later sees it closed; one under way holds the port until it is done.
     retro_atomic_store_release_int(&port->closing, 1);
-    retro_eventcount_notify(&port->drained_ec);
-
-    // Stop the output thread.
-    port->output_thread.Stop();
-
-    // After any copy into the buffer under way (writers): one that comes later sees closing
-    port->writers.Run([&] {
-        std::free(port->output_buffer);
-        port->output_buffer = nullptr;
-    });
 
     LOG_DEBUG(Lib_AudioOut, "Closed audio port {}", port_id);
     return ORBIS_OK;
@@ -545,15 +489,16 @@ s32 PS4_SYSV_ABI sceAudioOutOutput(s32 handle, void* ptr) {
     }
 
     return port->writers.Run([&]() -> s32 {
-        if (!port->WaitDrained()) {
-            LOG_DEBUG(Lib_AudioOut, "Port {} closed while waiting for drain", port_id);
+        if (ptr == nullptr) {
+            // Nothing is left to drain: the last buffer went to the mix in its own call
+            return retro_atomic_load_acquire_int(&port->closing) != 0
+                       ? ORBIS_AUDIO_OUT_ERROR_NOT_OPENED
+                       : 0;
+        }
+        if (!OutputBuffer(*port, ptr)) {
+            LOG_DEBUG(Lib_AudioOut, "Port {} closed", port_id);
             return ORBIS_AUDIO_OUT_ERROR_NOT_OPENED;
         }
-        if (ptr == nullptr) {
-            return 0;
-        }
-        std::memcpy(port->output_buffer, ptr, port->BufferSize());
-        retro_atomic_store_release_int(&port->output_ready, 1);
         return port->buffer_frames * port->format_info.num_channels;
     });
 }
@@ -636,31 +581,14 @@ s32 PS4_SYSV_ABI sceAudioOutOutputs(OrbisAudioOutOutputParam* param, u32 num) {
         }
     }
 
-    // Wait for all ports to be ready
-    for (u32 i = 0; i < num; i++) {
-        if (!ports[i]->WaitDrained()) {
-            LOG_DEBUG(Lib_AudioOut, "Port closed while waiting for drain");
-            return ORBIS_AUDIO_OUT_ERROR_NOT_OPENED;
-        }
-    }
-
-    // Copy data to all ports: each among its port's writers, which waits again only if another
-    // filled it meanwhile
+    // Each buffer to its port's mix, among the port's writers, from where the game wrote it
     for (u32 i = 0; i < num; i++) {
         if (param[i].ptr == nullptr) {
             continue;
         }
         auto& port = ports[i];
-        const bool open = port->writers.Run([&] {
-            if (!port->WaitDrained()) {
-                return false;
-            }
-            std::memcpy(port->output_buffer, param[i].ptr, port->BufferSize());
-            retro_atomic_store_release_int(&port->output_ready, 1);
-            return true;
-        });
-        if (!open) {
-            LOG_DEBUG(Lib_AudioOut, "Port closed while waiting for drain");
+        if (!port->writers.Run([&] { return OutputBuffer(*port, param[i].ptr); })) {
+            LOG_DEBUG(Lib_AudioOut, "Port closed");
             return ORBIS_AUDIO_OUT_ERROR_NOT_OPENED;
         }
     }

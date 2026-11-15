@@ -6,7 +6,7 @@
 
 #include <retro_atomic.h>
 #include "common/logging/log.h"
-#include "common/thread.h"
+#include "common/thread_name.h"
 #include "core/net/net_service.h"
 
 namespace Core::Net {
@@ -110,7 +110,7 @@ bool NetService::Run(Job job, void* user) {
 }
 
 void NetService::Loop() {
-    Common::SetCurrentThreadName("shadPS4:NetService");
+    thread_name_set("shadPS4:NetService");
     const bool network = network_init();
     if (!network) {
         LOG_WARNING(Lib_Net, "No network: network requests will fail");

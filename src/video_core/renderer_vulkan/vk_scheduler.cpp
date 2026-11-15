@@ -5,7 +5,7 @@
 #include <functional>
 
 #include "common/assert.h"
-#include "common/thread.h"
+#include "common/thread_name.h"
 #include "imgui/renderer/texture_manager.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_scheduler.h"
@@ -305,7 +305,7 @@ void Scheduler::SubmitExecution(SubmitInfo& info) {
 }
 
 void Scheduler::PriorityPendingOpsThread(std::stop_token stoken) {
-    Common::SetCurrentThreadName("shadPS4:GpuSchedPriorityPendingOpsRunner");
+    thread_name_set("shadPS4:GpuSchedPriorityPendingOpsRunner");
 
     // A stop wakes the wait below
     const std::stop_callback wake{stoken,

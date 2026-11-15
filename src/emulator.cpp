@@ -25,7 +25,7 @@
 #include "common/scm_rev.h"
 #include "common/singleton.h"
 #include "common/string_util.h"
-#include "common/thread.h"
+#include "common/thread_name.h"
 #include "core/cpu_patches.h" // Windows static guest red-zone protection
 #include "core/debugger.h"
 #include "core/devtools/widget/module_list.h"
@@ -261,7 +261,7 @@ void Emulator::Run(std::filesystem::path file, std::vector<std::string> args,
                    std::optional<std::filesystem::path> p_game_folder,
                    std::vector<std::pair<std::filesystem::path, std::string>> mounts,
                    std::vector<std::string> const& env_vars, bool append_log) {
-    Common::SetCurrentThreadName("shadPS4:Main");
+    thread_name_set("shadPS4:Main");
     if (waitForDebuggerBeforeRun) {
         Debugger::WaitForDebuggerAttach();
     }

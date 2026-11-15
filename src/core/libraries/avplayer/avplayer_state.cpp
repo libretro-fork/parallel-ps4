@@ -3,7 +3,7 @@
 
 #include "common/elf_info.h"
 #include "common/logging/log.h"
-#include "common/thread.h"
+#include "common/thread_name.h"
 #include "core/libraries/avplayer/avplayer_error.h"
 #include "core/libraries/avplayer/avplayer_state.h"
 #include "core/libraries/kernel/process.h"
@@ -242,7 +242,7 @@ void AvPlayerState::SetAvSyncMode(AvPlayerAvSyncMode sync_mode) {
 
 void AvPlayerState::AvControllerThread(std::stop_token stop) {
     using std::chrono::milliseconds;
-    Common::SetCurrentThreadName("shadPS4:AvController");
+    thread_name_set("shadPS4:AvController");
 
     // An event wakes the thread at once; the buffering state is looked at every 5 ms, as it was
     const std::stop_callback wake{stop, [this] { m_event_ready.Notify(); }};

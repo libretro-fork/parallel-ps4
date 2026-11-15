@@ -6,7 +6,7 @@
 #include "common/enum_names.h"
 #include "common/polyfill_thread.h"
 #include "common/scope_exit.h"
-#include "common/thread.h"
+#include "common/thread_name.h"
 #include "core/debug_state.h"
 #include "core/emulator_settings.h"
 #include "core/libraries/kernel/process.h"
@@ -129,7 +129,7 @@ void Liverpool::ProcessCommands() {
 }
 
 void Liverpool::Process(std::stop_token stoken) {
-    Common::SetCurrentThreadName("shadPS4:GpuCommandProcessor");
+    thread_name_set("shadPS4:GpuCommandProcessor");
     gpu_id = std::this_thread::get_id();
 #ifdef __linux__
     gpu_tid = gettid();

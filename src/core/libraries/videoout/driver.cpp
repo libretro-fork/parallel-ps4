@@ -3,13 +3,15 @@
 
 #include <retro_atomic.h>
 #include "common/assert.h"
-#include "common/thread.h"
+#include "common/thread_name.h"
+#include "common/vblank_clock.h"
 #include "core/debug_state.h"
 #include "core/emulator_settings.h"
 #include "core/libraries/kernel/time.h"
 #include "core/libraries/videoout/driver.h"
 #include "core/libraries/videoout/videoout_error.h"
 #include "imgui/renderer/imgui_core.h"
+#include "libretro/libretro_bridge.h"
 #include "video_core/amdgpu/liverpool.h"
 #include "video_core/renderer_vulkan/vk_presenter.h"
 
@@ -367,80 +369,86 @@ void VideoOutDriver::SubmitFlipInternal(VideoOutPort* port, s32 index, s64 flip_
 }
 
 void VideoOutDriver::PresentThread(std::stop_token token) {
-    const std::chrono::nanoseconds vblank_period(1000000000 / emu_settings_get_vblank_frequency());
+    thread_name_set("shadPS4:PresentThread");
 
-    Common::SetCurrentThreadName("shadPS4:PresentThread");
-    Common::SetCurrentThreadRealtime(vblank_period);
+    // The console's vblanks come from the frontend's frames (common/vblank_clock.h): the
+    // thread parks until the core's next retro_run, and gives the vblanks that frame owes.
+    std::uint32_t ticks = Libretro::VblankTicks();
+    vblank_clock_t clock;
+    vblank_clock_init(&clock, ticks, emu_settings_get_vblank_frequency());
 
-    Common::AccurateTimer timer{vblank_period};
-
-    const auto receive_request = [this] -> Request {
-        Request request{};
-        if (retro_spsc_read(&requests, &request, sizeof(request)) != sizeof(request)) {
-            return {};
-        }
-        retro_eventcount_notify(&request_taken_ec);
-        return request;
-    };
-
-    while (!token.stop_requested()) {
-        timer.Start();
-
-        if (retro_atomic_exchange_int(&main_port.reset_status, 0) != 0) {
-            ResetStatus();
-        }
-
-        if (DebugState.IsGuestThreadsPaused()) {
-            DrawLastFrame();
-            timer.End();
+    for (;;) {
+        unsigned owed = vblank_clock_owed(&clock, ticks, emu_settings_get_vblank_frequency());
+        if (owed == 0) {
+            if (!Libretro::WaitVblankTicks(ticks, token)) {
+                break;
+            }
+            ticks = Libretro::VblankTicks();
             continue;
         }
-
-        // Check if it's time to take a request.
-        auto& vblank_status = main_port.vblank_status;
-        if (vblank_status.count % (main_port.flip_rate + 1) == 0) {
-            const auto request = receive_request();
-            if (!request) {
-                if (timer.GetTotalWait().count() < 0) { // Dont draw too fast
-                    if (!main_port.is_open) {
-                        DrawBlankFrame();
-                    } else if (ImGui::Core::MustKeepDrawing()) {
-                        DrawLastFrame();
-                    }
-                }
-            } else {
-                Flip(request);
-            }
+        for (; owed != 0 && !token.stop_requested(); owed--) {
+            vblank_clock_take(&clock);
+            Vblank();
         }
-
-        {
-            // Trigger flip events for the port
-            for (auto& slot : main_port.vblank_events) {
-                const auto event = retro_atomic_load_acquire_64(&slot);
-                auto equeue = event ? Kernel::GetEqueue(event) : nullptr;
-                if (equeue != nullptr) {
-                    equeue->TriggerEvent(
-                        static_cast<u64>(OrbisVideoOutInternalEventId::Vblank),
-                        Kernel::OrbisKernelEvent::Filter::VideoOut,
-                        reinterpret_cast<void*>(
-                            static_cast<u64>(OrbisVideoOutInternalEventId::Vblank) |
-                            (vblank_status.count << 16)));
-                }
-            }
-
-            // Update vblank status: read by sceVideoOutGetVblankStatus and WaitVblank
-            const u64 process_time = Libraries::Kernel::sceKernelGetProcessTime();
-            const u64 tsc = Libraries::Kernel::sceKernelReadTsc();
-            retro_seqlock_write_begin(&main_port.vblank_seq);
-            vblank_status.count++;
-            vblank_status.process_time = process_time;
-            vblank_status.tsc = tsc;
-            retro_seqlock_write_end(&main_port.vblank_seq);
-            retro_eventcount_notify(&main_port.vblank_ec);
-        }
-
-        timer.End();
     }
+}
+
+VideoOutDriver::Request VideoOutDriver::ReceiveRequest() {
+    Request request{};
+    if (retro_spsc_read(&requests, &request, sizeof(request)) != sizeof(request)) {
+        return {};
+    }
+    retro_eventcount_notify(&request_taken_ec);
+    return request;
+}
+
+void VideoOutDriver::Vblank() {
+    if (retro_atomic_exchange_int(&main_port.reset_status, 0) != 0) {
+        ResetStatus();
+    }
+
+    if (DebugState.IsGuestThreadsPaused()) {
+        DrawLastFrame();
+        return;
+    }
+
+    // Check if it's time to take a request.
+    auto& vblank_status = main_port.vblank_status;
+    if (vblank_status.count % (main_port.flip_rate + 1) == 0) {
+        const auto request = ReceiveRequest();
+        if (!request) {
+            if (!main_port.is_open) {
+                DrawBlankFrame();
+            } else if (ImGui::Core::MustKeepDrawing()) {
+                DrawLastFrame();
+            }
+        } else {
+            Flip(request);
+        }
+    }
+
+    // Trigger flip events for the port
+    for (auto& slot : main_port.vblank_events) {
+        const auto event = retro_atomic_load_acquire_64(&slot);
+        auto equeue = event ? Kernel::GetEqueue(event) : nullptr;
+        if (equeue != nullptr) {
+            equeue->TriggerEvent(
+                static_cast<u64>(OrbisVideoOutInternalEventId::Vblank),
+                Kernel::OrbisKernelEvent::Filter::VideoOut,
+                reinterpret_cast<void*>(static_cast<u64>(OrbisVideoOutInternalEventId::Vblank) |
+                                        (vblank_status.count << 16)));
+        }
+    }
+
+    // Update vblank status: read by sceVideoOutGetVblankStatus and WaitVblank
+    const u64 process_time = Libraries::Kernel::sceKernelGetProcessTime();
+    const u64 tsc = Libraries::Kernel::sceKernelReadTsc();
+    retro_seqlock_write_begin(&main_port.vblank_seq);
+    vblank_status.count++;
+    vblank_status.process_time = process_time;
+    vblank_status.tsc = tsc;
+    retro_seqlock_write_end(&main_port.vblank_seq);
+    retro_eventcount_notify(&main_port.vblank_ec);
 }
 
 } // namespace Libraries::VideoOut

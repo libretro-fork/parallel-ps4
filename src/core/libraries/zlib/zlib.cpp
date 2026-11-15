@@ -10,7 +10,7 @@
 #include "common/combiner.h"
 #include "common/event_count.h"
 #include "common/logging/log.h"
-#include "common/thread.h"
+#include "common/thread_name.h"
 #include "core/libraries/kernel/threads.h"
 #include "core/libraries/libs.h"
 #include "core/libraries/zlib/zlib_error.h"
@@ -42,7 +42,7 @@ static std::unordered_map<u64, InflateResult> results;
 static u64 next_request_id;
 
 void ZlibTaskThread(const std::stop_token& stop) {
-    Common::SetCurrentThreadName("shadPS4:ZlibTaskThread");
+    thread_name_set("shadPS4:ZlibTaskThread");
 
     // One inflater for the thread, reset per request rather than made each time.
     void* inflater = rinflate_new(15);

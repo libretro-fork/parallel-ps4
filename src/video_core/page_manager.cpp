@@ -9,7 +9,7 @@
 #include "common/error.h"
 #include "common/multi_level_page_table.h"
 #include "common/signal_context.h"
-#include "common/thread.h"
+#include "common/thread_name.h"
 #include "core/emulator_settings.h"
 #include "core/memory.h"
 #include "core/signals.h"
@@ -327,7 +327,7 @@ public:
     }
 
     void UffdHandler(std::stop_token token) {
-        Common::SetCurrentThreadName("shadPS4:Uffd");
+        thread_name_set("shadPS4:Uffd");
 
         auto regions = Core::Memory::Instance()->GetAddressSpace().GetUsableRegions();
         for (auto& region : regions) {

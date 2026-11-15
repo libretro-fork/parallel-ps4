@@ -123,36 +123,14 @@ struct AudioFormatInfo {
 struct PortOut {
     std::unique_ptr<PortBackend> impl{};
 
-    /// One buffer between the game and the port's output thread: the game fills it while
-    /// output_ready is false and sets it, the thread hands it on and clears it, and notifies
-    /// drained_ec, where the game waits. The game's calls on a port run one at a time in
-    /// writers; volume and mix level changes in control.
-    void* output_buffer = nullptr;
-    retro_atomic_int_t output_ready{0};
+    /// The game's buffer is handed to the frontend's mix in the game's own call, straight
+    /// from where the game wrote it: no copy of it, no thread, no timer. The mix paces the
+    /// call as a device would, by what the frontend takes (frontend_audio_out.cpp). The
+    /// game's calls on a port run one at a time in writers; volume and mix level changes
+    /// in control.
     retro_atomic_int_t closing{0};
-    retro_eventcount_t drained_ec{};
     Common::Combiner writers;
     Common::Combiner control;
-    Kernel::Thread output_thread{};
-
-    PortOut();
-    ~PortOut();
-
-    /// Until the buffer is free or the port closes. @return false if it closed.
-    bool WaitDrained() {
-        for (;;) {
-            const int key = retro_eventcount_prepare_wait(&drained_ec);
-            if (retro_atomic_load_acquire_int(&closing) != 0) {
-                retro_eventcount_cancel_wait(&drained_ec);
-                return false;
-            }
-            if (retro_atomic_load_acquire_int(&output_ready) == 0) {
-                retro_eventcount_cancel_wait(&drained_ec);
-                return true;
-            }
-            retro_eventcount_commit_wait(&drained_ec, key);
-        }
-    }
 
     OrbisAudioOutPort type;
     AudioFormatInfo format_info;

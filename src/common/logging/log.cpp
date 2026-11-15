@@ -29,9 +29,11 @@
 #include "common/logging/log.h"
 #include "common/path_util.h"
 #include "common/quick_exit.h"
-#include "common/thread.h"
+#include "common/thread_name.h"
 #include "common/types.h"
 #include "core/emulator_settings.h"
+#include "core/libraries/fiber/fiber.h"
+#include "core/libraries/kernel/threads/pthread.h"
 
 namespace Common::Log {
 
@@ -356,7 +358,7 @@ bool RecordReady() {
 }
 
 void WriterLoop() {
-    Common::SetCurrentThreadName("shadPS4:Log");
+    thread_name_set("shadPS4:Log");
     for (;;) {
         if (PopRecord()) {
             continue;
@@ -423,6 +425,29 @@ void PushSession(const std::string& path, bool truncate) {
     Push(Kind::Session, Level::Info, payload, length + 1, true);
 }
 
+/// A guest thread's name (and its fiber's), else the name the host thread gave itself
+/// (thread_name.h): read from memory, no system call.
+void CurrentThreadName(char* out, std::size_t size) {
+    using namespace Libraries::Kernel;
+    const char* name = thread_name_get();
+    std::size_t length = 0;
+    if (g_curthread && !g_curthread->name.empty()) {
+        const auto result = g_curthread->tcb->tcb_fiber
+                                ? fmt::format_to_n(out, size - 1, "{}@@{}", g_curthread->name,
+                                                   g_curthread->tcb->tcb_fiber->current_fiber->name)
+                                : fmt::format_to_n(out, size - 1, "{}", g_curthread->name);
+        length = std::min<std::size_t>(result.size, size - 1);
+    } else if (*name) {
+        length = std::min(std::strlen(name), size - 1);
+        std::memcpy(out, name, length);
+    } else {
+        static constexpr char unknown[] = "<unknown name>";
+        length = std::min(sizeof(unknown) - 1, size - 1);
+        std::memcpy(out, unknown, length);
+    }
+    out[length] = '\0';
+}
+
 } // namespace
 
 void VLog(Class log_class, Level level, const char* file, int line, const char* func,
@@ -430,8 +455,8 @@ void VLog(Class log_class, Level level, const char* file, int line, const char* 
     if (retro_atomic_load_acquire_int(&g_running) == 0) {
         return;
     }
-    char thread[64];
-    Common::GetCurrentThreadName(thread, sizeof(thread));
+    char thread[96];
+    CurrentThreadName(thread, sizeof(thread));
     const std::string_view fn = std::string_view(func) == "operator()" ? "lambda" : func;
     char text[MAX_RECORD];
     const auto head = fmt::format_to_n(
