@@ -2,12 +2,13 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include <fmt/format.h>
+#include <lrc_hash.h>
+
 #include "common/alignment.h"
 #include "common/arch.h"
 #include "common/assert.h"
 #include "common/logging/log.h"
 #include "common/memory_patcher.h"
-#include "common/sha1.h"
 #include "common/string_util.h"
 #include "core/aerolib/aerolib.h"
 #include "core/cpu_patches.h"
@@ -69,14 +70,13 @@ static std::string EncodeId(u64 nVal) {
 static std::string StringToNid(std::string_view symbol) {
     static constexpr std::array<u8, 16> Salt = {0x51, 0x8D, 0x64, 0xA6, 0x35, 0xDE, 0xD8, 0xC1,
                                                 0xE6, 0xB0, 0x39, 0xB1, 0xC3, 0xE5, 0x52, 0x30};
-    std::vector<u8> input(symbol.size() + Salt.size());
-    std::memcpy(input.data(), symbol.data(), symbol.size());
-    std::memcpy(input.data() + symbol.size(), Salt.data(), Salt.size());
-
-    sha1::SHA1::digest8_t hash;
-    sha1::SHA1 sha;
-    sha.processBytes(input.data(), input.size());
-    sha.getDigestBytes(hash);
+    // The symbol and the salt hashed where they lie, no buffer of the two joined
+    sha1_state sha;
+    sha1_stream_init(&sha);
+    sha1_stream_update(&sha, reinterpret_cast<const uint8_t*>(symbol.data()), symbol.size());
+    sha1_stream_update(&sha, Salt.data(), Salt.size());
+    u8 hash[20];
+    sha1_stream_final(&sha, hash);
 
     u64 digest;
     std::memcpy(&digest, hash, sizeof(digest));
