@@ -309,7 +309,7 @@ CORE_SOURCES_CXX += $(addprefix src/video_core/texture_cache/,blit_helper.cpp \
 
 CORE_SOURCES_C :=
 CORE_SOURCES_C += $(addprefix src/common/,audio_stream.c enum_names.c json_util.c key_manager.c \
-	patch_catalog.c patch_index.c ptr_table.c u64_map.c)
+	node_pool.c patch_catalog.c patch_index.c ptr_table.c u64_map.c)
 CORE_SOURCES_C += $(addprefix src/core/,emulator_settings.c user_manager.c)
 CORE_SOURCES_C += $(addprefix src/core/libraries/network/,host_override.c)
 CORE_SOURCES_C += $(addprefix src/core/libraries/ngs2/,ngs2_core.c ngs2_util.c)

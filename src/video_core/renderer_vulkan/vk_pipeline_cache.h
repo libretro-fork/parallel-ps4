@@ -112,6 +112,8 @@ private:
                     std::string_view ext);
     std::optional<Common::FS::FileView> GetShaderPatch(u64 hash, Shader::HwStage stage,
                                                        size_t perm_idx, std::string_view ext);
+    /// The shader patch folder had files in it when the game started
+    bool has_shader_patches = false;
     vk::ShaderModule CompileModule(Shader::Info& info, Shader::RuntimeInfo& runtime_info,
                                    const std::span<const u32>& code, size_t perm_idx,
                                    Shader::Backend::Bindings& binding);

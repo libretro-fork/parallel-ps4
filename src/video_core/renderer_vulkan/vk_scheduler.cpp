@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright 2025 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include <cstddef>
 #include <functional>
 
 #include "common/assert.h"
@@ -13,9 +14,52 @@ namespace Vulkan {
 
 Common::Combiner Scheduler::submit_combiner;
 
+namespace {
+
+// The deferred operations of every scheduler, made when the first scheduler is: a game keeps
+// at most a few hundred in flight. The free ones are a lock-free pool (common/node_pool.h).
+// Should they all be in flight, one more is made, and kept in the pool once given back.
+constexpr std::size_t OpPoolSize = 4096;
+
+struct OpPool {
+    node_pool_t free_ops;
+
+    OpPool() {
+        node_pool_init(&free_ops);
+        auto* const block = new Scheduler::PendingOp[OpPoolSize];
+        for (std::size_t i = 0; i < OpPoolSize; ++i) {
+            node_pool_push(&free_ops, &block[i].free_link);
+        }
+    }
+};
+
+OpPool& Pool() {
+    static OpPool pool;
+    return pool;
+}
+
+} // Anonymous namespace
+
+Scheduler::PendingOp* Scheduler::AcquireOp() {
+    if (node_pool_node_t* const link = node_pool_pop(&Pool().free_ops)) {
+        return reinterpret_cast<PendingOp*>(reinterpret_cast<char*>(link) -
+                                            offsetof(PendingOp, free_link));
+    }
+    return new PendingOp;
+}
+
+void Scheduler::ReleaseOp(PendingOp* op) {
+    op->destroy(op->storage);
+    node_pool_push(&Pool().free_ops, &op->free_link);
+}
+
 Scheduler::Scheduler(const Instance& instance)
     : instance{instance}, work_semaphore{instance}, command_pool{instance, &work_semaphore} {
     retro_eventcount_init(&priority_pending_ops_ec);
+    // Made here, not in play: the pool, and room for the sessions of a submission
+    (void)Pool();
+    sessions.reserve(64);
+    submit_buffers.reserve(128);
     BeginSession();
     priority_pending_ops_thread =
         std::jthread(std::bind_front(&Scheduler::PriorityPendingOpsThread, this));
@@ -159,8 +203,8 @@ void Scheduler::RunPendingOperations() {
         }
         // Off the list before it runs, in case it runs the list again
         pending_ops.Pop();
-        op->callback();
-        delete op;
+        op->Run();
+        ReleaseOp(op);
         pending_ops.Take();
     }
 }
@@ -208,8 +252,9 @@ void Scheduler::SubmitExecution(SubmitInfo& info) {
 
         EndSession();
 
-        std::vector<vk::CommandBuffer> cmd_buffers;
-        cmd_buffers.reserve(sessions.size() * 2);
+        // Kept, so a submission does not allocate
+        auto& cmd_buffers = submit_buffers;
+        cmd_buffers.clear();
 
         for (const auto& session : sessions) {
             if (session.upload) {
@@ -280,12 +325,12 @@ void Scheduler::PriorityPendingOpsThread(std::stop_token stoken) {
 
         work_semaphore.Wait(op->gpu_tick);
         if (stoken.stop_requested()) {
-            delete op;
+            ReleaseOp(op);
             break;
         }
 
-        op->callback();
-        delete op;
+        op->Run();
+        ReleaseOp(op);
     }
 }
 

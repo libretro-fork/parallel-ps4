@@ -95,6 +95,13 @@ $CC -std=c89 -O1 -g -Wall -Wno-unused-function -fsanitize=address,undefined \
 # The touchpad's fingers into the pad's two slots
 $CC -std=c89 -pedantic -O1 -g -Wall -fsanitize=address,undefined \
     libretro/tests/touch_track_test.c -o "$OUT/touch_track_test"
+# The lock-free pool of free nodes, on four threads
+for san in address,undefined thread; do
+    $CC -std=gnu89 -O1 -g -Wall -Wdeclaration-after-statement -fsanitize=$san -Isrc -I$L/include \
+        libretro/tests/node_pool_test.c src/common/node_pool.c $L/rthreads/rthreads.c \
+        $L/features/features_cpu.c -o "$OUT/node_pool_test" -lpthread
+    "$OUT/node_pool_test"
+done
 # The Patch Manager's catalog: a game's patches from two repositories
 $CC -std=c89 -O1 -g -Wall -Wdeclaration-after-statement -fsanitize=address,undefined \
     -Isrc -I$L/include libretro/tests/patch_catalog_test.c src/common/patch_catalog.c \

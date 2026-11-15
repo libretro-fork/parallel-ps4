@@ -55,7 +55,9 @@ public:
 
     void ScopeMarker(fmt::string_view fmt, fmt::format_args args, auto&& func) {
         if (host_markers_enabled) {
-            ScopeMarkerBegin(fmt::vformat(fmt, args));
+            char text[MarkerBytes];
+            ScopeMarkerBegin(
+                MarkerText(text, fmt::vformat_to_n(text, sizeof(text) - 1, fmt, args).size));
             func();
             ScopeMarkerEnd();
         } else {
@@ -63,7 +65,25 @@ public:
         }
     }
 
+    /// A host marker's label made only when host markers are on, on the stack
+    template <typename... Args>
+    void HostMarkerBegin(fmt::format_string<Args...> fmt, Args&&... args) {
+        if (!host_markers_enabled) {
+            return;
+        }
+        char text[MarkerBytes];
+        ScopeMarkerBegin(MarkerText(
+            text, fmt::format_to_n(text, sizeof(text) - 1, fmt, std::forward<Args>(args)...).size));
+    }
+
     void ScopeMarkerBegin(const std::string_view& str, bool from_guest = false);
+    static constexpr std::size_t MarkerBytes = 256;
+    /// The label in @text, cut to its room and ended by a NUL, as Vulkan reads it
+    static std::string_view MarkerText(char* text, std::size_t size) {
+        size = size < MarkerBytes - 1 ? size : MarkerBytes - 1;
+        text[size] = '\0';
+        return {text, size};
+    }
     void ScopeMarkerEnd(bool from_guest = false);
     void ScopedMarkerInsert(const std::string_view& str, bool from_guest = false);
     void ScopedMarkerInsertColor(const std::string_view& str, const u32 color,

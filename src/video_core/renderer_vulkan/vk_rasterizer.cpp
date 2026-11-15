@@ -274,8 +274,8 @@ void Rasterizer::EliminateFastClear() {
     auto& image = texture_cache.GetImage(image_id);
     const auto clear_value = LiverpoolToVK::ColorBufferClearValue(col_buf);
 
-    ScopeMarkerBegin(fmt::format("EliminateFastClear:MRT={:#x}:M={:#x}", col_buf.Address(),
-                                 col_buf.CmaskAddress()));
+    HostMarkerBegin("EliminateFastClear:MRT={:#x}:M={:#x}", col_buf.Address(),
+                    col_buf.CmaskAddress());
     runtime.ClearImage(&image, desc.view_info.range, clear_value);
     ScopeMarkerEnd();
 }
@@ -1476,9 +1476,8 @@ void Rasterizer::Resolve() {
     auto& mrt0_image = texture_cache.GetImage(texture_cache.FindImage(mrt0_desc, true));
     auto& mrt1_image = texture_cache.GetImage(texture_cache.FindImage(mrt1_desc, true));
 
-    ScopeMarkerBegin(fmt::format("Resolve:MRT0={:#x}:MRT1={:#x}",
-                                 liverpool->regs.color_buffers[0].Address(),
-                                 liverpool->regs.color_buffers[1].Address()));
+    HostMarkerBegin("Resolve:MRT0={:#x}:MRT1={:#x}", liverpool->regs.color_buffers[0].Address(),
+                    liverpool->regs.color_buffers[1].Address());
     runtime.ResolveImage(&mrt0_image, &mrt1_image, mrt0_desc.view_info.range,
                          mrt1_desc.view_info.range);
     ScopeMarkerEnd();
@@ -1504,10 +1503,9 @@ void Rasterizer::DepthStencilCopy(bool is_depth, bool is_stencil) {
     sub_range.base.layer = liverpool->regs.depth_view.slice_start;
     sub_range.extent.layers = liverpool->regs.depth_view.NumSlices() - sub_range.base.layer;
 
-    ScopeMarkerBegin(fmt::format(
-        "DepthStencilCopy:DR={:#x}:SR={:#x}:DW={:#x}:SW={:#x}", regs.depth_buffer.DepthAddress(),
-        regs.depth_buffer.StencilAddress(), regs.depth_buffer.DepthWriteAddress(),
-        regs.depth_buffer.StencilWriteAddress()));
+    HostMarkerBegin("DepthStencilCopy:DR={:#x}:SR={:#x}:DW={:#x}:SW={:#x}",
+                    regs.depth_buffer.DepthAddress(), regs.depth_buffer.StencilAddress(),
+                    regs.depth_buffer.DepthWriteAddress(), regs.depth_buffer.StencilWriteAddress());
 
     runtime.CopyDepthStencil(&read_image, &write_image, sub_range);
 
@@ -1533,9 +1531,9 @@ void Rasterizer::DepthToColor(bool is_stencil, u32 sample) {
     auto& depth_image = texture_cache.GetImage(depth_id);
     auto& color_image = texture_cache.GetImage(color_id);
 
-    ScopeMarkerBegin(fmt::format("DepthToColor:D={:#x}:C={:#x}:stencil={}:sample={}",
-                                 depth_image.info.guest_address, color_image.info.guest_address,
-                                 is_stencil, sample));
+    HostMarkerBegin("DepthToColor:D={:#x}:C={:#x}:stencil={}:sample={}",
+                    depth_image.info.guest_address, color_image.info.guest_address, is_stencil,
+                    sample);
     // The channels of the image the game's mask stands for
     const auto write_mask =
         vk::ColorComponentFlags{col_buf.Swizzle().ApplyMask(regs.color_target_mask.GetMask(0))};

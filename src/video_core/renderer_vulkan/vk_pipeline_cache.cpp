@@ -334,6 +334,17 @@ PipelineCache::PipelineCache(const Instance& instance_, Scheduler& scheduler_,
         .supports_shader_stencil_export = instance_.IsShaderStencilExportSupported(),
         .fast_shader_math = emu_settings_get_fast_shader_math(),
     };
+    // The shader patches, looked for once: a game's shaders are compiled while it plays, and
+    // with none to find each one went to the disk for its patch
+    {
+        const auto patch_dir = Common::FS::GetUserPath(Common::FS::PathType::ShaderDir) / "patch";
+        if (!Common::FS::Exists(patch_dir)) {
+            Common::FS::CreateDirectories(patch_dir);
+        }
+        Common::FS::ForEachEntry(patch_dir, [this](std::string_view, bool is_dir) {
+            has_shader_patches = has_shader_patches || !is_dir;
+        });
+    }
     WarmUp();
 
     auto [cache_result, cache] = instance.GetDevice().createPipelineCacheUnique({});
@@ -828,12 +839,11 @@ void PipelineCache::DumpShader(std::span<const u32> code, u64 hash, Shader::HwSt
 std::optional<Common::FS::FileView> PipelineCache::GetShaderPatch(u64 hash, Shader::HwStage stage,
                                                                   size_t perm_idx,
                                                                   std::string_view ext) {
-
+    if (!has_shader_patches) {
+        return {};
+    }
     using namespace Common::FS;
     const auto patch_dir = GetUserPath(PathType::ShaderDir) / "patch";
-    if (!Common::FS::Exists(patch_dir)) {
-        Common::FS::CreateDirectories(patch_dir);
-    }
     const auto filename = fmt::format("{}.{}", GetShaderName(stage, hash, perm_idx), ext);
     const auto filepath = patch_dir / filename;
     if (!Common::FS::Exists(filepath)) {

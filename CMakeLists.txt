@@ -868,6 +868,8 @@ set(COMMON src/common/c_bridge.cpp
            src/common/number_utils.cpp
            src/common/memory_patcher.h
            src/common/memory_patcher.cpp
+           src/common/node_pool.c
+           src/common/node_pool.h
            src/common/patch_catalog.c
            src/common/patch_catalog.h
            src/common/patch_index.c
