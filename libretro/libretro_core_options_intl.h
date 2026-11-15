@@ -444,7 +444,7 @@ struct retro_core_option_v2_definition option_defs_ar[] = {
             { "enabled", NULL },
             { NULL, NULL },
         },
-        "disabled"
+        "enabled"
     },
     {
         "shadps4_show_fps",
@@ -997,7 +997,7 @@ struct retro_core_option_v2_definition option_defs_ast[] = {
             { "enabled", NULL },
             { NULL, NULL },
         },
-        "disabled"
+        "enabled"
     },
     {
         "shadps4_show_fps",
@@ -1550,7 +1550,7 @@ struct retro_core_option_v2_definition option_defs_be[] = {
             { "enabled", NULL },
             { NULL, NULL },
         },
-        "disabled"
+        "enabled"
     },
     {
         "shadps4_show_fps",
@@ -2103,7 +2103,7 @@ struct retro_core_option_v2_definition option_defs_ca[] = {
             { "enabled", NULL },
             { NULL, NULL },
         },
-        "disabled"
+        "enabled"
     },
     {
         "shadps4_show_fps",
@@ -2656,7 +2656,7 @@ struct retro_core_option_v2_definition option_defs_chs[] = {
             { "enabled", NULL },
             { NULL, NULL },
         },
-        "disabled"
+        "enabled"
     },
     {
         "shadps4_show_fps",
@@ -3209,7 +3209,7 @@ struct retro_core_option_v2_definition option_defs_cht[] = {
             { "enabled", NULL },
             { NULL, NULL },
         },
-        "disabled"
+        "enabled"
     },
     {
         "shadps4_show_fps",
@@ -3762,7 +3762,7 @@ struct retro_core_option_v2_definition option_defs_cs[] = {
             { "enabled", NULL },
             { NULL, NULL },
         },
-        "disabled"
+        "enabled"
     },
     {
         "shadps4_show_fps",
@@ -4315,7 +4315,7 @@ struct retro_core_option_v2_definition option_defs_de[] = {
             { "enabled", NULL },
             { NULL, NULL },
         },
-        "disabled"
+        "enabled"
     },
     {
         "shadps4_show_fps",
@@ -4868,7 +4868,7 @@ struct retro_core_option_v2_definition option_defs_el[] = {
             { "enabled", NULL },
             { NULL, NULL },
         },
-        "disabled"
+        "enabled"
     },
     {
         "shadps4_show_fps",
@@ -5421,7 +5421,7 @@ struct retro_core_option_v2_definition option_defs_en[] = {
             { "enabled", NULL },
             { NULL, NULL },
         },
-        "disabled"
+        "enabled"
     },
     {
         "shadps4_show_fps",
@@ -5974,7 +5974,7 @@ struct retro_core_option_v2_definition option_defs_eo[] = {
             { "enabled", NULL },
             { NULL, NULL },
         },
-        "disabled"
+        "enabled"
     },
     {
         "shadps4_show_fps",
@@ -6527,7 +6527,7 @@ struct retro_core_option_v2_definition option_defs_es[] = {
             { "enabled", NULL },
             { NULL, NULL },
         },
-        "disabled"
+        "enabled"
     },
     {
         "shadps4_show_fps",
@@ -7080,7 +7080,7 @@ struct retro_core_option_v2_definition option_defs_fa[] = {
             { "enabled", NULL },
             { NULL, NULL },
         },
-        "disabled"
+        "enabled"
     },
     {
         "shadps4_show_fps",
@@ -7633,7 +7633,7 @@ struct retro_core_option_v2_definition option_defs_fi[] = {
             { "enabled", NULL },
             { NULL, NULL },
         },
-        "disabled"
+        "enabled"
     },
     {
         "shadps4_show_fps",
@@ -8186,7 +8186,7 @@ struct retro_core_option_v2_definition option_defs_fr[] = {
             { "enabled", NULL },
             { NULL, NULL },
         },
-        "disabled"
+        "enabled"
     },
     {
         "shadps4_show_fps",
@@ -8739,7 +8739,7 @@ struct retro_core_option_v2_definition option_defs_ga[] = {
             { "enabled", NULL },
             { NULL, NULL },
         },
-        "disabled"
+        "enabled"
     },
     {
         "shadps4_show_fps",
@@ -9292,7 +9292,7 @@ struct retro_core_option_v2_definition option_defs_gl[] = {
             { "enabled", NULL },
             { NULL, NULL },
         },
-        "disabled"
+        "enabled"
     },
     {
         "shadps4_show_fps",
@@ -9845,7 +9845,7 @@ struct retro_core_option_v2_definition option_defs_he[] = {
             { "enabled", NULL },
             { NULL, NULL },
         },
-        "disabled"
+        "enabled"
     },
     {
         "shadps4_show_fps",
@@ -10398,7 +10398,7 @@ struct retro_core_option_v2_definition option_defs_hu[] = {
             { "enabled", NULL },
             { NULL, NULL },
         },
-        "disabled"
+        "enabled"
     },
     {
         "shadps4_show_fps",
@@ -10951,7 +10951,7 @@ struct retro_core_option_v2_definition option_defs_id[] = {
             { "enabled", NULL },
             { NULL, NULL },
         },
-        "disabled"
+        "enabled"
     },
     {
         "shadps4_show_fps",
@@ -11504,7 +11504,7 @@ struct retro_core_option_v2_definition option_defs_it[] = {
             { "enabled", NULL },
             { NULL, NULL },
         },
-        "disabled"
+        "enabled"
     },
     {
         "shadps4_show_fps",
@@ -12057,7 +12057,7 @@ struct retro_core_option_v2_definition option_defs_ja[] = {
             { "enabled", NULL },
             { NULL, NULL },
         },
-        "disabled"
+        "enabled"
     },
     {
         "shadps4_show_fps",
@@ -12610,7 +12610,7 @@ struct retro_core_option_v2_definition option_defs_ko[] = {
             { "enabled", NULL },
             { NULL, NULL },
         },
-        "disabled"
+        "enabled"
     },
     {
         "shadps4_show_fps",
@@ -13163,7 +13163,7 @@ struct retro_core_option_v2_definition option_defs_nl[] = {
             { "enabled", NULL },
             { NULL, NULL },
         },
-        "disabled"
+        "enabled"
     },
     {
         "shadps4_show_fps",
@@ -13716,7 +13716,7 @@ struct retro_core_option_v2_definition option_defs_no[] = {
             { "enabled", NULL },
             { NULL, NULL },
         },
-        "disabled"
+        "enabled"
     },
     {
         "shadps4_show_fps",
@@ -14269,7 +14269,7 @@ struct retro_core_option_v2_definition option_defs_pl[] = {
             { "enabled", NULL },
             { NULL, NULL },
         },
-        "disabled"
+        "enabled"
     },
     {
         "shadps4_show_fps",
@@ -14822,7 +14822,7 @@ struct retro_core_option_v2_definition option_defs_pt_br[] = {
             { "enabled", NULL },
             { NULL, NULL },
         },
-        "disabled"
+        "enabled"
     },
     {
         "shadps4_show_fps",
@@ -15375,7 +15375,7 @@ struct retro_core_option_v2_definition option_defs_pt_pt[] = {
             { "enabled", NULL },
             { NULL, NULL },
         },
-        "disabled"
+        "enabled"
     },
     {
         "shadps4_show_fps",
@@ -15928,7 +15928,7 @@ struct retro_core_option_v2_definition option_defs_ru[] = {
             { "enabled", NULL },
             { NULL, NULL },
         },
-        "disabled"
+        "enabled"
     },
     {
         "shadps4_show_fps",
@@ -16481,7 +16481,7 @@ struct retro_core_option_v2_definition option_defs_sk[] = {
             { "enabled", NULL },
             { NULL, NULL },
         },
-        "disabled"
+        "enabled"
     },
     {
         "shadps4_show_fps",
@@ -17034,7 +17034,7 @@ struct retro_core_option_v2_definition option_defs_sv[] = {
             { "enabled", NULL },
             { NULL, NULL },
         },
-        "disabled"
+        "enabled"
     },
     {
         "shadps4_show_fps",
@@ -17587,7 +17587,7 @@ struct retro_core_option_v2_definition option_defs_tr[] = {
             { "enabled", NULL },
             { NULL, NULL },
         },
-        "disabled"
+        "enabled"
     },
     {
         "shadps4_show_fps",
@@ -18140,7 +18140,7 @@ struct retro_core_option_v2_definition option_defs_uk[] = {
             { "enabled", NULL },
             { NULL, NULL },
         },
-        "disabled"
+        "enabled"
     },
     {
         "shadps4_show_fps",
@@ -18693,7 +18693,7 @@ struct retro_core_option_v2_definition option_defs_val[] = {
             { "enabled", NULL },
             { NULL, NULL },
         },
-        "disabled"
+        "enabled"
     },
     {
         "shadps4_show_fps",
@@ -19246,7 +19246,7 @@ struct retro_core_option_v2_definition option_defs_vn[] = {
             { "enabled", NULL },
             { NULL, NULL },
         },
-        "disabled"
+        "enabled"
     },
     {
         "shadps4_show_fps",

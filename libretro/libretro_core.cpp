@@ -419,7 +419,7 @@ void ReadCoreOptions(Libretro::SharedOptions& options) {
     options.extra_dmem_mbytes =
         std::clamp(std::atoi(OptionValue("shadps4_extra_memory", "0").c_str()), 0, 20000);
     options.readback_linear_images = enabled("shadps4_readback_linear_images", "disabled");
-    options.shader_cache = enabled("shadps4_shader_cache", "disabled");
+    options.shader_cache = enabled("shadps4_shader_cache", "enabled");
     options.dump_shaders = enabled("shadps4_dump_shaders", "disabled");
     options.sample_positions = enabled("shadps4_game_sample_positions", "disabled");
     options.copy_gpu_buffers = enabled("shadps4_copy_gpu_buffers", "enabled");

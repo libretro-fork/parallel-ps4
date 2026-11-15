@@ -380,7 +380,7 @@ struct retro_core_option_v2_definition option_defs_us[] = {
      "Shader Cache",
      NULL,
      "Keeps compiled shader pipelines on disk, so a game stutters less the "
-     "next time it is started.",
+     "next time it is started: they are made again before it starts.",
      NULL,
      "video",
      {
@@ -388,7 +388,7 @@ struct retro_core_option_v2_definition option_defs_us[] = {
          {"enabled", NULL},
          {NULL, NULL},
      },
-     "disabled"},
+     "enabled"},
     {"shadps4_shader_compilation",
      "Shader Compilation",
      NULL,
