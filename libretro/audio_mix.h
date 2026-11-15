@@ -19,6 +19,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <retro_atomic.h>
 #include <rthreads/retro_eventcount.h>
 
 #ifdef __cplusplus
@@ -35,13 +36,39 @@ extern "C" {
 /* What the mix takes from every input each of the frontend's frames: 48000 / 60 */
 #define AUDIO_MIX_FRAME_FRAMES 800
 
-typedef struct audio_mix_input audio_mix_input_t;
+/* An input: a ring of frames, written by its source and read by the mix, in memory both
+ * processes share. Counts of frames that only grow; no pointers in it. */
+typedef struct audio_mix_input
+{
+   retro_atomic_int_t state;
+   retro_atomic_int_t channels;
+   retro_atomic_int_t write;
+   retro_atomic_int_t read;
+   float frames[AUDIO_MIX_INPUT_FRAMES * 8];
+} audio_mix_input_t;
 
-/* Makes the pool. Once, before any input is opened. Returns 0 when there is no memory. */
+/* The inputs, all of them: where the core's shared state keeps them */
+typedef struct audio_mix_shared
+{
+   audio_mix_input_t inputs[AUDIO_MIX_INPUTS];
+} audio_mix_shared_t;
+
+/* Takes the pool at @pool for a mix of @channels (2, or 8 for surround), in this process; the
+ * side that made the memory passes @make to empty it, before the other attaches. Sources open
+ * inputs in it (the emulator), the mix reads them (the core). */
+int audio_mix_attach(audio_mix_shared_t* pool, unsigned channels, int make);
+
+/* A pool of its own, in this process (sources and mix in one): 2 channels, or @channels */
 int audio_mix_init(void);
-/* The same for a mix of @channels: 2, or 8 for surround (7.1), which lets a source open an
- * input of eight channels. audio_mix_init is this with 2. */
 int audio_mix_init_channels(unsigned channels);
+
+/* The sources' process: the mix took its frames (once a frame, after retro_run's): the
+ * sources waiting for room look again. The mix in one process does it itself. */
+void audio_mix_notify_room(void);
+
+/* The sources' process: the next @frames of a clip playing (audio_mix_play_clip) into an
+ * input of its own, as a source. Once a frame. */
+void audio_mix_feed_clip(unsigned frames);
 /* What the mix was made for: 2, or 8 */
 unsigned audio_mix_channels(void);
 
@@ -73,10 +100,6 @@ retro_eventcount_t* audio_mix_input_room_ec(audio_mix_input_t* in);
 
 /* Hands @frames written at the last reserve to the mixing thread. */
 void audio_mix_input_commit(audio_mix_input_t* in, unsigned frames);
-
-/* @wake(@ctx) is called after every commit and every clip started, from the source's thread:
- * the mixing thread parks on it when it has nothing to mix. Set once, before any source runs. */
-void audio_mix_set_wake(void (*wake)(void*), void* ctx);
 
 /* Mixing thread only: sums up to @frames of every open input, rounded to the nearest 16-bit
  * step and clamped, into @ring (16-bit stereo,

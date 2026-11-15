@@ -5,19 +5,23 @@
 #include <string.h>
 
 #include <retro_atomic.h>
-#include <retro_waitable_spsc.h>
 
 #include "audio_mix.h"
 
 /* A frame in an input: a float a channel, two (stereo) or eight (7.1, with surround). A
  * source's sound stays at full precision until the mix is made, and is rounded to 16 bits once,
  * there, if at all: not once by each source and again after the sum, and never cut towards
- * zero. */
+ * zero.
+ *
+ * The inputs live in memory both processes share (audio_mix_shared_t, in the core's shared
+ * state): the emulator's sources write them, the core mixes them, exactly one frame of every
+ * input in retro_run. Indices, not pointers: each process has the memory at its own address.
+ * Each input is a single-producer single-consumer ring of frame counts that only grow. */
 
 /* An input's life: free in the pool, open to its source, or closed by its source and not yet
- * emptied by the mixing thread. Only the source moves FREE to OPEN (by CAS, sources open from
- * several threads) and OPEN to CLOSING; only the mixing thread moves CLOSING to FREE, after it
- * has emptied the ring, so the ring has one producer and one consumer at all times. */
+ * emptied by the mix. Only the source moves FREE to OPEN (by CAS, sources open from several
+ * threads) and OPEN to CLOSING; only the mix moves CLOSING to FREE, after it has emptied the
+ * ring, so the ring has one producer and one consumer at all times. */
 enum
 {
    INPUT_FREE = 0,
@@ -25,31 +29,32 @@ enum
    INPUT_CLOSING
 };
 
-struct audio_mix_input
-{
-   retro_waitable_spsc_t ring;
-   retro_atomic_int_t state;
-   unsigned channels;   /* 2, or 8: set by the source as it opens the input */
-   size_t frame_bytes;
-};
+#define RING_MASK (AUDIO_MIX_INPUT_FRAMES - 1)
 
-static struct audio_mix_input inputs[AUDIO_MIX_INPUTS];
+static audio_mix_shared_t* shm;
+/* A pool of its own, for one process (audio_mix_init_channels: the tests) */
+static audio_mix_shared_t own_pool;
+static int own; /* the clip is mixed by the mix itself */
 
-/* Who the mixing thread waits on, told of every commit and clip */
-static void (*mix_wake)(void*);
-static void* mix_wake_ctx;
+/* What a source waiting for room parks on, in its process: notified when the frames were
+ * taken (audio_mix_notify_room, or the mix itself in one process) */
+static retro_eventcount_t room_ec;
+static int room_ec_made;
 
-/* The clip: published by its caller with a serial the mixing thread checks before and after
- * it reads the fields, so a clip started again while being read is taken on the next pass. */
+/* The clip: published by its caller with a serial the feeder checks before and after it reads
+ * the fields, so a clip started again while being read is taken on the next pass. In the
+ * emulator it is fed into an input of its own (audio_mix_feed_clip); in one process the mix
+ * adds it. */
 static retro_atomic_size_t clip_frames; /* the frames' address */
 static retro_atomic_int_t clip_count;
 static retro_atomic_int_t clip_gain_milli;
 static retro_atomic_int_t clip_serial;
-/* The mixing thread's own: the clip it plays and how far it is. */
+/* The feeder's own: the clip it plays and how far it is. */
 static int clip_seen;
 static const float* clip_play;
 static unsigned clip_left;
 static float clip_play_gain;
+static audio_mix_input_t* clip_in;
 
 /* The resampler's kernel: a sinc windowed with a Blackman window over 16 taps, at cutoff 1,
  * for 256 fractional positions and one more to interpolate to, each row summing to 1. */
@@ -92,12 +97,16 @@ static void sinc_row(float* row, double frac, double cutoff)
       row[t] = (float)(w[t] / sum);
 }
 
-int audio_mix_init(void)
+static void make_room_ec(void)
 {
-   return audio_mix_init_channels(2);
+   if (!room_ec_made)
+   {
+      retro_eventcount_init(&room_ec);
+      room_ec_made = 1;
+   }
 }
 
-int audio_mix_init_channels(unsigned channels)
+static void make_tables(unsigned channels)
 {
    unsigned i;
    mix_channels = channels == 8 ? 8 : 2;
@@ -107,16 +116,38 @@ int audio_mix_init_channels(unsigned channels)
    retro_atomic_int_init(&clip_count, 0);
    retro_atomic_int_init(&clip_gain_milli, 0);
    retro_atomic_int_init(&clip_serial, 0);
-   for (i = 0; i < AUDIO_MIX_INPUTS; i++)
-   {
-      retro_atomic_int_init(&inputs[i].state, INPUT_FREE);
-      inputs[i].channels    = 2;
-      inputs[i].frame_bytes = 2 * sizeof(float);
-      /* Room for the widest input the mix takes */
-      if (!retro_waitable_spsc_init(&inputs[i].ring,
-                                    AUDIO_MIX_INPUT_FRAMES * mix_channels * sizeof(float)))
-         return 0;
-   }
+   clip_seen = 0;
+   clip_left = 0;
+   clip_in   = NULL;
+   make_room_ec();
+}
+
+int audio_mix_attach(audio_mix_shared_t* pool, unsigned channels, int make)
+{
+   unsigned i;
+   make_tables(channels);
+   shm = pool;
+   own = 0;
+   if (make)
+      for (i = 0; i < AUDIO_MIX_INPUTS; i++)
+      {
+         retro_atomic_int_init(&pool->inputs[i].state, INPUT_FREE);
+         retro_atomic_int_init(&pool->inputs[i].channels, 2);
+         retro_atomic_int_init(&pool->inputs[i].write, 0);
+         retro_atomic_int_init(&pool->inputs[i].read, 0);
+      }
+   return 1;
+}
+
+int audio_mix_init(void)
+{
+   return audio_mix_init_channels(2);
+}
+
+int audio_mix_init_channels(unsigned channels)
+{
+   audio_mix_attach(&own_pool, channels, 1);
+   own = 1;
    return 1;
 }
 
@@ -131,14 +162,16 @@ audio_mix_input_t* audio_mix_input_open_channels(unsigned channels)
    if (channels != 2 && !(channels == 8 && mix_channels == 8))
       return NULL;
    for (i = 0; i < AUDIO_MIX_INPUTS; i++)
-      if (retro_atomic_cas_int(&inputs[i].state, INPUT_FREE, INPUT_OPEN))
+   {
+      audio_mix_input_t* in = &shm->inputs[i];
+      if (retro_atomic_cas_int(&in->state, INPUT_FREE, INPUT_OPEN))
       {
-         /* The mixing thread reads these once it sees frames, which the source commits
-          * after this, with release */
-         inputs[i].channels    = channels;
-         inputs[i].frame_bytes = channels * sizeof(float);
-         return &inputs[i];
+         /* The mix reads it once it sees frames, which the source commits after this, with
+          * release */
+         retro_atomic_store_relaxed_int(&in->channels, (int)channels);
+         return in;
       }
+   }
    return NULL;
 }
 
@@ -153,82 +186,93 @@ void audio_mix_input_close(audio_mix_input_t* in)
       retro_atomic_store_release_int(&in->state, INPUT_CLOSING);
 }
 
-int audio_mix_input_wait(audio_mix_input_t* in, unsigned frames, int64_t timeout_us)
+static unsigned queued_frames(audio_mix_input_t* in)
 {
-   /* Room for @frames on top of the most that may stay queued, out of what the ring holds. */
-   size_t capacity = retro_spsc_write_avail(&in->ring.queue) +
-                     retro_spsc_read_avail(&in->ring.queue);
-   size_t want     = capacity - AUDIO_MIX_QUEUE_FRAMES * in->frame_bytes;
-   if (frames * in->frame_bytes > want)
-      want = frames * in->frame_bytes;
-   return retro_waitable_spsc_wait_writable(&in->ring, want, timeout_us) ? 1 : 0;
+   return (unsigned)((uint32_t)retro_atomic_load_acquire_int(&in->write) -
+                     (uint32_t)retro_atomic_load_acquire_int(&in->read));
 }
 
 int audio_mix_input_ready(audio_mix_input_t* in, unsigned frames, unsigned queue_frames)
 {
-   const size_t queued = retro_spsc_read_avail(&in->ring.queue) / in->frame_bytes;
-   return queued <= queue_frames &&
-          retro_spsc_write_avail(&in->ring.queue) >= (size_t)frames * in->frame_bytes;
+   const unsigned queued = queued_frames(in);
+   return queued <= queue_frames && AUDIO_MIX_INPUT_FRAMES - queued >= frames;
 }
 
 retro_eventcount_t* audio_mix_input_room_ec(audio_mix_input_t* in)
 {
-   return &in->ring.writable;
+   (void)in;
+   return &room_ec;
+}
+
+void audio_mix_notify_room(void)
+{
+   retro_eventcount_notify(&room_ec);
+}
+
+int audio_mix_input_wait(audio_mix_input_t* in, unsigned frames, int64_t timeout_us)
+{
+   for (;;)
+   {
+      const int key = retro_eventcount_prepare_wait(&room_ec);
+      if (audio_mix_input_ready(in, frames, AUDIO_MIX_QUEUE_FRAMES))
+      {
+         retro_eventcount_cancel_wait(&room_ec);
+         return 1;
+      }
+      if (!retro_eventcount_commit_wait_timeout(&room_ec, key, timeout_us))
+         return audio_mix_input_ready(in, frames, AUDIO_MIX_QUEUE_FRAMES);
+   }
 }
 
 unsigned audio_mix_input_reserve(audio_mix_input_t* in, float** ptr, unsigned frames)
 {
-   void* span   = NULL;
-   size_t bytes = retro_spsc_write_begin(&in->ring.queue, &span);
-   unsigned got = (unsigned)(bytes / in->frame_bytes);
-   *ptr         = (float*)span;
+   const uint32_t write    = (uint32_t)retro_atomic_load_relaxed_int(&in->write);
+   const unsigned channels = (unsigned)retro_atomic_load_relaxed_int(&in->channels);
+   const unsigned room     = AUDIO_MIX_INPUT_FRAMES - queued_frames(in);
+   const unsigned to_wrap  = AUDIO_MIX_INPUT_FRAMES - (write & RING_MASK);
+   unsigned got            = room < to_wrap ? room : to_wrap;
+   *ptr                    = in->frames + (size_t)(write & RING_MASK) * channels;
    return got < frames ? got : frames;
-}
-
-void audio_mix_set_wake(void (*wake)(void*), void* ctx)
-{
-   mix_wake_ctx = ctx;
-   mix_wake     = wake;
 }
 
 void audio_mix_input_commit(audio_mix_input_t* in, unsigned frames)
 {
-   retro_spsc_write_end(&in->ring.queue, (size_t)frames * in->frame_bytes);
-   retro_waitable_spsc_notify_readable(&in->ring);
-   if (mix_wake)
-      mix_wake(mix_wake_ctx);
+   retro_atomic_store_release_int(&in->write,
+                                  (int)((uint32_t)retro_atomic_load_relaxed_int(&in->write) +
+                                        frames));
 }
 
 /* Adds what one input has, up to @frames, to the sums. Returns how many frames it had. */
-static unsigned pump_add(struct audio_mix_input* in, unsigned frames)
+static unsigned pump_add(audio_mix_input_t* in, unsigned frames)
 {
-   unsigned done = 0;
-   while (done < frames)
+   const unsigned channels = (unsigned)retro_atomic_load_relaxed_int(&in->channels);
+   uint32_t read           = (uint32_t)retro_atomic_load_relaxed_int(&in->read);
+   unsigned have           = queued_frames(in);
+   unsigned done           = 0;
+   if (have > frames)
+      have = frames;
+   while (done < have)
    {
-      const void* span = NULL;
-      size_t bytes     = retro_spsc_read_begin(&in->ring.queue, &span);
-      unsigned got     = (unsigned)(bytes / in->frame_bytes);
-      const float* s   = (const float*)span;
-      float* sum       = pump_sum + done * mix_channels;
+      const unsigned at      = read & RING_MASK;
+      const unsigned to_wrap = AUDIO_MIX_INPUT_FRAMES - at;
+      unsigned got           = have - done < to_wrap ? have - done : to_wrap;
+      const float* s         = in->frames + (size_t)at * channels;
+      float* sum             = pump_sum + done * mix_channels;
       unsigned i, c;
-      if (got == 0)
-         break;
-      if (got > frames - done)
-         got = frames - done;
-      if (in->channels == mix_channels)
+      if (channels == mix_channels)
          for (i = 0; i < got * mix_channels; i++)
             sum[i] += s[i];
       else /* stereo into a wider mix: the front pair */
          for (i = 0; i < got; i++)
             for (c = 0; c < 2; c++)
                sum[i * mix_channels + c] += s[i * 2 + c];
-      if (in->channels == 8)
+      if (channels == 8)
          pump_wide = 1;
-      retro_spsc_read_end(&in->ring.queue, (size_t)got * in->frame_bytes);
+      read += got;
       done += got;
    }
    if (done)
-      retro_waitable_spsc_notify_writable(&in->ring);
+      retro_atomic_store_release_int(&in->read, (int)read);
    return done;
 }
 
@@ -238,21 +282,17 @@ void audio_mix_play_clip(const float* frames, unsigned count, float gain)
    retro_atomic_store_relaxed_int(&clip_count, (int)count);
    retro_atomic_store_relaxed_int(&clip_gain_milli, (int)(gain * 1000.0f));
    retro_atomic_fetch_add_int(&clip_serial, 1);
-   if (mix_wake)
-      mix_wake(mix_wake_ctx);
 }
 
-/* Takes a newly started clip, and adds what is left of the playing one to the sums. Returns
- * the frames it added. */
-static unsigned pump_clip(unsigned frames)
+/* Takes a newly started clip. */
+static void clip_take(void)
 {
-   unsigned i, n;
    int serial = retro_atomic_load_acquire_int(&clip_serial);
    if (serial != clip_seen)
    {
-      const float* f   = (const float*)retro_atomic_load_relaxed_size(&clip_frames);
-      unsigned count   = (unsigned)retro_atomic_load_relaxed_int(&clip_count);
-      float gain       = retro_atomic_load_relaxed_int(&clip_gain_milli) / 1000.0f;
+      const float* f = (const float*)retro_atomic_load_relaxed_size(&clip_frames);
+      unsigned count = (unsigned)retro_atomic_load_relaxed_int(&clip_count);
+      float gain     = retro_atomic_load_relaxed_int(&clip_gain_milli) / 1000.0f;
       if (retro_atomic_load_acquire_int(&clip_serial) == serial)
       {
          clip_seen      = serial;
@@ -261,6 +301,13 @@ static unsigned pump_clip(unsigned frames)
          clip_play_gain = gain;
       }
    }
+}
+
+/* One process: adds what is left of the playing clip to the sums. Returns the frames. */
+static unsigned pump_clip(unsigned frames)
+{
+   unsigned i, n;
+   clip_take();
    n = clip_left < frames ? clip_left : frames;
    if (!n) /* no clip: there is no pointer to step */
       return 0;
@@ -272,6 +319,28 @@ static unsigned pump_clip(unsigned frames)
    clip_play += n * 2;
    clip_left -= n;
    return n;
+}
+
+void audio_mix_feed_clip(unsigned frames)
+{
+   unsigned i, n;
+   float* dst = NULL;
+   clip_take();
+   if (!clip_left)
+      return;
+   if (!clip_in && !(clip_in = audio_mix_input_open()))
+      return;
+   while (frames && clip_left && (n = audio_mix_input_reserve(clip_in, &dst, frames)) > 0)
+   {
+      if (n > clip_left)
+         n = clip_left;
+      for (i = 0; i < n * 2; i++)
+         dst[i] = clip_play[i] * clip_play_gain;
+      audio_mix_input_commit(clip_in, n);
+      clip_play += n * 2;
+      clip_left -= n;
+      frames -= n;
+   }
 }
 
 /* The one rounding to 16 bits: to the nearest step, halves away from zero, and clamped.
@@ -286,7 +355,8 @@ static int16_t round_s16(float v)
    return (int16_t)(v < 0.0f ? v - 0.5f : v + 0.5f);
 }
 
-/* Every open input's frames, up to @frames, summed into pump_sum. Returns how many. */
+/* Every open input's frames, up to @frames, summed into pump_sum (zeroed for all @frames: an
+ * input with fewer adds silence for the rest). Returns the most any had. */
 static unsigned pump_mix(unsigned frames)
 {
    unsigned i;
@@ -295,12 +365,13 @@ static unsigned pump_mix(unsigned frames)
       frames = PUMP_FRAMES;
    memset(pump_sum, 0, frames * mix_channels * sizeof(pump_sum[0]));
    pump_wide = 0;
-   most = pump_clip(frames);
+   if (own)
+      most = pump_clip(frames);
 
    for (i = 0; i < AUDIO_MIX_INPUTS; i++)
    {
-      struct audio_mix_input* in = &inputs[i];
-      int state                  = retro_atomic_load_acquire_int(&in->state);
+      audio_mix_input_t* in = &shm->inputs[i];
+      int state             = retro_atomic_load_acquire_int(&in->state);
       if (state == INPUT_OPEN)
       {
          unsigned got = pump_add(in, frames);
@@ -310,11 +381,13 @@ static unsigned pump_mix(unsigned frames)
       else if (state == INPUT_CLOSING)
       {
          /* Its source has gone: what it left is dropped, and the input goes back. */
-         retro_spsc_skip(&in->ring.queue, retro_spsc_read_avail(&in->ring.queue));
+         retro_atomic_store_release_int(&in->read, retro_atomic_load_acquire_int(&in->write));
          retro_atomic_store_release_int(&in->state, INPUT_FREE);
       }
    }
-
+   /* Room made: in one process, the sources waiting for it are told here */
+   if (own)
+      retro_eventcount_notify(&room_ec);
    return most;
 }
 

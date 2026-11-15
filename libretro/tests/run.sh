@@ -12,18 +12,14 @@ L=libretro/libretro-common
 COMMON="$L/queues/retro_spsc.c $L/queues/retro_waitable_spsc.c $L/rthreads/retro_eventcount.c
         $L/rthreads/rthreads.c $L/features/features_cpu.c $L/compat/compat_strl.c"
 mkdir -p "$OUT"
-# What the core hands the frontend each run: two frames in hand first, one a run, never short
-# with the emulator's mix up to a frame late, the oldest dropped when they pile up
-$CC -std=c89 -pedantic -O1 -g -Wall -Wdeclaration-after-statement -fsanitize=address,undefined \
-    libretro/tests/audio_pace_test.c libretro/audio_pace.c -o "$OUT/audio_pace_test"
-"$OUT/audio_pace_test"
-# The sound's whole path on threads: a game's port, the frame thread mixing a frame a frame,
-# retro_run at 60 Hz with jitter: every sample once, in order, no silence once primed (three
-# seconds of real time: it runs the frontend's cadence)
+# The sound's whole path on threads: a game's port writing into its input in the shared pool,
+# retro_run mixing exactly a frame of it at 60 Hz with jitter, the frame thread telling the
+# sources there is room: every sample once, in order, from the first run (three seconds of
+# real time: it runs the frontend's cadence)
 for san in address,undefined thread; do
     $CC -std=gnu89 -O1 -g -Wall -Wdeclaration-after-statement -fsanitize=$san -I$L/include \
-        libretro/tests/audio_pipeline_test.c libretro/audio_mix.c libretro/audio_pace.c \
-        $COMMON $L/time/rtime.c -o "$OUT/audio_pipeline_test" -lpthread -lm
+        libretro/tests/audio_pipeline_test.c libretro/audio_mix.c $COMMON $L/time/rtime.c \
+        -o "$OUT/audio_pipeline_test" -lpthread -lm
     "$OUT/audio_pipeline_test"
 done
 # The frame-locked mix: exactly a frame of every source's sound a frame, in order, none
@@ -43,12 +39,6 @@ for san in address,undefined thread; do
     $CC -std=gnu99 -O1 -g -Wall -fno-omit-frame-pointer -fsanitize=$san -I$L/include \
         libretro/tests/audio_mix_wide_test.c libretro/audio_mix.c $COMMON \
         -o "$OUT/$name" -lpthread -lm
-    "$OUT/$name"
-    # Surround's segments between the emulator and the core, on one thread and on two
-    name=audio_wide_test-$(echo $san | tr , -)
-    $CC -std=gnu99 -O1 -g -Wall -fno-omit-frame-pointer -fsanitize=$san -I$L/include \
-        libretro/tests/audio_wide_test.c libretro/audio_wide.c $L/rthreads/rthreads.c \
-        $L/features/features_cpu.c -o "$OUT/$name" -lpthread
     "$OUT/$name"
     name=write_snapshots_test-$(echo $san | tr , -)
     $CC -O1 -g -Wall -fno-omit-frame-pointer -fsanitize=$san -Isrc -I$L/include \

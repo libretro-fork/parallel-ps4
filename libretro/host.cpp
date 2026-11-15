@@ -10,8 +10,9 @@
 // core through the shared memory of shared_state.h:
 //
 //   picture  each finished frame, read back by the renderer (PushFrame)
-//   sound    the sources' inputs of the mix, summed into a ring a frame at a time (FrameThread,
-//   audio_mix.c) pads     the frontend's ports, put on the controllers
+//   sound    the sources' inputs of the mix, in the shared memory, which the core mixes a frame
+//            a retro_run (audio_mix.c, FrameThread)
+//   pads     the frontend's ports, put on the controllers
 //   (PumpInput), and their motors options  the core options, put on top of the
 //   emulator's configuration (ApplyCoreOptions)
 
@@ -157,19 +158,12 @@ void WatchQuit() {
     Common::QuickExit(0);
 }
 
-// One frame of the game's sound, from every source, into the ring the core plays from: each
-// of the frontend's frames is exactly AUDIO_MIX_FRAME_FRAMES (48000 / 60) of it, mixed when
-// the frame ends (MixAudioFrameNow, from the frame thread as it starts the next
-// frame of the game's time). A source short of them is silent for the rest; what sources
-// have beyond them waits for the next frame. Nothing is kept ahead: no target to fill to.
-static audio_wide_writer_t wide_writer{};
-
-static void MixAudioFrameNow();
-
-// Each of the frontend's frames as soon as the core counts it: the frame of the game's time that
-// ended gets its sound (one frame's worth, MixAudioFrameNow), and the next one starts
-// (game_clock_frame). On a thread of its own, which does nothing else, so that neither waits on
-// what the present thread is busy with (a flip, an image to draw into).
+// Each of the frontend's frames as soon as the core counts it (at the end of its retro_run, once
+// it has mixed and handed over that frame's sound, straight from the sources' inputs in the
+// shared memory): the sources waiting for room look again (audio_mix_notify_room), a clip
+// playing gets its next frame (audio_mix_feed_clip), and the next frame of the game's time
+// starts (game_clock_frame). On a thread of its own, which does nothing else, so that none of
+// it waits on what the present thread is busy with (a flip, an image to draw into).
 static void FrameThread(void*) {
     thread_name_set("shadPS4:Frames");
     std::uint32_t ticks =
@@ -188,68 +182,10 @@ static void FrameThread(void*) {
         }
         wakes.vblank.Cancel();
         for (; ticks != now; ++ticks) {
-            MixAudioFrameNow();
+            audio_mix_feed_clip(AUDIO_MIX_FRAME_FRAMES);
             game_clock_frame(Libraries::Kernel::GameClock());
         }
-    }
-}
-
-static void MixFrameWide() {
-    constexpr std::uint32_t frames = AUDIO_MIX_FRAME_FRAMES;
-    unsigned channels = 2;
-    audio_mix_mix(frames, &channels); // the sources' frames are taken whatever follows
-    if (audio_wide_room(shared->audio_wide, &wide_writer, frames) < frames) {
-        return; // the core is not taking them (it is far behind): this frame's are dropped
-    }
-    audio_wide_piece_t pieces[2];
-    unsigned n = 0;
-    audio_wide_plan(&wide_writer, frames, channels, pieces, &n);
-    std::uint32_t first = 0;
-    for (unsigned i = 0; i < n; i++) {
-        if (shared->options.audio_float) {
-            audio_mix_take_f32(shared->audio_wide_f32 + pieces[i].pos, first, pieces[i].frames,
-                               channels);
-        } else {
-            audio_mix_take_s16(shared->audio_wide_s16 + pieces[i].pos, first, pieces[i].frames,
-                               channels);
-        }
-        first += pieces[i].frames;
-    }
-    audio_wide_publish(shared->audio_wide, &wide_writer, pieces, n);
-    const std::uint32_t written =
-        static_cast<std::uint32_t>(retro_atomic_load_relaxed_int(&shared->audio_written));
-    retro_atomic_store_release_int(&shared->audio_written, written + frames);
-}
-
-static void MixFrameStereo() {
-    constexpr std::uint32_t frames = AUDIO_MIX_FRAME_FRAMES;
-    unsigned channels = 2;
-    audio_mix_mix(frames, &channels);
-    const std::uint32_t written =
-        static_cast<std::uint32_t>(retro_atomic_load_relaxed_int(&shared->audio_written));
-    const std::uint32_t read =
-        static_cast<std::uint32_t>(retro_atomic_load_acquire_int(&shared->audio_read));
-    if (written - read > Libretro::AUDIO_RING_FRAMES - frames) {
-        return; // the core is not taking them: this frame's are dropped
-    }
-    // Where the ring wraps, in two
-    const std::uint32_t at = written & (Libretro::AUDIO_RING_FRAMES - 1);
-    const std::uint32_t head = std::min(frames, Libretro::AUDIO_RING_FRAMES - at);
-    if (shared->options.audio_float) {
-        audio_mix_take_f32(shared->audio_f32 + at * 2, 0, head, 2);
-        audio_mix_take_f32(shared->audio_f32, head, frames - head, 2);
-    } else {
-        audio_mix_take_s16(shared->audio + at * 2, 0, head, 2);
-        audio_mix_take_s16(shared->audio, head, frames - head, 2);
-    }
-    retro_atomic_store_release_int(&shared->audio_written, written + frames);
-}
-
-static void MixAudioFrameNow() {
-    if (shared->options.audio_channels == 8) {
-        MixFrameWide();
-    } else {
-        MixFrameStereo();
+        audio_mix_notify_room();
     }
 }
 
@@ -420,9 +356,8 @@ int RunEmulator(const char* argument) {
     }
 
     std::thread(WatchQuit).detach();
-    if (!audio_mix_init_channels(shared->options.audio_channels == 8 ? 8 : 2)) {
-      LOG_CRITICAL(Lib_AudioOut, "No memory for the core's audio mix");
-    }
+    // The mix's inputs, in the shared memory the core made them in
+    audio_mix_attach(&shared->mix, shared->options.audio_channels == 8 ? 8 : 2, 0);
     std::thread(PumpInput).detach();
     sthread_detach(sthread_create(FrameThread, nullptr));
 
