@@ -16,12 +16,6 @@ public:
     virtual void Output(void* ptr) = 0;
 
     virtual void SetVolume(const std::array<int, 8>& ch_volumes) = 0;
-
-    /// The port has written all it has for frame @frame of the game's time: its next buffer
-    /// is due after the frame's end (PaceOutput)
-    virtual void WaitsPast(int frame) {
-        (void)frame;
-    }
 };
 
 class AudioOutBackend {

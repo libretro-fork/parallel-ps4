@@ -125,12 +125,6 @@ public:
         applied = target;
     }
 
-    void WaitsPast(int frame) override {
-        if (input) {
-            audio_mix_input_waits_past(input, frame);
-        }
-    }
-
     void SetVolume(const std::array<int, 8>& ch_volumes) override {
         float max_channel_gain = 0.0f;
         const u32 channels = std::min(num_channels, 8u);

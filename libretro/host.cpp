@@ -168,7 +168,6 @@ static void FrameThread(void*) {
     thread_name_set("shadPS4:Frames");
     std::uint32_t ticks =
         static_cast<std::uint32_t>(retro_atomic_load_acquire_int(&shared->vblank_ticks));
-    std::uint32_t finished = ticks;
     for (;;) {
         const int key = wakes.vblank.Prepare();
         if (retro_atomic_load_acquire_int(&shared->quit) != 0) {
@@ -177,26 +176,16 @@ static void FrameThread(void*) {
         }
         const std::uint32_t now =
             static_cast<std::uint32_t>(retro_atomic_load_acquire_int(&shared->vblank_ticks));
-        const std::uint32_t wanted =
-            static_cast<std::uint32_t>(retro_atomic_load_acquire_int(&shared->sound_wanted));
-        if (now == ticks && (wanted != ticks || finished == ticks)) {
+        if (now == ticks) {
             wakes.vblank.Wait(key);
             continue;
         }
         wakes.vblank.Cancel();
-        if (now != ticks) {
-            for (; ticks != now; ++ticks) {
-                audio_mix_feed_clip(AUDIO_MIX_FRAME_FRAMES);
-                game_clock_frame(Libraries::Kernel::GameClock());
-            }
-            audio_mix_notify_room();
+        for (; ticks != now; ++ticks) {
+            audio_mix_feed_clip(AUDIO_MIX_FRAME_FRAMES);
+            game_clock_frame(Libraries::Kernel::GameClock());
         }
-        // retro_run waits for this frame's sound: the frame is finished, its sleepers woken
-        // at their deadlines whoever is still running
-        if (wanted == ticks && finished != ticks) {
-            finished = ticks;
-            game_clock_finish(Libraries::Kernel::GameClock());
-        }
+        audio_mix_notify_room();
     }
 }
 
@@ -367,13 +356,9 @@ int RunEmulator(const char* argument) {
     }
 
     std::thread(WatchQuit).detach();
-    // The mix's inputs, in the shared memory the core made them in. retro_run waits for the
-    // frame's sound: it is woken by every write into them, and when the frame is done
+    // The mix's inputs, in the shared memory the core made them in
     audio_mix_attach(&shared->mix, shared->options.audio_channels == 8 ? 8 : 2, 0);
-    audio_mix_set_written([](void*) { wakes.audio.Notify(); }, nullptr);
-    game_clock_set_done(
-        Libraries::Kernel::GameClock(), &shared->frame_done, [](void*) { wakes.audio.Notify(); },
-        nullptr);
+
     std::thread(PumpInput).detach();
     sthread_detach(sthread_create(FrameThread, nullptr));
 

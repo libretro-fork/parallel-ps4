@@ -70,14 +70,6 @@ static float pump_sum[PUMP_FRAMES * 8];
 static unsigned mix_channels = 2;
 /* An eight-channel input added frames to the last mix */
 static int pump_wide;
-/* Each input's write count at the mix before the last (audio_mix_frame_ready), and at the last */
-static uint32_t mix_seen_write[AUDIO_MIX_INPUTS];
-static uint32_t mix_last_write[AUDIO_MIX_INPUTS];
-/* Inputs held back from this mix (audio_mix_mix): left as they are */
-static unsigned char pump_hold[AUDIO_MIX_INPUTS];
-/* Told of every commit, in the sources' process (audio_mix_set_written) */
-static void (*written_fn)(void* ctx);
-static void* written_ctx;
 
 static double sinc_kernel(double x, double cutoff)
 {
@@ -177,7 +169,6 @@ audio_mix_input_t* audio_mix_input_open_channels(unsigned channels)
          /* The mix reads it once it sees frames, which the source commits after this, with
           * release */
          retro_atomic_store_relaxed_int(&in->channels, (int)channels);
-         retro_atomic_store_release_int(&in->waits_past, 0);
          return in;
       }
    }
@@ -249,8 +240,6 @@ void audio_mix_input_commit(audio_mix_input_t* in, unsigned frames)
    retro_atomic_store_release_int(&in->write,
                                   (int)((uint32_t)retro_atomic_load_relaxed_int(&in->write) +
                                         frames));
-   if (written_fn)
-      written_fn(written_ctx);
 }
 
 /* Adds what one input has, up to @frames, to the sums. Returns how many frames it had. */
@@ -339,13 +328,8 @@ void audio_mix_feed_clip(unsigned frames)
    clip_take();
    if (!clip_left)
       return;
-   if (!clip_in)
-   {
-      if (!(clip_in = audio_mix_input_open()))
-         return;
-      /* Fed as each frame starts, a frame at a time: nothing to wait for */
-      audio_mix_input_waits_past(clip_in, AUDIO_MIX_NEVER_WAITED);
-   }
+   if (!clip_in && !(clip_in = audio_mix_input_open()))
+      return;
    while (frames && clip_left && (n = audio_mix_input_reserve(clip_in, &dst, frames)) > 0)
    {
       if (n > clip_left)
@@ -388,7 +372,7 @@ static unsigned pump_mix(unsigned frames)
    {
       audio_mix_input_t* in = &shm->inputs[i];
       int state             = retro_atomic_load_acquire_int(&in->state);
-      if (state == INPUT_OPEN && !pump_hold[i])
+      if (state == INPUT_OPEN)
       {
          unsigned got = pump_add(in, frames);
          if (got > most)
@@ -443,27 +427,11 @@ unsigned audio_mix_pump_f32(float* ring, uint32_t ring_mask, uint32_t at, unsign
 
 unsigned audio_mix_mix(unsigned frames, unsigned* channels)
 {
-   unsigned i, most;
-   /* A source still writing (it wrote in the last frame) that has less than the frame is held
-    * back whole, not mixed with silence after it (a gap): it is a source starting, whose
-    * first sound lands mid-frame, or one the frame ended without (retro_run waited as long as
-    * the game ran). It plays from the next frame, unbroken, its sound a frame later at most. */
+   unsigned i;
+   const unsigned most = pump_mix(frames);
    for (i = 0; i < AUDIO_MIX_INPUTS; i++)
    {
       audio_mix_input_t* in = &shm->inputs[i];
-      const unsigned have   = queued_frames(in);
-      pump_hold[i]          = retro_atomic_load_acquire_int(&in->state) == INPUT_OPEN &&
-                     (uint32_t)retro_atomic_load_acquire_int(&in->write) != mix_seen_write[i] &&
-                     have && have < frames;
-   }
-   most = pump_mix(frames);
-   for (i = 0; i < AUDIO_MIX_INPUTS; i++)
-   {
-      audio_mix_input_t* in = &shm->inputs[i];
-      pump_hold[i]          = 0;
-      /* Where each input's source had written to, for audio_mix_frame_ready */
-      mix_seen_write[i] = mix_last_write[i];
-      mix_last_write[i] = (uint32_t)retro_atomic_load_acquire_int(&in->write);
       /* Surround while an eight-channel input is open, with sound this frame or not: the
        * layout does not flip with each frame an input is silent (a pop as the frontend
        * changes it) */
@@ -473,35 +441,6 @@ unsigned audio_mix_mix(unsigned frames, unsigned* channels)
    }
    *channels = pump_wide ? 8 : 2;
    return most;
-}
-
-int audio_mix_frame_ready(unsigned frames, int frame)
-{
-   unsigned i;
-   for (i = 0; i < AUDIO_MIX_INPUTS; i++)
-   {
-      audio_mix_input_t* in = &shm->inputs[i];
-      int waits;
-      if (retro_atomic_load_acquire_int(&in->state) != INPUT_OPEN ||
-          (uint32_t)retro_atomic_load_acquire_int(&in->write) == mix_seen_write[i] ||
-          queued_frames(in) >= frames)
-         continue;
-      waits = retro_atomic_load_acquire_int(&in->waits_past);
-      if (waits != AUDIO_MIX_NEVER_WAITED && waits != frame)
-         return 0;
-   }
-   return 1;
-}
-
-void audio_mix_input_waits_past(audio_mix_input_t* in, int frame)
-{
-   retro_atomic_store_release_int(&in->waits_past, frame);
-}
-
-void audio_mix_set_written(void (*written)(void* ctx), void* ctx)
-{
-   written_ctx = ctx;
-   written_fn  = written;
 }
 
 void audio_mix_take_f32(float* dst, unsigned first, unsigned count, unsigned channels)

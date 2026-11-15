@@ -7,7 +7,6 @@
 #include <fmt/format.h>
 #include "common/enum_names.h"
 
-#include <span>
 #include <retro_atomic.h>
 #include "common/assert.h"
 #include "common/logging/log.h"
@@ -166,22 +165,10 @@ static void SetPortVolume(PortOut& port_ref, s32 flag, s32 vol_value);
 /// deadline): the first buffer, and the first after the game stopped outputting for a while,
 /// go at once, each one after a buffer's time later, counted in whole frames of the port's
 /// rate so the pace does not drift. Among the port's writers.
-static void PaceOutput(PortOut& port, std::span<const std::shared_ptr<PortOut>> also = {}) {
-    game_clock_t* clock = Kernel::GameClock();
-    const u64 due = game_clock_cadence(clock, &port.pace_start, &port.pace_buffers,
+static void PaceOutput(PortOut& port) {
+    const u64 due = game_clock_cadence(Kernel::GameClock(), &port.pace_start, &port.pace_buffers,
                                        port.buffer_frames, port.sample_rate);
     if (due > Kernel::GameNow()) {
-        // Due after the frame's end: all of this frame's sound from it is in, and retro_run
-        // need not wait for more
-        if (due > game_clock_frame_end(clock)) {
-            const int frame = static_cast<int>(game_clock_frames(clock));
-            port.impl->WaitsPast(frame);
-            for (const auto& other : also) {
-                if (other && other.get() != &port) {
-                    other->impl->WaitsPast(frame);
-                }
-            }
-        }
         Kernel::GameSleepUntil(due);
     }
 }
@@ -623,7 +610,7 @@ s32 PS4_SYSV_ABI sceAudioOutOutputs(OrbisAudioOutOutputParam* param, u32 num) {
         if (!port->writers.Run([&] {
                 if (!paced) {
                     paced = true;
-                    PaceOutput(*port, std::span(ports.data(), num));
+                    PaceOutput(*port);
                 }
                 return OutputBuffer(*port, param[i].ptr);
             })) {

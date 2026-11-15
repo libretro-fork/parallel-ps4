@@ -22,7 +22,7 @@
 namespace Libretro {
 
 inline constexpr std::uint32_t SHARED_MAGIC = 0x34505368; // "hSP4"
-inline constexpr std::uint32_t SHARED_VERSION = 28;
+inline constexpr std::uint32_t SHARED_VERSION = 29;
 
 inline constexpr std::uint32_t MAX_WIDTH = 3840;
 inline constexpr std::uint32_t MAX_HEIGHT = 2160;
@@ -159,9 +159,8 @@ struct SharedState {
     /// wake_control: quit, options_serial and frontend_gpu (the core).
     /// wake_input: buttons and axes (the core, when they change).
     /// wake_frame: frame_held (the core), an image no longer being drawn (the emulator).
-    /// wake_audio: frame_done, and every write into the mix's inputs (the emulator), for
-    /// retro_run waiting for the frame's sound.
-    /// wake_vblank: vblank_ticks and sound_wanted (the core).
+    /// wake_audio: not used.
+    /// wake_vblank: vblank_ticks (the core).
     retro_shared_eventcount_t wake_control;
     retro_shared_eventcount_t wake_input;
     retro_shared_eventcount_t wake_frame;
@@ -172,15 +171,6 @@ struct SharedState {
     /// console's vblanks are counted from these (src/common/vblank_clock.h), not from a clock.
     /// Written by the core only; it wraps.
     retro_atomic_int_t vblank_ticks;
-
-    /// The frame of the game's time that is done (common/game_clock.h): its threads are all
-    /// idle, none waiting for a time within it, so it will write no more sound unless
-    /// something wakes it. 0 while a game thread runs. Written by the emulator only.
-    retro_atomic_int_t frame_done;
-
-    /// The frame whose sound retro_run waits for (vblank_ticks then), with wake_vblank: the
-    /// emulator finishes the frame (game_clock_finish). Written by the core only.
-    retro_atomic_int_t sound_wanted;
 
     // Written by the core before the emulator is started.
     char eboot_path[PATH_BYTES]; // UTF-8
