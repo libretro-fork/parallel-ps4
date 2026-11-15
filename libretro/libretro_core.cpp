@@ -45,7 +45,10 @@
 #include <streams/file_stream.h>
 
 #include "common/io_file.h"
+#include "common/memory_patcher.h"
+#include "common/patch_catalog.h"
 #include "common/scm_rev.h"
+#include "core/file_format/psf.h"
 #include "core/libraries/pad/pad.h"
 #include "pad_scale.h"
 #include "touch_track.h"
@@ -229,6 +232,149 @@ std::string OptionValue(const char* key, const char* fallback) {
     return fallback;
 }
 
+std::filesystem::path Utf8Path(const std::string& text);
+
+// ---- The Patch Manager: the game's patches as core options ----
+//
+// Once the game is known, the patches the core carries for its serial (src/resources/patches,
+// common/patch_catalog.h) become core options of their own, an Enabled/Disabled switch each,
+// in a last category, Patch Manager, which a game without any patches does not have. Those
+// switched on go to the emulator when the game starts (SharedOptions::patches_on), which
+// applies them as the executable is loaded: a change applies at the next start of the game.
+
+// Large: kept off the stack. Its strings are what the options point at, kept until the next
+// game's.
+patch_catalog_t patch_catalog;
+std::string patch_serial;
+bool patch_catalog_built = false;
+std::vector<retro_core_option_v2_definition> option_definitions;
+std::vector<retro_core_option_v2_category> option_categories;
+std::vector<std::string> patch_infos;
+// A change of patches during play was told about
+bool patch_change_told = false;
+
+// The game's serial, as the emulator works it out: the title of the content ID in its
+// param.sfo, or the title ID.
+std::string EbootSerial(const std::string& eboot) {
+    PSF psf;
+    if (!psf.Open(Utf8Path(eboot).parent_path() / "sce_sys" / "param.sfo")) {
+        return {};
+    }
+    const auto content_id = psf.GetString("CONTENT_ID");
+    if (content_id && content_id->size() >= 16) {
+        return std::string(content_id->substr(7, 9));
+    }
+    const auto title_id = psf.GetString("TITLE_ID");
+    return title_id ? std::string(*title_id) : std::string{};
+}
+
+// The patch's description: its note's first paragraph, who made it and where it is from, the
+// versions it is for
+std::string PatchInfo(const patch_catalog_entry_t& entry) {
+    std::string info;
+    if (entry.note) {
+        const std::string_view note = entry.note;
+        info = std::string(note.substr(0, note.find("\n\n")));
+        for (char& c : info) {
+            if (c == '\n' || c == '\r' || c == '\t') {
+                c = ' ';
+            }
+        }
+        while (!info.empty() && info.back() == ' ') {
+            info.pop_back();
+        }
+        if (!info.empty() && info.back() != '.' && info.back() != '!' && info.back() != ')') {
+            info += '.';
+        }
+        if (!info.empty()) {
+            info += ' ';
+        }
+    }
+    info += '(';
+    if (entry.author && *entry.author) {
+        info += entry.author;
+        info += ", ";
+    }
+    info += entry.repository;
+    info += ") ";
+    if (entry.versions[0]) {
+        info += std::strchr(entry.versions, ',') ? "For versions " : "For version ";
+        info += entry.versions;
+        info += " of the game. ";
+    }
+    info += "Applies at the next start of the game.";
+    return info;
+}
+
+// The options of libretro_core_options.h, then the game's patches
+void PublishCoreOptions() {
+    option_definitions.clear();
+    option_categories.clear();
+    patch_infos.clear();
+    for (const auto* def = option_defs_us; def->key; def++) {
+        option_definitions.push_back(*def);
+    }
+    for (const auto* cat = option_cats_us; cat->key; cat++) {
+        option_categories.push_back(*cat);
+    }
+    if (patch_catalog.count) {
+        patch_infos.reserve(patch_catalog.count);
+        for (unsigned i = 0; i < patch_catalog.count; i++) {
+            const patch_catalog_entry_t& entry = patch_catalog.entries[i];
+            patch_infos.push_back(PatchInfo(entry));
+            retro_core_option_v2_definition& def = option_definitions.emplace_back();
+            def.key = entry.key;
+            def.desc = entry.name;
+            def.info = patch_infos.back().c_str();
+            def.category_key = "patches";
+            def.values[0] = {"disabled", nullptr};
+            def.values[1] = {"enabled", nullptr};
+            def.default_value = "disabled";
+        }
+        option_categories.push_back(
+            {"patches", "Patch Manager",
+             "The game's patches, from the shadPS4 and GoldHEN patch repositories the core "
+             "carries. A change applies at the next start of the game (Restart)."});
+    }
+    option_definitions.emplace_back();
+    option_categories.emplace_back();
+    options_us.definitions = option_definitions.data();
+    options_us.categories = option_categories.data();
+    bool categories_supported = false;
+    libretro_set_core_options(environ_cb, &categories_supported);
+}
+
+// The game's patches listed for @serial; the options again when they change
+void SetUpPatchManager(const std::string& serial) {
+    if (patch_catalog_built && serial == patch_serial) {
+        return;
+    }
+    patch_catalog_free(&patch_catalog);
+    patch_serial = serial.size() < sizeof(Libretro::SharedOptions::patch_serial) ? serial : "";
+    if (!MemoryPatcher::BuildCatalog(patch_catalog, patch_serial.c_str())) {
+        Log(RETRO_LOG_WARN, "Patch Manager: out of memory reading the patches");
+    }
+    patch_catalog_built = true;
+    patch_change_told = false;
+    if (!patch_serial.empty()) {
+        Log(RETRO_LOG_INFO, "Patch Manager: %u patches for %s", patch_catalog.count,
+            patch_serial.c_str());
+    }
+    PublishCoreOptions();
+}
+
+// The patches switched on, as SharedOptions has them
+void ReadPatchOptions(Libretro::SharedOptions& options) {
+    std::memset(options.patch_serial, 0, sizeof(options.patch_serial));
+    std::memset(options.patches_on, 0, sizeof(options.patches_on));
+    std::memcpy(options.patch_serial, patch_serial.data(), patch_serial.size());
+    for (unsigned i = 0; i < patch_catalog.count; i++) {
+        if (OptionValue(patch_catalog.entries[i].key, "disabled") == "enabled") {
+            options.patches_on[i / 32] |= 1u << (i % 32);
+        }
+    }
+}
+
 void ReadCoreOptions(Libretro::SharedOptions& options) {
     const auto enabled = [](const char* key, const char* fallback) -> uint32_t {
         return OptionValue(key, fallback) == "enabled" ? 1 : 0;
@@ -297,6 +443,7 @@ void ReadCoreOptions(Libretro::SharedOptions& options) {
     options.log_enable = enabled("shadps4_log", "enabled");
     options.log_separate = enabled("shadps4_log_separate", "disabled");
     options.log_sync = enabled("shadps4_log_sync", "enabled");
+    ReadPatchOptions(options);
 }
 
 void Notify(const char* text) {
@@ -1547,11 +1694,14 @@ RETRO_API bool retro_load_game(const struct retro_game_info* game) {
     // A PKG is run from as it is, or installed first and its eboot.bin run (PKG Content).
     std::string update_path;
     std::string addcont_paths;
-    if (IsPkgPath(game->path)) {
+    if (!IsPkgPath(game->path)) {
+        SetUpPatchManager(EbootSerial(game->path));
+    } else {
         std::string title_id;
         if (!FindPkgContent(game->path, user_dir, title_id, update_path, addcont_paths)) {
             return false;
         }
+        SetUpPatchManager(title_id);
         if (OptionValue("shadps4_pkg_content", "run") == "install") {
             // Installed on a thread of its own; retro_run starts the game when it is done,
             // and shows black until then, at the size the game will have.
@@ -1664,6 +1814,13 @@ RETRO_API void retro_run(void) {
         (void)retro_atomic_exchange_int(&live.trophy_seconds, options.trophy_seconds);
         retro_atomic_fetch_add_int(&shared->options_serial, 1);
         wakes.control.Notify();
+        // Patches are applied as the game's executable is loaded: a change waits for a start
+        const bool patches_changed = std::memcmp(options.patches_on, shared->options.patches_on,
+                                                 sizeof(options.patches_on)) != 0;
+        if (patches_changed && !patch_change_told) {
+            Notify("ParaLLEl PS4: the patches apply at the next start of the game (Restart)");
+        }
+        patch_change_told = patches_changed;
     }
 
     if (shared) {

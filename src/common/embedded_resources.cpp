@@ -26,4 +26,15 @@ std::span<const u8> GetEmbeddedResource(std::string_view path) {
     return {};
 }
 
+void ForEachEmbeddedResource(std::string_view prefix,
+                             const std::function<void(std::string_view, std::span<const u8>)>& fn) {
+    for (unsigned long i = 0; i < g_embedded_resource_count; i++) {
+        const EmbeddedResource& resource = g_embedded_resources[i];
+        const std::string_view path = resource.path;
+        if (path.starts_with(prefix)) {
+            fn(path, {resource.data, resource.size});
+        }
+    }
+}
+
 } // namespace Common

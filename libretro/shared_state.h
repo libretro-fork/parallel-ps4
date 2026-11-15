@@ -14,6 +14,7 @@
 #include <retro_atomic.h>
 
 #include "audio_wide.h"
+#include "common/patch_catalog.h"
 
 // The memory the libretro core (libretro_core.cpp, in the frontend's process) shares with the
 // emulator it runs in a process of its own (host.cpp). One block: this header, then three
@@ -21,7 +22,7 @@
 namespace Libretro {
 
 inline constexpr std::uint32_t SHARED_MAGIC = 0x34505368; // "hSP4"
-inline constexpr std::uint32_t SHARED_VERSION = 20;
+inline constexpr std::uint32_t SHARED_VERSION = 21;
 
 inline constexpr std::uint32_t MAX_WIDTH = 3840;
 inline constexpr std::uint32_t MAX_HEIGHT = 2160;
@@ -145,6 +146,11 @@ struct SharedOptions {
     std::uint32_t log_enable;
     std::uint32_t log_separate;
     std::uint32_t log_sync;
+    /// The Patch Manager: the serial the core listed the game's patches for, and those of
+    /// them switched on, by their index in its catalog (common/patch_catalog.h), which the
+    /// emulator builds again for the same serial.
+    char patch_serial[16];
+    std::uint32_t patches_on[PATCH_CATALOG_WORDS];
 };
 
 struct SharedState {

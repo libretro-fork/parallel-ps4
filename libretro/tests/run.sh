@@ -95,6 +95,11 @@ $CC -std=c89 -O1 -g -Wall -Wno-unused-function -fsanitize=address,undefined \
 # The touchpad's fingers into the pad's two slots
 $CC -std=c89 -pedantic -O1 -g -Wall -fsanitize=address,undefined \
     libretro/tests/touch_track_test.c -o "$OUT/touch_track_test"
+# The Patch Manager's catalog: a game's patches from two repositories
+$CC -std=c89 -O1 -g -Wall -Wdeclaration-after-statement -fsanitize=address,undefined \
+    -Isrc -I$L/include libretro/tests/patch_catalog_test.c src/common/patch_catalog.c \
+    $L/formats/xml/rxml.c -o "$OUT/patch_catalog_test"
+"$OUT/patch_catalog_test"
 "$OUT/touch_track_test"
 # The music player's block decoder, on a sine made by ffmpeg in each format it plays (an MP3
 # with its tag frame and one without); skipped with no ffmpeg

@@ -868,6 +868,8 @@ set(COMMON src/common/c_bridge.cpp
            src/common/number_utils.cpp
            src/common/memory_patcher.h
            src/common/memory_patcher.cpp
+           src/common/patch_catalog.c
+           src/common/patch_catalog.h
            src/common/patch_index.c
            src/common/patch_index.h
            src/common/multi_level_page_table.h
@@ -1616,16 +1618,29 @@ set(EMBEDDED_RESOURCES
         src/resources/trophy.wav
         src/resources/amd_rcp_index_table.bin.zstd
         src/resources/amd_rsqrt_index_table.bin.zstd)
+# The patch repositories (src/resources/patches/README.md), shadPS4's first: of a patch both
+# have for the same version, the first one's is applied (src/common/patch_catalog.h)
+foreach (repository IN ITEMS shadPS4 GoldHEN)
+    file(GLOB patch_files RELATIVE ${CMAKE_CURRENT_SOURCE_DIR}
+         CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/src/resources/patches/${repository}/*.xml)
+    list(SORT patch_files)
+    list(APPEND EMBEDDED_RESOURCES ${patch_files})
+endforeach()
 set(EMBEDDED_RESOURCES_SOURCE "${CMAKE_CURRENT_BINARY_DIR}/embedded_resources.c")
+# The paths go in a file, one a line: too many for a Windows command line
+set(EMBEDDED_RESOURCES_LIST "${CMAKE_CURRENT_BINARY_DIR}/embedded_resources.txt")
+list(JOIN EMBEDDED_RESOURCES "\n" embedded_resources_lines)
+file(CONFIGURE OUTPUT "${EMBEDDED_RESOURCES_LIST}" CONTENT "${embedded_resources_lines}\n")
 list(TRANSFORM EMBEDDED_RESOURCES PREPEND "${CMAKE_CURRENT_SOURCE_DIR}/" OUTPUT_VARIABLE EMBEDDED_RESOURCES_FILES)
 add_custom_command(
     OUTPUT "${EMBEDDED_RESOURCES_SOURCE}"
     COMMAND ${CMAKE_COMMAND}
             -DROOT=${CMAKE_CURRENT_SOURCE_DIR}
             -DOUTPUT=${EMBEDDED_RESOURCES_SOURCE}
-            "-DFILES=${EMBEDDED_RESOURCES}"
+            -DFILES_LIST=${EMBEDDED_RESOURCES_LIST}
             -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/EmbedResources.cmake
-    DEPENDS ${EMBEDDED_RESOURCES_FILES} ${CMAKE_CURRENT_SOURCE_DIR}/cmake/EmbedResources.cmake
+    DEPENDS ${EMBEDDED_RESOURCES_FILES} "${EMBEDDED_RESOURCES_LIST}"
+            ${CMAKE_CURRENT_SOURCE_DIR}/cmake/EmbedResources.cmake
     VERBATIM)
 target_sources(shadps4 PRIVATE "${EMBEDDED_RESOURCES_SOURCE}")
 

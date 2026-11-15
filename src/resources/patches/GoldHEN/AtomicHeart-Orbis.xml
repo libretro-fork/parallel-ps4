@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Patch>
+    <TitleID>
+        <ID>CUSA37321</ID>
+    </TitleID>	
+    <Metadata Title="Atomic Heart"
+              Name="60 fps"
+              Author="Joey85"
+              AppVer="01.31"
+              AppElf="eboot.bin">
+        <PatchList>
+            <Line Type="bytes" Address="0x020c2cc6" Value="31 c0"/>
+            <Line Type="bytes" Address="0x020c2e40" Value="31 c0"/>
+        </PatchList>
+    </Metadata>
+</Patch>

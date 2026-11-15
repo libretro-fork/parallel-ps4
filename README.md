@@ -70,6 +70,12 @@ Can't Load libSceLibcInternal.sprx switching to HLE
 No dumped system fonts, expect missing text or instability
 ```
 
+## Patches
+
+The core carries the game patches of shadPS4's and GoldHEN's patch repositories (framerate unlocks, intro skips, resolution and performance patches). Once a game is loaded, the core options have a last category, **Patch Manager**, listing that game's patches, each one on or off; it is not there for a game without any. A patch is applied as the game's executable is loaded, so a change takes effect at the next start of the game: Restart from the Quick Menu. A patch is made for one version of a game (its description says which) and is applied only to that version. RetroArch's game options (Quick Menu > Core Options > Manage Core Options > Save Game Options) keep the choice for that game alone.
+
+Patch files in `system/shadPS4/patches/` are still read as standalone shadPS4 reads them, those with `isEnabled="true"` applied as well.
+
 ## Files
 
 Everything the core keeps is in `system/shadPS4/`, laid out as standalone shadPS4's user folder, so what is set up there can be copied over: settings, save data, the shader cache, the folders for dumped system modules and fonts, and the emulator's logs in `log/`: `shadps4.log` covers the start, and from the point a game is loaded the log is `shad_log.txt` (or a file named after the game's ID with the core option Separate Log Files).

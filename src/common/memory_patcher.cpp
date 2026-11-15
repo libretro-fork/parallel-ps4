@@ -3,9 +3,12 @@
 
 #include <algorithm>
 #include <codecvt>
+#include <cstdio>
+#include <cstring>
 #include <sstream>
 #include <string>
 #include "common/elf_info.h"
+#include "common/embedded_resources.h"
 #include "common/io_file.h"
 #include "common/logging/log.h"
 #include "common/patch_index.h"
@@ -24,6 +27,9 @@ std::string g_game_serial;
 std::string patch_file;
 bool patches_applied = false;
 std::vector<patchInfo> pending_patches;
+// The Patch Manager's choice (SetCatalogPatches)
+static char catalog_serial[16];
+static uint32_t catalog_on[PATCH_CATALOG_WORDS];
 
 std::string toHex(u64 value, size_t byteSize) {
     std::stringstream ss;
@@ -129,6 +135,80 @@ std::string convertValueToHex(const std::string type, const std::string valueStr
 
 void ApplyPendingPatches();
 
+// One patch (a <Metadata>) of a patch file, for the executable and the version of the game
+// it names; a mask is looked for whatever the version.
+static void ApplyMetadata(const Common::Xml::Node& node, const std::string& app_version) {
+    std::string currentPatchName = node.attribute("Name").value();
+    std::string metadataAppVer = node.attribute("AppVer").value();
+    std::string metadataAppElf = node.attribute("AppElf").value();
+    bool versionMatches = metadataAppVer == app_version;
+
+    if (metadataAppElf != g_eboot_name)
+        return;
+
+    auto patchList = node.first_child();
+    for (const Common::Xml::Node patchLine : patchList.children()) {
+        const auto* patchLineIt = &patchLine;
+
+        std::string type = patchLineIt->attribute("Type").value();
+        if (!versionMatches && type != "mask" && type != "mask_jump32")
+            continue;
+
+        std::string address = patchLineIt->attribute("Address").value();
+        std::string patchValue = patchLineIt->attribute("Value").value();
+        std::string maskOffsetStr = patchLineIt->attribute("Offset").value();
+        std::string targetStr = "";
+        std::string sizeStr = "";
+        if (type == "mask_jump32") {
+            targetStr = patchLineIt->attribute("Target").value();
+            sizeStr = patchLineIt->attribute("Size").value();
+        } else {
+            try {
+                patchValue = convertValueToHex(type, patchValue);
+            } catch (std::exception& e) {
+                ASSERT_MSG(false,
+                           "Failed to parse patch value \"{}\" for \"{}\" in "
+                           "patch \"{}\", error: \"{}\"\n"
+                           "If the patch was working on earlier versions, then it "
+                           "was using a format that shadPS4 handled incorrectly, "
+                           "and the patch should instead be fixed.",
+                           patchValue, address, currentPatchName, e.what());
+            }
+        }
+
+        bool littleEndian = false;
+        if (type == "bytes16" || type == "bytes32" || type == "bytes64") {
+            littleEndian = true;
+        }
+
+        MemoryPatcher::PatchMask patchMask = MemoryPatcher::PatchMask::None;
+        int maskOffsetValue = 0;
+
+        if (type == "mask")
+            patchMask = MemoryPatcher::PatchMask::Mask;
+
+        if (type == "mask_jump32")
+            patchMask = MemoryPatcher::PatchMask::Mask_Jump32;
+
+        if ((type == "mask" || type == "mask_jump32") && !maskOffsetStr.empty()) {
+            maskOffsetValue = std::stoi(maskOffsetStr, 0, 10);
+        }
+
+        const patchInfo patch = {
+            .gameSerial = "*",
+            .modNameStr = currentPatchName,
+            .offsetStr = address,
+            .valueStr = patchValue,
+            .targetStr = targetStr,
+            .sizeStr = sizeStr,
+            .littleEndian = littleEndian,
+            .patchMask = patchMask,
+            .maskOffset = maskOffsetValue,
+        };
+        MemoryPatcher::PatchMemory(patch);
+    }
+}
+
 void ApplyPatchesFromXML(std::filesystem::path path) {
     Common::Xml::Document doc;
     const bool result = doc.Load(path);
@@ -139,80 +219,9 @@ void ApplyPatchesFromXML(std::filesystem::path path) {
     if (result) {
         auto patchXML = doc.child("Patch");
         for (const Common::Xml::Node node : patchXML.children()) {
-            const auto* it = &node;
-
-            if (std::string(it->name()) == "Metadata") {
-                if (std::string(it->attribute("isEnabled").value()) == "true") {
-                    std::string currentPatchName = it->attribute("Name").value();
-                    std::string metadataAppVer = it->attribute("AppVer").value();
-                    std::string metadataAppElf = it->attribute("AppElf").value();
-                    bool versionMatches = metadataAppVer == app_version;
-
-                    if (metadataAppElf != g_eboot_name)
-                        continue;
-
-                    auto patchList = it->first_child();
-                    for (const Common::Xml::Node patchLine : patchList.children()) {
-                        const auto* patchLineIt = &patchLine;
-
-                        std::string type = patchLineIt->attribute("Type").value();
-                        if (!versionMatches && type != "mask" && type != "mask_jump32")
-                            continue;
-
-                        std::string address = patchLineIt->attribute("Address").value();
-                        std::string patchValue = patchLineIt->attribute("Value").value();
-                        std::string maskOffsetStr = patchLineIt->attribute("Offset").value();
-                        std::string targetStr = "";
-                        std::string sizeStr = "";
-                        if (type == "mask_jump32") {
-                            targetStr = patchLineIt->attribute("Target").value();
-                            sizeStr = patchLineIt->attribute("Size").value();
-                        } else {
-                            try {
-                                patchValue = convertValueToHex(type, patchValue);
-                            } catch (std::exception& e) {
-                                ASSERT_MSG(false,
-                                           "Failed to parse patch value \"{}\" for \"{}\" in "
-                                           "patch \"{}\", error: \"{}\"\n"
-                                           "If the patch was working on earlier versions, then it "
-                                           "was using a format that shadPS4 handled incorrectly, "
-                                           "and the patch should instead be fixed.",
-                                           patchValue, address, currentPatchName, e.what());
-                            }
-                        }
-
-                        bool littleEndian = false;
-                        if (type == "bytes16" || type == "bytes32" || type == "bytes64") {
-                            littleEndian = true;
-                        }
-
-                        MemoryPatcher::PatchMask patchMask = MemoryPatcher::PatchMask::None;
-                        int maskOffsetValue = 0;
-
-                        if (type == "mask")
-                            patchMask = MemoryPatcher::PatchMask::Mask;
-
-                        if (type == "mask_jump32")
-                            patchMask = MemoryPatcher::PatchMask::Mask_Jump32;
-
-                        if ((type == "mask" || type == "mask_jump32") && !maskOffsetStr.empty()) {
-                            maskOffsetValue = std::stoi(maskOffsetStr, 0, 10);
-                        }
-
-                        const patchInfo patch = {
-                            .gameSerial = "*",
-                            .modNameStr = currentPatchName,
-                            .offsetStr = address,
-                            .valueStr = patchValue,
-                            .targetStr = targetStr,
-                            .sizeStr = sizeStr,
-                            .littleEndian = littleEndian,
-                            .patchMask = patchMask,
-                            .maskOffset = maskOffsetValue,
-                        };
-                        MemoryPatcher::PatchMemory(patch);
-                    }
-                }
+            if (node.name() == "Metadata" &&
+                std::string(node.attribute("isEnabled").value()) == "true") {
+                ApplyMetadata(node, std::string(app_version));
             }
         }
     } else {
@@ -220,7 +229,62 @@ void ApplyPatchesFromXML(std::filesystem::path path) {
     }
 }
 
+bool BuildCatalog(patch_catalog_t& cat, const char* serial) {
+    static constexpr std::string_view prefix = "src/resources/patches/";
+    std::vector<patch_catalog_source_t> sources;
+    Common::ForEachEmbeddedResource(prefix, [&](std::string_view path, std::span<const u8> data) {
+        // The repository is the folder the file is in, named by a string that lasts
+        const std::string_view rest = path.substr(prefix.size());
+        const auto slash = rest.find('/');
+        if (slash == std::string_view::npos) {
+            return;
+        }
+        static constexpr std::string_view repositories[] = {"shadPS4", "GoldHEN"};
+        for (const std::string_view repository : repositories) {
+            if (rest.substr(0, slash) == repository) {
+                sources.push_back({repository.data(), data.data(), data.size()});
+                return;
+            }
+        }
+    });
+    return patch_catalog_build(&cat, sources.data(), sources.size(), serial) != 0;
+}
+
+void SetCatalogPatches(const char* serial, const uint32_t* on) {
+    std::snprintf(catalog_serial, sizeof(catalog_serial), "%s", serial);
+    std::memcpy(catalog_on, on, sizeof(catalog_on));
+}
+
+// The patches switched on in the Patch Manager, from the repositories the core carries
+static void ApplyCatalogPatches() {
+    bool any = false;
+    for (const uint32_t word : catalog_on) {
+        any = any || word != 0;
+    }
+    if (!any || !catalog_serial[0]) {
+        return;
+    }
+    auto* param_sfo = Common::Singleton<PSF>::Instance();
+    const std::string app_version(param_sfo->GetString("APP_VER").value_or("Unknown version"));
+    // Large: kept off the stack
+    static patch_catalog_t cat;
+    if (!BuildCatalog(cat, catalog_serial)) {
+        LOG_ERROR(Loader, "Out of memory reading the patches for {}", catalog_serial);
+    }
+    for (unsigned i = 0; i < cat.metadata_count; i++) {
+        const int entry = cat.metadata[i].entry;
+        if (entry < 0 || (catalog_on[entry / 32] & (1u << (entry % 32))) == 0) {
+            continue;
+        }
+        LOG_INFO(Loader, "Patch Manager: {} ({})", cat.entries[entry].name,
+                 cat.entries[entry].repository);
+        ApplyMetadata(Common::Xml::Node(cat.metadata[i].node), app_version);
+    }
+    patch_catalog_free(&cat);
+}
+
 void OnGameLoaded() {
+    ApplyCatalogPatches();
     std::filesystem::path patch_dir = Common::FS::GetUserPath(Common::FS::PathType::PatchesDir);
     if (!patch_file.empty()) {
 

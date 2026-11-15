@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Patch>
+    <TitleID>
+        <ID>CUSA03980</ID>
+    </TitleID>
+    <Metadata Title="Bioshock Infinite: The Complete Edition"
+              Name="4K Resolution (PS4 Pro mode / PS5)"
+              Note="For PS5 (PS4 backward compatibility) with a 4K display: render resolution in PS4 Pro mode 2560x1440 -> 3840x2160."
+              Author=""
+              PatchVer="1.1"
+              AppVer="01.02"
+              AppElf="eboot.bin">
+        <PatchList>
+            <Line Type="bytes32" Address="0x00b92d15" Value="0x00000f00"/>
+            <Line Type="bytes32" Address="0x00b92d1b" Value="0x00000870"/>
+            <Line Type="bytes32" Address="0x00b92d89" Value="0x00000f00"/>
+            <Line Type="bytes32" Address="0x00b92d8f" Value="0x00000870"/>
+        </PatchList>
+    </Metadata>
+</Patch>

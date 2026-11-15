@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Patch>
+    <TitleID>
+        <ID>CUSA07202</ID>
+    </TitleID>
+    <Metadata Title="ACE COMBAT 7: SKIES UNKNOWN"
+              Name="4K Output (native 2160p render)"
+              Note="For PS5 (PS4 backward compatibility) with a 4K display. Allocates a 3840x2160 back buffer in PS4 Pro mode (r.PS4Allow4kOutput); the game keeps its screen percentage (100%: native 4K)."
+              Author=""
+              PatchVer="1.1"
+              AppVer="02.20"
+              AppElf="eboot.bin">
+        <PatchList>
+            <Line Type="bytes" Address="0x021677e0" Value="9090"/>
+            <Line Type="bytes" Address="0x0216799e" Value="9090"/>
+        </PatchList>
+    </Metadata>
+</Patch>

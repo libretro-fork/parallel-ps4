@@ -31,6 +31,7 @@
 #include "audio_mix.h"
 #include "common/key_manager.h"
 #include "common/logging/log.h"
+#include "common/memory_patcher.h"
 #include "common/path_util.h"
 #include "common/quick_exit.h"
 #include "common/singleton.h"
@@ -684,6 +685,10 @@ void ApplyCoreOptions() {
     emu_settings_set_log_enable(options.log_enable != 0, false);
     emu_settings_set_log_separate(options.log_separate != 0, false);
     emu_settings_set_log_sync(options.log_sync != 0, false);
+    char serial[sizeof(options.patch_serial)];
+    std::memcpy(serial, options.patch_serial, sizeof(serial));
+    serial[sizeof(serial) - 1] = '\0';
+    MemoryPatcher::SetCatalogPatches(serial, options.patches_on);
 }
 
 void SetRumble(std::uint32_t pad, std::uint8_t small_motor, std::uint8_t large_motor) {

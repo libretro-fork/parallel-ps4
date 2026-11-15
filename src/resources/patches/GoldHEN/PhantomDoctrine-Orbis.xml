@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Patch>
+    <TitleID>
+        <ID>CUSA11649</ID>
+    </TitleID>
+    <Metadata Title="Phantom Doctrine"
+              Name="120fps"
+			  Note="Also activate VideoOut for 120Hz in the patch manager settings"
+              Author="Joey85"
+              PatchVer="1.0"
+              AppVer="01.03"
+              AppElf="eboot.bin">
+        <PatchList>
+            <Line Type="bytes" Address="0x0043946f" Value="31 db"/>
+			<Line Type="bytes" Address="0x00439796" Value="31 db"/>
+			<Line Type="bytes" Address="0x00439c7b" Value="45 31 f6"/>
+			<Line Type="bytes" Address="0x0043a7ad" Value="31 db"/>
+			<Line Type="bytes" Address="0x02e8ee64" Value="eb 12"/>
+  			<Line Type="bytes" Address="0x02e8eeb1" Value="48 90"/>
+        </PatchList>
+    </Metadata>
+</Patch>

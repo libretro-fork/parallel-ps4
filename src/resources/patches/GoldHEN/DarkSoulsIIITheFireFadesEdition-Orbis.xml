@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Patch>
+    <TitleID>
+        <ID>CUSA08155</ID>
+        <ID>CUSA07439</ID>
+    </TitleID>
+    <Metadata Title="Dark Souls III: The Fire Fades Edition"
+              Name="60 FPS Unlock"
+              Note="Only useful for base console."
+              Author="illusion"
+              PatchVer="1.0"
+              AppVer="01.03"
+              AppElf="eboot.bin">
+        <PatchList>
+            <Line Type="bytes" Address="0x01c0405d" Value="eb0e"/>
+            <Line Type="bytes" Address="0x01c041d6" Value="eb0e"/>
+        </PatchList>
+    </Metadata>
+    <Metadata Title="Dark Souls III: The Fire Fades Edition"
+              Name="30 FPS Fix (Proper Frame-Pacing)"
+              Note="Caps framerate to 30 with proper frame pacing."
+              Author="illusion"
+              PatchVer="1.0"
+              AppVer="01.03"
+              AppElf="eboot.bin">
+        <PatchList>
+            <Line Type="bytes" Address="0x01c041d6" Value="eb0e"/>
+            <Line Type="bytes" Address="0x025140c3" Value="be01000000eb03"/>
+        </PatchList>
+    </Metadata>
+    <Metadata Title="Dark Souls III"
+              Name="Debug Menu (READ NOTES)"
+              Note="Left touchpad to open.\nThis patch requires files that are available on Nexus Mods, search for:\nnexusmods Dark Souls III Debug Menu PS4"
+              Author="DanielSvoboda"
+              PatchVer="1.0"
+              AppVer="01.03"
+              AppElf="eboot.bin">
+        <PatchList>
+            <Line Type="bytes" Address="0x1C01BD7" Value="01"/>
+            <Line Type="bytes" Address="0x86DFEA" Value="84"/>
+            <Line Type="bytes" Address="0x13871B4" Value="E8676C4EFF"/>
+            <Line Type="bytes" Address="0x86DE20" Value="4885F6740AE8A67AC501C34883C408E9C493B100"/>
+            <Line Type="bytes" Address="0x86DF6F" Value="B8362E3D04C3"/>
+            <Line Type="bytes" Address="0x43D2E36" Value="E88DB60400000000000000000000000000000000000000001200000000000000"/>
+            <Line Type="bytes" Address="0x86DC52" Value="E879FEFFFF"/>
+            <Line Type="bytes" Address="0x86DAD0" Value="4883EC48E877E16302488D7C2400488D354F030000488B9390000000E8FF4F0C004889442420488D7C2410488D357C030000488B9390000000E8E24F0C00488944242848837C242000742448837C242800741C4889DF488B742420488B542408488B4C24284C8B442418E801E76302E8100400004883C448C3"/>
+            <Line Type="bytes" Address="0x86DF54" Value="574889DF31F6488D1567FFFFFF488D0DA6FFFFFFE8830000005FC3"/>
+            <Line Type="bytes" Address="0x86DE34" Value="2F0064006100740061002F006400730033002F006400650062007500670066006F006E0074005F00760073002E00760070006F000000"/>
+            <Line Type="bytes" Address="0x86DE7E" Value="2F0064006100740061002F006400730033002F006400650062007500670066006F006E0074005F00700073002E00700070006F000000"/>
+            <Line Type="bytes" Address="0x86DEC8" Value="2F0064006100740061002F006400730033002F0064006200670066006F006E0074003100340068002E00630063006D000000"/>
+            <Line Type="bytes" Address="0x86DF0E" Value="2F0064006100740061002F006400730033002F0064006200670066006F006E0074003100340068002E007400700066000000"/>
+        </PatchList>
+    </Metadata>
+</Patch>

@@ -54,6 +54,10 @@ EMBEDDED_RESOURCES := $(addprefix src/resources/,big_picture/controller.png \
 	big_picture/profiles.png big_picture/settings.png bronze.png gold.png platinum.png \
 	shadps4.png silver.png trophy.wav amd_rcp_index_table.bin.zstd \
 	amd_rsqrt_index_table.bin.zstd)
+# The patch repositories (src/resources/patches/README.md), shadPS4's first: of a patch both
+# have for the same version, the first one's is applied (src/common/patch_catalog.h)
+EMBEDDED_RESOURCES += $(sort $(wildcard src/resources/patches/shadPS4/*.xml)) \
+	$(sort $(wildcard src/resources/patches/GoldHEN/*.xml))
 EMBEDDED_RESOURCES_C := $(GEN_DIR)/embedded_resources.c
 $(EMBEDDED_RESOURCES_C): $(EMBEDDED_RESOURCES) libretro/embed.sh
 	@mkdir -p $(@D)
@@ -305,7 +309,7 @@ CORE_SOURCES_CXX += $(addprefix src/video_core/texture_cache/,blit_helper.cpp \
 
 CORE_SOURCES_C :=
 CORE_SOURCES_C += $(addprefix src/common/,audio_stream.c enum_names.c json_util.c key_manager.c \
-	patch_index.c ptr_table.c u64_map.c)
+	patch_catalog.c patch_index.c ptr_table.c u64_map.c)
 CORE_SOURCES_C += $(addprefix src/core/,emulator_settings.c user_manager.c)
 CORE_SOURCES_C += $(addprefix src/core/libraries/network/,host_override.c)
 CORE_SOURCES_C += $(addprefix src/core/libraries/ngs2/,ngs2_core.c ngs2_util.c)
