@@ -23,6 +23,9 @@
  * once and in order: nothing padded, nothing late, nothing dropped, and no latency but the
  * frame's own. The stopped engine: its sound to the end (its last, less than a frame, held back
  * whole while it was still writing, then played), then silence, and no wait that does not end.
+ * The woken thread that never runs and the one blocked untracked: the frame is never done, and
+ * the woken one's wake is in flight for ever; retro_run's wait ends all the same (the port
+ * waits past the frame, the frame is finished regardless of the wake).
  * FMOD's: no slot output before its mixer filled it (built with MODEL_UNPACED, Output as fast
  * as the queue has room, as before: it fails). */
 
@@ -58,6 +61,7 @@ enum {
     CASE_SPINNER,
     CASE_STOPS,
     CASE_FMOD,
+    CASE_SUSPENDED,
     CASE_COUNT
 };
 static const char* const case_names[CASE_COUNT] = {
@@ -67,7 +71,8 @@ static const char* const case_names[CASE_COUNT] = {
     "a render thread busy 15 ms a frame",
     "a thread spinning without a yield",
     "an engine that stops",
-    "FMOD: a mixer two 256-frame slots ahead, an output thread without a wait for it"};
+    "FMOD: a mixer two 256-frame slots ahead, an output thread without a wait for it",
+    "a relative sleeper, a woken thread that never runs, a thread blocked untracked for ever"};
 static int which;
 
 static int stopping(void* ctx) {
@@ -78,6 +83,14 @@ static int stopping(void* ctx) {
 static int port_ready(void* ctx) {
     (void)ctx;
     return audio_mix_input_ready(port, BUFFER, FRAME) || retro_atomic_load_acquire_int(&stop);
+}
+
+/* A port's writer sleeps to its next buffer (audio_out's PaceOutput): one due after the
+ * frame's end has written all it has for the frame */
+static void port_sleep(uint64_t due) {
+    if (due > game_clock_frame_end(&clk))
+        audio_mix_input_waits_past(port, (int)game_clock_frames(&clk));
+    game_clock_wait(&clk, &sleep_ec, due, stopping, NULL, 1);
 }
 
 /* The count in two 14-bit halves, one a channel, each well inside 16 bits */
@@ -149,7 +162,7 @@ static void fmod_output_thread(void* data) {
         /* sceAudioOutOutput's pace (audioout.cpp, PaceOutput) */
         const uint64_t due = game_clock_cadence(&clk, &start, &count, BUFFER, 48000);
         if (due > game_clock_now(&clk))
-            game_clock_wait(&clk, &sleep_ec, due, stopping, NULL, 1);
+            port_sleep(due);
 #else
         (void)start;
         (void)count;
@@ -189,7 +202,8 @@ static void lock_give(void) {
 static void engine_thread(void* data) {
     unsigned count = 0, buffers = 0;
     uint64_t deadline = 0;
-    const int relative = which == CASE_YIELDER || which == CASE_LOCK_WAITER;
+    const int relative =
+        which == CASE_YIELDER || which == CASE_LOCK_WAITER || which == CASE_SUSPENDED;
     (void)data;
     while (!retro_atomic_load_acquire_int(&stop)) {
         /* Rendered, then out through the port */
@@ -206,7 +220,7 @@ static void engine_thread(void* data) {
         if (which == CASE_LOCK_WAITER)
             lock_take();
         deadline = relative ? game_clock_now(&clk) + BUFFER_NS : deadline + BUFFER_NS;
-        game_clock_wait(&clk, &sleep_ec, deadline, stopping, NULL, 1);
+        port_sleep(deadline);
         if (which == CASE_LOCK_WAITER)
             lock_give();
     }
@@ -261,6 +275,28 @@ static void spinner_thread(void* data) {
     game_clock_idle(&clk);
 }
 
+/* Parked, then woken, and never runs (suspended): its wake stays in flight */
+static retro_atomic_int_t suspended_word;
+static void suspended_thread(void* data) {
+    const int slot = game_clock_park(&clk, &suspended_word, 0);
+    (void)data;
+    game_clock_idle(&clk);
+    retro_atomic_fetch_add_int(&suspended_word, 1);
+    while (!retro_atomic_load_acquire_int(&stop))
+        retro_sleep_us(1000);
+    game_clock_busy(&clk);
+    game_clock_unpark(&clk, slot);
+    game_clock_idle(&clk);
+}
+
+/* Blocked in a wait nobody tracks (a socket's), counted running for ever */
+static void blocked_thread(void* data) {
+    (void)data;
+    while (!retro_atomic_load_acquire_int(&stop))
+        retro_sleep_us(1000);
+    game_clock_idle(&clk);
+}
+
 /* libretro/host.cpp's FrameThread */
 static void frame_thread(void* data) {
     int seen = 0, finished = 0;
@@ -301,7 +337,7 @@ static void wait_frame_sound(void) {
     int asked = 0;
     for (;;) {
         const int key = retro_eventcount_prepare_wait(&audio_ec);
-        if (audio_mix_frame_ready(FRAME) ||
+        if (audio_mix_frame_ready(FRAME, retro_atomic_load_relaxed_int(&ticks)) ||
             retro_atomic_load_acquire_int(&frame_done) == retro_atomic_load_relaxed_int(&ticks)) {
             retro_eventcount_cancel_wait(&audio_ec);
             return;
@@ -319,7 +355,7 @@ static int16_t out[FRAME * 2];
 
 /* @return nonzero if the case failed */
 static int run_case(int c) {
-    sthread_t* threads[5];
+    sthread_t* threads[8];
     unsigned n = 0, i, run, expect = 0, bad = 0, padded = 0, first = 0, sent = 0;
     int started = 0;
 
@@ -354,6 +390,13 @@ static int run_case(int c) {
                                       : c == CASE_LOCK_WAITER ? lock_waiter_thread
                                                               : spinner_thread,
                                       NULL);
+    }
+    if (c == CASE_SUSPENDED) {
+        retro_atomic_int_init(&suspended_word, 0);
+        game_clock_busy(&clk);
+        threads[n++] = sthread_create(suspended_thread, NULL);
+        game_clock_busy(&clk);
+        threads[n++] = sthread_create(blocked_thread, NULL);
     }
     threads[n++] = sthread_create(frame_thread, NULL);
     retro_sleep_us(2000);

@@ -1186,7 +1186,8 @@ static void WaitFrameSound() {
     bool asked = false;
     for (;;) {
         const int key = wakes.audio.Prepare();
-        if (audio_mix_frame_ready(kAudioFrames) ||
+        if (audio_mix_frame_ready(kAudioFrames,
+                                  retro_atomic_load_relaxed_int(&shared->vblank_ticks)) ||
             retro_atomic_load_acquire_int(&shared->frame_done) ==
                 retro_atomic_load_relaxed_int(&shared->vblank_ticks) ||
             retro_atomic_load_acquire_int(&emulator_gone) != 0) {

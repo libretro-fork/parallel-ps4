@@ -177,6 +177,7 @@ audio_mix_input_t* audio_mix_input_open_channels(unsigned channels)
          /* The mix reads it once it sees frames, which the source commits after this, with
           * release */
          retro_atomic_store_relaxed_int(&in->channels, (int)channels);
+         retro_atomic_store_release_int(&in->waits_past, 0);
          return in;
       }
    }
@@ -338,8 +339,13 @@ void audio_mix_feed_clip(unsigned frames)
    clip_take();
    if (!clip_left)
       return;
-   if (!clip_in && !(clip_in = audio_mix_input_open()))
-      return;
+   if (!clip_in)
+   {
+      if (!(clip_in = audio_mix_input_open()))
+         return;
+      /* Fed as each frame starts, a frame at a time: nothing to wait for */
+      audio_mix_input_waits_past(clip_in, AUDIO_MIX_NEVER_WAITED);
+   }
    while (frames && clip_left && (n = audio_mix_input_reserve(clip_in, &dst, frames)) > 0)
    {
       if (n > clip_left)
@@ -469,18 +475,27 @@ unsigned audio_mix_mix(unsigned frames, unsigned* channels)
    return most;
 }
 
-int audio_mix_frame_ready(unsigned frames)
+int audio_mix_frame_ready(unsigned frames, int frame)
 {
    unsigned i;
    for (i = 0; i < AUDIO_MIX_INPUTS; i++)
    {
       audio_mix_input_t* in = &shm->inputs[i];
-      if (retro_atomic_load_acquire_int(&in->state) == INPUT_OPEN &&
-          (uint32_t)retro_atomic_load_acquire_int(&in->write) != mix_seen_write[i] &&
-          queued_frames(in) < frames)
+      int waits;
+      if (retro_atomic_load_acquire_int(&in->state) != INPUT_OPEN ||
+          (uint32_t)retro_atomic_load_acquire_int(&in->write) == mix_seen_write[i] ||
+          queued_frames(in) >= frames)
+         continue;
+      waits = retro_atomic_load_acquire_int(&in->waits_past);
+      if (waits != AUDIO_MIX_NEVER_WAITED && waits != frame)
          return 0;
    }
    return 1;
+}
+
+void audio_mix_input_waits_past(audio_mix_input_t* in, int frame)
+{
+   retro_atomic_store_release_int(&in->waits_past, frame);
 }
 
 void audio_mix_set_written(void (*written)(void* ctx), void* ctx)

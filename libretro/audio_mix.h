@@ -44,8 +44,13 @@ typedef struct audio_mix_input
    retro_atomic_int_t channels;
    retro_atomic_int_t write;
    retro_atomic_int_t read;
+   /* The frame of the game's time its source waits past, having written all of it
+    * (audio_mix_input_waits_past); AUDIO_MIX_NEVER_WAITED: a source the mix never waits for */
+   retro_atomic_int_t waits_past;
    float frames[AUDIO_MIX_INPUT_FRAMES * 8];
 } audio_mix_input_t;
+
+#define AUDIO_MIX_NEVER_WAITED (-1)
 
 /* The inputs, all of them: where the core's shared state keeps them */
 typedef struct audio_mix_shared
@@ -120,11 +125,17 @@ unsigned audio_mix_pump_f32(float* ring, uint32_t ring_mask, uint32_t at, unsign
  * 16 bits, rounded to the nearest step and clamped. Mixing thread only. */
 unsigned audio_mix_mix(unsigned frames, unsigned* channels);
 
-/* Mixing thread: whether the frame's sound is in, @frames of every input whose source has
+/* Mixing thread: whether frame @frame's sound is in, @frames of every input whose source has
  * written since the audio_mix_mix before the last: one that wrote in the last frame is waited
- * for, even if its next writes wait on the game's time. An input not written to for a whole
- * frame (stopped, or not started) is not. */
-int audio_mix_frame_ready(unsigned frames);
+ * for, even if its next writes wait on the game's time. Not waited for: an input not written to
+ * for a whole frame (stopped, or not started); one whose source waits past the frame, having
+ * written all it has for it (audio_mix_input_waits_past); one never waited for. */
+int audio_mix_frame_ready(unsigned frames, int frame);
+
+/* The source: it has written all it has for frame @frame of the game's time and waits past
+ * it (a port sleeping to a buffer due after the frame's end), or AUDIO_MIX_NEVER_WAITED: a
+ * source the mix does not wait for (one not paced by the game's time) */
+void audio_mix_input_waits_past(audio_mix_input_t* in, int frame);
 
 /* In the sources' process: @written(@ctx) is called after every commit (to wake a mixer in
  * the other process that waits for the frame's sound). Set before the sources start. */

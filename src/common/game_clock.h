@@ -40,6 +40,10 @@ typedef struct game_clock_timer {
 typedef struct game_clock_parked {
     retro_atomic_ptr_t word; /* retro_atomic_int_t*, NULL: free */
     retro_atomic_int_t key;
+    /* The frame its wake was first seen in flight in, 0: not seen. A wake holds the time for
+     * the rest of that frame at most: a thread woken that does not get to run (suspended)
+     * cannot hold it for longer. */
+    retro_atomic_int_t flight_frame;
 } game_clock_parked_t;
 
 typedef struct game_clock {

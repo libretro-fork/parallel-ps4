@@ -37,6 +37,7 @@ void game_clock_init(game_clock_t* clock, unsigned fps_num, unsigned fps_den) {
         for (i = 0; i < GAME_CLOCK_PARKED; i++) {
             retro_atomic_ptr_init(&clock->parked[i].word, 0);
             retro_atomic_int_init(&clock->parked[i].key, 0);
+            retro_atomic_int_init(&clock->parked[i].flight_frame, 0);
         }
     }
     clock->done_frame = 0;
@@ -84,15 +85,22 @@ static uint64_t game_clock_earliest(game_clock_t* clock) {
     return earliest;
 }
 
-/* A parked thread has been woken and has not run yet */
+/* A parked thread has been woken and has not run yet, this frame */
 static int game_clock_wake_in_flight(game_clock_t* clock) {
+    const int frame = (int)game_clock_frames(clock) + 1; /* never 0 */
     unsigned i;
     for (i = 0; i < GAME_CLOCK_PARKED; i++) {
-        retro_atomic_int_t* word =
-            (retro_atomic_int_t*)retro_atomic_load_acquire_ptr(&clock->parked[i].word);
-        if (word && retro_atomic_load_seq_cst_int(word) !=
-                        retro_atomic_load_acquire_int(&clock->parked[i].key))
+        game_clock_parked_t* p = &clock->parked[i];
+        retro_atomic_int_t* word = (retro_atomic_int_t*)retro_atomic_load_acquire_ptr(&p->word);
+        int seen;
+        if (!word || retro_atomic_load_seq_cst_int(word) == retro_atomic_load_acquire_int(&p->key))
+            continue;
+        seen = retro_atomic_load_acquire_int(&p->flight_frame);
+        if (seen == 0 && retro_atomic_cas_int(&p->flight_frame, 0, frame))
+            seen = frame;
+        if (seen == frame || seen == 0)
             return 1;
+        /* In flight since an earlier frame: it is not running, and holds nothing */
     }
     return 0;
 }
@@ -102,13 +110,14 @@ static int game_clock_wake_in_flight(game_clock_t* clock) {
  * parked thread's wake is in flight: it runs first, and skips again once it waits. */
 static void game_clock_skip(game_clock_t* clock) {
     uint64_t earliest, next;
-    if (game_clock_wake_in_flight(clock))
+    /* Finishing the frame (retro_run waits for its sound), the time goes on regardless */
+    if (!retro_atomic_load_acquire_int(&clock->finishing) && game_clock_wake_in_flight(clock))
         return;
     earliest = game_clock_earliest(clock);
     if (earliest)
         game_clock_advance(clock, earliest);
     game_clock_fire_due(clock, game_clock_now(clock));
-    while (retro_atomic_load_acquire_int(&clock->finishing) && !game_clock_wake_in_flight(clock) &&
+    while (retro_atomic_load_acquire_int(&clock->finishing) &&
            (earliest = game_clock_earliest(clock)) != 0 &&
            earliest <= game_clock_frame_end(clock)) {
         game_clock_advance(clock, earliest);
@@ -309,6 +318,7 @@ int game_clock_park(game_clock_t* clock, retro_atomic_int_t* word, int key) {
                     bit++;
                 p = &clock->parked[w * 64 + bit];
                 retro_atomic_store_release_int(&p->key, key);
+                retro_atomic_store_release_int(&p->flight_frame, 0);
                 retro_atomic_store_release_ptr(&p->word, word);
                 return (int)(w * 64 + bit);
             }
@@ -322,6 +332,7 @@ void game_clock_repark(game_clock_t* clock, int slot, int key) {
     if (slot < 0)
         return;
     retro_atomic_store_release_int(&clock->parked[slot].key, key);
+    retro_atomic_store_release_int(&clock->parked[slot].flight_frame, 0);
     /* The wake that held the time was not for it after all: the time may move on now */
     if (retro_atomic_load_acquire_int(&clock->running) <= 0 ||
         retro_atomic_load_acquire_int(&clock->finishing))

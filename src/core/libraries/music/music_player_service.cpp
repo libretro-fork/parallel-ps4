@@ -507,6 +507,8 @@ private:
                 audio_stream_close(stream);
                 break;
             }
+            // Not paced by the game's time: retro_run does not wait for it
+            audio_mix_input_waits_past(input, AUDIO_MIX_NEVER_WAITED);
             audio_mix_resampler_t resampler;
             audio_mix_resampler_init(&resampler, hz, channels);
 
