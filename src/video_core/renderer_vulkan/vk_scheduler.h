@@ -5,9 +5,7 @@
 
 #include <array>
 #include <cstring>
-#include <new>
 #include <thread>
-#include <type_traits>
 
 #include <queues/mpsc_stack.h>
 #include <retro_atomic.h>
@@ -15,7 +13,6 @@
 
 #include "common/combiner.h"
 #include "common/interval_set.h"
-#include "common/node_pool.h"
 #include "common/unique_function.h"
 #include "video_core/amdgpu/regs_color.h"
 #include "video_core/amdgpu/regs_primitive.h"
@@ -450,16 +447,14 @@ public:
 
     /// Defers an operation until the gpu has reached the current cpu tick.
     /// Will be run when submitting or calling PopPendingOperations.
-    template <typename Func>
-    void DeferOperation(Func&& func) {
-        pending_ops.Push(MakeOp(std::forward<Func>(func)));
+    void DeferOperation(Common::UniqueFunction<void>&& func) {
+        pending_ops.Push(new PendingOp{{}, std::move(func), CurrentTick()});
     }
 
     /// Defers an operation until the gpu has reached the current cpu tick.
     /// Runs as soon as possible in another thread.
-    template <typename Func>
-    void DeferPriorityOperation(Func&& func) {
-        priority_pending_ops.Push(MakeOp(std::forward<Func>(func)));
+    void DeferPriorityOperation(Common::UniqueFunction<void>&& func) {
+        priority_pending_ops.Push(new PendingOp{{}, std::move(func), CurrentTick()});
         retro_eventcount_notify(&priority_pending_ops_ec);
     }
 
@@ -487,45 +482,11 @@ private:
         vk::CommandBuffer primary{};
     };
     std::vector<Session> sessions;
-    /// The command buffers of a submission, made up front with the sessions' room
-    std::vector<vk::CommandBuffer> submit_buffers;
-
-public:
-    /// Room for an operation's captures, kept in the operation itself
-    static constexpr std::size_t PendingOpBytes = 224;
-    /// A deferred operation: the function made in place in it, run and destroyed through
-    /// two pointers. Taken from a pool made up front (AcquireOp, ReleaseOp in
-    /// vk_scheduler.cpp), so deferring an operation does not allocate.
     struct PendingOp {
         mpsc_stack_node_t node; // first: the stack links operations through it
-        node_pool_node_t free_link; // in the pool while free
+        Common::UniqueFunction<void> callback;
         u64 gpu_tick;
-        void (*invoke)(void* storage);
-        void (*destroy)(void* storage);
-        alignas(16) unsigned char storage[PendingOpBytes];
-
-        void Run() {
-            invoke(storage);
-        }
     };
-
-private:
-    static PendingOp* AcquireOp();
-    /// Destroys the function and gives the operation back to the pool
-    static void ReleaseOp(PendingOp* op);
-
-    template <typename Func>
-    PendingOp* MakeOp(Func&& func) {
-        using F = std::decay_t<Func>;
-        static_assert(sizeof(F) <= PendingOpBytes, "the operation's captures do not fit");
-        static_assert(alignof(F) <= 16, "the operation's captures are aligned past 16");
-        PendingOp* op = AcquireOp();
-        new (op->storage) F(std::forward<Func>(func));
-        op->invoke = [](void* storage) { (*static_cast<F*>(storage))(); };
-        op->destroy = [](void* storage) { static_cast<F*>(storage)->~F(); };
-        op->gpu_tick = CurrentTick();
-        return op;
-    }
     /// Operations in order: pushed by any thread onto a lock-free stack, taken oldest first
     /// into a list that only the one running them touches.
     struct PendingOps {
@@ -539,7 +500,7 @@ private:
         ~PendingOps() {
             Take();
             while (PendingOp* op = Pop()) {
-                ReleaseOp(op);
+                delete op;
             }
         }
         void Push(PendingOp* op) {
