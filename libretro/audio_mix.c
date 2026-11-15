@@ -164,6 +164,18 @@ int audio_mix_input_wait(audio_mix_input_t* in, unsigned frames, int64_t timeout
    return retro_waitable_spsc_wait_writable(&in->ring, want, timeout_us) ? 1 : 0;
 }
 
+int audio_mix_input_ready(audio_mix_input_t* in, unsigned frames, unsigned queue_frames)
+{
+   const size_t queued = retro_spsc_read_avail(&in->ring.queue) / in->frame_bytes;
+   return queued <= queue_frames &&
+          retro_spsc_write_avail(&in->ring.queue) >= (size_t)frames * in->frame_bytes;
+}
+
+retro_eventcount_t* audio_mix_input_room_ec(audio_mix_input_t* in)
+{
+   return &in->ring.writable;
+}
+
 unsigned audio_mix_input_reserve(audio_mix_input_t* in, float** ptr, unsigned frames)
 {
    void* span   = NULL;

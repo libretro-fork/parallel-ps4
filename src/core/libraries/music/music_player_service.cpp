@@ -25,6 +25,7 @@
 #include "core/emulator_settings.h"
 #include "core/file_sys/fs.h"
 #include "core/libraries/error_codes.h"
+#include "core/libraries/kernel/time.h"
 #include "core/libraries/libs.h"
 #include "libretro/audio_mix.h"
 #include "music_player_service.h"
@@ -570,8 +571,13 @@ private:
                 if (eof && (rel >> 32) >= have) {
                     break;
                 }
-                // Bounded, so stop, pause and seek are seen while the frontend takes nothing.
-                if (!audio_mix_input_wait(input, chunk_frames, 20000)) {
+                // Paced by the mix's frames; bounded by 20 ms of the game's time, so stop, pause
+                // and seek are seen while the frontend takes nothing
+                if (!Kernel::GameWait(audio_mix_input_room_ec(input),
+                                      Kernel::GameDeadlineIn(20'000'000), [&] {
+                                          return audio_mix_input_ready(input, chunk_frames,
+                                                                       AUDIO_MIX_FRAME_FRAMES) != 0;
+                                      })) {
                     continue;
                 }
 

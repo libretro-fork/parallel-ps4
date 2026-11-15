@@ -19,6 +19,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <rthreads/retro_eventcount.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -30,6 +32,8 @@ extern "C" {
 #define AUDIO_MIX_QUEUE_FRAMES 1536
 /* Inputs open at once at most. */
 #define AUDIO_MIX_INPUTS 32
+/* What the mix takes from every input each of the frontend's frames: 48000 / 60 */
+#define AUDIO_MIX_FRAME_FRAMES 800
 
 typedef struct audio_mix_input audio_mix_input_t;
 
@@ -59,6 +63,13 @@ int audio_mix_input_wait(audio_mix_input_t* in, unsigned frames, int64_t timeout
 /* Room to write into, in place: up to @frames contiguous frames at *@ptr. Returns how many;
  * where the ring wraps it is fewer, and a second call gives the rest. */
 unsigned audio_mix_input_reserve(audio_mix_input_t* in, float** ptr, unsigned frames);
+
+/* Frame-locked: whether @frames more may go in with no more than @queue_frames queued before
+ * them (one frame of the mix's, AUDIO_MIX_FRAME_FRAMES, for a source paced by the frames).
+ * What notifies a source waiting for that: the mix taking frames. Nothing waits here: the
+ * caller parks on the eventcount (on the game's time, for a game thread). */
+int audio_mix_input_ready(audio_mix_input_t* in, unsigned frames, unsigned queue_frames);
+retro_eventcount_t* audio_mix_input_room_ec(audio_mix_input_t* in);
 
 /* Hands @frames written at the last reserve to the mixing thread. */
 void audio_mix_input_commit(audio_mix_input_t* in, unsigned frames);

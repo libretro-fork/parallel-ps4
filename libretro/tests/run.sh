@@ -12,6 +12,12 @@ L=libretro/libretro-common
 COMMON="$L/queues/retro_spsc.c $L/queues/retro_waitable_spsc.c $L/rthreads/retro_eventcount.c
         $L/rthreads/rthreads.c $L/features/features_cpu.c $L/compat/compat_strl.c"
 mkdir -p "$OUT"
+# The frame-locked mix: exactly a frame of every source's sound a frame, in order, none
+# queued past a frame and a buffer, a source that stops going silent
+$CC -std=gnu89 -O1 -g -Wall -Wdeclaration-after-statement -fsanitize=address,undefined \
+    -I$L/include libretro/tests/audio_frame_test.c libretro/audio_mix.c $COMMON \
+    -o "$OUT/audio_frame_test" -lpthread -lm
+"$OUT/audio_frame_test"
 for san in address,undefined thread; do
     name=audio_mix_test-$(echo $san | tr , -)
     $CC -std=gnu99 -O1 -g -Wall -fno-omit-frame-pointer -fsanitize=$san -I$L/include \

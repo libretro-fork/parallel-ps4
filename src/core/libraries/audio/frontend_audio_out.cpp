@@ -13,6 +13,7 @@
 #include "core/libraries/audio/audioout.h"
 #include "core/libraries/audio/audioout_backend.h"
 #include "core/libraries/kernel/threads.h"
+#include "core/libraries/kernel/time.h"
 #include "libretro/audio_mix.h"
 
 namespace Libraries::AudioOut {
@@ -21,15 +22,14 @@ namespace {
 
 constexpr float INV_VOLUME_0DB = 1.0f / 32768.0f;
 constexpr u64 VOLUME_CHECK_INTERVAL_US = 50000;
-// A frontend that has stopped taking sound must not stop the game's audio thread with it.
-constexpr s64 FRONTEND_WAIT_US = 250000;
 
 // The libretro core plays a port by handing it to the frontend: what the game writes is
 // converted, with the port's volume, straight into its input of the core's mix
 // (libretro/audio_mix.h): to stereo, or a port of eight channels as 7.1 where the mix is
-// surround (the frontend takes it), in the frontend's order. The port is paced by what the frontend
-// takes, as a device would pace it: it waits while more than about 32 ms of its sound is still
-// queued.
+// surround (the frontend takes it), in the frontend's order. The port is paced by the frames, as
+// a device would pace it: the mix takes one frame of every port's sound (AUDIO_MIX_FRAME_FRAMES)
+// as each frame ends, and a port waits while more than that is queued, on the game's time
+// (Kernel::GameWait): no buffer kept ahead, no timeout.
 class FrontendPortBackend final : public PortBackend {
 public:
     explicit FrontendPortBackend(const PortOut& port)
@@ -67,9 +67,9 @@ public:
             return;
         }
         UpdateVolumeIfChanged();
-        if (!audio_mix_input_wait(input, buffer_frames, FRONTEND_WAIT_US)) {
-            return; // the frontend is not taking sound: the buffer is dropped
-        }
+        Kernel::GameWait(audio_mix_input_room_ec(input), 0, [this] {
+            return audio_mix_input_ready(input, buffer_frames, AUDIO_MIX_FRAME_FRAMES) != 0;
+        });
         const float g = std::bit_cast<float>(retro_atomic_load_relaxed_int(&gain));
         const u32 sample_bytes = is_float ? 4 : 2;
         const u8* src = static_cast<const u8*>(ptr);

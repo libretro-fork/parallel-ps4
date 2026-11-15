@@ -1341,8 +1341,6 @@ void SendAudioWide() {
         if (frames) {
             const uint32_t read = static_cast<std::uint32_t>(retro_atomic_load_relaxed_int(&shared->audio_read));
             retro_atomic_store_release_int(&shared->audio_read, read + frames);
-            // Room in the ring: the emulator mixes more
-            wakes.audio.Notify();
         }
     }
     if (frames < static_cast<uint32_t>(kAudioFrames)) {
@@ -1363,8 +1361,14 @@ void SendAudio() {
     static const float silence_f32[kAudioFrames * 2] = {};
     uint32_t frames = 0;
     if (shared) {
-        const uint32_t read = static_cast<std::uint32_t>(retro_atomic_load_relaxed_int(&shared->audio_read));
+        uint32_t read = static_cast<std::uint32_t>(retro_atomic_load_relaxed_int(&shared->audio_read));
         const uint32_t written = static_cast<std::uint32_t>(retro_atomic_load_acquire_int(&shared->audio_written));
+        // The emulator mixes exactly one frame of sound a frame. More than two frames
+        // waiting (it ran ahead while the frontend did not take any): the oldest go, so the
+        // sound stays at most two frames behind the picture.
+        if (written - read > 2 * static_cast<uint32_t>(kAudioFrames)) {
+            read = written - 2 * static_cast<uint32_t>(kAudioFrames);
+        }
         frames = std::min<uint32_t>(written - read, kAudioFrames);
         const uint32_t at = read & (Libretro::AUDIO_RING_FRAMES - 1);
         const uint32_t first = std::min<uint32_t>(frames, Libretro::AUDIO_RING_FRAMES - at);
@@ -1385,8 +1389,6 @@ void SendAudio() {
         }
         if (frames) {
             retro_atomic_store_release_int(&shared->audio_read, read + frames);
-            // Room in the ring: the emulator mixes more
-            wakes.audio.Notify();
         }
     }
     if (frames < static_cast<uint32_t>(kAudioFrames)) {

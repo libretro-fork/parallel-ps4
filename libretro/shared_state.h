@@ -22,7 +22,7 @@
 namespace Libretro {
 
 inline constexpr std::uint32_t SHARED_MAGIC = 0x34505368; // "hSP4"
-inline constexpr std::uint32_t SHARED_VERSION = 24;
+inline constexpr std::uint32_t SHARED_VERSION = 25;
 
 inline constexpr std::uint32_t MAX_WIDTH = 3840;
 inline constexpr std::uint32_t MAX_HEIGHT = 2160;
@@ -66,10 +66,8 @@ struct GpuImagesMessage {
 
 /// Frames of 16-bit stereo the audio ring holds. A power of two.
 inline constexpr std::uint32_t AUDIO_RING_FRAMES = 16384;
-/// Frames the emulator keeps in the ring: two of the frontend's frames' worth at 60 per
-/// second, about 33 ms. The frontend takes one at a time, so less would run dry; more would
-/// only be latency.
-inline constexpr std::uint32_t AUDIO_RING_TARGET_FRAMES = 1600;
+/// The emulator writes exactly one frame of sound (AUDIO_MIX_FRAME_FRAMES) as each frame
+/// ends; the core hands one to the frontend each retro_run, at most two frames behind.
 
 inline constexpr std::size_t PATH_BYTES = 4096;
 /// The paths of a PKG game's additional content, one a line.
