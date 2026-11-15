@@ -82,6 +82,10 @@ static void ExitThread() {
     retro_atomic_store_release_int(&curthread->tid, TidTerminated);
     retro_eventcount_notify(curthread->join_wait.get());
 
+    if (IsGameThread()) {
+        SetGameThread(false);
+        game_clock_idle(GameClock());
+    }
     curthread->native_thr->Exit();
     UNREACHABLE();
     /* Never reach! */
@@ -190,31 +194,18 @@ static int JoinThread(PthreadT pthread, void** thread_return, const OrbisKernelT
         return static_cast<s32>(retro_atomic_load_acquire_int(&pthread->tid)) == TidTerminated ||
                curthread->ShouldCancel();
     };
+    // Until it ends, or the game's time reaches abstime (a time of day)
+    const u64 deadline =
+        abstime == nullptr ? 0 : std::max<u64>(GameDeadline(abstime, ORBIS_CLOCK_REALTIME), 1);
     while (static_cast<s32>(retro_atomic_load_acquire_int(&pthread->tid)) != TidTerminated) {
         if (curthread->ShouldCancel()) {
             PthreadTestCancel();
         }
-        const int key = retro_eventcount_prepare_wait(pthread->join_wait.get());
-        if (finished_or_cancelled()) {
-            retro_eventcount_cancel_wait(pthread->join_wait.get());
-            continue;
+        if (!GameWait(pthread->join_wait.get(), deadline, finished_or_cancelled) &&
+            !finished_or_cancelled()) {
+            ret = POSIX_ETIMEDOUT;
+            break;
         }
-        if (abstime == nullptr) {
-            retro_eventcount_commit_wait(pthread->join_wait.get(), key);
-            continue;
-        }
-        const auto left = std::chrono::ceil<std::chrono::microseconds>(
-                              abstime->TimePoint() - std::chrono::system_clock::now())
-                              .count();
-        if (left <= 0) {
-            retro_eventcount_cancel_wait(pthread->join_wait.get());
-            if (!finished_or_cancelled()) {
-                ret = POSIX_ETIMEDOUT;
-                break;
-            }
-            continue;
-        }
-        retro_eventcount_commit_wait_timeout(pthread->join_wait.get(), key, left);
     }
 
     (void)retro_atomic_exchange_int(&curthread->cancel_point, 0);
@@ -287,6 +278,9 @@ void UnblockPthreadCancelSignal();
 static void RunThread(void* arg) {
     auto* curthread = static_cast<Pthread*>(arg);
     g_curthread = curthread;
+    // One of the game's threads: the game's time counts it running until it waits or ends
+    SetGameThread(true);
+    game_clock_busy(GameClock());
     thread_name_set(curthread->name.c_str());
     DebugState.AddCurrentThreadToGuestList();
     Core::InitializeTLS();

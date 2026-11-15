@@ -98,9 +98,19 @@ public:
         stop = std::stop_source{};
     }
 
+    /// The emulator's own service threads made this way run host code: the game's time does
+    /// not count them (common/game_clock.h), as it does the game's threads. What runs the
+    /// game's code here counts itself (the game's main thread: Linker).
     static void* PS4_SYSV_ABI RunWrapper(void* arg) {
         Thread* thr = (Thread*)arg;
+        SetGameThread(false);
+        game_clock_idle(GameClock());
         thr->func(thr->stop.get_token());
+        // Counted again for its end, unless what ran counted itself
+        if (!IsGameThread()) {
+            game_clock_busy(GameClock());
+            SetGameThread(true);
+        }
         return nullptr;
     }
 

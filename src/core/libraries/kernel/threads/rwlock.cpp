@@ -158,12 +158,11 @@ int PS4_SYSV_ABI posix_pthread_rwlock_timedrdlock(PthreadRwlockT* rwlock,
     return prwlock->Rdlock(abstime);
 }
 
+// A time of day @usec on, on the game's time
 static OrbisKernelTimespec AbsTimeAfter(u32 usec) {
-    using namespace std::chrono;
-    const auto ns =
-        duration_cast<nanoseconds>((system_clock::now() + microseconds{usec}).time_since_epoch())
-            .count();
-    return OrbisKernelTimespec{ns / 1000000000, ns % 1000000000};
+    const u64 ns = GameRealtimeNs() + static_cast<u64>(usec) * 1000;
+    return OrbisKernelTimespec{static_cast<s64>(ns / 1000000000),
+                               static_cast<s64>(ns % 1000000000)};
 }
 
 int PS4_SYSV_ABI posix_pthread_rwlock_reltimedrdlock_np(PthreadRwlockT* rwlock, u32 usec) {

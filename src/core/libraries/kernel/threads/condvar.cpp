@@ -135,19 +135,10 @@ int PthreadCond::Wait(PthreadMutexT* mutex, const OrbisKernelTimespec* abstime, 
     SleepqAdd(this, curthread);
 
     const bool is_reltime = abstime == THR_RELTIME;
-    auto reltime_deadline = std::chrono::steady_clock::time_point{};
-    if (is_reltime) {
-        const auto now = std::chrono::steady_clock::now();
-        const auto max_relative = std::chrono::duration_cast<std::chrono::microseconds>(
-                                      std::chrono::steady_clock::time_point::max() - now)
-                                      .count();
-        reltime_deadline = usec > static_cast<u64>(max_relative)
-                               ? std::chrono::steady_clock::time_point::max()
-                               : now + std::chrono::microseconds(usec);
-    }
+    // A relative wait's deadline on the game's time, taken once
+    const u64 reltime_deadline = is_reltime ? GameDeadlineIn(usec * 1000) : 0;
 
     int error = 0;
-    bool first_sleep = true;
     for (;;) {
         (void)retro_atomic_exchange_int(&curthread->cancel_point, 1);
         curthread->ClearWake();
@@ -158,20 +149,10 @@ int PthreadCond::Wait(PthreadMutexT* mutex, const OrbisKernelTimespec* abstime, 
             error = 0;
         } else if (!is_reltime) {
             error = curthread->Sleep(abstime, usec, clock_id) ? 0 : POSIX_ETIMEDOUT;
-        } else if (first_sleep) {
-            first_sleep = false;
-            error = curthread->Sleep(abstime, usec) ? 0 : POSIX_ETIMEDOUT;
+        } else if (GameNow() >= reltime_deadline) {
+            error = curthread->TryWake() ? 0 : POSIX_ETIMEDOUT;
         } else {
-            const auto now = std::chrono::steady_clock::now();
-            if (now >= reltime_deadline) {
-                error = POSIX_ETIMEDOUT;
-            } else {
-                const auto remaining_us =
-                    std::chrono::ceil<std::chrono::microseconds>(reltime_deadline - now);
-                error = curthread->Sleep(abstime, static_cast<u64>(remaining_us.count()))
-                            ? 0
-                            : POSIX_ETIMEDOUT;
-            }
+            error = curthread->SleepUntil(reltime_deadline) ? 0 : POSIX_ETIMEDOUT;
         }
         SleepqLock(this);
         if (curthread->wchan == nullptr) {

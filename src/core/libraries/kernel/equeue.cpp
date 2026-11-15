@@ -11,6 +11,7 @@
 #include <retro_atomic.h>
 #include "common/assert.h"
 #include "common/logging/log.h"
+#include "common/node_pool.h"
 #include "common/singleton.h"
 #include "common/thread_name.h"
 #include "core/file_sys/fs.h"
@@ -39,52 +40,42 @@ EqueueInternal* GetEqueue(OrbisKernelEqueue eq) {
 // leaves its entry in the heap: the generation it carries no longer matches, so it is dropped
 // when it comes up.
 namespace {
-using TimerClock = std::chrono::steady_clock;
 using TimerFn = void (*)(OrbisKernelEqueue, const OrbisKernelEvent&);
 
 struct ArmedTimer {
-    TimerClock::time_point due;
+    u64 due; // on the game's time
     OrbisKernelEqueue eq;
     OrbisKernelEvent event;
     u64 generation;
     TimerFn fire;
 };
 
+// The equeues' timers, on the game's time: each a oneshot timer of the game's clock, which
+// fires it on whichever thread moves the time there (common/game_clock.h). No thread of their
+// own, no wall clock. What a timer carries lives in a pool made at start (node_pool): nothing
+// is allocated when one is armed. A timer called off still fires, and its generation, gone
+// stale, has it do nothing.
 class TimerService {
 public:
     void Start() {
-        if (m_thread.joinable()) {
+        if (m_started) {
             return;
         }
-        for (size_t i = 0; i < Cells; ++i) {
-            retro_atomic_store_relaxed_64(&m_cells[i].seq, i);
+        m_started = true;
+        node_pool_init(&m_pool);
+        for (auto& node : m_nodes) {
+            node_pool_push(&m_pool, &node.link);
         }
-        retro_eventcount_init(&m_ec);
-        m_heap.reserve(Cells);
-        m_thread = std::jthread([this](std::stop_token stop) { Run(stop); });
     }
 
     void Arm(const ArmedTimer& timer) {
-        size_t pos = static_cast<size_t>(retro_atomic_load_relaxed_64(&m_tail));
-        for (;;) {
-            Cell& cell = m_cells[pos % Cells];
-            const size_t seq = static_cast<size_t>(retro_atomic_load_acquire_64(&cell.seq));
-            const auto diff = static_cast<std::ptrdiff_t>(seq - pos);
-            if (diff == 0) {
-                if ((retro_atomic_cas_64(&m_tail, pos, pos + 1) ||
-                     ((pos = static_cast<size_t>(retro_atomic_load_acquire_64(&m_tail))), false))) {
-                    cell.timer = timer;
-                    retro_atomic_store_release_64(&cell.seq, pos + 1);
-                    break;
-                }
-            } else if (diff < 0) {
-                std::this_thread::yield(); // full: the service thread is draining it
-                pos = static_cast<size_t>(retro_atomic_load_relaxed_64(&m_tail));
-            } else {
-                pos = static_cast<size_t>(retro_atomic_load_relaxed_64(&m_tail));
-            }
-        }
-        retro_eventcount_notify(&m_ec);
+        auto* node = reinterpret_cast<Node*>(node_pool_pop(&m_pool));
+        ASSERT_MSG(node != nullptr, "All of the equeue timers are armed");
+        node->timer = timer;
+        node->service = this;
+        const int armed =
+            game_clock_arm_oneshot(GameClock(), timer.due != 0 ? timer.due : 1, Fire, node);
+        ASSERT_MSG(armed >= 0, "All of the game's timers are armed");
     }
 
     static u64 NextGeneration() {
@@ -93,77 +84,31 @@ public:
     }
 
 private:
-    static constexpr size_t Cells = 1024;
-    struct Cell {
-        retro_atomic_64_t seq;
+    struct Node {
+        node_pool_node_t link; // first: the pool links nodes through it
         ArmedTimer timer;
+        TimerService* service;
     };
 
-    static bool Later(const ArmedTimer& a, const ArmedTimer& b) {
-        return a.due > b.due;
-    }
+    static void Fire(void* ctx);
 
-    bool Pop(ArmedTimer& out) {
-        Cell& cell = m_cells[m_head % Cells];
-        if (static_cast<size_t>(retro_atomic_load_acquire_64(&cell.seq)) != m_head + 1) {
-            return false;
-        }
-        out = cell.timer;
-        retro_atomic_store_release_64(&cell.seq, m_head + Cells);
-        ++m_head;
-        return true;
-    }
-
-    bool Pending() const {
-        return static_cast<size_t>(retro_atomic_load_acquire_64(&m_cells[m_head % Cells].seq)) ==
-               m_head + 1;
-    }
-
-    void Run(std::stop_token stop) {
-        thread_name_set("shadPS4:KernelTimers");
-        std::stop_callback wake{stop, [this] { retro_eventcount_notify(&m_ec); }};
-        while (!stop.stop_requested()) {
-            ArmedTimer timer;
-            while (Pop(timer)) {
-                m_heap.push_back(timer);
-                std::push_heap(m_heap.begin(), m_heap.end(), Later);
-            }
-            const auto now = TimerClock::now();
-            while (!m_heap.empty() && m_heap.front().due <= now) {
-                std::pop_heap(m_heap.begin(), m_heap.end(), Later);
-                timer = m_heap.back();
-                m_heap.pop_back();
-                if (const auto equeue = GetEqueue(timer.eq);
-                    equeue &&
-                    equeue->TimerCurrent(timer.event.ident, timer.event.filter, timer.generation)) {
-                    timer.fire(timer.eq, timer.event);
-                }
-            }
-            const int key = retro_eventcount_prepare_wait(&m_ec);
-            if (Pending() || stop.stop_requested()) {
-                retro_eventcount_cancel_wait(&m_ec);
-                continue;
-            }
-            if (m_heap.empty()) {
-                retro_eventcount_commit_wait(&m_ec, key);
-            } else {
-                const auto left = std::chrono::duration_cast<std::chrono::microseconds>(
-                    m_heap.front().due - TimerClock::now());
-                retro_eventcount_commit_wait_timeout(&m_ec, key,
-                                                     std::max<int64_t>(left.count(), 0));
-            }
-        }
-    }
-
-    std::array<Cell, Cells> m_cells{};
-    alignas(64) retro_atomic_64_t m_tail{0};
-    alignas(64) size_t m_head = 0;
-    retro_eventcount_t m_ec{};
-    std::vector<ArmedTimer> m_heap; // the service thread's; reserved at start
-    std::jthread m_thread;
+    static constexpr size_t Nodes = GAME_CLOCK_TIMERS / 2;
+    std::array<Node, Nodes> m_nodes{};
+    node_pool_t m_pool{};
+    bool m_started = false;
 };
 
 TimerService g_timer_service;
+
+void TimerService::Fire(void* ctx) {
+    auto* node = static_cast<Node*>(ctx);
+    const ArmedTimer timer = node->timer;
+    node_pool_push(&node->service->m_pool, &node->link);
+    if (const auto equeue = GetEqueue(timer.eq);
+        equeue && equeue->TimerCurrent(timer.event.ident, timer.event.filter, timer.generation)) {
+        timer.fire(timer.eq, timer.event);
+    }
+}
 } // namespace
 
 void StartTimerService() {
@@ -194,7 +139,7 @@ bool EqueueInternal::AddEvent(EqueueEvent& event) {
 
     const bool updated = m_combiner.Run([&] {
         // Calculate timer interval
-        event.time_added = std::chrono::steady_clock::now();
+        event.time_added = GameNow();
         if (event.event.filter == OrbisKernelEvent::Filter::Timer) {
             // Set timer interval, this is stored in milliseconds for timers.
             event.timer_interval = std::chrono::milliseconds(event.event.data);
@@ -288,10 +233,10 @@ bool EqueueInternal::ScheduleEvent(u64 id, s16 filter,
                event.event.filter == OrbisKernelEvent::Filter::HrTimer);
 
         if (it->timer_generation == 0) {
-            it->timer_due = std::chrono::steady_clock::now() + event.timer_interval;
+            it->timer_due = GameNow() + static_cast<u64>(event.timer_interval.count());
         } else {
             // Already armed: the next period starts where the last one ended
-            it->timer_due += event.timer_interval;
+            it->timer_due += static_cast<u64>(event.timer_interval.count());
         }
         it->timer_generation = TimerService::NextGeneration();
         g_timer_service.Arm({it->timer_due, m_handle, event.event, it->timer_generation, callback});
@@ -341,36 +286,23 @@ int EqueueInternal::WaitForEvents(OrbisKernelEvent* ev, int num, const OrbisKern
         count = m_combiner.Run([&] { return GetTriggeredEvents(ev, num); });
         return count > 0;
     };
-    // I/O readiness is looked at, not notified: with I/O events pending the wait is cut in
-    // slices of at most 10 ms
+    // On the game's time. I/O readiness is looked at, not notified: with I/O events pending
+    // it is looked at again each frame of the game's time, or as soon as anything wakes it.
     const bool poll_io = m_combiner.Run([&] { return HasPendingIoEvents(); });
-    const bool forever = micros == 0;
-    const auto deadline = std::chrono::steady_clock::now() + std::chrono::microseconds(micros);
+    const u64 deadline = micros == 0 ? 0 : GameDeadlineIn(static_cast<u64>(micros) * 1000);
+    if (!poll_io) {
+        GameWait(m_wake.get(), deadline, take);
+        return count;
+    }
     while (!take()) {
-        const int key = retro_eventcount_prepare_wait(m_wake.get());
-        if (take()) {
-            retro_eventcount_cancel_wait(m_wake.get());
+        const u64 frame_end = game_clock_frame_end(GameClock());
+        const u64 until = deadline != 0 && deadline < frame_end ? deadline : frame_end;
+        if (!GameWait(m_wake.get(), until != 0 ? until : 1, take) && deadline != 0 &&
+            GameNow() >= deadline) {
+            take();
             break;
         }
-        s64 slice_us = poll_io ? 10'000 : -1;
-        if (!forever) {
-            const auto left = std::chrono::ceil<std::chrono::microseconds>(
-                                  deadline - std::chrono::steady_clock::now())
-                                  .count();
-            if (left <= 0) {
-                retro_eventcount_cancel_wait(m_wake.get());
-                take();
-                break;
-            }
-            slice_us = slice_us < 0 ? left : std::clamp<s64>(left, 1'000, slice_us);
-        }
-        if (slice_us < 0) {
-            retro_eventcount_commit_wait(m_wake.get(), key);
-        } else {
-            retro_eventcount_commit_wait_timeout(m_wake.get(), key, slice_us);
-        }
     }
-
     return count;
 }
 
@@ -532,7 +464,7 @@ bool EqueueInternal::AddSmallTimer(EqueueEvent& ev) {
     // Create the small timer
     SmallTimer st;
     st.event = ev.event;
-    st.added = std::chrono::steady_clock::now();
+    st.added = GameNow();
     st.interval = std::chrono::nanoseconds(ts.tv_nsec + ts.tv_sec * 1000000000);
     m_combiner.Run([&] { m_small_timers[st.event.ident] = std::move(st); });
     // A waiter sleeping toward a later timer looks again
@@ -542,54 +474,43 @@ bool EqueueInternal::AddSmallTimer(EqueueEvent& ev) {
 
 int EqueueInternal::WaitForSmallTimer(OrbisKernelEvent* ev, int num, u32 micros) {
     ASSERT(num >= 1);
-    using Clock = std::chrono::steady_clock;
-
-    // The thread sleeps until the first timer is due (or the wait's end), and turns the last
-    // stretch over to yields, where a timed sleep may oversleep: a timer added or removed
-    // meanwhile wakes it to look again. It spun on yields for the whole wait.
-#ifdef _WIN32
-    constexpr auto spin_window = std::chrono::milliseconds(1);
-#else
-    constexpr auto spin_window = std::chrono::microseconds(200);
-#endif
-    const auto wait_end =
-        (micros == 0) ? Clock::time_point::max() : Clock::now() + std::chrono::microseconds{micros};
-    for (;;) {
-        // Opened before looking, so that a timer added or removed after the look wakes it
-        const int key = retro_eventcount_prepare_wait(m_wake.get());
-        const auto now = Clock::now();
-        int count = 0;
-        auto first_due = Clock::time_point::max();
+    // On the game's time: until the first timer is due or the wait's end, woken to look again
+    // by a timer added or removed meanwhile. No spinning, no host timeout.
+    const u64 wait_end = micros == 0 ? 0 : GameDeadlineIn(static_cast<u64>(micros) * 1000);
+    int count = 0;
+    u64 first_due = 0;
+    const auto take = [&] {
+        const u64 now = GameNow();
+        first_due = 0;
         m_combiner.Run([&] {
             for (auto it = m_small_timers.begin(); it != m_small_timers.end() && count < num;) {
                 const SmallTimer& st = it->second;
-                const auto due = st.added + st.interval;
+                const u64 due = st.added + static_cast<u64>(st.interval.count());
                 if (now >= due) {
                     ev[count++] = st.event;
                     it = m_small_timers.erase(it);
                 } else {
-                    first_due = std::min(first_due, due);
+                    first_due = first_due == 0 ? due : std::min(first_due, due);
                     ++it;
                 }
             }
         });
-        if (count > 0) {
-            retro_eventcount_cancel_wait(m_wake.get());
+        return count > 0;
+    };
+    for (;;) {
+        if (take()) {
             return count;
         }
-        if (now >= wait_end) {
-            retro_eventcount_cancel_wait(m_wake.get());
+        if (wait_end != 0 && GameNow() >= wait_end) {
             return 0;
         }
-        const auto until = std::min(first_due, wait_end);
-        if (until - now > spin_window) {
-            const auto sleep_us =
-                std::chrono::duration_cast<std::chrono::microseconds>(until - spin_window - now);
-            retro_eventcount_commit_wait_timeout(m_wake.get(), key,
-                                                 std::max<s64>(sleep_us.count(), 1));
-        } else {
-            retro_eventcount_cancel_wait(m_wake.get());
-            std::this_thread::yield();
+        u64 until = wait_end;
+        if (first_due != 0 && (until == 0 || first_due < until)) {
+            until = first_due;
+        }
+        GameWait(m_wake.get(), until, take);
+        if (count > 0) {
+            return count;
         }
     }
 }

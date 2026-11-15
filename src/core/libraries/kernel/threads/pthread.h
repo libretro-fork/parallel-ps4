@@ -413,9 +413,21 @@ struct Pthread {
         nwaiter_defer = 0;
     }
 
+    /// A wake already given, taken without waiting
+    bool TryWake() {
+        return wake_sema.try_acquire_pending();
+    }
+
     void ClearWake() {
         while (wake_sema.try_acquire_pending()) {
         }
+    }
+
+    /// Until woken (true) or the game's time reaches @deadline (false; 0: never). No host
+    /// timeout: a timer on the game's time releases the wake semaphore, and the thread is not
+    /// counted running meanwhile (game_clock_idle), so that the time may skip ahead to it.
+    bool SleepUntil(u64 deadline) {
+        return GameSemaWait(wake_sema, deadline);
     }
 
     bool Sleep(const OrbisKernelTimespec* abstime, u64 usec, ClockId clock_id = ClockId::Realtime) {
@@ -424,44 +436,15 @@ struct Pthread {
             WakeAll();
         }
         if (abstime == THR_RELTIME) {
-            constexpr u64 MaxUsec =
-                static_cast<u64>(std::chrono::duration_cast<std::chrono::microseconds>(
-                                     std::chrono::nanoseconds::max())
-                                     .count());
-            const auto timeout = std::chrono::microseconds(std::min(usec, MaxUsec));
-            return wake_sema.try_acquire_for(timeout);
-        } else if (abstime != nullptr) {
-            OrbisKernelTimespec now{};
-            if (posix_clock_gettime(static_cast<u32>(clock_id), &now) != 0) {
-                return false;
-            }
-
-            if (abstime->tv_sec < now.tv_sec ||
-                (abstime->tv_sec == now.tv_sec && abstime->tv_nsec <= now.tv_nsec)) {
-                return wake_sema.try_acquire_pending();
-            }
-
-            s64 seconds = abstime->tv_sec - now.tv_sec;
-            s64 nanoseconds = abstime->tv_nsec - now.tv_nsec;
-            if (nanoseconds < 0) {
-                --seconds;
-                nanoseconds += 1'000'000'000;
-            }
-
-            constexpr auto MaxTimeout = std::chrono::nanoseconds::max();
-            constexpr s64 MaxSeconds =
-                std::chrono::duration_cast<std::chrono::seconds>(MaxTimeout).count();
-            const auto seconds_part = std::chrono::seconds(std::min(seconds, MaxSeconds));
-            const auto max_nanoseconds = MaxTimeout - seconds_part;
-            const auto timeout =
-                seconds > MaxSeconds || std::chrono::nanoseconds(nanoseconds) > max_nanoseconds
-                    ? MaxTimeout
-                    : seconds_part + std::chrono::nanoseconds(nanoseconds);
-            return wake_sema.try_acquire_for(timeout);
-        } else {
-            wake_sema.acquire();
-            return true;
+            return usec == 0 ? wake_sema.try_acquire_pending()
+                             : SleepUntil(GameDeadlineIn(usec * 1000));
         }
+        if (abstime != nullptr) {
+            const u64 deadline = GameDeadline(abstime, static_cast<u32>(clock_id));
+            return deadline == 0 || deadline <= GameNow() ? wake_sema.try_acquire_pending()
+                                                          : SleepUntil(deadline);
+        }
+        return SleepUntil(0);
     }
 
     int SetAffinity(const Cpuset* cpuset);

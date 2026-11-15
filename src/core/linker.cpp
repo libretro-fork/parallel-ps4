@@ -579,6 +579,10 @@ void Linker::Execute(const std::vector<std::string>& args) {
             Libraries::Kernel::g_curthread->name = "Game:Main";
         }
         thread_name_set("Game:Main");
+        // The game's main thread: counted running by the game's time (Kernel::Thread does not
+        // count the threads it makes)
+        Libraries::Kernel::SetGameThread(true);
+        game_clock_busy(Libraries::Kernel::GameClock());
 
 #ifndef _WIN32 // Clear any existing signal mask for game threads.
         sigset_t emptyset;

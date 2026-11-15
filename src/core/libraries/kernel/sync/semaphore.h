@@ -197,8 +197,9 @@ private:
 };
 
 using BinarySemaphore = Semaphore<1>;
-// A thread can receive one normal synchronization wake and one cancellation wake concurrently.
-using WakeSemaphore = Semaphore<2>;
+// A thread can receive one normal synchronization wake, one cancellation wake and its sleep's
+// timer on the game's time (Pthread::SleepUntil) concurrently.
+using WakeSemaphore = Semaphore<3>;
 using CountingSemaphore = Semaphore<0x7FFFFFFF /*ORBIS_KERNEL_SEM_VALUE_MAX*/>;
 
 } // namespace Libraries::Kernel

@@ -510,7 +510,7 @@ s32 PS4_SYSV_ABI posix_sigsuspend(const Sigset* sigmask) {
     thr->SetGuestSigmask(*sigmask);
 
     while (retro_atomic_load_acquire_int(&thr->sigsuspend_interrupted) == 0) {
-        thr->signal_sema.acquire();
+        GameSemaWait(thr->signal_sema, 0);
     }
 
     retro_atomic_store_release_int(&thr->in_sigsuspend, 0);
@@ -548,7 +548,7 @@ s32 PS4_SYSV_ABI posix_sigwait(const Sigset* set, s32* sig) {
             return ORBIS_OK;
         }
 
-        thread->signal_sema.acquire();
+        GameSemaWait(thread->signal_sema, 0);
     }
 }
 

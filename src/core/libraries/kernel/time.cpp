@@ -10,10 +10,9 @@
 #include "core/libraries/kernel/kernel.h"
 #include "core/libraries/kernel/orbis_error.h"
 #include "core/libraries/kernel/posix_error.h"
+#include "core/libraries/kernel/threads/pthread.h"
 #include "core/libraries/kernel/time.h"
 #include "core/libraries/libs.h"
-
-#include <features/features_cpu.h>
 
 #ifdef _WIN64
 #include <windows.h>
@@ -35,6 +34,8 @@ static std::unique_ptr<Common::NativeClock> clock;
 // the one the game started at, plus the game's time.
 static game_clock_t game_clock;
 static u64 boot_epoch_ns;
+/// What a thread that is not a guest thread sleeps on: only its timer notifies it
+static retro_eventcount_t host_sleep_ec;
 
 game_clock_t* GameClock() {
     return &game_clock;
@@ -50,6 +51,47 @@ static void GameTimespec(u64 base_ns, OrbisKernelTimespec* ts) {
     const u64 ns = base_ns + game_clock_now(&game_clock);
     ts->tv_sec = static_cast<s64>(ns / 1'000'000'000);
     ts->tv_nsec = static_cast<s64>(ns % 1'000'000'000);
+}
+
+namespace {
+thread_local bool game_thread = false;
+} // namespace
+
+bool IsGameThread() {
+    return game_thread;
+}
+
+void SetGameThread(bool counted) {
+    game_thread = counted;
+}
+
+void Detail::GameWaitFire(void* ctx) {
+    auto* timer = static_cast<GameWaitTimer*>(ctx);
+    // The woken thread counts as running from here: the time does not skip past it before it
+    // has run
+    if (timer->counted) {
+        game_clock_busy(&game_clock);
+    }
+    retro_atomic_store_release_int(&timer->fired, 1);
+    retro_eventcount_notify(timer->ec);
+}
+
+u64 GameDeadline(const OrbisKernelTimespec* abstime, u32 clock_id) {
+    const u64 ns =
+        static_cast<u64>(abstime->tv_sec) * 1'000'000'000 + static_cast<u64>(abstime->tv_nsec);
+    switch (clock_id) {
+    case ORBIS_CLOCK_REALTIME:
+    case ORBIS_CLOCK_REALTIME_PRECISE:
+    case ORBIS_CLOCK_SECOND:
+    case ORBIS_CLOCK_REALTIME_FAST:
+    case ORBIS_CLOCK_EXT_NETWORK:
+    case ORBIS_CLOCK_EXT_DEBUG_NETWORK:
+    case ORBIS_CLOCK_EXT_AD_NETWORK:
+    case ORBIS_CLOCK_EXT_RAW_NETWORK:
+        return ns > boot_epoch_ns ? ns - boot_epoch_ns : 0;
+    default:
+        return ns;
+    }
 }
 
 u64 PS4_SYSV_ABI sceKernelGetTscFrequency() {
@@ -72,48 +114,46 @@ u64 PS4_SYSV_ABI sceKernelReadTsc() {
     return initial_ptc + GameTicks(clock->GetTscFrequency());
 }
 
-// The game's own sleep. Uninterruptible: to a deadline on libretro-common's clock
-// (retro_sleep_until_us), never early. Interruptible (POSIX nanosleep, a cancellation point):
-// a host signal or APC cuts it short with EINTR and what is left, as the console's does.
+// The game's own sleep: until the game's time reaches the deadline, no host sleep. A guest
+// thread sleeps on its wake semaphore (Pthread::SleepUntil), so a cancellation, which releases
+// it, cuts an interruptible sleep (POSIX nanosleep, a cancellation point) short with EINTR and
+// what is left; any other wake is slept through. Another thread waits on the time alone.
 static bool GuestSleep(u64 ns, u64* left, bool interruptible) {
     *left = 0;
-    if (!interruptible) {
-        retro_sleep_until_us(cpu_features_get_time_usec() +
-                             static_cast<retro_time_t>((ns + 999) / 1000));
+    if (ns == 0) {
         return true;
     }
-#ifdef _WIN32
-#ifndef CREATE_WAITABLE_TIMER_HIGH_RESOLUTION
-#define CREATE_WAITABLE_TIMER_HIGH_RESOLUTION 0x00000002
-#endif
-    // One high-resolution timer a thread, made the first time it sleeps, kept after
-    static thread_local HANDLE timer = CreateWaitableTimerExW(
-        nullptr, nullptr, CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, TIMER_ALL_ACCESS);
-    if (!timer) {
-        timer = CreateWaitableTimerW(nullptr, TRUE, nullptr);
-    }
-    const retro_time_t begin = cpu_features_get_time_usec();
-    LARGE_INTEGER due;
-    due.QuadPart = -static_cast<LONGLONG>(ns / 100);
-    if (!timer || !SetWaitableTimer(timer, &due, 0, nullptr, nullptr, FALSE)) {
+    const u64 deadline = GameDeadlineIn(ns);
+    Pthread* curthread = g_curthread;
+    if (!curthread) {
+        GameWait(&host_sleep_ec, deadline, [] { return false; });
         return true;
     }
-    if (WaitForSingleObjectEx(timer, INFINITE, TRUE) == WAIT_OBJECT_0) {
-        return true;
+    while (curthread->SleepUntil(deadline)) {
+        if (interruptible && curthread->ShouldCancel()) {
+            const u64 now = GameNow();
+            *left = deadline > now ? deadline - now : 0;
+            return false;
+        }
     }
-    const u64 slept = static_cast<u64>(cpu_features_get_time_usec() - begin) * 1000;
-    *left = slept < ns ? ns - slept : 0;
-    return false;
-#else
-    timespec request{static_cast<time_t>(ns / 1'000'000'000),
-                     static_cast<long>(ns % 1'000'000'000)};
-    timespec remain{};
-    if (nanosleep(&request, &remain) == 0 || errno != EINTR) {
-        return true;
+    return true;
+}
+
+u64 GameRealtimeNs() {
+    return boot_epoch_ns + GameNow();
+}
+
+void GameSleepUntil(u64 deadline) {
+    if (deadline == 0) {
+        // Forever
+        GameWait(&host_sleep_ec, 0, [] { return false; });
+        return;
     }
-    *left = static_cast<u64>(remain.tv_sec) * 1'000'000'000 + static_cast<u64>(remain.tv_nsec);
-    return false;
-#endif
+    const u64 now = GameNow();
+    u64 left;
+    if (deadline > now) {
+        GuestSleep(deadline - now, &left, false);
+    }
 }
 
 static s32 posix_nanosleep_impl(const OrbisKernelTimespec* rqtp, OrbisKernelTimespec* rmtp,
@@ -627,6 +667,7 @@ void RegisterTime(Core::Loader::SymbolsResolver* sym) {
                                          std::chrono::system_clock::now().time_since_epoch())
                                          .count());
     game_clock_init(&game_clock, 60, 1);
+    retro_eventcount_init(&host_sleep_ec);
 
     // POSIX
     LIB_FUNCTION("NhpspxdjEKU", "libkernel", 1, "libkernel", posix_nanosleep);

@@ -157,14 +157,15 @@ s32 PthreadMutex::SelfTryLock() {
 
 s32 PthreadMutex::SelfLock(const OrbisKernelTimespec* abstime, u64 usec) {
     const auto DoSleep = [&] {
+        // On the game's time
         if (abstime == THR_RELTIME) {
-            std::this_thread::sleep_for(std::chrono::microseconds(usec));
+            GameSleepUntil(GameDeadlineIn(usec * 1000));
             return POSIX_ETIMEDOUT;
         } else {
             if (abstime->tv_sec < 0 || abstime->tv_nsec < 0 || abstime->tv_nsec >= 1000000000) {
                 return POSIX_EINVAL;
             } else {
-                std::this_thread::sleep_until(abstime->TimePoint());
+                GameSleepUntil(GameDeadline(abstime, ORBIS_CLOCK_REALTIME));
                 return POSIX_ETIMEDOUT;
             }
         }

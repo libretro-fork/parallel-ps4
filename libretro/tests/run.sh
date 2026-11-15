@@ -122,6 +122,7 @@ $CC -std=gnu89 -O1 -g -Wall -Wdeclaration-after-statement -fsanitize=address,und
 for san in address,undefined thread; do
     $CC -std=gnu89 -O1 -g -Wall -Wdeclaration-after-statement -fsanitize=$san -Isrc -I$L/include \
         libretro/tests/game_clock_test.c src/common/game_clock.c $L/rthreads/rthreads.c \
+        $L/rthreads/retro_eventcount.c \
         $L/features/features_cpu.c -o "$OUT/game_clock_test" -lpthread
     "$OUT/game_clock_test"
 done

@@ -68,8 +68,8 @@ static bool PthreadSemTryAcquire(PthreadSem* sem) {
 
 static s32 PthreadSemWait(PthreadSem* sem, const OrbisKernelTimespec* abstime, u64 usec = 0) {
     const bool is_reltime = abstime == THR_RELTIME;
-    auto reltime_deadline = std::chrono::steady_clock::time_point{};
-    bool first_sleep = true;
+    // A relative wait's deadline on the game's time, taken once
+    const u64 reltime_deadline = is_reltime ? GameDeadlineIn(usec * 1000) : 0;
 
     for (;;) {
         // libkernel checks and decrements the value before validating a timeout.
@@ -117,21 +117,8 @@ static s32 PthreadSemWait(PthreadSem* sem, const OrbisKernelTimespec* abstime, u
 
         bool woke = false;
         if (is_reltime) {
-            if (first_sleep) {
-                const auto now = std::chrono::steady_clock::now();
-                const auto max_relative = std::chrono::duration_cast<std::chrono::microseconds>(
-                                              std::chrono::steady_clock::time_point::max() - now)
-                                              .count();
-                reltime_deadline = usec > static_cast<u64>(max_relative)
-                                       ? std::chrono::steady_clock::time_point::max()
-                                       : now + std::chrono::microseconds(usec);
-                first_sleep = false;
-                woke = curthread->Sleep(THR_RELTIME, usec);
-            } else if (const auto current = std::chrono::steady_clock::now();
-                       current < reltime_deadline) {
-                const auto remaining =
-                    std::chrono::ceil<std::chrono::microseconds>(reltime_deadline - current);
-                woke = curthread->Sleep(THR_RELTIME, static_cast<u64>(remaining.count()));
+            if (reltime_deadline > GameNow()) {
+                woke = curthread->SleepUntil(reltime_deadline);
             }
         } else {
             woke = curthread->Sleep(abstime, 0, ClockId::Realtime);
@@ -265,7 +252,8 @@ public:
 
 public:
     struct WaitingThread {
-        BinarySemaphore sem;
+        // One wake, and its timer on the game's time
+        Semaphore<2> sem;
         u32 priority;
         s32 need_count;
         std::string thr_name;
@@ -296,18 +284,16 @@ public:
             return ORBIS_KERNEL_ERROR_ETIMEDOUT;
         }
 
-        /// Blocks until woken or out of time. @return the microseconds it waited.
+        /// Blocks until woken or out of time, on the game's time. @return the microseconds
+        /// of it that passed.
         s64 Wait(const u32* timeout) {
             if (!timeout) {
-                // Wait indefinitely until we are woken up.
-                sem.acquire();
+                GameSemaWait(sem, 0);
                 return 0;
             }
-            // Wait until timeout runs out, recording how much time it took.
-            const auto start = std::chrono::high_resolution_clock::now();
-            sem.try_acquire_for(std::chrono::microseconds(*timeout));
-            const auto end = std::chrono::high_resolution_clock::now();
-            return std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
+            const u64 start = GameNow();
+            GameSemaWait(sem, GameDeadlineIn(static_cast<u64>(*timeout) * 1000));
+            return static_cast<s64>((GameNow() - start) / 1000);
         }
     };
 

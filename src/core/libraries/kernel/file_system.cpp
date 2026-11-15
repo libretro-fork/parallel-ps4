@@ -2150,11 +2150,9 @@ s32 PS4_SYSV_ABI posix_select(s32 nfds, GuestFdSet* readfds, GuestFdSet* writefd
         }
         ready += static_cast<s32>(n);
     } else if (ready == 0 && timeout_us != 0) {
-        // Nothing that can become ready: select() is a sleep (forever without a timeout).
-        do {
-            std::this_thread::sleep_for(
-                std::chrono::microseconds{timeout_us < 0 ? 1'000'000 : timeout_us});
-        } while (timeout_us < 0);
+        // Nothing that can become ready: select() is a sleep on the game's time (forever
+        // without a timeout).
+        GameSleepUntil(timeout_us < 0 ? 0 : GameDeadlineIn(static_cast<u64>(timeout_us) * 1000));
     }
 
     for (const auto& e : sockets) {

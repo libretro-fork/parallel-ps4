@@ -150,26 +150,9 @@ static bool WaitDone(OrbisKernelAioSubmitId id, u32 usec) {
     if (!Batch(id)) {
         return true;
     }
-    const auto start = std::chrono::steady_clock::now();
-    for (;;) {
-        const int key = retro_eventcount_prepare_wait(&g_done);
-        if (State(id) != ORBIS_KERNEL_AIO_STATE_PROCESSING) {
-            retro_eventcount_cancel_wait(&g_done);
-            return true;
-        }
-        if (usec == 0) {
-            retro_eventcount_commit_wait(&g_done, key);
-            continue;
-        }
-        const s64 waited = std::chrono::duration_cast<std::chrono::microseconds>(
-                               std::chrono::steady_clock::now() - start)
-                               .count();
-        if (waited >= usec) {
-            retro_eventcount_cancel_wait(&g_done);
-            return State(id) != ORBIS_KERNEL_AIO_STATE_PROCESSING;
-        }
-        retro_eventcount_commit_wait_timeout(&g_done, key, usec - waited);
-    }
+    // On the game's time
+    return GameWait(&g_done, usec == 0 ? 0 : GameDeadlineIn(static_cast<u64>(usec) * 1000),
+                    [&] { return State(id) != ORBIS_KERNEL_AIO_STATE_PROCESSING; });
 }
 
 s32 PS4_SYSV_ABI sceKernelAioInitializeImpl(void* p, s32 size) {
@@ -260,34 +243,17 @@ s32 PS4_SYSV_ABI sceKernelAioWaitRequests(OrbisKernelAioSubmitId id[], s32 num, 
     }
     // Mode 0x01 waits for all of them, 0x02 for any one
     const u32 limit = usec ? *usec : 0;
-    const auto start = std::chrono::steady_clock::now();
-    bool timeout = false;
-    for (;;) {
-        const int key = retro_eventcount_prepare_wait(&g_done);
-        s32 done = 0;
-        for (s32 i = 0; i < num; i++) {
-            state[i] = State(id[i]);
-            done += state[i] != ORBIS_KERNEL_AIO_STATE_PROCESSING;
-        }
-        if (num == 0 || (mode == 0x02 ? done > 0 : done == num)) {
-            retro_eventcount_cancel_wait(&g_done);
-            break;
-        }
-        if (limit == 0) {
-            retro_eventcount_commit_wait(&g_done, key);
-            continue;
-        }
-        const s64 waited = std::chrono::duration_cast<std::chrono::microseconds>(
-                               std::chrono::steady_clock::now() - start)
-                               .count();
-        if (waited >= limit) {
-            retro_eventcount_cancel_wait(&g_done);
-            timeout = true;
-            break;
-        }
-        retro_eventcount_commit_wait_timeout(&g_done, key, limit - waited);
-    }
-    return timeout ? ORBIS_KERNEL_ERROR_ETIMEDOUT : 0;
+    // On the game's time
+    const bool done =
+        GameWait(&g_done, limit == 0 ? 0 : GameDeadlineIn(static_cast<u64>(limit) * 1000), [&] {
+            s32 finished = 0;
+            for (s32 i = 0; i < num; i++) {
+                state[i] = State(id[i]);
+                finished += state[i] != ORBIS_KERNEL_AIO_STATE_PROCESSING;
+            }
+            return num == 0 || (mode == 0x02 ? finished > 0 : finished == num);
+        });
+    return done ? 0 : ORBIS_KERNEL_ERROR_ETIMEDOUT;
 }
 
 s32 PS4_SYSV_ABI sceKernelAioSubmitReadCommands(OrbisKernelAioRWRequest req[], s32 size, s32 prio,

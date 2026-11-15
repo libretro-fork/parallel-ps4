@@ -163,30 +163,12 @@ public:
         }
 
         const bool infinite = ptr_micros == nullptr;
-        const auto deadline = std::chrono::steady_clock::now() +
-                              std::chrono::microseconds(infinite ? 0 : *ptr_micros);
+        const u64 deadline = infinite ? 0 : GameDeadlineIn(static_cast<u64>(*ptr_micros) * 1000);
 
-        // Until woken, or out of time
-        bool out_of_time = false;
-        while (retro_atomic_load_acquire_int(&waiter.woken) == 0) {
-            const int key = retro_eventcount_prepare_wait(&m_wake_ec);
-            if (retro_atomic_load_acquire_int(&waiter.woken) != 0) {
-                retro_eventcount_cancel_wait(&m_wake_ec);
-                break;
-            }
-            if (infinite) {
-                retro_eventcount_commit_wait(&m_wake_ec, key);
-                continue;
-            }
-            const auto left = std::chrono::ceil<std::chrono::microseconds>(
-                deadline - std::chrono::steady_clock::now());
-            if (left.count() <= 0) {
-                retro_eventcount_cancel_wait(&m_wake_ec);
-                out_of_time = true;
-                break;
-            }
-            retro_eventcount_commit_wait_timeout(&m_wake_ec, key, left.count());
-        }
+        // Until woken, or out of the game's time
+        const bool out_of_time = !GameWait(&m_wake_ec, deadline, [&] {
+            return retro_atomic_load_acquire_int(&waiter.woken) != 0;
+        });
 
         return m_combiner.Run([&] {
             RemoveWaiter(waiter);

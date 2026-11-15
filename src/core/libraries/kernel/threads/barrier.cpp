@@ -59,14 +59,9 @@ s32 PS4_SYSV_ABI posix_pthread_barrier_wait(PthreadBarrierT* barrier) {
         return PthreadBarrierSerialThread;
     }
     const u64 generation = word >> 32;
-    for (;;) {
-        const int key = retro_eventcount_prepare_wait(&value->generation_ec);
-        if ((static_cast<u64>(retro_atomic_load_acquire_64(&value->word)) >> 32) != generation) {
-            retro_eventcount_cancel_wait(&value->generation_ec);
-            break;
-        }
-        retro_eventcount_commit_wait(&value->generation_ec, key);
-    }
+    GameWait(&value->generation_ec, 0, [&] {
+        return (static_cast<u64>(retro_atomic_load_acquire_64(&value->word)) >> 32) != generation;
+    });
     return 0;
 }
 

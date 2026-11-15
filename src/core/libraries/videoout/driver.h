@@ -4,6 +4,7 @@
 #pragma once
 
 #include "common/polyfill_thread.h"
+#include "core/libraries/kernel/time.h"
 #include "core/libraries/videoout/video_out.h"
 
 #include <array>
@@ -104,15 +105,9 @@ struct VideoOutPort {
 
     /// Until the next vblank.
     void WaitVblank() {
+        // Not counted running meanwhile (Kernel::GameWait)
         const u64 prev_count = GetVblankStatus().count;
-        for (;;) {
-            const int key = retro_eventcount_prepare_wait(&vblank_ec);
-            if (GetVblankStatus().count != prev_count) {
-                retro_eventcount_cancel_wait(&vblank_ec);
-                return;
-            }
-            retro_eventcount_commit_wait(&vblank_ec, key);
-        }
+        Kernel::GameWait(&vblank_ec, 0, [&] { return GetVblankStatus().count != prev_count; });
     }
 
     s32 FindFreeGroup() const {
@@ -130,14 +125,7 @@ struct VideoOutPort {
     }
 
     void WaitVoLabel(auto&& pred) {
-        while (!pred()) {
-            const int key = retro_eventcount_prepare_wait(&vo_ec);
-            if (pred()) {
-                retro_eventcount_cancel_wait(&vo_ec);
-                return;
-            }
-            retro_eventcount_commit_wait(&vo_ec, key);
-        }
+        Kernel::GameWait(&vo_ec, 0, pred);
     }
 
     void SignalVoLabel() {

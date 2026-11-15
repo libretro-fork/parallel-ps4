@@ -3,6 +3,9 @@
 
 #include "common/game_clock.h"
 
+#define GAME_CLOCK_FIRING ((int64_t) - 1)
+#define GAME_CLOCK_FIRED ((int64_t) - 2)
+
 void game_clock_init(game_clock_t* clock, unsigned fps_num, unsigned fps_den) {
     const uint64_t total = (uint64_t)1000000000u * (fps_den ? fps_den : 1);
     if (!fps_num)
@@ -14,6 +17,59 @@ void game_clock_init(game_clock_t* clock, unsigned fps_num, unsigned fps_den) {
     clock->period = total / fps_num;
     clock->rem = total % fps_num;
     clock->acc = 0;
+    retro_atomic_int_init(&clock->running, 0);
+    {
+        unsigned i;
+        for (i = 0; i < GAME_CLOCK_TIMERS / 64; i++)
+            retro_atomic_64_init(&clock->free_timers[i], -1);
+        for (i = 0; i < GAME_CLOCK_TIMERS; i++) {
+            retro_atomic_64_init(&clock->timers[i].deadline, 0);
+            clock->timers[i].fire = 0;
+            clock->timers[i].ctx = 0;
+            clock->timers[i].oneshot = 0;
+        }
+    }
+}
+
+/* The timers due at @now fire: each once, by whichever thread claims it */
+static void game_clock_fire_due(game_clock_t* clock, uint64_t now) {
+    unsigned i;
+    for (i = 0; i < GAME_CLOCK_TIMERS; i++) {
+        game_clock_timer_t* t = &clock->timers[i];
+        const int64_t d = retro_atomic_load_acquire_64(&t->deadline);
+        if (d > 0 && (uint64_t)d <= now &&
+            retro_atomic_cas_64(&t->deadline, d, GAME_CLOCK_FIRING)) {
+            const int oneshot = t->oneshot;
+            t->fire(t->ctx);
+            if (oneshot) {
+                retro_atomic_store_release_64(&t->deadline, 0);
+                retro_atomic_fetch_or_64(&clock->free_timers[i / 64],
+                                         (int64_t)((uint64_t)1 << (i % 64)));
+            } else {
+                retro_atomic_store_release_64(&t->deadline, GAME_CLOCK_FIRED);
+            }
+        }
+    }
+}
+
+/* The earliest deadline armed, or 0 if none */
+static uint64_t game_clock_earliest(game_clock_t* clock) {
+    uint64_t earliest = 0;
+    unsigned i;
+    for (i = 0; i < GAME_CLOCK_TIMERS; i++) {
+        const int64_t d = retro_atomic_load_acquire_64(&clock->timers[i].deadline);
+        if (d > 0 && (earliest == 0 || (uint64_t)d < earliest))
+            earliest = (uint64_t)d;
+    }
+    return earliest;
+}
+
+/* All idle: the time moves to the earliest deadline, within the frame, and what is due fires */
+static void game_clock_skip(game_clock_t* clock) {
+    const uint64_t earliest = game_clock_earliest(clock);
+    if (earliest)
+        game_clock_advance(clock, earliest);
+    game_clock_fire_due(clock, game_clock_now(clock));
 }
 
 /* The time moves to @to if that is later: never back, whoever moves it */
@@ -37,6 +93,11 @@ void game_clock_frame(game_clock_t* clock) {
     retro_atomic_store_release_64(&clock->frame_end, (int64_t)end);
     game_clock_raise(clock, start);
     retro_atomic_fetch_add_64(&clock->frames, 1);
+    /* Nobody running: the new frame's time is theirs to skip through at once */
+    if (retro_atomic_load_acquire_int(&clock->running) <= 0)
+        game_clock_skip(clock);
+    else
+        game_clock_fire_due(clock, game_clock_now(clock));
 }
 
 uint64_t game_clock_now(game_clock_t* clock) {
@@ -54,4 +115,82 @@ uint64_t game_clock_frames(game_clock_t* clock) {
 uint64_t game_clock_advance(game_clock_t* clock, uint64_t until) {
     const uint64_t end = (uint64_t)retro_atomic_load_acquire_64(&clock->frame_end);
     return game_clock_raise(clock, until < end ? until : end);
+}
+
+static int game_clock_arm_ex(game_clock_t* clock, uint64_t deadline, void (*fire)(void*), void* ctx,
+                             int oneshot) {
+    unsigned w;
+    if (deadline == 0)
+        deadline = 1; /* 0 means free */
+    for (w = 0; w < GAME_CLOCK_TIMERS / 64; w++) {
+        int64_t bits = retro_atomic_load_acquire_64(&clock->free_timers[w]);
+        while (bits != 0) {
+            const uint64_t ubits = (uint64_t)bits;
+            const uint64_t lowest = ubits & (~ubits + 1);
+            if (retro_atomic_cas_64(&clock->free_timers[w], bits, (int64_t)(ubits & ~lowest))) {
+                unsigned bit = 0;
+                game_clock_timer_t* t;
+                while (!((lowest >> bit) & 1u))
+                    bit++;
+                t = &clock->timers[w * 64 + bit];
+                t->fire = fire;
+                t->ctx = ctx;
+                t->oneshot = oneshot;
+                retro_atomic_store_release_64(&t->deadline, (int64_t)deadline);
+                /* Due already, or the time moved past it while it was being armed */
+                if (deadline <= game_clock_now(clock))
+                    game_clock_fire_due(clock, game_clock_now(clock));
+                return (int)(w * 64 + bit);
+            }
+            bits = retro_atomic_load_acquire_64(&clock->free_timers[w]);
+        }
+    }
+    return -1;
+}
+
+int game_clock_arm(game_clock_t* clock, uint64_t deadline, void (*fire)(void*), void* ctx) {
+    return game_clock_arm_ex(clock, deadline, fire, ctx, 0);
+}
+
+int game_clock_arm_oneshot(game_clock_t* clock, uint64_t deadline, void (*fire)(void*), void* ctx) {
+    return game_clock_arm_ex(clock, deadline, fire, ctx, 1);
+}
+
+int game_clock_disarm(game_clock_t* clock, int timer) {
+    game_clock_timer_t* t;
+    int64_t d;
+    int fired;
+    if (timer < 0)
+        return 0;
+    t = &clock->timers[timer];
+    for (;;) {
+        d = retro_atomic_load_acquire_64(&t->deadline);
+        if (d == GAME_CLOCK_FIRED) {
+            fired = 1;
+            break;
+        }
+        if (d == GAME_CLOCK_FIRING)
+            continue; /* its fire is running: a few instructions */
+        if (retro_atomic_cas_64(&t->deadline, d, 0)) {
+            fired = 0;
+            break;
+        }
+    }
+    retro_atomic_store_release_64(&t->deadline, 0);
+    retro_atomic_fetch_or_64(&clock->free_timers[timer / 64],
+                             (int64_t)((uint64_t)1 << (timer % 64)));
+    return fired;
+}
+
+void game_clock_idle(game_clock_t* clock) {
+    if (retro_atomic_fetch_sub_int(&clock->running, 1) == 1)
+        game_clock_skip(clock);
+}
+
+void game_clock_busy(game_clock_t* clock) {
+    retro_atomic_fetch_add_int(&clock->running, 1);
+}
+
+int game_clock_running(game_clock_t* clock) {
+    return retro_atomic_load_acquire_int(&clock->running);
 }

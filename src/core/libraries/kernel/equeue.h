@@ -88,10 +88,11 @@ struct OrbisVideoOutEventData {
 struct EqueueEvent {
     OrbisKernelEvent event;
     void* data = nullptr;
-    std::chrono::steady_clock::time_point time_added;
+    u64 time_added; // on the game's time
     std::chrono::nanoseconds timer_interval;
-    // When the timer next fires, and which arming that is: an older one is stale
-    std::chrono::steady_clock::time_point timer_due{};
+    // When the timer next fires, on the game's time, and which arming that is: an older one is
+    // stale
+    u64 timer_due{};
     u64 timer_generation = 0;
 
     void Clear() {
@@ -156,7 +157,7 @@ private:
 class EqueueInternal {
     struct SmallTimer {
         OrbisKernelEvent event;
-        std::chrono::steady_clock::time_point added;
+        u64 added; // on the game's time
         std::chrono::nanoseconds interval;
     };
 

@@ -17,6 +17,7 @@
 #include "core/libraries/gnmdriver/gnmdriver_init.h"
 #include "core/libraries/kernel/orbis_error.h"
 #include "core/libraries/kernel/process.h"
+#include "core/libraries/kernel/time.h"
 #include "core/libraries/libs.h"
 #include "core/libraries/videoout/video_out.h"
 #include "core/memory.h"
@@ -108,14 +109,10 @@ static void TakeSubmissionLock() {
 }
 
 static void WaitGpuIdle() {
-    for (;;) {
-        const int key = retro_eventcount_prepare_wait(&idle_ec);
-        if (static_cast<u32>(retro_atomic_load_seq_cst_int(&submission_lock)) == 0) {
-            retro_eventcount_cancel_wait(&idle_ec);
-            return;
-        }
-        retro_eventcount_commit_wait(&idle_ec, key);
-    }
+    // Not counted running meanwhile (Kernel::GameWait)
+    Kernel::GameWait(&idle_ec, 0, [] {
+        return static_cast<u32>(retro_atomic_load_seq_cst_int(&submission_lock)) == 0;
+    });
 }
 
 // Write a special NOP packet with N DWs data block
