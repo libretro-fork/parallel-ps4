@@ -8,7 +8,10 @@
  *   - taken as float (not rounded, clamped past full scale) and as 16-bit (rounded, clamped);
  *   - the console's 7.1 orders put into the mix's, each channel at its own gain;
  *   - an input of eight is refused by a mix made for two (here: none of nine).
- *   - the stereo pump still gives the front pair. */
+ *   - the stereo pump still gives the front pair;
+ *   - a volume change ramped across a buffer split in two (a ring's wrap): each frame's gain on
+ *     the line from the old to the new, the new reached at the buffer's last frame, the old
+ *     not at its first (no step). */
 
 #include <stdio.h>
 #include <string.h>
@@ -119,6 +122,21 @@ static void test_stereo_pump(void) {
     audio_mix_pump(ring, 63, 0, 64);
 }
 
+static void test_ramp(void) {
+    float buf[8 * 2];
+    const float from[2] = {0.0f, 1.0f}, to[2] = {1.0f, 0.0f};
+    unsigned i;
+    for (i = 0; i < 16; i++)
+        buf[i] = 1.0f;
+    /* A buffer of 8 frames: 3 then 5 */
+    audio_mix_ramp(buf, 3, 2, 0, 8, from, to);
+    audio_mix_ramp(buf + 6, 5, 2, 3, 8, from, to);
+    for (i = 0; i < 8; i++) {
+        const float t = (float)(i + 1) / 8.0f;
+        CHECK(buf[i * 2] == t && buf[i * 2 + 1] == 1.0f - t, "the ramp, frame by frame");
+    }
+}
+
 int main(void) {
     if (!audio_mix_init_channels(8)) {
         printf("FAIL: init\n");
@@ -127,6 +145,7 @@ int main(void) {
     test_mix();
     test_convert();
     test_stereo_pump();
+    test_ramp();
     if (failures) {
         printf("audio_mix_wide: %d failed\n", failures);
         return 1;

@@ -703,6 +703,19 @@ void audio_mix_convert_s16_wide(float* dst, const int16_t* src, unsigned frames,
          dst[i * 8 + c] = src[i * 8 + order[c]] * gains[c];
 }
 
+void audio_mix_ramp(float* dst, unsigned frames, unsigned width, unsigned at, unsigned total,
+                    const float* from, const float* to)
+{
+   unsigned i, c;
+   const float step = total ? 1.0f / (float)total : 1.0f;
+   for (i = 0; i < frames; i++)
+   {
+      const float t = (float)(at + i + 1) * step;
+      for (c = 0; c < width; c++)
+         dst[i * width + c] *= from[c] + (to[c] - from[c]) * t;
+   }
+}
+
 void audio_mix_convert_f32_wide(float* dst, const float* src, unsigned frames,
                                 const int* order, const float* gains)
 {

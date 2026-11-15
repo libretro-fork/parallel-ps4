@@ -193,6 +193,13 @@ void audio_mix_convert_s16_wide(float* dst, const int16_t* src, unsigned frames,
 void audio_mix_convert_f32_wide(float* dst, const float* src, unsigned frames,
                                 const int* order, const float* gains);
 
+/* A volume changed between two buffers, ramped across the buffer instead of stepped (a step is
+ * a click): @frames frames of @width channels, converted at gain 1.0, frames @at.. of a buffer
+ * of @total, scaled by a gain going from @from[c] to @to[c] over the buffer, reaching @to[c]
+ * at its last frame. */
+void audio_mix_ramp(float* dst, unsigned frames, unsigned width, unsigned at, unsigned total,
+                    const float* from, const float* to);
+
 #ifdef __cplusplus
 }
 #endif

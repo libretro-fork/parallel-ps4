@@ -3,7 +3,6 @@
 
 #pragma once
 
-#include "common/bounded_threadsafe_queue.h"
 #include "common/shared_slots.h"
 #include "common/types.h"
 #include "core/libraries/ajm/ajm.h"
@@ -13,7 +12,6 @@
 #include <array>
 #include <memory>
 #include <span>
-#include <thread>
 #include <utility>
 
 namespace Libraries::Ajm {
@@ -31,7 +29,6 @@ public:
     s32 BatchStartBuffer(u8* p_batch, u32 batch_size, const int priority,
                          AjmBatchError* p_batch_error, u32* p_batch_id);
 
-    void WorkerThread(std::stop_token stop);
     void ProcessBatch(u32 id, std::span<AjmJob> jobs);
 
 private:
@@ -46,9 +43,6 @@ private:
     // Ids from 1: slot id - 1. Read, filled and emptied by any thread with no lock.
     Common::SharedSlots<AjmInstance, MaxInstances - 1> instances;
     Common::SharedSlots<AjmBatch, MaxBatches - 1> batches;
-
-    std::jthread worker_thread{};
-    Common::MPSCQueue<std::shared_ptr<AjmBatch>> batch_queue;
 };
 
 } // namespace Libraries::Ajm

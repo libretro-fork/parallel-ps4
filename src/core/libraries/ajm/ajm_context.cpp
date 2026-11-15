@@ -23,9 +23,7 @@ namespace Libraries::Ajm {
 constexpr u32 ORBIS_AJM_WAIT_INFINITE = -1;
 constexpr int INSTANCE_ID_MASK = 0x3FFF;
 
-AjmContext::AjmContext() {
-    worker_thread = std::jthread([this](std::stop_token stop) { this->WorkerThread(stop); });
-}
+AjmContext::AjmContext() = default;
 
 bool AjmContext::IsRegistered(AjmCodecType type) const {
     return registered_codecs[std::to_underlying(type)];
@@ -58,21 +56,6 @@ s32 AjmContext::ModuleRegister(AjmCodecType type) {
     return ORBIS_OK;
 }
 
-void AjmContext::WorkerThread(std::stop_token stop) {
-    thread_name_set("shadPS4:AjmWorker");
-    while (!stop.stop_requested()) {
-        auto batch = batch_queue.PopWait(stop);
-        if (batch != nullptr && retro_atomic_load_seq_cst_int(&batch->canceled) == 0) {
-            bool expected = false;
-            (retro_atomic_cas_int(&batch->processed, expected, true) ||
-             ((expected = (retro_atomic_load_acquire_int(&batch->processed) != 0)), false));
-            ProcessBatch(batch->id, batch->jobs);
-            retro_atomic_store_release_int(&batch->finished, 1);
-            batch->finished_ec.Notify();
-        }
-    }
-}
-
 void AjmContext::ProcessBatch(u32 id, std::span<AjmJob> jobs) {
     // Perform operation requested by control flags.
     for (auto& job : jobs) {
@@ -103,18 +86,8 @@ s32 AjmContext::BatchWait(const u32 batch_id, const u32 timeout, AjmBatchError* 
         return ORBIS_AJM_ERROR_BUSY;
     }
 
-    // On the game's time; counted running meanwhile, as the decode is its work
-    const auto take = [&batch] { return retro_atomic_cas_int(&batch->finished, 1, 0); };
-    if (timeout == ORBIS_AJM_WAIT_INFINITE) {
-        Kernel::GameWaitRunning(batch->finished_ec.get(), 0, take);
-    } else if (!(timeout == 0
-                     ? take()
-                     : Kernel::GameWaitRunning(
-                           batch->finished_ec.get(),
-                           Kernel::GameDeadlineIn(static_cast<u64>(timeout) * 1'000'000), take))) {
-        (void)retro_atomic_exchange_int(&batch->waiting, 0);
-        return ORBIS_AJM_ERROR_IN_PROGRESS;
-    }
+    // Decoded when it was started (BatchStartBuffer): never in progress, nothing to wait for
+    (void)timeout;
 
     batches.Take(batch_id - 1);
 
@@ -140,11 +113,14 @@ int AjmContext::BatchStartBuffer(u8* p_batch, u32 batch_size, const int priority
     *out_batch_id = static_cast<u32>(*slot) + 1;
     batch_info->id = *out_batch_id;
 
+    // Decoded here, on the game's thread, before the call returns: as the console's decoder,
+    // it is done well within the time the game gives it, so the game finds it done whenever it
+    // looks (a poll with no wait included). A decoder thread of its own was late now and then:
+    // a game that polled found the batch in progress and went on without its sound (FMOD's
+    // streams: a gap, a click). The decode is the game's work, counted running as such.
+    retro_atomic_store_release_int(&batch_info->processed, 1);
     if (!batch_info->jobs.empty()) {
-        batch_queue.EmplaceWait(batch_info);
-    } else {
-        // Empty batches are not submitted to the processor and are marked as finished
-        retro_atomic_store_release_int(&batch_info->finished, 1);
+        ProcessBatch(batch_info->id, batch_info->jobs);
     }
 
     return ORBIS_OK;

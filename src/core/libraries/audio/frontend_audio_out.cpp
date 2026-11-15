@@ -21,7 +21,6 @@ namespace Libraries::AudioOut {
 namespace {
 
 constexpr float INV_VOLUME_0DB = 1.0f / 32768.0f;
-constexpr u64 VOLUME_CHECK_INTERVAL_US = 50000;
 
 // The libretro core plays a port by handing it to the frontend: what the game writes is
 // converted, with the port's volume, straight into its input of the core's mix
@@ -39,11 +38,11 @@ public:
           wide(port.format_info.num_channels == 8 && audio_mix_channels() == 8),
           order(port.format_info.channel_layout),
           input(wide ? audio_mix_input_open_channels(8) : audio_mix_input_open()) {
-        retro_atomic_store_relaxed_int(
-            &gain, std::bit_cast<int>(emu_settings_get_volume_slider() * 0.01f));
+        retro_atomic_store_relaxed_int(&game_gain, std::bit_cast<int>(1.0f));
         for (auto& g : channel_gain) {
             retro_atomic_store_relaxed_int(&g, std::bit_cast<int>(1.0f));
         }
+        applied.fill(emu_settings_get_volume_slider() * 0.01f);
         if (!input) {
             LOG_ERROR(Lib_AudioOut, "No input left in the core's mix: port type {} is silent",
                       static_cast<int>(port.type));
@@ -67,11 +66,31 @@ public:
         if (!input || !ptr) [[unlikely]] {
             return;
         }
-        UpdateVolumeIfChanged();
+        // The call is paced by the game's time (PaceOutput), which keeps a frame and a buffer
+        // queued at most. This bound is only for a frontend that stopped taking frames: set
+        // past what the pace keeps, so that it never holds a paced port back (a port held, then
+        // let go, outputs its late buffers at once: FMOD's output overtakes its mixer)
         Kernel::GameWait(audio_mix_input_room_ec(input), 0, [this] {
-            return audio_mix_input_ready(input, buffer_frames, AUDIO_MIX_FRAME_FRAMES) != 0;
+            return audio_mix_input_ready(input, buffer_frames, AUDIO_MIX_FRAME_FRAMES * 2) != 0;
         });
-        const float g = std::bit_cast<float>(retro_atomic_load_relaxed_int(&gain));
+        // The gains this buffer goes to: the game's port volume times the Volume option's
+        const float slider = emu_settings_get_volume_slider() * 0.01f;
+        std::array<float, 8> target;
+        if (wide) {
+            for (u32 c = 0; c < 8; c++) {
+                target[c] = std::bit_cast<float>(
+                                retro_atomic_load_relaxed_int(&channel_gain[order[c] & 7])) *
+                            slider;
+            }
+        } else {
+            target.fill(std::bit_cast<float>(retro_atomic_load_relaxed_int(&game_gain)) * slider);
+        }
+        const u32 width = wide ? 8 : 2;
+        // A volume that changed is ramped across this buffer from the last one's, as the
+        // device does: stepped, it clicks (a fade, a duck)
+        const bool ramp = !std::equal(target.begin(), target.begin() + width, applied.begin());
+        static constexpr std::array<float, 8> unit{1, 1, 1, 1, 1, 1, 1, 1};
+        const std::array<float, 8>& gains = ramp ? unit : target;
         const u32 sample_bytes = is_float ? 4 : 2;
         const u8* src = static_cast<const u8*>(ptr);
         u32 done = 0;
@@ -83,14 +102,6 @@ public:
             }
             const void* at = src + static_cast<size_t>(done) * num_channels * sample_bytes;
             if (wide) {
-                // Each channel at its own volume, as the game set it, times the option's
-                const float slider = emu_settings_get_volume_slider() * 0.01f;
-                std::array<float, 8> gains;
-                for (u32 c = 0; c < 8; c++) {
-                    gains[c] = std::bit_cast<float>(
-                                   retro_atomic_load_relaxed_int(&channel_gain[order[c] & 7])) *
-                               slider;
-                }
                 if (is_float) {
                     audio_mix_convert_f32_wide(dst, static_cast<const float*>(at), got,
                                                order.data(), gains.data());
@@ -99,13 +110,19 @@ public:
                                                gains.data());
                 }
             } else if (is_float) {
-                audio_mix_convert_f32(dst, static_cast<const float*>(at), got, num_channels, g);
+                audio_mix_convert_f32(dst, static_cast<const float*>(at), got, num_channels,
+                                      gains[0]);
             } else {
-                audio_mix_convert_s16(dst, static_cast<const s16*>(at), got, num_channels, g);
+                audio_mix_convert_s16(dst, static_cast<const s16*>(at), got, num_channels,
+                                      gains[0]);
+            }
+            if (ramp) {
+                audio_mix_ramp(dst, got, width, done, buffer_frames, applied.data(), target.data());
             }
             audio_mix_input_commit(input, got);
             done += got;
         }
+        applied = target;
     }
 
     void WaitsPast(int frame) override {
@@ -127,23 +144,10 @@ public:
                 &channel_gain[i],
                 std::bit_cast<int>(static_cast<float>(ch_volumes[i]) * INV_VOLUME_0DB));
         }
-        retro_atomic_store_relaxed_int(
-            &gain, std::bit_cast<int>(max_channel_gain * emu_settings_get_volume_slider() * 0.01f));
     }
 
 private:
     // The Volume option can change while the game runs.
-    void UpdateVolumeIfChanged() {
-        const u64 now = Kernel::sceKernelGetProcessTime();
-        if (now - last_volume_check_time < VOLUME_CHECK_INTERVAL_US) {
-            return;
-        }
-        last_volume_check_time = now;
-        retro_atomic_store_relaxed_int(
-            &gain,
-            std::bit_cast<int>(emu_settings_get_volume_slider() * 0.01f *
-                               std::bit_cast<float>(retro_atomic_load_relaxed_int(&game_gain))));
-    }
 
     const u32 buffer_frames;
     const u32 num_channels;
@@ -155,8 +159,10 @@ private:
     audio_mix_input_t* input;
     // Wide: each of the port's channels' volume as the game set it (its order)
     std::array<retro_atomic_int_t, 8> channel_gain{};
-    retro_atomic_int_t gain{1};
-    retro_atomic_int_t game_gain{1};
+    // The stereo volume: the port's loudest channel's, as the game set it
+    retro_atomic_int_t game_gain{};
+    // The gains the last buffer ended at (the writers')
+    std::array<float, 8> applied{};
     u64 last_volume_check_time{0};
 };
 

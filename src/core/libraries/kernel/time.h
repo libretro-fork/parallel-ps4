@@ -171,15 +171,6 @@ bool GameWait(retro_eventcount_t* ec, u64 deadline, Ready&& ready) {
     return GameWaitAs(ec, deadline, ready, IsGameThread());
 }
 
-/// The same, for work the waiter hands to a service thread of the emulator (an AJM decode):
-/// the waiter stays counted running, as the work is its own, so the time does not skip past
-/// it, and its frame is not done before the work is.
-template <typename Ready>
-bool GameWaitRunning(retro_eventcount_t* ec, u64 deadline, Ready&& ready) {
-    (void)IsGameThread(); // one that yielded counts running again
-    return GameWaitAs(ec, deadline, ready, false);
-}
-
 namespace Dev {
 u64& GetInitialPtc();
 
