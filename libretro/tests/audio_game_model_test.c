@@ -21,8 +21,10 @@
  * stops after a few buffers (the frame done without them).
  * Each case: from the first frame with sound, exactly 800 samples a run, every one the game's,
  * once and in order: nothing padded, nothing late, nothing dropped, and no latency but the
- * frame's own. The stopped engine: its sound to the end, then silence, and no wait that does
- * not end. */
+ * frame's own. The stopped engine: its sound to the end (its last, less than a frame, held back
+ * whole while it was still writing, then played), then silence, and no wait that does not end.
+ * FMOD's: no slot output before its mixer filled it (built with MODEL_UNPACED, Output as fast
+ * as the queue has room, as before: it fails). */
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -55,6 +57,7 @@ enum {
     CASE_HEAVY,
     CASE_SPINNER,
     CASE_STOPS,
+    CASE_FMOD,
     CASE_COUNT
 };
 static const char* const case_names[CASE_COUNT] = {
@@ -63,7 +66,8 @@ static const char* const case_names[CASE_COUNT] = {
     "relative sleeper, a thread blocked on the engine's lock",
     "a render thread busy 15 ms a frame",
     "a thread spinning without a yield",
-    "an engine that stops"};
+    "an engine that stops",
+    "FMOD: a mixer two 256-frame slots ahead, an output thread without a wait for it"};
 static int which;
 
 static int stopping(void* ctx) {
@@ -90,6 +94,82 @@ static void write_buffer(unsigned* count) {
         audio_mix_input_commit(port, got);
         left -= got;
     }
+}
+
+/* FMOD's engine: its mixer fills 256-frame slots of a 512-frame ring, each when its output
+ * thread has taken the one before, and works the host's time at it (1 ms). The output thread
+ * outputs the next slot, sceAudioOutOutput paced as the console paces it, then gives the slot
+ * back to the mixer: it never waits for the mixer, relying on the call's pace to leave the
+ * mixer the time to fill it. Output returning faster (as before: as soon as the queue had room)
+ * outputs slots the mixer has not filled again yet: the same sound twice, a click. */
+static float fmod_ring[2][BUFFER * 2];
+static retro_atomic_int_t fmod_free; /* slots the mixer may fill */
+static retro_eventcount_t fmod_ec;
+
+static int fmod_slot_free(void* ctx) {
+    (void)ctx;
+    for (;;) {
+        const int n = retro_atomic_load_acquire_int(&fmod_free);
+        if (n == 0)
+            return retro_atomic_load_acquire_int(&stop);
+        if (retro_atomic_cas_int(&fmod_free, n, n - 1))
+            return 1;
+    }
+}
+
+static void fmod_mixer_thread(void* data) {
+    unsigned count = 0, slot = 0, i;
+    (void)data;
+    while (!retro_atomic_load_acquire_int(&stop)) {
+        game_clock_wait(&clk, &fmod_ec, 0, fmod_slot_free, NULL, 1);
+        if (retro_atomic_load_acquire_int(&stop))
+            break;
+        retro_sleep_us(1000); /* its mixing: the host's time, counted running */
+        for (i = 0; i < BUFFER; i++, count++) {
+            fmod_ring[slot][i * 2 + 0] = (float)(count & 0x3fff);
+            fmod_ring[slot][i * 2 + 1] = (float)((count >> 14) & 0x3fff);
+        }
+        slot ^= 1;
+    }
+    game_clock_idle(&clk);
+}
+
+static void fmod_output_thread(void* data) {
+    uint64_t start = 0, count = 0;
+    unsigned slot = 0;
+    (void)data;
+    /* Both slots mixed before it starts */
+    while (retro_atomic_load_acquire_int(&fmod_free) != 0 && !retro_atomic_load_acquire_int(&stop))
+        retro_sleep_us(100);
+    retro_sleep_us(1500);
+    while (!retro_atomic_load_acquire_int(&stop)) {
+        unsigned left = BUFFER;
+        const float* src = fmod_ring[slot];
+#ifndef MODEL_UNPACED
+        /* sceAudioOutOutput's pace (audioout.cpp, PaceOutput) */
+        const uint64_t due = game_clock_cadence(&clk, &start, &count, BUFFER, 48000);
+        if (due > game_clock_now(&clk))
+            game_clock_wait(&clk, &sleep_ec, due, stopping, NULL, 1);
+#else
+        (void)start;
+        (void)count;
+#endif
+        game_clock_wait(&clk, audio_mix_input_room_ec(port), 0, port_ready, NULL, 1);
+        if (retro_atomic_load_acquire_int(&stop))
+            break;
+        while (left) {
+            float* dst = NULL;
+            const unsigned got = audio_mix_input_reserve(port, &dst, left);
+            memcpy(dst, src, got * 2 * sizeof(float));
+            src += got * 2;
+            audio_mix_input_commit(port, got);
+            left -= got;
+        }
+        slot ^= 1;
+        retro_atomic_fetch_add_int(&fmod_free, 1);
+        retro_eventcount_notify(&fmod_ec);
+    }
+    game_clock_idle(&clk);
 }
 
 static int lock_free(void* ctx) {
@@ -256,8 +336,16 @@ static int run_case(int c) {
     retro_atomic_int_init(&stop, 0);
     retro_atomic_int_init(&lock_owner, 0);
     /* Each game thread counts running from its creation, as the kernel's do */
-    game_clock_busy(&clk);
-    threads[n++] = sthread_create(engine_thread, NULL);
+    if (c == CASE_FMOD) {
+        retro_atomic_int_init(&fmod_free, 2);
+        game_clock_busy(&clk);
+        threads[n++] = sthread_create(fmod_mixer_thread, NULL);
+        game_clock_busy(&clk);
+        threads[n++] = sthread_create(fmod_output_thread, NULL);
+    } else {
+        game_clock_busy(&clk);
+        threads[n++] = sthread_create(engine_thread, NULL);
+    }
     game_clock_busy(&clk);
     threads[n++] = sthread_create(render_thread, NULL);
     if (c == CASE_YIELDER || c == CASE_LOCK_WAITER || c == CASE_SPINNER) {
@@ -291,7 +379,8 @@ static int run_case(int c) {
             /* The stopped engine: what it wrote, then silence */
             const unsigned left = c == CASE_STOPS ? STOP_AFTER * BUFFER - sent : FRAME;
             const unsigned want = left < FRAME ? left : FRAME;
-            if (got != want)
+            /* Its last, less than a frame, held back whole while it was still writing */
+            if (got != want && !(want < FRAME && got == 0))
                 padded++;
             for (i = 0; i < FRAME; i++) {
                 const unsigned v =
@@ -318,6 +407,7 @@ static int run_case(int c) {
     retro_eventcount_notify(&vblank_ec);
     retro_eventcount_notify(&lock_ec);
     retro_eventcount_notify(&never_ec);
+    retro_eventcount_notify(&fmod_ec);
     audio_mix_notify_room();
     for (i = 0; i < n; i++)
         sthread_join(threads[i]);
@@ -327,6 +417,8 @@ static int run_case(int c) {
     printf("audio_game_model: %s: sound from run %u, %u runs not a whole frame, %u samples "
            "wrong\n",
            case_names[c], first, padded, bad);
+    if (c == CASE_STOPS && sent != STOP_AFTER * BUFFER)
+        padded++;
     return !started || first != 1 || padded || bad;
 }
 
@@ -339,6 +431,7 @@ int main(void) {
     retro_eventcount_init(&lock_ec);
     retro_eventcount_init(&audio_ec);
     retro_eventcount_init(&never_ec);
+    retro_eventcount_init(&fmod_ec);
     retro_atomic_int_init(&spin_word, 0);
     for (c = 0; c < CASE_COUNT; c++)
         failures += run_case(c) ? 1 : 0;

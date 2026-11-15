@@ -26,10 +26,11 @@ constexpr u64 VOLUME_CHECK_INTERVAL_US = 50000;
 // The libretro core plays a port by handing it to the frontend: what the game writes is
 // converted, with the port's volume, straight into its input of the core's mix
 // (libretro/audio_mix.h): to stereo, or a port of eight channels as 7.1 where the mix is
-// surround (the frontend takes it), in the frontend's order. The port is paced by the frames, as
-// a device would pace it: the mix takes one frame of every port's sound (AUDIO_MIX_FRAME_FRAMES)
-// as each frame ends, and a port waits while more than that is queued, on the game's time
-// (Kernel::GameWait): no buffer kept ahead, no timeout.
+// surround (the frontend takes it), in the frontend's order. The call is paced a buffer's time
+// at a time on the game's time, as the device paces it (audioout.cpp, PaceOutput); the mix takes
+// one frame of every port's sound (AUDIO_MIX_FRAME_FRAMES) each retro_run, and a port waits
+// besides while more than that is queued, on the game's time (Kernel::GameWait): no buffer kept
+// ahead, no timeout.
 class FrontendPortBackend final : public PortBackend {
 public:
     explicit FrontendPortBackend(const PortOut& port)

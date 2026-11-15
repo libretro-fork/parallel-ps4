@@ -17,12 +17,12 @@
 
 static int failures = 0;
 
-#define CHECK(cond, what)                                                                      \
-    do {                                                                                       \
-        if (!(cond)) {                                                                         \
-            printf("FAIL %s (line %d)\n", what, __LINE__);                                     \
-            ++failures;                                                                        \
-        }                                                                                      \
+#define CHECK(cond, what)                                                                          \
+    do {                                                                                           \
+        if (!(cond)) {                                                                             \
+            printf("FAIL %s (line %d)\n", what, __LINE__);                                         \
+            ++failures;                                                                            \
+        }                                                                                          \
     } while (0)
 
 static void write_frames(audio_mix_input_t* in, const float* src, unsigned frames,
@@ -41,7 +41,7 @@ static void write_frames(audio_mix_input_t* in, const float* src, unsigned frame
 
 static void test_mix(void) {
     static const float wide[2 * 8] = {100, 200, 300, 400, 500, 600, 700, 800,
-                                      -1, -2, -3, -4, -5, -6, -7, 99999};
+                                      -1,  -2,  -3,  -4,  -5,  -6,  -7,  99999};
     static const float stereo[2 * 2] = {10.25f, 20.5f, 1, 2};
     float f[2 * 8];
     int16_t s[2 * 8];
@@ -52,9 +52,10 @@ static void test_mix(void) {
     CHECK(a && b, "an input of 8 and one of 2");
     CHECK(audio_mix_input_open_channels(6) == NULL, "no input of 6");
 
+    /* A frame of two: an input still writing with less than the frame is held back */
     write_frames(a, wide, 2, 8);
     write_frames(b, stereo, 2, 2);
-    n = audio_mix_mix(1024, &channels);
+    n = audio_mix_mix(2, &channels);
     CHECK(n == 2 && channels == 8, "eight channels played: the result is 7.1");
     audio_mix_take_f32(f, 0, 2, 8);
     CHECK(f[0] == 110.25f / 32768.0f && f[1] == 220.5f / 32768.0f,
@@ -69,14 +70,23 @@ static void test_mix(void) {
     audio_mix_take_f32(f, 1, 1, 8);
     CHECK(f[0] == -0.0f + (-1.0f + 1.0f) / 32768.0f && f[1] == 0.0f, "from a later frame");
 
-    /* Only stereo: stereo */
+    /* The 7.1 input still open, silent this frame: still 7.1, the layout does not flip */
     write_frames(b, stereo, 2, 2);
-    n = audio_mix_mix(1024, &channels);
-    CHECK(n == 2 && channels == 2, "only stereo played: the result is stereo");
+    n = audio_mix_mix(2, &channels);
+    CHECK(n == 2 && channels == 8, "a 7.1 input open but silent: the result stays 7.1");
+    audio_mix_take_f32(f, 0, 2, 8);
+    CHECK(f[0] == 10.25f / 32768.0f && f[2] == 0.0f && f[8 + 1] == 2.0f / 32768.0f,
+          "the stereo in the front pair, the rest silent");
+
+    /* Only stereo open: stereo */
+    audio_mix_input_close(a);
+    audio_mix_mix(2, &channels);
+    write_frames(b, stereo, 2, 2);
+    n = audio_mix_mix(2, &channels);
+    CHECK(n == 2 && channels == 2, "only stereo open: the result is stereo");
     audio_mix_take_f32(f, 0, 2, 2);
     CHECK(f[0] == 10.25f / 32768.0f && f[3] == 2.0f / 32768.0f, "stereo taken as stereo");
 
-    audio_mix_input_close(a);
     audio_mix_input_close(b);
     audio_mix_mix(1024, &channels);
 }

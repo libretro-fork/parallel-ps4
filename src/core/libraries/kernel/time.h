@@ -130,7 +130,11 @@ bool GameSemaWait(Sema& sema, u64 deadline) {
                                           &timer_ctx)
                                     : -1;
     ASSERT_MSG(deadline == 0 || timer >= 0, "All of the game's timers are armed");
+    // Parked, idle: a release of it in flight holds the time until it has run
+    int slot = -1;
     if (timer_ctx.counted) {
+        slot =
+            game_clock_park(clock, &sema.releases, retro_atomic_load_seq_cst_int(&sema.releases));
         game_clock_idle(clock);
     }
     sema.acquire();
@@ -140,8 +144,10 @@ bool GameSemaWait(Sema& sema, u64 deadline) {
         if (timer_ctx.counted) {
             game_clock_busy(clock);
         }
+        game_clock_unpark(clock, slot);
         return true;
     }
+    game_clock_unpark(clock, slot);
     // The timer's release, or another as well: then both are taken
     return sema.try_acquire_pending();
 }

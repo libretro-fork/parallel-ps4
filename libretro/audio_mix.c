@@ -73,6 +73,8 @@ static int pump_wide;
 /* Each input's write count at the mix before the last (audio_mix_frame_ready), and at the last */
 static uint32_t mix_seen_write[AUDIO_MIX_INPUTS];
 static uint32_t mix_last_write[AUDIO_MIX_INPUTS];
+/* Inputs held back from this mix (audio_mix_mix): left as they are */
+static unsigned char pump_hold[AUDIO_MIX_INPUTS];
 /* Told of every commit, in the sources' process (audio_mix_set_written) */
 static void (*written_fn)(void* ctx);
 static void* written_ctx;
@@ -380,7 +382,7 @@ static unsigned pump_mix(unsigned frames)
    {
       audio_mix_input_t* in = &shm->inputs[i];
       int state             = retro_atomic_load_acquire_int(&in->state);
-      if (state == INPUT_OPEN)
+      if (state == INPUT_OPEN && !pump_hold[i])
       {
          unsigned got = pump_add(in, frames);
          if (got > most)
@@ -435,11 +437,24 @@ unsigned audio_mix_pump_f32(float* ring, uint32_t ring_mask, uint32_t at, unsign
 
 unsigned audio_mix_mix(unsigned frames, unsigned* channels)
 {
-   unsigned i;
-   const unsigned most = pump_mix(frames);
+   unsigned i, most;
+   /* A source still writing (it wrote in the last frame) that has less than the frame is held
+    * back whole, not mixed with silence after it (a gap): it is a source starting, whose
+    * first sound lands mid-frame, or one the frame ended without (retro_run waited as long as
+    * the game ran). It plays from the next frame, unbroken, its sound a frame later at most. */
    for (i = 0; i < AUDIO_MIX_INPUTS; i++)
    {
       audio_mix_input_t* in = &shm->inputs[i];
+      const unsigned have   = queued_frames(in);
+      pump_hold[i]          = retro_atomic_load_acquire_int(&in->state) == INPUT_OPEN &&
+                     (uint32_t)retro_atomic_load_acquire_int(&in->write) != mix_seen_write[i] &&
+                     have && have < frames;
+   }
+   most = pump_mix(frames);
+   for (i = 0; i < AUDIO_MIX_INPUTS; i++)
+   {
+      audio_mix_input_t* in = &shm->inputs[i];
+      pump_hold[i]          = 0;
       /* Where each input's source had written to, for audio_mix_frame_ready */
       mix_seen_write[i] = mix_last_write[i];
       mix_last_write[i] = (uint32_t)retro_atomic_load_acquire_int(&in->write);

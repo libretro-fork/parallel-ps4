@@ -124,9 +124,10 @@ struct PortOut {
     std::unique_ptr<PortBackend> impl{};
 
     /// The game's buffer is handed to the frontend's mix in the game's own call, straight
-    /// from where the game wrote it: no copy of it, no thread, no timer. The mix paces the
-    /// call as a device would, by what the frontend takes (frontend_audio_out.cpp). The
-    /// game's calls on a port run one at a time in writers; volume and mix level changes
+    /// from where the game wrote it: no copy of it, no thread, no timer. The call returns
+    /// once a buffer's time on the game's time, as the device paces it (PaceOutput), and the
+    /// mix holds it back besides while more than a frame is queued (frontend_audio_out.cpp).
+    /// The game's calls on a port run one at a time in writers; volume and mix level changes
     /// in control.
     retro_atomic_int_t closing{0};
     Common::Combiner writers;
@@ -137,6 +138,10 @@ struct PortOut {
     u32 sample_rate = 48000;
     u32 buffer_frames = 1024;
     retro_atomic_64_t last_output_time{0};
+    /// The call's pace, on the game's time (PaceOutput): the buffers returned since
+    /// pace_start, which is when the cadence (re)started. The port's writers only.
+    uint64_t pace_start = 0;
+    uint64_t pace_buffers = 0;
     std::array<s32, 8> volume;
     s32 userId = 0;
     s32 mixLevelPadSpk = ORBIS_AUDIO_OUT_MIXLEVEL_PADSPK_DEFAULT;

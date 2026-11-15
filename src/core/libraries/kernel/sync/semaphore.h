@@ -7,6 +7,7 @@
 #include <atomic>
 #include <chrono>
 
+#include <retro_atomic.h>
 #include "common/assert.h"
 #include "common/types.h"
 
@@ -51,7 +52,12 @@ public:
 #endif
     }
 
+    /// Bumped by every release, before it: a game thread parked on it (GameSemaWait) is woken
+    /// once it has moved on (game_clock_park)
+    retro_atomic_int_t releases{};
+
     void release() {
+        retro_atomic_fetch_add_seq_cst_int(&releases, 1);
 #ifdef _WIN64
         ASSERT_MSG(ReleaseSemaphore(sem, 1, nullptr) != 0, "Failed to release Win32 semaphore: {}",
                    GetLastError());

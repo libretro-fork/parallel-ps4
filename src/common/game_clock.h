@@ -32,6 +32,16 @@ typedef struct game_clock_timer {
     int oneshot; /* freed once fired: nobody disarms it */
 } game_clock_timer_t;
 
+/* A game thread parked on something tracked, counted idle: the word its wake bumps (an
+ * eventcount's epoch, a semaphore's releases) and its value when it parked. A word moved on
+ * since is a wake in flight: the thread is about to run, and the time waits for it. */
+#define GAME_CLOCK_PARKED 1024
+
+typedef struct game_clock_parked {
+    retro_atomic_ptr_t word; /* retro_atomic_int_t*, NULL: free */
+    retro_atomic_int_t key;
+} game_clock_parked_t;
+
 typedef struct game_clock {
     retro_atomic_64_t now;       /* the time */
     retro_atomic_64_t frame_end; /* the most the time may reach before the next frame */
@@ -45,6 +55,8 @@ typedef struct game_clock {
     retro_atomic_int_t running;
     retro_atomic_64_t free_timers[GAME_CLOCK_TIMERS / 64]; /* a bit a timer, set if free */
     game_clock_timer_t timers[GAME_CLOCK_TIMERS];
+    retro_atomic_64_t free_parked[GAME_CLOCK_PARKED / 64]; /* a bit a slot, set if free */
+    game_clock_parked_t parked[GAME_CLOCK_PARKED];
     /* The frame is wanted finished (game_clock_finish): its deadlines are not held back by
      * threads running */
     retro_atomic_int_t finishing;
@@ -76,6 +88,14 @@ void game_clock_set_done(game_clock_t* clock, retro_atomic_int_t* done_frame,
  * what is due fires, whoever is running. So a thread that never waits (a spin with no yield)
  * does not hold the frame, and the frame's sleepers all get their time. */
 void game_clock_finish(game_clock_t* clock);
+
+/* A cadence on the game's time: something done every @units of @rate a second (a device's
+ * buffer: frames of a sample rate), counted from *@start in whole units so it does not drift.
+ * Returns when the next one is due, and counts it. The first one, and the first after more
+ * than eight periods without one (a stall), are due now, and the cadence starts again there.
+ * @start and @count are the caller's, 0 to begin. */
+uint64_t game_clock_cadence(game_clock_t* clock, uint64_t* start, uint64_t* count, uint64_t units,
+                            uint64_t rate);
 
 /* The time now */
 uint64_t game_clock_now(game_clock_t* clock);
@@ -109,6 +129,16 @@ int game_clock_disarm(game_clock_t* clock, int timer);
  * game_clock_idle at its end. */
 void game_clock_idle(game_clock_t* clock);
 void game_clock_busy(game_clock_t* clock);
+
+/* A counted game thread parks, idle, on a wait whose wake bumps *@word (@key: its value
+ * now): until it has run again (game_clock_unpark), a wake of it in flight (the word moved
+ * on) holds the time, so that the time does not skip past a thread woken by another that then
+ * waits (an engine's output thread waking its mixer, then sleeping to its next buffer). Each
+ * time it parks again in the same wait, game_clock_repark with the new key. Returns the
+ * slot, or -1 if none is left (the wait goes on untracked). */
+int game_clock_park(game_clock_t* clock, retro_atomic_int_t* word, int key);
+void game_clock_repark(game_clock_t* clock, int slot, int key);
+void game_clock_unpark(game_clock_t* clock, int slot);
 
 /* The game threads counted running */
 int game_clock_running(game_clock_t* clock);

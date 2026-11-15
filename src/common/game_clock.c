@@ -30,6 +30,15 @@ void game_clock_init(game_clock_t* clock, unsigned fps_num, unsigned fps_den) {
         }
     }
     retro_atomic_int_init(&clock->finishing, 0);
+    {
+        unsigned i;
+        for (i = 0; i < GAME_CLOCK_PARKED / 64; i++)
+            retro_atomic_64_init(&clock->free_parked[i], -1);
+        for (i = 0; i < GAME_CLOCK_PARKED; i++) {
+            retro_atomic_ptr_init(&clock->parked[i].word, 0);
+            retro_atomic_int_init(&clock->parked[i].key, 0);
+        }
+    }
     clock->done_frame = 0;
     clock->done = 0;
     clock->done_ctx = 0;
@@ -75,15 +84,31 @@ static uint64_t game_clock_earliest(game_clock_t* clock) {
     return earliest;
 }
 
+/* A parked thread has been woken and has not run yet */
+static int game_clock_wake_in_flight(game_clock_t* clock) {
+    unsigned i;
+    for (i = 0; i < GAME_CLOCK_PARKED; i++) {
+        retro_atomic_int_t* word =
+            (retro_atomic_int_t*)retro_atomic_load_acquire_ptr(&clock->parked[i].word);
+        if (word && retro_atomic_load_seq_cst_int(word) !=
+                        retro_atomic_load_acquire_int(&clock->parked[i].key))
+            return 1;
+    }
+    return 0;
+}
+
 /* All idle: the time moves to the earliest deadline, within the frame, and what is due fires.
- * The frame being finished: to each deadline within it in turn, all of them. */
+ * The frame being finished: to each deadline within it in turn, all of them. Not while a
+ * parked thread's wake is in flight: it runs first, and skips again once it waits. */
 static void game_clock_skip(game_clock_t* clock) {
-    uint64_t earliest = game_clock_earliest(clock);
-    uint64_t next;
+    uint64_t earliest, next;
+    if (game_clock_wake_in_flight(clock))
+        return;
+    earliest = game_clock_earliest(clock);
     if (earliest)
         game_clock_advance(clock, earliest);
     game_clock_fire_due(clock, game_clock_now(clock));
-    while (retro_atomic_load_acquire_int(&clock->finishing) &&
+    while (retro_atomic_load_acquire_int(&clock->finishing) && !game_clock_wake_in_flight(clock) &&
            (earliest = game_clock_earliest(clock)) != 0 &&
            earliest <= game_clock_frame_end(clock)) {
         game_clock_advance(clock, earliest);
@@ -221,6 +246,20 @@ int game_clock_disarm(game_clock_t* clock, int timer) {
     return fired;
 }
 
+uint64_t game_clock_cadence(game_clock_t* clock, uint64_t* start, uint64_t* count, uint64_t units,
+                            uint64_t rate) {
+    const uint64_t now = game_clock_now(clock);
+    const uint64_t period = units * 1000000000u / (rate ? rate : 1);
+    uint64_t due = *start + *count * units * 1000000000u / (rate ? rate : 1);
+    if (*count == 0 || now > due + 8 * period) {
+        *start = now;
+        *count = 0;
+        due = now;
+    }
+    ++*count;
+    return due;
+}
+
 void game_clock_finish(game_clock_t* clock) {
     retro_atomic_store_release_int(&clock->finishing, 1);
     game_clock_skip(clock);
@@ -256,6 +295,46 @@ void game_clock_resume(game_clock_t* clock, int* yielded) {
     game_clock_busy(clock);
 }
 
+int game_clock_park(game_clock_t* clock, retro_atomic_int_t* word, int key) {
+    unsigned w;
+    for (w = 0; w < GAME_CLOCK_PARKED / 64; w++) {
+        int64_t bits = retro_atomic_load_acquire_64(&clock->free_parked[w]);
+        while (bits != 0) {
+            const uint64_t ubits = (uint64_t)bits;
+            const uint64_t lowest = ubits & (~ubits + 1);
+            if (retro_atomic_cas_64(&clock->free_parked[w], bits, (int64_t)(ubits & ~lowest))) {
+                unsigned bit = 0;
+                game_clock_parked_t* p;
+                while (!((lowest >> bit) & 1u))
+                    bit++;
+                p = &clock->parked[w * 64 + bit];
+                retro_atomic_store_release_int(&p->key, key);
+                retro_atomic_store_release_ptr(&p->word, word);
+                return (int)(w * 64 + bit);
+            }
+            bits = retro_atomic_load_acquire_64(&clock->free_parked[w]);
+        }
+    }
+    return -1;
+}
+
+void game_clock_repark(game_clock_t* clock, int slot, int key) {
+    if (slot < 0)
+        return;
+    retro_atomic_store_release_int(&clock->parked[slot].key, key);
+    /* The wake that held the time was not for it after all: the time may move on now */
+    if (retro_atomic_load_acquire_int(&clock->running) <= 0 ||
+        retro_atomic_load_acquire_int(&clock->finishing))
+        game_clock_skip(clock);
+}
+
+void game_clock_unpark(game_clock_t* clock, int slot) {
+    if (slot < 0)
+        return;
+    retro_atomic_store_release_ptr(&clock->parked[slot].word, 0);
+    retro_atomic_fetch_or_64(&clock->free_parked[slot / 64], (int64_t)((uint64_t)1 << (slot % 64)));
+}
+
 struct game_clock_wait_timer {
     game_clock_t* clock;
     retro_eventcount_t* ec;
@@ -276,7 +355,7 @@ static void game_clock_wait_fire(void* ctx) {
 int game_clock_wait(game_clock_t* clock, retro_eventcount_t* ec, uint64_t deadline,
                     int (*ready)(void* ctx), void* ctx, int counted) {
     struct game_clock_wait_timer t;
-    int timer = -1, ok = 0, fired;
+    int timer = -1, ok = 0, fired, slot = -2; /* -2: not parked yet */
     if (ready(ctx))
         return 1;
     if (deadline != 0 && deadline <= game_clock_now(clock))
@@ -287,8 +366,6 @@ int game_clock_wait(game_clock_t* clock, retro_eventcount_t* ec, uint64_t deadli
     t.counted = counted;
     if (deadline != 0)
         timer = game_clock_arm(clock, deadline, game_clock_wait_fire, &t);
-    if (counted)
-        game_clock_idle(clock);
     for (;;) {
         const int key = retro_eventcount_prepare_wait(ec);
         if (ready(ctx)) {
@@ -300,11 +377,28 @@ int game_clock_wait(game_clock_t* clock, retro_eventcount_t* ec, uint64_t deadli
             retro_eventcount_cancel_wait(ec);
             break;
         }
+        /* Parked, idle: the first time it parks, then again after a wake that was not for it */
+        if (counted) {
+            if (slot == -2) {
+                slot = game_clock_park(clock, &ec->epoch, key);
+                game_clock_idle(clock);
+            } else {
+                game_clock_repark(clock, slot, key);
+            }
+        }
         retro_eventcount_commit_wait(ec, key);
     }
-    /* A timer that fired handed this thread its count back */
+    /* Running again: counted before its slot goes, so that the time never finds it neither
+     * running nor woken */
     fired = timer >= 0 && game_clock_disarm(clock, timer);
-    if (counted && !fired)
-        game_clock_busy(clock);
+    if (counted && slot != -2) {
+        /* A timer that fired handed this thread its count back */
+        if (!fired)
+            game_clock_busy(clock);
+        game_clock_unpark(clock, slot);
+    } else if (fired && counted) {
+        /* Fired before it ever parked: its count was handed to it, and it never idled */
+        game_clock_idle(clock);
+    }
     return ok;
 }

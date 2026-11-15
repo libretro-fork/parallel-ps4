@@ -157,6 +157,22 @@ void AdjustVol() {
 
 static void SetPortVolume(PortOut& port_ref, s32 flag, s32 vol_value);
 
+/// The console's pace: sceAudioOutOutput returns once a buffer's time, as the device takes
+/// each buffer, not as fast as there is room. An engine that mixes ahead into a small ring
+/// and outputs from it (FMOD: 256-frame slots of a 512-frame ring) relies on that: returning
+/// a few buffers at once lets its output overtake its mixer and play halves it has not
+/// written yet, a click every buffer. Waited for on the game's time (a sleep to the buffer's
+/// deadline): the first buffer, and the first after the game stopped outputting for a while,
+/// go at once, each one after a buffer's time later, counted in whole frames of the port's
+/// rate so the pace does not drift. Among the port's writers.
+static void PaceOutput(PortOut& port) {
+    const u64 due = game_clock_cadence(Kernel::GameClock(), &port.pace_start, &port.pace_buffers,
+                                       port.buffer_frames, port.sample_rate);
+    if (due > Kernel::GameNow()) {
+        Kernel::GameSleepUntil(due);
+    }
+}
+
 /// Hands @ptr, a buffer of the port's, to its output. Among the port's writers.
 static bool OutputBuffer(PortOut& port, const void* ptr) {
     if (retro_atomic_load_acquire_int(&port.closing) != 0) {
@@ -495,6 +511,7 @@ s32 PS4_SYSV_ABI sceAudioOutOutput(s32 handle, void* ptr) {
                        ? ORBIS_AUDIO_OUT_ERROR_NOT_OPENED
                        : 0;
         }
+        PaceOutput(*port);
         if (!OutputBuffer(*port, ptr)) {
             LOG_DEBUG(Lib_AudioOut, "Port {} closed", port_id);
             return ORBIS_AUDIO_OUT_ERROR_NOT_OPENED;
@@ -581,13 +598,22 @@ s32 PS4_SYSV_ABI sceAudioOutOutputs(OrbisAudioOutOutputParam* param, u32 num) {
         }
     }
 
-    // Each buffer to its port's mix, among the port's writers, from where the game wrote it
+    // Each buffer to its port's mix, among the port's writers, from where the game wrote it.
+    // One buffer's time for the call, not one a port: the ports are fed together (FMOD's main
+    // and BGM), so pacing each would halve the rate. The first port given a buffer paces it.
+    bool paced = false;
     for (u32 i = 0; i < num; i++) {
         if (param[i].ptr == nullptr) {
             continue;
         }
         auto& port = ports[i];
-        if (!port->writers.Run([&] { return OutputBuffer(*port, param[i].ptr); })) {
+        if (!port->writers.Run([&] {
+                if (!paced) {
+                    paced = true;
+                    PaceOutput(*port);
+                }
+                return OutputBuffer(*port, param[i].ptr);
+            })) {
             LOG_DEBUG(Lib_AudioOut, "Port closed");
             return ORBIS_AUDIO_OUT_ERROR_NOT_OPENED;
         }
