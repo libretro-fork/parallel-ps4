@@ -921,8 +921,4 @@ IntervalList<> AddressSpace::GetUsableRegions() {
 #endif
 }
 
-u64 AddressSpace::BackingBytes() const noexcept {
-    return BackingSize;
-}
-
 } // namespace Core

@@ -53,8 +53,7 @@ struct UniqueBuffer {
         : device{other.device}, buffer{std::exchange(other.buffer, VK_NULL_HANDLE)},
           bda_addr{std::exchange(other.bda_addr, 0)},
           allocator{std::exchange(other.allocator, nullptr)},
-          allocation{std::exchange(other.allocation, nullptr)},
-          imported{std::exchange(other.imported, VK_NULL_HANDLE)} {}
+          allocation{std::exchange(other.allocation, nullptr)} {}
 
     UniqueBuffer& operator=(UniqueBuffer&& other) noexcept {
         if (this != &other) {
@@ -64,7 +63,6 @@ struct UniqueBuffer {
             bda_addr = std::exchange(other.bda_addr, 0);
             allocator = std::exchange(other.allocator, nullptr);
             allocation = std::exchange(other.allocation, nullptr);
-            imported = std::exchange(other.imported, VK_NULL_HANDLE);
         }
         return *this;
     }
@@ -78,18 +76,11 @@ struct UniqueBuffer {
     vk::DeviceAddress bda_addr{};
     Vulkan::MemoryAllocator* allocator;
     vk_heap_span* allocation{};
-    /// Host memory imported for the buffer (Buffer::ImportHost), freed with it
-    vk::DeviceMemory imported{};
 };
 
 struct Buffer {
     explicit Buffer(const Vulkan::Instance& instance, VAddr cpu_addr_, u64 size_bytes_,
                     MemoryType mem_type, std::string_view debug_name = "");
-
-    /// @host, imported as a buffer the GPU reads where it lies (VK_EXT_external_memory_host):
-    /// nothing is copied into it. Null when the driver will not import it. @host and its size
-    /// keep to Instance::ImportedHostPointerAlignment, and the memory outlives the buffer.
-    static std::unique_ptr<Buffer> ImportHost(const Vulkan::Instance& instance, std::span<u8> host);
 
     Buffer& operator=(const Buffer&) = delete;
     Buffer(const Buffer&) = delete;
@@ -97,10 +88,6 @@ struct Buffer {
     Buffer& operator=(Buffer&&) = default;
     Buffer(Buffer&&) = default;
 
-private:
-    explicit Buffer(const Vulkan::Instance& instance);
-
-public:
     [[nodiscard]] bool IsInBounds(VAddr addr, u64 size) const noexcept {
         return addr >= cpu_addr && addr + size <= cpu_addr + SizeBytes();
     }

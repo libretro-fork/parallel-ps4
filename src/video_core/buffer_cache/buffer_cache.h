@@ -180,23 +180,6 @@ private:
 
     std::unique_ptr<FaultManager> fault_manager;
     std::unique_ptr<Buffer> bda_pagetable_buffer;
-
-    /// The guest's memory, imported as buffers the GPU copies from where it lies: an upload
-    /// is a copy on the GPU from it, where it was a copy on the CPU into staging first. One
-    /// buffer a chunk of the backing memory; empty where the driver does not import host
-    /// memory, and the staging copy is made as before.
-    std::vector<std::unique_ptr<Buffer>> guest_chunks;
-    const u8* guest_base{};
-    u64 guest_chunk_size{};
-    void ImportGuestMemory();
-    /// Where the guest's page backing @host is in the imported chunks: the chunk and the
-    /// offset in it; the chunk is null when it is not imported
-    std::pair<const Buffer*, u64> GuestSource(const u8* host) const;
-    /// @copies (guest addresses to write, sizes) read from the imported memory into @arena
-    void UploadFromGuest(const Buffer* arena, std::span<vk::BufferCopy> copies);
-    /// Kept between uploads, so an upload does not allocate
-    std::vector<std::pair<u32, vk::BufferCopy>> guest_regions;
-    std::vector<vk::BufferCopy> guest_copies;
     bool fault_process_pending{};
 
     // The size of an arena page, in bits. A constant upstream; the libretro core picks it
