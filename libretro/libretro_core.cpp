@@ -1240,6 +1240,33 @@ bool GpuUploads() {
            static_cast<std::uint32_t>(retro_atomic_load_acquire_int(&shared->gpu_frames_state)) == Libretro::GPU_FRAMES_FAILED;
 }
 
+// The images the frontend may still be drawing from. A frame the frontend draws from an image
+// is waited for by it only when its sync index comes round again, as many frames later as it
+// has sync indices: until then the image stays busy for the emulator (frames_busy), whether or
+// not the core still holds it.
+uint32_t frames_shown = 0;
+uint32_t image_shown_at[Libretro::FRAME_IMAGES] = {};
+
+void MarkImagesBusy(uint32_t image) {
+    if (image >= Libretro::FRAME_IMAGES) {
+        return;
+    }
+    image_shown_at[image] = ++frames_shown;
+    const uint32_t in_flight = std::max(Libretro::GpuFrames::FramesInFlight(), 1u);
+    uint32_t busy = 0;
+    for (uint32_t i = 0; i < Libretro::FRAME_IMAGES; ++i) {
+        if (image_shown_at[i] != 0 && frames_shown - image_shown_at[i] < in_flight) {
+            busy |= 1u << i;
+        }
+    }
+    const uint32_t was =
+        static_cast<uint32_t>(retro_atomic_exchange_int(&shared->frames_busy, static_cast<int>(busy)));
+    if ((was & ~busy) != 0) {
+        // An image is free again for a frame that waits for one
+        wakes.frame.Notify();
+    }
+}
+
 // The newest frame, if there is one newer than the one shown. A frame stays whole until the
 // emulator begins the second one after it, so the copy is taken only if nothing was published
 // while it was made; else the newer one is tried.
@@ -1564,6 +1591,9 @@ static bool StartGame(const std::string& boot_path, const std::string& user_dir,
     }
 
     (void)retro_atomic_exchange_int(&shared->frame_held, Libretro::FRAME_SLOT_NONE);
+    (void)retro_atomic_exchange_int(&shared->frames_busy, 0);
+    frames_shown = 0;
+    std::fill(std::begin(image_shown_at), std::end(image_shown_at), 0u);
     shown_frame = nullptr;
     shown_width = 0;
     shown_height = 0;
@@ -1889,6 +1919,9 @@ RETRO_API void retro_run(void) {
         AnnounceSize(shown_width, shown_height);
         Libretro::GpuFrames::Show(video_cb, shown_image, shown_latest != 0, shown_width,
                                   shown_height);
+        if (shown_latest != 0 && Libretro::GpuFrames::Shared()) {
+            MarkImagesBusy(shown_image);
+        }
     } else if (video_cb) {
         if (!shown_frame) {
             // Nothing drawn yet: black, at the size declared.

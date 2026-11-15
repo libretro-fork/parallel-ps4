@@ -81,9 +81,9 @@ bool memory_import_enabled = false;
 // frontend makes one whenever its video driver is started again.
 bool have_message = false;
 GpuImagesMessage message{};
-static_assert(FRAME_IMAGES == 5);
-MemoryHandle memory_handles[FRAME_IMAGES] = {NO_HANDLE, NO_HANDLE, NO_HANDLE, NO_HANDLE,
-                                             NO_HANDLE};
+static_assert(FRAME_IMAGES == 6);
+MemoryHandle memory_handles[FRAME_IMAGES] = {NO_HANDLE, NO_HANDLE, NO_HANDLE,
+                                             NO_HANDLE, NO_HANDLE, NO_HANDLE};
 
 struct Imported {
     VkImage image = VK_NULL_HANDLE;
@@ -1034,6 +1034,18 @@ bool Shared() {
     return imported;
 }
 
+std::uint32_t FramesInFlight() {
+    if (!vulkan || !vulkan->get_sync_index_mask) {
+        return 0;
+    }
+    std::uint32_t mask = vulkan->get_sync_index_mask(vulkan->handle);
+    std::uint32_t count = 0;
+    for (; mask; mask &= mask - 1) {
+        ++count;
+    }
+    return count;
+}
+
 const char* Failure() {
     return failure;
 }
@@ -1064,6 +1076,9 @@ void ShowPixels(retro_video_refresh_t, const void*, unsigned, unsigned) {}
 void SetTenBitPixels(bool) {}
 bool Shared() {
     return false;
+}
+std::uint32_t FramesInFlight() {
+    return 0;
 }
 const char* Failure() {
     return nullptr;

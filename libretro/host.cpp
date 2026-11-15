@@ -597,18 +597,22 @@ void GpuFramesFailed(const char* why) {
 }
 
 std::uint32_t AcquireImage() {
-    // Up to a tenth of a second: the frontend holds one image and the newest is kept for it,
-    // which leaves three for frames being drawn. After that the wait is given up, and an image
-    // still being drawn is drawn over rather than the picture stopping. Parked until the core
-    // lets go of the image it held or a frame being drawn is published.
+    // Up to a tenth of a second: the frontend holds one image, the newest is kept for it, and
+    // those its frames in flight drew from are busy (frames_busy); what is left is for frames
+    // being drawn. After that the wait is given up, and an image still being drawn is drawn
+    // over rather than the picture stopping. Parked until the core lets go of an image or a
+    // frame being drawn is published.
     const auto give_up = std::chrono::steady_clock::now() + std::chrono::milliseconds(100);
     for (;;) {
         const int key = wakes.frame.Prepare();
         const std::uint32_t latest = static_cast<std::uint32_t>(retro_atomic_load_seq_cst_int(&shared->frame_latest));
         const std::uint32_t newest = latest == 0 ? FRAME_SLOT_NONE : latest & FRAME_SLOT_MASK;
         const std::uint32_t held = static_cast<std::uint32_t>(retro_atomic_load_seq_cst_int(&shared->frame_held));
+        // Not one the frontend may still be drawing from either
+        const std::uint32_t busy = static_cast<std::uint32_t>(retro_atomic_load_seq_cst_int(&shared->frames_busy));
         for (std::uint32_t image = 0; image < FRAME_IMAGES; ++image) {
-            if (image != newest && image != held && retro_atomic_exchange_int(&image_in_flight[image], 1) == 0) {
+            if (image != newest && image != held && (busy & (1u << image)) == 0 &&
+                retro_atomic_exchange_int(&image_in_flight[image], 1) == 0) {
                 wakes.frame.Cancel();
                 return image;
             }
@@ -624,9 +628,17 @@ std::uint32_t AcquireImage() {
     const std::uint32_t latest = static_cast<std::uint32_t>(retro_atomic_load_seq_cst_int(&shared->frame_latest));
     const std::uint32_t newest = latest == 0 ? FRAME_SLOT_NONE : latest & FRAME_SLOT_MASK;
     const std::uint32_t held = static_cast<std::uint32_t>(retro_atomic_load_seq_cst_int(&shared->frame_held));
+    const std::uint32_t busy = static_cast<std::uint32_t>(retro_atomic_load_seq_cst_int(&shared->frames_busy));
+    // One the frontend is not drawing from if there is one, else one drawn over
     std::uint32_t image = 0;
-    while (image == newest || image == held) {
+    while (image < FRAME_IMAGES && (image == newest || image == held || (busy & (1u << image)) != 0)) {
         ++image;
+    }
+    if (image == FRAME_IMAGES) {
+        image = 0;
+        while (image == newest || image == held) {
+            ++image;
+        }
     }
     (void)retro_atomic_exchange_int(&image_in_flight[image], 1);
     return image;

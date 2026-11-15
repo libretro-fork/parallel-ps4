@@ -22,7 +22,7 @@
 namespace Libretro {
 
 inline constexpr std::uint32_t SHARED_MAGIC = 0x34505368; // "hSP4"
-inline constexpr std::uint32_t SHARED_VERSION = 22;
+inline constexpr std::uint32_t SHARED_VERSION = 23;
 
 inline constexpr std::uint32_t MAX_WIDTH = 3840;
 inline constexpr std::uint32_t MAX_HEIGHT = 2160;
@@ -32,8 +32,9 @@ inline constexpr std::size_t FRAME_BYTES = static_cast<std::size_t>(MAX_WIDTH) *
 /// for the emulator to write the next into.
 inline constexpr std::uint32_t FRAME_SLOTS = 3;
 /// The emulator's images when the picture is handed over on the GPU (gpu_frames.h): the same
-/// three, and two more for frames that are drawn but not finished by the GPU yet.
-inline constexpr std::uint32_t FRAME_IMAGES = 5;
+/// three, two more for frames that are drawn but not finished by the GPU yet, and one for a
+/// frame the frontend may still be drawing from (frames_busy).
+inline constexpr std::uint32_t FRAME_IMAGES = 6;
 /// SharedState::gpu_frames_state
 inline constexpr std::uint32_t GPU_FRAMES_PENDING = 0;
 inline constexpr std::uint32_t GPU_FRAMES_SHOWN = 1;
@@ -219,6 +220,12 @@ struct SharedState {
     /// had not published anything newer, so it is not writing there. Both sides use the default,
     /// sequentially consistent ordering for the two; the argument needs it.
     retro_atomic_int_t frame_held;
+    /// With gpu_frames: the images the frontend may still be drawing from on the GPU, a bit
+    /// each, written by the core only. The core lets go of the image it held when it shows a
+    /// newer one, but the frontend's frames that sampled it can still be in flight, as many as
+    /// the frontend has sync indices: an image shown in one of those frames is not drawn into
+    /// by the emulator until the frontend has waited for that frame.
+    retro_atomic_int_t frames_busy;
     struct {
         std::uint32_t width;
         std::uint32_t height;

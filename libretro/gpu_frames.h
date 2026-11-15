@@ -47,6 +47,10 @@ void SetTenBitPixels(bool ten_bit);
 /// The emulator's images are imported, and frames are shown from them.
 bool Shared();
 
+/// The frames the frontend has in flight on the GPU at most (its sync indices); 0 without a
+/// Vulkan context
+std::uint32_t FramesInFlight();
+
 /// Why the picture cannot be handed over on the GPU, once that is known; nullptr otherwise.
 const char* Failure();
 
