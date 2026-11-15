@@ -70,65 +70,66 @@ void MemoryMapViewer::Draw() {
     }
 
     auto mem = Memory::Instance();
-    std::scoped_lock lck{mem->mutex};
+    // Among the maps' readers
+    mem->maps.Run([&] {
+        {
+            bool next_showing_vma = showing_vma;
+            if (showing_vma) {
+                PushStyleColor(ImGuiCol_Button, ImVec4{1.0f, 0.7f, 0.7f, 1.0f});
+            }
+            if (Button("VMem")) {
+                next_showing_vma = true;
+            }
+            if (showing_vma) {
+                PopStyleColor();
+            }
+            SameLine();
+            if (!showing_vma) {
+                PushStyleColor(ImGuiCol_Button, ImVec4{1.0f, 0.7f, 0.7f, 1.0f});
+            }
+            if (Button("DMem")) {
+                next_showing_vma = false;
+            }
+            if (!showing_vma) {
+                PopStyleColor();
+            }
+            showing_vma = next_showing_vma;
+        }
 
-    {
-        bool next_showing_vma = showing_vma;
+        Iterator it{};
         if (showing_vma) {
-            PushStyleColor(ImGuiCol_Button, ImVec4{1.0f, 0.7f, 0.7f, 1.0f});
-        }
-        if (Button("VMem")) {
-            next_showing_vma = true;
-        }
-        if (showing_vma) {
-            PopStyleColor();
-        }
-        SameLine();
-        if (!showing_vma) {
-            PushStyleColor(ImGuiCol_Button, ImVec4{1.0f, 0.7f, 0.7f, 1.0f});
-        }
-        if (Button("DMem")) {
-            next_showing_vma = false;
-        }
-        if (!showing_vma) {
-            PopStyleColor();
-        }
-        showing_vma = next_showing_vma;
-    }
-
-    Iterator it{};
-    if (showing_vma) {
-        it.is_vma = true;
-        it.vma.it = mem->vma_map.begin();
-        it.vma.end = mem->vma_map.end();
-    } else {
-        it.is_vma = false;
-        it.dmem.it = mem->dmem_map.begin();
-        it.dmem.end = mem->dmem_map.end();
-    }
-
-    if (BeginTable("memory_view_table", showing_vma ? 6 : 4,
-                   ImGuiTableFlags_Resizable | ImGuiTableFlags_Reorderable | ImGuiTableFlags_RowBg |
-                       ImGuiTableFlags_SizingFixedFit)) {
-        if (showing_vma) {
-            TableSetupColumn("Address");
-            TableSetupColumn("Size");
-            TableSetupColumn("Type");
-            TableSetupColumn("Prot");
-            TableSetupColumn("Is Exec");
-            TableSetupColumn("Name");
+            it.is_vma = true;
+            it.vma.it = mem->vma_map.begin();
+            it.vma.end = mem->vma_map.end();
         } else {
-            TableSetupColumn("Address");
-            TableSetupColumn("Size");
-            TableSetupColumn("Type");
-            TableSetupColumn("Pooled");
+            it.is_vma = false;
+            it.dmem.it = mem->dmem_map.begin();
+            it.dmem.end = mem->dmem_map.end();
         }
-        TableHeadersRow();
 
-        while (it.DrawLine())
-            ;
-        EndTable();
-    }
+        if (BeginTable("memory_view_table", showing_vma ? 6 : 4,
+                       ImGuiTableFlags_Resizable | ImGuiTableFlags_Reorderable |
+                           ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingFixedFit)) {
+            if (showing_vma) {
+                TableSetupColumn("Address");
+                TableSetupColumn("Size");
+                TableSetupColumn("Type");
+                TableSetupColumn("Prot");
+                TableSetupColumn("Is Exec");
+                TableSetupColumn("Name");
+            } else {
+                TableSetupColumn("Address");
+                TableSetupColumn("Size");
+                TableSetupColumn("Type");
+                TableSetupColumn("Pooled");
+            }
+            TableHeadersRow();
+
+            while (it.DrawLine())
+                ;
+            EndTable();
+        }
+    });
 
     End();
 }

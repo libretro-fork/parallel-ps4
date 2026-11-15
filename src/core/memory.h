@@ -8,7 +8,7 @@
 #include <string_view>
 #include "common/combiner.h"
 #include "common/enum.h"
-#include "common/shared_first_mutex.h"
+#include "common/range_runs.h"
 #include "common/singleton.h"
 #include "common/types.h"
 #include "core/address_space.h"
@@ -217,6 +217,12 @@ public:
     }
 
     bool IsValidMapping(const VAddr virtual_addr, const u64 size = 0) {
+        // Among the maps' readers (inside a change already, it runs there and then)
+        return maps.Run([&] { return IsValidMappingIn(virtual_addr, size); });
+    }
+
+private:
+    bool IsValidMappingIn(const VAddr virtual_addr, const u64 size) {
         const auto end_it = std::prev(vma_map.end());
         const VAddr end_addr = end_it->first + end_it->second.size;
 
@@ -253,6 +259,7 @@ public:
         return size_to_validate <= 0;
     }
 
+public:
     u64 ClampRangeSize(VAddr virtual_addr, u64 size);
 
     void SetPrtArea(u32 id, VAddr address, u64 size);
@@ -366,10 +373,32 @@ private:
     PhysMap dmem_map;
     PhysMap fmem_map;
     VMAMap vma_map;
-    Common::SharedFirstMutex mutex{};
-    /// Every change to the maps runs here, one at a time; mutex keeps the readers off the maps
-    /// while a change is under way.
-    Common::Combiner unmap_mutex;
+    /// Everything that reads or changes the maps runs here, one at a time, from the game's
+    /// threads (a Combiner: no lock, no thread parked on another's lock). The GPU thread, which
+    /// a change may be waiting on (rasterizer->UnmapMemory), never comes here: it writes through
+    /// the backing page table (TryWriteBacking) and looks up mapped_runs (ClampRangeSize).
+    Common::Combiner maps;
+    /// The runs of mapped memory, published at the end of every change (MapsChange)
+    static constexpr unsigned MaxMappedRuns = 16384;
+    range_runs_t mapped_runs{};
+
+    void PublishMappedRuns();
+
+    /// Within a change to the maps: publishes the runs of mapped memory when it ends, or at
+    /// Publish (before the GPU is told of a mapping, as the readers were let in there)
+    struct MapsChange {
+        MemoryManager& manager;
+        bool published = false;
+        void Publish() {
+            if (!published) {
+                published = true;
+                manager.PublishMappedRuns();
+            }
+        }
+        ~MapsChange() {
+            Publish();
+        }
+    };
 #ifdef SHADPS4_ENABLE_FEX_GUEST_CPU
     MemoryMapGeneration mapping_generation{};
 #endif

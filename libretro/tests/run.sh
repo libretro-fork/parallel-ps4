@@ -111,6 +111,12 @@ $CC -std=c89 -O1 -g -Wall -Wdeclaration-after-statement -fsanitize=address,undef
 $CC -std=c89 -pedantic -O1 -g -Wall -Wdeclaration-after-statement -fsanitize=address,undefined \
     -Isrc libretro/tests/vblank_clock_test.c src/common/vblank_clock.c -o "$OUT/vblank_clock_test"
 "$OUT/vblank_clock_test"
+# The runs of mapped memory the GPU thread looks up: lookups, overflow, and three readers
+# against a writer republishing as fast as it can (a seqlock: not under ThreadSanitizer)
+$CC -std=gnu89 -O1 -g -Wall -Wdeclaration-after-statement -fsanitize=address,undefined -Isrc \
+    -I$L/include libretro/tests/range_runs_test.c src/common/range_runs.c $L/rthreads/rthreads.c \
+    $L/features/features_cpu.c -o "$OUT/range_runs_test" -lpthread
+"$OUT/range_runs_test"
 # A thread's name, its own, on four threads
 for san in address,undefined thread; do
     $CC -std=gnu89 -O1 -g -Wall -Wdeclaration-after-statement -fsanitize=$san -Isrc -I$L/include \
