@@ -855,6 +855,8 @@ set(COMMON src/common/c_bridge.cpp
            src/common/string_literal.h
            src/common/string_util.cpp
            src/common/string_util.h
+           src/common/game_clock.c
+           src/common/game_clock.h
            src/common/host_thread.c
            src/common/host_thread.h
            src/common/range_runs.c

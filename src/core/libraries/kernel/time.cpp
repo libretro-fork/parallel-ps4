@@ -5,6 +5,7 @@
 #include <thread>
 
 #include "common/assert.h"
+#include "common/game_clock.h"
 #include "common/native_clock.h"
 #include "core/libraries/kernel/kernel.h"
 #include "core/libraries/kernel/orbis_error.h"
@@ -27,21 +28,40 @@
 namespace Libraries::Kernel {
 
 static u64 initial_ptc;
-static std::chrono::system_clock::time_point network_boottime;
-static std::chrono::steady_clock::time_point initial_uptime;
 static std::unique_ptr<Common::NativeClock> clock;
+
+// The game's time: from the frontend's frames (common/game_clock.h), never a wall clock. The
+// counters (the process time counter, the TSC) count it at the TSC's frequency; the date is
+// the one the game started at, plus the game's time.
+static game_clock_t game_clock;
+static u64 boot_epoch_ns;
+
+game_clock_t* GameClock() {
+    return &game_clock;
+}
+
+/// The game's time in ticks of @frequency
+static u64 GameTicks(u64 frequency) {
+    const u64 ns = game_clock_now(&game_clock);
+    return (ns / 1'000'000'000) * frequency + (ns % 1'000'000'000) * frequency / 1'000'000'000;
+}
+
+static void GameTimespec(u64 base_ns, OrbisKernelTimespec* ts) {
+    const u64 ns = base_ns + game_clock_now(&game_clock);
+    ts->tv_sec = static_cast<s64>(ns / 1'000'000'000);
+    ts->tv_nsec = static_cast<s64>(ns % 1'000'000'000);
+}
 
 u64 PS4_SYSV_ABI sceKernelGetTscFrequency() {
     return clock->GetTscFrequency();
 }
 
 u64 PS4_SYSV_ABI sceKernelGetProcessTime() {
-    // TODO: this timer should support suspends, so initial ptc needs to be updated on wake up
-    return clock->GetTimeUS(initial_ptc);
+    return game_clock_now(&game_clock) / 1000;
 }
 
 u64 PS4_SYSV_ABI sceKernelGetProcessTimeCounter() {
-    return clock->GetUptime() - initial_ptc;
+    return GameTicks(clock->GetTscFrequency());
 }
 
 u64 PS4_SYSV_ABI sceKernelGetProcessTimeCounterFrequency() {
@@ -49,7 +69,7 @@ u64 PS4_SYSV_ABI sceKernelGetProcessTimeCounterFrequency() {
 }
 
 u64 PS4_SYSV_ABI sceKernelReadTsc() {
-    return clock->GetUptime();
+    return initial_ptc + GameTicks(clock->GetTscFrequency());
 }
 
 // The game's own sleep. Uninterruptible: to a deadline on libretro-common's clock
@@ -165,23 +185,29 @@ s32 PS4_SYSV_ABI posix_clock_gettime(u32 clock_id, OrbisKernelTimespec* ts) {
         return -1;
     }
 
-    if (clock_id == ORBIS_CLOCK_PROCTIME) {
-        const auto us = sceKernelGetProcessTime();
-        ts->tv_sec = static_cast<s64>(us / 1'000'000);
-        ts->tv_nsec = static_cast<s64>((us % 1'000'000) * 1000);
+    switch (clock_id) {
+    case ORBIS_CLOCK_PROCTIME:
+    case ORBIS_CLOCK_UPTIME:
+    case ORBIS_CLOCK_UPTIME_PRECISE:
+    case ORBIS_CLOCK_MONOTONIC:
+    case ORBIS_CLOCK_MONOTONIC_PRECISE:
+    case ORBIS_CLOCK_UPTIME_FAST:
+    case ORBIS_CLOCK_MONOTONIC_FAST:
+        GameTimespec(0, ts);
         return 0;
-    }
-    if (clock_id == ORBIS_CLOCK_EXT_NETWORK || clock_id == ORBIS_CLOCK_EXT_DEBUG_NETWORK ||
-        clock_id == ORBIS_CLOCK_EXT_AD_NETWORK || clock_id == ORBIS_CLOCK_EXT_RAW_NETWORK) {
-        const auto current_time =
-            network_boottime + (std::chrono::steady_clock::now() - initial_uptime);
-        const auto epoch_ns =
-            std::chrono::duration_cast<std::chrono::nanoseconds>(current_time.time_since_epoch())
-                .count();
-
-        ts->tv_sec = epoch_ns / 1'000'000'000;
-        ts->tv_nsec = epoch_ns % 1'000'000'000;
+    case ORBIS_CLOCK_REALTIME:
+    case ORBIS_CLOCK_REALTIME_PRECISE:
+    case ORBIS_CLOCK_SECOND:
+    case ORBIS_CLOCK_REALTIME_FAST:
+    case ORBIS_CLOCK_EXT_NETWORK:
+    case ORBIS_CLOCK_EXT_DEBUG_NETWORK:
+    case ORBIS_CLOCK_EXT_AD_NETWORK:
+    case ORBIS_CLOCK_EXT_RAW_NETWORK:
+        GameTimespec(boot_epoch_ns, ts);
         return 0;
+    default:
+        // The CPU time clocks: what the host's threads spent, not a time of day
+        break;
     }
 
 #ifdef _WIN32
@@ -445,23 +471,13 @@ s32 PS4_SYSV_ABI sceKernelClockGetres(const u32 clock_id, OrbisKernelTimespec* r
 }
 
 s32 PS4_SYSV_ABI posix_gettimeofday(OrbisKernelTimeval* tp, OrbisKernelTimezone* tz) {
-#ifdef _WIN64
+    // The date the game started at, plus the game's time
     if (tp) {
-        FILETIME filetime;
-        GetSystemTimePreciseAsFileTime(&filetime);
-
-        constexpr u64 UNIX_TIME_START = 0x295E9648864000;
-        constexpr u64 TICKS_PER_SECOND = 1000000;
-
-        u64 ticks = filetime.dwHighDateTime;
-        ticks <<= 32;
-        ticks |= filetime.dwLowDateTime;
-        ticks /= 10;
-        ticks -= UNIX_TIME_START;
-
-        tp->tv_sec = ticks / TICKS_PER_SECOND;
-        tp->tv_usec = ticks % TICKS_PER_SECOND;
+        const u64 us = (boot_epoch_ns + game_clock_now(&game_clock)) / 1000;
+        tp->tv_sec = static_cast<s64>(us / 1'000'000);
+        tp->tv_usec = static_cast<s64>(us % 1'000'000);
     }
+#ifdef _WIN64
     if (tz) {
         static int tzflag = 0;
         if (!tzflag) {
@@ -477,14 +493,9 @@ s32 PS4_SYSV_ABI posix_gettimeofday(OrbisKernelTimeval* tp, OrbisKernelTimezone*
     }
     return 0;
 #else
-    timeval tv;
-    const auto ret = gettimeofday(&tv, nullptr);
-    if (tp) {
-        tp->tv_sec = tv.tv_sec;
-        tp->tv_usec = tv.tv_usec;
-    }
     if (tz) {
-        time_t t = tv.tv_sec;
+        time_t t =
+            static_cast<time_t>((boot_epoch_ns + game_clock_now(&game_clock)) / 1'000'000'000);
         struct tm tm_val;
         localtime_r(&t, &tm_val);
         s32 is_dst = (tm_val.tm_isdst > 0) ? 1 : 0;
@@ -492,10 +503,6 @@ s32 PS4_SYSV_ABI posix_gettimeofday(OrbisKernelTimeval* tp, OrbisKernelTimezone*
         s32 standard_offset_sec = static_cast<s32>(tm_val.tm_gmtoff) - dst_sec_val;
         tz->tz_minuteswest = standard_offset_sec / 60;
         tz->tz_dsttime = dst_sec_val / 60;
-    }
-    if (ret < 0) {
-        SetPosixErrno(errno);
-        return -1;
     }
     return 0;
 #endif
@@ -615,8 +622,11 @@ s32 PS4_SYSV_ABI sceKernelSettimeofday(OrbisKernelTimeval* _tv, OrbisKernelTimez
 void RegisterTime(Core::Loader::SymbolsResolver* sym) {
     clock = std::make_unique<Common::NativeClock>();
     initial_ptc = clock->GetUptime();
-    network_boottime = std::chrono::system_clock::now();
-    initial_uptime = std::chrono::steady_clock::now();
+    // The date, once, at the start: from here on the game's own time is added to it
+    boot_epoch_ns = static_cast<u64>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                         std::chrono::system_clock::now().time_since_epoch())
+                                         .count());
+    game_clock_init(&game_clock, 60, 1);
 
     // POSIX
     LIB_FUNCTION("NhpspxdjEKU", "libkernel", 1, "libkernel", posix_nanosleep);

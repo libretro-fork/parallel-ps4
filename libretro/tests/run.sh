@@ -117,6 +117,14 @@ $CC -std=gnu89 -O1 -g -Wall -Wdeclaration-after-statement -fsanitize=address,und
     -I$L/include libretro/tests/range_runs_test.c src/common/range_runs.c $L/rthreads/rthreads.c \
     $L/features/features_cpu.c -o "$OUT/range_runs_test" -lpthread
 "$OUT/range_runs_test"
+# The game's time from the frontend's frames: exact over a minute (60 and 59.94), advances
+# within a frame and never past it, four threads advancing while frames start
+for san in address,undefined thread; do
+    $CC -std=gnu89 -O1 -g -Wall -Wdeclaration-after-statement -fsanitize=$san -Isrc -I$L/include \
+        libretro/tests/game_clock_test.c src/common/game_clock.c $L/rthreads/rthreads.c \
+        $L/features/features_cpu.c -o "$OUT/game_clock_test" -lpthread
+    "$OUT/game_clock_test"
+done
 # A thread ended from anywhere in it, as a guest thread by pthread_exit: 2000 of them,
 # released while running
 for san in address,undefined thread; do

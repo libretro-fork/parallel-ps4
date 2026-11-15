@@ -383,7 +383,12 @@ void VideoOutDriver::PresentThread(std::stop_token token) {
             if (!Libretro::WaitVblankTicks(ticks, token)) {
                 break;
             }
-            ticks = Libretro::VblankTicks();
+            // Each of the frontend's frames is a frame of the game's time
+            const std::uint32_t now = Libretro::VblankTicks();
+            for (std::uint32_t frame = ticks; frame != now; ++frame) {
+                game_clock_frame(Libraries::Kernel::GameClock());
+            }
+            ticks = now;
             continue;
         }
         for (; owed != 0 && !token.stop_requested(); owed--) {

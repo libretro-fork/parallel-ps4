@@ -5,6 +5,7 @@
 
 #include <chrono>
 #include <sys/types.h>
+#include "common/game_clock.h"
 #include "common/types.h"
 
 namespace Common {
@@ -63,6 +64,9 @@ constexpr int ORBIS_CLOCK_EXT_NETWORK = 16;
 constexpr int ORBIS_CLOCK_EXT_DEBUG_NETWORK = 17;
 constexpr int ORBIS_CLOCK_EXT_AD_NETWORK = 18;
 constexpr int ORBIS_CLOCK_EXT_RAW_NETWORK = 19;
+
+/// The game's time, which the frontend's frames move (common/game_clock.h)
+game_clock_t* GameClock();
 
 namespace Dev {
 u64& GetInitialPtc();
