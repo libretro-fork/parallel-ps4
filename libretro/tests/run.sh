@@ -117,6 +117,14 @@ $CC -std=gnu89 -O1 -g -Wall -Wdeclaration-after-statement -fsanitize=address,und
     -I$L/include libretro/tests/range_runs_test.c src/common/range_runs.c $L/rthreads/rthreads.c \
     $L/features/features_cpu.c -o "$OUT/range_runs_test" -lpthread
 "$OUT/range_runs_test"
+# A thread ended from anywhere in it, as a guest thread by pthread_exit: 2000 of them,
+# released while running
+for san in address,undefined thread; do
+    $CC -std=gnu89 -O1 -g -Wall -Wdeclaration-after-statement -fsanitize=$san -Isrc -I$L/include \
+        libretro/tests/host_thread_test.c src/common/host_thread.c $L/rthreads/rthreads.c \
+        $L/features/features_cpu.c -o "$OUT/host_thread_test" -lpthread
+    "$OUT/host_thread_test"
+done
 # A thread's name, its own, on four threads
 for san in address,undefined thread; do
     $CC -std=gnu89 -O1 -g -Wall -Wdeclaration-after-statement -fsanitize=$san -Isrc -I$L/include \

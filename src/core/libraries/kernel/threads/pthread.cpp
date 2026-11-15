@@ -284,11 +284,7 @@ void UnblockPthreadCancelSignal();
 } // namespace
 #endif
 
-#ifdef WIN32
-static DWORD RunThread(void* arg) {
-#else
-static void* RunThread(void* arg) {
-#endif
+static void RunThread(void* arg) {
     auto* curthread = static_cast<Pthread*>(arg);
     g_curthread = curthread;
     thread_name_set(curthread->name.c_str());
@@ -323,11 +319,6 @@ static void* RunThread(void* arg) {
     /* Remove thread from tracking */
     DebugState.RemoveCurrentThreadFromGuestList();
     posix_pthread_exit(ret);
-#ifdef WIN32
-    return 0;
-#else
-    return nullptr;
-#endif
 }
 
 int PS4_SYSV_ABI posix_pthread_create_name_np(PthreadT* thread, const PthreadAttrT* attr,
@@ -405,7 +396,7 @@ int PS4_SYSV_ABI posix_pthread_create_name_np(PthreadT* thread, const PthreadAtt
     (*thread) = new_thread;
 
     /* Create thread */
-    new_thread->native_thr = std::make_unique<Core::NativeThread>(Core::NativeThread());
+    new_thread->native_thr = std::make_unique<Core::NativeThread>();
     int ret = new_thread->native_thr->Create(RunThread, new_thread);
 
     ASSERT_MSG(ret == 0, "Failed to create thread with error {}", ret);

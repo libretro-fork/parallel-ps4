@@ -34,16 +34,22 @@ namespace Core {
 
 // Windows
 
-static DWORD slot = 0;
-static std::once_flag slot_alloc_flag;
-
-static void AllocTcbKey() {
-    slot = TlsAlloc();
-}
+// The slot, plus one: zero until allocated. The first thread to want it allocates one and
+// publishes it with a compare-and-swap; one that loses the race frees its own.
+static retro_atomic_int_t slot_plus_one;
 
 u32 GetTcbKey() {
-    std::call_once(slot_alloc_flag, &AllocTcbKey);
-    return slot;
+    const int have = retro_atomic_load_acquire_int(&slot_plus_one);
+    if (have != 0) [[likely]] {
+        return static_cast<u32>(have - 1);
+    }
+    const DWORD made = TlsAlloc();
+    ASSERT(made != TLS_OUT_OF_INDEXES);
+    if (retro_atomic_cas_int(&slot_plus_one, 0, static_cast<int>(made) + 1)) {
+        return made;
+    }
+    TlsFree(made);
+    return static_cast<u32>(retro_atomic_load_acquire_int(&slot_plus_one) - 1);
 }
 
 void SetTcbBase(void* image_address) {
@@ -232,10 +238,14 @@ Tcb* GetTcbBase() {
 
 #endif
 
-thread_local std::once_flag init_tls_flag;
+// Once a thread: no other thread touches it
+thread_local bool tls_initialized = false;
 
 void InitializeTLS() {
-    std::call_once(init_tls_flag, [] { SetTcbBase(Libraries::Kernel::g_curthread->tcb); });
+    if (!tls_initialized) {
+        tls_initialized = true;
+        SetTcbBase(Libraries::Kernel::g_curthread->tcb);
+    }
 }
 
 } // namespace Core
