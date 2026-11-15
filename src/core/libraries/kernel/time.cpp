@@ -36,6 +36,12 @@ static game_clock_t game_clock;
 static u64 boot_epoch_ns;
 /// What a thread that is not a guest thread sleeps on: only its timer notifies it
 static retro_eventcount_t host_sleep_ec;
+// Ready before anything runs (the frame thread starts frames before the kernel's functions
+// are registered): made as the program loads, once
+static const bool game_clock_made = [] {
+    (void)game_clock_made;
+    return true;
+}();
 
 game_clock_t* GameClock() {
     return &game_clock;

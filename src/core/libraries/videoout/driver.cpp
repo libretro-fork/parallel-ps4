@@ -383,14 +383,9 @@ void VideoOutDriver::PresentThread(std::stop_token token) {
             if (!Libretro::WaitVblankTicks(ticks, token)) {
                 break;
             }
-            // Each of the frontend's frames is a frame of the game's time
-            const std::uint32_t now = Libretro::VblankTicks();
-            for (std::uint32_t frame = ticks; frame != now; ++frame) {
-                // The frame that ended: its sound, one frame's worth, then the next frame
-                Libretro::MixAudioFrame();
-                game_clock_frame(Libraries::Kernel::GameClock());
-            }
-            ticks = now;
+            // The frames of the game's time and their sound are started by the frame thread
+            // (libretro/host.cpp), whatever this thread is busy with
+            ticks = Libretro::VblankTicks();
             continue;
         }
         for (; owed != 0 && !token.stop_requested(); owed--) {

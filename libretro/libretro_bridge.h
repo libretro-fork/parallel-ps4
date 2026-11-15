@@ -75,11 +75,6 @@ void PushImage(std::uint32_t image, std::uint32_t width, std::uint32_t height);
 /// A pad's motors, 0 to 255 each, as the game set them. The pad is the controller's index.
 void SetRumble(std::uint32_t pad, std::uint8_t small_motor, std::uint8_t large_motor);
 
-/// The frame of the game's time that just ended: its sound, exactly AUDIO_MIX_FRAME_FRAMES
-/// from every source, mixed into the ring the core hands the frontend. Once a frame, from
-/// the thread that starts the frames.
-void MixAudioFrame();
-
 /// The frontend's frames so far, one a retro_run (shared_state.h, vblank_ticks); it wraps.
 std::uint32_t VblankTicks();
 /// Until the frontend's frames are past @seen, the emulator quits, or @stop is requested

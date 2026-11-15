@@ -50,6 +50,7 @@
 #include "common/scm_rev.h"
 #include "core/file_format/psf.h"
 #include "core/libraries/pad/pad.h"
+#include "audio_pace.h"
 #include "pad_scale.h"
 #include "touch_track.h"
 #include "libretro.h"
@@ -1316,16 +1317,25 @@ void TakeFrame() {
 // read index, which moves only once the frontend has taken the frames.
 // Surround: one frame's worth handed over a segment at a time, each where it lies in the wide
 // ring and with its own layout (libretro/audio_wide.h); what is not there is stereo silence.
+// How much of the emulator's sound to hand the frontend each run (audio_pace.h)
+static audio_pace_t frame_pace{};
+
 void SendAudioWide() {
     static const int16_t silence[kAudioFrames * 2] = {};
     static const float silence_f32[kAudioFrames * 2] = {};
     const bool is_float = audio_multi_float_cb != nullptr;
     uint32_t frames = 0;
+    uint32_t wanted = 0;
     if (shared) {
+        const uint32_t read = static_cast<std::uint32_t>(retro_atomic_load_relaxed_int(&shared->audio_read));
+        const uint32_t written = static_cast<std::uint32_t>(retro_atomic_load_acquire_int(&shared->audio_written));
+        uint32_t skip; // the wide ring is left to its room, not skipped through
+        wanted = audio_pace_take(&frame_pace, written - read, kAudioFrames, &skip);
+    }
+    if (wanted) {
         audio_wide_piece_t piece;
-        while (frames < static_cast<uint32_t>(kAudioFrames) &&
-               audio_wide_peek(shared->audio_wide, audio_wide_done, kAudioFrames - frames,
-                               &piece)) {
+        while (frames < wanted &&
+               audio_wide_peek(shared->audio_wide, audio_wide_done, wanted - frames, &piece)) {
             const unsigned layout =
                 piece.channels == 8 ? RETRO_AUDIO_LAYOUT_7_1 : RETRO_AUDIO_LAYOUT_STEREO;
             if (is_float) {
@@ -1363,13 +1373,9 @@ void SendAudio() {
     if (shared) {
         uint32_t read = static_cast<std::uint32_t>(retro_atomic_load_relaxed_int(&shared->audio_read));
         const uint32_t written = static_cast<std::uint32_t>(retro_atomic_load_acquire_int(&shared->audio_written));
-        // The emulator mixes exactly one frame of sound a frame. More than two frames
-        // waiting (it ran ahead while the frontend did not take any): the oldest go, so the
-        // sound stays at most two frames behind the picture.
-        if (written - read > 2 * static_cast<uint32_t>(kAudioFrames)) {
-            read = written - 2 * static_cast<uint32_t>(kAudioFrames);
-        }
-        frames = std::min<uint32_t>(written - read, kAudioFrames);
+        uint32_t skip;
+        frames = audio_pace_take(&frame_pace, written - read, kAudioFrames, &skip);
+        read += skip;
         const uint32_t at = read & (Libretro::AUDIO_RING_FRAMES - 1);
         const uint32_t first = std::min<uint32_t>(frames, Libretro::AUDIO_RING_FRAMES - at);
         if (audio_batch_float_cb) {
@@ -1703,6 +1709,7 @@ RETRO_API bool retro_load_game(const struct retro_game_info* game) {
         audio_multi_int16_cb = nullptr;
         audio_multi_float_cb = nullptr;
         audio_wide_done = 0;
+        frame_pace = {};
         struct retro_audio_sample_multi_callback multi {};
         if (OptionValue("shadps4_surround", "enabled") == "enabled" &&
             environ_cb(RETRO_ENVIRONMENT_GET_AUDIO_SAMPLE_BATCH_MULTI, &multi) &&

@@ -10,13 +10,14 @@
 // core through the shared memory of shared_state.h:
 //
 //   picture  each finished frame, read back by the renderer (PushFrame)
-//   sound    the sources' inputs of the mix, summed into a ring a frame at a time (MixAudioFrame,
+//   sound    the sources' inputs of the mix, summed into a ring a frame at a time (FrameThread,
 //   audio_mix.c) pads     the frontend's ports, put on the controllers
 //   (PumpInput), and their motors options  the core options, put on top of the
 //   emulator's configuration (ApplyCoreOptions)
 
 #include <algorithm>
 #include <retro_atomic.h>
+#include <rthreads/rthreads.h>
 #include <atomic>
 #include <cerrno>
 #include <chrono>
@@ -35,10 +36,12 @@
 #include "common/path_util.h"
 #include "common/quick_exit.h"
 #include "common/singleton.h"
+#include "common/thread_name.h"
 #include "core/devtools/layer.h"
 #include "core/emulator_settings.h"
 #include "core/file_sys/fs.h"
 #include "core/ipc/ipc.h"
+#include "core/libraries/kernel/time.h"
 #include "core/libraries/pad/pad.h"
 #include "core/libraries/system/userservice.h"
 #include "core/signals.h"
@@ -156,10 +159,40 @@ void WatchQuit() {
 
 // One frame of the game's sound, from every source, into the ring the core plays from: each
 // of the frontend's frames is exactly AUDIO_MIX_FRAME_FRAMES (48000 / 60) of it, mixed when
-// the frame ends (Libretro::MixAudioFrame, from the present thread as it starts the next
+// the frame ends (MixAudioFrameNow, from the frame thread as it starts the next
 // frame of the game's time). A source short of them is silent for the rest; what sources
 // have beyond them waits for the next frame. Nothing is kept ahead: no target to fill to.
 static audio_wide_writer_t wide_writer{};
+
+static void MixAudioFrameNow();
+
+// Each of the frontend's frames as soon as the core counts it: the frame of the game's time that
+// ended gets its sound (one frame's worth, MixAudioFrameNow), and the next one starts
+// (game_clock_frame). On a thread of its own, which does nothing else, so that neither waits on
+// what the present thread is busy with (a flip, an image to draw into).
+static void FrameThread(void*) {
+    thread_name_set("shadPS4:Frames");
+    std::uint32_t ticks =
+        static_cast<std::uint32_t>(retro_atomic_load_acquire_int(&shared->vblank_ticks));
+    for (;;) {
+        const int key = wakes.vblank.Prepare();
+        if (retro_atomic_load_acquire_int(&shared->quit) != 0) {
+            wakes.vblank.Cancel();
+            return;
+        }
+        const std::uint32_t now =
+            static_cast<std::uint32_t>(retro_atomic_load_acquire_int(&shared->vblank_ticks));
+        if (now == ticks) {
+            wakes.vblank.Wait(key);
+            continue;
+        }
+        wakes.vblank.Cancel();
+        for (; ticks != now; ++ticks) {
+            MixAudioFrameNow();
+            game_clock_frame(Libraries::Kernel::GameClock());
+        }
+    }
+}
 
 static void MixFrameWide() {
     constexpr std::uint32_t frames = AUDIO_MIX_FRAME_FRAMES;
@@ -210,6 +243,14 @@ static void MixFrameStereo() {
         audio_mix_take_s16(shared->audio, head, frames - head, 2);
     }
     retro_atomic_store_release_int(&shared->audio_written, written + frames);
+}
+
+static void MixAudioFrameNow() {
+    if (shared->options.audio_channels == 8) {
+        MixFrameWide();
+    } else {
+        MixFrameStereo();
+    }
 }
 
 // The frontend's ports onto the controllers. Only what changed: every call
@@ -383,6 +424,7 @@ int RunEmulator(const char* argument) {
       LOG_CRITICAL(Lib_AudioOut, "No memory for the core's audio mix");
     }
     std::thread(PumpInput).detach();
+    sthread_detach(sthread_create(FrameThread, nullptr));
 
     Common::Log::Setup("shadps4.log");
     Core::InstallCrashReport();
@@ -692,16 +734,6 @@ void SetRumble(std::uint32_t pad, std::uint8_t small_motor, std::uint8_t large_m
     }
 }
 
-void MixAudioFrame() {
-    if (!shared) {
-        return;
-    }
-    if (shared->options.audio_channels == 8) {
-        MixFrameWide();
-    } else {
-        MixFrameStereo();
-    }
-}
 
 std::uint32_t VblankTicks() {
     return shared ? static_cast<std::uint32_t>(retro_atomic_load_acquire_int(&shared->vblank_ticks))
