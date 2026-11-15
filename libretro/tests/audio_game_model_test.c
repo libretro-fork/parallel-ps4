@@ -62,6 +62,7 @@ enum {
     CASE_STOPS,
     CASE_FMOD,
     CASE_SUSPENDED,
+    CASE_CHAIN,
     CASE_COUNT
 };
 static const char* const case_names[CASE_COUNT] = {
@@ -72,8 +73,13 @@ static const char* const case_names[CASE_COUNT] = {
     "a thread spinning without a yield",
     "an engine that stops",
     "FMOD: a mixer two 256-frame slots ahead, an output thread without a wait for it",
-    "a relative sleeper, a woken thread that never runs, a thread blocked untracked for ever"};
+    "a relative sleeper, a woken thread that never runs, a thread blocked untracked for ever",
+    "a mixer on its own schedule, an output thread waiting for it, a thread blocked untracked"};
 static int which;
+
+/* Each game thread's own state for the clock */
+static __thread game_clock_thread_t self_state;
+#define SELF (&self_state)
 
 static int stopping(void* ctx) {
     (void)ctx;
@@ -90,7 +96,7 @@ static int port_ready(void* ctx) {
 static void port_sleep(uint64_t due) {
     if (due > game_clock_frame_end(&clk))
         audio_mix_input_waits_past(port, (int)game_clock_frames(&clk));
-    game_clock_wait(&clk, &sleep_ec, due, stopping, NULL, 1);
+    game_clock_wait(&clk, &sleep_ec, due, stopping, NULL, SELF);
 }
 
 /* The count in two 14-bit halves, one a channel, each well inside 16 bits */
@@ -134,7 +140,7 @@ static void fmod_mixer_thread(void* data) {
     unsigned count = 0, slot = 0, i;
     (void)data;
     while (!retro_atomic_load_acquire_int(&stop)) {
-        game_clock_wait(&clk, &fmod_ec, 0, fmod_slot_free, NULL, 1);
+        game_clock_wait(&clk, &fmod_ec, 0, fmod_slot_free, NULL, SELF);
         if (retro_atomic_load_acquire_int(&stop))
             break;
         retro_sleep_us(1000); /* its mixing: the host's time, counted running */
@@ -144,7 +150,7 @@ static void fmod_mixer_thread(void* data) {
         }
         slot ^= 1;
     }
-    game_clock_idle(&clk);
+    game_clock_thread_idle(&clk, SELF);
 }
 
 static void fmod_output_thread(void* data) {
@@ -167,7 +173,7 @@ static void fmod_output_thread(void* data) {
         (void)start;
         (void)count;
 #endif
-        game_clock_wait(&clk, audio_mix_input_room_ec(port), 0, port_ready, NULL, 1);
+        game_clock_wait(&clk, audio_mix_input_room_ec(port), 0, port_ready, NULL, SELF);
         if (retro_atomic_load_acquire_int(&stop))
             break;
         while (left) {
@@ -182,7 +188,7 @@ static void fmod_output_thread(void* data) {
         retro_atomic_fetch_add_int(&fmod_free, 1);
         retro_eventcount_notify(&fmod_ec);
     }
-    game_clock_idle(&clk);
+    game_clock_thread_idle(&clk, SELF);
 }
 
 static int lock_free(void* ctx) {
@@ -191,7 +197,7 @@ static int lock_free(void* ctx) {
 }
 
 static void lock_take(void) {
-    game_clock_wait(&clk, &lock_ec, 0, lock_free, NULL, 1);
+    game_clock_wait(&clk, &lock_ec, 0, lock_free, NULL, SELF);
 }
 
 static void lock_give(void) {
@@ -207,13 +213,13 @@ static void engine_thread(void* data) {
     (void)data;
     while (!retro_atomic_load_acquire_int(&stop)) {
         /* Rendered, then out through the port */
-        game_clock_wait(&clk, audio_mix_input_room_ec(port), 0, port_ready, NULL, 1);
+        game_clock_wait(&clk, audio_mix_input_room_ec(port), 0, port_ready, NULL, SELF);
         if (retro_atomic_load_acquire_int(&stop))
             break;
         write_buffer(&count);
         if (which == CASE_STOPS && ++buffers == STOP_AFTER) {
             /* Stops: waits for something that does not come */
-            game_clock_wait(&clk, &never_ec, 0, stopping, NULL, 1);
+            game_clock_wait(&clk, &never_ec, 0, stopping, NULL, SELF);
             break;
         }
         /* With the lock waiter, the lock held while it sleeps */
@@ -224,7 +230,7 @@ static void engine_thread(void* data) {
         if (which == CASE_LOCK_WAITER)
             lock_give();
     }
-    game_clock_idle(&clk);
+    game_clock_thread_idle(&clk, SELF);
 }
 
 static int next_vblank(void* ctx) {
@@ -242,9 +248,9 @@ static void render_thread(void* data) {
         /* A heavy game's frame: the host's time for its work, the game's time held */
         if (which == CASE_HEAVY)
             retro_sleep_us(15000);
-        game_clock_wait(&clk, &vblank_ec, 0, next_vblank, &frame, 1);
+        game_clock_wait(&clk, &vblank_ec, 0, next_vblank, &frame, SELF);
     }
-    game_clock_idle(&clk);
+    game_clock_thread_idle(&clk, SELF);
 }
 
 static void yielder_thread(void* data) {
@@ -255,7 +261,7 @@ static void yielder_thread(void* data) {
         retro_sleep_us(0);
     }
     game_clock_resume(&clk, &yielded);
-    game_clock_idle(&clk);
+    game_clock_thread_idle(&clk, SELF);
 }
 
 static void lock_waiter_thread(void* data) {
@@ -264,7 +270,7 @@ static void lock_waiter_thread(void* data) {
         lock_take();
         lock_give();
     }
-    game_clock_idle(&clk);
+    game_clock_thread_idle(&clk, SELF);
 }
 
 /* Spins on memory, no system call, no yield: counted running all along */
@@ -272,7 +278,7 @@ static void spinner_thread(void* data) {
     (void)data;
     while (!retro_atomic_load_acquire_int(&stop))
         retro_atomic_fetch_add_int(&spin_word, 1);
-    game_clock_idle(&clk);
+    game_clock_thread_idle(&clk, SELF);
 }
 
 /* Parked, then woken, and never runs (suspended): its wake stays in flight */
@@ -280,13 +286,13 @@ static retro_atomic_int_t suspended_word;
 static void suspended_thread(void* data) {
     const int slot = game_clock_park(&clk, &suspended_word, 0);
     (void)data;
-    game_clock_idle(&clk);
+    game_clock_thread_idle(&clk, SELF);
     retro_atomic_fetch_add_int(&suspended_word, 1);
     while (!retro_atomic_load_acquire_int(&stop))
         retro_sleep_us(1000);
     game_clock_busy(&clk);
     game_clock_unpark(&clk, slot);
-    game_clock_idle(&clk);
+    game_clock_thread_idle(&clk, SELF);
 }
 
 /* Blocked in a wait nobody tracks (a socket's), counted running for ever */
@@ -294,7 +300,54 @@ static void blocked_thread(void* data) {
     (void)data;
     while (!retro_atomic_load_acquire_int(&stop))
         retro_sleep_us(1000);
-    game_clock_idle(&clk);
+    game_clock_thread_idle(&clk, SELF);
+}
+
+/* A mixer that keeps its own schedule (a buffer each 5.33 ms of the game's time) and an output
+ * thread that waits for the mixer's buffer, then outputs it paced: the output's wait is on
+ * another thread, not on the time, and a thread blocked untracked keeps the frame from ever
+ * being done. retro_run's wait still ends: the finishing wakes the mixer, which wakes the
+ * output, and the frame is done once both have waited again. */
+static retro_atomic_int_t chain_mixed;
+static retro_eventcount_t chain_ec;
+
+static int chain_have(void* ctx) {
+    return retro_atomic_load_acquire_int(&chain_mixed) > *(int*)ctx ||
+           retro_atomic_load_acquire_int(&stop);
+}
+
+static void chain_mixer_thread(void* data) {
+    uint64_t deadline = 0;
+    (void)data;
+    while (!retro_atomic_load_acquire_int(&stop)) {
+        retro_atomic_fetch_add_int(&chain_mixed, 1);
+        retro_eventcount_notify(&chain_ec);
+        deadline += BUFFER_NS;
+        game_clock_wait(&clk, &sleep_ec, deadline, stopping, NULL, SELF);
+    }
+    game_clock_thread_idle(&clk, SELF);
+}
+
+static void chain_output_thread(void* data) {
+    uint64_t start = 0, count = 0;
+    unsigned written = 0;
+    int taken = 0;
+    (void)data;
+    while (!retro_atomic_load_acquire_int(&stop)) {
+        uint64_t due;
+        game_clock_wait(&clk, &chain_ec, 0, chain_have, &taken, SELF);
+        if (retro_atomic_load_acquire_int(&stop))
+            break;
+        taken++;
+        due = game_clock_cadence(&clk, &start, &count, BUFFER, 48000);
+        if (due > game_clock_now(&clk))
+            port_sleep(due);
+        game_clock_wait(&clk, audio_mix_input_room_ec(port), 0, port_ready, NULL, SELF);
+        if (retro_atomic_load_acquire_int(&stop))
+            break;
+        write_buffer(&written);
+    }
+    game_clock_thread_idle(&clk, SELF);
 }
 
 /* libretro/host.cpp's FrameThread */
@@ -378,6 +431,12 @@ static int run_case(int c) {
         threads[n++] = sthread_create(fmod_mixer_thread, NULL);
         game_clock_busy(&clk);
         threads[n++] = sthread_create(fmod_output_thread, NULL);
+    } else if (c == CASE_CHAIN) {
+        retro_atomic_int_init(&chain_mixed, 0);
+        game_clock_busy(&clk);
+        threads[n++] = sthread_create(chain_mixer_thread, NULL);
+        game_clock_busy(&clk);
+        threads[n++] = sthread_create(chain_output_thread, NULL);
     } else {
         game_clock_busy(&clk);
         threads[n++] = sthread_create(engine_thread, NULL);
@@ -390,6 +449,10 @@ static int run_case(int c) {
                                       : c == CASE_LOCK_WAITER ? lock_waiter_thread
                                                               : spinner_thread,
                                       NULL);
+    }
+    if (c == CASE_CHAIN) {
+        game_clock_busy(&clk);
+        threads[n++] = sthread_create(blocked_thread, NULL);
     }
     if (c == CASE_SUSPENDED) {
         retro_atomic_int_init(&suspended_word, 0);
@@ -451,6 +514,7 @@ static int run_case(int c) {
     retro_eventcount_notify(&lock_ec);
     retro_eventcount_notify(&never_ec);
     retro_eventcount_notify(&fmod_ec);
+    retro_eventcount_notify(&chain_ec);
     audio_mix_notify_room();
     for (i = 0; i < n; i++)
         sthread_join(threads[i]);
@@ -475,6 +539,7 @@ int main(void) {
     retro_eventcount_init(&audio_ec);
     retro_eventcount_init(&never_ec);
     retro_eventcount_init(&fmod_ec);
+    retro_eventcount_init(&chain_ec);
     retro_atomic_int_init(&spin_word, 0);
     for (c = 0; c < CASE_COUNT; c++)
         failures += run_case(c) ? 1 : 0;

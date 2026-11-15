@@ -83,8 +83,8 @@ static void ExitThread() {
     retro_eventcount_notify(curthread->join_wait.get());
 
     if (IsGameThread()) {
+        GameThreadIdle();
         SetGameThread(false);
-        game_clock_idle(GameClock());
     }
     curthread->native_thr->Exit();
     UNREACHABLE();

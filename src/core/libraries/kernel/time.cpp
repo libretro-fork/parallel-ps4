@@ -61,19 +61,28 @@ static void GameTimespec(u64 base_ns, OrbisKernelTimespec* ts) {
 
 namespace {
 thread_local bool game_thread = false;
-thread_local int game_thread_yielded = 0;
+thread_local game_clock_thread_t game_thread_self{};
 } // namespace
 
 bool IsGameThread() {
-    if (game_thread) {
-        game_clock_resume(&game_clock, &game_thread_yielded);
+    return GameThreadSelf() != nullptr;
+}
+
+game_clock_thread_t* GameThreadSelf() {
+    if (!game_thread) {
+        return nullptr;
     }
-    return game_thread;
+    game_clock_resume(&game_clock, &game_thread_self.yielded);
+    return &game_thread_self;
+}
+
+void GameThreadIdle() {
+    game_clock_thread_idle(&game_clock, &game_thread_self);
 }
 
 void GameYield() {
     if (game_thread) {
-        game_clock_yield(&game_clock, &game_thread_yielded);
+        game_clock_yield(&game_clock, &game_thread_self.yielded);
     }
     std::this_thread::yield();
 }

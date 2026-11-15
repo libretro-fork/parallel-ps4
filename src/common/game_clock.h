@@ -46,6 +46,12 @@ typedef struct game_clock_parked {
     retro_atomic_int_t flight_frame;
 } game_clock_parked_t;
 
+/* A game thread's own state, kept by the thread (thread-local) */
+typedef struct game_clock_thread {
+    int yielded; /* counted idle by a yield (game_clock_yield) */
+    int woken;   /* woken by the frame's finishing, the frame's number + 1, until it waits again */
+} game_clock_thread_t;
+
 typedef struct game_clock {
     retro_atomic_64_t now;       /* the time */
     retro_atomic_64_t frame_end; /* the most the time may reach before the next frame */
@@ -64,6 +70,8 @@ typedef struct game_clock {
     /* The frame is wanted finished (game_clock_finish): its deadlines are not held back by
      * threads running */
     retro_atomic_int_t finishing;
+    /* Threads the finishing woke that have not waited again (game_clock_thread_t.woken) */
+    retro_atomic_int_t woken;
     /* The frame done, or 0 (game_clock_set_done), and who is told */
     retro_atomic_int_t* done_frame;
     void (*done)(void* ctx);
@@ -80,7 +88,10 @@ void game_clock_frame(game_clock_t* clock);
 
 /* The frame is done when the game's threads are all idle and none waits for a time within
  * it: nothing more happens in it until something outside the game wakes a thread (the next
- * frame, the GPU, input). Then *@done_frame is set to the frame's number (frames started)
+ * frame, the GPU, input). The frame being finished (game_clock_finish), it is done too once its
+ * deadlines have all come and every thread the finishing woke has waited again, whoever else
+ * runs (a thread blocked where the clock does not see it, a socket's recv, runs for ever).
+ * Then *@done_frame is set to the frame's number (frames started)
  * and @done(@ctx) is called, on the thread that made it so; a game thread running again sets
  * it back to 0. @done_frame may be in memory another process reads. Set before the frames
  * start. */
@@ -134,6 +145,15 @@ int game_clock_disarm(game_clock_t* clock, int timer);
 void game_clock_idle(game_clock_t* clock);
 void game_clock_busy(game_clock_t* clock);
 
+/* A counted thread, @self, goes idle: as game_clock_idle, and one the frame's finishing woke
+ * has run its part of the frame */
+void game_clock_thread_idle(game_clock_t* clock, game_clock_thread_t* self);
+
+/* A timer hands @self, parked, its count back: as game_clock_busy, and while the frame is
+ * being finished, @self is one the finishing woke, which the frame waits for until it waits
+ * again. Called by the timer's fire, on the thread firing it. */
+void game_clock_hand(game_clock_t* clock, game_clock_thread_t* self);
+
 /* A counted game thread parks, idle, on a wait whose wake bumps *@word (@key: its value
  * now): until it has run again (game_clock_unpark), a wake of it in flight (the word moved
  * on) holds the time, so that the time does not skip past a thread woken by another that then
@@ -156,11 +176,11 @@ void game_clock_yield(game_clock_t* clock, int* yielded);
 void game_clock_resume(game_clock_t* clock, int* yielded);
 
 /* Waits on @ec until @ready(@ctx) is nonzero or the game's time reaches @deadline (0: none),
- * as a game thread (@counted) not counted running meanwhile: no host timeout, no wall clock.
- * A timer of the game's clock wakes it at the deadline and hands it its count back.
- * @return 1 if @ready ended it, 0 if the deadline did. */
+ * as the game thread @self (NULL: one not counted) not counted running meanwhile: no host
+ * timeout, no wall clock. A timer of the game's clock wakes it at the deadline and hands it its
+ * count back. @return 1 if @ready ended it, 0 if the deadline did. */
 int game_clock_wait(game_clock_t* clock, retro_eventcount_t* ec, uint64_t deadline,
-                    int (*ready)(void* ctx), void* ctx, int counted);
+                    int (*ready)(void* ctx), void* ctx, game_clock_thread_t* self);
 
 #ifdef __cplusplus
 }

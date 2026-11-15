@@ -99,6 +99,13 @@ void GameSleepUntil(u64 deadline);
 /// thread is about to wait or end: one that yielded counts running again from here.
 bool IsGameThread();
 
+/// The calling game thread's own state for the clock (one that yielded counts running again
+/// from here), or nullptr for a thread the clock does not count
+game_clock_thread_t* GameThreadSelf();
+
+/// The calling game thread goes idle (game_clock_thread_idle)
+void GameThreadIdle();
+
 /// The calling thread yields (sched_yield, usleep(0), a spin on a lock): a game thread waits
 /// on nothing tracked, so it counts idle until it next waits or ends (game_clock_yield)
 void GameYield();
@@ -116,14 +123,14 @@ bool GameSemaWait(Sema& sema, u64 deadline) {
     }
     struct Timer {
         Sema* sema;
-        bool counted;
-    } timer_ctx{&sema, IsGameThread()};
+        game_clock_thread_t* self;
+    } timer_ctx{&sema, GameThreadSelf()};
     const int timer = deadline != 0 ? game_clock_arm(
                                           clock, deadline,
                                           [](void* ctx) {
                                               auto* t = static_cast<Timer*>(ctx);
-                                              if (t->counted) {
-                                                  game_clock_busy(GameClock());
+                                              if (t->self) {
+                                                  game_clock_hand(GameClock(), t->self);
                                               }
                                               t->sema->release();
                                           },
@@ -132,16 +139,16 @@ bool GameSemaWait(Sema& sema, u64 deadline) {
     ASSERT_MSG(deadline == 0 || timer >= 0, "All of the game's timers are armed");
     // Parked, idle: a release of it in flight holds the time until it has run
     int slot = -1;
-    if (timer_ctx.counted) {
+    if (timer_ctx.self) {
         slot =
             game_clock_park(clock, &sema.releases, retro_atomic_load_seq_cst_int(&sema.releases));
-        game_clock_idle(clock);
+        game_clock_thread_idle(clock, timer_ctx.self);
     }
     sema.acquire();
     // A timer that fired handed this thread its count back
     const bool fired = timer >= 0 && game_clock_disarm(clock, timer) != 0;
     if (!fired) {
-        if (timer_ctx.counted) {
+        if (timer_ctx.self) {
             game_clock_busy(clock);
         }
         game_clock_unpark(clock, slot);
@@ -153,22 +160,22 @@ bool GameSemaWait(Sema& sema, u64 deadline) {
 }
 
 /// Waits on @ec until @ready() or the game's time reaches @deadline (0: none), as a game
-/// thread not counted running meanwhile (@counted: one that is counted): no host timeout, no
-/// wall clock (game_clock_wait). @return whether @ready() was what ended it.
+/// thread not counted running meanwhile (@self: the thread, nullptr if not counted): no host
+/// timeout, no wall clock (game_clock_wait). @return whether @ready() was what ended it.
 template <typename Ready>
-bool GameWaitAs(retro_eventcount_t* ec, u64 deadline, Ready&& ready, bool counted) {
+bool GameWaitAs(retro_eventcount_t* ec, u64 deadline, Ready&& ready, game_clock_thread_t* self) {
     return game_clock_wait(
                GameClock(), ec, deadline,
                [](void* ctx) -> int {
                    return (*static_cast<std::remove_reference_t<Ready>*>(ctx))() ? 1 : 0;
                },
-               const_cast<void*>(static_cast<const void*>(std::addressof(ready))), counted) != 0;
+               const_cast<void*>(static_cast<const void*>(std::addressof(ready))), self) != 0;
 }
 
 /// The same, for the calling thread as it is counted
 template <typename Ready>
 bool GameWait(retro_eventcount_t* ec, u64 deadline, Ready&& ready) {
-    return GameWaitAs(ec, deadline, ready, IsGameThread());
+    return GameWaitAs(ec, deadline, ready, GameThreadSelf());
 }
 
 namespace Dev {

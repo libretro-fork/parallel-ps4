@@ -30,6 +30,7 @@ void game_clock_init(game_clock_t* clock, unsigned fps_num, unsigned fps_den) {
         }
     }
     retro_atomic_int_init(&clock->finishing, 0);
+    retro_atomic_int_init(&clock->woken, 0);
     {
         unsigned i;
         for (i = 0; i < GAME_CLOCK_PARKED / 64; i++)
@@ -123,8 +124,13 @@ static void game_clock_skip(game_clock_t* clock) {
         game_clock_advance(clock, earliest);
         game_clock_fire_due(clock, game_clock_now(clock));
     }
-    /* Still nobody running, and nobody waiting for a time within the frame: it is done */
-    if (!clock->done_frame || retro_atomic_load_acquire_int(&clock->running) > 0)
+    /* Still nobody running, and nobody waiting for a time within the frame: it is done. The
+     * frame being finished: nobody it woke still running, whoever else runs. */
+    if (!clock->done_frame)
+        return;
+    if (retro_atomic_load_acquire_int(&clock->running) > 0 &&
+        !(retro_atomic_load_acquire_int(&clock->finishing) &&
+          retro_atomic_load_acquire_int(&clock->woken) <= 0 && !game_clock_wake_in_flight(clock)))
         return;
     next = game_clock_earliest(clock);
     if (next == 0 || next > game_clock_frame_end(clock)) {
@@ -132,7 +138,9 @@ static void game_clock_skip(game_clock_t* clock) {
         /* A thread that went running meanwhile may have looked before the store: then it is
          * taken back here (the store, then the count; its count, then the store's word) */
         retro_atomic_thread_fence_seq_cst();
-        if (retro_atomic_load_seq_cst_int(&clock->running) > 0) {
+        if (retro_atomic_load_seq_cst_int(&clock->running) > 0 &&
+            !(retro_atomic_load_seq_cst_int(&clock->finishing) &&
+              retro_atomic_load_seq_cst_int(&clock->woken) <= 0)) {
             retro_atomic_store_release_int(clock->done_frame, 0);
             return;
         }
@@ -161,6 +169,7 @@ void game_clock_frame(game_clock_t* clock) {
     /* The end first: a thread that sees the new start may advance within the new frame */
     retro_atomic_store_release_64(&clock->frame_end, (int64_t)end);
     retro_atomic_store_release_int(&clock->finishing, 0);
+    retro_atomic_store_release_int(&clock->woken, 0);
     game_clock_raise(clock, start);
     retro_atomic_fetch_add_64(&clock->frames, 1);
     /* Nobody running: the new frame's time is theirs to skip through at once */
@@ -275,14 +284,38 @@ void game_clock_finish(game_clock_t* clock) {
 }
 
 void game_clock_idle(game_clock_t* clock) {
-    if (retro_atomic_fetch_sub_int(&clock->running, 1) == 1)
+    /* The frame being finished: whoever else runs, a thread going idle may be the last it woke */
+    if (retro_atomic_fetch_sub_int(&clock->running, 1) == 1 ||
+        retro_atomic_load_acquire_int(&clock->finishing))
         game_clock_skip(clock);
+}
+
+void game_clock_thread_idle(game_clock_t* clock, game_clock_thread_t* self) {
+    if (self->woken) {
+        if (self->woken == (int)game_clock_frames(clock) + 1)
+            retro_atomic_fetch_sub_int(&clock->woken, 1);
+        self->woken = 0;
+    }
+    game_clock_idle(clock);
+}
+
+void game_clock_hand(game_clock_t* clock, game_clock_thread_t* self) {
+    game_clock_busy(clock);
+    if (self && retro_atomic_load_acquire_int(&clock->finishing)) {
+        self->woken = (int)game_clock_frames(clock) + 1;
+        retro_atomic_fetch_add_int(&clock->woken, 1);
+        /* Not done before this one has run */
+        if (clock->done_frame)
+            retro_atomic_store_release_int(clock->done_frame, 0);
+    }
 }
 
 void game_clock_busy(game_clock_t* clock) {
     retro_atomic_fetch_add_seq_cst_int(&clock->running, 1);
-    /* Running again: the frame is not done after all */
-    if (clock->done_frame && retro_atomic_load_seq_cst_int(clock->done_frame) != 0)
+    /* Running again: the frame is not done after all (being finished, it is done whoever runs:
+     * a thread the finishing wakes takes it back, game_clock_hand) */
+    if (clock->done_frame && !retro_atomic_load_acquire_int(&clock->finishing) &&
+        retro_atomic_load_seq_cst_int(clock->done_frame) != 0)
         retro_atomic_store_release_int(clock->done_frame, 0);
 }
 
@@ -350,21 +383,21 @@ struct game_clock_wait_timer {
     game_clock_t* clock;
     retro_eventcount_t* ec;
     retro_atomic_int_t fired;
-    int counted;
+    game_clock_thread_t* self;
 };
 
 static void game_clock_wait_fire(void* ctx) {
     struct game_clock_wait_timer* t = (struct game_clock_wait_timer*)ctx;
     /* The woken thread counts as running from here: the time does not skip past it before it
      * has run */
-    if (t->counted)
-        game_clock_busy(t->clock);
+    if (t->self)
+        game_clock_hand(t->clock, t->self);
     retro_atomic_store_release_int(&t->fired, 1);
     retro_eventcount_notify(t->ec);
 }
 
 int game_clock_wait(game_clock_t* clock, retro_eventcount_t* ec, uint64_t deadline,
-                    int (*ready)(void* ctx), void* ctx, int counted) {
+                    int (*ready)(void* ctx), void* ctx, game_clock_thread_t* self) {
     struct game_clock_wait_timer t;
     int timer = -1, ok = 0, fired, slot = -2; /* -2: not parked yet */
     if (ready(ctx))
@@ -374,7 +407,7 @@ int game_clock_wait(game_clock_t* clock, retro_eventcount_t* ec, uint64_t deadli
     t.clock = clock;
     t.ec = ec;
     retro_atomic_int_init(&t.fired, 0);
-    t.counted = counted;
+    t.self = self;
     if (deadline != 0)
         timer = game_clock_arm(clock, deadline, game_clock_wait_fire, &t);
     for (;;) {
@@ -389,10 +422,10 @@ int game_clock_wait(game_clock_t* clock, retro_eventcount_t* ec, uint64_t deadli
             break;
         }
         /* Parked, idle: the first time it parks, then again after a wake that was not for it */
-        if (counted) {
+        if (self) {
             if (slot == -2) {
                 slot = game_clock_park(clock, &ec->epoch, key);
-                game_clock_idle(clock);
+                game_clock_thread_idle(clock, self);
             } else {
                 game_clock_repark(clock, slot, key);
             }
@@ -402,14 +435,14 @@ int game_clock_wait(game_clock_t* clock, retro_eventcount_t* ec, uint64_t deadli
     /* Running again: counted before its slot goes, so that the time never finds it neither
      * running nor woken */
     fired = timer >= 0 && game_clock_disarm(clock, timer);
-    if (counted && slot != -2) {
+    if (self && slot != -2) {
         /* A timer that fired handed this thread its count back */
         if (!fired)
             game_clock_busy(clock);
         game_clock_unpark(clock, slot);
-    } else if (fired && counted) {
+    } else if (fired && self) {
         /* Fired before it ever parked: its count was handed to it, and it never idled */
-        game_clock_idle(clock);
+        game_clock_thread_idle(clock, self);
     }
     return ok;
 }
