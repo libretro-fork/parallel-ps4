@@ -3,6 +3,9 @@
 
 #pragma once
 
+#include <algorithm>
+#include <array>
+#include <cstring>
 #include <span>
 #include <vector>
 #include "common/assert.h"
@@ -24,6 +27,40 @@ struct Archive;
 }
 
 namespace Shader {
+
+namespace Gcn {
+struct FetchShaderData;
+}
+
+/// A V# read through a pointer in the user data (ReadUdReg), as the draw saw it
+struct SnapshotRead {
+    u32 ptr_index;
+    u32 dword_offset;
+    std::array<u32, 4> data;
+};
+
+/// What a translation on the compiler thread reads of the game's memory, taken on the drawing
+/// thread at the draw. By the time the compiler thread gets to a shader the game may have
+/// reused that memory (a level or a save loading): the SRT walker would follow pointers into
+/// whatever is there now, and the shader, its specialization and its pipeline would be made
+/// from garbage, or the walk would fault. With a snapshot nothing of the game's is read. The
+/// snapshot is lent (its storage is the compile job's) for the translation only.
+struct GuestSnapshot {
+    /// The SRT walker's result: flattened_ud_buf
+    std::span<const u32> flat;
+    /// A vertex shader's fetch shader, parsed; null if it has none
+    const Gcn::FetchShaderData* fetch = nullptr;
+    /// The V#s read through user data pointers: the vertex buffers', the tessellation
+    /// constants'
+    std::span<const SnapshotRead> reads;
+    /// The tessellation constants a hull shader reads; null if none
+    const TessellationDataConstantBuffer* tess = nullptr;
+    /// Only what the drawing thread needs to take the snapshot is wanted: the walker, where
+    /// the fetch shader and the tessellation constants are. The translation stops after the
+    /// walker is made, and reads nothing of the game's but the code (owned by the cache) and,
+    /// for a hull shader, its tessellation constants.
+    bool discover_only = false;
+};
 
 enum class Qualifier : u8 {
     None,
@@ -140,6 +177,10 @@ struct Info : InfoPersistent {
 
     std::array<Interpolation, IR::NumParams> fs_interpolation{};
 
+    /// Set for a translation on the compiler thread: what it reads instead of the game's
+    /// memory (GuestSnapshot). Null on the drawing thread, which reads the game's memory.
+    const GuestSnapshot* snapshot = nullptr;
+
     Info() = default;
     Info(HwStage stage_, SwStage l_stage_, ShaderParams params)
         : InfoPersistent(stage_, l_stage_, params.hash), pgm_base{params.Base()},
@@ -154,6 +195,17 @@ struct Info : InfoPersistent {
     T ReadUdReg(u32 ptr_index, u32 dword_offset) const noexcept {
         T data;
         const u32* base = user_data.data();
+        if (ptr_index != IR::NumScalarRegs && snapshot && !snapshot->discover_only) {
+            static_assert(sizeof(T) <= sizeof(SnapshotRead::data));
+            std::memset(&data, 0, sizeof(T));
+            for (const auto& read : snapshot->reads) {
+                if (read.ptr_index == ptr_index && read.dword_offset == dword_offset) {
+                    std::memcpy(&data, read.data.data(), sizeof(T));
+                    break;
+                }
+            }
+            return data;
+        }
         if (ptr_index != IR::NumScalarRegs) {
             std::memcpy(&base, &user_data[ptr_index], sizeof(base));
             base = reinterpret_cast<const u32*>(VAddr(base) & 0xFFFFFFFFFFFFULL);
@@ -171,6 +223,14 @@ struct Info : InfoPersistent {
         flattened_ud_buf.resize(srt_info.flattened_bufsize_dw);
         ASSERT(user_data.size() <= NUM_USER_DATA_REGS);
         std::memcpy(flattened_ud_buf.data(), user_data.data(), user_data.size_bytes());
+        if (snapshot) {
+            // What the draw's walk gave; a discovery reads nothing past the user data
+            if (!snapshot->discover_only) {
+                const size_t n = std::min(snapshot->flat.size(), flattened_ud_buf.size());
+                std::copy_n(snapshot->flat.begin(), n, flattened_ud_buf.begin());
+            }
+            return;
+        }
         if (srt_info.walker_func) {
 #if defined(__aarch64__) && defined(__linux__)
             RunSrtWalker(srt_info.walker_func, user_data.data(), flattened_ud_buf.data());
@@ -182,6 +242,12 @@ struct Info : InfoPersistent {
 
     void ReadTessConstantBuffer(TessellationDataConstantBuffer& tess_constants) const {
         ASSERT(tess_consts_dword_offset >= 0); // We've already tracked the V# UD
+        if (snapshot && snapshot->tess) {
+            tess_constants = *snapshot->tess;
+            return;
+        }
+        // A hull shader's discovery reads them where they are: its translation depends on
+        // them before the walker is made (the one read of the game's memory left there)
         auto buf = ReadUdReg<AmdGpu::Buffer>(static_cast<u32>(tess_consts_ptr_base),
                                              static_cast<u32>(tess_consts_dword_offset));
         VAddr tess_constants_addr = buf.base_address;

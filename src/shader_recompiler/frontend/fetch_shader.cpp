@@ -44,6 +44,14 @@ bool ParseFetchShader(const Shader::Info& info, FetchShaderData& out_fetch_data)
     if (!info.has_fetch_shader) {
         return false;
     }
+    if (info.snapshot) {
+        // As the drawing thread parsed it at the draw; a discovery has none
+        if (!info.snapshot->fetch) {
+            return false;
+        }
+        out_fetch_data = *info.snapshot->fetch;
+        return true;
+    }
 
     out_fetch_data.attributes.clear();
 

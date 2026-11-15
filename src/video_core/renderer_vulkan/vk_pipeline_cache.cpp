@@ -10,6 +10,7 @@
 #include "core/debug_state.h"
 #include "core/emulator_settings.h"
 #include "shader_recompiler/backend/spirv/emit_spirv.h"
+#include "shader_recompiler/frontend/fetch_shader.h"
 #include "shader_recompiler/info.h"
 #include "shader_recompiler/recompiler.h"
 #include "shader_recompiler/runtime_info.h"
@@ -29,17 +30,30 @@ namespace Vulkan {
 struct PipelineCache::CompileJob {
     mpsc_stack_node_t node; // first: the stacks link jobs through it
     enum class Kind {
-        Program,     // a shader not seen before: its translation, permutation 0
+        Discover,    // a shader not seen before: its walker (Shader::GuestSnapshot)
+        Program,     // its translation, permutation 0
         Permutation, // another permutation of a translated shader
         Check,       // a permutation the cache gave, translated again to be compared
         Graphics,    // a graphics pipeline, from shaders all translated
     } kind{};
 
-    // Program, Permutation, Check: the shader, with the user data copied as the draw had it
+    // Discover, Program, Permutation, Check: the shader, with the user data copied as the draw
+    // had it, its code lent by the cache (Program::code)
     Shader::HwStage hw_stage{};
     Shader::SwStage sw_stage{};
     std::array<u32, Shader::ShaderParams::NumShaderUserData> user_data{};
     std::span<const u32> code;
+
+    // What the translation reads of the game's memory, taken at the draw (CaptureSnapshot)
+    Shader::GuestSnapshot snapshot{};
+    std::vector<u32> snap_flat;
+    std::optional<Shader::Gcn::FetchShaderData> snap_fetch;
+    Common::SmallVector<Shader::SnapshotRead, 40> snap_reads; // attributes and the tess V#
+    Shader::TessellationDataConstantBuffer snap_tess{};
+    /// The walker the snapshot was taken with: a translation that makes another (it should
+    /// not) was made from a flat buffer of another layout, and is not used
+    std::vector<u8> snap_walker;
+    bool stale{};
     u64 hash{};
     size_t perm_idx{};
     Shader::RuntimeInfo runtime{};
@@ -57,7 +71,9 @@ struct PipelineCache::CompileJob {
     Shader::Info fresh;
     bool same_spv{}, same_walker{}, same_resources{};
 
-    // Graphics: the key, and copies of the stages as the draw had them
+    // Graphics: the key, and copies of the stages as the draw had them, with the vertex
+    // buffers' V#s
+    std::array<Shader::GuestSnapshot, MaxShaderStages> stage_snapshots{};
     GraphicsPipelineKey key{};
     u64 key_hash{};
     std::array<Shader::Info, MaxShaderStages> stage_infos{};
@@ -509,6 +525,25 @@ const GraphicsPipeline* PipelineCache::GetGraphicsPipeline(const DrawIndirectPar
             if (fetch_shader) {
                 job->fetch = *fetch_shader;
             }
+            // Made on the compiler thread from what the draw saw: the vertex buffers' V#s
+            // (their formats) read now, the stages' flat buffers copied with them
+            for (u32 stage = 0; stage < MaxShaderStages; ++stage) {
+                if (!infos[stage]) {
+                    continue;
+                }
+                auto& snap = job->stage_snapshots[stage];
+                if (infos[stage]->sw_stage == Shader::SwStage::Vertex && job->fetch) {
+                    for (const auto& attrib : job->fetch->attributes) {
+                        job->snap_reads.push_back({attrib.sgpr_base, attrib.dword_offset,
+                                                   infos[stage]->ReadUdReg<std::array<u32, 4>>(
+                                                       attrib.sgpr_base, attrib.dword_offset)});
+                    }
+                    snap.fetch = &*job->fetch;
+                    snap.reads = {job->snap_reads.data(), job->snap_reads.size()};
+                }
+                snap.flat = job->stage_infos[stage].flattened_ud_buf;
+                job->stage_infos[stage].snapshot = &snap;
+            }
             pending_pipelines[num_pending_pipelines++] = pipeline_hash;
             Submit(job);
         }
@@ -845,17 +880,51 @@ vk::ShaderModule PipelineCache::CompileModule(Shader::Info& info, Shader::Runtim
     return module;
 }
 
+/// The drawing thread's half of a translation: what it will read of the game's memory, read
+/// now, at the draw (Shader::GuestSnapshot). @info is the shader's description with this
+/// draw's user data, its flat buffer refreshed (RefreshFlatBuf).
+void PipelineCache::CaptureSnapshot(CompileJob& job, const Shader::Info& info) {
+    job.snap_flat = info.flattened_ud_buf;
+    job.snap_walker = info.srt_walker_code;
+    if (info.has_fetch_shader) {
+        Shader::Gcn::FetchShaderData fetch;
+        if (Shader::Gcn::ParseFetchShader(info, fetch)) {
+            for (const auto& attrib : fetch.attributes) {
+                job.snap_reads.push_back(
+                    {attrib.sgpr_base, attrib.dword_offset,
+                     info.ReadUdReg<std::array<u32, 4>>(attrib.sgpr_base, attrib.dword_offset)});
+            }
+            job.snap_fetch = std::move(fetch);
+        }
+    }
+    if (info.tess_consts_dword_offset >= 0) {
+        const auto ptr = static_cast<u32>(info.tess_consts_ptr_base);
+        const auto offset = static_cast<u32>(info.tess_consts_dword_offset);
+        job.snap_reads.push_back({ptr, offset, info.ReadUdReg<std::array<u32, 4>>(ptr, offset)});
+        info.ReadTessConstantBuffer(job.snap_tess);
+        job.snapshot.tess = &job.snap_tess;
+    }
+    job.snapshot.flat = job.snap_flat;
+    job.snapshot.fetch = job.snap_fetch ? &*job.snap_fetch : nullptr;
+    job.snapshot.reads = {job.snap_reads.data(), job.snap_reads.size()};
+}
+
 PipelineCache::Result PipelineCache::GetProgram(HwStage hw_stage, SwStage sw_stage,
                                                 const Shader::ShaderParams& params,
                                                 Shader::Backend::Bindings& binding) {
     const auto& runtime_info = BuildRuntimeInfo(hw_stage, sw_stage);
-    const auto make_job = [&](CompileJob::Kind kind, size_t perm_idx) {
+    const auto make_job = [&](CompileJob::Kind kind, size_t perm_idx, Program* program) {
         auto* job = new CompileJob;
         job->kind = kind;
         job->hw_stage = hw_stage;
         job->sw_stage = sw_stage;
         std::ranges::copy(params.user_data, job->user_data.begin());
-        job->code = params.code;
+        // The code, copied once for the shader (one the pipeline cache gave has none yet),
+        // lent to every job of it
+        if (program->code.empty()) {
+            program->code.assign(params.code.begin(), params.code.end());
+        }
+        job->code = program->code;
         job->hash = params.hash;
         job->perm_idx = perm_idx;
         job->runtime = runtime_info;
@@ -869,14 +938,28 @@ PipelineCache::Result PipelineCache::GetProgram(HwStage hw_stage, SwStage sw_sta
 
     Program* program = FindProgram(params.hash);
     if (!program) {
-        // Filed now, so that it is compiled once: the compiler thread's translation fills it
+        // Filed now, so that it is compiled once. The compiler thread first makes its walker
+        // (a discovery, which reads nothing of the game's), then, from a snapshot the next
+        // draw takes, translates it.
         auto* placeholder = new Program(hw_stage, sw_stage, params);
         placeholder->pending = true;
         ptr_table_insert(&program_cache, params.hash, placeholder);
-        Submit(make_job(CompileJob::Kind::Program, 0));
+        auto* job = make_job(CompileJob::Kind::Discover, 0, placeholder);
+        job->snapshot.discover_only = true;
+        Submit(job);
         return pending();
     }
     if (program->pending) {
+        if (program->discovered && !program->submitted) {
+            auto& info = program->info;
+            info.pgm_base = params.Base();
+            info.user_data = params.user_data;
+            info.RefreshFlatBuf();
+            auto* job = make_job(CompileJob::Kind::Program, 0, program);
+            CaptureSnapshot(*job, info);
+            program->submitted = true;
+            Submit(job);
+        }
         return pending();
     }
 
@@ -891,7 +974,9 @@ PipelineCache::Result PipelineCache::GetProgram(HwStage hw_stage, SwStage sw_sta
         // Another permutation: filed now with its specialization, compiled on the thread
         const size_t perm_idx = program->modules.size();
         program->modules.push_back({vk::ShaderModule{}, std::move(spec), false, true});
-        Submit(make_job(CompileJob::Kind::Permutation, perm_idx));
+        auto* job = make_job(CompileJob::Kind::Permutation, perm_idx, program);
+        CaptureSnapshot(*job, info);
+        Submit(job);
         return pending();
     }
     if (it->pending) {
@@ -905,7 +990,8 @@ PipelineCache::Result PipelineCache::GetProgram(HwStage hw_stage, SwStage sw_sta
     if (it->from_cache) {
         // Checked against a translation on the thread; used meanwhile
         it->from_cache = false;
-        auto* job = make_job(CompileJob::Kind::Check, perm_idx);
+        auto* job = make_job(CompileJob::Kind::Check, perm_idx, program);
+        CaptureSnapshot(*job, info);
         job->start = start;
         job->kept_walker = info.srt_walker_code;
         job->kept_flatbuf_dw = info.srt_info.flattened_bufsize_dw;
@@ -960,29 +1046,54 @@ void PipelineCache::CompilerThread(std::stop_token stop) {
 void PipelineCache::RunJob(CompileJob& job) {
     const auto params = job.Params();
     switch (job.kind) {
+    case CompileJob::Kind::Discover: {
+        job.program = std::make_unique<Program>(job.hw_stage, job.sw_stage, params);
+        auto& info = job.program->info;
+        info.snapshot = &job.snapshot;
+        auto runtime = job.runtime;
+        (void)Shader::TranslateProgram(params.code, pools, info, runtime, profile);
+        info.snapshot = nullptr;
+        break;
+    }
     case CompileJob::Kind::Program: {
         job.program = std::make_unique<Program>(job.hw_stage, job.sw_stage, params);
         auto& info = job.program->info;
+        info.snapshot = &job.snapshot;
         auto binding = job.start;
         const auto module = CompileModule(info, job.runtime, params.code, 0, binding);
         auto spec = Shader::StageSpecialization(info, job.runtime, profile, job.start);
+        info.snapshot = nullptr;
+        job.stale = info.srt_walker_code != job.snap_walker;
+        if (job.stale) {
+            // Its flat buffer was of another layout: thrown away, the walker it made kept
+            instance.GetDevice().destroyShaderModule(module);
+            break;
+        }
         RegisterShaderMeta(info, spec.fetch_shader_data, spec, HashCombine(job.hash, 0), 0);
         job.program->AddPermut(module, std::move(spec));
         break;
     }
     case CompileJob::Kind::Permutation: {
         auto new_info = Shader::Info(job.hw_stage, job.sw_stage, params);
+        new_info.snapshot = &job.snapshot;
         auto binding = job.start;
         job.module = CompileModule(new_info, job.runtime, params.code, job.perm_idx, binding);
+        new_info.snapshot = nullptr;
+        if (new_info.srt_walker_code != job.snap_walker) {
+            LOG_WARNING(Render_Vulkan, "{} shader {:#x} permutation {}: another SRT walker",
+                        job.hw_stage, job.hash, job.perm_idx);
+        }
         break;
     }
     case CompileJob::Kind::Check: {
         job.fresh = Shader::Info(job.hw_stage, job.sw_stage, params);
+        job.fresh.snapshot = &job.snapshot;
         auto runtime = job.runtime;
         auto binding = job.start;
         const auto ir_program =
             Shader::TranslateProgram(params.code, pools, job.fresh, runtime, profile);
         const auto spv = Shader::Backend::SPIRV::EmitSPIRV(profile, runtime, ir_program, binding);
+        job.fresh.snapshot = nullptr;
         const auto kept_spv = Storage::DataBase::Instance().Load(
             Storage::BlobType::ShaderBinary, fmt::format("{:#018x}_{}", job.hash, job.perm_idx));
         job.same_spv = kept_spv && kept_spv->size() == spv.size() * sizeof(u32) &&
@@ -1008,6 +1119,9 @@ void PipelineCache::RunJob(CompileJob& job) {
         job.pipeline = new GraphicsPipeline(
             instance, scheduler, desc_heap, profile, job.key, *pipeline_cache, stage_ptrs,
             job.runtimes, job.fetch ? &*job.fetch : nullptr, job.modules, job.sdata, false);
+        for (auto& info : job.stage_infos) {
+            info.snapshot = nullptr;
+        }
         break;
     }
     }
@@ -1044,10 +1158,29 @@ bool PipelineCache::IsPipelinePending(u64 hash) const {
 // The drawing thread's half: files what the compiler thread made
 void PipelineCache::FileJob(CompileJob& job) {
     switch (job.kind) {
+    case CompileJob::Kind::Discover: {
+        // Its walker, for the next draw's snapshot (GetProgram)
+        Program* placeholder = FindProgram(job.hash);
+        ASSERT(placeholder && placeholder->pending && !placeholder->discovered);
+        placeholder->info = std::move(job.program->info);
+        placeholder->info.user_data = {};
+        placeholder->discovered = true;
+        break;
+    }
     case CompileJob::Kind::Program: {
         Program* placeholder = FindProgram(job.hash);
-        ASSERT(placeholder && placeholder->pending);
+        ASSERT(placeholder && placeholder->pending && placeholder->submitted);
+        if (job.stale) {
+            // Taken again at the next draw, with the walker this translation made
+            placeholder->info = std::move(job.program->info);
+            placeholder->info.user_data = {};
+            placeholder->submitted = false;
+            break;
+        }
+        // The code stays with the cache's entry (the jobs to come borrow it)
+        auto code = std::move(placeholder->code);
         *placeholder = std::move(*job.program);
+        placeholder->code = std::move(code);
         // The specializations point at the description they were made from
         for (auto& module : placeholder->modules) {
             module.spec.info = &placeholder->info;

@@ -1173,6 +1173,10 @@ void Translator::EmitFetch(const GcnInst& inst) {
 
     info.has_fetch_shader = true;
     info.fetch_shader_sgpr_base = code_sgpr_base;
+    if (info.snapshot && info.snapshot->discover_only) {
+        // Where the fetch shader is, for the drawing thread to parse: nothing more is wanted
+        return;
+    }
     ASSERT(ParseFetchShader(info, fetch_data));
 
     if (emu_settings_get_dump_shaders()) {
