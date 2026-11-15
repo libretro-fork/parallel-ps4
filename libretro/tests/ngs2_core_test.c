@@ -806,6 +806,65 @@ static void test_formats(void) {
    rig_close(&r);
 }
 
+/* VAG in two blocks, the stream coming a block at a time: the prediction goes on across
+ * them, every sample the same as one block's (started again, the wave broke at the block:
+ * a click) */
+static void test_vag_blocks(void) {
+   rig r;
+   static uint8_t vag[16 * 8];
+   static float one[GRAIN * 2 * 2];
+   float out[GRAIN * 2];
+   ngs2_voice *v;
+   unsigned i, g, run;
+   blocks_param bp;
+   ngs2_waveform_block b[2];
+   /* Frames that predict from the ones before: the filter's history matters */
+   for (i = 0; i < 8; i++) {
+      unsigned k;
+      vag[i * 16] = (uint8_t)(0x20 | 6); /* filter 2, shift 6 */
+      for (k = 2; k < 16; k++)
+         vag[i * 16 + k] = (uint8_t)((i * 37 + k * 11) & 0xff);
+   }
+   for (run = 0; run < 2; run++) {
+      rig_open(&r, RATE);
+      v = ngs2_rack_voice(r.samplers, 0);
+      CHECK(sampler_setup(v, NGS2_WAVE_VAG, 1, RATE) == NGS2_OK);
+      memset(b, 0, sizeof(b));
+      memset(&bp, 0, sizeof(bp));
+      head(&bp.header, sizeof(bp), 0x10000001u);
+      bp.data = vag;
+      bp.blocks = b;
+      if (run == 0) {
+         b[0].data_size = sizeof(vag);
+         b[0].num_samples = 28 * 8;
+         bp.num_blocks = 1;
+      } else {
+         b[0].data_size = 16 * 4;
+         b[0].num_samples = 28 * 4;
+         b[1].data_offset = 16 * 4;
+         b[1].data_size = 16 * 4;
+         b[1].num_samples = 28 * 4;
+         bp.num_blocks = 2;
+      }
+      CHECK(ngs2_voice_control(v, &bp.header) == NGS2_OK);
+      CHECK(patch(v, 0, r.master) == NGS2_OK);
+      CHECK(event(v, NGS2_EVENT_PLAY) == NGS2_OK);
+      for (g = 0; g < 2; g++) {
+         render(&r, out, 2);
+         if (run == 0)
+            memcpy(one + g * GRAIN * 2, out, sizeof(out));
+         else
+            for (i = 0; i < GRAIN * 2; i++)
+               if (fabs(out[i] - one[g * GRAIN * 2 + i]) > 1e-6) {
+                  CHECK(!"VAG in two blocks differs from one");
+                  g = 2;
+                  break;
+               }
+      }
+      rig_close(&r);
+   }
+}
+
 
 /* ATRAC9 through a sampler is what the decoder gives for the block's frames,
  * less the samples the block skips, and no more than it says */
@@ -869,6 +928,37 @@ static void test_atrac9(void) {
                break;
             }
          }
+      }
+      /* The same waveform a superframe a block, the stream coming a block at a time: the
+       * decoder goes on across them, every sample the same as one block's */
+      CHECK(event(v, NGS2_EVENT_KILL) == NGS2_OK);
+      CHECK(ngs2_voice_control(v, &p.header) == NGS2_OK);
+      {
+         ngs2_waveform_block two[2];
+         memset(two, 0, sizeof(two));
+         two[0].data_size = AT9_SUPERFRAME;
+         two[0].num_skip_samples = 10;
+         two[1].data_offset = AT9_SUPERFRAME;
+         two[1].data_size = AT9_SUPERFRAME;
+         bp.num_blocks = 2;
+         bp.blocks = two;
+         CHECK(ngs2_voice_control(v, &bp.header) == NGS2_OK);
+         CHECK(patch(v, 0, r.master) == NGS2_OK);
+         CHECK(event(v, NGS2_EVENT_PLAY) == NGS2_OK);
+         for (g = 0; g < 2; g++) {
+            render(&r, out, 2);
+            for (i = 0; i < GRAIN; i++) {
+               unsigned at = g * GRAIN + i;
+               float l = at < 3 || at - 3 >= 512 - 10 ? 0.0f : want[0][at - 3 + 10];
+               float rr = at < 3 || at - 3 >= 512 - 10 ? 0.0f : want[1][at - 3 + 10];
+               if (fabs(out[i * 2] - l) > 1e-6 || fabs(out[i * 2 + 1] - rr) > 1e-6) {
+                  CHECK(!"ATRAC9 in two blocks differs from one");
+                  break;
+               }
+            }
+         }
+         bp.num_blocks = 1;
+         bp.blocks = &b;
       }
       /* A second voice with the configuration, and the first again after it was killed:
        * each has a decoder */
@@ -1286,6 +1376,7 @@ int main(void) {
    test_sampler_modules();
    test_formats();
    test_atrac9();
+   test_vag_blocks();
    if (failures) {
       printf("ngs2_core_test: %d failed\n", failures);
       return 1;

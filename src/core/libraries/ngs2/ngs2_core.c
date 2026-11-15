@@ -2959,12 +2959,12 @@ static void block_begin(ngs2_voice* v, ngs2_block* b) {
         v->block_left = b->info.num_samples ? b->info.num_samples : 0xffffffffu;
         if (!b->data && !b->info.num_samples)
             v->block_left = 0;
-        if (v->format.type == NGS2_WAVE_ATRAC9 && v->decoder) {
-            ratrac9_reset(v->decoder->at9);
-            v->at9_frame = 0;
-        }
-        if (v->format.type == NGS2_WAVE_VAG)
-            memset(v->vag_history, 0, sizeof(v->vag_history));
+        /* The decoder goes on from the block before: a stream that comes a block at a time,
+         * or a block that repeats, is one waveform. ATRAC9's overlap and VAG's prediction
+         * carry over, as the decoder runs on; started again they would break the wave at
+         * every block (a click). The voice starting again starts them again
+         * (sampler_restart). A superframe begins with the block. */
+        v->at9_frame = 0;
     }
 }
 
