@@ -148,6 +148,7 @@ enum emu_settings_section {
     EMU_SETTING(internal_screen_height, "internal_screen_height", GPU, UINT, 720, 0, GEN)          \
     EMU_SETTING(null_gpu, "null_gpu", GPU, BOOL, false, OVR, GEN)                                  \
     EMU_SETTING(copy_gpu_buffers, "copy_gpu_buffers", GPU, BOOL, false, OVR, GEN)                  \
+    EMU_SETTING(async_shaders, "async_shaders", GPU, BOOL, true, OVR, GEN)                         \
     EMU_SETTING(readbacks_mode, "readbacks_mode", GPU, UINT, EMU_READBACKS_DISABLED, OVR, GEN)     \
     EMU_SETTING(readback_linear_images_enabled, "readback_linear_images_enabled", GPU, BOOL,       \
                 false, OVR, GEN)                                                                   \

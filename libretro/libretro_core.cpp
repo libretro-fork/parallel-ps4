@@ -423,6 +423,7 @@ void ReadCoreOptions(Libretro::SharedOptions& options) {
     options.dump_shaders = enabled("shadps4_dump_shaders", "disabled");
     options.sample_positions = enabled("shadps4_game_sample_positions", "disabled");
     options.copy_gpu_buffers = enabled("shadps4_copy_gpu_buffers", "enabled");
+    options.async_shaders = OptionValue("shadps4_shader_compilation", "async") != "wait" ? 1 : 0;
     options.audio_float = (audio_multi_int16_cb ? audio_multi_float_cb != nullptr
                                                 : audio_batch_float_cb != nullptr)
                               ? 1

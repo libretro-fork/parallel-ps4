@@ -673,6 +673,7 @@ void ApplyCoreOptions() {
     emu_settings_set_dump_shaders(options.dump_shaders != 0, false);
     emu_settings_set_sample_positions(options.sample_positions != 0, false);
     emu_settings_set_copy_gpu_buffers(options.copy_gpu_buffers != 0, false);
+    emu_settings_set_async_shaders(options.async_shaders != 0, false);
     emu_settings_set_hdr_allowed(options.hdr_output != 0, false);
     emu_settings_set_hdr_paper_white(options.hdr_paper_white, false);
     emu_settings_set_hdr_max_nits(options.hdr_max_nits, false);

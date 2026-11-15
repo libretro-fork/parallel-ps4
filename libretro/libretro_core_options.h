@@ -389,6 +389,22 @@ struct retro_core_option_v2_definition option_defs_us[] = {
          {NULL, NULL},
      },
      "disabled"},
+    {"shadps4_shader_compilation",
+     "Shader Compilation",
+     NULL,
+     "Where shaders and pipelines are compiled while a game plays: always on a "
+     "thread of their own. Asynchronous: a draw whose pipeline is not ready yet "
+     "is skipped, so the game does not stutter, but something can be missing for "
+     "a frame or two the first time it is drawn. Wait: the draw waits for it, as "
+     "before. Compute work always waits.",
+     NULL,
+     "video",
+     {
+         {"async", "Asynchronous"},
+         {"wait", "Wait"},
+         {NULL, NULL},
+     },
+     "async"},
     {"shadps4_vertex_capture",
      "Capture Vertex Inputs (diagnostics)",
      NULL,

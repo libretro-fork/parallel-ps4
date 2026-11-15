@@ -68,6 +68,12 @@ public:
         return is_compute;
     }
 
+    /// The guest's shaders the pipeline binds from: a pipeline made on the compiler thread was
+    /// made from copies of them, and is given the cache's own once it is filed
+    void SetStages(std::span<const Shader::Info* const, Shader::MaxStageTypes> infos) {
+        std::ranges::copy(infos, stages.begin());
+    }
+
     using DescriptorWrites = std::vector<vk::WriteDescriptorSet>;
     void BindResources(DescriptorWrites& set_writes, const Shader::PushData& push_data) const;
 

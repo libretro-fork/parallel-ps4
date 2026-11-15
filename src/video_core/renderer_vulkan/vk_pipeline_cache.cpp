@@ -6,6 +6,7 @@
 #include "common/hash.h"
 #include "common/io_file.h"
 #include "common/path_util.h"
+#include "common/thread.h"
 #include "core/debug_state.h"
 #include "core/emulator_settings.h"
 #include "shader_recompiler/backend/spirv/emit_spirv.h"
@@ -22,6 +23,60 @@
 #include "video_core/renderer_vulkan/vk_shader_util.h"
 
 namespace Vulkan {
+
+// What the compiler thread is handed, and gives back. Made when a draw finds something
+// missing, which is when a compile would have allocated anyway.
+struct PipelineCache::CompileJob {
+    mpsc_stack_node_t node; // first: the stacks link jobs through it
+    enum class Kind {
+        Program,     // a shader not seen before: its translation, permutation 0
+        Permutation, // another permutation of a translated shader
+        Check,       // a permutation the cache gave, translated again to be compared
+        Graphics,    // a graphics pipeline, from shaders all translated
+    } kind{};
+
+    // Program, Permutation, Check: the shader, with the user data copied as the draw had it
+    Shader::HwStage hw_stage{};
+    Shader::SwStage sw_stage{};
+    std::array<u32, Shader::ShaderParams::NumShaderUserData> user_data{};
+    std::span<const u32> code;
+    u64 hash{};
+    size_t perm_idx{};
+    Shader::RuntimeInfo runtime{};
+    Shader::Backend::Bindings start{};
+
+    // Program: the translated program. Permutation: the module.
+    std::unique_ptr<Program> program;
+    vk::ShaderModule module{};
+
+    // Check: what the cache kept, and what the translation made
+    std::vector<u8> kept_walker;
+    u32 kept_flatbuf_dw{};
+    std::array<u32, 4> kept_resources{};
+    bool kept_dma{};
+    Shader::Info fresh;
+    bool same_spv{}, same_walker{}, same_resources{};
+
+    // Graphics: the key, and copies of the stages as the draw had them
+    GraphicsPipelineKey key{};
+    u64 key_hash{};
+    std::array<Shader::Info, MaxShaderStages> stage_infos{};
+    std::array<bool, MaxShaderStages> has_stage{};
+    std::array<std::array<u32, Shader::ShaderParams::NumShaderUserData>, MaxShaderStages>
+        stage_user_data{};
+    std::array<Shader::RuntimeInfo, MaxShaderStages> runtimes{};
+    std::optional<Shader::Gcn::FetchShaderData> fetch;
+    std::array<vk::ShaderModule, MaxShaderStages> modules{};
+    GraphicsPipeline* pipeline{};
+    GraphicsPipeline::SerializationSupport sdata{};
+
+    Shader::ShaderParams Params() const {
+        return {.user_data =
+                    std::span<const u32, Shader::ShaderParams::NumShaderUserData>{user_data},
+                .code = code,
+                .hash = hash};
+    }
+};
 
 using Shader::HwStage;
 using Shader::Output;
@@ -351,9 +406,34 @@ PipelineCache::PipelineCache(const Instance& instance_, Scheduler& scheduler_,
     ASSERT_MSG(cache_result == vk::Result::eSuccess, "Failed to create pipeline cache: {}",
                vk::to_string(cache_result));
     pipeline_cache = std::move(cache);
+
+    async_compile = emu_settings_get_async_shaders();
+    mpsc_stack_init(&compile_jobs);
+    mpsc_stack_init(&compile_results);
+    retro_eventcount_init(&compile_jobs_ec);
+    retro_eventcount_init(&compile_results_ec);
+    compiler = std::jthread(std::bind_front(&PipelineCache::CompilerThread, this));
 }
 
 PipelineCache::~PipelineCache() {
+    compiler.request_stop();
+    retro_eventcount_notify(&compile_jobs_ec);
+    if (compiler.joinable()) {
+        compiler.join();
+    }
+    for (auto* node = mpsc_stack_drain(&compile_results); node;) {
+        auto* job = reinterpret_cast<CompileJob*>(node);
+        node = node->next;
+        delete job->pipeline;
+        delete job;
+    }
+    for (auto* node = mpsc_stack_drain(&compile_jobs); node;) {
+        auto* job = reinterpret_cast<CompileJob*>(node);
+        node = node->next;
+        delete job;
+    }
+    retro_eventcount_free(&compile_jobs_ec);
+    retro_eventcount_free(&compile_results_ec);
     size_t pos = 0;
     while (auto* p = static_cast<GraphicsPipeline*>(ptr_table_next(&graphics_pipelines, &pos))) {
         delete p;
@@ -384,38 +464,71 @@ GraphicsPipeline* PipelineCache::FindGraphicsPipeline(const GraphicsPipelineKey&
 
 const GraphicsPipeline* PipelineCache::GetGraphicsPipeline(const DrawIndirectParams params) {
     draw_indirect_params = params;
-    if (!RefreshGraphicsKey()) {
-        return nullptr;
-    }
-    const auto pipeline_hash = std::hash<GraphicsPipelineKey>{}(graphics_key);
-    GraphicsPipeline* pipeline = FindGraphicsPipeline(graphics_key, pipeline_hash);
-    if (!pipeline) {
-        LOG_INFO(Render_Vulkan, "Compiling graphics pipeline {:#x}", pipeline_hash);
-
-        GraphicsPipeline::SerializationSupport sdata{};
-        pipeline = new GraphicsPipeline(instance, scheduler, desc_heap, profile, graphics_key,
-                                        *pipeline_cache, infos, runtime_infos, fetch_shader,
-                                        modules, sdata, false);
-        ptr_table_insert(&graphics_pipelines, pipeline_hash, pipeline);
-
-        RegisterPipelineData(graphics_key, pipeline_hash, sdata);
-        ++num_new_pipelines;
-
-        if (emu_settings_get_shader_collect()) {
-            for (auto stage = 0; stage < MaxShaderStages; ++stage) {
-                if (infos[stage]) {
-                    auto& m = modules[stage];
-                    module_related_pipelines[m].emplace_back(graphics_key);
-                }
+    for (;;) {
+        DrainCompiled();
+        stage_pending = false;
+        if (!RefreshGraphicsKey()) {
+            if (!stage_pending || async_compile) {
+                return nullptr;
             }
+            WaitCompiled();
+            continue;
         }
+        const auto pipeline_hash = std::hash<GraphicsPipelineKey>{}(graphics_key);
+        if (GraphicsPipeline* pipeline = FindGraphicsPipeline(graphics_key, pipeline_hash)) {
+            return pipeline;
+        }
+        if (!IsPipelinePending(pipeline_hash)) {
+            if (num_pending_pipelines == pending_pipelines.size()) {
+                // As many in the making as there is room for: this one waits its turn
+                if (async_compile) {
+                    return nullptr;
+                }
+                WaitCompiled();
+                continue;
+            }
+            LOG_INFO(Render_Vulkan, "Compiling graphics pipeline {:#x}", pipeline_hash);
+            auto* job = new CompileJob;
+            job->kind = CompileJob::Kind::Graphics;
+            job->key = graphics_key;
+            job->key_hash = pipeline_hash;
+            for (u32 stage = 0; stage < MaxShaderStages; ++stage) {
+                if (!infos[stage]) {
+                    continue;
+                }
+                job->has_stage[stage] = true;
+                job->stage_infos[stage] = *infos[stage];
+                const auto ud = infos[stage]->user_data;
+                std::copy_n(ud.begin(), std::min(ud.size(), job->stage_user_data[stage].size()),
+                            job->stage_user_data[stage].begin());
+                job->stage_infos[stage].user_data =
+                    std::span<const u32>{job->stage_user_data[stage].data(), ud.size()};
+                job->runtimes[stage] = runtime_infos[stage];
+                job->modules[stage] = modules[stage];
+            }
+            if (fetch_shader) {
+                job->fetch = *fetch_shader;
+            }
+            pending_pipelines[num_pending_pipelines++] = pipeline_hash;
+            Submit(job);
+        }
+        if (async_compile) {
+            return nullptr;
+        }
+        WaitCompiled();
     }
-    return pipeline;
 }
 
 const ComputePipeline* PipelineCache::GetComputePipeline() {
-    if (!RefreshComputeKey()) {
-        return nullptr;
+    // The game reads back what a dispatch writes: it waits for its shader, whatever the option
+    for (;;) {
+        DrainCompiled();
+        stage_pending = false;
+        RefreshComputeKey();
+        if (!stage_pending) {
+            break;
+        }
+        WaitCompiled();
     }
     ComputePipeline* pipeline = FindComputePipeline(compute_key);
     if (!pipeline) {
@@ -586,13 +699,17 @@ bool PipelineCache::RefreshGraphicsStages() {
         const auto params = AmdGpu::GetParams(*pgm);
         std::tie(infos[stage_out_idx], modules[stage_out_idx], key.stage_hashes[stage_out_idx]) =
             GetProgram(stage_in, stage_out, params, binding);
-        return true;
+        // Being compiled: the stages after it bind after its resources, which are not known yet
+        return !stage_pending;
     };
 
     infos.fill(nullptr);
     modules.fill(nullptr);
 
     bind_stage(HwStage::Fragment, SwStage::Fragment);
+    if (stage_pending) {
+        return false;
+    }
 
     const auto* fs_info = infos[static_cast<u32>(SwStage::Fragment)];
     key.mrt_mask = fs_info ? fs_info->mrt_mask : 0u;
@@ -662,6 +779,9 @@ bool PipelineCache::RefreshGraphicsStages() {
         return false;
     }
 
+    if (stage_pending) {
+        return false;
+    }
     const auto* vs_info = infos[static_cast<u32>(SwStage::Vertex)];
     if (vs_info && fetch_shader && !instance.IsVertexInputDynamicState()) {
         // Without vertex input dynamic state, the pipeline needs to specialize on format.
@@ -728,22 +848,36 @@ vk::ShaderModule PipelineCache::CompileModule(Shader::Info& info, Shader::Runtim
 PipelineCache::Result PipelineCache::GetProgram(HwStage hw_stage, SwStage sw_stage,
                                                 const Shader::ShaderParams& params,
                                                 Shader::Backend::Bindings& binding) {
-    auto runtime_info = BuildRuntimeInfo(hw_stage, sw_stage);
+    const auto& runtime_info = BuildRuntimeInfo(hw_stage, sw_stage);
+    const auto make_job = [&](CompileJob::Kind kind, size_t perm_idx) {
+        auto* job = new CompileJob;
+        job->kind = kind;
+        job->hw_stage = hw_stage;
+        job->sw_stage = sw_stage;
+        std::ranges::copy(params.user_data, job->user_data.begin());
+        job->code = params.code;
+        job->hash = params.hash;
+        job->perm_idx = perm_idx;
+        job->runtime = runtime_info;
+        job->start = binding;
+        return job;
+    };
+    const auto pending = [&]() -> Result {
+        stage_pending = true;
+        return std::make_tuple(nullptr, vk::ShaderModule{}, u64{0});
+    };
+
     Program* program = FindProgram(params.hash);
     if (!program) {
-        program = new Program(hw_stage, sw_stage, params);
-        ptr_table_insert(&program_cache, params.hash, program);
-        auto start = binding;
-        const auto module = CompileModule(program->info, runtime_info, params.code, 0, binding);
-        auto spec = Shader::StageSpecialization(program->info, runtime_info, profile, start);
-        const auto perm_hash = HashCombine(params.hash, 0);
-
-        RegisterShaderMeta(program->info, spec.fetch_shader_data, spec, perm_hash, 0);
-        program->AddPermut(module, std::move(spec));
-        if (auto& fetch = program->modules[0].spec.fetch_shader_data; !fetch.Empty()) {
-            fetch_shader = &fetch;
-        }
-        return std::make_tuple(&program->info, module, perm_hash);
+        // Filed now, so that it is compiled once: the compiler thread's translation fills it
+        auto* placeholder = new Program(hw_stage, sw_stage, params);
+        placeholder->pending = true;
+        ptr_table_insert(&program_cache, params.hash, placeholder);
+        Submit(make_job(CompileJob::Kind::Program, 0));
+        return pending();
+    }
+    if (program->pending) {
+        return pending();
     }
 
     auto& info = program->info;
@@ -752,81 +886,245 @@ PipelineCache::Result PipelineCache::GetProgram(HwStage hw_stage, SwStage sw_sta
     info.RefreshFlatBuf();
     auto spec = Shader::StageSpecialization(info, runtime_info, profile, binding);
 
-    size_t perm_idx = program->modules.size();
-    u64 perm_hash = HashCombine(params.hash, perm_idx);
-
-    vk::ShaderModule module{};
-
     const auto it = std::ranges::find(program->modules, spec, &Program::Module::spec);
     if (it == program->modules.end()) {
-        auto new_info = Shader::Info(hw_stage, sw_stage, params);
-        module = CompileModule(new_info, runtime_info, params.code, perm_idx, binding);
+        // Another permutation: filed now with its specialization, compiled on the thread
+        const size_t perm_idx = program->modules.size();
+        program->modules.push_back({vk::ShaderModule{}, std::move(spec), false, true});
+        Submit(make_job(CompileJob::Kind::Permutation, perm_idx));
+        return pending();
+    }
+    if (it->pending) {
+        return pending();
+    }
 
-        RegisterShaderMeta(info, spec.fetch_shader_data, spec, perm_hash, perm_idx);
-        program->AddPermut(module, std::move(spec));
-    } else {
-        const auto start = binding;
-        info.AddBindings(binding);
-        module = it->module;
-        perm_idx = std::distance(program->modules.begin(), it);
-        perm_hash = HashCombine(params.hash, perm_idx);
-        if (it->from_cache) {
-            module = CheckCachedPermutation(*program, perm_idx, hw_stage, sw_stage, params,
-                                            runtime_info, start, binding);
-        }
+    const auto start = binding;
+    info.AddBindings(binding);
+    const size_t perm_idx = std::distance(program->modules.begin(), it);
+    const u64 perm_hash = HashCombine(params.hash, perm_idx);
+    if (it->from_cache) {
+        // Checked against a translation on the thread; used meanwhile
+        it->from_cache = false;
+        auto* job = make_job(CompileJob::Kind::Check, perm_idx);
+        job->start = start;
+        job->kept_walker = info.srt_walker_code;
+        job->kept_flatbuf_dw = info.srt_info.flattened_bufsize_dw;
+        job->kept_resources = {
+            static_cast<u32>(info.buffers.size()), static_cast<u32>(info.images.size()),
+            static_cast<u32>(info.samplers.size()), static_cast<u32>(info.fmasks.size())};
+        job->kept_dma = info.uses_dma;
+        Submit(job);
     }
     if (auto& fetch = program->modules[perm_idx].spec.fetch_shader_data; !fetch.Empty()) {
         fetch_shader = &fetch;
     }
-    return std::make_tuple(&program->info, module, perm_hash);
+    return std::make_tuple(&program->info, program->modules[perm_idx].module, perm_hash);
 }
 
-vk::ShaderModule PipelineCache::CheckCachedPermutation(
-    Program& program, size_t perm_idx, Shader::HwStage hw_stage, Shader::SwStage sw_stage,
-    const Shader::ShaderParams& params, const Shader::RuntimeInfo& runtime_info,
-    Shader::Backend::Bindings start, Shader::Backend::Bindings& binding) {
-    auto& cached = program.modules[perm_idx];
-    cached.from_cache = false;
+void PipelineCache::Submit(CompileJob* job) {
+    mpsc_stack_push(&compile_jobs, &job->node);
+    retro_eventcount_notify(&compile_jobs_ec);
+}
 
-    // The translation as a compile of this permutation would make it
-    auto fresh = Shader::Info(hw_stage, sw_stage, params);
-    auto fresh_runtime = runtime_info;
-    auto fresh_binding = start;
-    const auto ir_program =
-        Shader::TranslateProgram(params.code, pools, fresh, fresh_runtime, profile);
-    auto spv = Shader::Backend::SPIRV::EmitSPIRV(profile, fresh_runtime, ir_program, fresh_binding);
-
-    const auto& kept = program.info;
-    const auto kept_spv = Storage::DataBase::Instance().Load(
-        Storage::BlobType::ShaderBinary, fmt::format("{:#018x}_{}", kept.pgm_hash, perm_idx));
-    const bool same_spv = kept_spv && kept_spv->size() == spv.size() * sizeof(u32) &&
-                          std::memcmp(kept_spv->data(), spv.data(), kept_spv->size()) == 0;
-    const bool same_walker =
-        fresh.srt_walker_code == kept.srt_walker_code &&
-        fresh.srt_info.flattened_bufsize_dw == kept.srt_info.flattened_bufsize_dw;
-    const bool same_resources =
-        fresh.buffers.size() == kept.buffers.size() && fresh.images.size() == kept.images.size() &&
-        fresh.samplers.size() == kept.samplers.size() &&
-        fresh.fmasks.size() == kept.fmasks.size() && fresh.uses_dma == kept.uses_dma &&
-        fresh.has_fetch_shader == kept.has_fetch_shader &&
-        fresh.fetch_shader_sgpr_base == kept.fetch_shader_sgpr_base;
-    if (same_spv && same_walker && same_resources) {
-        return cached.module;
+void PipelineCache::CompilerThread(std::stop_token stop) {
+    Common::SetCurrentThreadName("shadPS4:ShaderCompiler");
+    const std::stop_callback wake{stop, [this] { retro_eventcount_notify(&compile_jobs_ec); }};
+    while (!stop.stop_requested()) {
+        const int key = retro_eventcount_prepare_wait(&compile_jobs_ec);
+        mpsc_stack_node_t* node = mpsc_stack_drain(&compile_jobs);
+        if (!node) {
+            if (stop.stop_requested()) {
+                retro_eventcount_cancel_wait(&compile_jobs_ec);
+                break;
+            }
+            retro_eventcount_commit_wait(&compile_jobs_ec, key);
+            continue;
+        }
+        retro_eventcount_cancel_wait(&compile_jobs_ec);
+        // Oldest first, as they were handed over
+        for (node = mpsc_stack_reverse(node); node;) {
+            auto* job = reinterpret_cast<CompileJob*>(node);
+            node = node->next;
+            if (stop.stop_requested()) {
+                delete job;
+                continue;
+            }
+            RunJob(*job);
+            mpsc_stack_push(&compile_results, &job->node);
+            retro_eventcount_notify(&compile_results_ec);
+        }
     }
+}
 
+// The compiler thread's half: nothing here touches the tables
+void PipelineCache::RunJob(CompileJob& job) {
+    const auto params = job.Params();
+    switch (job.kind) {
+    case CompileJob::Kind::Program: {
+        job.program = std::make_unique<Program>(job.hw_stage, job.sw_stage, params);
+        auto& info = job.program->info;
+        auto binding = job.start;
+        const auto module = CompileModule(info, job.runtime, params.code, 0, binding);
+        auto spec = Shader::StageSpecialization(info, job.runtime, profile, job.start);
+        RegisterShaderMeta(info, spec.fetch_shader_data, spec, HashCombine(job.hash, 0), 0);
+        job.program->AddPermut(module, std::move(spec));
+        break;
+    }
+    case CompileJob::Kind::Permutation: {
+        auto new_info = Shader::Info(job.hw_stage, job.sw_stage, params);
+        auto binding = job.start;
+        job.module = CompileModule(new_info, job.runtime, params.code, job.perm_idx, binding);
+        break;
+    }
+    case CompileJob::Kind::Check: {
+        job.fresh = Shader::Info(job.hw_stage, job.sw_stage, params);
+        auto runtime = job.runtime;
+        auto binding = job.start;
+        const auto ir_program =
+            Shader::TranslateProgram(params.code, pools, job.fresh, runtime, profile);
+        const auto spv = Shader::Backend::SPIRV::EmitSPIRV(profile, runtime, ir_program, binding);
+        const auto kept_spv = Storage::DataBase::Instance().Load(
+            Storage::BlobType::ShaderBinary, fmt::format("{:#018x}_{}", job.hash, job.perm_idx));
+        job.same_spv = kept_spv && kept_spv->size() == spv.size() * sizeof(u32) &&
+                       std::memcmp(kept_spv->data(), spv.data(), kept_spv->size()) == 0;
+        job.same_walker = job.fresh.srt_walker_code == job.kept_walker &&
+                          job.fresh.srt_info.flattened_bufsize_dw == job.kept_flatbuf_dw;
+        job.same_resources =
+            job.kept_resources == std::array<u32, 4>{static_cast<u32>(job.fresh.buffers.size()),
+                                                     static_cast<u32>(job.fresh.images.size()),
+                                                     static_cast<u32>(job.fresh.samplers.size()),
+                                                     static_cast<u32>(job.fresh.fmasks.size())} &&
+            job.kept_dma == job.fresh.uses_dma;
+        if (!job.same_spv || !job.same_walker || !job.same_resources) {
+            job.module = CompileSPV(spv, instance.GetDevice());
+        }
+        break;
+    }
+    case CompileJob::Kind::Graphics: {
+        std::array<const Shader::Info*, MaxShaderStages> stage_ptrs{};
+        for (u32 stage = 0; stage < MaxShaderStages; ++stage) {
+            stage_ptrs[stage] = job.has_stage[stage] ? &job.stage_infos[stage] : nullptr;
+        }
+        job.pipeline = new GraphicsPipeline(
+            instance, scheduler, desc_heap, profile, job.key, *pipeline_cache, stage_ptrs,
+            job.runtimes, job.fetch ? &*job.fetch : nullptr, job.modules, job.sdata, false);
+        break;
+    }
+    }
+}
+
+bool PipelineCache::DrainCompiled() {
+    mpsc_stack_node_t* node = mpsc_stack_drain(&compile_results);
+    if (!node) {
+        return false;
+    }
+    for (node = mpsc_stack_reverse(node); node;) {
+        auto* job = reinterpret_cast<CompileJob*>(node);
+        node = node->next;
+        FileJob(*job);
+        delete job;
+    }
+    return true;
+}
+
+void PipelineCache::WaitCompiled() {
+    const int key = retro_eventcount_prepare_wait(&compile_results_ec);
+    if (!mpsc_stack_empty(&compile_results)) {
+        retro_eventcount_cancel_wait(&compile_results_ec);
+        return;
+    }
+    retro_eventcount_commit_wait(&compile_results_ec, key);
+}
+
+bool PipelineCache::IsPipelinePending(u64 hash) const {
+    return std::find(pending_pipelines.begin(), pending_pipelines.begin() + num_pending_pipelines,
+                     hash) != pending_pipelines.begin() + num_pending_pipelines;
+}
+
+// The drawing thread's half: files what the compiler thread made
+void PipelineCache::FileJob(CompileJob& job) {
+    switch (job.kind) {
+    case CompileJob::Kind::Program: {
+        Program* placeholder = FindProgram(job.hash);
+        ASSERT(placeholder && placeholder->pending);
+        *placeholder = std::move(*job.program);
+        // The specializations point at the description they were made from
+        for (auto& module : placeholder->modules) {
+            module.spec.info = &placeholder->info;
+        }
+        placeholder->info.user_data = {};
+        placeholder->pending = false;
+        break;
+    }
+    case CompileJob::Kind::Permutation: {
+        Program* program = FindProgram(job.hash);
+        ASSERT(program && job.perm_idx < program->modules.size());
+        auto& module = program->modules[job.perm_idx];
+        module.module = job.module;
+        module.pending = false;
+        RegisterShaderMeta(program->info, module.spec.fetch_shader_data, module.spec,
+                           HashCombine(job.hash, job.perm_idx), job.perm_idx);
+        break;
+    }
+    case CompileJob::Kind::Check:
+        if (!job.same_spv || !job.same_walker || !job.same_resources) {
+            ReplaceCachedPermutation(job);
+        }
+        break;
+    case CompileJob::Kind::Graphics: {
+        const auto end = pending_pipelines.begin() + num_pending_pipelines;
+        if (const auto it = std::find(pending_pipelines.begin(), end, job.key_hash); it != end) {
+            *it = pending_pipelines[--num_pending_pipelines];
+        }
+        // The pipeline binds from the cache's descriptions, not the copies it was made from
+        std::array<const Shader::Info*, MaxShaderStages> stage_ptrs{};
+        for (u32 stage = 0; stage < MaxShaderStages; ++stage) {
+            if (job.has_stage[stage]) {
+                const Program* program = FindProgram(job.stage_infos[stage].pgm_hash);
+                stage_ptrs[stage] = program ? &program->info : nullptr;
+            }
+        }
+        job.pipeline->SetStages(stage_ptrs);
+        if (FindGraphicsPipeline(job.key, job.key_hash)) {
+            // Made twice (its shader was replaced meanwhile): the first stays
+            scheduler.DeferOperation([p = job.pipeline] { delete p; });
+            break;
+        }
+        ptr_table_insert(&graphics_pipelines, job.key_hash, job.pipeline);
+        RegisterPipelineData(job.key, job.key_hash, job.sdata);
+        ++num_new_pipelines;
+        if (emu_settings_get_shader_collect()) {
+            for (u32 stage = 0; stage < MaxShaderStages; ++stage) {
+                if (job.has_stage[stage]) {
+                    module_related_pipelines[job.modules[stage]].emplace_back(job.key);
+                }
+            }
+        }
+        break;
+    }
+    }
+    job.pipeline = nullptr;
+}
+
+void PipelineCache::ReplaceCachedPermutation(CompileJob& job) {
+    Program* program = FindProgram(job.hash);
+    if (!program || program->pending || job.perm_idx >= program->modules.size()) {
+        return;
+    }
+    auto& cached = program->modules[job.perm_idx];
     LOG_WARNING(Render_Vulkan,
                 "Pipeline cache: {} shader {:#x} permutation {} differs from its translation "
                 "(SPIR-V {}, SRT walker {}, resources {}); the translation is used, and the cache "
                 "is started again at the next start",
-                hw_stage, kept.pgm_hash, perm_idx, same_spv ? "same" : "differs",
-                same_walker ? "same" : "differs", same_resources ? "same" : "differ");
+                job.hw_stage, job.hash, job.perm_idx, job.same_spv ? "same" : "differs",
+                job.same_walker ? "same" : "differs", job.same_resources ? "same" : "differ");
 
     // The cache is started again at the next start (WarmUp: another build's stamp)
     Storage::DataBase::Instance().Save(Storage::BlobType::ShaderProfile, "build",
                                        std::vector<u8>{'-'});
 
     // The pipelines made with the kept permutation go, once the GPU is done with them
-    const u64 perm_hash = HashCombine(params.hash, perm_idx);
+    const u64 perm_hash = HashCombine(job.hash, job.perm_idx);
     std::vector<std::pair<u64, GraphicsPipeline*>> stale;
     size_t pos = 0;
     while (auto* p = static_cast<GraphicsPipeline*>(ptr_table_next(&graphics_pipelines, &pos))) {
@@ -845,18 +1143,15 @@ vk::ShaderModule PipelineCache::CheckCachedPermutation(
     }
 
     const vk::ShaderModule old_module = cached.module;
-    cached.module = CompileSPV(spv, instance.GetDevice());
+    cached.module = job.module;
     scheduler.DeferOperation(
         [device = instance.GetDevice(), old_module] { device.destroyShaderModule(old_module); });
     // The permutations share the program's description: the translation's from now on
-    fresh.pgm_base = params.Base();
-    fresh.user_data = params.user_data;
-    program.info = std::move(fresh);
-    program.info.RefreshFlatBuf();
-    // The stages after this one bind after the translation's resources
-    binding = start;
-    program.info.AddBindings(binding);
-    return cached.module;
+    program->info = std::move(job.fresh);
+    program->info.user_data = {};
+    for (auto& module : program->modules) {
+        module.spec.info = &program->info;
+    }
 }
 
 std::optional<vk::ShaderModule> PipelineCache::ReplaceShader(vk::ShaderModule module,

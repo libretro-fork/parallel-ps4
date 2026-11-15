@@ -22,7 +22,7 @@
 namespace Libretro {
 
 inline constexpr std::uint32_t SHARED_MAGIC = 0x34505368; // "hSP4"
-inline constexpr std::uint32_t SHARED_VERSION = 21;
+inline constexpr std::uint32_t SHARED_VERSION = 22;
 
 inline constexpr std::uint32_t MAX_WIDTH = 3840;
 inline constexpr std::uint32_t MAX_HEIGHT = 2160;
@@ -117,6 +117,9 @@ struct SharedOptions {
     std::uint32_t dump_shaders;
     std::uint32_t sample_positions;
     std::uint32_t copy_gpu_buffers;
+    /// Shader Compilation: Asynchronous (1), a draw whose pipeline is being made is skipped;
+    /// Wait (0)
+    std::uint32_t async_shaders;
     /// The frontend takes float sound: the mix goes into audio_f32, unrounded, instead of
     /// audio. Fixed for the session.
     std::uint32_t audio_float;
