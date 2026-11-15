@@ -145,6 +145,61 @@ BufferCache::BufferCache(const Vulkan::Instance& instance_, Vulkan::Scheduler& s
                                                      MemoryType::DeviceLocal, "Null Index Buffer");
         runtime.FillBuffer(null_index_buffer.get(), 0u, NULL_INDEX_BUFFER_SIZE, 0u);
     }
+    ImportGuestMemory();
+}
+
+void BufferCache::ImportGuestMemory() {
+    if (!instance.IsExternalMemoryHostSupported()) {
+        return;
+    }
+    auto& address_space = memory->GetAddressSpace();
+    u8* const base = address_space.BackingBase();
+    const u64 size = address_space.BackingBytes();
+    const u64 alignment = std::max<u64>(instance.ImportedHostPointerAlignment(), 4_KB);
+    // Chunks of 256 MiB, so that no single import is larger than drivers take
+    constexpr u64 ChunkSize = 256_MB;
+    if (!base || size == 0 || reinterpret_cast<uintptr_t>(base) % alignment != 0 ||
+        ChunkSize % alignment != 0) {
+        return;
+    }
+    // Made before the game starts: the driver locks the memory it imports, which takes a
+    // while for gigabytes, and it is all imported here rather than as play first touches it
+    std::vector<std::unique_ptr<Buffer>> chunks;
+    for (u64 offset = 0; offset < size; offset += ChunkSize) {
+        const u64 length = Common::AlignUp(std::min(ChunkSize, size - offset), alignment);
+        if (offset + length > Common::AlignUp(size, alignment)) {
+            return;
+        }
+        auto chunk = Buffer::ImportHost(instance, std::span<u8>{base + offset, length});
+        if (!chunk) {
+            LOG_WARNING(Render_Vulkan,
+                        "The driver does not import the guest's memory: uploads are copied "
+                        "into staging first");
+            return;
+        }
+        chunks.push_back(std::move(chunk));
+    }
+    guest_chunks = std::move(chunks);
+    guest_regions.reserve(1024);
+    guest_copies.reserve(1024);
+    guest_base = base;
+    guest_chunk_size = ChunkSize;
+    LOG_INFO(Render_Vulkan,
+             "The guest's memory ({} MiB) is imported: uploads are copied by the GPU "
+             "from where it lies",
+             size >> 20);
+}
+
+std::pair<const Buffer*, u64> BufferCache::GuestSource(const u8* host) const {
+    if (guest_chunks.empty() || host < guest_base) {
+        return {nullptr, 0};
+    }
+    const u64 offset = static_cast<u64>(host - guest_base);
+    const u64 chunk = offset / guest_chunk_size;
+    if (chunk >= guest_chunks.size()) {
+        return {nullptr, 0};
+    }
+    return {guest_chunks[chunk].get(), offset - chunk * guest_chunk_size};
 }
 
 BufferCache::~BufferCache() {
@@ -280,6 +335,36 @@ std::pair<const Buffer*, u64> BufferCache::ObtainBuffer(VAddr device_addr, u32 s
 std::pair<const Buffer*, u64> BufferCache::ObtainBufferForImage(VAddr device_addr, u32 size) {
     if (IsRegionGpuModified(device_addr, size)) {
         return ObtainBuffer(device_addr, size);
+    }
+    // Where the image's bytes are one run of the guest's imported memory, the upload reads them
+    // there: no staging copy
+    if (!guest_chunks.empty() && size != 0) {
+        const auto& pages = memory->GetAddressSpace().BackingPages();
+        const u8* first = nullptr;
+        bool contiguous = true;
+        for (VAddr addr = device_addr; addr < device_addr + size && contiguous;) {
+            const VAddr page = addr >> Core::GUEST_PAGE_BITS;
+            const u64 in_page = addr & (Core::GUEST_PAGE_SIZE - 1);
+            const auto* entry = pages.find(page);
+            if (!entry || !*entry) {
+                contiguous = false;
+                break;
+            }
+            const u8* host = *entry + in_page;
+            if (!first) {
+                first = host;
+            } else if (host != first + (addr - device_addr)) {
+                contiguous = false;
+            }
+            addr += Core::GUEST_PAGE_SIZE - in_page;
+        }
+        if (contiguous && first) {
+            const auto [chunk, offset] = GuestSource(first);
+            if (chunk && offset + size <= chunk->SizeBytes() &&
+                offset % instance.StorageMinAlignment() == 0) {
+                return {chunk, offset};
+            }
+        }
     }
     const auto staging = staging_pool.Request(size, VideoCore::MemoryType::HostUncached,
                                               instance.StorageMinAlignment());
@@ -580,7 +665,10 @@ bool BufferCache::SynchronizeMemory(const Buffer* arena, VAddr device_addr, u32 
             upload(done, range.addr + range.size - done);
         }
     }
-    if (!copies.empty()) {
+    if (!copies.empty() && !guest_chunks.empty()) {
+        // Copied by the GPU from the guest's memory where it lies, nothing staged
+        UploadFromGuest(arena, std::span{copies.data(), copies.size()});
+    } else if (!copies.empty()) {
         const auto staging = staging_pool.Request(total_size_bytes, MemoryType::HostUncached);
         for (auto& copy : copies) {
             memory->CopySparseMemory(copy.dstOffset, staging.mapped + copy.srcOffset, copy.size);
@@ -594,6 +682,68 @@ bool BufferCache::SynchronizeMemory(const Buffer* arena, VAddr device_addr, u32 
         return SynchronizeMemoryFromImage(arena, device_addr, size);
     }
     return false;
+}
+
+void BufferCache::UploadFromGuest(const Buffer* arena, std::span<vk::BufferCopy> copies) {
+    const auto& pages = memory->GetAddressSpace().BackingPages();
+    guest_regions.clear();
+    const auto add = [&](u32 chunk, u64 src, u64 dst, u64 size) {
+        if (!guest_regions.empty()) {
+            auto& [last_chunk, last] = guest_regions.back();
+            if (last_chunk == chunk && last.srcOffset + last.size == src &&
+                last.dstOffset + last.size == dst) {
+                last.size += size;
+                return;
+            }
+        }
+        guest_regions.push_back({chunk, vk::BufferCopy{src, dst, size}});
+    };
+    constexpr u32 Unbacked = ~0u;
+    for (const auto& copy : copies) {
+        VAddr addr = copy.dstOffset;
+        u64 left = copy.size;
+        while (left) {
+            const VAddr page = addr >> Core::GUEST_PAGE_BITS;
+            const u64 in_page = addr & (Core::GUEST_PAGE_SIZE - 1);
+            u64 length = std::min<u64>(Core::GUEST_PAGE_SIZE - in_page, left);
+            const auto* entry = pages.find(page);
+            const u64 dst = addr - arena->cpu_addr;
+            if (entry && *entry) {
+                const u64 host = static_cast<u64>(*entry + in_page - guest_base);
+                u64 chunk = host / guest_chunk_size;
+                const u64 in_chunk = host - chunk * guest_chunk_size;
+                // A page never straddles a chunk: both are multiples of the page size
+                if (chunk < guest_chunks.size()) {
+                    add(static_cast<u32>(chunk), in_chunk, dst, length);
+                } else {
+                    add(Unbacked, 0, dst, length);
+                }
+            } else {
+                add(Unbacked, 0, dst, length);
+            }
+            addr += length;
+            left -= length;
+        }
+    }
+    // Grouped by chunk, a copy each; what has no memory behind it reads as zero, as before
+    std::ranges::stable_sort(guest_regions, {}, [](const auto& region) { return region.first; });
+    for (size_t begin = 0; begin < guest_regions.size();) {
+        const u32 chunk = guest_regions[begin].first;
+        size_t end = begin;
+        guest_copies.clear();
+        while (end < guest_regions.size() && guest_regions[end].first == chunk) {
+            guest_copies.push_back(guest_regions[end].second);
+            ++end;
+        }
+        if (chunk == Unbacked) {
+            for (const auto& region : guest_copies) {
+                runtime.FillBuffer(arena, region.dstOffset, region.size, 0u);
+            }
+        } else {
+            runtime.CopyBuffer(guest_chunks[chunk].get(), arena, guest_copies);
+        }
+        begin = end;
+    }
 }
 
 bool BufferCache::SynchronizeMemoryFromImage(const Buffer* arena, VAddr device_addr, u32 size) {

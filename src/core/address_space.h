@@ -45,6 +45,9 @@ public:
     [[nodiscard]] const BackingPageTable& BackingPages() const noexcept {
         return backing_pages;
     }
+    /// The size of the memory at BackingBase: the console's physical memory, and what the
+    /// options add to it
+    [[nodiscard]] u64 BackingBytes() const noexcept;
 
     [[nodiscard]] VAddr SystemManagedVirtualBase() noexcept {
         return reinterpret_cast<VAddr>(system_managed_base);

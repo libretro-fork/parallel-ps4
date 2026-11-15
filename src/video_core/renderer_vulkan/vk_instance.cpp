@@ -404,6 +404,14 @@ bool Instance::CreateDevice() {
     // The same, by NT handle. Spelled out: its macro comes with Vulkan's Win32 declarations.
     external_memory_export = add_extension("VK_KHR_external_memory_win32");
 #endif
+    external_memory_host = add_extension(VK_EXT_EXTERNAL_MEMORY_HOST_EXTENSION_NAME);
+    if (external_memory_host) {
+        const auto props = physical_device
+                               .getProperties2<vk::PhysicalDeviceProperties2,
+                                               vk::PhysicalDeviceExternalMemoryHostPropertiesEXT>()
+                               .get<vk::PhysicalDeviceExternalMemoryHostPropertiesEXT>();
+        imported_host_pointer_alignment = props.minImportedHostPointerAlignment;
+    }
     shader_clock = add_extension(VK_KHR_SHADER_CLOCK_EXTENSION_NAME);
     if (shader_clock) {
         shader_clock_features = feature_chain.get<vk::PhysicalDeviceShaderClockFeaturesKHR>();

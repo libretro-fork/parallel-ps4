@@ -334,6 +334,15 @@ public:
         return external_memory_export;
     }
 
+    /// VK_EXT_external_memory_host: the guest's memory imported as buffers the GPU copies from
+    /// where it lies (BufferCache), and the alignment an imported pointer and size need
+    bool IsExternalMemoryHostSupported() const {
+        return external_memory_host;
+    }
+    u64 ImportedHostPointerAlignment() const {
+        return imported_host_pointer_alignment;
+    }
+
     /// Returns the pipeline cache unique identifier
     const auto GetPipelineCacheUUID() const {
         return properties.pipelineCacheUUID;
@@ -589,6 +598,8 @@ private:
     bool device_fault{};
     bool device_checkpoints{};
     bool external_memory_export{};
+    bool external_memory_host{};
+    u64 imported_host_pointer_alignment{};
     bool supports_block_texel_view{};
     u64 total_memory_budget{};
     std::vector<size_t> valid_heaps;
