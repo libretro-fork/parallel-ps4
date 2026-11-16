@@ -11,15 +11,20 @@
  *   - the frontend, about 60 times a second, a few ms early or late each time: retro_run
  *     mixes exactly 800, never waiting on the game, then counts the frame;
  *   - the frame thread: starts each counted frame's time and tells the ports there is room.
+ * The frame's time steps from deadline to deadline as the threads woken by each react, so the
+ * frame's sound is in long before the next run, whatever else runs. The cases: the engine and
+ * the render thread; a relative sleeper with a thread spinning on sched_yield, and with a
+ * thread blocked on the engine's lock; a render thread busy 15 ms of the host's time a frame;
+ * a thread that spins and never yields; an engine that stops after a few buffers; FMOD's
+ * mixer two slots ahead of an output thread that never waits for it, alone, with a render
+ * thread busy 15 ms a frame, and with a render thread waiting each frame on a worker busy
+ * 12 ms; a woken thread that
+ * never runs with a thread blocked untracked for ever; a mixer on its own schedule with an
+ * output thread waiting for it and a thread blocked untracked.
  * Each case: from the first frame with sound, exactly 800 samples a run, every one the game's,
  * once and in order: nothing padded, nothing late, nothing dropped. The stopped engine: its
  * sound to the end, then silence. FMOD's: no slot output before its mixer filled it (built
- * with MODEL_UNPACED, Output as fast as the queue has room: it fails).
- * Four cases crackle and are reported as such, not counted as failures, until they are fixed:
- * a render thread busy 15 ms a frame, a thread spinning without a yield, a woken thread that
- * never runs with one blocked untracked, and a mixer with an output thread waiting for it and
- * one blocked untracked. In each, a thread the clock counts as running holds the game's time
- * within the frame, and the frame's sound comes after the run that mixes it. */
+ * with MODEL_UNPACED, Output as fast as the queue has room: it fails). */
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -55,6 +60,8 @@ enum {
     CASE_FMOD,
     CASE_SUSPENDED,
     CASE_CHAIN,
+    CASE_FMOD_HEAVY,
+    CASE_FMOD_JOBS,
     CASE_COUNT
 };
 static const char* const case_names[CASE_COUNT] = {
@@ -66,7 +73,9 @@ static const char* const case_names[CASE_COUNT] = {
     "an engine that stops",
     "FMOD: a mixer two 256-frame slots ahead, an output thread without a wait for it",
     "a relative sleeper, a woken thread that never runs, a thread blocked untracked for ever",
-    "a mixer on its own schedule, an output thread waiting for it, a thread blocked untracked"};
+    "a mixer on its own schedule, an output thread waiting for it, a thread blocked untracked",
+    "FMOD with a render thread busy 15 ms a frame",
+    "FMOD with a render thread waiting on a worker busy 12 ms a frame"};
 static int which;
 
 /* Each game thread's own state for the clock */
@@ -81,6 +90,13 @@ static int stopping(void* ctx) {
 static int port_ready(void* ctx) {
     (void)ctx;
     return audio_mix_input_ready(port, BUFFER, FRAME * 2) || retro_atomic_load_acquire_int(&stop);
+}
+
+/* A game thread wakes those waiting on @ec (the kernel's notify: a reaction carries on) */
+static void game_notify(retro_eventcount_t* ec) {
+    const int token = game_clock_chain_begin(&clk, &ec->epoch, SELF);
+    retro_eventcount_notify(ec);
+    game_clock_chain_end(&clk, &ec->epoch, token);
 }
 
 /* A port's writer sleeps to its next buffer (audio_out's PaceOutput) */
@@ -158,6 +174,8 @@ static void fmod_output_thread(void* data) {
         const uint64_t due = game_clock_cadence(&clk, &start, &count, BUFFER, 48000);
         if (due > game_clock_now(&clk))
             port_sleep(due);
+        /* A reaction to the device's time, whether it slept or not */
+        game_clock_woke(&clk, SELF);
 #else
         (void)start;
         (void)count;
@@ -175,10 +193,12 @@ static void fmod_output_thread(void* data) {
         }
         slot ^= 1;
         retro_atomic_fetch_add_int(&fmod_free, 1);
-        retro_eventcount_notify(&fmod_ec);
+        game_notify(&fmod_ec);
     }
     game_clock_thread_idle(&clk, SELF);
 }
+
+static retro_atomic_int_t engine_sleeps; /* the engine's sleeps, for the lock waiter */
 
 static int lock_free(void* ctx) {
     (void)ctx;
@@ -191,7 +211,7 @@ static void lock_take(void) {
 
 static void lock_give(void) {
     retro_atomic_store_release_int(&lock_owner, 0);
-    retro_eventcount_notify(&lock_ec);
+    game_notify(&lock_ec);
 }
 
 static void engine_thread(void* data) {
@@ -215,6 +235,10 @@ static void engine_thread(void* data) {
         if (which == CASE_LOCK_WAITER)
             lock_take();
         deadline = relative ? game_clock_now(&clk) + BUFFER_NS : deadline + BUFFER_NS;
+        if (which == CASE_LOCK_WAITER) {
+            retro_atomic_fetch_add_int(&engine_sleeps, 1);
+            game_notify(&lock_ec);
+        }
         port_sleep(deadline);
         if (which == CASE_LOCK_WAITER)
             lock_give();
@@ -226,6 +250,37 @@ static int next_vblank(void* ctx) {
     return game_clock_frames(&clk) != *(uint64_t*)ctx || retro_atomic_load_acquire_int(&stop);
 }
 
+/* A worker of the render thread's: woken by it each frame (a game thread, not reacting to a
+ * deadline), busy 12 ms of the host's time, then waking it back */
+static retro_atomic_int_t job_posted, job_done;
+static retro_eventcount_t job_ec, job_done_ec;
+
+static int job_waiting(void* ctx) {
+    return retro_atomic_load_acquire_int(&job_posted) != *(int*)ctx ||
+           retro_atomic_load_acquire_int(&stop);
+}
+
+static int job_finished(void* ctx) {
+    (void)ctx;
+    return retro_atomic_load_acquire_int(&job_done) == retro_atomic_load_acquire_int(&job_posted) ||
+           retro_atomic_load_acquire_int(&stop);
+}
+
+static void worker_thread(void* data) {
+    int taken = 0;
+    (void)data;
+    for (;;) {
+        game_clock_wait(&clk, &job_ec, 0, job_waiting, &taken, SELF);
+        if (retro_atomic_load_acquire_int(&stop))
+            break;
+        taken = retro_atomic_load_acquire_int(&job_posted);
+        retro_sleep_us(12000);
+        retro_atomic_store_release_int(&job_done, taken);
+        game_notify(&job_done_ec);
+    }
+    game_clock_thread_idle(&clk, SELF);
+}
+
 static void render_thread(void* data) {
     (void)data;
     while (!retro_atomic_load_acquire_int(&stop)) {
@@ -235,8 +290,14 @@ static void render_thread(void* data) {
         for (i = 0; i < 20000; i++)
             work += i;
         /* A heavy game's frame: the host's time for its work, the game's time held */
-        if (which == CASE_HEAVY)
+        if (which == CASE_HEAVY || which == CASE_FMOD_HEAVY)
             retro_sleep_us(15000);
+        if (which == CASE_FMOD_JOBS) {
+            retro_atomic_fetch_add_int(&job_posted, 1);
+            game_notify(&job_ec);
+            game_clock_wait(&clk, &job_done_ec, 0, job_finished, NULL, SELF);
+            retro_sleep_us(3000);
+        }
         game_clock_wait(&clk, &vblank_ec, 0, next_vblank, &frame, SELF);
     }
     game_clock_thread_idle(&clk, SELF);
@@ -253,9 +314,21 @@ static void yielder_thread(void* data) {
     game_clock_thread_idle(&clk, SELF);
 }
 
+/* Takes the engine's lock once each of the engine's buffers (as a game's thread queueing
+ * a sound would): blocked on it while the engine holds it asleep. Not a spin through the lock,
+ * which on a two-core host takes the engine's core from it for a whole time slice. */
+
+static int engine_slept(void* ctx) {
+    return retro_atomic_load_acquire_int(&engine_sleeps) != *(int*)ctx ||
+           retro_atomic_load_acquire_int(&stop);
+}
+
 static void lock_waiter_thread(void* data) {
+    int seen = 0;
     (void)data;
     while (!retro_atomic_load_acquire_int(&stop)) {
+        game_clock_wait(&clk, &lock_ec, 0, engine_slept, &seen, SELF);
+        seen = retro_atomic_load_acquire_int(&engine_sleeps);
         lock_take();
         lock_give();
     }
@@ -276,11 +349,12 @@ static void suspended_thread(void* data) {
     const int slot = game_clock_park(&clk, &suspended_word, 0);
     (void)data;
     game_clock_thread_idle(&clk, SELF);
+    /* Woken by the emulator (a debugger's resume, a signal), it does not get to run */
     retro_atomic_fetch_add_int(&suspended_word, 1);
     while (!retro_atomic_load_acquire_int(&stop))
         retro_sleep_us(1000);
     game_clock_busy(&clk);
-    game_clock_unpark(&clk, slot);
+    game_clock_unpark(&clk, slot, SELF);
     game_clock_thread_idle(&clk, SELF);
 }
 
@@ -310,7 +384,7 @@ static void chain_mixer_thread(void* data) {
     (void)data;
     while (!retro_atomic_load_acquire_int(&stop)) {
         retro_atomic_fetch_add_int(&chain_mixed, 1);
-        retro_eventcount_notify(&chain_ec);
+        game_notify(&chain_ec);
         deadline += BUFFER_NS;
         game_clock_wait(&clk, &sleep_ec, deadline, stopping, NULL, SELF);
     }
@@ -331,6 +405,7 @@ static void chain_output_thread(void* data) {
         due = game_clock_cadence(&clk, &start, &count, BUFFER, 48000);
         if (due > game_clock_now(&clk))
             port_sleep(due);
+        game_clock_woke(&clk, SELF);
         game_clock_wait(&clk, audio_mix_input_room_ec(port), 0, port_ready, NULL, SELF);
         if (retro_atomic_load_acquire_int(&stop))
             break;
@@ -378,8 +453,11 @@ static int run_case(int c) {
     retro_atomic_int_init(&ticks, 0);
     retro_atomic_int_init(&stop, 0);
     retro_atomic_int_init(&lock_owner, 0);
+    retro_atomic_int_init(&engine_sleeps, 0);
+    retro_atomic_int_init(&job_posted, 0);
+    retro_atomic_int_init(&job_done, 0);
     /* Each game thread counts running from its creation, as the kernel's do */
-    if (c == CASE_FMOD) {
+    if (c == CASE_FMOD || c == CASE_FMOD_HEAVY || c == CASE_FMOD_JOBS) {
         retro_atomic_int_init(&fmod_free, 2);
         game_clock_busy(&clk);
         threads[n++] = sthread_create(fmod_mixer_thread, NULL);
@@ -408,6 +486,10 @@ static int run_case(int c) {
         game_clock_busy(&clk);
         threads[n++] = sthread_create(blocked_thread, NULL);
     }
+    if (c == CASE_FMOD_JOBS) {
+        game_clock_busy(&clk);
+        threads[n++] = sthread_create(worker_thread, NULL);
+    }
     if (c == CASE_SUSPENDED) {
         retro_atomic_int_init(&suspended_word, 0);
         game_clock_busy(&clk);
@@ -416,12 +498,15 @@ static int run_case(int c) {
         threads[n++] = sthread_create(blocked_thread, NULL);
     }
     threads[n++] = sthread_create(frame_thread, NULL);
-    retro_sleep_us(2000);
+    /* The threads started and at their first waits before the first frame (a thread's first
+     * run under the sanitizers takes milliseconds of the host's time: no frame's sound is
+     * late for that) */
+    retro_sleep_us(20000);
 
     srand(7);
     for (run = 0; run < RUNS; run++) {
         unsigned ch, got = 0;
-        /* retro_run: the frame's sound waited for, exactly a frame of it mixed (none before
+        /* retro_run: exactly a frame of the sound mixed, never waiting on the game (none before
          * the game's time has started), then the frame counted */
         if (run != 0) {
             got = audio_mix_mix(FRAME, &ch);
@@ -438,15 +523,18 @@ static int run_case(int c) {
             /* The stopped engine: what it wrote, then silence */
             const unsigned left = c == CASE_STOPS ? STOP_AFTER * BUFFER - sent : FRAME;
             const unsigned want = left < FRAME ? left : FRAME;
-            /* Its last, less than a frame, held back whole while it was still writing */
+            /* Its last, less than a frame, then silence */
             if (got != want)
                 padded++;
             for (i = 0; i < FRAME; i++) {
                 const unsigned v =
                     (unsigned)((uint16_t)out[i * 2] | ((unsigned)(uint16_t)out[i * 2 + 1] << 14));
                 if (i < got) {
-                    if (v != expect)
+                    if (v != expect) {
                         bad++;
+                        if (getenv("MODEL_TRACE"))
+                            printf("  run %u at %u: %u, not %u\n", run, i, v, expect);
+                    }
                     expect = v + 1;
                 } else if (v != 0)
                     bad++;
@@ -468,6 +556,8 @@ static int run_case(int c) {
     retro_eventcount_notify(&never_ec);
     retro_eventcount_notify(&fmod_ec);
     retro_eventcount_notify(&chain_ec);
+    retro_eventcount_notify(&job_ec);
+    retro_eventcount_notify(&job_done_ec);
     audio_mix_notify_room();
     for (i = 0; i < n; i++)
         sthread_join(threads[i]);
@@ -491,20 +581,13 @@ int main(void) {
     retro_eventcount_init(&never_ec);
     retro_eventcount_init(&fmod_ec);
     retro_eventcount_init(&chain_ec);
+    retro_eventcount_init(&job_ec);
+    retro_eventcount_init(&job_done_ec);
     retro_atomic_int_init(&spin_word, 0);
-    for (c = 0; c < CASE_COUNT; c++) {
-        /* Not fixed yet: the game's time is held within the frame while a thread the clock
-         * counts as running runs (a heavy frame, a spin, a wait the clock does not see), so the
-         * frame's sound comes at the next frame's start, after the run that mixes it: these
-         * cases crackle. Reported, not counted, until they are fixed. */
-        const int known =
-            c == CASE_HEAVY || c == CASE_SPINNER || c == CASE_SUSPENDED || c == CASE_CHAIN;
-        const int failed = run_case(c);
-        if (failed && known)
-            printf("audio_game_model: KNOWN TO CRACKLE, not fixed yet: %s\n", case_names[c]);
-        else if (failed)
-            failures++;
-    }
+    /* MODEL_CASE=n: that case alone */
+    for (c = 0; c < CASE_COUNT; c++)
+        if (!getenv("MODEL_CASE") || atoi(getenv("MODEL_CASE")) == c)
+            failures += run_case(c) ? 1 : 0;
     if (failures) {
         printf("audio_game_model: FAILED\n");
         return 1;

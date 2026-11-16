@@ -55,7 +55,7 @@ s32 PS4_SYSV_ABI posix_pthread_barrier_wait(PthreadBarrierT* barrier) {
     } while (!(retro_atomic_cas_64(&value->word, word, next) ||
                ((word = static_cast<u64>(retro_atomic_load_acquire_64(&value->word))), false)));
     if (last) {
-        retro_eventcount_notify(&value->generation_ec);
+        GameNotify(&value->generation_ec);
         return PthreadBarrierSerialThread;
     }
     const u64 generation = word >> 32;

@@ -171,6 +171,9 @@ static void PaceOutput(PortOut& port) {
     if (due > Kernel::GameNow()) {
         Kernel::GameSleepUntil(due);
     }
+    // Its buffer's time, slept to or late: what the thread does next (waking the engine's mixer
+    // for the buffer it gave back) reacts to it, the time held for it until it waits again
+    game_clock_woke(Kernel::GameClock(), Kernel::GameThreadSelf());
 }
 
 /// Hands @ptr, a buffer of the port's, to its output. Among the port's writers.

@@ -103,6 +103,14 @@ bool IsGameThread();
 /// from here), or nullptr for a thread the clock does not count
 game_clock_thread_t* GameThreadSelf();
 
+/// The calling thread bumps *@word between the two (wakes those parked on it): a game thread
+/// reacting to a deadline hands its reaction on to the threads it wakes (game_clock_chain_begin)
+int GameChainBegin(retro_atomic_int_t* word);
+void GameChainEnd(retro_atomic_int_t* word, int token);
+
+/// retro_eventcount_notify(@ec), as the calling thread (GameChainBegin)
+void GameNotify(retro_eventcount_t* ec);
+
 /// The calling game thread goes idle (game_clock_thread_idle)
 void GameThreadIdle();
 
@@ -125,6 +133,20 @@ bool GameSemaWait(Sema& sema, u64 deadline) {
         Sema* sema;
         game_clock_thread_t* self;
     } timer_ctx{&sema, GameThreadSelf()};
+    // Released already: what it does next is still the reaction it was in (or none), whoever
+    // released it. A release from here on moves the word past the key: in flight.
+    const int key = retro_atomic_load_seq_cst_int(&sema.releases);
+    if (sema.try_acquire_pending()) {
+        return true;
+    }
+    // Parked first, its key behind any release from here on: a reacting thread's release is in
+    // flight from the moment its reaction is done, never neither. Then its reaction done,
+    // before its timer can hand it a new one.
+    int slot = -1;
+    if (timer_ctx.self) {
+        slot = game_clock_park(clock, &sema.releases, key);
+        game_clock_thread_done(clock, timer_ctx.self);
+    }
     const int timer = deadline != 0 ? game_clock_arm(
                                           clock, deadline,
                                           [](void* ctx) {
@@ -137,12 +159,9 @@ bool GameSemaWait(Sema& sema, u64 deadline) {
                                           &timer_ctx)
                                     : -1;
     ASSERT_MSG(deadline == 0 || timer >= 0, "All of the game's timers are armed");
-    // Parked, idle: a release of it in flight holds the time until it has run
-    int slot = -1;
+    // Idle: a reacting thread's release of it in flight holds the time until it has run
     if (timer_ctx.self) {
-        slot =
-            game_clock_park(clock, &sema.releases, retro_atomic_load_seq_cst_int(&sema.releases));
-        game_clock_thread_idle(clock, timer_ctx.self);
+        game_clock_idle(clock);
     }
     sema.acquire();
     // A timer that fired handed this thread its count back
@@ -151,10 +170,10 @@ bool GameSemaWait(Sema& sema, u64 deadline) {
         if (timer_ctx.self) {
             game_clock_busy(clock);
         }
-        game_clock_unpark(clock, slot);
+        game_clock_unpark(clock, slot, timer_ctx.self);
         return true;
     }
-    game_clock_unpark(clock, slot);
+    game_clock_unpark(clock, slot, timer_ctx.self);
     // The timer's release, or another as well: then both are taken
     return sema.try_acquire_pending();
 }

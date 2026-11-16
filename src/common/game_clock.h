@@ -14,11 +14,12 @@ extern "C" {
 #endif
 
 /* The game's time, in nanoseconds, from the frontend's frames rather than a wall clock.
- * Each retro_run starts a frame (game_clock_frame): the time moves to the frame's start,
- * and the frame's end is the most it may reach before the next one. Within a frame it moves
- * only when the game's threads are all idle (game_clock_advance), to the earliest deadline
- * they wait for, never past the frame's end: so a game gets each frame's worth of time, and
- * no more, however fast or slow the host runs it. The frame's length is exact over time
+ * Each retro_run starts a frame (game_clock_frame): the frame's end is the most the time may
+ * reach before the next one. The time steps from deadline to deadline, each once the threads
+ * reacting to the last have waited again, and to the frame's start when none is due before
+ * it, never past the frame's end: so a game gets each frame's worth of time, and no more,
+ * however fast or slow the host runs it, and its deadlines come in order, never two before
+ * the reaction to the first is done. The frame's length is exact over time
  * (1e9 / 60 ns, its fraction carried). One thread starts frames; any thread reads and
  * advances. */
 /* What the game's threads wait for on the game's time: a deadline, and what is done when
@@ -37,6 +38,12 @@ typedef struct game_clock_timer {
  * since is a wake in flight: the thread is about to run, and the time waits for it. */
 #define GAME_CLOCK_PARKED 1024
 
+/* Reacting game threads waking others at once (game_clock_chain_begin) */
+#define GAME_CLOCK_NOTIFIERS 16
+
+/* Words a reacting game thread last bumped, each with its value then (a power of two) */
+#define GAME_CLOCK_CHAINS 1024
+
 typedef struct game_clock_parked {
     retro_atomic_ptr_t word; /* retro_atomic_int_t*, NULL: free */
     retro_atomic_int_t key;
@@ -49,33 +56,38 @@ typedef struct game_clock_parked {
 /* A game thread's own state, kept by the thread (thread-local) */
 typedef struct game_clock_thread {
     int yielded; /* counted idle by a yield (game_clock_yield) */
-    int woken;   /* woken by the frame's finishing, the frame's number + 1, until it waits again */
+    retro_atomic_int_t woken; /* woken: in frame (number + 1), until it waits again */
 } game_clock_thread_t;
 
 typedef struct game_clock {
     retro_atomic_64_t now;       /* the time */
     retro_atomic_64_t frame_end; /* the most the time may reach before the next frame */
+    retro_atomic_64_t frame_start;  /* the time moves here when nothing holds it before */
+    retro_atomic_int_t stepping;    /* a thread is stepping the time (game_clock_skip) */
+    retro_atomic_int_t step_wanted; /* a step was asked for: the stepper looks again */
     retro_atomic_64_t frames;    /* frames started */
     uint64_t period;             /* a frame's whole nanoseconds */
     uint64_t rem;                /* and the fraction's numerator, over fps_num */
     uint64_t acc;
     uint64_t fps_num;
-    /* The game's threads not waiting on something tracked (game_clock_idle/busy): at none,
-     * the time moves on to the earliest deadline */
+    /* The game's threads not waiting on something tracked (game_clock_idle/busy) */
     retro_atomic_int_t running;
     retro_atomic_64_t free_timers[GAME_CLOCK_TIMERS / 64]; /* a bit a timer, set if free */
     game_clock_timer_t timers[GAME_CLOCK_TIMERS];
     retro_atomic_64_t free_parked[GAME_CLOCK_PARKED / 64]; /* a bit a slot, set if free */
     game_clock_parked_t parked[GAME_CLOCK_PARKED];
-    /* The frame is wanted finished (game_clock_finish): its deadlines are not held back by
-     * threads running */
-    retro_atomic_int_t finishing;
-    /* Threads the finishing woke that have not waited again (game_clock_thread_t.woken) */
-    retro_atomic_int_t woken;
-    /* The frame done, or 0 (game_clock_set_done), and who is told */
-    retro_atomic_int_t* done_frame;
-    void (*done)(void* ctx);
-    void* done_ctx;
+    retro_atomic_int_t parked_top; /* past the highest slot ever taken: the scans stop there */
+    /* The words reacting game threads are notifying (game_clock_chain_begin), NULL: free */
+    retro_atomic_ptr_t notifying[GAME_CLOCK_NOTIFIERS];
+    /* Each word a reacting game thread bumped, by its place (game_clock_chain_end): its tag
+     * << 32 | its value just past the bump. A thread parked on it with a key behind that was
+     * woken by the reaction, and reacts in turn. */
+    retro_atomic_64_t chains[GAME_CLOCK_CHAINS];
+    /* Threads woken that have not waited again (game_clock_thread_t.woken), counted by the
+     * frame they were woken in: [tag & 1] holds (tag << 32) | count. Those of this frame and
+     * the last hold the time: at none, and no wake in flight, the time steps to the next
+     * deadline. One woken before the last frame (running on for ever) no longer holds it. */
+    retro_atomic_64_t woken[2];
 } game_clock_t;
 
 /* At time 0, no frame started (the time stands until the first), frames of
@@ -83,26 +95,16 @@ typedef struct game_clock {
 void game_clock_init(game_clock_t* clock, unsigned fps_num, unsigned fps_den);
 
 /* A frame starts (retro_run): the time moves to its start (the last frame's end), if the
- * game had not used all of the last one. The one thread that starts frames. */
+ * game had not used all of the last one, as soon as nothing holds it: the deadlines before it
+ * first, in order, each after the reaction to the last (never at once, past a reaction still
+ * running). The one thread that starts frames.
+ * Within the frame the time steps from deadline to deadline, never past its end: to the next
+ * one as soon as every thread reacting (woken by a deadline, or by a thread reacting to one)
+ * has waited again and no wake of one in flight. Each reaction to a deadline runs before the next
+ * deadline comes, and the frame's deadlines come as fast as its threads react. A thread
+ * running for any other reason (its own work, a spin, a wait the clock does not see: a
+ * socket's) does not hold the time. */
 void game_clock_frame(game_clock_t* clock);
-
-/* The frame is done when the game's threads are all idle and none waits for a time within
- * it: nothing more happens in it until something outside the game wakes a thread (the next
- * frame, the GPU, input). The frame being finished (game_clock_finish), it is done too once its
- * deadlines have all come and every thread the finishing woke has waited again, whoever else
- * runs (a thread blocked where the clock does not see it, a socket's recv, runs for ever).
- * Then *@done_frame is set to the frame's number (frames started)
- * and @done(@ctx) is called, on the thread that made it so; a game thread running again sets
- * it back to 0. @done_frame may be in memory another process reads. Set before the frames
- * start. */
-void game_clock_set_done(game_clock_t* clock, retro_atomic_int_t* done_frame,
-                         void (*done)(void* ctx), void* ctx);
-
-/* The frontend wants the frame finished (it waits for its sound): from here until the next
- * frame starts, the time moves to each deadline within the frame as soon as it is armed, and
- * what is due fires, whoever is running. So a thread that never waits (a spin with no yield)
- * does not hold the frame, and the frame's sleepers all get their time. */
-void game_clock_finish(game_clock_t* clock);
 
 /* A cadence on the game's time: something done every @units of @rate a second (a device's
  * buffer: frames of a sample rate), counted from *@start in whole units so it does not drift.
@@ -138,31 +140,49 @@ int game_clock_arm_oneshot(game_clock_t* clock, uint64_t deadline, void (*fire)(
  * will not */
 int game_clock_disarm(game_clock_t* clock, int timer);
 
-/* The calling game thread starts or stops waiting on something tracked. When the last
- * running one stops, the time moves to the earliest deadline (within the frame) and the
- * timers due fire. A game thread counts as running from game_clock_busy at its start to
- * game_clock_idle at its end. */
+/* The calling game thread starts or stops waiting on something tracked. A game thread counts
+ * as running from game_clock_busy at its start to game_clock_idle at its end. */
 void game_clock_idle(game_clock_t* clock);
 void game_clock_busy(game_clock_t* clock);
 
-/* A counted thread, @self, goes idle: as game_clock_idle, and one the frame's finishing woke
- * has run its part of the frame */
+/* A counted thread, @self, goes idle: game_clock_thread_done, then game_clock_idle */
 void game_clock_thread_idle(game_clock_t* clock, game_clock_thread_t* self);
 
-/* A timer hands @self, parked, its count back: as game_clock_busy, and while the frame is
- * being finished, @self is one the finishing woke, which the frame waits for until it waits
- * again. Called by the timer's fire, on the thread firing it. */
+/* @self, about to wait (before it arms a timer for the wait), has done its reaction: one woken
+ * no longer holds the time (the last of them, the time steps on) */
+void game_clock_thread_done(game_clock_t* clock, game_clock_thread_t* self);
+
+/* A timer hands @self, parked, its count back: as game_clock_busy, and @self is woken
+ * (game_clock_woke). Called by the timer's fire, on the thread firing it. */
 void game_clock_hand(game_clock_t* clock, game_clock_thread_t* self);
 
+/* @self (NULL: none) reacts: woken this frame by a deadline (or late for one), or by a
+ * reacting game thread. The time waits for it until it waits again, for the rest of the next
+ * frame at most. */
+void game_clock_woke(game_clock_t* clock, game_clock_thread_t* self);
+
+/* A game thread, @self (NULL: none), bumps *@word (an eventcount's epoch, a semaphore's
+ * releases: wakes those parked on it) between the two. If it is reacting (woken by a deadline,
+ * or in turn by a thread that was, and not waited since), the threads it wakes react too: the
+ * time waits for them (an engine's output thread, woken at its buffer's time, waking its
+ * mixer). A wake from anything else (the emulator's threads, the GPU, a vblank; a game thread
+ * running its own work) holds nothing. @return the token for game_clock_chain_end. */
+int game_clock_chain_begin(game_clock_t* clock, retro_atomic_int_t* word,
+                           game_clock_thread_t* self);
+void game_clock_chain_end(game_clock_t* clock, retro_atomic_int_t* word, int token);
+
 /* A counted game thread parks, idle, on a wait whose wake bumps *@word (@key: its value
- * now): until it has run again (game_clock_unpark), a wake of it in flight (the word moved
- * on) holds the time, so that the time does not skip past a thread woken by another that then
- * waits (an engine's output thread waking its mixer, then sleeping to its next buffer). Each
+ * now): until it has run again (game_clock_unpark), a reacting thread's wake of it in flight
+ * (the word moved on, game_clock_chain_begin) holds the time, so that the time does not skip
+ * past a thread woken by another that then waits (an engine's output thread waking its mixer,
+ * then sleeping to its next buffer). Each
  * time it parks again in the same wait, game_clock_repark with the new key. Returns the
  * slot, or -1 if none is left (the wait goes on untracked). */
 int game_clock_park(game_clock_t* clock, retro_atomic_int_t* word, int key);
 void game_clock_repark(game_clock_t* clock, int slot, int key);
-void game_clock_unpark(game_clock_t* clock, int slot);
+/* Running again (counted): its slot goes. @self, if woken by a reacting game thread, reacts
+ * too (game_clock_woke). */
+void game_clock_unpark(game_clock_t* clock, int slot, game_clock_thread_t* self);
 
 /* The game threads counted running */
 int game_clock_running(game_clock_t* clock);

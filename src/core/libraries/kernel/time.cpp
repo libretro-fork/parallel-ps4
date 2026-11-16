@@ -76,6 +76,20 @@ game_clock_thread_t* GameThreadSelf() {
     return &game_thread_self;
 }
 
+int GameChainBegin(retro_atomic_int_t* word) {
+    return game_clock_chain_begin(&game_clock, word, game_thread ? &game_thread_self : nullptr);
+}
+
+void GameChainEnd(retro_atomic_int_t* word, int token) {
+    game_clock_chain_end(&game_clock, word, token);
+}
+
+void GameNotify(retro_eventcount_t* ec) {
+    const int token = GameChainBegin(&ec->epoch);
+    retro_eventcount_notify(ec);
+    GameChainEnd(&ec->epoch, token);
+}
+
 void GameThreadIdle() {
     game_clock_thread_idle(&game_clock, &game_thread_self);
 }
