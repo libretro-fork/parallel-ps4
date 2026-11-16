@@ -57,6 +57,11 @@ typedef struct game_clock_parked {
 typedef struct game_clock_thread {
     int yielded; /* counted idle by a yield (game_clock_yield) */
     retro_atomic_int_t woken; /* woken: in frame (number + 1), until it waits again */
+    /* Sleeping to an audio device's time (game_clock_pacing): its deadline starts a reaction */
+    retro_atomic_int_t pacing;
+    /* Its reaction began at a deadline: those it wakes react too. Woken by a reacting thread,
+     * 0: it wakes nobody into the reaction (an engine's mixer, woken by its output thread) */
+    retro_atomic_int_t leads;
 } game_clock_thread_t;
 
 typedef struct game_clock {
@@ -99,7 +104,7 @@ void game_clock_init(game_clock_t* clock, unsigned fps_num, unsigned fps_den);
  * first, in order, each after the reaction to the last (never at once, past a reaction still
  * running). The one thread that starts frames.
  * Within the frame the time steps from deadline to deadline, never past its end: to the next
- * one as soon as every thread reacting (woken by a deadline, or by a thread reacting to one)
+ * one as soon as every thread reacting to an audio device's time (and every thread it woke)
  * has waited again and no wake of one in flight. Each reaction to a deadline runs before the next
  * deadline comes, and the frame's deadlines come as fast as its threads react. A thread
  * running for any other reason (its own work, a spin, a wait the clock does not see: a
@@ -152,21 +157,29 @@ void game_clock_thread_idle(game_clock_t* clock, game_clock_thread_t* self);
  * no longer holds the time (the last of them, the time steps on) */
 void game_clock_thread_done(game_clock_t* clock, game_clock_thread_t* self);
 
-/* A timer hands @self, parked, its count back: as game_clock_busy, and @self is woken
- * (game_clock_woke). Called by the timer's fire, on the thread firing it. */
+/* A timer hands @self, parked, its count back: as game_clock_busy, and if @self was sleeping
+ * to an audio device's time (game_clock_pacing), it reacts (game_clock_woke). Called by the
+ * timer's fire, on the thread firing it. */
 void game_clock_hand(game_clock_t* clock, game_clock_thread_t* self);
 
-/* @self (NULL: none) reacts: woken this frame by a deadline (or late for one), or by a
- * reacting game thread. The time waits for it until it waits again, for the rest of the next
- * frame at most. */
+/* @self (NULL: none) reacts to an audio device's time: woken by it this frame, or late for it.
+ * The time waits for it until it waits again, for the rest of the next frame at most, and for
+ * the threads it wakes meanwhile (game_clock_chain_begin), but not for those they wake in
+ * turn. Only the sound's pace holds the time: a game's other sleeps (a main loop's, a
+ * worker's) end and the time steps on, however long the threads they wake run. */
 void game_clock_woke(game_clock_t* clock, game_clock_thread_t* self);
 
+/* @self sleeps to an audio device's time (sceAudioOutOutput's pace) from @on = 1 to @on = 0:
+ * the end of that sleep starts a reaction (game_clock_hand) */
+void game_clock_pacing(game_clock_thread_t* self, int on);
+
 /* A game thread, @self (NULL: none), bumps *@word (an eventcount's epoch, a semaphore's
- * releases: wakes those parked on it) between the two. If it is reacting (woken by a deadline,
- * or in turn by a thread that was, and not waited since), the threads it wakes react too: the
- * time waits for them (an engine's output thread, woken at its buffer's time, waking its
- * mixer). A wake from anything else (the emulator's threads, the GPU, a vblank; a game thread
- * running its own work) holds nothing. @return the token for game_clock_chain_end. */
+ * releases: wakes those parked on it) between the two. If it is reacting to an audio device's
+ * time (game_clock_woke) and not waited since, the threads it wakes react too: the time waits
+ * for them (an engine's output thread, woken at its buffer's time, waking its mixer). A wake
+ * from anything else (the emulator's threads, the GPU, a vblank; a game thread running its
+ * own work; a thread itself woken into a reaction) holds nothing. @return the token for
+ * game_clock_chain_end. */
 int game_clock_chain_begin(game_clock_t* clock, retro_atomic_int_t* word,
                            game_clock_thread_t* self);
 void game_clock_chain_end(game_clock_t* clock, retro_atomic_int_t* word, int token);

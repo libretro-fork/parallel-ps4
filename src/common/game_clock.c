@@ -127,7 +127,8 @@ static uint32_t game_clock_chain_tag(retro_atomic_int_t* word) {
 static int game_clock_self_reacting(game_clock_t* clock, game_clock_thread_t* self) {
     const int tag = game_clock_tag(clock);
     const int was = self ? retro_atomic_load_acquire_int(&self->woken) : 0;
-    return was != 0 && (was == tag || was == tag - 1 || (tag == 1 && was == 0x40000000));
+    return was != 0 && (was == tag || was == tag - 1 || (tag == 1 && was == 0x40000000)) &&
+           retro_atomic_load_acquire_int(&self->leads);
 }
 
 int game_clock_chain_begin(game_clock_t* clock, retro_atomic_int_t* word,
@@ -377,17 +378,21 @@ void game_clock_thread_idle(game_clock_t* clock, game_clock_thread_t* self) {
     game_clock_idle(clock);
 }
 
-void game_clock_woke(game_clock_t* clock, game_clock_thread_t* self) {
+static void game_clock_woke_as(game_clock_t* clock, game_clock_thread_t* self, int leads) {
     int tag, was;
     retro_atomic_64_t* count;
     if (!self)
         return;
+    if (leads)
+        retro_atomic_store_release_int(&self->leads, 1);
     tag = game_clock_tag(clock);
     was = retro_atomic_load_acquire_int(&self->woken);
     /* Still reacting, counted this frame or the last */
     if (was == tag || (was != 0 && (was == tag - 1 || (tag == 1 && was == 0x40000000))))
         return;
     /* Not woken, or its count lapsed: counted afresh in this frame's */
+    if (!leads)
+        retro_atomic_store_release_int(&self->leads, 0);
     if (!retro_atomic_cas_int(&self->woken, was, tag))
         return; /* only the thread itself and a timer handing it its count race here */
     count = &clock->woken[tag & 1];
@@ -400,9 +405,20 @@ void game_clock_woke(game_clock_t* clock, game_clock_thread_t* self) {
     }
 }
 
+void game_clock_woke(game_clock_t* clock, game_clock_thread_t* self) {
+    game_clock_woke_as(clock, self, 1);
+}
+
+void game_clock_pacing(game_clock_thread_t* self, int on) {
+    if (self)
+        retro_atomic_store_release_int(&self->pacing, on);
+}
+
 void game_clock_hand(game_clock_t* clock, game_clock_thread_t* self) {
     game_clock_busy(clock);
-    game_clock_woke(clock, self);
+    /* Only an audio device's time starts a reaction: any other sleep's end holds nothing */
+    if (self && retro_atomic_load_acquire_int(&self->pacing))
+        game_clock_woke_as(clock, self, 1);
 }
 
 void game_clock_busy(game_clock_t* clock) {
@@ -476,7 +492,7 @@ void game_clock_unpark(game_clock_t* clock, int slot, game_clock_thread_t* self)
             (retro_atomic_int_t*)retro_atomic_load_acquire_ptr(&clock->parked[slot].word);
         if (game_clock_chained(clock, word,
                                retro_atomic_load_acquire_int(&clock->parked[slot].key)))
-            game_clock_woke(clock, self);
+            game_clock_woke_as(clock, self, 0);
     }
     retro_atomic_store_release_ptr(&clock->parked[slot].word, 0);
     retro_atomic_fetch_or_64(&clock->free_parked[slot / 64], (int64_t)((uint64_t)1 << (slot % 64)));
