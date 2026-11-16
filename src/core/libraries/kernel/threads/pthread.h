@@ -119,7 +119,7 @@ struct GameLock {
     }
     void unlock() {
         retro_atomic_store_release_int(&held, 0);
-        GameNotify(&wake);
+        retro_eventcount_notify(&wake);
     }
 };
 

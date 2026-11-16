@@ -120,13 +120,13 @@ public:
     void RemoveWaiter(Waiter& waiter) {
         m_waiters.remove(&waiter);
         if (static_cast<u32>(retro_atomic_fetch_sub_int(&m_waiter_count, 1)) == 1 && m_deleted) {
-            GameNotify(&m_wake_ec);
+            retro_eventcount_notify(&m_wake_ec);
         }
     }
 
     void Wake(Waiter& waiter) {
         retro_atomic_store_release_int(&waiter.woken, 1);
-        GameNotify(&m_wake_ec);
+        retro_eventcount_notify(&m_wake_ec);
     }
 
     int Wait(u64 bits, WaitMode wait_mode, ClearMode clear_mode, u64* result, u32* ptr_micros) {

@@ -186,7 +186,7 @@ public:
         }
         if (--depth == 0) {
             (void)retro_atomic_exchange_ptr(&owner, nullptr);
-            Kernel::GameNotify(free.get());
+            free.Notify();
         }
         return true;
     }

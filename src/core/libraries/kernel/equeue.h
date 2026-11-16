@@ -13,7 +13,6 @@
 #include "common/event_count.h"
 #include "common/rdtsc.h"
 #include "common/types.h"
-#include "core/libraries/kernel/time.h"
 
 namespace Core::Loader {
 class SymbolsResolver;
@@ -187,7 +186,7 @@ public:
     bool RemoveSmallTimer(u64 id) {
         const bool removed = m_combiner.Run([&] { return m_small_timers.erase(id) > 0; });
         // A waiter sleeping toward this timer looks again
-        GameNotify(m_wake.get());
+        m_wake.Notify();
         return removed;
     }
 

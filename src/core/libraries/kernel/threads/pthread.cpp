@@ -80,7 +80,7 @@ static void ExitThread() {
      * will be resumed if it is sleeping at the address.
      */
     retro_atomic_store_release_int(&curthread->tid, TidTerminated);
-    GameNotify(curthread->join_wait.get());
+    retro_eventcount_notify(curthread->join_wait.get());
 
     if (IsGameThread()) {
         GameThreadIdle();
@@ -502,7 +502,7 @@ int PS4_SYSV_ABI posix_pthread_once(PthreadOnce* once_control,
             return;
         }
         retro_atomic_store_release_int(&once_control2->state, PthreadOnceState::NeverDone);
-        GameNotify(once_event.get());
+        once_event.Notify();
     };
 
     PthreadCleanup cup{once_cancel_handler, once_control, 0};
@@ -524,7 +524,7 @@ int PS4_SYSV_ABI posix_pthread_once(PthreadOnce* once_control,
         return 0;
     }
     (void)retro_atomic_exchange_int(&once_control->state, static_cast<int>(PthreadOnceState::Done));
-    GameNotify(once_event.get());
+    once_event.Notify();
     return 0;
 }
 
@@ -795,7 +795,7 @@ int PS4_SYSV_ABI posix_pthread_cancel(PthreadT thread) {
         thread->wake_sema.release();
         thread->signal_sema.release();
         if (join_target != nullptr) {
-            GameNotify(join_target->join_wait.get());
+            retro_eventcount_notify(join_target->join_wait.get());
         }
         if (thread != g_curthread) {
             InterruptPthreadForCancellation(thread);

@@ -168,16 +168,9 @@ static void SetPortVolume(PortOut& port_ref, s32 flag, s32 vol_value);
 static void PaceOutput(PortOut& port) {
     const u64 due = game_clock_cadence(Kernel::GameClock(), &port.pace_start, &port.pace_buffers,
                                        port.buffer_frames, port.sample_rate);
-    game_clock_thread_t* self = Kernel::GameThreadSelf();
     if (due > Kernel::GameNow()) {
-        // The device's time: its end starts a reaction (game_clock_hand)
-        game_clock_pacing(self, 1);
         Kernel::GameSleepUntil(due);
-        game_clock_pacing(self, 0);
     }
-    // Its buffer's time, slept to or late: what the thread does next (waking the engine's mixer
-    // for the buffer it gave back) reacts to it, the time held for it until it waits again
-    game_clock_woke(Kernel::GameClock(), self);
 }
 
 /// Hands @ptr, a buffer of the port's, to its output. Among the port's writers.

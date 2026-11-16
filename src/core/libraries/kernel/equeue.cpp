@@ -188,7 +188,7 @@ bool EqueueInternal::AddEvent(EqueueEvent& event) {
             old_event.event.data = event.event.data;
             CheckIoEvent(old_event);
             if (old_event.IsTriggered()) {
-                GameNotify(m_wake.get());
+                m_wake.Notify();
             }
             return true;
         }
@@ -200,7 +200,7 @@ bool EqueueInternal::AddEvent(EqueueEvent& event) {
         m_events.emplace_back(std::move(event));
 
         if (is_triggered) {
-            GameNotify(m_wake.get());
+            m_wake.Notify();
         }
         return false;
     });
@@ -325,7 +325,7 @@ bool EqueueInternal::TriggerEvent(u64 ident, s16 filter, void* trigger_data) {
             }
         }
     });
-    GameNotify(m_wake.get());
+    m_wake.Notify();
     return has_found;
 }
 
@@ -468,7 +468,7 @@ bool EqueueInternal::AddSmallTimer(EqueueEvent& ev) {
     st.interval = std::chrono::nanoseconds(ts.tv_nsec + ts.tv_sec * 1000000000);
     m_combiner.Run([&] { m_small_timers[st.event.ident] = std::move(st); });
     // A waiter sleeping toward a later timer looks again
-    GameNotify(m_wake.get());
+    m_wake.Notify();
     return true;
 }
 

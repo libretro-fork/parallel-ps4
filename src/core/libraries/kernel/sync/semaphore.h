@@ -27,10 +27,6 @@ void FlushPendingGuestOrbisSignal() noexcept;
 
 namespace Libraries::Kernel {
 
-// core/libraries/kernel/time.h: a reacting game thread's release hands its reaction on
-int GameChainBegin(retro_atomic_int_t* word);
-void GameChainEnd(retro_atomic_int_t* word, int token);
-
 template <s64 max>
 class Semaphore {
 public:
@@ -61,7 +57,6 @@ public:
     retro_atomic_int_t releases{};
 
     void release() {
-        const int token = GameChainBegin(&releases);
         retro_atomic_fetch_add_seq_cst_int(&releases, 1);
 #ifdef _WIN64
         ASSERT_MSG(ReleaseSemaphore(sem, 1, nullptr) != 0, "Failed to release Win32 semaphore: {}",
@@ -71,7 +66,6 @@ public:
 #else
         sem.release();
 #endif
-        GameChainEnd(&releases, token);
     }
 
     void acquire() {

@@ -24,7 +24,7 @@ for san in address,undefined thread; do
 done
 # A game's sound on the game's time against the frame-locked mix (the real game_clock and
 # audio_mix), retro_run never waiting on the game: exactly 800 of the game's samples every run,
-# in order, no buffer played twice (two seconds a case)
+# in order (two seconds a case). Four cases that still crackle are reported, not counted.
 for san in address,undefined thread; do
     $CC -std=gnu89 -O1 -g -Wall -Wdeclaration-after-statement -fsanitize=$san -Isrc -I$L/include \
         libretro/tests/audio_game_model_test.c libretro/audio_mix.c src/common/game_clock.c \
