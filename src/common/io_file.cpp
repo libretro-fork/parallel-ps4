@@ -135,6 +135,23 @@ int Descriptor(RFILE* file) {
     return handle->fp ? fileno(handle->fp) : -1;
 }
 
+#ifdef _WIN32
+/// The Windows handle under a stream, or INVALID_HANDLE_VALUE. The VFS opens a stream to write
+/// on a handle of its own, with no C runtime descriptor under it: _get_osfhandle(-1) is an
+/// invalid parameter, and the C runtime ends the process for one.
+HANDLE NativeHandle(RFILE* file) {
+    const libretro_vfs_implementation_file* handle = filestream_get_vfs_handle(file);
+    if (!handle) {
+        return INVALID_HANDLE_VALUE;
+    }
+    if (handle->fh && handle->fh != INVALID_HANDLE_VALUE) {
+        return handle->fh;
+    }
+    const int fd = Descriptor(file);
+    return fd >= 0 ? reinterpret_cast<HANDLE>(_get_osfhandle(fd)) : INVALID_HANDLE_VALUE;
+}
+#endif
+
 } // Anonymous namespace
 
 IOFile::IOFile() = default;
@@ -238,11 +255,15 @@ void IOFile::Unlink() {
     FILE_DISPOSITION_INFORMATION disposition;
     IO_STATUS_BLOCK iosb;
 
-    HANDLE hfile = reinterpret_cast<HANDLE>(_get_osfhandle(Descriptor(file)));
+    const HANDLE hfile = NativeHandle(file);
 
     disposition.DeleteFile = TRUE;
-    NtSetInformationFile(hfile, &iosb, &disposition, sizeof(disposition),
-                         FileDispositionInformation);
+    if (hfile == INVALID_HANDLE_VALUE ||
+        static_cast<s32>(NtSetInformationFile(hfile, &iosb, &disposition, sizeof(disposition),
+                                              FileDispositionInformation)) < 0) {
+        LOG_ERROR(Common_Filesystem, "Failed to unlink the file at path={}",
+                  PathToUTF8String(file_path));
+    }
 #else
     if (filestream_delete(PathToUTF8String(file_path).c_str()) != 0) {
         LOG_ERROR(Common_Filesystem, "Failed to unlink the file at path={}",
@@ -255,10 +276,9 @@ uintptr_t IOFile::GetFileMapping() {
     if (file_mapping) {
         return file_mapping;
     }
-    const int fd = Descriptor(file);
-    ASSERT_MSG(fd >= 0, "No descriptor under {}", PathToUTF8String(file_path));
 #ifdef _WIN64
-    HANDLE hfile = reinterpret_cast<HANDLE>(_get_osfhandle(fd));
+    const HANDLE hfile = NativeHandle(file);
+    ASSERT_MSG(hfile != INVALID_HANDLE_VALUE, "No handle under {}", PathToUTF8String(file_path));
     HANDLE mapping = nullptr;
 
     if (file_access_mode == FileAccessMode::ReadWrite) {
@@ -272,6 +292,8 @@ uintptr_t IOFile::GetFileMapping() {
     ASSERT_MSG(file_mapping, "{}", Common::GetLastErrorMsg());
     return file_mapping;
 #else
+    const int fd = Descriptor(file);
+    ASSERT_MSG(fd >= 0, "No descriptor under {}", PathToUTF8String(file_path));
     file_mapping = static_cast<uintptr_t>(fd);
     return file_mapping;
 #endif
@@ -349,10 +371,11 @@ bool IOFile::Commit() const {
     }
     bool committed = filestream_flush(file) == 0;
     if (committed) {
-        const int fd = Descriptor(file);
 #ifdef _WIN32
-        committed = fd >= 0 && _commit(fd) == 0;
+        const HANDLE hfile = NativeHandle(file);
+        committed = hfile != INVALID_HANDLE_VALUE && FlushFileBuffers(hfile) != 0;
 #else
+        const int fd = Descriptor(file);
         committed = fd >= 0 && fsync(fd) == 0;
 #endif
     }
@@ -400,11 +423,7 @@ std::optional<FileInfo> IOFile::GetInfo() const {
         return std::nullopt;
     }
 #ifdef _WIN32
-    const int fd = Descriptor(file);
-    if (fd < 0) {
-        return std::nullopt;
-    }
-    const auto handle = reinterpret_cast<HANDLE>(_get_osfhandle(fd));
+    const HANDLE handle = NativeHandle(file);
     if (handle == INVALID_HANDLE_VALUE) {
         return std::nullopt;
     }
