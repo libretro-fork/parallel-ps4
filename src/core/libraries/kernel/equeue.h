@@ -20,6 +20,8 @@ class SymbolsResolver;
 
 namespace Libraries::Kernel {
 
+void GameNoteWake(retro_atomic_int_t* word); // core/libraries/kernel/time.h
+
 class EqueueInternal;
 struct EqueueEvent;
 
@@ -187,6 +189,7 @@ public:
         const bool removed = m_combiner.Run([&] { return m_small_timers.erase(id) > 0; });
         // A waiter sleeping toward this timer looks again
         m_wake.Notify();
+        GameNoteWake(&m_wake.get()->epoch);
         return removed;
     }
 

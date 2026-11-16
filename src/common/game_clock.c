@@ -13,6 +13,7 @@ void game_clock_init(game_clock_t* clock, unsigned fps_num, unsigned fps_den) {
     retro_atomic_64_init(&clock->now, 0);
     retro_atomic_64_init(&clock->frame_end, 0);
     retro_atomic_64_init(&clock->frames, 0);
+    retro_eventcount_init(&clock->parked_ec);
     clock->fps_num = fps_num;
     clock->period = total / fps_num;
     clock->rem = total % fps_num;
@@ -177,6 +178,7 @@ void game_clock_frame(game_clock_t* clock) {
         game_clock_skip(clock);
     else
         game_clock_fire_due(clock, game_clock_now(clock));
+    retro_eventcount_notify(&clock->parked_ec);
 }
 
 uint64_t game_clock_now(game_clock_t* clock) {
@@ -353,6 +355,7 @@ int game_clock_park(game_clock_t* clock, retro_atomic_int_t* word, int key) {
                 retro_atomic_store_release_int(&p->key, key);
                 retro_atomic_store_release_int(&p->flight_frame, 0);
                 retro_atomic_store_release_ptr(&p->word, word);
+                retro_eventcount_notify(&clock->parked_ec);
                 return (int)(w * 64 + bit);
             }
             bits = retro_atomic_load_acquire_64(&clock->free_parked[w]);
@@ -366,10 +369,33 @@ void game_clock_repark(game_clock_t* clock, int slot, int key) {
         return;
     retro_atomic_store_release_int(&clock->parked[slot].key, key);
     retro_atomic_store_release_int(&clock->parked[slot].flight_frame, 0);
+    retro_eventcount_notify(&clock->parked_ec);
     /* The wake that held the time was not for it after all: the time may move on now */
     if (retro_atomic_load_acquire_int(&clock->running) <= 0 ||
         retro_atomic_load_acquire_int(&clock->finishing))
         game_clock_skip(clock);
+}
+
+int game_clock_waiting_on(game_clock_t* clock, retro_atomic_int_t* word) {
+    unsigned i;
+    for (i = 0; i < GAME_CLOCK_PARKED; i++) {
+        game_clock_parked_t* p = &clock->parked[i];
+        if ((retro_atomic_int_t*)retro_atomic_load_acquire_ptr(&p->word) == word &&
+            retro_atomic_load_acquire_int(&p->key) == retro_atomic_load_seq_cst_int(word))
+            return 1;
+    }
+    return 0;
+}
+
+int game_clock_wake_sent(game_clock_t* clock, retro_atomic_int_t* word) {
+    unsigned i;
+    for (i = 0; i < GAME_CLOCK_PARKED; i++) {
+        game_clock_parked_t* p = &clock->parked[i];
+        if ((retro_atomic_int_t*)retro_atomic_load_acquire_ptr(&p->word) == word &&
+            retro_atomic_load_acquire_int(&p->key) != retro_atomic_load_seq_cst_int(word))
+            return 1;
+    }
+    return 0;
 }
 
 void game_clock_unpark(game_clock_t* clock, int slot) {

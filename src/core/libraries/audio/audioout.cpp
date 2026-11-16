@@ -166,6 +166,26 @@ static void SetPortVolume(PortOut& port_ref, s32 flag, s32 vol_value);
 /// go at once, each one after a buffer's time later, counted in whole frames of the port's
 /// rate so the pace does not drift. Among the port's writers.
 static void PaceOutput(PortOut& port) {
+    // The threads this one woke since its last buffer (FMOD's mixer, for the slot it gave
+    // back) wait again before the next buffer goes, late or not: the output never takes the
+    // next slot before its mixer has refilled it. Until the frame changes at most.
+    retro_atomic_int_t* woken[4];
+    const int woke = Kernel::GameTakeWakes(woken, 4);
+    if (woke != 0) {
+        game_clock_t* clock = Kernel::GameClock();
+        const u64 frame = game_clock_frames(clock);
+        Kernel::GameWait(&clock->parked_ec, 0, [&] {
+            if (game_clock_frames(clock) != frame) {
+                return true;
+            }
+            for (int i = 0; i < woke; i++) {
+                if (!game_clock_waiting_on(clock, woken[i])) {
+                    return false;
+                }
+            }
+            return true;
+        });
+    }
     const u64 due = game_clock_cadence(Kernel::GameClock(), &port.pace_start, &port.pace_buffers,
                                        port.buffer_frames, port.sample_rate);
     if (due > Kernel::GameNow()) {

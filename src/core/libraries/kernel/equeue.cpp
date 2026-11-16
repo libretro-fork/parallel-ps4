@@ -189,6 +189,7 @@ bool EqueueInternal::AddEvent(EqueueEvent& event) {
             CheckIoEvent(old_event);
             if (old_event.IsTriggered()) {
                 m_wake.Notify();
+                GameNoteWake(&m_wake.get()->epoch);
             }
             return true;
         }
@@ -201,6 +202,7 @@ bool EqueueInternal::AddEvent(EqueueEvent& event) {
 
         if (is_triggered) {
             m_wake.Notify();
+            GameNoteWake(&m_wake.get()->epoch);
         }
         return false;
     });
@@ -326,6 +328,7 @@ bool EqueueInternal::TriggerEvent(u64 ident, s16 filter, void* trigger_data) {
         }
     });
     m_wake.Notify();
+    GameNoteWake(&m_wake.get()->epoch);
     return has_found;
 }
 
@@ -469,6 +472,7 @@ bool EqueueInternal::AddSmallTimer(EqueueEvent& ev) {
     m_combiner.Run([&] { m_small_timers[st.event.ident] = std::move(st); });
     // A waiter sleeping toward a later timer looks again
     m_wake.Notify();
+    GameNoteWake(&m_wake.get()->epoch);
     return true;
 }
 

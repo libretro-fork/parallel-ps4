@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright 2024-2026 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include <algorithm>
 #include <ctime>
 #include <thread>
 
@@ -74,6 +75,36 @@ game_clock_thread_t* GameThreadSelf() {
     }
     game_clock_resume(&game_clock, &game_thread_self.yielded);
     return &game_thread_self;
+}
+
+namespace {
+thread_local bool sound_output_thread = false;
+thread_local retro_atomic_int_t* noted_wakes[4]{};
+thread_local int noted_count = 0;
+} // namespace
+
+void GameNoteWake(retro_atomic_int_t* word) {
+    if (!sound_output_thread || noted_count >= 4) {
+        return;
+    }
+    for (int i = 0; i < noted_count; i++) {
+        if (noted_wakes[i] == word) {
+            return;
+        }
+    }
+    if (game_clock_wake_sent(&game_clock, word)) {
+        noted_wakes[noted_count++] = word;
+    }
+}
+
+int GameTakeWakes(retro_atomic_int_t** words, int max) {
+    sound_output_thread = true;
+    const int n = std::min(noted_count, max);
+    for (int i = 0; i < n; i++) {
+        words[i] = noted_wakes[i];
+    }
+    noted_count = 0;
+    return n;
 }
 
 void GameThreadIdle() {

@@ -103,6 +103,13 @@ bool IsGameThread();
 /// from here), or nullptr for a thread the clock does not count
 game_clock_thread_t* GameThreadSelf();
 
+/// The calling thread has just bumped *@word (a semaphore's releases, an eventcount's epoch):
+/// a sound output thread notes the wakes it sends, for its next buffer's pace (audioout.cpp)
+void GameNoteWake(retro_atomic_int_t* word);
+/// The wakes the calling thread noted since it last asked, up to @max; marks it a sound
+/// output thread
+int GameTakeWakes(retro_atomic_int_t** words, int max);
+
 /// The calling game thread goes idle (game_clock_thread_idle)
 void GameThreadIdle();
 

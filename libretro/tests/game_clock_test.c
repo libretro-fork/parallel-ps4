@@ -15,7 +15,10 @@
  *   - a game thread sleeping 1 ms at a time, alone: the time skips to each deadline as soon
  *     as it waits, so it gets every iteration a frame's time holds (16 or 17), and no more;
  *   - the same with another game thread that never waits: no skipping, one iteration a
- *     frame, at the frame's start. */
+ *     frame, at the frame's start;
+ *   - a thread parked on a word is waiting on it until the word moves (a wake sent) and
+ *     waiting again once it parks at the new value; parking and frames tell the sound's
+ *     output, which waits for that. */
 
 #include <stdio.h>
 
@@ -231,6 +234,37 @@ int main(void) {
         game_clock_frame(&clock_);
     CHECK(game_clock_frame_end(&clock_) == 60000000000ull, "3600 frames: exactly a minute");
     CHECK(game_clock_frames(&clock_) == 3600, "frames counted");
+
+    /* What the sound's output waits on: a word a thread is parked on at its current value
+     * (waiting), and one moved on since it parked (a wake sent, not yet taken) */
+    {
+        retro_atomic_int_t word;
+        int slot;
+        int epoch;
+        retro_atomic_int_init(&word, 7);
+        CHECK(!game_clock_waiting_on(&clock_, &word), "nobody parked on it yet");
+        CHECK(!game_clock_wake_sent(&clock_, &word), "and no wake sent");
+        epoch = retro_atomic_load_acquire_int(&clock_.parked_ec.epoch);
+        slot = game_clock_park(&clock_, &word, 7);
+        CHECK(slot >= 0, "parked");
+        CHECK(retro_atomic_load_acquire_int(&clock_.parked_ec.epoch) != epoch,
+              "parking tells the output");
+        CHECK(game_clock_waiting_on(&clock_, &word), "waiting on it");
+        CHECK(!game_clock_wake_sent(&clock_, &word), "not woken");
+        retro_atomic_fetch_add_int(&word, 1);
+        CHECK(!game_clock_waiting_on(&clock_, &word), "woken: not waiting");
+        CHECK(game_clock_wake_sent(&clock_, &word), "a wake sent");
+        game_clock_repark(&clock_, slot, 8);
+        CHECK(game_clock_waiting_on(&clock_, &word), "waiting again at the new value");
+        CHECK(!game_clock_wake_sent(&clock_, &word), "the wake taken");
+        game_clock_unpark(&clock_, slot);
+        CHECK(!game_clock_waiting_on(&clock_, &word), "gone once it runs");
+        CHECK(!game_clock_wake_sent(&clock_, &word), "and no wake left");
+        epoch = retro_atomic_load_acquire_int(&clock_.parked_ec.epoch);
+        game_clock_frame(&clock_);
+        CHECK(retro_atomic_load_acquire_int(&clock_.parked_ec.epoch) != epoch,
+              "a frame tells the output too");
+    }
 
     game_clock_init(&clock_, 60000, 1001);
     for (i = 0; i < 3600; i++)

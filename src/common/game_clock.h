@@ -72,6 +72,8 @@ typedef struct game_clock {
     retro_atomic_int_t finishing;
     /* Threads the finishing woke that have not waited again (game_clock_thread_t.woken) */
     retro_atomic_int_t woken;
+    /* Notified as a game thread parks and as a frame starts (game_clock_waiting_on) */
+    retro_eventcount_t parked_ec;
     /* The frame done, or 0 (game_clock_set_done), and who is told */
     retro_atomic_int_t* done_frame;
     void (*done)(void* ctx);
@@ -161,6 +163,11 @@ void game_clock_hand(game_clock_t* clock, game_clock_thread_t* self);
  * time it parks again in the same wait, game_clock_repark with the new key. Returns the
  * slot, or -1 if none is left (the wait goes on untracked). */
 int game_clock_park(game_clock_t* clock, retro_atomic_int_t* word, int key);
+/* A game thread is parked on *@word with no wake of it in flight: waiting on it again */
+int game_clock_waiting_on(game_clock_t* clock, retro_atomic_int_t* word);
+/* A wake of a thread parked on *@word is in flight (it was just bumped, and someone was
+ * waiting on it) */
+int game_clock_wake_sent(game_clock_t* clock, retro_atomic_int_t* word);
 void game_clock_repark(game_clock_t* clock, int slot, int key);
 void game_clock_unpark(game_clock_t* clock, int slot);
 

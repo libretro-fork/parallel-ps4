@@ -27,6 +27,8 @@ void FlushPendingGuestOrbisSignal() noexcept;
 
 namespace Libraries::Kernel {
 
+void GameNoteWake(retro_atomic_int_t* word); // core/libraries/kernel/time.h
+
 template <s64 max>
 class Semaphore {
 public:
@@ -66,6 +68,7 @@ public:
 #else
         sem.release();
 #endif
+        GameNoteWake(&releases);
     }
 
     void acquire() {
