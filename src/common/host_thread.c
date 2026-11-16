@@ -11,6 +11,16 @@
 typedef jmp_buf host_thread_jump_t;
 #define HOST_THREAD_SETJMP(buf) setjmp(buf)
 #define HOST_THREAD_LONGJMP(buf) longjmp(buf, 1)
+#elif defined(_WIN32) && defined(__clang__)
+/* clang for MinGW: its __builtin_setjmp keeps the frame pointer the Win64 frame layout moved
+ * (rbp sits 0x80 above rsp), so after the jump the function reads its locals from the wrong
+ * place and crashes as a thread ends (writing address 0x38). The CRT's own, given no frame,
+ * restores every register as it was, without unwinding through the guest's frames. */
+#include <setjmp.h>
+#define HOST_THREAD_LOCAL __thread
+typedef jmp_buf host_thread_jump_t;
+#define HOST_THREAD_SETJMP(buf) _setjmp(buf, NULL)
+#define HOST_THREAD_LONGJMP(buf) longjmp(buf, 1)
 #else
 #define HOST_THREAD_LOCAL __thread
 /* Frame, stack and resume addresses: what __builtin_setjmp keeps */
