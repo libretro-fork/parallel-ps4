@@ -10,6 +10,7 @@
 #include "common/arch.h"
 #include "common/assert.h"
 #include "common/decoder.h"
+#include "common/hex_dump.h"
 #include "common/logging/log.h"
 #include "common/quick_exit.h"
 #include "common/signal_context.h"
@@ -17,9 +18,11 @@
 #include "core/libraries/kernel/kernel.h"
 #include "core/libraries/kernel/threads/exception.h"
 #include "core/libraries/kernel/threads/pthread.h"
+#include "core/libraries/kernel/threads/thread_state.h"
 #include "core/linker.h"
 #include "core/module.h"
 #include "core/signals.h"
+#include "core/thread.h"
 #ifdef SHADPS4_ENABLE_FEX_GUEST_CPU
 #include "core/fex/fex_guest_engine.h"
 #include "core/libraries/kernel/threads/pthread.h"
@@ -431,6 +434,143 @@ static std::string DescribeAddress(u64 address) {
     return fmt::format("{:#x} (in no module: generated code or data)", address);
 }
 
+// Memory read for the crash report: false where it cannot be read, never a fault
+static bool ReadMemory(u64 address, void* out, size_t size) {
+    SIZE_T read = 0;
+    return ReadProcessMemory(GetCurrentProcess(), reinterpret_cast<LPCVOID>(address), out, size,
+                             &read) &&
+           read == size;
+}
+
+static bool InHostModule(u64 address) {
+    HMODULE module = nullptr;
+    return GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+                                  GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                              reinterpret_cast<LPCSTR>(address), &module) &&
+           module;
+}
+
+#if defined(_M_X64) || defined(__x86_64__)
+// The game's callers above a frame of its code, by its frame pointers (it is built with them):
+// the unwind tables end where the game's code starts. @shown says whether any was found.
+static int LogGameCallers(u64 rbp, const char* indent, int depth, int limit) {
+    auto* linker = Common::Singleton<Core::Linker>::Instance();
+    int shown = 0;
+    for (; shown < limit; ++shown) {
+        u64 frame[2]; // the caller's frame pointer, then the return address
+        if (rbp == 0 || (rbp & 7) != 0 || !ReadMemory(rbp, frame, sizeof(frame)) ||
+            !linker->FindByAddress(frame[1])) {
+            break;
+        }
+        LOG_CRITICAL(Debug, "{}#{} {}", indent, depth + shown, DescribeAddress(frame[1]));
+        if (frame[0] <= rbp) {
+            break; // a caller's frame is above its callee's
+        }
+        rbp = frame[0];
+    }
+    return shown;
+}
+
+// What is in memory around each address the registers hold: what the code was looking at when
+// it crashed (the object a garbage pointer came out of, and what lies before and after it).
+// Addresses in the emulator's own modules, and what cannot be read, are left out.
+static void LogMemoryAroundRegisters(const CONTEXT& ctx) {
+    static constexpr struct {
+        const char* name;
+        DWORD64 CONTEXT::* value;
+    } registers[] = {
+        {"rdi", &CONTEXT::Rdi}, {"rsi", &CONTEXT::Rsi}, {"rax", &CONTEXT::Rax},
+        {"rbx", &CONTEXT::Rbx}, {"rcx", &CONTEXT::Rcx}, {"rdx", &CONTEXT::Rdx},
+        {"r8", &CONTEXT::R8},   {"r9", &CONTEXT::R9},   {"r10", &CONTEXT::R10},
+        {"r11", &CONTEXT::R11}, {"r12", &CONTEXT::R12}, {"r13", &CONTEXT::R13},
+        {"r14", &CONTEXT::R14}, {"r15", &CONTEXT::R15},
+    };
+    // More before the first two, a call's arguments: where what was written over an object
+    // starts is as telling as the object
+    static constexpr u64 Before = 0x100, BeforeArgument = 0x400, After = 0x100;
+    u64 shown[std::size(registers)][2];
+    size_t shown_count = 0;
+    for (const auto& reg : registers) {
+        const u64 address = ctx.*(reg.value);
+        u64 start = 0, length = 0;
+        hex_dump_window(address, &reg < &registers[2] ? BeforeArgument : Before, After, &start,
+                        &length);
+        bool covered = address < 0x10000 || InHostModule(address);
+        for (size_t i = 0; i < shown_count && !covered; i++) {
+            covered = address >= shown[i][0] && address < shown[i][0] + shown[i][1];
+        }
+        u8 bytes[HEX_DUMP_LINE_BYTES];
+        if (covered || !ReadMemory(address & ~u64{HEX_DUMP_LINE_BYTES - 1}, bytes, sizeof(bytes))) {
+            continue;
+        }
+        shown[shown_count][0] = start;
+        shown[shown_count][1] = length;
+        ++shown_count;
+        LOG_CRITICAL(Debug, "  memory around {} = {:#x}:", reg.name, address);
+        for (u64 at = start; at < start + length; at += HEX_DUMP_LINE_BYTES) {
+            char line[HEX_DUMP_LINE_CHARS];
+            if (!ReadMemory(at, bytes, sizeof(bytes))) {
+                continue; // a page that is not there, before or after what is
+            }
+            hex_dump_line(line, sizeof(line), bytes, sizeof(bytes));
+            LOG_CRITICAL(Debug, "    {:#x}: {}", at, line);
+        }
+    }
+}
+
+// Where each of the game's other threads was: one of them may be the one that wrote what the
+// crashed thread tripped over. Each is stopped only for as long as reading its registers takes,
+// so that none is left holding a lock the report itself needs.
+static void LogOtherGameThreads() {
+    using namespace Libraries::Kernel;
+    auto* state = ThrState::Peek();
+    if (!state) {
+        return;
+    }
+    auto* linker = Common::Singleton<Core::Linker>::Instance();
+    int count = 0;
+    for (Pthread* thread = state->threads; thread != nullptr && count < 256;
+         thread = thread->thread_next, ++count) {
+        if (!state->IsThreadRecord(thread)) {
+            break; // the list changed under the walk
+        }
+        if (thread == g_curthread || !thread->native_thr) {
+            continue;
+        }
+        const HANDLE handle = reinterpret_cast<HANDLE>(thread->native_thr->GetHandle());
+        CONTEXT ctx{};
+        ctx.ContextFlags = CONTEXT_CONTROL | CONTEXT_INTEGER;
+        if (!handle || SuspendThread(handle) == static_cast<DWORD>(-1)) {
+            continue;
+        }
+        const bool got = GetThreadContext(handle, &ctx) != 0;
+        ResumeThread(handle);
+        if (!got) {
+            continue;
+        }
+        LOG_CRITICAL(Debug, "  thread '{}' at {}: rdi={:#x} rsi={:#x} rdx={:#x} rcx={:#x} r8={:#x}",
+                     thread->name, DescribeAddress(ctx.Rip), ctx.Rdi, ctx.Rsi, ctx.Rdx, ctx.Rcx,
+                     ctx.R8);
+        if (LogGameCallers(ctx.Rbp, "    ", 1, 6) != 0) {
+            continue;
+        }
+        // In the emulator's code, which keeps no frame pointer: the game's code addresses on
+        // its stack instead, its callers among them
+        int found = 0;
+        for (u64 at = ctx.Rsp & ~u64{7}; at < ctx.Rsp + 0x600 && found < 4; at += 8) {
+            u64 value = 0;
+            if (!ReadMemory(at, &value, sizeof(value))) {
+                break;
+            }
+            if (linker->FindByAddress(value)) {
+                LOG_CRITICAL(Debug, "    on its stack: {}", DescribeAddress(value));
+                ++found;
+            }
+        }
+    }
+}
+#endif
+
 // The last word on an exception nothing handled, just before Windows ends the process: what
 // happened, where, and how it got there, written and flushed to the log. Without it a crash
 // left a log with nothing about it, or with nothing at all: the lines before it were still
@@ -463,7 +603,8 @@ static LONG WINAPI CrashReport(EXCEPTION_POINTERS* info) noexcept {
                  ctx.R14, ctx.R15, ctx.Rip);
     // The callers, as far as the unwind tables go: they end at the game's code
     CONTEXT frame = ctx;
-    for (int depth = 0; depth < 24 && frame.Rip != 0; ++depth) {
+    int depth = 0;
+    for (; depth < 24 && frame.Rip != 0; ++depth) {
         LOG_CRITICAL(Debug, "  #{} {}", depth, DescribeAddress(frame.Rip));
         DWORD64 image_base = 0;
         PRUNTIME_FUNCTION function = RtlLookupFunctionEntry(frame.Rip, &image_base, nullptr);
@@ -490,6 +631,15 @@ static LONG WINAPI CrashReport(EXCEPTION_POINTERS* info) noexcept {
         RtlVirtualUnwind(UNW_FLAG_NHANDLER, image_base, frame.Rip, function, &frame, &handler_data,
                          &establisher, nullptr);
     }
+    // What is written so far is in the log whatever becomes of the rest
+    Common::Log::Flush();
+    // The game's own callers above that, and what the registers point at
+    if (!InHostModule(frame.Rip)) {
+        LogGameCallers(frame.Rbp, "  ", depth + 1, 16);
+    }
+    LogMemoryAroundRegisters(ctx);
+    Common::Log::Flush();
+    LogOtherGameThreads();
 #endif
     Common::Log::Flush();
     return EXCEPTION_CONTINUE_SEARCH;

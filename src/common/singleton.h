@@ -17,6 +17,11 @@ public:
         return m_instance.get();
     }
 
+    /// The instance if there is one yet, never making it: for a crash report
+    static T* Peek() {
+        return m_instance.get();
+    }
+
 protected:
     Singleton();
     ~Singleton();

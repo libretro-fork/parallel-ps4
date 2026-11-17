@@ -846,6 +846,8 @@ set(COMMON src/common/c_bridge.cpp
            src/common/node_pool.h
            src/common/patch_catalog.c
            src/common/patch_catalog.h
+           src/common/hex_dump.c
+           src/common/hex_dump.h
            src/common/patch_halve.c
            src/common/patch_halve.h
            src/common/patch_index.c

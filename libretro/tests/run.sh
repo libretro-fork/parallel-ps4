@@ -149,6 +149,11 @@ $CC -std=c89 -pedantic -O1 -g -Wall -Wdeclaration-after-statement -fsanitize=add
     -Isrc -I$L/include libretro/tests/patch_halve_test.c src/common/patch_halve.c \
     -o "$OUT/patch_halve_test"
 "$OUT/patch_halve_test"
+# The memory a crash report shows around an address
+$CC -std=c89 -pedantic -Wno-long-long -O1 -g -Wall -Wdeclaration-after-statement \
+    -fsanitize=address,undefined -Isrc -I$L/include libretro/tests/hex_dump_test.c \
+    src/common/hex_dump.c -o "$OUT/hex_dump_test"
+"$OUT/hex_dump_test"
 # The Patch Manager's catalog: a game's patches from two repositories
 $CC -std=c89 -O1 -g -Wall -Wdeclaration-after-statement -fsanitize=address,undefined \
     -Isrc -I$L/include libretro/tests/patch_catalog_test.c src/common/patch_catalog.c \
