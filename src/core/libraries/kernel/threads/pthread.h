@@ -414,6 +414,13 @@ struct Pthread {
     // Its neighbours on ThreadState's list of live threads, while it is on it
     Pthread* thread_prev{};
     Pthread* thread_next{};
+    // Its neighbours on the waiters of the POSIX semaphore it waits on, while it is on them
+    Pthread* sem_prev{};
+    Pthread* sem_next{};
+    bool sem_listed{};
+    // Its neighbours on the sleep queue it is blocked on (wchan), while it is on it
+    Pthread* sq_prev{};
+    Pthread* sq_next{};
 
     bool IsSignalBlocked(s32 sig) const;
     void QueueSignal(s32 sig);

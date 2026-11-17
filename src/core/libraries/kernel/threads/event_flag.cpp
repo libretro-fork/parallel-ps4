@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include <chrono>
-#include <list>
 #include <thread>
 
 #include <rthreads/retro_eventcount.h>
@@ -53,6 +52,10 @@ public:
         bool timed_out = false;
 
         int priority = 0;
+
+        // Its place in the flag's waiters: on the waiting thread's stack, its own list node
+        Waiter* prev = nullptr;
+        Waiter* next = nullptr;
     };
 
     EventFlagInternal(const std::string& name, ThreadMode thread_mode, QueueMode queue_mode,
@@ -65,7 +68,7 @@ public:
         m_combiner.Run([&] {
             m_deleted = true;
 
-            for (auto* w : m_waiters) {
+            for (Waiter* w = m_waiters; w != nullptr; w = w->next) {
                 w->deleted = true;
                 Wake(*w);
             }
@@ -105,20 +108,43 @@ public:
 
     void AddWaiter(Waiter& waiter) {
         retro_atomic_fetch_add_int(&m_waiter_count, 1);
-        if (m_queue_mode == QueueMode::Fifo) {
-            m_waiters.push_back(&waiter);
-            return;
+        ++m_listed;
+        // At the end for FIFO order; else right before the first of lower priority
+        Waiter* before = nullptr;
+        if (m_queue_mode != QueueMode::Fifo) {
+            before = m_waiters;
+            while (before != nullptr && before->priority >= waiter.priority) {
+                before = before->next;
+            }
         }
-
-        auto it = m_waiters.begin();
-        while (it != m_waiters.end() && (*it)->priority >= waiter.priority) {
-            ++it;
+        waiter.next = before;
+        waiter.prev = before != nullptr ? before->prev : m_waiters_tail;
+        if (waiter.prev != nullptr) {
+            waiter.prev->next = &waiter;
+        } else {
+            m_waiters = &waiter;
         }
-        m_waiters.insert(it, &waiter);
+        if (before != nullptr) {
+            before->prev = &waiter;
+        } else {
+            m_waiters_tail = &waiter;
+        }
     }
 
     void RemoveWaiter(Waiter& waiter) {
-        m_waiters.remove(&waiter);
+        if (waiter.prev != nullptr) {
+            waiter.prev->next = waiter.next;
+        } else {
+            m_waiters = waiter.next;
+        }
+        if (waiter.next != nullptr) {
+            waiter.next->prev = waiter.prev;
+        } else {
+            m_waiters_tail = waiter.prev;
+        }
+        waiter.prev = nullptr;
+        waiter.next = nullptr;
+        --m_listed;
         if (static_cast<u32>(retro_atomic_fetch_sub_int(&m_waiter_count, 1)) == 1 && m_deleted) {
             retro_eventcount_notify(&m_wake_ec);
             GameNoteWake(&m_wake_ec.epoch);
@@ -145,7 +171,7 @@ public:
                 return ORBIS_KERNEL_ERROR_EACCES;
             }
 
-            if (m_thread_mode == ThreadMode::Single && !m_waiters.empty()) {
+            if (m_thread_mode == ThreadMode::Single && m_waiters != nullptr) {
                 return ORBIS_KERNEL_ERROR_EPERM;
             }
 
@@ -214,9 +240,7 @@ public:
         m_combiner.Run([&] {
             m_bits |= bits;
 
-            for (auto it : m_waiters) {
-                Waiter* waiter = it;
-
+            for (Waiter* waiter = m_waiters; waiter != nullptr; waiter = waiter->next) {
                 if (!ConditionMet(*waiter)) {
                     continue;
                 }
@@ -237,11 +261,11 @@ public:
     void Cancel(u64 pattern, int* num_waiters) {
         m_combiner.Run([&] {
             if (num_waiters)
-                *num_waiters = static_cast<int>(m_waiters.size());
+                *num_waiters = m_listed;
 
             m_bits = pattern;
 
-            for (Waiter* waiter : m_waiters) {
+            for (Waiter* waiter = m_waiters; waiter != nullptr; waiter = waiter->next) {
                 waiter->result = pattern;
                 waiter->canceled = true;
                 Wake(*waiter);
@@ -255,7 +279,11 @@ private:
     retro_eventcount_t m_wake_ec{};
     retro_atomic_int_t m_waiter_count{0};
 
-    std::list<Waiter*> m_waiters;
+    // The waiters, in the order they are looked at: linked through themselves (Waiter::prev,
+    // next), so that a wait adds no list node
+    Waiter* m_waiters = nullptr;
+    Waiter* m_waiters_tail = nullptr;
+    int m_listed = 0;
 
     std::string m_name;
 

@@ -16,7 +16,10 @@ using ListBaseHook = Common::ListHook;
 using SleepqList = Common::IntrusiveList<SleepQueue>;
 
 struct SleepQueue : public ListBaseHook {
-    std::list<Pthread*> sq_blocked;
+    // The threads blocked on it, oldest first (FreeBSD's TAILQ), linked through the threads
+    // themselves (Pthread::sq_prev, sq_next): blocking adds no list node
+    Pthread* sq_blocked{};
+    Pthread* sq_blocked_tail{};
     SleepqList sq_freeq;
     void* sq_wchan;
     int sq_type;

@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include <limits>
-#include <list>
 #include <optional>
 #include <semaphore>
 
@@ -29,7 +28,35 @@ struct PthreadSem {
     retro_atomic_int_t value;
     // waiters changes one call at a time here
     Common::Combiner waiters_combiner;
-    std::list<Pthread*> waiters;
+    // Linked through the threads (Pthread::sem_prev, sem_next): a wait adds no list node
+    Pthread* waiters{};
+
+    void AddWaiter(Pthread* thread) {
+        thread->sem_prev = nullptr;
+        thread->sem_next = waiters;
+        if (waiters != nullptr) {
+            waiters->sem_prev = thread;
+        }
+        waiters = thread;
+        thread->sem_listed = true;
+    }
+
+    void RemoveWaiter(Pthread* thread) {
+        if (!thread->sem_listed) {
+            return;
+        }
+        if (thread->sem_prev != nullptr) {
+            thread->sem_prev->sem_next = thread->sem_next;
+        } else {
+            waiters = thread->sem_next;
+        }
+        if (thread->sem_next != nullptr) {
+            thread->sem_next->sem_prev = thread->sem_prev;
+        }
+        thread->sem_prev = nullptr;
+        thread->sem_next = nullptr;
+        thread->sem_listed = false;
+    }
 };
 
 class ScopedPthreadCritical {
@@ -103,7 +130,7 @@ static s32 PthreadSemWait(PthreadSem* sem, const OrbisKernelTimespec* abstime, u
                     (void)retro_atomic_exchange_int(&curthread->cancel_point, 0);
                     cancel_before_wait = true;
                 } else {
-                    sem->waiters.push_back(curthread);
+                    sem->AddWaiter(curthread);
                 }
                 return false;
             });
@@ -127,7 +154,7 @@ static s32 PthreadSemWait(PthreadSem* sem, const OrbisKernelTimespec* abstime, u
         {
             ScopedPthreadCritical critical{curthread};
             sem->waiters_combiner.Run([&] {
-                sem->waiters.remove(curthread);
+                sem->RemoveWaiter(curthread);
                 (void)retro_atomic_exchange_int(&curthread->cancel_point, 0);
             });
         }
@@ -156,7 +183,6 @@ public:
         // The combiner may run this on another thread: the caller is named here
         Pthread* const curthread = g_curthread;
         std::optional<WaitingThread> waiter;
-        WaitList::iterator it;
         const s32 early = combiner.Run([&]() -> s32 {
             if (static_cast<s32>(retro_atomic_load_seq_cst_int(&token_count)) >= need_count) {
                 retro_atomic_fetch_sub_int(&token_count, need_count);
@@ -172,7 +198,7 @@ public:
 
             // Create waiting thread object and add it into the list of waiters.
             waiter.emplace(need_count, is_fifo, curthread);
-            it = AddWaiter(&*waiter);
+            AddWaiter(&*waiter);
             return 1; // waits
         });
         if (early != 1) {
@@ -191,7 +217,7 @@ public:
             }
             const s32 result = waiter->GetResult();
             if (result == ORBIS_KERNEL_ERROR_ETIMEDOUT) {
-                wait_list.erase(it);
+                RemoveWaiter(&*waiter);
             }
             return result;
         });
@@ -209,17 +235,18 @@ public:
         retro_atomic_fetch_add_int(&token_count, signal_count);
 
         // Wake up threads in order of priority.
-        for (auto it = wait_list.begin(); it != wait_list.end();) {
-            auto* waiter = *it;
+        for (WaitingThread* waiter = wait_head; waiter != nullptr;) {
+            WaitingThread* const next = waiter->next;
             if (waiter->need_count >
                 static_cast<s32>(retro_atomic_load_seq_cst_int(&token_count))) {
-                ++it;
+                waiter = next;
                 continue;
             }
-            it = wait_list.erase(it);
+            RemoveWaiter(waiter);
             retro_atomic_fetch_sub_int(&token_count, waiter->need_count);
             waiter->was_signaled = true;
             waiter->sem.release();
+            waiter = next;
         }
 
         return true;
@@ -228,13 +255,13 @@ public:
     s32 Cancel(s32 set_count, s32* num_waiters) {
         return combiner.Run([&] {
             if (num_waiters) {
-                *num_waiters = static_cast<s32>(wait_list.size());
+                *num_waiters = wait_count;
             }
-            for (auto* waiter : wait_list) {
+            while (WaitingThread* waiter = wait_head) {
+                RemoveWaiter(waiter);
                 waiter->was_canceled = true;
                 waiter->sem.release();
             }
-            wait_list.clear();
             (void)retro_atomic_exchange_int(&token_count, set_count < 0 ? init_count : set_count);
             return ORBIS_OK;
         });
@@ -242,11 +269,11 @@ public:
 
     void Delete() {
         combiner.Run([&] {
-            for (auto* waiter : wait_list) {
+            while (WaitingThread* waiter = wait_head) {
+                RemoveWaiter(waiter);
                 waiter->was_deleted = true;
                 waiter->sem.release();
             }
-            wait_list.clear();
         });
     }
 
@@ -256,7 +283,10 @@ public:
         Semaphore<2> sem;
         u32 priority;
         s32 need_count;
-        std::string thr_name;
+        // Its place in the semaphore's list of waiters: the waiter is on the waiting thread's
+        // stack, and is its own list node
+        WaitingThread* prev{};
+        WaitingThread* next{};
         bool was_signaled{};
         bool was_deleted{};
         bool was_canceled{};
@@ -267,8 +297,6 @@ public:
             if (!is_fifo) {
                 priority = thread->attr.prio;
             }
-
-            thr_name = thread->name;
         }
 
         [[nodiscard]] s32 GetResult() const {
@@ -297,23 +325,52 @@ public:
         }
     };
 
-    using WaitList = std::list<WaitingThread*>;
-
-    WaitList::iterator AddWaiter(WaitingThread* waiter) {
-        // Insert at the end of the list for FIFO order.
-        if (is_fifo) {
-            wait_list.push_back(waiter);
-            return --wait_list.end();
+    void AddWaiter(WaitingThread* waiter) {
+        // At the end for FIFO order; else right before the first with lower priority (greater
+        // number) than it
+        WaitingThread* before = nullptr;
+        if (!is_fifo) {
+            before = wait_head;
+            while (before != nullptr && before->priority <= waiter->priority) {
+                before = before->next;
+            }
         }
-        // Find the first with lower priority (greater number) than us and insert right before it.
-        auto it = wait_list.begin();
-        while (it != wait_list.end() && (*it)->priority <= waiter->priority) {
-            ++it;
+        waiter->next = before;
+        waiter->prev = before != nullptr ? before->prev : wait_tail;
+        if (waiter->prev != nullptr) {
+            waiter->prev->next = waiter;
+        } else {
+            wait_head = waiter;
         }
-        return wait_list.insert(it, waiter);
+        if (before != nullptr) {
+            before->prev = waiter;
+        } else {
+            wait_tail = waiter;
+        }
+        ++wait_count;
     }
 
-    WaitList wait_list;
+    void RemoveWaiter(WaitingThread* waiter) {
+        if (waiter->prev != nullptr) {
+            waiter->prev->next = waiter->next;
+        } else {
+            wait_head = waiter->next;
+        }
+        if (waiter->next != nullptr) {
+            waiter->next->prev = waiter->prev;
+        } else {
+            wait_tail = waiter->prev;
+        }
+        waiter->prev = nullptr;
+        waiter->next = nullptr;
+        --wait_count;
+    }
+
+    // The waiters, in the order they are woken: linked through themselves (WaitingThread::prev,
+    // next), so that a wait adds no list node
+    WaitingThread* wait_head{};
+    WaitingThread* wait_tail{};
+    s32 wait_count{};
     std::string name;
     retro_atomic_int_t token_count;
     // The count and the waiters change one call at a time here
@@ -455,10 +512,10 @@ s32 PS4_SYSV_ABI posix_sem_post(PthreadSem** sem) {
     (*sem)->waiters_combiner.Run([&] {
         // libkernel wakes every waiter after incrementing the value. Only waiters that win the
         // value CAS return; the rest publish themselves again and continue waiting.
-        for (Pthread* waiter : (*sem)->waiters) {
+        while (Pthread* waiter = (*sem)->waiters) {
+            (*sem)->RemoveWaiter(waiter);
             waiter->wake_sema.release();
         }
-        (*sem)->waiters.clear();
     });
     return 0;
 }

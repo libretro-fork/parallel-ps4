@@ -68,7 +68,39 @@ void SleepqAdd(void* wchan, Pthread* td) {
     td->sleepqueue = nullptr;
     td->wchan = wchan;
     // libkernel uses a TAILQ here. Signal therefore selects the oldest waiter.
-    sq->sq_blocked.push_back(td);
+    td->sq_next = nullptr;
+    td->sq_prev = sq->sq_blocked_tail;
+    if (sq->sq_blocked_tail != nullptr) {
+        sq->sq_blocked_tail->sq_next = td;
+    } else {
+        sq->sq_blocked = td;
+    }
+    sq->sq_blocked_tail = td;
+}
+
+// Whether @td is on @sq's blocked threads
+static bool SleepqHas(const SleepQueue* sq, const Pthread* td) {
+    for (const Pthread* t = sq->sq_blocked; t != nullptr; t = t->sq_next) {
+        if (t == td) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static void SleepqUnblock(SleepQueue* sq, Pthread* td) {
+    if (td->sq_prev != nullptr) {
+        td->sq_prev->sq_next = td->sq_next;
+    } else {
+        sq->sq_blocked = td->sq_next;
+    }
+    if (td->sq_next != nullptr) {
+        td->sq_next->sq_prev = td->sq_prev;
+    } else {
+        sq->sq_blocked_tail = td->sq_prev;
+    }
+    td->sq_prev = nullptr;
+    td->sq_next = nullptr;
 }
 
 bool SleepqRemove(SleepQueue* sq, Pthread* td) {
@@ -77,12 +109,14 @@ bool SleepqRemove(SleepQueue* sq, Pthread* td) {
         return false;
     }
 
-    const auto removed = std::erase(sq->sq_blocked, td);
-    const bool has_waiters = !sq->sq_blocked.empty();
-    ASSERT_MSG(removed == 1, "Thread is missing from its sleep queue");
-    if (removed == 0) [[unlikely]] {
-        return has_waiters;
+    // On it when its wait channel is the queue's (the walk only checks that it is)
+    const bool removed = td->wchan == sq->sq_wchan && SleepqHas(sq, td);
+    ASSERT_MSG(removed, "Thread is missing from its sleep queue");
+    if (!removed) [[unlikely]] {
+        return sq->sq_blocked != nullptr;
     }
+    SleepqUnblock(sq, td);
+    const bool has_waiters = sq->sq_blocked != nullptr;
 
     td->wchan = nullptr;
     if (!has_waiters) {
@@ -98,13 +132,13 @@ bool SleepqRemove(SleepQueue* sq, Pthread* td) {
 }
 
 void SleepqDrop(SleepQueue* sq, void (*callback)(Pthread*, void*), void* arg) {
-    if (sq->sq_blocked.empty()) {
+    if (sq->sq_blocked == nullptr) {
         return;
     }
 
     sq->unlink();
-    Pthread* td = sq->sq_blocked.front();
-    sq->sq_blocked.pop_front();
+    Pthread* td = sq->sq_blocked;
+    SleepqUnblock(sq, td);
 
     callback(td, arg);
 
@@ -112,13 +146,13 @@ void SleepqDrop(SleepQueue* sq, void (*callback)(Pthread*, void*), void* arg) {
     td->wchan = nullptr;
 
     auto sq2 = sq->sq_freeq.begin();
-    for (Pthread* td2 : sq->sq_blocked) {
+    while (Pthread* td2 = sq->sq_blocked) {
+        SleepqUnblock(sq, td2);
         callback(td2, arg);
         td2->sleepqueue = std::addressof(*sq2);
         td2->wchan = nullptr;
         ++sq2;
     }
-    sq->sq_blocked.clear();
     sq->sq_freeq.clear();
 }
 

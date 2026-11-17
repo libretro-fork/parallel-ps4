@@ -235,9 +235,9 @@ int PthreadCond::Signal(Pthread* thread) {
         return thread != nullptr ? 1 : 0;
     }
 
-    ASSERT_MSG(!sq->sq_blocked.empty(),
+    ASSERT_MSG(sq->sq_blocked != nullptr,
                "Condition variable has a linked sleep queue with no blocked threads");
-    if (sq->sq_blocked.empty()) [[unlikely]] {
+    if (sq->sq_blocked == nullptr) [[unlikely]] {
         has_user_waiters = false;
         SleepqUnlock(this);
         return thread != nullptr ? 1 : 0;
@@ -245,14 +245,16 @@ int PthreadCond::Signal(Pthread* thread) {
 
     Pthread* td{};
     if (thread != nullptr) {
-        const auto it = std::find(sq->sq_blocked.begin(), sq->sq_blocked.end(), thread);
-        if (it == sq->sq_blocked.end()) {
+        td = sq->sq_blocked;
+        while (td != nullptr && td != thread) {
+            td = td->sq_next;
+        }
+        if (td == nullptr) {
             SleepqUnlock(this);
             return 1;
         }
-        td = *it;
     } else {
-        td = sq->sq_blocked.front();
+        td = sq->sq_blocked;
     }
 
     PthreadMutex* mp = td->mutex_obj;
