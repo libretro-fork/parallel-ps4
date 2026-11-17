@@ -205,6 +205,10 @@ enum ovl_key {
     OVL_KEY_PAD_R2,
     OVL_KEY_PAD_START,
     OVL_KEY_PAD_BACK,
+    OVL_KEY_PAD_LSTICK_LEFT, /* analog: down past the dead zone, and how far */
+    OVL_KEY_PAD_LSTICK_RIGHT,
+    OVL_KEY_PAD_LSTICK_UP,
+    OVL_KEY_PAD_LSTICK_DOWN,
     OVL_KEY_COUNT
 };
 
@@ -212,19 +216,33 @@ enum ovl_key {
 int ovl_create(ovl_font_t* default_font, float font_scale);
 void ovl_destroy(void);
 
+/* Input for the next frame, as ImGui's AddKeyEvent and AddKeyAnalogEvent; a gamepad's
+ * buttons move the focus and press only while one is connected (ImGui's HasGamepad) */
 void ovl_key_event(enum ovl_key key, int down);
+void ovl_key_analog_event(enum ovl_key key, int down, float value);
+void ovl_set_gamepad_connected(int connected);
 void ovl_char_event(uint32_t codepoint);
 void ovl_new_frame(float display_w, float display_h, float delta_time);
 /* Ends the frame: what to draw, valid until the next ovl_new_frame */
 const ovl_draw_data_t* ovl_render(void);
 /* What the last ovl_render made, until the next ovl_new_frame */
 const ovl_draw_data_t* ovl_draw_data(void);
-float ovl_time(void);
+double ovl_time(void);
 float ovl_delta_time(void);
 ovl_vec2_t ovl_display_size(void);
 
+/* As ImGui's IsKeyPressed(key, repeat): on the press, and with @repeat after 0.275 s every
+ * 0.050 s */
 int ovl_is_key_pressed(enum ovl_key key, int repeat);
 int ovl_is_key_down(enum ovl_key key);
+
+/* Navigation, as ImGui's: whether a window that takes navigation has the focus (io.NavActive);
+ * the focus cursor kept shown (NavCursorVisible); the focus put on an item, the last one for
+ * 0, as the core's SetItemCurrentNavFocus did */
+int ovl_nav_active(void);
+void ovl_keep_nav_highlight(void);
+void ovl_set_item_current_nav_focus(uint32_t id);
+uint32_t ovl_last_item_id(void);
 
 /* ------------------------------------------------------------------------------------------ */
 /* Style                                                                                       */
@@ -310,7 +328,10 @@ ovl_col_t ovl_color_u32_vec4(ovl_vec4_t col);
 #define OVL_WINDOW_ALWAYS_AUTO_RESIZE 0x40u
 #define OVL_WINDOW_NO_BACKGROUND 0x80u
 #define OVL_WINDOW_NO_SAVED_SETTINGS 0x100u
-#define OVL_WINDOW_NO_INPUTS 0x200u
+#define OVL_WINDOW_NO_MOUSE_INPUTS 0x200u
+#define OVL_WINDOW_NO_NAV_INPUTS 0x10000u
+#define OVL_WINDOW_NO_NAV_FOCUS 0x20000u
+#define OVL_WINDOW_NO_INPUTS 0x30200u
 #define OVL_WINDOW_NO_FOCUS_ON_APPEARING 0x1000u
 #define OVL_WINDOW_NO_BRING_TO_FRONT 0x2000u
 #define OVL_WINDOW_NO_NAV 0x30000u
@@ -334,6 +355,7 @@ void ovl_end_child(void);
 
 ovl_vec2_t ovl_window_pos(void);
 ovl_vec2_t ovl_window_size(void);
+ovl_vec2_t ovl_window_padding(void);
 void ovl_set_window_pos(ovl_vec2_t pos);
 void ovl_set_window_font_scale(float scale);
 ovl_draw_list_t* ovl_window_draw_list(void);
@@ -407,7 +429,6 @@ int ovl_is_item_focused(void);
 ovl_vec2_t ovl_item_rect_min(void);
 ovl_vec2_t ovl_item_rect_max(void);
 void ovl_set_item_default_focus(void);
-void ovl_set_keyboard_focus_here(int offset);
 void ovl_begin_disabled(int disabled);
 void ovl_end_disabled(void);
 

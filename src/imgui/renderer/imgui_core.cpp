@@ -181,7 +181,7 @@ void Shutdown(const vk::Device& device) {
 // The first controller, as it was last published, is what moves through a
 // dialog and presses its buttons: there is no other input here. ImGui takes
 // a key event only where the key changed.
-static void PadToImGui(ImGuiIO& io) {
+static void PadToImGui(ImGuiIO& io, const Input::State& state) {
     using Libraries::Pad::OrbisPadButtonDataOffset;
     struct Key {
         OrbisPadButtonDataOffset button;
@@ -205,8 +205,6 @@ static void PadToImGui(ImGuiIO& io) {
         {OrbisPadButtonDataOffset::Options, ImGuiKey_GamepadStart},
         {OrbisPadButtonDataOffset::TouchPad, ImGuiKey_GamepadBack},
     };
-    auto& controllers = *Common::Singleton<Input::GameControllers>::Instance();
-    const Input::State state = controllers[0]->ReadState();
     if (!state.connected) {
         io.BackendFlags &= ~ImGuiBackendFlags_HasGamepad;
         return;
@@ -230,7 +228,7 @@ static void PadToImGui(ImGuiIO& io) {
 
 // Each frame: the picture's size and the time step (the game's frame rate is the overlay's:
 // video_core/overlay)
-static void PlatformNewFrame() {
+static void PlatformNewFrame(const Input::State& pad) {
     using namespace std::chrono;
     ImGuiIO& io = GetIO();
     io.DisplaySize = ImVec2(static_cast<float>(platform_window->GetWidth()),
@@ -244,10 +242,10 @@ static void PlatformNewFrame() {
                                                                    : 1.0f / 60.0f;
     last_frame_time = now;
 
-    PadToImGui(io);
+    PadToImGui(io, pad);
 }
 
-void NewFrame() {
+void NewFrame(const Input::State& pad) {
     change_layers_mutex.Run([&] {
         while (!change_layers.empty()) {
             const auto [to_be_added, layer] = change_layers.front();
@@ -261,7 +259,7 @@ void NewFrame() {
         }
     });
 
-    PlatformNewFrame();
+    PlatformNewFrame(pad);
     ImGui::NewFrame();
     SetKeyOwner(ImGuiKey_GamepadFaceUp, ImHashStr("shadps4/pad"));
 

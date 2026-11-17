@@ -258,13 +258,15 @@ ASAN_OPTIONS=detect_leaks=0 "$OUT/vertex_capture_report" --selftest
 # them, their images' slots freed after; the splash decoded on its thread and fitted as the
 # presenter's ImGui window fitted it
 OVL="src/video_core/overlay/ovl_draw.c src/video_core/overlay/ovl_font.c \
-     src/video_core/overlay/ovl_fps.c src/video_core/overlay/ovl_notify.c \
+     src/video_core/overlay/ovl_fps.c src/video_core/overlay/ovl_msgdialog.c \
+     src/video_core/overlay/ovl_notify.c \
      src/video_core/overlay/ovl_splash.c src/video_core/overlay/ovl_tex.c \
      src/video_core/overlay/ovl_trophy.c \
      src/video_core/overlay/ovl_ttf.c src/video_core/overlay/ovl_ui.c \
      $L/formats/png/rpng.c $L/streams/trans_stream.c $L/streams/trans_stream_deflate.c \
      $L/streams/trans_stream_pipe.c $L/encodings/encoding_deflate.c \
-     $L/encodings/encoding_crc32.c $L/features/features_cpu.c $L/rthreads/rthreads.c"
+     $L/encodings/encoding_crc32.c $L/features/features_cpu.c $L/rthreads/rthreads.c \
+     $L/rthreads/retro_eventcount.c"
 $CC -std=gnu89 -O1 -g -Wall -Wdeclaration-after-statement -ffp-contract=off \
     -fsanitize=address,undefined -I. -Isrc -I$L/include libretro/tests/ovl_test.c $OVL \
     -o "$OUT/ovl_test" -lm -lpthread
@@ -284,4 +286,13 @@ for san in address,undefined thread; do
         -I$L/include libretro/tests/ovl_queue_test.c $OVL \
         -o "$OUT/ovl_queue_test" -lm -lpthread
     "$OUT/ovl_queue_test"
+done
+# The message dialog across threads: a game thread opening, changing and closing dialogs, another
+# waiting for the emulator's own, the overlay's thread drawing and pressing cross; each finished
+# once by one side, every wait returned
+for san in address,undefined thread; do
+    $CC -std=gnu89 -O1 -g -Wall -Wdeclaration-after-statement -fsanitize=$san -I. -Isrc \
+        -I$L/include libretro/tests/ovl_msgdialog_test.c $OVL \
+        -o "$OUT/ovl_msgdialog_test" -lm -lpthread
+    "$OUT/ovl_msgdialog_test"
 done

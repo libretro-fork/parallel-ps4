@@ -8,6 +8,10 @@
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "vulkan/vulkan_handles.hpp"
 
+namespace Input {
+struct State;
+}
+
 namespace Frontend {
 class Window;
 }
@@ -29,7 +33,8 @@ void AcquireGamepadInputCapture();
 void ReleaseGamepadInputCapture();
 bool IsGamepadInputCaptured();
 
-void NewFrame();
+/// @pad: the first controller, read once a frame by the presenter for the overlays too
+void NewFrame(const Input::State& pad);
 
 /// Draws the overlays into @image_view, over what is there; with nothing to draw, the image is
 /// left as it is, with no pass.

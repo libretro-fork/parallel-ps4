@@ -9,7 +9,7 @@
 #include "common/fixed_value.h"
 #include "common/types.h"
 #include "core/libraries/system/commondialog.h"
-#include "imgui/imgui_layer.h"
+#include "video_core/overlay/ovl_layers.h"
 
 namespace Libraries::MsgDialog {
 
@@ -151,28 +151,9 @@ public:
     }
 };
 
-class MsgDialogUi final : public ImGui::Layer {
-    bool first_render{false};
-    MsgDialogState* state{};
-    CommonDialog::Status* status{};
-    DialogResult* result{};
-
-    void DrawUser();
-    void DrawProgressBar();
-    void DrawSystemMessage();
-
-public:
-    explicit MsgDialogUi(MsgDialogState* state = nullptr, CommonDialog::Status* status = nullptr,
-                         DialogResult* result = nullptr);
-    ~MsgDialogUi() override;
-    MsgDialogUi(const MsgDialogUi& other) = delete;
-    MsgDialogUi(MsgDialogUi&& other) noexcept;
-    MsgDialogUi& operator=(MsgDialogUi other);
-
-    void Finish(ButtonId buttonId, CommonDialog::Result r = CommonDialog::Result::OK);
-
-    void Draw() override;
-};
+// The state as the overlay takes it (video_core/overlay/ovl_msgdialog.c): its texts lent for
+// the call that opens it
+ovl_msg_dialog_param_t MakeOverlayParam(MsgDialogState& state);
 
 // Utility function to show a message dialog
 // !!! This function can block !!!

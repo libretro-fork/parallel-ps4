@@ -13,8 +13,10 @@
 #include "imgui/invitation_prompt_layer.h"
 #include "imgui/renderer/imgui_core.h"
 #include "imgui/shadnet_notifications_layer.h"
+#include "input/controller.h"
 #include "video_core/buffer_cache/buffer.h"
 #include "video_core/buffer_cache/guest_import.h"
+#include "video_core/overlay/ovl.h"
 #include "video_core/overlay/vk_overlay.h"
 #include "video_core/renderer_vulkan/frame_notes.h"
 #include "video_core/renderer_vulkan/vk_memory.h"
@@ -101,6 +103,48 @@ bool CanBlitToSwapchain(const vk::PhysicalDevice physical_device, vk::Format for
 
 // The overlays' frame: the time since the last, and on a frame of the game's own its frame rate
 // over its last 60 frames, which the FPS counter shows
+// The first controller to the overlays, as ImGui had it (imgui_core.cpp's PadToImGui): the
+// buttons the dialogs read, the left stick past a quarter of its throw scrolling
+static void PadToOverlay(const Input::State& state) {
+    using Libraries::Pad::OrbisPadButtonDataOffset;
+    struct Key {
+        OrbisPadButtonDataOffset button;
+        ovl_key key;
+    };
+    static constexpr Key keys[] = {
+        {OrbisPadButtonDataOffset::Cross, OVL_KEY_PAD_FACE_DOWN},
+        {OrbisPadButtonDataOffset::Circle, OVL_KEY_PAD_FACE_RIGHT},
+        {OrbisPadButtonDataOffset::Square, OVL_KEY_PAD_FACE_LEFT},
+        {OrbisPadButtonDataOffset::Triangle, OVL_KEY_PAD_FACE_UP},
+        {OrbisPadButtonDataOffset::Up, OVL_KEY_PAD_DPAD_UP},
+        {OrbisPadButtonDataOffset::Down, OVL_KEY_PAD_DPAD_DOWN},
+        {OrbisPadButtonDataOffset::Left, OVL_KEY_PAD_DPAD_LEFT},
+        {OrbisPadButtonDataOffset::Right, OVL_KEY_PAD_DPAD_RIGHT},
+        {OrbisPadButtonDataOffset::L1, OVL_KEY_PAD_L1},
+        {OrbisPadButtonDataOffset::R1, OVL_KEY_PAD_R1},
+        {OrbisPadButtonDataOffset::L2, OVL_KEY_PAD_L2},
+        {OrbisPadButtonDataOffset::R2, OVL_KEY_PAD_R2},
+        {OrbisPadButtonDataOffset::Options, OVL_KEY_PAD_START},
+        {OrbisPadButtonDataOffset::TouchPad, OVL_KEY_PAD_BACK},
+    };
+    ovl_set_gamepad_connected(state.connected);
+    if (!state.connected) {
+        return;
+    }
+    for (const Key& k : keys) {
+        ovl_key_event(k.key, True(state.buttonsState & k.button));
+    }
+    const auto stick = [&](Input::Axis axis, ovl_key low, ovl_key high) {
+        const float v =
+            (static_cast<float>(state.axes[std::to_underlying(axis)]) - 128.0f) / 127.0f;
+        const float dead = 0.25f;
+        ovl_key_analog_event(low, v < -dead, v < -dead ? std::min(-v, 1.0f) : 0.0f);
+        ovl_key_analog_event(high, v > dead, v > dead ? std::min(v, 1.0f) : 0.0f);
+    };
+    stick(Input::Axis::LeftX, OVL_KEY_PAD_LSTICK_LEFT, OVL_KEY_PAD_LSTICK_RIGHT);
+    stick(Input::Axis::LeftY, OVL_KEY_PAD_LSTICK_UP, OVL_KEY_PAD_LSTICK_DOWN);
+}
+
 static void NewOverlayFrame(u32 width, u32 height, bool is_reusing_frame) {
     using namespace std::chrono;
     static steady_clock::time_point last_frame_time{};
@@ -865,7 +909,13 @@ void Presenter::Present(Frame* frame, bool is_reusing_frame, bool is_game_frame)
     ASSERT_MSG(reset_result == vk::Result::eSuccess,
                "Unexpected error resetting present done fence: {}", vk::to_string(reset_result));
 
-    ImGui::Core::NewFrame();
+    {
+        // The pad, once, for ImGui's dialogs and the overlays'
+        auto& controllers = *Common::Singleton<Input::GameControllers>::Instance();
+        const Input::State pad = controllers[0]->ReadState();
+        ImGui::Core::NewFrame(pad);
+        PadToOverlay(pad);
+    }
     NewOverlayFrame(window.GetWidth(), window.GetHeight(), is_reusing_frame);
 
     const vk::Image swapchain_image = swapchain.Image();

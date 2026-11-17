@@ -5,6 +5,7 @@
  * the same window placement, padding, auto-fit and clipping, the same item cursor (ItemSize,
  * SameLine), the same frames and text placement, in ImGui's dark style. */
 
+#include <float.h>
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
@@ -59,7 +60,32 @@ typedef struct window {
     int group_count;
     ovl_vec2_t region_max; /* the content region's bottom right */
     float work_max_x;      /* the work rectangle's right */
+    /* navigation, as ImGui's window keeps it */
+    uint32_t nav_last_id;
+    float nav_rect_rel[4];         /* the focused item, from the cursor's start */
+    ovl_vec2_t nav_pref_pos_rel;   /* NavPreferredScoringPosRel */
+    int nav_items, nav_items_next; /* NavLayersActiveMask: it has items to move to */
+    int focus_order;
+    float font_ref_size;
+    int id_stack_base;
 } window_t;
+
+/* A result of a navigation request, as ImGui's ImGuiNavItemData */
+typedef struct nav_item {
+    window_t* window;
+    uint32_t id;
+    float rect_rel[4];
+    float dist_box, dist_center, dist_axial;
+} nav_item_t;
+
+typedef struct key_data {
+    unsigned char down;
+    float duration, duration_prev; /* -1 when up */
+    float analog;
+} key_data_t;
+
+enum { DIR_NONE = -1, DIR_LEFT, DIR_RIGHT, DIR_UP, DIR_DOWN };
+enum { SRC_NONE, SRC_MOUSE, SRC_KEYBOARD, SRC_GAMEPAD };
 
 typedef struct color_mod {
     enum ovl_color idx;
@@ -89,7 +115,8 @@ typedef struct style {
 static struct {
     int created;
     style_t style;
-    float time, delta;
+    double time; /* as ImGui's, accumulated in double */
+    float delta;
     ovl_vec2_t display;
     int frame;
 
@@ -130,24 +157,39 @@ static struct {
     ovl_vec2_t last_min, last_max;
     int last_hovered, last_active, last_clicked;
 
-    /* navigation */
-    uint32_t nav_id;     /* the focused item */
-    uint32_t nav_window; /* the window it is in */
-    int nav_cursor_visible;
-    int nav_activate; /* the focused item is pressed this frame */
-    int nav_activate_down;
-    int nav_move_dir; /* 0 none, 1 left, 2 right, 3 up, 4 down */
-    uint32_t nav_best_id;
-    float nav_best_score;
-    uint32_t nav_first_id; /* the first focusable item of the nav window this frame */
-    int nav_seen;          /* the focused item was submitted this frame */
-    uint32_t nav_default_focus;
-    int focus_here; /* SetKeyboardFocusHere: items to skip */
+    /* navigation, as ImGui's (its main layer) */
+    window_t* nav_window;
+    uint32_t nav_id;
+    int nav_id_is_alive;
+    int nav_cursor_visible;      /* NavCursorVisible */
+    int nav_highlight_under_nav; /* NavHighlightItemUnderNav */
+    int nav_source;              /* NavInputSource */
+    int nav_init_request, nav_init_from_move;
+    nav_item_t nav_init_result;
+    int nav_move_submitted, nav_move_scoring;
+    int nav_move_dir;
+    float nav_scoring_rect[4];
+    nav_item_t nav_move_local, nav_move_other;
+    uint32_t nav_activate_id, nav_activate_down_id, nav_activate_pressed_id;
+    uint32_t nav_just_moved_to_id;
+    uint32_t nav_highlight_activated_id;
+    float nav_highlight_activated_timer;
+    int nav_any_request;
+    int nav_active; /* io.NavActive */
+    int focus_order_next;
+
+    /* the active item, as ImGui's ActiveId */
+    uint32_t active_id, active_id_is_alive, active_id_previous_frame;
+    window_t* active_id_window;
+    int active_id_source;
 
     /* input */
-    unsigned char key_down[MAX_KEYS];
-    float key_down_time[MAX_KEYS];
-    unsigned char key_pressed_event[MAX_KEYS];
+    key_data_t keys[MAX_KEYS];
+    struct {
+        unsigned char set, down;
+        float analog;
+    } key_events[MAX_KEYS];
+    int gamepad_connected;
 
     /* the draw data */
     ovl_buf_t out_vtx, out_idx, out_cmds;
@@ -221,6 +263,7 @@ static uint32_t hash_str(const char* s, const char* end, uint32_t seed) {
     return ~crc;
 }
 
+/* The top of the id stack, which a window starts at its own id, as ImGui's */
 static uint32_t id_seed(void) {
     return g.id_count ? g.ids[g.id_count - 1] : 0;
 }
@@ -530,38 +573,68 @@ void ovl_destroy(void) {
 }
 
 void ovl_key_event(enum ovl_key key, int down) {
+    ovl_key_analog_event(key, down, down ? 1.0f : 0.0f);
+}
+
+void ovl_key_analog_event(enum ovl_key key, int down, float value) {
     if (key <= OVL_KEY_NONE || key >= OVL_KEY_COUNT)
         return;
-    if (down && !g.key_down[key])
-        g.key_pressed_event[key] = 1;
-    g.key_down[key] = (unsigned char)(down != 0);
+    g.key_events[key].set = 1;
+    g.key_events[key].down = (unsigned char)(down != 0);
+    g.key_events[key].analog = value;
+}
+
+void ovl_set_gamepad_connected(int connected) {
+    g.gamepad_connected = connected != 0;
 }
 
 void ovl_char_event(uint32_t codepoint) {
     (void)codepoint;
 }
 
-int ovl_is_key_down(enum ovl_key key) {
-    return key > OVL_KEY_NONE && key < OVL_KEY_COUNT && g.key_down[key];
+static int is_gamepad_key(int key) {
+    return key >= OVL_KEY_PAD_FACE_DOWN && key < OVL_KEY_COUNT;
 }
 
-/* As ImGui's IsKeyPressed: on the press, then repeated after 0.275 s every 0.050 s */
+int ovl_is_key_down(enum ovl_key key) {
+    return key > OVL_KEY_NONE && key < OVL_KEY_COUNT && g.keys[key].down;
+}
+
+/* ImGui's CalcTypematicRepeatAmount */
+static int repeat_amount(float t0, float t1, float delay, float rate) {
+    int c0, c1;
+    if (t1 == 0.0f)
+        return 1;
+    if (t0 >= t1)
+        return 0;
+    if (rate <= 0.0f)
+        return t0 < delay && t1 >= delay;
+    c0 = t0 < delay ? -1 : (int)((t0 - delay) / rate);
+    c1 = t1 < delay ? -1 : (int)((t1 - delay) / rate);
+    return c1 - c0;
+}
+
+/* ImGui's IsKeyPressed with a repeat rate: io.KeyRepeatDelay 0.275 s and KeyRepeatRate
+ * 0.050 s, scaled as its RepeatRateNavMove (0.72, 0.80) when @nav_move */
+static int key_pressed(int key, int repeat, int nav_move) {
+    const key_data_t* k = &g.keys[key];
+    const float delay = nav_move ? 0.275f * 0.72f : 0.275f;
+    const float rate = nav_move ? 0.050f * 0.80f : 0.050f;
+    const float t = k->duration;
+    if (!k->down || t < 0.0f)
+        return 0;
+    if (t == 0.0f)
+        return 1;
+    return repeat && t > delay && repeat_amount(t - g.delta, t, delay, rate) > 0;
+}
+
 int ovl_is_key_pressed(enum ovl_key key, int repeat) {
-    float t, t0;
     if (key <= OVL_KEY_NONE || key >= OVL_KEY_COUNT)
         return 0;
-    if (g.key_pressed_event[key])
-        return 1;
-    if (!repeat || !g.key_down[key])
-        return 0;
-    t = g.key_down_time[key];
-    t0 = t - g.delta;
-    if (t <= 0.275f)
-        return 0;
-    return (int)((t - 0.275f) / 0.050f) > (int)((t0 - 0.275f) / 0.050f) || t0 < 0.275f;
+    return key_pressed(key, repeat, 0);
 }
 
-float ovl_time(void) {
+double ovl_time(void) {
     return g.time;
 }
 
@@ -573,16 +646,436 @@ ovl_vec2_t ovl_display_size(void) {
     return g.display;
 }
 
-static int nav_input(int left, int right, int up, int down) {
-    if (ovl_is_key_pressed((enum ovl_key)left, 1))
-        return 1;
-    if (ovl_is_key_pressed((enum ovl_key)right, 1))
-        return 2;
-    if (ovl_is_key_pressed((enum ovl_key)up, 1))
-        return 3;
-    if (ovl_is_key_pressed((enum ovl_key)down, 1))
-        return 4;
-    return 0;
+/* ------------------------------------------------------------------------------------------ */
+/* Navigation, as ImGui 1.92's (imgui.cpp, KEYBOARD/GAMEPAD NAVIGATION): focus, moving between
+ * items with the d-pad, pressing with cross, letting go with circle */
+
+typedef struct rect {
+    float x0, y0, x1, y1;
+} rect_t;
+
+static rect_t rect_of(const float* r) {
+    rect_t o;
+    o.x0 = r[0];
+    o.y0 = r[1];
+    o.x1 = r[2];
+    o.y1 = r[3];
+    return o;
+}
+
+static void rect_store(float* r, rect_t o) {
+    r[0] = o.x0;
+    r[1] = o.y0;
+    r[2] = o.x1;
+    r[3] = o.y1;
+}
+
+/* ImGui's WindowRectAbsToRel and back: from the window's cursor start */
+static rect_t rect_abs_to_rel(const window_t* w, rect_t r) {
+    r.x0 -= w->cursor_start.x;
+    r.x1 -= w->cursor_start.x;
+    r.y0 -= w->cursor_start.y;
+    r.y1 -= w->cursor_start.y;
+    return r;
+}
+
+static rect_t rect_rel_to_abs(const window_t* w, rect_t r) {
+    r.x0 += w->cursor_start.x;
+    r.x1 += w->cursor_start.x;
+    r.y0 += w->cursor_start.y;
+    r.y1 += w->cursor_start.y;
+    return r;
+}
+
+static window_t* root_window(window_t* w) {
+    while (w && w->is_child && w->parent)
+        w = w->parent;
+    return w;
+}
+
+/* RootWindowForNav: a window is its own, but for children flattened into their parent */
+static window_t* root_for_nav(window_t* w) {
+    return w;
+}
+
+static void nav_item_clear(nav_item_t* r) {
+    r->window = NULL;
+    r->id = 0;
+    r->dist_box = r->dist_center = r->dist_axial = FLT_MAX;
+}
+
+static void nav_update_any_request(void) {
+    g.nav_any_request = g.nav_move_scoring || g.nav_init_request;
+}
+
+static void clear_preferred_pos(int axis) {
+    window_t* r;
+    if (!g.nav_window)
+        return;
+    r = root_for_nav(g.nav_window);
+    if (axis == 0)
+        r->nav_pref_pos_rel.x = FLT_MAX;
+    else
+        r->nav_pref_pos_rel.y = FLT_MAX;
+}
+
+static void set_nav_window(window_t* w) {
+    g.nav_window = w;
+    g.nav_init_request = g.nav_move_submitted = g.nav_move_scoring = 0;
+    nav_update_any_request();
+}
+
+static void set_nav_id(uint32_t id, rect_t rect_rel) {
+    g.nav_id = id;
+    g.nav_window->nav_last_id = id;
+    rect_store(g.nav_window->nav_rect_rel, rect_rel);
+    clear_preferred_pos(0);
+    clear_preferred_pos(1);
+}
+
+/* ImGui's SetNavCursorVisibleAfterMove (navigation on for both, the cursor shown by itself) */
+static void set_nav_cursor_visible_after_move(void) {
+    if (g.nav_window && (g.nav_window->flags & OVL_WINDOW_NO_NAV_INPUTS))
+        g.nav_cursor_visible = 0;
+    else
+        g.nav_cursor_visible = 1;
+    g.nav_highlight_under_nav = 1;
+}
+
+static void set_active_id(uint32_t id, window_t* w) {
+    g.active_id = id;
+    g.active_id_window = w;
+    if (id)
+        g.active_id_source =
+            (g.nav_activate_id == id || g.nav_just_moved_to_id == id) ? g.nav_source : SRC_MOUSE;
+    g.active_id_is_alive = id;
+}
+
+static void clear_active_id(void) {
+    set_active_id(0, NULL);
+}
+
+/* ImGui's FocusWindow: the focus, and the window brought to the front */
+static void focus_window(window_t* w) {
+    window_t* root = root_window(w);
+    if (g.nav_window != w) {
+        set_nav_window(w);
+        g.nav_id = w ? w->nav_last_id : 0;
+        g.nav_id_is_alive = 0;
+    }
+    if (g.active_id && g.active_id_window && root_window(g.active_id_window) != root)
+        clear_active_id();
+    if (!w)
+        return;
+    root->focus_order = ++g.focus_order_next;
+    if (!(w->flags & OVL_WINDOW_NO_BRING_TO_FRONT) && !(root->flags & OVL_WINDOW_NO_BRING_TO_FRONT))
+        root->order = g.next_order++;
+}
+
+/* When the focused window has gone: the front-most window left that takes input, as ImGui's
+ * FocusTopMostWindowUnderOne */
+static void focus_top_most(void) {
+    window_t* best = NULL;
+    int i;
+    for (i = 0; i < g.window_count; i++) {
+        window_t* w = &g.windows[i];
+        if (!w->used || w->is_child || !w->was_active)
+            continue;
+        if ((w->flags & (OVL_WINDOW_NO_MOUSE_INPUTS | OVL_WINDOW_NO_NAV_INPUTS)) ==
+            (OVL_WINDOW_NO_MOUSE_INPUTS | OVL_WINDOW_NO_NAV_INPUTS))
+            continue;
+        if (!best || w->focus_order > best->focus_order)
+            best = w;
+    }
+    focus_window(best);
+}
+
+/* ImGui's NavInitWindow: the first item to be focused, found as the items come */
+static void nav_init_window(window_t* w) {
+    rect_t zero;
+    if (w->flags & OVL_WINDOW_NO_NAV_INPUTS) {
+        g.nav_id = 0;
+        return;
+    }
+    if (!w->is_child || w->nav_last_id == 0) {
+        memset(&zero, 0, sizeof(zero));
+        set_nav_id(0, zero);
+        g.nav_init_request = 1;
+        g.nav_init_from_move = 0;
+        g.nav_init_result.id = 0;
+        nav_update_any_request();
+    } else {
+        g.nav_id = w->nav_last_id;
+    }
+}
+
+/* ImGui's SetFocusID */
+static void set_focus_id(uint32_t id, window_t* w) {
+    if (g.nav_window != w)
+        set_nav_window(w);
+    g.nav_id = id;
+    w->nav_last_id = id;
+    if (g.last_id == id) {
+        rect_t r;
+        r.x0 = g.last_min.x;
+        r.y0 = g.last_min.y;
+        r.x1 = g.last_max.x;
+        r.y1 = g.last_max.y;
+        rect_store(w->nav_rect_rel, rect_abs_to_rel(w, r));
+    }
+    if (id == g.active_id_is_alive)
+        g.nav_id_is_alive = 1;
+    if (g.active_id_source == SRC_KEYBOARD || g.active_id_source == SRC_GAMEPAD)
+        g.nav_highlight_under_nav = 1;
+    else
+        g.nav_cursor_visible = 0;
+    clear_preferred_pos(0);
+    clear_preferred_pos(1);
+}
+
+static void nav_init_apply(void) {
+    rect_t r;
+    if (!g.nav_window)
+        return;
+    if (g.nav_id != g.nav_init_result.id)
+        g.nav_just_moved_to_id = g.nav_init_result.id;
+    r = rect_of(g.nav_init_result.rect_rel);
+    set_nav_id(g.nav_init_result.id, r);
+    g.nav_id_is_alive = 1;
+    if (g.nav_init_from_move)
+        set_nav_cursor_visible_after_move();
+}
+
+/* ImGui's NavMoveRequestApplyResult */
+static void nav_move_apply(void) {
+    nav_item_t* result = g.nav_move_local.id   ? &g.nav_move_local
+                         : g.nav_move_other.id ? &g.nav_move_other
+                                               : NULL;
+    const int axis = (g.nav_move_dir == DIR_UP || g.nav_move_dir == DIR_DOWN) ? 1 : 0;
+    ovl_vec2_t pref;
+    rect_t r;
+    if (!result) {
+        if (g.nav_id)
+            set_nav_cursor_visible_after_move();
+        clear_preferred_pos(axis);
+        return;
+    }
+    if (result != &g.nav_move_other && g.nav_move_other.id &&
+        g.nav_move_other.window->parent == g.nav_window)
+        if (g.nav_move_other.dist_box < result->dist_box ||
+            (g.nav_move_other.dist_box == result->dist_box &&
+             g.nav_move_other.dist_center < result->dist_center))
+            result = &g.nav_move_other;
+    /* The windows these overlays navigate in fit their items: no scrolling to them */
+    if (g.nav_window != result->window)
+        g.nav_window = result->window;
+    if (g.active_id != result->id)
+        clear_active_id();
+    if (g.nav_id != result->id)
+        g.nav_just_moved_to_id = result->id;
+    pref = root_for_nav(g.nav_window)->nav_pref_pos_rel;
+    r = rect_of(result->rect_rel);
+    set_nav_id(result->id, r);
+    if (axis == 0)
+        pref.x = (r.x0 + r.x1) * 0.5f;
+    else
+        pref.y = (r.y0 + r.y1) * 0.5f;
+    root_for_nav(g.nav_window)->nav_pref_pos_rel = pref;
+    set_nav_cursor_visible_after_move();
+}
+
+/* ImGui's NavUpdateCancelRequest: circle (or escape) lets go of the active item, else of the
+ * focused one */
+static void nav_cancel(int gamepad) {
+    if (!key_pressed(OVL_KEY_ESCAPE, 0, 0) &&
+        !(gamepad && key_pressed(OVL_KEY_PAD_FACE_RIGHT, 0, 0)))
+        return;
+    if (g.active_id)
+        clear_active_id();
+    else
+        g.nav_id = 0;
+}
+
+/* ImGui's NavBiasScoringRect */
+static void nav_bias_scoring_rect(rect_t* r, ovl_vec2_t* pref, int dir) {
+    const ovl_vec2_t off = g.nav_window->cursor_start;
+    if (pref->x == FLT_MAX)
+        pref->x = minf(r->x0 + 1.0f, r->x1) - off.x;
+    if (pref->y == FLT_MAX)
+        pref->y = (r->y0 + r->y1) * 0.5f - off.y;
+    if ((dir == DIR_UP || dir == DIR_DOWN) && pref->x != FLT_MAX)
+        r->x0 = r->x1 = pref->x + off.x;
+    else if ((dir == DIR_LEFT || dir == DIR_RIGHT) && pref->y != FLT_MAX)
+        r->y0 = r->y1 = pref->y + off.y;
+}
+
+/* ImGui's NavUpdateCreateMoveRequest: a d-pad press, repeated while held */
+static void nav_create_move(int gamepad) {
+    window_t* w = g.nav_window;
+    rect_t scoring;
+    g.nav_move_dir = DIR_NONE;
+    if (w && !(w->flags & OVL_WINDOW_NO_NAV_INPUTS)) {
+        if ((gamepad && key_pressed(OVL_KEY_PAD_DPAD_LEFT, 1, 1)) ||
+            key_pressed(OVL_KEY_LEFT, 1, 1))
+            g.nav_move_dir = DIR_LEFT;
+        if ((gamepad && key_pressed(OVL_KEY_PAD_DPAD_RIGHT, 1, 1)) ||
+            key_pressed(OVL_KEY_RIGHT, 1, 1))
+            g.nav_move_dir = DIR_RIGHT;
+        if ((gamepad && key_pressed(OVL_KEY_PAD_DPAD_UP, 1, 1)) || key_pressed(OVL_KEY_UP, 1, 1))
+            g.nav_move_dir = DIR_UP;
+        if ((gamepad && key_pressed(OVL_KEY_PAD_DPAD_DOWN, 1, 1)) ||
+            key_pressed(OVL_KEY_DOWN, 1, 1))
+            g.nav_move_dir = DIR_DOWN;
+    }
+    if (g.nav_move_dir != DIR_NONE) {
+        g.nav_move_submitted = g.nav_move_scoring = 1;
+        nav_item_clear(&g.nav_move_local);
+        nav_item_clear(&g.nav_move_other);
+        nav_update_any_request();
+    }
+    /* Moving with nothing focused finds the first item */
+    if (g.nav_move_submitted && g.nav_id == 0) {
+        g.nav_init_request = g.nav_init_from_move = 1;
+        g.nav_init_result.id = 0;
+        g.nav_cursor_visible = 1;
+        nav_update_any_request();
+    }
+    /* With the gamepad, from within what is visible of the window */
+    if (g.nav_move_submitted && g.nav_source == SRC_GAMEPAD && w) {
+        rect_t inner, nav;
+        inner.x0 = w->pos.x - 1.0f;
+        inner.y0 = w->pos.y - 1.0f;
+        inner.x1 = w->pos.x + w->size.x + 1.0f;
+        inner.y1 = w->pos.y + w->size.y + 1.0f;
+        inner = rect_abs_to_rel(w, inner);
+        nav = rect_of(w->nav_rect_rel);
+        if (!(nav.x0 >= inner.x0 && nav.y0 >= inner.y0 && nav.x1 <= inner.x1 &&
+              nav.y1 <= inner.y1)) {
+            const float pad_x = minf(inner.x1 - inner.x0, w->font_ref_size * 0.5f);
+            const float pad_y = minf(inner.y1 - inner.y0, w->font_ref_size * 0.5f);
+            inner.x0 += pad_x;
+            inner.x1 -= pad_x;
+            inner.y0 += pad_y;
+            inner.y1 -= pad_y;
+            /* ImRect::ClipWithFull */
+            nav.x0 = minf(maxf(nav.x0, inner.x0), inner.x1);
+            nav.y0 = minf(maxf(nav.y0, inner.y0), inner.y1);
+            nav.x1 = minf(maxf(nav.x1, inner.x0), inner.x1);
+            nav.y1 = minf(maxf(nav.y1, inner.y0), inner.y1);
+            rect_store(w->nav_rect_rel, nav);
+            g.nav_id = 0;
+        }
+    }
+    /* The scoring rectangle: the focused item's, narrowed across the move */
+    memset(&scoring, 0, sizeof(scoring));
+    if (w) {
+        rect_t nav = rect_of(w->nav_rect_rel);
+        if (nav.x0 > nav.x1 || nav.y0 > nav.y1)
+            memset(&nav, 0, sizeof(nav));
+        scoring = rect_rel_to_abs(w, nav);
+        if (g.nav_move_submitted)
+            nav_bias_scoring_rect(&scoring, &root_for_nav(w)->nav_pref_pos_rel, g.nav_move_dir);
+    }
+    rect_store(g.nav_scoring_rect, scoring);
+}
+
+/* ImGui's NavUpdate, at the start of a frame */
+static void nav_update(void) {
+    static const int pad_source_keys[] = {
+        OVL_KEY_PAD_FACE_RIGHT, OVL_KEY_PAD_FACE_LEFT, OVL_KEY_PAD_FACE_UP, OVL_KEY_PAD_FACE_DOWN,
+        OVL_KEY_PAD_DPAD_RIGHT, OVL_KEY_PAD_DPAD_LEFT, OVL_KEY_PAD_DPAD_UP, OVL_KEY_PAD_DPAD_DOWN};
+    static const int kb_source_keys[] = {OVL_KEY_SPACE, OVL_KEY_ENTER, OVL_KEY_ESCAPE,
+                                         OVL_KEY_RIGHT, OVL_KEY_LEFT,  OVL_KEY_UP,
+                                         OVL_KEY_DOWN};
+    const int gamepad = g.gamepad_connected;
+    int i;
+    if (gamepad && g.nav_source != SRC_GAMEPAD)
+        for (i = 0; i < (int)(sizeof(pad_source_keys) / sizeof(pad_source_keys[0])); i++)
+            if (g.keys[pad_source_keys[i]].down)
+                g.nav_source = SRC_GAMEPAD;
+    if (g.nav_source != SRC_KEYBOARD)
+        for (i = 0; i < (int)(sizeof(kb_source_keys) / sizeof(kb_source_keys[0])); i++)
+            if (g.keys[kb_source_keys[i]].down)
+                g.nav_source = SRC_KEYBOARD;
+
+    /* What the last frame's requests found */
+    g.nav_just_moved_to_id = 0;
+    if (g.nav_init_result.id)
+        nav_init_apply();
+    g.nav_init_request = g.nav_init_from_move = 0;
+    g.nav_init_result.id = 0;
+    if (g.nav_move_submitted)
+        nav_move_apply();
+    g.nav_move_submitted = g.nav_move_scoring = 0;
+
+    g.nav_active = g.nav_window && !(g.nav_window->flags & OVL_WINDOW_NO_NAV_INPUTS);
+    nav_cancel(gamepad);
+
+    /* Pressing the focused item: cross (or space; enter) */
+    g.nav_activate_id = g.nav_activate_down_id = g.nav_activate_pressed_id = 0;
+    if (g.nav_id && g.nav_cursor_visible && g.nav_window &&
+        !(g.nav_window->flags & OVL_WINDOW_NO_NAV_INPUTS)) {
+        const int down =
+            g.keys[OVL_KEY_SPACE].down || (gamepad && g.keys[OVL_KEY_PAD_FACE_DOWN].down);
+        const int pressed = down && (key_pressed(OVL_KEY_SPACE, 0, 0) ||
+                                     (gamepad && key_pressed(OVL_KEY_PAD_FACE_DOWN, 0, 0)));
+        const int enter = key_pressed(OVL_KEY_ENTER, 0, 0);
+        if (g.active_id == 0 && pressed)
+            g.nav_activate_id = g.nav_id;
+        if ((g.active_id == 0 || g.active_id == g.nav_id) && enter)
+            g.nav_activate_id = g.nav_id;
+        if ((g.active_id == 0 || g.active_id == g.nav_id) && (down || enter))
+            g.nav_activate_down_id = g.nav_id;
+        if ((g.active_id == 0 || g.active_id == g.nav_id) && (pressed || enter)) {
+            g.nav_activate_pressed_id = g.nav_id;
+            g.nav_highlight_activated_id = g.nav_id;
+            g.nav_highlight_activated_timer = 0.10f;
+        }
+    }
+    if (g.nav_window && (g.nav_window->flags & OVL_WINDOW_NO_NAV_INPUTS))
+        g.nav_cursor_visible = 0;
+    if (g.nav_highlight_activated_timer > 0.0f)
+        g.nav_highlight_activated_timer = maxf(0.0f, g.nav_highlight_activated_timer - g.delta);
+    if (g.nav_highlight_activated_timer == 0.0f)
+        g.nav_highlight_activated_id = 0;
+
+    nav_create_move(gamepad);
+    nav_update_any_request();
+    g.nav_id_is_alive = 0;
+
+    /* A window with nothing to move to scrolls with the d-pad; any with the left stick */
+    if (g.nav_window && !(g.nav_window->flags & OVL_WINDOW_NO_NAV_INPUTS)) {
+        window_t* w = g.nav_window;
+        const float speed = (float)floor(w->font_ref_size * 100.0f * g.delta + 0.5f);
+        if (!w->nav_items && w->scroll_max.y > 0.0f && g.nav_move_dir != DIR_NONE) {
+            if (g.nav_move_dir == DIR_UP || g.nav_move_dir == DIR_DOWN) {
+                w->scroll_target.x = w->scroll.x;
+                w->scroll_target.y =
+                    truncf_(w->scroll.y + (g.nav_move_dir == DIR_UP ? -1.0f : 1.0f) * speed);
+                w->scroll_target_set = 1;
+            }
+        }
+        if (gamepad) {
+            const float dy =
+                g.keys[OVL_KEY_PAD_LSTICK_DOWN].analog - g.keys[OVL_KEY_PAD_LSTICK_UP].analog;
+            const float tweak = g.keys[OVL_KEY_PAD_L1].down   ? 1.0f / 10.0f
+                                : g.keys[OVL_KEY_PAD_R1].down ? 10.0f
+                                                              : 1.0f;
+            if (dy != 0.0f) {
+                w->scroll_target.x = w->scroll.x;
+                w->scroll_target.y = truncf_(w->scroll.y + dy * speed * tweak);
+                w->scroll_target_set = 1;
+            }
+        }
+    }
+}
+
+int ovl_nav_active(void) {
+    return g.nav_active;
+}
+
+void ovl_keep_nav_highlight(void) {
+    g.nav_cursor_visible = 1;
 }
 
 void ovl_new_frame(float display_w, float display_h, float delta_time) {
@@ -591,14 +1084,41 @@ void ovl_new_frame(float display_w, float display_h, float delta_time) {
     g.frame++;
     g.display = v2(display_w, display_h);
     g.delta = delta_time > 0.0f ? delta_time : 1.0f / 60.0f;
-    g.time += g.delta;
-    for (i = 0; i < MAX_KEYS; i++)
-        g.key_down_time[i] = g.key_down[i] ? g.key_down_time[i] + g.delta : 0.0f;
+    g.time += (double)g.delta;
+
+    /* As ImGui's NewFrame: the active item let go once it is no longer submitted */
+    if (g.active_id && g.active_id_is_alive != g.active_id &&
+        g.active_id_previous_frame == g.active_id)
+        clear_active_id();
+    g.active_id_previous_frame = g.active_id;
+    g.active_id_is_alive = 0;
+
+    /* The input, as ImGui's UpdateKeyboardInputs: a gamepad's only while one is connected */
+    for (i = 1; i < MAX_KEYS; i++) {
+        key_data_t* k = &g.keys[i];
+        if (g.key_events[i].set) {
+            k->down = g.key_events[i].down;
+            k->analog = g.key_events[i].analog;
+            g.key_events[i].set = 0;
+        }
+        if (!g.gamepad_connected && is_gamepad_key(i)) {
+            k->down = 0;
+            k->analog = 0.0f;
+        }
+        k->duration_prev = k->duration;
+        k->duration = k->down ? (k->duration < 0.0f ? 0.0f : k->duration + g.delta) : -1.0f;
+    }
+    nav_update();
+
     for (i = 0; i < g.window_count; i++) {
         window_t* w = &g.windows[i];
         w->was_active = w->active;
         w->active = 0;
     }
+    /* The focused window gone, the focus goes to the front-most one left */
+    if (g.nav_window && !g.nav_window->was_active)
+        focus_top_most();
+
     ovl_draw_list_reset(&g.background, display_w, display_h);
     ovl_draw_list_reset(&g.foreground, display_w, display_h);
     g.stack_count = 0;
@@ -606,25 +1126,6 @@ void ovl_new_frame(float display_w, float display_h, float delta_time) {
     g.color_count = g.var_count = g.font_count = g.id_count = g.wrap_count = 0;
     g.disabled_count = 0;
     update_font_size();
-
-    /* Navigation: the move asked for this frame resolves among the items submitted */
-    g.nav_move_dir = nav_input(OVL_KEY_LEFT, OVL_KEY_RIGHT, OVL_KEY_UP, OVL_KEY_DOWN);
-    if (!g.nav_move_dir)
-        g.nav_move_dir = nav_input(OVL_KEY_PAD_DPAD_LEFT, OVL_KEY_PAD_DPAD_RIGHT,
-                                   OVL_KEY_PAD_DPAD_UP, OVL_KEY_PAD_DPAD_DOWN);
-    if (g.nav_move_dir)
-        g.nav_cursor_visible = 1;
-    g.nav_activate = ovl_is_key_pressed(OVL_KEY_ENTER, 0) ||
-                     ovl_is_key_pressed(OVL_KEY_PAD_FACE_DOWN, 0) ||
-                     ovl_is_key_pressed(OVL_KEY_SPACE, 0);
-    g.nav_activate_down = ovl_is_key_down(OVL_KEY_ENTER) ||
-                          ovl_is_key_down(OVL_KEY_PAD_FACE_DOWN) || ovl_is_key_down(OVL_KEY_SPACE);
-    g.nav_best_id = 0;
-    g.nav_best_score = 1e30f;
-    g.nav_first_id = 0;
-    g.nav_seen = 0;
-    g.nav_default_focus = 0;
-    memset(g.key_pressed_event, 0, sizeof(g.key_pressed_event));
 }
 
 /* ------------------------------------------------------------------------------------------ */
@@ -773,7 +1274,7 @@ static void setup_drawing_context(window_t* w) {
 static int begin_window(const char* name, unsigned flags, window_t* parent, ovl_vec2_t child_size,
                         int child_border) {
     window_t* w = find_window(name);
-    int just_created = 0;
+    int just_created = 0, want_focus;
     float bg_alpha;
     if (!w) {
         w = create_window(name, flags);
@@ -795,6 +1296,9 @@ static int begin_window(const char* name, unsigned flags, window_t* parent, ovl_
     if (g.stack_count < MAX_STACK)
         g.stack[g.stack_count++] = w;
     g.current = w;
+    w->id_stack_base = g.id_count;
+    if (g.id_count < MAX_STACK)
+        g.ids[g.id_count++] = w->id;
     update_font_size();
 
     if (parent) {
@@ -856,12 +1360,11 @@ static int begin_window(const char* name, unsigned flags, window_t* parent, ovl_
         w->pos.y = truncf_(w->pos.y);
         if (w->auto_fit_frames > 0)
             w->auto_fit_frames--;
-        if (g.next.focus || (w->appearing && !(flags & OVL_WINDOW_NO_FOCUS_ON_APPEARING))) {
-            w->order = g.next_order++;
-            if (!(flags & 0x30000u))
-                g.nav_window = w->id;
-        }
     }
+    /* SetNextWindowFocus */
+    if (g.next.focus)
+        focus_window(w);
+    want_focus = !parent && w->appearing && !(flags & OVL_WINDOW_NO_FOCUS_ON_APPEARING);
     bg_alpha = 1.0f;
     w->bg_alpha_set = g.next.bg_alpha_set;
     if (g.next.bg_alpha_set)
@@ -884,6 +1387,16 @@ static int begin_window(const char* name, unsigned flags, window_t* parent, ovl_
         ovl_push_clip(&w->dl, w->pos, v2(w->pos.x + w->size.x, w->pos.y + w->size.y), 0);
     }
     setup_drawing_context(w);
+    w->font_ref_size = g.font_size;
+    w->nav_items = w->nav_items_next;
+    w->nav_items_next = 0;
+    /* A window appearing takes the focus, its first item to be focused (ImGui's Begin, once the
+     * cursor's start is known) */
+    if (want_focus) {
+        focus_window(w);
+        if (w == g.nav_window)
+            nav_init_window(w);
+    }
 
     /* As ImGui: a window begun with the style's alpha at 0 is not drawn this frame */
     w->skip = g.style.alpha <= 0.0f;
@@ -922,6 +1435,7 @@ static void end_window(void) {
         w->content_size.x = truncf_(w->cursor_max.x - w->cursor_start.x);
         w->content_size.y = truncf_(w->cursor_max.y - w->cursor_start.y);
     }
+    g.id_count = w->id_stack_base;
     g.stack_count--;
     g.current = g.stack_count ? g.stack[g.stack_count - 1] : NULL;
     update_font_size();
@@ -999,6 +1513,10 @@ void ovl_end_child(void) {
 
 ovl_vec2_t ovl_window_pos(void) {
     return g.current ? g.current->pos : v2(0, 0);
+}
+
+ovl_vec2_t ovl_window_padding(void) {
+    return g.current ? g.current->padding : v2(0, 0);
 }
 
 ovl_vec2_t ovl_window_size(void) {
@@ -1339,127 +1857,189 @@ void ovl_pop_id(void) {
 /* ------------------------------------------------------------------------------------------ */
 /* Items and navigation */
 
-/* An item with an id: kept for navigation, and whether it is focused or pressed */
+/* ImGui's NavScoreItemDistInterval */
+static float dist_interval(float cand_min, float cand_max, float curr_min, float curr_max) {
+    if (cand_max < curr_min)
+        return cand_max - curr_min;
+    if (curr_max < cand_min)
+        return cand_min - curr_max;
+    return 0.0f;
+}
+
+static int dir_quadrant(float dx, float dy) {
+    if (fabs(dx) > fabs(dy))
+        return dx > 0.0f ? DIR_RIGHT : DIR_LEFT;
+    return dy > 0.0f ? DIR_DOWN : DIR_UP;
+}
+
+static float lerpf(float a, float b, float t) {
+    return a + (b - a) * t;
+}
+
+/* ImGui's NavScoreItem: whether @cand beats the best so far in the direction moved */
+static int nav_score_item(nav_item_t* result, rect_t cand) {
+    const rect_t curr = rect_of(g.nav_scoring_rect);
+    float dbx, dby, dist_box, dcx, dcy, dist_center;
+    int quadrant, new_best = 0;
+    dbx = dist_interval(cand.x0, cand.x1, curr.x0, curr.x1);
+    dby = dist_interval(lerpf(cand.y0, cand.y1, 0.2f), lerpf(cand.y0, cand.y1, 0.8f),
+                        lerpf(curr.y0, curr.y1, 0.2f), lerpf(curr.y0, curr.y1, 0.8f));
+    if (dby != 0.0f && dbx != 0.0f)
+        dbx = (dbx / 1000.0f) + (dbx > 0.0f ? 1.0f : -1.0f);
+    dist_box = (float)fabs(dbx) + (float)fabs(dby);
+    dcx = (cand.x0 + cand.x1) - (curr.x0 + curr.x1);
+    dcy = (cand.y0 + cand.y1) - (curr.y0 + curr.y1);
+    dist_center = (float)fabs(dcx) + (float)fabs(dcy);
+    if (dbx != 0.0f || dby != 0.0f)
+        quadrant = dir_quadrant(dbx, dby);
+    else if (dcx != 0.0f || dcy != 0.0f)
+        quadrant = dir_quadrant(dcx, dcy);
+    else
+        quadrant = g.last_id < g.nav_id ? DIR_LEFT : DIR_RIGHT;
+    if (quadrant == g.nav_move_dir) {
+        if (dist_box < result->dist_box) {
+            result->dist_box = dist_box;
+            result->dist_center = dist_center;
+            return 1;
+        }
+        if (dist_box == result->dist_box) {
+            if (dist_center < result->dist_center) {
+                result->dist_center = dist_center;
+                new_best = 1;
+            } else if (dist_center == result->dist_center) {
+                if (((g.nav_move_dir == DIR_UP || g.nav_move_dir == DIR_DOWN) ? dby : dbx) < 0.0f)
+                    new_best = 1;
+            }
+        }
+    }
+    /* (Its axial fallback is for menu bars only) */
+    return new_best;
+}
+
+static void nav_apply_item(nav_item_t* result) {
+    rect_t r;
+    r.x0 = g.last_min.x;
+    r.y0 = g.last_min.y;
+    r.x1 = g.last_max.x;
+    r.y1 = g.last_max.y;
+    result->window = g.current;
+    result->id = g.last_id;
+    rect_store(result->rect_rel, rect_abs_to_rel(g.current, r));
+}
+
+/* ImGui's NavProcessItem: the item for a request to focus the first item or to move, and the
+ * focused item's rectangle kept */
+static void nav_process_item(void) {
+    window_t* w = g.current;
+    const uint32_t id = g.last_id;
+    const int disabled = g.disabled_count > 0;
+    rect_t bb;
+    bb.x0 = g.last_min.x;
+    bb.y0 = g.last_min.y;
+    bb.x1 = g.last_max.x;
+    bb.y1 = g.last_max.y;
+    if (g.nav_init_request && !disabled) {
+        nav_apply_item(&g.nav_init_result);
+        g.nav_init_request = 0;
+        nav_update_any_request();
+    }
+    if (g.nav_move_scoring && !disabled && !(w->flags & OVL_WINDOW_NO_NAV_INPUTS) &&
+        g.nav_id != id) {
+        nav_item_t* result = w == g.nav_window ? &g.nav_move_local : &g.nav_move_other;
+        if (nav_score_item(result, bb))
+            nav_apply_item(result);
+    }
+    if (g.nav_id == id) {
+        if (g.nav_window != w)
+            set_nav_window(w);
+        g.nav_id_is_alive = 1;
+        rect_store(w->nav_rect_rel, rect_abs_to_rel(w, bb));
+    }
+}
+
+/* ImGui's ItemAdd: an item kept alive and offered to navigation; 0 when it is clipped away
+ * (and neither active nor focused), not to be drawn */
 static int item_add(uint32_t id, ovl_vec2_t min, ovl_vec2_t max) {
     window_t* w = g.current;
+    const float* c;
     g.last_id = id;
     g.last_min = min;
     g.last_max = max;
     g.last_hovered = g.last_active = g.last_clicked = 0;
-    if (!w || !id || g.disabled_count)
-        return 1;
-    if (w->id == g.nav_window || (w->parent && w->parent->id == g.nav_window)) {
-        if (g.focus_here > 0) {
-            if (--g.focus_here == 0) {
-                g.nav_id = id;
-                g.nav_cursor_visible = 1;
-            }
-        }
-        if (!g.nav_first_id)
-            g.nav_first_id = id;
-        if (id == g.nav_id)
-            g.nav_seen = 1;
-        if (g.nav_move_dir && g.nav_id && id != g.nav_id) {
-            /* Scored against the focused item's rectangle from the frame before */
-            static ovl_vec2_t focused_min, focused_max;
-            (void)focused_min;
-            (void)focused_max;
-        }
+    if (!w)
+        return 0;
+    if (id) {
+        if (g.active_id == id)
+            g.active_id_is_alive = id;
+        w->nav_items_next = 1;
+        if ((g.nav_id == id || g.nav_any_request) && g.nav_window &&
+            root_for_nav(g.nav_window) == root_for_nav(w) && w == g.nav_window)
+            nav_process_item();
     }
+    c = ovl_draw_list_clip(&w->dl);
+    if (!(min.y < c[3] && max.y > c[1] && min.x < c[2] && max.x > c[0]))
+        if (id == 0 || (id != g.active_id && id != g.active_id_previous_frame && id != g.nav_id &&
+                        id != g.nav_activate_id))
+            return 0;
     return 1;
 }
 
-/* Rectangles of the focusable items, from the frame before, for moving between them */
-#define NAV_ITEMS 256
-static struct {
-    uint32_t id;
-    ovl_vec2_t min, max;
-} nav_items[2][NAV_ITEMS];
-static int nav_item_count[2];
-
-static void nav_record(uint32_t id, ovl_vec2_t min, ovl_vec2_t max) {
-    const int cur = g.frame & 1;
-    if (nav_item_count[cur] < NAV_ITEMS) {
-        nav_items[cur][nav_item_count[cur]].id = id;
-        nav_items[cur][nav_item_count[cur]].min = min;
-        nav_items[cur][nav_item_count[cur]].max = max;
-        nav_item_count[cur]++;
-    }
-}
-
-/* The best item to move to from the focused one in the direction asked, among those of the
- * frame before: nearest along the direction, preferring overlap across it (ImGui's
- * NavScoreItem, simplified) */
-static uint32_t nav_resolve(int dir) {
-    const int prev = (g.frame & 1) ^ 1;
-    int i, have = 0;
-    ovl_vec2_t fmin = v2(0, 0), fmax = v2(0, 0);
-    uint32_t best = 0;
-    float best_score = 1e30f;
-    for (i = 0; i < nav_item_count[prev]; i++)
-        if (nav_items[prev][i].id == g.nav_id) {
-            fmin = nav_items[prev][i].min;
-            fmax = nav_items[prev][i].max;
-            have = 1;
-        }
-    if (!have)
-        return 0;
-    for (i = 0; i < nav_item_count[prev]; i++) {
-        const ovl_vec2_t mn = nav_items[prev][i].min, mx = nav_items[prev][i].max;
-        float along, across, score;
-        if (nav_items[prev][i].id == g.nav_id)
-            continue;
-        if (dir == 1 || dir == 2) {
-            along = dir == 1 ? fmin.x - mx.x : mn.x - fmax.x;
-            if (dir == 1 ? mn.x >= fmin.x : mx.x <= fmax.x)
-                continue;
-            across = maxf(0.0f, maxf(mn.y - fmax.y, fmin.y - mx.y));
-        } else {
-            along = dir == 3 ? fmin.y - mx.y : mn.y - fmax.y;
-            if (dir == 3 ? mn.y >= fmin.y : mx.y <= fmax.y)
-                continue;
-            across = maxf(0.0f, maxf(mn.x - fmax.x, fmin.x - mx.x));
-        }
-        score = maxf(along, 0.0f) + across * 4.0f;
-        if (score < best_score) {
-            best_score = score;
-            best = nav_items[prev][i].id;
-        }
-    }
-    return best;
-}
-
-/* ImGui's RenderNavCursor around a focused item */
+/* ImGui's RenderNavCursor around the focused item */
 static void render_nav_cursor(ovl_vec2_t min, ovl_vec2_t max, uint32_t id, float rounding) {
     window_t* w = g.current;
-    const float thickness = 2.0f, distance = 3.0f + thickness * 0.5f;
-    if (id != g.nav_id || !g.nav_cursor_visible || !w)
+    const float thickness = 2.0f, distance = 4.0f;
+    const float* c;
+    float r[4];
+    int fully_visible;
+    if (!w || id != g.nav_id || !g.nav_cursor_visible)
         return;
     if (rounding < 0.0f)
         rounding = g.style.frame_rounding;
-    ovl_push_clip(&w->dl, v2(w->clip[0] - 4.0f, w->clip[1] - 4.0f),
-                  v2(w->clip[2] + 4.0f, w->clip[3] + 4.0f), 0);
-    ovl_add_rect(&w->dl, v2(min.x - distance, min.y - distance),
-                 v2(max.x + distance, max.y + distance), ovl_color_u32(OVL_COLOR_NAV_CURSOR, 1.0f),
+    c = ovl_draw_list_clip(&w->dl);
+    /* ImRect::ClipWith, then expanded */
+    r[0] = maxf(min.x, c[0]) - distance;
+    r[1] = maxf(min.y, c[1]) - distance;
+    r[2] = minf(max.x, c[2]) + distance;
+    r[3] = minf(max.y, c[3]) + distance;
+    fully_visible = r[0] >= c[0] && r[1] >= c[1] && r[2] <= c[2] && r[3] <= c[3];
+    if (!fully_visible)
+        ovl_push_clip(&w->dl, v2(r[0], r[1]), v2(r[2], r[3]), 0);
+    ovl_add_rect(&w->dl, v2(r[0], r[1]), v2(r[2], r[3]), ovl_color_u32(OVL_COLOR_NAV_CURSOR, 1.0f),
                  rounding, 0, thickness);
-    ovl_pop_clip(&w->dl);
+    if (!fully_visible)
+        ovl_pop_clip(&w->dl);
 }
 
-/* Focus and press for a focusable item, from the keyboard or gamepad */
-static int button_behavior(uint32_t id, ovl_vec2_t min, ovl_vec2_t max, int* hovered, int* held) {
+/* ImGui's ButtonBehavior, for the gamepad and keyboard (the overlays have no mouse): shown as
+ * hovered while focused, pressed by cross, held while it is down */
+static int button_behavior(uint32_t id, int* hovered, int* held) {
     window_t* w = g.current;
+    const int disabled = g.disabled_count > 0;
     int pressed = 0;
     *hovered = *held = 0;
-    item_add(id, min, max);
-    if (!w || g.disabled_count)
-        return 0;
-    if (w->id == g.nav_window || (w->parent && w->parent->id == g.nav_window)) {
-        nav_record(id, min, max);
-        if (id == g.nav_id) {
-            *held = g.nav_activate_down;
-            pressed = g.nav_activate;
+    if (!disabled) {
+        if (g.nav_id == id && g.nav_cursor_visible && g.nav_highlight_under_nav)
+            *hovered = 1;
+        if (g.nav_activate_down_id == id &&
+            (g.nav_activate_id == id || g.nav_activate_pressed_id == id)) {
+            pressed = 1;
+            set_active_id(id, w);
+            g.active_id_source = g.nav_source;
+            set_focus_id(id, w);
         }
     }
+    if (g.active_id == id) {
+        if (g.active_id_source == SRC_MOUSE) {
+            clear_active_id();
+            g.nav_cursor_visible = 0;
+        } else if (g.nav_activate_down_id == id) {
+            *held = 1;
+        } else {
+            clear_active_id();
+        }
+    }
+    if (g.nav_highlight_activated_id == id && !disabled)
+        *hovered = 1;
     g.last_hovered = *hovered;
     g.last_active = *held;
     g.last_clicked = pressed;
@@ -1467,7 +2047,7 @@ static int button_behavior(uint32_t id, ovl_vec2_t min, ovl_vec2_t max, int* hov
 }
 
 int ovl_is_item_hovered(void) {
-    return g.last_hovered || (g.last_id && g.last_id == g.nav_id && g.nav_cursor_visible);
+    return g.last_hovered;
 }
 
 int ovl_is_item_active(void) {
@@ -1490,16 +2070,29 @@ ovl_vec2_t ovl_item_rect_max(void) {
     return g.last_max;
 }
 
-void ovl_set_item_default_focus(void) {
-    if (g.current && g.current->appearing && g.last_id) {
-        g.nav_id = g.last_id;
-        g.nav_window =
-            g.current->is_child && g.current->parent ? g.current->parent->id : g.current->id;
-    }
+uint32_t ovl_last_item_id(void) {
+    return g.last_id;
 }
 
-void ovl_set_keyboard_focus_here(int offset) {
-    g.focus_here = offset + 1;
+/* ImGui's SetItemDefaultFocus: the last item is the one a window appearing focuses */
+void ovl_set_item_default_focus(void) {
+    window_t* w = g.current;
+    if (!w || g.nav_window != root_for_nav(w) || !(g.nav_init_request || g.nav_init_result.id))
+        return;
+    g.nav_init_request = 0;
+    nav_apply_item(&g.nav_init_result);
+    nav_update_any_request();
+}
+
+/* The core's SetItemCurrentNavFocus (imgui_std.h): the focus put on an item, the cursor shown,
+ * and the window's first item no longer sought */
+void ovl_set_item_current_nav_focus(uint32_t id) {
+    if (!g.current)
+        return;
+    set_focus_id(id ? id : g.last_id, g.current);
+    g.nav_init_result.id = 0;
+    g.nav_init_result.window = NULL;
+    g.nav_cursor_visible = 1;
 }
 
 void ovl_begin_disabled(int disabled) {
@@ -1661,10 +2254,12 @@ int ovl_button(const char* label, ovl_vec2_t size_arg) {
                           label_size.y + g.style.frame_padding.y * 2.0f);
     mx = v2(pos.x + size.x, pos.y + size.y);
     item_size(size, g.style.frame_padding.y);
-    pressed = button_behavior(id, pos, mx, &hovered, &held);
-    ci = (held && hovered) || held ? OVL_COLOR_BUTTON_ACTIVE
-         : hovered                 ? OVL_COLOR_BUTTON_HOVERED
-                                   : OVL_COLOR_BUTTON;
+    if (!item_add(id, pos, mx))
+        return 0;
+    pressed = button_behavior(id, &hovered, &held);
+    ci = (held && hovered) ? OVL_COLOR_BUTTON_ACTIVE
+         : hovered         ? OVL_COLOR_BUTTON_HOVERED
+                           : OVL_COLOR_BUTTON;
     render_nav_cursor(pos, mx, id, -1.0f);
     ovl_add_rect_filled(&w->dl, pos, mx, ovl_color_u32(ci, 1.0f), g.style.frame_rounding, 0);
     if (g.style.frame_border_size > 0.0f)
@@ -1696,7 +2291,9 @@ int ovl_invisible_button(const char* str_id, ovl_vec2_t size_arg) {
     size = calc_item_size(size_arg, 0.0f, 0.0f);
     mx = v2(pos.x + size.x, pos.y + size.y);
     item_size(size, -1.0f);
-    return button_behavior(id, pos, mx, &hovered, &held);
+    if (!item_add(id, pos, mx))
+        return 0;
+    return button_behavior(id, &hovered, &held);
 }
 
 int ovl_selectable(const char* label, int selected, ovl_vec2_t size_arg) {
@@ -1721,7 +2318,9 @@ int ovl_selectable(const char* label, int selected, ovl_vec2_t size_arg) {
     mx.x = (size_arg.x == 0.0f ? w->region_max.x : pos.x + size.x) +
            (g.style.item_spacing.x - truncf_(g.style.item_spacing.x * 0.5f));
     mx.y = pos.y + size.y + (g.style.item_spacing.y - truncf_(g.style.item_spacing.y * 0.5f));
-    pressed = button_behavior(id, mn, mx, &hovered, &held);
+    if (!item_add(id, mn, mx))
+        return 0;
+    pressed = button_behavior(id, &hovered, &held);
     if (selected || hovered || held || id == g.nav_id) {
         enum ovl_color ci = held && hovered ? OVL_COLOR_HEADER_ACTIVE
                             : hovered || (id == g.nav_id && g.nav_cursor_visible)
@@ -1853,31 +2452,6 @@ const ovl_draw_data_t* ovl_draw_data(void) {
 const ovl_draw_data_t* ovl_render(void) {
     window_t* order[MAX_WINDOWS];
     int n = 0, i;
-    /* Navigation settles: a move goes to the best item found, a focus lost goes to the first */
-    if (g.nav_move_dir) {
-        const uint32_t to = nav_resolve(g.nav_move_dir);
-        if (to)
-            g.nav_id = to;
-    }
-    if (g.nav_window && (!g.nav_id || !g.nav_seen) && !g.nav_move_dir) {
-        /* The focused item went: the first of the window instead */
-        if (g.nav_first_id)
-            g.nav_id = g.nav_first_id;
-    }
-    nav_item_count[(g.frame & 1) ^ 1] = 0;
-    {
-        /* The window the focus is in went: none */
-        int alive = 0;
-        for (i = 0; i < g.window_count; i++)
-            if (g.windows[i].used && g.windows[i].active && g.windows[i].id == g.nav_window)
-                alive = 1;
-        if (!alive) {
-            g.nav_window = 0;
-            g.nav_id = 0;
-            g.nav_cursor_visible = 0;
-        }
-    }
-
     g.out_vtx.size = g.out_idx.size = g.out_cmds.size = 0;
     append_list(&g.background);
     for (i = 0; i < g.window_count; i++) {

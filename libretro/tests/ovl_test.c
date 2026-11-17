@@ -8,7 +8,9 @@
  * white texel and baked lines, and what it hands the renderer. The expected
  * numbers are ImGui 1.92's, from the same font at the same sizes. The splash:
  * its size from its header, decoded on its thread as rpng decodes it, fitted
- * where the presenter's ImGui window put it; a decode stopped part way.
+ * where the presenter's ImGui window put it; a decode stopped part way. The
+ * message and error dialogs: as many vertices and indices as ImGui made, the
+ * focus moved and the button pressed by the pad as ImGui's navigation does.
  *
  *   build-tests/ovl_test [NotoSans-Regular.ttf] */
 
@@ -387,6 +389,75 @@ static void check_splash(void) {
   CHECK(!ovl_splash_decoding(), "stopped");
 }
 
+/* A frame of the dialogs with the pad's d-pad left and cross as given */
+static const ovl_draw_data_t *dialog_frame(int left, int cross) {
+  ovl_key_event(OVL_KEY_PAD_DPAD_LEFT, left);
+  ovl_key_event(OVL_KEY_PAD_FACE_DOWN, cross);
+  ovl_new_frame(1920.0f, 1080.0f, 1.0f / 60.0f);
+  ovl_msg_dialog_draw();
+  return ovl_render();
+}
+
+static void check_dialogs(void) {
+  static const char long_msg[] =
+      "The saved data could not be loaded because it was made by a newer "
+      "version of the game. Update the game to the latest version and try "
+      "again. Do you want to continue without loading it?";
+  ovl_msg_dialog_param_t p;
+  const ovl_draw_data_t *dd;
+  int button = -1, result = -1, frame;
+  ovl_msg_dialog_init();
+  ovl_set_gamepad_connected(1);
+  memset(&p, 0, sizeof(p));
+  p.mode = OVL_MSG_MODE_USER;
+  p.button_type = OVL_MSG_YESNO;
+  p.msg = long_msg;
+  ovl_msg_dialog_set_status(OVL_MSG_DIALOG_GAME, 1);
+  ovl_msg_dialog_open(OVL_MSG_DIALOG_GAME, &p);
+  CHECK(ovl_msg_dialog_status(OVL_MSG_DIALOG_GAME) == 2, "running");
+  CHECK(ovl_msg_dialog_active(), "frames drawn while it shows");
+  /* ImGui's: the focus put on Yes after it is drawn, its cursor from the
+   * next frame */
+  dd = dialog_frame(0, 0);
+  CHECK(dd->vtx_count == 684 && dd->idx_count == 1164,
+        "the dialog's first frame as ImGui's");
+  dd = dialog_frame(0, 0);
+  CHECK(dd->vtx_count == 692 && dd->idx_count == 1188,
+        "with the focus cursor, as ImGui's");
+  /* Left to No (found the next frame), then cross */
+  dialog_frame(1, 0);
+  dialog_frame(0, 0);
+  dialog_frame(0, 1);
+  CHECK(ovl_msg_dialog_status(OVL_MSG_DIALOG_GAME) == 3, "finished by cross");
+  ovl_msg_dialog_result(OVL_MSG_DIALOG_GAME, &button, &result);
+  CHECK(button == OVL_MSG_BUTTON_2 && result == OVL_MSG_RESULT_OK, "on No");
+  dd = dialog_frame(0, 0);
+  CHECK(dd->vtx_count == 0 && !ovl_msg_dialog_active(), "gone");
+  /* The game closing it */
+  ovl_msg_dialog_open(OVL_MSG_DIALOG_GAME, &p);
+  CHECK(ovl_msg_dialog_close(OVL_MSG_DIALOG_GAME, 0, 0) &&
+            !ovl_msg_dialog_close(OVL_MSG_DIALOG_GAME, 0, 0),
+        "closed once");
+
+  /* The error dialog */
+  memset(&p, 0, sizeof(p));
+  p.mode = OVL_MSG_MODE_ERROR;
+  p.msg = "An error has occurred. \nCode: 0X80020016";
+  ovl_msg_dialog_set_status(OVL_MSG_DIALOG_ERROR, 1);
+  ovl_msg_dialog_open(OVL_MSG_DIALOG_ERROR, &p);
+  dd = dialog_frame(0, 0);
+  CHECK(dd->vtx_count == 216 && dd->idx_count == 462,
+        "the error dialog's first frame as ImGui's");
+  dd = dialog_frame(0, 0);
+  CHECK(dd->vtx_count == 224 && dd->idx_count == 486,
+        "with the focus cursor, as ImGui's");
+  for (frame = 0; frame < 3; frame++)
+    dialog_frame(0, frame == 1);
+  CHECK(ovl_msg_dialog_status(OVL_MSG_DIALOG_ERROR) == 3, "finished by OK");
+  dialog_frame(0, 0);
+  ovl_msg_dialog_shutdown();
+}
+
 int main(int argc, char **argv) {
   const char *path =
       argc > 1 ? argv[1] : "src/imgui/renderer/fonts/NotoSans-Regular.ttf";
@@ -438,6 +509,7 @@ int main(int argc, char **argv) {
   }
   check_layers();
   check_splash();
+  check_dialogs();
   ovl_destroy();
   free(noto);
   if (failures) {

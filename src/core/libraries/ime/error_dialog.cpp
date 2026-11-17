@@ -3,7 +3,6 @@
 
 #include <utility>
 #include <fmt/format.h>
-#include <imgui.h>
 #include "common/enum_names.h"
 
 #include "common/assert.h"
@@ -12,10 +11,10 @@
 #include "core/libraries/libs.h"
 #include "core/libraries/system/commondialog.h"
 #include "error_dialog.h"
-#include "imgui/imgui_layer.h"
-#include "imgui/imgui_std.h"
+#include "video_core/overlay/ovl_layers.h"
 
-static constexpr ImVec2 BUTTON_SIZE{100.0f, 30.0f};
+// Drawn by the overlay (video_core/overlay/ovl_msgdialog.c), which finishes it when OK is
+// pressed; the status is its own
 
 namespace Libraries::ErrorDialog {
 
@@ -23,97 +22,11 @@ using CommonDialog::Error;
 using CommonDialog::Result;
 using CommonDialog::Status;
 
-class ErrorDialogUi final : public ImGui::Layer {
-    bool first_render{false};
+static constexpr int DIALOG = OVL_MSG_DIALOG_ERROR;
 
-    Status* status{nullptr};
-    std::string err_message{};
-
-public:
-    explicit ErrorDialogUi(Status* status = nullptr, std::string err_message = "")
-        : status(status), err_message(std::move(err_message)) {
-        if (status && *status == Status::RUNNING) {
-            first_render = true;
-            AddLayer(this);
-        }
-    }
-    ~ErrorDialogUi() override {
-        Finish();
-    }
-    ErrorDialogUi(const ErrorDialogUi& other) = delete;
-    ErrorDialogUi(ErrorDialogUi&& other) noexcept
-        : Layer(other), status(other.status), err_message(std::move(other.err_message)) {
-        other.status = nullptr;
-    }
-    ErrorDialogUi& operator=(ErrorDialogUi other) {
-        using std::swap;
-        swap(status, other.status);
-        swap(err_message, other.err_message);
-        if (status && *status == Status::RUNNING) {
-            first_render = true;
-            AddLayer(this);
-        }
-        return *this;
-    }
-
-    void Finish() {
-        if (status) {
-            *status = Status::FINISHED;
-        }
-        status = nullptr;
-        RemoveLayer(this);
-    }
-
-    void Draw() override {
-        using namespace ImGui;
-        if (status == nullptr || *status != Status::RUNNING) {
-            return;
-        }
-        const auto& io = GetIO();
-
-        const ImVec2 window_size{
-            std::min(io.DisplaySize.x, 500.0f),
-            std::min(io.DisplaySize.y, 300.0f),
-        };
-
-        CentralizeNextWindow();
-        SetNextWindowSize(window_size);
-        SetNextWindowCollapsed(false);
-        if (first_render || !io.NavActive) {
-            SetNextWindowFocus();
-        }
-        KeepNavHighlight();
-        if (Begin("Error Dialog##ErrorDialog", nullptr,
-                  ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoSavedSettings)) {
-            const auto ws = GetWindowSize();
-
-            DrawPrettyBackground();
-            const char* begin = &err_message.front();
-            const char* end = &err_message.back() + 1;
-            SetWindowFontScale(1.3f);
-            DrawCenteredText(begin, end,
-                             GetContentRegionAvail() - ImVec2{0.0f, 15.0f + BUTTON_SIZE.y});
-            SetWindowFontScale(1.0f);
-
-            SetCursorPos({
-                ws.x / 2.0f - BUTTON_SIZE.x / 2.0f,
-                ws.y - 10.0f - BUTTON_SIZE.y,
-            });
-            if (Button("OK", BUTTON_SIZE)) {
-                Finish();
-            }
-            if (first_render) {
-                SetItemCurrentNavFocus();
-            }
-        }
-        End();
-
-        first_render = false;
-    }
-};
-
-static auto g_status = Status::NONE;
-static ErrorDialogUi g_dialog_ui;
+static Status GetStatus() {
+    return static_cast<Status>(ovl_msg_dialog_status(DIALOG));
+}
 
 struct Param {
     s32 size;
@@ -124,30 +37,32 @@ struct Param {
 
 Error PS4_SYSV_ABI sceErrorDialogClose() {
     LOG_DEBUG(Lib_ErrorDialog, "called");
-    if (g_status != Status::RUNNING) {
+    if (GetStatus() != Status::RUNNING) {
         return Error::NOT_RUNNING;
     }
-    g_dialog_ui.Finish();
+    ovl_msg_dialog_close(DIALOG, OVL_MSG_BUTTON_INVALID, OVL_MSG_RESULT_OK);
     return Error::OK;
 }
 
 Status PS4_SYSV_ABI sceErrorDialogGetStatus() {
+    const Status status = GetStatus();
     LOG_TRACE(Lib_ErrorDialog, "called status={}",
-              enum_name(&enum_names_Libraries_CommonDialog_Status, static_cast<s64>(g_status)));
-    return g_status;
+              enum_name(&enum_names_Libraries_CommonDialog_Status, static_cast<s64>(status)));
+    return status;
 }
 
 Error PS4_SYSV_ABI sceErrorDialogInitialize() {
     LOG_DEBUG(Lib_ErrorDialog, "called");
-    if (g_status != Status::NONE) {
+    if (GetStatus() != Status::NONE) {
         return Error::ALREADY_INITIALIZED;
     }
-    g_status = Status::INITIALIZED;
+    ovl_msg_dialog_set_status(DIALOG, static_cast<int>(Status::INITIALIZED));
     return Error::OK;
 }
 
 Error PS4_SYSV_ABI sceErrorDialogOpen(const Param* param) {
-    if (g_status != Status::INITIALIZED && g_status != Status::FINISHED) {
+    const Status status = GetStatus();
+    if (status != Status::INITIALIZED && status != Status::FINISHED) {
         LOG_INFO(Lib_ErrorDialog, "called without initialize");
         return Error::INVALID_STATE;
     }
@@ -160,8 +75,10 @@ Error PS4_SYSV_ABI sceErrorDialogOpen(const Param* param) {
     ASSERT(param->size == sizeof(Param));
 
     const std::string err_message = fmt::format("An error has occurred. \nCode: {:#X}", err);
-    g_status = Status::RUNNING;
-    g_dialog_ui = ErrorDialogUi{&g_status, err_message};
+    ovl_msg_dialog_param_t overlay_param{};
+    overlay_param.mode = OVL_MSG_MODE_ERROR;
+    overlay_param.msg = err_message.c_str();
+    ovl_msg_dialog_open(DIALOG, &overlay_param);
     return Error::OK;
 }
 
@@ -177,20 +94,21 @@ int PS4_SYSV_ABI sceErrorDialogOpenWithReport() {
 
 Error PS4_SYSV_ABI sceErrorDialogTerminate() {
     LOG_DEBUG(Lib_ErrorDialog, "called");
-    if (g_status == Status::RUNNING) {
+    if (GetStatus() == Status::RUNNING) {
         sceErrorDialogClose();
     }
-    if (g_status == Status::NONE) {
+    if (GetStatus() == Status::NONE) {
         return Error::NOT_INITIALIZED;
     }
-    g_status = Status::NONE;
+    ovl_msg_dialog_set_status(DIALOG, static_cast<int>(Status::NONE));
     return Error::OK;
 }
 
 Status PS4_SYSV_ABI sceErrorDialogUpdateStatus() {
+    const Status status = GetStatus();
     LOG_TRACE(Lib_ErrorDialog, "called status={}",
-              enum_name(&enum_names_Libraries_CommonDialog_Status, static_cast<s64>(g_status)));
-    return g_status;
+              enum_name(&enum_names_Libraries_CommonDialog_Status, static_cast<s64>(status)));
+    return status;
 }
 
 void RegisterLib(Core::Loader::SymbolsResolver* sym) {

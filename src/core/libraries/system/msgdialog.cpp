@@ -1,14 +1,12 @@
 // SPDX-FileCopyrightText: Copyright 2024 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
-#include <imgui.h>
 #include "common/enum_names.h"
 
 #include "common/assert.h"
 #include "common/logging/log.h"
 #include "core/libraries/libs.h"
 #include "core/libraries/system/msgdialog.h"
-#include "imgui_internal.h"
 #include "msgdialog_ui.h"
 
 namespace Libraries::MsgDialog {
@@ -17,36 +15,46 @@ using CommonDialog::Error;
 using CommonDialog::Result;
 using CommonDialog::Status;
 
-static auto g_status = Status::NONE;
-static MsgDialogState g_state{};
-static DialogResult g_result{};
-static MsgDialogUi g_msg_dialog_ui;
+// The status and result are the overlay's (video_core/overlay/ovl_msgdialog.c), which draws the
+// dialog and finishes it when a button is pressed; the mode is the game's thread's own
+static constexpr int GAME = OVL_MSG_DIALOG_GAME;
+static MsgDialogMode g_mode{};
+
+static Status GetStatus() {
+    return static_cast<Status>(ovl_msg_dialog_status(GAME));
+}
 
 Error PS4_SYSV_ABI sceMsgDialogClose() {
     LOG_DEBUG(Lib_MsgDlg, "called");
-    if (g_status != Status::RUNNING) {
+    if (GetStatus() != Status::RUNNING) {
         return Error::NOT_RUNNING;
     }
-    g_msg_dialog_ui.Finish(ButtonId::INVALID);
+    ovl_msg_dialog_close(GAME, OVL_MSG_BUTTON_INVALID, OVL_MSG_RESULT_OK);
     return Error::OK;
 }
 
 Error PS4_SYSV_ABI sceMsgDialogGetResult(DialogResult* result) {
     LOG_DEBUG(Lib_MsgDlg, "called");
-    if (g_status != Status::FINISHED) {
+    if (GetStatus() != Status::FINISHED) {
         return Error::NOT_FINISHED;
     }
     if (result == nullptr) {
         return Error::ARG_NULL;
     }
-    *result = g_result;
+    int button, r;
+    ovl_msg_dialog_result(GAME, &button, &r);
+    DialogResult out{};
+    out.result = static_cast<Result>(r);
+    out.buttonId = static_cast<ButtonId>(button);
+    *result = out;
     return Error::OK;
 }
 
 Status PS4_SYSV_ABI sceMsgDialogGetStatus() {
+    const Status status = GetStatus();
     LOG_TRACE(Lib_MsgDlg, "called status={}",
-              enum_name(&enum_names_Libraries_CommonDialog_Status, static_cast<s64>(g_status)));
-    return g_status;
+              enum_name(&enum_names_Libraries_CommonDialog_Status, static_cast<s64>(status)));
+    return status;
 }
 
 Error PS4_SYSV_ABI sceMsgDialogInitialize() {
@@ -54,20 +62,21 @@ Error PS4_SYSV_ABI sceMsgDialogInitialize() {
     if (!CommonDialog::g_isInitialized) {
         return Error::NOT_SYSTEM_INITIALIZED;
     }
-    if (g_status != Status::NONE) {
+    if (GetStatus() != Status::NONE) {
         return Error::ALREADY_INITIALIZED;
     }
     if (CommonDialog::g_isUsed) {
         return Error::BUSY;
     }
-    g_status = Status::INITIALIZED;
+    ovl_msg_dialog_set_status(GAME, static_cast<int>(Status::INITIALIZED));
     CommonDialog::g_isUsed = true;
 
     return Error::OK;
 }
 
 Error PS4_SYSV_ABI sceMsgDialogOpen(const OrbisParam* param) {
-    if (g_status != Status::INITIALIZED && g_status != Status::FINISHED) {
+    const Status status = GetStatus();
+    if (status != Status::INITIALIZED && status != Status::FINISHED) {
         LOG_INFO(Lib_MsgDlg, "called without initialize");
         return Error::INVALID_STATE;
     }
@@ -80,77 +89,73 @@ Error PS4_SYSV_ABI sceMsgDialogOpen(const OrbisParam* param) {
         enum_name(&enum_names_Libraries_MsgDialog_MsgDialogMode, static_cast<s64>(param->mode)));
     ASSERT(param->size == sizeof(OrbisParam));
     ASSERT(param->baseParam.size == sizeof(CommonDialog::BaseParam));
-    g_result = {};
-    g_state = MsgDialogState{*param};
-    g_status = Status::RUNNING;
-    g_msg_dialog_ui = MsgDialogUi(&g_state, &g_status, &g_result);
+    MsgDialogState state{*param};
+    g_mode = state.GetMode();
+    const ovl_msg_dialog_param_t overlay_param = MakeOverlayParam(state);
+    ovl_msg_dialog_open(GAME, &overlay_param);
+    return Error::OK;
+}
+
+static Error CheckProgressBar(OrbisMsgDialogProgressBarTarget target) {
+    if (GetStatus() != Status::RUNNING) {
+        return Error::NOT_RUNNING;
+    }
+    if (g_mode != MsgDialogMode::PROGRESS_BAR) {
+        return Error::NOT_SUPPORTED;
+    }
+    if (target != OrbisMsgDialogProgressBarTarget::DEFAULT) {
+        return Error::PARAM_INVALID;
+    }
     return Error::OK;
 }
 
 Error PS4_SYSV_ABI sceMsgDialogProgressBarInc(OrbisMsgDialogProgressBarTarget target, u32 delta) {
     LOG_DEBUG(Lib_MsgDlg, "called");
-    if (g_status != Status::RUNNING) {
-        return Error::NOT_RUNNING;
+    const Error error = CheckProgressBar(target);
+    if (error == Error::OK) {
+        ovl_msg_dialog_add_progress(GAME, delta);
     }
-    if (g_state.GetMode() != MsgDialogMode::PROGRESS_BAR) {
-        return Error::NOT_SUPPORTED;
-    }
-    if (target != OrbisMsgDialogProgressBarTarget::DEFAULT) {
-        return Error::PARAM_INVALID;
-    }
-    g_state.GetState<MsgDialogState::ProgressState>().progress += delta;
-    return Error::OK;
+    return error;
 }
 
 Error PS4_SYSV_ABI sceMsgDialogProgressBarSetMsg(OrbisMsgDialogProgressBarTarget target,
                                                  const char* msg) {
     LOG_DEBUG(Lib_MsgDlg, "called");
-    if (g_status != Status::RUNNING) {
-        return Error::NOT_RUNNING;
+    const Error error = CheckProgressBar(target);
+    if (error == Error::OK) {
+        ovl_msg_dialog_set_message(GAME, msg);
     }
-    if (g_state.GetMode() != MsgDialogMode::PROGRESS_BAR) {
-        return Error::NOT_SUPPORTED;
-    }
-    if (target != OrbisMsgDialogProgressBarTarget::DEFAULT) {
-        return Error::PARAM_INVALID;
-    }
-    g_state.GetState<MsgDialogState::ProgressState>().msg = msg;
-    return Error::OK;
+    return error;
 }
 
 Error PS4_SYSV_ABI sceMsgDialogProgressBarSetValue(OrbisMsgDialogProgressBarTarget target,
                                                    u32 value) {
     LOG_DEBUG(Lib_MsgDlg, "called");
-    if (g_status != Status::RUNNING) {
-        return Error::NOT_RUNNING;
+    const Error error = CheckProgressBar(target);
+    if (error == Error::OK) {
+        ovl_msg_dialog_set_progress(GAME, value);
     }
-    if (g_state.GetMode() != MsgDialogMode::PROGRESS_BAR) {
-        return Error::NOT_SUPPORTED;
-    }
-    if (target != OrbisMsgDialogProgressBarTarget::DEFAULT) {
-        return Error::PARAM_INVALID;
-    }
-    g_state.GetState<MsgDialogState::ProgressState>().progress = value;
-    return Error::OK;
+    return error;
 }
 
 Error PS4_SYSV_ABI sceMsgDialogTerminate() {
     LOG_DEBUG(Lib_MsgDlg, "called");
-    if (g_status == Status::RUNNING) {
+    if (GetStatus() == Status::RUNNING) {
         sceMsgDialogClose();
     }
-    if (g_status == Status::NONE) {
+    if (GetStatus() == Status::NONE) {
         return Error::NOT_INITIALIZED;
     }
-    g_status = Status::NONE;
+    ovl_msg_dialog_set_status(GAME, static_cast<int>(Status::NONE));
     CommonDialog::g_isUsed = false;
     return Error::OK;
 }
 
 Status PS4_SYSV_ABI sceMsgDialogUpdateStatus() {
+    const Status status = GetStatus();
     LOG_TRACE(Lib_MsgDlg, "called status={}",
-              enum_name(&enum_names_Libraries_CommonDialog_Status, static_cast<s64>(g_status)));
-    return g_status;
+              enum_name(&enum_names_Libraries_CommonDialog_Status, static_cast<s64>(status)));
+    return status;
 }
 
 void RegisterLib(Core::Loader::SymbolsResolver* sym) {
