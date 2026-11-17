@@ -7,10 +7,10 @@
 #include "common/path_util.h"
 #include "common/singleton.h"
 #include "core/debug_state.h"
-#include "core/devtools/layer.h"
 #include "core/emulator_settings.h"
 #include "core/libraries/system/systemservice.h"
 #include "frontend_window.h"
+#include "imgui/fps_layer.h"
 #include "imgui/friends_layer.h"
 #include "imgui/invitation_prompt_layer.h"
 #include "imgui/notifications_layer.h"
@@ -455,7 +455,7 @@ Presenter::Presenter(Frontend::Window& window_, AmdGpu::Liverpool* liverpool_)
 
     pp_pass.Create(device, swapchain.GetSurfaceFormat().format);
 
-    ImGui::Layer::AddLayer(Common::Singleton<Core::Devtools::Layer>::Instance());
+    ImGui::FpsCounter::Register();
     ImGui::Friends::Register();
     ImGui::ShadNetNotify::Register();
     ImGui::InvitationPrompt::Register();
@@ -465,7 +465,7 @@ Presenter::~Presenter() {
     ImGui::InvitationPrompt::Unregister();
     ImGui::ShadNetNotify::Unregister();
     ImGui::Friends::Unregister();
-    ImGui::Layer::RemoveLayer(Common::Singleton<Core::Devtools::Layer>::Instance());
+    ImGui::FpsCounter::Unregister();
 
     draw_scheduler.Finish();
     present_scheduler.Finish();
@@ -871,8 +871,7 @@ void Presenter::Present(Frame* frame, bool is_reusing_frame, bool is_game_frame)
         // docked there (the splash's, or from an earlier session's layout) leaves it the next
         // frame; for that one frame the picture is drawn over the background as a quad.
         const ImGuiDockNode* central = ImGui::DockBuilderGetCentralNode(dockId);
-        const bool no_window =
-            !Libraries::SystemService::IsSplashVisible() && !emu_settings_get_null_gpu();
+        const bool no_window = !Libraries::SystemService::IsSplashVisible();
         const bool direct = no_window && (!central || central->Windows.Size == 0);
         const std::array pre_barriers{
             vk::ImageMemoryBarrier{
@@ -985,10 +984,6 @@ void Presenter::Present(Frame* frame, bool is_reusing_frame, bool is_game_frame)
 
                 ImGui::SetCursorPos(ImGui::GetCursorStartPos() + offset);
                 ImGui::Image(game_texture, size);
-
-                if (emu_settings_get_null_gpu()) {
-                    Core::Devtools::Layer::DrawNullGpuNotice();
-                }
             }
             ImGui::End();
             ImGui::PopStyleVar(3);
@@ -1112,9 +1107,6 @@ void Presenter::Present(Frame* frame, bool is_reusing_frame, bool is_game_frame)
     swapchain.Present();
 
     free_frame();
-    if (!is_reusing_frame && is_game_frame) {
-        DebugState.IncFlipFrameNum();
-    }
 }
 
 Frame* Presenter::GetRenderFrame() {

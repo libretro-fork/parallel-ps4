@@ -7,7 +7,6 @@
 #include "common/alignment.h"
 #include "common/assert.h"
 #include "common/types.h"
-#include "core/devtools/widget/gpu_memory.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_scheduler.h"
 #include "video_core/renderer_vulkan/vk_staging_buffer_pool.h"
@@ -174,7 +173,6 @@ void StagingBufferPool::TickFrame() {
     for (auto& cache : large_caches) {
         TrimLarge(cache);
     }
-    PublishStats();
 }
 
 void StagingBufferPool::TrimRing(Ring& ring) {
@@ -202,29 +200,6 @@ void StagingBufferPool::TrimLarge(std::vector<LargeBuffer>& cache) {
         return !entry.held && frame - entry.last_used_frame >= LARGE_IDLE_FRAMES &&
                scheduler.IsFree(entry.tick);
     });
-}
-
-void StagingBufferPool::PublishStats() const {
-    using namespace Core::Devtools::Widget;
-    if (!GpuMemoryViewer::IsEnabled()) {
-        return;
-    }
-    static constexpr std::array<const char*, NUM_TYPES> names = {"DeviceLocal", "HostUncached",
-                                                                 "HostCached"};
-    GpuMemoryGroup group{.name = "Staging"};
-    for (size_t i = 0; i < NUM_TYPES; ++i) {
-        u64 bytes = 0;
-        for (const Block& block : rings[i].blocks) {
-            bytes += block.buffer->SizeBytes();
-        }
-        for (const LargeBuffer& entry : large_caches[i]) {
-            bytes += entry.buffer->SizeBytes();
-        }
-        if (bytes != 0) {
-            group.rows.push_back({.name = names[i], .bytes = bytes});
-        }
-    }
-    GpuMemoryViewer::Publish(std::move(group));
 }
 
 } // namespace Vulkan

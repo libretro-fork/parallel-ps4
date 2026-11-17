@@ -14,7 +14,6 @@
 #include "common/thread_name.h"
 #include "core/aerolib/aerolib.h"
 #include "core/aerolib/stubs.h"
-#include "core/devtools/widget/module_list.h"
 #include "core/emulator_settings.h"
 #ifdef SHADPS4_ENABLE_FEX_GUEST_CPU
 #include <cstdlib>
@@ -695,8 +694,6 @@ s32 Linker::LoadModule(const std::filesystem::path& elf_name, bool is_dynamic) {
         num_static_modules += !is_dynamic;
         m_modules.emplace_back(std::move(module));
 
-        Core::Devtools::Widget::ModuleList::AddModule(elf_name.filename().string(), elf_name);
-
         return mod_id;
     });
 }
@@ -884,7 +881,6 @@ bool Linker::Resolve(const std::string& name, Loader::SymbolType sym_type, Modul
     if (record) {
 #endif
         *return_info = *record;
-        Core::Devtools::Widget::ModuleList::AddModule(sr.library);
         return true;
     }
 

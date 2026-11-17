@@ -7,7 +7,6 @@
 #include "common/polyfill_thread.h"
 #include "common/scope_exit.h"
 #include "common/thread_name.h"
-#include "core/debug_state.h"
 #include "core/emulator_settings.h"
 #include "core/libraries/kernel/process.h"
 #include "core/libraries/videoout/driver.h"
@@ -459,9 +458,6 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb) {
                 regs.index_base_address.base_addr_hi = draw_index->index_base_hi;
                 regs.num_indices = draw_index->index_count;
                 regs.draw_initiator = draw_index->draw_initiator;
-                if (DebugState.DumpingCurrentReg()) {
-                    DebugState.PushRegsDump(base_addr, reinterpret_cast<uintptr_t>(header), regs);
-                }
                 if (!rasterizer) {
                     break;
                 }
@@ -476,9 +472,6 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb) {
                 regs.max_index_size = draw_index_off->max_size;
                 regs.num_indices = draw_index_off->index_count;
                 regs.draw_initiator = draw_index_off->draw_initiator;
-                if (DebugState.DumpingCurrentReg()) {
-                    DebugState.PushRegsDump(base_addr, reinterpret_cast<uintptr_t>(header), regs);
-                }
                 if (!rasterizer) {
                     break;
                 }
@@ -492,9 +485,6 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb) {
                 const auto* draw_index = reinterpret_cast<const PM4CmdDrawIndexAuto*>(header);
                 regs.num_indices = draw_index->index_count;
                 regs.draw_initiator = draw_index->draw_initiator;
-                if (DebugState.DumpingCurrentReg()) {
-                    DebugState.PushRegsDump(base_addr, reinterpret_cast<uintptr_t>(header), regs);
-                }
                 if (!rasterizer) {
                     break;
                 }
@@ -507,9 +497,6 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb) {
                 const auto* draw_indirect = reinterpret_cast<const PM4CmdDrawIndirect*>(header);
                 const auto offset = draw_indirect->data_offset;
                 const auto stride = sizeof(DrawIndirectArgs);
-                if (DebugState.DumpingCurrentReg()) {
-                    DebugState.PushRegsDump(base_addr, reinterpret_cast<uintptr_t>(header), regs);
-                }
                 if (!rasterizer) {
                     break;
                 }
@@ -527,9 +514,6 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb) {
                     reinterpret_cast<const PM4CmdDrawIndirectCountMulti*>(header);
                 const auto offset = draw_indirect->data_offset;
                 const auto stride = sizeof(DrawIndirectArgs);
-                if (DebugState.DumpingCurrentReg()) {
-                    DebugState.PushRegsDump(base_addr, reinterpret_cast<uintptr_t>(header), regs);
-                }
                 if (!rasterizer) {
                     break;
                 }
@@ -547,9 +531,6 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb) {
                 const auto* draw_indirect =
                     reinterpret_cast<const PM4CmdDrawIndirectMulti*>(header);
                 const auto offset = draw_indirect->data_offset;
-                if (DebugState.DumpingCurrentReg()) {
-                    DebugState.PushRegsDump(base_addr, reinterpret_cast<uintptr_t>(header), regs);
-                }
                 if (!rasterizer) {
                     break;
                 }
@@ -569,9 +550,6 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb) {
                 const auto offset = draw_index_indirect->data_offset;
                 const auto stride = sizeof(DrawIndexedIndirectArgs);
                 regs.max_index_size = index_buffer_num_indices;
-                if (DebugState.DumpingCurrentReg()) {
-                    DebugState.PushRegsDump(base_addr, reinterpret_cast<uintptr_t>(header), regs);
-                }
                 if (!rasterizer) {
                     break;
                 }
@@ -589,9 +567,6 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb) {
                     reinterpret_cast<const PM4CmdDrawIndexIndirectMulti*>(header);
                 const auto offset = draw_index_indirect->data_offset;
                 regs.max_index_size = index_buffer_num_indices;
-                if (DebugState.DumpingCurrentReg()) {
-                    DebugState.PushRegsDump(base_addr, reinterpret_cast<uintptr_t>(header), regs);
-                }
                 if (!rasterizer) {
                     break;
                 }
@@ -610,9 +585,6 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb) {
                     reinterpret_cast<const PM4CmdDrawIndexIndirectCountMulti*>(header);
                 const auto offset = draw_index_indirect->data_offset;
                 regs.max_index_size = index_buffer_num_indices;
-                if (DebugState.DumpingCurrentReg()) {
-                    DebugState.PushRegsDump(base_addr, reinterpret_cast<uintptr_t>(header), regs);
-                }
                 if (!rasterizer) {
                     break;
                 }
@@ -636,10 +608,6 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb) {
                 cs_program.dim_y = dispatch_direct->dim_y;
                 cs_program.dim_z = dispatch_direct->dim_z;
                 cs_program.dispatch_initiator = dispatch_direct->dispatch_initiator;
-                if (DebugState.DumpingCurrentReg()) {
-                    DebugState.PushRegsDumpCompute(base_addr, reinterpret_cast<uintptr_t>(header),
-                                                   cs_program);
-                }
                 if (!rasterizer || (cs_program.dispatch_initiator & 1) == 0) {
                     break;
                 }
@@ -654,10 +622,6 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb) {
                 auto& cs_program = GetCsRegs();
                 const auto offset = dispatch_indirect->data_offset;
                 const auto size = sizeof(PM4CmdDispatchIndirect::GroupDimensions);
-                if (DebugState.DumpingCurrentReg()) {
-                    DebugState.PushRegsDumpCompute(base_addr, reinterpret_cast<uintptr_t>(header),
-                                                   cs_program);
-                }
                 if (!rasterizer || (cs_program.dispatch_initiator & 1) == 0) {
                     break;
                 }
@@ -1093,10 +1057,6 @@ Liverpool::Task Liverpool::ProcessCompute(std::span<const u32> acb, u32 vqid) {
             cs_program.dim_y = dispatch_direct->dim_y;
             cs_program.dim_z = dispatch_direct->dim_z;
             cs_program.dispatch_initiator = dispatch_direct->dispatch_initiator;
-            if (DebugState.DumpingCurrentReg()) {
-                DebugState.PushRegsDumpCompute(base_addr, reinterpret_cast<uintptr_t>(header),
-                                               cs_program);
-            }
             if (!rasterizer || (cs_program.dispatch_initiator & 1) == 0) {
                 break;
             }
@@ -1112,10 +1072,6 @@ Liverpool::Task Liverpool::ProcessCompute(std::span<const u32> acb, u32 vqid) {
             auto& cs_program = GetCsRegs();
             const auto ib_address = dispatch_indirect->Address<VAddr>();
             const auto size = sizeof(PM4CmdDispatchIndirect::GroupDimensions);
-            if (DebugState.DumpingCurrentReg()) {
-                DebugState.PushRegsDumpCompute(base_addr, reinterpret_cast<uintptr_t>(header),
-                                               cs_program);
-            }
             if (!rasterizer || (cs_program.dispatch_initiator & 1) == 0) {
                 break;
             }

@@ -15,7 +15,6 @@
 #include "common/quick_exit.h"
 #include "common/singleton.h"
 #include "core/debug_state.h"
-#include "core/devtools/layer.h"
 #include "core/emulator_settings.h"
 #include "font_data.h"
 #include "font_stack.h"
@@ -134,7 +133,6 @@ void Initialize(const ::Vulkan::Instance& instance, const Frontend::Window& wind
 
     StyleColorsDark();
 
-    ::Core::Devtools::Layer::SetupSettings();
     platform_window = &window;
     io.BackendPlatformName = "parallel_ps4_libretro";
 
@@ -297,9 +295,7 @@ ImGuiID NewFrame(bool is_reusing_frame) {
 
     ImGuiWindowFlags flags =
         ImGuiDockNodeFlags_PassthruCentralNode | ImGuiDockNodeFlags_AutoHideTabBar;
-    if (!DebugState.IsShowingDebugMenuBar()) {
-        flags |= ImGuiDockNodeFlags_NoTabBar;
-    }
+    flags |= ImGuiDockNodeFlags_NoTabBar;
     ImGuiID dockId = DockSpaceOverViewport(0, GetMainViewport(), flags);
 
     for (auto* layer : layers) {

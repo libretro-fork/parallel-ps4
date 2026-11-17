@@ -7,7 +7,6 @@
 #include "common/enum_names.h"
 
 #include "common/alignment.h"
-#include "core/debug_state.h"
 #include "core/memory.h"
 #include "video_core/amdgpu/liverpool.h"
 #include "video_core/buffer_cache/buffer.h"

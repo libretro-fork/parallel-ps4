@@ -5,7 +5,6 @@
 #include "common/assert.h"
 #include "common/thread_name.h"
 #include "common/vblank_clock.h"
-#include "core/debug_state.h"
 #include "core/emulator_settings.h"
 #include "core/libraries/kernel/time.h"
 #include "core/libraries/videoout/driver.h"
@@ -407,11 +406,6 @@ VideoOutDriver::Request VideoOutDriver::ReceiveRequest() {
 void VideoOutDriver::Vblank() {
     if (retro_atomic_exchange_int(&main_port.reset_status, 0) != 0) {
         ResetStatus();
-    }
-
-    if (DebugState.IsGuestThreadsPaused()) {
-        DrawLastFrame();
-        return;
     }
 
     // Check if it's time to take a request.

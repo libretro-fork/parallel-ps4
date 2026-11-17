@@ -77,8 +77,6 @@ private:
     void TrimRing(Ring& ring);
     void TrimLarge(std::vector<LargeBuffer>& cache);
 
-    void PublishStats() const;
-
     const Instance& instance;
     Scheduler& scheduler;
 

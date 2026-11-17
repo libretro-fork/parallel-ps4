@@ -111,9 +111,6 @@ public:
     Result GetProgram(Shader::HwStage hw_stage, Shader::SwStage sw_stage,
                       const Shader::ShaderParams& params, Shader::Backend::Bindings& binding);
 
-    std::optional<vk::ShaderModule> ReplaceShader(vk::ShaderModule module,
-                                                  std::span<const u32> spv_code);
-
     static std::string GetShaderName(Shader::HwStage stage, u64 hash,
                                      std::optional<size_t> perm = {});
 
@@ -209,11 +206,6 @@ private:
     GraphicsPipelineKey graphics_key{};
     ComputePipelineKey compute_key{};
     u32 num_new_pipelines{}; // new pipelines added to the cache since the game start
-
-    // Only if Config::collectShadersForDebug()
-    std::unordered_map<vk::ShaderModule,
-                       std::vector<std::variant<GraphicsPipelineKey, ComputePipelineKey>>>
-        module_related_pipelines;
 };
 
 } // namespace Vulkan

@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include "common/enum_names.h"
-#include "core/debug_state.h"
 #include "core/emulator_settings.h"
 #include "core/memory.h"
 #include "shader_recompiler/resource.h"
@@ -333,7 +332,6 @@ void Rasterizer::Draw(bool is_indexed, u32 index_offset) {
         cmdbuf.draw(regs.num_indices, regs.num_instances.NumInstances(), vertex_offset,
                     instance_offset);
     }
-    DebugState.IncDrawCall();
 
     ResetBindings(false);
     if (!capture_textures.empty()) [[unlikely]] {
@@ -409,7 +407,6 @@ void Rasterizer::DrawIndirect(bool is_indexed, VAddr arg_address, u32 offset, u3
         } else {
             cmdbuf.drawIndexedIndirect(buffer->Handle(), base, max_count, stride);
         }
-        DebugState.IncDrawCall();
     } else {
         ASSERT(sizeof(VkDrawIndirectCommand) == stride);
 
@@ -419,7 +416,6 @@ void Rasterizer::DrawIndirect(bool is_indexed, VAddr arg_address, u32 offset, u3
         } else {
             cmdbuf.drawIndirect(buffer->Handle(), base, max_count, stride);
         }
-        DebugState.IncDrawCall();
     }
 
     ResetBindings(false);
@@ -459,7 +455,6 @@ void Rasterizer::DispatchDirect() {
     instance.Mark(cmdbuf, "dispatch: shader, x, y, z", cs.pgm_hash, cs_program.dim_x,
                   cs_program.dim_y, cs_program.dim_z);
     cmdbuf.dispatch(cs_program.dim_x, cs_program.dim_y, cs_program.dim_z);
-    DebugState.IncDispatch();
 
     ResetBindings(true);
     if (!capture_textures.empty()) [[unlikely]] {
@@ -497,7 +492,6 @@ void Rasterizer::DispatchIndirect(VAddr address, u32 offset, u32 size) {
     instance.Mark(cmdbuf, "indirect dispatch: shader, arguments at",
                   pipeline->GetStage(Shader::SwStage::Compute).pgm_hash, address + offset);
     cmdbuf.dispatchIndirect(buffer->Handle(), base);
-    DebugState.IncDispatch();
 
     ResetBindings(true);
     if (!capture_textures.empty()) [[unlikely]] {

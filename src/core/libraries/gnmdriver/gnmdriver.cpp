@@ -11,7 +11,6 @@
 #include "common/logging/log.h"
 #include "common/slot_vector.h"
 #include "core/address_space.h"
-#include "core/debug_state.h"
 #include "core/emulator_settings.h"
 #include "core/libraries/gnmdriver/gnm_error.h"
 #include "core/libraries/gnmdriver/gnmdriver_init.h"
@@ -71,7 +70,6 @@ static retro_atomic_int_t submission_lock{};
 static retro_eventcount_t idle_ec{};
 // The submissions run one at a time, in order, and so does all the state below
 static Common::Combiner submit_combiner;
-static u64 frames_submitted{};      // frame counter
 static bool send_init_packet{true}; // initialize HW state before first game's submit in a frame
 static s32 sdk_version{0};
 
@@ -333,9 +331,6 @@ void PS4_SYSV_ABI sceGnmDingDong(u32 gnm_vqid, u32 next_offs_dw) {
     submit_combiner.Run([&] {
         WaitGpuIdle();
 
-        if (DebugState.ShouldPauseInSubmit()) {
-            DebugState.PauseGuestThreads();
-        }
 
         auto vqid = gnm_vqid - 1;
         auto& asc_queue = liverpool->asc_queues[{vqid}];
@@ -361,39 +356,6 @@ void PS4_SYSV_ABI sceGnmDingDong(u32 gnm_vqid, u32 next_offs_dw) {
 
         asc_next_offs_dw[vqid] = next_offs_dw;
 
-        if (DebugState.DumpingCurrentFrame()) {
-            static auto last_frame_num = -1LL;
-            static u32 seq_num{};
-            if (last_frame_num == frames_submitted) {
-                ++seq_num;
-            } else {
-                last_frame_num = frames_submitted;
-                seq_num = 0u;
-            }
-
-            // Up to this point, all ACB submissions have been stored in a secondary command buffer.
-            // Dumping them using the current ring pointer would result in files containing only the
-            // `IndirectBuffer` command. To access the actual command stream, we need to unwrap the
-            // IB.
-            auto acb = acb_span;
-            auto base_addr = reinterpret_cast<uintptr_t>(acb_ptr);
-            const auto* indirect_buffer =
-                reinterpret_cast<const PM4CmdIndirectBuffer*>(acb_span.data());
-            if (indirect_buffer->header.opcode == PM4ItOpcode::IndirectBuffer) {
-                base_addr = reinterpret_cast<uintptr_t>(indirect_buffer->Address<const u32>());
-                acb = {reinterpret_cast<const u32*>(base_addr), indirect_buffer->ib_size};
-            }
-
-            using namespace DebugStateType;
-
-            DebugState.PushQueueDump({
-                .type = QueueType::acb,
-                .submit_num = seq_num,
-                .num2 = gnm_vqid,
-                .data = {acb.begin(), acb.end()},
-                .base_addr = base_addr,
-            });
-        }
         liverpool->SubmitAsc(gnm_vqid, acb_span);
     });
 }
@@ -1476,26 +1438,6 @@ s32 PS4_SYSV_ABI sceGnmRequestFlipAndSubmitDoneForWorkload(u64 workload, u32* gp
 
         // Submit
         const auto& dcb_span = std::span{gpu_addr, 0x40};
-        if (DebugState.DumpingCurrentFrame()) {
-            static auto last_frame_num = -1LL;
-            static u32 seq_num{};
-            if (last_frame_num == frames_submitted) {
-                ++seq_num;
-            } else {
-                last_frame_num = frames_submitted;
-                seq_num = 0u;
-            }
-
-            using DebugStateType::QueueType;
-
-            DebugState.PushQueueDump({
-                .type = QueueType::dcb,
-                .submit_num = seq_num,
-                .num2 = 0,
-                .data = {dcb_span.begin(), dcb_span.end()},
-                .base_addr = reinterpret_cast<uintptr_t>(gpu_addr),
-            });
-        }
         liverpool->SubmitGfx(dcb_span, {});
 
         TakeSubmissionLock();
@@ -2316,9 +2258,6 @@ int PS4_SYSV_ABI sceGnmSqttWaitForEvent() {
 
 static inline s32 PerformSubmit(u32 count, const u32* dcb_gpu_addrs[], u32* dcb_sizes_in_bytes,
                                 const u32* ccb_gpu_addrs[], u32* ccb_sizes_in_bytes) {
-    if (DebugState.ShouldPauseInSubmit()) {
-        DebugState.PauseGuestThreads();
-    }
 
     if (send_init_packet) {
         if (sdk_version < Common::ElfInfo::FW_200) {
@@ -2357,33 +2296,6 @@ static inline s32 PerformSubmit(u32 count, const u32* dcb_gpu_addrs[], u32* dcb_
         const auto& dcb_span = std::span{dcb_gpu_addrs[cbpair], dcb_size_dw};
         const auto& ccb_span = std::span{ccb, ccb_size_dw};
 
-        if (DebugState.DumpingCurrentFrame()) {
-            static auto last_frame_num = -1LL;
-            static u32 seq_num{};
-            if (last_frame_num == frames_submitted && cbpair == 0) {
-                ++seq_num;
-            } else {
-                last_frame_num = frames_submitted;
-                seq_num = 0u;
-            }
-
-            using DebugStateType::QueueType;
-
-            DebugState.PushQueueDump({
-                .type = QueueType::dcb,
-                .submit_num = seq_num,
-                .num2 = cbpair,
-                .data = {dcb_span.begin(), dcb_span.end()},
-                .base_addr = reinterpret_cast<uintptr_t>(dcb_gpu_addrs[cbpair]),
-            });
-            DebugState.PushQueueDump({
-                .type = QueueType::ccb,
-                .submit_num = seq_num,
-                .num2 = cbpair,
-                .data = {ccb_span.begin(), ccb_span.end()},
-                .base_addr = reinterpret_cast<uintptr_t>(ccb),
-            });
-        }
         liverpool->SubmitGfx(dcb_span, ccb_span);
     }
     return ORBIS_OK;
@@ -2503,8 +2415,6 @@ s32 PS4_SYSV_ABI sceGnmSubmitDone() {
         TakeSubmissionLock();
         liverpool->SubmitDone();
         send_init_packet = true;
-        ++frames_submitted;
-        DebugState.IncGnmFrameNum();
         return ORBIS_OK;
     });
 }

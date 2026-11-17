@@ -135,15 +135,9 @@ CORE_SOURCES_CXX += $(addprefix src/common/,assert.cpp c_bridge.cpp decoder.cpp 
 	path_util.cpp rdtsc.cpp signal_context.cpp slot_vector.cpp \
 	string_util.cpp xml.cpp)
 CORE_SOURCES_CXX += $(addprefix src/common/logging/,classes.cpp log.cpp)
-CORE_SOURCES_CXX += $(addprefix src/core/,address_space.cpp debug_state.cpp debugger.cpp \
+CORE_SOURCES_CXX += $(addprefix src/core/,address_space.cpp debugger.cpp \
 	emulator_state.cpp linker.cpp memory.cpp module.cpp signals.cpp thread.cpp tls.cpp)
 CORE_SOURCES_CXX += $(addprefix src/core/aerolib/,aerolib.cpp stubs.cpp)
-CORE_SOURCES_CXX += $(addprefix src/core/devtools/gcn/,gcn_context_regs.cpp gcn_op_names.cpp \
-	gcn_shader_regs.cpp)
-CORE_SOURCES_CXX += $(addprefix src/core/devtools/,layer.cpp layer_extra.cpp options.cpp)
-CORE_SOURCES_CXX += $(addprefix src/core/devtools/widget/,cmd_list.cpp frame_dump.cpp \
-	frame_graph.cpp gpu_memory.cpp memory_map.cpp module_list.cpp reg_popup.cpp reg_view.cpp \
-	shader_list.cpp text_editor.cpp)
 CORE_SOURCES_CXX += $(addprefix src/core/file_format/,npbind.cpp playgo_chunk.cpp psf.cpp rif.cpp \
 	trp.cpp)
 CORE_SOURCES_CXX += $(addprefix src/core/file_sys/backends/,host_fs.cpp zarchive_fs.cpp)
@@ -258,7 +252,7 @@ CORE_SOURCES_CXX += $(addprefix src/core/loader/,dwarf.cpp elf.cpp symbols_resol
 CORE_SOURCES_CXX += $(addprefix src/core/net/,guest_net.cpp host_net.cpp net_service.cpp \
 	p2p_codec.cpp p2p_crypto.cpp p2p_tcp.cpp p2p_transport.cpp)
 CORE_SOURCES_CXX += $(addprefix src/,emulator.cpp)
-CORE_SOURCES_CXX += $(addprefix src/imgui/,friends_layer.cpp imgui_translations.cpp \
+CORE_SOURCES_CXX += $(addprefix src/imgui/,fps_layer.cpp friends_layer.cpp imgui_translations.cpp \
 	invitation_prompt_layer.cpp notifications_layer.cpp shadnet_notifications_layer.cpp)
 CORE_SOURCES_CXX += $(addprefix src/imgui/renderer/,font_data.cpp font_stack.cpp imgui_core.cpp \
 	imgui_impl_vulkan.cpp texture_manager.cpp)

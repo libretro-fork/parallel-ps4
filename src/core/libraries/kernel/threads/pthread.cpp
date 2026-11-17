@@ -14,11 +14,11 @@
 #include <mach/thread_act.h>
 #endif
 #endif
-#include "core/debug_state.h"
 #ifdef SHADPS4_ENABLE_FEX_GUEST_CPU
 #include "core/fex/fex_guest_engine.h"
 #include "core/guest_cpu/guest_callback.h"
 #endif
+#include <fmt/format.h>
 #include <retro_atomic.h>
 #include "core/libraries/kernel/kernel.h"
 #include "core/libraries/kernel/orbis_error.h"
@@ -292,7 +292,6 @@ static void RunThread(void* arg) {
     SetGameThread(true);
     game_clock_busy(GameClock());
     thread_name_set(curthread->name.c_str());
-    DebugState.AddCurrentThreadToGuestList();
     Core::InitializeTLS();
 
     curthread->native_thr->Initialize();
@@ -321,7 +320,6 @@ static void RunThread(void* arg) {
 #endif
 
     /* Remove thread from tracking */
-    DebugState.RemoveCurrentThreadFromGuestList();
     posix_pthread_exit(ret);
 }
 

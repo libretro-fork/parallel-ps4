@@ -63,7 +63,6 @@ extern const enum_names_t enum_names_Core_FileSys_FileType;
 extern const enum_names_t enum_names_Core_MemoryProt;
 extern const enum_names_t enum_names_Platform_InterruptId;
 extern const enum_names_t enum_names_Core_VMAType;
-extern const enum_names_t enum_names_DebugStateType_QueueType;
 extern const enum_names_t enum_names_Libraries_Ajm_AjmCodecType;
 extern const enum_names_t enum_names_Libraries_Audio3d_OrbisAudio3dBlocking;
 extern const enum_names_t enum_names_Libraries_Audio3d_OrbisAudio3dFormat;

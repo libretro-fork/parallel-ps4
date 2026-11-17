@@ -24,7 +24,6 @@ SRC = os.path.dirname(HERE)
 
 # The headers that define the enums, and a source file for an enum of its own
 HEADERS = [
-    "core/debug_state.h",
     "core/file_sys/fs.h",
     "core/libraries/ajm/ajm.h",
     "core/libraries/audio/audioout.h",

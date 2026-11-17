@@ -755,37 +755,6 @@ set(COMPANION_LIBS  src/core/libraries/companion/companion_httpd.cpp
                     src/core/libraries/companion/companion_util.h
                     src/core/libraries/companion/companion_error.h
 )
-set(DEV_TOOLS src/core/devtools/layer.cpp
-              src/core/devtools/layer.h
-              src/core/devtools/layer_extra.cpp
-              src/core/devtools/options.cpp
-              src/core/devtools/options.h
-              src/core/devtools/gcn/gcn_context_regs.cpp
-              src/core/devtools/gcn/gcn_op_names.cpp
-              src/core/devtools/gcn/gcn_shader_regs.cpp
-              src/core/devtools/widget/cmd_list.cpp
-              src/core/devtools/widget/cmd_list.h
-              src/core/devtools/widget/common.h
-              src/core/devtools/widget/frame_dump.cpp
-              src/core/devtools/widget/frame_dump.h
-              src/core/devtools/widget/frame_graph.cpp
-              src/core/devtools/widget/frame_graph.h
-              src/core/devtools/widget/gpu_memory.cpp
-              src/core/devtools/widget/gpu_memory.h
-              src/core/devtools/widget/imgui_memory_editor.h
-              src/core/devtools/widget/memory_map.cpp
-              src/core/devtools/widget/memory_map.h
-              src/core/devtools/widget/module_list.cpp
-              src/core/devtools/widget/module_list.h
-              src/core/devtools/widget/reg_popup.cpp
-              src/core/devtools/widget/reg_popup.h
-              src/core/devtools/widget/reg_view.cpp
-              src/core/devtools/widget/reg_view.h
-              src/core/devtools/widget/shader_list.cpp
-              src/core/devtools/widget/shader_list.h
-              src/core/devtools/widget/text_editor.cpp
-              src/core/devtools/widget/text_editor.h
-)
 
 set(COMMON src/common/c_bridge.cpp
            src/common/c_bridge.h
@@ -1013,9 +982,6 @@ set(CORE src/core/aerolib/stubs.cpp
          ${VR_LIBS}
          ${CAMERA_LIBS}
          ${COMPANION_LIBS}
-         ${DEV_TOOLS}
-         src/core/debug_state.cpp
-         src/core/debug_state.h
          src/core/debugger.cpp
          src/core/debugger.h
          src/core/linker.cpp
@@ -1033,6 +999,7 @@ set(CORE src/core/aerolib/stubs.cpp
          src/core/tls.h
          src/core/emulator_state.cpp
          src/core/emulator_state.h
+         src/core/debug_state.h
          src/core/emulator_settings.c
          src/core/emulator_settings.h
          src/core/user_manager.c
@@ -1307,6 +1274,8 @@ set(IMGUI src/imgui/imgui_config.h
           src/imgui/imgui_texture.h
           src/imgui/imgui_translations.cpp
           src/imgui/imgui_translations.h
+          src/imgui/fps_layer.cpp
+          src/imgui/fps_layer.h
           src/imgui/friends_layer.cpp
           src/imgui/friends_layer.h
           src/imgui/invitation_prompt_layer.cpp

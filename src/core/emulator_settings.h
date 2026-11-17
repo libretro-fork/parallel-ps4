@@ -140,7 +140,6 @@ enum emu_settings_section {
     EMU_SETTINGS_LIST_WIN32_LOG                                                                    \
                                                                                                    \
     EMU_SETTING(debug_dump, "debug_dump", DEBUG, BOOL, false, OVR, GEN)                            \
-    EMU_SETTING(shader_collect, "shader_collect", DEBUG, BOOL, false, OVR, GEN)                    \
     EMU_SETTING(config_version, "config_version", DEBUG, STRING, "", 0, GEN)                       \
                                                                                                    \
     EMU_SETTING(usb_device_backend, "usb_device_backend", INPUT, INT, EMU_USB_BACKEND_REAL, OVR,   \

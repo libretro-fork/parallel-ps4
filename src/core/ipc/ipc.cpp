@@ -9,7 +9,6 @@
 #include "common/memory_patcher.h"
 #include "common/thread_name.h"
 #include "common/types.h"
-#include "core/debug_state.h"
 #include "core/debugger.h"
 #include "core/emulator_settings.h"
 #include "core/emulator_state.h"
@@ -133,10 +132,6 @@ void IPC::InputLoop() {
                 .maskOffset = static_cast<int>(next_u64()),
             };
             MemoryPatcher::AddPatchToQueue(entry);
-        } else if (cmd == "PAUSE") {
-            DebugState.PauseGuestThreads();
-        } else if (cmd == "RESUME") {
-            DebugState.ResumeGuestThreads();
         } else if (cmd == "STOP") {
             Frontend::RequestQuit();
         } else if (cmd == "ADJUST_VOLUME") {

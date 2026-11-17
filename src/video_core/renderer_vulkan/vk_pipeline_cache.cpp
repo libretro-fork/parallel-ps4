@@ -7,7 +7,6 @@
 #include "common/io_file.h"
 #include "common/path_util.h"
 #include "common/thread_name.h"
-#include "core/debug_state.h"
 #include "core/emulator_settings.h"
 #include "core/memory.h"
 #include "shader_recompiler/backend/spirv/emit_spirv.h"
@@ -585,11 +584,6 @@ const ComputePipeline* PipelineCache::GetComputePipeline() {
         ptr_table_insert(&compute_pipelines, compute_key.value, pipeline);
         RegisterPipelineData(compute_key, sdata);
         ++num_new_pipelines;
-
-        if (emu_settings_get_shader_collect()) {
-            auto& m = modules[0];
-            module_related_pipelines[m].emplace_back(compute_key);
-        }
     }
     return pipeline;
 }
@@ -883,9 +877,6 @@ vk::ShaderModule PipelineCache::CompileModule(Shader::Info& info, Shader::Runtim
 
     const auto name = GetShaderName(info.hw_stage, info.pgm_hash, perm_idx);
     Vulkan::SetObjectName(instance.GetDevice(), module, name);
-    if (emu_settings_get_shader_collect()) {
-        DebugState.CollectShader(name, info.sw_stage, module, spv, code, patch, is_patched);
-    }
     return module;
 }
 
@@ -1292,13 +1283,6 @@ void PipelineCache::FileJob(CompileJob& job) {
         ptr_table_insert(&graphics_pipelines, job.key_hash, job.pipeline);
         RegisterPipelineData(job.key, job.key_hash, job.sdata);
         ++num_new_pipelines;
-        if (emu_settings_get_shader_collect()) {
-            for (u32 stage = 0; stage < MaxShaderStages; ++stage) {
-                if (job.has_stage[stage]) {
-                    module_related_pipelines[job.modules[stage]].emplace_back(job.key);
-                }
-            }
-        }
         break;
     }
     }
@@ -1351,42 +1335,6 @@ void PipelineCache::ReplaceCachedPermutation(CompileJob& job) {
     for (auto& module : program->modules) {
         module.spec.info = &program->info;
     }
-}
-
-std::optional<vk::ShaderModule> PipelineCache::ReplaceShader(vk::ShaderModule module,
-                                                             std::span<const u32> spv_code) {
-    std::optional<vk::ShaderModule> new_module{};
-    size_t pos = 0;
-    while (auto* program = static_cast<Program*>(ptr_table_next(&program_cache, &pos))) {
-        for (auto& m : program->modules) {
-            if (m.module == module) {
-                const auto& d = instance.GetDevice();
-                d.destroyShaderModule(m.module);
-                m.module = CompileSPV(spv_code, d);
-                new_module = m.module;
-            }
-        }
-    }
-    if (module_related_pipelines.contains(module)) {
-        auto& pipeline_keys = module_related_pipelines[module];
-        for (auto& key : pipeline_keys) {
-            if (std::holds_alternative<GraphicsPipelineKey>(key)) {
-                const auto& graphics_key = std::get<GraphicsPipelineKey>(key);
-                const u64 hash = std::hash<GraphicsPipelineKey>{}(graphics_key);
-                if (auto* p = FindGraphicsPipeline(graphics_key, hash)) {
-                    ptr_table_erase(&graphics_pipelines, hash, p);
-                    delete p;
-                }
-            } else if (std::holds_alternative<ComputePipelineKey>(key)) {
-                const auto& compute_key = std::get<ComputePipelineKey>(key);
-                if (auto* p = FindComputePipeline(compute_key)) {
-                    ptr_table_erase(&compute_pipelines, compute_key.value, p);
-                    delete p;
-                }
-            }
-        }
-    }
-    return new_module;
 }
 
 std::string PipelineCache::GetShaderName(Shader::HwStage stage, u64 hash,

@@ -38,7 +38,6 @@
 #include "common/quick_exit.h"
 #include "common/singleton.h"
 #include "common/thread_name.h"
-#include "core/devtools/layer.h"
 #include "core/emulator_settings.h"
 #include "core/file_sys/fs.h"
 #include "core/ipc/ipc.h"
@@ -130,8 +129,10 @@ void ApplyLiveOptions() {
     }
     capturing = capture;
     emu_settings_set_volume_slider(static_cast<std::int32_t>(retro_atomic_load_seq_cst_int(&live.volume)), false);
-    emu_settings_set_show_fps_counter(static_cast<std::uint32_t>(retro_atomic_load_seq_cst_int(&live.show_fps)) != 0, false);
-    Overlay::SetSimpleFps(static_cast<std::uint32_t>(retro_atomic_load_seq_cst_int(&live.show_fps)) != 0);
+    emu_settings_set_show_fps_counter(
+        static_cast<std::uint32_t>(
+            retro_atomic_load_seq_cst_int(&live.show_fps)) != 0,
+        false);
     emu_settings_set_trophy_popup_disabled(static_cast<std::uint32_t>(retro_atomic_load_seq_cst_int(&live.trophy_popup)) == 0,
                                            false);
     emu_settings_set_trophy_notification_side(

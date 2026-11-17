@@ -467,14 +467,6 @@ static const enum_name_entry_t enum_names_Core_VMAType_entries[] = {
 const enum_names_t enum_names_Core_VMAType = {enum_names_Core_VMAType_entries,
     sizeof(enum_names_Core_VMAType_entries) / sizeof(enum_names_Core_VMAType_entries[0])};
 
-static const enum_name_entry_t enum_names_DebugStateType_QueueType_entries[] = {
-    {(int64_t)0, "dcb"},
-    {(int64_t)1, "ccb"},
-    {(int64_t)2, "acb"},
-};
-const enum_names_t enum_names_DebugStateType_QueueType = {enum_names_DebugStateType_QueueType_entries,
-    sizeof(enum_names_DebugStateType_QueueType_entries) / sizeof(enum_names_DebugStateType_QueueType_entries[0])};
-
 static const enum_name_entry_t enum_names_Libraries_Ajm_AjmCodecType_entries[] = {
     {(int64_t)0, "Mp3Dec"},
     {(int64_t)1, "At9Dec"},

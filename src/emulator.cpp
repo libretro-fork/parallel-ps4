@@ -28,7 +28,6 @@
 #include "common/thread_name.h"
 #include "core/cpu_patches.h" // Windows static guest red-zone protection
 #include "core/debugger.h"
-#include "core/devtools/widget/module_list.h"
 #include "core/emulator_settings.h"
 #include "core/emulator_state.h"
 #include "core/file_format/psf.h"
