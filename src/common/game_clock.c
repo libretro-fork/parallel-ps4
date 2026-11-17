@@ -387,6 +387,17 @@ int game_clock_waiting_on(game_clock_t* clock, retro_atomic_int_t* word) {
     return 0;
 }
 
+int game_clock_woken_waiting(game_clock_t* clock, retro_atomic_int_t* const* words, int n,
+                             uint64_t frame) {
+    int i;
+    if (game_clock_frames(clock) != frame)
+        return 1;
+    for (i = 0; i < n; i++)
+        if (!game_clock_waiting_on(clock, words[i]))
+            return 0;
+    return 1;
+}
+
 int game_clock_wake_sent(game_clock_t* clock, retro_atomic_int_t* word) {
     unsigned i;
     for (i = 0; i < GAME_CLOCK_PARKED; i++) {

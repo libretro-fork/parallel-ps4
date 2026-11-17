@@ -174,17 +174,8 @@ static void PaceOutput(PortOut& port) {
     if (woke != 0) {
         game_clock_t* clock = Kernel::GameClock();
         const u64 frame = game_clock_frames(clock);
-        Kernel::GameWait(&clock->parked_ec, 0, [&] {
-            if (game_clock_frames(clock) != frame) {
-                return true;
-            }
-            for (int i = 0; i < woke; i++) {
-                if (!game_clock_waiting_on(clock, woken[i])) {
-                    return false;
-                }
-            }
-            return true;
-        });
+        Kernel::GameWait(&clock->parked_ec, 0,
+                         [&] { return game_clock_woken_waiting(clock, woken, woke, frame) != 0; });
     }
     const u64 due = game_clock_cadence(Kernel::GameClock(), &port.pace_start, &port.pace_buffers,
                                        port.buffer_frames, port.sample_rate);

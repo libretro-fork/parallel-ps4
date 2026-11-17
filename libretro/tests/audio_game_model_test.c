@@ -14,7 +14,8 @@
  * Each case: from the first frame with sound, exactly 800 samples a run, every one the game's,
  * once and in order: nothing padded, nothing late, nothing dropped. The stopped engine: its
  * sound to the end, then silence. FMOD's: no slot output before its mixer filled it (built
- * with MODEL_UNPACED, Output as fast as the queue has room: it fails).
+ * with MODEL_UNPACED, Output as fast as the queue has room: it fails), its output held as
+ * audioout.cpp holds it.
  * Four cases crackle and are reported as such, not counted as failures, until they are fixed:
  * a render thread busy 15 ms a frame, a thread spinning without a yield, a woken thread that
  * never runs with one blocked untracked, and a mixer with an output thread waiting for it and
@@ -64,7 +65,8 @@ static const char* const case_names[CASE_COUNT] = {
     "a render thread busy 15 ms a frame",
     "a thread spinning without a yield",
     "an engine that stops",
-    "FMOD: a mixer two 256-frame slots ahead, an output thread without a wait for it",
+    "FMOD: a mixer two 256-frame slots ahead, an output thread without a wait for it but the "
+    "output's hold (PaceOutput)",
     "a relative sleeper, a woken thread that never runs, a thread blocked untracked for ever",
     "a mixer on its own schedule, an output thread waiting for it, a thread blocked untracked"};
 static int which;
@@ -109,7 +111,11 @@ static void write_buffer(unsigned* count) {
  * outputs the next slot, sceAudioOutOutput paced as the console paces it, then gives the slot
  * back to the mixer: it never waits for the mixer, relying on the call's pace to leave the
  * mixer the time to fill it. Output returning faster (as before: as soon as the queue had room)
- * outputs slots the mixer has not filled again yet: the same sound twice, a click. */
+ * outputs slots the mixer has not filled again yet: the same sound twice, a click. The output
+ * is also held as audioout.cpp's PaceOutput holds it, until the mixer it woke waits again or a
+ * frame starts (game_clock_woken_waiting): without the hold, which the core has, the case
+ * passed only while the mixer happened to run soon enough, and under ThreadSanitizer on a
+ * busy host now and then it did not. */
 static float fmod_ring[2][BUFFER * 2];
 static retro_atomic_int_t fmod_free; /* slots the mixer may fill */
 static retro_eventcount_t fmod_ec;
@@ -142,10 +148,25 @@ static void fmod_mixer_thread(void* data) {
     game_clock_thread_idle(&clk, SELF);
 }
 
+/* PaceOutput's hold: the threads the output woke since its last buffer wait again first */
+struct fmod_hold {
+    retro_atomic_int_t* woken[1];
+    int woke;
+    uint64_t frame;
+};
+
+static int fmod_held_enough(void* ctx) {
+    const struct fmod_hold* h = (const struct fmod_hold*)ctx;
+    return game_clock_woken_waiting(&clk, h->woken, h->woke, h->frame) ||
+           retro_atomic_load_acquire_int(&stop);
+}
+
 static void fmod_output_thread(void* data) {
     uint64_t start = 0, count = 0;
     unsigned slot = 0;
+    struct fmod_hold hold;
     (void)data;
+    hold.woke = 0;
     /* Both slots mixed before it starts */
     while (retro_atomic_load_acquire_int(&fmod_free) != 0 && !retro_atomic_load_acquire_int(&stop))
         retro_sleep_us(100);
@@ -154,8 +175,16 @@ static void fmod_output_thread(void* data) {
         unsigned left = BUFFER;
         const float* src = fmod_ring[slot];
 #ifndef MODEL_UNPACED
+        uint64_t due;
+#endif
+        if (hold.woke) {
+            hold.frame = game_clock_frames(&clk);
+            game_clock_wait(&clk, &clk.parked_ec, 0, fmod_held_enough, &hold, SELF);
+            hold.woke = 0;
+        }
+#ifndef MODEL_UNPACED
         /* sceAudioOutOutput's pace (audioout.cpp, PaceOutput) */
-        const uint64_t due = game_clock_cadence(&clk, &start, &count, BUFFER, 48000);
+        due = game_clock_cadence(&clk, &start, &count, BUFFER, 48000);
         if (due > game_clock_now(&clk))
             port_sleep(due);
 #else
@@ -176,6 +205,11 @@ static void fmod_output_thread(void* data) {
         slot ^= 1;
         retro_atomic_fetch_add_int(&fmod_free, 1);
         retro_eventcount_notify(&fmod_ec);
+        /* The kernel notes the wakes it sends to parked game threads (GameNoteWake) */
+        if (game_clock_wake_sent(&clk, &fmod_ec.epoch)) {
+            hold.woken[0] = &fmod_ec.epoch;
+            hold.woke = 1;
+        }
     }
     game_clock_thread_idle(&clk, SELF);
 }

@@ -266,6 +266,38 @@ int main(void) {
               "a frame tells the output too");
     }
 
+    /* The output's hold (game_clock_woken_waiting): until the threads it woke wait again, or a
+     * frame starts */
+    {
+        retro_atomic_int_t a, b;
+        retro_atomic_int_t* words[2];
+        int sa, sb;
+        uint64_t frame;
+        retro_atomic_int_init(&a, 3);
+        retro_atomic_int_init(&b, 5);
+        words[0] = &a;
+        words[1] = &b;
+        sa = game_clock_park(&clock_, &a, 3);
+        sb = game_clock_park(&clock_, &b, 5);
+        frame = game_clock_frames(&clock_);
+        CHECK(game_clock_woken_waiting(&clock_, words, 2, frame), "both waiting: no hold");
+        retro_atomic_fetch_add_int(&a, 1);
+        retro_atomic_fetch_add_int(&b, 1);
+        CHECK(!game_clock_woken_waiting(&clock_, words, 2, frame), "both woken: held");
+        game_clock_repark(&clock_, sa, 4);
+        CHECK(!game_clock_woken_waiting(&clock_, words, 2, frame), "one waiting again: held");
+        game_clock_repark(&clock_, sb, 6);
+        CHECK(game_clock_woken_waiting(&clock_, words, 2, frame), "both again: let go");
+        retro_atomic_fetch_add_int(&a, 1);
+        CHECK(!game_clock_woken_waiting(&clock_, words, 1, frame), "woken again: held");
+        game_clock_frame(&clock_);
+        CHECK(game_clock_woken_waiting(&clock_, words, 1, frame), "a frame later: let go");
+        CHECK(game_clock_woken_waiting(&clock_, words, 0, game_clock_frames(&clock_)),
+              "nobody woken: no hold");
+        game_clock_unpark(&clock_, sa);
+        game_clock_unpark(&clock_, sb);
+    }
+
     game_clock_init(&clock_, 60000, 1001);
     for (i = 0; i < 3600; i++)
         game_clock_frame(&clock_);
