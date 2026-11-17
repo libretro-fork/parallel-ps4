@@ -183,7 +183,6 @@ CORE_SOURCES_CXX += $(addprefix src/core/libraries/jpeg/,jpegenc.cpp)
 CORE_SOURCES_CXX += $(addprefix src/core/libraries/kernel/,aio.cpp debug.cpp equeue.cpp \
 	file_system.cpp kernel.cpp memory.cpp process.cpp threads.cpp time.cpp)
 CORE_SOURCES_CXX += $(addprefix src/core/libraries/kernel/coredump/,coredump.cpp)
-CORE_SOURCES_CXX += $(addprefix src/core/libraries/kernel/sync/,mutex.cpp)
 CORE_SOURCES_CXX += $(addprefix src/core/libraries/kernel/threads/,barrier.cpp condvar.cpp \
 	event_flag.cpp exception.cpp mutex.cpp pthread.cpp pthread_attr.cpp pthread_clean.cpp \
 	pthread_spec.cpp rwlock.cpp semaphore.cpp sleepq.cpp stack.cpp stack_asm.cpp tcb.cpp \

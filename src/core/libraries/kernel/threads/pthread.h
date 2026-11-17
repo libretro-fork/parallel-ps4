@@ -17,7 +17,6 @@
 #include "common/event_count.h"
 #include "common/event_mutex.h"
 #include "common/shared_first_mutex.h"
-#include "core/libraries/kernel/sync/mutex.h"
 #include "core/libraries/kernel/sync/semaphore.h"
 #include "core/libraries/kernel/threads/exception.h"
 #include "core/libraries/kernel/time.h"
