@@ -735,15 +735,25 @@ bool BufferCache::SynchronizeMemory(const Buffer* arena, VAddr device_addr, u32 
                         upload(start, end - start);
                         continue;
                     }
-                    std::array<u8, WRITE_SNAPSHOT_PAGE> now;
-                    memory->CopySparseMemory(page, now.data(), now.size());
+                    // The page as it is now, read where it lies in the game's memory; copied
+                    // out only where it does not lie in one run of the backing
+                    std::array<u8, WRITE_SNAPSHOT_PAGE> copied;
+                    const u8* now = copied.data();
+                    u64 backing_offset = 0;
+                    if (memory->BackingRun(page, WRITE_SNAPSHOT_PAGE, &backing_offset) ==
+                            WRITE_SNAPSHOT_PAGE &&
+                        backing_offset != ~u64{0}) {
+                        now = memory->BackingBase() + backing_offset;
+                    } else {
+                        memory->CopySparseMemory(page, copied.data(), copied.size());
+                    }
                     struct Runs {
                         decltype(upload)& upload;
                         VAddr page;
                     } runs{upload, page};
                     // Cut by the page, the GPU's range goes on into the one before or after
                     write_snapshots_written(
-                        now.data(), before, static_cast<u32>(start - page),
+                        now, before, static_cast<u32>(start - page),
                         static_cast<u32>(end - page), start == page && gpu_start < page,
                         end == page + WRITE_SNAPSHOT_PAGE && gpu_end > end,
                         [](void* ctx, u32 begin, u32 size) {
