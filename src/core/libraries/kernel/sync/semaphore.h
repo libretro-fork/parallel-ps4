@@ -29,6 +29,38 @@ namespace Libraries::Kernel {
 
 void GameNoteWake(retro_atomic_int_t* word); // core/libraries/kernel/time.h
 
+#ifdef _WIN64
+/// Win32 semaphore objects of semaphores that have gone, emptied and kept for the next ones of
+/// the same maximum: a thread's record makes two each time it is used again, which made two
+/// kernel objects and closed two each time a game made a thread. A fixed set of slots, taken
+/// and given with an exchange each; an object with no slot free is closed as before.
+template <s64 max>
+struct SemaphoreObjects {
+    static constexpr int Slots = 256;
+    static inline retro_atomic_ptr_t slots[Slots]{};
+
+    static HANDLE Take() {
+        for (int i = 0; i < Slots; i++) {
+            void* const object = retro_atomic_load_acquire_ptr(&slots[i]);
+            if (object != nullptr && retro_atomic_cas_ptr(&slots[i], object, nullptr)) {
+                return static_cast<HANDLE>(object);
+            }
+        }
+        return nullptr;
+    }
+
+    static bool Give(HANDLE object) {
+        for (int i = 0; i < Slots; i++) {
+            if (retro_atomic_load_acquire_ptr(&slots[i]) == nullptr &&
+                retro_atomic_cas_ptr(&slots[i], nullptr, object)) {
+                return true;
+            }
+        }
+        return false;
+    }
+};
+#endif
+
 template <s64 max>
 class Semaphore {
 public:
@@ -38,6 +70,14 @@ public:
 #endif
     {
 #ifdef _WIN64
+        sem = SemaphoreObjects<max>::Take();
+        if (sem != nullptr) {
+            // Empty, as it was given back
+            if (initialCount > 0) {
+                ReleaseSemaphore(sem, initialCount, nullptr);
+            }
+            return;
+        }
         sem = CreateSemaphore(nullptr, initialCount, max, nullptr);
         ASSERT_MSG(sem != nullptr, "Failed to create Win32 semaphore");
 #elif defined(__APPLE__)
@@ -48,7 +88,12 @@ public:
 
     ~Semaphore() {
 #ifdef _WIN64
-        CloseHandle(sem);
+        // Emptied, without running anything queued to this thread (not alertable), and kept
+        while (WaitForSingleObjectEx(sem, 0, FALSE) == WAIT_OBJECT_0) {
+        }
+        if (!SemaphoreObjects<max>::Give(sem)) {
+            CloseHandle(sem);
+        }
 #elif defined(__APPLE__)
         dispatch_release(sem);
 #endif
