@@ -11,6 +11,8 @@
 
 #include "video_core/renderer_vulkan/vk_platform.h"
 
+struct guest_import_info;
+
 namespace Vulkan {
 
 class MemoryAllocator;
@@ -343,6 +345,10 @@ public:
     vk::DeviceSize GetMinImportedHostPointerAlignment() const {
         return min_imported_host_pointer_alignment;
     }
+
+    /// @info filled in to lend [base, base + size) of this process's memory to this device
+    /// (buffer_cache/guest_import.h), for buffers of @usage, imported as they are first wanted
+    void FillHostImport(guest_import_info* info, void* base, u64 size, u32 usage) const;
 
     /// Returns the pipeline cache unique identifier
     const auto GetPipelineCacheUUID() const {

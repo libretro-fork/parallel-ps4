@@ -48,12 +48,13 @@
 #include "core/signals.h"
 #include "core/user_manager.h"
 #include "emulator.h"
+#include "frame_slots.h"
 #include "input/controller.h"
 #include "libretro.h"
 #include "libretro_bridge.h"
 #include "pixel_order.h"
-#include "touch_track.h"
 #include "shared_state.h"
+#include "touch_track.h"
 #include "video_core/renderer_vulkan/vk_vertex_capture.h"
 #include "video_core/texture_cache/texture_cache.h"
 
@@ -83,6 +84,9 @@ retro_atomic_int_t gpu_frames_active{0};
 retro_atomic_int_t game_size{0};
 retro_atomic_int_t game_size_new{0};
 retro_atomic_int_t image_in_flight[Libretro::FRAME_IMAGES];
+// The picture read back into the shared memory: the slots a frame is being
+// written into
+frame_slots_t emulator_frame_slots;
 
 Libretro::SharedState* OpenShared(const char* argument) {
 #ifdef _WIN32
@@ -336,6 +340,8 @@ int RunEmulator(const char* argument) {
         return 2;
     }
     wakes.Attach(shared, argument);
+    frame_slots_init(&emulator_frame_slots, &shared->frame_latest,
+                     &shared->frame_held, Libretro::FRAME_SLOTS);
 
     const std::filesystem::path eboot{
         std::u8string_view(reinterpret_cast<const char8_t*>(shared->eboot_path))};
@@ -405,39 +411,56 @@ bool GameSizePending() {
     return shared && shared->options.follow_game_size != 0 && static_cast<std::uint32_t>(retro_atomic_load_seq_cst_int(&game_size)) == 0;
 }
 
-void PushFrame(const void* pixels, std::uint32_t width, std::uint32_t height) {
-    if (!shared || !pixels || width == 0 || height == 0 || width > MAX_WIDTH ||
-        height > MAX_HEIGHT) {
-        return;
-    }
-    // Until the game's size is known the images for the frontend are not made yet, and it
-    // expects those, not frames in the shared memory
-    if (GpuFramesWanted() && GameSizePending()) {
-        return;
-    }
-    // Into the slot that is neither the newest nor the one the core is showing
-    // (shared_state.h, frame_held).
-    const std::uint32_t latest = static_cast<std::uint32_t>(retro_atomic_load_seq_cst_int(&shared->frame_latest));
-    const std::uint32_t newest = latest == 0 ? FRAME_SLOT_NONE : latest & FRAME_SLOT_MASK;
-    const std::uint32_t held = static_cast<std::uint32_t>(retro_atomic_load_seq_cst_int(&shared->frame_held));
-    std::uint32_t slot = 0;
-    while (slot == newest || slot == held) {
-        ++slot;
-    }
-    shared->frame_size[slot].width = width;
-    shared->frame_size[slot].height = height;
-    const std::size_t count = static_cast<std::size_t>(width) * height;
-    if (shared->options.hdr_output != 0) {
-      // The frames are A2B10G10R10; libretro's HDR10 has R and B the other way
-      // round
-      pixel_order_xrgb2101010(
-          reinterpret_cast<std::uint32_t *>(SharedFrame(shared, slot)),
-          static_cast<const std::uint32_t *>(pixels), count);
-    } else {
-      std::memcpy(SharedFrame(shared, slot), pixels, count * 4);
-    }
-    (void)retro_atomic_exchange_int(&shared->frame_latest, (((latest >> FRAME_SLOT_BITS) + 1) << FRAME_SLOT_BITS) | slot);
-    (void)retro_atomic_exchange_int(&frame_seen, 1);
+std::uint8_t *AcquireFrameSlot(std::uint32_t &slot) {
+  if (!shared || (GpuFramesWanted() && GameSizePending())) {
+    return nullptr;
+  }
+  slot = frame_slots_claim(&emulator_frame_slots);
+  return slot == FRAME_SLOTS_NONE ? nullptr : SharedFrame(shared, slot);
+}
+
+void ReleaseFrameSlot(std::uint32_t slot) {
+  frame_slots_release(&emulator_frame_slots, slot);
+}
+
+void PublishFrameSlot(std::uint32_t slot, std::uint32_t width,
+                      std::uint32_t height) {
+  if (!shared || slot >= FRAME_SLOTS) {
+    return;
+  }
+  shared->frame_size[slot].width = width;
+  shared->frame_size[slot].height = height;
+  frame_slots_publish(&emulator_frame_slots, slot);
+  (void)retro_atomic_exchange_int(&frame_seen, 1);
+}
+
+void PushFrame(const void *pixels, std::uint32_t width, std::uint32_t height,
+               bool in_order) {
+  if (!shared || !pixels || width == 0 || height == 0 || width > MAX_WIDTH ||
+      height > MAX_HEIGHT) {
+    return;
+  }
+  // Until the game's size is known the images for the frontend are not made
+  // yet, and it expects those, not frames in the shared memory
+  if (GpuFramesWanted() && GameSizePending()) {
+    return;
+  }
+  // Every slot taken by frames the GPU is still writing: this one is not shown
+  const std::uint32_t slot = frame_slots_claim(&emulator_frame_slots);
+  if (slot == FRAME_SLOTS_NONE) {
+    return;
+  }
+  const std::size_t count = static_cast<std::size_t>(width) * height;
+  if (shared->options.hdr_output != 0 && !in_order) {
+    // The frames are A2B10G10R10; libretro's HDR10 has R and B the other way
+    // round
+    pixel_order_xrgb2101010(
+        reinterpret_cast<std::uint32_t *>(SharedFrame(shared, slot)),
+        static_cast<const std::uint32_t *>(pixels), count);
+  } else {
+    std::memcpy(SharedFrame(shared, slot), pixels, count * 4);
+  }
+  PublishFrameSlot(slot, width, height);
 }
 
 bool GpuFramesWanted() {

@@ -18,6 +18,7 @@
 #include "imgui/renderer/imgui_impl_vulkan.h"
 #include "imgui/shadnet_notifications_layer.h"
 #include "video_core/buffer_cache/buffer.h"
+#include "video_core/buffer_cache/guest_import.h"
 #include "video_core/renderer_vulkan/frame_notes.h"
 #include "video_core/renderer_vulkan/vk_memory.h"
 #include "video_core/renderer_vulkan/vk_platform.h"
@@ -132,26 +133,39 @@ static vk::Rect2D FitImage(s32 frame_width, s32 frame_height, s32 swapchain_widt
 // A finished frame read back for the frontend, as XRGB8888. A frame of ten bits a channel is
 // narrowed to it first, on the GPU, into an image of the readback's own: the one place the
 // picture loses its last two bits, and only for a frontend that cannot share the images.
-// With HDR Output the frame is read back whole, ten bits a channel (Libretro::PushFrame puts
-// it in XRGB2101010's order).
+// With HDR Output the frame is read back whole, ten bits a channel, through an image of
+// libretro's XRGB2101010 order (A2R10G10B10) where the device can blit to one, the blit
+// putting R and B in place; else as it is, and Libretro::PushFrame puts them in place.
+// The frame goes straight into the shared memory where it can (Presenter::AcquireFrameSlot);
+// the buffer is made only for a frame that cannot.
 struct FrameReadback {
-    VideoCore::Buffer buffer;
+    const Instance* instance;
+    std::optional<VideoCore::Buffer> buffer;
     u32 width{};
     u32 height{};
     vk::Image narrow{};
     MemoryAllocation narrow_allocation{};
+    // The pixels read back are in libretro's order as they are
+    bool in_order{true};
 
-    FrameReadback(const Instance& instance, const u32 width_, const u32 height_,
+    FrameReadback(const Instance& instance_, const u32 width_, const u32 height_,
                   const vk::Format format)
-        : buffer{instance, 0, static_cast<u64>(width_) * static_cast<u64>(height_) * 4,
-                 VideoCore::MemoryType::HostCached},
-          width{width_}, height{height_} {
-        if (format == vk::Format::eB8G8R8A8Unorm || emu_settings_get_hdr_allowed()) {
+        : instance{&instance_}, width{width_}, height{height_} {
+        vk::Format narrow_format = vk::Format::eB8G8R8A8Unorm;
+        if (emu_settings_get_hdr_allowed()) {
+            narrow_format = vk::Format::eA2R10G10B10UnormPack32;
+            in_order = format != vk::Format::eA2B10G10R10UnormPack32;
+            if (in_order || !instance_.IsFormatSupported(
+                                narrow_format, vk::FormatFeatureFlagBits2::eBlitDst |
+                                                   vk::FormatFeatureFlagBits2::eTransferSrc)) {
+                return;
+            }
+        } else if (format == vk::Format::eB8G8R8A8Unorm) {
             return;
         }
         const vk::ImageCreateInfo image_info = {
             .imageType = vk::ImageType::e2D,
-            .format = vk::Format::eB8G8R8A8Unorm,
+            .format = narrow_format,
             .extent = {width, height, 1},
             .mipLevels = 1,
             .arrayLayers = 1,
@@ -159,11 +173,21 @@ struct FrameReadback {
             .tiling = vk::ImageTiling::eOptimal,
             .usage = vk::ImageUsageFlagBits::eTransferDst | vk::ImageUsageFlagBits::eTransferSrc,
         };
-        if (instance.GetAllocator()->CreateImage(image_info, false, narrow, narrow_allocation) !=
+        if (instance_.GetAllocator()->CreateImage(image_info, false, narrow, narrow_allocation) !=
             vk::Result::eSuccess) {
             LOG_CRITICAL(Render_Vulkan, "No image to read a frame back through");
             UNREACHABLE();
         }
+        in_order = true;
+    }
+
+    /// The buffer to read back into when the shared memory cannot be written to directly
+    VideoCore::Buffer& Buffer() {
+        if (!buffer) {
+            buffer.emplace(*instance, 0, static_cast<u64>(width) * static_cast<u64>(height) * 4,
+                           VideoCore::MemoryType::HostCached);
+        }
+        return *buffer;
     }
 };
 
@@ -216,7 +240,8 @@ static void ReturnFrameReadback(std::shared_ptr<FrameReadback> readback) {
 }
 
 static void CopyImageToReadback(const vk::CommandBuffer& cmdbuf, const vk::Image image,
-                                const vk::ImageLayout layout, FrameReadback& readback) {
+                                const vk::ImageLayout layout, FrameReadback& readback,
+                                const vk::Buffer target) {
     const vk::BufferImageCopy copy_region = {
         .bufferOffset = 0,
         .bufferRowLength = 0,
@@ -231,13 +256,13 @@ static void CopyImageToReadback(const vk::CommandBuffer& cmdbuf, const vk::Image
         .imageOffset = {0, 0, 0},
         .imageExtent = {readback.width, readback.height, 1},
     };
-    cmdbuf.copyImageToBuffer(image, layout, readback.buffer.Handle(), copy_region);
+    cmdbuf.copyImageToBuffer(image, layout, target, copy_region);
 }
 
 // The ten-bit frame narrowed to the readback's XRGB8888 image, rounded to the nearest step
 // by the blit, and that copied to its buffer
 static void NarrowToReadback(const vk::CommandBuffer& cmdbuf, const vk::Image image,
-                             FrameReadback& readback) {
+                             FrameReadback& readback, const vk::Buffer target) {
     const vk::ImageSubresourceRange range = {
         .aspectMask = vk::ImageAspectFlagBits::eColor,
         .baseMipLevel = 0,
@@ -287,7 +312,8 @@ static void NarrowToReadback(const vk::CommandBuffer& cmdbuf, const vk::Image im
     };
     cmdbuf.pipelineBarrier(vk::PipelineStageFlagBits::eTransfer,
                            vk::PipelineStageFlagBits::eTransfer, {}, {}, {}, to_src);
-    CopyImageToReadback(cmdbuf, readback.narrow, vk::ImageLayout::eTransferSrcOptimal, readback);
+    CopyImageToReadback(cmdbuf, readback.narrow, vk::ImageLayout::eTransferSrcOptimal, readback,
+                        target);
 }
 
 Presenter::Presenter(Frontend::Window& window_, AmdGpu::Liverpool* liverpool_)
@@ -333,12 +359,51 @@ Presenter::~Presenter() {
     Check(present_scheduler.CommandBuffer().reset());
     Check(flip_scheduler.CommandBuffer().reset());
 
+    for (auto& frame_slot_import : frame_slot_imports) {
+        guest_import_destroy(frame_slot_import.import);
+    }
+
     const vk::Device device = instance.GetDevice();
     for (auto& frame : present_frames) {
         instance.GetAllocator()->DestroyImage(frame.image, frame.allocation);
         device.destroyImageView(frame.image_view);
         device.destroyFence(frame.present_done);
     }
+}
+
+Presenter::FrameSlotTarget Presenter::AcquireFrameSlot(u32 width, u32 height) {
+    if (!instance.IsExternalMemoryHostSupported()) {
+        return {};
+    }
+    u32 slot = 0;
+    u8* const base = Libretro::AcquireFrameSlot(slot);
+    if (!base) {
+        return {};
+    }
+    // The slot's memory lent to the GPU, as much of it as the frame takes: made again only for
+    // a bigger frame. Nothing the GPU does is still writing the slot: it is free.
+    auto& slot_import = frame_slot_imports[slot];
+    const u64 bytes = static_cast<u64>(width) * height * 4;
+    if (bytes > slot_import.bytes) {
+        guest_import_destroy(slot_import.import);
+        const u64 alignment = std::max<u64>(instance.GetMinImportedHostPointerAlignment(), 1);
+        const u64 lent = (bytes + alignment - 1) / alignment * alignment;
+        slot_import.import = nullptr;
+        slot_import.bytes = bytes;
+        // Not past the slot, into the next one or the end of the memory
+        if (lent <= Libretro::FRAME_BYTES) {
+            guest_import_info_t info;
+            instance.FillHostImport(&info, base, lent, VK_BUFFER_USAGE_TRANSFER_DST_BIT);
+            slot_import.import = guest_import_create(&info);
+        }
+    }
+    VkDeviceSize offset = 0;
+    const VkBuffer buffer = guest_import_buffer(slot_import.import, 0, bytes, &offset);
+    if (buffer == VK_NULL_HANDLE) {
+        Libretro::ReleaseFrameSlot(slot);
+        return {};
+    }
+    return {vk::Buffer{buffer}, slot};
 }
 
 bool Presenter::IsVideoOutSurface(const AmdGpu::ColorBuffer& color_buffer) const {
@@ -670,8 +735,10 @@ void Presenter::Present(Frame* frame, bool is_reusing_frame, bool is_game_frame)
 
     auto& scheduler = present_scheduler;
     const auto cmdbuf = scheduler.CommandBuffer();
-    // The frame for the frontend, when it does not draw from the image itself
+    // The frame for the frontend, when it does not draw from the image itself, and the slot of
+    // the shared memory it is read back into where it goes there directly
     std::shared_ptr<FrameReadback> frame_readback;
+    FrameSlotTarget frame_slot{};
 
     if (emu_settings_get_vkhost_markers()) {
         cmdbuf.beginDebugUtilsLabelEXT(vk::DebugUtilsLabelEXT{
@@ -806,11 +873,17 @@ void Presenter::Present(Frame* frame, bool is_reusing_frame, bool is_game_frame)
             cmdbuf.pipelineBarrier(vk::PipelineStageFlagBits::eColorAttachmentOutput,
                                    vk::PipelineStageFlagBits::eTransfer,
                                    vk::DependencyFlagBits::eByRegion, {}, {}, to_transfer);
+            // Straight into a slot of the shared memory where one is free and the device can
+            // write there, else into the readback's buffer and copied there once it is done
+            frame_slot = readback.in_order ? AcquireFrameSlot(extent.width, extent.height)
+                                           : FrameSlotTarget{};
+            const vk::Buffer target =
+                frame_slot.buffer ? frame_slot.buffer : readback.Buffer().Handle();
             if (readback.narrow) {
-                NarrowToReadback(cmdbuf, swapchain_image, readback);
+                NarrowToReadback(cmdbuf, swapchain_image, readback, target);
             } else {
                 CopyImageToReadback(cmdbuf, swapchain_image, vk::ImageLayout::eTransferSrcOptimal,
-                                    readback);
+                                    readback, target);
             }
             read_back = true;
         }
@@ -857,12 +930,21 @@ void Presenter::Present(Frame* frame, bool is_reusing_frame, bool is_game_frame)
                 Libretro::PushImage(image, width, height);
             });
     }
-    if (frame_readback) {
+    if (frame_readback && frame_slot.buffer) {
+        // In the shared memory already: published once the GPU has written it
+        scheduler.DeferPriorityOperation(
+            [readback = std::move(frame_readback), slot = frame_slot.slot]() {
+                Libretro::PublishFrameSlot(slot, readback->width, readback->height);
+                ReturnFrameReadback(readback);
+            });
+    } else if (frame_readback) {
         scheduler.DeferPriorityOperation([readback = std::move(frame_readback)]() {
             const u64 size = static_cast<u64>(readback->width) * readback->height * 4;
-            if (readback->buffer.mapped_data.size() >= size) {
-                Libretro::PushFrame(readback->buffer.mapped_data.data(), readback->width,
-                                    readback->height);
+            auto& buffer = readback->Buffer();
+            buffer.Invalidate(0, size);
+            if (buffer.mapped_data.size() >= size) {
+                Libretro::PushFrame(buffer.mapped_data.data(), readback->width, readback->height,
+                                    readback->in_order);
             }
             ReturnFrameReadback(readback);
         });

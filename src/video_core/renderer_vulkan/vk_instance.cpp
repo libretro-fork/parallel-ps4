@@ -12,6 +12,7 @@
 #include "core/emulator_settings.h"
 #include "imgui/renderer/imgui_core.h"
 #include "libretro/libretro_bridge.h"
+#include "video_core/buffer_cache/guest_import.h"
 #include "video_core/renderer_vulkan/liverpool_to_vk.h"
 #include "video_core/renderer_vulkan/vk_device_fault.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
@@ -879,6 +880,25 @@ vk::Format Instance::GetSupportedFormat(const vk::Format format,
         }
     }
     return format;
+}
+
+void Instance::FillHostImport(guest_import_info* info, void* base, u64 size, u32 usage) const {
+    const auto& dispatch = VULKAN_HPP_DEFAULT_DISPATCHER;
+    *info = {};
+    info->device = static_cast<VkDevice>(*device);
+    info->memory = static_cast<VkPhysicalDeviceMemoryProperties>(memory_properties);
+    info->alignment = min_imported_host_pointer_alignment;
+    info->base = static_cast<uint8_t*>(base);
+    info->size = size;
+    info->usage = usage;
+    info->import_on_use = 1;
+    info->fns.allocate_memory = dispatch.vkAllocateMemory;
+    info->fns.free_memory = dispatch.vkFreeMemory;
+    info->fns.create_buffer = dispatch.vkCreateBuffer;
+    info->fns.destroy_buffer = dispatch.vkDestroyBuffer;
+    info->fns.get_buffer_memory_requirements = dispatch.vkGetBufferMemoryRequirements;
+    info->fns.bind_buffer_memory = dispatch.vkBindBufferMemory;
+    info->fns.get_memory_host_pointer_properties = dispatch.vkGetMemoryHostPointerPropertiesEXT;
 }
 
 } // namespace Vulkan

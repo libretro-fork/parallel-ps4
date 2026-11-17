@@ -1365,6 +1365,8 @@ add_library(shadps4 MODULE
     ${SHADNET}
     libretro/audio_mix.c
     libretro/audio_mix.h
+    libretro/frame_slots.c
+    libretro/frame_slots.h
     libretro/gpu_frames.cpp
     libretro/gpu_frames.h
     libretro/host.cpp

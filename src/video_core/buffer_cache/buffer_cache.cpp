@@ -165,22 +165,11 @@ BufferCache::BufferCache(const Vulkan::Instance& instance_, Vulkan::Scheduler& s
     const u32 import_mode = emu_settings_get_readback_import();
     const bool readbacks = emu_settings_get_readbacks_mode() != EMU_READBACKS_DISABLED;
     if (instance.IsExternalMemoryHostSupported() && import_mode != EMU_READBACK_IMPORT_DISABLED) {
-        const auto& dispatch = VULKAN_HPP_DEFAULT_DISPATCHER;
-        guest_import_info_t info{};
-        info.device = static_cast<VkDevice>(device);
-        info.memory = static_cast<VkPhysicalDeviceMemoryProperties>(instance.GetMemoryProperties());
-        info.alignment = instance.GetMinImportedHostPointerAlignment();
-        info.base = memory->BackingBase();
-        info.size = memory->BackingBytes();
-        info.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+        guest_import_info_t info;
+        instance.FillHostImport(&info, memory->BackingBase(), memory->BackingBytes(),
+                                VK_BUFFER_USAGE_TRANSFER_DST_BIT |
+                                    VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
         info.import_on_use = import_mode == EMU_READBACK_IMPORT_ON_USE;
-        info.fns.allocate_memory = dispatch.vkAllocateMemory;
-        info.fns.free_memory = dispatch.vkFreeMemory;
-        info.fns.create_buffer = dispatch.vkCreateBuffer;
-        info.fns.destroy_buffer = dispatch.vkDestroyBuffer;
-        info.fns.get_buffer_memory_requirements = dispatch.vkGetBufferMemoryRequirements;
-        info.fns.bind_buffer_memory = dispatch.vkBindBufferMemory;
-        info.fns.get_memory_host_pointer_properties = dispatch.vkGetMemoryHostPointerPropertiesEXT;
         guest = guest_import_create(&info);
         if (guest) {
             guest_chunks.resize((info.size + (u64{1} << GUEST_IMPORT_CHUNK_SHIFT) - 1) >>

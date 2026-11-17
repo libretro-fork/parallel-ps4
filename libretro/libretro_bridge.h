@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <stop_token>
 
@@ -10,9 +11,38 @@
 // passes it on to the core in the frontend's process.
 namespace Libretro {
 
-/// A finished frame, read back from the GPU: 32 bits a pixel, bytes B, G, R, X, rows top to
-/// bottom, no padding between them. Called from the renderer's thread.
-void PushFrame(const void* pixels, std::uint32_t width, std::uint32_t height);
+/// The slots a frame can be in, in the memory shared with the core
+/// (shared_state.h): the newest one published, the one the core is showing, and
+/// three for the emulator to write the next into. The GPU writes a frame
+/// straight into its slot (AcquireFrameSlot), so each frame it has not finished
+/// yet holds one.
+inline constexpr std::uint32_t FRAME_SLOTS = 5;
+
+/// A frame's size at most, and the bytes of a slot
+inline constexpr std::uint32_t MAX_WIDTH = 3840;
+inline constexpr std::uint32_t MAX_HEIGHT = 2160;
+inline constexpr std::size_t FRAME_BYTES =
+    static_cast<std::size_t>(MAX_WIDTH) * MAX_HEIGHT * 4;
+
+/// A finished frame, read back from the GPU: 32 bits a pixel, bytes B, G, R, X,
+/// rows top to bottom, no padding between them, copied into the shared memory.
+/// With HDR Output the frame is A2B10G10R10, and put in libretro's order on the
+/// way unless @in_order says it is already (A2R10G10B10). Called from the
+/// renderer's thread.
+void PushFrame(const void *pixels, std::uint32_t width, std::uint32_t height,
+               bool in_order);
+
+/// A slot of the shared memory for the GPU to read the next frame back into
+/// itself, with no copy after (PublishFrameSlot, or ReleaseFrameSlot if it is
+/// not written after all): not the newest frame's, not the one the core is
+/// showing, and not one another frame is being written into. Null when all are
+/// taken; nothing waits. A frame is then read back as before.
+std::uint8_t *AcquireFrameSlot(std::uint32_t &slot);
+/// The frame in @slot is finished, the GPU's work on it done: as PushFrame has
+/// it.
+void PublishFrameSlot(std::uint32_t slot, std::uint32_t width,
+                      std::uint32_t height);
+void ReleaseFrameSlot(std::uint32_t slot);
 
 // Resolution: Default - the size of the game's video out buffers, as it registers them. The
 // picture follows it: TakeGameSize hands a new one to the presenter once, and until the

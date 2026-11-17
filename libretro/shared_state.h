@@ -15,6 +15,8 @@
 
 #include "audio_mix.h"
 #include "common/patch_catalog.h"
+#include "frame_slots.h"
+#include "libretro_bridge.h"
 
 // The memory the libretro core (libretro_core.cpp, in the frontend's process) shares with the
 // emulator it runs in a process of its own (host.cpp). One block: this header, then three
@@ -22,27 +24,29 @@
 namespace Libretro {
 
 inline constexpr std::uint32_t SHARED_MAGIC = 0x34505368; // "hSP4"
-inline constexpr std::uint32_t SHARED_VERSION = 30;
+inline constexpr std::uint32_t SHARED_VERSION = 31;
 
-inline constexpr std::uint32_t MAX_WIDTH = 3840;
-inline constexpr std::uint32_t MAX_HEIGHT = 2160;
-inline constexpr std::size_t FRAME_BYTES = static_cast<std::size_t>(MAX_WIDTH) * MAX_HEIGHT * 4;
+// MAX_WIDTH, MAX_HEIGHT and FRAME_BYTES, a frame's size at most, are in
+// libretro_bridge.h
 
-/// The slots a frame can be in: the newest one published, the one the core is showing, and one
-/// for the emulator to write the next into.
-inline constexpr std::uint32_t FRAME_SLOTS = 3;
-/// The emulator's images when the picture is handed over on the GPU (gpu_frames.h): the same
-/// three, two more for frames that are drawn but not finished by the GPU yet, and one for a
-/// frame the frontend may still be drawing from (frames_busy).
+// FRAME_SLOTS, the frames in this memory, is in libretro_bridge.h
+/// The emulator's images when the picture is handed over on the GPU
+/// (gpu_frames.h): the same three, two more for frames that are drawn but not
+/// finished by the GPU yet, and one for a frame the frontend may still be
+/// drawing from (frames_busy).
 inline constexpr std::uint32_t FRAME_IMAGES = 6;
+static_assert(FRAME_SLOTS <= FRAME_IMAGES,
+              "frame_size has a place for every slot");
+static_assert(FRAME_SLOTS <= FRAME_SLOTS_MAX && FRAME_IMAGES < FRAME_SLOTS_NONE,
+              "frame_slots.h counts the slots");
 /// SharedState::gpu_frames_state
 inline constexpr std::uint32_t GPU_FRAMES_PENDING = 0;
 inline constexpr std::uint32_t GPU_FRAMES_SHOWN = 1;
 inline constexpr std::uint32_t GPU_FRAMES_FAILED = 2;
 /// frame_held when the core is showing none.
-inline constexpr std::uint32_t FRAME_SLOT_NONE = 7;
+inline constexpr std::uint32_t FRAME_SLOT_NONE = FRAME_SLOTS_NONE;
 /// frame_latest is the number of frames published shifted by this, plus the newest one's slot.
-inline constexpr std::uint32_t FRAME_SLOT_BITS = 3;
+inline constexpr std::uint32_t FRAME_SLOT_BITS = FRAME_SLOTS_BITS;
 inline constexpr std::uint32_t FRAME_SLOT_MASK = (1u << FRAME_SLOT_BITS) - 1;
 
 /// What the emulator tells the core once its images exist - over the socket on Linux, with one

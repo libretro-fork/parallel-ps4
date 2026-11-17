@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include <array>
+
 #include "common/bounded_threadsafe_queue.h"
 #include "core/emulator_settings.h"
 #include "core/libraries/videoout/buffer.h"
@@ -20,6 +22,7 @@ class Window;
 }
 
 struct vk_heap_span;
+struct guest_import;
 
 namespace AmdGpu {
 struct Liverpool;
@@ -103,6 +106,15 @@ private:
 
     void SetExpectedGameSize(s32 width, s32 height);
 
+    /// A slot of the shared memory to read the frame back into directly, lent to the GPU
+    /// (Libretro::AcquireFrameSlot); no buffer when none is free or the device cannot write
+    /// there
+    struct FrameSlotTarget {
+        vk::Buffer buffer{};
+        u32 slot{};
+    };
+    FrameSlotTarget AcquireFrameSlot(u32 width, u32 height);
+
 private:
     float expected_ratio{1920.0 / 1080.0f};
     u32 expected_frame_width{1920};
@@ -128,6 +140,12 @@ private:
     Frame* last_submit_frame;
     std::optional<ImGui::RefCountedTexture> splash_img;
     std::vector<VAddr> vo_buffers_addr;
+    // Each slot of the shared memory lent to the GPU, and how much of it
+    struct FrameSlotImport {
+        ::guest_import* import{};
+        u64 bytes{};
+    };
+    std::array<FrameSlotImport, Libretro::FRAME_SLOTS> frame_slot_imports{};
 };
 
 } // namespace Vulkan

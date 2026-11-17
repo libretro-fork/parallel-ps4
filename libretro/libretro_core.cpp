@@ -44,20 +44,21 @@
 #include <rthreads/rthreads.h>
 #include <streams/file_stream.h>
 
+#include "audio_mix.h"
 #include "common/io_file.h"
 #include "common/memory_patcher.h"
 #include "common/patch_catalog.h"
 #include "common/scm_rev.h"
 #include "core/file_format/psf.h"
 #include "core/libraries/pad/pad.h"
-#include "audio_mix.h"
-#include "pad_scale.h"
-#include "touch_track.h"
-#include "libretro.h"
+#include "frame_slots.h"
 #include "gpu_frames.h"
+#include "libretro.h"
 #include "libretro_core_options.h"
+#include "pad_scale.h"
 #include "pkg_reader.h"
 #include "shared_state.h"
+#include "touch_track.h"
 
 #ifdef _WIN32
 #include <windows.h>
@@ -1276,24 +1277,27 @@ void MarkImagesBusy(uint32_t image) {
 // while it was made; else the newer one is tried.
 void TakeFrame() {
     for (int attempt = 0; attempt < 3; ++attempt) {
-        const uint32_t latest = static_cast<std::uint32_t>(retro_atomic_load_seq_cst_int(&shared->frame_latest));
-        if (latest == 0 || latest == shown_latest) {
-            return;
-        }
-        // Held first, then looked at again: once the slot is held and still the newest, the
-        // emulator does not write into it, and it is shown from where it is.
-        const uint32_t slot = latest & Libretro::FRAME_SLOT_MASK;
-        const bool images = gpu_frames && !GpuUploads();
-        if (slot >= (images ? Libretro::FRAME_IMAGES : Libretro::FRAME_SLOTS)) {
-            return;
-        }
-        if (static_cast<std::uint32_t>(retro_atomic_exchange_int(&shared->frame_held, slot)) != slot) {
-            // The image it held is free for the emulator to draw into
-            wakes.frame.Notify();
-        }
-        if (static_cast<std::uint32_t>(retro_atomic_load_seq_cst_int(&shared->frame_latest)) != latest) {
-            continue;
-        }
+      // Held first, then looked at again (frame_slots.h): once the slot is held
+      // and still the newest, the emulator does not write into it, and it is
+      // shown from where it is.
+      const bool images = gpu_frames && !GpuUploads();
+      unsigned slot = 0;
+      unsigned latest = 0;
+      int released = 0;
+      const int held = frame_slots_hold(
+          &shared->frame_latest, &shared->frame_held,
+          images ? Libretro::FRAME_IMAGES : Libretro::FRAME_SLOTS, shown_latest,
+          &slot, &latest, &released);
+      if (released) {
+        // The image it held is free for the emulator to draw into
+        wakes.frame.Notify();
+      }
+      if (held == 0) {
+        return;
+      }
+      if (held < 0) {
+        continue;
+      }
         const uint32_t width = shared->frame_size[slot].width;
         const uint32_t height = shared->frame_size[slot].height;
         if (width == 0 || height == 0 || width > Libretro::MAX_WIDTH ||

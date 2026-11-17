@@ -100,6 +100,14 @@ $CC -std=c89 -O1 -g -Wall -fsanitize=address,undefined -isystem externals/vulkan
     -Isrc libretro/tests/vk_heap_device_test.c src/video_core/renderer_vulkan/vk_heap.c \
     -o "$OUT/vk_heap_device_test" -ldl
 ASAN_OPTIONS=detect_leaks=0 "$OUT/vk_heap_device_test"
+# The frames handed to the core in the shared memory (libretro/frame_slots.c): claimed slots
+# never the newest or held one, the core seeing only whole frames that stay as they are
+for san in address,undefined thread; do
+    name=frame_slots_test-$(echo $san | tr , -)
+    $CC -std=c89 -O1 -g -Wall -fsanitize=$san -I$L/include libretro/tests/frame_slots_test.c \
+        libretro/frame_slots.c -o "$OUT/$name" -lpthread
+    "$OUT/$name"
+done
 # The game's memory lent to the GPU (buffer_cache/guest_import.c) on a real device: copied
 # from, written into where a scattered address space maps it, chunks imported once, as wanted
 # or as mapped by threads racing
