@@ -216,6 +216,10 @@ int main(void) {
     int i;
 
     game_clock_init(&clock_, 60, 1);
+    CHECK(game_clock_fmod(&clock_), "FMOD's output hold on until the game is looked at");
+    game_clock_set_fmod(&clock_, 0);
+    CHECK(!game_clock_fmod(&clock_), "off for a game without FMOD");
+    game_clock_set_fmod(&clock_, 1);
     CHECK(game_clock_now(&clock_) == 0, "0 before the first frame");
     CHECK(game_clock_advance(&clock_, 5000000) == 0, "standing before the first frame");
 

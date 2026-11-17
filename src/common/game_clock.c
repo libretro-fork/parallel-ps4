@@ -45,6 +45,15 @@ void game_clock_init(game_clock_t* clock, unsigned fps_num, unsigned fps_den) {
     clock->done_frame = 0;
     clock->done = 0;
     clock->done_ctx = 0;
+    retro_atomic_int_init(&clock->fmod, 1);
+}
+
+void game_clock_set_fmod(game_clock_t* clock, int fmod) {
+    retro_atomic_store_release_int(&clock->fmod, fmod != 0);
+}
+
+int game_clock_fmod(game_clock_t* clock) {
+    return retro_atomic_load_acquire_int(&clock->fmod) != 0;
 }
 
 void game_clock_set_done(game_clock_t* clock, retro_atomic_int_t* done_frame,

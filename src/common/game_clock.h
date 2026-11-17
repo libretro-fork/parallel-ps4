@@ -78,11 +78,22 @@ typedef struct game_clock {
     retro_atomic_int_t* done_frame;
     void (*done)(void* ctx);
     void* done_ctx;
+    /* FMOD's holds (game_clock_set_fmod): 1 for a game with FMOD in it, 0 for the rest */
+    retro_atomic_int_t fmod;
 } game_clock_t;
 
 /* At time 0, no frame started (the time stands until the first), frames of
  * @fps_den / @fps_num seconds (60/1: 1/60 s) */
 void game_clock_init(game_clock_t* clock, unsigned fps_num, unsigned fps_den);
+
+/* Whether the game has FMOD in it (1, as at init) or not (0), set before its code runs. FMOD's
+ * engine outputs from a ring its mixer fills a slot at a time without waiting for it, and needs
+ * the sound's output to wait, before each buffer, for the threads it woke to wait again
+ * (game_clock_woken_waiting, audioout.cpp's PaceOutput): no other game gets that hold. The
+ * time is the frames' either way, and a woken thread that has not run yet holds it for every
+ * game (game_clock_park): without that, a timeout could end before the work it waits for. */
+void game_clock_set_fmod(game_clock_t* clock, int fmod);
+int game_clock_fmod(game_clock_t* clock);
 
 /* A frame starts (retro_run): the time moves to its start (the last frame's end), if the
  * game had not used all of the last one. The one thread that starts frames. */

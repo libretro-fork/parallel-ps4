@@ -5,6 +5,7 @@
 #include <cstdio>
 #include <ctime>
 #include <filesystem>
+#include <functional>
 #include <iostream>
 #include <set>
 #include <sstream>
@@ -35,6 +36,7 @@
 #include "core/file_sys/fs.h"
 #include "core/ipc/ipc.h"
 #include "core/libraries/kernel/kernel.h"
+#include "core/libraries/kernel/time.h"
 #include "core/libraries/libs.h"
 #include "core/libraries/np/np_handler/np_handler.h"
 #include "core/libraries/np/np_trophy.h"
@@ -99,6 +101,41 @@ void Emulator::Shutdown() {
     }
     UpdatePlayTime(Common::Singleton<Common::ElfInfo>::Instance()->GameSerial());
     exit_done = true;
+}
+
+// Whether the game has FMOD in it: built into its executable (FMOD's classes, namespace FMOD,
+// leave their names there, "N4FMOD...", as in Bloodborne's; FMOD's error strings name its types,
+// "FMOD_REVERB_PROPERTIES" and the like, as in Sekiro's, which has no such class names), or
+// named there as a module to load (libfmod*.prx), or one of its own modules. Only such a game gets
+// FMOD's hold (game_clock_set_fmod).
+static bool GameUsesFmod(const Module& eboot, const std::filesystem::path& sce_module) {
+    static constexpr std::string_view needles[] = {"N4FMOD", "FMOD_", "libfmod"};
+    const auto info = eboot.GetModuleInfo();
+    for (u32 i = 0; i < info.num_segments; i++) {
+        const auto& segment = info.segments[i];
+        if (!(segment.prot & 4) || segment.size == 0) { // PF_READ
+            continue;
+        }
+        const char* begin = reinterpret_cast<const char*>(segment.address);
+        const char* end = begin + segment.size;
+        for (const std::string_view needle : needles) {
+            if (std::search(begin, end,
+                            std::boyer_moore_horspool_searcher(needle.begin(), needle.end())) !=
+                end) {
+                return true;
+            }
+        }
+    }
+    std::error_code ec;
+    for (const auto& entry : std::filesystem::directory_iterator(sce_module, ec)) {
+        std::string name = entry.path().filename().string();
+        std::transform(name.begin(), name.end(), name.begin(),
+                       [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+        if (name.find("fmod") != std::string::npos) {
+            return true;
+        }
+    }
+    return false;
 }
 
 s32 ReadCompiledSdkVersion(const std::string& guest_or_host_path) {
@@ -622,9 +659,20 @@ void Emulator::Run(std::filesystem::path file, std::vector<std::string> args,
     Libraries::InitHLELibs(&linker->GetHLESymbols());
 
     // Load the module with the linker.
-    if (linker->LoadModule(guest_eboot_path) == -1) {
+    const s32 eboot_index = linker->LoadModule(guest_eboot_path);
+    if (eboot_index == -1) {
         LOG_CRITICAL(Loader, "Failed to load game's eboot.bin: {}", guest_eboot_path);
         Common::QuickExit(0);
+    }
+    // FMOD's hold on the sound output only for a game with FMOD in it, set before any
+    // of the game's code runs
+    {
+        const bool fmod =
+            GameUsesFmod(*linker->GetModule(eboot_index), mnt->GetHostPath("/app0/sce_module"));
+        game_clock_set_fmod(Libraries::Kernel::GameClock(), fmod ? 1 : 0);
+        LOG_INFO(Loader, "{}",
+                 fmod ? "FMOD found: the sound output waits for FMOD's mixer"
+                      : "No FMOD: the sound output goes at the device's pace alone");
     }
 
     if (!id.empty()) {

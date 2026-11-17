@@ -1364,6 +1364,221 @@ static void test_sampler_modules(void) {
    rig_close(&r);
 }
 
+/* Dead or Alive Xtreme 3's system as it makes it (its log): racks of the
+ * sizes its options give, each in memory of exactly the size the rack asks
+ * for, so that AddressSanitizer stops at any byte written past one; samplers
+ * playing every waveform kind the engine reads, at every pitch, their blocks
+ * appended, moved and stopped while they play; everything sent through a
+ * filter and compressor rack and a reverb into the mastering voice; rendered
+ * into each kind of buffer a game gives. DOAX3 stopped going in-game with a
+ * game variable and a thread's storage overwritten as its streams started. */
+static void *exact(size_t size) {
+   /* No slack after it: the next byte is AddressSanitizer's (malloc's blocks are 16-byte
+    * aligned on the hosts the tests run on) */
+   void *p;
+   size = (size + 15u) & ~(size_t)15u;
+   if (!(p = malloc(size)))
+      return NULL;
+   memset(p, 0xcd, size);
+   return p;
+}
+
+static ngs2_rack *exact_rack(ngs2_system *system, const ngs2_rack_desc *desc, void **mem) {
+   const size_t size = ngs2_rack_size(desc);
+   CHECK(size != 0);
+   *mem = exact(size);
+   return *mem ? ngs2_rack_init(system, *mem, size, desc) : NULL;
+}
+
+static void game_desc(ngs2_rack_desc *d, uint32_t id, const char *name, uint32_t voices,
+      uint32_t ports, uint32_t matrices) {
+   memset(d, 0, sizeof(*d));
+   d->rack_id = id;
+   strncpy(d->name, name, sizeof(d->name) - 1);
+   d->max_grain_samples = 256;
+   d->max_voices = voices;
+   d->max_ports = ports;
+   d->max_matrices = matrices;
+   d->max_channels = 8;
+   d->max_inputs = 1;
+   d->num_buffers = 1;
+   d->max_filters = 8;
+   d->max_envelope_points = 8;
+   if (id == NGS2_RACK_SAMPLER) {
+      /* libSceNgs2's defaults where a game gives none */
+      d->max_waveform_blocks = 4;
+      d->max_atrac9_decoders = 256;
+   }
+}
+
+static int pitch(ngs2_voice *v, float ratio) {
+   struct {
+      ngs2_param_header header;
+      float ratio;
+   } p;
+   memset(&p, 0, sizeof(p));
+   head(&p.header, 12, NGS2_RACK_SAMPLER << 16 | 5u);
+   p.ratio = ratio;
+   return ngs2_voice_control(v, &p.header);
+}
+
+static int move_blocks(ngs2_voice *v, const void *from, const void *to) {
+   struct {
+      ngs2_param_header header;
+      const void *from;
+      const void *to;
+   } p;
+   memset(&p, 0, sizeof(p));
+   head(&p.header, 24, NGS2_RACK_SAMPLER << 16 | 2u);
+   p.from = from;
+   p.to = to;
+   return ngs2_voice_control(v, &p.header);
+}
+
+static void test_game_racks(void) {
+   enum { STREAM, SFX, MOVIE, REVERB, MULTIFX, MASTER, RACKS };
+   static const struct {
+      uint32_t id;
+      const char *name;
+      uint32_t voices, ports, matrices;
+   } shape[RACKS] = {
+      {NGS2_RACK_SAMPLER, "Stream", 20, 7, 7},
+      {NGS2_RACK_SAMPLER, "Sfx", 230, 7, 7},
+      {NGS2_RACK_SAMPLER, "Movie", 1, 1, 1},
+      {NGS2_RACK_REVERB, "Reverb", 1, 1, 1},
+      {NGS2_RACK_CUSTOM_SUBMIXER, "MultiFx", 1, 1, 1},
+      {NGS2_RACK_MASTERING, "Mastering", 1, 0, 0},
+   };
+   static const struct {
+      uint32_t type, channels, rate, bytes_per_frame;
+   } kinds[] = {
+      {NGS2_WAVE_PCM_I16L, 1, 48000, 2},   {NGS2_WAVE_PCM_I16L, 2, 44100, 4},
+      {NGS2_WAVE_PCM_I16L, 8, 48000, 16},  {NGS2_WAVE_PCM_F32L, 6, 96000, 24},
+      {NGS2_WAVE_PCM_I16B, 2, 32000, 4},   {NGS2_WAVE_PCM_U8, 1, 22050, 1},
+      {NGS2_WAVE_PCM_I24L, 2, 48000, 6},   {NGS2_WAVE_PCM_F64L, 2, 192000, 16},
+      {NGS2_WAVE_VAG, 1, 48000, 0},        {NGS2_WAVE_VAG, 2, 24000, 0},
+   };
+   void *mem[RACKS], *system_mem, *data;
+   ngs2_rack *racks[RACKS];
+   ngs2_rack_desc d;
+   ngs2_system *system;
+   size_t size = ngs2_system_size(256);
+   const size_t data_size = 64 * 1024;
+   uint8_t *wave;
+   unsigned r, v, g, i;
+   system_mem = exact(size);
+   system = ngs2_system_init(system_mem, size, "KTSL2", 256, 256, 48000, &host);
+   CHECK(system != NULL);
+   if (!system)
+      return;
+   for (r = 0; r < RACKS; r++) {
+      game_desc(&d, shape[r].id, shape[r].name, shape[r].voices, shape[r].ports,
+            shape[r].matrices);
+      if (r == MULTIFX) {
+         /* Four filters and a compressor, buffer 0 to 0 */
+         d.num_modules = 5;
+         for (i = 0; i < 5; i++)
+            d.modules[i].id = i < 4 ? 0x13u : 0x12u;
+      }
+      racks[r] = exact_rack(system, &d, &mem[r]);
+      CHECK(racks[r] != NULL);
+      if (!racks[r])
+         return;
+   }
+   /* The waveforms the samplers read, in memory of their own, the game's */
+   data = exact(data_size);
+   wave = (uint8_t *)data;
+   for (i = 0; i < data_size; i++)
+      wave[i] = (uint8_t)(i * 2654435761u >> 13);
+   memcpy(wave, at9_data, sizeof(at9_data));
+
+   CHECK(mixer_setup(ngs2_rack_voice(racks[MASTER], 0), 0x30000000u, 8, 0) == NGS2_OK);
+   CHECK(event(ngs2_rack_voice(racks[MASTER], 0), NGS2_EVENT_PLAY) == NGS2_OK);
+   CHECK(mixer_setup(ngs2_rack_voice(racks[REVERB], 0), 0x20010000u, 8, 8) == NGS2_OK);
+   CHECK(patch(ngs2_rack_voice(racks[REVERB], 0), 0, ngs2_rack_voice(racks[MASTER], 0)) ==
+         NGS2_OK);
+   CHECK(event(ngs2_rack_voice(racks[REVERB], 0), NGS2_EVENT_PLAY) == NGS2_OK);
+   CHECK(patch(ngs2_rack_voice(racks[MULTIFX], 0), 0, ngs2_rack_voice(racks[REVERB], 0)) ==
+         NGS2_OK);
+   CHECK(event(ngs2_rack_voice(racks[MULTIFX], 0), NGS2_EVENT_PLAY) == NGS2_OK);
+
+   for (g = 0; g < 1500; g++) {
+      float out8[256 * 8];
+      int16_t out2[256 * 2];
+      ngs2_render_buffer b[2];
+      /* Voices started, changed and stopped as a game does it, a few a grain */
+      for (r = STREAM; r <= MOVIE; r++)
+         for (v = (g * 7u + r) % shape[r].voices; v < shape[r].voices; v += 37) {
+            ngs2_voice *voice = ngs2_rack_voice(racks[r], v);
+            const unsigned k = (g + v + r) % (sizeof(kinds) / sizeof(kinds[0]) + 1);
+            const unsigned what = (g / 3 + v) % 6;
+            if (what == 0) {
+               uint32_t bytes = 4096 + (uint32_t)((g * 131u + v * 17u) % 8192u);
+               const uint32_t off = (uint32_t)((g * 977u + v * 61u) % (data_size - 16384));
+               if (k == sizeof(kinds) / sizeof(kinds[0])) {
+                  /* ATRAC9, its superframes from the start */
+                  ngs2_waveform_format f;
+                  setup_param sp;
+                  memset(&sp, 0, sizeof(sp));
+                  head(&sp.header, sizeof(sp), 0x10000000u);
+                  f.type = NGS2_WAVE_ATRAC9;
+                  f.channels = 2;
+                  f.sample_rate = 48000;
+                  memcpy(&f.config_data, at9_config, 4);
+                  f.frame_offset = 0;
+                  f.frame_margin = 0;
+                  sp.format = f;
+                  ngs2_voice_control(voice, &sp.header);
+                  add_block(voice, wave, sizeof(at9_data), AT9_FRAMES * AT9_FRAME_SAMPLES * 2, 3,
+                        NGS2_BLOCKS_RESET, 0);
+               } else {
+                  ngs2_voice_control(voice, NULL);
+                  sampler_setup(voice, kinds[k].type, kinds[k].channels, kinds[k].rate);
+                  bytes -= kinds[k].bytes_per_frame ? bytes % kinds[k].bytes_per_frame : bytes % 16;
+                  add_block(voice, wave + off, bytes,
+                        kinds[k].bytes_per_frame ? bytes / kinds[k].bytes_per_frame
+                                                 : bytes / 16 * 28,
+                        v % 3 ? 0 : NGS2_REPEAT_ENDLESS, NGS2_BLOCKS_RESET, v);
+               }
+               patch(voice, v % shape[r].ports,
+                     ngs2_rack_voice(racks[(v & 1) ? MULTIFX : REVERB], 0));
+               pitch(voice, (float)((g + v) % 9) * 0.5f + 0.01f);
+               event(voice, NGS2_EVENT_PLAY);
+            } else if (what == 1) {
+               add_block(voice, wave + (g * 13u) % 4096u, 2048, 1024, 0, NGS2_BLOCKS_APPEND, g);
+            } else if (what == 2) {
+               pitch(voice, 4.0f);
+            } else if (what == 3) {
+               move_blocks(voice, wave, wave);
+            } else if (what == 4) {
+               event(voice, (g & 1) ? NGS2_EVENT_STOP : NGS2_EVENT_PAUSE);
+            } else {
+               event(voice, NGS2_EVENT_RESUME);
+            }
+         }
+      b[0].buffer = out8;
+      b[0].buffer_size = sizeof(out8);
+      b[0].waveform_type = NGS2_WAVE_PCM_F32L;
+      b[0].channels = 8;
+      b[1].buffer = out2;
+      b[1].buffer_size = sizeof(out2);
+      b[1].waveform_type = NGS2_WAVE_PCM_I16L;
+      b[1].channels = 2;
+      CHECK(ngs2_system_render(system, b, (g & 1) + 1) == NGS2_OK);
+      {
+         void *handler;
+         ngs2_callback_info info;
+         while (ngs2_system_next_callback(system, &handler, &info)) {
+         }
+      }
+   }
+   ngs2_system_destroy(system);
+   for (r = 0; r < RACKS; r++)
+      free(mem[r]);
+   free(system_mem);
+   free(data);
+}
+
 int main(void) {
    test_passthrough();
    test_resample();
@@ -1377,6 +1592,7 @@ int main(void) {
    test_formats();
    test_atrac9();
    test_vag_blocks();
+   test_game_racks();
    if (failures) {
       printf("ngs2_core_test: %d failed\n", failures);
       return 1;
