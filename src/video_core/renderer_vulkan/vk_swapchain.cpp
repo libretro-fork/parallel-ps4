@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <limits>
 #include "common/assert.h"
+#include "common/elf_info.h"
 #include "common/embedded_resources.h"
 #include "common/logging/log.h"
 #include "core/emulator_settings.h"
@@ -57,6 +58,10 @@ Swapchain::Swapchain(const Instance& instance_, const Frontend::Window& window_)
         info.surface_format = static_cast<VkFormat>(surface_format.format);
         info.font = font.data();
         info.font_size = font.size();
+        // The splash screen, read where the game's files lent it
+        const auto splash = Common::ElfInfo::Instance().GetSplashData();
+        info.splash = splash.data();
+        info.splash_size = splash.size();
         ASSERT_MSG(!font.empty() && ovl_vk_init(&info), "The overlays could not be made");
     }
 }

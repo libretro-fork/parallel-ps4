@@ -29,12 +29,12 @@ void AcquireGamepadInputCapture();
 void ReleaseGamepadInputCapture();
 bool IsGamepadInputCaptured();
 
-ImGuiID NewFrame();
+void NewFrame();
 
-/// Draws the overlays into @image_view: over what is there with @keep, else over black. With
-/// @keep and nothing to draw, the image is left as it is, with no pass.
+/// Draws the overlays into @image_view, over what is there; with nothing to draw, the image is
+/// left as it is, with no pass.
 void Render(const vk::CommandBuffer& cmdbuf, const vk::ImageView& image_view,
-            const vk::Extent2D& extent, bool keep = false);
+            const vk::Extent2D& extent);
 
 bool MustKeepDrawing(); // Force the emulator redraw
 

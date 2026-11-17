@@ -8,7 +8,6 @@
 #include "common/bounded_threadsafe_queue.h"
 #include "core/emulator_settings.h"
 #include "core/libraries/videoout/buffer.h"
-#include "imgui/imgui_texture.h"
 #include "libretro/libretro_bridge.h"
 #include "video_core/renderer_vulkan/host_passes/pp_pass.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
@@ -41,8 +40,6 @@ struct Frame {
     u64 ready_tick;
     bool is_hdr{false};
     u8 id{};
-
-    ImTextureID imgui_texture;
 };
 
 enum SchedulerType {
@@ -138,7 +135,6 @@ private:
     // capacity
     Common::MPMCQueue<Frame*, 64> free_queue;
     Frame* last_submit_frame;
-    std::optional<ImGui::RefCountedTexture> splash_img;
     std::vector<VAddr> vo_buffers_addr;
     // Each slot of the shared memory lent to the GPU, and how much of it
     struct FrameSlotImport {

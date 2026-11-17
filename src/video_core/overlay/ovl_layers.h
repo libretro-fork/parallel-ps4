@@ -38,6 +38,20 @@ void ovl_trophy_draw(void);
 int ovl_trophy_active(void);
 void ovl_trophy_reset(void);
 
+/* The splash screen (ovl_splash.c), drawn by vk_overlay.c. Opened with the game's PNG, lent
+ * for as long as it is open: its size, 0 when it is none rpng reads. Started with the memory
+ * it decodes into, w x h R, G, B, A bytes, on a thread of its own. From any thread after:
+ * whether it is decoded, or still decoding; asked to stop. Closed when the overlays go, the
+ * thread stopped and ended. */
+int ovl_splash_open(const uint8_t* png, size_t size, unsigned* w, unsigned* h);
+int ovl_splash_start(uint8_t* pixels);
+int ovl_splash_decoded(void);
+int ovl_splash_decoding(void);
+void ovl_splash_stop(void);
+void ovl_splash_close(void);
+/* Its quad within the display, as the core's ImGui window drew it: indices 0 1 2, 0 2 3 */
+void ovl_splash_quad(float display_w, float display_h, ovl_vertex_t v[4]);
+
 #ifdef __cplusplus
 }
 #endif

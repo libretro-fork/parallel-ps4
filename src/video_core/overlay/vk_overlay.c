@@ -9,7 +9,11 @@
  * swapchain's images a staging buffer for the atlas and a vertex and an index buffer, so that
  * a frame allocates nothing (a frame drawing more than they hold grows them, once). A slot of
  * frame buffers comes round again once the frame that used it is done, as ImGui's backend
- * had it. Nothing waits on the GPU. */
+ * had it. Nothing waits on the GPU.
+ *
+ * The splash screen (ovl_splash.c) is drawn on its own, ahead of everything else, as the
+ * picture in place of the game's: the image cleared to black and the splash over it. Its
+ * memory is made with the rest, at its size, and freed once it is no longer shown. */
 
 #include <string.h>
 
@@ -47,6 +51,22 @@ typedef struct tex_slot {
     VkDescriptorSet set;
 } tex_slot_t;
 
+/* The splash: what it decodes into (freed once copied), its texture, and its quad, a frame's
+ * four vertices each and the six indices after */
+typedef struct splash {
+    int made, uploaded, done;
+    host_buffer_t staging, quad;
+    VkImage image;
+    VkDeviceMemory memory;
+    VkImageView view;
+    VkDescriptorSet set;
+    uint32_t w, h;
+    unsigned quad_index;
+    unsigned upload_frame, retire_frame;
+} splash_t;
+
+#define SPLASH_QUADS_BYTES ((VkDeviceSize)MAX_FRAMES * 4 * sizeof(ovl_vertex_t))
+
 #define FN(name) PFN_##name name
 static struct {
     int made;
@@ -66,7 +86,9 @@ static struct {
     unsigned frame_count, frame_index;
     unsigned frame; /* frames presented */
     tex_slot_t tex[OVL_TEX_SLOTS];
+    splash_t splash;
     const ovl_draw_data_t* draw_data;
+    float display_w, display_h;
 
     FN(vkCreateBuffer);
     FN(vkDestroyBuffer);
@@ -221,7 +243,7 @@ static void host_buffer_free(host_buffer_t* b) {
 }
 
 /* A sampled image the GPU copies into, and its view */
-static int image_make(VkFormat format, uint32_t size, int swizzle, VkImage* image,
+static int image_make(VkFormat format, uint32_t width, uint32_t height, int swizzle, VkImage* image,
                       VkDeviceMemory* memory, VkImageView* view) {
     VkImageCreateInfo ii;
     VkImageViewCreateInfo vi;
@@ -230,8 +252,8 @@ static int image_make(VkFormat format, uint32_t size, int swizzle, VkImage* imag
     ii.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
     ii.imageType = VK_IMAGE_TYPE_2D;
     ii.format = format;
-    ii.extent.width = size;
-    ii.extent.height = size;
+    ii.extent.width = width;
+    ii.extent.height = height;
     ii.extent.depth = 1;
     ii.mipLevels = 1;
     ii.arrayLayers = 1;
@@ -323,10 +345,11 @@ static int descriptors_make(void) {
     sci.minLod = -1000.0f;
     sci.maxLod = 1000.0f;
     pool_size.type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    pool_size.descriptorCount = 1 + OVL_TEX_SLOTS;
+    /* The atlas, the slots and the splash */
+    pool_size.descriptorCount = 2 + OVL_TEX_SLOTS;
     memset(&dpi, 0, sizeof(dpi));
     dpi.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-    dpi.maxSets = 1 + OVL_TEX_SLOTS;
+    dpi.maxSets = 2 + OVL_TEX_SLOTS;
     dpi.poolSizeCount = 1;
     dpi.pPoolSizes = &pool_size;
     memset(&binding, 0, sizeof(binding));
@@ -492,14 +515,66 @@ static int textures_make(void) {
         tex_slot_t* t = &vk.tex[i];
         if (!host_buffer_make(&t->staging, (VkDeviceSize)OVL_TEX_DIM * OVL_TEX_DIM * 4,
                               VK_BUFFER_USAGE_TRANSFER_SRC_BIT) ||
-            !image_make(VK_FORMAT_R8G8B8A8_UNORM, OVL_TEX_DIM, 0, &t->image, &t->memory,
-                        &t->view) ||
+            !image_make(VK_FORMAT_R8G8B8A8_UNORM, OVL_TEX_DIM, OVL_TEX_DIM, 0, &t->image,
+                        &t->memory, &t->view) ||
             !set_make(t->view, &t->set))
             return 0;
         pixels[i] = t->staging.map;
     }
     ovl_tex_init(pixels, OVL_TEX_SLOTS);
     return 1;
+}
+
+static void splash_free(void) {
+    splash_t* s = &vk.splash;
+    host_buffer_free(&s->staging);
+    host_buffer_free(&s->quad);
+    image_free(&s->image, &s->memory, &s->view);
+    /* Its descriptor set stays the pool's, never bound again */
+    s->made = 0;
+}
+
+/* The splash, when the game has one and it is to be shown: its memory at its size, and its
+ * decoding started. Without it the game's picture shows, as it does once the splash is gone. */
+static void splash_make(const ovl_vk_info_t* info) {
+    splash_t* s = &vk.splash;
+    unsigned w, h;
+    uint32_t* idx;
+    if (!emu_settings_get_show_splash() ||
+        !ovl_splash_open(info->splash, info->splash_size, &w, &h))
+        return;
+    s->w = w;
+    s->h = h;
+    if (!host_buffer_make(&s->staging, (VkDeviceSize)w * h * 4, VK_BUFFER_USAGE_TRANSFER_SRC_BIT) ||
+        !host_buffer_make(&s->quad, SPLASH_QUADS_BYTES + 6 * sizeof(uint32_t),
+                          VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT) ||
+        !image_make(VK_FORMAT_R8G8B8A8_UNORM, w, h, 0, &s->image, &s->memory, &s->view) ||
+        !set_make(s->view, &s->set) || !ovl_splash_start(s->staging.map)) {
+        ovl_splash_close();
+        splash_free();
+        return;
+    }
+    /* As ImGui's AddImage */
+    idx = (uint32_t*)(s->quad.map + SPLASH_QUADS_BYTES);
+    idx[0] = 0;
+    idx[1] = 1;
+    idx[2] = 2;
+    idx[3] = 0;
+    idx[4] = 2;
+    idx[5] = 3;
+    s->made = 1;
+}
+
+/* The splash's memory, each part once no frame in flight may still read it: what it decoded
+ * into once the copy is done, the rest once it is no longer shown and its thread is done */
+static void splash_collect(void) {
+    splash_t* s = &vk.splash;
+    if (!s->made)
+        return;
+    if (s->uploaded && s->staging.buffer && vk.frame - s->upload_frame >= vk.frame_count + 1)
+        host_buffer_free(&s->staging);
+    if (s->done && !ovl_splash_decoding() && vk.frame - s->retire_frame >= vk.frame_count + 1)
+        splash_free();
 }
 
 int ovl_vk_init(const ovl_vk_info_t* info) {
@@ -523,8 +598,8 @@ int ovl_vk_init(const ovl_vk_info_t* info) {
     vk.frame_count = info->image_count < MAX_FRAMES ? info->image_count : MAX_FRAMES;
     if (vk.frame_count == 0)
         vk.frame_count = 1;
-    if (!image_make(VK_FORMAT_R8G8_UNORM, OVL_ATLAS_SIZE, 1, &vk.atlas, &vk.atlas_memory,
-                    &vk.atlas_view) ||
+    if (!image_make(VK_FORMAT_R8G8_UNORM, OVL_ATLAS_SIZE, OVL_ATLAS_SIZE, 1, &vk.atlas,
+                    &vk.atlas_memory, &vk.atlas_view) ||
         !descriptors_make() || !set_make(vk.atlas_view, &vk.atlas_set) || !textures_make() ||
         !pipeline_make(info->surface_format))
         return 0;
@@ -535,6 +610,7 @@ int ovl_vk_init(const ovl_vk_info_t* info) {
             !host_buffer_make(&f->index, INDEX_BYTES, VK_BUFFER_USAGE_INDEX_BUFFER_BIT))
             return 0;
     }
+    splash_make(info);
     vk.made = 1;
     return 1;
 }
@@ -546,6 +622,9 @@ void ovl_vk_shutdown(void) {
     ovl_notify_reset();
     ovl_trophy_reset();
     ovl_tex_shutdown();
+    /* Its thread ended before what it decodes into goes */
+    ovl_splash_close();
+    splash_free();
     for (i = 0; i < vk.frame_count; i++) {
         host_buffer_free(&vk.frames[i].staging);
         host_buffer_free(&vk.frames[i].vertex);
@@ -573,6 +652,8 @@ void ovl_vk_shutdown(void) {
 void ovl_vk_new_frame(unsigned width, unsigned height, float delta, float framerate) {
     if (!vk.made)
         return;
+    vk.display_w = (float)width;
+    vk.display_h = (float)height;
     ovl_new_frame((float)width, (float)height, delta);
     /* In ImGui's order: the counter, then a notification and a trophy, which came after */
     ovl_fps_draw(framerate);
@@ -583,6 +664,19 @@ void ovl_vk_new_frame(unsigned width, unsigned height, float delta, float framer
 
 int ovl_vk_must_keep_drawing(void) {
     return ovl_notify_active() || ovl_trophy_active();
+}
+
+int ovl_vk_splash_ready(void) {
+    return vk.made && vk.splash.made && !vk.splash.done && ovl_splash_decoded();
+}
+
+void ovl_vk_splash_done(void) {
+    splash_t* s = &vk.splash;
+    if (!s->made || s->done)
+        return;
+    s->done = 1;
+    s->retire_frame = vk.frame + 1;
+    ovl_splash_stop();
 }
 
 static void barrier(VkCommandBuffer cmd, VkImage image, VkAccessFlags src_access,
@@ -684,6 +778,80 @@ static void upload_textures(VkCommandBuffer cmd) {
     }
 }
 
+/* The splash in place of the game's picture: the image cleared to black, as the window's
+ * background left it, and the splash over it, ImGui's quad through ImGui's pipeline. Copied
+ * into its texture the first time. */
+void ovl_vk_render_splash(VkCommandBuffer cmd, VkImageView view, VkExtent2D extent) {
+    splash_t* s = &vk.splash;
+    VkRenderingAttachmentInfo color;
+    VkRenderingInfo rendering;
+    VkViewport viewport;
+    VkRect2D scissor;
+    VkDeviceSize offset;
+    float push[4];
+    if (!ovl_vk_splash_ready() || vk.display_w <= 0.0f || vk.display_h <= 0.0f)
+        return;
+    if (!s->uploaded) {
+        VkBufferImageCopy region;
+        barrier(cmd, s->image, 0, VK_ACCESS_TRANSFER_WRITE_BIT, VK_IMAGE_LAYOUT_UNDEFINED,
+                VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                VK_PIPELINE_STAGE_TRANSFER_BIT);
+        memset(&region, 0, sizeof(region));
+        region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        region.imageSubresource.layerCount = 1;
+        region.imageExtent.width = s->w;
+        region.imageExtent.height = s->h;
+        region.imageExtent.depth = 1;
+        vk.vkCmdCopyBufferToImage(cmd, s->staging.buffer, s->image,
+                                  VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
+        barrier(cmd, s->image, VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT,
+                VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
+        s->uploaded = 1;
+        s->upload_frame = vk.frame + 1;
+    }
+    s->quad_index = (s->quad_index + 1) % vk.frame_count;
+    ovl_splash_quad(vk.display_w, vk.display_h,
+                    (ovl_vertex_t*)s->quad.map + (size_t)s->quad_index * 4);
+
+    memset(&color, 0, sizeof(color));
+    color.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
+    color.imageView = view;
+    color.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    color.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    color.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    color.clearValue.color.float32[3] = 1.0f;
+    memset(&rendering, 0, sizeof(rendering));
+    rendering.sType = VK_STRUCTURE_TYPE_RENDERING_INFO;
+    rendering.renderArea.extent = extent;
+    rendering.layerCount = 1;
+    rendering.colorAttachmentCount = 1;
+    rendering.pColorAttachments = &color;
+    vk.vkCmdBeginRendering(cmd, &rendering);
+    vk.vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, vk.pipeline);
+    offset = (VkDeviceSize)s->quad_index * 4 * sizeof(ovl_vertex_t);
+    vk.vkCmdBindVertexBuffers(cmd, 0, 1, &s->quad.buffer, &offset);
+    vk.vkCmdBindIndexBuffer(cmd, s->quad.buffer, SPLASH_QUADS_BYTES, VK_INDEX_TYPE_UINT32);
+    memset(&viewport, 0, sizeof(viewport));
+    viewport.width = (float)extent.width;
+    viewport.height = (float)extent.height;
+    viewport.maxDepth = 1.0f;
+    vk.vkCmdSetViewport(cmd, 0, 1, &viewport);
+    scissor.offset.x = 0;
+    scissor.offset.y = 0;
+    scissor.extent = extent;
+    vk.vkCmdSetScissor(cmd, 0, 1, &scissor);
+    push[0] = 2.0f / vk.display_w;
+    push[1] = 2.0f / vk.display_h;
+    push[2] = -1.0f;
+    push[3] = -1.0f;
+    vk.vkCmdPushConstants(cmd, vk.layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(push), push);
+    vk.vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, vk.layout, 0, 1, &s->set, 0,
+                               NULL);
+    vk.vkCmdDrawIndexed(cmd, 6, 1, 0, 0, 0);
+    vk.vkCmdEndRendering(cmd);
+}
+
 /* A frame's vertices and indices into its buffers, grown once if the frame needs more */
 static int upload_geometry(frame_buffers_t* f, const ovl_draw_data_t* dd) {
     const VkDeviceSize vtx_bytes = (VkDeviceSize)dd->vtx_count * sizeof(ovl_vertex_t);
@@ -721,6 +889,7 @@ void ovl_vk_render(VkCommandBuffer cmd, VkImageView view, VkExtent2D extent) {
     /* Images released go once every frame that may have drawn them is done */
     vk.frame++;
     ovl_tex_collect(vk.frame, vk.frame_count + 1);
+    splash_collect();
     if (!dd || dd->idx_count == 0 || fb_w <= 0.0f || fb_h <= 0.0f)
         return;
     vk.frame_index = (vk.frame_index + 1) % vk.frame_count;

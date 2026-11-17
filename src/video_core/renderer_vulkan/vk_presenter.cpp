@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include "common/combiner.h"
-#include "common/elf_info.h"
 #include "common/io_file.h"
 #include "common/path_util.h"
 #include "common/singleton.h"
@@ -13,9 +12,7 @@
 #include "imgui/friends_layer.h"
 #include "imgui/invitation_prompt_layer.h"
 #include "imgui/renderer/imgui_core.h"
-#include "imgui/renderer/imgui_impl_vulkan.h"
 #include "imgui/shadnet_notifications_layer.h"
-#include "imgui_internal.h"
 #include "video_core/buffer_cache/buffer.h"
 #include "video_core/buffer_cache/guest_import.h"
 #include "video_core/overlay/vk_overlay.h"
@@ -45,7 +42,6 @@
 #include <sstream>
 #include <system_error>
 #include <vector>
-#include <imgui.h>
 #include "libretro/libretro_bridge.h"
 
 namespace Vulkan {
@@ -560,9 +556,6 @@ bool Presenter::IsVideoOutSurface(const AmdGpu::ColorBuffer& color_buffer) const
 
 void Presenter::RecreateFrame(Frame* frame, u32 width, u32 height) {
     const vk::Device device = instance.GetDevice();
-    if (frame->imgui_texture) {
-        ImGui::Vulkan::RemoveTexture(frame->imgui_texture);
-    }
     if (frame->image_view) {
         device.destroyImageView(frame->image_view);
     }
@@ -608,10 +601,6 @@ void Presenter::RecreateFrame(Frame* frame, u32 width, u32 height) {
     frame->image_view = view;
     frame->width = width;
     frame->height = height;
-
-    frame->imgui_texture = ImGui::Vulkan::AddTexture(view, vk::ImageLayout::eShaderReadOnlyOptimal);
-    // The output pass has put it in the output's form already
-    frame->imgui_texture->output = true;
 }
 
 Frame* Presenter::PrepareLastFrame() {
@@ -876,7 +865,7 @@ void Presenter::Present(Frame* frame, bool is_reusing_frame, bool is_game_frame)
     ASSERT_MSG(reset_result == vk::Result::eSuccess,
                "Unexpected error resetting present done fence: {}", vk::to_string(reset_result));
 
-    ImGuiID dockId = ImGui::Core::NewFrame();
+    ImGui::Core::NewFrame();
     NewOverlayFrame(window.GetWidth(), window.GetHeight(), is_reusing_frame);
 
     const vk::Image swapchain_image = swapchain.Image();
@@ -897,16 +886,14 @@ void Presenter::Present(Frame* frame, bool is_reusing_frame, bool is_game_frame)
 
     {
         const vk::Extent2D extent = swapchain.GetExtent();
-        // The game's picture is copied into the image, and the overlays drawn over it; through
-        // the overlays' pass, as a textured quad over a window's background, only for the
-        // splash screen. The frame image goes back to being sampled after (PrepareLastFrame).
-        // The game's picture outside a window: the dockspace's central node, which the
-        // dockspace leaves without a background when no window is docked in it. A window
-        // docked there (the splash's, or from an earlier session's layout) leaves it the next
-        // frame; for that one frame the picture is drawn over the background as a quad.
-        const ImGuiDockNode* central = ImGui::DockBuilderGetCentralNode(dockId);
-        const bool no_window = !Libraries::SystemService::IsSplashVisible();
-        const bool direct = no_window && (!central || central->Windows.Size == 0);
+        // The game's picture is copied into the image, and the overlays drawn over it; or, while
+        // the game shows its splash screen and it is decoded, the splash drawn in its place.
+        // The frame image goes back to being sampled after (PrepareLastFrame).
+        const bool splash_visible = Libraries::SystemService::IsSplashVisible();
+        if (!splash_visible) {
+            ovl_vk_splash_done();
+        }
+        const bool direct = !splash_visible || !ovl_vk_splash_ready();
         const std::array pre_barriers{
             vk::ImageMemoryBarrier{
                 .srcAccessMask = vk::AccessFlagBits::eNone,
@@ -953,80 +940,22 @@ void Presenter::Present(Frame* frame, bool is_reusing_frame, bool is_game_frame)
                                    vk::PipelineStageFlagBits::eFragmentShader |
                                    vk::PipelineStageFlagBits::eTransfer,
                                {}, {}, {}, pre_barriers);
-        // Where the game's picture goes, in the image's pixels; none when its window is hidden
-        std::optional<vk::Rect2D> game_rect;
-
-        if (no_window) {
-            const ImGuiViewport* viewport = ImGui::GetMainViewport();
-            const ImVec2 area_pos = central ? central->Pos : viewport->WorkPos;
-            const ImVec2 area = central ? central->Size : viewport->WorkSize;
-            SetExpectedGameSize(static_cast<s32>(area.x), static_cast<s32>(area.y));
-            const auto fit = FitImage(frame->width, frame->height, static_cast<s32>(area.x),
-                                      static_cast<s32>(area.y));
-            const ImVec2 min{area_pos.x + static_cast<float>(fit.offset.x),
-                             area_pos.y + static_cast<float>(fit.offset.y)};
-            const ImVec2 max{min.x + static_cast<float>(fit.extent.width),
-                             min.y + static_cast<float>(fit.extent.height)};
-            if (direct) {
-                const ImVec2 scale = ImGui::GetIO().DisplayFramebufferScale;
-                game_rect = ClampRect(min.x * scale.x, min.y * scale.y, (max.x - min.x) * scale.x,
-                                      (max.y - min.y) * scale.y, extent);
-            } else {
-                ImGui::GetForegroundDrawList()->AddImage(frame->imgui_texture, min, max);
-            }
-        } else { // Draw the game
-            ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2{0.0f});
-            ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
-            ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
-            ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.0f, 0.0f, 0.0f, 1.0f));
-            ImGui::SetNextWindowDockID(dockId, ImGuiCond_Once);
-            if (ImGui::Begin("Display##game_display", nullptr, ImGuiWindowFlags_NoNav)) {
-                auto game_texture = frame->imgui_texture;
-                auto game_width = frame->width;
-                auto game_height = frame->height;
-
-                if (Libraries::SystemService::IsSplashVisible()) { // draw splash
-                    if (!splash_img.has_value()) {
-                        splash_img.emplace();
-                        const auto splash_data = Common::ElfInfo::Instance().GetSplashData();
-                        if (!splash_data.empty()) {
-                            splash_img = ImGui::RefCountedTexture::DecodePngTexture(
-                                Common::FS::FileView::Borrow(splash_data));
-                        }
-                    }
-                    if (auto& splash_image = this->splash_img.value()) {
-                        auto [im_id, width, height] = splash_image.GetTexture();
-                        game_texture = im_id;
-                        game_width = width;
-                        game_height = height;
-                    }
-                }
-
-                ImVec2 contentArea = ImGui::GetContentRegionAvail();
-                SetExpectedGameSize((s32)contentArea.x, (s32)contentArea.y);
-
-                const auto imgRect =
-                    FitImage(game_width, game_height, (s32)contentArea.x, (s32)contentArea.y);
-                ImVec2 offset{
-                    static_cast<float>(imgRect.offset.x),
-                    static_cast<float>(imgRect.offset.y),
-                };
-                ImVec2 size{
-                    static_cast<float>(imgRect.extent.width),
-                    static_cast<float>(imgRect.extent.height),
-                };
-
-                ImGui::SetCursorPos(ImGui::GetCursorStartPos() + offset);
-                ImGui::Image(game_texture, size);
-            }
-            ImGui::End();
-            ImGui::PopStyleVar(3);
-            ImGui::PopStyleColor();
-        }
+        const s32 area_width = static_cast<s32>(window.GetWidth());
+        const s32 area_height = static_cast<s32>(window.GetHeight());
+        SetExpectedGameSize(area_width, area_height);
         if (direct) {
-            CopyGameToImage(cmdbuf, *frame, swapchain_image, extent, game_rect);
+            // Where the game's picture goes, in the image's pixels
+            const auto fit = FitImage(frame->width, frame->height, area_width, area_height);
+            CopyGameToImage(cmdbuf, *frame, swapchain_image, extent,
+                            ClampRect(static_cast<float>(fit.offset.x),
+                                      static_cast<float>(fit.offset.y),
+                                      static_cast<float>(fit.extent.width),
+                                      static_cast<float>(fit.extent.height), extent));
+        } else {
+            ovl_vk_render_splash(static_cast<VkCommandBuffer>(cmdbuf),
+                                 static_cast<VkImageView>(swapchain_image_view), extent);
         }
-        ImGui::Core::Render(cmdbuf, swapchain_image_view, swapchain.GetExtent(), direct);
+        ImGui::Core::Render(cmdbuf, swapchain_image_view, swapchain.GetExtent());
         ovl_vk_render(static_cast<VkCommandBuffer>(cmdbuf),
                       static_cast<VkImageView>(swapchain_image_view), swapchain.GetExtent());
 

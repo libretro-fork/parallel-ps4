@@ -255,14 +255,16 @@ $CC -std=c89 -pedantic -O1 -g -Wall -Wno-long-long -fsanitize=address,undefined 
 ASAN_OPTIONS=detect_leaks=0 "$OUT/vertex_capture_report" --selftest
 # The overlays' library against ImGui: the FPS counter's window, layout and glyphs where ImGui
 # put them, the atlas's white texel and baked lines, a notification and a trophy as ImGui drew
-# them, their images' slots freed after
+# them, their images' slots freed after; the splash decoded on its thread and fitted as the
+# presenter's ImGui window fitted it
 OVL="src/video_core/overlay/ovl_draw.c src/video_core/overlay/ovl_font.c \
      src/video_core/overlay/ovl_fps.c src/video_core/overlay/ovl_notify.c \
-     src/video_core/overlay/ovl_tex.c src/video_core/overlay/ovl_trophy.c \
+     src/video_core/overlay/ovl_splash.c src/video_core/overlay/ovl_tex.c \
+     src/video_core/overlay/ovl_trophy.c \
      src/video_core/overlay/ovl_ttf.c src/video_core/overlay/ovl_ui.c \
      $L/formats/png/rpng.c $L/streams/trans_stream.c $L/streams/trans_stream_deflate.c \
      $L/streams/trans_stream_pipe.c $L/encodings/encoding_deflate.c \
-     $L/encodings/encoding_crc32.c $L/features/features_cpu.c"
+     $L/encodings/encoding_crc32.c $L/features/features_cpu.c $L/rthreads/rthreads.c"
 $CC -std=gnu89 -O1 -g -Wall -Wdeclaration-after-statement -ffp-contract=off \
     -fsanitize=address,undefined -I. -Isrc -I$L/include libretro/tests/ovl_test.c $OVL \
     -o "$OUT/ovl_test" -lm -lpthread
@@ -279,7 +281,7 @@ ASAN_OPTIONS=detect_leaks=0 "$OUT/overlay_device_test"
 # shown once, each thread's in order, every image slot free after
 for san in address,undefined thread; do
     $CC -std=gnu89 -O1 -g -Wall -Wdeclaration-after-statement -fsanitize=$san -I. -Isrc \
-        -I$L/include libretro/tests/ovl_queue_test.c $OVL $L/rthreads/rthreads.c \
+        -I$L/include libretro/tests/ovl_queue_test.c $OVL \
         -o "$OUT/ovl_queue_test" -lm -lpthread
     "$OUT/ovl_queue_test"
 done

@@ -9,7 +9,9 @@
  * as a GPU draws it (pixel centres, top-left rule, bilinear texels with repeat,
  * source-alpha blending); ovl_test and the ImGui comparison it was made with
  * tie that frame to ImGui's look. Then, frames on, the images released and
- * their slots free again. Skipped (exit 0) with no device that does dynamic
+ * their slots free again. First, the splash screen: decoded on its thread and
+ * drawn in place of the game's picture, black around it, as the CPU model of
+ * it. Skipped (exit 0) with no device that does dynamic
  * rendering.
  *
  *   VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json
@@ -27,6 +29,9 @@
 #include "../../src/video_core/overlay/ovl_layers.h"
 #include "../../src/video_core/overlay/vk_overlay.h"
 #include "../audio_mix.h"
+
+#include <formats/image.h>
+#include <formats/rpng.h>
 
 static int failures = 0;
 
@@ -47,6 +52,7 @@ bool emu_settings_get_trophy_popup_disabled(void) { return false; }
 const char *emu_settings_get_trophy_notification_side(void) { return "right"; }
 double emu_settings_get_trophy_notification_duration(void) { return 6.0; }
 int emu_settings_get_volume_slider(void) { return 100; }
+bool emu_settings_get_show_splash(void) { return true; }
 void audio_mix_play_clip(const float *frames, unsigned count, float gain) {
   (void)frames;
   (void)count;
@@ -154,15 +160,15 @@ static void begin(void) {
 
 typedef struct texture {
   const uint8_t *px;
-  int size, bpp; /* bpp 2: the atlas, sampled (G, G, G, R); 4: an image's slot,
-                    RGBA */
+  int w, h, bpp; /* bpp 2: the atlas, sampled (G, G, G, R); 4: an image's slot
+                    or the splash, RGBA */
 } texture_t;
 
 static void texel(const texture_t *t, int x, int y, float *out) {
   const uint8_t *p;
-  x &= t->size - 1;
-  y &= t->size - 1;
-  p = t->px + ((size_t)y * (size_t)t->size + (size_t)x) * (size_t)t->bpp;
+  x = ((x % t->w) + t->w) % t->w;
+  y = ((y % t->h) + t->h) % t->h;
+  p = t->px + ((size_t)y * (size_t)t->w + (size_t)x) * (size_t)t->bpp;
   if (t->bpp == 2) {
     out[0] = out[1] = out[2] = p[1] / 255.0f;
     out[3] = p[0] / 255.0f;
@@ -175,7 +181,7 @@ static void texel(const texture_t *t, int x, int y, float *out) {
 }
 
 static void sample(const texture_t *t, float u, float v, float *out) {
-  const float x = u * (float)t->size - 0.5f, y = v * (float)t->size - 0.5f;
+  const float x = u * (float)t->w - 0.5f, y = v * (float)t->h - 0.5f;
   const int x0 = (int)floor(x), y0 = (int)floor(y);
   const float fx = x - (float)x0, fy = y - (float)y0;
   float a[4], b[4], c[4], d[4];
@@ -255,11 +261,11 @@ static int cpu_frame(float *rgb, const ovl_draw_data_t *dd) {
     int scissor[4];
     if (cmd->tex == OVL_TEX_ATLAS) {
       t.px = ovl_atlas_pixels();
-      t.size = OVL_ATLAS_SIZE;
+      t.w = t.h = OVL_ATLAS_SIZE;
       t.bpp = 2;
     } else {
       t.px = ovl_tex_pixels((int)cmd->tex);
-      t.size = OVL_TEX_DIM;
+      t.w = t.h = OVL_TEX_DIM;
       t.bpp = 4;
       images++;
     }
@@ -297,6 +303,110 @@ static unsigned char *read_file(const char *path, size_t *size) {
   fclose(f);
   *size = (size_t)n;
   return data;
+}
+
+/* @png as rpng decodes it, R, G, B, A bytes; its size */
+static uint8_t *decode_png(const unsigned char *png, size_t size, int *w,
+                           int *h) {
+  rpng_t *r = rpng_alloc();
+  struct rpng_info info;
+  uint8_t *px = NULL;
+  void *out = NULL;
+  unsigned ow, oh;
+  int ret;
+  rpng_set_buf_ptr(r, (void *)png, size);
+  rpng_start(r);
+  while (rpng_iterate_image(r)) {
+  }
+  if (rpng_get_info(r, &info)) {
+    px = (uint8_t *)malloc((size_t)info.width * info.height * 4);
+    rpng_set_output(r, (uint32_t *)px, info.width);
+    do {
+      ret = rpng_process_image(r, &out, size, &ow, &oh, true);
+    } while (ret == IMAGE_PROCESS_NEXT);
+    *w = (int)info.width;
+    *h = (int)info.height;
+  }
+  rpng_free(r);
+  return px;
+}
+
+/* The splash drawn in place of the game's picture, read back into @out_map:
+ * as the CPU model of it, and black around it */
+static void check_splash(VkImage target, VkImageView view, VkBuffer out,
+                         const void *out_map, const unsigned char *png,
+                         size_t png_size) {
+  const uint32_t idx[6] = {0, 1, 2, 0, 2, 3};
+  const int scissor[4] = {0, 0, W, H};
+  ovl_vertex_t v[4];
+  VkBufferImageCopy region;
+  VkExtent2D extent;
+  texture_t t;
+  float *want;
+  int i, worst = 0, off = 0, black = 1;
+  t.px = decode_png(png, png_size, &t.w, &t.h);
+  t.bpp = 4;
+  CHECK(t.px != NULL, "the splash decoded here");
+  if (!t.px)
+    return;
+  /* Its own thread decodes it from when the renderer is made */
+  while (!ovl_vk_splash_ready()) {
+  }
+  extent.width = W;
+  extent.height = H;
+  ovl_vk_new_frame(W, H, 1.0f / 60.0f, 17.0f);
+  begin();
+  barrier(target, VK_IMAGE_LAYOUT_UNDEFINED,
+          VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, 0,
+          VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT);
+  ovl_vk_render_splash(cb, view, extent);
+  barrier(target, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+          VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+          VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, VK_ACCESS_TRANSFER_READ_BIT);
+  memset(&region, 0, sizeof(region));
+  region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+  region.imageSubresource.layerCount = 1;
+  region.imageExtent.width = W;
+  region.imageExtent.height = H;
+  region.imageExtent.depth = 1;
+  p_vkCmdCopyImageToBuffer(cb, target, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                           out, 1, &region);
+  submit();
+
+  want = (float *)calloc((size_t)W * H * 3, sizeof(float));
+  ovl_splash_quad((float)W, (float)H, v);
+  for (i = 0; i < 6; i += 3)
+    cpu_triangle(want, &t, &v[idx[i]], &v[idx[i + 1]], &v[idx[i + 2]], scissor);
+  for (i = 0; i < W * H; i++) {
+    const uint8_t *got = (const uint8_t *)out_map + i * 4;
+    const int x = i % W;
+    int k, d = 0;
+    for (k = 0; k < 3; k++) {
+      const int diff =
+          abs((int)got[k] - (int)(want[i * 3 + k] * 255.0f + 0.5f));
+      if (diff > d)
+        d = diff;
+    }
+    if (d > worst)
+      worst = d;
+    if (d > 2)
+      off++;
+    /* Outside the picture, left and right of it here */
+    if ((float)x < v[0].x - 1.0f || (float)x > v[2].x)
+      black &= got[0] == 0 && got[1] == 0 && got[2] == 0 && got[3] == 255;
+  }
+  printf("overlay_device: splash %dx%d at %gx%g..%gx%g, %d pixels more than "
+         "2/255 off, the largest %d/255\n",
+         t.w, t.h, v[0].x, v[0].y, v[2].x, v[2].y, off, worst);
+  CHECK(v[0].x > 0.0f, "a square splash fitted between bars");
+  CHECK(off * 200 <= W * H, "the device's splash as the CPU model of it");
+  CHECK(black, "black around it");
+  free(want);
+  free((void *)t.px);
+
+  /* Hidden by the game: no longer drawn, freed frames on */
+  ovl_vk_splash_done();
+  CHECK(!ovl_vk_splash_ready(), "no longer shown");
 }
 
 /* How many images can be decoded now: every slot taken with @png, then given
@@ -348,6 +458,8 @@ static void run(void) {
   info.surface_format = VK_FORMAT_R8G8B8A8_UNORM;
   info.font = font;
   info.font_size = font_size;
+  info.splash = icon;
+  info.splash_size = icon_size;
   CHECK(ovl_vk_init(&info), "the core's renderer made");
   if (failures)
     return;
@@ -386,6 +498,8 @@ static void run(void) {
                                VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
   p_vkBindBufferMemory(device, out, out_memory, 0);
   p_vkMapMemory(device, out_memory, 0, VK_WHOLE_SIZE, 0, &out_map);
+
+  check_splash(target, view, out, out_map, icon, icon_size);
 
   CHECK(ovl_notify_queue("Settings saved, and a second line\nto wrap", 3.0f,
                          OVL_NOTIFY_BOTTOM_LEFT, icon, icon_size, 1),

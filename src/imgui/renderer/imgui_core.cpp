@@ -38,8 +38,6 @@ static std::vector<ImGui::Layer*> layers;
 static std::deque<std::pair<bool, ImGui::Layer*>> change_layers{};
 static Common::Combiner change_layers_mutex{};
 
-static ImGuiID dock_id;
-
 // ImGui's platform in the core: no window of the system's and no input of its own (the overlay
 // has no mouse or keyboard; the game's pad reads stay with the game), so all it is given is the
 // size of the picture it is drawn on and the time between frames.
@@ -151,10 +149,6 @@ void Initialize(const ::Vulkan::Instance& instance, const Frontend::Window& wind
 
     TextureManager::StartWorker();
 
-    char label[32];
-    ImFormatString(label, IM_ARRAYSIZE(label), "WindowOverViewport_%08X", GetMainViewport()->ID);
-    dock_id = ImHashStr(label);
-
     Common::AtQuickExit([] { SaveIniSettingsToDisk(GetIO().IniFilename); });
 }
 
@@ -253,7 +247,7 @@ static void PlatformNewFrame() {
     PadToImGui(io);
 }
 
-ImGuiID NewFrame() {
+void NewFrame() {
     change_layers_mutex.Run([&] {
         while (!change_layers.empty()) {
             const auto [to_be_added, layer] = change_layers.front();
@@ -271,25 +265,18 @@ ImGuiID NewFrame() {
     ImGui::NewFrame();
     SetKeyOwner(ImGuiKey_GamepadFaceUp, ImHashStr("shadps4/pad"));
 
-    ImGuiWindowFlags flags =
-        ImGuiDockNodeFlags_PassthruCentralNode | ImGuiDockNodeFlags_AutoHideTabBar;
-    flags |= ImGuiDockNodeFlags_NoTabBar;
-    ImGuiID dockId = DockSpaceOverViewport(0, GetMainViewport(), flags);
-
     for (auto* layer : layers) {
         layer->Draw();
     }
-
-    return dockId;
 }
 
 void Render(const vk::CommandBuffer& cmdbuf, const vk::ImageView& image_view,
-            const vk::Extent2D& extent, bool keep) {
+            const vk::Extent2D& extent) {
     ImGui::Render();
     ImDrawData* draw_data = GetDrawData();
     // Font atlas uploads are recorded ahead of the render pass that samples them.
     Vulkan::UpdateTextures(*draw_data, cmdbuf);
-    if (draw_data->CmdListsCount == 0 || (keep && draw_data->TotalVtxCount == 0)) {
+    if (draw_data->CmdListsCount == 0 || draw_data->TotalVtxCount == 0) {
         return;
     }
 
@@ -303,7 +290,7 @@ void Render(const vk::CommandBuffer& cmdbuf, const vk::ImageView& image_view,
         {
             .imageView = image_view,
             .imageLayout = vk::ImageLayout::eColorAttachmentOptimal,
-            .loadOp = keep ? vk::AttachmentLoadOp::eLoad : vk::AttachmentLoadOp::eClear,
+            .loadOp = vk::AttachmentLoadOp::eLoad,
             .storeOp = vk::AttachmentStoreOp::eStore,
         },
     };

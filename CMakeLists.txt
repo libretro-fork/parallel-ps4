@@ -1198,6 +1198,7 @@ set(VIDEO_CORE src/video_core/amdgpu/cb_db_extent.h
                src/video_core/overlay/ovl_internal.h
                src/video_core/overlay/ovl_layers.h
                src/video_core/overlay/ovl_notify.c
+               src/video_core/overlay/ovl_splash.c
                src/video_core/overlay/ovl_tex.c
                src/video_core/overlay/ovl_trophy.c
                src/video_core/overlay/ovl_ttf.c

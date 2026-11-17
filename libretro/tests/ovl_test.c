@@ -6,7 +6,9 @@
  * measured, then placed and sized as ImGui placed and sized it), its glyphs
  * where ImGui put them, as many vertices and indices as ImGui made; the atlas's
  * white texel and baked lines, and what it hands the renderer. The expected
- * numbers are ImGui 1.92's, from the same font at the same sizes.
+ * numbers are ImGui 1.92's, from the same font at the same sizes. The splash:
+ * its size from its header, decoded on its thread as rpng decodes it, fitted
+ * where the presenter's ImGui window put it; a decode stopped part way.
  *
  *   build-tests/ovl_test [NotoSans-Regular.ttf] */
 
@@ -14,6 +16,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+#include <encodings/crc32.h>
 
 #include "../../src/core/emulator_settings.h"
 #include "../../src/video_core/overlay/ovl.h"
@@ -250,6 +254,139 @@ static void check_layers(void) {
   free(plat);
 }
 
+/* The splash's quad at @dw x @dh: from (x0, y0) to (x1, y1), white, ImGui's
+ * texture coordinates */
+static int quad_is(float dw, float dh, float x0, float y0, float x1, float y1) {
+  ovl_vertex_t v[4];
+  int i, ok = 1;
+  ovl_splash_quad(dw, dh, v);
+  for (i = 0; i < 4; i++)
+    ok &= v[i].col == 0xFFFFFFFFu;
+  return ok && v[0].x == x0 && v[0].y == y0 && v[2].x == x1 && v[2].y == y1 &&
+         v[1].x == x1 && v[1].y == y0 && v[3].x == x0 && v[3].y == y1 &&
+         v[0].u == 0.0f && v[0].v == 0.0f && v[2].u == 1.0f && v[2].v == 1.0f;
+}
+
+/* A PNG of @w x @h RGB pixels, its image data stored uncompressed: a chunk at
+ * a time into @out, which is large enough; its size */
+static size_t chunk(uint8_t *out, const char *type, const uint8_t *data,
+                    uint32_t n) {
+  uint32_t crc;
+  out[0] = (uint8_t)(n >> 24);
+  out[1] = (uint8_t)(n >> 16);
+  out[2] = (uint8_t)(n >> 8);
+  out[3] = (uint8_t)n;
+  memcpy(out + 4, type, 4);
+  if (n)
+    memcpy(out + 8, data, n);
+  crc = encoding_crc32(0, out + 4, n + 4);
+  out[8 + n] = (uint8_t)(crc >> 24);
+  out[9 + n] = (uint8_t)(crc >> 16);
+  out[10 + n] = (uint8_t)(crc >> 8);
+  out[11 + n] = (uint8_t)crc;
+  return 12 + n;
+}
+
+static size_t make_png(uint8_t *out, uint8_t *scratch, const uint8_t *rgb,
+                       unsigned w, unsigned h) {
+  static const uint8_t sig[8] = {137, 80, 78, 71, 13, 10, 26, 10};
+  const size_t raw_size = (size_t)(w * 3 + 1) * h;
+  uint8_t ihdr[13];
+  uint8_t *z = scratch, *raw;
+  uint32_t a = 1, b = 0;
+  size_t n = 0, done = 0, i;
+  memcpy(out, sig, 8);
+  memset(ihdr, 0, sizeof(ihdr));
+  ihdr[2] = (uint8_t)(w >> 8);
+  ihdr[3] = (uint8_t)w;
+  ihdr[6] = (uint8_t)(h >> 8);
+  ihdr[7] = (uint8_t)h;
+  ihdr[8] = 8; /* bits */
+  ihdr[9] = 2; /* RGB */
+  n = 8 + chunk(out + 8, "IHDR", ihdr, 13);
+  /* zlib: its header, stored blocks, Adler-32 */
+  raw = scratch + raw_size + raw_size / 8 + 64;
+  for (i = 0; i < h; i++) {
+    raw[i * (w * 3 + 1)] = 0;
+    memcpy(raw + i * (w * 3 + 1) + 1, rgb + i * w * 3, w * 3);
+  }
+  for (i = 0; i < raw_size; i++) {
+    a = (a + raw[i]) % 65521;
+    b = (b + a) % 65521;
+  }
+  *z++ = 0x78;
+  *z++ = 0x01;
+  while (done < raw_size) {
+    const size_t len = raw_size - done > 65535 ? 65535 : raw_size - done;
+    *z++ = done + len == raw_size;
+    *z++ = (uint8_t)len;
+    *z++ = (uint8_t)(len >> 8);
+    *z++ = (uint8_t)~len;
+    *z++ = (uint8_t)(~len >> 8);
+    memcpy(z, raw + done, len);
+    z += len;
+    done += len;
+  }
+  *z++ = (uint8_t)(b >> 8);
+  *z++ = (uint8_t)b;
+  *z++ = (uint8_t)(a >> 8);
+  *z++ = (uint8_t)a;
+  n += chunk(out + n, "IDAT", scratch, (uint32_t)(z - scratch));
+  n += chunk(out + n, "IEND", NULL, 0);
+  return n;
+}
+
+static void check_splash(void) {
+  /* 300 x 100 of a pattern */
+  enum { SW = 300, SH = 100 };
+  static uint8_t rgb[SW * SH * 3];
+  static uint8_t pixels[SW * SH * 4];
+  static uint8_t scratch[SW * SH * 8];
+  static uint8_t png[SW * SH * 4];
+  const uint8_t junk[16] = {1, 2, 3};
+  size_t png_size;
+  unsigned w = 0, h = 0;
+  int i, same = 1;
+  for (i = 0; i < SW * SH; i++) {
+    rgb[i * 3 + 0] = (uint8_t)(i % SW);
+    rgb[i * 3 + 1] = (uint8_t)(i / SW);
+    rgb[i * 3 + 2] = (uint8_t)(i * 7);
+  }
+  png_size = make_png(png, scratch, rgb, SW, SH);
+  CHECK(!ovl_splash_open(NULL, 0, &w, &h), "no splash");
+  CHECK(!ovl_splash_open(junk, sizeof(junk), &w, &h), "not a PNG");
+  CHECK(ovl_splash_open(png, png_size, &w, &h) && w == SW && h == SH,
+        "its size from its header");
+  memset(pixels, 0, sizeof(pixels));
+  CHECK(ovl_splash_start(pixels), "decoding");
+  while (ovl_splash_decoding()) {
+  }
+  CHECK(ovl_splash_decoded(), "decoded");
+  for (i = 0; i < SW * SH; i++)
+    same &= pixels[i * 4 + 0] == rgb[i * 3 + 0] &&
+            pixels[i * 4 + 1] == rgb[i * 3 + 1] &&
+            pixels[i * 4 + 2] == rgb[i * 3 + 2] && pixels[i * 4 + 3] == 255;
+  CHECK(same, "as R, G, B, A bytes, where it was lent");
+  /* Wider than the screen: its width, centred, as FitImage */
+  CHECK(quad_is(1920.0f, 1080.0f, 0.0f, 220.0f, 1920.0f, 860.0f),
+        "fitted at 1080p");
+  CHECK(quad_is(1280.0f, 720.0f, 0.0f, 147.0f, 1280.0f, 573.0f),
+        "fitted at 720p, its height truncated");
+  CHECK(quad_is(300.0f, 1000.0f, 0.0f, 450.0f, 300.0f, 550.0f),
+        "fitted to a tall screen");
+  /* Narrower: its height */
+  CHECK(quad_is(1000.0f, 50.0f, 425.0f, 0.0f, 575.0f, 50.0f),
+        "fitted to a wide screen");
+  ovl_splash_close();
+  CHECK(!ovl_splash_decoded() && !ovl_splash_decoding(), "closed");
+
+  /* Closed while it decodes: its thread stops and ends first */
+  CHECK(ovl_splash_open(png, png_size, &w, &h) && ovl_splash_start(pixels),
+        "decoding again");
+  ovl_splash_close();
+  CHECK(!ovl_splash_decoding(), "stopped");
+}
+
 int main(int argc, char **argv) {
   const char *path =
       argc > 1 ? argv[1] : "src/imgui/renderer/fonts/NotoSans-Regular.ttf";
@@ -300,6 +437,7 @@ int main(int argc, char **argv) {
     }
   }
   check_layers();
+  check_splash();
   ovl_destroy();
   free(noto);
   if (failures) {

@@ -27,10 +27,13 @@ typedef struct ovl_vk_info {
     VkFormat surface_format;
     const uint8_t* font; /* the UI font (a TrueType file), lent for as long as it runs */
     size_t font_size;
+    const uint8_t* splash; /* the game's splash screen (a PNG), lent likewise; null for none */
+    size_t splash_size;
 } ovl_vk_info_t;
 
 /* Made with the swapchain: the fonts, the atlas, the images' slots, the pipeline and the
- * frames' buffers. 0 when the device would not make them. */
+ * frames' buffers, and the splash's texture when it is to be shown. 0 when the device would
+ * not make them (without the splash, the game's picture shows). */
 int ovl_vk_init(const ovl_vk_info_t* info);
 
 /* After the device has gone idle */
@@ -43,6 +46,16 @@ void ovl_vk_new_frame(unsigned width, unsigned height, float delta, float framer
 /* From any thread: an overlay is showing or waiting to, so frames are to be drawn even when
  * the game shows none */
 int ovl_vk_must_keep_drawing(void);
+
+/* The splash is decoded and still to be shown, in place of the game's picture */
+int ovl_vk_splash_ready(void);
+
+/* Draws it over the whole of @view (in the colour attachment layout), the rest black, when it
+ * is ready: the first pass on the image, ahead of every overlay */
+void ovl_vk_render_splash(VkCommandBuffer cmd, VkImageView view, VkExtent2D extent);
+
+/* It is no longer shown (the game hid it): freed once no frame in flight draws it */
+void ovl_vk_splash_done(void);
 
 /* Draws what ovl_vk_new_frame built over @view (in the colour attachment layout), keeping what
  * is there; with nothing to draw, records nothing */
