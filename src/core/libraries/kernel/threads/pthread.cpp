@@ -400,7 +400,10 @@ int PS4_SYSV_ABI posix_pthread_create_name_np(PthreadT* thread, const PthreadAtt
     (*thread) = new_thread;
 
     /* Create thread */
-    new_thread->native_thr = std::make_unique<Core::NativeThread>();
+    if (!new_thread->native_thr) {
+        // Only a record never used before: a recycled one keeps its own
+        new_thread->native_thr = std::make_unique<Core::NativeThread>();
+    }
     int ret = new_thread->native_thr->Create(RunThread, new_thread);
 
     ASSERT_MSG(ret == 0, "Failed to create thread with error {}", ret);

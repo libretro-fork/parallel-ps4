@@ -342,7 +342,8 @@ struct Pthread {
     retro_atomic_int_t tid;
     // Held across calls (libthr's thread lock): taken here, given back where the thread is
     // collected
-    std::unique_ptr<Common::EventMutex> lock = std::make_unique<Common::EventMutex>();
+    // Made by ThreadState::Alloc, and kept for the record's next thread
+    std::unique_ptr<Common::EventMutex> lock;
     u32 cycle;
     retro_atomic_int_t locklevel;
     retro_atomic_int_t critical_count;
@@ -404,6 +405,9 @@ struct Pthread {
     OrbisKernelExceptionHandlerStack sigaltstack{};
     Mcontext suspended_context{};
     retro_atomic_int_t is_suspended_in_signal{0};
+
+    // The next record on ThreadState's list of records waiting to be collected, or of free ones
+    Pthread* list_next{};
 
     bool IsSignalBlocked(s32 sig) const;
     void QueueSignal(s32 sig);

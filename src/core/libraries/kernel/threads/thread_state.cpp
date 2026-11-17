@@ -33,20 +33,24 @@ ThreadState::ThreadState() {
 }
 
 void ThreadState::Collect(Pthread* curthread) {
-    Common::SmallVector<Pthread*, 8> work_list;
+    // The ended ones, taken off the list and linked through the same field
+    Pthread* work_list = nullptr;
     thread_list_combiner.Run([&] {
-        for (auto it = gc_list.begin(); it != gc_list.end();) {
-            Pthread* td = *it;
+        for (Pthread** link = &gc_list; *link != nullptr;) {
+            Pthread* td = *link;
             if (static_cast<s32>(retro_atomic_load_seq_cst_int(&td->tid)) != TidTerminated) {
-                ++it;
+                link = &td->list_next;
                 continue;
             }
             FreeStack(&td->attr);
-            work_list.push_back(td);
-            it = gc_list.erase(it);
+            *link = td->list_next;
+            td->list_next = work_list;
+            work_list = td;
+            retro_atomic_fetch_sub_size(&gc_count, 1);
         }
     });
-    for (Pthread* td : work_list) {
+    while (Pthread* td = work_list) {
+        work_list = td->list_next;
         Free(curthread, td);
     }
 }
@@ -67,7 +71,9 @@ void ThreadState::TryCollect(Pthread* thread) {
         thread->refcount--;
         if (thread->ShouldCollect()) {
             threads.erase(thread);
-            gc_list.push_back(thread);
+            thread->list_next = gc_list;
+            gc_list = thread;
+            retro_atomic_fetch_add_size(&gc_count, 1);
         }
     });
 }
@@ -79,9 +85,10 @@ Pthread* ThreadState::Alloc(Pthread* curthread) {
             Collect(curthread);
         }
         free_thread_combiner.Run([&] {
-            if (!free_threads.empty()) {
-                thread = free_threads.back();
-                free_threads.pop_back();
+            if (free_threads != nullptr) {
+                thread = free_threads;
+                free_threads = thread->list_next;
+                --free_count;
             }
         });
     }
@@ -103,12 +110,36 @@ Pthread* ThreadState::Alloc(Pthread* curthread) {
         tcb = TcbCtor(thread, 1 /* initial tls */);
     }
     if (tcb != nullptr) {
+        // What the record holds that allocates is kept for its next thread: its lock, its
+        // sleep queue, its host thread's object and its name's storage. Only a record never
+        // used before makes them. A recycled record's previous host thread, ended, is released
+        // here (it was left to leak, with a Windows handle and what rthreads holds for it, as
+        // the record was cleared over it).
+        std::unique_ptr<Common::EventMutex> lock = std::move(thread->lock);
+        std::unique_ptr<Core::NativeThread> native = std::move(thread->native_thr);
+        SleepQueue* sleepqueue = thread->sleepqueue;
+        std::string name = std::move(thread->name);
+        std::destroy_at(thread);
         // Initialize thread struct memory to 0. This is safe since it will be constructed
         // immediately after.
         std::memset(static_cast<void*>(thread), 0, sizeof(Pthread));
         std::construct_at(thread);
         thread->tcb = tcb;
-        thread->sleepqueue = new SleepQueue{};
+        if (lock) {
+            std::destroy_at(lock.get());
+            std::construct_at(lock.get());
+        } else {
+            lock = std::make_unique<Common::EventMutex>();
+        }
+        thread->lock = std::move(lock);
+        if (native) {
+            std::destroy_at(native.get());
+            std::construct_at(native.get());
+        }
+        thread->native_thr = std::move(native);
+        name.clear();
+        thread->name = std::move(name);
+        thread->sleepqueue = sleepqueue != nullptr ? sleepqueue : new SleepQueue{};
     } else {
         thread_heap.Free(thread);
         retro_atomic_fetch_sub_int(&total_threads, 1);
@@ -127,11 +158,13 @@ void ThreadState::Free(Pthread* curthread, Pthread* thread) {
     auto* sleepqueue = thread->sleepqueue;
     bool should_free;
     free_thread_combiner.Run([&] {
-        if (free_threads.size() >= MaxCachedThreads) {
+        if (free_count >= MaxCachedThreads) {
             should_free = true;
         } else {
             should_free = false;
-            free_threads.push_back(thread);
+            thread->list_next = free_threads;
+            free_threads = thread;
+            ++free_count;
         }
     });
     if (should_free) {

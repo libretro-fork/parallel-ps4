@@ -3,10 +3,8 @@
 
 #pragma once
 
-#include <list>
 #include <mutex>
 #include <set>
-#include <stack>
 #include <retro_atomic.h>
 #include "common/combiner.h"
 #include "common/singleton.h"
@@ -22,6 +20,7 @@ struct Stack {
     size_t stacksize; /* Stack size (rounded up). */
     size_t guardsize; /* Guard size. */
     void* stackaddr;  /* Stack address. */
+    Stack* next;      /* The next spare stack of its list */
 };
 
 struct ThreadState {
@@ -32,7 +31,7 @@ struct ThreadState {
     explicit ThreadState();
 
     bool GcNeeded() const noexcept {
-        return gc_list.size() >= GcThreshold;
+        return retro_atomic_load_relaxed_size(&gc_count) >= GcThreshold;
     }
 
     void Collect(Pthread* curthread);
@@ -65,16 +64,21 @@ struct ThreadState {
 
     Common::SlabHeap<Pthread> thread_heap;
     std::set<Pthread*> threads;
-    std::list<Pthread*> free_threads;
-    std::list<Pthread*> gc_list;
+    // Lists linked through the records (Pthread::list_next) and the spare stacks themselves
+    // (Stack::next), so that making and ending a thread adds and takes no list node: the
+    // records of ended threads to collect, the free records, the spare stacks
+    Pthread* free_threads{};
+    std::size_t free_count{};
+    Pthread* gc_list{};
+    retro_atomic_size_t gc_count{};
     // Each list, and the TLS blocks, changes one call at a time in its own combiner
     Common::Combiner free_thread_combiner;
     Common::Combiner tcb_combiner;
     Common::Combiner thread_list_combiner;
     retro_atomic_int_t total_threads{};
     retro_atomic_int_t active_threads{};
-    std::stack<Stack*> dstackq;
-    std::list<Stack*> mstackq;
+    Stack* dstackq{};
+    Stack* mstackq{};
     VAddr last_stack = 0;
 };
 

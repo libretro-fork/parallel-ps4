@@ -46,10 +46,10 @@ int ThreadState::CreateStack(PthreadAttr* attr) {
          * from the default-size stack cache:
          */
         if (stacksize == ThrStackDefault && guardsize == ThrGuardDefault) {
-            if (!dstackq.empty()) {
+            if (dstackq != nullptr) {
                 /* Use the spare stack. */
-                Stack* spare_stack = dstackq.top();
-                dstackq.pop();
+                Stack* spare_stack = dstackq;
+                dstackq = spare_stack->next;
                 attr->stackaddr_attr = spare_stack->stackaddr;
             }
         }
@@ -59,12 +59,13 @@ int ThreadState::CreateStack(PthreadAttr* attr) {
          * rounded up stack size (stack_size) in the search:
          */
         else {
-            const auto it = std::ranges::find_if(mstackq, [&](Stack* stack) {
-                return stack->stacksize == stacksize && stack->guardsize == guardsize;
-            });
-            if (it != mstackq.end()) {
-                attr->stackaddr_attr = (*it)->stackaddr;
-                mstackq.erase(it);
+            for (Stack** link = &mstackq; *link != nullptr; link = &(*link)->next) {
+                Stack* const stack = *link;
+                if (stack->stacksize == stacksize && stack->guardsize == guardsize) {
+                    attr->stackaddr_attr = stack->stackaddr;
+                    *link = stack->next;
+                    break;
+                }
             }
         }
 
@@ -134,12 +135,15 @@ void ThreadState::FreeStack(PthreadAttr* attr) {
     spare_stack->guardsize = RoundUp(attr->guardsize_attr);
     spare_stack->stackaddr = attr->stackaddr_attr;
 
+    // Kept in the stack's own memory, at its top: the lists take no node of their own
     if (spare_stack->stacksize == ThrStackDefault && spare_stack->guardsize == ThrGuardDefault) {
         /* Default stack/guard size. */
-        dstackq.push(spare_stack);
+        spare_stack->next = dstackq;
+        dstackq = spare_stack;
     } else {
         /* Non-default stack/guard size. */
-        mstackq.push_back(spare_stack);
+        spare_stack->next = mstackq;
+        mstackq = spare_stack;
     }
     attr->stackaddr_attr = nullptr;
 }
