@@ -14,7 +14,8 @@ void PS4_SYSV_ABI __pthread_cleanup_push_imp(PthreadCleanupFunc routine, void* a
     newbuf->routine = routine;
     newbuf->routine_arg = arg;
     newbuf->onheap = 0;
-    g_curthread->cleanup.push_front(newbuf);
+    newbuf->prev = g_curthread->cleanup;
+    g_curthread->cleanup = newbuf;
 }
 
 void PS4_SYSV_ABI posix_pthread_cleanup_push(PthreadCleanupFunc routine, void* arg) {
@@ -27,14 +28,15 @@ void PS4_SYSV_ABI posix_pthread_cleanup_push(PthreadCleanupFunc routine, void* a
     newbuf->routine = routine;
     newbuf->routine_arg = arg;
     newbuf->onheap = 1;
-    curthread->cleanup.push_front(newbuf);
+    newbuf->prev = curthread->cleanup;
+    curthread->cleanup = newbuf;
 }
 
 void PS4_SYSV_ABI posix_pthread_cleanup_pop(int execute) {
     Pthread* curthread = g_curthread;
-    if (!curthread->cleanup.empty()) {
-        PthreadCleanup* old = curthread->cleanup.front();
-        curthread->cleanup.pop_front();
+    if (curthread->cleanup != nullptr) {
+        PthreadCleanup* old = curthread->cleanup;
+        curthread->cleanup = old->prev;
         if (execute) {
 #ifdef SHADPS4_ENABLE_FEX_GUEST_CPU
             if (Core::GuestCpu::IsGuestFunctionAddress(

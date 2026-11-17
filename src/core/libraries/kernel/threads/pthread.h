@@ -219,7 +219,10 @@ using PthreadCondAttrT = PthreadCondAttr*;
 
 using PthreadCleanupFunc = void PS4_SYSV_ABI (*)(void*);
 
+// Linked into its thread's stack of them through prev, as FreeBSD's is: a game's own buffer for
+// one (__pthread_cleanup_push_imp) has the room, and a push takes no node
 struct PthreadCleanup {
+    PthreadCleanup* prev;
     PthreadCleanupFunc routine;
     void* routine_arg;
     int onheap;
@@ -375,7 +378,7 @@ struct Pthread {
     int rdlock_count;
     int rtld_bits;
     Core::Tcb* tcb;
-    std::forward_list<PthreadCleanup*> cleanup;
+    PthreadCleanup* cleanup; // the newest pushed, linked to older ones through prev
     u32 pad[27];
     u32 magic;
     int report_events;
@@ -408,6 +411,9 @@ struct Pthread {
 
     // The next record on ThreadState's list of records waiting to be collected, or of free ones
     Pthread* list_next{};
+    // Its neighbours on ThreadState's list of live threads, while it is on it
+    Pthread* thread_prev{};
+    Pthread* thread_next{};
 
     bool IsSignalBlocked(s32 sig) const;
     void QueueSignal(s32 sig);

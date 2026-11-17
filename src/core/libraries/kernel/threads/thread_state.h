@@ -4,7 +4,7 @@
 #pragma once
 
 #include <mutex>
-#include <set>
+#include <vector>
 #include <retro_atomic.h>
 #include "common/combiner.h"
 #include "common/singleton.h"
@@ -53,17 +53,28 @@ struct ThreadState {
     void FreeStack(PthreadAttr* attr);
 
     void Link(Pthread* curthread, Pthread* thread) {
-        thread_list_combiner.Run([&] { threads.insert(thread); });
+        thread_list_combiner.Run([&] { LinkLocked(thread); });
         retro_atomic_fetch_add_int(&active_threads, 1);
     }
 
     void Unlink(Pthread* curthread, Pthread* thread) {
-        thread_list_combiner.Run([&] { threads.erase(thread); });
+        thread_list_combiner.Run([&] { UnlinkLocked(thread); });
         retro_atomic_fetch_sub_int(&active_threads, 1);
     }
 
+    /// Whether @thread is a record of the thread heap, at the start of one: what a pointer the
+    /// game hands in must be before its record is looked at
+    bool IsThreadRecord(const Pthread* thread) const;
+
     Common::SlabHeap<Pthread> thread_heap;
-    std::set<Pthread*> threads;
+    // The live threads, linked through the records (Pthread::thread_prev, thread_next), and
+    // whether each record of the heap is on the list, by its index: a lookup of a pointer the
+    // game hands in, and a thread made or ended, take no node and no tree. In the thread list's
+    // combiner.
+    Pthread* threads{};
+    std::vector<u8> thread_live;
+    void LinkLocked(Pthread* thread);
+    void UnlinkLocked(Pthread* thread);
     // Lists linked through the records (Pthread::list_next) and the spare stacks themselves
     // (Stack::next), so that making and ending a thread adds and takes no list node: the
     // records of ended threads to collect, the free records, the spare stacks

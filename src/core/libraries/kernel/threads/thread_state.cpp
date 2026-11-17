@@ -30,6 +30,45 @@ ThreadState::ThreadState() {
                                       Core::VMAType::File, "ThrHeap");
     ASSERT_MSG(ret == 0, "Unable to allocate thread heap memory {}", ret);
     thread_heap.Initialize(heap_addr, ThrHeapSize);
+    thread_live.assign(thread_heap.GetSlabHeapSize(), 0);
+}
+
+bool ThreadState::IsThreadRecord(const Pthread* thread) const {
+    const auto address = reinterpret_cast<uintptr_t>(thread);
+    return thread_heap.Contains(address) &&
+           (address - thread_heap.GetSlabHeapAddress()) % sizeof(Pthread) == 0;
+}
+
+void ThreadState::LinkLocked(Pthread* thread) {
+    u8& live = thread_live[thread_heap.GetObjectIndex(thread)];
+    if (live) {
+        return;
+    }
+    live = 1;
+    thread->thread_prev = nullptr;
+    thread->thread_next = threads;
+    if (threads != nullptr) {
+        threads->thread_prev = thread;
+    }
+    threads = thread;
+}
+
+void ThreadState::UnlinkLocked(Pthread* thread) {
+    u8& live = thread_live[thread_heap.GetObjectIndex(thread)];
+    if (!live) {
+        return;
+    }
+    live = 0;
+    if (thread->thread_prev != nullptr) {
+        thread->thread_prev->thread_next = thread->thread_next;
+    } else {
+        threads = thread->thread_next;
+    }
+    if (thread->thread_next != nullptr) {
+        thread->thread_next->thread_prev = thread->thread_prev;
+    }
+    thread->thread_prev = nullptr;
+    thread->thread_next = nullptr;
 }
 
 void ThreadState::Collect(Pthread* curthread) {
@@ -70,7 +109,7 @@ void ThreadState::TryCollect(Pthread* thread) {
         thread->lock->lock();
         thread->refcount--;
         if (thread->ShouldCollect()) {
-            threads.erase(thread);
+            UnlinkLocked(thread);
             thread->list_next = gc_list;
             gc_list = thread;
             retro_atomic_fetch_add_size(&gc_count, 1);
@@ -180,8 +219,8 @@ int ThreadState::FindThread(Pthread* thread, const bool include_dead) {
     }
     // Returns with the thread lock held when it finds the thread
     return thread_list_combiner.Run([&] {
-        const auto it = threads.find(thread);
-        if (it == threads.end()) {
+        // A pointer of the game's: a record of the heap, and one of a live thread
+        if (!IsThreadRecord(thread) || !thread_live[thread_heap.GetObjectIndex(thread)]) {
             return POSIX_ESRCH;
         }
         thread->lock->lock();

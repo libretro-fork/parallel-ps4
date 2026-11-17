@@ -348,7 +348,8 @@ void SignalHandler(int sig, siginfo_t* info, void* raw_context) {
                              guest_rax);
             }
             // The game's threads and their stacks, for a fault in a scan of them (a GC)
-            for (const auto* t : Libraries::Kernel::ThrState::Instance()->threads) {
+            for (const auto* t = Libraries::Kernel::ThrState::Instance()->threads; t != nullptr;
+                 t = t->thread_next) {
                 const auto base = reinterpret_cast<u64>(t->attr.stackaddr_attr);
                 LOG_CRITICAL(Debug, "thread '{}': stack {:#x}-{:#x}", t->name, base,
                              base + t->attr.stacksize_attr);

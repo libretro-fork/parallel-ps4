@@ -116,9 +116,9 @@ void PS4_SYSV_ABI posix_pthread_exit(void* status) {
 
     /* Save the return value: */
     curthread->ret = status;
-    while (!curthread->cleanup.empty()) {
-        PthreadCleanup* old = curthread->cleanup.front();
-        curthread->cleanup.pop_front();
+    while (curthread->cleanup != nullptr) {
+        PthreadCleanup* old = curthread->cleanup;
+        curthread->cleanup = old->prev;
 #ifdef SHADPS4_ENABLE_FEX_GUEST_CPU
         if (Core::GuestCpu::IsGuestFunctionAddress(reinterpret_cast<const void*>(old->routine))) {
             Core::GuestCpu::RunGuestFunctionOrAbort(
@@ -194,8 +194,8 @@ static int JoinThread(PthreadT pthread, void** thread_return, const OrbisKernelT
         pthread2->joiner = nullptr;
     };
 
-    PthreadCleanup cup{backout_join, pthread, 0};
-    curthread->cleanup.push_front(&cup);
+    PthreadCleanup cup{curthread->cleanup, backout_join, pthread, 0};
+    curthread->cleanup = &cup;
 
     (void)retro_atomic_exchange_int(&curthread->cancel_point, 1);
     PthreadTestCancel();
@@ -223,7 +223,7 @@ static int JoinThread(PthreadT pthread, void** thread_return, const OrbisKernelT
         std::scoped_lock lock{*curthread->lock};
         curthread->join_target = nullptr;
     }
-    curthread->cleanup.pop_front();
+    curthread->cleanup = cup.prev;
 
     if (ret == POSIX_ETIMEDOUT) {
         backout_join(pthread);
@@ -518,8 +518,8 @@ int PS4_SYSV_ABI posix_pthread_once(PthreadOnce* once_control,
         once_event.Notify();
     };
 
-    PthreadCleanup cup{once_cancel_handler, once_control, 0};
-    g_curthread->cleanup.push_front(&cup);
+    PthreadCleanup cup{g_curthread->cleanup, once_cancel_handler, once_control, 0};
+    g_curthread->cleanup = &cup;
 #ifdef SHADPS4_ENABLE_FEX_GUEST_CPU
     if (Core::GuestCpu::IsGuestFunctionAddress(reinterpret_cast<const void*>(init_routine))) {
         Core::GuestCpu::RunGuestFunctionOrAbort(reinterpret_cast<void*>(init_routine),
@@ -530,7 +530,7 @@ int PS4_SYSV_ABI posix_pthread_once(PthreadOnce* once_control,
 #else
     init_routine();
 #endif
-    g_curthread->cleanup.pop_front();
+    g_curthread->cleanup = cup.prev;
 
     if (retro_atomic_cas_int(&once_control->state, static_cast<int>(PthreadOnceState::InProgress),
                              static_cast<int>(PthreadOnceState::Done))) {
