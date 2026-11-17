@@ -147,6 +147,10 @@ public:
     /// Asks the OS to start reading [offset, offset + len) ahead of use. Returns at once.
     void Prefetch(u64 offset, u64 len) const;
 
+    /// Reads up to @size bytes at @offset without moving the file position (pread). Returns
+    /// the bytes read, 0 at the end, -1 where the stream has no positional read: seek and read.
+    s64 ReadAt(void* data, u64 size, u64 offset) const;
+
     template <typename T>
     size_t Read(T& data) const {
         if constexpr (IsContiguousContainer<T>) {

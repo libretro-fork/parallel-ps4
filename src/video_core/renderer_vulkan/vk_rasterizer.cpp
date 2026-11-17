@@ -1637,6 +1637,14 @@ bool Rasterizer::IsMapped(VAddr addr, u64 size) {
         [&](const IntervalList<>& ranges) { return ranges.Contains(addr, addr + size); });
 }
 
+bool Rasterizer::TouchesMapped(VAddr addr, u64 size) {
+    if (size == 0 || static_cast<u64>(addr) > std::numeric_limits<u64>::max() - size) {
+        return false;
+    }
+    return mapped_ranges.Read(
+        [&](const IntervalList<>& ranges) { return ranges.Overlaps(addr, addr + size); });
+}
+
 void Rasterizer::MapMemory(VAddr addr, u64 size) {
     mapped_ranges.Update([&](IntervalList<>& ranges) { ranges.Add(Interval{addr, addr + size}); });
 }

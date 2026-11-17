@@ -178,6 +178,10 @@ struct File {
         return handle ? handle->Read(dst, size) : -1;
     }
 
+    s64 ReadAt(void* dst, u64 size, u64 offset) {
+        return handle ? handle->ReadAt(dst, size, offset) : -1;
+    }
+
     s64 Write(const void* src, u64 size) {
         return handle ? handle->Write(src, size) : -1;
     }

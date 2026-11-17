@@ -353,6 +353,18 @@ void IOFile::Prefetch(u64 offset, u64 len) const {
     }
 }
 
+s64 IOFile::ReadAt(void* data, u64 size, u64 offset) const {
+    if (!IsOpen()) {
+        return -1;
+    }
+    // A positional read sees the file as it is on disk: what this stream has written and still
+    // holds goes there first (nothing to do for a stream that only reads)
+    if (file_access_mode != FileAccessMode::Read) {
+        filestream_flush(file);
+    }
+    return filestream_read_at(file, data, static_cast<s64>(size), static_cast<s64>(offset));
+}
+
 bool IOFile::Flush() const {
     if (!IsOpen()) {
         return false;

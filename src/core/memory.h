@@ -329,6 +329,11 @@ public:
 
     void InvalidateMemory(VAddr addr, u64 size) const;
 
+    /// True when any of [addr, addr + size) is GPU memory, whose pages the tracker may protect:
+    /// only the emulator's own code (which the fault handler serves) can write there then, and a
+    /// system call (a file read) must not
+    bool TouchesGpuMemory(VAddr addr, u64 size) const;
+
 private:
     VMAHandle FindVMA(VAddr target) {
         return std::prev(vma_map.upper_bound(target));

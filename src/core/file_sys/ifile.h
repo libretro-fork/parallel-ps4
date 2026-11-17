@@ -73,6 +73,11 @@ public:
     virtual ~IFile() = default;
 
     virtual s64 Read(void* dst, u64 size) = 0;
+    /// Reads at @offset without moving the position (pread); -1 where the backend has no
+    /// positional read, for the caller to seek and read instead
+    virtual s64 ReadAt(void* dst, u64 size, u64 offset) {
+        return -1;
+    }
     virtual s64 Write(const void* src, u64 size) = 0;
     virtual bool Seek(s64 offset, Common::FS::SeekOrigin origin) = 0;
     virtual u64 Tell() const = 0;

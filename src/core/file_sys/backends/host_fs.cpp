@@ -53,6 +53,10 @@ s64 HostFile::Read(void* dst, u64 size) {
     return static_cast<s64>(m_file.ReadRaw<u8>(dst, size));
 }
 
+s64 HostFile::ReadAt(void* dst, u64 size, u64 offset) {
+    return m_file.IsOpen() ? m_file.ReadAt(dst, size, offset) : -1;
+}
+
 s64 HostFile::Write(const void* src, u64 size) {
     if (!m_file.IsOpen() || m_read_only) {
         return -1;

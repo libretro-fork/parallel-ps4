@@ -447,30 +447,52 @@ s64 PS4_SYSV_ABI sceKernelWrite(s32 fd, const void* buf, u64 nbytes) {
 }
 
 // For a file read with read(): the guest's buffer may be a page the memory tracker protects,
-// which read() fails on with EFAULT, so it goes through here and is copied in, a chunk at a
-// time through a buffer of fixed size: a read never allocates, however large.
+// which read() fails on with EFAULT, so such a read goes through here and is copied in, a chunk
+// at a time through a buffer of fixed size: a read never allocates, however large.
 static constexpr u64 FileBounceSize = 256_KB;
 static thread_local std::unique_ptr<u8[]> file_buf{};
 
-s64 ReadFile(Core::FileSys::File* file, void* buf, u64 nbytes) {
+// @at: the offset of a positional read (pread), or -1 for a read at the file position
+static s64 ReadFileImpl(Core::FileSys::File* file, void* buf, u64 nbytes, s64 at) {
     const auto* memory = Core::Memory::Instance();
     // Invalidate up to the actual number of bytes that could be read.
-    const auto remaining = file->GetSize() - file->Tell();
+    const u64 size = file->GetSize();
+    const u64 from = at >= 0 ? static_cast<u64>(at) : static_cast<u64>(file->Tell());
+    const u64 remaining = from < size ? size - from : 0;
     memory->InvalidateMemory(reinterpret_cast<VAddr>(buf), std::min<u64>(nbytes, remaining));
+    // The whole buffer, not only what the file has now: it may have grown since it was asked
+    const bool tracked = memory->TouchesGpuMemory(reinterpret_cast<VAddr>(buf), nbytes);
+    const auto read = [&](void* dst, u64 n, u64 offset) -> s64 {
+        return at >= 0 ? file->ReadAt(dst, n, offset) : file->Read(dst, n);
+    };
     if (file->ReadsInPlace()) {
-        // Straight into the guest's buffer: a mapped file or a decoder, whose writes to a
+        // A mapped file or a decoder writes with the emulator's own code, whose writes to a
         // protected page the tracker's fault handler serves
-        return file->Read(buf, nbytes);
+        return read(buf, nbytes, from);
+    }
+    s64 total = 0;
+    if (!tracked) {
+        // Straight into the guest's buffer: memory that is not the GPU's has no protection a
+        // read() could fail on
+        const s64 bytes = read(buf, nbytes, from);
+        if (bytes >= 0 && (static_cast<u64>(bytes) == nbytes || from + bytes >= size)) {
+            return bytes; // all of it, or to the end of the file
+        }
+        // Short of the end, or failed: a page the tracker protects though it is not GPU
+        // memory (it tracks such a region now and then). The rest goes through the copy.
+        total = bytes > 0 ? bytes : 0;
+        if (at < 0 && !file->Seek(static_cast<s64>(from) + total)) {
+            return total > 0 ? total : -1;
+        }
     }
     if (!file_buf) {
         // Once per thread, on its first read of such a file
         file_buf = std::make_unique_for_overwrite<u8[]>(FileBounceSize);
     }
     u8* dst = static_cast<u8*>(buf);
-    s64 total = 0;
     while (static_cast<u64>(total) < nbytes) {
         const u64 chunk = std::min<u64>(nbytes - total, FileBounceSize);
-        const s64 bytes = file->Read(file_buf.get(), chunk);
+        const s64 bytes = read(file_buf.get(), chunk, from + total);
         if (bytes < 0) {
             return total > 0 ? total : bytes;
         }
@@ -481,6 +503,10 @@ s64 ReadFile(Core::FileSys::File* file, void* buf, u64 nbytes) {
         }
     }
     return total;
+}
+
+s64 ReadFile(Core::FileSys::File* file, void* buf, u64 nbytes) {
+    return ReadFileImpl(file, buf, nbytes, -1);
 }
 
 s64 PS4_SYSV_ABI readv(s32 fd, const OrbisKernelIovec* iov, s32 iovcnt) {
@@ -1570,6 +1596,28 @@ s64 PS4_SYSV_ABI posix_preadv(s32 fd, OrbisKernelIovec* iov, s32 iovcnt, s64 off
                 }
                 return total_read;
             }
+        }
+
+        // A positional read, where the file can take one: no seek away and back, so the file
+        // position another thread reads at is left alone
+        {
+            s64 total_read = 0;
+            s32 i = 0;
+            for (; i < iovcnt; i++) {
+                const s64 bytes =
+                    ReadFileImpl(file, iov[i].iov_base, iov[i].iov_len, offset + total_read);
+                if (bytes < 0) {
+                    break;
+                }
+                total_read += bytes;
+                if (static_cast<u64>(bytes) < iov[i].iov_len) {
+                    return total_read; // end of file
+                }
+            }
+            if (i > 0) {
+                return total_read;
+            }
+            // -1 at the first: a file that has no positional read, read at a seek instead
         }
 
         const s64 pos = file->Tell();
