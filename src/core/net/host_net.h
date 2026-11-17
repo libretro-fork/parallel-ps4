@@ -180,6 +180,10 @@ enum class WaitResult {
 
 WaitResult WaitOne(NativeSocket s, u32 interest, const WakeHandle& wake, Deadline deadline);
 
+// What @s is ready for now (EvIn, EvOut, with EvErr and EvHup), of @events (EvIn, EvOut):
+// one poll that does not wait, reported as HostEpoll reports it
+u32 PollNow(NativeSocket s, u32 events);
+
 // Host epoll/kqueue backing one guest epoll; on Windows, a table polled with select().
 // Add, Modify and Remove are not called from two threads at once; Wait may run meanwhile.
 enum EventBits : u32 {

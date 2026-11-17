@@ -651,6 +651,40 @@ WaitResult WaitOne(NativeSocket s, u32 interest, const WakeHandle& wake, Deadlin
     }
 }
 
+u32 PollNow(NativeSocket s, u32 events) {
+    pollfd fd{};
+    fd.fd = s;
+    fd.events = static_cast<short>(((events & EvIn) ? POLLIN : 0) | ((events & EvOut) ? POLLOUT : 0)
+#ifdef POLLRDHUP
+                                   | POLLRDHUP // as the epoll backend asks for EPOLLRDHUP
+#endif
+    );
+    for (;;) {
+        if (socket_poll(&fd, 1, 0) >= 0) {
+            break;
+        }
+#ifndef _WIN32
+        if (errno == EINTR) {
+            continue;
+        }
+#endif
+        return EvErr;
+    }
+    const short rev = fd.revents;
+    if (rev & POLLNVAL) {
+        return 0;
+    }
+    u32 ev = 0;
+    ev |= (rev & POLLIN) ? EvIn : 0;
+    ev |= (rev & POLLOUT) ? EvOut : 0;
+    ev |= (rev & POLLERR) ? EvErr : 0;
+    ev |= (rev & POLLHUP) ? EvHup : 0;
+#ifdef POLLRDHUP
+    ev |= (rev & POLLRDHUP) ? EvHup : 0;
+#endif
+    return ev;
+}
+
 #if HOST_NET_EPOLL // Linux
 
 u32 ToEpoll(u32 events, u32 flags) {

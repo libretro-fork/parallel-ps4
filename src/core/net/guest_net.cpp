@@ -1696,12 +1696,38 @@ NetResult EpollDestroy(s32 eid) {
     });
 }
 
+// A select that does not wait (a poll: equeue's per-event checks, select with a zero timeout):
+// each socket asked once as it is now, with no epoll made, filled and taken down. As the epoll
+// path reports: an error or hangup makes a socket readable and writable.
+static NetResult SocketSelectNow(std::span<SelectEntry> entries) {
+    s64 count = 0;
+    for (auto& e : entries) {
+        const auto s = g_objects.Get<GuestSocket>(e.id);
+        if (!s || s->reg_mutex.Run([&] { return s->closed; })) {
+            for (auto& f : entries) {
+                f.ready = 0;
+            }
+            return NetResult::Fail(Error::BadF);
+        }
+        u32 ready = s->IsP2P() ? s->P2PEvents() : Host::PollNow(s->native, e.interest);
+        if (ready & (Host::EvErr | Host::EvHup)) {
+            ready |= Host::EvIn | Host::EvOut;
+        }
+        e.ready = ready & e.interest;
+        count += std::popcount(e.ready);
+    }
+    return NetResult::Ok(count);
+}
+
 NetResult SocketSelect(std::span<SelectEntry> entries, s64 timeout_us) {
     for (auto& e : entries) {
         e.ready = 0;
     }
     if (entries.empty()) {
         return NetResult::Ok(0);
+    }
+    if (timeout_us == 0) {
+        return SocketSelectNow(entries);
     }
     // Private epoll with no id.
     const auto ep = std::make_shared<GuestEpoll>();
