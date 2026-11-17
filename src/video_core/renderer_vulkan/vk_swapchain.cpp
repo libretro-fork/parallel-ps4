@@ -62,7 +62,14 @@ Swapchain::Swapchain(const Instance& instance_, const Frontend::Window& window_)
         const auto splash = Common::ElfInfo::Instance().GetSplashData();
         info.splash = splash.data();
         info.splash_size = splash.size();
-        ASSERT_MSG(!font.empty() && ovl_vk_init(&info), "The overlays could not be made");
+        // Without them the game still runs: no FPS counter, notifications or trophy popups
+        if (font.empty()) {
+            LOG_ERROR(Render_Vulkan, "The UI font is not among the core's resources: the "
+                                     "overlays are off (a clean build puts it back)");
+        } else if (!ovl_vk_init(&info)) {
+            LOG_ERROR(Render_Vulkan, "The overlays could not be made ({}): they are off",
+                      ovl_vk_error());
+        }
     }
 }
 

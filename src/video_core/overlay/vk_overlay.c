@@ -577,6 +577,19 @@ static void splash_collect(void) {
         splash_free();
 }
 
+static const char* init_error = "";
+
+const char* ovl_vk_error(void) {
+    return init_error;
+}
+
+/* What failed, and everything made so far let go */
+static int init_failed(const char* what) {
+    init_error = what;
+    ovl_vk_shutdown();
+    return 0;
+}
+
 int ovl_vk_init(const ovl_vk_info_t* info) {
     ovl_face_desc_t face;
     ovl_font_t* font;
@@ -584,31 +597,39 @@ int ovl_vk_init(const ovl_vk_info_t* info) {
     if (vk.made)
         return 1;
     memset(&vk, 0, sizeof(vk));
-    if (!load_functions(info->get_device_proc, info->device))
+    if (!load_functions(info->get_device_proc, info->device)) {
+        init_error = "the device's functions";
         return 0;
+    }
     vk.device = info->device;
     vk.mem = info->memory_properties;
     /* The UI font, read in place, at ImGui's size: 32 pixels drawn at half (FontGlobalScale) */
     face.data = info->font;
     face.size = info->font_size;
     face.index = 0;
-    font = ovl_font_add(&face, 1, 32.0f);
-    if (!font || !ovl_create(font, 0.5f))
-        return 0;
+    font = info->font && info->font_size ? ovl_font_add(&face, 1, 32.0f) : NULL;
+    if (!font)
+        return init_failed("the UI font");
+    if (!ovl_create(font, 0.5f))
+        return init_failed("the overlay's state");
     vk.frame_count = info->image_count < MAX_FRAMES ? info->image_count : MAX_FRAMES;
     if (vk.frame_count == 0)
         vk.frame_count = 1;
     if (!image_make(VK_FORMAT_R8G8_UNORM, OVL_ATLAS_SIZE, OVL_ATLAS_SIZE, 1, &vk.atlas,
-                    &vk.atlas_memory, &vk.atlas_view) ||
-        !descriptors_make() || !set_make(vk.atlas_view, &vk.atlas_set) || !textures_make() ||
-        !pipeline_make(info->surface_format))
-        return 0;
+                    &vk.atlas_memory, &vk.atlas_view))
+        return init_failed("the atlas");
+    if (!descriptors_make() || !set_make(vk.atlas_view, &vk.atlas_set))
+        return init_failed("the descriptors");
+    if (!textures_make())
+        return init_failed("the images' slots");
+    if (!pipeline_make(info->surface_format))
+        return init_failed("the pipeline");
     for (i = 0; i < vk.frame_count; i++) {
         frame_buffers_t* f = &vk.frames[i];
         if (!host_buffer_make(&f->staging, STAGING_BYTES, VK_BUFFER_USAGE_TRANSFER_SRC_BIT) ||
             !host_buffer_make(&f->vertex, VERTEX_BYTES, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT) ||
             !host_buffer_make(&f->index, INDEX_BYTES, VK_BUFFER_USAGE_INDEX_BUFFER_BIT))
-            return 0;
+            return init_failed("the frames' buffers");
     }
     splash_make(info);
     vk.made = 1;
@@ -663,7 +684,7 @@ void ovl_vk_new_frame(unsigned width, unsigned height, float delta, float framer
 }
 
 int ovl_vk_must_keep_drawing(void) {
-    return ovl_notify_active() || ovl_trophy_active();
+    return vk.made && (ovl_notify_active() || ovl_trophy_active());
 }
 
 int ovl_vk_splash_ready(void) {

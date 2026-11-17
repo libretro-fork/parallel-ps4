@@ -61,7 +61,9 @@ EMBEDDED_RESOURCES += src/imgui/renderer/fonts/NotoSans-Regular.ttf
 EMBEDDED_RESOURCES += $(sort $(wildcard src/resources/patches/shadPS4/*.xml)) \
 	$(sort $(wildcard src/resources/patches/GoldHEN/*.xml))
 EMBEDDED_RESOURCES_C := $(GEN_DIR)/embedded_resources.c
-$(EMBEDDED_RESOURCES_C): $(EMBEDDED_RESOURCES) libretro/embed.sh
+# Made again when the list changes too (it is here): a file added to it is often older than the
+# source made from the last list
+$(EMBEDDED_RESOURCES_C): $(EMBEDDED_RESOURCES) libretro/embed.sh Makefile.common
 	@mkdir -p $(@D)
 	sh libretro/embed.sh resources $@ . $(EMBEDDED_RESOURCES)
 

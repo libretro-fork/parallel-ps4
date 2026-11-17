@@ -36,6 +36,9 @@ typedef struct ovl_vk_info {
  * not make them (without the splash, the game's picture shows). */
 int ovl_vk_init(const ovl_vk_info_t* info);
 
+/* What the last ovl_vk_init that failed could not make */
+const char* ovl_vk_error(void);
+
 /* After the device has gone idle */
 void ovl_vk_shutdown(void);
 

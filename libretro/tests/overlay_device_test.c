@@ -9,7 +9,8 @@
  * as a GPU draws it (pixel centres, top-left rule, bilinear texels with repeat,
  * source-alpha blending); ovl_test and the ImGui comparison it was made with
  * tie that frame to ImGui's look. Then, frames on, the images released and
- * their slots free again. First, the splash screen: decoded on its thread and
+ * their slots free again. Made after a failed attempt (no font), which makes
+ * nothing and says why. First, the splash screen: decoded on its thread and
  * drawn in place of the game's picture, black around it, as the CPU model of
  * it. Skipped (exit 0) with no device that does dynamic
  * rendering.
@@ -460,6 +461,15 @@ static void run(void) {
   info.font_size = font_size;
   info.splash = icon;
   info.splash_size = icon_size;
+  /* Without the font: nothing made, and said why */
+  info.font = NULL;
+  info.font_size = 0;
+  CHECK(!ovl_vk_init(&info) && strcmp(ovl_vk_error(), "the UI font") == 0,
+        "no overlays without the font");
+  CHECK(!ovl_vk_must_keep_drawing(),
+        "nothing to keep drawing for without them");
+  info.font = font;
+  info.font_size = font_size;
   CHECK(ovl_vk_init(&info), "the core's renderer made");
   if (failures)
     return;
