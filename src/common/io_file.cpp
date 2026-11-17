@@ -514,6 +514,14 @@ bool IsFile(const fs::path& path) {
     return (stat & RETRO_VFS_STAT_IS_VALID) && !(stat & RETRO_VFS_STAT_IS_DIRECTORY);
 }
 
+int PathKind(const fs::path& path) {
+    const int stat = path_stat(PathToUTF8String(path).c_str());
+    if (!(stat & RETRO_VFS_STAT_IS_VALID)) {
+        return 0;
+    }
+    return (stat & RETRO_VFS_STAT_IS_DIRECTORY) ? 2 : 1;
+}
+
 bool CreateDirectories(const fs::path& path) {
     return path_mkdir(PathToUTF8String(path).c_str());
 }

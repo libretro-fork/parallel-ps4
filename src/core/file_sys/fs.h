@@ -48,6 +48,13 @@ public:
         std::string mount; // e.g /app0
         bool read_only;
         std::vector<std::shared_ptr<IBackend>> backends;
+        // The overlays over the mount, looked up once as it is made rather than at every path:
+        // the update ("-UPDATE", else "-patch", or the PKG's update) and "-mods", and whether
+        // there is one at all
+        std::filesystem::path patch_root{};
+        std::filesystem::path mods_root{};
+        bool has_patch{false};
+        bool has_mods{false};
     };
 
     enum class HostPathType {
@@ -82,6 +89,9 @@ public:
     /// Returns true if the guest path resolves to a directory in any
     /// backend of the mount stack.
     bool IsDirectory(std::string_view guest_path);
+    /// What the guest path is in the mount's stack - the first backend that has it decides -
+    /// from one look per backend, where Exists and IsDirectory each take one
+    PathKind Kind(std::string_view guest_path);
     bool Stat(std::string_view guest_path, FileStat& out);
 
     /// Opens the guest path through the mount's backend stack. Returns
@@ -121,9 +131,12 @@ public:
         }
         return m_mutex.Run([&]() -> const MntPair* {
             const auto it = std::ranges::find_if(m_mnt_pairs, [&](const auto& mount) {
-                // When doing starts-with check, add a trailing slash to make sure we don't match
-                // against only part of the mount path.
-                return guest_path == mount.mount || guest_path.starts_with(mount.mount + "/");
+                // The mount itself, or a path under it: its name and then a slash, so as not to
+                // match only part of the mount's name - compared in place, nothing built
+                const std::string_view name{mount.mount};
+                return guest_path == name ||
+                       (guest_path.size() > name.size() && guest_path.starts_with(name) &&
+                        guest_path[name.size()] == '/');
             });
             if (it == m_mnt_pairs.end()) {
                 return nullptr;
@@ -204,7 +217,11 @@ struct File {
 
 class HandleTable {
 public:
-    HandleTable() = default;
+    HandleTable() {
+        // Room for more descriptors than a game keeps open, so that neither list grows mid-game
+        m_files.reserve(1024);
+        m_free.reserve(1024);
+    }
     virtual ~HandleTable() = default;
 
     int CreateHandle();
@@ -220,6 +237,9 @@ public:
 
 private:
     std::vector<File*> m_files;
+    // Closed files, emptied and kept for the next open: a game opening and closing files as it
+    // streams its levels gets one back instead of a new one
+    std::vector<File*> m_free;
     Common::Combiner m_mutex; // what it guards changes one call at a time here
 };
 

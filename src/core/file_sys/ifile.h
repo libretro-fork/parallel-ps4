@@ -207,12 +207,21 @@ public:
     virtual void Rewind() = 0;
 };
 
+enum class PathKind { None, File, Directory };
+
 class IBackend {
 public:
     virtual ~IBackend() = default;
 
     virtual bool Exists(std::string_view rel_path) = 0;
     virtual bool IsDirectory(std::string_view rel_path) = 0;
+    /// What the path is, nothing, a file or a directory: one look where the backend can
+    virtual PathKind Kind(std::string_view rel_path) {
+        if (!Exists(rel_path)) {
+            return PathKind::None;
+        }
+        return IsDirectory(rel_path) ? PathKind::Directory : PathKind::File;
+    }
     virtual std::unique_ptr<IFile> Open(std::string_view rel_path,
                                         Common::FS::FileAccessMode mode) = 0;
     virtual std::unique_ptr<IDirectory> OpenDir(std::string_view rel_path) = 0;

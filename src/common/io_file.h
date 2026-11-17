@@ -286,6 +286,8 @@ bool Exists(const std::filesystem::path& path);
 bool IsDirectory(const std::filesystem::path& path);
 /// True when @path is there and is not a directory.
 bool IsFile(const std::filesystem::path& path);
+/// What is at @path, from one look: 0 nothing, 1 a file, 2 a directory.
+int PathKind(const std::filesystem::path& path);
 /// Makes the directory @path and any of its parents that are missing; true when it is there.
 bool CreateDirectories(const std::filesystem::path& path);
 /// The size of the file @path in bytes, or -1.

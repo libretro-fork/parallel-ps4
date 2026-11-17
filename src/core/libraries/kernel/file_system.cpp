@@ -218,7 +218,9 @@ s32 PS4_SYSV_ABI open(const char* raw_path, s32 flags, u16 mode) {
     bool read_only = false;
     file->m_guest_name = path;
     file->m_host_name = mnt->GetHostPath(file->m_guest_name, &read_only);
-    bool exists = mnt->Exists(file->m_guest_name);
+    // What is there, from one look: whether it exists and whether it is a directory together
+    auto kind = mnt->Kind(file->m_guest_name);
+    const bool exists = kind != Core::FileSys::PathKind::None;
 
     if (create) {
         if (excl && exists) {
@@ -239,6 +241,7 @@ s32 PS4_SYSV_ABI open(const char* raw_path, s32 flags, u16 mode) {
             }
             // Create a file if it doesn't exist
             Common::FS::IOFile out(file->m_host_name, Common::FS::FileAccessMode::Create);
+            kind = Core::FileSys::PathKind::File;
         }
     } else if (!exists) {
         // If we're not creating a file, and it doesn't exist, return ENOENT
@@ -248,14 +251,14 @@ s32 PS4_SYSV_ABI open(const char* raw_path, s32 flags, u16 mode) {
         return -1;
     }
 
-    if (mnt->IsDirectory(file->m_guest_name) || directory) {
+    if (kind == Core::FileSys::PathKind::Directory || directory) {
         // Directories can be opened even if the directory flag isn't set.
         // In these cases, error behavior is identical to the directory code path.
         directory = true;
     }
 
     if (directory) {
-        if (!mnt->IsDirectory(file->m_guest_name)) {
+        if (kind != Core::FileSys::PathKind::Directory) {
             // If the opened file is not a directory, return ENOTDIR.
             // This will trigger when create & directory is specified, this is expected.
             h->DeleteHandle(handle);

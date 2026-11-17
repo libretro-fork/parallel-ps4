@@ -87,6 +87,7 @@ public:
 
     bool Exists(std::string_view rel_path) override;
     bool IsDirectory(std::string_view rel_path) override;
+    PathKind Kind(std::string_view rel_path) override;
     bool Stat(std::string_view rel_path, FileStat& out) override;
 
     std::unique_ptr<IFile> Open(std::string_view rel_path,

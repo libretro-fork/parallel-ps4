@@ -210,6 +210,17 @@ bool HostFsBackend::IsDirectory(std::string_view rel_path) {
     return Common::FS::IsDirectory(Resolve(rel_path));
 }
 
+PathKind HostFsBackend::Kind(std::string_view rel_path) {
+    switch (Common::FS::PathKind(Resolve(rel_path))) {
+    case 1:
+        return PathKind::File;
+    case 2:
+        return PathKind::Directory;
+    default:
+        return PathKind::None;
+    }
+}
+
 bool HostFsBackend::Stat(std::string_view rel_path, FileStat& out) {
     const auto info = Common::FS::GetFileInfo(Resolve(rel_path));
     if (!info) {
@@ -229,11 +240,8 @@ std::unique_ptr<IFile> HostFsBackend::Open(std::string_view rel_path,
     if (writable && m_read_only) {
         return nullptr;
     }
-    const auto path = Resolve(rel_path);
-    if (mode != Common::FS::FileAccessMode::Create && !Common::FS::IsFile(path)) {
-        return nullptr;
-    }
-    auto handle = std::make_unique<HostFile>(path, mode, m_read_only || !writable);
+    // MntPoints::Open has found it a file already: the open is the only look at it here
+    auto handle = std::make_unique<HostFile>(Resolve(rel_path), mode, m_read_only || !writable);
     if (!handle->IsOpen()) {
         return nullptr;
     }

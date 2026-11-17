@@ -169,7 +169,20 @@ void MntPoints::Mount(const std::filesystem::path& host_folder, const std::strin
                    host_folder.string());
         stack.push_back(std::move(base));
 
-        m_mnt_pairs.emplace_back(host_folder, guest_folder_sanitized, read_only, std::move(stack));
+        auto& pair = m_mnt_pairs.emplace_back(host_folder, guest_folder_sanitized, read_only,
+                                              std::move(stack));
+        // The overlays for GetHostPath, looked up here once rather than at every path: an update
+        // or a mods folder does not appear while a game runs
+        pair.patch_root = OverlayPath(host_folder, "-UPDATE");
+        if (!Common::FS::Exists(pair.patch_root)) {
+            pair.patch_root = OverlayPath(host_folder, "-patch");
+        }
+        if (!libretro_update.empty()) {
+            pair.patch_root = libretro_update;
+        }
+        pair.has_patch = Common::FS::Exists(pair.patch_root);
+        pair.mods_root = OverlayPath(host_folder, "-mods");
+        pair.has_mods = Common::FS::Exists(pair.mods_root);
         LOG_INFO(Kernel_Fs, "Mounted '{}' -> '{}'", guest_folder_sanitized, host_folder.string());
     });
 }
@@ -194,6 +207,27 @@ void MntPoints::UnmountAll() {
 std::optional<std::string> MntPoints::SanitizeGuestPath(std::string_view path) {
     if (path.empty() || path.length() > 255) {
         return std::nullopt;
+    }
+    // Most paths are normal already: absolute, no empty, "." or ".." part, no backslash. Those
+    // are kept as they are, without taking them apart into a path and putting them together again
+    const auto already_normal = [](std::string_view p) {
+        if (p.front() != '/' || p.find('\\') != std::string_view::npos) {
+            return false;
+        }
+        for (std::size_t i = 0; i < p.size(); i++) {
+            if (p[i] != '/') {
+                continue;
+            }
+            const std::string_view rest = p.substr(i + 1);
+            if (rest.starts_with('/') || rest == "." || rest.starts_with("./") || rest == ".." ||
+                rest.starts_with("../")) {
+                return false;
+            }
+        }
+        return true;
+    };
+    if (already_normal(path)) {
+        return std::string{path};
     }
     std::filesystem::path p(path);
     std::string normalized = p.lexically_normal().generic_string();
@@ -238,56 +272,54 @@ std::filesystem::path MntPoints::GetHostPath(std::string_view path, bool* is_rea
     const bool host_backed =
         mount->backends.empty() || mount->backends.back()->RootHostPath().has_value();
 
-    const auto corrected_path_sanitized = RemoveTrailingSlashes(corrected_path);
-    std::filesystem::path host_path = mount->host_path;
-
-    // Update folder is either mount + "-UPDATE" or mount + "-patch"
-    std::filesystem::path patch_path = OverlayPath(mount->host_path, "-UPDATE");
-    if (!Common::FS::Exists(patch_path)) {
-        patch_path = OverlayPath(mount->host_path, "-patch");
-    }
-    if (!libretro_update.empty()) {
-        patch_path = libretro_update;
-    }
-
-    // Mods folder can only be at mount + "-mods"
-    std::filesystem::path mods_path = OverlayPath(mount->host_path, "-mods");
-
     // If we're just retrieving the mount, return the correct mount path.
-    if (corrected_path_sanitized == mount->mount) {
+    std::string_view trimmed{corrected_path};
+    while (trimmed.ends_with('/')) {
+        trimmed.remove_suffix(1);
+    }
+    if (trimmed == mount->mount) {
         if (path_type == HostPathType::Mod) {
-            return mods_path;
+            return mount->mods_root;
         } else if (path_type == HostPathType::Patch) {
-            return patch_path;
+            return mount->patch_root;
         } else {
-            return host_path;
+            return mount->host_path;
         }
     }
 
     // Remove device (e.g /app0) from path to retrieve relative path.
     const auto rel_path = RelativeToMount(corrected_path, *mount);
-    if (!rel_path.empty()) {
-        host_path /= rel_path;
-        patch_path /= rel_path;
-        mods_path /= rel_path;
-    }
+    const auto under = [&](const std::filesystem::path& root) {
+        std::filesystem::path path = root;
+        if (!rel_path.empty()) {
+            path /= rel_path;
+        }
+        return path;
+    };
 
     if (path_type == HostPathType::Mod) {
-        return mods_path;
+        return under(mount->mods_root);
     } else if (path_type == HostPathType::Patch) {
-        return patch_path;
+        return under(mount->patch_root);
     }
 
-    if ((corrected_path.starts_with("/app0") || corrected_path.starts_with("/hostapp")) &&
-        path_type != HostPathType::Base && Common::FS::Exists(mods_path)) {
-        return mods_path;
+    // The overlays, only where the mount has them: no look on disk for a folder that is not there
+    const bool app = corrected_path.starts_with("/app0") || corrected_path.starts_with("/hostapp");
+    const bool try_mods = app && path_type != HostPathType::Base && mount->has_mods;
+    const bool try_patch =
+        path_type != HostPathType::Base && !ignore_game_patches && mount->has_patch;
+    if (try_mods) {
+        if (auto mods_path = under(mount->mods_root); Common::FS::Exists(mods_path)) {
+            return mods_path;
+        }
+    }
+    if (app && try_patch) {
+        if (auto patch_path = under(mount->patch_root); Common::FS::Exists(patch_path)) {
+            return patch_path;
+        }
     }
 
-    if ((corrected_path.starts_with("/app0") || corrected_path.starts_with("/hostapp")) &&
-        path_type != HostPathType::Base && !ignore_game_patches && Common::FS::Exists(patch_path)) {
-        return patch_path;
-    }
-
+    std::filesystem::path host_path = under(mount->host_path);
     if (!NeedsCaseInsensitiveSearch || !host_backed) {
         return host_path;
     }
@@ -343,15 +375,14 @@ std::filesystem::path MntPoints::GetHostPath(std::string_view path, bool* is_rea
         });
     };
 
-    if ((corrected_path.starts_with("/app0") || corrected_path.starts_with("/hostapp")) &&
-        path_type != HostPathType::Base) {
-        if (const auto path = search(mods_path)) {
+    if (try_mods) {
+        if (const auto path = search(under(mount->mods_root))) {
             return *path;
         }
     }
 
-    if (path_type != HostPathType::Base && !ignore_game_patches) {
-        if (const auto path = search(patch_path)) {
+    if (try_patch) {
+        if (const auto path = search(under(mount->patch_root))) {
             return *path;
         }
     }
@@ -481,24 +512,28 @@ bool MntPoints::Exists(std::string_view guest_path) {
 }
 
 bool MntPoints::IsDirectory(std::string_view guest_path) {
+    return Kind(guest_path) == PathKind::Directory;
+}
+
+PathKind MntPoints::Kind(std::string_view guest_path) {
     const auto corrected = SanitizeGuestPath(guest_path);
     if (!corrected) {
-        return false;
+        return PathKind::None;
     }
     if (*corrected == "/") {
-        return true;
+        return PathKind::Directory;
     }
     const auto mount = GetMount(*corrected);
     if (!mount || mount->backends.empty()) {
-        return false;
+        return PathKind::None;
     }
     const auto rel = RelativeToMount(*corrected, *mount);
     for (const auto& backend : mount->backends) {
-        if (backend->Exists(rel)) {
-            return backend->IsDirectory(rel);
+        if (const PathKind kind = backend->Kind(rel); kind != PathKind::None) {
+            return kind;
         }
     }
-    return false;
+    return PathKind::None;
 }
 
 bool MntPoints::Stat(std::string_view guest_path, FileStat& out) {
@@ -539,15 +574,15 @@ std::unique_ptr<IFile> MntPoints::Open(std::string_view guest_path,
         return nullptr;
     }
     const auto rel = RelativeToMount(*corrected, *mount);
-    const std::string rel_copy{rel};
 
     if (mode == Common::FS::FileAccessMode::Create) {
-        return mount->backends.back()->Open(rel_copy, mode);
+        return mount->backends.back()->Open(rel, mode);
     }
 
+    // The first backend where it is a file, from one look at each
     for (const auto& backend : mount->backends) {
-        if (backend->Exists(rel) && !backend->IsDirectory(rel)) {
-            return backend->Open(rel_copy, mode);
+        if (backend->Kind(rel) == PathKind::File) {
+            return backend->Open(rel, mode);
         }
     }
     return nullptr;
@@ -630,7 +665,14 @@ std::optional<Common::FS::FileView> MntPoints::ReadFile(std::string_view guest_p
 
 int HandleTable::CreateHandle() {
     return m_mutex.Run([&]() -> int {
-        auto* file = new File{};
+        File* file;
+        if (!m_free.empty()) {
+            file = m_free.back();
+            m_free.pop_back();
+        } else {
+            // Only until the game has had as many files open at once as it ever will
+            file = new File{};
+        }
         (void)retro_atomic_exchange_int(&file->is_opened, 0);
 
         int existingFilesNum = m_files.size();
@@ -649,8 +691,20 @@ int HandleTable::CreateHandle() {
 
 void HandleTable::DeleteHandle(int d) {
     m_mutex.Run([&] {
-        delete m_files.at(d);
+        File* file = m_files.at(d);
+        if (!file) {
+            return;
+        }
         m_files[d] = nullptr;
+        // Emptied for the next open: what it held is released, the names keep their storage
+        file->handle.reset();
+        file->directory.reset();
+        file->device.reset();
+        file->m_host_name.clear();
+        file->m_guest_name.clear();
+        (void)retro_atomic_exchange_int(&file->is_opened, 0);
+        (void)retro_atomic_exchange_int(&file->type, static_cast<int>(FileType::Regular));
+        m_free.push_back(file);
     });
 }
 
