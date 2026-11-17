@@ -29,7 +29,7 @@ void AcquireGamepadInputCapture();
 void ReleaseGamepadInputCapture();
 bool IsGamepadInputCaptured();
 
-ImGuiID NewFrame(bool is_reusing_frame = false);
+ImGuiID NewFrame();
 
 /// Draws the overlays into @image_view: over what is there with @keep, else over black. With
 /// @keep and nothing to draw, the image is left as it is, with no pass.

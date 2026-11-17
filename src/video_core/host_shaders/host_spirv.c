@@ -690,6 +690,66 @@ size_t host_spirv_imgui_pq_frag(uint32_t* out, size_t cap, float white) {
     return spv_end(m, SpvExecutionModelFragment, out, cap);
 }
 
+/* The overlays' vertex: ImGui's vertex shader, position in pixels, uv and colour in,
+ * push constants { vec2 scale; vec2 translate; } */
+size_t host_spirv_overlay_vert(uint32_t* out, size_t cap) {
+    uint32_t a_pos, a_uv, a_color, position, o_color, o_uv, pc_t, pc, members[2], pc_f32x2, xy;
+    uint32_t args[4];
+    spv_module_t module, *m = &module;
+    spv_begin(m);
+    a_pos = spv_io(m, SpvStorageClassInput, m->t_f32x2, 0);
+    a_uv = spv_io(m, SpvStorageClassInput, m->t_f32x2, 1);
+    a_color = spv_io(m, SpvStorageClassInput, m->t_f32x4, 2);
+    position = spv_builtin(m, SpvStorageClassOutput, m->t_f32x4, SpvBuiltInPosition);
+    o_color = spv_io(m, SpvStorageClassOutput, m->t_f32x4, 0);
+    o_uv = spv_io(m, SpvStorageClassOutput, m->t_f32x2, 1);
+    members[0] = m->t_f32x2;
+    members[1] = m->t_f32x2;
+    pc_t = spv_type_own(m, SpvOpTypeStruct, 2, members);
+    spv_decorate(m, pc_t, SpvDecorationBlock, 0, 0);
+    spv_member_offset(m, pc_t, 0, 0);
+    spv_member_offset(m, pc_t, 1, 8);
+    pc = spv_global(m, SpvStorageClassPushConstant, pc_t);
+    spv_main(m);
+    pc_f32x2 = t_ptr(m, SpvStorageClassPushConstant, m->t_f32x2);
+    /* gl_Position = vec4(aPos * uScale + uTranslate, 0, 1) */
+    xy = op2(m, SpvOpFAdd, m->t_f32x2,
+             op2(m, SpvOpFMul, m->t_f32x2, load(m, m->t_f32x2, a_pos),
+                 load(m, m->t_f32x2, op2(m, SpvOpAccessChain, pc_f32x2, pc, k_s32(m, 0)))),
+             load(m, m->t_f32x2, op2(m, SpvOpAccessChain, pc_f32x2, pc, k_s32(m, 1))));
+    args[0] = op2(m, SpvOpCompositeExtract, m->t_f32, xy, 0);
+    args[1] = op2(m, SpvOpCompositeExtract, m->t_f32, xy, 1);
+    args[2] = k_f32(m, 0.0f);
+    args[3] = k_f32(m, 1.0f);
+    store(m, position, opn(m, SpvOpCompositeConstruct, m->t_f32x4, 4, args));
+    store(m, o_color, load(m, m->t_f32x4, a_color));
+    store(m, o_uv, load(m, m->t_f32x2, a_uv));
+    return spv_end(m, SpvExecutionModelVertex, out, cap);
+}
+
+size_t host_spirv_overlay_frag(uint32_t* out, size_t cap, float white) {
+    uint32_t v_color, v_uv, color, image_t, sampled_t, tex, c;
+    spv_module_t module, *m = &module;
+    spv_begin(m);
+    v_color = spv_io(m, SpvStorageClassInput, m->t_f32x4, 0);
+    v_uv = spv_io(m, SpvStorageClassInput, m->t_f32x2, 1);
+    color = spv_io(m, SpvStorageClassOutput, m->t_f32x4, 0);
+    image_t = t_image(m, m->t_f32, 0);
+    sampled_t = t1(m, SpvOpTypeSampledImage, image_t);
+    tex = spv_binding(m, SpvStorageClassUniformConstant, sampled_t, 0);
+    spv_main(m);
+    /* fColor = Color * texture(sTexture, UV), as ImGui's fragment shader */
+    c = op2(m, SpvOpFMul, m->t_f32x4, load(m, m->t_f32x4, v_color),
+            op2(m, SpvOpImageSampleImplicitLod, m->t_f32x4, load(m, sampled_t, tex),
+                load(m, m->t_f32x2, v_uv)));
+    if (white > 0.0f)
+        c = with_alpha(m, pq_encode_709(m, srgb_decode(m, rgb_of(m, c)), k_f32(m, white)),
+                       op2(m, SpvOpCompositeExtract, m->t_f32, c, 3));
+    store(m, color, c);
+    spv_mode(m, SpvExecutionModeOriginUpperLeft, 0, NULL);
+    return spv_end(m, SpvExecutionModelFragment, out, cap);
+}
+
 size_t host_spirv_color_to_ms_depth_frag(uint32_t* out, size_t cap) {
     uint32_t uv, frag_depth, sample_id, image_t, tex, image, size, coord, texel;
     spv_module_t module, *m = &module;

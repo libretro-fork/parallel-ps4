@@ -1191,6 +1191,17 @@ set(VIDEO_CORE src/video_core/amdgpu/cb_db_extent.h
                src/video_core/buffer_cache/write_snapshots.h
                src/video_core/host_shaders/host_spirv.c
                src/video_core/host_shaders/host_spirv.h
+               src/video_core/overlay/ovl.h
+               src/video_core/overlay/ovl_draw.c
+               src/video_core/overlay/ovl_font.c
+               src/video_core/overlay/ovl_fps.c
+               src/video_core/overlay/ovl_internal.h
+               src/video_core/overlay/ovl_layers.h
+               src/video_core/overlay/ovl_ttf.c
+               src/video_core/overlay/ovl_ui.c
+               src/video_core/overlay/stb_truetype.h
+               src/video_core/overlay/vk_overlay.cpp
+               src/video_core/overlay/vk_overlay.h
                src/video_core/renderer_vulkan/liverpool_to_vk.cpp
                src/video_core/renderer_vulkan/liverpool_to_vk.h
                src/video_core/renderer_vulkan/vk_common.cpp
@@ -1274,8 +1285,6 @@ set(IMGUI src/imgui/imgui_config.h
           src/imgui/imgui_texture.h
           src/imgui/imgui_translations.cpp
           src/imgui/imgui_translations.h
-          src/imgui/fps_layer.cpp
-          src/imgui/fps_layer.h
           src/imgui/friends_layer.cpp
           src/imgui/friends_layer.h
           src/imgui/invitation_prompt_layer.cpp
@@ -1595,7 +1604,9 @@ set(EMBEDDED_RESOURCES
         src/resources/silver.png
         src/resources/trophy.wav
         src/resources/amd_rcp_index_table.bin.zstd
-        src/resources/amd_rsqrt_index_table.bin.zstd)
+        src/resources/amd_rsqrt_index_table.bin.zstd
+        # The overlays' font (src/video_core/overlay), read in place
+        src/imgui/renderer/fonts/NotoSans-Regular.ttf)
 # The patch repositories (src/resources/patches/README.md), shadPS4's first: of a patch both
 # have for the same version, the first one's is applied (src/common/patch_catalog.h)
 foreach (repository IN ITEMS shadPS4 GoldHEN)

@@ -10,7 +10,6 @@
 #include "core/emulator_settings.h"
 #include "core/libraries/system/systemservice.h"
 #include "frontend_window.h"
-#include "imgui/fps_layer.h"
 #include "imgui/friends_layer.h"
 #include "imgui/invitation_prompt_layer.h"
 #include "imgui/notifications_layer.h"
@@ -20,6 +19,7 @@
 #include "imgui_internal.h"
 #include "video_core/buffer_cache/buffer.h"
 #include "video_core/buffer_cache/guest_import.h"
+#include "video_core/overlay/vk_overlay.h"
 #include "video_core/renderer_vulkan/frame_notes.h"
 #include "video_core/renderer_vulkan/vk_memory.h"
 #include "video_core/renderer_vulkan/vk_platform.h"
@@ -455,7 +455,6 @@ Presenter::Presenter(Frontend::Window& window_, AmdGpu::Liverpool* liverpool_)
 
     pp_pass.Create(device, swapchain.GetSurfaceFormat().format);
 
-    ImGui::FpsCounter::Register();
     ImGui::Friends::Register();
     ImGui::ShadNetNotify::Register();
     ImGui::InvitationPrompt::Register();
@@ -465,7 +464,6 @@ Presenter::~Presenter() {
     ImGui::InvitationPrompt::Unregister();
     ImGui::ShadNetNotify::Unregister();
     ImGui::Friends::Unregister();
-    ImGui::FpsCounter::Unregister();
 
     draw_scheduler.Finish();
     present_scheduler.Finish();
@@ -843,7 +841,8 @@ void Presenter::Present(Frame* frame, bool is_reusing_frame, bool is_game_frame)
     ASSERT_MSG(reset_result == vk::Result::eSuccess,
                "Unexpected error resetting present done fence: {}", vk::to_string(reset_result));
 
-    ImGuiID dockId = ImGui::Core::NewFrame(is_reusing_frame);
+    ImGuiID dockId = ImGui::Core::NewFrame();
+    Overlay::NewFrame(window.GetWidth(), window.GetHeight(), is_reusing_frame);
 
     const vk::Image swapchain_image = swapchain.Image();
     const vk::ImageView swapchain_image_view = swapchain.ImageView();
@@ -993,6 +992,7 @@ void Presenter::Present(Frame* frame, bool is_reusing_frame, bool is_game_frame)
             CopyGameToImage(cmdbuf, *frame, swapchain_image, extent, game_rect);
         }
         ImGui::Core::Render(cmdbuf, swapchain_image_view, swapchain.GetExtent(), direct);
+        Overlay::Render(cmdbuf, swapchain_image_view, swapchain.GetExtent());
 
         // Every frame is read back for the frontend, after the overlays are drawn,
         // into a buffer that is used again - unless the frontend draws from the image itself.

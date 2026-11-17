@@ -14,7 +14,6 @@
 #include "common/path_util.h"
 #include "common/quick_exit.h"
 #include "common/singleton.h"
-#include "core/debug_state.h"
 #include "core/emulator_settings.h"
 #include "font_data.h"
 #include "font_stack.h"
@@ -46,10 +45,6 @@ static ImGuiID dock_id;
 // size of the picture it is drawn on and the time between frames.
 static const Frontend::Window* platform_window = nullptr;
 static std::chrono::steady_clock::time_point last_frame_time{};
-static std::chrono::steady_clock::time_point last_game_frame_time{};
-static std::array<float, 60> game_frame_seconds{};
-static float game_frame_seconds_sum = 0.0f;
-static std::size_t game_frame_index = 0;
 static retro_atomic_int_t force_gamepad_input_capture_count{0};
 
 namespace ImGui {
@@ -239,9 +234,9 @@ static void PadToImGui(ImGuiIO& io) {
     stick(Input::Axis::RightY, ImGuiKey_GamepadRStickUp, ImGuiKey_GamepadRStickDown);
 }
 
-// Each frame: the picture's size, the time step, and, on a frame of
-// the game's own, its frame time and rate for the overlay.
-static void PlatformNewFrame(bool is_reusing_frame) {
+// Each frame: the picture's size and the time step (the game's frame rate is the overlay's:
+// video_core/overlay)
+static void PlatformNewFrame() {
     using namespace std::chrono;
     ImGuiIO& io = GetIO();
     io.DisplaySize = ImVec2(static_cast<float>(platform_window->GetWidth()),
@@ -256,26 +251,9 @@ static void PlatformNewFrame(bool is_reusing_frame) {
     last_frame_time = now;
 
     PadToImGui(io);
-
-    if (!is_reusing_frame) {
-        const float delta = last_game_frame_time.time_since_epoch().count() != 0
-                                ? seconds(now - last_game_frame_time)
-                                : 1.0f / 60.0f;
-        last_game_frame_time = now;
-        DebugState.FrameDeltaTime = delta;
-
-        float& slot = game_frame_seconds[game_frame_index];
-        game_frame_seconds_sum += delta - slot;
-        slot = delta;
-        game_frame_index = (game_frame_index + 1) % game_frame_seconds.size();
-        DebugState.Framerate =
-            game_frame_seconds_sum > 0.0f
-                ? 1.0f / (game_frame_seconds_sum / static_cast<float>(game_frame_seconds.size()))
-                : FLT_MAX;
-    }
 }
 
-ImGuiID NewFrame(bool is_reusing_frame) {
+ImGuiID NewFrame() {
     change_layers_mutex.Run([&] {
         while (!change_layers.empty()) {
             const auto [to_be_added, layer] = change_layers.front();
@@ -289,7 +267,7 @@ ImGuiID NewFrame(bool is_reusing_frame) {
         }
     });
 
-    PlatformNewFrame(is_reusing_frame);
+    PlatformNewFrame();
     ImGui::NewFrame();
     SetKeyOwner(ImGuiKey_GamepadFaceUp, ImHashStr("shadps4/pad"));
 

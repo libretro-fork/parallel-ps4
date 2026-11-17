@@ -9,6 +9,7 @@
 #include "frontend_window.h"
 #include "imgui/renderer/imgui_core.h"
 #include "libretro/libretro_bridge.h"
+#include "video_core/overlay/vk_overlay.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_swapchain.h"
 
@@ -43,6 +44,7 @@ Swapchain::Swapchain(const Instance& instance_, const Frontend::Window& window_)
 
     Create(window.GetWidth(), window.GetHeight());
     ImGui::Core::Initialize(instance, window, image_count, surface_format.format);
+    Overlay::Initialize(instance, image_count, surface_format.format);
 }
 
 Swapchain::~Swapchain() {

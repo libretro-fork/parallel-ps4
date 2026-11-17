@@ -39,6 +39,13 @@ size_t host_spirv_post_process_frag(uint32_t* out, size_t cap);
  * vec2 UV; }. */
 size_t host_spirv_imgui_pq_frag(uint32_t* out, size_t cap, float white);
 
+/* The overlays (video_core/overlay): ImGui's vertex shader (position, uv and colour at
+ * locations 0 to 2, push constants { vec2 scale; vec2 translate; }; colour out at location 0,
+ * uv at 1), and its fragment shader (the colour times the texture at binding 0), turning the
+ * result into PQ Rec.2020 with SDR white at @white (of 10000 nits) when it is above 0 */
+size_t host_spirv_overlay_vert(uint32_t* out, size_t cap);
+size_t host_spirv_overlay_frag(uint32_t* out, size_t cap, float white);
+
 /* Depth from a colour texture's component for the current sample: texture
  * at binding 0, uv at location 0 */
 size_t host_spirv_color_to_ms_depth_frag(uint32_t* out, size_t cap);

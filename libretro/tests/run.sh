@@ -253,3 +253,16 @@ ASAN_OPTIONS=detect_leaks=0 "$OUT/pq_output_device_test"
 $CC -std=c89 -pedantic -O1 -g -Wall -Wno-long-long -fsanitize=address,undefined \
     tools/vertex_capture_report.c -o "$OUT/vertex_capture_report" -lm
 ASAN_OPTIONS=detect_leaks=0 "$OUT/vertex_capture_report" --selftest
+# The overlays' library against ImGui: the FPS counter's window, layout and glyphs where ImGui
+# put them, the atlas's white texel and baked lines
+OVL="src/video_core/overlay/ovl_draw.c src/video_core/overlay/ovl_font.c \
+     src/video_core/overlay/ovl_ttf.c src/video_core/overlay/ovl_ui.c"
+$CC -std=gnu89 -O1 -g -Wall -Wdeclaration-after-statement -ffp-contract=off \
+    -fsanitize=address,undefined libretro/tests/ovl_test.c $OVL -o "$OUT/ovl_test" -lm
+"$OUT/ovl_test" src/imgui/renderer/fonts/NotoSans-Regular.ttf
+# The overlays on a device as the core draws them: the device's frame as the CPU model of it
+$CC -std=gnu89 -O1 -g -Wall -Wdeclaration-after-statement -fsanitize=address,undefined \
+    -isystem externals/vulkan-headers/include -isystem externals/sirit/externals/SPIRV-Headers/include \
+    -Isrc -I$L/include libretro/tests/overlay_device_test.c src/video_core/host_shaders/host_spirv.c \
+    $OVL -o "$OUT/overlay_device_test" -ldl -lm
+ASAN_OPTIONS=detect_leaks=0 "$OUT/overlay_device_test" src/imgui/renderer/fonts/NotoSans-Regular.ttf

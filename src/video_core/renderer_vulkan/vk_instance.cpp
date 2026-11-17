@@ -13,6 +13,7 @@
 #include "imgui/renderer/imgui_core.h"
 #include "libretro/libretro_bridge.h"
 #include "video_core/buffer_cache/guest_import.h"
+#include "video_core/overlay/vk_overlay.h"
 #include "video_core/renderer_vulkan/liverpool_to_vk.h"
 #include "video_core/renderer_vulkan/vk_device_fault.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
@@ -198,6 +199,7 @@ Instance::Instance(s32 physical_device_index, bool enable_validation, bool enabl
 
 Instance::~Instance() {
     ImGui::Core::Shutdown(GetDevice());
+    Overlay::Shutdown(GetDevice());
     allocator.reset();
 }
 

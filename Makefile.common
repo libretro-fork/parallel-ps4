@@ -54,6 +54,8 @@ EMBEDDED_RESOURCES := $(addprefix src/resources/,big_picture/controller.png \
 	big_picture/profiles.png big_picture/settings.png bronze.png gold.png platinum.png \
 	shadps4.png silver.png trophy.wav amd_rcp_index_table.bin.zstd \
 	amd_rsqrt_index_table.bin.zstd)
+# The overlays' font (src/video_core/overlay), read in place
+EMBEDDED_RESOURCES += src/imgui/renderer/fonts/NotoSans-Regular.ttf
 # The patch repositories (src/resources/patches/README.md), shadPS4's first: of a patch both
 # have for the same version, the first one's is applied (src/common/patch_catalog.h)
 EMBEDDED_RESOURCES += $(sort $(wildcard src/resources/patches/shadPS4/*.xml)) \
@@ -252,7 +254,7 @@ CORE_SOURCES_CXX += $(addprefix src/core/loader/,dwarf.cpp elf.cpp symbols_resol
 CORE_SOURCES_CXX += $(addprefix src/core/net/,guest_net.cpp host_net.cpp net_service.cpp \
 	p2p_codec.cpp p2p_crypto.cpp p2p_tcp.cpp p2p_transport.cpp)
 CORE_SOURCES_CXX += $(addprefix src/,emulator.cpp)
-CORE_SOURCES_CXX += $(addprefix src/imgui/,fps_layer.cpp friends_layer.cpp imgui_translations.cpp \
+CORE_SOURCES_CXX += $(addprefix src/imgui/,friends_layer.cpp imgui_translations.cpp \
 	invitation_prompt_layer.cpp notifications_layer.cpp shadnet_notifications_layer.cpp)
 CORE_SOURCES_CXX += $(addprefix src/imgui/renderer/,font_data.cpp font_stack.cpp imgui_core.cpp \
 	imgui_impl_vulkan.cpp texture_manager.cpp)
@@ -289,6 +291,7 @@ CORE_SOURCES_CXX += $(addprefix src/video_core/amdgpu/,liverpool.cpp pixel_forma
 CORE_SOURCES_CXX += $(addprefix src/video_core/buffer_cache/,buffer.cpp buffer_cache.cpp \
 	fault_manager.cpp)
 CORE_SOURCES_CXX += $(addprefix src/video_core/,cache_storage.cpp page_manager.cpp)
+CORE_SOURCES_CXX += $(addprefix src/video_core/overlay/,vk_overlay.cpp)
 CORE_SOURCES_CXX += $(addprefix src/video_core/renderer_vulkan/host_passes/,pp_pass.cpp)
 CORE_SOURCES_CXX += $(addprefix src/video_core/renderer_vulkan/,liverpool_to_vk.cpp vk_common.cpp \
 	vk_compute_pipeline.cpp vk_graphics_pipeline.cpp vk_instance.cpp vk_memory.cpp \
@@ -312,6 +315,8 @@ CORE_SOURCES_C += $(addprefix src/core/libraries/ult/,ult.c ult_sync.c)
 CORE_SOURCES_C += $(addprefix src/core/libraries/np/np_handler/,np_invitation_json.c)
 CORE_SOURCES_C += $(addprefix src/shadnet/,pb_wire.c shadnet_msg.c)
 CORE_SOURCES_C += $(addprefix src/video_core/host_shaders/,host_spirv.c)
+CORE_SOURCES_C += $(addprefix src/video_core/overlay/,ovl_draw.c ovl_font.c ovl_fps.c ovl_ttf.c \
+	ovl_ui.c)
 CORE_SOURCES_C += $(addprefix src/video_core/renderer_vulkan/,vk_heap.c vk_device_fault.c frame_notes.c)
 CORE_SOURCES_C += src/video_core/amdgpu/sample_locs.c src/video_core/amdgpu/cmd_copy_ring.c
 CORE_SOURCES_C += $(addprefix src/video_core/buffer_cache/,write_snapshots.c guest_import.c)
