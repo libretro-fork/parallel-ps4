@@ -359,7 +359,15 @@ void PatchMemory(const patchInfo& patch) {
     }
 
     if (patch.patchMask == PatchMask::Mask) {
-        cheatAddress = reinterpret_cast<void*>(PatternScan(patch.offsetStr) + patch.maskOffset);
+        // Not found (another patch has rewritten the bytes, or this version of the game does
+        // not have them): nothing is written, where 0 + the offset was written to
+        const uintptr_t found = PatternScan(patch.offsetStr);
+        if (found == 0) {
+            LOG_ERROR(Loader, "Patch {}: its pattern is not in the game, not applied: {}",
+                      patch.modNameStr, patch.offsetStr);
+            return;
+        }
+        cheatAddress = reinterpret_cast<void*>(found + patch.maskOffset);
     }
 
     if (patch.patchMask == PatchMask::Mask_Jump32) {
