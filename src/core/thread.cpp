@@ -3,6 +3,7 @@
 
 #include <algorithm>
 
+#include <retro_atomic.h>
 #include <rthreads/rthreads.h>
 
 #include "common/alignment.h"
@@ -31,6 +32,32 @@ namespace {
 /// The alternate signal stack: the thread's own, not the NativeThread's, which the guest
 /// thread's joiner may free as soon as the thread is marked ended, before it is gone
 thread_local void* sig_stack_ptr = nullptr;
+
+/// Signal stacks of threads that have ended, kept for the next threads: a game making and
+/// ending threads as it goes took a 64 KiB allocation and gave it back each time. A fixed set
+/// of slots, taken and given with an exchange each; a stack with no slot free is freed.
+constexpr int SpareSigStacks = 256;
+retro_atomic_ptr_t spare_sig_stacks[SpareSigStacks]{};
+
+void* TakeSigStack() {
+    for (auto& slot : spare_sig_stacks) {
+        void* const stack = retro_atomic_load_acquire_ptr(&slot);
+        if (stack != nullptr && retro_atomic_cas_ptr(&slot, stack, nullptr)) {
+            return stack;
+        }
+    }
+    return nullptr;
+}
+
+void GiveSigStack(void* stack) {
+    for (auto& slot : spare_sig_stacks) {
+        if (retro_atomic_load_acquire_ptr(&slot) == nullptr &&
+            retro_atomic_cas_ptr(&slot, nullptr, stack)) {
+            return;
+        }
+    }
+    free(stack);
+}
 } // namespace
 #endif
 
@@ -66,13 +93,13 @@ int NativeThread::Create(Func func, void* arg) {
 void NativeThread::Exit() {
     tid = 0;
 #ifndef _WIN64
-    // Disable and free the signal stack.
+    // Disable the signal stack and keep it for the next thread
     constexpr stack_t sig_stack = {
         .ss_flags = SS_DISABLE,
     };
     sigaltstack(&sig_stack, nullptr);
     if (sig_stack_ptr) {
-        free(sig_stack_ptr);
+        GiveSigStack(sig_stack_ptr);
         sig_stack_ptr = nullptr;
     }
 #endif
@@ -91,8 +118,12 @@ void NativeThread::Initialize() {
     // Set up an alternate signal handler stack to avoid overflowing small thread stacks.
     const size_t page_size = getpagesize();
     const size_t sig_stack_size = Common::AlignUp(std::max<size_t>(64_KB, MINSIGSTKSZ), page_size);
-    ASSERT_MSG(posix_memalign(&sig_stack_ptr, page_size, sig_stack_size) == 0,
-               "Failed to allocate signal stack: {}", errno);
+    // One a thread that ended left, else a new one (all are the same size)
+    sig_stack_ptr = TakeSigStack();
+    if (sig_stack_ptr == nullptr) {
+        ASSERT_MSG(posix_memalign(&sig_stack_ptr, page_size, sig_stack_size) == 0,
+                   "Failed to allocate signal stack: {}", errno);
+    }
 
     stack_t sig_stack;
     sig_stack.ss_sp = sig_stack_ptr;

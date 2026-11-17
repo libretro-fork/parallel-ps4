@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright 2024-2026 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include <algorithm>
 #include <cstring>
 #include <source_location>
 #include <vector>
@@ -184,24 +185,18 @@ s32 KernelFstat(s32 fd, Libraries::Kernel::OrbisKernelStat* sb) {
 }
 
 s64 KernelSelect(std::span<Core::Net::SelectEntry> entries, s64 timeout_us) {
-    std::vector<Core::Net::SelectEntry> sockets;
-    sockets.reserve(entries.size());
+    // The sockets moved to the front, in place, and selected there: no copy of them to make
+    // and write back (the caller reads each entry's ready by its id, in any order)
     for (auto& e : entries) {
         e.ready = 0;
-        if (Core::Net::GetObjectKind(e.id) == Core::Net::NetObjectKind::Socket) {
-            sockets.push_back(e);
-        }
     }
-    const auto r = Core::Net::SocketSelect(sockets, timeout_us);
+    const auto sockets_end = std::partition(entries.begin(), entries.end(), [](const auto& e) {
+        return Core::Net::GetObjectKind(e.id) == Core::Net::NetObjectKind::Socket;
+    });
+    const auto r = Core::Net::SocketSelect(
+        entries.first(static_cast<std::size_t>(sockets_end - entries.begin())), timeout_us);
     if (r.error != Error::Ok) {
         return PosixError(static_cast<int>(r.error));
-    }
-    for (const auto& s : sockets) {
-        for (auto& e : entries) {
-            if (e.id == s.id) {
-                e.ready = s.ready;
-            }
-        }
     }
     return r.value;
 }

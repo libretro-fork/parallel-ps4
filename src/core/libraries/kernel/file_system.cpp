@@ -2155,7 +2155,13 @@ s32 PS4_SYSV_ABI posix_select(s32 nfds, GuestFdSet* readfds, GuestFdSet* writefd
     auto* h = Common::Singleton<Core::FileSys::HandleTable>::Instance();
     GuestFdSet read_ready{}, write_ready{};
     s32 ready = 0;
-    std::vector<Core::Net::SelectEntry> sockets;
+    // The thread's own, with room for every descriptor a set can hold from its first select:
+    // a select allocates nothing after that
+    static thread_local std::vector<Core::Net::SelectEntry> sockets;
+    if (sockets.capacity() == 0) {
+        sockets.reserve(kGuestFdSetSize);
+    }
+    sockets.clear();
     for (s32 i = 0; i < nfds; ++i) {
         const bool want_read = GuestFdIsSet(readfds, i);
         const bool want_write = GuestFdIsSet(writefds, i);
