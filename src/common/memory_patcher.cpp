@@ -11,6 +11,7 @@
 #include "common/embedded_resources.h"
 #include "common/io_file.h"
 #include "common/logging/log.h"
+#include "common/patch_halve.h"
 #include "common/patch_index.h"
 #include "common/path_util.h"
 #include "common/xml.h"
@@ -151,8 +152,32 @@ static void ApplyMetadata(const Common::Xml::Node& node, const std::string& app_
         const auto* patchLineIt = &patchLine;
 
         std::string type = patchLineIt->attribute("Type").value();
-        if (!versionMatches && type != "mask" && type != "mask_jump32")
+        if (!versionMatches && type != "mask" && type != "mask_jump32" && type != "mask_halve")
             continue;
+
+        if (type == "mask_halve") {
+            // The core's own kind of line: the decimal number of Size bytes at Offset from the
+            // pattern is halved where it is (common/patch_halve.h), whatever it is by now
+            const std::string pattern = patchLineIt->attribute("Address").value();
+            const std::string offset = patchLineIt->attribute("Offset").value();
+            const std::string size = patchLineIt->attribute("Size").value();
+            const uintptr_t found = PatternScan(pattern);
+            unsigned long before = 0;
+            unsigned long after = 0;
+            if (found == 0 || offset.empty() || size.empty()) {
+                LOG_ERROR(Loader, "Patch {}: its pattern is not in the game, not applied: {}",
+                          currentPatchName, pattern);
+            } else if (patch_halve_decimal(
+                           reinterpret_cast<unsigned char*>(found + std::stoi(offset, 0, 10)),
+                           static_cast<size_t>(std::stoul(size, 0, 10)), &before, &after)) {
+                LOG_INFO(Loader, "Applied patch: {}, {} halved to {}", currentPatchName, before,
+                         after);
+            } else {
+                LOG_ERROR(Loader, "Patch {}: no number to halve where its pattern is, not applied",
+                          currentPatchName);
+            }
+            continue;
+        }
 
         std::string address = patchLineIt->attribute("Address").value();
         std::string patchValue = patchLineIt->attribute("Value").value();

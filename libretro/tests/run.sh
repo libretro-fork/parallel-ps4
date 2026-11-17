@@ -144,6 +144,11 @@ $CC -std=c89 -pedantic -Wno-long-long -O1 -g -Wall -Wdeclaration-after-statement
     -fsanitize=address,undefined -Isrc -I$L/include libretro/tests/reserve_span_test.c \
     src/common/reserve_span.c -o "$OUT/reserve_span_test"
 "$OUT/reserve_span_test"
+# A patch line that halves a number a game carries as text
+$CC -std=c89 -pedantic -O1 -g -Wall -Wdeclaration-after-statement -fsanitize=address,undefined \
+    -Isrc -I$L/include libretro/tests/patch_halve_test.c src/common/patch_halve.c \
+    -o "$OUT/patch_halve_test"
+"$OUT/patch_halve_test"
 # The Patch Manager's catalog: a game's patches from two repositories
 $CC -std=c89 -O1 -g -Wall -Wdeclaration-after-statement -fsanitize=address,undefined \
     -Isrc -I$L/include libretro/tests/patch_catalog_test.c src/common/patch_catalog.c \

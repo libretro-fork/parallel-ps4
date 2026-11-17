@@ -179,30 +179,27 @@ static void parallel_patches(int argc, char** argv) {
             line = cat.metadata[0].node->children->children;
             while (line && (!line->name || strcmp(line->name, "Line") != 0))
                 line = line->next;
-            CHECK(line && strcmp(rxml_node_attrib(line, "Type"), "mask") == 0, "a mask line");
+            CHECK(line && strcmp(rxml_node_attrib(line, "Type"), "mask_halve") == 0, "a halving line");
             if (line) {
                 /* The game's text, and as another patch leaves it (Bloodborne's 60 FPS++ writes
-                 * the same value): found in both, 16666 after, the rest of the line left */
-                static const char* const before[] = {
+                 * 16666 there): found in both, at the value, five bytes of it */
+                static const char* const texts[] = {
                     "FmodStreamBuffSize= 196608\nMainThreadUpdateTime= 33333\nUseFmodLoader= FALSE\n",
                     "FmodStreamBuffSize= 196608\nMainThreadUpdateTime= 16666\nUseFmodLoader= FALSE\n"};
-                const char* value = rxml_node_attrib(line, "Value");
                 const int offset = atoi(rxml_node_attrib(line, "Offset"));
-                unsigned i, t;
+                unsigned t;
                 n = mask_bytes(rxml_node_attrib(line, "Address"), pattern, 64);
                 CHECK(n == 28, "the key, five bytes of value, the line's end");
+                CHECK(strcmp(rxml_node_attrib(line, "Size"), "5") == 0, "five bytes halved");
                 for (t = 0; t < 2; t++) {
-                    unsigned char text[96];
-                    size_t first = 0, len = strlen(before[t]);
-                    memcpy(text, before[t], len + 1);
-                    CHECK(mask_hits(text, len, pattern, n, &first) == 1 && first == 27,
+                    size_t first = 0;
+                    CHECK(mask_hits((const unsigned char*)texts[t], strlen(texts[t]), pattern, n,
+                                    &first) == 1 &&
+                              first == 27,
                           "the update time's line found");
-                    for (i = 0; value[i * 2] && value[i * 2 + 1]; i++) {
-                        unsigned v;
-                        sscanf(value + i * 2, "%2x", &v);
-                        text[first + (size_t)offset + i] = (unsigned char)v;
-                    }
-                    CHECK(strcmp((const char*)text, before[1]) == 0, "16666, the rest left");
+                    CHECK(texts[t][first + (size_t)offset - 2] == '=' &&
+                              texts[t][first + (size_t)offset + 5] == '\n',
+                          "the offset is the value's");
                 }
                 /* Executables given: the line once in each, as the scan finds the first */
                 for (a = 1; f == 0 && a < argc; a++) {
