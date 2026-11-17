@@ -140,16 +140,29 @@ public:
 private:
     struct ArenaBinds {
         const Buffer* arena;
-        Common::SmallVector<vk::SparseMemoryBind, 32> binds;
+        std::vector<vk::SparseMemoryBind> binds;
     };
 
+    /// The binds of @arena for the next submit. The slots are kept from submit to submit, each
+    /// with the room its binds have taken, so that binding allocates only past the most ever
+    /// pending at once.
     ArenaBinds* BindsForArena(const Buffer* arena) {
-        auto it = std::ranges::find(pending_binds, arena, &ArenaBinds::arena);
-        if (it != pending_binds.end()) {
-            return std::addressof(*it);
+        for (std::size_t i = 0; i < num_pending_binds; ++i) {
+            if (pending_binds[i].arena == arena) {
+                return &pending_binds[i];
+            }
         }
-        return &pending_binds.emplace_back(arena);
+        if (num_pending_binds == pending_binds.size()) {
+            pending_binds.emplace_back().binds.reserve(PENDING_BINDS_ROOM);
+        }
+        ArenaBinds* const slot = &pending_binds[num_pending_binds++];
+        slot->arena = arena;
+        slot->binds.clear();
+        return slot;
     }
+
+    /// Device memory for @blocks blocks of residency and the block it starts at
+    std::pair<vk::DeviceMemory, u64> BackingMemory(u64 blocks);
 
     const Buffer* GetArena(u64 first_block, u64 last_block);
 
@@ -190,6 +203,15 @@ private:
     std::vector<const Buffer*> address_space;
     std::deque<Buffer> arenas;
     std::vector<ArenaBinds> pending_binds;
+    std::size_t num_pending_binds{};
+    std::vector<vk::SparseBufferMemoryBindInfo> buffer_binds;
+    static constexpr std::size_t PENDING_ARENAS_ROOM = 16;
+    static constexpr std::size_t PENDING_BINDS_ROOM = 64;
+    // Residency is made out of chunks of device memory, a few blocks at a time, rather than
+    // with an allocation of its own each time: the chunk, its size and the blocks taken
+    vk::DeviceMemory backing_chunk{};
+    u64 backing_chunk_blocks{};
+    u64 backing_chunk_used{};
     Vulkan::Semaphore memory_semaphore;
 
     struct Backing : public Interval {

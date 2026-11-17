@@ -140,6 +140,18 @@ BufferCache::BufferCache(const Vulkan::Instance& instance_, Vulkan::Scheduler& s
     bda_pagetable_buffer = std::make_unique<Buffer>(
         instance, 0, bda_pagetable_size, MemoryType::DeviceLocal, "BDA Page Table Buffer");
     runtime.FillBuffer(bda_pagetable_buffer.get(), 0u, bda_pagetable_size, 0u);
+
+    // Room for the binds of a submit, and the first chunk of memory residency is made of, up
+    // front: neither is allocated as the game first draws
+    pending_binds.resize(PENDING_ARENAS_ROOM);
+    for (auto& slot : pending_binds) {
+        slot.binds.reserve(PENDING_BINDS_ROOM);
+    }
+    buffer_binds.reserve(PENDING_ARENAS_ROOM);
+    if (!dense_arenas) {
+        (void)BackingMemory(0);
+    }
+
     if (!instance.IsMaintenance6Supported()) {
         null_index_buffer = std::make_unique<Buffer>(instance, 0, NULL_INDEX_BUFFER_SIZE,
                                                      MemoryType::DeviceLocal, "Null Index Buffer");
@@ -441,6 +453,53 @@ const Buffer* BufferCache::GetArena(u64 first_block, u64 last_block) {
     return new_arena;
 }
 
+std::pair<vk::DeviceMemory, u64> BufferCache::BackingMemory(u64 blocks) {
+    if (backing_chunk && blocks <= backing_chunk_blocks - backing_chunk_used) {
+        const u64 first = backing_chunk_used;
+        backing_chunk_used += blocks;
+        return {backing_chunk, first};
+    }
+    // A chunk is a 64th of the device's memory, from 16 MiB to 128 MiB, in whole blocks
+    const u64 budget = instance.GetTotalMemoryBudget();
+    const u64 chunk_bytes =
+        Common::AlignUp(std::clamp<u64>(budget / 64, 16_MB, 128_MB), u64{block_size});
+    const u64 chunk_blocks = chunk_bytes >> block_shift;
+    const auto allocate = [&](u64 n) -> vk::DeviceMemory {
+        const vk::MemoryAllocateFlagsInfo alloc_flags = {
+            .flags = vk::MemoryAllocateFlagBits::eDeviceAddress,
+        };
+        const vk::MemoryAllocateInfo alloc_info = {
+            .pNext = &alloc_flags,
+            .allocationSize = n << block_shift,
+            .memoryTypeIndex = arena_memory_type_index,
+        };
+        const auto [result, memory] = instance.GetDevice().allocateMemory(alloc_info);
+        return result == vk::Result::eSuccess ? memory : vk::DeviceMemory{};
+    };
+    if (blocks > chunk_blocks / 2) {
+        // More than half a chunk: memory of its own, and the chunk keeps what it has left
+        const vk::DeviceMemory memory = allocate(blocks);
+        ASSERT_MSG(memory, "Out of device memory for {} blocks of buffer residency", blocks);
+        return {memory, 0};
+    }
+    vk::DeviceMemory chunk = allocate(chunk_blocks);
+    u64 got = chunk_blocks;
+    if (!chunk && blocks > 0) {
+        // No room for a whole chunk: only what is asked for
+        chunk = allocate(blocks);
+        got = blocks;
+    }
+    ASSERT_MSG(chunk || blocks == 0, "Out of device memory for {} blocks of buffer residency",
+               blocks);
+    if (!chunk) {
+        return {};
+    }
+    backing_chunk = chunk;
+    backing_chunk_blocks = got;
+    backing_chunk_used = blocks;
+    return {chunk, 0};
+}
+
 void BufferCache::EnsureResident(const Buffer* arena, u64 first_block, u64 last_block) {
     u32 resident_blocks{};
     IntervalList bind_ranges;
@@ -464,21 +523,13 @@ void BufferCache::EnsureResident(const Buffer* arena, u64 first_block, u64 last_
         return;
     }
 
-    const vk::MemoryAllocateFlagsInfo alloc_flags = {
-        .flags = vk::MemoryAllocateFlagBits::eDeviceAddress,
-    };
-    const vk::MemoryAllocateInfo alloc_info = {
-        .pNext = &alloc_flags,
-        .allocationSize = resident_blocks << block_shift,
-        .memoryTypeIndex = arena_memory_type_index,
-    };
-    const auto device_memory = Vulkan::Check(instance.GetDevice().allocateMemory(alloc_info));
+    const auto [device_memory, first_backing_block] = BackingMemory(resident_blocks);
 
     Common::SmallVector<vk::BufferCopy, 8> copies;
     const auto staging =
         staging_pool.Request(resident_blocks * sizeof(vk::DeviceAddress), MemoryType::HostUncached);
 
-    u64 memory_offset{};
+    u64 memory_offset = first_backing_block << block_shift;
     ArenaBinds* binds = BindsForArena(arena);
     auto* bda_addrs = reinterpret_cast<vk::DeviceAddress*>(staging.mapped);
     u64 offset = staging.offset;
@@ -723,14 +774,13 @@ void BufferCache::WriteArenaPageTable(const Buffer* arena, std::span<const Inter
 }
 
 void BufferCache::SubmitPendingArenaBinds(Vulkan::SubmitInfo& info) {
-    if (pending_binds.empty()) {
+    if (num_pending_binds == 0) {
         return;
     }
 
-    std::vector<vk::SparseBufferMemoryBindInfo> buffer_binds;
-    buffer_binds.reserve(pending_binds.size());
-
-    for (const auto& binds : pending_binds) {
+    buffer_binds.clear();
+    for (std::size_t i = 0; i < num_pending_binds; ++i) {
+        const auto& binds = pending_binds[i];
         buffer_binds.emplace_back(vk::SparseBufferMemoryBindInfo{
             .buffer = binds.arena->Handle(),
             .bindCount = static_cast<u32>(binds.binds.size()),
@@ -761,7 +811,8 @@ void BufferCache::SubmitPendingArenaBinds(Vulkan::SubmitInfo& info) {
     }
     ASSERT_MSG(submit_result != vk::Result::eErrorDeviceLost, "Device lost during submit");
 
-    pending_binds.clear();
+    // The slots and their room stay for the next submit's binds
+    num_pending_binds = 0;
 }
 
 } // namespace VideoCore
