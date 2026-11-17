@@ -848,6 +848,8 @@ set(COMMON src/common/c_bridge.cpp
            src/common/patch_catalog.h
            src/common/patch_index.c
            src/common/patch_index.h
+           src/common/reserve_span.c
+           src/common/reserve_span.h
            src/common/multi_level_page_table.h
            ${CMAKE_CURRENT_BINARY_DIR}/src/common/scm_rev.cpp
            src/common/scm_rev.h

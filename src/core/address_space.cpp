@@ -11,6 +11,7 @@
 #include "common/combiner.h"
 #include "common/elf_info.h"
 #include "common/error.h"
+#include "common/reserve_span.h"
 #include "core/address_space.h"
 #include "core/emulator_settings.h"
 #include "core/libraries/kernel/memory.h"
@@ -154,21 +155,19 @@ struct AddressSpace::Impl {
             ASSERT_MSG(VirtualQuery(reinterpret_cast<PVOID>(next_addr), &info, sizeof(info)),
                        "Failed to query memory information for address {:#x}", next_addr);
 
-            // Ensure logic uses values aligned to bage boundaries.
-            next_addr = reinterpret_cast<VAddr>(info.BaseAddress) + info.RegionSize;
-            next_addr = Common::AlignUp(next_addr, alignment);
-
-            // Prevent size from going past supported_user_max
-            u64 size = info.RegionSize;
-            if (next_addr > supported_user_max) {
-                size -= (next_addr - supported_user_max);
-            }
-            size = Common::AlignDown(size, alignment);
+            const VAddr region_start = reinterpret_cast<VAddr>(info.BaseAddress);
+            next_addr = Common::AlignUp(region_start + info.RegionSize, alignment);
 
             // Check for free memory areas
             // Restrict region size to avoid overly fragmenting the virtual memory space.
-            if (info.State == MEM_FREE && info.RegionSize > 0x1000000) {
-                VAddr addr = Common::AlignUp(reinterpret_cast<VAddr>(info.BaseAddress), alignment);
+            // What of it can be reserved (reserve_span): a free region need not start on the
+            // allocation granularity, and its size counted from its start rounded up reached past
+            // its end, into the next allocation: "Attempt to access invalid address".
+            uint64_t addr = 0;
+            uint64_t size = 0;
+            if (info.State == MEM_FREE && info.RegionSize > 0x1000000 &&
+                reserve_span(region_start, info.RegionSize, supported_user_max, alignment, &addr,
+                             &size)) {
                 regions.emplace(addr,
                                 MemoryRegion{addr, PAddr(-1), size, PAGE_NOACCESS, -1, false});
             }

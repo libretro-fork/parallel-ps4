@@ -139,6 +139,11 @@ for san in address,undefined thread; do
         $L/features/features_cpu.c -o "$OUT/node_pool_test" -lpthread
     "$OUT/node_pool_test"
 done
+# What of a free region of the address space can be reserved on Windows's granularity
+$CC -std=c89 -pedantic -Wno-long-long -O1 -g -Wall -Wdeclaration-after-statement \
+    -fsanitize=address,undefined -Isrc -I$L/include libretro/tests/reserve_span_test.c \
+    src/common/reserve_span.c -o "$OUT/reserve_span_test"
+"$OUT/reserve_span_test"
 # The Patch Manager's catalog: a game's patches from two repositories
 $CC -std=c89 -O1 -g -Wall -Wdeclaration-after-statement -fsanitize=address,undefined \
     -Isrc -I$L/include libretro/tests/patch_catalog_test.c src/common/patch_catalog.c \
