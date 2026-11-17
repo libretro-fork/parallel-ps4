@@ -22,6 +22,12 @@ constexpr u64 RING_IDLE_FRAMES = 300;
 constexpr u64 LARGE_IDLE_FRAMES = 120;
 constexpr u64 LARGE_MIN_GRANULARITY = 64_KB;
 constexpr u64 BLOCK_SIZE = 16_MB;
+// Blocks of the rings uploads and the tiler go through, made with the pool and kept: the first
+// upload of a game, and the first after a quiet spell, allocates nothing. Blocks past them are
+// made as a burst needs them and let go once idle.
+constexpr size_t RING_KEPT_BLOCKS = 2;
+// Room for the blocks of a ring, so that adding one does not move the others
+constexpr size_t RING_BLOCKS_ROOM = 32;
 
 u64 RoundAllocationSize(u64 size) {
     const u64 step = std::max(std::bit_floor(size) / 4, LARGE_MIN_GRANULARITY);
@@ -31,7 +37,24 @@ u64 RoundAllocationSize(u64 size) {
 } // Anonymous namespace
 
 StagingBufferPool::StagingBufferPool(const Instance& instance_, Scheduler& scheduler_)
-    : instance{instance_}, scheduler{scheduler_} {}
+    : instance{instance_}, scheduler{scheduler_} {
+    for (size_t type = 0; type < NUM_TYPES; ++type) {
+        Ring& ring = rings[type];
+        ring.blocks.reserve(RING_BLOCKS_ROOM);
+        // Read backs mostly go straight into the game's memory or their own buffers
+        // (RequestLarge); their ring is made as it is wanted
+        if (static_cast<MemoryType>(type) == MemoryType::HostCached) {
+            continue;
+        }
+        for (size_t i = 0; i < RING_KEPT_BLOCKS; ++i) {
+            ring.blocks.push_back(Block{
+                .buffer = std::make_unique<VideoCore::StreamBuffer>(
+                    instance, scheduler, static_cast<MemoryType>(type), BLOCK_SIZE),
+                .last_used_frame = 0,
+            });
+        }
+    }
+}
 
 StagingBufferPool::~StagingBufferPool() = default;
 
@@ -156,7 +179,7 @@ void StagingBufferPool::TickFrame() {
 
 void StagingBufferPool::TrimRing(Ring& ring) {
     auto& blocks = ring.blocks;
-    for (size_t i = blocks.size(); i-- > 0;) {
+    for (size_t i = blocks.size(); i-- > RING_KEPT_BLOCKS;) {
         const Block& block = blocks[i];
         if (frame - block.last_used_frame < RING_IDLE_FRAMES ||
             !scheduler.IsFree(block.buffer->LastTick())) {
