@@ -37,8 +37,14 @@ typedef struct window {
     int appearing;
     ovl_vec2_t pos, size, size_full;
     ovl_vec2_t content_size; /* measured the frame before */
-    ovl_vec2_t scroll, scroll_max, scroll_target;
-    int scroll_target_set;
+    ovl_vec2_t scroll, scroll_max;
+    float scroll_target[2];       /* ImGui's ScrollTarget: FLT_MAX for none */
+    float scroll_target_ratio[2]; /* and its ScrollTargetCenterRatio */
+    int scrollbar_y;              /* a vertical scrollbar, ImGui's ScrollbarY */
+    float deco_x2;                /* its width: ImGui's DecoOuterSizeX2 */
+    float inner[4];               /* ImGui's InnerRect: inside the decorations */
+    unsigned child_flags;
+    uint32_t child_id;
     ovl_vec2_t padding;
     float border_size, rounding;
     float font_scale;
@@ -195,6 +201,16 @@ static struct {
     ovl_buf_t out_vtx, out_idx, out_cmds;
     ovl_draw_data_t draw_data;
 } g;
+
+static void item_size(ovl_vec2_t size, float text_baseline_y);
+static int item_add(uint32_t id, ovl_vec2_t min, ovl_vec2_t max);
+static void item_add_no_nav(uint32_t id, ovl_vec2_t min, ovl_vec2_t max);
+static void render_nav_cursor(ovl_vec2_t min, ovl_vec2_t max, uint32_t id, float rounding);
+static float lerpf(float a, float b, float t);
+static ovl_vec2_t calc_next_scroll(const window_t* w);
+static void set_scroll_from_pos_y(window_t* w, float local_y, float center_ratio);
+static void set_scroll_x(window_t* w, float x);
+static void set_scroll_y(window_t* w, float y);
 
 /* ------------------------------------------------------------------------------------------ */
 /* Helpers */
@@ -695,6 +711,8 @@ static window_t* root_window(window_t* w) {
 
 /* RootWindowForNav: a window is its own, but for children flattened into their parent */
 static window_t* root_for_nav(window_t* w) {
+    while (w && w->is_child && w->parent && (w->child_flags & OVL_CHILD_NAV_FLATTENED))
+        w = w->parent;
     return w;
 }
 
@@ -846,6 +864,45 @@ static void nav_init_apply(void) {
         set_nav_cursor_visible_after_move();
 }
 
+/* ImGui's ScrollToRectEx, for the vertical axis (the overlays' windows do not scroll across):
+ * the item kept in view at the nearest edge, or centred when the window is appearing; the parent
+ * scrolled too for an item in a child. Its scroll change. */
+enum { SCROLL_KEEP_EDGE_Y = 1, SCROLL_KEEP_CENTER_Y = 2, SCROLL_ALWAYS_CENTER_Y = 4 };
+
+static float scroll_to_rect_y(window_t* w, rect_t item, int flags) {
+    const float sr_y0 = w->inner[1] - 1.0f, sr_y1 = w->inner[3] + 1.0f;
+    const int in_flags = flags;
+    int fully, can_fully;
+    float delta;
+    if (!(flags & (SCROLL_KEEP_EDGE_Y | SCROLL_KEEP_CENTER_Y | SCROLL_ALWAYS_CENTER_Y)))
+        flags |= w->appearing ? SCROLL_ALWAYS_CENTER_Y : SCROLL_KEEP_EDGE_Y;
+    fully = item.y0 >= sr_y0 && item.y1 <= sr_y1;
+    can_fully = (item.y1 - item.y0) + g.style.item_spacing.y * 2.0f <= sr_y1 - sr_y0 ||
+                (!w->is_child && w->auto_fit_frames > 0) ||
+                (w->flags & OVL_WINDOW_ALWAYS_AUTO_RESIZE);
+    if ((flags & SCROLL_KEEP_EDGE_Y) && !fully) {
+        if (item.y0 < sr_y0 || !can_fully)
+            set_scroll_from_pos_y(w, item.y0 - g.style.item_spacing.y - w->pos.y, 0.0f);
+        else if (item.y1 >= sr_y1)
+            set_scroll_from_pos_y(w, item.y1 + g.style.item_spacing.y - w->pos.y, 1.0f);
+    } else if (((flags & SCROLL_KEEP_CENTER_Y) && !fully) || (flags & SCROLL_ALWAYS_CENTER_Y)) {
+        if (can_fully)
+            set_scroll_from_pos_y(w, truncf_((item.y0 + item.y1) * 0.5f) - w->pos.y, 0.5f);
+        else
+            set_scroll_from_pos_y(w, item.y0 - w->pos.y, 0.0f);
+    }
+    delta = calc_next_scroll(w).y - w->scroll.y;
+    if (w->is_child && w->parent) {
+        int parent_flags = in_flags;
+        if (parent_flags & (SCROLL_ALWAYS_CENTER_Y | SCROLL_KEEP_CENTER_Y))
+            parent_flags = SCROLL_KEEP_EDGE_Y;
+        item.y0 -= delta;
+        item.y1 -= delta;
+        delta += scroll_to_rect_y(w->parent, item, parent_flags);
+    }
+    return delta;
+}
+
 /* ImGui's NavMoveRequestApplyResult */
 static void nav_move_apply(void) {
     nav_item_t* result = g.nav_move_local.id   ? &g.nav_move_local
@@ -866,7 +923,8 @@ static void nav_move_apply(void) {
             (g.nav_move_other.dist_box == result->dist_box &&
              g.nav_move_other.dist_center < result->dist_center))
             result = &g.nav_move_other;
-    /* The windows these overlays navigate in fit their items: no scrolling to them */
+    /* The item scrolled into view */
+    scroll_to_rect_y(result->window, rect_rel_to_abs(result->window, rect_of(result->rect_rel)), 0);
     if (g.nav_window != result->window)
         g.nav_window = result->window;
     if (g.active_id != result->id)
@@ -943,11 +1001,17 @@ static void nav_create_move(int gamepad) {
     /* With the gamepad, from within what is visible of the window */
     if (g.nav_move_submitted && g.nav_source == SRC_GAMEPAD && w) {
         rect_t inner, nav;
-        inner.x0 = w->pos.x - 1.0f;
-        inner.y0 = w->pos.y - 1.0f;
-        inner.x1 = w->pos.x + w->size.x + 1.0f;
-        inner.y1 = w->pos.y + w->size.y + 1.0f;
+        const ovl_vec2_t next = calc_next_scroll(w);
+        inner.x0 = w->inner[0] - 1.0f;
+        inner.y0 = w->inner[1] - 1.0f;
+        inner.x1 = w->inner[2] + 1.0f;
+        inner.y1 = w->inner[3] + 1.0f;
         inner = rect_abs_to_rel(w, inner);
+        /* As the window will be scrolled to */
+        inner.x0 += next.x - w->scroll.x;
+        inner.x1 += next.x - w->scroll.x;
+        inner.y0 += next.y - w->scroll.y;
+        inner.y1 += next.y - w->scroll.y;
         nav = rect_of(w->nav_rect_rel);
         if (!(nav.x0 >= inner.x0 && nav.y0 >= inner.y0 && nav.x1 <= inner.x1 &&
               nav.y1 <= inner.y1)) {
@@ -1048,12 +1112,12 @@ static void nav_update(void) {
         window_t* w = g.nav_window;
         const float speed = (float)floor(w->font_ref_size * 100.0f * g.delta + 0.5f);
         if (!w->nav_items && w->scroll_max.y > 0.0f && g.nav_move_dir != DIR_NONE) {
-            if (g.nav_move_dir == DIR_UP || g.nav_move_dir == DIR_DOWN) {
-                w->scroll_target.x = w->scroll.x;
-                w->scroll_target.y =
-                    truncf_(w->scroll.y + (g.nav_move_dir == DIR_UP ? -1.0f : 1.0f) * speed);
-                w->scroll_target_set = 1;
-            }
+            if (g.nav_move_dir == DIR_LEFT || g.nav_move_dir == DIR_RIGHT)
+                set_scroll_x(
+                    w, truncf_(w->scroll.x + (g.nav_move_dir == DIR_LEFT ? -1.0f : 1.0f) * speed));
+            else
+                set_scroll_y(
+                    w, truncf_(w->scroll.y + (g.nav_move_dir == DIR_UP ? -1.0f : 1.0f) * speed));
         }
         if (gamepad) {
             const float dy =
@@ -1061,11 +1125,8 @@ static void nav_update(void) {
             const float tweak = g.keys[OVL_KEY_PAD_L1].down   ? 1.0f / 10.0f
                                 : g.keys[OVL_KEY_PAD_R1].down ? 10.0f
                                                               : 1.0f;
-            if (dy != 0.0f) {
-                w->scroll_target.x = w->scroll.x;
-                w->scroll_target.y = truncf_(w->scroll.y + dy * speed * tweak);
-                w->scroll_target_set = 1;
-            }
+            if (dy != 0.0f)
+                set_scroll_y(w, truncf_(w->scroll.y + dy * speed * tweak));
         }
     }
 }
@@ -1177,6 +1238,7 @@ static window_t* create_window(const char* name, unsigned flags) {
     /* ImGui's CreateNewWindow: fitted for two frames, and kept fitting when it resizes itself */
     w->auto_fit_frames = 2;
     w->auto_fit_only_grows = !(flags & OVL_WINDOW_ALWAYS_AUTO_RESIZE);
+    w->scroll_target[0] = w->scroll_target[1] = FLT_MAX;
     return w;
 }
 
@@ -1244,6 +1306,92 @@ static ovl_vec2_t auto_fit_size(const window_t* w, ovl_vec2_t content) {
     return s;
 }
 
+/* ImGui's CalcNextScrollFromScrollTargetAndClamp */
+static ovl_vec2_t calc_next_scroll(const window_t* w) {
+    float s[2];
+    int axis;
+    const float deco[2] = {w->deco_x2, 0.0f};
+    const float size_full[2] = {w->size_full.x, w->size_full.y};
+    const float max[2] = {w->scroll_max.x, w->scroll_max.y};
+    s[0] = w->scroll.x;
+    s[1] = w->scroll.y;
+    for (axis = 0; axis < 2; axis++) {
+        if (w->scroll_target[axis] < FLT_MAX)
+            s[axis] = w->scroll_target[axis] -
+                      w->scroll_target_ratio[axis] * (size_full[axis] - deco[axis]);
+        /* ImRound64 */
+        s[axis] = (float)(long)(maxf(s[axis], 0.0f) + 0.5f);
+        if (!w->skip)
+            s[axis] = minf(s[axis], max[axis]);
+    }
+    return v2(s[0], s[1]);
+}
+
+/* ImGui's SetScrollFromPosY and SetScrollY */
+static void set_scroll_from_pos_y(window_t* w, float local_y, float center_ratio) {
+    w->scroll_target[1] = truncf_(local_y + w->scroll.y);
+    w->scroll_target_ratio[1] = center_ratio;
+}
+
+static void set_scroll_y(window_t* w, float y) {
+    w->scroll_target[1] = y;
+    w->scroll_target_ratio[1] = 0.0f;
+}
+
+static void set_scroll_x(window_t* w, float x) {
+    w->scroll_target[0] = x;
+    w->scroll_target_ratio[0] = 0.0f;
+}
+
+/* ImGui's Scrollbar(ImGuiAxis_Y) and ScrollbarEx, as drawn (the overlays have no mouse to drag
+ * it with) */
+static void draw_scrollbar_y(window_t* w) {
+    const float border = (float)floor(w->border_size * 0.5f + 0.5f);
+    float f[4], b[4], frame_w, frame_h, alpha = 1.0f, pad, size_v, grab_min, grab_h, grab_v;
+    long size_visible, size_contents, win_size, scroll_max;
+    float scroll_ratio;
+    /* GetWindowScrollbarRect: below no title bar, the top border */
+    f[0] = maxf(w->pos.x, w->pos.x + w->size.x - border - w->deco_x2);
+    f[1] = w->inner[1] + border;
+    f[2] = w->pos.x + w->size.x - border;
+    f[3] = w->inner[3] - border;
+    frame_w = f[2] - f[0];
+    frame_h = f[3] - f[1];
+    if (frame_w <= 0.0f || frame_h <= 0.0f)
+        return;
+    if (frame_h < frame_w)
+        alpha = minf(maxf(frame_h / maxf(frame_w * 2.0f, 1.0f), 0.0f), 1.0f);
+    if (alpha <= 0.0f)
+        return;
+    pad = truncf_(minf(2.0f, minf(frame_w, frame_h) * 0.5f));
+    b[0] = f[0] + pad;
+    b[1] = f[1] + pad;
+    b[2] = f[2] - pad;
+    b[3] = f[3] - pad;
+    size_v = b[3] - b[1];
+    if (size_v < 1.0f)
+        return;
+    size_visible = (long)(w->inner[3] - w->inner[1]);
+    size_contents = (long)(w->content_size.y + w->padding.y * 2.0f);
+    win_size = size_contents > size_visible ? size_contents : size_visible;
+    if (win_size < 1)
+        win_size = 1;
+    grab_min = minf(b[3] - b[1], g.style.grab_min_size);
+    grab_h =
+        (float)(int)minf(maxf(size_v * ((float)size_visible / (float)win_size), grab_min), size_v);
+    scroll_max = size_contents - size_visible > 1 ? size_contents - size_visible : 1;
+    scroll_ratio = minf(maxf((float)(long)w->scroll.y / (float)scroll_max, 0.0f), 1.0f);
+    grab_v = scroll_ratio * (size_v - grab_h) / size_v;
+    ovl_add_rect_filled(&w->dl, v2(f[0], f[1]), v2(f[2], f[3]),
+                        ovl_color_u32(OVL_COLOR_SCROLLBAR_BG, 1.0f), w->rounding, OVL_CORNERS_ALL);
+    {
+        const float y0 = b[1] + (b[3] - b[1]) * grab_v;
+        ovl_add_rect_filled(&w->dl, v2(b[0], y0), v2(b[2], y0 + grab_h),
+                            ovl_color_u32(OVL_COLOR_SCROLLBAR_GRAB, alpha),
+                            g.style.scrollbar_rounding, 0);
+    }
+}
+
 static void setup_drawing_context(window_t* w) {
     w->cursor_start.x = w->pos.x + w->padding.x - w->scroll.x;
     w->cursor_start.y = w->pos.y + w->padding.y - w->scroll.y;
@@ -1255,15 +1403,16 @@ static void setup_drawing_context(window_t* w) {
     w->group_offset = 0.0f;
     w->group_count = 0;
     w->text_wrap_pos = -1.0f;
-    w->region_max.x = w->pos.x - w->scroll.x + w->padding.x + (w->size.x - w->padding.x * 2.0f);
+    w->region_max.x =
+        w->pos.x - w->scroll.x + w->padding.x + (w->size.x - w->padding.x * 2.0f - w->deco_x2);
     w->region_max.y = w->pos.y - w->scroll.y + w->padding.y + (w->size.y - w->padding.y * 2.0f);
-    w->work_max_x = truncf_(w->pos.x - w->scroll.x + maxf(w->padding.x, w->border_size)) +
-                    maxf(0.0f, w->size.x - w->padding.x * 2.0f);
-    /* ImGui's InnerClipRect: up to the middle of the border */
-    w->clip[0] = (float)floor(0.5f + w->pos.x + w->border_size * 0.5f);
-    w->clip[1] = (float)floor(0.5f + w->pos.y + w->border_size * 0.5f);
-    w->clip[2] = (float)floor(w->pos.x + w->size.x - w->border_size * 0.5f);
-    w->clip[3] = (float)floor(w->pos.y + w->size.y - w->border_size * 0.5f);
+    w->work_max_x = truncf_(w->inner[0] - w->scroll.x + maxf(w->padding.x, w->border_size)) +
+                    maxf(0.0f, w->size.x - w->padding.x * 2.0f - w->deco_x2);
+    /* ImGui's InnerClipRect: up to the middle of the border, inside the scrollbar */
+    w->clip[0] = (float)floor(0.5f + w->inner[0] + w->border_size * 0.5f);
+    w->clip[1] = (float)floor(0.5f + w->inner[1] + w->border_size * 0.5f);
+    w->clip[2] = (float)floor(w->inner[2] - w->border_size * 0.5f);
+    w->clip[3] = (float)floor(w->inner[3] - w->border_size * 0.5f);
     /* within the display (or the parent's clip, which the draw list's push intersects) */
     w->clip[0] = maxf(w->clip[0], 0.0f);
     w->clip[1] = maxf(w->clip[1], 0.0f);
@@ -1274,7 +1423,7 @@ static void setup_drawing_context(window_t* w) {
 static int begin_window(const char* name, unsigned flags, window_t* parent, ovl_vec2_t child_size,
                         int child_border) {
     window_t* w = find_window(name);
-    int just_created = 0, want_focus;
+    int just_created = 0, want_focus, auto_fitted = 0;
     float bg_alpha;
     if (!w) {
         w = create_window(name, flags);
@@ -1302,8 +1451,12 @@ static int begin_window(const char* name, unsigned flags, window_t* parent, ovl_
     update_font_size();
 
     if (parent) {
-        w->padding = (flags & 0x40000000u) ? g.style.window_padding : v2(0, 0);
-        w->border_size = child_border ? g.style.child_border_size : 0.0f;
+        /* ImGui's: a child has the window padding with a border, or when asked */
+        w->padding = (child_border & (OVL_CHILD_BORDERS | OVL_CHILD_ALWAYS_USE_WINDOW_PADDING))
+                         ? g.style.window_padding
+                         : v2(0, 0);
+        w->border_size = (child_border & OVL_CHILD_BORDERS) ? g.style.child_border_size : 0.0f;
+        w->child_flags = (unsigned)child_border;
         w->rounding = g.style.child_rounding;
         w->pos = parent->cursor_pos;
         /* A child's size: given, or what is left of its parent's for 0, less for below 0 */
@@ -1337,6 +1490,7 @@ static int begin_window(const char* name, unsigned flags, window_t* parent, ovl_
             w->auto_fit_frames = 0;
         } else if ((flags & OVL_WINDOW_ALWAYS_AUTO_RESIZE) || w->auto_fit_frames > 0) {
             const ovl_vec2_t fit = auto_fit_size(w, w->content_size);
+            auto_fitted = 1;
             if ((flags & OVL_WINDOW_ALWAYS_AUTO_RESIZE) || !w->auto_fit_only_grows)
                 w->size_full = fit;
             else
@@ -1360,7 +1514,22 @@ static int begin_window(const char* name, unsigned flags, window_t* parent, ovl_
         w->pos.y = truncf_(w->pos.y);
         if (w->auto_fit_frames > 0)
             w->auto_fit_frames--;
+        w->child_flags = 0;
     }
+    /* ImGui's scrollbar visibility: what the contents needed last frame against the room the
+     * window had then (its size now when it was just made or fitted) */
+    {
+        const int use_current =
+            just_created || (!parent && (auto_fitted || (flags & OVL_WINDOW_ALWAYS_AUTO_RESIZE)));
+        const float avail_y = use_current ? w->size_full.y : w->inner[3] - w->inner[1];
+        const float needed_y = just_created ? 0.0f : w->content_size.y + w->padding.y * 2.0f;
+        w->scrollbar_y = !(flags & OVL_WINDOW_NO_SCROLLBAR) && needed_y > avail_y;
+        w->deco_x2 = w->scrollbar_y ? g.style.scrollbar_size : 0.0f;
+    }
+    w->inner[0] = w->pos.x;
+    w->inner[1] = w->pos.y;
+    w->inner[2] = w->pos.x + w->size.x - w->deco_x2;
+    w->inner[3] = w->pos.y + w->size.y;
     /* SetNextWindowFocus */
     if (g.next.focus)
         focus_window(w);
@@ -1371,15 +1540,14 @@ static int begin_window(const char* name, unsigned flags, window_t* parent, ovl_
         bg_alpha = g.next.bg_alpha;
     memset(&g.next, 0, sizeof(g.next));
 
-    /* Scrolling, to what was asked last frame, kept within what there is to scroll */
-    w->scroll_max.x = maxf(0.0f, w->content_size.x + w->padding.x * 2.0f - w->size.x);
-    w->scroll_max.y = maxf(0.0f, w->content_size.y + w->padding.y * 2.0f - w->size.y);
-    if (w->scroll_target_set) {
-        w->scroll = w->scroll_target;
-        w->scroll_target_set = 0;
-    }
-    w->scroll.x = (float)floor(minf(maxf(w->scroll.x, 0.0f), w->scroll_max.x));
-    w->scroll.y = (float)floor(minf(maxf(w->scroll.y, 0.0f), w->scroll_max.y));
+    /* Scrolling, to what was asked last frame, kept within what there is to scroll, as ImGui's
+     * CalcNextScrollFromScrollTargetAndClamp */
+    w->scroll_max.x =
+        maxf(0.0f, w->content_size.x + w->padding.x * 2.0f - (w->inner[2] - w->inner[0]));
+    w->scroll_max.y =
+        maxf(0.0f, w->content_size.y + w->padding.y * 2.0f - (w->inner[3] - w->inner[1]));
+    w->scroll = calc_next_scroll(w);
+    w->scroll_target[0] = w->scroll_target[1] = FLT_MAX;
 
     ovl_draw_list_reset(&w->dl, g.display.x, g.display.y);
     if (parent) {
@@ -1413,6 +1581,8 @@ static int begin_window(const char* name, unsigned flags, window_t* parent, ovl_
             }
             ovl_add_rect_filled(&w->dl, w->pos, mx, bg, w->rounding, 0);
         }
+        if (w->scrollbar_y)
+            draw_scrollbar_y(w);
         if (w->border_size > 0.0f)
             ovl_add_rect(&w->dl, w->pos, mx, ovl_color_u32(OVL_COLOR_BORDER, 1.0f), w->rounding, 0,
                          w->border_size);
@@ -1445,7 +1615,7 @@ void ovl_end(void) {
     end_window();
 }
 
-int ovl_begin_child(const char* id, ovl_vec2_t size, int border, unsigned flags) {
+int ovl_begin_child(const char* id, ovl_vec2_t size, unsigned child_flags, unsigned flags) {
     char name[64];
     window_t* parent = g.current;
     uint32_t hid;
@@ -1466,15 +1636,16 @@ int ovl_begin_child(const char* id, ovl_vec2_t size, int border, unsigned flags)
             name[n++] = hex[(hid >> (i * 4)) & 0xF];
         name[n] = 0;
     }
-    ok = begin_window(name, flags, parent, size, border);
+    ok = begin_window(name, flags | OVL_WINDOW_NO_TITLE_BAR, parent, size, (int)child_flags);
     g.current->order = parent->order;
+    g.current->child_id = hid;
     return ok;
 }
 
 void ovl_end_child(void) {
     window_t* child = g.current;
     window_t* parent;
-    ovl_vec2_t size;
+    ovl_vec2_t size, mx;
     if (!child || !child->is_child)
         return;
     size = child->size;
@@ -1482,32 +1653,22 @@ void ovl_end_child(void) {
     parent = g.current;
     if (!parent)
         return;
-    /* The child is an item of its parent's */
+    mx.x = parent->cursor_pos.x + size.x;
+    mx.y = parent->cursor_pos.y + size.y;
     {
-        ovl_vec2_t mx;
-        mx.x = parent->cursor_pos.x + size.x;
-        mx.y = parent->cursor_pos.y + size.y;
-        g.last_min = parent->cursor_pos;
-        g.last_max = mx;
-    }
-    {
-        /* ItemSize */
-        const float line_y1 =
-            parent->is_same_line ? parent->cursor_prev_line.y : parent->cursor_pos.y;
-        const float line_h =
-            maxf(parent->curr_line_size.y, parent->cursor_pos.y - line_y1 + size.y);
-        parent->cursor_prev_line.x = parent->cursor_pos.x + size.x;
-        parent->cursor_prev_line.y = line_y1;
-        parent->cursor_pos.x = truncf_(parent->pos.x + parent->indent + parent->group_offset);
-        parent->cursor_pos.y = truncf_(line_y1 + line_h + g.style.item_spacing.y);
-        parent->cursor_max.x = maxf(parent->cursor_max.x, parent->cursor_prev_line.x);
-        parent->cursor_max.y =
-            maxf(parent->cursor_max.y, parent->cursor_pos.y - g.style.item_spacing.y);
-        parent->prev_line_size.y = line_h;
-        parent->curr_line_size.y = 0.0f;
-        parent->prev_line_text_base = parent->curr_line_text_base;
-        parent->curr_line_text_base = 0.0f;
-        parent->is_same_line = 0;
+        const ovl_vec2_t mn = parent->cursor_pos;
+        item_size(size, -1.0f);
+        /* An item of its parent's: one to move to when it has items or scrolls and is not
+         * flattened into it, else not one (its items reached directly when flattened) */
+        if ((child->nav_items || child->scroll_max.y > 0.0f) &&
+            !(child->child_flags & OVL_CHILD_NAV_FLATTENED)) {
+            item_add(child->child_id, mn, mx);
+            render_nav_cursor(mn, mx, child->child_id, -1.0f);
+        } else {
+            item_add_no_nav(child->child_id, mn, mx);
+            if (child->child_flags & OVL_CHILD_NAV_FLATTENED)
+                parent->nav_items_next |= child->nav_items_next;
+        }
     }
 }
 
@@ -1795,19 +1956,13 @@ float ovl_calc_wrap_width_for_pos(ovl_vec2_t pos, float wrap_pos_x) {
 }
 
 void ovl_set_scroll_y(float y) {
-    if (!g.current)
-        return;
-    g.current->scroll_target.x = g.current->scroll.x;
-    g.current->scroll_target.y = y;
-    g.current->scroll_target_set = 1;
+    if (g.current)
+        set_scroll_y(g.current, y);
 }
 
 void ovl_set_scroll_x(float x) {
-    if (!g.current)
-        return;
-    g.current->scroll_target.x = x;
-    g.current->scroll_target.y = g.current->scroll.y;
-    g.current->scroll_target_set = 1;
+    if (g.current)
+        set_scroll_x(g.current, x);
 }
 
 float ovl_scroll_y(void) {
@@ -1818,13 +1973,16 @@ float ovl_scroll_max_y(void) {
     return g.current ? g.current->scroll_max.y : 0.0f;
 }
 
+/* ImGui's SetScrollHereY */
 void ovl_set_scroll_here_y(float center_ratio) {
     window_t* w = g.current;
-    float target;
+    float spacing, target;
     if (!w)
         return;
-    target = w->cursor_prev_line.y - w->pos.y + w->scroll.y - center_ratio * w->size.y;
-    ovl_set_scroll_y(target);
+    spacing = maxf(w->padding.y, g.style.item_spacing.y);
+    target = lerpf(w->cursor_prev_line.y - spacing,
+                   w->cursor_prev_line.y + w->prev_line_size.y + spacing, center_ratio);
+    set_scroll_from_pos_y(w, target - w->pos.y, center_ratio);
 }
 
 /* ------------------------------------------------------------------------------------------ */
@@ -1881,6 +2039,16 @@ static int nav_score_item(nav_item_t* result, rect_t cand) {
     const rect_t curr = rect_of(g.nav_scoring_rect);
     float dbx, dby, dist_box, dcx, dcy, dist_center;
     int quadrant, new_best = 0;
+    /* Entering a flattened child from its parent: its items as clipped to it */
+    if (g.current && g.current->parent == g.nav_window && g.current->is_child) {
+        const float* c = ovl_draw_list_clip(&g.current->dl);
+        if (!(cand.x0 < c[2] && cand.x1 > c[0] && cand.y0 < c[3] && cand.y1 > c[1]))
+            return 0;
+        cand.x0 = minf(maxf(cand.x0, c[0]), c[2]);
+        cand.y0 = minf(maxf(cand.y0, c[1]), c[3]);
+        cand.x1 = minf(maxf(cand.x1, c[0]), c[2]);
+        cand.y1 = minf(maxf(cand.y1, c[1]), c[3]);
+    }
     dbx = dist_interval(cand.x0, cand.x1, curr.x0, curr.x1);
     dby = dist_interval(lerpf(cand.y0, cand.y1, 0.2f), lerpf(cand.y0, cand.y1, 0.8f),
                         lerpf(curr.y0, curr.y1, 0.2f), lerpf(curr.y0, curr.y1, 0.8f));
@@ -1973,7 +2141,9 @@ static int item_add(uint32_t id, ovl_vec2_t min, ovl_vec2_t max) {
             g.active_id_is_alive = id;
         w->nav_items_next = 1;
         if ((g.nav_id == id || g.nav_any_request) && g.nav_window &&
-            root_for_nav(g.nav_window) == root_for_nav(w) && w == g.nav_window)
+            root_for_nav(g.nav_window) == root_for_nav(w) &&
+            (w == g.nav_window ||
+             ((w->child_flags | g.nav_window->child_flags) & OVL_CHILD_NAV_FLATTENED)))
             nav_process_item();
     }
     c = ovl_draw_list_clip(&w->dl);
@@ -1982,6 +2152,16 @@ static int item_add(uint32_t id, ovl_vec2_t min, ovl_vec2_t max) {
                         id != g.nav_activate_id))
             return 0;
     return 1;
+}
+
+/* ItemAdd for an item navigation does not go to (ImGuiItemFlags_NoNav): kept alive only */
+static void item_add_no_nav(uint32_t id, ovl_vec2_t min, ovl_vec2_t max) {
+    g.last_id = id;
+    g.last_min = min;
+    g.last_max = max;
+    g.last_hovered = g.last_active = g.last_clicked = 0;
+    if (id && g.active_id == id)
+        g.active_id_is_alive = id;
 }
 
 /* ImGui's RenderNavCursor around the focused item */

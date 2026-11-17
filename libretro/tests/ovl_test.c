@@ -10,7 +10,9 @@
  * its size from its header, decoded on its thread as rpng decodes it, fitted
  * where the presenter's ImGui window put it; a decode stopped part way. The
  * message and error dialogs: as many vertices and indices as ImGui made, the
- * focus moved and the button pressed by the pad as ImGui's navigation does.
+ * focus moved and the button pressed by the pad as ImGui's navigation does. A
+ * list in a child flattened into its window, scrolled to the focused item as
+ * the d-pad goes down it, with its scrollbar, as ImGui drew it.
  *
  *   build-tests/ovl_test [NotoSans-Regular.ttf] */
 
@@ -458,6 +460,72 @@ static void check_dialogs(void) {
   ovl_msg_dialog_shutdown();
 }
 
+/* A frame of the save data dialog's shape: a title between separators, a
+ * scrolling child of twelve buttons flattened into the window, back below */
+static const ovl_draw_data_t *list_frame(int first, int down, int up) {
+  ovl_vec2_t pos, size, pivot, avail, button;
+  char label[16];
+  int i;
+  ovl_key_event(OVL_KEY_PAD_DPAD_DOWN, down);
+  ovl_key_event(OVL_KEY_PAD_DPAD_UP, up);
+  ovl_new_frame(1920.0f, 1080.0f, 1.0f / 60.0f);
+  pos.x = 960.0f;
+  pos.y = 540.0f;
+  pivot.x = pivot.y = 0.5f;
+  size.x = 1100.0f;
+  size.y = 700.0f;
+  ovl_set_next_window_pos(pos, OVL_COND_ALWAYS, pivot);
+  ovl_set_next_window_size(size, OVL_COND_ALWAYS);
+  if (first || !ovl_nav_active())
+    ovl_set_next_window_focus();
+  if (ovl_begin("List##List",
+                OVL_WINDOW_NO_DECORATION | OVL_WINDOW_NO_SAVED_SETTINGS)) {
+    ovl_separator();
+    ovl_set_window_font_scale(1.7f);
+    ovl_text("Save", NULL);
+    ovl_set_window_font_scale(1.0f);
+    ovl_separator();
+    avail = ovl_content_region_avail();
+    avail.y -= 31.0f;
+    ovl_begin_child("##ScrollingRegion", avail, OVL_CHILD_NAV_FLATTENED, 0);
+    for (i = 0; i < 12; i++) {
+      sprintf(label, "Item %d", i);
+      button.x = ovl_content_region_avail().x;
+      button.y = 85.0f;
+      ovl_button(label, button);
+      if (first && i == 0)
+        ovl_set_item_current_nav_focus(0);
+    }
+    ovl_end_child();
+    ovl_separator();
+    ovl_set_cursor_pos_x(ovl_content_region_avail().x - 114.0f);
+    button.x = 114.0f;
+    button.y = 23.0f;
+    ovl_button("Back", button);
+  }
+  ovl_end();
+  return ovl_render();
+}
+
+static void check_list(void) {
+  const ovl_draw_data_t *dd = NULL;
+  int frame;
+  for (frame = 0; frame < 100; frame++) {
+    /* As the comparison with ImGui: six presses, then held down to back */
+    const int down = (frame >= 5 && frame <= 30 && frame % 5 == 0) ||
+                     (frame >= 40 && frame < 100);
+    dd = list_frame(frame == 0, down, 0);
+    if (frame == 0)
+      CHECK(dd->vtx_count == 280 && dd->idx_count == 558,
+            "the list's first frame as ImGui's");
+    if (frame == 1)
+      CHECK(dd->vtx_count == 324 && dd->idx_count == 726,
+            "its second, the scrollbar and focus cursor shown, as ImGui's");
+  }
+  CHECK(dd->vtx_count == 332 && dd->idx_count == 738,
+        "scrolled to its end, back focused, as ImGui's");
+}
+
 int main(int argc, char **argv) {
   const char *path =
       argc > 1 ? argv[1] : "src/imgui/renderer/fonts/NotoSans-Regular.ttf";
@@ -510,6 +578,7 @@ int main(int argc, char **argv) {
   check_layers();
   check_splash();
   check_dialogs();
+  check_list();
   ovl_destroy();
   free(noto);
   if (failures) {

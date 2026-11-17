@@ -350,7 +350,11 @@ void ovl_set_next_window_focus(void);
 /* 0 when the window is hidden (its contents are not to be built); ovl_end either way */
 int ovl_begin(const char* name, unsigned flags);
 void ovl_end(void);
-int ovl_begin_child(const char* id, ovl_vec2_t size, int border, unsigned flags);
+/* ImGui's BeginChild: its child flags, and its window's */
+#define OVL_CHILD_BORDERS 0x1u
+#define OVL_CHILD_ALWAYS_USE_WINDOW_PADDING 0x2u
+#define OVL_CHILD_NAV_FLATTENED 0x100u
+int ovl_begin_child(const char* id, ovl_vec2_t size, unsigned child_flags, unsigned flags);
 void ovl_end_child(void);
 
 ovl_vec2_t ovl_window_pos(void);
