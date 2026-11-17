@@ -18,7 +18,11 @@
  *     frame, at the frame's start;
  *   - a thread parked on a word is waiting on it until the word moves (a wake sent) and
  *     waiting again once it parks at the new value; parking and frames tell the sound's
- *     output, which waits for that. */
+ *     output, which waits for that;
+ *   - work in flight on a thread that is not the game's (kernel AIO's worker): a game thread
+ *     waiting for it with a timeout, alone, has the time skip to its deadline at once and
+ *     times out before the work is done; counted running from its submit until it is done
+ *     (game_clock_busy, game_clock_idle), the work holds the time and the wait ends with it. */
 
 #include <stdio.h>
 
@@ -210,6 +214,72 @@ static void timers_test(void) {
     retro_eventcount_free(&wake_ec);
 }
 
+/* ---- work in flight on a thread that is not the game's ---- */
+
+static game_clock_t io_clock;
+static retro_eventcount_t io_ec;
+static retro_atomic_int_t io_done;
+static retro_atomic_int_t io_counted;
+static retro_atomic_int_t io_gave_up; /* the wait is over, whatever ended it */
+static retro_atomic_64_t io_now_when_done;
+
+static int io_is_done(void* ctx) {
+    (void)ctx;
+    return retro_atomic_load_acquire_int(&io_done) != 0;
+}
+
+static void io_worker(void* data) {
+    (void)data;
+    /* The read takes until well after the game thread has parked for it */
+    while (!game_clock_waiting_on(&io_clock, &io_ec.epoch) &&
+           !retro_atomic_load_acquire_int(&io_gave_up))
+        sthread_yield();
+    sthread_yield();
+    retro_atomic_store_release_64(&io_now_when_done, (int64_t)game_clock_now(&io_clock));
+    retro_atomic_store_release_int(&io_done, 1);
+    if (retro_atomic_load_acquire_int(&io_counted))
+        game_clock_idle(&io_clock);
+    retro_eventcount_notify(&io_ec);
+}
+
+/* 1 if the wait ended with the work, 0 if its timeout ended it first */
+static int io_wait(int counted, uint64_t* deadline_out) {
+    game_clock_thread_t self = {0, 0};
+    sthread_t* worker;
+    uint64_t deadline;
+    int ok;
+    game_clock_init(&io_clock, 60, 1);
+    game_clock_frame(&io_clock);
+    game_clock_busy(&io_clock); /* the game thread */
+    retro_eventcount_init(&io_ec);
+    retro_atomic_int_init(&io_done, 0);
+    retro_atomic_int_init(&io_counted, counted);
+    retro_atomic_int_init(&io_gave_up, 0);
+    retro_atomic_64_init(&io_now_when_done, 0);
+    /* Submitted: in flight */
+    if (counted)
+        game_clock_busy(&io_clock);
+    worker = sthread_create(io_worker, NULL);
+    deadline = game_clock_now(&io_clock) + 5000000u; /* 5 ms, within the frame */
+    ok = game_clock_wait(&io_clock, &io_ec, deadline, io_is_done, NULL, &self);
+    retro_atomic_store_release_int(&io_gave_up, 1);
+    sthread_join(worker);
+    game_clock_idle(&io_clock);
+    retro_eventcount_free(&io_ec);
+    *deadline_out = deadline;
+    return ok;
+}
+
+static void in_flight_test(void) {
+    uint64_t deadline = 0;
+    CHECK(!io_wait(0, &deadline), "not counted: the wait times out before the work is done");
+    CHECK((uint64_t)retro_atomic_load_acquire_64(&io_now_when_done) >= deadline,
+          "the time had skipped to its deadline");
+    CHECK(io_wait(1, &deadline), "counted: the wait ends with the work");
+    CHECK((uint64_t)retro_atomic_load_acquire_64(&io_now_when_done) < deadline,
+          "the time held until it was done");
+}
+
 int main(void) {
     sthread_t* threads[THREADS];
     uint64_t t;
@@ -330,6 +400,7 @@ int main(void) {
     CHECK(t == 20001ull * 1000000000u / 60, "exactly that many frames' time");
 
     timers_test();
+    in_flight_test();
 
     if (failures) {
         printf("game_clock: %d failed\n", failures);

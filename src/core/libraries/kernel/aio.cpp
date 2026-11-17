@@ -26,6 +26,15 @@ namespace Libraries::Kernel {
 // as on the console, where it read or wrote them first. Each submit id is a batch slot made
 // once; game threads push batches onto a lock-free stack, the worker takes them all at once,
 // does them in order and wakes whoever waits. No lock and no allocation once running.
+//
+// A batch in flight (from its submit until the worker has done with it) counts as one of the
+// game's threads running (game_clock_busy): the worker is not a game thread, and with every
+// game thread waiting the game's time would skip to the earliest deadline at once, so a wait
+// for the batch with a timeout ended before the read it waited for had been done. The game
+// then went on, gave the buffer to something else, and the read landed in it later.
+// For the same reason a request is not deleted or cancelled under the worker: those wait
+// until the worker has done with the batch, after which it touches neither the game's buffer
+// nor its result.
 static constexpr s32 ORBIS_KERNEL_AIO_MAX_QUEUES = 512;
 // The most requests one submit takes on the console
 static constexpr u32 AioMaxBatch = 128;
@@ -33,6 +42,9 @@ static constexpr u32 AioMaxBatch = 128;
 struct AioBatch {
     mpsc_stack_node_t node; // first: the stack links batches through it
     retro_atomic_int_t state{0};
+    // 1 from the submit until the worker has done with it: it writes to the game's buffers and
+    // results only while this is set
+    retro_atomic_int_t flight{0};
     bool write = false;
     u32 count = 0;
     std::array<OrbisKernelAioRWRequest, AioMaxBatch> requests{};
@@ -80,8 +92,12 @@ static void AioWorker(void*) {
                                   failed ? ORBIS_KERNEL_AIO_STATE_ABORTED
                                          : ORBIS_KERNEL_AIO_STATE_COMPLETED) ||
              ((expected = static_cast<s32>(retro_atomic_load_acquire_int(&batch->state))), false));
+            // Done with it: nothing of the game's is touched from here, and the time it held
+            // moves on
+            retro_atomic_store_release_int(&batch->flight, 0);
+            game_clock_idle(GameClock());
+            retro_eventcount_notify(&g_done);
         }
-        retro_eventcount_notify(&g_done);
     }
 }
 
@@ -118,7 +134,8 @@ static OrbisKernelAioSubmitId Submit(const OrbisKernelAioRWRequest* req, u32 cou
     AioBatch& batch = g_batches[id];
     // An id comes round again after 511 submits; one still in flight then is waited out
     while (static_cast<s32>(retro_atomic_load_acquire_int(&batch.state)) ==
-           ORBIS_KERNEL_AIO_STATE_PROCESSING) {
+               ORBIS_KERNEL_AIO_STATE_PROCESSING ||
+           retro_atomic_load_acquire_int(&batch.flight) != 0) {
         GameYield();
     }
     for (u32 i = 0; i < count; i++) {
@@ -139,6 +156,9 @@ static OrbisKernelAioSubmitId Submit(const OrbisKernelAioRWRequest* req, u32 cou
     batch.count = count;
     std::memcpy(batch.requests.data(), req, count * sizeof(*req));
     retro_atomic_store_relaxed_int(&batch.state, ORBIS_KERNEL_AIO_STATE_PROCESSING);
+    retro_atomic_store_release_int(&batch.flight, 1);
+    // In flight: it holds the game's time until the worker has done with it
+    game_clock_busy(GameClock());
     mpsc_stack_push(&g_pending, &batch.node);
     retro_eventcount_notify(&g_work);
     return id;
@@ -155,6 +175,17 @@ static bool WaitDone(OrbisKernelAioSubmitId id, u32 usec) {
                     [&] { return State(id) != ORBIS_KERNEL_AIO_STATE_PROCESSING; });
 }
 
+// Waits until the worker has done with @id's batch: after that it touches neither the game's
+// buffers nor its results, which the game is free to let go once a request is deleted or
+// cancelled. No timeout: the worker always gets there.
+static void WaitLanded(OrbisKernelAioSubmitId id) {
+    AioBatch* batch = Batch(id);
+    if (!batch || retro_atomic_load_acquire_int(&batch->flight) == 0) {
+        return;
+    }
+    GameWait(&g_done, 0, [&] { return retro_atomic_load_acquire_int(&batch->flight) == 0; });
+}
+
 s32 PS4_SYSV_ABI sceKernelAioInitializeImpl(void* p, s32 size) {
     return 0;
 }
@@ -164,6 +195,7 @@ s32 PS4_SYSV_ABI sceKernelAioDeleteRequest(OrbisKernelAioSubmitId id, s32* ret) 
         return ORBIS_KERNEL_ERROR_EFAULT;
     }
     SetState(id, ORBIS_KERNEL_AIO_STATE_ABORTED);
+    WaitLanded(id);
     *ret = 0;
     return 0;
 }
@@ -174,6 +206,7 @@ s32 PS4_SYSV_ABI sceKernelAioDeleteRequests(OrbisKernelAioSubmitId id[], s32 num
     }
     for (s32 i = 0; i < num; i++) {
         SetState(id[i], ORBIS_KERNEL_AIO_STATE_ABORTED);
+        WaitLanded(id[i]);
         ret[i] = 0;
     }
 
@@ -204,6 +237,7 @@ s32 PS4_SYSV_ABI sceKernelAioCancelRequest(OrbisKernelAioSubmitId id, s32* state
     }
     if (id) {
         SetState(id, ORBIS_KERNEL_AIO_STATE_ABORTED);
+        WaitLanded(id);
         *state = ORBIS_KERNEL_AIO_STATE_ABORTED;
     } else {
         *state = ORBIS_KERNEL_AIO_STATE_PROCESSING;
@@ -218,6 +252,7 @@ s32 PS4_SYSV_ABI sceKernelAioCancelRequests(OrbisKernelAioSubmitId id[], s32 num
     for (s32 i = 0; i < num; i++) {
         if (id[i]) {
             SetState(id[i], ORBIS_KERNEL_AIO_STATE_ABORTED);
+            WaitLanded(id[i]);
             state[i] = ORBIS_KERNEL_AIO_STATE_ABORTED;
         } else {
             state[i] = ORBIS_KERNEL_AIO_STATE_PROCESSING;
