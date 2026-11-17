@@ -95,12 +95,17 @@ bool GpuFramesActive();
 /// shared memory from now on, and the core is told why.
 void GpuFramesFailed(const char* why);
 
-/// The image to draw the next frame into: not the newest one published, not the one the core
-/// is showing, and not one still being drawn. Waits a moment when all are taken.
-std::uint32_t AcquireImage();
+/// The image to draw the next frame into: not the newest one published, not the
+/// one the core is showing, and not one the frontend may still draw from. One
+/// free if there is one, else one whose frame the GPU is still drawing, taken
+/// over for the next (that frame is then not published). Never waits.
+/// @generation is the frame's, for PushImage.
+std::uint32_t AcquireImage(int &generation);
 
-/// A frame is finished in an image, the GPU's work on it done. Called from the renderer.
-void PushImage(std::uint32_t image, std::uint32_t width, std::uint32_t height);
+/// A frame is finished in an image, the GPU's work on it done: published unless
+/// a newer frame took the image over. Called from the renderer.
+void PushImage(std::uint32_t image, int generation, std::uint32_t width,
+               std::uint32_t height);
 
 /// A pad's motors, 0 to 255 each, as the game set them. The pad is the controller's index.
 void SetRumble(std::uint32_t pad, std::uint8_t small_motor, std::uint8_t large_motor);

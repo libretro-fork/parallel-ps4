@@ -66,6 +66,11 @@ public:
         return image_index;
     }
 
+    /// The frame's generation in the image shared with the frontend (Libretro::AcquireImage)
+    int GetImageGeneration() const {
+        return image_generation;
+    }
+
     vk::Extent2D GetExtent() const {
         return extent;
     }
@@ -97,6 +102,7 @@ private:
     u32 height = 0;
     u32 image_count = 0;
     u32 image_index = 0;
+    int image_generation = 0;
     u32 frame_index = 0;
 };
 

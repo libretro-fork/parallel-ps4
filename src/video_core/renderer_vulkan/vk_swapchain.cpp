@@ -81,8 +81,8 @@ void Swapchain::Recreate(u32 width_, u32 height_) {
 
 void Swapchain::AcquireNextImage() {
     // An image the frontend is not showing, when it shows them itself.
-    image_index =
-        Libretro::GpuFramesActive() ? Libretro::AcquireImage() : (image_index + 1) % image_count;
+    image_index = Libretro::GpuFramesActive() ? Libretro::AcquireImage(image_generation)
+                                              : (image_index + 1) % image_count;
 }
 
 void Swapchain::Present() {

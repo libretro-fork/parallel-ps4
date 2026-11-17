@@ -117,6 +117,114 @@ static void *core(void *arg) {
   return NULL;
 }
 
+/* The images shared with a GPU frontend: up to four frames in flight among six
+ * images, the core holding the newest and the frontend drawing from the last
+ * two shown */
+#define IMAGES 6
+#define IMAGES_IN_FLIGHT 4
+static retro_atomic_int_t inewest, iheld, ibusy, idone;
+static retro_atomic_int_t ipixels[IMAGES][WORDS];
+static frame_images_t images;
+static long ishown = 0, itorn = 0, ichanged = 0, iolder = 0, ipublished = 0;
+
+static void write_image(unsigned image, int frame) {
+  unsigned i;
+  for (i = 0; i < WORDS; i++) {
+    retro_atomic_store_relaxed_int(&ipixels[image][i], frame);
+    if ((i & 15) == 15)
+      sched_yield();
+  }
+}
+
+static void *images_emulator(void *arg) {
+  unsigned pending_image[IMAGES_IN_FLIGHT];
+  int pending_gen[IMAGES_IN_FLIGHT];
+  unsigned n = 0, i;
+  int frame;
+  (void)arg;
+  for (frame = 1; frame <= FRAMES; frame++) {
+    int gen = 0;
+    unsigned image;
+    /* The GPU finishes the oldest frame */
+    if (n == IMAGES_IN_FLIGHT || (frame % 5) == 0) {
+      if (n) {
+        if (frame_images_publish(&images, pending_image[0], pending_gen[0])) {
+          frame_images_published(&images, pending_image[0]);
+          ipublished++;
+        }
+        for (i = 1; i < n; i++) {
+          pending_image[i - 1] = pending_image[i];
+          pending_gen[i - 1] = pending_gen[i];
+        }
+        n--;
+      }
+    }
+    image = frame_images_acquire(&images, &gen);
+    write_image(image, frame);
+    pending_image[n] = image;
+    pending_gen[n] = gen;
+    n++;
+  }
+  for (i = 0; i < n; i++)
+    if (frame_images_publish(&images, pending_image[i], pending_gen[i])) {
+      frame_images_published(&images, pending_image[i]);
+      ipublished++;
+    }
+  retro_atomic_store_release_int(&idone, 1);
+  return NULL;
+}
+
+static int image_whole(unsigned image, int *value) {
+  unsigned i;
+  *value = retro_atomic_load_relaxed_int(&ipixels[image][0]);
+  for (i = 1; i < WORDS; i++)
+    if (retro_atomic_load_relaxed_int(&ipixels[image][i]) != *value)
+      return 0;
+  return 1;
+}
+
+static void *images_core(void *arg) {
+  unsigned shown_latest = 0, shown_image = FRAME_SLOTS_NONE;
+  unsigned before_image = FRAME_SLOTS_NONE;
+  int shown_value = 0, before_value = 0, last = 0;
+  (void)arg;
+  while (!retro_atomic_load_acquire_int(&idone)) {
+    unsigned slot = 0, latest = 0;
+    int released = 0, value;
+    int took;
+    /* The frontend may still draw from the image shown now once another is:
+     * busy before it is let go, and the one before that waited for */
+    retro_atomic_store_release_int(
+        &ibusy, (int)((shown_image < IMAGES ? 1u << shown_image : 0u) |
+                      (before_image < IMAGES ? 1u << before_image : 0u)));
+    took = frame_slots_hold(&inewest, &iheld, IMAGES, shown_latest, &slot,
+                            &latest, &released);
+    if (took > 0) {
+      /* The one before the last shown is waited for by now: no longer busy */
+      before_image = shown_image;
+      before_value = shown_value;
+      shown_image = slot;
+      shown_latest = latest;
+      ishown++;
+      if (!image_whole(slot, &value))
+        itorn++;
+      if (value <= last)
+        iolder++;
+      last = value;
+      shown_value = value;
+    }
+    sched_yield();
+    /* Neither the held image nor the busy one is drawn into */
+    if (shown_image < IMAGES &&
+        (!image_whole(shown_image, &value) || value != shown_value))
+      ichanged++;
+    if (before_image < IMAGES && before_image != shown_image &&
+        (!image_whole(before_image, &value) || value != before_value))
+      ichanged++;
+  }
+  return NULL;
+}
+
 int main(void) {
   pthread_t threads[2];
   unsigned a, b, c, d, e;
@@ -177,6 +285,26 @@ int main(void) {
    * of a claim */
   CHECK(dropped * 10000 < FRAMES,
         "with three in flight, a slot free all but rarely");
+  /* The images */
+  retro_atomic_int_init(&inewest, 0);
+  retro_atomic_int_init(&iheld, FRAME_SLOTS_NONE);
+  retro_atomic_int_init(&ibusy, 0);
+  retro_atomic_int_init(&idone, 0);
+  frame_images_init(&images, &inewest, &iheld, &ibusy, IMAGES);
+  pthread_create(&threads[0], NULL, images_emulator, NULL);
+  pthread_create(&threads[1], NULL, images_core, NULL);
+  pthread_join(threads[0], NULL);
+  pthread_join(threads[1], NULL);
+  printf("frame_images: %ld frames published, %ld shown, %u images taken over "
+         "from a frame in flight\n",
+         ipublished, ishown, images.taken_over);
+  CHECK(ishown > 0, "frames shown");
+  CHECK(itorn == 0, "no image shown before its frame was whole");
+  CHECK(ichanged == 0,
+        "no image drawn into while held or while the frontend draws from it");
+  CHECK(iolder == 0, "each frame shown newer than the last");
+  CHECK(ipublished + (long)images.taken_over == FRAMES,
+        "every frame published but those whose image was taken over");
   printf("frame_slots: %s\n", failures ? "FAILED" : "passed");
   return failures != 0;
 }

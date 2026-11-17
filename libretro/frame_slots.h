@@ -70,6 +70,42 @@ int frame_slots_hold(retro_atomic_int_t *newest, retro_atomic_int_t *held,
                      unsigned count, unsigned shown, unsigned *slot,
                      unsigned *newest_out, int *released);
 
+/* The images shared with a frontend that draws from them on the GPU: the same
+ * handing over, with two things more. An image the frontend may still be
+ * drawing from (a bit each in @busy, written by the core) is not drawn into.
+ * And an image whose frame the GPU is still drawing can be taken for a newer
+ * frame: the older one is then not published, so the image only becomes the
+ * newest once the newer frame in it is done. With an image free there is no
+ * wait, and with none, one is taken over in turn; nothing ever waits. */
+typedef struct frame_images {
+  retro_atomic_int_t *newest; /* shared, as for the slots */
+  retro_atomic_int_t *held;   /* shared, as for the slots */
+  retro_atomic_int_t *busy;   /* shared: images the frontend may draw from */
+  unsigned count;
+  /* 0 when free, else the generation of the frame being drawn into it, or
+   * FRAME_IMAGES_PUBLISHING while it is being published */
+  retro_atomic_int_t state[FRAME_SLOTS_MAX];
+  int generation;
+  unsigned taken_over; /* frames not published, their image taken over */
+} frame_images_t;
+
+#define FRAME_IMAGES_PUBLISHING (-1)
+
+/* @count images (FRAME_SLOTS_MAX at most) over the shared words */
+void frame_images_init(frame_images_t *images, retro_atomic_int_t *newest,
+                       retro_atomic_int_t *held, retro_atomic_int_t *busy,
+                       unsigned count);
+/* The image to draw the next frame into, and in *@generation that frame's
+ * generation for frame_images_publish. From one thread. */
+unsigned frame_images_acquire(frame_images_t *images, int *generation);
+/* The frame of @generation in @image is done: 1 when it is the image's frame
+ * still, the image now being published (its size to be written, then
+ * frame_images_published); 0 when a newer frame took the image over. */
+int frame_images_publish(frame_images_t *images, unsigned image,
+                         int generation);
+/* The image being published becomes the newest */
+void frame_images_published(frame_images_t *images, unsigned image);
+
 #ifdef __cplusplus
 }
 #endif

@@ -83,7 +83,7 @@ retro_atomic_int_t gpu_frames_active{0};
 // whether the presenter has taken it
 retro_atomic_int_t game_size{0};
 retro_atomic_int_t game_size_new{0};
-retro_atomic_int_t image_in_flight[Libretro::FRAME_IMAGES];
+frame_images_t emulator_frame_images;
 // The picture read back into the shared memory: the slots a frame is being
 // written into
 frame_slots_t emulator_frame_slots;
@@ -552,9 +552,8 @@ bool ShareImages(const std::uint64_t* memory_handles, std::uint32_t count, std::
         return false;
     }
 #endif
-    for (auto& in_flight : image_in_flight) {
-        (void)retro_atomic_exchange_int(&in_flight, 0);
-    }
+    frame_images_init(&emulator_frame_images, &shared->frame_latest,
+                      &shared->frame_held, &shared->frames_busy, FRAME_IMAGES);
     (void)retro_atomic_exchange_int(&gpu_frames_active, 1);
     LOG_INFO(Render_Vulkan, "The picture is handed to the frontend on the GPU: {} images of {}x{}",
              count, width, height);
@@ -578,66 +577,23 @@ void GpuFramesFailed(const char* why) {
     LOG_WARNING(Render_Vulkan, "The picture goes through system memory: {}", why);
 }
 
-std::uint32_t AcquireImage() {
-    // Up to a tenth of a second: the frontend holds one image, the newest is kept for it, and
-    // those its frames in flight drew from are busy (frames_busy); what is left is for frames
-    // being drawn. After that the wait is given up, and an image still being drawn is drawn
-    // over rather than the picture stopping. Parked until the core lets go of an image or a
-    // frame being drawn is published.
-    const auto give_up = std::chrono::steady_clock::now() + std::chrono::milliseconds(100);
-    for (;;) {
-        const int key = wakes.frame.Prepare();
-        const std::uint32_t latest = static_cast<std::uint32_t>(retro_atomic_load_seq_cst_int(&shared->frame_latest));
-        const std::uint32_t newest = latest == 0 ? FRAME_SLOT_NONE : latest & FRAME_SLOT_MASK;
-        const std::uint32_t held = static_cast<std::uint32_t>(retro_atomic_load_seq_cst_int(&shared->frame_held));
-        // Not one the frontend may still be drawing from either
-        const std::uint32_t busy = static_cast<std::uint32_t>(retro_atomic_load_seq_cst_int(&shared->frames_busy));
-        for (std::uint32_t image = 0; image < FRAME_IMAGES; ++image) {
-            if (image != newest && image != held && (busy & (1u << image)) == 0 &&
-                retro_atomic_exchange_int(&image_in_flight[image], 1) == 0) {
-                wakes.frame.Cancel();
-                return image;
-            }
-        }
-        const auto left = std::chrono::duration_cast<std::chrono::microseconds>(
-            give_up - std::chrono::steady_clock::now());
-        if (left.count() <= 0) {
-            wakes.frame.Cancel();
-            break;
-        }
-        wakes.frame.Wait(key, left.count());
-    }
-    const std::uint32_t latest = static_cast<std::uint32_t>(retro_atomic_load_seq_cst_int(&shared->frame_latest));
-    const std::uint32_t newest = latest == 0 ? FRAME_SLOT_NONE : latest & FRAME_SLOT_MASK;
-    const std::uint32_t held = static_cast<std::uint32_t>(retro_atomic_load_seq_cst_int(&shared->frame_held));
-    const std::uint32_t busy = static_cast<std::uint32_t>(retro_atomic_load_seq_cst_int(&shared->frames_busy));
-    // One the frontend is not drawing from if there is one, else one drawn over
-    std::uint32_t image = 0;
-    while (image < FRAME_IMAGES && (image == newest || image == held || (busy & (1u << image)) != 0)) {
-        ++image;
-    }
-    if (image == FRAME_IMAGES) {
-        image = 0;
-        while (image == newest || image == held) {
-            ++image;
-        }
-    }
-    (void)retro_atomic_exchange_int(&image_in_flight[image], 1);
-    return image;
+std::uint32_t AcquireImage(int &generation) {
+  // Never waits (frame_slots.h): an image free, else one whose frame the GPU is
+  // still drawing, taken over for this one
+  return frame_images_acquire(&emulator_frame_images, &generation);
 }
 
-void PushImage(std::uint32_t image, std::uint32_t width, std::uint32_t height) {
-    if (!shared || image >= FRAME_IMAGES) {
-        return;
-    }
-    shared->frame_size[image].width = width;
-    shared->frame_size[image].height = height;
-    const std::uint32_t latest = static_cast<std::uint32_t>(retro_atomic_load_seq_cst_int(&shared->frame_latest));
-    (void)retro_atomic_exchange_int(&shared->frame_latest, (((latest >> FRAME_SLOT_BITS) + 1) << FRAME_SLOT_BITS) | image);
-    (void)retro_atomic_exchange_int(&image_in_flight[image], 0);
-    // An image is free again for a frame that waits for one
-    wakes.frame.Notify();
-    (void)retro_atomic_exchange_int(&frame_seen, 1);
+void PushImage(std::uint32_t image, int generation, std::uint32_t width,
+               std::uint32_t height) {
+  if (!shared || image >= FRAME_IMAGES ||
+      !frame_images_publish(&emulator_frame_images, image, generation)) {
+    // A newer frame took its image over: that one is published once it is done
+    return;
+  }
+  shared->frame_size[image].width = width;
+  shared->frame_size[image].height = height;
+  frame_images_published(&emulator_frame_images, image);
+  (void)retro_atomic_exchange_int(&frame_seen, 1);
 }
 
 void ApplyCoreOptions() {

@@ -1080,9 +1080,9 @@ void Presenter::Present(Frame* frame, bool is_reusing_frame, bool is_game_frame)
         // The frame is the image: published once the GPU has drawn it.
         const vk::Extent2D shown = swapchain.GetExtent();
         scheduler.DeferPriorityOperation(
-            [image = swapchain.GetImageIndex(), width = shown.width, height = shown.height]() {
-                Libretro::PushImage(image, width, height);
-            });
+            [image = swapchain.GetImageIndex(), generation = swapchain.GetImageGeneration(),
+             width = shown.width,
+             height = shown.height]() { Libretro::PushImage(image, generation, width, height); });
     }
     if (frame_readback && frame_slot.buffer) {
         // In the shared memory already: published once the GPU has written it
