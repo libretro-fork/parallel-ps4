@@ -1992,6 +1992,11 @@ uint32_t ovl_get_id(const char* str) {
     return hash_str(str, NULL, id_seed());
 }
 
+/* ImGui's GetID(int) */
+uint32_t ovl_get_id_int(int value) {
+    return hash_data(&value, sizeof(value), id_seed());
+}
+
 void ovl_push_id_str(const char* str) {
     if (g.id_count < MAX_STACK)
         g.ids[g.id_count] = hash_str(str, NULL, id_seed()), g.id_count++;
@@ -2226,6 +2231,25 @@ static int button_behavior(uint32_t id, int* hovered, int* held) {
     return pressed;
 }
 
+/* ImGui's internals, for widgets of the overlays' own */
+void ovl_item_size(ovl_vec2_t size, float text_baseline_y) {
+    if (g.current)
+        item_size(size, text_baseline_y);
+}
+
+int ovl_item_add(uint32_t id, ovl_vec2_t min, ovl_vec2_t max) {
+    return item_add(id, min, max);
+}
+
+int ovl_button_behavior(uint32_t id, int* hovered, int* held) {
+    *hovered = *held = 0;
+    return g.current ? button_behavior(id, hovered, held) : 0;
+}
+
+void ovl_render_nav_cursor(ovl_vec2_t min, ovl_vec2_t max, uint32_t id) {
+    render_nav_cursor(min, max, id, -1.0f);
+}
+
 int ovl_is_item_hovered(void) {
     return g.last_hovered;
 }
@@ -2320,6 +2344,12 @@ static void render_text_clipped(ovl_vec2_t min, ovl_vec2_t max, const char* text
     render_text(pos, text, end, 0.0f, col);
     if (need_clip)
         ovl_pop_clip(&w->dl);
+}
+
+/* ImGui's RenderText: at @pos in the current font and size, the style's text colour */
+void ovl_render_text(ovl_vec2_t pos, const char* text, const char* end) {
+    if (text && (end ? end != text : text[0] != '\0'))
+        render_text(pos, text, end, 0.0f, ovl_color_u32(OVL_COLOR_TEXT, 1.0f));
 }
 
 /* As ImGui's ItemAdd for an item without an id: one wholly outside the window's clip rectangle

@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include <fmt/chrono.h>
-#include <imgui.h>
 #include "common/enum_names.h"
 #include "common/io_file.h"
 
@@ -12,21 +11,12 @@
 #include "core/file_format/psf.h"
 #include "core/file_sys/fs.h"
 #include "core/libraries/save_data/save_instance.h"
-#include "imgui/imgui_std.h"
 #include "savedatadialog_ui.h"
 
-using namespace ImGui;
 using namespace Libraries::CommonDialog;
 using Common::ElfInfo;
 
 constexpr u32 OrbisSaveDataBlockSize = 32768; // 32 KiB
-
-constexpr auto SAVE_ICON_SIZE = ImVec2{152.0f, 85.0f};
-constexpr auto SAVE_ICON_PADDING = ImVec2{8.0f, 2.0f};
-
-static constexpr ImVec2 BUTTON_SIZE{100.0f, 30.0f};
-constexpr auto FOOTER_HEIGHT = BUTTON_SIZE.y + 15.0f;
-static constexpr float PROGRESS_BAR_WIDTH{0.8f};
 
 static ::Core::FileSys::MntPoints* g_mnt =
     Common::Singleton<::Core::FileSys::MntPoints>::Instance();
@@ -43,6 +33,13 @@ static std::string SpaceSizeToString(size_t size) {
         size_str = fmt::format("{} B", size);
     }
     return size_str;
+}
+
+// A save's icon, decoded into the overlay's icon atlas from the file mapped where it lies; here,
+// on the game's thread while the dialog opens, as the rest of what it shows is read
+static int DecodeIcon(const std::filesystem::path& path) {
+    const auto mapped = Common::FS::FileView::Map(path);
+    return mapped ? ovl_tex_decode_icon(mapped->data(), mapped->size()) : 0;
 }
 
 namespace Libraries::SaveData::Dialog {
@@ -106,9 +103,9 @@ SaveDialogState::SaveDialogState(const OrbisSaveDataDialogParam& param) {
             std::string size_str = SpaceSizeToString(size);
 
             auto icon_path = dir_path / "sce_sys" / "icon0.png";
-            RefCountedTexture icon;
+            int icon = 0;
             if (Common::FS::Exists(icon_path)) {
-                icon = RefCountedTexture::DecodePngFile(icon_path);
+                icon = DecodeIcon(icon_path);
             }
 
             bool is_corrupted = Common::FS::Exists(dir_path / "sce_sys" / "corrupted");
@@ -131,16 +128,17 @@ SaveDialogState::SaveDialogState(const OrbisSaveDataDialogParam& param) {
     }
 
     if (type == DialogType::SAVE && item->newItem != nullptr) {
-        RefCountedTexture icon;
+        int icon = 0;
         std::string title{"New Save"};
 
         const auto new_item = item->newItem;
         if (new_item->iconBuf && new_item->iconSize) {
-            auto buf = (u8*)new_item->iconBuf;
-            icon = RefCountedTexture::DecodePngTexture({buf, buf + new_item->iconSize});
+            // Decoded where the game keeps it
+            icon =
+                ovl_tex_decode_icon(static_cast<const u8*>(new_item->iconBuf), new_item->iconSize);
         } else {
             if (auto bytes = g_mnt->ReadFile("/app0/sce_sys/save_data.png")) {
-                icon = RefCountedTexture::DecodePngTexture(std::move(*bytes));
+                icon = ovl_tex_decode_icon(bytes->data(), bytes->size());
             }
         }
         if (new_item->title != nullptr) {
@@ -289,10 +287,6 @@ SaveDialogState::ErrorCodeState::ErrorCodeState(const OrbisSaveDataDialogParam& 
 }
 SaveDialogState::ProgressBarState::ProgressBarState(const SaveDialogState& state,
                                                     const OrbisSaveDataDialogParam& param) {
-    static auto fw_ver = ElfInfo::Instance().FirmwareVer();
-
-    this->progress = 0;
-
     auto& bar = *param.progressBarParam;
 
     if (bar.msg != nullptr) {
@@ -322,532 +316,141 @@ SaveDialogState::ProgressBarState::ProgressBarState(const SaveDialogState& state
     }
 }
 
-SaveDialogUi::SaveDialogUi(SaveDialogState* state, Status* status, SaveDialogResult* result)
-    : state(state), status(status), result(result) {
-    if (status && *status == Status::RUNNING) {
-        first_render = true;
-        AddLayer(this);
-    }
-}
-
-SaveDialogUi::~SaveDialogUi() {
-    Finish(ButtonId::INVALID);
-}
-
-SaveDialogUi::SaveDialogUi(SaveDialogUi&& other) noexcept
-    : Layer(other), state(other.state), status(other.status), result(other.result) {
-    std::scoped_lock lock(draw_mutex, other.draw_mutex);
-    other.state = nullptr;
-    other.status = nullptr;
-    other.result = nullptr;
-    if (status && *status == Status::RUNNING) {
-        first_render = true;
-        AddLayer(this);
-    }
-}
-
-SaveDialogUi& SaveDialogUi::operator=(SaveDialogUi&& other) noexcept {
-    std::scoped_lock lock(draw_mutex, other.draw_mutex);
-    using std::swap;
-    state = other.state;
-    other.state = nullptr;
-    status = other.status;
-    other.status = nullptr;
-    result = other.result;
-    other.result = nullptr;
-    if (status && *status == Status::RUNNING) {
-        first_render = true;
-        AddLayer(this);
-    }
-    return *this;
-}
-
-void SaveDialogUi::Finish(ButtonId buttonId, Result r) {
-    std::unique_lock lock(draw_mutex);
-    if (result) {
-        result->mode = this->state->mode;
-        result->result = r;
-        result->button_id = buttonId;
-        result->user_data = this->state->user_data;
-        if (state && state->mode != SaveDataDialogMode::LIST && !state->save_list.empty()) {
-            result->dir_name = state->save_list.front().dir_name;
+int SaveDialogState::FocusIndex() const {
+    const int count = (new_item.has_value() ? 1 : 0) + static_cast<int>(save_list.size());
+    if (const auto* pos = std::get_if<FocusPos>(&focus_pos)) {
+        if (*pos == FocusPos::LISTHEAD || *pos == FocusPos::DATAHEAD) {
+            return 0;
         }
-    }
-    if (status) {
-        *status = Status::FINISHED;
-    }
-    RemoveLayer(this);
-}
-
-void SaveDialogUi::Draw() {
-    std::unique_lock lock{draw_mutex};
-
-    if (status == nullptr || *status != Status::RUNNING || state == nullptr) {
-        return;
-    }
-
-    const auto& ctx = *GetCurrentContext();
-    const auto& io = ctx.IO;
-
-    ImVec2 window_size;
-
-    if (state->GetMode() == SaveDataDialogMode::LIST) {
-        window_size = ImVec2{
-            std::min(io.DisplaySize.x - 200.0f, 1100.0f),
-            std::min(io.DisplaySize.y - 100.0f, 700.0f),
-        };
-    } else {
-        window_size = ImVec2{
-            std::min(io.DisplaySize.x, 600.0f),
-            std::min(io.DisplaySize.y, 300.0f),
-        };
-    }
-
-    CentralizeNextWindow();
-    SetNextWindowSize(window_size);
-    SetNextWindowCollapsed(false);
-    if (first_render || !io.NavActive) {
-        SetNextWindowFocus();
-    }
-    if (Begin("Save Data Dialog##SaveDataDialog", nullptr,
-              ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoSavedSettings)) {
-        DrawPrettyBackground();
-
-        Separator();
-        // Draw title bigger
-        SetWindowFontScale(1.7f);
-        switch (state->type) {
-        case DialogType::SAVE:
-            TextUnformatted("Save");
-            break;
-        case DialogType::LOAD:
-            TextUnformatted("Load");
-            break;
-        case DialogType::DELETE:
-            TextUnformatted("Delete");
-            break;
+        if (*pos == FocusPos::LISTTAIL || *pos == FocusPos::DATATAIL) {
+            return std::max(count - 1, 0);
         }
-        SetWindowFontScale(1.0f);
-        Separator();
-
-        BeginGroup();
-        switch (state->GetMode()) {
-        case SaveDataDialogMode::LIST:
-            DrawList();
-            break;
-        case SaveDataDialogMode::USER_MSG:
-            DrawUser();
-            break;
-        case SaveDataDialogMode::SYSTEM_MSG:
-            DrawSystemMessage();
-            break;
-        case SaveDataDialogMode::ERROR_CODE:
-            DrawErrorCode();
-            break;
-        case SaveDataDialogMode::PROGRESS_BAR:
-            DrawProgressBar();
-            break;
-        default:
-            TextColored(ImVec4(1.0f, 0.0f, 0.0f, 1.0f), "!!!Unknown dialog mode!!!");
+        // By date, as the ImGui dialog chose it
+        int idx = 0;
+        int max_idx = 0;
+        bool is_min = *pos == FocusPos::DATAOLDEST;
+        std::chrono::system_clock::time_point max_write{};
+        if (new_item.has_value()) {
+            idx++;
         }
-        EndGroup();
-    }
-    End();
-
-    first_render = false;
-    if (*status == Status::FINISHED) {
-        if (state) {
-            *state = SaveDialogState{};
-        }
-        state = nullptr;
-        status = nullptr;
-        result = nullptr;
-    }
-}
-
-void SaveDialogUi::DrawItem(int _id, const SaveDialogState::Item& item, bool clickable) {
-    constexpr auto text_spacing = 0.95f;
-
-    auto& ctx = *GetCurrentContext();
-    auto& window = *ctx.CurrentWindow;
-
-    auto content_region_avail = GetContentRegionAvail();
-    const auto outer_pos = window.DC.CursorPos;
-    const auto pos = outer_pos + SAVE_ICON_PADDING;
-
-    const ImVec2 size = {content_region_avail.x - SAVE_ICON_PADDING.x,
-                         SAVE_ICON_SIZE.y + SAVE_ICON_PADDING.y};
-    const ImRect bb{outer_pos, outer_pos + size + SAVE_ICON_PADDING};
-
-    const ImGuiID id = GetID(_id);
-
-    ItemSize(size + ImVec2{0.0f, SAVE_ICON_PADDING.y * 2.0f});
-    if (!ItemAdd(bb, id)) {
-        return;
-    }
-
-    window.DrawList->AddRectFilled(bb.Min + SAVE_ICON_PADDING, bb.Max - SAVE_ICON_PADDING,
-                                   GetColorU32(ImVec4{0.3f}));
-
-    bool hovered = false;
-    if (clickable) {
-        bool held;
-        bool pressed = ButtonBehavior(bb, id, &hovered, &held);
-        if (pressed) {
-            result->dir_name = item.dir_name;
-            result->param = item.pfo;
-            Finish(ButtonId::INVALID);
-        }
-        RenderNavHighlight(bb, id);
-    }
-
-    if (item.icon) {
-        auto texture = item.icon.GetTexture();
-        window.DrawList->AddImage(texture.im_id, pos, pos + SAVE_ICON_SIZE);
-    } else {
-        // placeholder
-        window.DrawList->AddRectFilled(pos, pos + SAVE_ICON_SIZE, GetColorU32(ImVec4{0.7f}));
-    }
-
-    auto pos_x = SAVE_ICON_SIZE.x + 5.0f;
-    auto pos_y = 2.0f;
-
-    if (!item.title.empty()) {
-        const char* begin = &item.title.front();
-        const char* end = &item.title.back() + 1;
-        SetWindowFontScale(1.5f);
-        RenderText(pos + ImVec2{pos_x, pos_y}, begin, end, false);
-        pos_y += ctx.FontSize * text_spacing;
-    }
-    SetWindowFontScale(1.1f);
-
-    if (item.is_corrupted) {
-        pos_y -= ctx.FontSize * text_spacing * 0.3f;
-        const auto bright = (int)std::abs(std::sin(ctx.Time) * 0.15f * 255.0f);
-        PushStyleColor(ImGuiCol_Text, IM_COL32(bright + 216, bright, bright, 0xFF));
-        RenderText(pos + ImVec2{pos_x, pos_y}, "Corrupted", nullptr, false);
-        PopStyleColor();
-        pos_y += ctx.FontSize * text_spacing * 0.8f;
-    }
-
-    if (state->style == ItemStyle::TITLE_SUBTITLE_DATESIZE) {
-        if (!item.subtitle.empty()) {
-            const char* begin = &item.subtitle.front();
-            const char* end = &item.subtitle.back() + 1;
-            RenderText(pos + ImVec2{pos_x, pos_y}, begin, end, false);
-        }
-        pos_y += ctx.FontSize * text_spacing;
-    }
-
-    {
-        float width = 0.0f;
-        if (!item.date.empty()) {
-            const char* d_begin = &item.date.front();
-            const char* d_end = &item.date.back() + 1;
-            width = CalcTextSize(d_begin, d_end).x + 15.0f;
-            RenderText(pos + ImVec2{pos_x, pos_y}, d_begin, d_end, false);
-        }
-        if (!item.size.empty()) {
-            const char* s_begin = &item.size.front();
-            const char* s_end = &item.size.back() + 1;
-            RenderText(pos + ImVec2{pos_x + width, pos_y}, s_begin, s_end, false);
-        }
-        pos_y += ctx.FontSize * text_spacing;
-    }
-
-    if (state->style == ItemStyle::TITLE_DATASIZE_SUBTITLE && !item.subtitle.empty()) {
-        const char* begin = &item.subtitle.front();
-        const char* end = &item.subtitle.back() + 1;
-        RenderText(pos + ImVec2{pos_x, pos_y}, begin, end, false);
-    }
-
-    SetWindowFontScale(1.0f);
-
-    if (hovered) {
-        window.DrawList->AddRect(bb.Min, bb.Max, GetColorU32(ImGuiCol_Border), 0.0f, 0, 2.0f);
-    }
-}
-
-void SaveDialogUi::DrawList() {
-    auto availableSize = GetContentRegionAvail();
-
-    constexpr auto footerHeight = 30.0f;
-    availableSize.y -= footerHeight + 1.0f;
-
-    BeginChild("##ScrollingRegion", availableSize, ImGuiChildFlags_NavFlattened);
-    int i = 0;
-    if (state->new_item.has_value()) {
-        DrawItem(i++, state->new_item.value());
-    }
-    for (const auto& item : state->save_list) {
-        DrawItem(i++, item);
-    }
-    if (first_render) { // Make the initial focus
-        if (std::holds_alternative<FocusPos>(state->focus_pos)) {
-            auto pos = std::get<FocusPos>(state->focus_pos);
-            if (pos == FocusPos::LISTHEAD || pos == FocusPos::DATAHEAD) {
-                SetItemCurrentNavFocus(GetID(0));
-            } else if (pos == FocusPos::LISTTAIL || pos == FocusPos::DATATAIL) {
-                SetItemCurrentNavFocus(GetID(std::max(i - 1, 0)));
-            } else { // Date
-                int idx = 0;
-                int max_idx = 0;
-                bool is_min = pos == FocusPos::DATAOLDEST;
-                std::chrono::system_clock::time_point max_write{};
-                if (state->new_item.has_value()) {
-                    idx++;
-                }
-                for (const auto& item : state->save_list) {
-                    if (item.last_write > max_write ^ is_min) {
-                        max_write = item.last_write;
-                        max_idx = idx;
-                    }
-                    idx++;
-                }
-                SetItemCurrentNavFocus(GetID(max_idx));
+        for (const auto& item : save_list) {
+            if ((item.last_write > max_write) ^ is_min) {
+                max_write = item.last_write;
+                max_idx = idx;
             }
-        } else if (std::holds_alternative<std::string>(state->focus_pos)) {
-            auto dir_name = std::get<std::string>(state->focus_pos);
-            if (dir_name.empty()) {
-                SetItemCurrentNavFocus(GetID(0));
-            } else {
-                int idx = 0;
-                if (state->new_item.has_value()) {
-                    if (dir_name == state->new_item->dir_name) {
-                        SetItemCurrentNavFocus(GetID(idx));
-                    }
-                    idx++;
-                }
-                for (const auto& item : state->save_list) {
-                    if (item.dir_name == dir_name) {
-                        SetItemCurrentNavFocus(GetID(idx));
-                        break;
-                    }
-                    idx++;
-                }
+            idx++;
+        }
+        return max_idx;
+    }
+    if (const auto* dir_name = std::get_if<std::string>(&focus_pos)) {
+        if (dir_name->empty()) {
+            return 0;
+        }
+        int idx = 0;
+        int found = -1;
+        if (new_item.has_value()) {
+            if (*dir_name == new_item->dir_name) {
+                found = idx;
             }
+            idx++;
         }
+        for (const auto& item : save_list) {
+            if (item.dir_name == *dir_name) {
+                found = idx;
+                break;
+            }
+            idx++;
+        }
+        return found;
     }
-    EndChild();
-
-    Separator();
-    if (state->enable_back.value_or(true)) {
-        constexpr auto back = "Back";
-        constexpr float pad = 7.0f;
-        const auto txt_size = CalcTextSize(back);
-        const auto button_size = ImVec2{
-            std::max(txt_size.x, 100.0f) + pad * 2.0f,
-            footerHeight - pad,
-        };
-        SetCursorPosX(GetContentRegionAvail().x - button_size.x);
-        if (Button(back, button_size)) {
-            result->dir_name.clear();
-            Finish(ButtonId::INVALID, Result::USER_CANCELED);
-        }
-        if (IsKeyPressed(ImGuiKey_GamepadFaceRight)) {
-            SetItemCurrentNavFocus();
-        }
-    }
+    return -1;
 }
 
-void SaveDialogUi::DrawUser() {
-    const auto& user_state = state->GetState<SaveDialogState::UserState>();
-    const auto btn_type = user_state.type;
-
-    const auto ws = GetWindowSize();
-
-    if (!state->save_list.empty()) {
-        DrawItem(0, state->save_list.front(), false);
-    } else if (state->new_item) {
-        DrawItem(0, *state->new_item, false);
-    }
-
-    auto has_btn = btn_type != ButtonType::NONE;
-    ImVec2 btn_space;
-    if (has_btn) {
-        btn_space = ImVec2{0.0f, FOOTER_HEIGHT};
-    }
-
-    const auto& msg = user_state.msg;
-    if (!msg.empty()) {
-        const char* begin = &msg.front();
-        const char* end = &msg.back() + 1;
-        if (user_state.msg_type == UserMessageType::ERROR) {
-            PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.0f, 0.0f, 1.0f));
-            // Maybe make the text bold?
-        }
-        DrawCenteredText(begin, end, GetContentRegionAvail() - btn_space);
-        if (user_state.msg_type == UserMessageType::ERROR) {
-            PopStyleColor();
-        }
-    }
-
-    if (has_btn) {
-        int count = 1;
-        if (btn_type == ButtonType::YESNO || btn_type == ButtonType::OKCANCEL) {
-            ++count;
-        }
-
-        SetCursorPos({
-            ws.x / 2.0f - BUTTON_SIZE.x / 2.0f * static_cast<float>(count),
-            ws.y - FOOTER_HEIGHT + 5.0f,
+ovl_save_dialog_param_t SaveDialogState::MakeParam() {
+    const auto add = [this](const Item& item) {
+        view.push_back(ovl_save_item_t{
+            .title = item.title.c_str(),
+            .subtitle = item.subtitle.c_str(),
+            .date = item.date.c_str(),
+            .size = item.size.c_str(),
+            .icon = item.icon,
+            .corrupted = item.is_corrupted ? 1 : 0,
         });
+    };
+    view.clear();
+    view.reserve(save_list.size() + 1);
+    if (new_item.has_value()) {
+        add(*new_item);
+    }
+    for (const auto& item : save_list) {
+        add(item);
+    }
 
-        BeginGroup();
-        if (btn_type == ButtonType::YESNO) {
-            if (Button("Yes", BUTTON_SIZE)) {
-                Finish(ButtonId::YES);
-            }
-            SameLine();
-            if (Button("No", BUTTON_SIZE)) {
-                if (ElfInfo::Instance().FirmwareVer() < ElfInfo::FW_450) {
-                    Finish(ButtonId::INVALID, Result::USER_CANCELED);
-                } else {
-                    Finish(ButtonId::NO);
-                }
-            }
-            if (first_render || IsKeyPressed(ImGuiKey_GamepadFaceRight)) {
-                SetItemCurrentNavFocus();
-            }
-        } else {
-            if (Button("OK", BUTTON_SIZE)) {
-                if (btn_type == ButtonType::OK &&
-                    ElfInfo::Instance().FirmwareVer() < ElfInfo::FW_450) {
-                    Finish(ButtonId::INVALID, Result::USER_CANCELED);
-                } else {
-                    Finish(ButtonId::OK);
-                }
-            }
-            if (first_render) {
-                SetItemCurrentNavFocus();
-            }
-            if (btn_type == ButtonType::OKCANCEL) {
-                SameLine();
-                if (Button("Cancel", BUTTON_SIZE)) {
-                    Finish(ButtonId::INVALID, Result::USER_CANCELED);
-                }
-                if (IsKeyPressed(ImGuiKey_GamepadFaceRight)) {
-                    SetItemCurrentNavFocus();
-                }
-            }
+    ovl_save_dialog_param_t p{};
+    p.mode = static_cast<int>(mode);
+    p.type = static_cast<int>(type);
+    p.style = static_cast<int>(style);
+    p.enable_back = enable_back.has_value() ? (*enable_back ? 1 : 0) : -1;
+    p.items = view.data();
+    p.item_count = static_cast<int>(view.size());
+    p.has_new_item = new_item.has_value() ? 1 : 0;
+    p.focus = FocusIndex();
+    p.old_firmware = ElfInfo::Instance().FirmwareVer() < ElfInfo::FW_450 ? 1 : 0;
+    if (const auto* user = std::get_if<UserState>(&state)) {
+        p.msg = user->msg.c_str();
+        p.user_buttons = static_cast<int>(user->type);
+        p.user_error = user->msg_type == UserMessageType::ERROR ? 1 : 0;
+    } else if (const auto* sys = std::get_if<SystemState>(&state)) {
+        p.msg = sys->msg.c_str();
+        p.hide_ok = sys->hide_ok;
+        p.show_no = sys->show_no;
+        p.show_cancel = sys->show_cancel;
+        p.return_cancel = sys->return_cancel;
+    } else if (const auto* err = std::get_if<ErrorCodeState>(&state)) {
+        p.msg = err->error_msg.c_str();
+    } else if (const auto* bar = std::get_if<ProgressBarState>(&state)) {
+        p.msg = bar->msg.c_str();
+    }
+    return p;
+}
+
+void SaveDialogState::MakeResult(SaveDialogResult& out, int button, int result, int item) const {
+    out.mode = mode;
+    out.result = static_cast<Result>(result);
+    out.button_id = static_cast<ButtonId>(button);
+    out.user_data = user_data;
+    out.dir_name.clear();
+    out.param = PSF{};
+    const int first_save = new_item.has_value() ? 1 : 0;
+    if (item >= 0) {
+        // A save chosen from the list
+        const Item* chosen = nullptr;
+        if (item < first_save) {
+            chosen = &*new_item;
+        } else if (static_cast<size_t>(item - first_save) < save_list.size()) {
+            chosen = &save_list[item - first_save];
         }
-        EndGroup();
+        if (chosen != nullptr) {
+            out.dir_name = chosen->dir_name;
+            out.param = chosen->pfo;
+        }
+    } else if (mode != SaveDataDialogMode::LIST && !save_list.empty()) {
+        // A message is about its first save
+        out.dir_name = save_list.front().dir_name;
     }
 }
 
-void SaveDialogUi::DrawSystemMessage() {
-    const auto& sys_state = state->GetState<SaveDialogState::SystemState>();
-
-    if (!state->save_list.empty()) {
-        DrawItem(0, state->save_list.front(), false);
-    } else if (state->new_item) {
-        DrawItem(0, *state->new_item, false);
-    }
-
-    const auto ws = GetWindowSize();
-    const auto& msg = sys_state.msg;
-    if (!msg.empty()) {
-        const char* begin = &msg.front();
-        const char* end = &msg.back() + 1;
-        DrawCenteredText(begin, end, GetContentRegionAvail() - ImVec2{0.0f, FOOTER_HEIGHT});
-    }
-    int count = 1;
-    if (sys_state.hide_ok) {
-        --count;
-    }
-    if (sys_state.show_no || sys_state.show_cancel) {
-        ++count;
-    }
-
-    SetCursorPos({
-        ws.x / 2.0f - BUTTON_SIZE.x / 2.0f * static_cast<float>(count),
-        ws.y - FOOTER_HEIGHT + 5.0f,
-    });
-    BeginGroup();
-    if (Button(sys_state.show_no ? "Yes" : "OK", BUTTON_SIZE)) {
-        if (sys_state.return_cancel && ElfInfo::Instance().FirmwareVer() < ElfInfo::FW_450) {
-            Finish(ButtonId::INVALID, Result::USER_CANCELED);
-        } else {
-            Finish(ButtonId::YES);
+void SaveDialogState::ReleaseIcons() {
+    for (auto& item : save_list) {
+        if (item.icon != 0) {
+            ovl_tex_release(item.icon);
+            item.icon = 0;
         }
     }
-    SameLine();
-    if (sys_state.show_no) {
-        if (Button("No", BUTTON_SIZE)) {
-            if (ElfInfo::Instance().FirmwareVer() < ElfInfo::FW_450) {
-                Finish(ButtonId::INVALID, Result::USER_CANCELED);
-            } else {
-                Finish(ButtonId::NO);
-            }
-        }
-    } else if (sys_state.show_cancel) {
-        if (Button("Cancel", BUTTON_SIZE)) {
-            Finish(ButtonId::INVALID, Result::USER_CANCELED);
-        }
-    }
-    if (first_render || IsKeyPressed(ImGuiKey_GamepadFaceRight)) {
-        SetItemCurrentNavFocus();
-    }
-    EndGroup();
-}
-
-void SaveDialogUi::DrawErrorCode() {
-    const auto& err_state = state->GetState<SaveDialogState::ErrorCodeState>();
-
-    if (!state->save_list.empty()) {
-        DrawItem(0, state->save_list.front(), false);
-    } else if (state->new_item) {
-        DrawItem(0, *state->new_item, false);
-    }
-
-    const auto ws = GetWindowSize();
-    const auto& msg = err_state.error_msg;
-    if (!msg.empty()) {
-        const char* begin = &msg.front();
-        const char* end = &msg.back() + 1;
-        DrawCenteredText(begin, end, GetContentRegionAvail() - ImVec2{0.0f, FOOTER_HEIGHT});
-    }
-
-    SetCursorPos({
-        ws.x / 2.0f - BUTTON_SIZE.x / 2.0f,
-        ws.y - FOOTER_HEIGHT + 5.0f,
-    });
-    if (Button("OK", BUTTON_SIZE)) {
-        if (ElfInfo::Instance().FirmwareVer() < ElfInfo::FW_450) {
-            Finish(ButtonId::INVALID, Result::USER_CANCELED);
-        } else {
-            Finish(ButtonId::OK);
-        }
-    }
-    if (first_render) {
-        SetItemCurrentNavFocus();
+    if (new_item.has_value() && new_item->icon != 0) {
+        ovl_tex_release(new_item->icon);
+        new_item->icon = 0;
     }
 }
 
-void SaveDialogUi::DrawProgressBar() {
-    const auto& bar_state = state->GetState<SaveDialogState::ProgressBarState>();
-
-    const auto ws = GetWindowSize();
-
-    if (!state->save_list.empty()) {
-        DrawItem(0, state->save_list.front(), false);
-    } else if (state->new_item) {
-        DrawItem(0, *state->new_item, false);
-    }
-
-    const auto& msg = bar_state.msg;
-    if (!msg.empty()) {
-        const char* begin = &msg.front();
-        const char* end = &msg.back() + 1;
-        DrawCenteredText(begin, end, GetContentRegionAvail() - ImVec2{0.0f, FOOTER_HEIGHT});
-    }
-
-    SetCursorPos({
-        ws.x * ((1 - PROGRESS_BAR_WIDTH) / 2.0f),
-        ws.y - FOOTER_HEIGHT + 5.0f,
-    });
-
-    ProgressBar(static_cast<float>(bar_state.progress) / 100.0f,
-                {PROGRESS_BAR_WIDTH * ws.x, BUTTON_SIZE.y});
-}
 }; // namespace Libraries::SaveData::Dialog

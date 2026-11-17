@@ -16,37 +16,48 @@ using CommonDialog::Error;
 using CommonDialog::Result;
 using CommonDialog::Status;
 
-static auto g_status = Status::NONE;
-static SaveDialogState g_state{};
+// The dialog is drawn by the overlay (video_core/overlay/ovl_savedialog.c), which keeps its
+// status and result, and is lent what it shows from one of these, the one it says to build in
+// next; the overlay never draws from that one, so building there waits for nothing.
+static SaveDialogState g_states[3];
+static int g_opened = -1; // the one the dialog opened last was built in
 static SaveDialogResult g_result{};
-static SaveDialogUi g_save_dialog_ui;
+
+static Status GetStatus() {
+    return static_cast<Status>(ovl_save_dialog_status());
+}
 
 Error PS4_SYSV_ABI sceSaveDataDialogClose() {
     LOG_DEBUG(Lib_SaveDataDialog, "called");
-    if (g_status != Status::RUNNING) {
+    if (GetStatus() != Status::RUNNING) {
         return Error::NOT_RUNNING;
     }
-    g_save_dialog_ui.Finish(ButtonId::INVALID);
-    g_save_dialog_ui = SaveDialogUi{};
+    ovl_save_dialog_close(OVL_SAVE_BUTTON_INVALID, OVL_SAVE_RESULT_OK);
     return Error::OK;
 }
 
 Error PS4_SYSV_ABI sceSaveDataDialogGetResult(OrbisSaveDataDialogResult* result) {
     LOG_DEBUG(Lib_SaveDataDialog, "called");
-    if (g_status != Status::FINISHED) {
+    if (GetStatus() != Status::FINISHED) {
         return Error::NOT_FINISHED;
     }
     if (result == nullptr) {
         return Error::ARG_NULL;
+    }
+    if (g_opened >= 0) {
+        int button, res, item;
+        ovl_save_dialog_result(&button, &res, &item);
+        g_states[g_opened].MakeResult(g_result, button, res, item);
     }
     g_result.CopyTo(*result);
     return Error::OK;
 }
 
 Status PS4_SYSV_ABI sceSaveDataDialogGetStatus() {
+    const auto status = GetStatus();
     LOG_TRACE(Lib_SaveDataDialog, "called status={}",
-              enum_name(&enum_names_Libraries_CommonDialog_Status, static_cast<s64>(g_status)));
-    return g_status;
+              enum_name(&enum_names_Libraries_CommonDialog_Status, static_cast<s64>(status)));
+    return status;
 }
 
 Error PS4_SYSV_ABI sceSaveDataDialogInitialize() {
@@ -54,13 +65,13 @@ Error PS4_SYSV_ABI sceSaveDataDialogInitialize() {
     if (!CommonDialog::g_isInitialized) {
         return Error::NOT_SYSTEM_INITIALIZED;
     }
-    if (g_status != Status::NONE) {
+    if (GetStatus() != Status::NONE) {
         return Error::ALREADY_INITIALIZED;
     }
     if (CommonDialog::g_isUsed) {
         return Error::BUSY;
     }
-    g_status = Status::INITIALIZED;
+    ovl_save_dialog_set_status(static_cast<int>(Status::INITIALIZED));
     CommonDialog::g_isUsed = true;
 
     return Error::OK;
@@ -71,7 +82,8 @@ s32 PS4_SYSV_ABI sceSaveDataDialogIsReadyToDisplay() {
 }
 
 Error PS4_SYSV_ABI sceSaveDataDialogOpen(const OrbisSaveDataDialogParam* param) {
-    if (g_status != Status::INITIALIZED && g_status != Status::FINISHED) {
+    const auto status = GetStatus();
+    if (status != Status::INITIALIZED && status != Status::FINISHED) {
         LOG_INFO(Lib_SaveDataDialog, "called without initialize");
         return Error::INVALID_STATE;
     }
@@ -85,62 +97,73 @@ Error PS4_SYSV_ABI sceSaveDataDialogOpen(const OrbisSaveDataDialogParam* param) 
     ASSERT(param->size == sizeof(OrbisSaveDataDialogParam));
     ASSERT(param->baseParam.size == sizeof(CommonDialog::BaseParam));
     g_result = {};
-    g_state = SaveDialogState{*param};
-    g_status = Status::RUNNING;
-    g_save_dialog_ui = SaveDialogUi(&g_state, &g_status, &g_result);
+    // The last dialog's icons go (it is finished, so no longer drawn), then what was built where
+    // this one is built
+    if (g_opened >= 0) {
+        g_states[g_opened].ReleaseIcons();
+    }
+    const int back = ovl_save_dialog_back();
+    g_states[back].ReleaseIcons();
+    g_states[back] = SaveDialogState{*param};
+    const auto open = g_states[back].MakeParam();
+    g_opened = ovl_save_dialog_open(&open);
     return Error::OK;
 }
 
 Error PS4_SYSV_ABI sceSaveDataDialogProgressBarInc(OrbisSaveDataDialogProgressBarTarget target,
                                                    u32 delta) {
     LOG_DEBUG(Lib_SaveDataDialog, "called");
-    if (g_status != Status::RUNNING) {
+    if (GetStatus() != Status::RUNNING) {
         return Error::NOT_RUNNING;
     }
-    if (g_state.GetMode() != SaveDataDialogMode::PROGRESS_BAR) {
+    if (g_states[g_opened].GetMode() != SaveDataDialogMode::PROGRESS_BAR) {
         return Error::NOT_SUPPORTED;
     }
     if (target != OrbisSaveDataDialogProgressBarTarget::DEFAULT) {
         return Error::PARAM_INVALID;
     }
-    g_state.GetState<SaveDialogState::ProgressBarState>().progress += delta;
+    ovl_save_dialog_add_progress(delta);
     return Error::OK;
 }
 
 Error PS4_SYSV_ABI sceSaveDataDialogProgressBarSetValue(OrbisSaveDataDialogProgressBarTarget target,
                                                         u32 rate) {
     LOG_DEBUG(Lib_SaveDataDialog, "called");
-    if (g_status != Status::RUNNING) {
+    if (GetStatus() != Status::RUNNING) {
         return Error::NOT_RUNNING;
     }
-    if (g_state.GetMode() != SaveDataDialogMode::PROGRESS_BAR) {
+    if (g_states[g_opened].GetMode() != SaveDataDialogMode::PROGRESS_BAR) {
         return Error::NOT_SUPPORTED;
     }
     if (target != OrbisSaveDataDialogProgressBarTarget::DEFAULT) {
         return Error::PARAM_INVALID;
     }
-    g_state.GetState<SaveDialogState::ProgressBarState>().progress = rate;
+    ovl_save_dialog_set_progress(rate);
     return Error::OK;
 }
 
 Error PS4_SYSV_ABI sceSaveDataDialogTerminate() {
     LOG_DEBUG(Lib_SaveDataDialog, "called");
-    if (g_status == Status::RUNNING) {
+    if (GetStatus() == Status::RUNNING) {
         sceSaveDataDialogClose();
     }
-    if (g_status == Status::NONE) {
+    if (GetStatus() == Status::NONE) {
         return Error::NOT_INITIALIZED;
     }
-    g_save_dialog_ui = SaveDialogUi{};
-    g_status = Status::NONE;
+    // Only the icons go: the overlay may still be drawing the last frame of the one it showed
+    for (auto& state : g_states) {
+        state.ReleaseIcons();
+    }
+    ovl_save_dialog_set_status(static_cast<int>(Status::NONE));
     CommonDialog::g_isUsed = false;
     return Error::OK;
 }
 
 Status PS4_SYSV_ABI sceSaveDataDialogUpdateStatus() {
+    const auto status = GetStatus();
     LOG_TRACE(Lib_SaveDataDialog, "called status={}",
-              enum_name(&enum_names_Libraries_CommonDialog_Status, static_cast<s64>(g_status)));
-    return g_status;
+              enum_name(&enum_names_Libraries_CommonDialog_Status, static_cast<s64>(status)));
+    return status;
 }
 
 void RegisterLib(Core::Loader::SymbolsResolver* sym) {

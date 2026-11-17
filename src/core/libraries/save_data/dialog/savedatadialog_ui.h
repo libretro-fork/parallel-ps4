@@ -3,16 +3,16 @@
 
 #pragma once
 
-#include <mutex>
+#include <chrono>
+#include <optional>
+#include <string>
 #include <variant>
 #include <vector>
-#include "common/event_mutex.h"
 
 #include "core/file_format/psf.h"
 #include "core/libraries/save_data/savedata.h"
 #include "core/libraries/system/commondialog.h"
-#include "imgui/imgui_layer.h"
-#include "imgui/imgui_texture.h"
+#include "video_core/overlay/ovl_layers.h"
 
 namespace Libraries::SaveData::Dialog {
 
@@ -206,9 +206,9 @@ struct SaveDialogResult {
     void CopyTo(OrbisSaveDataDialogResult& result) const;
 };
 
+/// What a dialog shows, read from the game's saves when it opens; drawn by the overlay
+/// (video_core/overlay/ovl_savedialog.c), which it lends its texts and the saves' icons.
 class SaveDialogState {
-    friend class SaveDialogUi;
-
 public:
     struct UserState {
         ButtonType type{};
@@ -234,14 +234,13 @@ public:
     };
     struct ProgressBarState {
         std::string msg{};
-        u32 progress{};
 
         ProgressBarState(const SaveDialogState& state, const OrbisSaveDataDialogParam& param);
     };
 
     struct Item {
         std::string dir_name{};
-        ImGui::RefCountedTexture icon{};
+        int icon{}; ///< the overlay's image (ovl_tex_decode_icon), 0 for none
 
         std::string title{};
         std::string subtitle{};
@@ -271,6 +270,11 @@ private:
     std::variant<UserState, SystemState, ErrorCodeState, ProgressBarState, std::monostate> state{
         std::monostate{}};
 
+    /// What the overlay draws from, lending the strings above
+    std::vector<ovl_save_item_t> view{};
+
+    [[nodiscard]] int FocusIndex() const;
+
 public:
     explicit SaveDialogState(const OrbisSaveDataDialogParam& param);
 
@@ -284,38 +288,14 @@ public:
     [[nodiscard]] T& GetState() {
         return std::get<T>(state);
     }
-};
 
-class SaveDialogUi final : public ImGui::Layer {
-    bool first_render{false};
-    SaveDialogState* state{};
-    CommonDialog::Status* status{};
-    SaveDialogResult* result{};
-
-    Common::RecursiveEventMutex draw_mutex{};
-
-public:
-    explicit SaveDialogUi(SaveDialogState* state = nullptr, CommonDialog::Status* status = nullptr,
-                          SaveDialogResult* result = nullptr);
-
-    ~SaveDialogUi() override;
-    SaveDialogUi(const SaveDialogUi& other) = delete;
-    SaveDialogUi(SaveDialogUi&& other) noexcept;
-    SaveDialogUi& operator=(SaveDialogUi& other) = delete;
-    SaveDialogUi& operator=(SaveDialogUi&& other) noexcept;
-
-    void Finish(ButtonId buttonId, CommonDialog::Result r = CommonDialog::Result::OK);
-
-    void Draw() override;
-
-private:
-    void DrawItem(int id, const SaveDialogState::Item& item, bool clickable = true);
-
-    void DrawList();
-    void DrawUser();
-    void DrawSystemMessage();
-    void DrawErrorCode();
-    void DrawProgressBar();
+    /// What the overlay is opened with, lending this state's texts and icons
+    [[nodiscard]] ovl_save_dialog_param_t MakeParam();
+    /// The result of a dialog finished with @button and @result, @item the save chosen (an
+    /// index into what MakeParam lent, -1 for none)
+    void MakeResult(SaveDialogResult& out, int button, int result, int item) const;
+    /// Lets the icons go, once the overlay no longer draws them
+    void ReleaseIcons();
 };
 
 }; // namespace Libraries::SaveData::Dialog

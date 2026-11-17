@@ -86,6 +86,8 @@ static struct {
     unsigned frame_count, frame_index;
     unsigned frame; /* frames presented */
     tex_slot_t tex[OVL_TEX_SLOTS];
+    tex_slot_t icons; /* the icon atlas */
+    int icons_sampled;
     splash_t splash;
     const ovl_draw_data_t* draw_data;
     float display_w, display_h;
@@ -346,10 +348,10 @@ static int descriptors_make(void) {
     sci.maxLod = 1000.0f;
     pool_size.type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
     /* The atlas, the slots and the splash */
-    pool_size.descriptorCount = 2 + OVL_TEX_SLOTS;
+    pool_size.descriptorCount = 3 + OVL_TEX_SLOTS;
     memset(&dpi, 0, sizeof(dpi));
     dpi.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-    dpi.maxSets = 2 + OVL_TEX_SLOTS;
+    dpi.maxSets = 3 + OVL_TEX_SLOTS;
     dpi.poolSizeCount = 1;
     dpi.pPoolSizes = &pool_size;
     memset(&binding, 0, sizeof(binding));
@@ -522,6 +524,14 @@ static int textures_make(void) {
         pixels[i] = t->staging.map;
     }
     ovl_tex_init(pixels, OVL_TEX_SLOTS);
+    if (!host_buffer_make(&vk.icons.staging, (VkDeviceSize)OVL_ICON_ATLAS_W * OVL_ICON_ATLAS_H * 4,
+                          VK_BUFFER_USAGE_TRANSFER_SRC_BIT) ||
+        !image_make(VK_FORMAT_R8G8B8A8_UNORM, OVL_ICON_ATLAS_W, OVL_ICON_ATLAS_H, 0,
+                    &vk.icons.image, &vk.icons.memory, &vk.icons.view) ||
+        !set_make(vk.icons.view, &vk.icons.set))
+        return 0;
+    vk.icons_sampled = 0;
+    ovl_tex_init_icons(vk.icons.staging.map);
     return 1;
 }
 
@@ -598,6 +608,7 @@ int ovl_vk_init(const ovl_vk_info_t* info) {
         return 1;
     memset(&vk, 0, sizeof(vk));
     ovl_msg_dialog_init();
+    ovl_save_dialog_init();
     if (!load_functions(info->get_device_proc, info->device)) {
         init_error = "the device's functions";
         return 0;
@@ -642,6 +653,7 @@ void ovl_vk_shutdown(void) {
     if (!vk.device)
         return;
     ovl_msg_dialog_shutdown();
+    ovl_save_dialog_shutdown();
     ovl_notify_reset();
     ovl_trophy_reset();
     ovl_tex_shutdown();
@@ -657,6 +669,8 @@ void ovl_vk_shutdown(void) {
         host_buffer_free(&vk.tex[i].staging);
         image_free(&vk.tex[i].image, &vk.tex[i].memory, &vk.tex[i].view);
     }
+    host_buffer_free(&vk.icons.staging);
+    image_free(&vk.icons.image, &vk.icons.memory, &vk.icons.view);
     if (vk.pipeline)
         vk.vkDestroyPipeline(vk.device, vk.pipeline, NULL);
     if (vk.layout)
@@ -682,13 +696,16 @@ void ovl_vk_new_frame(unsigned width, unsigned height, float delta, float framer
     ovl_fps_draw(framerate);
     ovl_notify_draw();
     ovl_trophy_draw();
-    /* The dialogs after, as ImGui's layers registered as they opened */
+    /* The dialogs after, as ImGui's layers registered as they opened; a message (the emulator's
+     * own save data errors among them) over the save data dialog */
+    ovl_save_dialog_draw();
     ovl_msg_dialog_draw();
     vk.draw_data = ovl_render();
 }
 
 int ovl_vk_must_keep_drawing(void) {
-    return vk.made && (ovl_notify_active() || ovl_trophy_active() || ovl_msg_dialog_active());
+    return vk.made && (ovl_notify_active() || ovl_trophy_active() || ovl_msg_dialog_active() ||
+                       ovl_save_dialog_active());
 }
 
 int ovl_vk_splash_ready(void) {
@@ -780,12 +797,41 @@ static void upload_atlas(VkCommandBuffer cmd, frame_buffers_t* f) {
     vk.atlas_sampled = 1;
 }
 
-/* Images decoded since the last frame, each copied whole into its slot's texture */
+/* Images decoded since the last frame, each copied whole into its slot's texture; icons, each
+ * with its border into the atlas, the rest of it kept */
 static void upload_textures(VkCommandBuffer cmd) {
     int handle;
     while ((handle = ovl_tex_take_upload()) != 0) {
-        const tex_slot_t* t = &vk.tex[handle - 1];
+        const tex_slot_t* t;
         VkBufferImageCopy region;
+        int rect[4];
+        if (ovl_tex_icon_rect(handle, rect)) {
+            t = &vk.icons;
+            barrier(cmd, t->image, VK_ACCESS_SHADER_READ_BIT, VK_ACCESS_TRANSFER_WRITE_BIT,
+                    vk.icons_sampled ? VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+                                     : VK_IMAGE_LAYOUT_UNDEFINED,
+                    VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                    VK_PIPELINE_STAGE_TRANSFER_BIT);
+            memset(&region, 0, sizeof(region));
+            region.bufferOffset =
+                ((VkDeviceSize)rect[1] * OVL_ICON_ATLAS_W + (VkDeviceSize)rect[0]) * 4;
+            region.bufferRowLength = OVL_ICON_ATLAS_W;
+            region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+            region.imageSubresource.layerCount = 1;
+            region.imageOffset.x = rect[0];
+            region.imageOffset.y = rect[1];
+            region.imageExtent.width = (uint32_t)rect[2];
+            region.imageExtent.height = (uint32_t)rect[3];
+            region.imageExtent.depth = 1;
+            vk.vkCmdCopyBufferToImage(cmd, t->staging.buffer, t->image,
+                                      VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
+            barrier(cmd, t->image, VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT,
+                    VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                    VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
+            vk.icons_sampled = 1;
+            continue;
+        }
+        t = &vk.tex[handle - 1];
         barrier(cmd, t->image, VK_ACCESS_SHADER_READ_BIT, VK_ACCESS_TRANSFER_WRITE_BIT,
                 VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                 VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
@@ -979,8 +1025,9 @@ void ovl_vk_render(VkCommandBuffer cmd, VkImageView view, VkExtent2D extent) {
         scissor.extent.width = (uint32_t)(x1 - x0);
         scissor.extent.height = (uint32_t)(y1 - y0);
         vk.vkCmdSetScissor(cmd, 0, 1, &scissor);
-        set = c->tex == OVL_TEX_ATLAS || c->tex > OVL_TEX_SLOTS ? vk.atlas_set
-                                                                : vk.tex[c->tex - 1].set;
+        set = c->tex == OVL_TEX_ICONS                             ? vk.icons.set
+              : c->tex == OVL_TEX_ATLAS || c->tex > OVL_TEX_SLOTS ? vk.atlas_set
+                                                                  : vk.tex[c->tex - 1].set;
         if (set != bound) {
             vk.vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, vk.layout, 0, 1, &set,
                                        0, NULL);

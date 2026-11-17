@@ -343,7 +343,7 @@ static ovl_col_t gray(int v) {
     return OVL_COL(c, c, c, 255);
 }
 
-static void draw_pretty_background(void) {
+void ovl_draw_pretty_background(void) {
     const double time = ovl_time() / 1.5f;
     const float x = ((float)cos(time) + 1.0f) / 2.0f;
     const float d = fast_in_fast_out_cubic(x);
@@ -367,7 +367,7 @@ static void draw_pretty_background(void) {
 static void draw_error(int which, const msg_param_t* p, int first) {
     const ovl_vec2_t ws = ovl_window_size();
     ovl_vec2_t avail;
-    draw_pretty_background();
+    ovl_draw_pretty_background();
     ovl_set_window_font_scale(1.3f);
     avail = ovl_content_region_avail();
     ovl_draw_centered_text(p->msg, NULL, vec2(avail.x, avail.y - (15.0f + BUTTON_H)));

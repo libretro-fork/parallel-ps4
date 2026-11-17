@@ -110,6 +110,77 @@ void ovl_msg_dialog_draw(void);
 int ovl_msg_dialog_active(void);
 /* The core's DrawCenteredText, shared with the other dialogs */
 void ovl_draw_centered_text(const char* text, const char* end, ovl_vec2_t content);
+/* The core's DrawPrettyBackground: the window's inside in greys that shift with time */
+void ovl_draw_pretty_background(void);
+
+/* The save data dialog (ovl_savedialog.c), libSceSaveDataDialog's: the game's saves to choose
+ * one of, or one save over a message, or a progress bar. Its values are libSceSaveDataDialog's,
+ * the status CommonDialog::Status's. The game's thread opens it and may close it; the overlay's
+ * thread draws it and closes it when a save or a button is chosen.
+ *
+ * What it shows is lent: the game's thread builds it where ovl_save_dialog_back says, a buffer
+ * of three that the overlay's thread reads only once it is opened, and keeps it until it builds
+ * in that buffer again; opening returns the buffer opened. */
+enum {
+    OVL_SAVE_MODE_LIST = 1,
+    OVL_SAVE_MODE_USER = 2,
+    OVL_SAVE_MODE_SYSTEM = 3,
+    OVL_SAVE_MODE_ERROR = 4,
+    OVL_SAVE_MODE_PROGRESS_BAR = 5
+};
+enum { OVL_SAVE_TYPE_SAVE = 1, OVL_SAVE_TYPE_LOAD = 2, OVL_SAVE_TYPE_DELETE = 3 };
+enum {
+    OVL_SAVE_STYLE_TITLE_DATESIZE_SUBTITLE = 0,
+    OVL_SAVE_STYLE_TITLE_SUBTITLE_DATESIZE = 1,
+    OVL_SAVE_STYLE_TITLE_DATESIZE = 2
+};
+enum {
+    OVL_SAVE_BUTTONS_OK = 0,
+    OVL_SAVE_BUTTONS_YESNO = 1,
+    OVL_SAVE_BUTTONS_NONE = 2,
+    OVL_SAVE_BUTTONS_OKCANCEL = 3
+};
+enum {
+    OVL_SAVE_BUTTON_INVALID = 0,
+    OVL_SAVE_BUTTON_OK = 1,
+    OVL_SAVE_BUTTON_YES = 1,
+    OVL_SAVE_BUTTON_NO = 2
+};
+enum { OVL_SAVE_RESULT_OK = 0, OVL_SAVE_RESULT_USER_CANCELED = 1 };
+typedef struct ovl_save_item {
+    const char* title;
+    const char* subtitle;
+    const char* date;
+    const char* size;
+    int icon; /* an image's handle (ovl_tex_decode_icon), 0 for none */
+    int corrupted;
+} ovl_save_item_t;
+typedef struct ovl_save_dialog_param {
+    int mode, type, style;
+    int enable_back;              /* the game's option: 1, 0, or -1 when it gave none */
+    const ovl_save_item_t* items; /* the new save first, when there is one */
+    int item_count;
+    int has_new_item;
+    int focus;                    /* the save focused when the list appears, -1 for none */
+    const char* msg;              /* a message's */
+    int user_buttons, user_error; /* a user message's */
+    int hide_ok, show_no, show_cancel, return_cancel; /* a system message's */
+    int old_firmware; /* the game's before 4.50: OK alone and No answer as cancelled */
+} ovl_save_dialog_param_t;
+void ovl_save_dialog_init(void);
+void ovl_save_dialog_shutdown(void);
+int ovl_save_dialog_status(void);
+void ovl_save_dialog_set_status(int status);
+int ovl_save_dialog_back(void);
+int ovl_save_dialog_open(const ovl_save_dialog_param_t* param);
+void ovl_save_dialog_set_progress(unsigned value);
+void ovl_save_dialog_add_progress(unsigned delta);
+/* Finishes it with @button and @result if it runs, no save chosen; 0 if it did not */
+int ovl_save_dialog_close(int button, int result);
+/* The button, result and the save chosen (an index into the items, -1 for none) */
+void ovl_save_dialog_result(int* button, int* result, int* item);
+void ovl_save_dialog_draw(void);
+int ovl_save_dialog_active(void);
 
 #ifdef __cplusplus
 }

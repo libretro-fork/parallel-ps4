@@ -155,9 +155,23 @@ void ovl_atlas_mark_dirty(int x, int y, int w, int h);
 #define OVL_TEX_SLOTS 12
 #define OVL_TEX_DIM 512
 
+/* Icons (a save's icon0.png, 228 x 128) have cells of their own in one image, the icon atlas,
+ * eight by eight cells: an icon up to 230 x 130 in each, with a texel all round it. Its memory
+ * (RGBA, OVL_ICON_ATLAS_W x OVL_ICON_ATLAS_H) is lent by the renderer when it starts. An
+ * icon's handle follows the slots'; their draws sample OVL_TEX_ICONS. */
+#define OVL_ICON_CELLS 64
+#define OVL_ICON_COLS 8
+#define OVL_ICON_CELL_W 232
+#define OVL_ICON_CELL_H 132
+#define OVL_ICON_ATLAS_W (OVL_ICON_COLS * OVL_ICON_CELL_W)
+#define OVL_ICON_ATLAS_H ((OVL_ICON_CELLS / OVL_ICON_COLS) * OVL_ICON_CELL_H)
+#define OVL_TEX_ICONS ((ovl_tex_t)(OVL_TEX_SLOTS + OVL_ICON_CELLS + 1))
+
 /* From any thread: decodes a PNG into a free slot, read where it lies; 0 when no slot is free,
  * it is not a PNG, or it is larger than a slot */
 int ovl_tex_decode_png(const uint8_t* png, size_t size);
+/* The same into an icon's cell, or a slot when it is larger than a cell or none is free */
+int ovl_tex_decode_icon(const uint8_t* png, size_t size);
 /* From any thread: the image's owner is done with it */
 void ovl_tex_release(int handle);
 /* The image's size, when it is there to draw (decoded, uploaded or about to be) */
@@ -167,8 +181,12 @@ int ovl_tex_size(int handle, int* w, int* h);
  * (the whole slot), 0 when none; and slots released, freed once @frames_in_flight frames
  * have passed since */
 void ovl_tex_init(uint8_t* const* pixels, int count);
+void ovl_tex_init_icons(uint8_t* atlas);
 void ovl_tex_shutdown(void);
 int ovl_tex_take_upload(void);
+/* For an icon taken to upload: the part of the atlas to copy, x, y, w, h (its cell's, the
+ * icon and its border); 0 for a slot's image, copied whole */
+int ovl_tex_icon_rect(int handle, int rect[4]);
 const uint8_t* ovl_tex_pixels(int handle);
 void ovl_tex_collect(unsigned frame, unsigned frames_in_flight);
 
@@ -410,6 +428,7 @@ void ovl_set_scroll_here_y(float center_ratio);
 /* Items                                                                                       */
 
 uint32_t ovl_get_id(const char* str);
+uint32_t ovl_get_id_int(int value);
 void ovl_push_id_str(const char* str);
 void ovl_push_id_int(int value);
 void ovl_push_id_ptr(const void* ptr);
@@ -433,6 +452,15 @@ int ovl_is_item_focused(void);
 ovl_vec2_t ovl_item_rect_min(void);
 ovl_vec2_t ovl_item_rect_max(void);
 void ovl_set_item_default_focus(void);
+
+/* ImGui's internals, for widgets of the overlays' own: ItemSize, ItemAdd (0 when it is clipped
+ * away, not to be drawn), ButtonBehavior (for the pad: hovered while focused), RenderNavCursor
+ * (rounded as frames are) and RenderText */
+void ovl_item_size(ovl_vec2_t size, float text_baseline_y);
+int ovl_item_add(uint32_t id, ovl_vec2_t min, ovl_vec2_t max);
+int ovl_button_behavior(uint32_t id, int* hovered, int* held);
+void ovl_render_nav_cursor(ovl_vec2_t min, ovl_vec2_t max, uint32_t id);
+void ovl_render_text(ovl_vec2_t pos, const char* text, const char* end);
 void ovl_begin_disabled(int disabled);
 void ovl_end_disabled(void);
 

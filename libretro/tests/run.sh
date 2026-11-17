@@ -259,7 +259,7 @@ ASAN_OPTIONS=detect_leaks=0 "$OUT/vertex_capture_report" --selftest
 # presenter's ImGui window fitted it
 OVL="src/video_core/overlay/ovl_draw.c src/video_core/overlay/ovl_font.c \
      src/video_core/overlay/ovl_fps.c src/video_core/overlay/ovl_msgdialog.c \
-     src/video_core/overlay/ovl_notify.c \
+     src/video_core/overlay/ovl_notify.c src/video_core/overlay/ovl_savedialog.c \
      src/video_core/overlay/ovl_splash.c src/video_core/overlay/ovl_tex.c \
      src/video_core/overlay/ovl_trophy.c \
      src/video_core/overlay/ovl_ttf.c src/video_core/overlay/ovl_ui.c \
@@ -295,4 +295,14 @@ for san in address,undefined thread; do
         -I$L/include libretro/tests/ovl_msgdialog_test.c $OVL \
         -o "$OUT/ovl_msgdialog_test" -lm -lpthread
     "$OUT/ovl_msgdialog_test"
+done
+# The save data dialog across threads: a game thread building lists of saves with icons where
+# the dialog says to, opening them, changing a progress bar, closing some; the overlay's thread
+# drawing, pressing, uploading the icons and retiring them; each finished once by one side, a
+# save chosen one of its list, every icon cell free after
+for san in address,undefined thread; do
+    $CC -std=gnu89 -O1 -g -Wall -Wdeclaration-after-statement -fsanitize=$san -I. -Isrc \
+        -I$L/include libretro/tests/ovl_savedialog_test.c $OVL \
+        -o "$OUT/ovl_savedialog_test" -lm -lpthread
+    "$OUT/ovl_savedialog_test"
 done
