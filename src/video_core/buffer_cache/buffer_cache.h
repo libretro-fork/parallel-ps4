@@ -141,6 +141,11 @@ public:
     [[nodiscard]] std::pair<const Buffer*, u64> GuestTarget(VAddr device_addr, u64 size,
                                                             u64 alignment);
 
+    /// The game has mapped [device_addr, device_addr + size): with Readbacks Into Game Memory
+    /// set to When Game Maps Memory, the memory behind it is lent to the GPU now. From the
+    /// thread that maps it.
+    void MapGuestMemory(VAddr device_addr, u64 size);
+
     /// Synchronizes all buffers needed for DMA.
     void SynchronizeDmaBuffers();
 
@@ -269,6 +274,7 @@ private:
     const Buffer* guest_src{};
     const Buffer* guest_batch{};
     u64 guest_src_offset{};
+    bool guest_at_map{};
 };
 
 } // namespace VideoCore

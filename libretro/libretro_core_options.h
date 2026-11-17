@@ -310,6 +310,24 @@ struct retro_core_option_v2_definition option_defs_us[] = {
          {NULL, NULL},
      },
      "disabled"},
+    {"shadps4_readback_import",
+     "Readbacks Into Game Memory",
+     NULL,
+     "With GPU Readbacks on, lets the GPU write what is read back straight "
+     "into the game's memory, with no extra copy. On First Readback sets this "
+     "up for each 64 MiB of memory the first time a readback goes there, which "
+     "can cause a short pause that one time. When Game Maps Memory sets it up "
+     "as the game takes its memory: no pause while playing, but all the memory "
+     "the game has taken stays in RAM. Takes effect when content is restarted.",
+     NULL,
+     "video",
+     {
+         {"on_use", "On First Readback"},
+         {"at_map", "When Game Maps Memory"},
+         {"disabled", NULL},
+         {NULL, NULL},
+     },
+     "on_use"},
     {"shadps4_direct_memory_access",
      "Direct Memory Access",
      NULL,

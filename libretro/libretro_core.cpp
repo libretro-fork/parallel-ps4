@@ -404,6 +404,11 @@ void ReadCoreOptions(Libretro::SharedOptions& options) {
         static_cast<uint32_t>(std::atoi(OptionValue("shadps4_vblank_frequency", "60").c_str()));
     const std::string readbacks = OptionValue("shadps4_readbacks", "disabled");
     options.readbacks = readbacks == "precise" ? 2 : readbacks == "relaxed" ? 1 : 0;
+    const std::string readback_import =
+        OptionValue("shadps4_readback_import", "on_use");
+    options.readback_import = readback_import == "at_map"     ? 2
+                              : readback_import == "disabled" ? 0
+                                                              : 1;
     options.direct_memory_access = enabled("shadps4_direct_memory_access", "disabled");
     options.show_fps = enabled("shadps4_show_fps", "disabled");
     options.vertex_capture = enabled("shadps4_vertex_capture", "disabled");

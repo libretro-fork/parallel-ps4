@@ -1647,6 +1647,7 @@ bool Rasterizer::TouchesMapped(VAddr addr, u64 size) {
 
 void Rasterizer::MapMemory(VAddr addr, u64 size) {
     mapped_ranges.Update([&](IntervalList<>& ranges) { ranges.Add(Interval{addr, addr + size}); });
+    buffer_cache.MapGuestMemory(addr, size);
 }
 
 void Rasterizer::RegisterMemory(VAddr addr, u64 size) {

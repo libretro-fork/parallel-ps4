@@ -631,6 +631,7 @@ void ApplyCoreOptions() {
     (void)retro_atomic_exchange_int(&VideoCore::render_width, options.render_width);
     emu_settings_set_vblank_frequency(options.vblank_frequency, false);
     emu_settings_set_readbacks_mode(options.readbacks, false);
+    emu_settings_set_readback_import(options.readback_import, false);
     emu_settings_set_direct_memory_access_enabled(
         options.direct_memory_access != 0, false);
     emu_settings_set_show_fps_counter(options.show_fps != 0, false);

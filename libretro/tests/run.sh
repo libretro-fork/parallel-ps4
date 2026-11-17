@@ -101,11 +101,15 @@ $CC -std=c89 -O1 -g -Wall -fsanitize=address,undefined -isystem externals/vulkan
     -o "$OUT/vk_heap_device_test" -ldl
 ASAN_OPTIONS=detect_leaks=0 "$OUT/vk_heap_device_test"
 # The game's memory lent to the GPU (buffer_cache/guest_import.c) on a real device: copied
-# from, written into where a scattered address space maps it, chunks imported once
-$CC -std=c89 -O1 -g -Wall -fsanitize=address,undefined -isystem externals/vulkan-headers/include \
-    -Isrc libretro/tests/guest_import_device_test.c src/video_core/buffer_cache/guest_import.c \
-    -o "$OUT/guest_import_device_test" -ldl
-ASAN_OPTIONS=detect_leaks=0 "$OUT/guest_import_device_test"
+# from, written into where a scattered address space maps it, chunks imported once, as wanted
+# or as mapped by threads racing
+for san in address,undefined thread; do
+    name=guest_import_device_test-$(echo $san | tr , -)
+    $CC -std=c89 -O1 -g -Wall -fsanitize=$san -isystem externals/vulkan-headers/include \
+        -Isrc -I$L/include libretro/tests/guest_import_device_test.c \
+        src/video_core/buffer_cache/guest_import.c -o "$OUT/$name" -ldl -lpthread
+    ASAN_OPTIONS=detect_leaks=0 "$OUT/$name"
+done
 # The tiling shader on a real device: tiled and detiled texels are the texels they were, and a
 # texel with no place in the image is neither read nor written
 $CC -std=c89 -O1 -g -Wall -fsanitize=address,undefined -isystem externals/vulkan-headers/include \

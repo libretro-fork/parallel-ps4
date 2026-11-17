@@ -159,8 +159,12 @@ BufferCache::BufferCache(const Vulkan::Instance& instance_, Vulkan::Scheduler& s
         runtime.FillBuffer(null_index_buffer.get(), 0u, NULL_INDEX_BUFFER_SIZE, 0u);
     }
 
-    // The game's memory lent to the GPU, for readbacks to land in (guest_import.h)
-    if (instance.IsExternalMemoryHostSupported()) {
+    // The game's memory lent to the GPU, for readbacks to land in (guest_import.h): as a
+    // readback first goes into each chunk of it, or as the game maps it, where there are
+    // readbacks to land (so that nothing is kept in RAM for none)
+    const u32 import_mode = emu_settings_get_readback_import();
+    const bool readbacks = emu_settings_get_readbacks_mode() != EMU_READBACKS_DISABLED;
+    if (instance.IsExternalMemoryHostSupported() && import_mode != EMU_READBACK_IMPORT_DISABLED) {
         const auto& dispatch = VULKAN_HPP_DEFAULT_DISPATCHER;
         guest_import_info_t info{};
         info.device = static_cast<VkDevice>(device);
@@ -169,6 +173,7 @@ BufferCache::BufferCache(const Vulkan::Instance& instance_, Vulkan::Scheduler& s
         info.base = memory->BackingBase();
         info.size = memory->BackingBytes();
         info.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+        info.import_on_use = import_mode == EMU_READBACK_IMPORT_ON_USE;
         info.fns.allocate_memory = dispatch.vkAllocateMemory;
         info.fns.free_memory = dispatch.vkFreeMemory;
         info.fns.create_buffer = dispatch.vkCreateBuffer;
@@ -181,6 +186,7 @@ BufferCache::BufferCache(const Vulkan::Instance& instance_, Vulkan::Scheduler& s
             guest_chunks.resize((info.size + (u64{1} << GUEST_IMPORT_CHUNK_SHIFT) - 1) >>
                                 GUEST_IMPORT_CHUNK_SHIFT);
             guest_rest.reserve(64);
+            guest_at_map = import_mode == EMU_READBACK_IMPORT_AT_MAP && readbacks;
         }
     }
 }
@@ -196,6 +202,24 @@ BufferCache::~BufferCache() {
 /// The guest_import_run_fn over the memory manager's backing
 static u64 GuestRun(void* ctx, u64 addr, u64 size, u64* backing_offset) {
     return static_cast<const Core::MemoryManager*>(ctx)->BackingRun(addr, size, backing_offset);
+}
+
+void BufferCache::MapGuestMemory(VAddr device_addr, u64 size) {
+    if (!guest_at_map) {
+        return;
+    }
+    while (size) {
+        u64 offset = 0;
+        const u64 run = memory->BackingRun(device_addr, size, &offset);
+        if (run == 0) {
+            return;
+        }
+        if (offset != ~u64{0}) {
+            guest_import_prepare(guest, offset, run);
+        }
+        device_addr += run;
+        size -= run;
+    }
 }
 
 const Buffer* BufferCache::GuestChunk(u32 chunk, vk::Buffer handle) {

@@ -22,6 +22,7 @@
 #include <string.h>
 
 #include <dlfcn.h>
+#include <pthread.h>
 #include <sys/mman.h>
 #include <unistd.h>
 
@@ -145,6 +146,14 @@ typedef struct pieces {
   uint64_t delta[MAX_PIECES];
   uint64_t size[MAX_PIECES];
 } pieces_t;
+
+/* Threads importing as the game maps its memory, all of it at once */
+static guest_import_t *racing_import;
+static void *prepare_all(void *arg) {
+  (void)arg;
+  guest_import_prepare(racing_import, 0, MEMORY_SIZE);
+  return NULL;
+}
 
 static void on_piece(void *ctx, VkBuffer buffer, uint32_t chunk,
                      VkDeviceSize buffer_offset, uint64_t addr, uint64_t delta,
@@ -359,6 +368,7 @@ int main(void) {
   info.fns.bind_buffer_memory = p_vkBindBufferMemory;
   info.fns.get_memory_host_pointer_properties =
       p_vkGetMemoryHostPointerPropertiesEXT;
+  info.import_on_use = 1;
   import = guest_import_create(&info);
   CHECK(import != NULL, "import made");
   if (!import)
@@ -553,6 +563,46 @@ int main(void) {
   p_vkDestroyBuffer(device, dst, NULL);
   p_vkFreeMemory(device, dst_memory, NULL);
   guest_import_destroy(import);
+
+  /* Imported only as the memory is mapped: not where it is wanted, and once for
+   * each chunk however many threads map at once, with the thread that wants it
+   * going on meanwhile */
+  info.import_on_use = 0;
+  import = guest_import_create(&info);
+  CHECK(import != NULL, "an import made that imports only as memory is mapped");
+  if (import) {
+    pthread_t threads[4];
+    VkDeviceSize offset = 0;
+    uint32_t n, seen = 0;
+    CHECK(guest_import_buffer(import, starts[0], 64, &offset) == VK_NULL_HANDLE,
+          "nothing imported where it is wanted");
+    CHECK(guest_import_chunks(import, NULL) == 0, "and nothing tried");
+    guest_import_prepare(import, starts[0], 64);
+    CHECK(guest_import_buffer(import, starts[0], 64, &offset) !=
+                  VK_NULL_HANDLE &&
+              offset == starts[0],
+          "the chunk of a range mapped: imported");
+    CHECK(guest_import_chunks(import, NULL) == 1, "that chunk alone");
+    racing_import = import;
+    for (n = 0; n < 4; n++)
+      pthread_create(&threads[n], NULL, prepare_all, NULL);
+    /* What is there is used, what is being imported is not waited for */
+    while (!seen && guest_import_chunks(import, &failed) + failed < 4)
+      seen = guest_import_buffer(import, CHUNK * 3 + 64, 64, &offset) !=
+             VK_NULL_HANDLE;
+    for (n = 0; n < 4; n++)
+      pthread_join(threads[n], NULL);
+    imported = guest_import_chunks(import, &failed);
+    CHECK(imported == 4 && failed == 0,
+          "four threads mapping all of it: each chunk imported once");
+    CHECK(guest_import_buffer(import, CHUNK * 3 + 64, 64, &offset) !=
+              VK_NULL_HANDLE,
+          "the last chunk there for the thread that wants it");
+    guest_import_prepare(import, 0, MEMORY_SIZE);
+    CHECK(guest_import_chunks(import, NULL) == 4,
+          "mapped again: nothing imported again");
+    guest_import_destroy(import);
+  }
   p_vkDestroyDevice(device, NULL);
   if (messenger)
     p_vkDestroyDebugUtilsMessengerEXT(instance, messenger, NULL);

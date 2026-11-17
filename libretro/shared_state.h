@@ -22,7 +22,7 @@
 namespace Libretro {
 
 inline constexpr std::uint32_t SHARED_MAGIC = 0x34505368; // "hSP4"
-inline constexpr std::uint32_t SHARED_VERSION = 29;
+inline constexpr std::uint32_t SHARED_VERSION = 30;
 
 inline constexpr std::uint32_t MAX_WIDTH = 3840;
 inline constexpr std::uint32_t MAX_HEIGHT = 2160;
@@ -98,6 +98,9 @@ struct SharedOptions {
     std::uint32_t follow_game_size;
     std::uint32_t vblank_frequency;
     std::uint32_t readbacks;
+    /// When the game's memory is lent to the GPU for readbacks: 0 never, 1 as a
+    /// readback first goes there, 2 as the game maps it (emu_readback_import)
+    std::uint32_t readback_import;
     std::uint32_t direct_memory_access;
     std::uint32_t show_fps;
     std::uint32_t vertex_capture;

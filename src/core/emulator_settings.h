@@ -43,6 +43,17 @@ enum emu_readbacks_mode {
     EMU_READBACKS_PRECISE
 };
 
+/* When the game's memory is lent to the GPU for readbacks to land in
+ * (buffer_cache/guest_import.h) */
+enum emu_readback_import {
+    /* never: readbacks go through a staging buffer */
+    EMU_READBACK_IMPORT_DISABLED = 0,
+    /* 64 MiB of it the first time a readback goes there */
+    EMU_READBACK_IMPORT_ON_USE,
+    /* as the game maps it */
+    EMU_READBACK_IMPORT_AT_MAP
+};
+
 /* Which value a getter returns. */
 enum emu_config_mode {
     /* the game-specific value if there is one, else the base value */
@@ -150,6 +161,8 @@ enum emu_settings_section {
     EMU_SETTING(copy_gpu_buffers, "copy_gpu_buffers", GPU, BOOL, false, OVR, GEN)                  \
     EMU_SETTING(async_shaders, "async_shaders", GPU, BOOL, true, OVR, GEN)                         \
     EMU_SETTING(readbacks_mode, "readbacks_mode", GPU, UINT, EMU_READBACKS_DISABLED, OVR, GEN)     \
+    EMU_SETTING(readback_import, "readback_import", GPU, UINT, EMU_READBACK_IMPORT_ON_USE, OVR,    \
+                GEN)                                                                               \
     EMU_SETTING(readback_linear_images_enabled, "readback_linear_images_enabled", GPU, BOOL,       \
                 false, OVR, GEN)                                                                   \
     EMU_SETTING(direct_memory_access_enabled, "direct_memory_access_enabled", GPU, BOOL, false,    \

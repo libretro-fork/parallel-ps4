@@ -4,31 +4,36 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include <retro_atomic.h>
+
 #include "guest_import.h"
 
 #define CHUNK_SIZE ((uint64_t)1 << GUEST_IMPORT_CHUNK_SHIFT)
 
-/* A chunk's state */
+/* A chunk's state. The thread that moves it from UNTRIED to IMPORTING imports it; its buffer
+ * and memory are written before the state is released as IMPORTED. */
 #define CHUNK_UNTRIED 0
-#define CHUNK_IMPORTED 1
-#define CHUNK_FAILED 2
+#define CHUNK_IMPORTING 1
+#define CHUNK_IMPORTED 2
+#define CHUNK_FAILED 3
 
 typedef struct guest_chunk {
     VkBuffer buffer;
     VkDeviceMemory memory;
-    uint32_t state;
+    retro_atomic_int_t state;
 } guest_chunk_t;
 
 struct guest_import {
     guest_import_info_t info;
     guest_chunk_t* chunks;
     uint32_t count;
-    uint32_t imported;
-    uint32_t failed;
+    retro_atomic_int_t imported;
+    retro_atomic_int_t failed;
 };
 
 guest_import_t* guest_import_create(const guest_import_info_t* info) {
     guest_import_t* import;
+    uint32_t i;
     const guest_import_fns_t* f = &info->fns;
     if (!info->device || !info->base || !info->size || !info->alignment ||
         (info->alignment & (info->alignment - 1)) != 0 || CHUNK_SIZE % info->alignment != 0 ||
@@ -47,6 +52,10 @@ guest_import_t* guest_import_create(const guest_import_info_t* info) {
         free(import);
         return NULL;
     }
+    for (i = 0; i < import->count; i++)
+        retro_atomic_int_init(&import->chunks[i].state, CHUNK_UNTRIED);
+    retro_atomic_int_init(&import->imported, 0);
+    retro_atomic_int_init(&import->failed, 0);
     return import;
 }
 
@@ -56,7 +65,7 @@ void guest_import_destroy(guest_import_t* import) {
         return;
     for (i = 0; i < import->count; i++) {
         guest_chunk_t* c = &import->chunks[i];
-        if (c->state != CHUNK_IMPORTED)
+        if (retro_atomic_load_acquire_int(&c->state) != CHUNK_IMPORTED)
             continue;
         import->info.fns.destroy_buffer(import->info.device, c->buffer, NULL);
         import->info.fns.free_memory(import->info.device, c->memory, NULL);
@@ -146,29 +155,52 @@ static int import_chunk(guest_import_t* import, uint32_t index) {
     return 1;
 }
 
+/* Imports chunk @index if no thread has tried yet; its state after */
+static int claim_chunk(guest_import_t* import, uint32_t index) {
+    guest_chunk_t* c = &import->chunks[index];
+    int state = retro_atomic_load_acquire_int(&c->state);
+    if (state != CHUNK_UNTRIED)
+        return state;
+    if (!retro_atomic_cas_int(&c->state, CHUNK_UNTRIED, CHUNK_IMPORTING))
+        return CHUNK_IMPORTING; /* another thread's to import, or done */
+    if (import_chunk(import, index)) {
+        state = CHUNK_IMPORTED;
+        retro_atomic_fetch_add_int(&import->imported, 1);
+    } else {
+        state = CHUNK_FAILED;
+        retro_atomic_fetch_add_int(&import->failed, 1);
+    }
+    retro_atomic_store_release_int(&c->state, state);
+    return state;
+}
+
+void guest_import_prepare(guest_import_t* import, uint64_t offset, uint64_t size) {
+    uint64_t index, last;
+    if (!import || size == 0 || offset >= import->info.size)
+        return;
+    if (size > import->info.size - offset)
+        size = import->info.size - offset;
+    last = (offset + size - 1) >> GUEST_IMPORT_CHUNK_SHIFT;
+    for (index = offset >> GUEST_IMPORT_CHUNK_SHIFT; index <= last; index++)
+        (void)claim_chunk(import, (uint32_t)index);
+}
+
 VkBuffer guest_import_buffer(guest_import_t* import, uint64_t offset, uint64_t size,
                              VkDeviceSize* buffer_offset) {
     uint32_t index;
-    guest_chunk_t* c;
+    int state;
     if (!import || size == 0 || offset >= import->info.size || size > import->info.size - offset)
         return VK_NULL_HANDLE;
     index = (uint32_t)(offset >> GUEST_IMPORT_CHUNK_SHIFT);
     if (((offset + size - 1) >> GUEST_IMPORT_CHUNK_SHIFT) != index)
         return VK_NULL_HANDLE; /* across two chunks */
-    c = &import->chunks[index];
-    if (c->state == CHUNK_UNTRIED) {
-        if (import_chunk(import, index)) {
-            c->state = CHUNK_IMPORTED;
-            import->imported++;
-        } else {
-            c->state = CHUNK_FAILED;
-            import->failed++;
-        }
-    }
-    if (c->state != CHUNK_IMPORTED)
+    state = retro_atomic_load_acquire_int(&import->chunks[index].state);
+    if (state == CHUNK_UNTRIED && import->info.import_on_use)
+        state = claim_chunk(import, index);
+    if (state != CHUNK_IMPORTED)
         return VK_NULL_HANDLE;
     *buffer_offset = offset & (CHUNK_SIZE - 1);
-    return c->buffer;
+    return import->chunks[index].buffer;
 }
 
 VkBuffer guest_import_target(guest_import_t* import, guest_import_run_fn run, void* run_ctx,
@@ -208,8 +240,8 @@ void guest_import_split(guest_import_t* import, guest_import_run_fn run, void* r
     }
 }
 
-uint32_t guest_import_chunks(const guest_import_t* import, uint32_t* failed) {
+uint32_t guest_import_chunks(guest_import_t* import, uint32_t* failed) {
     if (failed)
-        *failed = import ? import->failed : 0;
-    return import ? import->imported : 0;
+        *failed = import ? (uint32_t)retro_atomic_load_acquire_int(&import->failed) : 0;
+    return import ? (uint32_t)retro_atomic_load_acquire_int(&import->imported) : 0;
 }

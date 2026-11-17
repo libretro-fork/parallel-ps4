@@ -87,7 +87,7 @@ RetroArch's ports 1 to 4 are the console's controllers, as many as the core opti
 ## Core options
 
 - **System:** PS4 Pro Mode, Console Language, Devkit Console Mode, Additional Memory, Confirm Button, Connected to Network, PKG Content, Controllers, Show Splash Screen, Exact CPU Flags (only in the box64 build of the ARM core)
-- **Video:** Resolution, VBlank Frequency, GPU Readbacks, Direct Memory Access, Readback Linear Images, Copy GPU Buffers, Shader Cache, Show FPS Counter
+- **Video:** Resolution, VBlank Frequency, GPU Readbacks, Readbacks Into Game Memory, Direct Memory Access, Readback Linear Images, Copy GPU Buffers, Shader Cache, Show FPS Counter
 - **Audio:** Volume
 - **Trophies:** Trophy Notifications, Trophy Notification Position, Trophy Notification Duration
 - **Logging:** Logging, Separate Log Files, Log Sync
