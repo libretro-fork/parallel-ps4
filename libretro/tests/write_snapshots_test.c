@@ -4,7 +4,8 @@
 /* The buffer cache's page snapshots (src/video_core/buffer_cache/write_snapshots.c): a
  * snapshot is found again and holds what was given, the cutoff parts the ones taken before a
  * page's upload from the ones after, only the bytes changed since are reported and the GPU's
- * are left out, a full table drops old pages and nothing else, and threads taking snapshots
+ * are left out, what the guest wrote is told apart from the GPU's bytes even where it wrote a
+ * value that was there already (a vertex buffer over memory the GPU drew to), a full table drops old pages and nothing else, and threads taking snapshots
  * while another claims them never hand over a torn page. */
 
 #include <stdio.h>
@@ -116,6 +117,92 @@ static void test_changed(void) {
     CHECK(run_count == 0, "nothing between the writes");
 }
 
+/* A vertex buffer written by the guest (28-byte vertices: x, y, z, then four words) over
+ * memory the GPU had written: the snapshot is zero, and some vertices have a z of 0. Every
+ * byte of the buffer is the guest's, the zeros too; a GPU byte left would be a z of the GPU's
+ * (Bloodborne: 0xFF000000, -2^127, the vertex thrown). */
+static void test_written(void) {
+    unsigned char before[WRITE_SNAPSHOT_PAGE], now[WRITE_SNAPSHOT_PAGE];
+    uint32_t v, w;
+    memset(before, 0, sizeof(before));
+    memset(now, 0, sizeof(now));
+    /* Vertices 0 to 99 from byte 1000 */
+    for (v = 0; v < 100; ++v) {
+        uint32_t words[7];
+        for (w = 0; w < 7; ++w) {
+            words[w] = 0x3f000000u + v * 16u + w;
+        }
+        if (v % 7 == 3) {
+            words[2] = 0; /* z = 0 */
+        }
+        memcpy(now + 1000 + v * 28, words, sizeof(words));
+    }
+    run_count = 0;
+    write_snapshots_changed(now, before, 0, WRITE_SNAPSHOT_PAGE, on_run, NULL);
+    CHECK(run_count > 1, "changed bytes alone leave the zeros out");
+    run_count = 0;
+    write_snapshots_written(now, before, 0, WRITE_SNAPSHOT_PAGE, 0, 0, on_run, NULL);
+    CHECK(run_count == 1 && run_begin[0] == 1000 && run_size[0] == 2800,
+          "the buffer whole, the zeros it wrote too");
+
+    /* Two writes far apart in the GPU's range: the GPU's bytes between stay */
+    memcpy(now, before, sizeof(now));
+    now[100] = 1;
+    now[100 + 4 + WRITE_SNAPSHOT_BRIDGE + 4] = 1;
+    run_count = 0;
+    write_snapshots_written(now, before, 0, WRITE_SNAPSHOT_PAGE, 0, 0, on_run, NULL);
+    CHECK(run_count == 2 && run_begin[0] == 100 && run_size[0] == 4 &&
+              run_begin[1] == 100 + 4 + WRITE_SNAPSHOT_BRIDGE + 4 && run_size[1] == 4,
+          "a long gap is not joined");
+    now[100 + 4 + WRITE_SNAPSHOT_BRIDGE + 4] = 0;
+    now[100 + 4 + WRITE_SNAPSHOT_BRIDGE] = 1;
+    run_count = 0;
+    write_snapshots_written(now, before, 0, WRITE_SNAPSHOT_PAGE, 0, 0, on_run, NULL);
+    CHECK(run_count == 1 && run_begin[0] == 100 && run_size[0] == 4 + WRITE_SNAPSHOT_BRIDGE + 4,
+          "a gap of the bridge's length is");
+
+    /* At the page's edges: joined to the edge only where the range goes on past it */
+    memcpy(now, before, sizeof(now));
+    now[40] = 1;
+    now[WRITE_SNAPSHOT_PAGE - 41] = 1;
+    run_count = 0;
+    write_snapshots_written(now, before, 0, WRITE_SNAPSHOT_PAGE, 0, 0, on_run, NULL);
+    CHECK(run_count == 2 && run_begin[0] == 40 && run_begin[1] == WRITE_SNAPSHOT_PAGE - 44 &&
+              run_size[1] == 4,
+          "a range that ends at the edges: not joined to them");
+    run_count = 0;
+    write_snapshots_written(now, before, 0, WRITE_SNAPSHOT_PAGE, 1, 1, on_run, NULL);
+    CHECK(run_count == 2 && run_begin[0] == 0 && run_size[0] == 44 &&
+              run_begin[1] == WRITE_SNAPSHOT_PAGE - 44 && run_size[1] == 44,
+          "one that goes on past them: joined to them");
+    run_count = 0;
+    write_snapshots_written(now, before, 16, 2000, 1, 1, on_run, NULL);
+    CHECK(run_count == 1 && run_begin[0] == 16 && run_size[0] == 28,
+          "within the range given, and the end's gap too long to join");
+    memcpy(now, before, sizeof(now));
+    run_count = 0;
+    write_snapshots_written(now, before, 0, WRITE_SNAPSHOT_PAGE, 1, 1, on_run, NULL);
+    CHECK(run_count == 0, "nothing written: nothing, edges or not");
+
+    /* The GPU's range starts and ends at a zero the guest wrote, its writes on either side
+     * outside the range: the zeros are the guest's */
+    now[500] = 1; /* before the range */
+    now[520] = 1; /* in it */
+    now[540] = 1; /* after it */
+    run_count = 0;
+    write_snapshots_written(now, before, 508, 532, 0, 0, on_run, NULL);
+    CHECK(run_count == 1 && run_begin[0] == 508 && run_size[0] == 24,
+          "a write across the range's edges: all of the range");
+    now[564] = 1;
+    run_count = 0;
+    write_snapshots_written(now, before, 548, 560, 0, 0, on_run, NULL);
+    CHECK(run_count == 1 && run_begin[0] == 548 && run_size[0] == 12,
+          "a range in a short gap between two writes: the guest's too");
+    run_count = 0;
+    write_snapshots_written(now, before, 600, 700, 0, 0, on_run, NULL);
+    CHECK(run_count == 0, "one in a long gap: the GPU's");
+}
+
 static void test_full_table(void) {
     write_snapshots_t* s = write_snapshots_create();
     unsigned char page[WRITE_SNAPSHOT_PAGE];
@@ -205,6 +292,7 @@ static void test_threads(void) {
 int main(void) {
     test_take_claim();
     test_changed();
+    test_written();
     test_full_table();
     test_threads();
     if (failures) {

@@ -57,6 +57,22 @@ typedef void (*write_snapshots_run_t)(void* ctx, uint32_t begin, uint32_t size);
 void write_snapshots_changed(const unsigned char* now, const unsigned char* base, uint32_t begin,
                              uint32_t end, write_snapshots_run_t run, void* ctx);
 
+/* What the guest wrote, as far as can be told: the runs write_snapshots_changed gives, joined
+ * across a gap of at most WRITE_SNAPSHOT_BRIDGE bytes the guest left as they were. A guest
+ * writes its data whole, and some of it is what was there before (a zero over a zero): the
+ * cells between the ones it changed were written too, and the GPU's bytes under them are not
+ * to stay - they are older than the guest's data (memory used again: a vertex buffer where the
+ * GPU had drawn, its z of 0 kept as the GPU's 0xFF000000, a vertex thrown to -2^127). The
+ * bytes of the page just outside the range are looked at too, so a write that starts before
+ * @begin or goes on past @end is joined into the range; and where the range is cut by the page
+ * and goes on in the page before or after (@open_begin, @open_end), a short gap at the page's
+ * start or end is joined to it, as the guest's writes go on into that page. The runs given
+ * lie within the range. */
+#define WRITE_SNAPSHOT_BRIDGE 128u
+void write_snapshots_written(const unsigned char* now, const unsigned char* base, uint32_t begin,
+                             uint32_t end, int open_begin, int open_end, write_snapshots_run_t run,
+                             void* ctx);
+
 #ifdef __cplusplus
 }
 #endif

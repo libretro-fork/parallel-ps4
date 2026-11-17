@@ -588,8 +588,9 @@ bool BufferCache::SynchronizeMemory(const Buffer* arena, VAddr device_addr, u32 
     });
     // Readbacks off: the bytes the GPU wrote are only in the arena, and guest memory has stale
     // ones beneath them. A page the guest wrote to elsewhere is uploaded around them; of the
-    // GPU's bytes, only those the guest changed since the page was kept (write_snapshots.h)
-    // are, so the rest stay as the GPU left them. The pages are tracked by now: a write from
+    // GPU's bytes, only those the guest wrote since the page was kept (write_snapshots.h: the
+    // ones it changed, and short runs it left as they were between them) are, so the rest
+    // stay as the GPU left them. The pages are tracked by now: a write from
     // here on faults and is for the next upload.
     for (const Range& range : ranges) {
         VAddr done = range.addr;
@@ -616,9 +617,11 @@ bool BufferCache::SynchronizeMemory(const Buffer* arena, VAddr device_addr, u32 
                         decltype(upload)& upload;
                         VAddr page;
                     } runs{upload, page};
-                    write_snapshots_changed(
+                    // Cut by the page, the GPU's range goes on into the one before or after
+                    write_snapshots_written(
                         now.data(), before, static_cast<u32>(start - page),
-                        static_cast<u32>(end - page),
+                        static_cast<u32>(end - page), start == page && gpu_start < page,
+                        end == page + WRITE_SNAPSHOT_PAGE && gpu_end > end,
                         [](void* ctx, u32 begin, u32 size) {
                             auto* runs = static_cast<Runs*>(ctx);
                             runs->upload(runs->page + begin, size);

@@ -143,3 +143,74 @@ void write_snapshots_changed(const unsigned char* now, const unsigned char* base
         run(ctx, run_begin, end - run_begin);
     }
 }
+
+/* Joins the runs it is given across gaps of at most WRITE_SNAPSHOT_BRIDGE bytes, and gives
+ * the joined ones clipped to the range asked about */
+typedef struct {
+    write_snapshots_run_t run;
+    void* ctx;
+    uint32_t begin, end; /* the range asked about */
+    uint32_t edge_begin; /* where a first run may be joined back to (a page's start) */
+    int have;            /* a run is held */
+    uint32_t run_begin, run_end;
+} write_snapshots_joiner_t;
+
+static void write_snapshots_give(write_snapshots_joiner_t* j) {
+    const uint32_t b = j->run_begin > j->begin ? j->run_begin : j->begin;
+    const uint32_t e = j->run_end < j->end ? j->run_end : j->end;
+    if (b < e) {
+        j->run(j->ctx, b, e - b);
+    }
+}
+
+static void write_snapshots_join(void* ctx, uint32_t begin, uint32_t size) {
+    write_snapshots_joiner_t* j = (write_snapshots_joiner_t*)ctx;
+    const uint32_t end = begin + size;
+    if (!j->have) {
+        if (begin - j->edge_begin <= WRITE_SNAPSHOT_BRIDGE) {
+            begin = j->edge_begin;
+        }
+        j->have = 1;
+        j->run_begin = begin;
+        j->run_end = end;
+        return;
+    }
+    if (begin - j->run_end <= WRITE_SNAPSHOT_BRIDGE) {
+        j->run_end = end;
+        return;
+    }
+    write_snapshots_give(j);
+    j->run_begin = begin;
+    j->run_end = end;
+}
+
+void write_snapshots_written(const unsigned char* now, const unsigned char* base, uint32_t begin,
+                             uint32_t end, int open_begin, int open_end, write_snapshots_run_t run,
+                             void* ctx) {
+    /* The page around the range is looked at too, as far as a gap is joined across: a write
+     * that starts before the range's start or goes on past its end is joined into it */
+    const uint32_t look_begin = begin > WRITE_SNAPSHOT_BRIDGE ? begin - WRITE_SNAPSHOT_BRIDGE : 0;
+    const uint32_t look_end = end + WRITE_SNAPSHOT_BRIDGE < WRITE_SNAPSHOT_PAGE
+                                  ? end + WRITE_SNAPSHOT_BRIDGE
+                                  : WRITE_SNAPSHOT_PAGE;
+    write_snapshots_joiner_t j;
+    j.run = run;
+    j.ctx = ctx;
+    j.begin = begin;
+    j.end = end;
+    /* Joined back to the page's start only where the range goes on into the page before */
+    j.edge_begin = (open_begin && look_begin == 0) ? 0 : WRITE_SNAPSHOT_PAGE;
+    j.have = 0;
+    j.run_begin = 0;
+    j.run_end = 0;
+    write_snapshots_changed(now, base, look_begin, look_end, write_snapshots_join, &j);
+    if (!j.have) {
+        return;
+    }
+    /* And the last on to the page's end, where the range goes on into the page after */
+    if (open_end && look_end == WRITE_SNAPSHOT_PAGE &&
+        WRITE_SNAPSHOT_PAGE - j.run_end <= WRITE_SNAPSHOT_BRIDGE) {
+        j.run_end = WRITE_SNAPSHOT_PAGE;
+    }
+    write_snapshots_give(&j);
+}
