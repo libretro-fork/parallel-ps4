@@ -59,7 +59,8 @@ EMBEDDED_RESOURCES += src/imgui/renderer/fonts/NotoSans-Regular.ttf
 # The patch repositories (src/resources/patches/README.md), shadPS4's first: of a patch both
 # have for the same version, the first one's is applied (src/common/patch_catalog.h)
 EMBEDDED_RESOURCES += $(sort $(wildcard src/resources/patches/shadPS4/*.xml)) \
-	$(sort $(wildcard src/resources/patches/GoldHEN/*.xml))
+	$(sort $(wildcard src/resources/patches/GoldHEN/*.xml)) \
+	$(sort $(wildcard src/resources/patches/ParaLLEl/*.xml))
 EMBEDDED_RESOURCES_C := $(GEN_DIR)/embedded_resources.c
 # Made again when the list changes too (it is here): a file added to it is often older than the
 # source made from the last list

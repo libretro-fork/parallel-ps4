@@ -7,9 +7,13 @@
  *   - the second repository's patch of the same name: the same entry, its metadata for a
  *     version the first has left out (-1), for another version kept;
  *   - the keys stable and distinct, the same for the same serial and name;
- *   - a file that does not parse, an empty serial. */
+ *   - a file that does not parse, an empty serial;
+ *   - the core's own Lower Audio Latency (ParaLLEl/) for Bloodborne, Dark Souls III and
+ *     Sekiro: one entry for every version, its mask line finding the sound engine's update
+ *     time and making it 16666; an executable given is checked to have the line once. */
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "common/patch_catalog.h"
@@ -83,7 +87,114 @@ static int find(const patch_catalog_t* cat, const char* name) {
 
 static patch_catalog_t cat;
 
-int main(void) {
+static unsigned char* read_file(const char* path, size_t* size) {
+    FILE* f = fopen(path, "rb");
+    unsigned char* data;
+    long n;
+    if (!f)
+        return NULL;
+    fseek(f, 0, SEEK_END);
+    n = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    data = (unsigned char*)malloc((size_t)n + 1);
+    if (data && fread(data, 1, (size_t)n, f) != (size_t)n) {
+        free(data);
+        data = NULL;
+    }
+    fclose(f);
+    *size = (size_t)n;
+    return data;
+}
+
+/* The bytes of a mask line's Address ("4D 61 ..."); their count */
+static size_t mask_bytes(const char* address, unsigned char* out, size_t cap) {
+    size_t n = 0;
+    while (*address && n < cap) {
+        unsigned v;
+        if (*address == ' ') {
+            address++;
+            continue;
+        }
+        if (sscanf(address, "%2x", &v) != 1)
+            break;
+        out[n++] = (unsigned char)v;
+        address += 2;
+    }
+    return n;
+}
+
+/* The core's own Lower Audio Latency (src/resources/patches/ParaLLEl), as the catalog reads it
+ * for each game's serials: one entry, for every version (no AppVer), and its line finds
+ * MagicOrchestra's update time by its text and makes it 16666, leaving the rest of the line.
+ * An executable given (argv) is patched as the emulator does it: exactly once. */
+static void parallel_patches(int argc, char** argv) {
+    static const char* const files[] = {"src/resources/patches/ParaLLEl/Bloodborne.xml",
+                                        "src/resources/patches/ParaLLEl/DarkSoulsIII.xml",
+                                        "src/resources/patches/ParaLLEl/Sekiro.xml"};
+    static const char* const serials[] = {"CUSA03173", "CUSA03388", "CUSA12047"};
+    unsigned f;
+    int a;
+    for (f = 0; f < 3; f++) {
+        patch_catalog_source_t src;
+        size_t size = 0;
+        unsigned char* data = read_file(files[f], &size);
+        int entry;
+        CHECK(data != NULL, files[f]);
+        if (!data)
+            continue;
+        src.repository = "ParaLLEl";
+        src.data = data;
+        src.size = size;
+        CHECK(patch_catalog_build(&cat, &src, 1, serials[f]), "built from the core's file");
+        entry = find(&cat, "Lower Audio Latency");
+        CHECK(entry >= 0 && cat.count == 1, "its one patch");
+        if (entry >= 0) {
+            struct rxml_node* line;
+            unsigned char pattern[64], text[64];
+            size_t n;
+            CHECK(cat.entries[entry].versions[0] == '\0', "for every version");
+            CHECK(strcmp(cat.entries[entry].repository, "ParaLLEl") == 0, "the core's");
+            CHECK(cat.metadata_count == 1, "one metadata");
+            line = cat.metadata[0].node->children->children;
+            while (line && (!line->name || strcmp(line->name, "Line") != 0))
+                line = line->next;
+            CHECK(line && strcmp(rxml_node_attrib(line, "Type"), "mask") == 0, "a mask line");
+            if (line) {
+                const char* value = rxml_node_attrib(line, "Value");
+                const int offset = atoi(rxml_node_attrib(line, "Offset"));
+                unsigned i;
+                n = mask_bytes(rxml_node_attrib(line, "Address"), pattern, sizeof(pattern));
+                CHECK(n == 28 && memcmp(pattern, "MainThreadUpdateTime= 33333\n", 28) == 0,
+                      "it finds the update time's line, whole");
+                memcpy(text, pattern, n);
+                for (i = 0; value[i * 2] && value[i * 2 + 1]; i++) {
+                    unsigned v;
+                    sscanf(value + i * 2, "%2x", &v);
+                    text[offset + (int)i] = (unsigned char)v;
+                }
+                CHECK(memcmp(text, "MainThreadUpdateTime= 16666\n", 28) == 0,
+                      "and makes it 16666, the rest left");
+                /* Executables given: the line once in each, as the scan finds the first */
+                for (a = 1; f == 0 && a < argc; a++) {
+                    size_t esize = 0, at, hits = 0;
+                    unsigned char* exe = read_file(argv[a], &esize);
+                    CHECK(exe != NULL, argv[a]);
+                    for (at = 0; exe && at + n <= esize; at++)
+                        if (exe[at] == pattern[0] && memcmp(exe + at, pattern, n) == 0)
+                            hits++;
+                    CHECK(hits == 1, "the line once in the executable");
+                    printf("patch_catalog: %s: the update time's line %u time(s)\n", argv[a],
+                           (unsigned)hits);
+                    free(exe);
+                }
+            }
+        }
+        patch_catalog_free(&cat);
+        free(data);
+    }
+}
+
+int main(int argc, char** argv) {
     patch_catalog_source_t sources[4];
     char key[32];
     int fps, intro, blur;
@@ -142,6 +253,8 @@ int main(void) {
     CHECK(patch_catalog_build(&cat, sources, 4, ""), "no serial");
     CHECK(cat.count == 0 && cat.doc_count == 0, "nothing for no serial");
     patch_catalog_free(&cat);
+
+    parallel_patches(argc, argv);
 
     if (failures) {
         printf("patch_catalog: %d failed\n", failures);

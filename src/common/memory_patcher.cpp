@@ -239,7 +239,7 @@ bool BuildCatalog(patch_catalog_t& cat, const char* serial) {
         if (slash == std::string_view::npos) {
             return;
         }
-        static constexpr std::string_view repositories[] = {"shadPS4", "GoldHEN"};
+        static constexpr std::string_view repositories[] = {"shadPS4", "GoldHEN", "ParaLLEl"};
         for (const std::string_view repository : repositories) {
             if (rest.substr(0, slash) == repository) {
                 sources.push_back({repository.data(), data.data(), data.size()});

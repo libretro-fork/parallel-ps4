@@ -1609,7 +1609,7 @@ set(EMBEDDED_RESOURCES
         src/imgui/renderer/fonts/NotoSans-Regular.ttf)
 # The patch repositories (src/resources/patches/README.md), shadPS4's first: of a patch both
 # have for the same version, the first one's is applied (src/common/patch_catalog.h)
-foreach (repository IN ITEMS shadPS4 GoldHEN)
+foreach (repository IN ITEMS shadPS4 GoldHEN ParaLLEl)
     file(GLOB patch_files RELATIVE ${CMAKE_CURRENT_SOURCE_DIR}
          CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/src/resources/patches/${repository}/*.xml)
     list(SORT patch_files)

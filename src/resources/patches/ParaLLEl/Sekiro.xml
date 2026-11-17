@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Patch>
+    <TitleID>
+        <ID>CUSA12047</ID>
+        <ID>CUSA13801</ID>
+        <ID>CUSA13910</ID>
+    </TitleID>
+    <Metadata Title="Sekiro: Shadows Die Twice"
+              Name="Lower Audio Latency"
+              Note="The sound engine (FromSoftware's MagicOrchestra over FMOD) updates 60 times a second instead of 30, so a sound the game starts plays up to 17 ms sooner. Its setup text in the executable says MainThreadUpdateTime= 33333 (microseconds); this makes it 16666, found by the text itself, so every version of the game that has the line gets it."
+              PatchVer="1.0"
+              AppElf="eboot.bin">
+        <PatchList>
+            <Line Type="mask" Address="4D 61 69 6E 54 68 72 65 61 64 55 70 64 61 74 65 54 69 6D 65 3D 20 33 33 33 33 33 0A" Offset="22" Value="3136363636"/>
+        </PatchList>
+    </Metadata>
+</Patch>
