@@ -45,6 +45,8 @@ public:
     [[nodiscard]] const BackingPageTable& BackingPages() const noexcept {
         return backing_pages;
     }
+    /// The size of the backing, from BackingBase
+    [[nodiscard]] u64 BackingBytes() const noexcept;
 
     [[nodiscard]] VAddr SystemManagedVirtualBase() noexcept {
         return reinterpret_cast<VAddr>(system_managed_base);

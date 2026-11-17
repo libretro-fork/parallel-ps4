@@ -268,6 +268,20 @@ public:
 
     bool TryWriteBacking(void* address, const void* data, u64 size);
 
+    /// The backing's start and size (AddressSpace::BackingBase)
+    u8* BackingBase() const noexcept {
+        return impl.BackingBase();
+    }
+    u64 BackingBytes() const noexcept {
+        return impl.BackingBytes();
+    }
+
+    /// The run of pages [virtual_addr, virtual_addr + size) starts with: its length, and in
+    /// *backing_offset where it lies in the backing, or ~0 for a run without backing (the
+    /// guest_import_run_fn of buffer_cache/guest_import.h). Through the backing page table, as
+    /// CopySparseMemory.
+    u64 BackingRun(VAddr virtual_addr, u64 size, u64* backing_offset) const;
+
     void SetupMemoryRegions(u64 flexible_size, bool use_extended_mem1, bool use_extended_mem2);
 
     PAddr PoolExpand(PAddr search_start, PAddr search_end, u64 size, u64 alignment);

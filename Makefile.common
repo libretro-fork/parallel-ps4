@@ -320,7 +320,7 @@ CORE_SOURCES_C += $(addprefix src/shadnet/,pb_wire.c shadnet_msg.c)
 CORE_SOURCES_C += $(addprefix src/video_core/host_shaders/,host_spirv.c)
 CORE_SOURCES_C += $(addprefix src/video_core/renderer_vulkan/,vk_heap.c vk_device_fault.c frame_notes.c)
 CORE_SOURCES_C += src/video_core/amdgpu/sample_locs.c src/video_core/amdgpu/cmd_copy_ring.c
-CORE_SOURCES_C += $(addprefix src/video_core/buffer_cache/,write_snapshots.c)
+CORE_SOURCES_C += $(addprefix src/video_core/buffer_cache/,write_snapshots.c guest_import.c)
 
 CORE_SOURCES_CXX += $(SCM_REV_CPP)
 CORE_SOURCES_CXX += $(addprefix libretro/,gpu_frames.cpp host.cpp libretro_core.cpp \

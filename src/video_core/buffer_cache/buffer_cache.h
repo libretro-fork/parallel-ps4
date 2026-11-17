@@ -4,6 +4,7 @@
 #pragma once
 
 #include <deque>
+#include <optional>
 #include <span>
 #include <vector>
 #include "common/small_vector.h"
@@ -18,6 +19,7 @@
 #include "video_core/texture_cache/image.h"
 
 struct write_snapshots;
+struct guest_import;
 
 namespace AmdGpu {
 struct Liverpool;
@@ -131,6 +133,14 @@ public:
     /// Mark region as modified from the GPU
     void MarkRegionAsGpuModified(VAddr addr, size_t size);
 
+    /// Where the GPU writes [@device_addr, @device_addr + @size) of the game's memory itself:
+    /// the imported buffer over it and the offset in that buffer, provided the range lies in one
+    /// run of the backing and in one chunk (guest_import.h); {nullptr, 0} otherwise, and then
+    /// the caller reads back through a staging buffer as before. @alignment is what the offset
+    /// must be a multiple of.
+    [[nodiscard]] std::pair<const Buffer*, u64> GuestTarget(VAddr device_addr, u64 size,
+                                                            u64 alignment);
+
     /// Synchronizes all buffers needed for DMA.
     void SynchronizeDmaBuffers();
 
@@ -174,6 +184,18 @@ private:
                            bool is_texel_buffer);
 
     bool SynchronizeMemoryFromImage(const Buffer* arena, VAddr device_addr, u32 size);
+
+    /// The Buffer over imported chunk @chunk, @handle, made the first time it is wanted
+    const Buffer* GuestChunk(u32 chunk, vk::Buffer handle);
+
+    /// Of @copies (each with where in the game's memory it goes as its dstOffset) records from
+    /// @src what the GPU can write into the game's memory itself, and leaves in @copies what
+    /// must go through a staging buffer
+    template <typename Copies>
+    void CopyToGuest(const Buffer* src, Copies& copies);
+    void FlushGuestCopies();
+    static void OnGuestPiece(void* ctx, VkBuffer buffer, u32 chunk, VkDeviceSize buffer_offset,
+                             u64 addr, u64 delta, u64 size);
 
     const Vulkan::Instance& instance;
     Vulkan::Scheduler& scheduler;
@@ -236,6 +258,17 @@ private:
     u32 block_shift{};
     u32 blocks_per_arena_page{};
     u32 blocks_per_arena_page_shift{};
+
+    // The game's memory lent to the GPU, null without VK_EXT_external_memory_host; a Buffer
+    // over each chunk of it, made the first time one is wanted (the table itself at start),
+    // and the copies being gathered for one (CopyToGuest)
+    ::guest_import* guest{};
+    std::vector<std::optional<Buffer>> guest_chunks;
+    Common::SmallVector<vk::BufferCopy, 8> guest_copies;
+    std::vector<vk::BufferCopy> guest_rest;
+    const Buffer* guest_src{};
+    const Buffer* guest_batch{};
+    u64 guest_src_offset{};
 };
 
 } // namespace VideoCore

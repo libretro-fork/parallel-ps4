@@ -12,6 +12,7 @@
 #include "video_core/amdgpu/liverpool.h"
 #include "video_core/buffer_cache/buffer.h"
 #include "video_core/buffer_cache/buffer_cache.h"
+#include "video_core/buffer_cache/guest_import.h"
 #include "video_core/buffer_cache/memory_tracker.h"
 #include "video_core/buffer_cache/region_definitions.h"
 #include "video_core/renderer_vulkan/vk_graphics_pipeline.h"
@@ -157,11 +158,106 @@ BufferCache::BufferCache(const Vulkan::Instance& instance_, Vulkan::Scheduler& s
                                                      MemoryType::DeviceLocal, "Null Index Buffer");
         runtime.FillBuffer(null_index_buffer.get(), 0u, NULL_INDEX_BUFFER_SIZE, 0u);
     }
+
+    // The game's memory lent to the GPU, for readbacks to land in (guest_import.h)
+    if (instance.IsExternalMemoryHostSupported()) {
+        const auto& dispatch = VULKAN_HPP_DEFAULT_DISPATCHER;
+        guest_import_info_t info{};
+        info.device = static_cast<VkDevice>(device);
+        info.memory = static_cast<VkPhysicalDeviceMemoryProperties>(instance.GetMemoryProperties());
+        info.alignment = instance.GetMinImportedHostPointerAlignment();
+        info.base = memory->BackingBase();
+        info.size = memory->BackingBytes();
+        info.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+        info.fns.allocate_memory = dispatch.vkAllocateMemory;
+        info.fns.free_memory = dispatch.vkFreeMemory;
+        info.fns.create_buffer = dispatch.vkCreateBuffer;
+        info.fns.destroy_buffer = dispatch.vkDestroyBuffer;
+        info.fns.get_buffer_memory_requirements = dispatch.vkGetBufferMemoryRequirements;
+        info.fns.bind_buffer_memory = dispatch.vkBindBufferMemory;
+        info.fns.get_memory_host_pointer_properties = dispatch.vkGetMemoryHostPointerPropertiesEXT;
+        guest = guest_import_create(&info);
+        if (guest) {
+            guest_chunks.resize((info.size + (u64{1} << GUEST_IMPORT_CHUNK_SHIFT) - 1) >>
+                                GUEST_IMPORT_CHUNK_SHIFT);
+            guest_rest.reserve(64);
+        }
+    }
 }
 
 BufferCache::~BufferCache() {
     memory_tracker.reset();
     write_snapshots_destroy(snapshots);
+    // The Buffers only borrow the chunks' handles
+    guest_chunks.clear();
+    guest_import_destroy(guest);
+}
+
+/// The guest_import_run_fn over the memory manager's backing
+static u64 GuestRun(void* ctx, u64 addr, u64 size, u64* backing_offset) {
+    return static_cast<const Core::MemoryManager*>(ctx)->BackingRun(addr, size, backing_offset);
+}
+
+const Buffer* BufferCache::GuestChunk(u32 chunk, vk::Buffer handle) {
+    auto& slot = guest_chunks[chunk];
+    if (!slot) {
+        constexpr u64 chunk_size = u64{1} << GUEST_IMPORT_CHUNK_SHIFT;
+        const u64 start = u64{chunk} << GUEST_IMPORT_CHUNK_SHIFT;
+        slot.emplace(instance, handle, std::min(chunk_size, memory->BackingBytes() - start),
+                     "Game memory");
+    }
+    return &*slot;
+}
+
+std::pair<const Buffer*, u64> BufferCache::GuestTarget(VAddr device_addr, u64 size, u64 alignment) {
+    u32 chunk = 0;
+    VkDeviceSize offset = 0;
+    const VkBuffer handle =
+        guest_import_target(guest, GuestRun, memory, device_addr, size, alignment, &chunk, &offset);
+    if (handle == VK_NULL_HANDLE) {
+        return {nullptr, 0};
+    }
+    return {GuestChunk(chunk, handle), offset};
+}
+
+void BufferCache::OnGuestPiece(void* ctx, VkBuffer buffer, u32 chunk, VkDeviceSize buffer_offset,
+                               u64 addr, u64 delta, u64 size) {
+    auto* const self = static_cast<BufferCache*>(ctx);
+    const u64 src_offset = self->guest_src_offset + delta;
+    if (buffer == VK_NULL_HANDLE) {
+        self->guest_rest.push_back({src_offset, addr, size});
+        return;
+    }
+    const Buffer* const target = self->GuestChunk(chunk, buffer);
+    if (target != self->guest_batch) {
+        self->FlushGuestCopies();
+        self->guest_batch = target;
+    }
+    self->guest_copies.push_back({src_offset, buffer_offset, size});
+}
+
+void BufferCache::FlushGuestCopies() {
+    if (guest_batch && !guest_copies.empty()) {
+        runtime.CopyBuffer(guest_src, guest_batch, guest_copies);
+    }
+    guest_copies.clear();
+}
+
+template <typename Copies>
+void BufferCache::CopyToGuest(const Buffer* src, Copies& copies) {
+    if (!guest) {
+        return;
+    }
+    guest_src = src;
+    guest_batch = nullptr;
+    guest_rest.clear();
+    for (const auto& copy : copies) {
+        guest_src_offset = copy.srcOffset;
+        guest_import_split(guest, GuestRun, memory, copy.dstOffset, copy.size, OnGuestPiece, this);
+    }
+    FlushGuestCopies();
+    copies.clear();
+    copies.insert(copies.end(), guest_rest.begin(), guest_rest.end());
 }
 
 void BufferCache::TickFrame() {
@@ -209,47 +305,55 @@ void BufferCache::ReadMemory(VAddr device_addr, u64 size, bool is_write, bool as
 }
 
 void BufferCache::DownloadMemory(const Buffer* arena, VAddr device_addr, u64 size, bool async) {
+    // Each copy first with where in the game's memory it goes as its destination
     Common::SmallVector<vk::BufferCopy, 1> copies;
-    u64 total_size_bytes = 0;
     const VAddr arena_base = arena->cpu_addr;
     memory_tracker->ForEachDownloadRange<false>(device_addr, size, [&](u64 address, u64 size) {
-        const auto add_download = [&](VAddr start, VAddr end) {
-            const u64 new_offset = start - arena_base;
-            const u64 new_size = end - start;
+        gpu_modified_ranges.ForEachInRange(address, size, [&](VAddr start, VAddr end) {
             copies.push_back(vk::BufferCopy{
-                .srcOffset = new_offset,
-                .dstOffset = total_size_bytes,
-                .size = new_size,
+                .srcOffset = start - arena_base,
+                .dstOffset = start,
+                .size = end - start,
             });
-            // Align up to avoid cache conflicts
-            constexpr u64 align = 64ULL;
-            constexpr u64 mask = ~(align - 1ULL);
-            total_size_bytes += (new_size + align - 1) & mask;
-        };
-        gpu_modified_ranges.ForEachInRange(address, size, add_download);
+        });
         gpu_modified_ranges.Subtract(address, size);
     });
-    if (total_size_bytes == 0) {
+    if (copies.empty()) {
         return;
     }
-    const auto download =
-        staging_pool.Request(total_size_bytes, VideoCore::MemoryType::HostCached, 16, async);
+    // Straight into the game's memory where it is lent to the GPU, the rest through staging
+    CopyToGuest(arena, copies);
+    u64 total_size_bytes = 0;
     for (auto& copy : copies) {
-        copy.dstOffset += download.offset;
+        copy.dstOffset = total_size_bytes;
+        // Align up to avoid cache conflicts
+        constexpr u64 align = 64ULL;
+        constexpr u64 mask = ~(align - 1ULL);
+        total_size_bytes += (copy.size + align - 1) & mask;
     }
-    runtime.CopyBuffer(arena, download.buffer, copies);
+    Vulkan::StagingBufferRef download{};
+    if (total_size_bytes != 0) {
+        download =
+            staging_pool.Request(total_size_bytes, VideoCore::MemoryType::HostCached, 16, async);
+        for (auto& copy : copies) {
+            copy.dstOffset += download.offset;
+        }
+        runtime.CopyBuffer(arena, download.buffer, copies);
+    }
 
     const auto write_data = [this, arena_base, device_addr, size, download, async,
                              copies = std::move(copies)] {
-        download.Invalidate();
-        for (const auto& copy : copies) {
-            auto* dst_addr = std::bit_cast<u8*>(arena_base + copy.srcOffset);
-            memory->TryWriteBacking(dst_addr, download.mapped + (copy.dstOffset - download.offset),
-                                    copy.size);
+        if (download.buffer) {
+            download.Invalidate();
+            for (const auto& copy : copies) {
+                auto* dst_addr = std::bit_cast<u8*>(arena_base + copy.srcOffset);
+                memory->TryWriteBacking(
+                    dst_addr, download.mapped + (copy.dstOffset - download.offset), copy.size);
+            }
         }
         memory_tracker->UnmarkRegionAsGpuModified(device_addr, size, false);
 
-        if (async) {
+        if (async && download.buffer) {
             staging_pool.FreeDeferred(download);
         }
     };
@@ -323,25 +427,33 @@ void BufferCache::ReadEdgeImagePages(const Image& image) {
     const VAddr image_end = image_addr + image_size;
     const VAddr page_start = PageManager::GetPageAddr(image_addr);
     const VAddr page_end = PageManager::GetNextPageAddr(image_end - 1);
+    // Each copy first with where in the game's memory it goes as its destination
     Common::SmallVector<vk::BufferCopy, 2> copies;
-    u64 total_size_bytes = 0;
     const auto [buffer, offset] = ObtainBuffer(page_start, page_end - page_start);
     const auto add_download = [&](VAddr start, VAddr end) {
-        const u64 new_offset = start - buffer->CpuAddr();
-        const u64 new_size = end - start;
         copies.push_back(vk::BufferCopy{
-            .srcOffset = new_offset,
-            .dstOffset = total_size_bytes,
-            .size = new_size,
+            .srcOffset = start - buffer->CpuAddr(),
+            .dstOffset = start,
+            .size = end - start,
         });
-        // Align up to avoid cache conflicts
-        constexpr u64 align = 64ULL;
-        constexpr u64 mask = ~(align - 1ULL);
-        total_size_bytes += (new_size + align - 1) & mask;
     };
     gpu_modified_ranges.ForEachInRange(page_start, image_addr - page_start, add_download);
     gpu_modified_ranges.ForEachInRange(image_end, page_end - image_end, add_download);
     gpu_modified_ranges.Subtract(page_start, page_end - page_start);
+    if (copies.empty()) {
+        return;
+    }
+    scheduler.EndRendering();
+    // Straight into the game's memory where it is lent to the GPU, the rest through staging
+    CopyToGuest(buffer, copies);
+    u64 total_size_bytes = 0;
+    for (auto& copy : copies) {
+        copy.dstOffset = total_size_bytes;
+        // Align up to avoid cache conflicts
+        constexpr u64 align = 64ULL;
+        constexpr u64 mask = ~(align - 1ULL);
+        total_size_bytes += (copy.size + align - 1) & mask;
+    }
     if (total_size_bytes == 0) {
         return;
     }
@@ -351,7 +463,6 @@ void BufferCache::ReadEdgeImagePages(const Image& image) {
         // Modify copies to have the staging offset in mind
         copy.dstOffset += download.offset;
     }
-    scheduler.EndRendering();
     runtime.CopyBuffer(buffer, download.buffer, copies);
     scheduler.DeferOperation(
         [this, base = buffer->CpuAddr(), download, copies = std::move(copies)]() {

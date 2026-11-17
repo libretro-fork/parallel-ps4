@@ -247,7 +247,7 @@ bool Instance::CreateDevice() {
     }
 
     // Room for the one the libretro core adds below.
-    Common::StaticVector<const char*, 40> enabled_extensions;
+    Common::StaticVector<const char*, 48> enabled_extensions;
     const auto add_extension = [&](std::string_view extension) -> bool {
         const auto result =
             std::find_if(available_extensions.begin(), available_extensions.end(),
@@ -404,6 +404,16 @@ bool Instance::CreateDevice() {
     // The same, by NT handle. Spelled out: its macro comes with Vulkan's Win32 declarations.
     external_memory_export = add_extension("VK_KHR_external_memory_win32");
 #endif
+    // Game memory the GPU writes a readback straight into (buffer_cache/guest_import.h)
+    external_memory_host = add_extension(VK_EXT_EXTERNAL_MEMORY_HOST_EXTENSION_NAME);
+    if (external_memory_host) {
+        const auto host_chain =
+            physical_device.getProperties2<vk::PhysicalDeviceProperties2,
+                                           vk::PhysicalDeviceExternalMemoryHostPropertiesEXT>();
+        min_imported_host_pointer_alignment =
+            host_chain.get<vk::PhysicalDeviceExternalMemoryHostPropertiesEXT>()
+                .minImportedHostPointerAlignment;
+    }
     shader_clock = add_extension(VK_KHR_SHADER_CLOCK_EXTENSION_NAME);
     if (shader_clock) {
         shader_clock_features = feature_chain.get<vk::PhysicalDeviceShaderClockFeaturesKHR>();

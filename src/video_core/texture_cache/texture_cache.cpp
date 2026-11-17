@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include <algorithm>
+#include <bit>
 #include <limits>
 #include <encodings/xxh3.h>
 
@@ -222,6 +223,35 @@ void TextureCache::DownloadImageMemory(ImageId image_id, DownloadMemoryFlags fla
         return;
     }
     ASSERT(copy_size <= image.info.guest_size);
+
+    // Straight into the game's memory where it is lent to the GPU (guest_import.h). The tiler
+    // writes all of the image's memory, so only when all of it is read back; a copy writes the
+    // levels' texels, at offsets a texel's size divides.
+    const bool tiled = image.info.props.is_tiled;
+    if ((!tiled || copy_size == image.info.guest_size) &&
+        std::has_single_bit(image.info.num_bits)) {
+        const u64 alignment = tiled ? std::max<u64>(256, instance.StorageMinAlignment()) : 256;
+        const auto [target, target_offset] = buffer_cache.GuestTarget(
+            image_addr, tiled ? image.info.guest_size : copy_size, alignment);
+        if (target) {
+            tile_manager.TileImage(image, buffer_copies, target, target_offset);
+            const auto written = [this, image_addr, copy_size, discard_buffer_cache] {
+                if (discard_buffer_cache) {
+                    buffer_cache.UnmarkRegionAsGpuModified(image_addr, copy_size, true);
+                }
+            };
+            if (is_priority) {
+                scheduler.DeferPriorityOperation(written);
+            } else if (is_sync) {
+                scheduler.Finish();
+                written();
+            } else {
+                scheduler.DeferOperation(written);
+            }
+            return;
+        }
+    }
+
     const auto download =
         runtime.GetStagingPool().Request(copy_size, MemoryType::HostCached, 16, !is_sync);
 

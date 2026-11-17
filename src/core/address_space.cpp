@@ -843,6 +843,10 @@ struct AddressSpace::Impl {
 };
 #endif
 
+u64 AddressSpace::BackingBytes() const noexcept {
+    return BackingSize;
+}
+
 AddressSpace::AddressSpace() : impl{std::make_unique<Impl>()} {
     backing_base = impl->backing_base;
     system_managed_base = impl->system_managed_base;

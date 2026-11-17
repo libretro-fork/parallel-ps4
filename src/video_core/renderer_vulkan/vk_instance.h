@@ -334,6 +334,16 @@ public:
         return external_memory_export;
     }
 
+    /// Whether host memory can be imported as device memory (VK_EXT_external_memory_host)
+    bool IsExternalMemoryHostSupported() const {
+        return external_memory_host;
+    }
+
+    /// The alignment of a host pointer and size to import
+    vk::DeviceSize GetMinImportedHostPointerAlignment() const {
+        return min_imported_host_pointer_alignment;
+    }
+
     /// Returns the pipeline cache unique identifier
     const auto GetPipelineCacheUUID() const {
         return properties.pipelineCacheUUID;
@@ -589,6 +599,8 @@ private:
     bool device_fault{};
     bool device_checkpoints{};
     bool external_memory_export{};
+    bool external_memory_host{};
+    vk::DeviceSize min_imported_host_pointer_alignment{};
     bool supports_block_texel_view{};
     u64 total_memory_budget{};
     std::vector<size_t> valid_heaps;

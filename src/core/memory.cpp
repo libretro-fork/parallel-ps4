@@ -183,6 +183,35 @@ void MemoryManager::CopySparseMemory(VAddr virtual_addr, u8* dest, u64 size) {
     }
 }
 
+u64 MemoryManager::BackingRun(VAddr virtual_addr, u64 size, u64* backing_offset) const {
+    const auto& backing_pages = impl.BackingPages();
+    const u8* const base = impl.BackingBase();
+    const u8* expected = nullptr;
+    bool backed = false;
+    u64 run = 0;
+    while (size) {
+        const u64 page = virtual_addr >> GUEST_PAGE_BITS;
+        const u64 offset_in_page = virtual_addr % GUEST_PAGE_SIZE;
+        const u64 run_size = std::min<u64>(GUEST_PAGE_SIZE - offset_in_page, size);
+        const auto* entry = backing_pages.find(page);
+        const bool page_backed = entry && *entry;
+        if (run == 0) {
+            backed = page_backed;
+            *backing_offset =
+                page_backed ? static_cast<u64>(*entry + offset_in_page - base) : ~u64{0};
+        } else if (page_backed != backed || (page_backed && *entry + offset_in_page != expected)) {
+            break;
+        }
+        if (page_backed) {
+            expected = *entry + offset_in_page + run_size;
+        }
+        run += run_size;
+        size -= run_size;
+        virtual_addr += run_size;
+    }
+    return run;
+}
+
 bool MemoryManager::TryWriteBacking(void* address, const void* data, u64 size) {
     // From the GPU thread: through the backing page table, as CopySparseMemory reads, without
     // the maps (a change to them may be waiting on this thread). It stops where the backing

@@ -100,6 +100,12 @@ $CC -std=c89 -O1 -g -Wall -fsanitize=address,undefined -isystem externals/vulkan
     -Isrc libretro/tests/vk_heap_device_test.c src/video_core/renderer_vulkan/vk_heap.c \
     -o "$OUT/vk_heap_device_test" -ldl
 ASAN_OPTIONS=detect_leaks=0 "$OUT/vk_heap_device_test"
+# The game's memory lent to the GPU (buffer_cache/guest_import.c) on a real device: copied
+# from, written into where a scattered address space maps it, chunks imported once
+$CC -std=c89 -O1 -g -Wall -fsanitize=address,undefined -isystem externals/vulkan-headers/include \
+    -Isrc libretro/tests/guest_import_device_test.c src/video_core/buffer_cache/guest_import.c \
+    -o "$OUT/guest_import_device_test" -ldl
+ASAN_OPTIONS=detect_leaks=0 "$OUT/guest_import_device_test"
 # The tiling shader on a real device: tiled and detiled texels are the texels they were, and a
 # texel with no place in the image is neither read nor written
 $CC -std=c89 -O1 -g -Wall -fsanitize=address,undefined -isystem externals/vulkan-headers/include \

@@ -53,7 +53,8 @@ struct UniqueBuffer {
         : device{other.device}, buffer{std::exchange(other.buffer, VK_NULL_HANDLE)},
           bda_addr{std::exchange(other.bda_addr, 0)},
           allocator{std::exchange(other.allocator, nullptr)},
-          allocation{std::exchange(other.allocation, nullptr)} {}
+          allocation{std::exchange(other.allocation, nullptr)},
+          borrowed{std::exchange(other.borrowed, false)} {}
 
     UniqueBuffer& operator=(UniqueBuffer&& other) noexcept {
         if (this != &other) {
@@ -63,6 +64,7 @@ struct UniqueBuffer {
             bda_addr = std::exchange(other.bda_addr, 0);
             allocator = std::exchange(other.allocator, nullptr);
             allocation = std::exchange(other.allocation, nullptr);
+            borrowed = std::exchange(other.borrowed, false);
         }
         return *this;
     }
@@ -76,11 +78,18 @@ struct UniqueBuffer {
     vk::DeviceAddress bda_addr{};
     Vulkan::MemoryAllocator* allocator;
     vk_heap_span* allocation{};
+    /// A buffer someone else made and destroys (Buffer's borrowing constructor)
+    bool borrowed{};
 };
 
 struct Buffer {
     explicit Buffer(const Vulkan::Instance& instance, VAddr cpu_addr_, u64 size_bytes_,
                     MemoryType mem_type, std::string_view debug_name = "");
+
+    /// A buffer over @handle, made and destroyed by someone else, so that it can be copied to
+    /// and from as any other (the game's memory imported, guest_import.h)
+    explicit Buffer(const Vulkan::Instance& instance, vk::Buffer handle, u64 size_bytes_,
+                    std::string_view debug_name);
 
     Buffer& operator=(const Buffer&) = delete;
     Buffer(const Buffer&) = delete;

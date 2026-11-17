@@ -52,7 +52,9 @@ UniqueBuffer::~UniqueBuffer() {
 }
 
 void UniqueBuffer::Destroy() {
-    if (allocation) {
+    if (borrowed) {
+        borrowed = false;
+    } else if (allocation) {
         allocator->DestroyBuffer(buffer, allocation);
     } else if (buffer) {
         device.destroyBuffer(buffer);
@@ -130,6 +132,14 @@ Buffer::Buffer(const Vulkan::Instance& instance, VAddr cpu_addr_, u64 size_bytes
         }
         is_coherent = buffer.allocation->flags & VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
     }
+}
+
+Buffer::Buffer(const Vulkan::Instance& instance, vk::Buffer handle, u64 size_bytes_,
+               std::string_view debug_name)
+    : size_bytes{size_bytes_}, buffer{instance.GetDevice(), instance.GetAllocator()} {
+    buffer.buffer = handle;
+    buffer.borrowed = true;
+    Vulkan::SetObjectName(instance.GetDevice(), Handle(), debug_name);
 }
 
 void Buffer::Flush(u64 offset, u64 size) {
