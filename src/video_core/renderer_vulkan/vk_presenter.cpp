@@ -17,6 +17,7 @@
 #include "imgui/renderer/imgui_core.h"
 #include "imgui/renderer/imgui_impl_vulkan.h"
 #include "imgui/shadnet_notifications_layer.h"
+#include "imgui_internal.h"
 #include "video_core/buffer_cache/buffer.h"
 #include "video_core/buffer_cache/guest_import.h"
 #include "video_core/renderer_vulkan/frame_notes.h"
@@ -865,8 +866,14 @@ void Presenter::Present(Frame* frame, bool is_reusing_frame, bool is_game_frame)
         // The game's picture is copied into the image, and the overlays drawn over it; through
         // the overlays' pass, as a textured quad over a window's background, only for the
         // splash screen. The frame image goes back to being sampled after (PrepareLastFrame).
-        const bool splash = Libraries::SystemService::IsSplashVisible();
-        const bool direct = !splash;
+        // The game's picture outside a window: the dockspace's central node, which the
+        // dockspace leaves without a background when no window is docked in it. A window
+        // docked there (the splash's, or from an earlier session's layout) leaves it the next
+        // frame; for that one frame the picture is drawn over the background as a quad.
+        const ImGuiDockNode* central = ImGui::DockBuilderGetCentralNode(dockId);
+        const bool no_window =
+            !Libraries::SystemService::IsSplashVisible() && !emu_settings_get_null_gpu();
+        const bool direct = no_window && (!central || central->Windows.Size == 0);
         const std::array pre_barriers{
             vk::ImageMemoryBarrier{
                 .srcAccessMask = vk::AccessFlagBits::eNone,
@@ -916,13 +923,29 @@ void Presenter::Present(Frame* frame, bool is_reusing_frame, bool is_game_frame)
         // Where the game's picture goes, in the image's pixels; none when its window is hidden
         std::optional<vk::Rect2D> game_rect;
 
-        { // Draw the game
+        if (no_window) {
+            const ImGuiViewport* viewport = ImGui::GetMainViewport();
+            const ImVec2 area_pos = central ? central->Pos : viewport->WorkPos;
+            const ImVec2 area = central ? central->Size : viewport->WorkSize;
+            SetExpectedGameSize(static_cast<s32>(area.x), static_cast<s32>(area.y));
+            const auto fit = FitImage(frame->width, frame->height, static_cast<s32>(area.x),
+                                      static_cast<s32>(area.y));
+            const ImVec2 min{area_pos.x + static_cast<float>(fit.offset.x),
+                             area_pos.y + static_cast<float>(fit.offset.y)};
+            const ImVec2 max{min.x + static_cast<float>(fit.extent.width),
+                             min.y + static_cast<float>(fit.extent.height)};
+            if (direct) {
+                const ImVec2 scale = ImGui::GetIO().DisplayFramebufferScale;
+                game_rect = ClampRect(min.x * scale.x, min.y * scale.y, (max.x - min.x) * scale.x,
+                                      (max.y - min.y) * scale.y, extent);
+            } else {
+                ImGui::GetForegroundDrawList()->AddImage(frame->imgui_texture, min, max);
+            }
+        } else { // Draw the game
             ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2{0.0f});
             ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
             ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
-            // No background where the picture is copied in beneath the overlays
-            ImGui::PushStyleColor(ImGuiCol_WindowBg,
-                                  ImVec4(0.0f, 0.0f, 0.0f, direct ? 0.0f : 1.0f));
+            ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.0f, 0.0f, 0.0f, 1.0f));
             ImGui::SetNextWindowDockID(dockId, ImGuiCond_Once);
             if (ImGui::Begin("Display##game_display", nullptr, ImGuiWindowFlags_NoNav)) {
                 auto game_texture = frame->imgui_texture;
@@ -961,15 +984,7 @@ void Presenter::Present(Frame* frame, bool is_reusing_frame, bool is_game_frame)
                 };
 
                 ImGui::SetCursorPos(ImGui::GetCursorStartPos() + offset);
-                if (direct) {
-                    const ImVec2 at = ImGui::GetCursorScreenPos();
-                    const ImVec2 scale = ImGui::GetIO().DisplayFramebufferScale;
-                    game_rect = ClampRect(at.x * scale.x, at.y * scale.y, size.x * scale.x,
-                                          size.y * scale.y, extent);
-                    ImGui::Dummy(size);
-                } else {
-                    ImGui::Image(game_texture, size);
-                }
+                ImGui::Image(game_texture, size);
 
                 if (emu_settings_get_null_gpu()) {
                     Core::Devtools::Layer::DrawNullGpuNotice();
