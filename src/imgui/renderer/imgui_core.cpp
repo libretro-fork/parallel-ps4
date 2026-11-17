@@ -310,12 +310,12 @@ ImGuiID NewFrame(bool is_reusing_frame) {
 }
 
 void Render(const vk::CommandBuffer& cmdbuf, const vk::ImageView& image_view,
-            const vk::Extent2D& extent) {
+            const vk::Extent2D& extent, bool keep) {
     ImGui::Render();
     ImDrawData* draw_data = GetDrawData();
     // Font atlas uploads are recorded ahead of the render pass that samples them.
     Vulkan::UpdateTextures(*draw_data, cmdbuf);
-    if (draw_data->CmdListsCount == 0) {
+    if (draw_data->CmdListsCount == 0 || (keep && draw_data->TotalVtxCount == 0)) {
         return;
     }
 
@@ -329,7 +329,7 @@ void Render(const vk::CommandBuffer& cmdbuf, const vk::ImageView& image_view,
         {
             .imageView = image_view,
             .imageLayout = vk::ImageLayout::eColorAttachmentOptimal,
-            .loadOp = vk::AttachmentLoadOp::eClear,
+            .loadOp = keep ? vk::AttachmentLoadOp::eLoad : vk::AttachmentLoadOp::eClear,
             .storeOp = vk::AttachmentStoreOp::eStore,
         },
     };

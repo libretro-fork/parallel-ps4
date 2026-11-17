@@ -316,6 +316,120 @@ static void NarrowToReadback(const vk::CommandBuffer& cmdbuf, const vk::Image im
                         target);
 }
 
+// The rectangle of the image's pixels [x, x + width) by [y, y + height) covers, rounded to
+// whole pixels and kept inside @extent; none when nothing of it is
+static std::optional<vk::Rect2D> ClampRect(float x, float y, float width, float height,
+                                           const vk::Extent2D extent) {
+    const s32 left = std::max<s32>(static_cast<s32>(std::lround(x)), 0);
+    const s32 top = std::max<s32>(static_cast<s32>(std::lround(y)), 0);
+    const s32 right =
+        std::min<s32>(static_cast<s32>(std::lround(x + width)), static_cast<s32>(extent.width));
+    const s32 bottom =
+        std::min<s32>(static_cast<s32>(std::lround(y + height)), static_cast<s32>(extent.height));
+    if (right <= left || bottom <= top) {
+        return std::nullopt;
+    }
+    return vk::Rect2D{{left, top},
+                      {static_cast<u32>(right - left), static_cast<u32>(bottom - top)}};
+}
+
+// The game's picture, the frame's image, into @image at @rect, the rest of it black: copied
+// where it is the frame's size, stretched by a blit where it is not. @image is in
+// TransferDstOptimal and the frame's image in TransferSrcOptimal; after, @image is ready to be
+// drawn over and the frame's image to be sampled again.
+static void CopyGameToImage(const vk::CommandBuffer& cmdbuf, const Frame& frame,
+                            const vk::Image image, const vk::Extent2D extent,
+                            const std::optional<vk::Rect2D>& rect) {
+    const vk::ImageSubresourceRange range = {
+        .aspectMask = vk::ImageAspectFlagBits::eColor,
+        .baseMipLevel = 0,
+        .levelCount = 1,
+        .baseArrayLayer = 0,
+        .layerCount = 1,
+    };
+    const vk::ImageSubresourceLayers layers = {
+        .aspectMask = vk::ImageAspectFlagBits::eColor,
+        .mipLevel = 0,
+        .baseArrayLayer = 0,
+        .layerCount = 1,
+    };
+    const bool covers = rect && rect->offset.x == 0 && rect->offset.y == 0 &&
+                        rect->extent.width == extent.width && rect->extent.height == extent.height;
+    if (!covers) {
+        // Black around the picture, as the window's background was
+        const vk::ClearColorValue black{std::array<float, 4>{0.0f, 0.0f, 0.0f, 1.0f}};
+        cmdbuf.clearColorImage(image, vk::ImageLayout::eTransferDstOptimal, black, range);
+        if (rect) {
+            const vk::ImageMemoryBarrier cleared = {
+                .srcAccessMask = vk::AccessFlagBits::eTransferWrite,
+                .dstAccessMask = vk::AccessFlagBits::eTransferWrite,
+                .oldLayout = vk::ImageLayout::eTransferDstOptimal,
+                .newLayout = vk::ImageLayout::eTransferDstOptimal,
+                .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+                .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+                .image = image,
+                .subresourceRange = range,
+            };
+            cmdbuf.pipelineBarrier(vk::PipelineStageFlagBits::eTransfer,
+                                   vk::PipelineStageFlagBits::eTransfer, {}, {}, {}, cleared);
+        }
+    }
+    if (rect && frame.width == rect->extent.width && frame.height == rect->extent.height) {
+        const vk::ImageCopy copy = {
+            .srcSubresource = layers,
+            .srcOffset = {0, 0, 0},
+            .dstSubresource = layers,
+            .dstOffset = {rect->offset.x, rect->offset.y, 0},
+            .extent = {frame.width, frame.height, 1},
+        };
+        cmdbuf.copyImage(frame.image, vk::ImageLayout::eTransferSrcOptimal, image,
+                         vk::ImageLayout::eTransferDstOptimal, copy);
+    } else if (rect) {
+        const vk::ImageBlit blit = {
+            .srcSubresource = layers,
+            .srcOffsets =
+                std::array<vk::Offset3D, 2>{
+                    vk::Offset3D{0, 0, 0},
+                    vk::Offset3D{static_cast<s32>(frame.width), static_cast<s32>(frame.height), 1}},
+            .dstSubresource = layers,
+            .dstOffsets =
+                std::array<vk::Offset3D, 2>{
+                    vk::Offset3D{rect->offset.x, rect->offset.y, 0},
+                    vk::Offset3D{rect->offset.x + static_cast<s32>(rect->extent.width),
+                                 rect->offset.y + static_cast<s32>(rect->extent.height), 1}},
+        };
+        cmdbuf.blitImage(frame.image, vk::ImageLayout::eTransferSrcOptimal, image,
+                         vk::ImageLayout::eTransferDstOptimal, blit, vk::Filter::eLinear);
+    }
+    const std::array barriers = {
+        vk::ImageMemoryBarrier{
+            .srcAccessMask = vk::AccessFlagBits::eTransferWrite,
+            .dstAccessMask = vk::AccessFlagBits::eColorAttachmentRead |
+                             vk::AccessFlagBits::eColorAttachmentWrite,
+            .oldLayout = vk::ImageLayout::eTransferDstOptimal,
+            .newLayout = vk::ImageLayout::eColorAttachmentOptimal,
+            .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+            .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+            .image = image,
+            .subresourceRange = range,
+        },
+        vk::ImageMemoryBarrier{
+            .srcAccessMask = vk::AccessFlagBits::eTransferRead,
+            .dstAccessMask = vk::AccessFlagBits::eShaderRead,
+            .oldLayout = vk::ImageLayout::eTransferSrcOptimal,
+            .newLayout = vk::ImageLayout::eShaderReadOnlyOptimal,
+            .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+            .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+            .image = frame.image,
+            .subresourceRange = range,
+        },
+    };
+    cmdbuf.pipelineBarrier(vk::PipelineStageFlagBits::eTransfer,
+                           vk::PipelineStageFlagBits::eColorAttachmentOutput |
+                               vk::PipelineStageFlagBits::eFragmentShader,
+                           {}, {}, {}, barriers);
+}
+
 Presenter::Presenter(Frontend::Window& window_, AmdGpu::Liverpool* liverpool_)
     : window{window_}, liverpool{liverpool_},
       instance{emu_settings_get_gpu_id(), emu_settings_get_vkvalidation_enabled(),
@@ -748,12 +862,19 @@ void Presenter::Present(Frame* frame, bool is_reusing_frame, bool is_game_frame)
 
     {
         const vk::Extent2D extent = swapchain.GetExtent();
+        // The game's picture is copied into the image, and the overlays drawn over it; through
+        // the overlays' pass, as a textured quad over a window's background, only for the
+        // splash screen. The frame image goes back to being sampled after (PrepareLastFrame).
+        const bool splash = Libraries::SystemService::IsSplashVisible();
+        const bool direct = !splash;
         const std::array pre_barriers{
             vk::ImageMemoryBarrier{
                 .srcAccessMask = vk::AccessFlagBits::eNone,
-                .dstAccessMask = vk::AccessFlagBits::eColorAttachmentWrite,
+                .dstAccessMask = direct ? vk::AccessFlagBits::eTransferWrite
+                                        : vk::AccessFlagBits::eColorAttachmentWrite,
                 .oldLayout = vk::ImageLayout::eUndefined,
-                .newLayout = vk::ImageLayout::eColorAttachmentOptimal,
+                .newLayout = direct ? vk::ImageLayout::eTransferDstOptimal
+                                    : vk::ImageLayout::eColorAttachmentOptimal,
                 .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
                 .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
                 .image = swapchain_image,
@@ -767,9 +888,11 @@ void Presenter::Present(Frame* frame, bool is_reusing_frame, bool is_game_frame)
             },
             vk::ImageMemoryBarrier{
                 .srcAccessMask = vk::AccessFlagBits::eColorAttachmentWrite,
-                .dstAccessMask = vk::AccessFlagBits::eShaderRead,
+                .dstAccessMask =
+                    direct ? vk::AccessFlagBits::eTransferRead : vk::AccessFlagBits::eShaderRead,
                 .oldLayout = vk::ImageLayout::eGeneral,
-                .newLayout = vk::ImageLayout::eShaderReadOnlyOptimal,
+                .newLayout = direct ? vk::ImageLayout::eTransferSrcOptimal
+                                    : vk::ImageLayout::eShaderReadOnlyOptimal,
                 .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
                 .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
                 .image = frame->image,
@@ -787,14 +910,19 @@ void Presenter::Present(Frame* frame, bool is_reusing_frame, bool is_game_frame)
 
         cmdbuf.pipelineBarrier(vk::PipelineStageFlagBits::eColorAttachmentOutput,
                                vk::PipelineStageFlagBits::eColorAttachmentOutput |
-                                   vk::PipelineStageFlagBits::eFragmentShader,
+                                   vk::PipelineStageFlagBits::eFragmentShader |
+                                   vk::PipelineStageFlagBits::eTransfer,
                                {}, {}, {}, pre_barriers);
+        // Where the game's picture goes, in the image's pixels; none when its window is hidden
+        std::optional<vk::Rect2D> game_rect;
 
         { // Draw the game
             ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2{0.0f});
             ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
             ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
-            ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.0f, 0.0f, 0.0f, 1.0f));
+            // No background where the picture is copied in beneath the overlays
+            ImGui::PushStyleColor(ImGuiCol_WindowBg,
+                                  ImVec4(0.0f, 0.0f, 0.0f, direct ? 0.0f : 1.0f));
             ImGui::SetNextWindowDockID(dockId, ImGuiCond_Once);
             if (ImGui::Begin("Display##game_display", nullptr, ImGuiWindowFlags_NoNav)) {
                 auto game_texture = frame->imgui_texture;
@@ -833,7 +961,15 @@ void Presenter::Present(Frame* frame, bool is_reusing_frame, bool is_game_frame)
                 };
 
                 ImGui::SetCursorPos(ImGui::GetCursorStartPos() + offset);
-                ImGui::Image(game_texture, size);
+                if (direct) {
+                    const ImVec2 at = ImGui::GetCursorScreenPos();
+                    const ImVec2 scale = ImGui::GetIO().DisplayFramebufferScale;
+                    game_rect = ClampRect(at.x * scale.x, at.y * scale.y, size.x * scale.x,
+                                          size.y * scale.y, extent);
+                    ImGui::Dummy(size);
+                } else {
+                    ImGui::Image(game_texture, size);
+                }
 
                 if (emu_settings_get_null_gpu()) {
                     Core::Devtools::Layer::DrawNullGpuNotice();
@@ -843,7 +979,10 @@ void Presenter::Present(Frame* frame, bool is_reusing_frame, bool is_game_frame)
             ImGui::PopStyleVar(3);
             ImGui::PopStyleColor();
         }
-        ImGui::Core::Render(cmdbuf, swapchain_image_view, swapchain.GetExtent());
+        if (direct) {
+            CopyGameToImage(cmdbuf, *frame, swapchain_image, extent, game_rect);
+        }
+        ImGui::Core::Render(cmdbuf, swapchain_image_view, swapchain.GetExtent(), direct);
 
         // Every frame is read back for the frontend, after the overlays are drawn,
         // into a buffer that is used again - unless the frontend draws from the image itself.
