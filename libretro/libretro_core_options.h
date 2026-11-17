@@ -414,7 +414,9 @@ struct retro_core_option_v2_definition option_defs_us[] = {
      "thread of their own. Asynchronous: a draw whose pipeline is not ready yet "
      "is skipped, so the game does not stutter, but something can be missing for "
      "a frame or two the first time it is drawn. Wait: the draw waits for it, as "
-     "before. Compute work always waits.",
+     "before. Compute work always waits, and so does a draw into small images "
+     "only (where games keep what they carry from frame to frame, such as "
+     "exposure).",
      NULL,
      "video",
      {

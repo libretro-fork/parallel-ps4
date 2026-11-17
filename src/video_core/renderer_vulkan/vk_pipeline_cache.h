@@ -120,6 +120,7 @@ public:
 
 private:
     bool RefreshGraphicsKey();
+    [[nodiscard]] bool DrawsIntoSmallTargets() const;
     bool RefreshGraphicsStages();
     bool RefreshComputeKey();
 

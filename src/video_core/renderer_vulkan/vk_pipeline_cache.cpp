@@ -486,13 +486,45 @@ GraphicsPipeline* PipelineCache::FindGraphicsPipeline(const GraphicsPipelineKey&
         ptr_table_find(&graphics_pipelines, hash, MatchGraphicsKey, &key));
 }
 
+// Whether every image the draw renders into is small. What a game carries from one frame to the
+// next is kept in such images at the end of a chain that makes it smaller and smaller (exposure,
+// the scene's average luminance, eye adaptation): a draw into one skipped while the draws that
+// read it run leaves a value the next frames build on (black, or not a number, for good).
+bool PipelineCache::DrawsIntoSmallTargets() const {
+    constexpr u64 SmallTargetTexels = 256 * 256;
+    const auto& regs = liverpool->regs;
+    bool any = false;
+    if (regs.color_control.mode != AmdGpu::ColorControl::OperationMode::Disable) {
+        for (s32 cb = 0; cb < AmdGpu::NUM_COLOR_BUFFERS; ++cb) {
+            const auto& col_buf = regs.color_buffers[cb];
+            if (!col_buf || !regs.color_target_mask.GetMask(cb)) {
+                continue;
+            }
+            any = true;
+            if (u64{col_buf.Pitch()} * col_buf.Height() > SmallTargetTexels) {
+                return false;
+            }
+        }
+    }
+    if (regs.depth_buffer.DepthValid() || regs.depth_buffer.StencilValid()) {
+        any = true;
+        if (u64{regs.depth_buffer.Pitch()} * regs.depth_buffer.Height() > SmallTargetTexels) {
+            return false;
+        }
+    }
+    return any;
+}
+
 const GraphicsPipeline* PipelineCache::GetGraphicsPipeline(const DrawIndirectParams params) {
     draw_indirect_params = params;
+    // Asynchronous: a draw whose pipeline is not ready is skipped, but one into small images
+    // only waits for it, as compute work does
+    const bool skip_unready = async_compile && !DrawsIntoSmallTargets();
     for (;;) {
         DrainCompiled();
         stage_pending = false;
         if (!RefreshGraphicsKey()) {
-            if (!stage_pending || async_compile) {
+            if (!stage_pending || skip_unready) {
                 return nullptr;
             }
             WaitCompiled();
@@ -505,7 +537,7 @@ const GraphicsPipeline* PipelineCache::GetGraphicsPipeline(const DrawIndirectPar
         if (!IsPipelinePending(pipeline_hash)) {
             if (num_pending_pipelines == pending_pipelines.size()) {
                 // As many in the making as there is room for: this one waits its turn
-                if (async_compile) {
+                if (skip_unready) {
                     return nullptr;
                 }
                 WaitCompiled();
@@ -555,7 +587,7 @@ const GraphicsPipeline* PipelineCache::GetGraphicsPipeline(const DrawIndirectPar
             pending_pipelines[num_pending_pipelines++] = pipeline_hash;
             Submit(job);
         }
-        if (async_compile) {
+        if (skip_unready) {
             return nullptr;
         }
         WaitCompiled();
