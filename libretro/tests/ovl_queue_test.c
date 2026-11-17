@@ -46,6 +46,13 @@ void audio_mix_play_clip(const float *frames, unsigned count, float gain) {
   (void)count;
   (void)gain;
 }
+void ovl_invite_chosen(int user_id, const char *invitation_id, const char *from_npid,
+                       int accept) {
+  (void)user_id;
+  (void)invitation_id;
+  (void)from_npid;
+  (void)accept;
+}
 
 static unsigned char *icon;
 static size_t icon_size;

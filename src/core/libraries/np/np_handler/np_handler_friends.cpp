@@ -6,7 +6,6 @@
 #include "common/logging/log.h"
 #include "core/libraries/np/np_error.h"
 #include "core/libraries/np/np_handler/np_handler.h"
-#include "imgui/shadnet_notifications_layer.h"
 
 namespace Libraries::Np {
 
@@ -27,8 +26,7 @@ std::optional<std::string> NpHandler::GetFriendNpid(s32 user_id, u32 index) cons
 
 void NpHandler::OnFriendQuery(s32 user_id, const ShadNet::NotifyFriendQuery& n) {
     LOG_INFO(NpHandler, "user_id={} FriendQuery from '{}'", user_id, n.fromNpid);
-    ImGui::ShadNetNotify::Push(ImGui::ShadNetNotify::Kind::FriendRequest,
-                               "Friend request from " + n.fromNpid);
+    ShadNetNotify(OVL_SHADNET_FRIEND_REQUEST, "Friend request from " + n.fromNpid);
     m_mutex_friend_state.Run([&] {
         auto& st = m_friend_state[user_id];
         if (std::find(st.requests_received.begin(), st.requests_received.end(), n.fromNpid) ==
@@ -41,8 +39,7 @@ void NpHandler::OnFriendQuery(s32 user_id, const ShadNet::NotifyFriendQuery& n) 
 void NpHandler::OnFriendNew(s32 user_id, const ShadNet::NotifyFriendNew& n) {
     LOG_INFO(NpHandler, "user_id={} FriendNew '{}' ({})", user_id, n.npid,
              n.online ? "online" : "offline");
-    ImGui::ShadNetNotify::Push(ImGui::ShadNetNotify::Kind::FriendNew,
-                               n.npid + " is now your friend");
+    ShadNetNotify(OVL_SHADNET_FRIEND_NEW, n.npid + " is now your friend");
     m_mutex_friend_state.Run([&] {
         auto& st = m_friend_state[user_id];
         auto it = std::find_if(st.friends.begin(), st.friends.end(),
@@ -62,8 +59,7 @@ void NpHandler::OnFriendNew(s32 user_id, const ShadNet::NotifyFriendNew& n) {
 
 void NpHandler::OnFriendLost(s32 user_id, const ShadNet::NotifyFriendLost& n) {
     LOG_INFO(NpHandler, "user_id={} FriendLost '{}'", user_id, n.npid);
-    ImGui::ShadNetNotify::Push(ImGui::ShadNetNotify::Kind::FriendLost,
-                               n.npid + " removed you as a friend");
+    ShadNetNotify(OVL_SHADNET_FRIEND_LOST, n.npid + " removed you as a friend");
     m_mutex_friend_state.Run([&] {
         auto& st = m_friend_state[user_id];
         st.friends.erase(std::remove_if(st.friends.begin(), st.friends.end(),
@@ -76,7 +72,7 @@ void NpHandler::OnFriendStatus(s32 user_id, const ShadNet::NotifyFriendStatus& n
     LOG_DEBUG(NpHandler, "user_id={} FriendStatus '{}' is {}", user_id, n.npid,
               n.online ? "online" : "offline");
     if (n.online) {
-        ImGui::ShadNetNotify::Push(ImGui::ShadNetNotify::Kind::Online, n.npid + " is online");
+        ShadNetNotify(OVL_SHADNET_ONLINE, n.npid + " is online");
     }
     m_mutex_friend_state.Run([&] {
         auto& st = m_friend_state[user_id];
@@ -110,9 +106,8 @@ void NpHandler::OnLoginResult(s32 user_id, const ShadNet::LoginResult& res) {
 
     // Surface friend requests that arrived while offline (no live notification fires for these).
     if (!res.requestsReceived.empty()) {
-        ImGui::ShadNetNotify::Push(ImGui::ShadNetNotify::Kind::FriendRequest,
-                                   std::to_string(res.requestsReceived.size()) +
-                                       " pending friend request(s)");
+        ShadNetNotify(OVL_SHADNET_FRIEND_REQUEST,
+                      std::to_string(res.requestsReceived.size()) + " pending friend request(s)");
     }
 }
 

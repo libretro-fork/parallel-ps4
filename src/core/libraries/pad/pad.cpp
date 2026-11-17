@@ -8,9 +8,9 @@
 #include "core/libraries/libs.h"
 #include "core/libraries/pad/pad_errors.h"
 #include "core/user_manager.h"
-#include "imgui/renderer/imgui_core.h"
 #include "input/controller.h"
 #include "pad.h"
+#include "video_core/overlay/ovl.h"
 
 #include <algorithm>
 #include <array>
@@ -373,7 +373,7 @@ int ProcessStates(OrbisPadData* pData, const Input::State* states, s32 num) {
         return 1;
     }
 
-    const bool gamepad_input_intercepted = ImGui::Core::IsGamepadInputCaptured();
+    const bool gamepad_input_intercepted = ovl_pad_captured() != 0;
     for (int i = 0; i < num; i++) {
         pData[i] = {};
         if (gamepad_input_intercepted) {

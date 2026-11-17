@@ -14,7 +14,6 @@
 #include "core/libraries/np/np_handler/np_invitation_json.h"
 #include "core/libraries/system/systemservice.h"
 #include "core/net/net_service.h"
-#include "imgui/invitation_prompt_layer.h"
 
 namespace Libraries::Np {
 
@@ -187,7 +186,7 @@ bool NpHandler::AcceptSessionInvitation(s32 user_id, const std::string& invitati
         }
     });
     // Whatever surface handled it (RECV dialog or the emulator prompt), retire the other one.
-    ImGui::InvitationPrompt::Dismiss(invitation_id);
+    ovl_invite_remove(invitation_id.c_str());
     if (!found) {
         LOG_ERROR(NpHandler, "no pending invite '{}' for user_id={}", invitation_id, user_id);
         return false;
@@ -201,7 +200,7 @@ bool NpHandler::AcceptSessionInvitation(s32 user_id, const std::string& invitati
 }
 
 void NpHandler::DeclineSessionInvitation(s32 user_id, const std::string& invitation_id) {
-    ImGui::InvitationPrompt::Dismiss(invitation_id);
+    ovl_invite_remove(invitation_id.c_str());
     m_mutex_pending_invites.Run([&] {
         auto uit = m_pending_invites.find(user_id);
         if (uit == m_pending_invites.end()) {
@@ -217,3 +216,25 @@ void NpHandler::DeclineSessionInvitation(s32 user_id, const std::string& invitat
 }
 
 } // namespace Libraries::Np
+
+// An invitation accepted or declined on the overlay's prompt (ovl_invite.c), on the overlay's
+// thread. Answering hits the shadNet server (blocking HTTP inside NpHandler), so it runs on a
+// thread of its own; the prompt shows it busy until it is removed, and an acceptance's outcome
+// is told as a shadNet notification.
+extern "C" void ovl_invite_chosen(int user_id, const char* invitation_id, const char* from_npid,
+                                  int accept) {
+    std::thread([user_id, id = std::string{invitation_id}, from = std::string{from_npid}, accept] {
+        auto& np = Libraries::Np::NpHandler::GetInstance();
+        if (accept) {
+            const bool ok = np.AcceptSessionInvitation(user_id, id);
+            ovl_invite_remove(id.c_str());
+            ShadNetNotify(OVL_SHADNET_INFO,
+                          ok ? "Accepted " + from + "'s invitation, joining session"
+                             : "Could not accept " + from +
+                                   "'s invitation (expired or already used)");
+        } else {
+            np.DeclineSessionInvitation(user_id, id);
+            ovl_invite_remove(id.c_str());
+        }
+    }).detach();
+}

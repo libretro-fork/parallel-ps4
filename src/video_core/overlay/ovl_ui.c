@@ -10,6 +10,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include <retro_atomic.h>
+
 #include "ovl_internal.h"
 
 #define MAX_WINDOWS 32
@@ -31,7 +33,7 @@ typedef struct window {
     int active, was_active; /* begun this frame, the frame before */
     int hidden_frames;      /* frames left to measure before it is drawn */
     int skip;               /* not drawn this frame, nor its contents built (style alpha 0) */
-    int auto_fit_frames;    /* frames left fitting the contents (ImGui's AutoFitFrames) */
+    int auto_fit[2];        /* frames left fitting each axis to the contents (AutoFitFramesX/Y) */
     int auto_fit_only_grows;
     int order; /* back to front */
     int appearing;
@@ -243,7 +245,8 @@ static float truncf_(float v) {
     return (float)(int)v;
 }
 
-/* ImGui's ImHashStr: CRC32 (reflected 0xEDB88320) of the string, "###" restarting it */
+/* ImGui's ImHashStr as the core built it (with SSE 4.2, so CRC32C: reflected 0x82F63B78) of the
+ * string, "###" restarting it and left out */
 static uint32_t crc_table[256];
 
 static void crc_init(void) {
@@ -251,7 +254,7 @@ static void crc_init(void) {
     for (i = 0; i < 256; i++) {
         uint32_t c = i;
         for (j = 0; j < 8; j++)
-            c = (c & 1) ? (c >> 1) ^ 0xEDB88320u : c >> 1;
+            c = (c & 1) ? (c >> 1) ^ 0x82F63B78u : c >> 1;
         crc_table[i] = c;
     }
 }
@@ -272,8 +275,11 @@ static uint32_t hash_str(const char* s, const char* end, uint32_t seed) {
         end = s + strlen(s);
     while ((const char*)p < end) {
         unsigned char c = *p++;
-        if (c == '#' && (const char*)p + 1 < end + 0 && p[0] == '#' && p[1] == '#')
+        if (c == '#' && end - (const char*)p >= 2 && p[0] == '#' && p[1] == '#') {
             crc = ~seed0;
+            p += 2;
+            continue;
+        }
         crc = (crc >> 8) ^ crc_table[(crc & 0xFF) ^ c];
     }
     return ~crc;
@@ -600,6 +606,22 @@ void ovl_key_analog_event(enum ovl_key key, int down, float value) {
     g.key_events[key].analog = value;
 }
 
+static retro_atomic_int_t pad_capture;
+
+void ovl_pad_capture_acquire(void) {
+    retro_atomic_fetch_add_int(&pad_capture, 1);
+}
+
+void ovl_pad_capture_release(void) {
+    int n = retro_atomic_load_acquire_int(&pad_capture);
+    while (n > 0 && !retro_atomic_cas_int(&pad_capture, n, n - 1))
+        n = retro_atomic_load_acquire_int(&pad_capture);
+}
+
+int ovl_pad_captured(void) {
+    return retro_atomic_load_relaxed_int(&pad_capture) > 0;
+}
+
 void ovl_set_gamepad_connected(int connected) {
     g.gamepad_connected = connected != 0;
 }
@@ -878,8 +900,7 @@ static float scroll_to_rect_y(window_t* w, rect_t item, int flags) {
         flags |= w->appearing ? SCROLL_ALWAYS_CENTER_Y : SCROLL_KEEP_EDGE_Y;
     fully = item.y0 >= sr_y0 && item.y1 <= sr_y1;
     can_fully = (item.y1 - item.y0) + g.style.item_spacing.y * 2.0f <= sr_y1 - sr_y0 ||
-                (!w->is_child && w->auto_fit_frames > 0) ||
-                (w->flags & OVL_WINDOW_ALWAYS_AUTO_RESIZE);
+                (!w->is_child && w->auto_fit[1] > 0) || (w->flags & OVL_WINDOW_ALWAYS_AUTO_RESIZE);
     if ((flags & SCROLL_KEEP_EDGE_Y) && !fully) {
         if (item.y0 < sr_y0 || !can_fully)
             set_scroll_from_pos_y(w, item.y0 - g.style.item_spacing.y - w->pos.y, 0.0f);
@@ -1236,7 +1257,7 @@ static window_t* create_window(const char* name, unsigned flags) {
     w->font_scale = 1.0f;
     w->order = g.next_order++;
     /* ImGui's CreateNewWindow: fitted for two frames, and kept fitting when it resizes itself */
-    w->auto_fit_frames = 2;
+    w->auto_fit[0] = w->auto_fit[1] = 2;
     w->auto_fit_only_grows = !(flags & OVL_WINDOW_ALWAYS_AUTO_RESIZE);
     w->scroll_target[0] = w->scroll_target[1] = FLT_MAX;
     return w;
@@ -1285,12 +1306,13 @@ static ovl_vec2_t min_size(const window_t* w) {
     return mn;
 }
 
-/* ImGui's CalcWindowAutoFitSize for a window without a title bar: the contents and the padding,
- * within the display less its safe area */
-static ovl_vec2_t auto_fit_size(const window_t* w, ovl_vec2_t content) {
+/* ImGui's CalcWindowAutoFitSize for a window without a title bar: the contents and the padding
+ * on the axes fitted (@mask: 1 x, 2 y), the size it had on the others, within the display less
+ * its safe area */
+static ovl_vec2_t auto_fit_size(const window_t* w, ovl_vec2_t content, int mask) {
     ovl_vec2_t s, mn, mx;
-    s.x = content.x + w->padding.x * 2.0f;
-    s.y = content.y + w->padding.y * 2.0f;
+    s.x = (mask & 1) ? content.x + w->padding.x * 2.0f : w->size.x;
+    s.y = (mask & 2) ? content.y + w->padding.y * 2.0f : w->size.y;
     mn = min_size(w);
     mx = v2(g.display.x - 6.0f, g.display.y - 6.0f);
     s.x = minf(maxf(s.x, minf(mn.x, mx.x)), mx.x);
@@ -1481,20 +1503,40 @@ static int begin_window(const char* name, unsigned flags, window_t* parent, ovl_
          * within the display */
         const int size_set = cond_applies(g.next.size_cond, w, just_created);
         const int pos_set = cond_applies(g.next.pos_cond, w, just_created);
+        /* ImGui's SetWindowSize: an axis asked as 0 or less is fitted to the contents, as one
+         * not asked for is */
+        const int x_set = size_set && g.next.size.x > 0.0f;
+        const int y_set = size_set && g.next.size.y > 0.0f;
+        int fit_x_always, fit_y_always, fit_x, fit_y;
         w->padding = g.style.window_padding;
         w->border_size = g.style.window_border_size;
         w->rounding = g.style.window_rounding;
         if (size_set) {
-            w->size_full.x = truncf_(g.next.size.x);
-            w->size_full.y = truncf_(g.next.size.y);
-            w->auto_fit_frames = 0;
-        } else if ((flags & OVL_WINDOW_ALWAYS_AUTO_RESIZE) || w->auto_fit_frames > 0) {
-            const ovl_vec2_t fit = auto_fit_size(w, w->content_size);
-            auto_fitted = 1;
-            if ((flags & OVL_WINDOW_ALWAYS_AUTO_RESIZE) || !w->auto_fit_only_grows)
-                w->size_full = fit;
+            w->auto_fit[0] = x_set ? 0 : 2;
+            w->auto_fit[1] = y_set ? 0 : 2;
+            if (x_set)
+                w->size_full.x = truncf_(g.next.size.x);
             else
-                w->size_full = v2(maxf(w->size_full.x, fit.x), maxf(w->size_full.y, fit.y));
+                w->auto_fit_only_grows = 0;
+            if (y_set)
+                w->size_full.y = truncf_(g.next.size.y);
+            else
+                w->auto_fit_only_grows = 0;
+        }
+        fit_x_always = !x_set && (flags & OVL_WINDOW_ALWAYS_AUTO_RESIZE);
+        fit_y_always = !y_set && (flags & OVL_WINDOW_ALWAYS_AUTO_RESIZE);
+        fit_x = fit_x_always || (!x_set && w->auto_fit[0] > 0);
+        fit_y = fit_y_always || (!y_set && w->auto_fit[1] > 0);
+        if (fit_x || fit_y) {
+            const ovl_vec2_t fit =
+                auto_fit_size(w, w->content_size, (fit_x ? 1 : 0) | (fit_y ? 2 : 0));
+            auto_fitted = 1;
+            if (fit_x)
+                w->size_full.x =
+                    fit_x_always || !w->auto_fit_only_grows ? fit.x : maxf(w->size_full.x, fit.x);
+            if (fit_y)
+                w->size_full.y =
+                    fit_y_always || !w->auto_fit_only_grows ? fit.y : maxf(w->size_full.y, fit.y);
         }
         {
             const ovl_vec2_t mn = min_size(w);
@@ -1512,8 +1554,10 @@ static int begin_window(const char* name, unsigned flags, window_t* parent, ovl_
         }
         w->pos.x = truncf_(w->pos.x);
         w->pos.y = truncf_(w->pos.y);
-        if (w->auto_fit_frames > 0)
-            w->auto_fit_frames--;
+        if (w->auto_fit[0] > 0)
+            w->auto_fit[0]--;
+        if (w->auto_fit[1] > 0)
+            w->auto_fit[1]--;
         w->child_flags = 0;
     }
     /* ImGui's scrollbar visibility: what the contents needed last frame against the room the

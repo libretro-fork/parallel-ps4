@@ -32,6 +32,12 @@
 #include "core/libraries/rtc/rtc.h"
 #include "core/libraries/system/userservice.h"
 #include "shadnet/client.h"
+#include "video_core/overlay/ovl_layers.h"
+
+/// A shadNet notification, shown by the overlay (ovl_shadnet.c) from any thread
+inline void ShadNetNotify(int kind, const std::string& text) {
+    ovl_shadnet_push(kind, text.c_str());
+}
 
 namespace Libraries::Np {
 

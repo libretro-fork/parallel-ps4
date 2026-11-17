@@ -182,6 +182,34 @@ void ovl_save_dialog_result(int* button, int* result, int* item);
 void ovl_save_dialog_draw(void);
 int ovl_save_dialog_active(void);
 
+/* shadNet's notifications (ovl_shadnet.c): queued from any thread, a kind and its text (copied,
+ * up to 511 bytes); 0 when too many are waiting. Up to six show, newest first. */
+enum {
+    OVL_SHADNET_FRIEND_REQUEST,
+    OVL_SHADNET_FRIEND_NEW,
+    OVL_SHADNET_FRIEND_LOST,
+    OVL_SHADNET_ONLINE,
+    OVL_SHADNET_INFO,
+    OVL_SHADNET_WARNING /* the server refused something */
+};
+int ovl_shadnet_push(int kind, const char* text);
+void ovl_shadnet_draw(void);
+int ovl_shadnet_active(void);
+void ovl_shadnet_reset(void);
+
+/* The session invitation prompt (ovl_invite.c), the system software's stand-in. From any thread:
+ * an invitation received (its texts copied; one with the same id replaced), or one gone (taken
+ * through the game's dialog, or answered). 0 when too many changes are waiting. */
+int ovl_invite_push(int user_id, const char* invitation_id, const char* session_id,
+                    const char* from_npid);
+int ovl_invite_remove(const char* invitation_id);
+void ovl_invite_draw(void);
+int ovl_invite_active(void);
+void ovl_invite_reset(void);
+/* The core's: called on the overlay's thread when one is accepted or declined on screen; it
+ * answers the server without waiting there, and removes the prompt when done */
+void ovl_invite_chosen(int user_id, const char* invitation_id, const char* from_npid, int accept);
+
 #ifdef __cplusplus
 }
 #endif

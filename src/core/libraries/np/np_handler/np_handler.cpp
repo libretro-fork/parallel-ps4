@@ -18,7 +18,6 @@
 #include "core/libraries/np/np_matching2/np_matching2_internal.h"
 #include "core/libraries/np/np_matching2/np_matching2_mm.h"
 #include "core/user_manager.h"
-#include "imgui/shadnet_notifications_layer.h"
 #include "shadnet/messages.h"
 #include "shadnet/server_probe.h"
 
@@ -160,8 +159,8 @@ void NpHandler::Initialize() {
                             "shadNet server {}:{} protocol version mismatch (server v{}, emulator "
                             "v{}); disabling shadNet for this run (saved setting unchanged)",
                             host, port, probe.server_version, ShadNet::SHAD_PROTOCOL_VERSION);
-                ImGui::ShadNetNotify::Push(
-                    ImGui::ShadNetNotify::Kind::Info,
+                ShadNetNotify(
+                    OVL_SHADNET_INFO,
                     fmt::format("shadNet protocol version mismatch (server v{}, emulator v{}). "
                                 "Please update shadPS4. Online features are disabled for this "
                                 "session.",
@@ -172,8 +171,8 @@ void NpHandler::Initialize() {
                             "shadNet server {}:{} sent an invalid ServerInfo handshake; disabling "
                             "shadNet for this run (saved setting unchanged)",
                             host, port);
-                ImGui::ShadNetNotify::Push(
-                    ImGui::ShadNetNotify::Kind::Info,
+                ShadNetNotify(
+                    OVL_SHADNET_INFO,
                     fmt::format("shadNet server ({}:{}) uses an incompatible protocol. Online "
                                 "features are disabled for this session.",
                                 host, port));
@@ -183,8 +182,8 @@ void NpHandler::Initialize() {
                             "shadNet server {}:{} is offline/unreachable; disabling shadNet for "
                             "this run (saved setting unchanged)",
                             host, port);
-                ImGui::ShadNetNotify::Push(
-                    ImGui::ShadNetNotify::Kind::Info,
+                ShadNetNotify(
+                    OVL_SHADNET_INFO,
                     fmt::format("shadNet server ({}:{}) is offline. Online features are disabled "
                                 "for this session.",
                                 host, port));
@@ -293,8 +292,8 @@ bool NpHandler::ConnectUser(s32 user_id, const std::string& host, u16 port, cons
                       "shadNet protocol version mismatch (server v{}, emulator v{}); disabling "
                       "shadNet for this run (saved setting unchanged)",
                       server_ver, ShadNet::SHAD_PROTOCOL_VERSION);
-            ImGui::ShadNetNotify::Push(
-                ImGui::ShadNetNotify::Kind::Info,
+            ShadNetNotify(
+                OVL_SHADNET_INFO,
                 fmt::format("shadNet protocol version mismatch (server v{}, emulator v{}). "
                             "Please update shadPS4. Online features are disabled for this "
                             "session.",
@@ -302,8 +301,8 @@ bool NpHandler::ConnectUser(s32 user_id, const std::string& host, u16 port, cons
         } else {
             LOG_ERROR(NpHandler, "shadNet protocol error during handshake; disabling shadNet for "
                                  "this run (saved setting unchanged)");
-            ImGui::ShadNetNotify::Push(
-                ImGui::ShadNetNotify::Kind::Info,
+            ShadNetNotify(
+                OVL_SHADNET_INFO,
                 "shadNet server uses an incompatible protocol. Online features are disabled "
                 "for this session.");
         }
@@ -802,7 +801,7 @@ void NpHandler::OnClientRejected(s32 user_id, const ShadNet::NotifyClientRejecte
                           : n.message + " Online features are off for this session.";
     LOG_ERROR(NpHandler, "user_id={} signed out by the server (reason {}, version '{}'): {}",
               user_id, n.reason, n.version, n.message);
-    ImGui::ShadNetNotify::Push(ImGui::ShadNetNotify::Kind::Warning, text);
+    ShadNetNotify(OVL_SHADNET_WARNING, text);
 }
 
 void NpHandler::OnServiceUnavailable(s32 user_id, const ShadNet::NotifyServiceUnavailable& n) {
@@ -831,7 +830,7 @@ void NpHandler::OnServiceUnavailable(s32 user_id, const ShadNet::NotifyServiceUn
         break;
     }
     LOG_WARNING(NpHandler, "user_id={} matchmaking unavailable: {}", user_id, text);
-    ImGui::ShadNetNotify::Push(ImGui::ShadNetNotify::Kind::Warning, std::move(text));
+    ShadNetNotify(OVL_SHADNET_WARNING, std::move(text));
 }
 
 } // namespace Libraries::Np

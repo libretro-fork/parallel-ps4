@@ -1199,6 +1199,8 @@ set(VIDEO_CORE src/video_core/amdgpu/cb_db_extent.h
                src/video_core/overlay/ovl_layers.h
                src/video_core/overlay/ovl_msgdialog.c
                src/video_core/overlay/ovl_savedialog.c
+               src/video_core/overlay/ovl_shadnet.c
+               src/video_core/overlay/ovl_invite.c
                src/video_core/overlay/ovl_notify.c
                src/video_core/overlay/ovl_splash.c
                src/video_core/overlay/ovl_tex.c
@@ -1291,12 +1293,6 @@ set(IMGUI src/imgui/imgui_config.h
           src/imgui/imgui_texture.h
           src/imgui/imgui_translations.cpp
           src/imgui/imgui_translations.h
-          src/imgui/friends_layer.cpp
-          src/imgui/friends_layer.h
-          src/imgui/invitation_prompt_layer.cpp
-          src/imgui/invitation_prompt_layer.h
-          src/imgui/shadnet_notifications_layer.cpp
-          src/imgui/shadnet_notifications_layer.h
           src/imgui/renderer/imgui_core.cpp
           src/imgui/renderer/imgui_core.h
           src/imgui/renderer/imgui_impl_vulkan.cpp

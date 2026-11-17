@@ -9,10 +9,7 @@
 #include "core/emulator_settings.h"
 #include "core/libraries/system/systemservice.h"
 #include "frontend_window.h"
-#include "imgui/friends_layer.h"
-#include "imgui/invitation_prompt_layer.h"
 #include "imgui/renderer/imgui_core.h"
-#include "imgui/shadnet_notifications_layer.h"
 #include "input/controller.h"
 #include "video_core/buffer_cache/buffer.h"
 #include "video_core/buffer_cache/guest_import.h"
@@ -529,17 +526,9 @@ Presenter::Presenter(Frontend::Window& window_, AmdGpu::Liverpool* liverpool_)
     }
 
     pp_pass.Create(device, swapchain.GetSurfaceFormat().format);
-
-    ImGui::Friends::Register();
-    ImGui::ShadNetNotify::Register();
-    ImGui::InvitationPrompt::Register();
 }
 
 Presenter::~Presenter() {
-    ImGui::InvitationPrompt::Unregister();
-    ImGui::ShadNetNotify::Unregister();
-    ImGui::Friends::Unregister();
-
     draw_scheduler.Finish();
     present_scheduler.Finish();
     flip_scheduler.Finish();

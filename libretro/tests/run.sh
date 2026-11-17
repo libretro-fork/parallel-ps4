@@ -260,6 +260,7 @@ ASAN_OPTIONS=detect_leaks=0 "$OUT/vertex_capture_report" --selftest
 OVL="src/video_core/overlay/ovl_draw.c src/video_core/overlay/ovl_font.c \
      src/video_core/overlay/ovl_fps.c src/video_core/overlay/ovl_msgdialog.c \
      src/video_core/overlay/ovl_notify.c src/video_core/overlay/ovl_savedialog.c \
+     src/video_core/overlay/ovl_shadnet.c src/video_core/overlay/ovl_invite.c \
      src/video_core/overlay/ovl_splash.c src/video_core/overlay/ovl_tex.c \
      src/video_core/overlay/ovl_trophy.c \
      src/video_core/overlay/ovl_ttf.c src/video_core/overlay/ovl_ui.c \

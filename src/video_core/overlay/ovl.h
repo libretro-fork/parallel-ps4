@@ -239,6 +239,11 @@ void ovl_destroy(void);
 void ovl_key_event(enum ovl_key key, int down);
 void ovl_key_analog_event(enum ovl_key key, int down, float value);
 void ovl_set_gamepad_connected(int connected);
+/* From any thread: the pad taken from the game while an overlay has it (the invitation prompt
+ * focused, the keyboard showing), counted; whether any has */
+void ovl_pad_capture_acquire(void);
+void ovl_pad_capture_release(void);
+int ovl_pad_captured(void);
 void ovl_char_event(uint32_t codepoint);
 void ovl_new_frame(float display_w, float display_h, float delta_time);
 /* Ends the frame: what to draw, valid until the next ovl_new_frame */

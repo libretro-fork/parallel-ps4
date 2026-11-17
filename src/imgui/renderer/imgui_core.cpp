@@ -24,6 +24,7 @@
 #include "imgui_internal.h"
 #include "input/controller.h"
 #include "texture_manager.h"
+#include "video_core/overlay/ovl.h"
 #include "video_core/renderer_vulkan/vk_presenter.h"
 
 static void CheckVkResult(const vk::Result err) {
@@ -43,33 +44,22 @@ static Common::Combiner change_layers_mutex{};
 // size of the picture it is drawn on and the time between frames.
 static const Frontend::Window* platform_window = nullptr;
 static std::chrono::steady_clock::time_point last_frame_time{};
-static retro_atomic_int_t force_gamepad_input_capture_count{0};
 
 namespace ImGui {
 
 namespace Core {
 
+// The pad's capture is the overlay's (ovl_ui.c), shared with what it draws
 void AcquireGamepadInputCapture() {
-    retro_atomic_fetch_add_int(&force_gamepad_input_capture_count, 1);
+    ovl_pad_capture_acquire();
 }
 
 void ReleaseGamepadInputCapture() {
-    std::uint32_t expected = static_cast<std::uint32_t>(
-        retro_atomic_load_relaxed_int(&force_gamepad_input_capture_count));
-    while (expected != 0) {
-        if ((retro_atomic_cas_int(&force_gamepad_input_capture_count, expected, expected - 1) ||
-             ((expected = static_cast<std::uint32_t>(
-                   retro_atomic_load_acquire_int(&force_gamepad_input_capture_count))),
-              false))) {
-            return;
-        }
-    }
-    LOG_WARNING(ImGui, "ReleaseGamepadInputCapture called with no active capture");
+    ovl_pad_capture_release();
 }
 
 bool IsGamepadInputCaptured() {
-    return static_cast<std::uint32_t>(
-               retro_atomic_load_relaxed_int(&force_gamepad_input_capture_count)) > 0;
+    return ovl_pad_captured() != 0;
 }
 
 void Initialize(const ::Vulkan::Instance& instance, const Frontend::Window& window,

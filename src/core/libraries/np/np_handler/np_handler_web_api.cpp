@@ -7,7 +7,6 @@
 #include "common/logging/log.h"
 #include "core/libraries/np/np_handler/np_handler.h"
 #include "core/libraries/np/np_web_api/np_web_api.h"
-#include "imgui/invitation_prompt_layer.h"
 
 namespace Libraries::Np {
 
@@ -80,7 +79,7 @@ void NpHandler::OnWebApiPushEvent(s32 user_id, const ShadNet::NotifyWebApiPushEv
                 inv.from_account_id = ev.fromAccountId;
                 v.push_back(std::move(inv));
             });
-            ImGui::InvitationPrompt::Push(user_id, invitation_id, session_id, n.fromNpid);
+            ovl_invite_push(user_id, invitation_id.c_str(), session_id.c_str(), n.fromNpid.c_str());
         }
     }
 }
