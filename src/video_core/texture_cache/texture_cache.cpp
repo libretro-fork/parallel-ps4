@@ -234,11 +234,17 @@ void TextureCache::DownloadImageMemory(ImageId image_id, DownloadMemoryFlags fla
         const auto [target, target_offset] = buffer_cache.GuestTarget(
             image_addr, tiled ? image.info.guest_size : copy_size, alignment);
         if (target) {
+            // Landing when the GPU is done: until then the CPU waits for it there
+            const int writeback =
+                is_sync ? -1
+                        : buffer_cache.BeginWriteback(image_addr,
+                                                      tiled ? image.info.guest_size : copy_size);
             tile_manager.TileImage(image, buffer_copies, target, target_offset);
-            const auto written = [this, image_addr, copy_size, discard_buffer_cache] {
+            const auto written = [this, image_addr, copy_size, discard_buffer_cache, writeback] {
                 if (discard_buffer_cache) {
                     buffer_cache.UnmarkRegionAsGpuModified(image_addr, copy_size, true);
                 }
+                buffer_cache.EndWriteback(writeback);
             };
             if (is_priority) {
                 scheduler.DeferPriorityOperation(written);
@@ -252,12 +258,14 @@ void TextureCache::DownloadImageMemory(ImageId image_id, DownloadMemoryFlags fla
         }
     }
 
+    const int writeback = is_sync ? -1 : buffer_cache.BeginWriteback(image_addr, copy_size);
     const auto download =
         runtime.GetStagingPool().Request(copy_size, MemoryType::HostCached, 16, !is_sync);
 
     tile_manager.TileImage(image, buffer_copies, download.buffer, download.offset);
 
-    const auto write_data = [this, image_addr, copy_size, download, discard_buffer_cache, is_sync] {
+    const auto write_data = [this, image_addr, copy_size, download, discard_buffer_cache, is_sync,
+                             writeback] {
         download.Invalidate();
         Core::Memory::Instance()->TryWriteBacking(std::bit_cast<u8*>(image_addr), download.mapped,
                                                   copy_size);
@@ -267,6 +275,7 @@ void TextureCache::DownloadImageMemory(ImageId image_id, DownloadMemoryFlags fla
         if (!is_sync) {
             runtime.GetStagingPool().FreeDeferred(download);
         }
+        buffer_cache.EndWriteback(writeback);
     };
 
     if (is_priority) {

@@ -161,6 +161,8 @@ BufferCache::BufferCache(const Vulkan::Instance& instance_, Vulkan::Scheduler& s
     // The game's memory lent to the GPU, for readbacks to land in (guest_import.h): as a
     // readback first goes into each chunk of it, or as the game maps it, where there are
     // readbacks to land (so that nothing is kept in RAM for none)
+    retro_eventcount_init(&writebacks_ec);
+
     const u32 import_mode = emu_settings_get_readback_import();
     const bool readbacks = emu_settings_get_readbacks_mode() != EMU_READBACKS_DISABLED;
     if (instance.IsExternalMemoryHostSupported() && import_mode != EMU_READBACK_IMPORT_DISABLED) {
@@ -180,6 +182,7 @@ BufferCache::BufferCache(const Vulkan::Instance& instance_, Vulkan::Scheduler& s
 }
 
 BufferCache::~BufferCache() {
+    retro_eventcount_free(&writebacks_ec);
     memory_tracker.reset();
     write_snapshots_destroy(snapshots);
     // The Buffers only borrow the chunks' handles
@@ -272,6 +275,71 @@ void BufferCache::CopyToGuest(const Buffer* src, Copies& copies) {
     copies.insert(copies.end(), guest_rest.begin(), guest_rest.end());
 }
 
+int BufferCache::BeginWriteback(VAddr addr, u64 size) {
+    for (int i = 0; i < WRITEBACK_SLOTS; i++) {
+        Writeback& w = writebacks[i];
+        if (retro_atomic_load_acquire_int(&w.live)) {
+            continue;
+        }
+        w.addr = addr;
+        w.end = addr + size;
+        w.tick = scheduler.CurrentTick();
+        retro_atomic_fetch_add_int(&writebacks_live, 1);
+        retro_atomic_store_release_int(&w.live, 1);
+        return i;
+    }
+    // As many landing as there is room for: these go first
+    WaitWritebacksHere(0, ~u64{0});
+    return BeginWriteback(addr, size);
+}
+
+void BufferCache::EndWriteback(int slot) {
+    if (slot < 0) {
+        return;
+    }
+    retro_atomic_store_release_int(&writebacks[slot].live, 0);
+    retro_atomic_fetch_add_int(&writebacks_live, -1);
+    retro_eventcount_notify(&writebacks_ec);
+}
+
+void BufferCache::WaitWritebacksHere(VAddr addr, u64 size) {
+    const VAddr end = size > ~u64{0} - addr ? ~u64{0} : addr + size;
+    for (int i = 0; i < WRITEBACK_SLOTS; i++) {
+        Writeback& w = writebacks[i];
+        if (!retro_atomic_load_acquire_int(&w.live) || w.end <= addr || w.addr >= end) {
+            continue;
+        }
+        // The GPU done with it, then what lands it after: the deferred operations run here,
+        // the priority ones on their own thread, waited for until it is ended
+        scheduler.Wait(w.tick);
+        scheduler.PopPendingOperations();
+        if (retro_atomic_load_acquire_int(&w.live)) {
+            // Deferred at a later tick (a submit in between): all of it, then
+            scheduler.Finish();
+            scheduler.PopPendingOperations();
+        }
+        for (;;) {
+            const int key = retro_eventcount_prepare_wait(&writebacks_ec);
+            if (!retro_atomic_load_acquire_int(&w.live)) {
+                retro_eventcount_cancel_wait(&writebacks_ec);
+                break;
+            }
+            retro_eventcount_commit_wait(&writebacks_ec, key);
+        }
+    }
+}
+
+void BufferCache::WaitWritebacks(VAddr addr, u64 size, bool on_gpu_thread) {
+    if (retro_atomic_load_acquire_int(&writebacks_live) == 0) {
+        return;
+    }
+    if (on_gpu_thread) {
+        WaitWritebacksHere(addr, size);
+    } else {
+        liverpool->SendCommand<true>([this, addr, size] { WaitWritebacksHere(addr, size); });
+    }
+}
+
 void BufferCache::TickFrame() {
     if (std::exchange(fault_process_pending, false)) {
         fault_manager->ProcessFaultBuffer();
@@ -292,6 +360,11 @@ void BufferCache::UnmarkRegionAsGpuModified(VAddr device_addr, u64 size, bool is
 void BufferCache::ReadMemory(VAddr device_addr, u64 size, bool is_write, bool async,
                              bool assume_locks) {
     const auto flush_request = [this, device_addr, size, is_write, async] {
+        if (!async) {
+            // The CPU goes on in it after this: an earlier asynchronous read back into it lands
+            // first, not on what the game writes next
+            WaitWritebacksHere(device_addr, size);
+        }
         const u32 first_block = device_addr >> block_shift;
         const u32 last_block = (device_addr + size - 1) >> block_shift;
         const auto* arena = GetArena(first_block, last_block);
@@ -333,6 +406,7 @@ void BufferCache::DownloadMemory(const Buffer* arena, VAddr device_addr, u64 siz
     if (copies.empty()) {
         return;
     }
+    const int writeback = async ? BeginWriteback(device_addr, size) : -1;
     // Straight into the game's memory where it is lent to the GPU, the rest through staging
     CopyToGuest(arena, copies);
     u64 total_size_bytes = 0;
@@ -353,7 +427,7 @@ void BufferCache::DownloadMemory(const Buffer* arena, VAddr device_addr, u64 siz
         runtime.CopyBuffer(arena, download.buffer, copies);
     }
 
-    const auto write_data = [this, arena_base, device_addr, size, download, async,
+    const auto write_data = [this, arena_base, device_addr, size, download, async, writeback,
                              copies = std::move(copies)] {
         if (download.buffer) {
             download.Invalidate();
@@ -368,6 +442,7 @@ void BufferCache::DownloadMemory(const Buffer* arena, VAddr device_addr, u64 siz
         if (async && download.buffer) {
             staging_pool.FreeDeferred(download);
         }
+        EndWriteback(writeback);
     };
 
     if (async) {
@@ -456,6 +531,7 @@ void BufferCache::ReadEdgeImagePages(const Image& image) {
         return;
     }
     scheduler.EndRendering();
+    const int writeback = BeginWriteback(page_start, page_end - page_start);
     // Straight into the game's memory where it is lent to the GPU, the rest through staging
     CopyToGuest(buffer, copies);
     u64 total_size_bytes = 0;
@@ -467,6 +543,8 @@ void BufferCache::ReadEdgeImagePages(const Image& image) {
         total_size_bytes += (copy.size + align - 1) & mask;
     }
     if (total_size_bytes == 0) {
+        // All of it straight into the game's memory: landed when the GPU is done
+        scheduler.DeferOperation([this, writeback] { EndWriteback(writeback); });
         return;
     }
     const auto download =
@@ -477,7 +555,7 @@ void BufferCache::ReadEdgeImagePages(const Image& image) {
     }
     runtime.CopyBuffer(buffer, download.buffer, copies);
     scheduler.DeferOperation(
-        [this, base = buffer->CpuAddr(), download, copies = std::move(copies)]() {
+        [this, base = buffer->CpuAddr(), download, writeback, copies = std::move(copies)]() {
             download.Invalidate();
             auto* memory = Core::Memory::Instance();
             for (const auto& copy : copies) {
@@ -487,6 +565,7 @@ void BufferCache::ReadEdgeImagePages(const Image& image) {
                                         download.mapped + dst_offset, copy.size);
             }
             staging_pool.FreeDeferred(download);
+            EndWriteback(writeback);
         });
 }
 

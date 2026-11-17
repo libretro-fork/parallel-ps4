@@ -3,10 +3,15 @@
 
 #pragma once
 
+#include <array>
 #include <deque>
 #include <optional>
 #include <span>
 #include <vector>
+
+#include <retro_atomic.h>
+#include <rthreads/retro_eventcount.h>
+
 #include "common/small_vector.h"
 
 #include "common/enum.h"
@@ -110,6 +115,17 @@ public:
     /// Flushes GPU modified ranges of the uncovered part of the edge pages of an image.
     void ReadEdgeImagePages(const Image& image);
 
+    /// An asynchronous write into the game's memory, recorded on the GPU thread: what is read
+    /// back lands when the GPU is done (straight into the game's memory, or copied there by a
+    /// deferred operation). Until EndWriteback, a CPU access to the range waits for it
+    /// (WaitWritebacks), so that what the game writes there is not landed on afterwards.
+    /// Returns the slot to end, -1 for none (none free: then it was waited for).
+    int BeginWriteback(VAddr addr, u64 size);
+    void EndWriteback(int slot);
+    /// Before the CPU goes on in @addr, @size: waits for the write-backs into it still landing.
+    /// On the GPU thread when @on_gpu_thread, else it is sent there.
+    void WaitWritebacks(VAddr addr, u64 size, bool on_gpu_thread);
+
     /// Finds a buffer for the specified region.
     [[nodiscard]] std::pair<const Buffer*, u64> ObtainBuffer(
         VAddr device_addr, u32 size, ObtainBufferFlags flags = ObtainBufferFlags::None);
@@ -212,6 +228,19 @@ private:
     /// Pages as they were before the guest wrote where the GPU has written too (readbacks off)
     ::write_snapshots* snapshots{};
     std::unique_ptr<MemoryTracker> memory_tracker;
+    /// Write-backs still landing (BeginWriteback): set on the GPU thread, freed from wherever
+    /// they land (a deferred operation, or the priority operations' thread)
+    struct Writeback {
+        retro_atomic_int_t live;
+        VAddr addr;
+        VAddr end;
+        u64 tick;
+    };
+    static constexpr int WRITEBACK_SLOTS = 64;
+    std::array<Writeback, WRITEBACK_SLOTS> writebacks{};
+    retro_atomic_int_t writebacks_live{};
+    retro_eventcount_t writebacks_ec{};
+    void WaitWritebacksHere(VAddr addr, u64 size);
 
     StreamBuffer stream_buffer;
     Buffer gds_buffer;

@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright 2024-2026 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include <thread>
 #include "common/enum_names.h"
 #include "core/emulator_settings.h"
 #include "core/memory.h"
@@ -1604,6 +1605,8 @@ bool Rasterizer::InvalidateMemory(VAddr addr, u64 size, bool assume_locks) {
         // Not GPU mapped memory, can skip invalidation logic entirely.
         return false;
     }
+    // An asynchronous read back into it still landing lands before the CPU writes there
+    buffer_cache.WaitWritebacks(addr, size, assume_locks);
     buffer_cache.InvalidateMemory(addr, size, assume_locks);
     texture_cache.InvalidateMemory(addr, size);
     return true;
@@ -1649,6 +1652,9 @@ void Rasterizer::RegisterMemory(VAddr addr, u64 size) {
 }
 
 void Rasterizer::UnmapMemory(VAddr addr, u64 size) {
+    // Nothing read back lands in it once it is gone (its pages may be the game's elsewhere)
+    buffer_cache.WaitWritebacks(addr, size,
+                                std::this_thread::get_id() == GetGpuCommandProcessorThread());
     buffer_cache.InvalidateMemory(addr, size);
     texture_cache.UnmapMemory(addr, size);
     mapped_ranges.Update([&](IntervalList<>& ranges) { ranges.Subtract(addr, addr + size); });
