@@ -12,7 +12,6 @@
 #include "frontend_window.h"
 #include "imgui/friends_layer.h"
 #include "imgui/invitation_prompt_layer.h"
-#include "imgui/notifications_layer.h"
 #include "imgui/renderer/imgui_core.h"
 #include "imgui/renderer/imgui_impl_vulkan.h"
 #include "imgui/shadnet_notifications_layer.h"
@@ -32,6 +31,7 @@
 #include <array>
 #include <atomic>
 #include <cctype>
+#include <cfloat>
 #include <chrono>
 #include <cmath>
 #include <csetjmp>
@@ -101,6 +101,41 @@ bool CanBlitToSwapchain(const vk::PhysicalDevice physical_device, vk::Format for
 [[nodiscard]] vk::ImageBlit MakeImageBlitStretch(s32 frame_width, s32 frame_height,
                                                  s32 swapchain_width, s32 swapchain_height) {
     return MakeImageBlit(frame_width, frame_height, swapchain_width, swapchain_height, 0, 0);
+}
+
+// The overlays' frame: the time since the last, and on a frame of the game's own its frame rate
+// over its last 60 frames, which the FPS counter shows
+static void NewOverlayFrame(u32 width, u32 height, bool is_reusing_frame) {
+    using namespace std::chrono;
+    static steady_clock::time_point last_frame_time{};
+    static steady_clock::time_point last_game_frame_time{};
+    static std::array<float, 60> game_frame_seconds{};
+    static float game_frame_seconds_sum = 0.0f;
+    static std::size_t game_frame_index = 0;
+    const auto now = steady_clock::now();
+    const auto seconds = [](steady_clock::duration d) {
+        return std::max(duration<float>(d).count(), FLT_MIN);
+    };
+    const float delta = last_frame_time.time_since_epoch().count() != 0
+                            ? seconds(now - last_frame_time)
+                            : 1.0f / 60.0f;
+    last_frame_time = now;
+    if (!is_reusing_frame) {
+        const float game_delta = last_game_frame_time.time_since_epoch().count() != 0
+                                     ? seconds(now - last_game_frame_time)
+                                     : 1.0f / 60.0f;
+        last_game_frame_time = now;
+        DebugState.FrameDeltaTime = game_delta;
+        float& slot = game_frame_seconds[game_frame_index];
+        game_frame_seconds_sum += game_delta - slot;
+        slot = game_delta;
+        game_frame_index = (game_frame_index + 1) % game_frame_seconds.size();
+        DebugState.Framerate =
+            game_frame_seconds_sum > 0.0f
+                ? 1.0f / (game_frame_seconds_sum / static_cast<float>(game_frame_seconds.size()))
+                : FLT_MAX;
+    }
+    ovl_vk_new_frame(width, height, delta, DebugState.Framerate);
 }
 
 static vk::Rect2D FitImage(s32 frame_width, s32 frame_height, s32 swapchain_width,
@@ -842,7 +877,7 @@ void Presenter::Present(Frame* frame, bool is_reusing_frame, bool is_game_frame)
                "Unexpected error resetting present done fence: {}", vk::to_string(reset_result));
 
     ImGuiID dockId = ImGui::Core::NewFrame();
-    Overlay::NewFrame(window.GetWidth(), window.GetHeight(), is_reusing_frame);
+    NewOverlayFrame(window.GetWidth(), window.GetHeight(), is_reusing_frame);
 
     const vk::Image swapchain_image = swapchain.Image();
     const vk::ImageView swapchain_image_view = swapchain.ImageView();
@@ -992,7 +1027,8 @@ void Presenter::Present(Frame* frame, bool is_reusing_frame, bool is_game_frame)
             CopyGameToImage(cmdbuf, *frame, swapchain_image, extent, game_rect);
         }
         ImGui::Core::Render(cmdbuf, swapchain_image_view, swapchain.GetExtent(), direct);
-        Overlay::Render(cmdbuf, swapchain_image_view, swapchain.GetExtent());
+        ovl_vk_render(static_cast<VkCommandBuffer>(cmdbuf),
+                      static_cast<VkImageView>(swapchain_image_view), swapchain.GetExtent());
 
         // Every frame is read back for the frontend, after the overlays are drawn,
         // into a buffer that is used again - unless the frontend draws from the image itself.

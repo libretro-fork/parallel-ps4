@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <limits>
 #include "common/assert.h"
+#include "common/embedded_resources.h"
 #include "common/logging/log.h"
 #include "core/emulator_settings.h"
 #include "frontend_window.h"
@@ -44,7 +45,20 @@ Swapchain::Swapchain(const Instance& instance_, const Frontend::Window& window_)
 
     Create(window.GetWidth(), window.GetHeight());
     ImGui::Core::Initialize(instance, window, image_count, surface_format.format);
-    Overlay::Initialize(instance, image_count, surface_format.format);
+    {
+        // The overlays, with the UI font read in place from what the core carries
+        const auto font =
+            Common::GetEmbeddedResource("src/imgui/renderer/fonts/NotoSans-Regular.ttf");
+        ovl_vk_info_t info{};
+        info.get_device_proc = VULKAN_HPP_DEFAULT_DISPATCHER.vkGetDeviceProcAddr;
+        info.device = static_cast<VkDevice>(instance.GetDevice());
+        info.memory_properties = instance.GetPhysicalDevice().getMemoryProperties();
+        info.image_count = image_count;
+        info.surface_format = static_cast<VkFormat>(surface_format.format);
+        info.font = font.data();
+        info.font_size = font.size();
+        ASSERT_MSG(!font.empty() && ovl_vk_init(&info), "The overlays could not be made");
+    }
 }
 
 Swapchain::~Swapchain() {

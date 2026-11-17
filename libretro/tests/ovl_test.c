@@ -15,7 +15,24 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "../../src/core/emulator_settings.h"
 #include "../../src/video_core/overlay/ovl.h"
+#include "../../src/video_core/overlay/ovl_layers.h"
+#include "../audio_mix.h"
+
+/* What the overlays ask of the core's settings and mix */
+bool emu_settings_get_show_fps_counter(void) { return true; }
+bool emu_settings_get_trophy_popup_disabled(void) { return false; }
+const char *emu_settings_get_trophy_notification_side(void) { return "right"; }
+double emu_settings_get_trophy_notification_duration(void) { return 6.0; }
+int emu_settings_get_volume_slider(void) { return 100; }
+static int clips;
+void audio_mix_play_clip(const float *frames, unsigned count, float gain) {
+  (void)frames;
+  (void)count;
+  (void)gain;
+  clips++;
+}
 
 static int failures = 0;
 
@@ -158,6 +175,81 @@ static void check_atlas(void) {
         "a rectangle put back is taken again");
 }
 
+/* A notification and a trophy, frame by frame at 60 a second until @frames, as
+ * ImGui drew them: the vertices and indices of the frame then, ImGui's */
+static void check_layers(void) {
+  static uint8_t slots[OVL_TEX_SLOTS][OVL_TEX_DIM * OVL_TEX_DIM * 4];
+  static const float sound[4] = {0, 0, 0, 0};
+  uint8_t *pixels[OVL_TEX_SLOTS];
+  unsigned char *icon, *gold, *plat;
+  size_t icon_size, gold_size, plat_size;
+  const ovl_draw_data_t *dd = NULL;
+  int i, frame;
+  for (i = 0; i < OVL_TEX_SLOTS; i++)
+    pixels[i] = slots[i];
+  ovl_tex_init(pixels, OVL_TEX_SLOTS);
+  icon = read_file("src/resources/shadps4.png", &icon_size);
+  gold = read_file("src/resources/gold.png", &gold_size);
+  plat = read_file("src/resources/platinum.png", &plat_size);
+  CHECK(icon && gold && plat, "the icons");
+  if (!icon || !gold || !plat)
+    return;
+
+  /* The system fonts warning, bottom right, a minute into its thirty seconds */
+  CHECK(ovl_notify_queue("WARNING! PS4 system fonts not found.\n"
+                         "Using bundled fallback fonts instead.\n"
+                         "Text rendering may be inaccurate.",
+                         30.0f, OVL_NOTIFY_BOTTOM_RIGHT, icon, icon_size, 0),
+        "a notification queued");
+  CHECK(ovl_notify_active(), "waiting to show");
+  for (frame = 0; frame <= 60; frame++) {
+    ovl_new_frame(1920.0f, 1080.0f, 1.0f / 60.0f);
+    ovl_notify_draw();
+    dd = ovl_render();
+    ovl_tex_take_upload();
+  }
+  CHECK(dd->vtx_count == 440 && dd->idx_count == 798,
+        "the notification as ImGui drew it");
+  ovl_notify_reset();
+
+  /* A trophy, right, two thirds of a second in */
+  ovl_trophy_set_sound(sound, 2);
+  CHECK(
+      ovl_trophy_queue("The Hunter of Hunters and the Nightmare Slain Forever",
+                       plat, plat_size, gold, gold_size),
+      "a trophy queued");
+  for (frame = 0; frame <= 40; frame++) {
+    ovl_new_frame(1920.0f, 1080.0f, 1.0f / 60.0f);
+    ovl_trophy_draw();
+    dd = ovl_render();
+  }
+  CHECK(dd->vtx_count == 304 && dd->idx_count == 594,
+        "the trophy as ImGui drew it");
+  CHECK(clips == 1, "its sound played once");
+  /* Over after its six seconds: its images released, their slots free once
+   * frames pass */
+  for (frame = 0; frame < 400; frame++) {
+    ovl_new_frame(1920.0f, 1080.0f, 1.0f / 60.0f);
+    ovl_trophy_draw();
+    ovl_render();
+    ovl_tex_collect((unsigned)frame, 3);
+  }
+  CHECK(!ovl_trophy_active(), "the trophy over");
+  {
+    int handles[OVL_TEX_SLOTS + 1], n = 0;
+    while (n <= OVL_TEX_SLOTS &&
+           (handles[n] = ovl_tex_decode_png(gold, gold_size)) != 0)
+      n++;
+    CHECK(n == OVL_TEX_SLOTS, "every image's slot free again");
+    for (i = 0; i < n; i++)
+      ovl_tex_release(handles[i]);
+  }
+  ovl_tex_shutdown();
+  free(icon);
+  free(gold);
+  free(plat);
+}
+
 int main(int argc, char **argv) {
   const char *path =
       argc > 1 ? argv[1] : "src/imgui/renderer/fonts/NotoSans-Regular.ttf";
@@ -207,6 +299,7 @@ int main(int argc, char **argv) {
         check_quads(dd);
     }
   }
+  check_layers();
   ovl_destroy();
   free(noto);
   if (failures) {

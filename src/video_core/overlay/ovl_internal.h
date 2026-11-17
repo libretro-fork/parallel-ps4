@@ -85,6 +85,9 @@ void ovl_atlas_free(void);
 /* Starts the atlas again when the frame before filled it */
 void ovl_atlas_begin_frame(void);
 
+/* Images (ovl_tex.c): an image's texture coordinates in its slot, 0 when it has none */
+int ovl_tex_uv_scale(ovl_tex_t tex, float* su, float* sv);
+
 /* TrueType (ovl_ttf.c): stb_truetype as ImGui uses it, faces read in place */
 int ovl_ttf_init(void);
 void ovl_ttf_free(void);

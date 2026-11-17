@@ -12,6 +12,7 @@
 #include "imgui/renderer/imgui_core.h"
 #include "libretro/libretro_bridge.h"
 #include "video_core/amdgpu/liverpool.h"
+#include "video_core/overlay/vk_overlay.h"
 #include "video_core/renderer_vulkan/vk_presenter.h"
 
 extern std::unique_ptr<Vulkan::Presenter> presenter;
@@ -415,7 +416,7 @@ void VideoOutDriver::Vblank() {
         if (!request) {
             if (!main_port.is_open) {
                 DrawBlankFrame();
-            } else if (ImGui::Core::MustKeepDrawing()) {
+            } else if (ImGui::Core::MustKeepDrawing() || ovl_vk_must_keep_drawing()) {
                 DrawLastFrame();
             }
         } else {

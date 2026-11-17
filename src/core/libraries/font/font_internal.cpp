@@ -7,12 +7,13 @@
 
 #include <array>
 
+#include "common/embedded_resources.h"
 #include "common/path_util.h"
 #include "core/emulator_settings.h"
 #include "core/libraries/font/fontft_internal.h"
 #include "core/libraries/kernel/kernel.h"
-#include "imgui/notifications_layer.h"
 #include "imgui/renderer/font_data.h"
+#include "video_core/overlay/ovl_layers.h"
 
 namespace Libraries::Font::Internal {
 
@@ -2178,11 +2179,12 @@ void AddBuiltinFallbackFaces(FontState& st, u32 font_set_type, u32 subfont_index
 void NotifyBuiltinFontFallbackOnce() {
     static std::once_flag once;
     std::call_once(once, [] {
-        shadNotifications::QueueNotification("WARNING! PS4 system fonts not found.\n"
-                                             "Using bundled fallback fonts instead.\n"
-                                             "Text rendering may be inaccurate.",
-                                             30.0f, shadNotifications::position::BottomRight,
-                                             shadNotifications::stockIcons::shadPS4);
+        // The core's icon, decoded where it lies
+        const auto icon = Common::GetEmbeddedResource("src/resources/shadps4.png");
+        ovl_notify_queue("WARNING! PS4 system fonts not found.\n"
+                         "Using bundled fallback fonts instead.\n"
+                         "Text rendering may be inaccurate.",
+                         30.0f, OVL_NOTIFY_BOTTOM_RIGHT, icon.data(), icon.size(), 0);
     });
 }
 

@@ -1197,10 +1197,13 @@ set(VIDEO_CORE src/video_core/amdgpu/cb_db_extent.h
                src/video_core/overlay/ovl_fps.c
                src/video_core/overlay/ovl_internal.h
                src/video_core/overlay/ovl_layers.h
+               src/video_core/overlay/ovl_notify.c
+               src/video_core/overlay/ovl_tex.c
+               src/video_core/overlay/ovl_trophy.c
                src/video_core/overlay/ovl_ttf.c
                src/video_core/overlay/ovl_ui.c
                src/video_core/overlay/stb_truetype.h
-               src/video_core/overlay/vk_overlay.cpp
+               src/video_core/overlay/vk_overlay.c
                src/video_core/overlay/vk_overlay.h
                src/video_core/renderer_vulkan/liverpool_to_vk.cpp
                src/video_core/renderer_vulkan/liverpool_to_vk.h
@@ -1291,8 +1294,6 @@ set(IMGUI src/imgui/imgui_config.h
           src/imgui/invitation_prompt_layer.h
           src/imgui/shadnet_notifications_layer.cpp
           src/imgui/shadnet_notifications_layer.h
-          src/imgui/notifications_layer.cpp
-          src/imgui/notifications_layer.h
           src/imgui/renderer/imgui_core.cpp
           src/imgui/renderer/imgui_core.h
           src/imgui/renderer/imgui_impl_vulkan.cpp

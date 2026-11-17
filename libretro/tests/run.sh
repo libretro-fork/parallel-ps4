@@ -254,15 +254,32 @@ $CC -std=c89 -pedantic -O1 -g -Wall -Wno-long-long -fsanitize=address,undefined 
     tools/vertex_capture_report.c -o "$OUT/vertex_capture_report" -lm
 ASAN_OPTIONS=detect_leaks=0 "$OUT/vertex_capture_report" --selftest
 # The overlays' library against ImGui: the FPS counter's window, layout and glyphs where ImGui
-# put them, the atlas's white texel and baked lines
+# put them, the atlas's white texel and baked lines, a notification and a trophy as ImGui drew
+# them, their images' slots freed after
 OVL="src/video_core/overlay/ovl_draw.c src/video_core/overlay/ovl_font.c \
-     src/video_core/overlay/ovl_ttf.c src/video_core/overlay/ovl_ui.c"
+     src/video_core/overlay/ovl_fps.c src/video_core/overlay/ovl_notify.c \
+     src/video_core/overlay/ovl_tex.c src/video_core/overlay/ovl_trophy.c \
+     src/video_core/overlay/ovl_ttf.c src/video_core/overlay/ovl_ui.c \
+     $L/formats/png/rpng.c $L/streams/trans_stream.c $L/streams/trans_stream_deflate.c \
+     $L/streams/trans_stream_pipe.c $L/encodings/encoding_deflate.c \
+     $L/encodings/encoding_crc32.c $L/features/features_cpu.c"
 $CC -std=gnu89 -O1 -g -Wall -Wdeclaration-after-statement -ffp-contract=off \
-    -fsanitize=address,undefined libretro/tests/ovl_test.c $OVL -o "$OUT/ovl_test" -lm
+    -fsanitize=address,undefined -I. -Isrc -I$L/include libretro/tests/ovl_test.c $OVL \
+    -o "$OUT/ovl_test" -lm -lpthread
 "$OUT/ovl_test" src/imgui/renderer/fonts/NotoSans-Regular.ttf
-# The overlays on a device as the core draws them: the device's frame as the CPU model of it
+# The overlays drawn on a device by the core's renderer (vk_overlay.c): the FPS counter, a
+# notification and a trophy with their images, as the CPU model of them; the images' slots
+# free again after
 $CC -std=gnu89 -O1 -g -Wall -Wdeclaration-after-statement -fsanitize=address,undefined \
     -isystem externals/vulkan-headers/include -isystem externals/sirit/externals/SPIRV-Headers/include \
-    -Isrc -I$L/include libretro/tests/overlay_device_test.c src/video_core/host_shaders/host_spirv.c \
-    $OVL -o "$OUT/overlay_device_test" -ldl -lm
-ASAN_OPTIONS=detect_leaks=0 "$OUT/overlay_device_test" src/imgui/renderer/fonts/NotoSans-Regular.ttf
+    -I. -Isrc -I$L/include libretro/tests/overlay_device_test.c src/video_core/overlay/vk_overlay.c \
+    src/video_core/host_shaders/host_spirv.c $OVL -o "$OUT/overlay_device_test" -ldl -lm -lpthread
+ASAN_OPTIONS=detect_leaks=0 "$OUT/overlay_device_test"
+# The overlays' queues from four threads at once while frames are drawn: every notification
+# shown once, each thread's in order, every image slot free after
+for san in address,undefined thread; do
+    $CC -std=gnu89 -O1 -g -Wall -Wdeclaration-after-statement -fsanitize=$san -I. -Isrc \
+        -I$L/include libretro/tests/ovl_queue_test.c $OVL $L/rthreads/rthreads.c \
+        -o "$OUT/ovl_queue_test" -lm -lpthread
+    "$OUT/ovl_queue_test"
+done

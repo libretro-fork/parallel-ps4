@@ -778,11 +778,23 @@ void ovl_add_triangle_filled(ovl_draw_list_t* dl, ovl_vec2_t a, ovl_vec2_t b, ov
     ovl_path_fill_convex(dl, col);
 }
 
+/* An image's texture coordinates, 0 to 1 over it, to where it lies in its slot (ovl_tex.c) */
+static void scale_uv(ovl_tex_t tex, ovl_vec2_t* uv_min, ovl_vec2_t* uv_max) {
+    float su, sv;
+    if (tex == OVL_TEX_ATLAS || !ovl_tex_uv_scale(tex, &su, &sv))
+        return;
+    uv_min->x *= su;
+    uv_min->y *= sv;
+    uv_max->x *= su;
+    uv_max->y *= sv;
+}
+
 void ovl_add_image(ovl_draw_list_t* dl, ovl_tex_t tex, ovl_vec2_t min, ovl_vec2_t max,
                    ovl_vec2_t uv_min, ovl_vec2_t uv_max, ovl_col_t col) {
     const ovl_tex_t was = dl->tex;
     if ((col & 0xFF000000u) == 0)
         return;
+    scale_uv(tex, &uv_min, &uv_max);
     dl->tex = tex;
     ovl_prim_rect_uv(dl, min, max, uv_min, uv_max, col);
     dl->tex = was;
@@ -801,6 +813,7 @@ void ovl_add_image_rounded(ovl_draw_list_t* dl, ovl_tex_t tex, ovl_vec2_t min, o
         ovl_add_image(dl, tex, min, max, uv_min, uv_max, col);
         return;
     }
+    scale_uv(tex, &uv_min, &uv_max);
     dl->tex = tex;
     first = dl->vtx.size;
     ovl_path_rect(dl, min, max, rounding, flags);

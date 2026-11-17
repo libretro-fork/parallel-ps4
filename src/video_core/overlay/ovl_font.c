@@ -595,11 +595,22 @@ void ovl_add_text(ovl_draw_list_t* dl, ovl_font_t* font, float size, ovl_vec2_t 
     if (!end)
         end = text + strlen(text);
     b = baked_for(font, size);
-    x = (float)floor(pos.x);
-    y = (float)floor(pos.y);
+    x = (float)(int)pos.x; /* ImGui snaps with IM_TRUNC, toward 0 */
+    y = (float)(int)pos.y;
     origin_x = x;
     if (y > clip[3])
         return;
+    /* Lines above the clip rectangle are passed over, as ImGui's RenderText */
+    while (y + size < clip[1] && s < end) {
+        const char* line_end = (const char*)memchr(s, '\n', (size_t)(end - s));
+        if (wrap) {
+            s = word_wrap_position(font, b, s, line_end ? line_end : end, wrap_width);
+            s = wrap_next_line_start(s, end);
+        } else {
+            s = line_end ? line_end + 1 : end;
+        }
+        y += size;
+    }
     dl->tex = OVL_TEX_ATLAS;
     while (s < end) {
         uint32_t c;

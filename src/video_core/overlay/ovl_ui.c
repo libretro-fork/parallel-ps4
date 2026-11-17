@@ -29,6 +29,7 @@ typedef struct window {
     int used;               /* made */
     int active, was_active; /* begun this frame, the frame before */
     int hidden_frames;      /* frames left to measure before it is drawn */
+    int skip;               /* not drawn this frame, nor its contents built (style alpha 0) */
     int auto_fit_frames;    /* frames left fitting the contents (ImGui's AutoFitFrames) */
     int auto_fit_only_grows;
     int order; /* back to front */
@@ -300,6 +301,11 @@ ovl_vec4_t ovl_style_color(enum ovl_color idx) {
     return g.style.colors[idx];
 }
 
+ovl_col_t ovl_color_u32_vec4(ovl_vec4_t col) {
+    col.w *= g.style.alpha;
+    return ovl_col_from_vec4(col);
+}
+
 ovl_col_t ovl_color_u32(enum ovl_color idx, float alpha_mul) {
     ovl_vec4_t c = g.style.colors[idx];
     c.w *= g.style.alpha * alpha_mul;
@@ -409,11 +415,11 @@ static ovl_font_t* current_font(void) {
 static void update_font_size(void) {
     ovl_font_t* f = current_font();
     float size = f ? ovl_font_size(f) : 13.0f;
-    size *= g.font_scale;
     if (g.current)
         size *= g.current->font_scale;
-    size = (float)floor(size + 0.5f);
-    g.font_size = size < 1.0f ? 1.0f : size;
+    size *= g.font_scale;
+    size = (float)(int)(size + 0.5f);
+    g.font_size = size < 1.0f ? 1.0f : size > 512.0f ? 512.0f : size;
 }
 
 void ovl_push_font(ovl_font_t* font) {
@@ -879,7 +885,9 @@ static int begin_window(const char* name, unsigned flags, window_t* parent, ovl_
     }
     setup_drawing_context(w);
 
-    if (w->hidden_frames == 0) {
+    /* As ImGui: a window begun with the style's alpha at 0 is not drawn this frame */
+    w->skip = g.style.alpha <= 0.0f;
+    if (w->hidden_frames == 0 && !w->skip) {
         ovl_vec2_t mx;
         mx.x = w->pos.x + w->size.x;
         mx.y = w->pos.y + w->size.y;
@@ -898,7 +906,7 @@ static int begin_window(const char* name, unsigned flags, window_t* parent, ovl_
     }
     ovl_push_clip(&w->dl, v2(w->clip[0], w->clip[1]), v2(w->clip[2], w->clip[3]), parent != NULL);
     /* Hidden windows still lay out their items, to be measured */
-    return 1;
+    return !w->skip;
 }
 
 int ovl_begin(const char* name, unsigned flags) {
@@ -909,8 +917,11 @@ static void end_window(void) {
     window_t* w = g.current;
     if (!w)
         return;
-    w->content_size.x = truncf_(w->cursor_max.x - w->cursor_start.x);
-    w->content_size.y = truncf_(w->cursor_max.y - w->cursor_start.y);
+    /* A window skipped keeps the size of what it held (CalcWindowContentSizes) */
+    if (!w->skip) {
+        w->content_size.x = truncf_(w->cursor_max.x - w->cursor_start.x);
+        w->content_size.y = truncf_(w->cursor_max.y - w->cursor_start.y);
+    }
     g.stack_count--;
     g.current = g.stack_count ? g.stack[g.stack_count - 1] : NULL;
     update_font_size();
@@ -1252,13 +1263,17 @@ void ovl_pop_text_wrap_pos(void) {
 /* ImGui's CalcWrapWidthForPos */
 static float wrap_width_for(ovl_vec2_t pos, float wrap_pos_x) {
     window_t* w = g.current;
-    if (wrap_pos_x < 0.0f)
+    if (wrap_pos_x < 0.0f || !w)
         return 0.0f;
     if (wrap_pos_x == 0.0f)
-        wrap_pos_x = w->region_max.x;
+        wrap_pos_x = w->work_max_x;
     else if (wrap_pos_x > 0.0f)
         wrap_pos_x += w->pos.x - w->scroll.x;
     return maxf(wrap_pos_x - pos.x, 1.0f);
+}
+
+float ovl_calc_wrap_width_for_pos(ovl_vec2_t pos, float wrap_pos_x) {
+    return wrap_width_for(pos, wrap_pos_x);
 }
 
 void ovl_set_scroll_y(float y) {
@@ -1534,6 +1549,13 @@ static void render_text_clipped(ovl_vec2_t min, ovl_vec2_t max, const char* text
         ovl_pop_clip(&w->dl);
 }
 
+/* As ImGui's ItemAdd for an item without an id: one wholly outside the window's clip rectangle
+ * is laid out but not drawn */
+static int item_clipped(ovl_vec2_t mn, ovl_vec2_t mx) {
+    const float* c = ovl_draw_list_clip(&g.current->dl);
+    return !(mn.y < c[3] && mx.y > c[1] && mn.x < c[2] && mx.x > c[0]);
+}
+
 void ovl_text(const char* text, const char* end) {
     window_t* w = g.current;
     ovl_vec2_t pos, size;
@@ -1550,6 +1572,8 @@ void ovl_text(const char* text, const char* end) {
     g.last_min = pos;
     g.last_max = v2(pos.x + size.x, pos.y + size.y);
     item_size(size, 0.0f);
+    if (item_clipped(g.last_min, g.last_max))
+        return;
     render_text(pos, text, end, wrap_width, ovl_color_u32(OVL_COLOR_TEXT, 1.0f));
 }
 
@@ -1722,6 +1746,8 @@ void ovl_image(ovl_tex_t tex, ovl_vec2_t size, ovl_vec2_t uv0, ovl_vec2_t uv1) {
     g.last_id = 0;
     g.last_min = pos;
     g.last_max = mx;
+    if (item_clipped(pos, mx))
+        return;
     ovl_add_image(&w->dl, tex, pos, mx, uv0, uv1, color_vec(v4(1, 1, 1, 1)));
 }
 
@@ -1820,6 +1846,10 @@ static void append_list(const ovl_draw_list_t* dl) {
     }
 }
 
+const ovl_draw_data_t* ovl_draw_data(void) {
+    return &g.draw_data;
+}
+
 const ovl_draw_data_t* ovl_render(void) {
     window_t* order[MAX_WINDOWS];
     int n = 0, i;
@@ -1852,7 +1882,7 @@ const ovl_draw_data_t* ovl_render(void) {
     append_list(&g.background);
     for (i = 0; i < g.window_count; i++) {
         window_t* w = &g.windows[i];
-        if (w->used && w->active && !w->is_child && w->hidden_frames == 0)
+        if (w->used && w->active && !w->is_child && w->hidden_frames == 0 && !w->skip)
             order[n++] = w;
     }
     qsort(order, (size_t)n, sizeof(order[0]), window_compare);

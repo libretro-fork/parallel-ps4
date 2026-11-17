@@ -5,18 +5,15 @@
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
-#include <mutex>
+#include <optional>
+#include <string>
 #include <type_traits>
 #include <vector>
 #include <fmt/format.h>
 #include <formats/rmp3.h>
-#include <imgui.h>
-#include <imgui/imgui_std.h>
-#include <queue>
 
 #define MINIMP3_IMPLEMENTATION
 
-#include "common/combiner.h"
 #include "common/embedded_resources.h"
 #include "common/io_file.h"
 #include "common/logging/formatter.h"
@@ -25,12 +22,10 @@
 #include "core/emulator_settings.h"
 #include "core/libraries/np/trophy_ui.h"
 #include "libretro/audio_mix.h"
+#include "video_core/overlay/ovl_layers.h"
 
 namespace fs = std::filesystem;
-using namespace ImGui;
 namespace Libraries::Np::NpTrophy {
-
-std::optional<TrophyUI> current_trophy_ui;
 
 // The trophy sound, as the core's mix plays it: stereo at 48 kHz in the mix's format, made once
 // when the emulator starts and borrowed by the mix each time a trophy is unlocked.
@@ -118,7 +113,15 @@ static bool DecodeMp3F32(const u8* data, size_t size, std::vector<float>& pcm, u
     return ok;
 }
 
+static void PreloadTrophySoundInto();
+
 void PreloadTrophySound() {
+    PreloadTrophySoundInto();
+    // Lent to the overlay, which plays it as a trophy shows
+    ovl_trophy_set_sound(trophy_sound.data(), static_cast<unsigned>(trophy_sound.size() / 2));
+}
+
+static void PreloadTrophySoundInto() {
     trophy_sound.clear();
     const auto dir = Common::FS::GetUserPath(Common::FS::PathType::CustomTrophy);
     const auto mp3_path = dir / "trophy.mp3";
@@ -155,248 +158,40 @@ void PreloadTrophySound() {
         ResampleTrophySound(samples, frames, channels, hz);
     }
 }
-std::queue<TrophyInfo> trophy_queue;
-Common::Combiner queueMtx;
-std::string side = "right";
-double trophy_timer;
-
-TrophyUI::TrophyUI(const std::filesystem::path& trophyIconPath, const std::string& trophyName,
-                   const std::string_view& rarity)
-    : trophy_name(trophyName), trophy_type(rarity) {
-
-    side = emu_settings_get_trophy_notification_side();
-    trophy_timer = emu_settings_get_trophy_notification_duration();
-
+void AddTrophyToQueue(const std::filesystem::path& trophyIconPath, const std::string& trophyName,
+                      const std::string_view& rarity) {
+    if (emu_settings_get_trophy_popup_disabled()) {
+        return;
+    }
+    // The trophy's icon, mapped where it lies; the type's, the user's own in the custom trophy
+    // folder or the core's
+    std::optional<Common::FS::FileView> icon;
     if (Common::FS::Exists(trophyIconPath)) {
-        trophy_icon = RefCountedTexture::DecodePngFile(trophyIconPath);
-    } else {
+        icon = Common::FS::FileView::Map(trophyIconPath);
+    }
+    if (!icon) {
         LOG_ERROR(Lib_NpTrophy, "Couldnt load trophy icon at {}",
                   fmt::UTF(trophyIconPath.u8string()));
     }
-
-    std::string pathString = "src/resources/";
-
-    if (trophy_type == "P") {
-        pathString += "platinum.png";
-    } else if (trophy_type == "G") {
-        pathString += "gold.png";
-    } else if (trophy_type == "S") {
-        pathString += "silver.png";
-    } else if (trophy_type == "B") {
-        pathString += "bronze.png";
-    }
-
-    const auto CustomTrophy_Dir = Common::FS::GetUserPath(Common::FS::PathType::CustomTrophy);
-    std::string customPath;
-
-    if (trophy_type == "P" && Common::FS::Exists(CustomTrophy_Dir / "platinum.png")) {
-        customPath = (CustomTrophy_Dir / "platinum.png").string();
-    } else if (trophy_type == "G" && Common::FS::Exists(CustomTrophy_Dir / "gold.png")) {
-        customPath = (CustomTrophy_Dir / "gold.png").string();
-    } else if (trophy_type == "S" && Common::FS::Exists(CustomTrophy_Dir / "silver.png")) {
-        customPath = (CustomTrophy_Dir / "silver.png").string();
-    } else if (trophy_type == "B" && Common::FS::Exists(CustomTrophy_Dir / "bronze.png")) {
-        customPath = (CustomTrophy_Dir / "bronze.png").string();
-    }
-
-    if (!customPath.empty()) {
-        trophy_type_icon = RefCountedTexture::DecodePngFile(customPath);
-    } else {
-        // Embedded in the core: lent, not copied
-        trophy_type_icon = RefCountedTexture::DecodePngTexture(
-            Common::FS::FileView::Borrow(Common::GetEmbeddedResource(pathString)));
-    }
-
-    AddLayer(this);
-
-    // Louder than the game, as standalone plays it.
-    if (!trophy_sound.empty()) {
-        audio_mix_play_clip(trophy_sound.data(), static_cast<unsigned>(trophy_sound.size() / 2),
-                            emu_settings_get_volume_slider() * 0.01f * 1.2f);
-    }
-}
-
-TrophyUI::~TrophyUI() {
-    Finish();
-}
-
-void TrophyUI::Finish() {
-    RemoveLayer(this);
-}
-
-float fade_opacity = 0.0f;                 // Initial opacity (invisible)
-ImVec2 start_pos = ImVec2(1280.0f, 50.0f); // Starts off screen, right
-ImVec2 target_pos = ImVec2(0.0f, 50.0f);   // Final position
-float animation_duration = 0.5f;           // Animation duration
-float elapsed_time = 0.0f;                 // Animation time
-float fade_out_duration = 0.5f;            // Final fade duration
-
-void TrophyUI::Draw() {
-    const auto& io = GetIO();
-
-    float AdjustWidth = io.DisplaySize.x / 1920;
-    float AdjustHeight = io.DisplaySize.y / 1080;
-    const ImVec2 window_size{
-        std::min(io.DisplaySize.x, (350 * AdjustWidth)),
-        std::min(io.DisplaySize.y, (70 * AdjustHeight)),
-    };
-
-    elapsed_time += io.DeltaTime;
-    float progress = std::min(elapsed_time / animation_duration, 1.0f);
-
-    float final_pos_x, start_x;
-    float final_pos_y, start_y;
-
-    if (side == "top") {
-        start_x = (io.DisplaySize.x - window_size.x) * 0.5f;
-        start_y = -window_size.y;
-        final_pos_x = start_x;
-        final_pos_y = 20 * AdjustHeight;
-    } else if (side == "left") {
-        start_x = -window_size.x;
-        start_y = 50 * AdjustHeight;
-        final_pos_x = 20 * AdjustWidth;
-        final_pos_y = start_y;
-    } else if (side == "right") {
-        start_x = io.DisplaySize.x;
-        start_y = 50 * AdjustHeight;
-        final_pos_x = io.DisplaySize.x - window_size.x - 20 * AdjustWidth;
-        final_pos_y = start_y;
-    } else if (side == "bottom") {
-        start_x = (io.DisplaySize.x - window_size.x) * 0.5f;
-        start_y = io.DisplaySize.y;
-        final_pos_x = start_x;
-        final_pos_y = io.DisplaySize.y - window_size.y - 20 * AdjustHeight;
-    }
-
-    ImVec2 current_pos = ImVec2(start_x + (final_pos_x - start_x) * progress,
-                                start_y + (final_pos_y - start_y) * progress);
-
-    trophy_timer -= io.DeltaTime;
-
-    ImGui::SetNextWindowPos(current_pos);
-
-    // If the remaining time of the trophy is less than or equal to 1 second, the fade-out begins.
-    if (trophy_timer <= 1.0f) {
-        float fade_out_time = 1.0f - (trophy_timer / 1.0f);
-        fade_opacity = 1.0f - fade_out_time;
-    } else {
-        // Fade in , 0 to 1
-        fade_opacity = progress;
-    }
-
-    fade_opacity = std::max(0.0f, std::min(fade_opacity, 1.0f));
-
-    SetNextWindowSize(window_size);
-    SetNextWindowPos(current_pos);
-    SetNextWindowCollapsed(false);
-    KeepNavHighlight();
-    PushStyleVar(ImGuiStyleVar_Alpha, fade_opacity);
-
-    if (Begin("Trophy Window", nullptr,
-              ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoSavedSettings |
-                  ImGuiWindowFlags_NoInputs)) {
-
-        // Displays the trophy icon
-        if (trophy_type_icon) {
-            SetCursorPosY((window_size.y * 0.5f) - (25 * AdjustHeight));
-            Image(trophy_type_icon.GetTexture().im_id,
-                  ImVec2((50 * AdjustWidth), (50 * AdjustHeight)));
-            ImGui::SameLine();
+    const char* type_name = rarity == "P"   ? "platinum.png"
+                            : rarity == "G" ? "gold.png"
+                            : rarity == "S" ? "silver.png"
+                            : rarity == "B" ? "bronze.png"
+                                            : nullptr;
+    std::optional<Common::FS::FileView> type_icon;
+    if (type_name) {
+        const auto custom = Common::FS::GetUserPath(Common::FS::PathType::CustomTrophy) / type_name;
+        if (Common::FS::Exists(custom)) {
+            type_icon = Common::FS::FileView::Map(custom);
         } else {
-            // Placeholder
-            const auto pos = GetCursorScreenPos();
-            ImGui::GetWindowDrawList()->AddRectFilled(pos, pos + ImVec2{50.0f * AdjustHeight},
-                                                      GetColorU32(ImVec4{0.7f}));
-            ImGui::Indent(60);
-        }
-
-        // Displays the name of the trophy
-        const std::string combinedString = "Trophy earned!\n" + trophy_name;
-        const float wrap_width =
-            CalcWrapWidthForPos(GetCursorScreenPos(), (window_size.x - (60 * AdjustWidth)));
-        SetWindowFontScale(1.2 * AdjustHeight);
-        // If trophy name exceeds 1 line
-        if (CalcTextSize(trophy_name.c_str()).x > wrap_width) {
-            SetCursorPosY(5 * AdjustHeight);
-            if (CalcTextSize(trophy_name.c_str()).x > (wrap_width * 2)) {
-                SetWindowFontScale(0.95 * AdjustHeight);
-            } else {
-                SetWindowFontScale(1.1 * AdjustHeight);
-            }
-        } else {
-            const float text_height = ImGui::CalcTextSize(combinedString.c_str()).y;
-            SetCursorPosY((window_size.y - text_height) * 0.5);
-        }
-
-        if (side == "top" || side == "bottom") {
-            float text_width = ImGui::CalcTextSize(trophy_name.c_str()).x;
-            float centered_x = (window_size.x - text_width) * 0.5f;
-            ImGui::SetCursorPosX(std::max(centered_x, 10.0f * AdjustWidth));
-        }
-
-        ImGui::PushTextWrapPos(window_size.x - (60 * AdjustWidth));
-        TextWrapped("Trophy earned!\n%s", trophy_name.c_str());
-        ImGui::SameLine(window_size.x - (60 * AdjustWidth));
-
-        // Displays the trophy icon
-        if (trophy_icon) {
-            SetCursorPosY((window_size.y * 0.5f) - (25 * AdjustHeight));
-            Image(trophy_icon.GetTexture().im_id, ImVec2((50 * AdjustWidth), (50 * AdjustHeight)));
-        } else {
-            // Placeholder
-            const auto pos = GetCursorScreenPos();
-            ImGui::GetWindowDrawList()->AddRectFilled(pos, pos + ImVec2{50.0f * AdjustHeight},
-                                                      GetColorU32(ImVec4{0.7f}));
+            // Embedded in the core: lent, not copied
+            type_icon = Common::FS::FileView::Borrow(
+                Common::GetEmbeddedResource(std::string("src/resources/") + type_name));
         }
     }
-    End();
-
-    PopStyleVar();
-
-    if (trophy_timer <= 0) {
-        queueMtx.Run([&] {
-            if (!trophy_queue.empty()) {
-                TrophyInfo next_trophy = trophy_queue.front();
-                trophy_queue.pop();
-                current_trophy_ui.emplace(next_trophy.trophy_icon_path, next_trophy.trophy_name,
-                                          next_trophy.trophy_type);
-            } else {
-                current_trophy_ui.reset();
-            }
-        });
-    }
-}
-
-void AddTrophyToQueue(const std::filesystem::path& trophyIconPath, const std::string& trophyName,
-                      const std::string_view& rarity) {
-    queueMtx.Run([&] {
-        if (emu_settings_get_trophy_popup_disabled()) {
-            return;
-        } else if (current_trophy_ui.has_value()) {
-            current_trophy_ui.reset();
-        }
-
-        TrophyInfo new_trophy;
-        new_trophy.trophy_icon_path = trophyIconPath;
-        new_trophy.trophy_name = trophyName;
-        new_trophy.trophy_type = rarity;
-        trophy_queue.push(new_trophy);
-
-        if (!current_trophy_ui.has_value()) {
-#ifdef ENABLE_QT_GUI
-            BackgroundMusicPlayer::getInstance().stopMusic();
-#endif
-            // Resetting the animation for the next trophy
-            elapsed_time = 0.0f;                // Resetting animation time
-            fade_opacity = 0.0f;                // Starts invisible
-            start_pos = ImVec2(1280.0f, 50.0f); // Starts off screen, right
-            TrophyInfo next_trophy = trophy_queue.front();
-            trophy_queue.pop();
-            current_trophy_ui.emplace(next_trophy.trophy_icon_path, next_trophy.trophy_name,
-                                      next_trophy.trophy_type);
-        }
-    });
+    // Decoded here, on the game's thread, before the overlay shows it
+    ovl_trophy_queue(trophyName.c_str(), icon ? icon->data() : nullptr, icon ? icon->size() : 0,
+                     type_icon ? type_icon->data() : nullptr, type_icon ? type_icon->size() : 0);
 }
 
 } // namespace Libraries::Np::NpTrophy

@@ -147,6 +147,32 @@ int ovl_atlas_take_dirty(int rect[4], int* cleared);
 void ovl_atlas_mark_dirty(int x, int y, int w, int h);
 
 /* ------------------------------------------------------------------------------------------ */
+/* Images                                                                                      */
+
+/* Images live in a fixed set of slots, OVL_TEX_DIM square at most, whose pixels (RGBA,
+ * OVL_TEX_DIM x OVL_TEX_DIM, rows OVL_TEX_DIM pixels apart) the renderer lends when it starts.
+ * A handle is a slot's number from 1, and the ovl_tex_t its draws sample; 0 is none. */
+#define OVL_TEX_SLOTS 12
+#define OVL_TEX_DIM 512
+
+/* From any thread: decodes a PNG into a free slot, read where it lies; 0 when no slot is free,
+ * it is not a PNG, or it is larger than a slot */
+int ovl_tex_decode_png(const uint8_t* png, size_t size);
+/* From any thread: the image's owner is done with it */
+void ovl_tex_release(int handle);
+/* The image's size, when it is there to draw (decoded, uploaded or about to be) */
+int ovl_tex_size(int handle, int* w, int* h);
+
+/* The renderer's: lends the slots' pixels; a decoded image to copy to its slot's texture
+ * (the whole slot), 0 when none; and slots released, freed once @frames_in_flight frames
+ * have passed since */
+void ovl_tex_init(uint8_t* const* pixels, int count);
+void ovl_tex_shutdown(void);
+int ovl_tex_take_upload(void);
+const uint8_t* ovl_tex_pixels(int handle);
+void ovl_tex_collect(unsigned frame, unsigned frames_in_flight);
+
+/* ------------------------------------------------------------------------------------------ */
 /* Frames and input                                                                            */
 
 /* Keys and buttons the overlays read, keyboard and gamepad as ImGui names them */
@@ -191,6 +217,8 @@ void ovl_char_event(uint32_t codepoint);
 void ovl_new_frame(float display_w, float display_h, float delta_time);
 /* Ends the frame: what to draw, valid until the next ovl_new_frame */
 const ovl_draw_data_t* ovl_render(void);
+/* What the last ovl_render made, until the next ovl_new_frame */
+const ovl_draw_data_t* ovl_draw_data(void);
 float ovl_time(void);
 float ovl_delta_time(void);
 ovl_vec2_t ovl_display_size(void);
@@ -267,6 +295,8 @@ void ovl_pop_var(int count);
 ovl_vec4_t ovl_style_color(enum ovl_color idx);
 /* A style colour with the current alpha applied, as ImGui's GetColorU32 */
 ovl_col_t ovl_color_u32(enum ovl_color idx, float alpha_mul);
+/* A colour with the current alpha applied, as ImGui's GetColorU32(ImVec4) */
+ovl_col_t ovl_color_u32_vec4(ovl_vec4_t col);
 
 /* ------------------------------------------------------------------------------------------ */
 /* Windows                                                                                     */
@@ -340,6 +370,10 @@ float ovl_text_line_height_with_spacing(void);
 float ovl_frame_height(void);
 float ovl_frame_height_with_spacing(void);
 ovl_vec2_t ovl_calc_text_size(const char* text, const char* end, float wrap_width);
+/* The width text at @pos wraps at, for a wrap position as ovl_push_text_wrap_pos takes it
+ * (0: the window's right edge; below 0: no wrapping, 0 returned), as ImGui's
+ * CalcWrapWidthForPos */
+float ovl_calc_wrap_width_for_pos(ovl_vec2_t pos, float wrap_pos_x);
 void ovl_set_scroll_y(float y);
 void ovl_set_scroll_x(float x);
 float ovl_scroll_y(void);

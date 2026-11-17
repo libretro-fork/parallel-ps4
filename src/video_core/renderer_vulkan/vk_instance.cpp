@@ -199,7 +199,7 @@ Instance::Instance(s32 physical_device_index, bool enable_validation, bool enabl
 
 Instance::~Instance() {
     ImGui::Core::Shutdown(GetDevice());
-    Overlay::Shutdown(GetDevice());
+    ovl_vk_shutdown();
     allocator.reset();
 }
 
