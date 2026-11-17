@@ -245,6 +245,12 @@ private:
 
     std::unique_ptr<Slot[]> slots_;
     retro_atomic_int_t high_water_{0}; // slots in use lie below
+    // The threads waiting on it, each told of a change through a change handle of its own
+    // (an index into the process's change handles, plus one; 0 is a free entry)
+    static constexpr u32 MaxWaiters = 64;
+    retro_atomic_int_t waiting_[MaxWaiters]{};
+    // Waiters that found no entry or no change handle free: told through wake_, and looking
+    // again now and then, as another may take the signal
     retro_atomic_int_t waiters_{0};
     retro_atomic_int_t guest_wakes_{0}; // Wake() since DrainWake(); else the signal is a change
 #else

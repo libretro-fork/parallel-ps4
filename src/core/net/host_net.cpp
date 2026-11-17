@@ -819,6 +819,50 @@ struct HostEpoll::Slot {
     retro_atomic_64_t tag{0};
 };
 
+namespace {
+// Change handles, one taken by each thread waiting on an epoll for as long as it waits, so
+// that a change to an epoll's table reaches every thread waiting on it (one shared signal
+// reaches only the thread that drains it). Made the first time each is taken and kept for the
+// process: a handle signalled just after its waiter left is a spurious wake for its next one.
+constexpr u32 ChangeHandles = 256;
+struct ChangeHandle {
+    retro_atomic_int_t taken{0};
+    retro_atomic_ptr_t handle{nullptr}; // WakeHandle*, set once by the first to take it
+};
+ChangeHandle change_handles[ChangeHandles];
+
+// A change handle's index, or -1 if none is free (or none could be made)
+int TakeChangeHandle() {
+    for (u32 i = 0; i < ChangeHandles; ++i) {
+        ChangeHandle& c = change_handles[i];
+        if (retro_atomic_load_relaxed_int(&c.taken) != 0 || !retro_atomic_cas_int(&c.taken, 0, 1)) {
+            continue;
+        }
+        auto* handle = static_cast<WakeHandle*>(retro_atomic_load_acquire_ptr(&c.handle));
+        if (handle == nullptr) {
+            handle = new WakeHandle();
+            if (!handle->Valid()) {
+                delete handle;
+                retro_atomic_store_release_int(&c.taken, 0);
+                return -1;
+            }
+            retro_atomic_store_release_ptr(&c.handle, handle);
+        }
+        handle->Drain(); // what was meant for whoever had it before
+        return static_cast<int>(i);
+    }
+    return -1;
+}
+
+WakeHandle& ChangeHandleAt(int index) {
+    return *static_cast<WakeHandle*>(retro_atomic_load_acquire_ptr(&change_handles[index].handle));
+}
+
+void GiveChangeHandle(int index) {
+    retro_atomic_store_release_int(&change_handles[index].taken, 0);
+}
+} // namespace
+
 HostEpoll::HostEpoll() : slots_(std::make_unique<Slot[]>(MaxSlots)) {}
 
 HostEpoll::~HostEpoll() = default;
@@ -876,8 +920,15 @@ void HostEpoll::Write(u32 index, NativeSocket s, u64 tag, u64 flag_bits) {
     retro_atomic_store_release_64(&slot.state, SlotState(SlotVersion(state) + 2, flag_bits));
 }
 
-// A waiter rebuilds its poll set when told. Only a waiting thread needs telling.
+// A waiter rebuilds its poll set when told. Only a waiting thread needs telling: each one with
+// a change handle through its own, the others through wake_.
 void HostEpoll::Changed() {
+    for (u32 i = 0; i < MaxWaiters; ++i) {
+        const int entry = retro_atomic_load_acquire_int(&waiting_[i]);
+        if (entry != 0) {
+            ChangeHandleAt(entry - 1).Signal();
+        }
+    }
     if (static_cast<u32>(retro_atomic_load_acquire_int(&waiters_)) != 0) {
         wake_.Signal();
     }
@@ -910,21 +961,43 @@ EpollWaitResult HostEpoll::Wait(std::span<EpollEvent> out, Deadline deadline) {
     if (cap == 0) {
         return {0, false, Error::Inval};
     }
+    // Told of changes through a change handle of its own, in an entry of waiting_; else, with
+    // no entry or handle free, through wake_ as one of waiters_. Registered before the poll set
+    // is built: a change made before is in the set, one made after signals the handle.
     struct Waiting {
-        retro_atomic_int_t& count;
-        explicit Waiting(retro_atomic_int_t& c) : count(c) {
-            retro_atomic_fetch_add_int(&count, 1);
+        HostEpoll& ep;
+        int handle = -1;
+        u32 entry = MaxWaiters;
+        explicit Waiting(HostEpoll& e) : ep(e) {
+            handle = TakeChangeHandle();
+            if (handle >= 0) {
+                for (u32 i = 0; i < MaxWaiters; ++i) {
+                    if (retro_atomic_load_relaxed_int(&ep.waiting_[i]) == 0 &&
+                        retro_atomic_cas_int(&ep.waiting_[i], 0, handle + 1)) {
+                        entry = i;
+                        return;
+                    }
+                }
+                GiveChangeHandle(handle);
+                handle = -1;
+            }
+            retro_atomic_fetch_add_int(&ep.waiters_, 1);
         }
         ~Waiting() {
-            retro_atomic_fetch_sub_int(&count, 1);
+            if (entry != MaxWaiters) {
+                retro_atomic_store_release_int(&ep.waiting_[entry], 0);
+                GiveChangeHandle(handle);
+            } else {
+                retro_atomic_fetch_sub_int(&ep.waiters_, 1);
+            }
         }
-    } waiting{waiters_};
+    } waiting{*this};
 
     // The poll set lives with the thread rather than on a guest thread's stack
     struct PollSet {
-        std::array<pollfd, MaxSlots + 1> fds;
-        std::array<u32, MaxSlots + 1> index;
-        std::array<u64, MaxSlots + 1> seen;
+        std::array<pollfd, MaxSlots + 2> fds;
+        std::array<u32, MaxSlots + 2> index;
+        std::array<u64, MaxSlots + 2> seen;
     };
     static thread_local PollSet set;
     auto& fds = set.fds;
@@ -936,6 +1009,12 @@ EpollWaitResult HostEpoll::Wait(std::span<EpollEvent> out, Deadline deadline) {
         fds[n].fd = wake_.PollHandle();
         fds[n].events = POLLIN;
         ++n;
+        if (waiting.handle >= 0) {
+            fds[n].fd = ChangeHandleAt(waiting.handle).PollHandle();
+            fds[n].events = POLLIN;
+            ++n;
+        }
+        const u32 first = n; // the sockets from here
         const u32 high = static_cast<u32>(retro_atomic_load_acquire_int(&high_water_));
         for (u32 i = 0; i < high; ++i) {
             Slot& slot = slots_[i];
@@ -957,10 +1036,11 @@ EpollWaitResult HostEpoll::Wait(std::span<EpollEvent> out, Deadline deadline) {
             ++n;
         }
 
-        // Another waiter may have taken the change signal: look again now and then
+        // Only a waiter with no change handle of its own (more than 64 on this epoll, or 256
+        // waiting in all): it shares wake_ for changes, which another may drain first, so it
+        // looks again now and then
         int timeout = TimeoutMs(deadline);
-        if (static_cast<u32>(retro_atomic_load_relaxed_int(&waiters_)) > 1 &&
-            (timeout < 0 || timeout > 50)) {
+        if (waiting.handle < 0 && (timeout < 0 || timeout > 50)) {
             timeout = 50;
         }
         const int ready = socket_poll(fds.data(), n, timeout);
@@ -981,7 +1061,11 @@ EpollWaitResult HostEpoll::Wait(std::span<EpollEvent> out, Deadline deadline) {
                 }
             }
         }
-        for (u32 k = 1; k < n && static_cast<size_t>(r.count) < cap; ++k) {
+        if (waiting.handle >= 0 && fds[1].revents != 0) {
+            // A change: drained before the set is built again, so one made meanwhile is seen
+            ChangeHandleAt(waiting.handle).Drain();
+        }
+        for (u32 k = first; k < n && static_cast<size_t>(r.count) < cap; ++k) {
             const short rev = fds[k].revents;
             if (rev == 0 || (rev & POLLNVAL)) {
                 continue;
