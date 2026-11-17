@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include "common/assert.h"
+#include "common/host_thread.h"
 #include "common/thread_name.h"
 #ifdef _WIN32
 #include "common/ntapi.h"
@@ -52,6 +53,21 @@ void PS4_SYSV_ABI _sceKernelSetThreadDtors(ThreadDtor dtor) {
     ThreadDtors = dtor;
 }
 
+// The thread has ended: called on its host thread's own stack, once it is off the game's stack
+// and done with its record (host_thread_at_exit). Until the tid says so, its stack is not
+// handed to a new thread nor its record reused: before, it was said while the thread still ran
+// on the stack, in GameThreadIdle and NativeThread::Exit, and a thread made meanwhile could be
+// given that stack, and clear it, under it.
+static void ThreadEnded(void* arg) {
+    auto* thread = static_cast<Pthread*>(arg);
+    /*
+     * Kernel will do wakeup at the address, so joiner thread
+     * will be resumed if it is sleeping at the address.
+     */
+    retro_atomic_store_release_int(&thread->tid, TidTerminated);
+    retro_eventcount_notify(thread->join_wait.get());
+}
+
 static void ExitThread() {
     Pthread* curthread = g_curthread;
 
@@ -75,17 +91,11 @@ static void ExitThread() {
     curthread->refcount--;
     thread_state->TryCollect(curthread); /* thread lock released */
 
-    /*
-     * Kernel will do wakeup at the address, so joiner thread
-     * will be resumed if it is sleeping at the address.
-     */
-    retro_atomic_store_release_int(&curthread->tid, TidTerminated);
-    retro_eventcount_notify(curthread->join_wait.get());
-
     if (IsGameThread()) {
         GameThreadIdle();
         SetGameThread(false);
     }
+    host_thread_at_exit(ThreadEnded, curthread);
     curthread->native_thr->Exit();
     UNREACHABLE();
     /* Never reach! */

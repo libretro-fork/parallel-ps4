@@ -33,15 +33,24 @@ typedef void* host_thread_jump_t[5];
  * marked ended, before it is gone */
 static HOST_THREAD_LOCAL host_thread_jump_t host_thread_jump;
 static HOST_THREAD_LOCAL int host_thread_started;
+static HOST_THREAD_LOCAL host_thread_func_t host_thread_exit_func;
+static HOST_THREAD_LOCAL void* host_thread_exit_arg;
 
 static void host_thread_entry(void* data) {
     const host_thread_t* thread = (const host_thread_t*)data;
     const host_thread_func_t func = thread->func;
     void* const arg = thread->arg;
+    host_thread_func_t at_exit;
     host_thread_started = 1;
+    host_thread_exit_func = NULL;
     if (HOST_THREAD_SETJMP(host_thread_jump) == 0)
         func(arg);
     host_thread_started = 0;
+    /* Back on this thread's own stack, every frame of the thread's gone */
+    at_exit = host_thread_exit_func;
+    host_thread_exit_func = NULL;
+    if (at_exit)
+        at_exit(host_thread_exit_arg);
 }
 
 int host_thread_start(host_thread_t* thread, host_thread_func_t func, void* arg) {
@@ -57,6 +66,11 @@ int host_thread_start(host_thread_t* thread, host_thread_func_t func, void* arg)
 
 void host_thread_exit(void) {
     HOST_THREAD_LONGJMP(host_thread_jump);
+}
+
+void host_thread_at_exit(host_thread_func_t func, void* arg) {
+    host_thread_exit_arg = arg;
+    host_thread_exit_func = func;
 }
 
 int host_thread_is_current(void) {

@@ -32,6 +32,11 @@ int host_thread_start(host_thread_t* thread, host_thread_func_t func, void* arg)
 /* From the thread itself, anywhere in it: ends it. Does not return. */
 void host_thread_exit(void);
 
+/* From the thread itself: @func(@arg) is called as it ends, by host_thread_exit or by
+ * returning, once its own frames are gone - on the host thread's stack, not on a stack the
+ * thread switched to - and after anything else it does. Once; the last one asked for. */
+void host_thread_at_exit(host_thread_func_t func, void* arg);
+
 /* Whether the calling thread was started by host_thread_start (and is not past its exit) */
 int host_thread_is_current(void);
 
