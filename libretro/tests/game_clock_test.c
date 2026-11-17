@@ -230,11 +230,19 @@ static int io_is_done(void* ctx) {
 
 static void io_worker(void* data) {
     (void)data;
-    /* The read takes until well after the game thread has parked for it */
-    while (!game_clock_waiting_on(&io_clock, &io_ec.epoch) &&
-           !retro_atomic_load_acquire_int(&io_gave_up))
+    if (retro_atomic_load_acquire_int(&io_counted)) {
+        /* The read takes until well after the game thread has parked for it */
+        while (!game_clock_waiting_on(&io_clock, &io_ec.epoch) &&
+               !retro_atomic_load_acquire_int(&io_gave_up))
+            sthread_yield();
         sthread_yield();
-    sthread_yield();
+    } else {
+        /* A read slower than the timeout: done only once the game thread's wait has ended
+         * without it. (Done as soon as the game thread had parked, it raced the timeout the
+         * skipped time fires on that thread, and now and then won.) */
+        while (!retro_atomic_load_acquire_int(&io_gave_up))
+            sthread_yield();
+    }
     retro_atomic_store_release_64(&io_now_when_done, (int64_t)game_clock_now(&io_clock));
     retro_atomic_store_release_int(&io_done, 1);
     if (retro_atomic_load_acquire_int(&io_counted))
