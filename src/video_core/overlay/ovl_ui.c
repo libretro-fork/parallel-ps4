@@ -538,6 +538,10 @@ ovl_vec2_t ovl_frame_padding(void) {
     return g.style.frame_padding;
 }
 
+float ovl_scrollbar_size(void) {
+    return g.style.scrollbar_size;
+}
+
 float ovl_text_line_height(void) {
     return g.font_size;
 }
@@ -2887,8 +2891,8 @@ int ovl_input_text_with_hint(const char* label, const char* hint, char* buf, siz
     return 0;
 }
 
-void ovl_text_field(const char* label, const char* hint, const char* text, ovl_vec2_t size,
-                    int multiline) {
+static void text_field(const char* label, const char* hint, const char* text, ovl_vec2_t size,
+                       int multiline, ovl_vec2_t scroll) {
     window_t* w = g.current;
     const char* lend;
     const char* display;
@@ -2921,7 +2925,8 @@ void ovl_text_field(const char* label, const char* hint, const char* text, ovl_v
         item_add_no_nav(id, frame_min, total_max);
         render_frame(frame_min, frame_max, ovl_color_u32(OVL_COLOR_FRAME_BG, 1.0f),
                      g.style.frame_rounding);
-        draw_pos = v2(frame_min.x + g.style.frame_padding.x, frame_min.y + g.style.frame_padding.y);
+        draw_pos = v2(frame_min.x + g.style.frame_padding.x - (float)(int)scroll.x,
+                      frame_min.y + g.style.frame_padding.y);
         if (display != display_end && (text_col & 0xFF000000u)) {
             ovl_push_clip(&w->dl, frame_min, frame_max, 1);
             render_text(draw_pos, display, display_end, 0.0f, text_col);
@@ -2944,9 +2949,18 @@ void ovl_text_field(const char* label, const char* hint, const char* text, ovl_v
         ovl_pop_var(3);
         ovl_pop_color(1);
         child = g.current;
+        /* The text at the size of the window's, which the frame was sized by and whoever
+         * places a caret over it measures with. (ImGui's child starts again at the font's
+         * own size: under a window scaled up, small text in a large frame.) */
+        child->font_scale = w->font_scale;
+        update_font_size();
         child->cursor_pos.x += g.style.frame_padding.x;
         child->cursor_pos.y += g.style.frame_padding.y;
-        draw_pos = child->cursor_pos;
+        /* Scrolled as asked, this frame: from the frame's top, not from where the window's
+         * own scroll (last frame's) left the cursor. The window is told, for its scrollbar. */
+        draw_pos = v2(frame_min.x + g.style.frame_padding.x - (float)(int)scroll.x,
+                      frame_min.y + g.style.frame_padding.y - (float)(int)scroll.y);
+        set_scroll_y(child, scroll.y);
         clip[0] = maxf(frame_min.x, child->clip[0]);
         clip[1] = maxf(frame_min.y, child->clip[1]);
         clip[2] = minf(frame_min.x + frame_size.x - child->deco_x2, child->clip[2]);
@@ -2986,6 +3000,18 @@ void ovl_text_field(const char* label, const char* hint, const char* text, ovl_v
         render_text(
             v2(frame_max.x + g.style.item_inner_spacing.x, frame_min.y + g.style.frame_padding.y),
             label, lend, 0.0f, ovl_color_u32(OVL_COLOR_TEXT, 1.0f));
+}
+
+void ovl_text_field(const char* label, const char* hint, const char* text, ovl_vec2_t size,
+                    int multiline) {
+    text_field(label, hint, text, size, multiline, v2(0.0f, 0.0f));
+}
+
+void ovl_text_field_scrolled(const char* label, const char* hint, const char* text, ovl_vec2_t size,
+                             int multiline, ovl_vec2_t scroll) {
+    if (hint && text[0] == '\0')
+        scroll = v2(0.0f, 0.0f); /* the hint is not the text */
+    text_field(label, hint, text, size, multiline, v2(maxf(scroll.x, 0.0f), maxf(scroll.y, 0.0f)));
 }
 
 int ovl_invisible_button(const char* str_id, ovl_vec2_t size_arg) {

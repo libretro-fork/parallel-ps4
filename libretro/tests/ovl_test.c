@@ -798,6 +798,74 @@ static void check_text_field(void) {
   ovl_render();
 }
 
+/* One text field in a window, the window's text at @scale, the field's text
+ * moved by @scroll: what the on-screen keyboard draws */
+static unsigned scrolled_frame(const char *text, float scale, int multiline,
+                               float scroll_x, float scroll_y) {
+  ovl_vec2_t pos, pivot, size, scroll;
+  ovl_new_frame(1920.0f, 1080.0f, 1.0f / 60.0f);
+  pos.x = 960.0f;
+  pos.y = 540.0f;
+  pivot.x = pivot.y = 0.5f;
+  size.x = 520.0f;
+  size.y = 300.0f;
+  ovl_set_next_window_pos(pos, OVL_COND_ALWAYS, pivot);
+  ovl_set_next_window_size(size, OVL_COND_ALWAYS);
+  if (ovl_begin("Scrolled##ts",
+                OVL_WINDOW_NO_DECORATION | OVL_WINDOW_NO_SAVED_SETTINGS)) {
+    ovl_set_window_font_scale(scale);
+    size.x = 300.0f;
+    size.y = multiline ? 100.0f : 40.0f;
+    scroll.x = scroll_x;
+    scroll.y = scroll_y;
+    ovl_text_field_scrolled("##field", NULL, text, size, multiline, scroll);
+    ovl_set_window_font_scale(1.0f);
+  }
+  ovl_end();
+  return ovl_render()->vtx_count;
+}
+
+static void check_text_field_scrolled(void) {
+  /* Twelve lines, the nth of n letters: a line's glyphs say which it is */
+  static const char stairs[] = "x\nxx\nxxx\nxxxx\nxxxxx\nxxxxxx\nxxxxxxx\n"
+                               "xxxxxxxx\nxxxxxxxxx\nxxxxxxxxxx\nxxxxxxxxxxx\n"
+                               "xxxxxxxxxxxx";
+  static const char wide[] = "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+                             "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx";
+  unsigned top, down, big, none, all, part;
+  int i;
+  /* The field is 100 high, the text 3 below its top: at 16 a line, lines 1
+   * to 7 show (28 letters); moved up two lines, 2 (its last 3 pixels) to 9
+   * (44) */
+  for (i = 0; i < 3; i++)
+    top = scrolled_frame(stairs, 1.0f, 1, 0.0f, 0.0f);
+  for (i = 0; i < 3; i++)
+    down = scrolled_frame(stairs, 1.0f, 1, 0.0f, 32.0f);
+  CHECK(down == top + (44 - 28) * 4,
+        "several lines moved up by two: the lines in view then");
+  for (i = 0; i < 3; i++)
+    top = scrolled_frame(stairs, 1.0f, 1, 0.0f, 0.0f);
+  /* The window's text twice the size: the field's too, 32 a line, lines 1
+   * to 4 (10 letters) */
+  for (i = 0; i < 3; i++)
+    big = scrolled_frame(stairs, 2.0f, 1, 0.0f, 0.0f);
+  CHECK(top == big + (28 - 10) * 4,
+        "the field's text at the size of the window's");
+  /* One line wider than the field: moved left by some; by more than its
+   * width, none */
+  for (i = 0; i < 3; i++)
+    none = scrolled_frame("", 1.0f, 0, 0.0f, 0.0f);
+  all = scrolled_frame(wide, 1.0f, 0, 0.0f, 0.0f);
+  part = scrolled_frame(wide, 1.0f, 0, 200.0f, 0.0f);
+  CHECK(all > none && (part == all || part == all + 4),
+        "a line wider than the field moved left: as many letters in view, or "
+        "one more cut at each edge");
+  CHECK(scrolled_frame(wide, 1.0f, 0, 5000.0f, 0.0f) == none,
+        "moved left by more than its width: none");
+  ovl_new_frame(1920.0f, 1080.0f, 1.0f / 60.0f);
+  ovl_render();
+}
+
 /* The invitation dialog, as ImGui drew it; what it asks of the core is noted
  * here and answered when the test says */
 static int inv_friend_count;
@@ -1173,6 +1241,7 @@ int main(int argc, char **argv) {
   check_commerce();
   check_widgets();
   check_text_field();
+  check_text_field_scrolled();
   check_invitation();
   check_list();
   check_fallback_faces(noto, size);

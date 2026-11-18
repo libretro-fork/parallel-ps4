@@ -454,6 +454,7 @@ ImeDialogUi& ImeDialogUi::operator=(ImeDialogUi&& other) {
     panel_layout_anchor_initialized = other.panel_layout_anchor_initialized;
     panel_position = other.panel_position;
     panel_layout_anchor = other.panel_layout_anchor;
+    input_scroll = other.input_scroll;
     input_cursor_utf16 = other.input_cursor_utf16;
     input_cursor_byte = other.input_cursor_byte;
     input_selection_start_byte = other.input_selection_start_byte;
@@ -1620,12 +1621,15 @@ void ImeDialogUi::DrawInputText(const Libraries::Ime::ImePanelMetrics& metrics, 
     ovl_push_color(OVL_COLOR_FRAME_BG,
                    Libraries::Ime::ImeColorToVec4(state->style_config.color_text_field));
     ovl_push_color(OVL_COLOR_TEXT, Libraries::Ime::ImeColorToVec4(state->style_config.color_text));
-    ovl_text_field("##ImeDialogInput", placeholder, state->current_text.begin(), input_size,
-                   multiline);
+    // The caret kept in view: the text moved left, and up on several lines, as far as it takes
+    Libraries::Ime::FollowCaretInTextField(input_size, state->current_text.begin(),
+                                           input_cursor_byte, multiline, input_scroll);
+    ovl_text_field_scrolled("##ImeDialogInput", placeholder, state->current_text.begin(),
+                            input_size, multiline, input_scroll);
     ovl_pop_color(2);
     DrawInactiveCaretOverlay(ovl_item_rect_min(), ovl_item_rect_max(), state->current_text.begin(),
                              input_cursor_byte, input_selection_start_byte,
-                             input_selection_end_byte, multiline);
+                             input_selection_end_byte, multiline, input_scroll);
 }
 
 } // namespace Libraries::ImeDialog

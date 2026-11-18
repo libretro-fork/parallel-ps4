@@ -421,6 +421,7 @@ float ovl_font_current_size(void);
  * ovl_add_text and measures with ovl_font_calc_text_size; and the style's frame padding */
 ovl_font_t* ovl_font_current(void);
 ovl_vec2_t ovl_frame_padding(void);
+float ovl_scrollbar_size(void);
 float ovl_text_line_height(void);
 float ovl_text_line_height_with_spacing(void);
 float ovl_frame_height(void);
@@ -474,9 +475,16 @@ int ovl_input_text_with_hint(const char* label, const char* hint, char* buf, siz
  * item. @hint shown while @text is empty (null: none). @size as ImGui's size_arg (0: the
  * item width, a line's height; with @multiline, eight lines'). With @multiline the text's own
  * line breaks are kept, the frame is a child window as ImGui's is, and a text taller than it
- * gets that window's scrollbar; it stays at its top. */
+ * gets that window's scrollbar; it stays at its top. Unlike ImGui's, the text in it is at the
+ * size of the window's text (ovl_set_window_font_scale), as on one line. */
 void ovl_text_field(const char* label, const char* hint, const char* text, ovl_vec2_t size,
                     int multiline);
+/* The same with the text moved left and up by @scroll pixels, this frame: for whoever keeps a
+ * caret in view. The text starts ovl_frame_padding() inside the frame; a line is
+ * ovl_text_line_height() high; on several lines a text taller than the frame loses
+ * ovl_scrollbar_size() of its width to the scrollbar. */
+void ovl_text_field_scrolled(const char* label, const char* hint, const char* text, ovl_vec2_t size,
+                             int multiline, ovl_vec2_t scroll);
 
 int ovl_is_item_hovered(void);
 int ovl_is_item_active(void);

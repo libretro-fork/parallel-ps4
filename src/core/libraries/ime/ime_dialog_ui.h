@@ -137,6 +137,7 @@ class ImeDialogUi final : public Libraries::Ime::ImeLayer {
     bool panel_layout_anchor_initialized = false;
     ovl_vec2_t panel_position{};
     ovl_vec2_t panel_layout_anchor{};
+    ovl_vec2_t input_scroll{}; // how far the field's text is moved to keep the caret in view
     int input_cursor_utf16 = 0;
     int input_cursor_byte = 0;
     int input_selection_start_byte = 0;

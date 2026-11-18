@@ -448,9 +448,51 @@ int Utf8ByteIndexFromUtf16Index(const char* text, int utf16_index) {
     return static_cast<int>(p - text);
 }
 
+void FollowCaretInTextField(ovl_vec2_t field_size, const char* text, int caret_byte, bool multiline,
+                            ovl_vec2_t& scroll) {
+    const ovl_vec2_t frame_padding = ovl_frame_padding();
+    const float line_h = ovl_text_line_height();
+    const int text_len = static_cast<int>(std::strlen(text));
+    const char* const caret_ptr = text + std::clamp(caret_byte, 0, text_len);
+    const char* line_begin = text;
+    int caret_line = 0;
+    if (multiline) {
+        for (const char* p = text; p < caret_ptr; ++p) {
+            if (*p == '\n') {
+                line_begin = p + 1;
+                ++caret_line;
+            }
+        }
+    }
+    const ovl_vec2_t text_size = ovl_calc_text_size(text, nullptr, 0.0f);
+    const float visible_h = std::max(0.0f, field_size.y - frame_padding.y * 2.0f);
+    float visible_w = std::max(0.0f, field_size.x - frame_padding.x * 2.0f);
+    if (multiline) {
+        if (text_size.y > visible_h) {
+            visible_w = std::max(0.0f, visible_w - ovl_scrollbar_size());
+        }
+        const float caret_top = static_cast<float>(caret_line) * line_h;
+        if (caret_top < scroll.y) {
+            scroll.y = caret_top;
+        } else if (caret_top + line_h > scroll.y + visible_h) {
+            scroll.y = caret_top + line_h - visible_h;
+        }
+        scroll.y = std::floor(std::clamp(scroll.y, 0.0f, std::max(0.0f, text_size.y - visible_h)));
+    } else {
+        scroll.y = 0.0f;
+    }
+    const float caret_x = ovl_calc_text_size(line_begin, caret_ptr, 0.0f).x;
+    if (caret_x < scroll.x) {
+        scroll.x = caret_x;
+    } else if (caret_x > scroll.x + visible_w) {
+        scroll.x = caret_x - visible_w;
+    }
+    scroll.x = std::floor(std::clamp(scroll.x, 0.0f, std::max(0.0f, text_size.x - visible_w)));
+}
+
 void DrawInactiveCaretOverlay(ovl_vec2_t frame_min, ovl_vec2_t frame_max, const char* text,
                               int caret_byte, int selection_start_byte, int selection_end_byte,
-                              bool multiline) {
+                              bool multiline, ovl_vec2_t scroll) {
     if (!text) {
         return;
     }
@@ -492,11 +534,11 @@ void DrawInactiveCaretOverlay(ovl_vec2_t frame_min, ovl_vec2_t frame_max, const 
             }
             ++p;
         }
-        caret_x = left + ovl_calc_text_size(line_begin, caret_ptr, 0.0f).x;
-        caret_y = top + static_cast<float>(line_index) * ovl_text_line_height();
+        caret_x = left + ovl_calc_text_size(line_begin, caret_ptr, 0.0f).x - scroll.x;
+        caret_y = top + static_cast<float>(line_index) * ovl_text_line_height() - scroll.y;
         caret_bottom = caret_y + ovl_text_line_height();
     } else {
-        caret_x = left + ovl_calc_text_size(text, caret_ptr, 0.0f).x;
+        caret_x = left + ovl_calc_text_size(text, caret_ptr, 0.0f).x - scroll.x;
     }
 
     caret_x = std::clamp(caret_x, left, right);

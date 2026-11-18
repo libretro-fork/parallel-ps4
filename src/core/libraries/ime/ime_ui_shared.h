@@ -65,9 +65,14 @@ void Utf8ToUtf16(const char* text, std::size_t length, char16_t* out, std::size_
 /// The keyboard's own clipboard: what Copy took, for Paste (empty: nothing yet)
 const char* ImeClipboardText();
 void SetImeClipboardText(const char* text);
+/// How far a text field's text is moved left and up (ovl_text_field_scrolled) for its caret to
+/// be in view: @scroll as it was, moved only as far as the caret needs
+void FollowCaretInTextField(ovl_vec2_t field_size, const char* text, int caret_byte, bool multiline,
+                            ovl_vec2_t& scroll);
+/// The caret over a text field's text, moved by @scroll with it
 void DrawInactiveCaretOverlay(ovl_vec2_t frame_min, ovl_vec2_t frame_max, const char* text,
                               int caret_byte, int selection_start_byte, int selection_end_byte,
-                              bool multiline = false);
+                              bool multiline, ovl_vec2_t scroll);
 
 struct SelectorFadeState {
     ovl_vec2_t current_min{};

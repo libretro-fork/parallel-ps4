@@ -289,6 +289,7 @@ ImeUi& ImeUi::operator=(ImeUi&& other) {
     panel_vertical_nav_state = other.panel_vertical_nav_state;
     panel_position_initialized = other.panel_position_initialized;
     panel_position = other.panel_position;
+    input_scroll = other.input_scroll;
     input_cursor_utf16 = other.input_cursor_utf16;
     input_cursor_byte = other.input_cursor_byte;
     input_selection_start_byte = other.input_selection_start_byte;
@@ -1398,12 +1399,16 @@ void ImeUi::DrawInputText(const ImePanelMetrics& metrics) {
     // The field only shows the text: the keys below are what changes it
     ovl_push_color(OVL_COLOR_FRAME_BG, ImeColorToVec4(style_config.color_text_field));
     ovl_push_color(OVL_COLOR_TEXT, ImeColorToVec4(style_config.color_text));
-    ovl_text_field("##ImeInput", nullptr, state->current_text.begin(), input_size, 0);
+    // The caret kept in view: the text moved left as far as it takes
+    FollowCaretInTextField(input_size, state->current_text.begin(), input_cursor_byte, false,
+                           input_scroll);
+    ovl_text_field_scrolled("##ImeInput", nullptr, state->current_text.begin(), input_size, 0,
+                            input_scroll);
     ovl_pop_color(2);
 
     DrawInactiveCaretOverlay(ovl_item_rect_min(), ovl_item_rect_max(), state->current_text.begin(),
                              input_cursor_byte, input_selection_start_byte,
-                             input_selection_end_byte);
+                             input_selection_end_byte, false, input_scroll);
 }
 
 void ImeUi::Free() {
