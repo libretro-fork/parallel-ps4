@@ -761,6 +761,8 @@ set(COMMON src/common/c_bridge.cpp
            src/common/json_util.c
            src/common/ptr_table.c
            src/common/ptr_table.h
+           src/common/target_frames.c
+           src/common/target_frames.h
            src/common/u64_map.c
            src/common/u64_map.h
            src/common/json_util.h

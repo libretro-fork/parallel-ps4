@@ -715,6 +715,7 @@ Frame* Presenter::PrepareFrame(const Libraries::VideoOut::BufferAttributeGroup& 
                                VAddr cpu_address, bool game_hdr) {
     // A frame of the game's is done: a vertex capture counts them
     VertexCapture::OnFlip();
+    rasterizer->OnFlip();
     // With Dump Shaders on, what is recorded for the GPU during a frame is written out
     // every so many frames, next to the shaders
     if (emu_settings_get_dump_shaders()) {

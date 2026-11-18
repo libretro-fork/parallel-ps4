@@ -103,7 +103,15 @@ public:
     bool LoadGraphicsPipeline(Serialization::Archive& ar);
     bool LoadPipelineStage(Serialization::Archive& ar, size_t stage);
 
-    const GraphicsPipeline* GetGraphicsPipeline(const DrawIndirectParams params = {});
+    /// @may_skip: with asynchronous compilation, whether the draw may be left out while its
+    /// pipeline is being made (null is returned); otherwise it waits for it
+    const GraphicsPipeline* GetGraphicsPipeline(const DrawIndirectParams params = {},
+                                                bool may_skip = true);
+
+    /// Asynchronous compilation: draws may be left out
+    [[nodiscard]] bool AsyncCompile() const {
+        return async_compile;
+    }
 
     const ComputePipeline* GetComputePipeline();
 

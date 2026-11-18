@@ -515,11 +515,13 @@ bool PipelineCache::DrawsIntoSmallTargets() const {
     return any;
 }
 
-const GraphicsPipeline* PipelineCache::GetGraphicsPipeline(const DrawIndirectParams params) {
+const GraphicsPipeline* PipelineCache::GetGraphicsPipeline(const DrawIndirectParams params,
+                                                           bool may_skip) {
     draw_indirect_params = params;
-    // Asynchronous: a draw whose pipeline is not ready is skipped, but one into small images
-    // only waits for it, as compute work does
-    const bool skip_unready = async_compile && !DrawsIntoSmallTargets();
+    // Asynchronous: a draw whose pipeline is not ready is skipped, but one into small images,
+    // or into an image the game did not draw into the frame before (@may_skip), only waits
+    // for it, as compute work does
+    const bool skip_unready = async_compile && may_skip && !DrawsIntoSmallTargets();
     for (;;) {
         DrainCompiled();
         stage_pending = false;

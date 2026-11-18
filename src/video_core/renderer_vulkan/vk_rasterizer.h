@@ -5,6 +5,7 @@
 
 #include "common/interval_set.h"
 #include "common/published.h"
+#include "common/target_frames.h"
 #include "video_core/buffer_cache/buffer_cache.h"
 #include "video_core/page_manager.h"
 #include "video_core/renderer_vulkan/vk_pipeline_cache.h"
@@ -105,6 +106,8 @@ public:
     void Finish();
     void OnSubmit();
     void OnFence();
+    /// A frame of the game's is done
+    void OnFlip();
 
     PipelineCache& GetPipelineCache() {
         return pipeline_cache;
@@ -195,6 +198,15 @@ private:
     u32 target_scale_num = 1;
     u32 target_scale_den = 1;
     bool needs_barrier{};
+    /// Asynchronous shader compilation: the frames each image was drawn into, and the images
+    /// of the last draw asked about with the answer it got (draws come in runs into the same)
+    target_frames_t target_frames{};
+    std::array<u64, AmdGpu::NUM_COLOR_BUFFERS + 4> last_targets{};
+    u32 num_last_targets = 0;
+    u32 last_targets_frame = 0;
+    bool last_targets_may_skip = false;
+    /// The pipeline of the draw being set up; null when the draw is not made
+    const GraphicsPipeline* DrawPipeline(const DrawIndirectParams params = {});
     /// A vertex capture's: the vertices the draw being recorded reads, and its indices read
     /// to find them
     u32 capture_first_vertex{};
