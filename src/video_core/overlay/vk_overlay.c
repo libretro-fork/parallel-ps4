@@ -609,6 +609,7 @@ int ovl_vk_init(const ovl_vk_info_t* info) {
     memset(&vk, 0, sizeof(vk));
     ovl_msg_dialog_init();
     ovl_save_dialog_init();
+    ovl_profile_dialog_init();
     if (!load_functions(info->get_device_proc, info->device)) {
         init_error = "the device's functions";
         return 0;
@@ -654,6 +655,7 @@ void ovl_vk_shutdown(void) {
         return;
     ovl_msg_dialog_shutdown();
     ovl_save_dialog_shutdown();
+    ovl_profile_dialog_shutdown();
     ovl_shadnet_reset();
     ovl_invite_reset();
     ovl_notify_reset();
@@ -704,13 +706,15 @@ void ovl_vk_new_frame(unsigned width, unsigned height, float delta, float framer
     /* The dialogs after, as ImGui's layers registered as they opened; a message (the emulator's
      * own save data errors among them) over the save data dialog */
     ovl_save_dialog_draw();
+    ovl_profile_dialog_draw();
     ovl_msg_dialog_draw();
     vk.draw_data = ovl_render();
 }
 
 int ovl_vk_must_keep_drawing(void) {
     return vk.made && (ovl_notify_active() || ovl_trophy_active() || ovl_msg_dialog_active() ||
-                       ovl_save_dialog_active() || ovl_shadnet_active() || ovl_invite_active());
+                       ovl_save_dialog_active() || ovl_profile_dialog_active() ||
+                       ovl_shadnet_active() || ovl_invite_active());
 }
 
 int ovl_vk_splash_ready(void) {

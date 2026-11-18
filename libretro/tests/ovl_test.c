@@ -467,6 +467,55 @@ static void check_dialogs(void) {
   ovl_msg_dialog_shutdown();
 }
 
+/* The profile dialog: an account's number on its card, as ImGui drew it, closed
+ * by cross on Close, and by the game */
+static const ovl_draw_data_t *profile_frame(int cross) {
+  ovl_key_event(OVL_KEY_PAD_FACE_DOWN, cross);
+  ovl_new_frame(1920.0f, 1080.0f, 1.0f / 60.0f);
+  ovl_profile_dialog_draw();
+  return ovl_render();
+}
+
+static void check_profile(void) {
+  ovl_profile_dialog_param_t p;
+  const ovl_draw_data_t *dd;
+  int frame;
+  ovl_profile_dialog_init();
+  ovl_set_gamepad_connected(1);
+  memset(&p, 0, sizeof(p));
+  p.mode = OVL_PROFILE_MODE_NORMAL;
+  p.has_account_id = 1;
+  p.account_id = ((uint64_t)0xFFFFFFFFu << 32) | 0xFFFFFFFFu;
+  ovl_profile_dialog_set_status(1);
+  ovl_profile_dialog_open(&p);
+  CHECK(ovl_profile_dialog_status() == 2 && ovl_profile_dialog_active(),
+        "running, frames drawn while it shows");
+  dd = profile_frame(0);
+  CHECK(dd->vtx_count == 1236 && dd->idx_count == 4758,
+        "the profile dialog's first frame as ImGui's");
+  dd = profile_frame(0);
+  CHECK(dd->vtx_count == 1268 && dd->idx_count == 4854,
+        "with the focus cursor, as ImGui's");
+  for (frame = 0; frame < 3; frame++)
+    profile_frame(frame == 1);
+  CHECK(ovl_profile_dialog_status() == 3, "finished by cross on Close");
+  CHECK(ovl_profile_dialog_result() == OVL_PROFILE_RESULT_USER_CANCELED,
+        "as cancelled by the player");
+  dd = profile_frame(0);
+  CHECK(dd->vtx_count == 0 && !ovl_profile_dialog_active(), "gone");
+  /* The game closing it */
+  p.has_account_id = 0;
+  p.online_id = "Kestrel";
+  ovl_profile_dialog_open(&p);
+  profile_frame(0);
+  CHECK(ovl_profile_dialog_close(OVL_PROFILE_RESULT_OK) &&
+            !ovl_profile_dialog_close(OVL_PROFILE_RESULT_USER_CANCELED),
+        "closed once");
+  CHECK(ovl_profile_dialog_result() == OVL_PROFILE_RESULT_OK,
+        "with the game's result");
+  ovl_profile_dialog_shutdown();
+}
+
 /* A frame of the save data dialog's shape: a title between separators, a
  * scrolling child of twelve buttons flattened into the window, back below */
 static const ovl_draw_data_t *list_frame(int first, int down, int up) {
@@ -585,6 +634,7 @@ int main(int argc, char **argv) {
   check_layers();
   check_splash();
   check_dialogs();
+  check_profile();
   check_list();
   ovl_destroy();
   free(noto);

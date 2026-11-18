@@ -182,6 +182,34 @@ void ovl_save_dialog_result(int* button, int* result, int* item);
 void ovl_save_dialog_draw(void);
 int ovl_save_dialog_active(void);
 
+/* The profile dialog (ovl_profile.c), libSceNpProfileDialog's: a card naming a player and what
+ * was asked about them, and Close. Its modes are libSceNpProfileDialog's, the status and the
+ * result CommonDialog's. The game's thread opens it (its text copied) and may close it; the
+ * overlay's thread draws it and closes it when Close is pressed. */
+enum {
+    OVL_PROFILE_MODE_NORMAL = 1,
+    OVL_PROFILE_MODE_FRIEND_REQUEST = 2,
+    OVL_PROFILE_MODE_ADD_TO_BLOCK_LIST = 3,
+    OVL_PROFILE_MODE_GRIEF_REPORT = 4
+};
+enum { OVL_PROFILE_RESULT_OK = 0, OVL_PROFILE_RESULT_USER_CANCELED = 1 };
+typedef struct ovl_profile_dialog_param {
+    int mode;
+    const char* online_id; /* shown unless there is an account id; up to 32 bytes */
+    int has_account_id;
+    uint64_t account_id; /* shown as its number */
+} ovl_profile_dialog_param_t;
+void ovl_profile_dialog_init(void);
+void ovl_profile_dialog_shutdown(void);
+int ovl_profile_dialog_status(void);
+void ovl_profile_dialog_set_status(int status);
+void ovl_profile_dialog_open(const ovl_profile_dialog_param_t* param);
+/* Finishes it with @user_action if it runs; 0 if it did not */
+int ovl_profile_dialog_close(int user_action);
+int ovl_profile_dialog_result(void);
+void ovl_profile_dialog_draw(void);
+int ovl_profile_dialog_active(void);
+
 /* shadNet's notifications (ovl_shadnet.c): queued from any thread, a kind and its text (copied,
  * up to 511 bytes); 0 when too many are waiting. Up to six show, newest first. */
 enum {
