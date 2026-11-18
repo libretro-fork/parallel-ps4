@@ -147,7 +147,7 @@ static size_t mask_hits(const unsigned char* data, size_t size, const int* patte
 /* The core's own patches (src/resources/patches/ParaLLEl), as the catalog reads them for each
  * game's serials: two entries, for every version (no AppVer). Double Sound Update Rate's line
  * finds MagicOrchestra's update time by its text and halves it, leaving the rest of the line;
- * Lower Audio Latency's finds FMOD's mixer blocks in its code and makes the 4 kept 3.
+ * Lower Audio Latency's finds FMOD's mixer blocks in its code and makes the 4 kept 2.
  * An executable given (argv) is patched as the emulator does it: exactly once. */
 static void parallel_patches(int argc, char** argv) {
     static const char* const files[] = {"src/resources/patches/ParaLLEl/Bloodborne.xml",
@@ -168,9 +168,9 @@ static void parallel_patches(int argc, char** argv) {
         src.data = data;
         src.size = size;
         CHECK(patch_catalog_build(&cat, &src, 1, serials[f]), "built from the core's file");
-        /* Lower Audio Latency: FMOD's mixer keeps 3 blocks of 256 samples, not 4. Its line
+        /* Lower Audio Latency: FMOD's mixer keeps 2 blocks of 256 samples, not 4. Its line
          * finds where FMOD's own code sets the two (the block's length, then all the blocks'
-         * together) and writes 768 over the 1024: the bytes are each game's own. */
+         * together) and writes 512 over the 1024: the bytes are each game's own. */
         entry = find(&cat, "Lower Audio Latency");
         CHECK(entry >= 0 && cat.count == 2, "its two patches");
         if (entry >= 0) {
@@ -204,8 +204,8 @@ static void parallel_patches(int argc, char** argv) {
                 at = code[f] + first + (size_t)offset;
                 CHECK(at[0] == 0 && at[1] == 0x04 && at[2] == 0 && at[3] == 0,
                       "the offset is the 1024 of all the blocks together");
-                CHECK(strcmp(rxml_node_attrib(line, "Value"), "00030000") == 0,
-                      "768 written there: 3 blocks of 256 (with 2, some sounds crackle)");
+                CHECK(strcmp(rxml_node_attrib(line, "Value"), "00020000") == 0,
+                      "512 written there: 2 blocks of 256");
                 for (a = 1; a < argc; a++) {
                     size_t esize = 0, hits;
                     unsigned char* exe = read_file(argv[a], &esize);
