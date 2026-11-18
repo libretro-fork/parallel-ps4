@@ -32,6 +32,10 @@
 #include "../audio_mix.h"
 #include "ovl_invdialog_stubs.h"
 
+/* The on-screen keyboard is the core's (C++, with the keyboard): none here */
+void ovl_ime_draw(void) {}
+int ovl_ime_must_keep_drawing(void) { return 0; }
+
 #include <formats/image.h>
 #include <formats/rpng.h>
 

@@ -995,107 +995,21 @@ const ImeTopPanelLayoutConfig& GetDefaultTopPanelLayoutConfig() {
 
 } // namespace
 
-namespace {
-
-void AddImeKeyLabelGlyphs(ImFontGlyphRangesBuilder& builder, const char* label) {
-    if (!label || label[0] == '\0') {
-        return;
-    }
-    builder.AddText(label);
-}
-
-void AddImeLayoutGlyphs(ImFontGlyphRangesBuilder& builder, const ImeKbLayoutModel& model,
-                        const ImeKbLayoutSelection& selection,
-                        const OrbisImeLanguage supported_languages) {
-    if (!model.keys || model.key_count == 0) {
-        return;
-    }
-
-    for (std::size_t i = 0; i < model.key_count; ++i) {
-        const ImeKbKeySpec& key = model.keys[i];
-        const bool is_done = key.action == ImeKbKeyAction::Done;
-        const char* label = key.label;
-        if (!is_done) {
-            label = ResolveSymbolOverrideLabel(selection, supported_languages, key, label);
-            label = ResolveShiftOverrideLabel(selection, key, label);
-        }
-        AddImeKeyLabelGlyphs(builder, label);
-        AddImeKeyLabelGlyphs(builder, key.hotkey_label);
-    }
-}
-
-} // namespace
-
-void AddImeKeyboardGlyphsToFontRanges(ImFontGlyphRangesBuilder& builder) {
-    // Resolve labels via real layout selection paths so accent/symbol overrides stay complete.
-    constexpr std::array<OrbisImeLanguage, 5> kLanguageMasks = {
-        static_cast<OrbisImeLanguage>(0), OrbisImeLanguage::ENGLISH_US,
-        OrbisImeLanguage::ENGLISH_GB,     OrbisImeLanguage::JAPANESE,
-        OrbisImeLanguage::KOREAN,
-    };
-    constexpr std::array<ImeKbLayoutFamily, 3> kFamilies = {
-        ImeKbLayoutFamily::Latin,
-        ImeKbLayoutFamily::Symbols,
-        ImeKbLayoutFamily::Specials,
-    };
-    constexpr std::array<ImeKbCaseState, 3> kCaseStates = {
-        ImeKbCaseState::Lower,
-        ImeKbCaseState::Upper,
-        ImeKbCaseState::CapsLock,
-    };
-
-    for (const OrbisImeLanguage language_mask : kLanguageMasks) {
-        for (const ImeKbLayoutFamily family : kFamilies) {
-            for (const ImeKbCaseState case_state : kCaseStates) {
-                for (u8 page = 0; page < 2; ++page) {
-                    const ImeKbLayoutSelection selection{
-                        .family = family,
-                        .case_state = case_state,
-                        .page = page,
-                    };
-                    const ImeKbLayoutModel& model = GetImeKeyboardLayout(selection);
-                    AddImeLayoutGlyphs(builder, model, selection, language_mask);
-                }
-            }
-        }
-    }
-
-    // Done key label is injected dynamically from game params.
-    AddImeKeyLabelGlyphs(builder, GetEnterLabel(OrbisImeEnterLabel::Default));
-    AddImeKeyLabelGlyphs(builder, GetEnterLabel(OrbisImeEnterLabel::Go));
-    AddImeKeyLabelGlyphs(builder, GetEnterLabel(OrbisImeEnterLabel::Search));
-    AddImeKeyLabelGlyphs(builder, GetEnterLabel(OrbisImeEnterLabel::Send));
-    AddImeKeyLabelGlyphs(builder, kArrowLabelUp);
-    AddImeKeyLabelGlyphs(builder, kArrowLabelRight);
-    AddImeKeyLabelGlyphs(builder, kArrowLabelDown);
-    AddImeKeyLabelGlyphs(builder, kArrowLabelLeft);
-}
-
 ImeViewportMetrics ComputeImeViewportMetrics(bool use_over2k) {
     ImeViewportMetrics metrics{};
     metrics.base_w = use_over2k ? 3840.0f : 1920.0f;
     metrics.base_h = use_over2k ? 2160.0f : 1080.0f;
 
-    const ImGuiIO& io = ImGui::GetIO();
-    const ImGuiViewport* viewport = ImGui::GetMainViewport();
-    ImVec2 base_pos = viewport ? viewport->WorkPos : ImVec2{0.0f, 0.0f};
-    ImVec2 base_size = viewport ? viewport->WorkSize : io.DisplaySize;
-    if (base_size.x <= 0.0f || base_size.y <= 0.0f) {
-        base_pos = {0.0f, 0.0f};
-        base_size = io.DisplaySize;
-    }
+    const ovl_vec2_t base_pos{0.0f, 0.0f};
+    const ovl_vec2_t base_size = ovl_display_size();
 
     metrics.size = base_size;
     metrics.offset = base_pos;
 
     const auto out_res = DebugState.output_resolution;
     if (out_res.first != 0 && out_res.second != 0) {
-        const float fb_scale_x =
-            io.DisplayFramebufferScale.x > 0.0f ? io.DisplayFramebufferScale.x : 1.0f;
-        const float fb_scale_y =
-            io.DisplayFramebufferScale.y > 0.0f ? io.DisplayFramebufferScale.y : 1.0f;
-        const float viewport_w = static_cast<float>(out_res.first) / fb_scale_x;
-        const float viewport_h = static_cast<float>(out_res.second) / fb_scale_y;
+        const float viewport_w = static_cast<float>(out_res.first);
+        const float viewport_h = static_cast<float>(out_res.second);
 
         float offset_x = (base_size.x - viewport_w) * 0.5f;
         float offset_y = (base_size.y - viewport_h) * 0.5f;
@@ -1251,12 +1165,12 @@ const ImeTopPanelLayoutConfig& GetImeTopPanelLayoutConfig(const ImeKbLayoutSelec
     return GetImeTopPanelLayoutConfig(ResolveImeKeyboardLayoutId(selection));
 }
 
-ImU32 ImeColorToImU32(const OrbisImeColor& color) {
-    return IM_COL32(color.r, color.g, color.b, color.a);
+ovl_col_t ImeColorToCol(const OrbisImeColor& color) {
+    return OVL_COL(color.r, color.g, color.b, color.a);
 }
 
-ImVec4 ImeColorToImVec4(const OrbisImeColor& color) {
-    return ImGui::ColorConvertU32ToFloat4(ImeColorToImU32(color));
+ovl_vec4_t ImeColorToVec4(const OrbisImeColor& color) {
+    return ovl_vec4_from_col(ImeColorToCol(color));
 }
 
 ImeStyleConfig GetDefaultImeStyleConfig() {
@@ -1285,18 +1199,18 @@ ImeStyleConfig ResolveImeStyleConfig(const OrbisImeParamExtended* extended) {
 }
 
 void ApplyImeStyleToKeyboardDrawParams(const ImeStyleConfig& style, ImeKbDrawParams& params) {
-    params.key_bg_default = ImeColorToImU32(style.color_button_default);
-    params.key_bg_function = ImeColorToImU32(style.color_button_function);
-    params.key_bg_symbol = ImeColorToImU32(style.color_button_symbol);
-    params.key_border = ImeColorToImU32(style.color_line);
-    params.key_done = ImeColorToImU32(style.color_special);
-    params.key_text = ImeColorToImU32(style.color_text);
+    params.key_bg_default = ImeColorToCol(style.color_button_default);
+    params.key_bg_function = ImeColorToCol(style.color_button_function);
+    params.key_bg_symbol = ImeColorToCol(style.color_button_symbol);
+    params.key_border = ImeColorToCol(style.color_line);
+    params.key_done = ImeColorToCol(style.color_special);
+    params.key_text = ImeColorToCol(style.color_text);
 
-    ImVec4 hotkey = ImeColorToImVec4(style.color_text);
+    ovl_vec4_t hotkey = ImeColorToVec4(style.color_text);
     hotkey.x = std::clamp(hotkey.x * 0.92f, 0.0f, 1.0f);
     hotkey.y = std::clamp(hotkey.y * 0.92f, 0.0f, 1.0f);
     hotkey.z = std::clamp(hotkey.z * 0.92f, 0.0f, 1.0f);
-    params.key_hotkey_text = ImGui::ColorConvertFloat4ToU32(hotkey);
+    params.key_hotkey_text = ovl_col_from_vec4(hotkey);
 }
 
 void DrawImeKeyboardGrid(const ImeKbGridLayout& layout, const ImeKbDrawParams& params,
@@ -1310,7 +1224,7 @@ void DrawImeKeyboardGrid(const ImeKbGridLayout& layout, const ImeKbDrawParams& p
     state.selected_col = -1;
     state.selected_center = {};
 
-    auto* draw = ImGui::GetWindowDrawList();
+    ovl_draw_list_t* draw = ovl_window_draw_list();
     if (!draw || layout.cols <= 0 || layout.rows <= 0 || layout.size.x <= 0.0f ||
         layout.size.y <= 0.0f) {
         return;
@@ -1395,10 +1309,10 @@ void DrawImeKeyboardGrid(const ImeKbGridLayout& layout, const ImeKbDrawParams& p
         int col = 0;
         u8 col_span = 1;
         u8 row_span = 1;
-        ImVec2 pos{};
-        ImVec2 size{};
-        ImVec2 center{};
-        ImU32 bg = 0;
+        ovl_vec2_t pos{};
+        ovl_vec2_t size{};
+        ovl_vec2_t center{};
+        ovl_col_t bg = 0;
         const char* label = nullptr;
         const char* hotkey_label = nullptr;
         ImeKbKeyGlyph glyph = ImeKbKeyGlyph::None;
@@ -1433,8 +1347,8 @@ void DrawImeKeyboardGrid(const ImeKbGridLayout& layout, const ImeKbDrawParams& p
             const float y = row_offsets[static_cast<std::size_t>(row)];
             const float w = key_w * col_span + key_gap_x * (col_span - 1);
             const float h = span_row_height(row, row_span);
-            ImVec2 pos{x, y};
-            ImVec2 size{w, h};
+            ovl_vec2_t pos{x, y};
+            ovl_vec2_t size{w, h};
 
             const auto slot_base_bg = [&](int slot_row) {
                 const bool function_row =
@@ -1448,7 +1362,7 @@ void DrawImeKeyboardGrid(const ImeKbGridLayout& layout, const ImeKbDrawParams& p
                 return params.key_bg_default;
             };
 
-            ImU32 bg = slot_base_bg(row);
+            ovl_col_t bg = slot_base_bg(row);
             bool is_done = false;
             const char* label = nullptr;
             const char* hotkey_label = nullptr;
@@ -1524,8 +1438,8 @@ void DrawImeKeyboardGrid(const ImeKbGridLayout& layout, const ImeKbDrawParams& p
         int press_pulse_col = -1;
         double press_pulse_started_at = -1.0;
     };
-    static std::unordered_map<ImGuiID, ImeKbNavState> s_nav_states;
-    const ImGuiID nav_id = ImGui::GetID("##ImeKbGridNav");
+    static std::unordered_map<u32, ImeKbNavState> s_nav_states;
+    const u32 nav_id = ovl_get_id("##ImeKbGridNav");
     ImeKbNavState& nav_state = s_nav_states[nav_id];
     const auto clear_selection_fade = [&]() {
         nav_state.highlighted_row = -1;
@@ -1674,7 +1588,7 @@ void DrawImeKeyboardGrid(const ImeKbGridLayout& layout, const ImeKbDrawParams& p
 
         int row = nav_state.cursor_row;
         int col = nav_state.cursor_col;
-        const double now = ImGui::GetTime();
+        const double now = ovl_time();
         if (row < 0 || col < 0) {
             const auto [first_row, first_col] = first_selectable_cell();
             nav_state.cursor_row = first_row;
@@ -1723,51 +1637,50 @@ void DrawImeKeyboardGrid(const ImeKbGridLayout& layout, const ImeKbDrawParams& p
     };
 
     if (params.allow_nav_input) {
-        const bool use_imgui_lstick_nav = params.use_imgui_lstick_nav;
-        const bool imgui_move_left_once =
-            ImGui::IsKeyPressed(ImGuiKey_GamepadDpadLeft, false) ||
-            (use_imgui_lstick_nav && ImGui::IsKeyPressed(ImGuiKey_GamepadLStickLeft, false));
-        const bool imgui_move_right_once =
-            ImGui::IsKeyPressed(ImGuiKey_GamepadDpadRight, false) ||
-            (use_imgui_lstick_nav && ImGui::IsKeyPressed(ImGuiKey_GamepadLStickRight, false));
-        const bool imgui_move_up_once =
-            ImGui::IsKeyPressed(ImGuiKey_GamepadDpadUp, false) ||
-            (use_imgui_lstick_nav && ImGui::IsKeyPressed(ImGuiKey_GamepadLStickUp, false));
-        const bool imgui_move_down_once =
-            ImGui::IsKeyPressed(ImGuiKey_GamepadDpadDown, false) ||
-            (use_imgui_lstick_nav && ImGui::IsKeyPressed(ImGuiKey_GamepadLStickDown, false));
-        const bool imgui_move_left_with_repeat =
-            ImGui::IsKeyPressed(ImGuiKey_GamepadDpadLeft, true) ||
-            (use_imgui_lstick_nav && ImGui::IsKeyPressed(ImGuiKey_GamepadLStickLeft, true));
-        const bool imgui_move_right_with_repeat =
-            ImGui::IsKeyPressed(ImGuiKey_GamepadDpadRight, true) ||
-            (use_imgui_lstick_nav && ImGui::IsKeyPressed(ImGuiKey_GamepadLStickRight, true));
-        const bool imgui_move_up_with_repeat =
-            ImGui::IsKeyPressed(ImGuiKey_GamepadDpadUp, true) ||
-            (use_imgui_lstick_nav && ImGui::IsKeyPressed(ImGuiKey_GamepadLStickUp, true));
-        const bool imgui_move_down_with_repeat =
-            ImGui::IsKeyPressed(ImGuiKey_GamepadDpadDown, true) ||
-            (use_imgui_lstick_nav && ImGui::IsKeyPressed(ImGuiKey_GamepadLStickDown, true));
-        const bool imgui_move_left_repeat = imgui_move_left_with_repeat && !imgui_move_left_once;
-        const bool imgui_move_right_repeat = imgui_move_right_with_repeat && !imgui_move_right_once;
-        const bool imgui_move_up_repeat = imgui_move_up_with_repeat && !imgui_move_up_once;
-        const bool imgui_move_down_repeat = imgui_move_down_with_repeat && !imgui_move_down_once;
+        const bool use_lstick_key_nav = params.use_lstick_key_nav;
+        const bool key_move_left_once =
+            ovl_is_key_pressed(OVL_KEY_PAD_DPAD_LEFT, false) ||
+            (use_lstick_key_nav && ovl_is_key_pressed(OVL_KEY_PAD_LSTICK_LEFT, false));
+        const bool key_move_right_once =
+            ovl_is_key_pressed(OVL_KEY_PAD_DPAD_RIGHT, false) ||
+            (use_lstick_key_nav && ovl_is_key_pressed(OVL_KEY_PAD_LSTICK_RIGHT, false));
+        const bool key_move_up_once =
+            ovl_is_key_pressed(OVL_KEY_PAD_DPAD_UP, false) ||
+            (use_lstick_key_nav && ovl_is_key_pressed(OVL_KEY_PAD_LSTICK_UP, false));
+        const bool key_move_down_once =
+            ovl_is_key_pressed(OVL_KEY_PAD_DPAD_DOWN, false) ||
+            (use_lstick_key_nav && ovl_is_key_pressed(OVL_KEY_PAD_LSTICK_DOWN, false));
+        const bool key_move_left_with_repeat =
+            ovl_is_key_pressed(OVL_KEY_PAD_DPAD_LEFT, true) ||
+            (use_lstick_key_nav && ovl_is_key_pressed(OVL_KEY_PAD_LSTICK_LEFT, true));
+        const bool key_move_right_with_repeat =
+            ovl_is_key_pressed(OVL_KEY_PAD_DPAD_RIGHT, true) ||
+            (use_lstick_key_nav && ovl_is_key_pressed(OVL_KEY_PAD_LSTICK_RIGHT, true));
+        const bool key_move_up_with_repeat =
+            ovl_is_key_pressed(OVL_KEY_PAD_DPAD_UP, true) ||
+            (use_lstick_key_nav && ovl_is_key_pressed(OVL_KEY_PAD_LSTICK_UP, true));
+        const bool key_move_down_with_repeat =
+            ovl_is_key_pressed(OVL_KEY_PAD_DPAD_DOWN, true) ||
+            (use_lstick_key_nav && ovl_is_key_pressed(OVL_KEY_PAD_LSTICK_DOWN, true));
+        const bool key_move_left_repeat = key_move_left_with_repeat && !key_move_left_once;
+        const bool key_move_right_repeat = key_move_right_with_repeat && !key_move_right_once;
+        const bool key_move_up_repeat = key_move_up_with_repeat && !key_move_up_once;
+        const bool key_move_down_repeat = key_move_down_with_repeat && !key_move_down_once;
         const bool move_left =
-            imgui_move_left_once || imgui_move_left_repeat || params.external_nav_left;
+            key_move_left_once || key_move_left_repeat || params.external_nav_left;
         const bool move_right =
-            imgui_move_right_once || imgui_move_right_repeat || params.external_nav_right;
-        const bool move_up = imgui_move_up_once || imgui_move_up_repeat || params.external_nav_up;
+            key_move_right_once || key_move_right_repeat || params.external_nav_right;
+        const bool move_up = key_move_up_once || key_move_up_repeat || params.external_nav_up;
         const bool move_down =
-            imgui_move_down_once || imgui_move_down_repeat || params.external_nav_down;
+            key_move_down_once || key_move_down_repeat || params.external_nav_down;
         const bool move_left_repeat =
-            imgui_move_left_repeat || (params.external_nav_left && params.external_nav_left_repeat);
-        const bool move_right_repeat =
-            imgui_move_right_repeat ||
-            (params.external_nav_right && params.external_nav_right_repeat);
+            key_move_left_repeat || (params.external_nav_left && params.external_nav_left_repeat);
+        const bool move_right_repeat = key_move_right_repeat || (params.external_nav_right &&
+                                                                 params.external_nav_right_repeat);
         const bool move_up_repeat =
-            imgui_move_up_repeat || (params.external_nav_up && params.external_nav_up_repeat);
+            key_move_up_repeat || (params.external_nav_up && params.external_nav_up_repeat);
         const bool move_down_repeat =
-            imgui_move_down_repeat || (params.external_nav_down && params.external_nav_down_repeat);
+            key_move_down_repeat || (params.external_nav_down && params.external_nav_down_repeat);
 
         if (move_left) {
             move_cursor(0, -1, move_left_repeat);
@@ -1780,8 +1693,8 @@ void DrawImeKeyboardGrid(const ImeKbGridLayout& layout, const ImeKbDrawParams& p
         }
     }
 
-    const bool imgui_activate_selected_once = ImGui::IsKeyPressed(ImGuiKey_GamepadFaceDown, false);
-    const bool imgui_activate_selected_repeat = ImGui::IsKeyPressed(ImGuiKey_GamepadFaceDown, true);
+    const bool key_activate_selected_once = ovl_is_key_pressed(OVL_KEY_PAD_FACE_DOWN, false);
+    const bool key_activate_selected_repeat = ovl_is_key_pressed(OVL_KEY_PAD_FACE_DOWN, true);
 
     const auto activate_key = [&](const RenderedKey& render_key, bool trigger_press_pulse) {
         if (!render_key.key || !render_key.selectable) {
@@ -1790,7 +1703,7 @@ void DrawImeKeyboardGrid(const ImeKbGridLayout& layout, const ImeKbDrawParams& p
         if (trigger_press_pulse) {
             nav_state.press_pulse_row = render_key.row;
             nav_state.press_pulse_col = render_key.col;
-            nav_state.press_pulse_started_at = ImGui::GetTime();
+            nav_state.press_pulse_started_at = ovl_time();
         }
         state.pressed_action = render_key.key->action;
         state.pressed_label = render_key.label;
@@ -1835,7 +1748,7 @@ void DrawImeKeyboardGrid(const ImeKbGridLayout& layout, const ImeKbDrawParams& p
         if (nav_state.highlighted_row >= 0 && nav_state.highlighted_col >= 0) {
             nav_state.fade_row = nav_state.highlighted_row;
             nav_state.fade_col = nav_state.highlighted_col;
-            nav_state.fade_started_at = ImGui::GetTime();
+            nav_state.fade_started_at = ovl_time();
         } else {
             nav_state.fade_row = -1;
             nav_state.fade_col = -1;
@@ -1847,7 +1760,7 @@ void DrawImeKeyboardGrid(const ImeKbGridLayout& layout, const ImeKbDrawParams& p
 
     float faded_selection_alpha = 0.0f;
     if (nav_state.fade_row >= 0 && nav_state.fade_col >= 0 && kSelectionFadeOutDurationSec > 0.0) {
-        const double elapsed = ImGui::GetTime() - nav_state.fade_started_at;
+        const double elapsed = ovl_time() - nav_state.fade_started_at;
         if (elapsed >= 0.0 && elapsed < kSelectionFadeOutDurationSec) {
             faded_selection_alpha =
                 1.0f - static_cast<float>(elapsed / kSelectionFadeOutDurationSec);
@@ -1887,8 +1800,8 @@ void DrawImeKeyboardGrid(const ImeKbGridLayout& layout, const ImeKbDrawParams& p
     bool activate_selected = false;
     bool activate_selected_pulse = false;
     if (params.allow_activate_input) {
-        bool activate_once = imgui_activate_selected_once;
-        bool activate_repeat = imgui_activate_selected_repeat && !imgui_activate_selected_once;
+        bool activate_once = key_activate_selected_once;
+        bool activate_repeat = key_activate_selected_repeat && !key_activate_selected_once;
         if (!activate_once && params.external_activate_pressed) {
             if (params.external_activate_repeat) {
                 activate_repeat = true;
@@ -1912,23 +1825,23 @@ void DrawImeKeyboardGrid(const ImeKbGridLayout& layout, const ImeKbDrawParams& p
         activate_selected_pulse = activate_once;
     }
 
-    const auto draw_key_glyph = [&](ImVec2 pos, ImVec2 size, ImeKbKeyGlyph glyph) {
+    const auto draw_key_glyph = [&](ovl_vec2_t pos, ovl_vec2_t size, ImeKbKeyGlyph glyph) {
         if (glyph == ImeKbKeyGlyph::None) {
             return;
         }
 
         const float glyph_extent = std::min(size.x, size.y);
         const float thickness = std::max(1.2f, glyph_extent * 0.05f);
-        const ImU32 color = params.key_text;
+        const ovl_col_t color = params.key_text;
         const float cx = pos.x + size.x * 0.5f;
         const float cy = pos.y + size.y * 0.5f;
         const auto draw_symbol_glyph = [&](const char* symbol) {
-            ImFont* font = ImGui::GetFont();
+            ovl_font_t* font = ovl_font_current();
             const float symbol_font_size = std::max(8.0f, glyph_extent * 0.62f);
-            const ImVec2 symbol_size = font->CalcTextSizeA(
-                symbol_font_size, std::numeric_limits<float>::max(), -1.0f, symbol);
-            const ImVec2 symbol_pos{cx - symbol_size.x * 0.5f, cy - symbol_size.y * 0.5f};
-            draw->AddText(font, symbol_font_size, symbol_pos, color, symbol);
+            const ovl_vec2_t symbol_size =
+                ovl_font_calc_text_size(font, symbol_font_size, 0.0f, symbol, nullptr);
+            const ovl_vec2_t symbol_pos{cx - symbol_size.x * 0.5f, cy - symbol_size.y * 0.5f};
+            ovl_add_text(draw, font, symbol_font_size, symbol_pos, color, symbol, nullptr, 0.0f);
         };
         const auto draw_shift_glyph = [&](bool filled, bool caps_locked) {
             const float extent = std::min(size.x, size.y);
@@ -1940,21 +1853,22 @@ void DrawImeKeyboardGrid(const ImeKbGridLayout& layout, const ImeKbDrawParams& p
             const float head_half_w = extent * (0.30f * scale);
             const float stem_half_w = extent * (0.11f * scale);
 
-            const std::array<ImVec2, 7> shape{
-                ImVec2{cx, tip_y},
-                ImVec2{cx - head_half_w, shoulder_y},
-                ImVec2{cx - stem_half_w, shoulder_y},
-                ImVec2{cx - stem_half_w, base_y},
-                ImVec2{cx + stem_half_w, base_y},
-                ImVec2{cx + stem_half_w, shoulder_y},
-                ImVec2{cx + head_half_w, shoulder_y},
+            const std::array<ovl_vec2_t, 7> shape{
+                ovl_vec2_t{cx, tip_y},
+                ovl_vec2_t{cx - head_half_w, shoulder_y},
+                ovl_vec2_t{cx - stem_half_w, shoulder_y},
+                ovl_vec2_t{cx - stem_half_w, base_y},
+                ovl_vec2_t{cx + stem_half_w, base_y},
+                ovl_vec2_t{cx + stem_half_w, shoulder_y},
+                ovl_vec2_t{cx + head_half_w, shoulder_y},
             };
 
             if (filled) {
-                draw->AddConvexPolyFilled(shape.data(), static_cast<int>(shape.size()), color);
+                ovl_add_convex_poly_filled(draw, shape.data(), static_cast<int>(shape.size()),
+                                           color);
             } else {
-                draw->AddPolyline(shape.data(), static_cast<int>(shape.size()), color, thickness,
-                                  ImDrawFlags_Closed);
+                ovl_add_polyline(draw, shape.data(), static_cast<int>(shape.size()), color,
+                                 OVL_CLOSED, thickness);
             }
 
             if (caps_locked) {
@@ -1962,9 +1876,9 @@ void DrawImeKeyboardGrid(const ImeKbGridLayout& layout, const ImeKbDrawParams& p
                 const float marker_h = std::max(thickness * 1.25f, extent * 0.07f);
                 const float marker_y =
                     std::min(pos.y + size.y - marker_h * 0.9f, base_y + extent * (0.10f * scale));
-                const ImVec2 marker_min{cx - marker_w * 0.5f, marker_y - marker_h * 0.5f};
-                const ImVec2 marker_max{cx + marker_w * 0.5f, marker_y + marker_h * 0.5f};
-                draw->AddRectFilled(marker_min, marker_max, color, marker_h * 0.45f);
+                const ovl_vec2_t marker_min{cx - marker_w * 0.5f, marker_y - marker_h * 0.5f};
+                const ovl_vec2_t marker_max{cx + marker_w * 0.5f, marker_y + marker_h * 0.5f};
+                ovl_add_rect_filled(draw, marker_min, marker_max, color, marker_h * 0.45f, 0);
             }
         };
 
@@ -1978,23 +1892,23 @@ void DrawImeKeyboardGrid(const ImeKbGridLayout& layout, const ImeKbDrawParams& p
             const float right = left + body_w;
             const float top = cy - body_h * 0.5f;
             const float bottom = cy + body_h * 0.5f;
-            const ImVec2 tip{left - tip_w, cy};
-            const std::array<ImVec2, 5> frame{
-                ImVec2{left, top},
-                ImVec2{right, top},
-                ImVec2{right, bottom},
-                ImVec2{left, bottom},
+            const ovl_vec2_t tip{left - tip_w, cy};
+            const std::array<ovl_vec2_t, 5> frame{
+                ovl_vec2_t{left, top},
+                ovl_vec2_t{right, top},
+                ovl_vec2_t{right, bottom},
+                ovl_vec2_t{left, bottom},
                 tip,
             };
-            draw->AddPolyline(frame.data(), static_cast<int>(frame.size()), color, thickness,
-                              ImDrawFlags_Closed);
+            ovl_add_polyline(draw, frame.data(), static_cast<int>(frame.size()), color, OVL_CLOSED,
+                             thickness);
 
             const float cross_half = extent * 0.10f;
             const float cross_cx = left + body_w * 0.57f;
-            draw->AddLine({cross_cx - cross_half, cy - cross_half},
-                          {cross_cx + cross_half, cy + cross_half}, color, thickness);
-            draw->AddLine({cross_cx + cross_half, cy - cross_half},
-                          {cross_cx - cross_half, cy + cross_half}, color, thickness);
+            ovl_add_line(draw, {cross_cx - cross_half, cy - cross_half},
+                         {cross_cx + cross_half, cy + cross_half}, color, thickness);
+            ovl_add_line(draw, {cross_cx + cross_half, cy - cross_half},
+                         {cross_cx - cross_half, cy + cross_half}, color, thickness);
             break;
         }
         case ImeKbKeyGlyph::ArrowLeft: {
@@ -2028,57 +1942,58 @@ void DrawImeKeyboardGrid(const ImeKbGridLayout& layout, const ImeKbDrawParams& p
         }
     };
 
-    const auto draw_key = [&](ImVec2 pos, ImVec2 size, ImU32 bg, const char* label,
+    const auto draw_key = [&](ovl_vec2_t pos, ovl_vec2_t size, ovl_col_t bg, const char* label,
                               const char* hotkey_label, ImeKbKeyGlyph glyph, float selection_alpha,
                               float pulse_expand_px, bool emphasize_main_label,
                               bool underline_main_label, bool disabled_visual, bool done_key) {
         const float clamped_selection_alpha = std::clamp(selection_alpha, 0.0f, 1.0f);
         if (clamped_selection_alpha > 0.0f) {
             const float selection_boost = 0.11f * clamped_selection_alpha;
-            ImVec4 selected_bg = ImGui::ColorConvertU32ToFloat4(bg);
+            ovl_vec4_t selected_bg = ovl_vec4_from_col(bg);
             selected_bg.x = std::min(1.0f, selected_bg.x + selection_boost);
             selected_bg.y = std::min(1.0f, selected_bg.y + selection_boost);
             selected_bg.z = std::min(1.0f, selected_bg.z + selection_boost);
-            bg = ImGui::ColorConvertFloat4ToU32(selected_bg);
+            bg = ovl_col_from_vec4(selected_bg);
         }
-        ImU32 key_text_color = params.key_text;
-        ImU32 key_hotkey_color = params.key_hotkey_text;
+        ovl_col_t key_text_color = params.key_text;
+        ovl_col_t key_hotkey_color = params.key_hotkey_text;
         if (disabled_visual) {
-            ImVec4 dim_bg = ImGui::ColorConvertU32ToFloat4(bg);
+            ovl_vec4_t dim_bg = ovl_vec4_from_col(bg);
             dim_bg.x *= 0.72f;
             dim_bg.y *= 0.72f;
             dim_bg.z *= 0.72f;
-            bg = ImGui::ColorConvertFloat4ToU32(dim_bg);
-            key_text_color = IM_COL32(150, 150, 150, 255);
-            key_hotkey_color = IM_COL32(122, 122, 122, 255);
+            bg = ovl_col_from_vec4(dim_bg);
+            key_text_color = OVL_COL(150, 150, 150, 255);
+            key_hotkey_color = OVL_COL(122, 122, 122, 255);
         }
         const float expand = std::max(0.0f, pulse_expand_px);
-        const ImVec2 draw_min{pos.x - expand, pos.y - expand};
-        const ImVec2 draw_max{pos.x + size.x + expand, pos.y + size.y + expand};
+        const ovl_vec2_t draw_min{pos.x - expand, pos.y - expand};
+        const ovl_vec2_t draw_max{pos.x + size.x + expand, pos.y + size.y + expand};
         const float draw_corner_radius = layout.corner_radius + expand;
-        draw->AddRectFilled(draw_min, draw_max, bg, draw_corner_radius);
+        ovl_add_rect_filled(draw, draw_min, draw_max, bg, draw_corner_radius, 0);
         const bool selected = clamped_selection_alpha > 0.0f;
-        ImU32 border_color = params.key_border;
+        ovl_col_t border_color = params.key_border;
         if (done_key) {
-            ImVec4 done_border = ImGui::ColorConvertU32ToFloat4(bg);
+            ovl_vec4_t done_border = ovl_vec4_from_col(bg);
             done_border.x = std::clamp(done_border.x * 0.72f, 0.0f, 1.0f);
             done_border.y = std::clamp(done_border.y * 0.72f, 0.0f, 1.0f);
             done_border.z = std::clamp(done_border.z * 0.72f, 0.0f, 1.0f);
             done_border.w = 1.0f;
-            border_color = ImGui::ColorConvertFloat4ToU32(done_border);
+            border_color = ovl_col_from_vec4(done_border);
         }
         if (selected) {
-            border_color = IM_COL32(248, 248, 248, 255);
+            border_color = OVL_COL(248, 248, 248, 255);
         }
         const float border_thickness = selected ? 2.0f : 1.0f;
         if (selected && clamped_selection_alpha < 1.0f) {
-            ImVec4 border = ImGui::ColorConvertU32ToFloat4(border_color);
+            ovl_vec4_t border = ovl_vec4_from_col(border_color);
             border.w *= clamped_selection_alpha;
-            border_color = ImGui::ColorConvertFloat4ToU32(border);
+            border_color = ovl_col_from_vec4(border);
         }
-        draw->AddRect(draw_min, draw_max, border_color, draw_corner_radius, 0, border_thickness);
-        ImFont* font = ImGui::GetFont();
-        const float base_font_size = ImGui::GetFontSize();
+        ovl_add_rect(draw, draw_min, draw_max, border_color, draw_corner_radius, 0,
+                     border_thickness);
+        ovl_font_t* font = ovl_font_current();
+        const float base_font_size = ovl_font_current_size();
         const auto draw_hotkey_badge = [&]() {
             if (!hotkey_label || hotkey_label[0] == '\0') {
                 return;
@@ -2086,28 +2001,30 @@ void DrawImeKeyboardGrid(const ImeKbGridLayout& layout, const ImeKbDrawParams& p
             const float hotkey_padding_x = std::max(3.0f, size.y * 0.08f);
             const float hotkey_max_w = std::max(0.0f, size.x - hotkey_padding_x * 2.0f);
             float hotkey_font_size = std::max(6.0f, base_font_size * kHotkeyLabelScale);
-            ImVec2 hotkey_size = font->CalcTextSizeA(
-                hotkey_font_size, std::numeric_limits<float>::max(), -1.0f, hotkey_label);
+            ovl_vec2_t hotkey_size =
+                ovl_font_calc_text_size(font, hotkey_font_size, 0.0f, hotkey_label, nullptr);
             if (hotkey_max_w > 0.0f && hotkey_size.x > hotkey_max_w && hotkey_size.x > 0.0f) {
                 hotkey_font_size *= hotkey_max_w / hotkey_size.x;
-                hotkey_size = font->CalcTextSizeA(
-                    hotkey_font_size, std::numeric_limits<float>::max(), -1.0f, hotkey_label);
+                hotkey_size =
+                    ovl_font_calc_text_size(font, hotkey_font_size, 0.0f, hotkey_label, nullptr);
             }
-            ImVec2 hotkey_pos{pos.x + hotkey_padding_x, pos.y};
+            ovl_vec2_t hotkey_pos{pos.x + hotkey_padding_x, pos.y};
             const float hotkey_bg_pad_x = std::max(2.0f, hotkey_font_size * 0.28f);
             const float hotkey_bg_pad_bottom = std::max(1.0f, hotkey_font_size * 0.16f);
-            const ImVec2 hotkey_bg_min{hotkey_pos.x - hotkey_bg_pad_x, pos.y};
-            const ImVec2 hotkey_bg_max{hotkey_pos.x + hotkey_size.x + hotkey_bg_pad_x,
-                                       hotkey_pos.y + hotkey_size.y + hotkey_bg_pad_bottom};
+            const ovl_vec2_t hotkey_bg_min{hotkey_pos.x - hotkey_bg_pad_x, pos.y};
+            const ovl_vec2_t hotkey_bg_max{hotkey_pos.x + hotkey_size.x + hotkey_bg_pad_x,
+                                           hotkey_pos.y + hotkey_size.y + hotkey_bg_pad_bottom};
             const float hotkey_bg_rounding = std::max(2.0f, hotkey_font_size * 0.24f);
-            const ImU32 hotkey_bg_color =
-                disabled_visual ? IM_COL32(16, 16, 16, 120) : IM_COL32(10, 10, 10, 132);
-            const ImU32 hotkey_bg_border =
-                disabled_visual ? IM_COL32(70, 70, 70, 90) : IM_COL32(92, 92, 92, 105);
-            draw->AddRectFilled(hotkey_bg_min, hotkey_bg_max, hotkey_bg_color, hotkey_bg_rounding);
-            draw->AddRect(hotkey_bg_min, hotkey_bg_max, hotkey_bg_border, hotkey_bg_rounding, 0,
-                          1.0f);
-            draw->AddText(font, hotkey_font_size, hotkey_pos, key_hotkey_color, hotkey_label);
+            const ovl_col_t hotkey_bg_color =
+                disabled_visual ? OVL_COL(16, 16, 16, 120) : OVL_COL(10, 10, 10, 132);
+            const ovl_col_t hotkey_bg_border =
+                disabled_visual ? OVL_COL(70, 70, 70, 90) : OVL_COL(92, 92, 92, 105);
+            ovl_add_rect_filled(draw, hotkey_bg_min, hotkey_bg_max, hotkey_bg_color,
+                                hotkey_bg_rounding, 0);
+            ovl_add_rect(draw, hotkey_bg_min, hotkey_bg_max, hotkey_bg_border, hotkey_bg_rounding,
+                         0, 1.0f);
+            ovl_add_text(draw, font, hotkey_font_size, hotkey_pos, key_hotkey_color, hotkey_label,
+                         nullptr, 0.0f);
         };
         if ((!label || label[0] == '\0') && glyph != ImeKbKeyGlyph::None) {
             draw_key_glyph(pos, size, glyph);
@@ -2118,23 +2035,24 @@ void DrawImeKeyboardGrid(const ImeKbGridLayout& layout, const ImeKbDrawParams& p
                 (emphasize_main_label ? kTypingKeyLabelScale : kFunctionKeyLabelScale);
             const float label_padding_x = std::max(4.0f, size.x * 0.08f);
             const float label_max_w = std::max(0.0f, size.x - label_padding_x * 2.0f);
-            ImVec2 text_size = font->CalcTextSizeA(label_font_size,
-                                                   std::numeric_limits<float>::max(), -1.0f, label);
+            ovl_vec2_t text_size =
+                ovl_font_calc_text_size(font, label_font_size, 0.0f, label, nullptr);
             if (label_max_w > 0.0f && text_size.x > label_max_w && text_size.x > 0.0f) {
                 label_font_size *= label_max_w / text_size.x;
-                text_size = font->CalcTextSizeA(label_font_size, std::numeric_limits<float>::max(),
-                                                -1.0f, label);
+                text_size = ovl_font_calc_text_size(font, label_font_size, 0.0f, label, nullptr);
             }
-            ImVec2 text_pos{pos.x + (size.x - text_size.x) * 0.5f,
-                            pos.y + (size.y - text_size.y) * 0.5f};
-            draw->AddText(font, label_font_size, text_pos, key_text_color, label);
+            ovl_vec2_t text_pos{pos.x + (size.x - text_size.x) * 0.5f,
+                                pos.y + (size.y - text_size.y) * 0.5f};
+            ovl_add_text(draw, font, label_font_size, text_pos, key_text_color, label, nullptr,
+                         0.0f);
             if (underline_main_label) {
                 const float underline_pad = std::max(1.0f, label_font_size * 0.05f);
                 const float underline_y =
                     std::min(pos.y + size.y - 3.0f, text_pos.y + text_size.y + underline_pad);
                 const float underline_thickness = std::max(1.0f, label_font_size * 0.06f);
-                draw->AddLine({text_pos.x, underline_y}, {text_pos.x + text_size.x, underline_y},
-                              key_text_color, underline_thickness);
+                ovl_add_line(draw, {text_pos.x, underline_y},
+                             {text_pos.x + text_size.x, underline_y}, key_text_color,
+                             underline_thickness);
             }
         }
         // Draw hotkey tag last so it always stays over main key label/glyph.
@@ -2154,7 +2072,7 @@ void DrawImeKeyboardGrid(const ImeKbGridLayout& layout, const ImeKbDrawParams& p
         if (selected && key.row == nav_state.press_pulse_row &&
             key.col == nav_state.press_pulse_col) {
             press_pulse_expand = ComputePressPulseExpand(
-                nav_state.press_pulse_started_at, ImGui::GetTime(), kSelectorPressPulseDurationSec,
+                nav_state.press_pulse_started_at, ovl_time(), kSelectorPressPulseDurationSec,
                 kSelectedBorderThickness * kSelectorPressPulseExpandBorderFactor);
         }
         const bool emphasize_main_label = key.key && key.key->action == ImeKbKeyAction::Character;

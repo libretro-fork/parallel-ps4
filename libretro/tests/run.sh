@@ -140,6 +140,15 @@ for san in address,undefined thread; do
         $L/features/features_cpu.c -o "$OUT/node_pool_test" -lpthread
     "$OUT/node_pool_test"
 done
+# What the on-screen keyboard stands on: the list of keyboards on screen, on five threads, and
+# text between UTF-16 and UTF-8
+for san in address,undefined thread; do
+    $CC -std=gnu89 -O1 -g -Wall -Wdeclaration-after-statement -fsanitize=$san -Isrc -I$L/include \
+        libretro/tests/ime_support_test.c src/core/libraries/ime/ime_support.c \
+        $L/rthreads/rthreads.c $L/rthreads/retro_eventcount.c $L/encodings/encoding_utf.c \
+        $L/compat/compat_strl.c $L/features/features_cpu.c -o "$OUT/ime_support_test" -lpthread
+    "$OUT/ime_support_test"
+done
 # What of a free region of the address space can be reserved on Windows's granularity
 $CC -std=c89 -pedantic -Wno-long-long -O1 -g -Wall -Wdeclaration-after-statement \
     -fsanitize=address,undefined -Isrc -I$L/include libretro/tests/reserve_span_test.c \

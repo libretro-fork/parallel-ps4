@@ -4,15 +4,14 @@
 #pragma once
 
 #include <mutex>
-#include <imgui.h>
 #include <queue>
-#include "imgui/imgui_layer.h"
 
 #include "common/cstring.h"
 #include "common/event_mutex.h"
 #include "common/types.h"
 
 #include "core/libraries/ime/ime_kb_layout.h"
+#include "core/libraries/ime/ime_ui_shared.h"
 #include "ime.h"
 
 namespace Libraries::Ime {
@@ -57,7 +56,7 @@ private:
                             char16_t* orbis_text, std::size_t orbis_text_len);
 };
 
-class ImeUi : public ImGui::Layer {
+class ImeUi : public ImeLayer {
     enum class PanelSelectionTarget : u8 {
         Input = 0,
         Prediction = 1,
@@ -109,8 +108,7 @@ class ImeUi : public ImGui::Layer {
     double virtual_dpad_down_next_repeat_time = 0.0;
     ImeEdgeWrapNavState panel_vertical_nav_state{};
     bool panel_position_initialized = false;
-    bool gamepad_input_capture_active = false;
-    ImVec2 panel_position{};
+    ovl_vec2_t panel_position{};
     int input_cursor_utf16 = 0;
     int input_cursor_byte = 0;
     int input_selection_start_byte = 0;
@@ -128,7 +126,6 @@ class ImeUi : public ImGui::Layer {
     ImeKbLayoutSelection last_nav_layout_selection{};
     bool nav_layout_selection_initialized = false;
     ImeKbLayoutFamily kb_alpha_family = ImeKbLayoutFamily::Latin;
-    Common::EventMutex draw_mutex;
 
 public:
     explicit ImeUi(ImeState* state = nullptr, const OrbisImeParam* param = nullptr,

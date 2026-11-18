@@ -10,11 +10,8 @@
 #include <unordered_map>
 #include <utility>
 #include <vector>
-#include <imgui.h>
-#include <imgui_internal.h>
 
 #include "common/assert.h"
-#include "common/event_mutex.h"
 #include "common/logging/log.h"
 #include "core/debug_state.h"
 #include "core/libraries/error_codes.h"
@@ -25,15 +22,13 @@
 #include "core/libraries/pad/pad.h"
 #include "core/memory.h"
 #include "core/tls.h"
-#include "imgui/imgui_std.h"
-#include "imgui/renderer/imgui_core.h"
-
-using namespace ImGui;
+#include "video_core/overlay/ovl.h"
+#include "video_core/overlay/ovl_layers.h"
 
 namespace Libraries::ImeDialog {
 namespace {
-constexpr ImU32 kSelectorBorderColor = IM_COL32(248, 248, 248, 255);
-constexpr ImU32 kSelectorOverlayColor = IM_COL32(255, 255, 255, 18);
+constexpr ovl_col_t kSelectorBorderColor = OVL_COL(248, 248, 248, 255);
+constexpr ovl_col_t kSelectorOverlayColor = OVL_COL(255, 255, 255, 18);
 constexpr float kSelectorBorderThickness = 2.0f;
 constexpr float kSelectorInnerMargin = 2.0f;
 constexpr const char* kSelectorInputId = "##ImeDialogSelectorInput";
@@ -44,14 +39,20 @@ using Libraries::Ime::BrightenColor;
 using Libraries::Ime::CommitOskPadInputFrame;
 using Libraries::Ime::ComputeOskPadInputFrame;
 using Libraries::Ime::DrawInactiveCaretOverlay;
+using Libraries::Ime::ImeClipboardText;
+using Libraries::Ime::ImeLayer;
 using Libraries::Ime::kPanelEdgeWrapHoldDelaySec;
 using Libraries::Ime::kRepeatIntentWindowSec;
 using Libraries::Ime::OskPadInputFrame;
 using Libraries::Ime::OskPadInputState;
 using Libraries::Ime::OskVirtualPadInputView;
 using Libraries::Ime::ReadVirtualPadSnapshot;
+using Libraries::Ime::SetImeClipboardText;
 using Libraries::Ime::Utf16CountFromUtf8Range;
+using Libraries::Ime::Utf16ToUtf8;
 using Libraries::Ime::Utf8ByteIndexFromUtf16Index;
+using Libraries::Ime::Utf8Step;
+using Libraries::Ime::Utf8ToUtf16;
 using Libraries::Ime::VirtualPadSnapshot;
 
 bool IsMappedGuestBuffer(const void* ptr, size_t bytes) {
@@ -301,14 +302,11 @@ bool ImeDialogState::ClampCurrentTextToMaxLen() {
         return false;
     }
     std::vector<char16_t> utf16(static_cast<size_t>(max_text_length) + 1, u'\0');
-    ImTextStrFromUtf8(reinterpret_cast<ImWchar*>(utf16.data()),
-                      static_cast<int>(max_text_length) + 1, current_text.begin(),
-                      current_text.begin() + current_text.size());
+    Utf8ToUtf16(current_text.begin(), current_text.size(), utf16.data(), utf16.size());
     size_t len = BoundedUtf16Length(utf16.data(), static_cast<size_t>(max_text_length));
     std::string out;
     out.resize(len * 4 + 1, '\0');
-    ImTextStrToUtf8(out.data(), out.size(), reinterpret_cast<const ImWchar*>(utf16.data()),
-                    reinterpret_cast<const ImWchar*>(utf16.data()) + len);
+    Utf16ToUtf8(utf16.data(), len, out.data(), out.size());
     out.resize(std::strlen(out.c_str()));
     current_text.FromString(out);
     return true;
@@ -372,18 +370,14 @@ bool ImeDialogState::CallKeyboardFilter(const OrbisImeKeycode* src_keycode, u16*
 
 bool ImeDialogState::ConvertOrbisToUTF8(const char16_t* orbis_text, std::size_t orbis_text_len,
                                         char* utf8_text, std::size_t utf8_text_len) {
-    std::fill(utf8_text, utf8_text + utf8_text_len, '\0');
-    const ImWchar* orbis_text_ptr = reinterpret_cast<const ImWchar*>(orbis_text);
-    ImTextStrToUtf8(utf8_text, utf8_text_len, orbis_text_ptr, orbis_text_ptr + orbis_text_len);
+    Utf16ToUtf8(orbis_text, orbis_text_len, utf8_text, utf8_text_len);
 
     return true;
 }
 
 bool ImeDialogState::ConvertUTF8ToOrbis(const char* utf8_text, std::size_t utf8_text_len,
                                         char16_t* orbis_text, std::size_t orbis_text_len) {
-    std::fill(orbis_text, orbis_text + orbis_text_len, u'\0');
-    const char* utf8_end = utf8_text ? (utf8_text + utf8_text_len) : nullptr;
-    ImTextStrFromUtf8(reinterpret_cast<ImWchar*>(orbis_text), orbis_text_len, utf8_text, utf8_end);
+    Utf8ToUtf16(utf8_text, utf8_text_len, orbis_text, orbis_text_len);
 
     return true;
 }
@@ -404,116 +398,22 @@ ImeDialogUi::ImeDialogUi(ImeDialogState* state, OrbisImeDialogStatus* status,
         Libraries::Ime::InitializeDefaultOskSelectionAnchor(
             kb_layout_selection, state->ext_option, pending_keyboard_row, pending_keyboard_col,
             last_keyboard_selected_row, last_keyboard_selected_col);
-        AddLayer(this);
-        ImGui::Core::AcquireGamepadInputCapture();
-        gamepad_input_capture_active = true;
+        ImeLayer::Add(this);
     }
 }
 
 ImeDialogUi::~ImeDialogUi() {
-    std::scoped_lock lock(draw_mutex);
-
     Free();
 }
 
-ImeDialogUi::ImeDialogUi(ImeDialogUi&& other) noexcept
-    : state(other.state), status(other.status), result(other.result),
-      first_render(other.first_render), accept_armed(other.accept_armed),
-      pointer_navigation_active(other.pointer_navigation_active),
-      edit_menu_popup(other.edit_menu_popup), menu_activate_armed(other.menu_activate_armed),
-      l2_shortcut_armed(other.l2_shortcut_armed), text_select_mode(other.text_select_mode),
-      prev_virtual_cross_down(other.prev_virtual_cross_down),
-      prev_virtual_lstick_left_down(other.prev_virtual_lstick_left_down),
-      prev_virtual_lstick_right_down(other.prev_virtual_lstick_right_down),
-      prev_virtual_lstick_up_down(other.prev_virtual_lstick_up_down),
-      prev_virtual_lstick_down_down(other.prev_virtual_lstick_down_down),
-      left_stick_repeat_dir(other.left_stick_repeat_dir),
-      left_stick_next_repeat_time(other.left_stick_next_repeat_time),
-      virtual_cross_next_repeat_time(other.virtual_cross_next_repeat_time),
-      virtual_triangle_next_repeat_time(other.virtual_triangle_next_repeat_time),
-      prev_virtual_buttons(other.prev_virtual_buttons),
-      prev_virtual_square_down(other.prev_virtual_square_down),
-      prev_virtual_l1_down(other.prev_virtual_l1_down),
-      prev_virtual_r1_down(other.prev_virtual_r1_down),
-      prev_virtual_dpad_left_down(other.prev_virtual_dpad_left_down),
-      prev_virtual_dpad_right_down(other.prev_virtual_dpad_right_down),
-      prev_virtual_dpad_up_down(other.prev_virtual_dpad_up_down),
-      prev_virtual_dpad_down_down(other.prev_virtual_dpad_down_down),
-      virtual_square_next_repeat_time(other.virtual_square_next_repeat_time),
-      virtual_l1_next_repeat_time(other.virtual_l1_next_repeat_time),
-      virtual_r1_next_repeat_time(other.virtual_r1_next_repeat_time),
-      virtual_dpad_left_next_repeat_time(other.virtual_dpad_left_next_repeat_time),
-      virtual_dpad_right_next_repeat_time(other.virtual_dpad_right_next_repeat_time),
-      virtual_dpad_up_next_repeat_time(other.virtual_dpad_up_next_repeat_time),
-      virtual_dpad_down_next_repeat_time(other.virtual_dpad_down_next_repeat_time),
-      panel_vertical_nav_state(other.panel_vertical_nav_state),
-      panel_position_initialized(other.panel_position_initialized),
-      panel_layout_anchor_initialized(other.panel_layout_anchor_initialized),
-      panel_position(other.panel_position), panel_layout_anchor(other.panel_layout_anchor),
-      input_cursor_utf16(other.input_cursor_utf16), input_cursor_byte(other.input_cursor_byte),
-      input_selection_start_byte(other.input_selection_start_byte),
-      input_selection_end_byte(other.input_selection_end_byte),
-      text_select_anchor_utf16(other.text_select_anchor_utf16),
-      text_select_focus_utf16(other.text_select_focus_utf16),
-      top_virtual_col(other.top_virtual_col), panel_selection(other.panel_selection),
-      pending_keyboard_row(other.pending_keyboard_row),
-      pending_keyboard_col(other.pending_keyboard_col),
-      last_keyboard_selected_row(other.last_keyboard_selected_row),
-      last_keyboard_selected_col(other.last_keyboard_selected_col),
-      edit_menu_index(other.edit_menu_index), kb_layout_selection(other.kb_layout_selection),
-      last_nav_layout_selection(other.last_nav_layout_selection),
-      nav_layout_selection_initialized(other.nav_layout_selection_initialized),
-      kb_alpha_family(other.kb_alpha_family),
-      gamepad_input_capture_active(other.gamepad_input_capture_active) {
-
-    std::scoped_lock lock(draw_mutex, other.draw_mutex);
-    other.state = nullptr;
-    other.status = nullptr;
-    other.result = nullptr;
-    other.menu_activate_armed = true;
-    other.l2_shortcut_armed = true;
-    other.prev_virtual_lstick_left_down = false;
-    other.prev_virtual_lstick_right_down = false;
-    other.prev_virtual_lstick_up_down = false;
-    other.prev_virtual_lstick_down_down = false;
-    other.left_stick_repeat_dir = 0;
-    other.left_stick_next_repeat_time = 0.0;
-    other.virtual_cross_next_repeat_time = 0.0;
-    other.virtual_triangle_next_repeat_time = 0.0;
-    other.prev_virtual_buttons = 0;
-    other.prev_virtual_square_down = false;
-    other.prev_virtual_l1_down = false;
-    other.prev_virtual_r1_down = false;
-    other.prev_virtual_dpad_left_down = false;
-    other.prev_virtual_dpad_right_down = false;
-    other.prev_virtual_dpad_up_down = false;
-    other.prev_virtual_dpad_down_down = false;
-    other.virtual_square_next_repeat_time = 0.0;
-    other.virtual_l1_next_repeat_time = 0.0;
-    other.virtual_r1_next_repeat_time = 0.0;
-    other.virtual_dpad_left_next_repeat_time = 0.0;
-    other.virtual_dpad_right_next_repeat_time = 0.0;
-    other.virtual_dpad_up_next_repeat_time = 0.0;
-    other.virtual_dpad_down_next_repeat_time = 0.0;
-    Libraries::Ime::ResetImeEdgeWrapNav(other.panel_vertical_nav_state);
-    other.nav_layout_selection_initialized = false;
-    other.panel_layout_anchor_initialized = false;
-    other.panel_layout_anchor = {};
-    other.kb_alpha_family = Libraries::Ime::ImeKbLayoutFamily::Latin;
-    other.gamepad_input_capture_active = false;
-
-    if (state && *status == OrbisImeDialogStatus::Running) {
-        AddLayer(this);
-        if (!gamepad_input_capture_active) {
-            ImGui::Core::AcquireGamepadInputCapture();
-            gamepad_input_capture_active = true;
-        }
-    }
+ImeDialogUi::ImeDialogUi(ImeDialogUi&& other) noexcept {
+    *this = std::move(other);
 }
 
 ImeDialogUi& ImeDialogUi::operator=(ImeDialogUi&& other) {
-    std::scoped_lock lock(draw_mutex, other.draw_mutex);
+    // Neither is drawn while one becomes the other
     Free();
+    other.Free();
 
     state = other.state;
     status = other.status;
@@ -571,7 +471,6 @@ ImeDialogUi& ImeDialogUi::operator=(ImeDialogUi&& other) {
     last_nav_layout_selection = other.last_nav_layout_selection;
     nav_layout_selection_initialized = other.nav_layout_selection_initialized;
     kb_alpha_family = other.kb_alpha_family;
-    gamepad_input_capture_active = other.gamepad_input_capture_active;
     other.state = nullptr;
     other.status = nullptr;
     other.result = nullptr;
@@ -605,25 +504,16 @@ ImeDialogUi& ImeDialogUi::operator=(ImeDialogUi&& other) {
     other.panel_layout_anchor_initialized = false;
     other.panel_layout_anchor = {};
     other.kb_alpha_family = Libraries::Ime::ImeKbLayoutFamily::Latin;
-    other.gamepad_input_capture_active = false;
 
     if (state && *status == OrbisImeDialogStatus::Running) {
-        AddLayer(this);
-        if (!gamepad_input_capture_active) {
-            ImGui::Core::AcquireGamepadInputCapture();
-            gamepad_input_capture_active = true;
-        }
+        ImeLayer::Add(this);
     }
 
     return *this;
 }
 
 void ImeDialogUi::Free() {
-    RemoveLayer(this);
-    if (gamepad_input_capture_active) {
-        ImGui::Core::ReleaseGamepadInputCapture();
-        gamepad_input_capture_active = false;
-    }
+    ImeLayer::Remove(this);
 }
 
 void ImeDialogUi::FinishDialog(OrbisImeDialogEndStatus endstatus, bool restore_original,
@@ -639,8 +529,6 @@ void ImeDialogUi::FinishDialog(OrbisImeDialogEndStatus endstatus, bool restore_o
 }
 
 void ImeDialogUi::Draw() {
-    std::unique_lock<Common::EventMutex> lock{draw_mutex};
-
     if (!state) {
         return;
     }
@@ -650,20 +538,18 @@ void ImeDialogUi::Draw() {
         return;
     }
 
-    const auto& ctx = *GetCurrentContext();
-    const auto& io = ctx.IO;
-    const VirtualPadSnapshot virtual_pad = ReadVirtualPadSnapshot(state->user_id, io.DeltaTime);
+    const VirtualPadSnapshot virtual_pad = ReadVirtualPadSnapshot(state->user_id, ovl_delta_time());
 
     OrbisImePositionAndForm layout = state->panel_layout;
     const bool has_layout = state->panel_layout_valid;
     const auto viewport = Libraries::Ime::ComputeImeViewportMetrics(state->use_over2k);
-    const ImVec2 viewport_size = viewport.size;
-    const ImVec2 viewport_offset = viewport.offset;
+    const ovl_vec2_t viewport_size = viewport.size;
+    const ovl_vec2_t viewport_offset = viewport.offset;
     const float scale_x = viewport.scale_x;
     const float scale_y = viewport.scale_y;
     const float ui_scale = viewport.ui_scale;
 
-    ImVec2 window_size;
+    ovl_vec2_t window_size;
     const bool has_panel_size = (has_layout && layout.width > 0 && layout.height > 0) ||
                                 (state->panel_req_width > 0 && state->panel_req_height > 0);
     if (has_layout && layout.width > 0 && layout.height > 0) {
@@ -708,13 +594,13 @@ void ImeDialogUi::Draw() {
     const float max_y = viewport_offset.y + std::max(0.0f, viewport_size.y - window_size.y);
     base_x = std::clamp(base_x, min_x, max_x);
     base_y = std::clamp(base_y, min_y, max_y);
-    const ImVec2 layout_anchor{base_x, base_y};
+    const ovl_vec2_t layout_anchor{base_x, base_y};
     if (!panel_layout_anchor_initialized) {
         panel_layout_anchor = layout_anchor;
         panel_layout_anchor_initialized = true;
     }
-    const ImVec2 layout_anchor_delta{layout_anchor.x - panel_layout_anchor.x,
-                                     layout_anchor.y - panel_layout_anchor.y};
+    const ovl_vec2_t layout_anchor_delta{layout_anchor.x - panel_layout_anchor.x,
+                                         layout_anchor.y - panel_layout_anchor.y};
 
     if (!panel_position_initialized) {
         panel_position = layout_anchor;
@@ -732,43 +618,32 @@ void ImeDialogUi::Draw() {
     panel_layout_anchor = layout_anchor;
     panel_position.x = std::clamp(panel_position.x, min_x, max_x);
     panel_position.y = std::clamp(panel_position.y, min_y, max_y);
-    SetNextWindowPos(panel_position);
-    SetNextWindowSize(window_size);
-    SetNextWindowDockID(0, ImGuiCond_Always);
-    SetNextWindowCollapsed(false);
+    ovl_set_next_window_pos(panel_position, OVL_COND_ALWAYS, {0.0f, 0.0f});
+    ovl_set_next_window_size(window_size, OVL_COND_ALWAYS);
 
-    if (first_render || !io.NavActive) {
-        SetNextWindowFocus();
+    if (first_render || !ovl_nav_active()) {
+        ovl_set_next_window_focus();
     }
 
     const auto lock_window_scroll = []() {
-        SetScrollX(0.0f);
-        SetScrollY(0.0f);
-        ImGuiWindow* window = GetCurrentWindow();
-        if (!window) {
-            return;
-        }
-        window->Scroll = ImVec2(0.0f, 0.0f);
-        const float max_f = std::numeric_limits<float>::max();
-        window->ScrollTarget = ImVec2(max_f, max_f);
+        ovl_set_scroll_x(0.0f);
+        ovl_set_scroll_y(0.0f);
     };
 
-    ImGuiWindowFlags window_flags =
-        ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoSavedSettings |
-        ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse |
-        ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoDocking;
-    window_flags |= ImGuiWindowFlags_NoNavInputs;
-    if (Begin("IME Dialog##ImeDialog", nullptr, window_flags)) {
+    const unsigned window_flags = OVL_WINDOW_NO_DECORATION | OVL_WINDOW_NO_SAVED_SETTINGS |
+                                  OVL_WINDOW_NO_SCROLLBAR | OVL_WINDOW_NO_SCROLL_WITH_MOUSE |
+                                  OVL_WINDOW_NO_MOVE | OVL_WINDOW_NO_NAV_INPUTS;
+    if (ovl_begin("IME Dialog##ImeDialog", window_flags)) {
         lock_window_scroll();
-        KeepNavHighlight();
-        DrawPrettyBackground();
+        ovl_keep_nav_highlight();
+        ovl_draw_pretty_background();
         const Libraries::Ime::ImePanelMetricsConfig metrics_cfg{
             .panel_w = panel_w,
             .panel_h = panel_h,
             .multiline = state->is_multi_line,
             .show_title = !state->title.empty(),
-            .base_font_size = GetFontSize(),
-            .window_pos = GetWindowPos(),
+            .base_font_size = ovl_font_current_size(),
+            .window_pos = ovl_window_pos(),
         };
         const Libraries::Ime::ImePanelMetrics metrics =
             Libraries::Ime::ComputeImePanelMetrics(metrics_cfg);
@@ -798,7 +673,7 @@ void ImeDialogUi::Draw() {
         const OskPadInputFrame panel_input = ComputeOskPadInputFrame(
             virtual_pad, allow_osk_shortcuts, first_render, panel_pad_state);
 
-        const OskVirtualPadInputView virtual_pad_input(panel_input, io);
+        const OskVirtualPadInputView virtual_pad_input(panel_input);
         const bool cross_down = panel_input.cross_down;
         const bool panel_activate_pressed_raw = panel_input.panel_activate_pressed_raw;
         const bool panel_activate_repeat_raw = panel_input.panel_activate_repeat_raw;
@@ -812,7 +687,7 @@ void ImeDialogUi::Draw() {
         const bool nav_down_repeat = panel_input.nav_down_repeat;
         const bool osk_control_input = panel_input.osk_control_input;
 
-        const double nav_now = ImGui::GetTime();
+        const double nav_now = ovl_time();
         const bool cancel_shortcut_pressed =
             allow_osk_shortcuts &&
             virtual_pad_input.Pressed(Libraries::Pad::OrbisPadButtonDataOffset::Circle);
@@ -1022,7 +897,7 @@ void ImeDialogUi::Draw() {
             }
         }
 
-        SetWindowFontScale(std::max(ui_scale, metrics.input_font_scale));
+        ovl_set_window_font_scale(std::max(ui_scale, metrics.input_font_scale));
 
         if (first_render) {
             const auto game_res = DebugState.game_resolution;
@@ -1042,20 +917,19 @@ void ImeDialogUi::Draw() {
         }
 
         if (!state->title.empty()) {
-            SetCursorPosY(0.0f);
-            SetCursorPosX(metrics.padding_x);
-            SetWindowFontScale(metrics.label_font_scale);
-            TextUnformatted(state->title.data());
-            SetWindowFontScale(std::max(ui_scale, metrics.input_font_scale));
+            ovl_set_cursor_pos_y(0.0f);
+            ovl_set_cursor_pos_x(metrics.padding_x);
+            ovl_set_window_font_scale(metrics.label_font_scale);
+            ovl_text(state->title.data(), nullptr);
+            ovl_set_window_font_scale(std::max(ui_scale, metrics.input_font_scale));
         }
 
         DrawInputText(metrics, state->is_multi_line);
-        static std::unordered_map<ImGuiID, Libraries::Ime::SelectorFadeState>
-            s_selector_fade_states;
-        const auto draw_selector = [&](const char* selector_id, ImVec2 pos, ImVec2 size,
+        static std::unordered_map<u32, Libraries::Ime::SelectorFadeState> s_selector_fade_states;
+        const auto draw_selector = [&](const char* selector_id, ovl_vec2_t pos, ovl_vec2_t size,
                                        bool selected, bool pulse_triggered) {
-            auto& fade_state = s_selector_fade_states[ImGui::GetID(selector_id)];
-            const double now = ImGui::GetTime();
+            auto& fade_state = s_selector_fade_states[ovl_get_id(selector_id)];
+            const double now = ovl_time();
             if (selected && pulse_triggered) {
                 Libraries::Ime::TriggerSelectorPressPulse(fade_state, now);
             }
@@ -1071,37 +945,38 @@ void ImeDialogUi::Draw() {
                                    Libraries::Ime::kSelectorPressPulseExpandBorderFactor)
                          : 0.0f;
             Libraries::Ime::DrawSelectorFadeState(
-                fade_state, GetWindowDrawList(), kSelectorOverlayColor, kSelectorBorderColor,
+                fade_state, ovl_window_draw_list(), kSelectorOverlayColor, kSelectorBorderColor,
                 kSelectorBorderThickness, Libraries::Ime::kSelectorFadeOutDurationSec, now,
                 press_pulse_expand);
         };
         draw_selector(kSelectorInputId, metrics.input_pos_screen, metrics.input_size, false,
                       panel_selection == PanelSelectionTarget::Input && panel_activate_pressed_raw);
 
-        auto* draw = GetWindowDrawList();
-        const ImU32 pane_bg = Libraries::Ime::ImeColorToImU32(state->style_config.color_base);
-        draw->AddRectFilled(metrics.predict_pos,
+        auto* draw = ovl_window_draw_list();
+        const ovl_col_t pane_bg = Libraries::Ime::ImeColorToCol(state->style_config.color_base);
+        ovl_add_rect_filled(draw, metrics.predict_pos,
                             {metrics.predict_pos.x + metrics.predict_size.x,
                              metrics.predict_pos.y + metrics.predict_size.y},
-                            pane_bg, metrics.corner_radius);
+                            pane_bg, metrics.corner_radius, 0);
         draw_selector(kSelectorPredictId, metrics.predict_pos, metrics.predict_size,
                       panel_selection == PanelSelectionTarget::Prediction,
                       panel_selection == PanelSelectionTarget::Prediction &&
                           panel_activate_pressed_raw);
-        const ImU32 close_button_bg =
-            Libraries::Ime::ImeColorToImU32(state->style_config.color_button_function);
-        draw->AddRectFilled(metrics.close_pos,
+        const ovl_col_t close_button_bg =
+            Libraries::Ime::ImeColorToCol(state->style_config.color_button_function);
+        ovl_add_rect_filled(draw, metrics.close_pos,
                             {metrics.close_pos.x + metrics.close_size.x,
                              metrics.close_pos.y + metrics.close_size.y},
-                            GetColorU32(BrightenColor(close_button_bg, 0.0f)));
+                            ovl_color_u32_vec4(BrightenColor(close_button_bg, 0.0f)), 0.0f, 0);
         constexpr const char* kCloseLabel = "\xE2\x9C\x95";
-        const ImVec2 close_label_size = CalcTextSize(kCloseLabel, nullptr, true);
+        const ovl_vec2_t close_label_size = ovl_calc_text_size(kCloseLabel, nullptr, 0.0f);
         const float close_pad_y = std::max(1.0f, metrics.close_size.y * 0.04f);
-        const ImVec2 close_label_pos{metrics.close_pos.x +
-                                         (metrics.close_size.x - close_label_size.x) * 0.5f,
-                                     metrics.close_pos.y + close_pad_y};
-        draw->AddText(close_label_pos,
-                      Libraries::Ime::ImeColorToImU32(state->style_config.color_text), kCloseLabel);
+        const ovl_vec2_t close_label_pos{metrics.close_pos.x +
+                                             (metrics.close_size.x - close_label_size.x) * 0.5f,
+                                         metrics.close_pos.y + close_pad_y};
+        ovl_add_text(draw, ovl_font_current(), ovl_font_current_size(), close_label_pos,
+                     Libraries::Ime::ImeColorToCol(state->style_config.color_text), kCloseLabel,
+                     nullptr, 0.0f);
         bool cancel_pressed = cancel_shortcut_pressed;
         draw_selector(kSelectorCloseId, metrics.close_pos, metrics.close_size,
                       panel_selection == PanelSelectionTarget::Close,
@@ -1111,7 +986,7 @@ void ImeDialogUi::Draw() {
             cancel_pressed = true;
         }
 
-        SetCursorScreenPos(metrics.kb_pos);
+        ovl_set_cursor_screen_pos(metrics.kb_pos);
 
         bool entered_keyboard_from_top = false;
         const auto move_top_navigation = [&](int dir_x, int dir_y) {
@@ -1242,8 +1117,8 @@ void ImeDialogUi::Draw() {
                 const char* p = insert_utf8;
                 int used_utf16 = 0;
                 while (*p && used_utf16 < available_utf16) {
-                    unsigned int codepoint = 0;
-                    const int step = ImTextCharFromUtf8(&codepoint, p, nullptr);
+                    u32 codepoint = 0;
+                    const int step = Utf8Step(p, &codepoint);
                     if (step <= 0) {
                         break;
                     }
@@ -1367,7 +1242,7 @@ void ImeDialogUi::Draw() {
         kb_params.allow_nav_input = allow_osk_shortcuts && !menu_modal && !text_select_mode &&
                                     (panel_selection == PanelSelectionTarget::Keyboard) &&
                                     !entered_keyboard_from_top;
-        kb_params.use_imgui_lstick_nav = false;
+        kb_params.use_lstick_key_nav = false;
         kb_params.allow_activate_input = allow_osk_shortcuts && accept_armed && !menu_modal &&
                                          !text_select_mode &&
                                          (panel_selection == PanelSelectionTarget::Keyboard);
@@ -1383,9 +1258,9 @@ void ImeDialogUi::Draw() {
         pending_keyboard_col = -1;
 
         Libraries::Ime::ImeKbDrawState kb_state{};
-        SetWindowFontScale(metrics.key_font_scale);
+        ovl_set_window_font_scale(metrics.key_font_scale);
         Libraries::Ime::DrawImeKeyboardGrid(kb_layout, kb_params, kb_state);
-        SetWindowFontScale(metrics.input_font_scale);
+        ovl_set_window_font_scale(metrics.input_font_scale);
         if (kb_state.selected_row >= 0 && kb_state.selected_col >= 0) {
             last_keyboard_selected_row = kb_state.selected_row;
             last_keyboard_selected_col = kb_state.selected_col;
@@ -1397,7 +1272,7 @@ void ImeDialogUi::Draw() {
             }
         };
         const auto has_clipboard_text = [&]() {
-            const char* text = ImGui::GetClipboardText();
+            const char* text = ImeClipboardText();
             return text && text[0] != '\0';
         };
         const auto get_selection_byte_range = [&]() {
@@ -1413,9 +1288,9 @@ void ImeDialogUi::Draw() {
                 const std::string selection =
                     current.substr(static_cast<std::size_t>(sel_start),
                                    static_cast<std::size_t>(sel_end - sel_start));
-                ImGui::SetClipboardText(selection.c_str());
+                SetImeClipboardText(selection.c_str());
             } else {
-                ImGui::SetClipboardText(current.c_str());
+                SetImeClipboardText(current.c_str());
             }
         };
         const auto collapse_selection_to_caret = [&](int caret_utf16) {
@@ -1498,7 +1373,7 @@ void ImeDialogUi::Draw() {
                 break;
             case 2: // Paste
                 if (has_clipboard_text()) {
-                    (void)insert_text_at_caret(ImGui::GetClipboardText());
+                    (void)insert_text_at_caret(ImeClipboardText());
                 }
                 edit_menu_popup = EditMenuPopup::None;
                 break;
@@ -1516,7 +1391,7 @@ void ImeDialogUi::Draw() {
                 break;
             case 1: // Paste
                 if (has_clipboard_text()) {
-                    (void)insert_text_at_caret(ImGui::GetClipboardText());
+                    (void)insert_text_at_caret(ImeClipboardText());
                 }
                 edit_menu_popup = EditMenuPopup::None;
                 break;
@@ -1696,7 +1571,7 @@ void ImeDialogUi::Draw() {
             }
         }
 
-        Dummy({metrics.kb_size.x, metrics.kb_size.y + metrics.padding_bottom});
+        ovl_dummy({metrics.kb_size.x, metrics.kb_size.y + metrics.padding_bottom});
 
         if (accept_pressed) {
             LOG_INFO(Lib_ImeDialog, "ImeDialog OK text(len={}): \"{}\"", state->current_text.size(),
@@ -1707,16 +1582,16 @@ void ImeDialogUi::Draw() {
         }
         CommitOskPadInputFrame(panel_input, panel_pad_state);
         lock_window_scroll();
-        SetWindowFontScale(1.0f);
+        ovl_set_window_font_scale(1.0f);
     }
-    End();
+    ovl_end();
 
     first_render = false;
 }
 
 void ImeDialogUi::DrawInputText(const Libraries::Ime::ImePanelMetrics& metrics, bool multiline) {
-    const ImVec2 input_size = metrics.input_size;
-    SetCursorPos(metrics.input_pos_local);
+    const ovl_vec2_t input_size = metrics.input_size;
+    ovl_set_cursor_pos(metrics.input_pos_local);
 
     if (state->caret_dirty && !text_select_mode) {
         const char* text = state->current_text.begin();
@@ -1741,22 +1616,16 @@ void ImeDialogUi::DrawInputText(const Libraries::Ime::ImePanelMetrics& metrics, 
     }
 
     // The field only shows the text: the keys below are what changes it
-    ImGuiInputTextFlags flags = ImGuiInputTextFlags_ReadOnly;
-    if (multiline) {
-        flags |= static_cast<ImGuiInputTextFlags>(ImGuiInputTextFlags_Multiline);
-    }
     const char* placeholder = state->placeholder.empty() ? nullptr : state->placeholder.data();
-    PushStyleColor(ImGuiCol_FrameBg,
-                   Libraries::Ime::ImeColorToImVec4(state->style_config.color_text_field));
-    PushStyleColor(ImGuiCol_Text, Libraries::Ime::ImeColorToImVec4(state->style_config.color_text));
-    PushItemFlag(ImGuiItemFlags_NoNav, true);
-    InputTextEx("##ImeDialogInput", placeholder, state->current_text.begin(),
-                state->max_text_length * 4 + 1, input_size, flags, nullptr, nullptr);
-    PopItemFlag();
-    PopStyleColor(2);
-    const ImRect frame_rect = {GetItemRectMin(), GetItemRectMax()};
-    DrawInactiveCaretOverlay(frame_rect, state->current_text.begin(), input_cursor_byte,
-                             input_selection_start_byte, input_selection_end_byte, multiline);
+    ovl_push_color(OVL_COLOR_FRAME_BG,
+                   Libraries::Ime::ImeColorToVec4(state->style_config.color_text_field));
+    ovl_push_color(OVL_COLOR_TEXT, Libraries::Ime::ImeColorToVec4(state->style_config.color_text));
+    ovl_text_field("##ImeDialogInput", placeholder, state->current_text.begin(), input_size,
+                   multiline);
+    ovl_pop_color(2);
+    DrawInactiveCaretOverlay(ovl_item_rect_min(), ovl_item_rect_max(), state->current_text.begin(),
+                             input_cursor_byte, input_selection_start_byte,
+                             input_selection_end_byte, multiline);
 }
 
 } // namespace Libraries::ImeDialog

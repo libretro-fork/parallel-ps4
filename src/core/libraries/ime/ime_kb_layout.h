@@ -5,15 +5,15 @@
 
 #include <algorithm>
 #include <cstddef>
-#include <imgui.h>
 
 #include "core/libraries/ime/ime_common.h"
+#include "video_core/overlay/ovl.h"
 
 namespace Libraries::Ime {
 
 struct ImeViewportMetrics {
-    ImVec2 size{};
-    ImVec2 offset{};
+    ovl_vec2_t size{};
+    ovl_vec2_t offset{};
     float scale_x = 1.0f;
     float scale_y = 1.0f;
     float ui_scale = 1.0f;
@@ -22,8 +22,8 @@ struct ImeViewportMetrics {
 };
 
 struct ImeKbGridLayout {
-    ImVec2 pos{};
-    ImVec2 size{};
+    ovl_vec2_t pos{};
+    ovl_vec2_t size{};
     float key_gap_x = 0.0f;
     float key_gap_y = 0.0f;
     // Base row height used for non-fixed rows.
@@ -454,7 +454,7 @@ struct ImeKbDrawParams {
     OrbisImeEnterLabel enter_label = OrbisImeEnterLabel::Default;
     bool show_selection_highlight = true;
     bool allow_nav_input = true;
-    bool use_imgui_lstick_nav = true;
+    bool use_lstick_key_nav = true;
     bool allow_activate_input = true;
     bool external_nav_left = false;
     bool external_nav_right = false;
@@ -469,13 +469,13 @@ struct ImeKbDrawParams {
     bool reset_nav_state = false;
     int requested_selected_row = -1;
     int requested_selected_col = -1;
-    ImU32 key_bg_default = IM_COL32(35, 35, 35, 255);
-    ImU32 key_bg_function = IM_COL32(60, 60, 60, 255);
-    ImU32 key_bg_symbol = IM_COL32(78, 78, 78, 255);
-    ImU32 key_border = IM_COL32(80, 80, 80, 255);
-    ImU32 key_done = IM_COL32(30, 90, 170, 255);
-    ImU32 key_text = IM_COL32(230, 230, 230, 255);
-    ImU32 key_hotkey_text = IM_COL32(220, 220, 220, 255);
+    ovl_col_t key_bg_default = OVL_COL(35, 35, 35, 255);
+    ovl_col_t key_bg_function = OVL_COL(60, 60, 60, 255);
+    ovl_col_t key_bg_symbol = OVL_COL(78, 78, 78, 255);
+    ovl_col_t key_border = OVL_COL(80, 80, 80, 255);
+    ovl_col_t key_done = OVL_COL(30, 90, 170, 255);
+    ovl_col_t key_text = OVL_COL(230, 230, 230, 255);
+    ovl_col_t key_hotkey_text = OVL_COL(220, 220, 220, 255);
 };
 
 struct ImeKbDrawState {
@@ -488,7 +488,7 @@ struct ImeKbDrawState {
     // visible nearest enabled fallback key used for drawing and activation.
     int selected_row = -1;
     int selected_col = -1;
-    ImVec2 selected_center{};
+    ovl_vec2_t selected_center{};
 };
 
 struct ImePanelMetricsConfig {
@@ -497,7 +497,7 @@ struct ImePanelMetricsConfig {
     bool multiline = false;
     bool show_title = true;
     float base_font_size = 0.0f;
-    ImVec2 window_pos{};
+    ovl_vec2_t window_pos{};
 };
 
 struct ImePanelMetrics {
@@ -517,15 +517,15 @@ struct ImePanelMetrics {
     float input_font_scale = 1.0f;
     float key_font_scale = 1.0f;
     float predict_gap = 0.0f;
-    ImVec2 input_pos_local{};
-    ImVec2 input_size{};
-    ImVec2 input_pos_screen{};
-    ImVec2 predict_pos{};
-    ImVec2 predict_size{};
-    ImVec2 close_pos{};
-    ImVec2 close_size{};
-    ImVec2 kb_pos{};
-    ImVec2 kb_size{};
+    ovl_vec2_t input_pos_local{};
+    ovl_vec2_t input_size{};
+    ovl_vec2_t input_pos_screen{};
+    ovl_vec2_t predict_pos{};
+    ovl_vec2_t predict_size{};
+    ovl_vec2_t close_pos{};
+    ovl_vec2_t close_size{};
+    ovl_vec2_t kb_pos{};
+    ovl_vec2_t kb_size{};
 };
 
 ImeViewportMetrics ComputeImeViewportMetrics(bool use_over2k);
@@ -538,10 +538,9 @@ const ImeTopPanelLayoutConfig& GetImeTopPanelLayoutConfig(ImeKbLayoutId id);
 const ImeTopPanelLayoutConfig& GetImeTopPanelLayoutConfig(const ImeKbLayoutSelection& selection);
 ImeStyleConfig GetDefaultImeStyleConfig();
 ImeStyleConfig ResolveImeStyleConfig(const OrbisImeParamExtended* extended);
-ImU32 ImeColorToImU32(const OrbisImeColor& color);
-ImVec4 ImeColorToImVec4(const OrbisImeColor& color);
+ovl_col_t ImeColorToCol(const OrbisImeColor& color);
+ovl_vec4_t ImeColorToVec4(const OrbisImeColor& color);
 void ApplyImeStyleToKeyboardDrawParams(const ImeStyleConfig& style, ImeKbDrawParams& params);
-void AddImeKeyboardGlyphsToFontRanges(ImFontGlyphRangesBuilder& builder);
 
 void DrawImeKeyboardGrid(const ImeKbGridLayout& layout, const ImeKbDrawParams& params,
                          ImeKbDrawState& state);

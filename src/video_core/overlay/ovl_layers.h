@@ -347,6 +347,12 @@ void ovl_invite_reset(void);
  * answers the server without waiting there, and removes the prompt when done */
 void ovl_invite_chosen(int user_id, const char* invitation_id, const char* from_npid, int accept);
 
+/* The on-screen keyboard (libSceIme and libSceImeDialog). The core's, in C++ with the keyboard
+ * (core/libraries/ime/ime_ui_shared.cpp): the keyboards a game has open are drawn, on the
+ * overlay's thread; and whether one is open. */
+void ovl_ime_draw(void);
+int ovl_ime_must_keep_drawing(void);
+
 #ifdef __cplusplus
 }
 #endif

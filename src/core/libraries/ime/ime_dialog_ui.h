@@ -3,15 +3,12 @@
 
 #pragma once
 
-#include <mutex>
 #include <vector>
-#include <imgui.h>
 #include "common/cstring.h"
-#include "common/event_mutex.h"
 #include "common/types.h"
 #include "core/libraries/ime/ime_dialog.h"
 #include "core/libraries/ime/ime_kb_layout.h"
-#include "imgui/imgui_layer.h"
+#include "core/libraries/ime/ime_ui_shared.h"
 
 namespace Libraries::ImeDialog {
 
@@ -86,7 +83,7 @@ private:
                             char16_t* orbis_text, std::size_t orbis_text_len);
 };
 
-class ImeDialogUi final : public ImGui::Layer {
+class ImeDialogUi final : public Libraries::Ime::ImeLayer {
     enum class PanelSelectionTarget : u8 {
         Input = 0,
         Prediction = 1,
@@ -138,9 +135,8 @@ class ImeDialogUi final : public ImGui::Layer {
     Libraries::Ime::ImeEdgeWrapNavState panel_vertical_nav_state{};
     bool panel_position_initialized = false;
     bool panel_layout_anchor_initialized = false;
-    bool gamepad_input_capture_active = false;
-    ImVec2 panel_position{};
-    ImVec2 panel_layout_anchor{};
+    ovl_vec2_t panel_position{};
+    ovl_vec2_t panel_layout_anchor{};
     int input_cursor_utf16 = 0;
     int input_cursor_byte = 0;
     int input_selection_start_byte = 0;
@@ -158,7 +154,6 @@ class ImeDialogUi final : public ImGui::Layer {
     Libraries::Ime::ImeKbLayoutSelection last_nav_layout_selection{};
     bool nav_layout_selection_initialized = false;
     Libraries::Ime::ImeKbLayoutFamily kb_alpha_family = Libraries::Ime::ImeKbLayoutFamily::Latin;
-    Common::EventMutex draw_mutex;
 
 public:
     explicit ImeDialogUi(ImeDialogState* state = nullptr, OrbisImeDialogStatus* status = nullptr,

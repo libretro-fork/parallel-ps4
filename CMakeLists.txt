@@ -532,6 +532,8 @@ set(IME_LIB src/core/libraries/ime/error_dialog.cpp
             src/core/libraries/ime/error_dialog.h
             src/core/libraries/ime/ime_common.h
             src/core/libraries/ime/ime_kb_layout.cpp
+            src/core/libraries/ime/ime_support.c
+            src/core/libraries/ime/ime_support.h
             src/core/libraries/ime/ime_kb_layout.h
             src/core/libraries/ime/ime_dialog_ui.cpp
             src/core/libraries/ime/ime_dialog_ui.h

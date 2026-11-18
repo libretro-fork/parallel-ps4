@@ -218,6 +218,8 @@ public:
         }*/
 
         if (ime_mode) {
+            // The keyboard before the state it shows: once it is gone, no frame draws it
+            g_ime_ui.reset();
             g_ime_state = std::make_unique<ImeState>(&m_param.ime, &m_param.ime_ext);
             g_ime_ui = std::make_unique<ImeUi>(g_ime_state.get(), &m_param.ime, &m_param.ime_ext);
 

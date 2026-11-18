@@ -7,8 +7,11 @@
 #include <cstring>
 #include <numbers>
 
+#include <encodings/utf.h>
+
 #include "common/singleton.h"
 #include "input/controller.h"
+#include "video_core/overlay/ovl_layers.h"
 
 namespace Libraries::Ime {
 
@@ -52,11 +55,7 @@ struct StickNavPulseResult {
 };
 
 bool IsCaretBlinkVisible() {
-    const ImGuiIO& io = ImGui::GetIO();
-    if (!io.ConfigInputTextCursorBlink) {
-        return true;
-    }
-    const double phase = std::fmod(ImGui::GetTime(), kCaretBlinkCycleSec);
+    const double phase = std::fmod(ovl_time(), kCaretBlinkCycleSec);
     return phase <= kCaretBlinkOnSec;
 }
 
@@ -119,18 +118,89 @@ bool ReadControllerState(Libraries::UserService::OrbisUserServiceUserId user_id,
 
 } // namespace UiShared
 
-ImVec4 BrightenColor(ImU32 color, float delta) {
-    ImVec4 out = ImGui::ColorConvertU32ToFloat4(color);
+namespace {
+
+// The list of keyboards is made with the core and outlives every keyboard
+struct ImeLayersLifetime {
+    ImeLayersLifetime() {
+        ime_layers_init();
+    }
+    ~ImeLayersLifetime() {
+        ime_layers_free();
+    }
+} ime_layers_lifetime;
+
+// On the presenter's thread while it draws the keyboards: one that takes itself out then
+// does not wait for the drawing to end
+thread_local bool drawing_ime_layers = false;
+
+char ime_clipboard[ORBIS_IME_MAX_TEXT_LENGTH * 4 + 1];
+
+} // namespace
+
+ImeLayer::ImeLayer() {
+    node.draw = [](ime_layer_t* layer) { static_cast<Node*>(layer)->self->Draw(); };
+    node.self = this;
+}
+
+void ImeLayer::Add(ImeLayer* layer) {
+    if (ime_layers_add(&layer->node)) {
+        ovl_pad_capture_acquire();
+    }
+}
+
+void ImeLayer::Remove(ImeLayer* layer) {
+    if (ime_layers_remove(&layer->node, drawing_ime_layers)) {
+        ovl_pad_capture_release();
+    }
+}
+
+extern "C" void ovl_ime_draw(void) {
+    drawing_ime_layers = true;
+    ime_layers_draw();
+    drawing_ime_layers = false;
+}
+
+extern "C" int ovl_ime_must_keep_drawing(void) {
+    return ime_layers_any();
+}
+
+const char* ImeClipboardText() {
+    return ime_clipboard;
+}
+
+void SetImeClipboardText(const char* text) {
+    const std::size_t length = std::min(std::strlen(text), sizeof(ime_clipboard) - 1);
+    std::memcpy(ime_clipboard, text, length);
+    ime_clipboard[length] = '\0';
+}
+
+int Utf8Step(const char* text, u32* codepoint) {
+    const char* next = text;
+    *codepoint = utf8_walk(&next);
+    return static_cast<int>(next - text);
+}
+
+void Utf16ToUtf8(const char16_t* text, std::size_t length, char* out, std::size_t out_size) {
+    ime_utf16_to_utf8(reinterpret_cast<const unsigned short*>(text), length, out, out_size);
+}
+
+void Utf8ToUtf16(const char* text, std::size_t length, char16_t* out, std::size_t out_size) {
+    ime_utf8_to_utf16(text, length, reinterpret_cast<unsigned short*>(out), out_size);
+}
+
+ovl_vec4_t BrightenColor(ovl_col_t color, float delta) {
+    ovl_vec4_t out = ovl_vec4_from_col(color);
     out.x = std::clamp(out.x + delta, 0.0f, 1.0f);
     out.y = std::clamp(out.y + delta, 0.0f, 1.0f);
     out.z = std::clamp(out.z + delta, 0.0f, 1.0f);
     return out;
 }
 
-static ImU32 ScaleColorAlpha(ImU32 color, float alpha_scale) {
-    ImVec4 c = ImGui::ColorConvertU32ToFloat4(color);
+static ovl_col_t ScaleColorAlpha(ovl_col_t color, float alpha_scale) {
+    ovl_vec4_t c = ovl_vec4_from_col(color);
     c.w = std::clamp(c.w * alpha_scale, 0.0f, 1.0f);
-    return ImGui::ColorConvertFloat4ToU32(c);
+    return ovl_col_from_vec4(c);
 }
 
 void TriggerSelectorPressPulse(SelectorFadeState& state, double now) {
@@ -152,11 +222,11 @@ float ComputePressPulseExpand(double pulse_started_at, double now, float pulse_d
     return std::max(0.0f, envelope) * max_expand_px;
 }
 
-void UpdateSelectorFadeState(SelectorFadeState& state, ImVec2 pos, ImVec2 size, float inset,
+void UpdateSelectorFadeState(SelectorFadeState& state, ovl_vec2_t pos, ovl_vec2_t size, float inset,
                              float corner_radius, bool selected, double now) {
     bool next_visible = false;
-    ImVec2 next_min{};
-    ImVec2 next_max{};
+    ovl_vec2_t next_min{};
+    ovl_vec2_t next_max{};
     if (selected && size.x > inset * 2.0f && size.y > inset * 2.0f) {
         next_visible = true;
         next_min = {pos.x + inset, pos.y + inset};
@@ -181,8 +251,8 @@ void UpdateSelectorFadeState(SelectorFadeState& state, ImVec2 pos, ImVec2 size, 
     state.current_corner_radius = std::max(0.0f, corner_radius);
 }
 
-void DrawSelectorFadeState(const SelectorFadeState& state, ImDrawList* draw_list,
-                           ImU32 overlay_color, ImU32 border_color, float border_thickness,
+void DrawSelectorFadeState(const SelectorFadeState& state, ovl_draw_list_t* draw_list,
+                           ovl_col_t overlay_color, ovl_col_t border_color, float border_thickness,
                            float fade_duration_sec, double now, float current_expand_px) {
     if (!draw_list) {
         return;
@@ -194,12 +264,12 @@ void DrawSelectorFadeState(const SelectorFadeState& state, ImDrawList* draw_list
             const float alpha =
                 1.0f - static_cast<float>(elapsed / static_cast<double>(fade_duration_sec));
             if (alpha > 0.0f) {
-                draw_list->AddRectFilled(state.previous_min, state.previous_max,
-                                         ScaleColorAlpha(overlay_color, alpha),
-                                         state.previous_corner_radius);
-                draw_list->AddRect(state.previous_min, state.previous_max,
-                                   ScaleColorAlpha(border_color, alpha),
-                                   state.previous_corner_radius, 0, border_thickness);
+                ovl_add_rect_filled(draw_list, state.previous_min, state.previous_max,
+                                    ScaleColorAlpha(overlay_color, alpha),
+                                    state.previous_corner_radius, 0);
+                ovl_add_rect(draw_list, state.previous_min, state.previous_max,
+                             ScaleColorAlpha(border_color, alpha), state.previous_corner_radius, 0,
+                             border_thickness);
             }
         }
     }
@@ -208,11 +278,12 @@ void DrawSelectorFadeState(const SelectorFadeState& state, ImDrawList* draw_list
         return;
     }
     const float expand = std::max(0.0f, current_expand_px);
-    const ImVec2 current_min{state.current_min.x - expand, state.current_min.y - expand};
-    const ImVec2 current_max{state.current_max.x + expand, state.current_max.y + expand};
+    const ovl_vec2_t current_min{state.current_min.x - expand, state.current_min.y - expand};
+    const ovl_vec2_t current_max{state.current_max.x + expand, state.current_max.y + expand};
     const float corner_radius = state.current_corner_radius + expand;
-    draw_list->AddRectFilled(current_min, current_max, overlay_color, corner_radius);
-    draw_list->AddRect(current_min, current_max, border_color, corner_radius, 0, border_thickness);
+    ovl_add_rect_filled(draw_list, current_min, current_max, overlay_color, corner_radius, 0);
+    ovl_add_rect(draw_list, current_min, current_max, border_color, corner_radius, 0,
+                 border_thickness);
 }
 
 ImeKbLayoutSelection ResolveInitialKbLayoutSelection(OrbisImeExtOption ext_option,
@@ -344,8 +415,8 @@ int Utf16CountFromUtf8Range(const char* text, const char* end) {
     const char* p = text;
     int utf16_units = 0;
     while (p < range_end && *p) {
-        unsigned int c = 0;
-        const int step = ImTextCharFromUtf8(&c, p, range_end);
+        u32 c = 0;
+        const int step = Utf8Step(p, &c);
         if (step <= 0) {
             break;
         }
@@ -362,8 +433,8 @@ int Utf8ByteIndexFromUtf16Index(const char* text, int utf16_index) {
     const char* p = text;
     int count = 0;
     while (*p && count < utf16_index) {
-        unsigned int c = 0;
-        const int step = ImTextCharFromUtf8(&c, p, nullptr);
+        u32 c = 0;
+        const int step = Utf8Step(p, &c);
         if (step <= 0) {
             break;
         }
@@ -377,8 +448,9 @@ int Utf8ByteIndexFromUtf16Index(const char* text, int utf16_index) {
     return static_cast<int>(p - text);
 }
 
-void DrawInactiveCaretOverlay(const ImRect& frame_rect, const char* text, int caret_byte,
-                              int selection_start_byte, int selection_end_byte, bool multiline) {
+void DrawInactiveCaretOverlay(ovl_vec2_t frame_min, ovl_vec2_t frame_max, const char* text,
+                              int caret_byte, int selection_start_byte, int selection_end_byte,
+                              bool multiline) {
     if (!text) {
         return;
     }
@@ -393,15 +465,15 @@ void DrawInactiveCaretOverlay(const ImRect& frame_rect, const char* text, int ca
     const int clamped_byte = std::clamp(caret_byte, 0, text_len);
     const char* const caret_ptr = text + clamped_byte;
 
-    const ImGuiStyle& style = ImGui::GetStyle();
-    const float left = frame_rect.Min.x + style.FramePadding.x;
-    const float right = frame_rect.Max.x - style.FramePadding.x;
+    const ovl_vec2_t frame_padding = ovl_frame_padding();
+    const float left = frame_min.x + frame_padding.x;
+    const float right = frame_max.x - frame_padding.x;
     if (right <= left) {
         return;
     }
 
-    const float top = frame_rect.Min.y + style.FramePadding.y;
-    const float bottom = frame_rect.Max.y - style.FramePadding.y;
+    const float top = frame_min.y + frame_padding.y;
+    const float bottom = frame_max.y - frame_padding.y;
     if (bottom <= top) {
         return;
     }
@@ -420,11 +492,11 @@ void DrawInactiveCaretOverlay(const ImRect& frame_rect, const char* text, int ca
             }
             ++p;
         }
-        caret_x = left + ImGui::CalcTextSize(line_begin, caret_ptr, false, -1.0f).x;
-        caret_y = top + static_cast<float>(line_index) * ImGui::GetTextLineHeight();
-        caret_bottom = caret_y + ImGui::GetTextLineHeight();
+        caret_x = left + ovl_calc_text_size(line_begin, caret_ptr, 0.0f).x;
+        caret_y = top + static_cast<float>(line_index) * ovl_text_line_height();
+        caret_bottom = caret_y + ovl_text_line_height();
     } else {
-        caret_x = left + ImGui::CalcTextSize(text, caret_ptr, false, -1.0f).x;
+        caret_x = left + ovl_calc_text_size(text, caret_ptr, 0.0f).x;
     }
 
     caret_x = std::clamp(caret_x, left, right);
@@ -434,9 +506,9 @@ void DrawInactiveCaretOverlay(const ImRect& frame_rect, const char* text, int ca
         return;
     }
 
-    const ImU32 caret_col = ImGui::GetColorU32(ImGuiCol_Text);
-    ImGui::GetWindowDrawList()->AddLine({caret_x, caret_y}, {caret_x, caret_bottom}, caret_col,
-                                        1.5f);
+    const ovl_col_t caret_col = ovl_color_u32(OVL_COLOR_TEXT, 1.0f);
+    ovl_add_line(ovl_window_draw_list(), {caret_x, caret_y}, {caret_x, caret_bottom}, caret_col,
+                 1.5f);
 }
 
 static float ApplyAxisDeadzone(float v) {
@@ -451,29 +523,12 @@ static float ApplyAxisDeadzone(float v) {
 VirtualPadSnapshot ReadVirtualPadSnapshot(Libraries::UserService::OrbisUserServiceUserId user_id,
                                           float delta_time) {
     VirtualPadSnapshot snapshot{};
-    constexpr u32 kMaskLeft = static_cast<u32>(Libraries::Pad::OrbisPadButtonDataOffset::Left);
-    constexpr u32 kMaskRight = static_cast<u32>(Libraries::Pad::OrbisPadButtonDataOffset::Right);
-    constexpr u32 kMaskUp = static_cast<u32>(Libraries::Pad::OrbisPadButtonDataOffset::Up);
-    constexpr u32 kMaskDown = static_cast<u32>(Libraries::Pad::OrbisPadButtonDataOffset::Down);
-    constexpr u32 kMaskCross = static_cast<u32>(Libraries::Pad::OrbisPadButtonDataOffset::Cross);
-    constexpr u32 kMaskTriangle =
-        static_cast<u32>(Libraries::Pad::OrbisPadButtonDataOffset::Triangle);
-    constexpr u32 kMaskSquare = static_cast<u32>(Libraries::Pad::OrbisPadButtonDataOffset::Square);
-    constexpr u32 kMaskCircle = static_cast<u32>(Libraries::Pad::OrbisPadButtonDataOffset::Circle);
-    constexpr u32 kMaskL1 = static_cast<u32>(Libraries::Pad::OrbisPadButtonDataOffset::L1);
-    constexpr u32 kMaskR1 = static_cast<u32>(Libraries::Pad::OrbisPadButtonDataOffset::R1);
-    constexpr u32 kMaskL2 = static_cast<u32>(Libraries::Pad::OrbisPadButtonDataOffset::L2);
-    constexpr u32 kMaskR2 = static_cast<u32>(Libraries::Pad::OrbisPadButtonDataOffset::R2);
-    constexpr u32 kMaskL3 = static_cast<u32>(Libraries::Pad::OrbisPadButtonDataOffset::L3);
-    constexpr u32 kMaskR3 = static_cast<u32>(Libraries::Pad::OrbisPadButtonDataOffset::R3);
-    constexpr float kTriggerButtonThreshold = 0.25f;
 
     float lx = 0.0f;
     float ly = 0.0f;
     float rx = 0.0f;
     float ry = 0.0f;
     float l2_analog = 0.0f;
-    float r2_analog = 0.0f;
     u32 buttons = 0;
     Input::State state{};
     if (UiShared::ReadControllerState(user_id, &state)) {
@@ -488,10 +543,6 @@ VirtualPadSnapshot ReadVirtualPadSnapshot(Libraries::UserService::OrbisUserServi
             UiShared::ToAxisUnit(state.axes[static_cast<std::size_t>(Input::Axis::RightY)]));
         l2_analog = std::clamp(
             static_cast<float>(state.axes[static_cast<std::size_t>(Input::Axis::TriggerLeft)]) /
-                255.0f,
-            0.0f, 1.0f);
-        r2_analog = std::clamp(
-            static_cast<float>(state.axes[static_cast<std::size_t>(Input::Axis::TriggerRight)]) /
                 255.0f,
             0.0f, 1.0f);
     }
@@ -648,10 +699,9 @@ static StickNavPulseResult ProcessStickNavPulse(bool enabled, StickNavDirection 
     return result;
 }
 
-OskVirtualPadInputView::OskVirtualPadInputView(const OskPadInputFrame& input_frame,
-                                               const ImGuiIO& io)
-    : frame(input_frame), repeat_delay(static_cast<double>(io.KeyRepeatDelay)),
-      repeat_rate(static_cast<double>(io.KeyRepeatRate)) {}
+OskVirtualPadInputView::OskVirtualPadInputView(const OskPadInputFrame& input_frame)
+    : frame(input_frame), repeat_delay(static_cast<double>(kKeyRepeatDelay)),
+      repeat_rate(static_cast<double>(kKeyRepeatRate)) {}
 
 bool OskVirtualPadInputView::Down(Libraries::Pad::OrbisPadButtonDataOffset button) const {
     return (frame.virtual_buttons & static_cast<u32>(button)) != 0;
@@ -666,8 +716,8 @@ bool OskVirtualPadInputView::RepeatPressed(Libraries::Pad::OrbisPadButtonDataOff
                                            bool& prev_down_state, double& next_repeat_time,
                                            bool* out_repeat) const {
     const VirtualButtonRepeatResult result =
-        ProcessRepeatButton(Down(button), Pressed(button), ImGui::GetTime(), repeat_delay,
-                            repeat_rate, prev_down_state, next_repeat_time);
+        ProcessRepeatButton(Down(button), Pressed(button), ovl_time(), repeat_delay, repeat_rate,
+                            prev_down_state, next_repeat_time);
     if (out_repeat) {
         *out_repeat = result.repeat;
     }
@@ -838,10 +888,9 @@ OskPadInputFrame ComputeOskPadInputFrame(const VirtualPadSnapshot& virtual_pad,
         return IsVirtualPadButtonPressed(frame.virtual_buttons, frame.prev_virtual_buttons, mask);
     };
 
-    const ImGuiIO& io = ImGui::GetIO();
-    const double now = ImGui::GetTime();
-    const double repeat_delay = static_cast<double>(io.KeyRepeatDelay);
-    const double repeat_rate = static_cast<double>(io.KeyRepeatRate);
+    const double now = ovl_time();
+    const double repeat_delay = static_cast<double>(kKeyRepeatDelay);
+    const double repeat_rate = static_cast<double>(kKeyRepeatRate);
 
     frame.cross_down = virtual_down(kMaskCross);
 

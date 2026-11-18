@@ -719,6 +719,8 @@ void ovl_vk_new_frame(unsigned width, unsigned height, float delta, float framer
     ovl_invitation_dialog_draw();
     ovl_store_icon_draw();
     ovl_msg_dialog_draw();
+    /* The on-screen keyboard, as ImGui's layer of it was: after what was open before it */
+    ovl_ime_draw();
     vk.draw_data = ovl_render();
 }
 
@@ -726,7 +728,8 @@ int ovl_vk_must_keep_drawing(void) {
     return vk.made && (ovl_notify_active() || ovl_trophy_active() || ovl_msg_dialog_active() ||
                        ovl_save_dialog_active() || ovl_profile_dialog_active() ||
                        ovl_commerce_dialog_active() || ovl_invitation_dialog_active() ||
-                       ovl_store_icon_active() || ovl_shadnet_active() || ovl_invite_active());
+                       ovl_store_icon_active() || ovl_shadnet_active() || ovl_invite_active() ||
+                       ovl_ime_must_keep_drawing());
 }
 
 int ovl_vk_splash_ready(void) {
