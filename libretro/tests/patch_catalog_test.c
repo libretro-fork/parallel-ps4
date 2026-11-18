@@ -144,9 +144,10 @@ static size_t mask_hits(const unsigned char* data, size_t size, const int* patte
     return hits;
 }
 
-/* The core's own Lower Audio Latency (src/resources/patches/ParaLLEl), as the catalog reads it
- * for each game's serials: one entry, for every version (no AppVer), and its line finds
- * MagicOrchestra's update time by its text and makes it 16666, leaving the rest of the line.
+/* The core's own patches (src/resources/patches/ParaLLEl), as the catalog reads them for each
+ * game's serials: two entries, for every version (no AppVer). Double Sound Update Rate's line
+ * finds MagicOrchestra's update time by its text and halves it, leaving the rest of the line;
+ * Lower Audio Latency's finds FMOD's mixer blocks in its code and makes the 4 kept 2.
  * An executable given (argv) is patched as the emulator does it: exactly once. */
 static void parallel_patches(int argc, char** argv) {
     static const char* const files[] = {"src/resources/patches/ParaLLEl/Bloodborne.xml",
@@ -167,18 +168,73 @@ static void parallel_patches(int argc, char** argv) {
         src.data = data;
         src.size = size;
         CHECK(patch_catalog_build(&cat, &src, 1, serials[f]), "built from the core's file");
+        /* Lower Audio Latency: FMOD's mixer keeps 2 blocks of 256 samples, not 4. Its line
+         * finds where FMOD's own code sets the two (the block's length, then all the blocks'
+         * together) and writes 512 over the 1024: the bytes are each game's own. */
         entry = find(&cat, "Lower Audio Latency");
-        CHECK(entry >= 0 && cat.count == 1, "its one patch");
+        CHECK(entry >= 0 && cat.count == 2, "its two patches");
         if (entry >= 0) {
-            struct rxml_node* line;
+            static const unsigned char code[3][24] = {
+                {0x41, 0xc7, 0x85, 0xf4, 0x07, 0, 0, 0, 0x01, 0, 0,
+                 0x41, 0xc7, 0x85, 0xf8, 0x07, 0, 0, 0, 0x04, 0, 0, 0x49, 0xc7},
+                {0x41, 0xc7, 0x85, 0xf4, 0x07, 0, 0, 0, 0x01, 0, 0,
+                 0x41, 0xc7, 0x85, 0xf8, 0x07, 0, 0, 0, 0x04, 0, 0, 0x49, 0xc7},
+                {0x48, 0xb9, 0, 0x01, 0, 0, 0, 0x04, 0, 0, 0x49, 0x8d, 0xbd, 0, 0x08, 0, 0}};
+            struct rxml_node* line = NULL;
+            int pattern[64];
+            size_t n, first = 0;
+            unsigned m;
+            CHECK(cat.entries[entry].versions[0] == '\0', "for every version");
+            CHECK(cat.metadata_count == 2, "two metadata");
+            for (m = 0; m < cat.metadata_count; m++) {
+                const char* name = rxml_node_attrib(cat.metadata[m].node, "Name");
+                if (name && strcmp(name, "Lower Audio Latency") == 0) {
+                    line = cat.metadata[m].node->children->children;
+                    while (line && (!line->name || strcmp(line->name, "Line") != 0))
+                        line = line->next;
+                }
+            }
+            CHECK(line && strcmp(rxml_node_attrib(line, "Type"), "mask") == 0, "a mask line");
+            if (line) {
+                const int offset = atoi(rxml_node_attrib(line, "Offset"));
+                const unsigned char* at;
+                n = mask_bytes(rxml_node_attrib(line, "Address"), pattern, 64);
+                CHECK(mask_hits(code[f], sizeof(code[f]), pattern, n, &first) == 1 && first == 0,
+                      "FMOD's code found");
+                at = code[f] + first + (size_t)offset;
+                CHECK(at[0] == 0 && at[1] == 0x04 && at[2] == 0 && at[3] == 0,
+                      "the offset is the 1024 of all the blocks together");
+                CHECK(strcmp(rxml_node_attrib(line, "Value"), "00020000") == 0,
+                      "512 written there: 2 blocks of 256");
+                for (a = 1; a < argc; a++) {
+                    size_t esize = 0, hits;
+                    unsigned char* exe = read_file(argv[a], &esize);
+                    hits = exe ? mask_hits(exe, esize, pattern, n, &first) : 0;
+                    CHECK(hits <= 1, "FMOD's code at most once in an executable");
+                    printf("patch_catalog: %s: %s's mixer blocks %u time(s)\n", argv[a], files[f],
+                           (unsigned)hits);
+                    free(exe);
+                }
+            }
+        }
+        /* Double Sound Update Rate */
+        entry = find(&cat, "Double Sound Update Rate");
+        CHECK(entry >= 0, "the update rate's patch");
+        if (entry >= 0) {
+            struct rxml_node* line = NULL;
             int pattern[64];
             size_t n;
+            unsigned m;
             CHECK(cat.entries[entry].versions[0] == '\0', "for every version");
             CHECK(strcmp(cat.entries[entry].repository, "ParaLLEl") == 0, "the core's");
-            CHECK(cat.metadata_count == 1, "one metadata");
-            line = cat.metadata[0].node->children->children;
-            while (line && (!line->name || strcmp(line->name, "Line") != 0))
-                line = line->next;
+            for (m = 0; m < cat.metadata_count; m++) {
+                const char* name = rxml_node_attrib(cat.metadata[m].node, "Name");
+                if (name && strcmp(name, "Double Sound Update Rate") == 0) {
+                    line = cat.metadata[m].node->children->children;
+                    while (line && (!line->name || strcmp(line->name, "Line") != 0))
+                        line = line->next;
+                }
+            }
             CHECK(line && strcmp(rxml_node_attrib(line, "Type"), "mask_halve") == 0, "a halving line");
             if (line) {
                 /* The game's text, and as another patch leaves it (Bloodborne's 60 FPS++ writes
