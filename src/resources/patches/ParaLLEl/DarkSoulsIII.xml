@@ -18,11 +18,11 @@
     </Metadata>
     <Metadata Title="Dark Souls III"
               Name="Lower Audio Latency"
-              Note="FMOD mixes the game's sound ahead of the speakers in blocks of 256 samples and keeps 4 of them: 1024 samples, 21 milliseconds, between a sound being mixed and being heard. This makes it keep 2, the fewest FMOD takes: 512 samples, 11 milliseconds. Blocks cannot be shorter than 256 samples, the console's smallest. If the sound crackles, the mixer is not keeping up with 2: turn this off. Found by FMOD's own code, so every version of the game that has it gets it."
+              Note="FMOD mixes the game's sound ahead of the speakers in blocks of 256 samples and keeps 4 of them: 1024 samples, 21 milliseconds, between a sound being mixed and being heard. This makes it keep 3: 768 samples, 16 milliseconds. Blocks cannot be shorter than 256 samples, the console's smallest, so the steps are whole blocks; with 2, the fewest FMOD takes, some sounds crackle. Found by FMOD's own code, so every version of the game that has it gets it."
               PatchVer="1.0"
               AppElf="eboot.bin">
         <PatchList>
-            <Line Type="mask" Address="41 C7 85 F4 07 00 00 00 01 00 00 41 C7 85 F8 07 00 00 00 04 00 00" Value="00020000" Offset="18"/>
+            <Line Type="mask" Address="41 C7 85 F4 07 00 00 00 01 00 00 41 C7 85 F8 07 00 00 00 04 00 00" Value="00030000" Offset="18"/>
         </PatchList>
     </Metadata>
 </Patch>
