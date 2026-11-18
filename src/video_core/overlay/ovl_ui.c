@@ -2891,8 +2891,48 @@ int ovl_input_text_with_hint(const char* label, const char* hint, char* buf, siz
     return 0;
 }
 
+/* The selection's boxes behind a text field's text, as ImGui's text field draws them: on each
+ * line the selection touches, from its first selected character to its last, half a space
+ * more where it takes in the line's end; on one line a pixel above the line to two below */
+static void text_field_selection(ovl_draw_list_t* dl, const float* clip, ovl_vec2_t draw_pos,
+                                 const char* text, const char* text_end, int select_start,
+                                 int select_end, int multiline) {
+    const float up = multiline ? 0.0f : -1.0f, down = multiline ? 0.0f : 2.0f;
+    const ovl_col_t col = ovl_color_u32(OVL_COLOR_TEXT_SELECTED_BG, 1.0f);
+    const char* a = text + select_start;
+    const char* b = text + select_end;
+    const char* line = text;
+    float y = draw_pos.y;
+    while (line <= text_end) {
+        const char* eol =
+            multiline ? (const char*)memchr(line, '\n', (size_t)(text_end - line)) : NULL;
+        const char* end = eol ? eol : text_end;
+        if (a <= end && b > line) {
+            const char* sa = a > line ? a : line;
+            const char* sb = b < end ? b : end;
+            ovl_vec2_t mn, mx;
+            mn.x = draw_pos.x + (sa > line ? ovl_calc_text_size(line, sa, 0.0f).x : 0.0f);
+            mx.x = mn.x + (sb > sa ? ovl_calc_text_size(sa, sb, 0.0f).x : 0.0f);
+            if (eol && b > end)
+                mx.x += truncf_(ovl_calc_text_size(" ", NULL, 0.0f).x * 0.5f);
+            mn.y = y + up;
+            mx.y = y + g.font_size + down;
+            mn.x = minf(maxf(mn.x, clip[0]), clip[2]);
+            mx.x = minf(maxf(mx.x, clip[0]), clip[2]);
+            mn.y = minf(maxf(mn.y, clip[1]), clip[3]);
+            mx.y = minf(maxf(mx.y, clip[1]), clip[3]);
+            if (mx.x > mn.x && mx.y > mn.y)
+                ovl_add_rect_filled(dl, mn, mx, col, 0.0f, 0);
+        }
+        if (!eol)
+            break;
+        line = eol + 1;
+        y += g.font_size;
+    }
+}
+
 static void text_field(const char* label, const char* hint, const char* text, ovl_vec2_t size,
-                       int multiline, ovl_vec2_t scroll) {
+                       int multiline, ovl_vec2_t scroll, int select_start, int select_end) {
     window_t* w = g.current;
     const char* lend;
     const char* display;
@@ -2919,6 +2959,21 @@ static void text_field(const char* label, const char* hint, const char* text, ov
     display = hinting ? hint : text;
     display_end = display + strlen(display);
     text_col = ovl_color_u32(hinting ? OVL_COLOR_TEXT_DISABLED : OVL_COLOR_TEXT, 1.0f);
+    /* A selection within the text, its ends in order; none of a hint */
+    {
+        const int length = (int)(display_end - display);
+        if (select_start > select_end) {
+            const int t = select_start;
+            select_start = select_end;
+            select_end = t;
+        }
+        if (select_start < 0)
+            select_start = 0;
+        if (select_end > length)
+            select_end = length;
+        if (hinting || select_start >= select_end)
+            select_start = select_end = 0;
+    }
 
     if (!multiline) {
         item_size(v2(total_max.x - frame_min.x, frame_size.y), g.style.frame_padding.y);
@@ -2927,6 +2982,15 @@ static void text_field(const char* label, const char* hint, const char* text, ov
                      g.style.frame_rounding);
         draw_pos = v2(frame_min.x + g.style.frame_padding.x - (float)(int)scroll.x,
                       frame_min.y + g.style.frame_padding.y);
+        if (select_end > select_start) {
+            const float* c = ovl_draw_list_clip(&w->dl);
+            clip[0] = maxf(frame_min.x, c[0]);
+            clip[1] = maxf(frame_min.y, c[1]);
+            clip[2] = minf(frame_max.x, c[2]);
+            clip[3] = minf(frame_max.y, c[3]);
+            text_field_selection(&w->dl, clip, draw_pos, display, display_end, select_start,
+                                 select_end, 0);
+        }
         if (display != display_end && (text_col & 0xFF000000u)) {
             ovl_push_clip(&w->dl, frame_min, frame_max, 1);
             render_text(draw_pos, display, display_end, 0.0f, text_col);
@@ -2977,6 +3041,9 @@ static void text_field(const char* label, const char* hint, const char* text, ov
             n1 = n0;
         if (n1 > lines)
             n1 = lines;
+        if (select_end > select_start)
+            text_field_selection(&child->dl, clip, draw_pos, display, display_end, select_start,
+                                 select_end, 1);
         if ((text_col & 0xFF000000u) && n0 < n1) {
             first = display;
             for (i = 0; i < n0; i++)
@@ -3004,14 +3071,15 @@ static void text_field(const char* label, const char* hint, const char* text, ov
 
 void ovl_text_field(const char* label, const char* hint, const char* text, ovl_vec2_t size,
                     int multiline) {
-    text_field(label, hint, text, size, multiline, v2(0.0f, 0.0f));
+    text_field(label, hint, text, size, multiline, v2(0.0f, 0.0f), 0, 0);
 }
 
 void ovl_text_field_scrolled(const char* label, const char* hint, const char* text, ovl_vec2_t size,
-                             int multiline, ovl_vec2_t scroll) {
+                             int multiline, ovl_vec2_t scroll, int select_start, int select_end) {
     if (hint && text[0] == '\0')
         scroll = v2(0.0f, 0.0f); /* the hint is not the text */
-    text_field(label, hint, text, size, multiline, v2(maxf(scroll.x, 0.0f), maxf(scroll.y, 0.0f)));
+    text_field(label, hint, text, size, multiline, v2(maxf(scroll.x, 0.0f), maxf(scroll.y, 0.0f)),
+               select_start, select_end);
 }
 
 int ovl_invisible_button(const char* str_id, ovl_vec2_t size_arg) {

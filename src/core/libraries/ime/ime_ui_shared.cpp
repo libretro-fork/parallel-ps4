@@ -491,12 +491,8 @@ void FollowCaretInTextField(ovl_vec2_t field_size, const char* text, int caret_b
 }
 
 void DrawInactiveCaretOverlay(ovl_vec2_t frame_min, ovl_vec2_t frame_max, const char* text,
-                              int caret_byte, int selection_start_byte, int selection_end_byte,
-                              bool multiline, ovl_vec2_t scroll) {
+                              int caret_byte, bool multiline, ovl_vec2_t scroll) {
     if (!text) {
-        return;
-    }
-    if (selection_start_byte != selection_end_byte) {
         return;
     }
     if (!IsCaretBlinkVisible()) {

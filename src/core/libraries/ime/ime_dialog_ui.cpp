@@ -1625,11 +1625,11 @@ void ImeDialogUi::DrawInputText(const Libraries::Ime::ImePanelMetrics& metrics, 
     Libraries::Ime::FollowCaretInTextField(input_size, state->current_text.begin(),
                                            input_cursor_byte, multiline, input_scroll);
     ovl_text_field_scrolled("##ImeDialogInput", placeholder, state->current_text.begin(),
-                            input_size, multiline, input_scroll);
+                            input_size, multiline, input_scroll, input_selection_start_byte,
+                            input_selection_end_byte);
     ovl_pop_color(2);
     DrawInactiveCaretOverlay(ovl_item_rect_min(), ovl_item_rect_max(), state->current_text.begin(),
-                             input_cursor_byte, input_selection_start_byte,
-                             input_selection_end_byte, multiline, input_scroll);
+                             input_cursor_byte, multiline, input_scroll);
 }
 
 } // namespace Libraries::ImeDialog

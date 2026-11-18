@@ -1403,12 +1403,11 @@ void ImeUi::DrawInputText(const ImePanelMetrics& metrics) {
     FollowCaretInTextField(input_size, state->current_text.begin(), input_cursor_byte, false,
                            input_scroll);
     ovl_text_field_scrolled("##ImeInput", nullptr, state->current_text.begin(), input_size, 0,
-                            input_scroll);
+                            input_scroll, input_selection_start_byte, input_selection_end_byte);
     ovl_pop_color(2);
 
     DrawInactiveCaretOverlay(ovl_item_rect_min(), ovl_item_rect_max(), state->current_text.begin(),
-                             input_cursor_byte, input_selection_start_byte,
-                             input_selection_end_byte, false, input_scroll);
+                             input_cursor_byte, false, input_scroll);
 }
 
 void ImeUi::Free() {

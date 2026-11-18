@@ -799,7 +799,9 @@ static void check_text_field(void) {
 }
 
 /* One text field in a window, the window's text at @scale, the field's text
- * moved by @scroll: what the on-screen keyboard draws */
+ * moved by @scroll, its bytes from select_a to select_b selected: what the
+ * on-screen keyboard draws */
+static int select_a, select_b;
 static unsigned scrolled_frame(const char *text, float scale, int multiline,
                                float scroll_x, float scroll_y) {
   ovl_vec2_t pos, pivot, size, scroll;
@@ -818,7 +820,9 @@ static unsigned scrolled_frame(const char *text, float scale, int multiline,
     size.y = multiline ? 100.0f : 40.0f;
     scroll.x = scroll_x;
     scroll.y = scroll_y;
-    ovl_text_field_scrolled("##field", NULL, text, size, multiline, scroll);
+    ovl_text_field_scrolled("##field", select_a == -9 ? "hint" : NULL, text,
+                            size, multiline, scroll,
+                            select_a == -9 ? 0 : select_a, select_b);
     ovl_set_window_font_scale(1.0f);
   }
   ovl_end();
@@ -862,6 +866,48 @@ static void check_text_field_scrolled(void) {
         "one more cut at each edge");
   CHECK(scrolled_frame(wide, 1.0f, 0, 5000.0f, 0.0f) == none,
         "moved left by more than its width: none");
+  /* A selection is a box behind the text on each line it is on, four
+   * vertices each; given either end first, and kept within the text */
+  select_a = 2;
+  select_b = 5;
+  CHECK(scrolled_frame(wide, 1.0f, 0, 0.0f, 0.0f) == all + 4,
+        "some of one line selected: one box");
+  select_a = 5;
+  select_b = 2;
+  CHECK(scrolled_frame(wide, 1.0f, 0, 0.0f, 0.0f) == all + 4,
+        "the selection's end given first: the same box");
+  select_a = -40;
+  select_b = 4000;
+  CHECK(scrolled_frame(wide, 1.0f, 0, 0.0f, 0.0f) == all + 4,
+        "a selection past the text's ends: all of it, one box");
+  select_a = 90;
+  select_b = 100;
+  CHECK(scrolled_frame(wide, 1.0f, 0, 0.0f, 0.0f) == all,
+        "a selection right of the field: no box");
+  select_a = select_b = 3;
+  CHECK(scrolled_frame(wide, 1.0f, 0, 0.0f, 0.0f) == all,
+        "nothing selected: no box");
+  select_a = -9; /* the field shows a hint */
+  select_b = 3;
+  part = scrolled_frame("", 1.0f, 0, 0.0f, 0.0f);
+  select_b = 0;
+  CHECK(scrolled_frame("", 1.0f, 0, 0.0f, 0.0f) == part,
+        "the hint is not the text: none of it selected");
+  /* Several lines: "x", its line end and "xx" are bytes 0 to 4, on lines 1
+   * and 2; lines 9 to 12 (bytes 44 on) are below the field */
+  select_a = 0;
+  select_b = 5;
+  CHECK(scrolled_frame(stairs, 1.0f, 1, 0.0f, 0.0f) == top + 8,
+        "a selection over two lines: a box on each");
+  select_a = 0;
+  select_b = 89;
+  CHECK(scrolled_frame(stairs, 1.0f, 1, 0.0f, 0.0f) == top + 7 * 4,
+        "all of twelve lines selected: a box on each line in view");
+  select_a = 45;
+  select_b = 89;
+  CHECK(scrolled_frame(stairs, 1.0f, 1, 0.0f, 0.0f) == top,
+        "a selection below the field: no box");
+  select_a = select_b = 0;
   ovl_new_frame(1920.0f, 1080.0f, 1.0f / 60.0f);
   ovl_render();
 }

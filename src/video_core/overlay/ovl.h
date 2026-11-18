@@ -482,9 +482,11 @@ void ovl_text_field(const char* label, const char* hint, const char* text, ovl_v
 /* The same with the text moved left and up by @scroll pixels, this frame: for whoever keeps a
  * caret in view. The text starts ovl_frame_padding() inside the frame; a line is
  * ovl_text_line_height() high; on several lines a text taller than the frame loses
- * ovl_scrollbar_size() of its width to the scrollbar. */
+ * ovl_scrollbar_size() of its width to the scrollbar. The bytes of @text from @select_start to
+ * @select_end (either first; the same for none) are shown selected, as ImGui's text field shows
+ * a selection: a box behind them, on every line they are on. */
 void ovl_text_field_scrolled(const char* label, const char* hint, const char* text, ovl_vec2_t size,
-                             int multiline, ovl_vec2_t scroll);
+                             int multiline, ovl_vec2_t scroll, int select_start, int select_end);
 
 int ovl_is_item_hovered(void);
 int ovl_is_item_active(void);
