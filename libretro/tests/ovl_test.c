@@ -516,6 +516,69 @@ static void check_profile(void) {
   ovl_profile_dialog_shutdown();
 }
 
+/* The store's dialog: a product for a user, as ImGui drew it, the focus on
+ * Close so that cross buys nothing; and the store's icon beside it */
+static const ovl_draw_data_t *commerce_frame(int cross) {
+  ovl_key_event(OVL_KEY_PAD_FACE_DOWN, cross);
+  ovl_new_frame(1920.0f, 1080.0f, 1.0f / 60.0f);
+  ovl_commerce_dialog_draw();
+  ovl_store_icon_draw();
+  return ovl_render();
+}
+
+static void check_commerce(void) {
+  static const char *const targets[] = {"A"};
+  ovl_commerce_dialog_param_t p;
+  const ovl_draw_data_t *dd;
+  int frame;
+  ovl_commerce_dialog_init();
+  ovl_set_gamepad_connected(1);
+  memset(&p, 0, sizeof(p));
+  p.mode = OVL_COMMERCE_MODE_PRODUCT;
+  p.user_id = 1;
+  p.username = "Lib";
+  p.targets = targets;
+  p.target_count = 1;
+  ovl_commerce_dialog_set_status(1);
+  ovl_commerce_dialog_open(&p);
+  CHECK(ovl_commerce_dialog_status() == 2 && ovl_commerce_dialog_active(),
+        "running, frames drawn while it shows");
+  dd = commerce_frame(0);
+  CHECK(dd->vtx_count == 416 && dd->idx_count == 804,
+        "the store dialog's first frame as ImGui's");
+  dd = commerce_frame(0);
+  CHECK(dd->vtx_count == 424 && dd->idx_count == 828,
+        "with the focus cursor, as ImGui's");
+  ovl_store_icon_show(OVL_STORE_ICON_CENTER);
+  CHECK(ovl_store_icon_active(), "frames drawn while the icon shows");
+  dd = commerce_frame(0);
+  CHECK(dd->vtx_count == 512 && dd->idx_count == 1134,
+        "and the store's icon, as ImGui's: no border on its window");
+  for (frame = 0; frame < 3; frame++)
+    commerce_frame(frame == 1);
+  CHECK(ovl_commerce_dialog_status() == 3, "finished by cross");
+  CHECK(ovl_commerce_dialog_result() == OVL_COMMERCE_RESULT_USER_CANCELED,
+        "on Close: nothing bought");
+  dd = commerce_frame(0);
+  CHECK(dd->vtx_count == 88 && dd->idx_count == 306 &&
+            !ovl_commerce_dialog_active(),
+        "the icon left alone");
+  ovl_store_icon_hide();
+  dd = commerce_frame(0);
+  CHECK(dd->vtx_count == 0 && !ovl_store_icon_active(), "gone");
+  /* The game closing it */
+  ovl_commerce_dialog_open(&p);
+  CHECK(ovl_commerce_dialog_result() == OVL_COMMERCE_RESULT_USER_CANCELED,
+        "cancelled until something says otherwise");
+  commerce_frame(0);
+  CHECK(ovl_commerce_dialog_close(OVL_COMMERCE_RESULT_OK) &&
+            !ovl_commerce_dialog_close(OVL_COMMERCE_RESULT_PURCHASED),
+        "closed once");
+  CHECK(ovl_commerce_dialog_result() == OVL_COMMERCE_RESULT_OK,
+        "with the game's result");
+  ovl_commerce_dialog_shutdown();
+}
+
 /* A frame of the save data dialog's shape: a title between separators, a
  * scrolling child of twelve buttons flattened into the window, back below */
 static const ovl_draw_data_t *list_frame(int first, int down, int up) {
@@ -635,6 +698,7 @@ int main(int argc, char **argv) {
   check_splash();
   check_dialogs();
   check_profile();
+  check_commerce();
   check_list();
   ovl_destroy();
   free(noto);

@@ -282,7 +282,7 @@ ASAN_OPTIONS=detect_leaks=0 "$OUT/vertex_capture_report" --selftest
 OVL="src/video_core/overlay/ovl_draw.c src/video_core/overlay/ovl_font.c \
      src/video_core/overlay/ovl_fps.c src/video_core/overlay/ovl_msgdialog.c \
      src/video_core/overlay/ovl_notify.c src/video_core/overlay/ovl_savedialog.c \
-     src/video_core/overlay/ovl_profile.c \
+     src/video_core/overlay/ovl_profile.c src/video_core/overlay/ovl_commerce.c \
      src/video_core/overlay/ovl_shadnet.c src/video_core/overlay/ovl_invite.c \
      src/video_core/overlay/ovl_splash.c src/video_core/overlay/ovl_tex.c \
      src/video_core/overlay/ovl_trophy.c \
@@ -337,4 +337,13 @@ for san in address,undefined thread; do
         -I$L/include libretro/tests/ovl_profile_test.c $OVL \
         -o "$OUT/ovl_profile_test" -lm -lpthread
     "$OUT/ovl_profile_test"
+done
+# The store's dialog and icon across threads: a game thread opening dialogs in every mode,
+# closing some, moving the icon; the overlay's thread drawing and pressing cross; each finished
+# once by one side, a press never a purchase
+for san in address,undefined thread; do
+    $CC -std=gnu89 -O1 -g -Wall -Wdeclaration-after-statement -fsanitize=$san -I. -Isrc \
+        -I$L/include libretro/tests/ovl_commerce_test.c $OVL \
+        -o "$OUT/ovl_commerce_test" -lm -lpthread
+    "$OUT/ovl_commerce_test"
 done

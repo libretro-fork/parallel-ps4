@@ -1627,7 +1627,8 @@ static int begin_window(const char* name, unsigned flags, window_t* parent, ovl_
         }
         if (w->scrollbar_y)
             draw_scrollbar_y(w);
-        if (w->border_size > 0.0f)
+        /* No border on a window without a background, as ImGui (RenderWindowOuterBorders) */
+        if (w->border_size > 0.0f && !(flags & OVL_WINDOW_NO_BACKGROUND))
             ovl_add_rect(&w->dl, w->pos, mx, ovl_color_u32(OVL_COLOR_BORDER, 1.0f), w->rounding, 0,
                          w->border_size);
     }

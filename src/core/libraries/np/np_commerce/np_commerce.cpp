@@ -1,45 +1,53 @@
 // SPDX-FileCopyrightText: Copyright 2025-2026 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include <algorithm>
 #include <cstddef>
 #include <cstring>
 #include "common/logging/log.h"
 #include "core/libraries/error_codes.h"
 #include "core/libraries/libs.h"
-#include "core/libraries/np/np_commerce/np_commerce_ui.h"
 #include "core/libraries/system/commondialog.h"
 #include "core/libraries/system/userservice.h"
 #include "np_commerce.h"
+#include "video_core/overlay/ovl_layers.h"
 
 namespace Libraries::Np::NpCommerce {
 
-static Status g_dialog_status = Status::NONE;
-static s32 g_result_code = ORBIS_COMMON_DIALOG_RESULT_USER_CANCELED;
-static CommerceDialogState g_state;
-static CommerceDialogUi g_dialog;
+// The dialog is the overlay's (video_core/overlay/ovl_commerce.c): its status and what was
+// pressed are kept there, among the game's thread and the overlay's. These are the game's
+// thread's alone: the mode it opened, what it gave to be handed back with the result, and the
+// error of an open the dialog was never shown for (0: none)
+static s32 g_mode = ORBIS_NP_COMMERCE_DIALOG_MODE_CATEGORY;
+static void* g_user_data = nullptr;
+static s32 g_param_error = 0;
+
+static Status DialogStatus() {
+    return static_cast<Status>(ovl_commerce_dialog_status());
+}
 
 s32 PS4_SYSV_ABI sceNpCommerceDialogInitialize() {
     LOG_INFO(Lib_NpCommerce, "called");
-    if (g_dialog_status != Status::NONE) {
+    if (DialogStatus() != Status::NONE) {
         return static_cast<s32>(Error::ALREADY_INITIALIZED);
     }
-    g_dialog_status = Status::INITIALIZED;
+    ovl_commerce_dialog_set_status(static_cast<int>(Status::INITIALIZED));
     return ORBIS_OK;
 }
 
 s32 PS4_SYSV_ABI sceNpCommerceDialogTerminate() {
     LOG_INFO(Lib_NpCommerce, "called");
-    if (g_dialog_status == Status::NONE) {
+    if (DialogStatus() == Status::NONE) {
         return static_cast<s32>(Error::NOT_INITIALIZED);
     }
-    g_dialog.Finish(CommerceResult::OK);
-    g_dialog_status = Status::NONE;
+    ovl_commerce_dialog_close(OVL_COMMERCE_RESULT_OK);
+    ovl_commerce_dialog_set_status(static_cast<int>(Status::NONE));
     return ORBIS_OK;
 }
 
 s32 PS4_SYSV_ABI sceNpCommerceDialogClose() {
     LOG_INFO(Lib_NpCommerce, "called");
-    switch (g_dialog_status) {
+    switch (DialogStatus()) {
     case Status::NONE:
         return static_cast<s32>(Error::NOT_INITIALIZED);
     case Status::INITIALIZED:
@@ -49,13 +57,17 @@ s32 PS4_SYSV_ABI sceNpCommerceDialogClose() {
     default:
         break;
     }
-    g_dialog.Finish(CommerceResult::OK);
+    // Pressed on screen at the same moment: closed already, by the player
+    if (!ovl_commerce_dialog_close(OVL_COMMERCE_RESULT_OK)) {
+        return static_cast<s32>(Error::ALREADY_CLOSE);
+    }
     return ORBIS_OK;
 }
 
 s8 PS4_SYSV_ABI sceNpCommerceDialogGetStatus() {
-    LOG_DEBUG(Lib_NpCommerce, "called, status = {}", static_cast<u32>(g_dialog_status));
-    return static_cast<s8>(g_dialog_status);
+    const Status status = DialogStatus();
+    LOG_DEBUG(Lib_NpCommerce, "called, status = {}", static_cast<u32>(status));
+    return static_cast<s8>(status);
 }
 
 s32 PS4_SYSV_ABI sceNpCommerceDialogInitializeInternal() {
@@ -64,30 +76,33 @@ s32 PS4_SYSV_ABI sceNpCommerceDialogInitializeInternal() {
 }
 
 s32 PS4_SYSV_ABI sceNpCommerceDialogUpdateStatus() {
-    LOG_DEBUG(Lib_NpCommerce, "called, status = {}", static_cast<u32>(g_dialog_status));
-    return static_cast<s32>(g_dialog_status);
+    const Status status = DialogStatus();
+    LOG_DEBUG(Lib_NpCommerce, "called, status = {}", static_cast<u32>(status));
+    return static_cast<s32>(status);
 }
 
 s32 PS4_SYSV_ABI sceNpCommerceDialogGetResult(OrbisNpCommerceDialogResult* result) {
     if (result == nullptr) {
         return static_cast<s32>(Error::ARG_NULL);
     }
-    if (g_dialog_status != Status::FINISHED) {
+    if (DialogStatus() != Status::FINISHED) {
         return static_cast<s32>(Error::NOT_FINISHED);
     }
+    const s32 g_result_code = g_param_error != 0 ? g_param_error : ovl_commerce_dialog_result();
     result->result = g_result_code;
     // authorized is only meaningful in PLUS mode
-    result->authorized = g_state.mode == CommerceMode::PLUS &&
+    result->authorized = g_mode == ORBIS_NP_COMMERCE_DIALOG_MODE_PLUS &&
                          g_result_code == ORBIS_NP_COMMERCE_DIALOG_RESULT_PURCHASED;
-    result->userData = g_state.user_data;
+    result->userData = g_user_data;
     LOG_INFO(Lib_NpCommerce, "result={} authorized={}", result->result, result->authorized);
     return g_result_code;
 }
 
 s32 PS4_SYSV_ABI sceNpCommerceDialogOpen(const OrbisNpCommerceDialogParam* param) {
     LOG_INFO(Lib_NpCommerce, "called, param = {}", static_cast<const void*>(param));
-    if (g_dialog_status != Status::INITIALIZED && g_dialog_status != Status::FINISHED) {
-        LOG_WARNING(Lib_NpCommerce, "Open in bad state {}", static_cast<u32>(g_dialog_status));
+    if (const Status status = DialogStatus();
+        status != Status::INITIALIZED && status != Status::FINISHED) {
+        LOG_WARNING(Lib_NpCommerce, "Open in bad state {}", static_cast<u32>(status));
         return static_cast<s32>(Error::NOT_INITIALIZED);
     }
     if (param == nullptr) {
@@ -96,54 +111,57 @@ s32 PS4_SYSV_ABI sceNpCommerceDialogOpen(const OrbisNpCommerceDialogParam* param
     if (param->mode < ORBIS_NP_COMMERCE_DIALOG_MODE_CATEGORY ||
         param->mode > ORBIS_NP_COMMERCE_DIALOG_MODE_PLUS) {
         LOG_ERROR(Lib_NpCommerce, "SceNpCommerceDialog Parameter Error (mode={})", param->mode);
-        g_result_code = static_cast<s32>(Error::PARAM_INVALID);
-        g_dialog_status = Status::FINISHED;
+        g_param_error = static_cast<s32>(Error::PARAM_INVALID);
+        ovl_commerce_dialog_set_status(static_cast<int>(Status::FINISHED));
         return static_cast<s32>(Error::PARAM_INVALID);
     }
 
-    g_state = CommerceDialogState{};
-    g_state.mode = static_cast<CommerceMode>(param->mode);
-    g_state.user_id = param->userId;
-    g_state.service_label = param->serviceLabel;
-    g_state.user_data = param->userData;
+    g_param_error = 0;
+    g_mode = param->mode;
+    g_user_data = param->userData;
+
+    ovl_commerce_dialog_param_t shown{};
+    shown.mode = param->mode;
+    shown.user_id = param->userId;
+    shown.service_label = param->serviceLabel;
     // features is only meaningful in PLUS mode
-    g_state.features = g_state.mode == CommerceMode::PLUS ? param->features : 0;
+    shown.features = param->mode == ORBIS_NP_COMMERCE_DIALOG_MODE_PLUS ? param->features : 0;
 
     // Resolve the calling user's name for display
     char name_buf[Libraries::UserService::ORBIS_USER_SERVICE_MAX_USER_NAME_LENGTH + 1] = {};
     if (Libraries::UserService::sceUserServiceGetUserName(param->userId, name_buf,
                                                           sizeof(name_buf)) >= 0) {
-        g_state.username = name_buf;
+        shown.username = name_buf;
     }
 
     if (param->numTargets > ORBIS_NP_COMMERCE_DIALOG_NUM_TARGETS_MAX) {
         LOG_WARNING(Lib_NpCommerce, "numTargets {} exceeds max {}, clamping", param->numTargets,
                     ORBIS_NP_COMMERCE_DIALOG_NUM_TARGETS_MAX);
     }
+    // The labels the game gave, the null ones left out; the overlay copies them, each up to
+    // MAX_LABEL_LEN bytes
+    const char* targets[ORBIS_NP_COMMERCE_DIALOG_NUM_TARGETS_MAX];
     const u32 count = std::min(param->numTargets, ORBIS_NP_COMMERCE_DIALOG_NUM_TARGETS_MAX);
     if (count > 0 && param->targets != nullptr) {
-        g_state.targets.reserve(count);
         for (u32 i = 0; i < count; ++i) {
-            const char* label = param->targets[i];
-            if (label != nullptr) {
-                g_state.targets.emplace_back(label, strnlen(label, MAX_LABEL_LEN));
+            if (const char* label = param->targets[i]; label != nullptr) {
+                targets[shown.target_count++] = label;
             }
         }
     }
+    shown.targets = targets;
     LOG_INFO(Lib_NpCommerce,
              "open: mode={} user_id={} serviceLabel={:#x} numTargets={} features={:#x} first='{}'",
-             param->mode, g_state.user_id, g_state.service_label, param->numTargets,
-             g_state.features, g_state.targets.empty() ? "" : g_state.targets.front());
+             param->mode, shown.user_id, shown.service_label, param->numTargets, shown.features,
+             shown.target_count == 0 ? "" : targets[0]);
 
-    g_dialog_status = Status::RUNNING;
-    g_result_code = ORBIS_COMMON_DIALOG_RESULT_USER_CANCELED;
-    g_dialog = CommerceDialogUi(&g_state, &g_dialog_status, &g_result_code);
+    ovl_commerce_dialog_open(&shown);
     return ORBIS_OK;
 }
 
 s32 PS4_SYSV_ABI sceNpCommerceHidePsStoreIcon() {
     LOG_INFO(Lib_NpCommerce, "called");
-    PsStoreIconLayer::Instance().Hide();
+    ovl_store_icon_hide();
     return ORBIS_OK;
 }
 
@@ -153,15 +171,13 @@ s32 PS4_SYSV_ABI sceNpCommerceSetPsStoreIconLayout(s32 layout) {
         LOG_WARNING(Lib_NpCommerce, "invalid layout {}, ignoring", layout);
         return ORBIS_OK;
     }
-    PsStoreIconLayer::Instance().SetLayout(static_cast<PsStoreIconLayout>(layout));
+    ovl_store_icon_set_layout(layout);
     return ORBIS_OK;
 }
 
 s32 PS4_SYSV_ABI sceNpCommerceShowPsStoreIcon(s32 pos) {
     LOG_INFO(Lib_NpCommerce, "called, pos = {}", pos);
-    const auto p =
-        (pos >= 0 && pos <= 2) ? static_cast<PsStoreIconPos>(pos) : PsStoreIconPos::CENTER;
-    PsStoreIconLayer::Instance().Show(p);
+    ovl_store_icon_show(pos >= 0 && pos <= 2 ? pos : OVL_STORE_ICON_CENTER);
     return ORBIS_OK;
 }
 

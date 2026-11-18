@@ -666,8 +666,6 @@ set(NP_LIBS src/core/libraries/np/np_error.h
             src/core/libraries/np/signaling_handler.h
             src/core/libraries/np/np_commerce/np_commerce.cpp
             src/core/libraries/np/np_commerce/np_commerce.h
-            src/core/libraries/np/np_commerce/np_commerce_ui.cpp
-            src/core/libraries/np/np_commerce/np_commerce_ui.h
             src/core/libraries/np/np_profile_dialog/np_profile_dialog.cpp
             src/core/libraries/np/np_profile_dialog/np_profile_dialog.h
             src/core/libraries/np/np_score/np_score.cpp
@@ -1197,6 +1195,7 @@ set(VIDEO_CORE src/video_core/amdgpu/cb_db_extent.h
                src/video_core/host_shaders/host_spirv.c
                src/video_core/host_shaders/host_spirv.h
                src/video_core/overlay/ovl.h
+               src/video_core/overlay/ovl_commerce.c
                src/video_core/overlay/ovl_draw.c
                src/video_core/overlay/ovl_font.c
                src/video_core/overlay/ovl_fps.c

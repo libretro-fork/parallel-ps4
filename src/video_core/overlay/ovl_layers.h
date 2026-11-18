@@ -210,6 +210,59 @@ int ovl_profile_dialog_result(void);
 void ovl_profile_dialog_draw(void);
 int ovl_profile_dialog_active(void);
 
+/* The store's dialog (ovl_commerce.c), libSceNpCommerce's: what the game asked the store for,
+ * for whom, and one or two buttons. Its modes and results are libSceNpCommerce's, the status
+ * CommonDialog's. The game's thread opens it (its texts copied) and may close it; the overlay's
+ * thread draws it and closes it when a button is pressed. */
+enum {
+    OVL_COMMERCE_MODE_CATEGORY = 0,
+    OVL_COMMERCE_MODE_PRODUCT = 1,
+    OVL_COMMERCE_MODE_PRODUCT_CODE = 2,
+    OVL_COMMERCE_MODE_CHECKOUT = 3,
+    OVL_COMMERCE_MODE_DOWNLOADLIST = 4,
+    OVL_COMMERCE_MODE_PLUS = 5
+};
+enum {
+    OVL_COMMERCE_RESULT_OK = 0,
+    OVL_COMMERCE_RESULT_USER_CANCELED = 1,
+    OVL_COMMERCE_RESULT_PURCHASED = 2
+};
+#define OVL_COMMERCE_TARGETS 10 /* ORBIS_NP_COMMERCE_DIALOG_NUM_TARGETS_MAX */
+typedef struct ovl_commerce_dialog_param {
+    int mode;
+    int user_id;
+    const char* username; /* null or empty when the user has none; up to 64 bytes */
+    unsigned service_label;
+    uint64_t features;          /* the subscription's (ORBIS_NP_PLUS_FEATURE_*), 0 otherwise */
+    const char* const* targets; /* products or categories, up to 128 bytes each */
+    int target_count;
+} ovl_commerce_dialog_param_t;
+void ovl_commerce_dialog_init(void);
+void ovl_commerce_dialog_shutdown(void);
+int ovl_commerce_dialog_status(void);
+void ovl_commerce_dialog_set_status(int status);
+/* Running, its result cancelled until a button or the game says otherwise */
+void ovl_commerce_dialog_open(const ovl_commerce_dialog_param_t* param);
+/* Finishes it with @result if it runs; 0 if it did not */
+int ovl_commerce_dialog_close(int result);
+int ovl_commerce_dialog_result(void);
+void ovl_commerce_dialog_draw(void);
+int ovl_commerce_dialog_active(void);
+/* The store's icon at the bottom of the screen, from any thread: shown at a place
+ * (OrbisNpCommercePsStoreIconPos), hidden, and how far in from the edges
+ * (OrbisNpCommercePsStoreIconLayout) */
+enum { OVL_STORE_ICON_CENTER = 0, OVL_STORE_ICON_LEFT = 1, OVL_STORE_ICON_RIGHT = 2 };
+enum {
+    OVL_STORE_ICON_LAYOUT_DEFAULT = 0,
+    OVL_STORE_ICON_LAYOUT_FOLLOW_SAFE_AREA = 1,
+    OVL_STORE_ICON_LAYOUT_FIXED_90 = 2
+};
+void ovl_store_icon_show(int pos);
+void ovl_store_icon_hide(void);
+void ovl_store_icon_set_layout(int layout);
+void ovl_store_icon_draw(void);
+int ovl_store_icon_active(void);
+
 /* shadNet's notifications (ovl_shadnet.c): queued from any thread, a kind and its text (copied,
  * up to 511 bytes); 0 when too many are waiting. Up to six show, newest first. */
 enum {

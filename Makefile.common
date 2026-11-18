@@ -203,8 +203,7 @@ CORE_SOURCES_CXX += $(addprefix src/core/libraries/ngs2/,ngs2.cpp ngs2_custom.cp
 	ngs2_geom.cpp ngs2_mastering.cpp ngs2_pan.cpp ngs2_report.cpp ngs2_reverb.cpp \
 	ngs2_sampler.cpp ngs2_submixer.cpp)
 CORE_SOURCES_CXX += $(addprefix src/core/libraries/np/np_auth/,np_auth.cpp)
-CORE_SOURCES_CXX += $(addprefix src/core/libraries/np/np_commerce/,np_commerce.cpp \
-	np_commerce_ui.cpp)
+CORE_SOURCES_CXX += $(addprefix src/core/libraries/np/np_commerce/,np_commerce.cpp)
 CORE_SOURCES_CXX += $(addprefix src/core/libraries/np/,np_common.cpp np_manager.cpp np_partner.cpp \
 	np_party.cpp np_sns_facebook_dialog.cpp np_trophy.cpp signaling_handler.cpp trophy_ui.cpp)
 CORE_SOURCES_CXX += $(addprefix src/core/libraries/np/np_handler/,np_handler.cpp \
@@ -315,7 +314,7 @@ CORE_SOURCES_C += $(addprefix src/core/libraries/ult/,ult.c ult_sync.c)
 CORE_SOURCES_C += $(addprefix src/core/libraries/np/np_handler/,np_invitation_json.c)
 CORE_SOURCES_C += $(addprefix src/shadnet/,pb_wire.c shadnet_msg.c)
 CORE_SOURCES_C += $(addprefix src/video_core/host_shaders/,host_spirv.c)
-CORE_SOURCES_C += $(addprefix src/video_core/overlay/,ovl_draw.c ovl_font.c ovl_fps.c ovl_invite.c \
+CORE_SOURCES_C += $(addprefix src/video_core/overlay/,ovl_commerce.c ovl_draw.c ovl_font.c ovl_fps.c ovl_invite.c \
 	ovl_msgdialog.c ovl_notify.c ovl_profile.c ovl_savedialog.c ovl_shadnet.c ovl_splash.c ovl_tex.c \
 	ovl_trophy.c ovl_ttf.c ovl_ui.c vk_overlay.c)
 CORE_SOURCES_C += $(addprefix src/video_core/renderer_vulkan/,vk_heap.c vk_device_fault.c frame_notes.c)
