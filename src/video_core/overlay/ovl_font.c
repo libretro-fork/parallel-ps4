@@ -530,7 +530,11 @@ static const char* wrap_next_line_start(const char* s, const char* end) {
 ovl_vec2_t ovl_font_calc_text_size(ovl_font_t* font, float size, float wrap_width, const char* text,
                                    const char* end) {
     ovl_vec2_t r;
-    ovl_baked_t* b = baked_for(font, size);
+    /* Glyphs are made at whole sizes and scaled to the size asked for, as ImGui's
+     * (ImFont::GetFontBaked rounds) */
+    const float made_size = (float)(int)(size + 0.5f);
+    const float scale = size / made_size;
+    ovl_baked_t* b = baked_for(font, made_size);
     float line_width = 0.0f;
     const char* s = text;
     const char* eol = NULL;
@@ -542,7 +546,7 @@ ovl_vec2_t ovl_font_calc_text_size(ovl_font_t* font, float size, float wrap_widt
         uint32_t c;
         if (wrap) {
             if (!eol)
-                eol = word_wrap_position(font, b, s, end, wrap_width - line_width);
+                eol = word_wrap_position(font, b, s, end, (wrap_width - line_width) / scale);
             if (s >= eol) {
                 if (r.x < line_width)
                     r.x = line_width;
@@ -567,7 +571,7 @@ ovl_vec2_t ovl_font_calc_text_size(ovl_font_t* font, float size, float wrap_widt
         }
         if (c == '\r')
             continue;
-        line_width += advance_of(font, b, c);
+        line_width += advance_of(font, b, c) * scale;
     }
     if (r.x < line_width)
         r.x = line_width;
@@ -585,6 +589,8 @@ void ovl_add_text(ovl_draw_list_t* dl, ovl_font_t* font, float size, ovl_vec2_t 
                   const char* text, const char* end, float wrap_width) {
     ovl_baked_t* b;
     const float* clip = ovl_draw_list_clip(dl);
+    const float made_size = (float)(int)(size + 0.5f);
+    const float scale = size / made_size;
     float x, y, origin_x;
     const char* s = text;
     const char* eol = NULL;
@@ -594,7 +600,7 @@ void ovl_add_text(ovl_draw_list_t* dl, ovl_font_t* font, float size, ovl_vec2_t 
         return;
     if (!end)
         end = text + strlen(text);
-    b = baked_for(font, size);
+    b = baked_for(font, made_size);
     x = (float)(int)pos.x; /* ImGui snaps with IM_TRUNC, toward 0 */
     y = (float)(int)pos.y;
     origin_x = x;
@@ -604,7 +610,7 @@ void ovl_add_text(ovl_draw_list_t* dl, ovl_font_t* font, float size, ovl_vec2_t 
     while (y + size < clip[1] && s < end) {
         const char* line_end = (const char*)memchr(s, '\n', (size_t)(end - s));
         if (wrap) {
-            s = word_wrap_position(font, b, s, line_end ? line_end : end, wrap_width);
+            s = word_wrap_position(font, b, s, line_end ? line_end : end, wrap_width / scale);
             s = wrap_next_line_start(s, end);
         } else {
             s = line_end ? line_end + 1 : end;
@@ -617,7 +623,7 @@ void ovl_add_text(ovl_draw_list_t* dl, ovl_font_t* font, float size, ovl_vec2_t 
         const ovl_glyph_t* g;
         if (wrap) {
             if (!eol)
-                eol = word_wrap_position(font, b, s, end, wrap_width - (x - origin_x));
+                eol = word_wrap_position(font, b, s, end, (wrap_width - (x - origin_x)) / scale);
             if (s >= eol) {
                 x = origin_x;
                 y += size;
@@ -648,8 +654,8 @@ void ovl_add_text(ovl_draw_list_t* dl, ovl_font_t* font, float size, ovl_vec2_t 
         if (!g)
             continue;
         if (g->visible == 1) {
-            const float x1 = x + g->x0, x2 = x + g->x1;
-            const float y1 = y + g->y0, y2 = y + g->y1;
+            const float x1 = x + g->x0 * scale, x2 = x + g->x1 * scale;
+            const float y1 = y + g->y0 * scale, y2 = y + g->y1 * scale;
             if (x1 <= clip[2] && x2 >= clip[0]) {
                 ovl_vec2_t a, c2, ua, uc;
                 a.x = x1;
@@ -663,7 +669,7 @@ void ovl_add_text(ovl_draw_list_t* dl, ovl_font_t* font, float size, ovl_vec2_t 
                 ovl_prim_rect_uv(dl, a, c2, ua, uc, col);
             }
         }
-        x += g->advance;
+        x += g->advance * scale;
     }
     dl->tex = was;
 }

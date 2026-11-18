@@ -417,6 +417,10 @@ void ovl_pop_text_wrap_pos(void);
 void ovl_push_font(ovl_font_t* font);
 void ovl_pop_font(void);
 float ovl_font_current_size(void);
+/* The font text is drawn with now (ImGui's GetFont), for text a layer places itself with
+ * ovl_add_text and measures with ovl_font_calc_text_size; and the style's frame padding */
+ovl_font_t* ovl_font_current(void);
+ovl_vec2_t ovl_frame_padding(void);
 float ovl_text_line_height(void);
 float ovl_text_line_height_with_spacing(void);
 float ovl_frame_height(void);
@@ -465,6 +469,14 @@ void ovl_set_next_item_width(float width);
  * OVL_INPUT_TEXT_MAX bytes while it is active. */
 #define OVL_INPUT_TEXT_MAX 4096
 int ovl_input_text_with_hint(const char* label, const char* hint, char* buf, size_t buf_size);
+/* A text shown in a text field's frame and never edited there: ImGui's InputTextEx with
+ * ReadOnly, on an item navigation does not go to (ImGuiItemFlags_NoNav), so never the active
+ * item. @hint shown while @text is empty (null: none). @size as ImGui's size_arg (0: the
+ * item width, a line's height; with @multiline, eight lines'). With @multiline the text's own
+ * line breaks are kept, the frame is a child window as ImGui's is, and a text taller than it
+ * gets that window's scrollbar; it stays at its top. */
+void ovl_text_field(const char* label, const char* hint, const char* text, ovl_vec2_t size,
+                    int multiline);
 
 int ovl_is_item_hovered(void);
 int ovl_is_item_active(void);

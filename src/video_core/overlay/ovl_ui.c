@@ -226,6 +226,7 @@ static struct {
 static void item_size(ovl_vec2_t size, float text_baseline_y);
 static int item_add(uint32_t id, ovl_vec2_t min, ovl_vec2_t max);
 static void item_add_no_nav(uint32_t id, ovl_vec2_t min, ovl_vec2_t max);
+static void end_child(int no_nav);
 static void render_nav_cursor(ovl_vec2_t min, ovl_vec2_t max, uint32_t id, float rounding);
 static float lerpf(float a, float b, float t);
 static ovl_vec2_t calc_next_scroll(const window_t* w);
@@ -527,6 +528,14 @@ void ovl_pop_font(void) {
 
 float ovl_font_current_size(void) {
     return g.font_size;
+}
+
+ovl_font_t* ovl_font_current(void) {
+    return current_font();
+}
+
+ovl_vec2_t ovl_frame_padding(void) {
+    return g.style.frame_padding;
 }
 
 float ovl_text_line_height(void) {
@@ -1453,8 +1462,12 @@ static void draw_scrollbar_y(window_t* w, ovl_draw_list_t* dl) {
     scroll_max = size_contents - size_visible > 1 ? size_contents - size_visible : 1;
     scroll_ratio = minf(maxf((float)(long)w->scroll.y / (float)scroll_max, 0.0f), 1.0f);
     grab_v = scroll_ratio * (size_v - grab_h) / size_v;
+    /* Rounded with the window where it meets its corners: its right side, the top one only
+     * under no title bar */
     ovl_add_rect_filled(dl, v2(f[0], f[1]), v2(f[2], f[3]),
-                        ovl_color_u32(OVL_COLOR_SCROLLBAR_BG, 1.0f), w->rounding, OVL_CORNERS_ALL);
+                        ovl_color_u32(OVL_COLOR_SCROLLBAR_BG, 1.0f), w->rounding,
+                        (w->flags & OVL_WINDOW_NO_TITLE_BAR) ? OVL_CORNERS_TR | OVL_CORNERS_BR
+                                                             : OVL_CORNERS_BR);
     {
         const float y0 = b[1] + (b[3] - b[1]) * grab_v;
         ovl_add_rect_filled(dl, v2(b[0], y0), v2(b[2], y0 + grab_h),
@@ -1772,7 +1785,7 @@ int ovl_begin_child(const char* id, ovl_vec2_t size, unsigned child_flags, unsig
     return ok;
 }
 
-void ovl_end_child(void) {
+static void end_child(int no_nav) {
     window_t* child = g.current;
     window_t* parent;
     ovl_vec2_t size, mx;
@@ -1790,7 +1803,7 @@ void ovl_end_child(void) {
         item_size(size, -1.0f);
         /* An item of its parent's: one to move to when it has items or scrolls and is not
          * flattened into it, else not one (its items reached directly when flattened) */
-        if ((child->nav_items || child->scroll_max.y > 0.0f) &&
+        if (!no_nav && (child->nav_items || child->scroll_max.y > 0.0f) &&
             !(child->child_flags & OVL_CHILD_NAV_FLATTENED)) {
             item_add(child->child_id, mn, mx);
             render_nav_cursor(mn, mx, child->child_id, -1.0f);
@@ -1800,6 +1813,10 @@ void ovl_end_child(void) {
                 parent->nav_items_next |= child->nav_items_next;
         }
     }
+}
+
+void ovl_end_child(void) {
+    end_child(0);
 }
 
 ovl_vec2_t ovl_window_pos(void) {
@@ -2868,6 +2885,107 @@ int ovl_input_text_with_hint(const char* label, const char* hint, char* buf, siz
             v2(frame_max.x + g.style.item_inner_spacing.x, frame_min.y + g.style.frame_padding.y),
             label, lend, 0.0f, ovl_color_u32(OVL_COLOR_TEXT, 1.0f));
     return 0;
+}
+
+void ovl_text_field(const char* label, const char* hint, const char* text, ovl_vec2_t size,
+                    int multiline) {
+    window_t* w = g.current;
+    const char* lend;
+    const char* display;
+    const char* display_end;
+    ovl_vec2_t label_size, frame_size, frame_min, frame_max, total_max, draw_pos;
+    uint32_t id;
+    ovl_col_t text_col;
+    float clip[4];
+    int hinting;
+    if (!w)
+        return;
+    lend = label_end(label);
+    id = hash_str(label, NULL, id_seed());
+    label_size = ovl_calc_text_size(label, lend, 0.0f);
+    frame_size = calc_item_size(size, calc_item_width(),
+                                (multiline ? g.font_size * 8.0f : label_size.y) +
+                                    g.style.frame_padding.y * 2.0f);
+    frame_min = w->cursor_pos;
+    frame_max = v2(frame_min.x + frame_size.x, frame_min.y + frame_size.y);
+    total_max =
+        v2(frame_max.x + (label_size.x > 0.0f ? g.style.item_inner_spacing.x + label_size.x : 0.0f),
+           frame_max.y);
+    hinting = hint && text[0] == '\0';
+    display = hinting ? hint : text;
+    display_end = display + strlen(display);
+    text_col = ovl_color_u32(hinting ? OVL_COLOR_TEXT_DISABLED : OVL_COLOR_TEXT, 1.0f);
+
+    if (!multiline) {
+        item_size(v2(total_max.x - frame_min.x, frame_size.y), g.style.frame_padding.y);
+        item_add_no_nav(id, frame_min, total_max);
+        render_frame(frame_min, frame_max, ovl_color_u32(OVL_COLOR_FRAME_BG, 1.0f),
+                     g.style.frame_rounding);
+        draw_pos = v2(frame_min.x + g.style.frame_padding.x, frame_min.y + g.style.frame_padding.y);
+        if (display != display_end && (text_col & 0xFF000000u)) {
+            ovl_push_clip(&w->dl, frame_min, frame_max, 1);
+            render_text(draw_pos, display, display_end, 0.0f, text_col);
+            ovl_pop_clip(&w->dl);
+        }
+    } else {
+        /* ImGui's is a child window with the frame's look, the text in it from its top, and
+         * a scrollbar when the text is taller: it is never scrolled here */
+        window_t* child;
+        const char* p;
+        int lines = 1, n0, n1, i;
+        const char* first;
+        const char* last;
+        ovl_begin_group();
+        ovl_push_color(OVL_COLOR_CHILD_BG, g.style.colors[OVL_COLOR_FRAME_BG]);
+        ovl_push_var_float(OVL_VAR_CHILD_ROUNDING, g.style.frame_rounding);
+        ovl_push_var_float(OVL_VAR_CHILD_BORDER_SIZE, g.style.frame_border_size);
+        ovl_push_var_vec2(OVL_VAR_WINDOW_PADDING, v2(0.0f, 0.0f));
+        ovl_begin_child(label, frame_size, OVL_CHILD_BORDERS, OVL_WINDOW_NO_MOVE);
+        ovl_pop_var(3);
+        ovl_pop_color(1);
+        child = g.current;
+        child->cursor_pos.x += g.style.frame_padding.x;
+        child->cursor_pos.y += g.style.frame_padding.y;
+        draw_pos = child->cursor_pos;
+        clip[0] = maxf(frame_min.x, child->clip[0]);
+        clip[1] = maxf(frame_min.y, child->clip[1]);
+        clip[2] = minf(frame_min.x + frame_size.x - child->deco_x2, child->clip[2]);
+        clip[3] = minf(frame_min.y + frame_size.y, child->clip[3]);
+        for (p = display; p < display_end; p++)
+            if (*p == '\n')
+                lines++;
+        /* The lines the clip shows (ImGui's CalcClipRectVisibleItemsY) */
+        n0 = (int)((clip[1] - draw_pos.y) / g.font_size);
+        if (n0 < 0)
+            n0 = 0;
+        n1 = (int)ceil((double)((clip[3] - draw_pos.y) / g.font_size));
+        if (n1 < n0)
+            n1 = n0;
+        if (n1 > lines)
+            n1 = lines;
+        if ((text_col & 0xFF000000u) && n0 < n1) {
+            first = display;
+            for (i = 0; i < n0; i++)
+                first = strchr(first, '\n') + 1;
+            last = first;
+            for (i = n0; i < n1; i++) {
+                const char* eol = (const char*)memchr(last, '\n', (size_t)(display_end - last));
+                last = eol && i + 1 < n1 ? eol + 1 : eol ? eol : display_end;
+            }
+            ovl_push_clip(&child->dl, v2(clip[0], clip[1]), v2(clip[2], clip[3]), 0);
+            render_text(v2(draw_pos.x, draw_pos.y + (float)n0 * g.font_size), first, last, 0.0f,
+                        text_col);
+            ovl_pop_clip(&child->dl);
+        }
+        ovl_dummy(v2(0.0f, (float)lines * g.font_size + g.style.frame_padding.y));
+        end_child(1);
+        ovl_end_group();
+        g.last_id = id;
+    }
+    if (label_size.x > 0.0f)
+        render_text(
+            v2(frame_max.x + g.style.item_inner_spacing.x, frame_min.y + g.style.frame_padding.y),
+            label, lend, 0.0f, ovl_color_u32(OVL_COLOR_TEXT, 1.0f));
 }
 
 int ovl_invisible_button(const char* str_id, ovl_vec2_t size_arg) {

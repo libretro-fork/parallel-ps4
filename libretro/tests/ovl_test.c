@@ -697,6 +697,107 @@ static void check_widgets(void) {
   ovl_render();
 }
 
+/* The read-only text field, in a window as ImGui laid the same one out (its
+ * InputTextEx, ReadOnly, on items navigation passes over): one line and
+ * several, a hint, a text taller than the field */
+static int field_focus[2];
+
+static const ovl_draw_data_t *field_frame(const char *text, enum ovl_key key,
+                                          int first) {
+  ovl_vec2_t pos, pivot, size;
+  ovl_vec4_t bg, fg;
+  ovl_key_event(OVL_KEY_PAD_DPAD_DOWN, key == OVL_KEY_PAD_DPAD_DOWN);
+  ovl_key_event(OVL_KEY_PAD_DPAD_UP, key == OVL_KEY_PAD_DPAD_UP);
+  ovl_new_frame(1920.0f, 1080.0f, 1.0f / 60.0f);
+  pos.x = 960.0f;
+  pos.y = 540.0f;
+  pivot.x = pivot.y = 0.5f;
+  size.x = 520.0f;
+  size.y = 560.0f;
+  ovl_set_next_window_pos(pos, OVL_COND_ALWAYS, pivot);
+  ovl_set_next_window_size(size, OVL_COND_ALWAYS);
+  if (first || !ovl_nav_active())
+    ovl_set_next_window_focus();
+  ovl_keep_nav_highlight();
+  if (ovl_begin("Fields##tf",
+                OVL_WINDOW_NO_DECORATION | OVL_WINDOW_NO_SAVED_SETTINGS)) {
+    size.x = 100.0f;
+    size.y = 30.0f;
+    ovl_button("Above", size);
+    field_focus[0] = ovl_is_item_focused();
+    bg.x = 0.1f;
+    bg.y = 0.2f;
+    bg.z = 0.4f;
+    bg.w = 1.0f;
+    fg.x = fg.y = 0.9f;
+    fg.z = 0.6f;
+    fg.w = 1.0f;
+    ovl_push_color(OVL_COLOR_FRAME_BG, bg);
+    ovl_push_color(OVL_COLOR_TEXT, fg);
+    size.x = 300.0f;
+    size.y = 40.0f;
+    ovl_text_field("##one", "Hint", text, size, 0);
+    size.x = size.y = 0.0f;
+    ovl_text_field("##def", NULL, text, size, 0);
+    size.x = 200.0f;
+    ovl_text_field("Label", "Hint\ntwo", text, size, 0);
+    pos.x = 20.0f;
+    pos.y = 190.0f;
+    ovl_set_cursor_pos(pos);
+    size.x = 360.0f;
+    size.y = 120.0f;
+    ovl_text_field("##multi", "Hint", text, size, 1);
+    size.x = 180.0f;
+    size.y = 0.0f;
+    ovl_text_field("Named", "Hint\nof two", text, size, 1);
+    ovl_pop_color(2);
+    size.x = 100.0f;
+    size.y = 30.0f;
+    ovl_button("Below", size);
+    field_focus[1] = ovl_is_item_focused();
+  }
+  ovl_end();
+  return ovl_render();
+}
+
+static void check_text_field(void) {
+  static const char tall[] = "one\ntwo\nthree\nfour\nfive\nsix\nseven\neight\n"
+                             "nine\nten\neleven\ntwelve\nthirteen";
+  const ovl_draw_data_t *dd;
+  int frame;
+  ovl_set_gamepad_connected(1);
+  field_frame("Geralt", OVL_KEY_NONE, 1);
+  field_frame("Geralt", OVL_KEY_NONE, 0);
+  dd = field_frame("Geralt", OVL_KEY_NONE, 0);
+  CHECK(dd->vtx_count == 300 && dd->idx_count == 600,
+        "text fields laid out and drawn as ImGui's");
+  /* Down from the button above: past all five fields to the one below */
+  field_frame("Geralt", OVL_KEY_PAD_DPAD_DOWN, 0);
+  field_frame("Geralt", OVL_KEY_NONE, 0);
+  CHECK(!field_focus[0] && field_focus[1], "navigation passes over them");
+  field_frame("Geralt", OVL_KEY_PAD_DPAD_UP, 0);
+  field_frame("Geralt", OVL_KEY_NONE, 0);
+  CHECK(field_focus[0] && !field_focus[1], "both ways");
+  dd = field_frame("", OVL_KEY_NONE, 0);
+  CHECK(dd->vtx_count == 276 && dd->idx_count == 564,
+        "empty: the hints, none where none is given");
+  /* Taller than the fields of several lines: their scrollbars, from the
+   * frame after (the text's height is measured the frame before), and still
+   * passed over */
+  field_frame(tall, OVL_KEY_NONE, 0);
+  for (frame = 0; frame < 4; frame++)
+    dd = field_frame(tall, OVL_KEY_NONE, 0);
+  CHECK(dd->vtx_count == 616 && dd->idx_count == 1254,
+        "a text taller than the field: clipped to it, with a scrollbar");
+  field_frame(tall, OVL_KEY_PAD_DPAD_DOWN, 0);
+  field_frame(tall, OVL_KEY_NONE, 0);
+  CHECK(!field_focus[0] && field_focus[1],
+        "navigation passes over one that could scroll");
+  ovl_key_event(OVL_KEY_PAD_DPAD_DOWN, 0);
+  ovl_new_frame(1920.0f, 1080.0f, 1.0f / 60.0f);
+  ovl_render();
+}
+
 /* The invitation dialog, as ImGui drew it; what it asks of the core is noted
  * here and answered when the test says */
 static int inv_friend_count;
@@ -928,6 +1029,25 @@ static void check_fallback_faces(const unsigned char *noto, size_t noto_size) {
     a = ovl_font_calc_text_size(alone, 16.0f, 0.0f, "Hunter", NULL);
     b = ovl_font_calc_text_size(stack, 16.0f, 0.0f, "Hunter", NULL);
     CHECK(a.x == b.x, "Latin from the UI font either way");
+    /* A size between two whole ones: the glyphs of the nearest whole size,
+     * scaled, as ImGui's; so none are made for it */
+    {
+      int rect[4], cleared;
+      float d;
+      a = ovl_font_calc_text_size(alone, 14.0f, 0.0f, "Space Done ghk", NULL);
+      while (ovl_atlas_take_dirty(rect, &cleared)) {
+      }
+      b = ovl_font_calc_text_size(alone, 13.5f, 0.0f, "Space Done ghk", NULL);
+      d = b.x - a.x * (13.5f / 14.0f);
+      CHECK(b.y == 13.5f && d < 0.01f && d > -0.01f,
+            "a text at 13.5: the line's height, 14's widths scaled");
+      CHECK(!ovl_atlas_take_dirty(rect, &cleared),
+            "with the glyphs made for 14");
+      b = ovl_font_calc_text_size(alone, 14.49f, 0.0f, "Space Done ghk", NULL);
+      d = b.x - a.x * (14.49f / 14.0f);
+      CHECK(d < 0.01f && d > -0.01f && !ovl_atlas_take_dirty(rect, &cleared),
+            "and at 14.49");
+    }
   }
 }
 
@@ -1052,6 +1172,7 @@ int main(int argc, char **argv) {
   check_profile();
   check_commerce();
   check_widgets();
+  check_text_field();
   check_invitation();
   check_list();
   check_fallback_faces(noto, size);
