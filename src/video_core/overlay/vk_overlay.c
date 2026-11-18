@@ -601,7 +601,8 @@ static int init_failed(const char* what) {
 }
 
 int ovl_vk_init(const ovl_vk_info_t* info) {
-    ovl_face_desc_t face;
+    ovl_face_desc_t faces[8];
+    unsigned face_count = 1;
     ovl_font_t* font;
     unsigned i;
     if (vk.made)
@@ -619,10 +620,13 @@ int ovl_vk_init(const ovl_vk_info_t* info) {
     vk.device = info->device;
     vk.mem = info->memory_properties;
     /* The UI font, read in place, at ImGui's size: 32 pixels drawn at half (FontGlobalScale) */
-    face.data = info->font;
-    face.size = info->font_size;
-    face.index = 0;
-    font = info->font && info->font_size ? ovl_font_add(&face, 1, 32.0f) : NULL;
+    faces[0].data = info->font;
+    faces[0].size = info->font_size;
+    faces[0].index = 0;
+    for (i = 0; i < info->fallback_count && face_count < sizeof(faces) / sizeof(faces[0]); i++)
+        if (info->fallback_faces[i].data && info->fallback_faces[i].size)
+            faces[face_count++] = info->fallback_faces[i];
+    font = info->font && info->font_size ? ovl_font_add(faces, (int)face_count, 32.0f) : NULL;
     if (!font)
         return init_failed("the UI font");
     if (!ovl_create(font, 0.5f))

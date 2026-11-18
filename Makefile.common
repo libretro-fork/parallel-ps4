@@ -54,8 +54,11 @@ EMBEDDED_RESOURCES := $(addprefix src/resources/,big_picture/controller.png \
 	big_picture/profiles.png big_picture/settings.png bronze.png gold.png platinum.png \
 	shadps4.png silver.png trophy.wav amd_rcp_index_table.bin.zstd \
 	amd_rsqrt_index_table.bin.zstd)
-# The overlays' font (src/video_core/overlay), read in place
-EMBEDDED_RESOURCES += src/imgui/renderer/fonts/NotoSans-Regular.ttf
+# The overlays' fonts (src/video_core/overlay), read in place: the UI font, then the ones tried
+# for what it lacks
+EMBEDDED_RESOURCES += $(addprefix src/imgui/renderer/fonts/,NotoSans-Regular.ttf \
+	NotoSansArabic-Regular.ttf NotoSansThai-Regular.ttf NotoSansSymbols2-Regular.ttf \
+	NotoSansCJK-Regular.ttc)
 # The patch repositories (src/resources/patches/README.md), shadPS4's first: of a patch both
 # have for the same version, the first one's is applied (src/common/patch_catalog.h)
 EMBEDDED_RESOURCES += $(sort $(wildcard src/resources/patches/shadPS4/*.xml)) \

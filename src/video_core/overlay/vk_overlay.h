@@ -10,6 +10,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "ovl.h"
+
 #ifndef VK_NO_PROTOTYPES
 #define VK_NO_PROTOTYPES
 #endif
@@ -27,6 +29,10 @@ typedef struct ovl_vk_info {
     VkFormat surface_format;
     const uint8_t* font; /* the UI font (a TrueType file), lent for as long as it runs */
     size_t font_size;
+    /* The fonts tried after it, in turn, for a character it does not have (other scripts,
+     * symbols), lent likewise; those that cannot be read are left out */
+    const ovl_face_desc_t* fallback_faces;
+    unsigned fallback_count;
     const uint8_t* splash; /* the game's splash screen (a PNG), lent likewise; null for none */
     size_t splash_size;
 } ovl_vk_info_t;

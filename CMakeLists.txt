@@ -1609,8 +1609,13 @@ set(EMBEDDED_RESOURCES
         src/resources/trophy.wav
         src/resources/amd_rcp_index_table.bin.zstd
         src/resources/amd_rsqrt_index_table.bin.zstd
-        # The overlays' font (src/video_core/overlay), read in place
-        src/imgui/renderer/fonts/NotoSans-Regular.ttf)
+        # The overlays' fonts (src/video_core/overlay), read in place: the UI font, then the ones
+        # tried for what it lacks
+        src/imgui/renderer/fonts/NotoSans-Regular.ttf
+        src/imgui/renderer/fonts/NotoSansArabic-Regular.ttf
+        src/imgui/renderer/fonts/NotoSansThai-Regular.ttf
+        src/imgui/renderer/fonts/NotoSansSymbols2-Regular.ttf
+        src/imgui/renderer/fonts/NotoSansCJK-Regular.ttc)
 # The patch repositories (src/resources/patches/README.md), shadPS4's first: of a patch both
 # have for the same version, the first one's is applied (src/common/patch_catalog.h)
 foreach (repository IN ITEMS shadPS4 GoldHEN ParaLLEl)

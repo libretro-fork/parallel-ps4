@@ -881,6 +881,56 @@ static void check_invitation(void) {
   ovl_invitation_dialog_shutdown();
 }
 
+static unsigned char *fallback_cjk, *fallback_sym;
+
+/* A font of several faces: a character the first lacks comes from the next
+ * that has it, as ImGui's merged fonts gave it; one none has is the fallback
+ * glyph. The collection's faces are told apart by their index. */
+static void check_fallback_faces(const unsigned char *noto, size_t noto_size) {
+  static const char hunter[] = "\xe7\x8b\xa9\xe4\xba\xba"; /* two kanji */
+  static const char arrow[] = "\xe2\x8c\xab"; /* erase to the left */
+  size_t cjk_size, sym_size;
+  unsigned char *cjk, *sym;
+  ovl_face_desc_t faces[3];
+  ovl_font_t *alone, *stack;
+  ovl_vec2_t a, b;
+  /* Lent for as long as the overlay lives: freed after it */
+  cjk = fallback_cjk =
+      read_file("src/imgui/renderer/fonts/NotoSansCJK-Regular.ttc", &cjk_size);
+  sym = fallback_sym = read_file(
+      "src/imgui/renderer/fonts/NotoSansSymbols2-Regular.ttf", &sym_size);
+  if (!cjk || !sym) {
+    printf("FAIL the fallback fonts are not in the tree\n");
+    failures++;
+    return;
+  }
+  faces[0].data = noto;
+  faces[0].size = noto_size;
+  faces[0].index = 0;
+  faces[1].data = sym;
+  faces[1].size = sym_size;
+  faces[1].index = 0;
+  faces[2].data = cjk;
+  faces[2].size = cjk_size;
+  faces[2].index = 1; /* the Korean face */
+  alone = ovl_font_add(faces, 1, 32.0f);
+  stack = ovl_font_add(faces, 3, 32.0f);
+  CHECK(alone && stack, "fonts of one face and of three");
+  if (alone && stack) {
+    a = ovl_font_calc_text_size(alone, 16.0f, 0.0f, hunter, NULL);
+    b = ovl_font_calc_text_size(stack, 16.0f, 0.0f, hunter, NULL);
+    CHECK(b.x > 0.0f && a.x != b.x,
+          "kanji from the CJK face; not in the UI font, whose fallback glyph "
+          "is another width");
+    a = ovl_font_calc_text_size(alone, 16.0f, 0.0f, arrow, NULL);
+    b = ovl_font_calc_text_size(stack, 16.0f, 0.0f, arrow, NULL);
+    CHECK(a.x != b.x, "a keyboard symbol from the symbols face");
+    a = ovl_font_calc_text_size(alone, 16.0f, 0.0f, "Hunter", NULL);
+    b = ovl_font_calc_text_size(stack, 16.0f, 0.0f, "Hunter", NULL);
+    CHECK(a.x == b.x, "Latin from the UI font either way");
+  }
+}
+
 /* A frame of the save data dialog's shape: a title between separators, a
  * scrolling child of twelve buttons flattened into the window, back below */
 static const ovl_draw_data_t *list_frame(int first, int down, int up) {
@@ -1004,8 +1054,11 @@ int main(int argc, char **argv) {
   check_widgets();
   check_invitation();
   check_list();
+  check_fallback_faces(noto, size);
   ovl_destroy();
   free(noto);
+  free(fallback_cjk);
+  free(fallback_sym);
   if (failures) {
     printf("%d failures\n", failures);
     return 1;

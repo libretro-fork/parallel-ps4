@@ -58,6 +58,37 @@ Swapchain::Swapchain(const Instance& instance_, const Frontend::Window& window_)
         info.surface_format = static_cast<VkFormat>(surface_format.format);
         info.font = font.data();
         info.font_size = font.size();
+        // The fonts after it, as ImGui's stack merged them (imgui/renderer/font_stack.cpp): Arabic,
+        // Thai, symbols, then the CJK collection's face for the console's language
+        static constexpr const char* fallbacks[] = {
+            "src/imgui/renderer/fonts/NotoSansArabic-Regular.ttf",
+            "src/imgui/renderer/fonts/NotoSansThai-Regular.ttf",
+            "src/imgui/renderer/fonts/NotoSansSymbols2-Regular.ttf",
+            "src/imgui/renderer/fonts/NotoSansCJK-Regular.ttc",
+        };
+        ovl_face_desc_t faces[std::size(fallbacks)]{};
+        for (size_t i = 0; i < std::size(fallbacks); i++) {
+            const auto data = Common::GetEmbeddedResource(fallbacks[i]);
+            faces[i].data = data.data();
+            faces[i].size = data.size();
+        }
+        // The collection's faces: Japanese, Korean, Simplified and Traditional Chinese; the
+        // console's languages 9, 11 and 10 are the last three, any other reads the Japanese
+        switch (emu_settings_get_console_language()) {
+        case 9:
+            faces[3].index = 1;
+            break;
+        case 11:
+            faces[3].index = 2;
+            break;
+        case 10:
+            faces[3].index = 3;
+            break;
+        default:
+            break;
+        }
+        info.fallback_faces = faces;
+        info.fallback_count = static_cast<unsigned>(std::size(fallbacks));
         // The splash screen, read where the game's files lent it
         const auto splash = Common::ElfInfo::Instance().GetSplashData();
         info.splash = splash.data();
