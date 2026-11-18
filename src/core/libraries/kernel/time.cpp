@@ -50,12 +50,12 @@ game_clock_t* GameClock() {
 
 /// The game's time in ticks of @frequency
 static u64 GameTicks(u64 frequency) {
-    const u64 ns = game_clock_now(&game_clock);
+    const u64 ns = game_clock_read(&game_clock);
     return (ns / 1'000'000'000) * frequency + (ns % 1'000'000'000) * frequency / 1'000'000'000;
 }
 
 static void GameTimespec(u64 base_ns, OrbisKernelTimespec* ts) {
-    const u64 ns = base_ns + game_clock_now(&game_clock);
+    const u64 ns = base_ns + game_clock_read(&game_clock);
     ts->tv_sec = static_cast<s64>(ns / 1'000'000'000);
     ts->tv_nsec = static_cast<s64>(ns % 1'000'000'000);
 }
@@ -145,7 +145,9 @@ u64 PS4_SYSV_ABI sceKernelGetTscFrequency() {
 }
 
 u64 PS4_SYSV_ABI sceKernelGetProcessTime() {
-    return game_clock_now(&game_clock) / 1000;
+    // The time the game is told moves on at each read: one seeds a random draw from this
+    // and draws again, a call deeper, until the draw differs (game_clock_read)
+    return game_clock_read(&game_clock) / 1000;
 }
 
 u64 PS4_SYSV_ABI sceKernelGetProcessTimeCounter() {
@@ -561,7 +563,7 @@ s32 PS4_SYSV_ABI sceKernelClockGetres(const u32 clock_id, OrbisKernelTimespec* r
 s32 PS4_SYSV_ABI posix_gettimeofday(OrbisKernelTimeval* tp, OrbisKernelTimezone* tz) {
     // The date the game started at, plus the game's time
     if (tp) {
-        const u64 us = (boot_epoch_ns + game_clock_now(&game_clock)) / 1000;
+        const u64 us = (boot_epoch_ns + game_clock_read(&game_clock)) / 1000;
         tp->tv_sec = static_cast<s64>(us / 1'000'000);
         tp->tv_usec = static_cast<s64>(us % 1'000'000);
     }

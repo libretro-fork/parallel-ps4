@@ -22,7 +22,14 @@
  *   - work in flight on a thread that is not the game's (kernel AIO's worker): a game thread
  *     waiting for it with a timeout, alone, has the time skip to its deadline at once and
  *     times out before the work is done; counted running from its submit until it is done
- *     (game_clock_busy, game_clock_idle), the work holds the time and the wait ends with it. */
+ *     (game_clock_busy, game_clock_idle), the work holds the time and the wait ends with it;
+ *   - the time the game is told (game_clock_read): a microsecond on at each read while the
+ *     time stands, never behind the time, never past the frame's end, standing there until
+ *     the next frame, and moving no deadline; a draw seeded from the clock and drawn again
+ *     until it differs (what Dead or Alive Xtreme 3 Fortune does, a call deeper each time)
+ *     ends at its second draw, where on the standing time it never would; four threads
+ *     reading while frames start are each told times that never go back, and no time twice
+ *     before a frame's end. */
 
 #include <stdio.h>
 
@@ -288,6 +295,112 @@ static void in_flight_test(void) {
           "the time held until it was done");
 }
 
+/* The game's draw: a generator seeded from the clock in microseconds, as its
+ * sceKernelGetProcessTime gives it, drawn again until the draw is not @taken. Returns the
+ * draws it took, or @limit if it never ended. */
+static unsigned seeded_draw(uint32_t seed) {
+    seed ^= seed >> 30;
+    return (unsigned)((seed * 1812433253u + 1u) >> 8) % 26u;
+}
+
+static int draws_until_free(game_clock_t* clock, int moving, int limit) {
+    unsigned taken = 0;
+    int draws;
+    for (draws = 1; draws <= limit; draws++) {
+        const uint64_t ns = moving ? game_clock_read(clock) : game_clock_now(clock);
+        const unsigned slot = seeded_draw((uint32_t)(ns / 1000u));
+        if (draws == 1)
+            taken = slot; /* the first slot drawn is taken */
+        else if (slot != taken)
+            return draws;
+    }
+    return limit;
+}
+
+static game_clock_t read_clock;
+static retro_atomic_int_t read_stop;
+static retro_atomic_int_t read_bad;
+static retro_atomic_64_t read_seen[4][4096];
+
+static void reader(void* data) {
+    const int me = (int)(size_t)data;
+    uint64_t last = 0;
+    int n = 0;
+    while (!retro_atomic_load_acquire_int(&read_stop)) {
+        const uint64_t end_before = game_clock_frame_end(&read_clock);
+        const uint64_t t = game_clock_read(&read_clock);
+        if (t < last || t > game_clock_frame_end(&read_clock))
+            retro_atomic_fetch_add_int(&read_bad, 1);
+        last = t;
+        /* Kept: the times told short of a frame's end, which no two reads are told */
+        if (n < 4096 && t < end_before)
+            retro_atomic_store_release_64(&read_seen[me][n++], (int64_t)t);
+    }
+}
+
+static void read_test(void) {
+    game_clock_t* c = &read_clock;
+    sthread_t* threads[4];
+    uint64_t t, end;
+    int i, j, a, b, twice = 0;
+
+    game_clock_init(c, 60, 1);
+    CHECK(game_clock_read(c) == 0, "told 0 before the first frame");
+    CHECK(game_clock_read(c) == 0, "and again: no frame, no time");
+    game_clock_frame(c);
+    end = game_clock_frame_end(c);
+    t = game_clock_read(c);
+    CHECK(t == GAME_CLOCK_READ_STEP, "the first read of a frame: a microsecond in");
+    CHECK(game_clock_read(c) == t + GAME_CLOCK_READ_STEP, "the next: a microsecond on");
+    CHECK(game_clock_now(c) == 0, "the time itself has not moved");
+    /* The game's draw ends on the time it is told, never on the time that stands */
+    CHECK(draws_until_free(c, 1, 100000) == 2, "a draw seeded from the clock ends at its second");
+    CHECK(draws_until_free(c, 0, 100000) == 100000, "on the standing time it never ends");
+    /* The time moves past what was told: told the time */
+    game_clock_advance(c, 5000000);
+    CHECK(game_clock_read(c) == 5000000, "never behind the time");
+    CHECK(game_clock_read(c) == 5000000 + GAME_CLOCK_READ_STEP, "and on from there");
+    /* A frame's reads end at the frame's end and stand there */
+    for (i = 0; i < 20000; i++)
+        t = game_clock_read(c);
+    CHECK(t == end, "a frame's reads reach its end");
+    CHECK(game_clock_read(c) == end, "and stand there");
+    CHECK(game_clock_now(c) == 5000000, "the time still where the game's threads left it");
+    game_clock_frame(c);
+    CHECK(game_clock_read(c) == end + GAME_CLOCK_READ_STEP, "the next frame: on again");
+    CHECK(game_clock_read(c) <= game_clock_frame_end(c), "within it");
+
+    /* Four threads reading while frames start */
+    retro_atomic_int_init(&read_stop, 0);
+    retro_atomic_int_init(&read_bad, 0);
+    for (i = 0; i < 4; i++)
+        for (j = 0; j < 4096; j++)
+            retro_atomic_64_init(&read_seen[i][j], 0);
+    for (i = 0; i < 4; i++)
+        threads[i] = sthread_create(reader, (void*)(size_t)i);
+    for (i = 0; i < 200; i++) {
+        game_clock_frame(c);
+        sthread_yield();
+    }
+    retro_atomic_store_release_int(&read_stop, 1);
+    for (i = 0; i < 4; i++)
+        sthread_join(threads[i]);
+    CHECK(retro_atomic_load_acquire_int(&read_bad) == 0,
+          "threads: never back, never past the frame's end");
+    /* No time told twice, unless it is a frame's end (where the reads stand) */
+    for (a = 0; a < 4; a++)
+        for (b = a + 1; b < 4; b++)
+            for (i = 0; i < 4096; i += 7)
+                for (j = 0; j < 4096; j++) {
+                    const uint64_t x = (uint64_t)retro_atomic_load_acquire_64(&read_seen[a][i]);
+                    const uint64_t y = (uint64_t)retro_atomic_load_acquire_64(&read_seen[b][j]);
+                    if (x != 0 && x == y)
+                        twice++;
+                }
+    CHECK(twice == 0, "threads: no time within a frame told twice");
+    retro_eventcount_free(&c->parked_ec);
+}
+
 int main(void) {
     sthread_t* threads[THREADS];
     uint64_t t;
@@ -409,6 +522,7 @@ int main(void) {
 
     timers_test();
     in_flight_test();
+    read_test();
 
     if (failures) {
         printf("game_clock: %d failed\n", failures);

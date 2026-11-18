@@ -54,6 +54,7 @@ typedef struct game_clock_thread {
 
 typedef struct game_clock {
     retro_atomic_64_t now;       /* the time */
+    retro_atomic_64_t read;      /* the last time the game was told (game_clock_read) */
     retro_atomic_64_t frame_end; /* the most the time may reach before the next frame */
     retro_atomic_64_t frames;    /* frames started */
     uint64_t period;             /* a frame's whole nanoseconds */
@@ -127,6 +128,19 @@ uint64_t game_clock_cadence(game_clock_t* clock, uint64_t* start, uint64_t* coun
 
 /* The time now */
 uint64_t game_clock_now(game_clock_t* clock);
+
+/* The time as the game is told it when it asks (its clock functions): the time now, and a
+ * microsecond on from what it was last told while the time has not moved, up to the frame's
+ * end. The time itself stands while the game's threads run, and a game takes a clock read
+ * twice in a row to give two times: one that seeds a random draw from the clock, draws again
+ * until it likes the result, each draw one call deeper, never ended on a time that stood
+ * (Dead or Alive Xtreme 3 Fortune: its stack ran over the sound engine's objects). A
+ * microsecond is the unit of the coarsest of those functions. Reads move nothing else: no
+ * deadline comes sooner for them, and a frame's reads never tell a time past the frame's end,
+ * so the pace is still the frames'. Never back, whichever thread asks; once a frame's reads
+ * have reached its end they stand there until the next frame. */
+#define GAME_CLOCK_READ_STEP 1000u
+uint64_t game_clock_read(game_clock_t* clock);
 
 /* The end of the frame under way */
 uint64_t game_clock_frame_end(game_clock_t* clock);

@@ -11,6 +11,7 @@ void game_clock_init(game_clock_t* clock, unsigned fps_num, unsigned fps_den) {
     if (!fps_num)
         fps_num = 60;
     retro_atomic_64_init(&clock->now, 0);
+    retro_atomic_64_init(&clock->read, 0);
     retro_atomic_64_init(&clock->frame_end, 0);
     retro_atomic_64_init(&clock->frames, 0);
     retro_eventcount_init(&clock->parked_ec);
@@ -192,6 +193,23 @@ void game_clock_frame(game_clock_t* clock) {
 
 uint64_t game_clock_now(game_clock_t* clock) {
     return (uint64_t)retro_atomic_load_acquire_64(&clock->now);
+}
+
+uint64_t game_clock_read(game_clock_t* clock) {
+    for (;;) {
+        const int64_t last = retro_atomic_load_acquire_64(&clock->read);
+        const uint64_t now = (uint64_t)retro_atomic_load_acquire_64(&clock->now);
+        const uint64_t end = (uint64_t)retro_atomic_load_acquire_64(&clock->frame_end);
+        uint64_t next = (uint64_t)last + GAME_CLOCK_READ_STEP;
+        if (next > end)
+            next = end;
+        if (next < (uint64_t)last)
+            next = (uint64_t)last; /* never back */
+        if (next < now)
+            next = now; /* never behind the time */
+        if (next == (uint64_t)last || retro_atomic_cas_64(&clock->read, last, (int64_t)next))
+            return next;
+    }
 }
 
 uint64_t game_clock_frame_end(game_clock_t* clock) {
