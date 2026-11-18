@@ -503,8 +503,6 @@ set(SYSTEM_LIBS src/core/libraries/system/commondialog.cpp
                 src/core/libraries/video_recording/video_recording_error.h
                 src/core/libraries/invitation_dialog/invitation_dialog.cpp
                 src/core/libraries/invitation_dialog/invitation_dialog.h
-                src/core/libraries/invitation_dialog/invitation_dialog_ui.cpp
-                src/core/libraries/invitation_dialog/invitation_dialog_ui.h
 )
 
 set(VIDEOOUT_LIB src/core/libraries/videoout/buffer.h
@@ -1205,6 +1203,7 @@ set(VIDEO_CORE src/video_core/amdgpu/cb_db_extent.h
                src/video_core/overlay/ovl_profile.c
                src/video_core/overlay/ovl_savedialog.c
                src/video_core/overlay/ovl_shadnet.c
+               src/video_core/overlay/ovl_invdialog.c
                src/video_core/overlay/ovl_invite.c
                src/video_core/overlay/ovl_notify.c
                src/video_core/overlay/ovl_splash.c

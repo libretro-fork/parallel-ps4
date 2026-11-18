@@ -263,6 +263,62 @@ void ovl_store_icon_set_layout(int layout);
 void ovl_store_icon_draw(void);
 int ovl_store_icon_active(void);
 
+/* The invitation dialog (ovl_invdialog.c), libSceInvitationDialog's: to send a session's
+ * invitation to friends the player ticks or the game fixed, or to answer the invitations
+ * waiting. Its modes are libSceInvitationDialog's, the status and the result CommonDialog's.
+ * The game's thread opens it (its texts copied) and may close it; the overlay's thread draws
+ * it and closes it. */
+enum { OVL_INVDLG_MODE_SEND = 1, OVL_INVDLG_MODE_RECV = 2 };
+enum { OVL_INVDLG_RESULT_OK = 0, OVL_INVDLG_RESULT_USER_CANCELED = 1 };
+#define OVL_INVDLG_FRIENDS 128 /* the friends listed at most */
+#define OVL_INVDLG_INVITES 32  /* the invitations listed at most */
+#define OVL_INVDLG_FIXED 16    /* ORBIS_INVITATION_DIALOG_ADDRESS_USER_LIST_MAX_SIZE */
+#define OVL_INVDLG_SENT 16     /* and as many reported sent to */
+typedef struct ovl_invdlg_invite {
+    const char* invitation_id; /* up to 63 bytes */
+    const char* from_npid;     /* up to 31; empty when unknown */
+} ovl_invdlg_invite_t;
+typedef struct ovl_invdlg_friend {
+    char npid[32];
+    int online;
+} ovl_invdlg_friend_t;
+typedef struct ovl_invitation_dialog_param {
+    int mode;
+    int user_id;
+    /* To send */
+    int user_editable;           /* the player ticks friends; else the game's list below */
+    const char* session_id;      /* up to 47 bytes */
+    const char* message;         /* up to 512 */
+    const char* const* fixed_to; /* the game's recipients: online ids, or account numbers */
+    int fixed_count;
+    /* To receive: the invitations waiting */
+    const ovl_invdlg_invite_t* invites;
+    int invite_count;
+} ovl_invitation_dialog_param_t;
+void ovl_invitation_dialog_init(void);
+void ovl_invitation_dialog_shutdown(void);
+int ovl_invitation_dialog_status(void);
+void ovl_invitation_dialog_set_status(int status);
+void ovl_invitation_dialog_open(const ovl_invitation_dialog_param_t* param);
+/* The game's: finishes it with @result if it runs; 0 if it did not */
+int ovl_invitation_dialog_close(int result);
+int ovl_invitation_dialog_result(void);
+/* Once finished: -1 if nothing was sent, else the friends ticked that it was sent to (@npids
+ * filled, up to @max; 0 when the recipients were the game's own) */
+int ovl_invitation_dialog_sent(const char** npids, int max);
+void ovl_invitation_dialog_draw(void);
+int ovl_invitation_dialog_active(void);
+/* The core's, called on the overlay's thread, none of them waiting on the server: the user's
+ * friends, now (@out filled, up to @max; how many); an invitation sent to @to, or accepted,
+ * the outcome told later with @token; one declined */
+int ovl_invitation_dialog_friends(int user_id, ovl_invdlg_friend_t* out, int max);
+void ovl_invitation_dialog_send(int user_id, const char* session_id, const char* message,
+                                const char* const* to, int count, unsigned token);
+void ovl_invitation_dialog_accept(int user_id, const char* invitation_id, unsigned token);
+void ovl_invitation_dialog_decline(int user_id, const char* invitation_id);
+/* From any thread: how the request numbered @token went */
+void ovl_invitation_dialog_request_done(unsigned token, int ok);
+
 /* shadNet's notifications (ovl_shadnet.c): queued from any thread, a kind and its text (copied,
  * up to 511 bytes); 0 when too many are waiting. Up to six show, newest first. */
 enum {

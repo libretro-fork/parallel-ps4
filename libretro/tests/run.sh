@@ -283,6 +283,7 @@ OVL="src/video_core/overlay/ovl_draw.c src/video_core/overlay/ovl_font.c \
      src/video_core/overlay/ovl_fps.c src/video_core/overlay/ovl_msgdialog.c \
      src/video_core/overlay/ovl_notify.c src/video_core/overlay/ovl_savedialog.c \
      src/video_core/overlay/ovl_profile.c src/video_core/overlay/ovl_commerce.c \
+     src/video_core/overlay/ovl_invdialog.c \
      src/video_core/overlay/ovl_shadnet.c src/video_core/overlay/ovl_invite.c \
      src/video_core/overlay/ovl_splash.c src/video_core/overlay/ovl_tex.c \
      src/video_core/overlay/ovl_trophy.c \
@@ -346,4 +347,13 @@ for san in address,undefined thread; do
         -I$L/include libretro/tests/ovl_commerce_test.c $OVL \
         -o "$OUT/ovl_commerce_test" -lm -lpthread
     "$OUT/ovl_commerce_test"
+done
+# The invitation dialog across threads: a game thread opening dialogs to send and to receive,
+# closing some; the overlay's thread drawing and pressing cross; a server thread answering the
+# requests, some refused, some twice; each finished once, a late answer changing nothing
+for san in address,undefined thread; do
+    $CC -std=gnu89 -O1 -g -Wall -Wdeclaration-after-statement -fsanitize=$san -I. -Isrc \
+        -I$L/include libretro/tests/ovl_invdialog_test.c $OVL \
+        -o "$OUT/ovl_invdialog_test" -lm -lpthread
+    "$OUT/ovl_invdialog_test"
 done

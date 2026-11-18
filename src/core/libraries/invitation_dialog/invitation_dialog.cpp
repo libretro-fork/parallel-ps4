@@ -1,7 +1,11 @@
 // SPDX-FileCopyrightText: Copyright 2026 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include <algorithm>
 #include <cstring>
+#include <string>
+#include <thread>
+#include <vector>
 #include <fmt/format.h>
 #include "common/enum_names.h"
 
@@ -10,28 +14,116 @@
 #include "core/libraries/invitation_dialog/invitation_dialog.h"
 #include "core/libraries/libs.h"
 #include "core/libraries/np/np_handler/np_handler.h"
-#include "invitation_dialog_ui.h"
+#include "core/libraries/system/commondialog.h"
+#include "video_core/overlay/ovl_layers.h"
 
 namespace Libraries::InvitationDialog {
 
-static auto g_status = Libraries::CommonDialog::Status::NONE;
-static InvitationDialogUi g_dialog_ui;
+// The dialog is the overlay's (video_core/overlay/ovl_invdialog.c): its status, what the player
+// chose and whether an invitation was sent are kept there, among the game's thread and the
+// overlay's. This is the game's thread's alone: what it opened the dialog with, and what
+// GetResult()/GetResultA() hand back, taken from the overlay once it is finished.
+struct DialogState {
+    s32 mode = ORBIS_INVITATION_DIALOG_MODE_INVALID;
+    CommonDialog::Result result = CommonDialog::Result::OK;
+    bool user_editable = false; // USERENABLE recipient list (the player ticks friends)
+    void* callback_arg = nullptr;
+    s32 error_code = 0;
+    // USERDISABLE fixed recipient lists resolved at Open. Only one is populated per dialog:
+    // online IDs (non-A path) or account IDs (A accountIds path).
+    std::vector<Libraries::Np::OrbisNpOnlineId> online_ids;
+    std::vector<Libraries::Np::OrbisNpAccountId> account_ids;
+    // Recipients actually sent (SEND mode), echoed back by GetResult/GetResultA. Online IDs come
+    // from the picker or the non-A fixed list; account IDs from the A fixed list.
+    std::vector<std::string> sent_online_ids;
+    std::vector<Libraries::Np::OrbisNpAccountId> sent_account_ids;
+};
 static DialogState g_state;
+
+static Libraries::CommonDialog::Status DialogStatus() {
+    return static_cast<Libraries::CommonDialog::Status>(ovl_invitation_dialog_status());
+}
+
+static std::string OnlineIdText(const Libraries::Np::OrbisNpOnlineId& oid) {
+    size_t n = 0;
+    while (n < sizeof(oid.data) && oid.data[n] != '\0') {
+        n++;
+    }
+    return std::string(oid.data, n);
+}
+
+// The finished dialog's result and who it sent to, for GetResult()/GetResultA()
+static void TakeResult() {
+    g_state.result = static_cast<CommonDialog::Result>(ovl_invitation_dialog_result());
+    g_state.sent_online_ids.clear();
+    g_state.sent_account_ids.clear();
+    const char* picked[OVL_INVDLG_SENT];
+    const int n = ovl_invitation_dialog_sent(picked, OVL_INVDLG_SENT);
+    if (n < 0) {
+        return; // nothing sent
+    }
+    if (g_state.user_editable) {
+        g_state.sent_online_ids.assign(picked, picked + n);
+    } else {
+        for (const auto& oid : g_state.online_ids) {
+            g_state.sent_online_ids.push_back(OnlineIdText(oid));
+        }
+    }
+    g_state.sent_account_ids = g_state.account_ids;
+}
+
+// Opens the overlay's dialog with what g_state was just given, and for SEND the session and
+// message, for RECV the invitations waiting for the user
+static void OpenOverlayDialog(
+    s32 user_id, const char* session_id, const char* message,
+    const std::vector<Libraries::Np::NpHandler::PendingInvitation>& pend) {
+    ovl_invitation_dialog_param_t shown{};
+    shown.mode = g_state.mode;
+    shown.user_id = user_id;
+    shown.user_editable = g_state.user_editable;
+    shown.session_id = session_id;
+    shown.message = message;
+    // The game's own recipients, as the server takes them: online ids, or account numbers
+    std::vector<std::string> fixed;
+    for (const auto& oid : g_state.online_ids) {
+        fixed.push_back(OnlineIdText(oid));
+    }
+    for (const auto id : g_state.account_ids) {
+        fixed.push_back(std::to_string(id));
+    }
+    const char* fixed_to[OVL_INVDLG_FIXED];
+    for (;
+         shown.fixed_count < static_cast<int>(fixed.size()) && shown.fixed_count < OVL_INVDLG_FIXED;
+         shown.fixed_count++) {
+        fixed_to[shown.fixed_count] = fixed[shown.fixed_count].c_str();
+    }
+    shown.fixed_to = fixed_to;
+    ovl_invdlg_invite_t invites[OVL_INVDLG_INVITES];
+    for (; shown.invite_count < static_cast<int>(pend.size()) &&
+           shown.invite_count < OVL_INVDLG_INVITES;
+         shown.invite_count++) {
+        invites[shown.invite_count].invitation_id = pend[shown.invite_count].invitation_id.c_str();
+        invites[shown.invite_count].from_npid = pend[shown.invite_count].from_npid.c_str();
+    }
+    shown.invites = invites;
+    ovl_invitation_dialog_open(&shown);
+}
 
 s32 PS4_SYSV_ABI sceInvitationDialogGetResultA(OrbisInvitationDialogResultA* result) {
     LOG_DEBUG(Lib_InvitationDialog, "Getting invitation dialog result (async), result ptr={}",
               fmt::ptr(result));
 
-    if (g_status == Libraries::CommonDialog::Status::NONE) {
+    if (DialogStatus() == Libraries::CommonDialog::Status::NONE) {
         return static_cast<s32>(Libraries::CommonDialog::Error::NOT_INITIALIZED);
     }
-    if (g_status != Libraries::CommonDialog::Status::FINISHED) {
+    if (DialogStatus() != Libraries::CommonDialog::Status::FINISHED) {
         return static_cast<s32>(Libraries::CommonDialog::Error::NOT_FINISHED);
     }
     if (result == nullptr) {
         return static_cast<s32>(Libraries::CommonDialog::Error::ARG_NULL);
     }
 
+    TakeResult();
     if (g_state.error_code != 0) {
         LOG_ERROR(Lib_InvitationDialog, "errorCode {} block all players", g_state.error_code);
         return ORBIS_INVITATION_DIALOG_ERROR_BLOCKED_ALL_PLAYERS;
@@ -132,17 +224,20 @@ sceInvitationDialogOpenA(const OrbisInvitationDialogParamA* param) {
     }
 
     // Check initialization state
-    if (g_status != Libraries::CommonDialog::Status::INITIALIZED &&
-        g_status != Libraries::CommonDialog::Status::FINISHED) {
-        LOG_INFO(Lib_InvitationDialog, "Called without proper initialization (status={})",
-                 enum_name(&enum_names_Libraries_CommonDialog_Status, static_cast<s64>(g_status)));
+    if (DialogStatus() != Libraries::CommonDialog::Status::INITIALIZED &&
+        DialogStatus() != Libraries::CommonDialog::Status::FINISHED) {
+        LOG_INFO(
+            Lib_InvitationDialog, "Called without proper initialization (status={})",
+            enum_name(&enum_names_Libraries_CommonDialog_Status, static_cast<s64>(DialogStatus())));
         return Libraries::CommonDialog::Error::INVALID_STATE;
     }
 
+    const char* session_id = nullptr;
+    const char* message = nullptr;
+    std::vector<Libraries::Np::NpHandler::PendingInvitation> pend;
     g_state = DialogState{};
     g_state.mode = param->mode;
     g_state.callback_arg = param->callbackArg;
-    g_state.user_id = param->userId;
 
     if (param->mode == ORBIS_INVITATION_DIALOG_MODE_SEND) {
         if (param->dataParam == nullptr) {
@@ -150,10 +245,10 @@ sceInvitationDialogOpenA(const OrbisInvitationDialogParamA* param) {
         }
         const auto& send = param->dataParam->SendInfo;
         if (send.sessionId != nullptr) {
-            g_state.session_id = send.sessionId->data;
+            session_id = send.sessionId->data;
         }
         if (send.userMessage != nullptr) {
-            g_state.message = send.userMessage;
+            message = send.userMessage;
         }
         // USERDISABLE: the app fixes the recipient list up front (account IDs). USERENABLE: the
         // user picks them in the dialog via the searchable friend picker.
@@ -171,17 +266,14 @@ sceInvitationDialogOpenA(const OrbisInvitationDialogParamA* param) {
             }
         }
         LOG_INFO(Lib_InvitationDialog, "OpenA(SEND) user={} sessionId='{}' recipients={}",
-                 param->userId, g_state.session_id, g_state.account_ids.size());
+                 param->userId, session_id ? session_id : "", g_state.account_ids.size());
     } else {
-        g_state.recv_invitations =
-            Libraries::Np::NpHandler::GetInstance().GetPendingInvitations(param->userId);
-        g_state.recv_selected = g_state.recv_invitations.empty() ? -1 : 0;
+        pend = Libraries::Np::NpHandler::GetInstance().GetPendingInvitations(param->userId);
         LOG_INFO(Lib_InvitationDialog, "OpenA(RECV) user={} pending={}", param->userId,
-                 g_state.recv_invitations.size());
+                 pend.size());
     }
 
-    g_status = Libraries::CommonDialog::Status::RUNNING;
-    g_dialog_ui = InvitationDialogUi{&g_status, &g_state};
+    OpenOverlayDialog(param->userId, session_id, message, pend);
     return Libraries::CommonDialog::Error::OK;
 }
 
@@ -189,8 +281,8 @@ Libraries::CommonDialog::Error PS4_SYSV_ABI
 sceInvitationDialogOpen(const OrbisInvitationDialogParam* param) {
     LOG_DEBUG(Lib_InvitationDialog, "Opening invitation dialog, param ptr={}", fmt::ptr(param));
 
-    if (g_status != Libraries::CommonDialog::Status::INITIALIZED &&
-        g_status != Libraries::CommonDialog::Status::FINISHED) {
+    if (DialogStatus() != Libraries::CommonDialog::Status::INITIALIZED &&
+        DialogStatus() != Libraries::CommonDialog::Status::FINISHED) {
         LOG_ERROR(Lib_InvitationDialog, "called without initialize");
         return Libraries::CommonDialog::Error::INVALID_STATE;
     }
@@ -250,10 +342,12 @@ sceInvitationDialogOpen(const OrbisInvitationDialogParam* param) {
         }
     }
 
+    const char* session_id = nullptr;
+    const char* message = nullptr;
+    std::vector<Libraries::Np::NpHandler::PendingInvitation> pend;
     g_state = DialogState{};
     g_state.mode = param->mode;
     g_state.callback_arg = param->callbackArg;
-    g_state.user_id = param->userId;
 
     if (param->mode == ORBIS_INVITATION_DIALOG_MODE_SEND) {
         if (param->dataParam == nullptr) {
@@ -261,10 +355,10 @@ sceInvitationDialogOpen(const OrbisInvitationDialogParam* param) {
         }
         const auto& send = param->dataParam->SendInfo;
         if (send.sessionId != nullptr) {
-            g_state.session_id = send.sessionId->data;
+            session_id = send.sessionId->data;
         }
         if (send.userMessage != nullptr) {
-            g_state.message = send.userMessage;
+            message = send.userMessage;
         }
         // USERDISABLE: the app fixes the recipient list up front. USERENABLE: the user picks them
         // in the dialog via the searchable friend picker.
@@ -282,17 +376,13 @@ sceInvitationDialogOpen(const OrbisInvitationDialogParam* param) {
             }
         }
         LOG_INFO(Lib_InvitationDialog, "Open(SEND) user={} sessionId='{}' recipients={}",
-                 param->userId, g_state.session_id, g_state.online_ids.size());
+                 param->userId, session_id ? session_id : "", g_state.online_ids.size());
     } else {
-        auto pend = Libraries::Np::NpHandler::GetInstance().GetPendingInvitations(param->userId);
-        g_state.recv_invitations = std::move(pend);
-        g_state.recv_selected = g_state.recv_invitations.empty() ? -1 : 0;
-        LOG_INFO(Lib_InvitationDialog, "Open(RECV) user={} pending={}", param->userId,
-                 g_state.recv_invitations.size());
+        pend = Libraries::Np::NpHandler::GetInstance().GetPendingInvitations(param->userId);
+        LOG_INFO(Lib_InvitationDialog, "Open(RECV) user={} pending={}", param->userId, pend.size());
     }
 
-    g_status = Libraries::CommonDialog::Status::RUNNING;
-    g_dialog_ui = InvitationDialogUi{&g_status, &g_state};
+    OpenOverlayDialog(param->userId, session_id, message, pend);
     return Libraries::CommonDialog::Error::OK;
 }
 
@@ -300,16 +390,17 @@ s32 PS4_SYSV_ABI sceInvitationDialogGetResult(OrbisInvitationDialogResult* resul
     LOG_DEBUG(Lib_InvitationDialog, "Getting invitation dialog result, result ptr={}",
               fmt::ptr(result));
 
-    if (g_status == Libraries::CommonDialog::Status::NONE) {
+    if (DialogStatus() == Libraries::CommonDialog::Status::NONE) {
         return static_cast<s32>(Libraries::CommonDialog::Error::NOT_INITIALIZED);
     }
-    if (g_status != Libraries::CommonDialog::Status::FINISHED) {
+    if (DialogStatus() != Libraries::CommonDialog::Status::FINISHED) {
         return static_cast<s32>(Libraries::CommonDialog::Error::NOT_FINISHED);
     }
     if (result == nullptr) {
         return static_cast<s32>(Libraries::CommonDialog::Error::ARG_NULL);
     }
 
+    TakeResult();
     if (g_state.error_code != 0) {
         LOG_ERROR(Lib_InvitationDialog, "errorCode {} block all players", g_state.error_code);
         return ORBIS_INVITATION_DIALOG_ERROR_BLOCKED_ALL_PLAYERS;
@@ -354,50 +445,57 @@ s32 PS4_SYSV_ABI sceInvitationDialogGetResult(OrbisInvitationDialogResult* resul
 }
 
 Libraries::CommonDialog::Status PS4_SYSV_ABI sceInvitationDialogUpdateStatus() {
-    LOG_DEBUG(Lib_InvitationDialog, "UpdateStatus called, current status={}",
-              enum_name(&enum_names_Libraries_CommonDialog_Status, static_cast<s64>(g_status)));
-    return g_status;
+    LOG_DEBUG(
+        Lib_InvitationDialog, "UpdateStatus called, current status={}",
+        enum_name(&enum_names_Libraries_CommonDialog_Status, static_cast<s64>(DialogStatus())));
+    return DialogStatus();
 }
 
 Libraries::CommonDialog::Error PS4_SYSV_ABI sceInvitationDialogClose() {
-    LOG_DEBUG(Lib_InvitationDialog, "Closing invitation dialog, current status={}",
-              enum_name(&enum_names_Libraries_CommonDialog_Status, static_cast<s64>(g_status)));
+    LOG_DEBUG(
+        Lib_InvitationDialog, "Closing invitation dialog, current status={}",
+        enum_name(&enum_names_Libraries_CommonDialog_Status, static_cast<s64>(DialogStatus())));
 
-    if (g_status != Libraries::CommonDialog::Status::RUNNING) {
+    if (DialogStatus() != Libraries::CommonDialog::Status::RUNNING) {
         LOG_WARNING(
             Lib_InvitationDialog, "Cannot close dialog: not running (status={})",
-            enum_name(&enum_names_Libraries_CommonDialog_Status, static_cast<s64>(g_status)));
+            enum_name(&enum_names_Libraries_CommonDialog_Status, static_cast<s64>(DialogStatus())));
         return Libraries::CommonDialog::Error::NOT_RUNNING;
     }
 
-    g_dialog_ui.Finish(Libraries::CommonDialog::Result::OK);
+    // Closed on screen at the same moment: finished already, by the player
+    if (!ovl_invitation_dialog_close(OVL_INVDLG_RESULT_OK)) {
+        return Libraries::CommonDialog::Error::NOT_RUNNING;
+    }
     return Libraries::CommonDialog::Error::OK;
 }
 
 Libraries::CommonDialog::Error PS4_SYSV_ABI sceInvitationDialogTerminate() {
-    LOG_DEBUG(Lib_InvitationDialog, "Terminating invitation dialog system, current status={}",
-              enum_name(&enum_names_Libraries_CommonDialog_Status, static_cast<s64>(g_status)));
+    LOG_DEBUG(
+        Lib_InvitationDialog, "Terminating invitation dialog system, current status={}",
+        enum_name(&enum_names_Libraries_CommonDialog_Status, static_cast<s64>(DialogStatus())));
 
-    if (g_status == Libraries::CommonDialog::Status::RUNNING) {
+    if (DialogStatus() == Libraries::CommonDialog::Status::RUNNING) {
         LOG_DEBUG(Lib_InvitationDialog, "Dialog is running, closing before termination");
         sceInvitationDialogClose();
     }
 
-    if (g_status == Libraries::CommonDialog::Status::NONE) {
+    if (DialogStatus() == Libraries::CommonDialog::Status::NONE) {
         LOG_ERROR(Lib_InvitationDialog, "Cannot terminate: not initialized");
         return Libraries::CommonDialog::Error::NOT_INITIALIZED;
     }
 
-    g_status = Libraries::CommonDialog::Status::NONE;
+    ovl_invitation_dialog_set_status(static_cast<int>(Libraries::CommonDialog::Status::NONE));
     CommonDialog::g_isUsed = false;
     LOG_DEBUG(Lib_InvitationDialog, "Invitation dialog terminated successfully");
     return Libraries::CommonDialog::Error::OK;
 }
 
 Libraries::CommonDialog::Status PS4_SYSV_ABI sceInvitationDialogGetStatus() {
-    LOG_DEBUG(Lib_InvitationDialog, "Getting invitation dialog status: {}",
-              enum_name(&enum_names_Libraries_CommonDialog_Status, static_cast<s64>(g_status)));
-    return g_status;
+    LOG_DEBUG(
+        Lib_InvitationDialog, "Getting invitation dialog status: {}",
+        enum_name(&enum_names_Libraries_CommonDialog_Status, static_cast<s64>(DialogStatus())));
+    return DialogStatus();
 }
 
 Libraries::CommonDialog::Error PS4_SYSV_ABI sceInvitationDialogInitialize() {
@@ -407,9 +505,10 @@ Libraries::CommonDialog::Error PS4_SYSV_ABI sceInvitationDialogInitialize() {
         return Libraries::CommonDialog::Error::NOT_SYSTEM_INITIALIZED;
     }
 
-    if (g_status != Libraries::CommonDialog::Status::NONE) {
-        LOG_ERROR(Lib_InvitationDialog, "Invitation dialog already initialized (status={})",
-                  enum_name(&enum_names_Libraries_CommonDialog_Status, static_cast<s64>(g_status)));
+    if (DialogStatus() != Libraries::CommonDialog::Status::NONE) {
+        LOG_ERROR(
+            Lib_InvitationDialog, "Invitation dialog already initialized (status={})",
+            enum_name(&enum_names_Libraries_CommonDialog_Status, static_cast<s64>(DialogStatus())));
         return Libraries::CommonDialog::Error::ALREADY_INITIALIZED;
     }
 
@@ -418,11 +517,60 @@ Libraries::CommonDialog::Error PS4_SYSV_ABI sceInvitationDialogInitialize() {
         return Libraries::CommonDialog::Error::BUSY;
     }
 
-    g_status = Libraries::CommonDialog::Status::INITIALIZED;
+    ovl_invitation_dialog_set_status(
+        static_cast<int>(Libraries::CommonDialog::Status::INITIALIZED));
     CommonDialog::g_isUsed = true;
     LOG_INFO(Lib_InvitationDialog, "Invitation dialog initialized successfully");
     return Libraries::CommonDialog::Error::OK;
 }
+
+} // namespace Libraries::InvitationDialog
+
+// What the overlay's dialog asks of the core, on the overlay's thread. Sending, accepting and
+// declining hit the shadNet server (blocking HTTP inside NpHandler), so each runs on a thread
+// of its own; the dialog shows itself busy until a send or an acceptance says how it went.
+extern "C" int ovl_invitation_dialog_friends(int user_id, ovl_invdlg_friend_t* out, int max) {
+    const auto list = Libraries::Np::NpHandler::GetInstance().GetFriendList(user_id);
+    int n = 0;
+    for (const auto& f : list.friends) {
+        if (n == max) {
+            break;
+        }
+        const size_t len = std::min(f.npid.size(), sizeof(out[n].npid) - 1);
+        std::memcpy(out[n].npid, f.npid.data(), len);
+        out[n].npid[len] = '\0';
+        out[n].online = f.online;
+        n++;
+    }
+    return n;
+}
+
+extern "C" void ovl_invitation_dialog_send(int user_id, const char* session_id, const char* message,
+                                           const char* const* to, int count, unsigned token) {
+    std::thread([user_id, session = std::string{session_id}, msg = std::string{message},
+                 recipients = std::vector<std::string>(to, to + count), token] {
+        const bool ok = Libraries::Np::NpHandler::GetInstance().SendSessionInvitation(
+            user_id, session, recipients, msg);
+        ovl_invitation_dialog_request_done(token, ok);
+    }).detach();
+}
+
+extern "C" void ovl_invitation_dialog_accept(int user_id, const char* invitation_id,
+                                             unsigned token) {
+    std::thread([user_id, id = std::string{invitation_id}, token] {
+        const bool ok =
+            Libraries::Np::NpHandler::GetInstance().AcceptSessionInvitation(user_id, id);
+        ovl_invitation_dialog_request_done(token, ok);
+    }).detach();
+}
+
+extern "C" void ovl_invitation_dialog_decline(int user_id, const char* invitation_id) {
+    std::thread([user_id, id = std::string{invitation_id}] {
+        Libraries::Np::NpHandler::GetInstance().DeclineSessionInvitation(user_id, id);
+    }).detach();
+}
+
+namespace Libraries::InvitationDialog {
 
 void RegisterLib(Core::Loader::SymbolsResolver* sym) {
     LIB_FUNCTION("WWtCL5lzi7Y", "libSceInvitationDialog", 1, "libSceInvitationDialog",

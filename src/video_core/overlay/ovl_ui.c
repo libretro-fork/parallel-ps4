@@ -76,6 +76,9 @@ typedef struct window {
     int focus_order;
     float font_ref_size;
     int id_stack_base;
+    /* The child begun last in it this frame: whether there is one, and its rectangle */
+    int has_prev_child;
+    float prev_child[4];
 } window_t;
 
 /* A result of a navigation request, as ImGui's ImGuiNavItemData */
@@ -995,10 +998,23 @@ static void nav_cancel(int gamepad) {
     if (!key_pressed(OVL_KEY_ESCAPE, 0, 0) &&
         !(gamepad && key_pressed(OVL_KEY_PAD_FACE_RIGHT, 0, 0)))
         return;
-    if (g.active_id)
+    if (g.active_id) {
         clear_active_id();
-    else
+    } else if (g.nav_window && g.nav_window->is_child && root_for_nav(g.nav_window)->parent) {
+        /* Out of a child window: the focus back on it, as its parent's item */
+        window_t* child = root_for_nav(g.nav_window);
+        window_t* parent = child->parent;
+        rect_t r;
+        r.x0 = child->pos.x;
+        r.y0 = child->pos.y;
+        r.x1 = child->pos.x + child->size.x;
+        r.y1 = child->pos.y + child->size.y;
+        focus_window(parent);
+        set_nav_id(child->child_id, rect_abs_to_rel(parent, r));
+        set_nav_cursor_visible_after_move();
+    } else {
         g.nav_id = 0;
+    }
 }
 
 /* ImGui's NavBiasScoringRect */
@@ -1400,7 +1416,7 @@ static void set_scroll_x(window_t* w, float x) {
 
 /* ImGui's Scrollbar(ImGuiAxis_Y) and ScrollbarEx, as drawn (the overlays have no mouse to drag
  * it with) */
-static void draw_scrollbar_y(window_t* w) {
+static void draw_scrollbar_y(window_t* w, ovl_draw_list_t* dl) {
     const float border = (float)floor(w->border_size * 0.5f + 0.5f);
     float f[4], b[4], frame_w, frame_h, alpha = 1.0f, pad, size_v, grab_min, grab_h, grab_v;
     long size_visible, size_contents, win_size, scroll_max;
@@ -1437,11 +1453,11 @@ static void draw_scrollbar_y(window_t* w) {
     scroll_max = size_contents - size_visible > 1 ? size_contents - size_visible : 1;
     scroll_ratio = minf(maxf((float)(long)w->scroll.y / (float)scroll_max, 0.0f), 1.0f);
     grab_v = scroll_ratio * (size_v - grab_h) / size_v;
-    ovl_add_rect_filled(&w->dl, v2(f[0], f[1]), v2(f[2], f[3]),
+    ovl_add_rect_filled(dl, v2(f[0], f[1]), v2(f[2], f[3]),
                         ovl_color_u32(OVL_COLOR_SCROLLBAR_BG, 1.0f), w->rounding, OVL_CORNERS_ALL);
     {
         const float y0 = b[1] + (b[3] - b[1]) * grab_v;
-        ovl_add_rect_filled(&w->dl, v2(b[0], y0), v2(b[2], y0 + grab_h),
+        ovl_add_rect_filled(dl, v2(b[0], y0), v2(b[2], y0 + grab_h),
                             ovl_color_u32(OVL_COLOR_SCROLLBAR_GRAB, alpha),
                             g.style.scrollbar_rounding, 0);
     }
@@ -1646,9 +1662,28 @@ static int begin_window(const char* name, unsigned flags, window_t* parent, ovl_
     /* As ImGui: a window begun with the style's alpha at 0 is not drawn this frame */
     w->skip = g.style.alpha <= 0.0f;
     if (w->hidden_frames == 0 && !w->skip) {
+        /* A child's background, scrollbar and border go into its parent's list, as ImGui's
+         * (render_decorations_in_parent): under what the parent draws after it, where the child's
+         * own list is over all of the parent's. Unless the parent has drawn nothing yet, or the
+         * child begun before this one overlaps it. */
+        ovl_draw_list_t* deco = &w->dl;
         ovl_vec2_t mx;
         mx.x = w->pos.x + w->size.x;
         mx.y = w->pos.y + w->size.y;
+        if (parent) {
+            const int overlapping = parent->has_prev_child && w->pos.x < parent->prev_child[2] &&
+                                    mx.x > parent->prev_child[0] &&
+                                    w->pos.y < parent->prev_child[3] &&
+                                    mx.y > parent->prev_child[1];
+            if (parent->dl.vtx.size != 0 && !overlapping)
+                deco = &parent->dl;
+            parent->has_prev_child = 1;
+            parent->prev_child[0] = w->pos.x;
+            parent->prev_child[1] = w->pos.y;
+            parent->prev_child[2] = mx.x;
+            parent->prev_child[3] = mx.y;
+        }
+        w->has_prev_child = 0;
         if (!(flags & OVL_WINDOW_NO_BACKGROUND)) {
             ovl_col_t bg = parent ? ovl_color_u32(OVL_COLOR_CHILD_BG, 1.0f)
                                   : ovl_color_u32(OVL_COLOR_WINDOW_BG, 1.0f);
@@ -1656,13 +1691,13 @@ static int begin_window(const char* name, unsigned flags, window_t* parent, ovl_
                 bg = (bg & 0x00FFFFFFu) |
                      ((ovl_col_t)(minf(maxf(bg_alpha, 0.0f), 1.0f) * 255.0f + 0.5f) << 24);
             }
-            ovl_add_rect_filled(&w->dl, w->pos, mx, bg, w->rounding, 0);
+            ovl_add_rect_filled(deco, w->pos, mx, bg, w->rounding, 0);
         }
         if (w->scrollbar_y)
-            draw_scrollbar_y(w);
+            draw_scrollbar_y(w, deco);
         /* No border on a window without a background, as ImGui (RenderWindowOuterBorders) */
         if (w->border_size > 0.0f && !(flags & OVL_WINDOW_NO_BACKGROUND))
-            ovl_add_rect(&w->dl, w->pos, mx, ovl_color_u32(OVL_COLOR_BORDER, 1.0f), w->rounding, 0,
+            ovl_add_rect(deco, w->pos, mx, ovl_color_u32(OVL_COLOR_BORDER, 1.0f), w->rounding, 0,
                          w->border_size);
     }
     ovl_push_clip(&w->dl, v2(w->clip[0], w->clip[1]), v2(w->clip[2], w->clip[3]), parent != NULL);
@@ -1717,6 +1752,23 @@ int ovl_begin_child(const char* id, ovl_vec2_t size, unsigned child_flags, unsig
     ok = begin_window(name, flags | OVL_WINDOW_NO_TITLE_BAR, parent, size, (int)child_flags);
     g.current->order = parent->order;
     g.current->child_id = hid;
+    /* Entered when it is pressed as its parent's item, if it has items or scrolls and is not
+     * flattened into the parent (ImGui's BeginChildEx): the focus goes to it and to an item of
+     * its own. An id of no item is made the active one, so that the press does not also press
+     * the item the focus lands on; it lapses by itself. */
+    {
+        window_t* child = g.current;
+        const uint32_t entering = hash_str("##Child", NULL, hid);
+        if (g.active_id == entering)
+            clear_active_id();
+        if (g.nav_activate_id == hid && !(child_flags & OVL_CHILD_NAV_FLATTENED) &&
+            (child->nav_items || child->scroll_max.y > 0.0f)) {
+            focus_window(child);
+            nav_init_window(child);
+            set_active_id(entering, child);
+            g.active_id_source = g.nav_source;
+        }
+    }
     return ok;
 }
 

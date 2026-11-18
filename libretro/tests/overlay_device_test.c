@@ -30,6 +30,7 @@
 #include "../../src/video_core/overlay/ovl_layers.h"
 #include "../../src/video_core/overlay/vk_overlay.h"
 #include "../audio_mix.h"
+#include "ovl_invdialog_stubs.h"
 
 #include <formats/image.h>
 #include <formats/rpng.h>

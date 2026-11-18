@@ -176,8 +176,7 @@ CORE_SOURCES_CXX += $(addprefix src/core/libraries/hmd/,hmd.cpp hmd_distortion.c
 	hmd_reprojection.cpp hmd_setup_dialog.cpp)
 CORE_SOURCES_CXX += $(addprefix src/core/libraries/ime/,error_dialog.cpp ime.cpp ime_dialog.cpp \
 	ime_dialog_ui.cpp ime_kb_layout.cpp ime_ui.cpp ime_ui_shared.cpp)
-CORE_SOURCES_CXX += $(addprefix src/core/libraries/invitation_dialog/,invitation_dialog.cpp \
-	invitation_dialog_ui.cpp)
+CORE_SOURCES_CXX += $(addprefix src/core/libraries/invitation_dialog/,invitation_dialog.cpp)
 CORE_SOURCES_CXX += $(addprefix src/core/libraries/jpeg/,jpegenc.cpp)
 CORE_SOURCES_CXX += $(addprefix src/core/libraries/kernel/,aio.cpp debug.cpp equeue.cpp \
 	file_system.cpp kernel.cpp memory.cpp process.cpp threads.cpp time.cpp)
@@ -314,7 +313,7 @@ CORE_SOURCES_C += $(addprefix src/core/libraries/ult/,ult.c ult_sync.c)
 CORE_SOURCES_C += $(addprefix src/core/libraries/np/np_handler/,np_invitation_json.c)
 CORE_SOURCES_C += $(addprefix src/shadnet/,pb_wire.c shadnet_msg.c)
 CORE_SOURCES_C += $(addprefix src/video_core/host_shaders/,host_spirv.c)
-CORE_SOURCES_C += $(addprefix src/video_core/overlay/,ovl_commerce.c ovl_draw.c ovl_font.c ovl_fps.c ovl_invite.c \
+CORE_SOURCES_C += $(addprefix src/video_core/overlay/,ovl_commerce.c ovl_draw.c ovl_font.c ovl_fps.c ovl_invdialog.c ovl_invite.c \
 	ovl_msgdialog.c ovl_notify.c ovl_profile.c ovl_savedialog.c ovl_shadnet.c ovl_splash.c ovl_tex.c \
 	ovl_trophy.c ovl_ttf.c ovl_ui.c vk_overlay.c)
 CORE_SOURCES_C += $(addprefix src/video_core/renderer_vulkan/,vk_heap.c vk_device_fault.c frame_notes.c)

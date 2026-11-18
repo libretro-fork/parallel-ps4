@@ -25,6 +25,7 @@
 #include "../../src/video_core/overlay/ovl.h"
 #include "../../src/video_core/overlay/ovl_layers.h"
 #include "../audio_mix.h"
+#include "ovl_invdialog_stubs.h"
 
 bool emu_settings_get_show_fps_counter(void) { return false; }
 bool emu_settings_get_trophy_popup_disabled(void) { return false; }

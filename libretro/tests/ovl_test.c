@@ -697,6 +697,190 @@ static void check_widgets(void) {
   ovl_render();
 }
 
+/* The invitation dialog, as ImGui drew it; what it asks of the core is noted
+ * here and answered when the test says */
+static int inv_friend_count;
+static unsigned inv_token;
+static int inv_requests, inv_to_count;
+static char inv_to[4][32], inv_accepted[64], inv_declined[4][64];
+static int inv_declined_count;
+
+int ovl_invitation_dialog_friends(int user_id, ovl_invdlg_friend_t *out, int max) {
+  static const char *const names[] = {"Lantern_99", "Kestrel", "Moth"};
+  int i;
+  (void)user_id;
+  for (i = 0; i < inv_friend_count && i < max; i++) {
+    strcpy(out[i].npid, names[i]);
+    out[i].online = i != 1;
+  }
+  return i;
+}
+void ovl_invitation_dialog_send(int user_id, const char *session_id,
+                                const char *message, const char *const *to,
+                                int count, unsigned token) {
+  int i;
+  (void)user_id;
+  (void)session_id;
+  (void)message;
+  inv_to_count = count;
+  for (i = 0; i < count && i < 4; i++)
+    strcpy(inv_to[i], to[i]);
+  inv_token = token;
+  inv_requests++;
+}
+void ovl_invitation_dialog_accept(int user_id, const char *invitation_id,
+                                  unsigned token) {
+  (void)user_id;
+  strcpy(inv_accepted, invitation_id);
+  inv_token = token;
+  inv_requests++;
+}
+void ovl_invitation_dialog_decline(int user_id, const char *invitation_id) {
+  (void)user_id;
+  if (inv_declined_count < 4)
+    strcpy(inv_declined[inv_declined_count++], invitation_id);
+}
+
+static const ovl_draw_data_t *invitation_frame(enum ovl_key key) {
+  static const enum ovl_key keys[] = {
+      OVL_KEY_PAD_FACE_DOWN, OVL_KEY_PAD_FACE_RIGHT, OVL_KEY_PAD_DPAD_DOWN,
+      OVL_KEY_PAD_DPAD_RIGHT, OVL_KEY_PAD_DPAD_UP};
+  unsigned i;
+  for (i = 0; i < sizeof(keys) / sizeof(keys[0]); i++)
+    ovl_key_event(keys[i], keys[i] == key);
+  ovl_new_frame(1920.0f, 1080.0f, 1.0f / 60.0f);
+  ovl_invitation_dialog_draw();
+  return ovl_render();
+}
+
+/* A press: down two frames, up three */
+static const ovl_draw_data_t *invitation_press(enum ovl_key key) {
+  const ovl_draw_data_t *dd;
+  invitation_frame(key);
+  invitation_frame(key);
+  invitation_frame(OVL_KEY_NONE);
+  invitation_frame(OVL_KEY_NONE);
+  dd = invitation_frame(OVL_KEY_NONE);
+  return dd;
+}
+
+static void check_invitation(void) {
+  static const char *const fixed[] = {"Kestrel", "Moth"};
+  ovl_invdlg_invite_t invites[2];
+  ovl_invitation_dialog_param_t p;
+  const ovl_draw_data_t *dd;
+  const char *sent[OVL_INVDLG_SENT];
+  ovl_invitation_dialog_init();
+  ovl_set_gamepad_connected(1);
+  ovl_invitation_dialog_set_status(1);
+
+  /* To send to the game's own recipients: Send focused; pressed, it shows
+   * itself busy; refused by the server, the dialog is finished all the same,
+   * nobody reported sent to */
+  memset(&p, 0, sizeof(p));
+  p.mode = OVL_INVDLG_MODE_SEND;
+  p.user_id = 1;
+  p.session_id = "session-2";
+  p.fixed_to = fixed;
+  p.fixed_count = 2;
+  inv_friend_count = 3;
+  ovl_invitation_dialog_open(&p);
+  CHECK(ovl_invitation_dialog_status() == 2 && ovl_invitation_dialog_active(),
+        "running, frames drawn while it shows");
+  dd = invitation_frame(OVL_KEY_NONE);
+  CHECK(dd->vtx_count == 244 && dd->idx_count == 504,
+        "the invitation dialog's first frame as ImGui's");
+  dd = invitation_frame(OVL_KEY_NONE);
+  CHECK(dd->vtx_count == 252 && dd->idx_count == 528,
+        "with the focus cursor, as ImGui's");
+  dd = invitation_press(OVL_KEY_PAD_FACE_DOWN);
+  CHECK(inv_requests == 1 && inv_to_count == 2 &&
+            strcmp(inv_to[0], "Kestrel") == 0 && strcmp(inv_to[1], "Moth") == 0,
+        "sent to the game's recipients");
+  CHECK(dd->vtx_count == 268 && dd->idx_count == 540,
+        "busy, as ImGui's: Sending..., both buttons disabled");
+  invitation_press(OVL_KEY_PAD_FACE_DOWN);
+  CHECK(inv_requests == 1 && ovl_invitation_dialog_status() == 2,
+        "not sent twice, not cancelled while it waits");
+  ovl_invitation_dialog_request_done(inv_token + 1, 1);
+  invitation_frame(OVL_KEY_NONE);
+  CHECK(ovl_invitation_dialog_status() == 2, "another request's answer: not this one's");
+  ovl_invitation_dialog_request_done(inv_token, 0);
+  dd = invitation_frame(OVL_KEY_NONE);
+  CHECK(ovl_invitation_dialog_status() == 3 && dd->vtx_count == 0 &&
+            ovl_invitation_dialog_result() == OVL_INVDLG_RESULT_OK &&
+            ovl_invitation_dialog_sent(sent, OVL_INVDLG_SENT) == -1,
+        "finished when answered; refused: nobody sent to");
+
+  /* Friends to tick: up to their list, cross goes into it, cross ticks the
+   * first, circle comes out, down to Send, now enabled */
+  p.fixed_to = NULL;
+  p.fixed_count = 0;
+  p.user_editable = 1;
+  ovl_invitation_dialog_open(&p);
+  invitation_frame(OVL_KEY_NONE);
+  invitation_frame(OVL_KEY_NONE);
+  invitation_press(OVL_KEY_PAD_FACE_DOWN);
+  CHECK(inv_requests == 1, "nobody ticked: Send does nothing");
+  invitation_press(OVL_KEY_PAD_DPAD_UP);
+  invitation_press(OVL_KEY_PAD_FACE_DOWN);
+  invitation_press(OVL_KEY_PAD_FACE_DOWN);
+  invitation_press(OVL_KEY_PAD_FACE_RIGHT);
+  invitation_press(OVL_KEY_PAD_DPAD_DOWN);
+  invitation_press(OVL_KEY_PAD_FACE_DOWN);
+  CHECK(inv_requests == 2 && inv_to_count == 1 &&
+            strcmp(inv_to[0], "Lantern_99") == 0,
+        "the list entered by cross, a friend ticked, left by circle, sent");
+  ovl_invitation_dialog_request_done(inv_token, 1);
+  invitation_frame(OVL_KEY_NONE);
+  CHECK(ovl_invitation_dialog_status() == 3 &&
+            ovl_invitation_dialog_sent(sent, OVL_INVDLG_SENT) == 1 &&
+            strcmp(sent[0], "Lantern_99") == 0,
+        "finished, the friend reported sent to");
+
+  /* To receive: two waiting, the first chosen; Decline takes it off the list,
+   * and the last one's ends the dialog as cancelled */
+  memset(&p, 0, sizeof(p));
+  p.mode = OVL_INVDLG_MODE_RECV;
+  p.user_id = 1;
+  invites[0].invitation_id = "a";
+  invites[0].from_npid = "Kestrel";
+  invites[1].invitation_id = "b";
+  invites[1].from_npid = "Moth";
+  p.invites = invites;
+  p.invite_count = 2;
+  ovl_invitation_dialog_open(&p);
+  dd = invitation_frame(OVL_KEY_NONE);
+  CHECK(dd->vtx_count == 784 && dd->idx_count == 1326,
+        "the invitations waiting, as ImGui's");
+  dd = invitation_frame(OVL_KEY_NONE);
+  CHECK(dd->vtx_count == 792 && dd->idx_count == 1350,
+        "with the focus cursor on Accept, as ImGui's");
+  invitation_press(OVL_KEY_PAD_DPAD_RIGHT);
+  dd = invitation_press(OVL_KEY_PAD_FACE_DOWN);
+  CHECK(inv_declined_count == 1 && strcmp(inv_declined[0], "a") == 0 &&
+            dd->vtx_count == 664 && dd->idx_count == 1158,
+        "one declined: the other left, as ImGui's");
+  invitation_press(OVL_KEY_PAD_FACE_DOWN);
+  CHECK(inv_declined_count == 2 && strcmp(inv_declined[1], "b") == 0 &&
+            ovl_invitation_dialog_status() == 3 &&
+            ovl_invitation_dialog_result() == OVL_INVDLG_RESULT_USER_CANCELED,
+        "the last declined: finished, cancelled");
+  /* Accepted; and closed by the game while it waits */
+  ovl_invitation_dialog_open(&p);
+  invitation_frame(OVL_KEY_NONE);
+  invitation_frame(OVL_KEY_NONE);
+  invitation_press(OVL_KEY_PAD_FACE_DOWN);
+  CHECK(inv_requests == 3 && strcmp(inv_accepted, "a") == 0, "the first accepted");
+  CHECK(ovl_invitation_dialog_close(OVL_INVDLG_RESULT_OK) &&
+            !ovl_invitation_dialog_close(OVL_INVDLG_RESULT_USER_CANCELED),
+        "closed once by the game");
+  ovl_invitation_dialog_request_done(inv_token, 1);
+  dd = invitation_frame(OVL_KEY_NONE);
+  CHECK(dd->vtx_count == 0 && !ovl_invitation_dialog_active(), "gone");
+  ovl_invitation_dialog_shutdown();
+}
+
 /* A frame of the save data dialog's shape: a title between separators, a
  * scrolling child of twelve buttons flattened into the window, back below */
 static const ovl_draw_data_t *list_frame(int first, int down, int up) {
@@ -818,6 +1002,7 @@ int main(int argc, char **argv) {
   check_profile();
   check_commerce();
   check_widgets();
+  check_invitation();
   check_list();
   ovl_destroy();
   free(noto);

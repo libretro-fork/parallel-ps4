@@ -22,6 +22,7 @@
 #include "../../src/video_core/overlay/ovl.h"
 #include "../../src/video_core/overlay/ovl_layers.h"
 #include "../audio_mix.h"
+#include "ovl_invdialog_stubs.h"
 
 #define THREADS 4
 #define EACH 12
