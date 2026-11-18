@@ -141,7 +141,7 @@ for san in address,undefined thread; do
     "$OUT/node_pool_test"
 done
 # What the on-screen keyboard stands on: the list of keyboards on screen, on five threads, and
-# text between UTF-16 and UTF-8
+# text between UTF-16 and UTF-8; the text edited where it is as the same edit made of copies
 for san in address,undefined thread; do
     $CC -std=gnu89 -O1 -g -Wall -Wdeclaration-after-statement -fsanitize=$san -Isrc -I$L/include \
         libretro/tests/ime_support_test.c src/core/libraries/ime/ime_support.c \

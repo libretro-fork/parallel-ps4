@@ -131,3 +131,68 @@ size_t ime_utf8_to_utf16(const char* text, size_t length, unsigned short* out, s
     }
     return units;
 }
+
+size_t ime_text_splice(char* text, size_t size, size_t start, size_t end, const char* insert,
+                       size_t insert_len) {
+    size_t length, tail, at;
+    if (!text || size == 0)
+        return 0;
+    length = strlen(text);
+    if (end > length)
+        end = length;
+    if (start > end)
+        start = end;
+    /* What is put in, then what was after, as far as each fits before the last byte */
+    if (insert_len > size - 1 - start)
+        insert_len = size - 1 - start;
+    at = start + insert_len;
+    tail = length - end;
+    if (tail > size - 1 - at)
+        tail = size - 1 - at;
+    if (at != end)
+        memmove(text + at, text + end, tail);
+    if (insert_len)
+        memcpy(text + start, insert, insert_len);
+    text[at + tail] = '\0';
+    return at + tail;
+}
+
+int ime_text_normalize_newlines(char* text) {
+    const char* from = text;
+    char* to = text;
+    int changed = 0;
+    if (!text)
+        return 0;
+    while (*from) {
+        if (*from == '\r') {
+            if (from[1] == '\n')
+                from++;
+            *to++ = '\n';
+            from++;
+            changed = 1;
+        } else {
+            *to++ = *from++;
+        }
+    }
+    *to = '\0';
+    return changed;
+}
+
+int ime_text_clamp_utf16(char* text, size_t max_units) {
+    const char* at = text;
+    size_t units = 0;
+    if (!text)
+        return 0;
+    while (*at) {
+        const char* next = at;
+        const uint32_t c = utf8_walk(&next);
+        const size_t need = c > 0xFFFF ? 2 : 1;
+        if (units + need > max_units) {
+            text[at - text] = '\0';
+            return 1;
+        }
+        units += need;
+        at = next;
+    }
+    return 0;
+}

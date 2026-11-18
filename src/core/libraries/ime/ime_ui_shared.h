@@ -64,7 +64,8 @@ void Utf16ToUtf8(const char16_t* text, std::size_t length, char* out, std::size_
 void Utf8ToUtf16(const char* text, std::size_t length, char16_t* out, std::size_t out_size);
 /// The keyboard's own clipboard: what Copy took, for Paste (empty: nothing yet)
 const char* ImeClipboardText();
-void SetImeClipboardText(const char* text);
+/// @length bytes of @text, which need not end there
+void SetImeClipboardText(const char* text, std::size_t length);
 /// How far a text field's text is moved left and up (ovl_text_field_scrolled) for its caret to
 /// be in view: @scroll as it was, moved only as far as the caret needs
 void FollowCaretInTextField(ovl_vec2_t field_size, const char* text, int caret_byte, bool multiline,

@@ -260,9 +260,105 @@ static void check_text(void) {
           "no text, no room");
 }
 
+/* The text edited where it is, against the same edit made the long way: the parts copied out
+ * and put together, then cut to the buffer */
+static void splice_reference(char* out, size_t size, const char* text, size_t start, size_t end,
+                             const char* insert, size_t insert_len) {
+    char all[256];
+    size_t length = strlen(text), n = 0;
+    if (end > length)
+        end = length;
+    if (start > end)
+        start = end;
+    memcpy(all + n, text, start);
+    n += start;
+    memcpy(all + n, insert, insert_len);
+    n += insert_len;
+    memcpy(all + n, text + end, length - end);
+    n += length - end;
+    if (n > size - 1)
+        n = size - 1;
+    memcpy(out, all, n);
+    out[n] = '\0';
+}
+
+static void check_edit(void) {
+    /* The buffer in the middle of one with a guard each side: nothing is written outside it */
+    char box[48], want[32];
+    char* text = box + 8;
+    unsigned seed = 12345, i;
+    size_t n;
+
+    strcpy(text, "hello world");
+    n = ime_text_splice(text, 32, 5, 5, ",", 1);
+    CHECK(n == 12 && strcmp(text, "hello, world") == 0, "put in: what is after moves up");
+    n = ime_text_splice(text, 32, 5, 6, "", 0);
+    CHECK(n == 11 && strcmp(text, "hello world") == 0, "taken out: what is after moves down");
+    n = ime_text_splice(text, 32, 6, 11, "there", 5);
+    CHECK(n == 11 && strcmp(text, "hello there") == 0, "replaced by as much");
+    n = ime_text_splice(text, 32, 0, 99, "x", 1);
+    CHECK(n == 1 && strcmp(text, "x") == 0, "an end past the text is the text's");
+    strcpy(text, "abcdef");
+    n = ime_text_splice(text, 8, 3, 3, "12345", 5);
+    CHECK(n == 7 && strcmp(text, "abc1234") == 0,
+          "more than fits: what is put in is cut at the buffer's last byte, what was after gone");
+    strcpy(text, "abcdef");
+    n = ime_text_splice(text, 8, 1, 1, "12", 2);
+    CHECK(n == 7 && strcmp(text, "a12bcde") == 0, "what was after is cut there too");
+    CHECK(ime_text_splice(NULL, 8, 0, 0, "a", 1) == 0 && ime_text_splice(text, 0, 0, 0, "a", 1) == 0,
+          "no text, no buffer");
+
+    for (i = 0; i < 20000; i++) {
+        char insert[16];
+        size_t size, length, start, end, insert_len, k;
+        memset(box, 0x55, sizeof(box));
+        seed = seed * 1103515245u + 12345u;
+        size = 1 + (seed >> 16) % 32;
+        seed = seed * 1103515245u + 12345u;
+        length = (seed >> 16) % size;
+        for (k = 0; k < length; k++)
+            text[k] = (char)('a' + k % 26);
+        text[length] = '\0';
+        seed = seed * 1103515245u + 12345u;
+        start = (seed >> 16) % 36;
+        seed = seed * 1103515245u + 12345u;
+        end = (seed >> 16) % 36;
+        seed = seed * 1103515245u + 12345u;
+        insert_len = (seed >> 16) % 16;
+        for (k = 0; k < insert_len; k++)
+            insert[k] = (char)('0' + k % 10);
+        splice_reference(want, size, text, start, end, insert, insert_len);
+        n = ime_text_splice(text, size, start, end, insert, insert_len);
+        if (n != strlen(want) || strcmp(text, want) != 0 || box[7] != 0x55 ||
+            text[size] != 0x55) {
+            CHECK(0, "an edit in place as the same edit made of copies, within its buffer");
+            break;
+        }
+    }
+
+    strcpy(text, "a\r\nb\rc\nd\r");
+    CHECK(ime_text_normalize_newlines(text) && strcmp(text, "a\nb\nc\nd\n") == 0,
+          "CR LF and CR alone are LF");
+    CHECK(!ime_text_normalize_newlines(text) && strcmp(text, "a\nb\nc\nd\n") == 0 &&
+              !ime_text_normalize_newlines(NULL),
+          "nothing to change");
+
+    /* A, e acute, a kanji, a character above U+FFFF (two units), B: 1 + 1 + 1 + 2 + 1 units */
+    strcpy(text, "A\xC3\xA9\xE6\xBC\xA2\xF0\x9F\x98\x80" "B");
+    CHECK(!ime_text_clamp_utf16(text, 6) && strlen(text) == 11, "six units: all of it");
+    CHECK(ime_text_clamp_utf16(text, 5) && strlen(text) == 10, "five: without the B");
+    CHECK(ime_text_clamp_utf16(text, 4) && strlen(text) == 6,
+          "four: not half of the character that is two");
+    CHECK(ime_text_clamp_utf16(text, 2) && strcmp(text, "A\xC3\xA9") == 0, "two");
+    CHECK(ime_text_clamp_utf16(text, 0) && text[0] == '\0' && !ime_text_clamp_utf16(text, 0) &&
+              !ime_text_clamp_utf16(NULL, 3),
+          "none; and nothing to cut");
+}
+
 int main(void) {
     check_layers();
     check_text();
+    check_edit();
     if (failures) {
         printf("ime_support: %d failed\n", failures);
         return 1;

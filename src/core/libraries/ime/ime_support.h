@@ -49,6 +49,22 @@ int ime_layers_any(void);
 size_t ime_utf16_to_utf8(const unsigned short* text, size_t length, char* out, size_t out_size);
 size_t ime_utf8_to_utf16(const char* text, size_t length, unsigned short* out, size_t out_size);
 
+/* The keyboard's text, edited where it is: nothing is copied out and back, nothing allocated.
+ * @text is a string in a buffer of @size bytes.
+ *
+ * ime_text_splice: its bytes from @start to @end give way to @insert_len bytes of @insert
+ * (not within @text); what comes after moves up or down. What does not fit before the
+ * buffer's last byte is cut off the end. The new length.
+ *
+ * ime_text_normalize_newlines: every CR LF and every CR alone becomes LF. Nonzero if any was.
+ *
+ * ime_text_clamp_utf16: cut after the last character with which it is no more than @max_units
+ * UTF-16 units (a character above U+FFFF is two). Nonzero if it was cut. */
+size_t ime_text_splice(char* text, size_t size, size_t start, size_t end, const char* insert,
+                       size_t insert_len);
+int ime_text_normalize_newlines(char* text);
+int ime_text_clamp_utf16(char* text, size_t max_units);
+
 RETRO_END_DECLS
 
 #endif

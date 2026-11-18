@@ -7,10 +7,12 @@
 #include <cstring>
 #include <limits>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <utility>
 #include <vector>
 #include "core/libraries/ime/ime_kb_layout.h"
+#include "core/libraries/ime/ime_support.h"
 #include "core/libraries/ime/ime_ui_shared.h"
 #include "core/libraries/pad/pad.h"
 #include "ime_ui.h"
@@ -554,9 +556,12 @@ void ImeUi::Draw() {
             int max_col = 0;
         };
 
-        std::vector<int> top_col_to_element_index(static_cast<std::size_t>(top_cols_cfg), -1);
-        std::vector<TopNavElement> top_elements;
-        top_elements.reserve(static_cast<std::size_t>(top_cols_cfg));
+        // On the stack: this runs every frame the keyboard is up (the layout's columns are a
+        // byte, 255 at most)
+        std::array<int, 256> top_col_to_element_index;
+        top_col_to_element_index.fill(-1);
+        std::array<TopNavElement, 256> top_elements;
+        int top_element_count = 0;
 
         const auto append_top_element = [&](ImeTopPanelElementId id, int min_col, int max_col) {
             PanelSelectionTarget target = PanelSelectionTarget::Prediction;
@@ -571,7 +576,7 @@ void ImeUi::Draw() {
                 return;
             }
 
-            if (static_cast<int>(top_elements.size()) >= top_cols_cfg) {
+            if (top_element_count >= top_cols_cfg) {
                 return;
             }
             if (max_col < min_col) {
@@ -584,8 +589,9 @@ void ImeUi::Draw() {
                 return;
             }
 
-            top_elements.push_back({target, clamped_min, clamped_max});
-            const int element_index = static_cast<int>(top_elements.size()) - 1;
+            top_elements[static_cast<std::size_t>(top_element_count++)] = {target, clamped_min,
+                                                                           clamped_max};
+            const int element_index = top_element_count - 1;
             for (int col = clamped_min; col <= clamped_max; ++col) {
                 top_col_to_element_index[static_cast<std::size_t>(col - top_col_min)] =
                     element_index;
@@ -599,7 +605,7 @@ void ImeUi::Draw() {
             const int max_col = std::clamp(min_col + span - 1, top_col_min, top_col_max);
             append_top_element(spec.id, min_col, max_col);
         }
-        if (top_elements.empty()) {
+        if (top_element_count == 0) {
             append_top_element(ImeTopPanelElementId::Prediction, top_col_min, top_col_max);
         }
 
@@ -610,7 +616,7 @@ void ImeUi::Draw() {
             return top_col_to_element_index[static_cast<std::size_t>(col - top_col_min)];
         };
         const auto element_index_for_target = [&](PanelSelectionTarget target) {
-            for (int i = 0; i < static_cast<int>(top_elements.size()); ++i) {
+            for (int i = 0; i < top_element_count; ++i) {
                 if (top_elements[static_cast<std::size_t>(i)].target == target) {
                     return i;
                 }
@@ -656,7 +662,7 @@ void ImeUi::Draw() {
             if (element_idx >= 0) {
                 const auto& element = top_elements[static_cast<std::size_t>(element_idx)];
                 set_top_selection(element.target, top_col);
-            } else if (!top_elements.empty()) {
+            } else if (top_element_count != 0) {
                 const auto& first_element = top_elements[0];
                 set_top_selection(first_element.target, first_element.min_col);
             }
@@ -897,17 +903,18 @@ void ImeUi::Draw() {
         };
         const auto apply_text_edit = [&](int start_utf16, int end_utf16,
                                          const char* insert_utf8) -> bool {
-            const std::string current = state->current_text.to_string();
-            const char* current_text = current.c_str();
+            // The text where it is: read in place, then edited in place (ime_text_splice)
+            const char* current_text = state->current_text.begin();
             const int len_utf16 = Utf16CountFromUtf8Range(
-                current_text, current_text + static_cast<int>(current.size()));
+                current_text, current_text + static_cast<int>(state->current_text.size()));
             const int start = std::clamp(start_utf16, 0, len_utf16);
             const int end = std::clamp(end_utf16, start, len_utf16);
             const int removed_utf16 = end - start;
             const int available_utf16 =
                 static_cast<int>(state->max_text_length) - (len_utf16 - removed_utf16);
 
-            std::string insert_clamped{};
+            // As much of what is put in as there is room for: a part of it, not a copy
+            std::string_view insert_clamped{};
             if (insert_utf8 && insert_utf8[0] != '\0' && available_utf16 > 0) {
                 const char* p = insert_utf8;
                 int used_utf16 = 0;
@@ -921,10 +928,11 @@ void ImeUi::Draw() {
                     if (used_utf16 + units > available_utf16) {
                         break;
                     }
-                    insert_clamped.append(p, static_cast<std::size_t>(step));
                     p += step;
                     used_utf16 += units;
                 }
+                insert_clamped =
+                    std::string_view(insert_utf8, static_cast<std::size_t>(p - insert_utf8));
             }
 
             if (removed_utf16 == 0 && insert_clamped.empty()) {
@@ -933,18 +941,14 @@ void ImeUi::Draw() {
 
             const int start_byte = Utf8ByteIndexFromUtf16Index(current_text, start);
             const int end_byte = Utf8ByteIndexFromUtf16Index(current_text, end);
-            std::string updated{};
-            updated.reserve(current.size() - static_cast<std::size_t>(end_byte - start_byte) +
+            ime_text_splice(state->current_text.begin(), state->current_text.capacity(),
+                            static_cast<std::size_t>(start_byte),
+                            static_cast<std::size_t>(end_byte), insert_clamped.data(),
                             insert_clamped.size());
-            updated.append(current, 0, static_cast<std::size_t>(start_byte));
-            updated.append(insert_clamped);
-            updated.append(current, static_cast<std::size_t>(end_byte), std::string::npos);
-
-            state->current_text.FromString(updated);
             sync_text_buffers();
             const int inserted_utf16 = Utf16CountFromUtf8Range(
-                insert_clamped.c_str(),
-                insert_clamped.c_str() + static_cast<int>(insert_clamped.size()));
+                insert_clamped.data(),
+                insert_clamped.data() + static_cast<int>(insert_clamped.size()));
             const int new_caret_utf16 = start + inserted_utf16;
             text_select_mode = false;
             text_select_anchor_utf16 = new_caret_utf16;
@@ -975,8 +979,7 @@ void ImeUi::Draw() {
             if (sel_end <= 0) {
                 return false;
             }
-            const std::string current = state->current_text.to_string();
-            const char* text = current.c_str();
+            const char* text = state->current_text.begin();
             const int caret_byte = Utf8ByteIndexFromUtf16Index(text, sel_end);
             int prev_byte = caret_byte;
             do {
@@ -1072,15 +1075,13 @@ void ImeUi::Draw() {
             return std::pair{std::min(sel_start, sel_end), std::max(sel_start, sel_end)};
         };
         const auto copy_selected_text = [&]() {
-            const std::string current = state->current_text.to_string();
+            const char* current = state->current_text.begin();
             const auto [sel_start, sel_end] = get_selection_byte_range();
             if (sel_end > sel_start) {
-                const std::string selection =
-                    current.substr(static_cast<std::size_t>(sel_start),
-                                   static_cast<std::size_t>(sel_end - sel_start));
-                SetImeClipboardText(selection.c_str());
+                SetImeClipboardText(current + sel_start,
+                                    static_cast<std::size_t>(sel_end - sel_start));
             } else {
-                SetImeClipboardText(current.c_str());
+                SetImeClipboardText(current, state->current_text.size());
             }
         };
         const auto collapse_selection_to_caret = [&](int caret_utf16) {

@@ -169,8 +169,8 @@ const char* ImeClipboardText() {
     return ime_clipboard;
 }
 
-void SetImeClipboardText(const char* text) {
-    const std::size_t length = std::min(std::strlen(text), sizeof(ime_clipboard) - 1);
+void SetImeClipboardText(const char* text, std::size_t length) {
+    length = std::min(length, sizeof(ime_clipboard) - 1);
     std::memcpy(ime_clipboard, text, length);
     ime_clipboard[length] = '\0';
 }
