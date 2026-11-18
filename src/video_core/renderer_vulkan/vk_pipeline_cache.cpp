@@ -516,17 +516,24 @@ bool PipelineCache::DrawsIntoSmallTargets() const {
 }
 
 const GraphicsPipeline* PipelineCache::GetGraphicsPipeline(const DrawIndirectParams params,
-                                                           bool may_skip) {
+                                                           MaySkip may_skip, void* ctx) {
     draw_indirect_params = params;
     // Asynchronous: a draw whose pipeline is not ready is skipped, but one into small images,
     // or into an image the game did not draw into the frame before (@may_skip), only waits
-    // for it, as compute work does
-    const bool skip_unready = async_compile && may_skip && !DrawsIntoSmallTargets();
+    // for it, as compute work does. Worked out only if the pipeline turns out not to be
+    // ready: a draw whose pipeline is made pays nothing for the option.
+    int skip = -1;
+    const auto skip_unready = [&] {
+        if (skip < 0) {
+            skip = async_compile && !DrawsIntoSmallTargets() && (!may_skip || may_skip(ctx));
+        }
+        return skip != 0;
+    };
     for (;;) {
         DrainCompiled();
         stage_pending = false;
         if (!RefreshGraphicsKey()) {
-            if (!stage_pending || skip_unready) {
+            if (!stage_pending || skip_unready()) {
                 return nullptr;
             }
             WaitCompiled();
@@ -539,7 +546,7 @@ const GraphicsPipeline* PipelineCache::GetGraphicsPipeline(const DrawIndirectPar
         if (!IsPipelinePending(pipeline_hash)) {
             if (num_pending_pipelines == pending_pipelines.size()) {
                 // As many in the making as there is room for: this one waits its turn
-                if (skip_unready) {
+                if (skip_unready()) {
                     return nullptr;
                 }
                 WaitCompiled();
@@ -589,7 +596,7 @@ const GraphicsPipeline* PipelineCache::GetGraphicsPipeline(const DrawIndirectPar
             pending_pipelines[num_pending_pipelines++] = pipeline_hash;
             Submit(job);
         }
-        if (skip_unready) {
+        if (skip_unready()) {
             return nullptr;
         }
         WaitCompiled();

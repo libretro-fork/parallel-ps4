@@ -103,15 +103,12 @@ public:
     bool LoadGraphicsPipeline(Serialization::Archive& ar);
     bool LoadPipelineStage(Serialization::Archive& ar, size_t stage);
 
-    /// @may_skip: with asynchronous compilation, whether the draw may be left out while its
-    /// pipeline is being made (null is returned); otherwise it waits for it
+    /// @may_skip(@ctx): with asynchronous compilation, whether the draw may be left out while
+    /// its pipeline is being made (null is returned); otherwise it waits for it. Asked only
+    /// when the pipeline is not made, and once.
+    using MaySkip = bool (*)(void* ctx);
     const GraphicsPipeline* GetGraphicsPipeline(const DrawIndirectParams params = {},
-                                                bool may_skip = true);
-
-    /// Asynchronous compilation: draws may be left out
-    [[nodiscard]] bool AsyncCompile() const {
-        return async_compile;
-    }
+                                                MaySkip may_skip = nullptr, void* ctx = nullptr);
 
     const ComputePipeline* GetComputePipeline();
 

@@ -151,6 +151,17 @@ public:
     /// Retrieves the render target with specified properties
     [[nodiscard]] ImageView& FindRenderTarget(ImageId image_id, const ImageDesc& desc);
 
+    /// A frame of the game's is done
+    void NextDrawFrame() {
+        ++draw_frame;
+    }
+
+    /// Whether the game drew, the frame before, into the image it has at @address: a draw
+    /// into it may then be left out while its pipeline is made (common/target_frames.h).
+    /// Notes this frame's draw too, which a draw left out never gets to do at its binding.
+    /// Asked only for a draw whose pipeline is not made.
+    [[nodiscard]] bool DrawnLastFrame(VAddr address);
+
     /// Retrieves the depth target with specified properties
     [[nodiscard]] ImageView& FindDepthTarget(ImageId image_id, const ImageDesc& desc);
 
@@ -420,6 +431,8 @@ private:
     u64 pressure_gc_samplers = 0;
     u64 critical_gc_samplers = 0;
     u64 gc_tick = 0;
+    /// The game's frame being drawn, from 1: counted at its flips
+    u32 draw_frame = 1;
     Common::LRUCache<Image> image_lru_cache;
     Common::LRUCache<Sampler> sampler_lru_cache;
     const bool readback_linear_images;

@@ -4,7 +4,7 @@
 #ifndef SHADPS4_COMMON_TARGET_FRAMES_H
 #define SHADPS4_COMMON_TARGET_FRAMES_H
 
-/* Which of the game's frames each image was drawn into, for the draws that
+/* Which of the game's frames an image was drawn into, for the draws that
  * asynchronous shader compilation may leave out.
  *
  * A draw whose pipeline is still being made is left out so that the game
@@ -24,41 +24,36 @@
  *
  * So a draw may be left out only when the game drew into every image it
  * draws into the frame before; a draw into any other waits for its
- * pipeline. target_frames_draw notes the draw and says which it is.
+ * pipeline.
  *
- * Images are known by their address in the game's memory. Entries not drawn
- * into for TARGET_FRAMES_KEEP frames are dropped, so the table stays within
- * the room made for it at init: nothing is allocated while the game runs
- * unless it draws into more images than that at once. Not thread-safe: the
- * thread that draws. */
+ * The two frames are kept in the image itself, noted where the image is
+ * bound to be drawn into (a line of the image the binding writes anyway),
+ * and looked at only for a draw whose pipeline is not made: a draw whose
+ * pipeline is made, with the option on or off, pays one comparison. Frames
+ * count from 1; 0 is never. */
 
-#include <stddef.h>
 #include <stdint.h>
 
-#include <boolean.h>
-#include <retro_common_api.h>
-
-#include "common/u64_map.h"
-
-RETRO_BEGIN_DECLS
-
-#define TARGET_FRAMES_KEEP 256u
+#include <retro_inline.h>
 
 typedef struct target_frames {
-    u64_map_t map;
-    uint32_t frame; /* the frame being drawn, from 1 */
+    uint32_t drawn;  /* the last frame it was drawn into, 0: never */
+    uint32_t before; /* and the one before that, 0: none */
 } target_frames_t;
 
-bool target_frames_init(target_frames_t* t, size_t reserve);
-void target_frames_free(target_frames_t* t);
+/* The game draws into the image in @frame. */
+static INLINE void target_frames_draw(target_frames_t* t, uint32_t frame) {
+    if (t->drawn != frame) {
+        t->before = t->drawn;
+        t->drawn = frame;
+    }
+}
 
-/* The frame is done: the next one starts. */
-void target_frames_next(target_frames_t* t);
-
-/* The game draws into the image at @address this frame. Returns 1 when it
- * also drew into it the frame before: a draw into it may be left out. */
-int target_frames_draw(target_frames_t* t, uint64_t address);
-
-RETRO_END_DECLS
+/* Whether the game drew into the image in the frame before @frame: a draw
+ * into it in @frame may be left out. */
+static INLINE int target_frames_recurring(const target_frames_t* t, uint32_t frame) {
+    const uint32_t last = t->drawn == frame ? t->before : t->drawn;
+    return last != 0 && last + 1 == frame;
+}
 
 #endif

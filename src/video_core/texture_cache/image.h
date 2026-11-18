@@ -12,6 +12,7 @@
 #include "common/incremental_id.h"
 #include "common/lru_cache.h"
 #include "common/small_vector.h"
+#include "common/target_frames.h"
 #include "common/types.h"
 #include "video_core/renderer_vulkan/vk_common.h"
 #include "video_core/texture_cache/host_compatibility.h"
@@ -203,6 +204,8 @@ public:
     u64 image_uid{};
     u64 lru_id{};
     u64 tick_accessed_last{};
+    /// The game's frames it was last drawn into (asynchronous shader compilation)
+    target_frames_t drawn_frames{};
     u64 cpu_hash{};
     u64 gpu_hash{};
 

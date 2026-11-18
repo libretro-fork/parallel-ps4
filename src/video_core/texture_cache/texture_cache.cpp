@@ -881,9 +881,25 @@ void TextureCache::UnregisterMeta(VAddr address, u64 owner_uid) {
     }
 }
 
+bool TextureCache::DrawnLastFrame(VAddr address) {
+    bool found = false;
+    bool recurring = true;
+    ForEachImageInRegion(address, 1, [&](ImageId, Image& image) {
+        if (image.info.guest_address != address) {
+            return;
+        }
+        found = true;
+        recurring &= target_frames_recurring(&image.drawn_frames, draw_frame) != 0;
+        target_frames_draw(&image.drawn_frames, draw_frame);
+    });
+    // No image yet: the game has never drawn into it
+    return found && recurring;
+}
+
 ImageView& TextureCache::FindRenderTarget(ImageId image_id, const ImageDesc& desc) {
     Image& image = slot_images[image_id];
     image.flags |= ImageFlagBits::GpuModified;
+    target_frames_draw(&image.drawn_frames, draw_frame);
     if (readback_linear_images && (!image.info.props.is_tiled || image.info.size.width <= 8)) {
         download_images_combiner.Run(
             [&] { u64_map_insert(&download_images, image_id.index, nullptr); });
@@ -926,6 +942,7 @@ ImageView& TextureCache::FindRenderTarget(ImageId image_id, const ImageDesc& des
 ImageView& TextureCache::FindDepthTarget(ImageId image_id, const ImageDesc& desc) {
     Image& image = slot_images[image_id];
     image.flags |= ImageFlagBits::GpuModified;
+    target_frames_draw(&image.drawn_frames, draw_frame);
     image.usage.depth_target = 1u;
     UpdateImage(image_id);
 

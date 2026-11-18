@@ -50,8 +50,6 @@ Rasterizer::Rasterizer(const Instance& instance_, Scheduler& scheduler_, Runtime
         liverpool->BindRasterizer(this);
     }
     memory->SetRasterizer(this);
-    // Room for more images than a game draws into at once: none made while it runs
-    target_frames_init(&target_frames, 4096);
 
     scheduler.SetSubmitCallback([this](Vulkan::SubmitInfo& info) {
         runtime.FlushBarriers();
@@ -59,59 +57,43 @@ Rasterizer::Rasterizer(const Instance& instance_, Scheduler& scheduler_, Runtime
     });
 }
 
-Rasterizer::~Rasterizer() {
-    target_frames_free(&target_frames);
-}
+Rasterizer::~Rasterizer() = default;
 
 void Rasterizer::OnFlip() {
-    target_frames_next(&target_frames);
+    texture_cache.NextDrawFrame();
 }
 
-const GraphicsPipeline* Rasterizer::DrawPipeline(const DrawIndirectParams params) {
-    if (!pipeline_cache.AsyncCompile()) {
-        return pipeline_cache.GetGraphicsPipeline(params);
-    }
+bool Rasterizer::TargetsDrawnLastFrame() {
     // A draw is left out while its pipeline is made only if the game drew into every image
     // it draws into the frame before (common/target_frames.h): an image it draws once is
     // never made again, and one it has just started on holds nothing yet
     const auto& regs = liverpool->regs;
-    std::array<u64, AmdGpu::NUM_COLOR_BUFFERS + 4> targets;
-    u32 count = 0;
+    bool any = false;
+    bool all = true;
     if (regs.color_control.mode != AmdGpu::ColorControl::OperationMode::Disable) {
         for (s32 cb = 0; cb < AmdGpu::NUM_COLOR_BUFFERS; ++cb) {
             const auto& col_buf = regs.color_buffers[cb];
             if (col_buf && regs.color_target_mask.GetMask(cb)) {
-                targets[count++] = col_buf.Address();
+                any = true;
+                // Every one is asked, and so noted: no stopping at the first that says no
+                all &= texture_cache.DrawnLastFrame(col_buf.Address());
             }
         }
     }
     if (regs.depth_buffer.DepthValid()) {
-        targets[count++] = regs.depth_buffer.DepthAddress();
+        any = true;
+        all &= texture_cache.DrawnLastFrame(regs.depth_buffer.DepthAddress());
+    } else if (regs.depth_buffer.StencilValid()) {
+        any = true;
+        all &= texture_cache.DrawnLastFrame(regs.depth_buffer.StencilAddress());
     }
-    if (regs.depth_buffer.DepthWriteValid() &&
-        regs.depth_buffer.DepthWriteAddress() != regs.depth_buffer.DepthAddress()) {
-        targets[count++] = regs.depth_buffer.DepthWriteAddress();
-    }
-    if (regs.depth_buffer.StencilValid()) {
-        targets[count++] = regs.depth_buffer.StencilAddress();
-    }
-    if (regs.depth_buffer.StencilWriteValid() &&
-        regs.depth_buffer.StencilWriteAddress() != regs.depth_buffer.StencilAddress()) {
-        targets[count++] = regs.depth_buffer.StencilWriteAddress();
-    }
-    if (count != num_last_targets || last_targets_frame != target_frames.frame ||
-        !std::equal(targets.begin(), targets.begin() + count, last_targets.begin())) {
-        bool may_skip = count != 0;
-        for (u32 i = 0; i < count; ++i) {
-            // Every one is noted: no stopping at the first that says no
-            may_skip &= target_frames_draw(&target_frames, targets[i]) != 0;
-        }
-        last_targets = targets;
-        num_last_targets = count;
-        last_targets_frame = target_frames.frame;
-        last_targets_may_skip = may_skip;
-    }
-    return pipeline_cache.GetGraphicsPipeline(params, last_targets_may_skip);
+    return any && all;
+}
+
+const GraphicsPipeline* Rasterizer::DrawPipeline(const DrawIndirectParams params) {
+    return pipeline_cache.GetGraphicsPipeline(
+        params, [](void* self) { return static_cast<Rasterizer*>(self)->TargetsDrawnLastFrame(); },
+        this);
 }
 
 /// While a frame's notes are being written out: the images the draw or dispatch being set up

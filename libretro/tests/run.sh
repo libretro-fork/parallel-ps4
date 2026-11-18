@@ -151,9 +151,8 @@ $CC -std=c89 -pedantic -O1 -g -Wall -Wdeclaration-after-statement -fsanitize=add
 "$OUT/patch_halve_test"
 # Asynchronous shader compilation: a draw is left out only of an image the game drew into the
 # frame before
-$CC -std=c89 -pedantic -Wno-long-long -Wno-c99-extensions -O1 -g -Wall \
-    -Wdeclaration-after-statement -fsanitize=address,undefined -Isrc -I$L/include \
-    libretro/tests/target_frames_test.c src/common/target_frames.c src/common/u64_map.c \
+$CC -std=c89 -pedantic -Wno-long-long -O1 -g -Wall -Wdeclaration-after-statement \
+    -fsanitize=address,undefined -Isrc -I$L/include libretro/tests/target_frames_test.c \
     -o "$OUT/target_frames_test"
 "$OUT/target_frames_test"
 # The memory a crash report shows around an address
