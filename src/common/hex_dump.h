@@ -32,6 +32,13 @@ void hex_dump_window(uint64_t address, uint64_t before, uint64_t after, uint64_t
  * written, 0 when @size is too small for the line. */
 size_t hex_dump_line(char* out, size_t size, const unsigned char* bytes, size_t count);
 
+/* Whether @count bytes (a line's worth is what it is meant for) look like
+ * packed data, a compressed or encoded stream: no more than one zero among
+ * them and no value more than three times. Pointers, counters, text padded
+ * with zeroes and cleared memory do not; it is how a crash report finds
+ * where a run of data written over the game's objects starts and ends. */
+int hex_dump_packed(const unsigned char* bytes, size_t count);
+
 RETRO_END_DECLS
 
 #endif

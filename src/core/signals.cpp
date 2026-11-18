@@ -518,6 +518,73 @@ static void LogMemoryAroundRegisters(const CONTEXT& ctx) {
     }
 }
 
+// A dump of @length bytes from @start, the lines that can be read
+static void LogMemory(u64 start, u64 length) {
+    for (u64 at = start; at < start + length; at += HEX_DUMP_LINE_BYTES) {
+        u8 bytes[HEX_DUMP_LINE_BYTES];
+        char line[HEX_DUMP_LINE_CHARS];
+        if (ReadMemory(at, bytes, sizeof(bytes))) {
+            hex_dump_line(line, sizeof(line), bytes, sizeof(bytes));
+            LOG_CRITICAL(Debug, "    {:#x}: {}", at, line);
+        }
+    }
+}
+
+// When an argument of the call that crashed points into packed data (a compressed or encoded
+// stream, where an object of the game's should be): how far that data runs either way, and what
+// is at its two ends. Where it starts is the buffer it was written into, or the one it ran out
+// of; its first bytes are often a header that names what it is.
+static void LogPackedRun(const char* name, u64 address) {
+    static constexpr u64 Line = HEX_DUMP_LINE_BYTES, Page = 0x1000, Limit = u64{64} << 20;
+    static constexpr int Gap = 4; // lines that are not packed, in a row, end the run
+    const u64 origin = address & ~(Line - 1);
+    u8 page[Page];
+    u64 page_at = ~u64{0};
+    const auto packed = [&](u64 at) {
+        if ((at & ~(Page - 1)) != page_at) {
+            page_at = at & ~(Page - 1);
+            if (!ReadMemory(page_at, page, Page)) {
+                page_at = ~u64{0};
+                return -1;
+            }
+        }
+        return hex_dump_packed(page + (at - page_at), Line);
+    };
+    if (address < 0x10000 || InHostModule(address) || packed(origin) != 1) {
+        return;
+    }
+    u64 start = origin, end = origin + Line;
+    int gap = 0;
+    for (u64 at = origin; at >= Line && origin - at < Limit && gap < Gap;) {
+        at -= Line;
+        const int is = packed(at);
+        if (is < 0) {
+            break;
+        }
+        gap = is ? 0 : gap + 1;
+        if (is) {
+            start = at;
+        }
+    }
+    gap = 0;
+    for (u64 at = origin + Line; at - origin < Limit && gap < Gap; at += Line) {
+        const int is = packed(at);
+        if (is < 0) {
+            break;
+        }
+        gap = is ? 0 : gap + 1;
+        if (is) {
+            end = at + Line;
+        }
+    }
+    LOG_CRITICAL(Debug, "  {} = {:#x} is inside packed data from {:#x} to {:#x} ({} bytes)", name,
+                 address, start, end, end - start);
+    LOG_CRITICAL(Debug, "  where it starts:");
+    LogMemory(start >= 0x100 ? start - 0x100 : 0, 0x200);
+    LOG_CRITICAL(Debug, "  where it ends:");
+    LogMemory(end - 0x80, 0x180);
+}
+
 // Where each of the game's other threads was: one of them may be the one that wrote what the
 // crashed thread tripped over. Each is stopped only for as long as reading its registers takes,
 // so that none is left holding a lock the report itself needs.
@@ -638,6 +705,8 @@ static LONG WINAPI CrashReport(EXCEPTION_POINTERS* info) noexcept {
         LogGameCallers(frame.Rbp, "  ", depth + 1, 16);
     }
     LogMemoryAroundRegisters(ctx);
+    LogPackedRun("rdi", ctx.Rdi);
+    LogPackedRun("rsi", ctx.Rsi);
     Common::Log::Flush();
     LogOtherGameThreads();
 #endif

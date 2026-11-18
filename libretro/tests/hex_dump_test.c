@@ -7,7 +7,9 @@
  *   - it never starts below 0 nor wraps past the end of the address space;
  *   - a line is hex in two groups of eight and the bytes as text, dots for
  *     what does not print; a short line keeps its columns;
- *   - a buffer too small for a line gets an empty string, never an overrun. */
+ *   - a buffer too small for a line gets an empty string, never an overrun;
+ *   - packed data (a compressed or encoded stream) is told from pointers,
+ *     counters and cleared or filled memory. */
 
 #include <stdio.h>
 #include <string.h>
@@ -78,9 +80,34 @@ static void test_line(void) {
     CHECK(hex_dump_line(NULL, 0, bytes, 16) == 0, "no buffer");
 }
 
+static void test_packed(void) {
+    /* Lines of the crash's dump: what lay over the game's lock, and the
+     * thread object beside it, pointers and counters */
+    static const unsigned char over[16] = {0x92, 0x94, 0x50, 0x66, 0xc8, 0xbf, 0x1c, 0x2b,
+                                           0x10, 0x52, 0x92, 0x33, 0xc1, 0xfd, 0x29, 0x44};
+    static const unsigned char one_zero[16] = {0x49, 0xcc, 0xf6, 0x13, 0x1b, 0x97, 0xf2, 0x11,
+                                               0xfc, 0x46, 0xaf, 0x18, 0x00, 0x71, 0x54, 0x53};
+    static const unsigned char pointers[16] = {0xb0, 0xe0, 0xee, 0x00, 0x00, 0x00, 0x00, 0x00,
+                                               0x20, 0x57, 0xf8, 0xfb, 0x42, 0x01, 0x00, 0x00};
+    static const unsigned char counters[16] = {0x01, 0, 0, 0, 0, 0, 0, 0, 0x9e, 0x02, 0, 0, 0, 0, 0, 0};
+    static const unsigned char filled[16] = {0xcc, 0xcc, 0xcc, 0xcc, 0xcc, 0xcc, 0xcc, 0xcc,
+                                             0xcc, 0xcc, 0xcc, 0xcc, 0xcc, 0xcc, 0xcc, 0xcc};
+    unsigned char cleared[16];
+    memset(cleared, 0, sizeof(cleared));
+    CHECK(hex_dump_packed(over, 16), "data written over an object is packed");
+    CHECK(hex_dump_packed(one_zero, 16), "one zero in a line of it is still packed");
+    CHECK(!hex_dump_packed(pointers, 16), "pointers are not");
+    CHECK(!hex_dump_packed(counters, 16), "counters are not");
+    CHECK(!hex_dump_packed(cleared, 16), "cleared memory is not");
+    CHECK(!hex_dump_packed(filled, 16), "memory filled with one value is not");
+    CHECK(!hex_dump_packed(over, 4), "too few bytes to say");
+    CHECK(!hex_dump_packed(NULL, 16), "no bytes");
+}
+
 int main(void) {
     test_window();
     test_line();
+    test_packed();
     if (failures) {
         printf("hex_dump_test: %d failure(s)\n", failures);
         return 1;

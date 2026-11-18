@@ -50,3 +50,18 @@ size_t hex_dump_line(char* out, size_t size, const unsigned char* bytes, size_t 
     out[n] = '\0';
     return n;
 }
+
+int hex_dump_packed(const unsigned char* bytes, size_t count) {
+    size_t i, j, zeroes = 0;
+    if (!bytes || count < 8)
+        return 0;
+    for (i = 0; i < count; i++) {
+        size_t same = 1;
+        if (bytes[i] == 0 && ++zeroes > 1)
+            return 0;
+        for (j = 0; j < i; j++)
+            if (bytes[j] == bytes[i] && ++same > 3)
+                return 0;
+    }
+    return 1;
+}
