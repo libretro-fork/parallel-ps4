@@ -219,7 +219,11 @@ static struct {
     int gamepad_connected;
 
     /* the draw data */
-    ovl_buf_t out_vtx, out_idx, out_cmds;
+    /* The frame's commands, and the draw lists they draw from, in order: their vertices and
+     * indices stay in the lists until the renderer takes them (ovl_draw_data_write) */
+    ovl_buf_t out_cmds;
+    const ovl_draw_list_t* out_lists[MAX_WINDOWS + 2];
+    int out_list_count;
     ovl_draw_data_t draw_data;
 } g;
 
@@ -607,12 +611,8 @@ int ovl_create(ovl_font_t* default_font, float font_scale) {
         draw_list_make(&g.windows[i].dl);
     draw_list_make(&g.background);
     draw_list_make(&g.foreground);
-    ovl_buf_init(&g.out_vtx, sizeof(ovl_vertex_t));
-    ovl_buf_init(&g.out_idx, sizeof(uint32_t));
     ovl_buf_init(&g.out_cmds, sizeof(ovl_cmd_t));
     /* Room for a frame of dialogs up front */
-    ovl_buf_reserve(&g.out_vtx, 65536);
-    ovl_buf_reserve(&g.out_idx, 98304);
     ovl_buf_reserve(&g.out_cmds, 1024);
     g.created = 1;
     return 1;
@@ -626,8 +626,6 @@ void ovl_destroy(void) {
         ovl_draw_list_free(&g.windows[i].dl);
     ovl_draw_list_free(&g.background);
     ovl_draw_list_free(&g.foreground);
-    ovl_buf_free(&g.out_vtx);
-    ovl_buf_free(&g.out_idx);
     ovl_buf_free(&g.out_cmds);
     ovl_atlas_free();
     memset(&g, 0, sizeof(g));
@@ -3225,26 +3223,34 @@ static int window_compare(const void* a, const void* b) {
     return wa->order - wb->order;
 }
 
+/* A draw list's commands after the frame's others, each told where its list's indices and
+ * vertices will be; the list itself only noted */
 static void append_list(const ovl_draw_list_t* dl) {
-    const uint32_t base = (uint32_t)g.out_vtx.size;
-    const uint32_t ibase = (uint32_t)g.out_idx.size;
-    ovl_vertex_t* v;
-    uint32_t* ix;
     ovl_cmd_t* c;
     size_t i;
     if (dl->idx.size == 0)
         return;
-    v = (ovl_vertex_t*)ovl_buf_grow(&g.out_vtx, dl->vtx.size);
-    ix = (uint32_t*)ovl_buf_grow(&g.out_idx, dl->idx.size);
     c = (ovl_cmd_t*)ovl_buf_grow(&g.out_cmds, dl->cmds.size);
-    if (!v || !ix || !c)
+    if (!c)
         return;
-    memcpy(v, dl->vtx.data, dl->vtx.size * sizeof(ovl_vertex_t));
-    for (i = 0; i < dl->idx.size; i++)
-        ix[i] = ((const uint32_t*)dl->idx.data)[i] + base;
     for (i = 0; i < dl->cmds.size; i++) {
         c[i] = ((const ovl_cmd_t*)dl->cmds.data)[i];
-        c[i].idx_offset += ibase;
+        c[i].idx_offset += g.draw_data.idx_count;
+        c[i].vtx_offset = g.draw_data.vtx_count;
+    }
+    g.out_lists[g.out_list_count++] = dl;
+    g.draw_data.vtx_count += (uint32_t)dl->vtx.size;
+    g.draw_data.idx_count += (uint32_t)dl->idx.size;
+}
+
+void ovl_draw_data_write(ovl_vertex_t* vtx, uint32_t* idx) {
+    int i;
+    for (i = 0; i < g.out_list_count; i++) {
+        const ovl_draw_list_t* dl = g.out_lists[i];
+        memcpy(vtx, dl->vtx.data, dl->vtx.size * sizeof(ovl_vertex_t));
+        memcpy(idx, dl->idx.data, dl->idx.size * sizeof(uint32_t));
+        vtx += dl->vtx.size;
+        idx += dl->idx.size;
     }
 }
 
@@ -3255,7 +3261,9 @@ const ovl_draw_data_t* ovl_draw_data(void) {
 const ovl_draw_data_t* ovl_render(void) {
     window_t* order[MAX_WINDOWS];
     int n = 0, i;
-    g.out_vtx.size = g.out_idx.size = g.out_cmds.size = 0;
+    g.out_cmds.size = 0;
+    g.out_list_count = 0;
+    g.draw_data.vtx_count = g.draw_data.idx_count = 0;
     append_list(&g.background);
     for (i = 0; i < g.window_count; i++) {
         window_t* w = &g.windows[i];
@@ -3274,10 +3282,6 @@ const ovl_draw_data_t* ovl_render(void) {
         }
     }
     append_list(&g.foreground);
-    g.draw_data.vtx = (const ovl_vertex_t*)g.out_vtx.data;
-    g.draw_data.vtx_count = (uint32_t)g.out_vtx.size;
-    g.draw_data.idx = (const uint32_t*)g.out_idx.data;
-    g.draw_data.idx_count = (uint32_t)g.out_idx.size;
     g.draw_data.cmds = (const ovl_cmd_t*)g.out_cmds.data;
     g.draw_data.cmd_count = (uint32_t)g.out_cmds.size;
     g.draw_data.display_w = g.display.x;

@@ -261,8 +261,12 @@ static void cpu_triangle(float *rgb, const texture_t *t, const ovl_vertex_t *v0,
 }
 
 static int cpu_frame(float *rgb, const ovl_draw_data_t *dd) {
+  /* The frame's vertices and indices, taken as the renderer takes them */
+  ovl_vertex_t *vtx = malloc((dd->vtx_count + 1) * sizeof(*vtx));
+  uint32_t *idx = malloc((dd->idx_count + 1) * sizeof(*idx));
   uint32_t c, i;
   int images = 0;
+  ovl_draw_data_write(vtx, idx);
   for (i = 0; i < W * H; i++) {
     rgb[i * 3 + 0] = clear_colour[0];
     rgb[i * 3 + 1] = clear_colour[1];
@@ -289,10 +293,12 @@ static int cpu_frame(float *rgb, const ovl_draw_data_t *dd) {
     scissor[3] = scissor[1] + (int)((cmd->clip[3] > H ? H : cmd->clip[3]) -
                                     (float)scissor[1]);
     for (i = 0; i + 2 < cmd->idx_count; i += 3)
-      cpu_triangle(rgb, &t, &dd->vtx[dd->idx[cmd->idx_offset + i]],
-                   &dd->vtx[dd->idx[cmd->idx_offset + i + 1]],
-                   &dd->vtx[dd->idx[cmd->idx_offset + i + 2]], scissor);
+      cpu_triangle(rgb, &t, &vtx[cmd->vtx_offset + idx[cmd->idx_offset + i]],
+                   &vtx[cmd->vtx_offset + idx[cmd->idx_offset + i + 1]],
+                   &vtx[cmd->vtx_offset + idx[cmd->idx_offset + i + 2]], scissor);
   }
+  free(vtx);
+  free(idx);
   return images;
 }
 

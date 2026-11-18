@@ -53,19 +53,21 @@ typedef struct ovl_vertex {
     ovl_col_t col;
 } ovl_vertex_t;
 
-/* A run of triangles with one texture and clip rectangle (x0, y0, x1, y1 in pixels) */
+/* A run of triangles with one texture and clip rectangle (x0, y0, x1, y1 in pixels). Its
+ * indices count from @vtx_offset, its draw list's first vertex (a draw's vertexOffset). */
 typedef struct ovl_cmd {
     ovl_tex_t tex;
     float clip[4];
     uint32_t idx_offset;
     uint32_t idx_count;
+    uint32_t vtx_offset;
 } ovl_cmd_t;
 
-/* What a frame draws, in order, in one vertex and one index buffer */
+/* What a frame draws, in order, in one vertex and one index buffer: how many of each, and the
+ * commands. The vertices and indices themselves are written where the renderer wants them
+ * (ovl_draw_data_write), once: they are not gathered anywhere first. */
 typedef struct ovl_draw_data {
-    const ovl_vertex_t* vtx;
     uint32_t vtx_count;
-    const uint32_t* idx;
     uint32_t idx_count;
     const ovl_cmd_t* cmds;
     uint32_t cmd_count;
@@ -250,6 +252,10 @@ void ovl_new_frame(float display_w, float display_h, float delta_time);
 const ovl_draw_data_t* ovl_render(void);
 /* What the last ovl_render made, until the next ovl_new_frame */
 const ovl_draw_data_t* ovl_draw_data(void);
+/* Its vertices and indices, vtx_count and idx_count of them, into @vtx and @idx: the
+ * renderer's own memory (a mapped buffer), written front to back and never read. Between
+ * ovl_render and the next ovl_new_frame. */
+void ovl_draw_data_write(ovl_vertex_t* vtx, uint32_t* idx);
 double ovl_time(void);
 float ovl_delta_time(void);
 ovl_vec2_t ovl_display_size(void);

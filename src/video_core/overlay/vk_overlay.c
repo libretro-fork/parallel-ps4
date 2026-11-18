@@ -961,8 +961,8 @@ static int upload_geometry(frame_buffers_t* f, const ovl_draw_data_t* dd) {
         if (!host_buffer_make(&f->index, idx_bytes * 2, VK_BUFFER_USAGE_INDEX_BUFFER_BIT))
             return 0;
     }
-    memcpy(f->vertex.map, dd->vtx, (size_t)vtx_bytes);
-    memcpy(f->index.map, dd->idx, (size_t)idx_bytes);
+    /* Straight from the overlay's draw lists into the buffers the GPU reads */
+    ovl_draw_data_write((ovl_vertex_t*)f->vertex.map, (uint32_t*)f->index.map);
     return 1;
 }
 
@@ -1057,7 +1057,7 @@ void ovl_vk_render(VkCommandBuffer cmd, VkImageView view, VkExtent2D extent) {
                                        0, NULL);
             bound = set;
         }
-        vk.vkCmdDrawIndexed(cmd, c->idx_count, 1, c->idx_offset, 0, 0);
+        vk.vkCmdDrawIndexed(cmd, c->idx_count, 1, c->idx_offset, (int32_t)c->vtx_offset, 0);
     }
     vk.vkCmdEndRendering(cmd);
     if (markers)

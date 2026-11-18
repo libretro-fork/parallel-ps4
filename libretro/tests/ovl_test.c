@@ -122,23 +122,46 @@ static const float want_quads[13][4] = {
 
 static void check_quads(const ovl_draw_data_t *dd) {
   const ovl_cmd_t *text = NULL;
-  uint32_t i;
+  /* The frame's vertices and indices, taken as the renderer takes them */
+  ovl_vertex_t *frame_vtx = malloc((dd->vtx_count + 1) * sizeof(*frame_vtx));
+  uint32_t *frame_idx = malloc((dd->idx_count + 1) * sizeof(*frame_idx));
+  uint32_t i, most = 0;
   int q;
+  ovl_draw_data_write(frame_vtx, frame_idx);
+  /* A command's indices count from its own list's first vertex, and stay within the frame's */
+  for (i = 0; i < dd->cmd_count; i++) {
+    uint32_t k;
+    for (k = 0; k < dd->cmds[i].idx_count; k++) {
+      const uint32_t at =
+          dd->cmds[i].vtx_offset + frame_idx[dd->cmds[i].idx_offset + k];
+      if (at > most)
+        most = at;
+    }
+  }
+  CHECK(dd->vtx_count != 0 && most == dd->vtx_count - 1,
+        "the commands' indices reach the frame's last vertex and none past it");
   for (i = 0; i < dd->cmd_count; i++)
     if (dd->cmds[i].clip[0] == 1815.0f && dd->cmds[i].clip[1] == 1.0f &&
         dd->cmds[i].clip[2] == 1919.0f && dd->cmds[i].clip[3] == 31.0f)
       text = &dd->cmds[i];
   CHECK(text != NULL, "the text clipped to the window's inner rectangle");
-  if (!text)
+  if (!text) {
+    free(frame_vtx);
+    free(frame_idx);
     return;
+  }
   CHECK(text->idx_count == 13 * 6, "a quad a visible glyph");
-  if (text->idx_count != 13 * 6)
+  if (text->idx_count != 13 * 6) {
+    free(frame_vtx);
+    free(frame_idx);
     return;
+  }
   for (q = 0; q < 13; q++) {
     float x0 = 1e9f, y0 = 1e9f, x1 = -1e9f, y1 = -1e9f;
     int k;
     for (k = 0; k < 6; k++) {
-      const ovl_vertex_t *v = &dd->vtx[dd->idx[text->idx_offset + q * 6 + k]];
+      const ovl_vertex_t *v =
+          &frame_vtx[text->vtx_offset + frame_idx[text->idx_offset + q * 6 + k]];
       if (v->x < x0)
         x0 = v->x;
       if (v->y < y0)
@@ -158,6 +181,8 @@ static void check_quads(const ovl_draw_data_t *dd) {
       CHECK(0, "a glyph where ImGui put it");
     }
   }
+  free(frame_vtx);
+  free(frame_idx);
 }
 
 static void check_atlas(void) {
