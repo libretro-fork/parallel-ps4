@@ -78,15 +78,11 @@ class ImeUi : public ImGui::Layer {
 
     bool first_render = true;
     bool accept_armed = false;
-    bool native_input_active = false;
     bool pointer_navigation_active = true;
     EditMenuPopup edit_menu_popup = EditMenuPopup::None;
     bool menu_activate_armed = true;
     bool l2_shortcut_armed = true;
-    bool request_input_focus = false;
-    bool request_input_select_all = false;
     bool text_select_mode = false;
-    bool pending_input_selection_apply = false;
     bool prev_virtual_cross_down = false;
     bool prev_virtual_lstick_left_down = false;
     bool prev_virtual_lstick_right_down = false;
@@ -113,7 +109,6 @@ class ImeUi : public ImGui::Layer {
     double virtual_dpad_down_next_repeat_time = 0.0;
     ImeEdgeWrapNavState panel_vertical_nav_state{};
     bool panel_position_initialized = false;
-    bool panel_drag_active = false;
     bool gamepad_input_capture_active = false;
     ImVec2 panel_position{};
     int input_cursor_utf16 = 0;
@@ -147,9 +142,7 @@ public:
 private:
     void Free();
 
-    bool DrawInputText(const ImePanelMetrics& metrics, bool pointer_selection_enabled);
-
-    static int InputTextCallback(ImGuiInputTextCallbackData* data);
+    void DrawInputText(const ImePanelMetrics& metrics);
 };
 
 }; // namespace Libraries::Ime

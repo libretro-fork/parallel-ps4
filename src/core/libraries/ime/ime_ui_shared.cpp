@@ -377,51 +377,6 @@ int Utf8ByteIndexFromUtf16Index(const char* text, int utf16_index) {
     return static_cast<int>(p - text);
 }
 
-bool RejectInputCharByUtf16Limit(const ImGuiInputTextCallbackData* data, int max_utf16) {
-    if (!data || max_utf16 < 0 || data->EventChar == 0) {
-        return false;
-    }
-    ImGuiContext* g = data->Ctx;
-    if (!g) {
-        return false;
-    }
-    ImGuiInputTextState* st = &g->InputTextState;
-    if (!st || !st->TextSrc) {
-        return false;
-    }
-
-    const int cur_units = Utf16CountFromUtf8Range(st->TextSrc, st->TextSrc + st->TextLen);
-    int selected_units = 0;
-    if (st->HasSelection()) {
-        const int sel_begin = st->GetSelectionStart();
-        const int sel_end = st->GetSelectionEnd();
-        selected_units = Utf16CountFromUtf8Range(st->TextSrc + sel_begin, st->TextSrc + sel_end);
-    }
-
-    const int incoming_units = data->EventChar > 0xFFFF ? 2 : 1;
-    const int remaining_units = max_utf16 - (cur_units - selected_units);
-    return remaining_units < incoming_units;
-}
-
-bool ClampInputBufferToUtf16Limit(ImGuiInputTextCallbackData* data, int max_utf16) {
-    if (!data || max_utf16 < 0) {
-        return false;
-    }
-    const int utf16_len = Utf16CountFromUtf8Range(data->Buf, data->Buf + data->BufTextLen);
-    if (utf16_len <= max_utf16) {
-        return false;
-    }
-
-    const int keep_bytes = Utf8ByteIndexFromUtf16Index(data->Buf, max_utf16);
-    if (keep_bytes < data->BufTextLen) {
-        data->DeleteChars(keep_bytes, data->BufTextLen - keep_bytes);
-    }
-    data->CursorPos = std::clamp(data->CursorPos, 0, data->BufTextLen);
-    data->SelectionStart = std::clamp(data->SelectionStart, 0, data->BufTextLen);
-    data->SelectionEnd = std::clamp(data->SelectionEnd, 0, data->BufTextLen);
-    return true;
-}
-
 void DrawInactiveCaretOverlay(const ImRect& frame_rect, const char* text, int caret_byte,
                               int selection_start_byte, int selection_end_byte, bool multiline) {
     if (!text) {
@@ -494,7 +449,7 @@ static float ApplyAxisDeadzone(float v) {
 }
 
 VirtualPadSnapshot ReadVirtualPadSnapshot(Libraries::UserService::OrbisUserServiceUserId user_id,
-                                          float delta_time, bool include_imgui_fallback) {
+                                          float delta_time) {
     VirtualPadSnapshot snapshot{};
     constexpr u32 kMaskLeft = static_cast<u32>(Libraries::Pad::OrbisPadButtonDataOffset::Left);
     constexpr u32 kMaskRight = static_cast<u32>(Libraries::Pad::OrbisPadButtonDataOffset::Right);
@@ -539,64 +494,6 @@ VirtualPadSnapshot ReadVirtualPadSnapshot(Libraries::UserService::OrbisUserServi
             static_cast<float>(state.axes[static_cast<std::size_t>(Input::Axis::TriggerRight)]) /
                 255.0f,
             0.0f, 1.0f);
-    }
-
-    if (include_imgui_fallback) {
-        const float imgui_lx =
-            ApplyAxisDeadzone(ImGui::GetKeyData(ImGuiKey_GamepadLStickRight)->AnalogValue -
-                              ImGui::GetKeyData(ImGuiKey_GamepadLStickLeft)->AnalogValue);
-        const float imgui_ly =
-            ApplyAxisDeadzone(ImGui::GetKeyData(ImGuiKey_GamepadLStickDown)->AnalogValue -
-                              ImGui::GetKeyData(ImGuiKey_GamepadLStickUp)->AnalogValue);
-        const float imgui_rx =
-            ApplyAxisDeadzone(ImGui::GetKeyData(ImGuiKey_GamepadRStickRight)->AnalogValue -
-                              ImGui::GetKeyData(ImGuiKey_GamepadRStickLeft)->AnalogValue);
-        const float imgui_ry =
-            ApplyAxisDeadzone(ImGui::GetKeyData(ImGuiKey_GamepadRStickDown)->AnalogValue -
-                              ImGui::GetKeyData(ImGuiKey_GamepadRStickUp)->AnalogValue);
-        const float imgui_l2 =
-            std::clamp(ImGui::GetKeyData(ImGuiKey_GamepadL2)->AnalogValue, 0.0f, 1.0f);
-        const float imgui_r2 =
-            std::clamp(ImGui::GetKeyData(ImGuiKey_GamepadR2)->AnalogValue, 0.0f, 1.0f);
-
-        if (std::abs(imgui_lx) > std::abs(lx)) {
-            lx = imgui_lx;
-        }
-        if (std::abs(imgui_ly) > std::abs(ly)) {
-            ly = imgui_ly;
-        }
-        if (std::abs(imgui_rx) > std::abs(rx)) {
-            rx = imgui_rx;
-        }
-        if (std::abs(imgui_ry) > std::abs(ry)) {
-            ry = imgui_ry;
-        }
-        l2_analog = std::max(l2_analog, imgui_l2);
-        r2_analog = std::max(r2_analog, imgui_r2);
-
-        const auto merge_imgui_button = [&](const ImGuiKey key, const u32 mask) {
-            if (ImGui::IsKeyDown(key)) {
-                buttons |= mask;
-            }
-        };
-        merge_imgui_button(ImGuiKey_GamepadDpadLeft, kMaskLeft);
-        merge_imgui_button(ImGuiKey_GamepadDpadRight, kMaskRight);
-        merge_imgui_button(ImGuiKey_GamepadDpadUp, kMaskUp);
-        merge_imgui_button(ImGuiKey_GamepadDpadDown, kMaskDown);
-        merge_imgui_button(ImGuiKey_GamepadFaceDown, kMaskCross);
-        merge_imgui_button(ImGuiKey_GamepadFaceUp, kMaskTriangle);
-        merge_imgui_button(ImGuiKey_GamepadFaceLeft, kMaskSquare);
-        merge_imgui_button(ImGuiKey_GamepadFaceRight, kMaskCircle);
-        merge_imgui_button(ImGuiKey_GamepadL1, kMaskL1);
-        merge_imgui_button(ImGuiKey_GamepadR1, kMaskR1);
-        merge_imgui_button(ImGuiKey_GamepadL3, kMaskL3);
-        merge_imgui_button(ImGuiKey_GamepadR3, kMaskR3);
-        if (l2_analog >= kTriggerButtonThreshold) {
-            buttons |= kMaskL2;
-        }
-        if (r2_analog >= kTriggerButtonThreshold) {
-            buttons |= kMaskR2;
-        }
     }
 
     snapshot.buttons = buttons;
@@ -992,16 +889,6 @@ OskPadInputFrame ComputeOskPadInputFrame(const VirtualPadSnapshot& virtual_pad,
         frame.virtual_lstick_dirs.up && !prev_virtual_lstick_up_down;
     const bool virtual_lstick_down_edge =
         frame.virtual_lstick_dirs.down && !prev_virtual_lstick_down_down;
-
-    const bool raw_virtual_control_input =
-        virtual_pressed(kMaskLeft) || virtual_pressed(kMaskRight) || virtual_pressed(kMaskUp) ||
-        virtual_pressed(kMaskDown) || virtual_lstick_left_edge || virtual_lstick_right_edge ||
-        virtual_lstick_up_edge || virtual_lstick_down_edge || virtual_pressed(kMaskCross) ||
-        virtual_pressed(kMaskTriangle) || virtual_pressed(kMaskSquare) ||
-        virtual_pressed(kMaskCircle) || virtual_pressed(kMaskL1) || virtual_pressed(kMaskR1) ||
-        virtual_pressed(kMaskL2) || virtual_pressed(kMaskR2) || virtual_pressed(kMaskL3) ||
-        virtual_pressed(kMaskR3);
-    frame.raw_osk_control_input = raw_virtual_control_input;
 
     float stick_strength = 0.0f;
     const StickNavDirection stick_dir = ResolveStickNavDirection(

@@ -30,8 +30,6 @@ constexpr float kSelectorPressPulseExpandBorderFactor = 1.0f;
 ImVec4 BrightenColor(ImU32 color, float delta);
 int Utf16CountFromUtf8Range(const char* text, const char* end = nullptr);
 int Utf8ByteIndexFromUtf16Index(const char* text, int utf16_index);
-bool RejectInputCharByUtf16Limit(const ImGuiInputTextCallbackData* data, int max_utf16);
-bool ClampInputBufferToUtf16Limit(ImGuiInputTextCallbackData* data, int max_utf16);
 void DrawInactiveCaretOverlay(const ImRect& frame_rect, const char* text, int caret_byte,
                               int selection_start_byte, int selection_end_byte,
                               bool multiline = false);
@@ -65,7 +63,7 @@ void InitializeDefaultOskSelectionAnchor(const ImeKbLayoutSelection& layout_sele
                                          OrbisImeExtOption ext_option, int& pending_row,
                                          int& pending_col, int& last_row, int& last_col);
 VirtualPadSnapshot ReadVirtualPadSnapshot(Libraries::UserService::OrbisUserServiceUserId user_id,
-                                          float delta_time, bool include_imgui_fallback = true);
+                                          float delta_time);
 
 struct OskPadInputState {
     u32& prev_virtual_buttons;
@@ -124,7 +122,6 @@ struct OskPadInputFrame {
     bool nav_right_repeat = false;
     bool nav_up_repeat = false;
     bool nav_down_repeat = false;
-    bool raw_osk_control_input = false;
     bool virtual_control_input = false;
     bool osk_control_input = false;
 };
@@ -240,12 +237,13 @@ inline bool CloseOskEditMenuOnCancel(EditMenuPopupT& popup, bool& cancel_pressed
 }
 
 template <typename EditMenuPopupT, typename PanelMetricsT, typename ApplyActionFn>
-inline bool DrawAndHandleOskEditMenuPopup(
-    EditMenuPopupT& popup, int& edit_menu_index, const PanelMetricsT& metrics, ImDrawList* draw,
-    bool pointer_navigation_active, bool nav_up, bool nav_down, bool cross_down,
-    bool panel_activate_pressed, bool opened_menu_this_frame, bool& menu_activate_armed,
-    bool clipboard_ready, int id_base, const char* item_button_id, bool close_on_outside_click,
-    ApplyActionFn&& apply_action) {
+inline bool DrawAndHandleOskEditMenuPopup(EditMenuPopupT& popup, int& edit_menu_index,
+                                          const PanelMetricsT& metrics, ImDrawList* draw,
+                                          bool pointer_navigation_active, bool nav_up,
+                                          bool nav_down, bool cross_down,
+                                          bool panel_activate_pressed, bool opened_menu_this_frame,
+                                          bool& menu_activate_armed, bool clipboard_ready,
+                                          ApplyActionFn&& apply_action) {
     if (popup == EditMenuPopupT::None || draw == nullptr) {
         return false;
     }
@@ -292,7 +290,6 @@ inline bool DrawAndHandleOskEditMenuPopup(
     RearmMenuActivateOnRelease(cross_down, menu_activate_armed);
     const bool menu_activate = ConsumeMenuActivatePress(
         panel_activate_pressed, opened_menu_this_frame, menu_activate_armed);
-    bool click_activate = false;
     for (int i = 0; i < item_count; ++i) {
         const float item_y = menu_pos.y + menu_inner_pad + i * (item_h + item_gap);
         const ImVec2 item_pos{menu_pos.x + menu_inner_pad, item_y};
@@ -307,20 +304,6 @@ inline bool DrawAndHandleOskEditMenuPopup(
         draw->AddRect(item_pos, {item_pos.x + item_size.x, item_pos.y + item_size.y},
                       IM_COL32(90, 90, 90, 255), metrics.corner_radius * 0.6f);
 
-        ImGui::PushID(id_base + i);
-        ImGui::SetCursorScreenPos(item_pos);
-        ImGui::PushItemFlag(ImGuiItemFlags_NoNav, true);
-        ImGui::InvisibleButton(item_button_id, item_size);
-        ImGui::PopItemFlag();
-        if (ImGui::IsItemHovered()) {
-            edit_menu_index = i;
-        }
-        if (ImGui::IsItemClicked(ImGuiMouseButton_Left) && enabled) {
-            edit_menu_index = i;
-            click_activate = true;
-        }
-        ImGui::PopID();
-
         const char* label = item_label(i);
         const ImVec2 text_size = ImGui::CalcTextSize(label);
         const ImVec2 text_pos{
@@ -332,17 +315,7 @@ inline bool DrawAndHandleOskEditMenuPopup(
         draw->AddText(text_pos, text_col, label);
     }
 
-    const bool outside_click_close = close_on_outside_click && pointer_navigation_active &&
-                                     !opened_menu_this_frame &&
-                                     ImGui::IsMouseClicked(ImGuiMouseButton_Left, false) &&
-                                     !ImGui::IsMouseHoveringRect(menu_pos, menu_max, false);
-    if (outside_click_close) {
-        popup = EditMenuPopupT::None;
-        menu_activate_armed = true;
-        return true;
-    }
-
-    if ((menu_activate || click_activate) && item_enabled(edit_menu_index)) {
+    if (menu_activate && item_enabled(edit_menu_index)) {
         const EditMenuPopupT previous_popup = popup;
         apply_action(previous_popup, edit_menu_index);
         if (popup != EditMenuPopupT::None && popup != previous_popup) {

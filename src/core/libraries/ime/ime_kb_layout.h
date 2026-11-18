@@ -171,16 +171,6 @@ struct ImeSelectionGridIndex {
                                  PanelKeyboardMinRowForTopPanel(top_panel_row, top_panel_rows),
                              keyboard_rows, top_panel_row, top_panel_rows);
     }
-
-    static int GridColumnFromX(float x, float left, float width, int min_col, int max_col) {
-        if (max_col < min_col || width <= 0.0f) {
-            return min_col;
-        }
-        const float t = std::clamp((x - left) / width, 0.0f, 0.9999f);
-        const int span = max_col - min_col + 1;
-        const int offset = std::clamp(static_cast<int>(t * static_cast<float>(span)), 0, span - 1);
-        return min_col + offset;
-    }
 };
 
 enum class ImeKbLayoutFamily : u8 {
@@ -499,8 +489,6 @@ struct ImeKbDrawState {
     int selected_row = -1;
     int selected_col = -1;
     ImVec2 selected_center{};
-    bool hovered = false;
-    bool clicked = false;
 };
 
 struct ImePanelMetricsConfig {
