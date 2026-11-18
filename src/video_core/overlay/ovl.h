@@ -309,6 +309,9 @@ enum ovl_color {
     OVL_COLOR_TEXT_SELECTED_BG,
     OVL_COLOR_NAV_CURSOR,
     OVL_COLOR_MODAL_WINDOW_DIM_BG,
+    /* After ImGui's own order: a ticked checkbox's square, a text field's caret */
+    OVL_COLOR_CHECKBOX_SELECTED_BG,
+    OVL_COLOR_INPUT_TEXT_CURSOR,
     OVL_COLOR_COUNT
 };
 
@@ -449,6 +452,19 @@ int ovl_invisible_button(const char* id, ovl_vec2_t size);
 int ovl_selectable(const char* label, int selected, ovl_vec2_t size);
 void ovl_image(ovl_tex_t tex, ovl_vec2_t size, ovl_vec2_t uv0, ovl_vec2_t uv1);
 void ovl_progress_bar(float fraction, ovl_vec2_t size, const char* overlay);
+/* ImGui's Checkbox: 1 when cross changed *@v */
+int ovl_checkbox(const char* label, int* v);
+/* ImGui's SetNextItemWidth, for the next item that takes a width (a text field): below 0, that
+ * far short of the window's right edge */
+void ovl_set_next_item_width(float width);
+/* ImGui's InputTextWithHint, a line of text (UTF-8, @buf_size bytes with its end) in a frame,
+ * @hint shown while it is empty (null: none). Cross on it makes it the active item: the caret
+ * shows and blinks, the d-pad's left and right are its own, and cross again or circle lets it
+ * go. The overlays are given no keyboard and no characters (the pad only), so nothing typed
+ * reaches it: what it holds is what @buf holds. 1 when it changed @buf. A text up to
+ * OVL_INPUT_TEXT_MAX bytes while it is active. */
+#define OVL_INPUT_TEXT_MAX 4096
+int ovl_input_text_with_hint(const char* label, const char* hint, char* buf, size_t buf_size);
 
 int ovl_is_item_hovered(void);
 int ovl_is_item_active(void);

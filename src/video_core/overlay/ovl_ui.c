@@ -190,6 +190,22 @@ static struct {
     uint32_t active_id, active_id_is_alive, active_id_previous_frame;
     window_t* active_id_window;
     int active_id_source;
+    int active_id_just_activated;     /* ActiveIdIsJustActivated */
+    unsigned active_id_using_nav_dir; /* ActiveIdUsingNavDirMask: a bit a direction */
+
+    /* SetNextItemWidth */
+    int next_item_width_set;
+    float next_item_width;
+
+    /* the text field being edited, as ImGui's InputTextState: one at a time */
+    struct {
+        uint32_t id;
+        int text_len;
+        int cursor, select_start, select_end; /* in bytes */
+        float cursor_anim;
+        float scroll_x;
+        char text[OVL_INPUT_TEXT_MAX + 1];
+    } input;
 
     /* input */
     key_data_t keys[MAX_KEYS];
@@ -360,6 +376,13 @@ static void style_dark(style_t* s) {
     c[OVL_COLOR_TEXT_SELECTED_BG] = v4(0.26f, 0.59f, 0.98f, 0.35f);
     c[OVL_COLOR_NAV_CURSOR] = v4(0.26f, 0.59f, 0.98f, 1.00f);
     c[OVL_COLOR_MODAL_WINDOW_DIM_BG] = v4(0.80f, 0.80f, 0.80f, 0.35f);
+    /* ImLerp(FrameBg, FrameBgHovered, 0.65f) */
+    c[OVL_COLOR_CHECKBOX_SELECTED_BG] =
+        v4(lerpf(c[OVL_COLOR_FRAME_BG].x, c[OVL_COLOR_FRAME_BG_HOVERED].x, 0.65f),
+           lerpf(c[OVL_COLOR_FRAME_BG].y, c[OVL_COLOR_FRAME_BG_HOVERED].y, 0.65f),
+           lerpf(c[OVL_COLOR_FRAME_BG].z, c[OVL_COLOR_FRAME_BG_HOVERED].z, 0.65f),
+           lerpf(c[OVL_COLOR_FRAME_BG].w, c[OVL_COLOR_FRAME_BG_HOVERED].w, 0.65f));
+    c[OVL_COLOR_INPUT_TEXT_CURSOR] = c[OVL_COLOR_TEXT];
 }
 
 ovl_vec4_t ovl_style_color(enum ovl_color idx) {
@@ -783,6 +806,9 @@ static void set_nav_cursor_visible_after_move(void) {
 }
 
 static void set_active_id(uint32_t id, window_t* w) {
+    g.active_id_just_activated = g.active_id != id;
+    /* What the item before claimed is let go */
+    g.active_id_using_nav_dir = 0;
     g.active_id = id;
     g.active_id_window = w;
     if (id)
@@ -994,16 +1020,20 @@ static void nav_create_move(int gamepad) {
     rect_t scoring;
     g.nav_move_dir = DIR_NONE;
     if (w && !(w->flags & OVL_WINDOW_NO_NAV_INPUTS)) {
-        if ((gamepad && key_pressed(OVL_KEY_PAD_DPAD_LEFT, 1, 1)) ||
-            key_pressed(OVL_KEY_LEFT, 1, 1))
+        /* Not in a direction the active item uses itself (IsActiveIdUsingNavDir) */
+        const unsigned used = g.active_id_using_nav_dir;
+        if (!(used & (1u << DIR_LEFT)) && ((gamepad && key_pressed(OVL_KEY_PAD_DPAD_LEFT, 1, 1)) ||
+                                           key_pressed(OVL_KEY_LEFT, 1, 1)))
             g.nav_move_dir = DIR_LEFT;
-        if ((gamepad && key_pressed(OVL_KEY_PAD_DPAD_RIGHT, 1, 1)) ||
-            key_pressed(OVL_KEY_RIGHT, 1, 1))
+        if (!(used & (1u << DIR_RIGHT)) &&
+            ((gamepad && key_pressed(OVL_KEY_PAD_DPAD_RIGHT, 1, 1)) ||
+             key_pressed(OVL_KEY_RIGHT, 1, 1)))
             g.nav_move_dir = DIR_RIGHT;
-        if ((gamepad && key_pressed(OVL_KEY_PAD_DPAD_UP, 1, 1)) || key_pressed(OVL_KEY_UP, 1, 1))
+        if (!(used & (1u << DIR_UP)) &&
+            ((gamepad && key_pressed(OVL_KEY_PAD_DPAD_UP, 1, 1)) || key_pressed(OVL_KEY_UP, 1, 1)))
             g.nav_move_dir = DIR_UP;
-        if ((gamepad && key_pressed(OVL_KEY_PAD_DPAD_DOWN, 1, 1)) ||
-            key_pressed(OVL_KEY_DOWN, 1, 1))
+        if (!(used & (1u << DIR_DOWN)) && ((gamepad && key_pressed(OVL_KEY_PAD_DPAD_DOWN, 1, 1)) ||
+                                           key_pressed(OVL_KEY_DOWN, 1, 1)))
             g.nav_move_dir = DIR_DOWN;
     }
     if (g.nav_move_dir != DIR_NONE) {
@@ -1174,6 +1204,9 @@ void ovl_new_frame(float display_w, float display_h, float delta_time) {
         clear_active_id();
     g.active_id_previous_frame = g.active_id;
     g.active_id_is_alive = 0;
+    g.active_id_just_activated = 0;
+    if (g.active_id == 0)
+        g.active_id_using_nav_dir = 0;
 
     /* The input, as ImGui's UpdateKeyboardInputs: a gamepad's only while one is connected */
     for (i = 1; i < MAX_KEYS; i++) {
@@ -2180,6 +2213,7 @@ static void nav_process_item(void) {
 static int item_add(uint32_t id, ovl_vec2_t min, ovl_vec2_t max) {
     window_t* w = g.current;
     const float* c;
+    g.next_item_width_set = 0; /* for the item that asked: this one, or none */
     g.last_id = id;
     g.last_min = min;
     g.last_max = max;
@@ -2532,6 +2566,256 @@ int ovl_button(const char* label, ovl_vec2_t size_arg) {
                             ovl_color_u32(OVL_COLOR_TEXT, 1.0f), clip);
     }
     return pressed;
+}
+
+/* ImGui's RenderFrame: the fill, and the frame's border when the style has one */
+static void render_frame(ovl_vec2_t mn, ovl_vec2_t mx, ovl_col_t fill, float rounding) {
+    window_t* w = g.current;
+    const float bs = g.style.frame_border_size;
+    ovl_add_rect_filled(&w->dl, mn, mx, fill, rounding, 0);
+    if (bs > 0.0f) {
+        ovl_add_rect(&w->dl, v2(mn.x + 1.0f, mn.y + 1.0f), v2(mx.x + 1.0f, mx.y + 1.0f),
+                     ovl_color_u32(OVL_COLOR_BORDER_SHADOW, 1.0f), rounding, 0, bs);
+        ovl_add_rect(&w->dl, mn, mx, ovl_color_u32(OVL_COLOR_BORDER, 1.0f), rounding, 0, bs);
+    }
+}
+
+/* ImGui's RenderCheckMark */
+static void render_check_mark(ovl_draw_list_t* dl, ovl_vec2_t pos, ovl_col_t col, float sz) {
+    const float thickness = maxf(sz / 5.0f, 1.0f);
+    ovl_vec2_t pts[3];
+    float third, bx, by;
+    sz -= thickness * 0.5f;
+    pos.x += thickness * 0.25f;
+    pos.y += thickness * 0.25f;
+    third = sz / 3.0f;
+    bx = pos.x + third;
+    by = pos.y + sz - third * 0.5f;
+    pts[0] = v2(bx - third, by - third);
+    pts[1] = v2(bx, by);
+    pts[2] = v2(bx + third * 2.0f, by - third * 2.0f);
+    ovl_add_polyline(dl, pts, 3, col, 0, thickness);
+}
+
+int ovl_checkbox(const char* label, int* v) {
+    window_t* w = g.current;
+    const char* lend;
+    ovl_vec2_t label_size, pos, total_max, check_max;
+    uint32_t id;
+    float square;
+    int hovered, held, pressed;
+    if (!w)
+        return 0;
+    lend = label_end(label);
+    id = hash_str(label, NULL, id_seed());
+    label_size = ovl_calc_text_size(label, lend, 0.0f);
+    square = ovl_frame_height();
+    pos = w->cursor_pos;
+    total_max.x =
+        pos.x + square + (label_size.x > 0.0f ? g.style.item_inner_spacing.x + label_size.x : 0.0f);
+    total_max.y = pos.y + label_size.y + g.style.frame_padding.y * 2.0f;
+    item_size(v2(total_max.x - pos.x, total_max.y - pos.y), g.style.frame_padding.y);
+    if (!item_add(id, pos, total_max))
+        return 0;
+    pressed = button_behavior(id, &hovered, &held);
+    if (pressed)
+        *v = !*v;
+    check_max = v2(pos.x + square, pos.y + square);
+    render_nav_cursor(pos, total_max, id, -1.0f);
+    render_frame(pos, check_max,
+                 ovl_color_u32((held && hovered) ? OVL_COLOR_FRAME_BG_ACTIVE
+                               : hovered         ? OVL_COLOR_FRAME_BG_HOVERED
+                               : *v              ? OVL_COLOR_CHECKBOX_SELECTED_BG
+                                                 : OVL_COLOR_FRAME_BG,
+                               1.0f),
+                 g.style.frame_rounding);
+    if (*v) {
+        const float pad = maxf(1.0f, truncf_(square / 6.0f));
+        render_check_mark(&w->dl, v2(pos.x + pad, pos.y + pad),
+                          ovl_color_u32(OVL_COLOR_CHECK_MARK, 1.0f), square - pad * 2.0f);
+    }
+    if (label_size.x > 0.0f)
+        render_text(v2(check_max.x + g.style.item_inner_spacing.x, pos.y + g.style.frame_padding.y),
+                    label, lend, 0.0f, ovl_color_u32(OVL_COLOR_TEXT, 1.0f));
+    return pressed;
+}
+
+void ovl_set_next_item_width(float width) {
+    g.next_item_width_set = 1;
+    g.next_item_width = width;
+}
+
+/* ImGui's CalcItemWidth: what was set for the next item, or the window's default (65% of a
+ * window with a width of its own, 16 font heights of one that fits its contents) */
+static float calc_item_width(void) {
+    const window_t* w = g.current;
+    float width;
+    if (g.next_item_width_set)
+        width = g.next_item_width;
+    else if (w->size.x > 0.0f && !(w->flags & OVL_WINDOW_ALWAYS_AUTO_RESIZE))
+        width = truncf_(w->size.x * 0.65f);
+    else
+        width = truncf_(g.font_size * 16.0f);
+    if (width < 0.0f)
+        width = maxf(1.0f, ovl_content_region_avail().x + width);
+    return truncf_(width);
+}
+
+/* ImGui's InputTextEx for one line, as far as the pad reaches it (the overlays are given no
+ * keyboard, characters or mouse): made active by cross, its text selected and the caret shown,
+ * blinking; left and right its own while it is; let go by cross again (validated) or by circle
+ * (navigation's cancel). Nothing edits the text, so none is written back. */
+int ovl_input_text_with_hint(const char* label, const char* hint, char* buf, size_t buf_size) {
+    window_t* w = g.current;
+    const char* lend;
+    const char* display;
+    const char* display_end;
+    ovl_vec2_t label_size, frame_size, frame_min, frame_max, total_max, draw_pos;
+    uint32_t id;
+    int state, requested, select_all = 0, clear = 0, render_cursor, render_selection, from_state;
+    int displaying_hint;
+    float clip[4], cursor_x = 0.0f;
+    ovl_col_t text_col;
+    (void)buf_size;
+    if (!w)
+        return 0;
+    lend = label_end(label);
+    id = hash_str(label, NULL, id_seed());
+    label_size = ovl_calc_text_size(label, lend, 0.0f);
+    frame_size = calc_item_size(v2(0.0f, 0.0f), calc_item_width(),
+                                label_size.y + g.style.frame_padding.y * 2.0f);
+    frame_min = w->cursor_pos;
+    frame_max = v2(frame_min.x + frame_size.x, frame_min.y + frame_size.y);
+    total_max =
+        v2(frame_max.x + (label_size.x > 0.0f ? g.style.item_inner_spacing.x + label_size.x : 0.0f),
+           frame_max.y);
+    item_size(v2(total_max.x - frame_min.x, frame_size.y), g.style.frame_padding.y);
+    if (!item_add(id, frame_min, total_max))
+        return 0;
+
+    state = g.input.id == id;
+    requested = g.active_id != id && g.nav_activate_id == id;
+    if (requested) {
+        size_t len = strlen(buf);
+        int recycle;
+        if (len > OVL_INPUT_TEXT_MAX)
+            len = OVL_INPUT_TEXT_MAX;
+        /* The caret kept if it comes back to the same field with the same text */
+        recycle = state && g.input.text_len == (int)len && memcmp(g.input.text, buf, len) == 0;
+        g.input.id = id;
+        g.input.text_len = (int)len;
+        memcpy(g.input.text, buf, len);
+        g.input.text[len] = '\0';
+        g.input.cursor_anim = -0.30f;
+        g.input.scroll_x = 0.0f;
+        if (!recycle)
+            g.input.cursor = g.input.select_start = g.input.select_end = 0;
+        /* From navigation, everything is selected */
+        select_all = 1;
+        state = 1;
+        set_active_id(id, w);
+        g.active_id_source = g.nav_source;
+        set_focus_id(id, w);
+        focus_window(w);
+        set_nav_cursor_visible_after_move();
+    }
+    if (g.active_id == id) {
+        g.active_id_using_nav_dir |= (1u << DIR_LEFT) | (1u << DIR_RIGHT);
+        if (g.input.cursor > g.input.text_len)
+            g.input.cursor = g.input.text_len;
+        if (g.input.select_start > g.input.text_len)
+            g.input.select_start = g.input.text_len;
+        if (g.input.select_end > g.input.text_len)
+            g.input.select_end = g.input.text_len;
+    }
+    render_cursor = g.active_id == id;
+    render_selection =
+        state && (g.input.select_start != g.input.select_end || select_all) && render_cursor;
+    from_state = render_cursor && state;
+    displaying_hint = hint && (from_state ? g.input.text : buf)[0] == '\0';
+    if (g.active_id == id) {
+        if (select_all) {
+            g.input.select_start = 0;
+            g.input.cursor = g.input.select_end = g.input.text_len;
+        }
+        /* Cross again validates it: let go (not the press that made it active) */
+        if (!g.active_id_just_activated && g.gamepad_connected &&
+            key_pressed(OVL_KEY_PAD_FACE_DOWN, 0, 0))
+            clear = 1;
+        render_selection |= g.input.select_start != g.input.select_end && render_cursor;
+    }
+    if (g.active_id == id && clear)
+        clear_active_id();
+
+    render_nav_cursor(frame_min, frame_max, id, -1.0f);
+    render_frame(frame_min, frame_max, ovl_color_u32(OVL_COLOR_FRAME_BG, 1.0f),
+                 g.style.frame_rounding);
+    draw_pos = v2(frame_min.x + g.style.frame_padding.x, frame_min.y + g.style.frame_padding.y);
+    clip[0] = frame_min.x;
+    clip[1] = frame_min.y;
+    clip[2] = frame_max.x;
+    clip[3] = frame_max.y;
+    if (displaying_hint) {
+        display = hint;
+        display_end = hint + strlen(hint);
+    } else if (from_state) {
+        display = g.input.text;
+        display_end = display + g.input.text_len;
+    } else {
+        display = buf;
+        display_end = buf + strlen(buf);
+    }
+    if (render_cursor && state)
+        cursor_x = ovl_font_calc_text_size(current_font(), g.font_size, 0.0f, display,
+                                           display + (displaying_hint ? 0 : g.input.cursor))
+                       .x;
+    text_col = ovl_color_u32(displaying_hint ? OVL_COLOR_TEXT_DISABLED : OVL_COLOR_TEXT, 1.0f);
+    ovl_push_clip(&w->dl, v2(clip[0], clip[1]), v2(clip[2], clip[3]), 1);
+    if (render_selection && !displaying_hint) {
+        const int a =
+            g.input.select_start < g.input.select_end ? g.input.select_start : g.input.select_end;
+        const int b =
+            g.input.select_start < g.input.select_end ? g.input.select_end : g.input.select_start;
+        if (a < b) {
+            /* The selection's box: a pixel above the line to two below it */
+            ovl_vec2_t mn, mx;
+            mn.x = draw_pos.x - g.input.scroll_x + ovl_calc_text_size(display, display + a, 0.0f).x;
+            mn.y = draw_pos.y - 1.0f;
+            mx.x = mn.x + ovl_calc_text_size(display + a, display + b, 0.0f).x;
+            mx.y = draw_pos.y + 2.0f + g.font_size;
+            mn.x = minf(maxf(mn.x, clip[0]), clip[2]);
+            mx.x = minf(maxf(mx.x, clip[0]), clip[2]);
+            mn.y = minf(maxf(mn.y, clip[1]), clip[3]);
+            mx.y = minf(maxf(mx.y, clip[1]), clip[3]);
+            ovl_add_rect_filled(&w->dl, mn, mx, ovl_color_u32(OVL_COLOR_TEXT_SELECTED_BG, 1.0f),
+                                0.0f, 0);
+        }
+    }
+    if (display != display_end && (text_col & 0xFF000000u))
+        render_text(v2(draw_pos.x - g.input.scroll_x * (float)(render_cursor || render_selection),
+                       draw_pos.y),
+                    display, display_end, 0.0f, text_col);
+    if (render_cursor) {
+        const float x = truncf_(draw_pos.x + cursor_x - g.input.scroll_x);
+        const float y = truncf_(draw_pos.y + g.font_size);
+        const float y0 = y - g.font_size + 0.5f, y1 = y - 1.5f;
+        g.input.cursor_anim += g.delta;
+        if ((g.input.cursor_anim <= 0.0f || fmod(g.input.cursor_anim, 1.20f) <= 0.80f) &&
+            x < clip[2] && x + 1.0f > clip[0] && y0 < clip[3] && y1 > clip[1]) {
+            /* ImDrawList::AddLineV */
+            ovl_vec2_t pts[2];
+            pts[0] = v2(x + 0.5f, y0 + 0.5f);
+            pts[1] = v2(x + 0.5f, y1 + 0.5f);
+            ovl_add_polyline(&w->dl, pts, 2, ovl_color_u32(OVL_COLOR_INPUT_TEXT_CURSOR, 1.0f), 0,
+                             1.0f);
+        }
+    }
+    ovl_pop_clip(&w->dl);
+    if (label_size.x > 0.0f)
+        render_text(
+            v2(frame_max.x + g.style.item_inner_spacing.x, frame_min.y + g.style.frame_padding.y),
+            label, lend, 0.0f, ovl_color_u32(OVL_COLOR_TEXT, 1.0f));
+    return 0;
 }
 
 int ovl_invisible_button(const char* str_id, ovl_vec2_t size_arg) {

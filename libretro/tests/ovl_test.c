@@ -579,6 +579,124 @@ static void check_commerce(void) {
   ovl_commerce_dialog_shutdown();
 }
 
+/* The checkbox and the text field, in a window as ImGui laid the same one
+ * out: ticked by cross; the field made active by cross, its caret blinking,
+ * left and right its own, let go by cross again and by circle */
+static int widget_checks[4];
+static char widget_text[3][128];
+
+static const ovl_draw_data_t *widgets_frame(enum ovl_key key, int first) {
+  static const enum ovl_key keys[] = {OVL_KEY_PAD_FACE_DOWN,
+                                      OVL_KEY_PAD_FACE_RIGHT,
+                                      OVL_KEY_PAD_DPAD_DOWN,
+                                      OVL_KEY_PAD_DPAD_LEFT,
+                                      OVL_KEY_PAD_DPAD_UP};
+  ovl_vec2_t pos, pivot, size;
+  unsigned i;
+  for (i = 0; i < sizeof(keys) / sizeof(keys[0]); i++)
+    ovl_key_event(keys[i], keys[i] == key);
+  ovl_new_frame(1920.0f, 1080.0f, 1.0f / 60.0f);
+  pos.x = 960.0f;
+  pos.y = 540.0f;
+  pivot.x = pivot.y = 0.5f;
+  size.x = 360.0f;
+  size.y = 300.0f;
+  ovl_set_next_window_pos(pos, OVL_COND_ALWAYS, pivot);
+  ovl_set_next_window_size(size, OVL_COND_ALWAYS);
+  if (first || !ovl_nav_active())
+    ovl_set_next_window_focus();
+  ovl_keep_nav_highlight();
+  if (ovl_begin("Widgets##w",
+                OVL_WINDOW_NO_DECORATION | OVL_WINDOW_NO_SAVED_SETTINGS)) {
+    size.x = 100.0f;
+    size.y = 30.0f;
+    ovl_checkbox("Lantern_99 (online)", &widget_checks[0]);
+    if (first)
+      ovl_set_item_current_nav_focus(0);
+    ovl_checkbox("Moth (offline)", &widget_checks[1]);
+    ovl_checkbox("##hidden", &widget_checks[2]);
+    ovl_same_line(0.0f, -1.0f);
+    ovl_checkbox("beside", &widget_checks[3]);
+    ovl_set_next_item_width(-1.0f);
+    ovl_input_text_with_hint("##filter", "Search friends", widget_text[0],
+                             sizeof(widget_text[0]));
+    ovl_input_text_with_hint("Name", NULL, widget_text[1],
+                             sizeof(widget_text[1]));
+    ovl_set_next_item_width(120.0f);
+    ovl_input_text_with_hint("##long", "hint", widget_text[2],
+                             sizeof(widget_text[2]));
+    ovl_button("A button", size);
+  }
+  ovl_end();
+  return ovl_render();
+}
+
+static void check_widgets(void) {
+  const ovl_draw_data_t *dd;
+  unsigned vtx, idx;
+  int frame, shown = 0, hidden = 0;
+  memset(widget_checks, 0, sizeof(widget_checks));
+  widget_checks[1] = 1;
+  memset(widget_text, 0, sizeof(widget_text));
+  strcpy(widget_text[1], "Kestrel");
+  strcpy(widget_text[2], "A line of text far longer than the field it is in, "
+                         "to be clipped at its edge");
+  ovl_set_gamepad_connected(1);
+  dd = widgets_frame(OVL_KEY_NONE, 1);
+  CHECK(dd->vtx_count == 456 && dd->idx_count == 840,
+        "checkboxes and text fields laid out and drawn as ImGui's");
+  dd = widgets_frame(OVL_KEY_NONE, 0);
+  CHECK(dd->vtx_count == 464 && dd->idx_count == 864,
+        "with the focus cursor, as ImGui's");
+  /* Cross ticks the first: its mark is three points' line */
+  widgets_frame(OVL_KEY_PAD_FACE_DOWN, 0);
+  widgets_frame(OVL_KEY_PAD_FACE_DOWN, 0);
+  dd = widgets_frame(OVL_KEY_NONE, 0);
+  CHECK(widget_checks[0] == 1 && dd->vtx_count == 476 && dd->idx_count == 900,
+        "ticked by cross, as ImGui's");
+  /* Down three times: the second, the hidden one, the filter */
+  for (frame = 0; frame < 9; frame++)
+    widgets_frame(frame % 3 == 0 ? OVL_KEY_PAD_DPAD_DOWN : OVL_KEY_NONE, 0);
+  dd = widgets_frame(OVL_KEY_NONE, 0);
+  vtx = dd->vtx_count;
+  idx = dd->idx_count;
+  /* Cross makes the field active: the caret, a line; it blinks, 0.8 s of
+   * every 1.2 s shown */
+  widgets_frame(OVL_KEY_PAD_FACE_DOWN, 0);
+  widgets_frame(OVL_KEY_PAD_FACE_DOWN, 0);
+  for (frame = 0; frame < 144; frame++) {
+    dd = widgets_frame(frame == 100 ? OVL_KEY_PAD_DPAD_LEFT : OVL_KEY_NONE, 0);
+    if (dd->vtx_count == vtx + 4 && dd->idx_count == idx + 6)
+      shown++;
+    else if (dd->vtx_count == vtx && dd->idx_count == idx)
+      hidden++;
+  }
+  CHECK(shown + hidden == 144 && shown > 80 && hidden > 30,
+        "the caret, blinking; left is the field's own: the focus stays");
+  /* Cross again lets it go */
+  widgets_frame(OVL_KEY_PAD_FACE_DOWN, 0);
+  for (frame = 0; frame < 60; frame++) {
+    dd = widgets_frame(OVL_KEY_NONE, 0);
+    if (dd->vtx_count != vtx)
+      break;
+  }
+  CHECK(frame == 60, "let go by cross: no caret");
+  /* And circle */
+  widgets_frame(OVL_KEY_PAD_FACE_DOWN, 0);
+  widgets_frame(OVL_KEY_NONE, 0);
+  dd = widgets_frame(OVL_KEY_NONE, 0);
+  CHECK(dd->vtx_count == vtx + 4, "active again");
+  widgets_frame(OVL_KEY_PAD_FACE_RIGHT, 0);
+  dd = widgets_frame(OVL_KEY_NONE, 0);
+  CHECK(dd->vtx_count == vtx, "let go by circle");
+  CHECK(widget_text[0][0] == '\0' && strcmp(widget_text[1], "Kestrel") == 0,
+        "the texts as they were");
+  /* The window drawn out */
+  ovl_key_event(OVL_KEY_PAD_FACE_RIGHT, 0);
+  ovl_new_frame(1920.0f, 1080.0f, 1.0f / 60.0f);
+  ovl_render();
+}
+
 /* A frame of the save data dialog's shape: a title between separators, a
  * scrolling child of twelve buttons flattened into the window, back below */
 static const ovl_draw_data_t *list_frame(int first, int down, int up) {
@@ -699,6 +817,7 @@ int main(int argc, char **argv) {
   check_dialogs();
   check_profile();
   check_commerce();
+  check_widgets();
   check_list();
   ovl_destroy();
   free(noto);
