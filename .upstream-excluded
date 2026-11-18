@@ -17,7 +17,8 @@ src/core/libraries/audio/openal_audio_out.cpp
 src/core/libraries/audio/openal_manager.h
 src/core/libraries/audio3d/audio3d_openal.cpp
 src/core/libraries/audio3d/audio3d_openal.h
-src/imgui/big_picture
+src/imgui
+externals/imgui
 src/sdl_window_apple.mm
 src/resources/big_picture/experimental.png
 src/resources/big_picture/folder.png
@@ -35,8 +36,6 @@ src/input/input_mouse.cpp
 src/input/input_mouse.h
 src/core/libraries/mouse/sdl_mouse.cpp
 src/core/libraries/mouse/sdl_mouse.h
-src/imgui/renderer/imgui_impl_sdl3.cpp
-src/imgui/renderer/imgui_impl_sdl3.h
 externals/sdl3
 externals/discord-rpc
 src/common/discord_rpc_handler.cpp

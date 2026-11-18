@@ -437,7 +437,7 @@ static int free_slots(const unsigned char *png, size_t size) {
 static void run(void) {
   size_t font_size, icon_size, gold_size, plat_size;
   unsigned char *font =
-      read_file("src/imgui/renderer/fonts/NotoSans-Regular.ttf", &font_size);
+      read_file("src/resources/fonts/NotoSans-Regular.ttf", &font_size);
   unsigned char *icon = read_file("src/resources/shadps4.png", &icon_size);
   unsigned char *gold = read_file("src/resources/gold.png", &gold_size);
   unsigned char *plat = read_file("src/resources/platinum.png", &plat_size);

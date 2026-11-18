@@ -46,17 +46,6 @@ if (WIN32)
     target_compile_options(sirit PRIVATE $<$<CXX_COMPILER_ID:Clang>:-Wno-error=unused-command-line-argument>)
 endif()
 
-# Dear ImGui
-add_library(Dear_ImGui
-        imgui/imgui.cpp
-        imgui/imgui_demo.cpp
-        imgui/imgui_draw.cpp
-        imgui/imgui_internal.h
-        imgui/imgui_tables.cpp
-        imgui/imgui_widgets.cpp
-)
-target_include_directories(Dear_ImGui INTERFACE imgui/)
-
 # libusb
 if (NOT TARGET libusb::usb)
     if (${CMAKE_SYSTEM_NAME} STREQUAL "FreeBSD")

@@ -1293,23 +1293,6 @@ set(VIDEO_CORE src/video_core/amdgpu/cb_db_extent.h
                src/video_core/page_manager.h
 )
 
-set(IMGUI src/imgui/imgui_config.h
-          src/imgui/imgui_layer.h
-          src/imgui/imgui_std.h
-          src/imgui/imgui_texture.h
-          src/imgui/imgui_translations.cpp
-          src/imgui/imgui_translations.h
-          src/imgui/renderer/imgui_core.cpp
-          src/imgui/renderer/imgui_core.h
-          src/imgui/renderer/imgui_impl_vulkan.cpp
-          src/imgui/renderer/imgui_impl_vulkan.h
-          src/imgui/renderer/font_data.cpp
-          src/imgui/renderer/font_data.h
-          src/imgui/renderer/font_stack.cpp
-          src/imgui/renderer/font_stack.h
-          src/imgui/renderer/texture_manager.cpp
-          src/imgui/renderer/texture_manager.h
-)
 
 set(INPUT src/input/controller.cpp
           src/input/controller.h
@@ -1339,7 +1322,6 @@ set(SHADNET src/shadnet/client.cpp
 # to it.
 add_library(shadps4 MODULE
     ${AUDIO_CORE}
-    ${IMGUI}
     ${INPUT}
     ${COMMON}
     ${CORE}
@@ -1502,7 +1484,9 @@ endif()
 
 create_target_directory_groups(shadps4)
 
-target_link_libraries(shadps4 PRIVATE fmt::fmt xbyak::xbyak Dear_ImGui gcn)
+target_link_libraries(shadps4 PRIVATE fmt::fmt xbyak::xbyak gcn)
+# Vulkan with its beta extensions, in every file: C headers and vulkan.hpp must agree
+target_compile_definitions(shadps4 PRIVATE VK_ENABLE_BETA_EXTENSIONS)
 target_link_libraries(shadps4 PRIVATE sirit Vulkan::Headers Zydis::Zydis)
 
 if (ENABLE_FEX_GUEST_CPU)
@@ -1549,8 +1533,6 @@ else()
     target_link_libraries(shadps4 PRIVATE libusb::usb)
 endif()
 
-target_compile_definitions(shadps4 PRIVATE IMGUI_USER_CONFIG="imgui/imgui_config.h")
-target_compile_definitions(Dear_ImGui PRIVATE IMGUI_USER_CONFIG="${PROJECT_SOURCE_DIR}/src/imgui/imgui_config.h")
 
 
 if (${CMAKE_SYSTEM_NAME} STREQUAL "Linux")
@@ -1613,11 +1595,11 @@ set(EMBEDDED_RESOURCES
         src/resources/amd_rsqrt_index_table.bin.zstd
         # The overlays' fonts (src/video_core/overlay), read in place: the UI font, then the ones
         # tried for what it lacks
-        src/imgui/renderer/fonts/NotoSans-Regular.ttf
-        src/imgui/renderer/fonts/NotoSansArabic-Regular.ttf
-        src/imgui/renderer/fonts/NotoSansThai-Regular.ttf
-        src/imgui/renderer/fonts/NotoSansSymbols2-Regular.ttf
-        src/imgui/renderer/fonts/NotoSansCJK-Regular.ttc)
+        src/resources/fonts/NotoSans-Regular.ttf
+        src/resources/fonts/NotoSansArabic-Regular.ttf
+        src/resources/fonts/NotoSansThai-Regular.ttf
+        src/resources/fonts/NotoSansSymbols2-Regular.ttf
+        src/resources/fonts/NotoSansCJK-Regular.ttc)
 # The patch repositories (src/resources/patches/README.md), shadPS4's first: of a patch both
 # have for the same version, the first one's is applied (src/common/patch_catalog.h)
 foreach (repository IN ITEMS shadPS4 GoldHEN ParaLLEl)
@@ -1644,9 +1626,5 @@ add_custom_command(
     VERBATIM)
 target_sources(shadps4 PRIVATE "${EMBEDDED_RESOURCES_SOURCE}")
 
-# ImGui resources
-add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/src/imgui/renderer)
-add_dependencies(shadps4 ImGui_Resources)
-target_include_directories(shadps4 PRIVATE ${IMGUI_RESOURCES_INCLUDE})
 
 

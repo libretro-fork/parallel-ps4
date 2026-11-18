@@ -107,12 +107,6 @@ for d in ("sdk/lib/um/x86_64", "sdk/lib/ucrt/x86_64", "crt/lib/x86_64"):
 print(f"library case links: {libs}")
 PY
 
-# The tool the build runs that turns the fonts into sources. Built for Linux
-# here and handed to the Windows build, which cannot run its own.
-HOST="$TOOLS/host"
-mkdir -p "$HOST"
-clang++-19 -O1 -o "$HOST/font-embed" externals/imgui/misc/fonts/binary_to_compressed_c.cpp
-
 TOOLCHAIN="$TOOLS/clang-cl-x86_64.cmake"
 cat > "$TOOLCHAIN" <<TOOLCHAIN_EOF
 set(CMAKE_SYSTEM_NAME Windows)
@@ -160,8 +154,7 @@ TOOLCHAIN_EOF
 
 cmake -S . -B "$BUILD_DIR" -G Ninja -DCMAKE_BUILD_TYPE=Release \
   -DCMAKE_TOOLCHAIN_FILE="$TOOLCHAIN" \
-  -DENABLE_UPDATER=OFF \
-  -DSHADPS4_HOST_FONT_EMBED="$HOST/font-embed"
+  -DENABLE_UPDATER=OFF
 export PATH="$LLVM:$PATH"
 export LIB="$MSVC/crt/lib/x86_64;$MSVC/sdk/lib/um/x86_64;$MSVC/sdk/lib/ucrt/x86_64"
 cmake --build "$BUILD_DIR" -- -j "$NUMPROC" ${SHAD_CROSS_KEEP_GOING:+-k 0}

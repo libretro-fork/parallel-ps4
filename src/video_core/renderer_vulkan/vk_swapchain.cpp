@@ -9,7 +9,6 @@
 #include "common/logging/log.h"
 #include "core/emulator_settings.h"
 #include "frontend_window.h"
-#include "imgui/renderer/imgui_core.h"
 #include "libretro/libretro_bridge.h"
 #include "video_core/overlay/vk_overlay.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
@@ -45,11 +44,9 @@ Swapchain::Swapchain(const Instance& instance_, const Frontend::Window& window_)
     }
 
     Create(window.GetWidth(), window.GetHeight());
-    ImGui::Core::Initialize(instance, window, image_count, surface_format.format);
     {
         // The overlays, with the UI font read in place from what the core carries
-        const auto font =
-            Common::GetEmbeddedResource("src/imgui/renderer/fonts/NotoSans-Regular.ttf");
+        const auto font = Common::GetEmbeddedResource("src/resources/fonts/NotoSans-Regular.ttf");
         ovl_vk_info_t info{};
         info.get_device_proc = VULKAN_HPP_DEFAULT_DISPATCHER.vkGetDeviceProcAddr;
         info.device = static_cast<VkDevice>(instance.GetDevice());
@@ -58,13 +55,13 @@ Swapchain::Swapchain(const Instance& instance_, const Frontend::Window& window_)
         info.surface_format = static_cast<VkFormat>(surface_format.format);
         info.font = font.data();
         info.font_size = font.size();
-        // The fonts after it, as ImGui's stack merged them (imgui/renderer/font_stack.cpp): Arabic,
-        // Thai, symbols, then the CJK collection's face for the console's language
+        // The fonts after it, tried in turn for what it lacks: Arabic, Thai, symbols, then the
+        // CJK collection's face for the console's language
         static constexpr const char* fallbacks[] = {
-            "src/imgui/renderer/fonts/NotoSansArabic-Regular.ttf",
-            "src/imgui/renderer/fonts/NotoSansThai-Regular.ttf",
-            "src/imgui/renderer/fonts/NotoSansSymbols2-Regular.ttf",
-            "src/imgui/renderer/fonts/NotoSansCJK-Regular.ttc",
+            "src/resources/fonts/NotoSansArabic-Regular.ttf",
+            "src/resources/fonts/NotoSansThai-Regular.ttf",
+            "src/resources/fonts/NotoSansSymbols2-Regular.ttf",
+            "src/resources/fonts/NotoSansCJK-Regular.ttc",
         };
         ovl_face_desc_t faces[std::size(fallbacks)]{};
         for (size_t i = 0; i < std::size(fallbacks); i++) {

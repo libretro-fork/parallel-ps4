@@ -196,7 +196,7 @@ Look for it in every change, in audio, video, textures, input and any conversion
 
 Not there yet. These are debts, not precedent:
 
-1. HDR Output (core option, off by default) is not yet run on an HDR display. With it on and a frontend that takes HDR10, games are told the display shows HDR, a game's own PQ passes through the output pass, and any other picture and ImGui's overlays are encoded to PQ there (`host_spirv_post_process_frag`, `host_spirv_imgui_pq_frag`), SDR white at the frontend's paper white. A game is told the frontend's peak and black level (`sceSystemServiceGetHdrToneMapLuminance`, from `max_nits` and `min_nits`); the full-frame peak is given the peak too, since the frontend does not report one.
+1. HDR Output (core option, off by default) is not yet run on an HDR display. With it on and a frontend that takes HDR10, games are told the display shows HDR, a game's own PQ passes through the output pass, and any other picture and the overlays are encoded to PQ there (`host_spirv_post_process_frag`, `host_spirv_overlay_frag`), SDR white at the frontend's paper white. A game is told the frontend's peak and black level (`sceSystemServiceGetHdrToneMapLuminance`, from `max_nits` and `min_nits`); the full-frame peak is given the peak too, since the frontend does not report one.
 2. `ngs2_core.c` writes a game's 16-bit output buffers at a scale of 32767, cut towards zero. That output is read by the game, so what Sony's library does there decides it, and it is not known.
 3. A FLAC with no seek table, seeked backwards, makes rflac's state again (its only way back to the start), so that seek allocates.
 

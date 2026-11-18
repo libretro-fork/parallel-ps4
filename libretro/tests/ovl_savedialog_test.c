@@ -186,7 +186,7 @@ static unsigned upload(const unsigned char *atlas, unsigned frame) {
 
 int main(int argc, char **argv) {
   const char *path =
-      argc > 1 ? argv[1] : "src/imgui/renderer/fonts/NotoSans-Regular.ttf";
+      argc > 1 ? argv[1] : "src/resources/fonts/NotoSans-Regular.ttf";
   const char *icon_path =
       argc > 2 ? argv[2] : "src/resources/big_picture/settings.png";
   size_t size;

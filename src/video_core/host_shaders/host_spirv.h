@@ -33,12 +33,6 @@ size_t host_spirv_fs_tri_vert(uint32_t* out, size_t cap);
  * nits), or passes HDR (already PQ) through. */
 size_t host_spirv_post_process_frag(uint32_t* out, size_t cap);
 
-/* ImGui's fragment shader for an HDR (PQ) frontend: its sRGB-encoded colour
- * times the texture at binding 0, as PQ Rec.2020 with SDR white at @white
- * (of 10000 nits). The input is ImGui's: location 0, struct { vec4 Color;
- * vec2 UV; }. */
-size_t host_spirv_imgui_pq_frag(uint32_t* out, size_t cap, float white);
-
 /* The overlays (video_core/overlay): ImGui's vertex shader (position, uv and colour at
  * locations 0 to 2, push constants { vec2 scale; vec2 translate; }; colour out at location 0,
  * uv at 1), and its fragment shader (the colour times the texture at binding 0), turning the

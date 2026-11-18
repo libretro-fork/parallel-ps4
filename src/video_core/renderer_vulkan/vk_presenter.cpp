@@ -9,7 +9,6 @@
 #include "core/emulator_settings.h"
 #include "core/libraries/system/systemservice.h"
 #include "frontend_window.h"
-#include "imgui/renderer/imgui_core.h"
 #include "input/controller.h"
 #include "video_core/buffer_cache/buffer.h"
 #include "video_core/buffer_cache/guest_import.h"
@@ -100,8 +99,8 @@ bool CanBlitToSwapchain(const vk::PhysicalDevice physical_device, vk::Format for
 
 // The overlays' frame: the time since the last, and on a frame of the game's own its frame rate
 // over its last 60 frames, which the FPS counter shows
-// The first controller to the overlays, as ImGui had it (imgui_core.cpp's PadToImGui): the
-// buttons the dialogs read, the left stick past a quarter of its throw scrolling
+// The first controller to the overlays, as it was last published: the buttons the dialogs
+// read, the left stick past a quarter of its throw scrolling
 static void PadToOverlay(const Input::State& state) {
     using Libraries::Pad::OrbisPadButtonDataOffset;
     struct Key {
@@ -900,10 +899,9 @@ void Presenter::Present(Frame* frame, bool is_reusing_frame, bool is_game_frame)
                "Unexpected error resetting present done fence: {}", vk::to_string(reset_result));
 
     {
-        // The pad, once, for ImGui's dialogs and the overlays'
+        // The pad, for the overlays' dialogs
         auto& controllers = *Common::Singleton<Input::GameControllers>::Instance();
         const Input::State pad = controllers[0]->ReadState();
-        ImGui::Core::NewFrame(pad);
         PadToOverlay(pad);
     }
     NewOverlayFrame(window.GetWidth(), window.GetHeight(), is_reusing_frame);
@@ -995,7 +993,6 @@ void Presenter::Present(Frame* frame, bool is_reusing_frame, bool is_game_frame)
             ovl_vk_render_splash(static_cast<VkCommandBuffer>(cmdbuf),
                                  static_cast<VkImageView>(swapchain_image_view), extent);
         }
-        ImGui::Core::Render(cmdbuf, swapchain_image_view, swapchain.GetExtent());
         ovl_vk_render(static_cast<VkCommandBuffer>(cmdbuf),
                       static_cast<VkImageView>(swapchain_image_view), swapchain.GetExtent());
 

@@ -138,7 +138,7 @@ static unsigned char *read_file(const char *path, size_t *size) {
 
 int main(int argc, char **argv) {
   const char *path =
-      argc > 1 ? argv[1] : "src/imgui/renderer/fonts/NotoSans-Regular.ttf";
+      argc > 1 ? argv[1] : "src/resources/fonts/NotoSans-Regular.ttf";
   size_t size;
   unsigned char *noto = read_file(path, &size);
   ovl_face_desc_t face;

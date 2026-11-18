@@ -47,14 +47,6 @@ ifeq ($(platform),win)
    endif
 endif
 
-# The ImGui fonts are packed by a tool built for, and run on, the build machine.
-ifeq ($(OS),Windows_NT)
-   HOSTCXX ?= g++
-   HOST_EXE := .exe
-else
-   HOSTCXX ?= c++
-endif
-
 # ----------------------------------------------------------------------------
 # Target architecture: taken from the compiler, not the host, so a cross build
 # picks the right one.

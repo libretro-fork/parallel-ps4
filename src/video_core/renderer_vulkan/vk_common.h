@@ -3,8 +3,8 @@
 
 #pragma once
 
-// Include vulkan-hpp header
-#define VK_ENABLE_BETA_EXTENSIONS
+// Include vulkan-hpp header. VK_ENABLE_BETA_EXTENSIONS is the build's, for every file: the C
+// headers some include before this one must take Vulkan in the same way.
 #define VK_NO_PROTOTYPES
 #define VULKAN_HPP_DISPATCH_LOADER_DYNAMIC 1
 #define VULKAN_HPP_NO_CONSTRUCTORS

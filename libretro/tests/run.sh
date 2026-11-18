@@ -304,7 +304,7 @@ OVL="src/video_core/overlay/ovl_draw.c src/video_core/overlay/ovl_font.c \
 $CC -std=gnu89 -O1 -g -Wall -Wdeclaration-after-statement -ffp-contract=off \
     -fsanitize=address,undefined -I. -Isrc -I$L/include libretro/tests/ovl_test.c $OVL \
     -o "$OUT/ovl_test" -lm -lpthread
-"$OUT/ovl_test" src/imgui/renderer/fonts/NotoSans-Regular.ttf
+"$OUT/ovl_test" src/resources/fonts/NotoSans-Regular.ttf
 # The overlays drawn on a device by the core's renderer (vk_overlay.c): the FPS counter, a
 # notification and a trophy with their images, as the CPU model of them; the images' slots
 # free again after

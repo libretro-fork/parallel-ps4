@@ -56,7 +56,7 @@ EMBEDDED_RESOURCES := $(addprefix src/resources/,big_picture/controller.png \
 	amd_rsqrt_index_table.bin.zstd)
 # The overlays' fonts (src/video_core/overlay), read in place: the UI font, then the ones tried
 # for what it lacks
-EMBEDDED_RESOURCES += $(addprefix src/imgui/renderer/fonts/,NotoSans-Regular.ttf \
+EMBEDDED_RESOURCES += $(addprefix src/resources/fonts/,NotoSans-Regular.ttf \
 	NotoSansArabic-Regular.ttf NotoSansThai-Regular.ttf NotoSansSymbols2-Regular.ttf \
 	NotoSansCJK-Regular.ttc)
 # The patch repositories (src/resources/patches/README.md), shadPS4's first: of a patch both
@@ -70,31 +70,6 @@ EMBEDDED_RESOURCES_C := $(GEN_DIR)/embedded_resources.c
 $(EMBEDDED_RESOURCES_C): $(EMBEDDED_RESOURCES) libretro/embed.sh Makefile.common
 	@mkdir -p $(@D)
 	sh libretro/embed.sh resources $@ . $(EMBEDDED_RESOURCES)
-
-# The ImGui fonts, packed by ImGui's own tool built for the build machine
-# (src/imgui/renderer/CMakeLists.txt); font_data.cpp includes them.
-FONT_TOOL := $(GEN_DIR)/binary_to_compressed_c$(HOST_EXE)
-$(FONT_TOOL): $(EXT_DIR)/imgui/misc/fonts/binary_to_compressed_c.cpp
-	@mkdir -p $(@D)
-	$(HOSTCXX) -O2 $< -o $@
-
-FONTS_DIR := $(GEN_DIR)/fonts
-FONTS :=
-# $(1) the font, $(2) the name it is generated under
-define FONT_template
-$(FONTS_DIR)/imgui_fonts/$(2).g.cpp: src/imgui/renderer/fonts/$(1) $(FONT_TOOL)
-	@mkdir -p $$(@D)
-	$(FONT_TOOL) -nostatic $$< imgui_font_$(basename $(2)) > $$@.tmp
-	mv -f $$@.tmp $$@
-FONTS += $(FONTS_DIR)/imgui_fonts/$(2).g.cpp
-endef
-$(eval $(call FONT_template,NotoSans-Regular.ttf,notosans_regular.ttf))
-$(eval $(call FONT_template,NotoSansArabic-Regular.ttf,notosansarabic_regular.ttf))
-$(eval $(call FONT_template,NotoSansCJK-Regular.ttc,notosanscjk_regular.ttc))
-$(eval $(call FONT_template,NotoSansSymbols2-Regular.ttf,notosanssymbols2_regular.ttf))
-$(eval $(call FONT_template,NotoSansThai-Regular.ttf,notosansthai_regular.ttf))
-$(eval $(call FONT_template,ProggyVector-Regular.ttf,proggyvector_regular.ttf))
-$(OBJ_DIR)/src/imgui/renderer/font_data.cpp.o: $(FONTS)
 
 # Linux: the launcher of the emulator's process (libretro/host_main.c), built
 # for the target and carried in the core as an array.
@@ -257,9 +232,6 @@ CORE_SOURCES_CXX += $(addprefix src/core/loader/,dwarf.cpp elf.cpp symbols_resol
 CORE_SOURCES_CXX += $(addprefix src/core/net/,guest_net.cpp host_net.cpp net_service.cpp \
 	p2p_codec.cpp p2p_crypto.cpp p2p_tcp.cpp p2p_transport.cpp)
 CORE_SOURCES_CXX += $(addprefix src/,emulator.cpp)
-CORE_SOURCES_CXX += $(addprefix src/imgui/,imgui_translations.cpp)
-CORE_SOURCES_CXX += $(addprefix src/imgui/renderer/,font_data.cpp font_stack.cpp imgui_core.cpp \
-	imgui_impl_vulkan.cpp texture_manager.cpp)
 CORE_SOURCES_CXX += $(addprefix src/input/,controller.cpp controller_state.cpp)
 CORE_SOURCES_CXX += $(addprefix src/shader_recompiler/backend/spirv/,emit_spirv.cpp \
 	emit_spirv_atomic.cpp emit_spirv_barriers.cpp emit_spirv_bitwise_conversion.cpp \
@@ -336,9 +308,9 @@ ifeq ($(ARCH_X86_64),1)
 	$(addprefix src/core/libraries/fiber/,fiber.cpp fiber_context.cpp)
 endif
 
-CORE_FLAGS := -DIMGUI_USER_CONFIG='"imgui/imgui_config.h"' -DZYCORE_STATIC_BUILD \
-	-DZYDIS_STATIC_BUILD -Isrc -I$(LRC_DIR)/include -I. -I$(FONTS_DIR) \
-	-isystem $(EXT_DIR)/fmt/include -isystem $(EXT_DIR)/xbyak -isystem $(EXT_DIR)/imgui \
+CORE_FLAGS := -DZYCORE_STATIC_BUILD -DZYDIS_STATIC_BUILD -DVK_ENABLE_BETA_EXTENSIONS \
+	-Isrc -I$(LRC_DIR)/include -I. \
+	-isystem $(EXT_DIR)/fmt/include -isystem $(EXT_DIR)/xbyak \
 	-isystem $(EXT_DIR)/gcn/include \
 	-isystem $(EXT_DIR)/sirit/include -isystem $(EXT_DIR)/sirit/externals/SPIRV-Headers/include \
 	-isystem $(EXT_DIR)/vulkan-headers/include -isystem $(EXT_DIR)/zydis/include \
@@ -439,10 +411,6 @@ $(OBJ_DIR)/$(LRC_DIR)/formats/zar/zar.c.o: CFLAGS += -DHAVE_RZSTD
 FMT_SOURCES_CXX := $(addprefix $(EXT_DIR)/fmt/src/,format.cc os.cc)
 FMT_FLAGS := -I$(EXT_DIR)/fmt/include
 
-IMGUI_SOURCES_CXX := $(addprefix $(EXT_DIR)/imgui/,imgui.cpp imgui_demo.cpp imgui_draw.cpp \
-	imgui_tables.cpp imgui_widgets.cpp)
-IMGUI_FLAGS := -DIMGUI_USER_CONFIG='"src/imgui/imgui_config.h"' -I. -I$(EXT_DIR)/imgui
-
 SIRIT_SOURCES_CXX := $(EXT_DIR)/sirit/src/sirit.cpp \
 	$(addprefix $(EXT_DIR)/sirit/src/instructions/,annotation.cpp arithmetic.cpp atomic.cpp \
 	barrier.cpp bit.cpp constant.cpp conversion.cpp debug.cpp derivatives.cpp extension.cpp \
@@ -480,4 +448,4 @@ LIBUSB_FLAGS := -Ilibretro/libusb-config -I$(LIBUSB_DIR) -I$(LIBUSB_DIR)/os -w
 # libusb's Windows backend uses windows.h's min and max
 LIBUSB_FLAGS += -UNOMINMAX
 
-LIB_GROUPS := CORE LRC FMT IMGUI SIRIT ZYDIS ZYCORE LIBUSB
+LIB_GROUPS := CORE LRC FMT SIRIT ZYDIS ZYCORE LIBUSB

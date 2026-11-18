@@ -12,8 +12,8 @@ namespace Frontend {
 
 // What the emulator keeps of a window in the core, where the frontend shows the picture and
 // there is no window of the system's: the size of the picture - the Resolution option's, or with
-// Resolution: Default the game's own (the presenter sets it) - read by the presenter and ImGui on
-// the renderer's thread.
+// Resolution: Default the game's own (the presenter sets it) - read by the presenter on the
+// renderer's thread.
 class Window {
 public:
     Window(s32 width_, s32 height_) : width{width_}, height{height_} {}

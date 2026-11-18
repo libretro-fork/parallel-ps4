@@ -126,7 +126,7 @@ int main(void) {
   unsigned frame = 0;
   int i;
 
-  font = read_file("src/imgui/renderer/fonts/NotoSans-Regular.ttf", &font_size);
+  font = read_file("src/resources/fonts/NotoSans-Regular.ttf", &font_size);
   icon = read_file("src/resources/big_picture/settings.png", &icon_size);
   if (!font || !icon) {
     printf("FAIL the font and icon\n");

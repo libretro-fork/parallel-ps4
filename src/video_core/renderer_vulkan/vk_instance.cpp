@@ -10,7 +10,6 @@
 #include "common/assert.h"
 #include "common/types.h"
 #include "core/emulator_settings.h"
-#include "imgui/renderer/imgui_core.h"
 #include "libretro/libretro_bridge.h"
 #include "video_core/buffer_cache/guest_import.h"
 #include "video_core/overlay/vk_overlay.h"
@@ -198,7 +197,12 @@ Instance::Instance(s32 physical_device_index, bool enable_validation, bool enabl
 }
 
 Instance::~Instance() {
-    ImGui::Core::Shutdown(GetDevice());
+    // Nothing of the overlays' is in use by the device when it goes
+    const auto result = GetDevice().waitIdle();
+    if (result != vk::Result::eSuccess) {
+        LOG_WARNING(Render_Vulkan, "Failed to wait for Vulkan device idle on shutdown: {}",
+                    vk::to_string(result));
+    }
     ovl_vk_shutdown();
     allocator.reset();
 }

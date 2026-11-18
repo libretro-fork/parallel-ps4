@@ -9,7 +9,6 @@
 #include "core/libraries/kernel/time.h"
 #include "core/libraries/videoout/driver.h"
 #include "core/libraries/videoout/videoout_error.h"
-#include "imgui/renderer/imgui_core.h"
 #include "libretro/libretro_bridge.h"
 #include "video_core/amdgpu/liverpool.h"
 #include "video_core/overlay/vk_overlay.h"
@@ -416,7 +415,7 @@ void VideoOutDriver::Vblank() {
         if (!request) {
             if (!main_port.is_open) {
                 DrawBlankFrame();
-            } else if (ImGui::Core::MustKeepDrawing() || ovl_vk_must_keep_drawing()) {
+            } else if (ovl_vk_must_keep_drawing()) {
                 DrawLastFrame();
             }
         } else {

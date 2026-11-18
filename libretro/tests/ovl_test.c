@@ -1065,9 +1065,9 @@ static void check_fallback_faces(const unsigned char *noto, size_t noto_size) {
   ovl_vec2_t a, b;
   /* Lent for as long as the overlay lives: freed after it */
   cjk = fallback_cjk =
-      read_file("src/imgui/renderer/fonts/NotoSansCJK-Regular.ttc", &cjk_size);
+      read_file("src/resources/fonts/NotoSansCJK-Regular.ttc", &cjk_size);
   sym = fallback_sym = read_file(
-      "src/imgui/renderer/fonts/NotoSansSymbols2-Regular.ttf", &sym_size);
+      "src/resources/fonts/NotoSansSymbols2-Regular.ttf", &sym_size);
   if (!cjk || !sym) {
     printf("FAIL the fallback fonts are not in the tree\n");
     failures++;
@@ -1187,7 +1187,7 @@ static void check_list(void) {
 
 int main(int argc, char **argv) {
   const char *path =
-      argc > 1 ? argv[1] : "src/imgui/renderer/fonts/NotoSans-Regular.ttf";
+      argc > 1 ? argv[1] : "src/resources/fonts/NotoSans-Regular.ttf";
   unsigned char *noto;
   size_t size;
   ovl_face_desc_t face;

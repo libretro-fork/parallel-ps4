@@ -219,8 +219,6 @@ std::string_view NameOf(Class log_class) {
         return "Render.Recompiler";
     case Class::ShadNet:
         return "ShadNet";
-    case Class::ImGui:
-        return "ImGui";
     case Class::Loader:
         return "Loader";
     case Class::Input:

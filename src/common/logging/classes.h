@@ -118,7 +118,6 @@ enum class Class {
     Render_Vulkan,           ///< Vulkan backend
     Render_Recompiler,       ///< Shader recompiler
     ShadNet,                 ///< shadNet binary protocol client
-    ImGui,                   ///< ImGui
     Loader,                  ///< ROM loader
     Input,                   ///< Input emulation
     Tty,                     ///< Debug output from emu
