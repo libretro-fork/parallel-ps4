@@ -417,23 +417,13 @@ int game_clock_waiting_on(game_clock_t* clock, retro_atomic_int_t* word) {
 int game_clock_woken_waiting(game_clock_t* clock, retro_atomic_int_t* const* words, int n,
                              uint64_t frame) {
     int i;
-    if (game_clock_frames(clock) != frame)
+    /* A whole frame of the frames' has gone by: the second to start since */
+    if (game_clock_frames(clock) - frame >= 2)
         return 1;
     for (i = 0; i < n; i++)
         if (!game_clock_waiting_on(clock, words[i]))
             return 0;
     return 1;
-}
-
-int game_clock_wake_sent(game_clock_t* clock, retro_atomic_int_t* word) {
-    unsigned i;
-    for (i = 0; i < GAME_CLOCK_PARKED; i++) {
-        game_clock_parked_t* p = &clock->parked[i];
-        if ((retro_atomic_int_t*)retro_atomic_load_acquire_ptr(&p->word) == word &&
-            retro_atomic_load_acquire_int(&p->key) != retro_atomic_load_seq_cst_int(word))
-            return 1;
-    }
-    return 0;
 }
 
 void game_clock_unpark(game_clock_t* clock, int slot) {

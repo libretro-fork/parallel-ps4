@@ -438,23 +438,18 @@ int main(void) {
         int epoch;
         retro_atomic_int_init(&word, 7);
         CHECK(!game_clock_waiting_on(&clock_, &word), "nobody parked on it yet");
-        CHECK(!game_clock_wake_sent(&clock_, &word), "and no wake sent");
         epoch = retro_atomic_load_acquire_int(&clock_.parked_ec.epoch);
         slot = game_clock_park(&clock_, &word, 7);
         CHECK(slot >= 0, "parked");
         CHECK(retro_atomic_load_acquire_int(&clock_.parked_ec.epoch) != epoch,
               "parking tells the output");
         CHECK(game_clock_waiting_on(&clock_, &word), "waiting on it");
-        CHECK(!game_clock_wake_sent(&clock_, &word), "not woken");
         retro_atomic_fetch_add_int(&word, 1);
         CHECK(!game_clock_waiting_on(&clock_, &word), "woken: not waiting");
-        CHECK(game_clock_wake_sent(&clock_, &word), "a wake sent");
         game_clock_repark(&clock_, slot, 8);
         CHECK(game_clock_waiting_on(&clock_, &word), "waiting again at the new value");
-        CHECK(!game_clock_wake_sent(&clock_, &word), "the wake taken");
         game_clock_unpark(&clock_, slot);
         CHECK(!game_clock_waiting_on(&clock_, &word), "gone once it runs");
-        CHECK(!game_clock_wake_sent(&clock_, &word), "and no wake left");
         epoch = retro_atomic_load_acquire_int(&clock_.parked_ec.epoch);
         game_clock_frame(&clock_);
         CHECK(retro_atomic_load_acquire_int(&clock_.parked_ec.epoch) != epoch,
@@ -462,7 +457,7 @@ int main(void) {
     }
 
     /* The output's hold (game_clock_woken_waiting): until the threads it woke wait again, or a
-     * frame starts */
+     * whole frame has gone by (the second to start: the first may start at once) */
     {
         retro_atomic_int_t a, b;
         retro_atomic_int_t* words[2];
@@ -486,7 +481,12 @@ int main(void) {
         retro_atomic_fetch_add_int(&a, 1);
         CHECK(!game_clock_woken_waiting(&clock_, words, 1, frame), "woken again: held");
         game_clock_frame(&clock_);
-        CHECK(game_clock_woken_waiting(&clock_, words, 1, frame), "a frame later: let go");
+        CHECK(!game_clock_woken_waiting(&clock_, words, 1, frame), "a frame starts: still held");
+        game_clock_repark(&clock_, sa, 5);
+        CHECK(game_clock_woken_waiting(&clock_, words, 1, frame), "waiting again: let go");
+        retro_atomic_fetch_add_int(&a, 1);
+        game_clock_frame(&clock_);
+        CHECK(game_clock_woken_waiting(&clock_, words, 1, frame), "a whole frame later: let go");
         CHECK(game_clock_woken_waiting(&clock_, words, 0, game_clock_frames(&clock_)),
               "nobody woken: no hold");
         game_clock_unpark(&clock_, sa);

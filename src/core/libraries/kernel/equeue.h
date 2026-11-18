@@ -188,8 +188,8 @@ public:
     bool RemoveSmallTimer(u64 id) {
         const bool removed = m_combiner.Run([&] { return m_small_timers.erase(id) > 0; });
         // A waiter sleeping toward this timer looks again
-        m_wake.Notify();
         GameNoteWake(&m_wake.get()->epoch);
+        m_wake.Notify();
         return removed;
     }
 

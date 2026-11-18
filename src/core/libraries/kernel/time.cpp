@@ -92,7 +92,7 @@ void GameNoteWake(retro_atomic_int_t* word) {
             return;
         }
     }
-    if (game_clock_wake_sent(&game_clock, word)) {
+    if (game_clock_waiting_on(&game_clock, word)) {
         noted_wakes[noted_count++] = word;
     }
 }

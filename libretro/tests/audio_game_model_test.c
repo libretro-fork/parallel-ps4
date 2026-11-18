@@ -15,7 +15,10 @@
  * once and in order: nothing padded, nothing late, nothing dropped. The stopped engine: its
  * sound to the end, then silence. FMOD's: no slot output before its mixer filled it (built
  * with MODEL_UNPACED, Output as fast as the queue has room: it fails), its output held as
- * audioout.cpp holds it.
+ * audioout.cpp holds it. The same with a render thread busy most of the frame: the frame's
+ * buffers go as that thread waits, late in the frame, and the next frame starts among them,
+ * the mixer in the middle of a slot. Only the slots are judged there (none output before it
+ * is filled): the sound coming late behind a heavy frame is the first case below.
  * Four cases crackle and are reported as such, not counted as failures, until they are fixed:
  * a render thread busy 15 ms a frame, a thread spinning without a yield, a woken thread that
  * never runs with one blocked untracked, and a mixer with an output thread waiting for it and
@@ -56,6 +59,7 @@ enum {
     CASE_FMOD,
     CASE_SUSPENDED,
     CASE_CHAIN,
+    CASE_FMOD_HEAVY,
     CASE_COUNT
 };
 static const char* const case_names[CASE_COUNT] = {
@@ -68,7 +72,8 @@ static const char* const case_names[CASE_COUNT] = {
     "FMOD: a mixer two 256-frame slots ahead, an output thread without a wait for it but the "
     "output's hold (PaceOutput)",
     "a relative sleeper, a woken thread that never runs, a thread blocked untracked for ever",
-    "a mixer on its own schedule, an output thread waiting for it, a thread blocked untracked"};
+    "a mixer on its own schedule, an output thread waiting for it, a thread blocked untracked",
+    "FMOD, and a render thread busy 13 ms a frame: frames start while the mixer mixes"};
 static int which;
 
 /* Each game thread's own state for the clock */
@@ -113,9 +118,9 @@ static void write_buffer(unsigned* count) {
  * mixer the time to fill it. Output returning faster (as before: as soon as the queue had room)
  * outputs slots the mixer has not filled again yet: the same sound twice, a click. The output
  * is also held as audioout.cpp's PaceOutput holds it, until the mixer it woke waits again or a
- * frame starts (game_clock_woken_waiting): without the hold, which the core has, the case
- * passed only while the mixer happened to run soon enough, and under ThreadSanitizer on a
- * busy host now and then it did not. */
+ * whole frame has gone by (game_clock_woken_waiting): without the hold, which the core has,
+ * the case passed only while the mixer happened to run soon enough, and under ThreadSanitizer
+ * on a busy host now and then it did not. */
 static float fmod_ring[2][BUFFER * 2];
 static retro_atomic_int_t fmod_free; /* slots the mixer may fill */
 static retro_eventcount_t fmod_ec;
@@ -203,13 +208,15 @@ static void fmod_output_thread(void* data) {
             left -= got;
         }
         slot ^= 1;
-        retro_atomic_fetch_add_int(&fmod_free, 1);
-        retro_eventcount_notify(&fmod_ec);
-        /* The kernel notes the wakes it sends to parked game threads (GameNoteWake) */
-        if (game_clock_wake_sent(&clk, &fmod_ec.epoch)) {
+        /* The kernel notes the game threads its wakes find parked (GameNoteWake), before it
+         * sends them: looked for after, the mixer may have run already, the wake not noted and
+         * the next slot output unheld */
+        if (game_clock_waiting_on(&clk, &fmod_ec.epoch)) {
             hold.woken[0] = &fmod_ec.epoch;
             hold.woke = 1;
         }
+        retro_atomic_fetch_add_int(&fmod_free, 1);
+        retro_eventcount_notify(&fmod_ec);
     }
     game_clock_thread_idle(&clk, SELF);
 }
@@ -271,6 +278,10 @@ static void render_thread(void* data) {
         /* A heavy game's frame: the host's time for its work, the game's time held */
         if (which == CASE_HEAVY)
             retro_sleep_us(15000);
+        /* The same with FMOD: the frame's buffers go once this has waited, a frame's start
+         * among them */
+        if (which == CASE_FMOD_HEAVY)
+            retro_sleep_us(13000);
         game_clock_wait(&clk, &vblank_ec, 0, next_vblank, &frame, SELF);
     }
     game_clock_thread_idle(&clk, SELF);
@@ -413,7 +424,7 @@ static int run_case(int c) {
     retro_atomic_int_init(&stop, 0);
     retro_atomic_int_init(&lock_owner, 0);
     /* Each game thread counts running from its creation, as the kernel's do */
-    if (c == CASE_FMOD) {
+    if (c == CASE_FMOD || c == CASE_FMOD_HEAVY) {
         retro_atomic_int_init(&fmod_free, 2);
         game_clock_busy(&clk);
         threads[n++] = sthread_create(fmod_mixer_thread, NULL);
@@ -502,6 +513,7 @@ static int run_case(int c) {
     retro_eventcount_notify(&never_ec);
     retro_eventcount_notify(&fmod_ec);
     retro_eventcount_notify(&chain_ec);
+    retro_eventcount_notify(&clk.parked_ec); /* an output holding for its mixer */
     audio_mix_notify_room();
     for (i = 0; i < n; i++)
         sthread_join(threads[i]);
@@ -512,6 +524,9 @@ static int run_case(int c) {
            case_names[c], first, padded, bad);
     if (c == CASE_STOPS && sent != STOP_AFTER * BUFFER)
         padded++;
+    /* FMOD behind a heavy frame: its slots, not when they come */
+    if (c == CASE_FMOD_HEAVY)
+        return !started || bad;
     return !started || first != 1 || padded || bad;
 }
 

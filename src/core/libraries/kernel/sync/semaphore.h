@@ -45,6 +45,7 @@ public:
     retro_atomic_int_t releases{};
 
     void release() {
+        GameNoteWake(&releases);
         retro_atomic_fetch_add_seq_cst_int(&releases, 1);
         s32 have = static_cast<s32>(retro_atomic_load_acquire_int(&count));
         for (;;) {
@@ -55,7 +56,6 @@ public:
             have = static_cast<s32>(retro_atomic_load_acquire_int(&count));
         }
         retro_eventcount_notify(&ec);
-        GameNoteWake(&releases);
     }
 
     void acquire() {

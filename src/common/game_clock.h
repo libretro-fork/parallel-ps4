@@ -190,14 +190,14 @@ void game_clock_hand(game_clock_t* clock, game_clock_thread_t* self);
 int game_clock_park(game_clock_t* clock, retro_atomic_int_t* word, int key);
 /* A game thread is parked on *@word with no wake of it in flight: waiting on it again */
 int game_clock_waiting_on(game_clock_t* clock, retro_atomic_int_t* word);
-/* A wake of a thread parked on *@word is in flight (it was just bumped, and someone was
- * waiting on it) */
-int game_clock_wake_sent(game_clock_t* clock, retro_atomic_int_t* word);
 void game_clock_repark(game_clock_t* clock, int slot, int key);
 /* The sound's output holds its next buffer until the threads it woke since its last one
  * (@words, @n of them: parked on each) wait again (audioout.cpp, PaceOutput): 1 once they all
- * do, or once a frame has started since @frame (the frames started when it began to hold), so
- * that a woken thread that never waits again holds the sound for a frame at most. */
+ * do, or once two frames have started since @frame (the frames started when it began to hold):
+ * a whole frame gone by, so that a woken thread that never waits again holds the sound for two
+ * frames at most. Not at the first frame to start: that one may start the moment after, the
+ * woken thread (a mixer) in the middle of its work, and the buffers let go then are output
+ * before it has filled them. */
 int game_clock_woken_waiting(game_clock_t* clock, retro_atomic_int_t* const* words, int n,
                              uint64_t frame);
 void game_clock_unpark(game_clock_t* clock, int slot);

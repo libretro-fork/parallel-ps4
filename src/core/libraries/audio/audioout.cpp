@@ -168,7 +168,8 @@ static void SetPortVolume(PortOut& port_ref, s32 flag, s32 vol_value);
 static void PaceOutput(PortOut& port) {
     // The threads this one woke since its last buffer (FMOD's mixer, for the slot it gave
     // back) wait again before the next buffer goes, late or not: the output never takes the
-    // next slot before its mixer has refilled it. Until the frame changes at most.
+    // next slot before its mixer has refilled it. For a whole frame at most (the second to start
+    // since: the first may start while the mixer is at it).
     // Only for a game with FMOD in it (game_clock_set_fmod): any other's output goes at the
     // device's pace alone
     retro_atomic_int_t* woken[4];
