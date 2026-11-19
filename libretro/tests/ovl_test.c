@@ -228,7 +228,7 @@ static void check_layers(void) {
   for (i = 0; i < OVL_TEX_SLOTS; i++)
     pixels[i] = slots[i];
   ovl_tex_init(pixels, OVL_TEX_SLOTS);
-  icon = read_file("src/resources/shadps4.png", &icon_size);
+  icon = read_file("src/resources/bronze.png", &icon_size);
   gold = read_file("src/resources/gold.png", &gold_size);
   plat = read_file("src/resources/platinum.png", &plat_size);
   CHECK(icon && gold && plat, "the icons");

@@ -4,6 +4,7 @@ What changed in the libretro core of this fork, newest first. Changes that come 
 
 ## Unreleased
 
+- `src/resources/shadps4.png` (35 KB) is removed, and no longer carried in the core. Its one use was the icon of the warning shown when the PS4's system fonts are missing; that warning now shows no icon. The two overlay tests that took it as a sample icon (ovl_test, overlay_device_test) take `bronze.png` and pass. Built on Linux and Windows.
 - The renderer's own shaders (`src/video_core/host_shaders/host_spirv.c`) are written through the same SPIR-V module as the shader recompiler's (`spv_module.c`), in place of a second writer of its own.
   - **Types and constants:** found through the module's hash table, where a linear search ran over up to 256 of them for each one made.
   - **Layout:** the module is laid out in place and copied once into the caller's buffer, as before.

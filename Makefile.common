@@ -52,7 +52,7 @@ SCM_REV_STATUS := $(shell mkdir -p $(GEN_DIR); sed \
 # The files the core carries (src/common/embedded_resources.h)
 EMBEDDED_RESOURCES := $(addprefix src/resources/,big_picture/controller.png \
 	big_picture/profiles.png big_picture/settings.png bronze.png gold.png platinum.png \
-	shadps4.png silver.png trophy.wav amd_rcp_index_table.bin.zstd \
+	silver.png trophy.wav amd_rcp_index_table.bin.zstd \
 	amd_rsqrt_index_table.bin.zstd)
 # The overlays' fonts (src/video_core/overlay), read in place: the UI font, then the ones tried
 # for what it lacks

@@ -27,7 +27,6 @@ path = [
     "src/resources/bronze.png",
     "src/resources/gold.png",
     "src/resources/platinum.png",
-    "src/resources/shadps4.png",
     "src/resources/silver.png",
     "src/resources/trophy.wav",
     "AGENTS.md",
