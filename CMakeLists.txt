@@ -486,6 +486,8 @@ set(SYSTEM_LIBS src/core/libraries/system/commondialog.cpp
                 src/core/libraries/web_browser_dialog/webbrowserdialog.h
                 src/core/libraries/font/font.cpp
                 src/core/libraries/font/font.h
+                src/core/libraries/font/font_blit.c
+                src/core/libraries/font/font_blit.h
                 src/core/libraries/font/font_face.cpp
                 src/core/libraries/font/font_face.h
                 src/core/libraries/font/font_internal.cpp

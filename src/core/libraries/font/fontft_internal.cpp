@@ -26,6 +26,7 @@
 #include "common/logging/log.h"
 #include "common/singleton.h"
 #include "core/file_sys/fs.h"
+#include "core/libraries/font/font_blit.h"
 #include "core/libraries/font/font_internal.h"
 #include "core/libraries/kernel/kernel.h"
 #include "core/tls.h"
@@ -1726,31 +1727,8 @@ static s32 RenderGlyphIndexToSurface(FontObj& font_obj, u32 glyph_index,
     metrics->Vertical.bearingY = 0.0f;
     metrics->Vertical.advance = 0.0f;
 
-    std::vector<unsigned char> glyph_bitmap;
-    glyph_bitmap.resize(static_cast<std::size_t>(glyph_w) * static_cast<std::size_t>(glyph_h));
-    if (glyph_w > 0 && glyph_h > 0) {
-        const int pitch = static_cast<int>(slot->bitmap_width);
-        const unsigned char* src = reinterpret_cast<const unsigned char*>(slot->bitmap.data());
-        if (false /* rendered as 8-bit coverage only */) {
-            for (int row = 0; row < glyph_h; ++row) {
-                const unsigned char* src_row = src + static_cast<std::size_t>(row) * pitch;
-                unsigned char* dst_row =
-                    glyph_bitmap.data() + static_cast<std::size_t>(row) * glyph_w;
-                for (int col = 0; col < glyph_w; ++col) {
-                    const unsigned char byte = src_row[col >> 3];
-                    const unsigned char bit = static_cast<unsigned char>(0x80u >> (col & 7));
-                    dst_row[col] = (byte & bit) ? 0xFFu : 0x00u;
-                }
-            }
-        } else {
-            for (int row = 0; row < glyph_h; ++row) {
-                const unsigned char* src_row = src + static_cast<std::size_t>(row) * pitch;
-                unsigned char* dst_row =
-                    glyph_bitmap.data() + static_cast<std::size_t>(row) * glyph_w;
-                std::memcpy(dst_row, src_row, static_cast<std::size_t>(glyph_w));
-            }
-        }
-    }
+    // The face's own bitmap, width bytes a row: read where it is until the blit below
+    const unsigned char* const glyph_bitmap = slot->bitmap.data();
 
     const int dest_x = static_cast<int>(std::floor(x)) + x0;
     const int dest_y = static_cast<int>(std::floor(y)) + y0;
@@ -1779,32 +1757,8 @@ static s32 RenderGlyphIndexToSurface(FontObj& font_obj, u32 glyph_index,
         update_w = std::max(0, end_col - start_col);
         update_h = std::max(0, end_row - start_row);
 
-        for (int row = start_row; row < end_row; ++row) {
-            const int src_y = row - dest_y;
-            if (src_y < 0 || src_y >= glyph_h) {
-                continue;
-            }
-            const std::uint8_t* src_row =
-                glyph_bitmap.data() + static_cast<std::size_t>(src_y) * glyph_w;
-            std::uint8_t* dst_row = dst_base + static_cast<std::size_t>(row) *
-                                                   static_cast<std::size_t>(surf->widthByte);
-            for (int col = start_col; col < end_col; ++col) {
-                const int src_x = col - dest_x;
-                if (src_x < 0 || src_x >= glyph_w) {
-                    continue;
-                }
-                const std::uint8_t cov = src_row[src_x];
-                std::uint8_t* dst = dst_row + static_cast<std::size_t>(col) * bpp;
-                if (bpp == 1) {
-                    dst[0] = cov;
-                } else {
-                    dst[0] = cov;
-                    dst[1] = cov;
-                    dst[2] = cov;
-                    dst[3] = cov;
-                }
-            }
-        }
+        font_glyph_blit(dst_base, static_cast<std::size_t>(surf->widthByte), bpp, glyph_bitmap,
+                        glyph_w, dest_x, dest_y, start_row, end_row, start_col, end_col);
     }
 
     result->stage = nullptr;

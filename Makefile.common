@@ -281,6 +281,7 @@ CORE_SOURCES_C += $(addprefix src/common/,audio_stream.c enum_names.c game_clock
 	hex_dump.c node_pool.c patch_catalog.c patch_halve.c patch_index.c ptr_table.c range_runs.c reserve_span.c thread_name.c \
 	u64_map.c vblank_clock.c)
 CORE_SOURCES_C += $(addprefix src/core/,emulator_settings.c user_manager.c)
+CORE_SOURCES_C += $(addprefix src/core/libraries/font/,font_blit.c)
 CORE_SOURCES_C += $(addprefix src/core/libraries/network/,host_override.c)
 CORE_SOURCES_C += $(addprefix src/core/libraries/ngs2/,ngs2_core.c ngs2_util.c)
 CORE_SOURCES_C += $(addprefix src/core/libraries/audiodec/,audiodec.c)

@@ -154,6 +154,12 @@ $CC -std=c89 -pedantic -Wno-long-long -O1 -g -Wall -Wdeclaration-after-statement
     -fsanitize=address,undefined -Isrc -I$L/include libretro/tests/reserve_span_test.c \
     src/common/reserve_span.c -o "$OUT/reserve_span_test"
 "$OUT/reserve_span_test"
+# A glyph into a game's surface straight from the face's bitmap, as it was written by way of a
+# copy of the bitmap
+$CC -std=c89 -pedantic -O1 -g -Wall -Wdeclaration-after-statement -fsanitize=address,undefined \
+    -Isrc libretro/tests/font_blit_test.c src/core/libraries/font/font_blit.c \
+    -o "$OUT/font_blit_test"
+"$OUT/font_blit_test"
 # A patch line that halves a number a game carries as text
 $CC -std=c89 -pedantic -O1 -g -Wall -Wdeclaration-after-statement -fsanitize=address,undefined \
     -Isrc -I$L/include libretro/tests/patch_halve_test.c src/common/patch_halve.c \
