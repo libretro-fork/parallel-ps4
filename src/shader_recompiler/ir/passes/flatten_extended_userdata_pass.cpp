@@ -8,13 +8,13 @@
 #include <memmap.h>
 #include <queue>
 #include "common/arch.h"
-#include "common/decoder.h"
 #include "common/flat_map.h"
 #include "common/io_file.h"
 #include "common/logging/log.h"
 #include "common/path_util.h"
 #include "common/run_once.h"
 #include "common/signal_context.h"
+#include "common/x64_decode.h"
 #include "common/x64_emit.h"
 #include "core/emulator_settings.h"
 #include "core/signals.h"
@@ -114,18 +114,23 @@ static void DumpSrtProgram(const Shader::Info& info, const u8* code, size_t code
     const auto filename = fmt::format("{}_{:#018x}.srtprogram.txt", info.hw_stage, info.pgm_hash);
     const auto file = IOFile{dump_dir / filename, FileAccessMode::Create};
 
-    u64 address = reinterpret_cast<u64>(code);
-    u64 code_end = address + codesize;
-    ZydisDecodedInstruction instruction;
-    ZydisDecodedOperand operands[ZYDIS_MAX_OPERAND_COUNT];
-    ZyanStatus status = ZYAN_STATUS_SUCCESS;
-    while (address < code_end && ZYAN_SUCCESS(Common::Decoder::Instance()->decodeInstruction(
-                                     instruction, operands, reinterpret_cast<void*>(address)))) {
-        std::string s =
-            Common::Decoder::Instance()->disassembleInst(instruction, operands, address);
-        s += "\n";
-        file.WriteString(s);
-        address += instruction.length;
+    const u8* const end = code + codesize;
+    for (const u8* ip = code; ip < end;) {
+        x64_insn_t instruction;
+        x64_operand_t operands[X64_MAX_OPERANDS];
+        char text[256];
+        const unsigned length = x64_decode(ip, static_cast<size_t>(end - ip), &instruction);
+        if (!length) {
+            break;
+        }
+        x64_operands(&instruction, operands);
+        // The text and its line end, cut short as the buffer is
+        size_t n =
+            x64_format(&instruction, operands, reinterpret_cast<u64>(ip), text, sizeof(text) - 1);
+        n = n < sizeof(text) - 2 ? n : sizeof(text) - 2;
+        text[n++] = '\n';
+        file.WriteString(std::span<const char>{text, n});
+        ip += length;
     }
 }
 
@@ -139,29 +144,29 @@ static bool SrtWalkerSignalHandler(void* context, void* fault_address) {
     }
 
     // Patch instruction to zero register
-    ZydisDecodedInstruction instruction;
-    ZydisDecodedOperand operands[ZYDIS_MAX_OPERAND_COUNT];
-    ZyanStatus status = Common::Decoder::Instance()->decodeInstruction(instruction, operands,
-                                                                       const_cast<void*>(code), 15);
+    x64_insn_t instruction;
+    x64_operand_t operands[X64_MAX_OPERANDS];
+    const size_t len = x64_decode(static_cast<const u8*>(code), 15, &instruction);
+    if (len) {
+        x64_operands(&instruction, operands);
+    }
 
-    ASSERT(ZYAN_SUCCESS(status) && instruction.mnemonic == ZYDIS_MNEMONIC_MOV &&
-           operands[0].type == ZYDIS_OPERAND_TYPE_REGISTER &&
-           operands[1].type == ZYDIS_OPERAND_TYPE_MEMORY);
+    ASSERT(len != 0 && instruction.mnemonic == X64_MN_MOV &&
+           operands[0].type == X64_OPERAND_REGISTER && operands[1].type == X64_OPERAND_MEMORY);
 
-    size_t len = instruction.length;
     const size_t patch_size = 3;
     u8* code_patch = const_cast<u8*>(reinterpret_cast<const u8*>(code));
 
     // We can only encounter rdi or r10d as the first operand in a
     // fault memory access for SRT walker.
-    switch (operands[0].reg.value) {
-    case ZYDIS_REGISTER_RDI:
+    switch (operands[0].reg) {
+    case X64_REG_RDI:
         // mov rdi, [rdi + (off_dw << 2)] -> xor rdi, rdi
         code_patch[0] = 0x48;
         code_patch[1] = 0x31;
         code_patch[2] = 0xFF;
         break;
-    case ZYDIS_REGISTER_R10D:
+    case X64_REG_R10D:
         // mov r10d, [rdi + (off_dw << 2)] -> xor r10d, r10d
         code_patch[0] = 0x45;
         code_patch[1] = 0x31;

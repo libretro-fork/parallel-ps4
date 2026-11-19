@@ -4,6 +4,19 @@ What changed in the libretro core of this fork, newest first. Changes that come 
 
 ## Unreleased
 
+- The x86-64 decoder (`src/common/x64_decode.c`) gives each instruction's mnemonic and category, its operands, and its Intel syntax text. The SRT walker interpreter, the walker fault handler, the shader dumps' walker disassembly and the crash log now use it in place of Zydis. Only the CPU patches use Zydis now; they move next, and then Zydis goes.
+  - **Operands (`x64_operands`):** register, memory, immediate and pointer operands, the hidden ones too, with what the instruction does to each (read, write, conditional), its size and how the instruction names it. They are numbered and named as Zydis numbers and names them (`src/common/x64_names.h`), so `X64_REG_RSP` is Zydis's `ZYDIS_REGISTER_RSP`.
+  - **Text (`x64_format`):** Zydis's Intel style, prefixes, size casts and absolute branch targets included.
+  - **Where it comes from:** `tools/x64_decode_gen.c` now also keeps each definition Zydis reaches: its mnemonic, category, operand definitions, operand and address widths, and the prefixes it takes. Zydis's register table goes along with it.
+  - **The same as Zydis:**
+    - at every offset of a game's 7.3 MB of code: mnemonic, category, widths, and every operand with every field;
+    - over 50 million generated instruction-shaped byte strings;
+    - the text, character for character, at every offset of that code and over 2 million generated strings.
+  - **Size:** the decoder's object is now 288 KB, most of it tables. Zydis's objects are 559 KB without Zycore.
+  - **Test:** `x64_decode_test` now also holds the text Zydis wrote for each listed form, and a second digest of the generated cases (mnemonics, operands and text).
+  - **Checked:** built on Linux and Windows, and the walker interpreter compiled for aarch64.
+
+  Not seen in a game yet.
 - A C89 x86-64 decoder, `src/common/x64_decode.c`, to take Zydis's place where the core reads x86-64 code. Nothing uses it yet: the CPU patches, the SRT walker interpreter, the fault handler and the crash log move onto it in the patches that follow, and then Zydis goes.
   - **What it gives:** each instruction's length and parts, read in place into a small record: prefixes, REX, VEX or XOP, the opcode and its map, ModRM, SIB, the memory operand, the displacement and the immediates with their offsets. Nothing is copied and nothing is allocated.
   - **Where its knowledge comes from:** tables made from Zydis 4 by `tools/x64_decode_gen.c`. That tool decodes every opcode of every map with Zydis, under every prefix form and every ModRM byte, and keeps what Zydis decides: whether there is ModRM, the immediates, whether LOCK is allowed, and what the register operands may name. The decoder then makes Zydis's own checks: LOCK, unused VEX.vvvv, CR and DR numbers, no move to CS, no rip-relative operand where none is allowed, and distinct gather registers. The tables are 16 KB.

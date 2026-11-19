@@ -3,9 +3,9 @@
 
 // The SRT walkers on a host that is not x86-64. FlattenExtendedUserdataPass emits them as x86-64
 // code (common/x64_emit.c) on every host, so a pipeline cache holds the same walkers whatever
-// machine wrote it; here they are decoded once with Zydis and run by a small interpreter of the few
-// instructions the pass emits. A load from a bad guest pointer reads 0, as the x86-64 walker's
-// fault handler makes it.
+// machine wrote it; here they are decoded once (common/x64_decode.c) and run by a small interpreter
+// of the few instructions the pass emits. A load from a bad guest pointer reads 0, as the x86-64
+// walker's fault handler makes it.
 
 #include "common/arch.h"
 #include "common/combiner.h"
@@ -21,8 +21,8 @@
 #include <vector>
 #include <ucontext.h>
 #include "common/assert.h"
-#include "common/decoder.h"
 #include "common/logging/log.h"
+#include "common/x64_decode.h"
 #include "core/signals.h"
 #include "shader_recompiler/ir/passes/srt.h"
 
@@ -65,7 +65,7 @@ struct Operand {
 };
 
 struct Op {
-    ZydisMnemonic mnemonic{};
+    u16 mnemonic{}; // X64_MN_
     u8 count{};
     std::array<Operand, 3> operands{};
 };
@@ -76,25 +76,24 @@ constexpr s8 RegRsp = 4;
 constexpr s8 RegRsi = 6;
 constexpr s8 RegRdi = 7;
 
-s8 GprIndex(ZydisRegister reg) {
-    if (reg == ZYDIS_REGISTER_NONE) {
+s8 GprIndex(unsigned reg) {
+    if (reg == X64_REG_NONE) {
         return -1;
     }
-    const ZydisRegister full = ZydisRegisterGetLargestEnclosing(ZYDIS_MACHINE_MODE_LONG_64, reg);
-    ASSERT_MSG(full >= ZYDIS_REGISTER_RAX && full <= ZYDIS_REGISTER_R15,
+    const unsigned full = x64_register_largest(reg);
+    ASSERT_MSG(full >= X64_REG_RAX && full <= X64_REG_R15,
                "SRT walker uses a register that is not a GPR");
-    return static_cast<s8>(full - ZYDIS_REGISTER_RAX);
+    return static_cast<s8>(full - X64_REG_RAX);
 }
 
 Program Decode(const u8* code) {
     Program program;
-    auto* decoder = Common::Decoder::Instance();
     for (const u8* ip = code;;) {
-        ZydisDecodedInstruction instruction;
-        ZydisDecodedOperand operands[ZYDIS_MAX_OPERAND_COUNT];
-        const auto status =
-            decoder->decodeInstruction(instruction, operands, const_cast<u8*>(ip));
-        ASSERT_MSG(ZYAN_SUCCESS(status), "SRT walker code could not be decoded");
+        x64_insn_t instruction;
+        x64_operand_t operands[X64_MAX_OPERANDS];
+        const unsigned length = x64_decode(ip, 15, &instruction);
+        ASSERT_MSG(length != 0, "SRT walker code could not be decoded");
+        x64_operands(&instruction, operands);
         Op op{};
         op.mnemonic = instruction.mnemonic;
         op.count = instruction.operand_count_visible;
@@ -104,31 +103,30 @@ Program Decode(const u8* code) {
             auto& operand = op.operands[i];
             operand.size = static_cast<u8>(source.size);
             switch (source.type) {
-            case ZYDIS_OPERAND_TYPE_REGISTER:
+            case X64_OPERAND_REGISTER:
                 operand.kind = OperandKind::Register;
-                operand.reg = GprIndex(source.reg.value);
+                operand.reg = GprIndex(source.reg);
                 break;
-            case ZYDIS_OPERAND_TYPE_MEMORY:
+            case X64_OPERAND_MEMORY:
                 operand.kind = OperandKind::Memory;
                 operand.base = GprIndex(source.mem.base);
                 operand.index = GprIndex(source.mem.index);
                 operand.scale = source.mem.scale;
-                operand.disp = source.mem.disp.value;
+                operand.disp = source.mem.disp;
                 break;
-            case ZYDIS_OPERAND_TYPE_IMMEDIATE:
+            case X64_OPERAND_IMMEDIATE:
                 operand.kind = OperandKind::Immediate;
-                operand.imm = source.imm.is_signed ? static_cast<u64>(source.imm.value.s)
-                                                   : source.imm.value.u;
+                operand.imm = source.imm.value; // sign extended when signed
                 break;
             default:
                 UNREACHABLE_MSG("SRT walker operand type {}", static_cast<int>(source.type));
             }
         }
         program.push_back(op);
-        if (instruction.mnemonic == ZYDIS_MNEMONIC_RET) {
+        if (instruction.mnemonic == X64_MN_RET) {
             return program;
         }
-        ip += instruction.length;
+        ip += length;
     }
 }
 
@@ -241,78 +239,78 @@ struct Machine {
             const auto& b = op.operands[1];
             const u8 size = a.size;
             switch (op.mnemonic) {
-            case ZYDIS_MNEMONIC_MOV:
+            case X64_MN_MOV:
                 Write(a, Read(b, size));
                 break;
-            case ZYDIS_MNEMONIC_ADD:
+            case X64_MN_ADD:
                 Write(a, Read(a, size) + Read(b, size));
                 break;
-            case ZYDIS_MNEMONIC_SUB:
+            case X64_MN_SUB:
                 Write(a, Read(a, size) - Read(b, size));
                 break;
-            case ZYDIS_MNEMONIC_AND:
+            case X64_MN_AND:
                 Write(a, Read(a, size) & Read(b, size));
                 break;
-            case ZYDIS_MNEMONIC_OR:
+            case X64_MN_OR:
                 Write(a, Read(a, size) | Read(b, size));
                 break;
-            case ZYDIS_MNEMONIC_XOR:
+            case X64_MN_XOR:
                 Write(a, Read(a, size) ^ Read(b, size));
                 break;
-            case ZYDIS_MNEMONIC_NEG:
+            case X64_MN_NEG:
                 Write(a, u64{0} - Read(a, size));
                 break;
-            case ZYDIS_MNEMONIC_NOT:
+            case X64_MN_NOT:
                 Write(a, ~Read(a, size));
                 break;
-            case ZYDIS_MNEMONIC_DEC:
+            case X64_MN_DEC:
                 Write(a, Read(a, size) - 1);
                 break;
-            case ZYDIS_MNEMONIC_IMUL:
+            case X64_MN_IMUL:
                 if (op.count == 3) {
                     Write(a, Read(b, size) * Read(op.operands[2], size));
                 } else {
                     Write(a, Read(a, size) * Read(b, size));
                 }
                 break;
-            case ZYDIS_MNEMONIC_SHL:
+            case X64_MN_SHL:
                 Write(a, Read(a, size) << (Read(b, size) & (size == 64 ? 63 : 31)));
                 break;
-            case ZYDIS_MNEMONIC_SHR:
+            case X64_MN_SHR:
                 Write(a, Read(a, size) >> (Read(b, size) & (size == 64 ? 63 : 31)));
                 break;
-            case ZYDIS_MNEMONIC_CMP:
+            case X64_MN_CMP:
                 cmp_left = Read(a, size);
                 cmp_right = Read(b, size);
                 break;
-            case ZYDIS_MNEMONIC_CMOVNBE:
+            case X64_MN_CMOVNBE:
                 if (cmp_left > cmp_right) {
                     Write(a, Read(b, size));
                 }
                 break;
-            case ZYDIS_MNEMONIC_CMOVB:
+            case X64_MN_CMOVB:
                 if (cmp_left < cmp_right) {
                     Write(a, Read(b, size));
                 }
                 break;
-            case ZYDIS_MNEMONIC_PUSH: {
+            case X64_MN_PUSH: {
                 gpr[RegRsp] -= 8;
                 const u64 value = Read(a, size);
                 std::memcpy(reinterpret_cast<void*>(gpr[RegRsp]), &value, sizeof(value));
                 break;
             }
-            case ZYDIS_MNEMONIC_POP: {
+            case X64_MN_POP: {
                 u64 value;
                 std::memcpy(&value, reinterpret_cast<const void*>(gpr[RegRsp]), sizeof(value));
                 gpr[RegRsp] += 8;
                 Write(a, value);
                 break;
             }
-            case ZYDIS_MNEMONIC_RET:
+            case X64_MN_RET:
                 return;
             default:
                 UNREACHABLE_MSG("SRT walker instruction {} not interpreted",
-                                ZydisMnemonicGetString(op.mnemonic));
+                                x64_mnemonic_name(op.mnemonic));
             }
         }
     }

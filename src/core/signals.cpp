@@ -9,11 +9,11 @@
 #include <retro_atomic.h>
 #include "common/arch.h"
 #include "common/assert.h"
-#include "common/decoder.h"
 #include "common/hex_dump.h"
 #include "common/logging/log.h"
 #include "common/quick_exit.h"
 #include "common/signal_context.h"
+#include "common/x64_decode.h"
 #include "core/cpu_patches.h" // Windows static guest red-zone protection
 #include "core/libraries/kernel/kernel.h"
 #include "core/libraries/kernel/threads/exception.h"
@@ -36,9 +36,6 @@ static constexpr DWORD MS_VC_EXCEPTION = 0x406D1388;
 #else
 #include <csignal>
 #include <pthread.h>
-#ifdef ARCH_X86_64
-#include <Zydis/Formatter.h>
-#endif
 #endif
 
 namespace Core {
@@ -189,16 +186,12 @@ static std::string DisassembleInstruction(void* code_address) {
     char buffer[256] = "<unable to decode>";
 
 #ifdef ARCH_X86_64
-    ZydisDecodedInstruction instruction;
-    ZydisDecodedOperand operands[ZYDIS_MAX_OPERAND_COUNT];
-    const auto status =
-        Common::Decoder::Instance()->decodeInstruction(instruction, operands, code_address);
-    if (ZYAN_SUCCESS(status)) {
-        ZydisFormatter formatter;
-        ZydisFormatterInit(&formatter, ZYDIS_FORMATTER_STYLE_INTEL);
-        ZydisFormatterFormatInstruction(&formatter, &instruction, operands,
-                                        instruction.operand_count_visible, buffer, sizeof(buffer),
-                                        reinterpret_cast<u64>(code_address), ZYAN_NULL);
+    x64_insn_t instruction;
+    x64_operand_t operands[X64_MAX_OPERANDS];
+    if (x64_decode(static_cast<const u8*>(code_address), 15, &instruction)) {
+        x64_operands(&instruction, operands);
+        x64_format(&instruction, operands, reinterpret_cast<u64>(code_address), buffer,
+                   sizeof(buffer));
     }
 #endif
 
