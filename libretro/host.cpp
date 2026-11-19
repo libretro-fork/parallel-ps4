@@ -35,6 +35,7 @@
 #include "common/memory_patcher.h"
 #include "common/path_util.h"
 #include "common/quick_exit.h"
+#include "common/run_once.h"
 #include "common/singleton.h"
 #include "common/thread_name.h"
 #include "core/emulator_settings.h"
@@ -334,9 +335,11 @@ void PumpInput() {
 // What main() does between its command line and Emulator::Run. Run does not return: it ends
 // in the window's event loop and std::quick_exit.
 int RunEmulator(const char* argument) {
-    shared = OpenShared(argument);
-    if (!shared) {
-        return 2;
+  // Before anything that is done once (common/run_once.h)
+  run_once_setup();
+  shared = OpenShared(argument);
+  if (!shared) {
+    return 2;
     }
     wakes.Attach(shared, argument);
     frame_slots_init(&emulator_frame_slots, &shared->frame_latest,

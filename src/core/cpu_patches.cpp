@@ -26,6 +26,7 @@
 #include "common/combiner.h"
 #include "common/decoder.h"
 #include "common/embedded_resources.h"
+#include "common/run_once.h"
 #include "common/signal_context.h"
 #include "common/types.h"
 #include "core/signals.h"
@@ -796,7 +797,7 @@ static const std::unordered_map<ZydisMnemonic, std::vector<PatchInfo>> Patches =
 #endif
 };
 
-static std::once_flag init_flag;
+static run_once_t init_flag = RUN_ONCE_INIT;
 
 struct PatchModule {
     /// Mutex controlling access to module code regions.
@@ -2547,7 +2548,7 @@ static void PatchesInit() {
 
 void RegisterPatchModule(void* module_ptr, u64 module_size, void* trampoline_area_ptr,
                          u64 trampoline_area_size) {
-    std::call_once(init_flag, PatchesInit);
+    run_once(&init_flag, [](void*) { PatchesInit(); }, nullptr);
 
     const auto module_addr = reinterpret_cast<u64>(module_ptr);
     modules.emplace(std::piecewise_construct, std::forward_as_tuple(module_addr),

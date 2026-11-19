@@ -48,6 +48,7 @@
 #include "common/io_file.h"
 #include "common/memory_patcher.h"
 #include "common/patch_catalog.h"
+#include "common/run_once.h"
 #include "common/scm_rev.h"
 #include "core/file_format/psf.h"
 #include "core/libraries/pad/pad.h"
@@ -1452,7 +1453,11 @@ RETRO_API void retro_set_input_state(retro_input_state_t cb) {
     input_state_cb = cb;
 }
 
-RETRO_API void retro_init(void) {}
+RETRO_API void retro_init(void) {
+  // Before anything that is done once in the frontend's process
+  // (common/run_once.h)
+  run_once_setup();
+}
 
 RETRO_API void retro_deinit(void) {}
 

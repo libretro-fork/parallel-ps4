@@ -7,6 +7,7 @@
 #include <utility>
 #include <vector>
 #include "common/enum_names.h"
+#include "common/run_once.h"
 
 #include "common/assert.h"
 #include "common/func_traits.h"
@@ -465,10 +466,14 @@ void SetupDenormFlushMode(EmitContext& ctx, const Profile& profile, const Runtim
             ctx.AddCapability(spv::Capability::DenormFlushToZero);
             ctx.AddExecutionMode(main_func, spv::ExecutionMode::DenormFlushToZero, 32U);
         } else {
-            static std::once_flag logged;
-            std::call_once(logged, [] {
-                LOG_WARNING(Render_Vulkan, "Float32 denorm flushing is not supported by the GPU");
-            });
+            static run_once_t logged = RUN_ONCE_INIT;
+            run_once(
+                &logged,
+                [](void*) {
+                    LOG_WARNING(Render_Vulkan,
+                                "Float32 denorm flushing is not supported by the GPU");
+                },
+                nullptr);
         }
     } else {
         LOG_WARNING(Render_Vulkan, "Unknown FP denorm mode {}", u32(fp32_denorm_mode));
@@ -481,11 +486,15 @@ void SetupDenormFlushMode(EmitContext& ctx, const Profile& profile, const Runtim
     const auto fp16_64_denorm_mode = runtime_info.props.fp_denorm_mode16_64;
     const auto same_denorm_mode = fp16_64_denorm_mode == fp32_denorm_mode;
     if (!same_denorm_mode && !profile.supports_denorm_behavior_independence) {
-        static std::once_flag logged;
-        std::call_once(logged, [] {
-            LOG_WARNING(Render_Vulkan, "Float32 and Float16/64 denorm modes are different but the "
-                                       "GPU does not support that");
-        });
+        static run_once_t logged = RUN_ONCE_INIT;
+        run_once(
+            &logged,
+            [](void*) {
+                LOG_WARNING(Render_Vulkan,
+                            "Float32 and Float16/64 denorm modes are different but the "
+                            "GPU does not support that");
+            },
+            nullptr);
         return;
     }
 
@@ -494,38 +503,54 @@ void SetupDenormFlushMode(EmitContext& ctx, const Profile& profile, const Runtim
             ctx.AddCapability(spv::Capability::DenormFlushToZero);
             ctx.AddExecutionMode(main_func, spv::ExecutionMode::DenormFlushToZero, 16U);
         } else {
-            static std::once_flag logged;
-            std::call_once(logged, [] {
-                LOG_WARNING(Render_Vulkan, "Float16 denorm flushing is not supported by the GPU");
-            });
+            static run_once_t logged = RUN_ONCE_INIT;
+            run_once(
+                &logged,
+                [](void*) {
+                    LOG_WARNING(Render_Vulkan,
+                                "Float16 denorm flushing is not supported by the GPU");
+                },
+                nullptr);
         }
         if (profile.support_fp64_denorm_flush) {
             ctx.AddCapability(spv::Capability::DenormFlushToZero);
             ctx.AddExecutionMode(main_func, spv::ExecutionMode::DenormFlushToZero, 64U);
         } else {
-            static std::once_flag logged;
-            std::call_once(logged, [] {
-                LOG_WARNING(Render_Vulkan, "Float64 denorm flushing is not supported by the GPU");
-            });
+            static run_once_t logged = RUN_ONCE_INIT;
+            run_once(
+                &logged,
+                [](void*) {
+                    LOG_WARNING(Render_Vulkan,
+                                "Float64 denorm flushing is not supported by the GPU");
+                },
+                nullptr);
         }
     } else if (fp16_64_denorm_mode == AmdGpu::FpDenormMode::InOutAllow) {
         if (profile.support_fp16_denorm_preserve) {
             ctx.AddCapability(spv::Capability::DenormPreserve);
             ctx.AddExecutionMode(main_func, spv::ExecutionMode::DenormPreserve, 16U);
         } else {
-            static std::once_flag logged;
-            std::call_once(logged, [] {
-                LOG_WARNING(Render_Vulkan, "Float16 denorm preserving is not supported by the GPU");
-            });
+            static run_once_t logged = RUN_ONCE_INIT;
+            run_once(
+                &logged,
+                [](void*) {
+                    LOG_WARNING(Render_Vulkan,
+                                "Float16 denorm preserving is not supported by the GPU");
+                },
+                nullptr);
         }
         if (profile.support_fp64_denorm_preserve) {
             ctx.AddCapability(spv::Capability::DenormPreserve);
             ctx.AddExecutionMode(main_func, spv::ExecutionMode::DenormPreserve, 64U);
         } else {
-            static std::once_flag logged;
-            std::call_once(logged, [] {
-                LOG_WARNING(Render_Vulkan, "Float64 denorm preserving is not supported by the GPU");
-            });
+            static run_once_t logged = RUN_ONCE_INIT;
+            run_once(
+                &logged,
+                [](void*) {
+                    LOG_WARNING(Render_Vulkan,
+                                "Float64 denorm preserving is not supported by the GPU");
+                },
+                nullptr);
         }
     } else {
         LOG_WARNING(Render_Vulkan, "Unknown Float16/64 denorm mode {}", u32(fp16_64_denorm_mode));
@@ -540,10 +565,14 @@ void SetupRoundingMode(EmitContext& ctx, const Profile& profile, const RuntimeIn
             ctx.AddCapability(spv::Capability::RoundingModeRTZ);
             ctx.AddExecutionMode(main_func, spv::ExecutionMode::RoundingModeRTZ, 32U);
         } else {
-            static std::once_flag logged;
-            std::call_once(logged, [] {
-                LOG_WARNING(Render_Vulkan, "Float32 rounding to zero is not supported by the GPU");
-            });
+            static run_once_t logged = RUN_ONCE_INIT;
+            run_once(
+                &logged,
+                [](void*) {
+                    LOG_WARNING(Render_Vulkan,
+                                "Float32 rounding to zero is not supported by the GPU");
+                },
+                nullptr);
         }
     } else if (fp_round_mode != AmdGpu::FpRoundMode::NearestEven) {
         LOG_WARNING(Render_Vulkan, "Unimplemented FP rounding mode {}",
@@ -554,11 +583,15 @@ void SetupRoundingMode(EmitContext& ctx, const Profile& profile, const RuntimeIn
         const auto fp16_64_round_mode = runtime_info.props.fp_round_mode16_64;
         const auto same_round_mode = fp16_64_round_mode == fp_round_mode;
         if (!same_round_mode && !profile.supports_rounding_mode_independence) {
-            static std::once_flag logged;
-            std::call_once(logged, [] {
-                LOG_WARNING(Render_Vulkan, "Float32 and Float16/64 rounding modes are different "
-                                           "but the GPU does not support that");
-            });
+            static run_once_t logged = RUN_ONCE_INIT;
+            run_once(
+                &logged,
+                [](void*) {
+                    LOG_WARNING(Render_Vulkan,
+                                "Float32 and Float16/64 rounding modes are different "
+                                "but the GPU does not support that");
+                },
+                nullptr);
             return;
         }
 
@@ -568,11 +601,14 @@ void SetupRoundingMode(EmitContext& ctx, const Profile& profile, const RuntimeIn
                     ctx.AddCapability(spv::Capability::RoundingModeRTZ);
                     ctx.AddExecutionMode(main_func, spv::ExecutionMode::RoundingModeRTZ, 16U);
                 } else {
-                    static std::once_flag logged;
-                    std::call_once(logged, [] {
-                        LOG_WARNING(Render_Vulkan,
-                                    "Float16 rounding to zero is not supported by the GPU");
-                    });
+                    static run_once_t logged = RUN_ONCE_INIT;
+                    run_once(
+                        &logged,
+                        [](void*) {
+                            LOG_WARNING(Render_Vulkan,
+                                        "Float16 rounding to zero is not supported by the GPU");
+                        },
+                        nullptr);
                 }
             }
             if (ctx.info.uses_fp64) {
@@ -580,11 +616,14 @@ void SetupRoundingMode(EmitContext& ctx, const Profile& profile, const RuntimeIn
                     ctx.AddCapability(spv::Capability::RoundingModeRTZ);
                     ctx.AddExecutionMode(main_func, spv::ExecutionMode::RoundingModeRTZ, 64U);
                 } else {
-                    static std::once_flag logged;
-                    std::call_once(logged, [] {
-                        LOG_WARNING(Render_Vulkan,
-                                    "Float64 rounding to zero is not supported by the GPU");
-                    });
+                    static run_once_t logged = RUN_ONCE_INIT;
+                    run_once(
+                        &logged,
+                        [](void*) {
+                            LOG_WARNING(Render_Vulkan,
+                                        "Float64 rounding to zero is not supported by the GPU");
+                        },
+                        nullptr);
                 }
             }
         } else if (fp16_64_round_mode != AmdGpu::FpRoundMode::NearestEven) {
@@ -608,34 +647,44 @@ void SetupInfNanPreserveMode(EmitContext& ctx, const Profile& profile,
     if (profile.support_fp32_signed_zero_inf_nan_preserve) {
         ctx.AddExecutionMode(main_func, spv::ExecutionMode::SignedZeroInfNanPreserve, 32U);
     } else {
-        static std::once_flag logged;
-        std::call_once(logged, [] {
-            LOG_WARNING(Render_Vulkan,
-                        "Float32 signed zero/inf/nan preserve mode is not supported by the GPU");
-        });
+        static run_once_t logged = RUN_ONCE_INIT;
+        run_once(
+            &logged,
+            [](void*) {
+                LOG_WARNING(
+                    Render_Vulkan,
+                    "Float32 signed zero/inf/nan preserve mode is not supported by the GPU");
+            },
+            nullptr);
     }
     if (ctx.info.uses_fp16) {
         if (profile.support_fp16_signed_zero_inf_nan_preserve) {
             ctx.AddExecutionMode(main_func, spv::ExecutionMode::SignedZeroInfNanPreserve, 16U);
         } else {
-            static std::once_flag logged;
-            std::call_once(logged, [] {
-                LOG_WARNING(
-                    Render_Vulkan,
-                    "Float16 signed zero/inf/nan preserve mode is not supported by the GPU");
-            });
+            static run_once_t logged = RUN_ONCE_INIT;
+            run_once(
+                &logged,
+                [](void*) {
+                    LOG_WARNING(
+                        Render_Vulkan,
+                        "Float16 signed zero/inf/nan preserve mode is not supported by the GPU");
+                },
+                nullptr);
         }
     }
     if (ctx.info.uses_fp64) {
         if (profile.support_fp64_signed_zero_inf_nan_preserve) {
             ctx.AddExecutionMode(main_func, spv::ExecutionMode::SignedZeroInfNanPreserve, 64U);
         } else {
-            static std::once_flag logged;
-            std::call_once(logged, [] {
-                LOG_WARNING(
-                    Render_Vulkan,
-                    "Float64 signed zero/inf/nan preserve mode is not supported by the GPU");
-            });
+            static run_once_t logged = RUN_ONCE_INIT;
+            run_once(
+                &logged,
+                [](void*) {
+                    LOG_WARNING(
+                        Render_Vulkan,
+                        "Float64 signed zero/inf/nan preserve mode is not supported by the GPU");
+                },
+                nullptr);
         }
     }
 }

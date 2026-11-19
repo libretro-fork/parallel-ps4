@@ -14,6 +14,7 @@
 #include "aio.h"
 #include "common/assert.h"
 #include "common/logging/log.h"
+#include "common/run_once.h"
 #include "core/libraries/kernel/equeue.h"
 #include "core/libraries/kernel/orbis_error.h"
 #include "core/libraries/libs.h"
@@ -54,7 +55,7 @@ static retro_atomic_int_t g_next_id{0};
 static mpsc_stack_t g_pending;
 static retro_eventcount_t g_work;
 static retro_eventcount_t g_done;
-static std::once_flag g_worker_once;
+static run_once_t g_worker_once = RUN_ONCE_INIT;
 
 static void AioDo(const OrbisKernelAioRWRequest& req, bool write, retro_atomic_int_t& state) {
     if (static_cast<s32>(retro_atomic_load_acquire_int(&state)) == ORBIS_KERNEL_AIO_STATE_ABORTED) {
@@ -118,14 +119,17 @@ static void SetState(OrbisKernelAioSubmitId id, s32 state) {
 // Hands @count requests to the worker under one id. A batch larger than one slot takes, which
 // the console refuses, is done here as before.
 static OrbisKernelAioSubmitId Submit(const OrbisKernelAioRWRequest* req, u32 count, bool write) {
-    std::call_once(g_worker_once, [] {
-        mpsc_stack_init(&g_pending);
-        retro_eventcount_init(&g_work);
-        retro_eventcount_init(&g_done);
-        sthread_t* thread = sthread_create(AioWorker, nullptr);
-        ASSERT_MSG(thread, "No thread for asynchronous I/O");
-        sthread_detach(thread);
-    });
+    run_once(
+        &g_worker_once,
+        [](void*) {
+            mpsc_stack_init(&g_pending);
+            retro_eventcount_init(&g_work);
+            retro_eventcount_init(&g_done);
+            sthread_t* thread = sthread_create(AioWorker, nullptr);
+            ASSERT_MSG(thread, "No thread for asynchronous I/O");
+            sthread_detach(thread);
+        },
+        nullptr);
     // Ids 1 to 511 in turn; 0 is the cancel functions' own
     const OrbisKernelAioSubmitId id = static_cast<OrbisKernelAioSubmitId>(
         1 + static_cast<u32>(retro_atomic_fetch_add_int(&g_next_id, 1)) %

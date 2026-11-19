@@ -28,6 +28,7 @@
 #include "common/logging/log.h"
 #include "common/path_util.h"
 #include "common/quick_exit.h"
+#include "common/run_once.h"
 #include "common/stop_thread.h"
 #include "common/thread_name.h"
 #include "common/types.h"
@@ -89,14 +90,17 @@ s64 NowMs() {
 }
 
 void InitRing() {
-    static std::once_flag once;
-    std::call_once(once, [] {
-        for (std::size_t i = 0; i < NUM_CELLS; ++i) {
-            retro_atomic_store_relaxed_64(&g_ring[i].seq, i);
-        }
-        retro_eventcount_init(&g_writer_ec);
-        retro_eventcount_init(&g_flush_ec);
-    });
+    static run_once_t once = RUN_ONCE_INIT;
+    run_once(
+        &once,
+        [](void*) {
+            for (std::size_t i = 0; i < NUM_CELLS; ++i) {
+                retro_atomic_store_relaxed_64(&g_ring[i].seq, i);
+            }
+            retro_eventcount_init(&g_writer_ec);
+            retro_eventcount_init(&g_flush_ec);
+        },
+        nullptr);
 }
 
 // Claims room for the record, copies it in and publishes it. Returns its last ticket + 1, or 0
@@ -473,11 +477,14 @@ void VLog(Class log_class, Level level, const char* file, int line, const char* 
 }
 
 void Setup(std::string_view shadps4_filename) {
-    static std::once_flag already_registered;
-    std::call_once(already_registered, []() {
-        std::atexit(Shutdown);
-        Common::AtQuickExit(Flush);
-    });
+    static run_once_t already_registered = RUN_ONCE_INIT;
+    run_once(
+        &already_registered,
+        [](void*) {
+            std::atexit(Shutdown);
+            Common::AtQuickExit(Flush);
+        },
+        nullptr);
 
     g_control.Run([&] {
         InitRing();

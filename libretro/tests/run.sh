@@ -140,6 +140,14 @@ for san in address,undefined thread; do
         $L/features/features_cpu.c -o "$OUT/node_pool_test" -lpthread
     "$OUT/node_pool_test"
 done
+# What is done once, where the core had std::call_once: four threads at 2000 of them
+for san in address,undefined thread; do
+    $CC -std=gnu89 -O1 -g -Wall -Wdeclaration-after-statement -fsanitize=$san -Isrc -I$L/include \
+        libretro/tests/run_once_test.c src/common/run_once.c $L/rthreads/rthreads.c \
+        $L/rthreads/retro_eventcount.c $L/features/features_cpu.c -o "$OUT/run_once_test" \
+        -lpthread
+    "$OUT/run_once_test"
+done
 # The service thread that can be asked to stop, where the core had std::jthread: 5000 started,
 # stopped as they work or go into their wait, and joined
 for san in address,undefined thread; do

@@ -9,6 +9,7 @@
 
 #include "common/arch.h"
 #include "common/combiner.h"
+#include "common/run_once.h"
 
 #if defined(__aarch64__) && defined(__linux__)
 
@@ -320,11 +321,14 @@ struct Machine {
 } // namespace
 
 void RunSrtWalker(PFN_SrtWalker walker, const u32* user_data, u32* flat_dst) {
-    static std::once_flag handler_once;
-    std::call_once(handler_once, [] {
-        // After the memory invalidation handler, as the x86-64 walker's own
-        Core::Signals::Instance()->RegisterAccessViolationHandler(SafeLoadFaultHandler, 1);
-    });
+    static run_once_t handler_once = RUN_ONCE_INIT;
+    run_once(
+        &handler_once,
+        [](void*) {
+            // After the memory invalidation handler, as the x86-64 walker's own
+            Core::Signals::Instance()->RegisterAccessViolationHandler(SafeLoadFaultHandler, 1);
+        },
+        nullptr);
     const Program& program = GetProgram(reinterpret_cast<const void*>(walker));
     Machine machine;
     machine.gpr[RegRdi] = reinterpret_cast<u64>(user_data);

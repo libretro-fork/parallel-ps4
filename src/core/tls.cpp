@@ -5,6 +5,7 @@
 #include <retro_atomic.h>
 #include "common/arch.h"
 #include "common/assert.h"
+#include "common/run_once.h"
 #include "core/libraries/kernel/threads/pthread.h"
 #include "core/tls.h"
 
@@ -103,7 +104,7 @@ static bool AcquireLdtIndex(u16* out) {
     }
     return false;
 }
-static std::once_flag ldt_region_init_flag;
+static run_once_t ldt_region_init_flag = RUN_ONCE_INIT;
 static pthread_key_t ldt_page_slot = 0;
 
 static void FreeLdtPage(void* raw) {
@@ -126,7 +127,7 @@ static void InitLdtRegion() {
 }
 
 void SetTcbBase(void* image_address) {
-    std::call_once(ldt_region_init_flag, InitLdtRegion);
+    run_once(&ldt_region_init_flag, [](void*) { InitLdtRegion(); }, nullptr);
 
     auto* ldt_page = static_cast<LdtPage*>(pthread_getspecific(ldt_page_slot));
     if (ldt_page != nullptr) {
@@ -217,14 +218,14 @@ Tcb* GetTcbBase() {
 // code to it.
 
 static pthread_key_t slot = 0;
-static std::once_flag slot_alloc_flag;
+static run_once_t slot_alloc_flag = RUN_ONCE_INIT;
 
 static void AllocTcbKey() {
     ASSERT(pthread_key_create(&slot, nullptr) == 0);
 }
 
 pthread_key_t GetTcbKey() {
-    std::call_once(slot_alloc_flag, &AllocTcbKey);
+    run_once(&slot_alloc_flag, [](void*) { AllocTcbKey(); }, nullptr);
     return slot;
 }
 

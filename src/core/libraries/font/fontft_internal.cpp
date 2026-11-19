@@ -3,6 +3,7 @@
 
 #include "common/combiner.h"
 #include "common/io_file.h"
+#include "common/run_once.h"
 #include "core/libraries/font/fontft_internal.h"
 
 #include <algorithm>
@@ -2388,11 +2389,11 @@ using Libraries::Font::Internal::FaceVector;
 
 namespace {
 
-static std::once_flag g_driver_table_once;
+static run_once_t g_driver_table_once = RUN_ONCE_INIT;
 alignas(Libraries::Font::Internal::SysDriver) static Libraries::Font::Internal::SysDriver
     g_driver_table{};
 
-static std::once_flag g_renderer_table_once;
+static run_once_t g_renderer_table_once = RUN_ONCE_INIT;
 alignas(Libraries::FontFt::OrbisFontRendererSelection) static Libraries::FontFt::
     OrbisFontRendererSelection g_renderer_table{};
 
@@ -2563,49 +2564,56 @@ static std::optional<FontObjSidecar> TakeFontObjSidecar(const FontObj* obj) {
 } // namespace
 
 const Libraries::FontFt::OrbisFontLibrarySelection* GetDriverTable() {
-    std::call_once(g_driver_table_once, [] {
-        auto* selection =
-            reinterpret_cast<Libraries::FontFt::OrbisFontLibrarySelection*>(&g_driver_table);
-        selection->magic = 0;
-        selection->reserved = 0;
-        selection->reserved_ptr1 = nullptr;
+    run_once(
+        &g_driver_table_once,
+        [](void*) {
+            auto* selection =
+                reinterpret_cast<Libraries::FontFt::OrbisFontLibrarySelection*>(&g_driver_table);
+            selection->magic = 0;
+            selection->reserved = 0;
+            selection->reserved_ptr1 = nullptr;
 
-        auto* driver = &g_driver_table;
-        driver->pixel_resolution = &Libraries::FontFt::Internal::LibraryGetPixelResolutionStub;
-        driver->init = &Libraries::FontFt::Internal::LibraryInitStub;
-        driver->term = &Libraries::FontFt::Internal::LibraryTermStub;
-        driver->support_formats = &Libraries::FontFt::Internal::LibrarySupportStub;
-        driver->open = &Libraries::FontFt::Internal::LibraryOpenFontMemoryStub;
-        driver->close = &Libraries::FontFt::Internal::LibraryCloseFontObjStub;
-        driver->scale = &Libraries::FontFt::Internal::LibraryGetFaceScaleStub;
-        driver->metric = &Libraries::FontFt::Internal::LibraryGetFaceMetricStub;
-        driver->glyph_index = &Libraries::FontFt::Internal::LibraryGetGlyphIndexStub;
-        driver->set_char_with_dpi = &Libraries::FontFt::Internal::LibrarySetCharSizeWithDpiStub;
-        driver->set_char_default_dpi =
-            &Libraries::FontFt::Internal::LibrarySetCharSizeDefaultDpiStub;
-        driver->compute_layout = &Libraries::FontFt::Internal::LibraryComputeLayoutBlockStub;
-        driver->compute_layout_alt = &Libraries::FontFt::Internal::LibraryComputeLayoutAltBlockStub;
-        driver->load_glyph_cached = &Libraries::FontFt::Internal::LibraryLoadGlyphCachedStub;
-        driver->get_glyph_metrics = &Libraries::FontFt::Internal::LibraryGetGlyphMetricsStub;
-        driver->apply_glyph_adjust = &Libraries::FontFt::Internal::LibraryApplyGlyphAdjustStub;
-        driver->configure_glyph = &Libraries::FontFt::Internal::LibraryConfigureGlyphStub;
-    });
+            auto* driver = &g_driver_table;
+            driver->pixel_resolution = &Libraries::FontFt::Internal::LibraryGetPixelResolutionStub;
+            driver->init = &Libraries::FontFt::Internal::LibraryInitStub;
+            driver->term = &Libraries::FontFt::Internal::LibraryTermStub;
+            driver->support_formats = &Libraries::FontFt::Internal::LibrarySupportStub;
+            driver->open = &Libraries::FontFt::Internal::LibraryOpenFontMemoryStub;
+            driver->close = &Libraries::FontFt::Internal::LibraryCloseFontObjStub;
+            driver->scale = &Libraries::FontFt::Internal::LibraryGetFaceScaleStub;
+            driver->metric = &Libraries::FontFt::Internal::LibraryGetFaceMetricStub;
+            driver->glyph_index = &Libraries::FontFt::Internal::LibraryGetGlyphIndexStub;
+            driver->set_char_with_dpi = &Libraries::FontFt::Internal::LibrarySetCharSizeWithDpiStub;
+            driver->set_char_default_dpi =
+                &Libraries::FontFt::Internal::LibrarySetCharSizeDefaultDpiStub;
+            driver->compute_layout = &Libraries::FontFt::Internal::LibraryComputeLayoutBlockStub;
+            driver->compute_layout_alt =
+                &Libraries::FontFt::Internal::LibraryComputeLayoutAltBlockStub;
+            driver->load_glyph_cached = &Libraries::FontFt::Internal::LibraryLoadGlyphCachedStub;
+            driver->get_glyph_metrics = &Libraries::FontFt::Internal::LibraryGetGlyphMetricsStub;
+            driver->apply_glyph_adjust = &Libraries::FontFt::Internal::LibraryApplyGlyphAdjustStub;
+            driver->configure_glyph = &Libraries::FontFt::Internal::LibraryConfigureGlyphStub;
+        },
+        nullptr);
 
     return reinterpret_cast<const Libraries::FontFt::OrbisFontLibrarySelection*>(&g_driver_table);
 }
 
 const Libraries::FontFt::OrbisFontRendererSelection* GetRendererSelectionTable() {
-    std::call_once(g_renderer_table_once, [] {
-        g_renderer_table.magic = 0;
-        g_renderer_table.size =
-            static_cast<u32>(sizeof(Libraries::Font::Internal::RendererFtOpaque));
-        g_renderer_table.create_fn =
-            reinterpret_cast<std::uintptr_t>(&Libraries::FontFt::Internal::FtRendererCreate);
-        g_renderer_table.destroy_fn =
-            reinterpret_cast<std::uintptr_t>(&Libraries::FontFt::Internal::FtRendererDestroy);
-        g_renderer_table.query_fn =
-            reinterpret_cast<std::uintptr_t>(&Libraries::FontFt::Internal::FtRendererQuery);
-    });
+    run_once(
+        &g_renderer_table_once,
+        [](void*) {
+            g_renderer_table.magic = 0;
+            g_renderer_table.size =
+                static_cast<u32>(sizeof(Libraries::Font::Internal::RendererFtOpaque));
+            g_renderer_table.create_fn =
+                reinterpret_cast<std::uintptr_t>(&Libraries::FontFt::Internal::FtRendererCreate);
+            g_renderer_table.destroy_fn =
+                reinterpret_cast<std::uintptr_t>(&Libraries::FontFt::Internal::FtRendererDestroy);
+            g_renderer_table.query_fn =
+                reinterpret_cast<std::uintptr_t>(&Libraries::FontFt::Internal::FtRendererQuery);
+        },
+        nullptr);
     return &g_renderer_table;
 }
 
