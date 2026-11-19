@@ -4,7 +4,10 @@
 #pragma once
 
 #include <array>
+#include <span>
 #include <unordered_map>
+#include <vector>
+#include <fmt/format.h>
 #include "shader_recompiler/backend/spirv/spv_ops.h"
 
 #include "shader_recompiler/backend/bindings.h"
@@ -14,12 +17,27 @@
 
 namespace Shader::Backend::SPIRV {
 
-/// The module's words (spv_module_finish), copied out for the caller that keeps them
-inline std::vector<u32> FinishModule(spv_module_t* m, u32 version) {
+/// The module's words (spv_module_finish), where they lie: the module's until its next reset
+inline std::span<const u32> ModuleWords(spv_module_t* m, u32 version) {
     size_t words = 0;
     const u32* module = spv_module_finish(m, version, 0, &words);
     ASSERT_MSG(module, "SPIR-V module: out of memory");
-    return std::vector<u32>(module, module + words);
+    return {module, words};
+}
+
+/// The same, copied out, for a module that goes before its words are used
+inline std::vector<u32> FinishModule(spv_module_t* m, u32 version) {
+    const auto words = ModuleWords(m, version);
+    return std::vector<u32>(words.begin(), words.end());
+}
+
+/// OpName of @target, the name formatted only when the module writes names
+template <typename... Args>
+u32 NameFmt(spv_module_t* m, u32 target, fmt::format_string<Args...> format, Args&&... args) {
+    if (m->names) {
+        spv_Name(m, target, fmt::format(format, std::forward<Args>(args)...).c_str());
+    }
+    return target;
 }
 
 /// An id of the SPIR-V module (spv_module.h): a plain word, 0 for none
@@ -47,11 +65,10 @@ struct VectorIds {
 
 class EmitContext final {
 public:
-    spv_module_t m; ///< The module written (spv_module.h): first, as the rest is made into it
+    spv_module_t& m; ///< The module written (spv_module.h), the caller's and reused: first
 
-    explicit EmitContext(const Profile& profile, const RuntimeInfo& runtime_info, Info& info,
-                         Bindings& binding);
-    ~EmitContext();
+    explicit EmitContext(spv_module_t& module, const Profile& profile,
+                         const RuntimeInfo& runtime_info, Info& info, Bindings& binding);
 
     Id Def(const IR::Value& value);
 

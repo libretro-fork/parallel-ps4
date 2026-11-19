@@ -9,7 +9,8 @@
  * for, a dense id bound, the module laid out as SPIR-V's logical layout wants, and, when
  * spirv-val is installed, valid for Vulkan 1.2. An extended set imported once however often asked
  * for, and an OpPhi written before its value is known, its value and parent then set through
- * spv_module_patch_phis. */
+ * spv_module_patch_phis. Debug names (spv_Name, spv_MemberName) written only when the module
+ * says names are wanted. */
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -17,7 +18,7 @@
 
 #include <spirv/unified1/spirv.h>
 
-#include "shader_recompiler/backend/spirv/spv_module.h"
+#include "shader_recompiler/backend/spirv/spv_ops.h"
 
 static int failures;
 static long live_blocks;
@@ -270,11 +271,32 @@ static void validate(const char* path) {
     expect("valid SPIR-V (spirv-val)", system(cmd) == 0);
 }
 
+/* spv_Name and spv_MemberName: nothing written with names off, the name with them on */
+static void check_names(spv_module_t* m) {
+    uint32_t t;
+    expect("reset", spv_module_reset(m, 64));
+    t = spv_module_id(m);
+    m->names = 0;
+    expect("a name off gives its target back", spv_Name(m, t, "off") == t);
+    (void)spv_MemberName(m, t, 0, "off");
+    expect("no name with names off", m->sec[SPV_SEC_DEBUG_NAMES].n == 0);
+    m->names = 1;
+    (void)spv_Name(m, t, "on");
+    expect("the name with names on", m->sec[SPV_SEC_DEBUG_NAMES].n == 3 &&
+                                          m->sec[SPV_SEC_DEBUG_NAMES].v[0] ==
+                                              ((3u << 16) | SpvOpName) &&
+                                          memcmp(&m->sec[SPV_SEC_DEBUG_NAMES].v[2], "on", 3) == 0);
+    (void)spv_MemberName(m, t, 1, "on");
+    expect("the member name with names on", m->sec[SPV_SEC_DEBUG_NAMES].n == 7);
+    m->names = 0;
+}
+
 int main(int argc, char** argv) {
     spv_module_t m;
     const char* dir = argc > 1 ? argv[1] : ".";
     char path[400];
     spv_module_init(&m, test_grow, NULL);
+    check_names(&m);
 
     snprintf(path, sizeof(path), "%s/spv_module_test_a.spv", dir);
     write_shader(&m, path);

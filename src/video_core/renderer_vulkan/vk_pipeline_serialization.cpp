@@ -13,7 +13,7 @@
 
 namespace Serialization {
 /* You should increment versions below once corresponding serialization scheme is changed. */
-static constexpr u32 ShaderBinaryVersion = 13u; // 13: written by spv_module, not Sirit
+static constexpr u32 ShaderBinaryVersion = 14u; // 14: debug names only when dumping
 static constexpr u32 ShaderMetaVersion = 7u;    // 7: the whole Info, the walker as made
 static constexpr u32 PipelineKeyVersion = 3u;
 } // namespace Serialization
@@ -82,14 +82,16 @@ void RegisterShaderMeta(const Shader::Info& info,
                                        fmt::format("{:#018x}", perm_hash), ar.TakeOff());
 }
 
-void RegisterShaderBinary(std::vector<u32>&& spv, u64 pgm_hash, size_t perm_idx) {
+void RegisterShaderBinary(std::span<const u32> spv, u64 pgm_hash, size_t perm_idx) {
     if (!Storage::DataBase::Instance().IsOpened()) {
         return;
     }
 
+    // The one copy, for the writer that saves it later: the words lie in the recompiler's
+    // module, which the next shader is written into
     Storage::DataBase::Instance().Save(Storage::BlobType::ShaderBinary,
                                        fmt::format("{:#018x}_{}", pgm_hash, perm_idx),
-                                       std::move(spv));
+                                       std::vector<u32>(spv.begin(), spv.end()));
 }
 
 bool LoadShaderMeta(Serialization::Archive& ar, Shader::Info& info,

@@ -95,7 +95,8 @@ for san in address,undefined thread; do
         libretro/tests/vk_heap_test.c src/video_core/renderer_vulkan/vk_heap.c -o "$OUT/$name"
     "$OUT/$name"
     # The shader recompiler's SPIR-V module: types made once, the layout, the code moved once
-    # when the gap before it is too small, and spirv-val's word where it is installed
+    # when the gap before it is too small, debug names only when asked for, and spirv-val's
+    # word where it is installed
     name=spv_module_test-$(echo $san | tr , -)
     $CC -std=gnu89 -O1 -g -Wall -Wextra -Wdeclaration-after-statement -fno-omit-frame-pointer \
         -fsanitize=$san -Isrc -I$L/include -isystem externals/sirit/externals/SPIRV-Headers/include \

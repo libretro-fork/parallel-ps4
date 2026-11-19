@@ -46,7 +46,7 @@ static std::pair<Id, bool> OutputAttrComponentType(EmitContext& ctx, IR::Attribu
 
 Id EmitGetUserData(EmitContext& ctx, IR::ScalarReg reg) {
     const Id ud_reg{ctx.EmitFlatbufferLoad(ctx.ConstU32(static_cast<u32>(reg)))};
-    spv_Name(&ctx.m, ud_reg, std::string(fmt::format("ud_{}", u32(reg))).c_str());
+    NameFmt(&ctx.m, ud_reg, "ud_{}", u32(reg));
     return ud_reg;
 }
 

@@ -19,26 +19,6 @@
 namespace Shader::Backend::SPIRV {
 namespace {
 
-std::string_view StageName(HwStage stage) {
-    switch (stage) {
-    case HwStage::Vertex:
-        return "vs";
-    case HwStage::Local:
-        return "ls";
-    case HwStage::Export:
-        return "es";
-    case HwStage::Hull:
-        return "hs";
-    case HwStage::Geometry:
-        return "gs";
-    case HwStage::Fragment:
-        return "fs";
-    case HwStage::Compute:
-        return "cs";
-    }
-    UNREACHABLE_MSG("Invalid hw stage {}", u32(stage));
-}
-
 static constexpr u32 NumVertices(AmdGpu::PrimitiveType type) {
     switch (type) {
     case AmdGpu::PrimitiveType::PointList:
@@ -59,22 +39,12 @@ static constexpr u32 NumVertices(AmdGpu::PrimitiveType type) {
     }
 }
 
-template <typename... Args>
-void NameFmt(EmitContext& ctx, Id object, std::string_view format_str, Args&&... args) {
-    spv_Name(&ctx.m, object,
-             std::string(fmt::format(fmt::runtime(format_str), StageName(ctx.hw_stage),
-                                     std::forward<Args>(args)...)
-                             .c_str())
-                 .c_str());
-}
-
 } // Anonymous namespace
 
-EmitContext::EmitContext(const Profile& profile_, const RuntimeInfo& runtime_info_, Info& info_,
-                         Bindings& binding_)
-    : info{info_}, runtime_info{runtime_info_}, profile{profile_}, hw_stage{info.hw_stage},
-      sw_stage{info.sw_stage}, binding{binding_} {
-    spv_module_init(&m, spv_module_heap_grow, nullptr);
+EmitContext::EmitContext(spv_module_t& module, const Profile& profile_,
+                         const RuntimeInfo& runtime_info_, Info& info_, Bindings& binding_)
+    : m{module}, info{info_}, runtime_info{runtime_info_}, profile{profile_},
+      hw_stage{info.hw_stage}, sw_stage{info.sw_stage}, binding{binding_} {
     ASSERT_MSG(spv_module_reset(&m, 4096), "SPIR-V module: out of memory");
     if (info.uses_dma) {
         spv_SetMemoryModel(&m, u32(SpvAddressingModelPhysicalStorageBuffer64),
@@ -82,7 +52,9 @@ EmitContext::EmitContext(const Profile& profile_, const RuntimeInfo& runtime_inf
     } else {
         spv_SetMemoryModel(&m, u32(SpvAddressingModelLogical), u32(SpvMemoryModelGLSL450));
     }
-    spv_String(&m, std::string(fmt::format("{:#x}", info.pgm_hash)).c_str());
+    if (m.names) {
+        spv_String(&m, fmt::format("{:#x}", info.pgm_hash).c_str());
+    }
 
     spv_AddCapability(&m, u32(SpvCapabilityShader));
     DefineArithmeticTypes();
@@ -91,10 +63,6 @@ EmitContext::EmitContext(const Profile& profile_, const RuntimeInfo& runtime_inf
     DefineBuffers();
     DefineImagesAndSamplers();
     DefineFunctions();
-}
-
-EmitContext::~EmitContext() {
-    spv_module_free(&m);
 }
 
 Id EmitContext::Def(const IR::Value& value) {
@@ -141,21 +109,15 @@ void EmitContext::DefineArithmeticTypes() {
 
     for (u32 i = 2; i <= 4; i++) {
         if (info.uses_fp16) {
-            F16[i] = spv_Name(&m, spv_TypeVector(&m, F16[1], u32(i)),
-                              std::string(fmt::format("f16vec{}_id", i)).c_str());
+            F16[i] = NameFmt(&m, spv_TypeVector(&m, F16[1], u32(i)), "f16vec{}_id", i);
         }
         if (info.uses_fp64) {
-            F64[i] = spv_Name(&m, spv_TypeVector(&m, F64[1], u32(i)),
-                              std::string(fmt::format("f64vec{}_id", i)).c_str());
+            F64[i] = NameFmt(&m, spv_TypeVector(&m, F64[1], u32(i)), "f64vec{}_id", i);
         }
-        F32[i] = spv_Name(&m, spv_TypeVector(&m, F32[1], u32(i)),
-                          std::string(fmt::format("f32vec{}_id", i)).c_str());
-        S32[i] = spv_Name(&m, spv_TypeVector(&m, S32[1], u32(i)),
-                          std::string(fmt::format("i32vec{}_id", i)).c_str());
-        U32[i] = spv_Name(&m, spv_TypeVector(&m, U32[1], u32(i)),
-                          std::string(fmt::format("u32vec{}_id", i)).c_str());
-        U1[i] = spv_Name(&m, spv_TypeVector(&m, U1[1], u32(i)),
-                         std::string(fmt::format("bvec{}_id", i)).c_str());
+        F32[i] = NameFmt(&m, spv_TypeVector(&m, F32[1], u32(i)), "f32vec{}_id", i);
+        S32[i] = NameFmt(&m, spv_TypeVector(&m, S32[1], u32(i)), "i32vec{}_id", i);
+        U32[i] = NameFmt(&m, spv_TypeVector(&m, U32[1], u32(i)), "u32vec{}_id", i);
+        U1[i] = NameFmt(&m, spv_TypeVector(&m, U1[1], u32(i)), "bvec{}_id", i);
     }
 
     true_value = spv_ConstantTrue(&m, U1[1]);
@@ -279,27 +241,24 @@ void EmitContext::DefineBufferProperties() {
 
         const Id buf_offset{
             spv_OpBitFieldUExtract(&m, U32[1], value, ConstU32(offset), ConstU32(8U))};
-        spv_Name(&m, buf_offset, std::string(fmt::format("buf{}_off", binding)).c_str());
+        NameFmt(&m, buf_offset, "buf{}_off", binding);
         buffer.Offset(PointerSize::B8) = buf_offset;
 
         if (True(desc.used_types & IR::Type::U16)) {
             const Id buf_word_offset{spv_OpShiftRightLogical(&m, U32[1], buf_offset, ConstU32(1U))};
-            spv_Name(&m, buf_word_offset,
-                     std::string(fmt::format("buf{}_word_off", binding)).c_str());
+            NameFmt(&m, buf_word_offset, "buf{}_word_off", binding);
             buffer.Offset(PointerSize::B16) = buf_word_offset;
         }
         if (True(desc.used_types & IR::Type::U32)) {
             const Id buf_dword_offset{
                 spv_OpShiftRightLogical(&m, U32[1], buf_offset, ConstU32(2U))};
-            spv_Name(&m, buf_dword_offset,
-                     std::string(fmt::format("buf{}_dword_off", binding)).c_str());
+            NameFmt(&m, buf_dword_offset, "buf{}_dword_off", binding);
             buffer.Offset(PointerSize::B32) = buf_dword_offset;
         }
         if (True(desc.used_types & IR::Type::U64)) {
             const Id buf_qword_offset{
                 spv_OpShiftRightLogical(&m, U32[1], buf_offset, ConstU32(3U))};
-            spv_Name(&m, buf_qword_offset,
-                     std::string(fmt::format("buf{}_qword_off", binding)).c_str());
+            NameFmt(&m, buf_qword_offset, "buf{}_qword_off", binding);
             buffer.Offset(PointerSize::B64) = buf_qword_offset;
         }
     }
@@ -379,9 +338,9 @@ void EmitContext::DefineInputs() {
             const Id type{GetAttributeType(*this, sharp.GetNumberFmt())[4]};
             Id id{DefineInput(type, semantic)};
             if (attrib.GetStepRate() != Gcn::VertexAttribute::InstanceIdType::None) {
-                spv_Name(&m, id, std::string(fmt::format("vs_instance_attr{}", semantic)).c_str());
+                NameFmt(&m, id, "vs_instance_attr{}", semantic);
             } else {
-                spv_Name(&m, id, std::string(fmt::format("vs_in_attr{}", semantic)).c_str());
+                NameFmt(&m, id, "vs_in_attr{}", semantic);
             }
             input_params[semantic] = GetAttributeInfo(sharp.GetNumberFmt(), id, 4, false);
         }
@@ -489,12 +448,11 @@ void EmitContext::DefineInputs() {
                 const auto bind_location = input.param_index + (has_clip_distance_inputs ? 1 : 0);
                 if (primary == Qualifier::PerVertex &&
                     profile.supports_fragment_shader_barycentric) {
-                    return spv_Name(
+                    return NameFmt(
                         &m, DefineInput(spv_TypeArray(&m, type, ConstU32(3U)), bind_location),
-                        std::string(fmt::format("fs_in_attr{}_p", i)).c_str());
+                        "fs_in_attr{}_p", i);
                 }
-                return spv_Name(&m, DefineInput(type, bind_location),
-                                std::string(fmt::format("fs_in_attr{}", i)).c_str());
+                return NameFmt(&m, DefineInput(type, bind_location), "fs_in_attr{}", i);
             }();
             if (primary == Qualifier::PerVertex) {
                 spv_Decorate0(&m, attr_id,
@@ -517,8 +475,7 @@ void EmitContext::DefineInputs() {
 
         if (has_clip_distance_inputs) {
             const auto type = F32[MaxEmulatedClipDistances];
-            const auto attr_id = spv_Name(&m, DefineInput(type, 0),
-                                          std::string(fmt::format("cldist_attr{}", 0)).c_str());
+            const auto attr_id = NameFmt(&m, DefineInput(type, 0), "cldist_attr{}", 0);
             input_params[num_inputs] = GetAttributeInfo(AmdGpu::NumberFormat::Float, attr_id,
                                                         MaxEmulatedClipDistances, false);
         }
@@ -570,7 +527,7 @@ void EmitContext::DefineInputs() {
         for (int param_id = 0; param_id < num_params; ++param_id) {
             const Id type{spv_TypeArray(&m, F32[4], ConstU32(num_verts_in))};
             const Id id{DefineInput(type, param_id)};
-            spv_Name(&m, id, std::string(fmt::format("gs_in_attr{}", param_id)).c_str());
+            NameFmt(&m, id, "gs_in_attr{}", param_id);
             input_params[param_id] =
                 GetAttributeInfo(AmdGpu::NumberFormat::Float, id, 4, false, false, true);
         }
@@ -613,7 +570,7 @@ void EmitContext::DefineInputs() {
             }
             const Id id{DefineInput(F32[4], patch_base_location + index)};
             spv_Decorate0(&m, id, u32(SpvDecorationPatch));
-            spv_Name(&m, id, std::string(fmt::format("patch_in{}", index)).c_str());
+            NameFmt(&m, id, "patch_in{}", index);
             patches[index] = id;
         }
         break;
@@ -679,7 +636,7 @@ void EmitContext::DefineOutputs() {
                 const u32 num_components = info.stores.NumComponents(param);
                 const Id id{
                     DefineOutput(F32[num_components], i + (needs_clip_distance_emulation ? 1 : 0))};
-                spv_Name(&m, id, std::string(fmt::format("out_attr{}", i)).c_str());
+                NameFmt(&m, id, "out_attr{}", i);
                 output_params[i] =
                     GetAttributeInfo(AmdGpu::NumberFormat::Float, id, num_components, true);
                 ++num_attrs;
@@ -689,7 +646,7 @@ void EmitContext::DefineOutputs() {
                 clip_distances = Id{DefineOutput(F32[MaxEmulatedClipDistances], 0)};
                 output_params[num_attrs] = GetAttributeInfo(
                     AmdGpu::NumberFormat::Float, clip_distances, MaxEmulatedClipDistances, true);
-                spv_Name(&m, clip_distances, std::string(fmt::format("cldist_attr{}", 0)).c_str());
+                NameFmt(&m, clip_distances, "cldist_attr{}", 0);
             }
         }
         break;
@@ -724,7 +681,7 @@ void EmitContext::DefineOutputs() {
             }
             const Id id{DefineOutput(F32[4], patch_base_location + index)};
             spv_Decorate0(&m, id, u32(SpvDecorationPatch));
-            spv_Name(&m, id, std::string(fmt::format("patch_out{}", index)).c_str());
+            NameFmt(&m, id, "patch_out{}", index);
             patches[index] = id;
         }
         break;
@@ -738,7 +695,7 @@ void EmitContext::DefineOutputs() {
             }
             const u32 num_components = info.stores.NumComponents(param);
             const Id id{DefineOutput(F32[num_components], i)};
-            spv_Name(&m, id, std::string(fmt::format("out_attr{}", i)).c_str());
+            NameFmt(&m, id, "out_attr{}", i);
             output_params[i] =
                 GetAttributeInfo(AmdGpu::NumberFormat::Float, id, num_components, true);
         }
@@ -772,7 +729,7 @@ void EmitContext::DefineOutputs() {
             } else {
                 id = DefineOutput(type, i);
             }
-            spv_Name(&m, id, std::string(fmt::format("frag_color{}", i)).c_str());
+            NameFmt(&m, id, "frag_color{}", i);
             frag_outputs[i] = GetAttributeInfo(num_format, id, num_components, true);
             ++num_render_targets;
         }
@@ -787,7 +744,7 @@ void EmitContext::DefineOutputs() {
         DefineVertexBlock();
         for (u32 attr_id = 0; attr_id < info.gs_copy_data.num_attrs; attr_id++) {
             const Id id{DefineOutput(F32[4], attr_id)};
-            spv_Name(&m, id, std::string(fmt::format("out_attr{}", attr_id)).c_str());
+            NameFmt(&m, id, "out_attr{}", attr_id);
             output_params[attr_id] = GetAttributeInfo(AmdGpu::NumberFormat::Float, id, 4, true);
         }
         break;
@@ -877,7 +834,7 @@ EmitContext::BufferSpv EmitContext::DefineBuffer(bool is_written, bool is_cohere
         spv_Name(&m, id, "ssbo_shmem");
         break;
     default:
-        spv_Name(&m, id, std::string(fmt::format("ssbo_{}", binding.buffer)).c_str());
+        NameFmt(&m, id, "ssbo_{}", binding.buffer);
         break;
     }
     interfaces.push_back(id);
@@ -1055,8 +1012,7 @@ void EmitContext::DefineImagesAndSamplers() {
         spv_Decorate1(&m, id, u32(SpvDecorationBinding), u32(binding.unified));
         binding.unified += num_bindings;
         spv_Decorate1(&m, id, u32(SpvDecorationDescriptorSet), 0U);
-        spv_Name(&m, id,
-                 std::string(fmt::format("{}_{}{}", hw_stage, "img", images.size())).c_str());
+        NameFmt(&m, id, "{}_{}{}", hw_stage, "img", images.size());
         images.push_back({
             .data_types = &data_types,
             .id = id,
@@ -1084,8 +1040,7 @@ void EmitContext::DefineImagesAndSamplers() {
                                           u32(SpvStorageClassUniformConstant), 0)};
         spv_Decorate1(&m, id, u32(SpvDecorationBinding), u32(binding.unified++));
         spv_Decorate1(&m, id, u32(SpvDecorationDescriptorSet), 0U);
-        spv_Name(&m, id,
-                 std::string(fmt::format("{}_{}{}", hw_stage, "samp", samplers.size())).c_str());
+        NameFmt(&m, id, "{}_{}{}", hw_stage, "samp", samplers.size());
         samplers.push_back(id);
         interfaces.push_back(id);
     }

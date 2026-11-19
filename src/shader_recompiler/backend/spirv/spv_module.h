@@ -64,6 +64,8 @@ typedef struct spv_module {
     uint32_t bound;  /* the next id */
     uint32_t gap;    /* words left before the code */
     uint32_t failed; /* out of memory somewhere: the module is not to be used */
+    uint32_t names;  /* debug names (OpName, OpMemberName) written: 0 leaves them out, the
+                      * caller's to set, kept across resets */
     uint32_t caps[SPV_MODULE_MAX_CAPS];
     uint32_t num_caps;
     const char* exts[SPV_MODULE_MAX_EXTS]; /* the caller's strings, kept while it writes */

@@ -11,6 +11,7 @@
 
 #include "common/assert.h"
 #include "common/func_traits.h"
+#include "core/emulator_settings.h"
 #include "shader_recompiler/backend/spirv/emit_spirv.h"
 #include "shader_recompiler/backend/spirv/emit_spirv_instructions.h"
 #include "shader_recompiler/backend/spirv/spirv_emit_context.h"
@@ -740,15 +741,18 @@ void PatchPhiNodes(const IR::Program& program, EmitContext& ctx) {
 }
 } // Anonymous namespace
 
-std::vector<u32> EmitSPIRV(const Profile& profile, const RuntimeInfo& runtime_info,
-                           const IR::Program& program, Bindings& binding) {
-    EmitContext ctx{profile, runtime_info, program.info, binding};
+std::span<const u32> EmitSPIRV(spv_module_t& module, const Profile& profile,
+                               const RuntimeInfo& runtime_info, const IR::Program& program,
+                               Bindings& binding) {
+    // Debug names only for a shader that is dumped, where they are read
+    module.names = emu_settings_get_dump_shaders() ? 1 : 0;
+    EmitContext ctx{module, profile, runtime_info, program.info, binding};
     const Id main{DefineMain(ctx, program)};
     DefineEntryPoint(program.info, runtime_info, ctx, main);
     SetupCapabilities(program.info, profile, runtime_info, ctx);
     SetupFloatMode(ctx, profile, runtime_info, main);
     PatchPhiNodes(program, ctx);
-    return FinishModule(&ctx.m, profile.supported_spirv);
+    return ModuleWords(&ctx.m, profile.supported_spirv);
 }
 
 Id EmitPhi(EmitContext& ctx, IR::Inst* inst) {

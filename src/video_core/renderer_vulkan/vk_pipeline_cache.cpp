@@ -954,7 +954,8 @@ vk::ShaderModule PipelineCache::CompileModule(Shader::Info& info, Shader::Runtim
     DumpShader(code, info.pgm_hash, info.hw_stage, perm_idx, "bin");
 
     const auto ir_program = Shader::TranslateProgram(code, pools, info, runtime_info, profile);
-    auto spv = Shader::Backend::SPIRV::EmitSPIRV(profile, runtime_info, ir_program, binding);
+    const auto spv =
+        Shader::Backend::SPIRV::EmitSPIRV(pools.spv, profile, runtime_info, ir_program, binding);
     DumpShader(spv, info.pgm_hash, info.hw_stage, perm_idx, "spv");
 
     vk::ShaderModule module;
@@ -972,7 +973,7 @@ vk::ShaderModule PipelineCache::CompileModule(Shader::Info& info, Shader::Runtim
         module = CompileSPV(spv, instance.GetDevice());
     }
 
-    RegisterShaderBinary(std::move(spv), info.pgm_hash, perm_idx);
+    RegisterShaderBinary(spv, info.pgm_hash, perm_idx);
 
     const auto name = GetShaderName(info.hw_stage, info.pgm_hash, perm_idx);
     Vulkan::SetObjectName(instance.GetDevice(), module, name);
@@ -1249,11 +1250,12 @@ void PipelineCache::RunJobOn(CompileJob& job, const Shader::ShaderParams& params
         auto binding = job.start;
         const auto ir_program =
             Shader::TranslateProgram(params.code, pools, job.fresh, runtime, profile);
-        const auto spv = Shader::Backend::SPIRV::EmitSPIRV(profile, runtime, ir_program, binding);
+        const auto spv =
+            Shader::Backend::SPIRV::EmitSPIRV(pools.spv, profile, runtime, ir_program, binding);
         job.fresh.snapshot = nullptr;
         const auto kept_spv = Storage::DataBase::Instance().Load(
             Storage::BlobType::ShaderBinary, fmt::format("{:#018x}_{}", job.hash, job.perm_idx));
-        job.same_spv = kept_spv && kept_spv->size() == spv.size() * sizeof(u32) &&
+        job.same_spv = kept_spv && kept_spv->size() == spv.size_bytes() &&
                        std::memcmp(kept_spv->data(), spv.data(), kept_spv->size()) == 0;
         job.same_walker = WalkerId(job.fresh.srt_walker_code) == job.kept_walker &&
                           job.fresh.srt_info.flattened_bufsize_dw == job.kept_flatbuf_dw;

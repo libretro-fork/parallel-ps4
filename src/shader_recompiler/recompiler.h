@@ -4,7 +4,9 @@
 #pragma once
 
 #include <vector>
+#include "common/assert.h"
 #include "common/object_pool.h"
+#include "shader_recompiler/backend/spirv/spv_module.h"
 #include "shader_recompiler/frontend/control_flow_graph.h"
 #include "shader_recompiler/ir/basic_block.h"
 #include "shader_recompiler/ir/program.h"
@@ -26,9 +28,19 @@ struct Pools {
     // translation to the next with their storage, where each was allocated anew
     std::vector<Gcn::GcnInst> gcn_insts;
     Common::ObjectPool<Gcn::Block> gcn_block_pool;
+    // The SPIR-V module a translation is written into, reset for each: its buffers keep their
+    // storage, so a shader like those before it allocates nothing to be written
+    spv_module_t spv;
 
     explicit Pools()
-        : inst_pool{InstPoolSize}, block_pool{BlockPoolSize}, gcn_block_pool{GcnBlockPoolSize} {}
+        : inst_pool{InstPoolSize}, block_pool{BlockPoolSize}, gcn_block_pool{GcnBlockPoolSize} {
+        spv_module_init(&spv, spv_module_heap_grow, nullptr);
+    }
+    ~Pools() {
+        spv_module_free(&spv);
+    }
+    Pools(const Pools&) = delete;
+    Pools& operator=(const Pools&) = delete;
 
     void ReleaseContents() {
         block_pool.ReleaseContents();

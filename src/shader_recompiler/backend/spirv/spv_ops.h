@@ -74,6 +74,9 @@ static SPIRV_WORDS_INLINE void spv_AddExecutionMode3(spv_module_t* m, uint32_t f
 }
 
 static SPIRV_WORDS_INLINE uint32_t spv_Name(spv_module_t* m, uint32_t target, const char* name) {
+    if (!m->names) {
+        return target;
+    }
     spv_module_op_str(m, SPV_SEC_DEBUG_NAMES, SpvOpName, &target, 1, name, NULL, 0);
     return target;
 }
@@ -81,6 +84,9 @@ static SPIRV_WORDS_INLINE uint32_t spv_Name(spv_module_t* m, uint32_t target, co
 static SPIRV_WORDS_INLINE uint32_t spv_MemberName(spv_module_t* m, uint32_t type, uint32_t member,
                                                   const char* name) {
     uint32_t pre[2];
+    if (!m->names) {
+        return type;
+    }
     pre[0] = type;
     pre[1] = member;
     spv_module_op_str(m, SPV_SEC_DEBUG_NAMES, SpvOpMemberName, pre, 2, name, NULL, 0);
