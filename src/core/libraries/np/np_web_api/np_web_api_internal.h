@@ -2,13 +2,12 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #pragma once
-#include <map>
-#include <mutex>
 #include <string>
 #include <utility>
 #include <vector>
-#include "common/event_mutex.h"
+#include <retro_atomic.h>
 #include "common/logging/log.h"
+#include "common/obj_table.h"
 #include "core/libraries/error_codes.h"
 #include "core/libraries/libs.h"
 #include "np_web_api.h"
@@ -20,7 +19,6 @@ struct OrbisNpWebApiContext;
 struct OrbisNpWebApiUserContext;
 struct OrbisNpWebApiRequest;
 struct OrbisNpWebApiHandle;
-struct OrbisNpWebApiTimerHandle;
 struct OrbisNpWebApiPushEventFilter;
 struct OrbisNpWebApiServicePushEventFilter;
 struct OrbisNpWebApiExtendedPushEventFilter;
@@ -28,39 +26,52 @@ struct OrbisNpWebApiRegisteredPushEventCallback;
 struct OrbisNpWebApiRegisteredServicePushEventCallback;
 struct OrbisNpWebApiRegisteredExtendedPushEventCallback;
 
+// What each of the library's objects keeps first: its id (the one the game holds), its slot
+// in the table it is kept in (obj_table.c: found, held and given back there without a lock),
+// and how it is freed by whichever thread lets go of it last.
+struct WebApiObject {
+    s64 id;
+    s32 index;
+    void (*destroy)(WebApiObject* object);
+};
+
 struct OrbisNpWebApiContext {
+    WebApiObject base;
     s32 type;
-    s32 userCount;
     s32 libCtxId;
     s32 libHttpCtxId;
-    Common::RecursiveEventMutex contextLock;
-    std::map<s32, OrbisNpWebApiUserContext*> userContexts;
-    std::map<s32, OrbisNpWebApiHandle*> handles;
-    std::map<s32, OrbisNpWebApiTimerHandle*> timerHandles;
-    std::map<s32, OrbisNpWebApiPushEventFilter*> pushEventFilters;
-    std::map<s32, OrbisNpWebApiServicePushEventFilter*> servicePushEventFilters;
-    std::map<s32, OrbisNpWebApiExtendedPushEventFilter*> extendedPushEventFilters;
+    // Its objects; how often each table's slots have been used, for ids not reused at once
+    obj_table_t userContexts;
+    obj_table_t handles; // a handle's timer is the handle's own
+    obj_table_t pushEventFilters;
+    obj_table_t servicePushEventFilters;
+    obj_table_t extendedPushEventFilters;
+    retro_atomic_int_t generation;
     std::string name;
-    bool terminated;
+    retro_atomic_int_t terminated;
 };
 
 struct OrbisNpWebApiUserContext {
+    WebApiObject base;
     OrbisNpWebApiContext* parentContext;
-    s32 userCount;
     s32 userCtxId;
     Libraries::UserService::OrbisUserServiceUserId userId;
-    std::map<s64, OrbisNpWebApiRequest*> requests;
-    std::map<s32, OrbisNpWebApiRegisteredPushEventCallback*> pushEventCallbacks;
-    std::map<s32, OrbisNpWebApiRegisteredServicePushEventCallback*> servicePushEventCallbacks;
-    std::map<s32, OrbisNpWebApiRegisteredExtendedPushEventCallback*> extendedPushEventCallbacks;
-    bool deleted;
-    OrbisNpWebApiNotificationCallback notificationCallbackFunction;
-    void* pNotificationCallbackUserArgs;
+    obj_table_t requests;
+    obj_table_t pushEventCallbacks;
+    obj_table_t servicePushEventCallbacks;
+    obj_table_t extendedPushEventCallbacks;
+    retro_atomic_int_t generation;
+    retro_atomic_int_t deleted;
+    // Set and read by any thread: the argument stored before the function, the function
+    // cleared first
+    retro_atomic_ptr_t notificationCallbackFunction;
+    retro_atomic_ptr_t pNotificationCallbackUserArgs;
 };
 
 struct OrbisNpWebApiRequest {
+    WebApiObject base;
     OrbisNpWebApiContext* parentContext;
-    s32 userCount;
+    OrbisNpWebApiUserContext* parentUserContext;
     s64 requestId;
     std::string userApiGroup;
     std::string userPath;
@@ -82,11 +93,12 @@ struct OrbisNpWebApiRequest {
     std::string multipartContentType; // type name, e.g. "multipart/mixed"
     std::string multipartBoundary;
     std::vector<MultipartPart> multipartParts;
-    bool aborted;
+    retro_atomic_int_t aborted; // set by any thread, looked at by the sending one
     bool sent;
-    u32 requestTimeout;
-    u64 requestEndTime;
-    bool timedOut;
+    // Its timer: set by the game, looked at by the timeout check from any thread
+    retro_atomic_int_t requestTimeout;
+    retro_atomic_64_t requestEndTime;
+    retro_atomic_int_t timedOut;
     // not sure Stephen
     u8 requestState;
     u64 remainingData;
@@ -98,26 +110,25 @@ struct OrbisNpWebApiRequest {
 };
 
 struct OrbisNpWebApiHandle {
+    WebApiObject base;
     s32 handleId;
-    bool aborted;
-    bool deleted;
-    s32 userCount;
-};
-
-struct OrbisNpWebApiTimerHandle {
-    s32 handleId;
-    u32 handleTimeout;
-    u64 handleEndTime;
-    bool timedOut;
+    retro_atomic_int_t aborted;
+    retro_atomic_int_t deleted;
+    // Its timer (SDK 3.00 and later)
+    retro_atomic_int_t handleTimeout;
+    retro_atomic_64_t handleEndTime;
+    retro_atomic_int_t timedOut;
 };
 
 struct OrbisNpWebApiPushEventFilter {
+    WebApiObject base;
     s32 filterId;
     std::vector<OrbisNpWebApiPushEventFilterParameter> filterParams;
     OrbisNpWebApiContext* parentContext;
 };
 
 struct OrbisNpWebApiServicePushEventFilter {
+    WebApiObject base;
     s32 filterId;
     bool internal;
     std::vector<OrbisNpWebApiServicePushEventFilterParameter> filterParams;
@@ -127,6 +138,7 @@ struct OrbisNpWebApiServicePushEventFilter {
 };
 
 struct OrbisNpWebApiExtendedPushEventFilter {
+    WebApiObject base;
     s32 filterId;
     bool internal;
     std::vector<OrbisNpWebApiExtdPushEventFilterParameter> filterParams;
@@ -137,6 +149,7 @@ struct OrbisNpWebApiExtendedPushEventFilter {
 };
 
 struct OrbisNpWebApiRegisteredPushEventCallback {
+    WebApiObject base;
     s32 callbackId;
     s32 filterId;
     OrbisNpWebApiPushEventCallback cbFunc;
@@ -144,6 +157,7 @@ struct OrbisNpWebApiRegisteredPushEventCallback {
 };
 
 struct OrbisNpWebApiRegisteredServicePushEventCallback {
+    WebApiObject base;
     s32 callbackId;
     s32 filterId;
     OrbisNpWebApiServicePushEventCallback cbFunc;
@@ -154,6 +168,7 @@ struct OrbisNpWebApiRegisteredServicePushEventCallback {
 };
 
 struct OrbisNpWebApiRegisteredExtendedPushEventCallback {
+    WebApiObject base;
     s32 callbackId;
     s32 filterId;
     OrbisNpWebApiExtdPushEventCallback cbFunc;
@@ -174,8 +189,6 @@ void releaseContext(OrbisNpWebApiContext* context);                       // FUN
 bool isContextTerminated(OrbisNpWebApiContext* context);                  // FUN_01006910
 bool isContextBusy(OrbisNpWebApiContext* context);                        // FUN_01008a50
 bool areContextHandlesBusy(OrbisNpWebApiContext* context);                // FUN_01008c20
-void lockContext(OrbisNpWebApiContext* context);                          // FUN_010072e0
-void unlockContext(OrbisNpWebApiContext* context);                        // FUN_010072f0
 void markContextAsTerminated(OrbisNpWebApiContext* context);              // FUN_01008bf0
 void checkContextTimeout(OrbisNpWebApiContext* context);                  // FUN_01008ad0
 void checkTimeout();                                                      // FUN_01003700

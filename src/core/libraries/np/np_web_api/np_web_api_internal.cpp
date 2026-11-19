@@ -5,13 +5,12 @@
 #include <cctype>
 #include <cstdio>
 #include <cstring>
-#include <deque>
 #include <string>
 #include <string_view>
-#include "common/combiner.h"
+#include <queues/mpsc_stack.h>
 #include "common/elf_info.h"
 #include "common/enum_names.h"
-#include "common/event_mutex.h"
+#include "common/run_once.h"
 #include "core/emulator_settings.h"
 #include "core/libraries/kernel/process.h"
 #include "core/libraries/kernel/time.h"
@@ -22,25 +21,158 @@
 
 namespace Libraries::Np::NpWebApi {
 
-static Common::RecursiveEventMutex g_global_mutex;
-static std::map<s32, OrbisNpWebApiContext*> g_contexts;
-static s32 g_library_context_count = 0;
+// The library's objects, in tables without a lock (obj_table.c). An id names its slot in its
+// low bits and how often the slot was used above them, so a stale id finds nothing.
+static constexpr int MaxContexts = 32;
+static constexpr int MaxUserContexts = 16;
+static constexpr int MaxRequests = 128;
+static constexpr int MaxHandles = 64;
+static constexpr int MaxFilters = 64;
+static constexpr int MaxCallbacks = 64;
 
-// Last WebApi error code parsed from an error response body
+static obj_table_t g_contexts;
+static retro_atomic_int_t g_context_generation{0};
+// Notified as any object is given back: a thread waiting for one's users to leave parks here,
+// on the game's time
+static retro_eventcount_t g_released;
+static run_once_t g_tables_once = RUN_ONCE_INIT;
+
+static void TablesInit() {
+    run_once(
+        &g_tables_once,
+        [](void*) {
+            obj_table_init(&g_contexts, MaxContexts);
+            retro_eventcount_init(&g_released);
+        },
+        nullptr);
+}
+
 static thread_local s32 g_last_webapi_error = ORBIS_OK;
 
 static s32 captureWebApiError(const char* body, u64 len);
-static s32 g_user_context_count = 0;
-static s32 g_handle_count = 0;
-static s32 g_push_event_filter_count = 0;
-static s32 g_service_push_event_filter_count = 0;
-static s32 g_extended_push_event_filter_count = 0;
-static s32 g_registered_callback_count = 0;
-static s64 g_request_count = 0;
-static u64 g_last_timeout_check = 0;
+static retro_atomic_64_t g_last_timeout_check{0};
 static s32 g_sdk_ver = 0;
 
+// An id for slot @index of a table: the slot + 1 in the low @slot_bits, the generation above,
+// within @id_bits
+static s64 MakeId(retro_atomic_int_t* generation, int index, int slot_bits, int id_bits) {
+    const s64 gen_mask = (s64{1} << (id_bits - slot_bits)) - 1;
+    s64 gen = (retro_atomic_fetch_add_int(generation, 1) + 1) & gen_mask;
+    return (gen << slot_bits) | (index + 1);
+}
+
+static int SlotOf(s64 id, int slot_bits) {
+    return static_cast<int>(id & ((s64{1} << slot_bits) - 1)) - 1;
+}
+
+// The object @id names in @table, held, or nullptr
+static WebApiObject* FindObject(obj_table_t* table, s64 id, int slot_bits) {
+    const int index = SlotOf(id, slot_bits);
+    auto* object = static_cast<WebApiObject*>(obj_table_hold(table, index));
+    if (object == nullptr) {
+        return nullptr;
+    }
+    if (object->id != id) {
+        if (obj_table_release(table, index)) {
+            object->destroy(object);
+            obj_table_reuse(table, index);
+        }
+        return nullptr;
+    }
+    return object;
+}
+
+static void ReleaseObject(obj_table_t* table, WebApiObject* object);
+
+// Whether @id names an object of @table now
+static bool HasObject(obj_table_t* table, s64 id) {
+    WebApiObject* object = FindObject(table, id, 8);
+    if (object == nullptr) {
+        return false;
+    }
+    ReleaseObject(table, object);
+    return true;
+}
+
+// A hold given back: the last one of a removed object frees it
+static void ReleaseObject(obj_table_t* table, WebApiObject* object) {
+    const int index = object->index;
+    if (obj_table_release(table, index)) {
+        object->destroy(object);
+        obj_table_reuse(table, index);
+    }
+    retro_eventcount_notify(&g_released);
+}
+
+// Off its table: found no more, freed once its last holder lets go (now, if none)
+static void RemoveObject(obj_table_t* table, WebApiObject* object) {
+    const int index = object->index;
+    if (obj_table_doom(table, index) == 1) {
+        object->destroy(object);
+        obj_table_reuse(table, index);
+    }
+}
+
+// @object into @table, with an id made for its slot: false if the table is full
+static bool AddObject(obj_table_t* table, WebApiObject* object, retro_atomic_int_t* generation,
+                      int slot_bits, int id_bits, s64 high) {
+    const int index = obj_table_add(table, object, 0, table->count);
+    if (index < 0) {
+        return false;
+    }
+    object->index = index;
+    object->id = high | MakeId(generation, index, slot_bits, id_bits);
+    return true;
+}
+
+// Until @done(), on the game's time, woken as objects are given back
+template <typename Done>
+static void WaitUntil(Done&& done) {
+    Kernel::GameWait(&g_released, 0, done);
+}
+
+template <typename T>
+static void DestroyAs(WebApiObject* object) {
+    delete reinterpret_cast<T*>(object);
+}
+
+// What a table still holds goes with it
+static void DestroyTable(obj_table_t* table) {
+    for (int i = 0; i < table->count; i++) {
+        auto* object = static_cast<WebApiObject*>(obj_table_peek(table, i));
+        if (object != nullptr) {
+            object->destroy(object);
+        }
+    }
+    obj_table_free(table);
+}
+
+static void DestroyUserContext(WebApiObject* object) {
+    auto* user_context = reinterpret_cast<OrbisNpWebApiUserContext*>(object);
+    DestroyTable(&user_context->requests);
+    DestroyTable(&user_context->pushEventCallbacks);
+    DestroyTable(&user_context->servicePushEventCallbacks);
+    DestroyTable(&user_context->extendedPushEventCallbacks);
+    delete user_context;
+}
+
+static void DestroyContext(WebApiObject* object) {
+    auto* context = reinterpret_cast<OrbisNpWebApiContext*>(object);
+    DestroyTable(&context->userContexts);
+    DestroyTable(&context->handles);
+    DestroyTable(&context->pushEventFilters);
+    DestroyTable(&context->servicePushEventFilters);
+    DestroyTable(&context->extendedPushEventFilters);
+    delete context;
+}
+
+// The game's time in microseconds, as sceKernelGetProcessTime counted
+static u64 NowUs() {
+    return Kernel::GameNow() / 1000;
+}
+
 s32 initializeLibrary() {
+    TablesInit();
     return Kernel::sceKernelGetCompiledSdkVersion(&g_sdk_ver);
 }
 
@@ -49,133 +181,132 @@ s32 getCompiledSdkVersion() {
 }
 
 s32 createLibraryContext(s32 libHttpCtxId, u64 poolSize, const char* name, s32 type) {
-    std::scoped_lock lk{g_global_mutex};
-
-    g_library_context_count++;
-    if (g_library_context_count >= 0x8000) {
-        g_library_context_count = 1;
-    }
-    s32 ctx_id = g_library_context_count;
-    while (g_contexts.contains(ctx_id)) {
-        ctx_id--;
-    }
-    if (ctx_id <= 0) {
-        return ORBIS_NP_WEBAPI_ERROR_LIB_CONTEXT_MAX;
-    }
-
-    // Create new context
-    g_contexts[ctx_id] = new OrbisNpWebApiContext{};
-    auto& new_context = g_contexts.at(ctx_id);
-    new_context->libCtxId = ctx_id;
+    TablesInit();
+    auto* new_context = new OrbisNpWebApiContext{};
+    new_context->base.destroy = DestroyContext;
     new_context->libHttpCtxId = libHttpCtxId;
     new_context->type = type;
-    new_context->userCount = 0;
-    new_context->terminated = false;
+    retro_atomic_int_init(&new_context->terminated, 0);
+    retro_atomic_int_init(&new_context->generation, 0);
     if (name != nullptr) {
         new_context->name = std::string(name);
     }
+    if (!obj_table_init(&new_context->userContexts, MaxUserContexts) ||
+        !obj_table_init(&new_context->handles, MaxHandles) ||
+        !obj_table_init(&new_context->pushEventFilters, MaxFilters) ||
+        !obj_table_init(&new_context->servicePushEventFilters, MaxFilters) ||
+        !obj_table_init(&new_context->extendedPushEventFilters, MaxFilters)) {
+        DestroyContext(&new_context->base);
+        return ORBIS_NP_WEBAPI_ERROR_LIB_CONTEXT_MAX;
+    }
 
-    return ctx_id;
+    // Its id below 0x8000: its slot in six bits, the generation above
+    if (!AddObject(&g_contexts, &new_context->base, &g_context_generation, 6, 15, 0)) {
+        DestroyContext(&new_context->base);
+        return ORBIS_NP_WEBAPI_ERROR_LIB_CONTEXT_MAX;
+    }
+    new_context->libCtxId = static_cast<s32>(new_context->base.id);
+    return new_context->libCtxId;
 }
 
 OrbisNpWebApiContext* findAndValidateContext(s32 libCtxId, s32 flag) {
-    std::scoped_lock lk{g_global_mutex};
-    if (libCtxId < 1 || libCtxId >= 0x8000 || !g_contexts.contains(libCtxId)) {
+    TablesInit();
+    if (libCtxId < 1 || libCtxId >= 0x8000) {
         return nullptr;
     }
-    auto& context = g_contexts[libCtxId];
-    std::scoped_lock lk2{context->contextLock};
-    if (flag == 0 && context->terminated) {
+    auto* context = reinterpret_cast<OrbisNpWebApiContext*>(FindObject(&g_contexts, libCtxId, 6));
+    if (context == nullptr) {
         return nullptr;
     }
-    context->userCount++;
+    if (flag == 0 && retro_atomic_load_acquire_int(&context->terminated) != 0) {
+        releaseContext(context);
+        return nullptr;
+    }
     return context;
 }
 
 void releaseContext(OrbisNpWebApiContext* context) {
-    std::scoped_lock lk{context->contextLock};
-    context->userCount--;
+    ReleaseObject(&g_contexts, &context->base);
 }
 
 bool isContextTerminated(OrbisNpWebApiContext* context) {
-    std::scoped_lock lk{context->contextLock};
-    return context->terminated;
+    return retro_atomic_load_acquire_int(&context->terminated) != 0;
 }
 
 bool isContextBusy(OrbisNpWebApiContext* context) {
-    std::scoped_lock lk{context->contextLock};
-    return context->userCount > 1;
+    return obj_table_users(&g_contexts, context->base.index) > 1;
 }
 
 bool areContextHandlesBusy(OrbisNpWebApiContext* context) {
-    std::scoped_lock lk{context->contextLock};
-    bool is_busy = false;
-    for (auto& handle : context->handles) {
-        if (handle.second->userCount > 0) {
+    for (int i = 0; i < context->handles.count; i++) {
+        if (obj_table_live(&context->handles, i) && obj_table_users(&context->handles, i) > 0) {
             return true;
         }
     }
     return false;
 }
 
-void lockContext(OrbisNpWebApiContext* context) {
-    context->contextLock.lock();
-}
-
-void unlockContext(OrbisNpWebApiContext* context) {
-    context->contextLock.unlock();
-}
-
 void markContextAsTerminated(OrbisNpWebApiContext* context) {
-    std::scoped_lock lk{context->contextLock};
-    context->terminated = true;
+    retro_atomic_store_release_int(&context->terminated, 1);
 }
 
 void checkContextTimeout(OrbisNpWebApiContext* context) {
-    u64 time = Kernel::sceKernelGetProcessTime();
-    std::scoped_lock lk{context->contextLock};
+    const u64 time = NowUs();
 
-    for (auto& user_context : context->userContexts) {
-        checkUserContextTimeout(user_context.second);
+    for (int i = 0; i < context->userContexts.count; i++) {
+        auto* user_context =
+            static_cast<OrbisNpWebApiUserContext*>(obj_table_hold(&context->userContexts, i));
+        if (user_context == nullptr) {
+            continue;
+        }
+        checkUserContextTimeout(user_context);
+        releaseUserContext(user_context);
     }
 
-    for (auto& value : context->timerHandles) {
-        auto& timer_handle = value.second;
-        if (!timer_handle->timedOut && timer_handle->handleTimeout != 0 &&
-            timer_handle->handleEndTime < time) {
-            timer_handle->timedOut = true;
-            abortHandle(context->libCtxId, timer_handle->handleId);
+    for (int i = 0; i < context->handles.count; i++) {
+        auto* handle = static_cast<OrbisNpWebApiHandle*>(obj_table_hold(&context->handles, i));
+        if (handle == nullptr) {
+            continue;
         }
+        const u64 end = static_cast<u64>(retro_atomic_load_acquire_64(&handle->handleEndTime));
+        if (retro_atomic_load_acquire_int(&handle->handleTimeout) != 0 && end != 0 && end < time &&
+            retro_atomic_exchange_int(&handle->timedOut, 1) == 0) {
+            const s32 handle_id = handle->handleId;
+            releaseHandle(context, handle);
+            abortHandle(context->libCtxId, handle_id);
+            continue;
+        }
+        releaseHandle(context, handle);
     }
 }
 
 void checkTimeout() {
-    u64 time = Kernel::sceKernelGetProcessTime();
-    if (time < g_last_timeout_check + 1000) {
+    TablesInit();
+    const u64 time = NowUs();
+    const s64 last = retro_atomic_load_acquire_64(&g_last_timeout_check);
+    if (time < static_cast<u64>(last) + 1000 ||
+        !retro_atomic_cas_64(&g_last_timeout_check, last, static_cast<s64>(time))) {
         return;
     }
-    g_last_timeout_check = time;
-    std::scoped_lock lk{g_global_mutex};
 
-    for (auto& context : g_contexts) {
-        checkContextTimeout(context.second);
+    for (int i = 0; i < g_contexts.count; i++) {
+        auto* context = static_cast<OrbisNpWebApiContext*>(obj_table_hold(&g_contexts, i));
+        if (context == nullptr) {
+            continue;
+        }
+        checkContextTimeout(context);
+        releaseContext(context);
     }
 }
 
 s32 deleteContext(s32 libCtxId) {
-    std::scoped_lock lk{g_global_mutex};
-    if (!g_contexts.contains(libCtxId)) {
+    auto* context = findAndValidateContext(libCtxId, 1);
+    if (context == nullptr) {
         return ORBIS_NP_WEBAPI_ERROR_LIB_CONTEXT_NOT_FOUND;
     }
-
-    auto& context = g_contexts[libCtxId];
-    context->handles.clear();
-    context->timerHandles.clear();
-    context->pushEventFilters.clear();
-    context->servicePushEventFilters.clear();
-    context->extendedPushEventFilters.clear();
-
-    g_contexts.erase(libCtxId);
+    // Freed with all it holds once the last holder lets go
+    RemoveObject(&g_contexts, &context->base);
+    releaseContext(context);
     return ORBIS_OK;
 }
 
@@ -190,37 +321,38 @@ s32 terminateContext(s32 libCtxId) {
         return ORBIS_NP_WEBAPI_ERROR_LIB_CONTEXT_BUSY;
     }
 
-    std::vector<s32> user_context_ids;
-    for (auto& user_context : ctx->userContexts) {
-        user_context_ids.emplace_back(user_context.first);
-    }
-    for (s32 user_context_id : user_context_ids) {
-        s32 result = deleteUserContext(user_context_id);
+    for (int i = 0; i < ctx->userContexts.count; i++) {
+        auto* user_context =
+            static_cast<OrbisNpWebApiUserContext*>(obj_table_peek(&ctx->userContexts, i));
+        if (user_context == nullptr || !obj_table_live(&ctx->userContexts, i)) {
+            continue;
+        }
+        s32 result = deleteUserContext(user_context->userCtxId);
         if (result != ORBIS_NP_WEBAPI_ERROR_USER_CONTEXT_NOT_FOUND ||
             g_sdk_ver < Common::ElfInfo::FW_400) {
+            releaseContext(ctx);
             return result;
         }
     }
 
-    lockContext(ctx);
     if (g_sdk_ver >= Common::ElfInfo::FW_400) {
-        for (auto& handle : ctx->handles) {
-            abortHandle(libCtxId, handle.first);
+        for (int i = 0; i < ctx->handles.count; i++) {
+            auto* handle = static_cast<OrbisNpWebApiHandle*>(obj_table_hold(&ctx->handles, i));
+            if (handle == nullptr) {
+                continue;
+            }
+            const s32 handle_id = handle->handleId;
+            releaseHandle(ctx, handle);
+            abortHandle(libCtxId, handle_id);
         }
-        if (isContextTerminated(ctx)) {
-            unlockContext(ctx);
+        if (retro_atomic_exchange_int(&ctx->terminated, 1) != 0) {
             releaseContext(ctx);
             return ORBIS_NP_WEBAPI_ERROR_LIB_CONTEXT_NOT_FOUND;
         }
-        markContextAsTerminated(ctx);
-        while (isContextBusy(ctx) || areContextHandlesBusy(ctx)) {
-            unlockContext(ctx);
-            Kernel::sceKernelUsleep(50000);
-            lockContext(ctx);
-        }
+        // Until no other call is in it and no handle is held
+        WaitUntil([ctx] { return !isContextBusy(ctx) && !areContextHandlesBusy(ctx); });
     }
 
-    unlockContext(ctx);
     releaseContext(ctx);
     return deleteContext(libCtxId);
 }
@@ -231,26 +363,33 @@ OrbisNpWebApiUserContext* findUserContextByUserId(
         return nullptr;
     }
 
-    std::scoped_lock lk{context->contextLock};
-    for (auto& user_context : context->userContexts) {
-        if (user_context.second->userId == userId) {
-            user_context.second->userCount++;
-            return user_context.second;
+    for (int i = 0; i < context->userContexts.count; i++) {
+        auto* user_context =
+            static_cast<OrbisNpWebApiUserContext*>(obj_table_hold(&context->userContexts, i));
+        if (user_context == nullptr) {
+            continue;
         }
+        if (user_context->userId == userId) {
+            return user_context;
+        }
+        releaseUserContext(user_context);
     }
     return nullptr;
 }
 
 OrbisNpWebApiUserContext* findUserContext(OrbisNpWebApiContext* context, s32 titleUserCtxId) {
-    std::scoped_lock lk{context->contextLock};
-    if (!context->userContexts.contains(titleUserCtxId)) {
+    if ((titleUserCtxId >> 0x10) != context->libCtxId) {
         return nullptr;
     }
-    OrbisNpWebApiUserContext* user_context = context->userContexts[titleUserCtxId];
-    if (user_context->deleted) {
+    auto* user_context = reinterpret_cast<OrbisNpWebApiUserContext*>(
+        FindObject(&context->userContexts, titleUserCtxId, 6));
+    if (user_context == nullptr) {
         return nullptr;
     }
-    user_context->userCount++;
+    if (retro_atomic_load_acquire_int(&user_context->deleted) != 0) {
+        releaseUserContext(user_context);
+        return nullptr;
+    }
     return user_context;
 }
 
@@ -276,32 +415,27 @@ s32 createUserContext(s32 libCtxId, Libraries::UserService::OrbisUserServiceUser
         return ORBIS_NP_WEBAPI_ERROR_USER_CONTEXT_ALREADY_EXIST;
     }
 
-    std::scoped_lock lk{context->contextLock};
-
-    // Create new user context
-    g_user_context_count++;
-    if (g_user_context_count >= 0x10000) {
-        g_user_context_count = 1;
-    }
-    s32 user_ctx_id = (libCtxId << 0x10) | g_user_context_count;
-    while (context->userContexts.contains(user_ctx_id)) {
-        user_ctx_id--;
-    }
-    if (user_ctx_id <= (libCtxId << 0x10)) {
-        return ORBIS_NP_WEBAPI_ERROR_USER_CONTEXT_MAX;
-    }
-
-    context->userContexts[user_ctx_id] = new OrbisNpWebApiUserContext{};
-    user_context = context->userContexts.at(user_ctx_id);
-    user_context->userCount = 0;
+    user_context = new OrbisNpWebApiUserContext{};
+    user_context->base.destroy = DestroyUserContext;
     user_context->parentContext = context;
     user_context->userId = userId;
-    user_context->userCtxId = user_ctx_id;
-    user_context->deleted = false;
+    retro_atomic_int_init(&user_context->deleted, 0);
+    retro_atomic_int_init(&user_context->generation, 0);
+    if (!obj_table_init(&user_context->requests, MaxRequests) ||
+        !obj_table_init(&user_context->pushEventCallbacks, MaxCallbacks) ||
+        !obj_table_init(&user_context->servicePushEventCallbacks, MaxCallbacks) ||
+        !obj_table_init(&user_context->extendedPushEventCallbacks, MaxCallbacks) ||
+        !AddObject(&context->userContexts, &user_context->base, &context->generation, 6, 16,
+                   static_cast<s64>(libCtxId) << 0x10)) {
+        DestroyUserContext(&user_context->base);
+        releaseContext(context);
+        return ORBIS_NP_WEBAPI_ERROR_USER_CONTEXT_MAX;
+    }
+    user_context->userCtxId = static_cast<s32>(user_context->base.id);
 
     // TODO: Internal structs related to libSceHttp use are initialized here.
     releaseContext(context);
-    return user_ctx_id;
+    return user_context->userCtxId;
 }
 
 s32 registerNotificationCallback(s32 titleUserCtxId, OrbisNpWebApiNotificationCallback cbFunc,
@@ -317,10 +451,9 @@ s32 registerNotificationCallback(s32 titleUserCtxId, OrbisNpWebApiNotificationCa
         return ORBIS_NP_WEBAPI_ERROR_USER_CONTEXT_NOT_FOUND;
     }
 
-    lockContext(context);
-    user_context->notificationCallbackFunction = cbFunc;
-    user_context->pNotificationCallbackUserArgs = pUserArg;
-    unlockContext(context);
+    retro_atomic_store_release_ptr(&user_context->pNotificationCallbackUserArgs, pUserArg);
+    retro_atomic_store_release_ptr(&user_context->notificationCallbackFunction,
+                                   reinterpret_cast<void*>(cbFunc));
     releaseUserContext(user_context);
     releaseContext(context);
     return ORBIS_OK;
@@ -338,28 +471,21 @@ s32 unregisterNotificationCallback(s32 titleUserCtxId) {
         return ORBIS_NP_WEBAPI_ERROR_USER_CONTEXT_NOT_FOUND;
     }
 
-    lockContext(context);
-    user_context->notificationCallbackFunction = nullptr;
-    user_context->pNotificationCallbackUserArgs = nullptr;
-    unlockContext(context);
+    retro_atomic_store_release_ptr(&user_context->notificationCallbackFunction, nullptr);
+    retro_atomic_store_release_ptr(&user_context->pNotificationCallbackUserArgs, nullptr);
     releaseUserContext(user_context);
     releaseContext(context);
     return ORBIS_OK;
 }
 
 bool isUserContextBusy(OrbisNpWebApiUserContext* userContext) {
-    std::scoped_lock lk{userContext->parentContext->contextLock};
-    return userContext->userCount > 1;
+    return obj_table_users(&userContext->parentContext->userContexts, userContext->base.index) > 1;
 }
 
 bool areUserContextRequestsBusy(OrbisNpWebApiUserContext* userContext) {
-    std::scoped_lock lk{userContext->parentContext->contextLock};
-    bool is_busy = false;
-    for (auto& request : userContext->requests) {
-        request.second->userCount++;
-        bool req_busy = isRequestBusy(request.second);
-        request.second->userCount--;
-        if (req_busy) {
+    for (int i = 0; i < userContext->requests.count; i++) {
+        if (obj_table_live(&userContext->requests, i) &&
+            obj_table_users(&userContext->requests, i) > 0) {
             return true;
         }
     }
@@ -367,14 +493,24 @@ bool areUserContextRequestsBusy(OrbisNpWebApiUserContext* userContext) {
 }
 
 void releaseUserContext(OrbisNpWebApiUserContext* userContext) {
-    std::scoped_lock lk{userContext->parentContext->contextLock};
-    userContext->userCount--;
+    ReleaseObject(&userContext->parentContext->userContexts, &userContext->base);
 }
 
 void checkUserContextTimeout(OrbisNpWebApiUserContext* userContext) {
-    std::scoped_lock lk{userContext->parentContext->contextLock};
-    for (auto& request : userContext->requests) {
-        checkRequestTimeout(request.second);
+    for (int i = 0; i < userContext->requests.count; i++) {
+        auto* request =
+            static_cast<OrbisNpWebApiRequest*>(obj_table_hold(&userContext->requests, i));
+        if (request == nullptr) {
+            continue;
+        }
+        const s64 request_id = request->requestId;
+        const u64 end = static_cast<u64>(retro_atomic_load_acquire_64(&request->requestEndTime));
+        const bool expired =
+            end != 0 && end < NowUs() && retro_atomic_exchange_int(&request->timedOut, 1) == 0;
+        releaseRequest(request);
+        if (expired) {
+            abortRequest(request_id);
+        }
     }
 }
 
@@ -384,57 +520,50 @@ s32 deleteUserContext(s32 titleUserCtxId) {
         return ORBIS_NP_WEBAPI_ERROR_LIB_CONTEXT_NOT_FOUND;
     }
 
-    lockContext(context);
     OrbisNpWebApiUserContext* user_context = findUserContext(context, titleUserCtxId);
     if (user_context == nullptr) {
-        unlockContext(context);
         releaseContext(context);
         return ORBIS_NP_WEBAPI_ERROR_USER_CONTEXT_NOT_FOUND;
     }
 
     if (g_sdk_ver < Common::ElfInfo::FW_400) {
-        if (isUserContextBusy(user_context)) {
+        if (isUserContextBusy(user_context) || areUserContextRequestsBusy(user_context)) {
             releaseUserContext(user_context);
-            unlockContext(context);
-            releaseContext(context);
-            return ORBIS_NP_WEBAPI_ERROR_USER_CONTEXT_BUSY;
-        }
-
-        if (areUserContextRequestsBusy(user_context)) {
-            releaseUserContext(user_context);
-            unlockContext(context);
             releaseContext(context);
             return ORBIS_NP_WEBAPI_ERROR_USER_CONTEXT_BUSY;
         }
     } else {
-        for (auto& request : user_context->requests) {
-            abortRequestInternal(context, user_context, request.second);
+        for (int i = 0; i < user_context->requests.count; i++) {
+            auto* request =
+                static_cast<OrbisNpWebApiRequest*>(obj_table_hold(&user_context->requests, i));
+            if (request == nullptr) {
+                continue;
+            }
+            abortRequestInternal(context, user_context, request);
+            releaseRequest(request);
         }
 
-        if (user_context->deleted) {
+        if (retro_atomic_exchange_int(&user_context->deleted, 1) != 0) {
             releaseUserContext(user_context);
-            unlockContext(context);
             releaseContext(context);
             return ORBIS_NP_WEBAPI_ERROR_USER_CONTEXT_NOT_FOUND;
         }
 
-        user_context->deleted = true;
-        while (isUserContextBusy(user_context) || areUserContextRequestsBusy(user_context)) {
-            unlockContext(context);
-            Kernel::sceKernelUsleep(50000);
-            lockContext(context);
-        }
+        // Until no other call is in it and none of its requests is held
+        WaitUntil([user_context] {
+            return !isUserContextBusy(user_context) && !areUserContextRequestsBusy(user_context);
+        });
     }
 
-    user_context->extendedPushEventCallbacks.clear();
-    user_context->servicePushEventCallbacks.clear();
-    user_context->pushEventCallbacks.clear();
-    user_context->requests.clear();
-    context->userContexts.erase(titleUserCtxId);
-
-    unlockContext(context);
+    // Freed with its requests and callbacks once the last holder lets go
+    RemoveObject(&context->userContexts, &user_context->base);
+    releaseUserContext(user_context);
     releaseContext(context);
     return ORBIS_OK;
+}
+
+static void DestroyRequest(WebApiObject* object) {
+    delete reinterpret_cast<OrbisNpWebApiRequest*>(object);
 }
 
 s32 createRequest(s32 titleUserCtxId, const char* pApiGroup, const char* pPath,
@@ -453,35 +582,29 @@ s32 createRequest(s32 titleUserCtxId, const char* pApiGroup, const char* pPath,
         return ORBIS_NP_WEBAPI_ERROR_USER_CONTEXT_NOT_FOUND;
     }
 
-    lockContext(user_context->parentContext);
-    if (g_sdk_ver >= Common::ElfInfo::FW_400 && user_context->deleted) {
-        unlockContext(user_context->parentContext);
+    if (g_sdk_ver >= Common::ElfInfo::FW_400 &&
+        retro_atomic_load_acquire_int(&user_context->deleted) != 0) {
         releaseUserContext(user_context);
         releaseContext(context);
         return ORBIS_NP_WEBAPI_ERROR_USER_CONTEXT_NOT_FOUND;
     }
 
-    g_request_count++;
-    if (g_request_count >> 0x20 != 0) {
-        g_request_count = 1;
+    if (pInternalArgs != nullptr) {
+        ASSERT_MSG(pInternalArgs->unk_0 == nullptr && pInternalArgs->unk_1 == nullptr &&
+                       pInternalArgs->unk_2 == nullptr,
+                   "Internal arguments for requests not supported");
     }
 
-    s64 user_ctx_id = static_cast<s64>(titleUserCtxId);
-    s64 request_id = (user_ctx_id << 0x20) | g_request_count;
-    while (user_context->requests.contains(request_id)) {
-        request_id--;
-    }
-    // Real library would hang if this assert fails.
-    ASSERT_MSG(request_id > (user_ctx_id << 0x20), "Too many requests!");
-    user_context->requests[request_id] = new OrbisNpWebApiRequest{};
-
-    auto& request = user_context->requests[request_id];
+    auto* request = new OrbisNpWebApiRequest{};
+    request->base.destroy = DestroyRequest;
     request->parentContext = context;
-    request->userCount = 0;
-    request->requestId = request_id;
+    request->parentUserContext = user_context;
     request->userMethod = method;
     request->multipart = isMultipart;
-    request->aborted = false;
+    retro_atomic_int_init(&request->aborted, 0);
+    retro_atomic_int_init(&request->requestTimeout, 0);
+    retro_atomic_64_init(&request->requestEndTime, 0);
+    retro_atomic_int_init(&request->timedOut, 0);
 
     if (pApiGroup != nullptr) {
         request->userApiGroup = std::string(pApiGroup);
@@ -498,13 +621,15 @@ s32 createRequest(s32 titleUserCtxId, const char* pApiGroup, const char* pPath,
         }
     }
 
-    if (pInternalArgs != nullptr) {
-        ASSERT_MSG(pInternalArgs->unk_0 == nullptr && pInternalArgs->unk_1 == nullptr &&
-                       pInternalArgs->unk_2 == nullptr,
-                   "Internal arguments for requests not supported");
+    // Its id: the user context's above 32 bits, its slot and generation below
+    if (!AddObject(&user_context->requests, &request->base, &user_context->generation, 8, 31,
+                   static_cast<s64>(titleUserCtxId) << 0x20)) {
+        delete request;
+        releaseUserContext(user_context);
+        releaseContext(context);
+        return ORBIS_NP_WEBAPI_ERROR_OUT_OF_MEMORY;
     }
-
-    unlockContext(user_context->parentContext);
+    request->requestId = request->base.id;
 
     if (pRequestId != nullptr) {
         *pRequestId = request->requestId;
@@ -516,28 +641,19 @@ s32 createRequest(s32 titleUserCtxId, const char* pApiGroup, const char* pPath,
 }
 
 OrbisNpWebApiRequest* findRequest(OrbisNpWebApiUserContext* userContext, s64 requestId) {
-    std::scoped_lock lk{userContext->parentContext->contextLock};
-    if (userContext->requests.contains(requestId)) {
-        return userContext->requests[requestId];
+    if (static_cast<s32>(requestId >> 0x20) != userContext->userCtxId) {
+        return nullptr;
     }
-
-    return nullptr;
+    return reinterpret_cast<OrbisNpWebApiRequest*>(
+        FindObject(&userContext->requests, requestId, 8));
 }
 
 OrbisNpWebApiRequest* findRequestAndMarkBusy(OrbisNpWebApiUserContext* userContext, s64 requestId) {
-    std::scoped_lock lk{userContext->parentContext->contextLock};
-    if (userContext->requests.contains(requestId)) {
-        auto& request = userContext->requests[requestId];
-        request->userCount++;
-        return request;
-    }
-
-    return nullptr;
+    return findRequest(userContext, requestId);
 }
 
 bool isRequestBusy(OrbisNpWebApiRequest* request) {
-    std::scoped_lock lk{request->parentContext->contextLock};
-    return request->userCount > 1;
+    return obj_table_users(&request->parentUserContext->requests, request->base.index) > 1;
 }
 
 s32 setRequestTimeout(s64 requestId, u32 timeout) {
@@ -559,7 +675,7 @@ s32 setRequestTimeout(s64 requestId, u32 timeout) {
         return ORBIS_NP_WEBAPI_ERROR_REQUEST_NOT_FOUND;
     }
 
-    request->requestTimeout = timeout;
+    retro_atomic_store_release_int(&request->requestTimeout, static_cast<int>(timeout));
 
     releaseRequest(request);
     releaseUserContext(user_context);
@@ -568,15 +684,15 @@ s32 setRequestTimeout(s64 requestId, u32 timeout) {
 }
 
 void startRequestTimer(OrbisNpWebApiRequest* request) {
-    if (request->requestTimeout != 0 && request->requestEndTime == 0) {
-        request->requestEndTime = Kernel::sceKernelGetProcessTime() + request->requestTimeout;
+    const u32 timeout = static_cast<u32>(retro_atomic_load_acquire_int(&request->requestTimeout));
+    if (timeout != 0) {
+        (void)retro_atomic_cas_64(&request->requestEndTime, 0, static_cast<s64>(NowUs() + timeout));
     }
 }
 
 void checkRequestTimeout(OrbisNpWebApiRequest* request) {
-    u64 time = Kernel::sceKernelGetProcessTime();
-    if (!request->timedOut && request->requestEndTime != 0 && request->requestEndTime < time) {
-        request->timedOut = true;
+    const u64 end = static_cast<u64>(retro_atomic_load_acquire_64(&request->requestEndTime));
+    if (end != 0 && end < NowUs() && retro_atomic_exchange_int(&request->timedOut, 1) == 0) {
         abortRequest(request->requestId);
     }
 }
@@ -759,16 +875,13 @@ s32 sendRequest(s64 requestId, s32 partIndex, const void* pData, u64 dataSize, s
         request->sent = true;
     }
 
-    lockContext(context);
-    if (!request->timedOut && request->aborted) {
-        unlockContext(context);
+    if (retro_atomic_load_acquire_int(&request->timedOut) == 0 &&
+        retro_atomic_load_acquire_int(&request->aborted) != 0) {
         releaseRequest(request);
         releaseUserContext(user_context);
         releaseContext(context);
         return ORBIS_NP_WEBAPI_ERROR_ABORTED;
     }
-
-    unlockContext(context);
 
     // Stubbing sceNpManagerIntGetSigninState call with a config check.
     if (!emu_settings_is_shadnet_enabled()) {
@@ -974,12 +1087,7 @@ s32 abortRequestInternal(OrbisNpWebApiContext* context, OrbisNpWebApiUserContext
         return ORBIS_NP_WEBAPI_ERROR_INVALID_ARGUMENT;
     }
 
-    std::scoped_lock lk{context->contextLock};
-    if (request->aborted) {
-        return ORBIS_OK;
-    }
-
-    request->aborted = true;
+    (void)retro_atomic_exchange_int(&request->aborted, 1);
 
     // TODO: Should also abort any Np requests and Http requests tied to this request.
 
@@ -1007,14 +1115,14 @@ s32 abortRequest(s64 requestId) {
 
     s32 result = abortRequestInternal(context, user_context, request);
 
+    releaseRequest(request);
     releaseUserContext(user_context);
     releaseContext(context);
     return result;
 }
 
 void releaseRequest(OrbisNpWebApiRequest* request) {
-    std::scoped_lock lk{request->parentContext->contextLock};
-    request->userCount--;
+    ReleaseObject(&request->parentUserContext->requests, &request->base);
 }
 
 s32 deleteRequest(s64 requestId) {
@@ -1023,7 +1131,6 @@ s32 deleteRequest(s64 requestId) {
         return ORBIS_NP_WEBAPI_ERROR_LIB_CONTEXT_NOT_FOUND;
     }
 
-    lockContext(context);
     OrbisNpWebApiUserContext* user_context = findUserContext(context, requestId >> 0x20);
     if (user_context == nullptr) {
         releaseContext(context);
@@ -1045,13 +1152,9 @@ s32 deleteRequest(s64 requestId) {
     }
 
     abortRequestInternal(context, user_context, request);
-    while (isRequestBusy(request)) {
-        unlockContext(context);
-        Kernel::sceKernelUsleep(50000);
-        lockContext(context);
-    }
+    // Until no other call holds it, on the game's time
+    WaitUntil([request] { return !isRequestBusy(request); });
 
-    releaseRequest(request);
     if (request->http_request_id != 0) {
         Libraries::Http::sceHttpDeleteRequest(request->http_request_id);
         request->http_request_id = 0;
@@ -1064,40 +1167,28 @@ s32 deleteRequest(s64 requestId) {
         Libraries::Http::sceHttpDeleteTemplate(request->http_template_id);
         request->http_template_id = 0;
     }
-    user_context->requests.erase(request->requestId);
+    RemoveObject(&user_context->requests, &request->base);
+    releaseRequest(request);
 
     releaseUserContext(user_context);
-    unlockContext(context);
     releaseContext(context);
     return ORBIS_OK;
 }
 
 s32 createHandleInternal(OrbisNpWebApiContext* context) {
-    g_handle_count++;
-    if (g_handle_count >= 0xf0000000) {
-        g_handle_count = 1;
+    auto* handle = new OrbisNpWebApiHandle{};
+    handle->base.destroy = DestroyAs<OrbisNpWebApiHandle>;
+    retro_atomic_int_init(&handle->aborted, 0);
+    retro_atomic_int_init(&handle->deleted, 0);
+    retro_atomic_int_init(&handle->handleTimeout, 0);
+    retro_atomic_64_init(&handle->handleEndTime, 0);
+    retro_atomic_int_init(&handle->timedOut, 0);
+    if (!AddObject(&context->handles, &handle->base, &context->generation, 8, 31, 0)) {
+        delete handle;
+        return ORBIS_NP_WEBAPI_ERROR_OUT_OF_MEMORY;
     }
-
-    std::scoped_lock lk{context->contextLock};
-
-    s32 handle_id = g_handle_count;
-    context->handles[handle_id] = new OrbisNpWebApiHandle{};
-    auto& handle = context->handles[handle_id];
-    handle->handleId = handle_id;
-    handle->userCount = 0;
-    handle->aborted = false;
-    handle->deleted = false;
-
-    if (g_sdk_ver >= Common::ElfInfo::FW_300) {
-        context->timerHandles[handle_id] = new OrbisNpWebApiTimerHandle{};
-        auto& timer_handle = context->timerHandles[handle_id];
-        timer_handle->handleId = handle_id;
-        timer_handle->timedOut = false;
-        timer_handle->handleTimeout = 0;
-        timer_handle->handleEndTime = 0;
-    }
-
-    return handle_id;
+    handle->handleId = static_cast<s32>(handle->base.id);
+    return handle->handleId;
 }
 
 s32 createHandle(s32 libCtxId) {
@@ -1112,17 +1203,13 @@ s32 createHandle(s32 libCtxId) {
 }
 
 s32 setHandleTimeoutInternal(OrbisNpWebApiContext* context, s32 handleId, u32 timeout) {
-    std::scoped_lock lk{context->contextLock};
-    if (!context->timerHandles.contains(handleId)) {
+    // A handle's timer is there from SDK 3.00
+    OrbisNpWebApiHandle* handle = nullptr;
+    if (g_sdk_ver < Common::ElfInfo::FW_300 || getHandle(context, handleId, &handle) != ORBIS_OK) {
         return ORBIS_NP_WEBAPI_ERROR_HANDLE_NOT_FOUND;
     }
-    auto& handle = context->handles[handleId];
-    handle->userCount++;
-
-    auto& timer_handle = context->timerHandles[handleId];
-    timer_handle->handleTimeout = timeout;
-
-    handle->userCount--;
+    retro_atomic_store_release_int(&handle->handleTimeout, static_cast<int>(timeout));
+    releaseHandle(context, handle);
     return ORBIS_OK;
 }
 
@@ -1138,33 +1225,33 @@ s32 setHandleTimeout(s32 libCtxId, s32 handleId, u32 timeout) {
 }
 
 void startHandleTimer(OrbisNpWebApiContext* context, s32 handleId) {
-    std::scoped_lock lk{context->contextLock};
-    if (!context->timerHandles.contains(handleId)) {
+    OrbisNpWebApiHandle* handle = nullptr;
+    if (g_sdk_ver < Common::ElfInfo::FW_300 || getHandle(context, handleId, &handle) != ORBIS_OK) {
         return;
     }
-    auto& timer_handle = context->timerHandles[handleId];
-    if (timer_handle->handleTimeout == 0) {
-        return;
+    const u32 timeout = static_cast<u32>(retro_atomic_load_acquire_int(&handle->handleTimeout));
+    if (timeout != 0) {
+        retro_atomic_store_release_64(&handle->handleEndTime, static_cast<s64>(NowUs() + timeout));
     }
-    timer_handle->handleEndTime = Kernel::sceKernelGetProcessTime() + timer_handle->handleTimeout;
+    releaseHandle(context, handle);
 }
 
 void releaseHandle(OrbisNpWebApiContext* context, OrbisNpWebApiHandle* handle) {
     if (handle != nullptr) {
-        std::scoped_lock lk{context->contextLock};
-        handle->userCount--;
+        ReleaseObject(&context->handles, &handle->base);
     }
 }
 
 s32 getHandle(OrbisNpWebApiContext* context, s32 handleId, OrbisNpWebApiHandle** handleOut) {
-    std::scoped_lock lk{context->contextLock};
-    if (!context->handles.contains(handleId)) {
+    auto* handle =
+        reinterpret_cast<OrbisNpWebApiHandle*>(FindObject(&context->handles, handleId, 8));
+    if (handle == nullptr) {
         return ORBIS_NP_WEBAPI_ERROR_HANDLE_NOT_FOUND;
     }
-    auto& handle = context->handles[handleId];
-    handle->userCount++;
     if (handleOut != nullptr) {
         *handleOut = handle;
+    } else {
+        releaseHandle(context, handle);
     }
     return ORBIS_OK;
 }
@@ -1178,8 +1265,7 @@ s32 abortHandle(s32 libCtxId, s32 handleId) {
     OrbisNpWebApiHandle* handle;
     s32 result = getHandle(context, handleId, &handle);
     if (result == ORBIS_OK) {
-        std::scoped_lock lk{context->contextLock};
-        handle->aborted = true;
+        (void)retro_atomic_exchange_int(&handle->aborted, 1);
         // TODO: sceNpAsmClientAbortRequest call
         releaseHandle(context, handle);
     }
@@ -1189,43 +1275,28 @@ s32 abortHandle(s32 libCtxId, s32 handleId) {
 }
 
 s32 deleteHandleInternal(OrbisNpWebApiContext* context, s32 handleId) {
-    lockContext(context);
-    if (!context->handles.contains(handleId)) {
+    OrbisNpWebApiHandle* handle = nullptr;
+    if (getHandle(context, handleId, &handle) != ORBIS_OK) {
         return ORBIS_NP_WEBAPI_ERROR_HANDLE_NOT_FOUND;
     }
 
-    auto& handle = context->handles[handleId];
     if (g_sdk_ver >= Common::ElfInfo::FW_400) {
-        if (handle->deleted) {
-            unlockContext(context);
+        if (retro_atomic_exchange_int(&handle->deleted, 1) != 0) {
+            releaseHandle(context, handle);
             return ORBIS_NP_WEBAPI_ERROR_HANDLE_NOT_FOUND;
         }
-        handle->deleted = true;
-        unlockContext(context);
         abortHandle(context->libCtxId, handleId);
-        lockContext(context);
-        handle->userCount++;
-        while (handle->userCount > 1) {
-            handle->userCount--;
-            unlockContext(context);
-            Kernel::sceKernelUsleep(50000);
-            lockContext(context);
-            handle->userCount++;
-        }
-        handle->userCount--;
-    } else if (handle->userCount > 0) {
-        unlockContext(context);
+        // Until this call is the only one holding it, on the game's time
+        WaitUntil([context, handle] {
+            return obj_table_users(&context->handles, handle->base.index) <= 1;
+        });
+    } else if (obj_table_users(&context->handles, handle->base.index) > 1) {
+        releaseHandle(context, handle);
         return ORBIS_NP_WEBAPI_ERROR_HANDLE_BUSY;
     }
 
-    context->handles.erase(handleId);
-
-    if (g_sdk_ver >= Common::ElfInfo::FW_300 && context->timerHandles.contains(handleId)) {
-        auto& timer_handle = context->timerHandles[handleId];
-        context->timerHandles.erase(handleId);
-    }
-
-    unlockContext(context);
+    RemoveObject(&context->handles, &handle->base);
+    releaseHandle(context, handle);
     return ORBIS_OK;
 }
 
@@ -1243,19 +1314,11 @@ s32 deleteHandle(s32 libCtxId, s32 handleId) {
 s32 createPushEventFilterInternal(OrbisNpWebApiContext* context,
                                   const OrbisNpWebApiPushEventFilterParameter* pFilterParam,
                                   u64 filterParamNum) {
-    std::scoped_lock lk{context->contextLock};
-    g_push_event_filter_count++;
-    if (g_push_event_filter_count >= 0xf0000000) {
-        g_push_event_filter_count = 1;
-    }
-    s32 filterId = g_push_event_filter_count;
-
-    context->pushEventFilters[filterId] = new OrbisNpWebApiPushEventFilter{};
-    auto& filter = context->pushEventFilters[filterId];
+    // Made whole, then put in its table, where others may find it
+    auto* filter = new OrbisNpWebApiPushEventFilter{};
+    filter->base.destroy = DestroyAs<OrbisNpWebApiPushEventFilter>;
     filter->parentContext = context;
-    filter->filterId = filterId;
 
-    LOG_INFO(Lib_NpWebApi, "filterId={} dataTypeParams={}", filterId, filterParamNum);
     if (pFilterParam != nullptr && filterParamNum != 0) {
         for (u64 param_idx = 0; param_idx < filterParamNum; param_idx++) {
             OrbisNpWebApiPushEventFilterParameter copy = OrbisNpWebApiPushEventFilterParameter{};
@@ -1264,6 +1327,13 @@ s32 createPushEventFilterInternal(OrbisNpWebApiContext* context,
             filter->filterParams.emplace_back(copy);
         }
     }
+    if (!AddObject(&context->pushEventFilters, &filter->base, &context->generation, 8, 31, 0)) {
+        delete filter;
+        return ORBIS_NP_WEBAPI_ERROR_OUT_OF_MEMORY;
+    }
+    const s32 filterId = static_cast<s32>(filter->base.id);
+    filter->filterId = filterId;
+    LOG_INFO(Lib_NpWebApi, "filterId={} dataTypeParams={}", filterId, filterParamNum);
     return filterId;
 }
 
@@ -1280,13 +1350,12 @@ s32 createPushEventFilter(s32 libCtxId, const OrbisNpWebApiPushEventFilterParame
 }
 
 s32 deletePushEventFilterInternal(OrbisNpWebApiContext* context, s32 filterId) {
-    std::scoped_lock lk{context->contextLock};
-    if (!context->pushEventFilters.contains(filterId)) {
+    WebApiObject* filter = FindObject(&context->pushEventFilters, filterId, 8);
+    if (filter == nullptr) {
         return ORBIS_NP_WEBAPI_ERROR_PUSH_EVENT_FILTER_NOT_FOUND;
     }
-
-    context->pushEventFilters[filterId]->filterParams.clear();
-    context->pushEventFilters.erase(filterId);
+    RemoveObject(&context->pushEventFilters, filter);
+    ReleaseObject(&context->pushEventFilters, filter);
     return ORBIS_OK;
 }
 
@@ -1303,20 +1372,20 @@ s32 deletePushEventFilter(s32 libCtxId, s32 filterId) {
 
 s32 registerPushEventCallbackInternal(OrbisNpWebApiUserContext* userContext, s32 filterId,
                                       OrbisNpWebApiPushEventCallback cbFunc, void* pUserArg) {
-    std::scoped_lock lk{userContext->parentContext->contextLock};
-    g_registered_callback_count++;
-    if (g_registered_callback_count >= 0xf0000000) {
-        g_registered_callback_count = 1;
-    }
-    s32 cbId = g_registered_callback_count;
-
-    userContext->pushEventCallbacks[cbId] = new OrbisNpWebApiRegisteredPushEventCallback{};
-    auto& cb = userContext->pushEventCallbacks[cbId];
-    cb->callbackId = cbId;
+    // Made whole, then put in its table, where others may find it
+    auto* cb = new OrbisNpWebApiRegisteredPushEventCallback{};
+    cb->base.destroy = DestroyAs<OrbisNpWebApiRegisteredPushEventCallback>;
     cb->filterId = filterId;
     cb->cbFunc = cbFunc;
     cb->pUserArg = pUserArg;
 
+    if (!AddObject(&userContext->pushEventCallbacks, &cb->base, &userContext->generation, 8, 31,
+                   0)) {
+        delete cb;
+        return ORBIS_NP_WEBAPI_ERROR_OUT_OF_MEMORY;
+    }
+    const s32 cbId = static_cast<s32>(cb->base.id);
+    cb->callbackId = cbId;
     return cbId;
 }
 
@@ -1333,7 +1402,7 @@ s32 registerPushEventCallback(s32 titleUserCtxId, s32 filterId,
         return ORBIS_NP_WEBAPI_ERROR_USER_CONTEXT_NOT_FOUND;
     }
 
-    if (g_sdk_ver >= Common::ElfInfo::FW_250 && !context->pushEventFilters.contains(filterId)) {
+    if (g_sdk_ver >= Common::ElfInfo::FW_250 && !HasObject(&context->pushEventFilters, filterId)) {
         releaseUserContext(user_context);
         releaseContext(context);
         return ORBIS_NP_WEBAPI_ERROR_PUSH_EVENT_FILTER_NOT_FOUND;
@@ -1357,15 +1426,15 @@ s32 unregisterPushEventCallback(s32 titleUserCtxId, s32 callbackId) {
         return ORBIS_NP_WEBAPI_ERROR_USER_CONTEXT_NOT_FOUND;
     }
 
-    if (!user_context->pushEventCallbacks.contains(callbackId)) {
+    WebApiObject* callback = FindObject(&user_context->pushEventCallbacks, callbackId, 8);
+    if (callback == nullptr) {
         releaseUserContext(user_context);
         releaseContext(context);
         return ORBIS_NP_WEBAPI_ERROR_PUSH_EVENT_CALLBACK_NOT_FOUND;
     }
 
-    lockContext(context);
-    user_context->pushEventCallbacks.erase(callbackId);
-    unlockContext(context);
+    RemoveObject(&user_context->pushEventCallbacks, callback);
+    ReleaseObject(&user_context->pushEventCallbacks, callback);
     releaseUserContext(user_context);
     releaseContext(context);
     return ORBIS_OK;
@@ -1375,30 +1444,22 @@ s32 createServicePushEventFilterInternal(
     OrbisNpWebApiContext* context, s32 handleId, const char* pNpServiceName,
     OrbisNpServiceLabel npServiceLabel,
     const OrbisNpWebApiServicePushEventFilterParameter* pFilterParam, u64 filterParamNum) {
-    std::scoped_lock lk{context->contextLock};
-    if (!context->handles.contains(handleId)) {
+    OrbisNpWebApiHandle* handle = nullptr;
+    if (getHandle(context, handleId, &handle) != ORBIS_OK) {
         return ORBIS_NP_WEBAPI_ERROR_HANDLE_NOT_FOUND;
     }
-    auto& handle = context->handles[handleId];
-    handle->userCount++;
 
     if (pNpServiceName != nullptr && !emu_settings_is_shadnet_enabled()) {
         // Seems sceNpManagerIntGetUserList fails?
         LOG_DEBUG(Lib_NpWebApi, "Cannot create service push event while shadNet is disabled");
-        handle->userCount--;
+        releaseHandle(context, handle);
         return ORBIS_NP_WEBAPI_ERROR_SIGNED_IN_USER_NOT_FOUND;
     }
 
-    g_service_push_event_filter_count++;
-    if (g_service_push_event_filter_count >= 0xf0000000) {
-        g_service_push_event_filter_count = 1;
-    }
-    s32 filterId = g_service_push_event_filter_count;
-
-    context->servicePushEventFilters[filterId] = new OrbisNpWebApiServicePushEventFilter{};
-    auto& filter = context->servicePushEventFilters[filterId];
+    // Made whole, then put in its table, where others may find it
+    auto* filter = new OrbisNpWebApiServicePushEventFilter{};
+    filter->base.destroy = DestroyAs<OrbisNpWebApiServicePushEventFilter>;
     filter->parentContext = context;
-    filter->filterId = filterId;
 
     if (pNpServiceName == nullptr) {
         filter->internal = true;
@@ -1407,7 +1468,6 @@ s32 createServicePushEventFilterInternal(
     }
 
     filter->npServiceLabel = npServiceLabel;
-    LOG_INFO(Lib_NpWebApi, "filterId={} dataTypeParams={}", filterId, filterParamNum);
     if (pFilterParam != nullptr && filterParamNum != 0) {
         for (u64 param_idx = 0; param_idx < filterParamNum; param_idx++) {
             OrbisNpWebApiServicePushEventFilterParameter copy =
@@ -1420,7 +1480,15 @@ s32 createServicePushEventFilterInternal(
         }
     }
 
-    handle->userCount--;
+    releaseHandle(context, handle);
+    if (!AddObject(&context->servicePushEventFilters, &filter->base, &context->generation, 8, 31,
+                   0)) {
+        delete filter;
+        return ORBIS_NP_WEBAPI_ERROR_OUT_OF_MEMORY;
+    }
+    const s32 filterId = static_cast<s32>(filter->base.id);
+    filter->filterId = filterId;
+    LOG_INFO(Lib_NpWebApi, "filterId={} dataTypeParams={}", filterId, filterParamNum);
     return filterId;
 }
 
@@ -1441,13 +1509,12 @@ s32 createServicePushEventFilter(s32 libCtxId, s32 handleId, const char* pNpServ
 }
 
 s32 deleteServicePushEventFilterInternal(OrbisNpWebApiContext* context, s32 filterId) {
-    std::scoped_lock lk{context->contextLock};
-    if (!context->servicePushEventFilters.contains(filterId)) {
+    WebApiObject* filter = FindObject(&context->servicePushEventFilters, filterId, 8);
+    if (filter == nullptr) {
         return ORBIS_NP_WEBAPI_ERROR_SERVICE_PUSH_EVENT_FILTER_NOT_FOUND;
     }
-
-    context->servicePushEventFilters[filterId]->filterParams.clear();
-    context->servicePushEventFilters.erase(filterId);
+    RemoveObject(&context->servicePushEventFilters, filter);
+    ReleaseObject(&context->servicePushEventFilters, filter);
     return ORBIS_OK;
 }
 
@@ -1467,27 +1534,26 @@ s32 registerServicePushEventCallbackInternal(
     OrbisNpWebApiServicePushEventCallback cbFunc,
     OrbisNpWebApiInternalServicePushEventCallback intCbFunc,
     OrbisNpWebApiInternalServicePushEventCallbackA intCbFuncA, void* pUserArg) {
-    std::scoped_lock lk{userContext->parentContext->contextLock};
     if (cbFunc == nullptr && intCbFunc == nullptr && intCbFuncA == nullptr) {
         return ORBIS_NP_WEBAPI_ERROR_INVALID_ARGUMENT;
     }
 
-    g_registered_callback_count++;
-    if (g_registered_callback_count >= 0xf0000000) {
-        g_registered_callback_count = 1;
-    }
-    s32 cbId = g_registered_callback_count;
-
-    userContext->servicePushEventCallbacks[cbId] =
-        new OrbisNpWebApiRegisteredServicePushEventCallback{};
-    auto& cb = userContext->servicePushEventCallbacks[cbId];
-    cb->callbackId = cbId;
+    // Made whole, then put in its table, where others may find it
+    auto* cb = new OrbisNpWebApiRegisteredServicePushEventCallback{};
+    cb->base.destroy = DestroyAs<OrbisNpWebApiRegisteredServicePushEventCallback>;
     cb->filterId = filterId;
     cb->cbFunc = cbFunc;
     cb->internalCbFunc = intCbFunc;
     cb->internalCbFuncA = intCbFuncA;
     cb->pUserArg = pUserArg;
 
+    if (!AddObject(&userContext->servicePushEventCallbacks, &cb->base, &userContext->generation, 8,
+                   31, 0)) {
+        delete cb;
+        return ORBIS_NP_WEBAPI_ERROR_OUT_OF_MEMORY;
+    }
+    const s32 cbId = static_cast<s32>(cb->base.id);
+    cb->callbackId = cbId;
     return cbId;
 }
 
@@ -1508,7 +1574,7 @@ s32 registerServicePushEventCallback(s32 titleUserCtxId, s32 filterId,
     }
 
     if (g_sdk_ver >= Common::ElfInfo::FW_250 &&
-        !context->servicePushEventFilters.contains(filterId)) {
+        !HasObject(&context->servicePushEventFilters, filterId)) {
         releaseUserContext(user_context);
         releaseContext(context);
         return ORBIS_NP_WEBAPI_ERROR_SERVICE_PUSH_EVENT_FILTER_NOT_FOUND;
@@ -1533,15 +1599,15 @@ s32 unregisterServicePushEventCallback(s32 titleUserCtxId, s32 callbackId) {
         return ORBIS_NP_WEBAPI_ERROR_USER_CONTEXT_NOT_FOUND;
     }
 
-    if (!user_context->servicePushEventCallbacks.contains(callbackId)) {
+    WebApiObject* callback = FindObject(&user_context->servicePushEventCallbacks, callbackId, 8);
+    if (callback == nullptr) {
         releaseUserContext(user_context);
         releaseContext(context);
         return ORBIS_NP_WEBAPI_ERROR_SERVICE_PUSH_EVENT_CALLBACK_NOT_FOUND;
     }
 
-    lockContext(context);
-    user_context->servicePushEventCallbacks.erase(callbackId);
-    unlockContext(context);
+    RemoveObject(&user_context->servicePushEventCallbacks, callback);
+    ReleaseObject(&user_context->servicePushEventCallbacks, callback);
     releaseUserContext(user_context);
     releaseContext(context);
     return ORBIS_OK;
@@ -1552,31 +1618,23 @@ s32 createExtendedPushEventFilterInternal(
     OrbisNpServiceLabel npServiceLabel,
     const OrbisNpWebApiExtdPushEventFilterParameter* pFilterParam, u64 filterParamNum,
     bool internal) {
-    std::scoped_lock lk{context->contextLock};
-    if (!context->handles.contains(handleId)) {
+    OrbisNpWebApiHandle* handle = nullptr;
+    if (getHandle(context, handleId, &handle) != ORBIS_OK) {
         return ORBIS_NP_WEBAPI_ERROR_HANDLE_NOT_FOUND;
     }
-    auto& handle = context->handles[handleId];
-    handle->userCount++;
 
     if (pNpServiceName != nullptr && !emu_settings_is_shadnet_enabled()) {
         // Seems sceNpManagerIntGetUserList fails?
         LOG_DEBUG(Lib_NpWebApi, "Cannot create extended push event while shadNet is disabled");
-        handle->userCount--;
+        releaseHandle(context, handle);
         return ORBIS_NP_WEBAPI_ERROR_SIGNED_IN_USER_NOT_FOUND;
     }
 
-    g_extended_push_event_filter_count++;
-    if (g_extended_push_event_filter_count >= 0xf0000000) {
-        g_extended_push_event_filter_count = 1;
-    }
-    s32 filterId = g_extended_push_event_filter_count;
-
-    context->extendedPushEventFilters[filterId] = new OrbisNpWebApiExtendedPushEventFilter{};
-    auto& filter = context->extendedPushEventFilters[filterId];
+    // Made whole, then put in its table, where others may find it
+    auto* filter = new OrbisNpWebApiExtendedPushEventFilter{};
+    filter->base.destroy = DestroyAs<OrbisNpWebApiExtendedPushEventFilter>;
     filter->internal = internal;
     filter->parentContext = context;
-    filter->filterId = filterId;
 
     if (pNpServiceName == nullptr) {
         npServiceLabel = ORBIS_NP_INVALID_SERVICE_LABEL;
@@ -1586,7 +1644,7 @@ s32 createExtendedPushEventFilterInternal(
 
     filter->npServiceLabel = npServiceLabel;
 
-    LOG_INFO(Lib_NpWebApi, "filterId={} service='{}' label={:#x} dataTypeParams={}", filterId,
+    LOG_INFO(Lib_NpWebApi, "service='{}' label={:#x} dataTypeParams={}",
              pNpServiceName ? pNpServiceName : "null", npServiceLabel, filterParamNum);
     if (pFilterParam != nullptr && filterParamNum != 0) {
         for (u64 param_idx = 0; param_idx < filterParamNum; param_idx++) {
@@ -1614,7 +1672,15 @@ s32 createExtendedPushEventFilterInternal(
         }
     }
 
-    handle->userCount--;
+    releaseHandle(context, handle);
+    if (!AddObject(&context->extendedPushEventFilters, &filter->base, &context->generation, 8, 31,
+                   0)) {
+        delete filter;
+        return ORBIS_NP_WEBAPI_ERROR_OUT_OF_MEMORY;
+    }
+    const s32 filterId = static_cast<s32>(filter->base.id);
+    filter->filterId = filterId;
+    LOG_INFO(Lib_NpWebApi, "filterId={} dataTypeParams={}", filterId, filterParamNum);
     return filterId;
 }
 
@@ -1635,13 +1701,12 @@ s32 createExtendedPushEventFilter(s32 libCtxId, s32 handleId, const char* pNpSer
 }
 
 s32 deleteExtendedPushEventFilterInternal(OrbisNpWebApiContext* context, s32 filterId) {
-    std::scoped_lock lk{context->contextLock};
-    if (!context->extendedPushEventFilters.contains(filterId)) {
+    WebApiObject* filter = FindObject(&context->extendedPushEventFilters, filterId, 8);
+    if (filter == nullptr) {
         return ORBIS_NP_WEBAPI_ERROR_EXTD_PUSH_EVENT_FILTER_NOT_FOUND;
     }
-
-    context->extendedPushEventFilters[filterId]->filterParams.clear();
-    context->extendedPushEventFilters.erase(filterId);
+    RemoveObject(&context->extendedPushEventFilters, filter);
+    ReleaseObject(&context->extendedPushEventFilters, filter);
     return ORBIS_OK;
 }
 
@@ -1660,27 +1725,25 @@ s32 registerExtdPushEventCallbackInternal(OrbisNpWebApiUserContext* userContext,
                                           OrbisNpWebApiExtdPushEventCallback cbFunc,
                                           OrbisNpWebApiExtdPushEventCallbackA cbFuncA,
                                           void* pUserArg) {
-    std::scoped_lock lk{userContext->parentContext->contextLock};
-
-    g_registered_callback_count++;
-    if (g_registered_callback_count >= 0xf0000000) {
-        g_registered_callback_count = 1;
-    }
 
     if (cbFunc == nullptr && cbFuncA == nullptr) {
         return ORBIS_NP_WEBAPI_ERROR_INVALID_ARGUMENT;
     }
-    s32 cbId = g_registered_callback_count;
-
-    userContext->extendedPushEventCallbacks[cbId] =
-        new OrbisNpWebApiRegisteredExtendedPushEventCallback{};
-    auto& cb = userContext->extendedPushEventCallbacks[cbId];
-    cb->callbackId = cbId;
+    // Made whole, then put in its table, where others may find it
+    auto* cb = new OrbisNpWebApiRegisteredExtendedPushEventCallback{};
+    cb->base.destroy = DestroyAs<OrbisNpWebApiRegisteredExtendedPushEventCallback>;
     cb->filterId = filterId;
     cb->cbFunc = cbFunc;
     cb->cbFuncA = cbFuncA;
     cb->pUserArg = pUserArg;
 
+    if (!AddObject(&userContext->extendedPushEventCallbacks, &cb->base, &userContext->generation, 8,
+                   31, 0)) {
+        delete cb;
+        return ORBIS_NP_WEBAPI_ERROR_OUT_OF_MEMORY;
+    }
+    const s32 cbId = static_cast<s32>(cb->base.id);
+    cb->callbackId = cbId;
     return cbId;
 }
 
@@ -1698,7 +1761,7 @@ s32 registerExtdPushEventCallback(s32 titleUserCtxId, s32 filterId,
         return ORBIS_NP_WEBAPI_ERROR_USER_CONTEXT_NOT_FOUND;
     }
 
-    if (!context->extendedPushEventFilters.contains(filterId)) {
+    if (!HasObject(&context->extendedPushEventFilters, filterId)) {
         releaseUserContext(user_context);
         releaseContext(context);
         return ORBIS_NP_WEBAPI_ERROR_EXTD_PUSH_EVENT_FILTER_NOT_FOUND;
@@ -1728,15 +1791,15 @@ s32 unregisterExtdPushEventCallback(s32 titleUserCtxId, s32 callbackId) {
         return ORBIS_NP_WEBAPI_ERROR_USER_CONTEXT_NOT_FOUND;
     }
 
-    if (!user_context->extendedPushEventCallbacks.contains(callbackId)) {
+    WebApiObject* callback = FindObject(&user_context->extendedPushEventCallbacks, callbackId, 8);
+    if (callback == nullptr) {
         releaseUserContext(user_context);
         releaseContext(context);
         return ORBIS_NP_WEBAPI_ERROR_EXTD_PUSH_EVENT_CALLBACK_NOT_FOUND;
     }
 
-    lockContext(context);
-    user_context->extendedPushEventCallbacks.erase(callbackId);
-    unlockContext(context);
+    RemoveObject(&user_context->extendedPushEventCallbacks, callback);
+    ReleaseObject(&user_context->extendedPushEventCallbacks, callback);
     releaseUserContext(user_context);
     releaseContext(context);
     return ORBIS_OK;
@@ -1935,24 +1998,19 @@ s32 PS4_SYSV_ABI getHttpStatusCodeInternal(s64 requestId, s32* out_status_code) 
 }
 
 void PS4_SYSV_ABI setRequestEndTime(OrbisNpWebApiRequest* request) {
-    u64 time;
-    if ((request->requestTimeout != 0) && (request->requestEndTime == 0)) {
-        time = Libraries::Kernel::sceKernelGetProcessTime();
-        request->requestEndTime = (u64)request->requestTimeout + time;
-    }
+    startRequestTimer(request);
 }
 
 void PS4_SYSV_ABI clearRequestEndTime(OrbisNpWebApiRequest* req) {
-    req->requestEndTime = 0;
-    return;
+    retro_atomic_store_release_64(&req->requestEndTime, 0);
 }
 
 bool PS4_SYSV_ABI hasRequestTimedOut(OrbisNpWebApiRequest* request) {
-    return request->timedOut;
+    return retro_atomic_load_acquire_int(&request->timedOut) != 0;
 }
 
 bool PS4_SYSV_ABI isRequestAborted(OrbisNpWebApiRequest* request) {
-    return request->aborted;
+    return retro_atomic_load_acquire_int(&request->aborted) != 0;
 }
 
 void PS4_SYSV_ABI setRequestState(OrbisNpWebApiRequest* request, u8 state) {
@@ -2009,15 +2067,11 @@ s32 PS4_SYSV_ABI readDataInternal(s64 requestId, void* pData, u64 size) {
 
     // If caller wants more data than buffered
     if (remainingSize != 0) {
-        lockContext(context);
         setRequestState(request, 5); // TODO add request states?
 
         if (!hasRequestTimedOut(request) && isRequestAborted(request)) {
-            unlockContext(context);
             offset = ORBIS_NP_WEBAPI_ERROR_ABORTED;
         } else {
-            unlockContext(context);
-
             int32_t httpReqId = getHttpRequestIdFromRequest(request);
             int32_t httpRead =
                 Libraries::Http::sceHttpReadData(httpReqId, (u8*)pData + offset, remainingSize);
@@ -2030,7 +2084,6 @@ s32 PS4_SYSV_ABI readDataInternal(s64 requestId, void* pData, u64 size) {
     }
 
     // Final state resolution
-    lockContext(context);
     setRequestState(request, 0);
 
     if (hasRequestTimedOut(request)) {
@@ -2056,8 +2109,6 @@ s32 PS4_SYSV_ABI readDataInternal(s64 requestId, void* pData, u64 size) {
                  std::string(reinterpret_cast<const char*>(pData),
                              std::min<u64>(result, 256))); // debug to be removed
     }
-
-    unlockContext(context);
 
     // Cleanup
     clearRequestEndTime(request);
@@ -2093,8 +2144,13 @@ using ExtdCbA = PS4_SYSV_ABI void (*)(s32, s32, const char*, OrbisNpServiceLabel
                                       const OrbisNpWebApiPushEventDataType*, const char*, u64,
                                       const OrbisNpWebApiExtdPushEventExtdData*, u64, void*);
 
-Common::Combiner g_push_mutex;
-std::deque<PushEventInput> g_push_queue;
+// Push events from the network thread, on a lock-free stack until the game's thread takes
+// them (libretro-common's mpsc_stack.h)
+struct PushEventNode {
+    mpsc_stack_node_t node; // first: the stack links them through it
+    PushEventInput ev;
+};
+static mpsc_stack_t g_push_stack{};
 
 template <typename Filter>
 bool filterMatches(const Filter* flt, const std::string& evServiceName, bool evHasServiceName,
@@ -2117,23 +2173,18 @@ bool filterMatches(const Filter* flt, const std::string& evServiceName, bool evH
 
 // Network-thread hand-off only,the event is dispatched later from DrainPushEvents.
 void EnqueuePushEvent(const PushEventInput& ev) {
-    g_push_mutex.Run([&] { g_push_queue.push_back(ev); });
+    auto* const node = new PushEventNode{{}, ev};
+    mpsc_stack_push(&g_push_stack, &node->node);
 }
 
 // Runs on the game thread from sceNpCheckCallback
 void DrainPushEvents() {
-    std::deque<PushEventInput> local;
-    if (g_push_mutex.Run([&] {
-            if (g_push_queue.empty()) {
-                return true;
-            }
-            local.swap(g_push_queue);
-            return false;
-        })) {
-        return;
-    }
-
-    for (const PushEventInput& ev : local) {
+    // Everything pushed so far, oldest first
+    mpsc_stack_node_t* next = mpsc_stack_reverse(mpsc_stack_drain(&g_push_stack));
+    while (next != nullptr) {
+        auto* const event_node = reinterpret_cast<PushEventNode*>(next);
+        next = next->next;
+        const PushEventInput& ev = event_node->ev;
         const bool ev_has_service = !ev.npServiceName.empty();
         OrbisNpWebApiPushEventDataType dt{};
         std::snprintf(dt.val, sizeof(dt.val), "%s", ev.dataType.c_str());
@@ -2148,144 +2199,129 @@ void DrainPushEvents() {
         const OrbisNpPeerAddressA* to_addr_p = ev.toAccountId != 0 ? &to_addr : nullptr;
         const OrbisNpPeerAddressA* from_addr_p = ev.fromAccountId != 0 ? &from_addr : nullptr;
 
-        std::scoped_lock gl{g_global_mutex};
-        for (auto& [libId, context] : g_contexts) {
+        // Each context and user context held while its callbacks run: none freed under them
+        for (int ctx_slot = 0; ctx_slot < g_contexts.count; ctx_slot++) {
+            auto* context =
+                static_cast<OrbisNpWebApiContext*>(obj_table_hold(&g_contexts, ctx_slot));
             if (context == nullptr) {
                 continue;
             }
-            std::scoped_lock cl{context->contextLock};
-            for (auto& [ucKey, uc] : context->userContexts) {
+            for (int uc_slot = 0; uc_slot < context->userContexts.count; uc_slot++) {
+                auto* uc = static_cast<OrbisNpWebApiUserContext*>(
+                    obj_table_hold(&context->userContexts, uc_slot));
                 if (uc == nullptr) {
                     continue;
                 }
                 if (uc->userId != ev.targetUserId) {
+                    releaseUserContext(uc);
                     continue;
                 }
-                const s32 title_user_ctx_id = ucKey;
+                const s32 title_user_ctx_id = uc->userCtxId;
 
-                for (auto& [cbId, cb] : uc->extendedPushEventCallbacks) {
+                for (int cb_slot = 0; cb_slot < uc->extendedPushEventCallbacks.count; cb_slot++) {
+                    auto* cb = static_cast<OrbisNpWebApiRegisteredExtendedPushEventCallback*>(
+                        obj_table_hold(&uc->extendedPushEventCallbacks, cb_slot));
                     if (cb == nullptr) {
                         continue;
                     }
-                    void (*raw)() = cb->cbFuncA  ? reinterpret_cast<void (*)()>(cb->cbFuncA)
-                                    : cb->cbFunc ? reinterpret_cast<void (*)()>(cb->cbFunc)
-                                                 : nullptr;
-                    if (raw == nullptr) {
-                        continue;
-                    }
-                    auto fit = context->extendedPushEventFilters.find(cb->filterId);
-                    if (fit == context->extendedPushEventFilters.end()) {
-                        continue;
-                    }
-                    const OrbisNpWebApiExtendedPushEventFilter* flt = fit->second;
-                    if (!filterMatches(flt, ev.npServiceName, ev_has_service, ev.dataType)) {
-                        continue;
-                    }
-                    // Only hand the title the extended-data keys its filter asked for for this
-                    // dataType (SDK behaviour). This also keeps server-internal pairs such as
-                    // fromAccountId/toAccountId/fromPlatform out of pExtdData.
-                    const std::vector<std::string>* wanted_keys = nullptr;
-                    for (size_t i = 0; i < flt->filterParams.size(); ++i) {
-                        if (ev.dataType == flt->filterParams[i].dataType.val) {
-                            if (i < flt->extdDataKeys.size()) {
-                                wanted_keys = &flt->extdDataKeys[i];
-                            }
+                    const s32 cbId = cb->callbackId;
+                    OrbisNpWebApiExtendedPushEventFilter* flt = nullptr;
+                    do {
+                        if (cb == nullptr) {
                             break;
                         }
-                    }
-                    auto key_requested = [wanted_keys](const std::string& k) {
-                        return wanted_keys != nullptr &&
-                               std::find(wanted_keys->begin(), wanted_keys->end(), k) !=
-                                   wanted_keys->end();
-                    };
-                    std::vector<OrbisNpWebApiExtdPushEventExtdData> exarr;
-                    exarr.reserve(ev.extdData.size());
-                    for (auto& [k, v] : ev.extdData) {
-                        if (!key_requested(k)) {
-                            continue;
+                        void (*raw)() = cb->cbFuncA  ? reinterpret_cast<void (*)()>(cb->cbFuncA)
+                                        : cb->cbFunc ? reinterpret_cast<void (*)()>(cb->cbFunc)
+                                                     : nullptr;
+                        if (raw == nullptr) {
+                            break;
                         }
-                        OrbisNpWebApiExtdPushEventExtdData e{};
-                        std::snprintf(e.extdDataKey.val, sizeof(e.extdDataKey.val), "%s",
-                                      k.c_str());
-                        e.pData = const_cast<char*>(v.data());
-                        e.dataLen = v.size();
-                        exarr.push_back(e);
-                    }
-                    // Service name/label come from the FILTER
-                    const char* svc =
-                        flt->npServiceName.empty() ? nullptr : flt->npServiceName.c_str();
-                    // pData/pExtdData are NULL (and the counts 0) when the event
-                    // carries no payload / no matching extended data.
-                    const char* ext_data = ev.data.empty() ? nullptr : ev.data.data();
-                    const OrbisNpWebApiExtdPushEventExtdData* ext_arr =
-                        exarr.empty() ? nullptr : exarr.data();
-
-                    LOG_INFO(
-                        Lib_NpWebApi, "invoking extd cb ctx={:#x} cbId={} dataType='{}'",
-                        title_user_ctx_id, cbId,
-                        ev.dataType); // debug confirm the listener callback fires. to be removed
-                    reinterpret_cast<ExtdCbA>(raw)(
-                        title_user_ctx_id, cbId, svc, flt->npServiceLabel, to_addr_p, to_p,
-                        from_addr_p, from_p, &dt, ext_data, ev.data.size(), ext_arr, exarr.size(),
-                        cb->pUserArg);
-                }
-
-                // Service push
-                for (auto& [cbId, cb] : uc->servicePushEventCallbacks) {
-                    if (cb == nullptr || cb->cbFunc == nullptr) {
-                        continue;
-                    }
-                    auto fit = context->servicePushEventFilters.find(cb->filterId);
-                    if (fit == context->servicePushEventFilters.end()) {
-                        continue;
-                    }
-                    const OrbisNpWebApiServicePushEventFilter* flt = fit->second;
-                    if (!filterMatches(flt, ev.npServiceName, ev_has_service, ev.dataType)) {
-                        continue;
-                    }
-                    const char* svc =
-                        flt->npServiceName.empty() ? nullptr : flt->npServiceName.c_str();
-                    const char* svc_data = ev.data.empty() ? nullptr : ev.data.data();
-                    PushPeerAddress to_peer{};   // notified user (self)
-                    PushPeerAddress from_peer{}; // user that caused the event
-                    if (ev.hasTo) {
-                        to_peer.onlineId = ev.toOnlineId;
-                    }
-                    if (ev.hasFrom) {
-                        from_peer.onlineId = ev.fromOnlineId;
-                    }
-                    reinterpret_cast<ServiceCb>(reinterpret_cast<void (*)()>(cb->cbFunc))(
-                        title_user_ctx_id, cbId, svc, flt->npServiceLabel, &to_peer, &from_peer,
-                        &dt, svc_data, ev.data.size(), cb->pUserArg);
-                }
-
-                // Basic push
-                if (!ev_has_service) {
-                    for (auto& [cbId, cb] : uc->pushEventCallbacks) {
-                        if (cb == nullptr || cb->cbFunc == nullptr) {
-                            continue;
+                        flt = reinterpret_cast<OrbisNpWebApiExtendedPushEventFilter*>(
+                            FindObject(&context->extendedPushEventFilters, cb->filterId, 8));
+                        if (flt == nullptr) {
+                            break;
                         }
-                        auto fit = context->pushEventFilters.find(cb->filterId);
-                        if (fit == context->pushEventFilters.end()) {
-                            continue;
+                        if (!filterMatches(flt, ev.npServiceName, ev_has_service, ev.dataType)) {
+                            break;
                         }
-                        const OrbisNpWebApiPushEventFilter* flt = fit->second;
-                        bool matched = false;
-                        for (const auto& p : flt->filterParams) {
-                            if (ev.dataType == p.dataType.val) {
-                                matched = true;
+                        // Only hand the title the extended-data keys its filter asked for for this
+                        // dataType (SDK behaviour). This also keeps server-internal pairs such as
+                        // fromAccountId/toAccountId/fromPlatform out of pExtdData.
+                        const std::vector<std::string>* wanted_keys = nullptr;
+                        for (size_t i = 0; i < flt->filterParams.size(); ++i) {
+                            if (ev.dataType == flt->filterParams[i].dataType.val) {
+                                if (i < flt->extdDataKeys.size()) {
+                                    wanted_keys = &flt->extdDataKeys[i];
+                                }
                                 break;
                             }
                         }
-                        if (!matched) {
-                            continue;
+                        auto key_requested = [wanted_keys](const std::string& k) {
+                            return wanted_keys != nullptr &&
+                                   std::find(wanted_keys->begin(), wanted_keys->end(), k) !=
+                                       wanted_keys->end();
+                        };
+                        std::vector<OrbisNpWebApiExtdPushEventExtdData> exarr;
+                        exarr.reserve(ev.extdData.size());
+                        for (auto& [k, v] : ev.extdData) {
+                            if (!key_requested(k)) {
+                                continue;
+                            }
+                            OrbisNpWebApiExtdPushEventExtdData e{};
+                            std::snprintf(e.extdDataKey.val, sizeof(e.extdDataKey.val), "%s",
+                                          k.c_str());
+                            e.pData = const_cast<char*>(v.data());
+                            e.dataLen = v.size();
+                            exarr.push_back(e);
                         }
-                        LOG_INFO(Lib_NpWebApi,
-                                 "invoking basic cb ctx={:#x} cbId={} "
-                                 "dataType='{}'",
+                        // Service name/label come from the FILTER
+                        const char* svc =
+                            flt->npServiceName.empty() ? nullptr : flt->npServiceName.c_str();
+                        // pData/pExtdData are NULL (and the counts 0) when the event
+                        // carries no payload / no matching extended data.
+                        const char* ext_data = ev.data.empty() ? nullptr : ev.data.data();
+                        const OrbisNpWebApiExtdPushEventExtdData* ext_arr =
+                            exarr.empty() ? nullptr : exarr.data();
+
+                        LOG_INFO(Lib_NpWebApi, "invoking extd cb ctx={:#x} cbId={} dataType='{}'",
                                  title_user_ctx_id, cbId,
                                  ev.dataType); // debug confirm the listener callback fires. to be
                                                // removed
+                        reinterpret_cast<ExtdCbA>(raw)(
+                            title_user_ctx_id, cbId, svc, flt->npServiceLabel, to_addr_p, to_p,
+                            from_addr_p, from_p, &dt, ext_data, ev.data.size(), ext_arr,
+                            exarr.size(), cb->pUserArg);
+                    } while (false);
+                    if (flt != nullptr) {
+                        ReleaseObject(&context->extendedPushEventFilters, &flt->base);
+                    }
+                    ReleaseObject(&uc->extendedPushEventCallbacks, &cb->base);
+                }
+
+                // Service push
+                for (int cb_slot = 0; cb_slot < uc->servicePushEventCallbacks.count; cb_slot++) {
+                    auto* cb = static_cast<OrbisNpWebApiRegisteredServicePushEventCallback*>(
+                        obj_table_hold(&uc->servicePushEventCallbacks, cb_slot));
+                    if (cb == nullptr) {
+                        continue;
+                    }
+                    const s32 cbId = cb->callbackId;
+                    OrbisNpWebApiServicePushEventFilter* flt = nullptr;
+                    do {
+                        if (cb == nullptr || cb->cbFunc == nullptr) {
+                            break;
+                        }
+                        flt = reinterpret_cast<OrbisNpWebApiServicePushEventFilter*>(
+                            FindObject(&context->servicePushEventFilters, cb->filterId, 8));
+                        if (flt == nullptr) {
+                            break;
+                        }
+                        if (!filterMatches(flt, ev.npServiceName, ev_has_service, ev.dataType)) {
+                            break;
+                        }
+                        const char* svc =
+                            flt->npServiceName.empty() ? nullptr : flt->npServiceName.c_str();
+                        const char* svc_data = ev.data.empty() ? nullptr : ev.data.data();
                         PushPeerAddress to_peer{};   // notified user (self)
                         PushPeerAddress from_peer{}; // user that caused the event
                         if (ev.hasTo) {
@@ -2294,14 +2330,75 @@ void DrainPushEvents() {
                         if (ev.hasFrom) {
                             from_peer.onlineId = ev.fromOnlineId;
                         }
-                        const char* p_data = ev.data.empty() ? nullptr : ev.data.data();
-                        reinterpret_cast<BasicCb>(reinterpret_cast<void (*)()>(cb->cbFunc))(
-                            title_user_ctx_id, cbId, &to_peer, &from_peer, &dt, p_data,
-                            ev.data.size(), cb->pUserArg);
+                        reinterpret_cast<ServiceCb>(reinterpret_cast<void (*)()>(cb->cbFunc))(
+                            title_user_ctx_id, cbId, svc, flt->npServiceLabel, &to_peer, &from_peer,
+                            &dt, svc_data, ev.data.size(), cb->pUserArg);
+                    } while (false);
+                    if (flt != nullptr) {
+                        ReleaseObject(&context->servicePushEventFilters, &flt->base);
+                    }
+                    ReleaseObject(&uc->servicePushEventCallbacks, &cb->base);
+                }
+
+                // Basic push
+                if (!ev_has_service) {
+                    for (int cb_slot = 0; cb_slot < uc->pushEventCallbacks.count; cb_slot++) {
+                        auto* cb = static_cast<OrbisNpWebApiRegisteredPushEventCallback*>(
+                            obj_table_hold(&uc->pushEventCallbacks, cb_slot));
+                        if (cb == nullptr) {
+                            continue;
+                        }
+                        const s32 cbId = cb->callbackId;
+                        OrbisNpWebApiPushEventFilter* flt = nullptr;
+                        do {
+                            if (cb == nullptr || cb->cbFunc == nullptr) {
+                                break;
+                            }
+                            flt = reinterpret_cast<OrbisNpWebApiPushEventFilter*>(
+                                FindObject(&context->pushEventFilters, cb->filterId, 8));
+                            if (flt == nullptr) {
+                                break;
+                            }
+                            bool matched = false;
+                            for (const auto& p : flt->filterParams) {
+                                if (ev.dataType == p.dataType.val) {
+                                    matched = true;
+                                    break;
+                                }
+                            }
+                            if (!matched) {
+                                break;
+                            }
+                            LOG_INFO(Lib_NpWebApi,
+                                     "invoking basic cb ctx={:#x} cbId={} "
+                                     "dataType='{}'",
+                                     title_user_ctx_id, cbId,
+                                     ev.dataType); // debug confirm the listener callback fires. to
+                                                   // be removed
+                            PushPeerAddress to_peer{};   // notified user (self)
+                            PushPeerAddress from_peer{}; // user that caused the event
+                            if (ev.hasTo) {
+                                to_peer.onlineId = ev.toOnlineId;
+                            }
+                            if (ev.hasFrom) {
+                                from_peer.onlineId = ev.fromOnlineId;
+                            }
+                            const char* p_data = ev.data.empty() ? nullptr : ev.data.data();
+                            reinterpret_cast<BasicCb>(reinterpret_cast<void (*)()>(cb->cbFunc))(
+                                title_user_ctx_id, cbId, &to_peer, &from_peer, &dt, p_data,
+                                ev.data.size(), cb->pUserArg);
+                        } while (false);
+                        if (flt != nullptr) {
+                            ReleaseObject(&context->pushEventFilters, &flt->base);
+                        }
+                        ReleaseObject(&uc->pushEventCallbacks, &cb->base);
                     }
                 }
+                releaseUserContext(uc);
             }
+            releaseContext(context);
         }
+        delete event_node;
     }
 }
 }; // namespace Libraries::Np::NpWebApi

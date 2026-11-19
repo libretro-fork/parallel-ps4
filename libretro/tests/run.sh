@@ -180,6 +180,15 @@ $CC -std=c89 -pedantic -Wno-long-long -O1 -g -Wall -Wdeclaration-after-statement
     -fsanitize=address,undefined -Isrc -I$L/include libretro/tests/reserve_span_test.c \
     src/common/reserve_span.c -o "$OUT/reserve_span_test"
 "$OUT/reserve_span_test"
+# The object table the network libraries keep their objects in: three threads holding and
+# giving back objects while a fourth removes them and puts new ones in; none seen once freed,
+# each freed exactly once
+for san in address,undefined thread; do
+    $CC -std=gnu89 -O1 -g -Wall -Wdeclaration-after-statement -fsanitize=$san -Isrc -I$L/include \
+        libretro/tests/obj_table_test.c src/common/obj_table.c $L/rthreads/rthreads.c \
+        $L/rthreads/retro_eventcount.c $L/features/features_cpu.c -o "$OUT/obj_table_test" -lpthread
+    "$OUT/obj_table_test"
+done
 # The bounded many-to-one queue the keyboard's and the music player's events go through: four
 # threads put into a queue too small for them, every item taken once, whole, in each one's order
 for san in address,undefined thread; do
