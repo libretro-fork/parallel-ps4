@@ -22,6 +22,14 @@ enum class BlobType : u32 {
     ShaderBinary,
     PipelineKey,
     ShaderProfile,
+    DriverCache, // the driver's own pipeline cache (vkGetPipelineCacheData)
+};
+
+/// What Close calls first, while the cache still takes blobs: the last word of one that keeps
+/// what it saves in memory until then
+struct CloseHook {
+    void (*func)(void* arg);
+    void* arg;
 };
 
 class DataBase {
@@ -47,6 +55,9 @@ public:
     /// The blob, mapped where it lies; nothing when there is none.
     std::optional<Common::FS::FileView> Load(BlobType type, const std::string& name);
 
+    /// @hook (nullptr: none) called by Close before it closes; it lives until it is cleared.
+    void SetCloseHook(const CloseHook* hook);
+
     /// Calls @func with each blob of @type, lent until it returns.
     void ForEachBlob(BlobType type, const std::function<void(std::span<const u8> data)>& func);
 
@@ -57,6 +68,7 @@ private:
     sthread* io_worker{};
     std::filesystem::path cache_path{};
     retro_atomic_int_t opened{};
+    retro_atomic_ptr_t close_hook{};
 };
 
 } // namespace Storage

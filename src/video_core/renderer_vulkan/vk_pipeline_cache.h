@@ -13,6 +13,7 @@
 #include "shader_recompiler/profile.h"
 #include "shader_recompiler/recompiler.h"
 #include "shader_recompiler/specialization.h"
+#include "video_core/cache_storage.h"
 #include "video_core/renderer_vulkan/vk_compute_pipeline.h"
 #include "video_core/renderer_vulkan/vk_graphics_pipeline.h"
 #include "video_core/renderer_vulkan/vk_resource_pool.h"
@@ -98,6 +99,10 @@ public:
 
     void WarmUp();
     void Sync();
+    /// The driver's pipeline cache, made from what was kept of it if it is this device's
+    void CreateDriverCache(bool from_disk);
+    /// The driver's pipeline cache handed to the disk cache, to be written as it is
+    void SaveDriverCache();
 
     bool LoadComputePipeline(Serialization::Archive& ar);
     bool LoadGraphicsPipeline(Serialization::Archive& ar);
@@ -212,6 +217,10 @@ private:
     GraphicsPipelineKey graphics_key{};
     ComputePipelineKey compute_key{};
     u32 num_new_pipelines{}; // new pipelines added to the cache since the game start
+    // The compiler thread's graphics pipelines since the driver's cache was last saved
+    u32 driver_cache_unsaved{};
+    // Saves the driver's cache as the disk cache closes
+    Storage::CloseHook driver_cache_hook{};
 };
 
 } // namespace Vulkan

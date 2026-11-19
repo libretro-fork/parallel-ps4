@@ -94,6 +94,12 @@ for san in address,undefined thread; do
         -fno-omit-frame-pointer -fsanitize=$san -isystem externals/vulkan-headers/include -Isrc \
         libretro/tests/vk_heap_test.c src/video_core/renderer_vulkan/vk_heap.c -o "$OUT/$name"
     "$OUT/$name"
+    # The driver's kept pipeline cache: whose it is, read from its header
+    name=pipeline_cache_blob_test-$(echo $san | tr , -)
+    $CC -std=c89 -pedantic -O1 -g -Wall -Wdeclaration-after-statement -Wno-long-long \
+        -fno-omit-frame-pointer -fsanitize=$san -Isrc libretro/tests/pipeline_cache_blob_test.c \
+        src/video_core/renderer_vulkan/pipeline_cache_blob.c -o "$OUT/$name"
+    "$OUT/$name"
 done
 # The heap on a real device (lavapipe where there is no GPU), with the validation layer when
 # it is installed; skipped with no Vulkan

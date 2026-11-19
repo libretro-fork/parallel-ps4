@@ -366,6 +366,9 @@ void PipelineCache::WarmUp() {
         return;
     }
 
+    // The pipelines loaded below are made into the driver's cache as it was kept
+    CreateDriverCache(true);
+
     u32 num_pipelines{};
     u32 num_total_pipelines{};
 

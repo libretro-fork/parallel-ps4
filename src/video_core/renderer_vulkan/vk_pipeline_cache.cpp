@@ -18,6 +18,7 @@
 #include "video_core/amdgpu/sample_locs.h"
 #include "video_core/cache_storage.h"
 #include "video_core/renderer_vulkan/liverpool_to_vk.h"
+#include "video_core/renderer_vulkan/pipeline_cache_blob.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_pipeline_serialization.h"
 #include "video_core/renderer_vulkan/vk_scheduler.h"
@@ -425,11 +426,16 @@ PipelineCache::PipelineCache(const Instance& instance_, Scheduler& scheduler_,
         });
     }
     WarmUp();
-
-    auto [cache_result, cache] = instance.GetDevice().createPipelineCacheUnique({});
-    ASSERT_MSG(cache_result == vk::Result::eSuccess, "Failed to create pipeline cache: {}",
-               vk::to_string(cache_result));
-    pipeline_cache = std::move(cache);
+    if (!pipeline_cache) {
+        CreateDriverCache(false);
+    }
+    // What the driver built is kept for the next start, written as the disk cache closes (the
+    // emulator's process is ended then, and this cache with it)
+    if (Storage::DataBase::Instance().IsOpened()) {
+        driver_cache_hook = {
+            [](void* self) { static_cast<PipelineCache*>(self)->SaveDriverCache(); }, this};
+        Storage::DataBase::Instance().SetCloseHook(&driver_cache_hook);
+    }
 
     async_compile = emu_settings_get_async_shaders();
     mpsc_stack_init(&compile_jobs);
@@ -441,6 +447,7 @@ PipelineCache::PipelineCache(const Instance& instance_, Scheduler& scheduler_,
 }
 
 PipelineCache::~PipelineCache() {
+    Storage::DataBase::Instance().SetCloseHook(nullptr);
     stop_thread_request(&compiler);
     retro_eventcount_notify(&compile_jobs_ec);
     stop_thread_join(&compiler);
@@ -472,6 +479,49 @@ PipelineCache::~PipelineCache() {
     ptr_table_free(&graphics_pipelines);
     ptr_table_free(&compute_pipelines);
     ptr_table_free(&program_cache);
+}
+
+void PipelineCache::CreateDriverCache(bool from_disk) {
+    const auto device = instance.GetDevice();
+    if (from_disk) {
+        // Mapped, and handed to the driver where it lies
+        const auto kept =
+            Storage::DataBase::Instance().Load(Storage::BlobType::DriverCache, "driver");
+        if (kept && pipeline_cache_blob_fits(kept->data(), kept->size(), instance.GetVendorID(),
+                                             instance.GetDeviceID(),
+                                             instance.GetPipelineCacheUUID().data())) {
+            const vk::PipelineCacheCreateInfo info{
+                .initialDataSize = kept->size(),
+                .pInitialData = kept->data(),
+            };
+            auto [result, cache] = device.createPipelineCacheUnique(info);
+            if (result == vk::Result::eSuccess) {
+                LOG_INFO(Render_Vulkan, "Driver pipeline cache: {} bytes kept", kept->size());
+                pipeline_cache = std::move(cache);
+                return;
+            }
+            LOG_WARNING(Render_Vulkan, "Driver pipeline cache not taken: {}",
+                        vk::to_string(result));
+        } else if (kept) {
+            LOG_INFO(Render_Vulkan, "Driver pipeline cache of another GPU or driver: not taken");
+        }
+    }
+    auto [result, cache] = device.createPipelineCacheUnique({});
+    ASSERT_MSG(result == vk::Result::eSuccess, "Failed to create pipeline cache: {}",
+               vk::to_string(result));
+    pipeline_cache = std::move(cache);
+}
+
+void PipelineCache::SaveDriverCache() {
+    if (!pipeline_cache) {
+        return;
+    }
+    // The driver's cache is its own to lock: read while pipelines are made into it
+    auto [result, data] = instance.GetDevice().getPipelineCacheData(*pipeline_cache);
+    if (result != vk::Result::eSuccess || data.empty()) {
+        return;
+    }
+    Storage::DataBase::Instance().Save(Storage::BlobType::DriverCache, "driver", std::move(data));
 }
 
 static int MatchGraphicsKey(const void* pipeline, const void* key) {
@@ -1070,6 +1120,11 @@ void PipelineCache::Submit(CompileJob* job) {
     retro_eventcount_notify(&compile_jobs_ec);
 }
 
+// Graphics pipelines the compiler thread makes before the driver's cache is kept again, once it
+// has nothing left to compile: often enough that little is lost to a process ended without a
+// close, seldom enough that a cache of megabytes is not written for each pipeline
+static constexpr u32 DriverCacheSaveAfter = 64;
+
 void PipelineCache::CompilerThread() {
     thread_name_set("shadPS4:ShaderCompiler");
     while (!stop_thread_stopping(&compiler)) {
@@ -1079,6 +1134,14 @@ void PipelineCache::CompilerThread() {
             if (stop_thread_stopping(&compiler)) {
                 retro_eventcount_cancel_wait(&compile_jobs_ec);
                 break;
+            }
+            // Nothing left to compile: what the driver built since its cache was last kept is
+            // kept now, off the game's threads, should the process end without a close
+            if (driver_cache_unsaved >= DriverCacheSaveAfter) {
+                retro_eventcount_cancel_wait(&compile_jobs_ec);
+                driver_cache_unsaved = 0;
+                SaveDriverCache();
+                continue;
             }
             retro_eventcount_commit_wait(&compile_jobs_ec, key);
             continue;
@@ -1198,6 +1261,7 @@ void PipelineCache::RunJobOn(CompileJob& job, const Shader::ShaderParams& params
         job.pipeline = new GraphicsPipeline(
             instance, scheduler, desc_heap, profile, job.key, *pipeline_cache, stage_ptrs,
             job.runtimes, job.fetch ? &*job.fetch : nullptr, job.modules, job.sdata, false);
+        ++driver_cache_unsaved;
         for (auto& info : job.stage_infos) {
             info.snapshot = nullptr;
         }

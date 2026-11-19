@@ -35,8 +35,17 @@ struct Request {
 mpsc_stack_t g_pending;
 retro_eventcount_t g_work;
 retro_atomic_int_t g_stop{};
-// Saves between their check of DataBase::opened and their push, for Close to wait out
+// Saves between their check of DataBase::opened and their push, for Close to wait out; the
+// last of them to leave wakes it
 retro_atomic_int_t g_saving{};
+retro_eventcount_t g_saved;
+
+// A Save leaves: the last one out wakes a Close waiting for it
+void LeaveSave() {
+    if (retro_atomic_fetch_sub_int(&g_saving, 1) == 1) {
+        retro_eventcount_notify(&g_saved);
+    }
+}
 
 } // namespace
 
@@ -53,6 +62,9 @@ constexpr std::string GetBlobFileExtension(BlobType type) {
     }
     case BlobType::ShaderProfile: {
         return "bin";
+    }
+    case BlobType::DriverCache: {
+        return "vkc";
     }
     default:
         UNREACHABLE();
@@ -134,6 +146,7 @@ void DataBase::Open() {
 
     mpsc_stack_init(&g_pending);
     retro_eventcount_init(&g_work);
+    retro_eventcount_init(&g_saved);
     retro_atomic_store_relaxed_int(&g_stop, 0);
     io_worker = sthread_create(ProcessIO, this);
     (void)retro_atomic_exchange_int(&opened, io_worker != nullptr);
@@ -156,11 +169,23 @@ void DataBase::Close() {
         return;
     }
 
-    // No Save gets past its check after this; wait out the ones already past it (a few
-    // instructions each), then let the writer finish what was pushed and go.
+    // Its last word, while Saves still go through
+    if (const auto* hook =
+            static_cast<const CloseHook*>(retro_atomic_exchange_ptr(&close_hook, nullptr))) {
+        hook->func(hook->arg);
+    }
+
+    // No Save gets past its check after this; wait for the ones already past it (a few
+    // instructions each) to leave, woken by the last, then let the writer finish what was
+    // pushed and go.
     (void)retro_atomic_exchange_int(&opened, 0);
-    while (static_cast<u32>(retro_atomic_load_seq_cst_int(&g_saving)) != 0) {
-        sthread_yield();
+    for (;;) {
+        const int key = retro_eventcount_prepare_wait(&g_saved);
+        if (retro_atomic_load_seq_cst_int(&g_saving) == 0) {
+            retro_eventcount_cancel_wait(&g_saved);
+            break;
+        }
+        retro_eventcount_commit_wait(&g_saved, key);
     }
     retro_atomic_store_release_int(&g_stop, 1);
     retro_eventcount_notify(&g_work);
@@ -174,14 +199,18 @@ bool DataBase::Push(BlobType type, std::string&& name, std::vector<u8>&& bytes,
                     std::vector<u32>&& words) {
     retro_atomic_fetch_add_int(&g_saving, 1);
     if (retro_atomic_load_seq_cst_int(&opened) == 0) {
-        retro_atomic_fetch_sub_int(&g_saving, 1);
+        LeaveSave();
         return false;
     }
     auto* request = new Request{{}, type, std::move(name), std::move(bytes), std::move(words)};
     mpsc_stack_push(&g_pending, &request->node);
-    retro_atomic_fetch_sub_int(&g_saving, 1);
+    LeaveSave();
     retro_eventcount_notify(&g_work);
     return true;
+}
+
+void DataBase::SetCloseHook(const CloseHook* hook) {
+    (void)retro_atomic_exchange_ptr(&close_hook, const_cast<CloseHook*>(hook));
 }
 
 bool DataBase::Save(BlobType type, std::string name, std::vector<u8>&& data) {
