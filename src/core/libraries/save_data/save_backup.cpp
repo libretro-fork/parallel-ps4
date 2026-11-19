@@ -20,6 +20,7 @@
 #include "common/path_util.h"
 #include "common/polyfill_thread.h"
 #include "common/thread_name.h"
+#include "core/libraries/kernel/time.h"
 
 constexpr std::string_view sce_sys = "sce_sys";               // system folder inside save
 constexpr std::string_view backup_dir = "sce_backup";         // backup folder
@@ -145,7 +146,13 @@ static void BackupThreadBody() {
                 }
             }
         });
-        std::this_thread::sleep_for(std::chrono::seconds(5)); // Don't backup too often
+        // Don't backup too often: five seconds of the game's time, or until the thread is
+        // told to stop
+        Libraries::Kernel::GameWait(
+            &g_backup_queued, Libraries::Kernel::GameDeadlineIn(5'000'000'000ULL), [] {
+                return static_cast<WorkerStatus>(retro_atomic_load_seq_cst_int(&g_backup_status)) ==
+                       WorkerStatus::Stopping;
+            });
     }
     (void)retro_atomic_exchange_int(&g_backup_status, static_cast<int>(WorkerStatus::NotStarted));
 }

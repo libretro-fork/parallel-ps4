@@ -18,6 +18,7 @@
 #include "common/singleton.h"
 #include "common/thread_name.h"
 #include "core/file_sys/fs.h"
+#include "core/libraries/kernel/time.h"
 #include "core/libraries/system/msgdialog_ui.h"
 #include "save_instance.h"
 
@@ -78,7 +79,8 @@ static void PersistMemoryOwned(u32 slot_id) {
             throw std::filesystem::filesystem_error{err.message(), err};
         } catch (const std::filesystem::filesystem_error& e) {
             errMsg = std::string{e.what()};
-            std::this_thread::sleep_for(std::chrono::seconds(1));
+            // A second of the game's time before the next try
+            Libraries::Kernel::GameSleepUntil(Libraries::Kernel::GameDeadlineIn(1'000'000'000));
         }
     }
     const MsgDialog::MsgDialogState dialog{MsgDialog::MsgDialogState::UserState{

@@ -62,46 +62,11 @@ bool Core::Debugger::IsDebuggerAttached() {
 #endif
 }
 
-void Core::Debugger::WaitForDebuggerAttach() {
-    int count = 0;
-    while (!IsDebuggerAttached()) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(200));
-        if (--count <= 0) {
-            count = 10;
-            std::cerr << "Waiting for debugger to attach..." << std::endl;
-        }
-    }
-}
 int Core::Debugger::GetCurrentPid() {
 #if defined(_WIN32)
     return GetCurrentProcessId();
 #elif defined(__APPLE__) || defined(__linux__) || defined(__FreeBSD__)
     return getpid();
-#else
-#error "Unsupported platform"
-#endif
-}
-
-void Core::Debugger::WaitForPid(int pid) {
-#if defined(_WIN32)
-    HANDLE process_handle = OpenProcess(SYNCHRONIZE, FALSE, pid);
-    if (process_handle != nullptr) {
-        std::cerr << "Waiting for process " << pid << " to exit..." << std::endl;
-        WaitForSingleObject(process_handle, INFINITE);
-        CloseHandle(process_handle);
-    }
-#elif defined(__linux__)
-    std::string proc_path = "/proc/" + std::to_string(pid);
-
-    while (path_is_directory(proc_path.c_str())) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(500));
-        std::cerr << "Waiting for process " << pid << " to exit..." << std::endl;
-    }
-#elif defined(__APPLE__) || defined(__FreeBSD__)
-    while (kill(pid, 0) == 0) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(500));
-        std::cerr << "Waiting for process " << pid << " to exit..." << std::endl;
-    }
 #else
 #error "Unsupported platform"
 #endif

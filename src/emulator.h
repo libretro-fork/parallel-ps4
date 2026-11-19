@@ -46,7 +46,6 @@ public:
     [[noreturn]] void Relaunch(std::vector<std::string> args);
 
     const char* executableName;
-    bool waitForDebuggerBeforeRun{false};
 
 private:
     void LoadSystemModules(const std::string& game_serial);

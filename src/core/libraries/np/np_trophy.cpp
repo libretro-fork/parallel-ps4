@@ -12,6 +12,7 @@
 #include "common/slot_vector.h"
 #include "common/xml.h"
 #include "core/emulator_settings.h"
+#include "core/libraries/kernel/time.h"
 #include "core/libraries/libs.h"
 #include "core/libraries/np/np_error.h"
 #include "core/libraries/np/np_handler/np_handler.h"
@@ -1116,8 +1117,10 @@ int PS4_SYSV_ABI sceNpTrophyUnlockTrophy(OrbisNpTrophyContext context, OrbisNpTr
     AddTrophyToQueue(trophy_icon_path, trophy_name, trophy_type);
     if (unlock_platinum) {
         std::thread plat_popup_thread{[=]() {
-            std::this_thread::sleep_for(std::chrono::milliseconds(
-                (s32)emu_settings_get_trophy_notification_duration() * 1000 + 250));
+            // After the first trophy's notification has had its time, the game's
+            Libraries::Kernel::GameSleepUntil(Libraries::Kernel::GameDeadlineIn(
+                (static_cast<u64>(emu_settings_get_trophy_notification_duration()) * 1000 + 250) *
+                1'000'000));
             AddTrophyToQueue(platinum_icon_path, platinum_name, "P");
         }};
         plat_popup_thread.detach();

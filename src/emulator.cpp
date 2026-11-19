@@ -297,9 +297,6 @@ void Emulator::Run(std::filesystem::path file, std::vector<std::string> args,
                    std::vector<std::pair<std::filesystem::path, std::string>> mounts,
                    std::vector<std::string> const& env_vars, bool append_log) {
     thread_name_set("shadPS4:Main");
-    if (waitForDebuggerBeforeRun) {
-        Debugger::WaitForDebuggerAttach();
-    }
 
     if (Common::FS::IsDirectory(file)) {
         file /= "eboot.bin";
@@ -737,10 +734,6 @@ void Emulator::Restart(std::filesystem::path eboot_path,
     if (!MemoryPatcher::patch_file.empty()) {
         args.push_back("--patch");
         args.push_back(MemoryPatcher::patch_file);
-    }
-
-    if (waitForDebuggerBeforeRun) {
-        args.push_back("--wait-for-debugger");
     }
 
     if (guest_args.size() > 0) {

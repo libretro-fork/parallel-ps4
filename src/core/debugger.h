@@ -7,10 +7,6 @@ namespace Core::Debugger {
 
 bool IsDebuggerAttached();
 
-void WaitForDebuggerAttach();
-
 int GetCurrentPid();
-
-void WaitForPid(int pid);
 
 } // namespace Core::Debugger
