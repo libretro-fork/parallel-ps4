@@ -109,6 +109,14 @@ for san in address,undefined thread; do
         -fno-omit-frame-pointer -fsanitize=$san -Isrc libretro/tests/pipeline_cache_blob_test.c \
         src/video_core/renderer_vulkan/pipeline_cache_blob.c -o "$OUT/$name"
     "$OUT/$name"
+    # The pipeline cache's pack: records found again, the last of a name, data 8-aligned, a
+    # record cut short or changed ending the pack there
+    name=blob_pack_test-$(echo $san | tr , -)
+    $CC -std=c89 -pedantic -O1 -g -Wall -Wextra -Wdeclaration-after-statement -Wno-long-long \
+        -Wno-c99-extensions -fno-omit-frame-pointer -fsanitize=$san -Isrc -I$L/include \
+        libretro/tests/blob_pack_test.c src/video_core/blob_pack.c $L/encodings/encoding_xxh3.c \
+        $L/features/features_cpu.c -o "$OUT/$name"
+    "$OUT/$name"
 done
 # The heap on a real device (lavapipe where there is no GPU), with the validation layer when
 # it is installed; skipped with no Vulkan
@@ -412,6 +420,22 @@ ASAN_OPTIONS=detect_leaks=0 "$OUT/pq_output_device_test"
 $CC -std=c89 -pedantic -O1 -g -Wall -Wno-long-long -fsanitize=address,undefined \
     tools/vertex_capture_report.c -o "$OUT/vertex_capture_report" -lm
 ASAN_OPTIONS=detect_leaks=0 "$OUT/vertex_capture_report" --selftest
+# The pack's measuring tool kept building, and run on a folder of loose blobs it makes into a
+# pack: every file a record of it
+$CC -std=gnu89 -O1 -g -Wall -DHAVE_MMAP -fsanitize=address,undefined -Isrc -I$L/include \
+    tools/blob_pack_bench.c src/video_core/blob_pack.c $L/encodings/encoding_xxh3.c \
+    $L/encodings/encoding_utf.c $L/features/features_cpu.c $L/file/retro_dirent.c \
+    $L/file/file_path.c $L/file/file_path_io.c $L/streams/file_stream.c \
+    $L/vfs/vfs_implementation.c $L/compat/compat_strl.c $L/compat/compat_strcasestr.c \
+    $L/string/stdstring.c $L/string/rstrtod.c $L/time/rtime.c -o "$OUT/blob_pack_bench" \
+    -lpthread -lm
+rm -rf "$OUT/blob_pack_bench_in" && mkdir -p "$OUT/blob_pack_bench_in"
+for i in 1 2 3; do
+    printf 'shader %s' $i > "$OUT/blob_pack_bench_in/0x$i.spv"
+    printf 'meta %s' $i > "$OUT/blob_pack_bench_in/0x$i.meta"
+done
+printf 'stamp' > "$OUT/blob_pack_bench_in/build.bin"
+ASAN_OPTIONS=detect_leaks=0 "$OUT/blob_pack_bench" "$OUT/blob_pack_bench_in" "$OUT/blob_pack_bench.pack"
 # The overlays' library against ImGui: the FPS counter's window, layout and glyphs where ImGui
 # put them, the atlas's white texel and baked lines, a notification and a trophy as ImGui drew
 # them, their images' slots freed after; the splash decoded on its thread and fitted as the
