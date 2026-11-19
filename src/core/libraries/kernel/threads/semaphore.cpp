@@ -294,7 +294,7 @@ public:
             : sem{0}, priority{0}, need_count{need_count} {
             // Retrieve calling thread priority for sorting into waiting threads list.
             if (!is_fifo) {
-                priority = thread->attr.prio;
+                priority = thread->Prio();
             }
         }
 

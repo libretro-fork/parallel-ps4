@@ -14,8 +14,9 @@
 #include <retro_atomic.h>
 #include "common/enum.h"
 #include "common/event_count.h"
-#include "common/event_mutex.h"
 #include "common/rw_word.h"
+#include "common/thread_life.h"
+#include "common/word_name.h"
 #include "core/libraries/kernel/sync/semaphore.h"
 #include "core/libraries/kernel/threads/exception.h"
 #include "core/libraries/kernel/time.h"
@@ -360,15 +361,14 @@ struct Pthread {
     static constexpr u32 MaxDeferWaiters = 50;
 
     retro_atomic_int_t tid;
-    // Held across calls (libthr's thread lock): taken here, given back where the thread is
-    // collected
-    // Made by ThreadState::Alloc, and kept for the record's next thread
-    std::unique_ptr<Common::EventMutex> lock;
+    // Where libthr's thread lock was, kept for the record's layout: what it guarded is in
+    // atomic words now (life, sched_prio, sched_policy, affinity, suspended, name)
+    void* unused_lock;
     u32 cycle;
     retro_atomic_int_t locklevel;
     retro_atomic_int_t critical_count;
     int sigblock;
-    int refcount;
+    int unused_refcount; // in life now
     PthreadEntryFunc start_routine;
     void* arg;
     std::unique_ptr<Core::NativeThread> native_thr;
@@ -400,7 +400,8 @@ struct Pthread {
     u32 magic;
     int report_events;
     int event_mask;
-    std::string name;
+    // Read by any thread while another may rename it (word_name.c)
+    word_name_t name;
     WakeSemaphore wake_sema{0};
     SleepQueue* sleepqueue;
     void* wchan;
@@ -409,7 +410,8 @@ struct Pthread {
     bool has_user_waiters;
     int nwaiter_defer;
     WakeSemaphore* defer_waiters[MaxDeferWaiters]{};
-    Pthread* join_target{};
+    // The thread it is joining (Pthread*), read by a thread cancelling it
+    retro_atomic_ptr_t join_target{};
     /// Notified when the thread has ended, and when its joiner is cancelled: the joiner parks
     /// here
     Common::EventCount join_wait;
@@ -439,6 +441,15 @@ struct Pthread {
     Pthread* sq_prev{};
     Pthread* sq_next{};
 
+    // Ended, detached, joined, and the holds on its record, in one word (thread_life.c)
+    retro_atomic_int_t life{};
+    // Its scheduling, set by any thread: attr's prio and sched_policy are what it was made with
+    retro_atomic_int_t sched_prio{};
+    retro_atomic_int_t sched_policy{};
+    // The CPUs it may run on (Cpuset::bits), 0 if never set: all
+    retro_atomic_64_t affinity{};
+    retro_atomic_int_t suspended{};
+
     bool IsSignalBlocked(s32 sig) const;
     void QueueSignal(s32 sig);
     bool ConsumeSignal(s32 sig);
@@ -457,8 +468,12 @@ struct Pthread {
                retro_atomic_load_acquire_int(&critical_count) > 0;
     }
 
-    bool ShouldCollect() const noexcept {
-        return refcount == 0 && state == PthreadState::Dead && True(flags & ThreadFlags::Detached);
+    int Prio() const noexcept {
+        return retro_atomic_load_acquire_int(const_cast<retro_atomic_int_t*>(&sched_prio));
+    }
+    SchedPolicy Policy() const noexcept {
+        return static_cast<SchedPolicy>(
+            retro_atomic_load_acquire_int(const_cast<retro_atomic_int_t*>(&sched_policy)));
     }
 
     bool ShouldCancel() const noexcept {

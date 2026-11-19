@@ -225,7 +225,7 @@ int PthreadCond::Signal(Pthread* thread) {
         if (ret != ORBIS_OK) {
             return ret;
         }
-        thread->lock->unlock();
+        thread_state->RefDelete(thread);
     }
 
     SleepqLock(this);

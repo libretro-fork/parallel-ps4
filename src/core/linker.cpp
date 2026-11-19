@@ -574,7 +574,7 @@ void Linker::Execute(const std::vector<std::string>& args) {
 
     main_thread.Run([this, module, &args, has_libcinternal] {
         if (Libraries::Kernel::g_curthread) {
-            Libraries::Kernel::g_curthread->name = "Game:Main";
+            word_name_set(&Libraries::Kernel::g_curthread->name, "Game:Main");
         }
         thread_name_set("Game:Main");
         // The game's main thread: counted running by the game's time (Kernel::Thread does not

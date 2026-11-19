@@ -36,12 +36,16 @@ struct ThreadState {
 
     void Collect(Pthread* curthread);
 
-    void TryCollect(Pthread* thread);
+    /// @thread's life said it is to be collected (ended, detached, held by no one): off the
+    /// live list and onto the list to collect, once
+    void Retire(Pthread* thread);
 
     Pthread* Alloc(Pthread* curthread);
 
     void Free(Pthread* curthread, Pthread* thread);
 
+    /// A hold on @thread's record if it is a live thread's (and not ended, unless
+    /// @include_dead): 0, and the caller gives it back with RefDelete; else an error, no hold
     int FindThread(Pthread* thread, bool include_dead);
 
     int RefAdd(Pthread* thread, bool include_dead);

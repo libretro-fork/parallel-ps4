@@ -435,11 +435,12 @@ void CurrentThreadName(char* out, std::size_t size) {
     using namespace Libraries::Kernel;
     const char* name = thread_name_get();
     std::size_t length = 0;
-    if (g_curthread && !g_curthread->name.empty()) {
+    char guest[WORD_NAME_MAX + 1];
+    if (g_curthread && word_name_get(&g_curthread->name, guest) != 0) {
         const auto result = g_curthread->tcb->tcb_fiber
-                                ? fmt::format_to_n(out, size - 1, "{}@@{}", g_curthread->name,
+                                ? fmt::format_to_n(out, size - 1, "{}@@{}", guest,
                                                    g_curthread->tcb->tcb_fiber->current_fiber->name)
-                                : fmt::format_to_n(out, size - 1, "{}", g_curthread->name);
+                                : fmt::format_to_n(out, size - 1, "{}", guest);
         length = std::min<std::size_t>(result.size, size - 1);
     } else if (*name) {
         length = std::min(std::strlen(name), size - 1);

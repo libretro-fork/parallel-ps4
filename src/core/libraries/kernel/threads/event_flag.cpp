@@ -161,7 +161,7 @@ public:
             .bits = bits,
             .wait_mode = wait_mode,
             .clear_mode = clear_mode,
-            .priority = g_curthread->attr.prio,
+            .priority = g_curthread->Prio(),
         };
 
         constexpr int Waits = 1;

@@ -277,8 +277,8 @@ CORE_SOURCES_CXX += $(addprefix src/video_core/texture_cache/,blit_helper.cpp \
 
 CORE_SOURCES_C :=
 CORE_SOURCES_C += $(addprefix src/common/,audio_stream.c enum_names.c event_latch.c game_clock.c host_thread.c json_util.c key_manager.c \
-	hex_dump.c line_buffer.c node_pool.c patch_catalog.c patch_halve.c patch_index.c pin_gate.c ptr_table.c range_runs.c reserve_span.c run_once.c rw_word.c slot_table.c stop_thread.c thread_name.c \
-	u64_map.c vblank_clock.c)
+	hex_dump.c line_buffer.c node_pool.c patch_catalog.c patch_halve.c patch_index.c pin_gate.c ptr_table.c range_runs.c reserve_span.c run_once.c rw_word.c slot_table.c stop_thread.c thread_life.c thread_name.c \
+	u64_map.c vblank_clock.c word_name.c)
 CORE_SOURCES_C += $(addprefix src/core/,emulator_settings.c user_manager.c)
 CORE_SOURCES_C += $(addprefix src/core/libraries/avplayer/,avplayer_clock.c avplayer_fsm.c)
 CORE_SOURCES_C += $(addprefix src/core/libraries/audio3d/,audio3d_port.c)

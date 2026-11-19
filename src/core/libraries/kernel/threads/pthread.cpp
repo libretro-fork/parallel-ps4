@@ -82,16 +82,16 @@ static void ExitThread() {
     auto* thread_state = ThrState::Instance();
     ASSERT(static_cast<s32>(retro_atomic_fetch_sub_int(&thread_state->active_threads, 1)) != 1);
 
-    curthread->lock->lock();
     curthread->state = PthreadState::Dead;
     ASSERT(False(curthread->flags & ThreadFlags::NeedSuspend));
 
     /*
-     * Thread was created with initial refcount 1, we drop the
-     * reference count to allow it to be garbage collected.
+     * Thread was created held once by itself: that hold goes, and it may be
+     * collected (thread_life.c).
      */
-    curthread->refcount--;
-    thread_state->TryCollect(curthread); /* thread lock released */
+    if (thread_life_end(&curthread->life)) {
+        thread_state->Retire(curthread);
+    }
 
     if (IsGameThread()) {
         GameThreadIdle();
@@ -166,34 +166,34 @@ static int JoinThread(PthreadT pthread, void** thread_return, const OrbisKernelT
         return POSIX_ESRCH;
     }
 
+    // Held until the join ends: the record is not collected or reused under it
     int ret = 0;
-    if (True(pthread->flags & ThreadFlags::Detached)) {
+    switch (thread_life_join(&pthread->life)) {
+    case THREAD_LIFE_DETACHED_ALREADY:
         ret = POSIX_EINVAL;
-    } else if (pthread->joiner != nullptr) {
+        break;
+    case THREAD_LIFE_JOINED_ALREADY:
         /* Multiple joiners are not supported. */
         ret = POSIX_ENOTSUP;
+        break;
+    default:
+        break;
     }
     if (ret) {
-        pthread->lock->unlock();
+        thread_state->RefDelete(pthread);
         return ret;
     }
     /* Set the running thread to be the joiner: */
     pthread->joiner = curthread;
-    {
-        std::scoped_lock lock{*curthread->lock};
-        curthread->join_target = pthread;
-    }
-    pthread->lock->unlock();
+    retro_atomic_store_release_ptr(&curthread->join_target, pthread);
 
+    // Given up (timed out, or cancelled while it waits): no longer joining, nor holding it
     const auto backout_join = [](void* arg) PS4_SYSV_ABI {
         auto* pthread2 = static_cast<Pthread*>(arg);
-        Pthread* current = g_curthread;
-        {
-            std::scoped_lock lk{*current->lock};
-            current->join_target = nullptr;
-        }
-        std::scoped_lock lk{*pthread2->lock};
+        retro_atomic_store_release_ptr(&g_curthread->join_target, nullptr);
         pthread2->joiner = nullptr;
+        thread_life_unjoin(&pthread2->life);
+        ThrState::Instance()->RefDelete(pthread2);
     };
 
     PthreadCleanup cup{curthread->cleanup, backout_join, pthread, 0};
@@ -221,10 +221,7 @@ static int JoinThread(PthreadT pthread, void** thread_return, const OrbisKernelT
     }
 
     (void)retro_atomic_exchange_int(&curthread->cancel_point, 0);
-    {
-        std::scoped_lock lock{*curthread->lock};
-        curthread->join_target = nullptr;
-    }
+    retro_atomic_store_release_ptr(&curthread->join_target, nullptr);
     curthread->cleanup = cup.prev;
 
     if (ret == POSIX_ETIMEDOUT) {
@@ -233,10 +230,12 @@ static int JoinThread(PthreadT pthread, void** thread_return, const OrbisKernelT
     }
 
     void* tmp = pthread->ret;
-    pthread->lock->lock();
     pthread->flags |= ThreadFlags::Detached;
     pthread->joiner = nullptr;
-    thread_state->TryCollect(pthread); /* thread lock released */
+    if (thread_life_joined(&pthread->life)) {
+        thread_state->Retire(pthread);
+    }
+    thread_state->RefDelete(pthread);
     if (thread_return != nullptr) {
         *thread_return = tmp;
     }
@@ -268,16 +267,14 @@ int PS4_SYSV_ABI posix_pthread_detach(PthreadT pthread) {
         return ret;
     }
 
-    /* Check if the thread is already detached or has a joiner. */
-    if (True(pthread->flags & ThreadFlags::Detached) || pthread->joiner != nullptr) {
-        pthread->lock->unlock();
-        return POSIX_EINVAL;
+    /* Not if it is already detached or has a joiner. */
+    int collect = 0;
+    const int detached = thread_life_detach(&pthread->life, &collect);
+    if (collect) {
+        thread_state->Retire(pthread);
     }
-
-    /* Flag the thread as detached. */
-    pthread->flags |= ThreadFlags::Detached;
-    thread_state->TryCollect(pthread); /* thread lock released */
-    return 0;
+    thread_state->RefDelete(pthread);
+    return detached == THREAD_LIFE_OK ? 0 : POSIX_EINVAL;
 }
 
 #ifndef _WIN32
@@ -293,7 +290,11 @@ static void RunThread(void* arg) {
     // One of the game's threads: the game's time counts it running until it waits or ends
     SetGameThread(true);
     game_clock_busy(GameClock());
-    thread_name_set(curthread->name.c_str());
+    {
+        char name[WORD_NAME_MAX + 1];
+        word_name_get(&curthread->name, name);
+        thread_name_set(name);
+    }
     Core::InitializeTLS();
 
     curthread->native_thr->Initialize();
@@ -311,8 +312,8 @@ static void RunThread(void* arg) {
             reinterpret_cast<const void*>(curthread->start_routine))) {
         const std::array<u64, 1> start_arguments{reinterpret_cast<u64>(curthread->arg)};
         const auto guest_result = Core::GuestCpu::RunGuestFunctionOrAbort(
-            reinterpret_cast<void*>(curthread->start_routine), start_arguments,
-            "pthread start", reinterpret_cast<VAddr>(stack));
+            reinterpret_cast<void*>(curthread->start_routine), start_arguments, "pthread start",
+            reinterpret_cast<VAddr>(stack));
         ret = reinterpret_cast<void*>(guest_result);
     } else {
         ret = curthread->start_routine(curthread->arg);
@@ -347,8 +348,8 @@ int PS4_SYSV_ABI posix_pthread_create_name_np(PthreadT* thread, const PthreadAtt
         } else {
             new_thread->attr.flags &= ~PthreadAttrFlags::ScopeSystem;
         }
-        new_thread->attr.prio = curthread->attr.prio;
-        new_thread->attr.sched_policy = curthread->attr.sched_policy;
+        new_thread->attr.prio = curthread->Prio();
+        new_thread->attr.sched_policy = curthread->Policy();
     }
 
     static retro_atomic_int_t TidCounter{1};
@@ -379,21 +380,27 @@ int PS4_SYSV_ABI posix_pthread_create_name_np(PthreadT* thread, const PthreadAtt
 
     auto* memory = Core::Memory::Instance();
     if (name && memory->IsValidMapping(reinterpret_cast<VAddr>(name))) {
-        new_thread->name = name;
+        word_name_set(&new_thread->name, name);
     } else {
-        new_thread->name = fmt::format(
-            "Thread{}", static_cast<s32>(retro_atomic_load_seq_cst_int(&new_thread->tid)));
+        char numbered[WORD_NAME_MAX + 1];
+        snprintf(numbered, sizeof(numbered), "Thread%d",
+                 static_cast<s32>(retro_atomic_load_seq_cst_int(&new_thread->tid)));
+        word_name_set(&new_thread->name, numbered);
     }
+    retro_atomic_store_release_int(&new_thread->sched_prio, new_thread->attr.prio);
+    retro_atomic_store_release_int(&new_thread->sched_policy,
+                                   static_cast<int>(new_thread->attr.sched_policy));
 
     ASSERT(new_thread->attr.suspend == 0);
     new_thread->state = PthreadState::Running;
 
-    if (True(new_thread->attr.flags & PthreadAttrFlags::Detached)) {
+    const bool detached = True(new_thread->attr.flags & PthreadAttrFlags::Detached);
+    if (detached) {
         new_thread->flags |= ThreadFlags::Detached;
     }
 
-    /* Add the new thread. */
-    new_thread->refcount = 1;
+    /* Add the new thread, held once by itself. */
+    thread_life_init(&new_thread->life, detached ? 1 : 0);
     thread_state->Link(curthread, new_thread);
 
     /* Return thread pointer eariler so that new thread can use it. */
@@ -427,9 +434,10 @@ int PS4_SYSV_ABI posix_pthread_getthreadid_np() {
 }
 
 int PS4_SYSV_ABI posix_pthread_getname_np(PthreadT thread, char* name) {
+    char current[WORD_NAME_MAX + 1];
     if (thread == g_curthread) {
-        // Can skip locking and reference logic if thread is curthread.
-        std::memcpy(name, thread->name.data(), std::min<size_t>(thread->name.size(), 32));
+        // Can skip reference logic if thread is curthread.
+        std::memcpy(name, current, word_name_get(&thread->name, current));
         return ORBIS_OK;
     }
 
@@ -439,16 +447,8 @@ int PS4_SYSV_ABI posix_pthread_getname_np(PthreadT thread, char* name) {
         return POSIX_ESRCH;
     }
 
-    // Lock the thread.
-    thread->lock->lock();
-
-    // Get the thread name
-    if (thread->state != PthreadState::Dead) {
-        std::memcpy(name, thread->name.data(), std::min<size_t>(thread->name.size(), 32));
-    }
-
-    // Unlock and remove reference.
-    thread->lock->unlock();
+    // Held as a live thread: its name, as it is now
+    std::memcpy(name, current, word_name_get(&thread->name, current));
     thread_state->RefDelete(thread);
     return ORBIS_OK;
 }
@@ -523,7 +523,7 @@ int PS4_SYSV_ABI posix_pthread_once(PthreadOnce* once_control,
 #ifdef SHADPS4_ENABLE_FEX_GUEST_CPU
     if (Core::GuestCpu::IsGuestFunctionAddress(reinterpret_cast<const void*>(init_routine))) {
         Core::GuestCpu::RunGuestFunctionOrAbort(reinterpret_cast<void*>(init_routine),
-                                                 "pthread once");
+                                                "pthread once");
     } else {
         init_routine();
     }
@@ -562,8 +562,8 @@ int PS4_SYSV_ABI posix_pthread_rename_np(PthreadT thread, const char* name) {
 
     if (thread == g_curthread) {
         // If the requested thread is curthread, skip locking and reference logic.
-        thread->name = name ? name : std::string{""};
-        thread_name_set(thread->name.c_str());
+        word_name_set(&thread->name, name);
+        thread_name_set(name ? name : "");
         if (name && False(thread->attr.flags & PthreadAttrFlags::StackUser)) {
             VAddr stack_addr = std::bit_cast<VAddr>(thread->attr.stackaddr_attr);
             memory->NameVirtualRange(stack_addr, thread->attr.stacksize_attr, name);
@@ -576,22 +576,13 @@ int PS4_SYSV_ABI posix_pthread_rename_np(PthreadT thread, const char* name) {
         return POSIX_ESRCH;
     }
 
-    // Lock the thread.
-    thread->lock->lock();
-
-    // Set the thread and thread stack names.
-    if (thread->state != PthreadState::Dead) {
-        // Another thread's: the name the log shows (thread->name); the system's name of the
-        // host thread is its own to set (thread_name_set names only the caller)
-        thread->name = name ? name : std::string{""};
-        if (name && False(thread->attr.flags & PthreadAttrFlags::StackUser)) {
-            VAddr stack_addr = std::bit_cast<VAddr>(thread->attr.stackaddr_attr);
-            memory->NameVirtualRange(stack_addr, thread->attr.stacksize_attr, name);
-        }
+    // Held as a live thread: the name the log shows; the system's name of the host thread is
+    // its own to set (thread_name_set names only the caller)
+    word_name_set(&thread->name, name);
+    if (name && False(thread->attr.flags & PthreadAttrFlags::StackUser)) {
+        VAddr stack_addr = std::bit_cast<VAddr>(thread->attr.stackaddr_attr);
+        memory->NameVirtualRange(stack_addr, thread->attr.stacksize_attr, name);
     }
-
-    // Unlock and remove reference.
-    thread->lock->unlock();
     thread_state->RefDelete(thread);
     return ORBIS_OK;
 }
@@ -611,9 +602,8 @@ int PS4_SYSV_ABI posix_pthread_getschedparam(PthreadT pthread, SchedPolicy* poli
          * Avoid searching the thread list when it is the current
          * thread.
          */
-        std::scoped_lock lk{*g_curthread->lock};
-        *policy = g_curthread->attr.sched_policy;
-        param->sched_priority = g_curthread->attr.prio;
+        *policy = g_curthread->Policy();
+        param->sched_priority = g_curthread->Prio();
         return 0;
     }
     auto* thread_state = ThrState::Instance();
@@ -621,10 +611,8 @@ int PS4_SYSV_ABI posix_pthread_getschedparam(PthreadT pthread, SchedPolicy* poli
     if (int ret = thread_state->RefAdd(pthread, /*include dead*/ false); ret != 0) {
         return ret;
     }
-    pthread->lock->lock();
-    *policy = pthread->attr.sched_policy;
-    param->sched_priority = pthread->attr.prio;
-    pthread->lock->unlock();
+    *policy = pthread->Policy();
+    param->sched_priority = pthread->Prio();
     thread_state->RefDelete(pthread);
     return 0;
 }
@@ -636,23 +624,19 @@ int PS4_SYSV_ABI posix_pthread_setschedparam(PthreadT pthread, SchedPolicy polic
     }
 
     auto* thread_state = ThrState::Instance();
-    if (pthread == g_curthread) {
-        g_curthread->lock->lock();
-    } else if (int ret = thread_state->FindThread(pthread, /*include dead*/ false); ret != 0) {
-        return ret;
-    }
-
-    if (pthread->attr.sched_policy == policy &&
-        (policy == SchedPolicy::Other || pthread->attr.prio == param->sched_priority)) {
-        pthread->attr.prio = param->sched_priority;
-        pthread->lock->unlock();
-        return 0;
+    const bool self = pthread == g_curthread;
+    if (!self) {
+        if (int ret = thread_state->FindThread(pthread, /*include dead*/ false); ret != 0) {
+            return ret;
+        }
     }
 
     // TODO: _thr_setscheduler
-    pthread->attr.sched_policy = policy;
-    pthread->attr.prio = param->sched_priority;
-    pthread->lock->unlock();
+    retro_atomic_store_release_int(&pthread->sched_policy, static_cast<int>(policy));
+    retro_atomic_store_release_int(&pthread->sched_prio, param->sched_priority);
+    if (!self) {
+        thread_state->RefDelete(pthread);
+    }
     return 0;
 }
 
@@ -680,15 +664,8 @@ int PS4_SYSV_ABI posix_pthread_setprio(PthreadT thread, int prio) {
         }
     }
 
-    thread->lock->lock();
-    if (thread->attr.sched_policy == SchedPolicy::Other || thread->attr.prio == prio) {
-        thread->attr.prio = prio;
-    } else {
-        // TODO: _thr_setscheduler
-        thread->attr.prio = prio;
-    }
-
-    thread->lock->unlock();
+    // TODO: _thr_setscheduler
+    retro_atomic_store_release_int(&thread->sched_prio, prio);
     if (thread != g_curthread) {
         thread_state->RefDelete(thread);
     }
@@ -798,7 +775,8 @@ int PS4_SYSV_ABI posix_pthread_cancel(PthreadT thread) {
         return ret;
     }
 
-    Pthread* join_target = thread->join_target;
+    auto* const join_target =
+        static_cast<Pthread*>(retro_atomic_load_acquire_ptr(&thread->join_target));
     bool newly_pending;
     // The joiner looks at this after it opens its wait, so the notify below reaches it
     newly_pending = retro_atomic_exchange_int(&thread->cancel_pending, 1) == 0;
@@ -817,7 +795,7 @@ int PS4_SYSV_ABI posix_pthread_cancel(PthreadT thread) {
     const bool cancel_self = thread == g_curthread &&
                              (retro_atomic_load_seq_cst_int(&thread->cancel_async) != 0) &&
                              retro_atomic_load_seq_cst_int(&thread->cancel_point) == 0;
-    thread->lock->unlock();
+    thread_state->RefDelete(thread);
 
     if (cancel_self) {
         PthreadTestCancel();
@@ -1224,18 +1202,26 @@ int PS4_SYSV_ABI posix_pthread_getaffinity_np(PthreadT thread, size_t cpusetsize
     }
 
     auto* thread_state = ThrState::Instance();
-    if (thread == g_curthread) {
-        g_curthread->lock->lock();
-    } else if (const auto ret = thread_state->FindThread(thread, /*include dead*/ false);
-               ret != 0) {
-        return ret;
+    const bool self = thread == g_curthread;
+    if (!self) {
+        if (const auto ret = thread_state->FindThread(thread, /*include dead*/ false); ret != 0) {
+            return ret;
+        }
     }
 
-    auto* attr_ptr = &thread->attr;
-    auto ret = posix_pthread_attr_getaffinity_np(&attr_ptr, cpusetsize, cpusetp);
+    // Never set: every CPU
+    const u64 bits = static_cast<u64>(retro_atomic_load_acquire_64(&thread->affinity));
+    if (bits == 0) {
+        memset(cpusetp, -1, cpusetsize);
+    } else {
+        memset(cpusetp, 0, cpusetsize);
+        memcpy(cpusetp, &bits, std::min(cpusetsize, sizeof(bits)));
+    }
 
-    thread->lock->unlock();
-    return ret;
+    if (!self) {
+        thread_state->RefDelete(thread);
+    }
+    return 0;
 }
 
 int PS4_SYSV_ABI posix_pthread_setaffinity_np(PthreadT thread, size_t cpusetsize,
@@ -1245,21 +1231,21 @@ int PS4_SYSV_ABI posix_pthread_setaffinity_np(PthreadT thread, size_t cpusetsize
     }
 
     auto* thread_state = ThrState::Instance();
-    if (thread == g_curthread) {
-        g_curthread->lock->lock();
-    } else if (const auto ret = thread_state->FindThread(thread, /*include dead*/ false);
-               ret != 0) {
-        return ret;
+    const bool self = thread == g_curthread;
+    if (!self) {
+        if (const auto ret = thread_state->FindThread(thread, /*include dead*/ false); ret != 0) {
+            return ret;
+        }
     }
 
-    auto* attr_ptr = &thread->attr;
-    auto ret = posix_pthread_attr_setaffinity_np(&attr_ptr, cpusetsize, cpusetp);
+    Cpuset cpuset{};
+    memcpy(&cpuset.bits, cpusetp, std::min(cpusetsize, sizeof(cpuset.bits)));
+    retro_atomic_store_release_64(&thread->affinity, static_cast<s64>(cpuset.bits));
+    const int ret = thread->SetAffinity(&cpuset);
 
-    if (ret == ORBIS_OK) {
-        ret = thread->SetAffinity(thread->attr.cpuset);
+    if (!self) {
+        thread_state->RefDelete(thread);
     }
-
-    thread->lock->unlock();
     return ret;
 }
 
@@ -1285,8 +1271,8 @@ int PS4_SYSV_ABI posix_pthread_suspend_user_context_np(PthreadT thread) {
     if (int ret = thread_state->FindThread(thread, false); ret != 0) {
         return ret;
     }
-    thread->flags |= ThreadFlags::Suspended;
-    thread->lock->unlock();
+    retro_atomic_store_release_int(&thread->suspended, 1);
+    thread_state->RefDelete(thread);
 
 #ifdef __APPLE__
     if (thread->native_thr && thread != g_curthread) {
@@ -1328,8 +1314,8 @@ int PS4_SYSV_ABI posix_pthread_resume_user_context_np(PthreadT thread) {
     if (int ret = thread_state->FindThread(thread, false); ret != 0) {
         return ret;
     }
-    thread->flags &= ~ThreadFlags::Suspended;
-    thread->lock->unlock();
+    retro_atomic_store_release_int(&thread->suspended, 0);
+    thread_state->RefDelete(thread);
 
 #ifdef __APPLE__
     if (thread->native_thr && thread != g_curthread) {
@@ -1370,7 +1356,7 @@ int PS4_SYSV_ABI posix_pthread_get_user_context_np(PthreadT thread, Ucontext* ct
     const size_t stack_size = thread->attr.stacksize_attr;
     const uintptr_t stack_top = stack_base + stack_size;
     const uintptr_t start_pc = reinterpret_cast<uintptr_t>(thread->start_routine);
-    thread->lock->unlock();
+    thread_state->RefDelete(thread);
 
     std::memset(ctx, 0, sizeof(Ucontext));
 
@@ -1481,7 +1467,7 @@ int PS4_SYSV_ABI posix_pthread_set_user_context_np(PthreadT thread, const Uconte
     if (int ret = thread_state->FindThread(thread, false); ret != 0) {
         return ret;
     }
-    thread->lock->unlock();
+    thread_state->RefDelete(thread);
     return 0;
 }
 

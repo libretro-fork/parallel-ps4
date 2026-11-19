@@ -256,10 +256,12 @@ int PS4_SYSV_ABI posix_pthread_attr_get_np(PthreadT pthread, PthreadAttrT* dstat
         return ret;
     }
     PthreadAttr attr = pthread->attr;
-    if (True(pthread->flags & ThreadFlags::Detached)) {
+    attr.prio = pthread->Prio();
+    attr.sched_policy = pthread->Policy();
+    if (thread_life_is(&pthread->life, THREAD_LIFE_DETACHED)) {
         attr.flags |= PthreadAttrFlags::Detached;
     }
-    pthread->lock->unlock();
+    thread_state->RefDelete(pthread);
     memcpy(dst, &attr, sizeof(PthreadAttr));
     return ret;
 }

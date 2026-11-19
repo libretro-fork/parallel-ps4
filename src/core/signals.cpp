@@ -615,8 +615,10 @@ static void LogOtherGameThreads() {
         if (!got) {
             continue;
         }
+        char thread_name[WORD_NAME_MAX + 1];
+        word_name_get(&thread->name, thread_name);
         LOG_CRITICAL(Debug, "  thread '{}' at {}: rdi={:#x} rsi={:#x} rdx={:#x} rcx={:#x} r8={:#x}",
-                     thread->name, DescribeAddress(ctx.Rip), ctx.Rdi, ctx.Rsi, ctx.Rdx, ctx.Rcx,
+                     thread_name, DescribeAddress(ctx.Rip), ctx.Rdi, ctx.Rsi, ctx.Rdx, ctx.Rcx,
                      ctx.R8);
         if (LogGameCallers(ctx.Rbp, "    ", 1, 6) != 0) {
             continue;
@@ -658,9 +660,11 @@ static LONG WINAPI CrashReport(EXCEPTION_POINTERS* info) noexcept {
         LOG_CRITICAL(Debug, "  {} address {:#x}", kind == 8 ? "executing" : kinds[kind & 1],
                      record.ExceptionInformation[1]);
     }
-    LOG_CRITICAL(Debug, "  thread {} '{}'", GetCurrentThreadId(),
-                 Libraries::Kernel::g_curthread ? Libraries::Kernel::g_curthread->name
-                                                : std::string{"(not a game thread)"});
+    char current_name[WORD_NAME_MAX + 1] = "(not a game thread)";
+    if (Libraries::Kernel::g_curthread) {
+        word_name_get(&Libraries::Kernel::g_curthread->name, current_name);
+    }
+    LOG_CRITICAL(Debug, "  thread {} '{}'", GetCurrentThreadId(), current_name);
 #if defined(_M_X64) || defined(__x86_64__)
     LOG_CRITICAL(Debug, "  rax={:#x} rbx={:#x} rcx={:#x} rdx={:#x} rsi={:#x} rdi={:#x}", ctx.Rax,
                  ctx.Rbx, ctx.Rcx, ctx.Rdx, ctx.Rsi, ctx.Rdi);

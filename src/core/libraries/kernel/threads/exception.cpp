@@ -572,7 +572,9 @@ s32 PS4_SYSV_ABI posix_pthread_kill(PthreadT thread, s32 sig) {
     if (sig < 1 || sig > 128) {
         return POSIX_EINVAL;
     }
-    LOG_INFO(Lib_Kernel, "Raising signal {} on thread '{}'", sig, thread->name);
+    char name[WORD_NAME_MAX + 1];
+    word_name_get(&thread->name, name);
+    LOG_INFO(Lib_Kernel, "Raising signal {} on thread '{}'", sig, name);
     thread->QueueSignal(sig);
 
     if (!thread->IsSignalBlocked(sig)) {
