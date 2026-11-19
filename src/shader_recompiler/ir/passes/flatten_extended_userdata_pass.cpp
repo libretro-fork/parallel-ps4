@@ -4,24 +4,18 @@
 #include <array>
 #include <cstring>
 #include <unordered_map>
-#include <queue>
-#include "common/flat_map.h"
-#ifdef __aarch64__
-// x86-64 walkers emitted on an aarch64 host (srt_walker_interpreter.cpp): Xbyak's 64-bit mode
-#define XBYAK64
-#define XBYAK64_GCC
-#endif
 #include <encodings/xxh3.h>
-#include <xbyak/xbyak.h>
-#ifdef ARCH_X86_64
-#include <xbyak/xbyak_util.h>
-#endif
+#include <memmap.h>
+#include <queue>
 #include "common/arch.h"
 #include "common/decoder.h"
+#include "common/flat_map.h"
 #include "common/io_file.h"
 #include "common/logging/log.h"
 #include "common/path_util.h"
+#include "common/run_once.h"
 #include "common/signal_context.h"
+#include "common/x64_emit.h"
 #include "core/emulator_settings.h"
 #include "core/signals.h"
 #include "shader_recompiler/info.h"
@@ -37,10 +31,25 @@
 // runs there (RunSrtWalker)
 #if defined(ARCH_X86_64) || (defined(__aarch64__) && defined(__linux__))
 
-using namespace Xbyak::util;
-
-static Xbyak::CodeGenerator g_srt_codegen(32_MB);
+// The walkers' code, x86-64 on every host (an aarch64 one interprets it): 32 MB, made
+// executable once, at the first walker
+static x64_code_t g_srt_code{};
+static run_once_t g_srt_code_once = RUN_ONCE_INIT;
 static const u8* g_srt_codegen_start = nullptr;
+
+static x64_code_t* SrtCode() {
+    run_once(
+        &g_srt_code_once,
+        [](void*) {
+            constexpr size_t size = 32_MB;
+            void* mem = mmap(nullptr, size, PROT_READ | PROT_WRITE | PROT_EXEC,
+                             MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+            ASSERT_MSG(mem != MAP_FAILED, "No executable memory for the SRT walkers");
+            x64_init(&g_srt_code, mem, size);
+        },
+        nullptr);
+    return &g_srt_code;
+}
 
 namespace Shader {
 
@@ -79,12 +88,13 @@ static const u8* FindOrKeepWalker(const u8* code, size_t size) {
 }
 
 PFN_SrtWalker RegisterWalkerCode(const u8* ptr, size_t size) {
-    const size_t start = g_srt_codegen.getSize();
-    const auto func_addr = (PFN_SrtWalker)g_srt_codegen.getCurr();
-    g_srt_codegen.db(ptr, size);
-    g_srt_codegen.ready();
+    x64_code_t* c = SrtCode();
+    const size_t start = c->size;
+    const auto func_addr = (PFN_SrtWalker)x64_curr(c);
+    x64_db(c, ptr, size);
+    ASSERT_MSG(!c->error, "SRT walker code is too big");
     if (const u8* kept = FindOrKeepWalker(reinterpret_cast<const u8*>(func_addr), size)) {
-        g_srt_codegen.setSize(start);
+        c->size = start;
         return reinterpret_cast<PFN_SrtWalker>(const_cast<u8*>(kept));
     }
     return func_addr;
@@ -122,7 +132,7 @@ static void DumpSrtProgram(const Shader::Info& info, const u8* code, size_t code
 static bool SrtWalkerSignalHandler(void* context, void* fault_address) {
     // Only handle if the fault address is within the SRT code range
     const u8* code_start = g_srt_codegen_start;
-    const u8* code_end = code_start + g_srt_codegen.getSize();
+    const u8* code_end = g_srt_code.p + g_srt_code.size;
     const void* code = Common::GetRip(context);
     if (code < code_start || code >= code_end) {
         return false; // Not in SRT code range
@@ -267,8 +277,7 @@ static inline void SetFlatbufOffset(IR::Inst* inst, u16 offset) {
     UNREACHABLE_MSG("Instruction not supported");
 }
 
-static bool ComputeOffset(Xbyak::CodeGenerator& c, Xbyak::Reg32 reg, PassInfo& pass_info,
-                          const IR::Value& off_dw);
+static bool ComputeOffset(x64_code_t* c, int reg, PassInfo& pass_info, const IR::Value& off_dw);
 
 #define ABORT_ON_FAILURE(expr)                                                                     \
     if (!(expr)) {                                                                                 \
@@ -277,260 +286,255 @@ static bool ComputeOffset(Xbyak::CodeGenerator& c, Xbyak::Reg32 reg, PassInfo& p
 
 #define POP_ABORT_ON_FAILURE(expr)                                                                 \
     if (!(expr)) {                                                                                 \
-        c.add(rsp, 8);                                                                             \
+        x64_alu_ri(c, X64_ADD, 64, X64_RSP, 8);                                                    \
         return false;                                                                              \
     }
 
-static bool EmitComputeOffsetIAdd32(Xbyak::CodeGenerator& c, Xbyak::Reg32 reg, PassInfo& pass_info,
-                                    IR::Inst* inst) {
+static bool EmitComputeOffsetIAdd32(x64_code_t* c, int reg, PassInfo& pass_info, IR::Inst* inst) {
     ASSERT(!inst->AreAllArgsImmediates());
     if (inst->Arg(0).IsImmediate()) {
         ABORT_ON_FAILURE(ComputeOffset(c, reg, pass_info, inst->Arg(1)));
-        c.add(reg, inst->Arg(0).U32());
+        x64_alu_ri(c, X64_ADD, 32, reg, inst->Arg(0).U32());
     } else if (inst->Arg(1).IsImmediate()) {
         ABORT_ON_FAILURE(ComputeOffset(c, reg, pass_info, inst->Arg(0)));
-        c.add(reg, inst->Arg(1).U32());
+        x64_alu_ri(c, X64_ADD, 32, reg, inst->Arg(1).U32());
     } else {
         ABORT_ON_FAILURE(ComputeOffset(c, reg, pass_info, inst->Arg(0)));
-        c.push(reg.cvt64());
+        x64_push(c, reg);
         POP_ABORT_ON_FAILURE(ComputeOffset(c, reg, pass_info, inst->Arg(1)));
-        c.add(reg, dword[rsp]);
-        c.add(rsp, 8);
+        x64_alu_rm(c, X64_ADD, 32, reg, x64_m(X64_RSP, 0));
+        x64_alu_ri(c, X64_ADD, 64, X64_RSP, 8);
     }
     return true;
 }
 
-static bool EmitComputeOffsetISub32(Xbyak::CodeGenerator& c, Xbyak::Reg32 reg, PassInfo& pass_info,
-                                    IR::Inst* inst) {
+static bool EmitComputeOffsetISub32(x64_code_t* c, int reg, PassInfo& pass_info, IR::Inst* inst) {
     ASSERT(!inst->AreAllArgsImmediates());
     if (inst->Arg(0).IsImmediate()) {
         ABORT_ON_FAILURE(ComputeOffset(c, reg, pass_info, inst->Arg(1)));
-        c.neg(reg);
-        c.add(reg, inst->Arg(0).U32());
+        x64_neg(c, 32, reg);
+        x64_alu_ri(c, X64_ADD, 32, reg, inst->Arg(0).U32());
     } else if (inst->Arg(1).IsImmediate()) {
         ABORT_ON_FAILURE(ComputeOffset(c, reg, pass_info, inst->Arg(0)));
-        c.sub(reg, inst->Arg(1).U32());
+        x64_alu_ri(c, X64_SUB, 32, reg, inst->Arg(1).U32());
     } else {
         ABORT_ON_FAILURE(ComputeOffset(c, reg, pass_info, inst->Arg(0)));
-        c.push(reg.cvt64());
+        x64_push(c, reg);
         POP_ABORT_ON_FAILURE(ComputeOffset(c, reg, pass_info, inst->Arg(1)));
-        c.neg(reg);
-        c.add(reg, dword[rsp]);
-        c.add(rsp, 8);
+        x64_neg(c, 32, reg);
+        x64_alu_rm(c, X64_ADD, 32, reg, x64_m(X64_RSP, 0));
+        x64_alu_ri(c, X64_ADD, 64, X64_RSP, 8);
     }
     return true;
 }
 
-static bool EmitComputeOffsetIMul32(Xbyak::CodeGenerator& c, Xbyak::Reg32 reg, PassInfo& pass_info,
-                                    IR::Inst* inst) {
+static bool EmitComputeOffsetIMul32(x64_code_t* c, int reg, PassInfo& pass_info, IR::Inst* inst) {
     ASSERT(!inst->AreAllArgsImmediates());
     if (inst->Arg(0).IsImmediate()) {
         ABORT_ON_FAILURE(ComputeOffset(c, reg, pass_info, inst->Arg(1)));
-        c.imul(reg, reg, inst->Arg(0).U32());
+        x64_imul_rri(c, 32, reg, reg, inst->Arg(0).U32());
     } else if (inst->Arg(1).IsImmediate()) {
         ABORT_ON_FAILURE(ComputeOffset(c, reg, pass_info, inst->Arg(0)));
-        c.imul(reg, reg, inst->Arg(1).U32());
+        x64_imul_rri(c, 32, reg, reg, inst->Arg(1).U32());
     } else {
         ABORT_ON_FAILURE(ComputeOffset(c, reg, pass_info, inst->Arg(0)));
-        c.push(reg.cvt64());
+        x64_push(c, reg);
         POP_ABORT_ON_FAILURE(ComputeOffset(c, reg, pass_info, inst->Arg(1)));
-        c.imul(reg, dword[rsp]);
-        c.add(rsp, 8);
+        x64_imul_rm(c, 32, reg, x64_m(X64_RSP, 0));
+        x64_alu_ri(c, X64_ADD, 64, X64_RSP, 8);
     }
     return true;
 }
 
-static bool EmitComputeOffsetShiftLeftLogical32(Xbyak::CodeGenerator& c, Xbyak::Reg32 reg,
-                                                PassInfo& pass_info, IR::Inst* inst) {
+static bool EmitComputeOffsetShiftLeftLogical32(x64_code_t* c, int reg, PassInfo& pass_info,
+                                                IR::Inst* inst) {
     ASSERT(!inst->AreAllArgsImmediates());
     if (inst->Arg(0).IsImmediate()) {
         ABORT_ON_FAILURE(ComputeOffset(c, reg, pass_info, inst->Arg(1)));
-        c.shl(reg, inst->Arg(0).U32());
-        c.mov(ecx, reg);
-        c.mov(reg, inst->Arg(0).U32());
-        c.shl(reg, cl);
+        x64_shift_ri(c, X64_SHL, 32, reg, static_cast<u8>(inst->Arg(0).U32()));
+        x64_mov_rr(c, 32, X64_RCX, reg);
+        x64_mov_ri(c, 32, reg, inst->Arg(0).U32());
+        x64_shift_rcl(c, X64_SHL, 32, reg);
     } else if (inst->Arg(1).IsImmediate()) {
         ABORT_ON_FAILURE(ComputeOffset(c, reg, pass_info, inst->Arg(0)));
-        c.shl(reg, inst->Arg(1).U32());
+        x64_shift_ri(c, X64_SHL, 32, reg, static_cast<u8>(inst->Arg(1).U32()));
     } else {
         ABORT_ON_FAILURE(ComputeOffset(c, reg, pass_info, inst->Arg(1)));
-        c.push(reg.cvt64());
+        x64_push(c, reg);
         POP_ABORT_ON_FAILURE(ComputeOffset(c, reg, pass_info, inst->Arg(0)));
-        c.pop(rcx);
-        c.shl(reg, cl);
+        x64_pop(c, X64_RCX);
+        x64_shift_rcl(c, X64_SHL, 32, reg);
     }
     return true;
 }
 
-static bool EmitComputeOffsetShiftRightLogical32(Xbyak::CodeGenerator& c, Xbyak::Reg32 reg,
-                                                 PassInfo& pass_info, IR::Inst* inst) {
+static bool EmitComputeOffsetShiftRightLogical32(x64_code_t* c, int reg, PassInfo& pass_info,
+                                                 IR::Inst* inst) {
     ASSERT(!inst->AreAllArgsImmediates());
     if (inst->Arg(0).IsImmediate()) {
         ABORT_ON_FAILURE(ComputeOffset(c, reg, pass_info, inst->Arg(1)));
-        c.mov(ecx, reg);
-        c.mov(reg, inst->Arg(0).U32());
-        c.shr(reg, cl);
+        x64_mov_rr(c, 32, X64_RCX, reg);
+        x64_mov_ri(c, 32, reg, inst->Arg(0).U32());
+        x64_shift_rcl(c, X64_SHR, 32, reg);
     } else if (inst->Arg(1).IsImmediate()) {
         ABORT_ON_FAILURE(ComputeOffset(c, reg, pass_info, inst->Arg(0)));
-        c.shr(reg, inst->Arg(1).U32());
+        x64_shift_ri(c, X64_SHR, 32, reg, static_cast<u8>(inst->Arg(1).U32()));
     } else {
         ABORT_ON_FAILURE(ComputeOffset(c, reg, pass_info, inst->Arg(1)));
-        c.push(reg.cvt64());
+        x64_push(c, reg);
         POP_ABORT_ON_FAILURE(ComputeOffset(c, reg, pass_info, inst->Arg(0)));
-        c.pop(rcx);
-        c.shr(reg, cl);
+        x64_pop(c, X64_RCX);
+        x64_shift_rcl(c, X64_SHR, 32, reg);
     }
     return true;
 }
 
-static bool EmitComputeOffsetBitwiseAnd32(Xbyak::CodeGenerator& c, Xbyak::Reg32 reg,
-                                          PassInfo& pass_info, IR::Inst* inst) {
+static bool EmitComputeOffsetBitwiseAnd32(x64_code_t* c, int reg, PassInfo& pass_info,
+                                          IR::Inst* inst) {
     ASSERT(!inst->AreAllArgsImmediates());
     if (inst->Arg(0).IsImmediate()) {
         ABORT_ON_FAILURE(ComputeOffset(c, reg, pass_info, inst->Arg(1)));
-        c.and_(reg, inst->Arg(0).U32());
+        x64_alu_ri(c, X64_AND, 32, reg, inst->Arg(0).U32());
     } else if (inst->Arg(1).IsImmediate()) {
         ABORT_ON_FAILURE(ComputeOffset(c, reg, pass_info, inst->Arg(0)));
-        c.and_(reg, inst->Arg(1).U32());
+        x64_alu_ri(c, X64_AND, 32, reg, inst->Arg(1).U32());
     } else {
         ABORT_ON_FAILURE(ComputeOffset(c, reg, pass_info, inst->Arg(0)));
-        c.push(reg.cvt64());
+        x64_push(c, reg);
         POP_ABORT_ON_FAILURE(ComputeOffset(c, reg, pass_info, inst->Arg(1)));
-        c.and_(reg, dword[rsp]);
-        c.add(rsp, 8);
+        x64_alu_rm(c, X64_AND, 32, reg, x64_m(X64_RSP, 0));
+        x64_alu_ri(c, X64_ADD, 64, X64_RSP, 8);
     }
     return true;
 }
 
-static bool EmitComputeOffsetBitwiseOr32(Xbyak::CodeGenerator& c, Xbyak::Reg32 reg,
-                                         PassInfo& pass_info, IR::Inst* inst) {
+static bool EmitComputeOffsetBitwiseOr32(x64_code_t* c, int reg, PassInfo& pass_info,
+                                         IR::Inst* inst) {
     ASSERT(!inst->AreAllArgsImmediates());
     if (inst->Arg(0).IsImmediate()) {
         ABORT_ON_FAILURE(ComputeOffset(c, reg, pass_info, inst->Arg(1)));
-        c.or_(reg, inst->Arg(0).U32());
+        x64_alu_ri(c, X64_OR, 32, reg, inst->Arg(0).U32());
     } else if (inst->Arg(1).IsImmediate()) {
         ABORT_ON_FAILURE(ComputeOffset(c, reg, pass_info, inst->Arg(0)));
-        c.or_(reg, inst->Arg(1).U32());
+        x64_alu_ri(c, X64_OR, 32, reg, inst->Arg(1).U32());
     } else {
         ABORT_ON_FAILURE(ComputeOffset(c, reg, pass_info, inst->Arg(0)));
-        c.push(reg.cvt64());
+        x64_push(c, reg);
         POP_ABORT_ON_FAILURE(ComputeOffset(c, reg, pass_info, inst->Arg(1)));
-        c.or_(reg, dword[rsp]);
-        c.add(rsp, 8);
+        x64_alu_rm(c, X64_OR, 32, reg, x64_m(X64_RSP, 0));
+        x64_alu_ri(c, X64_ADD, 64, X64_RSP, 8);
     }
     return true;
 }
 
-static bool EmitComputeOffsetBitwiseXor32(Xbyak::CodeGenerator& c, Xbyak::Reg32 reg,
-                                          PassInfo& pass_info, IR::Inst* inst) {
+static bool EmitComputeOffsetBitwiseXor32(x64_code_t* c, int reg, PassInfo& pass_info,
+                                          IR::Inst* inst) {
     ASSERT(!inst->AreAllArgsImmediates());
     if (inst->Arg(0).IsImmediate()) {
         ABORT_ON_FAILURE(ComputeOffset(c, reg, pass_info, inst->Arg(1)));
-        c.xor_(reg, inst->Arg(0).U32());
+        x64_alu_ri(c, X64_XOR, 32, reg, inst->Arg(0).U32());
     } else if (inst->Arg(1).IsImmediate()) {
         ABORT_ON_FAILURE(ComputeOffset(c, reg, pass_info, inst->Arg(0)));
-        c.xor_(reg, inst->Arg(1).U32());
+        x64_alu_ri(c, X64_XOR, 32, reg, inst->Arg(1).U32());
     } else {
         ABORT_ON_FAILURE(ComputeOffset(c, reg, pass_info, inst->Arg(0)));
-        c.push(reg.cvt64());
+        x64_push(c, reg);
         POP_ABORT_ON_FAILURE(ComputeOffset(c, reg, pass_info, inst->Arg(1)));
-        c.xor_(reg, dword[rsp]);
-        c.add(rsp, 8);
+        x64_alu_rm(c, X64_XOR, 32, reg, x64_m(X64_RSP, 0));
+        x64_alu_ri(c, X64_ADD, 64, X64_RSP, 8);
     }
     return true;
 }
 
-static bool EmitComputeOffsetBitwiseNot32(Xbyak::CodeGenerator& c, Xbyak::Reg32 reg,
-                                          PassInfo& pass_info, IR::Inst* inst) {
+static bool EmitComputeOffsetBitwiseNot32(x64_code_t* c, int reg, PassInfo& pass_info,
+                                          IR::Inst* inst) {
     ASSERT(!inst->AreAllArgsImmediates());
     ABORT_ON_FAILURE(ComputeOffset(c, reg, pass_info, inst->Arg(0)));
-    c.not_(reg);
+    x64_not(c, 32, reg);
     return true;
 }
 
-static bool EmitComputeOffsetUMin32(Xbyak::CodeGenerator& c, Xbyak::Reg32 reg, PassInfo& pass_info,
-                                    IR::Inst* inst) {
+static bool EmitComputeOffsetUMin32(x64_code_t* c, int reg, PassInfo& pass_info, IR::Inst* inst) {
     ASSERT(!inst->AreAllArgsImmediates());
     if (inst->Arg(0).IsImmediate()) {
         ABORT_ON_FAILURE(ComputeOffset(c, reg, pass_info, inst->Arg(1)));
-        c.mov(ecx, inst->Arg(0).U32());
-        c.cmp(reg, ecx);
-        c.cmova(reg, ecx);
+        x64_mov_ri(c, 32, X64_RCX, inst->Arg(0).U32());
+        x64_alu_rr(c, X64_CMP, 32, reg, X64_RCX);
+        x64_cmov_rr(c, X64_CC_A, 32, reg, X64_RCX);
     } else if (inst->Arg(1).IsImmediate()) {
         ABORT_ON_FAILURE(ComputeOffset(c, reg, pass_info, inst->Arg(0)));
-        c.mov(ecx, inst->Arg(1).U32());
-        c.cmp(reg, ecx);
-        c.cmova(reg, ecx);
+        x64_mov_ri(c, 32, X64_RCX, inst->Arg(1).U32());
+        x64_alu_rr(c, X64_CMP, 32, reg, X64_RCX);
+        x64_cmov_rr(c, X64_CC_A, 32, reg, X64_RCX);
     } else {
         ABORT_ON_FAILURE(ComputeOffset(c, reg, pass_info, inst->Arg(0)));
-        c.push(reg.cvt64());
+        x64_push(c, reg);
         POP_ABORT_ON_FAILURE(ComputeOffset(c, reg, pass_info, inst->Arg(1)));
-        c.cmp(reg, dword[rsp]);
-        c.cmova(reg, dword[rsp]);
-        c.add(rsp, 8);
+        x64_alu_rm(c, X64_CMP, 32, reg, x64_m(X64_RSP, 0));
+        x64_cmov_rm(c, X64_CC_A, 32, reg, x64_m(X64_RSP, 0));
+        x64_alu_ri(c, X64_ADD, 64, X64_RSP, 8);
     }
     return true;
 }
 
-static bool EmitComputeOffsetUMax32(Xbyak::CodeGenerator& c, Xbyak::Reg32 reg, PassInfo& pass_info,
-                                    IR::Inst* inst) {
+static bool EmitComputeOffsetUMax32(x64_code_t* c, int reg, PassInfo& pass_info, IR::Inst* inst) {
     ASSERT(!inst->AreAllArgsImmediates());
     if (inst->Arg(0).IsImmediate()) {
         ABORT_ON_FAILURE(ComputeOffset(c, reg, pass_info, inst->Arg(1)));
-        c.mov(ecx, inst->Arg(0).U32());
-        c.cmp(reg, ecx);
-        c.cmovb(reg, ecx);
+        x64_mov_ri(c, 32, X64_RCX, inst->Arg(0).U32());
+        x64_alu_rr(c, X64_CMP, 32, reg, X64_RCX);
+        x64_cmov_rr(c, X64_CC_B, 32, reg, X64_RCX);
     } else if (inst->Arg(1).IsImmediate()) {
         ABORT_ON_FAILURE(ComputeOffset(c, reg, pass_info, inst->Arg(0)));
-        c.mov(ecx, inst->Arg(1).U32());
-        c.cmp(reg, ecx);
-        c.cmovb(reg, ecx);
+        x64_mov_ri(c, 32, X64_RCX, inst->Arg(1).U32());
+        x64_alu_rr(c, X64_CMP, 32, reg, X64_RCX);
+        x64_cmov_rr(c, X64_CC_B, 32, reg, X64_RCX);
     } else {
         ABORT_ON_FAILURE(ComputeOffset(c, reg, pass_info, inst->Arg(0)));
-        c.push(reg.cvt64());
+        x64_push(c, reg);
         POP_ABORT_ON_FAILURE(ComputeOffset(c, reg, pass_info, inst->Arg(1)));
-        c.cmp(reg, dword[rsp]);
-        c.cmovb(reg, dword[rsp]);
-        c.add(rsp, 8);
+        x64_alu_rm(c, X64_CMP, 32, reg, x64_m(X64_RSP, 0));
+        x64_cmov_rm(c, X64_CC_B, 32, reg, x64_m(X64_RSP, 0));
+        x64_alu_ri(c, X64_ADD, 64, X64_RSP, 8);
     }
     return true;
 }
 
-static bool EmitComputeOffsetBitFieldUExtract(Xbyak::CodeGenerator& c, Xbyak::Reg32 reg,
-                                              PassInfo& pass_info, IR::Inst* inst) {
+static bool EmitComputeOffsetBitFieldUExtract(x64_code_t* c, int reg, PassInfo& pass_info,
+                                              IR::Inst* inst) {
     // We asume that the count is always less than 32, Is this correct?
     ASSERT(!inst->AreAllArgsImmediates());
     if (inst->Arg(0).IsImmediate()) {
-        c.mov(reg, inst->Arg(0).U32());
+        x64_mov_ri(c, 32, reg, inst->Arg(0).U32());
     } else {
         ABORT_ON_FAILURE(ComputeOffset(c, reg, pass_info, inst->Arg(0)));
     }
     bool in_stack = false;
     if (inst->Arg(1).IsImmediate()) {
-        c.shr(reg, inst->Arg(1).U32());
+        x64_shift_ri(c, X64_SHR, 32, reg, static_cast<u8>(inst->Arg(1).U32()));
     } else {
-        c.push(reg.cvt64());
+        x64_push(c, reg);
         in_stack = true;
         POP_ABORT_ON_FAILURE(ComputeOffset(c, reg, pass_info, inst->Arg(1)));
-        c.mov(ecx, reg);
-        c.shr(dword[rsp], cl);
+        x64_mov_rr(c, 32, X64_RCX, reg);
+        x64_shift_mcl(c, X64_SHR, 32, x64_m(X64_RSP, 0));
     }
     if (inst->Arg(2).IsImmediate()) {
         if (in_stack) {
-            c.pop(reg.cvt64());
+            x64_pop(c, reg);
         }
-        c.and_(reg, (1U << inst->Arg(2).U32()) - 1);
+        x64_alu_ri(c, X64_AND, 32, reg, (1U << inst->Arg(2).U32()) - 1);
     } else {
         if (!in_stack) {
-            c.push(reg.cvt64());
+            x64_push(c, reg);
         }
         POP_ABORT_ON_FAILURE(ComputeOffset(c, reg, pass_info, inst->Arg(2)));
-        c.mov(ecx, reg);
-        c.mov(edx, 1);
-        c.shl(edx, cl);
-        c.dec(edx);
-        c.and_(dword[rsp], edx);
-        c.pop(reg.cvt64());
+        x64_mov_rr(c, 32, X64_RCX, reg);
+        x64_mov_ri(c, 32, X64_RDX, 1);
+        x64_shift_rcl(c, X64_SHL, 32, X64_RDX);
+        x64_dec(c, 32, X64_RDX);
+        x64_alu_mr(c, X64_AND, 32, x64_m(X64_RSP, 0), X64_RDX);
+        x64_pop(c, reg);
     }
     return true;
 }
@@ -558,18 +562,17 @@ static bool IsAllowedOffsetInstruction(const IR::Inst* inst) {
     }
 }
 
-static bool ComputeOffset(Xbyak::CodeGenerator& c, Xbyak::Reg32 reg, PassInfo& pass_info,
-                          const IR::Value& off_dw) {
-    ASSERT(reg != ecx && reg != edx);
+static bool ComputeOffset(x64_code_t* c, int reg, PassInfo& pass_info, const IR::Value& off_dw) {
+    ASSERT(reg != X64_RCX && reg != X64_RDX);
     auto inst = off_dw.Inst();
     switch (inst->GetOpcode()) {
     case IR::Opcode::GetUserData:
-        c.mov(reg, ptr[rsi + (static_cast<u32>(inst->Arg(0).ScalarReg()) << 2)]);
+        x64_mov_rm(c, 32, reg, x64_m(X64_RSI, (static_cast<u32>(inst->Arg(0).ScalarReg()) << 2)));
         return true;
     case IR::Opcode::ReadConst:
     case IR::Opcode::ReadConstBuffer:
         if (u16 offset = GetFlatbufOffset(pass_info.DeduplicateInstruction(inst)); offset != 0) {
-            c.mov(reg, ptr[rsi + (offset << 2)]);
+            x64_mov_rm(c, 32, reg, x64_m(X64_RSI, (offset << 2)));
             return true;
         }
         return false;
@@ -616,27 +619,27 @@ static bool ComputeOffset(Xbyak::CodeGenerator& c, Xbyak::Reg32 reg, PassInfo& p
     }
 }
 
-static inline bool PushPtr(Xbyak::CodeGenerator& c, PassInfo& pass_info, const IR::Value& off_dw) {
-    c.push(rdi);
+static inline bool PushPtr(x64_code_t* c, PassInfo& pass_info, const IR::Value& off_dw) {
+    x64_push(c, X64_RDI);
     if (off_dw.IsImmediate()) {
-        c.mov(rdi, ptr[rdi + (off_dw.U32() << 2)]);
+        x64_mov_rm(c, 64, X64_RDI, x64_m(X64_RDI, (off_dw.U32() << 2)));
     } else {
-        ABORT_ON_FAILURE(ComputeOffset(c, r10d, pass_info, off_dw));
-        c.shl(r10d, 2);
-        c.mov(r10d, r10d);
-        c.mov(rdi, ptr[rdi + r10]);
+        ABORT_ON_FAILURE(ComputeOffset(c, X64_R10, pass_info, off_dw));
+        x64_shift_ri(c, X64_SHL, 32, X64_R10, static_cast<u8>(2));
+        x64_mov_rr(c, 32, X64_R10, X64_R10);
+        x64_mov_rm(c, 64, X64_RDI, x64_mi(X64_RDI, X64_R10, 1, 0));
     }
-    c.mov(r10, 0xFFFFFFFFFFFFULL);
-    c.and_(rdi, r10);
+    x64_mov_ri(c, 64, X64_R10, 0xFFFFFFFFFFFFULL);
+    x64_alu_rr(c, X64_AND, 64, X64_RDI, X64_R10);
     return true;
 }
 
-static inline void PopPtr(Xbyak::CodeGenerator& c) {
-    c.pop(rdi);
+static inline void PopPtr(x64_code_t* c) {
+    x64_pop(c, X64_RDI);
 }
 
 static void VisitPointer(const IR::Value& off_dw, IR::Inst* subtree, PassInfo& pass_info,
-                         Xbyak::CodeGenerator& c) {
+                         x64_code_t* c) {
     if (subtree->GetOpcode() == IR::Opcode::ReadConst && subtree->Flags<u16>() == 0 ||
         subtree->GetOpcode() == IR::Opcode::ReadConstBuffer &&
             subtree->Flags<IR::BufferInstInfo>().flatbuf_off_dw == 0) {
@@ -657,17 +660,17 @@ static void VisitPointer(const IR::Value& off_dw, IR::Inst* subtree, PassInfo& p
     // TODO if this subtree is dynamically indexed, don't compact it (keep it sparse)
     for (auto [src_off_dw, use] : *use_list) {
         if (src_off_dw.IsImmediate()) {
-            c.mov(r10d, ptr[rdi + (src_off_dw.U32() << 2)]);
+            x64_mov_rm(c, 32, X64_R10, x64_m(X64_RDI, (src_off_dw.U32() << 2)));
         } else {
-            if (!ComputeOffset(c, r10d, pass_info, src_off_dw)) {
+            if (!ComputeOffset(c, X64_R10, pass_info, src_off_dw)) {
                 LOG_ERROR(Render_Recompiler, "Failed to compute offset for SRT walker");
                 continue;
             }
-            c.shl(r10d, 2);
-            c.mov(r10d, r10d);
-            c.mov(r10d, dword[rdi + r10]);
+            x64_shift_ri(c, X64_SHL, 32, X64_R10, static_cast<u8>(2));
+            x64_mov_rr(c, 32, X64_R10, X64_R10);
+            x64_mov_rm(c, 32, X64_R10, x64_mi(X64_RDI, X64_R10, 1, 0));
         }
-        c.mov(ptr[rsi + (pass_info.dst_off_dw << 2)], r10d);
+        x64_mov_mr(c, 32, x64_m(X64_RSI, (pass_info.dst_off_dw << 2)), X64_R10);
 
         SetFlatbufOffset(use, pass_info.dst_off_dw);
         pass_info.dst_off_dw++;
@@ -684,7 +687,7 @@ static void VisitPointer(const IR::Value& off_dw, IR::Inst* subtree, PassInfo& p
 }
 
 static void GenerateSrtProgram(Info& info, PassInfo& pass_info) {
-    Xbyak::CodeGenerator& c = g_srt_codegen;
+    x64_code_t* c = SrtCode();
 
     if (pass_info.srt_roots.empty()) {
         return;
@@ -697,15 +700,15 @@ static void GenerateSrtProgram(Info& info, PassInfo& pass_info) {
     // The interpreter reads a bad guest pointer as 0 itself; the x86-64 code is not run
     if (false) {
 #endif
-        g_srt_codegen_start = c.getCurr();
+        g_srt_codegen_start = x64_curr(c);
         auto* signals = Core::Signals::Instance();
         // Call after the memory invalidation handler
         constexpr u32 priority = 1;
         signals->RegisterAccessViolationHandler(SrtWalkerSignalHandler, priority);
     }
 
-    const size_t walker_start = c.getSize();
-    info.srt_info.walker_func = c.getCurr<PFN_SrtWalker>();
+    const size_t walker_start = c->size;
+    info.srt_info.walker_func = reinterpret_cast<PFN_SrtWalker>(x64_curr(c));
     pass_info.dst_off_dw = NUM_USER_DATA_REGS;
     ASSERT(pass_info.dst_off_dw == info.srt_info.flattened_bufsize_dw);
 
@@ -713,11 +716,11 @@ static void GenerateSrtProgram(Info& info, PassInfo& pass_info) {
         VisitPointer(IR::Value(static_cast<u32>(sgpr_base)), root, pass_info, c);
     }
 
-    c.ret();
-    c.ready();
+    x64_ret(c);
+    ASSERT_MSG(!c->error, "SRT walker code is too big");
 
     info.srt_info.walker_func_size =
-        c.getCurr() - reinterpret_cast<const u8*>(info.srt_info.walker_func);
+        x64_curr(c) - reinterpret_cast<const u8*>(info.srt_info.walker_func);
     // The walker as made, for the pipeline cache: the fault handler rewrites the code it runs
     // where a pointer was bad at that moment, and that rewrite must not be kept for later starts
     {
@@ -727,7 +730,7 @@ static void GenerateSrtProgram(Info& info, PassInfo& pass_info) {
     // Another permutation's identical walker is used, and this copy is dropped
     if (const u8* kept = FindOrKeepWalker(reinterpret_cast<const u8*>(info.srt_info.walker_func),
                                           info.srt_info.walker_func_size)) {
-        c.setSize(walker_start);
+        c->size = walker_start;
         info.srt_info.walker_func = reinterpret_cast<PFN_SrtWalker>(const_cast<u8*>(kept));
     }
 

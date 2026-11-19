@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 // The SRT walkers on a host that is not x86-64. FlattenExtendedUserdataPass emits them as x86-64
-// code with Xbyak on every host, so a pipeline cache holds the same walkers whatever machine
-// wrote it; here they are decoded once with Zydis and run by a small interpreter of the few
+// code (common/x64_emit.c) on every host, so a pipeline cache holds the same walkers whatever
+// machine wrote it; here they are decoded once with Zydis and run by a small interpreter of the few
 // instructions the pass emits. A load from a bad guest pointer reads 0, as the x86-64 walker's
 // fault handler makes it.
 

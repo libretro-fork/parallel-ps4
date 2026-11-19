@@ -4,6 +4,26 @@ What changed in the libretro core of this fork, newest first. Changes that come 
 
 ## Unreleased
 
+- Xbyak is gone. It was a C++ dependency, and the core used it for three things, all of which now go through `src/common/x64_emit.c`, a C89 x86-64 encoder holding only the instructions those three write.
+  - **SRT walkers:** x86-64 on every host. An aarch64 host interprets them, so they are written there too.
+  - **Symbol stubs:** for functions a game imports that nothing exports.
+  - **CPU patches** (`cpu_patches.cpp`, x86-64 hosts): the TCB accesses through gs, the SSE4a instructions on CPUs without them, the reciprocal instructions on Intel CPUs, Rosetta's compare, and the Windows red-zone trampolines.
+  - **How it writes:** straight into the memory the code runs from. A jump or rip-relative operand is given its absolute target and the offset is worked out where the instruction lands. Nothing is allocated, and nothing is thrown: an instruction that does not fit sets an error flag that the caller checks once.
+  - **Trampoline area full:** a patch site whose trampoline does not fit is left to the run-time path, as when Xbyak threw "code too big".
+  - **Symbol stubs, before and after:** each stub was a code generator with an executable allocation of its own. They are now 17 bytes each in shared executable blocks of 64 KB.
+  - **SRT walker area:** a 32 MB executable block made once, at the first walker.
+  - **CPU features:** the patches ask CPUID themselves for SSE4a and for an Intel CPU, where Xbyak's CPU class was used.
+  - **Executable memory:** comes from libretro-common's `memmap.c`, identical to RetroArch's.
+  - **Byte for byte the same:**
+    - Before Xbyak was removed, the encoder was compared with it over 229,636 register, immediate and memory combinations of every form the core uses, and all matched.
+    - The CPU patches' generators, old and new, were run on 20 guest instructions (reciprocals in their register, memory, rip-relative and rsp-based forms, xmm and ymm; EXTRQ and INSERTQ in both forms; the TCB loads, compares and xors), and wrote the same bytes.
+    - Walkers written before and after are the same, so pipeline caches stay valid.
+  - **Tests:** x64_emit_test, under both sanitizers. It checks 88 instruction forms against the bytes Xbyak wrote for them (taken from Xbyak once, beside each call), an instruction that does not fit, and short jumps out of reach.
+  - **Built:** Linux and Windows. The walker, stub and interpreter sources also compile for aarch64.
+  - **Not run:** the Windows-only TCB and red-zone trampolines, and the macOS compare patch.
+  - **Removed:** `externals/xbyak` and its include path.
+
+  Not seen in a game yet.
 - The SPIR-V headers are part of the tree, not a submodule. The five C headers of Khronos' SPIRV-Headers that the shader recompiler and the host shaders include (`spirv.h`, `GLSL.std.450.h` and three AMD extension headers) and its license are in `externals/spirv-headers`. They are copied unchanged from the commit the submodule pointed at (2acb319), which its README names along with how to move them on. A checkout needs one submodule fewer, and nothing of SPIRV-Headers' other files (grammars, other languages, its build files) comes with it. Built on Linux and Windows; the core's tests pass.
 - The pipeline cache keeps its blobs in one file, `blobs.pack`, instead of a file each. That covers shader binaries, shader descriptions, pipeline keys and the build stamp. Bloodborne's cache was 1,587 files of these.
   - **Start:** the cache used to open, map and close every file as it read it. Now the pack is mapped once and indexed (`src/video_core/blob_pack.c`, C89), and blobs are lent from that one mapping.

@@ -9,10 +9,6 @@
 #include <malloc.h>
 #endif
 
-namespace Xbyak {
-class CodeGenerator;
-}
-
 namespace Libraries::Fiber {
 struct OrbisFiberContext;
 }

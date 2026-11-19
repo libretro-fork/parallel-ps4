@@ -278,7 +278,7 @@ CORE_SOURCES_CXX += $(addprefix src/video_core/texture_cache/,blit_helper.cpp \
 CORE_SOURCES_C :=
 CORE_SOURCES_C += $(addprefix src/common/,audio_stream.c enum_names.c event_latch.c game_clock.c host_thread.c json_util.c key_manager.c \
 	hex_dump.c line_buffer.c mpsc_ring.c node_pool.c obj_table.c patch_catalog.c patch_halve.c patch_index.c pin_gate.c ptr_table.c range_runs.c reserve_span.c run_once.c rw_word.c slot_table.c stop_thread.c thread_life.c thread_name.c \
-	u64_map.c vblank_clock.c word_name.c)
+	u64_map.c vblank_clock.c word_name.c x64_emit.c)
 CORE_SOURCES_C += $(addprefix src/core/,emulator_settings.c user_manager.c)
 CORE_SOURCES_C += $(addprefix src/core/libraries/avplayer/,avplayer_clock.c avplayer_fsm.c)
 CORE_SOURCES_C += $(addprefix src/core/libraries/audio3d/,audio3d_port.c)
@@ -314,7 +314,7 @@ endif
 
 CORE_FLAGS := -DZYCORE_STATIC_BUILD -DZYDIS_STATIC_BUILD -DVK_ENABLE_BETA_EXTENSIONS \
 	-Isrc -I$(LRC_DIR)/include -I. \
-	-isystem $(EXT_DIR)/fmt/include -isystem $(EXT_DIR)/xbyak \
+	-isystem $(EXT_DIR)/fmt/include \
 	-isystem $(EXT_DIR)/gcn/include \
 	-isystem $(EXT_DIR)/spirv-headers/include \
 	-isystem $(EXT_DIR)/vulkan-headers/include -isystem $(EXT_DIR)/zydis/include \
@@ -376,6 +376,7 @@ LRC_SOURCES_C += $(addprefix $(LRC_DIR)/encodings/,encoding_base64.c \
 	encoding_crc32.c encoding_deflate.c encoding_rzstd.c encoding_utf.c encoding_xxh3.c \
 	encoding_xxh64.c)
 LRC_SOURCES_C += $(addprefix $(LRC_DIR)/features/,features_cpu.c)
+LRC_SOURCES_C += $(LRC_DIR)/memmap/memmap.c
 LRC_SOURCES_C += $(addprefix $(LRC_DIR)/file/,file_path.c file_path_io.c retro_dirent.c)
 LRC_SOURCES_C += $(addprefix $(LRC_DIR)/formats/aac/,raac.c)
 LRC_SOURCES_C += $(addprefix $(LRC_DIR)/formats/atrac9/,ratrac9.c)

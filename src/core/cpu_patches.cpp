@@ -18,8 +18,11 @@
 #include <encodings/rzstd.h>
 #include <fmt/format.h>
 #include <retro_atomic.h>
-#include <xbyak/xbyak.h>
-#include <xbyak/xbyak_util.h>
+#if defined(_MSC_VER)
+#include <intrin.h>
+#else
+#include <cpuid.h>
+#endif
 #include "common/alignment.h"
 #include "common/arch.h"
 #include "common/assert.h"
@@ -29,6 +32,7 @@
 #include "common/run_once.h"
 #include "common/signal_context.h"
 #include "common/types.h"
+#include "common/x64_emit.h"
 #include "core/signals.h"
 #include "core/tls.h"
 #include "cpu_patches.h"
@@ -42,8 +46,6 @@
 #include <pthread.h>
 #include <sys/ucontext.h>
 #endif
-
-using namespace Xbyak::util;
 
 namespace Core {
 
@@ -88,32 +90,45 @@ static bool InitializeIndexTables() {
     return true;
 }
 
-static Xbyak::Reg ZydisToXbyakRegister(const ZydisRegister reg) {
+/// A register of a guest instruction, as the encoder numbers it, and its width in bits (32, 64;
+/// 128 for an xmm, 256 for a ymm)
+struct PatchReg {
+    int idx;
+    int bits;
+    bool IsVector() const {
+        return bits >= 128;
+    }
+    int L() const {
+        return bits == 256 ? 1 : 0;
+    }
+};
+
+static PatchReg ZydisToPatchRegister(const ZydisRegister reg) {
     if (reg >= ZYDIS_REGISTER_EAX && reg <= ZYDIS_REGISTER_R15D) {
-        return Xbyak::Reg32(reg - ZYDIS_REGISTER_EAX + Xbyak::Operand::EAX);
+        return {static_cast<int>(reg - ZYDIS_REGISTER_EAX), 32};
     }
     if (reg >= ZYDIS_REGISTER_RAX && reg <= ZYDIS_REGISTER_R15) {
-        return Xbyak::Reg64(reg - ZYDIS_REGISTER_RAX + Xbyak::Operand::RAX);
+        return {static_cast<int>(reg - ZYDIS_REGISTER_RAX), 64};
     }
     if (reg >= ZYDIS_REGISTER_XMM0 && reg <= ZYDIS_REGISTER_XMM31) {
-        return Xbyak::Xmm(reg - ZYDIS_REGISTER_XMM0 + xmm0.getIdx());
+        return {static_cast<int>(reg - ZYDIS_REGISTER_XMM0), 128};
     }
     if (reg >= ZYDIS_REGISTER_YMM0 && reg <= ZYDIS_REGISTER_YMM31) {
-        return Xbyak::Ymm(reg - ZYDIS_REGISTER_YMM0 + ymm0.getIdx());
+        return {static_cast<int>(reg - ZYDIS_REGISTER_YMM0), 256};
     }
     UNREACHABLE_MSG("Unsupported register: {}", static_cast<u32>(reg));
 }
 
-static Xbyak::Reg ZydisToXbyakRegisterOperand(const ZydisDecodedOperand& operand) {
+static PatchReg ZydisToPatchRegisterOperand(const ZydisDecodedOperand& operand) {
     ASSERT_MSG(operand.type == ZYDIS_OPERAND_TYPE_REGISTER,
                "Expected register operand, got type: {}", static_cast<u32>(operand.type));
 
-    return ZydisToXbyakRegister(operand.reg.value);
+    return ZydisToPatchRegister(operand.reg.value);
 }
 
-static Xbyak::Address ZydisToXbyakMemoryOperand(void* address,
-                                                const ZydisDecodedInstruction& instruction,
-                                                const ZydisDecodedOperand& operand) {
+static x64_mem_t ZydisToPatchMemoryOperand(void* address,
+                                           const ZydisDecodedInstruction& instruction,
+                                           const ZydisDecodedOperand& operand) {
     ASSERT_MSG(operand.type == ZYDIS_OPERAND_TYPE_MEMORY, "Expected memory operand, got type: {}",
                static_cast<u32>(operand.type));
 
@@ -121,25 +136,22 @@ static Xbyak::Address ZydisToXbyakMemoryOperand(void* address,
         ZyanU64 target{};
         ASSERT(ZYAN_SUCCESS(ZydisCalcAbsoluteAddress(&instruction, &operand,
                                                      reinterpret_cast<ZyanU64>(address), &target)));
-        return ptr[rip + reinterpret_cast<const void*>(target)];
+        return x64_mrip(target);
     }
 
-    Xbyak::RegExp expression{};
-    if (operand.mem.base != ZYDIS_REGISTER_NONE) {
-        expression = expression + ZydisToXbyakRegister(operand.mem.base);
-    }
-    if (operand.mem.index != ZYDIS_REGISTER_NONE) {
-        if (operand.mem.scale != 0) {
-            expression = expression + ZydisToXbyakRegister(operand.mem.index) * operand.mem.scale;
-        } else {
-            expression = expression + ZydisToXbyakRegister(operand.mem.index);
-        }
-    }
-    if (operand.mem.disp.size != 0 && operand.mem.disp.value != 0) {
-        expression = expression + operand.mem.disp.value;
-    }
+    const int base =
+        operand.mem.base != ZYDIS_REGISTER_NONE ? ZydisToPatchRegister(operand.mem.base).idx : -1;
+    const int index =
+        operand.mem.index != ZYDIS_REGISTER_NONE ? ZydisToPatchRegister(operand.mem.index).idx : -1;
+    const int scale = operand.mem.scale != 0 ? operand.mem.scale : 1;
+    const s32 disp = operand.mem.disp.size != 0 ? static_cast<s32>(operand.mem.disp.value) : 0;
+    return x64_mi(base, index, scale, disp);
+}
 
-    return ptr[expression];
+/// @m through gs
+static x64_mem_t Gs(x64_mem_t m) {
+    m.seg = X64_SEG_GS;
+    return m;
 }
 
 static bool FilterTcbAccess(const ZydisDecodedOperand* operands) {
@@ -154,7 +166,7 @@ static bool FilterTcbAccess(const ZydisDecodedOperand* operands) {
 }
 
 #if defined(_WIN32)
-static void RetrieveTcbPointer(Xbyak::Reg dst, Xbyak::CodeGenerator& c, ZyanI64 offset) {
+static void RetrieveTcbPointer(int dst, x64_code_t* c, ZyanI64 offset) {
     // The following logic is based on the Kernel32.dll asm of TlsGetValue
     static constexpr u32 TlsSlotsOffset = 0x1480;
     static constexpr u32 TlsExpansionSlotsOffset = 0x1780;
@@ -162,108 +174,121 @@ static void RetrieveTcbPointer(Xbyak::Reg dst, Xbyak::CodeGenerator& c, ZyanI64 
 
     const auto slot = GetTcbKey();
 
-    // Load the pointer to the table of TLS slots.
-    c.putSeg(gs);
+    // Load the pointer to the table of TLS slots (through gs).
     if (slot < TlsMinimumAvailable) {
         // Load the pointer to TLS slots.
-        c.mov(dst, ptr[reinterpret_cast<void*>(TlsSlotsOffset + slot * sizeof(LPVOID))]);
+        x64_mov_rm(c, 64, dst,
+                   Gs(x64_mabs(static_cast<s32>(TlsSlotsOffset + slot * sizeof(LPVOID)))));
     } else {
         const u32 tls_index = slot - TlsMinimumAvailable;
 
         // Load the pointer to the table of TLS expansion slots.
-        c.mov(dst, ptr[reinterpret_cast<void*>(TlsExpansionSlotsOffset)]);
+        x64_mov_rm(c, 64, dst, Gs(x64_mabs(TlsExpansionSlotsOffset)));
         // Load the pointer to our buffer.
-        c.mov(dst, qword[dst + tls_index * sizeof(LPVOID)]);
+        x64_mov_rm(c, 64, dst, x64_m(dst, static_cast<s32>(tls_index * sizeof(LPVOID))));
     }
     if (offset > 0) {
         // TCB starts with a pointer to self. Dereference this to get the correct data.
-        c.mov(dst, qword[dst + offset]);
+        x64_mov_rm(c, 64, dst, x64_m(dst, static_cast<s32>(offset)));
     }
 }
 #endif
 
 static void GenerateTcbAccess(void* address, const ZydisDecodedInstruction& instruction,
-                              const ZydisDecodedOperand* operands, Xbyak::CodeGenerator& c) {
-    const auto dst = ZydisToXbyakRegisterOperand(operands[0]);
+                              const ZydisDecodedOperand* operands, x64_code_t* c) {
+    const auto dst = ZydisToPatchRegisterOperand(operands[0]);
 
 #if defined(_WIN32)
-    RetrieveTcbPointer(dst, c, operands[1].mem.disp.value);
+    RetrieveTcbPointer(dst.idx, c, operands[1].mem.disp.value);
 #else
-    const auto src = ZydisToXbyakMemoryOperand(address, instruction, operands[1]);
+    const auto src = ZydisToPatchMemoryOperand(address, instruction, operands[1]);
 
     // Replace fs read with gs read.
-    c.putSeg(gs);
-    c.mov(dst, src);
+    x64_mov_rm(c, dst.bits, dst.idx, Gs(src));
 #endif
 }
 
 static void GenerateTcbCompare(void* address, const ZydisDecodedInstruction& instruction,
-                               const ZydisDecodedOperand* operands, Xbyak::CodeGenerator& c) {
-    const auto dst = ZydisToXbyakRegisterOperand(operands[0]);
+                               const ZydisDecodedOperand* operands, x64_code_t* c) {
+    const auto dst = ZydisToPatchRegisterOperand(operands[0]);
 
 #if defined(_WIN32)
     // Prepare a scratch register. Use rax where possible, rbx if rax is in use.
-    const Xbyak::Reg64 scratch = operands[0].reg.value == ZYDIS_REGISTER_RAX ? rbx : rax;
+    const int scratch = operands[0].reg.value == ZYDIS_REGISTER_RAX ? X64_RBX : X64_RAX;
 
     // Set rsp to before red zone and save scratch register
-    c.lea(rsp, ptr[rsp - 128]);
-    c.pushfq();
-    c.push(scratch);
+    x64_lea(c, X64_RSP, x64_m(X64_RSP, -128));
+    x64_pushfq(c);
+    x64_push(c, scratch);
 
     // Retrieve value from TCB and store it in the scratch register
     RetrieveTcbPointer(scratch, c, operands[1].mem.disp.value);
 
     // Perform compare op
-    c.cmp(dst, scratch);
+    x64_alu_rr(c, X64_CMP, dst.bits, dst.idx, scratch);
 
     // Restore registers
-    c.pop(scratch);
-    c.popfq();
-    c.lea(rsp, ptr[rsp + 128]);
+    x64_pop(c, scratch);
+    x64_popfq(c);
+    x64_lea(c, X64_RSP, x64_m(X64_RSP, 128));
 #else
-    const auto src = ZydisToXbyakMemoryOperand(address, instruction, operands[1]);
+    const auto src = ZydisToPatchMemoryOperand(address, instruction, operands[1]);
 
     // Replace fs compare with gs compare.
-    c.putSeg(gs);
-    c.cmp(dst, src);
+    x64_alu_rm(c, X64_CMP, dst.bits, dst.idx, Gs(src));
 #endif
 }
 
 static void GenerateTcbExclusiveOr(void* address, const ZydisDecodedInstruction& instruction,
-                                   const ZydisDecodedOperand* operands, Xbyak::CodeGenerator& c) {
-    const auto dst = ZydisToXbyakRegisterOperand(operands[0]);
+                                   const ZydisDecodedOperand* operands, x64_code_t* c) {
+    const auto dst = ZydisToPatchRegisterOperand(operands[0]);
 
 #if defined(_WIN32)
     // Prepare a scratch register. Use rax where possible, rbx if rax is in use.
-    const Xbyak::Reg64 scratch = operands[0].reg.value == ZYDIS_REGISTER_RAX ? rbx : rax;
+    const int scratch = operands[0].reg.value == ZYDIS_REGISTER_RAX ? X64_RBX : X64_RAX;
 
     // Set rsp to before red zone and save scratch register
-    c.lea(rsp, ptr[rsp - 128]);
-    c.pushfq();
-    c.push(scratch);
+    x64_lea(c, X64_RSP, x64_m(X64_RSP, -128));
+    x64_pushfq(c);
+    x64_push(c, scratch);
 
     // Retrieve value from TCB and store it in the scratch register
     RetrieveTcbPointer(scratch, c, operands[1].mem.disp.value);
 
     // Perform xor
-    c.xor_(dst, scratch);
+    x64_alu_rr(c, X64_XOR, dst.bits, dst.idx, scratch);
 
     // Restore registers
-    c.pop(scratch);
-    c.popfq();
-    c.lea(rsp, ptr[rsp + 128]);
+    x64_pop(c, scratch);
+    x64_popfq(c);
+    x64_lea(c, X64_RSP, x64_m(X64_RSP, 128));
 #else
-    const auto src = ZydisToXbyakMemoryOperand(address, instruction, operands[1]);
+    const auto src = ZydisToPatchMemoryOperand(address, instruction, operands[1]);
 
     // Replace fs xor with gs xor.
-    c.putSeg(gs);
-    c.xor_(dst, src);
+    x64_alu_rm(c, X64_XOR, dst.bits, dst.idx, Gs(src));
 #endif
 }
 
+/// CPUID @leaf: eax, ebx, ecx, edx
+static std::array<u32, 4> Cpuid(u32 leaf) {
+    std::array<u32, 4> r{};
+#if defined(_MSC_VER)
+    int regs[4];
+    __cpuid(regs, static_cast<int>(leaf));
+    std::memcpy(r.data(), regs, sizeof(regs));
+#else
+    __cpuid(leaf, r[0], r[1], r[2], r[3]);
+#endif
+    return r;
+}
+
 static bool FilterNoSSE4a(const ZydisDecodedOperand*) {
-    Cpu cpu;
-    return !cpu.has(Cpu::tSSE4a);
+    // CPUID 0x80000001: ECX bit 6, where the extended leaves go that far
+    if (Cpuid(0x80000000)[0] < 0x80000001) {
+        return true;
+    }
+    return (Cpuid(0x80000001)[2] & (1u << 6)) == 0;
 }
 
 static bool FilterIntelCPU(const ZydisDecodedOperand*) {
@@ -273,161 +298,169 @@ static bool FilterIntelCPU(const ZydisDecodedOperand*) {
     return true;
 #endif
 
-    Cpu cpu;
-    return cpu.has(Cpu::tINTEL);
+    // "GenuineIntel" in ebx, edx, ecx
+    const auto id = Cpuid(0);
+    return id[1] == 0x756e6547 && id[3] == 0x49656e69 && id[2] == 0x6c65746e;
 }
 
 static void GenerateReciprocalInstruction(void* address, const ZydisDecodedInstruction& instruction,
-                                          const ZydisDecodedOperand* operands,
-                                          Xbyak::CodeGenerator& c, bool rsqrt, bool vex) {
+                                          const ZydisDecodedOperand* operands, x64_code_t* c,
+                                          bool rsqrt, bool vex) {
     bool table_loaded = InitializeIndexTables();
     ASSERT_MSG(table_loaded, "Failed to load RCP index table");
 
     ASSERT_MSG(operands[0].type == ZYDIS_OPERAND_TYPE_REGISTER, "operand 0 must be a register");
 
-    const auto dst = ZydisToXbyakRegisterOperand(operands[0]);
+    const auto dst = ZydisToPatchRegisterOperand(operands[0]);
 
-    ASSERT_MSG(dst.isXMM() || dst.isYMM(), "operand 0 must be an XMM or YMM register");
+    ASSERT_MSG(dst.IsVector(), "operand 0 must be an XMM or YMM register");
     bool is_src_mem = operands[1].type == ZYDIS_OPERAND_TYPE_MEMORY;
 
+    // The registers' width is the destination's: xmm or ymm
+    const int l = dst.L();
     std::array<bool, 16> taken_vecs = {};
-    Xbyak::Xmm dst_reg;
-    Xbyak::Xmm src_reg;
+    int dst_reg;
+    int src_reg = 0;
 
     if (!is_src_mem) {
-        const auto src = ZydisToXbyakRegisterOperand(operands[1]);
-        src_reg = Xbyak::Xmm(src.getKind(), src.getIdx());
-        taken_vecs[src_reg.getIdx()] = true;
+        src_reg = ZydisToPatchRegisterOperand(operands[1]).idx;
+        taken_vecs[src_reg] = true;
     }
 
-    dst_reg = Xbyak::Xmm(dst.getKind(), dst.getIdx());
-    taken_vecs[dst_reg.getIdx()] = true;
+    dst_reg = dst.idx;
+    taken_vecs[dst_reg] = true;
 
-    const Xbyak::Reg64 scratch1 = rax;
-    const Xbyak::Reg64 scratch2 = rcx;
+    const int scratch1 = X64_RAX;
+    const int scratch2 = X64_RCX;
     auto it1 = std::find(taken_vecs.begin(), taken_vecs.end(), false);
     auto it2 = std::find(std::next(it1), taken_vecs.end(), false);
     auto it3 = std::find(std::next(it2), taken_vecs.end(), false);
     auto it4 = std::find(std::next(it3), taken_vecs.end(), false);
     auto it5 = std::find(std::next(it4), taken_vecs.end(), false);
-    const Xbyak::Xmm xmm_scratch1 = Xbyak::Xmm(dst.getKind(), it1 - taken_vecs.begin());
-    const Xbyak::Xmm xmm_scratch2 = Xbyak::Xmm(dst.getKind(), it2 - taken_vecs.begin());
-    const Xbyak::Xmm xmm_scratch3 = Xbyak::Xmm(dst.getKind(), it3 - taken_vecs.begin());
-    const Xbyak::Xmm src_storage = Xbyak::Xmm(dst.getKind(), it4 - taken_vecs.begin());
-    const Xbyak::Xmm nan_mask = Xbyak::Xmm(dst.getKind(), it5 - taken_vecs.begin());
+    const int xmm_scratch1 = static_cast<int>(it1 - taken_vecs.begin());
+    const int xmm_scratch2 = static_cast<int>(it2 - taken_vecs.begin());
+    const int xmm_scratch3 = static_cast<int>(it3 - taken_vecs.begin());
+    const int src_storage = static_cast<int>(it4 - taken_vecs.begin());
+    const int nan_mask = static_cast<int>(it5 - taken_vecs.begin());
     const int ymm_storage = is_src_mem ? 32 * 5 : 32 * 4;
 
-    // Set rsp to before red zone and save scratch registers
+    // Set rsp to before red zone and save scratch registers (whole ymm registers)
     const int rsp_disp = 128 + ymm_storage;
-    c.lea(rsp, ptr[rsp - rsp_disp]);
-    c.vmovups(ptr[rsp], xmm_scratch1.cvt256());
-    c.vmovups(ptr[rsp + 32], xmm_scratch2.cvt256());
-    c.vmovups(ptr[rsp + 64], xmm_scratch3.cvt256());
-    c.vmovups(ptr[rsp + 96], nan_mask.cvt256());
+    x64_lea(c, X64_RSP, x64_m(X64_RSP, -rsp_disp));
+    x64_vmovups_mr(c, 1, x64_m(X64_RSP, 0), xmm_scratch1);
+    x64_vmovups_mr(c, 1, x64_m(X64_RSP, 32), xmm_scratch2);
+    x64_vmovups_mr(c, 1, x64_m(X64_RSP, 64), xmm_scratch3);
+    x64_vmovups_mr(c, 1, x64_m(X64_RSP, 96), nan_mask);
     if (is_src_mem) {
-        c.vmovups(ptr[rsp + 128], src_storage.cvt256());
+        x64_vmovups_mr(c, 1, x64_m(X64_RSP, 128), src_storage);
     }
-    c.pushfq();
-    c.push(scratch1);
-    c.push(scratch2);
+    x64_pushfq(c);
+    x64_push(c, scratch1);
+    x64_push(c, scratch2);
 
     if (is_src_mem) {
         if (operands[1].mem.base == ZYDIS_REGISTER_RIP) {
             const u64 target = (u64)address + instruction.length + operands[1].mem.disp.value;
-            c.mov(rax, target);
-            c.vmovups(src_storage, ptr[rax]);
+            x64_mov_ri(c, 64, X64_RAX, target);
+            x64_vmovups_rm(c, l, src_storage, x64_m(X64_RAX, 0));
         } else {
             ZydisDecodedOperand operand = operands[1];
             if (operands[1].mem.base == ZYDIS_REGISTER_RSP) { // rsp can't be index
                 operand.mem.disp.size = 32;
                 operand.mem.disp.value += rsp_disp + 8 * 3; // Account for what we pushed
             }
-            Xbyak::Address mem = ZydisToXbyakMemoryOperand(address, instruction, operand);
-            c.vmovups(src_storage, mem);
+            x64_vmovups_rm(c, l, src_storage,
+                           ZydisToPatchMemoryOperand(address, instruction, operand));
         }
         src_reg = src_storage;
     }
     void* index_table = rsqrt ? rsqrt_index_table.data() : rcp_index_table.data();
     const int* xor_table = rsqrt ? rsqrt_xor_values.data() : rcp_xor_values.data();
-    c.mov(scratch1, reinterpret_cast<u64>(index_table));
-    c.mov(scratch2, reinterpret_cast<u64>(xor_table));
+    x64_mov_ri(c, 64, scratch1, reinterpret_cast<u64>(index_table));
+    x64_mov_ri(c, 64, scratch2, reinterpret_cast<u64>(xor_table));
     // Find NaNs in source
     // In non-VEX forms this will zero the top elements which will make the vblendvps
     // pick from dst_reg, thus preserving the top bits
-    c.vcmpunordps(nan_mask, src_reg, src_reg);
+    x64_vcmpps(c, l, nan_mask, src_reg, src_reg, 3); // unord
     // Set mask to all ones for the elements we'll load
-    c.vpcmpeqd(xmm_scratch2, xmm_scratch2, xmm_scratch2);
+    x64_vpcmpeqd(c, l, xmm_scratch2, xmm_scratch2, xmm_scratch2);
     // Load indices for active elements from table
-    c.vpsrld(xmm_scratch3, src_reg, 11);
-    c.vgatherdps(xmm_scratch1, ptr[scratch1 + xmm_scratch3], xmm_scratch2);
-    c.vpslld(xmm_scratch1, xmm_scratch1, 24);
-    c.vpsrld(xmm_scratch1, xmm_scratch1, 24);
+    x64_vpsrld_ri(c, l, xmm_scratch3, src_reg, 11);
+    x64_vgatherdps(c, l, xmm_scratch1, x64_mi(scratch1, xmm_scratch3, 1, 0), xmm_scratch2);
+    x64_vpslld_ri(c, l, xmm_scratch1, xmm_scratch1, 24);
+    x64_vpsrld_ri(c, l, xmm_scratch1, xmm_scratch1, 24);
     // Load XOR values using those indices
-    c.vpcmpeqd(xmm_scratch2, xmm_scratch2, xmm_scratch2); // vgather sets to zero
-    c.vgatherdps(xmm_scratch3, ptr[scratch2 + xmm_scratch1 * 4], xmm_scratch2);
+    x64_vpcmpeqd(c, l, xmm_scratch2, xmm_scratch2, xmm_scratch2); // vgather sets to zero
+    x64_vgatherdps(c, l, xmm_scratch3, x64_mi(scratch2, xmm_scratch1, 4, 0), xmm_scratch2);
     if (dst_reg == src_reg) {
         // The RCP would modify our source reg so we wouldn't be able to use it for NaN merging
-        c.vmovaps(xmm_scratch1, src_reg);
+        x64_vmovaps_rr(c, l, xmm_scratch1, src_reg);
         src_reg = xmm_scratch1;
     }
     if (vex) {
-        auto func = rsqrt ? &Xbyak::CodeGenerator::vrsqrtps : &Xbyak::CodeGenerator::vrcpps;
-        (c.*func)(dst_reg, src_reg);
-        c.vxorps(dst_reg, dst_reg, xmm_scratch3);
+        if (rsqrt) {
+            x64_vrsqrtps(c, l, dst_reg, src_reg);
+        } else {
+            x64_vrcpps(c, l, dst_reg, src_reg);
+        }
+        x64_vxorps_rrr(c, l, dst_reg, dst_reg, xmm_scratch3);
     } else {
         // Preserve top bits
-        auto func = rsqrt ? &Xbyak::CodeGenerator::rsqrtps : &Xbyak::CodeGenerator::rcpps;
-        (c.*func)(dst_reg, src_reg);
-        c.xorps(dst_reg, xmm_scratch3);
+        if (rsqrt) {
+            x64_rsqrtps(c, dst_reg, src_reg);
+        } else {
+            x64_rcpps(c, dst_reg, src_reg);
+        }
+        x64_xorps(c, dst_reg, xmm_scratch3);
     }
     // Merge NaNs back into dst
-    c.vblendvps(dst_reg.cvt256(), dst_reg.cvt256(), src_reg.cvt256(), nan_mask);
+    x64_vblendvps(c, 1, dst_reg, dst_reg, src_reg, nan_mask);
 
-    c.pop(scratch2);
-    c.pop(scratch1);
-    c.popfq();
+    x64_pop(c, scratch2);
+    x64_pop(c, scratch1);
+    x64_popfq(c);
     if (is_src_mem) {
-        c.vmovups(src_storage.cvt256(), ptr[rsp + 128]);
+        x64_vmovups_rm(c, 1, src_storage, x64_m(X64_RSP, 128));
     }
-    c.vmovups(nan_mask.cvt256(), ptr[rsp + 96]);
-    c.vmovups(xmm_scratch3.cvt256(), ptr[rsp + 64]);
-    c.vmovups(xmm_scratch2.cvt256(), ptr[rsp + 32]);
-    c.vmovups(xmm_scratch1.cvt256(), ptr[rsp]);
-    c.lea(rsp, ptr[rsp + rsp_disp]);
+    x64_vmovups_rm(c, 1, nan_mask, x64_m(X64_RSP, 96));
+    x64_vmovups_rm(c, 1, xmm_scratch3, x64_m(X64_RSP, 64));
+    x64_vmovups_rm(c, 1, xmm_scratch2, x64_m(X64_RSP, 32));
+    x64_vmovups_rm(c, 1, xmm_scratch1, x64_m(X64_RSP, 0));
+    x64_lea(c, X64_RSP, x64_m(X64_RSP, rsp_disp));
 }
 
 static void GenerateRSQRTPS(void* address, const ZydisDecodedInstruction& instruction,
-                            const ZydisDecodedOperand* operands, Xbyak::CodeGenerator& c) {
+                            const ZydisDecodedOperand* operands, x64_code_t* c) {
     GenerateReciprocalInstruction(address, instruction, operands, c, true, false);
 }
 
 static void GenerateVRSQRTPS(void* address, const ZydisDecodedInstruction& instruction,
-                             const ZydisDecodedOperand* operands, Xbyak::CodeGenerator& c) {
+                             const ZydisDecodedOperand* operands, x64_code_t* c) {
     GenerateReciprocalInstruction(address, instruction, operands, c, true, true);
 }
 
 static void GenerateRCPPS(void* address, const ZydisDecodedInstruction& instruction,
-                          const ZydisDecodedOperand* operands, Xbyak::CodeGenerator& c) {
+                          const ZydisDecodedOperand* operands, x64_code_t* c) {
     GenerateReciprocalInstruction(address, instruction, operands, c, false, false);
 }
 
 static void GenerateVRCPPS(void* address, const ZydisDecodedInstruction& instruction,
-                           const ZydisDecodedOperand* operands, Xbyak::CodeGenerator& c) {
+                           const ZydisDecodedOperand* operands, x64_code_t* c) {
     GenerateReciprocalInstruction(address, instruction, operands, c, false, true);
 }
 
 static void GenerateEXTRQ(void* /* address */, const ZydisDecodedInstruction&,
-                          const ZydisDecodedOperand* operands, Xbyak::CodeGenerator& c) {
+                          const ZydisDecodedOperand* operands, x64_code_t* c) {
     bool immediateForm = operands[1].type == ZYDIS_OPERAND_TYPE_IMMEDIATE &&
                          operands[2].type == ZYDIS_OPERAND_TYPE_IMMEDIATE;
 
     ASSERT_MSG(operands[0].type == ZYDIS_OPERAND_TYPE_REGISTER, "operand 0 must be a register");
 
-    const auto dst = ZydisToXbyakRegisterOperand(operands[0]);
+    const auto dst = ZydisToPatchRegisterOperand(operands[0]);
 
-    ASSERT_MSG(dst.isXMM(), "operand 0 must be an XMM register");
+    ASSERT_MSG(dst.bits == 128, "operand 0 must be an XMM register");
 
-    Xbyak::Xmm xmm_dst = *reinterpret_cast<const Xbyak::Xmm*>(&dst);
+    const int xmm_dst = dst.idx;
 
     if (immediateForm) {
         u8 length = operands[1].imm.value.u & 0x3F;
@@ -435,14 +468,14 @@ static void GenerateEXTRQ(void* /* address */, const ZydisDecodedInstruction&,
 
         LOG_DEBUG(Core, "Patching immediate form EXTRQ, length: {}, index: {}", length, index);
 
-        const Xbyak::Reg64 scratch1 = rax;
-        const Xbyak::Reg64 scratch2 = rcx;
+        const int scratch1 = X64_RAX;
+        const int scratch2 = X64_RCX;
 
         // Set rsp to before red zone and save scratch registers
-        c.lea(rsp, ptr[rsp - 128]);
-        c.pushfq();
-        c.push(scratch1);
-        c.push(scratch2);
+        x64_lea(c, X64_RSP, x64_m(X64_RSP, -128));
+        x64_pushfq(c);
+        x64_push(c, scratch1);
+        x64_push(c, scratch2);
 
         u64 mask;
         if (length == 0) {
@@ -457,25 +490,25 @@ static void GenerateEXTRQ(void* /* address */, const ZydisDecodedInstruction&,
         }
 
         // Get lower qword from xmm register
-        c.vmovq(scratch1, xmm_dst);
+        x64_vmovq_rx(c, scratch1, xmm_dst);
 
         if (index != 0) {
-            c.shr(scratch1, index);
+            x64_shift_ri(c, X64_SHR, 64, scratch1, index);
         }
 
         // We need to move mask to a register because we can't use all the possible
         // immediate values with `and reg, imm32`
-        c.mov(scratch2, mask);
-        c.and_(scratch1, scratch2);
+        x64_mov_ri(c, 64, scratch2, mask);
+        x64_alu_rr(c, X64_AND, 64, scratch1, scratch2);
 
         // Writeback to xmm register, extrq instruction says top 64-bits are undefined but zeroed on
         // AMD CPUs
-        c.vmovq(xmm_dst, scratch1);
+        x64_vmovq_xr(c, xmm_dst, scratch1);
 
-        c.pop(scratch2);
-        c.pop(scratch1);
-        c.popfq();
-        c.lea(rsp, ptr[rsp + 128]);
+        x64_pop(c, scratch2);
+        x64_pop(c, scratch1);
+        x64_popfq(c);
+        x64_lea(c, X64_RSP, x64_m(X64_RSP, 128));
     } else {
         ASSERT_MSG(operands[0].type == ZYDIS_OPERAND_TYPE_REGISTER &&
                        operands[1].type == ZYDIS_OPERAND_TYPE_REGISTER &&
@@ -485,61 +518,61 @@ static void GenerateEXTRQ(void* /* address */, const ZydisDecodedInstruction&,
                        operands[1].reg.value <= ZYDIS_REGISTER_XMM15,
                    "Unexpected operand types for EXTRQ instruction");
 
-        const auto src = ZydisToXbyakRegisterOperand(operands[1]);
+        const auto src = ZydisToPatchRegisterOperand(operands[1]);
 
-        ASSERT_MSG(src.isXMM(), "operand 1 must be an XMM register");
+        ASSERT_MSG(src.bits == 128, "operand 1 must be an XMM register");
 
-        Xbyak::Xmm xmm_src = *reinterpret_cast<const Xbyak::Xmm*>(&src);
+        const int xmm_src = src.idx;
 
-        const Xbyak::Reg64 scratch1 = rax;
-        const Xbyak::Reg64 scratch2 = rcx;
-        const Xbyak::Reg64 mask = rdx;
+        const int scratch1 = X64_RAX;
+        const int scratch2 = X64_RCX;
+        const int mask = X64_RDX;
 
-        Xbyak::Label length_zero, end;
+        size_t length_zero, end;
 
-        c.lea(rsp, ptr[rsp - 128]);
-        c.pushfq();
-        c.push(scratch1);
-        c.push(scratch2);
-        c.push(mask);
+        x64_lea(c, X64_RSP, x64_m(X64_RSP, -128));
+        x64_pushfq(c);
+        x64_push(c, scratch1);
+        x64_push(c, scratch2);
+        x64_push(c, mask);
 
         // Construct the mask out of the length that resides in bottom 6 bits of source xmm
-        c.vmovq(scratch1, xmm_src);
-        c.mov(scratch2, scratch1);
-        c.and_(scratch2, 0x3F);
-        c.jz(length_zero);
+        x64_vmovq_rx(c, scratch1, xmm_src);
+        x64_mov_rr(c, 64, scratch2, scratch1);
+        x64_alu_ri(c, X64_AND, 64, scratch2, 0x3F);
+        length_zero = x64_jcc_fwd(c, X64_CC_Z);
 
         // mask = (1ULL << length) - 1
-        c.mov(mask, 1);
-        c.shl(mask, cl);
-        c.dec(mask);
-        c.jmp(end);
+        x64_mov_ri(c, 64, mask, 1);
+        x64_shift_rcl(c, X64_SHL, 64, mask);
+        x64_dec(c, 64, mask);
+        end = x64_jmp_fwd(c);
 
-        c.L(length_zero);
-        c.mov(mask, 0xFFFF'FFFF'FFFF'FFFF);
+        x64_bind(c, length_zero);
+        x64_mov_ri(c, 64, mask, 0xFFFF'FFFF'FFFF'FFFF);
 
-        c.L(end);
+        x64_bind(c, end);
 
         // Get the shift amount and store it in scratch2
-        c.shr(scratch1, 8);
-        c.and_(scratch1, 0x3F);
-        c.mov(scratch2, scratch1); // cl now contains the shift amount
+        x64_shift_ri(c, X64_SHR, 64, scratch1, 8);
+        x64_alu_ri(c, X64_AND, 64, scratch1, 0x3F);
+        x64_mov_rr(c, 64, scratch2, scratch1); // cl now contains the shift amount
 
-        c.vmovq(scratch1, xmm_dst);
-        c.shr(scratch1, cl);
-        c.and_(scratch1, mask);
-        c.vmovq(xmm_dst, scratch1);
+        x64_vmovq_rx(c, scratch1, xmm_dst);
+        x64_shift_rcl(c, X64_SHR, 64, scratch1);
+        x64_alu_rr(c, X64_AND, 64, scratch1, mask);
+        x64_vmovq_xr(c, xmm_dst, scratch1);
 
-        c.pop(mask);
-        c.pop(scratch2);
-        c.pop(scratch1);
-        c.popfq();
-        c.lea(rsp, ptr[rsp + 128]);
+        x64_pop(c, mask);
+        x64_pop(c, scratch2);
+        x64_pop(c, scratch1);
+        x64_popfq(c);
+        x64_lea(c, X64_RSP, x64_m(X64_RSP, 128));
     }
 }
 
 static void GenerateINSERTQ(void* /* address */, const ZydisDecodedInstruction&,
-                            const ZydisDecodedOperand* operands, Xbyak::CodeGenerator& c) {
+                            const ZydisDecodedOperand* operands, x64_code_t* c) {
     bool immediateForm = operands[2].type == ZYDIS_OPERAND_TYPE_IMMEDIATE &&
                          operands[3].type == ZYDIS_OPERAND_TYPE_IMMEDIATE;
 
@@ -547,28 +580,28 @@ static void GenerateINSERTQ(void* /* address */, const ZydisDecodedInstruction&,
                    operands[1].type == ZYDIS_OPERAND_TYPE_REGISTER,
                "operands 0 and 1 must be registers.");
 
-    const auto dst = ZydisToXbyakRegisterOperand(operands[0]);
-    const auto src = ZydisToXbyakRegisterOperand(operands[1]);
+    const auto dst = ZydisToPatchRegisterOperand(operands[0]);
+    const auto src = ZydisToPatchRegisterOperand(operands[1]);
 
-    ASSERT_MSG(dst.isXMM() && src.isXMM(), "operands 0 and 1 must be xmm registers.");
+    ASSERT_MSG(dst.bits == 128 && src.bits == 128, "operands 0 and 1 must be xmm registers.");
 
-    Xbyak::Xmm xmm_dst = *reinterpret_cast<const Xbyak::Xmm*>(&dst);
-    Xbyak::Xmm xmm_src = *reinterpret_cast<const Xbyak::Xmm*>(&src);
+    const int xmm_dst = dst.idx;
+    const int xmm_src = src.idx;
 
     if (immediateForm) {
         u8 length = operands[2].imm.value.u & 0x3F;
         u8 index = operands[3].imm.value.u & 0x3F;
 
-        const Xbyak::Reg64 scratch1 = rax;
-        const Xbyak::Reg64 scratch2 = rcx;
-        const Xbyak::Reg64 mask = rdx;
+        const int scratch1 = X64_RAX;
+        const int scratch2 = X64_RCX;
+        const int mask = X64_RDX;
 
         // Set rsp to before red zone and save scratch registers
-        c.lea(rsp, ptr[rsp - 128]);
-        c.pushfq();
-        c.push(scratch1);
-        c.push(scratch2);
-        c.push(mask);
+        x64_lea(c, X64_RSP, x64_m(X64_RSP, -128));
+        x64_pushfq(c);
+        x64_push(c, scratch1);
+        x64_push(c, scratch2);
+        x64_push(c, mask);
 
         u64 mask_value;
         if (length == 0) {
@@ -582,101 +615,102 @@ static void GenerateINSERTQ(void* /* address */, const ZydisDecodedInstruction&,
             mask_value = 0xFFFF'FFFF'FFFF'FFFF;
         }
 
-        c.vmovq(scratch1, xmm_src);
-        c.vmovq(scratch2, xmm_dst);
-        c.mov(mask, mask_value);
+        x64_vmovq_rx(c, scratch1, xmm_src);
+        x64_vmovq_rx(c, scratch2, xmm_dst);
+        x64_mov_ri(c, 64, mask, mask_value);
 
         // src &= mask
-        c.and_(scratch1, mask);
+        x64_alu_rr(c, X64_AND, 64, scratch1, mask);
 
         // src <<= index
-        c.shl(scratch1, index);
+        x64_shift_ri(c, X64_SHL, 64, scratch1, index);
 
         // dst &= ~(mask << index)
         mask_value = ~(mask_value << index);
-        c.mov(mask, mask_value);
-        c.and_(scratch2, mask);
+        x64_mov_ri(c, 64, mask, mask_value);
+        x64_alu_rr(c, X64_AND, 64, scratch2, mask);
 
         // dst |= src
-        c.or_(scratch2, scratch1);
+        x64_alu_rr(c, X64_OR, 64, scratch2, scratch1);
 
         // Insert scratch2 into low 64 bits of dst, upper 64 bits are undefined but zeroed on AMD
         // CPUs
-        c.vmovq(xmm_dst, scratch2);
+        x64_vmovq_xr(c, xmm_dst, scratch2);
 
-        c.pop(mask);
-        c.pop(scratch2);
-        c.pop(scratch1);
-        c.popfq();
-        c.lea(rsp, ptr[rsp + 128]);
+        x64_pop(c, mask);
+        x64_pop(c, scratch2);
+        x64_pop(c, scratch1);
+        x64_popfq(c);
+        x64_lea(c, X64_RSP, x64_m(X64_RSP, 128));
     } else {
         ASSERT_MSG(operands[2].type == ZYDIS_OPERAND_TYPE_UNUSED &&
                        operands[3].type == ZYDIS_OPERAND_TYPE_UNUSED,
                    "operands 2 and 3 must be unused for register form.");
 
-        const Xbyak::Reg64 scratch1 = rax;
-        const Xbyak::Reg64 scratch2 = rcx;
-        const Xbyak::Reg64 index = rdx;
-        const Xbyak::Reg64 mask = rbx;
+        const int scratch1 = X64_RAX;
+        const int scratch2 = X64_RCX;
+        const int index = X64_RDX;
+        const int mask = X64_RBX;
 
-        Xbyak::Label length_zero, end;
+        size_t length_zero, end;
 
-        c.lea(rsp, ptr[rsp - 128]);
-        c.pushfq();
-        c.push(scratch1);
-        c.push(scratch2);
-        c.push(index);
-        c.push(mask);
+        x64_lea(c, X64_RSP, x64_m(X64_RSP, -128));
+        x64_pushfq(c);
+        x64_push(c, scratch1);
+        x64_push(c, scratch2);
+        x64_push(c, index);
+        x64_push(c, mask);
 
         // Get upper 64 bits of src and copy it to mask and index
-        c.vpextrq(index, xmm_src, 1);
-        c.mov(mask, index);
+        x64_vpextrq(c, index, xmm_src, 1);
+        x64_mov_rr(c, 64, mask, index);
 
         // When length is 0, set it to 64
-        c.and_(mask, 0x3F); // mask now holds the length
-        c.jz(length_zero);  // Check if length is 0 and set mask to all 1s if it is
+        x64_alu_ri(c, X64_AND, 64, mask, 0x3F); // mask now holds the length
+        length_zero =
+            x64_jcc_fwd(c, X64_CC_Z); // Check if length is 0 and set mask to all 1s if it is
 
         // Create a mask out of the length
-        c.mov(cl, mask.cvt8());
-        c.mov(mask, 1);
-        c.shl(mask, cl);
-        c.dec(mask);
-        c.jmp(end);
+        x64_mov_rr(c, 8, X64_RCX, mask);
+        x64_mov_ri(c, 64, mask, 1);
+        x64_shift_rcl(c, X64_SHL, 64, mask);
+        x64_dec(c, 64, mask);
+        end = x64_jmp_fwd(c);
 
-        c.L(length_zero);
-        c.mov(mask, 0xFFFF'FFFF'FFFF'FFFF);
+        x64_bind(c, length_zero);
+        x64_mov_ri(c, 64, mask, 0xFFFF'FFFF'FFFF'FFFF);
 
-        c.L(end);
+        x64_bind(c, end);
         // Get index to insert at
-        c.shr(index, 8);
-        c.and_(index, 0x3F);
+        x64_shift_ri(c, X64_SHR, 64, index, 8);
+        x64_alu_ri(c, X64_AND, 64, index, 0x3F);
 
         // src &= mask
-        c.vmovq(scratch1, xmm_src);
-        c.and_(scratch1, mask);
+        x64_vmovq_rx(c, scratch1, xmm_src);
+        x64_alu_rr(c, X64_AND, 64, scratch1, mask);
 
         // mask = ~(mask << index)
-        c.mov(cl, index.cvt8());
-        c.shl(mask, cl);
-        c.not_(mask);
+        x64_mov_rr(c, 8, X64_RCX, index);
+        x64_shift_rcl(c, X64_SHL, 64, mask);
+        x64_not(c, 64, mask);
 
         // src <<= index
-        c.shl(scratch1, cl);
+        x64_shift_rcl(c, X64_SHL, 64, scratch1);
 
         // dst = (dst & mask) | src
-        c.vmovq(scratch2, xmm_dst);
-        c.and_(scratch2, mask);
-        c.or_(scratch2, scratch1);
+        x64_vmovq_rx(c, scratch2, xmm_dst);
+        x64_alu_rr(c, X64_AND, 64, scratch2, mask);
+        x64_alu_rr(c, X64_OR, 64, scratch2, scratch1);
 
         // Upper 64 bits are undefined in insertq but AMD CPUs zero them
-        c.vmovq(xmm_dst, scratch2);
+        x64_vmovq_xr(c, xmm_dst, scratch2);
 
-        c.pop(mask);
-        c.pop(index);
-        c.pop(scratch2);
-        c.pop(scratch1);
-        c.popfq();
-        c.lea(rsp, ptr[rsp + 128]);
+        x64_pop(c, mask);
+        x64_pop(c, index);
+        x64_pop(c, scratch2);
+        x64_pop(c, scratch1);
+        x64_popfq(c);
+        x64_lea(c, X64_RSP, x64_m(X64_RSP, 128));
     }
 }
 
@@ -709,12 +743,12 @@ static void ReplaceMOVNT(void* address, u8 rep_prefix) {
 }
 
 static void ReplaceMOVNTSS(void* address, const ZydisDecodedInstruction&,
-                           const ZydisDecodedOperand*, Xbyak::CodeGenerator&) {
+                           const ZydisDecodedOperand*, x64_code_t*) {
     ReplaceMOVNT(address, 0xF3);
 }
 
 static void ReplaceMOVNTSD(void* address, const ZydisDecodedInstruction&,
-                           const ZydisDecodedOperand*, Xbyak::CodeGenerator&) {
+                           const ZydisDecodedOperand*, x64_code_t*) {
     ReplaceMOVNT(address, 0xF2);
 }
 
@@ -729,32 +763,32 @@ static bool FilterNegatedScalarCompare(const ZydisDecodedOperand* operands) {
 
 // Compares with the non-negated predicate and flips lane 0, which gives the same bits.
 static void GenerateNegatedScalarCompare(void* address, const ZydisDecodedInstruction& instruction,
-                                         const ZydisDecodedOperand* operands,
-                                         Xbyak::CodeGenerator& c) {
-    const auto dst = ZydisToXbyakRegisterOperand(operands[0]);
-    const auto src1 = ZydisToXbyakRegisterOperand(operands[1]);
-    const auto& xmm_dst = *reinterpret_cast<const Xbyak::Xmm*>(&dst);
-    const auto& xmm_src1 = *reinterpret_cast<const Xbyak::Xmm*>(&src1);
+                                         const ZydisDecodedOperand* operands, x64_code_t* c) {
+    const int xmm_dst = ZydisToPatchRegisterOperand(operands[0]).idx;
+    const int xmm_src1 = ZydisToPatchRegisterOperand(operands[1]).idx;
     const u8 predicate = operands[3].imm.value.u & 3;
     if (operands[2].type == ZYDIS_OPERAND_TYPE_REGISTER) {
-        c.vcmpss(xmm_dst, xmm_src1, ZydisToXbyakRegisterOperand(operands[2]), predicate);
+        x64_vcmpss_rrr(c, xmm_dst, xmm_src1, ZydisToPatchRegisterOperand(operands[2]).idx,
+                       predicate);
     } else {
-        c.vcmpss(xmm_dst, xmm_src1, ZydisToXbyakMemoryOperand(address, instruction, operands[2]),
-                 predicate);
+        x64_vcmpss_rrm(c, xmm_dst, xmm_src1,
+                       ZydisToPatchMemoryOperand(address, instruction, operands[2]), predicate);
     }
-    Xbyak::Label lane0_mask, done;
-    c.vxorps(xmm_dst, xmm_dst, ptr[rip + lane0_mask]);
-    c.jmp(done);
-    c.L(lane0_mask);
-    c.dq(0xFFFFFFFF);
-    c.dq(0);
-    c.L(done);
+    // The lane 0 mask lies after the vxorps and the 2-byte jump over the mask. A rip-relative
+    // vxorps of xmm registers always takes the 2-byte VEX: 8 bytes in all
+    const u8* vx = x64_curr(c);
+    x64_vxorps_rrm(c, 0, xmm_dst, xmm_dst, x64_mrip(reinterpret_cast<u64>(vx + 8 + 2)));
+    ASSERT(c->error || x64_curr(c) == vx + 8);
+    const size_t done = x64_jmp_fwd(c);
+    x64_dq(c, 0xFFFFFFFF);
+    x64_dq(c, 0);
+    x64_bind(c, done);
 }
 #endif
 
 using PatchFilter = bool (*)(const ZydisDecodedOperand*);
 using InstructionGenerator = void (*)(void*, const ZydisDecodedInstruction&,
-                                      const ZydisDecodedOperand*, Xbyak::CodeGenerator&);
+                                      const ZydisDecodedOperand*, x64_code_t*);
 struct PatchInfo {
     /// Filter for more granular patch conditions past just the instruction mnemonic.
     PatchFilter filter;
@@ -812,32 +846,33 @@ struct PatchModule {
     /// Tracker for patched code locations.
     std::set<u8*> patched;
 
-    /// Code generator for patching the module.
-    Xbyak::CodeGenerator patch_gen;
+    /// Code written over the module's own, where it is.
+    x64_code_t patch_gen{};
 
-    /// Code generator for writing trampoline patches.
-    Xbyak::CodeGenerator trampoline_gen;
+    /// Code written into the module's trampoline area.
+    x64_code_t trampoline_gen{};
 
     /// Prevents repeated generation attempts after the fixed trampoline area is exhausted.
     bool trampoline_exhausted{};
 
     PatchModule(u8* module_ptr, const u64 module_size, u8* trampoline_ptr,
                 const u64 trampoline_size)
-        : start(module_ptr), end(module_ptr + module_size), patch_gen(module_size, module_ptr),
-          trampoline_gen(trampoline_size, trampoline_ptr) {}
+        : start(module_ptr), end(module_ptr + module_size) {
+        x64_init(&patch_gen, module_ptr, module_size);
+        x64_init(&trampoline_gen, trampoline_ptr, trampoline_size);
+    }
 };
 static std::map<u64, PatchModule> modules;
 
-static bool HandleTrampolineError(PatchModule* module, const Xbyak::Error& error) {
-    if (static_cast<int>(error) != Xbyak::ERR_CODE_IS_TOO_BIG) {
-        return false;
-    }
+/// A trampoline that did not fit, its code dropped from @at on: the area is full
+static void TrampolineFull(PatchModule* module, size_t at) {
+    module->trampoline_gen.size = at;
+    module->trampoline_gen.error = 0;
     if (!module->trampoline_exhausted) {
         LOG_WARNING(Core, "Patch trampoline space exhausted for module at {}",
                     fmt::ptr(module->start));
         module->trampoline_exhausted = true;
     }
-    return true;
 }
 
 static PatchModule* GetModule(const void* ptr) {
@@ -884,34 +919,33 @@ static std::pair<bool, u64> TryPatch(u8* code, PatchModule* module, bool allow_t
                     return std::make_pair(false, instruction.length);
                 }
 
-                // Reset state and move to current code position.
-                patch_gen.reset();
-                patch_gen.setSize(code - patch_gen.getCode());
+                // Move to the current code position.
+                patch_gen.error = 0;
+                patch_gen.size = code - patch_gen.p;
 
                 if (needs_trampoline) {
                     auto& trampoline_gen = module->trampoline_gen;
-                    const size_t trampoline_offset = trampoline_gen.getSize();
-                    const auto trampoline_ptr = trampoline_gen.getCurr();
-                    try {
-                        patch_info.generator(code, instruction, operands, trampoline_gen);
+                    const size_t trampoline_offset = trampoline_gen.size;
+                    const auto trampoline_ptr = x64_curr(&trampoline_gen);
+                    patch_info.generator(code, instruction, operands, &trampoline_gen);
 
-                        // Return to the following instruction at the end of the trampoline.
-                        trampoline_gen.jmp(code + instruction.length);
-                    } catch (const Xbyak::Error& error) {
-                        trampoline_gen.setSize(trampoline_offset);
-                        if (HandleTrampolineError(module, error)) {
-                            return std::make_pair(false, instruction.length);
-                        }
-                        throw;
+                    // Return to the following instruction at the end of the trampoline.
+                    x64_jmp(&trampoline_gen, reinterpret_cast<u64>(code + instruction.length),
+                            X64_JMP_AUTO);
+                    if (trampoline_gen.error) {
+                        TrampolineFull(module, trampoline_offset);
+                        return std::make_pair(false, instruction.length);
                     }
 
                     // Replace instruction with near jump to the trampoline.
-                    patch_gen.jmp(trampoline_ptr, Xbyak::CodeGenerator::LabelType::T_NEAR);
+                    x64_jmp(&patch_gen, reinterpret_cast<u64>(trampoline_ptr), X64_JMP_NEAR);
                 } else {
-                    patch_info.generator(code, instruction, operands, patch_gen);
+                    patch_info.generator(code, instruction, operands, &patch_gen);
                 }
+                ASSERT_MSG(!patch_gen.error, "Patch past the end of the module at {}",
+                           fmt::ptr(code));
 
-                const auto patch_size = patch_gen.getCurr() - code;
+                const auto patch_size = x64_curr(&patch_gen) - code;
                 if (patch_size > 0) {
                     ASSERT_MSG(instruction.length >= patch_size,
                                "Instruction {} with length {} is too short to replace at: {}",
@@ -919,7 +953,7 @@ static std::pair<bool, u64> TryPatch(u8* code, PatchModule* module, bool allow_t
                                fmt::ptr(code));
 
                     // Fill remaining space with nops.
-                    patch_gen.nop(instruction.length - patch_size);
+                    x64_nop(&patch_gen, instruction.length - patch_size);
 
                     module->patched.insert(code);
                     LOG_DEBUG(Core, "Patched instruction '{}' at: {}",
@@ -1731,8 +1765,7 @@ void AnalyzeRedZoneLiveness(DecodedFunction& function) {
     }
 }
 
-bool EncodeRelocatedInstruction(const DecodedCodeInstruction& decoded,
-                                Xbyak::CodeGenerator& generator) {
+bool EncodeRelocatedInstruction(const DecodedCodeInstruction& decoded, x64_code_t* generator) {
     ZydisEncoderRequest request;
     if (!ZYAN_SUCCESS(ZydisEncoderDecodedInstructionToEncoderRequest(
             &decoded.instruction, decoded.operands.data(),
@@ -1765,15 +1798,14 @@ bool EncodeRelocatedInstruction(const DecodedCodeInstruction& decoded,
     ZyanUSize encoded_size = encoded.size();
     if (!ZYAN_SUCCESS(ZydisEncoderEncodeInstructionAbsolute(
             &request, encoded.data(), &encoded_size,
-            reinterpret_cast<ZyanU64>(generator.getCurr())))) {
+            reinterpret_cast<ZyanU64>(x64_curr(generator))))) {
         return false;
     }
-    generator.db(encoded.data(), encoded_size);
+    x64_db(generator, encoded.data(), encoded_size);
     return true;
 }
 
-bool GenerateProtectedIndirectCall(const DecodedCodeInstruction& decoded,
-                                   Xbyak::CodeGenerator& generator) {
+bool GenerateProtectedIndirectCall(const DecodedCodeInstruction& decoded, x64_code_t* generator) {
     ASSERT(decoded.instruction.meta.category == ZYDIS_CATEGORY_CALL);
     const auto& target = decoded.operands[0];
     ASSERT(target.type == ZYDIS_OPERAND_TYPE_MEMORY && target.size == sizeof(uintptr_t) * CHAR_BIT);
@@ -1805,21 +1837,22 @@ bool GenerateProtectedIndirectCall(const DecodedCodeInstruction& decoded,
         request.operands[1].mem.displacement = static_cast<ZyanI64>(absolute_address);
     }
 
-    generator.lea(rsp, ptr[rsp - GuestRedZoneSize]);
-    generator.push(r11);
+    x64_lea(generator, X64_RSP, x64_m(X64_RSP, -static_cast<s32>(GuestRedZoneSize)));
+    x64_push(generator, X64_R11);
 
     std::array<u8, ZYDIS_MAX_INSTRUCTION_LENGTH> encoded{};
     ZyanUSize encoded_size = encoded.size();
     if (!ZYAN_SUCCESS(ZydisEncoderEncodeInstructionAbsolute(
             &request, encoded.data(), &encoded_size,
-            reinterpret_cast<ZyanU64>(generator.getCurr())))) {
+            reinterpret_cast<ZyanU64>(x64_curr(generator))))) {
         return false;
     }
-    generator.db(encoded.data(), encoded_size);
+    x64_db(generator, encoded.data(), encoded_size);
 
-    generator.xchg(r11, ptr[rsp]);
-    generator.lea(rsp, ptr[rsp + GuestRedZoneSize + sizeof(uintptr_t)]);
-    generator.call(ptr[rsp - GuestRedZoneSize - sizeof(uintptr_t)]);
+    x64_xchg_rm(generator, X64_R11, x64_m(X64_RSP, 0));
+    x64_lea(generator, X64_RSP,
+            x64_m(X64_RSP, static_cast<s32>(GuestRedZoneSize + sizeof(uintptr_t))));
+    x64_call_m(generator, x64_m(X64_RSP, -static_cast<s32>(GuestRedZoneSize + sizeof(uintptr_t))));
     return true;
 }
 
@@ -1965,11 +1998,12 @@ static RedZonePatchResult PatchSegmentStatically(u64 segment_addr, u64 segment_s
             };
 
             const auto emit_span = [&](const RelocationSpan& span) -> std::optional<size_t> {
-                const size_t trampoline_offset = module->trampoline_gen.getSize();
+                x64_code_t* tg = &module->trampoline_gen;
+                const size_t trampoline_offset = tg->size;
                 if (module->trampoline_exhausted) {
                     return std::nullopt;
                 }
-                try {
+                {
                     for (const auto* decoded : span.instructions) {
                         const auto rewrite = rewrite_sites.find(decoded->address);
                         const bool protected_indirect_call =
@@ -1979,33 +2013,35 @@ static RedZonePatchResult PatchSegmentStatically(u64 segment_addr, u64 segment_s
                                                       rewrite->second.protect_red_zone &&
                                                       !protected_indirect_call;
                         if (protect_red_zone) {
-                            module->trampoline_gen.lea(rsp, ptr[rsp - GuestRedZoneSize]);
+                            x64_lea(tg, X64_RSP,
+                                    x64_m(X64_RSP, -static_cast<s32>(GuestRedZoneSize)));
                         }
                         if (protected_indirect_call) {
-                            if (!GenerateProtectedIndirectCall(*decoded, module->trampoline_gen)) {
-                                module->trampoline_gen.setSize(trampoline_offset);
+                            if (!GenerateProtectedIndirectCall(*decoded, tg)) {
+                                tg->size = trampoline_offset;
+                                tg->error = 0;
                                 return std::nullopt;
                             }
                         } else if (rewrite != rewrite_sites.end() &&
                                    rewrite->second.cpu_patch != nullptr) {
                             rewrite->second.cpu_patch->generator(
                                 reinterpret_cast<void*>(decoded->address), decoded->instruction,
-                                decoded->operands.data(), module->trampoline_gen);
-                        } else if (!EncodeRelocatedInstruction(*decoded, module->trampoline_gen)) {
-                            module->trampoline_gen.setSize(trampoline_offset);
+                                decoded->operands.data(), tg);
+                        } else if (!EncodeRelocatedInstruction(*decoded, tg)) {
+                            tg->size = trampoline_offset;
+                            tg->error = 0;
                             return std::nullopt;
                         }
                         if (protect_red_zone && !decoded->replaces_stack_pointer) {
-                            module->trampoline_gen.lea(rsp, ptr[rsp + GuestRedZoneSize]);
+                            x64_lea(tg, X64_RSP,
+                                    x64_m(X64_RSP, static_cast<s32>(GuestRedZoneSize)));
                         }
                     }
-                    module->trampoline_gen.jmp(reinterpret_cast<void*>(span.continuation));
-                } catch (const Xbyak::Error& error) {
-                    module->trampoline_gen.setSize(trampoline_offset);
-                    if (HandleTrampolineError(module, error)) {
-                        return std::nullopt;
-                    }
-                    throw;
+                    x64_jmp(tg, span.continuation, X64_JMP_AUTO);
+                }
+                if (tg->error) {
+                    TrampolineFull(module, trampoline_offset);
+                    return std::nullopt;
                 }
                 return trampoline_offset;
             };
@@ -2119,14 +2155,13 @@ static RedZonePatchResult PatchSegmentStatically(u64 segment_addr, u64 segment_s
                 }
 
                 const auto& span = *selected_span;
-                const auto* trampoline = module->trampoline_gen.getCode() + *trampoline_offset;
+                const auto* trampoline = module->trampoline_gen.p + *trampoline_offset;
 
                 auto& patch_gen = module->patch_gen;
-                patch_gen.reset();
-                patch_gen.setSize(span.patch_start -
-                                  reinterpret_cast<uintptr_t>(patch_gen.getCode()));
-                patch_gen.jmp(trampoline, Xbyak::CodeGenerator::LabelType::T_NEAR);
-                patch_gen.nop(span.patch_size - NearJumpSize);
+                patch_gen.error = 0;
+                patch_gen.size = span.patch_start - reinterpret_cast<uintptr_t>(patch_gen.p);
+                x64_jmp(&patch_gen, reinterpret_cast<u64>(trampoline), X64_JMP_NEAR);
+                x64_nop(&patch_gen, span.patch_size - NearJumpSize);
 
                 record_rewrites(span);
                 patched_spans.emplace_back(span.patch_start, span.continuation);
@@ -2173,7 +2208,7 @@ static RedZonePatchResult PatchSegmentStatically(u64 segment_addr, u64 segment_s
                     .continuation = site + site_instruction->second.instruction.length,
                     .patch_size = site_instruction->second.instruction.length,
                 };
-                const size_t trampoline_start = module->trampoline_gen.getSize();
+                const size_t trampoline_start = module->trampoline_gen.size;
                 const auto site_trampoline_offset = emit_span(site_span);
                 if (!site_trampoline_offset) {
                     record_unsupported(site);
@@ -2190,19 +2225,18 @@ static RedZonePatchResult PatchSegmentStatically(u64 segment_addr, u64 segment_s
                     });
                 if (relay_slot != relay_slots.end()) {
                     const auto* site_trampoline =
-                        module->trampoline_gen.getCode() + *site_trampoline_offset;
+                        module->trampoline_gen.p + *site_trampoline_offset;
 
                     auto& patch_gen = module->patch_gen;
-                    patch_gen.reset();
-                    patch_gen.setSize(*relay_slot -
-                                      reinterpret_cast<uintptr_t>(patch_gen.getCode()));
-                    patch_gen.jmp(site_trampoline, Xbyak::CodeGenerator::LabelType::T_NEAR);
+                    patch_gen.error = 0;
+                    patch_gen.size = *relay_slot - reinterpret_cast<uintptr_t>(patch_gen.p);
+                    x64_jmp(&patch_gen, reinterpret_cast<u64>(site_trampoline), X64_JMP_NEAR);
 
-                    patch_gen.reset();
-                    patch_gen.setSize(site - reinterpret_cast<uintptr_t>(patch_gen.getCode()));
-                    patch_gen.jmp(reinterpret_cast<void*>(*relay_slot),
-                                  Xbyak::CodeGenerator::LabelType::T_SHORT);
-                    patch_gen.nop(site_span.patch_size - ShortJumpSize);
+                    patch_gen.error = 0;
+                    patch_gen.size = site - reinterpret_cast<uintptr_t>(patch_gen.p);
+                    x64_jmp(&patch_gen, static_cast<u64>(*relay_slot), X64_JMP_SHORT);
+                    ASSERT_MSG(!patch_gen.error, "Short jump out of reach");
+                    x64_nop(&patch_gen, site_span.patch_size - ShortJumpSize);
 
                     record_rewrites(site_span);
                     patched_spans.emplace_back(site_span.patch_start, site_span.continuation);
@@ -2322,44 +2356,41 @@ static RedZonePatchResult PatchSegmentStatically(u64 segment_addr, u64 segment_s
                 }
 
                 if (!host_span && !final_relay_slot) {
-                    module->trampoline_gen.setSize(trampoline_start);
+                    module->trampoline_gen.size = trampoline_start;
                     record_unsupported(site);
                     continue;
                 }
 
-                const auto* site_trampoline =
-                    module->trampoline_gen.getCode() + *site_trampoline_offset;
+                const auto* site_trampoline = module->trampoline_gen.p + *site_trampoline_offset;
                 auto& patch_gen = module->patch_gen;
                 uintptr_t relay_address{};
                 if (final_relay_slot) {
                     relay_address = *final_relay_slot;
-                    patch_gen.reset();
-                    patch_gen.setSize(relay_address -
-                                      reinterpret_cast<uintptr_t>(patch_gen.getCode()));
-                    patch_gen.jmp(site_trampoline, Xbyak::CodeGenerator::LabelType::T_NEAR);
+                    patch_gen.error = 0;
+                    patch_gen.size = relay_address - reinterpret_cast<uintptr_t>(patch_gen.p);
+                    x64_jmp(&patch_gen, reinterpret_cast<u64>(site_trampoline), X64_JMP_NEAR);
                     std::erase(relay_slots, relay_address);
                     std::erase(short_relay_slots, relay_address);
                 } else {
                     ASSERT(host_span && host_trampoline_offset);
                     const auto* host_trampoline =
-                        module->trampoline_gen.getCode() + *host_trampoline_offset;
+                        module->trampoline_gen.p + *host_trampoline_offset;
                     relay_address = host_span->patch_start + NearJumpSize;
 
-                    patch_gen.reset();
-                    patch_gen.setSize(host_span->patch_start -
-                                      reinterpret_cast<uintptr_t>(patch_gen.getCode()));
-                    patch_gen.jmp(host_trampoline, Xbyak::CodeGenerator::LabelType::T_NEAR);
-                    patch_gen.jmp(site_trampoline, Xbyak::CodeGenerator::LabelType::T_NEAR);
-                    patch_gen.nop(host_span->patch_size - NearJumpSize * 2);
+                    patch_gen.error = 0;
+                    patch_gen.size =
+                        host_span->patch_start - reinterpret_cast<uintptr_t>(patch_gen.p);
+                    x64_jmp(&patch_gen, reinterpret_cast<u64>(host_trampoline), X64_JMP_NEAR);
+                    x64_jmp(&patch_gen, reinterpret_cast<u64>(site_trampoline), X64_JMP_NEAR);
+                    x64_nop(&patch_gen, host_span->patch_size - NearJumpSize * 2);
                 }
 
                 uintptr_t jump_target = relay_address;
                 while (final_short_jump != site) {
-                    patch_gen.reset();
-                    patch_gen.setSize(final_short_jump -
-                                      reinterpret_cast<uintptr_t>(patch_gen.getCode()));
-                    patch_gen.jmp(reinterpret_cast<void*>(jump_target),
-                                  Xbyak::CodeGenerator::LabelType::T_SHORT);
+                    patch_gen.error = 0;
+                    patch_gen.size = final_short_jump - reinterpret_cast<uintptr_t>(patch_gen.p);
+                    x64_jmp(&patch_gen, static_cast<u64>(jump_target), X64_JMP_SHORT);
+                    ASSERT_MSG(!patch_gen.error, "Short jump out of reach");
                     jump_target = final_short_jump;
                     const auto parent = relay_parent.find(final_short_jump);
                     ASSERT(parent != relay_parent.end());
@@ -2368,11 +2399,11 @@ static RedZonePatchResult PatchSegmentStatically(u64 segment_addr, u64 segment_s
                     std::erase(short_relay_slots, jump_target);
                 }
 
-                patch_gen.reset();
-                patch_gen.setSize(site - reinterpret_cast<uintptr_t>(patch_gen.getCode()));
-                patch_gen.jmp(reinterpret_cast<void*>(jump_target),
-                              Xbyak::CodeGenerator::LabelType::T_SHORT);
-                patch_gen.nop(site_span.patch_size - ShortJumpSize);
+                patch_gen.error = 0;
+                patch_gen.size = site - reinterpret_cast<uintptr_t>(patch_gen.p);
+                x64_jmp(&patch_gen, static_cast<u64>(jump_target), X64_JMP_SHORT);
+                ASSERT_MSG(!patch_gen.error, "Short jump out of reach");
+                x64_nop(&patch_gen, site_span.patch_size - ShortJumpSize);
 
                 if (host_span) {
                     record_rewrites(*host_span);
