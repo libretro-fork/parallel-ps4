@@ -18,7 +18,3 @@
 	path = externals/libusb
 	url = https://github.com/shadexternals/libusb.git
 	branch = shadps4
-[submodule "externals/spirv-headers"]
-	path = externals/spirv-headers
-	url = https://github.com/KhronosGroup/SPIRV-Headers.git
-	shallow = true
