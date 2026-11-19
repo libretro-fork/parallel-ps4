@@ -31,9 +31,12 @@ static void work_loop(void* arg) {
     retro_atomic_store_release_int(&running, 1);
     for (;;) {
         int key;
+        /* Asked to stop: looked at before the jobs, so a job given before the ask is done
+         * before the thread ends */
+        const int stopping = stop_thread_stopping(&worker);
         while (retro_atomic_load_acquire_int(&done) < retro_atomic_load_acquire_int(&jobs))
             (void)retro_atomic_fetch_add_int(&done, 1);
-        if (stop_thread_stopping(&worker))
+        if (stopping)
             break;
         key = retro_eventcount_prepare_wait(&work);
         if (retro_atomic_load_acquire_int(&done) < retro_atomic_load_acquire_int(&jobs) ||

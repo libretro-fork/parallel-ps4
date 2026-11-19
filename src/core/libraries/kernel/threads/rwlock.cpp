@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright 2024-2026 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
-#include <chrono>
+#include <algorithm>
 
 #include "common/combiner.h"
 #include "common/elf_info.h"
@@ -95,7 +95,7 @@ int PthreadRwlock::Rdlock(const OrbisKernelTimespec* abstime) {
      * POSIX said the validity of the abstimeout parameter need
      * not be checked if the lock can be immediately acquired.
      */
-    if (lock.try_lock_shared()) {
+    if (rw_word_try_read(&word)) {
         curthread->rdlock_count++;
         return 0;
     }
@@ -103,13 +103,12 @@ int PthreadRwlock::Rdlock(const OrbisKernelTimespec* abstime) {
         return POSIX_EINVAL;
     }
 
-    // Note: On interruption an attempt to relock the mutex is made.
-    if (abstime != nullptr) {
-        if (!lock.try_lock_shared_until(abstime->TimePoint())) {
-            return POSIX_ETIMEDOUT;
-        }
-    } else {
-        lock.lock_shared();
+    // Parked on the game's time until it can be had, or the game's time of day reaches
+    // abstime
+    const u64 deadline =
+        abstime == nullptr ? 0 : std::max<u64>(GameDeadline(abstime, ORBIS_CLOCK_REALTIME), 1);
+    if (!GameWait(&wake, deadline, [this] { return rw_word_try_read(&word) != 0; })) {
+        return POSIX_ETIMEDOUT;
     }
 
     curthread->rdlock_count++;
@@ -123,7 +122,7 @@ int PthreadRwlock::Wrlock(const OrbisKernelTimespec* abstime) {
      * POSIX said the validity of the abstimeout parameter need
      * not be checked if the lock can be immediately acquired.
      */
-    if (lock.try_lock()) {
+    if (rw_word_try_write(&word)) {
         owner = curthread;
         return 0;
     }
@@ -132,13 +131,10 @@ int PthreadRwlock::Wrlock(const OrbisKernelTimespec* abstime) {
         return POSIX_EINVAL;
     }
 
-    // Note: On interruption an attempt to relock the mutex is made.
-    if (abstime != nullptr) {
-        if (!lock.try_lock_until(abstime->TimePoint())) {
-            return POSIX_ETIMEDOUT;
-        }
-    } else {
-        lock.lock();
+    const u64 deadline =
+        abstime == nullptr ? 0 : std::max<u64>(GameDeadline(abstime, ORBIS_CLOCK_REALTIME), 1);
+    if (!GameWait(&wake, deadline, [this] { return rw_word_try_write(&word) != 0; })) {
+        return POSIX_ETIMEDOUT;
     }
 
     owner = curthread;
@@ -184,7 +180,7 @@ int PS4_SYSV_ABI posix_pthread_rwlock_tryrdlock(PthreadRwlockT* rwlock) {
     PthreadRwlockT prwlock{};
     CHECK_AND_INIT_RWLOCK
 
-    if (!prwlock->lock.try_lock_shared()) {
+    if (!rw_word_try_read(&prwlock->word)) {
         return POSIX_EBUSY;
     }
 
@@ -197,7 +193,7 @@ int PS4_SYSV_ABI posix_pthread_rwlock_trywrlock(PthreadRwlockT* rwlock) {
     PthreadRwlockT prwlock{};
     CHECK_AND_INIT_RWLOCK
 
-    if (!prwlock->lock.try_lock()) {
+    if (!rw_word_try_write(&prwlock->word)) {
         return POSIX_EBUSY;
     }
     prwlock->owner = curthread;
@@ -224,14 +220,20 @@ int PS4_SYSV_ABI posix_pthread_rwlock_unlock(PthreadRwlockT* rwlock) {
         return POSIX_EINVAL;
     }
 
+    int freed;
     if (prwlock->owner == curthread) {
         prwlock->owner = nullptr;
-        prwlock->lock.unlock();
+        freed = rw_word_unlock_write(&prwlock->word);
     } else {
-        if (prwlock->owner == nullptr) {
-            curthread->rdlock_count--;
+        // Not held for reading (another thread writes, or no one holds it): nothing to give
+        freed = rw_word_unlock_read(&prwlock->word);
+        if (freed < 0) {
+            return POSIX_EPERM;
         }
-        prwlock->lock.unlock_shared();
+        curthread->rdlock_count--;
+    }
+    if (freed > 0) {
+        prwlock->Wake();
     }
 
     return 0;

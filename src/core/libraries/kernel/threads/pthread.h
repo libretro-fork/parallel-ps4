@@ -8,7 +8,6 @@
 #include <list>
 #include <memory>
 #include <mutex>
-#include <shared_mutex>
 
 #include <rthreads/retro_eventcount.h>
 
@@ -16,7 +15,7 @@
 #include "common/enum.h"
 #include "common/event_count.h"
 #include "common/event_mutex.h"
-#include "common/shared_first_mutex.h"
+#include "common/rw_word.h"
 #include "core/libraries/kernel/sync/semaphore.h"
 #include "core/libraries/kernel/threads/exception.h"
 #include "core/libraries/kernel/time.h"
@@ -273,10 +272,29 @@ struct PthreadRwlockAttr {
 };
 using PthreadRwlockAttrT = PthreadRwlockAttr*;
 
+/// A guest rwlock: a reader-writer word taken by compare-and-swap (rw_word.c), readers first,
+/// its waiters parked on the game's time as a guest mutex's are: no host lock, no wall clock
 struct PthreadRwlock {
-    Common::SharedFirstMutex lock;
-    Pthread* owner;
+    retro_atomic_int_t word;
+    retro_eventcount_t wake;
+    Pthread* owner{};
     std::string name;
+
+    PthreadRwlock() {
+        rw_word_init(&word);
+        retro_eventcount_init(&wake);
+    }
+    ~PthreadRwlock() {
+        retro_eventcount_free(&wake);
+    }
+    PthreadRwlock(const PthreadRwlock&) = delete;
+    PthreadRwlock& operator=(const PthreadRwlock&) = delete;
+
+    /// Threads turned away try again: the word is free
+    void Wake() {
+        GameNoteWake(&wake.epoch);
+        retro_eventcount_notify(&wake);
+    }
 
     int Wrlock(const OrbisKernelTimespec* abstime);
     int Rdlock(const OrbisKernelTimespec* abstime);
