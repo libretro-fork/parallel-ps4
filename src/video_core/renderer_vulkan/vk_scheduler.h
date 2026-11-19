@@ -451,15 +451,15 @@ public:
     /// Defers an operation until the gpu has reached the current cpu tick.
     /// Will be run when submitting or calling PopPendingOperations.
     template <typename Func>
-    void DeferOperation(Func&& func) {
-        pending_ops.Push(MakeOp(std::forward<Func>(func)));
+    void DeferOperation(Func func) {
+        pending_ops.Push(MakeOp(func));
     }
 
     /// Defers an operation until the gpu has reached the current cpu tick.
     /// Runs as soon as possible in another thread.
     template <typename Func>
-    void DeferPriorityOperation(Func&& func) {
-        priority_pending_ops.Push(MakeOp(std::forward<Func>(func)));
+    void DeferPriorityOperation(Func func) {
+        priority_pending_ops.Push(MakeOp(func));
         retro_eventcount_notify(&priority_pending_ops_ec);
     }
 
@@ -497,7 +497,7 @@ public:
     /// two pointers. Taken from a pool made up front (AcquireOp, ReleaseOp in
     /// vk_scheduler.cpp), so deferring an operation does not allocate.
     struct PendingOp {
-        mpsc_stack_node_t node; // first: the stack links operations through it
+        mpsc_stack_node_t node;     // first: the stack links operations through it
         node_pool_node_t free_link; // in the pool while free
         u64 gpu_tick;
         void (*invoke)(void* storage);
@@ -514,13 +514,13 @@ private:
     /// Destroys the function and gives the operation back to the pool
     static void ReleaseOp(PendingOp* op);
 
-    template <typename Func>
-    PendingOp* MakeOp(Func&& func) {
-        using F = std::decay_t<Func>;
+    /// @func is moved into the operation's own storage
+    template <typename F>
+    PendingOp* MakeOp(F& func) {
         static_assert(sizeof(F) <= PendingOpBytes, "the operation's captures do not fit");
         static_assert(alignof(F) <= 16, "the operation's captures are aligned past 16");
         PendingOp* op = AcquireOp();
-        new (op->storage) F(std::forward<Func>(func));
+        new (op->storage) F(static_cast<F&&>(func));
         op->invoke = [](void* storage) { (*static_cast<F*>(storage))(); };
         op->destroy = [](void* storage) { static_cast<F*>(storage)->~F(); };
         op->gpu_tick = CurrentTick();

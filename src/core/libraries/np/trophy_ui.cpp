@@ -159,7 +159,7 @@ static void PreloadTrophySoundInto() {
     }
 }
 void AddTrophyToQueue(const std::filesystem::path& trophyIconPath, const std::string& trophyName,
-                      const std::string_view& rarity) {
+                      const std::string_view& rarity, const bool after) {
     if (emu_settings_get_trophy_popup_disabled()) {
         return;
     }
@@ -190,8 +190,9 @@ void AddTrophyToQueue(const std::filesystem::path& trophyIconPath, const std::st
         }
     }
     // Decoded here, on the game's thread, before the overlay shows it
-    ovl_trophy_queue(trophyName.c_str(), icon ? icon->data() : nullptr, icon ? icon->size() : 0,
-                     type_icon ? type_icon->data() : nullptr, type_icon ? type_icon->size() : 0);
+    ovl_trophy_queue_after(trophyName.c_str(), icon ? icon->data() : nullptr,
+                           icon ? icon->size() : 0, type_icon ? type_icon->data() : nullptr,
+                           type_icon ? type_icon->size() : 0, after ? 1 : 0);
 }
 
 } // namespace Libraries::Np::NpTrophy

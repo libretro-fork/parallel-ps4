@@ -7,8 +7,8 @@
 #include <cstring>
 #include <net/net_http.h>
 
+#include <rthreads/rthreads.h>
 #include "common/logging/log.h"
-#include "common/unique_function.h"
 #include "core/emulator_settings.h"
 #include "core/libraries/invitation_dialog/invitation_dialog.h"
 #include "core/libraries/np/np_handler/np_handler.h"
@@ -224,19 +224,33 @@ void NpHandler::DeclineSessionInvitation(s32 user_id, const std::string& invitat
 // is told as a shadNet notification.
 extern "C" void ovl_invite_chosen(int user_id, const char* invitation_id, const char* from_npid,
                                   int accept) {
-    Common::DetachThread([user_id, id = std::string{invitation_id}, from = std::string{from_npid},
-                          accept] {
-        auto& np = Libraries::Np::NpHandler::GetInstance();
-        if (accept) {
-            const bool ok = np.AcceptSessionInvitation(user_id, id);
-            ovl_invite_remove(id.c_str());
-            ShadNetNotify(OVL_SHADNET_INFO,
-                          ok ? "Accepted " + from + "'s invitation, joining session"
-                             : "Could not accept " + from +
-                                   "'s invitation (expired or already used)");
-        } else {
-            np.DeclineSessionInvitation(user_id, id);
-            ovl_invite_remove(id.c_str());
+    struct Job {
+        int user_id;
+        std::string id;
+        std::string from;
+        int accept;
+
+        static void Run(void* arg) {
+            auto* const job = static_cast<Job*>(arg);
+            auto& np = Libraries::Np::NpHandler::GetInstance();
+            if (job->accept) {
+                const bool ok = np.AcceptSessionInvitation(job->user_id, job->id);
+                ovl_invite_remove(job->id.c_str());
+                ShadNetNotify(OVL_SHADNET_INFO,
+                              ok ? "Accepted " + job->from + "'s invitation, joining session"
+                                 : "Could not accept " + job->from +
+                                       "'s invitation (expired or already used)");
+            } else {
+                np.DeclineSessionInvitation(job->user_id, job->id);
+                ovl_invite_remove(job->id.c_str());
+            }
+            delete job;
         }
-    });
+    };
+    auto* const job = new Job{user_id, invitation_id, from_npid, accept};
+    if (sthread_t* thread = sthread_create(&Job::Run, job)) {
+        sthread_detach(thread);
+    } else {
+        delete job;
+    }
 }

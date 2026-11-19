@@ -17,12 +17,12 @@
 #include <vector>
 #include <encodings/deflate.h>
 #include <fmt/format.h>
+#include <rthreads/rthreads.h>
 #include "common/combiner.h"
 #include "common/elf_info.h"
 #include "common/event_mutex.h"
 #include "common/logging/log.h"
 #include "common/path_util.h"
-#include "common/unique_function.h"
 #include "core/emulator_settings.h"
 #include "core/libraries/error_codes.h"
 #include "core/libraries/kernel/kernel.h"
@@ -1539,6 +1539,83 @@ int PS4_SYSV_ABI sceHttpRequestGetAllHeaders() {
     return ORBIS_OK;
 }
 
+// The request sent, and its result handed back to the game's request: on its own thread
+static void HttpSendWork(const std::shared_ptr<HttpRequest>& req_ptr, const int reqId,
+                         const SendRequestPlan& plan, const bool online) {
+    HttpResponse local_res;
+    s32 worker_errno = 0;
+    u32 success_event_bits = 0; // 0 = no event (offline path uses failure bits)
+
+    if (!online) {
+        SynthesizeTransportFailureResponse(local_res);
+        worker_errno = ORBIS_HTTP_ERROR_RESOLVER_ENODNS;
+    } else {
+        worker_errno = RunRealHttpRequest(plan, local_res, success_event_bits);
+    }
+
+    std::lock_guard<Common::EventMutex> lock(g_state.m_mutex);
+    if ((retro_atomic_load_seq_cst_int(&g_state.shutting_down) != 0) || req_ptr->deleted ||
+        req_ptr->state == HttpRequestState::Aborted) {
+        const char* reason = (retro_atomic_load_seq_cst_int(&g_state.shutting_down) != 0)
+                                 ? "shutdown"
+                             : req_ptr->deleted ? "deleted"
+                                                : "aborted";
+        LOG_INFO(Lib_Http,
+                 "reqId={} worker finished but request was {} before completion; "
+                 "dropping result (would have been status={}, errno={:#x})",
+                 reqId, reason, local_res.status_code, static_cast<u32>(worker_errno));
+        req_ptr->cv.notify_all();
+        return;
+    }
+    req_ptr->res = std::move(local_res);
+    req_ptr->state = HttpRequestState::Sent;
+    req_ptr->last_errno = worker_errno;
+    if (worker_errno == 0) {
+        LOG_INFO(Lib_Http, "(SUCCESS) reqId={} status={} body={} bytes", reqId,
+                 req_ptr->res.status_code, req_ptr->res.body.size());
+    } else {
+        LOG_INFO(Lib_Http, "(TRANSPORT FAIL) reqId={} -> {} (body {} bytes, errno={:#x})", reqId,
+                 req_ptr->res.status_code, req_ptr->res.body.size(),
+                 static_cast<u32>(worker_errno));
+    }
+    req_ptr->cv.notify_all();
+
+    // Push an epoll event so sceHttpWaitRequest callers see completion.
+    if (req_ptr->epoll_id != 0) {
+        auto epoll_it = g_state.epolls.find(req_ptr->epoll_id);
+        if (epoll_it != g_state.epolls.end() && !epoll_it->second->destroyed) {
+            u32 event_bits;
+            if (worker_errno == 0) {
+                event_bits = success_event_bits;
+            } else {
+                event_bits = ORBIS_HTTP_NB_EVENT_RESOLVER_ERR | ORBIS_HTTP_NB_EVENT_HUP;
+            }
+            OrbisHttpNBEvent ev{};
+            ev.events = event_bits;
+            ev.eventDetail = event_bits;
+            ev.id = reqId;
+            ev.userArg = req_ptr->epoll_user_arg;
+            epoll_it->second->events.push_back(ev);
+            epoll_it->second->cv.notify_all();
+            LOG_DEBUG(Lib_Http, "pushed epoll event for reqId={} on epoll={} bits={:#x}", reqId,
+                      req_ptr->epoll_id, event_bits);
+        }
+    }
+}
+
+struct HttpSendJob {
+    std::shared_ptr<HttpRequest> req_ptr;
+    int reqId;
+    SendRequestPlan plan;
+    bool online;
+
+    static void Run(void* arg) {
+        auto* const job = static_cast<HttpSendJob*>(arg);
+        HttpSendWork(job->req_ptr, job->reqId, job->plan, job->online);
+        delete job;
+    }
+};
+
 int PS4_SYSV_ABI sceHttpSendRequest(int reqId, const void* postData, u64 size) {
     LOG_INFO(Lib_Http, "called reqId={}, postData={}, size={}", reqId, fmt::ptr(postData), size);
     std::shared_ptr<HttpRequest> req_ptr;
@@ -1626,67 +1703,13 @@ int PS4_SYSV_ABI sceHttpSendRequest(int reqId, const void* postData, u64 size) {
              online ? "ONLINE" : "OFFLINE", HttpMethodName(plan.method), plan.scheme, plan.host,
              plan.port, plan.path);
 
-    Common::DetachThread([req_ptr, reqId, plan = std::move(plan), online]() {
-        HttpResponse local_res;
-        s32 worker_errno = 0;
-        u32 success_event_bits = 0; // 0 = no event (offline path uses failure bits)
-
-        if (!online) {
-            SynthesizeTransportFailureResponse(local_res);
-            worker_errno = ORBIS_HTTP_ERROR_RESOLVER_ENODNS;
-        } else {
-            worker_errno = RunRealHttpRequest(plan, local_res, success_event_bits);
-        }
-
-        std::lock_guard<Common::EventMutex> lock(g_state.m_mutex);
-        if ((retro_atomic_load_seq_cst_int(&g_state.shutting_down) != 0) || req_ptr->deleted ||
-            req_ptr->state == HttpRequestState::Aborted) {
-            const char* reason = (retro_atomic_load_seq_cst_int(&g_state.shutting_down) != 0)
-                                     ? "shutdown"
-                                 : req_ptr->deleted ? "deleted"
-                                                    : "aborted";
-            LOG_INFO(Lib_Http,
-                     "reqId={} worker finished but request was {} before completion; "
-                     "dropping result (would have been status={}, errno={:#x})",
-                     reqId, reason, local_res.status_code, static_cast<u32>(worker_errno));
-            req_ptr->cv.notify_all();
-            return;
-        }
-        req_ptr->res = std::move(local_res);
-        req_ptr->state = HttpRequestState::Sent;
-        req_ptr->last_errno = worker_errno;
-        if (worker_errno == 0) {
-            LOG_INFO(Lib_Http, "(SUCCESS) reqId={} status={} body={} bytes", reqId,
-                     req_ptr->res.status_code, req_ptr->res.body.size());
-        } else {
-            LOG_INFO(Lib_Http, "(TRANSPORT FAIL) reqId={} -> {} (body {} bytes, errno={:#x})",
-                     reqId, req_ptr->res.status_code, req_ptr->res.body.size(),
-                     static_cast<u32>(worker_errno));
-        }
-        req_ptr->cv.notify_all();
-
-        // Push an epoll event so sceHttpWaitRequest callers see completion.
-        if (req_ptr->epoll_id != 0) {
-            auto epoll_it = g_state.epolls.find(req_ptr->epoll_id);
-            if (epoll_it != g_state.epolls.end() && !epoll_it->second->destroyed) {
-                u32 event_bits;
-                if (worker_errno == 0) {
-                    event_bits = success_event_bits;
-                } else {
-                    event_bits = ORBIS_HTTP_NB_EVENT_RESOLVER_ERR | ORBIS_HTTP_NB_EVENT_HUP;
-                }
-                OrbisHttpNBEvent ev{};
-                ev.events = event_bits;
-                ev.eventDetail = event_bits;
-                ev.id = reqId;
-                ev.userArg = req_ptr->epoll_user_arg;
-                epoll_it->second->events.push_back(ev);
-                epoll_it->second->cv.notify_all();
-                LOG_DEBUG(Lib_Http, "pushed epoll event for reqId={} on epoll={} bits={:#x}", reqId,
-                          req_ptr->epoll_id, event_bits);
-            }
-        }
-    });
+    // Sent on a thread of its own that nobody joins
+    auto* const job = new HttpSendJob{std::move(req_ptr), reqId, std::move(plan), online};
+    if (sthread_t* thread = sthread_create(&HttpSendJob::Run, job)) {
+        sthread_detach(thread);
+    } else {
+        delete job;
+    }
 
     return ORBIS_OK;
 }

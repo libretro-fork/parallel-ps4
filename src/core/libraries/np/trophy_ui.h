@@ -14,7 +14,9 @@ namespace Libraries::Np::NpTrophy {
 /// built-in one. Called once, before the game runs, so nothing is decoded when a trophy unlocks.
 void PreloadTrophySound();
 
+/// @after: shown once the one showing (or queued before it) has had its time, rather than in
+/// its place
 void AddTrophyToQueue(const std::filesystem::path& trophyIconPath, const std::string& trophyName,
-                      const std::string_view& rarity);
+                      const std::string_view& rarity, bool after = false);
 
 }; // namespace Libraries::Np::NpTrophy

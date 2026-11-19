@@ -4,7 +4,8 @@
 /* The trophy popup, as core/libraries/np/trophy_ui.cpp drew it with ImGui: the trophy's type
  * icon, "Trophy earned!" and its name, and its icon, sliding in from the side the settings
  * say, for as long as they say, fading out over the last second, with the trophy sound.
- * A trophy unlocked while one shows takes its place, its animation starting again, as there.
+ * A trophy unlocked while one shows takes its place, its animation starting again, as there;
+ * one queued to come after (a platinum) waits until nothing else is to show.
  *
  * The game's thread queues it (its icons decoded into image slots there, ovl_tex.c) in a free
  * slot taken by compare-and-swap, with a ticket; the overlay's thread shows the newest.
@@ -28,6 +29,7 @@ enum { SIDE_RIGHT, SIDE_LEFT, SIDE_TOP, SIDE_BOTTOM };
 typedef struct trophy {
     retro_atomic_int_t state;
     unsigned ticket;
+    int after; /* waits for the others */
     char name[TROPHY_NAME];
     int icon; /* image handles, 0 for none */
     int type_icon;
@@ -60,6 +62,11 @@ void ovl_trophy_set_sound(const float* frames, unsigned count) {
 
 int ovl_trophy_queue(const char* name, const uint8_t* icon_png, size_t icon_size,
                      const uint8_t* type_png, size_t type_size) {
+    return ovl_trophy_queue_after(name, icon_png, icon_size, type_png, type_size, 0);
+}
+
+int ovl_trophy_queue_after(const char* name, const uint8_t* icon_png, size_t icon_size,
+                           const uint8_t* type_png, size_t type_size, int after) {
     int i;
     if (emu_settings_get_trophy_popup_disabled())
         return 0;
@@ -76,6 +83,7 @@ int ovl_trophy_queue(const char* name, const uint8_t* icon_png, size_t icon_size
         t->name[len] = '\0';
         t->icon = ovl_tex_decode_png(icon_png, icon_size);
         t->type_icon = ovl_tex_decode_png(type_png, type_size);
+        t->after = after;
         t->ticket = (unsigned)retro_atomic_fetch_add_int(&next_ticket, 1);
         retro_atomic_store_release_int(&t->state, READY);
         return 1;
@@ -100,26 +108,37 @@ static void discard(trophy_t* t) {
 }
 
 /* The newest queued takes the place of what shows; older ones go unseen, as do any found
- * later that were queued before what shows (published while an earlier look went by) */
+ * later that were queued before what shows (published while an earlier look went by). One
+ * queued to come after waits while one shows or another is queued; then the newest of those
+ * shows. */
 static void take_newest(void) {
     trophy_t* best = NULL;
+    trophy_t* best_after = NULL;
     const char* side;
     int i;
     for (i = 0; i < TROPHY_SLOTS; i++) {
         trophy_t* t = &trophies[i];
+        trophy_t** pick;
         if (retro_atomic_load_acquire_int(&t->state) != READY)
             continue;
-        if (shown.taken && (int)(t->ticket - shown.ticket) < 0) {
+        /* One to come after is not left behind by one shown before it */
+        if (!t->after && shown.taken && (int)(t->ticket - shown.ticket) < 0) {
             discard(t);
             continue;
         }
-        if (best && (int)(t->ticket - best->ticket) < 0) {
+        pick = t->after ? &best_after : &best;
+        if (*pick && (int)(t->ticket - (*pick)->ticket) < 0) {
             discard(t);
             continue;
         }
-        if (best)
-            discard(best);
-        best = t;
+        if (*pick)
+            discard(*pick);
+        *pick = t;
+    }
+    if (!best) {
+        if (shown.active)
+            return;
+        best = best_after;
     }
     if (!best)
         return;

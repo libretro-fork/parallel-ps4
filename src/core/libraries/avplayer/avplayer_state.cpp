@@ -126,15 +126,19 @@ AvPlayerState::~AvPlayerState() {
     pin_gate_free(&m_source_gate);
 }
 
-template <typename R, typename F>
-R AvPlayerState::WithSource(R none, F&& f) {
+AvPlayerSource* AvPlayerState::PinSource() {
     if (!pin_gate_enter(&m_source_gate)) {
-        return none;
+        return nullptr;
     }
     auto* const source = static_cast<AvPlayerSource*>(retro_atomic_load_acquire_ptr(&m_source));
-    R result = source != nullptr ? f(*source) : none;
+    if (source == nullptr) {
+        pin_gate_leave(&m_source_gate);
+    }
+    return source;
+}
+
+void AvPlayerState::UnpinSource() {
     pin_gate_leave(&m_source_gate);
-    return result;
 }
 
 AvState AvPlayerState::State() {
@@ -179,19 +183,25 @@ bool AvPlayerState::AddSource(std::string_view path, AvPlayerSourceType source_t
 
 // Called inside GAME thread
 s32 AvPlayerState::GetStreamCount() {
-    const auto count = WithSource<std::optional<s32>>(
-        std::nullopt, [](AvPlayerSource& source) { return source.GetStreamCount(); });
-    if (!count.has_value()) {
+    AvPlayerSource* const source = PinSource();
+    if (source == nullptr) {
         LOG_ERROR(Lib_AvPlayer, "Could not get stream count. No source.");
         return -1;
     }
-    return *count;
+    const s32 count = source->GetStreamCount();
+    UnpinSource();
+    return count;
 }
 
 // Called inside GAME thread
 bool AvPlayerState::GetStreamInfo(u32 stream_index, AvPlayerStreamInfo& info) {
-    return WithSource(
-        false, [&](AvPlayerSource& source) { return source.GetStreamInfo(stream_index, info); });
+    AvPlayerSource* const source = PinSource();
+    if (source == nullptr) {
+        return false;
+    }
+    const bool got = source->GetStreamInfo(stream_index, info);
+    UnpinSource();
+    return got;
 }
 
 // Called inside GAME and CONTROLLER threads (auto-play)
@@ -262,15 +272,17 @@ bool AvPlayerState::Pause() {
         return true;
     }
     const AvState state = State();
-    if (state == AvState::Pause || state == AvState::Ready || state == AvState::Initial ||
-        state == AvState::Unknown || state == AvState::AddingSource ||
-        !WithSource(false, [](AvPlayerSource& source) {
-            source.Pause();
-            return true;
-        })) {
+    AvPlayerSource* const source = state == AvState::Pause || state == AvState::Ready ||
+                                           state == AvState::Initial || state == AvState::Unknown ||
+                                           state == AvState::AddingSource
+                                       ? nullptr
+                                       : PinSource();
+    if (source == nullptr) {
         LOG_ERROR(Lib_AvPlayer, "Could not pause playback.");
         return false;
     }
+    source->Pause();
+    UnpinSource();
     if (!SetState(AvState::Pause)) {
         return false;
     }
@@ -280,13 +292,13 @@ bool AvPlayerState::Pause() {
 
 // Called inside GAME thread
 bool AvPlayerState::Resume() {
-    if (State() != AvState::Pause || !WithSource(false, [](AvPlayerSource& source) {
-            source.Resume();
-            return true;
-        })) {
+    AvPlayerSource* const source = State() == AvState::Pause ? PinSource() : nullptr;
+    if (source == nullptr) {
         LOG_ERROR(Lib_AvPlayer, "Could not resume playback.");
         return false;
     }
+    source->Resume();
+    UnpinSource();
     // Back to the state before the pause
     int resumed = 0;
     if (!avplayer_fsm_revert(&m_fsm, nullptr, &resumed)) {
@@ -350,25 +362,44 @@ void AvPlayerState::StartControllerThread() {
 
 // Called inside GAME thread
 bool AvPlayerState::EnableStream(u32 stream_index) {
-    return WithSource(false, [stream_index](AvPlayerSource& source) {
-        return source.EnableStream(stream_index);
-    });
+    AvPlayerSource* const source = PinSource();
+    if (source == nullptr) {
+        return false;
+    }
+    const bool enabled = source->EnableStream(stream_index);
+    UnpinSource();
+    return enabled;
 }
 
 // Called inside GAME thread
 bool AvPlayerState::GetVideoData(AvPlayerFrameInfo& video_info) {
-    return WithSource(false,
-                      [&](AvPlayerSource& source) { return source.GetVideoData(video_info); });
+    AvPlayerSource* const source = PinSource();
+    if (source == nullptr) {
+        return false;
+    }
+    const bool got = source->GetVideoData(video_info);
+    UnpinSource();
+    return got;
 }
 
 bool AvPlayerState::GetVideoData(AvPlayerFrameInfoEx& video_info) {
-    return WithSource(false,
-                      [&](AvPlayerSource& source) { return source.GetVideoData(video_info); });
+    AvPlayerSource* const source = PinSource();
+    if (source == nullptr) {
+        return false;
+    }
+    const bool got = source->GetVideoData(video_info);
+    UnpinSource();
+    return got;
 }
 
 bool AvPlayerState::GetAudioData(AvPlayerFrameInfo& audio_info) {
-    return WithSource(false,
-                      [&](AvPlayerSource& source) { return source.GetAudioData(audio_info); });
+    AvPlayerSource* const source = PinSource();
+    if (source == nullptr) {
+        return false;
+    }
+    const bool got = source->GetAudioData(audio_info);
+    UnpinSource();
+    return got;
 }
 
 bool AvPlayerState::IsActive() {
@@ -385,14 +416,23 @@ bool AvPlayerState::IsActive() {
 }
 
 u64 AvPlayerState::CurrentTime() {
-    return WithSource<u64>(0, [](AvPlayerSource& source) { return source.CurrentTime(); });
+    AvPlayerSource* const source = PinSource();
+    if (source == nullptr) {
+        return 0;
+    }
+    const u64 time = source->CurrentTime();
+    UnpinSource();
+    return time;
 }
 
 bool AvPlayerState::SetLooping(bool is_looping) {
-    return WithSource(false, [is_looping](AvPlayerSource& source) {
-        source.SetLooping(is_looping);
-        return true;
-    });
+    AvPlayerSource* const source = PinSource();
+    if (source == nullptr) {
+        return false;
+    }
+    source->SetLooping(is_looping);
+    UnpinSource();
+    return true;
 }
 
 // May be called from different threads
@@ -415,8 +455,13 @@ void AvPlayerState::OnEOF() {
 }
 
 void AvPlayerState::UpdateEndOfFileState() {
-    if (WithSource(true, [](AvPlayerSource& source) { return source.IsActive(); }) ||
-        (retro_atomic_exchange_int(&m_eof_stop_event_sent, 1) != 0)) {
+    // Kept out (being changed) counts as still active
+    AvPlayerSource* const source = PinSource();
+    const bool active = source == nullptr || source->IsActive();
+    if (source != nullptr) {
+        UnpinSource();
+    }
+    if (active || (retro_atomic_exchange_int(&m_eof_stop_event_sent, 1) != 0)) {
         return;
     }
 
@@ -465,9 +510,13 @@ bool AvPlayerState::SetState(AvState state) {
 
 // Called inside CONTROLLER thread
 std::optional<bool> AvPlayerState::OnBufferingCheckEvent(u32 num_frames) {
-    return WithSource<std::optional<bool>>(std::nullopt, [num_frames](AvPlayerSource& source) {
-        return source.HasFrames(num_frames);
-    });
+    AvPlayerSource* const source = PinSource();
+    if (source == nullptr) {
+        return std::nullopt;
+    }
+    const std::optional<bool> has = source->HasFrames(num_frames);
+    UnpinSource();
+    return has;
 }
 
 // Called inside CONTROLLER thread

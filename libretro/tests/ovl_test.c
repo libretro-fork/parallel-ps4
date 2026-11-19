@@ -275,6 +275,32 @@ static void check_layers(void) {
     ovl_tex_collect((unsigned)frame, 3);
   }
   CHECK(!ovl_trophy_active(), "the trophy over");
+  /* A platinum queued to come after the trophy that earned it: the trophy keeps its place,
+   * the platinum shows once the trophy has had its time, then it too is over */
+  CHECK(ovl_trophy_queue("Lantern Lit", plat, plat_size, gold, gold_size) &&
+            ovl_trophy_queue_after("Platinum", plat, plat_size, plat, plat_size, 1),
+        "a trophy and a platinum after it queued");
+  for (frame = 400; frame < 440; frame++) {
+    ovl_new_frame(1920.0f, 1080.0f, 1.0f / 60.0f);
+    ovl_trophy_draw();
+    ovl_render();
+    ovl_tex_collect((unsigned)frame, 3);
+  }
+  CHECK(clips == 2, "the platinum waited for the trophy");
+  for (frame = 440; frame < 840; frame++) {
+    ovl_new_frame(1920.0f, 1080.0f, 1.0f / 60.0f);
+    ovl_trophy_draw();
+    ovl_render();
+    ovl_tex_collect((unsigned)frame, 3);
+  }
+  CHECK(clips == 3 && ovl_trophy_active(), "the platinum shown after it");
+  for (frame = 840; frame < 1240; frame++) {
+    ovl_new_frame(1920.0f, 1080.0f, 1.0f / 60.0f);
+    ovl_trophy_draw();
+    ovl_render();
+    ovl_tex_collect((unsigned)frame, 3);
+  }
+  CHECK(!ovl_trophy_active(), "the platinum over");
   {
     int handles[OVL_TEX_SLOTS + 1], n = 0;
     while (n <= OVL_TEX_SLOTS &&

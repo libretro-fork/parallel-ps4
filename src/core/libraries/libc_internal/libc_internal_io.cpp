@@ -3,7 +3,8 @@
 
 #include <cstdarg>
 #include <cstdio>
-#include <new>
+#include <cstdlib>
+#include <cstring>
 
 #include <common/va_ctx.h>
 #include "common/alignment.h"
@@ -65,7 +66,7 @@ OrbisFILE* PS4_SYSV_ABI internal__Fofind() {
     }
     auto* file = static_cast<OrbisFILE*>(retro_atomic_load_acquire_ptr(&g_files[index]));
     if (file == nullptr) {
-        file = new (std::nothrow) OrbisFILE();
+        file = static_cast<OrbisFILE*>(calloc(1, sizeof(OrbisFILE)));
         if (file == nullptr) {
             slot_table_give(g_file_taken, index);
             return nullptr;
@@ -73,7 +74,7 @@ OrbisFILE* PS4_SYSV_ABI internal__Fofind() {
         retro_atomic_store_release_ptr(&g_files[index], file);
     } else {
         // As a new one
-        *file = OrbisFILE{};
+        memset(file, 0, sizeof(OrbisFILE));
     }
     file->_Mode = 0x80;
     file->_Idx = static_cast<u8>(index);

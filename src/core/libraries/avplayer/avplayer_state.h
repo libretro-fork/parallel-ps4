@@ -62,10 +62,10 @@ private:
     AvState State();
     AvState PreviousState();
 
-    /// Runs @f on the source if there is one and it is not being changed (the gate is open),
-    /// else returns @none: the source is pinned meanwhile, and no one waits
-    template <typename R, typename F>
-    R WithSource(R none, F&& f);
+    /// The source, pinned until UnpinSource, if there is one and it is not being changed (the
+    /// gate is open); else nullptr, and nothing to unpin. No one waits.
+    AvPlayerSource* PinSource();
+    void UnpinSource();
 
     /// Start and Stop: the thread that gets the transport does it, and then whatever was asked
     /// of it meanwhile (avplayer_fsm.h)

@@ -9,7 +9,6 @@
 #include "common/logging/log.h"
 #include "common/path_util.h"
 #include "common/slot_vector.h"
-#include "common/unique_function.h"
 #include "common/xml.h"
 #include "core/emulator_settings.h"
 #include "core/libraries/kernel/time.h"
@@ -1116,13 +1115,8 @@ int PS4_SYSV_ABI sceNpTrophyUnlockTrophy(OrbisNpTrophyContext context, OrbisNpTr
     // Queue UI notifications (only once, using the primary XML's strings).
     AddTrophyToQueue(trophy_icon_path, trophy_name, trophy_type);
     if (unlock_platinum) {
-        Common::DetachThread([=]() {
-            // After the first trophy's notification has had its time, the game's
-            Libraries::Kernel::GameSleepUntil(Libraries::Kernel::GameDeadlineIn(
-                (static_cast<u64>(emu_settings_get_trophy_notification_duration()) * 1000 + 250) *
-                1'000'000));
-            AddTrophyToQueue(platinum_icon_path, platinum_name, "P");
-        });
+        // Shown once the trophy's notification has had its time
+        AddTrophyToQueue(platinum_icon_path, platinum_name, "P", true);
     }
 
     ApplyUnlockToXmlFile(ctx.xml_save_file, trophyId, trophy_timestamp, unlock_platinum,

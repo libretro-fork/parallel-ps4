@@ -6,8 +6,8 @@
 #include <string>
 #include <vector>
 #include <fmt/format.h>
+#include <rthreads/rthreads.h>
 #include "common/enum_names.h"
-#include "common/unique_function.h"
 
 #include "common/logging/log.h"
 #include "core/libraries/error_codes.h"
@@ -545,29 +545,60 @@ extern "C" int ovl_invitation_dialog_friends(int user_id, ovl_invdlg_friend_t* o
     return n;
 }
 
+// A request of the overlay's dialog, sent to the shadNet server (blocking HTTP inside
+// NpHandler) on a thread of its own that nobody joins
+struct InvitationJob {
+    enum Kind { Send, Accept, Decline } kind;
+    int user_id;
+    std::string id; // the session's, or the invitation's
+    std::string message;
+    std::vector<std::string> recipients;
+    unsigned token;
+
+    static void Run(void* arg) {
+        auto* const job = static_cast<InvitationJob*>(arg);
+        auto& np = Libraries::Np::NpHandler::GetInstance();
+        switch (job->kind) {
+        case Send:
+            ovl_invitation_dialog_request_done(
+                job->token,
+                np.SendSessionInvitation(job->user_id, job->id, job->recipients, job->message));
+            break;
+        case Accept:
+            ovl_invitation_dialog_request_done(job->token,
+                                               np.AcceptSessionInvitation(job->user_id, job->id));
+            break;
+        case Decline:
+            np.DeclineSessionInvitation(job->user_id, job->id);
+            break;
+        }
+        delete job;
+    }
+};
+
+static void StartInvitationJob(InvitationJob* job) {
+    if (sthread_t* thread = sthread_create(&InvitationJob::Run, job)) {
+        sthread_detach(thread);
+    } else {
+        delete job;
+    }
+}
+
 extern "C" void ovl_invitation_dialog_send(int user_id, const char* session_id, const char* message,
                                            const char* const* to, int count, unsigned token) {
-    Common::DetachThread([user_id, session = std::string{session_id}, msg = std::string{message},
-                          recipients = std::vector<std::string>(to, to + count), token] {
-        const bool ok = Libraries::Np::NpHandler::GetInstance().SendSessionInvitation(
-            user_id, session, recipients, msg);
-        ovl_invitation_dialog_request_done(token, ok);
-    });
+    StartInvitationJob(new InvitationJob{InvitationJob::Send, user_id, session_id, message,
+                                         std::vector<std::string>(to, to + count), token});
 }
 
 extern "C" void ovl_invitation_dialog_accept(int user_id, const char* invitation_id,
                                              unsigned token) {
-    Common::DetachThread([user_id, id = std::string{invitation_id}, token] {
-        const bool ok =
-            Libraries::Np::NpHandler::GetInstance().AcceptSessionInvitation(user_id, id);
-        ovl_invitation_dialog_request_done(token, ok);
-    });
+    StartInvitationJob(
+        new InvitationJob{InvitationJob::Accept, user_id, invitation_id, {}, {}, token});
 }
 
 extern "C" void ovl_invitation_dialog_decline(int user_id, const char* invitation_id) {
-    Common::DetachThread([user_id, id = std::string{invitation_id}] {
-        Libraries::Np::NpHandler::GetInstance().DeclineSessionInvitation(user_id, id);
-    });
+    StartInvitationJob(
+        new InvitationJob{InvitationJob::Decline, user_id, invitation_id, {}, {}, 0});
 }
 
 namespace Libraries::InvitationDialog {

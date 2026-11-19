@@ -33,6 +33,10 @@ void ovl_notify_reset(void);
  * stereo frames for the core's mix. */
 int ovl_trophy_queue(const char* name, const uint8_t* icon_png, size_t icon_size,
                      const uint8_t* type_png, size_t type_size);
+/* As ovl_trophy_queue; @after: shown once the one showing, and any queued before it, has had
+ * its time, rather than taking its place (a platinum after the trophy that earned it) */
+int ovl_trophy_queue_after(const char* name, const uint8_t* icon_png, size_t icon_size,
+                           const uint8_t* type_png, size_t type_size, int after);
 void ovl_trophy_set_sound(const float* frames, unsigned count);
 void ovl_trophy_draw(void);
 int ovl_trophy_active(void);
