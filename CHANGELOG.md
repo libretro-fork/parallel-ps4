@@ -4,6 +4,17 @@ What changed in the libretro core of this fork, newest first. Changes that come 
 
 ## Unreleased
 
+- No submodules are left: fmt, Zydis (with Zycore) and libusb are part of the tree.
+  - **What is kept:** what the build compiles or includes, copied unchanged from the commits the submodules pointed at:
+    - {fmt}'s headers with `format.cc` and `os.cc` (ec73fb7).
+    - Zydis's headers and sources with their generated tables (120e0e7).
+    - Zycore's headers and sources (38d4f02).
+    - libusb's core with the Linux and Windows backends the Makefile lists (d087ea8, branch shadps4).
+  - **Licences and origins:** each library keeps its licence. A README in each names the repository and commit, and the files kept.
+  - **Left out:** their docs, tests, examples, build systems and other platforms' backends.
+  - **Submodule list:** `.gitmodules` is gone, so a checkout needs no `git submodule update` at all.
+  - **Size:** about 15 MB, of which 13 MB is Zydis (nearly all of it its tables).
+  - **Checked:** the libraries rebuilt from the copies on Linux and Windows, and every source of the core that includes their headers finds them in the tree. The tests pass.
 - The Vulkan headers are part of the tree, not a submodule. The 27 headers of Khronos' Vulkan-Headers that the core and its tests include, and its licence, are in `externals/vulkan-headers`, copied unchanged from the commit the submodule pointed at (ee3b5ca, Vulkan 1.4.230). That is `vulkan.h` and the platform headers the core asks for, `vulkan.hpp` and the headers it reads, and `vk_video`; the registry, the C++ modules and the other platforms' headers are left out. Its README names the commit and the files. The core tests' CI job checked out no submodules, so the Vulkan headers were missing and the job stopped at vk_device_fault_test; with them in the tree it builds. Checked here: with the system's own Vulkan headers hidden, every file of the core that includes Vulkan's (Linux and Windows) finds its headers in the tree, and the tests pass. Built on Linux and Windows.
 - `src/resources/shadps4.png` (35 KB) is removed, and no longer carried in the core. Its one use was the icon of the warning shown when the PS4's system fonts are missing; that warning now shows no icon. The two overlay tests that took it as a sample icon (ovl_test, overlay_device_test) take `bronze.png` and pass. Built on Linux and Windows.
 - The renderer's own shaders (`src/video_core/host_shaders/host_spirv.c`) are written through the same SPIR-V module as the shader recompiler's (`spv_module.c`), in place of a second writer of its own.
