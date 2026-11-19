@@ -14,11 +14,11 @@
 	path = externals/zydis
 	url = https://github.com/zyantific/zydis.git
 	shallow = true
-[submodule "externals/sirit"]
-	path = externals/sirit
-	url = https://github.com/shadps4-emu/sirit.git
-	shallow = true
 [submodule "externals/libusb"]
 	path = externals/libusb
 	url = https://github.com/shadexternals/libusb.git
 	branch = shadps4
+[submodule "externals/spirv-headers"]
+	path = externals/spirv-headers
+	url = https://github.com/KhronosGroup/SPIRV-Headers.git
+	shallow = true

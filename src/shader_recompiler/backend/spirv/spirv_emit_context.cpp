@@ -10,7 +10,6 @@
 #include "shader_recompiler/runtime_info.h"
 
 #include <fmt/format.h>
-#include <spirv/unified1/spirv.hpp11>
 #include "common/small_vector.h"
 
 #include <numbers>

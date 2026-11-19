@@ -99,7 +99,7 @@ for san in address,undefined thread; do
     # word where it is installed
     name=spv_module_test-$(echo $san | tr , -)
     $CC -std=gnu89 -O1 -g -Wall -Wextra -Wdeclaration-after-statement -fno-omit-frame-pointer \
-        -fsanitize=$san -Isrc -I$L/include -isystem externals/sirit/externals/SPIRV-Headers/include \
+        -fsanitize=$san -Isrc -I$L/include -isystem externals/spirv-headers/include \
         libretro/tests/spv_module_test.c src/shader_recompiler/backend/spirv/spv_module.c \
         -o "$OUT/$name"
     "$OUT/$name" "$OUT"
@@ -137,7 +137,7 @@ done
 # The tiling shader on a real device: tiled and detiled texels are the texels they were, and a
 # texel with no place in the image is neither read nor written
 $CC -std=c89 -O1 -g -Wall -fsanitize=address,undefined -isystem externals/vulkan-headers/include \
-    -isystem externals/sirit/externals/SPIRV-Headers/include -Isrc -I$L/include \
+    -isystem externals/spirv-headers/include -Isrc -I$L/include \
     libretro/tests/tiling_device_test.c src/video_core/host_shaders/host_spirv.c \
     -o "$OUT/tiling_device_test" -ldl
 ASAN_OPTIONS=detect_leaks=0 "$OUT/tiling_device_test"
@@ -398,13 +398,13 @@ ASAN_OPTIONS=detect_leaks=0 "$OUT/frame_narrow_device_test"
 # The depth-to-colour shader on a real device: each sample of a depth buffer's depth and stencil
 # comes out as the colour it should
 $CC -std=c89 -O1 -g -Wall -fsanitize=address,undefined -isystem externals/vulkan-headers/include \
-    -isystem externals/sirit/externals/SPIRV-Headers/include -Isrc -I$L/include \
+    -isystem externals/spirv-headers/include -Isrc -I$L/include \
     libretro/tests/depth_to_color_device_test.c src/video_core/host_shaders/host_spirv.c \
     -o "$OUT/depth_to_color_device_test" -ldl
 ASAN_OPTIONS=detect_leaks=0 "$OUT/depth_to_color_device_test"
 # The output pass on a device: SDR unchanged, PQ for an HDR frontend, a game's HDR passed through
 $CC -std=c89 -O1 -g -Wall -fsanitize=address,undefined -isystem externals/vulkan-headers/include \
-    -isystem externals/sirit/externals/SPIRV-Headers/include -Isrc -I$L/include \
+    -isystem externals/spirv-headers/include -Isrc -I$L/include \
     libretro/tests/pq_output_device_test.c src/video_core/host_shaders/host_spirv.c \
     -o "$OUT/pq_output_device_test" -ldl -lm
 ASAN_OPTIONS=detect_leaks=0 "$OUT/pq_output_device_test"
@@ -437,7 +437,7 @@ $CC -std=gnu89 -O1 -g -Wall -Wdeclaration-after-statement -ffp-contract=off \
 # notification and a trophy with their images, as the CPU model of them; the images' slots
 # free again after
 $CC -std=gnu89 -O1 -g -Wall -Wdeclaration-after-statement -fsanitize=address,undefined \
-    -isystem externals/vulkan-headers/include -isystem externals/sirit/externals/SPIRV-Headers/include \
+    -isystem externals/vulkan-headers/include -isystem externals/spirv-headers/include \
     -I. -Isrc -I$L/include libretro/tests/overlay_device_test.c src/video_core/overlay/vk_overlay.c \
     src/video_core/host_shaders/host_spirv.c $OVL -o "$OUT/overlay_device_test" -ldl -lm -lpthread
 ASAN_OPTIONS=detect_leaks=0 "$OUT/overlay_device_test"

@@ -315,7 +315,7 @@ CORE_FLAGS := -DZYCORE_STATIC_BUILD -DZYDIS_STATIC_BUILD -DVK_ENABLE_BETA_EXTENS
 	-Isrc -I$(LRC_DIR)/include -I. \
 	-isystem $(EXT_DIR)/fmt/include -isystem $(EXT_DIR)/xbyak \
 	-isystem $(EXT_DIR)/gcn/include \
-	-isystem $(EXT_DIR)/sirit/externals/SPIRV-Headers/include \
+	-isystem $(EXT_DIR)/spirv-headers/include \
 	-isystem $(EXT_DIR)/vulkan-headers/include -isystem $(EXT_DIR)/zydis/include \
 	-isystem $(EXT_DIR)/zydis/dependencies/zycore/include -isystem $(EXT_DIR)/libusb/libusb
 CORE_CXXFLAGS := -Wno-invalid-offsetof
