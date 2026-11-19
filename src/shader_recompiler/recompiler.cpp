@@ -41,7 +41,7 @@ void EmitControlFlowGraph(IR::Program& program, Pools& pools, Gcn::CFG& cfg,
         ir_block->cfg_block = &block;
         block.ir_block = ir_block;
         translator.Translate(ir_block, block.begin, block.cond,
-                             std::span{program.ins_list}.subspan(start, size));
+                             std::span{pools.gcn_insts}.subspan(start, size));
         program.blocks.push_back(ir_block);
     }
     translator.EmitPrologue(program.blocks.front());
@@ -71,19 +71,20 @@ IR::Program TranslateProgram(const std::span<const u32>& code, Pools& pools, Inf
     Gcn::GcnCodeSlice slice(code.data(), code.data() + code.size());
     Gcn::GcnDecodeContext decoder;
 
-    // Decode and save instructions
-    IR::Program program{info};
-    program.ins_list.reserve(code.size());
-    while (!slice.atEnd()) {
-        program.ins_list.emplace_back(decoder.decodeInstruction(slice));
-    }
-
     // Clear any previous pooled data.
     pools.ReleaseContents();
 
+    // Decode and save instructions, into the storage the last translation left
+    IR::Program program{info};
+    auto& ins_list = pools.gcn_insts;
+    ins_list.clear();
+    ins_list.reserve(code.size());
+    while (!slice.atEnd()) {
+        ins_list.emplace_back(decoder.decodeInstruction(slice));
+    }
+
     // Create control flow graph
-    Common::ObjectPool<Gcn::Block> gcn_block_pool{64};
-    Gcn::CFG cfg{gcn_block_pool, program.ins_list};
+    Gcn::CFG cfg{pools.gcn_block_pool, ins_list};
     EmitControlFlowGraph(program, pools, cfg, runtime_info, profile);
 
     // On NVIDIA GPUs HW interpolation of clip distance values seems broken, and we need to emulate

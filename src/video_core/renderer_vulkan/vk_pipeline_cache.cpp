@@ -28,6 +28,12 @@ namespace Vulkan {
 
 // What the compiler thread is handed, and gives back. Made when a draw finds something
 // missing, which is when a compile would have allocated anyway.
+// An SRT walker's machine code by its hash, its length the seed: what a job compares a walker
+// against, where it kept a copy of the code for that alone
+static u64 WalkerId(const std::vector<u8>& code) {
+    return xxh3_64(code.data(), code.size(), code.size());
+}
+
 struct PipelineCache::CompileJob {
     mpsc_stack_node_t node; // first: the stacks link jobs through it
     enum class Kind {
@@ -59,9 +65,9 @@ struct PipelineCache::CompileJob {
     std::optional<Shader::Gcn::FetchShaderData> snap_fetch;
     Common::SmallVector<Shader::SnapshotRead, 40> snap_reads; // attributes and the tess V#
     Shader::TessellationDataConstantBuffer snap_tess{};
-    /// The walker the snapshot was taken with: a translation that makes another (it should
-    /// not) was made from a flat buffer of another layout, and is not used
-    std::vector<u8> snap_walker;
+    /// The walker the snapshot was taken with (WalkerId): a translation that makes another (it
+    /// should not) was made from a flat buffer of another layout, and is not used
+    u64 snap_walker{};
     bool stale{};
     u64 hash{};
     size_t perm_idx{};
@@ -73,7 +79,7 @@ struct PipelineCache::CompileJob {
     vk::ShaderModule module{};
 
     // Check: what the cache kept, and what the translation made
-    std::vector<u8> kept_walker;
+    u64 kept_walker{}; // WalkerId
     u32 kept_flatbuf_dw{};
     std::array<u32, 4> kept_resources{};
     bool kept_dma{};
@@ -982,7 +988,7 @@ bool PipelineCache::CodeUnchanged(const CompileJob& job) {
 
 void PipelineCache::CaptureSnapshot(CompileJob& job, const Shader::Info& info) {
     job.snap_flat = info.flattened_ud_buf;
-    job.snap_walker = info.srt_walker_code;
+    job.snap_walker = WalkerId(info.srt_walker_code);
     if (info.has_fetch_shader) {
         Shader::Gcn::FetchShaderData fetch;
         if (Shader::Gcn::ParseFetchShader(info, fetch)) {
@@ -1101,7 +1107,7 @@ PipelineCache::Result PipelineCache::GetProgram(HwStage hw_stage, SwStage sw_sta
         auto* job = make_job(CompileJob::Kind::Check, perm_idx, program);
         CaptureSnapshot(*job, info);
         job->start = start;
-        job->kept_walker = info.srt_walker_code;
+        job->kept_walker = WalkerId(info.srt_walker_code);
         job->kept_flatbuf_dw = info.srt_info.flattened_bufsize_dw;
         job->kept_resources = {
             static_cast<u32>(info.buffers.size()), static_cast<u32>(info.images.size()),
@@ -1205,7 +1211,7 @@ void PipelineCache::RunJobOn(CompileJob& job, const Shader::ShaderParams& params
         const auto module = CompileModule(info, job.runtime, params.code, 0, binding);
         auto spec = Shader::StageSpecialization(info, job.runtime, profile, job.start);
         info.snapshot = nullptr;
-        job.stale = info.srt_walker_code != job.snap_walker;
+        job.stale = WalkerId(info.srt_walker_code) != job.snap_walker;
         if (job.stale) {
             // Its flat buffer was of another layout: thrown away, the walker it made kept
             instance.GetDevice().destroyShaderModule(module);
@@ -1221,7 +1227,7 @@ void PipelineCache::RunJobOn(CompileJob& job, const Shader::ShaderParams& params
         auto binding = job.start;
         job.module = CompileModule(new_info, job.runtime, params.code, job.perm_idx, binding);
         new_info.snapshot = nullptr;
-        if (new_info.srt_walker_code != job.snap_walker) {
+        if (WalkerId(new_info.srt_walker_code) != job.snap_walker) {
             LOG_WARNING(Render_Vulkan, "{} shader {:#x} permutation {}: another SRT walker",
                         job.hw_stage, job.hash, job.perm_idx);
         }
@@ -1240,7 +1246,7 @@ void PipelineCache::RunJobOn(CompileJob& job, const Shader::ShaderParams& params
             Storage::BlobType::ShaderBinary, fmt::format("{:#018x}_{}", job.hash, job.perm_idx));
         job.same_spv = kept_spv && kept_spv->size() == spv.size() * sizeof(u32) &&
                        std::memcmp(kept_spv->data(), spv.data(), kept_spv->size()) == 0;
-        job.same_walker = job.fresh.srt_walker_code == job.kept_walker &&
+        job.same_walker = WalkerId(job.fresh.srt_walker_code) == job.kept_walker &&
                           job.fresh.srt_info.flattened_bufsize_dw == job.kept_flatbuf_dw;
         job.same_resources =
             job.kept_resources == std::array<u32, 4>{static_cast<u32>(job.fresh.buffers.size()),
