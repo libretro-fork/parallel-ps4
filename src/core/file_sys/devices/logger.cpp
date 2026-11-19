@@ -1,13 +1,24 @@
 // SPDX-FileCopyrightText: Copyright 2025 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include <retro_atomic.h>
+#include "common/assert.h"
+#include "common/line_buffer.h"
 #include "common/logging/log.h"
 #include "core/file_sys/devices/logger.h"
 #include "core/libraries/kernel/file_system.h"
 
 namespace Core::Devices {
 
-Logger::Logger(std::string prefix, bool is_err) : prefix(std::move(prefix)), is_err(is_err) {}
+static constexpr int MaxLoggers = 4;
+static retro_atomic_int_t g_loggers{0};
+// Each thread's lines, one buffer a device
+static thread_local line_buffer_t t_lines[MaxLoggers];
+
+Logger::Logger(std::string prefix, bool is_err)
+    : prefix(std::move(prefix)), is_err(is_err), slot(retro_atomic_fetch_add_int(&g_loggers, 1)) {
+    ASSERT_MSG(slot < MaxLoggers, "More logger devices than line buffers");
+}
 
 Logger::~Logger() = default;
 
@@ -35,33 +46,25 @@ s32 Logger::fsync() {
     return 0;
 }
 
-void Logger::log(const char* buf, u64 nbytes) {
-    std::scoped_lock lock{mtx};
-    const char* end = buf + nbytes;
-    for (const char* it = buf; it < end; ++it) {
-        char c = *it;
-        if (c == '\r') {
-            continue;
-        }
-        if (c == '\n') {
-            log_flush();
-            continue;
-        }
-        buffer.push_back(c);
+static void EmitLine(void* ctx, const char* text, size_t len) {
+    const auto* const self = static_cast<const Logger*>(ctx);
+    self->Emit(std::string_view{text, len});
+}
+
+void Logger::Emit(std::string_view line) const {
+    if (is_err) {
+        LOG_ERROR(Tty, "[{}] {}", prefix, line);
+    } else {
+        LOG_INFO(Tty, "[{}] {}", prefix, line);
     }
 }
 
+void Logger::log(const char* buf, u64 nbytes) {
+    line_buffer_feed(&t_lines[slot], buf, static_cast<size_t>(nbytes), EmitLine, this);
+}
+
 void Logger::log_flush() {
-    std::scoped_lock lock{mtx};
-    if (buffer.empty()) {
-        return;
-    }
-    if (is_err) {
-        LOG_ERROR(Tty, "[{}] {}", prefix, std::string_view{buffer});
-    } else {
-        LOG_INFO(Tty, "[{}] {}", prefix, std::string_view{buffer});
-    }
-    buffer.clear();
+    line_buffer_flush(&t_lines[slot], EmitLine, this);
 }
 
 } // namespace Core::Devices

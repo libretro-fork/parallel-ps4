@@ -3,12 +3,15 @@
 
 #include <cstdarg>
 #include <cstdio>
-#include <map>
+#include <new>
 
 #include <common/va_ctx.h>
 #include "common/alignment.h"
 #include "common/assert.h"
 #include "common/logging/log.h"
+#include "common/pin_gate.h"
+#include "common/run_once.h"
+#include "common/slot_table.h"
 #include "core/libraries/error_codes.h"
 #include "core/libraries/kernel/file_system.h"
 #include "core/libraries/kernel/kernel.h"
@@ -25,36 +28,57 @@ s32 PS4_SYSV_ABI internal_snprintf(char* s, u64 n, VA_ARGS) {
     return snprintf_ctx(s, n, &ctx);
 }
 
-std::map<s32, OrbisFILE*> g_files{};
 // Constants for tracking accurate file indexes.
 // Since the file struct is exposed to the application, accuracy is important.
 static constexpr s32 g_initial_files = 5;
 static constexpr s32 g_max_files = 0x100;
 
-OrbisFILE* PS4_SYSV_ABI internal__Fofind() {
-    u64 index = g_initial_files;
-    while (index != g_max_files) {
-        OrbisFILE* file = g_files[index];
-        // If file doesn't exist, create it.
-        if (file == nullptr) {
-            file = new OrbisFILE();
-            if (file == nullptr) {
-                return nullptr;
+// The file table, without a lock: a slot is taken by compare-and-swap (slot_table.c); its
+// FILE is made the first time and kept for the slot's next file, so an fopen allocates once
+// a slot. fflush(NULL) holds a file it flushes through its slot's gate, which a close shuts
+// and waits on before the slot is given back.
+static retro_atomic_ptr_t g_files[g_max_files];
+static retro_atomic_int_t g_file_taken[g_max_files];
+static pin_gate_t g_file_gates[g_max_files];
+static run_once_t g_files_once = RUN_ONCE_INIT;
+
+static void FilesInit() {
+    run_once(
+        &g_files_once,
+        [](void*) {
+            for (s32 i = 0; i < g_max_files; i++) {
+                retro_atomic_ptr_init(&g_files[i], nullptr);
+                retro_atomic_int_init(&g_file_taken[i], 0);
+                pin_gate_init(&g_file_gates[i]);
+                // Shut while the slot is free
+                pin_gate_shut(&g_file_gates[i]);
             }
-            // Store new file in the array, initialize default values, and return it.
-            g_files[index] = file;
-            file->_Mode = 0x80;
-            file->_Idx = index;
-            return file;
-        }
-        // Special case, files with mode 0 are returned?
-        if (file->_Mode == 0) {
-            file->_Mode = 0xff7f;
-            return file;
-        }
-        index++;
+        },
+        nullptr);
+}
+
+OrbisFILE* PS4_SYSV_ABI internal__Fofind() {
+    FilesInit();
+    const s32 index = slot_table_take(g_file_taken, g_initial_files, g_max_files);
+    if (index < 0) {
+        return nullptr;
     }
-    return nullptr;
+    auto* file = static_cast<OrbisFILE*>(retro_atomic_load_acquire_ptr(&g_files[index]));
+    if (file == nullptr) {
+        file = new (std::nothrow) OrbisFILE();
+        if (file == nullptr) {
+            slot_table_give(g_file_taken, index);
+            return nullptr;
+        }
+        retro_atomic_store_release_ptr(&g_files[index], file);
+    } else {
+        // As a new one
+        *file = OrbisFILE{};
+    }
+    file->_Mode = 0x80;
+    file->_Idx = static_cast<u8>(index);
+    pin_gate_open(&g_file_gates[index]);
+    return file;
 }
 
 void PS4_SYSV_ABI internal__Lockfilelock(OrbisFILE* file) {
@@ -197,7 +221,6 @@ s32 PS4_SYSV_ABI internal__Fopen(const char* path, u16 mode, bool flag) {
 }
 
 OrbisFILE* PS4_SYSV_ABI internal_fopen(const char* path, const char* mode) {
-    std::scoped_lock lk{g_file_mtx};
     LOG_INFO(Lib_LibcInternal, "called, path {}, mode {}", path, mode);
     OrbisFILE* file = internal__Fofind();
     OrbisFILE* ret_file = internal__Foprep(path, mode, file, -1, 0, 0);
@@ -209,13 +232,18 @@ OrbisFILE* PS4_SYSV_ABI internal_fopen(const char* path, const char* mode) {
 
 s32 PS4_SYSV_ABI internal_fflush(OrbisFILE* file) {
     if (file == nullptr) {
-        std::scoped_lock lk{g_file_mtx};
+        FilesInit();
         s32 fflush_result = 0;
-        for (auto& file : g_files) {
-            s32 res = internal_fflush(file.second);
-            if (res < 0) {
+        for (s32 i = g_initial_files; i < g_max_files; i++) {
+            // A file being closed is not held, and is flushed by its close
+            if (!pin_gate_enter(&g_file_gates[i])) {
+                continue;
+            }
+            auto* const open = static_cast<OrbisFILE*>(retro_atomic_load_acquire_ptr(&g_files[i]));
+            if (open != nullptr && internal_fflush(open) < 0) {
                 fflush_result = -1;
             }
+            pin_gate_leave(&g_file_gates[i]);
         }
         return fflush_result;
     }
@@ -418,6 +446,15 @@ u64 PS4_SYSV_ABI internal_fread(char* ptr, u64 size, u64 nmemb, OrbisFILE* file)
 }
 
 void PS4_SYSV_ABI internal__Fofree(OrbisFILE* file) {
+    FilesInit();
+    // A file of the table: an fflush(NULL) holding it is waited for first
+    const s32 index = file->_Idx;
+    const bool in_table = index >= g_initial_files && index < g_max_files &&
+                          retro_atomic_load_acquire_ptr(&g_files[index]) == file &&
+                          slot_table_taken(g_file_taken, index);
+    if (in_table) {
+        pin_gate_close(&g_file_gates[index]);
+    }
     u8* cbuf_ptr = &file->_Cbuf;
     s8 trunc_mode = static_cast<s8>(file->_Mode);
 
@@ -432,10 +469,11 @@ void PS4_SYSV_ABI internal__Fofree(OrbisFILE* file) {
     file->_Rback = cbuf_ptr;
     file->_WRback = &file->unk1;
     if (trunc_mode < 0) {
-        // Remove file from vector
-        g_files.erase(file->_Idx);
         internal__Mtxdst(&file->_Mutex);
-        free(file);
+    }
+    // The FILE stays the slot's, for its next file
+    if (in_table) {
+        slot_table_give(g_file_taken, index);
     }
 }
 
@@ -446,12 +484,10 @@ s32 PS4_SYSV_ABI internal_fclose(OrbisFILE* file) {
 
     LOG_INFO(Lib_LibcInternal, "called, file handle {:#x}", file->_Handle);
     if ((file->_Mode & 3) == 0 || file->_Handle < 0) {
-        std::scoped_lock lk{g_file_mtx};
         internal__Fofree(file);
         *Libraries::Kernel::__Error() = POSIX_EBADF;
     } else {
         s32 fflush_result = internal_fflush(file);
-        std::scoped_lock lk{g_file_mtx};
         if ((file->_Mode & 0x40) != 0) {
             std::free(file->_Buf);
         }

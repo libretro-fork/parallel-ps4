@@ -180,6 +180,19 @@ $CC -std=c89 -pedantic -Wno-long-long -O1 -g -Wall -Wdeclaration-after-statement
     -fsanitize=address,undefined -Isrc -I$L/include libretro/tests/reserve_span_test.c \
     src/common/reserve_span.c -o "$OUT/reserve_span_test"
 "$OUT/reserve_span_test"
+# The game's libc file table: four threads taking and giving back slots of a table too small
+# for all, never two in one slot
+for san in address,undefined thread; do
+    $CC -std=gnu89 -O1 -g -Wall -Wdeclaration-after-statement -fsanitize=$san -Isrc -I$L/include \
+        libretro/tests/slot_table_test.c src/common/slot_table.c $L/rthreads/rthreads.c \
+        -o "$OUT/slot_table_test" -lpthread
+    "$OUT/slot_table_test"
+done
+# The game's stdout and stderr cut into lines, each thread its own buffer
+$CC -std=c89 -pedantic -O1 -g -Wall -Wdeclaration-after-statement -fsanitize=address,undefined \
+    -Isrc -I$L/include libretro/tests/line_buffer_test.c src/common/line_buffer.c \
+    -o "$OUT/line_buffer_test"
+"$OUT/line_buffer_test"
 # The guest rwlocks' word: four threads reading and writing a block through it, never a
 # reader beside a writer nor two writers
 for san in address,undefined thread; do

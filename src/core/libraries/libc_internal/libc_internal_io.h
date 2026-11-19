@@ -3,8 +3,6 @@
 
 #pragma once
 
-#include <mutex>
-#include "common/event_mutex.h"
 #include "common/types.h"
 #include "core/libraries/kernel/threads.h"
 
@@ -13,8 +11,6 @@ class SymbolsResolver;
 }
 
 namespace Libraries::LibcInternal {
-
-static Common::RecursiveEventMutex g_file_mtx{};
 
 union Orbis__mbstate_t {
     u8 __mbstate8[128];

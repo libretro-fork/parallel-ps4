@@ -3,21 +3,20 @@
 
 #pragma once
 
-#include "common/event_mutex.h"
 #include "core/file_sys/devices/base_device.h"
 
-#include <mutex>
 #include <string>
-#include <vector>
+#include <string_view>
 
 namespace Core::Devices {
 
+/// The game's stdin, stdout and stderr: what it writes goes to the log a line at a time. Each
+/// thread cuts its own writes into lines in a buffer of its own (line_buffer.c), so threads
+/// never wait for each other and a line is never another thread's half.
 class Logger final : BaseDevice {
     std::string prefix;
     bool is_err;
-
-    Common::RecursiveEventMutex mtx;
-    std::vector<char> buffer;
+    int slot; // which of each thread's line buffers is this device's
 
 public:
     explicit Logger(std::string prefix, bool is_err);
@@ -29,6 +28,8 @@ public:
     s64 pwrite(const void* buf, u64 nbytes, s64 offset) override;
 
     s32 fsync() override;
+
+    void Emit(std::string_view line) const;
 
 private:
     void log(const char* buf, u64 nbytes);
