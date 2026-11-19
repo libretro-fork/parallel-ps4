@@ -89,6 +89,23 @@ int main(void) {
     }
     pin_gate_close(&gate);
     pin_gate_open(&gate);
+    /* Shut with a reader in: not drained until it leaves */
+    if (!pin_gate_enter(&gate)) {
+        printf("pin_gate: a reader was turned away from an open gate\n");
+        failures++;
+    } else {
+        pin_gate_shut(&gate);
+        if (pin_gate_drained(&gate)) {
+            printf("pin_gate: drained with a reader in\n");
+            failures++;
+        }
+        pin_gate_leave(&gate);
+        if (!pin_gate_drained(&gate)) {
+            printf("pin_gate: not drained once the reader left\n");
+            failures++;
+        }
+        pin_gate_open(&gate);
+    }
     if (!pin_gate_enter(&gate)) {
         printf("pin_gate: a reader was turned away from an open gate\n");
         failures++;

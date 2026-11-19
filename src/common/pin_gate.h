@@ -37,6 +37,12 @@ void pin_gate_leave(pin_gate_t* gate);
 void pin_gate_close(pin_gate_t* gate);
 void pin_gate_open(pin_gate_t* gate);
 
+/* pin_gate_close in two halves, for an owner that must wait its own way (a game thread, on the
+ * game's time): readers are turned away from here, and @gate->drained is notified as the last
+ * one in leaves; pin_gate_drained says whether none is left. */
+void pin_gate_shut(pin_gate_t* gate);
+int pin_gate_drained(pin_gate_t* gate);
+
 RETRO_END_DECLS
 
 #endif

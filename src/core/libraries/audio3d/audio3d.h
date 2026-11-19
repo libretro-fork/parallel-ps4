@@ -3,16 +3,11 @@
 
 #pragma once
 
-#include <algorithm>
-#include <mutex>
-#include <optional>
-#include <vector>
-#include <queue>
-
-#include "common/combiner.h"
-#include "common/event_mutex.h"
+#include <retro_atomic.h>
+#include "common/pin_gate.h"
 #include "common/types.h"
 #include "core/libraries/audio/audioout.h"
+#include "core/libraries/audio3d/audio3d_port.h"
 
 namespace Core::Loader {
 class SymbolsResolver;
@@ -92,164 +87,32 @@ struct OrbisAudio3dAttribute {
     u64 value_size;
 };
 
-// Fixed-size blocks out of one allocation made when a port opens, given back and taken again:
-// the sound the game hands over is never allocated for while it runs. Used under the port's
-// mutex.
-class BlockPool {
-public:
-    void Init(u32 block_bytes_, u32 count) {
-        block_bytes = block_bytes_;
-        storage.assign(static_cast<size_t>(block_bytes) * count, 0);
-        free_blocks.clear();
-        free_blocks.reserve(count);
-        for (u32 i = 0; i < count; i++) {
-            free_blocks.push_back(storage.data() + static_cast<size_t>(i) * block_bytes);
-        }
-    }
-    u8* Take() {
-        if (free_blocks.empty()) {
-            return nullptr;
-        }
-        u8* const block = free_blocks.back();
-        free_blocks.pop_back();
-        return block;
-    }
-    // Within the capacity reserved at Init: never allocates
-    void Give(u8* block) {
-        free_blocks.push_back(block);
-    }
-    u32 BlockBytes() const {
-        return block_bytes;
-    }
-
-private:
-    std::vector<u8> storage;
-    std::vector<u8*> free_blocks;
-    u32 block_bytes{};
-};
-
-// A queue of at most the capacity given at Init, in storage made then: pushing and popping
-// never allocate (a std::deque does, a chunk at a time, as it moves along). A popped slot is
-// kept as it is, so a slot that owns memory (a vector) keeps it for the next push.
-template <typename T>
-class FixedQueue {
-public:
-    void Init(u32 capacity) {
-        items.assign(capacity, T{});
-        head = 0;
-        count = 0;
-    }
-    u32 size() const {
-        return count;
-    }
-    bool empty() const {
-        return count == 0;
-    }
-    T& front() {
-        return items[head];
-    }
-    // The next slot, counted in; the caller fills it. Only below capacity.
-    T& push_slot() {
-        T& slot = items[(head + count) % items.size()];
-        ++count;
-        return slot;
-    }
-    void push_back(const T& item) {
-        push_slot() = item;
-    }
-    void pop_front() {
-        head = (head + 1) % static_cast<u32>(items.size());
-        --count;
-    }
-    void clear() {
-        head = 0;
-        count = 0;
-    }
-    bool full() const {
-        return count >= items.size();
-    }
-
-    class Iterator {
-    public:
-        Iterator(FixedQueue* q_, u32 i_) : q{q_}, i{i_} {}
-        T& operator*() const {
-            return q->items[(q->head + i) % q->items.size()];
-        }
-        Iterator& operator++() {
-            ++i;
-            return *this;
-        }
-        bool operator!=(const Iterator& other) const {
-            return i != other.i;
-        }
-
-    private:
-        FixedQueue* q;
-        u32 i;
-    };
-    Iterator begin() {
-        return Iterator{this, 0};
-    }
-    Iterator end() {
-        return Iterator{this, count};
-    }
-
-private:
-    std::vector<T> items;
-    u32 head{};
-    u32 count{};
-};
-
-struct AudioData {
-    u8* sample_buffer;
-    BlockPool* pool{}; // where sample_buffer goes back to
-    u32 num_samples;
-    u32 num_channels{1}; // channels in sample_buffer
-    OrbisAudio3dFormat format{
-        OrbisAudio3dFormat::ORBIS_AUDIO3D_FORMAT_S16}; // format of sample_buffer
-};
-
-struct ObjectState {
-    FixedQueue<AudioData> pcm_queue;
-    std::unordered_map<u32, std::vector<u8>> persistent_attributes;
-    bool unreserved{false};
-};
-
-// An AudioOut port opened by the game through sceAudio3dAudioOutOpen
+// An AudioOut port opened by the game through sceAudio3dAudioOutOpen: what the game outputs
+// to it waits in a ring until the port's push sends it on
 struct AssociatedAudioOutPort {
+    retro_atomic_int_t state{0}; // AssociatedFree, AssociatedOpening, AssociatedLive
     s32 handle{-1};
-    u32 buffer_bytes{0};
     u32 samples_per_buffer{0};
     bool is_float{false};
-    // Buffers of buffer_bytes each, made when the port is opened
-    FixedQueue<std::vector<u8>> pending;
+    audio3d_ring_t pending{};
 };
 
+constexpr u32 MaxAssociatedPorts = 8;
+
+// A port: its sound and objects in audio3d_port.c, made when it opens. Calls pin it through
+// its gate; closing it waits for those in to leave.
 struct Port {
-    mutable Common::RecursiveEventMutex mutex;
+    retro_atomic_int_t state{0}; // PortFree, PortOpening, PortOpen, PortClosing
+    pin_gate_t gate{};
     OrbisAudio3dOpenParameters parameters{};
-    // Opened lazily on the first sceAudio3dPortPush call.
-    s32 audio_out_handle{-1};
-    // AudioOut ports explicitly opened by the game via sceAudio3dAudioOutOpen.
-    std::vector<AssociatedAudioOutPort> audioout_ports;
-    // Reserved objects and their state.
-    std::unordered_map<OrbisAudio3dObjectId, ObjectState> objects;
-    // increasing counter for generating unique object IDs within this port.
-    OrbisAudio3dObjectId next_object_id{0};
-    // Bed audio queue
-    FixedQueue<AudioData> bed_queue;
-    // Mixed frames ready to be consumed by sceAudio3dPortPush: stereo, or 7.1 with surround
-    FixedQueue<AudioData> mixed_queue;
-    // The blocks queued sound is kept in, made when the port opens: a bed's, up to 8
-    // channels, objects' mono sound, and the mix's
-    BlockPool bed_pool;
-    BlockPool sample_pool;
-    BlockPool mix_pool;
+    // The AudioOut port the mix goes out through, opened on the first push
+    retro_atomic_int_t audio_out_handle{-1};
+    audio3d_port_t core{};
+    AssociatedAudioOutPort audioout_ports[MaxAssociatedPorts];
 };
 
 struct Audio3dState {
-    Common::Combiner ports_mutex;
-    std::unordered_map<OrbisAudio3dPortId, Port> ports;
+    Port ports[MaxPorts];
 };
 
 s32 PS4_SYSV_ABI sceAudio3dAudioOutClose(s32 handle);

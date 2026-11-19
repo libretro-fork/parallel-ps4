@@ -180,6 +180,15 @@ $CC -std=c89 -pedantic -Wno-long-long -O1 -g -Wall -Wdeclaration-after-statement
     -fsanitize=address,undefined -Isrc -I$L/include libretro/tests/reserve_span_test.c \
     src/common/reserve_span.c -o "$OUT/reserve_span_test"
 "$OUT/reserve_span_test"
+# libSceAudio3d's ports without a lock: a ring's blocks whole and in order while a third
+# thread drops what is queued; objects reserved by four threads while a fifth mixes; the mix's
+# sums, stereo and 7.1
+for san in address,undefined thread; do
+    $CC -std=gnu89 -O1 -g -Wall -Wdeclaration-after-statement -fsanitize=$san -Isrc -I$L/include \
+        libretro/tests/audio3d_port_test.c src/core/libraries/audio3d/audio3d_port.c \
+        $L/rthreads/rthreads.c -o "$OUT/audio3d_port_test" -lpthread
+    "$OUT/audio3d_port_test"
+done
 # The video player's state machine and who starts and stops it, moved by four threads at once:
 # its moves the ones it had under a lock, none lost, one thread starting or stopping at a time
 for san in address,undefined thread; do

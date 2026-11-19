@@ -33,17 +33,23 @@ void pin_gate_leave(pin_gate_t* gate) {
     }
 }
 
+void pin_gate_shut(pin_gate_t* gate) {
+    (void)retro_atomic_fetch_or_int(&gate->word, PIN_GATE_CLOSED);
+}
+
+int pin_gate_drained(pin_gate_t* gate) {
+    return retro_atomic_load_acquire_int(&gate->word) == PIN_GATE_CLOSED;
+}
+
 void pin_gate_close(pin_gate_t* gate) {
-    if (retro_atomic_fetch_or_int(&gate->word, PIN_GATE_CLOSED) == 0) {
-        return;
-    }
+    pin_gate_shut(gate);
     for (;;) {
         int key;
-        if (retro_atomic_load_acquire_int(&gate->word) == PIN_GATE_CLOSED) {
+        if (pin_gate_drained(gate)) {
             return;
         }
         key = retro_eventcount_prepare_wait(&gate->drained);
-        if (retro_atomic_load_acquire_int(&gate->word) == PIN_GATE_CLOSED) {
+        if (pin_gate_drained(gate)) {
             retro_eventcount_cancel_wait(&gate->drained);
             return;
         }
