@@ -20,6 +20,7 @@
 static pin_gate_t gate;
 static int block[WORDS];
 static retro_atomic_int_t done;
+static retro_atomic_int_t entered; /* reads let in so far, for the owner to see */
 static int failures;
 
 typedef struct reader {
@@ -42,6 +43,9 @@ static void reader_run(void* arg) {
             }
         }
         r->in++;
+        if (r->in == 1) {
+            retro_atomic_inc_int(&entered);
+        }
         pin_gate_leave(&gate);
     }
 }
@@ -54,10 +58,13 @@ int main(void) {
 
     pin_gate_init(&gate);
     retro_atomic_int_init(&done, 0);
+    retro_atomic_int_init(&entered, 0);
     for (i = 0; i < READERS; i++) {
         threads[i] = sthread_create(reader_run, &readers[i]);
     }
-    for (round = 1; round <= ROUNDS; round++) {
+    /* Its rounds, and more until a reader got in: on a loaded machine the owner can finish them
+     * all before a reader thread first runs, and then the test proves nothing */
+    for (round = 1; round <= ROUNDS || retro_atomic_load_acquire_int(&entered) == 0; round++) {
         pin_gate_close(&gate);
         for (i = 0; i < WORDS; i++) {
             block[i] = round;
