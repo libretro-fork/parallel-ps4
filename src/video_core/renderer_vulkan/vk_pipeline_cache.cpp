@@ -72,6 +72,9 @@ struct PipelineCache::CompileJob {
     /// should not) was made from a flat buffer of another layout, and is not used
     u64 snap_walker{};
     bool stale{};
+    /// Discover: the translation went on to the end (GuestSnapshot::finished), and the job has
+    /// made the program as a Program job does
+    bool finished{};
     u64 hash{};
     size_t perm_idx{};
     Shader::RuntimeInfo runtime{};
@@ -954,6 +957,14 @@ vk::ShaderModule PipelineCache::CompileModule(Shader::Info& info, Shader::Runtim
     DumpShader(code, info.pgm_hash, info.hw_stage, perm_idx, "bin");
 
     const auto ir_program = Shader::TranslateProgram(code, pools, info, runtime_info, profile);
+    return ModuleFromProgram(info, runtime_info, ir_program, perm_idx, binding);
+}
+
+vk::ShaderModule PipelineCache::ModuleFromProgram(Shader::Info& info,
+                                                  Shader::RuntimeInfo& runtime_info,
+                                                  const Shader::IR::Program& ir_program,
+                                                  size_t perm_idx,
+                                                  Shader::Backend::Bindings& binding) {
     const auto spv =
         Shader::Backend::SPIRV::EmitSPIRV(pools.spv, profile, runtime_info, ir_program, binding);
     DumpShader(spv, info.pgm_hash, info.hw_stage, perm_idx, "spv");
@@ -1062,6 +1073,7 @@ PipelineCache::Result PipelineCache::GetProgram(HwStage hw_stage, SwStage sw_sta
     if (program->pending && !program->discovery_submitted) {
         auto* job = make_job(CompileJob::Kind::Discover, 0, program);
         job->snapshot.discover_only = true;
+        job->snapshot.finished = &job->finished;
         program->discovery_submitted = true;
         Submit(job);
         return pending();
@@ -1209,8 +1221,23 @@ void PipelineCache::RunJobOn(CompileJob& job, const Shader::ShaderParams& params
         auto& info = job.program->info;
         info.snapshot = &job.snapshot;
         auto runtime = job.runtime;
-        (void)Shader::TranslateProgram(params.code, pools, info, runtime, profile);
+        const auto ir_program =
+            Shader::TranslateProgram(params.code, pools, info, runtime, profile);
+        if (!job.finished) {
+            info.snapshot = nullptr;
+            break;
+        }
+        // It read nothing of the game's but its user data: made here, as a Program job would
+        // make it from the next draw, with the translation already done
+        LOG_INFO(Render_Vulkan, "Compiling {} shader {:#x} (from its discovery)", info.hw_stage,
+                 info.pgm_hash);
+        DumpShader(params.code, info.pgm_hash, info.hw_stage, 0, "bin");
+        auto binding = job.start;
+        const auto module = ModuleFromProgram(info, runtime, ir_program, 0, binding);
+        auto spec = Shader::StageSpecialization(info, runtime, profile, job.start);
         info.snapshot = nullptr;
+        RegisterShaderMeta(info, spec.fetch_shader_data, spec, HashCombine(job.hash, 0), 0);
+        job.program->AddPermut(module, std::move(spec));
         break;
     }
     case CompileJob::Kind::Program: {
@@ -1324,6 +1351,16 @@ void PipelineCache::FileJob(CompileJob& job) {
         ASSERT(placeholder && placeholder->pending && !placeholder->discovered);
         if (job.code_changed) {
             placeholder->discovery_submitted = false;
+            break;
+        }
+        if (job.finished) {
+            // Made whole: filed as a Program job's is
+            *placeholder = std::move(*job.program);
+            for (auto& module : placeholder->modules) {
+                module.spec.info = &placeholder->info;
+            }
+            placeholder->info.user_data = {};
+            placeholder->pending = false;
             break;
         }
         placeholder->info = std::move(job.program->info);

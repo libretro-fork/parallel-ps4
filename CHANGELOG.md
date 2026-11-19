@@ -4,6 +4,16 @@ What changed in the libretro core of this fork, newest first. Changes that come 
 
 ## Unreleased
 
+- A new shader that reads nothing of the game's beyond its user data is now translated once instead of twice.
+  - **Before:** the compiler thread first ran a discovery: half a translation, stopped once the shader's SRT walker was made, so that the next draw could take a snapshot of what the walker reads. A second, whole translation then started again from the beginning, from that snapshot.
+  - **Now:** when the discovery finds the shader has no SRT walker, no fetch shader and is not a tessellation stage, its snapshot would hold nothing but the user data the discovery already has. So the discovery carries on from where it stopped and makes the shader there and then: its SPIR-V, its Vulkan module, its specialization and its cache entry. No second job and no second translation, and the shader is ready a draw sooner.
+  - Shaders that do read more through a snapshot are made as before.
+  - The log line for such a shader reads "Compiling … (from its discovery)".
+  - **Checked:** on PS4-OpenGNM's triangle, cube and instances examples on lavapipe, every shader they made took the new way, and the SPIR-V is byte for byte what the last build made.
+  - **Not checked:** a shader with a walker or a fetch shader, which none of the homebrew has, so the way they still take was not run here.
+  - **No test in run.sh:** the change lives in the pipeline cache's compile jobs, which need a running game to exercise.
+
+  Not seen in a game yet.
 - Less work for each shader translated, in three ways.
   - Debug names (OpName, OpMemberName, and the OpString with the shader's hash) are written only when shaders are dumped, where they are read, and their strings are no longer even formatted otherwise. On the five shaders of PS4-OpenGNM's triangle and cube examples the modules are 27 to 38% smaller without them (1960 bytes against 2892 for one of them). That is less written, less kept in the disk cache, and less for the driver to read. The core's two built-in shaders (the clip-distance discard and the quad-list expansion) never write names now.
   - The SPIR-V module is made once and reset for each shader (`Shader::Pools`, beside the recompiler's other reused pools), instead of made and freed for each. Once its buffers have grown to the size of the shaders a game uses, writing one allocates nothing.

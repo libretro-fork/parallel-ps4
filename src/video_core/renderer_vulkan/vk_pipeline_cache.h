@@ -182,6 +182,11 @@ private:
     vk::ShaderModule CompileModule(Shader::Info& info, Shader::RuntimeInfo& runtime_info,
                                    const std::span<const u32>& code, size_t perm_idx,
                                    Shader::Backend::Bindings& binding);
+    /// The rest of CompileModule, from a program translated: its SPIR-V, dumped, kept and made
+    /// into a Vulkan module
+    vk::ShaderModule ModuleFromProgram(Shader::Info& info, Shader::RuntimeInfo& runtime_info,
+                                       const Shader::IR::Program& ir_program, size_t perm_idx,
+                                       Shader::Backend::Bindings& binding);
     const Shader::RuntimeInfo& BuildRuntimeInfo(Shader::HwStage stage, Shader::SwStage l_stage);
 
     [[nodiscard]] bool IsPipelineCacheDirty() const {

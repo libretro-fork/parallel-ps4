@@ -60,6 +60,11 @@ struct GuestSnapshot {
     /// walker is made, and reads nothing of the game's but the code (owned by the cache) and,
     /// for a hull shader, its tessellation constants.
     bool discover_only = false;
+    /// For a discovery: set when the shader turned out to read nothing of the game's beyond its
+    /// user data, which the discovery has (no SRT walker, no fetch shader, not a tessellation
+    /// stage). Its translation then goes on to the end where it stopped, instead of being made
+    /// again from the start by a translation after the next draw. Null: a discovery stops.
+    bool* finished = nullptr;
 };
 
 enum class Qualifier : u8 {

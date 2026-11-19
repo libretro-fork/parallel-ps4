@@ -110,8 +110,18 @@ IR::Program TranslateProgram(const std::span<const u32>& code, Pools& pools, Inf
     auto resources = Shader::Optimization::ResourceDiscoverPass(program, profile);
     Shader::Optimization::FlattenExtendedUserdataPass(program);
     if (info.snapshot && info.snapshot->discover_only) {
-        // The walker is made: all a discovery is for (GuestSnapshot)
-        return program;
+        // The walker is made: all a discovery is for (GuestSnapshot), unless the shader reads
+        // nothing a snapshot would hold beyond the user data the discovery already has. Then
+        // the flat buffer is that user data whichever draw it came from, and the rest of the
+        // translation is as one from a snapshot would be: it goes on from here.
+        const bool reads_beyond_user_data = info.srt_info.walker_func || info.has_fetch_shader ||
+                                            info.sw_stage == SwStage::TessellationControl ||
+                                            info.sw_stage == SwStage::TessellationEval ||
+                                            info.tess_consts_dword_offset >= 0;
+        if (!info.snapshot->finished || reads_beyond_user_data) {
+            return program;
+        }
+        *info.snapshot->finished = true;
     }
     Shader::IR::DumpProgram(program, info, "pre-res-patch.");
     Shader::Optimization::ResourcePatchingPass(program.info, resources, profile);
