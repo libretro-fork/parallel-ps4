@@ -115,6 +115,12 @@ for san in address,undefined thread; do
         -fno-omit-frame-pointer -fsanitize=$san -Isrc libretro/tests/x64_emit_test.c \
         src/common/x64_emit.c -o "$OUT/$name"
     "$OUT/$name"
+    # The x86-64 decoder: lengths, displacements and immediates as Zydis decoded them
+    name=x64_decode_test-$(echo $san | tr , -)
+    $CC -std=c89 -pedantic -O1 -g -Wall -Wextra -Wdeclaration-after-statement -Wno-long-long \
+        -fno-omit-frame-pointer -fsanitize=$san -Isrc libretro/tests/x64_decode_test.c \
+        src/common/x64_decode.c -o "$OUT/$name"
+    "$OUT/$name"
     # The pipeline cache's pack: records found again, the last of a name, data 8-aligned, a
     # record cut short or changed ending the pack there
     name=blob_pack_test-$(echo $san | tr , -)

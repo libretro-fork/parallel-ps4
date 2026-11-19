@@ -4,6 +4,16 @@ What changed in the libretro core of this fork, newest first. Changes that come 
 
 ## Unreleased
 
+- A C89 x86-64 decoder, `src/common/x64_decode.c`, to take Zydis's place where the core reads x86-64 code. Nothing uses it yet: the CPU patches, the SRT walker interpreter, the fault handler and the crash log move onto it in the patches that follow, and then Zydis goes.
+  - **What it gives:** each instruction's length and parts, read in place into a small record: prefixes, REX, VEX or XOP, the opcode and its map, ModRM, SIB, the memory operand, the displacement and the immediates with their offsets. Nothing is copied and nothing is allocated.
+  - **Where its knowledge comes from:** tables made from Zydis 4 by `tools/x64_decode_gen.c`. That tool decodes every opcode of every map with Zydis, under every prefix form and every ModRM byte, and keeps what Zydis decides: whether there is ModRM, the immediates, whether LOCK is allowed, and what the register operands may name. The decoder then makes Zydis's own checks: LOCK, unused VEX.vvvv, CR and DR numbers, no move to CS, no rip-relative operand where none is allowed, and distinct gather registers. The tables are 16 KB.
+  - **The same as Zydis:**
+    - at every offset of a game's 7.3 MB of code (length, and refused or not);
+    - in a linear sweep of that code, as the CPU patches walk it: the same 1,750,629 instructions;
+    - over 200 million generated instruction-shaped byte strings, some of them cut short: length, opcode, ModRM, displacement, immediates.
+  - **Not decoded:** AVX-512 and Knights Corner (EVEX and MVEX, 62) are refused. No PS4 game has them. Zydis decoded 8 offsets of that code as EVEX, none of them on the sweep.
+  - **Speed:** the sweep takes 50 ms against Zydis's 125 ms (without operands) and 215 ms (with operands, as the CPU patches decode).
+  - **Test:** `x64_decode_test` holds what Zydis decoded of 143 listed forms, and a digest of what it decoded of a million generated cases. It is in run.sh.
 - No submodules are left: fmt, Zydis (with Zycore) and libusb are part of the tree.
   - **What is kept:** what the build compiles or includes, copied unchanged from the commits the submodules pointed at:
     - {fmt}'s headers with `format.cc` and `os.cc` (ec73fb7).
