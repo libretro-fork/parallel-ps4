@@ -57,6 +57,9 @@ struct PipelineCache::CompileJob {
     VAddr code_info{};
     u64 code_hash{};
     u32 code_crc{};
+    // The code is the core's own, in none of the game's memory (sceGnmSetEmbeddedVsShader's
+    // fullscreen triangle): it cannot change, and the game's memory has nothing to compare
+    bool code_static{};
     bool code_changed{};
 
     // What the translation reads of the game's memory, taken at the draw (CaptureSnapshot)
@@ -980,6 +983,9 @@ vk::ShaderModule PipelineCache::CompileModule(Shader::Info& info, Shader::Runtim
 /// now, at the draw (Shader::GuestSnapshot). @info is the shader's description with this
 /// draw's user data, its flat buffer refreshed (RefreshFlatBuf).
 bool PipelineCache::CodeUnchanged(const CompileJob& job) {
+    if (job.code_static) {
+        return true;
+    }
     AmdGpu::BinaryInfo now{};
     Core::Memory::Instance()->CopySparseMemory(job.code_info, reinterpret_cast<u8*>(&now),
                                                sizeof(now));
@@ -1029,6 +1035,9 @@ PipelineCache::Result PipelineCache::GetProgram(HwStage hw_stage, SwStage sw_sta
         job->code_info = reinterpret_cast<VAddr>(&info);
         job->code_hash = info.shader_hash;
         job->code_crc = info.crc32;
+        u64 backing_offset{};
+        (void)Core::Memory::Instance()->BackingRun(job->code_info, sizeof(info), &backing_offset);
+        job->code_static = backing_offset == ~u64{0};
         job->hash = params.hash;
         job->perm_idx = perm_idx;
         job->runtime = runtime_info;
