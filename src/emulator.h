@@ -54,7 +54,8 @@ private:
     Input::GameControllers* controllers;
     Core::Linker* linker;
     std::unique_ptr<Frontend::Window> window;
-    std::chrono::steady_clock::time_point start_time;
+    // The game's time (nanoseconds) the play time was last counted up to; 0: not counting
+    u64 start_time{};
     std::jthread play_time_thread;
 };
 

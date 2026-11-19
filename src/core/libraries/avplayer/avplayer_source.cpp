@@ -17,6 +17,7 @@
 #include "core/libraries/avplayer/avplayer_file_streamer.h"
 #include "core/libraries/avplayer/avplayer_handle_streamer.h"
 #include "core/libraries/avplayer/avplayer_source.h"
+#include "core/libraries/kernel/time.h"
 #include "core/memory.h"
 
 namespace Libraries::AvPlayer {
@@ -359,7 +360,7 @@ bool AvPlayerSource::Start() {
     m_demuxer_thread.Run([this](std::stop_token stop) { this->DemuxerThread(stop); });
     m_video_decoder_thread.Run([this](std::stop_token stop) { this->VideoDecoderThread(stop); });
     m_audio_decoder_thread.Run([this](std::stop_token stop) { this->AudioDecoderThread(stop); });
-    m_start_time = std::chrono::high_resolution_clock::now();
+    avplayer_clock_start(&m_clock, Libraries::Kernel::GameNow());
     return true;
 }
 
@@ -400,10 +401,7 @@ bool AvPlayerSource::Stop() {
     m_audio_pool.clear();
 
     m_last_audio_ts.reset();
-    m_last_data_time.reset();
-    m_start_time.reset();
-    m_pause_time = {};
-    m_pause_duration = {};
+    avplayer_clock_reset(&m_clock);
 
     (void)retro_atomic_exchange_int(&m_is_paused, 0);
     (void)retro_atomic_exchange_int(&m_is_eof, 0);
@@ -412,12 +410,12 @@ bool AvPlayerSource::Stop() {
 }
 
 void AvPlayerSource::Pause() {
-    m_pause_time = std::chrono::high_resolution_clock::now();
+    avplayer_clock_pause(&m_clock, Libraries::Kernel::GameNow());
     (void)retro_atomic_exchange_int(&m_is_paused, 1);
 }
 
 void AvPlayerSource::Resume() {
-    m_pause_duration += std::chrono::high_resolution_clock::now() - m_pause_time;
+    avplayer_clock_resume(&m_clock, Libraries::Kernel::GameNow());
     (void)retro_atomic_exchange_int(&m_is_paused, 0);
 }
 
@@ -477,8 +475,7 @@ bool AvPlayerSource::GetAudioData(AvPlayerFrameInfo& audio_info) {
     }
 
     m_last_audio_ts = frame.info.timestamp;
-    m_last_data_time = std::chrono::high_resolution_clock::now();
-    m_pause_duration = std::chrono::high_resolution_clock::duration(0);
+    avplayer_clock_data(&m_clock, Libraries::Kernel::GameNow());
 
     audio_info = {};
     audio_info.timestamp = frame.info.timestamp;
@@ -502,7 +499,7 @@ u64 AvPlayerSource::DurationMillis() const {
 }
 
 u64 AvPlayerSource::CurrentTime() {
-    if (!m_start_time.has_value()) {
+    if (!m_clock.started) {
         return 0;
     }
 
@@ -513,19 +510,14 @@ u64 AvPlayerSource::CurrentTime() {
         return 0;
     }
 
-    using namespace std::chrono;
-    const auto now = (retro_atomic_load_seq_cst_int(&m_is_paused) != 0)
-                         ? m_pause_time
-                         : high_resolution_clock::now();
+    // Milliseconds of the game's time, less the time spent paused (avplayer_clock.c)
+    const u64 now = Libraries::Kernel::GameNow();
+    const int paused = retro_atomic_load_seq_cst_int(&m_is_paused) != 0;
     if (m_audio_stream_index) {
-        const auto last_audio = m_last_data_time.value_or(now);
-        const auto elapsed =
-            duration_cast<milliseconds>(now - last_audio - m_pause_duration).count();
-        return m_last_audio_ts.value_or(0) + elapsed;
+        return m_last_audio_ts.value_or(0) + avplayer_clock_since_data_ms(&m_clock, now, paused);
     }
 
-    const auto elapsed =
-        duration_cast<milliseconds>(now - m_start_time.value() - m_pause_duration).count();
+    const s64 elapsed = avplayer_clock_since_start_ms(&m_clock, now, paused);
     if (elapsed <= 0) {
         return 0;
     }

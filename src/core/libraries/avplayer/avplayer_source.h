@@ -17,6 +17,7 @@
 #include "common/assert.h"
 #include "common/event_mutex.h"
 #include "core/libraries/avplayer/avplayer.h"
+#include "core/libraries/avplayer/avplayer_clock.h"
 #include "core/libraries/avplayer/avplayer_common.h"
 #include "core/libraries/avplayer/avplayer_data_streamer.h"
 #include "core/libraries/kernel/threads.h"
@@ -328,10 +329,9 @@ private:
     u64 m_audio_skip = 0; // samples a channel the edit list trims, still to drop
 
     std::optional<u64> m_last_audio_ts{};
-    std::optional<std::chrono::high_resolution_clock::time_point> m_last_data_time{};
-    std::optional<std::chrono::high_resolution_clock::time_point> m_start_time{};
-    std::chrono::high_resolution_clock::time_point m_pause_time{};
-    std::chrono::high_resolution_clock::duration m_pause_duration{};
+    // The player's clock is the game's time (nanoseconds), which the frontend's frames move:
+    // the picture keeps step with the sound, which goes out by the same frames
+    avplayer_clock_t m_clock{};
 };
 
 } // namespace Libraries::AvPlayer

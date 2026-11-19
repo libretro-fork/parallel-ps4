@@ -12,13 +12,15 @@
 #include "save_backup.h"
 #include "save_instance.h"
 
+#include <chrono>
+#include <stop_token>
+#include <thread>
 #include <retro_atomic.h>
 #include <rthreads/retro_eventcount.h>
 #include "common/io_file.h"
 #include "common/logging/formatter.h"
 #include "common/logging/log.h"
 #include "common/path_util.h"
-#include "common/polyfill_thread.h"
 #include "common/thread_name.h"
 #include "core/libraries/kernel/time.h"
 

@@ -337,11 +337,10 @@ enum class InterruptSelect : u32 {
     IrqUndocumented = 3,
 };
 
+/// The GPU's clock a game is given with its end-of-pipeline events: the game's time, in
+/// nanoseconds
 static u64 GetGpuClock64() {
-    auto now = std::chrono::high_resolution_clock::now();
-    auto duration = now.time_since_epoch();
-    auto ticks = std::chrono::duration_cast<std::chrono::nanoseconds>(duration).count();
-    return static_cast<u64>(ticks);
+    return Libraries::Kernel::GameNow();
 }
 
 static u64 GetGpuPerfCounter() {

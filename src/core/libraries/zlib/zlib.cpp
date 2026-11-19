@@ -12,6 +12,7 @@
 #include "common/logging/log.h"
 #include "common/thread_name.h"
 #include "core/libraries/kernel/threads.h"
+#include "core/libraries/kernel/time.h"
 #include "core/libraries/libs.h"
 #include "core/libraries/zlib/zlib_error.h"
 #include "core/libraries/zlib/zlib_sce.h"
@@ -169,29 +170,17 @@ s32 PS4_SYSV_ABI sceZlibWaitForDone(u64* request_id, const u32* timeout) {
                 return true;
             });
         };
-        const auto deadline =
-            std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout ? *timeout : 0);
-        while (!take()) {
-            const int key = retro_eventcount_prepare_wait(done_queue_cv.get());
-            if (take()) {
-                retro_eventcount_cancel_wait(done_queue_cv.get());
-                break;
-            }
-            if (!timeout) {
-                retro_eventcount_commit_wait(done_queue_cv.get(), key);
-                continue;
-            }
-            const auto left = std::chrono::ceil<std::chrono::microseconds>(
-                                  deadline - std::chrono::steady_clock::now())
-                                  .count();
-            if (left <= 0) {
-                retro_eventcount_cancel_wait(done_queue_cv.get());
-                if (take()) {
-                    break;
-                }
+        // The timeout is of the game's time (milliseconds); none: until one is done
+        if (!take()) {
+            if (timeout && *timeout == 0) {
                 return ORBIS_ZLIB_ERROR_TIMEDOUT;
             }
-            retro_eventcount_commit_wait_timeout(done_queue_cv.get(), key, left);
+            const u64 deadline =
+                timeout ? Libraries::Kernel::GameDeadlineIn(static_cast<u64>(*timeout) * 1'000'000)
+                        : 0;
+            if (!Libraries::Kernel::GameWait(done_queue_cv.get(), deadline, take)) {
+                return ORBIS_ZLIB_ERROR_TIMEDOUT;
+            }
         }
     }
     return ORBIS_OK;

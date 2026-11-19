@@ -6,6 +6,7 @@
 #include "core/file_format/playgo_chunk.h"
 #include "core/file_sys/fs.h"
 #include "core/libraries/error_codes.h"
+#include "core/libraries/kernel/time.h"
 #include "core/libraries/libs.h"
 #include "core/libraries/system/systemservice.h"
 #include "playgo.h"
@@ -106,9 +107,9 @@ s32 PS4_SYSV_ABI scePlayGoGetInstallSpeed(OrbisPlayGoHandle handle,
     std::scoped_lock lk{playgo->GetSpeedMutex()};
 
     if (playgo->speed == OrbisPlayGoInstallSpeed::Suspended) {
-        using namespace std::chrono;
-        if ((duration_cast<milliseconds>(steady_clock::now().time_since_epoch()).count() -
-             playgo->speed_tick) > 30 * 1000) { // 30sec
+        // Thirty seconds of the game's time
+        if ((static_cast<s64>(Libraries::Kernel::GameNow() / 1'000'000) - playgo->speed_tick) >
+            30 * 1000) {
             playgo->speed = OrbisPlayGoInstallSpeed::Trickle;
         }
     }
@@ -335,10 +336,8 @@ s32 PS4_SYSV_ABI scePlayGoSetInstallSpeed(OrbisPlayGoHandle handle, OrbisPlayGoI
     }
 
     std::scoped_lock lk{playgo->GetSpeedMutex()};
-    using namespace std::chrono;
     playgo->speed = speed;
-    playgo->speed_tick =
-        duration_cast<milliseconds>(steady_clock::now().time_since_epoch()).count();
+    playgo->speed_tick = static_cast<s64>(Libraries::Kernel::GameNow() / 1'000'000);
 
     return ORBIS_OK;
 }

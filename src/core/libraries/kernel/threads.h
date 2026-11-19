@@ -3,8 +3,10 @@
 
 #pragma once
 
+#include <chrono>
 #include <functional>
-#include "common/polyfill_thread.h"
+#include <stop_token>
+#include <thread>
 #include "core/libraries/kernel/threads/pthread.h"
 #include "core/tls.h"
 

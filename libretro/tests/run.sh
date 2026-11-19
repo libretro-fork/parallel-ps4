@@ -163,6 +163,11 @@ $CC -std=c89 -pedantic -Wno-long-long -O1 -g -Wall -Wdeclaration-after-statement
     -fsanitize=address,undefined -Isrc -I$L/include libretro/tests/reserve_span_test.c \
     src/common/reserve_span.c -o "$OUT/reserve_span_test"
 "$OUT/reserve_span_test"
+# The video player's clock: the time into a file from times of the game's, pauses not counted
+$CC -std=c89 -pedantic -Wno-long-long -O1 -g -Wall -Wdeclaration-after-statement \
+    -fsanitize=address,undefined -Isrc libretro/tests/avplayer_clock_test.c \
+    src/core/libraries/avplayer/avplayer_clock.c -o "$OUT/avplayer_clock_test"
+"$OUT/avplayer_clock_test"
 # A glyph into a game's surface straight from the face's bitmap, as it was written by way of a
 # copy of the bitmap
 $CC -std=c89 -pedantic -O1 -g -Wall -Wdeclaration-after-statement -fsanitize=address,undefined \

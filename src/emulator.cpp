@@ -14,6 +14,9 @@
 #include <fmt/xchar.h>
 #include <streams/file_stream.h>
 
+#include <chrono>
+#include <stop_token>
+#include <thread>
 #include "common/elf_info.h"
 #include "common/event_mutex.h"
 #include "common/io_file.h"
@@ -21,7 +24,6 @@
 #include "common/memory_patcher.h"
 #include "common/ntapi.h"
 #include "common/path_util.h"
-#include "common/polyfill_thread.h"
 #include "common/quick_exit.h"
 #include "common/scm_rev.h"
 #include "common/singleton.h"
@@ -672,12 +674,22 @@ void Emulator::Run(std::filesystem::path file, std::vector<std::string> args,
     }
 
     if (!id.empty()) {
-        start_time = std::chrono::steady_clock::now();
+        // The play time is the game's time, which the frontend's frames move: counted up
+        // every minute of it, until the thread is stopped
+        start_time = Libraries::Kernel::GameDeadlineIn(0);
 
         play_time_thread = std::jthread([this, id](std::stop_token stop) {
-            while (Common::StoppableTimedWait(stop, std::chrono::seconds(60))) {
-                UpdatePlayTime(id);
+            retro_eventcount_t stopped;
+            retro_eventcount_init(&stopped);
+            {
+                std::stop_callback wake{stop, [&stopped] { retro_eventcount_notify(&stopped); }};
+                while (!Libraries::Kernel::GameWait(
+                    &stopped, Libraries::Kernel::GameDeadlineIn(60'000'000'000ULL),
+                    [&stop] { return stop.stop_requested(); })) {
+                    UpdatePlayTime(id);
+                }
             }
+            retro_eventcount_free(&stopped);
         });
     }
 
@@ -808,17 +820,17 @@ void Emulator::Restart(std::filesystem::path eboot_path,
 }
 
 void Emulator::UpdatePlayTime(const std::string_view serial) {
-    if (serial.empty() || start_time == std::chrono::steady_clock::time_point{}) {
+    if (serial.empty() || start_time == 0) {
         return;
     }
 
     const auto user_dir = Common::FS::GetUserPath(Common::FS::PathType::UserDir);
     const auto file_path = user_dir / "play_time.txt";
 
-    const auto end_time = std::chrono::steady_clock::now();
-    const auto duration = std::chrono::duration_cast<std::chrono::seconds>(end_time - start_time);
-    start_time = end_time;
-    const int total_seconds = static_cast<int>(duration.count());
+    // Whole seconds of the game's time; what is left over of a second is counted next time
+    const u64 end_time = Libraries::Kernel::GameDeadlineIn(0);
+    const int total_seconds = static_cast<int>((end_time - start_time) / 1'000'000'000);
+    start_time += static_cast<u64>(total_seconds) * 1'000'000'000;
 
     // One line a game, "serial h:mm:ss last-played", read where it lies (mapped)
     auto file = Common::FS::FileView::Map(file_path);

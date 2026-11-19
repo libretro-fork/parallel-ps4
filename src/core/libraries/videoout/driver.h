@@ -3,7 +3,9 @@
 
 #pragma once
 
-#include "common/polyfill_thread.h"
+#include <chrono>
+#include <stop_token>
+#include <thread>
 #include "core/libraries/kernel/time.h"
 #include "core/libraries/videoout/video_out.h"
 
