@@ -6,7 +6,6 @@
 #include <algorithm>
 #include <chrono>
 #include <memory>
-#include <mutex>
 #include <optional>
 #include <string_view>
 #include <type_traits>
@@ -14,7 +13,6 @@
 #include <vector>
 
 #include "common/assert.h"
-#include "common/event_mutex.h"
 #include "core/libraries/avplayer/avplayer.h"
 #include "core/libraries/avplayer/avplayer_clock.h"
 #include "core/libraries/avplayer/avplayer_common.h"
@@ -308,7 +306,6 @@ private:
     std::optional<s32> m_video_stream_index{};
     std::optional<s32> m_audio_stream_index{};
 
-    Common::EventMutex m_state_mutex{};
     Kernel::Thread m_demuxer_thread{};
     Kernel::Thread m_video_decoder_thread{};
     Kernel::Thread m_audio_decoder_thread{};

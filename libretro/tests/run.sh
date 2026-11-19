@@ -180,6 +180,22 @@ $CC -std=c89 -pedantic -Wno-long-long -O1 -g -Wall -Wdeclaration-after-statement
     -fsanitize=address,undefined -Isrc -I$L/include libretro/tests/reserve_span_test.c \
     src/common/reserve_span.c -o "$OUT/reserve_span_test"
 "$OUT/reserve_span_test"
+# The video player's state machine and who starts and stops it, moved by four threads at once:
+# its moves the ones it had under a lock, none lost, one thread starting or stopping at a time
+for san in address,undefined thread; do
+    $CC -std=gnu89 -O1 -g -Wall -Wdeclaration-after-statement -fsanitize=$san -Isrc -I$L/include \
+        libretro/tests/avplayer_fsm_test.c src/core/libraries/avplayer/avplayer_fsm.c \
+        $L/rthreads/rthreads.c -o "$OUT/avplayer_fsm_test" -lpthread
+    "$OUT/avplayer_fsm_test"
+done
+# The gate readers pin the video player's source through while its owner changes it: a reader
+# let in never finds it half changed
+for san in address,undefined thread; do
+    $CC -std=gnu89 -O1 -g -Wall -Wdeclaration-after-statement -fsanitize=$san -Isrc -I$L/include \
+        libretro/tests/pin_gate_test.c src/common/pin_gate.c $L/rthreads/rthreads.c \
+        $L/rthreads/retro_eventcount.c $L/features/features_cpu.c -o "$OUT/pin_gate_test" -lpthread
+    "$OUT/pin_gate_test"
+done
 # The video player's clock: the time into a file from times of the game's, pauses not counted
 $CC -std=c89 -pedantic -Wno-long-long -O1 -g -Wall -Wdeclaration-after-statement \
     -fsanitize=address,undefined -Isrc libretro/tests/avplayer_clock_test.c \

@@ -295,8 +295,6 @@ std::optional<bool> AvPlayerSource::HasFrames(u32 num_frames) {
 }
 
 bool AvPlayerSource::Start() {
-    std::unique_lock lock(m_state_mutex);
-
     if (!m_video_stream_index && !m_audio_stream_index) {
         LOG_ERROR(Lib_AvPlayer, "Could not start playback. No streams.");
         return false;
@@ -374,8 +372,6 @@ void AvPlayerSource::CloseQueues() {
 }
 
 bool AvPlayerSource::Stop() {
-    std::unique_lock lock(m_state_mutex);
-
     if (!HasRunningThreads()) {
         LOG_WARNING(Lib_AvPlayer, "Could not stop playback: already stopped.");
         return false;

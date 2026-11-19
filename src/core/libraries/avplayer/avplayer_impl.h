@@ -3,12 +3,10 @@
 
 #pragma once
 
-#include "common/combiner.h"
 #include "core/libraries/avplayer/avplayer.h"
 #include "core/libraries/avplayer/avplayer_state.h"
 
 #include <memory>
-#include <mutex>
 #include <string_view>
 
 namespace Libraries::AvPlayer {
@@ -52,7 +50,6 @@ private:
 
     AvPlayerInitData m_init_data{};
     AvPlayerInitData m_init_data_original{};
-    Common::Combiner m_file_io_mutex{};
 
     std::unique_ptr<AvPlayerState> m_state{};
 };

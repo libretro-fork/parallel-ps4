@@ -3,17 +3,14 @@
 
 #pragma once
 
-#include <memory>
-#include <mutex>
 #include <optional>
-#include <shared_mutex>
 #include <string_view>
 #include "common/event_count.h"
-#include "common/event_mutex.h"
-#include "common/shared_first_mutex.h"
+#include "common/pin_gate.h"
 
 #include <retro_atomic.h>
 #include "core/libraries/avplayer/avplayer.h"
+#include "core/libraries/avplayer/avplayer_fsm.h"
 #include "core/libraries/avplayer/avplayer_source.h"
 #include "core/libraries/kernel/threads.h"
 
@@ -62,6 +59,19 @@ private:
 
     void EmitEvent(AvPlayerEvents event_id, void* event_data = nullptr);
     bool SetState(AvState state);
+    AvState State();
+    AvState PreviousState();
+
+    /// Runs @f on the source if there is one and it is not being changed (the gate is open),
+    /// else returns @none: the source is pinned meanwhile, and no one waits
+    template <typename R, typename F>
+    R WithSource(R none, F&& f);
+
+    /// Start and Stop: the thread that gets the transport does it, and then whatever was asked
+    /// of it meanwhile (avplayer_fsm.h)
+    bool Transport(int op);
+    bool DoStart();
+    bool DoStop();
 
     void AvControllerThread();
 
@@ -72,9 +82,12 @@ private:
     void ProcessEvent();
     void UpdateBufferingState();
     void UpdateEndOfFileState();
-    bool IsStateTransitionValid(AvState state);
 
-    std::unique_ptr<AvPlayerSource> m_up_source;
+    /// The source (AvPlayerSource*, owned), published by AddSource; readers go through
+    /// m_source_gate, which its changes close (FindStreams, the source's Start, the end)
+    retro_atomic_ptr_t m_source{};
+    retro_atomic_int_t m_source_taken{0};
+    pin_gate_t m_source_gate{};
 
     AvPlayerInitData m_init_data{};
     AvPlayerPostInitData m_post_init_data{};
@@ -83,16 +96,13 @@ private:
     char m_default_language[4]{};
     AvPlayerAvSyncMode m_sync_mode = AvPlayerAvSyncMode::Default;
 
-    retro_atomic_int_t m_current_state;
-    retro_atomic_int_t m_previous_state;
+    avplayer_fsm_t m_fsm{};
+    avplayer_transport_t m_transport{};
     retro_atomic_int_t m_eof_stop_event_sent{0};
     u32 m_thread_priority;
     u32 m_thread_affinity;
     retro_atomic_int_t m_some_event_result{};
 
-    Common::SharedFirstMutex m_source_mutex{};
-    Common::EventMutex m_state_machine_mutex{};
-    Common::EventMutex m_event_handler_mutex{};
     Kernel::Thread m_controller_thread{};
     MpscRing<AvPlayerEvent, 64> m_event_queue{};
     /// Notified on every event pushed: the controller thread parks here between its looks at
