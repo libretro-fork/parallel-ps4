@@ -112,7 +112,7 @@ public:
         return pipeline_cache;
     }
 
-    std::thread::id GetGpuCommandProcessorThread();
+    uintptr_t GetGpuCommandProcessorThread();
 #ifdef __linux__
     u32 GetGpuCommandProcessorThreadId();
 #endif

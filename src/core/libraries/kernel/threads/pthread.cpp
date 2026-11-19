@@ -1,6 +1,8 @@
 // SPDX-FileCopyrightText: Copyright 2025-2026 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include <features/features_cpu.h>
+#include <rthreads/rthreads.h>
 #include "common/assert.h"
 #include "common/host_thread.h"
 #include "common/thread_name.h"
@@ -1172,7 +1174,7 @@ bool Pthread::DispatchPendingSignals(Siginfo* info, Ucontext* context) {
 }
 
 int Pthread::SetAffinity(const Cpuset* cpuset) {
-    const auto processor_count = std::thread::hardware_concurrency();
+    const auto processor_count = cpu_features_get_core_amount();
     if (processor_count < 8) {
         return 0;
     }
@@ -1309,7 +1311,7 @@ int PS4_SYSV_ABI posix_pthread_suspend_user_context_np(PthreadT thread) {
             for (int i = 0;
                  i < 1000 && retro_atomic_load_seq_cst_int(&thread->is_suspended_in_signal) == 0;
                  ++i) {
-                std::this_thread::yield();
+                sthread_yield();
             }
         }
     }

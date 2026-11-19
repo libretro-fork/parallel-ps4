@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright 2024-2026 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
-#include <thread>
+#include <rthreads/rthreads.h>
 #include "common/enum_names.h"
 #include "core/emulator_settings.h"
 #include "core/memory.h"
@@ -1691,7 +1691,7 @@ void Rasterizer::RegisterMemory(VAddr addr, u64 size) {
 void Rasterizer::UnmapMemory(VAddr addr, u64 size) {
     // Nothing read back lands in it once it is gone (its pages may be the game's elsewhere)
     buffer_cache.WaitWritebacks(addr, size,
-                                std::this_thread::get_id() == GetGpuCommandProcessorThread());
+                                sthread_get_current_thread_id() == GetGpuCommandProcessorThread());
     buffer_cache.InvalidateMemory(addr, size);
     texture_cache.UnmapMemory(addr, size);
     mapped_ranges.Update([&](IntervalList<>& ranges) { ranges.Subtract(addr, addr + size); });
@@ -2047,7 +2047,7 @@ void Rasterizer::ScopedMarkerInsertColor(const std::string_view& str, const u32 
              (f32)(color & 0xff) / 255.0f, (f32)((color >> 24) & 0xff) / 255.0f})});
 }
 
-std::thread::id Rasterizer::GetGpuCommandProcessorThread() {
+uintptr_t Rasterizer::GetGpuCommandProcessorThread() {
     return liverpool->GetGpuCommandProcessorThread();
 }
 

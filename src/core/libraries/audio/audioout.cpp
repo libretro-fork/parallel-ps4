@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include <memory>
-#include <thread>
 #include <fmt/format.h>
 #include "common/enum_names.h"
 

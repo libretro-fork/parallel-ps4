@@ -4,7 +4,6 @@
 #pragma once
 
 #include <optional>
-#include <thread>
 #include <unordered_set>
 #include <queue>
 #include "common/small_vector.h"

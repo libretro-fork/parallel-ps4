@@ -17,17 +17,16 @@
 //   emulator's configuration (ApplyCoreOptions)
 
 #include <algorithm>
-#include <retro_atomic.h>
-#include <rthreads/rthreads.h>
 #include <atomic>
 #include <cerrno>
 #include <chrono>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
+#include <retro_atomic.h>
+#include <rthreads/rthreads.h>
 #include <string>
 #include <string_view>
-#include <thread>
 #include <vector>
 
 #include "audio_mix.h"
@@ -361,11 +360,11 @@ int RunEmulator(const char* argument) {
         paths = end == std::string_view::npos ? std::string_view{} : paths.substr(end + 1);
     }
 
-    std::thread(WatchQuit).detach();
+    sthread_detach(sthread_create([](void *) { WatchQuit(); }, nullptr));
     // The mix's inputs, in the shared memory the core made them in
     audio_mix_attach(&shared->mix, shared->options.audio_channels == 8 ? 8 : 2, 0);
 
-    std::thread(PumpInput).detach();
+    sthread_detach(sthread_create([](void *) { PumpInput(); }, nullptr));
     sthread_detach(sthread_create(FrameThread, nullptr));
 
     Common::Log::Setup("shadps4.log");

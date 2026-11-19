@@ -4,7 +4,6 @@
 
 #include <algorithm>
 #include <chrono>
-#include <thread>
 #include <fmt/format.h>
 
 #include <retro_atomic.h>
@@ -13,6 +12,7 @@
 #include "common/logging/log.h"
 #include "common/scm_rev.h"
 #include "common/thread_name.h"
+#include "core/libraries/kernel/time.h"
 #include "shadnet/messages.h"
 
 #ifdef _WIN32
@@ -79,7 +79,9 @@ void ShadNetClient::Start(const std::string& host, u16 port, const std::string& 
     (void)retro_atomic_exchange_int(&m_terminate, 0);
     event_latch_clear(&m_connect_settled);
     event_latch_clear(&m_login_settled);
-    m_thread_connect = std::thread(&ShadNetClient::ConnectThread, this);
+    stop_thread_start(
+        &m_thread_connect, [](void* self) { static_cast<ShadNetClient*>(self)->ConnectThread(); },
+        this);
 }
 
 void ShadNetClient::Stop() {
@@ -88,12 +90,9 @@ void ShadNetClient::Stop() {
     event_latch_set(&m_login_settled);
     m_mutex_send_queue.Run([&] { m_cv_send_queue.notify_all(); });
     DoDisconnect();
-    if (m_thread_connect.joinable())
-        m_thread_connect.join();
-    if (m_thread_reader.joinable())
-        m_thread_reader.join();
-    if (m_thread_writer.joinable())
-        m_thread_writer.join();
+    stop_thread_join(&m_thread_connect);
+    stop_thread_join(&m_thread_reader);
+    stop_thread_join(&m_thread_writer);
 }
 
 ShadNetState ShadNetClient::WaitForConnection() {
@@ -189,10 +188,11 @@ void ShadNetClient::ConnectThread() {
             break;
         LOG_WARNING(ShadNet, "ShadNet: connect attempt {}/{} to {}:{} failed, retrying in {} ms",
                     attempt, SHAD_CONNECT_MAX_ATTEMPTS, m_host, m_port, backoff_ms);
-        // Interruptible backoff: poll m_terminate so Stop() wakes us promptly.
-        for (u32 waited = 0;
-             waited < backoff_ms && retro_atomic_load_seq_cst_int(&m_terminate) == 0; waited += 100)
-            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        // The backoff is of the game's time; Stop() sets the latch waited on, and ends it
+        Libraries::Kernel::GameWait(
+            &m_connect_settled.waiters,
+            Libraries::Kernel::GameDeadlineIn(static_cast<u64>(backoff_ms) * 1'000'000),
+            [this] { return retro_atomic_load_seq_cst_int(&m_terminate) != 0; });
         backoff_ms = std::min<u32>(backoff_ms * 2, 8000);
     }
 
@@ -203,8 +203,12 @@ void ShadNetClient::ConnectThread() {
         return;
     }
 
-    m_thread_reader = std::thread(&ShadNetClient::ReaderThread, this);
-    m_thread_writer = std::thread(&ShadNetClient::WriterThread, this);
+    stop_thread_start(
+        &m_thread_reader, [](void* self) { static_cast<ShadNetClient*>(self)->ReaderThread(); },
+        this);
+    stop_thread_start(
+        &m_thread_writer, [](void* self) { static_cast<ShadNetClient*>(self)->WriterThread(); },
+        this);
     event_latch_set(&m_connect_settled);
 
     // Build Login request as protobuf

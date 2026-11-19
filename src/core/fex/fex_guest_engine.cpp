@@ -42,12 +42,12 @@ __attribute__((weak)) u64 FexCurrentGuestStackTop() noexcept {
 #include <optional>
 #include <shared_mutex>
 #include <string>
-#include <thread>
 #include <tuple>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
 #include <vector>
+#include <rthreads/rthreads.h>
 
 #include <retro_atomic.h>
 #include <streams/file_stream.h>
@@ -1067,18 +1067,18 @@ bool HandleGuestSignal(int signal, siginfo_t* info, void* rawContext) noexcept {
 
 class GuestEngine::Thread final {
 public:
-  Thread(std::thread::id owner, GuestExecutionRequest request)
-    : Owner {owner}
-    , Request {std::move(request)} {}
+    Thread(uintptr_t owner, GuestExecutionRequest request)
+        : Owner{owner}, Request{std::move(request)} {}
 
-  std::thread::id Owner;
-  GuestExecutionRequest Request;
-  FEXCore::Core::InternalThreadState* Native {};
-  CallRetStack CallRet;
-  GuestSegmentState Segments;
-  BridgeSyscallHandler::InvocationState Invocation;
-  uint64_t FirstRip {};
-  uint64_t LastRip {};
+    // The thread it was made on, as sthread_get_current_thread_id gives it
+    uintptr_t Owner;
+    GuestExecutionRequest Request;
+    FEXCore::Core::InternalThreadState* Native{};
+    CallRetStack CallRet;
+    GuestSegmentState Segments;
+    BridgeSyscallHandler::InvocationState Invocation;
+    uint64_t FirstRip{};
+    uint64_t LastRip{};
 };
 
 class GuestEngine::Impl final {
@@ -1179,10 +1179,21 @@ public:
 
     bool firstThread = false;
     bool secondThread = false;
-    std::thread firstHostThread {[&] { firstThread = ExecuteThreadTlsCheck(initialRip + guest.ThreadOffset, kThreadSentinelA); }};
-    std::thread secondHostThread {[&] { secondThread = ExecuteThreadTlsCheck(initialRip + guest.ThreadOffset, kThreadSentinelB); }};
-    firstHostThread.join();
-    secondHostThread.join();
+    // Each check on a host thread of its own (rthreads), both waited for
+    auto firstCheck = [&] {
+        firstThread = ExecuteThreadTlsCheck(initialRip + guest.ThreadOffset, kThreadSentinelA);
+    };
+    auto secondCheck = [&] {
+        secondThread = ExecuteThreadTlsCheck(initialRip + guest.ThreadOffset, kThreadSentinelB);
+    };
+    sthread_t* firstHostThread = sthread_create(
+        [](void* check) { (*static_cast<decltype(firstCheck)*>(check))(); }, &firstCheck);
+    sthread_t* secondHostThread = sthread_create(
+        [](void* check) { (*static_cast<decltype(secondCheck)*>(check))(); }, &secondCheck);
+    if (firstHostThread)
+        sthread_join(firstHostThread);
+    if (secondHostThread)
+        sthread_join(secondHostThread);
     result.Threads = firstThread && secondThread;
     result.Tls = result.Threads;
     if (!result.Threads) return Failure(EngineStage::Thread, EPROTO);
@@ -1385,7 +1396,7 @@ EngineResult<GuestEngine::Thread*> GuestEngine::CreateThread(const GuestExecutio
     return *failure;
   }
 
-  auto thread = std::make_unique<Thread>(std::this_thread::get_id(), request);
+  auto thread = std::make_unique<Thread>(sthread_get_current_thread_id(), request);
   if (!thread->CallRet.IsReserved()) {
     return Failure(EngineStage::Mapping, thread->CallRet.Error());
   }
@@ -1443,8 +1454,8 @@ EngineResult<GuestExecutionState> GuestEngine::Run(Thread& thread) {
   }
   {
     std::scoped_lock lock {ImplState->ThreadsMutex};
-    if (!ImplState->Threads.contains(&thread) || thread.Owner != std::this_thread::get_id()) {
-      return Failure(EngineStage::Thread, EPERM);
+    if (!ImplState->Threads.contains(&thread) || thread.Owner != sthread_get_current_thread_id()) {
+        return Failure(EngineStage::Thread, EPERM);
     }
   }
 
@@ -1551,8 +1562,8 @@ EngineResult<bool> GuestEngine::Invalidate(Thread& thread, std::uintptr_t begin,
   }
   {
     std::scoped_lock lock {ImplState->ThreadsMutex};
-    if (!ImplState->Threads.contains(&thread) || thread.Owner != std::this_thread::get_id()) {
-      return Failure(EngineStage::Thread, EPERM);
+    if (!ImplState->Threads.contains(&thread) || thread.Owner != sthread_get_current_thread_id()) {
+        return Failure(EngineStage::Thread, EPERM);
     }
   }
   if (begin == 0 || size == 0 || begin % kRequiredPageSize != 0 || size % kRequiredPageSize != 0) {
@@ -1578,8 +1589,8 @@ EngineResult<bool> GuestEngine::DestroyThread(Thread*& thread) {
   }
   {
     std::scoped_lock lock {ImplState->ThreadsMutex};
-    if (!ImplState->Threads.contains(thread) || thread->Owner != std::this_thread::get_id()) {
-      return Failure(EngineStage::Thread, EPERM);
+    if (!ImplState->Threads.contains(thread) || thread->Owner != sthread_get_current_thread_id()) {
+        return Failure(EngineStage::Thread, EPERM);
     }
   }
   ImplState->Syscalls->UnregisterThread(thread->Native);

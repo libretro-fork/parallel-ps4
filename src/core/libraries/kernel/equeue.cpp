@@ -4,7 +4,6 @@
 #include <algorithm>
 #include <array>
 #include <span>
-#include <thread>
 #include <rthreads/retro_eventcount.h>
 #include "common/enum_names.h"
 

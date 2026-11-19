@@ -5,7 +5,6 @@
 #include <chrono>
 #include <cstring>
 #include <mutex>
-#include <thread>
 
 #include <queues/mpsc_stack.h>
 #include <rthreads/retro_eventcount.h>

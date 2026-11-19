@@ -10,6 +10,7 @@
 #include "common/elf_info.h"
 #include "common/logging/log.h"
 #include "core/emulator_settings.h"
+#include "core/libraries/kernel/time.h"
 #include "core/libraries/net/net_p2p.h"
 #include "core/libraries/net/net_upnp.h"
 #include "core/libraries/np/np_error.h"
@@ -133,7 +134,11 @@ void NpHandler::StartWorker() {
     bool expected = false;
     if ((retro_atomic_cas_int(&m_worker_running, expected, true) ||
          ((expected = (retro_atomic_load_acquire_int(&m_worker_running) != 0)), false))) {
-        m_worker_thread = std::thread(&NpHandler::WorkerThread, this);
+        // One that ended is joined first
+        stop_thread_join(&m_worker_thread);
+        stop_thread_start(
+            &m_worker_thread, [](void* self) { static_cast<NpHandler*>(self)->WorkerThread(); },
+            this);
     }
 }
 
@@ -215,6 +220,7 @@ void NpHandler::Shutdown() {
         return;
 
     (void)retro_atomic_exchange_int(&m_worker_running, 0);
+    m_worker_wake.Notify();
 
     // Stop any pending reconnect retries.
     m_mutex_clients.Run([&] { m_reconnect.clear(); });
@@ -228,8 +234,7 @@ void NpHandler::Shutdown() {
     for (s32 uid : ids)
         DisconnectUser(uid);
 
-    if (m_worker_thread.joinable())
-        m_worker_thread.join();
+    stop_thread_join(&m_worker_thread);
 
     // P2P goes with NP: closes the UDP port and removes its UPnP forwarding.
     Net::StopP2P();
@@ -454,10 +459,10 @@ void NpHandler::OnUserLoggedOut(s32 user_id) {
 }
 
 void NpHandler::WorkerThread() {
-    constexpr auto INTERVAL = std::chrono::milliseconds(500);
-
-    while (retro_atomic_load_seq_cst_int(&m_worker_running) != 0) {
-        std::this_thread::sleep_for(INTERVAL);
+    // Looks every half second of the game's time, until it is told to stop (which wakes it)
+    while (!Libraries::Kernel::GameWait(
+        m_worker_wake.get(), Libraries::Kernel::GameDeadlineIn(500'000'000),
+        [this] { return retro_atomic_load_seq_cst_int(&m_worker_running) == 0; })) {
 
         // Collect ids of dropped clients
         std::vector<s32> dropped;

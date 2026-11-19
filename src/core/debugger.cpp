@@ -4,7 +4,6 @@
 #include "debugger.h"
 
 #include <iostream>
-#include <thread>
 
 #if defined(_WIN32)
 #include <Windows.h>

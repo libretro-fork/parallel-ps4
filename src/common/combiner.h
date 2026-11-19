@@ -6,7 +6,6 @@
 #include <atomic>
 #include <memory>
 #include <optional>
-#include <thread>
 #include <type_traits>
 #include <utility>
 

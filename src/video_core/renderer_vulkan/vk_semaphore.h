@@ -4,7 +4,6 @@
 #pragma once
 
 #include <condition_variable>
-#include <thread>
 #include <queue>
 #include <retro_atomic.h>
 #include "common/types.h"

@@ -15,7 +15,6 @@
 #include <sys/time.h>
 #endif
 #include <ranges>
-#include <thread>
 #include <vector>
 #include <file/file_path.h>
 #include <vfs/vfs_implementation.h>

@@ -5,7 +5,6 @@
 
 #include <chrono>
 #include <functional>
-#include <thread>
 #include <retro_atomic.h>
 #include "core/libraries/kernel/threads/pthread.h"
 #include "core/tls.h"

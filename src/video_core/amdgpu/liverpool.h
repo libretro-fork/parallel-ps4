@@ -7,7 +7,6 @@
 #include <cstddef>
 #include <exception>
 #include <span>
-#include <thread>
 #include <vector>
 
 #include <queues/mpsc_stack.h>
@@ -151,7 +150,8 @@ public:
     };
     Common::SlotVector<AscQueueInfo> asc_queues{64};
 
-    std::thread::id GetGpuCommandProcessorThread() {
+    /// The GPU command processor's thread, as sthread_get_current_thread_id gives it
+    uintptr_t GetGpuCommandProcessorThread() {
         return gpu_id;
     }
 
@@ -310,7 +310,7 @@ private:
     retro_eventcount_t work_ec{};
     retro_eventcount_t idle_ec{};
     retro_eventcount_t command_done_ec{};
-    std::thread::id gpu_id;
+    uintptr_t gpu_id{};
 #ifdef __linux__
     u32 gpu_tid;
 #endif

@@ -3,7 +3,6 @@
 
 #include <cstring>
 #include <span>
-#include <thread>
 #include <vector>
 
 #include "common/enum_names.h"

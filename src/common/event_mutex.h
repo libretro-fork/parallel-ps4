@@ -172,7 +172,6 @@ private:
 
 } // namespace Common
 
-#include <thread>
 #include <retro_atomic.h>
 
 namespace Common {

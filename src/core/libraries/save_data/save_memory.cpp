@@ -8,7 +8,6 @@
 #include <condition_variable>
 #include <filesystem>
 #include <mutex>
-#include <thread>
 #include <utility>
 #include <fmt/format.h>
 

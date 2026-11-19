@@ -8,13 +8,13 @@
 #include <mutex>
 #include <optional>
 #include <string>
-#include <thread>
 #include <utility>
 #include <vector>
 #include <retro_atomic.h>
 #include "common/combiner.h"
 #include "common/event_latch.h"
 #include "common/event_mutex.h"
+#include "common/stop_thread.h"
 #include "common/types.h"
 #ifdef _WIN32
 #include <winsock2.h>
@@ -424,9 +424,9 @@ private:
     Common::Combiner m_mutex_connected;
     Common::Combiner m_mutex_authenticated;
 
-    std::thread m_thread_connect;
-    std::thread m_thread_reader;
-    std::thread m_thread_writer;
+    stop_thread_t m_thread_connect = STOP_THREAD_INIT;
+    stop_thread_t m_thread_reader = STOP_THREAD_INIT;
+    stop_thread_t m_thread_writer = STOP_THREAD_INIT;
 
     Common::Combiner m_mutex_send_direct;
     Common::EventMutex m_mutex_send_queue;

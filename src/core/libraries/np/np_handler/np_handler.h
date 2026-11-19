@@ -11,14 +11,15 @@
 #include <mutex>
 #include <optional>
 #include <string>
-#include <thread>
 #include <unordered_map>
 #include <utility>
 #include <vector>
 
 #include <retro_atomic.h>
 #include "common/combiner.h"
+#include "common/event_count.h"
 #include "common/event_mutex.h"
+#include "common/stop_thread.h"
 #include "common/types.h"
 #include "core/libraries/np/np_auth/np_auth_ctx.h"
 #include "core/libraries/np/np_manager.h"
@@ -531,7 +532,9 @@ private:
     // Worker thread
     retro_atomic_int_t m_initialized{0};
     retro_atomic_int_t m_worker_running{0};
-    std::thread m_worker_thread;
+    stop_thread_t m_worker_thread = STOP_THREAD_INIT;
+    // What the worker waits on between its looks: notified to stop it
+    Common::EventCount m_worker_wake;
 
     // Users dropped by a network error and awaiting transparent reconnect
     struct ReconnectState {

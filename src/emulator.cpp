@@ -15,7 +15,6 @@
 #include <streams/file_stream.h>
 
 #include <chrono>
-#include <thread>
 #include "common/elf_info.h"
 #include "common/event_mutex.h"
 #include "common/io_file.h"

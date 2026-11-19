@@ -9,7 +9,6 @@
 #include <cstring>
 #include <mutex>
 #include <string>
-#include <thread>
 #include <unordered_map>
 #include <vector>
 #include <queue>
@@ -22,6 +21,7 @@
 #include "common/io_file.h"
 #include "common/logging/log.h"
 #include "common/singleton.h"
+#include "common/stop_thread.h"
 #include "core/emulator_settings.h"
 #include "core/file_sys/fs.h"
 #include "core/libraries/error_codes.h"
@@ -244,8 +244,17 @@ public:
         (void)retro_atomic_exchange_64(&m_total_duration_ms, 0);
         (void)retro_atomic_exchange_int(&m_play_state, 1);
 
-        m_worker_thread =
-            std::thread(&MusicPlayerManager::PlaybackWorker, this, track_index, start_time_ms);
+        // What the thread starts with, read by it as it starts; StopPlaybackInternal above has
+        // joined the one before
+        m_worker_track = track_index;
+        m_worker_start_ms = start_time_ms;
+        stop_thread_start(
+            &m_worker_thread,
+            [](void* arg) {
+                auto* self = static_cast<MusicPlayerManager*>(arg);
+                self->PlaybackWorker(self->m_worker_track, self->m_worker_start_ms);
+            },
+            this);
     }
 
     void StopPlayback() {
@@ -260,9 +269,7 @@ public:
         (void)retro_atomic_exchange_64(&m_total_duration_ms, 0);
         retro_eventcount_notify(&m_control_ec);
 
-        if (m_worker_thread.joinable()) {
-            m_worker_thread.join();
-        }
+        stop_thread_join(&m_worker_thread);
     }
 
     void Pause() {
@@ -286,7 +293,8 @@ public:
         return (static_cast<u32>(retro_atomic_load_seq_cst_int(&m_current_track_idx)) ==
                 track_index) &&
                (static_cast<u32>(retro_atomic_load_seq_cst_int(&m_play_state)) != 0) &&
-               m_worker_thread.joinable() && retro_atomic_load_seq_cst_int(&m_stop_requested) == 0;
+               stop_thread_started(&m_worker_thread) &&
+               retro_atomic_load_seq_cst_int(&m_stop_requested) == 0;
     }
 
     void PlayOrSeek(u32 track_index, u64 start_time_ms) {
@@ -690,7 +698,9 @@ private:
     // so playing allocates nothing for it
     static constexpr u64 WindowFrames = 8192;
     std::array<float, WindowFrames * 2> m_window{};
-    std::thread m_worker_thread;
+    stop_thread_t m_worker_thread = STOP_THREAD_INIT;
+    u32 m_worker_track = 0;
+    u64 m_worker_start_ms = 0;
     Common::EventMutex m_event_mutex;
     Common::EventCondition m_event_cv;
     std::queue<MusicEvent> m_event_queue;

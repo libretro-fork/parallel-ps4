@@ -13,7 +13,6 @@
 #include <cstring>
 #include <mutex>
 #include <string_view>
-#include <thread>
 #include <fmt/format.h>
 
 #ifdef _WIN32
@@ -29,6 +28,7 @@
 #include "common/logging/log.h"
 #include "common/path_util.h"
 #include "common/quick_exit.h"
+#include "common/stop_thread.h"
 #include "common/thread_name.h"
 #include "common/types.h"
 #include "core/emulator_settings.h"
@@ -69,7 +69,7 @@ retro_atomic_int_t g_running{0};
 retro_atomic_int_t g_stop{0};
 retro_eventcount_t g_writer_ec{};
 retro_eventcount_t g_flush_ec{};
-std::thread g_writer;
+stop_thread_t g_writer = STOP_THREAD_INIT;
 Common::Combiner g_control; // Setup/Shutdown only
 
 // Settings the writer reads.
@@ -146,7 +146,7 @@ u64 Push(Kind kind, Level level, const char* data, std::size_t length, bool must
             retro_atomic_fetch_add_64(&g_dropped, 1);
             return 0;
         }
-        std::this_thread::yield();
+        sthread_yield();
     }
 }
 
@@ -327,7 +327,7 @@ bool PopRecord() {
         Cell& cell = g_ring[(g_head + i) % NUM_CELLS];
         // The producer that claimed this record is still filling it.
         while (static_cast<u64>(retro_atomic_load_acquire_64(&cell.seq)) != g_head + i + 1) {
-            std::this_thread::yield();
+            sthread_yield();
         }
         const std::size_t offset = i * CELL_BYTES;
         std::memcpy(g_w.record + offset, cell.text, std::min(CELL_BYTES, length - offset));
@@ -369,7 +369,7 @@ void WriterLoop() {
             if (g_head == static_cast<u64>(retro_atomic_load_acquire_64(&g_tail))) {
                 break;
             }
-            std::this_thread::yield();
+            sthread_yield();
             continue;
         }
         const int key = retro_eventcount_prepare_wait(&g_writer_ec);
@@ -494,7 +494,7 @@ void Setup(std::string_view shadps4_filename) {
         g_w.main = OpenFile(
             (GetUserPath(Common::FS::PathType::LogDir) / shadps4_filename).string().c_str(), false);
         retro_atomic_store_relaxed_int(&g_stop, 0);
-        g_writer = std::thread(WriterLoop);
+        stop_thread_start(&g_writer, [](void*) { WriterLoop(); }, nullptr);
         retro_atomic_store_release_int(&g_running, 1);
     });
 }
@@ -518,7 +518,7 @@ void Shutdown() {
         }
         retro_atomic_store_release_int(&g_stop, 1);
         retro_eventcount_notify(&g_writer_ec);
-        g_writer.join();
+        stop_thread_join(&g_writer);
     });
 }
 

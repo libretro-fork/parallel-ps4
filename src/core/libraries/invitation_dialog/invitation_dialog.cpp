@@ -4,10 +4,10 @@
 #include <algorithm>
 #include <cstring>
 #include <string>
-#include <thread>
 #include <vector>
 #include <fmt/format.h>
 #include "common/enum_names.h"
+#include "common/unique_function.h"
 
 #include "common/logging/log.h"
 #include "core/libraries/error_codes.h"
@@ -547,27 +547,27 @@ extern "C" int ovl_invitation_dialog_friends(int user_id, ovl_invdlg_friend_t* o
 
 extern "C" void ovl_invitation_dialog_send(int user_id, const char* session_id, const char* message,
                                            const char* const* to, int count, unsigned token) {
-    std::thread([user_id, session = std::string{session_id}, msg = std::string{message},
-                 recipients = std::vector<std::string>(to, to + count), token] {
+    Common::DetachThread([user_id, session = std::string{session_id}, msg = std::string{message},
+                          recipients = std::vector<std::string>(to, to + count), token] {
         const bool ok = Libraries::Np::NpHandler::GetInstance().SendSessionInvitation(
             user_id, session, recipients, msg);
         ovl_invitation_dialog_request_done(token, ok);
-    }).detach();
+    });
 }
 
 extern "C" void ovl_invitation_dialog_accept(int user_id, const char* invitation_id,
                                              unsigned token) {
-    std::thread([user_id, id = std::string{invitation_id}, token] {
+    Common::DetachThread([user_id, id = std::string{invitation_id}, token] {
         const bool ok =
             Libraries::Np::NpHandler::GetInstance().AcceptSessionInvitation(user_id, id);
         ovl_invitation_dialog_request_done(token, ok);
-    }).detach();
+    });
 }
 
 extern "C" void ovl_invitation_dialog_decline(int user_id, const char* invitation_id) {
-    std::thread([user_id, id = std::string{invitation_id}] {
+    Common::DetachThread([user_id, id = std::string{invitation_id}] {
         Libraries::Np::NpHandler::GetInstance().DeclineSessionInvitation(user_id, id);
-    }).detach();
+    });
 }
 
 namespace Libraries::InvitationDialog {

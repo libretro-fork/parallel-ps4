@@ -12,7 +12,6 @@
 #include <sstream>
 #include <string>
 #include <string_view>
-#include <thread>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -23,6 +22,7 @@
 #include "common/event_mutex.h"
 #include "common/logging/log.h"
 #include "common/path_util.h"
+#include "common/unique_function.h"
 #include "core/emulator_settings.h"
 #include "core/libraries/error_codes.h"
 #include "core/libraries/kernel/kernel.h"
@@ -1626,7 +1626,7 @@ int PS4_SYSV_ABI sceHttpSendRequest(int reqId, const void* postData, u64 size) {
              online ? "ONLINE" : "OFFLINE", HttpMethodName(plan.method), plan.scheme, plan.host,
              plan.port, plan.path);
 
-    std::thread([req_ptr, reqId, plan = std::move(plan), online]() {
+    Common::DetachThread([req_ptr, reqId, plan = std::move(plan), online]() {
         HttpResponse local_res;
         s32 worker_errno = 0;
         u32 success_event_bits = 0; // 0 = no event (offline path uses failure bits)
@@ -1686,7 +1686,7 @@ int PS4_SYSV_ABI sceHttpSendRequest(int reqId, const void* postData, u64 size) {
                           req_ptr->epoll_id, event_bits);
             }
         }
-    }).detach();
+    });
 
     return ORBIS_OK;
 }

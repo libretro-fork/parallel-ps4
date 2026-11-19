@@ -3,7 +3,6 @@
 
 #include <bit>
 #include <mutex>
-#include <thread>
 #include "core/libraries/kernel/threads.h"
 #include "core/tls.h"
 #include "dimensions.h"

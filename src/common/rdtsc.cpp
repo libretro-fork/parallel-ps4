@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright 2023 yuzu Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
-#include <thread>
+#include <retro_timers.h>
 #include "common/rdtsc.h"
 #include "common/uint128.h"
 
@@ -41,14 +41,15 @@ static u64 GetTimeNs() {
 u64 EstimateRDTSCFrequency() {
     // Discard the first result measuring the rdtsc.
     FencedRDTSC();
-    std::this_thread::sleep_for(std::chrono::milliseconds{1});
+    retro_sleep(1);
     FencedRDTSC();
 
     // Get the current time.
     const auto start_time = GetTimeNs();
     const u64 tsc_start = FencedRDTSC();
-    // Wait for 100 milliseconds.
-    std::this_thread::sleep_for(std::chrono::milliseconds{100});
+    // Wait for 100 milliseconds: of the host's time, which is what the counter's rate is
+    // measured against. Once, as the emulator starts, before there is a game.
+    retro_sleep(100);
     const auto end_time = GetTimeNs();
     const u64 tsc_end = FencedRDTSC();
     // Calculate differences.

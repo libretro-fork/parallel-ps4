@@ -24,7 +24,6 @@
 #endif
 
 #ifdef __linux__
-#include <thread>
 #include <fcntl.h>
 #include <linux/userfaultfd.h>
 #include <poll.h>
@@ -425,7 +424,7 @@ struct SignalImpl : public PageManager::Impl {
         const auto addr = reinterpret_cast<VAddr>(fault_address);
         const auto size = std::min<u64>(8, PageManager::GetNextPageAddr(addr) - addr);
         const auto is_gpu_thread =
-            std::this_thread::get_id() == rasterizer->GetGpuCommandProcessorThread();
+            sthread_get_current_thread_id() == rasterizer->GetGpuCommandProcessorThread();
         if (Common::IsWriteError(context)) {
             return rasterizer->InvalidateMemory(addr, size, is_gpu_thread);
         } else {

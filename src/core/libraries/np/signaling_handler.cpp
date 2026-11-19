@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright 2026 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include "core/libraries/kernel/time.h"
 #include "core/libraries/np/signaling_handler.h"
 
 #include <algorithm>
@@ -9,7 +10,6 @@
 #include <cstring>
 #include <mutex>
 #include <string>
-#include <thread>
 #include <vector>
 
 #include <retro_atomic.h>
@@ -1267,8 +1267,14 @@ void ThreadMain() {
     auto& state = NpHandler::GetInstance().GetSignalingState();
     auto last_publish = std::chrono::steady_clock::time_point{};
     while (retro_atomic_load_relaxed_int(&state.runtime_stop) == 0) {
+        // Between its turns it waits on the game's time, and a stop wakes it
+        const auto wait_ms = [&state](u64 ms) {
+            Libraries::Kernel::GameWait(
+                state.runtime_wake.get(), Libraries::Kernel::GameDeadlineIn(ms * 1'000'000),
+                [&state] { return retro_atomic_load_relaxed_int(&state.runtime_stop) != 0; });
+        };
         if (!NpSignaling::Transport::EnsureTransport()) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+            wait_ms(50);
             continue;
         }
 
@@ -1286,7 +1292,7 @@ void ThreadMain() {
             }
         }
 
-        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        wait_ms(5);
     }
     LOG_DEBUG(Lib_NpSignaling, "Signaling runtime thread stopped");
 }
@@ -1318,15 +1324,15 @@ void ActivationThreadMain() {
 void Start() {
     auto& state = NpHandler::GetInstance().GetSignalingState();
     state.runtime_thread_mutex.Run([&] {
-        if (state.runtime_thread.joinable()) {
+        if (stop_thread_started(&state.runtime_thread)) {
             LOG_DEBUG(Lib_NpSignaling, "Signaling runtime already started refs={}",
                       state.context_refs);
             return;
         }
         retro_atomic_store_relaxed_int(&state.runtime_stop, 0);
         LOG_DEBUG(Lib_NpSignaling, "Signaling runtime starting refs={}", state.context_refs);
-        state.runtime_thread = std::thread(ThreadMain);
-        state.activation_thread = std::thread(ActivationThreadMain);
+        stop_thread_start(&state.runtime_thread, [](void*) { ThreadMain(); }, nullptr);
+        stop_thread_start(&state.activation_thread, [](void*) { ActivationThreadMain(); }, nullptr);
     });
 }
 
@@ -1337,17 +1343,14 @@ void Stop() {
                 return true;
             }
             retro_atomic_store_relaxed_int(&state.runtime_stop, 1);
+            state.runtime_wake.Notify();
             state.activation_cv.notify_all();
             return false;
         })) {
         return;
     }
-    if (state.runtime_thread.joinable()) {
-        state.runtime_thread.join();
-    }
-    if (state.activation_thread.joinable()) {
-        state.activation_thread.join();
-    }
+    stop_thread_join(&state.runtime_thread);
+    stop_thread_join(&state.activation_thread);
 }
 
 void AddContextRef() {

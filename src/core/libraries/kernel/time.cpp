@@ -3,8 +3,8 @@
 
 #include <algorithm>
 #include <ctime>
-#include <thread>
 
+#include <rthreads/rthreads.h>
 #include "common/assert.h"
 #include "common/game_clock.h"
 #include "common/native_clock.h"
@@ -115,7 +115,7 @@ void GameYield() {
     if (game_thread) {
         game_clock_yield(&game_clock, &game_thread_self.yielded);
     }
-    std::this_thread::yield();
+    sthread_yield();
 }
 
 void SetGameThread(bool counted) {

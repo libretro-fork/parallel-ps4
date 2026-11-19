@@ -9,13 +9,14 @@
 #include <map>
 #include <mutex>
 #include <string>
-#include <thread>
 #include <unordered_map>
 #include <vector>
 
 #include <retro_atomic.h>
 #include "common/combiner.h"
+#include "common/event_count.h"
 #include "common/event_mutex.h"
+#include "common/stop_thread.h"
 #include "common/types.h"
 #include "core/libraries/kernel/threads.h"
 #include "core/libraries/np/np_common.h"
@@ -276,11 +277,13 @@ struct NpSignalingState {
     bool dispatch_stop = false;
 
     retro_atomic_int_t runtime_stop{0};
+    // What the runtime thread waits on between its turns: notified to stop it
+    Common::EventCount runtime_wake;
     Common::Combiner runtime_thread_mutex;
-    std::thread runtime_thread;
+    stop_thread_t runtime_thread = STOP_THREAD_INIT;
     Common::EventMutex activation_mutex;
     Common::EventCondition activation_cv;
-    std::thread activation_thread;
+    stop_thread_t activation_thread = STOP_THREAD_INIT;
     u32 context_refs = 0;
 
     void ResetSig1Data() {

@@ -1,7 +1,6 @@
 // SPDX-FileCopyrightText: Copyright 2024-2026 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
-#include <thread>
 #include <retro_atomic.h>
 #include "common/assert.h"
 #include "common/enum_names.h"
@@ -132,7 +131,7 @@ void Liverpool::ProcessCommands() {
 
 void Liverpool::Process() {
     thread_name_set("shadPS4:GpuCommandProcessor");
-    gpu_id = std::this_thread::get_id();
+    gpu_id = sthread_get_current_thread_id();
 #ifdef __linux__
     gpu_tid = gettid();
 #endif

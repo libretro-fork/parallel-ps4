@@ -12,7 +12,6 @@
 #include "video_core/renderer_vulkan/vk_pipeline_cache.h"
 
 #include <functional>
-#include <thread>
 
 #include <queues/mpsc_stack.h>
 #include <retro_atomic.h>
@@ -161,7 +160,7 @@ void DataBase::Close() {
     // instructions each), then let the writer finish what was pushed and go.
     (void)retro_atomic_exchange_int(&opened, 0);
     while (static_cast<u32>(retro_atomic_load_seq_cst_int(&g_saving)) != 0) {
-        std::this_thread::yield();
+        sthread_yield();
     }
     retro_atomic_store_release_int(&g_stop, 1);
     retro_eventcount_notify(&g_work);

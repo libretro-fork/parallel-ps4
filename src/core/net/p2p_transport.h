@@ -10,8 +10,8 @@
 #include <map>
 #include <memory>
 #include <mutex>
-#include <thread>
 #include "common/combiner.h"
+#include "common/stop_thread.h"
 
 #include <retro_atomic.h>
 #include "core/net/p2p_tcp.h"
@@ -247,7 +247,7 @@ private:
     double loss_for_testing_ = 0.0;
     u64 loss_rng_ = 0x9e3779b97f4a7c15ull;
 
-    std::thread thread_;
+    stop_thread_t thread_ = STOP_THREAD_INIT;
     retro_atomic_int_t stop_{0};
     Host::WakeHandle kick_;
     Clock::time_point sleeping_until_ = Clock::time_point::min();

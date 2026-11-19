@@ -8,6 +8,7 @@
 #include <net/net_http.h>
 
 #include "common/logging/log.h"
+#include "common/unique_function.h"
 #include "core/emulator_settings.h"
 #include "core/libraries/invitation_dialog/invitation_dialog.h"
 #include "core/libraries/np/np_handler/np_handler.h"
@@ -223,7 +224,8 @@ void NpHandler::DeclineSessionInvitation(s32 user_id, const std::string& invitat
 // is told as a shadNet notification.
 extern "C" void ovl_invite_chosen(int user_id, const char* invitation_id, const char* from_npid,
                                   int accept) {
-    std::thread([user_id, id = std::string{invitation_id}, from = std::string{from_npid}, accept] {
+    Common::DetachThread([user_id, id = std::string{invitation_id}, from = std::string{from_npid},
+                          accept] {
         auto& np = Libraries::Np::NpHandler::GetInstance();
         if (accept) {
             const bool ok = np.AcceptSessionInvitation(user_id, id);
@@ -236,5 +238,5 @@ extern "C" void ovl_invite_chosen(int user_id, const char* invitation_id, const 
             np.DeclineSessionInvitation(user_id, id);
             ovl_invite_remove(id.c_str());
         }
-    }).detach();
+    });
 }

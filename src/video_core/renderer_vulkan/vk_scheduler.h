@@ -6,7 +6,6 @@
 #include <array>
 #include <cstring>
 #include <new>
-#include <thread>
 #include <type_traits>
 
 #include <queues/mpsc_stack.h>

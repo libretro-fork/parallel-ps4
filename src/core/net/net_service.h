@@ -4,11 +4,11 @@
 #pragma once
 
 #include <array>
-#include <thread>
 
 #include <rthreads/retro_eventcount.h>
 
 #include <retro_atomic.h>
+#include "common/stop_thread.h"
 #include "common/types.h"
 
 namespace Core::Net {
@@ -48,7 +48,7 @@ private:
     retro_eventcount_t m_work{}; // jobs posted, stop
     retro_eventcount_t m_done{}; // a waited-for job finished
     bool m_ok = false;
-    std::thread m_thread;
+    stop_thread_t m_thread = STOP_THREAD_INIT;
 };
 
 } // namespace Core::Net

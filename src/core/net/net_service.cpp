@@ -53,7 +53,7 @@ NetService::NetService() {
         }
         return;
     }
-    m_thread = std::thread([this] { Loop(); });
+    stop_thread_start(&m_thread, [](void* self) { static_cast<NetService*>(self)->Loop(); }, this);
 }
 
 NetService::~NetService() {
@@ -62,7 +62,7 @@ NetService::~NetService() {
     }
     retro_atomic_store_release_int(&m_stop, 1);
     retro_eventcount_notify(&m_work);
-    m_thread.join();
+    stop_thread_join(&m_thread);
     retro_eventcount_free(&m_work);
     retro_eventcount_free(&m_done);
 }

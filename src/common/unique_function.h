@@ -4,9 +4,33 @@
 #pragma once
 
 #include <memory>
+#include <type_traits>
 #include <utility>
 
+#include <rthreads/rthreads.h>
+
 namespace Common {
+
+/// Runs @functor once on a thread of its own that nobody joins (rthreads): what
+/// std::thread(functor).detach() did. The functor is moved to the heap and freed on its
+/// thread. False if no thread could be made, and then it did not run.
+template <typename Functor>
+bool DetachThread(Functor&& functor) {
+    using Held = std::decay_t<Functor>;
+    auto* held = new Held(std::forward<Functor>(functor));
+    sthread_t* thread = sthread_create(
+        [](void* arg) {
+            const std::unique_ptr<Held> run(static_cast<Held*>(arg));
+            (*run)();
+        },
+        held);
+    if (!thread) {
+        delete held;
+        return false;
+    }
+    sthread_detach(thread);
+    return true;
+}
 
 /// General purpose function wrapper similar to std::function.
 /// Unlike std::function, the captured values don't have to be copyable.

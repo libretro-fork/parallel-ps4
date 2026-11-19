@@ -8,10 +8,10 @@
 #include <cstddef>
 #include <cstdint>
 #include <string>
-#include <thread>
 
-#include <rthreads/retro_shared_eventcount.h>
 #include <retro_atomic.h>
+#include <retro_timers.h>
+#include <rthreads/retro_shared_eventcount.h>
 
 #include "audio_mix.h"
 #include "common/patch_catalog.h"
@@ -311,7 +311,7 @@ public:
     void Wait(int key, std::int64_t timeout_us = -1) {
         if (!attached) {
             const std::int64_t us = timeout_us < 0 ? 1000 : std::min<std::int64_t>(timeout_us, 1000);
-            std::this_thread::sleep_for(std::chrono::microseconds(us));
+            retro_sleep_us(static_cast<unsigned>(us));
         } else if (timeout_us < 0) {
             retro_shared_eventcount_commit_wait(&handle, key);
         } else {

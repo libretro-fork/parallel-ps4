@@ -152,7 +152,8 @@ std::shared_ptr<Transport> Transport::Create(int family, const Endpoint& bind_ad
     getsockname(t->socket_, reinterpret_cast<sockaddr*>(&actual), &actual_len);
     t->bound_port_ =
         Endpoint::FromSockaddr(reinterpret_cast<sockaddr*>(&actual), actual_len).Port();
-    t->thread_ = std::thread([raw = t.get()] { raw->ThreadMain(); });
+    stop_thread_start(
+        &t->thread_, [](void* self) { static_cast<Transport*>(self)->ThreadMain(); }, t.get());
     *error = Error::Ok;
     return t;
 }
@@ -160,9 +161,7 @@ std::shared_ptr<Transport> Transport::Create(int family, const Endpoint& bind_ad
 Transport::~Transport() {
     (void)retro_atomic_exchange_int(&stop_, 1);
     kick_.Signal();
-    if (thread_.joinable()) {
-        thread_.join();
-    }
+    stop_thread_join(&thread_);
     Host::CloseSocket(socket_); // thread is stopped by now
 }
 

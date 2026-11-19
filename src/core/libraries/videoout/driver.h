@@ -4,7 +4,6 @@
 #pragma once
 
 #include <chrono>
-#include <thread>
 #include "common/stop_thread.h"
 #include "core/libraries/kernel/time.h"
 #include "core/libraries/videoout/video_out.h"

@@ -4,12 +4,12 @@
 #pragma once
 
 #include <array>
-#include <thread>
 #include <vector>
 
 #include <rthreads/retro_eventcount.h>
 
 #include <retro_atomic.h>
+#include "common/stop_thread.h"
 #include "vdecsw.h"
 #include "video_utils.h"
 
@@ -106,7 +106,7 @@ private:
     retro_eventcount_t m_worker_ec{}; // commands, frame slots, stop
     retro_eventcount_t m_game_ec{};   // results, pictures, the end of a sequence, stop
     bool m_ec_ok = false;
-    std::thread m_worker_thread;
+    stop_thread_t m_worker_thread = STOP_THREAD_INIT;
 };
 
 } // namespace Libraries::Vdecsw

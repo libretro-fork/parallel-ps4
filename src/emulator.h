@@ -5,7 +5,6 @@
 
 #include <filesystem>
 #include <optional>
-#include <thread>
 
 #include <string>
 #include <rthreads/retro_eventcount.h>

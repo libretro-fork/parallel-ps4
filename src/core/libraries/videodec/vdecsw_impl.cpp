@@ -50,7 +50,8 @@ VdecDecoder::VdecDecoder(const OrbisVdecswDecoderConfigInfo& config_info,
         }
         return;
     }
-    m_worker_thread = std::thread([this] { WorkerLoop(); });
+    stop_thread_start(
+        &m_worker_thread, [](void* self) { static_cast<VdecDecoder*>(self)->WorkerLoop(); }, this);
 }
 
 VdecDecoder::~VdecDecoder() {
@@ -60,7 +61,7 @@ VdecDecoder::~VdecDecoder() {
     retro_atomic_store_release_int(&m_stop, 1);
     retro_eventcount_notify(&m_worker_ec);
     retro_eventcount_notify(&m_game_ec);
-    m_worker_thread.join();
+    stop_thread_join(&m_worker_thread);
     retro_eventcount_free(&m_worker_ec);
     retro_eventcount_free(&m_game_ec);
 }

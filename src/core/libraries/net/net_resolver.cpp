@@ -6,7 +6,6 @@
 #include <cstring>
 #include <memory>
 #include <mutex>
-#include <thread>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -15,6 +14,7 @@
 
 #include "common/combiner.h"
 #include "common/logging/log.h"
+#include "common/unique_function.h"
 #include "core/libraries/net/net_error.h"
 #include "core/libraries/net/net_log.h"
 #include "core/libraries/net/net_resolver.h"
@@ -228,7 +228,8 @@ s32 RunLookup(s32 id, LookupKind kind, bool async, Work work, Deliver deliver) {
             return status;
         });
     }
-    std::thread([resolver, id, lookup, work = std::move(work), deliver = std::move(deliver)] {
+    Common::DetachThread([resolver, id, lookup, work = std::move(work),
+                          deliver = std::move(deliver)] {
         auto [status, result] = work();
         resolver->mutex.Run([&, status = status, result = std::move(result)]() mutable {
             if (resolver->destroyed || resolver->lookup != lookup) {
@@ -241,7 +242,7 @@ s32 RunLookup(s32 id, LookupKind kind, bool async, Work work, Deliver deliver) {
             resolver->running = false;
             Core::Net::SignalExternal(id);
         });
-    }).detach();
+    });
     return 0;
 }
 
