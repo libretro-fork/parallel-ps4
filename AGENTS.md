@@ -52,7 +52,7 @@ This repository builds the libretro core and nothing else. The standalone's part
 - The emulator runs in a process of its own, started by the core (`libretro/libretro_core.cpp` in the frontend's process, `libretro/host.cpp` in the emulator's). Everything that crosses between them goes through the shared memory of `libretro/shared_state.h`. Do not move emulator code into the frontend's process: the emulator needs its address range to itself and can only be stopped by ending its process.
 - A change to the layout of `SharedState` bumps `SHARED_VERSION`.
 - The shared memory is the one place the two processes meet, so it is the place to get ownership right: every field has one writer, is published with release and read with acquire, and a ring in it is SPSC with its producer and consumer named in a comment. The frame and audio paths through it are borrowed in place (the frontend is handed the frame where it lies in the shared memory, not a copy of it), with the slot held until the frontend is done with it.
-- Builds are CMake. A commit that adds, removes or renames a source updates the CMake files and anything else that lists sources (`.gitlab-ci.yml`, `.ci/` scripts, `libretro/embed_host.cmake`) in the same commit, and builds the core to completion on every lane it touches.
+- The build is the static Makefile (`Makefile`, with the sources listed in `Makefile.common`); there is no CMake build, and none is to be added. A commit that adds, removes or renames a source updates `Makefile.common` and anything else that lists sources (`libretro/tests/run.sh`, `.ci/` scripts) in the same commit, and builds the core to completion on every lane it touches: Linux, and Windows with a MinGW-w64 compiler (`.ci/build-windows-cross.sh` from Linux).
 
 ## Code
 

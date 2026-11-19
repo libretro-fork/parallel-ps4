@@ -13,7 +13,7 @@
 #   FEXCORE_GUEST_CPU_SOURCE_DIR=<dir> FEXCORE_GUEST_CPU_BUILD_DIR=<dir>
 #                                FEX built on its own (.ci/build-fex.sh)
 #
-# The lists follow CMakeLists.txt: a source added there is added here too.
+# The lists are the build's only ones: a source added to the tree is added here.
 
 LRC_DIR := libretro/libretro-common
 EXT_DIR := externals
@@ -25,8 +25,8 @@ EXT_DIR := externals
 # nothing new compiles nothing.
 replace_if_changed = cmp -s $(1).tmp $(1) || mv -f $(1).tmp $(1); rm -f $(1).tmp
 
-# Version and git information (src/common/scm_rev.cpp.in), as CMakeLists.txt
-# fills them in; the date is the commit's, so the same commit builds the same.
+# Version and git information (src/common/scm_rev.cpp.in); the date is the
+# commit's, so the same commit builds the same.
 APP_VERSION     := 0.20.1 WIP
 GIT_REV         := $(shell git rev-parse HEAD 2>/dev/null)
 GIT_DESC        := $(shell git describe --always --long --dirty 2>/dev/null)

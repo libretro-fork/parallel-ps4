@@ -77,7 +77,7 @@
 
 extern char** environ;
 
-// The launcher (host_main.c), embedded by embed_host.cmake.
+// The launcher (host_main.c), embedded by libretro/embed.sh.
 extern "C" const unsigned char g_libretro_host[];
 extern "C" const unsigned long g_libretro_host_size;
 #endif
@@ -935,7 +935,7 @@ int LauncherDescriptor() {
 // this core's own kind as on x86-64
 #if defined(__aarch64__) && !defined(SHADPS4_ENABLE_FEX_GUEST_CPU)
 #ifdef LIBRETRO_X86_64_PARTS
-// box64 and the x86-64 build of the core, carried in this one (CMakeLists.txt)
+// box64 and the x86-64 build of the core, carried in this one (Makefile.common)
 extern "C" const unsigned char g_part_box64[], g_part_box64_end[];
 extern "C" const unsigned char g_part_parallel_ps4_libretro_host[], g_part_parallel_ps4_libretro_host_end[];
 extern "C" const unsigned char g_part_parallel_ps4_libretro_so[], g_part_parallel_ps4_libretro_so_end[];

@@ -6,8 +6,9 @@ enums the core prints, with the values the compiler gives them.
 
     python3 src/common/gen_enum_names.py BUILD_DIR
 
-BUILD_DIR holds compile_commands.json (configure with
-CMAKE_EXPORT_COMPILE_COMMANDS=ON). Needs Python's libclang module
+BUILD_DIR holds compile_commands.json, the compiler's command for each
+source of the Makefile build (a tool such as bear records them: bear --
+make). Needs Python's libclang module
 (pip install libclang). Add an enum to ENUMS, and its header to HEADERS,
 to give it a table.
 """

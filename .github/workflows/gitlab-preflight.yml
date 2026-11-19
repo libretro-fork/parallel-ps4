@@ -23,32 +23,25 @@ jobs:
     - name: Replay the job in ubuntu:24.04
       run: |
         docker run --rm -v "$PWD":/src -w /src \
-          -e DEBIAN_FRONTEND=noninteractive -e CORENAME=parallel_ps4 -e LIBNAME=parallel_ps4_libretro.so \
+          -e DEBIAN_FRONTEND=noninteractive -e CORENAME=parallel_ps4 \
           ubuntu:24.04 bash -euxc '
             export NUMPROC=$(($(nproc)/5)); [ "$NUMPROC" -ge 1 ] || NUMPROC=$(nproc)
             git config --global --add safe.directory "*" || true
             apt-get update -qq
             apt-get install -y --no-install-recommends \
-              ca-certificates wget gnupg git cmake ninja-build pkg-config build-essential binutils
+              ca-certificates wget gnupg git make pkg-config build-essential binutils
             git config --global --add safe.directory "*"
             wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key > /etc/apt/trusted.gpg.d/apt.llvm.org.asc
             echo "deb http://apt.llvm.org/noble/ llvm-toolchain-noble-19 main" > /etc/apt/sources.list.d/llvm-19.list
             apt-get update -qq
             apt-get install -y --no-install-recommends \
-              clang-19 clang-tools-19 mold libstdc++-14-dev \
+              clang-19 libstdc++-14-dev \
               libudev-dev libdbus-1-dev uuid-dev \
               python3 nasm zlib1g-dev
-            cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
-              -DENABLE_UPDATER=OFF \
-              -DCMAKE_C_COMPILER=clang-19 -DCMAKE_CXX_COMPILER=clang++-19 \
-              -DCMAKE_EXE_LINKER_FLAGS=-fuse-ld=mold \
-              -DCMAKE_SHARED_LINKER_FLAGS=-fuse-ld=mold \
-              -DCMAKE_MODULE_LINKER_FLAGS=-fuse-ld=mold
-            cmake --build build -- -j $NUMPROC
-            mv "$(find build -name "$LIBNAME" | head -1)" "$LIBNAME"
-            strip --strip-unneeded "$LIBNAME"
-            ls -la "$LIBNAME"
-            nm -D --defined-only "$LIBNAME" | grep " retro_"
+            make -j $NUMPROC CC=clang-19 CXX=clang++-19
+            strip --strip-unneeded ${CORENAME}_libretro.so
+            ls -la ${CORENAME}_libretro.so
+            nm -D --defined-only ${CORENAME}_libretro.so | grep " retro_"
           '
 
     - uses: actions/upload-artifact@v7

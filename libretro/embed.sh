@@ -3,8 +3,7 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 
 # Writes files the core carries into a C source, for the static Makefile build. POSIX sh,
-# od and awk only. The CMake build does the same with libretro/embed_host.cmake and
-# cmake/EmbedResources.cmake, since the MSVC Windows build has no sh: keep them in step.
+# od and awk only.
 #
 #   embed.sh host <out.c> <executable>
 #       the launcher (libretro/host_main.c), as g_libretro_host

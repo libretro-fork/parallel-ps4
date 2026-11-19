@@ -98,7 +98,7 @@ else ifeq ($(platform),win)
    TARGET := $(TARGET_NAME)_libretro.dll
    # Only what RETRO_API marks dllexport is exported
    SHARED := -shared -Wl,--no-undefined
-   # Windows 10 RS5, as the CMake build
+   # Windows 10 RS5
    FLAGS  += -DNTDDI_VERSION=0x0A000006 -D_WIN32_WINNT=0x0A00 -DWINVER=0x0A00 \
 	-DNOMINMAX -DWIN32_LEAN_AND_MEAN
    LDFLAGS += -static-libgcc -static-libstdc++ -static

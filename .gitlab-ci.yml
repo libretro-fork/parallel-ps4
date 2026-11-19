@@ -11,6 +11,10 @@
 # Windows x64: cross-built on Linux, see the job. Not here: Linux aarch64, macOS and
 # Android - the emulator runs the game's x86-64 code directly on the
 # host CPU and has no other backend.
+#
+# Both build with the static Makefile, which leaves the core in the project's
+# directory under the name the templates keep as the job's artifact. Only the
+# templates' names and artifacts are used: the image and the steps are the jobs' own.
 
 ##############################################################################
 ################################# BOILERPLATE ################################
@@ -27,11 +31,11 @@ variables:
 include:
   # Linux
   - project: 'libretro-infrastructure/ci-templates'
-    file: '/linux-cmake.yml'
+    file: '/linux-x64.yml'
 
   # Windows
   - project: 'libretro-infrastructure/ci-templates'
-    file: '/windows-cmake-mingw.yml'
+    file: '/windows-x64-mingw.yml'
 
 stages:
   - build-prepare
@@ -58,50 +62,41 @@ default:
     - export NUMPROC=$(($(nproc)/5))
     - apt-get update -qq
     - apt-get install -y --no-install-recommends
-      ca-certificates wget gnupg git cmake ninja-build pkg-config build-essential binutils
+      ca-certificates wget gnupg git make pkg-config build-essential binutils
     - wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key > /etc/apt/trusted.gpg.d/apt.llvm.org.asc
     - echo "deb http://apt.llvm.org/noble/ llvm-toolchain-noble-19 main" > /etc/apt/sources.list.d/llvm-19.list
     - apt-get update -qq
     - apt-get install -y --no-install-recommends
-      clang-19 clang-tools-19 mold libstdc++-14-dev
+      clang-19 libstdc++-14-dev
       libudev-dev libdbus-1-dev uuid-dev
       python3 nasm zlib1g-dev
   script:
-    - cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
-      -DENABLE_UPDATER=OFF
-      -DCMAKE_C_COMPILER=clang-19 -DCMAKE_CXX_COMPILER=clang++-19
-      -DCMAKE_EXE_LINKER_FLAGS=-fuse-ld=mold
-      -DCMAKE_SHARED_LINKER_FLAGS=-fuse-ld=mold
-      -DCMAKE_MODULE_LINKER_FLAGS=-fuse-ld=mold
-    - cmake --build build -- -j $NUMPROC
-    - mv "$(find build -name "$LIBNAME" | head -1)" "$LIBNAME"
-    - strip --strip-unneeded "$LIBNAME"
+    - make -j $NUMPROC CC=clang-19 CXX=clang++-19
+    - strip --strip-unneeded ${CORENAME}_libretro.so
 
 # Linux 64-bit
 libretro-build-linux-x64:
   extends:
-    - .libretro-linux-cmake-x86_64
+    - .libretro-linux-x64-make-default
     - .core-defs-linux
 
 # Windows 64-bit
 #
-# The project builds on Windows with clang-cl against a current MSVC, newer than
-# the buildbot's 2019 16.8, so the job cross-builds on Linux: clang-cl and
-# lld-link against the MSVC CRT and Windows SDK that xwin fetches
-# (.ci/build-windows-cross.sh), linking the same runtime as the project's own
-# Windows build. The template's MXE image and steps are not used, only its name
-# and artifacts.
+# The sources need a current MinGW-w64, newer than the buildbot's, so the job
+# cross-builds on Linux: clang and lld against the C runtime, Windows headers
+# and libstdc++ of MSYS2's UCRT64 environment (.ci/build-windows-cross.sh), the
+# build `make` gives in an MSYS2 shell on Windows. The template's MXE image and
+# steps are not used, only its name and artifacts.
 libretro-build-windows-x64:
   extends:
-    - .libretro-windows-cmake-x86_64
+    - .libretro-windows-x64-mingw-make-default
     - .core-defs
   image: ubuntu:24.04
   timeout: 3h
   variables:
-    # The script's tools - the MSVC CRT and Windows SDK, the Python tools it
-    # installs - inside the project, so that GitLab's cache can
-    # keep them between pipelines (Craig). The key follows the script, which
-    # names the versions.
+    # The script's sysroot inside the project, so that GitLab's cache can keep
+    # it between pipelines (Craig). The script fetches it again when MSYS2's
+    # packages have moved on.
     SHAD_CROSS_TOOLS: $CI_PROJECT_DIR/.cross-tools
   cache:
     key:
@@ -109,12 +104,10 @@ libretro-build-windows-x64:
         - .ci/build-windows-cross.sh
       prefix: windows-x64
     paths:
-      - .cross-tools/msvc/
-      - .cross-tools/venv/
+      - .cross-tools/ucrt64/
   before_script:
     - export NUMPROC=$(($(nproc)/5))
     - apt-get update -qq
     - apt-get install -y --no-install-recommends git ca-certificates
   script:
-    - BUILD_DIR=$BUILD_DIR NUMPROC=$NUMPROC .ci/build-windows-cross.sh
-    - mv "$BUILD_DIR/$LIBNAME" "$LIBNAME"
+    - NUMPROC=$NUMPROC .ci/build-windows-cross.sh

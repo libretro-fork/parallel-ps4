@@ -1,5 +1,5 @@
-/* libusb config.h for the static Makefile build: the CMake configure results for Windows
- * (MinGW-w64) and Linux merged into one header. Device hotplug goes through netlink, not
+/* libusb config.h for the static Makefile build: what libusb's own configure finds on Windows
+ * (MinGW-w64) and on Linux, merged into one header. Device hotplug goes through netlink, not
  * libudev, so the core needs no libudev. */
 #ifndef LIBUSB_CONFIG_H_MAKEFILE
 #define LIBUSB_CONFIG_H_MAKEFILE

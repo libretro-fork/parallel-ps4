@@ -14,9 +14,6 @@ concurrency:
   group: libretro-${{ github.ref }}
   cancel-in-progress: true
 
-env:
-  BUILD_TYPE: Release
-
 jobs:
   linux:
     name: Linux x86_64
@@ -33,24 +30,21 @@ jobs:
         sudo add-apt-repository 'deb http://apt.llvm.org/noble/ llvm-toolchain-noble-19 main'
 
     - name: Install dependencies
-      run: sudo apt-get update && sudo apt install -y clang-19 mold build-essential libudev-dev
+      run: sudo apt-get update && sudo apt install -y clang-19 build-essential libudev-dev uuid-dev
 
-    - name: Cache CMake Build
+    - name: Cache the compiler's output
       uses: hendrikmuhs/ccache-action@v1.2.21
       with:
         append-timestamp: false
-        key: libretro-linux-${{ hashFiles('**/CMakeLists.txt', 'cmake/**') }}
-
-    - name: Configure CMake
-      run: cmake --fresh -B ${{github.workspace}}/build -DENABLE_UPDATER=OFF -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}} -DCMAKE_C_COMPILER=clang-19 -DCMAKE_CXX_COMPILER=clang++-19 -DCMAKE_EXE_LINKER_FLAGS="-fuse-ld=mold" -DCMAKE_SHARED_LINKER_FLAGS="-fuse-ld=mold" -DCMAKE_MODULE_LINKER_FLAGS="-fuse-ld=mold" -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+        key: libretro-linux-${{ hashFiles('Makefile', 'Makefile.common') }}
 
     - name: Build
-      run: cmake --build ${{github.workspace}}/build --config ${{env.BUILD_TYPE}} --parallel $(nproc)
+      run: make -j$(nproc) CC="ccache clang-19" CXX="ccache clang++-19"
 
     - name: Collect
       run: |
         mkdir out
-        cp "$(find build -name 'parallel_ps4_libretro.so' | head -1)" out/
+        cp parallel_ps4_libretro.so out/
         cp libretro/parallel_ps4_libretro.info out/
         ls -la out
         nm -D --defined-only out/parallel_ps4_libretro.so | grep -c ' retro_'
@@ -58,7 +52,7 @@ jobs:
         # through box64, without their debugging information
         mkdir parts
         cp out/parallel_ps4_libretro.so parts/
-        cp "$(find build -name 'parallel_ps4_libretro_host' -type f | head -1)" parts/
+        cp obj/unix-x86_64/gen/parallel_ps4_libretro_host parts/
         strip --strip-unneeded parts/parallel_ps4_libretro.so parts/parallel_ps4_libretro_host
         readelf -d parts/parallel_ps4_libretro.so | grep NEEDED
         ls -la parts
@@ -102,24 +96,21 @@ jobs:
         sudo add-apt-repository 'deb http://apt.llvm.org/noble/ llvm-toolchain-noble-19 main'
 
     - name: Install dependencies
-      run: sudo apt-get update && sudo apt install -y clang-19 mold build-essential libudev-dev
+      run: sudo apt-get update && sudo apt install -y clang-19 build-essential libudev-dev uuid-dev
 
-    - name: Cache CMake Build
+    - name: Cache the compiler's output
       uses: hendrikmuhs/ccache-action@v1.2.21
       with:
         append-timestamp: false
-        key: libretro-linux-arm64-${{ hashFiles('**/CMakeLists.txt', 'cmake/**') }}
-
-    - name: Configure CMake
-      run: cmake --fresh -B ${{github.workspace}}/build -DENABLE_UPDATER=OFF -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}} -DCMAKE_C_COMPILER=clang-19 -DCMAKE_CXX_COMPILER=clang++-19 -DCMAKE_EXE_LINKER_FLAGS="-fuse-ld=mold" -DCMAKE_SHARED_LINKER_FLAGS="-fuse-ld=mold" -DCMAKE_MODULE_LINKER_FLAGS="-fuse-ld=mold" -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache -DLIBRETRO_X86_64_PARTS=${{github.workspace}}/parts
+        key: libretro-linux-arm64-${{ hashFiles('Makefile', 'Makefile.common') }}
 
     - name: Build
-      run: cmake --build ${{github.workspace}}/build --config ${{env.BUILD_TYPE}} --parallel $(nproc)
+      run: make -j$(nproc) CC="ccache clang-19" CXX="ccache clang++-19" LIBRETRO_X86_64_PARTS=${{github.workspace}}/parts
 
     - name: Collect
       run: |
         mkdir out
-        cp "$(find build -name 'parallel_ps4_libretro.so' | head -1)" out/
+        cp parallel_ps4_libretro.so out/
         cp libretro/parallel_ps4_libretro.info out/
         strip --strip-unneeded out/parallel_ps4_libretro.so
         ls -la out
@@ -147,13 +138,13 @@ jobs:
         sudo add-apt-repository 'deb http://apt.llvm.org/noble/ llvm-toolchain-noble-19 main'
 
     - name: Install dependencies
-      run: sudo apt-get update && sudo apt install -y clang-19 lld-19 mold ninja-build build-essential libudev-dev
+      run: sudo apt-get update && sudo apt install -y clang-19 lld-19 cmake ninja-build build-essential libudev-dev uuid-dev
 
-    - name: Cache CMake Build
+    - name: Cache the compiler's output
       uses: hendrikmuhs/ccache-action@v1.2.21
       with:
         append-timestamp: false
-        key: libretro-linux-arm64-fex-${{ hashFiles('**/CMakeLists.txt', 'cmake/**', '.ci/build-fex.sh') }}
+        key: libretro-linux-arm64-fex-${{ hashFiles('Makefile', 'Makefile.common', '.ci/build-fex.sh') }}
 
     # FEX changes only with its build script, patch or smoke test
     - name: Cache FEX
@@ -172,17 +163,14 @@ jobs:
     - name: FEXCore smoke test
       run: "$(find ${{github.workspace}}/fex-build -name fexcore-smoke -type f -perm -u+x | head -1)"
 
-    - name: Configure CMake
-      run: cmake --fresh -B ${{github.workspace}}/build -DENABLE_UPDATER=OFF -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}} -DCMAKE_C_COMPILER=clang-19 -DCMAKE_CXX_COMPILER=clang++-19 -DCMAKE_EXE_LINKER_FLAGS="-fuse-ld=mold" -DCMAKE_SHARED_LINKER_FLAGS="-fuse-ld=mold" -DCMAKE_MODULE_LINKER_FLAGS="-fuse-ld=mold" -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache -DENABLE_FEX_GUEST_CPU=ON -DFEXCORE_GUEST_CPU_SOURCE_DIR=${{github.workspace}}/fex -DFEXCORE_GUEST_CPU_BUILD_DIR=${{github.workspace}}/fex-build
-
     # -k: every file that does not compile yet, not just the first
     - name: Build
-      run: cmake --build ${{github.workspace}}/build --config ${{env.BUILD_TYPE}} --parallel $(nproc) -- -k
+      run: make -k -j$(nproc) CC="ccache clang-19" CXX="ccache clang++-19" ENABLE_FEX_GUEST_CPU=1 FEXCORE_GUEST_CPU_SOURCE_DIR=${{github.workspace}}/fex FEXCORE_GUEST_CPU_BUILD_DIR=${{github.workspace}}/fex-build
 
     - name: Collect
       run: |
         mkdir out
-        cp "$(find build -name 'parallel_ps4_libretro.so' | head -1)" out/
+        cp parallel_ps4_libretro.so out/
         cp libretro/parallel_ps4_libretro.info out/
         # With its symbols, for backtraces of crashes on the test machine
         mkdir symbols && cp out/parallel_ps4_libretro.so symbols/
@@ -259,32 +247,24 @@ jobs:
         name: box64-linux-aarch64
         path: out/
 
+  # Cross-built on Linux, as the libretro buildbot's job (.gitlab-ci.yml): the build
+  # `make` gives in an MSYS2 UCRT64 shell on Windows
   windows:
     name: Windows x86_64
     if: contains(inputs.platforms, 'windows')
-    runs-on: windows-2025-vs2026
+    runs-on: ubuntu-24.04
     steps:
     - uses: actions/checkout@v6
       with:
         submodules: recursive
 
-    - name: Cache CMake Build
-      uses: hendrikmuhs/ccache-action@v1.2.21
-      with:
-        append-timestamp: false
-        key: libretro-windows-${{ hashFiles('**/CMakeLists.txt', 'cmake/**') }}
-
-    - name: Configure CMake
-      run: cmake --fresh -G Ninja -B ${{github.workspace}}/build -DENABLE_UPDATER=OFF -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}} -DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
-
     - name: Build
-      run: cmake --build ${{github.workspace}}/build --config ${{env.BUILD_TYPE}} --parallel $env:NUMBER_OF_PROCESSORS
+      run: sudo SHAD_CROSS_TOOLS=${{github.workspace}}/.cross-tools .ci/build-windows-cross.sh
 
     - name: Collect
-      shell: bash
       run: |
         mkdir out
-        cp "$(find build -name 'parallel_ps4_libretro.dll' | head -1)" out/
+        cp parallel_ps4_libretro.dll out/
         cp libretro/parallel_ps4_libretro.info out/
         ls -la out
 
@@ -328,9 +308,9 @@ jobs:
 
     - name: Name the build in the release notes
       run: |
-        version=$(sed -n 's/^set(EMULATOR_VERSION_\(MAJOR\|MINOR\|PATCH\) "\([0-9]*\)")/\2/p' CMakeLists.txt | paste -sd.)
+        version=$(sed -n 's/^APP_VERSION *:= *//p' Makefile.common)
         short=${GITHUB_SHA::7}
-        first="Test build of the shadPS4 (PlayStation 4) libretro core, shadPS4 $version WIP. Built on $(date -u +%Y-%m-%d) from commit [$short](https://github.com/$GH_REPO/commit/$GITHUB_SHA) of branch \`$GITHUB_REF_NAME\`."
+        first="Test build of the shadPS4 (PlayStation 4) libretro core, shadPS4 $version. Built on $(date -u +%Y-%m-%d) from commit [$short](https://github.com/$GH_REPO/commit/$GITHUB_SHA) of branch \`$GITHUB_REF_NAME\`."
         gh release view "$TAG" --json body --jq .body > notes.md
         { echo "$first"; tail -n +2 notes.md; } > new-notes.md
         gh release edit "$TAG" --notes-file new-notes.md
