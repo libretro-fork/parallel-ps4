@@ -7,13 +7,13 @@
 #include <functional>
 #include <mutex>
 #include <optional>
-#include <semaphore>
 #include <string>
 #include <thread>
 #include <utility>
 #include <vector>
 #include <retro_atomic.h>
 #include "common/combiner.h"
+#include "common/event_latch.h"
 #include "common/event_mutex.h"
 #include "common/types.h"
 #ifdef _WIN32
@@ -416,8 +416,11 @@ private:
     retro_atomic_int_t m_authenticated{0};
     retro_atomic_int_t m_state{static_cast<int>(ShadNetState::Ok)};
 
-    std::binary_semaphore m_sem_connected{0};
-    std::binary_semaphore m_sem_authenticated{0};
+    // Set when the attempt to connect, and then to log in, has come to an end either way (or
+    // the client is being stopped): what WaitForConnection and WaitForAuthenticated wait for.
+    // Cleared by Start for the next attempt.
+    event_latch_t m_connect_settled;
+    event_latch_t m_login_settled;
     Common::Combiner m_mutex_connected;
     Common::Combiner m_mutex_authenticated;
 

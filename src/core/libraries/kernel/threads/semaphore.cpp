@@ -3,7 +3,6 @@
 
 #include <limits>
 #include <optional>
-#include <semaphore>
 
 #include "core/libraries/kernel/sync/semaphore.h"
 

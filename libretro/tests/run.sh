@@ -140,6 +140,15 @@ for san in address,undefined thread; do
         $L/features/features_cpu.c -o "$OUT/node_pool_test" -lpthread
     "$OUT/node_pool_test"
 done
+# The latch that stands where the core had semaphores: every wait woken by its set, four
+# threads, 20000 sets each
+for san in address,undefined thread; do
+    $CC -std=gnu89 -O1 -g -Wall -Wdeclaration-after-statement -fsanitize=$san -Isrc -I$L/include \
+        libretro/tests/event_latch_test.c src/common/event_latch.c $L/rthreads/rthreads.c \
+        $L/rthreads/retro_eventcount.c $L/features/features_cpu.c -o "$OUT/event_latch_test" \
+        -lpthread
+    "$OUT/event_latch_test"
+done
 # What the on-screen keyboard stands on: the list of keyboards on screen, on five threads, and
 # text between UTF-16 and UTF-8; the text edited where it is as the same edit made of copies
 for san in address,undefined thread; do

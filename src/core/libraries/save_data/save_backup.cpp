@@ -5,7 +5,6 @@
 #include <deque>
 #include <mutex>
 #include <ranges>
-#include <semaphore>
 
 #include "common/combiner.h"
 #include "common/enum_names.h"
@@ -14,6 +13,7 @@
 #include "save_instance.h"
 
 #include <retro_atomic.h>
+#include <rthreads/retro_eventcount.h>
 #include "common/io_file.h"
 #include "common/logging/formatter.h"
 #include "common/logging/log.h"
@@ -40,7 +40,8 @@ static void CopyShareReadWrite(const std::filesystem::path& from, const std::fil
 }
 
 static std::jthread g_backup_thread;
-static std::counting_semaphore g_backup_thread_semaphore{0};
+// Notified when a request is queued: the thread waits on it for its queue to have one
+static retro_eventcount_t g_backup_queued;
 
 static Common::Combiner g_backup_running_mutex;
 
@@ -99,26 +100,25 @@ static void BackupThreadBody() {
            WorkerStatus::Stopping) {
         (void)retro_atomic_exchange_int(&g_backup_status, static_cast<int>(WorkerStatus::Waiting));
 
-        bool wait;
         BackupRequest req;
-        g_backup_queue_mutex.Run([&] {
-            wait = g_backup_queue.empty();
-            if (!wait) {
-                req = g_backup_queue.front();
-            }
-        });
-        if (wait) {
-            g_backup_thread_semaphore.acquire();
-            const bool empty = g_backup_queue_mutex.Run([&] {
+        const auto take = [&] {
+            return g_backup_queue_mutex.Run([&] {
                 if (g_backup_queue.empty()) {
-                    return true;
+                    return false;
                 }
                 req = g_backup_queue.front();
-                return false;
+                return true;
             });
-            if (empty) {
-                continue;
+        };
+        // Until a request is queued: the wait is opened before the queue is looked at again,
+        // so one queued in between is not slept through
+        while (!take()) {
+            const int key = retro_eventcount_prepare_wait(&g_backup_queued);
+            if (take()) {
+                retro_eventcount_cancel_wait(&g_backup_queued);
+                break;
             }
+            retro_eventcount_commit_wait(&g_backup_queued, key);
         }
         if (req.save_path.empty()) {
             break;
@@ -157,6 +157,8 @@ void StartThread() {
     }
     LOG_DEBUG(Lib_SaveData, "Starting backup thread");
     (void)retro_atomic_exchange_int(&g_backup_status, static_cast<int>(WorkerStatus::Waiting));
+    static const bool queued_made = (retro_eventcount_init(&g_backup_queued), true);
+    (void)queued_made;
     g_backup_thread = std::jthread{BackupThreadBody};
 }
 
@@ -170,9 +172,10 @@ void StopThread() {
     LOG_DEBUG(Lib_SaveData, "Stopping backup thread");
     (void)retro_atomic_exchange_int(&g_backup_status, static_cast<int>(WorkerStatus::Stopping));
     g_backup_queue_mutex.Run([&] { g_backup_queue.emplace_back(BackupRequest{}); });
-    g_backup_thread_semaphore.release();
-    while (GetWorkerStatus() != WorkerStatus::NotStarted) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    retro_eventcount_notify(&g_backup_queued);
+    // The thread ends once it reaches that request: waited for, not looked in on
+    if (g_backup_thread.joinable()) {
+        g_backup_thread.join();
     }
 }
 
@@ -210,7 +213,7 @@ bool NewRequest(Libraries::UserService::OrbisUserServiceUserId user_id, std::str
     if (!queued) {
         return false;
     }
-    g_backup_thread_semaphore.release();
+    retro_eventcount_notify(&g_backup_queued);
     return true;
 }
 

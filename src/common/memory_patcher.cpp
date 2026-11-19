@@ -15,7 +15,6 @@
 #include "common/patch_index.h"
 #include "common/path_util.h"
 #include "common/xml.h"
-#include "core/emulator_state.h"
 #include "core/file_format/psf.h"
 #include "memory_patcher.h"
 
@@ -26,8 +25,6 @@ uint64_t g_eboot_image_size;
 std::string g_eboot_name;
 std::string g_game_serial;
 std::string patch_file;
-bool patches_applied = false;
-std::vector<patchInfo> pending_patches;
 // The Patch Manager's choice (SetCatalogPatches)
 static char catalog_serial[16];
 static uint32_t catalog_on[PATCH_CATALOG_WORDS];
@@ -133,8 +130,6 @@ std::string convertValueToHex(const std::string type, const std::string valueStr
     }
     return result;
 }
-
-void ApplyPendingPatches();
 
 // One patch (a <Metadata>) of a patch file, for the executable and the version of the game
 // it names; a mask is looked for whatever the version.
@@ -319,7 +314,7 @@ void OnGameLoaded() {
         } else {
             ApplyPatchesFromXML(file_path);
         }
-    } else if (EmulatorState::GetInstance()->IsAutoPatchesLoadEnabled()) {
+    } else {
         Common::FS::ForEachEntry(patch_dir, [&](std::string_view name, bool is_dir) {
             if (!is_dir) {
                 return;
@@ -344,29 +339,6 @@ void OnGameLoaded() {
             }
         });
     }
-    ApplyPendingPatches();
-}
-
-void AddPatchToQueue(const patchInfo& patchToAdd) {
-    if (patches_applied) {
-        PatchMemory(patchToAdd);
-        return;
-    }
-    pending_patches.push_back(patchToAdd);
-}
-
-void ApplyPendingPatches() {
-    patches_applied = true;
-    for (size_t i = 0; i < pending_patches.size(); ++i) {
-        const patchInfo& currentPatch = pending_patches[i];
-
-        if (currentPatch.gameSerial != "*" && currentPatch.gameSerial != g_game_serial)
-            continue;
-
-        PatchMemory(currentPatch);
-    }
-
-    pending_patches.clear();
 }
 
 void PatchMemory(const patchInfo& patch) {

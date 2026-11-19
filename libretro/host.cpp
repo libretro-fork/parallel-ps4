@@ -40,7 +40,6 @@
 #include "common/thread_name.h"
 #include "core/emulator_settings.h"
 #include "core/file_sys/fs.h"
-#include "core/ipc/ipc.h"
 #include "core/libraries/kernel/time.h"
 #include "core/libraries/pad/pad.h"
 #include "core/libraries/system/userservice.h"
@@ -371,7 +370,6 @@ int RunEmulator(const char* argument) {
 
     Common::Log::Setup("shadps4.log");
     Core::InstallCrashReport();
-    IPC::Instance().Init();
     key_manager_load();
     emu_settings_load();
     user_manager_load();

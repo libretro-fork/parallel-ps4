@@ -58,11 +58,15 @@ std::string ShadNetClient::ExtractBlob(const std::vector<u8>& p, int pos) {
 }
 
 ShadNetClient::ShadNetClient() {
+    event_latch_init(&m_connect_settled);
+    event_latch_init(&m_login_settled);
     PlatformInit();
 }
 
 ShadNetClient::~ShadNetClient() {
     Stop();
+    event_latch_free(&m_connect_settled);
+    event_latch_free(&m_login_settled);
 }
 
 void ShadNetClient::Start(const std::string& host, u16 port, const std::string& npid,
@@ -73,19 +77,15 @@ void ShadNetClient::Start(const std::string& host, u16 port, const std::string& 
     m_password = password;
     m_token = token;
     (void)retro_atomic_exchange_int(&m_terminate, 0);
+    event_latch_clear(&m_connect_settled);
+    event_latch_clear(&m_login_settled);
     m_thread_connect = std::thread(&ShadNetClient::ConnectThread, this);
 }
 
 void ShadNetClient::Stop() {
     (void)retro_atomic_exchange_int(&m_terminate, 1);
-    try {
-        m_sem_connected.release();
-    } catch (...) {
-    }
-    try {
-        m_sem_authenticated.release();
-    } catch (...) {
-    }
+    event_latch_set(&m_connect_settled);
+    event_latch_set(&m_login_settled);
     m_mutex_send_queue.Run([&] { m_cv_send_queue.notify_all(); });
     DoDisconnect();
     if (m_thread_connect.joinable())
@@ -104,7 +104,7 @@ ShadNetState ShadNetClient::WaitForConnection() {
         })) {
         return *returned;
     }
-    m_sem_connected.acquire();
+    event_latch_wait(&m_connect_settled);
     return (retro_atomic_load_seq_cst_int(&m_connected) != 0)
                ? ShadNetState::Ok
                : static_cast<ShadNetState>(retro_atomic_load_seq_cst_int(&m_state));
@@ -118,7 +118,7 @@ ShadNetState ShadNetClient::WaitForAuthenticated() {
         })) {
         return *returned;
     }
-    m_sem_authenticated.acquire();
+    event_latch_wait(&m_login_settled);
     return (retro_atomic_load_seq_cst_int(&m_authenticated) != 0)
                ? ShadNetState::Ok
                : static_cast<ShadNetState>(retro_atomic_load_seq_cst_int(&m_state));
@@ -198,14 +198,14 @@ void ShadNetClient::ConnectThread() {
 
     if (!connected) {
         // m_state holds the last failure reason from DoConnect.
-        m_sem_connected.release();
-        m_sem_authenticated.release();
+        event_latch_set(&m_connect_settled);
+        event_latch_set(&m_login_settled);
         return;
     }
 
     m_thread_reader = std::thread(&ShadNetClient::ReaderThread, this);
     m_thread_writer = std::thread(&ShadNetClient::WriterThread, this);
-    m_sem_connected.release();
+    event_latch_set(&m_connect_settled);
 
     // Build Login request as protobuf
     const std::string title_id(Common::ElfInfo::Instance().GameSerial());
@@ -273,7 +273,7 @@ void ShadNetClient::ReaderThread() {
     if (retro_atomic_load_seq_cst_int(&m_authenticated) == 0) {
         if (static_cast<ShadNetState>(retro_atomic_load_seq_cst_int(&m_state)) == ShadNetState::Ok)
             (void)retro_atomic_exchange_int(&m_state, static_cast<int>(ShadNetState::FailureOther));
-        m_sem_authenticated.release();
+        event_latch_set(&m_login_settled);
     }
     (void)retro_atomic_exchange_int(&m_connected, 0);
     (void)retro_atomic_exchange_int(&m_authenticated, 0);
@@ -733,7 +733,7 @@ void ShadNetClient::HandleLoginReply(const std::vector<u8>& payload) {
                 LOG_ERROR(ShadNet, "Failed to parse LoginReply proto");
                 (void)retro_atomic_exchange_int(&m_state,
                                                 static_cast<int>(ShadNetState::FailureProtocol));
-                m_sem_authenticated.release();
+                event_latch_set(&m_login_settled);
                 DoDisconnect();
             }
         } else {
@@ -760,7 +760,7 @@ void ShadNetClient::HandleLoginReply(const std::vector<u8>& payload) {
                 break;
             }
             LOG_ERROR(ShadNet, "Login rejected error code {}", static_cast<u8>(res.error));
-            m_sem_authenticated.release();
+            event_latch_set(&m_login_settled);
             DoDisconnect();
         }
     }
@@ -826,7 +826,7 @@ void ShadNetClient::HandleServerFeaturesReply(const std::vector<u8>& payload) {
     LOG_INFO(ShadNet, "Server features: matching2_enabled={} trophies_enabled={}{}",
              matching2_enabled ? "true" : "false", trophies_enabled ? "true" : "false",
              parsed ? "" : " (defaulted)");
-    m_sem_authenticated.release();
+    event_latch_set(&m_login_settled);
 }
 
 // Notifications

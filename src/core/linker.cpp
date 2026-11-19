@@ -34,7 +34,6 @@
 #include "core/linker.h"
 #include "core/memory.h"
 #include "core/tls.h"
-#include "ipc/ipc.h"
 
 #ifndef _WIN32
 #include <signal.h>
@@ -588,10 +587,6 @@ void Linker::Execute(const std::vector<std::string>& args) {
         sigemptyset(&emptyset);
         pthread_sigmask(SIG_SETMASK, &emptyset, nullptr);
 #endif
-        if (auto& ipc = IPC::Instance()) {
-            ipc.WaitForStart();
-        }
-
         // Load libSceLibcInternal, run malloc_init.
         if (has_libcinternal) {
             LoadLibcInternal();

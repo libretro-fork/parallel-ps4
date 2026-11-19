@@ -29,13 +29,6 @@ void EmulatorState::SetGameRunning(bool running) {
     m_running = running;
 }
 
-bool EmulatorState::IsAutoPatchesLoadEnabled() const {
-    return m_load_patches_auto;
-}
-void EmulatorState::SetAutoPatchesLoadEnabled(bool enable) {
-    m_load_patches_auto = enable;
-}
-
 bool EmulatorState::IsGameSpecifigConfigUsed() const {
     return m_game_specific_config_used;
 }

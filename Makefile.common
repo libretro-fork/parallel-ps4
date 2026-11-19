@@ -130,7 +130,6 @@ CORE_SOURCES_CXX += $(addprefix src/core/file_sys/devices/,base_device.cpp conso
 CORE_SOURCES_CXX += $(addprefix src/core/file_sys/directories/,base_directory.cpp \
 	normal_directory.cpp pfs_directory.cpp)
 CORE_SOURCES_CXX += $(addprefix src/core/file_sys/,fs.cpp ifile.cpp)
-CORE_SOURCES_CXX += $(addprefix src/core/ipc/,ipc.cpp)
 CORE_SOURCES_CXX += $(addprefix src/core/libraries/ajm/,ajm.cpp ajm_aac.cpp ajm_at9.cpp \
 	ajm_batch.cpp ajm_context.cpp ajm_instance.cpp ajm_instance_statistics.cpp ajm_mp3.cpp)
 CORE_SOURCES_CXX += $(addprefix src/core/libraries/app_content/,app_content.cpp)
@@ -277,7 +276,7 @@ CORE_SOURCES_CXX += $(addprefix src/video_core/texture_cache/,blit_helper.cpp \
 	tile_manager.cpp)
 
 CORE_SOURCES_C :=
-CORE_SOURCES_C += $(addprefix src/common/,audio_stream.c enum_names.c game_clock.c host_thread.c json_util.c key_manager.c \
+CORE_SOURCES_C += $(addprefix src/common/,audio_stream.c enum_names.c event_latch.c game_clock.c host_thread.c json_util.c key_manager.c \
 	hex_dump.c node_pool.c patch_catalog.c patch_halve.c patch_index.c ptr_table.c range_runs.c reserve_span.c thread_name.c \
 	u64_map.c vblank_clock.c)
 CORE_SOURCES_C += $(addprefix src/core/,emulator_settings.c user_manager.c)

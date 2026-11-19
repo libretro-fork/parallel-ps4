@@ -34,7 +34,6 @@
 #include "core/file_format/psf.h"
 #include "core/file_format/trp.h"
 #include "core/file_sys/fs.h"
-#include "core/ipc/ipc.h"
 #include "core/libraries/kernel/kernel.h"
 #include "core/libraries/kernel/time.h"
 #include "core/libraries/libs.h"
@@ -762,14 +761,6 @@ void Emulator::Restart(std::filesystem::path eboot_path,
     Libraries::Np::NpHandler::GetInstance().Shutdown();
     Common::Log::Shutdown();
 
-    auto& ipc = IPC::Instance();
-
-    if (ipc.IsEnabled()) {
-        ipc.SendRestart(args);
-        while (true) {
-            std::this_thread::sleep_for(std::chrono::minutes(1));
-        }
-    }
 #if defined(_WIN32)
     std::wstring cmdline;
     // Emulator executable
