@@ -7,7 +7,7 @@
 
 namespace Libraries::Np::NpWebApi2 {
 
-s64 g_current_push_event_push_context_id{};
+static retro_atomic_64_t g_current_push_event_push_context_id{0};
 
 s32 PushEventFilter::Initialize(PushEventHandle* handle,
                                 const OrbisNpWebApi2PushEventFilterParameter* filter_param,
@@ -52,11 +52,10 @@ void PushEventPushContext::Initialize() {
 
     // As for the ID itself, for now we'll cheat a bit.
     // Real library does a mostly random string, but it's easier to just use an actual index.
-    ++g_current_push_event_push_context_id;
-    if (g_current_push_event_push_context_id < 0) {
-        g_current_push_event_push_context_id = 1;
+    s64 new_id = retro_atomic_fetch_add_64(&g_current_push_event_push_context_id, 1) + 1;
+    if (new_id <= 0) {
+        new_id = 1;
     }
-    s64 new_id = g_current_push_event_push_context_id;
     std::memset(&this->id, 0, sizeof(this->id));
     std::memcpy(&this->id, &new_id, sizeof(s64));
 }

@@ -11,92 +11,87 @@
 
 namespace Libraries::Np::NpWebApi2 {
 
-u32 g_current_push_event_handle_id{};
-u32 g_current_push_event_filter_id{};
-u32 g_current_push_event_callback_id{};
-u32 g_current_push_context_callback_id{};
-u32 g_current_user_context_id{};
-u64 g_current_request_id{};
+// Each object of @table held in turn, for @visit, then given back
+static void ForEach(obj_table_t* table, void (*visit)(void* object, void* arg), void* arg) {
+    for (int i = 0; i < table->count; i++) {
+        void* object = obj_table_hold(table, i);
+        if (object != nullptr) {
+            visit(object, arg);
+            obj_table_put_back(table, static_cast<obj_head_t*>(object));
+        }
+    }
+}
+
+LibraryContext::~LibraryContext() {
+    obj_table_destroy(&user_contexts);
+    obj_table_destroy(&push_event_handles);
+    obj_table_destroy(&push_event_filters);
+}
 
 void LibraryContext::CheckTimeout() {
-    u64 time = Libraries::Kernel::sceKernelGetProcessTime();
-    std::scoped_lock lk{this->lock};
-    for (auto& [user_ctx_id, user_ctx] : this->user_contexts) {
-        user_ctx->CheckTimeout();
-    }
-    for (auto& [handle_id, handle] : this->push_event_handles) {
-        handle->CheckTimeout(time);
-    }
+    u64 time = NowUs();
+    ForEach(
+        &user_contexts,
+        [](void* object, void*) { static_cast<UserContext*>(object)->CheckTimeout(); }, nullptr);
+    ForEach(
+        &push_event_handles,
+        [](void* object, void* arg) {
+            static_cast<PushEventHandle*>(object)->CheckTimeout(*static_cast<u64*>(arg));
+        },
+        &time);
 }
 
 s32 LibraryContext::CreateUserContext(Libraries::UserService::OrbisUserServiceUserId user_id) {
-    std::scoped_lock lk{this->lock};
-    if (this->user_contexts.size() >= 0x10000) {
+    UserContext* user_ctx = new UserContext(this, user_id);
+    // Its id: this context's above, its slot and the table's count below
+    if (!obj_table_put(&user_contexts, &user_ctx->head, 6, 16, static_cast<s64>(GetId()) << 0x10)) {
+        delete user_ctx;
         LOG_ERROR(Lib_NpWebApi2, "Too many user contexts");
         return ORBIS_NP_WEBAPI2_ERROR_USER_CONTEXT_MAX;
     }
+    return user_ctx->GetId();
+}
 
-    s32 actual_user_ctx_id = 0;
-    do {
-        g_current_user_context_id++;
-        if (g_current_user_context_id >= 0x10000) {
-            g_current_user_context_id = 1;
+void LibraryContext::DeleteAllUserContexts() {
+    for (int i = 0; i < user_contexts.count; i++) {
+        auto* user_ctx = static_cast<UserContext*>(obj_table_hold(&user_contexts, i));
+        if (user_ctx != nullptr) {
+            const s32 user_ctx_id = user_ctx->GetId();
+            user_ctx->RemoveUser();
+            deleteUserContext(user_ctx_id);
         }
-        actual_user_ctx_id = (this->id << 0x10) | g_current_user_context_id;
-    } while (this->user_contexts.contains(actual_user_ctx_id));
-
-    this->user_contexts[actual_user_ctx_id] = new UserContext(this, actual_user_ctx_id, user_id);
-    return actual_user_ctx_id;
+    }
 }
 
 s32 LibraryContext::CreatePushEventHandle() {
-    std::scoped_lock lk{this->lock};
-    if (g_current_push_event_handle_id + 1 < 0xf0000000) {
-        ++g_current_push_event_handle_id;
-    } else {
-        g_current_push_event_handle_id = 1;
+    PushEventHandle* handle = new PushEventHandle();
+    handle->head.destroy = PushEventHandle::Destroy;
+    handle->home = &push_event_handles;
+    if (!obj_table_put(&push_event_handles, &handle->head, 8, 31, 0)) {
+        delete handle;
+        LOG_ERROR(Lib_NpWebApi2, "Too many push event handles");
+        return ORBIS_NP_WEBAPI2_ERROR_OUT_OF_MEMORY;
     }
-
-    s32 new_handle_id = g_current_push_event_handle_id;
-    this->push_event_handles[new_handle_id] = new PushEventHandle(new_handle_id);
-    return new_handle_id;
+    return handle->GetId();
 }
 
 PushEventHandle* LibraryContext::GetPushEventHandle(s32 handle_id) {
-    std::scoped_lock lk{lock};
-    if (!push_event_handles.contains(handle_id)) {
-        return nullptr;
-    }
-    PushEventHandle* handle = push_event_handles[handle_id];
-    handle->AddUser();
-    return handle;
+    return reinterpret_cast<PushEventHandle*>(obj_table_find(&push_event_handles, handle_id, 8));
 }
 
 s32 LibraryContext::DeletePushEventHandle(PushEventHandle* handle) {
-    this->Lock();
     s32 handle_id = handle->GetId();
-    if (handle->IsDeleted()) {
-        this->Unlock();
+    if (!handle->MarkForDeletion()) {
+        handle->RemoveUser();
         LOG_ERROR(Lib_NpWebApi2, "handle with id {:#x} is already deleted", handle_id);
         return ORBIS_NP_WEBAPI2_ERROR_HANDLE_NOT_FOUND;
     }
 
-    handle->MarkForDeletion();
     handle->Abort();
-
-    while (handle->IsBusy()) {
-        handle->RemoveUser();
-        this->Unlock();
-        Libraries::Kernel::sceKernelUsleep(50000);
-        this->Lock();
-        handle->AddUser();
-    }
-
-    if (push_event_handles.contains(handle_id)) {
-        push_event_handles.erase(handle_id);
-    }
-    delete handle;
-
+    obj_table_remove(&push_event_handles, &handle->head);
+    // Its other holders let go, on the game's time; the last one frees it
+    Libraries::Kernel::GameWait(obj_table_released(), 0, [handle] { return !handle->IsBusy(); });
+    handle->RemoveUser();
     return ORBIS_OK;
 }
 
@@ -104,47 +99,37 @@ s32 LibraryContext::CreatePushEventFilter(
     s32 handle_id, const char* np_service_name, OrbisNpServiceLabel np_service_label,
     const OrbisNpWebApi2PushEventFilterParameter* filter_param, u64 filter_param_num,
     bool internal) {
-    std::scoped_lock lk{this->lock};
-    if (!this->push_event_handles.contains(handle_id)) {
+    PushEventHandle* handle = GetPushEventHandle(handle_id);
+    if (handle == nullptr) {
         LOG_ERROR(Lib_NpWebApi2, "No push event handle with id {:#x}", handle_id);
         return ORBIS_NP_WEBAPI2_ERROR_HANDLE_NOT_FOUND;
     }
-    PushEventHandle* handle = this->push_event_handles[handle_id];
-    handle->AddUser();
 
-    if (g_current_push_event_filter_id + 1 < 0xf0000000) {
-        ++g_current_push_event_filter_id;
-    } else {
-        g_current_push_event_filter_id = 1;
-    }
-
-    s32 new_filter_id = g_current_push_event_filter_id;
-    this->push_event_filters[new_filter_id] =
-        new PushEventFilter(new_filter_id, np_service_name, np_service_label, internal);
-    PushEventFilter* filter = this->push_event_filters[new_filter_id];
+    PushEventFilter* filter = new PushEventFilter(np_service_name, np_service_label, internal);
+    filter->head.destroy = PushEventFilter::Destroy;
+    filter->home = &push_event_filters;
     s32 result = filter->Initialize(handle, filter_param, filter_param_num);
+    handle->RemoveUser();
     if (result < 0) {
         // Failed to initialize filter.
         delete filter;
-        this->push_event_filters.erase(new_filter_id);
-        handle->RemoveUser();
         return result;
     }
-    handle->RemoveUser();
-    return new_filter_id;
+    if (!obj_table_put(&push_event_filters, &filter->head, 8, 31, 0)) {
+        delete filter;
+        LOG_ERROR(Lib_NpWebApi2, "Too many push event filters");
+        return ORBIS_NP_WEBAPI2_ERROR_OUT_OF_MEMORY;
+    }
+    return filter->GetId();
 }
 
 UserContext* LibraryContext::GetUserContext(s32 user_ctx_id) {
-    std::scoped_lock lk{this->lock};
-    if (!this->user_contexts.contains(user_ctx_id)) {
+    UserContext* user_ctx =
+        reinterpret_cast<UserContext*>(obj_table_find(&user_contexts, user_ctx_id, 6));
+    if (user_ctx != nullptr && user_ctx->IsDeleted()) {
+        user_ctx->RemoveUser();
         return nullptr;
     }
-
-    UserContext* user_ctx = this->user_contexts.at(user_ctx_id);
-    if (user_ctx->IsDeleted()) {
-        return nullptr;
-    }
-    user_ctx->AddUser();
     return user_ctx;
 }
 
@@ -154,14 +139,16 @@ UserContext* LibraryContext::GetUserContextByUserId(
         return nullptr;
     }
 
-    std::scoped_lock lk{this->lock};
-    for (auto& [user_ctx_id, user_ctx] : this->user_contexts) {
+    for (int i = 0; i < user_contexts.count; i++) {
+        auto* user_ctx = static_cast<UserContext*>(obj_table_hold(&user_contexts, i));
+        if (user_ctx == nullptr) {
+            continue;
+        }
         if (user_ctx->GetUserId() == user_id) {
-            user_ctx->AddUser();
             return user_ctx;
         }
+        user_ctx->RemoveUser();
     }
-
     return nullptr;
 }
 
@@ -202,7 +189,7 @@ s32 UserContext::Initialize() {
     }
 
     s32 result = Libraries::Http2::sceHttp2SetPreSendCallback(
-        http_template_id, internalPreSendCallback, reinterpret_cast<void*>(this->id));
+        http_template_id, internalPreSendCallback, reinterpret_cast<void*>(head.id));
     if (result < 0) {
         LOG_ERROR(Lib_NpWebApi2, "Failed to set pre-send callback, error = {:#x}", result);
         return result;
@@ -211,232 +198,162 @@ s32 UserContext::Initialize() {
     return result;
 }
 
+UserContext::~UserContext() {
+    obj_table_destroy(&requests);
+    obj_table_destroy(&push_event_callbacks);
+    obj_table_destroy(&push_contexts);
+    obj_table_destroy(&push_context_callbacks);
+}
+
 void UserContext::CheckTimeout() {
-    parent_ctx->Lock();
-    for (auto& [request_id, request] : requests) {
-        request->CheckTimeout();
-    }
-    parent_ctx->Unlock();
+    ForEach(
+        &requests, [](void* object, void*) { static_cast<Request*>(object)->CheckTimeout(); },
+        nullptr);
 }
 
 s32 UserContext::CreatePushEventCallback(s32 filter_id, OrbisNpWebApi2PushEventCallback cb_func,
                                          void* user_arg) {
-    this->Lock();
-    if (g_current_push_event_callback_id + 1 < 0xf0000000) {
-        ++g_current_push_event_callback_id;
-    } else {
-        g_current_push_event_callback_id = 1;
+    PushEventCallback* callback = new PushEventCallback{{}, filter_id, cb_func, user_arg};
+    callback->head.destroy = PushEventCallback::Destroy;
+    if (!obj_table_put(&push_event_callbacks, &callback->head, 8, 31, 0)) {
+        delete callback;
+        LOG_ERROR(Lib_NpWebApi2, "Too many push event callbacks");
+        return ORBIS_NP_WEBAPI2_ERROR_OUT_OF_MEMORY;
     }
+    return static_cast<s32>(callback->head.id);
+}
 
-    s32 new_callback_id = g_current_push_event_callback_id;
-    this->push_event_callbacks[new_callback_id] =
-        new PushEventCallback(new_callback_id, filter_id, cb_func, user_arg, false);
-    this->Unlock();
-    return new_callback_id;
+// The object of @id off @table, once no one else holds it, freed (obj_table.c)
+static bool DeleteById(obj_table_t* table, s64 id) {
+    obj_head_t* object = obj_table_find(table, id, 8);
+    if (object == nullptr) {
+        return false;
+    }
+    if (obj_table_retire(table, object)) {
+        const int index = object->index;
+        Libraries::Kernel::GameWait(obj_table_released(), 0,
+                                    [table, index] { return obj_table_users(table, index) <= 1; });
+    }
+    obj_table_put_back(table, object);
+    return true;
 }
 
 s32 UserContext::DeletePushEventCallback(s32 callback_id) {
-    this->Lock();
-    if (!this->push_event_callbacks.contains(callback_id)) {
-        this->Unlock();
+    if (!DeleteById(&push_event_callbacks, callback_id)) {
         LOG_ERROR(Lib_NpWebApi2, "No push event callback with id {:#x}", callback_id);
         return ORBIS_NP_WEBAPI2_ERROR_PUSH_EVENT_CALLBACK_NOT_FOUND;
     }
-
-    PushEventCallback* callback = this->push_event_callbacks[callback_id];
-    while (callback->is_busy) {
-        this->Unlock();
-        Libraries::Kernel::sceKernelUsleep(100000);
-        this->Lock();
-    }
-
-    delete callback;
-    this->push_event_callbacks.erase(callback_id);
-    this->Unlock();
     return ORBIS_OK;
 }
 
-void UserContext::CreatePushContext(OrbisNpWebApi2PushEventPushContextId* push_ctx_id) {
-    this->Lock();
-    while (this->push_contexts_busy) {
-        this->Unlock();
-        Libraries::Kernel::sceKernelUsleep(10000);
-        this->Lock();
-    }
-    this->push_contexts_busy = true;
+s32 UserContext::CreatePushContext(OrbisNpWebApi2PushEventPushContextId* push_ctx_id) {
     PushEventPushContext* push_ctx = new PushEventPushContext(5000, this);
+    push_ctx->head.destroy = PushEventPushContext::Destroy;
+    push_ctx->home = &push_contexts;
     push_ctx->Initialize();
-    OrbisNpWebApi2PushEventPushContextId* new_id = push_ctx->GetId();
-    std::memcpy(push_ctx_id, new_id, sizeof(*push_ctx_id));
-
-    s64 raw_id = push_ctx->GetFakeId();
-    this->push_contexts[raw_id] = push_ctx;
-    this->push_contexts_busy = false;
-    this->Unlock();
+    if (!obj_table_put(&push_contexts, &push_ctx->head, 6, 31, 0)) {
+        delete push_ctx;
+        LOG_ERROR(Lib_NpWebApi2, "Too many push contexts");
+        return ORBIS_NP_WEBAPI2_ERROR_OUT_OF_MEMORY;
+    }
+    std::memcpy(push_ctx_id, push_ctx->GetId(), sizeof(*push_ctx_id));
+    return ORBIS_OK;
 }
 
 PushEventPushContext* UserContext::GetPushContext(
     const OrbisNpWebApi2PushEventPushContextId* push_ctx_id) {
-    parent_ctx->Lock();
     s64 raw_id{};
     std::memcpy(&raw_id, push_ctx_id, sizeof(s64));
-    if (!push_contexts.contains(raw_id)) {
-        return nullptr;
+    for (int i = 0; i < push_contexts.count; i++) {
+        auto* push_ctx = static_cast<PushEventPushContext*>(obj_table_hold(&push_contexts, i));
+        if (push_ctx == nullptr) {
+            continue;
+        }
+        if (push_ctx->GetFakeId() == raw_id) {
+            return push_ctx;
+        }
+        push_ctx->RemoveUser();
     }
-    PushEventPushContext* push_ctx = push_contexts[raw_id];
-    parent_ctx->Unlock();
-    return push_ctx;
+    return nullptr;
 }
 
 void UserContext::DeletePushContext(PushEventPushContext* push_ctx) {
-    this->Lock();
-    while (this->push_contexts_busy) {
-        this->Unlock();
-        Libraries::Kernel::sceKernelUsleep(10000);
-        this->Lock();
+    if (obj_table_retire(&push_contexts, &push_ctx->head)) {
+        // Its callback done and its other holders gone, on the game's time
+        const int index = push_ctx->head.index;
+        obj_table_t* table = &push_contexts;
+        Libraries::Kernel::GameWait(obj_table_released(), 0, [push_ctx, table, index] {
+            return !push_ctx->CallbackRunning() && obj_table_users(table, index) <= 1;
+        });
     }
-    this->push_contexts_busy = true;
-
-    while (push_ctx->CallbackRunning()) {
-        this->Unlock();
-        Libraries::Kernel::sceKernelUsleep(100000);
-        this->Lock();
-    }
-
-    s64 raw_id = push_ctx->GetFakeId();
-    this->push_contexts.erase(raw_id);
-    delete push_ctx;
-    this->push_contexts_busy = false;
-    this->Unlock();
+    push_ctx->RemoveUser();
 }
 
 s32 UserContext::CreatePushContextCallback(s32 filter_id,
                                            OrbisNpWebApi2PushEventPushContextCallback cb_func,
                                            void* user_arg) {
-    this->Lock();
-    if (g_current_push_context_callback_id + 1 < 0xf0000000) {
-        ++g_current_push_context_callback_id;
-    } else {
-        g_current_push_context_callback_id = 1;
+    PushEventPushContextCallback* callback =
+        new PushEventPushContextCallback{{}, filter_id, cb_func, user_arg};
+    callback->head.destroy = PushEventPushContextCallback::Destroy;
+    if (!obj_table_put(&push_context_callbacks, &callback->head, 8, 31, 0)) {
+        delete callback;
+        LOG_ERROR(Lib_NpWebApi2, "Too many push context callbacks");
+        return ORBIS_NP_WEBAPI2_ERROR_OUT_OF_MEMORY;
     }
-
-    s32 new_callback_id = g_current_push_context_callback_id;
-    this->push_context_callbacks[new_callback_id] =
-        new PushEventPushContextCallback(new_callback_id, filter_id, cb_func, user_arg, false);
-    this->Unlock();
-    return new_callback_id;
+    return static_cast<s32>(callback->head.id);
 }
 
 s32 UserContext::DeletePushContextCallback(s32 callback_id) {
-    this->Lock();
-    if (!this->push_context_callbacks.contains(callback_id)) {
-        this->Unlock();
+    if (!DeleteById(&push_context_callbacks, callback_id)) {
         LOG_ERROR(Lib_NpWebApi2, "No push event push context callback with id {:#x}", callback_id);
         return ORBIS_NP_WEBAPI2_ERROR_PUSH_EVENT_CALLBACK_NOT_FOUND;
     }
-
-    PushEventPushContextCallback* callback = this->push_context_callbacks[callback_id];
-    while (callback->is_busy) {
-        this->Unlock();
-        Libraries::Kernel::sceKernelUsleep(100000);
-        this->Lock();
-    }
-
-    delete callback;
-    this->push_context_callbacks.erase(callback_id);
-    this->Unlock();
     return ORBIS_OK;
 }
 
 s32 UserContext::CreateRequest(const char* api_group, const char* path, const char* method,
                                const OrbisNpWebApi2ContentParameter* content_parameter,
                                bool multipart, Request** request) {
-    this->Lock();
-    s64 actual_request_id = 0;
-    do {
-        g_current_request_id++;
-        if (g_current_request_id >> 0x20 != 0) {
-            g_current_request_id = 1;
-        }
-        actual_request_id = (static_cast<s64>(this->id) << 0x20) | g_current_request_id;
-    } while (this->requests.contains(actual_request_id));
-
-    if (content_parameter) {
-        this->requests[actual_request_id] =
-            new Request(this->parent_ctx, actual_request_id, api_group, path, method, multipart,
-                        content_parameter);
-    } else {
-        this->requests[actual_request_id] =
-            new Request(this->parent_ctx, actual_request_id, api_group, path, method, multipart);
+    Request* new_request =
+        new Request(this->parent_ctx, api_group, path, method, multipart, content_parameter);
+    new_request->home = &requests;
+    // Its id: this user context's above, its slot and the table's count below
+    if (!obj_table_put(&requests, &new_request->head, 8, 31, static_cast<s64>(GetId()) << 0x20)) {
+        delete new_request;
+        *request = nullptr;
+        LOG_ERROR(Lib_NpWebApi2, "Too many requests");
+        return ORBIS_NP_WEBAPI2_ERROR_OUT_OF_MEMORY;
     }
-    *request = this->requests[actual_request_id];
-    this->Unlock();
+    *request = new_request;
     return ORBIS_OK;
 }
 
 Request* UserContext::GetRequest(s64 request_id) {
-    this->Lock();
-    if (!this->requests.contains(request_id)) {
-        this->Unlock();
-        return nullptr;
-    }
-
-    Request* request = this->requests[request_id];
-    request->AddUser();
-    this->Unlock();
-    return request;
+    return reinterpret_cast<Request*>(obj_table_find(&requests, request_id, 8));
 }
 
 bool UserContext::HasBusyRequests() {
-    this->Lock();
-    for (auto& [request_id, request] : this->requests) {
-        request->AddUser();
-        bool busy = request->IsBusy();
-        request->RemoveUser();
-        if (busy) {
-            this->Unlock();
+    for (int i = 0; i < requests.count; i++) {
+        if (obj_table_users(&requests, i) > 0) {
             return true;
         }
     }
-    this->Unlock();
     return false;
 }
 
 void UserContext::AbortAllRequests() {
-    this->Lock();
-    for (auto& [request_id, request] : this->requests) {
-        request->Abort();
-    }
-    this->Unlock();
+    ForEach(
+        &requests, [](void* object, void*) { static_cast<Request*>(object)->Abort(); }, nullptr);
 }
 
 void UserContext::Delete() {
     if (this->http_template_id != 0) {
         Libraries::Http2::sceHttp2DeleteTemplate(this->http_template_id);
+        this->http_template_id = 0;
     }
-    this->parent_ctx->RemoveUserContext(this->id);
-    this->RemoveUser();
-
-    for (auto& [request_id, request] : this->requests) {
-        request->Delete(nullptr);
-    }
-    this->requests.clear();
-
-    for (auto& [push_ctx_id, push_ctx] : this->push_contexts) {
-        delete push_ctx;
-    }
-    this->push_contexts.clear();
-
-    for (auto& [callback_id, callback] : this->push_event_callbacks) {
-        delete callback;
-    }
-    this->push_event_callbacks.clear();
-
-    for (auto& [callback_id, callback] : this->push_context_callbacks) {
-        delete callback;
-    }
-    this->push_context_callbacks.clear();
-    delete this;
+    // Off its context; the caller's hold given back frees it, with its requests and callbacks
+    obj_table_remove(parent_ctx->UserContexts(), &head);
+    RemoveUser();
 }
 
 static bool IsInternalHeader(const char* header_name) {
@@ -466,9 +383,8 @@ s32 Request::AddHttpRequestHeader(const char* field_name, const char* field_valu
         return ORBIS_OK;
     }
 
-    this->Lock();
+    // Before it is sent, by the game's one caller of it
     this->http_headers.emplace_back(new HttpRequestHeader(field_name, field_value));
-    this->Unlock();
     return ORBIS_OK;
 }
 
@@ -489,7 +405,11 @@ s32 Request::CreateHttpRequest(s32 http_template_id, const char* url) {
         return result;
     }
 
-    UserContext* user_ctx = this->parent_ctx->GetUserContext(this->id >> 0x20);
+    UserContext* user_ctx = this->parent_ctx->GetUserContext(static_cast<s32>(head.id >> 0x20));
+    if (user_ctx == nullptr) {
+        LOG_ERROR(Lib_NpWebApi2, "No user context for request id {:#x}", head.id);
+        return ORBIS_NP_WEBAPI2_ERROR_USER_CONTEXT_NOT_FOUND;
+    }
     const std::string bearer = NpHandler::GetInstance().GetBearerToken(user_ctx->GetUserId());
     if (!bearer.empty()) {
         const std::string auth_value = "Bearer " + bearer;
@@ -588,43 +508,33 @@ s32 Request::ParseHttpResponseHeaders(const char* field_name, char* value, u64 v
 }
 
 s32 Request::Abort() {
-    this->Lock();
     s32 result = 0;
-    if (this->Aborted()) {
+    if (retro_atomic_exchange_int(&aborted, 1) != 0) {
         // Nothing to do.
-        this->Unlock();
         return result;
     }
-    this->aborted = true;
 
     // Real library has multiple states, we don't since our logic is simpler.
-    if (this->send_state == 3) {
+    // Its sender sets the state, then looks for an abort; this sets the abort, then looks at the
+    // state: one of the two sees the other (both full barriers)
+    if (retro_atomic_load_seq_cst_int(&send_state) == 3) {
         // In the middle of an Http request, that needs aborting.
         result = Libraries::Http2::sceHttp2AbortRequest(this->http_request_id);
         if (result < 0) {
             LOG_ERROR(Lib_NpWebApi2, "Failed to abort http request, error = {:#x}", result);
         }
     }
-    this->Unlock();
     return result;
 }
 
-s32 Request::Delete(s32* http_request) {
+Request::~Request() {
     for (HttpRequestHeader* header : this->http_headers) {
         delete header;
     }
     this->http_headers.clear();
-
-    if (!http_request && this->http_request_id) {
+    if (this->http_request_id != 0) {
         Libraries::Http2::sceHttp2DeleteRequest(this->http_request_id);
-    } else {
-        *http_request = this->http_request_id;
     }
-    while (this->user_count > 0) {
-        Libraries::Kernel::sceKernelUsleep(50000);
-    }
-    delete this;
-    return ORBIS_OK;
 }
 
 }; // namespace Libraries::Np::NpWebApi2

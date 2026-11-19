@@ -1,8 +1,8 @@
 // SPDX-FileCopyrightText: Copyright 2026 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
-#include "common/combiner.h"
 #include "common/logging/log.h"
+#include "common/run_once.h"
 #include "core/emulator_settings.h"
 #include "core/libraries/kernel/time.h"
 #include "core/libraries/network/http2.h"
@@ -12,53 +12,39 @@
 #include "core/libraries/np/np_web_api2/np_web_api2_internal.h"
 #include "core/libraries/system/userservice.h"
 
-#include <map>
-#include <mutex>
-
 namespace Libraries::Np::NpWebApi2 {
 
-Common::Combiner g_mutex; // runs a nested call in place, as the recursive mutex did
-s32 g_current_lib_context_id{};
-std::map<s32, LibraryContext*> g_lib_contexts{};
-u64 g_last_timeout_check{};
+// The library contexts, in a table without a lock (obj_table.c)
+static obj_table_t g_lib_contexts;
+static run_once_t g_lib_contexts_once = RUN_ONCE_INIT;
+static retro_atomic_64_t g_last_timeout_check{0};
+
+obj_table_t* LibraryContexts() {
+    run_once(
+        &g_lib_contexts_once, [](void*) { obj_table_init(&g_lib_contexts, MaxLibraryContexts); },
+        nullptr);
+    return &g_lib_contexts;
+}
 
 s32 createLibraryContext(s32 http_ctx_id, s32 type, u64 pool_size, const char* name) {
-    return g_mutex.Run([&]() -> s32 {
-        if (g_lib_contexts.size() >= 0x8000) {
-            LOG_ERROR(Lib_NpWebApi2, "Too many library contexts");
-            return ORBIS_NP_WEBAPI2_ERROR_LIB_CONTEXT_MAX;
-        }
-
-        do {
-            g_current_lib_context_id++;
-            if (g_current_lib_context_id >= 0x8000) {
-                g_current_lib_context_id = 1;
-            }
-        } while (g_lib_contexts.contains(g_current_lib_context_id));
-
-        if (!name) {
-            g_lib_contexts[g_current_lib_context_id] =
-                new LibraryContext(g_current_lib_context_id, type, http_ctx_id, pool_size);
-        } else {
-            g_lib_contexts[g_current_lib_context_id] =
-                new LibraryContext(g_current_lib_context_id, type, http_ctx_id, pool_size, name);
-        }
-        return g_current_lib_context_id;
-    });
+    LibraryContext* lib_ctx = new LibraryContext(type, http_ctx_id, pool_size, name);
+    // Its id: its slot and the table's count, under 0x8000
+    if (!obj_table_put(LibraryContexts(), &lib_ctx->head, 6, 15, 0)) {
+        delete lib_ctx;
+        LOG_ERROR(Lib_NpWebApi2, "Too many library contexts");
+        return ORBIS_NP_WEBAPI2_ERROR_LIB_CONTEXT_MAX;
+    }
+    return lib_ctx->GetId();
 }
 
 LibraryContext* getLibraryContext(s32 lib_ctx_id) {
-    return g_mutex.Run([&]() -> LibraryContext* {
-        if (!g_lib_contexts.contains(lib_ctx_id)) {
-            return nullptr;
-        }
-        LibraryContext* lib_ctx = g_lib_contexts.at(lib_ctx_id);
-        if (lib_ctx->IsDeleted()) {
-            return nullptr;
-        }
-        lib_ctx->AddUser();
-        return lib_ctx;
-    });
+    LibraryContext* lib_ctx =
+        reinterpret_cast<LibraryContext*>(obj_table_find(LibraryContexts(), lib_ctx_id, 6));
+    if (lib_ctx != nullptr && lib_ctx->IsDeleted()) {
+        lib_ctx->RemoveUser();
+        return nullptr;
+    }
+    return lib_ctx;
 }
 
 s32 getMemoryPoolStats(s32 lib_ctx_id, OrbisNpWebApi2MemoryPoolStats* stats) {
@@ -102,10 +88,8 @@ s32 setHandleTimeout(s32 lib_ctx_id, s32 handle_id, u32 timeout) {
         return ORBIS_NP_WEBAPI2_ERROR_HANDLE_NOT_FOUND;
     }
 
-    lib_ctx->Lock();
     handle->SetTimeout(timeout);
     handle->RemoveUser();
-    lib_ctx->Unlock();
     lib_ctx->RemoveUser();
     return ORBIS_OK;
 }
@@ -124,9 +108,7 @@ s32 abortPushEventHandle(s32 lib_ctx_id, s32 handle_id) {
         return ORBIS_NP_WEBAPI2_ERROR_HANDLE_NOT_FOUND;
     }
 
-    lib_ctx->Lock();
     handle->Abort();
-    lib_ctx->Unlock();
     handle->RemoveUser();
     lib_ctx->RemoveUser();
     return ORBIS_OK;
@@ -194,32 +176,22 @@ s32 terminateLibraryContext(s32 lib_ctx_id) {
         return ORBIS_NP_WEBAPI2_ERROR_LIB_CONTEXT_NOT_FOUND;
     }
 
-    lib_ctx->Lock();
     lib_ctx->DeleteAllUserContexts();
     lib_ctx->AbortAllPushEventHandles();
 
-    if (lib_ctx->IsDeleted()) {
+    if (!lib_ctx->MarkForDeletion()) {
         LOG_ERROR(Lib_NpWebApi2, "Library context with id {:#x} is already deleted", lib_ctx_id);
-        lib_ctx->Unlock();
         lib_ctx->RemoveUser();
         return ORBIS_NP_WEBAPI2_ERROR_LIB_CONTEXT_NOT_FOUND;
     }
 
-    lib_ctx->MarkForDeletion();
-    while (lib_ctx->IsBusy() || lib_ctx->HasBusyPushEventHandles()) {
-        lib_ctx->Unlock();
-        Libraries::Kernel::sceKernelUsleep(50000);
-        lib_ctx->Lock();
-    }
-    lib_ctx->Unlock();
+    // Found no more; its other holders and its handles' let go, on the game's time. The last
+    // hold frees it, with its handles and filters.
+    obj_table_remove(LibraryContexts(), &lib_ctx->head);
+    Libraries::Kernel::GameWait(obj_table_released(), 0, [lib_ctx] {
+        return !lib_ctx->IsBusy() && !lib_ctx->HasBusyPushEventHandles();
+    });
     lib_ctx->RemoveUser();
-
-    g_mutex.Run([&] { g_lib_contexts.erase(lib_ctx_id); });
-
-    lib_ctx->DeleteAllPushEventHandles();
-    lib_ctx->DeleteAllPushEventFilters();
-    delete lib_ctx;
-
     return ORBIS_OK;
 }
 
@@ -246,13 +218,14 @@ s32 createUserContext(s32 lib_ctx_id, Libraries::UserService::OrbisUserServiceUs
     }
 
     user_ctx = lib_ctx->GetUserContext(user_ctx_id);
-    user_ctx->RemoveUser();
-
-    s32 result = user_ctx->Initialize();
-    if (result < 0) {
-        // Failed to initialize user_ctx, destroy it.
-        lib_ctx->RemoveUserContext(user_ctx_id);
-        delete user_ctx;
+    if (user_ctx != nullptr) {
+        s32 result = user_ctx->Initialize();
+        if (result < 0) {
+            // Failed to initialize user_ctx, destroy it.
+            user_ctx->Delete();
+        } else {
+            user_ctx->RemoveUser();
+        }
     }
 
     lib_ctx->RemoveUser();
@@ -265,34 +238,28 @@ s32 deleteUserContext(s32 user_ctx_id) {
         LOG_ERROR(Lib_NpWebApi2, "No library context for user context id {:#x}", user_ctx_id);
         return ORBIS_NP_WEBAPI2_ERROR_LIB_CONTEXT_NOT_FOUND;
     }
-    lib_ctx->Lock();
 
     UserContext* user_ctx = lib_ctx->GetUserContext(user_ctx_id);
     if (!user_ctx) {
         LOG_ERROR(Lib_NpWebApi2, "No user context with id {:#x}", user_ctx_id);
-        lib_ctx->Unlock();
         lib_ctx->RemoveUser();
         return ORBIS_NP_WEBAPI2_ERROR_USER_CONTEXT_NOT_FOUND;
     }
 
     user_ctx->AbortAllRequests();
-    if (user_ctx->IsDeleted()) {
+    if (!user_ctx->MarkForDeletion()) {
         LOG_ERROR(Lib_NpWebApi2, "User context with id {:#x} is already deleted", user_ctx_id);
         user_ctx->RemoveUser();
-        lib_ctx->Unlock();
         lib_ctx->RemoveUser();
         return ORBIS_NP_WEBAPI2_ERROR_USER_CONTEXT_NOT_FOUND;
     }
 
-    user_ctx->MarkForDeletion();
-    while (user_ctx->IsBusy() || user_ctx->HasBusyRequests()) {
-        lib_ctx->Unlock();
-        Libraries::Kernel::sceKernelUsleep(50000);
-        lib_ctx->Lock();
-    }
+    // Its other holders and its requests' let go, on the game's time
+    Libraries::Kernel::GameWait(obj_table_released(), 0, [user_ctx] {
+        return !user_ctx->IsBusy() && !user_ctx->HasBusyRequests();
+    });
 
     user_ctx->Delete();
-    lib_ctx->Unlock();
     lib_ctx->RemoveUser();
     return ORBIS_OK;
 }
@@ -312,7 +279,7 @@ s32 registerPushEventCallback(s32 user_ctx_id, s32 filter_id,
         return ORBIS_NP_WEBAPI2_ERROR_USER_CONTEXT_NOT_FOUND;
     }
 
-    if (!lib_ctx->GetPushEventFilter(filter_id)) {
+    if (!lib_ctx->HasPushEventFilter(filter_id)) {
         LOG_ERROR(Lib_NpWebApi2, "No push event filter with id {:#x}", filter_id);
         user_ctx->RemoveUser();
         lib_ctx->RemoveUser();
@@ -359,10 +326,10 @@ s32 createPushContext(s32 user_ctx_id, OrbisNpWebApi2PushEventPushContextId* pus
         return ORBIS_NP_WEBAPI2_ERROR_USER_CONTEXT_NOT_FOUND;
     }
 
-    user_ctx->CreatePushContext(push_ctx_id);
+    s32 result = user_ctx->CreatePushContext(push_ctx_id);
     user_ctx->RemoveUser();
     lib_ctx->RemoveUser();
-    return ORBIS_OK;
+    return result;
 }
 
 s32 startPushContextCallback(s32 user_ctx_id,
@@ -391,6 +358,7 @@ s32 startPushContextCallback(s32 user_ctx_id,
     }
 
     push_ctx->Start();
+    push_ctx->RemoveUser();
     user_ctx->RemoveUser();
     lib_ctx->RemoveUser();
     return ORBIS_OK;
@@ -442,7 +410,7 @@ s32 registerPushContextCallback(s32 user_ctx_id, s32 filter_id,
         return ORBIS_NP_WEBAPI2_ERROR_USER_CONTEXT_NOT_FOUND;
     }
 
-    if (!lib_ctx->GetPushEventFilter(filter_id)) {
+    if (!lib_ctx->HasPushEventFilter(filter_id)) {
         LOG_ERROR(Lib_NpWebApi2, "No push event filter with id {:#x}", filter_id);
         user_ctx->RemoveUser();
         lib_ctx->RemoveUser();
@@ -509,9 +477,6 @@ s32 createRequest(s32 user_ctx_id, const char* api_group, const char* path, cons
         // Request creation failed
         user_ctx->RemoveUser();
         lib_ctx->RemoveUser();
-        if (request) {
-            delete request;
-        }
         return result;
     }
 
@@ -653,10 +618,8 @@ s32 sendRequest(s64 request_id, s32 part_index, void* data, u64 data_size,
         request->MarkSent();
     }
 
-    request->Lock();
     request->SetState(0);
     s32 result = checkRequestStatus(request, user_ctx, lib_ctx);
-    request->Unlock();
     if (result != 0) {
         // Aborted or timed out.
         return result;
@@ -686,10 +649,8 @@ s32 sendRequest(s64 request_id, s32 part_index, void* data, u64 data_size,
         }
     }
 
-    request->Lock();
     request->SetState(3);
     result = checkRequestStatus(request, user_ctx, lib_ctx);
-    request->Unlock();
     if (result != 0) {
         // Aborted or timed out.
         return result;
@@ -721,10 +682,8 @@ s32 sendRequest(s64 request_id, s32 part_index, void* data, u64 data_size,
         }
     }
 
-    request->Lock();
     request->SetState(0);
     s32 result2 = checkRequestStatus(request, user_ctx, lib_ctx);
-    request->Unlock();
     if (result2 != 0) {
         // Aborted or timed out.
         return result2;
@@ -795,10 +754,8 @@ s32 readData(s64 request_id, void* data, u64 size) {
 
     request->SetEndTime();
 
-    request->Lock();
     request->SetState(3);
     s32 result = checkRequestStatus(request, user_ctx, lib_ctx);
-    request->Unlock();
     if (result != 0) {
         // Aborted or timed out.
         return result;
@@ -807,10 +764,8 @@ s32 readData(s64 request_id, void* data, u64 size) {
     s32 http_req_id = request->GetHttpRequestId();
     s32 result2 = Libraries::Http2::sceHttp2ReadData(http_req_id, data, size);
 
-    request->Lock();
     request->SetState(0);
     result = checkRequestStatus(request, user_ctx, lib_ctx);
-    request->Unlock();
     if (result != 0) {
         // Aborted or timed out.
         return result;
@@ -848,8 +803,8 @@ s32 abortRequest(s64 request_id) {
         return ORBIS_NP_WEBAPI2_ERROR_REQUEST_NOT_FOUND;
     }
 
-    request->RemoveUser();
     s32 result = request->Abort();
+    request->RemoveUser();
     user_ctx->RemoveUser();
     lib_ctx->RemoveUser();
     return result;
@@ -864,11 +819,9 @@ s32 deleteRequest(s64 request_id) {
         return ORBIS_NP_WEBAPI2_ERROR_LIB_CONTEXT_NOT_FOUND;
     }
 
-    lib_ctx->Lock();
     UserContext* user_ctx = lib_ctx->GetUserContext(user_ctx_id);
     if (!user_ctx) {
         LOG_ERROR(Lib_NpWebApi2, "No user context for request id {:#x}", request_id);
-        lib_ctx->Unlock();
         lib_ctx->RemoveUser();
         return ORBIS_NP_WEBAPI2_ERROR_USER_CONTEXT_NOT_FOUND;
     }
@@ -877,36 +830,28 @@ s32 deleteRequest(s64 request_id) {
     if (!request) {
         LOG_ERROR(Lib_NpWebApi2, "No request with id {:#x}", request_id);
         user_ctx->RemoveUser();
-        lib_ctx->Unlock();
         lib_ctx->RemoveUser();
         return ORBIS_NP_WEBAPI2_ERROR_REQUEST_NOT_FOUND;
     }
 
-    if (request->IsDeleted()) {
+    if (!request->MarkForDeletion()) {
         // Already marked for deletion
         LOG_ERROR(Lib_NpWebApi2, "Request with id {:#x} is already being deleted", request_id);
         request->RemoveUser();
         user_ctx->RemoveUser();
-        lib_ctx->Unlock();
         lib_ctx->RemoveUser();
         return ORBIS_NP_WEBAPI2_ERROR_REQUEST_NOT_FOUND;
     }
 
-    request->MarkForDeletion();
     request->Abort();
-    while (request->IsBusy()) {
-        lib_ctx->Unlock();
-        Libraries::Kernel::sceKernelUsleep(50000);
-        lib_ctx->Lock();
-    }
-    user_ctx->RemoveRequest(request_id);
+    // Found no more; its other holders let go, on the game's time
+    obj_table_remove(user_ctx->Requests(), &request->head);
+    Libraries::Kernel::GameWait(obj_table_released(), 0, [request] { return !request->IsBusy(); });
+    // Its HTTP request deleted here, after the request itself is freed
+    const s32 http_request_id = request->TakeHttpRequestId();
     request->RemoveUser();
 
-    s32 http_request_id = 0;
-    request->Delete(&http_request_id);
-
     user_ctx->RemoveUser();
-    lib_ctx->Unlock();
     lib_ctx->RemoveUser();
     if (http_request_id != 0) {
         Libraries::Http2::sceHttp2DeleteRequest(http_request_id);
@@ -915,18 +860,22 @@ s32 deleteRequest(s64 request_id) {
 }
 
 void checkTimeout() {
-    u64 current_time = Libraries::Kernel::sceKernelGetProcessTime();
-    if (current_time < g_last_timeout_check + 1000) {
-        // Too soon, skip check.
+    const u64 current_time = NowUs();
+    const s64 last = retro_atomic_load_acquire_64(&g_last_timeout_check);
+    // Too soon, or another thread checking now: skip
+    if (current_time < static_cast<u64>(last) + 1000 ||
+        !retro_atomic_cas_64(&g_last_timeout_check, last, static_cast<s64>(current_time))) {
         return;
     }
 
-    g_mutex.Run([&] {
-        g_last_timeout_check = current_time;
-        for (auto& [lib_ctx_id, lib_ctx] : g_lib_contexts) {
+    obj_table_t* table = LibraryContexts();
+    for (int i = 0; i < table->count; i++) {
+        auto* lib_ctx = static_cast<LibraryContext*>(obj_table_hold(table, i));
+        if (lib_ctx != nullptr) {
             lib_ctx->CheckTimeout();
+            lib_ctx->RemoveUser();
         }
-    });
+    }
 }
 
 }; // namespace Libraries::Np::NpWebApi2

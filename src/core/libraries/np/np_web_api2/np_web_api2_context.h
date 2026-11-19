@@ -1,16 +1,14 @@
 // SPDX-FileCopyrightText: Copyright 2026 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
-#include "common/event_mutex.h"
+#include <retro_atomic.h>
+#include "common/obj_table.h"
 #include "core/libraries/kernel/time.h"
 #include "core/libraries/np/np_web_api2/np_web_api2.h"
 #include "core/libraries/np/np_web_api2/np_web_api2_internal.h"
 #include "core/libraries/np/np_web_api2/np_web_api2_push_event.h"
 #include "core/libraries/system/userservice.h"
 
-#include <atomic>
-#include <map>
-#include <mutex>
 #include <string>
 #include <vector>
 
@@ -19,35 +17,48 @@ namespace Libraries::Np::NpWebApi2 {
 class UserContext;
 class Request;
 
+// How many of each a table holds (obj_table.c): found, held and given back without a lock, an
+// id naming its slot and how often the table's slots were used
+constexpr int MaxLibraryContexts = 32;
+constexpr int MaxUserContexts = 16;
+constexpr int MaxRequests = 128;
+constexpr int MaxHandles = 64;
+constexpr int MaxFilters = 64;
+constexpr int MaxCallbacks = 64;
+constexpr int MaxPushContexts = 32;
+
+/// The library's contexts; a wait for their holders to let go is woken by
+/// obj_table_released(), on the game's time
+obj_table_t* LibraryContexts();
+
 class LibraryContext {
 public:
-    LibraryContext(s32 ctx_id, s32 type, s32 http_ctx_id, u64 pool_size)
-        : id(ctx_id), type(static_cast<LibraryContextType>(type)), http_ctx_id(http_ctx_id),
-          pool_size(pool_size) {}
-    LibraryContext(s32 ctx_id, s32 type, s32 http_ctx_id, u64 pool_size, const char* name)
-        : id(ctx_id), type(static_cast<LibraryContextType>(type)), http_ctx_id(http_ctx_id),
-          pool_size(pool_size), name(name) {}
+    obj_head_t head{}; // first: its id, its slot and how it is freed
 
-    void Lock() {
-        lock.lock();
+    LibraryContext(s32 type, s32 http_ctx_id, u64 pool_size, const char* name)
+        : http_ctx_id(http_ctx_id), type(static_cast<LibraryContextType>(type)),
+          pool_size(pool_size), name(name ? name : "") {
+        head.destroy = Destroy;
+        obj_table_init(&user_contexts, MaxUserContexts);
+        obj_table_init(&push_event_handles, MaxHandles);
+        obj_table_init(&push_event_filters, MaxFilters);
     }
+    ~LibraryContext();
 
-    void Unlock() {
-        lock.unlock();
+    static void Destroy(obj_head_t* object) {
+        delete reinterpret_cast<LibraryContext*>(object);
     }
 
     void AddUser() {
-        std::scoped_lock lk{lock};
-        user_count++;
+        (void)obj_table_hold(LibraryContexts(), head.index);
     }
 
     void RemoveUser() {
-        std::scoped_lock lk{lock};
-        user_count--;
+        obj_table_put_back(LibraryContexts(), &head);
     }
 
     s32 GetId() {
-        return id;
+        return static_cast<s32>(head.id);
     }
 
     s32 GetHttpCtxId() {
@@ -79,16 +90,17 @@ public:
     }
 
     bool IsDeleted() {
-        return deleting;
+        return retro_atomic_load_acquire_int(&deleting) != 0;
     }
 
-    void MarkForDeletion() {
-        deleting = true;
+    /// Marked once: false if it already was
+    bool MarkForDeletion() {
+        return retro_atomic_exchange_int(&deleting, 1) == 0;
     }
 
+    /// Held by others than the caller
     bool IsBusy() {
-        std::scoped_lock lk{lock};
-        return user_count > 1;
+        return obj_table_users(LibraryContexts(), head.index) > 1;
     }
 
     void CheckTimeout();
@@ -97,24 +109,26 @@ public:
     PushEventHandle* GetPushEventHandle(s32 handle_id);
 
     void SetHandleEndTime(s32 handle_id) {
-        std::scoped_lock lk{lock};
-        if (push_event_handles.contains(handle_id)) {
-            auto& handle = push_event_handles[handle_id];
+        if (PushEventHandle* handle = GetPushEventHandle(handle_id)) {
             handle->SetEndTime();
+            handle->RemoveUser();
         }
     }
 
     void AbortAllPushEventHandles() {
-        std::scoped_lock lk{lock};
-        for (auto& [handle_id, handle] : push_event_handles) {
-            abortPushEventHandle(id, handle_id);
+        for (int i = 0; i < push_event_handles.count; i++) {
+            auto* handle = static_cast<PushEventHandle*>(obj_table_hold(&push_event_handles, i));
+            if (handle != nullptr) {
+                handle->Abort();
+                handle->RemoveUser();
+            }
         }
     }
 
     bool HasBusyPushEventHandles() {
-        std::scoped_lock lk{lock};
-        for (auto& [handle_id, handle] : push_event_handles) {
-            if (handle->IsBusy()) {
+        for (int i = 0; i < push_event_handles.count; i++) {
+            if (obj_table_live(&push_event_handles, i) &&
+                obj_table_users(&push_event_handles, i) > 0) {
                 return true;
             }
         }
@@ -123,65 +137,44 @@ public:
 
     s32 DeletePushEventHandle(PushEventHandle* handle);
 
-    void DeleteAllPushEventHandles() {
-        for (auto& [handle_id, handle] : push_event_handles) {
-            delete handle;
-        }
-        push_event_handles.clear();
-    }
-
     s32 CreatePushEventFilter(s32 handle_id, const char* np_service_name,
                               OrbisNpServiceLabel np_service_label,
                               const OrbisNpWebApi2PushEventFilterParameter* filter_param,
                               u64 filter_param_num, bool internal);
 
+    /// Held: given back with RemoveUser
     PushEventFilter* GetPushEventFilter(s32 filter_id) {
-        std::scoped_lock lk{lock};
-        if (!push_event_filters.contains(filter_id)) {
-            return nullptr;
-        }
-        return push_event_filters[filter_id];
+        return reinterpret_cast<PushEventFilter*>(
+            obj_table_find(&push_event_filters, filter_id, 8));
     }
 
+    bool HasPushEventFilter(s32 filter_id) {
+        PushEventFilter* filter = GetPushEventFilter(filter_id);
+        if (filter == nullptr) {
+            return false;
+        }
+        filter->RemoveUser();
+        return true;
+    }
+
+    /// Held by the caller: off the table, freed as the last holder lets go
     void DeletePushEventFilter(PushEventFilter* filter) {
-        std::scoped_lock lk{lock};
-        s32 filter_id = filter->GetId();
-        if (push_event_filters.contains(filter_id)) {
-            push_event_filters.erase(filter_id);
-        }
-        delete filter;
-    }
-
-    void DeleteAllPushEventFilters() {
-        for (auto& [filter_id, filter] : push_event_filters) {
-            delete filter;
-        }
-        push_event_filters.clear();
+        obj_table_remove(&push_event_filters, &filter->head);
+        filter->RemoveUser();
     }
 
     s32 CreateUserContext(Libraries::UserService::OrbisUserServiceUserId user_id);
     UserContext* GetUserContext(s32 user_ctx_id);
     UserContext* GetUserContextByUserId(Libraries::UserService::OrbisUserServiceUserId user_id);
 
-    void RemoveUserContext(s32 user_ctx_id) {
-        std::scoped_lock lk{lock};
-        if (user_contexts.contains(user_ctx_id)) {
-            user_contexts.erase(user_ctx_id);
-        }
+    obj_table_t* UserContexts() {
+        return &user_contexts;
     }
 
-    void DeleteAllUserContexts() {
-        std::scoped_lock lk{lock};
-        for (auto& [user_ctx_id, user_ctx] : user_contexts) {
-            deleteUserContext(user_ctx_id);
-        }
-        user_contexts.clear();
-    }
+    void DeleteAllUserContexts();
 
 private:
-    s32 id{};
     s32 http_ctx_id{};
-    s32 user_count{};
     enum LibraryContextType : s32 {
         Debug = 0,
         Normal = 1,
@@ -189,58 +182,55 @@ private:
         Presence = 3,
     } type;
     u64 pool_size{};
-    bool deleting{};
-    Common::RecursiveEventMutex lock{};
+    retro_atomic_int_t deleting{0};
     std::string name{};
-    std::map<s32, UserContext*> user_contexts{};
-    std::map<s32, PushEventHandle*> push_event_handles{};
-    std::map<s32, PushEventFilter*> push_event_filters{};
+    obj_table_t user_contexts{};
+    obj_table_t push_event_handles{};
+    obj_table_t push_event_filters{};
 };
 
 class UserContext {
 public:
-    UserContext(LibraryContext* parent, s32 user_ctx_id,
-                Libraries::UserService::OrbisUserServiceUserId user_id)
-        : parent_ctx(parent), id(user_ctx_id), user_id(user_id) {}
+    obj_head_t head{}; // first: its id, its slot and how it is freed
 
-    void Lock() {
-        parent_ctx->Lock();
+    UserContext(LibraryContext* parent, Libraries::UserService::OrbisUserServiceUserId user_id)
+        : user_id(user_id), parent_ctx(parent) {
+        head.destroy = Destroy;
+        obj_table_init(&requests, MaxRequests);
+        obj_table_init(&push_event_callbacks, MaxCallbacks);
+        obj_table_init(&push_contexts, MaxPushContexts);
+        obj_table_init(&push_context_callbacks, MaxCallbacks);
     }
+    ~UserContext();
 
-    void Unlock() {
-        parent_ctx->Unlock();
+    static void Destroy(obj_head_t* object) {
+        delete reinterpret_cast<UserContext*>(object);
     }
 
     void AddUser() {
-        Lock();
-        user_count++;
-        Unlock();
+        (void)obj_table_hold(parent_ctx->UserContexts(), head.index);
     }
 
     void RemoveUser() {
-        Lock();
-        user_count--;
-        Unlock();
+        obj_table_put_back(parent_ctx->UserContexts(), &head);
     }
 
     bool IsDeleted() {
-        return deleting;
+        return retro_atomic_load_acquire_int(&deleting) != 0;
     }
 
-    void MarkForDeletion() {
-        deleting = true;
+    /// Marked once: false if it already was
+    bool MarkForDeletion() {
+        return retro_atomic_exchange_int(&deleting, 1) == 0;
     }
 
+    /// Held by others than the caller
     bool IsBusy() {
-        parent_ctx->Lock();
-        s32 users = user_count;
-        parent_ctx->Unlock();
-        // Assumes caller is a user
-        return users > 1;
+        return obj_table_users(parent_ctx->UserContexts(), head.index) > 1;
     }
 
     s32 GetId() {
-        return id;
+        return static_cast<s32>(head.id);
     }
 
     Libraries::UserService::OrbisUserServiceUserId GetUserId() {
@@ -259,7 +249,7 @@ public:
                                 void* user_arg);
     s32 DeletePushEventCallback(s32 callback_id);
 
-    void CreatePushContext(OrbisNpWebApi2PushEventPushContextId* push_ctx_id);
+    s32 CreatePushContext(OrbisNpWebApi2PushEventPushContextId* push_ctx_id);
     PushEventPushContext* GetPushContext(const OrbisNpWebApi2PushEventPushContextId* push_ctx_id);
     void DeletePushContext(PushEventPushContext* push_ctx_id);
 
@@ -274,66 +264,61 @@ public:
     bool HasBusyRequests();
     void AbortAllRequests();
 
-    void RemoveRequest(s64 request_id) {
-        parent_ctx->Lock();
-        if (requests.contains(request_id)) {
-            requests.erase(request_id);
-        }
-        parent_ctx->Unlock();
+    obj_table_t* Requests() {
+        return &requests;
     }
 
+    /// Held by the caller: off its context, freed with all it holds as the last holder lets go
     void Delete();
 
 private:
-    s32 id{};
     Libraries::UserService::OrbisUserServiceUserId user_id{};
-    s32 user_count{};
     s32 http_template_id{};
-    bool deleting{};
-    bool push_contexts_busy{};
+    retro_atomic_int_t deleting{0};
     LibraryContext* parent_ctx{};
     std::string user_agent{};
-    std::map<s64, Request*> requests{};
-    std::map<s32, PushEventCallback*> push_event_callbacks{};
-    std::map<s64, PushEventPushContext*> push_contexts{};
-    std::map<s32, PushEventPushContextCallback*> push_context_callbacks{};
+    obj_table_t requests{};
+    obj_table_t push_event_callbacks{};
+    obj_table_t push_contexts{};
+    obj_table_t push_context_callbacks{};
 };
 
 class Request {
 public:
-    Request(LibraryContext* parent, s64 request_id, const char* api_group, const char* path,
-            const char* method, bool multipart)
-        : parent_ctx(parent), id(request_id), api_group(api_group), path(path), method(method),
-          multipart_supported(multipart) {}
-    Request(LibraryContext* parent, s64 request_id, const char* api_group, const char* path,
-            const char* method, bool multipart,
-            const OrbisNpWebApi2ContentParameter* content_parameter)
-        : parent_ctx(parent), id(request_id), api_group(api_group), path(path), method(method),
-          multipart_supported(multipart), content_type(content_parameter->content_type),
-          content_length(content_parameter->content_length) {}
+    obj_head_t head{}; // first: its id, its slot and how it is freed
+    obj_table_t* home{};
 
-    void Lock() {
-        parent_ctx->Lock();
+    Request(LibraryContext* parent, const char* api_group, const char* path, const char* method,
+            bool multipart, const OrbisNpWebApi2ContentParameter* content_parameter)
+        : content_length(content_parameter ? content_parameter->content_length : 0),
+          multipart_supported(multipart), parent_ctx(parent), api_group(api_group), path(path),
+          method(method), content_type(content_parameter ? content_parameter->content_type : "") {
+        head.destroy = Destroy;
     }
+    /// Its headers, and its HTTP request unless one took it (TakeHttpRequestId)
+    ~Request();
 
-    void Unlock() {
-        parent_ctx->Unlock();
+    static void Destroy(obj_head_t* object) {
+        delete reinterpret_cast<Request*>(object);
     }
 
     void AddUser() {
-        Lock();
-        user_count++;
-        Unlock();
+        (void)obj_table_hold(home, head.index);
     }
 
     void RemoveUser() {
-        Lock();
-        user_count--;
-        Unlock();
+        obj_table_put_back(home, &head);
     }
 
     s64 GetId() {
-        return id;
+        return head.id;
+    }
+
+    /// Its HTTP request, for the caller to delete: the request no longer does
+    s32 TakeHttpRequestId() {
+        const s32 taken = http_request_id;
+        http_request_id = 0;
+        return taken;
     }
 
     s32 GetHttpRequestId() {
@@ -353,11 +338,11 @@ public:
     }
 
     bool Aborted() {
-        return aborted;
+        return retro_atomic_load_acquire_int(&aborted) != 0;
     }
 
     bool Expired() {
-        return expired;
+        return retro_atomic_load_acquire_int(&expired) != 0;
     }
 
     bool OutOfData() {
@@ -365,13 +350,14 @@ public:
     }
 
     void SetEndTime() {
-        if (timeout != 0 && end_time == 0) {
-            end_time = Libraries::Kernel::sceKernelGetProcessTime() + timeout;
+        const u32 t = static_cast<u32>(retro_atomic_load_acquire_int(&timeout));
+        if (t != 0) {
+            (void)retro_atomic_cas_64(&end_time, 0, static_cast<s64>(NowUs() + t));
         }
     }
 
     void ClearEndTime() {
-        end_time = 0;
+        retro_atomic_store_release_64(&end_time, 0);
     }
 
     std::string& GetApiGroup() {
@@ -390,36 +376,34 @@ public:
         return content_type;
     }
 
+    /// A full barrier: Abort sees it, or this thread's next look sees the abort
     void SetState(s32 state) {
-        send_state = state;
+        (void)retro_atomic_exchange_int(&send_state, state);
     }
 
     bool IsDeleted() {
-        return deleting;
+        return retro_atomic_load_acquire_int(&deleting) != 0;
     }
 
-    void MarkForDeletion() {
-        deleting = true;
+    /// Marked once: false if it already was
+    bool MarkForDeletion() {
+        return retro_atomic_exchange_int(&deleting, 1) == 0;
     }
 
+    /// Held by others than the caller
     bool IsBusy() {
-        parent_ctx->Lock();
-        s32 users = user_count;
-        parent_ctx->Unlock();
-        // Assumes caller is a user
-        return users > 1;
+        return obj_table_users(home, head.index) > 1;
     }
 
     s32 AddHttpRequestHeader(const char* field_name, const char* field_value);
 
     void SetTimeout(u32 new_timeout) {
-        this->timeout = new_timeout;
+        retro_atomic_store_release_int(&timeout, static_cast<int>(new_timeout));
     }
 
     void CheckTimeout() {
-        u64 time = Libraries::Kernel::sceKernelGetProcessTime();
-        if (!expired && end_time != 0 && end_time < time) {
-            expired = true;
+        const u64 end = static_cast<u64>(retro_atomic_load_acquire_64(&end_time));
+        if (end != 0 && end < NowUs() && retro_atomic_exchange_int(&expired, 1) == 0) {
             Abort();
         }
     }
@@ -430,24 +414,21 @@ public:
     s32 ParseHttpResponseHeaders(const char* field_name, char* value, u64 value_size,
                                  u64* value_size_out);
     s32 Abort();
-    s32 Delete(s32* http_request_id);
 
 private:
-    s64 id{};
     u64 content_length{};
     char* http_response_headers{};
     u64 http_response_header_size{};
-    s32 user_count{};
     s32 http_request_id{};
-    u32 timeout{};
+    retro_atomic_int_t timeout{0};
     s32 sent_data{};
-    s32 send_state{};
+    retro_atomic_int_t send_state{0};
     bool multipart_supported{};
     bool sent{};
-    bool aborted{};
-    bool expired{};
-    bool deleting{};
-    u64 end_time{};
+    retro_atomic_int_t aborted{0};
+    retro_atomic_int_t expired{0};
+    retro_atomic_int_t deleting{0};
+    retro_atomic_64_t end_time{0};
     LibraryContext* parent_ctx{};
     std::string api_group{};
     std::string path{};

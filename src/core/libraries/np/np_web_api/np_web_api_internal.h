@@ -26,33 +26,25 @@ struct OrbisNpWebApiRegisteredPushEventCallback;
 struct OrbisNpWebApiRegisteredServicePushEventCallback;
 struct OrbisNpWebApiRegisteredExtendedPushEventCallback;
 
-// What each of the library's objects keeps first: its id (the one the game holds), its slot
-// in the table it is kept in (obj_table.c: found, held and given back there without a lock),
-// and how it is freed by whichever thread lets go of it last.
-struct WebApiObject {
-    s64 id;
-    s32 index;
-    void (*destroy)(WebApiObject* object);
-};
-
 struct OrbisNpWebApiContext {
-    WebApiObject base;
+    // First: its id, its slot and how it is freed (obj_table.c)
+    obj_head_t base;
     s32 type;
     s32 libCtxId;
     s32 libHttpCtxId;
-    // Its objects; how often each table's slots have been used, for ids not reused at once
+    // Its objects
     obj_table_t userContexts;
     obj_table_t handles; // a handle's timer is the handle's own
     obj_table_t pushEventFilters;
     obj_table_t servicePushEventFilters;
     obj_table_t extendedPushEventFilters;
-    retro_atomic_int_t generation;
     std::string name;
     retro_atomic_int_t terminated;
 };
 
 struct OrbisNpWebApiUserContext {
-    WebApiObject base;
+    // First: its id, its slot and how it is freed (obj_table.c)
+    obj_head_t base;
     OrbisNpWebApiContext* parentContext;
     s32 userCtxId;
     Libraries::UserService::OrbisUserServiceUserId userId;
@@ -60,7 +52,6 @@ struct OrbisNpWebApiUserContext {
     obj_table_t pushEventCallbacks;
     obj_table_t servicePushEventCallbacks;
     obj_table_t extendedPushEventCallbacks;
-    retro_atomic_int_t generation;
     retro_atomic_int_t deleted;
     // Set and read by any thread: the argument stored before the function, the function
     // cleared first
@@ -69,7 +60,8 @@ struct OrbisNpWebApiUserContext {
 };
 
 struct OrbisNpWebApiRequest {
-    WebApiObject base;
+    // First: its id, its slot and how it is freed (obj_table.c)
+    obj_head_t base;
     OrbisNpWebApiContext* parentContext;
     OrbisNpWebApiUserContext* parentUserContext;
     s64 requestId;
@@ -110,7 +102,8 @@ struct OrbisNpWebApiRequest {
 };
 
 struct OrbisNpWebApiHandle {
-    WebApiObject base;
+    // First: its id, its slot and how it is freed (obj_table.c)
+    obj_head_t base;
     s32 handleId;
     retro_atomic_int_t aborted;
     retro_atomic_int_t deleted;
@@ -121,14 +114,16 @@ struct OrbisNpWebApiHandle {
 };
 
 struct OrbisNpWebApiPushEventFilter {
-    WebApiObject base;
+    // First: its id, its slot and how it is freed (obj_table.c)
+    obj_head_t base;
     s32 filterId;
     std::vector<OrbisNpWebApiPushEventFilterParameter> filterParams;
     OrbisNpWebApiContext* parentContext;
 };
 
 struct OrbisNpWebApiServicePushEventFilter {
-    WebApiObject base;
+    // First: its id, its slot and how it is freed (obj_table.c)
+    obj_head_t base;
     s32 filterId;
     bool internal;
     std::vector<OrbisNpWebApiServicePushEventFilterParameter> filterParams;
@@ -138,7 +133,8 @@ struct OrbisNpWebApiServicePushEventFilter {
 };
 
 struct OrbisNpWebApiExtendedPushEventFilter {
-    WebApiObject base;
+    // First: its id, its slot and how it is freed (obj_table.c)
+    obj_head_t base;
     s32 filterId;
     bool internal;
     std::vector<OrbisNpWebApiExtdPushEventFilterParameter> filterParams;
@@ -149,7 +145,8 @@ struct OrbisNpWebApiExtendedPushEventFilter {
 };
 
 struct OrbisNpWebApiRegisteredPushEventCallback {
-    WebApiObject base;
+    // First: its id, its slot and how it is freed (obj_table.c)
+    obj_head_t base;
     s32 callbackId;
     s32 filterId;
     OrbisNpWebApiPushEventCallback cbFunc;
@@ -157,7 +154,8 @@ struct OrbisNpWebApiRegisteredPushEventCallback {
 };
 
 struct OrbisNpWebApiRegisteredServicePushEventCallback {
-    WebApiObject base;
+    // First: its id, its slot and how it is freed (obj_table.c)
+    obj_head_t base;
     s32 callbackId;
     s32 filterId;
     OrbisNpWebApiServicePushEventCallback cbFunc;
@@ -168,7 +166,8 @@ struct OrbisNpWebApiRegisteredServicePushEventCallback {
 };
 
 struct OrbisNpWebApiRegisteredExtendedPushEventCallback {
-    WebApiObject base;
+    // First: its id, its slot and how it is freed (obj_table.c)
+    obj_head_t base;
     s32 callbackId;
     s32 filterId;
     OrbisNpWebApiExtdPushEventCallback cbFunc;

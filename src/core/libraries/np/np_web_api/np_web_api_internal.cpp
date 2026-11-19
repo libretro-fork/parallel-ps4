@@ -31,20 +31,10 @@ static constexpr int MaxFilters = 64;
 static constexpr int MaxCallbacks = 64;
 
 static obj_table_t g_contexts;
-static retro_atomic_int_t g_context_generation{0};
-// Notified as any object is given back: a thread waiting for one's users to leave parks here,
-// on the game's time
-static retro_eventcount_t g_released;
 static run_once_t g_tables_once = RUN_ONCE_INIT;
 
 static void TablesInit() {
-    run_once(
-        &g_tables_once,
-        [](void*) {
-            obj_table_init(&g_contexts, MaxContexts);
-            retro_eventcount_init(&g_released);
-        },
-        nullptr);
+    run_once(&g_tables_once, [](void*) { obj_table_init(&g_contexts, MaxContexts); }, nullptr);
 }
 
 static thread_local s32 g_last_webapi_error = ORBIS_OK;
@@ -53,116 +43,43 @@ static s32 captureWebApiError(const char* body, u64 len);
 static retro_atomic_64_t g_last_timeout_check{0};
 static s32 g_sdk_ver = 0;
 
-// An id for slot @index of a table: the slot + 1 in the low @slot_bits, the generation above,
-// within @id_bits
-static s64 MakeId(retro_atomic_int_t* generation, int index, int slot_bits, int id_bits) {
-    const s64 gen_mask = (s64{1} << (id_bits - slot_bits)) - 1;
-    s64 gen = (retro_atomic_fetch_add_int(generation, 1) + 1) & gen_mask;
-    return (gen << slot_bits) | (index + 1);
+// Until @done(), on the game's time, woken as objects are given back (obj_table.c)
+template <typename Done>
+static void WaitUntil(Done&& done) {
+    Kernel::GameWait(obj_table_released(), 0, done);
 }
-
-static int SlotOf(s64 id, int slot_bits) {
-    return static_cast<int>(id & ((s64{1} << slot_bits) - 1)) - 1;
-}
-
-// The object @id names in @table, held, or nullptr
-static WebApiObject* FindObject(obj_table_t* table, s64 id, int slot_bits) {
-    const int index = SlotOf(id, slot_bits);
-    auto* object = static_cast<WebApiObject*>(obj_table_hold(table, index));
-    if (object == nullptr) {
-        return nullptr;
-    }
-    if (object->id != id) {
-        if (obj_table_release(table, index)) {
-            object->destroy(object);
-            obj_table_reuse(table, index);
-        }
-        return nullptr;
-    }
-    return object;
-}
-
-static void ReleaseObject(obj_table_t* table, WebApiObject* object);
 
 // Whether @id names an object of @table now
 static bool HasObject(obj_table_t* table, s64 id) {
-    WebApiObject* object = FindObject(table, id, 8);
+    obj_head_t* object = obj_table_find(table, id, 8);
     if (object == nullptr) {
         return false;
     }
-    ReleaseObject(table, object);
+    obj_table_put_back(table, object);
     return true;
-}
-
-// A hold given back: the last one of a removed object frees it
-static void ReleaseObject(obj_table_t* table, WebApiObject* object) {
-    const int index = object->index;
-    if (obj_table_release(table, index)) {
-        object->destroy(object);
-        obj_table_reuse(table, index);
-    }
-    retro_eventcount_notify(&g_released);
-}
-
-// Off its table: found no more, freed once its last holder lets go (now, if none)
-static void RemoveObject(obj_table_t* table, WebApiObject* object) {
-    const int index = object->index;
-    if (obj_table_doom(table, index) == 1) {
-        object->destroy(object);
-        obj_table_reuse(table, index);
-    }
-}
-
-// @object into @table, with an id made for its slot: false if the table is full
-static bool AddObject(obj_table_t* table, WebApiObject* object, retro_atomic_int_t* generation,
-                      int slot_bits, int id_bits, s64 high) {
-    const int index = obj_table_add(table, object, 0, table->count);
-    if (index < 0) {
-        return false;
-    }
-    object->index = index;
-    object->id = high | MakeId(generation, index, slot_bits, id_bits);
-    return true;
-}
-
-// Until @done(), on the game's time, woken as objects are given back
-template <typename Done>
-static void WaitUntil(Done&& done) {
-    Kernel::GameWait(&g_released, 0, done);
 }
 
 template <typename T>
-static void DestroyAs(WebApiObject* object) {
+static void DestroyAs(obj_head_t* object) {
     delete reinterpret_cast<T*>(object);
 }
 
-// What a table still holds goes with it
-static void DestroyTable(obj_table_t* table) {
-    for (int i = 0; i < table->count; i++) {
-        auto* object = static_cast<WebApiObject*>(obj_table_peek(table, i));
-        if (object != nullptr) {
-            object->destroy(object);
-        }
-    }
-    obj_table_free(table);
-}
-
-static void DestroyUserContext(WebApiObject* object) {
+static void DestroyUserContext(obj_head_t* object) {
     auto* user_context = reinterpret_cast<OrbisNpWebApiUserContext*>(object);
-    DestroyTable(&user_context->requests);
-    DestroyTable(&user_context->pushEventCallbacks);
-    DestroyTable(&user_context->servicePushEventCallbacks);
-    DestroyTable(&user_context->extendedPushEventCallbacks);
+    obj_table_destroy(&user_context->requests);
+    obj_table_destroy(&user_context->pushEventCallbacks);
+    obj_table_destroy(&user_context->servicePushEventCallbacks);
+    obj_table_destroy(&user_context->extendedPushEventCallbacks);
     delete user_context;
 }
 
-static void DestroyContext(WebApiObject* object) {
+static void DestroyContext(obj_head_t* object) {
     auto* context = reinterpret_cast<OrbisNpWebApiContext*>(object);
-    DestroyTable(&context->userContexts);
-    DestroyTable(&context->handles);
-    DestroyTable(&context->pushEventFilters);
-    DestroyTable(&context->servicePushEventFilters);
-    DestroyTable(&context->extendedPushEventFilters);
+    obj_table_destroy(&context->userContexts);
+    obj_table_destroy(&context->handles);
+    obj_table_destroy(&context->pushEventFilters);
+    obj_table_destroy(&context->servicePushEventFilters);
+    obj_table_destroy(&context->extendedPushEventFilters);
     delete context;
 }
 
@@ -187,7 +104,6 @@ s32 createLibraryContext(s32 libHttpCtxId, u64 poolSize, const char* name, s32 t
     new_context->libHttpCtxId = libHttpCtxId;
     new_context->type = type;
     retro_atomic_int_init(&new_context->terminated, 0);
-    retro_atomic_int_init(&new_context->generation, 0);
     if (name != nullptr) {
         new_context->name = std::string(name);
     }
@@ -201,7 +117,7 @@ s32 createLibraryContext(s32 libHttpCtxId, u64 poolSize, const char* name, s32 t
     }
 
     // Its id below 0x8000: its slot in six bits, the generation above
-    if (!AddObject(&g_contexts, &new_context->base, &g_context_generation, 6, 15, 0)) {
+    if (!obj_table_put(&g_contexts, &new_context->base, 6, 15, 0)) {
         DestroyContext(&new_context->base);
         return ORBIS_NP_WEBAPI_ERROR_LIB_CONTEXT_MAX;
     }
@@ -214,7 +130,8 @@ OrbisNpWebApiContext* findAndValidateContext(s32 libCtxId, s32 flag) {
     if (libCtxId < 1 || libCtxId >= 0x8000) {
         return nullptr;
     }
-    auto* context = reinterpret_cast<OrbisNpWebApiContext*>(FindObject(&g_contexts, libCtxId, 6));
+    auto* context =
+        reinterpret_cast<OrbisNpWebApiContext*>(obj_table_find(&g_contexts, libCtxId, 6));
     if (context == nullptr) {
         return nullptr;
     }
@@ -226,7 +143,7 @@ OrbisNpWebApiContext* findAndValidateContext(s32 libCtxId, s32 flag) {
 }
 
 void releaseContext(OrbisNpWebApiContext* context) {
-    ReleaseObject(&g_contexts, &context->base);
+    obj_table_put_back(&g_contexts, &context->base);
 }
 
 bool isContextTerminated(OrbisNpWebApiContext* context) {
@@ -305,7 +222,7 @@ s32 deleteContext(s32 libCtxId) {
         return ORBIS_NP_WEBAPI_ERROR_LIB_CONTEXT_NOT_FOUND;
     }
     // Freed with all it holds once the last holder lets go
-    RemoveObject(&g_contexts, &context->base);
+    obj_table_remove(&g_contexts, &context->base);
     releaseContext(context);
     return ORBIS_OK;
 }
@@ -382,7 +299,7 @@ OrbisNpWebApiUserContext* findUserContext(OrbisNpWebApiContext* context, s32 tit
         return nullptr;
     }
     auto* user_context = reinterpret_cast<OrbisNpWebApiUserContext*>(
-        FindObject(&context->userContexts, titleUserCtxId, 6));
+        obj_table_find(&context->userContexts, titleUserCtxId, 6));
     if (user_context == nullptr) {
         return nullptr;
     }
@@ -420,13 +337,12 @@ s32 createUserContext(s32 libCtxId, Libraries::UserService::OrbisUserServiceUser
     user_context->parentContext = context;
     user_context->userId = userId;
     retro_atomic_int_init(&user_context->deleted, 0);
-    retro_atomic_int_init(&user_context->generation, 0);
     if (!obj_table_init(&user_context->requests, MaxRequests) ||
         !obj_table_init(&user_context->pushEventCallbacks, MaxCallbacks) ||
         !obj_table_init(&user_context->servicePushEventCallbacks, MaxCallbacks) ||
         !obj_table_init(&user_context->extendedPushEventCallbacks, MaxCallbacks) ||
-        !AddObject(&context->userContexts, &user_context->base, &context->generation, 6, 16,
-                   static_cast<s64>(libCtxId) << 0x10)) {
+        !obj_table_put(&context->userContexts, &user_context->base, 6, 16,
+                       static_cast<s64>(libCtxId) << 0x10)) {
         DestroyUserContext(&user_context->base);
         releaseContext(context);
         return ORBIS_NP_WEBAPI_ERROR_USER_CONTEXT_MAX;
@@ -493,7 +409,7 @@ bool areUserContextRequestsBusy(OrbisNpWebApiUserContext* userContext) {
 }
 
 void releaseUserContext(OrbisNpWebApiUserContext* userContext) {
-    ReleaseObject(&userContext->parentContext->userContexts, &userContext->base);
+    obj_table_put_back(&userContext->parentContext->userContexts, &userContext->base);
 }
 
 void checkUserContextTimeout(OrbisNpWebApiUserContext* userContext) {
@@ -556,13 +472,13 @@ s32 deleteUserContext(s32 titleUserCtxId) {
     }
 
     // Freed with its requests and callbacks once the last holder lets go
-    RemoveObject(&context->userContexts, &user_context->base);
+    obj_table_remove(&context->userContexts, &user_context->base);
     releaseUserContext(user_context);
     releaseContext(context);
     return ORBIS_OK;
 }
 
-static void DestroyRequest(WebApiObject* object) {
+static void DestroyRequest(obj_head_t* object) {
     delete reinterpret_cast<OrbisNpWebApiRequest*>(object);
 }
 
@@ -622,8 +538,8 @@ s32 createRequest(s32 titleUserCtxId, const char* pApiGroup, const char* pPath,
     }
 
     // Its id: the user context's above 32 bits, its slot and generation below
-    if (!AddObject(&user_context->requests, &request->base, &user_context->generation, 8, 31,
-                   static_cast<s64>(titleUserCtxId) << 0x20)) {
+    if (!obj_table_put(&user_context->requests, &request->base, 8, 31,
+                       static_cast<s64>(titleUserCtxId) << 0x20)) {
         delete request;
         releaseUserContext(user_context);
         releaseContext(context);
@@ -645,7 +561,7 @@ OrbisNpWebApiRequest* findRequest(OrbisNpWebApiUserContext* userContext, s64 req
         return nullptr;
     }
     return reinterpret_cast<OrbisNpWebApiRequest*>(
-        FindObject(&userContext->requests, requestId, 8));
+        obj_table_find(&userContext->requests, requestId, 8));
 }
 
 OrbisNpWebApiRequest* findRequestAndMarkBusy(OrbisNpWebApiUserContext* userContext, s64 requestId) {
@@ -1122,7 +1038,7 @@ s32 abortRequest(s64 requestId) {
 }
 
 void releaseRequest(OrbisNpWebApiRequest* request) {
-    ReleaseObject(&request->parentUserContext->requests, &request->base);
+    obj_table_put_back(&request->parentUserContext->requests, &request->base);
 }
 
 s32 deleteRequest(s64 requestId) {
@@ -1167,7 +1083,7 @@ s32 deleteRequest(s64 requestId) {
         Libraries::Http::sceHttpDeleteTemplate(request->http_template_id);
         request->http_template_id = 0;
     }
-    RemoveObject(&user_context->requests, &request->base);
+    obj_table_remove(&user_context->requests, &request->base);
     releaseRequest(request);
 
     releaseUserContext(user_context);
@@ -1183,7 +1099,7 @@ s32 createHandleInternal(OrbisNpWebApiContext* context) {
     retro_atomic_int_init(&handle->handleTimeout, 0);
     retro_atomic_64_init(&handle->handleEndTime, 0);
     retro_atomic_int_init(&handle->timedOut, 0);
-    if (!AddObject(&context->handles, &handle->base, &context->generation, 8, 31, 0)) {
+    if (!obj_table_put(&context->handles, &handle->base, 8, 31, 0)) {
         delete handle;
         return ORBIS_NP_WEBAPI_ERROR_OUT_OF_MEMORY;
     }
@@ -1238,13 +1154,13 @@ void startHandleTimer(OrbisNpWebApiContext* context, s32 handleId) {
 
 void releaseHandle(OrbisNpWebApiContext* context, OrbisNpWebApiHandle* handle) {
     if (handle != nullptr) {
-        ReleaseObject(&context->handles, &handle->base);
+        obj_table_put_back(&context->handles, &handle->base);
     }
 }
 
 s32 getHandle(OrbisNpWebApiContext* context, s32 handleId, OrbisNpWebApiHandle** handleOut) {
     auto* handle =
-        reinterpret_cast<OrbisNpWebApiHandle*>(FindObject(&context->handles, handleId, 8));
+        reinterpret_cast<OrbisNpWebApiHandle*>(obj_table_find(&context->handles, handleId, 8));
     if (handle == nullptr) {
         return ORBIS_NP_WEBAPI_ERROR_HANDLE_NOT_FOUND;
     }
@@ -1295,7 +1211,7 @@ s32 deleteHandleInternal(OrbisNpWebApiContext* context, s32 handleId) {
         return ORBIS_NP_WEBAPI_ERROR_HANDLE_BUSY;
     }
 
-    RemoveObject(&context->handles, &handle->base);
+    obj_table_remove(&context->handles, &handle->base);
     releaseHandle(context, handle);
     return ORBIS_OK;
 }
@@ -1327,7 +1243,7 @@ s32 createPushEventFilterInternal(OrbisNpWebApiContext* context,
             filter->filterParams.emplace_back(copy);
         }
     }
-    if (!AddObject(&context->pushEventFilters, &filter->base, &context->generation, 8, 31, 0)) {
+    if (!obj_table_put(&context->pushEventFilters, &filter->base, 8, 31, 0)) {
         delete filter;
         return ORBIS_NP_WEBAPI_ERROR_OUT_OF_MEMORY;
     }
@@ -1350,12 +1266,12 @@ s32 createPushEventFilter(s32 libCtxId, const OrbisNpWebApiPushEventFilterParame
 }
 
 s32 deletePushEventFilterInternal(OrbisNpWebApiContext* context, s32 filterId) {
-    WebApiObject* filter = FindObject(&context->pushEventFilters, filterId, 8);
+    obj_head_t* filter = obj_table_find(&context->pushEventFilters, filterId, 8);
     if (filter == nullptr) {
         return ORBIS_NP_WEBAPI_ERROR_PUSH_EVENT_FILTER_NOT_FOUND;
     }
-    RemoveObject(&context->pushEventFilters, filter);
-    ReleaseObject(&context->pushEventFilters, filter);
+    obj_table_remove(&context->pushEventFilters, filter);
+    obj_table_put_back(&context->pushEventFilters, filter);
     return ORBIS_OK;
 }
 
@@ -1379,8 +1295,7 @@ s32 registerPushEventCallbackInternal(OrbisNpWebApiUserContext* userContext, s32
     cb->cbFunc = cbFunc;
     cb->pUserArg = pUserArg;
 
-    if (!AddObject(&userContext->pushEventCallbacks, &cb->base, &userContext->generation, 8, 31,
-                   0)) {
+    if (!obj_table_put(&userContext->pushEventCallbacks, &cb->base, 8, 31, 0)) {
         delete cb;
         return ORBIS_NP_WEBAPI_ERROR_OUT_OF_MEMORY;
     }
@@ -1426,15 +1341,15 @@ s32 unregisterPushEventCallback(s32 titleUserCtxId, s32 callbackId) {
         return ORBIS_NP_WEBAPI_ERROR_USER_CONTEXT_NOT_FOUND;
     }
 
-    WebApiObject* callback = FindObject(&user_context->pushEventCallbacks, callbackId, 8);
+    obj_head_t* callback = obj_table_find(&user_context->pushEventCallbacks, callbackId, 8);
     if (callback == nullptr) {
         releaseUserContext(user_context);
         releaseContext(context);
         return ORBIS_NP_WEBAPI_ERROR_PUSH_EVENT_CALLBACK_NOT_FOUND;
     }
 
-    RemoveObject(&user_context->pushEventCallbacks, callback);
-    ReleaseObject(&user_context->pushEventCallbacks, callback);
+    obj_table_remove(&user_context->pushEventCallbacks, callback);
+    obj_table_put_back(&user_context->pushEventCallbacks, callback);
     releaseUserContext(user_context);
     releaseContext(context);
     return ORBIS_OK;
@@ -1481,8 +1396,7 @@ s32 createServicePushEventFilterInternal(
     }
 
     releaseHandle(context, handle);
-    if (!AddObject(&context->servicePushEventFilters, &filter->base, &context->generation, 8, 31,
-                   0)) {
+    if (!obj_table_put(&context->servicePushEventFilters, &filter->base, 8, 31, 0)) {
         delete filter;
         return ORBIS_NP_WEBAPI_ERROR_OUT_OF_MEMORY;
     }
@@ -1509,12 +1423,12 @@ s32 createServicePushEventFilter(s32 libCtxId, s32 handleId, const char* pNpServ
 }
 
 s32 deleteServicePushEventFilterInternal(OrbisNpWebApiContext* context, s32 filterId) {
-    WebApiObject* filter = FindObject(&context->servicePushEventFilters, filterId, 8);
+    obj_head_t* filter = obj_table_find(&context->servicePushEventFilters, filterId, 8);
     if (filter == nullptr) {
         return ORBIS_NP_WEBAPI_ERROR_SERVICE_PUSH_EVENT_FILTER_NOT_FOUND;
     }
-    RemoveObject(&context->servicePushEventFilters, filter);
-    ReleaseObject(&context->servicePushEventFilters, filter);
+    obj_table_remove(&context->servicePushEventFilters, filter);
+    obj_table_put_back(&context->servicePushEventFilters, filter);
     return ORBIS_OK;
 }
 
@@ -1547,8 +1461,7 @@ s32 registerServicePushEventCallbackInternal(
     cb->internalCbFuncA = intCbFuncA;
     cb->pUserArg = pUserArg;
 
-    if (!AddObject(&userContext->servicePushEventCallbacks, &cb->base, &userContext->generation, 8,
-                   31, 0)) {
+    if (!obj_table_put(&userContext->servicePushEventCallbacks, &cb->base, 8, 31, 0)) {
         delete cb;
         return ORBIS_NP_WEBAPI_ERROR_OUT_OF_MEMORY;
     }
@@ -1599,15 +1512,15 @@ s32 unregisterServicePushEventCallback(s32 titleUserCtxId, s32 callbackId) {
         return ORBIS_NP_WEBAPI_ERROR_USER_CONTEXT_NOT_FOUND;
     }
 
-    WebApiObject* callback = FindObject(&user_context->servicePushEventCallbacks, callbackId, 8);
+    obj_head_t* callback = obj_table_find(&user_context->servicePushEventCallbacks, callbackId, 8);
     if (callback == nullptr) {
         releaseUserContext(user_context);
         releaseContext(context);
         return ORBIS_NP_WEBAPI_ERROR_SERVICE_PUSH_EVENT_CALLBACK_NOT_FOUND;
     }
 
-    RemoveObject(&user_context->servicePushEventCallbacks, callback);
-    ReleaseObject(&user_context->servicePushEventCallbacks, callback);
+    obj_table_remove(&user_context->servicePushEventCallbacks, callback);
+    obj_table_put_back(&user_context->servicePushEventCallbacks, callback);
     releaseUserContext(user_context);
     releaseContext(context);
     return ORBIS_OK;
@@ -1673,8 +1586,7 @@ s32 createExtendedPushEventFilterInternal(
     }
 
     releaseHandle(context, handle);
-    if (!AddObject(&context->extendedPushEventFilters, &filter->base, &context->generation, 8, 31,
-                   0)) {
+    if (!obj_table_put(&context->extendedPushEventFilters, &filter->base, 8, 31, 0)) {
         delete filter;
         return ORBIS_NP_WEBAPI_ERROR_OUT_OF_MEMORY;
     }
@@ -1701,12 +1613,12 @@ s32 createExtendedPushEventFilter(s32 libCtxId, s32 handleId, const char* pNpSer
 }
 
 s32 deleteExtendedPushEventFilterInternal(OrbisNpWebApiContext* context, s32 filterId) {
-    WebApiObject* filter = FindObject(&context->extendedPushEventFilters, filterId, 8);
+    obj_head_t* filter = obj_table_find(&context->extendedPushEventFilters, filterId, 8);
     if (filter == nullptr) {
         return ORBIS_NP_WEBAPI_ERROR_EXTD_PUSH_EVENT_FILTER_NOT_FOUND;
     }
-    RemoveObject(&context->extendedPushEventFilters, filter);
-    ReleaseObject(&context->extendedPushEventFilters, filter);
+    obj_table_remove(&context->extendedPushEventFilters, filter);
+    obj_table_put_back(&context->extendedPushEventFilters, filter);
     return ORBIS_OK;
 }
 
@@ -1737,8 +1649,7 @@ s32 registerExtdPushEventCallbackInternal(OrbisNpWebApiUserContext* userContext,
     cb->cbFuncA = cbFuncA;
     cb->pUserArg = pUserArg;
 
-    if (!AddObject(&userContext->extendedPushEventCallbacks, &cb->base, &userContext->generation, 8,
-                   31, 0)) {
+    if (!obj_table_put(&userContext->extendedPushEventCallbacks, &cb->base, 8, 31, 0)) {
         delete cb;
         return ORBIS_NP_WEBAPI_ERROR_OUT_OF_MEMORY;
     }
@@ -1791,15 +1702,15 @@ s32 unregisterExtdPushEventCallback(s32 titleUserCtxId, s32 callbackId) {
         return ORBIS_NP_WEBAPI_ERROR_USER_CONTEXT_NOT_FOUND;
     }
 
-    WebApiObject* callback = FindObject(&user_context->extendedPushEventCallbacks, callbackId, 8);
+    obj_head_t* callback = obj_table_find(&user_context->extendedPushEventCallbacks, callbackId, 8);
     if (callback == nullptr) {
         releaseUserContext(user_context);
         releaseContext(context);
         return ORBIS_NP_WEBAPI_ERROR_EXTD_PUSH_EVENT_CALLBACK_NOT_FOUND;
     }
 
-    RemoveObject(&user_context->extendedPushEventCallbacks, callback);
-    ReleaseObject(&user_context->extendedPushEventCallbacks, callback);
+    obj_table_remove(&user_context->extendedPushEventCallbacks, callback);
+    obj_table_put_back(&user_context->extendedPushEventCallbacks, callback);
     releaseUserContext(user_context);
     releaseContext(context);
     return ORBIS_OK;
@@ -2237,7 +2148,7 @@ void DrainPushEvents() {
                             break;
                         }
                         flt = reinterpret_cast<OrbisNpWebApiExtendedPushEventFilter*>(
-                            FindObject(&context->extendedPushEventFilters, cb->filterId, 8));
+                            obj_table_find(&context->extendedPushEventFilters, cb->filterId, 8));
                         if (flt == nullptr) {
                             break;
                         }
@@ -2293,9 +2204,9 @@ void DrainPushEvents() {
                             exarr.size(), cb->pUserArg);
                     } while (false);
                     if (flt != nullptr) {
-                        ReleaseObject(&context->extendedPushEventFilters, &flt->base);
+                        obj_table_put_back(&context->extendedPushEventFilters, &flt->base);
                     }
-                    ReleaseObject(&uc->extendedPushEventCallbacks, &cb->base);
+                    obj_table_put_back(&uc->extendedPushEventCallbacks, &cb->base);
                 }
 
                 // Service push
@@ -2312,7 +2223,7 @@ void DrainPushEvents() {
                             break;
                         }
                         flt = reinterpret_cast<OrbisNpWebApiServicePushEventFilter*>(
-                            FindObject(&context->servicePushEventFilters, cb->filterId, 8));
+                            obj_table_find(&context->servicePushEventFilters, cb->filterId, 8));
                         if (flt == nullptr) {
                             break;
                         }
@@ -2335,9 +2246,9 @@ void DrainPushEvents() {
                             &dt, svc_data, ev.data.size(), cb->pUserArg);
                     } while (false);
                     if (flt != nullptr) {
-                        ReleaseObject(&context->servicePushEventFilters, &flt->base);
+                        obj_table_put_back(&context->servicePushEventFilters, &flt->base);
                     }
-                    ReleaseObject(&uc->servicePushEventCallbacks, &cb->base);
+                    obj_table_put_back(&uc->servicePushEventCallbacks, &cb->base);
                 }
 
                 // Basic push
@@ -2355,7 +2266,7 @@ void DrainPushEvents() {
                                 break;
                             }
                             flt = reinterpret_cast<OrbisNpWebApiPushEventFilter*>(
-                                FindObject(&context->pushEventFilters, cb->filterId, 8));
+                                obj_table_find(&context->pushEventFilters, cb->filterId, 8));
                             if (flt == nullptr) {
                                 break;
                             }
@@ -2389,9 +2300,9 @@ void DrainPushEvents() {
                                 ev.data.size(), cb->pUserArg);
                         } while (false);
                         if (flt != nullptr) {
-                            ReleaseObject(&context->pushEventFilters, &flt->base);
+                            obj_table_put_back(&context->pushEventFilters, &flt->base);
                         }
-                        ReleaseObject(&uc->pushEventCallbacks, &cb->base);
+                        obj_table_put_back(&uc->pushEventCallbacks, &cb->base);
                     }
                 }
                 releaseUserContext(uc);

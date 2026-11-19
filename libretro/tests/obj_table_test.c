@@ -8,11 +8,13 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include <retro_atomic.h>
 #include <rthreads/rthreads.h>
 
 #include "common/obj_table.h"
+#include "common/run_once.h"
 
 #define SLOTS 4
 #define ROUNDS 20000
@@ -67,10 +69,78 @@ static void holder(void* arg) {
     }
 }
 
+/* Objects found by id: a stale id finds nothing once its slot holds another, and an object
+ * removed while held is freed by the last put back */
+typedef struct keyed {
+    obj_head_t head;
+    int freed;
+} keyed_t;
+
+static void keyed_destroy(obj_head_t* object) {
+    ((keyed_t*)object)->freed++;
+}
+
+static void test_keyed(void) {
+    obj_table_t keyed_table;
+    keyed_t a, b;
+    int64_t a_id;
+    memset(&a, 0, sizeof(a));
+    memset(&b, 0, sizeof(b));
+    a.head.destroy = keyed_destroy;
+    b.head.destroy = keyed_destroy;
+    obj_table_init(&keyed_table, 2);
+    if (!obj_table_put(&keyed_table, &a.head, 4, 16, (int64_t)7 << 16) ||
+        (a.head.id >> 16) != 7 || (a.head.id & 0xf) != 1 ||
+        obj_table_find(&keyed_table, a.head.id, 4) != &a.head) {
+        printf("obj_table: an object not found by its id\n");
+        failures++;
+    }
+    a_id = a.head.id;
+    /* Removed while held: freed by the put back, not before */
+    obj_table_remove(&keyed_table, &a.head);
+    if (a.freed != 0 || obj_table_find(&keyed_table, a_id, 4) != NULL) {
+        printf("obj_table: a removed object freed while held, or still found\n");
+        failures++;
+    }
+    obj_table_put_back(&keyed_table, &a.head);
+    if (a.freed != 1) {
+        printf("obj_table: a removed object not freed by its last put back\n");
+        failures++;
+    }
+    /* Its slot taken again: the old id finds nothing */
+    if (!obj_table_put(&keyed_table, &b.head, 4, 16, (int64_t)7 << 16) || b.head.index != 0 ||
+        b.head.id == a_id || obj_table_find(&keyed_table, a_id, 4) != NULL) {
+        printf("obj_table: a stale id found the slot's new object\n");
+        failures++;
+    }
+    /* Two holders delete it: one takes it off and frees it with its put back */
+    if (obj_table_find(&keyed_table, b.head.id, 4) != &b.head ||
+        obj_table_find(&keyed_table, b.head.id, 4) != &b.head ||
+        obj_table_retire(&keyed_table, &b.head) != 1 ||
+        obj_table_retire(&keyed_table, &b.head) != 0 || obj_table_users(&keyed_table, 0) != 2) {
+        printf("obj_table: a held object retired by both of its deleters\n");
+        failures++;
+    }
+    obj_table_put_back(&keyed_table, &b.head);
+    obj_table_put_back(&keyed_table, &b.head);
+    if (b.freed != 1 || obj_table_put(&keyed_table, &b.head, 4, 16, 0) != 1) {
+        printf("obj_table: a retired object not freed by its last put back\n");
+        failures++;
+    }
+    b.freed = 0;
+    obj_table_destroy(&keyed_table);
+    if (b.freed != 1) {
+        printf("obj_table: an object left in the table not freed with it\n");
+        failures++;
+    }
+}
+
 int main(void) {
     sthread_t* threads[HOLDERS];
     object_t* a;
     int i, r, index;
+    run_once_setup();
+    test_keyed();
     obj_table_init(&table, SLOTS);
     retro_atomic_int_init(&done, 0);
     retro_atomic_int_init(&frees, 0);
