@@ -5,21 +5,18 @@
 #include <array>
 #include <cctype>
 #include <chrono>
-#include <condition_variable>
 #include <cstring>
-#include <mutex>
 #include <string>
 #include <unordered_map>
 #include <vector>
-#include <queue>
 
 #include <retro_atomic.h>
 #include <rthreads/retro_eventcount.h>
 #include "common/audio_stream.h"
 #include "common/combiner.h"
-#include "common/event_mutex.h"
 #include "common/io_file.h"
 #include "common/logging/log.h"
+#include "common/mpsc_ring.h"
 #include "common/singleton.h"
 #include "common/stop_thread.h"
 #include "core/emulator_settings.h"
@@ -203,21 +200,21 @@ public:
     };
 
     void PushEvent(u32 event_id, u32 track_index) {
-        m_event_mutex.Run([&] {
-            m_event_queue.push({event_id, track_index});
-            m_event_cv.notify_one();
-        });
+        const MusicEvent event{event_id, track_index};
+        if (!mpsc_ring_put(&m_events, &event)) {
+            LOG_ERROR(Lib_AudioOut, "The music player's event queue is full: an event is dropped");
+            return;
+        }
+        Libraries::Kernel::GameNoteWake(&m_events_ec.epoch);
+        retro_eventcount_notify(&m_events_ec);
     }
 
+    /// The next event, waiting up to @timeout_ms of the game's time for one
     bool PopEvent(MusicEvent& ev, u32 timeout_ms = 50) {
-        std::unique_lock lock(m_event_mutex);
-        if (m_event_cv.wait_for(lock, std::chrono::milliseconds(timeout_ms),
-                                [this] { return !m_event_queue.empty(); })) {
-            ev = m_event_queue.front();
-            m_event_queue.pop();
-            return true;
-        }
-        return false;
+        return Libraries::Kernel::GameWait(
+            &m_events_ec,
+            Libraries::Kernel::GameDeadlineIn(static_cast<u64>(timeout_ms) * 1'000'000),
+            [&] { return mpsc_ring_take(&m_events, &ev) != 0; });
     }
 
     void Play(u32 track_index, u64 start_time_ms) {
@@ -391,9 +388,13 @@ public:
 private:
     MusicPlayerManager() {
         retro_eventcount_init(&m_control_ec);
+        retro_eventcount_init(&m_events_ec);
+        mpsc_ring_init(&m_events, 64, sizeof(MusicEvent));
     }
     ~MusicPlayerManager() {
         StopPlayback();
+        mpsc_ring_free(&m_events);
+        retro_eventcount_free(&m_events_ec);
         retro_eventcount_free(&m_control_ec);
     }
 
@@ -701,9 +702,9 @@ private:
     stop_thread_t m_worker_thread = STOP_THREAD_INIT;
     u32 m_worker_track = 0;
     u64 m_worker_start_ms = 0;
-    Common::EventMutex m_event_mutex;
-    Common::EventCondition m_event_cv;
-    std::queue<MusicEvent> m_event_queue;
+    // Put by the playback thread, taken by the game's call for its events
+    mpsc_ring_t m_events{};
+    retro_eventcount_t m_events_ec{};
     std::unordered_map<u32, std::vector<std::string>> m_tracklists;
     std::unordered_map<std::string, u32> m_usb_devices;
     retro_atomic_int_t m_in_transaction{0};

@@ -180,6 +180,14 @@ $CC -std=c89 -pedantic -Wno-long-long -O1 -g -Wall -Wdeclaration-after-statement
     -fsanitize=address,undefined -Isrc -I$L/include libretro/tests/reserve_span_test.c \
     src/common/reserve_span.c -o "$OUT/reserve_span_test"
 "$OUT/reserve_span_test"
+# The bounded many-to-one queue the keyboard's and the music player's events go through: four
+# threads put into a queue too small for them, every item taken once, whole, in each one's order
+for san in address,undefined thread; do
+    $CC -std=gnu89 -O1 -g -Wall -Wdeclaration-after-statement -fsanitize=$san -Isrc -I$L/include \
+        libretro/tests/mpsc_ring_test.c src/common/mpsc_ring.c $L/rthreads/rthreads.c \
+        -o "$OUT/mpsc_ring_test" -lpthread
+    "$OUT/mpsc_ring_test"
+done
 # A game thread's life: its record collected exactly once, however its end, its detach or join
 # and other threads' holds fall; and its name read while another thread renames it
 for san in address,undefined thread; do

@@ -10,10 +10,11 @@
 #include <string>
 #include <utility>
 #include <vector>
+#include <queues/mpsc_stack.h>
 #include <retro_atomic.h>
+#include <rthreads/retro_eventcount.h>
 #include "common/combiner.h"
 #include "common/event_latch.h"
-#include "common/event_mutex.h"
 #include "common/stop_thread.h"
 #include "common/types.h"
 #ifdef _WIN32
@@ -429,9 +430,14 @@ private:
     stop_thread_t m_thread_writer = STOP_THREAD_INIT;
 
     Common::Combiner m_mutex_send_direct;
-    Common::EventMutex m_mutex_send_queue;
-    Common::EventCondition m_cv_send_queue;
-    std::vector<std::vector<u8>> m_send_queue;
+    // Packets to send, pushed by any thread, taken in order by the writer (mpsc_stack.h)
+    struct SendPacket {
+        mpsc_stack_node_t node; // first: the stack links them through it
+        std::vector<u8> bytes;
+    };
+    mpsc_stack_t m_send_stack{};
+    retro_eventcount_t m_send_ec{};
+    void QueuePacket(std::vector<u8>&& pkt);
 
     std::string m_avatar_url;
     u64 m_user_id = 0;

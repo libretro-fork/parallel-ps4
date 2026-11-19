@@ -4,10 +4,9 @@
 #pragma once
 
 #include <mutex>
-#include <queue>
 
 #include "common/cstring.h"
-#include "common/event_mutex.h"
+#include "common/mpsc_ring.h"
 #include "common/types.h"
 
 #include "core/libraries/ime/ime_kb_layout.h"
@@ -34,13 +33,14 @@ class ImeState {
     int caret_byte_index = 0;
     bool caret_dirty = false;
 
-    std::queue<OrbisImeEvent> event_queue;
-    Common::EventMutex queue_mutex;
+    // Put by the keyboard's thread, taken by the game's Update (mpsc_ring.c)
+    mpsc_ring_t event_queue{};
 
 public:
     ImeState(const OrbisImeParam* param = nullptr, const OrbisImeParamExtended* extended = nullptr);
     ImeState(ImeState&& other) noexcept;
     ImeState& operator=(ImeState&& other) noexcept;
+    ~ImeState();
 
     void SendEvent(OrbisImeEvent* event);
     void SendEnterEvent();

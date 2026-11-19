@@ -102,8 +102,9 @@ public:
     OrbisPlayGoHandle handle = 0;
     OrbisPlayGoChunkId id = 0;
     OrbisPlayGoLocus locus = OrbisPlayGoLocus::NotDownloaded;
-    OrbisPlayGoInstallSpeed speed = OrbisPlayGoInstallSpeed::Full;
-    s64 speed_tick = 0;
+    // The install speed (low 8 bits) and the game's time it was set at, in milliseconds (the
+    // rest): one atomic word, set and read by any thread
+    retro_atomic_64_t speed_word{static_cast<s64>(OrbisPlayGoInstallSpeed::Full)};
     OrbisPlayGoEta eta = 0;
     OrbisPlayGoLanguageMask langMask = 0;
     std::vector<PlaygoChunk> chunks;
@@ -118,11 +119,7 @@ public:
     PlaygoHeader& GetPlaygoHeader() {
         return playgoHeader;
     }
-    Common::EventMutex& GetSpeedMutex() {
-        return speed_mutex;
-    }
 
 private:
     PlaygoHeader playgoHeader;
-    Common::EventMutex speed_mutex;
 };

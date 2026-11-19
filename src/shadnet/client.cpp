@@ -60,11 +60,20 @@ std::string ShadNetClient::ExtractBlob(const std::vector<u8>& p, int pos) {
 ShadNetClient::ShadNetClient() {
     event_latch_init(&m_connect_settled);
     event_latch_init(&m_login_settled);
+    mpsc_stack_init(&m_send_stack);
+    retro_eventcount_init(&m_send_ec);
     PlatformInit();
 }
 
 ShadNetClient::~ShadNetClient() {
     Stop();
+    // Packets never sent
+    for (mpsc_stack_node_t* node = mpsc_stack_drain(&m_send_stack); node != nullptr;) {
+        auto* const packet = reinterpret_cast<SendPacket*>(node);
+        node = node->next;
+        delete packet;
+    }
+    retro_eventcount_free(&m_send_ec);
     event_latch_free(&m_connect_settled);
     event_latch_free(&m_login_settled);
 }
@@ -88,7 +97,7 @@ void ShadNetClient::Stop() {
     (void)retro_atomic_exchange_int(&m_terminate, 1);
     event_latch_set(&m_connect_settled);
     event_latch_set(&m_login_settled);
-    m_mutex_send_queue.Run([&] { m_cv_send_queue.notify_all(); });
+    retro_eventcount_notify(&m_send_ec);
     DoDisconnect();
     stop_thread_join(&m_thread_connect);
     stop_thread_join(&m_thread_reader);
@@ -284,25 +293,40 @@ void ShadNetClient::ReaderThread() {
     LOG_INFO(ShadNet, "ReaderThread exiting");
 }
 
+void ShadNetClient::QueuePacket(std::vector<u8>&& pkt) {
+    auto* const packet = new SendPacket{{}, std::move(pkt)};
+    mpsc_stack_push(&m_send_stack, &packet->node);
+    retro_eventcount_notify(&m_send_ec);
+}
+
 void ShadNetClient::WriterThread() {
     thread_name_set("ShadNet:Writer");
     while (retro_atomic_load_seq_cst_int(&m_terminate) == 0) {
-        std::unique_lock lock(m_mutex_send_queue);
-        m_cv_send_queue.wait(lock, [&] {
-            return (retro_atomic_load_seq_cst_int(&m_terminate) != 0) || !m_send_queue.empty();
-        });
-        if (retro_atomic_load_seq_cst_int(&m_terminate) != 0)
-            break;
-        std::vector<std::vector<u8>> batch;
-        std::swap(batch, m_send_queue);
-        lock.unlock();
-        for (auto& pkt : batch) {
-            if (retro_atomic_load_seq_cst_int(&m_connected) == 0)
-                break;
-            if (!SendAll(pkt)) {
-                LOG_ERROR(ShadNet, "WriterThread send failed");
-                return;
+        // Everything pushed so far, oldest first
+        mpsc_stack_node_t* node = mpsc_stack_reverse(mpsc_stack_drain(&m_send_stack));
+        if (node == nullptr) {
+            const int key = retro_eventcount_prepare_wait(&m_send_ec);
+            if (retro_atomic_load_seq_cst_int(&m_terminate) != 0 ||
+                !mpsc_stack_empty(&m_send_stack)) {
+                retro_eventcount_cancel_wait(&m_send_ec);
+                continue;
             }
+            retro_eventcount_commit_wait(&m_send_ec, key);
+            continue;
+        }
+        bool failed = false;
+        while (node != nullptr) {
+            auto* const packet = reinterpret_cast<SendPacket*>(node);
+            node = node->next;
+            if (!failed && retro_atomic_load_seq_cst_int(&m_connected) != 0 &&
+                !SendAll(packet->bytes)) {
+                LOG_ERROR(ShadNet, "WriterThread send failed");
+                failed = true;
+            }
+            delete packet;
+        }
+        if (failed) {
+            return;
         }
     }
 }
@@ -522,8 +546,7 @@ std::vector<u8> ShadNetClient::BuildPacket(CommandType cmd, u64 id,
 u64 ShadNetClient::SubmitRequest(CommandType cmd, const std::vector<u8>& payload) {
     const u64 pkt_id = static_cast<u64>(retro_atomic_fetch_add_64(&m_pkt_counter, 1));
     auto pkt = BuildPacket(cmd, pkt_id, payload);
-    m_mutex_send_queue.Run([&] { m_send_queue.push_back(std::move(pkt)); });
-    m_cv_send_queue.notify_all();
+    QueuePacket(std::move(pkt));
     return pkt_id;
 }
 
@@ -636,8 +659,7 @@ bool ShadNetClient::RequestServerFeatures() {
     const u64 pkt_id = static_cast<u64>(retro_atomic_fetch_add_64(&m_pkt_counter, 1));
     std::vector<u8> empty_payload;
     std::vector<u8> pkt = BuildPacket(CommandType::GetServerFeatures, pkt_id, empty_payload);
-    m_mutex_send_queue.Run([&] { m_send_queue.push_back(std::move(pkt)); });
-    m_cv_send_queue.notify_one();
+    QueuePacket(std::move(pkt));
     LOG_DEBUG(ShadNet, "GetServerFeatures request fired pkt_id={}", pkt_id);
     return true;
 }
@@ -729,8 +751,7 @@ void ShadNetClient::HandleLoginReply(const std::vector<u8>& payload) {
                 const u64 pkt_id = static_cast<u64>(retro_atomic_fetch_add_64(&m_pkt_counter, 1));
                 std::vector<u8> empty_payload;
                 std::vector<u8> pkt = BuildPacket(CommandType::GetToken, pkt_id, empty_payload);
-                m_mutex_send_queue.Run([&] { m_send_queue.push_back(std::move(pkt)); });
-                m_cv_send_queue.notify_one();
+                QueuePacket(std::move(pkt));
                 LOG_DEBUG(ShadNet, "GetToken request fired pkt_id={}", pkt_id);
             } else {
                 res.error = ErrorType::Malformed;

@@ -104,16 +104,23 @@ s32 PS4_SYSV_ABI scePlayGoGetInstallSpeed(OrbisPlayGoHandle handle,
         return ORBIS_PLAYGO_ERROR_NOT_INITIALIZED;
     }
 
-    std::scoped_lock lk{playgo->GetSpeedMutex()};
-
-    if (playgo->speed == OrbisPlayGoInstallSpeed::Suspended) {
-        // Thirty seconds of the game's time
-        if ((static_cast<s64>(Libraries::Kernel::GameNow() / 1'000'000) - playgo->speed_tick) >
+    const s64 word = retro_atomic_load_acquire_64(&playgo->speed_word);
+    auto speed = static_cast<OrbisPlayGoInstallSpeed>(word & 0xff);
+    if (speed == OrbisPlayGoInstallSpeed::Suspended) {
+        // Thirty seconds of the game's time: trickling again, unless it was set meanwhile
+        if ((static_cast<s64>(Libraries::Kernel::GameNow() / 1'000'000) - (word >> 8)) >
             30 * 1000) {
-            playgo->speed = OrbisPlayGoInstallSpeed::Trickle;
+            const s64 trickle =
+                (word & ~s64{0xff}) | static_cast<s64>(OrbisPlayGoInstallSpeed::Trickle);
+            if (retro_atomic_cas_64(&playgo->speed_word, word, trickle)) {
+                speed = OrbisPlayGoInstallSpeed::Trickle;
+            } else {
+                speed = static_cast<OrbisPlayGoInstallSpeed>(
+                    retro_atomic_load_acquire_64(&playgo->speed_word) & 0xff);
+            }
         }
     }
-    *outSpeed = playgo->speed;
+    *outSpeed = speed;
 
     return ORBIS_OK;
 }
@@ -335,9 +342,9 @@ s32 PS4_SYSV_ABI scePlayGoSetInstallSpeed(OrbisPlayGoHandle handle, OrbisPlayGoI
         return ORBIS_PLAYGO_ERROR_INVALID_ARGUMENT;
     }
 
-    std::scoped_lock lk{playgo->GetSpeedMutex()};
-    playgo->speed = speed;
-    playgo->speed_tick = static_cast<s64>(Libraries::Kernel::GameNow() / 1'000'000);
+    retro_atomic_store_release_64(
+        &playgo->speed_word, (static_cast<s64>(Libraries::Kernel::GameNow() / 1'000'000) << 8) |
+                                 static_cast<s64>(speed));
 
     return ORBIS_OK;
 }

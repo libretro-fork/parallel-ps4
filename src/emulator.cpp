@@ -23,6 +23,7 @@
 #include "common/ntapi.h"
 #include "common/path_util.h"
 #include "common/quick_exit.h"
+#include "common/run_once.h"
 #include "common/scm_rev.h"
 #include "common/singleton.h"
 #include "common/string_util.h"
@@ -67,8 +68,6 @@ extern char const* g_environment[64];
 
 namespace Core {
 
-Common::EventMutex exit_mutex{};
-
 Emulator::Emulator() {
     // Initialize NT API functions, set high priority and disable WER
 #ifdef _WIN32
@@ -86,11 +85,12 @@ Emulator::Emulator() {
 Emulator::~Emulator() {}
 
 void Emulator::Shutdown() {
-    static bool exit_done = false;
-    std::scoped_lock l{exit_mutex};
-    if (exit_done) {
-        return;
-    }
+    // Once, by the first thread to come (run_once.c); another that comes meanwhile waits for it
+    static run_once_t done = RUN_ONCE_INIT;
+    run_once(&done, [](void* self) { static_cast<Emulator*>(self)->ShutdownOnce(); }, this);
+}
+
+void Emulator::ShutdownOnce() {
     Common::Log::Flush();
     Libraries::SaveData::Backup::StopThread();
     Storage::DataBase::Instance().Close();
@@ -101,7 +101,6 @@ void Emulator::Shutdown() {
         retro_eventcount_free(&play_time_wake);
     }
     UpdatePlayTime(Common::Singleton<Common::ElfInfo>::Instance()->GameSerial());
-    exit_done = true;
 }
 
 // Whether the game has FMOD in it: built into its executable (FMOD's classes, namespace FMOD,

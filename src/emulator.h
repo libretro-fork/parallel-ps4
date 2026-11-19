@@ -34,6 +34,7 @@ public:
              std::vector<std::string> const& env_vars = {}, bool append_log = false);
     void UpdatePlayTime(const std::string_view serial);
     void Shutdown();
+    void ShutdownOnce();
 
     /**
      * This will kill the current process and launch a new process with the same configuration

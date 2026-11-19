@@ -33,7 +33,11 @@ constexpr const char* kSelectorCloseId = "##ImeSelectorClose";
 
 } // namespace
 
+// A keyboard's events: as many as its thread may put before the game's Update takes them
+static constexpr unsigned ImeEventSlots = 64;
+
 ImeState::ImeState(const OrbisImeParam* param, const OrbisImeParamExtended* extended) {
+    mpsc_ring_init(&event_queue, ImeEventSlots, sizeof(OrbisImeEvent));
     if (!param) {
         LOG_ERROR(Lib_Ime, "Invalid IME parameters");
         return;
@@ -73,7 +77,12 @@ ImeState::ImeState(ImeState&& other) noexcept
     : work_buffer(other.work_buffer), text_buffer(other.text_buffer),
       max_text_length(other.max_text_length), current_text(std::move(other.current_text)),
       caret_index(other.caret_index), caret_byte_index(other.caret_byte_index),
-      caret_dirty(other.caret_dirty), event_queue(std::move(other.event_queue)) {
+      caret_dirty(other.caret_dirty) {
+    // Moved before the keyboard's thread runs: its events come along
+    mpsc_ring_init(&event_queue, ImeEventSlots, sizeof(OrbisImeEvent));
+    for (OrbisImeEvent event; mpsc_ring_take(&other.event_queue, &event);) {
+        mpsc_ring_put(&event_queue, &event);
+    }
     other.text_buffer = nullptr;
     other.max_text_length = 0;
     other.caret_index = 0;
@@ -90,7 +99,9 @@ ImeState& ImeState::operator=(ImeState&& other) noexcept {
         caret_index = other.caret_index;
         caret_byte_index = other.caret_byte_index;
         caret_dirty = other.caret_dirty;
-        event_queue = std::move(other.event_queue);
+        for (OrbisImeEvent event; mpsc_ring_take(&other.event_queue, &event);) {
+            mpsc_ring_put(&event_queue, &event);
+        }
 
         other.text_buffer = nullptr;
         other.max_text_length = 0;
@@ -101,9 +112,14 @@ ImeState& ImeState::operator=(ImeState&& other) noexcept {
     return *this;
 }
 
+ImeState::~ImeState() {
+    mpsc_ring_free(&event_queue);
+}
+
 void ImeState::SendEvent(OrbisImeEvent* event) {
-    std::unique_lock<Common::EventMutex> lock{queue_mutex};
-    event_queue.push(*event);
+    if (!mpsc_ring_put(&event_queue, event)) {
+        LOG_ERROR(Lib_Ime, "The keyboard's event queue is full: an event is dropped");
+    }
 }
 
 void ImeState::SendEnterEvent() {

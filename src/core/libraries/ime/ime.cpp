@@ -16,7 +16,6 @@
 
 namespace Libraries::Ime {
 
-static std::queue<OrbisImeEvent> g_ime_events;
 static std::unique_ptr<ImeState> g_ime_state;
 static std::unique_ptr<ImeUi> g_ime_ui;
 
@@ -241,11 +240,8 @@ public:
             return Error::INTERNAL;
         }
 
-        std::unique_lock<Common::EventMutex> lock{g_ime_state->queue_mutex};
-
-        while (!g_ime_state->event_queue.empty()) {
-            OrbisImeEvent event = g_ime_state->event_queue.front();
-            g_ime_state->event_queue.pop();
+        // Taken one at a time, the game's handler run with nothing held
+        for (OrbisImeEvent event; mpsc_ring_take(&g_ime_state->event_queue, &event);) {
             Execute(handler, &event, false);
         }
 
