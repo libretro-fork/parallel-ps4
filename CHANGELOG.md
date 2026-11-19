@@ -4,6 +4,15 @@ What changed in the libretro core of this fork, newest first. Changes that come 
 
 ## Unreleased
 
+- The renderer's own shaders (`src/video_core/host_shaders/host_spirv.c`) are written through the same SPIR-V module as the shader recompiler's (`spv_module.c`), in place of a second writer of its own.
+  - **Types and constants:** found through the module's hash table, where a linear search ran over up to 256 of them for each one made.
+  - **Layout:** the module is laid out in place and copied once into the caller's buffer, as before.
+  - **Memory:** still none is allocated. The module's memory is a 48 KB block on the caller's stack, grown in place where it can be; the tiling shader, the largest, takes 26 KB of it. The old builder kept 32 KB on the stack.
+  - **Size:** 77 lines fewer.
+  - **Byte for byte the same:** all 37 variants the renderer can ask for, written before and after: the full-screen triangle, the output pass, the overlay's two shaders (with and without HDR), the MSAA blits, the eight depth-to-colour forms, the fault buffer pass, and the tiling shader for every texel size, micro and macro tiled, with and without word access.
+  - **Tests:** the device tests that run these shaders (tiling, depth to colour, PQ output, overlay) now build with `spv_module.c` and pass on lavapipe.
+
+  Not seen in a game yet.
 - Xbyak is gone. It was a C++ dependency, and the core used it for three things, all of which now go through `src/common/x64_emit.c`, a C89 x86-64 encoder holding only the instructions those three write.
   - **SRT walkers:** x86-64 on every host. An aarch64 host interprets them, so they are written there too.
   - **Symbol stubs:** for functions a game imports that nothing exports.

@@ -8,41 +8,32 @@
 #include <spirv/unified1/GLSL.std.450.h>
 #include <spirv/unified1/spirv.h>
 
+#include "shader_recompiler/backend/spirv/spv_module.h"
 #include "video_core/host_shaders/host_spirv.h"
 
 /* ------------------------------------------------------------------------ */
-/* A SPIR-V module, built a section at a time and joined at the end.        */
+/* A SPIR-V module, on the shader recompiler's spv_module (spv_module.c):    */
+/* types and constants made once through its table, the module laid out in  */
+/* place. Its memory is a block on the caller's stack: nothing is allocated. */
 /* ------------------------------------------------------------------------ */
 
 #define SPV_VERSION_1_3 0x00010300u /* the entry point lists inputs and outputs only */
 
-typedef struct spv_section {
-    uint32_t* w;
-    size_t n;
-    size_t cap;
-} spv_section_t;
-
-typedef struct spv_key {
-    uint32_t words[8];
-    unsigned len;
-    uint32_t id;
-} spv_key_t;
-
-#define CAP_SMALL 64
-#define CAP_ANNOT 256
-#define CAP_TYPES 1024
-#define CAP_CODE 4096
-#define SPV_STORAGE_WORDS (CAP_SMALL * 6 + CAP_ANNOT + CAP_TYPES + CAP_CODE)
-
-#define SPV_MAX_KEYS 256
 #define SPV_MAX_INTERFACE 16
+/* The builder's memory: the largest module here, the tiling shader, takes 26 KiB of it, its
+ * sections grown by doubling */
+#define HSPV_ARENA_BYTES (48 * 1024)
 
-typedef struct spv_module {
-    uint32_t bound;
+typedef struct hspv_arena {
+    uint8_t* base;
+    size_t used;
+    size_t cap;
+} hspv_arena_t;
+
+typedef struct hspv {
+    spv_module_t sm;
+    hspv_arena_t arena;
     int overflow;
-    spv_section_t caps, exts, imports, model, entry, modes, annot, types, code;
-    spv_key_t keys[SPV_MAX_KEYS]; /* types and constants made once */
-    unsigned num_keys;
     uint32_t interface[SPV_MAX_INTERFACE];
     unsigned num_interface;
     uint32_t glsl;
@@ -50,39 +41,32 @@ typedef struct spv_module {
     /* the types every shader here uses */
     uint32_t t_void, t_bool, t_u32, t_s32, t_f32;
     uint32_t t_f32x2, t_f32x3, t_f32x4, t_s32x2, t_u32x3, t_bool3;
-    uint32_t storage[SPV_STORAGE_WORDS]; /* the sections' words */
-} spv_module_t;
+    uint64_t mem[HSPV_ARENA_BYTES / 8]; /* the arena */
+} hspv_t;
 
-static void spv_section_init(spv_section_t* s, uint32_t** next, size_t cap) {
-    s->w = *next;
-    s->n = 0;
-    s->cap = cap;
-    *next += cap;
-}
-
-static void spv_word(spv_module_t* m, spv_section_t* s, uint32_t w) {
-    if (s->n == s->cap) {
-        m->overflow = 1;
-        return;
+/* spv_module's memory from the arena: a block grown in place when it is the last one, else
+ * moved to the end; nothing is given back until the builder goes */
+static void* hspv_grow(void* user, void* old, size_t old_bytes, size_t new_bytes) {
+    hspv_arena_t* a = (hspv_arena_t*)user;
+    uint8_t* p;
+    new_bytes = (new_bytes + 7) & ~(size_t)7;
+    if (new_bytes == 0) {
+        return NULL;
     }
-    s->w[s->n++] = w;
-}
-
-static void spv_emit(spv_module_t* m, spv_section_t* s, SpvOp op, unsigned n,
-                     const uint32_t* operands) {
-    unsigned i;
-    spv_word(m, s, ((uint32_t)(n + 1) << 16) | (uint32_t)op);
-    for (i = 0; i < n; i++)
-        spv_word(m, s, operands[i]);
-}
-
-/* A literal string's words, NUL-terminated and padded */
-static unsigned spv_string(uint32_t* out, const char* str) {
-    size_t len = strlen(str) + 1;
-    unsigned words = (unsigned)((len + 3) / 4);
-    memset(out, 0, words * 4);
-    memcpy(out, str, len);
-    return words;
+    if (old && (uint8_t*)old + ((old_bytes + 7) & ~(size_t)7) == a->base + a->used &&
+        (size_t)((uint8_t*)old - a->base) + new_bytes <= a->cap) {
+        a->used = (size_t)((uint8_t*)old - a->base) + new_bytes;
+        return old;
+    }
+    if (a->cap - a->used < new_bytes) {
+        return NULL;
+    }
+    p = a->base + a->used;
+    if (old && old_bytes) {
+        memcpy(p, old, old_bytes);
+    }
+    a->used += new_bytes;
+    return p;
 }
 
 /* memcpy for words, which also takes an empty, null source */
@@ -92,74 +76,47 @@ static void copy_words(uint32_t* dst, const uint32_t* src, size_t n) {
         dst[i] = src[i];
 }
 
-static uint32_t spv_id(spv_module_t* m) {
-    return m->bound++;
+static uint32_t spv_id(hspv_t* m) {
+    return spv_module_id(&m->sm);
+}
+
+static void spv_emit(hspv_t* m, enum spv_module_section sec, SpvOp op, unsigned n,
+                     const uint32_t* operands) {
+    spv_module_op(&m->sm, sec, (uint32_t)op, operands, n);
 }
 
 /* A type or constant: @op with @n operands after its result id (and, for a
  * constant, after its type), made once and reused */
-static uint32_t spv_unique(spv_module_t* m, SpvOp op, int has_type, unsigned n,
+static uint32_t spv_unique(hspv_t* m, SpvOp op, int has_type, unsigned n,
                            const uint32_t* operands) {
-    uint32_t words[10];
-    unsigned i;
-    spv_key_t* key;
-    for (i = 0; i < m->num_keys; i++) {
-        key = &m->keys[i];
-        if (key->len == n + 1 && key->words[0] == (uint32_t)op &&
-            (n == 0 || memcmp(key->words + 1, operands, n * 4) == 0))
-            return key->id;
-    }
-    if (m->num_keys == SPV_MAX_KEYS || n > 7) {
-        m->overflow = 1;
-        return 0;
-    }
-    key = &m->keys[m->num_keys++];
-    key->words[0] = (uint32_t)op;
-    copy_words(key->words + 1, operands, n);
-    key->len = n + 1;
-    key->id = spv_id(m);
-    /* a constant's type comes before its id */
-    if (has_type) {
-        words[0] = operands[0];
-        words[1] = key->id;
-        copy_words(words + 2, operands + 1, n - 1);
-    } else {
-        words[0] = key->id;
-        copy_words(words + 1, operands, n);
-    }
-    spv_emit(m, &m->types, op, n + 1, words);
-    return key->id;
+    return has_type ? spv_module_decl(&m->sm, (uint32_t)op, operands[0], operands + 1, n - 1)
+                    : spv_module_decl(&m->sm, (uint32_t)op, 0, operands, n);
 }
 
 /* A type that is decorated (a block, an array with a stride): never shared */
-static uint32_t spv_type_own(spv_module_t* m, SpvOp op, unsigned n, const uint32_t* operands) {
-    uint32_t words[10];
-    uint32_t id = spv_id(m);
-    words[0] = id;
-    copy_words(words + 1, operands, n);
-    spv_emit(m, &m->types, op, n + 1, words);
-    return id;
+static uint32_t spv_type_own(hspv_t* m, SpvOp op, unsigned n, const uint32_t* operands) {
+    return spv_module_decl_new(&m->sm, (uint32_t)op, 0, operands, n);
 }
 
-static uint32_t t0(spv_module_t* m, SpvOp op) {
+static uint32_t t0(hspv_t* m, SpvOp op) {
     return spv_unique(m, op, 0, 0, NULL);
 }
-static uint32_t t1(spv_module_t* m, SpvOp op, uint32_t a) {
+static uint32_t t1(hspv_t* m, SpvOp op, uint32_t a) {
     return spv_unique(m, op, 0, 1, &a);
 }
-static uint32_t t2(spv_module_t* m, SpvOp op, uint32_t a, uint32_t b) {
+static uint32_t t2(hspv_t* m, SpvOp op, uint32_t a, uint32_t b) {
     uint32_t v[2];
     v[0] = a;
     v[1] = b;
     return spv_unique(m, op, 0, 2, v);
 }
-static uint32_t t_int(spv_module_t* m, unsigned width, unsigned is_signed) {
+static uint32_t t_int(hspv_t* m, unsigned width, unsigned is_signed) {
     return t2(m, SpvOpTypeInt, width, is_signed);
 }
-static uint32_t t_ptr(spv_module_t* m, SpvStorageClass storage, uint32_t type) {
+static uint32_t t_ptr(hspv_t* m, SpvStorageClass storage, uint32_t type) {
     return t2(m, SpvOpTypePointer, (uint32_t)storage, type);
 }
-static uint32_t t_image(spv_module_t* m, uint32_t sampled_type, int ms) {
+static uint32_t t_image(hspv_t* m, uint32_t sampled_type, int ms) {
     uint32_t v[7];
     v[0] = sampled_type;
     v[1] = SpvDim2D;
@@ -171,76 +128,72 @@ static uint32_t t_image(spv_module_t* m, uint32_t sampled_type, int ms) {
     return spv_unique(m, SpvOpTypeImage, 0, 7, v);
 }
 
-static uint32_t k_u32(spv_module_t* m, uint32_t value) {
+static uint32_t k_u32(hspv_t* m, uint32_t value) {
     uint32_t v[2];
     v[0] = m->t_u32;
     v[1] = value;
     return spv_unique(m, SpvOpConstant, 1, 2, v);
 }
-static uint32_t k_s32(spv_module_t* m, int32_t value) {
+static uint32_t k_s32(hspv_t* m, int32_t value) {
     uint32_t v[2];
     v[0] = m->t_s32;
     v[1] = (uint32_t)value;
     return spv_unique(m, SpvOpConstant, 1, 2, v);
 }
-static uint32_t k_f32(spv_module_t* m, float value) {
+static uint32_t k_f32(hspv_t* m, float value) {
     uint32_t v[2];
     v[0] = m->t_f32;
     memcpy(&v[1], &value, 4);
     return spv_unique(m, SpvOpConstant, 1, 2, v);
 }
 
-static void spv_decorate(spv_module_t* m, uint32_t target, SpvDecoration decoration, int has_value,
+static void spv_decorate(hspv_t* m, uint32_t target, SpvDecoration decoration, int has_value,
                          uint32_t value) {
     uint32_t v[3];
     v[0] = target;
     v[1] = (uint32_t)decoration;
     v[2] = value;
-    spv_emit(m, &m->annot, SpvOpDecorate, has_value ? 3 : 2, v);
+    spv_emit(m, SPV_SEC_ANNOTATIONS, SpvOpDecorate, has_value ? 3 : 2, v);
 }
-static void spv_member_offset(spv_module_t* m, uint32_t type, uint32_t member, uint32_t offset) {
+static void spv_member_offset(hspv_t* m, uint32_t type, uint32_t member, uint32_t offset) {
     uint32_t v[4];
     v[0] = type;
     v[1] = member;
     v[2] = SpvDecorationOffset;
     v[3] = offset;
-    spv_emit(m, &m->annot, SpvOpMemberDecorate, 4, v);
+    spv_emit(m, SPV_SEC_ANNOTATIONS, SpvOpMemberDecorate, 4, v);
 }
 
-static void spv_capability(spv_module_t* m, SpvCapability capability) {
-    uint32_t v = (uint32_t)capability;
-    spv_emit(m, &m->caps, SpvOpCapability, 1, &v);
+static void spv_capability(hspv_t* m, SpvCapability capability) {
+    spv_module_capability(&m->sm, (uint32_t)capability);
 }
-static void spv_extension(spv_module_t* m, const char* name) {
-    uint32_t v[16];
-    spv_emit(m, &m->exts, SpvOpExtension, spv_string(v, name), v);
+static void spv_extension(hspv_t* m, const char* name) {
+    spv_module_extension(&m->sm, name);
 }
 
-static uint32_t spv_global(spv_module_t* m, SpvStorageClass storage, uint32_t type) {
+static uint32_t spv_global(hspv_t* m, SpvStorageClass storage, uint32_t type) {
     uint32_t v[3];
     v[0] = t_ptr(m, storage, type);
     v[1] = spv_id(m);
     v[2] = (uint32_t)storage;
-    spv_emit(m, &m->types, SpvOpVariable, 3, v);
+    spv_emit(m, SPV_SEC_TYPES, SpvOpVariable, 3, v);
     return v[1];
 }
-static uint32_t spv_io(spv_module_t* m, SpvStorageClass storage, uint32_t type, uint32_t location) {
+static uint32_t spv_io(hspv_t* m, SpvStorageClass storage, uint32_t type, uint32_t location) {
     uint32_t var = spv_global(m, storage, type);
     spv_decorate(m, var, SpvDecorationLocation, 1, location);
     if (m->num_interface < SPV_MAX_INTERFACE)
         m->interface[m->num_interface++] = var;
     return var;
 }
-static uint32_t spv_builtin(spv_module_t* m, SpvStorageClass storage, uint32_t type,
-                            SpvBuiltIn builtin) {
+static uint32_t spv_builtin(hspv_t* m, SpvStorageClass storage, uint32_t type, SpvBuiltIn builtin) {
     uint32_t var = spv_global(m, storage, type);
     spv_decorate(m, var, SpvDecorationBuiltIn, 1, (uint32_t)builtin);
     if (m->num_interface < SPV_MAX_INTERFACE)
         m->interface[m->num_interface++] = var;
     return var;
 }
-static uint32_t spv_binding(spv_module_t* m, SpvStorageClass storage, uint32_t type,
-                            uint32_t binding) {
+static uint32_t spv_binding(hspv_t* m, SpvStorageClass storage, uint32_t type, uint32_t binding) {
     uint32_t var = spv_global(m, storage, type);
     spv_decorate(m, var, SpvDecorationDescriptorSet, 1, 0);
     spv_decorate(m, var, SpvDecorationBinding, 1, binding);
@@ -249,31 +202,31 @@ static uint32_t spv_binding(spv_module_t* m, SpvStorageClass storage, uint32_t t
 
 /* -- instructions in main() ---------------------------------------------- */
 
-static uint32_t opn(spv_module_t* m, SpvOp op, uint32_t type, unsigned n, const uint32_t* args) {
+static uint32_t opn(hspv_t* m, SpvOp op, uint32_t type, unsigned n, const uint32_t* args) {
     uint32_t v[12];
     v[0] = type;
     v[1] = spv_id(m);
     copy_words(v + 2, args, n);
-    spv_emit(m, &m->code, op, n + 2, v);
+    spv_emit(m, SPV_SEC_CODE, op, n + 2, v);
     return v[1];
 }
-static uint32_t op1(spv_module_t* m, SpvOp op, uint32_t type, uint32_t a) {
+static uint32_t op1(hspv_t* m, SpvOp op, uint32_t type, uint32_t a) {
     return opn(m, op, type, 1, &a);
 }
-static uint32_t op2(spv_module_t* m, SpvOp op, uint32_t type, uint32_t a, uint32_t b) {
+static uint32_t op2(hspv_t* m, SpvOp op, uint32_t type, uint32_t a, uint32_t b) {
     uint32_t v[2];
     v[0] = a;
     v[1] = b;
     return opn(m, op, type, 2, v);
 }
-static uint32_t op3(spv_module_t* m, SpvOp op, uint32_t type, uint32_t a, uint32_t b, uint32_t c) {
+static uint32_t op3(hspv_t* m, SpvOp op, uint32_t type, uint32_t a, uint32_t b, uint32_t c) {
     uint32_t v[3];
     v[0] = a;
     v[1] = b;
     v[2] = c;
     return opn(m, op, type, 3, v);
 }
-static uint32_t op4(spv_module_t* m, SpvOp op, uint32_t type, uint32_t a, uint32_t b, uint32_t c,
+static uint32_t op4(hspv_t* m, SpvOp op, uint32_t type, uint32_t a, uint32_t b, uint32_t c,
                     uint32_t d) {
     uint32_t v[4];
     v[0] = a;
@@ -283,7 +236,7 @@ static uint32_t op4(spv_module_t* m, SpvOp op, uint32_t type, uint32_t a, uint32
     return opn(m, op, type, 4, v);
 }
 /* An instruction with no result */
-static void opv(spv_module_t* m, SpvOp op, unsigned n, ...) {
+static void opv(hspv_t* m, SpvOp op, unsigned n, ...) {
     uint32_t v[8];
     unsigned i;
     va_list ap;
@@ -291,9 +244,9 @@ static void opv(spv_module_t* m, SpvOp op, unsigned n, ...) {
     for (i = 0; i < n && i < 8; i++)
         v[i] = va_arg(ap, uint32_t);
     va_end(ap);
-    spv_emit(m, &m->code, op, n, v);
+    spv_emit(m, SPV_SEC_CODE, op, n, v);
 }
-static uint32_t ext(spv_module_t* m, uint32_t type, enum GLSLstd450 inst, unsigned n,
+static uint32_t ext(hspv_t* m, uint32_t type, enum GLSLstd450 inst, unsigned n,
                     const uint32_t* args) {
     uint32_t v[6];
     v[0] = m->glsl;
@@ -301,110 +254,102 @@ static uint32_t ext(spv_module_t* m, uint32_t type, enum GLSLstd450 inst, unsign
     copy_words(v + 2, args, n);
     return opn(m, SpvOpExtInst, type, n + 2, v);
 }
-static uint32_t label(spv_module_t* m, uint32_t id) {
-    spv_emit(m, &m->code, SpvOpLabel, 1, &id);
+static uint32_t label(hspv_t* m, uint32_t id) {
+    spv_emit(m, SPV_SEC_CODE, SpvOpLabel, 1, &id);
     return id;
 }
-static uint32_t load(spv_module_t* m, uint32_t type, uint32_t pointer) {
+static uint32_t load(hspv_t* m, uint32_t type, uint32_t pointer) {
     return op1(m, SpvOpLoad, type, pointer);
 }
-static void store(spv_module_t* m, uint32_t pointer, uint32_t value) {
+static void store(hspv_t* m, uint32_t pointer, uint32_t value) {
     opv(m, SpvOpStore, 2, pointer, value);
 }
-static uint32_t local(spv_module_t* m, uint32_t type) {
+static uint32_t local(hspv_t* m, uint32_t type) {
     uint32_t v[3];
     v[0] = t_ptr(m, SpvStorageClassFunction, type);
     v[1] = spv_id(m);
     v[2] = SpvStorageClassFunction;
-    spv_emit(m, &m->code, SpvOpVariable, 3, v);
+    spv_emit(m, SPV_SEC_CODE, SpvOpVariable, 3, v);
     return v[1];
 }
 
 /* u32 arithmetic, as GLSL's uint */
-static uint32_t u_add(spv_module_t* m, uint32_t a, uint32_t b) {
+static uint32_t u_add(hspv_t* m, uint32_t a, uint32_t b) {
     return op2(m, SpvOpIAdd, m->t_u32, a, b);
 }
-static uint32_t u_sub(spv_module_t* m, uint32_t a, uint32_t b) {
+static uint32_t u_sub(hspv_t* m, uint32_t a, uint32_t b) {
     return op2(m, SpvOpISub, m->t_u32, a, b);
 }
-static uint32_t u_mul(spv_module_t* m, uint32_t a, uint32_t b) {
+static uint32_t u_mul(hspv_t* m, uint32_t a, uint32_t b) {
     return op2(m, SpvOpIMul, m->t_u32, a, b);
 }
-static uint32_t u_div(spv_module_t* m, uint32_t a, uint32_t b) {
+static uint32_t u_div(hspv_t* m, uint32_t a, uint32_t b) {
     return op2(m, SpvOpUDiv, m->t_u32, a, b);
 }
-static uint32_t u_mod(spv_module_t* m, uint32_t a, uint32_t b) {
+static uint32_t u_mod(hspv_t* m, uint32_t a, uint32_t b) {
     return op2(m, SpvOpUMod, m->t_u32, a, b);
 }
-static uint32_t u_and(spv_module_t* m, uint32_t a, uint32_t b) {
+static uint32_t u_and(hspv_t* m, uint32_t a, uint32_t b) {
     return op2(m, SpvOpBitwiseAnd, m->t_u32, a, b);
 }
-static uint32_t u_or(spv_module_t* m, uint32_t a, uint32_t b) {
+static uint32_t u_or(hspv_t* m, uint32_t a, uint32_t b) {
     return op2(m, SpvOpBitwiseOr, m->t_u32, a, b);
 }
-static uint32_t u_xor(spv_module_t* m, uint32_t a, uint32_t b) {
+static uint32_t u_xor(hspv_t* m, uint32_t a, uint32_t b) {
     return op2(m, SpvOpBitwiseXor, m->t_u32, a, b);
 }
-static uint32_t u_shl(spv_module_t* m, uint32_t a, uint32_t b) {
+static uint32_t u_shl(hspv_t* m, uint32_t a, uint32_t b) {
     return op2(m, SpvOpShiftLeftLogical, m->t_u32, a, b);
 }
-static uint32_t u_shr(spv_module_t* m, uint32_t a, uint32_t b) {
+static uint32_t u_shr(hspv_t* m, uint32_t a, uint32_t b) {
     return op2(m, SpvOpShiftRightLogical, m->t_u32, a, b);
 }
 /* With a constant second operand, folding the identities */
-static uint32_t u_addk(spv_module_t* m, uint32_t a, uint32_t k) {
+static uint32_t u_addk(hspv_t* m, uint32_t a, uint32_t k) {
     return k ? u_add(m, a, k_u32(m, k)) : a;
 }
-static uint32_t u_mulk(spv_module_t* m, uint32_t a, uint32_t k) {
+static uint32_t u_mulk(hspv_t* m, uint32_t a, uint32_t k) {
     return k == 1 ? a : u_mul(m, a, k_u32(m, k));
 }
-static uint32_t u_divk(spv_module_t* m, uint32_t a, uint32_t k) {
+static uint32_t u_divk(hspv_t* m, uint32_t a, uint32_t k) {
     return k == 1 ? a : u_div(m, a, k_u32(m, k));
 }
-static uint32_t u_modk(spv_module_t* m, uint32_t a, uint32_t k) {
+static uint32_t u_modk(hspv_t* m, uint32_t a, uint32_t k) {
     return u_mod(m, a, k_u32(m, k));
 }
-static uint32_t u_andk(spv_module_t* m, uint32_t a, uint32_t k) {
+static uint32_t u_andk(hspv_t* m, uint32_t a, uint32_t k) {
     return u_and(m, a, k_u32(m, k));
 }
-static uint32_t u_shlk(spv_module_t* m, uint32_t a, uint32_t k) {
+static uint32_t u_shlk(hspv_t* m, uint32_t a, uint32_t k) {
     return k ? u_shl(m, a, k_u32(m, k)) : a;
 }
-static uint32_t u_shrk(spv_module_t* m, uint32_t a, uint32_t k) {
+static uint32_t u_shrk(hspv_t* m, uint32_t a, uint32_t k) {
     return k ? u_shr(m, a, k_u32(m, k)) : a;
 }
 /* bitfieldExtract(v, bit, 1) */
-static uint32_t u_bit(spv_module_t* m, uint32_t v, uint32_t bit) {
+static uint32_t u_bit(hspv_t* m, uint32_t v, uint32_t bit) {
     return op3(m, SpvOpBitFieldUExtract, m->t_u32, v, k_u32(m, bit), k_u32(m, 1));
 }
 
 /* -- module start and end ------------------------------------------------- */
 
-/* The builder lives on the caller's stack (some 32 KiB): making a module
+/* The builder lives on the caller's stack (some 48 KiB): making a module
  * allocates nothing */
-static void spv_begin(spv_module_t* m) {
-    uint32_t* next;
-    uint32_t v[16];
-    memset(m, 0, offsetof(spv_module_t, storage));
-    m->bound = 1;
-    next = m->storage;
-    spv_section_init(&m->caps, &next, CAP_SMALL);
-    spv_section_init(&m->exts, &next, CAP_SMALL);
-    spv_section_init(&m->imports, &next, CAP_SMALL);
-    spv_section_init(&m->model, &next, CAP_SMALL);
-    spv_section_init(&m->entry, &next, CAP_SMALL);
-    spv_section_init(&m->modes, &next, CAP_SMALL);
-    spv_section_init(&m->annot, &next, CAP_ANNOT);
-    spv_section_init(&m->types, &next, CAP_TYPES);
-    spv_section_init(&m->code, &next, CAP_CODE);
+static void spv_begin(hspv_t* m) {
+    uint32_t v[2];
+    memset(m, 0, offsetof(hspv_t, mem));
+    m->arena.base = (uint8_t*)m->mem;
+    m->arena.cap = sizeof(m->mem);
+    spv_module_init(&m->sm, hspv_grow, &m->arena);
+    if (!spv_module_reset(&m->sm, 1024)) {
+        m->overflow = 1;
+    }
 
     spv_capability(m, SpvCapabilityShader);
-    m->glsl = spv_id(m);
-    v[0] = m->glsl;
-    spv_emit(m, &m->imports, SpvOpExtInstImport, 1 + spv_string(v + 1, "GLSL.std.450"), v);
+    m->glsl = spv_module_import(&m->sm, "GLSL.std.450");
     v[0] = SpvAddressingModelLogical;
     v[1] = SpvMemoryModelGLSL450;
-    spv_emit(m, &m->model, SpvOpMemoryModel, 2, v);
+    spv_emit(m, SPV_SEC_MEMORY_MODEL, SpvOpMemoryModel, 2, v);
 
     m->t_void = t0(m, SpvOpTypeVoid);
     m->t_bool = t0(m, SpvOpTypeBool);
@@ -420,65 +365,43 @@ static void spv_begin(spv_module_t* m) {
 }
 
 /* Opens main(); the code that follows is its body */
-static void spv_main(spv_module_t* m) {
+static void spv_main(hspv_t* m) {
     uint32_t v[4];
     v[0] = m->t_void;
     v[1] = m->main_fn = spv_id(m);
     v[2] = SpvFunctionControlMaskNone;
     v[3] = t1(m, SpvOpTypeFunction, m->t_void);
-    spv_emit(m, &m->code, SpvOpFunction, 4, v);
+    spv_emit(m, SPV_SEC_CODE, SpvOpFunction, 4, v);
     label(m, spv_id(m));
 }
 
-static void spv_mode(spv_module_t* m, SpvExecutionMode mode, unsigned n, const uint32_t* values) {
+static void spv_mode(hspv_t* m, SpvExecutionMode mode, unsigned n, const uint32_t* values) {
     uint32_t v[5];
     v[0] = m->main_fn;
     v[1] = (uint32_t)mode;
     copy_words(v + 2, values, n);
-    spv_emit(m, &m->modes, SpvOpExecutionMode, n + 2, v);
+    spv_emit(m, SPV_SEC_EXEC_MODES, SpvOpExecutionMode, n + 2, v);
 }
 
 /* Closes main() and writes the module into @out */
-static size_t spv_end(spv_module_t* m, SpvExecutionModel model, uint32_t* out, size_t cap) {
-    uint32_t v[32];
-    unsigned n = 0;
-    size_t total, at = 0;
-    const spv_section_t* sections[9];
-    unsigned i;
+static size_t spv_end(hspv_t* m, SpvExecutionModel model, uint32_t* out, size_t cap) {
+    uint32_t pre[2];
+    const uint32_t* module;
+    size_t words = 0;
 
     opv(m, SpvOpReturn, 0);
     opv(m, SpvOpFunctionEnd, 0);
-    v[n++] = (uint32_t)model;
-    v[n++] = m->main_fn;
-    n += spv_string(v + n, "main");
-    copy_words(v + n, m->interface, m->num_interface);
-    n += m->num_interface;
-    spv_emit(m, &m->entry, SpvOpEntryPoint, n, v);
+    pre[0] = (uint32_t)model;
+    pre[1] = m->main_fn;
+    spv_module_op_str(&m->sm, SPV_SEC_ENTRY_POINTS, SpvOpEntryPoint, pre, 2, "main", m->interface,
+                      m->num_interface);
 
-    sections[0] = &m->caps;
-    sections[1] = &m->exts;
-    sections[2] = &m->imports;
-    sections[3] = &m->model;
-    sections[4] = &m->entry;
-    sections[5] = &m->modes;
-    sections[6] = &m->annot;
-    sections[7] = &m->types;
-    sections[8] = &m->code;
-    total = 5;
-    for (i = 0; i < 9; i++)
-        total += sections[i]->n;
-    if (m->overflow || total > cap)
+    /* Laid out in place in the arena, then copied out once */
+    module = spv_module_finish(&m->sm, SPV_VERSION_1_3, 0, &words);
+    if (m->overflow || !module || words > cap)
         return 0;
-    out[at++] = SpvMagicNumber;
-    out[at++] = SPV_VERSION_1_3;
-    out[at++] = 0; /* generator */
-    out[at++] = m->bound;
-    out[at++] = 0;
-    for (i = 0; i < 9; i++) {
-        copy_words(out + at, sections[i]->w, sections[i]->n);
-        at += sections[i]->n;
-    }
-    return at;
+    copy_words(out, module, words);
+    return words;
 }
 
 /* ------------------------------------------------------------------------ */
@@ -487,7 +410,7 @@ static size_t spv_end(spv_module_t* m, SpvExecutionModel model, uint32_t* out, s
 
 size_t host_spirv_fs_tri_vert(uint32_t* out, size_t cap) {
     uint32_t vertex_index, position, uv, i, px, py, args[4];
-    spv_module_t module, *m = &module;
+    hspv_t module, *m = &module;
     spv_begin(m);
     vertex_index = spv_builtin(m, SpvStorageClassInput, m->t_s32, SpvBuiltInVertexIndex);
     position = spv_builtin(m, SpvStorageClassOutput, m->t_f32x4, SpvBuiltInPosition);
@@ -508,17 +431,17 @@ size_t host_spirv_fs_tri_vert(uint32_t* out, size_t cap) {
     return spv_end(m, SpvExecutionModelVertex, out, cap);
 }
 
-static uint32_t splat3(spv_module_t* m, uint32_t v) {
+static uint32_t splat3(hspv_t* m, uint32_t v) {
     return op3(m, SpvOpCompositeConstruct, m->t_f32x3, v, v, v);
 }
 
-static uint32_t vec3k(spv_module_t* m, float x, float y, float z) {
+static uint32_t vec3k(hspv_t* m, float x, float y, float z) {
     return op3(m, SpvOpCompositeConstruct, m->t_f32x3, k_f32(m, x), k_f32(m, y), k_f32(m, z));
 }
 
 /* sRGB-encoded to linear, per component (IEC 61966-2-1):
  * mix(pow(max(rgb + b, 0) / a, 2.4), rgb / d, rgb < d * cutoff) */
-static uint32_t srgb_decode(spv_module_t* m, uint32_t rgb) {
+static uint32_t srgb_decode(hspv_t* m, uint32_t rgb) {
     const float cutoff = 0.0031308f, a = 1.055f, b = 0.055f, d = 12.92f;
     uint32_t args[2], dg_pow, dg_lin;
     args[0] = op2(m, SpvOpFAdd, m->t_f32x3, rgb, splat3(m, k_f32(m, b)));
@@ -535,7 +458,7 @@ static uint32_t srgb_decode(spv_module_t* m, uint32_t rgb) {
 
 /* Linear Rec.709, 1.0 being SDR white, to PQ-encoded Rec.2020 (SMPTE ST 2084), with SDR
  * white at @white of the 10000 nits PQ's 1.0 stands for */
-static uint32_t pq_encode_709(spv_module_t* m, uint32_t rgb, uint32_t white) {
+static uint32_t pq_encode_709(hspv_t* m, uint32_t rgb, uint32_t white) {
     const float m1 = 0.1593017578125f, m2 = 78.84375f;
     const float c1 = 0.8359375f, c2 = 18.8515625f, c3 = 18.6875f;
     uint32_t r, g, b, y, p, args[3];
@@ -562,7 +485,7 @@ static uint32_t pq_encode_709(spv_module_t* m, uint32_t rgb, uint32_t white) {
     return ext(m, m->t_f32x3, GLSLstd450Pow, 2, args);
 }
 
-static uint32_t with_alpha(spv_module_t* m, uint32_t rgb, uint32_t alpha) {
+static uint32_t with_alpha(hspv_t* m, uint32_t rgb, uint32_t alpha) {
     uint32_t args[4];
     args[0] = op2(m, SpvOpCompositeExtract, m->t_f32, rgb, 0);
     args[1] = op2(m, SpvOpCompositeExtract, m->t_f32, rgb, 1);
@@ -571,7 +494,7 @@ static uint32_t with_alpha(spv_module_t* m, uint32_t rgb, uint32_t alpha) {
     return opn(m, SpvOpCompositeConstruct, m->t_f32x4, 4, args);
 }
 
-static uint32_t rgb_of(spv_module_t* m, uint32_t v4) {
+static uint32_t rgb_of(hspv_t* m, uint32_t v4) {
     uint32_t shuffle[5];
     shuffle[0] = v4;
     shuffle[1] = v4;
@@ -586,7 +509,7 @@ size_t host_spirv_post_process_frag(uint32_t* out, size_t cap) {
     uint32_t pc_f32, pc_u32, gamma, hdr, srgb_input, pq_white, pq, linear, rgb, alpha, args[4];
     uint32_t in, exponent, g_pow, g_lin, g, sdr, pq_out, t_bool4;
     const float cutoff = 0.0031308f, a = 1.055f, b = 0.055f, d = 12.92f;
-    spv_module_t module, *m = &module;
+    hspv_t module, *m = &module;
     spv_begin(m);
     uv = spv_io(m, SpvStorageClassInput, m->t_f32x2, 0);
     color = spv_io(m, SpvStorageClassOutput, m->t_f32x4, 0);
@@ -666,7 +589,7 @@ size_t host_spirv_post_process_frag(uint32_t* out, size_t cap) {
 size_t host_spirv_overlay_vert(uint32_t* out, size_t cap) {
     uint32_t a_pos, a_uv, a_color, position, o_color, o_uv, pc_t, pc, members[2], pc_f32x2, xy;
     uint32_t args[4];
-    spv_module_t module, *m = &module;
+    hspv_t module, *m = &module;
     spv_begin(m);
     a_pos = spv_io(m, SpvStorageClassInput, m->t_f32x2, 0);
     a_uv = spv_io(m, SpvStorageClassInput, m->t_f32x2, 1);
@@ -700,7 +623,7 @@ size_t host_spirv_overlay_vert(uint32_t* out, size_t cap) {
 
 size_t host_spirv_overlay_frag(uint32_t* out, size_t cap, float white) {
     uint32_t v_color, v_uv, color, image_t, sampled_t, tex, c;
-    spv_module_t module, *m = &module;
+    hspv_t module, *m = &module;
     spv_begin(m);
     v_color = spv_io(m, SpvStorageClassInput, m->t_f32x4, 0);
     v_uv = spv_io(m, SpvStorageClassInput, m->t_f32x2, 1);
@@ -723,7 +646,7 @@ size_t host_spirv_overlay_frag(uint32_t* out, size_t cap, float white) {
 
 size_t host_spirv_color_to_ms_depth_frag(uint32_t* out, size_t cap) {
     uint32_t uv, frag_depth, sample_id, image_t, tex, image, size, coord, texel;
-    spv_module_t module, *m = &module;
+    hspv_t module, *m = &module;
     spv_begin(m);
     spv_capability(m, SpvCapabilitySampleRateShading);
     spv_capability(m, SpvCapabilityImageQuery);
@@ -751,7 +674,7 @@ size_t host_spirv_color_to_ms_depth_frag(uint32_t* out, size_t cap) {
 size_t host_spirv_ms_image_blit_frag(uint32_t* out, size_t cap, int msaa) {
     uint32_t out_color, frag_coord, sample_id = 0, image_t, tex, fc, coord, image, texel;
     uint32_t shuffle[4];
-    spv_module_t module, *m = &module;
+    hspv_t module, *m = &module;
     spv_begin(m);
     if (msaa)
         spv_capability(m, SpvCapabilitySampleRateShading);
@@ -788,7 +711,7 @@ size_t host_spirv_depth_to_color_frag(uint32_t* out, size_t cap, int msaa, int s
                                       int uint_out, uint32_t sample) {
     uint32_t out_color, frag_coord, image_t, tex, fc, coord, image, texel, value;
     uint32_t t_u32x4, sampled_t, texel_t, out_t, shuffle[4], parts[4];
-    spv_module_t module, *m = &module;
+    hspv_t module, *m = &module;
     spv_begin(m);
     t_u32x4 = t2(m, SpvOpTypeVector, m->t_u32, 4);
     sampled_t = stencil ? m->t_u32 : m->t_f32;
@@ -833,7 +756,7 @@ size_t host_spirv_depth_to_color_frag(uint32_t* out, size_t cap, int msaa, int s
 }
 
 /* A storage buffer holding one runtime array of @elem, @stride bytes apart */
-static uint32_t storage_array(spv_module_t* m, uint32_t elem, uint32_t stride, uint32_t binding) {
+static uint32_t storage_array(hspv_t* m, uint32_t elem, uint32_t stride, uint32_t binding) {
     uint32_t array_t = spv_type_own(m, SpvOpTypeRuntimeArray, 1, &elem);
     uint32_t block_t;
     spv_decorate(m, array_t, SpvDecorationArrayStride, 1, stride);
@@ -843,7 +766,7 @@ static uint32_t storage_array(spv_module_t* m, uint32_t elem, uint32_t stride, u
     return spv_binding(m, SpvStorageClassStorageBuffer, block_t, binding);
 }
 
-static void compute_mode(spv_module_t* m) {
+static void compute_mode(hspv_t* m) {
     uint32_t size[3];
     size[0] = 64;
     size[1] = 1;
@@ -851,7 +774,7 @@ static void compute_mode(spv_module_t* m) {
     spv_mode(m, SpvExecutionModeLocalSize, 3, size);
 }
 
-static uint32_t global_id_x(spv_module_t* m, uint32_t gid) {
+static uint32_t global_id_x(hspv_t* m, uint32_t gid) {
     return op2(m, SpvOpCompositeExtract, m->t_u32, load(m, m->t_u32x3, gid), 0);
 }
 
@@ -860,7 +783,7 @@ size_t host_spirv_fault_buffer_process_comp(uint32_t* out, size_t cap, uint32_t 
     uint32_t t_u64, gid, fault_buffer, download64, download32, sb_u32, sb_u64, word_var;
     uint32_t id, fault_ptr, base_bit, header, cond, body, cont, merge, stop, go, idx[2];
     uint32_t counter, store_index, full, word, bit, page, address, k64[3];
-    spv_module_t module, *m = &module;
+    hspv_t module, *m = &module;
     spv_begin(m);
     spv_capability(m, SpvCapabilityInt64);
     t_u64 = t_int(m, 64, 0);
@@ -1052,7 +975,7 @@ static void pixel_bits(const tiling_t* t, uint32_t thickness, char axis[9], uint
     }
 }
 
-static uint32_t pixel_index(spv_module_t* m, const tiling_t* t, uint32_t x, uint32_t y, uint32_t z,
+static uint32_t pixel_index(hspv_t* m, const tiling_t* t, uint32_t x, uint32_t y, uint32_t z,
                             uint32_t thickness) {
     char axis[9];
     uint32_t bit[9], result = k_u32(m, 0), src;
@@ -1067,7 +990,7 @@ static uint32_t pixel_index(spv_module_t* m, const tiling_t* t, uint32_t x, uint
     return result;
 }
 
-static uint32_t addr_micro_tiled(spv_module_t* m, const tiling_t* t, uint32_t x, uint32_t y,
+static uint32_t addr_micro_tiled(hspv_t* m, const tiling_t* t, uint32_t x, uint32_t y,
                                  uint32_t slice, uint32_t pitch, uint32_t height,
                                  uint32_t thickness) {
     const uint32_t micro_tile_bytes = MICRO_TILE_PIXELS * thickness * t->bpp * t->num_samples / 8;
@@ -1089,7 +1012,7 @@ static uint32_t addr_micro_tiled(spv_module_t* m, const tiling_t* t, uint32_t x,
     return u_add(m, u_add(m, slice_offset, micro_tile_offset), u_divk(m, pixel_offset, 8));
 }
 
-static uint32_t pipe_from_coord(spv_module_t* m, const tiling_t* t, uint32_t x, uint32_t y,
+static uint32_t pipe_from_coord(hspv_t* m, const tiling_t* t, uint32_t x, uint32_t y,
                                 uint32_t slice) {
     uint32_t tx = u_divk(m, x, MICRO_TILE_WIDTH), ty = u_divk(m, y, MICRO_TILE_HEIGHT);
     uint32_t x3 = u_bit(m, tx, 0), x4 = u_bit(m, tx, 1), x5 = u_bit(m, tx, 2);
@@ -1115,7 +1038,7 @@ static uint32_t pipe_from_coord(spv_module_t* m, const tiling_t* t, uint32_t x, 
     return pipe;
 }
 
-static uint32_t bank_from_coord(spv_module_t* m, const tiling_t* t, uint32_t x, uint32_t y,
+static uint32_t bank_from_coord(hspv_t* m, const tiling_t* t, uint32_t x, uint32_t y,
                                 uint32_t slice, uint32_t tile_split_slice, uint32_t bank_swizzle) {
     uint32_t tx = u_divk(m, u_divk(m, x, MICRO_TILE_WIDTH), t->bank_width * t->num_pipes);
     uint32_t ty = u_divk(m, u_divk(m, y, MICRO_TILE_HEIGHT), t->bank_height);
@@ -1161,7 +1084,7 @@ static uint32_t bank_from_coord(spv_module_t* m, const tiling_t* t, uint32_t x, 
     return u_andk(m, bank, t->num_banks - 1);
 }
 
-static uint32_t addr_macro_tiled(spv_module_t* m, const tiling_t* t, uint32_t x, uint32_t y,
+static uint32_t addr_macro_tiled(hspv_t* m, const tiling_t* t, uint32_t x, uint32_t y,
                                  uint32_t slice, uint32_t pitch, uint32_t height,
                                  uint32_t bank_swizzle) {
     const uint32_t micro_tile_bytes_full =
@@ -1242,7 +1165,7 @@ size_t host_spirv_tiling_comp(uint32_t* out, size_t cap, unsigned bits_per_pixel
     uint32_t merge, more, next_mip, texel, mip, pitch_height, pitch, height, x, y, slice;
     uint32_t in_mips, done, in_data, done_data, inside;
     uint32_t tiled_offset, micro, macro, is_micro, i;
-    spv_module_t module, *m = &module;
+    hspv_t module, *m = &module;
 
     memset(p, 0, sizeof(p));
     for (i = 0; i < 12 && i < num_params; i++)

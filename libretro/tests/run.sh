@@ -153,6 +153,7 @@ done
 $CC -std=c89 -O1 -g -Wall -fsanitize=address,undefined -isystem externals/vulkan-headers/include \
     -isystem externals/spirv-headers/include -Isrc -I$L/include \
     libretro/tests/tiling_device_test.c src/video_core/host_shaders/host_spirv.c \
+    src/shader_recompiler/backend/spirv/spv_module.c \
     -o "$OUT/tiling_device_test" -ldl
 ASAN_OPTIONS=detect_leaks=0 "$OUT/tiling_device_test"
 # libretro's analog values to the pad's bytes, rounded, a stick at rest centred
@@ -414,12 +415,14 @@ ASAN_OPTIONS=detect_leaks=0 "$OUT/frame_narrow_device_test"
 $CC -std=c89 -O1 -g -Wall -fsanitize=address,undefined -isystem externals/vulkan-headers/include \
     -isystem externals/spirv-headers/include -Isrc -I$L/include \
     libretro/tests/depth_to_color_device_test.c src/video_core/host_shaders/host_spirv.c \
+    src/shader_recompiler/backend/spirv/spv_module.c \
     -o "$OUT/depth_to_color_device_test" -ldl
 ASAN_OPTIONS=detect_leaks=0 "$OUT/depth_to_color_device_test"
 # The output pass on a device: SDR unchanged, PQ for an HDR frontend, a game's HDR passed through
 $CC -std=c89 -O1 -g -Wall -fsanitize=address,undefined -isystem externals/vulkan-headers/include \
     -isystem externals/spirv-headers/include -Isrc -I$L/include \
     libretro/tests/pq_output_device_test.c src/video_core/host_shaders/host_spirv.c \
+    src/shader_recompiler/backend/spirv/spv_module.c \
     -o "$OUT/pq_output_device_test" -ldl -lm
 ASAN_OPTIONS=detect_leaks=0 "$OUT/pq_output_device_test"
 # The vertex capture's report on a capture it makes itself, a mesh of each kind in it
@@ -469,7 +472,8 @@ $CC -std=gnu89 -O1 -g -Wall -Wdeclaration-after-statement -ffp-contract=off \
 $CC -std=gnu89 -O1 -g -Wall -Wdeclaration-after-statement -fsanitize=address,undefined \
     -isystem externals/vulkan-headers/include -isystem externals/spirv-headers/include \
     -I. -Isrc -I$L/include libretro/tests/overlay_device_test.c src/video_core/overlay/vk_overlay.c \
-    src/video_core/host_shaders/host_spirv.c $OVL -o "$OUT/overlay_device_test" -ldl -lm -lpthread
+    src/video_core/host_shaders/host_spirv.c src/shader_recompiler/backend/spirv/spv_module.c \
+    $OVL -o "$OUT/overlay_device_test" -ldl -lm -lpthread
 ASAN_OPTIONS=detect_leaks=0 "$OUT/overlay_device_test"
 # The overlays' queues from four threads at once while frames are drawn: every notification
 # shown once, each thread's in order, every image slot free after
