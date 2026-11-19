@@ -7,7 +7,10 @@
 #include <optional>
 #include <thread>
 
+#include <string>
+#include <rthreads/retro_eventcount.h>
 #include "common/singleton.h"
+#include "common/stop_thread.h"
 #include "core/linker.h"
 #include "frontend_window.h"
 #include "input/controller.h"
@@ -56,7 +59,10 @@ private:
     std::unique_ptr<Frontend::Window> window;
     // The game's time (nanoseconds) the play time was last counted up to; 0: not counting
     u64 start_time{};
-    std::jthread play_time_thread;
+    stop_thread_t play_time_thread = STOP_THREAD_INIT;
+    // What the play time thread waits on between its counts: notified to stop it
+    retro_eventcount_t play_time_wake;
+    std::string play_time_serial;
 };
 
 } // namespace Core

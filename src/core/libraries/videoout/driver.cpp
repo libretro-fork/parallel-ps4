@@ -49,14 +49,16 @@ VideoOutDriver::VideoOutDriver(u32 width, u32 height) {
     static_assert(std::is_trivially_copyable_v<Request>);
     retro_spsc_init(&requests, 256 * sizeof(Request));
     retro_eventcount_init(&request_taken_ec);
-    present_thread = std::jthread([&](std::stop_token token) { PresentThread(token); });
+    stop_thread_start(
+        &present_thread, [](void* self) { static_cast<VideoOutDriver*>(self)->PresentThread(); },
+        this);
 }
 
 VideoOutDriver::~VideoOutDriver() {
-    present_thread.request_stop();
-    if (present_thread.joinable()) {
-        present_thread.join();
-    }
+    // Asked to stop, then woken where it waits for the frontend's next frame
+    stop_thread_request(&present_thread);
+    Libretro::WakeVblankWaits();
+    stop_thread_join(&present_thread);
     retro_eventcount_free(&request_taken_ec);
     retro_spsc_free(&requests);
 }
@@ -367,7 +369,7 @@ void VideoOutDriver::SubmitFlipInternal(VideoOutPort* port, s32 index, s64 flip_
     }
 }
 
-void VideoOutDriver::PresentThread(std::stop_token token) {
+void VideoOutDriver::PresentThread() {
     thread_name_set("shadPS4:PresentThread");
 
     // The console's vblanks come from the frontend's frames (common/vblank_clock.h): the
@@ -379,7 +381,7 @@ void VideoOutDriver::PresentThread(std::stop_token token) {
     for (;;) {
         unsigned owed = vblank_clock_owed(&clock, ticks, emu_settings_get_vblank_frequency());
         if (owed == 0) {
-            if (!Libretro::WaitVblankTicks(ticks, token)) {
+            if (!Libretro::WaitVblankTicks(ticks, &present_thread.stop)) {
                 break;
             }
             // The frames of the game's time and their sound are started by the frame thread
@@ -387,9 +389,14 @@ void VideoOutDriver::PresentThread(std::stop_token token) {
             ticks = Libretro::VblankTicks();
             continue;
         }
-        for (; owed != 0 && !token.stop_requested(); owed--) {
+        for (; owed != 0 && !stop_thread_stopping(&present_thread); owed--) {
             vblank_clock_take(&clock);
             Vblank();
+        }
+        // Asked to stop with vblanks still owed: they are not given, and would be found owed
+        // again for ever
+        if (stop_thread_stopping(&present_thread)) {
+            break;
         }
     }
 }

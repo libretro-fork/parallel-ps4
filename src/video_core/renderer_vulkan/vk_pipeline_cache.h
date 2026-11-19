@@ -10,6 +10,7 @@
 #include <rthreads/retro_eventcount.h>
 #include "common/io_file.h"
 #include "common/ptr_table.h"
+#include "common/stop_thread.h"
 #include "shader_recompiler/profile.h"
 #include "shader_recompiler/recompiler.h"
 #include "shader_recompiler/specialization.h"
@@ -142,7 +143,7 @@ private:
     // dispatch always waits, as the game reads back what it writes. Finished jobs come back to
     // the drawing thread, which files them: the tables are only ever touched by that thread.
     struct CompileJob;
-    void CompilerThread(std::stop_token stop);
+    void CompilerThread();
     void Submit(CompileJob* job);
     /// Files what the compiler thread has finished; true when there was any
     bool DrainCompiled();
@@ -166,7 +167,7 @@ private:
     mpsc_stack_t compile_results{};
     retro_eventcount_t compile_jobs_ec{};
     retro_eventcount_t compile_results_ec{};
-    std::jthread compiler;
+    stop_thread_t compiler = STOP_THREAD_INIT;
     /// Set by GetProgram when the stage it was asked for is being compiled
     bool stage_pending = false;
     /// Asynchronous: a draw whose pipeline is being made is skipped rather than waited for

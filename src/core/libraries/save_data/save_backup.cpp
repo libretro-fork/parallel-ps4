@@ -12,15 +12,13 @@
 #include "save_backup.h"
 #include "save_instance.h"
 
-#include <chrono>
-#include <stop_token>
-#include <thread>
 #include <retro_atomic.h>
 #include <rthreads/retro_eventcount.h>
 #include "common/io_file.h"
 #include "common/logging/formatter.h"
 #include "common/logging/log.h"
 #include "common/path_util.h"
+#include "common/stop_thread.h"
 #include "common/thread_name.h"
 #include "core/libraries/kernel/time.h"
 
@@ -42,7 +40,7 @@ static void CopyShareReadWrite(const std::filesystem::path& from, const std::fil
     }
 }
 
-static std::jthread g_backup_thread;
+static stop_thread_t g_backup_thread = STOP_THREAD_INIT;
 // Notified when a request is queued: the thread waits on it for its queue to have one
 static retro_eventcount_t g_backup_queued;
 
@@ -168,7 +166,9 @@ void StartThread() {
     (void)retro_atomic_exchange_int(&g_backup_status, static_cast<int>(WorkerStatus::Waiting));
     static const bool queued_made = (retro_eventcount_init(&g_backup_queued), true);
     (void)queued_made;
-    g_backup_thread = std::jthread{BackupThreadBody};
+    // One that ended by itself is joined first
+    stop_thread_join(&g_backup_thread);
+    stop_thread_start(&g_backup_thread, [](void*) { BackupThreadBody(); }, nullptr);
 }
 
 void StopThread() {
@@ -183,9 +183,7 @@ void StopThread() {
     g_backup_queue_mutex.Run([&] { g_backup_queue.emplace_back(BackupRequest{}); });
     retro_eventcount_notify(&g_backup_queued);
     // The thread ends once it reaches that request: waited for, not looked in on
-    if (g_backup_thread.joinable()) {
-        g_backup_thread.join();
-    }
+    stop_thread_join(&g_backup_thread);
 }
 
 bool NewRequest(Libraries::UserService::OrbisUserServiceUserId user_id, std::string_view title_id,

@@ -436,15 +436,14 @@ PipelineCache::PipelineCache(const Instance& instance_, Scheduler& scheduler_,
     mpsc_stack_init(&compile_results);
     retro_eventcount_init(&compile_jobs_ec);
     retro_eventcount_init(&compile_results_ec);
-    compiler = std::jthread(std::bind_front(&PipelineCache::CompilerThread, this));
+    stop_thread_start(
+        &compiler, [](void* self) { static_cast<PipelineCache*>(self)->CompilerThread(); }, this);
 }
 
 PipelineCache::~PipelineCache() {
-    compiler.request_stop();
+    stop_thread_request(&compiler);
     retro_eventcount_notify(&compile_jobs_ec);
-    if (compiler.joinable()) {
-        compiler.join();
-    }
+    stop_thread_join(&compiler);
     for (auto* node = mpsc_stack_drain(&compile_results); node;) {
         auto* job = reinterpret_cast<CompileJob*>(node);
         node = node->next;
@@ -1071,14 +1070,13 @@ void PipelineCache::Submit(CompileJob* job) {
     retro_eventcount_notify(&compile_jobs_ec);
 }
 
-void PipelineCache::CompilerThread(std::stop_token stop) {
+void PipelineCache::CompilerThread() {
     thread_name_set("shadPS4:ShaderCompiler");
-    const std::stop_callback wake{stop, [this] { retro_eventcount_notify(&compile_jobs_ec); }};
-    while (!stop.stop_requested()) {
+    while (!stop_thread_stopping(&compiler)) {
         const int key = retro_eventcount_prepare_wait(&compile_jobs_ec);
         mpsc_stack_node_t* node = mpsc_stack_drain(&compile_jobs);
         if (!node) {
-            if (stop.stop_requested()) {
+            if (stop_thread_stopping(&compiler)) {
                 retro_eventcount_cancel_wait(&compile_jobs_ec);
                 break;
             }
@@ -1090,7 +1088,7 @@ void PipelineCache::CompilerThread(std::stop_token stop) {
         for (node = mpsc_stack_reverse(node); node;) {
             auto* job = reinterpret_cast<CompileJob*>(node);
             node = node->next;
-            if (stop.stop_requested()) {
+            if (stop_thread_stopping(&compiler)) {
                 delete job;
                 continue;
             }

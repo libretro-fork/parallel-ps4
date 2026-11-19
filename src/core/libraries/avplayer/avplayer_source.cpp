@@ -357,9 +357,9 @@ bool AvPlayerSource::Start() {
     for (u32 index = 0; index < m_audio_pool.size(); ++index) {
         m_audio_buffers.Push(index);
     }
-    m_demuxer_thread.Run([this](std::stop_token stop) { this->DemuxerThread(stop); });
-    m_video_decoder_thread.Run([this](std::stop_token stop) { this->VideoDecoderThread(stop); });
-    m_audio_decoder_thread.Run([this](std::stop_token stop) { this->AudioDecoderThread(stop); });
+    m_demuxer_thread.Run([this] { this->DemuxerThread(); });
+    m_video_decoder_thread.Run([this] { this->VideoDecoderThread(); });
+    m_audio_decoder_thread.Run([this] { this->AudioDecoderThread(); });
     avplayer_clock_start(&m_clock, Libraries::Kernel::GameNow());
     return true;
 }
@@ -530,7 +530,7 @@ bool AvPlayerSource::IsActive() {
            m_video_packets.Size() != 0 || m_video_frames.Size() != 0 || m_audio_frames.Size() != 0;
 }
 
-void AvPlayerSource::DemuxerThread(std::stop_token stop) {
+void AvPlayerSource::DemuxerThread() {
     using namespace std::chrono;
     thread_name_set("shadPS4:AvDemuxer");
 
@@ -545,7 +545,7 @@ void AvPlayerSource::DemuxerThread(std::stop_token stop) {
     const int audio_track =
         m_audio_stream_index ? m_streams[m_audio_stream_index.value()].track : -1;
 
-    while (!stop.stop_requested()) {
+    while (!m_demuxer_thread.Stopping()) {
         if (m_video_packets.Size() > 30 &&
             (!m_audio_stream_index.has_value() || m_audio_packets.Size() > 8)) {
             // The video decoder taking a packet wakes it; the audio side is looked at again
@@ -606,7 +606,7 @@ void AvPlayerSource::DemuxerThread(std::stop_token stop) {
     m_demuxer_thread.Join();
 }
 
-void AvPlayerSource::VideoDecoderThread(std::stop_token stop) {
+void AvPlayerSource::VideoDecoderThread() {
     using namespace std::chrono;
     thread_name_set("shadPS4:AvVideoDecoder");
 
@@ -666,7 +666,7 @@ void AvPlayerSource::VideoDecoderThread(std::stop_token stop) {
     };
 
     Packet packet;
-    while (!stop.stop_requested() && m_video_packets.Pop(packet)) {
+    while (!m_video_decoder_thread.Stopping() && m_video_packets.Pop(packet)) {
         const Videodec::PictureMeta meta{.pts = packet.timestamp};
         const int res = decoder.Decode(packet.data, packet.size, meta);
         if (res < 0) {
@@ -679,7 +679,7 @@ void AvPlayerSource::VideoDecoderThread(std::stop_token stop) {
         }
     }
     // The pictures still held for display order
-    while (!stop.stop_requested() && decoder.Drain()) {
+    while (!m_video_decoder_thread.Stopping() && decoder.Drain()) {
         if (!output()) {
             break;
         }
@@ -689,7 +689,7 @@ void AvPlayerSource::VideoDecoderThread(std::stop_token stop) {
     m_video_decoder_thread.Join();
 }
 
-void AvPlayerSource::AudioDecoderThread(std::stop_token stop) {
+void AvPlayerSource::AudioDecoderThread() {
     using namespace std::chrono;
     thread_name_set("shadPS4:AvAudioDecoder");
 
@@ -708,7 +708,7 @@ void AvPlayerSource::AudioDecoderThread(std::stop_token stop) {
     }
     Packet packet;
     std::optional<u32> spare; // a buffer taken and not filled
-    while (!stop.stop_requested() && m_audio_packets.Pop(packet)) {
+    while (!m_audio_decoder_thread.Stopping() && m_audio_packets.Pop(packet)) {
         if (!spare.has_value()) {
             u32 index = 0;
             if (!m_audio_buffers.Pop(index)) {

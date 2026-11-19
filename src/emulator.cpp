@@ -15,7 +15,6 @@
 #include <streams/file_stream.h>
 
 #include <chrono>
-#include <stop_token>
 #include <thread>
 #include "common/elf_info.h"
 #include "common/event_mutex.h"
@@ -96,9 +95,11 @@ void Emulator::Shutdown() {
     Common::Log::Flush();
     Libraries::SaveData::Backup::StopThread();
     Storage::DataBase::Instance().Close();
-    play_time_thread.request_stop();
-    if (play_time_thread.joinable()) {
-        play_time_thread.join();
+    if (stop_thread_started(&play_time_thread)) {
+        stop_thread_request(&play_time_thread);
+        retro_eventcount_notify(&play_time_wake);
+        stop_thread_join(&play_time_thread);
+        retro_eventcount_free(&play_time_wake);
     }
     UpdatePlayTime(Common::Singleton<Common::ElfInfo>::Instance()->GameSerial());
     exit_done = true;
@@ -678,19 +679,19 @@ void Emulator::Run(std::filesystem::path file, std::vector<std::string> args,
         // every minute of it, until the thread is stopped
         start_time = Libraries::Kernel::GameDeadlineIn(0);
 
-        play_time_thread = std::jthread([this, id](std::stop_token stop) {
-            retro_eventcount_t stopped;
-            retro_eventcount_init(&stopped);
-            {
-                std::stop_callback wake{stop, [&stopped] { retro_eventcount_notify(&stopped); }};
+        play_time_serial = id;
+        retro_eventcount_init(&play_time_wake);
+        stop_thread_start(
+            &play_time_thread,
+            [](void* arg) {
+                auto* self = static_cast<Emulator*>(arg);
                 while (!Libraries::Kernel::GameWait(
-                    &stopped, Libraries::Kernel::GameDeadlineIn(60'000'000'000ULL),
-                    [&stop] { return stop.stop_requested(); })) {
-                    UpdatePlayTime(id);
+                    &self->play_time_wake, Libraries::Kernel::GameDeadlineIn(60'000'000'000ULL),
+                    [self] { return stop_thread_stopping(&self->play_time_thread) != 0; })) {
+                    self->UpdatePlayTime(self->play_time_serial);
                 }
-            }
-            retro_eventcount_free(&stopped);
-        });
+            },
+            this);
     }
 
     linker->Execute(args);

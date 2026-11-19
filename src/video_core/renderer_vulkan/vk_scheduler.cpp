@@ -60,15 +60,16 @@ Scheduler::Scheduler(const Instance& instance)
     sessions.reserve(64);
     submit_buffers.reserve(128);
     BeginSession();
-    priority_pending_ops_thread =
-        std::jthread(std::bind_front(&Scheduler::PriorityPendingOpsThread, this));
+    stop_thread_start(
+        &priority_pending_ops_thread,
+        [](void* self) { static_cast<Scheduler*>(self)->PriorityPendingOpsThread(); }, this);
 }
 
 Scheduler::~Scheduler() {
-    priority_pending_ops_thread.request_stop();
-    if (priority_pending_ops_thread.joinable()) {
-        priority_pending_ops_thread.join();
-    }
+    // Asked to stop, then woken where it waits for an operation
+    stop_thread_request(&priority_pending_ops_thread);
+    retro_eventcount_notify(&priority_pending_ops_ec);
+    stop_thread_join(&priority_pending_ops_thread);
     retro_eventcount_free(&priority_pending_ops_ec);
 }
 
@@ -302,18 +303,16 @@ void Scheduler::SubmitExecution(SubmitInfo& info) {
     });
 }
 
-void Scheduler::PriorityPendingOpsThread(std::stop_token stoken) {
+void Scheduler::PriorityPendingOpsThread() {
     thread_name_set("shadPS4:GpuSchedPriorityPendingOpsRunner");
 
-    // A stop wakes the wait below
-    const std::stop_callback wake{stoken,
-                                  [this] { retro_eventcount_notify(&priority_pending_ops_ec); }};
-    while (!stoken.stop_requested()) {
+    while (!stop_thread_stopping(&priority_pending_ops_thread)) {
         priority_pending_ops.Take();
         PendingOp* op = priority_pending_ops.Pop();
         if (!op) {
             const int key = retro_eventcount_prepare_wait(&priority_pending_ops_ec);
-            if (!mpsc_stack_empty(&priority_pending_ops.incoming) || stoken.stop_requested()) {
+            if (!mpsc_stack_empty(&priority_pending_ops.incoming) ||
+                stop_thread_stopping(&priority_pending_ops_thread)) {
                 retro_eventcount_cancel_wait(&priority_pending_ops_ec);
                 continue;
             }
@@ -322,7 +321,7 @@ void Scheduler::PriorityPendingOpsThread(std::stop_token stoken) {
         }
 
         work_semaphore.Wait(op->gpu_tick);
-        if (stoken.stop_requested()) {
+        if (stop_thread_stopping(&priority_pending_ops_thread)) {
             ReleaseOp(op);
             break;
         }

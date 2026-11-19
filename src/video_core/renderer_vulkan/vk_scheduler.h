@@ -16,6 +16,7 @@
 #include "common/combiner.h"
 #include "common/interval_set.h"
 #include "common/node_pool.h"
+#include "common/stop_thread.h"
 #include "common/unique_function.h"
 #include "video_core/amdgpu/regs_color.h"
 #include "video_core/amdgpu/regs_primitive.h"
@@ -472,7 +473,7 @@ private:
 
     void SubmitExecution(SubmitInfo& info);
 
-    void PriorityPendingOpsThread(std::stop_token stoken);
+    void PriorityPendingOpsThread();
     void RunPendingOperations();
 
 private:
@@ -585,7 +586,7 @@ private:
     }
     PendingOps priority_pending_ops;
     retro_eventcount_t priority_pending_ops_ec{};
-    std::jthread priority_pending_ops_thread;
+    stop_thread_t priority_pending_ops_thread = STOP_THREAD_INIT;
     RenderState render_state;
     bool is_rendering = false;
 };

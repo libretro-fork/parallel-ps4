@@ -1,7 +1,6 @@
 // SPDX-FileCopyrightText: Copyright 2024 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
-#include <stop_token>
 #include <unordered_map>
 #include <queue>
 
@@ -42,17 +41,16 @@ static Common::EventCount done_queue_cv;
 static std::unordered_map<u64, InflateResult> results;
 static u64 next_request_id;
 
-void ZlibTaskThread(const std::stop_token& stop) {
+void ZlibTaskThread() {
     thread_name_set("shadPS4:ZlibTaskThread");
 
     // One inflater for the thread, reset per request rather than made each time.
     void* inflater = rinflate_new(15);
 
-    while (!stop.stop_requested()) {
+    while (!task_thread.Stopping()) {
         InflateTask task;
         {
-            // Pop from the task queue, unless stop has been requested.
-            const std::stop_callback wake{stop, [] { task_queue_cv.Notify(); }};
+            // Pop from the task queue, unless stop has been requested (which wakes the wait)
             bool got = false;
             task_queue_cv.Wait([&] {
                 got = mutex.Run([&] {
@@ -63,7 +61,7 @@ void ZlibTaskThread(const std::stop_token& stop) {
                     task_queue.pop();
                     return true;
                 });
-                return got || stop.stop_requested();
+                return got || task_thread.Stopping();
             });
             if (!got) {
                 break;
@@ -120,7 +118,7 @@ s32 PS4_SYSV_ABI sceZlibInitialize(const void* buffer, u32 length) {
     results.clear();
     next_request_id = 1;
 
-    task_thread.Run([](const std::stop_token& stop) { ZlibTaskThread(stop); });
+    task_thread.Run([] { ZlibTaskThread(); }, [] { task_queue_cv.Notify(); });
     return ORBIS_OK;
 }
 

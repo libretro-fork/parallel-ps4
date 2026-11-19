@@ -9,6 +9,7 @@
 #include "common/error.h"
 #include "common/multi_level_page_table.h"
 #include "common/signal_context.h"
+#include "common/stop_thread.h"
 #include "common/thread_name.h"
 #include "core/emulator_settings.h"
 #include "core/memory.h"
@@ -265,7 +266,7 @@ struct PageManager::Impl {
 #ifdef __linux__
 struct UffdImpl : public PageManager::Impl {
 private:
-    std::jthread ufd_thread;
+    stop_thread_t ufd_thread = STOP_THREAD_INIT;
     int uffd;
 
 public:
@@ -292,10 +293,16 @@ public:
         }
 
         // Create uffd handler thread
-        ufd_thread = std::jthread([&](std::stop_token token) { UffdHandler(token); });
+        stop_thread_start(
+            &ufd_thread, [](void* self) { static_cast<UffdImpl*>(self)->UffdHandler(); }, this);
     }
 
-    ~UffdImpl() = default;
+    // As the jthread it was: asked to stop and waited for. The thread sits in poll, so this
+    // returns once a fault has come; the object lives as long as the emulator's process.
+    ~UffdImpl() {
+        stop_thread_request(&ufd_thread);
+        stop_thread_join(&ufd_thread);
+    }
 
     void OnMap(VAddr address, size_t size) override {
         PageManager::Impl::OnMap(address, size);
@@ -326,7 +333,7 @@ public:
                    Common::GetLastErrorMsg());
     }
 
-    void UffdHandler(std::stop_token token) {
+    void UffdHandler() {
         thread_name_set("shadPS4:Uffd");
 
         auto regions = Core::Memory::Instance()->GetAddressSpace().GetUsableRegions();
@@ -335,7 +342,7 @@ public:
         }
         LOG_INFO(Common_Memory, "registered reserved memory with userfaultfd");
 
-        while (!token.stop_requested()) {
+        while (!stop_thread_stopping(&ufd_thread)) {
             pollfd pollfd;
             pollfd.fd = uffd;
             pollfd.events = POLLIN;

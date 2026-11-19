@@ -16,6 +16,7 @@
 #include <retro_atomic.h>
 #include "common/assert.h"
 #include "common/slot_vector.h"
+#include "common/stop_thread.h"
 #include "common/types.h"
 #include "common/unique_function.h"
 #include "video_core/amdgpu/cb_db_extent.h"
@@ -207,7 +208,7 @@ private:
     void ProcessCeQueue();
     /// One submission fewer; the last wakes WaitGpuIdle.
     void SubmitFinished();
-    void Process(std::stop_token stoken);
+    void Process();
 
     /// Submissions in order: pushed by any thread onto a lock-free stack, and taken by the GPU
     /// thread into a list of its own, oldest first, which only it touches.
@@ -299,7 +300,7 @@ private:
     Vulkan::Rasterizer* rasterizer{};
     Libraries::VideoOut::VideoOutPort* vo_port{};
     const bool guest_markers_enabled;
-    std::jthread process_thread{};
+    stop_thread_t process_thread = STOP_THREAD_INIT;
     retro_atomic_int_t num_submits{};
     retro_atomic_int_t num_commands{};
     retro_atomic_int_t submit_done{};

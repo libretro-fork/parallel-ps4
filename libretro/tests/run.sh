@@ -140,6 +140,15 @@ for san in address,undefined thread; do
         $L/features/features_cpu.c -o "$OUT/node_pool_test" -lpthread
     "$OUT/node_pool_test"
 done
+# The service thread that can be asked to stop, where the core had std::jthread: 5000 started,
+# stopped as they work or go into their wait, and joined
+for san in address,undefined thread; do
+    $CC -std=gnu89 -O1 -g -Wall -Wdeclaration-after-statement -fsanitize=$san -Isrc -I$L/include \
+        libretro/tests/stop_thread_test.c src/common/stop_thread.c $L/rthreads/rthreads.c \
+        $L/rthreads/retro_eventcount.c $L/features/features_cpu.c -o "$OUT/stop_thread_test" \
+        -lpthread
+    "$OUT/stop_thread_test"
+done
 # The latch that stands where the core had semaphores: every wait woken by its set, four
 # threads, 20000 sets each
 for san in address,undefined thread; do

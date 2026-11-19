@@ -572,7 +572,7 @@ void Linker::Execute(const std::vector<std::string>& args) {
 
     memory->SetupMemoryRegions(fmem_size, use_extended_mem1, use_extended_mem2);
 
-    main_thread.Run([this, module, &args, has_libcinternal](std::stop_token) {
+    main_thread.Run([this, module, &args, has_libcinternal] {
         if (Libraries::Kernel::g_curthread) {
             Libraries::Kernel::g_curthread->name = "Game:Main";
         }

@@ -240,19 +240,18 @@ void AvPlayerState::SetAvSyncMode(AvPlayerAvSyncMode sync_mode) {
     m_sync_mode = sync_mode;
 }
 
-void AvPlayerState::AvControllerThread(std::stop_token stop) {
+void AvPlayerState::AvControllerThread() {
     using std::chrono::milliseconds;
     thread_name_set("shadPS4:AvController");
 
     // An event wakes the thread at once; the buffering state is looked at every 5 ms, as it was
-    const std::stop_callback wake{stop, [this] { m_event_ready.Notify(); }};
-    while (!stop.stop_requested()) {
+    while (!m_controller_thread.Stopping()) {
         if (!m_event_queue.Empty()) {
             ProcessEvent();
             continue;
         }
         const int key = retro_eventcount_prepare_wait(m_event_ready.get());
-        if (!m_event_queue.Empty() || stop.stop_requested()) {
+        if (!m_event_queue.Empty() || m_controller_thread.Stopping()) {
             retro_eventcount_cancel_wait(m_event_ready.get());
             continue;
         }
@@ -288,7 +287,8 @@ void AvPlayerState::WarningEvent(s32 id) {
 
 // Called inside GAME thread
 void AvPlayerState::StartControllerThread() {
-    m_controller_thread.Run([this](std::stop_token stop) { this->AvControllerThread(stop); });
+    m_controller_thread.Run([this] { this->AvControllerThread(); },
+                            [this] { m_event_ready.Notify(); });
 }
 
 // Called inside GAME thread

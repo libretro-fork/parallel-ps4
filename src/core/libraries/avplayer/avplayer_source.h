@@ -8,7 +8,6 @@
 #include <memory>
 #include <mutex>
 #include <optional>
-#include <stop_token>
 #include <string_view>
 #include <type_traits>
 #include <utility>
@@ -263,9 +262,9 @@ private:
     // Makes the bytes below hi of a file that is not mapped readable.
     bool Load(size_t hi);
 
-    void DemuxerThread(std::stop_token stop);
-    void VideoDecoderThread(std::stop_token stop);
-    void AudioDecoderThread(std::stop_token stop);
+    void DemuxerThread();
+    void VideoDecoderThread();
+    void AudioDecoderThread();
 
     bool HasRunningThreads() const;
 

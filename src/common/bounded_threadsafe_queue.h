@@ -5,7 +5,6 @@
 
 #include <array>
 #include <cstddef>
-#include <stop_token>
 #include <utility>
 
 #include <retro_atomic.h>
@@ -69,37 +68,20 @@ public:
     }
 
     void PopWait(T& t) {
-        PopWait(t, std::stop_token{});
-    }
-
-    /// False if @stop_token was stopped first.
-    bool PopWait(T& t, std::stop_token stop_token) {
-        // A stop wakes the wait below
-        const std::stop_callback wake{stop_token, [this] { retro_eventcount_notify(&m_readable); }};
         while (!TryTake(t)) {
-            if (stop_token.stop_requested()) {
-                return false;
-            }
             const int key = retro_eventcount_prepare_wait(&m_readable);
-            if (!Empty() || stop_token.stop_requested()) {
+            if (!Empty()) {
                 retro_eventcount_cancel_wait(&m_readable);
                 continue;
             }
             retro_eventcount_commit_wait(&m_readable, key);
         }
         retro_eventcount_notify(&m_writable);
-        return true;
     }
 
     T PopWait() {
         T t;
         PopWait(t);
-        return t;
-    }
-
-    T PopWait(std::stop_token stop_token) {
-        T t;
-        PopWait(t, stop_token);
         return t;
     }
 

@@ -655,25 +655,30 @@ std::uint32_t VblankTicks() {
                   : 0;
 }
 
-bool WaitVblankTicks(std::uint32_t seen, const std::stop_token& stop) {
-    if (!shared) {
-        return false;
+void WakeVblankWaits() {
+  if (shared) {
+    wakes.vblank.Notify();
+  }
+}
+
+bool WaitVblankTicks(std::uint32_t seen, retro_atomic_int_t *stop) {
+  if (!shared) {
+    return false;
+  }
+  for (;;) {
+    const int key = wakes.vblank.Prepare();
+    if (retro_atomic_load_acquire_int(stop) != 0 ||
+        retro_atomic_load_acquire_int(&shared->quit) != 0) {
+      wakes.vblank.Cancel();
+      return false;
     }
-    // The stop is a notify of the same wake, from here
-    const std::stop_callback wake(stop, [] { wakes.vblank.Notify(); });
-    for (;;) {
-        const int key = wakes.vblank.Prepare();
-        if (stop.stop_requested() || retro_atomic_load_acquire_int(&shared->quit) != 0) {
-            wakes.vblank.Cancel();
-            return false;
-        }
-        if (static_cast<std::uint32_t>(retro_atomic_load_acquire_int(&shared->vblank_ticks)) !=
-            seen) {
-            wakes.vblank.Cancel();
-            return true;
-        }
-        wakes.vblank.Wait(key);
+    if (static_cast<std::uint32_t>(
+            retro_atomic_load_acquire_int(&shared->vblank_ticks)) != seen) {
+      wakes.vblank.Cancel();
+      return true;
     }
+    wakes.vblank.Wait(key);
+  }
 }
 
 } // namespace Libretro

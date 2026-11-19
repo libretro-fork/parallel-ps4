@@ -5,8 +5,8 @@
 
 #include <chrono>
 #include <functional>
-#include <stop_token>
 #include <thread>
+#include <retro_atomic.h>
 #include "core/libraries/kernel/threads/pthread.h"
 #include "core/tls.h"
 
@@ -71,8 +71,12 @@ public:
         Stop();
     }
 
-    void Run(std::function<void(std::stop_token)>&& func) {
+    /// Runs @func on a thread. @wake, if given, wakes whatever @func waits on: Stop calls it
+    /// once the thread has been asked to stop, where a stop_token's callback used to.
+    void Run(std::function<void()>&& func, std::function<void()>&& wake = {}) {
         this->func = std::move(func);
+        this->wake = std::move(wake);
+        retro_atomic_store_release_int(&stop, 0);
         PthreadAttrT attr{};
         posix_pthread_attr_init(&attr);
         posix_pthread_create(&thread, &attr, HOST_CALL(RunWrapper), this);
@@ -90,14 +94,25 @@ public:
         return thread != nullptr;
     }
 
+    /// On the thread, and anywhere: whether it has been asked to stop. One load of a flag
+    /// that lies in the object the thread works on.
+    bool Stopping() {
+        return retro_atomic_load_acquire_int(&stop) != 0;
+    }
+
     void Stop() {
         if (Joinable()) {
-            stop.request_stop();
+            // With a full fence, as an eventcount's notifier's state change
+            (void)retro_atomic_exchange_int(&stop, 1);
+            if (wake) {
+                wake();
+            }
             Join();
         }
         thread = nullptr;
         func = nullptr;
-        stop = std::stop_source{};
+        wake = nullptr;
+        retro_atomic_store_release_int(&stop, 0);
     }
 
     /// The emulator's own service threads made this way run host code: the game's time does
@@ -107,7 +122,7 @@ public:
         Thread* thr = (Thread*)arg;
         SetGameThread(false);
         game_clock_idle(GameClock());
-        thr->func(thr->stop.get_token());
+        thr->func();
         // Counted again for its end, unless what ran counted itself
         if (!IsGameThread()) {
             game_clock_busy(GameClock());
@@ -118,8 +133,9 @@ public:
 
 private:
     PthreadT thread{};
-    std::function<void(std::stop_token)> func;
-    std::stop_source stop;
+    std::function<void()> func;
+    std::function<void()> wake;
+    retro_atomic_int_t stop{0};
 };
 
 } // namespace Libraries::Kernel

@@ -5,7 +5,8 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <stop_token>
+
+#include <retro_atomic.h>
 
 // What the emulator calls in the libretro core's side of its own process (host.cpp), which
 // passes it on to the core in the frontend's process.
@@ -112,9 +113,11 @@ void SetRumble(std::uint32_t pad, std::uint8_t small_motor, std::uint8_t large_m
 
 /// The frontend's frames so far, one a retro_run (shared_state.h, vblank_ticks); it wraps.
 std::uint32_t VblankTicks();
-/// Until the frontend's frames are past @seen, the emulator quits, or @stop is requested
-/// (which wakes it). Nothing is timed: it parks on the core's notify. @return false when
-/// stopped or quitting.
-bool WaitVblankTicks(std::uint32_t seen, const std::stop_token& stop);
+/// Until the frontend's frames are past @seen, the emulator quits, or *@stop is
+/// nonzero (set it, then WakeVblankWaits). Nothing is timed: it parks on the
+/// core's notify. @return false when stopped or quitting.
+bool WaitVblankTicks(std::uint32_t seen, retro_atomic_int_t *stop);
+/// Wakes every WaitVblankTicks, to look at its @stop again
+void WakeVblankWaits();
 
 } // namespace Libretro

@@ -1,8 +1,6 @@
 // SPDX-FileCopyrightText: Copyright 2024-2026 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
-#include <chrono>
-#include <stop_token>
 #include <thread>
 #include <retro_atomic.h>
 #include "common/assert.h"
@@ -53,12 +51,15 @@ Liverpool::Liverpool() : guest_markers_enabled{emu_settings_get_vkguest_markers(
     retro_eventcount_init(&work_ec);
     retro_eventcount_init(&idle_ec);
     retro_eventcount_init(&command_done_ec);
-    process_thread = std::jthread{std::bind_front(&Liverpool::Process, this)};
+    stop_thread_start(
+        &process_thread, [](void* self) { static_cast<Liverpool*>(self)->Process(); }, this);
 }
 
 Liverpool::~Liverpool() {
-    process_thread.request_stop();
-    process_thread.join();
+    // Asked to stop, then woken wherever it is parked on work_ec
+    stop_thread_request(&process_thread);
+    retro_eventcount_notify(&work_ec);
+    stop_thread_join(&process_thread);
     auto destroy_all = [](TaskQueue& queue) {
         queue.Take();
         while (!queue.Empty()) {
@@ -129,22 +130,21 @@ void Liverpool::ProcessCommands() {
     }
 }
 
-void Liverpool::Process(std::stop_token stoken) {
+void Liverpool::Process() {
     thread_name_set("shadPS4:GpuCommandProcessor");
     gpu_id = std::this_thread::get_id();
 #ifdef __linux__
     gpu_tid = gettid();
 #endif
 
-    // A stop wakes the thread wherever it parks on work_ec
-    const std::stop_callback wake_on_stop{stoken, [this] { retro_eventcount_notify(&work_ec); }};
     const auto has_work = [&] {
         return static_cast<u32>(retro_atomic_load_seq_cst_int(&num_commands)) ||
                static_cast<u32>(retro_atomic_load_seq_cst_int(&num_submits)) ||
-               (retro_atomic_load_acquire_int(&submit_done) != 0) || stoken.stop_requested();
+               (retro_atomic_load_acquire_int(&submit_done) != 0) ||
+               stop_thread_stopping(&process_thread);
     };
 
-    while (!stoken.stop_requested()) {
+    while (!stop_thread_stopping(&process_thread)) {
         while (!has_work()) {
             const int key = retro_eventcount_prepare_wait(&work_ec);
             if (has_work()) {
@@ -153,7 +153,7 @@ void Liverpool::Process(std::stop_token stoken) {
             }
             retro_eventcount_commit_wait(&work_ec, key);
         }
-        if (stoken.stop_requested()) {
+        if (stop_thread_stopping(&process_thread)) {
             break;
         }
 
@@ -161,7 +161,7 @@ void Liverpool::Process(std::stop_token stoken) {
 
         while ((static_cast<u32>(retro_atomic_load_seq_cst_int(&num_submits)) ||
                 static_cast<u32>(retro_atomic_load_seq_cst_int(&num_commands))) &&
-               !stoken.stop_requested()) {
+               !stop_thread_stopping(&process_thread)) {
             ProcessCommands();
             ProcessCeQueue();
 

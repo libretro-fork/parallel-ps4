@@ -4,8 +4,8 @@
 #pragma once
 
 #include <chrono>
-#include <stop_token>
 #include <thread>
+#include "common/stop_thread.h"
 #include "core/libraries/kernel/time.h"
 #include "core/libraries/videoout/video_out.h"
 
@@ -183,7 +183,7 @@ private:
     void DrawBlankFrame(); // Video port out not open
     void DrawLastFrame();  // Used when there is no flip request
     void SubmitFlipInternal(VideoOutPort* port, s32 index, s64 flip_arg, bool is_eop = false);
-    void PresentThread(std::stop_token token);
+    void PresentThread();
     /// One of the console's vblanks: a flip taken if one is due, the vblank events, the status.
     void Vblank();
     Request ReceiveRequest();
@@ -194,7 +194,7 @@ private:
     /// thread; a full ring has the GPU thread wait on request_taken_ec.
     retro_spsc_t requests{};
     retro_eventcount_t request_taken_ec{};
-    std::jthread present_thread;
+    stop_thread_t present_thread = STOP_THREAD_INIT;
 };
 
 } // namespace Libraries::VideoOut

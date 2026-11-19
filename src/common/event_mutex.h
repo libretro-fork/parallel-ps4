@@ -92,7 +92,6 @@ private:
 
 #include <chrono>
 #include <condition_variable>
-#include <stop_token>
 
 namespace Common {
 
@@ -131,25 +130,6 @@ public:
         while (!pred()) {
             wait(lock);
         }
-    }
-
-    template <typename Lock, typename Pred>
-    bool wait(Lock& lock, std::stop_token stop, Pred pred) {
-        const std::stop_callback wake{stop, [this] { notify_all(); }};
-        while (!pred()) {
-            if (stop.stop_requested()) {
-                return false;
-            }
-            const int key = retro_eventcount_prepare_wait(&ec);
-            if (stop.stop_requested()) {
-                retro_eventcount_cancel_wait(&ec);
-                return pred();
-            }
-            lock.unlock();
-            retro_eventcount_commit_wait(&ec, key);
-            lock.lock();
-        }
-        return true;
     }
 
     template <typename Lock, typename Clock, typename Duration>

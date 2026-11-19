@@ -63,7 +63,7 @@ private:
     void EmitEvent(AvPlayerEvents event_id, void* event_data = nullptr);
     bool SetState(AvState state);
 
-    void AvControllerThread(std::stop_token stop);
+    void AvControllerThread();
 
     void AddSourceEvent();
     void WarningEvent(s32 id);
