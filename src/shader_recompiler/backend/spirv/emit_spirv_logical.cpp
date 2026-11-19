@@ -7,19 +7,19 @@
 namespace Shader::Backend::SPIRV {
 
 Id EmitLogicalOr(EmitContext& ctx, Id a, Id b) {
-    return ctx.OpLogicalOr(ctx.U1[1], a, b);
+    return spv_OpLogicalOr(&ctx.m, ctx.U1[1], a, b);
 }
 
 Id EmitLogicalAnd(EmitContext& ctx, Id a, Id b) {
-    return ctx.OpLogicalAnd(ctx.U1[1], a, b);
+    return spv_OpLogicalAnd(&ctx.m, ctx.U1[1], a, b);
 }
 
 Id EmitLogicalXor(EmitContext& ctx, Id a, Id b) {
-    return ctx.OpLogicalNotEqual(ctx.U1[1], a, b);
+    return spv_OpLogicalNotEqual(&ctx.m, ctx.U1[1], a, b);
 }
 
 Id EmitLogicalNot(EmitContext& ctx, Id value) {
-    return ctx.OpLogicalNot(ctx.U1[1], value);
+    return spv_OpLogicalNot(&ctx.m, ctx.U1[1], value);
 }
 
 } // namespace Shader::Backend::SPIRV

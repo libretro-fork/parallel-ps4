@@ -13,7 +13,7 @@
 
 namespace Serialization {
 /* You should increment versions below once corresponding serialization scheme is changed. */
-static constexpr u32 ShaderBinaryVersion = 12u; // 12: _CLAMP, float atomic min/max, FMask reads
+static constexpr u32 ShaderBinaryVersion = 13u; // 13: written by spv_module, not Sirit
 static constexpr u32 ShaderMetaVersion = 7u;    // 7: the whole Info, the walker as made
 static constexpr u32 PipelineKeyVersion = 3u;
 } // namespace Serialization

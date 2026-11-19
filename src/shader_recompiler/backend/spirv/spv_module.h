@@ -51,6 +51,7 @@ enum spv_module_section {
 
 #define SPV_MODULE_MAX_CAPS 96
 #define SPV_MODULE_MAX_EXTS 32
+#define SPV_MODULE_MAX_IMPORTS 8
 
 typedef struct spv_decl_slot {
     uint32_t off; /* word of its opcode in the types section, plus one; 0: free */
@@ -67,10 +68,17 @@ typedef struct spv_module {
     uint32_t num_caps;
     const char* exts[SPV_MODULE_MAX_EXTS]; /* the caller's strings, kept while it writes */
     uint32_t num_exts;
+    const char* import_names[SPV_MODULE_MAX_IMPORTS]; /* extended sets imported, and ids */
+    uint32_t import_ids[SPV_MODULE_MAX_IMPORTS];
+    uint32_t num_imports;
+    struct spirv_words_buf phis; /* code offsets of the OpPhis written before their values */
     spv_decl_slot_t* decls; /* types and constants made, by their words */
     uint32_t decls_mask;    /* slots minus one: a power of two less one */
     uint32_t num_decls;
 } spv_module_t;
+
+/* Memory from the C heap (realloc and free), for spv_module_init. */
+void* spv_module_heap_grow(void* user, void* old, size_t old_bytes, size_t new_bytes);
 
 /* A module with its memory from @grow (@user its first argument). */
 void spv_module_init(spv_module_t* m, spirv_words_grow_t grow, void* user);
@@ -114,6 +122,20 @@ static SPIRV_WORDS_INLINE uint32_t spv_module_result(spv_module_t* m, uint32_t o
     }
     return id;
 }
+
+/* The id of the extended instruction set @name (a string that lives as long as the module),
+ * imported the first time it is asked for. */
+uint32_t spv_module_import(spv_module_t* m, const char* name);
+
+/* OpPhi of the @n parents @blocks, its values left for spv_module_patch_phis: its id. */
+uint32_t spv_module_phi_deferred(spv_module_t* m, uint32_t type, const uint32_t* blocks,
+                                 uint32_t n);
+
+/* Each deferred OpPhi's (value, parent) pairs in the order they were written, from @fn: it
+ * gets the argument's index within its phi and the parent written, and sets both. */
+typedef void (*spv_phi_patch_fn)(void* ctx, uint32_t arg, uint32_t parent, uint32_t* value_out,
+                                 uint32_t* parent_out);
+void spv_module_patch_phis(spv_module_t* m, spv_phi_patch_fn fn, void* ctx);
 
 /* @op with a literal string after the @npre words and before the @npost ones. */
 void spv_module_op_str(spv_module_t* m, enum spv_module_section sec, uint32_t op,

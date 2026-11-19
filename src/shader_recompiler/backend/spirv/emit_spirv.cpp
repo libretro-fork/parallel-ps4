@@ -22,34 +22,34 @@
 namespace Shader::Backend::SPIRV {
 namespace {
 
-static constexpr spv::ExecutionMode GetInputPrimitiveType(AmdGpu::PrimitiveType type) {
+static constexpr u32 GetInputPrimitiveType(AmdGpu::PrimitiveType type) {
     switch (type) {
     case AmdGpu::PrimitiveType::PointList:
-        return spv::ExecutionMode::InputPoints;
+        return SpvExecutionModeInputPoints;
     case AmdGpu::PrimitiveType::LineList:
     case AmdGpu::PrimitiveType::LineStrip:
-        return spv::ExecutionMode::InputLines;
+        return SpvExecutionModeInputLines;
     case AmdGpu::PrimitiveType::TriangleList:
     case AmdGpu::PrimitiveType::TriangleStrip:
     case AmdGpu::PrimitiveType::RectList:
-        return spv::ExecutionMode::Triangles;
+        return SpvExecutionModeTriangles;
     case AmdGpu::PrimitiveType::AdjTriangleList:
-        return spv::ExecutionMode::InputTrianglesAdjacency;
+        return SpvExecutionModeInputTrianglesAdjacency;
     case AmdGpu::PrimitiveType::AdjLineList:
-        return spv::ExecutionMode::InputLinesAdjacency;
+        return SpvExecutionModeInputLinesAdjacency;
     default:
         UNREACHABLE_MSG("Unknown input primitive type {}", u32(type));
     }
 }
 
-static constexpr spv::ExecutionMode GetOutputPrimitiveType(AmdGpu::GsOutputPrimitiveType type) {
+static constexpr u32 GetOutputPrimitiveType(AmdGpu::GsOutputPrimitiveType type) {
     switch (type) {
     case AmdGpu::GsOutputPrimitiveType::PointList:
-        return spv::ExecutionMode::OutputVertices;
+        return SpvExecutionModeOutputVertices;
     case AmdGpu::GsOutputPrimitiveType::LineStrip:
-        return spv::ExecutionMode::OutputLineStrip;
+        return SpvExecutionModeOutputLineStrip;
     case AmdGpu::GsOutputPrimitiveType::TriangleStrip:
-        return spv::ExecutionMode::OutputTriangleStrip;
+        return SpvExecutionModeOutputTriangleStrip;
     default:
         UNREACHABLE_MSG("Unknown output primitive type {}", u32(type));
     }
@@ -66,6 +66,8 @@ ArgType Arg(EmitContext& ctx, const IR::Value& arg) {
         return ctx.Def(arg);
     } else if constexpr (std::is_same_v<ArgType, const IR::Value&>) {
         return arg;
+    } else if constexpr (std::is_same_v<ArgType, Imm32>) {
+        return Imm32(arg.U32());
     } else if constexpr (std::is_same_v<ArgType, u32>) {
         return arg.U32();
     } else if constexpr (std::is_same_v<ArgType, u64>) {
@@ -160,21 +162,21 @@ void Traverse(EmitContext& ctx, const IR::Program& program) {
         case IR::AbstractSyntaxNode::Type::Block: {
             const Id label{node.data.block->Definition<Id>()};
             if (current_block) {
-                ctx.OpBranch(label);
+                spv_OpBranch(&ctx.m, label);
             }
             current_block = node.data.block;
             ctx.AddLabel(label);
             for (IR::Inst& inst : node.data.block->Instructions()) {
                 EmitInst(ctx, &inst);
             }
-            ctx.first_to_last_label_map[label.value] = ctx.last_label;
+            ctx.first_to_last_label_map[label] = ctx.last_label;
             break;
         }
         case IR::AbstractSyntaxNode::Type::If: {
             const Id if_label{node.data.if_node.body->Definition<Id>()};
             const Id endif_label{node.data.if_node.merge->Definition<Id>()};
-            ctx.OpSelectionMerge(endif_label, spv::SelectionControlMask::MaskNone);
-            ctx.OpBranchConditional(ctx.Def(node.data.if_node.cond), if_label, endif_label);
+            spv_OpSelectionMerge(&ctx.m, endif_label, u32(SpvSelectionControlMaskNone));
+            spv_OpBranchConditional(&ctx.m, ctx.Def(node.data.if_node.cond), if_label, endif_label);
             break;
         }
         case IR::AbstractSyntaxNode::Type::Loop: {
@@ -182,33 +184,34 @@ void Traverse(EmitContext& ctx, const IR::Program& program) {
             const Id continue_label{node.data.loop.continue_block->Definition<Id>()};
             const Id endloop_label{node.data.loop.merge->Definition<Id>()};
 
-            ctx.OpLoopMerge(endloop_label, continue_label, spv::LoopControlMask::MaskNone);
-            ctx.OpBranch(body_label);
+            spv_OpLoopMerge(&ctx.m, endloop_label, continue_label, u32(SpvLoopControlMaskNone));
+            spv_OpBranch(&ctx.m, body_label);
             break;
         }
         case IR::AbstractSyntaxNode::Type::Break: {
             const Id break_label{node.data.break_node.merge->Definition<Id>()};
             const Id skip_label{node.data.break_node.skip->Definition<Id>()};
-            ctx.OpBranchConditional(ctx.Def(node.data.break_node.cond), break_label, skip_label);
+            spv_OpBranchConditional(&ctx.m, ctx.Def(node.data.break_node.cond), break_label,
+                                    skip_label);
             break;
         }
         case IR::AbstractSyntaxNode::Type::EndIf:
             if (current_block) {
-                ctx.OpBranch(node.data.end_if.merge->Definition<Id>());
+                spv_OpBranch(&ctx.m, node.data.end_if.merge->Definition<Id>());
             }
             break;
         case IR::AbstractSyntaxNode::Type::Repeat: {
             Id cond{ctx.Def(node.data.repeat.cond)};
             const Id loop_header_label{node.data.repeat.loop_header->Definition<Id>()};
             const Id merge_label{node.data.repeat.merge->Definition<Id>()};
-            ctx.OpBranchConditional(cond, loop_header_label, merge_label);
+            spv_OpBranchConditional(&ctx.m, cond, loop_header_label, merge_label);
             break;
         }
         case IR::AbstractSyntaxNode::Type::Return:
-            ctx.OpReturn();
+            spv_OpReturn(&ctx.m);
             break;
         case IR::AbstractSyntaxNode::Type::Unreachable:
-            ctx.OpUnreachable();
+            spv_OpUnreachable(&ctx.m);
             break;
         }
         if (node.type != IR::AbstractSyntaxNode::Type::Block) {
@@ -218,43 +221,44 @@ void Traverse(EmitContext& ctx, const IR::Program& program) {
 }
 
 Id DefineMain(EmitContext& ctx, const IR::Program& program) {
-    const Id void_function{ctx.TypeFunction(ctx.void_id)};
-    const Id main{ctx.OpFunction(ctx.void_id, spv::FunctionControlMask::MaskNone, void_function)};
+    const Id void_function{spv_TypeFunction0(&ctx.m, ctx.void_id)};
+    const Id main{
+        spv_OpFunction(&ctx.m, ctx.void_id, u32(SpvFunctionControlMaskNone), void_function)};
     for (IR::Block* const block : program.blocks) {
-        block->SetDefinition(ctx.OpLabel());
+        block->SetDefinition(spv_OpLabel(&ctx.m));
     }
     Traverse(ctx, program);
-    ctx.OpFunctionEnd();
+    spv_OpFunctionEnd(&ctx.m);
     return main;
 }
 
-spv::ExecutionMode ExecutionMode(AmdGpu::TessellationType primitive) {
+u32 ExecutionMode(AmdGpu::TessellationType primitive) {
     switch (primitive) {
     case AmdGpu::TessellationType::Isoline:
-        return spv::ExecutionMode::Isolines;
+        return SpvExecutionModeIsolines;
     case AmdGpu::TessellationType::Triangle:
-        return spv::ExecutionMode::Triangles;
+        return SpvExecutionModeTriangles;
     case AmdGpu::TessellationType::Quad:
-        return spv::ExecutionMode::Quads;
+        return SpvExecutionModeQuads;
     }
     UNREACHABLE_MSG("Tessellation primitive {}",
                     enum_name(&enum_names_AmdGpu_TessellationType, static_cast<s64>(primitive)));
 }
 
-spv::ExecutionMode ExecutionMode(AmdGpu::TessellationPartitioning spacing) {
+u32 ExecutionMode(AmdGpu::TessellationPartitioning spacing) {
     switch (spacing) {
     case AmdGpu::TessellationPartitioning::Integer:
-        return spv::ExecutionMode::SpacingEqual;
+        return SpvExecutionModeSpacingEqual;
     case AmdGpu::TessellationPartitioning::FracOdd:
-        return spv::ExecutionMode::SpacingFractionalOdd;
+        return SpvExecutionModeSpacingFractionalOdd;
     case AmdGpu::TessellationPartitioning::FracEven:
-        return spv::ExecutionMode::SpacingFractionalEven;
+        return SpvExecutionModeSpacingFractionalEven;
     case AmdGpu::TessellationPartitioning::Pow2:
         // Pow2 rounds tessellation factors to the nearest power of 2, which has no
         // direct Vulkan equivalent. SpacingEqual (integer) is the closest match.
         LOG_WARNING(Render_Vulkan, "Tessellation partitioning Pow2 has no Vulkan equivalent, "
                                    "falling back to SpacingEqual");
-        return spv::ExecutionMode::SpacingEqual;
+        return SpvExecutionModeSpacingEqual;
     default:
         break;
     }
@@ -265,56 +269,56 @@ spv::ExecutionMode ExecutionMode(AmdGpu::TessellationPartitioning spacing) {
 
 void SetupCapabilities(const Info& info, const Profile& profile, const RuntimeInfo& runtime_info,
                        EmitContext& ctx) {
-    ctx.AddCapability(spv::Capability::Image1D);
-    ctx.AddCapability(spv::Capability::Sampled1D);
-    ctx.AddCapability(spv::Capability::ImageQuery);
-    ctx.AddCapability(spv::Capability::Int8);
-    ctx.AddCapability(spv::Capability::Int16);
-    ctx.AddCapability(spv::Capability::Int64);
-    ctx.AddCapability(spv::Capability::StorageBuffer8BitAccess);
-    ctx.AddCapability(spv::Capability::StorageBuffer16BitAccess);
+    spv_AddCapability(&ctx.m, u32(SpvCapabilityImage1D));
+    spv_AddCapability(&ctx.m, u32(SpvCapabilitySampled1D));
+    spv_AddCapability(&ctx.m, u32(SpvCapabilityImageQuery));
+    spv_AddCapability(&ctx.m, u32(SpvCapabilityInt8));
+    spv_AddCapability(&ctx.m, u32(SpvCapabilityInt16));
+    spv_AddCapability(&ctx.m, u32(SpvCapabilityInt64));
+    spv_AddCapability(&ctx.m, u32(SpvCapabilityStorageBuffer8BitAccess));
+    spv_AddCapability(&ctx.m, u32(SpvCapabilityStorageBuffer16BitAccess));
     if (info.uses_fp16) {
-        ctx.AddCapability(spv::Capability::Float16);
+        spv_AddCapability(&ctx.m, u32(SpvCapabilityFloat16));
     }
     if (info.uses_fp64) {
-        ctx.AddCapability(spv::Capability::Float64);
+        spv_AddCapability(&ctx.m, u32(SpvCapabilityFloat64));
     }
     if (info.has_storage_images) {
-        ctx.AddCapability(spv::Capability::StorageImageExtendedFormats);
-        ctx.AddCapability(spv::Capability::StorageImageReadWithoutFormat);
-        ctx.AddCapability(spv::Capability::StorageImageWriteWithoutFormat);
+        spv_AddCapability(&ctx.m, u32(SpvCapabilityStorageImageExtendedFormats));
+        spv_AddCapability(&ctx.m, u32(SpvCapabilityStorageImageReadWithoutFormat));
+        spv_AddCapability(&ctx.m, u32(SpvCapabilityStorageImageWriteWithoutFormat));
         if (profile.supports_image_load_store_lod) {
-            ctx.AddExtension("SPV_AMD_shader_image_load_store_lod");
-            ctx.AddCapability(spv::Capability::ImageReadWriteLodAMD);
+            spv_AddExtension(&ctx.m, "SPV_AMD_shader_image_load_store_lod");
+            spv_AddCapability(&ctx.m, u32(SpvCapabilityImageReadWriteLodAMD));
         }
     }
     if (info.has_image_gather) {
-        ctx.AddCapability(spv::Capability::ImageGatherExtended);
+        spv_AddCapability(&ctx.m, u32(SpvCapabilityImageGatherExtended));
     }
     if (info.has_image_query) {
-        ctx.AddCapability(spv::Capability::ImageQuery);
+        spv_AddCapability(&ctx.m, u32(SpvCapabilityImageQuery));
     }
     if ((info.uses_image_atomic_float_min_max && profile.supports_image_fp32_atomic_min_max) ||
         (info.uses_buffer_atomic_float_min_max && profile.supports_buffer_fp32_atomic_min_max)) {
-        ctx.AddExtension("SPV_EXT_shader_atomic_float_min_max");
-        ctx.AddCapability(spv::Capability::AtomicFloat32MinMaxEXT);
+        spv_AddExtension(&ctx.m, "SPV_EXT_shader_atomic_float_min_max");
+        spv_AddCapability(&ctx.m, u32(SpvCapabilityAtomicFloat32MinMaxEXT));
     }
     if (info.uses_lane_id) {
-        ctx.AddCapability(spv::Capability::GroupNonUniform);
+        spv_AddCapability(&ctx.m, u32(SpvCapabilityGroupNonUniform));
     }
     if (info.uses_group_quad) {
-        ctx.AddCapability(spv::Capability::GroupNonUniformQuad);
+        spv_AddCapability(&ctx.m, u32(SpvCapabilityGroupNonUniformQuad));
     }
     if (info.uses_group_shuffle) {
-        ctx.AddCapability(spv::Capability::GroupNonUniformShuffle);
+        spv_AddCapability(&ctx.m, u32(SpvCapabilityGroupNonUniformShuffle));
     }
     if (info.uses_group_ballot || info.loads.Get(IR::Attribute::SubgroupLtMask)) {
-        ctx.AddCapability(spv::Capability::GroupNonUniformBallot);
+        spv_AddCapability(&ctx.m, u32(SpvCapabilityGroupNonUniformBallot));
     }
     if (info.uses_shader_clock) {
         if (ctx.profile.supports_shader_subgroup_clock) {
-            ctx.AddExtension("SPV_KHR_shader_clock");
-            ctx.AddCapability(spv::Capability::ShaderClockKHR);
+            spv_AddExtension(&ctx.m, "SPV_KHR_shader_clock");
+            spv_AddCapability(&ctx.m, u32(SpvCapabilityShaderClockKHR));
         } else {
             LOG_WARNING(Render_Recompiler,
                         "Shader requires support for ShaderClockKHR capability"
@@ -323,19 +327,19 @@ void SetupCapabilities(const Info& info, const Profile& profile, const RuntimeIn
     }
     const auto stage = info.sw_stage;
     if (stage == SwStage::Vertex) {
-        ctx.AddExtension("SPV_KHR_shader_draw_parameters");
-        ctx.AddCapability(spv::Capability::DrawParameters);
+        spv_AddExtension(&ctx.m, "SPV_KHR_shader_draw_parameters");
+        spv_AddCapability(&ctx.m, u32(SpvCapabilityDrawParameters));
     }
     if (stage == SwStage::Geometry) {
-        ctx.AddCapability(spv::Capability::Geometry);
+        spv_AddCapability(&ctx.m, u32(SpvCapabilityGeometry));
     }
     if (info.hw_stage == HwStage::Fragment) {
         if (profile.supports_amd_shader_explicit_vertex_parameter) {
-            ctx.AddExtension("SPV_AMD_shader_explicit_vertex_parameter");
+            spv_AddExtension(&ctx.m, "SPV_AMD_shader_explicit_vertex_parameter");
         } else if (profile.supports_fragment_shader_barycentric) {
-            ctx.AddExtension("SPV_KHR_fragment_shader_barycentric");
-            ctx.AddCapability(spv::Capability::FragmentBarycentricKHR);
-            ctx.AddCapability(spv::Capability::InterpolationFunction);
+            spv_AddExtension(&ctx.m, "SPV_KHR_fragment_shader_barycentric");
+            spv_AddCapability(&ctx.m, u32(SpvCapabilityFragmentBarycentricKHR));
+            spv_AddCapability(&ctx.m, u32(SpvCapabilityInterpolationFunction));
         }
         if (info.loads.Get(IR::Attribute::SampleIndex) ||
             runtime_info.hw.fs.addr_flags.linear_sample_ena ||
@@ -343,39 +347,39 @@ void SetupCapabilities(const Info& info, const Profile& profile, const RuntimeIn
             (!profile.supports_amd_shader_explicit_vertex_parameter &&
              profile.supports_fragment_shader_barycentric &&
              info.loads.Get(IR::Attribute::BaryCoordSmoothSample))) {
-            ctx.AddCapability(spv::Capability::SampleRateShading);
+            spv_AddCapability(&ctx.m, u32(SpvCapabilitySampleRateShading));
         }
         if (info.loads.GetAny(IR::Attribute::RenderTargetIndex)) {
-            ctx.AddCapability(spv::Capability::Geometry);
+            spv_AddCapability(&ctx.m, u32(SpvCapabilityGeometry));
         }
         if (info.stores.Get(IR::Attribute::StencilRef) && profile.supports_shader_stencil_export) {
-            ctx.AddExtension("SPV_EXT_shader_stencil_export");
-            ctx.AddCapability(spv::Capability::StencilExportEXT);
+            spv_AddExtension(&ctx.m, "SPV_EXT_shader_stencil_export");
+            spv_AddCapability(&ctx.m, u32(SpvCapabilityStencilExportEXT));
         }
     }
     if (stage == SwStage::TessellationControl || stage == SwStage::TessellationEval) {
-        ctx.AddCapability(spv::Capability::Tessellation);
+        spv_AddCapability(&ctx.m, u32(SpvCapabilityTessellation));
     }
     if (stage == SwStage::Vertex || stage == SwStage::TessellationControl ||
         stage == SwStage::TessellationEval) {
         if (info.stores.GetAny(IR::Attribute::RenderTargetIndex)) {
-            ctx.AddCapability(spv::Capability::ShaderLayer);
+            spv_AddCapability(&ctx.m, u32(SpvCapabilityShaderLayer));
         }
         if (info.stores.GetAny(IR::Attribute::ViewportIndex)) {
-            ctx.AddCapability(spv::Capability::ShaderViewportIndex);
+            spv_AddCapability(&ctx.m, u32(SpvCapabilityShaderViewportIndex));
         }
     } else if (stage == SwStage::Geometry && info.stores.GetAny(IR::Attribute::ViewportIndex)) {
-        ctx.AddCapability(spv::Capability::MultiViewport);
+        spv_AddCapability(&ctx.m, u32(SpvCapabilityMultiViewport));
     }
     if (info.uses_dma) {
-        ctx.AddCapability(spv::Capability::PhysicalStorageBufferAddresses);
-        ctx.AddExtension("SPV_KHR_physical_storage_buffer");
+        spv_AddCapability(&ctx.m, u32(SpvCapabilityPhysicalStorageBufferAddresses));
+        spv_AddExtension(&ctx.m, "SPV_KHR_physical_storage_buffer");
     }
     const auto shared_type_count = std::popcount(static_cast<u32>(info.shared_types));
     if (shared_type_count > 1 && profile.supports_workgroup_explicit_memory_layout) {
-        ctx.AddExtension("SPV_KHR_workgroup_memory_explicit_layout");
-        ctx.AddCapability(spv::Capability::WorkgroupMemoryExplicitLayoutKHR);
-        ctx.AddCapability(spv::Capability::WorkgroupMemoryExplicitLayout16BitAccessKHR);
+        spv_AddExtension(&ctx.m, "SPV_KHR_workgroup_memory_explicit_layout");
+        spv_AddCapability(&ctx.m, u32(SpvCapabilityWorkgroupMemoryExplicitLayoutKHR));
+        spv_AddCapability(&ctx.m, u32(SpvCapabilityWorkgroupMemoryExplicitLayout16BitAccessKHR));
     }
     if (info.uses_buffer_int64_atomics || info.uses_shared_int64_atomics) {
         if (info.uses_buffer_int64_atomics) {
@@ -388,74 +392,79 @@ void SetupCapabilities(const Info& info, const Profile& profile, const RuntimeIn
                        "Shader requires support for atomic Int64 shared memory operations that "
                        "your Vulkan instance does not advertise");
         }
-        ctx.AddCapability(spv::Capability::Int64Atomics);
+        spv_AddCapability(&ctx.m, u32(SpvCapabilityInt64Atomics));
     }
 }
 
 void DefineEntryPoint(const Info& info, const RuntimeInfo& runtime_info, EmitContext& ctx,
                       Id main) {
     const std::span interfaces(ctx.interfaces.data(), ctx.interfaces.size());
-    spv::ExecutionModel execution_model{};
+    u32 execution_model{};
     switch (info.sw_stage) {
     case SwStage::Compute: {
         const std::array<u32, 3> workgroup_size{ctx.runtime_info.hw.cs.workgroup_size};
-        execution_model = spv::ExecutionModel::GLCompute;
-        ctx.AddExecutionMode(main, spv::ExecutionMode::LocalSize, workgroup_size[0],
-                             workgroup_size[1], workgroup_size[2]);
+        execution_model = SpvExecutionModelGLCompute;
+        spv_AddExecutionMode3(&ctx.m, main, u32(SpvExecutionModeLocalSize), u32(workgroup_size[0]),
+                              u32(workgroup_size[1]), u32(workgroup_size[2]));
         break;
     }
     case SwStage::Vertex:
-        execution_model = spv::ExecutionModel::Vertex;
+        execution_model = SpvExecutionModelVertex;
         break;
     case SwStage::TessellationControl:
-        execution_model = spv::ExecutionModel::TessellationControl;
-        ctx.AddCapability(spv::Capability::Tessellation);
-        ctx.AddExecutionMode(main, spv::ExecutionMode::OutputVertices,
-                             ctx.runtime_info.sw.tcs.NumOutputControlPoints());
+        execution_model = SpvExecutionModelTessellationControl;
+        spv_AddCapability(&ctx.m, u32(SpvCapabilityTessellation));
+        spv_AddExecutionMode1(&ctx.m, main, u32(SpvExecutionModeOutputVertices),
+                              u32(ctx.runtime_info.sw.tcs.NumOutputControlPoints()));
         break;
     case SwStage::TessellationEval: {
-        execution_model = spv::ExecutionModel::TessellationEvaluation;
-        ctx.AddExecutionMode(main, ExecutionMode(ctx.runtime_info.sw.tes.tess_type));
-        ctx.AddExecutionMode(main, ExecutionMode(ctx.runtime_info.sw.tes.tess_partitioning));
-        ctx.AddExecutionMode(main, ctx.runtime_info.sw.tes.tess_topology ==
-                                           AmdGpu::TessellationTopology::TriangleCcw
-                                       ? spv::ExecutionMode::VertexOrderCcw
-                                       : spv::ExecutionMode::VertexOrderCw);
+        execution_model = SpvExecutionModelTessellationEvaluation;
+        spv_AddExecutionMode0(&ctx.m, main, u32(ExecutionMode(ctx.runtime_info.sw.tes.tess_type)));
+        spv_AddExecutionMode0(&ctx.m, main,
+                              u32(ExecutionMode(ctx.runtime_info.sw.tes.tess_partitioning)));
+        spv_AddExecutionMode0(
+            &ctx.m, main,
+            u32(ctx.runtime_info.sw.tes.tess_topology == AmdGpu::TessellationTopology::TriangleCcw
+                    ? SpvExecutionModeVertexOrderCcw
+                    : SpvExecutionModeVertexOrderCw));
         break;
     }
     case SwStage::Fragment: {
-        execution_model = spv::ExecutionModel::Fragment;
+        execution_model = SpvExecutionModelFragment;
         if (ctx.profile.lower_left_origin_mode) {
-            ctx.AddExecutionMode(main, spv::ExecutionMode::OriginLowerLeft);
+            spv_AddExecutionMode0(&ctx.m, main, u32(SpvExecutionModeOriginLowerLeft));
         } else {
-            ctx.AddExecutionMode(main, spv::ExecutionMode::OriginUpperLeft);
+            spv_AddExecutionMode0(&ctx.m, main, u32(SpvExecutionModeOriginUpperLeft));
         }
         if (info.has_discard) {
-            ctx.AddCapability(spv::Capability::DemoteToHelperInvocation);
+            spv_AddCapability(&ctx.m, u32(SpvCapabilityDemoteToHelperInvocation));
         }
         const bool stores_depth = info.stores.Get(IR::Attribute::Depth);
         if (stores_depth) {
-            ctx.AddExecutionMode(main, spv::ExecutionMode::DepthReplacing);
+            spv_AddExecutionMode0(&ctx.m, main, u32(SpvExecutionModeDepthReplacing));
         }
         if (runtime_info.hw.fs.depth_before_shader) {
-            ctx.AddExecutionMode(main, spv::ExecutionMode::EarlyFragmentTests);
+            spv_AddExecutionMode0(&ctx.m, main, u32(SpvExecutionModeEarlyFragmentTests));
             ASSERT_MSG(!stores_depth, "DEPTH_BEFORE_SHADER enabled with depth exporting shader");
         }
         break;
     }
     case SwStage::Geometry:
-        execution_model = spv::ExecutionModel::Geometry;
-        ctx.AddExecutionMode(main, GetInputPrimitiveType(ctx.runtime_info.hw.gs.in_primitive));
-        ctx.AddExecutionMode(main, GetOutputPrimitiveType(ctx.runtime_info.hw.gs.out_primitive[0]));
-        ctx.AddExecutionMode(main, spv::ExecutionMode::OutputVertices,
-                             ctx.runtime_info.hw.gs.output_vertices);
-        ctx.AddExecutionMode(main, spv::ExecutionMode::Invocations,
-                             ctx.runtime_info.hw.gs.num_invocations);
+        execution_model = SpvExecutionModelGeometry;
+        spv_AddExecutionMode0(&ctx.m, main,
+                              u32(GetInputPrimitiveType(ctx.runtime_info.hw.gs.in_primitive)));
+        spv_AddExecutionMode0(&ctx.m, main,
+                              u32(GetOutputPrimitiveType(ctx.runtime_info.hw.gs.out_primitive[0])));
+        spv_AddExecutionMode1(&ctx.m, main, u32(SpvExecutionModeOutputVertices),
+                              u32(ctx.runtime_info.hw.gs.output_vertices));
+        spv_AddExecutionMode1(&ctx.m, main, u32(SpvExecutionModeInvocations),
+                              u32(ctx.runtime_info.hw.gs.num_invocations));
         break;
     default:
         UNREACHABLE_MSG("Stage {}", u32(info.hw_stage));
     }
-    ctx.AddEntryPoint(execution_model, main, "main", interfaces);
+    spv_AddEntryPoint(&ctx.m, u32(execution_model), main, "main", interfaces.data(),
+                      u32(interfaces.size()));
 }
 
 void SetupDenormFlushMode(EmitContext& ctx, const Profile& profile, const RuntimeInfo& runtime_info,
@@ -463,8 +472,8 @@ void SetupDenormFlushMode(EmitContext& ctx, const Profile& profile, const Runtim
     const auto fp32_denorm_mode = runtime_info.props.fp_denorm_mode32;
     if (fp32_denorm_mode == AmdGpu::FpDenormMode::InOutFlush) {
         if (profile.support_fp32_denorm_flush) {
-            ctx.AddCapability(spv::Capability::DenormFlushToZero);
-            ctx.AddExecutionMode(main_func, spv::ExecutionMode::DenormFlushToZero, 32U);
+            spv_AddCapability(&ctx.m, u32(SpvCapabilityDenormFlushToZero));
+            spv_AddExecutionMode1(&ctx.m, main_func, u32(SpvExecutionModeDenormFlushToZero), 32U);
         } else {
             static run_once_t logged = RUN_ONCE_INIT;
             run_once(
@@ -500,8 +509,8 @@ void SetupDenormFlushMode(EmitContext& ctx, const Profile& profile, const Runtim
 
     if (fp16_64_denorm_mode == AmdGpu::FpDenormMode::InOutFlush) {
         if (profile.support_fp16_denorm_flush) {
-            ctx.AddCapability(spv::Capability::DenormFlushToZero);
-            ctx.AddExecutionMode(main_func, spv::ExecutionMode::DenormFlushToZero, 16U);
+            spv_AddCapability(&ctx.m, u32(SpvCapabilityDenormFlushToZero));
+            spv_AddExecutionMode1(&ctx.m, main_func, u32(SpvExecutionModeDenormFlushToZero), 16U);
         } else {
             static run_once_t logged = RUN_ONCE_INIT;
             run_once(
@@ -513,8 +522,8 @@ void SetupDenormFlushMode(EmitContext& ctx, const Profile& profile, const Runtim
                 nullptr);
         }
         if (profile.support_fp64_denorm_flush) {
-            ctx.AddCapability(spv::Capability::DenormFlushToZero);
-            ctx.AddExecutionMode(main_func, spv::ExecutionMode::DenormFlushToZero, 64U);
+            spv_AddCapability(&ctx.m, u32(SpvCapabilityDenormFlushToZero));
+            spv_AddExecutionMode1(&ctx.m, main_func, u32(SpvExecutionModeDenormFlushToZero), 64U);
         } else {
             static run_once_t logged = RUN_ONCE_INIT;
             run_once(
@@ -527,8 +536,8 @@ void SetupDenormFlushMode(EmitContext& ctx, const Profile& profile, const Runtim
         }
     } else if (fp16_64_denorm_mode == AmdGpu::FpDenormMode::InOutAllow) {
         if (profile.support_fp16_denorm_preserve) {
-            ctx.AddCapability(spv::Capability::DenormPreserve);
-            ctx.AddExecutionMode(main_func, spv::ExecutionMode::DenormPreserve, 16U);
+            spv_AddCapability(&ctx.m, u32(SpvCapabilityDenormPreserve));
+            spv_AddExecutionMode1(&ctx.m, main_func, u32(SpvExecutionModeDenormPreserve), 16U);
         } else {
             static run_once_t logged = RUN_ONCE_INIT;
             run_once(
@@ -540,8 +549,8 @@ void SetupDenormFlushMode(EmitContext& ctx, const Profile& profile, const Runtim
                 nullptr);
         }
         if (profile.support_fp64_denorm_preserve) {
-            ctx.AddCapability(spv::Capability::DenormPreserve);
-            ctx.AddExecutionMode(main_func, spv::ExecutionMode::DenormPreserve, 64U);
+            spv_AddCapability(&ctx.m, u32(SpvCapabilityDenormPreserve));
+            spv_AddExecutionMode1(&ctx.m, main_func, u32(SpvExecutionModeDenormPreserve), 64U);
         } else {
             static run_once_t logged = RUN_ONCE_INIT;
             run_once(
@@ -562,8 +571,8 @@ void SetupRoundingMode(EmitContext& ctx, const Profile& profile, const RuntimeIn
     const auto fp_round_mode = runtime_info.props.fp_round_mode32;
     if (fp_round_mode == AmdGpu::FpRoundMode::ToZero) {
         if (profile.support_fp32_round_to_zero) {
-            ctx.AddCapability(spv::Capability::RoundingModeRTZ);
-            ctx.AddExecutionMode(main_func, spv::ExecutionMode::RoundingModeRTZ, 32U);
+            spv_AddCapability(&ctx.m, u32(SpvCapabilityRoundingModeRTZ));
+            spv_AddExecutionMode1(&ctx.m, main_func, u32(SpvExecutionModeRoundingModeRTZ), 32U);
         } else {
             static run_once_t logged = RUN_ONCE_INIT;
             run_once(
@@ -598,8 +607,9 @@ void SetupRoundingMode(EmitContext& ctx, const Profile& profile, const RuntimeIn
         if (fp16_64_round_mode == AmdGpu::FpRoundMode::ToZero) {
             if (ctx.info.uses_fp16) {
                 if (profile.support_fp16_round_to_zero) {
-                    ctx.AddCapability(spv::Capability::RoundingModeRTZ);
-                    ctx.AddExecutionMode(main_func, spv::ExecutionMode::RoundingModeRTZ, 16U);
+                    spv_AddCapability(&ctx.m, u32(SpvCapabilityRoundingModeRTZ));
+                    spv_AddExecutionMode1(&ctx.m, main_func, u32(SpvExecutionModeRoundingModeRTZ),
+                                          16U);
                 } else {
                     static run_once_t logged = RUN_ONCE_INIT;
                     run_once(
@@ -613,8 +623,9 @@ void SetupRoundingMode(EmitContext& ctx, const Profile& profile, const RuntimeIn
             }
             if (ctx.info.uses_fp64) {
                 if (profile.support_fp64_round_to_zero) {
-                    ctx.AddCapability(spv::Capability::RoundingModeRTZ);
-                    ctx.AddExecutionMode(main_func, spv::ExecutionMode::RoundingModeRTZ, 64U);
+                    spv_AddCapability(&ctx.m, u32(SpvCapabilityRoundingModeRTZ));
+                    spv_AddExecutionMode1(&ctx.m, main_func, u32(SpvExecutionModeRoundingModeRTZ),
+                                          64U);
                 } else {
                     static run_once_t logged = RUN_ONCE_INIT;
                     run_once(
@@ -641,11 +652,12 @@ void SetupInfNanPreserveMode(EmitContext& ctx, const Profile& profile,
     if (profile.support_fp16_signed_zero_inf_nan_preserve ||
         profile.support_fp32_signed_zero_inf_nan_preserve ||
         profile.support_fp64_signed_zero_inf_nan_preserve) {
-        ctx.AddCapability(spv::Capability::SignedZeroInfNanPreserve);
+        spv_AddCapability(&ctx.m, u32(SpvCapabilitySignedZeroInfNanPreserve));
     }
 
     if (profile.support_fp32_signed_zero_inf_nan_preserve) {
-        ctx.AddExecutionMode(main_func, spv::ExecutionMode::SignedZeroInfNanPreserve, 32U);
+        spv_AddExecutionMode1(&ctx.m, main_func, u32(SpvExecutionModeSignedZeroInfNanPreserve),
+                              32U);
     } else {
         static run_once_t logged = RUN_ONCE_INIT;
         run_once(
@@ -659,7 +671,8 @@ void SetupInfNanPreserveMode(EmitContext& ctx, const Profile& profile,
     }
     if (ctx.info.uses_fp16) {
         if (profile.support_fp16_signed_zero_inf_nan_preserve) {
-            ctx.AddExecutionMode(main_func, spv::ExecutionMode::SignedZeroInfNanPreserve, 16U);
+            spv_AddExecutionMode1(&ctx.m, main_func, u32(SpvExecutionModeSignedZeroInfNanPreserve),
+                                  16U);
         } else {
             static run_once_t logged = RUN_ONCE_INIT;
             run_once(
@@ -674,7 +687,8 @@ void SetupInfNanPreserveMode(EmitContext& ctx, const Profile& profile,
     }
     if (ctx.info.uses_fp64) {
         if (profile.support_fp64_signed_zero_inf_nan_preserve) {
-            ctx.AddExecutionMode(main_func, spv::ExecutionMode::SignedZeroInfNanPreserve, 64U);
+            spv_AddExecutionMode1(&ctx.m, main_func, u32(SpvExecutionModeSignedZeroInfNanPreserve),
+                                  64U);
         } else {
             static run_once_t logged = RUN_ONCE_INIT;
             run_once(
@@ -691,29 +705,38 @@ void SetupInfNanPreserveMode(EmitContext& ctx, const Profile& profile,
 
 void SetupFloatMode(EmitContext& ctx, const Profile& profile, const RuntimeInfo& runtime_info,
                     Id main_func) {
-    ctx.AddExtension("SPV_KHR_float_controls");
+    spv_AddExtension(&ctx.m, "SPV_KHR_float_controls");
     SetupDenormFlushMode(ctx, profile, runtime_info, main_func);
     SetupRoundingMode(ctx, profile, runtime_info, main_func);
     SetupInfNanPreserveMode(ctx, profile, runtime_info, main_func);
 }
 
-void PatchPhiNodes(const IR::Program& program, EmitContext& ctx) {
-    auto inst{program.blocks.front()->begin()};
-    size_t block_index{0};
-    ctx.PatchDeferredPhi([&](u32 phi_arg, Id first_parent) {
-        if (phi_arg == 0) {
-            ++inst;
-            while (inst == program.blocks[block_index]->end() ||
-                   inst->GetOpcode() != IR::Opcode::Phi) {
-                ++block_index;
-                inst = program.blocks[block_index]->begin();
-            }
+// What the deferred OpPhis' values are taken from, in the order they were written
+struct PhiPatch {
+    const IR::Program& program;
+    EmitContext& ctx;
+    IR::Block::const_iterator inst;
+    size_t block_index;
+};
+
+void PatchPhiArg(void* arg_ctx, u32 phi_arg, u32 first_parent, u32* value_out, u32* parent_out) {
+    auto& p = *static_cast<PhiPatch*>(arg_ctx);
+    if (phi_arg == 0) {
+        ++p.inst;
+        while (p.inst == p.program.blocks[p.block_index]->end() ||
+               p.inst->GetOpcode() != IR::Opcode::Phi) {
+            ++p.block_index;
+            p.inst = p.program.blocks[p.block_index]->begin();
         }
-        ASSERT(inst != program.blocks[block_index]->end());
-        const Id arg = ctx.Def(inst->Arg(phi_arg));
-        const Id parent = ctx.first_to_last_label_map[first_parent.value];
-        return std::make_pair(arg, parent);
-    });
+    }
+    ASSERT(p.inst != p.program.blocks[p.block_index]->end());
+    *value_out = p.ctx.Def(p.inst->Arg(phi_arg));
+    *parent_out = p.ctx.first_to_last_label_map[first_parent];
+}
+
+void PatchPhiNodes(const IR::Program& program, EmitContext& ctx) {
+    PhiPatch patch{program, ctx, program.blocks.front()->begin(), 0};
+    spv_module_patch_phis(&ctx.m, PatchPhiArg, &patch);
 }
 } // Anonymous namespace
 
@@ -725,7 +748,7 @@ std::vector<u32> EmitSPIRV(const Profile& profile, const RuntimeInfo& runtime_in
     SetupCapabilities(program.info, profile, runtime_info, ctx);
     SetupFloatMode(ctx, profile, runtime_info, main);
     PatchPhiNodes(program, ctx);
-    return ctx.Assemble();
+    return FinishModule(&ctx.m, profile.supported_spirv);
 }
 
 Id EmitPhi(EmitContext& ctx, IR::Inst* inst) {
@@ -737,20 +760,20 @@ Id EmitPhi(EmitContext& ctx, IR::Inst* inst) {
     }
     // The type of a phi instruction is stored in its flags
     const Id result_type{TypeId(ctx, inst->Flags<IR::Type>())};
-    return ctx.DeferredOpPhi(result_type, std::span(blocks.data(), blocks.size()));
+    return spv_DeferredOpPhi(&ctx.m, result_type, blocks.data(), u32(blocks.size()));
 }
 
 void EmitVoid(EmitContext&) {}
 
 Id EmitConditionRef(EmitContext& ctx, const IR::Value& value) {
     const Id id{ctx.Def(value)};
-    ASSERT_MSG(Sirit::ValidId(id), "Forward identity declaration");
+    ASSERT_MSG((id != 0), "Forward identity declaration");
     return id;
 }
 
 Id EmitGetPcLo(EmitContext& ctx, const IR::Value& value) {
     const Id id{ctx.Def(value)};
-    ASSERT_MSG(Sirit::ValidId(id), "Forward identity declaration");
+    ASSERT_MSG((id != 0), "Forward identity declaration");
     return id;
 }
 

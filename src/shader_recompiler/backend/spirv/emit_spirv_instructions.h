@@ -3,7 +3,6 @@
 
 #pragma once
 
-#include <sirit/sirit.h>
 #include "common/types.h"
 
 namespace Shader::IR {
@@ -16,7 +15,10 @@ class Value;
 
 namespace Shader::Backend::SPIRV {
 
-using Sirit::Id;
+using Id = u32;
+/* An emitter argument that is an immediate of the IR, not a value: a type of its own, as Id
+ * is u32. */
+enum Imm32 : u32 {};
 
 class EmitContext;
 
@@ -62,58 +64,58 @@ void EmitSetMaskLaneVariable(EmitContext& ctx);
 void EmitGetMaskLaneVariable(EmitContext& ctx);
 void EmitSetScc(EmitContext& ctx);
 Id EmitReadConst(EmitContext& ctx, IR::Inst* inst, Id addr, Id offset);
-Id EmitReadConstBuffer(EmitContext& ctx, u32 handle, Id index);
-Id EmitLoadBufferU8(EmitContext& ctx, IR::Inst* inst, u32 handle, Id address);
-Id EmitLoadBufferU16(EmitContext& ctx, IR::Inst* inst, u32 handle, Id address);
-Id EmitLoadBufferU32(EmitContext& ctx, IR::Inst* inst, u32 handle, Id address);
-Id EmitLoadBufferU32x2(EmitContext& ctx, IR::Inst* inst, u32 handle, Id address);
-Id EmitLoadBufferU32x3(EmitContext& ctx, IR::Inst* inst, u32 handle, Id address);
-Id EmitLoadBufferU32x4(EmitContext& ctx, IR::Inst* inst, u32 handle, Id address);
-Id EmitLoadBufferU64(EmitContext& ctx, IR::Inst* inst, u32 handle, Id address);
-Id EmitLoadBufferF32(EmitContext& ctx, IR::Inst* inst, u32 handle, Id address);
-Id EmitLoadBufferF32x2(EmitContext& ctx, IR::Inst* inst, u32 handle, Id address);
-Id EmitLoadBufferF32x3(EmitContext& ctx, IR::Inst* inst, u32 handle, Id address);
-Id EmitLoadBufferF32x4(EmitContext& ctx, IR::Inst* inst, u32 handle, Id address);
-Id EmitLoadBufferFormatF32(EmitContext& ctx, IR::Inst* inst, u32 handle, Id address);
-void EmitStoreBufferU8(EmitContext& ctx, IR::Inst* inst, u32 handle, Id address, Id value);
-void EmitStoreBufferU16(EmitContext& ctx, IR::Inst* inst, u32 handle, Id address, Id value);
-void EmitStoreBufferU32(EmitContext& ctx, IR::Inst* inst, u32 handle, Id address, Id value);
-void EmitStoreBufferU32x2(EmitContext& ctx, IR::Inst* inst, u32 handle, Id address, Id value);
-void EmitStoreBufferU32x3(EmitContext& ctx, IR::Inst* inst, u32 handle, Id address, Id value);
-void EmitStoreBufferU32x4(EmitContext& ctx, IR::Inst* inst, u32 handle, Id address, Id value);
-void EmitStoreBufferU64(EmitContext& ctx, IR::Inst* inst, u32 handle, Id address, Id value);
-void EmitStoreBufferF32(EmitContext& ctx, IR::Inst* inst, u32 handle, Id address, Id value);
-void EmitStoreBufferF32x2(EmitContext& ctx, IR::Inst* inst, u32 handle, Id address, Id value);
-void EmitStoreBufferF32x3(EmitContext& ctx, IR::Inst* inst, u32 handle, Id address, Id value);
-void EmitStoreBufferF32x4(EmitContext& ctx, IR::Inst* inst, u32 handle, Id address, Id value);
-void EmitStoreBufferFormatF32(EmitContext& ctx, IR::Inst* inst, u32 handle, Id address, Id value);
-Id EmitBufferAtomicIAdd32(EmitContext& ctx, IR::Inst* inst, u32 handle, Id address, Id value);
-Id EmitBufferAtomicIAdd64(EmitContext& ctx, IR::Inst* inst, u32 handle, Id address, Id value);
-Id EmitBufferAtomicISub32(EmitContext& ctx, IR::Inst* inst, u32 handle, Id address, Id value);
-Id EmitBufferAtomicSMin32(EmitContext& ctx, IR::Inst* inst, u32 handle, Id address, Id value);
-Id EmitBufferAtomicSMin64(EmitContext& ctx, IR::Inst* inst, u32 handle, Id address, Id value);
-Id EmitBufferAtomicUMin32(EmitContext& ctx, IR::Inst* inst, u32 handle, Id address, Id value);
-Id EmitBufferAtomicUMin64(EmitContext& ctx, IR::Inst* inst, u32 handle, Id address, Id value);
-Id EmitBufferAtomicFMin32(EmitContext& ctx, IR::Inst* inst, u32 handle, Id address, Id value);
-Id EmitBufferAtomicSMax32(EmitContext& ctx, IR::Inst* inst, u32 handle, Id address, Id value);
-Id EmitBufferAtomicSMax64(EmitContext& ctx, IR::Inst* inst, u32 handle, Id address, Id value);
-Id EmitBufferAtomicUMax32(EmitContext& ctx, IR::Inst* inst, u32 handle, Id address, Id value);
-Id EmitBufferAtomicUMax64(EmitContext& ctx, IR::Inst* inst, u32 handle, Id address, Id value);
-Id EmitBufferAtomicFMax32(EmitContext& ctx, IR::Inst* inst, u32 handle, Id address, Id value);
-Id EmitBufferAtomicInc32(EmitContext& ctx, IR::Inst* inst, u32 handle, Id address);
-Id EmitBufferAtomicDec32(EmitContext& ctx, IR::Inst* inst, u32 handle, Id address);
-Id EmitBufferAtomicAnd32(EmitContext& ctx, IR::Inst* inst, u32 handle, Id address, Id value);
-Id EmitBufferAtomicOr32(EmitContext& ctx, IR::Inst* inst, u32 handle, Id address, Id value);
-Id EmitBufferAtomicXor32(EmitContext& ctx, IR::Inst* inst, u32 handle, Id address, Id value);
-Id EmitBufferAtomicSwap32(EmitContext& ctx, IR::Inst* inst, u32 handle, Id address, Id value);
-Id EmitBufferAtomicCmpSwap32(EmitContext& ctx, IR::Inst* inst, u32 handle, Id address, Id value,
+Id EmitReadConstBuffer(EmitContext& ctx, Imm32 handle, Id index);
+Id EmitLoadBufferU8(EmitContext& ctx, IR::Inst* inst, Imm32 handle, Id address);
+Id EmitLoadBufferU16(EmitContext& ctx, IR::Inst* inst, Imm32 handle, Id address);
+Id EmitLoadBufferU32(EmitContext& ctx, IR::Inst* inst, Imm32 handle, Id address);
+Id EmitLoadBufferU32x2(EmitContext& ctx, IR::Inst* inst, Imm32 handle, Id address);
+Id EmitLoadBufferU32x3(EmitContext& ctx, IR::Inst* inst, Imm32 handle, Id address);
+Id EmitLoadBufferU32x4(EmitContext& ctx, IR::Inst* inst, Imm32 handle, Id address);
+Id EmitLoadBufferU64(EmitContext& ctx, IR::Inst* inst, Imm32 handle, Id address);
+Id EmitLoadBufferF32(EmitContext& ctx, IR::Inst* inst, Imm32 handle, Id address);
+Id EmitLoadBufferF32x2(EmitContext& ctx, IR::Inst* inst, Imm32 handle, Id address);
+Id EmitLoadBufferF32x3(EmitContext& ctx, IR::Inst* inst, Imm32 handle, Id address);
+Id EmitLoadBufferF32x4(EmitContext& ctx, IR::Inst* inst, Imm32 handle, Id address);
+Id EmitLoadBufferFormatF32(EmitContext& ctx, IR::Inst* inst, Imm32 handle, Id address);
+void EmitStoreBufferU8(EmitContext& ctx, IR::Inst* inst, Imm32 handle, Id address, Id value);
+void EmitStoreBufferU16(EmitContext& ctx, IR::Inst* inst, Imm32 handle, Id address, Id value);
+void EmitStoreBufferU32(EmitContext& ctx, IR::Inst* inst, Imm32 handle, Id address, Id value);
+void EmitStoreBufferU32x2(EmitContext& ctx, IR::Inst* inst, Imm32 handle, Id address, Id value);
+void EmitStoreBufferU32x3(EmitContext& ctx, IR::Inst* inst, Imm32 handle, Id address, Id value);
+void EmitStoreBufferU32x4(EmitContext& ctx, IR::Inst* inst, Imm32 handle, Id address, Id value);
+void EmitStoreBufferU64(EmitContext& ctx, IR::Inst* inst, Imm32 handle, Id address, Id value);
+void EmitStoreBufferF32(EmitContext& ctx, IR::Inst* inst, Imm32 handle, Id address, Id value);
+void EmitStoreBufferF32x2(EmitContext& ctx, IR::Inst* inst, Imm32 handle, Id address, Id value);
+void EmitStoreBufferF32x3(EmitContext& ctx, IR::Inst* inst, Imm32 handle, Id address, Id value);
+void EmitStoreBufferF32x4(EmitContext& ctx, IR::Inst* inst, Imm32 handle, Id address, Id value);
+void EmitStoreBufferFormatF32(EmitContext& ctx, IR::Inst* inst, Imm32 handle, Id address, Id value);
+Id EmitBufferAtomicIAdd32(EmitContext& ctx, IR::Inst* inst, Imm32 handle, Id address, Id value);
+Id EmitBufferAtomicIAdd64(EmitContext& ctx, IR::Inst* inst, Imm32 handle, Id address, Id value);
+Id EmitBufferAtomicISub32(EmitContext& ctx, IR::Inst* inst, Imm32 handle, Id address, Id value);
+Id EmitBufferAtomicSMin32(EmitContext& ctx, IR::Inst* inst, Imm32 handle, Id address, Id value);
+Id EmitBufferAtomicSMin64(EmitContext& ctx, IR::Inst* inst, Imm32 handle, Id address, Id value);
+Id EmitBufferAtomicUMin32(EmitContext& ctx, IR::Inst* inst, Imm32 handle, Id address, Id value);
+Id EmitBufferAtomicUMin64(EmitContext& ctx, IR::Inst* inst, Imm32 handle, Id address, Id value);
+Id EmitBufferAtomicFMin32(EmitContext& ctx, IR::Inst* inst, Imm32 handle, Id address, Id value);
+Id EmitBufferAtomicSMax32(EmitContext& ctx, IR::Inst* inst, Imm32 handle, Id address, Id value);
+Id EmitBufferAtomicSMax64(EmitContext& ctx, IR::Inst* inst, Imm32 handle, Id address, Id value);
+Id EmitBufferAtomicUMax32(EmitContext& ctx, IR::Inst* inst, Imm32 handle, Id address, Id value);
+Id EmitBufferAtomicUMax64(EmitContext& ctx, IR::Inst* inst, Imm32 handle, Id address, Id value);
+Id EmitBufferAtomicFMax32(EmitContext& ctx, IR::Inst* inst, Imm32 handle, Id address, Id value);
+Id EmitBufferAtomicInc32(EmitContext& ctx, IR::Inst* inst, Imm32 handle, Id address);
+Id EmitBufferAtomicDec32(EmitContext& ctx, IR::Inst* inst, Imm32 handle, Id address);
+Id EmitBufferAtomicAnd32(EmitContext& ctx, IR::Inst* inst, Imm32 handle, Id address, Id value);
+Id EmitBufferAtomicOr32(EmitContext& ctx, IR::Inst* inst, Imm32 handle, Id address, Id value);
+Id EmitBufferAtomicXor32(EmitContext& ctx, IR::Inst* inst, Imm32 handle, Id address, Id value);
+Id EmitBufferAtomicSwap32(EmitContext& ctx, IR::Inst* inst, Imm32 handle, Id address, Id value);
+Id EmitBufferAtomicCmpSwap32(EmitContext& ctx, IR::Inst* inst, Imm32 handle, Id address, Id value,
                              Id cmp_value);
-Id EmitBufferAtomicFCmpSwap32(EmitContext& ctx, IR::Inst* inst, u32 handle, Id address, Id value,
+Id EmitBufferAtomicFCmpSwap32(EmitContext& ctx, IR::Inst* inst, Imm32 handle, Id address, Id value,
                               Id cmp_value);
-Id EmitGetAttribute(EmitContext& ctx, IR::Attribute attr, u32 comp, u32 index);
-Id EmitGetAttributeU1(EmitContext& ctx, IR::Attribute attr, u32 comp);
-Id EmitGetAttributeU32(EmitContext& ctx, IR::Attribute attr, u32 comp);
-void EmitSetAttribute(EmitContext& ctx, IR::Attribute attr, Id value, u32 comp);
+Id EmitGetAttribute(EmitContext& ctx, IR::Attribute attr, Imm32 comp, Imm32 index);
+Id EmitGetAttributeU1(EmitContext& ctx, IR::Attribute attr, Imm32 comp);
+Id EmitGetAttributeU32(EmitContext& ctx, IR::Attribute attr, Imm32 comp);
+void EmitSetAttribute(EmitContext& ctx, IR::Attribute attr, Id value, Imm32 comp);
 Id EmitGetTessGenericAttribute(EmitContext& ctx, Id vertex_index, Id attr_index, Id comp_index);
 void EmitSetTcsGenericAttribute(EmitContext& ctx, Id value, Id attr_index, Id comp_index);
 Id EmitReadTcsGenericOuputAttribute(EmitContext& ctx, Id vertex_index, Id attr_index,
@@ -169,32 +171,34 @@ Id EmitCompositeConstructU32x2(EmitContext& ctx, IR::Inst* inst, Id e1, Id e2);
 Id EmitCompositeConstructU32x3(EmitContext& ctx, IR::Inst* inst, Id e1, Id e2, Id e3);
 Id EmitCompositeConstructU32x4(EmitContext& ctx, IR::Inst* inst, Id e1, Id e2, Id e3, Id e4);
 Id EmitCompositeConstructU32x2x2(EmitContext& ctx, IR::Inst* inst, Id e1, Id e2);
-Id EmitCompositeExtractU32x2(EmitContext& ctx, Id composite, u32 index);
-Id EmitCompositeExtractU32x3(EmitContext& ctx, Id composite, u32 index);
-Id EmitCompositeExtractU32x4(EmitContext& ctx, Id composite, u32 index);
-Id EmitCompositeInsertU32x2(EmitContext& ctx, Id composite, Id object, u32 index);
-Id EmitCompositeInsertU32x3(EmitContext& ctx, Id composite, Id object, u32 index);
-Id EmitCompositeInsertU32x4(EmitContext& ctx, Id composite, Id object, u32 index);
-Id EmitCompositeShuffleU32x2(EmitContext& ctx, Id composite1, Id composite2, u32 comp0, u32 comp1);
-Id EmitCompositeShuffleU32x3(EmitContext& ctx, Id composite1, Id composite2, u32 comp0, u32 comp1,
-                             u32 comp2);
-Id EmitCompositeShuffleU32x4(EmitContext& ctx, Id composite1, Id composite2, u32 comp0, u32 comp1,
-                             u32 comp2, u32 comp3);
+Id EmitCompositeExtractU32x2(EmitContext& ctx, Id composite, Imm32 index);
+Id EmitCompositeExtractU32x3(EmitContext& ctx, Id composite, Imm32 index);
+Id EmitCompositeExtractU32x4(EmitContext& ctx, Id composite, Imm32 index);
+Id EmitCompositeInsertU32x2(EmitContext& ctx, Id composite, Id object, Imm32 index);
+Id EmitCompositeInsertU32x3(EmitContext& ctx, Id composite, Id object, Imm32 index);
+Id EmitCompositeInsertU32x4(EmitContext& ctx, Id composite, Id object, Imm32 index);
+Id EmitCompositeShuffleU32x2(EmitContext& ctx, Id composite1, Id composite2, Imm32 comp0,
+                             Imm32 comp1);
+Id EmitCompositeShuffleU32x3(EmitContext& ctx, Id composite1, Id composite2, Imm32 comp0,
+                             Imm32 comp1, Imm32 comp2);
+Id EmitCompositeShuffleU32x4(EmitContext& ctx, Id composite1, Id composite2, Imm32 comp0,
+                             Imm32 comp1, Imm32 comp2, Imm32 comp3);
 Id EmitCompositeConstructF32x2(EmitContext& ctx, IR::Inst* inst, Id e1, Id e2);
 Id EmitCompositeConstructF32x3(EmitContext& ctx, IR::Inst* inst, Id e1, Id e2, Id e3);
 Id EmitCompositeConstructF32x4(EmitContext& ctx, IR::Inst* inst, Id e1, Id e2, Id e3, Id e4);
 Id EmitCompositeConstructF32x2x2(EmitContext& ctx, IR::Inst* inst, Id e1, Id e2);
-Id EmitCompositeExtractF32x2(EmitContext& ctx, Id composite, u32 index);
-Id EmitCompositeExtractF32x3(EmitContext& ctx, Id composite, u32 index);
-Id EmitCompositeExtractF32x4(EmitContext& ctx, Id composite, u32 index);
-Id EmitCompositeInsertF32x2(EmitContext& ctx, Id composite, Id object, u32 index);
-Id EmitCompositeInsertF32x3(EmitContext& ctx, Id composite, Id object, u32 index);
-Id EmitCompositeInsertF32x4(EmitContext& ctx, Id composite, Id object, u32 index);
-Id EmitCompositeShuffleF32x2(EmitContext& ctx, Id composite1, Id composite2, u32 comp0, u32 comp1);
-Id EmitCompositeShuffleF32x3(EmitContext& ctx, Id composite1, Id composite2, u32 comp0, u32 comp1,
-                             u32 comp2);
-Id EmitCompositeShuffleF32x4(EmitContext& ctx, Id composite1, Id composite2, u32 comp0, u32 comp1,
-                             u32 comp2, u32 comp3);
+Id EmitCompositeExtractF32x2(EmitContext& ctx, Id composite, Imm32 index);
+Id EmitCompositeExtractF32x3(EmitContext& ctx, Id composite, Imm32 index);
+Id EmitCompositeExtractF32x4(EmitContext& ctx, Id composite, Imm32 index);
+Id EmitCompositeInsertF32x2(EmitContext& ctx, Id composite, Id object, Imm32 index);
+Id EmitCompositeInsertF32x3(EmitContext& ctx, Id composite, Id object, Imm32 index);
+Id EmitCompositeInsertF32x4(EmitContext& ctx, Id composite, Id object, Imm32 index);
+Id EmitCompositeShuffleF32x2(EmitContext& ctx, Id composite1, Id composite2, Imm32 comp0,
+                             Imm32 comp1);
+Id EmitCompositeShuffleF32x3(EmitContext& ctx, Id composite1, Id composite2, Imm32 comp0,
+                             Imm32 comp1, Imm32 comp2);
+Id EmitCompositeShuffleF32x4(EmitContext& ctx, Id composite1, Id composite2, Imm32 comp0,
+                             Imm32 comp1, Imm32 comp2, Imm32 comp3);
 Id EmitSelectU1(EmitContext& ctx, Id cond, Id true_value, Id false_value);
 Id EmitSelectU32(EmitContext& ctx, Id cond, Id true_value, Id false_value);
 Id EmitSelectF32(EmitContext& ctx, Id cond, Id true_value, Id false_value);
@@ -432,42 +436,42 @@ Id EmitConvertS32S8(EmitContext& ctx, Id value);
 Id EmitConvertS32S16(EmitContext& ctx, Id value);
 
 Id EmitImageHandle(EmitContext& ctx, Id, Id);
-Id EmitImageSampleRaw(EmitContext& ctx, IR::Inst* inst, u32 handle, Id address1, Id address2,
+Id EmitImageSampleRaw(EmitContext& ctx, IR::Inst* inst, Imm32 handle, Id address1, Id address2,
                       Id address3, Id address4);
-Id EmitImageSampleImplicitLod(EmitContext& ctx, IR::Inst* inst, u32 handle, Id coords, Id bias,
+Id EmitImageSampleImplicitLod(EmitContext& ctx, IR::Inst* inst, Imm32 handle, Id coords, Id bias,
                               const IR::Value& offset);
-Id EmitImageSampleExplicitLod(EmitContext& ctx, IR::Inst* inst, u32 handle, Id coords, Id lod,
+Id EmitImageSampleExplicitLod(EmitContext& ctx, IR::Inst* inst, Imm32 handle, Id coords, Id lod,
                               const IR::Value& offset);
-Id EmitImageSampleDrefImplicitLod(EmitContext& ctx, IR::Inst* inst, u32 handle, Id coords, Id dref,
-                                  Id bias, const IR::Value& offset);
-Id EmitImageSampleDrefExplicitLod(EmitContext& ctx, IR::Inst* inst, u32 handle, Id coords, Id dref,
-                                  Id lod, const IR::Value& offset);
-Id EmitImageGather(EmitContext& ctx, IR::Inst* inst, u32 handle, Id coords,
+Id EmitImageSampleDrefImplicitLod(EmitContext& ctx, IR::Inst* inst, Imm32 handle, Id coords,
+                                  Id dref, Id bias, const IR::Value& offset);
+Id EmitImageSampleDrefExplicitLod(EmitContext& ctx, IR::Inst* inst, Imm32 handle, Id coords,
+                                  Id dref, Id lod, const IR::Value& offset);
+Id EmitImageGather(EmitContext& ctx, IR::Inst* inst, Imm32 handle, Id coords,
                    const IR::Value& offset);
-Id EmitImageGatherDref(EmitContext& ctx, IR::Inst* inst, u32 handle, Id coords,
+Id EmitImageGatherDref(EmitContext& ctx, IR::Inst* inst, Imm32 handle, Id coords,
                        const IR::Value& offset, Id dref);
-Id EmitImageQueryDimensions(EmitContext& ctx, IR::Inst* inst, u32 handle, Id lod, bool skip_mips);
-Id EmitImageQueryLod(EmitContext& ctx, IR::Inst* inst, u32 handle, Id coords);
-Id EmitImageGradient(EmitContext& ctx, IR::Inst* inst, u32 handle, Id coords, Id derivatives_dx,
+Id EmitImageQueryDimensions(EmitContext& ctx, IR::Inst* inst, Imm32 handle, Id lod, bool skip_mips);
+Id EmitImageQueryLod(EmitContext& ctx, IR::Inst* inst, Imm32 handle, Id coords);
+Id EmitImageGradient(EmitContext& ctx, IR::Inst* inst, Imm32 handle, Id coords, Id derivatives_dx,
                      Id derivatives_dy, const IR::Value& offset, const IR::Value& lod_clamp);
-Id EmitImageRead(EmitContext& ctx, IR::Inst* inst, u32 handle, Id coords, Id lod, Id ms);
-void EmitImageWrite(EmitContext& ctx, IR::Inst* inst, u32 handle, Id coords, Id lod, Id ms,
+Id EmitImageRead(EmitContext& ctx, IR::Inst* inst, Imm32 handle, Id coords, Id lod, Id ms);
+void EmitImageWrite(EmitContext& ctx, IR::Inst* inst, Imm32 handle, Id coords, Id lod, Id ms,
                     Id color);
 
-Id EmitImageAtomicIAdd32(EmitContext& ctx, IR::Inst* inst, u32 handle, Id coords, Id value);
-Id EmitImageAtomicSMin32(EmitContext& ctx, IR::Inst* inst, u32 handle, Id coords, Id value);
-Id EmitImageAtomicUMin32(EmitContext& ctx, IR::Inst* inst, u32 handle, Id coords, Id value);
-Id EmitImageAtomicSMax32(EmitContext& ctx, IR::Inst* inst, u32 handle, Id coords, Id value);
-Id EmitImageAtomicUMax32(EmitContext& ctx, IR::Inst* inst, u32 handle, Id coords, Id value);
-Id EmitImageAtomicFMax32(EmitContext& ctx, IR::Inst* inst, u32 handle, Id coords, Id value);
-Id EmitImageAtomicFMin32(EmitContext& ctx, IR::Inst* inst, u32 handle, Id coords, Id value);
-Id EmitImageAtomicInc32(EmitContext& ctx, IR::Inst* inst, u32 handle, Id coords, Id value);
-Id EmitImageAtomicDec32(EmitContext& ctx, IR::Inst* inst, u32 handle, Id coords, Id value);
-Id EmitImageAtomicAnd32(EmitContext& ctx, IR::Inst* inst, u32 handle, Id coords, Id value);
-Id EmitImageAtomicOr32(EmitContext& ctx, IR::Inst* inst, u32 handle, Id coords, Id value);
-Id EmitImageAtomicXor32(EmitContext& ctx, IR::Inst* inst, u32 handle, Id coords, Id value);
-Id EmitImageAtomicExchange32(EmitContext& ctx, IR::Inst* inst, u32 handle, Id coords, Id value);
-Id EmitImageAtomicCmpSwap32(EmitContext& ctx, IR::Inst* inst, u32 handle, Id address, Id value,
+Id EmitImageAtomicIAdd32(EmitContext& ctx, IR::Inst* inst, Imm32 handle, Id coords, Id value);
+Id EmitImageAtomicSMin32(EmitContext& ctx, IR::Inst* inst, Imm32 handle, Id coords, Id value);
+Id EmitImageAtomicUMin32(EmitContext& ctx, IR::Inst* inst, Imm32 handle, Id coords, Id value);
+Id EmitImageAtomicSMax32(EmitContext& ctx, IR::Inst* inst, Imm32 handle, Id coords, Id value);
+Id EmitImageAtomicUMax32(EmitContext& ctx, IR::Inst* inst, Imm32 handle, Id coords, Id value);
+Id EmitImageAtomicFMax32(EmitContext& ctx, IR::Inst* inst, Imm32 handle, Id coords, Id value);
+Id EmitImageAtomicFMin32(EmitContext& ctx, IR::Inst* inst, Imm32 handle, Id coords, Id value);
+Id EmitImageAtomicInc32(EmitContext& ctx, IR::Inst* inst, Imm32 handle, Id coords, Id value);
+Id EmitImageAtomicDec32(EmitContext& ctx, IR::Inst* inst, Imm32 handle, Id coords, Id value);
+Id EmitImageAtomicAnd32(EmitContext& ctx, IR::Inst* inst, Imm32 handle, Id coords, Id value);
+Id EmitImageAtomicOr32(EmitContext& ctx, IR::Inst* inst, Imm32 handle, Id coords, Id value);
+Id EmitImageAtomicXor32(EmitContext& ctx, IR::Inst* inst, Imm32 handle, Id coords, Id value);
+Id EmitImageAtomicExchange32(EmitContext& ctx, IR::Inst* inst, Imm32 handle, Id coords, Id value);
+Id EmitImageAtomicCmpSwap32(EmitContext& ctx, IR::Inst* inst, Imm32 handle, Id address, Id value,
                             Id cmp_value);
 Id EmitCubeFaceIndex(EmitContext& ctx, IR::Inst* inst, Id x, Id y, Id z);
 Id EmitCubeFaceCoordS(EmitContext& ctx, IR::Inst* inst, Id x, Id y, Id z);
@@ -480,7 +484,7 @@ Id EmitShuffle(EmitContext& ctx, Id value, Id index);
 Id EmitShuffleXor(EmitContext& ctx, Id value, Id mask);
 Id EmitReadFirstLane(EmitContext& ctx, Id value);
 Id EmitReadLane(EmitContext& ctx, Id value, Id lane);
-Id EmitWriteLane(EmitContext& ctx, Id value, Id write_value, u32 lane);
+Id EmitWriteLane(EmitContext& ctx, Id value, Id write_value, Imm32 lane);
 Id EmitBallot(EmitContext& ctx, Id bit);
 Id EmitBallotFindLsb(EmitContext& ctx, Id mask);
 Id EmitInverseBallot(EmitContext& ctx, Id mask);

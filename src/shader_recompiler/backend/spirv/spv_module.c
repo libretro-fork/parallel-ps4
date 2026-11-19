@@ -1,11 +1,14 @@
 /* SPDX-FileCopyrightText: Copyright 2026 shadPS4 Emulator Project
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
+#include <stdlib.h>
 #include <string.h>
 
 #include "shader_recompiler/backend/spirv/spv_module.h"
 
 /* SPIR-V's own numbers, as spirv.h has them */
+#define OP_EXT_INST_IMPORT 11
+#define OP_PHI 245
 #define OP_EXTENSION 10
 #define OP_CAPABILITY 17
 
@@ -86,6 +89,16 @@ static int decls_grow(spv_module_t* m) {
     return 1;
 }
 
+void* spv_module_heap_grow(void* user, void* old, size_t old_bytes, size_t new_bytes) {
+    (void)user;
+    (void)old_bytes;
+    if (new_bytes == 0) {
+        free(old);
+        return NULL;
+    }
+    return realloc(old, new_bytes);
+}
+
 void spv_module_init(spv_module_t* m, spirv_words_grow_t grow, void* user) {
     memset(m, 0, sizeof(*m));
     m->mem.grow = grow;
@@ -100,6 +113,10 @@ void spv_module_free(spv_module_t* m) {
             (void)m->mem.grow(m->mem.user, m->sec[s].v, m->sec[s].cap * sizeof(uint32_t), 0);
         }
     }
+    if (m->phis.v) {
+        (void)m->mem.grow(m->mem.user, m->phis.v, m->phis.cap * sizeof(uint32_t), 0);
+    }
+    memset(&m->phis, 0, sizeof(m->phis));
     if (m->decls) {
         (void)m->mem.grow(m->mem.user, m->decls, (m->decls_mask + 1) * sizeof(*m->decls), 0);
     }
@@ -118,6 +135,8 @@ bool spv_module_reset(spv_module_t* m, uint32_t code_words) {
     m->num_caps = 0;
     m->num_exts = 0;
     m->num_decls = 0;
+    m->num_imports = 0;
+    m->phis.n = 0;
     if (m->decls) {
         memset(m->decls, 0, (m->decls_mask + 1) * sizeof(*m->decls));
     } else if (!decls_grow(m)) {
@@ -157,6 +176,57 @@ void spv_module_extension(spv_module_t* m, const char* ext) {
         return;
     }
     m->exts[m->num_exts++] = ext;
+}
+
+uint32_t spv_module_import(spv_module_t* m, const char* name) {
+    uint32_t i, id;
+    for (i = 0; i < m->num_imports; i++) {
+        if (m->import_names[i] == name || strcmp(m->import_names[i], name) == 0) {
+            return m->import_ids[i];
+        }
+    }
+    id = spv_module_id(m);
+    if (m->num_imports == SPV_MODULE_MAX_IMPORTS) {
+        m->failed = 1;
+        return id;
+    }
+    m->import_names[m->num_imports] = name;
+    m->import_ids[m->num_imports++] = id;
+    spv_module_op_str(m, SPV_SEC_EXT_IMPORTS, OP_EXT_INST_IMPORT, &id, 1, name, NULL, 0);
+    return id;
+}
+
+uint32_t spv_module_phi_deferred(spv_module_t* m, uint32_t type, const uint32_t* blocks,
+                                 uint32_t n) {
+    struct spirv_words_buf* code = &m->sec[SPV_SEC_CODE];
+    const uint32_t at = code->n;
+    uint32_t* p = spirv_words_op_at(&m->mem, code, OP_PHI, 2 + n * 2);
+    const uint32_t id = m->bound++;
+    uint32_t i;
+    if (!p || !spirv_words_put(&m->mem, &m->phis, at)) {
+        m->failed = 1;
+        return id;
+    }
+    p[0] = type;
+    p[1] = id;
+    for (i = 0; i < n; i++) {
+        p[2 + i * 2] = 0;
+        p[3 + i * 2] = blocks[i];
+    }
+    return id;
+}
+
+void spv_module_patch_phis(spv_module_t* m, spv_phi_patch_fn fn, void* ctx) {
+    uint32_t* code = m->sec[SPV_SEC_CODE].v;
+    uint32_t i, arg;
+    for (i = 0; i < m->phis.n; i++) {
+        uint32_t* at = code + m->phis.v[i];
+        const uint32_t args = ((at[0] >> 16) - 3) / 2;
+        uint32_t* pair = at + 3;
+        for (arg = 0; arg < args; arg++, pair += 2) {
+            fn(ctx, arg, pair[1], &pair[0], &pair[1]);
+        }
+    }
 }
 
 void spv_module_op_str(spv_module_t* m, enum spv_module_section sec, uint32_t op,

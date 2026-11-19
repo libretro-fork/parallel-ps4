@@ -7,19 +7,19 @@
 namespace Shader::Backend::SPIRV {
 
 Id EmitSelectU1(EmitContext& ctx, Id cond, Id true_value, Id false_value) {
-    return ctx.OpSelect(ctx.U1[1], cond, true_value, false_value);
+    return spv_OpSelect(&ctx.m, ctx.U1[1], cond, true_value, false_value);
 }
 
 Id EmitSelectU32(EmitContext& ctx, Id cond, Id true_value, Id false_value) {
-    return ctx.OpSelect(ctx.U32[1], cond, true_value, false_value);
+    return spv_OpSelect(&ctx.m, ctx.U32[1], cond, true_value, false_value);
 }
 
 Id EmitSelectF32(EmitContext& ctx, Id cond, Id true_value, Id false_value) {
-    return ctx.OpSelect(ctx.F32[1], cond, true_value, false_value);
+    return spv_OpSelect(&ctx.m, ctx.F32[1], cond, true_value, false_value);
 }
 
 Id EmitSelectU64(EmitContext& ctx, Id cond, Id true_value, Id false_value) {
-    return ctx.OpSelect(ctx.U64, cond, true_value, false_value);
+    return spv_OpSelect(&ctx.m, ctx.U64, cond, true_value, false_value);
 }
 
 } // namespace Shader::Backend::SPIRV

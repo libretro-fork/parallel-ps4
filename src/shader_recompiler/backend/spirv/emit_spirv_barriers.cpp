@@ -6,46 +6,46 @@
 
 namespace Shader::Backend::SPIRV {
 namespace {
-void MemoryBarrier(EmitContext& ctx, spv::Scope scope) {
+void MemoryBarrier(EmitContext& ctx, u32 scope) {
     const auto semantics{
-        spv::MemorySemanticsMask::AcquireRelease | spv::MemorySemanticsMask::UniformMemory |
-        spv::MemorySemanticsMask::WorkgroupMemory | spv::MemorySemanticsMask::AtomicCounterMemory |
-        spv::MemorySemanticsMask::ImageMemory};
-    ctx.OpMemoryBarrier(ctx.ConstU32(static_cast<u32>(scope)),
+        SpvMemorySemanticsAcquireReleaseMask | SpvMemorySemanticsUniformMemoryMask |
+        SpvMemorySemanticsWorkgroupMemoryMask | SpvMemorySemanticsAtomicCounterMemoryMask |
+        SpvMemorySemanticsImageMemoryMask};
+    spv_OpMemoryBarrier(&ctx.m, ctx.ConstU32(static_cast<u32>(scope)),
                         ctx.ConstU32(static_cast<u32>(semantics)));
 }
 } // Anonymous namespace
 
 void EmitBarrier(EmitContext& ctx) {
-    const auto execution{spv::Scope::Workgroup};
-    spv::Scope memory;
-    spv::MemorySemanticsMask memory_semantics;
+    const auto execution{SpvScopeWorkgroup};
+    u32 memory;
+    u32 memory_semantics;
     if (ctx.sw_stage == Shader::SwStage::TessellationControl) {
-        memory = spv::Scope::Invocation;
-        memory_semantics = spv::MemorySemanticsMask::MaskNone;
+        memory = SpvScopeInvocation;
+        memory_semantics = SpvMemorySemanticsMaskNone;
     } else {
-        memory = spv::Scope::Workgroup;
+        memory = SpvScopeWorkgroup;
         memory_semantics =
-            spv::MemorySemanticsMask::AcquireRelease | spv::MemorySemanticsMask::WorkgroupMemory;
+            SpvMemorySemanticsAcquireReleaseMask | SpvMemorySemanticsWorkgroupMemoryMask;
     }
-    ctx.OpControlBarrier(ctx.ConstU32(static_cast<u32>(execution)),
+    spv_OpControlBarrier(&ctx.m, ctx.ConstU32(static_cast<u32>(execution)),
                          ctx.ConstU32(static_cast<u32>(memory)),
                          ctx.ConstU32(static_cast<u32>(memory_semantics)));
 }
 
 void EmitSubgroupBarrier(EmitContext& ctx) {
-    const auto semantics{static_cast<u32>(spv::MemorySemanticsMask::AcquireRelease |
-                                          spv::MemorySemanticsMask::WorkgroupMemory)};
-    ctx.OpMemoryBarrier(ctx.ConstU32(static_cast<u32>(spv::Scope::Subgroup)),
+    const auto semantics{static_cast<u32>(SpvMemorySemanticsAcquireReleaseMask |
+                                          SpvMemorySemanticsWorkgroupMemoryMask)};
+    spv_OpMemoryBarrier(&ctx.m, ctx.ConstU32(static_cast<u32>(SpvScopeSubgroup)),
                         ctx.ConstU32(semantics));
 }
 
 void EmitWorkgroupMemoryBarrier(EmitContext& ctx) {
-    MemoryBarrier(ctx, spv::Scope::Workgroup);
+    MemoryBarrier(ctx, SpvScopeWorkgroup);
 }
 
 void EmitDeviceMemoryBarrier(EmitContext& ctx) {
-    MemoryBarrier(ctx, spv::Scope::Device);
+    MemoryBarrier(ctx, SpvScopeDevice);
 }
 
 } // namespace Shader::Backend::SPIRV

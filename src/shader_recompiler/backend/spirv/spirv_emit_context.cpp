@@ -60,26 +60,31 @@ static constexpr u32 NumVertices(AmdGpu::PrimitiveType type) {
 }
 
 template <typename... Args>
-void Name(EmitContext& ctx, Id object, std::string_view format_str, Args&&... args) {
-    ctx.Name(object, fmt::format(fmt::runtime(format_str), StageName(ctx.hw_stage),
-                                 std::forward<Args>(args)...)
-                         .c_str());
+void NameFmt(EmitContext& ctx, Id object, std::string_view format_str, Args&&... args) {
+    spv_Name(&ctx.m, object,
+             std::string(fmt::format(fmt::runtime(format_str), StageName(ctx.hw_stage),
+                                     std::forward<Args>(args)...)
+                             .c_str())
+                 .c_str());
 }
 
 } // Anonymous namespace
 
 EmitContext::EmitContext(const Profile& profile_, const RuntimeInfo& runtime_info_, Info& info_,
                          Bindings& binding_)
-    : Sirit::Module(profile_.supported_spirv), info{info_}, runtime_info{runtime_info_},
-      profile{profile_}, hw_stage{info.hw_stage}, sw_stage{info.sw_stage}, binding{binding_} {
+    : info{info_}, runtime_info{runtime_info_}, profile{profile_}, hw_stage{info.hw_stage},
+      sw_stage{info.sw_stage}, binding{binding_} {
+    spv_module_init(&m, spv_module_heap_grow, nullptr);
+    ASSERT_MSG(spv_module_reset(&m, 4096), "SPIR-V module: out of memory");
     if (info.uses_dma) {
-        SetMemoryModel(spv::AddressingModel::PhysicalStorageBuffer64, spv::MemoryModel::GLSL450);
+        spv_SetMemoryModel(&m, u32(SpvAddressingModelPhysicalStorageBuffer64),
+                           u32(SpvMemoryModelGLSL450));
     } else {
-        SetMemoryModel(spv::AddressingModel::Logical, spv::MemoryModel::GLSL450);
+        spv_SetMemoryModel(&m, u32(SpvAddressingModelLogical), u32(SpvMemoryModelGLSL450));
     }
-    String(fmt::format("{:#x}", info.pgm_hash));
+    spv_String(&m, std::string(fmt::format("{:#x}", info.pgm_hash)).c_str());
 
-    AddCapability(spv::Capability::Shader);
+    spv_AddCapability(&m, u32(SpvCapabilityShader));
     DefineArithmeticTypes();
     DefineInterfaces();
     DefineSharedMemory();
@@ -88,7 +93,9 @@ EmitContext::EmitContext(const Profile& profile_, const RuntimeInfo& runtime_inf
     DefineFunctions();
 }
 
-EmitContext::~EmitContext() = default;
+EmitContext::~EmitContext() {
+    spv_module_free(&m);
+}
 
 Id EmitContext::Def(const IR::Value& value) {
     if (!value.IsImmediate()) {
@@ -102,79 +109,94 @@ Id EmitContext::Def(const IR::Value& value) {
     case IR::Type::U32:
         return ConstU32(value.U32());
     case IR::Type::U64:
-        return Constant(U64, value.U64());
+        return spv_Constant64(&m, U64, u64(value.U64()));
     case IR::Type::F32:
         return ConstF32(value.F32());
     case IR::Type::F64:
-        return Constant(F64[1], value.F64());
+        return spv_ConstantF64(&m, F64[1], f64(value.F64()));
     case IR::Type::StringLiteral:
-        return String(value.StringLiteral());
+        return spv_String(&m, std::string(value.StringLiteral()).c_str());
     default:
         UNREACHABLE_MSG("Immediate type {}", value.Type());
     }
 }
 
 void EmitContext::DefineArithmeticTypes() {
-    void_id = Name(TypeVoid(), "void_id");
-    U1[1] = Name(TypeBool(), "bool_id");
-    U8 = Name(TypeUInt(8), "u8_id");
-    S8 = Name(TypeSInt(8), "i8_id");
-    U16 = Name(TypeUInt(16), "u16_id");
-    S16 = Name(TypeSInt(16), "i16_id");
+    void_id = spv_Name(&m, spv_TypeVoid(&m), "void_id");
+    U1[1] = spv_Name(&m, spv_TypeBool(&m), "bool_id");
+    U8 = spv_Name(&m, spv_TypeUInt(&m, 8), "u8_id");
+    S8 = spv_Name(&m, spv_TypeSInt(&m, 8), "i8_id");
+    U16 = spv_Name(&m, spv_TypeUInt(&m, 16), "u16_id");
+    S16 = spv_Name(&m, spv_TypeSInt(&m, 16), "i16_id");
     if (info.uses_fp16) {
-        F16[1] = Name(TypeFloat(16), "f16_id");
+        F16[1] = spv_Name(&m, spv_TypeFloat(&m, 16), "f16_id");
     }
     if (info.uses_fp64) {
-        F64[1] = Name(TypeFloat(64), "f64_id");
+        F64[1] = spv_Name(&m, spv_TypeFloat(&m, 64), "f64_id");
     }
-    F32[1] = Name(TypeFloat(32), "f32_id");
-    S32[1] = Name(TypeSInt(32), "i32_id");
-    U32[1] = Name(TypeUInt(32), "u32_id");
-    U64 = Name(TypeUInt(64), "u64_id");
+    F32[1] = spv_Name(&m, spv_TypeFloat(&m, 32), "f32_id");
+    S32[1] = spv_Name(&m, spv_TypeSInt(&m, 32), "i32_id");
+    U32[1] = spv_Name(&m, spv_TypeUInt(&m, 32), "u32_id");
+    U64 = spv_Name(&m, spv_TypeUInt(&m, 64), "u64_id");
 
     for (u32 i = 2; i <= 4; i++) {
         if (info.uses_fp16) {
-            F16[i] = Name(TypeVector(F16[1], i), fmt::format("f16vec{}_id", i));
+            F16[i] = spv_Name(&m, spv_TypeVector(&m, F16[1], u32(i)),
+                              std::string(fmt::format("f16vec{}_id", i)).c_str());
         }
         if (info.uses_fp64) {
-            F64[i] = Name(TypeVector(F64[1], i), fmt::format("f64vec{}_id", i));
+            F64[i] = spv_Name(&m, spv_TypeVector(&m, F64[1], u32(i)),
+                              std::string(fmt::format("f64vec{}_id", i)).c_str());
         }
-        F32[i] = Name(TypeVector(F32[1], i), fmt::format("f32vec{}_id", i));
-        S32[i] = Name(TypeVector(S32[1], i), fmt::format("i32vec{}_id", i));
-        U32[i] = Name(TypeVector(U32[1], i), fmt::format("u32vec{}_id", i));
-        U1[i] = Name(TypeVector(U1[1], i), fmt::format("bvec{}_id", i));
+        F32[i] = spv_Name(&m, spv_TypeVector(&m, F32[1], u32(i)),
+                          std::string(fmt::format("f32vec{}_id", i)).c_str());
+        S32[i] = spv_Name(&m, spv_TypeVector(&m, S32[1], u32(i)),
+                          std::string(fmt::format("i32vec{}_id", i)).c_str());
+        U32[i] = spv_Name(&m, spv_TypeVector(&m, U32[1], u32(i)),
+                          std::string(fmt::format("u32vec{}_id", i)).c_str());
+        U1[i] = spv_Name(&m, spv_TypeVector(&m, U1[1], u32(i)),
+                         std::string(fmt::format("bvec{}_id", i)).c_str());
     }
 
-    true_value = ConstantTrue(U1[1]);
-    false_value = ConstantFalse(U1[1]);
-    u8_one_value = Constant(U8, 1U);
-    u8_zero_value = Constant(U8, 0U);
-    u16_zero_value = Constant(U16, 0U);
+    true_value = spv_ConstantTrue(&m, U1[1]);
+    false_value = spv_ConstantFalse(&m, U1[1]);
+    u8_one_value = spv_Constant32(&m, U8, u32(1U));
+    u8_zero_value = spv_Constant32(&m, U8, u32(0U));
+    u16_zero_value = spv_Constant32(&m, U16, u32(0U));
     u32_one_value = ConstU32(1U);
     u32_zero_value = ConstU32(0U);
     f32_one_value = ConstF32(1.f);
     f32_zero_value = ConstF32(0.f);
-    u64_one_value = Constant(U64, 1ULL);
-    u64_zero_value = Constant(U64, 0ULL);
+    u64_one_value = spv_Constant64(&m, U64, u64(1ULL));
+    u64_zero_value = spv_Constant64(&m, U64, u64(0ULL));
 
     pi_x2 = ConstF32(2.0f * float{std::numbers::pi});
 
-    input_f32 = Name(TypePointer(spv::StorageClass::Input, F32[1]), "input_f32");
-    input_u32 = Name(TypePointer(spv::StorageClass::Input, U32[1]), "input_u32");
-    input_s32 = Name(TypePointer(spv::StorageClass::Input, S32[1]), "input_s32");
+    input_f32 = spv_Name(&m, spv_TypePointer(&m, u32(SpvStorageClassInput), F32[1]), "input_f32");
+    input_u32 = spv_Name(&m, spv_TypePointer(&m, u32(SpvStorageClassInput), U32[1]), "input_u32");
+    input_s32 = spv_Name(&m, spv_TypePointer(&m, u32(SpvStorageClassInput), S32[1]), "input_s32");
 
-    output_f32 = Name(TypePointer(spv::StorageClass::Output, F32[1]), "output_f32");
-    output_u32 = Name(TypePointer(spv::StorageClass::Output, U32[1]), "output_u32");
-    output_s32 = Name(TypePointer(spv::StorageClass::Output, S32[1]), "output_s32");
+    output_f32 =
+        spv_Name(&m, spv_TypePointer(&m, u32(SpvStorageClassOutput), F32[1]), "output_f32");
+    output_u32 =
+        spv_Name(&m, spv_TypePointer(&m, u32(SpvStorageClassOutput), U32[1]), "output_u32");
+    output_s32 =
+        spv_Name(&m, spv_TypePointer(&m, u32(SpvStorageClassOutput), S32[1]), "output_s32");
 
-    full_result_i32x2 = Name(TypeStruct(S32[1], S32[1]), "full_result_i32x2");
-    full_result_u32x2 = Name(TypeStruct(U32[1], U32[1]), "full_result_u32x2");
-    frexp_result_f32 = Name(TypeStruct(F32[1], S32[1]), "frexp_result_f32");
+    full_result_i32x2 = spv_Name(
+        &m, spv_TypeStruct(&m, std::array<u32, 2>{S32[1], S32[1]}.data(), 2), "full_result_i32x2");
+    full_result_u32x2 = spv_Name(
+        &m, spv_TypeStruct(&m, std::array<u32, 2>{U32[1], U32[1]}.data(), 2), "full_result_u32x2");
+    frexp_result_f32 = spv_Name(
+        &m, spv_TypeStruct(&m, std::array<u32, 2>{F32[1], S32[1]}.data(), 2), "frexp_result_f32");
     if (info.uses_fp64) {
-        frexp_result_f64 = Name(TypeStruct(F64[1], S32[1]), "frexp_result_f64");
+        frexp_result_f64 =
+            spv_Name(&m, spv_TypeStruct(&m, std::array<u32, 2>{F64[1], S32[1]}.data(), 2),
+                     "frexp_result_f64");
     }
     if (info.uses_dma) {
-        physical_pointer_type_u32 = TypePointer(spv::StorageClass::PhysicalStorageBuffer, U32[1]);
+        physical_pointer_type_u32 =
+            spv_TypePointer(&m, u32(SpvStorageClassPhysicalStorageBuffer), U32[1]);
     }
 }
 
@@ -220,17 +242,19 @@ Id EmitContext::GetBufferSize(const u32 sharp_idx) {
     ASSERT(srt_flatbuf.buffer_type == BufferType::Flatbuf);
     const auto [id, pointer_type] = srt_flatbuf.Alias(PointerType::U32);
 
-    const auto rsrc1{
-        OpLoad(U32[1], OpAccessChain(pointer_type, id, u32_zero_value, ConstU32(sharp_idx + 1)))};
-    const auto rsrc2{
-        OpLoad(U32[1], OpAccessChain(pointer_type, id, u32_zero_value, ConstU32(sharp_idx + 2)))};
+    const auto rsrc1{spv_OpLoad(
+        &m, U32[1],
+        spv_OpAccessChain2(&m, pointer_type, id, u32_zero_value, ConstU32(sharp_idx + 1)))};
+    const auto rsrc2{spv_OpLoad(
+        &m, U32[1],
+        spv_OpAccessChain2(&m, pointer_type, id, u32_zero_value, ConstU32(sharp_idx + 2)))};
 
-    const auto stride{OpBitFieldUExtract(U32[1], rsrc1, ConstU32(16u), ConstU32(14u))};
+    const auto stride{spv_OpBitFieldUExtract(&m, U32[1], rsrc1, ConstU32(16u), ConstU32(14u))};
     const auto num_records{rsrc2};
 
-    const auto stride_zero{OpIEqual(U1[1], stride, u32_zero_value)};
-    const auto stride_size{OpIMul(U32[1], num_records, stride)};
-    return OpSelect(U32[1], stride_zero, num_records, stride_size);
+    const auto stride_zero{spv_OpIEqual(&m, U1[1], stride, u32_zero_value)};
+    const auto stride_size{spv_OpIMul(&m, U32[1], num_records, stride)};
+    return spv_OpSelect(&m, U32[1], stride_zero, num_records, stride_size);
 }
 
 void EmitContext::DefineBufferProperties() {
@@ -248,27 +272,34 @@ void EmitContext::DefineBufferProperties() {
         const u32 half = PushData::BufOffsetIndex + (binding >> 4);
         const u32 comp = (binding & 0xf) >> 2;
         const u32 offset = (binding & 0x3) << 3;
-        const Id ptr{OpAccessChain(TypePointer(spv::StorageClass::PushConstant, U32[1]),
-                                   push_data_block, ConstU32(half), ConstU32(comp))};
-        const Id value{OpLoad(U32[1], ptr)};
+        const Id ptr{
+            spv_OpAccessChain2(&m, spv_TypePointer(&m, u32(SpvStorageClassPushConstant), U32[1]),
+                               push_data_block, ConstU32(half), ConstU32(comp))};
+        const Id value{spv_OpLoad(&m, U32[1], ptr)};
 
-        const Id buf_offset{OpBitFieldUExtract(U32[1], value, ConstU32(offset), ConstU32(8U))};
-        Name(buf_offset, fmt::format("buf{}_off", binding));
+        const Id buf_offset{
+            spv_OpBitFieldUExtract(&m, U32[1], value, ConstU32(offset), ConstU32(8U))};
+        spv_Name(&m, buf_offset, std::string(fmt::format("buf{}_off", binding)).c_str());
         buffer.Offset(PointerSize::B8) = buf_offset;
 
         if (True(desc.used_types & IR::Type::U16)) {
-            const Id buf_word_offset{OpShiftRightLogical(U32[1], buf_offset, ConstU32(1U))};
-            Name(buf_word_offset, fmt::format("buf{}_word_off", binding));
+            const Id buf_word_offset{spv_OpShiftRightLogical(&m, U32[1], buf_offset, ConstU32(1U))};
+            spv_Name(&m, buf_word_offset,
+                     std::string(fmt::format("buf{}_word_off", binding)).c_str());
             buffer.Offset(PointerSize::B16) = buf_word_offset;
         }
         if (True(desc.used_types & IR::Type::U32)) {
-            const Id buf_dword_offset{OpShiftRightLogical(U32[1], buf_offset, ConstU32(2U))};
-            Name(buf_dword_offset, fmt::format("buf{}_dword_off", binding));
+            const Id buf_dword_offset{
+                spv_OpShiftRightLogical(&m, U32[1], buf_offset, ConstU32(2U))};
+            spv_Name(&m, buf_dword_offset,
+                     std::string(fmt::format("buf{}_dword_off", binding)).c_str());
             buffer.Offset(PointerSize::B32) = buf_dword_offset;
         }
         if (True(desc.used_types & IR::Type::U64)) {
-            const Id buf_qword_offset{OpShiftRightLogical(U32[1], buf_offset, ConstU32(3U))};
-            Name(buf_qword_offset, fmt::format("buf{}_qword_off", binding));
+            const Id buf_qword_offset{
+                spv_OpShiftRightLogical(&m, U32[1], buf_offset, ConstU32(3U))};
+            spv_Name(&m, buf_qword_offset,
+                     std::string(fmt::format("buf{}_qword_off", binding)).c_str());
             buffer.Offset(PointerSize::B64) = buf_qword_offset;
         }
     }
@@ -286,56 +317,55 @@ void EmitContext::DefineAmdPerVertexAttribs() {
         auto& param = input_params[i];
         const Id pointer = param.id;
         param.id_array[0] =
-            OpInterpolateAtVertexAMD(F32[param.num_components], pointer, ConstU32(0U));
+            spv_OpInterpolateAtVertexAMD(&m, F32[param.num_components], pointer, ConstU32(0U));
         param.id_array[1] =
-            OpInterpolateAtVertexAMD(F32[param.num_components], pointer, ConstU32(1U));
+            spv_OpInterpolateAtVertexAMD(&m, F32[param.num_components], pointer, ConstU32(1U));
         param.id_array[2] =
-            OpInterpolateAtVertexAMD(F32[param.num_components], pointer, ConstU32(2U));
+            spv_OpInterpolateAtVertexAMD(&m, F32[param.num_components], pointer, ConstU32(2U));
         param.is_loaded = true;
     }
 }
 
 void EmitContext::DefineWorkgroupIndex() {
-    const Id workgroup_id_val{OpLoad(U32[3], workgroup_id)};
-    const Id workgroup_x{OpCompositeExtract(U32[1], workgroup_id_val, 0)};
-    const Id workgroup_y{OpCompositeExtract(U32[1], workgroup_id_val, 1)};
-    const Id workgroup_z{OpCompositeExtract(U32[1], workgroup_id_val, 2)};
-    const Id num_workgroups{OpLoad(U32[3], num_workgroups_id)};
-    const Id num_workgroups_x{OpCompositeExtract(U32[1], num_workgroups, 0)};
-    const Id num_workgroups_y{OpCompositeExtract(U32[1], num_workgroups, 1)};
-    workgroup_index_id =
-        OpIAdd(U32[1], OpIAdd(U32[1], workgroup_x, OpIMul(U32[1], workgroup_y, num_workgroups_x)),
-               OpIMul(U32[1], workgroup_z, OpIMul(U32[1], num_workgroups_x, num_workgroups_y)));
-    Name(workgroup_index_id, "workgroup_index");
+    const Id workgroup_id_val{spv_OpLoad(&m, U32[3], workgroup_id)};
+    const Id workgroup_x{spv_OpCompositeExtract1(&m, U32[1], workgroup_id_val, 0)};
+    const Id workgroup_y{spv_OpCompositeExtract1(&m, U32[1], workgroup_id_val, 1)};
+    const Id workgroup_z{spv_OpCompositeExtract1(&m, U32[1], workgroup_id_val, 2)};
+    const Id num_workgroups{spv_OpLoad(&m, U32[3], num_workgroups_id)};
+    const Id num_workgroups_x{spv_OpCompositeExtract1(&m, U32[1], num_workgroups, 0)};
+    const Id num_workgroups_y{spv_OpCompositeExtract1(&m, U32[1], num_workgroups, 1)};
+    workgroup_index_id = spv_OpIAdd(
+        &m, U32[1],
+        spv_OpIAdd(&m, U32[1], workgroup_x, spv_OpIMul(&m, U32[1], workgroup_y, num_workgroups_x)),
+        spv_OpIMul(&m, U32[1], workgroup_z,
+                   spv_OpIMul(&m, U32[1], num_workgroups_x, num_workgroups_y)));
+    spv_Name(&m, workgroup_index_id, "workgroup_index");
 }
 
 void EmitContext::DefineInputs() {
     if (info.uses_lane_id) {
-        subgroup_local_invocation_id = DefineVariable(
-            U32[1], spv::BuiltIn::SubgroupLocalInvocationId, spv::StorageClass::Input);
+        subgroup_local_invocation_id =
+            DefineVariable(U32[1], SpvBuiltInSubgroupLocalInvocationId, SpvStorageClassInput);
         // Flat is for fragment inputs only (VUID-StandaloneSpirv-Flat-06202)
         if (hw_stage == HwStage::Fragment) {
-            Decorate(subgroup_local_invocation_id, spv::Decoration::Flat);
+            spv_Decorate0(&m, subgroup_local_invocation_id, u32(SpvDecorationFlat));
         }
     }
     if (info.loads.GetAny(IR::Attribute::SubgroupLtMask)) {
-        subgroup_lt_mask =
-            DefineVariable(U32[4], spv::BuiltIn::SubgroupLtMask, spv::StorageClass::Input);
+        subgroup_lt_mask = DefineVariable(U32[4], SpvBuiltInSubgroupLtMask, SpvStorageClassInput);
         if (hw_stage == HwStage::Fragment) {
-            Decorate(subgroup_lt_mask, spv::Decoration::Flat);
+            spv_Decorate0(&m, subgroup_lt_mask, u32(SpvDecorationFlat));
         }
     }
     switch (sw_stage) {
     case SwStage::Vertex: {
-        vertex_index = DefineVariable(U32[1], spv::BuiltIn::VertexIndex, spv::StorageClass::Input);
-        instance_id = DefineVariable(U32[1], spv::BuiltIn::InstanceIndex, spv::StorageClass::Input);
+        vertex_index = DefineVariable(U32[1], SpvBuiltInVertexIndex, SpvStorageClassInput);
+        instance_id = DefineVariable(U32[1], SpvBuiltInInstanceIndex, SpvStorageClassInput);
         if (info.loads.Get(IR::Attribute::BaseVertex)) {
-            base_vertex =
-                DefineVariable(U32[1], spv::BuiltIn::BaseVertex, spv::StorageClass::Input);
+            base_vertex = DefineVariable(U32[1], SpvBuiltInBaseVertex, SpvStorageClassInput);
         }
         if (info.loads.Get(IR::Attribute::BaseInstance)) {
-            base_instance =
-                DefineVariable(U32[1], spv::BuiltIn::BaseInstance, spv::StorageClass::Input);
+            base_instance = DefineVariable(U32[1], SpvBuiltInBaseInstance, SpvStorageClassInput);
         }
 
         Shader::Gcn::FetchShaderData fetch_shader;
@@ -349,9 +379,9 @@ void EmitContext::DefineInputs() {
             const Id type{GetAttributeType(*this, sharp.GetNumberFmt())[4]};
             Id id{DefineInput(type, semantic)};
             if (attrib.GetStepRate() != Gcn::VertexAttribute::InstanceIdType::None) {
-                Name(id, fmt::format("vs_instance_attr{}", semantic));
+                spv_Name(&m, id, std::string(fmt::format("vs_instance_attr{}", semantic)).c_str());
             } else {
-                Name(id, fmt::format("vs_in_attr{}", semantic));
+                spv_Name(&m, id, std::string(fmt::format("vs_in_attr{}", semantic)).c_str());
             }
             input_params[semantic] = GetAttributeInfo(sharp.GetNumberFmt(), id, 4, false);
         }
@@ -361,89 +391,84 @@ void EmitContext::DefineInputs() {
         if (info.loads.GetAny(IR::Attribute::FragCoord) ||
             (info.loads.GetAny(IR::Attribute::BaryCoordPullModel) &&
              !profile.supports_amd_shader_explicit_vertex_parameter)) {
-            frag_coord = DefineVariable(F32[4], spv::BuiltIn::FragCoord, spv::StorageClass::Input);
+            frag_coord = DefineVariable(F32[4], SpvBuiltInFragCoord, SpvStorageClassInput);
         }
         if (info.loads.Get(IR::Attribute::IsFrontFace)) {
-            front_facing =
-                DefineVariable(U1[1], spv::BuiltIn::FrontFacing, spv::StorageClass::Input);
+            front_facing = DefineVariable(U1[1], SpvBuiltInFrontFacing, SpvStorageClassInput);
         }
         if (info.loads.GetAny(IR::Attribute::RenderTargetIndex)) {
-            output_layer = DefineVariable(U32[1], spv::BuiltIn::Layer, spv::StorageClass::Input);
-            Decorate(output_layer, spv::Decoration::Flat);
+            output_layer = DefineVariable(U32[1], SpvBuiltInLayer, SpvStorageClassInput);
+            spv_Decorate0(&m, output_layer, u32(SpvDecorationFlat));
         }
         if (info.loads.Get(IR::Attribute::SampleIndex)) {
-            sample_index = DefineVariable(U32[1], spv::BuiltIn::SampleId, spv::StorageClass::Input);
-            Decorate(sample_index, spv::Decoration::Flat);
+            sample_index = DefineVariable(U32[1], SpvBuiltInSampleId, SpvStorageClassInput);
+            spv_Decorate0(&m, sample_index, u32(SpvDecorationFlat));
         }
         if (info.loads.Get(IR::Attribute::IsHelperInvocation)) {
             helper_invocation =
-                DefineVariable(U1[1], spv::BuiltIn::HelperInvocation, spv::StorageClass::Input);
+                DefineVariable(U1[1], SpvBuiltInHelperInvocation, SpvStorageClassInput);
         }
         if (info.loads.Get(IR::Attribute::SampleMask)) {
-            sample_mask_in = DefineVariable(TypeArray(U32[1], u32_one_value),
-                                            spv::BuiltIn::SampleMask, spv::StorageClass::Input);
+            sample_mask_in = DefineVariable(spv_TypeArray(&m, U32[1], u32_one_value),
+                                            SpvBuiltInSampleMask, SpvStorageClassInput);
         }
         if (info.loads.GetAny(IR::Attribute::BaryCoordSmooth)) {
             if (profile.supports_amd_shader_explicit_vertex_parameter) {
-                bary_coord_smooth = DefineVariable(F32[2], spv::BuiltIn::BaryCoordSmoothAMD,
-                                                   spv::StorageClass::Input);
-            } else if (profile.supports_fragment_shader_barycentric && !ValidId(bary_coord)) {
-                bary_coord =
-                    DefineVariable(F32[3], spv::BuiltIn::BaryCoordKHR, spv::StorageClass::Input);
+                bary_coord_smooth =
+                    DefineVariable(F32[2], SpvBuiltInBaryCoordSmoothAMD, SpvStorageClassInput);
+            } else if (profile.supports_fragment_shader_barycentric && !(bary_coord != 0)) {
+                bary_coord = DefineVariable(F32[3], SpvBuiltInBaryCoordKHR, SpvStorageClassInput);
             }
         }
         if (info.loads.GetAny(IR::Attribute::BaryCoordPullModel)) {
             if (profile.supports_amd_shader_explicit_vertex_parameter) {
-                bary_coord_pull_model = DefineVariable(F32[3], spv::BuiltIn::BaryCoordPullModelAMD,
-                                                       spv::StorageClass::Input);
-            } else if (profile.supports_fragment_shader_barycentric && !ValidId(bary_coord)) {
-                bary_coord =
-                    DefineVariable(F32[3], spv::BuiltIn::BaryCoordKHR, spv::StorageClass::Input);
+                bary_coord_pull_model =
+                    DefineVariable(F32[3], SpvBuiltInBaryCoordPullModelAMD, SpvStorageClassInput);
+            } else if (profile.supports_fragment_shader_barycentric && !(bary_coord != 0)) {
+                bary_coord = DefineVariable(F32[3], SpvBuiltInBaryCoordKHR, SpvStorageClassInput);
             }
         }
         if (info.loads.GetAny(IR::Attribute::BaryCoordSmoothCentroid)) {
             if (profile.supports_amd_shader_explicit_vertex_parameter) {
                 bary_coord_smooth_centroid = DefineVariable(
-                    F32[2], spv::BuiltIn::BaryCoordSmoothCentroidAMD, spv::StorageClass::Input);
-            } else if (profile.supports_fragment_shader_barycentric && !ValidId(bary_coord)) {
-                bary_coord =
-                    DefineVariable(F32[3], spv::BuiltIn::BaryCoordKHR, spv::StorageClass::Input);
+                    F32[2], SpvBuiltInBaryCoordSmoothCentroidAMD, SpvStorageClassInput);
+            } else if (profile.supports_fragment_shader_barycentric && !(bary_coord != 0)) {
+                bary_coord = DefineVariable(F32[3], SpvBuiltInBaryCoordKHR, SpvStorageClassInput);
             }
         }
         if (info.loads.GetAny(IR::Attribute::BaryCoordSmoothSample)) {
             if (profile.supports_amd_shader_explicit_vertex_parameter) {
                 bary_coord_smooth_sample = DefineVariable(
-                    F32[2], spv::BuiltIn::BaryCoordSmoothSampleAMD, spv::StorageClass::Input);
+                    F32[2], SpvBuiltInBaryCoordSmoothSampleAMD, SpvStorageClassInput);
             } else if (profile.supports_fragment_shader_barycentric) {
-                if (!ValidId(bary_coord)) {
-                    bary_coord = DefineVariable(F32[3], spv::BuiltIn::BaryCoordKHR,
-                                                spv::StorageClass::Input);
+                if (!(bary_coord != 0)) {
+                    bary_coord =
+                        DefineVariable(F32[3], SpvBuiltInBaryCoordKHR, SpvStorageClassInput);
                 }
                 // we would need sample_index to interpolate the bary_coord later
-                if (!ValidId(sample_index)) {
-                    sample_index =
-                        DefineVariable(U32[1], spv::BuiltIn::SampleId, spv::StorageClass::Input);
-                    Decorate(sample_index, spv::Decoration::Flat);
+                if (!(sample_index != 0)) {
+                    sample_index = DefineVariable(U32[1], SpvBuiltInSampleId, SpvStorageClassInput);
+                    spv_Decorate0(&m, sample_index, u32(SpvDecorationFlat));
                 }
             }
         }
         if (info.loads.GetAny(IR::Attribute::BaryCoordNoPersp)) {
             if (profile.supports_amd_shader_explicit_vertex_parameter) {
-                bary_coord_nopersp = DefineVariable(F32[2], spv::BuiltIn::BaryCoordNoPerspAMD,
-                                                    spv::StorageClass::Input);
+                bary_coord_nopersp =
+                    DefineVariable(F32[2], SpvBuiltInBaryCoordNoPerspAMD, SpvStorageClassInput);
             } else if (profile.supports_fragment_shader_barycentric) {
-                bary_coord_nopersp = DefineVariable(F32[3], spv::BuiltIn::BaryCoordNoPerspKHR,
-                                                    spv::StorageClass::Input);
+                bary_coord_nopersp =
+                    DefineVariable(F32[3], SpvBuiltInBaryCoordNoPerspKHR, SpvStorageClassInput);
             }
         }
         if (info.loads.GetAny(IR::Attribute::BaryCoordNoPerspSample)) {
             if (profile.supports_amd_shader_explicit_vertex_parameter) {
                 bary_coord_nopersp_sample = DefineVariable(
-                    F32[2], spv::BuiltIn::BaryCoordNoPerspSampleAMD, spv::StorageClass::Input);
+                    F32[2], SpvBuiltInBaryCoordNoPerspSampleAMD, SpvStorageClassInput);
             } else if (profile.supports_fragment_shader_barycentric) {
-                bary_coord_nopersp_sample = DefineVariable(
-                    F32[3], spv::BuiltIn::BaryCoordNoPerspKHR, spv::StorageClass::Input);
-                // Decorate(bary_coord_nopersp_sample, spv::Decoration::Sample);
+                bary_coord_nopersp_sample =
+                    DefineVariable(F32[3], SpvBuiltInBaryCoordNoPerspKHR, SpvStorageClassInput);
+                // spv_Decorate0(&m, bary_coord_nopersp_sample, u32(SpvDecorationSample));
             }
         }
 
@@ -464,22 +489,27 @@ void EmitContext::DefineInputs() {
                 const auto bind_location = input.param_index + (has_clip_distance_inputs ? 1 : 0);
                 if (primary == Qualifier::PerVertex &&
                     profile.supports_fragment_shader_barycentric) {
-                    return Name(DefineInput(TypeArray(type, ConstU32(3U)), bind_location),
-                                fmt::format("fs_in_attr{}_p", i));
+                    return spv_Name(
+                        &m, DefineInput(spv_TypeArray(&m, type, ConstU32(3U)), bind_location),
+                        std::string(fmt::format("fs_in_attr{}_p", i)).c_str());
                 }
-                return Name(DefineInput(type, bind_location), fmt::format("fs_in_attr{}", i));
+                return spv_Name(&m, DefineInput(type, bind_location),
+                                std::string(fmt::format("fs_in_attr{}", i)).c_str());
             }();
             if (primary == Qualifier::PerVertex) {
-                Decorate(attr_id, profile.supports_amd_shader_explicit_vertex_parameter
-                                      ? spv::Decoration::ExplicitInterpAMD
-                                      : spv::Decoration::PerVertexKHR);
+                spv_Decorate0(&m, attr_id,
+                              u32(profile.supports_amd_shader_explicit_vertex_parameter
+                                      ? SpvDecorationExplicitInterpAMD
+                                      : SpvDecorationPerVertexKHR));
             } else if (primary != Qualifier::Smooth) {
-                Decorate(attr_id, primary == Qualifier::Flat ? spv::Decoration::Flat
-                                                             : spv::Decoration::NoPerspective);
+                spv_Decorate0(&m, attr_id,
+                              u32(primary == Qualifier::Flat ? SpvDecorationFlat
+                                                             : SpvDecorationNoPerspective));
             }
             if (auxiliary != Qualifier::None) {
-                Decorate(attr_id, auxiliary == Qualifier::Centroid ? spv::Decoration::Centroid
-                                                                   : spv::Decoration::Sample);
+                spv_Decorate0(&m, attr_id,
+                              u32(auxiliary == Qualifier::Centroid ? SpvDecorationCentroid
+                                                                   : SpvDecorationSample));
             }
             input_params[i] = GetAttributeInfo(AmdGpu::NumberFormat::Float, attr_id, num_components,
                                                false, false, primary == Qualifier::PerVertex);
@@ -487,7 +517,8 @@ void EmitContext::DefineInputs() {
 
         if (has_clip_distance_inputs) {
             const auto type = F32[MaxEmulatedClipDistances];
-            const auto attr_id = Name(DefineInput(type, 0), fmt::format("cldist_attr{}", 0));
+            const auto attr_id = spv_Name(&m, DefineInput(type, 0),
+                                          std::string(fmt::format("cldist_attr{}", 0)).c_str());
             input_params[num_inputs] = GetAttributeInfo(AmdGpu::NumberFormat::Float, attr_id,
                                                         MaxEmulatedClipDistances, false);
         }
@@ -496,81 +527,83 @@ void EmitContext::DefineInputs() {
     case SwStage::Compute:
         if (info.loads.GetAny(IR::Attribute::WorkgroupIndex) ||
             info.loads.GetAny(IR::Attribute::WorkgroupId)) {
-            workgroup_id =
-                DefineVariable(U32[3], spv::BuiltIn::WorkgroupId, spv::StorageClass::Input);
+            workgroup_id = DefineVariable(U32[3], SpvBuiltInWorkgroupId, SpvStorageClassInput);
         }
         if (info.loads.GetAny(IR::Attribute::WorkgroupIndex)) {
             num_workgroups_id =
-                DefineVariable(U32[3], spv::BuiltIn::NumWorkgroups, spv::StorageClass::Input);
+                DefineVariable(U32[3], SpvBuiltInNumWorkgroups, SpvStorageClassInput);
         }
         if (info.loads.GetAny(IR::Attribute::LocalInvocationId)) {
             local_invocation_id =
-                DefineVariable(U32[3], spv::BuiltIn::LocalInvocationId, spv::StorageClass::Input);
+                DefineVariable(U32[3], SpvBuiltInLocalInvocationId, SpvStorageClassInput);
         }
         if (info.loads.Get(IR::Attribute::LocalInvocationIndex)) {
-            local_invocation_index = DefineVariable(U32[1], spv::BuiltIn::LocalInvocationIndex,
-                                                    spv::StorageClass::Input);
+            local_invocation_index =
+                DefineVariable(U32[1], SpvBuiltInLocalInvocationIndex, SpvStorageClassInput);
         }
         break;
     case SwStage::Geometry: {
-        primitive_id = DefineVariable(U32[1], spv::BuiltIn::PrimitiveId, spv::StorageClass::Input);
-        const auto gl_per_vertex =
-            Name(TypeStruct(F32[4], F32[1], TypeArray(F32[1], ConstU32(1u))), "gl_PerVertex");
-        MemberName(gl_per_vertex, 0, "gl_Position");
-        MemberName(gl_per_vertex, 1, "gl_PointSize");
-        MemberName(gl_per_vertex, 2, "gl_ClipDistance");
-        MemberDecorate(gl_per_vertex, 0, spv::Decoration::BuiltIn,
-                       static_cast<u32>(spv::BuiltIn::Position));
-        MemberDecorate(gl_per_vertex, 1, spv::Decoration::BuiltIn,
-                       static_cast<u32>(spv::BuiltIn::PointSize));
-        MemberDecorate(gl_per_vertex, 2, spv::Decoration::BuiltIn,
-                       static_cast<u32>(spv::BuiltIn::ClipDistance));
-        Decorate(gl_per_vertex, spv::Decoration::Block);
+        primitive_id = DefineVariable(U32[1], SpvBuiltInPrimitiveId, SpvStorageClassInput);
+        const auto gl_per_vertex = spv_Name(
+            &m,
+            spv_TypeStruct(
+                &m,
+                std::array<u32, 3>{F32[4], F32[1], spv_TypeArray(&m, F32[1], ConstU32(1u))}.data(),
+                3),
+            "gl_PerVertex");
+        spv_MemberName(&m, gl_per_vertex, 0, "gl_Position");
+        spv_MemberName(&m, gl_per_vertex, 1, "gl_PointSize");
+        spv_MemberName(&m, gl_per_vertex, 2, "gl_ClipDistance");
+        spv_MemberDecorate1(&m, gl_per_vertex, 0, u32(SpvDecorationBuiltIn),
+                            u32(static_cast<u32>(SpvBuiltInPosition)));
+        spv_MemberDecorate1(&m, gl_per_vertex, 1, u32(SpvDecorationBuiltIn),
+                            u32(static_cast<u32>(SpvBuiltInPointSize)));
+        spv_MemberDecorate1(&m, gl_per_vertex, 2, u32(SpvDecorationBuiltIn),
+                            u32(static_cast<u32>(SpvBuiltInClipDistance)));
+        spv_Decorate0(&m, gl_per_vertex, u32(SpvDecorationBlock));
         const auto num_verts_in = NumVertices(runtime_info.hw.gs.in_primitive);
-        const auto vertices_in = TypeArray(gl_per_vertex, ConstU32(num_verts_in));
-        gl_in = Name(DefineVar(vertices_in, spv::StorageClass::Input), "gl_in");
+        const auto vertices_in = spv_TypeArray(&m, gl_per_vertex, ConstU32(num_verts_in));
+        gl_in = spv_Name(&m, DefineVar(vertices_in, SpvStorageClassInput), "gl_in");
         interfaces.push_back(gl_in);
 
         const auto num_params = runtime_info.hw.gs.in_vertex_data_size / 4 - 1u;
         for (int param_id = 0; param_id < num_params; ++param_id) {
-            const Id type{TypeArray(F32[4], ConstU32(num_verts_in))};
+            const Id type{spv_TypeArray(&m, F32[4], ConstU32(num_verts_in))};
             const Id id{DefineInput(type, param_id)};
-            Name(id, fmt::format("gs_in_attr{}", param_id));
+            spv_Name(&m, id, std::string(fmt::format("gs_in_attr{}", param_id)).c_str());
             input_params[param_id] =
                 GetAttributeInfo(AmdGpu::NumberFormat::Float, id, 4, false, false, true);
         }
         break;
     }
     case SwStage::TessellationControl: {
-        invocation_id =
-            DefineVariable(U32[1], spv::BuiltIn::InvocationId, spv::StorageClass::Input);
-        patch_vertices =
-            DefineVariable(U32[1], spv::BuiltIn::PatchVertices, spv::StorageClass::Input);
-        primitive_id = DefineVariable(U32[1], spv::BuiltIn::PrimitiveId, spv::StorageClass::Input);
+        invocation_id = DefineVariable(U32[1], SpvBuiltInInvocationId, SpvStorageClassInput);
+        patch_vertices = DefineVariable(U32[1], SpvBuiltInPatchVertices, SpvStorageClassInput);
+        primitive_id = DefineVariable(U32[1], SpvBuiltInPrimitiveId, SpvStorageClassInput);
 
         const u32 num_attrs = Common::AlignUp(runtime_info.sw.tcs.ls_stride, 16) >> 4;
         if (num_attrs > 0) {
-            const Id per_vertex_type{TypeArray(F32[4], ConstU32(num_attrs))};
+            const Id per_vertex_type{spv_TypeArray(&m, F32[4], ConstU32(num_attrs))};
             // The input vertex count isn't statically known, so make length 32 (what
             // glslang does)
-            const Id patch_array_type{TypeArray(per_vertex_type, ConstU32(32u))};
+            const Id patch_array_type{spv_TypeArray(&m, per_vertex_type, ConstU32(32u))};
             input_attr_array = DefineInput(patch_array_type, 0);
-            Name(input_attr_array, "in_attrs");
+            spv_Name(&m, input_attr_array, "in_attrs");
         }
         break;
     }
     case SwStage::TessellationEval: {
-        tess_coord = DefineInput(F32[3], std::nullopt, spv::BuiltIn::TessCoord);
-        primitive_id = DefineVariable(U32[1], spv::BuiltIn::PrimitiveId, spv::StorageClass::Input);
+        tess_coord = DefineInput(F32[3], std::nullopt, SpvBuiltInTessCoord);
+        primitive_id = DefineVariable(U32[1], SpvBuiltInPrimitiveId, SpvStorageClassInput);
 
         const u32 num_attrs = Common::AlignUp(runtime_info.sw.tes.hs_output_cp_stride, 16) >> 4;
         if (num_attrs > 0) {
-            const Id per_vertex_type{TypeArray(F32[4], ConstU32(num_attrs))};
+            const Id per_vertex_type{spv_TypeArray(&m, F32[4], ConstU32(num_attrs))};
             // The input vertex count isn't statically known, so make length 32 (what
             // glslang does)
-            const Id patch_array_type{TypeArray(per_vertex_type, ConstU32(32u))};
+            const Id patch_array_type{spv_TypeArray(&m, per_vertex_type, ConstU32(32u))};
             input_attr_array = DefineInput(patch_array_type, 0);
-            Name(input_attr_array, "in_attrs");
+            spv_Name(&m, input_attr_array, "in_attrs");
         }
 
         const u32 patch_base_location = num_attrs;
@@ -579,8 +612,8 @@ void EmitContext::DefineInputs() {
                 continue;
             }
             const Id id{DefineInput(F32[4], patch_base_location + index)};
-            Decorate(id, spv::Decoration::Patch);
-            Name(id, fmt::format("patch_in{}", index));
+            spv_Decorate0(&m, id, u32(SpvDecorationPatch));
+            spv_Name(&m, id, std::string(fmt::format("patch_in{}", index)).c_str());
             patches[index] = id;
         }
         break;
@@ -593,33 +626,32 @@ void EmitContext::DefineInputs() {
 void EmitContext::DefineVertexBlock() {
     const std::array<Id, 8> zero{f32_zero_value, f32_zero_value, f32_zero_value, f32_zero_value,
                                  f32_zero_value, f32_zero_value, f32_zero_value, f32_zero_value};
-    output_position = DefineVariable(F32[4], spv::BuiltIn::Position, spv::StorageClass::Output);
+    output_position = DefineVariable(F32[4], SpvBuiltInPosition, SpvStorageClassOutput);
     const bool needs_clip_distance_emulation = sw_stage == SwStage::Vertex &&
                                                hw_stage == HwStage::Vertex &&
                                                profile.needs_clip_distance_emulation;
     const auto has_clip_distance_outputs = info.stores.GetAny(IR::Attribute::ClipDistance);
     if (has_clip_distance_outputs && !needs_clip_distance_emulation) {
-        const Id type{TypeArray(F32[1], ConstU32(8U))};
-        const Id initializer{ConstantComposite(type, zero)};
-        clip_distances = DefineVariable(type, spv::BuiltIn::ClipDistance, spv::StorageClass::Output,
-                                        initializer);
+        const Id type{spv_TypeArray(&m, F32[1], ConstU32(8U))};
+        const Id initializer{spv_ConstantComposite(&m, type, zero.data(), u32(zero.size()))};
+        clip_distances =
+            DefineVariable(type, SpvBuiltInClipDistance, SpvStorageClassOutput, initializer);
     }
     if (info.stores.GetAny(IR::Attribute::CullDistance)) {
-        const Id type{TypeArray(F32[1], ConstU32(8U))};
-        const Id initializer{ConstantComposite(type, zero)};
-        cull_distances = DefineVariable(type, spv::BuiltIn::CullDistance, spv::StorageClass::Output,
-                                        initializer);
+        const Id type{spv_TypeArray(&m, F32[1], ConstU32(8U))};
+        const Id initializer{spv_ConstantComposite(&m, type, zero.data(), u32(zero.size()))};
+        cull_distances =
+            DefineVariable(type, SpvBuiltInCullDistance, SpvStorageClassOutput, initializer);
     }
     if (info.stores.GetAny(IR::Attribute::PointSize)) {
-        output_point_size =
-            DefineVariable(F32[1], spv::BuiltIn::PointSize, spv::StorageClass::Output);
+        output_point_size = DefineVariable(F32[1], SpvBuiltInPointSize, SpvStorageClassOutput);
     }
     if (info.stores.GetAny(IR::Attribute::RenderTargetIndex)) {
-        output_layer = DefineVariable(U32[1], spv::BuiltIn::Layer, spv::StorageClass::Output);
+        output_layer = DefineVariable(U32[1], SpvBuiltInLayer, SpvStorageClassOutput);
     }
     if (info.stores.GetAny(IR::Attribute::ViewportIndex)) {
         output_viewport_index =
-            DefineVariable(U32[1], spv::BuiltIn::ViewportIndex, spv::StorageClass::Output);
+            DefineVariable(U32[1], SpvBuiltInViewportIndex, SpvStorageClassOutput);
     }
 }
 
@@ -630,9 +662,9 @@ void EmitContext::DefineOutputs() {
         if (hw_stage == Shader::HwStage::Local) {
             const u32 num_attrs = Common::AlignUp(runtime_info.hw.ls.ls_stride, 16) >> 4;
             if (num_attrs > 0) {
-                const Id type{TypeArray(F32[4], ConstU32(num_attrs))};
+                const Id type{spv_TypeArray(&m, F32[4], ConstU32(num_attrs))};
                 output_attr_array = DefineOutput(type, 0);
-                Name(output_attr_array, "out_attrs");
+                spv_Name(&m, output_attr_array, "out_attrs");
             }
         } else {
             const bool needs_clip_distance_emulation =
@@ -647,7 +679,7 @@ void EmitContext::DefineOutputs() {
                 const u32 num_components = info.stores.NumComponents(param);
                 const Id id{
                     DefineOutput(F32[num_components], i + (needs_clip_distance_emulation ? 1 : 0))};
-                Name(id, fmt::format("out_attr{}", i));
+                spv_Name(&m, id, std::string(fmt::format("out_attr{}", i)).c_str());
                 output_params[i] =
                     GetAttributeInfo(AmdGpu::NumberFormat::Float, id, num_components, true);
                 ++num_attrs;
@@ -657,34 +689,32 @@ void EmitContext::DefineOutputs() {
                 clip_distances = Id{DefineOutput(F32[MaxEmulatedClipDistances], 0)};
                 output_params[num_attrs] = GetAttributeInfo(
                     AmdGpu::NumberFormat::Float, clip_distances, MaxEmulatedClipDistances, true);
-                Name(clip_distances, fmt::format("cldist_attr{}", 0));
+                spv_Name(&m, clip_distances, std::string(fmt::format("cldist_attr{}", 0)).c_str());
             }
         }
         break;
     }
     case SwStage::TessellationControl: {
         if (info.stores_tess_level_outer) {
-            const Id type{TypeArray(F32[1], ConstU32(4U))};
-            output_tess_level_outer =
-                DefineOutput(type, std::nullopt, spv::BuiltIn::TessLevelOuter);
-            Decorate(output_tess_level_outer, spv::Decoration::Patch);
+            const Id type{spv_TypeArray(&m, F32[1], ConstU32(4U))};
+            output_tess_level_outer = DefineOutput(type, std::nullopt, SpvBuiltInTessLevelOuter);
+            spv_Decorate0(&m, output_tess_level_outer, u32(SpvDecorationPatch));
         }
         if (info.stores_tess_level_inner) {
-            const Id type{TypeArray(F32[1], ConstU32(2U))};
-            output_tess_level_inner =
-                DefineOutput(type, std::nullopt, spv::BuiltIn::TessLevelInner);
-            Decorate(output_tess_level_inner, spv::Decoration::Patch);
+            const Id type{spv_TypeArray(&m, F32[1], ConstU32(2U))};
+            output_tess_level_inner = DefineOutput(type, std::nullopt, SpvBuiltInTessLevelInner);
+            spv_Decorate0(&m, output_tess_level_inner, u32(SpvDecorationPatch));
         }
 
         const u32 num_attrs = Common::AlignUp(runtime_info.sw.tcs.hs_output_cp_stride, 16) >> 4;
         if (num_attrs > 0) {
-            const Id per_vertex_type{TypeArray(F32[4], ConstU32(num_attrs))};
+            const Id per_vertex_type{spv_TypeArray(&m, F32[4], ConstU32(num_attrs))};
             // The input vertex count isn't statically known, so make length 32 (what
             // glslang does)
-            const Id patch_array_type{
-                TypeArray(per_vertex_type, ConstU32(runtime_info.sw.tcs.NumOutputControlPoints()))};
+            const Id patch_array_type{spv_TypeArray(
+                &m, per_vertex_type, ConstU32(runtime_info.sw.tcs.NumOutputControlPoints()))};
             output_attr_array = DefineOutput(patch_array_type, 0);
-            Name(output_attr_array, "out_attrs");
+            spv_Name(&m, output_attr_array, "out_attrs");
         }
 
         const u32 patch_base_location = num_attrs;
@@ -693,8 +723,8 @@ void EmitContext::DefineOutputs() {
                 continue;
             }
             const Id id{DefineOutput(F32[4], patch_base_location + index)};
-            Decorate(id, spv::Decoration::Patch);
-            Name(id, fmt::format("patch_out{}", index));
+            spv_Decorate0(&m, id, u32(SpvDecorationPatch));
+            spv_Name(&m, id, std::string(fmt::format("patch_out{}", index)).c_str());
             patches[index] = id;
         }
         break;
@@ -708,7 +738,7 @@ void EmitContext::DefineOutputs() {
             }
             const u32 num_components = info.stores.NumComponents(param);
             const Id id{DefineOutput(F32[num_components], i)};
-            Name(id, fmt::format("out_attr{}", i));
+            spv_Name(&m, id, std::string(fmt::format("out_attr{}", i)).c_str());
             output_params[i] =
                 GetAttributeInfo(AmdGpu::NumberFormat::Float, id, num_components, true);
         }
@@ -716,15 +746,15 @@ void EmitContext::DefineOutputs() {
     }
     case SwStage::Fragment: {
         if (info.stores.Get(IR::Attribute::Depth)) {
-            frag_depth = DefineVariable(F32[1], spv::BuiltIn::FragDepth, spv::StorageClass::Output);
+            frag_depth = DefineVariable(F32[1], SpvBuiltInFragDepth, SpvStorageClassOutput);
         }
         if (info.stores.Get(IR::Attribute::SampleMask)) {
-            sample_mask = DefineVariable(TypeArray(U32[1], u32_one_value), spv::BuiltIn::SampleMask,
-                                         spv::StorageClass::Output);
+            sample_mask = DefineVariable(spv_TypeArray(&m, U32[1], u32_one_value),
+                                         SpvBuiltInSampleMask, SpvStorageClassOutput);
         }
         if (info.stores.Get(IR::Attribute::StencilRef) && profile.supports_shader_stencil_export) {
             stencil_ref =
-                DefineVariable(S32[1], spv::BuiltIn::FragStencilRefEXT, spv::StorageClass::Output);
+                DefineVariable(S32[1], SpvBuiltInFragStencilRefEXT, SpvStorageClassOutput);
         }
         u32 num_render_targets = 0;
         for (u32 i = 0; i < IR::NumRenderTargets; i++) {
@@ -738,11 +768,11 @@ void EmitContext::DefineOutputs() {
             Id id;
             if (runtime_info.hw.fs.dual_source_blending) {
                 id = DefineOutput(type, 0);
-                Decorate(id, spv::Decoration::Index, i);
+                spv_Decorate1(&m, id, u32(SpvDecorationIndex), u32(i));
             } else {
                 id = DefineOutput(type, i);
             }
-            Name(id, fmt::format("frag_color{}", i));
+            spv_Name(&m, id, std::string(fmt::format("frag_color{}", i)).c_str());
             frag_outputs[i] = GetAttributeInfo(num_format, id, num_components, true);
             ++num_render_targets;
         }
@@ -757,7 +787,7 @@ void EmitContext::DefineOutputs() {
         DefineVertexBlock();
         for (u32 attr_id = 0; attr_id < info.gs_copy_data.num_attrs; attr_id++) {
             const Id id{DefineOutput(F32[4], attr_id)};
-            Name(id, fmt::format("out_attr{}", attr_id));
+            spv_Name(&m, id, std::string(fmt::format("out_attr{}", attr_id)).c_str());
             output_params[attr_id] = GetAttributeInfo(AmdGpu::NumberFormat::Float, id, 4, true);
         }
         break;
@@ -771,77 +801,83 @@ void EmitContext::DefineOutputs() {
 
 void EmitContext::DefinePushDataBlock() {
     // Create push constants block for instance steps rates
-    const Id struct_type{
-        Name(TypeStruct(F32[1], F32[1], F32[1], F32[1], U32[4], U32[4], U32[2]), "AuxData")};
-    Decorate(struct_type, spv::Decoration::Block);
-    MemberName(struct_type, PushData::XOffsetIndex, "xoffset");
-    MemberName(struct_type, PushData::YOffsetIndex, "yoffset");
-    MemberName(struct_type, PushData::XScaleIndex, "xscale");
-    MemberName(struct_type, PushData::YScaleIndex, "yscale");
-    MemberName(struct_type, PushData::BufOffsetIndex + 0, "buf_offsets0");
-    MemberName(struct_type, PushData::BufOffsetIndex + 1, "buf_offsets1");
-    MemberName(struct_type, PushData::BufOffsetIndex + 2, "buf_offsets2");
-    MemberDecorate(struct_type, PushData::XOffsetIndex, spv::Decoration::Offset, 0U);
-    MemberDecorate(struct_type, PushData::YOffsetIndex, spv::Decoration::Offset, 4U);
-    MemberDecorate(struct_type, PushData::XScaleIndex, spv::Decoration::Offset, 8U);
-    MemberDecorate(struct_type, PushData::YScaleIndex, spv::Decoration::Offset, 12U);
-    MemberDecorate(struct_type, PushData::BufOffsetIndex + 0, spv::Decoration::Offset, 16U);
-    MemberDecorate(struct_type, PushData::BufOffsetIndex + 1, spv::Decoration::Offset, 32U);
-    MemberDecorate(struct_type, PushData::BufOffsetIndex + 2, spv::Decoration::Offset, 48U);
-    push_data_block = DefineVar(struct_type, spv::StorageClass::PushConstant);
-    Name(push_data_block, "push_data");
+    const Id struct_type{spv_Name(
+        &m,
+        spv_TypeStruct(
+            &m, std::array<u32, 7>{F32[1], F32[1], F32[1], F32[1], U32[4], U32[4], U32[2]}.data(),
+            7),
+        "AuxData")};
+    spv_Decorate0(&m, struct_type, u32(SpvDecorationBlock));
+    spv_MemberName(&m, struct_type, u32(PushData::XOffsetIndex), "xoffset");
+    spv_MemberName(&m, struct_type, u32(PushData::YOffsetIndex), "yoffset");
+    spv_MemberName(&m, struct_type, u32(PushData::XScaleIndex), "xscale");
+    spv_MemberName(&m, struct_type, u32(PushData::YScaleIndex), "yscale");
+    spv_MemberName(&m, struct_type, u32(PushData::BufOffsetIndex + 0), "buf_offsets0");
+    spv_MemberName(&m, struct_type, u32(PushData::BufOffsetIndex + 1), "buf_offsets1");
+    spv_MemberName(&m, struct_type, u32(PushData::BufOffsetIndex + 2), "buf_offsets2");
+    spv_MemberDecorate1(&m, struct_type, u32(PushData::XOffsetIndex), u32(SpvDecorationOffset), 0U);
+    spv_MemberDecorate1(&m, struct_type, u32(PushData::YOffsetIndex), u32(SpvDecorationOffset), 4U);
+    spv_MemberDecorate1(&m, struct_type, u32(PushData::XScaleIndex), u32(SpvDecorationOffset), 8U);
+    spv_MemberDecorate1(&m, struct_type, u32(PushData::YScaleIndex), u32(SpvDecorationOffset), 12U);
+    spv_MemberDecorate1(&m, struct_type, u32(PushData::BufOffsetIndex + 0),
+                        u32(SpvDecorationOffset), 16U);
+    spv_MemberDecorate1(&m, struct_type, u32(PushData::BufOffsetIndex + 1),
+                        u32(SpvDecorationOffset), 32U);
+    spv_MemberDecorate1(&m, struct_type, u32(PushData::BufOffsetIndex + 2),
+                        u32(SpvDecorationOffset), 48U);
+    push_data_block = DefineVar(struct_type, SpvStorageClassPushConstant);
+    spv_Name(&m, push_data_block, "push_data");
     interfaces.push_back(push_data_block);
 }
 
 EmitContext::BufferSpv EmitContext::DefineBuffer(bool is_written, bool is_coherent, u32 elem_shift,
                                                  BufferType buffer_type, Id data_type) {
     // Define array type.
-    const Id record_array_type{TypeRuntimeArray(data_type)};
+    const Id record_array_type{spv_TypeRuntimeArray(&m, data_type)};
     // Define block struct type. Don't perform decorations twice on the same Id.
-    const Id struct_type{TypeStruct(record_array_type)};
-    if (std::ranges::find(buf_type_ids, record_array_type.value, &Id::value) ==
-        buf_type_ids.end()) {
-        Decorate(record_array_type, spv::Decoration::ArrayStride, 1 << elem_shift);
-        Decorate(struct_type, spv::Decoration::Block);
-        MemberName(struct_type, 0, "data");
-        MemberDecorate(struct_type, 0, spv::Decoration::Offset, 0U);
+    const Id struct_type{spv_TypeStruct1(&m, record_array_type)};
+    if (std::ranges::find(buf_type_ids, record_array_type) == buf_type_ids.end()) {
+        spv_Decorate1(&m, record_array_type, u32(SpvDecorationArrayStride), u32(1 << elem_shift));
+        spv_Decorate0(&m, struct_type, u32(SpvDecorationBlock));
+        spv_MemberName(&m, struct_type, 0, "data");
+        spv_MemberDecorate1(&m, struct_type, 0, u32(SpvDecorationOffset), 0U);
         buf_type_ids.push_back(record_array_type);
     }
     // Define buffer binding interface.
-    constexpr auto storage_class = spv::StorageClass::StorageBuffer;
-    const Id struct_pointer_type{TypePointer(storage_class, struct_type)};
-    const Id pointer_type = TypePointer(storage_class, data_type);
-    const Id id{AddGlobalVariable(struct_pointer_type, storage_class)};
-    Decorate(id, spv::Decoration::Binding, binding.unified);
-    Decorate(id, spv::Decoration::DescriptorSet, 0U);
+    constexpr auto storage_class = SpvStorageClassStorageBuffer;
+    const Id struct_pointer_type{spv_TypePointer(&m, u32(storage_class), struct_type)};
+    const Id pointer_type = spv_TypePointer(&m, u32(storage_class), data_type);
+    const Id id{spv_AddGlobalVariable(&m, struct_pointer_type, u32(storage_class), 0)};
+    spv_Decorate1(&m, id, u32(SpvDecorationBinding), u32(binding.unified));
+    spv_Decorate1(&m, id, u32(SpvDecorationDescriptorSet), 0U);
     if (!is_written) {
-        Decorate(id, spv::Decoration::NonWritable);
+        spv_Decorate0(&m, id, u32(SpvDecorationNonWritable));
     } else if (is_coherent) {
         // The guest V# MTYPE marks this buffer as shared between invocations;
         // Coherent forbids caching its accesses in registers across barriers.
-        Decorate(id, spv::Decoration::Coherent);
+        spv_Decorate0(&m, id, u32(SpvDecorationCoherent));
     }
     switch (buffer_type) {
     case BufferType::GdsBuffer:
-        Name(id, "gds_buffer");
+        spv_Name(&m, id, "gds_buffer");
         break;
     case BufferType::Flatbuf:
-        Name(id, "srt_flatbuf");
+        spv_Name(&m, id, "srt_flatbuf");
         break;
     case BufferType::ClipPlanes:
-        Name(id, "clip_planes");
+        spv_Name(&m, id, "clip_planes");
         break;
     case BufferType::BdaPagetable:
-        Name(id, "bda_pagetable");
+        spv_Name(&m, id, "bda_pagetable");
         break;
     case BufferType::FaultBuffer:
-        Name(id, "fault_buffer");
+        spv_Name(&m, id, "fault_buffer");
         break;
     case BufferType::SharedMemory:
-        Name(id, "ssbo_shmem");
+        spv_Name(&m, id, "ssbo_shmem");
         break;
     default:
-        Name(id, fmt::format("ssbo_{}", binding.buffer));
+        spv_Name(&m, id, std::string(fmt::format("ssbo_{}", binding.buffer)).c_str());
         break;
     }
     interfaces.push_back(id);
@@ -891,78 +927,78 @@ void EmitContext::DefineBuffers() {
     }
 }
 
-spv::ImageFormat GetFormat(const AmdGpu::Image& image) {
+u32 GetFormat(const AmdGpu::Image& image) {
     if (image.GetDataFmt() == AmdGpu::DataFormat::Format32 &&
         image.GetNumberFmt() == AmdGpu::NumberFormat::Uint) {
-        return spv::ImageFormat::R32ui;
+        return SpvImageFormatR32ui;
     }
     if (image.GetDataFmt() == AmdGpu::DataFormat::Format32 &&
         image.GetNumberFmt() == AmdGpu::NumberFormat::Sint) {
-        return spv::ImageFormat::R32i;
+        return SpvImageFormatR32i;
     }
     if (image.GetDataFmt() == AmdGpu::DataFormat::Format32 &&
         image.GetNumberFmt() == AmdGpu::NumberFormat::Float) {
-        return spv::ImageFormat::R32f;
+        return SpvImageFormatR32f;
     }
     if (image.GetDataFmt() == AmdGpu::DataFormat::Format32_32 &&
         image.GetNumberFmt() == AmdGpu::NumberFormat::Float) {
-        return spv::ImageFormat::Rg32f;
+        return SpvImageFormatRg32f;
     }
     if (image.GetDataFmt() == AmdGpu::DataFormat::Format32_32 &&
         image.GetNumberFmt() == AmdGpu::NumberFormat::Uint) {
-        return spv::ImageFormat::Rg32ui;
+        return SpvImageFormatRg32ui;
     }
     if (image.GetDataFmt() == AmdGpu::DataFormat::Format32_32_32_32 &&
         image.GetNumberFmt() == AmdGpu::NumberFormat::Uint) {
-        return spv::ImageFormat::Rgba32ui;
+        return SpvImageFormatRgba32ui;
     }
     if (image.GetDataFmt() == AmdGpu::DataFormat::Format16 &&
         image.GetNumberFmt() == AmdGpu::NumberFormat::Float) {
-        return spv::ImageFormat::R16f;
+        return SpvImageFormatR16f;
     }
     if (image.GetDataFmt() == AmdGpu::DataFormat::Format16 &&
         image.GetNumberFmt() == AmdGpu::NumberFormat::Uint) {
-        return spv::ImageFormat::R16ui;
+        return SpvImageFormatR16ui;
     }
     if (image.GetDataFmt() == AmdGpu::DataFormat::Format16_16 &&
         image.GetNumberFmt() == AmdGpu::NumberFormat::Float) {
-        return spv::ImageFormat::Rg16f;
+        return SpvImageFormatRg16f;
     }
     if (image.GetDataFmt() == AmdGpu::DataFormat::Format16_16 &&
         image.GetNumberFmt() == AmdGpu::NumberFormat::Snorm) {
-        return spv::ImageFormat::Rg16Snorm;
+        return SpvImageFormatRg16Snorm;
     }
     if (image.GetDataFmt() == AmdGpu::DataFormat::Format8_8 &&
         image.GetNumberFmt() == AmdGpu::NumberFormat::Unorm) {
-        return spv::ImageFormat::Rg8;
+        return SpvImageFormatRg8;
     }
     if (image.GetDataFmt() == AmdGpu::DataFormat::Format16_16_16_16 &&
         image.GetNumberFmt() == AmdGpu::NumberFormat::Float) {
-        return spv::ImageFormat::Rgba16f;
+        return SpvImageFormatRgba16f;
     }
     if (image.GetDataFmt() == AmdGpu::DataFormat::Format16_16_16_16 &&
         image.GetNumberFmt() == AmdGpu::NumberFormat::Unorm) {
-        return spv::ImageFormat::Rgba16;
+        return SpvImageFormatRgba16;
     }
     if (image.GetDataFmt() == AmdGpu::DataFormat::Format8 &&
         image.GetNumberFmt() == AmdGpu::NumberFormat::Unorm) {
-        return spv::ImageFormat::R8;
+        return SpvImageFormatR8;
     }
     if (image.GetDataFmt() == AmdGpu::DataFormat::Format8_8_8_8 &&
         image.GetNumberFmt() == AmdGpu::NumberFormat::Unorm) {
-        return spv::ImageFormat::Rgba8;
+        return SpvImageFormatRgba8;
     }
     if (image.GetDataFmt() == AmdGpu::DataFormat::Format8_8_8_8 &&
         image.GetNumberFmt() == AmdGpu::NumberFormat::Uint) {
-        return spv::ImageFormat::Rgba8ui;
+        return SpvImageFormatRgba8ui;
     }
     if (image.GetDataFmt() == AmdGpu::DataFormat::Format10_11_11 &&
         image.GetNumberFmt() == AmdGpu::NumberFormat::Float) {
-        return spv::ImageFormat::R11fG11fB10f;
+        return SpvImageFormatR11fG11fB10f;
     }
     if (image.GetDataFmt() == AmdGpu::DataFormat::Format32_32_32_32 &&
         image.GetNumberFmt() == AmdGpu::NumberFormat::Float) {
-        return spv::ImageFormat::Rgba32f;
+        return SpvImageFormatRgba32f;
     }
     UNREACHABLE_MSG("Unknown storage format data_format={}, num_format={}", image.GetDataFmt(),
                     image.GetNumberFmt());
@@ -970,21 +1006,25 @@ spv::ImageFormat GetFormat(const AmdGpu::Image& image) {
 
 Id ImageType(EmitContext& ctx, const ImageResource& desc, Id sampled_type) {
     const auto image = desc.GetSharp(ctx.info);
-    const auto format = desc.is_atomic ? GetFormat(image) : spv::ImageFormat::Unknown;
+    const auto format = desc.is_atomic ? GetFormat(image) : SpvImageFormatUnknown;
     const auto type = image.GetViewType(desc.is_array);
     const u32 sampled = desc.is_written ? 2 : 1;
     switch (type) {
     case AmdGpu::ImageType::Color1D:
     case AmdGpu::ImageType::Color2D:
-        return ctx.TypeImage(sampled_type, spv::Dim::Dim2D, false, false, false, sampled, format);
+        return spv_TypeImage(&ctx.m, sampled_type, u32(SpvDim2D), u32(false), u32(false),
+                             u32(false), u32(sampled), u32(format), ~0u);
     case AmdGpu::ImageType::Color1DArray:
     case AmdGpu::ImageType::Color2DArray:
     case AmdGpu::ImageType::Cube:
-        return ctx.TypeImage(sampled_type, spv::Dim::Dim2D, false, true, false, sampled, format);
+        return spv_TypeImage(&ctx.m, sampled_type, u32(SpvDim2D), u32(false), u32(true), u32(false),
+                             u32(sampled), u32(format), ~0u);
     case AmdGpu::ImageType::Color2DMsaa:
-        return ctx.TypeImage(sampled_type, spv::Dim::Dim2D, false, false, true, sampled, format);
+        return spv_TypeImage(&ctx.m, sampled_type, u32(SpvDim2D), u32(false), u32(false), u32(true),
+                             u32(sampled), u32(format), ~0u);
     case AmdGpu::ImageType::Color3D:
-        return ctx.TypeImage(sampled_type, spv::Dim::Dim3D, false, false, false, sampled, format);
+        return spv_TypeImage(&ctx.m, sampled_type, u32(SpvDim3D), u32(false), u32(false),
+                             u32(false), u32(sampled), u32(format), ~0u);
     default:
         break;
     }
@@ -1005,19 +1045,22 @@ void EmitContext::DefineImagesAndSamplers() {
         const u32 num_bindings = image_desc.NumBindings(info);
         Id pointee_type = image_type;
         if (mip_fallback_mode == MipStorageFallbackMode::DynamicIndex) {
-            pointee_type = TypeArray(pointee_type, ConstU32(num_bindings));
+            pointee_type = spv_TypeArray(&m, pointee_type, ConstU32(num_bindings));
         }
 
-        const Id pointer_type{TypePointer(spv::StorageClass::UniformConstant, pointee_type)};
-        const Id id{AddGlobalVariable(pointer_type, spv::StorageClass::UniformConstant)};
-        Decorate(id, spv::Decoration::Binding, binding.unified);
+        const Id pointer_type{
+            spv_TypePointer(&m, u32(SpvStorageClassUniformConstant), pointee_type)};
+        const Id id{
+            spv_AddGlobalVariable(&m, pointer_type, u32(SpvStorageClassUniformConstant), 0)};
+        spv_Decorate1(&m, id, u32(SpvDecorationBinding), u32(binding.unified));
         binding.unified += num_bindings;
-        Decorate(id, spv::Decoration::DescriptorSet, 0U);
-        Name(id, fmt::format("{}_{}{}", hw_stage, "img", images.size()));
+        spv_Decorate1(&m, id, u32(SpvDecorationDescriptorSet), 0U);
+        spv_Name(&m, id,
+                 std::string(fmt::format("{}_{}{}", hw_stage, "img", images.size())).c_str());
         images.push_back({
             .data_types = &data_types,
             .id = id,
-            .sampled_type = is_storage ? sampled_type : TypeSampledImage(image_type),
+            .sampled_type = is_storage ? sampled_type : spv_TypeSampledImage(&m, image_type),
             .image_type = image_type,
             .view_type = sharp.GetViewType(image_desc.is_array),
             .is_integer = is_integer,
@@ -1028,19 +1071,21 @@ void EmitContext::DefineImagesAndSamplers() {
     }
     if (std::ranges::any_of(info.images,
                             [](const ImageResource& image) { return image.is_atomic; })) {
-        image_u32 = TypePointer(spv::StorageClass::Image, U32[1]);
-        image_f32 = TypePointer(spv::StorageClass::Image, F32[1]);
+        image_u32 = spv_TypePointer(&m, u32(SpvStorageClassImage), U32[1]);
+        image_f32 = spv_TypePointer(&m, u32(SpvStorageClassImage), F32[1]);
     }
     if (info.samplers.empty()) {
         return;
     }
-    sampler_type = TypeSampler();
-    sampler_pointer_type = TypePointer(spv::StorageClass::UniformConstant, sampler_type);
+    sampler_type = spv_TypeSampler(&m);
+    sampler_pointer_type = spv_TypePointer(&m, u32(SpvStorageClassUniformConstant), sampler_type);
     for (const auto& samp_desc : info.samplers) {
-        const Id id{AddGlobalVariable(sampler_pointer_type, spv::StorageClass::UniformConstant)};
-        Decorate(id, spv::Decoration::Binding, binding.unified++);
-        Decorate(id, spv::Decoration::DescriptorSet, 0U);
-        Name(id, fmt::format("{}_{}{}", hw_stage, "samp", samplers.size()));
+        const Id id{spv_AddGlobalVariable(&m, sampler_pointer_type,
+                                          u32(SpvStorageClassUniformConstant), 0)};
+        spv_Decorate1(&m, id, u32(SpvDecorationBinding), u32(binding.unified++));
+        spv_Decorate1(&m, id, u32(SpvDecorationDescriptorSet), 0U);
+        spv_Name(&m, id,
+                 std::string(fmt::format("{}_{}{}", hw_stage, "samp", samplers.size())).c_str());
         samplers.push_back(id);
         interfaces.push_back(id);
     }
@@ -1063,28 +1108,28 @@ void EmitContext::DefineSharedMemory() {
         }
 
         const u32 num_elements{Common::DivCeil(shared_memory_size, element_size)};
-        const Id array_type{TypeArray(element_type, ConstU32(num_elements))};
+        const Id array_type{spv_TypeArray(&m, element_type, ConstU32(num_elements))};
 
         const auto mem_type = [&] {
             if (num_types > 1) {
-                const Id struct_type{TypeStruct(array_type)};
-                Decorate(struct_type, spv::Decoration::Block);
-                MemberDecorate(struct_type, 0u, spv::Decoration::Offset, 0u);
+                const Id struct_type{spv_TypeStruct1(&m, array_type)};
+                spv_Decorate0(&m, struct_type, u32(SpvDecorationBlock));
+                spv_MemberDecorate1(&m, struct_type, 0u, u32(SpvDecorationOffset), 0u);
                 return struct_type;
             } else {
                 return array_type;
             }
         }();
 
-        const Id pointer = TypePointer(spv::StorageClass::Workgroup, mem_type);
-        const Id element_pointer = TypePointer(spv::StorageClass::Workgroup, element_type);
-        const Id variable = AddGlobalVariable(pointer, spv::StorageClass::Workgroup);
-        Name(variable, name);
+        const Id pointer = spv_TypePointer(&m, u32(SpvStorageClassWorkgroup), mem_type);
+        const Id element_pointer = spv_TypePointer(&m, u32(SpvStorageClassWorkgroup), element_type);
+        const Id variable = spv_AddGlobalVariable(&m, pointer, u32(SpvStorageClassWorkgroup), 0);
+        spv_Name(&m, variable, std::string(name).c_str());
         interfaces.push_back(variable);
 
         if (num_types > 1) {
-            Decorate(array_type, spv::Decoration::ArrayStride, element_size);
-            Decorate(variable, spv::Decoration::Aliased);
+            spv_Decorate1(&m, array_type, u32(SpvDecorationArrayStride), u32(element_size));
+            spv_Decorate0(&m, variable, u32(SpvDecorationAliased));
         }
 
         return std::make_tuple(variable, element_pointer, pointer);
@@ -1099,93 +1144,107 @@ void EmitContext::DefineSharedMemory() {
 
 Id EmitContext::DefineFloat32ToUfloatM5(u32 mantissa_bits, const std::string_view name) {
     // https://gitlab.freedesktop.org/mesa/mesa/-/blob/main/src/util/format_r11g11b10f.h
-    const auto func_type{TypeFunction(U32[1], F32[1])};
-    const auto func{OpFunction(U32[1], spv::FunctionControlMask::MaskNone, func_type)};
-    const auto value{OpFunctionParameter(F32[1])};
-    Name(func, name);
+    const auto func_type{spv_TypeFunction(&m, U32[1], std::array<u32, 1>{F32[1]}.data(), 1)};
+    const auto func{spv_OpFunction(&m, U32[1], u32(SpvFunctionControlMaskNone), func_type)};
+    const auto value{spv_OpFunctionParameter(&m, F32[1])};
+    spv_Name(&m, func, std::string(name).c_str());
     AddLabel();
 
-    const auto raw_value{OpBitcast(U32[1], value)};
-    const auto exponent{
-        OpBitcast(S32[1], OpBitFieldSExtract(U32[1], raw_value, ConstU32(23U), ConstU32(8U)))};
-    const auto sign{OpBitFieldUExtract(U32[1], raw_value, ConstU32(31U), ConstU32(1U))};
+    const auto raw_value{spv_OpBitcast(&m, U32[1], value)};
+    const auto exponent{spv_OpBitcast(
+        &m, S32[1], spv_OpBitFieldSExtract(&m, U32[1], raw_value, ConstU32(23U), ConstU32(8U)))};
+    const auto sign{spv_OpBitFieldUExtract(&m, U32[1], raw_value, ConstU32(31U), ConstU32(1U))};
 
-    const auto is_zero{OpLogicalOr(U1[1], OpIEqual(U1[1], raw_value, ConstU32(0U)),
-                                   OpIEqual(U1[1], sign, ConstU32(1U)))};
-    const auto is_nan{OpIsNan(U1[1], value)};
-    const auto is_inf{OpIsInf(U1[1], value)};
-    const auto is_denorm{OpSLessThanEqual(U1[1], exponent, ConstS32(-15))};
+    const auto is_zero{spv_OpLogicalOr(&m, U1[1], spv_OpIEqual(&m, U1[1], raw_value, ConstU32(0U)),
+                                       spv_OpIEqual(&m, U1[1], sign, ConstU32(1U)))};
+    const auto is_nan{spv_OpIsNan(&m, U1[1], value)};
+    const auto is_inf{spv_OpIsInf(&m, U1[1], value)};
+    const auto is_denorm{spv_OpSLessThanEqual(&m, U1[1], exponent, ConstS32(-15))};
 
-    const auto denorm_mantissa{OpConvertFToU(
-        U32[1],
-        OpRoundEven(F32[1], OpFMul(F32[1], value,
+    const auto denorm_mantissa{spv_OpConvertFToU(
+        &m, U32[1],
+        spv_OpRoundEven(&m, F32[1],
+                        spv_OpFMul(&m, F32[1], value,
                                    ConstF32(static_cast<float>(1 << (mantissa_bits + 14))))))};
-    const auto denorm_overflow{
-        OpINotEqual(U1[1], OpShiftRightLogical(U32[1], denorm_mantissa, ConstU32(mantissa_bits)),
-                    ConstU32(0U))};
+    const auto denorm_overflow{spv_OpINotEqual(
+        &m, U1[1], spv_OpShiftRightLogical(&m, U32[1], denorm_mantissa, ConstU32(mantissa_bits)),
+        ConstU32(0U))};
     const auto denorm{
-        OpSelect(U32[1], denorm_overflow, ConstU32(1U << mantissa_bits), denorm_mantissa)};
+        spv_OpSelect(&m, U32[1], denorm_overflow, ConstU32(1U << mantissa_bits), denorm_mantissa)};
 
-    const auto norm_mantissa{OpConvertFToU(
-        U32[1],
-        OpRoundEven(F32[1],
-                    OpLdexp(F32[1], value,
-                            OpISub(S32[1], ConstS32(static_cast<int>(mantissa_bits)), exponent))))};
+    const auto norm_mantissa{spv_OpConvertFToU(
+        &m, U32[1],
+        spv_OpRoundEven(
+            &m, F32[1],
+            spv_OpLdexp(
+                &m, F32[1], value,
+                spv_OpISub(&m, S32[1], ConstS32(static_cast<int>(mantissa_bits)), exponent))))};
     const auto norm_overflow{
-        OpUGreaterThanEqual(U1[1], norm_mantissa, ConstU32(2U << mantissa_bits))};
-    const auto norm_final_mantissa{OpBitwiseAnd(
-        U32[1],
-        OpSelect(U32[1], norm_overflow, OpShiftRightLogical(U32[1], norm_mantissa, ConstU32(1U)),
-                 norm_mantissa),
+        spv_OpUGreaterThanEqual(&m, U1[1], norm_mantissa, ConstU32(2U << mantissa_bits))};
+    const auto norm_final_mantissa{spv_OpBitwiseAnd(
+        &m, U32[1],
+        spv_OpSelect(&m, U32[1], norm_overflow,
+                     spv_OpShiftRightLogical(&m, U32[1], norm_mantissa, ConstU32(1U)),
+                     norm_mantissa),
         ConstU32((1U << mantissa_bits) - 1))};
-    const auto norm_final_exponent{OpBitcast(
-        U32[1],
-        OpIAdd(S32[1],
-               OpSelect(S32[1], norm_overflow, OpIAdd(S32[1], exponent, ConstS32(1)), exponent),
-               ConstS32(15)))};
-    const auto norm{OpBitFieldInsert(U32[1], norm_final_mantissa, norm_final_exponent,
-                                     ConstU32(mantissa_bits), ConstU32(5U))};
+    const auto norm_final_exponent{spv_OpBitcast(
+        &m, U32[1],
+        spv_OpIAdd(&m, S32[1],
+                   spv_OpSelect(&m, S32[1], norm_overflow,
+                                spv_OpIAdd(&m, S32[1], exponent, ConstS32(1)), exponent),
+                   ConstS32(15)))};
+    const auto norm{spv_OpBitFieldInsert(&m, U32[1], norm_final_mantissa, norm_final_exponent,
+                                         ConstU32(mantissa_bits), ConstU32(5U))};
 
-    const auto result{OpSelect(U32[1], is_zero, ConstU32(0U),
-                               OpSelect(U32[1], is_nan, ConstU32(31u << mantissa_bits | 1U),
-                                        OpSelect(U32[1], is_inf, ConstU32(31U << mantissa_bits),
-                                                 OpSelect(U32[1], is_denorm, denorm, norm))))};
+    const auto result{spv_OpSelect(
+        &m, U32[1], is_zero, ConstU32(0U),
+        spv_OpSelect(&m, U32[1], is_nan, ConstU32(31u << mantissa_bits | 1U),
+                     spv_OpSelect(&m, U32[1], is_inf, ConstU32(31U << mantissa_bits),
+                                  spv_OpSelect(&m, U32[1], is_denorm, denorm, norm))))};
 
-    OpReturnValue(result);
-    OpFunctionEnd();
+    spv_OpReturnValue(&m, result);
+    spv_OpFunctionEnd(&m);
     return func;
 }
 
 Id EmitContext::DefineUfloatM5ToFloat32(u32 mantissa_bits, const std::string_view name) {
     // https://gitlab.freedesktop.org/mesa/mesa/-/blob/main/src/util/format_r11g11b10f.h
-    const auto func_type{TypeFunction(F32[1], U32[1])};
-    const auto func{OpFunction(F32[1], spv::FunctionControlMask::MaskNone, func_type)};
-    const auto value{OpFunctionParameter(U32[1])};
-    Name(func, name);
+    const auto func_type{spv_TypeFunction(&m, F32[1], std::array<u32, 1>{U32[1]}.data(), 1)};
+    const auto func{spv_OpFunction(&m, F32[1], u32(SpvFunctionControlMaskNone), func_type)};
+    const auto value{spv_OpFunctionParameter(&m, U32[1])};
+    spv_Name(&m, func, std::string(name).c_str());
     AddLabel();
 
-    const Id exponent{OpBitFieldUExtract(U32[1], value, ConstU32(mantissa_bits), ConstU32(5U))};
-    const Id mantissa{OpBitFieldUExtract(U32[1], value, ConstU32(0U), ConstU32(mantissa_bits))};
-    const Id mantissa_f{OpConvertUToF(F32[1], mantissa)};
-    const Id a{OpSelect(F32[1], OpINotEqual(U1[1], mantissa, u32_zero_value),
-                        OpFMul(F32[1], ConstF32(1.f / (1 << (14 + mantissa_bits))), mantissa_f),
-                        f32_zero_value)};
-    const Id b{OpBitcast(F32[1], OpBitwiseOr(U32[1], mantissa, ConstU32(0x7f800000U)))};
-    const Id exponent_c{OpISub(U32[1], exponent, ConstU32(15U))};
-    const Id scale_a{
-        OpFDiv(F32[1], ConstF32(1.f),
-               OpConvertUToF(F32[1], OpShiftLeftLogical(U32[1], u32_one_value,
-                                                        OpSNegate(U32[1], exponent_c))))};
-    const Id scale_b{OpConvertUToF(F32[1], OpShiftLeftLogical(U32[1], u32_one_value, exponent_c))};
-    const Id scale{
-        OpSelect(F32[1], OpSLessThan(U1[1], exponent_c, u32_zero_value), scale_a, scale_b)};
-    const Id c{OpFMul(F32[1], scale,
-                      OpFAdd(F32[1], ConstF32(1.f),
-                             OpFDiv(F32[1], mantissa_f, ConstF32(f32(1 << mantissa_bits)))))};
-    const Id result{OpSelect(F32[1], OpIEqual(U1[1], exponent, u32_zero_value), a,
-                             OpSelect(F32[1], OpIEqual(U1[1], exponent, ConstU32(31U)), b, c))};
-    OpReturnValue(result);
-    OpFunctionEnd();
+    const Id exponent{
+        spv_OpBitFieldUExtract(&m, U32[1], value, ConstU32(mantissa_bits), ConstU32(5U))};
+    const Id mantissa{
+        spv_OpBitFieldUExtract(&m, U32[1], value, ConstU32(0U), ConstU32(mantissa_bits))};
+    const Id mantissa_f{spv_OpConvertUToF(&m, F32[1], mantissa)};
+    const Id a{spv_OpSelect(
+        &m, F32[1], spv_OpINotEqual(&m, U1[1], mantissa, u32_zero_value),
+        spv_OpFMul(&m, F32[1], ConstF32(1.f / (1 << (14 + mantissa_bits))), mantissa_f),
+        f32_zero_value)};
+    const Id b{
+        spv_OpBitcast(&m, F32[1], spv_OpBitwiseOr(&m, U32[1], mantissa, ConstU32(0x7f800000U)))};
+    const Id exponent_c{spv_OpISub(&m, U32[1], exponent, ConstU32(15U))};
+    const Id scale_a{spv_OpFDiv(
+        &m, F32[1], ConstF32(1.f),
+        spv_OpConvertUToF(&m, F32[1],
+                          spv_OpShiftLeftLogical(&m, U32[1], u32_one_value,
+                                                 spv_OpSNegate(&m, U32[1], exponent_c))))};
+    const Id scale_b{spv_OpConvertUToF(
+        &m, F32[1], spv_OpShiftLeftLogical(&m, U32[1], u32_one_value, exponent_c))};
+    const Id scale{spv_OpSelect(&m, F32[1], spv_OpSLessThan(&m, U1[1], exponent_c, u32_zero_value),
+                                scale_a, scale_b)};
+    const Id c{spv_OpFMul(
+        &m, F32[1], scale,
+        spv_OpFAdd(&m, F32[1], ConstF32(1.f),
+                   spv_OpFDiv(&m, F32[1], mantissa_f, ConstF32(f32(1 << mantissa_bits)))))};
+    const Id result{spv_OpSelect(
+        &m, F32[1], spv_OpIEqual(&m, U1[1], exponent, u32_zero_value), a,
+        spv_OpSelect(&m, F32[1], spv_OpIEqual(&m, U1[1], exponent, ConstU32(31U)), b, c))};
+    spv_OpReturnValue(&m, result);
+    spv_OpFunctionEnd(&m);
     return func;
 }
 
@@ -1194,97 +1253,107 @@ Id EmitContext::DefineUfloatM5ToFloat32(u32 mantissa_bits, const std::string_vie
 static constexpr u64 GUEST_ADDRESS_SPACE_BITS = 40;
 
 Id EmitContext::DefineGetBdaPointer() {
-    const auto caching_pagebits{Constant(U64, static_cast<u64>(profile.sparse_page_shift))};
+    const auto caching_pagebits{
+        spv_Constant64(&m, U64, u64(static_cast<u64>(profile.sparse_page_shift)))};
     const auto caching_pagemask{
-        Constant(U64, static_cast<u64>((1u << profile.sparse_page_shift) - 1))};
+        spv_Constant64(&m, U64, u64(static_cast<u64>((1u << profile.sparse_page_shift) - 1)))};
 
-    const auto func_type{TypeFunction(U64, U64)};
-    const auto func{OpFunction(U64, spv::FunctionControlMask::MaskNone, func_type)};
-    const auto address{OpFunctionParameter(U64)};
-    Name(func, "get_bda_pointer");
+    const auto func_type{spv_TypeFunction(&m, U64, std::array<u32, 1>{U64}.data(), 1)};
+    const auto func{spv_OpFunction(&m, U64, u32(SpvFunctionControlMaskNone), func_type)};
+    const auto address{spv_OpFunctionParameter(&m, U64)};
+    spv_Name(&m, func, "get_bda_pointer");
     const auto entry_label{AddLabel()};
 
-    const auto lookup_label{OpLabel()};
-    const auto fault_label{OpLabel()};
-    const auto available_label{OpLabel()};
-    const auto merge_label{OpLabel()};
-    const auto end_label{OpLabel()};
+    const auto lookup_label{spv_OpLabel(&m)};
+    const auto fault_label{spv_OpLabel(&m)};
+    const auto available_label{spv_OpLabel(&m)};
+    const auto merge_label{spv_OpLabel(&m)};
+    const auto end_label{spv_OpLabel(&m)};
 
     // An address outside the guest's address space (what a shader takes for a pointer need not
     // be one) has no page in the table and no bit in the fault buffer: looking it up read past
     // the table, and marking the fault wrote past the fault buffer, which lost the GPU device
     // ("write to an invalid address"; Sekiro after its intro movie). It reads as nothing.
     const auto in_space{
-        OpIEqual(U1[1], OpShiftRightLogical(U64, address, Constant(U64, GUEST_ADDRESS_SPACE_BITS)),
-                 u64_zero_value)};
-    OpSelectionMerge(end_label, spv::SelectionControlMask::MaskNone);
-    OpBranchConditional(in_space, lookup_label, end_label);
+        spv_OpIEqual(&m, U1[1],
+                     spv_OpShiftRightLogical(
+                         &m, U64, address, spv_Constant64(&m, U64, u64(GUEST_ADDRESS_SPACE_BITS))),
+                     u64_zero_value)};
+    spv_OpSelectionMerge(&m, end_label, u32(SpvSelectionControlMaskNone));
+    spv_OpBranchConditional(&m, in_space, lookup_label, end_label);
     AddLabel(lookup_label);
 
     // Get page BDA
-    const auto page{OpShiftRightLogical(U64, address, caching_pagebits)};
-    const auto page32{OpUConvert(U32[1], page)};
+    const auto page{spv_OpShiftRightLogical(&m, U64, address, caching_pagebits)};
+    const auto page32{spv_OpUConvert(&m, U32[1], page)};
     const auto& bda_buffer{buffers[bda_pagetable_index]};
     const auto [bda_buffer_id, bda_pointer_type] = bda_buffer.Alias(PointerType::U64);
-    const auto bda_ptr{OpAccessChain(bda_pointer_type, bda_buffer_id, u32_zero_value, page32)};
-    const auto bda{OpLoad(U64, bda_ptr)};
+    const auto bda_ptr{
+        spv_OpAccessChain2(&m, bda_pointer_type, bda_buffer_id, u32_zero_value, page32)};
+    const auto bda{spv_OpLoad(&m, U64, bda_ptr)};
 
     // Check if page is GPU cached
-    const auto is_fault{OpIEqual(U1[1], bda, u64_zero_value)};
-    OpSelectionMerge(merge_label, spv::SelectionControlMask::MaskNone);
-    OpBranchConditional(is_fault, fault_label, available_label);
+    const auto is_fault{spv_OpIEqual(&m, U1[1], bda, u64_zero_value)};
+    spv_OpSelectionMerge(&m, merge_label, u32(SpvSelectionControlMaskNone));
+    spv_OpBranchConditional(&m, is_fault, fault_label, available_label);
 
     // First time acces, mark as fault
     AddLabel(fault_label);
     const auto& fault_buffer{buffers[fault_buffer_index]};
     const auto [fault_buffer_id, fault_pointer_type] = fault_buffer.Alias(PointerType::U32);
-    const auto page_div32{OpShiftRightLogical(U32[1], page32, ConstU32(5U))};
-    const auto page_mod32{OpBitwiseAnd(U32[1], page32, ConstU32(31U))};
-    const auto page_mask{OpShiftLeftLogical(U32[1], u32_one_value, page_mod32)};
+    const auto page_div32{spv_OpShiftRightLogical(&m, U32[1], page32, ConstU32(5U))};
+    const auto page_mod32{spv_OpBitwiseAnd(&m, U32[1], page32, ConstU32(31U))};
+    const auto page_mask{spv_OpShiftLeftLogical(&m, U32[1], u32_one_value, page_mod32)};
     const auto fault_ptr{
-        OpAccessChain(fault_pointer_type, fault_buffer_id, u32_zero_value, page_div32)};
-    const auto fault_value{OpLoad(U32[1], fault_ptr)};
-    const auto fault_value_masked{OpBitwiseOr(U32[1], fault_value, page_mask)};
-    OpStore(fault_ptr, fault_value_masked);
+        spv_OpAccessChain2(&m, fault_pointer_type, fault_buffer_id, u32_zero_value, page_div32)};
+    const auto fault_value{spv_OpLoad(&m, U32[1], fault_ptr)};
+    const auto fault_value_masked{spv_OpBitwiseOr(&m, U32[1], fault_value, page_mask)};
+    spv_OpStore(&m, fault_ptr, fault_value_masked);
 
     // Return null pointer
     const auto fallback_result{u64_zero_value};
-    OpBranch(merge_label);
+    spv_OpBranch(&m, merge_label);
 
     // Value is available, compute address
     AddLabel(available_label);
-    const auto offset_in_bda{OpBitwiseAnd(U64, address, caching_pagemask)};
-    const auto addr{OpIAdd(U64, bda, offset_in_bda)};
-    OpBranch(merge_label);
+    const auto offset_in_bda{spv_OpBitwiseAnd(&m, U64, address, caching_pagemask)};
+    const auto addr{spv_OpIAdd(&m, U64, bda, offset_in_bda)};
+    spv_OpBranch(&m, merge_label);
 
     // Merge
     AddLabel(merge_label);
-    const auto looked_up{OpPhi(U64, addr, available_label, fallback_result, fault_label)};
-    OpBranch(end_label);
+    const auto looked_up{spv_OpPhi(
+        &m, U64, std::array<u32, 4>{addr, available_label, fallback_result, fault_label}.data(),
+        4)};
+    spv_OpBranch(&m, end_label);
 
     AddLabel(end_label);
-    const auto result{OpPhi(U64, looked_up, merge_label, u64_zero_value, entry_label)};
-    OpReturnValue(result);
-    OpFunctionEnd();
+    const auto result{spv_OpPhi(
+        &m, U64, std::array<u32, 4>{looked_up, merge_label, u64_zero_value, entry_label}.data(),
+        4)};
+    spv_OpReturnValue(&m, result);
+    spv_OpFunctionEnd(&m);
     return func;
 }
 
 Id EmitContext::DefineReadConst(bool dynamic) {
-    const auto func_type{!dynamic ? TypeFunction(U32[1], U32[2], U32[1], U32[1])
-                                  : TypeFunction(U32[1], U32[2], U32[1])};
-    const auto func{OpFunction(U32[1], spv::FunctionControlMask::MaskNone, func_type)};
-    const auto base{OpFunctionParameter(U32[2])};
-    const auto offset{OpFunctionParameter(U32[1])};
-    const auto flatbuf_offset{!dynamic ? OpFunctionParameter(U32[1]) : Id{}};
-    Name(func, dynamic ? "read_const_dynamic" : "read_const");
+    const auto func_type{
+        !dynamic
+            ? spv_TypeFunction(&m, U32[1], std::array<u32, 3>{U32[2], U32[1], U32[1]}.data(), 3)
+            : spv_TypeFunction(&m, U32[1], std::array<u32, 2>{U32[2], U32[1]}.data(), 2)};
+    const auto func{spv_OpFunction(&m, U32[1], u32(SpvFunctionControlMaskNone), func_type)};
+    const auto base{spv_OpFunctionParameter(&m, U32[2])};
+    const auto offset{spv_OpFunctionParameter(&m, U32[1])};
+    const auto flatbuf_offset{!dynamic ? spv_OpFunctionParameter(&m, U32[1]) : Id{}};
+    spv_Name(&m, func, std::string(dynamic ? "read_const_dynamic" : "read_const").c_str());
     AddLabel();
 
-    const auto base_lo{OpUConvert(U64, OpCompositeExtract(U32[1], base, 0))};
-    const auto base_hi{OpUConvert(U64, OpCompositeExtract(U32[1], base, 1))};
-    const auto base_shift{OpShiftLeftLogical(U64, base_hi, ConstU32(32U))};
-    const auto base_addr{OpBitwiseOr(U64, base_lo, base_shift)};
-    const auto offset_bytes{OpShiftLeftLogical(U32[1], offset, ConstU32(2U))};
-    const auto addr{OpIAdd(U64, base_addr, OpUConvert(U64, offset_bytes))};
+    const auto base_lo{spv_OpUConvert(&m, U64, spv_OpCompositeExtract1(&m, U32[1], base, 0))};
+    const auto base_hi{spv_OpUConvert(&m, U64, spv_OpCompositeExtract1(&m, U32[1], base, 1))};
+    const auto base_shift{spv_OpShiftLeftLogical(&m, U64, base_hi, ConstU32(32U))};
+    const auto base_addr{spv_OpBitwiseOr(&m, U64, base_lo, base_shift)};
+    const auto offset_bytes{spv_OpShiftLeftLogical(&m, U32[1], offset, ConstU32(2U))};
+    const auto addr{spv_OpIAdd(&m, U64, base_addr, spv_OpUConvert(&m, U64, offset_bytes))};
 
     const auto result = EmitDwordMemoryRead(addr, [&]() {
         if (dynamic) {
@@ -1294,8 +1363,8 @@ Id EmitContext::DefineReadConst(bool dynamic) {
         }
     });
 
-    OpReturnValue(result);
-    OpFunctionEnd();
+    spv_OpReturnValue(&m, result);
+    spv_OpFunctionEnd(&m);
     return func;
 }
 

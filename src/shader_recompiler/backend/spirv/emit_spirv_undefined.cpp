@@ -7,7 +7,7 @@
 namespace Shader::Backend::SPIRV {
 
 Id EmitUndefU1(EmitContext& ctx) {
-    return ctx.OpUndef(ctx.U1[1]);
+    return spv_OpUndef(&ctx.m, ctx.U1[1]);
 }
 
 Id EmitUndefU8(EmitContext&) {
@@ -19,27 +19,27 @@ Id EmitUndefU16(EmitContext&) {
 }
 
 Id EmitUndefU32(EmitContext& ctx) {
-    return ctx.OpUndef(ctx.U32[1]);
+    return spv_OpUndef(&ctx.m, ctx.U32[1]);
 }
 
 Id EmitUndefU32x2(EmitContext& ctx) {
-    return ctx.OpUndef(ctx.U32[2]);
+    return spv_OpUndef(&ctx.m, ctx.U32[2]);
 }
 
 Id EmitUndefU32x3(EmitContext& ctx) {
-    return ctx.OpUndef(ctx.U32[3]);
+    return spv_OpUndef(&ctx.m, ctx.U32[3]);
 }
 
 Id EmitUndefU32x4(EmitContext& ctx) {
-    return ctx.OpUndef(ctx.U32[4]);
+    return spv_OpUndef(&ctx.m, ctx.U32[4]);
 }
 
 Id EmitUndefF32(EmitContext& ctx) {
-    return ctx.OpUndef(ctx.F32[1]);
+    return spv_OpUndef(&ctx.m, ctx.F32[1]);
 }
 
 Id EmitUndefU64(EmitContext& ctx) {
-    return ctx.OpUndef(ctx.U64);
+    return spv_OpUndef(&ctx.m, ctx.U64);
 }
 
 } // namespace Shader::Backend::SPIRV

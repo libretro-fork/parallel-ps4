@@ -5,7 +5,7 @@
 
 #include <array>
 #include <unordered_map>
-#include <sirit/sirit.h>
+#include "shader_recompiler/backend/spirv/spv_ops.h"
 
 #include "shader_recompiler/backend/bindings.h"
 #include "shader_recompiler/info.h"
@@ -14,7 +14,16 @@
 
 namespace Shader::Backend::SPIRV {
 
-using Sirit::Id;
+/// The module's words (spv_module_finish), copied out for the caller that keeps them
+inline std::vector<u32> FinishModule(spv_module_t* m, u32 version) {
+    size_t words = 0;
+    const u32* module = spv_module_finish(m, version, 0, &words);
+    ASSERT_MSG(module, "SPIR-V module: out of memory");
+    return std::vector<u32>(module, module + words);
+}
+
+/// An id of the SPIR-V module (spv_module.h): a plain word, 0 for none
+using Id = u32;
 
 struct VectorIds {
     [[nodiscard]] Id& operator[](u32 index) {
@@ -36,8 +45,10 @@ struct VectorIds {
     std::array<Id, 4> ids;
 };
 
-class EmitContext final : public Sirit::Module {
+class EmitContext final {
 public:
+    spv_module_t m; ///< The module written (spv_module.h): first, as the rest is made into it
+
     explicit EmitContext(const Profile& profile, const RuntimeInfo& runtime_info, Info& info,
                          Bindings& binding);
     ~EmitContext();
@@ -49,135 +60,138 @@ public:
     void DefineWorkgroupIndex();
 
     [[nodiscard]] Id DefineInput(Id type, std::optional<u32> location = std::nullopt,
-                                 std::optional<spv::BuiltIn> builtin = std::nullopt) {
-        const Id input_id{DefineVariable(type, builtin, spv::StorageClass::Input)};
+                                 std::optional<u32> builtin = std::nullopt) {
+        const Id input_id{DefineVariable(type, builtin, SpvStorageClassInput)};
         if (location) {
-            Decorate(input_id, spv::Decoration::Location, *location);
+            spv_Decorate1(&m, input_id, u32(SpvDecorationLocation), u32(*location));
         }
         return input_id;
     }
 
     [[nodiscard]] Id DefineOutput(Id type, std::optional<u32> location = std::nullopt,
-                                  std::optional<spv::BuiltIn> builtin = std::nullopt) {
-        const Id output_id{DefineVariable(type, builtin, spv::StorageClass::Output)};
+                                  std::optional<u32> builtin = std::nullopt) {
+        const Id output_id{DefineVariable(type, builtin, SpvStorageClassOutput)};
         if (location) {
-            Decorate(output_id, spv::Decoration::Location, *location);
+            spv_Decorate1(&m, output_id, u32(SpvDecorationLocation), u32(*location));
         }
         return output_id;
     }
 
     [[nodiscard]] Id DefineUniformConst(Id type, u32 set, u32 binding, bool readonly = false) {
-        const Id uniform_id{DefineVar(type, spv::StorageClass::UniformConstant)};
-        Decorate(uniform_id, spv::Decoration::DescriptorSet, set);
-        Decorate(uniform_id, spv::Decoration::Binding, binding);
+        const Id uniform_id{DefineVar(type, SpvStorageClassUniformConstant)};
+        spv_Decorate1(&m, uniform_id, u32(SpvDecorationDescriptorSet), u32(set));
+        spv_Decorate1(&m, uniform_id, u32(SpvDecorationBinding), u32(binding));
         if (readonly) {
-            Decorate(uniform_id, spv::Decoration::NonWritable);
+            spv_Decorate0(&m, uniform_id, u32(SpvDecorationNonWritable));
         }
         return uniform_id;
     }
 
     template <bool global = true>
-    [[nodiscard]] Id DefineVar(Id type, spv::StorageClass storage_class,
+    [[nodiscard]] Id DefineVar(Id type, u32 storage_class,
                                std::optional<Id> initializer = std::nullopt) {
-        const Id pointer_type_id{TypePointer(storage_class, type)};
-        return global ? AddGlobalVariable(pointer_type_id, storage_class, initializer)
-                      : AddLocalVariable(pointer_type_id, storage_class, initializer);
+        const Id pointer_type_id{spv_TypePointer(&m, u32(storage_class), type)};
+        return global ? spv_AddGlobalVariable(&m, pointer_type_id, u32(storage_class),
+                                              initializer.value_or(0))
+                      : spv_AddLocalVariable(&m, pointer_type_id, u32(storage_class),
+                                             initializer.value_or(0));
     }
 
-    [[nodiscard]] Id DefineVariable(Id type, std::optional<spv::BuiltIn> builtin,
-                                    spv::StorageClass storage_class,
+    [[nodiscard]] Id DefineVariable(Id type, std::optional<u32> builtin, u32 storage_class,
                                     std::optional<Id> initializer = std::nullopt) {
         const Id id{DefineVar(type, storage_class, initializer)};
         if (builtin) {
-            Decorate(id, spv::Decoration::BuiltIn, *builtin);
+            spv_Decorate1(&m, id, u32(SpvDecorationBuiltIn), u32(*builtin));
         }
         interfaces.push_back(id);
         return id;
     }
 
     [[nodiscard]] Id ConstU32(u32 value) {
-        return Constant(U32[1], value);
+        return spv_Constant32(&m, U32[1], u32(value));
     }
 
     template <typename... Args>
     [[nodiscard]] Id ConstU32(Args&&... values) {
         constexpr u32 size = static_cast<u32>(sizeof...(values));
         static_assert(size >= 2);
-        const std::array constituents{Constant(U32[1], values)...};
-        const Id type = size <= 4 ? U32[size] : TypeArray(U32[1], ConstU32(size));
-        return ConstantComposite(type, constituents);
+        const std::array constituents{spv_Constant32(&m, U32[1], u32(values))...};
+        const Id type = size <= 4 ? U32[size] : spv_TypeArray(&m, U32[1], ConstU32(size));
+        return spv_ConstantComposite(&m, type, constituents.data(), u32(constituents.size()));
     }
 
     [[nodiscard]] Id ConstS32(s32 value) {
-        return Constant(S32[1], value);
+        return spv_Constant32(&m, S32[1], u32(value));
     }
 
     template <typename... Args>
     [[nodiscard]] Id ConstS32(Args&&... values) {
         constexpr u32 size = static_cast<u32>(sizeof...(values));
         static_assert(size >= 2);
-        const std::array constituents{Constant(S32[1], values)...};
-        const Id type = size <= 4 ? S32[size] : TypeArray(S32[1], ConstU32(size));
-        return ConstantComposite(type, constituents);
+        const std::array constituents{spv_Constant32(&m, S32[1], u32(values))...};
+        const Id type = size <= 4 ? S32[size] : spv_TypeArray(&m, S32[1], ConstU32(size));
+        return spv_ConstantComposite(&m, type, constituents.data(), u32(constituents.size()));
     }
 
     [[nodiscard]] Id ConstF32(f32 value) {
-        return Constant(F32[1], value);
+        return spv_ConstantF32(&m, F32[1], f32(value));
     }
 
     template <typename... Args>
     [[nodiscard]] Id ConstF32(Args... values) {
         constexpr u32 size = static_cast<u32>(sizeof...(values));
         static_assert(size >= 2);
-        const std::array constituents{Constant(F32[1], values)...};
-        const Id type = size <= 4 ? F32[size] : TypeArray(F32[1], ConstU32(size));
-        return ConstantComposite(type, constituents);
+        const std::array constituents{spv_ConstantF32(&m, F32[1], f32(values))...};
+        const Id type = size <= 4 ? F32[size] : spv_TypeArray(&m, F32[1], ConstU32(size));
+        return spv_ConstantComposite(&m, type, constituents.data(), u32(constituents.size()));
     }
 
     inline Id AddLabel() {
-        last_label = Module::AddLabel();
+        last_label = spv_AddLabel0(&m);
         return last_label;
     }
 
     inline Id AddLabel(Id label) {
-        last_label = Module::AddLabel(label);
+        last_label = spv_AddLabel(&m, label);
         return last_label;
     }
 
     Id EmitDwordMemoryRead(Id address, auto&& fallback) {
-        const Id available_label = OpLabel();
-        const Id fallback_label = OpLabel();
-        const Id merge_label = OpLabel();
+        const Id available_label = spv_OpLabel(&m);
+        const Id fallback_label = spv_OpLabel(&m);
+        const Id merge_label = spv_OpLabel(&m);
 
-        const Id addr = OpFunctionCall(U64, get_bda_pointer, address);
-        const Id is_available = OpINotEqual(U1[1], addr, u64_zero_value);
-        OpSelectionMerge(merge_label, spv::SelectionControlMask::MaskNone);
-        OpBranchConditional(is_available, available_label, fallback_label);
+        const Id addr =
+            spv_OpFunctionCall(&m, U64, get_bda_pointer, std::array<u32, 1>{address}.data(), 1);
+        const Id is_available = spv_OpINotEqual(&m, U1[1], addr, u64_zero_value);
+        spv_OpSelectionMerge(&m, merge_label, u32(SpvSelectionControlMaskNone));
+        spv_OpBranchConditional(&m, is_available, available_label, fallback_label);
 
         // Available
         AddLabel(available_label);
-        const Id addr_ptr = OpConvertUToPtr(physical_pointer_type_u32, addr);
-        const Id result = OpLoad(U32[1], addr_ptr, spv::MemoryAccessMask::Aligned, 4u);
-        OpBranch(merge_label);
+        const Id addr_ptr = spv_OpConvertUToPtr(&m, physical_pointer_type_u32, addr);
+        const Id result = spv_OpLoadAligned(&m, U32[1], addr_ptr, 4u);
+        spv_OpBranch(&m, merge_label);
 
         // Fallback
         AddLabel(fallback_label);
         const Id fallback_result = fallback();
-        OpBranch(merge_label);
+        spv_OpBranch(&m, merge_label);
 
         // Merge
         AddLabel(merge_label);
-        const Id final_result =
-            OpPhi(U32[1], fallback_result, fallback_label, result, available_label);
+        const Id final_result = spv_OpPhi(
+            &m, U32[1],
+            std::array<u32, 4>{fallback_result, fallback_label, result, available_label}.data(), 4);
         return final_result;
     }
 
     Id EmitSharedMemoryAccess(const Id result_type, const Id shared_mem, const Id index) {
         if (std::popcount(static_cast<u32>(info.shared_types)) > 1) {
-            return OpAccessChain(result_type, shared_mem, u32_zero_value, index);
+            return spv_OpAccessChain2(&m, result_type, shared_mem, u32_zero_value, index);
         }
         // Workgroup layout struct omitted.
-        return OpAccessChain(result_type, shared_mem, index);
+        return spv_OpAccessChain1(&m, result_type, shared_mem, index);
     }
 
     Id EmitFlatbufferLoad(Id flatbuf_offset) {
@@ -185,9 +199,9 @@ public:
         ASSERT(flatbuf_buffer.binding >= 0 && flatbuf_buffer.buffer_type == BufferType::Flatbuf);
         const auto [flatbuf_buffer_id, flatbuf_pointer_type] =
             flatbuf_buffer.aliases[u32(PointerType::U32)];
-        const auto ptr{
-            OpAccessChain(flatbuf_pointer_type, flatbuf_buffer_id, u32_zero_value, flatbuf_offset)};
-        return OpLoad(U32[1], ptr);
+        const auto ptr{spv_OpAccessChain2(&m, flatbuf_pointer_type, flatbuf_buffer_id,
+                                          u32_zero_value, flatbuf_offset)};
+        return spv_OpLoad(&m, U32[1], ptr);
     }
 
     Info& info;

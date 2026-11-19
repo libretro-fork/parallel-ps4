@@ -315,7 +315,7 @@ CORE_FLAGS := -DZYCORE_STATIC_BUILD -DZYDIS_STATIC_BUILD -DVK_ENABLE_BETA_EXTENS
 	-Isrc -I$(LRC_DIR)/include -I. \
 	-isystem $(EXT_DIR)/fmt/include -isystem $(EXT_DIR)/xbyak \
 	-isystem $(EXT_DIR)/gcn/include \
-	-isystem $(EXT_DIR)/sirit/include -isystem $(EXT_DIR)/sirit/externals/SPIRV-Headers/include \
+	-isystem $(EXT_DIR)/sirit/externals/SPIRV-Headers/include \
 	-isystem $(EXT_DIR)/vulkan-headers/include -isystem $(EXT_DIR)/zydis/include \
 	-isystem $(EXT_DIR)/zydis/dependencies/zycore/include -isystem $(EXT_DIR)/libusb/libusb
 CORE_CXXFLAGS := -Wno-invalid-offsetof
@@ -414,13 +414,6 @@ $(OBJ_DIR)/$(LRC_DIR)/formats/zar/zar.c.o: CFLAGS += -DHAVE_RZSTD
 FMT_SOURCES_CXX := $(addprefix $(EXT_DIR)/fmt/src/,format.cc os.cc)
 FMT_FLAGS := -I$(EXT_DIR)/fmt/include
 
-SIRIT_SOURCES_CXX := $(EXT_DIR)/sirit/src/sirit.cpp \
-	$(addprefix $(EXT_DIR)/sirit/src/instructions/,annotation.cpp arithmetic.cpp atomic.cpp \
-	barrier.cpp bit.cpp constant.cpp conversion.cpp debug.cpp derivatives.cpp extension.cpp \
-	flow.cpp function.cpp group.cpp image.cpp logical.cpp memory.cpp misc.cpp type.cpp)
-SIRIT_FLAGS := -I$(EXT_DIR)/sirit/include -I$(EXT_DIR)/sirit/src \
-	-isystem $(EXT_DIR)/sirit/externals/SPIRV-Headers/include
-SIRIT_CXXFLAGS := -std=c++20
 
 ZYDIS_DIR := $(EXT_DIR)/zydis
 ZYCORE_DIR := $(ZYDIS_DIR)/dependencies/zycore
@@ -451,4 +444,4 @@ LIBUSB_FLAGS := -Ilibretro/libusb-config -I$(LIBUSB_DIR) -I$(LIBUSB_DIR)/os -w
 # libusb's Windows backend uses windows.h's min and max
 LIBUSB_FLAGS += -UNOMINMAX
 
-LIB_GROUPS := CORE LRC FMT SIRIT ZYDIS ZYCORE LIBUSB
+LIB_GROUPS := CORE LRC FMT ZYDIS ZYCORE LIBUSB

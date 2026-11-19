@@ -7,7 +7,9 @@
  * made once (the same id back for the same words, a new one for other words, many of them
  * through the table's growth), capabilities and extensions once each in the order asked
  * for, a dense id bound, the module laid out as SPIR-V's logical layout wants, and, when
- * spirv-val is installed, valid for Vulkan 1.2. */
+ * spirv-val is installed, valid for Vulkan 1.2. An extended set imported once however often asked
+ * for, and an OpPhi written before its value is known, its value and parent then set through
+ * spv_module_patch_phis. */
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -74,11 +76,27 @@ static int layout_rank(uint32_t op) {
     }
 }
 
+/* The deferred OpPhi's one value: the constant 1, from the parent written */
+struct phi_ctx {
+    uint32_t value, parent, calls;
+};
+
+static void patch_phi(void* ctx, uint32_t arg, uint32_t parent, uint32_t* value_out,
+                      uint32_t* parent_out) {
+    struct phi_ctx* p = (struct phi_ctx*)ctx;
+    expect("the phi's argument index", arg == 0);
+    expect("the phi's parent as written", parent == p->parent);
+    *value_out = p->value;
+    *parent_out = parent;
+    p->calls++;
+}
+
 static void write_shader(spv_module_t* m, const char* path) {
     uint32_t w[8];
     uint32_t t_void, t_fn, t_u32, t_u32_again, t_v3, t_rta, t_struct, t_ptr_sb, t_ptr_u32;
     uint32_t t_ptr_in, c0, c1, c1_again, c64, var_buf, var_gid, ext, fn, label, gid, idx, ptr, val;
-    uint32_t i, first_of_many = 0, last_of_many = 0;
+    uint32_t i, first_of_many = 0, last_of_many = 0, join, phi;
+    struct phi_ctx pc;
     const uint32_t* mod;
     size_t words, at;
     int rank = -1, ordered = 1;
@@ -91,9 +109,8 @@ static void write_shader(spv_module_t* m, const char* path) {
     spv_module_extension(m, "SPV_KHR_storage_buffer_storage_class");
     spv_module_extension(m, "SPV_KHR_storage_buffer_storage_class");
 
-    ext = spv_module_id(m);
-    spv_module_op_str(m, SPV_SEC_EXT_IMPORTS, SpvOpExtInstImport, &ext, 1, "GLSL.std.450",
-                      NULL, 0);
+    ext = spv_module_import(m, "GLSL.std.450");
+    expect("an extended set imported once", spv_module_import(m, "GLSL.std.450") == ext);
     w[0] = SpvAddressingModelLogical;
     w[1] = SpvMemoryModelGLSL450;
     spv_module_op(m, SPV_SEC_MEMORY_MODEL, SpvOpMemoryModel, w, 2);
@@ -176,7 +193,17 @@ static void write_shader(spv_module_t* m, const char* path) {
     idx = spv_module_result(m, SpvOpCompositeExtract, t_u32, (w[0] = gid, w[1] = 0, w), 2);
     ptr = spv_module_result(m, SpvOpAccessChain, t_ptr_u32,
                             (w[0] = var_buf, w[1] = c0, w[2] = idx, w), 3);
-    val = c1;
+    /* The value stored through an OpPhi of the one parent, its value set afterwards */
+    join = spv_module_id(m);
+    spv_module_op(m, SPV_SEC_CODE, SpvOpBranch, &join, 1);
+    spv_module_op(m, SPV_SEC_CODE, SpvOpLabel, &join, 1);
+    phi = spv_module_phi_deferred(m, t_u32, &label, 1);
+    pc.value = c1;
+    pc.parent = label;
+    pc.calls = 0;
+    spv_module_patch_phis(m, patch_phi, &pc);
+    expect("the phi patched once", pc.calls == 1);
+    val = phi;
     w[0] = ptr;
     w[1] = val;
     spv_module_op(m, SPV_SEC_CODE, SpvOpStore, w, 2);
