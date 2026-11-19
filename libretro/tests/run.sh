@@ -94,6 +94,14 @@ for san in address,undefined thread; do
         -fno-omit-frame-pointer -fsanitize=$san -isystem externals/vulkan-headers/include -Isrc \
         libretro/tests/vk_heap_test.c src/video_core/renderer_vulkan/vk_heap.c -o "$OUT/$name"
     "$OUT/$name"
+    # The shader recompiler's SPIR-V module: types made once, the layout, the code moved once
+    # when the gap before it is too small, and spirv-val's word where it is installed
+    name=spv_module_test-$(echo $san | tr , -)
+    $CC -std=gnu89 -O1 -g -Wall -Wextra -Wdeclaration-after-statement -fno-omit-frame-pointer \
+        -fsanitize=$san -Isrc -I$L/include -isystem externals/sirit/externals/SPIRV-Headers/include \
+        libretro/tests/spv_module_test.c src/shader_recompiler/backend/spirv/spv_module.c \
+        -o "$OUT/$name"
+    "$OUT/$name" "$OUT"
     # The driver's kept pipeline cache: whose it is, read from its header
     name=pipeline_cache_blob_test-$(echo $san | tr , -)
     $CC -std=c89 -pedantic -O1 -g -Wall -Wdeclaration-after-statement -Wno-long-long \
