@@ -10,7 +10,9 @@
  * definitions, and its operand and address widths. Zydis's register table and names go along.
  * A hook in a copy of Zydis's decoder hands those over; nothing of Zydis goes in the core.
  *
- * To run it, against a Zydis 4 source tree (Z) and its built objects, but Decoder.c's:
+ * Zydis is no longer in the tree: the tables were made from Zydis 4 at commit 120e0e7 (with
+ * Zycore 38d4f02). To run it, against a Zydis source tree (Z) and its built objects, but
+ * Decoder.c's:
  *   cp $Z/src/Decoder.c zdec3.c
  *   sed -i 's|^\(\s*\)ZydisGetInstructionEncodingInfo(node, &info);|&\n\1x64g_hook(definition,
  *     info, instruction, state->context);|' zdec3.c

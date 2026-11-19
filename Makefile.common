@@ -312,13 +312,12 @@ ifeq ($(ARCH_X86_64),1)
 	$(addprefix src/core/libraries/fiber/,fiber.cpp fiber_context.cpp)
 endif
 
-CORE_FLAGS := -DZYCORE_STATIC_BUILD -DZYDIS_STATIC_BUILD -DVK_ENABLE_BETA_EXTENSIONS \
+CORE_FLAGS := -DVK_ENABLE_BETA_EXTENSIONS \
 	-Isrc -I$(LRC_DIR)/include -I. \
 	-isystem $(EXT_DIR)/fmt/include \
 	-isystem $(EXT_DIR)/gcn/include \
 	-isystem $(EXT_DIR)/spirv-headers/include \
-	-isystem $(EXT_DIR)/vulkan-headers/include -isystem $(EXT_DIR)/zydis/include \
-	-isystem $(EXT_DIR)/zydis/dependencies/zycore/include -isystem $(EXT_DIR)/libusb/libusb
+	-isystem $(EXT_DIR)/vulkan-headers/include -isystem $(EXT_DIR)/libusb/libusb
 CORE_CXXFLAGS := -Wno-invalid-offsetof
 
 ifneq ($(X86_64_PARTS_ASM),)
@@ -417,20 +416,6 @@ FMT_SOURCES_CXX := $(addprefix $(EXT_DIR)/fmt/src/,format.cc os.cc)
 FMT_FLAGS := -I$(EXT_DIR)/fmt/include
 
 
-ZYDIS_DIR := $(EXT_DIR)/zydis
-ZYCORE_DIR := $(ZYDIS_DIR)/dependencies/zycore
-ZYDIS_SOURCES_C := $(addprefix $(ZYDIS_DIR)/src/,Decoder.c DecoderData.c Disassembler.c \
-	Encoder.c EncoderData.c Formatter.c FormatterATT.c FormatterBase.c FormatterBuffer.c \
-	FormatterIntel.c MetaInfo.c Mnemonic.c Register.c Segment.c SharedData.c String.c \
-	Utils.c Zydis.c)
-ZYDIS_FLAGS := -DZYCORE_STATIC_BUILD -DZYDIS_STATIC_BUILD -I$(ZYDIS_DIR)/include \
-	-I$(ZYDIS_DIR)/src -I$(ZYCORE_DIR)/include
-ZYCORE_SOURCES_C := $(addprefix $(ZYCORE_DIR)/src/,Allocator.c ArgParse.c Bitset.c Format.c \
-	List.c String.c Vector.c Zycore.c) \
-	$(addprefix $(ZYCORE_DIR)/src/API/,Memory.c Process.c Synchronization.c Terminal.c \
-	Thread.c)
-ZYCORE_FLAGS := -DZYCORE_STATIC_BUILD -D_GNU_SOURCE -I$(ZYCORE_DIR)/include -I$(ZYCORE_DIR)/src
-
 LIBUSB_DIR := $(EXT_DIR)/libusb/libusb
 LIBUSB_SOURCES_C := $(addprefix $(LIBUSB_DIR)/,core.c descriptor.c hotplug.c io.c strerror.c \
 	sync.c)
@@ -446,4 +431,4 @@ LIBUSB_FLAGS := -Ilibretro/libusb-config -I$(LIBUSB_DIR) -I$(LIBUSB_DIR)/os -w
 # libusb's Windows backend uses windows.h's min and max
 LIBUSB_FLAGS += -UNOMINMAX
 
-LIB_GROUPS := CORE LRC FMT ZYDIS ZYCORE LIBUSB
+LIB_GROUPS := CORE LRC FMT LIBUSB

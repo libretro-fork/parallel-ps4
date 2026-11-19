@@ -4,6 +4,7 @@ What changed in the libretro core of this fork, newest first. Changes that come 
 
 ## Unreleased
 
+- Zydis (with Zycore) is gone from the tree: 13 MB, 18 C files and their tables, a C library dependency fewer. Nothing in the core has used it since the previous entries: the core's own C89 decoder (`src/common/x64_decode.c`) and encoder (`src/common/x64_emit.c`) do what it did. `tools/x64_decode_gen.c` still needs a Zydis checkout to remake the decoder's tables, and names the commit they came from (120e0e7, Zycore 38d4f02). Built on Linux and Windows; the tests pass.
 - The CPU patches (`src/core/cpu_patches.cpp`) read the game's code with the core's own x86-64 decoder (`src/common/x64_decode.c`) in place of Zydis. Nothing in the core uses Zydis now, and `src/common/decoder.cpp`, the wrapper around it, is gone. Zydis itself leaves the tree in the next patch.
   - **Same decisions:** the patches find instructions by the same mnemonics and filter them on the same operands. Those are what Zydis gave at every offset of a game's code (previous entries), so the same instructions are found, the same sites patched and the same code generated for them. This includes the Windows red-zone analysis, which reads every operand of every instruction of a function.
   - **Moving an instruction into a trampoline** (Windows red-zone protection) is now `x64_relocate` in `src/common/x64_emit.c`, in place of Zydis's encoder:
