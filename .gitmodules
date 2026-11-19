@@ -2,10 +2,6 @@
 	path = externals/fmt
 	url = https://github.com/shadps4-emu/ext-fmt.git
 	shallow = true
-[submodule "externals/vulkan-headers"]
-	path = externals/vulkan-headers
-	url = https://github.com/KhronosGroup/Vulkan-Headers.git
-	shallow = true
 [submodule "externals/zydis"]
 	path = externals/zydis
 	url = https://github.com/zyantific/zydis.git
