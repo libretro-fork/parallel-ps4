@@ -113,7 +113,7 @@ endif
 # The core
 # ----------------------------------------------------------------------------
 CORE_SOURCES_CXX :=
-CORE_SOURCES_CXX += $(addprefix src/common/,assert.cpp c_bridge.cpp decoder.cpp \
+CORE_SOURCES_CXX += $(addprefix src/common/,assert.cpp c_bridge.cpp \
 	embedded_resources.cpp error.cpp io_file.cpp memory_patcher.cpp native_clock.cpp ntapi.cpp number_utils.cpp \
 	path_util.cpp rdtsc.cpp signal_context.cpp slot_vector.cpp \
 	string_util.cpp xml.cpp)

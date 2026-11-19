@@ -109,11 +109,12 @@ for san in address,undefined thread; do
         -fno-omit-frame-pointer -fsanitize=$san -Isrc libretro/tests/pipeline_cache_blob_test.c \
         src/video_core/renderer_vulkan/pipeline_cache_blob.c -o "$OUT/$name"
     "$OUT/$name"
-    # The x86-64 encoder: each form the core writes, against the bytes Xbyak wrote for it
+    # The x86-64 encoder: each form the core writes, against the bytes Xbyak wrote for it; guest
+    # instructions relocated as Zydis's encoder relocated them
     name=x64_emit_test-$(echo $san | tr , -)
     $CC -std=c89 -pedantic -O1 -g -Wall -Wextra -Wdeclaration-after-statement -Wno-long-long \
         -fno-omit-frame-pointer -fsanitize=$san -Isrc libretro/tests/x64_emit_test.c \
-        src/common/x64_emit.c -o "$OUT/$name"
+        src/common/x64_emit.c src/common/x64_decode.c -o "$OUT/$name"
     "$OUT/$name"
     # The x86-64 decoder: lengths, displacements and immediates as Zydis decoded them
     name=x64_decode_test-$(echo $san | tr , -)

@@ -4,6 +4,18 @@ What changed in the libretro core of this fork, newest first. Changes that come 
 
 ## Unreleased
 
+- The CPU patches (`src/core/cpu_patches.cpp`) read the game's code with the core's own x86-64 decoder (`src/common/x64_decode.c`) in place of Zydis. Nothing in the core uses Zydis now, and `src/common/decoder.cpp`, the wrapper around it, is gone. Zydis itself leaves the tree in the next patch.
+  - **Same decisions:** the patches find instructions by the same mnemonics and filter them on the same operands. Those are what Zydis gave at every offset of a game's code (previous entries), so the same instructions are found, the same sites patched and the same code generated for them. This includes the Windows red-zone analysis, which reads every operand of every instruction of a function.
+  - **Moving an instruction into a trampoline** (Windows red-zone protection) is now `x64_relocate` in `src/common/x64_emit.c`, in place of Zydis's encoder:
+    - The instruction's own bytes are copied. Zydis's encoder wrote them again in its own way, which dropped redundant prefixes and wrote another NOP form, so a trampoline can now be a byte or two longer.
+    - A relative branch keeps its form, short or near, as Zydis kept it, with its offset moved. A rip-relative operand keeps its address.
+    - Over every instruction of a game's code, moved 64 bytes, 4 KB, 2 GB and 12 GB away, the copies can be made in exactly the cases Zydis could make them.
+  - **Protected indirect calls:** the `mov r11, [target]` that loads the call's target is written by `x64_emit` and is byte for byte what Zydis's encoder wrote, over all 12,866 `call qword ptr [...]` at any offset of that code.
+  - **Logging:** the crash and failed-patch logs write the instruction's text with `x64_format`, the same text Zydis wrote.
+  - **Test:** `x64_emit_test` now also checks relocated copies: plain, rip-relative, short and near branches, calls, LOOP and JECXZ, each in reach and out of reach.
+  - **Checked:** built on Linux and Windows. The red-zone patcher is Windows code, so it has only been compiled here, not run.
+
+  Not seen in a game yet.
 - The x86-64 decoder (`src/common/x64_decode.c`) gives each instruction's mnemonic and category, its operands, and its Intel syntax text. The SRT walker interpreter, the walker fault handler, the shader dumps' walker disassembly and the crash log now use it in place of Zydis. Only the CPU patches use Zydis now; they move next, and then Zydis goes.
   - **Operands (`x64_operands`):** register, memory, immediate and pointer operands, the hidden ones too, with what the instruction does to each (read, write, conditional), its size and how the instruction names it. They are numbered and named as Zydis numbers and names them (`src/common/x64_names.h`), so `X64_REG_RSP` is Zydis's `ZYDIS_REGISTER_RSP`.
   - **Text (`x64_format`):** Zydis's Intel style, prefixes, size casts and absolute branch targets included.

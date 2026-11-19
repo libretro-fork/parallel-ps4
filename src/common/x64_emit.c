@@ -3,6 +3,7 @@
 
 #include <string.h>
 
+#include "common/x64_decode.h"
 #include "common/x64_emit.h"
 
 x64_mem_t x64_m(int base, int32_t disp) {
@@ -747,4 +748,46 @@ void x64_vgatherdps(x64_code_t* c, int l, int dst, x64_mem_t m, int mask) {
     if (room(c, MAX_INSN)) {
         vex(c, 1, 2, 0, l, dst, mask, &o, 0x92, 0);
     }
+}
+
+static int fits_s32(int64_t v) {
+    return v >= -2147483647 - 1 && v <= 2147483647;
+}
+
+int x64_relocate(x64_code_t* c, const uint8_t* bytes, const x64_insn_t* in, uint64_t from) {
+    const uint64_t at = (uint64_t)(uintptr_t)x64_curr(c);
+    if (in->rel) {
+        /* A relative branch keeps its form (as Zydis's encoder relocated it): its offset moved */
+        const uint64_t target = x64_target(in, from);
+        const int64_t off = (int64_t)(target - (at + in->len));
+        if ((in->imm_size == 1 && !is_s8(off)) ||
+            (in->imm_size == 2 && (off < -32768 || off > 32767)) ||
+            (in->imm_size == 4 && !fits_s32(off)))
+            return 0;
+        if (!room(c, in->len))
+            return 0;
+        memcpy(c->p + c->size, bytes, in->len);
+        memcpy(c->p + c->size + in->imm_off, &off, in->imm_size); /* little endian */
+        c->size += in->len;
+        return 1;
+    }
+    if (in->rip) {
+        const uint64_t target = x64_target(in, from);
+        const int64_t disp = (int64_t)(target - (at + in->len));
+        int32_t d;
+        if (!fits_s32(disp))
+            return 0;
+        if (!room(c, in->len))
+            return 0;
+        d = (int32_t)disp;
+        memcpy(c->p + c->size, bytes, in->len);
+        memcpy(c->p + c->size + in->disp_off, &d, 4);
+        c->size += in->len;
+        return 1;
+    }
+    if (!room(c, in->len))
+        return 0;
+    memcpy(c->p + c->size, bytes, in->len);
+    c->size += in->len;
+    return 1;
 }

@@ -132,6 +132,14 @@ size_t x64_jcc_fwd(x64_code_t* c, int cc);
 /* The forward jump at @at lands here */
 void x64_bind(x64_code_t* c, size_t at);
 
+struct x64_insn;
+/* A copy of the guest instruction @in (decoded by common/x64_decode.h from @bytes, at @from),
+ * written to run where the code goes: byte for byte, but that a relative branch (in its own
+ * form, short or near) reaches the same target and a rip-relative operand the same address.
+ * 0 when the copy cannot reach (nothing is written, and no error set); also 0, with the error
+ * set, when there is no room. */
+int x64_relocate(x64_code_t* c, const uint8_t* bytes, const struct x64_insn* in, uint64_t from);
+
 /* SSE and AVX on xmm registers (@l: 0) and ymm registers (@l: 1) */
 void x64_vmovups_rm(x64_code_t* c, int l, int x, x64_mem_t m);
 void x64_vmovups_mr(x64_code_t* c, int l, x64_mem_t m, int x);

@@ -764,6 +764,33 @@ unsigned x64_operands(const x64_insn_t* in, x64_operand_t out[X64_MAX_OPERANDS])
     return def->nops;
 }
 
+int x64_operand_address(const x64_insn_t* in, const x64_operand_t* o, uint64_t address,
+                        uint64_t* out) {
+    if (o->type == X64_OPERAND_MEMORY) {
+        if (!o->mem.disp_size)
+            return 0;
+        if (o->mem.base == X64_REG_EIP) {
+            *out = (uint32_t)((uint32_t)address + in->len + (uint32_t)o->mem.disp);
+            return 1;
+        }
+        if (o->mem.base == X64_REG_RIP) {
+            *out = address + in->len + (uint64_t)o->mem.disp;
+            return 1;
+        }
+        if (o->mem.base == X64_REG_NONE && o->mem.index == X64_REG_NONE) {
+            *out = in->address_width == 32 ? (uint64_t)o->mem.disp & 0xFFFFFFFFu
+                                           : (uint64_t)o->mem.disp;
+            return 1;
+        }
+        return 0;
+    }
+    if (o->type == X64_OPERAND_IMMEDIATE && o->imm.is_signed && o->imm.is_relative) {
+        *out = address + in->len + o->imm.value;
+        return 1;
+    }
+    return 0;
+}
+
 const char* x64_mnemonic_name(unsigned mnemonic) {
     return mnemonic < X64_MN_COUNT ? dec_mnemonic_names[mnemonic] : "invalid";
 }
@@ -939,11 +966,8 @@ size_t x64_format(const x64_insn_t* in, const x64_operand_t* ops, uint64_t addre
             put(&t, "[");
             if (o->mem.disp_size && index == X64_REG_NONE &&
                 (base == X64_REG_NONE || base == X64_REG_EIP || base == X64_REG_RIP)) {
-                uint64_t a = (uint64_t)o->mem.disp;
-                if (base == X64_REG_EIP)
-                    a = (uint32_t)((uint32_t)address + in->len + (uint32_t)o->mem.disp);
-                else if (base == X64_REG_RIP)
-                    a = address + in->len + (uint64_t)o->mem.disp;
+                uint64_t a = 0;
+                x64_operand_address(in, o, address, &a);
                 put_address(&t, a, in->address_width);
             } else {
                 if (base != X64_REG_NONE)
@@ -961,7 +985,9 @@ size_t x64_format(const x64_insn_t* in, const x64_operand_t* ops, uint64_t addre
                     }
                 }
                 if (base == X64_REG_NONE && index == X64_REG_NONE) {
-                    put_address(&t, (uint64_t)o->mem.disp, in->address_width);
+                    uint64_t a = 0;
+                    x64_operand_address(in, o, address, &a);
+                    put_address(&t, a, in->address_width);
                 } else if (o->mem.disp_size && o->mem.disp) {
                     if (o->mem.disp < 0) {
                         put(&t, "-");
@@ -982,7 +1008,9 @@ size_t x64_format(const x64_insn_t* in, const x64_operand_t* ops, uint64_t addre
             break;
         case X64_OPERAND_IMMEDIATE:
             if (o->imm.is_relative) {
-                put_address(&t, address + in->len + o->imm.value, in->address_width);
+                uint64_t a = 0;
+                x64_operand_address(in, o, address, &a);
+                put_address(&t, a, in->address_width);
             } else {
                 switch (in->operand_width) {
                 case 8:

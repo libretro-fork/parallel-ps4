@@ -12,6 +12,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "common/x64_decode.h"
 #include "common/x64_emit.h"
 
 struct x64_case {
@@ -417,6 +418,57 @@ int main(void) {
     x64_init(&c, code, sizeof(code));
     x64_jmp(&c, (uint64_t)(uintptr_t)(code + 200), X64_JMP_SHORT);
     expect("a short jump too far: an error, nothing written", c.error && c.size == 0);
+
+    /* Relocation: a guest instruction copied to run at code[0], from where it lay (@from) */
+    {
+        struct reloc_case {
+            const char* what;
+            const char* bytes;
+            unsigned n;
+            int64_t from; /* from code[0] */
+            int ok;
+            const char* expect; /* the copy, the offset or displacement patched in */
+            unsigned expect_n;
+        };
+        static const struct reloc_case rc[] = {
+            {"a plain instruction: byte for byte", "\x66\x2e\x0f\x1f\x84\x00\x00\x00\x00\x00",
+             10, 0x100000, 1, "\x66\x2e\x0f\x1f\x84\x00\x00\x00\x00\x00", 10},
+            {"a rip-relative operand: the same address", "\x48\x8b\x05\x10\x00\x00\x00", 7,
+             0x1000, 1, "\x48\x8b\x05\x10\x10\x00\x00", 7},
+            {"a rip-relative operand out of reach: no copy", "\x48\x8b\x05\x10\x00\x00\x00", 7,
+             0x100000000ll, 0, "", 0},
+            {"a short Jcc in reach: still short", "\x74\x10", 2, 0x40, 1, "\x74\x50", 2},
+            {"a short Jcc out of reach: no copy (as Zydis kept the form)", "\x74\x10", 2, 0x1000, 0,
+             "", 0},
+            {"a near Jcc: still near", "\x0f\x84\x00\x01\x00\x00", 6, 0x2000, 1,
+             "\x0f\x84\x00\x21\x00\x00", 6},
+            {"a call: the same target", "\xe8\xfb\xff\xff\xff", 5, -0x1000, 1,
+             "\xe8\xfb\xef\xff\xff", 5},
+            {"LOOP in reach", "\xe2\xfe", 2, 0x10, 1, "\xe2\x0e", 2},
+            {"JECXZ (67) in reach", "\x67\xe3\x00", 3, -0x20, 1, "\x67\xe3\xe0", 3},
+        };
+        static uint8_t guest[16];
+        for (i = 0; i < sizeof(rc) / sizeof(rc[0]); i++) {
+            x64_insn_t in;
+            int ok;
+            memcpy(guest, rc[i].bytes, rc[i].n);
+            x64_init(&c, code, sizeof(code));
+            ok = x64_decode(guest, rc[i].n, &in) == rc[i].n &&
+                 x64_relocate(&c, guest, &in, (uint64_t)(uintptr_t)code + (uint64_t)rc[i].from);
+            expect(rc[i].what, ok == rc[i].ok && !c.error && c.size == rc[i].expect_n &&
+                                   memcmp(code, rc[i].expect, rc[i].expect_n) == 0);
+        }
+        /* No room: an error, nothing written */
+        memcpy(guest, "\x48\x8b\x05\x10\x00\x00\x00", 7);
+        x64_init(&c, code, 4);
+        {
+            x64_insn_t in;
+            x64_decode(guest, 7, &in);
+            expect("a copy that does not fit: an error",
+                   !x64_relocate(&c, guest, &in, (uint64_t)(uintptr_t)code) && c.error &&
+                       c.size == 0);
+        }
+    }
 
     if (failures == 0) {
         printf("x64_emit: all passed\n");

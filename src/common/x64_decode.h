@@ -152,6 +152,11 @@ unsigned x64_operands(const x64_insn_t* in, x64_operand_t out[X64_MAX_OPERANDS])
 size_t x64_format(const x64_insn_t* in, const x64_operand_t* ops, uint64_t address, char* buf,
                   size_t size);
 
+/* The absolute address operand @o of @in at @address reaches, as Zydis works it out: a relative
+ * branch's target, a rip-relative operand's address, an absolute address. 0 when it has none. */
+int x64_operand_address(const x64_insn_t* in, const x64_operand_t* o, uint64_t address,
+                        uint64_t* out);
+
 const char* x64_mnemonic_name(unsigned mnemonic);
 const char* x64_register_name(unsigned reg);
 /* The 64-bit register a register is part of (rax for al, ax, eax); itself if none */

@@ -14,7 +14,6 @@
 #include <set>
 #include <unordered_set>
 #include <vector>
-#include <Zydis/Zydis.h>
 #include <encodings/rzstd.h>
 #include <fmt/format.h>
 #include <retro_atomic.h>
@@ -27,11 +26,11 @@
 #include "common/arch.h"
 #include "common/assert.h"
 #include "common/combiner.h"
-#include "common/decoder.h"
 #include "common/embedded_resources.h"
 #include "common/run_once.h"
 #include "common/signal_context.h"
 #include "common/types.h"
+#include "common/x64_decode.h"
 #include "common/x64_emit.h"
 #include "core/signals.h"
 #include "core/tls.h"
@@ -90,6 +89,16 @@ static bool InitializeIndexTables() {
     return true;
 }
 
+/// The instruction at @code, of the @size bytes there, and its operands: false when there is none
+static bool DecodeInstruction(const void* code, size_t size, x64_insn_t& instruction,
+                              x64_operand_t* operands) {
+    if (!x64_decode(static_cast<const u8*>(code), size, &instruction)) {
+        return false;
+    }
+    x64_operands(&instruction, operands);
+    return true;
+}
+
 /// A register of a guest instruction, as the encoder numbers it, and its width in bits (32, 64;
 /// 128 for an xmm, 256 for a ymm)
 struct PatchReg {
@@ -103,48 +112,46 @@ struct PatchReg {
     }
 };
 
-static PatchReg ZydisToPatchRegister(const ZydisRegister reg) {
-    if (reg >= ZYDIS_REGISTER_EAX && reg <= ZYDIS_REGISTER_R15D) {
-        return {static_cast<int>(reg - ZYDIS_REGISTER_EAX), 32};
+static PatchReg ToPatchRegister(const unsigned reg) {
+    if (reg >= X64_REG_EAX && reg <= X64_REG_R15D) {
+        return {static_cast<int>(reg - X64_REG_EAX), 32};
     }
-    if (reg >= ZYDIS_REGISTER_RAX && reg <= ZYDIS_REGISTER_R15) {
-        return {static_cast<int>(reg - ZYDIS_REGISTER_RAX), 64};
+    if (reg >= X64_REG_RAX && reg <= X64_REG_R15) {
+        return {static_cast<int>(reg - X64_REG_RAX), 64};
     }
-    if (reg >= ZYDIS_REGISTER_XMM0 && reg <= ZYDIS_REGISTER_XMM31) {
-        return {static_cast<int>(reg - ZYDIS_REGISTER_XMM0), 128};
+    if (reg >= X64_REG_XMM0 && reg <= X64_REG_XMM31) {
+        return {static_cast<int>(reg - X64_REG_XMM0), 128};
     }
-    if (reg >= ZYDIS_REGISTER_YMM0 && reg <= ZYDIS_REGISTER_YMM31) {
-        return {static_cast<int>(reg - ZYDIS_REGISTER_YMM0), 256};
+    if (reg >= X64_REG_YMM0 && reg <= X64_REG_YMM31) {
+        return {static_cast<int>(reg - X64_REG_YMM0), 256};
     }
     UNREACHABLE_MSG("Unsupported register: {}", static_cast<u32>(reg));
 }
 
-static PatchReg ZydisToPatchRegisterOperand(const ZydisDecodedOperand& operand) {
-    ASSERT_MSG(operand.type == ZYDIS_OPERAND_TYPE_REGISTER,
-               "Expected register operand, got type: {}", static_cast<u32>(operand.type));
-
-    return ZydisToPatchRegister(operand.reg.value);
-}
-
-static x64_mem_t ZydisToPatchMemoryOperand(void* address,
-                                           const ZydisDecodedInstruction& instruction,
-                                           const ZydisDecodedOperand& operand) {
-    ASSERT_MSG(operand.type == ZYDIS_OPERAND_TYPE_MEMORY, "Expected memory operand, got type: {}",
+static PatchReg ToPatchRegisterOperand(const x64_operand_t& operand) {
+    ASSERT_MSG(operand.type == X64_OPERAND_REGISTER, "Expected register operand, got type: {}",
                static_cast<u32>(operand.type));
 
-    if (operand.mem.base == ZYDIS_REGISTER_RIP || operand.mem.base == ZYDIS_REGISTER_EIP) {
-        ZyanU64 target{};
-        ASSERT(ZYAN_SUCCESS(ZydisCalcAbsoluteAddress(&instruction, &operand,
-                                                     reinterpret_cast<ZyanU64>(address), &target)));
+    return ToPatchRegister(operand.reg);
+}
+
+static x64_mem_t ToPatchMemoryOperand(void* address, const x64_insn_t& instruction,
+                                      const x64_operand_t& operand) {
+    ASSERT_MSG(operand.type == X64_OPERAND_MEMORY, "Expected memory operand, got type: {}",
+               static_cast<u32>(operand.type));
+
+    if (operand.mem.base == X64_REG_RIP || operand.mem.base == X64_REG_EIP) {
+        u64 target{};
+        ASSERT(
+            x64_operand_address(&instruction, &operand, reinterpret_cast<u64>(address), &target));
         return x64_mrip(target);
     }
 
-    const int base =
-        operand.mem.base != ZYDIS_REGISTER_NONE ? ZydisToPatchRegister(operand.mem.base).idx : -1;
+    const int base = operand.mem.base != X64_REG_NONE ? ToPatchRegister(operand.mem.base).idx : -1;
     const int index =
-        operand.mem.index != ZYDIS_REGISTER_NONE ? ZydisToPatchRegister(operand.mem.index).idx : -1;
+        operand.mem.index != X64_REG_NONE ? ToPatchRegister(operand.mem.index).idx : -1;
     const int scale = operand.mem.scale != 0 ? operand.mem.scale : 1;
-    const s32 disp = operand.mem.disp.size != 0 ? static_cast<s32>(operand.mem.disp.value) : 0;
+    const s32 disp = operand.mem.disp_size != 0 ? static_cast<s32>(operand.mem.disp) : 0;
     return x64_mi(base, index, scale, disp);
 }
 
@@ -154,19 +161,19 @@ static x64_mem_t Gs(x64_mem_t m) {
     return m;
 }
 
-static bool FilterTcbAccess(const ZydisDecodedOperand* operands) {
+static bool FilterTcbAccess(const x64_operand_t* operands) {
     const auto& dst_op = operands[0];
     const auto& src_op = operands[1];
 
     // Patch only 'mov (64-bit register), fs:[0]'
-    return src_op.type == ZYDIS_OPERAND_TYPE_MEMORY && src_op.mem.segment == ZYDIS_REGISTER_FS &&
-           src_op.mem.base == ZYDIS_REGISTER_NONE && src_op.mem.index == ZYDIS_REGISTER_NONE &&
-           src_op.mem.disp.value < sizeof(Core::Tcb) && dst_op.reg.value >= ZYDIS_REGISTER_RAX &&
-           dst_op.reg.value <= ZYDIS_REGISTER_R15;
+    return src_op.type == X64_OPERAND_MEMORY && src_op.mem.segment == X64_REG_FS &&
+           src_op.mem.base == X64_REG_NONE && src_op.mem.index == X64_REG_NONE &&
+           src_op.mem.disp < sizeof(Core::Tcb) && dst_op.reg >= X64_REG_RAX &&
+           dst_op.reg <= X64_REG_R15;
 }
 
 #if defined(_WIN32)
-static void RetrieveTcbPointer(int dst, x64_code_t* c, ZyanI64 offset) {
+static void RetrieveTcbPointer(int dst, x64_code_t* c, s64 offset) {
     // The following logic is based on the Kernel32.dll asm of TlsGetValue
     static constexpr u32 TlsSlotsOffset = 0x1480;
     static constexpr u32 TlsExpansionSlotsOffset = 0x1780;
@@ -194,27 +201,27 @@ static void RetrieveTcbPointer(int dst, x64_code_t* c, ZyanI64 offset) {
 }
 #endif
 
-static void GenerateTcbAccess(void* address, const ZydisDecodedInstruction& instruction,
-                              const ZydisDecodedOperand* operands, x64_code_t* c) {
-    const auto dst = ZydisToPatchRegisterOperand(operands[0]);
+static void GenerateTcbAccess(void* address, const x64_insn_t& instruction,
+                              const x64_operand_t* operands, x64_code_t* c) {
+    const auto dst = ToPatchRegisterOperand(operands[0]);
 
 #if defined(_WIN32)
-    RetrieveTcbPointer(dst.idx, c, operands[1].mem.disp.value);
+    RetrieveTcbPointer(dst.idx, c, operands[1].mem.disp);
 #else
-    const auto src = ZydisToPatchMemoryOperand(address, instruction, operands[1]);
+    const auto src = ToPatchMemoryOperand(address, instruction, operands[1]);
 
     // Replace fs read with gs read.
     x64_mov_rm(c, dst.bits, dst.idx, Gs(src));
 #endif
 }
 
-static void GenerateTcbCompare(void* address, const ZydisDecodedInstruction& instruction,
-                               const ZydisDecodedOperand* operands, x64_code_t* c) {
-    const auto dst = ZydisToPatchRegisterOperand(operands[0]);
+static void GenerateTcbCompare(void* address, const x64_insn_t& instruction,
+                               const x64_operand_t* operands, x64_code_t* c) {
+    const auto dst = ToPatchRegisterOperand(operands[0]);
 
 #if defined(_WIN32)
     // Prepare a scratch register. Use rax where possible, rbx if rax is in use.
-    const int scratch = operands[0].reg.value == ZYDIS_REGISTER_RAX ? X64_RBX : X64_RAX;
+    const int scratch = operands[0].reg == X64_REG_RAX ? X64_RBX : X64_RAX;
 
     // Set rsp to before red zone and save scratch register
     x64_lea(c, X64_RSP, x64_m(X64_RSP, -128));
@@ -222,7 +229,7 @@ static void GenerateTcbCompare(void* address, const ZydisDecodedInstruction& ins
     x64_push(c, scratch);
 
     // Retrieve value from TCB and store it in the scratch register
-    RetrieveTcbPointer(scratch, c, operands[1].mem.disp.value);
+    RetrieveTcbPointer(scratch, c, operands[1].mem.disp);
 
     // Perform compare op
     x64_alu_rr(c, X64_CMP, dst.bits, dst.idx, scratch);
@@ -232,20 +239,20 @@ static void GenerateTcbCompare(void* address, const ZydisDecodedInstruction& ins
     x64_popfq(c);
     x64_lea(c, X64_RSP, x64_m(X64_RSP, 128));
 #else
-    const auto src = ZydisToPatchMemoryOperand(address, instruction, operands[1]);
+    const auto src = ToPatchMemoryOperand(address, instruction, operands[1]);
 
     // Replace fs compare with gs compare.
     x64_alu_rm(c, X64_CMP, dst.bits, dst.idx, Gs(src));
 #endif
 }
 
-static void GenerateTcbExclusiveOr(void* address, const ZydisDecodedInstruction& instruction,
-                                   const ZydisDecodedOperand* operands, x64_code_t* c) {
-    const auto dst = ZydisToPatchRegisterOperand(operands[0]);
+static void GenerateTcbExclusiveOr(void* address, const x64_insn_t& instruction,
+                                   const x64_operand_t* operands, x64_code_t* c) {
+    const auto dst = ToPatchRegisterOperand(operands[0]);
 
 #if defined(_WIN32)
     // Prepare a scratch register. Use rax where possible, rbx if rax is in use.
-    const int scratch = operands[0].reg.value == ZYDIS_REGISTER_RAX ? X64_RBX : X64_RAX;
+    const int scratch = operands[0].reg == X64_REG_RAX ? X64_RBX : X64_RAX;
 
     // Set rsp to before red zone and save scratch register
     x64_lea(c, X64_RSP, x64_m(X64_RSP, -128));
@@ -253,7 +260,7 @@ static void GenerateTcbExclusiveOr(void* address, const ZydisDecodedInstruction&
     x64_push(c, scratch);
 
     // Retrieve value from TCB and store it in the scratch register
-    RetrieveTcbPointer(scratch, c, operands[1].mem.disp.value);
+    RetrieveTcbPointer(scratch, c, operands[1].mem.disp);
 
     // Perform xor
     x64_alu_rr(c, X64_XOR, dst.bits, dst.idx, scratch);
@@ -263,7 +270,7 @@ static void GenerateTcbExclusiveOr(void* address, const ZydisDecodedInstruction&
     x64_popfq(c);
     x64_lea(c, X64_RSP, x64_m(X64_RSP, 128));
 #else
-    const auto src = ZydisToPatchMemoryOperand(address, instruction, operands[1]);
+    const auto src = ToPatchMemoryOperand(address, instruction, operands[1]);
 
     // Replace fs xor with gs xor.
     x64_alu_rm(c, X64_XOR, dst.bits, dst.idx, Gs(src));
@@ -283,7 +290,7 @@ static std::array<u32, 4> Cpuid(u32 leaf) {
     return r;
 }
 
-static bool FilterNoSSE4a(const ZydisDecodedOperand*) {
+static bool FilterNoSSE4a(const x64_operand_t*) {
     // CPUID 0x80000001: ECX bit 6, where the extended leaves go that far
     if (Cpuid(0x80000000)[0] < 0x80000001) {
         return true;
@@ -291,7 +298,7 @@ static bool FilterNoSSE4a(const ZydisDecodedOperand*) {
     return (Cpuid(0x80000001)[2] & (1u << 6)) == 0;
 }
 
-static bool FilterIntelCPU(const ZydisDecodedOperand*) {
+static bool FilterIntelCPU(const x64_operand_t*) {
 #if defined(__APPLE__)
     // Rosetta seems to emulate the reciprocal instructions with exact Intel results
     // so we enable our reciprocal translation there too
@@ -303,18 +310,18 @@ static bool FilterIntelCPU(const ZydisDecodedOperand*) {
     return id[1] == 0x756e6547 && id[3] == 0x49656e69 && id[2] == 0x6c65746e;
 }
 
-static void GenerateReciprocalInstruction(void* address, const ZydisDecodedInstruction& instruction,
-                                          const ZydisDecodedOperand* operands, x64_code_t* c,
-                                          bool rsqrt, bool vex) {
+static void GenerateReciprocalInstruction(void* address, const x64_insn_t& instruction,
+                                          const x64_operand_t* operands, x64_code_t* c, bool rsqrt,
+                                          bool vex) {
     bool table_loaded = InitializeIndexTables();
     ASSERT_MSG(table_loaded, "Failed to load RCP index table");
 
-    ASSERT_MSG(operands[0].type == ZYDIS_OPERAND_TYPE_REGISTER, "operand 0 must be a register");
+    ASSERT_MSG(operands[0].type == X64_OPERAND_REGISTER, "operand 0 must be a register");
 
-    const auto dst = ZydisToPatchRegisterOperand(operands[0]);
+    const auto dst = ToPatchRegisterOperand(operands[0]);
 
     ASSERT_MSG(dst.IsVector(), "operand 0 must be an XMM or YMM register");
-    bool is_src_mem = operands[1].type == ZYDIS_OPERAND_TYPE_MEMORY;
+    bool is_src_mem = operands[1].type == X64_OPERAND_MEMORY;
 
     // The registers' width is the destination's: xmm or ymm
     const int l = dst.L();
@@ -323,7 +330,7 @@ static void GenerateReciprocalInstruction(void* address, const ZydisDecodedInstr
     int src_reg = 0;
 
     if (!is_src_mem) {
-        src_reg = ZydisToPatchRegisterOperand(operands[1]).idx;
+        src_reg = ToPatchRegisterOperand(operands[1]).idx;
         taken_vecs[src_reg] = true;
     }
 
@@ -359,18 +366,17 @@ static void GenerateReciprocalInstruction(void* address, const ZydisDecodedInstr
     x64_push(c, scratch2);
 
     if (is_src_mem) {
-        if (operands[1].mem.base == ZYDIS_REGISTER_RIP) {
-            const u64 target = (u64)address + instruction.length + operands[1].mem.disp.value;
+        if (operands[1].mem.base == X64_REG_RIP) {
+            const u64 target = (u64)address + instruction.len + operands[1].mem.disp;
             x64_mov_ri(c, 64, X64_RAX, target);
             x64_vmovups_rm(c, l, src_storage, x64_m(X64_RAX, 0));
         } else {
-            ZydisDecodedOperand operand = operands[1];
-            if (operands[1].mem.base == ZYDIS_REGISTER_RSP) { // rsp can't be index
-                operand.mem.disp.size = 32;
-                operand.mem.disp.value += rsp_disp + 8 * 3; // Account for what we pushed
+            x64_operand_t operand = operands[1];
+            if (operands[1].mem.base == X64_REG_RSP) { // rsp can't be index
+                operand.mem.disp_size = 4;
+                operand.mem.disp += rsp_disp + 8 * 3; // Account for what we pushed
             }
-            x64_vmovups_rm(c, l, src_storage,
-                           ZydisToPatchMemoryOperand(address, instruction, operand));
+            x64_vmovups_rm(c, l, src_storage, ToPatchMemoryOperand(address, instruction, operand));
         }
         src_reg = src_storage;
     }
@@ -429,42 +435,42 @@ static void GenerateReciprocalInstruction(void* address, const ZydisDecodedInstr
     x64_lea(c, X64_RSP, x64_m(X64_RSP, rsp_disp));
 }
 
-static void GenerateRSQRTPS(void* address, const ZydisDecodedInstruction& instruction,
-                            const ZydisDecodedOperand* operands, x64_code_t* c) {
+static void GenerateRSQRTPS(void* address, const x64_insn_t& instruction,
+                            const x64_operand_t* operands, x64_code_t* c) {
     GenerateReciprocalInstruction(address, instruction, operands, c, true, false);
 }
 
-static void GenerateVRSQRTPS(void* address, const ZydisDecodedInstruction& instruction,
-                             const ZydisDecodedOperand* operands, x64_code_t* c) {
+static void GenerateVRSQRTPS(void* address, const x64_insn_t& instruction,
+                             const x64_operand_t* operands, x64_code_t* c) {
     GenerateReciprocalInstruction(address, instruction, operands, c, true, true);
 }
 
-static void GenerateRCPPS(void* address, const ZydisDecodedInstruction& instruction,
-                          const ZydisDecodedOperand* operands, x64_code_t* c) {
+static void GenerateRCPPS(void* address, const x64_insn_t& instruction,
+                          const x64_operand_t* operands, x64_code_t* c) {
     GenerateReciprocalInstruction(address, instruction, operands, c, false, false);
 }
 
-static void GenerateVRCPPS(void* address, const ZydisDecodedInstruction& instruction,
-                           const ZydisDecodedOperand* operands, x64_code_t* c) {
+static void GenerateVRCPPS(void* address, const x64_insn_t& instruction,
+                           const x64_operand_t* operands, x64_code_t* c) {
     GenerateReciprocalInstruction(address, instruction, operands, c, false, true);
 }
 
-static void GenerateEXTRQ(void* /* address */, const ZydisDecodedInstruction&,
-                          const ZydisDecodedOperand* operands, x64_code_t* c) {
-    bool immediateForm = operands[1].type == ZYDIS_OPERAND_TYPE_IMMEDIATE &&
-                         operands[2].type == ZYDIS_OPERAND_TYPE_IMMEDIATE;
+static void GenerateEXTRQ(void* /* address */, const x64_insn_t&, const x64_operand_t* operands,
+                          x64_code_t* c) {
+    bool immediateForm =
+        operands[1].type == X64_OPERAND_IMMEDIATE && operands[2].type == X64_OPERAND_IMMEDIATE;
 
-    ASSERT_MSG(operands[0].type == ZYDIS_OPERAND_TYPE_REGISTER, "operand 0 must be a register");
+    ASSERT_MSG(operands[0].type == X64_OPERAND_REGISTER, "operand 0 must be a register");
 
-    const auto dst = ZydisToPatchRegisterOperand(operands[0]);
+    const auto dst = ToPatchRegisterOperand(operands[0]);
 
     ASSERT_MSG(dst.bits == 128, "operand 0 must be an XMM register");
 
     const int xmm_dst = dst.idx;
 
     if (immediateForm) {
-        u8 length = operands[1].imm.value.u & 0x3F;
-        u8 index = operands[2].imm.value.u & 0x3F;
+        u8 length = operands[1].imm.value & 0x3F;
+        u8 index = operands[2].imm.value & 0x3F;
 
         LOG_DEBUG(Core, "Patching immediate form EXTRQ, length: {}, index: {}", length, index);
 
@@ -510,15 +516,13 @@ static void GenerateEXTRQ(void* /* address */, const ZydisDecodedInstruction&,
         x64_popfq(c);
         x64_lea(c, X64_RSP, x64_m(X64_RSP, 128));
     } else {
-        ASSERT_MSG(operands[0].type == ZYDIS_OPERAND_TYPE_REGISTER &&
-                       operands[1].type == ZYDIS_OPERAND_TYPE_REGISTER &&
-                       operands[0].reg.value >= ZYDIS_REGISTER_XMM0 &&
-                       operands[0].reg.value <= ZYDIS_REGISTER_XMM15 &&
-                       operands[1].reg.value >= ZYDIS_REGISTER_XMM0 &&
-                       operands[1].reg.value <= ZYDIS_REGISTER_XMM15,
+        ASSERT_MSG(operands[0].type == X64_OPERAND_REGISTER &&
+                       operands[1].type == X64_OPERAND_REGISTER &&
+                       operands[0].reg >= X64_REG_XMM0 && operands[0].reg <= X64_REG_XMM15 &&
+                       operands[1].reg >= X64_REG_XMM0 && operands[1].reg <= X64_REG_XMM15,
                    "Unexpected operand types for EXTRQ instruction");
 
-        const auto src = ZydisToPatchRegisterOperand(operands[1]);
+        const auto src = ToPatchRegisterOperand(operands[1]);
 
         ASSERT_MSG(src.bits == 128, "operand 1 must be an XMM register");
 
@@ -571,17 +575,16 @@ static void GenerateEXTRQ(void* /* address */, const ZydisDecodedInstruction&,
     }
 }
 
-static void GenerateINSERTQ(void* /* address */, const ZydisDecodedInstruction&,
-                            const ZydisDecodedOperand* operands, x64_code_t* c) {
-    bool immediateForm = operands[2].type == ZYDIS_OPERAND_TYPE_IMMEDIATE &&
-                         operands[3].type == ZYDIS_OPERAND_TYPE_IMMEDIATE;
+static void GenerateINSERTQ(void* /* address */, const x64_insn_t&, const x64_operand_t* operands,
+                            x64_code_t* c) {
+    bool immediateForm =
+        operands[2].type == X64_OPERAND_IMMEDIATE && operands[3].type == X64_OPERAND_IMMEDIATE;
 
-    ASSERT_MSG(operands[0].type == ZYDIS_OPERAND_TYPE_REGISTER &&
-                   operands[1].type == ZYDIS_OPERAND_TYPE_REGISTER,
+    ASSERT_MSG(operands[0].type == X64_OPERAND_REGISTER && operands[1].type == X64_OPERAND_REGISTER,
                "operands 0 and 1 must be registers.");
 
-    const auto dst = ZydisToPatchRegisterOperand(operands[0]);
-    const auto src = ZydisToPatchRegisterOperand(operands[1]);
+    const auto dst = ToPatchRegisterOperand(operands[0]);
+    const auto src = ToPatchRegisterOperand(operands[1]);
 
     ASSERT_MSG(dst.bits == 128 && src.bits == 128, "operands 0 and 1 must be xmm registers.");
 
@@ -589,8 +592,8 @@ static void GenerateINSERTQ(void* /* address */, const ZydisDecodedInstruction&,
     const int xmm_src = src.idx;
 
     if (immediateForm) {
-        u8 length = operands[2].imm.value.u & 0x3F;
-        u8 index = operands[3].imm.value.u & 0x3F;
+        u8 length = operands[2].imm.value & 0x3F;
+        u8 index = operands[3].imm.value & 0x3F;
 
         const int scratch1 = X64_RAX;
         const int scratch2 = X64_RCX;
@@ -643,8 +646,7 @@ static void GenerateINSERTQ(void* /* address */, const ZydisDecodedInstruction&,
         x64_popfq(c);
         x64_lea(c, X64_RSP, x64_m(X64_RSP, 128));
     } else {
-        ASSERT_MSG(operands[2].type == ZYDIS_OPERAND_TYPE_UNUSED &&
-                       operands[3].type == ZYDIS_OPERAND_TYPE_UNUSED,
+        ASSERT_MSG(operands[2].type == X64_OPERAND_UNUSED && operands[3].type == X64_OPERAND_UNUSED,
                    "operands 2 and 3 must be unused for register form.");
 
         const int scratch1 = X64_RAX;
@@ -742,37 +744,34 @@ static void ReplaceMOVNT(void* address, u8 rep_prefix) {
     ptr[index] = 0x11;
 }
 
-static void ReplaceMOVNTSS(void* address, const ZydisDecodedInstruction&,
-                           const ZydisDecodedOperand*, x64_code_t*) {
+static void ReplaceMOVNTSS(void* address, const x64_insn_t&, const x64_operand_t*, x64_code_t*) {
     ReplaceMOVNT(address, 0xF3);
 }
 
-static void ReplaceMOVNTSD(void* address, const ZydisDecodedInstruction&,
-                           const ZydisDecodedOperand*, x64_code_t*) {
+static void ReplaceMOVNTSD(void* address, const x64_insn_t&, const x64_operand_t*, x64_code_t*) {
     ReplaceMOVNT(address, 0xF2);
 }
 
 #if defined(__APPLE__)
 // Rosetta 2 mistranslates VCMPSS with NEQ, NLT or NLE: if the destination is then reloaded by a
 // full width VEX load, later scalar reads of it still return the compare mask.
-static bool FilterNegatedScalarCompare(const ZydisDecodedOperand* operands) {
+static bool FilterNegatedScalarCompare(const x64_operand_t* operands) {
     // NEQ, NLT and NLE are 4 to 6, and 20 to 22 are the same predicates with bit 4 set.
-    const u64 predicate = operands[3].imm.value.u & ~0x10ULL;
+    const u64 predicate = operands[3].imm.value & ~0x10ULL;
     return predicate >= 4 && predicate <= 6;
 }
 
 // Compares with the non-negated predicate and flips lane 0, which gives the same bits.
-static void GenerateNegatedScalarCompare(void* address, const ZydisDecodedInstruction& instruction,
-                                         const ZydisDecodedOperand* operands, x64_code_t* c) {
-    const int xmm_dst = ZydisToPatchRegisterOperand(operands[0]).idx;
-    const int xmm_src1 = ZydisToPatchRegisterOperand(operands[1]).idx;
-    const u8 predicate = operands[3].imm.value.u & 3;
-    if (operands[2].type == ZYDIS_OPERAND_TYPE_REGISTER) {
-        x64_vcmpss_rrr(c, xmm_dst, xmm_src1, ZydisToPatchRegisterOperand(operands[2]).idx,
-                       predicate);
+static void GenerateNegatedScalarCompare(void* address, const x64_insn_t& instruction,
+                                         const x64_operand_t* operands, x64_code_t* c) {
+    const int xmm_dst = ToPatchRegisterOperand(operands[0]).idx;
+    const int xmm_src1 = ToPatchRegisterOperand(operands[1]).idx;
+    const u8 predicate = operands[3].imm.value & 3;
+    if (operands[2].type == X64_OPERAND_REGISTER) {
+        x64_vcmpss_rrr(c, xmm_dst, xmm_src1, ToPatchRegisterOperand(operands[2]).idx, predicate);
     } else {
         x64_vcmpss_rrm(c, xmm_dst, xmm_src1,
-                       ZydisToPatchMemoryOperand(address, instruction, operands[2]), predicate);
+                       ToPatchMemoryOperand(address, instruction, operands[2]), predicate);
     }
     // The lane 0 mask lies after the vxorps and the 2-byte jump over the mask. A rip-relative
     // vxorps of xmm registers always takes the 2-byte VEX: 8 bytes in all
@@ -786,9 +785,8 @@ static void GenerateNegatedScalarCompare(void* address, const ZydisDecodedInstru
 }
 #endif
 
-using PatchFilter = bool (*)(const ZydisDecodedOperand*);
-using InstructionGenerator = void (*)(void*, const ZydisDecodedInstruction&,
-                                      const ZydisDecodedOperand*, x64_code_t*);
+using PatchFilter = bool (*)(const x64_operand_t*);
+using InstructionGenerator = void (*)(void*, const x64_insn_t&, const x64_operand_t*, x64_code_t*);
 struct PatchInfo {
     /// Filter for more granular patch conditions past just the instruction mnemonic.
     PatchFilter filter;
@@ -808,26 +806,26 @@ static const bool need_tcb_trampoline = true;
 static const bool need_tcb_trampoline = false;
 #endif
 
-static const std::unordered_map<ZydisMnemonic, std::vector<PatchInfo>> Patches = {
+static const std::unordered_map<u16, std::vector<PatchInfo>> Patches = {
     // SSE4a
-    {ZYDIS_MNEMONIC_EXTRQ, {{FilterNoSSE4a, GenerateEXTRQ, true}}},
-    {ZYDIS_MNEMONIC_INSERTQ, {{FilterNoSSE4a, GenerateINSERTQ, true}}},
-    {ZYDIS_MNEMONIC_MOVNTSS, {{FilterNoSSE4a, ReplaceMOVNTSS, false}}},
-    {ZYDIS_MNEMONIC_MOVNTSD, {{FilterNoSSE4a, ReplaceMOVNTSD, false}}},
-    {ZYDIS_MNEMONIC_RSQRTPS, {{FilterIntelCPU, GenerateRSQRTPS, true}}},
-    {ZYDIS_MNEMONIC_VRSQRTPS, {{FilterIntelCPU, GenerateVRSQRTPS, true}}},
-    {ZYDIS_MNEMONIC_RCPPS, {{FilterIntelCPU, GenerateRCPPS, true}}},
-    {ZYDIS_MNEMONIC_VRCPPS, {{FilterIntelCPU, GenerateVRCPPS, true}}},
+    {X64_MN_EXTRQ, {{FilterNoSSE4a, GenerateEXTRQ, true}}},
+    {X64_MN_INSERTQ, {{FilterNoSSE4a, GenerateINSERTQ, true}}},
+    {X64_MN_MOVNTSS, {{FilterNoSSE4a, ReplaceMOVNTSS, false}}},
+    {X64_MN_MOVNTSD, {{FilterNoSSE4a, ReplaceMOVNTSD, false}}},
+    {X64_MN_RSQRTPS, {{FilterIntelCPU, GenerateRSQRTPS, true}}},
+    {X64_MN_VRSQRTPS, {{FilterIntelCPU, GenerateVRSQRTPS, true}}},
+    {X64_MN_RCPPS, {{FilterIntelCPU, GenerateRCPPS, true}}},
+    {X64_MN_VRCPPS, {{FilterIntelCPU, GenerateVRCPPS, true}}},
 
 #if defined(__APPLE__)
     // Rosetta 2
-    {ZYDIS_MNEMONIC_VCMPSS, {{FilterNegatedScalarCompare, GenerateNegatedScalarCompare, true}}},
+    {X64_MN_VCMPSS, {{FilterNegatedScalarCompare, GenerateNegatedScalarCompare, true}}},
 #else
     // FS segment patches
     // For most of these, Windows needs a trampoline while other platforms do not.
-    {ZYDIS_MNEMONIC_XOR, {{FilterTcbAccess, GenerateTcbExclusiveOr, need_tcb_trampoline}}},
-    {ZYDIS_MNEMONIC_MOV, {{FilterTcbAccess, GenerateTcbAccess, need_tcb_trampoline}}},
-    {ZYDIS_MNEMONIC_CMP, {{FilterTcbAccess, GenerateTcbCompare, need_tcb_trampoline}}}
+    {X64_MN_XOR, {{FilterTcbAccess, GenerateTcbExclusiveOr, need_tcb_trampoline}}},
+    {X64_MN_MOV, {{FilterTcbAccess, GenerateTcbAccess, need_tcb_trampoline}}},
+    {X64_MN_CMP, {{FilterTcbAccess, GenerateTcbCompare, need_tcb_trampoline}}}
 #endif
 };
 
@@ -893,11 +891,9 @@ static PatchModule* GetContainingModule(const void* ptr) {
 /// Returns a boolean indicating whether the instruction was patched, and the offset to advance past
 /// whatever is at the current code pointer.
 static std::pair<bool, u64> TryPatch(u8* code, PatchModule* module, bool allow_trampoline = true) {
-    ZydisDecodedInstruction instruction;
-    ZydisDecodedOperand operands[ZYDIS_MAX_OPERAND_COUNT];
-    const auto status = Common::Decoder::Instance()->decodeInstruction(instruction, operands, code,
-                                                                       module->end - code);
-    if (!ZYAN_SUCCESS(status)) {
+    x64_insn_t instruction;
+    x64_operand_t operands[X64_MAX_OPERANDS];
+    if (!DecodeInstruction(code, module->end - code, instruction, operands)) {
         return std::make_pair(false, 1);
     }
 
@@ -908,15 +904,15 @@ static std::pair<bool, u64> TryPatch(u8* code, PatchModule* module, bool allow_t
             if (patch_info.filter(operands)) {
                 auto& patch_gen = module->patch_gen;
 
-                if (needs_trampoline && instruction.length < NearJumpSize) {
+                if (needs_trampoline && instruction.len < NearJumpSize) {
                     // Trampoline is needed but instruction is too short to patch.
                     // Return false and length to signal to AOT compilation that this instruction
                     // should be skipped and handled at runtime.
-                    return std::make_pair(false, instruction.length);
+                    return std::make_pair(false, instruction.len);
                 }
 
                 if (needs_trampoline && (!allow_trampoline || module->trampoline_exhausted)) {
-                    return std::make_pair(false, instruction.length);
+                    return std::make_pair(false, instruction.len);
                 }
 
                 // Move to the current code position.
@@ -930,11 +926,11 @@ static std::pair<bool, u64> TryPatch(u8* code, PatchModule* module, bool allow_t
                     patch_info.generator(code, instruction, operands, &trampoline_gen);
 
                     // Return to the following instruction at the end of the trampoline.
-                    x64_jmp(&trampoline_gen, reinterpret_cast<u64>(code + instruction.length),
+                    x64_jmp(&trampoline_gen, reinterpret_cast<u64>(code + instruction.len),
                             X64_JMP_AUTO);
                     if (trampoline_gen.error) {
                         TrampolineFull(module, trampoline_offset);
-                        return std::make_pair(false, instruction.length);
+                        return std::make_pair(false, instruction.len);
                     }
 
                     // Replace instruction with near jump to the trampoline.
@@ -947,24 +943,24 @@ static std::pair<bool, u64> TryPatch(u8* code, PatchModule* module, bool allow_t
 
                 const auto patch_size = x64_curr(&patch_gen) - code;
                 if (patch_size > 0) {
-                    ASSERT_MSG(instruction.length >= patch_size,
+                    ASSERT_MSG(instruction.len >= patch_size,
                                "Instruction {} with length {} is too short to replace at: {}",
-                               ZydisMnemonicGetString(instruction.mnemonic), instruction.length,
+                               x64_mnemonic_name(instruction.mnemonic), instruction.len,
                                fmt::ptr(code));
 
                     // Fill remaining space with nops.
-                    x64_nop(&patch_gen, instruction.length - patch_size);
+                    x64_nop(&patch_gen, instruction.len - patch_size);
 
                     module->patched.insert(code);
                     LOG_DEBUG(Core, "Patched instruction '{}' at: {}",
-                              ZydisMnemonicGetString(instruction.mnemonic), fmt::ptr(code));
-                    return std::make_pair(true, instruction.length);
+                              x64_mnemonic_name(instruction.mnemonic), fmt::ptr(code));
+                    return std::make_pair(true, instruction.len);
                 }
             }
         }
     }
 
-    return std::make_pair(false, instruction.length);
+    return std::make_pair(false, instruction.len);
 }
 
 static bool Is4ByteExtrqOrInsertq(void* code_address) {
@@ -1040,27 +1036,21 @@ static void IncrementRip(void* ctx, u64 length) {
 }
 
 static bool TryExecuteIllegalInstruction(void* ctx, void* code_address) {
-    // We need to decode the instruction to find out what it is. Normally we'd use a fully fleshed
-    // out decoder like Zydis, however Zydis does a bunch of stuff that impact performance that we
-    // don't care about. We can get information about the instruction a lot faster by writing a mini
-    // decoder here, since we know it is definitely an extrq or an insertq. If for some reason we
-    // need to interpret more instructions in the future (I don't see why we would), we can revert
-    // to using Zydis.
-    ZydisMnemonic mnemonic;
+    // We need to decode the instruction to find out what it is. It is definitely an extrq or an
+    // insertq, so a mini decoder here tells them apart faster than the full one does.
+    u16 mnemonic;
     u8* bytes = (u8*)code_address;
     if (bytes[0] == 0x66) {
-        mnemonic = ZYDIS_MNEMONIC_EXTRQ;
+        mnemonic = X64_MN_EXTRQ;
     } else if (bytes[0] == 0xF2) {
-        mnemonic = ZYDIS_MNEMONIC_INSERTQ;
+        mnemonic = X64_MN_INSERTQ;
     } else {
-        ZydisDecodedInstruction instruction;
-        ZydisDecodedOperand operands[ZYDIS_MAX_OPERAND_COUNT];
-        const auto status =
-            Common::Decoder::Instance()->decodeInstruction(instruction, operands, code_address);
+        x64_insn_t instruction;
+        x64_operand_t operands[X64_MAX_OPERANDS];
+        const bool decoded = DecodeInstruction(code_address, 15, instruction, operands);
         LOG_ERROR(Core, "Unhandled illegal instruction at code address {}: {}",
                   fmt::ptr(code_address),
-                  ZYAN_SUCCESS(status) ? ZydisMnemonicGetString(instruction.mnemonic)
-                                       : "Failed to decode");
+                  decoded ? x64_mnemonic_name(instruction.mnemonic) : "Failed to decode");
         return false;
     }
 
@@ -1079,7 +1069,7 @@ static bool TryExecuteIllegalInstruction(void* ctx, void* code_address) {
     int srcIndex = rm;
 
     switch (mnemonic) {
-    case ZYDIS_MNEMONIC_EXTRQ: {
+    case X64_MN_EXTRQ: {
         const auto dst = GetXmmPointer(ctx, dstIndex);
         const auto src = GetXmmPointer(ctx, srcIndex);
 
@@ -1118,7 +1108,7 @@ static bool TryExecuteIllegalInstruction(void* ctx, void* code_address) {
 
         return true;
     }
-    case ZYDIS_MNEMONIC_INSERTQ: {
+    case X64_MN_INSERTQ: {
         const auto dst = GetXmmPointer(ctx, dstIndex);
         const auto src = GetXmmPointer(ctx, srcIndex);
 
@@ -1233,8 +1223,8 @@ using RedZoneMask = std::bitset<GuestRedZoneSize>;
 
 struct DecodedCodeInstruction {
     uintptr_t address{};
-    ZydisDecodedInstruction instruction{};
-    std::array<ZydisDecodedOperand, ZYDIS_MAX_OPERAND_COUNT> operands{};
+    x64_insn_t instruction{};
+    std::array<x64_operand_t, X64_MAX_OPERANDS> operands{};
     RedZoneMask red_zone_use{};
     RedZoneMask red_zone_def{};
     RedZoneMask red_zone_live{};
@@ -1261,29 +1251,25 @@ struct InstructionRewrite {
     bool protected_indirect_call{};
 };
 
-bool IsStackPointerRegister(ZydisRegister reg) {
-    return reg != ZYDIS_REGISTER_NONE &&
-           ZydisRegisterGetLargestEnclosing(ZYDIS_MACHINE_MODE_LONG_64, reg) == ZYDIS_REGISTER_RSP;
+bool IsStackPointerRegister(unsigned reg) {
+    return reg != X64_REG_NONE && x64_register_largest(reg) == X64_REG_RSP;
 }
 
-bool IsControlFlowTerminator(const ZydisDecodedInstruction& instruction) {
-    return instruction.meta.category == ZYDIS_CATEGORY_UNCOND_BR ||
-           instruction.meta.category == ZYDIS_CATEGORY_RET ||
-           instruction.meta.category == ZYDIS_CATEGORY_INTERRUPT ||
-           instruction.meta.category == ZYDIS_CATEGORY_SYSRET ||
-           instruction.mnemonic == ZYDIS_MNEMONIC_UD2;
+bool IsControlFlowTerminator(const x64_insn_t& instruction) {
+    return instruction.category == X64_CAT_UNCOND_BR || instruction.category == X64_CAT_RET ||
+           instruction.category == X64_CAT_INTERRUPT || instruction.category == X64_CAT_SYSRET ||
+           instruction.mnemonic == X64_MN_UD2;
 }
 
 uintptr_t GetRelativeTarget(const DecodedCodeInstruction& decoded) {
     for (u8 index = 0; index < decoded.instruction.operand_count_visible; ++index) {
         const auto& operand = decoded.operands[index];
-        if (operand.type != ZYDIS_OPERAND_TYPE_IMMEDIATE || !operand.imm.is_relative) {
+        if (operand.type != X64_OPERAND_IMMEDIATE || !operand.imm.is_relative) {
             continue;
         }
 
-        ZyanU64 target{};
-        if (ZYAN_SUCCESS(ZydisCalcAbsoluteAddress(&decoded.instruction, &operand, decoded.address,
-                                                  &target))) {
+        u64 target{};
+        if (x64_operand_address(&decoded.instruction, &operand, decoded.address, &target)) {
             return target;
         }
     }
@@ -1292,37 +1278,34 @@ uintptr_t GetRelativeTarget(const DecodedCodeInstruction& decoded) {
 
 DecodedCodeInstruction DecodeCodeInstruction(uintptr_t address, uintptr_t end) {
     DecodedCodeInstruction decoded{.address = address};
-    const auto status = Common::Decoder::Instance()->decodeInstruction(
-        decoded.instruction, decoded.operands.data(), reinterpret_cast<void*>(address),
-        end - address);
-    if (!ZYAN_SUCCESS(status)) {
-        decoded.instruction.length = 0;
+    if (!DecodeInstruction(reinterpret_cast<void*>(address), end - address, decoded.instruction,
+                           decoded.operands.data())) {
+        decoded.instruction.len = 0;
         return decoded;
     }
 
     for (u8 index = 0; index < decoded.instruction.operand_count; ++index) {
         const auto& operand = decoded.operands[index];
-        if (operand.type == ZYDIS_OPERAND_TYPE_REGISTER) {
-            decoded.uses_stack_pointer |= IsStackPointerRegister(operand.reg.value);
-            if (IsStackPointerRegister(operand.reg.value) &&
-                (operand.actions & ZYDIS_OPERAND_ACTION_MASK_WRITE) != 0 &&
-                decoded.instruction.meta.category != ZYDIS_CATEGORY_CALL &&
-                decoded.instruction.meta.category != ZYDIS_CATEGORY_RET) {
+        if (operand.type == X64_OPERAND_REGISTER) {
+            decoded.uses_stack_pointer |= IsStackPointerRegister(operand.reg);
+            if (IsStackPointerRegister(operand.reg) &&
+                (operand.actions & X64_ACTION_MASK_WRITE) != 0 &&
+                decoded.instruction.category != X64_CAT_CALL &&
+                decoded.instruction.category != X64_CAT_RET) {
                 decoded.changes_stack_pointer = true;
             }
             continue;
         }
-        if (operand.type != ZYDIS_OPERAND_TYPE_MEMORY) {
+        if (operand.type != X64_OPERAND_MEMORY) {
             continue;
         }
 
         const bool stack_relative =
             IsStackPointerRegister(operand.mem.base) || IsStackPointerRegister(operand.mem.index);
         decoded.uses_stack_pointer |= stack_relative;
-        constexpr ZydisOperandActions MemoryAccessMask =
-            ZYDIS_OPERAND_ACTION_MASK_READ | ZYDIS_OPERAND_ACTION_MASK_WRITE;
-        if (decoded.instruction.mnemonic != ZYDIS_MNEMONIC_LEA &&
-            decoded.instruction.mnemonic != ZYDIS_MNEMONIC_NOP && !stack_relative &&
+        constexpr u8 MemoryAccessMask = X64_ACTION_MASK_READ | X64_ACTION_MASK_WRITE;
+        if (decoded.instruction.mnemonic != X64_MN_LEA &&
+            decoded.instruction.mnemonic != X64_MN_NOP && !stack_relative &&
             (operand.actions & MemoryAccessMask) != 0) {
             decoded.accesses_memory = true;
         }
@@ -1330,51 +1313,45 @@ DecodedCodeInstruction DecodeCodeInstruction(uintptr_t address, uintptr_t end) {
 
     if (decoded.changes_stack_pointer) {
         const auto& operands = decoded.operands;
-        if (decoded.instruction.mnemonic == ZYDIS_MNEMONIC_MOV &&
-            operands[0].type == ZYDIS_OPERAND_TYPE_REGISTER &&
-            IsStackPointerRegister(operands[0].reg.value) &&
-            operands[1].type == ZYDIS_OPERAND_TYPE_MEMORY) {
+        if (decoded.instruction.mnemonic == X64_MN_MOV &&
+            operands[0].type == X64_OPERAND_REGISTER && IsStackPointerRegister(operands[0].reg) &&
+            operands[1].type == X64_OPERAND_MEMORY) {
             decoded.replaces_stack_pointer = true;
-        } else if ((decoded.instruction.mnemonic == ZYDIS_MNEMONIC_ADD ||
-                    decoded.instruction.mnemonic == ZYDIS_MNEMONIC_SUB) &&
-                   operands[0].type == ZYDIS_OPERAND_TYPE_REGISTER &&
-                   IsStackPointerRegister(operands[0].reg.value) &&
-                   operands[1].type == ZYDIS_OPERAND_TYPE_IMMEDIATE) {
-            const s64 immediate = operands[1].imm.is_signed
-                                      ? operands[1].imm.value.s
-                                      : static_cast<s64>(operands[1].imm.value.u);
+        } else if ((decoded.instruction.mnemonic == X64_MN_ADD ||
+                    decoded.instruction.mnemonic == X64_MN_SUB) &&
+                   operands[0].type == X64_OPERAND_REGISTER &&
+                   IsStackPointerRegister(operands[0].reg) &&
+                   operands[1].type == X64_OPERAND_IMMEDIATE) {
+            const s64 immediate = static_cast<s64>(operands[1].imm.value); // sign extended
             decoded.stack_pointer_delta =
-                decoded.instruction.mnemonic == ZYDIS_MNEMONIC_ADD ? immediate : -immediate;
-        } else if (decoded.instruction.mnemonic == ZYDIS_MNEMONIC_LEA &&
-                   operands[0].type == ZYDIS_OPERAND_TYPE_REGISTER &&
-                   IsStackPointerRegister(operands[0].reg.value) &&
-                   operands[1].type == ZYDIS_OPERAND_TYPE_MEMORY &&
+                decoded.instruction.mnemonic == X64_MN_ADD ? immediate : -immediate;
+        } else if (decoded.instruction.mnemonic == X64_MN_LEA &&
+                   operands[0].type == X64_OPERAND_REGISTER &&
+                   IsStackPointerRegister(operands[0].reg) &&
+                   operands[1].type == X64_OPERAND_MEMORY &&
                    IsStackPointerRegister(operands[1].mem.base) &&
-                   operands[1].mem.index == ZYDIS_REGISTER_NONE) {
-            decoded.stack_pointer_delta = operands[1].mem.disp.value;
-        } else if (decoded.instruction.mnemonic == ZYDIS_MNEMONIC_PUSH ||
-                   decoded.instruction.mnemonic == ZYDIS_MNEMONIC_PUSHF ||
-                   decoded.instruction.mnemonic == ZYDIS_MNEMONIC_PUSHFD ||
-                   decoded.instruction.mnemonic == ZYDIS_MNEMONIC_PUSHFQ) {
+                   operands[1].mem.index == X64_REG_NONE) {
+            decoded.stack_pointer_delta = operands[1].mem.disp;
+        } else if (decoded.instruction.mnemonic == X64_MN_PUSH ||
+                   decoded.instruction.mnemonic == X64_MN_PUSHF ||
+                   decoded.instruction.mnemonic == X64_MN_PUSHFQ) { // no PUSHFD in long mode
             decoded.stack_pointer_delta = -static_cast<s64>(sizeof(u64));
-        } else if (decoded.instruction.mnemonic == ZYDIS_MNEMONIC_POP ||
-                   decoded.instruction.mnemonic == ZYDIS_MNEMONIC_POPF ||
-                   decoded.instruction.mnemonic == ZYDIS_MNEMONIC_POPFD ||
-                   decoded.instruction.mnemonic == ZYDIS_MNEMONIC_POPFQ) {
+        } else if (decoded.instruction.mnemonic == X64_MN_POP ||
+                   decoded.instruction.mnemonic == X64_MN_POPF ||
+                   decoded.instruction.mnemonic == X64_MN_POPFQ) { // no POPFD in long mode
             decoded.stack_pointer_delta = sizeof(u64);
         }
     }
 
     for (u8 index = 0; index < decoded.instruction.operand_count_visible; ++index) {
         const auto& operand = decoded.operands[index];
-        if (operand.type != ZYDIS_OPERAND_TYPE_MEMORY ||
-            !IsStackPointerRegister(operand.mem.base) || operand.mem.disp.size == 0 ||
-            operand.mem.disp.value >= 0) {
+        if (operand.type != X64_OPERAND_MEMORY || !IsStackPointerRegister(operand.mem.base) ||
+            operand.mem.disp_size == 0 || operand.mem.disp >= 0) {
             continue;
         }
 
         decoded.has_red_zone_operand = true;
-        if (decoded.instruction.mnemonic == ZYDIS_MNEMONIC_LEA) {
+        if (decoded.instruction.mnemonic == X64_MN_LEA) {
             if (decoded.stack_pointer_delta.has_value()) {
                 decoded.has_red_zone_operand = false;
                 continue;
@@ -1383,16 +1360,16 @@ DecodedCodeInstruction DecodeCodeInstruction(uintptr_t address, uintptr_t end) {
             continue;
         }
 
-        const s64 access_start = operand.mem.disp.value;
+        const s64 access_start = operand.mem.disp;
         const s64 access_size = std::max<s64>(operand.size / 8, 1);
         const s64 range_start = std::max(access_start, -static_cast<s64>(GuestRedZoneSize));
         const s64 range_end = std::min(access_start + access_size, static_cast<s64>(0));
         for (s64 offset = range_start; offset < range_end; ++offset) {
             const size_t bit = static_cast<size_t>(offset + static_cast<s64>(GuestRedZoneSize));
-            if ((operand.actions & ZYDIS_OPERAND_ACTION_MASK_READ) != 0) {
+            if ((operand.actions & X64_ACTION_MASK_READ) != 0) {
                 decoded.red_zone_use.set(bit);
             }
-            if ((operand.actions & ZYDIS_OPERAND_ACTION_WRITE) != 0) {
+            if ((operand.actions & X64_ACTION_WRITE) != 0) {
                 decoded.red_zone_def.set(bit);
             }
         }
@@ -1400,19 +1377,17 @@ DecodedCodeInstruction DecodeCodeInstruction(uintptr_t address, uintptr_t end) {
     return decoded;
 }
 
-bool IsSameRegister(ZydisRegister lhs, ZydisRegister rhs) {
-    return lhs != ZYDIS_REGISTER_NONE && rhs != ZYDIS_REGISTER_NONE &&
-           ZydisRegisterGetLargestEnclosing(ZYDIS_MACHINE_MODE_LONG_64, lhs) ==
-               ZydisRegisterGetLargestEnclosing(ZYDIS_MACHINE_MODE_LONG_64, rhs);
+bool IsSameRegister(unsigned lhs, unsigned rhs) {
+    return lhs != X64_REG_NONE && rhs != X64_REG_NONE &&
+           x64_register_largest(lhs) == x64_register_largest(rhs);
 }
 
-bool WritesRegister(const DecodedCodeInstruction& decoded, ZydisRegister reg) {
+bool WritesRegister(const DecodedCodeInstruction& decoded, unsigned reg) {
     return std::ranges::any_of(std::span{decoded.operands}.first(decoded.instruction.operand_count),
-                               [reg](const ZydisDecodedOperand& operand) {
-                                   return operand.type == ZYDIS_OPERAND_TYPE_REGISTER &&
-                                          (operand.actions & ZYDIS_OPERAND_ACTION_MASK_WRITE) !=
-                                              0 &&
-                                          IsSameRegister(operand.reg.value, reg);
+                               [reg](const x64_operand_t& operand) {
+                                   return operand.type == X64_OPERAND_REGISTER &&
+                                          (operand.actions & X64_ACTION_MASK_WRITE) != 0 &&
+                                          IsSameRegister(operand.reg, reg);
                                });
 }
 
@@ -1421,18 +1396,18 @@ std::optional<std::vector<uintptr_t>> ResolveBoundedJumpTable(
     uintptr_t function_end, uintptr_t segment_start, uintptr_t segment_end) {
     const auto branch = function.instructions.find(branch_address);
     if (branch == function.instructions.end() ||
-        branch->second.instruction.mnemonic != ZYDIS_MNEMONIC_JMP ||
-        branch->second.operands[0].type != ZYDIS_OPERAND_TYPE_REGISTER) {
+        branch->second.instruction.mnemonic != X64_MN_JMP ||
+        branch->second.operands[0].type != X64_OPERAND_REGISTER) {
         return std::nullopt;
     }
-    const ZydisRegister target_reg = branch->second.operands[0].reg.value;
+    const unsigned target_reg = branch->second.operands[0].reg;
 
     const auto previous_contiguous = [&function](auto instruction) {
         if (instruction == function.instructions.begin()) {
             return function.instructions.end();
         }
         const auto previous = std::prev(instruction);
-        return previous->first + previous->second.instruction.length == instruction->first
+        return previous->first + previous->second.instruction.len == instruction->first
                    ? previous
                    : function.instructions.end();
     };
@@ -1446,10 +1421,10 @@ std::optional<std::vector<uintptr_t>> ResolveBoundedJumpTable(
             break;
         }
         const auto& decoded = candidate->second;
-        if (decoded.instruction.mnemonic == ZYDIS_MNEMONIC_ADD &&
-            decoded.operands[0].type == ZYDIS_OPERAND_TYPE_REGISTER &&
-            IsSameRegister(decoded.operands[0].reg.value, target_reg) &&
-            decoded.operands[1].type == ZYDIS_OPERAND_TYPE_REGISTER) {
+        if (decoded.instruction.mnemonic == X64_MN_ADD &&
+            decoded.operands[0].type == X64_OPERAND_REGISTER &&
+            IsSameRegister(decoded.operands[0].reg, target_reg) &&
+            decoded.operands[1].type == X64_OPERAND_REGISTER) {
             add = candidate;
             break;
         }
@@ -1461,20 +1436,19 @@ std::optional<std::vector<uintptr_t>> ResolveBoundedJumpTable(
     if (add == function.instructions.end()) {
         return std::nullopt;
     }
-    const ZydisRegister table_reg = add->second.operands[1].reg.value;
+    const unsigned table_reg = add->second.operands[1].reg;
 
     const auto load = previous_contiguous(add);
-    if (load == function.instructions.end() ||
-        load->second.instruction.mnemonic != ZYDIS_MNEMONIC_MOVSXD ||
-        load->second.operands[0].type != ZYDIS_OPERAND_TYPE_REGISTER ||
-        !IsSameRegister(load->second.operands[0].reg.value, target_reg) ||
-        load->second.operands[1].type != ZYDIS_OPERAND_TYPE_MEMORY ||
+    if (load == function.instructions.end() || load->second.instruction.mnemonic != X64_MN_MOVSXD ||
+        load->second.operands[0].type != X64_OPERAND_REGISTER ||
+        !IsSameRegister(load->second.operands[0].reg, target_reg) ||
+        load->second.operands[1].type != X64_OPERAND_MEMORY ||
         !IsSameRegister(load->second.operands[1].mem.base, table_reg) ||
-        load->second.operands[1].mem.index == ZYDIS_REGISTER_NONE ||
+        load->second.operands[1].mem.index == X64_REG_NONE ||
         load->second.operands[1].mem.scale != sizeof(s32)) {
         return std::nullopt;
     }
-    const ZydisRegister index_reg = load->second.operands[1].mem.index;
+    const unsigned index_reg = load->second.operands[1].mem.index;
 
     constexpr size_t MaxPatternInstructions = 64;
     std::optional<size_t> table_size;
@@ -1486,29 +1460,27 @@ std::optional<std::vector<uintptr_t>> ResolveBoundedJumpTable(
             break;
         }
         const auto& decoded = cursor->second;
-        if (decoded.instruction.mnemonic == ZYDIS_MNEMONIC_CMP &&
-            decoded.operands[0].type == ZYDIS_OPERAND_TYPE_REGISTER &&
-            IsSameRegister(decoded.operands[0].reg.value, index_reg) &&
-            decoded.operands[1].type == ZYDIS_OPERAND_TYPE_IMMEDIATE) {
-            const uintptr_t next_address = decoded.address + decoded.instruction.length;
+        if (decoded.instruction.mnemonic == X64_MN_CMP &&
+            decoded.operands[0].type == X64_OPERAND_REGISTER &&
+            IsSameRegister(decoded.operands[0].reg, index_reg) &&
+            decoded.operands[1].type == X64_OPERAND_IMMEDIATE) {
+            const uintptr_t next_address = decoded.address + decoded.instruction.len;
             const auto bounds_branch = function.instructions.find(next_address);
             if (bounds_branch == function.instructions.end()) {
                 return std::nullopt;
             }
-            const s64 bound = decoded.operands[1].imm.is_signed
-                                  ? decoded.operands[1].imm.value.s
-                                  : static_cast<s64>(decoded.operands[1].imm.value.u);
+            const s64 bound = static_cast<s64>(decoded.operands[1].imm.value); // sign extended
             if (bound < 0) {
                 return std::nullopt;
             }
-            if (bounds_branch->second.instruction.mnemonic == ZYDIS_MNEMONIC_JNBE) {
+            if (bounds_branch->second.instruction.mnemonic == X64_MN_JNBE) {
                 table_size = static_cast<size_t>(bound) + 1;
-            } else if (bounds_branch->second.instruction.mnemonic == ZYDIS_MNEMONIC_JNB) {
+            } else if (bounds_branch->second.instruction.mnemonic == X64_MN_JNB) {
                 table_size = static_cast<size_t>(bound);
             } else {
                 return std::nullopt;
             }
-            guarded_path_start = next_address + bounds_branch->second.instruction.length;
+            guarded_path_start = next_address + bounds_branch->second.instruction.len;
             break;
         }
         if (WritesRegister(decoded, index_reg)) {
@@ -1526,15 +1498,15 @@ std::optional<std::vector<uintptr_t>> ResolveBoundedJumpTable(
 
     const auto decode_table_address =
         [table_reg](const DecodedCodeInstruction& decoded) -> std::optional<uintptr_t> {
-        if (decoded.instruction.mnemonic != ZYDIS_MNEMONIC_LEA ||
-            decoded.operands[0].type != ZYDIS_OPERAND_TYPE_REGISTER ||
-            !IsSameRegister(decoded.operands[0].reg.value, table_reg) ||
-            decoded.operands[1].type != ZYDIS_OPERAND_TYPE_MEMORY) {
+        if (decoded.instruction.mnemonic != X64_MN_LEA ||
+            decoded.operands[0].type != X64_OPERAND_REGISTER ||
+            !IsSameRegister(decoded.operands[0].reg, table_reg) ||
+            decoded.operands[1].type != X64_OPERAND_MEMORY) {
             return std::nullopt;
         }
-        ZyanU64 absolute_address{};
-        if (!ZYAN_SUCCESS(ZydisCalcAbsoluteAddress(&decoded.instruction, &decoded.operands[1],
-                                                   decoded.address, &absolute_address))) {
+        u64 absolute_address{};
+        if (!x64_operand_address(&decoded.instruction, &decoded.operands[1], decoded.address,
+                                 &absolute_address)) {
             return std::nullopt;
         }
         return absolute_address;
@@ -1623,7 +1595,7 @@ DecodedFunction DecodeFunction(uintptr_t function_start, uintptr_t function_end,
                    !visited.contains(address)) {
                 visited.insert(address);
                 auto decoded = DecodeCodeInstruction(address, function_end);
-                if (decoded.instruction.length == 0) {
+                if (decoded.instruction.len == 0) {
                     break;
                 }
 
@@ -1632,22 +1604,22 @@ DecodedFunction DecodeFunction(uintptr_t function_start, uintptr_t function_end,
                     decoded.has_unmodeled_red_zone_operand ||
                     (decoded.changes_stack_pointer && !decoded.stack_pointer_delta.has_value());
 
-                const uintptr_t next_address = address + decoded.instruction.length;
+                const uintptr_t next_address = address + decoded.instruction.len;
                 const uintptr_t branch_target = GetRelativeTarget(decoded);
                 if (branch_target >= function_start && branch_target < function_end) {
                     function.branch_targets.insert(branch_target);
                 }
                 function.instructions.emplace(address, decoded);
 
-                if (decoded.instruction.meta.category == ZYDIS_CATEGORY_COND_BR) {
+                if (decoded.instruction.category == X64_CAT_COND_BR) {
                     if (branch_target >= function_start && branch_target < function_end) {
                         blocks.push_back(branch_target);
                     }
                 } else if (IsControlFlowTerminator(decoded.instruction)) {
-                    if (decoded.instruction.meta.category == ZYDIS_CATEGORY_UNCOND_BR &&
+                    if (decoded.instruction.category == X64_CAT_UNCOND_BR &&
                         branch_target >= function_start && branch_target < function_end) {
                         blocks.push_back(branch_target);
-                    } else if (decoded.instruction.meta.category == ZYDIS_CATEGORY_UNCOND_BR &&
+                    } else if (decoded.instruction.category == X64_CAT_UNCOND_BR &&
                                branch_target == 0) {
                         indirect_branches.insert(address);
                     }
@@ -1736,12 +1708,12 @@ void AnalyzeRedZoneLiveness(DecodedFunction& function) {
                 }
             };
 
-            const uintptr_t next_address = decoded.address + decoded.instruction.length;
+            const uintptr_t next_address = decoded.address + decoded.instruction.len;
             const uintptr_t branch_target = GetRelativeTarget(decoded);
-            if (decoded.instruction.meta.category == ZYDIS_CATEGORY_COND_BR) {
+            if (decoded.instruction.category == X64_CAT_COND_BR) {
                 add_successor(next_address);
                 add_successor(branch_target);
-            } else if (decoded.instruction.meta.category == ZYDIS_CATEGORY_UNCOND_BR) {
+            } else if (decoded.instruction.category == X64_CAT_UNCOND_BR) {
                 add_successor(branch_target);
             } else if (!IsControlFlowTerminator(decoded.instruction)) {
                 add_successor(next_address);
@@ -1766,88 +1738,51 @@ void AnalyzeRedZoneLiveness(DecodedFunction& function) {
 }
 
 bool EncodeRelocatedInstruction(const DecodedCodeInstruction& decoded, x64_code_t* generator) {
-    ZydisEncoderRequest request;
-    if (!ZYAN_SUCCESS(ZydisEncoderDecodedInstructionToEncoderRequest(
-            &decoded.instruction, decoded.operands.data(),
-            decoded.instruction.operand_count_visible, &request))) {
-        return false;
-    }
-
-    for (u8 index = 0; index < decoded.instruction.operand_count_visible; ++index) {
-        const auto& operand = decoded.operands[index];
-        if (operand.type == ZYDIS_OPERAND_TYPE_IMMEDIATE && operand.imm.is_relative) {
-            ZyanU64 absolute_address{};
-            if (!ZYAN_SUCCESS(ZydisCalcAbsoluteAddress(&decoded.instruction, &operand,
-                                                       decoded.address, &absolute_address))) {
-                return false;
-            }
-            request.operands[index].imm.u = absolute_address;
-        } else if (operand.type == ZYDIS_OPERAND_TYPE_MEMORY &&
-                   (operand.mem.base == ZYDIS_REGISTER_RIP ||
-                    operand.mem.base == ZYDIS_REGISTER_EIP)) {
-            ZyanU64 absolute_address{};
-            if (!ZYAN_SUCCESS(ZydisCalcAbsoluteAddress(&decoded.instruction, &operand,
-                                                       decoded.address, &absolute_address))) {
-                return false;
-            }
-            request.operands[index].mem.displacement = static_cast<ZyanI64>(absolute_address);
-        }
-    }
-
-    std::array<u8, ZYDIS_MAX_INSTRUCTION_LENGTH> encoded{};
-    ZyanUSize encoded_size = encoded.size();
-    if (!ZYAN_SUCCESS(ZydisEncoderEncodeInstructionAbsolute(
-            &request, encoded.data(), &encoded_size,
-            reinterpret_cast<ZyanU64>(x64_curr(generator))))) {
-        return false;
-    }
-    x64_db(generator, encoded.data(), encoded_size);
-    return true;
+    // The instruction's own bytes; a relative branch or rip-relative operand still reaching its
+    // target from the trampoline
+    return x64_relocate(generator, reinterpret_cast<const u8*>(decoded.address),
+                        &decoded.instruction, decoded.address) != 0;
 }
 
 bool GenerateProtectedIndirectCall(const DecodedCodeInstruction& decoded, x64_code_t* generator) {
-    ASSERT(decoded.instruction.meta.category == ZYDIS_CATEGORY_CALL);
+    ASSERT(decoded.instruction.category == X64_CAT_CALL);
     const auto& target = decoded.operands[0];
-    ASSERT(target.type == ZYDIS_OPERAND_TYPE_MEMORY && target.size == sizeof(uintptr_t) * CHAR_BIT);
+    ASSERT(target.type == X64_OPERAND_MEMORY && target.size == sizeof(uintptr_t) * CHAR_BIT);
 
-    ZydisEncoderRequest request{};
-    request.machine_mode = ZYDIS_MACHINE_MODE_LONG_64;
-    request.mnemonic = ZYDIS_MNEMONIC_MOV;
-    request.operand_count = 2;
-    request.operands[0].type = ZYDIS_OPERAND_TYPE_REGISTER;
-    request.operands[0].reg.value = ZYDIS_REGISTER_R11;
-
-    ZydisEncoderRequest original_request{};
-    if (!ZYAN_SUCCESS(ZydisEncoderDecodedInstructionToEncoderRequest(
-            &decoded.instruction, decoded.operands.data(),
-            decoded.instruction.operand_count_visible, &original_request))) {
-        return false;
-    }
-    request.prefixes = original_request.prefixes & ZYDIS_ATTRIB_HAS_SEGMENT;
-    request.address_size_hint = original_request.address_size_hint;
-    request.operands[1] = original_request.operands[0];
-    request.operands[1].mem.size = sizeof(uintptr_t);
-
-    if (target.mem.base == ZYDIS_REGISTER_RIP || target.mem.base == ZYDIS_REGISTER_EIP) {
-        ZyanU64 absolute_address{};
-        if (!ZYAN_SUCCESS(ZydisCalcAbsoluteAddress(&decoded.instruction, &target, decoded.address,
-                                                   &absolute_address))) {
+    // mov r11, the call's memory operand (its segment, address size and target kept)
+    x64_mem_t source;
+    if (target.mem.base == X64_REG_RIP || target.mem.base == X64_REG_EIP) {
+        u64 absolute_address{};
+        if (target.mem.base == X64_REG_EIP ||
+            !x64_operand_address(&decoded.instruction, &target, decoded.address,
+                                 &absolute_address)) {
             return false;
         }
-        request.operands[1].mem.displacement = static_cast<ZyanI64>(absolute_address);
+        source = x64_mrip(absolute_address);
+    } else {
+        const auto gpr = [](unsigned reg) {
+            return reg == X64_REG_NONE ? -1
+                                       : static_cast<int>(x64_register_largest(reg) - X64_REG_RAX);
+        };
+        source = x64_mi(gpr(target.mem.base), gpr(target.mem.index),
+                        target.mem.scale ? target.mem.scale : 1,
+                        target.mem.disp_size ? static_cast<s32>(target.mem.disp) : 0);
+        if (target.mem.base == X64_REG_NONE && target.mem.index == X64_REG_NONE) {
+            source = x64_mabs(static_cast<s32>(target.mem.disp));
+        }
+    }
+    if (target.mem.segment == X64_REG_FS || target.mem.segment == X64_REG_GS) {
+        source.seg = target.mem.segment == X64_REG_FS ? X64_SEG_FS : X64_SEG_GS;
     }
 
     x64_lea(generator, X64_RSP, x64_m(X64_RSP, -static_cast<s32>(GuestRedZoneSize)));
     x64_push(generator, X64_R11);
 
-    std::array<u8, ZYDIS_MAX_INSTRUCTION_LENGTH> encoded{};
-    ZyanUSize encoded_size = encoded.size();
-    if (!ZYAN_SUCCESS(ZydisEncoderEncodeInstructionAbsolute(
-            &request, encoded.data(), &encoded_size,
-            reinterpret_cast<ZyanU64>(x64_curr(generator))))) {
-        return false;
+    if (decoded.instruction.address_width == 32) {
+        static const u8 address_size = 0x67;
+        x64_db(generator, &address_size, 1);
     }
-    x64_db(generator, encoded.data(), encoded_size);
+    x64_mov_rm(generator, 64, X64_R11, source);
 
     x64_xchg_rm(generator, X64_R11, x64_m(X64_RSP, 0));
     x64_lea(generator, X64_RSP,
@@ -1856,8 +1791,8 @@ bool GenerateProtectedIndirectCall(const DecodedCodeInstruction& decoded, x64_co
     return true;
 }
 
-bool IsInPlaceMemoryPatch(ZydisMnemonic mnemonic) {
-    return mnemonic == ZYDIS_MNEMONIC_MOVNTSS || mnemonic == ZYDIS_MNEMONIC_MOVNTSD;
+bool IsInPlaceMemoryPatch(u16 mnemonic) {
+    return mnemonic == X64_MN_MOVNTSS || mnemonic == X64_MN_MOVNTSD;
 }
 
 const PatchInfo* FindMatchingPatch(const DecodedCodeInstruction& decoded) {
@@ -1919,7 +1854,7 @@ static RedZonePatchResult PatchSegmentStatically(u64 segment_addr, u64 segment_s
             if (covered_ranges != nullptr) {
                 // Functions and their instructions are visited in address order.
                 for (const auto& [address, decoded] : function.instructions) {
-                    const uintptr_t end = address + decoded.instruction.length;
+                    const uintptr_t end = address + decoded.instruction.len;
                     if (!covered_ranges->empty() && address <= covered_ranges->back().second) {
                         covered_ranges->back().second =
                             std::max(covered_ranges->back().second, end);
@@ -1960,11 +1895,11 @@ static RedZonePatchResult PatchSegmentStatically(u64 segment_addr, u64 segment_s
                         continue;
                     }
                     ++result.memory_instruction_count;
-                    if (decoded.instruction.length < NearJumpSize) {
+                    if (decoded.instruction.len < NearJumpSize) {
                         ++result.short_memory_instruction_count;
                     }
-                    if (decoded.instruction.meta.category == ZYDIS_CATEGORY_CALL &&
-                        decoded.operands[0].type == ZYDIS_OPERAND_TYPE_MEMORY &&
+                    if (decoded.instruction.category == X64_CAT_CALL &&
+                        decoded.operands[0].type == X64_OPERAND_MEMORY &&
                         decoded.operands[0].size == sizeof(uintptr_t) * CHAR_BIT &&
                         !IsStackPointerRegister(decoded.operands[0].mem.base) &&
                         !IsStackPointerRegister(decoded.operands[0].mem.index)) {
@@ -1978,7 +1913,7 @@ static RedZonePatchResult PatchSegmentStatically(u64 segment_addr, u64 segment_s
                         ++result.stack_dependent_memory_instruction_count;
                         continue;
                     }
-                    if (decoded.instruction.meta.category == ZYDIS_CATEGORY_CALL ||
+                    if (decoded.instruction.category == X64_CAT_CALL ||
                         IsControlFlowTerminator(decoded.instruction)) {
                         ++result.control_flow_memory_instruction_count;
                         continue;
@@ -2085,8 +2020,8 @@ static RedZonePatchResult PatchSegmentStatically(u64 segment_addr, u64 segment_s
 
                         const auto& decoded = decoded_it->second;
                         span.instructions.push_back(&decoded);
-                        span.patch_size += decoded.instruction.length;
-                        span.continuation += decoded.instruction.length;
+                        span.patch_size += decoded.instruction.len;
+                        span.continuation += decoded.instruction.len;
                         if (span.patch_size < NearJumpSize &&
                             IsControlFlowTerminator(decoded.instruction)) {
                             return std::nullopt;
@@ -2101,8 +2036,8 @@ static RedZonePatchResult PatchSegmentStatically(u64 segment_addr, u64 segment_s
                     RelocationSpan span{
                         .instructions = {&site_instruction->second},
                         .patch_start = site,
-                        .continuation = site + site_instruction->second.instruction.length,
-                        .patch_size = site_instruction->second.instruction.length,
+                        .continuation = site + site_instruction->second.instruction.len,
+                        .patch_size = site_instruction->second.instruction.len,
                     };
 
                     while (span.patch_size < NearJumpSize) {
@@ -2115,7 +2050,7 @@ static RedZonePatchResult PatchSegmentStatically(u64 segment_addr, u64 segment_s
 
                         const auto previous = std::prev(previous_end);
                         const auto& decoded = previous->second;
-                        if (previous->first + decoded.instruction.length != span.patch_start ||
+                        if (previous->first + decoded.instruction.len != span.patch_start ||
                             previous->first < covered_until ||
                             IsControlFlowTerminator(decoded.instruction)) {
                             return std::nullopt;
@@ -2123,7 +2058,7 @@ static RedZonePatchResult PatchSegmentStatically(u64 segment_addr, u64 segment_s
 
                         span.instructions.insert(span.instructions.begin(), &decoded);
                         span.patch_start = previous->first;
-                        span.patch_size += decoded.instruction.length;
+                        span.patch_size += decoded.instruction.len;
                     }
                     return span;
                 };
@@ -2132,7 +2067,7 @@ static RedZonePatchResult PatchSegmentStatically(u64 segment_addr, u64 segment_s
                 std::optional<size_t> trampoline_offset;
                 const auto& site_instruction = function.instructions.at(site);
                 const bool can_relocate_neighbors = !function.has_indirect_branch;
-                if (can_relocate_neighbors || site_instruction.instruction.length >= NearJumpSize) {
+                if (can_relocate_neighbors || site_instruction.instruction.len >= NearJumpSize) {
                     auto forward_span = collect_forward_span();
                     if (forward_span) {
                         trampoline_offset = emit_span(*forward_span);
@@ -2197,7 +2132,7 @@ static RedZonePatchResult PatchSegmentStatically(u64 segment_addr, u64 segment_s
                 const auto site_instruction = function.instructions.find(site);
                 ASSERT(site_instruction != function.instructions.end());
                 if (function.has_indirect_branch ||
-                    site_instruction->second.instruction.length < ShortJumpSize) {
+                    site_instruction->second.instruction.len < ShortJumpSize) {
                     record_unsupported(site);
                     continue;
                 }
@@ -2205,8 +2140,8 @@ static RedZonePatchResult PatchSegmentStatically(u64 segment_addr, u64 segment_s
                 const RelocationSpan site_span{
                     .instructions = {&site_instruction->second},
                     .patch_start = site,
-                    .continuation = site + site_instruction->second.instruction.length,
-                    .patch_size = site_instruction->second.instruction.length,
+                    .continuation = site + site_instruction->second.instruction.len,
+                    .patch_size = site_instruction->second.instruction.len,
                 };
                 const size_t trampoline_start = module->trampoline_gen.size;
                 const auto site_trampoline_offset = emit_span(site_span);
@@ -2270,8 +2205,8 @@ static RedZonePatchResult PatchSegmentStatically(u64 segment_addr, u64 segment_s
                                 break;
                             }
                             span.instructions.push_back(&instruction->second);
-                            span.patch_size += instruction->second.instruction.length;
-                            span.continuation += instruction->second.instruction.length;
+                            span.patch_size += instruction->second.instruction.len;
+                            span.continuation += instruction->second.instruction.len;
                             if (span.patch_size < NearJumpSize * 2 &&
                                 IsControlFlowTerminator(instruction->second.instruction)) {
                                 span.instructions.clear();
@@ -2484,7 +2419,7 @@ static void PatchUncoveredCpuInstructions(u64 segment_addr, const AddressRanges&
                 }
                 const auto decoded =
                     DecodeCodeInstruction(reinterpret_cast<uintptr_t>(start), gap_end);
-                if (decoded.instruction.length == 0 || FindMatchingPatch(decoded) == nullptr) {
+                if (decoded.instruction.len == 0 || FindMatchingPatch(decoded) == nullptr) {
                     continue;
                 }
                 if (TryPatch(start, module).first) {
@@ -2492,7 +2427,7 @@ static void PatchUncoveredCpuInstructions(u64 segment_addr, const AddressRanges&
                 } else if (!IsInPlaceMemoryPatch(decoded.instruction.mnemonic)) {
                     ++result.uncovered_unsupported_cpu_patch_instruction_count;
                 }
-                address = decoded.address + decoded.instruction.length - 1;
+                address = decoded.address + decoded.instruction.len - 1;
             }
         };
 
@@ -2546,16 +2481,15 @@ static bool PatchesIllegalInstructionHandler(void* context) {
         return TryExecuteIllegalInstruction(context, code_address);
     } else {
         if (!TryPatchJit(code_address)) {
-            ZydisDecodedInstruction instruction;
-            ZydisDecodedOperand operands[ZYDIS_MAX_OPERAND_COUNT];
-            const auto status =
-                Common::Decoder::Instance()->decodeInstruction(instruction, operands, code_address);
-            if (ZYAN_SUCCESS(status)) {
-                const auto disassembled = Common::Decoder::Instance()->disassembleInst(
-                    instruction, operands, std::bit_cast<u64>(code_address));
+            x64_insn_t instruction;
+            x64_operand_t operands[X64_MAX_OPERANDS];
+            if (DecodeInstruction(code_address, 15, instruction, operands)) {
+                char disassembled[256];
+                x64_format(&instruction, operands, std::bit_cast<u64>(code_address), disassembled,
+                           sizeof(disassembled));
                 LOG_ERROR(Core, "Failed to patch address {:x} -- mnemonic: {}, instruction: {}",
                           reinterpret_cast<u64>(code_address),
-                          ZydisMnemonicGetString(instruction.mnemonic), disassembled);
+                          x64_mnemonic_name(instruction.mnemonic), disassembled);
             } else {
                 LOG_ERROR(Core, "Failed to patch address {:x} -- mnemonic: (failed to decode)",
                           reinterpret_cast<u64>(code_address));
