@@ -68,13 +68,15 @@ struct Program {
         : info{stage, l_stage, params} {}
 
     void AddPermut(vk::ShaderModule module, Shader::StageSpecialization&& spec) {
-        modules.emplace_back(module, std::move(spec));
+        modules.emplace_back(module, static_cast<Shader::StageSpecialization&&>(spec));
     }
 
     void InsertPermut(vk::ShaderModule module, Shader::StageSpecialization&& spec, size_t perm_idx,
                       bool from_cache = false) {
-        modules.resize(std::max(modules.size(), perm_idx + 1)); // <-- beware of realloc
-        modules[perm_idx] = {module, std::move(spec), from_cache};
+        if (modules.size() < perm_idx + 1) {
+            modules.resize(perm_idx + 1); // <-- beware of realloc
+        }
+        modules[perm_idx] = {module, static_cast<Shader::StageSpecialization&&>(spec), from_cache};
     }
 };
 
@@ -110,14 +112,24 @@ public:
 
     const ComputePipeline* GetComputePipeline();
 
-    using Result = std::tuple<const Shader::Info*, vk::ShaderModule, u64>;
+    /// A stage's program: its description, the module of its permutation and the permutation's
+    /// hash; all null while it is being compiled
+    struct Result {
+        const Shader::Info* info;
+        vk::ShaderModule module;
+        u64 hash;
+    };
     Result GetProgram(Shader::HwStage hw_stage, Shader::SwStage sw_stage,
                       const Shader::ShaderParams& params, Shader::Backend::Bindings& binding);
 
-    static std::string GetShaderName(Shader::HwStage stage, u64 hash,
-                                     std::optional<size_t> perm = {});
+    /// Room enough for GetShaderName
+    static constexpr size_t ShaderNameSize = 48;
+    /// A shader's name (its stage and hash, and the permutation where @perm is not negative)
+    /// into @out
+    static void GetShaderName(char* out, size_t size, Shader::HwStage stage, u64 hash,
+                              int perm = -1);
 
-    auto& GetProfile() const {
+    const Shader::Profile& GetProfile() const {
         return profile;
     }
 
@@ -128,9 +140,19 @@ private:
     bool RefreshComputeKey();
 
     void DumpShader(std::span<const u32> code, u64 hash, Shader::HwStage stage, size_t perm_idx,
-                    std::string_view ext);
+                    const char* ext);
     std::optional<Common::FS::FileView> GetShaderPatch(u64 hash, Shader::HwStage stage,
-                                                       size_t perm_idx, std::string_view ext);
+                                                       size_t perm_idx, const char* ext);
+
+    /// Asynchronous compilation: whether a draw whose pipeline is not ready is left out;
+    /// worked out once a draw (@skip starts at -1)
+    bool SkipUnready(int& skip, MaySkip may_skip, void* ctx) const;
+    /// Binds a stage's program for a graphics pipeline: false where the stage is off or its
+    /// program is being compiled
+    bool BindStage(Shader::Backend::Bindings& binding, Shader::HwStage stage_in,
+                   Shader::SwStage stage_out);
+    /// A stage's program being compiled
+    Result PendingResult();
     /// The shader patch folder had files in it when the game started
     bool has_shader_patches = false;
     // ---- The compiler thread ----
@@ -140,6 +162,8 @@ private:
     // dispatch always waits, as the game reads back what it writes. Finished jobs come back to
     // the drawing thread, which files them: the tables are only ever touched by that thread.
     struct CompileJob;
+    /// What a CompileJob is for (defined with it in vk_pipeline_cache.cpp)
+    enum class JobKind : u8;
     void CompilerThread();
     void Submit(CompileJob* job);
     /// Files what the compiler thread has finished; true when there was any
@@ -158,6 +182,11 @@ private:
     /// A pipeline the cache gave whose shader turned out to differ from its translation: the
     /// translation is used, the pipelines made with it go, the cache starts again
     void ReplaceCachedPermutation(CompileJob& job);
+    /// A job for a stage's program, with the game's code and user data as the draw has them
+    CompileJob* MakeJob(Shader::HwStage hw_stage, Shader::SwStage sw_stage,
+                        const Shader::ShaderParams& params, const Shader::RuntimeInfo& runtime_info,
+                        const Shader::Backend::Bindings& binding, JobKind kind, size_t perm_idx,
+                        Program* program);
     bool IsPipelinePending(u64 hash) const;
 
     mpsc_stack_t compile_jobs{};
@@ -170,7 +199,8 @@ private:
     /// Asynchronous: a draw whose pipeline is being made is skipped rather than waited for
     bool async_compile = true;
     /// The graphics pipelines being made, by their hash
-    std::array<u64, 256> pending_pipelines{};
+    static constexpr u32 MaxPendingPipelines = 256;
+    u64 pending_pipelines[MaxPendingPipelines]{};
     u32 num_pending_pipelines = 0;
     vk::ShaderModule CompileModule(Shader::Info& info, Shader::RuntimeInfo& runtime_info,
                                    const std::span<const u32>& code, size_t perm_idx,
@@ -207,9 +237,9 @@ private:
             ptr_table_find(&compute_pipelines, key.value, nullptr, nullptr));
     }
     GraphicsPipeline* FindGraphicsPipeline(const GraphicsPipelineKey& key, u64 hash) const;
-    std::array<Shader::RuntimeInfo, MaxShaderStages> runtime_infos{};
-    std::array<const Shader::Info*, MaxShaderStages> infos{};
-    std::array<vk::ShaderModule, MaxShaderStages> modules{};
+    Shader::RuntimeInfo runtime_infos[MaxShaderStages]{};
+    const Shader::Info* infos[MaxShaderStages]{};
+    vk::ShaderModule modules[MaxShaderStages]{};
     Shader::Gcn::FetchShaderData* fetch_shader{};
     GraphicsPipelineKey graphics_key{};
     ComputePipelineKey compute_key{};

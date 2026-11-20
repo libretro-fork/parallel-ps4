@@ -4,6 +4,15 @@ What changed in the libretro core of this fork, newest first. Changes that come 
 
 ## Unreleased
 
+- No `auto` and much less STL in the pipeline cache (`vk_pipeline_cache`).
+  - **Lambdas made functions:** the draw's skip check (`SkipUnready`), binding a stage (`BindStage`), making a job (`MakeJob`), what every stage takes from its program's registers (`BuildCommon`) and the primitive a tessellation hands the geometry stage are functions of their own.
+  - **Jobs:** a compile job's user data, stage copies, runtimes and modules are plain arrays. The fetch shader data a job carries is a value with a flag instead of a `std::optional`, and the program it makes is a plain pointer it deletes, instead of a `std::unique_ptr`.
+  - **Programs:** `GetProgram` returns a small struct instead of a `std::tuple` (no more `std::tie`). A permutation is looked up with a loop instead of `std::ranges::find`.
+  - **Names:** shader names are written into buffers on the stack (`GetShaderName`), with the same text as before, so dumps, patches and kept binaries keep their file names.
+  - **The rest:** the pending pipelines and the stage tables are plain arrays, the pipelines to throw away when a cached shader differs are gathered in a small vector of the core's own, and `memcpy`, `memset` and `memcmp` take the place of the `std::` ones and of `std::copy_n`, `std::exchange`, `std::max` and `std::bit_width`.
+  - **Still STL, for now:** what the shader recompiler, the disk cache and the file system hand over or take (`std::span` of code and SPIR-V, `std::vector` of flattened user data and of blobs, `std::optional` file views, `std::filesystem` paths), and the graphics key's `std::hash`. Each goes when its own file does.
+  - **Unchanged:** the jobs made, what is compiled and when, and the Vulkan calls and arguments.
+  - **Checks:** the Linux and Windows builds pass. Not run in a game yet.
 - No STL or `auto` in the pipeline base and compute pipelines (`vk_pipeline_common`, `vk_compute_pipeline`).
   - **Stages:** a pipeline's stages are a plain array. `GetStages` hands back a pointer and a count instead of a `std::span`, and `SetStages` takes a pointer; the rasterizer and the pipeline cache follow.
   - **Binding:** `BindResources` takes a pointer and a count of descriptor writes instead of a `std::vector`.

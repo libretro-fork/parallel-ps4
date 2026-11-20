@@ -169,8 +169,10 @@ bool PipelineCache::LoadComputePipeline(Serialization::Archive& ar) {
                                          vk::PipelineCache{pipeline_cache}, compute_key, *infos[0],
                                          modules[0], sdata, true));
 
-    infos.fill(nullptr);
-    modules.fill(nullptr);
+    for (u32 i = 0; i < MaxShaderStages; ++i) {
+        infos[i] = nullptr;
+        modules[i] = vk::ShaderModule{};
+    }
 
     return true;
 }
@@ -244,8 +246,10 @@ bool PipelineCache::LoadGraphicsPipeline(Serialization::Archive& ar) {
                                           vk::PipelineCache{pipeline_cache}, infos, runtime_infos,
                                           fetch_shader, modules, sdata, true));
 
-    infos.fill(nullptr);
-    modules.fill(nullptr);
+    for (u32 i = 0; i < MaxShaderStages; ++i) {
+        infos[i] = nullptr;
+        modules[i] = vk::ShaderModule{};
+    }
     fetch_shader = nullptr;
 
     return true;

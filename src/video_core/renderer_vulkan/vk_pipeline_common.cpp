@@ -94,9 +94,9 @@ void Pipeline::GetDebugString(char* out, size_t size) const {
         if (!stage || length >= size) {
             continue;
         }
-        const int written =
-            snprintf(out + length, size - length, "%s%s", length ? "," : "",
-                     PipelineCache::GetShaderName(stage->hw_stage, stage->pgm_hash).c_str());
+        char name[PipelineCache::ShaderNameSize];
+        PipelineCache::GetShaderName(name, sizeof(name), stage->hw_stage, stage->pgm_hash);
+        const int written = snprintf(out + length, size - length, "%s%s", length ? "," : "", name);
         if (written > 0) {
             length += static_cast<size_t>(written);
         }
