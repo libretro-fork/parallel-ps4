@@ -82,6 +82,8 @@ class IOFile final {
 public:
     IOFile();
 
+    /// @path in UTF-8
+    explicit IOFile(const char* path, FileAccessMode mode, FileHint hint = FileHint::None);
     explicit IOFile(const std::filesystem::path& path, FileAccessMode mode,
                     FileHint hint = FileHint::None);
     explicit IOFile(const std::string& path, FileAccessMode mode, FileHint hint = FileHint::None)
@@ -97,8 +99,11 @@ public:
     IOFile(IOFile&& other) noexcept;
     IOFile& operator=(IOFile&& other) noexcept;
 
-    std::filesystem::path GetPath() const {
-        return file_path;
+    std::filesystem::path GetPath() const;
+
+    /// The path it was opened with, in UTF-8; empty when it was not
+    const char* GetPathUTF8() const {
+        return file_path ? file_path : "";
     }
 
     FileAccessMode GetAccessMode() const {
@@ -118,7 +123,8 @@ public:
     /// on Windows, a descriptor elsewhere.
     uintptr_t GetFileMapping();
 
-    /// 0 on success, else an errno value.
+    /// 0 on success, else an errno value. @path in UTF-8.
+    int Open(const char* path, FileAccessMode mode, FileHint hint = FileHint::None);
     int Open(const std::filesystem::path& path, FileAccessMode mode,
              FileHint hint = FileHint::None);
     void Close();
@@ -233,7 +239,8 @@ private:
     size_t WriteBytes(const void* data, size_t size) const;
 
     RFILE* file = nullptr;
-    std::filesystem::path file_path;
+    /// UTF-8, made with the file and freed with it
+    char* file_path = nullptr;
     FileAccessMode file_access_mode{};
     uintptr_t file_mapping = 0;
 };

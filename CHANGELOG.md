@@ -4,6 +4,13 @@ What changed in the libretro core of this fork, newest first. Changes that come 
 
 ## Unreleased
 
+- Files and the core's directories in UTF-8 C strings, the first step off `std::filesystem` (`common/io_file`, `common/path_util`).
+  - **`IOFile`:** takes a UTF-8 C string (`IOFile(const char*, …)`, `Open(const char*, …)`) and keeps its path as one, made with the file and freed with it; `GetPathUTF8` hands it out. The `std::filesystem::path` forms turn the path into UTF-8 once and call those, until their callers move over. A failed open says the error with `strerror` instead of a `std::error_code`, and the moves are written out instead of `std::swap`.
+  - **The core's directories:** made once in a table of UTF-8 paths, joined and created with libretro-common (`fill_pathname_join_special`, `path_mkdir`), instead of a `std::unordered_map` of `std::filesystem::path`s. `GetUserPathUTF8` hands one out; `GetUserPath` still gives the `std::filesystem::path` of it, from the same table.
+  - **Removed, as the core never takes them:** the fallbacks for when the frontend has not given a directory (a portable `user` folder beside the process, `XDG_DATA_HOME`, `~/Library/Application Support`, `%APPDATA%`) and the macOS bundle lookup that went with them. The core's directory is always the one the frontend gives (`system/shadPS4`, set in `libretro/host.cpp` before any path is asked for).
+  - **Unchanged:** where everything is, the folders made, the trophy notice written, and the longest path taken (260 UTF-16 units on Windows, 1024 bytes elsewhere).
+  - **Run:** `path_util.cpp`'s object linked into a small program with a user directory set: every one of the 18 directories made under it with its name, each UTF-8 path the same as its `std::filesystem::path`, and the trophy notice written.
+  - **Checks:** the Linux and Windows builds pass. Not run in a game yet.
 - No STL in the object pools (`common/object_pool.h`), which the shader recompiler makes its instructions, blocks and statements in; `common/slot_array.h`, which nothing used, is gone.
   - **Object pools:** their chunks are plain blocks from `malloc` in a list grown with `realloc`, instead of `std::unique_ptr` arrays in a `std::vector`; objects are made in place with placement `new`. Giving everything back works as before: a full first chunk takes the size of all of them, otherwise it is kept and the others go.
   - **Checked:** 50 rounds of up to 300 objects holding strings in a pool of 16-object chunks, each round given back at once, and a pool destroyed with objects in it, under AddressSanitizer and UndefinedBehaviorSanitizer: every object made right, and every one destroyed once.

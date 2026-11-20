@@ -1,10 +1,11 @@
 // SPDX-FileCopyrightText: Copyright 2024-2026 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
-#include <cstring>
-#include <string_view>
-#include <unordered_map>
+#include <string.h>
 
+#include <compat/strl.h>
+#include <file/file_path.h>
+#include <retro_miscellaneous.h>
 #include <streams/file_stream.h>
 
 #include "common/io_file.h"
@@ -14,145 +15,50 @@
 #include "common/types.h"
 #include "core/file_sys/ifile.h"
 
-#ifdef __APPLE__
-#include <CoreFoundation/CFBundle.h>
-#include <dlfcn.h>
-#include <sys/param.h>
-#endif
-
-#ifndef MAX_PATH
-#ifdef _WIN32
-// This is the maximum number of UTF-16 code units permissible in Windows file paths
-#define MAX_PATH 260
-#include <Shlobj.h>
-#include <windows.h>
-#else
-// This is the maximum number of UTF-8 code units permissible in all other OSes' file paths
-#define MAX_PATH 1024
-#endif
-#endif
-
 namespace Common::FS {
 
 namespace fs = std::filesystem;
 
-#ifdef __APPLE__
-using IsTranslocatedURLFunc = Boolean (*)(CFURLRef path, bool* isTranslocated,
-                                          CFErrorRef* __nullable error);
-using CreateOriginalPathForURLFunc = CFURLRef __nullable (*)(CFURLRef translocatedPath,
-                                                             CFErrorRef* __nullable error);
+namespace {
 
-static CFURLRef UntranslocateBundlePath(const CFURLRef bundle_path) {
-    if (void* security_handle =
-            dlopen("/System/Library/Frameworks/Security.framework/Security", RTLD_LAZY)) {
-        SCOPE_EXIT {
-            dlclose(security_handle);
-        };
+constexpr size_t PathTypeCount = static_cast<size_t>(PathType::LicensesDir) + 1;
 
-        const auto IsTranslocatedURL = reinterpret_cast<IsTranslocatedURLFunc>(
-            dlsym(security_handle, "SecTranslocateIsTranslocatedURL"));
-        const auto CreateOriginalPathForURL = reinterpret_cast<CreateOriginalPathForURLFunc>(
-            dlsym(security_handle, "SecTranslocateCreateOriginalPathForURL"));
+// The libretro core keeps everything under the frontend's system directory (system/shadPS4),
+// set before the first path is asked for (libretro/host.cpp)
+char libretro_user_dir[PATH_MAX_LENGTH];
 
-        bool is_translocated = false;
-        if (IsTranslocatedURL && CreateOriginalPathForURL &&
-            IsTranslocatedURL(bundle_path, &is_translocated, nullptr) && is_translocated) {
-            return CreateOriginalPathForURL(bundle_path, nullptr);
-        }
-    }
-    return nullptr;
+struct UserPathTable {
+    char utf8[PathTypeCount][PATH_MAX_LENGTH];
+    fs::path paths[PathTypeCount];
+};
+
+constexpr const char* SubDirs[PathTypeCount] = {
+    "",           LOG_DIR,    SHADER_DIR,  TEMPDATA_DIR, GAMEDATA_DIR,       SYSMODULES_DIR,
+    DOWNLOAD_DIR, CHEATS_DIR, PATCHES_DIR, METADATA_DIR, CUSTOM_TROPHY,      CUSTOM_CONFIGS,
+    CACHE_DIR,    FONTS_DIR,  TROPHY_DIR,  HOME_DIR,     CUSTOM_MODULES_DIR, LICENSES_DIR,
+};
+
+void SetTableEntry(UserPathTable& table, size_t type, const char* utf8) {
+    strlcpy(table.utf8[type], utf8, sizeof(table.utf8[type]));
+    table.paths[type] = PathFromUTF8String(table.utf8[type]);
 }
 
-static std::optional<std::filesystem::path> GetBundleParentDirectory() {
-    if (CFBundleRef bundle_ref = CFBundleGetMainBundle()) {
-        if (CFURLRef bundle_url_ref = CFBundleCopyBundleURL(bundle_ref)) {
-            SCOPE_EXIT {
-                CFRelease(bundle_url_ref);
-            };
-
-            CFURLRef untranslocated_url_ref = UntranslocateBundlePath(bundle_url_ref);
-            SCOPE_EXIT {
-                if (untranslocated_url_ref) {
-                    CFRelease(untranslocated_url_ref);
-                }
-            };
-
-            char app_bundle_path[MAXPATHLEN];
-            if (CFURLGetFileSystemRepresentation(
-                    untranslocated_url_ref ? untranslocated_url_ref : bundle_url_ref, true,
-                    reinterpret_cast<u8*>(app_bundle_path), sizeof(app_bundle_path))) {
-                std::filesystem::path bundle_path{app_bundle_path};
-                return bundle_path.parent_path();
-            }
-        }
-    }
-    return std::nullopt;
-}
-#endif
-
-// The libretro core keeps everything under the frontend's system directory
-// (system/shadPS4), set before the first path is asked for.
-static std::filesystem::path libretro_user_dir;
-
-void SetLibretroUserDir(const std::filesystem::path& dir) {
-    libretro_user_dir = dir;
-}
-
-static std::unordered_map<PathType, fs::path> MakeUserPaths() {
-    // Try the portable user directory first.
-    auto user_dir = std::filesystem::current_path() / PORTABLE_DIR;
-    if (!libretro_user_dir.empty()) {
-        Common::FS::CreateDirectories(libretro_user_dir);
-        user_dir = libretro_user_dir;
-    }
-    if (!Common::FS::Exists(user_dir)) {
-        // If it doesn't exist, use the standard path for the platform instead.
-        // NOTE: On Windows we currently just create the portable directory instead.
-#ifdef __APPLE__
-        user_dir =
-            std::filesystem::path(getenv("HOME")) / "Library" / "Application Support" / "shadPS4";
-#elif defined(__linux__)
-        const char* xdg_data_home = getenv("XDG_DATA_HOME");
-        if (xdg_data_home != nullptr && strlen(xdg_data_home) > 0) {
-            user_dir = std::filesystem::path(xdg_data_home) / "shadPS4";
+UserPathTable* MakeUserPaths() {
+    UserPathTable* const table = new UserPathTable;
+    const char* const user_dir = libretro_user_dir;
+    for (size_t type = 0; type < PathTypeCount; ++type) {
+        char dir[PATH_MAX_LENGTH];
+        if (SubDirs[type][0]) {
+            fill_pathname_join_special(dir, user_dir, SubDirs[type], sizeof(dir));
         } else {
-            user_dir = std::filesystem::path(getenv("HOME")) / ".local" / "share" / "shadPS4";
+            strlcpy(dir, user_dir, sizeof(dir));
         }
-#elif _WIN32
-        TCHAR appdata[MAX_PATH] = {0};
-        SHGetFolderPath(NULL, CSIDL_APPDATA, NULL, 0, appdata);
-        user_dir = std::filesystem::path(appdata) / "shadPS4";
-#endif
+        path_mkdir(dir);
+        SetTableEntry(*table, type, dir);
     }
-
-    std::unordered_map<PathType, fs::path> paths;
-
-    const auto create_path = [&](PathType shad_path, const fs::path& new_path) {
-        Common::FS::CreateDirectories(new_path);
-        paths.insert_or_assign(shad_path, new_path);
-    };
-
-    create_path(PathType::UserDir, user_dir);
-    create_path(PathType::LogDir, user_dir / LOG_DIR);
-    create_path(PathType::ShaderDir, user_dir / SHADER_DIR);
-    create_path(PathType::GameDataDir, user_dir / GAMEDATA_DIR);
-    create_path(PathType::TempDataDir, user_dir / TEMPDATA_DIR);
-    create_path(PathType::SysModuleDir, user_dir / SYSMODULES_DIR);
-    create_path(PathType::DownloadDir, user_dir / DOWNLOAD_DIR);
-    create_path(PathType::CheatsDir, user_dir / CHEATS_DIR);
-    create_path(PathType::PatchesDir, user_dir / PATCHES_DIR);
-    create_path(PathType::MetaDataDir, user_dir / METADATA_DIR);
-    create_path(PathType::CustomTrophy, user_dir / CUSTOM_TROPHY);
-    create_path(PathType::CustomConfigs, user_dir / CUSTOM_CONFIGS);
-    create_path(PathType::CacheDir, user_dir / CACHE_DIR);
-    create_path(PathType::FontsDir, user_dir / FONTS_DIR);
-    create_path(PathType::TrophyDir, user_dir / TROPHY_DIR);
-    create_path(PathType::HomeDir, user_dir / HOME_DIR);
-    create_path(PathType::CustomModulesDir, user_dir / CUSTOM_MODULES_DIR);
-    create_path(PathType::LicensesDir, user_dir / LICENSES_DIR);
 
     // Written once, and again only when the text has changed
-    static constexpr std::string_view notice =
+    static constexpr char notice[] =
         "++++++++++++++++++++++++++++++++\n+ Custom Trophy Images / Sound "
         "+\n++++++++++++++++++++++++++++++++\n\nYou can add custom images to the "
         "trophies.\n*We recommend a square resolution image, for example 200x200, 500x500, "
@@ -162,21 +68,35 @@ static std::unordered_map<PathType, fs::path> MakeUserPaths() {
         "sound for trophy notifications.\n*By default, no audio is played unless it is in "
         "this folder and you are using the QT version.\nIn this folder "
         "('user\\custom_trophy'), add the files with the following names:\n\ntrophy.mp3";
-    const std::string notice_path = PathToUTF8String(user_dir / CUSTOM_TROPHY / "Notice.txt");
-    if (!filestream_matches_buf(notice_path.c_str(), notice.data(), notice.size())) {
-        filestream_write_file(notice_path.c_str(), notice.data(), static_cast<s64>(notice.size()));
+    char notice_path[PATH_MAX_LENGTH];
+    fill_pathname_join_special(notice_path,
+                               table->utf8[static_cast<size_t>(PathType::CustomTrophy)],
+                               "Notice.txt", sizeof(notice_path));
+    if (!filestream_matches_buf(notice_path, notice, sizeof(notice) - 1)) {
+        filestream_write_file(notice_path, notice, static_cast<s64>(sizeof(notice) - 1));
     }
-
-    return paths;
+    return table;
 }
 
-// Made when first asked for, not when the library is loaded: the frontend's
-// system directory is only known once the core is running.
-static std::unordered_map<PathType, fs::path>& UserPathsRef() {
-    static auto paths = MakeUserPaths();
-    return paths;
+// Made when first asked for, not when the library is loaded: the frontend's system directory
+// is only known once the core is running. Kept for the process's life.
+UserPathTable& UserPaths() {
+    static UserPathTable* const table = MakeUserPaths();
+    return *table;
 }
-#define UserPaths UserPathsRef()
+
+} // Anonymous namespace
+
+void SetLibretroUserDir(const std::filesystem::path& dir) {
+    strlcpy(libretro_user_dir, PathToUTF8String(dir).c_str(), sizeof(libretro_user_dir));
+}
+
+// The longest path the host takes: UTF-16 code units on Windows, UTF-8 ones elsewhere
+#ifdef _WIN32
+constexpr size_t MaxPathUnits = 260;
+#else
+constexpr size_t MaxPathUnits = 1024;
+#endif
 
 bool ValidatePath(const fs::path& path) {
     if (path.empty()) {
@@ -186,13 +106,13 @@ bool ValidatePath(const fs::path& path) {
     }
 
 #ifdef _WIN32
-    if (path.u16string().size() >= MAX_PATH) {
+    if (path.u16string().size() >= MaxPathUnits) {
         LOG_ERROR(Common_Filesystem, "Input path is too long, path=%s",
                   (PathToUTF8String(path)).c_str());
         return false;
     }
 #else
-    if (path.u8string().size() >= MAX_PATH) {
+    if (path.u8string().size() >= MaxPathUnits) {
         LOG_ERROR(Common_Filesystem, "Input path is too long, path=%s",
                   (PathToUTF8String(path)).c_str());
         return false;
@@ -222,11 +142,15 @@ std::filesystem::path PathFromCString(size_t (*get)(char* s, size_t len)) {
 }
 
 const fs::path& GetUserPath(PathType shad_path) {
-    return UserPaths.at(shad_path);
+    return UserPaths().paths[static_cast<size_t>(shad_path)];
+}
+
+const char* GetUserPathUTF8(PathType shad_path) {
+    return UserPaths().utf8[static_cast<size_t>(shad_path)];
 }
 
 std::string GetUserPathString(PathType shad_path) {
-    return PathToUTF8String(GetUserPath(shad_path));
+    return GetUserPathUTF8(shad_path);
 }
 
 void SetUserPath(PathType shad_path, const fs::path& new_path) {
@@ -236,7 +160,7 @@ void SetUserPath(PathType shad_path, const fs::path& new_path) {
         return;
     }
 
-    UserPaths.insert_or_assign(shad_path, new_path);
+    SetTableEntry(UserPaths(), static_cast<size_t>(shad_path), PathToUTF8String(new_path).c_str());
 }
 
 std::optional<fs::path> FindGameByID(const fs::path& dir, const std::string& game_id,

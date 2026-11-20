@@ -32,8 +32,6 @@ enum class PathType {
     LicensesDir,      // Where license files are stored.
 };
 
-constexpr auto PORTABLE_DIR = "user";
-
 // Sub-directories contained within a user data directory
 constexpr auto LOG_DIR = "log";
 constexpr auto SHADER_DIR = "shader";
@@ -106,6 +104,9 @@ constexpr auto LOG_FILE = "shad_log.txt";
  * @returns The filesystem path associated with the PathType enum as a UTF-8 encoded std::string.
  */
 [[nodiscard]] std::string GetUserPathString(PathType user_path);
+
+/// The directory of @user_path in UTF-8, good for the process's life
+[[nodiscard]] const char* GetUserPathUTF8(PathType user_path);
 
 /**
  * Sets a new filesystem path associated with the PathType enum.
