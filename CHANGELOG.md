@@ -4,6 +4,12 @@ What changed in the libretro core of this fork, newest first. Changes that come 
 
 ## Unreleased
 
+- Vulkan: the first step off vulkan.hpp to the C API. libretro-common's Vulkan symbol wrapper (`vulkan/vulkan_symbol_wrapper.c`, identical to RetroArch's with the Vulkan 1.2, 1.3 and extension entry points just added there) is in the build and loaded beside vulkan.hpp's dispatcher.
+  - **Where it loads:** at the three points the dispatcher does: the loader's `vkGetInstanceProcAddr`, the instance, and the device.
+  - **What includes it:** `vk_common.h`, ahead of vulkan.hpp. Every renderer file names the dispatcher's entry points the same way, and code moved to the C API calls through the wrapper.
+  - **What changes now:** nothing calls through it yet, so the renderer behaves as before. A device missing a Vulkan 1.0 entry point now fails device creation with a log line. Renderer files move to the C API in the next patches.
+  - **Checks:** the Linux and Windows builds pass and the tests pass. The wrapper loads every 1.2 and 1.3 entry point from Mesa's lavapipe, checked in RetroArch.
+  - **Not run in a game yet.**
 - `externals/gcn` is gone: two AMD register headers (`si_ci_vi_merged_offset.h`, `si_ci_vi_merged_pm4_it_opcodes.h`, 1.3 MB) that nothing in the core includes. Only the include path and its REUSE entry referred to them. The Linux and Windows builds pass without them.
 - FEX's rpmalloc is gone. FEX's allocator hooks (`AllocatorHooks.cpp`) are built without `ENABLE_FEX_ALLOCATOR`, the branch upstream has for that. FEX now allocates with the C library's malloc, as the rest of the core does.
   - **Why it can go:** the core never called FEX's allocator setup (`SetupHooks`), so rpmalloc ran on its defaults and kept no guest memory out of the way.

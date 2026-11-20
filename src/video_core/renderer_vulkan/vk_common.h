@@ -14,6 +14,11 @@
 // Define assert-on-result to nothing to instead return the result for our handling.
 #define VULKAN_HPP_ASSERT_ON_RESULT
 
+// libretro-common's Vulkan symbol wrapper, the C API's entry points as it loads them, first:
+// the C code being moved off vulkan.hpp calls through it, and vulkan.hpp's dispatcher is
+// named after it in every file alike
+#include <vulkan/vulkan_symbol_wrapper.h>
+
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wunused-value"
 #include <vulkan/vulkan.hpp>

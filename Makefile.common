@@ -467,8 +467,11 @@ LRC_SOURCES_C += $(addprefix $(LRC_DIR)/string/,rstrtod.c stdstring.c)
 LRC_SOURCES_C += $(addprefix $(LRC_DIR)/time/,rtime.c)
 LRC_SOURCES_C += $(addprefix $(LRC_DIR)/utils/,md5.c)
 LRC_SOURCES_C += $(addprefix $(LRC_DIR)/vfs/,vfs_implementation.c)
+LRC_SOURCES_C += $(addprefix $(LRC_DIR)/vulkan/,vulkan_symbol_wrapper.c)
 
 LRC_FLAGS := -I$(LRC_DIR)/include
+# The Vulkan symbol wrapper, against the core's own Vulkan headers
+$(OBJ_DIR)/$(LRC_DIR)/vulkan/vulkan_symbol_wrapper.c.o: CFLAGS += -isystem $(EXT_DIR)/vulkan-headers/include
 # HTTPS through libretro-common's own TLS client
 $(OBJ_DIR)/$(LRC_DIR)/net/net_http.c.o: CFLAGS += -DHAVE_SSL -DHAVE_RETROSSL
 # Zstandard-compressed blocks in ZArchive

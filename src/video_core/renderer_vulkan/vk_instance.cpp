@@ -673,6 +673,11 @@ bool Instance::CreateDevice() {
     device = std::move(dev);
 
     VULKAN_HPP_DEFAULT_DISPATCHER.init(*device);
+    if (!vulkan_symbol_wrapper_load_core_device_symbols(*device)) {
+        LOG_CRITICAL(Render_Vulkan, "Failed to load Vulkan's device entry points");
+        return false;
+    }
+    vulkan_symbol_wrapper_load_extended_symbols(*instance, *device);
 
     graphics_queue = device->getQueue(queue_family_index, 0);
     present_queue = device->getQueue(queue_family_index, 0);

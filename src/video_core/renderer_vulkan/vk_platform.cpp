@@ -153,8 +153,13 @@ vk::UniqueInstance CreateInstance(bool enable_validation, bool enable_crash_diag
 
     // The Vulkan the frontend's environment provides; the core brings none of its own.
     static vk::detail::DynamicLoader dl;
-    VULKAN_HPP_DEFAULT_DISPATCHER.init(
-        dl.getProcAddress<PFN_vkGetInstanceProcAddr>("vkGetInstanceProcAddr"));
+    const auto get_instance_proc_addr =
+        dl.getProcAddress<PFN_vkGetInstanceProcAddr>("vkGetInstanceProcAddr");
+    VULKAN_HPP_DEFAULT_DISPATCHER.init(get_instance_proc_addr);
+    // The C API's entry points, alongside vulkan.hpp's
+    vulkan_symbol_wrapper_init(get_instance_proc_addr);
+    ASSERT_MSG(vulkan_symbol_wrapper_load_global_symbols(),
+               "Failed to load Vulkan's global entry points");
 
     const auto [available_version_result, available_version] =
         VULKAN_HPP_DEFAULT_DISPATCHER.vkEnumerateInstanceVersion
@@ -309,6 +314,9 @@ vk::UniqueInstance CreateInstance(bool enable_validation, bool enable_crash_diag
                (vk::to_string(instance_result)).c_str());
 
     VULKAN_HPP_DEFAULT_DISPATCHER.init(*instance);
+    ASSERT_MSG(vulkan_symbol_wrapper_load_core_instance_symbols(*instance),
+               "Failed to load Vulkan's instance entry points");
+    vulkan_symbol_wrapper_load_extended_symbols(*instance, VK_NULL_HANDLE);
 
     return std::move(instance);
 }
