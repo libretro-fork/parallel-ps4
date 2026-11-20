@@ -17,57 +17,81 @@ Sampler::Sampler(const Vulkan::Instance& instance, const AmdGpu::Sampler& sample
     const float max_anisotropy =
         anisotropy_enable ? std::clamp(sampler.MaxAniso(), 1.0f, instance.MaxSamplerAnisotropy())
                           : 1.0f;
-    auto border_color = LiverpoolToVK::BorderColor(sampler.border_color_type);
-    if (border_color == vk::BorderColor::eFloatCustomEXT &&
+    auto border_color =
+        static_cast<VkBorderColor>(LiverpoolToVK::BorderColor(sampler.border_color_type));
+    if (border_color == VK_BORDER_COLOR_FLOAT_CUSTOM_EXT &&
         !instance.IsCustomBorderColorSupported()) {
         LOG_WARNING(Render_Vulkan, "Custom border color is not supported, falling back to black");
-        border_color = vk::BorderColor::eFloatOpaqueBlack;
+        border_color = VK_BORDER_COLOR_FLOAT_OPAQUE_BLACK;
     }
 
-    const auto custom_color = [&]() -> std::optional<vk::SamplerCustomBorderColorCreateInfoEXT> {
-        if (border_color == vk::BorderColor::eFloatCustomEXT) {
-            const auto border_color_index = sampler.border_color_ptr.Value();
-            const auto border_color_buffer = border_color_base.Address<std::array<float, 4>*>();
-            const auto custom_border_color_array = border_color_buffer[border_color_index];
-
-            const vk::SamplerCustomBorderColorCreateInfoEXT ret{
-                .customBorderColor =
-                    vk::ClearColorValue{
-                        .float32 = custom_border_color_array,
-                    },
-                .format = vk::Format::eR32G32B32A32Sfloat,
-            };
-            return ret;
-        } else {
-            return std::nullopt;
+    VkSamplerCustomBorderColorCreateInfoEXT custom_color{};
+    custom_color.sType = VK_STRUCTURE_TYPE_SAMPLER_CUSTOM_BORDER_COLOR_CREATE_INFO_EXT;
+    if (border_color == VK_BORDER_COLOR_FLOAT_CUSTOM_EXT) {
+        const auto border_color_index = sampler.border_color_ptr.Value();
+        const auto border_color_buffer = border_color_base.Address<std::array<float, 4>*>();
+        const auto& custom_border_color_array = border_color_buffer[border_color_index];
+        for (u32 i = 0; i < 4; ++i) {
+            custom_color.customBorderColor.float32[i] = custom_border_color_array[i];
         }
-    }();
+        custom_color.format = VK_FORMAT_R32G32B32A32_SFLOAT;
+    }
 
-    const vk::SamplerCreateInfo sampler_ci = {
-        .pNext = custom_color ? &*custom_color : nullptr,
-        .magFilter = LiverpoolToVK::Filter(sampler.xy_mag_filter),
-        .minFilter = LiverpoolToVK::Filter(sampler.xy_min_filter),
-        .mipmapMode = LiverpoolToVK::MipFilter(sampler.mip_filter),
-        .addressModeU = LiverpoolToVK::ClampMode(sampler.clamp_x),
-        .addressModeV = LiverpoolToVK::ClampMode(sampler.clamp_y),
-        .addressModeW = LiverpoolToVK::ClampMode(sampler.clamp_z),
-        .mipLodBias = std::min(sampler.LodBias(), instance.MaxSamplerLodBias()),
-        .anisotropyEnable = anisotropy_enable,
-        .maxAnisotropy = max_anisotropy,
-        // GCN compares per instruction; a plain read of a compare sampler is undefined in Vulkan.
-        .compareEnable = is_depth,
-        .compareOp = LiverpoolToVK::DepthCompare(sampler.depth_compare_func),
-        .minLod = sampler.MinLod(),
-        .maxLod = sampler.MaxLod(),
-        .borderColor = border_color,
-        .unnormalizedCoordinates = false, // Handled in shader due to Vulkan limitations.
-    };
-    auto [sampler_result, smplr] = instance.GetDevice().createSamplerUnique(sampler_ci);
-    ASSERT_MSG(sampler_result == vk::Result::eSuccess, "Failed to create sampler: %s",
-               (vk::to_string(sampler_result)).c_str());
-    handle = std::move(smplr);
+    VkSamplerCreateInfo sampler_ci{};
+    sampler_ci.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+    sampler_ci.pNext = border_color == VK_BORDER_COLOR_FLOAT_CUSTOM_EXT ? &custom_color : nullptr;
+    sampler_ci.magFilter = static_cast<VkFilter>(LiverpoolToVK::Filter(sampler.xy_mag_filter));
+    sampler_ci.minFilter = static_cast<VkFilter>(LiverpoolToVK::Filter(sampler.xy_min_filter));
+    sampler_ci.mipmapMode =
+        static_cast<VkSamplerMipmapMode>(LiverpoolToVK::MipFilter(sampler.mip_filter));
+    sampler_ci.addressModeU =
+        static_cast<VkSamplerAddressMode>(LiverpoolToVK::ClampMode(sampler.clamp_x));
+    sampler_ci.addressModeV =
+        static_cast<VkSamplerAddressMode>(LiverpoolToVK::ClampMode(sampler.clamp_y));
+    sampler_ci.addressModeW =
+        static_cast<VkSamplerAddressMode>(LiverpoolToVK::ClampMode(sampler.clamp_z));
+    sampler_ci.mipLodBias = std::min(sampler.LodBias(), instance.MaxSamplerLodBias());
+    sampler_ci.anisotropyEnable = anisotropy_enable;
+    sampler_ci.maxAnisotropy = max_anisotropy;
+    // GCN compares per instruction; a plain read of a compare sampler is undefined in Vulkan.
+    sampler_ci.compareEnable = is_depth;
+    sampler_ci.compareOp =
+        static_cast<VkCompareOp>(LiverpoolToVK::DepthCompare(sampler.depth_compare_func));
+    sampler_ci.minLod = sampler.MinLod();
+    sampler_ci.maxLod = sampler.MaxLod();
+    sampler_ci.borderColor = border_color;
+    sampler_ci.unnormalizedCoordinates = VK_FALSE; // Handled in shader due to Vulkan limitations.
+
+    device = static_cast<VkDevice>(instance.GetDevice());
+    const VkResult result = vkCreateSampler(device, &sampler_ci, nullptr, &handle);
+    ASSERT_MSG(result == VK_SUCCESS, "Failed to create sampler: %s",
+               vk::to_string(static_cast<vk::Result>(result)).c_str());
 }
 
-Sampler::~Sampler() = default;
+Sampler::~Sampler() {
+    if (handle != VK_NULL_HANDLE) {
+        vkDestroySampler(device, handle, nullptr);
+    }
+}
+
+Sampler::Sampler(Sampler&& other) noexcept
+    : Common::LRUNode<>(std::move(other)), hash{other.hash}, device{other.device},
+      handle{other.handle} {
+    other.handle = VK_NULL_HANDLE;
+}
+
+Sampler& Sampler::operator=(Sampler&& other) noexcept {
+    if (this != &other) {
+        if (handle != VK_NULL_HANDLE) {
+            vkDestroySampler(device, handle, nullptr);
+        }
+        Common::LRUNode<>::operator=(std::move(other));
+        hash = other.hash;
+        device = other.device;
+        handle = other.handle;
+        other.handle = VK_NULL_HANDLE;
+    }
+    return *this;
+}
 
 } // namespace VideoCore

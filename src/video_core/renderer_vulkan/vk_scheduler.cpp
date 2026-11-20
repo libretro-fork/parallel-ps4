@@ -264,7 +264,7 @@ void Scheduler::SubmitExecution(SubmitInfo& info) {
         }
         sessions.clear();
 
-        const vk::Semaphore timeline = work_semaphore.Handle();
+        const vk::Semaphore timeline{work_semaphore.Handle()};
         info.AddSignal(timeline, signal_value);
 
         std::array<vk::PipelineStageFlags, std::tuple_size_v<decltype(info.wait_semas)>>

@@ -12,36 +12,36 @@ namespace Vulkan {
 
 constexpr u64 WAIT_TIMEOUT = std::numeric_limits<u64>::max();
 
-Semaphore::Semaphore(const Instance& instance_) : instance{instance_} {
-    const vk::StructureChain semaphore_chain = {
-        vk::SemaphoreCreateInfo{},
-        vk::SemaphoreTypeCreateInfo{
-            .semaphoreType = vk::SemaphoreType::eTimeline,
-            .initialValue = 0,
-        },
-    };
-    auto [semaphore_result, sem] =
-        instance.GetDevice().createSemaphoreUnique(semaphore_chain.get());
-    ASSERT_MSG(semaphore_result == vk::Result::eSuccess, "Failed to create master semaphore: %s",
-               (vk::to_string(semaphore_result)).c_str());
-    semaphore = std::move(sem);
+Semaphore::Semaphore(const Instance& instance_)
+    : instance{instance_}, device{static_cast<VkDevice>(instance_.GetDevice())},
+      semaphore{VK_NULL_HANDLE} {
+    VkSemaphoreTypeCreateInfo type_ci{};
+    type_ci.sType = VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO;
+    type_ci.semaphoreType = VK_SEMAPHORE_TYPE_TIMELINE;
+    type_ci.initialValue = 0;
+    VkSemaphoreCreateInfo semaphore_ci{};
+    semaphore_ci.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+    semaphore_ci.pNext = &type_ci;
+    const VkResult result = vkCreateSemaphore(device, &semaphore_ci, nullptr, &semaphore);
+    ASSERT_MSG(result == VK_SUCCESS, "Failed to create master semaphore: %s",
+               vk::to_string(static_cast<vk::Result>(result)).c_str());
 }
 
-Semaphore::~Semaphore() = default;
+Semaphore::~Semaphore() {
+    vkDestroySemaphore(device, semaphore, nullptr);
+}
 
 void Semaphore::Refresh() {
     u64 this_tick{};
     u64 counter{};
     do {
         this_tick = static_cast<u64>(retro_atomic_load_acquire_64(&gpu_tick));
-        auto [counter_result, cntr] = instance.GetDevice().getSemaphoreCounterValue(*semaphore);
-        if (counter_result == vk::Result::eErrorDeviceLost) {
+        const VkResult counter_result = vkGetSemaphoreCounterValue(device, semaphore, &counter);
+        if (counter_result == VK_ERROR_DEVICE_LOST) {
             instance.ReportDeviceLost();
         }
-        ASSERT_MSG(counter_result == vk::Result::eSuccess,
-                   "Failed to get master semaphore value: %s",
-                   (vk::to_string(counter_result)).c_str());
-        counter = cntr;
+        ASSERT_MSG(counter_result == VK_SUCCESS, "Failed to get master semaphore value: %s",
+                   vk::to_string(static_cast<vk::Result>(counter_result)).c_str());
         if (counter < this_tick) {
             return;
         }
@@ -61,13 +61,13 @@ void Semaphore::Wait(u64 tick) {
     }
 
     // If none of the above is hit, fallback to a regular wait
-    const vk::SemaphoreWaitInfo wait_info = {
-        .semaphoreCount = 1,
-        .pSemaphores = &semaphore.get(),
-        .pValues = &tick,
-    };
+    VkSemaphoreWaitInfo wait_info{};
+    wait_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO;
+    wait_info.semaphoreCount = 1;
+    wait_info.pSemaphores = &semaphore;
+    wait_info.pValues = &tick;
 
-    while (instance.GetDevice().waitSemaphores(&wait_info, WAIT_TIMEOUT) != vk::Result::eSuccess) {
+    while (vkWaitSemaphores(device, &wait_info, WAIT_TIMEOUT) != VK_SUCCESS) {
     }
     Refresh();
 }

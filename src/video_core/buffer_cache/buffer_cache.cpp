@@ -1008,7 +1008,7 @@ void BufferCache::SubmitPendingArenaBinds(Vulkan::SubmitInfo& info) {
     }
 
     const u64 signal_tick = memory_semaphore.NextTick();
-    const auto signal_sema = memory_semaphore.Handle();
+    const vk::Semaphore signal_sema{memory_semaphore.Handle()};
 
     const vk::TimelineSemaphoreSubmitInfo timeline_si = {
         .signalSemaphoreValueCount = 1u,

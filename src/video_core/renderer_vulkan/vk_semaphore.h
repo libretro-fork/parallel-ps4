@@ -3,8 +3,6 @@
 
 #pragma once
 
-#include <condition_variable>
-#include <queue>
 #include <retro_atomic.h>
 #include "common/types.h"
 #include "video_core/renderer_vulkan/vk_common.h"
@@ -35,8 +33,8 @@ public:
         return static_cast<u64>(retro_atomic_fetch_add_64(&current_tick, 1));
     }
 
-    [[nodiscard]] vk::Semaphore Handle() const noexcept {
-        return semaphore.get();
+    [[nodiscard]] VkSemaphore Handle() const noexcept {
+        return semaphore;
     }
 
     /// Refresh the known GPU tick
@@ -47,7 +45,8 @@ public:
 
 protected:
     const Instance& instance;
-    vk::UniqueSemaphore semaphore;    ///< Timeline semaphore.
+    VkDevice device;                  ///< The device the semaphore is of.
+    VkSemaphore semaphore;            ///< Timeline semaphore.
     retro_atomic_64_t gpu_tick{0};    ///< Current known GPU tick.
     retro_atomic_64_t current_tick{1}; ///< Current logical tick.
 };

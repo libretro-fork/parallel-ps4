@@ -4,6 +4,11 @@ What changed in the libretro core of this fork, newest first. Changes that come 
 
 ## Unreleased
 
+- Vulkan, first files on the C API: shader modules (`vk_shader_util.cpp`), the timeline semaphore (`vk_semaphore`) and samplers (`sampler`) now create, wait on and destroy their objects with the C API through libretro-common's symbol wrapper, in place of vulkan.hpp.
+  - **What holds the objects:** the semaphore and sampler hold plain Vulkan handles and destroy them themselves. The sampler has its own move, so a sampler moved in its LRU cache still destroys its handle once.
+  - **What still uses vulkan.hpp:** the callers, who get the handles back as vulkan.hpp types where they still use those.
+  - **What it does at runtime:** the same Vulkan calls with the same arguments.
+  - **Checks:** the Linux and Windows builds pass. Not run in a game yet.
 - Vulkan: the first step off vulkan.hpp to the C API. libretro-common's Vulkan symbol wrapper (`vulkan/vulkan_symbol_wrapper.c`, identical to RetroArch's with the Vulkan 1.2, 1.3 and extension entry points just added there) is in the build and loaded beside vulkan.hpp's dispatcher.
   - **Where it loads:** at the three points the dispatcher does: the loader's `vkGetInstanceProcAddr`, the instance, and the device.
   - **What includes it:** `vk_common.h`, ahead of vulkan.hpp. Every renderer file names the dispatcher's entry points the same way, and code moved to the C API calls through the wrapper.

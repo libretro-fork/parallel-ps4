@@ -23,17 +23,18 @@ public:
     Sampler(const Sampler&) = delete;
     Sampler& operator=(const Sampler&) = delete;
 
-    Sampler(Sampler&&) = default;
-    Sampler& operator=(Sampler&&) = default;
+    Sampler(Sampler&& other) noexcept;
+    Sampler& operator=(Sampler&& other) noexcept;
 
     vk::Sampler Handle() const noexcept {
-        return *handle;
+        return vk::Sampler{handle};
     }
 
     u64 hash;
 
 private:
-    vk::UniqueSampler handle;
+    VkDevice device{VK_NULL_HANDLE};
+    VkSampler handle{VK_NULL_HANDLE};
 };
 
 } // namespace VideoCore
