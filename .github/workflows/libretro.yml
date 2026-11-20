@@ -138,34 +138,21 @@ jobs:
         sudo add-apt-repository 'deb http://apt.llvm.org/noble/ llvm-toolchain-noble-19 main'
 
     - name: Install dependencies
-      run: sudo apt-get update && sudo apt install -y clang-19 lld-19 cmake ninja-build build-essential libudev-dev uuid-dev
+      run: sudo apt-get update && sudo apt install -y clang-19 lld-19 build-essential libudev-dev uuid-dev
 
     - name: Cache the compiler's output
       uses: hendrikmuhs/ccache-action@v1.2.21
       with:
         append-timestamp: false
-        key: libretro-linux-arm64-fex-${{ hashFiles('Makefile', 'Makefile.common', '.ci/build-fex.sh') }}
+        key: libretro-linux-arm64-fex-${{ hashFiles('Makefile', 'Makefile.common') }}
 
-    # FEX changes only with its build script, patch or smoke test
-    - name: Cache FEX
-      id: fex-cache
-      uses: actions/cache@v4
-      with:
-        path: |
-          fex
-          fex-build
-        key: fex-arm64-${{ hashFiles('.ci/build-fex.sh', '.ci/fex/**') }}
-
-    - name: Build FEX
-      if: steps.fex-cache.outputs.cache-hit != 'true'
-      run: CC=clang-19 CXX=clang++-19 .ci/build-fex.sh ${{github.workspace}}/fex ${{github.workspace}}/fex-build
-
+    # FEX is built from externals/fex by the core's own Makefile
     - name: FEXCore smoke test
-      run: "$(find ${{github.workspace}}/fex-build -name fexcore-smoke -type f -perm -u+x | head -1)"
+      run: make -j$(nproc) CC="ccache clang-19" CXX="ccache clang++-19" ENABLE_FEX_GUEST_CPU=1 fexcore-smoke && ./fexcore-smoke
 
     # -k: every file that does not compile yet, not just the first
     - name: Build
-      run: make -k -j$(nproc) CC="ccache clang-19" CXX="ccache clang++-19" ENABLE_FEX_GUEST_CPU=1 FEXCORE_GUEST_CPU_SOURCE_DIR=${{github.workspace}}/fex FEXCORE_GUEST_CPU_BUILD_DIR=${{github.workspace}}/fex-build
+      run: make -k -j$(nproc) CC="ccache clang-19" CXX="ccache clang++-19" ENABLE_FEX_GUEST_CPU=1
 
     - name: Collect
       run: |

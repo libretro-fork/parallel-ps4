@@ -9,9 +9,8 @@
 #
 #   LIBRETRO_X86_64_PARTS=<dir>  aarch64: carry box64 and the x86-64 build
 #                                (box64, parallel_ps4_libretro_host, parallel_ps4_libretro.so)
-#   ENABLE_FEX_GUEST_CPU=1       aarch64: run the game's code through FEXCore, with
-#   FEXCORE_GUEST_CPU_SOURCE_DIR=<dir> FEXCORE_GUEST_CPU_BUILD_DIR=<dir>
-#                                FEX built on its own (.ci/build-fex.sh)
+#   ENABLE_FEX_GUEST_CPU=1       aarch64: run the game's code through FEXCore, built
+#                                from externals/fex
 #
 # The lists are the build's only ones: a source added to the tree is added here.
 
@@ -331,37 +330,120 @@ ifeq ($(ENABLE_FEX_GUEST_CPU),1)
 ifneq ($(ARCH_ARM64),1)
 $(error ENABLE_FEX_GUEST_CPU is for the aarch64 core)
 endif
-FEX_SRC   := $(FEXCORE_GUEST_CPU_SOURCE_DIR)
-FEX_BUILD := $(FEXCORE_GUEST_CPU_BUILD_DIR)
-ifeq ($(FEX_SRC)$(FEX_BUILD),)
-$(error ENABLE_FEX_GUEST_CPU needs FEXCORE_GUEST_CPU_SOURCE_DIR and FEXCORE_GUEST_CPU_BUILD_DIR)
-endif
+# FEX (externals/fex): the files of FEX-Emu/FEX f2b679f that FEXCore and the parts of
+# its Source/Common the core uses are built from, with their headers. generated/ holds what
+# FEX's CMake writes at configure time (the IR and config tables, the git hash).
+FEX_DIR := $(EXT_DIR)/fex
+FEX_BASE_DEFS := -DARCHITECTURE_arm64=1 -DFEX_DISABLE_TELEMETRY=1 -DFEX_HAS_PRESERVE_ALL_ATTR=1 \
+	'-DFEX_PRESERVE_ALL_ATTR=__attribute__((preserve_all))' -DHAS_PROGRAM_INVOCATION_NAME=1 \
+	-D_LARGEFILE64_SOURCE
+FEX_DEFS := $(FEX_BASE_DEFS) -DFEXCORE_HAS_PRESERVE_ALL_ATTR=1 \
+	'-DFEXCORE_PRESERVE_ALL_ATTR=__attribute__((preserve_all))' \
+	'-DGLOBAL_DATA_DIRECTORY="/usr/local/share/fex-emu/"' -DHAS_SYSCALL_GETCPU=1 \
+	-DHAS_SYSCALL_GETTID=1 -DHAS_SYSCALL_RENAMEAT2=1 -DHAS_SYSCALL_STATX=1 \
+	-DHAS_SYSCALL_TGKILL=1
+# SoftFloat's own: its INLINE would replace libretro-common's, so only the code that includes
+# SoftFloat's internals takes it
+FEX_SF_DEFS := '-DINLINE=static inline' -DINLINE_LEVEL=4 -DSOFTFLOAT_BUILTIN_CLZ=1 \
+	-DSOFTFLOAT_FAST_DIV32TO16=1 -DSOFTFLOAT_FAST_DIV64TO32=1 -DSOFTFLOAT_FAST_INT64=1
+FEX_SF_INC := -I$(FEX_DIR)/External/SoftFloat-3e/include \
+	-I$(FEX_DIR)/External/SoftFloat-3e/include/SoftFloat-3e
+FEX_INC := -I$(FEX_DIR)/generated -I$(FEX_DIR)/generated/include -I$(FEX_DIR)/Source \
+	-I$(FEX_DIR)/FEXCore/include -I$(FEX_DIR)/External/unordered_dense/include \
+	-I$(FEX_DIR)/External/fmt/include \
+	-I$(FEX_DIR)/FEXHeaderUtils -I$(FEX_DIR)/CodeEmitter -I$(FEX_DIR)/External/cephes/include \
+	$(FEX_SF_INC)
+FEX_CXX := -std=gnu++20 -fomit-frame-pointer -Wno-trigraphs -Wno-deprecated-enum-enum-conversion
+# FEXCore
+FEXCORE_SOURCES_CXX := $(addprefix $(FEX_DIR)/FEXCore/Source/,Common/JitSymbols.cpp \
+	Interface/Config/Config.cpp Interface/Context/Context.cpp Interface/GDBJIT/GDBJIT.cpp \
+	$(addprefix Interface/Core/,Addressing.cpp ArchHelpers/Arm64Emitter.cpp CPUBackend.cpp \
+	CPUID.cpp CodeCache.cpp Core.cpp Dispatcher/Dispatcher.cpp Frontend.cpp \
+	Interpreter/Fallbacks/StringCompareFallbacks.cpp LookupCache.cpp OpcodeDispatcher.cpp) \
+	$(addprefix Interface/Core/JIT/,ALUOps.cpp Arm64Relocations.cpp AtomicOps.cpp \
+	BranchOps.cpp ConversionOps.cpp EncryptionOps.cpp JIT.cpp MemoryOps.cpp MiscOps.cpp \
+	MoveOps.cpp VectorOps.cpp) \
+	$(addprefix Interface/Core/OpcodeDispatcher/,AVX_128.cpp Crypto.cpp Flags.cpp Vector.cpp \
+	X87.cpp X87F64.cpp) \
+	$(addprefix Interface/Core/X86Tables/,BaseTables.cpp DDDTables.cpp H0F38Tables.cpp \
+	H0F3ATables.cpp PrimaryGroupTables.cpp SecondaryGroupTables.cpp \
+	SecondaryModRMTables.cpp SecondaryTables.cpp VEXTables.cpp X87Tables.cpp) \
+	$(addprefix Interface/IR/,IRDumper.cpp IREmitter.cpp PassManager.cpp \
+	Passes/IRDumperPass.cpp Passes/IRValidation.cpp \
+	Passes/RedundantFlagCalculationElimination.cpp Passes/RegisterAllocationPass.cpp \
+	Passes/x87StackOptimizationPass.cpp) \
+	$(addprefix Utils/,Allocator.cpp Allocator/64BitAllocator.cpp ArchHelpers/Arm64.cpp \
+	FileLoading.cpp ForcedAssert.cpp LogManager.cpp LongJump.cpp Profiler.cpp \
+	SpinWaitLock.cpp Telemetry.cpp Threads.cpp WildcardMatcher.cpp))
+FEXCORE_FLAGS := $(FEX_DEFS) -DJIT_ARM64 -I$(FEX_DIR)/FEXCore/Source -I$(LRC_DIR)/include \
+	-I$(FEX_DIR)/FEXCore/Source/IncludePrivate $(FEX_INC)
+FEXCORE_CXXFLAGS := $(FEX_CXX) -fvisibility-inlines-hidden -fno-strict-aliasing \
+	-fno-exceptions -Werror=cast-qual -Werror=ignored-qualifiers -Werror=implicit-fallthrough \
+	-ffunction-sections -fwrapv
+# The x87 fallbacks, which include SoftFloat's internals
+FEXCORESF_SOURCES_CXX := $(FEX_DIR)/FEXCore/Source/Interface/Core/Interpreter/Fallbacks/InterpreterFallbacks.cpp
+FEXCORESF_FLAGS := $(FEXCORE_FLAGS) $(FEX_SF_DEFS)
+FEXCORESF_CXXFLAGS := $(FEXCORE_CXXFLAGS)
+# FEX's allocator hooks, on rpmalloc
+FEXALLOC_SOURCES_CXX := $(FEX_DIR)/FEXCore/Source/Utils/AllocatorHooks.cpp
+FEXALLOC_FLAGS := $(FEX_BASE_DEFS) '-DGLOBAL_DATA_DIRECTORY="/usr/local/share/fex-emu/"' \
+	-DENABLE_FEX_ALLOCATOR=1 -I$(FEX_DIR)/FEXCore/Source -I$(FEX_DIR)/Source \
+	-I$(FEX_DIR)/generated -I$(FEX_DIR)/External/rpmalloc
+FEXALLOC_CXXFLAGS := $(FEX_CXX) -fno-strict-aliasing -fno-exceptions
+FEXRPMALLOC_SOURCES_C := $(FEX_DIR)/External/rpmalloc/rpmalloc/rpmalloc.c
+FEXRPMALLOC_FLAGS := $(FEX_BASE_DEFS) -DENABLE_ASSERTS=0 -DENABLE_DECOMMIT=1 \
+	-DENABLE_DYNAMIC_LINK=0 -DENABLE_OVERRIDE=0 -DENABLE_STATISTICS=0 \
+	-I$(FEX_DIR)/External/rpmalloc
+# FEX's Source/Common, cpp-optparse and CommonTools: the config and host feature code
+FEXCOMMON_SOURCES_CXX := $(addprefix $(FEX_DIR)/Source/,$(addprefix Common/,ArgumentLoader.cpp \
+	CPUInfo.cpp Config.cpp FEXServerClient.cpp FileFormatCheck.cpp HostFeatures.cpp \
+	JSONPool.cpp Linux/SBRKAllocations.cpp SHMStats.cpp VolatileMetadata.cpp \
+	cpp-optparse/OptionParser.cpp) \
+	Tools/CommonTools/DummyHandlers.cpp Tools/CommonTools/Linux/Utils/ELFContainer.cpp)
+FEXCOMMON_FLAGS := $(FEX_DEFS) -DRANGES_DISABLE_DEPRECATED_WARNINGS $(FEX_INC) \
+	-I$(FEX_DIR)/Source/Common -I$(FEX_DIR)/Source/Common/cpp-optparse \
+	-I$(FEX_DIR)/Source/Tools/CommonTools -I$(FEX_DIR)/External/tiny-json \
+	-I$(FEX_DIR)/External/range-v3/include
+FEXCOMMON_CXXFLAGS := $(FEX_CXX)
+# SoftFloat 3e and cephes: x87's 80-bit float and its transcendentals
+FEXFLOAT_SOURCES_C := $(addprefix $(FEX_DIR)/External/SoftFloat-3e/src/,$(addsuffix .c, \
+	$(addprefix extF80_,add div eq le lt mul rem roundToInt sqrt sub to_f128 to_f32 to_f64 \
+	to_i32 to_i64 to_ui64) \
+	$(addprefix f128_,add div eq eq_signaling isSignalingNaN le le_quiet lt lt_quiet mul \
+	mulAdd rem sqrt sub to_extF80 to_f16 to_f32 to_f64 to_i32 to_i64 to_ui32 to_ui64) \
+	f32_to_extF80 f32_to_f128 f64_to_extF80 i32_to_extF80 i32_to_f128 ui64_to_extF80 \
+	softfloat_raiseFlags \
+	$(addprefix s_,addMagsExtF80 addMagsF128 approxRecipSqrt32_1 approxRecipSqrt_1Ks \
+	approxRecip_1Ks commonNaNToExtF80UI commonNaNToF128UI commonNaNToF32UI commonNaNToF64UI \
+	extF80UIToCommonNaN f128UIToCommonNaN f32UIToCommonNaN f64UIToCommonNaN \
+	normRoundPackToExtF80 normRoundPackToF128 normSubnormalExtF80Sig normSubnormalF128Sig \
+	normSubnormalF32Sig normSubnormalF64Sig propagateNaNExtF80UI propagateNaNF128UI \
+	roundPackToExtF80 roundPackToF128 roundPackToF32 roundPackToF64 roundToI32 roundToI64 \
+	roundToUI64 shiftRightJam128 shiftRightJam128Extra subMagsExtF80 subMagsF128)))
+FEXFLOAT_SOURCES_C += $(addprefix $(FEX_DIR)/External/cephes/src/128bit/,atanll.c constll.c \
+	exp2ll.c floorll.c log2ll.c mtherr.c polevll.c sinll.c tanll.c)
+FEXFLOAT_SOURCES_CXX := $(FEX_DIR)/External/cephes/src/128bit/Impl.cpp
+FEXFLOAT_FLAGS := $(FEX_DEFS) $(FEX_SF_DEFS) -I$(FEX_DIR)/External/SoftFloat-3e -I$(FEX_DIR)/Source \
+	-I$(FEX_DIR)/External/cephes/include $(FEX_SF_INC) -Wno-trigraphs -fno-builtin
+FEXFLOAT_CXXFLAGS := $(FEX_CXX)
+# fmt, tiny-json (XXH3 is libretro-common's)
+FEXLIBS_SOURCES_C := $(FEX_DIR)/External/tiny-json/tiny-json.c
+FEXLIBS_SOURCES_CXX := $(FEX_DIR)/External/fmt/src/format.cc $(FEX_DIR)/External/fmt/src/os.cc
+FEXLIBS_FLAGS := $(FEX_BASE_DEFS) -I$(FEX_DIR)/External/fmt/include
+FEXLIBS_CXXFLAGS := $(FEX_CXX)
+# Linked from one archive, so only what the core reaches comes in, as from FEX's own
+FEX_GROUPS := FEXCORE FEXCORESF FEXALLOC FEXRPMALLOC FEXCOMMON FEXFLOAT FEXLIBS
 # libSceFiber HLE, its switches done on the guest's registers (no fiber_context.cpp asm)
 CORE_SOURCES_CXX += src/core/libraries/fiber/fiber.cpp src/core/fex/fex_guest_engine.cpp \
 	$(addprefix src/core/guest_cpu/,fex_guest_cpu.cpp fex_hle_bridge.cpp guest_cpu.cpp \
 	hle_call_adapter.cpp)
-CORE_FLAGS += -DSHADPS4_ENABLE_FEX_GUEST_CPU=1 -DFEXCORE_HAS_PRESERVE_ALL_ATTR=1 \
-	-DFEX_DISABLE_TELEMETRY=1 -DFEX_HAS_PRESERVE_ALL_ATTR=1 \
+# The core's own FEX code takes only FEX's attribute defines
+CORE_FLAGS += -DSHADPS4_ENABLE_FEX_GUEST_CPU=1 -DFEX_DISABLE_TELEMETRY=1 -DFEX_HAS_PRESERVE_ALL_ATTR=1 \
+	'-DFEX_PRESERVE_ALL_ATTR=__attribute__((preserve_all))' -DFEXCORE_HAS_PRESERVE_ALL_ATTR=1 \
 	'-DFEXCORE_PRESERVE_ALL_ATTR=__attribute__((preserve_all))' \
-	'-DFEX_PRESERVE_ALL_ATTR=__attribute__((preserve_all))' \
-	-I$(FEX_BUILD) -I$(FEX_SRC) -I$(FEX_SRC)/Source -I$(FEX_BUILD)/Source \
-	-I$(FEX_BUILD)/generated -I$(FEX_SRC)/Source/Tools/CommonTools \
-	-I$(FEX_BUILD)/FEXCore/Source -I$(FEX_SRC)/FEXCore/include -I$(FEX_BUILD)/include \
-	-I$(FEX_SRC)/External/unordered_dense/include -I$(FEX_SRC)/External/fmt/include \
-	-I$(FEX_SRC)/External/xxhash -I$(FEX_SRC)/FEXHeaderUtils -I$(FEX_SRC)/CodeEmitter \
-	-I$(FEX_SRC)/External/cephes/include -I$(FEX_SRC)/External/SoftFloat-3e/include \
-	-I$(FEX_SRC)/External/SoftFloat-3e/include/SoftFloat-3e \
-	-I$(FEX_SRC)/Source/Common/cpp-optparse -I$(FEX_SRC)/External/tiny-json \
-	-I$(FEX_SRC)/External/range-v3/include -I$(FEX_SRC)/External/rpmalloc
-FEX_LIBRARIES := $(addprefix $(FEX_BUILD)/,FEXCore/Source/libFEXCore.a \
-	Source/Common/libCommon.a Source/Tools/CommonTools/libCommonTools.a \
-	FEXCore/Source/libJemallocLibs.a Source/Common/cpp-optparse/libcpp-optparse.a \
-	External/tiny-json/libtiny-json.a FEXCore/Source/libFEXCore_Base.a \
-	External/fmt/libfmt.a External/xxhash/cmake_unofficial/libxxhash.a \
-	External/cephes/libcephes_128bit.a External/SoftFloat-3e/libsoftfloat_3e.a \
-	External/rpmalloc/librpmalloc.a)
-$(foreach f,$(FEX_LIBRARIES),$(if $(wildcard $(f)),,$(error FEXCore guest CPU library is missing: $(f). Build FEX with .ci/build-fex.sh first.)))
-LIBS := $(FEX_LIBRARIES) $(LIBS)
+	-I$(FEX_DIR)/Source/Tools/CommonTools $(FEX_INC) \
+	-I$(FEX_DIR)/Source/Common/cpp-optparse -I$(FEX_DIR)/External/tiny-json \
+	-I$(FEX_DIR)/External/range-v3/include -I$(FEX_DIR)/External/rpmalloc
 endif
 
 # ----------------------------------------------------------------------------

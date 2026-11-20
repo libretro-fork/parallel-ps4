@@ -163,15 +163,25 @@ LDFLAGS  += $(fpic) $(SHARED)
 # one's objects.
 obj_of = $(patsubst %,$(OBJ_DIR)/%.o,$(1))
 
+# A group's objects go into the link ($(2) = OBJECTS) or into an archive ($(2) = FEX_OBJECTS)
 define LIB_template
 $(1)_OBJECTS := $$(call obj_of,$$($(1)_SOURCES_C) $$($(1)_SOURCES_CXX) $$($(1)_SOURCES_ASM))
 $$($(1)_OBJECTS): GROUP := $(1)
-OBJECTS += $$($(1)_OBJECTS)
+$(2) += $$($(1)_OBJECTS)
 endef
 
 OBJECTS :=
-$(foreach g,$(LIB_GROUPS),$(eval $(call LIB_template,$(g))))
-DEPS := $(OBJECTS:.o=.d)
+FEX_OBJECTS :=
+$(foreach g,$(LIB_GROUPS),$(eval $(call LIB_template,$(g),OBJECTS)))
+$(foreach g,$(FEX_GROUPS),$(eval $(call LIB_template,$(g),FEX_OBJECTS)))
+DEPS := $(OBJECTS:.o=.d) $(FEX_OBJECTS:.o=.d)
+
+# FEX (ENABLE_FEX_GUEST_CPU) is linked from an archive, so only the objects the core
+# reaches come in
+ifneq ($(FEX_OBJECTS),)
+FEX_ARCHIVE := $(OBJ_DIR)/libfex.a
+LIBS := $(FEX_ARCHIVE) $(LIBS)
+endif
 
 # The toolchain and configuration a tree was built with; a change wipes it,
 # since nothing in an object's name says which compiler produced it.
@@ -196,7 +206,20 @@ else
 LINK_OBJECTS = $(OBJECTS)
 endif
 
-$(TARGET): $(OBJECTS)
+$(FEX_ARCHIVE): $(FEX_OBJECTS)
+	@$(if $(E),echo AR $@,)
+	rm -f $@
+	$(AR) rcs $@ $(FEX_OBJECTS)
+
+# FEXCore on its own, embedded the way the core does (.ci/fex/fexcore-smoke.cpp)
+# (with libretro-common's XXH3 and the CPU feature query it takes)
+FEX_SMOKE_LRC := $(call obj_of,$(addprefix $(LRC_DIR)/,encodings/encoding_xxh3.c \
+	features/features_cpu.c compat/compat_strl.c))
+fexcore-smoke: .ci/fex/fexcore-smoke.cpp $(FEX_ARCHIVE) $(FEX_SMOKE_LRC)
+	$(CXX) $(CXXFLAGS) $(FEXCOMMON_FLAGS) $(FEX_CXX) $< -o $@ $(FEX_ARCHIVE) $(FEX_SMOKE_LRC) \
+	-lpthread -ldl
+
+$(TARGET): $(OBJECTS) $(FEX_ARCHIVE)
 	@$(if $(E),echo LD $@,)
 ifeq ($(OS_WIN),1)
 	$(file >$(OBJ_DIR)/link-objects.rsp,$(OBJECTS))
@@ -225,6 +248,6 @@ $(OBJ_DIR)/%.S.o: %.S
 
 clean:
 	rm -rf obj
-	rm -f $(TARGET)
+	rm -f $(TARGET) fexcore-smoke
 
 .PHONY: all clean

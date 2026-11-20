@@ -4,6 +4,20 @@ What changed in the libretro core of this fork, newest first. Changes that come 
 
 ## Unreleased
 
+- FEX is part of the tree now (`externals/fex`, 8 MB), built by the core's own Makefile like everything else. The aarch64 `ENABLE_FEX_GUEST_CPU=1` build used to clone FEX from GitHub and build it with CMake (`.ci/build-fex.sh`); both are gone.
+  - **What is in the tree:** the files of FEX f2b679f that the build compiles or includes, with their licenses. Those are FEXCore, the parts of FEX's `Source/Common` and CommonTools it links, and the used files of SoftFloat 3e, cephes, rpmalloc, tiny-json, fmt, unordered_dense, range-v3 and cpp-optparse.
+  - **Generated files:** `generated/` holds what FEX's CMake wrote at configure time (the IR and config tables, the git hash).
+  - **Changes from upstream:**
+    - rpmalloc's TLS model, as `.ci/build-fex.sh` patched it before.
+    - FEX's xxhash is gone. FEXCore's two XXH3 hashes (an opcode dispatcher map, the code cache's file names) are libretro-common's `xxh3_64`. It gives the same values as FEX's xxhash on all 32,776 inputs tried (lengths 0 to 4096, 8 alignments), on x86-64 and on aarch64 under qemu, so the code cache keeps its file names.
+    - The core's own FEX code takes only FEX's attribute defines. SoftFloat's `INLINE` (`static inline`) goes only to SoftFloat, cephes and the x87 fallbacks, so it no longer replaces libretro-common's `INLINE` elsewhere.
+  - **How it builds:** with FEX's own flags, per library, into one archive. The core links that archive, so as before only the objects it reaches come in.
+  - **Options and CI:** `FEXCORE_GUEST_CPU_SOURCE_DIR` and `FEXCORE_GUEST_CPU_BUILD_DIR` are gone. `make ENABLE_FEX_GUEST_CPU=1 fexcore-smoke` builds the smoke test, and CI runs it before the build, with no FEX cache step and no CMake.
+  - **Checks:**
+    - Cross-built for aarch64 with clang, the core links. Its one unresolved symbol is `uuid_generate`, because this machine has no aarch64 libuuid.
+    - The smoke test passes under qemu: GPRs, stack, FP, threads, TLS, callbacks and invalidation.
+    - The x86-64 Linux and Windows builds are unchanged.
+  - **Not run on an aarch64 machine yet.**
 - aarch64 build: `host_thread.c` did not compile with clang there, because clang has no `__builtin_setjmp` on aarch64. The aarch64 core now uses the C library's `_setjmp`/`_longjmp` (no signal mask) to end a thread from inside it. x86-64 keeps `__builtin_setjmp`, and Windows keeps its own paths. `host_thread_test` now also runs on aarch64 under qemu, built with GCC and clang (when `qemu-aarch64` and an aarch64 compiler are installed): 2,001 threads ended from inside, all pass. Not run on an aarch64 machine yet.
 - USB: `GetMaxPacketSize` on an emulated device (Skylanders, Infinity, Dimensions portals) copied the device descriptor through a null pointer, so it would crash. It now reads the descriptor into a local. GCC 16 found this on Windows: `-Werror=format` from the previous entry also makes GCC's `-Wnonnull` an error, which broke the MinGW build in `usb_backend.h`. Built with GCC at -O3 and with clang. Not seen in a game yet.
 - {fmt} is gone from the core (600 KB of headers and sources, `externals/fmt`). The log macros, the asserts and the core's string formatting now take printf formats, the libretro way. Each call site in `src` was rewritten from `{}` to its printf conversion, chosen from the argument's type.
