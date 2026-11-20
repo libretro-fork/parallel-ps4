@@ -51,8 +51,8 @@ bool IsViewTypeCompatible(AmdGpu::ImageType view_type, AmdGpu::ImageType image_t
 
 ImageViewInfo::ImageViewInfo(const AmdGpu::Image& image, const Shader::ImageResource& desc) noexcept
     : is_storage{desc.is_written} {
-    const auto dfmt = image.GetDataFmt();
-    auto nfmt = image.GetNumberFmt();
+    const AmdGpu::DataFormat dfmt = image.GetDataFmt();
+    AmdGpu::NumberFormat nfmt = image.GetNumberFmt();
     if (is_storage && nfmt == AmdGpu::NumberFormat::Srgb) {
         nfmt = AmdGpu::NumberFormat::Unorm;
     }
@@ -62,7 +62,9 @@ ImageViewInfo::ImageViewInfo(const AmdGpu::Image& image, const Shader::ImageReso
     }
 
     range.base.level = image.base_level;
-    range.base.layer = std::min<u32>(image.base_array, image.NumLayers() - 1);
+    const u32 base_array = static_cast<u32>(image.base_array);
+    const u32 last_layer = static_cast<u32>(image.NumLayers() - 1);
+    range.base.layer = base_array < last_layer ? base_array : last_layer;
     range.extent.levels = image.NumViewLevels(desc.is_array);
     range.extent.layers = image.NumViewLayers(desc.is_array);
     type = image.GetViewType(desc.is_array);
@@ -104,7 +106,8 @@ ImageView::ImageView(const Vulkan::Instance& instance, const ImageViewInfo& info
     if (info.min_lod != 0 && instance.IsImageViewMinLodSupported()) {
         const float last_level =
             static_cast<float>(info.range.base.level + info.range.extent.levels - 1);
-        min_lod_ci.minLod = std::min(static_cast<float>(info.min_lod) / 256.f, last_level);
+        const float min_lod = static_cast<float>(info.min_lod) / 256.f;
+        min_lod_ci.minLod = min_lod < last_level ? min_lod : last_level;
         usage_ci.pNext = &min_lod_ci;
     }
     // When sampling D32/D16 texture from shader, the T# specifies R32/R16 format so adjust it.
@@ -150,9 +153,9 @@ ImageView::ImageView(const Vulkan::Instance& instance, const ImageViewInfo& info
     ASSERT_MSG(view_result == VK_SUCCESS, "Failed to create image view: %s",
                vk::to_string(static_cast<vk::Result>(view_result)).c_str());
 
-    const auto view_aspect = aspect & vk::ImageAspectFlagBits::eDepth     ? "Depth"
-                             : aspect & vk::ImageAspectFlagBits::eStencil ? "Stencil"
-                                                                          : "Color";
+    const char* const view_aspect = aspect & vk::ImageAspectFlagBits::eDepth     ? "Depth"
+                                    : aspect & vk::ImageAspectFlagBits::eStencil ? "Stencil"
+                                                                                 : "Color";
     Vulkan::SetObjectName(
         instance.GetDevice(), Handle(), "ImageView %ux%ux%u 0x%" PRIxPTR ":0x%x %d:%d %d:%d (%s)",
         image.info.size.width, image.info.size.height, image.info.size.depth,

@@ -3,10 +3,6 @@
 
 #pragma once
 
-#include <deque>
-#include <vector>
-#include "common/small_vector.h"
-
 #include "common/types.h"
 #include "common/u64_map.h"
 #include "video_core/renderer_vulkan/vk_common.h"
@@ -22,31 +18,31 @@ class Semaphore;
  */
 class ResourcePool {
 public:
-    explicit ResourcePool() = default;
-    explicit ResourcePool(Semaphore* work_semaphore, std::size_t grow_step);
-    virtual ~ResourcePool() = default;
+    explicit ResourcePool(Semaphore* work_semaphore, size_t grow_step);
+    virtual ~ResourcePool();
 
-    ResourcePool& operator=(ResourcePool&&) noexcept = default;
-    ResourcePool(ResourcePool&&) noexcept = default;
-
-    ResourcePool& operator=(const ResourcePool&) = default;
-    ResourcePool(const ResourcePool&) = default;
+    ResourcePool(const ResourcePool&) = delete;
+    ResourcePool& operator=(const ResourcePool&) = delete;
 
 protected:
-    std::size_t CommitResource();
+    size_t CommitResource();
 
     /// Called when a chunk of resources have to be allocated.
-    virtual void Allocate(std::size_t begin, std::size_t end) = 0;
+    virtual void Allocate(size_t begin, size_t end) = 0;
 
 private:
     /// Manages pool overflow allocating new resources.
-    std::size_t ManageOverflow();
+    size_t ManageOverflow();
+
+    /// The first free resource in [begin, end), taken for the current tick; @end when none
+    size_t Search(size_t begin, size_t end, u64 gpu_tick);
 
 protected:
     Semaphore* work_semaphore{};
-    std::size_t grow_step = 0;     ///< Number of new resources created after an overflow
-    std::size_t hint_iterator = 0; ///< Hint to where the next free resources is likely to be found
-    std::vector<u64> ticks;        ///< Ticks for each resource
+    size_t grow_step = 0;     ///< Number of new resources created after an overflow
+    size_t hint_iterator = 0; ///< Hint to where the next free resources is likely to be found
+    u64* ticks = nullptr;     ///< Ticks for each resource
+    size_t num_ticks = 0;
 };
 
 class CommandPool final : public ResourcePool {
@@ -54,7 +50,7 @@ public:
     explicit CommandPool(const Instance& instance, Semaphore* work_semaphore);
     ~CommandPool() override;
 
-    void Allocate(std::size_t begin, std::size_t end) override;
+    void Allocate(size_t begin, size_t end) override;
 
     vk::CommandBuffer Commit();
 
@@ -62,7 +58,7 @@ private:
     const Instance& instance;
     VkDevice device;
     VkCommandPool cmd_pool{VK_NULL_HANDLE};
-    std::vector<VkCommandBuffer> cmd_buffers;
+    VkCommandBuffer* cmd_buffers = nullptr;
 };
 
 class DescriptorHeap final {
@@ -72,8 +68,9 @@ public:
     DescriptorHeap(const DescriptorHeap&) = delete;
     DescriptorHeap& operator=(const DescriptorHeap&) = delete;
 
+    /// @pool_sizes must outlive the heap
     explicit DescriptorHeap(const Instance& instance, Semaphore* work_semaphore,
-                            std::span<const VkDescriptorPoolSize> pool_sizes,
+                            const VkDescriptorPoolSize* pool_sizes, u32 num_pool_sizes,
                             u32 descriptor_heap_count = 1024);
     ~DescriptorHeap();
 
@@ -86,9 +83,19 @@ private:
     VkDevice device;
     Semaphore* work_semaphore;
     u32 descriptor_heap_count;
-    std::span<const VkDescriptorPoolSize> pool_sizes;
+    const VkDescriptorPoolSize* pool_sizes;
+    u32 num_pool_sizes;
     VkDescriptorPool curr_pool{VK_NULL_HANDLE};
-    std::deque<std::pair<VkDescriptorPool, u64>> pending_pools;
+    /// Pools out of sets, oldest first, each with the tick after which it can be reset: a ring
+    /// that doubles when full
+    struct PendingPool {
+        VkDescriptorPool pool;
+        u64 tick;
+    };
+    PendingPool* pending_pools = nullptr;
+    u32 pending_capacity = 0;
+    u32 pending_head = 0;
+    u32 pending_count = 0;
     // Sets allocated ahead for one layout, taken from the back
     struct DescSetBatch {
         VkDescriptorSet sets[DescriptorSetBatch];

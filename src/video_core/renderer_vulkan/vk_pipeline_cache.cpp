@@ -122,12 +122,10 @@ using Shader::SwStage;
 
 constexpr static auto SpirvVersion1_6 = 0x00010600U;
 
-constexpr static std::array DescriptorHeapSizes = {
-    VkDescriptorPoolSize{VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 512},
-    VkDescriptorPoolSize{VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 8192},
-    VkDescriptorPoolSize{VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 8192},
-    VkDescriptorPoolSize{VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1024},
-    VkDescriptorPoolSize{VK_DESCRIPTOR_TYPE_SAMPLER, 1024},
+constexpr static VkDescriptorPoolSize DescriptorHeapSizes[] = {
+    {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 512}, {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 8192},
+    {VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 8192}, {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1024},
+    {VK_DESCRIPTOR_TYPE_SAMPLER, 1024},
 };
 
 static u32 MapOutputs(std::span<Shader::OutputMap, 3> outputs, const AmdGpu::VsOutputControl& ctl) {
@@ -366,7 +364,8 @@ const Shader::RuntimeInfo& PipelineCache::BuildRuntimeInfo(HwStage stage, SwStag
 PipelineCache::PipelineCache(const Instance& instance_, Scheduler& scheduler_,
                              AmdGpu::Liverpool* liverpool_, u32 sparse_page_shift)
     : instance{instance_}, scheduler{scheduler_}, liverpool{liverpool_},
-      desc_heap{instance, scheduler.GetWorkSemaphore(), DescriptorHeapSizes} {
+      desc_heap{instance, scheduler.GetWorkSemaphore(), DescriptorHeapSizes,
+                sizeof(DescriptorHeapSizes) / sizeof(DescriptorHeapSizes[0])} {
     // Sized for a large game's shaders and pipelines, so they seldom grow mid-game
     ptr_table_init(&program_cache, 4096);
     ptr_table_init(&compute_pipelines, 1024);

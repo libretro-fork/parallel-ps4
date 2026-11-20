@@ -4,6 +4,12 @@ What changed in the libretro core of this fork, newest first. Changes that come 
 
 ## Unreleased
 
+- No STL or `auto` in the semaphore, samplers, image views and the resource pools (`vk_semaphore`, `sampler`, `image_view`, `vk_resource_pool`). This is part of taking the STL and `auto` out of the whole core, a file or a few at a time.
+  - **Resource pools:** the command pool's ticks and command buffers are plain arrays, grown with `realloc` when the pool overflows, as the vectors grew. The descriptor heap's used-up pools wait in a ring with room for eight, made at start and doubled only past that, instead of a `std::deque`. It takes its pool sizes as a pointer and a count, and the pipeline cache's table of them is a plain array.
+  - **Pools can no longer be copied.** Nothing copied them, and a copy would have freed their arrays twice.
+  - **The rest:** clamps and minimums written out, a sampler's custom border colour read from the guest's table as four floats, and explicit types in place of `auto`.
+  - **Unchanged:** the Vulkan calls and arguments, and the order pools are reused in.
+  - **Checks:** the Linux and Windows builds pass. Not run in a game yet.
 - No STL or `auto` in the fault manager and the tile manager, the first files of the renderer to drop them. The rule from here on: the renderer files moved to the Vulkan C API drop the STL, `std::array` and `auto` too.
   - **Fault manager:** a plain array of fault areas, and the shader's words in one block made at start instead of a `std::vector`.
   - **Tile manager:**
