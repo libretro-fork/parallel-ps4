@@ -50,11 +50,18 @@ struct ImageView {
     ImageView(const ImageView&) = delete;
     ImageView& operator=(const ImageView&) = delete;
 
-    ImageView(ImageView&&) = default;
-    ImageView& operator=(ImageView&&) = default;
+    ImageView(ImageView&& other) noexcept;
+    ImageView& operator=(ImageView&& other) noexcept;
+
+    vk::ImageView Handle() const noexcept {
+        return vk::ImageView{image_view};
+    }
 
     ImageViewInfo info;
-    vk::UniqueImageView image_view;
+
+private:
+    VkDevice device{VK_NULL_HANDLE};
+    VkImageView image_view{VK_NULL_HANDLE};
 };
 
 } // namespace VideoCore

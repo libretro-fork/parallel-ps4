@@ -767,7 +767,7 @@ Frame* Presenter::PrepareFrame(const Libraries::VideoOut::BufferAttributeGroup& 
     view_info.mapping.a = AmdGpu::CompSwizzle::One;
 
     auto& image = texture_cache.GetImage(image_id);
-    auto image_view = *image.FindView(view_info).image_view;
+    auto image_view = image.FindView(view_info).Handle();
     // Its size on the GPU, which Render Resolution may make smaller than the guest's
     const vk::Extent2D image_size = {image.HostSize().width, image.HostSize().height};
     expected_ratio = static_cast<float>(image_size.width) / static_cast<float>(image_size.height);

@@ -1272,7 +1272,7 @@ void Rasterizer::BindTextures(const Shader::Info& stage, Shader::Backend::Bindin
             image.usage.storage |= is_storage;
             image.usage.texture |= !is_storage;
 
-            image_infos.emplace_back(VK_NULL_HANDLE, *image_view.image_view,
+            image_infos.emplace_back(VK_NULL_HANDLE, image_view.Handle(),
                                      image.backing->state.layout);
         }
     }
@@ -1385,7 +1385,7 @@ RenderState Rasterizer::BeginRendering(const GraphicsPipeline* pipeline) {
         const auto clear_value =
             is_clear ? LiverpoolToVK::ColorBufferClearValue(col_buf) : vk::ClearValue{};
         auto& attachment = state.color_attachments[cb];
-        attachment.image_view = *image_view.image_view;
+        attachment.image_view = image_view.Handle();
         attachment.image_layout = image->backing->state.layout;
         attachment.clear_value = clear_value.color.uint32;
         attachment.is_clear = is_clear;
@@ -1452,7 +1452,7 @@ RenderState Rasterizer::BeginRendering(const GraphicsPipeline* pipeline) {
         state.num_layers = std::min<u32>(state.num_layers, image_view.info.range.extent.layers);
 
         auto& attachment = state.depth_stencil_attachment;
-        attachment.image_view = *image_view.image_view;
+        attachment.image_view = image_view.Handle();
         attachment.image_layout = image.backing->state.layout;
         attachment.clear_value = {};
         attachment.is_clear = 0;

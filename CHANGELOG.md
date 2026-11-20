@@ -4,6 +4,10 @@ What changed in the libretro core of this fork, newest first. Changes that come 
 
 ## Unreleased
 
+- Vulkan, image views on the C API: `ImageView` (`texture_cache/image_view`) creates and destroys its view with the C API through libretro-common's symbol wrapper.
+  - **What changes:** it holds a plain Vulkan handle and has its own move, so a view moved in the texture cache's slot vector still destroys its handle once. Its users get the view from `Handle()`, as a vulkan.hpp handle for now.
+  - **Unchanged:** the Vulkan calls and arguments are the same.
+  - **Checks:** the Linux and Windows builds pass. Not run in a game yet.
 - Vulkan, buffers on the C API: `UniqueBuffer` (`buffer_cache/buffer`) holds a plain Vulkan buffer.
   - **What changes:** it creates sparse buffers, queries device addresses and destroys buffers it made itself with the C API through libretro-common's symbol wrapper. Buffers with memory still go through the memory allocator, as before.
   - **Unchanged:** `Buffer::Handle()` still gives callers a vulkan.hpp handle, and the Vulkan calls and arguments are the same.

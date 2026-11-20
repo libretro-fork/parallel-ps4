@@ -93,11 +93,14 @@ ImageViewInfo::ImageViewInfo(const AmdGpu::DepthBuffer& depth_buffer, AmdGpu::De
 ImageView::ImageView(const Vulkan::Instance& instance, const ImageViewInfo& info_,
                      const Image& image)
     : info{info_} {
-    vk::ImageViewUsageCreateInfo usage_ci{.usage = image.usage_flags};
+    VkImageViewUsageCreateInfo usage_ci{};
+    usage_ci.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_USAGE_CREATE_INFO;
+    usage_ci.usage = static_cast<VkImageUsageFlags>(image.usage_flags);
     if (!info.is_storage) {
-        usage_ci.usage &= ~vk::ImageUsageFlagBits::eStorage;
+        usage_ci.usage &= ~VK_IMAGE_USAGE_STORAGE_BIT;
     }
-    vk::ImageViewMinLodCreateInfoEXT min_lod_ci{};
+    VkImageViewMinLodCreateInfoEXT min_lod_ci{};
+    min_lod_ci.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_MIN_LOD_CREATE_INFO_EXT;
     if (info.min_lod != 0 && instance.IsImageViewMinLodSupported()) {
         const float last_level =
             static_cast<float>(info.range.base.level + info.range.extent.levels - 1);
@@ -118,47 +121,68 @@ ImageView::ImageView(const Vulkan::Instance& instance, const ImageViewInfo& info
         aspect = vk::ImageAspectFlagBits::eStencil;
     }
 
-    const auto components = info.mapping == AmdGpu::IdentityMapping
-                                ? vk::ComponentMapping{}
-                                : Vulkan::LiverpoolToVK::ComponentMapping(info.mapping);
+    const vk::ComponentMapping components =
+        info.mapping == AmdGpu::IdentityMapping
+            ? vk::ComponentMapping{}
+            : Vulkan::LiverpoolToVK::ComponentMapping(info.mapping);
 
-    const vk::ImageViewCreateInfo image_view_ci = {
-        .pNext = &usage_ci,
-        .image = image.GetImage(),
-        .viewType = ConvertImageViewType(info.type),
-        .format = instance.GetSupportedFormat(format, image.format_features),
-        .components = components,
-        .subresourceRange{
-            .aspectMask = aspect,
-            .baseMipLevel = info.range.base.level,
-            .levelCount = info.range.extent.levels,
-            .baseArrayLayer = info.range.base.layer,
-            .layerCount = info.range.extent.layers,
-        },
-    };
+    VkImageViewCreateInfo image_view_ci{};
+    image_view_ci.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+    image_view_ci.pNext = &usage_ci;
+    image_view_ci.image = static_cast<VkImage>(image.GetImage());
+    image_view_ci.viewType = static_cast<VkImageViewType>(ConvertImageViewType(info.type));
+    image_view_ci.format =
+        static_cast<VkFormat>(instance.GetSupportedFormat(format, image.format_features));
+    image_view_ci.components = static_cast<VkComponentMapping>(components);
+    image_view_ci.subresourceRange.aspectMask = static_cast<VkImageAspectFlags>(aspect);
+    image_view_ci.subresourceRange.baseMipLevel = info.range.base.level;
+    image_view_ci.subresourceRange.levelCount = info.range.extent.levels;
+    image_view_ci.subresourceRange.baseArrayLayer = info.range.base.layer;
+    image_view_ci.subresourceRange.layerCount = info.range.extent.layers;
     if (!IsViewTypeCompatible(info.type, image.info.type)) {
         LOG_ERROR(Render_Vulkan, "image view type %s is incompatible with image type %s",
                   enum_name(&enum_names_AmdGpu_ImageType, static_cast<s64>(info.type)),
                   enum_name(&enum_names_AmdGpu_ImageType, static_cast<s64>(image.info.type)));
     }
 
-    auto [view_result, view] = instance.GetDevice().createImageViewUnique(image_view_ci);
-    ASSERT_MSG(view_result == vk::Result::eSuccess, "Failed to create image view: %s",
-               (vk::to_string(view_result)).c_str());
-    image_view = std::move(view);
+    device = static_cast<VkDevice>(instance.GetDevice());
+    const VkResult view_result = vkCreateImageView(device, &image_view_ci, nullptr, &image_view);
+    ASSERT_MSG(view_result == VK_SUCCESS, "Failed to create image view: %s",
+               vk::to_string(static_cast<vk::Result>(view_result)).c_str());
 
     const auto view_aspect = aspect & vk::ImageAspectFlagBits::eDepth     ? "Depth"
                              : aspect & vk::ImageAspectFlagBits::eStencil ? "Stencil"
                                                                           : "Color";
-    Vulkan::SetObjectName(instance.GetDevice(), *image_view,
-                          "ImageView %ux%ux%u 0x%" PRIxPTR ":0x%x %d:%d %d:%d (%s)",
-                          image.info.size.width, image.info.size.height, image.info.size.depth,
-                          image.info.guest_address, image.info.guest_size, info.range.base.level,
-                          info.range.base.level + info.range.extent.levels - 1,
-                          info.range.base.layer,
-                          info.range.base.layer + info.range.extent.layers - 1, view_aspect);
+    Vulkan::SetObjectName(
+        instance.GetDevice(), Handle(), "ImageView %ux%ux%u 0x%" PRIxPTR ":0x%x %d:%d %d:%d (%s)",
+        image.info.size.width, image.info.size.height, image.info.size.depth,
+        image.info.guest_address, image.info.guest_size, info.range.base.level,
+        info.range.base.level + info.range.extent.levels - 1, info.range.base.layer,
+        info.range.base.layer + info.range.extent.layers - 1, view_aspect);
 }
 
-ImageView::~ImageView() = default;
+ImageView::~ImageView() {
+    if (image_view != VK_NULL_HANDLE) {
+        vkDestroyImageView(device, image_view, nullptr);
+    }
+}
+
+ImageView::ImageView(ImageView&& other) noexcept
+    : info{other.info}, device{other.device}, image_view{other.image_view} {
+    other.image_view = VK_NULL_HANDLE;
+}
+
+ImageView& ImageView::operator=(ImageView&& other) noexcept {
+    if (this != &other) {
+        if (image_view != VK_NULL_HANDLE) {
+            vkDestroyImageView(device, image_view, nullptr);
+        }
+        info = other.info;
+        device = other.device;
+        image_view = other.image_view;
+        other.image_view = VK_NULL_HANDLE;
+    }
+    return *this;
+}
 
 } // namespace VideoCore
