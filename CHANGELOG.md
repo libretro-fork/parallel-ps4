@@ -4,6 +4,10 @@ What changed in the libretro core of this fork, newest first. Changes that come 
 
 ## Unreleased
 
+- Vulkan, more on the C API: the command pool, the descriptor heap (`vk_resource_pool`) and the memory allocator (`vk_memory`).
+  - **What changes:** they create, allocate, bind, reset and destroy with the C API through libretro-common's symbol wrapper, and hold plain Vulkan handles. The memory heap takes its entry points from the wrapper instead of vulkan.hpp's dispatcher.
+  - **Unchanged:** their callers still pass and get vulkan.hpp types, and the Vulkan calls and arguments are the same.
+  - **Checks:** the Linux and Windows builds pass. Not run in a game yet.
 - Vulkan, first files on the C API: shader modules (`vk_shader_util.cpp`), the timeline semaphore (`vk_semaphore`) and samplers (`sampler`) now create, wait on and destroy their objects with the C API through libretro-common's symbol wrapper, in place of vulkan.hpp.
   - **What holds the objects:** the semaphore and sampler hold plain Vulkan handles and destroy them themselves. The sampler has its own move, so a sampler moved in its LRU cache still destroys its handle once.
   - **What still uses vulkan.hpp:** the callers, who get the handles back as vulkan.hpp types where they still use those.

@@ -62,50 +62,52 @@ std::size_t ResourcePool::ManageOverflow() {
 constexpr std::size_t COMMAND_BUFFER_POOL_SIZE = 4;
 
 CommandPool::CommandPool(const Instance& instance, Semaphore* work_semaphore)
-    : ResourcePool{work_semaphore, COMMAND_BUFFER_POOL_SIZE}, instance{instance} {
-    const vk::CommandPoolCreateInfo pool_create_info = {
-        .flags = vk::CommandPoolCreateFlagBits::eTransient |
-                 vk::CommandPoolCreateFlagBits::eResetCommandBuffer,
-        .queueFamilyIndex = instance.GetGraphicsQueueFamilyIndex(),
-    };
-    const vk::Device device = instance.GetDevice();
-    auto [pool_result, pool] = device.createCommandPoolUnique(pool_create_info);
-    ASSERT_MSG(pool_result == vk::Result::eSuccess, "Failed to create command pool: %s",
-               (vk::to_string(pool_result)).c_str());
-    cmd_pool = std::move(pool);
-    SetObjectName(device, *cmd_pool, "CommandPool");
+    : ResourcePool{work_semaphore, COMMAND_BUFFER_POOL_SIZE}, instance{instance},
+      device{static_cast<VkDevice>(instance.GetDevice())} {
+    VkCommandPoolCreateInfo pool_create_info{};
+    pool_create_info.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+    pool_create_info.flags =
+        VK_COMMAND_POOL_CREATE_TRANSIENT_BIT | VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+    pool_create_info.queueFamilyIndex = instance.GetGraphicsQueueFamilyIndex();
+    const VkResult result = vkCreateCommandPool(device, &pool_create_info, nullptr, &cmd_pool);
+    ASSERT_MSG(result == VK_SUCCESS, "Failed to create command pool: %s",
+               vk::to_string(static_cast<vk::Result>(result)).c_str());
+    SetObjectName(instance.GetDevice(), vk::CommandPool{cmd_pool}, "CommandPool");
 }
 
-CommandPool::~CommandPool() = default;
+CommandPool::~CommandPool() {
+    // Its command buffers go with it
+    vkDestroyCommandPool(device, cmd_pool, nullptr);
+}
 
 void CommandPool::Allocate(std::size_t begin, std::size_t end) {
     cmd_buffers.resize(end);
 
-    const vk::CommandBufferAllocateInfo buffer_alloc_info = {
-        .commandPool = *cmd_pool,
-        .level = vk::CommandBufferLevel::ePrimary,
-        .commandBufferCount = COMMAND_BUFFER_POOL_SIZE,
-    };
+    VkCommandBufferAllocateInfo buffer_alloc_info{};
+    buffer_alloc_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+    buffer_alloc_info.commandPool = cmd_pool;
+    buffer_alloc_info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    buffer_alloc_info.commandBufferCount = COMMAND_BUFFER_POOL_SIZE;
 
-    const vk::Device device = instance.GetDevice();
-    const auto result =
-        device.allocateCommandBuffers(&buffer_alloc_info, cmd_buffers.data() + begin);
-    ASSERT(result == vk::Result::eSuccess);
+    const VkResult result =
+        vkAllocateCommandBuffers(device, &buffer_alloc_info, cmd_buffers.data() + begin);
+    ASSERT(result == VK_SUCCESS);
 
     for (std::size_t i = begin; i < end; ++i) {
-        SetObjectName(device, cmd_buffers[i], "CommandPool: Command Buffer %zu", i);
+        SetObjectName(instance.GetDevice(), vk::CommandBuffer{cmd_buffers[i]},
+                      "CommandPool: Command Buffer %zu", i);
     }
 }
 
 vk::CommandBuffer CommandPool::Commit() {
     const std::size_t index = CommitResource();
-    return cmd_buffers[index];
+    return vk::CommandBuffer{cmd_buffers[index]};
 }
 
 DescriptorHeap::DescriptorHeap(const Instance& instance, Semaphore* work_semaphore_,
                                std::span<const vk::DescriptorPoolSize> pool_sizes_,
                                u32 descriptor_heap_count_)
-    : device{instance.GetDevice()}, work_semaphore{work_semaphore_},
+    : device{static_cast<VkDevice>(instance.GetDevice())}, work_semaphore{work_semaphore_},
       descriptor_heap_count{descriptor_heap_count_}, pool_sizes{pool_sizes_} {
     // One entry per set layout in use; made once, it doubles only past that
     u64_map_init(&descriptor_sets, sizeof(DescSetBatch), 256);
@@ -114,53 +116,52 @@ DescriptorHeap::DescriptorHeap(const Instance& instance, Semaphore* work_semapho
 
 DescriptorHeap::~DescriptorHeap() {
     u64_map_free(&descriptor_sets);
-    device.destroyDescriptorPool(curr_pool);
+    vkDestroyDescriptorPool(device, curr_pool, nullptr);
     for (const auto [pool, tick] : pending_pools) {
         work_semaphore->Wait(tick);
-        device.destroyDescriptorPool(pool);
+        vkDestroyDescriptorPool(device, pool, nullptr);
     }
 }
 
 vk::DescriptorSet DescriptorHeap::Commit(vk::DescriptorSetLayout set_layout) {
-    const u64 set_key = std::bit_cast<u64>(set_layout);
+    const VkDescriptorSetLayout layout = static_cast<VkDescriptorSetLayout>(set_layout);
+    const u64 set_key = std::bit_cast<u64>(layout);
     auto* batch = static_cast<DescSetBatch*>(u64_map_insert(&descriptor_sets, set_key, nullptr));
     ASSERT(batch);
 
     // Check if allocated sets exist and pick one.
     if (batch->count != 0) {
-        return batch->sets[--batch->count];
+        return vk::DescriptorSet{batch->sets[--batch->count]};
     }
 
-    std::array<vk::DescriptorSetLayout, DescriptorSetBatch> layouts;
-    layouts.fill(set_layout);
+    std::array<VkDescriptorSetLayout, DescriptorSetBatch> layouts;
+    layouts.fill(layout);
 
-    vk::DescriptorSetAllocateInfo alloc_info = {
-        .descriptorPool = curr_pool,
-        .descriptorSetCount = DescriptorSetBatch,
-        .pSetLayouts = layouts.data(),
-    };
+    VkDescriptorSetAllocateInfo alloc_info{};
+    alloc_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+    alloc_info.descriptorPool = curr_pool;
+    alloc_info.descriptorSetCount = DescriptorSetBatch;
+    alloc_info.pSetLayouts = layouts.data();
 
     // Attempt to allocate the descriptor set batch straight into the table.
-    auto* sets = reinterpret_cast<vk::DescriptorSet*>(batch->sets);
-    auto result = device.allocateDescriptorSets(&alloc_info, sets);
-    if (result == vk::Result::eSuccess) {
+    VkResult result = vkAllocateDescriptorSets(device, &alloc_info, batch->sets);
+    if (result == VK_SUCCESS) {
         batch->count = DescriptorSetBatch - 1;
-        return sets[DescriptorSetBatch - 1];
+        return vk::DescriptorSet{batch->sets[DescriptorSetBatch - 1]};
     }
 
     // The pool has run out. Record current tick and place it in pending list.
-    ASSERT_MSG(
-        result == vk::Result::eErrorOutOfPoolMemory || result == vk::Result::eErrorFragmentedPool,
-        "Unexpected error during descriptor set allocation: %s", (vk::to_string(result)).c_str());
+    ASSERT_MSG(result == VK_ERROR_OUT_OF_POOL_MEMORY || result == VK_ERROR_FRAGMENTED_POOL,
+               "Unexpected error during descriptor set allocation: %s",
+               vk::to_string(static_cast<vk::Result>(result)).c_str());
     pending_pools.emplace_back(curr_pool, work_semaphore->CurrentTick());
     if (const auto [pool, tick] = pending_pools.front(); work_semaphore->IsFree(tick)) {
         curr_pool = pool;
         pending_pools.pop_front();
 
-        const auto reset_result = device.resetDescriptorPool(curr_pool);
-        ASSERT_MSG(reset_result == vk::Result::eSuccess,
-                   "Unexpected error resetting descriptor pool: %s",
-                   (vk::to_string(reset_result)).c_str());
+        const VkResult reset_result = vkResetDescriptorPool(device, curr_pool, 0);
+        ASSERT_MSG(reset_result == VK_SUCCESS, "Unexpected error resetting descriptor pool: %s",
+                   vk::to_string(static_cast<vk::Result>(reset_result)).c_str());
     } else {
         CreateDescriptorPool();
     }
@@ -168,29 +169,27 @@ vk::DescriptorSet DescriptorHeap::Commit(vk::DescriptorSetLayout set_layout) {
     // We've changed pool so also reset descriptor batch cache.
     u64_map_clear(&descriptor_sets);
     batch = static_cast<DescSetBatch*>(u64_map_insert(&descriptor_sets, set_key, nullptr));
-    sets = reinterpret_cast<vk::DescriptorSet*>(batch->sets);
 
     // Attempt to allocate again with fresh pool.
     alloc_info.descriptorPool = curr_pool;
-    result = device.allocateDescriptorSets(&alloc_info, sets);
-    ASSERT_MSG(result == vk::Result::eSuccess,
-               "Unexpected error during descriptor set allocation %s",
-               (vk::to_string(result)).c_str());
+    result = vkAllocateDescriptorSets(device, &alloc_info, batch->sets);
+    ASSERT_MSG(result == VK_SUCCESS, "Unexpected error during descriptor set allocation %s",
+               vk::to_string(static_cast<vk::Result>(result)).c_str());
     batch->count = DescriptorSetBatch - 1;
-    return sets[DescriptorSetBatch - 1];
+    return vk::DescriptorSet{batch->sets[DescriptorSetBatch - 1]};
 }
 
 void DescriptorHeap::CreateDescriptorPool() {
-    const vk::DescriptorPoolCreateInfo pool_info = {
-        .flags = vk::DescriptorPoolCreateFlagBits::eUpdateAfterBind,
-        .maxSets = descriptor_heap_count,
-        .poolSizeCount = static_cast<u32>(pool_sizes.size()),
-        .pPoolSizes = pool_sizes.data(),
-    };
-    auto [pool_result, pool] = device.createDescriptorPool(pool_info);
-    ASSERT_MSG(pool_result == vk::Result::eSuccess, "Failed to create descriptor pool: %s",
-               (vk::to_string(pool_result)).c_str());
-    curr_pool = pool;
+    VkDescriptorPoolCreateInfo pool_info{};
+    pool_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+    pool_info.flags = VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT;
+    pool_info.maxSets = descriptor_heap_count;
+    pool_info.poolSizeCount = static_cast<u32>(pool_sizes.size());
+    // vk::DescriptorPoolSize is VkDescriptorPoolSize's layout (vulkan.hpp asserts it)
+    pool_info.pPoolSizes = reinterpret_cast<const VkDescriptorPoolSize*>(pool_sizes.data());
+    const VkResult result = vkCreateDescriptorPool(device, &pool_info, nullptr, &curr_pool);
+    ASSERT_MSG(result == VK_SUCCESS, "Failed to create descriptor pool: %s",
+               vk::to_string(static_cast<vk::Result>(result)).c_str());
 }
 
 } // namespace Vulkan

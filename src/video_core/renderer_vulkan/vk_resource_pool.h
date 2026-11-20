@@ -60,8 +60,9 @@ public:
 
 private:
     const Instance& instance;
-    vk::UniqueCommandPool cmd_pool;
-    std::vector<vk::CommandBuffer> cmd_buffers;
+    VkDevice device;
+    VkCommandPool cmd_pool{VK_NULL_HANDLE};
+    std::vector<VkCommandBuffer> cmd_buffers;
 };
 
 class DescriptorHeap final {
@@ -82,12 +83,12 @@ private:
     void CreateDescriptorPool();
 
 private:
-    vk::Device device;
+    VkDevice device;
     Semaphore* work_semaphore;
     u32 descriptor_heap_count;
     std::span<const vk::DescriptorPoolSize> pool_sizes;
-    vk::DescriptorPool curr_pool;
-    std::deque<std::pair<vk::DescriptorPool, u64>> pending_pools;
+    VkDescriptorPool curr_pool{VK_NULL_HANDLE};
+    std::deque<std::pair<VkDescriptorPool, u64>> pending_pools;
     // Sets allocated ahead for one layout, taken from the back
     struct DescSetBatch {
         VkDescriptorSet sets[DescriptorSetBatch];

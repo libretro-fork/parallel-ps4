@@ -58,7 +58,7 @@ private:
                         const vk_heap_request_t& request, MemoryAllocation& allocation);
     void Free(MemoryAllocation allocation);
 
-    vk::Device device;
+    VkDevice device;
     vk_heap_t* heap{};
     Common::Combiner combiner;
 };

@@ -44,23 +44,23 @@ MemoryAllocator::MemoryAllocator(vk::PhysicalDevice physical_device, vk::Device 
                                  const vk::PhysicalDeviceMemoryProperties& memory,
                                  const vk::PhysicalDeviceLimits& limits, bool device_address,
                                  bool memory_budget)
-    : device{device_} {
-    const auto& dispatch = VULKAN_HPP_DEFAULT_DISPATCHER;
+    : device{static_cast<VkDevice>(device_)} {
     vk_heap_info_t info{};
     info.physical_device = static_cast<VkPhysicalDevice>(physical_device);
-    info.device = static_cast<VkDevice>(device);
+    info.device = device;
     info.memory = static_cast<VkPhysicalDeviceMemoryProperties>(memory);
     info.buffer_image_granularity = limits.bufferImageGranularity;
     info.non_coherent_atom_size = limits.nonCoherentAtomSize;
     info.device_address = device_address;
-    info.fns.allocate_memory = dispatch.vkAllocateMemory;
-    info.fns.free_memory = dispatch.vkFreeMemory;
-    info.fns.map_memory = dispatch.vkMapMemory;
-    info.fns.unmap_memory = dispatch.vkUnmapMemory;
-    info.fns.flush_ranges = dispatch.vkFlushMappedMemoryRanges;
-    info.fns.invalidate_ranges = dispatch.vkInvalidateMappedMemoryRanges;
+    // The symbol wrapper's entry points
+    info.fns.allocate_memory = vkAllocateMemory;
+    info.fns.free_memory = vkFreeMemory;
+    info.fns.map_memory = vkMapMemory;
+    info.fns.unmap_memory = vkUnmapMemory;
+    info.fns.flush_ranges = vkFlushMappedMemoryRanges;
+    info.fns.invalidate_ranges = vkInvalidateMappedMemoryRanges;
     info.fns.get_memory_properties2 =
-        memory_budget ? dispatch.vkGetPhysicalDeviceMemoryProperties2 : nullptr;
+        memory_budget ? vkGetPhysicalDeviceMemoryProperties2 : nullptr;
     heap = vk_heap_create(&info);
     ASSERT_MSG(heap, "Failed to create the Vulkan memory heap");
 }
@@ -87,56 +87,67 @@ void MemoryAllocator::Free(MemoryAllocation allocation) {
 vk::Result MemoryAllocator::CreateImage(const vk::ImageCreateInfo& image_ci, bool within_budget,
                                         vk::Image& image, MemoryAllocation& allocation) {
     allocation = nullptr;
-    auto [result, new_image] = device.createImage(image_ci);
-    if (result != vk::Result::eSuccess) {
-        return result;
+    VkImage new_image = VK_NULL_HANDLE;
+    VkResult result = vkCreateImage(device, &static_cast<const VkImageCreateInfo&>(image_ci),
+                                    nullptr, &new_image);
+    if (result != VK_SUCCESS) {
+        return static_cast<vk::Result>(result);
     }
-    const auto chain =
-        device
-            .getImageMemoryRequirements2<vk::MemoryRequirements2, vk::MemoryDedicatedRequirements>(
-                vk::ImageMemoryRequirementsInfo2{.image = new_image});
-    const auto& dedicated = chain.get<vk::MemoryDedicatedRequirements>();
+    VkImageMemoryRequirementsInfo2 requirements_info{};
+    requirements_info.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_REQUIREMENTS_INFO_2;
+    requirements_info.image = new_image;
+    VkMemoryDedicatedRequirements dedicated{};
+    dedicated.sType = VK_STRUCTURE_TYPE_MEMORY_DEDICATED_REQUIREMENTS;
+    VkMemoryRequirements2 requirements2{};
+    requirements2.sType = VK_STRUCTURE_TYPE_MEMORY_REQUIREMENTS_2;
+    requirements2.pNext = &dedicated;
+    vkGetImageMemoryRequirements2(device, &requirements_info, &requirements2);
     vk_heap_request_t request = RequestFor(MemoryUsage::DeviceLocal);
-    request.image = static_cast<VkImage>(new_image);
+    request.image = new_image;
     if (image_ci.tiling == vk::ImageTiling::eLinear) {
         request.flags |= VK_HEAP_LINEAR;
     }
     if (within_budget) {
         request.flags |= VK_HEAP_WITHIN_BUDGET;
     }
-    const VkMemoryRequirements requirements =
-        chain.get<vk::MemoryRequirements2>().memoryRequirements;
-    result = Allocate(requirements,
-                      dedicated.requiresDedicatedAllocation || dedicated.prefersDedicatedAllocation,
-                      request, allocation);
-    if (result == vk::Result::eSuccess) {
-        result = device.bindImageMemory(new_image, allocation->memory, allocation->offset);
+    result = static_cast<VkResult>(
+        Allocate(requirements2.memoryRequirements,
+                 dedicated.requiresDedicatedAllocation || dedicated.prefersDedicatedAllocation,
+                 request, allocation));
+    if (result == VK_SUCCESS) {
+        result = vkBindImageMemory(device, new_image, allocation->memory, allocation->offset);
     }
-    if (result != vk::Result::eSuccess) {
-        device.destroyImage(new_image);
+    if (result != VK_SUCCESS) {
+        vkDestroyImage(device, new_image, nullptr);
         Free(allocation);
         allocation = nullptr;
-        return result;
+        return static_cast<vk::Result>(result);
     }
-    image = new_image;
-    return result;
+    image = vk::Image{new_image};
+    return vk::Result::eSuccess;
 }
 
 vk::Result MemoryAllocator::CreateBuffer(const vk::BufferCreateInfo& buffer_ci, MemoryUsage usage,
                                          bool dedicated_, bool within_budget, vk::Buffer& buffer,
                                          MemoryAllocation& allocation) {
     allocation = nullptr;
-    auto [result, new_buffer] = device.createBuffer(buffer_ci);
-    if (result != vk::Result::eSuccess) {
-        return result;
+    VkBuffer new_buffer = VK_NULL_HANDLE;
+    VkResult result = vkCreateBuffer(device, &static_cast<const VkBufferCreateInfo&>(buffer_ci),
+                                     nullptr, &new_buffer);
+    if (result != VK_SUCCESS) {
+        return static_cast<vk::Result>(result);
     }
-    const auto chain =
-        device
-            .getBufferMemoryRequirements2<vk::MemoryRequirements2, vk::MemoryDedicatedRequirements>(
-                vk::BufferMemoryRequirementsInfo2{.buffer = new_buffer});
-    const auto& dedicated = chain.get<vk::MemoryDedicatedRequirements>();
+    VkBufferMemoryRequirementsInfo2 requirements_info{};
+    requirements_info.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_REQUIREMENTS_INFO_2;
+    requirements_info.buffer = new_buffer;
+    VkMemoryDedicatedRequirements dedicated{};
+    dedicated.sType = VK_STRUCTURE_TYPE_MEMORY_DEDICATED_REQUIREMENTS;
+    VkMemoryRequirements2 requirements2{};
+    requirements2.sType = VK_STRUCTURE_TYPE_MEMORY_REQUIREMENTS_2;
+    requirements2.pNext = &dedicated;
+    vkGetBufferMemoryRequirements2(device, &requirements_info, &requirements2);
     vk_heap_request_t request = RequestFor(usage);
-    request.buffer = static_cast<VkBuffer>(new_buffer);
+    request.buffer = new_buffer;
     request.flags |= VK_HEAP_LINEAR;
     if (dedicated_) {
         request.flags |= VK_HEAP_DEDICATED;
@@ -144,34 +155,33 @@ vk::Result MemoryAllocator::CreateBuffer(const vk::BufferCreateInfo& buffer_ci, 
     if (within_budget) {
         request.flags |= VK_HEAP_WITHIN_BUDGET;
     }
-    const VkMemoryRequirements requirements =
-        chain.get<vk::MemoryRequirements2>().memoryRequirements;
-    result = Allocate(requirements,
-                      dedicated.requiresDedicatedAllocation || dedicated.prefersDedicatedAllocation,
-                      request, allocation);
-    if (result == vk::Result::eSuccess) {
-        result = device.bindBufferMemory(new_buffer, allocation->memory, allocation->offset);
+    result = static_cast<VkResult>(
+        Allocate(requirements2.memoryRequirements,
+                 dedicated.requiresDedicatedAllocation || dedicated.prefersDedicatedAllocation,
+                 request, allocation));
+    if (result == VK_SUCCESS) {
+        result = vkBindBufferMemory(device, new_buffer, allocation->memory, allocation->offset);
     }
-    if (result != vk::Result::eSuccess) {
-        device.destroyBuffer(new_buffer);
+    if (result != VK_SUCCESS) {
+        vkDestroyBuffer(device, new_buffer, nullptr);
         Free(allocation);
         allocation = nullptr;
-        return result;
+        return static_cast<vk::Result>(result);
     }
-    buffer = new_buffer;
-    return result;
+    buffer = vk::Buffer{new_buffer};
+    return vk::Result::eSuccess;
 }
 
 void MemoryAllocator::DestroyImage(vk::Image image, MemoryAllocation allocation) {
     if (image) {
-        device.destroyImage(image);
+        vkDestroyImage(device, static_cast<VkImage>(image), nullptr);
     }
     Free(allocation);
 }
 
 void MemoryAllocator::DestroyBuffer(vk::Buffer buffer, MemoryAllocation allocation) {
     if (buffer) {
-        device.destroyBuffer(buffer);
+        vkDestroyBuffer(device, static_cast<VkBuffer>(buffer), nullptr);
     }
     Free(allocation);
 }
