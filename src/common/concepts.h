@@ -107,6 +107,55 @@ inline constexpr bool IsUnsigned = [] {
     }
 }();
 
+template <typename T>
+inline constexpr bool IsReference = false;
+template <typename T>
+inline constexpr bool IsReference<T&> = true;
+template <typename T>
+inline constexpr bool IsReference<T&&> = true;
+
+/// Whether T is a signed integer type, as std::is_signed_v is for integers
+template <typename T>
+inline constexpr bool IsSigned = [] {
+    if constexpr (IsIntegral<T>) {
+        return T(-1) < T(0);
+    } else {
+        return false;
+    }
+}();
+
+/// T's underlying type for an enumeration, T itself otherwise
+template <typename T, bool = __is_enum(T)>
+struct UnderlyingOf {
+    using Type = T;
+};
+template <typename T>
+struct UnderlyingOf<T, true> {
+    using Type = __underlying_type(T);
+};
+
+/// The unsigned integer type as wide as T
+template <size_t Size>
+struct UnsignedOfSize;
+template <>
+struct UnsignedOfSize<1> {
+    using Type = unsigned char;
+};
+template <>
+struct UnsignedOfSize<2> {
+    using Type = unsigned short;
+};
+template <>
+struct UnsignedOfSize<4> {
+    using Type = unsigned int;
+};
+template <>
+struct UnsignedOfSize<8> {
+    using Type = unsigned long long;
+};
+template <typename T>
+using MakeUnsigned = typename UnsignedOfSize<sizeof(T)>::Type;
+
 /// The type at @I of Args
 template <size_t I, typename... Args>
 struct TypeAt;

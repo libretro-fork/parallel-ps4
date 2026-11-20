@@ -3,28 +3,27 @@
 
 #pragma once
 
-#include <type_traits>
 #include "common/types.h"
 
 #define DECLARE_ENUM_FLAG_OPERATORS(type)                                                          \
     [[nodiscard]] constexpr type operator|(type a, type b) noexcept {                              \
-        using T = std::underlying_type_t<type>;                                                    \
+        using T = __underlying_type(type);                                                         \
         return static_cast<type>(static_cast<T>(a) | static_cast<T>(b));                           \
     }                                                                                              \
     [[nodiscard]] constexpr type operator&(type a, type b) noexcept {                              \
-        using T = std::underlying_type_t<type>;                                                    \
+        using T = __underlying_type(type);                                                         \
         return static_cast<type>(static_cast<T>(a) & static_cast<T>(b));                           \
     }                                                                                              \
     [[nodiscard]] constexpr type operator^(type a, type b) noexcept {                              \
-        using T = std::underlying_type_t<type>;                                                    \
+        using T = __underlying_type(type);                                                         \
         return static_cast<type>(static_cast<T>(a) ^ static_cast<T>(b));                           \
     }                                                                                              \
     [[nodiscard]] constexpr type operator<<(type a, type b) noexcept {                             \
-        using T = std::underlying_type_t<type>;                                                    \
+        using T = __underlying_type(type);                                                         \
         return static_cast<type>(static_cast<T>(a) << static_cast<T>(b));                          \
     }                                                                                              \
     [[nodiscard]] constexpr type operator>>(type a, type b) noexcept {                             \
-        using T = std::underlying_type_t<type>;                                                    \
+        using T = __underlying_type(type);                                                         \
         return static_cast<type>(static_cast<T>(a) >> static_cast<T>(b));                          \
     }                                                                                              \
     constexpr type& operator|=(type& a, type b) noexcept {                                         \
@@ -48,15 +47,15 @@
         return a;                                                                                  \
     }                                                                                              \
     [[nodiscard]] constexpr type operator~(type key) noexcept {                                    \
-        using T = std::underlying_type_t<type>;                                                    \
+        using T = __underlying_type(type);                                                         \
         return static_cast<type>(~static_cast<T>(key));                                            \
     }                                                                                              \
     [[nodiscard]] constexpr bool True(type key) noexcept {                                         \
-        using T = std::underlying_type_t<type>;                                                    \
+        using T = __underlying_type(type);                                                         \
         return static_cast<T>(key) != 0;                                                           \
     }                                                                                              \
     [[nodiscard]] constexpr bool False(type key) noexcept {                                        \
-        using T = std::underlying_type_t<type>;                                                    \
+        using T = __underlying_type(type);                                                         \
         return static_cast<T>(key) == 0;                                                           \
     }
 
@@ -65,7 +64,7 @@ namespace Common {
 template <typename T>
 class Flags {
 public:
-    using IntType = std::underlying_type_t<T>;
+    using IntType = __underlying_type(T);
 
     Flags() {}
 

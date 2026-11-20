@@ -1,10 +1,9 @@
 // SPDX-FileCopyrightText: Copyright 2026 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
-#include <cstdarg>
-#include <cstdio>
-#include <cstring>
-#include <string_view>
+#include <stdarg.h>
+#include <stdio.h>
+#include <string.h>
 
 #include "common/c_bridge.h"
 #include "common/logging/log.h"
@@ -46,22 +45,21 @@ extern "C" void c_log(c_log_class log_class, c_log_level level, const char* func
     char buf[1024];
     va_list ap;
     va_start(ap, fmt);
-    std::vsnprintf(buf, sizeof(buf), fmt, ap);
+    vsnprintf(buf, sizeof(buf), fmt, ap);
     va_end(ap);
-    Common::Log::Log(cls, lvl, "c", 0, func, "%.*s",
-                     static_cast<int>((std::string_view(buf)).size()),
-                     (std::string_view(buf)).data());
+    Common::Log::Log(cls, lvl, "c", 0, func, "%s", buf);
 }
 
 extern "C" size_t c_get_user_path(c_user_path type, char* s, size_t len) {
-    const auto& path = Common::FS::GetUserPath(static_cast<Common::FS::PathType>(type));
-    const auto u8 = path.u8string();
+    // The table's own UTF-8 copy: no string made
+    const char* path = Common::FS::GetUserPathUTF8(static_cast<Common::FS::PathType>(type));
+    const size_t size = strlen(path);
     if (len) {
-        const size_t n = u8.size() < len ? u8.size() : len - 1;
-        std::memcpy(s, u8.data(), n);
+        const size_t n = size < len ? size : len - 1;
+        memcpy(s, path, n);
         s[n] = '\0';
     }
-    return u8.size();
+    return size;
 }
 
 extern "C" const char* c_get_scm_rev(void) {

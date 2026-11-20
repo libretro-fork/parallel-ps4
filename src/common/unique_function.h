@@ -3,9 +3,6 @@
 
 #pragma once
 
-#include <memory>
-#include <utility>
-
 namespace Common {
 
 /// General purpose function wrapper similar to std::function.
@@ -22,11 +19,11 @@ class UniqueFunction {
     template <typename Functor>
     class Callable final : public CallableBase {
     public:
-        Callable(Functor&& functor_) : functor{std::move(functor_)} {}
+        Callable(Functor&& functor_) : functor{static_cast<Functor&&>(functor_)} {}
         ~Callable() override = default;
 
         ResultType operator()(Args&&... args) override {
-            return functor(std::forward<Args>(args)...);
+            return functor(static_cast<Args&&>(args)...);
         }
 
     private:
@@ -38,24 +35,36 @@ public:
 
     template <typename Functor>
     UniqueFunction(Functor&& functor)
-        : callable{std::make_unique<Callable<Functor>>(std::move(functor))} {}
+        : callable{new Callable<Functor>(static_cast<Functor&&>(functor))} {}
 
-    UniqueFunction& operator=(UniqueFunction&& rhs) noexcept = default;
-    UniqueFunction(UniqueFunction&& rhs) noexcept = default;
+    UniqueFunction& operator=(UniqueFunction&& rhs) noexcept {
+        if (this != &rhs) {
+            delete callable;
+            callable = rhs.callable;
+            rhs.callable = nullptr;
+        }
+        return *this;
+    }
+    UniqueFunction(UniqueFunction&& rhs) noexcept : callable{rhs.callable} {
+        rhs.callable = nullptr;
+    }
+    ~UniqueFunction() {
+        delete callable;
+    }
 
     UniqueFunction& operator=(const UniqueFunction&) = delete;
     UniqueFunction(const UniqueFunction&) = delete;
 
     ResultType operator()(Args&&... args) const {
-        return (*callable)(std::forward<Args>(args)...);
+        return (*callable)(static_cast<Args&&>(args)...);
     }
 
     explicit operator bool() const noexcept {
-        return static_cast<bool>(callable);
+        return callable != nullptr;
     }
 
 private:
-    std::unique_ptr<CallableBase> callable;
+    CallableBase* callable = nullptr;
 };
 
 } // namespace Common

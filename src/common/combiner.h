@@ -3,15 +3,13 @@
 
 #pragma once
 
-#include <atomic>
-#include <memory>
-#include <optional>
-#include <type_traits>
-#include <utility>
+#include <new>
 
 #include <queues/mpsc_stack.h>
 #include <retro_atomic.h>
 #include <rthreads/retro_eventcount.h>
+
+#include "common/concepts.h"
 
 namespace Common {
 
@@ -37,21 +35,26 @@ public:
 
     /// Runs @func with no other function of this Combiner running, and returns what it returns.
     template <typename F>
-    auto Run(F&& func) -> std::invoke_result_t<F&> {
-        using R = std::invoke_result_t<F&>;
-        if constexpr (std::is_void_v<R>) {
-            RunErased(const_cast<void*>(static_cast<const void*>(std::addressof(func))),
-                      [](void* f) { (*static_cast<std::remove_reference_t<F>*>(f))(); });
-        } else if constexpr (std::is_reference_v<R>) {
-            std::remove_reference_t<R>* result = nullptr;
-            auto call = [&] { result = std::addressof(func()); };
+    auto Run(F&& func) -> decltype(func()) {
+        using R = decltype(func());
+        using Func = typename RemoveReference<F>::Type;
+        if constexpr (IsSame<R, void>) {
+            RunErased(const_cast<void*>(static_cast<const void*>(__builtin_addressof(func))),
+                      [](void* f) { (*static_cast<Func*>(f))(); });
+        } else if constexpr (IsReference<R>) {
+            typename RemoveReference<R>::Type* result = nullptr;
+            auto call = [&] { result = __builtin_addressof(func()); };
             RunErased(&call, [](void* f) { (*static_cast<decltype(call)*>(f))(); });
             return static_cast<R>(*result);
         } else {
-            std::optional<R> result;
-            auto call = [&] { result.emplace(func()); };
+            // Made in place by the function's run, moved out and ended here
+            alignas(R) unsigned char storage[sizeof(R)];
+            auto call = [&] { new (storage) R(func()); };
             RunErased(&call, [](void* f) { (*static_cast<decltype(call)*>(f))(); });
-            return std::move(*result);
+            R* made = __builtin_launder(reinterpret_cast<R*>(storage));
+            R result(static_cast<R&&>(*made));
+            made->~R();
+            return result;
         }
     }
 

@@ -59,7 +59,7 @@ void CalculateOrientation(const Libraries::Pad::OrbisFVector3& angular_velocity,
 // Copied out of the seqlock as plain memory
 static_assert(std::is_trivially_copyable_v<State>);
 
-GameController::GameController() : m_states_queue(64) {
+GameController::GameController() {
     retro_seqlock_init(&m_published_seq);
 }
 
@@ -93,11 +93,10 @@ int GameController::ReadStates(State* states, int states_num) {
 
         int read_count = 0;
         while (read_count < states_num) {
-            auto state = m_states_queue.Pop();
-            if (!state) {
+            if (!m_states_queue.Pop(&states[read_count])) {
                 break;
             }
-            states[read_count++] = std::move(*state);
+            read_count++;
         }
         return read_count;
     });

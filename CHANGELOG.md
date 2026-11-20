@@ -4,6 +4,14 @@ What changed in the libretro core of this fork, newest first. Changes that come 
 
 ## Unreleased
 
+- No STL in `common`'s `bit_field.h`, `enum.h`, `combiner.h`, `unique_function.h`, `ring_buffer_queue.h` and `c_bridge.cpp`.
+  - **Traits:** `concepts.h` gains `IsReference`, `IsSigned`, `UnderlyingOf` and `MakeUnsigned`. `BitField` and the enum flag operators use them, and the compiler's `__underlying_type` and `__is_trivially_copyable`.
+  - **Combiner:** `Run` makes a returned value in place in a buffer on the caller's stack, moves it out and ends it, as `std::optional` did.
+  - **UniqueFunction:** holds a plain pointer, freed by its own destructor and moves.
+  - **Input queue:** `RingBufferQueue` is a fixed array of `N` (64 for the controller), not a vector made at start. `Pop` moves the oldest state straight into the caller's array instead of through an `std::optional`.
+  - **C bridge:** `c_get_user_path` copies the table's UTF-8 path, with no string made from the `std::filesystem::path` on each call. `c_log` passes its text with `%s`.
+  - **Headers:** `buffer_cache.h`, `resource.h`, `reinterpret.h` and the inverse ballot pass include `<memory>` or `<limits>` themselves now.
+  - **Checks:** the combiner's value, reference and void runs, the queue's wrap, `UniqueFunction`'s moves and signed, enum and unsigned `BitField`s were checked in a small program under AddressSanitizer. The Linux and Windows builds pass. Not run in a game yet.
 - No STL in `common`'s small headers: `types.h`, `concepts.h`, `endian.h`, `alignment.h`, `div_ceil.h`, `func_traits.h`, `incremental_id.h`, `lru_cache.h`, `multi_level_page_table.h`, `published.h`, `scope_exit.h`, `uint128.h`, `scm_rev`, and the includes of `logging/classes.h`, `native_clock.h` and `slab_heap.h`.
   - **Traits:** `concepts.h` holds the core's own, written out by hand: `IsIntegral`, `IsUnsigned`, `IsSame`, `RemoveCV`, `RemoveReference`, `TypeAt` and `ByteSwap`. `IsContiguousContainer` asks for an iterator type, `data()` and `size()`. The unused `DerivedFrom`, `ConvertibleTo`, `IsArithmetic` and the old `IsIntegral` concept are gone.
   - **Endian:** `LittleEndian` and `BigEndian` are chosen for a little-endian host, which the build now checks, instead of through `<bit>`.

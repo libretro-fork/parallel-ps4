@@ -4,9 +4,9 @@
 
 #pragma once
 
-#include <cstddef>
-#include <limits>
-#include <type_traits>
+#include <stddef.h>
+
+#include "common/concepts.h"
 
 /*
  * Abstract bitfield class
@@ -79,24 +79,21 @@
  * sizeof(StorageType).
  */
 #pragma pack(1)
-template <std::size_t Position, std::size_t Bits, typename T>
+template <size_t Position, size_t Bits, typename T>
 struct BitField {
 
     using Type = T;
 
     // UnderlyingType is T for non-enum types and the underlying type of T if
-    // T is an enumeration. Note that T is wrapped within an enable_if in the
-    // former case to workaround compile errors which arise when using
-    // std::underlying_type<T>::type directly.
-    using UnderlyingType = typename std::conditional_t<std::is_enum_v<T>, std::underlying_type<T>,
-                                                       std::enable_if<true, T>>::type;
+    // T is an enumeration.
+    using UnderlyingType = typename Common::UnderlyingOf<T>::Type;
 
     // We store the value as the unsigned type to avoid undefined behaviour on value shifting
-    using StorageType = std::make_unsigned_t<UnderlyingType>;
+    using StorageType = Common::MakeUnsigned<UnderlyingType>;
 
     /// Constants to allow limited introspection of fields if needed
-    static constexpr std::size_t position = Position;
-    static constexpr std::size_t bits = Bits;
+    static constexpr size_t position = Position;
+    static constexpr size_t bits = Bits;
     static constexpr StorageType mask = (((StorageType)~0) >> (8 * sizeof(T) - bits)) << position;
 
     /**
@@ -114,8 +111,8 @@ struct BitField {
      * union in a constexpr context.
      */
     [[nodiscard]] static constexpr T ExtractValue(const StorageType& storage) {
-        if constexpr (std::numeric_limits<UnderlyingType>::is_signed) {
-            std::size_t shift = 8 * sizeof(T) - bits;
+        if constexpr (Common::IsSigned<UnderlyingType>) {
+            size_t shift = 8 * sizeof(T) - bits;
             return static_cast<T>(static_cast<UnderlyingType>(storage << (shift - position)) >>
                                   shift);
         } else {
@@ -162,6 +159,6 @@ private:
     static_assert(position < 8 * sizeof(T), "Invalid position");
     static_assert(bits <= 8 * sizeof(T), "Invalid number of bits");
     static_assert(bits > 0, "Invalid number of bits");
-    static_assert(std::is_trivially_copyable_v<T>, "T must be trivially copyable in a BitField");
+    static_assert(__is_trivially_copyable(T), "T must be trivially copyable in a BitField");
 };
 #pragma pack()

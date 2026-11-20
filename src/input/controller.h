@@ -124,7 +124,7 @@ private:
     Common::Combiner m_combiner;
     State m_published;
     retro_seqlock_t m_published_seq{};
-    RingBufferQueue<State> m_states_queue;
+    RingBufferQueue<State, 64> m_states_queue;
 };
 
 class GameControllers {

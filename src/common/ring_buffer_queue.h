@@ -3,42 +3,37 @@
 
 #pragma once
 
-#include <optional>
-#include <utility>
-#include <vector>
-
 #include "common/types.h"
 
-template <class T>
+/// The last @N items pushed, oldest first: a full queue drops its oldest for a new one
+template <class T, u32 N>
 class RingBufferQueue {
 public:
-    RingBufferQueue(u64 size) : m_storage(size) {}
-
-    void Push(T item) {
-        const u64 index = (m_begin + m_size) % m_storage.size();
-        m_storage[index] = std::move(item);
-        if (m_size < m_storage.size()) {
+    void Push(const T& item) {
+        const u32 index = (m_begin + m_size) % N;
+        m_storage[index] = item;
+        if (m_size < N) {
             m_size += 1;
         } else {
-            m_begin = (m_begin + 1) % m_storage.size();
+            m_begin = (m_begin + 1) % N;
         }
     }
 
-    std::optional<T> Pop() {
+    /// Moves the oldest item into *@out; false when there is none
+    bool Pop(T* out) {
         if (m_size == 0) {
-            return {};
+            return false;
         }
-        const u64 index = m_begin;
-        m_begin = (m_begin + 1) % m_storage.size();
+        const u32 index = m_begin;
+        m_begin = (m_begin + 1) % N;
         m_size -= 1;
-        return std::move(m_storage[index]);
+        *out = static_cast<T&&>(m_storage[index]);
+        return true;
     }
 
-    std::optional<T> Peek() {
-        if (m_size == 0) {
-            return {};
-        }
-        return m_storage[m_begin];
+    /// The oldest item, or null
+    const T* Peek() const {
+        return m_size == 0 ? nullptr : &m_storage[m_begin];
     }
 
     void Clear() {
@@ -47,7 +42,7 @@ public:
     }
 
 private:
-    u64 m_begin = 0;
-    u64 m_size = 0;
-    std::vector<T> m_storage;
+    u32 m_begin = 0;
+    u32 m_size = 0;
+    T m_storage[N]{};
 };
