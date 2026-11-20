@@ -3,10 +3,7 @@
 
 #pragma once
 
-#include <deque>
 #include <filesystem>
-#include <string>
-#include <string_view>
 
 #include <formats/rxml.h>
 
@@ -58,7 +55,7 @@ public:
     explicit operator bool() const {
         return m_node != nullptr;
     }
-    std::string_view name() const {
+    const char* name() const {
         return m_node && m_node->name ? m_node->name : "";
     }
     Text text() const {
@@ -71,7 +68,7 @@ public:
     Node first_child() const {
         return Node(m_node ? m_node->children : nullptr);
     }
-    Node child(std::string_view name) const;
+    Node child(const char* name) const;
 
     // The child elements, in document order.
     class Iterator {
@@ -119,22 +116,28 @@ public:
     Document(const Document&) = delete;
     Document& operator=(const Document&) = delete;
 
-    // Reads and parses the file; false when it cannot be read or is not XML.
+    // Reads and parses the file at @path (UTF-8); false when it cannot be read or is not XML.
+    bool Load(const char* path);
     bool Load(const std::filesystem::path& path);
     // Writes the document back, with the attributes set on it.
+    bool Save(const char* path) const;
     bool Save(const std::filesystem::path& path) const;
 
     // The root element when it is named @name.
-    Node child(std::string_view name) const;
+    Node child(const char* name) const;
 
     // Sets @name on @node to @value, adding the attribute when the element has none.
-    void SetAttribute(Node node, const char* name, std::string value);
+    void SetAttribute(Node node, const char* name, const char* value);
 
 private:
+    // Frees what SetAttribute made
+    void FreeOwned();
+
     rxml_document_t* m_doc = nullptr;
-    // What SetAttribute adds to the tree; rxml's own nodes and strings stay in its arena.
-    std::deque<std::string> m_strings;
-    std::deque<rxml_attrib_node> m_attribs;
+    // What SetAttribute adds to the tree, a block each (its link and its text), newest first;
+    // rxml's own nodes and strings stay in its arena.
+    struct Owned;
+    Owned* m_owned = nullptr;
 };
 
 } // namespace Common::Xml

@@ -2,9 +2,9 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #pragma once
-#include <cstring>
-#include <string>
-#include <vector>
+
+#include <stddef.h>
+#include <stdint.h>
 
 #include "common/patch_catalog.h"
 
@@ -18,9 +18,10 @@ namespace MemoryPatcher {
 
 extern EXPORT uintptr_t g_eboot_address;
 extern uint64_t g_eboot_image_size;
-extern std::string g_eboot_name;
-extern std::string g_game_serial;
-extern std::string patch_file;
+/// The executable's file name, as the patches name it (AppElf)
+extern char g_eboot_name[256];
+/// The game's serial, to find its patches by
+extern char g_game_serial[32];
 
 enum PatchMask : uint8_t {
     None,
@@ -28,20 +29,18 @@ enum PatchMask : uint8_t {
     Mask_Jump32,
 };
 
+/// One line of a patch, its strings borrowed for the time it is applied
 struct patchInfo {
-    std::string gameSerial;
-    std::string modNameStr;
-    std::string offsetStr;
-    std::string valueStr;
-    std::string targetStr;
-    std::string sizeStr;
+    const char* modNameStr;
+    const char* offsetStr;
+    const char* valueStr;
+    const char* targetStr;
+    const char* sizeStr;
     bool isOffset;
     bool littleEndian;
     PatchMask patchMask;
     int maskOffset;
 };
-
-std::string convertValueToHex(const std::string type, const std::string valueStr);
 
 void OnGameLoaded();
 
@@ -54,7 +53,7 @@ void SetCatalogPatches(const char* serial, const uint32_t* on);
 
 void PatchMemory(const patchInfo& patch);
 
-static std::vector<int32_t> PatternToByte(const std::string& pattern);
-uintptr_t PatternScan(const std::string& signature);
+/// Where @signature (hex bytes, ?? for any) is first found in the executable; 0 when it is not
+uintptr_t PatternScan(const char* signature);
 
 } // namespace MemoryPatcher

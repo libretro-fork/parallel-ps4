@@ -96,7 +96,7 @@ static void ApplyUnlockToXmlFile(const std::filesystem::path& xml_path, OrbisNpT
         auto set_unlock = [&](u64 ts) {
             doc.SetAttribute(node, "unlockstate", "true");
             const auto ts_str = std::to_string(ts);
-            doc.SetAttribute(node, "timestamp", ts_str);
+            doc.SetAttribute(node, "timestamp", ts_str.c_str());
         };
 
         if (id == trophyId) {
@@ -163,7 +163,7 @@ static u32 ApplyServerTrophies(const std::filesystem::path& xml_save_file,
 
         doc.SetAttribute(node, "unlockstate", "true");
         const auto ts_str = std::to_string(match->second);
-        doc.SetAttribute(node, "timestamp", ts_str);
+        doc.SetAttribute(node, "timestamp", ts_str.c_str());
         ++applied;
     }
 

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include <algorithm>
+#include <compat/strl.h>
 #include <lrc_hash.h>
 
 #include "common/alignment.h"
@@ -320,7 +321,7 @@ void Module::LoadModuleToMemory(u32& max_tls_index) {
         if (lower_name == "eboot.bin" || lower_name.ends_with(".elf")) {
             MemoryPatcher::g_eboot_address = base_virtual_addr;
             MemoryPatcher::g_eboot_image_size = base_size;
-            MemoryPatcher::g_eboot_name = name;
+            strlcpy(MemoryPatcher::g_eboot_name, name.c_str(), sizeof(MemoryPatcher::g_eboot_name));
             MemoryPatcher::OnGameLoaded();
         }
     }

@@ -4,6 +4,17 @@ What changed in the libretro core of this fork, newest first. Changes that come 
 
 ## Unreleased
 
+- No STL in the game patches (`common/memory_patcher`) and the XML reader they and the trophies use (`common/xml`).
+  - **Game patches:** values turned into bytes with `snprintf` and `strtoull`, `strtof` and `strtod` instead of string streams and `std::stoul`; strings borrowed from the patch file while a line is applied, instead of copied into `std::string`s; the patches folder walked with libretro-common (`retro_opendir`, `fill_pathname_join_special`); the executable's name and the game's serial in plain arrays.
+  - **What a patch may now do that it could not:**
+    - A pattern that ends on the executable's last byte is found; the search stopped one short of it.
+    - A value written after `$` or `#`, which the patches' own rules call hex, is read; `std::stoul` threw on the sign and the core stopped on an assert.
+    - A value that is not of its type is logged and its line left out, where the core stopped on an assert.
+    - A `utf16` value is read as UTF-8; `mbstowcs` under the C locale read only ASCII.
+  - **Checked against the old code:** every one of 11 types against 23 values (numbers in each base and size, floats, text, hex strings, values that are not numbers): the same bytes wherever the old code gave any. Pattern search and the plain, little-endian and mask writes run on a buffer, the pattern at the very end included.
+  - **Removed:** `patch_file`, a patch given on a command line, which nothing set, and the restart argument that passed it on.
+  - **XML reader:** element names are C strings and `child` takes one; a document loads from and saves to a UTF-8 C string; the attributes it sets are kept in blocks of their own instead of two `std::deque`s. The trophy code passes C strings to it.
+  - **Checks:** the Linux and Windows builds pass. Not run in a game yet.
 - Files and the core's directories in UTF-8 C strings, the first step off `std::filesystem` (`common/io_file`, `common/path_util`).
   - **`IOFile`:** takes a UTF-8 C string (`IOFile(const char*, …)`, `Open(const char*, …)`) and keeps its path as one, made with the file and freed with it; `GetPathUTF8` hands it out. The `std::filesystem::path` forms turn the path into UTF-8 once and call those, until their callers move over. A failed open says the error with `strerror` instead of a `std::error_code`, and the moves are written out instead of `std::swap`.
   - **The core's directories:** made once in a table of UTF-8 paths, joined and created with libretro-common (`fill_pathname_join_special`, `path_mkdir`), instead of a `std::unordered_map` of `std::filesystem::path`s. `GetUserPathUTF8` hands one out; `GetUserPath` still gives the `std::filesystem::path` of it, from the same table.

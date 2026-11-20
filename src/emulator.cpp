@@ -9,6 +9,7 @@
 #include <iostream>
 #include <set>
 #include <sstream>
+#include <compat/strl.h>
 #include <features/features_cpu.h>
 #include <streams/file_stream.h>
 
@@ -600,7 +601,7 @@ void Emulator::Run(std::filesystem::path file, std::vector<std::string> args,
 
     // Initialize patcher
     if (!id.empty()) {
-        MemoryPatcher::g_game_serial = id;
+        strlcpy(MemoryPatcher::g_game_serial, id.c_str(), sizeof(MemoryPatcher::g_game_serial));
     }
 
     // Extract and load trophies.
@@ -762,11 +763,6 @@ void Emulator::Restart(std::filesystem::path eboot_path,
 
     if (FileSys::MntPoints::ignore_game_patches) {
         args.push_back("--ignore-game-patch");
-    }
-
-    if (!MemoryPatcher::patch_file.empty()) {
-        args.push_back("--patch");
-        args.push_back(MemoryPatcher::patch_file);
     }
 
     if (guest_args.size() > 0) {

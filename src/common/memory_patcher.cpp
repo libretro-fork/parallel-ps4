@@ -1,15 +1,19 @@
 // SPDX-FileCopyrightText: Copyright 2024-2026 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
-#include <algorithm>
-#include <codecvt>
-#include <cstdio>
-#include <cstring>
-#include <sstream>
-#include <string>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#include <compat/strl.h>
+#include <encodings/utf.h>
+#include <file/file_path.h>
+#include <retro_dirent.h>
+#include <retro_miscellaneous.h>
+#include <streams/file_stream.h>
+
 #include "common/elf_info.h"
 #include "common/embedded_resources.h"
-#include "common/io_file.h"
 #include "common/logging/log.h"
 #include "common/patch_halve.h"
 #include "common/patch_index.h"
@@ -23,232 +27,270 @@ namespace MemoryPatcher {
 
 EXPORT uintptr_t g_eboot_address;
 uint64_t g_eboot_image_size;
-std::string g_eboot_name;
-std::string g_game_serial;
-std::string patch_file;
+char g_eboot_name[256];
+char g_game_serial[32];
 // The Patch Manager's choice (SetCatalogPatches)
 static char catalog_serial[16];
 static uint32_t catalog_on[PATCH_CATALOG_WORDS];
 
-std::string toHex(u64 value, size_t byteSize) {
-    std::stringstream ss;
-    ss << std::hex << std::setfill('0') << std::setw(byteSize * 2) << value;
-    return ss.str();
+namespace {
+
+// A value written as hex after 0x, $ or #; decimal otherwise. @digits is past the prefix.
+int NumberBase(const char* s, const char** digits) {
+    if (s[0] == '0' && (s[1] == 'x' || s[1] == 'X')) {
+        *digits = s + 2;
+        return 16;
+    }
+    if (s[0] == '$' || s[0] == '#') {
+        *digits = s + 1;
+        return 16;
+    }
+    *digits = s;
+    return 10;
 }
 
-static bool isHexSym(const std::string& s) {
-    return (s.size() >= 2 && (s[0] == '$' || s[0] == '#'));
+// @s as an unsigned number in its base (NumberBase), what follows the digits left out as
+// std::stoul did; false when there are no digits
+bool ParseUnsigned(const char* s, unsigned long long* out) {
+    const char* digits = nullptr;
+    const int base = NumberBase(s, &digits);
+    char* end = nullptr;
+    *out = strtoull(digits, &end, base);
+    return end != digits;
 }
 
-static bool isHex0x(const std::string& s) {
-    return (s.size() >= 3 && s[0] == '0' && (s[1] == 'x' || s[1] == 'X'));
+// @bytes bytes of @value in hex, most significant first: at least that many digits
+void AppendHex(char* out, size_t* length, size_t size, unsigned long long value, size_t bytes) {
+    const int written =
+        snprintf(out + *length, size - *length, "%0*llx", static_cast<int>(bytes * 2), value);
+    if (written > 0) {
+        *length += static_cast<size_t>(written);
+    }
 }
 
-// possible prefixes == (s == `0x` || s == `#` || s == `$`) will be interpet as hex value, else is
-// decimal
-static int convertNumBase(const std::string& s) {
-    return (isHex0x(s) || isHexSym(s)) ? 16 : 10;
+u32 ByteSwap32(u32 v) {
+    return (v >> 24) | ((v >> 8) & 0xff00) | ((v << 8) & 0xff0000) | (v << 24);
 }
 
-std::string convertValueToHex(const std::string type, const std::string valueStr) {
-    std::string result;
+u64 ByteSwap64(u64 v) {
+    return (u64(ByteSwap32(u32(v))) << 32) | ByteSwap32(u32(v >> 32));
+}
 
-    if (type == "byte") {
-        const u32 value = std::stoul(valueStr, nullptr, convertNumBase(valueStr));
-        result = toHex(value, 1);
-    } else if (type == "bytes16") {
-        const u32 value = std::stoul(valueStr, nullptr, convertNumBase(valueStr));
-        result = toHex(value, 2);
-    } else if (type == "bytes32") {
-        const u32 value = std::stoul(valueStr, nullptr, convertNumBase(valueStr));
-        result = toHex(value, 4);
-    } else if (type == "bytes64") {
-        const u64 value = std::stoull(valueStr, nullptr, convertNumBase(valueStr));
-        result = toHex(value, 8);
-    } else if (type == "float32") {
-        union {
-            float f;
-            uint32_t i;
-        } floatUnion;
-        floatUnion.f = std::stof(valueStr);
-        result = toHex(std::byteswap(floatUnion.i), sizeof(floatUnion.i));
-    } else if (type == "float64") {
-        union {
-            double d;
-            uint64_t i;
-        } doubleUnion;
-        doubleUnion.d = std::stod(valueStr);
-        result = toHex(std::byteswap(doubleUnion.i), sizeof(doubleUnion.i));
-    } else if (type == "utf8") {
-        std::vector<unsigned char> byteArray =
-            std::vector<unsigned char>(valueStr.begin(), valueStr.end());
-        byteArray.push_back('\0');
-        std::stringstream ss;
-        for (unsigned char c : byteArray) {
-            ss << std::hex << std::setfill('0') << std::setw(2) << static_cast<int>(c);
+// The bytes a patch line of @type writes, in hex, into @out (at least 8 times the value's
+// length and 16 more). False when the value is not one of its type.
+bool ConvertValueToHex(const char* type, const char* value, char* out, size_t size) {
+    size_t length = 0;
+    out[0] = '\0';
+    unsigned long long number = 0;
+    if (strcmp(type, "byte") == 0 || strcmp(type, "bytes16") == 0 || strcmp(type, "bytes32") == 0 ||
+        strcmp(type, "bytes64") == 0) {
+        if (!ParseUnsigned(value, &number)) {
+            return false;
         }
-        result = ss.str();
-    } else if (type == "utf16") {
-        std::wstring wide_str(valueStr.size(), L'\0');
-        std::mbstowcs(&wide_str[0], valueStr.c_str(), valueStr.size());
-        wide_str.resize(std::wcslen(wide_str.c_str()));
-
-        std::u16string valueStringU16;
-
-        for (wchar_t wc : wide_str) {
-            if (wc <= 0xFFFF) {
-                valueStringU16.push_back(static_cast<char16_t>(wc));
-            } else {
-                wc -= 0x10000;
-                valueStringU16.push_back(static_cast<char16_t>(0xD800 | (wc >> 10)));
-                valueStringU16.push_back(static_cast<char16_t>(0xDC00 | (wc & 0x3FF)));
+        const size_t bytes = type[4] == '\0' ? 1 : type[5] == '1' ? 2 : type[5] == '3' ? 4 : 8;
+        if (bytes < 8) {
+            number &= 0xffffffffull;
+        }
+        AppendHex(out, &length, size, number, bytes);
+    } else if (strcmp(type, "float32") == 0) {
+        char* end = nullptr;
+        const float f = strtof(value, &end);
+        if (end == value) {
+            return false;
+        }
+        u32 bits = 0;
+        memcpy(&bits, &f, sizeof(bits));
+        AppendHex(out, &length, size, ByteSwap32(bits), sizeof(bits));
+    } else if (strcmp(type, "float64") == 0) {
+        char* end = nullptr;
+        const double d = strtod(value, &end);
+        if (end == value) {
+            return false;
+        }
+        u64 bits = 0;
+        memcpy(&bits, &d, sizeof(bits));
+        AppendHex(out, &length, size, ByteSwap64(bits), sizeof(bits));
+    } else if (strcmp(type, "utf8") == 0) {
+        // Its bytes and a NUL
+        for (const char* c = value;; ++c) {
+            AppendHex(out, &length, size, static_cast<unsigned char>(*c), 1);
+            if (!*c) {
+                break;
             }
         }
-
-        std::vector<unsigned char> byteArray;
-        // convert to little endian
-        for (char16_t ch : valueStringU16) {
-            unsigned char low_byte = static_cast<unsigned char>(ch & 0x00FF);
-            unsigned char high_byte = static_cast<unsigned char>((ch >> 8) & 0x00FF);
-
-            byteArray.push_back(low_byte);
-            byteArray.push_back(high_byte);
+    } else if (strcmp(type, "utf16") == 0) {
+        // In UTF-16, little-endian, and a NUL
+        const char* walk = value;
+        for (;;) {
+            u32 code = utf8_walk(&walk);
+            if (code == 0) {
+                break;
+            }
+            u16 units[2];
+            size_t count = 1;
+            if (code <= 0xFFFF) {
+                units[0] = static_cast<u16>(code);
+            } else {
+                code -= 0x10000;
+                units[0] = static_cast<u16>(0xD800 | (code >> 10));
+                units[1] = static_cast<u16>(0xDC00 | (code & 0x3FF));
+                count = 2;
+            }
+            for (size_t i = 0; i < count; ++i) {
+                AppendHex(out, &length, size, units[i] & 0xFF, 1);
+                AppendHex(out, &length, size, units[i] >> 8, 1);
+            }
         }
-        byteArray.push_back('\0');
-        byteArray.push_back('\0');
-        std::stringstream ss;
-
-        for (unsigned char ch : byteArray) {
-            ss << std::hex << std::setw(2) << std::setfill('0') << static_cast<int>(ch);
-        }
-        result = ss.str();
-    } else if (type == "bytes") {
-        result = valueStr;
-    } else if (type == "mask" || type == "mask_jump32") {
-        result = valueStr;
+        AppendHex(out, &length, size, 0, 2);
+    } else if (strcmp(type, "bytes") == 0 || strcmp(type, "mask") == 0 ||
+               strcmp(type, "mask_jump32") == 0) {
+        strlcpy(out, value, size);
     } else {
-        LOG_INFO(Loader, "Error applying Patch, unknown type: %s", (type).c_str());
+        LOG_INFO(Loader, "Error applying Patch, unknown type: %s", type);
     }
-    return result;
+    return true;
 }
+
+// The game's version, as its patches name it (AppVer)
+void GetAppVersion(char* out, size_t size) {
+    PSF* const param_sfo = Common::Singleton<PSF>::Instance();
+    const std::optional<std::string_view> version = param_sfo->GetString("APP_VER");
+    if (version) {
+        snprintf(out, size, "%.*s", static_cast<int>(version->size()), version->data());
+    } else {
+        strlcpy(out, "Unknown version", size);
+    }
+}
+
+// The bytes of @hex (two digits each) into @out, at most @size; how many, or -1 when a pair
+// is not hex
+long ParseHexBytes(const char* hex, u8* out, size_t size) {
+    size_t count = 0;
+    for (size_t i = 0; hex[i] && hex[i + 1] && count < size; i += 2) {
+        const char pair[3] = {hex[i], hex[i + 1], '\0'};
+        char* end = nullptr;
+        const unsigned long byte = strtoul(pair, &end, 16);
+        if (end != pair + 2) {
+            return -1;
+        }
+        out[count++] = static_cast<u8>(byte);
+    }
+    return static_cast<long>(count);
+}
+
+} // Anonymous namespace
 
 // One patch (a <Metadata>) of a patch file, for the executable and the version of the game
 // it names; a mask is looked for whatever the version.
-static void ApplyMetadata(const Common::Xml::Node& node, const std::string& app_version) {
-    std::string currentPatchName = node.attribute("Name").value();
-    std::string metadataAppVer = node.attribute("AppVer").value();
-    std::string metadataAppElf = node.attribute("AppElf").value();
-    bool versionMatches = metadataAppVer == app_version;
+static void ApplyMetadata(const Common::Xml::Node& node, const char* app_version) {
+    const char* const current_patch_name = node.attribute("Name").value();
+    const bool version_matches = strcmp(node.attribute("AppVer").value(), app_version) == 0;
 
-    if (metadataAppElf != g_eboot_name)
+    if (strcmp(node.attribute("AppElf").value(), g_eboot_name) != 0) {
         return;
+    }
 
-    auto patchList = node.first_child();
-    for (const Common::Xml::Node patchLine : patchList.children()) {
-        const auto* patchLineIt = &patchLine;
-
-        std::string type = patchLineIt->attribute("Type").value();
-        if (!versionMatches && type != "mask" && type != "mask_jump32" && type != "mask_halve")
+    const Common::Xml::Node patch_list = node.first_child();
+    for (const Common::Xml::Node patch_line : patch_list.children()) {
+        const char* const type = patch_line.attribute("Type").value();
+        const bool is_mask = strcmp(type, "mask") == 0;
+        const bool is_jump = strcmp(type, "mask_jump32") == 0;
+        const bool is_halve = strcmp(type, "mask_halve") == 0;
+        if (!version_matches && !is_mask && !is_jump && !is_halve) {
             continue;
+        }
 
-        if (type == "mask_halve") {
+        if (is_halve) {
             // The core's own kind of line: the decimal number of Size bytes at Offset from the
             // pattern is halved where it is (common/patch_halve.h), whatever it is by now
-            const std::string pattern = patchLineIt->attribute("Address").value();
-            const std::string offset = patchLineIt->attribute("Offset").value();
-            const std::string size = patchLineIt->attribute("Size").value();
+            const char* const pattern = patch_line.attribute("Address").value();
+            const char* const offset = patch_line.attribute("Offset").value();
+            const char* const size = patch_line.attribute("Size").value();
             const uintptr_t found = PatternScan(pattern);
             unsigned long before = 0;
             unsigned long after = 0;
-            if (found == 0 || offset.empty() || size.empty()) {
+            if (found == 0 || !offset[0] || !size[0]) {
                 LOG_ERROR(Loader, "Patch %s: its pattern is not in the game, not applied: %s",
-                          (currentPatchName).c_str(), (pattern).c_str());
+                          current_patch_name, pattern);
             } else if (patch_halve_decimal(
-                           reinterpret_cast<unsigned char*>(found + std::stoi(offset, 0, 10)),
-                           static_cast<size_t>(std::stoul(size, 0, 10)), &before, &after)) {
-                LOG_INFO(Loader, "Applied patch: %s, %llu halved to %llu",
-                         (currentPatchName).c_str(), static_cast<unsigned long long>(before),
+                           reinterpret_cast<unsigned char*>(found + strtol(offset, nullptr, 10)),
+                           static_cast<size_t>(strtoul(size, nullptr, 10)), &before, &after)) {
+                LOG_INFO(Loader, "Applied patch: %s, %llu halved to %llu", current_patch_name,
+                         static_cast<unsigned long long>(before),
                          static_cast<unsigned long long>(after));
             } else {
                 LOG_ERROR(Loader, "Patch %s: no number to halve where its pattern is, not applied",
-                          (currentPatchName).c_str());
+                          current_patch_name);
             }
             continue;
         }
 
-        std::string address = patchLineIt->attribute("Address").value();
-        std::string patchValue = patchLineIt->attribute("Value").value();
-        std::string maskOffsetStr = patchLineIt->attribute("Offset").value();
-        std::string targetStr = "";
-        std::string sizeStr = "";
-        if (type == "mask_jump32") {
-            targetStr = patchLineIt->attribute("Target").value();
-            sizeStr = patchLineIt->attribute("Size").value();
-        } else {
-            try {
-                patchValue = convertValueToHex(type, patchValue);
-            } catch (std::exception& e) {
-                ASSERT_MSG(false,
-                           "Failed to parse patch value \"%s\" for \"%s\" in "
-                           "patch \"%s\", error: \"%s\"\n"
-                           "If the patch was working on earlier versions, then it "
-                           "was using a format that shadPS4 handled incorrectly, "
-                           "and the patch should instead be fixed.",
-                           (patchValue).c_str(), (address).c_str(), (currentPatchName).c_str(),
-                           e.what());
-            }
+        const char* const address = patch_line.attribute("Address").value();
+        const char* const value = patch_line.attribute("Value").value();
+        const char* const mask_offset = patch_line.attribute("Offset").value();
+        const char* target = "";
+        const char* size = "";
+        // The bytes to write, in hex: up to four digits for each byte of a UTF-16 value
+        const size_t hex_size = strlen(value) * 8 + 32;
+        char* const hex = static_cast<char*>(malloc(hex_size));
+        if (!hex) {
+            LOG_ERROR(Loader, "Patch %s: out of memory, not applied", current_patch_name);
+            continue;
+        }
+        if (is_jump) {
+            target = patch_line.attribute("Target").value();
+            size = patch_line.attribute("Size").value();
+            strlcpy(hex, value, hex_size);
+        } else if (!ConvertValueToHex(type, value, hex, hex_size)) {
+            LOG_ERROR(Loader,
+                      "Patch %s: its value \"%s\" for \"%s\" is not a %s, not applied. If it "
+                      "worked on earlier versions, it was in a format shadPS4 read wrongly, "
+                      "and the patch should be fixed.",
+                      current_patch_name, value, address, type);
+            free(hex);
+            continue;
         }
 
-        bool littleEndian = false;
-        if (type == "bytes16" || type == "bytes32" || type == "bytes64") {
-            littleEndian = true;
+        const bool little_endian = strcmp(type, "bytes16") == 0 || strcmp(type, "bytes32") == 0 ||
+                                   strcmp(type, "bytes64") == 0;
+        PatchMask patch_mask = PatchMask::None;
+        if (is_mask) {
+            patch_mask = PatchMask::Mask;
+        } else if (is_jump) {
+            patch_mask = PatchMask::Mask_Jump32;
+        }
+        int mask_offset_value = 0;
+        if ((is_mask || is_jump) && mask_offset[0]) {
+            mask_offset_value = static_cast<int>(strtol(mask_offset, nullptr, 10));
         }
 
-        MemoryPatcher::PatchMask patchMask = MemoryPatcher::PatchMask::None;
-        int maskOffsetValue = 0;
-
-        if (type == "mask")
-            patchMask = MemoryPatcher::PatchMask::Mask;
-
-        if (type == "mask_jump32")
-            patchMask = MemoryPatcher::PatchMask::Mask_Jump32;
-
-        if ((type == "mask" || type == "mask_jump32") && !maskOffsetStr.empty()) {
-            maskOffsetValue = std::stoi(maskOffsetStr, 0, 10);
-        }
-
-        const patchInfo patch = {
-            .gameSerial = "*",
-            .modNameStr = currentPatchName,
-            .offsetStr = address,
-            .valueStr = patchValue,
-            .targetStr = targetStr,
-            .sizeStr = sizeStr,
-            .littleEndian = littleEndian,
-            .patchMask = patchMask,
-            .maskOffset = maskOffsetValue,
-        };
-        MemoryPatcher::PatchMemory(patch);
+        patchInfo patch{};
+        patch.modNameStr = current_patch_name;
+        patch.offsetStr = address;
+        patch.valueStr = hex;
+        patch.targetStr = target;
+        patch.sizeStr = size;
+        patch.littleEndian = little_endian;
+        patch.patchMask = patch_mask;
+        patch.maskOffset = mask_offset_value;
+        PatchMemory(patch);
+        free(hex);
     }
 }
 
-void ApplyPatchesFromXML(std::filesystem::path path) {
+static void ApplyPatchesFromXML(const char* path) {
     Common::Xml::Document doc;
-    const bool result = doc.Load(path);
-
-    auto* param_sfo = Common::Singleton<PSF>::Instance();
-    auto app_version = param_sfo->GetString("APP_VER").value_or("Unknown version");
-
-    if (result) {
-        auto patchXML = doc.child("Patch");
-        for (const Common::Xml::Node node : patchXML.children()) {
-            if (node.name() == "Metadata" &&
-                std::string(node.attribute("isEnabled").value()) == "true") {
-                ApplyMetadata(node, std::string(app_version));
-            }
+    if (!doc.Load(path)) {
+        LOG_ERROR(Loader, "Could not read or parse patch XML: %s", path);
+        return;
+    }
+    char app_version[64];
+    GetAppVersion(app_version, sizeof(app_version));
+    for (const Common::Xml::Node node : doc.child("Patch").children()) {
+        if (strcmp(node.name(), "Metadata") == 0 &&
+            strcmp(node.attribute("isEnabled").value(), "true") == 0) {
+            ApplyMetadata(node, app_version);
         }
-    } else {
-        LOG_ERROR(Loader, "Could not read or parse patch XML: %s", (path.string()).c_str());
     }
 }
 
@@ -285,8 +327,8 @@ bool BuildCatalog(patch_catalog_t& cat, const char* serial) {
 }
 
 void SetCatalogPatches(const char* serial, const uint32_t* on) {
-    std::snprintf(catalog_serial, sizeof(catalog_serial), "%s", serial);
-    std::memcpy(catalog_on, on, sizeof(catalog_on));
+    snprintf(catalog_serial, sizeof(catalog_serial), "%s", serial);
+    memcpy(catalog_on, on, sizeof(catalog_on));
 }
 
 // The patches switched on in the Patch Manager, from the repositories the core carries
@@ -298,8 +340,8 @@ static void ApplyCatalogPatches() {
     if (!any || !catalog_serial[0]) {
         return;
     }
-    auto* param_sfo = Common::Singleton<PSF>::Instance();
-    const std::string app_version(param_sfo->GetString("APP_VER").value_or("Unknown version"));
+    char app_version[64];
+    GetAppVersion(app_version, sizeof(app_version));
     // Large: kept off the stack
     static patch_catalog_t cat;
     if (!BuildCatalog(cat, catalog_serial)) {
@@ -319,54 +361,49 @@ static void ApplyCatalogPatches() {
 
 void OnGameLoaded() {
     ApplyCatalogPatches();
-    std::filesystem::path patch_dir = Common::FS::GetUserPath(Common::FS::PathType::PatchesDir);
-    if (!patch_file.empty()) {
-
-        auto file_path = (patch_dir / patch_file).native();
-        if (Common::FS::Exists(patch_file)) {
-            ApplyPatchesFromXML(patch_file);
-        } else {
-            ApplyPatchesFromXML(file_path);
-        }
-    } else {
-        Common::FS::ForEachEntry(patch_dir, [&](std::string_view name, bool is_dir) {
-            if (!is_dir) {
-                return;
-            }
-            const auto repo = patch_dir / Common::FS::PathFromUTF8String(name);
-            const auto files_json_path = repo / "files.json";
-
-            if (!Common::FS::IsFile(files_json_path)) {
-                LOG_ERROR(Loader, "The folder '%.*s' does not contain the files.json file.",
-                          static_cast<int>((name).size()), (name).data());
-                return;
-            }
-
-            char patch_name[1024];
-            if (!patch_index_find(Common::FS::PathToUTF8String(files_json_path).c_str(),
-                                  g_game_serial.c_str(), patch_name, sizeof(patch_name))) {
-                return;
-            }
-            const std::filesystem::path game_patch_file =
-                repo / std::u8string_view(reinterpret_cast<const char8_t*>(patch_name));
-            if (Common::FS::Exists(game_patch_file)) {
-                ApplyPatchesFromXML(game_patch_file);
-            }
-        });
+    // Each repository in the patches folder, by its files.json
+    const char* const patch_dir = Common::FS::GetUserPathUTF8(Common::FS::PathType::PatchesDir);
+    RDIR* const dir = retro_opendir_include_hidden(patch_dir, true);
+    if (!dir) {
+        return;
     }
+    while (retro_readdir(dir)) {
+        const char* const name = retro_dirent_get_name(dir);
+        if (!retro_dirent_is_dir(dir, nullptr) || strcmp(name, ".") == 0 ||
+            strcmp(name, "..") == 0) {
+            continue;
+        }
+        char repo[PATH_MAX_LENGTH];
+        char files_json[PATH_MAX_LENGTH];
+        fill_pathname_join_special(repo, patch_dir, name, sizeof(repo));
+        fill_pathname_join_special(files_json, repo, "files.json", sizeof(files_json));
+        if (!path_is_valid(files_json) || path_is_directory(files_json)) {
+            LOG_ERROR(Loader, "The folder '%s' does not contain the files.json file.", name);
+            continue;
+        }
+        char patch_name[1024];
+        if (!patch_index_find(files_json, g_game_serial, patch_name, sizeof(patch_name))) {
+            continue;
+        }
+        char game_patch_file[PATH_MAX_LENGTH];
+        fill_pathname_join_special(game_patch_file, repo, patch_name, sizeof(game_patch_file));
+        if (path_is_valid(game_patch_file)) {
+            ApplyPatchesFromXML(game_patch_file);
+        }
+    }
+    retro_closedir(dir);
 }
 
 void PatchMemory(const patchInfo& patch) {
     // Send a request to modify the process memory.
-    void* cheatAddress = nullptr;
+    void* cheat_address = nullptr;
 
     if (patch.patchMask == PatchMask::None) {
+        const long offset = strtol(patch.offsetStr, nullptr, 16);
         if (patch.isOffset) {
-            cheatAddress =
-                reinterpret_cast<void*>(g_eboot_address + std::stoi(patch.offsetStr, 0, 16));
+            cheat_address = reinterpret_cast<void*>(g_eboot_address + offset);
         } else {
-            cheatAddress = reinterpret_cast<void*>(g_eboot_address +
-                                                   (std::stoi(patch.offsetStr, 0, 16) - 0x400000));
+            cheat_address = reinterpret_cast<void*>(g_eboot_address + (offset - 0x400000));
         }
     }
 
@@ -376,160 +413,157 @@ void PatchMemory(const patchInfo& patch) {
         const uintptr_t found = PatternScan(patch.offsetStr);
         if (found == 0) {
             LOG_ERROR(Loader, "Patch %s: its pattern is not in the game, not applied: %s",
-                      (patch.modNameStr).c_str(), (patch.offsetStr).c_str());
+                      patch.modNameStr, patch.offsetStr);
             return;
         }
-        cheatAddress = reinterpret_cast<void*>(found + patch.maskOffset);
+        cheat_address = reinterpret_cast<void*>(found + patch.maskOffset);
     }
 
+    const size_t value_length = strlen(patch.valueStr);
     if (patch.patchMask == PatchMask::Mask_Jump32) {
-        int jumpSize = std::stoi(patch.sizeStr);
+        const int jump_size = static_cast<int>(strtol(patch.sizeStr, nullptr, 10));
 
         constexpr int MAX_PATTERN_LENGTH = 256;
-        if (jumpSize < 5) {
+        if (jump_size < 5) {
             LOG_ERROR(Loader, "Jump size must be at least 5 bytes");
             return;
         }
-        if (jumpSize > MAX_PATTERN_LENGTH) {
+        if (jump_size > MAX_PATTERN_LENGTH) {
             LOG_ERROR(Loader, "Jump size must be no more than %d bytes.", MAX_PATTERN_LENGTH);
             return;
         }
 
         // Find the base address using "Address"
-        uintptr_t baseAddress = PatternScan(patch.offsetStr);
-        if (baseAddress == 0) {
+        const uintptr_t base_address = PatternScan(patch.offsetStr);
+        if (base_address == 0) {
             LOG_ERROR(Loader, "PatternScan failed for mask_jump32 with pattern: %s",
-                      (patch.offsetStr).c_str());
+                      patch.offsetStr);
             return;
         }
-        uintptr_t patchAddress = baseAddress + patch.maskOffset;
+        const uintptr_t patch_address = base_address + patch.maskOffset;
 
-        // Fills the original region (jumpSize bytes) with NOPs
-        std::vector<u8> nopBytes(jumpSize, 0x90);
-        std::memcpy(reinterpret_cast<void*>(patchAddress), nopBytes.data(), nopBytes.size());
+        // Fills the original region (jump_size bytes) with NOPs
+        memset(reinterpret_cast<void*>(patch_address), 0x90, static_cast<size_t>(jump_size));
 
         // Use "Target" to locate the start of the code cave
-        uintptr_t jump_target = PatternScan(patch.targetStr);
+        const uintptr_t jump_target = PatternScan(patch.targetStr);
         if (jump_target == 0) {
-            LOG_ERROR(Loader, "PatternScan failed to Target with pattern: %s",
-                      (patch.targetStr).c_str());
+            LOG_ERROR(Loader, "PatternScan failed to Target with pattern: %s", patch.targetStr);
             return;
         }
 
         // Converts the Value attribute to a byte array (payload)
-        std::vector<u8> payload;
-        for (size_t i = 0; i < patch.valueStr.length(); i += 2) {
-            std::string tempStr = patch.valueStr.substr(i, 2);
-            const char* byteStr = tempStr.c_str();
-            char* endPtr;
-            unsigned int byteVal = std::strtoul(byteStr, &endPtr, 16);
-
-            if (endPtr != byteStr + 2) {
-                LOG_ERROR(Loader, "Invalid byte in Value: %s",
-                          (patch.valueStr.substr(i, 2)).c_str());
-                return;
-            }
-            payload.push_back(static_cast<u8>(byteVal));
+        u8* const payload = static_cast<u8*>(malloc(value_length / 2 + 1));
+        if (!payload) {
+            return;
+        }
+        const long payload_size = ParseHexBytes(patch.valueStr, payload, value_length / 2 + 1);
+        if (payload_size < 0) {
+            LOG_ERROR(Loader, "Invalid byte in Value: %s", patch.valueStr);
+            free(payload);
+            return;
         }
 
         // Calculates the end of the code cave (where the return jump will be inserted)
-        uintptr_t code_cave_end = jump_target + payload.size();
+        const uintptr_t code_cave_end = jump_target + static_cast<uintptr_t>(payload_size);
 
         // Write the payload to the code cave, from jump_target
-        std::memcpy(reinterpret_cast<void*>(jump_target), payload.data(), payload.size());
+        memcpy(reinterpret_cast<void*>(jump_target), payload, static_cast<size_t>(payload_size));
+        free(payload);
 
         // Inserts the initial jump in the original region to divert to the code cave
-        u8 jumpInstruction[5];
-        jumpInstruction[0] = 0xE9;
-        s32 relJump = static_cast<s32>(jump_target - patchAddress - 5);
-        std::memcpy(&jumpInstruction[1], &relJump, sizeof(relJump));
-        std::memcpy(reinterpret_cast<void*>(patchAddress), jumpInstruction,
-                    sizeof(jumpInstruction));
+        u8 jump_instruction[5];
+        jump_instruction[0] = 0xE9;
+        const s32 rel_jump = static_cast<s32>(jump_target - patch_address - 5);
+        memcpy(&jump_instruction[1], &rel_jump, sizeof(rel_jump));
+        memcpy(reinterpret_cast<void*>(patch_address), jump_instruction, sizeof(jump_instruction));
 
         // Inserts jump back at the end of the code cave to resume execution after patching
-        u8 jumpBack[5];
-        jumpBack[0] = 0xE9;
+        u8 jump_back[5];
+        jump_back[0] = 0xE9;
         // Calculates the relative offset to return to the instruction immediately following the
         // overwritten region
-        s32 target_return = static_cast<s32>((patchAddress + jumpSize) - (code_cave_end + 5));
-        std::memcpy(&jumpBack[1], &target_return, sizeof(target_return));
-        std::memcpy(reinterpret_cast<void*>(code_cave_end), jumpBack, sizeof(jumpBack));
+        const s32 target_return =
+            static_cast<s32>((patch_address + jump_size) - (code_cave_end + 5));
+        memcpy(&jump_back[1], &target_return, sizeof(target_return));
+        memcpy(reinterpret_cast<void*>(code_cave_end), jump_back, sizeof(jump_back));
 
         LOG_INFO(Loader,
                  "Applied Patch mask_jump32: %s, PatchAddress: 0x%" PRIxPTR
                  ", JumpTarget: 0x%" PRIxPTR ", "
                  "CodeCaveEnd: 0x%" PRIxPTR ", JumpSize: %d",
-                 (patch.modNameStr).c_str(), patchAddress, jump_target, code_cave_end, jumpSize);
+                 patch.modNameStr, patch_address, jump_target, code_cave_end, jump_size);
         return;
     }
 
-    if (cheatAddress == nullptr) {
-        LOG_ERROR(Loader, "Failed to get address for patch %s", (patch.modNameStr).c_str());
+    if (cheat_address == nullptr) {
+        LOG_ERROR(Loader, "Failed to get address for patch %s", patch.modNameStr);
         return;
     }
 
-    std::vector<unsigned char> bytePatch;
-
-    for (size_t i = 0; i < patch.valueStr.length(); i += 2) {
-        unsigned char byte = static_cast<unsigned char>(
-            std::strtol(patch.valueStr.substr(i, 2).c_str(), nullptr, 16));
-
-        bytePatch.push_back(byte);
+    // The bytes, two hex digits each; a pair that is not hex writes 0, as strtol read it
+    u8* const byte_patch = static_cast<u8*>(malloc(value_length / 2 + 1));
+    if (!byte_patch) {
+        return;
     }
-
+    size_t count = 0;
+    for (size_t i = 0; i + 1 < value_length + 1 && patch.valueStr[i]; i += 2) {
+        const char pair[3] = {patch.valueStr[i], patch.valueStr[i + 1], '\0'};
+        byte_patch[count++] = static_cast<u8>(strtol(pair, nullptr, 16));
+    }
     if (patch.littleEndian) {
-        std::reverse(bytePatch.begin(), bytePatch.end());
-    }
-
-    std::memcpy(cheatAddress, bytePatch.data(), bytePatch.size());
-
-    LOG_INFO(Loader, "Applied patch: %s, Offset: 0x%" PRIxPTR ", Value: %s",
-             (patch.modNameStr).c_str(), (uintptr_t)cheatAddress, (patch.valueStr).c_str());
-}
-
-static std::vector<int32_t> PatternToByte(const std::string& pattern) {
-    std::vector<int32_t> bytes;
-    const char* start = pattern.data();
-    const char* end = start + pattern.size();
-
-    for (const char* current = start; current < end; ++current) {
-        if (*current == '?') {
-            ++current;
-            if (*current == '?')
-                ++current;
-            bytes.push_back(-1);
-        } else {
-            bytes.push_back(strtoul(current, const_cast<char**>(&current), 16));
+        for (size_t i = 0; i < count / 2; ++i) {
+            const u8 byte = byte_patch[i];
+            byte_patch[i] = byte_patch[count - 1 - i];
+            byte_patch[count - 1 - i] = byte;
         }
     }
 
-    return bytes;
+    memcpy(cheat_address, byte_patch, count);
+    free(byte_patch);
+
+    LOG_INFO(Loader, "Applied patch: %s, Offset: 0x%" PRIxPTR ", Value: %s", patch.modNameStr,
+             reinterpret_cast<uintptr_t>(cheat_address), patch.valueStr);
 }
 
-uintptr_t PatternScan(const std::string& signature) {
-    std::vector<int32_t> patternBytes = PatternToByte(signature);
-    const auto scanBytes = static_cast<uint8_t*>((void*)g_eboot_address);
+uintptr_t PatternScan(const char* signature) {
+    // The pattern's bytes, -1 where any will do: one at most for each character
+    const size_t length = strlen(signature);
+    s32* const pattern = static_cast<s32*>(malloc((length + 1) * sizeof(s32)));
+    if (!pattern) {
+        return 0;
+    }
+    size_t pattern_size = 0;
+    for (const char* current = signature; current < signature + length; ++current) {
+        if (*current == '?') {
+            ++current;
+            if (*current == '?') {
+                ++current;
+            }
+            pattern[pattern_size++] = -1;
+        } else {
+            char* end = nullptr;
+            pattern[pattern_size++] = static_cast<s32>(strtoul(current, &end, 16));
+            current = end;
+        }
+    }
 
-    const int32_t* sigPtr = patternBytes.data();
-    const size_t sigSize = patternBytes.size();
-
-    uint32_t foundResults = 0;
-    for (uint32_t i = 0; i < g_eboot_image_size - sigSize; ++i) {
-        bool found = true;
-        for (uint32_t j = 0; j < sigSize; ++j) {
-            if (scanBytes[i + j] != sigPtr[j] && sigPtr[j] != -1) {
-                found = false;
+    const u8* const scan_bytes = reinterpret_cast<const u8*>(g_eboot_address);
+    uintptr_t found = 0;
+    for (u64 i = 0; pattern_size && i + pattern_size <= g_eboot_image_size && !found; ++i) {
+        bool match = true;
+        for (size_t j = 0; j < pattern_size; ++j) {
+            if (pattern[j] != -1 && scan_bytes[i + j] != pattern[j]) {
+                match = false;
                 break;
             }
         }
-
-        if (found) {
-            foundResults++;
-            return reinterpret_cast<uintptr_t>(&scanBytes[i]);
+        if (match) {
+            found = reinterpret_cast<uintptr_t>(&scan_bytes[i]);
         }
     }
-
-    return 0;
+    free(pattern);
+    return found;
 }
 
 } // namespace MemoryPatcher
