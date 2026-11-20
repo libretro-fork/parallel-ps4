@@ -15,6 +15,9 @@ namespace Vulkan {
  * @param code The SPIR-V bytecode data.
  * @param device The vulkan device handle
  */
+/// Makes a shader module of @num_words SPIR-V words at @code
+vk::ShaderModule CompileSPV(const u32* code, size_t num_words, vk::Device device);
+
 vk::ShaderModule CompileSPV(std::span<const u32> code, vk::Device device);
 
 } // namespace Vulkan

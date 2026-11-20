@@ -11,7 +11,7 @@ namespace VideoCore {
 class BufferCache;
 
 class FaultManager {
-    static constexpr size_t MaxPendingFaults = 8;
+    static constexpr u32 MaxPendingFaults = 8;
 
 public:
     explicit FaultManager(const Vulkan::Instance& instance, Vulkan::Scheduler& scheduler,
@@ -37,7 +37,7 @@ private:
     u64 fault_buffer_size;
     Buffer fault_buffer;
     Buffer download_buffer;
-    std::array<u64, MaxPendingFaults> fault_areas{};
+    u64 fault_areas[MaxPendingFaults]{};
     u32 current_area{};
     VkDescriptorSetLayout fault_process_desc_layout{VK_NULL_HANDLE};
     VkPipeline fault_process_pipeline{VK_NULL_HANDLE};

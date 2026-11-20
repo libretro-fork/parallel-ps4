@@ -4,6 +4,15 @@ What changed in the libretro core of this fork, newest first. Changes that come 
 
 ## Unreleased
 
+- No STL or `auto` in the fault manager and the tile manager, the first files of the renderer to drop them. The rule from here on: the renderer files moved to the Vulkan C API drop the STL, `std::array` and `auto` too.
+  - **Fault manager:** a plain array of fault areas, and the shader's words in one block made at start instead of a `std::vector`.
+  - **Tile manager:**
+    - Its tiling pipelines are in a `u64_map` (`common/u64_map`), keyed by tile mode, pixel width, samples and direction packed into one word, instead of a `std::unordered_map` with a hash of the four. Room for 64 is made at start.
+    - The parameters, the shader's words and the debug name are plain arrays.
+    - `TileImage` takes a pointer and a count, and `DetileImage` returns the buffer and writes its offset, instead of a `std::span` and a `std::pair`.
+  - **Shared pieces:** `StreamBuffer::Map` returns the mapped pointer and writes the offset, instead of a `std::pair`, and its three callers follow. `CompileSPV` gained a pointer-and-count form.
+  - **Unchanged:** what runs on the GPU, and the same Vulkan calls and arguments.
+  - **Checks:** the Linux and Windows builds pass. Not run in a game yet.
 - Vulkan, the scheduler on the C API: `Scheduler` (`vk_scheduler`) begins and ends its command buffers, begins and ends rendering, submits to the queue, and sets every piece of dynamic state, with the C API through libretro-common's symbol wrapper.
   - **What holds the command buffers:** its sessions and the list it submits hold plain Vulkan handles. `CommandBuffer()` and `UploadCommandBuffer()` still give callers vulkan.hpp handles for now.
   - **Unchanged:** `SubmitInfo`, `RenderState` and `DynamicState` keep their vulkan.hpp fields, which the C calls read as they are. The Vulkan calls and arguments are the same.

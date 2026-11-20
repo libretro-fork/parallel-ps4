@@ -211,12 +211,13 @@ bool StreamBuffer::PrepareMap(u64 size, u64 alignment, bool allow_wait) {
     return true;
 }
 
-std::pair<u8*, u64> StreamBuffer::Map(u64 size, u64 alignment, bool allow_wait) {
+u8* StreamBuffer::Map(u64 size, u64* out_offset, u64 alignment, bool allow_wait) {
     if (!PrepareMap(size, alignment, allow_wait)) {
-        return {nullptr, 0};
+        *out_offset = 0;
+        return nullptr;
     }
-    u8* const data = mapped_data.empty() ? nullptr : mapped_data.data() + offset;
-    return {data, offset};
+    *out_offset = offset;
+    return mapped_data.empty() ? nullptr : mapped_data.data() + offset;
 }
 
 void StreamBuffer::Commit() {

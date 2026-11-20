@@ -463,7 +463,8 @@ std::pair<const Buffer*, u64> BufferCache::ObtainBuffer(VAddr device_addr, u32 s
     // For read-only buffers use device local stream buffer to reduce renderpass breaks.
     if (!is_written && !skip_stream_buffer && size <= STREAM_THRESHOLD &&
         !IsRegionGpuModified(device_addr, size)) {
-        const auto [data, offset] = stream_buffer.Map(size, instance.UniformMinAlignment());
+        u64 offset = 0;
+        u8* const data = stream_buffer.Map(size, &offset, instance.UniformMinAlignment());
         memory->CopySparseMemory(device_addr, data, size);
         stream_buffer.Commit();
         return {&stream_buffer, offset};
@@ -937,7 +938,8 @@ bool BufferCache::SynchronizeMemoryFromImage(const Buffer* arena, VAddr device_a
         return false;
     }
     auto& tile_manager = texture_cache.GetTileManager();
-    tile_manager.TileImage(image, buffer_copies, arena, arena_offset);
+    tile_manager.TileImage(image, buffer_copies.data(), static_cast<u32>(buffer_copies.size()),
+                           arena, arena_offset);
     return true;
 }
 

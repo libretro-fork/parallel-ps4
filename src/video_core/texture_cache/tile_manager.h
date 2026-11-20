@@ -3,12 +3,8 @@
 
 #pragma once
 
-#include <array>
-#include <unordered_map>
-#include <utility>
-
-#include "common/hash.h"
 #include "common/types.h"
+#include "common/u64_map.h"
 #include "video_core/amdgpu/tiling.h"
 #include "video_core/buffer_cache/buffer.h"
 #include "video_core/host_shaders/host_spirv.h"
@@ -23,24 +19,6 @@ struct ImageInfo;
 struct Image;
 
 class TileManager {
-    struct TilingKey {
-        AmdGpu::TileMode tile_mode;
-        u32 num_bits;
-        u32 num_samples;
-        bool is_tiler;
-
-        bool operator==(const TilingKey&) const = default;
-
-        struct Hash {
-            size_t operator()(const TilingKey& key) const {
-                // The four fields packed into two words, then mixed
-                const u64 a = (static_cast<u64>(key.tile_mode) << 32) | key.num_bits;
-                const u64 b = (static_cast<u64>(key.num_samples) << 1) | (key.is_tiler ? 1 : 0);
-                return static_cast<size_t>(HashCombine(HashCombine(u64{0}, a), b));
-            }
-        };
-    };
-
 public:
     explicit TileManager(const Vulkan::Instance& instance, Vulkan::Scheduler& scheduler,
                          Vulkan::Runtime& runtime, StreamBuffer& stream_buffer);
@@ -49,11 +27,15 @@ public:
     TileManager(const TileManager&) = delete;
     TileManager& operator=(const TileManager&) = delete;
 
-    void TileImage(Image& in_image, std::span<vk::BufferImageCopy> buffer_copies,
+    /// Copies @in_image into @out_buffer at @out_offset, tiled as the guest has it. The
+    /// offsets of @buffer_copies are moved by where the copy lands.
+    void TileImage(Image& in_image, vk::BufferImageCopy* buffer_copies, u32 num_copies,
                    const VideoCore::Buffer* out_buffer, u64 out_offset);
 
-    std::pair<const Buffer*, u64> DetileImage(const VideoCore::Buffer* in_buffer, u64 in_offset,
-                                              const ImageInfo& info);
+    /// The buffer holding the image at @in_offset of @in_buffer untiled, with the offset at
+    /// which it is in *@out_offset: @in_buffer itself for an image that is not tiled.
+    const Buffer* DetileImage(const VideoCore::Buffer* in_buffer, u64 in_offset,
+                              const ImageInfo& info, u64* out_offset);
 
 private:
     VkPipeline GetTilingPipeline(const ImageInfo& info, bool is_tiler);
@@ -65,9 +47,10 @@ private:
     StreamBuffer& stream_buffer;
     VkDescriptorSetLayout desc_layout{VK_NULL_HANDLE};
     VkPipelineLayout pl_layout{VK_NULL_HANDLE};
-    std::unordered_map<TilingKey, VkPipeline, TilingKey::Hash> tiling_pipelines;
+    /// Tiling pipelines by their packed key (TilingKey in tile_manager.cpp): VkPipeline values
+    u64_map_t tiling_pipelines{};
     /// A new tiling pipeline's module, written here instead of allocated
-    std::array<u32, HOST_SPIRV_MAX_WORDS> spirv_words;
+    u32 spirv_words[HOST_SPIRV_MAX_WORDS];
 };
 
 } // namespace VideoCore

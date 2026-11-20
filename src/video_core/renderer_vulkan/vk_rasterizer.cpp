@@ -1075,7 +1075,8 @@ void Rasterizer::BindBuffers(const Shader::Info& stage, Shader::Backend::Binding
                 auto& lds_buffer = buffer_cache.GetStreamBuffer();
                 const auto& cs_program = liverpool->GetCsRegs();
                 const auto lds_size = cs_program.SharedMemSize() * cs_program.NumWorkgroups();
-                const auto [data, offset] = lds_buffer.Map(lds_size, alignment);
+                u64 offset = 0;
+                u8* const data = lds_buffer.Map(lds_size, &offset, alignment);
                 std::memset(data, 0, lds_size);
                 lds_buffer.Commit();
                 buffer_infos.emplace_back(lds_buffer.Handle(), offset, lds_size);

@@ -140,8 +140,9 @@ struct StreamBuffer : public Buffer {
     explicit StreamBuffer(const Vulkan::Instance& instance, Vulkan::Scheduler& scheduler,
                           MemoryType mem_type, u64 size_bytes);
 
-    /// Reserves a region of memory from the stream buffer. Must be followed by Commit().
-    std::pair<u8*, u64> Map(u64 size, u64 alignment = 0, bool allow_wait = true);
+    /// Reserves a region of memory from the stream buffer, at *@out_offset in it, and returns
+    /// where it is mapped (null when it could not be reserved). Must be followed by Commit().
+    u8* Map(u64 size, u64* out_offset, u64 alignment = 0, bool allow_wait = true);
 
     /// Ensures that reserved bytes of memory are available to the GPU.
     void Commit();
@@ -156,7 +157,8 @@ struct StreamBuffer : public Buffer {
 
     /// Maps and commits a memory region with user provided data
     u64 Copy(auto src, size_t size, size_t alignment = 0) {
-        const auto [data, offset] = Map(size, alignment);
+        u64 offset = 0;
+        u8* const data = Map(size, &offset, alignment);
         ASSERT_MSG(data, "Failed to copy 0x%zx bytes", size);
         std::memcpy(data, reinterpret_cast<const void*>(src), size);
         Commit();

@@ -239,7 +239,8 @@ void TextureCache::DownloadImageMemory(ImageId image_id, DownloadMemoryFlags fla
                 is_sync ? -1
                         : buffer_cache.BeginWriteback(image_addr,
                                                       tiled ? image.info.guest_size : copy_size);
-            tile_manager.TileImage(image, buffer_copies, target, target_offset);
+            tile_manager.TileImage(image, buffer_copies.data(),
+                                   static_cast<u32>(buffer_copies.size()), target, target_offset);
             const auto written = [this, image_addr, copy_size, discard_buffer_cache, writeback] {
                 if (discard_buffer_cache) {
                     buffer_cache.UnmarkRegionAsGpuModified(image_addr, copy_size, true);
@@ -262,7 +263,8 @@ void TextureCache::DownloadImageMemory(ImageId image_id, DownloadMemoryFlags fla
     const auto download =
         runtime.GetStagingPool().Request(copy_size, MemoryType::HostCached, 16, !is_sync);
 
-    tile_manager.TileImage(image, buffer_copies, download.buffer, download.offset);
+    tile_manager.TileImage(image, buffer_copies.data(), static_cast<u32>(buffer_copies.size()),
+                           download.buffer, download.offset);
 
     const auto write_data = [this, image_addr, copy_size, download, discard_buffer_cache, is_sync,
                              writeback] {
@@ -1074,7 +1076,9 @@ void TextureCache::RefreshImage(Image& image) {
 
     const auto [in_buffer, in_offset] =
         buffer_cache.ObtainBufferForImage(image.info.guest_address, image.info.guest_size);
-    const auto [buffer, offset] = tile_manager.DetileImage(in_buffer, in_offset, image.info);
+    u64 offset = 0;
+    const Buffer* const buffer =
+        tile_manager.DetileImage(in_buffer, in_offset, image.info, &offset);
     for (auto& copy : image_copies) {
         copy.bufferOffset += offset;
     }

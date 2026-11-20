@@ -1,7 +1,8 @@
 // SPDX-FileCopyrightText: Copyright 2025 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
-#include <vector>
+#include <stdint.h>
+#include <string.h>
 
 #include "common/div_ceil.h"
 #include "video_core/buffer_cache/buffer_cache.h"
@@ -43,10 +44,12 @@ FaultManager::FaultManager(const Vulkan::Instance& instance, Vulkan::Scheduler& 
     Vulkan::Check(static_cast<vk::Result>(
         vkCreateDescriptorSetLayout(device, &desc_layout_ci, nullptr, &fault_process_desc_layout)));
 
-    std::vector<u32> words(HOST_SPIRV_MAX_WORDS);
-    const size_t num_words = host_spirv_fault_buffer_process_comp(words.data(), words.size(),
+    // Made once, at start: the module's words on the heap rather than the stack (32 KiB)
+    u32* words = new u32[HOST_SPIRV_MAX_WORDS];
+    const size_t num_words = host_spirv_fault_buffer_process_comp(words, HOST_SPIRV_MAX_WORDS,
                                                                   sparse_pagebits, MaxPageFaults);
-    const auto module = Vulkan::CompileSPV({words.data(), num_words}, vk_device);
+    const vk::ShaderModule module = Vulkan::CompileSPV(words, num_words, vk_device);
+    delete[] words;
     Vulkan::SetObjectName(vk_device, module, "Fault Buffer Parser");
 
     VkPipelineLayoutCreateInfo layout_info{};
@@ -85,7 +88,7 @@ void FaultManager::ProcessFaultBuffer() {
 
     const u32 offset = current_area * PageFaultAreaSize;
     u8* mapped = download_buffer.mapped_data.data() + offset;
-    std::memset(mapped, 0, PageFaultAreaSize);
+    memset(mapped, 0, PageFaultAreaSize);
 
     const VkBuffer fault_handle = static_cast<VkBuffer>(fault_buffer.Handle());
     VkBufferMemoryBarrier2 pre_barrier{};
@@ -132,7 +135,7 @@ void FaultManager::ProcessFaultBuffer() {
     post_dependency.pBufferMemoryBarriers = &post_barrier;
 
     scheduler.EndRendering();
-    const auto cmdbuf = static_cast<VkCommandBuffer>(scheduler.CommandBuffer());
+    const VkCommandBuffer cmdbuf = static_cast<VkCommandBuffer>(scheduler.CommandBuffer());
     vkCmdPipelineBarrier2(cmdbuf, &pre_dependency);
     vkCmdBindPipeline(cmdbuf, VK_PIPELINE_BIND_POINT_COMPUTE, fault_process_pipeline);
     vkCmdPushDescriptorSetKHR(cmdbuf, VK_PIPELINE_BIND_POINT_COMPUTE, fault_process_pipeline_layout,
@@ -146,15 +149,14 @@ void FaultManager::ProcessFaultBuffer() {
 
     scheduler.DeferOperation([this, mapped, area = current_area] {
         fault_ranges.Clear();
-        const u64* fault_buf = std::bit_cast<const u64*>(mapped);
+        const u64* fault_buf = reinterpret_cast<const u64*>(mapped);
         const u32 fault_count = fault_buf[0];
         for (u32 i = 1; i <= fault_count; ++i) {
             fault_ranges.Add(fault_buf[i], sparse_pagesize);
             LOG_INFO(Render_Vulkan, "Accessed non-GPU cached memory at 0x%" PRIx64, fault_buf[i]);
         }
         fault_ranges.ForEach([&](VAddr start, VAddr end) {
-            ASSERT_MSG((end - start) <= std::numeric_limits<u32>::max(),
-                       "Buffer size is too large");
+            ASSERT_MSG((end - start) <= UINT32_MAX, "Buffer size is too large");
             (void)buffer_cache.ObtainBuffer(start, end - start);
         });
         fault_areas[area] = 0;
