@@ -4,6 +4,9 @@ What changed in the libretro core of this fork, newest first. Changes that come 
 
 ## Unreleased
 
+- Tests: the suite (`libretro/tests/run.sh`) keeps each test's build and takes it again when nothing it was made from has changed, instead of compiling every sanitizer build each run.
+  - **How:** a build is kept in `build-tests/.cache` under its whole command line, with the list of files the compiler read for it (`-M`, the in-tree Vulkan and SPIR-V headers included). A run with the same command and none of those files newer links it back in place of compiling. `NO_CACHE=1` compiles everything.
+  - **Time on this box (2 CPUs):** 9 min 16 s for a run that compiles everything, 2 min 1 s for one after it with nothing changed. The two minutes left are the tests running.
 - No STL or `auto` in the semaphore, samplers, image views and the resource pools (`vk_semaphore`, `sampler`, `image_view`, `vk_resource_pool`). This is part of taking the STL and `auto` out of the whole core, a file or a few at a time.
   - **Resource pools:** the command pool's ticks and command buffers are plain arrays, grown with `realloc` when the pool overflows, as the vectors grew. The descriptor heap's used-up pools wait in a ring with room for eight, made at start and doubled only past that, instead of a `std::deque`. It takes its pool sizes as a pointer and a count, and the pipeline cache's table of them is a plain array.
   - **Pools can no longer be copied.** Nothing copied them, and a copy would have freed their arrays twice.
