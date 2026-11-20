@@ -4,6 +4,11 @@ What changed in the libretro core of this fork, newest first. Changes that come 
 
 ## Unreleased
 
+- No STL in the flat maps and sets (`common/flat_map.h`) and the slot vectors (`common/slot_vector.h`).
+  - **Flat maps and sets:** a binary search of their own instead of `std::lower_bound`; an entry is a `KeyValue` with `first` and `second`, and an insert returns an `InsertResult` with the same two names, so their users read the same. Keys are ordered by a `Less` of the header's own.
+  - **Slot vectors:** the occupancy bits and the free list are plain arrays, grown with `realloc` as a chunk is committed, as the vectors grew. `SlotId` compares with `==`, `!=` and `<` of its own instead of `<=>`, and its `std::hash`, which nothing used, is gone.
+  - **Checked against the STL:** 3,000 rounds of 80 random inserts, `[]`, erases and walks on a map and a set that move to the heap past 4, against `std::map` and `std::set`; 20,000 random inserts and erases on a slot vector against a `std::map`, and 150,000 inserts into one that commits chunks as it grows; all under AddressSanitizer and UndefinedBehaviorSanitizer, with the same contents throughout.
+  - **Checks:** the Linux and Windows builds pass. Not run in a game yet.
 - No STL in the core's small vectors (`common/small_vector.h`), which most of the core's containers are.
   - **What takes the STL's place:** moves are written as casts, and destroying, moving into raw storage, rotating (for insert) and comparing are short loops of the header's own. The reverse iterator is a pointer walked backwards, and what can be walked is said by a concept instead of `std::iterator_traits`.
   - **Compiler checks:** whether an element can be copied byte for byte, and whether its move cannot throw, come from the compiler (`__is_trivially_copyable`, `__is_nothrow_constructible`, which GCC, Clang and MSVC have).

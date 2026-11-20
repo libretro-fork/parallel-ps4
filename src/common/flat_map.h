@@ -9,20 +9,38 @@
 // in place. They replace Boost.Container's flat_map, small_flat_map and
 // flat_set.
 
-#include <algorithm>
-#include <cstddef>
-#include <functional>
-#include <tuple>
-#include <utility>
+#include <stddef.h>
 
 #include "common/small_vector.h"
 
 namespace Common {
 
-template <typename K, typename V, std::size_t N = 8, typename Compare = std::less<K>>
+/// Orders keys with their operator<
+template <typename K>
+struct Less {
+    constexpr bool operator()(const K& a, const K& b) const {
+        return a < b;
+    }
+};
+
+/// A map's entry: its key and its value
+template <typename K, typename V>
+struct KeyValue {
+    K first;
+    V second;
+};
+
+/// Where an insert went, and whether it added the entry
+template <typename It>
+struct InsertResult {
+    It first;
+    bool second;
+};
+
+template <typename K, typename V, size_t N = 8, typename Compare = Less<K>>
 class FlatMap {
 public:
-    using value_type = std::pair<K, V>;
+    using value_type = KeyValue<K, V>;
     using Storage = SmallVector<value_type, N>;
     using iterator = typename Storage::iterator;
     using const_iterator = typename Storage::const_iterator;
@@ -39,7 +57,7 @@ public:
     const_iterator end() const noexcept {
         return entries.end();
     }
-    std::size_t size() const noexcept {
+    size_t size() const noexcept {
         return entries.size();
     }
     bool empty() const noexcept {
@@ -49,22 +67,19 @@ public:
         entries.clear();
     }
 
+    /// The first entry whose key is not before @key
     iterator lower_bound(const K& key) {
-        return std::lower_bound(
-            entries.begin(), entries.end(), key,
-            [this](const value_type& e, const K& k) { return less(e.first, k); });
+        return entries.begin() + LowerBound(key);
     }
     const_iterator lower_bound(const K& key) const {
-        return std::lower_bound(
-            entries.begin(), entries.end(), key,
-            [this](const value_type& e, const K& k) { return less(e.first, k); });
+        return entries.begin() + LowerBound(key);
     }
     iterator find(const K& key) {
-        const auto it = lower_bound(key);
+        const iterator it = lower_bound(key);
         return (it != end() && !less(key, it->first)) ? it : end();
     }
     const_iterator find(const K& key) const {
-        const auto it = lower_bound(key);
+        const const_iterator it = lower_bound(key);
         return (it != end() && !less(key, it->first)) ? it : end();
     }
     bool contains(const K& key) const {
@@ -72,23 +87,22 @@ public:
     }
 
     template <typename... Args>
-    std::pair<iterator, bool> try_emplace(const K& key, Args&&... args) {
-        auto it = lower_bound(key);
+    InsertResult<iterator> try_emplace(const K& key, Args&&... args) {
+        iterator it = lower_bound(key);
         if (it != end() && !less(key, it->first)) {
             return {it, false};
         }
-        it = entries.emplace(it, std::piecewise_construct, std::forward_as_tuple(key),
-                             std::forward_as_tuple(std::forward<Args>(args)...));
+        it = entries.emplace(it, value_type{key, V(static_cast<Args&&>(args)...)});
         return {it, true};
     }
-    std::pair<iterator, bool> insert(const value_type& v) {
+    InsertResult<iterator> insert(const value_type& v) {
         return try_emplace(v.first, v.second);
     }
     V& operator[](const K& key) {
         return try_emplace(key).first->second;
     }
-    std::size_t erase(const K& key) {
-        const auto it = find(key);
+    size_t erase(const K& key) {
+        const iterator it = find(key);
         if (it == end()) {
             return 0;
         }
@@ -97,11 +111,26 @@ public:
     }
 
 private:
+    size_t LowerBound(const K& key) const {
+        size_t first = 0;
+        size_t count = entries.size();
+        while (count > 0) {
+            const size_t half = count / 2;
+            if (less(entries[first + half].first, key)) {
+                first += half + 1;
+                count -= half + 1;
+            } else {
+                count = half;
+            }
+        }
+        return first;
+    }
+
     Storage entries;
     [[no_unique_address]] Compare less{};
 };
 
-template <typename K, std::size_t N = 8, typename Compare = std::less<K>>
+template <typename K, size_t N = 8, typename Compare = Less<K>>
 class FlatSet {
 public:
     using Storage = SmallVector<K, N>;
@@ -114,7 +143,7 @@ public:
     const_iterator end() const noexcept {
         return entries.end();
     }
-    std::size_t size() const noexcept {
+    size_t size() const noexcept {
         return entries.size();
     }
     bool empty() const noexcept {
@@ -125,22 +154,21 @@ public:
     }
 
     const_iterator find(const K& key) const {
-        const auto it = std::lower_bound(entries.begin(), entries.end(), key, less);
+        const const_iterator it = entries.begin() + LowerBound(key);
         return (it != end() && !less(key, *it)) ? it : end();
     }
     bool contains(const K& key) const {
         return find(key) != end();
     }
-    std::pair<const_iterator, bool> insert(const K& key) {
-        auto it = std::lower_bound(entries.begin(), entries.end(), key, less);
-        if (it != entries.end() && !less(key, *it)) {
-            return {it, false};
+    InsertResult<const_iterator> insert(const K& key) {
+        const size_t at = LowerBound(key);
+        if (at != entries.size() && !less(key, entries[at])) {
+            return {entries.begin() + at, false};
         }
-        it = entries.insert(it, key);
-        return {it, true};
+        return {entries.insert(entries.begin() + at, key), true};
     }
-    std::size_t erase(const K& key) {
-        const auto it = find(key);
+    size_t erase(const K& key) {
+        const const_iterator it = find(key);
         if (it == end()) {
             return 0;
         }
@@ -149,6 +177,21 @@ public:
     }
 
 private:
+    size_t LowerBound(const K& key) const {
+        size_t first = 0;
+        size_t count = entries.size();
+        while (count > 0) {
+            const size_t half = count / 2;
+            if (less(entries[first + half], key)) {
+                first += half + 1;
+                count -= half + 1;
+            } else {
+                count = half;
+            }
+        }
+        return first;
+    }
+
     Storage entries;
     [[no_unique_address]] Compare less{};
 };
