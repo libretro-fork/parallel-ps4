@@ -4,6 +4,13 @@ What changed in the libretro core of this fork, newest first. Changes that come 
 
 ## Unreleased
 
+- The buffer cache (`buffer_cache.h`/`.cpp`) on the Vulkan C API, with no STL or `auto`.
+  - **C API:** the sparse binds, their submit (`vkQueueBindSparse`), residency memory (`vkAllocateMemory`), the arena memory requirements (`vkGetDeviceBufferMemoryRequirements`) and every copy are Vulkan's C structs. `Runtime::CopyBuffer` takes a pointer and a count and records `vkCmdCopyBuffer`, and records nothing for no copies.
+  - **Containers:** the arena table is one array made at start, the arenas a list of pointers to them, the binds and their submit infos arrays that keep the room they have grown to, as the vectors did. The tracker, fault manager, page table, null index buffer and the game memory's chunk buffers are plain pointers freed with the cache, in the order they were before.
+  - **API:** `ObtainBuffer`, `ObtainBufferForImage` and `GuestTarget` return the buffer and give the offset through a pointer, instead of a pair. The rasterizer, the HLE shader copy, the texture cache and the fault manager take the new form.
+  - **Same behaviour:** an unsupported CMask sample count still fills with 0. Its warning could never be reached: the value was an `std::optional` that was never empty. The dead check is gone.
+  - **Still vulkan.hpp at the edges:** the `Buffer` constructor, the tile manager's copies and `SubmitInfo::AddWait` take vulkan.hpp types until their files convert; `GetMetaInfo`'s `std::optional` stays until the texture cache does.
+  - **Checks:** the Linux and Windows builds pass. Not run in a game yet.
 - The on-screen keyboard's UTF-8 to UTF-16 conversion is libretro-common's `utf8_conv_utf16` instead of its own encoder.
   - **libretro-common:** `encoding_utf.c` and `utf.h` synced from RetroArch, which gains `utf8_conv_utf16`.
   - **Same text:** the IME still stops at a NUL, keeps a unit for the terminator, never cuts a surrogate pair and stops before a character cut off by the length. It gave the same units as before on 500,000 random strings of valid UTF-8, cut and sized at random.

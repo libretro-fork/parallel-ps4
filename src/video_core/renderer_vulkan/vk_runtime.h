@@ -34,8 +34,9 @@ public:
 
     void TickFrame();
 
+    /// Copies @num_copies regions at @copies from @src to @dst
     void CopyBuffer(const VideoCore::Buffer* src, const VideoCore::Buffer* dst,
-                    std::span<const vk::BufferCopy> copies);
+                    const VkBufferCopy* copies, u32 num_copies);
 
     void FillBuffer(const VideoCore::Buffer* dst, u64 offset, u64 size, u32 value);
 

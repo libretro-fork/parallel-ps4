@@ -231,8 +231,9 @@ void TextureCache::DownloadImageMemory(ImageId image_id, DownloadMemoryFlags fla
     if ((!tiled || copy_size == image.info.guest_size) &&
         std::has_single_bit(image.info.num_bits)) {
         const u64 alignment = tiled ? std::max<u64>(256, instance.StorageMinAlignment()) : 256;
-        const auto [target, target_offset] = buffer_cache.GuestTarget(
-            image_addr, tiled ? image.info.guest_size : copy_size, alignment);
+        u64 target_offset = 0;
+        const Buffer* target = buffer_cache.GuestTarget(
+            image_addr, tiled ? image.info.guest_size : copy_size, alignment, &target_offset);
         if (target) {
             // Landing when the GPU is done: until then the CPU waits for it there
             const int writeback =
@@ -1074,8 +1075,9 @@ void TextureCache::RefreshImage(Image& image) {
 
     scheduler.EndRendering();
 
-    const auto [in_buffer, in_offset] =
-        buffer_cache.ObtainBufferForImage(image.info.guest_address, image.info.guest_size);
+    u64 in_offset = 0;
+    const Buffer* in_buffer = buffer_cache.ObtainBufferForImage(image.info.guest_address,
+                                                                image.info.guest_size, &in_offset);
     u64 offset = 0;
     const Buffer* const buffer =
         tile_manager.DetileImage(in_buffer, in_offset, image.info, &offset);

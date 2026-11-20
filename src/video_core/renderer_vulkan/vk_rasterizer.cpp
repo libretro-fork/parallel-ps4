@@ -409,14 +409,15 @@ void Rasterizer::DrawIndirect(bool is_indexed, VAddr arg_address, u32 offset, u3
     }
 
     const auto size = stride * max_count;
-    const auto [buffer, base] = buffer_cache.ObtainBuffer(arg_address + offset, size);
+    u64 base = 0;
+    const VideoCore::Buffer* buffer = buffer_cache.ObtainBuffer(arg_address + offset, size, &base);
     needs_barrier |= runtime.IsBufferAccessed(buffer, base, size);
     bound_buffers.emplace_back(buffer, base, size, vk::AccessFlagBits2::eIndirectCommandRead);
 
     const VideoCore::Buffer* count_buffer;
     u64 count_offset;
     if (count_address != 0) {
-        std::tie(count_buffer, count_offset) = buffer_cache.ObtainBuffer(count_address, 4);
+        count_buffer = buffer_cache.ObtainBuffer(count_address, 4, &count_offset);
         needs_barrier |= runtime.IsBufferAccessed(count_buffer, count_offset, 4);
         bound_buffers.emplace_back(count_buffer, count_offset, 4,
                                    vk::AccessFlagBits2::eIndirectCommandRead);
@@ -514,7 +515,8 @@ void Rasterizer::DispatchIndirect(VAddr address, u32 offset, u32 size) {
         return;
     }
 
-    const auto [buffer, base] = buffer_cache.ObtainBuffer(address + offset, size);
+    u64 base = 0;
+    const VideoCore::Buffer* buffer = buffer_cache.ObtainBuffer(address + offset, size, &base);
     needs_barrier |= runtime.IsBufferAccessed(buffer, base, size);
     bound_buffers.emplace_back(buffer, base, size, vk::AccessFlagBits2::eIndirectCommandRead);
 
@@ -697,7 +699,7 @@ void Rasterizer::BindVertexBuffers(const GraphicsPipeline* pipeline) {
     // Map buffers for merged ranges
     for (auto& range : ranges_merged) {
         const u64 size = memory->ClampRangeSize(range.base_address, range.GetSize());
-        std::tie(range.buffer, range.offset) = buffer_cache.ObtainBuffer(range.base_address, size);
+        range.buffer = buffer_cache.ObtainBuffer(range.base_address, size, &range.offset);
         needs_barrier |= runtime.IsBufferAccessed(range.buffer, range.offset, size);
         bound_buffers.emplace_back(range.buffer, range.offset, size,
                                    vk::AccessFlagBits2::eVertexAttributeRead);
@@ -762,8 +764,8 @@ void Rasterizer::BindVertexBuffers(const GraphicsPipeline* pipeline) {
             // got this far
             const auto readback =
                 staging_pool.Request(size, VideoCore::MemoryType::HostCached, 16, true);
-            const vk::BufferCopy copy{range.offset, readback.offset, size};
-            runtime.CopyBuffer(range.buffer, readback.buffer, {&copy, 1});
+            const VkBufferCopy copy{range.offset, readback.offset, size};
+            runtime.CopyBuffer(range.buffer, readback.buffer, &copy, 1);
             VertexCapture::HostPending();
             scheduler.DeferOperation(
                 [&staging_pool, readback, draw, address = range.base_address, size] {
@@ -807,7 +809,9 @@ void Rasterizer::BindIndexBuffer(u32 index_offset, bool is_indirect) {
     vk::Buffer index_buffer{};
     u64 buffer_offset{};
     if (index_buffer_size != 0) {
-        const auto [buffer, offset] = buffer_cache.ObtainBuffer(index_address, index_buffer_size);
+        u64 offset = 0;
+        const VideoCore::Buffer* buffer =
+            buffer_cache.ObtainBuffer(index_address, index_buffer_size, &offset);
         needs_barrier |= runtime.IsBufferAccessed(buffer, offset, index_buffer_size);
         bound_buffers.emplace_back(buffer, offset, index_buffer_size,
                                    vk::AccessFlagBits2::eIndexRead);
@@ -1103,8 +1107,9 @@ void Rasterizer::BindBuffers(const Shader::Info& stage, Shader::Backend::Binding
                 if (desc.is_formatted) {
                     flags |= VideoCore::ObtainBufferFlags::IsTexelBuffer;
                 }
-                const auto [buffer, offset] =
-                    buffer_cache.ObtainBuffer(vsharp.base_address, size, flags);
+                u64 offset = 0;
+                const VideoCore::Buffer* buffer =
+                    buffer_cache.ObtainBuffer(vsharp.base_address, size, &offset, flags);
                 const u64 offset_aligned = Common::AlignDown(offset, alignment);
                 const u64 adjust = offset - offset_aligned;
                 if (adjust % 4 != 0) {
@@ -1595,13 +1600,11 @@ void Rasterizer::FillBuffer(VAddr address, u32 num_bytes, u32 value, bool is_gds
             return;
         }
     }
-    const auto [buffer, offset] = [&] -> std::pair<const VideoCore::Buffer*, u64> {
-        if (is_gds) {
-            return {buffer_cache.GetGdsBuffer(), address};
-        }
-        return buffer_cache.ObtainBuffer(address, num_bytes,
-                                         VideoCore::ObtainBufferFlags::IsWritten);
-    }();
+    u64 offset = address;
+    const VideoCore::Buffer* buffer =
+        is_gds ? buffer_cache.GetGdsBuffer()
+               : buffer_cache.ObtainBuffer(address, num_bytes, &offset,
+                                           VideoCore::ObtainBufferFlags::IsWritten);
     runtime.FillBuffer(buffer, offset, num_bytes, value);
 }
 
@@ -1616,27 +1619,19 @@ void Rasterizer::CopyBuffer(VAddr dst, VAddr src, u32 num_bytes, bool dst_gds, b
     }
     texture_cache.InvalidateMemoryFromGPU(dst, num_bytes);
     const auto* gds_buffer = buffer_cache.GetGdsBuffer();
-    const auto [src_buffer, src_offset] = [&] -> std::pair<const VideoCore::Buffer*, u64> {
-        if (src_gds) {
-            return {gds_buffer, src};
-        }
-        return buffer_cache.ObtainBuffer(src, num_bytes,
-                                         VideoCore::ObtainBufferFlags::IsTexelBuffer);
-    }();
-    const auto [dst_buffer, dst_offset] = [&] -> std::pair<const VideoCore::Buffer*, u64> {
-        if (dst_gds) {
-            return {gds_buffer, dst};
-        }
-        return buffer_cache.ObtainBuffer(dst, num_bytes,
-                                         VideoCore::ObtainBufferFlags::IsWritten |
-                                             VideoCore::ObtainBufferFlags::IsTexelBuffer);
-    }();
-    const vk::BufferCopy copy = {
-        .srcOffset = src_offset,
-        .dstOffset = dst_offset,
-        .size = num_bytes,
-    };
-    runtime.CopyBuffer(src_buffer, dst_buffer, std::span{&copy, 1});
+    u64 src_offset = src;
+    const VideoCore::Buffer* src_buffer =
+        src_gds ? gds_buffer
+                : buffer_cache.ObtainBuffer(src, num_bytes, &src_offset,
+                                            VideoCore::ObtainBufferFlags::IsTexelBuffer);
+    u64 dst_offset = dst;
+    const VideoCore::Buffer* dst_buffer =
+        dst_gds ? gds_buffer
+                : buffer_cache.ObtainBuffer(dst, num_bytes, &dst_offset,
+                                            VideoCore::ObtainBufferFlags::IsWritten |
+                                                VideoCore::ObtainBufferFlags::IsTexelBuffer);
+    const VkBufferCopy copy = {src_offset, dst_offset, num_bytes};
+    runtime.CopyBuffer(src_buffer, dst_buffer, &copy, 1);
 }
 
 u32 Rasterizer::ReadDataFromGds(u32 gds_offset) {

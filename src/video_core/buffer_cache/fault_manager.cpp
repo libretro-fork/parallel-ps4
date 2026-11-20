@@ -157,7 +157,8 @@ void FaultManager::ProcessFaultBuffer() {
         }
         fault_ranges.ForEach([&](VAddr start, VAddr end) {
             ASSERT_MSG((end - start) <= UINT32_MAX, "Buffer size is too large");
-            (void)buffer_cache.ObtainBuffer(start, end - start);
+            u64 offset = 0;
+            (void)buffer_cache.ObtainBuffer(start, end - start, &offset);
         });
         fault_areas[area] = 0;
     });

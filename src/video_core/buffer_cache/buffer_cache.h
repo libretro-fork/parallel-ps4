@@ -3,13 +3,6 @@
 
 #pragma once
 
-#include <array>
-#include <deque>
-#include <memory>
-#include <optional>
-#include <span>
-#include <vector>
-
 #include <retro_atomic.h>
 #include <rthreads/retro_eventcount.h>
 
@@ -78,12 +71,12 @@ public:
     }
 
     [[nodiscard]] const Buffer* GetNullIndexBuffer() const noexcept {
-        return null_index_buffer.get();
+        return null_index_buffer;
     }
 
     /// Retrieves the device local DBA page table buffer.
     [[nodiscard]] Buffer* GetBdaPageTableBuffer() noexcept {
-        return bda_pagetable_buffer.get();
+        return bda_pagetable_buffer;
     }
 
     /// Retrieves the fault buffer.
@@ -127,12 +120,12 @@ public:
     /// On the GPU thread when @on_gpu_thread, else it is sent there.
     void WaitWritebacks(VAddr addr, u64 size, bool on_gpu_thread);
 
-    /// Finds a buffer for the specified region.
-    [[nodiscard]] std::pair<const Buffer*, u64> ObtainBuffer(
-        VAddr device_addr, u32 size, ObtainBufferFlags flags = ObtainBufferFlags::None);
+    /// Finds a buffer for the specified region; *@out_offset gets where in it the region is.
+    [[nodiscard]] const Buffer* ObtainBuffer(VAddr device_addr, u32 size, u64* out_offset,
+                                             ObtainBufferFlags flags = ObtainBufferFlags::None);
 
     /// Attempts to obtain a buffer without modifying the cache contents.
-    [[nodiscard]] std::pair<const Buffer*, u64> ObtainBufferForImage(VAddr device_addr, u32 size);
+    [[nodiscard]] const Buffer* ObtainBufferForImage(VAddr device_addr, u32 size, u64* out_offset);
 
     /// Return true when a region is modified from the CPU
     [[nodiscard]] bool IsRegionCpuModified(VAddr addr, size_t size);
@@ -152,11 +145,11 @@ public:
 
     /// Where the GPU writes [@device_addr, @device_addr + @size) of the game's memory itself:
     /// the imported buffer over it and the offset in that buffer, provided the range lies in one
-    /// run of the backing and in one chunk (guest_import.h); {nullptr, 0} otherwise, and then
-    /// the caller reads back through a staging buffer as before. @alignment is what the offset
-    /// must be a multiple of.
-    [[nodiscard]] std::pair<const Buffer*, u64> GuestTarget(VAddr device_addr, u64 size,
-                                                            u64 alignment);
+    /// run of the backing and in one chunk (guest_import.h); null otherwise, and then the
+    /// caller reads back through a staging buffer as before. @alignment is what the offset
+    /// (*@out_offset) must be a multiple of.
+    [[nodiscard]] const Buffer* GuestTarget(VAddr device_addr, u64 size, u64 alignment,
+                                            u64* out_offset);
 
     /// The game has mapped [device_addr, device_addr + size): with Readbacks Into Game Memory
     /// set to When Game Maps Memory, the memory behind it is lent to the GPU now. From the
@@ -172,29 +165,28 @@ public:
 private:
     struct ArenaBinds {
         const Buffer* arena;
-        std::vector<vk::SparseMemoryBind> binds;
+        VkSparseMemoryBind* binds;
+        u32 num_binds;
+        u32 binds_room;
     };
 
     /// The binds of @arena for the next submit. The slots are kept from submit to submit, each
     /// with the room its binds have taken, so that binding allocates only past the most ever
     /// pending at once.
-    ArenaBinds* BindsForArena(const Buffer* arena) {
-        for (std::size_t i = 0; i < num_pending_binds; ++i) {
-            if (pending_binds[i].arena == arena) {
-                return &pending_binds[i];
-            }
-        }
-        if (num_pending_binds == pending_binds.size()) {
-            pending_binds.emplace_back().binds.reserve(PENDING_BINDS_ROOM);
-        }
-        ArenaBinds* const slot = &pending_binds[num_pending_binds++];
-        slot->arena = arena;
-        slot->binds.clear();
-        return slot;
-    }
+    ArenaBinds* BindsForArena(const Buffer* arena);
 
-    /// Device memory for @blocks blocks of residency and the block it starts at
-    std::pair<vk::DeviceMemory, u64> BackingMemory(u64 blocks);
+    /// Adds @bind to @binds, making room past the most it has had
+    static void AddBind(ArenaBinds* binds, const VkSparseMemoryBind& bind);
+
+    /// Device memory for @blocks blocks of residency; *@out_first gets the block it starts at
+    VkDeviceMemory BackingMemory(u64 blocks, u64* out_first);
+
+    /// A new arena over @size bytes from @cpu_addr, kept until the cache goes
+    Buffer* NewArena(VAddr cpu_addr, u64 size);
+
+    /// Downloads [@device_addr, @device_addr + @size) of the arena over it into the game's
+    /// memory (ReadMemory's request, on the GPU thread)
+    void FlushRegion(VAddr device_addr, u64 size, bool is_write, bool async);
 
     const Buffer* GetArena(u64 first_block, u64 last_block);
 
@@ -202,13 +194,19 @@ private:
 
     void DownloadMemory(const Buffer* arena, VAddr device_addr, u64 size, bool async);
 
+    /// Writes what DownloadMemory read back through @download into the game's memory, once the
+    /// GPU is done with it
+    void LandDownload(VAddr arena_base, VAddr device_addr, u64 size,
+                      const Vulkan::StagingBufferRef& download, bool async, int writeback,
+                      const VkBufferCopy* copies, u32 num_copies);
+
     bool SynchronizeMemory(const Buffer* arena, VAddr device_addr, u32 size, bool is_written,
                            bool is_texel_buffer);
 
     bool SynchronizeMemoryFromImage(const Buffer* arena, VAddr device_addr, u32 size);
 
     /// The Buffer over imported chunk @chunk, @handle, made the first time it is wanted
-    const Buffer* GuestChunk(u32 chunk, vk::Buffer handle);
+    const Buffer* GuestChunk(u32 chunk, VkBuffer handle);
 
     /// Of @copies (each with where in the game's memory it goes as its dstOffset) records from
     /// @src what the GPU can write into the game's memory itself, and leaves in @copies what
@@ -228,7 +226,7 @@ private:
     TextureCache& texture_cache;
     /// Pages as they were before the guest wrote where the GPU has written too (readbacks off)
     ::write_snapshots* snapshots{};
-    std::unique_ptr<MemoryTracker> memory_tracker;
+    MemoryTracker* memory_tracker{};
     /// Write-backs still landing (BeginWriteback): set on the GPU thread, freed from wherever
     /// they land (a deferred operation, or the priority operations' thread)
     struct Writeback {
@@ -238,18 +236,18 @@ private:
         u64 tick;
     };
     static constexpr int WRITEBACK_SLOTS = 64;
-    std::array<Writeback, WRITEBACK_SLOTS> writebacks{};
+    Writeback writebacks[WRITEBACK_SLOTS]{};
     retro_atomic_int_t writebacks_live{};
     retro_eventcount_t writebacks_ec{};
     void WaitWritebacksHere(VAddr addr, u64 size);
 
     StreamBuffer stream_buffer;
     Buffer gds_buffer;
-    std::unique_ptr<Buffer> null_index_buffer;
+    Buffer* null_index_buffer{};
     RangeSet gpu_modified_ranges;
 
-    std::unique_ptr<FaultManager> fault_manager;
-    std::unique_ptr<Buffer> bda_pagetable_buffer;
+    FaultManager* fault_manager{};
+    Buffer* bda_pagetable_buffer{};
     bool fault_process_pending{};
 
     // The size of an arena page, in bits. A constant upstream; the libretro core picks it
@@ -257,22 +255,28 @@ private:
     u64 ARENA_PAGE_BITS{DEFAULT_ARENA_PAGE_BITS};
     u64 ARENA_PAGE_SIZE{u64{1} << DEFAULT_ARENA_PAGE_BITS};
     u64 NUM_ARENA_PAGES{u64{1} << (ADDRESS_SPACE_BITS - DEFAULT_ARENA_PAGE_BITS)};
-    std::vector<const Buffer*> address_space;
-    std::deque<Buffer> arenas;
-    std::vector<ArenaBinds> pending_binds;
-    std::size_t num_pending_binds{};
-    std::vector<vk::SparseBufferMemoryBindInfo> buffer_binds;
-    static constexpr std::size_t PENDING_ARENAS_ROOM = 16;
-    static constexpr std::size_t PENDING_BINDS_ROOM = 64;
+    /// The arena over each arena page, null where there is none yet (NUM_ARENA_PAGES of them)
+    const Buffer** address_space{};
+    /// Every arena made, freed with the cache
+    Buffer** arenas{};
+    u32 num_arenas{};
+    u32 arenas_room{};
+    ArenaBinds* pending_binds{};
+    u32 num_pending_binds{};
+    u32 pending_binds_room{};
+    VkSparseBufferMemoryBindInfo* buffer_binds{};
+    u32 buffer_binds_room{};
+    static constexpr u32 PENDING_ARENAS_ROOM = 16;
+    static constexpr u32 PENDING_BINDS_ROOM = 64;
     // Residency is made out of chunks of device memory, a few blocks at a time, rather than
     // with an allocation of its own each time: the chunk, its size and the blocks taken
-    vk::DeviceMemory backing_chunk{};
+    VkDeviceMemory backing_chunk{VK_NULL_HANDLE};
     u64 backing_chunk_blocks{};
     u64 backing_chunk_used{};
     Vulkan::Semaphore memory_semaphore;
 
     struct Backing : public Interval {
-        vk::DeviceMemory memory;
+        VkDeviceMemory memory;
         u64 offset;
         constexpr bool CanMergeWith(const Backing& other) const noexcept {
             return memory == other.memory && offset + (end - start) == other.offset;
@@ -287,7 +291,7 @@ private:
     // nothing is bound, and an arena that replaces others takes their contents by a copy
     bool dense_arenas{};
     void MigrateDenseArena(const Buffer* old_arena, const Buffer* new_arena);
-    void WriteArenaPageTable(const Buffer* arena, std::span<const Interval> ranges);
+    void WriteArenaPageTable(const Buffer* arena, const Interval* ranges, u32 num_ranges);
     u32 arena_memory_type_index{};
     u32 block_size{};
     u32 block_shift{};
@@ -298,9 +302,10 @@ private:
     // over each chunk of it, made the first time one is wanted (the table itself at start),
     // and the copies being gathered for one (CopyToGuest)
     ::guest_import* guest{};
-    std::vector<std::optional<Buffer>> guest_chunks;
-    Common::SmallVector<vk::BufferCopy, 8> guest_copies;
-    std::vector<vk::BufferCopy> guest_rest;
+    Buffer** guest_chunks{};
+    u32 num_guest_chunks{};
+    Common::SmallVector<VkBufferCopy, 8> guest_copies;
+    Common::SmallVector<VkBufferCopy, 64> guest_rest;
     const Buffer* guest_src{};
     const Buffer* guest_batch{};
     u64 guest_src_offset{};

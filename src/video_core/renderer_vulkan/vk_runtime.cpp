@@ -109,25 +109,29 @@ void Runtime::TickFrame() {
 }
 
 void Runtime::CopyBuffer(const VideoCore::Buffer* src, const VideoCore::Buffer* dst,
-                         std::span<const vk::BufferCopy> copies) {
+                         const VkBufferCopy* copies, u32 num_copies) {
     scheduler.EndRendering();
 
     bool needs_flush{};
-    for (const auto& copy : copies) {
-        needs_flush |= IsBufferAccessed(src, copy.srcOffset, copy.size);
-        needs_flush |= IsBufferAccessed(dst, copy.dstOffset, copy.size, true);
+    for (u32 i = 0; i < num_copies; ++i) {
+        needs_flush |= IsBufferAccessed(src, copies[i].srcOffset, copies[i].size);
+        needs_flush |= IsBufferAccessed(dst, copies[i].dstOffset, copies[i].size, true);
     }
     if (needs_flush) {
         FlushBarriers();
     }
 
-    const auto cmdbuf = scheduler.CommandBuffer();
+    const vk::CommandBuffer cmdbuf = scheduler.CommandBuffer();
     instance.Mark(cmdbuf, "buffer copy: to buffer of size, first offset, first size, copies",
-                  dst->SizeBytes(), copies.empty() ? 0 : copies[0].dstOffset,
-                  copies.empty() ? 0 : copies[0].size, copies.size());
-    cmdbuf.copyBuffer(src->Handle(), dst->Handle(), copies);
+                  dst->SizeBytes(), num_copies == 0 ? 0 : copies[0].dstOffset,
+                  num_copies == 0 ? 0 : copies[0].size, static_cast<size_t>(num_copies));
+    if (num_copies != 0) {
+        vkCmdCopyBuffer(static_cast<VkCommandBuffer>(cmdbuf), static_cast<VkBuffer>(src->Handle()),
+                        static_cast<VkBuffer>(dst->Handle()), num_copies, copies);
+    }
 
-    for (const auto& copy : copies) {
+    for (u32 i = 0; i < num_copies; ++i) {
+        const VkBufferCopy& copy = copies[i];
         AccessBuffer(src, copy.srcOffset, copy.size, vk::PipelineStageFlagBits2::eCopy,
                      vk::AccessFlagBits2::eTransferRead);
         AccessBuffer(dst, copy.dstOffset, copy.size, vk::PipelineStageFlagBits2::eCopy,

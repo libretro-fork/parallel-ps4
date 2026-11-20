@@ -80,11 +80,14 @@ static bool ExecuteCopyShaderHLE(const Shader::Info& info, const AmdGpu::Compute
         }
 
         // Obtain buffers for the total source and destination ranges.
-        const auto [src_buf, src_buf_offset] = buffer_cache.ObtainBuffer(
-            src_buf_sharp.base_address + src_offset_min, src_offset_max - src_offset_min);
-        const auto [dst_buf, dst_buf_offset] = buffer_cache.ObtainBuffer(
+        u64 src_buf_offset = 0;
+        const VideoCore::Buffer* src_buf =
+            buffer_cache.ObtainBuffer(src_buf_sharp.base_address + src_offset_min,
+                                      src_offset_max - src_offset_min, &src_buf_offset);
+        u64 dst_buf_offset = 0;
+        const VideoCore::Buffer* dst_buf = buffer_cache.ObtainBuffer(
             dst_buf_sharp.base_address + dst_offset_min, dst_offset_max - dst_offset_min,
-            VideoCore::ObtainBufferFlags::IgnoreStreamBuffer);
+            &dst_buf_offset, VideoCore::ObtainBufferFlags::IgnoreStreamBuffer);
 
         // Apply found buffer base.
         const auto vk_copies = std::span{copies}.subspan(batch_start, batch_end - batch_start);
@@ -97,7 +100,9 @@ static bool ExecuteCopyShaderHLE(const Shader::Info& info, const AmdGpu::Compute
         LOG_TRACE(Render_Vulkan, "HLE buffer copy: src_size = %llu, dst_size = %llu",
                   static_cast<unsigned long long>(src_offset_max - src_offset_min),
                   static_cast<unsigned long long>(dst_offset_max - dst_offset_min));
-        runtime.CopyBuffer(src_buf, dst_buf, vk_copies);
+        runtime.CopyBuffer(src_buf, dst_buf,
+                           reinterpret_cast<const VkBufferCopy*>(vk_copies.data()),
+                           static_cast<u32>(vk_copies.size()));
         batch_start = batch_end;
     }
 
