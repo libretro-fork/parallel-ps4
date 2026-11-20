@@ -66,6 +66,29 @@ TileManager::~TileManager() {
 
 namespace {
 
+/// Writes the tiling parameters straight into the stream buffer, with no copy on the stack.
+/// The bytes are the same as before: the mips past num_mips stay zero.
+u64 WriteTilingInfo(StreamBuffer& stream_buffer, u64 alignment, const ImageInfo& info,
+                    u32 num_mips) {
+    const auto [data, offset] = stream_buffer.Map(sizeof(TilingInfo), alignment);
+    ASSERT_MSG(data, "Failed to map the tiling parameters");
+    auto* params = reinterpret_cast<TilingInfo*>(data);
+    params->bank_swizzle = info.bank_swizzle;
+    params->micro_tiled_mips = info.micro_tiled_mips;
+    params->num_mips = num_mips;
+    for (u32 mip = 0; mip < num_mips; ++mip) {
+        MipInfo mip_info = info.mips_layout[mip];
+        if (info.props.is_block) {
+            mip_info.pitch = std::max<u16>((mip_info.pitch + 3) / 4, 1U);
+            mip_info.height = std::max<u16>((mip_info.height + 3) / 4, 1U);
+        }
+        params->mips[mip] = mip_info;
+    }
+    std::memset(&params->mips[num_mips], 0, (MAX_MIPS - num_mips) * sizeof(MipInfo));
+    stream_buffer.Commit();
+    return offset;
+}
+
 /// Binds the tiling pipeline and pushes its tiled, linear and parameter buffers
 void BindTiling(VkCommandBuffer cmdbuf, VkPipeline pipeline, VkPipelineLayout layout,
                 VkBuffer tiled, u64 tiled_offset, VkBuffer linear, u64 linear_offset, u64 size,
@@ -186,21 +209,9 @@ std::pair<const Buffer*, u64> TileManager::DetileImage(const VideoCore::Buffer* 
         return {in_buffer, in_offset};
     }
 
-    TilingInfo params{};
-    params.bank_swizzle = info.bank_swizzle;
-    params.micro_tiled_mips = info.micro_tiled_mips;
-    params.num_mips = info.resources.levels;
-    for (u32 mip = 0; mip < params.num_mips; ++mip) {
-        auto& mip_info = params.mips[mip];
-        mip_info = info.mips_layout[mip];
-        if (info.props.is_block) {
-            mip_info.pitch = std::max<u16>((mip_info.pitch + 3) / 4, 1U);
-            mip_info.height = std::max<u16>((mip_info.height + 3) / 4, 1U);
-        }
-    }
-
+    const u32 num_mips = info.resources.levels;
     const u64 params_offset =
-        stream_buffer.Copy(&params, sizeof(params), instance.UniformMinAlignment());
+        WriteTilingInfo(stream_buffer, instance.UniformMinAlignment(), info, num_mips);
 
     const auto staging = runtime.GetStagingPool().Request(info.guest_size, MemoryType::DeviceLocal,
                                                           256, false, true);
@@ -212,7 +223,7 @@ std::pair<const Buffer*, u64> TileManager::DetileImage(const VideoCore::Buffer* 
     BindTiling(static_cast<VkCommandBuffer>(cmdbuf), GetTilingPipeline(info, false), pl_layout,
                static_cast<VkBuffer>(in_buffer->Handle()), in_offset,
                static_cast<VkBuffer>(staging.buffer->Handle()), staging.offset, info.guest_size,
-               static_cast<VkBuffer>(stream_buffer.Handle()), params_offset, sizeof(params));
+               static_cast<VkBuffer>(stream_buffer.Handle()), params_offset, sizeof(TilingInfo));
 
     const auto dim_x = (info.guest_size / (info.num_bits / 8)) / 64;
     instance.Mark(cmdbuf, "detile: image at, size, mode|bits<<8|mips<<16, w|h<<16|d<<32",
@@ -239,21 +250,9 @@ void TileManager::TileImage(Image& in_image, std::span<vk::BufferImageCopy> buff
         return;
     }
 
-    TilingInfo params{};
-    params.bank_swizzle = info.bank_swizzle;
-    params.micro_tiled_mips = info.micro_tiled_mips;
-    params.num_mips = static_cast<u32>(buffer_copies.size());
-    for (u32 mip = 0; mip < params.num_mips; ++mip) {
-        auto& mip_info = params.mips[mip];
-        mip_info = info.mips_layout[mip];
-        if (info.props.is_block) {
-            mip_info.pitch = std::max<u16>((mip_info.pitch + 3) / 4, 1U);
-            mip_info.height = std::max<u16>((mip_info.height + 3) / 4, 1U);
-        }
-    }
-
+    const u32 num_mips = static_cast<u32>(buffer_copies.size());
     const u64 params_offset =
-        stream_buffer.Copy(&params, sizeof(params), instance.UniformMinAlignment());
+        WriteTilingInfo(stream_buffer, instance.UniformMinAlignment(), info, num_mips);
 
     const auto staging = runtime.GetStagingPool().Request(info.guest_size, MemoryType::DeviceLocal,
                                                           256, false, true);
@@ -268,12 +267,12 @@ void TileManager::TileImage(Image& in_image, std::span<vk::BufferImageCopy> buff
     BindTiling(static_cast<VkCommandBuffer>(cmdbuf), GetTilingPipeline(info, true), pl_layout,
                static_cast<VkBuffer>(out_buffer->Handle()), out_offset,
                static_cast<VkBuffer>(staging.buffer->Handle()), staging.offset, info.guest_size,
-               static_cast<VkBuffer>(stream_buffer.Handle()), params_offset, sizeof(params));
+               static_cast<VkBuffer>(stream_buffer.Handle()), params_offset, sizeof(TilingInfo));
 
     const auto dim_x = (info.guest_size / (info.num_bits / 8)) / 64;
     instance.Mark(cmdbuf, "tile: image at, size, mode|bits<<8|mips<<16, w|h<<16|d<<32",
                   info.guest_address, info.guest_size,
-                  u64(info.tile_mode) | u64(info.num_bits) << 8 | u64(params.num_mips) << 16,
+                  u64(info.tile_mode) | u64(info.num_bits) << 8 | u64(num_mips) << 16,
                   u64(info.size.width) | u64(info.size.height) << 16 | u64(info.size.depth) << 32);
     vkCmdDispatch(static_cast<VkCommandBuffer>(cmdbuf), dim_x, 1, 1);
 

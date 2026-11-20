@@ -4,6 +4,9 @@ What changed in the libretro core of this fork, newest first. Changes that come 
 
 ## Unreleased
 
+- Tile manager, one copy fewer: the tiler and detiler write their tiling parameters (about 200 bytes per tiled image upload or download) straight into the stream buffer, instead of building them on the stack and copying them in.
+  - **Same bytes:** the GPU reads exactly what it did before; the unused mip entries are still zero.
+  - **Checks:** the Linux and Windows builds pass. Not run in a game yet.
 - Vulkan, the tile manager on the C API: `TileManager` (`texture_cache/tile_manager`) creates its descriptor set layout, pipeline layout and tiling pipelines, and binds, pushes descriptors and dispatches, with the C API through libretro-common's symbol wrapper.
   - **What holds the objects:** plain Vulkan handles, its tiling pipelines included, destroyed in its destructor in the same order as before. It can no longer be copied (it never was).
   - **Less code:** the tiler and detiler share one helper for the bind and the three descriptor writes, instead of two copies.
