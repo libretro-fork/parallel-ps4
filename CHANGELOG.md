@@ -4,6 +4,12 @@ What changed in the libretro core of this fork, newest first. Changes that come 
 
 ## Unreleased
 
+- Vulkan, pipelines on the C API: the pipeline base (`vk_pipeline_common`), compute pipelines (`vk_compute_pipeline`) and the creation of graphics pipelines (`vk_graphics_pipeline`) go through libretro-common's symbol wrapper.
+  - **What changes:** a pipeline holds its pipeline, pipeline layout and descriptor set layout as plain Vulkan handles and destroys them itself. Compute and graphics pipelines create their layouts with one shared pair of helpers, instead of a copy each. Binding a pipeline's resources (push constants, push descriptors or a descriptor set) uses the C calls too.
+  - **Still vulkan.hpp:** the graphics pipeline's state structs, which are passed to the C call as they are, and the descriptor writes the rasterizer fills in.
+  - **One read fewer:** making a compute pipeline no longer reads each buffer's sharp, which it threw away.
+  - **Unchanged:** the Vulkan calls and arguments are the same.
+  - **Checks:** the Linux and Windows builds pass. Not run in a game yet.
 - Tile manager, one copy fewer: the tiler and detiler write their tiling parameters (about 200 bytes per tiled image upload or download) straight into the stream buffer, instead of building them on the stack and copying them in.
   - **Same bytes:** the GPU reads exactly what it did before; the unused mip entries are still zero.
   - **Checks:** the Linux and Windows builds pass. Not run in a game yet.

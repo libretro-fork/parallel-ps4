@@ -21,98 +21,56 @@ ComputePipeline::ComputePipeline(const Instance& instance, Scheduler& scheduler,
     info = &info_;
     const auto debug_str = GetDebugString();
 
-    const vk::PipelineShaderStageRequiredSubgroupSizeCreateInfo subgroup_size_ci = {
-        .requiredSubgroupSize = 64,
-    };
-    const vk::PipelineShaderStageCreateInfo shader_ci = {
-        .pNext = instance.IsSubgroupSize64Supported() ? &subgroup_size_ci : nullptr,
-        .stage = vk::ShaderStageFlagBits::eCompute,
-        .module = module,
-        .pName = "main",
-    };
-
     u32 binding{};
-    Common::SmallVector<vk::DescriptorSetLayoutBinding, 32> bindings;
-    for (const auto& buffer : info->buffers) {
-        // During deserialization, we don't have access to the UD to fetch sharp data. To address
-        // this properly we need to track shaprs or portion of them in `sdata`, but since we're
-        // interested only in "is storage" flag (which is not even effective atm), we can take a
-        // shortcut there.
-        const auto sharp = preloading ? AmdGpu::Buffer{} : buffer.GetSharp(*info);
-        bindings.push_back({
-            .binding = binding++,
-            .descriptorType = vk::DescriptorType::eStorageBuffer,
-            .descriptorCount = 1,
-            .stageFlags = vk::ShaderStageFlagBits::eCompute,
-        });
+    Common::SmallVector<VkDescriptorSetLayoutBinding, 32> bindings;
+    const auto add_binding = [&](VkDescriptorType type, u32 count) {
+        VkDescriptorSetLayoutBinding layout_binding{};
+        layout_binding.binding = binding;
+        layout_binding.descriptorType = type;
+        layout_binding.descriptorCount = count;
+        layout_binding.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+        bindings.push_back(layout_binding);
+        binding += count;
+    };
+    // During deserialization the sharps are out of reach, and only the "is storage" flag (not
+    // even effective yet) would come from them, so every buffer is a storage buffer
+    for (size_t i = 0; i < info->buffers.size(); ++i) {
+        add_binding(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1);
     }
     for (const auto& image : info->images) {
-        const u32 num_bindings = image.NumBindings(*info);
-        bindings.push_back({
-            .binding = binding,
-            .descriptorType = image.is_written ? vk::DescriptorType::eStorageImage
-                                               : vk::DescriptorType::eSampledImage,
-            .descriptorCount = num_bindings,
-            .stageFlags = vk::ShaderStageFlagBits::eCompute,
-        });
-        binding += num_bindings;
+        add_binding(image.is_written ? VK_DESCRIPTOR_TYPE_STORAGE_IMAGE
+                                     : VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
+                    image.NumBindings(*info));
     }
-    for (const auto& sampler : info->samplers) {
-        bindings.push_back({
-            .binding = binding++,
-            .descriptorType = vk::DescriptorType::eSampler,
-            .descriptorCount = 1,
-            .stageFlags = vk::ShaderStageFlagBits::eCompute,
-        });
+    for (size_t i = 0; i < info->samplers.size(); ++i) {
+        add_binding(VK_DESCRIPTOR_TYPE_SAMPLER, 1);
     }
-
-    const vk::PushConstantRange push_constants = {
-        .stageFlags = vk::ShaderStageFlagBits::eCompute,
-        .offset = 0,
-        .size = sizeof(Shader::PushData),
-    };
 
     uses_push_descriptors = binding < instance.MaxPushDescriptors();
-    const auto flags = uses_push_descriptors
-                           ? vk::DescriptorSetLayoutCreateFlagBits::ePushDescriptorKHR
-                           : vk::DescriptorSetLayoutCreateFlagBits{};
-    const vk::DescriptorSetLayoutCreateInfo desc_layout_ci = {
-        .flags = flags,
-        .bindingCount = static_cast<u32>(bindings.size()),
-        .pBindings = bindings.data(),
-    };
-    const auto device = instance.GetDevice();
-    auto [descriptor_set_result, descriptor_set] =
-        device.createDescriptorSetLayoutUnique(desc_layout_ci);
-    ASSERT_MSG(descriptor_set_result == vk::Result::eSuccess,
-               "Failed to create compute descriptor set layout: %s",
-               (vk::to_string(descriptor_set_result)).c_str());
-    desc_layout = std::move(descriptor_set);
+    CreateDescSetLayout(bindings.data(), static_cast<u32>(bindings.size()), "compute");
+    CreatePipelineLayout(VK_SHADER_STAGE_COMPUTE_BIT, "compute");
+    const vk::Device vk_device{device};
+    SetObjectName(vk_device, GetLayout(), "Compute PipelineLayout %s", debug_str.c_str());
 
-    const vk::DescriptorSetLayout set_layout = *desc_layout;
-    const vk::PipelineLayoutCreateInfo layout_info = {
-        .setLayoutCount = 1U,
-        .pSetLayouts = &set_layout,
-        .pushConstantRangeCount = 1U,
-        .pPushConstantRanges = &push_constants,
-    };
-    auto [layout_result, layout] = instance.GetDevice().createPipelineLayoutUnique(layout_info);
-    ASSERT_MSG(layout_result == vk::Result::eSuccess,
-               "Failed to create compute pipeline layout: %s",
-               (vk::to_string(layout_result)).c_str());
-    pipeline_layout = std::move(layout);
-    SetObjectName(device, *pipeline_layout, "Compute PipelineLayout %s", debug_str.c_str());
-
-    const vk::ComputePipelineCreateInfo compute_pipeline_ci = {
-        .stage = shader_ci,
-        .layout = *pipeline_layout,
-    };
-    auto [pipeline_result, pipe] =
-        instance.GetDevice().createComputePipelineUnique(pipeline_cache, compute_pipeline_ci);
-    ASSERT_MSG(pipeline_result == vk::Result::eSuccess, "Failed to create compute pipeline: %s",
-               (vk::to_string(pipeline_result)).c_str());
-    pipeline = std::move(pipe);
-    SetObjectName(device, *pipeline, "Compute Pipeline %s", debug_str.c_str());
+    VkPipelineShaderStageRequiredSubgroupSizeCreateInfo subgroup_size_ci{};
+    subgroup_size_ci.sType =
+        VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_REQUIRED_SUBGROUP_SIZE_CREATE_INFO;
+    subgroup_size_ci.requiredSubgroupSize = 64;
+    VkComputePipelineCreateInfo compute_pipeline_ci{};
+    compute_pipeline_ci.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
+    compute_pipeline_ci.stage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    compute_pipeline_ci.stage.pNext =
+        instance.IsSubgroupSize64Supported() ? &subgroup_size_ci : nullptr;
+    compute_pipeline_ci.stage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+    compute_pipeline_ci.stage.module = static_cast<VkShaderModule>(module);
+    compute_pipeline_ci.stage.pName = "main";
+    compute_pipeline_ci.layout = pipeline_layout;
+    const VkResult pipeline_result =
+        vkCreateComputePipelines(device, static_cast<VkPipelineCache>(pipeline_cache), 1,
+                                 &compute_pipeline_ci, nullptr, &pipeline);
+    ASSERT_MSG(pipeline_result == VK_SUCCESS, "Failed to create compute pipeline: %s",
+               vk::to_string(static_cast<vk::Result>(pipeline_result)).c_str());
+    SetObjectName(vk_device, Handle(), "Compute Pipeline %s", debug_str.c_str());
 }
 
 ComputePipeline::~ComputePipeline() = default;

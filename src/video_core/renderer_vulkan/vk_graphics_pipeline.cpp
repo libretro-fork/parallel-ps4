@@ -39,30 +39,13 @@ GraphicsPipeline::GraphicsPipeline(
         fetch_shader = *fetch_shader_;
     }
 
-    const vk::Device device = instance.GetDevice();
+    const vk::Device vk_device{device};
     std::ranges::copy(infos, stages.begin());
     BuildDescSetLayout(preloading);
     const auto debug_str = GetDebugString();
 
-    const vk::PushConstantRange push_constants = {
-        .stageFlags = AllGraphicsStageBits,
-        .offset = 0,
-        .size = sizeof(Shader::PushData),
-    };
-
-    const vk::DescriptorSetLayout set_layout = *desc_layout;
-    const vk::PipelineLayoutCreateInfo layout_info = {
-        .setLayoutCount = 1U,
-        .pSetLayouts = &set_layout,
-        .pushConstantRangeCount = 1,
-        .pPushConstantRanges = &push_constants,
-    };
-    auto [layout_result, layout] = instance.GetDevice().createPipelineLayoutUnique(layout_info);
-    ASSERT_MSG(layout_result == vk::Result::eSuccess,
-               "Failed to create graphics pipeline layout: %s",
-               (vk::to_string(layout_result)).c_str());
-    pipeline_layout = std::move(layout);
-    SetObjectName(device, *pipeline_layout, "Graphics PipelineLayout %s", debug_str.c_str());
+    CreatePipelineLayout(static_cast<VkShaderStageFlags>(AllGraphicsStageBits), "graphics");
+    SetObjectName(vk_device, GetLayout(), "Graphics PipelineLayout %s", debug_str.c_str());
 
     if (!preloading) {
         VertexInputs<AmdGpu::Buffer> guest_buffers;
@@ -420,15 +403,15 @@ GraphicsPipeline::GraphicsPipeline(
             !instance.IsExtendedDynamicState3Supported() ? &depth_stencil_info : nullptr,
         .pColorBlendState = &color_blending,
         .pDynamicState = &dynamic_info,
-        .layout = *pipeline_layout,
+        .layout = GetLayout(),
     };
 
-    auto [pipeline_result, pipe] =
-        device.createGraphicsPipelineUnique(pipeline_cache, pipeline_info);
-    ASSERT_MSG(pipeline_result == vk::Result::eSuccess, "Failed to create graphics pipeline: %s",
-               (vk::to_string(pipeline_result)).c_str());
-    pipeline = std::move(pipe);
-    SetObjectName(device, *pipeline, "Graphics Pipeline %s", debug_str.c_str());
+    const VkResult pipeline_result = vkCreateGraphicsPipelines(
+        device, static_cast<VkPipelineCache>(pipeline_cache), 1,
+        &static_cast<const VkGraphicsPipelineCreateInfo&>(pipeline_info), nullptr, &pipeline);
+    ASSERT_MSG(pipeline_result == VK_SUCCESS, "Failed to create graphics pipeline: %s",
+               vk::to_string(static_cast<vk::Result>(pipeline_result)).c_str());
+    SetObjectName(vk_device, Handle(), "Graphics Pipeline %s", debug_str.c_str());
 }
 
 GraphicsPipeline::~GraphicsPipeline() = default;
@@ -527,20 +510,8 @@ void GraphicsPipeline::BuildDescSetLayout(bool preloading) {
         }
     }
     uses_push_descriptors = binding < instance.MaxPushDescriptors();
-    const auto flags = uses_push_descriptors
-                           ? vk::DescriptorSetLayoutCreateFlagBits::ePushDescriptorKHR
-                           : vk::DescriptorSetLayoutCreateFlagBits{};
-    const vk::DescriptorSetLayoutCreateInfo desc_layout_ci = {
-        .flags = flags,
-        .bindingCount = static_cast<u32>(bindings.size()),
-        .pBindings = bindings.data(),
-    };
-    auto [layout_result, layout] =
-        instance.GetDevice().createDescriptorSetLayoutUnique(desc_layout_ci);
-    ASSERT_MSG(layout_result == vk::Result::eSuccess,
-               "Failed to create graphics descriptor set layout: %s",
-               (vk::to_string(layout_result)).c_str());
-    desc_layout = std::move(layout);
+    CreateDescSetLayout(reinterpret_cast<const VkDescriptorSetLayoutBinding*>(bindings.data()),
+                        static_cast<u32>(bindings.size()), "graphics");
 }
 
 } // namespace Vulkan

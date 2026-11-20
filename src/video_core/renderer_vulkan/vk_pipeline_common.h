@@ -32,12 +32,15 @@ public:
              bool is_compute = false);
     virtual ~Pipeline();
 
+    Pipeline(const Pipeline&) = delete;
+    Pipeline& operator=(const Pipeline&) = delete;
+
     vk::Pipeline Handle() const noexcept {
-        return *pipeline;
+        return vk::Pipeline{pipeline};
     }
 
     vk::PipelineLayout GetLayout() const noexcept {
-        return *pipeline_layout;
+        return vk::PipelineLayout{pipeline_layout};
     }
 
     auto GetStages() const {
@@ -80,13 +83,21 @@ public:
 protected:
     [[nodiscard]] std::string GetDebugString() const;
 
+    /// Creates desc_layout from @bindings, as push descriptors where uses_push_descriptors is set
+    void CreateDescSetLayout(const VkDescriptorSetLayoutBinding* bindings, u32 num_bindings,
+                             const char* kind);
+
+    /// Creates pipeline_layout over desc_layout, with the push data visible to @stage_flags
+    void CreatePipelineLayout(VkShaderStageFlags stage_flags, const char* kind);
+
     const Instance& instance;
     Scheduler& scheduler;
     DescriptorHeap& desc_heap;
     const Shader::Profile& profile;
-    vk::UniquePipeline pipeline;
-    vk::UniquePipelineLayout pipeline_layout;
-    vk::UniqueDescriptorSetLayout desc_layout;
+    VkDevice device;
+    VkPipeline pipeline{VK_NULL_HANDLE};
+    VkPipelineLayout pipeline_layout{VK_NULL_HANDLE};
+    VkDescriptorSetLayout desc_layout{VK_NULL_HANDLE};
     std::array<const Shader::Info*, Shader::MaxStageTypes> stages{};
     bool uses_push_descriptors{};
     bool is_compute;
