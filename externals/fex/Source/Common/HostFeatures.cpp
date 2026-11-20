@@ -7,8 +7,6 @@
 #include <FEXCore/Utils/FileLoading.h>
 #include <FEXCore/Utils/StringUtils.h>
 
-#include <range/v3/view/split.hpp>
-#include <range/v3/view/transform.hpp>
 
 #ifdef ARCHITECTURE_x86_64
 #include "Common/X86Features.h"
@@ -108,29 +106,23 @@ FEX::CPUFeatures GetCPUFeaturesFromIDRegisters() {
 class CPUFeaturesFromConfig final : public FEX::CPUFeatures {
 public:
   CPUFeaturesFromConfig(std::string_view Config) {
-    auto to_string_view = [](auto rng) {
-      return std::string_view(&*rng.begin(), ranges::distance(rng));
-    };
+    // Comma-separated key=value options
+    for (std::string_view Rest = Config; !Rest.empty();) {
+      const auto OptionEnd = Rest.find(',');
+      const auto Option = Rest.substr(0, OptionEnd);
+      Rest = OptionEnd == std::string_view::npos ? std::string_view {} : Rest.substr(OptionEnd + 1);
 
-    for (auto Option : ranges::views::split(Config, ',') | ranges::views::transform(to_string_view)) {
-      auto OptionData = ranges::views::split(Option, '=') | ranges::views::transform(to_string_view);
-      auto OptionDataBegin = ranges::begin(OptionData);
-      auto OptionDataEnd = ranges::end(OptionData);
-
-      if (OptionDataBegin == OptionDataEnd) {
+      const auto KeyEnd = Option.find('=');
+      if (KeyEnd == std::string_view::npos) {
         continue;
       }
-
-      auto Key = *OptionDataBegin;
+      const auto Key = Option.substr(0, KeyEnd);
       if (Key.empty()) {
         continue;
       }
-
-      ++OptionDataBegin;
-      if (OptionDataBegin == OptionDataEnd) {
-        continue;
-      }
-      auto Value = *OptionDataBegin;
+      // Up to a second '=', if there is one
+      auto Value = Option.substr(KeyEnd + 1);
+      Value = Value.substr(0, Value.find('='));
       uint64_t ValueHex {};
       char* str_end {};
       ValueHex = std::strtoull(Value.data(), &str_end, 16);

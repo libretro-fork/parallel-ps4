@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: MIT
-#include "Common/ArgumentLoader.h"
 #include "Common/Config.h"
 
 #include <FEXCore/Config/Config.h>
@@ -23,8 +22,6 @@
 #include <utility>
 #include <formats/rjson.h>
 
-#include <range/v3/view/split.hpp>
-#include <range/v3/view/transform.hpp>
 
 namespace FEX::Config {
 namespace JSON {
@@ -622,31 +619,36 @@ fextl::string FindUserHomeThroughUID() {
     return {};
   }
 
-  auto to_string_view = [](auto rng) {
-    return std::string_view(&*rng.begin(), ranges::distance(rng));
-  };
-
   const auto uid = geteuid();
 
-  for (const auto entry : ranges::views::split(Data, '\n') | ranges::views::transform(to_string_view)) {
-    const auto elements = ranges::views::split(entry, ':') | ranges::views::transform(to_string_view);
+  std::string_view Lines(Data.data(), Data.size());
+  while (!Lines.empty()) {
+    const auto LineEnd = Lines.find('\n');
+    const auto entry = Lines.substr(0, LineEnd);
+    Lines = LineEnd == std::string_view::npos ? std::string_view {} : Lines.substr(LineEnd + 1);
+
+    // The seven fields, split at ':'
+    std::string_view elements[7];
+    size_t Count = 0;
+    for (std::string_view Rest = entry;; ++Count) {
+      const auto FieldEnd = Rest.find(':');
+      if (Count < 7) {
+        elements[Count] = Rest.substr(0, FieldEnd);
+      }
+      if (FieldEnd == std::string_view::npos) {
+        ++Count;
+        break;
+      }
+      Rest = Rest.substr(FieldEnd + 1);
+    }
     // Reject bad entries.
-    if (std::distance(elements.begin(), elements.end()) != 7) {
+    if (Count != 7) {
       continue;
     }
 
-    auto iter = elements.begin();
-    ++iter; // name
-    ++iter; // password hash
-    ++iter; // comment
-    // uid
-    const auto uid_s = *iter;
-    ++iter;
-    ++iter; // gid
-    // home
-    const auto home_s = *iter;
-    ++iter;
-    ++iter; // shell
+    // name, password hash, uid, gid, comment, home, shell
+    const auto uid_s = elements[2];
+    const auto home_s = elements[5];
 
     uint64_t element_uid;
     auto Results = std::from_chars(uid_s.begin(), uid_s.end(), element_uid, 10);

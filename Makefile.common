@@ -395,16 +395,10 @@ FEXRPMALLOC_SOURCES_C := $(FEX_DIR)/External/rpmalloc/rpmalloc/rpmalloc.c
 FEXRPMALLOC_FLAGS := $(FEX_BASE_DEFS) -DENABLE_ASSERTS=0 -DENABLE_DECOMMIT=1 \
 	-DENABLE_DYNAMIC_LINK=0 -DENABLE_OVERRIDE=0 -DENABLE_STATISTICS=0 \
 	-I$(FEX_DIR)/External/rpmalloc
-# FEX's Source/Common, cpp-optparse and CommonTools: the config and host feature code
-FEXCOMMON_SOURCES_CXX := $(addprefix $(FEX_DIR)/Source/,$(addprefix Common/,ArgumentLoader.cpp \
-	CPUInfo.cpp Config.cpp FEXServerClient.cpp FileFormatCheck.cpp HostFeatures.cpp \
-	Linux/SBRKAllocations.cpp SHMStats.cpp VolatileMetadata.cpp \
-	cpp-optparse/OptionParser.cpp) \
-	Tools/CommonTools/DummyHandlers.cpp Tools/CommonTools/Linux/Utils/ELFContainer.cpp)
-FEXCOMMON_FLAGS := $(FEX_DEFS) -DRANGES_DISABLE_DEPRECATED_WARNINGS $(FEX_INC) \
-	-I$(FEX_DIR)/Source/Common -I$(FEX_DIR)/Source/Common/cpp-optparse \
-	-I$(FEX_DIR)/Source/Tools/CommonTools -I$(FEX_DIR)/External/range-v3/include \
-	-I$(LRC_DIR)/include
+# FEX's Source/Common: the config and host feature code the core reaches
+FEXCOMMON_SOURCES_CXX := $(addprefix $(FEX_DIR)/Source/Common/,CPUInfo.cpp Config.cpp \
+	HostFeatures.cpp)
+FEXCOMMON_FLAGS := $(FEX_DEFS) $(FEX_INC) -I$(FEX_DIR)/Source/Common -I$(LRC_DIR)/include
 FEXCOMMON_CXXFLAGS := $(FEX_CXX)
 # SoftFloat 3e and cephes: x87's 80-bit float and its transcendentals
 FEXFLOAT_SOURCES_C := $(addprefix $(FEX_DIR)/External/SoftFloat-3e/src/,$(addsuffix .c, \
@@ -437,9 +431,7 @@ CORE_SOURCES_CXX += src/core/libraries/fiber/fiber.cpp src/core/fex/fex_guest_en
 CORE_FLAGS += -DSHADPS4_ENABLE_FEX_GUEST_CPU=1 -DFEX_DISABLE_TELEMETRY=1 -DFEX_HAS_PRESERVE_ALL_ATTR=1 \
 	'-DFEX_PRESERVE_ALL_ATTR=__attribute__((preserve_all))' -DFEXCORE_HAS_PRESERVE_ALL_ATTR=1 \
 	'-DFEXCORE_PRESERVE_ALL_ATTR=__attribute__((preserve_all))' \
-	-I$(FEX_DIR)/Source/Tools/CommonTools $(FEX_INC) \
-	-I$(FEX_DIR)/Source/Common/cpp-optparse \
-	-I$(FEX_DIR)/External/range-v3/include -I$(FEX_DIR)/External/rpmalloc
+	$(FEX_INC) -I$(FEX_DIR)/External/rpmalloc
 endif
 
 # ----------------------------------------------------------------------------

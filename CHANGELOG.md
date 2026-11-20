@@ -4,6 +4,12 @@ What changed in the libretro core of this fork, newest first. Changes that come 
 
 ## Unreleased
 
+- FEX's range-v3, cpp-optparse and CommonTools are gone, with the parts of FEX's `Source/Common` the core never linked. `externals/fex` keeps three files of `Source/Common`: config, host features and CPU count.
+  - **What was never linked:** argument parsing, the FEXServer client, file format checks, SBRK allocations, SHM stats and volatile metadata. They were in the archive, but nothing in the core reached them (checked from the link map).
+  - **range-v3:** it was used for two string splits the core does reach, the passwd lookup in `Config.cpp` and the CPU feature option string in `HostFeatures.cpp`. Both are plain `std::string_view` code now.
+  - **Fixed along the way, upstream's bug:** `FindUserHomeThroughUID` compared the user's uid against the passwd entry's gid field (it skipped one field too many), so it could pick another user's home directory. It reads the uid field now. Not tested against a passwd file with a different uid and gid.
+  - **Checks:** built for aarch64 with no warnings, the core links, and the FEXCore smoke test passes under qemu.
+  - **Not run on an aarch64 machine yet.**
 - FEX's tiny-json is gone (`externals/fex/External/tiny-json` and FEX's `JSONPool`). FEX's config files (`Source/Common/Config.cpp`) are read and written with libretro-common's JSON code instead.
   - **Reading:** `rjson_read_span`, zero-copy. The file is read where it lies, with no copy of it and no tree of nodes built.
   - **Writing:** `rjsonwriter`, in place of tiny-json's fixed 4 KB buffer.
