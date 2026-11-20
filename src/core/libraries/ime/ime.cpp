@@ -566,7 +566,7 @@ Error PS4_SYSV_ABI sceImeKeyboardOpen(Libraries::UserService::OrbisUserServiceUs
 
     LOG_DEBUG(Lib_Ime, "  userId: %u", static_cast<u32>(userId));
     LOG_DEBUG(Lib_Ime, "  param->option: %s",
-              Common::BinaryText(static_cast<u32>(param->option), 32).c_str());
+              Common::BinaryText(static_cast<u32>(param->option), 32).s);
     LOG_DEBUG(Lib_Ime, "  param->arg: 0x%llx",
               static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(param->arg)));
     LOG_DEBUG(Lib_Ime, "  param->handler: 0x%" PRIX64,
@@ -583,8 +583,8 @@ Error PS4_SYSV_ABI sceImeKeyboardOpen(Libraries::UserService::OrbisUserServiceUs
                   "Invalid param->option\n"
                   "option:    %s\n"
                   "validMask: %s",
-                  Common::BinaryText(static_cast<u32>(param->option), 32).c_str(),
-                  Common::BinaryText(kValidOrbisImeKeyboardOptionMask, 32).c_str());
+                  Common::BinaryText(static_cast<u32>(param->option), 32).s,
+                  Common::BinaryText(kValidOrbisImeKeyboardOptionMask, 32).s);
         return Error::INVALID_OPTION;
     }
 
@@ -660,14 +660,14 @@ Error PS4_SYSV_ABI sceImeOpen(const OrbisImeParam* param, const OrbisImeParamExt
         LOG_DEBUG(Lib_Ime, "param->user_id: %d", param->user_id);
         LOG_DEBUG(Lib_Ime, "param->type: %u", static_cast<u32>(param->type));
         LOG_DEBUG(Lib_Ime, "param->supported_languages: %s",
-                  Common::BinaryText(static_cast<u64>(param->supported_languages), 64).c_str());
+                  Common::BinaryText(static_cast<u64>(param->supported_languages), 64).s);
         LOG_DEBUG(Lib_Ime, "param->enter_label: %u", static_cast<u32>(param->enter_label));
         LOG_DEBUG(Lib_Ime, "param->input_method: %u", static_cast<u32>(param->input_method));
         LOG_DEBUG(Lib_Ime, "param->filter: 0x%llx",
                   static_cast<unsigned long long>(
                       reinterpret_cast<uintptr_t>(reinterpret_cast<void*>(param->filter))));
         LOG_DEBUG(Lib_Ime, "param->option: %s",
-                  Common::BinaryText(static_cast<u32>(param->option), 32).c_str());
+                  Common::BinaryText(static_cast<u32>(param->option), 32).s);
         LOG_DEBUG(Lib_Ime, "param->maxTextLength: %u", param->maxTextLength);
         LOG_DEBUG(Lib_Ime, "param->inputTextBuffer: 0x%llx",
                   static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(
@@ -690,7 +690,7 @@ Error PS4_SYSV_ABI sceImeOpen(const OrbisImeParam* param, const OrbisImeParamExt
         LOG_DEBUG(Lib_Ime, "Not used extended: NULL");
     } else {
         LOG_DEBUG(Lib_Ime, "extended->option: %s",
-                  Common::BinaryText(static_cast<u32>(extended->option), 32).c_str());
+                  Common::BinaryText(static_cast<u32>(extended->option), 32).s);
         LOG_DEBUG(Lib_Ime, "extended->color_base: {%u,%u,%u,%u}", extended->color_base.r,
                   extended->color_base.g, extended->color_base.b, extended->color_base.a);
         LOG_DEBUG(Lib_Ime, "extended->color_line: {%u,%u,%u,%u}", extended->color_line.r,
@@ -721,7 +721,7 @@ Error PS4_SYSV_ABI sceImeOpen(const OrbisImeParam* param, const OrbisImeParamExt
                   static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(
                       reinterpret_cast<void*>(extended->ext_keyboard_filter))));
         LOG_DEBUG(Lib_Ime, "extended->disable_device: %s",
-                  Common::BinaryText(static_cast<u32>(extended->disable_device), 32).c_str());
+                  Common::BinaryText(static_cast<u32>(extended->disable_device), 32).s);
         LOG_DEBUG(Lib_Ime, "extended->ext_keyboard_mode: %u", extended->ext_keyboard_mode);
     }
 
@@ -741,8 +741,8 @@ Error PS4_SYSV_ABI sceImeOpen(const OrbisImeParam* param, const OrbisImeParamExt
                   "Invalid supported_languages\n"
                   "supported_languages: %s\n"
                   "valid_mask:          %s",
-                  Common::BinaryText(static_cast<u64>(param->supported_languages), 64).c_str(),
-                  Common::BinaryText(lang_mask, 64).c_str());
+                  Common::BinaryText(static_cast<u64>(param->supported_languages), 64).s,
+                  Common::BinaryText(lang_mask, 64).s);
         return Error::INVALID_SUPPORTED_LANGUAGES;
     }
 
@@ -835,7 +835,7 @@ Error PS4_SYSV_ABI sceImeOpen(const OrbisImeParam* param, const OrbisImeParamExt
                       "Invalid extended->option\n"
                       "option: %s\n"
                       "sdk: 0x%X",
-                      Common::BinaryText(ext_option_value, 32).c_str(), sdk);
+                      Common::BinaryText(ext_option_value, 32).s, sdk);
             return Error::INVALID_EXTENDED;
         }
 

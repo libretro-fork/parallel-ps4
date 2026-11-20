@@ -581,25 +581,26 @@ void Module::LoadSymbols() {
             const u8 bind = sym->GetBind();
             const u8 type = sym->GetType();
             const u8 visibility = sym->GetVisibility();
-            const auto id = std::string(dynamic_info.str_table + sym->st_name);
-            const auto ids = Common::SplitString(id, '#');
-            if (ids.size() != 3) {
+            const char* id = dynamic_info.str_table + sym->st_name;
+            Common::StringPiece ids[3];
+            if (Common::SplitString(id, strlen(id), '#', ids, 3) != 3) {
                 continue;
             }
 
-            const auto* library = FindLibrary(ids[1]);
-            const auto* module = FindModule(ids[2]);
+            const auto* library = FindLibrary(std::string_view(ids[1].data, ids[1].size));
+            const auto* module = FindModule(std::string_view(ids[2].data, ids[2].size));
             ASSERT_MSG(library && module, "Unable to find library and module");
             if ((bind != STB_GLOBAL && bind != STB_WEAK) ||
                 (type != STT_FUN && type != STT_OBJECT) || export_func != (sym->st_value != 0)) {
                 continue;
             }
 
-            const auto aeronid = AeroLib::FindByNid(ids.at(0).c_str());
+            const std::string nid(ids[0].data, ids[0].size);
+            const auto aeronid = AeroLib::FindByNid(nid.c_str());
             const auto nid_name = aeronid ? aeronid->name : "UNK";
 
             Loader::SymbolResolver sym_r{};
-            sym_r.name = ids.at(0);
+            sym_r.name = nid;
             sym_r.nidName = nid_name;
             sym_r.library = library->name;
             sym_r.library_version = library->version;

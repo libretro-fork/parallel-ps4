@@ -10,6 +10,7 @@
 #include <set>
 #include <sstream>
 #include <compat/strl.h>
+#include <encodings/utf.h>
 #include <features/features_cpu.h>
 #include <streams/file_stream.h>
 
@@ -205,7 +206,8 @@ std::map<s32, std::string> ExtractTrophies(std::string_view npbind_guest,
             continue;
         }
         // Extension check: match TROPHY00.TRP as well as trophy00.trp.
-        const std::string name_lower = Common::ToLower(entry.name);
+        std::string name_lower = entry.name;
+        Common::ToLowerInPlace(name_lower.data(), name_lower.size());
         if (!name_lower.ends_with(".trp")) {
             continue;
         }
@@ -789,24 +791,27 @@ void Emulator::Restart(std::filesystem::path eboot_path,
     Common::Log::Shutdown();
 
 #if defined(_WIN32)
-    std::wstring cmdline;
-    // Emulator executable
-    const auto executable = Common::UTF8ToUTF16W(executableName);
-    cmdline += L"\"";
-    cmdline += executable;
-    cmdline += L"\"";
-    for (const auto& arg : args) {
-        cmdline += L" \"";
-        cmdline += Common::UTF8ToUTF16W(arg);
-        cmdline += L"\"";
+    // The emulator executable, then the arguments, each quoted; made UTF-16 once
+    std::string cmdline_utf8;
+    cmdline_utf8 += '"';
+    cmdline_utf8 += executableName;
+    cmdline_utf8 += '"';
+    for (const std::string& arg : args) {
+        cmdline_utf8 += " \"";
+        cmdline_utf8 += arg;
+        cmdline_utf8 += '"';
     }
-    cmdline += L'\0';
+    wchar_t* executable = utf8_to_utf16_string_alloc(executableName);
+    wchar_t* cmdline = utf8_to_utf16_string_alloc(cmdline_utf8.c_str());
 
     STARTUPINFOW si{};
     si.cb = sizeof(si);
     PROCESS_INFORMATION pi{};
-    bool success = CreateProcessW(executable.c_str(), cmdline.data(), nullptr, nullptr, TRUE, 0,
-                                  nullptr, nullptr, &si, &pi);
+    bool success =
+        executable && cmdline &&
+        CreateProcessW(executable, cmdline, nullptr, nullptr, TRUE, 0, nullptr, nullptr, &si, &pi);
+    free(cmdline);
+    free(executable);
 
     if (!success) {
         std::cerr << "Failed to restart game: " << GetLastError() << std::endl;

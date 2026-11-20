@@ -853,27 +853,32 @@ void Linker::Relocate(Module* module) {
 
 bool Linker::Resolve(const std::string& name, Loader::SymbolType sym_type, Module* m,
                      Loader::SymbolRecord* return_info) {
-    const auto ids = Common::SplitString(name, '#');
+    Common::StringPiece ids[3];
+    for (Common::StringPiece& piece : ids) {
+        piece = {name.data(), 0};
+    }
+    const u32 num_ids = Common::SplitString(name.data(), name.size(), '#', ids, 3);
+    const std::string_view nid(ids[0].data, ids[0].size);
     const LibraryInfo* library;
     const ModuleInfo* module;
-    if (ids.size() != 3 && sym_type != Loader::SymbolType::NoType) {
+    if (num_ids != 3 && sym_type != Loader::SymbolType::NoType) {
         return_info->virtual_address = 0;
-        return_info->symbol.name = ids.at(0);
+        return_info->symbol.name = nid;
         LOG_ERROR(Core_Linker, "Not Resolved %s", (name).c_str());
         return false;
-    } else if (ids.size() == 1 && sym_type == Loader::SymbolType::NoType) {
+    } else if (num_ids == 1 && sym_type == Loader::SymbolType::NoType) {
         LOG_DEBUG(Core_Linker, "NoType export %s", (name).c_str());
         library = m->FindLibrary("");
         module = m->FindModule("");
     } else {
-        library = m->FindLibrary(ids[1]);
-        module = m->FindModule(ids[2]);
+        library = m->FindLibrary(std::string_view(ids[1].data, ids[1].size));
+        module = m->FindModule(std::string_view(ids[2].data, ids[2].size));
     }
 
     ASSERT_MSG(library && module, "Unable to find library and module");
 
     Loader::SymbolResolver sr{};
-    sr.name = ids.at(0);
+    sr.name = nid;
     sr.library = library->name;
     sr.library_version = library->version;
     sr.module = module->name;

@@ -175,7 +175,9 @@ std::optional<std::filesystem::path> HostFsBackend::ResolveCaseInsensitive(
             if (!prefix.empty()) {
                 prefix += '/';
             }
-            prefix += Common::ToLower(part_str);
+            const size_t part_at = prefix.size();
+            prefix += part_str;
+            Common::ToLowerInPlace(prefix.data() + part_at, part_str.size());
 
             if (const auto it = m_case_cache.find(prefix); it != m_case_cache.end()) {
                 current = it->second;
@@ -189,10 +191,10 @@ std::optional<std::filesystem::path> HostFsBackend::ResolveCaseInsensitive(
                 continue;
             }
 
-            const std::string part_low = Common::ToLower(part_str);
             std::string match;
             Common::FS::ForEachEntry(current, [&](std::string_view name, bool) {
-                if (match.empty() && Common::ToLower(std::string{name}) == part_low) {
+                if (match.empty() && Common::EqualsIgnoreCase(name.data(), name.size(),
+                                                              part_str.data(), part_str.size())) {
                     match = name;
                 }
             });

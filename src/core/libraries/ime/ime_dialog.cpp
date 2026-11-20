@@ -695,11 +695,11 @@ static Error ComputeImeDialogPanelSize(const OrbisImeDialogParam* param, u32* wi
     const u32 invalid_bits = option & (option_mask ^ 0xfffffdffU);
     if (invalid_bits != 0) {
         if (log) {
-            LOG_ERROR(Lib_ImeDialog, "Invalid option: %s", Common::BinaryText(option, 32).c_str());
+            LOG_ERROR(Lib_ImeDialog, "Invalid option: %s", Common::BinaryText(option, 32).s);
             return Error::INVALID_OPTION;
         }
         LOG_DEBUG(Lib_ImeDialog, "Masking invalid option bits: %s",
-                  Common::BinaryText(invalid_bits, 32).c_str());
+                  Common::BinaryText(invalid_bits, 32).s);
         const u32 over2k_bit = static_cast<u32>(OrbisImeOption::USE_OVER_2K_COORDINATES);
         const u32 preserve_over2k = option & over2k_bit;
         option = (option & ~invalid_bits) | preserve_over2k;
@@ -709,7 +709,7 @@ static Error ComputeImeDialogPanelSize(const OrbisImeDialogParam* param, u32* wi
     if ((~lang_mask & static_cast<u64>(param->supported_languages)) != 0) {
         if (log) {
             LOG_ERROR(Lib_ImeDialog, "Invalid supported_languages: %s",
-                      Common::BinaryText(static_cast<u64>(param->supported_languages), 64).c_str());
+                      Common::BinaryText(static_cast<u64>(param->supported_languages), 64).s);
             return Error::INVALID_SUPPORTED_LANGUAGES;
         }
         LOG_DEBUG(Lib_ImeDialog, "Masking invalid supported_languages bits");
@@ -1080,14 +1080,14 @@ Error PS4_SYSV_ABI sceImeDialogInit(OrbisImeDialogParam* param, OrbisImeParamExt
         LOG_DEBUG(Lib_ImeDialog, "param->user_id: %u", static_cast<u32>(param->user_id));
         LOG_DEBUG(Lib_ImeDialog, "param->type: %u", static_cast<u32>(param->type));
         LOG_DEBUG(Lib_ImeDialog, "param->supported_languages: %s",
-                  Common::BinaryText(static_cast<u64>(param->supported_languages), 64).c_str());
+                  Common::BinaryText(static_cast<u64>(param->supported_languages), 64).s);
         LOG_DEBUG(Lib_ImeDialog, "param->enter_label: %u", static_cast<u32>(param->enter_label));
         LOG_DEBUG(Lib_ImeDialog, "param->input_method: %u", static_cast<u32>(param->input_method));
         LOG_DEBUG(
             Lib_ImeDialog, "param->filter: 0x%llx",
             static_cast<unsigned long long>(reinterpret_cast<uintptr_t>((void*)param->filter)));
         LOG_DEBUG(Lib_ImeDialog, "param->option: %s",
-                  Common::BinaryText(static_cast<u32>(param->option), 32).c_str());
+                  Common::BinaryText(static_cast<u32>(param->option), 32).s);
         LOG_DEBUG(Lib_ImeDialog,
                   "  opt flags: multiline=%s, password=%s, ext_kbd=%s, fixed_pos=%s, over2k=%s",
                   (True(param->option & OrbisImeOption::MULTILINE)) ? "true" : "false",
@@ -1113,7 +1113,7 @@ Error PS4_SYSV_ABI sceImeDialogInit(OrbisImeDialogParam* param, OrbisImeParamExt
 
     if (extended) {
         LOG_DEBUG(Lib_ImeDialog, "extended->option: %s",
-                  Common::BinaryText(static_cast<u32>(extended->option), 32).c_str());
+                  Common::BinaryText(static_cast<u32>(extended->option), 32).s);
         LOG_DEBUG(Lib_ImeDialog, "extended->color_base: {%u,%u,%u,%u}", extended->color_base.r,
                   extended->color_base.g, extended->color_base.b, extended->color_base.a);
         LOG_DEBUG(Lib_ImeDialog, "extended->color_line: {%u,%u,%u,%u}", extended->color_line.r,
@@ -1140,11 +1140,11 @@ Error PS4_SYSV_ABI sceImeDialogInit(OrbisImeDialogParam* param, OrbisImeParamExt
                   extended->color_special.a);
 
         LOG_DEBUG(Lib_ImeDialog, "extended->priority: %s",
-                  Common::BinaryText(static_cast<u32>(extended->priority), 32).c_str());
+                  Common::BinaryText(static_cast<u32>(extended->priority), 32).s);
         LOG_DEBUG(Lib_ImeDialog, "extended->disable_device: %s",
-                  Common::BinaryText(static_cast<u32>(extended->disable_device), 32).c_str());
+                  Common::BinaryText(static_cast<u32>(extended->disable_device), 32).s);
         LOG_DEBUG(Lib_ImeDialog, "extended->ext_keyboard_mode: %s",
-                  Common::BinaryText(static_cast<u32>(extended->ext_keyboard_mode), 32).c_str());
+                  Common::BinaryText(static_cast<u32>(extended->ext_keyboard_mode), 32).s);
         LOG_DEBUG(Lib_ImeDialog, "extended->additional_dictionary_path: %s",
                   extended->additional_dictionary_path ? extended->additional_dictionary_path
                                                        : "NULL");

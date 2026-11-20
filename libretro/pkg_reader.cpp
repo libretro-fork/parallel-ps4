@@ -507,7 +507,9 @@ void PkgReader::AddNode(const std::string& rel, Node node) {
         }
         child = parent;
     }
-    lower[Common::ToLower(rel)] = rel;
+    std::string rel_low = rel;
+    Common::ToLowerInPlace(rel_low.data(), rel_low.size());
+    lower[rel_low] = rel;
     auto& slot = nodes[rel];
     if (slot.directory && node.directory) {
         return; // a folder already made for one of its files
@@ -761,10 +763,12 @@ const PkgReader::Node* PkgReader::Find(std::string_view rel) const {
     if (const auto it = nodes.find(normal); it != nodes.end()) {
         return &it->second;
     }
-    if (const auto it = lower.find(Common::ToLower(normal)); it != lower.end()) {
-        if (const auto node = nodes.find(it->second); node != nodes.end()) {
-            return &node->second;
-        }
+    std::string normal_low = normal;
+    Common::ToLowerInPlace(normal_low.data(), normal_low.size());
+    if (const auto it = lower.find(normal_low); it != lower.end()) {
+      if (const auto node = nodes.find(it->second); node != nodes.end()) {
+        return &node->second;
+      }
     }
     return nullptr;
 }

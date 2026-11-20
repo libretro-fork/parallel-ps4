@@ -4,6 +4,12 @@ What changed in the libretro core of this fork, newest first. Changes that come 
 
 ## Unreleased
 
+- No STL in `common/string_util`, apart from `StringFromFormat`, which stays a `std::string` until its callers convert.
+  - **Lowercase:** `ToLower`, which made a new string, is gone. Callers lower a string in place with `ToLowerInPlace(char*, size_t)`, or compare with the new `EqualsIgnoreCase`, which makes no copy. Both work on ASCII, as `tolower` did in the C locale.
+  - **Split:** `SplitString` gives pieces borrowed from the string, into a caller's array, instead of a vector of new strings. The pieces are the same as `getline` gave, an empty last one dropped. The linker and module symbol lookups use it with no copies.
+  - **Binary text:** `BinaryText` gives its text in a small struct on the stack (`.s`) instead of a `std::string`.
+  - **Removed:** `U8stringToString`, `UTF16ToUTF8` and `UTF8ToUTF16W`. The relaunch on Windows builds its command line in UTF-8 and makes it UTF-16 once with libretro-common's `utf8_to_utf16_string_alloc`.
+  - **Checks:** the new helpers matched the old ones on 200,000 random strings. The Linux and Windows builds pass. Not run in a game yet.
 - No STL in the log (`common/logging`), and no spinning in it.
   - **Waits:** a line that must wait for room in the ring (sync logging, or a critical line) now parks until the writer frees cells, and the writer parks until a line it has started to take is all in, instead of both spinning on `sthread_yield`. The writer wakes them as it frees cells and as it stops.
   - **Clock:** the time a line is taken at, used only to skip a duplicate line within the set window, is libretro-common's (`cpu_features_get_time_usec`) instead of `std::chrono::steady_clock`.

@@ -358,11 +358,13 @@ std::filesystem::path MntPoints::GetHostPath(std::string_view path, bool* is_rea
                         add_match(part);
                         continue;
                     }
-                    const auto part_low = Common::ToLower(part.string());
+                    const std::string part_str = part.string();
                     // A name that matches in a case insensitive manner
                     std::string candidate;
                     Common::FS::ForEachEntry(current_path, [&](std::string_view name, bool) {
-                        if (candidate.empty() && Common::ToLower(std::string{name}) == part_low) {
+                        if (candidate.empty() &&
+                            Common::EqualsIgnoreCase(name.data(), name.size(), part_str.data(),
+                                                     part_str.size())) {
                             candidate = name;
                         }
                     });
@@ -460,7 +462,11 @@ void MntPoints::IterateDirectory(std::string_view guest_directory,
 
     std::unordered_set<std::string> emitted;
     const auto emit_key = [](const std::string& name) {
-        return NeedsCaseInsensitiveSearch ? Common::ToLower(name) : name;
+        std::string key = name;
+        if (NeedsCaseInsensitiveSearch) {
+            Common::ToLowerInPlace(key.data(), key.size());
+        }
+        return key;
     };
 
     if (auto dir = base_backend->OpenDir(rel)) {
@@ -634,7 +640,10 @@ std::unique_ptr<IDirectory> MntPoints::OpenDir(std::string_view guest_path) {
         }
         DirEntry entry;
         while (dir->Next(entry)) {
-            const auto key = NeedsCaseInsensitiveSearch ? Common::ToLower(entry.name) : entry.name;
+            std::string key = entry.name;
+            if (NeedsCaseInsensitiveSearch) {
+                Common::ToLowerInPlace(key.data(), key.size());
+            }
             if (!seen.insert(key).second) {
                 continue;
             }

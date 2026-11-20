@@ -21,6 +21,15 @@ using ShadNet::View;
 
 namespace Libraries::Np {
 
+namespace {
+
+/// Whether two NP IDs are the same, case aside
+bool SameNpId(const std::string& a, const std::string& b) {
+    return Common::EqualsIgnoreCase(a.data(), a.size(), b.data(), b.size());
+}
+
+} // Anonymous namespace
+
 std::vector<u8> BuildTusPayload(const std::string& com_id, const std::string& proto_bytes) {
     std::vector<u8> payload;
     payload.reserve(12 + 4 + proto_bytes.size());
@@ -63,8 +72,7 @@ s32 NpHandler::TusGetMultiSlotVariable(
         proto.virtualUser = Bytes(virtualUser);
     } else if (ownerAccountId != 0) {
         proto.ownerAccountId = ownerAccountId;
-    } else if (ownerNpId.empty() ||
-               Common::ToLower(ownerNpId) == Common::ToLower(client->GetNpid())) {
+    } else if (ownerNpId.empty() || SameNpId(ownerNpId, client->GetNpid())) {
         proto.ownerAccountId = static_cast<s64>(client->GetUserId());
     }
     for (s32 s : slotIds) {
@@ -114,8 +122,7 @@ s32 NpHandler::TusSetMultiSlotVariable(s32 user_id, s32 service_label, const std
         proto.virtualUser = Bytes(virtualUser);
     } else if (ownerAccountId != 0) {
         proto.ownerAccountId = ownerAccountId;
-    } else if (ownerNpId.empty() ||
-               Common::ToLower(ownerNpId) == Common::ToLower(client->GetNpid())) {
+    } else if (ownerNpId.empty() || SameNpId(ownerNpId, client->GetNpid())) {
         proto.ownerAccountId = static_cast<s64>(client->GetUserId());
     }
 
@@ -217,8 +224,7 @@ s32 NpHandler::TusGetData(s32 user_id, s32 service_label, const std::string& own
         proto.virtualUser = Bytes(virtualUser);
     } else if (ownerAccountId != 0) {
         proto.ownerAccountId = ownerAccountId;
-    } else if (ownerNpId.empty() ||
-               Common::ToLower(ownerNpId) == Common::ToLower(client->GetNpid())) {
+    } else if (ownerNpId.empty() || SameNpId(ownerNpId, client->GetNpid())) {
         proto.ownerAccountId = static_cast<s64>(client->GetUserId());
     }
     const std::string com_id = GetNpCommId(service_label);
@@ -267,8 +273,7 @@ s32 NpHandler::TusDeleteMultiSlotData(s32 user_id, s32 service_label, const std:
         proto.virtualUser = Bytes(virtualUser);
     } else if (ownerAccountId != 0) {
         proto.ownerAccountId = ownerAccountId;
-    } else if (ownerNpId.empty() ||
-               Common::ToLower(ownerNpId) == Common::ToLower(client->GetNpid())) {
+    } else if (ownerNpId.empty() || SameNpId(ownerNpId, client->GetNpid())) {
         proto.ownerAccountId = static_cast<s64>(client->GetUserId());
     }
     for (s32 s : slotIds) {
@@ -313,8 +318,7 @@ s32 NpHandler::TusDeleteMultiSlotVariable(s32 user_id, s32 service_label,
         proto.virtualUser = Bytes(virtualUser);
     } else if (ownerAccountId != 0) {
         proto.ownerAccountId = ownerAccountId;
-    } else if (ownerNpId.empty() ||
-               Common::ToLower(ownerNpId) == Common::ToLower(client->GetNpid())) {
+    } else if (ownerNpId.empty() || SameNpId(ownerNpId, client->GetNpid())) {
         proto.ownerAccountId = static_cast<s64>(client->GetUserId());
     }
     for (s32 s : slotIds) {
@@ -472,8 +476,7 @@ s32 NpHandler::TusTryAndSetVariable(s32 user_id, s32 service_label, const std::s
         proto.virtualUser = Bytes(virtualUser);
     } else if (ownerAccountId != 0) {
         proto.ownerAccountId = ownerAccountId;
-    } else if (ownerNpId.empty() ||
-               Common::ToLower(ownerNpId) == Common::ToLower(client->GetNpid())) {
+    } else if (ownerNpId.empty() || SameNpId(ownerNpId, client->GetNpid())) {
         proto.ownerAccountId = static_cast<s64>(client->GetUserId());
     }
     if (hasAuthorCheck) {
@@ -534,8 +537,7 @@ s32 NpHandler::TusAddAndGetVariable(s32 user_id, s32 service_label, const std::s
         proto.virtualUser = Bytes(virtualUser);
     } else if (ownerAccountId != 0) {
         proto.ownerAccountId = ownerAccountId;
-    } else if (ownerNpId.empty() ||
-               Common::ToLower(ownerNpId) == Common::ToLower(client->GetNpid())) {
+    } else if (ownerNpId.empty() || SameNpId(ownerNpId, client->GetNpid())) {
         proto.ownerAccountId = static_cast<s64>(client->GetUserId());
     }
     if (hasAuthorCheck) {
@@ -686,8 +688,7 @@ s32 NpHandler::TusGetMultiSlotDataStatus(s32 user_id, s32 service_label,
         proto.virtualUser = Bytes(virtualUser);
     } else if (ownerAccountId != 0) {
         proto.ownerAccountId = ownerAccountId;
-    } else if (ownerNpId.empty() ||
-               Common::ToLower(ownerNpId) == Common::ToLower(client->GetNpid())) {
+    } else if (ownerNpId.empty() || SameNpId(ownerNpId, client->GetNpid())) {
         proto.ownerAccountId = static_cast<s64>(client->GetUserId());
     }
     for (s32 s : slotIds) {
@@ -741,8 +742,7 @@ s32 NpHandler::TusSetData(s32 user_id, s32 service_label, const std::string& own
         proto.virtualUser = Bytes(virtualUser);
     } else if (ownerAccountId != 0) {
         proto.ownerAccountId = ownerAccountId;
-    } else if (ownerNpId.empty() ||
-               Common::ToLower(ownerNpId) == Common::ToLower(client->GetNpid())) {
+    } else if (ownerNpId.empty() || SameNpId(ownerNpId, client->GetNpid())) {
         proto.ownerAccountId = static_cast<s64>(client->GetUserId());
     }
     if (hasAuthorCheck) {

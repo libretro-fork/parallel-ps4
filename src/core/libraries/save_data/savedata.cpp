@@ -818,10 +818,13 @@ Error PS4_SYSV_ABI sceSaveDataDirNameSearch(const OrbisSaveDataDirNameSearchCond
     });
     if (cond->dirName != nullptr) {
         // Filter names
-        const auto pat = Common::ToLower(std::string_view{cond->dirName->data});
+        std::string pat{cond->dirName->data};
+        Common::ToLowerInPlace(pat.data(), pat.size());
         if (!pat.empty()) {
             std::erase_if(dir_list, [&](const std::string& dir_name) {
-                return !match(Common::ToLower(dir_name), pat);
+                std::string name_low = dir_name;
+                Common::ToLowerInPlace(name_low.data(), name_low.size());
+                return !match(name_low, pat);
             });
         }
     }
@@ -1277,7 +1280,7 @@ Error PS4_SYSV_ABI sceSaveDataMount(const OrbisSaveDataMount* mount,
     LOG_DEBUG(Lib_SaveData, "called dirName: %.*s, mode: %s, blocks: %" PRIu64,
               static_cast<int>((mount->dirName->data.to_view()).size()),
               (mount->dirName->data.to_view()).data(),
-              Common::BinaryText((int)mount->mountMode, 0).c_str(), mount->blocks);
+              Common::BinaryText((int)mount->mountMode, 0).s, mount->blocks);
 
     OrbisSaveDataMount2 mount_info{};
     mount_info.userId = mount->userId;
@@ -1300,7 +1303,7 @@ Error PS4_SYSV_ABI sceSaveDataMount2(const OrbisSaveDataMount2* mount,
     LOG_DEBUG(Lib_SaveData, "called dirName: %.*s, mode: %s, blocks: %" PRIu64,
               static_cast<int>((mount->dirName->data.to_view()).size()),
               (mount->dirName->data.to_view()).data(),
-              Common::BinaryText((int)mount->mountMode, 0).c_str(), mount->blocks);
+              Common::BinaryText((int)mount->mountMode, 0).s, mount->blocks);
     return saveDataMount(mount, mount_result);
 }
 

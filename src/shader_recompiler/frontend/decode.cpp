@@ -537,8 +537,7 @@ void GcnDecodeContext::decodeDataParallelPrimitive(InstEncoding encoding, GcnCod
             "unhandled DPP operation: %s (0x%x), value %u, bc %s, row_mask 0b%s, bank_mask 0b%s",
             enum_name(&enum_names_Shader_Gcn_DppCtrl, static_cast<s64>(op.op)), u32(op.op),
             static_cast<u32>(op.value), bool(dpp.bc) ? "true" : "false",
-            Common::BinaryText(u8(dpp.row_mask), 0).c_str(),
-            Common::BinaryText(u8(dpp.bank_mask), 0).c_str());
+            Common::BinaryText(u8(dpp.row_mask), 0).s, Common::BinaryText(u8(dpp.bank_mask), 0).s);
 
         m_instruction.src[0].dpp = op;
     }

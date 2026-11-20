@@ -2,106 +2,72 @@
 // SPDX-FileCopyrightText: 2014 Citra Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
-#include <algorithm>
-#include <cstdarg>
-#include <cstdio>
-#include <sstream>
-#include <string>
+#include <stdarg.h>
+#include <stdio.h>
+#include <string.h>
 #include "common/string_util.h"
-#include "common/types.h"
-
-#ifdef _WIN32
-#include <windows.h>
-#endif
 
 namespace Common {
 
-std::string ToLower(std::string_view input) {
-    std::string str;
-    str.resize(input.size());
-    std::ranges::transform(input, str.begin(), tolower);
-    return str;
+namespace {
+
+char LowerAscii(char c) {
+    return (c >= 'A' && c <= 'Z') ? static_cast<char>(c - 'A' + 'a') : c;
 }
 
-void ToLowerInPlace(std::string& str) {
-    std::ranges::transform(str, str.begin(), tolower);
-}
+} // Anonymous namespace
 
-std::vector<std::string> SplitString(const std::string& str, char delimiter) {
-    std::istringstream iss(str);
-    std::vector<std::string> output(1);
-
-    while (std::getline(iss, *output.rbegin(), delimiter)) {
-        output.emplace_back();
+void ToLowerInPlace(char* str, size_t len) {
+    for (size_t i = 0; i < len; i++) {
+        str[i] = LowerAscii(str[i]);
     }
-
-    output.pop_back();
-    return output;
 }
 
-std::string_view U8stringToString(std::u8string_view u8str) {
-    return std::string_view{reinterpret_cast<const char*>(u8str.data()), u8str.size()};
-}
-
-#ifdef _WIN32
-static std::wstring CPToUTF16(u32 code_page, std::string_view input) {
-    const auto size =
-        MultiByteToWideChar(code_page, 0, input.data(), static_cast<int>(input.size()), nullptr, 0);
-
-    if (size == 0) {
-        return {};
+bool EqualsIgnoreCase(const char* a, size_t a_len, const char* b, size_t b_len) {
+    if (a_len != b_len) {
+        return false;
     }
-
-    std::wstring output(size, L'\0');
-
-    if (size != MultiByteToWideChar(code_page, 0, input.data(), static_cast<int>(input.size()),
-                                    &output[0], static_cast<int>(output.size()))) {
-        output.clear();
+    for (size_t i = 0; i < a_len; i++) {
+        if (LowerAscii(a[i]) != LowerAscii(b[i])) {
+            return false;
+        }
     }
-
-    return output;
+    return true;
 }
 
-std::string UTF16ToUTF8(std::wstring_view input) {
-    const auto size = WideCharToMultiByte(CP_UTF8, 0, input.data(), static_cast<int>(input.size()),
-                                          nullptr, 0, nullptr, nullptr);
-    if (size == 0) {
-        return {};
+u32 SplitString(const char* str, size_t len, char delimiter, StringPiece* out, u32 max) {
+    u32 count = 0;
+    size_t start = 0;
+    while (start < len) {
+        const void* hit = memchr(str + start, delimiter, len - start);
+        const size_t end = hit ? static_cast<size_t>(static_cast<const char*>(hit) - str) : len;
+        if (count < max) {
+            out[count].data = str + start;
+            out[count].size = end - start;
+        }
+        count++;
+        start = end + 1;
     }
-
-    std::string output(size, '\0');
-
-    if (size != WideCharToMultiByte(CP_UTF8, 0, input.data(), static_cast<int>(input.size()),
-                                    &output[0], static_cast<int>(output.size()), nullptr,
-                                    nullptr)) {
-        output.clear();
-    }
-
-    return output;
+    return count;
 }
-
-std::wstring UTF8ToUTF16W(std::string_view input) {
-    return CPToUTF16(CP_UTF8, input);
-}
-#endif
 
 std::string StringFromFormat(const char* format, ...) {
     va_list args;
     va_start(args, format);
     va_list again;
     va_copy(again, args);
-    const int n = std::vsnprintf(nullptr, 0, format, args);
+    const int n = vsnprintf(nullptr, 0, format, args);
     va_end(args);
     std::string text;
     if (n > 0) {
-        text.resize(static_cast<std::size_t>(n));
-        std::vsnprintf(text.data(), text.size() + 1, format, again);
+        text.resize(static_cast<size_t>(n));
+        vsnprintf(text.data(), text.size() + 1, format, again);
     }
     va_end(again);
     return text;
 }
 
-std::string BinaryText(unsigned long long value, int digits) {
+BinaryTextBuf BinaryText(unsigned long long value, int digits) {
     char bits[64];
     int n = 0;
     do {
@@ -111,10 +77,11 @@ std::string BinaryText(unsigned long long value, int digits) {
     while (n < digits && n < 64) {
         bits[n++] = '0';
     }
-    std::string text(static_cast<std::size_t>(n), '0');
+    BinaryTextBuf text;
     for (int i = 0; i < n; i++) {
-        text[static_cast<std::size_t>(i)] = bits[n - 1 - i];
+        text.s[i] = bits[n - 1 - i];
     }
+    text.s[n] = '\0';
     return text;
 }
 

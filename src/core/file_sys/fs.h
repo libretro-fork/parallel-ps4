@@ -115,7 +115,9 @@ public:
     const MntPair* GetMountFromHostPath(const std::string& host_path) {
         return m_mutex.Run([&]() -> const MntPair* {
             const auto it = std::ranges::find_if(m_mnt_pairs, [&](const MntPair& mount) {
-                return host_path.starts_with(Common::U8stringToString(mount.host_path.u8string()));
+                const std::u8string host = mount.host_path.u8string();
+                return host_path.starts_with(
+                    std::string_view(reinterpret_cast<const char*>(host.data()), host.size()));
             });
             return it == m_mnt_pairs.end() ? nullptr : &*it;
         });
