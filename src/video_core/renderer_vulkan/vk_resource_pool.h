@@ -73,7 +73,7 @@ public:
     DescriptorHeap& operator=(const DescriptorHeap&) = delete;
 
     explicit DescriptorHeap(const Instance& instance, Semaphore* work_semaphore,
-                            std::span<const vk::DescriptorPoolSize> pool_sizes,
+                            std::span<const VkDescriptorPoolSize> pool_sizes,
                             u32 descriptor_heap_count = 1024);
     ~DescriptorHeap();
 
@@ -86,7 +86,7 @@ private:
     VkDevice device;
     Semaphore* work_semaphore;
     u32 descriptor_heap_count;
-    std::span<const vk::DescriptorPoolSize> pool_sizes;
+    std::span<const VkDescriptorPoolSize> pool_sizes;
     VkDescriptorPool curr_pool{VK_NULL_HANDLE};
     std::deque<std::pair<VkDescriptorPool, u64>> pending_pools;
     // Sets allocated ahead for one layout, taken from the back

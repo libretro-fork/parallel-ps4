@@ -4,6 +4,12 @@ What changed in the libretro core of this fork, newest first. Changes that come 
 
 ## Unreleased
 
+- Vulkan, the pipeline cache on the C API: `PipelineCache` creates, reads back and destroys the driver's pipeline cache, and destroys shader modules, with the C API through libretro-common's symbol wrapper. The descriptor heap's pool sizes are plain Vulkan structs.
+  - **Driver cache read-back:** the driver writes its cache straight into the buffer the disk cache then takes, as before.
+  - **Shader modules at close:** the modules the cache keeps for its shaders were never destroyed when the core closed. They are now, after every pipeline made from them is gone. Not run in a game yet.
+  - **Removed:** a pipeline layout member nothing used, and an unused hash for shader modules.
+  - **Unchanged:** the Vulkan calls and arguments while running are the same.
+  - **Checks:** the Linux and Windows builds pass. Not run in a game yet.
 - Vulkan, pipelines on the C API: the pipeline base (`vk_pipeline_common`), compute pipelines (`vk_compute_pipeline`) and the creation of graphics pipelines (`vk_graphics_pipeline`) go through libretro-common's symbol wrapper.
   - **What changes:** a pipeline holds its pipeline, pipeline layout and descriptor set layout as plain Vulkan handles and destroys them itself. Compute and graphics pipelines create their layouts with one shared pair of helpers, instead of a copy each. Binding a pipeline's resources (push constants, push descriptors or a descriptor set) uses the C calls too.
   - **Still vulkan.hpp:** the graphics pipeline's state structs, which are passed to the C call as they are, and the descriptor writes the rasterizer fills in.

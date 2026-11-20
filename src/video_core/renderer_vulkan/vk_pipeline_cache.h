@@ -19,13 +19,6 @@
 #include "video_core/renderer_vulkan/vk_resource_pool.h"
 #include "vulkan/vulkan.hpp"
 
-template <>
-struct std::hash<vk::ShaderModule> {
-    std::size_t operator()(const vk::ShaderModule& module) const noexcept {
-        return std::hash<size_t>{}(reinterpret_cast<size_t>((VkShaderModule)module));
-    }
-};
-
 namespace AmdGpu {
 class Liverpool;
 }
@@ -198,8 +191,7 @@ private:
     Scheduler& scheduler;
     AmdGpu::Liverpool* liverpool;
     DescriptorHeap desc_heap;
-    vk::UniquePipelineCache pipeline_cache;
-    vk::UniquePipelineLayout pipeline_layout;
+    VkPipelineCache pipeline_cache{VK_NULL_HANDLE};
     Shader::Profile profile{};
     Shader::Pools pools;
     DrawIndirectParams draw_indirect_params{};

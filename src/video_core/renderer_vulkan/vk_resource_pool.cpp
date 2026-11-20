@@ -105,7 +105,7 @@ vk::CommandBuffer CommandPool::Commit() {
 }
 
 DescriptorHeap::DescriptorHeap(const Instance& instance, Semaphore* work_semaphore_,
-                               std::span<const vk::DescriptorPoolSize> pool_sizes_,
+                               std::span<const VkDescriptorPoolSize> pool_sizes_,
                                u32 descriptor_heap_count_)
     : device{static_cast<VkDevice>(instance.GetDevice())}, work_semaphore{work_semaphore_},
       descriptor_heap_count{descriptor_heap_count_}, pool_sizes{pool_sizes_} {
@@ -186,7 +186,7 @@ void DescriptorHeap::CreateDescriptorPool() {
     pool_info.maxSets = descriptor_heap_count;
     pool_info.poolSizeCount = static_cast<u32>(pool_sizes.size());
     // vk::DescriptorPoolSize is VkDescriptorPoolSize's layout (vulkan.hpp asserts it)
-    pool_info.pPoolSizes = reinterpret_cast<const VkDescriptorPoolSize*>(pool_sizes.data());
+    pool_info.pPoolSizes = pool_sizes.data();
     const VkResult result = vkCreateDescriptorPool(device, &pool_info, nullptr, &curr_pool);
     ASSERT_MSG(result == VK_SUCCESS, "Failed to create descriptor pool: %s",
                vk::to_string(static_cast<vk::Result>(result)).c_str());

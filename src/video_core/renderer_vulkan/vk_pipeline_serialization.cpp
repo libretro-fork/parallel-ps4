@@ -165,8 +165,9 @@ bool PipelineCache::LoadComputePipeline(Serialization::Archive& ar) {
 
     ASSERT(!FindComputePipeline(compute_key));
     ptr_table_insert(&compute_pipelines, compute_key.value,
-                     new ComputePipeline(instance, scheduler, desc_heap, profile, *pipeline_cache,
-                                         compute_key, *infos[0], modules[0], sdata, true));
+                     new ComputePipeline(instance, scheduler, desc_heap, profile,
+                                         vk::PipelineCache{pipeline_cache}, compute_key, *infos[0],
+                                         modules[0], sdata, true));
 
     infos.fill(nullptr);
     modules.fill(nullptr);
@@ -240,8 +241,8 @@ bool PipelineCache::LoadGraphicsPipeline(Serialization::Archive& ar) {
     ASSERT(!FindGraphicsPipeline(graphics_key, pipeline_hash));
     ptr_table_insert(&graphics_pipelines, pipeline_hash,
                      new GraphicsPipeline(instance, scheduler, desc_heap, profile, graphics_key,
-                                          *pipeline_cache, infos, runtime_infos, fetch_shader,
-                                          modules, sdata, true));
+                                          vk::PipelineCache{pipeline_cache}, infos, runtime_infos,
+                                          fetch_shader, modules, sdata, true));
 
     infos.fill(nullptr);
     modules.fill(nullptr);

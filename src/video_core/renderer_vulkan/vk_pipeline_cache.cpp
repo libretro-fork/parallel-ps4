@@ -123,11 +123,11 @@ using Shader::SwStage;
 constexpr static auto SpirvVersion1_6 = 0x00010600U;
 
 constexpr static std::array DescriptorHeapSizes = {
-    vk::DescriptorPoolSize{vk::DescriptorType::eUniformBuffer, 512},
-    vk::DescriptorPoolSize{vk::DescriptorType::eStorageBuffer, 8192},
-    vk::DescriptorPoolSize{vk::DescriptorType::eSampledImage, 8192},
-    vk::DescriptorPoolSize{vk::DescriptorType::eStorageImage, 1024},
-    vk::DescriptorPoolSize{vk::DescriptorType::eSampler, 1024},
+    VkDescriptorPoolSize{VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 512},
+    VkDescriptorPoolSize{VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 8192},
+    VkDescriptorPoolSize{VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 8192},
+    VkDescriptorPoolSize{VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1024},
+    VkDescriptorPoolSize{VK_DESCRIPTOR_TYPE_SAMPLER, 1024},
 };
 
 static u32 MapOutputs(std::span<Shader::OutputMap, 3> outputs, const AmdGpu::VsOutputControl& ctl) {
@@ -486,16 +486,24 @@ PipelineCache::~PipelineCache() {
         delete p;
     }
     pos = 0;
+    const auto device = static_cast<VkDevice>(instance.GetDevice());
     while (auto* p = static_cast<Program*>(ptr_table_next(&program_cache, &pos))) {
+        // Each module is its program's own, and every pipeline made from it is gone by now
+        for (const auto& module : p->modules) {
+            vkDestroyShaderModule(device, static_cast<VkShaderModule>(module.module), nullptr);
+        }
         delete p;
     }
     ptr_table_free(&graphics_pipelines);
     ptr_table_free(&compute_pipelines);
     ptr_table_free(&program_cache);
+    vkDestroyPipelineCache(device, pipeline_cache, nullptr);
 }
 
 void PipelineCache::CreateDriverCache(bool from_disk) {
-    const auto device = instance.GetDevice();
+    const auto device = static_cast<VkDevice>(instance.GetDevice());
+    VkPipelineCacheCreateInfo info{};
+    info.sType = VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO;
     if (from_disk) {
         // Mapped, and handed to the driver where it lies
         const auto kept =
@@ -503,35 +511,47 @@ void PipelineCache::CreateDriverCache(bool from_disk) {
         if (kept && pipeline_cache_blob_fits(kept->data(), kept->size(), instance.GetVendorID(),
                                              instance.GetDeviceID(),
                                              instance.GetPipelineCacheUUID().data())) {
-            const vk::PipelineCacheCreateInfo info{
-                .initialDataSize = kept->size(),
-                .pInitialData = kept->data(),
-            };
-            auto [result, cache] = device.createPipelineCacheUnique(info);
-            if (result == vk::Result::eSuccess) {
+            info.initialDataSize = kept->size();
+            info.pInitialData = kept->data();
+            const VkResult result = vkCreatePipelineCache(device, &info, nullptr, &pipeline_cache);
+            if (result == VK_SUCCESS) {
                 LOG_INFO(Render_Vulkan, "Driver pipeline cache: %zu bytes kept", kept->size());
-                pipeline_cache = std::move(cache);
                 return;
             }
+            pipeline_cache = VK_NULL_HANDLE;
             LOG_WARNING(Render_Vulkan, "Driver pipeline cache not taken: %s",
-                        (vk::to_string(result)).c_str());
+                        vk::to_string(static_cast<vk::Result>(result)).c_str());
+            info.initialDataSize = 0;
+            info.pInitialData = nullptr;
         } else if (kept) {
             LOG_INFO(Render_Vulkan, "Driver pipeline cache of another GPU or driver: not taken");
         }
     }
-    auto [result, cache] = device.createPipelineCacheUnique({});
-    ASSERT_MSG(result == vk::Result::eSuccess, "Failed to create pipeline cache: %s",
-               (vk::to_string(result)).c_str());
-    pipeline_cache = std::move(cache);
+    const VkResult result = vkCreatePipelineCache(device, &info, nullptr, &pipeline_cache);
+    ASSERT_MSG(result == VK_SUCCESS, "Failed to create pipeline cache: %s",
+               vk::to_string(static_cast<vk::Result>(result)).c_str());
 }
 
 void PipelineCache::SaveDriverCache() {
     if (!pipeline_cache) {
         return;
     }
-    // The driver's cache is its own to lock: read while pipelines are made into it
-    auto [result, data] = instance.GetDevice().getPipelineCacheData(*pipeline_cache);
-    if (result != vk::Result::eSuccess || data.empty()) {
+    // The driver's cache is its own to lock: read while pipelines are made into it. The driver
+    // writes it straight into the vector handed to the disk cache.
+    const auto device = static_cast<VkDevice>(instance.GetDevice());
+    std::vector<u8> data;
+    VkResult result;
+    do {
+        size_t size = 0;
+        result = vkGetPipelineCacheData(device, pipeline_cache, &size, nullptr);
+        if (result != VK_SUCCESS || size == 0) {
+            return;
+        }
+        data.resize(size);
+        result = vkGetPipelineCacheData(device, pipeline_cache, &size, data.data());
+        data.resize(size);
+    } while (result == VK_INCOMPLETE);
+    if (result != VK_SUCCESS || data.empty()) {
         return;
     }
     Storage::DataBase::Instance().Save(Storage::BlobType::DriverCache, "driver", std::move(data));
@@ -684,8 +704,9 @@ const ComputePipeline* PipelineCache::GetComputePipeline() {
                  static_cast<unsigned long long>(pipeline_hash));
 
         ComputePipeline::SerializationSupport sdata{};
-        pipeline = new ComputePipeline(instance, scheduler, desc_heap, profile, *pipeline_cache,
-                                       compute_key, *infos[0], modules[0], sdata, false);
+        pipeline = new ComputePipeline(instance, scheduler, desc_heap, profile,
+                                       vk::PipelineCache{pipeline_cache}, compute_key, *infos[0],
+                                       modules[0], sdata, false);
         ptr_table_insert(&compute_pipelines, compute_key.value, pipeline);
         RegisterPipelineData(compute_key, sdata);
         ++num_new_pipelines;
@@ -1206,12 +1227,14 @@ void PipelineCache::RunJob(CompileJob& job) {
         // Changed while it was being translated: what was made from it goes
         job.code_changed = true;
         if (job.module) {
-            instance.GetDevice().destroyShaderModule(job.module);
+            vkDestroyShaderModule(static_cast<VkDevice>(instance.GetDevice()),
+                                  static_cast<VkShaderModule>(job.module), nullptr);
             job.module = vk::ShaderModule{};
         }
         if (job.program) {
             for (auto& module : job.program->modules) {
-                instance.GetDevice().destroyShaderModule(module.module);
+                vkDestroyShaderModule(static_cast<VkDevice>(instance.GetDevice()),
+                                      static_cast<VkShaderModule>(module.module), nullptr);
             }
             job.program->modules.clear();
         }
@@ -1255,7 +1278,8 @@ void PipelineCache::RunJobOn(CompileJob& job, const Shader::ShaderParams& params
         job.stale = WalkerId(info.srt_walker_code) != job.snap_walker;
         if (job.stale) {
             // Its flat buffer was of another layout: thrown away, the walker it made kept
-            instance.GetDevice().destroyShaderModule(module);
+            vkDestroyShaderModule(static_cast<VkDevice>(instance.GetDevice()),
+                                  static_cast<VkShaderModule>(module), nullptr);
             break;
         }
         RegisterShaderMeta(info, spec.fetch_shader_data, spec, HashCombine(job.hash, 0), 0);
@@ -1308,9 +1332,10 @@ void PipelineCache::RunJobOn(CompileJob& job, const Shader::ShaderParams& params
         for (u32 stage = 0; stage < MaxShaderStages; ++stage) {
             stage_ptrs[stage] = job.has_stage[stage] ? &job.stage_infos[stage] : nullptr;
         }
-        job.pipeline = new GraphicsPipeline(
-            instance, scheduler, desc_heap, profile, job.key, *pipeline_cache, stage_ptrs,
-            job.runtimes, job.fetch ? &*job.fetch : nullptr, job.modules, job.sdata, false);
+        job.pipeline =
+            new GraphicsPipeline(instance, scheduler, desc_heap, profile, job.key,
+                                 vk::PipelineCache{pipeline_cache}, stage_ptrs, job.runtimes,
+                                 job.fetch ? &*job.fetch : nullptr, job.modules, job.sdata, false);
         ++driver_cache_unsaved;
         for (auto& info : job.stage_infos) {
             info.snapshot = nullptr;
@@ -1489,10 +1514,11 @@ void PipelineCache::ReplaceCachedPermutation(CompileJob& job) {
         scheduler.DeferOperation([p] { delete p; });
     }
 
-    const vk::ShaderModule old_module = cached.module;
+    const auto old_module = static_cast<VkShaderModule>(cached.module);
     cached.module = job.module;
-    scheduler.DeferOperation(
-        [device = instance.GetDevice(), old_module] { device.destroyShaderModule(old_module); });
+    scheduler.DeferOperation([device = static_cast<VkDevice>(instance.GetDevice()), old_module] {
+        vkDestroyShaderModule(device, old_module, nullptr);
+    });
     // The permutations share the program's description: the translation's from now on
     program->info = std::move(job.fresh);
     program->info.user_data = {};
