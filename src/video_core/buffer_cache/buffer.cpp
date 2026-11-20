@@ -45,7 +45,7 @@ std::string_view BufferTypeName(MemoryType type) {
 }
 
 UniqueBuffer::UniqueBuffer(vk::Device device_, Vulkan::MemoryAllocator* allocator_)
-    : device{device_}, allocator{allocator_} {}
+    : device{static_cast<VkDevice>(device_)}, allocator{allocator_} {}
 
 UniqueBuffer::~UniqueBuffer() {
     Destroy();
@@ -55,9 +55,9 @@ void UniqueBuffer::Destroy() {
     if (borrowed) {
         borrowed = false;
     } else if (allocation) {
-        allocator->DestroyBuffer(buffer, allocation);
-    } else if (buffer) {
-        device.destroyBuffer(buffer);
+        allocator->DestroyBuffer(vk::Buffer{buffer}, allocation);
+    } else if (buffer != VK_NULL_HANDLE) {
+        vkDestroyBuffer(device, buffer, nullptr);
     }
     buffer = VK_NULL_HANDLE;
     allocation = nullptr;
@@ -69,15 +69,18 @@ void UniqueBuffer::Create(vk::BufferCreateInfo& buffer_ci, MemoryType mem_type) 
     if (mem_type != MemoryType::Sparse) {
         // A buffer with a device address gets memory of its own, as it did under VMA
         const auto usage = MemoryUsageOf(mem_type);
+        vk::Buffer created{};
         vk::Result result =
-            allocator->CreateBuffer(buffer_ci, usage, with_bda, true, buffer, allocation);
+            allocator->CreateBuffer(buffer_ci, usage, with_bda, true, created, allocation);
         if (result == vk::Result::eErrorOutOfDeviceMemory) {
             LOG_WARNING(Render_Vulkan, "Allocating buffer of size %" PRIu64 " bytes over budget.",
                         buffer_ci.size);
-            result = allocator->CreateBuffer(buffer_ci, usage, with_bda, false, buffer, allocation);
+            result =
+                allocator->CreateBuffer(buffer_ci, usage, with_bda, false, created, allocation);
         }
         ASSERT_MSG(result == vk::Result::eSuccess, "Failed allocating buffer with error %s",
                    (vk::to_string(result)).c_str());
+        buffer = static_cast<VkBuffer>(created);
     } else {
         // The libretro core's Buffer sets the flags itself where the device has no sparse
         // residency
@@ -85,16 +88,18 @@ void UniqueBuffer::Create(vk::BufferCreateInfo& buffer_ci, MemoryType mem_type) 
             buffer_ci.flags |= vk::BufferCreateFlagBits::eSparseBinding |
                                vk::BufferCreateFlagBits::eSparseResidency;
         }
-        buffer = Vulkan::Check(device.createBuffer(buffer_ci));
+        const VkResult result = vkCreateBuffer(
+            device, &static_cast<const VkBufferCreateInfo&>(buffer_ci), nullptr, &buffer);
+        ASSERT_MSG(result == VK_SUCCESS, "Failed to create sparse buffer: %s",
+                   vk::to_string(static_cast<vk::Result>(result)).c_str());
     }
 
     if (with_bda) {
-        const vk::BufferDeviceAddressInfo bda_info = {
-            .buffer = buffer,
-        };
-        auto bda_result = device.getBufferAddress(bda_info);
-        ASSERT_MSG(bda_result != 0, "Failed to get buffer device address");
-        bda_addr = bda_result;
+        VkBufferDeviceAddressInfo bda_info{};
+        bda_info.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
+        bda_info.buffer = buffer;
+        bda_addr = vkGetBufferDeviceAddress(device, &bda_info);
+        ASSERT_MSG(bda_addr != 0, "Failed to get buffer device address");
     }
 }
 
@@ -138,7 +143,7 @@ Buffer::Buffer(const Vulkan::Instance& instance, VAddr cpu_addr_, u64 size_bytes
 Buffer::Buffer(const Vulkan::Instance& instance, vk::Buffer handle, u64 size_bytes_,
                std::string_view debug_name)
     : size_bytes{size_bytes_}, buffer{instance.GetDevice(), instance.GetAllocator()} {
-    buffer.buffer = handle;
+    buffer.buffer = static_cast<VkBuffer>(handle);
     buffer.borrowed = true;
     Vulkan::SetObjectName(instance.GetDevice(), Handle(), debug_name);
 }

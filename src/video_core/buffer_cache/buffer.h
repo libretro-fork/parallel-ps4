@@ -73,9 +73,9 @@ struct UniqueBuffer {
 
     void Destroy();
 
-    vk::Device device;
-    vk::Buffer buffer{};
-    vk::DeviceAddress bda_addr{};
+    VkDevice device;
+    VkBuffer buffer{VK_NULL_HANDLE};
+    VkDeviceAddress bda_addr{};
     Vulkan::MemoryAllocator* allocator;
     vk_heap_span* allocation{};
     /// A buffer someone else made and destroys (Buffer's borrowing constructor)
@@ -114,7 +114,7 @@ struct Buffer {
     }
 
     vk::Buffer Handle() const noexcept {
-        return buffer.buffer;
+        return vk::Buffer{buffer.buffer};
     }
 
     vk::DeviceAddress BufferDeviceAddress() const noexcept {

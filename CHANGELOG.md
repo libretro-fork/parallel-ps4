@@ -4,6 +4,10 @@ What changed in the libretro core of this fork, newest first. Changes that come 
 
 ## Unreleased
 
+- Vulkan, buffers on the C API: `UniqueBuffer` (`buffer_cache/buffer`) holds a plain Vulkan buffer.
+  - **What changes:** it creates sparse buffers, queries device addresses and destroys buffers it made itself with the C API through libretro-common's symbol wrapper. Buffers with memory still go through the memory allocator, as before.
+  - **Unchanged:** `Buffer::Handle()` still gives callers a vulkan.hpp handle, and the Vulkan calls and arguments are the same.
+  - **Checks:** the Linux and Windows builds pass. Not run in a game yet.
 - Vulkan, more on the C API: the command pool, the descriptor heap (`vk_resource_pool`) and the memory allocator (`vk_memory`).
   - **What changes:** they create, allocate, bind, reset and destroy with the C API through libretro-common's symbol wrapper, and hold plain Vulkan handles. The memory heap takes its entry points from the wrapper instead of vulkan.hpp's dispatcher.
   - **Unchanged:** their callers still pass and get vulkan.hpp types, and the Vulkan calls and arguments are the same.
