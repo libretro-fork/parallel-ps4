@@ -1,10 +1,10 @@
 # FEX (FEXCore) for the aarch64 core
 
-The files of [FEX-Emu/FEX](https://github.com/FEX-Emu/FEX) at f2b679f6028ce1c38875233aecfcf5d3f8ebecec that the core's `ENABLE_FEX_GUEST_CPU=1` build compiles and includes: FEXCore, the three files of `Source/Common` the core reaches (config, host features, CPU count), CodeEmitter, FEXHeaderUtils, and the used files of SoftFloat 3e, cephes, rpmalloc and unordered_dense, with their licenses. Nothing else of FEX is here.
+The files of [FEX-Emu/FEX](https://github.com/FEX-Emu/FEX) at f2b679f6028ce1c38875233aecfcf5d3f8ebecec that the core's `ENABLE_FEX_GUEST_CPU=1` build compiles and includes: FEXCore, the three files of `Source/Common` the core reaches (config, host features, CPU count), CodeEmitter, FEXHeaderUtils, and the used files of SoftFloat 3e, cephes and unordered_dense, with their licenses. Nothing else of FEX is here.
 
 - `generated/` holds what FEX's CMake writes at configure time for an aarch64 build: `git_version.h`, the IR tables (`IRDefines.inc`, `IRDefines_Dispatch.inc`) and the config tables (`ConfigValues.inl`, `ConfigOptions.inl`).
 - Changes from upstream:
-  - rpmalloc's thread heap uses the default TLS model (`TLS_MODEL` is empty), because the frontend loads the core with dlopen and gets no static TLS.
+  - No rpmalloc: FEX's allocator hooks (`AllocatorHooks.cpp`) are built without `ENABLE_FEX_ALLOCATOR`, upstream's own branch for that, so FEX allocates with the C library's malloc like the rest of the core.
   - No tiny-json: FEX's config files (`Source/Common/Config.cpp`) are read with libretro-common's zero-copy span reader (`rjson_read_span`) and written with its `rjsonwriter`. `JSONPool` is gone with it. `\u` escapes now decode, where tiny-json turned them into `?`.
   - No range-v3, cpp-optparse or CommonTools: FEX's two string splits the core reaches (`Config.cpp`, `HostFeatures.cpp`) are plain `std::string_view` code, and the rest of `Source/Common` (argument parsing, FEXServer, file format checks, SHM stats, volatile metadata) never reached the core's link and is gone.
   - `FindUserHomeThroughUID` matches the passwd entry's uid; upstream compared the gid field.

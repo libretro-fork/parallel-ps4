@@ -4,6 +4,14 @@ What changed in the libretro core of this fork, newest first. Changes that come 
 
 ## Unreleased
 
+- FEX's rpmalloc is gone. FEX's allocator hooks (`AllocatorHooks.cpp`) are built without `ENABLE_FEX_ALLOCATOR`, the branch upstream has for that. FEX now allocates with the C library's malloc, as the rest of the core does.
+  - **Why it can go:** the core never called FEX's allocator setup (`SetupHooks`), so rpmalloc ran on its defaults and kept no guest memory out of the way.
+  - **What goes with it:** rpmalloc's TLS-model patch (only needed because the frontend dlopens the core) and its 512 MB address-space reservation at FEX's first allocation.
+  - **Checks:**
+    - Built for aarch64 with no warnings. The core links, with no rpmalloc symbols and no static TLS.
+    - The FEXCore smoke test passes under qemu, and its trace no longer shows the 512 MB mapping.
+    - The JIT's speed with the C library's malloc, in place of rpmalloc's per-thread caches, has not been measured.
+  - **Not run on an aarch64 machine yet.**
 - FEX's range-v3, cpp-optparse and CommonTools are gone, with the parts of FEX's `Source/Common` the core never linked. `externals/fex` keeps three files of `Source/Common`: config, host features and CPU count.
   - **What was never linked:** argument parsing, the FEXServer client, file format checks, SBRK allocations, SHM stats and volatile metadata. They were in the archive, but nothing in the core reached them (checked from the link map).
   - **range-v3:** it was used for two string splits the core does reach, the passwd lookup in `Config.cpp` and the CPU feature option string in `HostFeatures.cpp`. Both are plain `std::string_view` code now.

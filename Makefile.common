@@ -385,16 +385,12 @@ FEXCORE_CXXFLAGS := $(FEX_CXX) -fvisibility-inlines-hidden -fno-strict-aliasing 
 FEXCORESF_SOURCES_CXX := $(FEX_DIR)/FEXCore/Source/Interface/Core/Interpreter/Fallbacks/InterpreterFallbacks.cpp
 FEXCORESF_FLAGS := $(FEXCORE_FLAGS) $(FEX_SF_DEFS)
 FEXCORESF_CXXFLAGS := $(FEXCORE_CXXFLAGS)
-# FEX's allocator hooks, on rpmalloc
+# FEX's allocator hooks: the C library's malloc, as for the rest of the core
 FEXALLOC_SOURCES_CXX := $(FEX_DIR)/FEXCore/Source/Utils/AllocatorHooks.cpp
 FEXALLOC_FLAGS := $(FEX_BASE_DEFS) '-DGLOBAL_DATA_DIRECTORY="/usr/local/share/fex-emu/"' \
-	-DENABLE_FEX_ALLOCATOR=1 -I$(FEX_DIR)/FEXCore/Source -I$(FEX_DIR)/Source \
-	-I$(FEX_DIR)/generated -I$(FEX_DIR)/External/rpmalloc
+	-I$(FEX_DIR)/FEXCore/Source -I$(FEX_DIR)/Source -I$(FEX_DIR)/generated \
+	-I$(FEX_DIR)/FEXCore/include
 FEXALLOC_CXXFLAGS := $(FEX_CXX) -fno-strict-aliasing -fno-exceptions
-FEXRPMALLOC_SOURCES_C := $(FEX_DIR)/External/rpmalloc/rpmalloc/rpmalloc.c
-FEXRPMALLOC_FLAGS := $(FEX_BASE_DEFS) -DENABLE_ASSERTS=0 -DENABLE_DECOMMIT=1 \
-	-DENABLE_DYNAMIC_LINK=0 -DENABLE_OVERRIDE=0 -DENABLE_STATISTICS=0 \
-	-I$(FEX_DIR)/External/rpmalloc
 # FEX's Source/Common: the config and host feature code the core reaches
 FEXCOMMON_SOURCES_CXX := $(addprefix $(FEX_DIR)/Source/Common/,CPUInfo.cpp Config.cpp \
 	HostFeatures.cpp)
@@ -422,7 +418,7 @@ FEXFLOAT_FLAGS := $(FEX_DEFS) $(FEX_SF_DEFS) -I$(FEX_DIR)/External/SoftFloat-3e 
 	-I$(FEX_DIR)/External/cephes/include $(FEX_SF_INC) -Wno-trigraphs -fno-builtin
 FEXFLOAT_CXXFLAGS := $(FEX_CXX)
 # Linked from one archive, so only what the core reaches comes in, as from FEX's own
-FEX_GROUPS := FEXCORE FEXCORESF FEXALLOC FEXRPMALLOC FEXCOMMON FEXFLOAT
+FEX_GROUPS := FEXCORE FEXCORESF FEXALLOC FEXCOMMON FEXFLOAT
 # libSceFiber HLE, its switches done on the guest's registers (no fiber_context.cpp asm)
 CORE_SOURCES_CXX += src/core/libraries/fiber/fiber.cpp src/core/fex/fex_guest_engine.cpp \
 	$(addprefix src/core/guest_cpu/,fex_guest_cpu.cpp fex_hle_bridge.cpp guest_cpu.cpp \
@@ -431,7 +427,7 @@ CORE_SOURCES_CXX += src/core/libraries/fiber/fiber.cpp src/core/fex/fex_guest_en
 CORE_FLAGS += -DSHADPS4_ENABLE_FEX_GUEST_CPU=1 -DFEX_DISABLE_TELEMETRY=1 -DFEX_HAS_PRESERVE_ALL_ATTR=1 \
 	'-DFEX_PRESERVE_ALL_ATTR=__attribute__((preserve_all))' -DFEXCORE_HAS_PRESERVE_ALL_ATTR=1 \
 	'-DFEXCORE_PRESERVE_ALL_ATTR=__attribute__((preserve_all))' \
-	$(FEX_INC) -I$(FEX_DIR)/External/rpmalloc
+	$(FEX_INC)
 endif
 
 # ----------------------------------------------------------------------------
