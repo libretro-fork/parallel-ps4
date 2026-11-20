@@ -4,6 +4,10 @@ What changed in the libretro core of this fork, newest first. Changes that come 
 
 ## Unreleased
 
+- Vulkan, the scheduler on the C API: `Scheduler` (`vk_scheduler`) begins and ends its command buffers, begins and ends rendering, submits to the queue, and sets every piece of dynamic state, with the C API through libretro-common's symbol wrapper.
+  - **What holds the command buffers:** its sessions and the list it submits hold plain Vulkan handles. `CommandBuffer()` and `UploadCommandBuffer()` still give callers vulkan.hpp handles for now.
+  - **Unchanged:** `SubmitInfo`, `RenderState` and `DynamicState` keep their vulkan.hpp fields, which the C calls read as they are. The Vulkan calls and arguments are the same.
+  - **Checks:** the Linux and Windows builds pass. Not run in a game yet.
 - Vulkan, the pipeline cache on the C API: `PipelineCache` creates, reads back and destroys the driver's pipeline cache, and destroys shader modules, with the C API through libretro-common's symbol wrapper. The descriptor heap's pool sizes are plain Vulkan structs.
   - **Driver cache read-back:** the driver writes its cache straight into the buffer the disk cache then takes, as before.
   - **Shader modules at close:** the modules the cache keeps for its shaders were never destroyed when the core closed. They are now, after every pipeline made from them is gone. Not run in a game yet.

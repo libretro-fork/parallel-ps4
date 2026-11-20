@@ -426,7 +426,7 @@ public:
 
     /// Returns the current command buffer.
     vk::CommandBuffer CommandBuffer() const {
-        return sessions.back().primary;
+        return vk::CommandBuffer{sessions.back().primary};
     }
 
     /// Returns the current command buffer tick.
@@ -483,12 +483,12 @@ private:
     SessionFunc on_session{};
     SubmitFunc on_submit{};
     struct Session {
-        vk::CommandBuffer upload{};
-        vk::CommandBuffer primary{};
+        VkCommandBuffer upload{VK_NULL_HANDLE};
+        VkCommandBuffer primary{VK_NULL_HANDLE};
     };
     std::vector<Session> sessions;
     /// The command buffers of a submission, made up front with the sessions' room
-    std::vector<vk::CommandBuffer> submit_buffers;
+    std::vector<VkCommandBuffer> submit_buffers;
 
 public:
     /// Room for an operation's captures, kept in the operation itself

@@ -37,6 +37,13 @@ OpPool& Pool() {
     return pool;
 }
 
+void BeginOneTime(VkCommandBuffer cmdbuf) {
+    VkCommandBufferBeginInfo begin_info{};
+    begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    begin_info.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    Check(static_cast<vk::Result>(vkBeginCommandBuffer(cmdbuf, &begin_info)));
+}
+
 } // Anonymous namespace
 
 Scheduler::PendingOp* Scheduler::AcquireOp() {
@@ -81,56 +88,49 @@ void Scheduler::BeginRendering(const RenderState& new_state) {
     is_rendering = true;
     render_state = new_state;
 
-    std::array<vk::RenderingAttachmentInfo, 8> color_attachments;
+    std::array<VkRenderingAttachmentInfo, 8> color_attachments;
     for (u32 i = 0; i < render_state.num_color_attachments; ++i) {
         const auto& cb = render_state.color_attachments[i];
-        color_attachments[i] = vk::RenderingAttachmentInfo{
-            .imageView = cb.image_view,
-            .imageLayout = cb.image_layout,
-            .loadOp = cb.is_clear ? vk::AttachmentLoadOp::eClear : vk::AttachmentLoadOp::eLoad,
-            .storeOp = vk::AttachmentStoreOp::eStore,
-            .clearValue = vk::ClearValue{.color = vk::ClearColorValue{.uint32 = cb.clear_value}},
-        };
+        VkRenderingAttachmentInfo& attachment = color_attachments[i];
+        attachment = {};
+        attachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
+        attachment.imageView = static_cast<VkImageView>(cb.image_view);
+        attachment.imageLayout = static_cast<VkImageLayout>(cb.image_layout);
+        attachment.loadOp = cb.is_clear ? VK_ATTACHMENT_LOAD_OP_CLEAR : VK_ATTACHMENT_LOAD_OP_LOAD;
+        attachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+        std::memcpy(attachment.clearValue.color.uint32, cb.clear_value.data(),
+                    sizeof(cb.clear_value));
     }
 
     const auto& db = render_state.depth_stencil_attachment;
-    const vk::RenderingAttachmentInfo depth_attachment = {
-        .imageView = db.image_view,
-        .imageLayout = db.image_layout,
-        .loadOp = db.depth_clear ? vk::AttachmentLoadOp::eClear : vk::AttachmentLoadOp::eLoad,
-        .storeOp = vk::AttachmentStoreOp::eStore,
-        .clearValue =
-            vk::ClearValue{.depthStencil = vk::ClearDepthStencilValue{.depth = std::bit_cast<float>(
-                                                                          db.clear_value[0])}},
-    };
-    const vk::RenderingAttachmentInfo stencil_attachment = {
-        .imageView = db.image_view,
-        .imageLayout = db.image_layout,
-        .loadOp = db.stencil_clear ? vk::AttachmentLoadOp::eClear : vk::AttachmentLoadOp::eLoad,
-        .storeOp = vk::AttachmentStoreOp::eStore,
-        .clearValue = vk::ClearValue{.depthStencil =
-                                         vk::ClearDepthStencilValue{.stencil = db.clear_value[1]}},
-    };
+    VkRenderingAttachmentInfo depth_attachment{};
+    depth_attachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
+    depth_attachment.imageView = static_cast<VkImageView>(db.image_view);
+    depth_attachment.imageLayout = static_cast<VkImageLayout>(db.image_layout);
+    depth_attachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    VkRenderingAttachmentInfo stencil_attachment = depth_attachment;
+    depth_attachment.loadOp =
+        db.depth_clear ? VK_ATTACHMENT_LOAD_OP_CLEAR : VK_ATTACHMENT_LOAD_OP_LOAD;
+    depth_attachment.clearValue.depthStencil.depth = std::bit_cast<float>(db.clear_value[0]);
+    stencil_attachment.loadOp =
+        db.stencil_clear ? VK_ATTACHMENT_LOAD_OP_CLEAR : VK_ATTACHMENT_LOAD_OP_LOAD;
+    stencil_attachment.clearValue.depthStencil.stencil = db.clear_value[1];
 
-    const vk::RenderingInfo rendering_info = {
-        .renderArea =
-            {
-                .offset = {0, 0},
-                .extent = {render_state.width, render_state.height},
-            },
-        .layerCount = render_state.num_layers,
-        .colorAttachmentCount = render_state.num_color_attachments,
-        .pColorAttachments = color_attachments.data(),
-        .pDepthAttachment = db.has_depth ? &depth_attachment : nullptr,
-        .pStencilAttachment = db.has_stencil ? &stencil_attachment : nullptr,
-    };
+    VkRenderingInfo rendering_info{};
+    rendering_info.sType = VK_STRUCTURE_TYPE_RENDERING_INFO;
+    rendering_info.renderArea.extent = {render_state.width, render_state.height};
+    rendering_info.layerCount = render_state.num_layers;
+    rendering_info.colorAttachmentCount = render_state.num_color_attachments;
+    rendering_info.pColorAttachments = color_attachments.data();
+    rendering_info.pDepthAttachment = db.has_depth ? &depth_attachment : nullptr;
+    rendering_info.pStencilAttachment = db.has_stencil ? &stencil_attachment : nullptr;
 
     instance.Mark(CommandBuffer(), "render pass: w, h, colours|depth<<8|stencil<<9, layers",
                   render_state.width, render_state.height,
                   u64(render_state.num_color_attachments) | u64(db.has_depth) << 8 |
                       u64(db.has_stencil) << 9,
                   render_state.num_layers);
-    CommandBuffer().beginRendering(rendering_info);
+    vkCmdBeginRendering(sessions.back().primary, &rendering_info);
 }
 
 void Scheduler::EndRendering() {
@@ -138,20 +138,17 @@ void Scheduler::EndRendering() {
         return;
     }
     is_rendering = false;
-    CommandBuffer().endRendering();
+    vkCmdEndRendering(sessions.back().primary);
 }
 
 vk::CommandBuffer Scheduler::UploadCommandBuffer() {
     auto& upload_cmdbuf = sessions.back().upload;
     if (upload_cmdbuf) {
-        return upload_cmdbuf;
+        return vk::CommandBuffer{upload_cmdbuf};
     }
-    const vk::CommandBufferBeginInfo begin_info = {
-        .flags = vk::CommandBufferUsageFlagBits::eOneTimeSubmit,
-    };
-    upload_cmdbuf = command_pool.Commit();
-    Check(upload_cmdbuf.begin(begin_info));
-    return upload_cmdbuf;
+    upload_cmdbuf = static_cast<VkCommandBuffer>(command_pool.Commit());
+    BeginOneTime(upload_cmdbuf);
+    return vk::CommandBuffer{upload_cmdbuf};
 }
 
 void Scheduler::Flush(SubmitInfo& info) {
@@ -214,11 +211,8 @@ void Scheduler::BeginSession() {
 
     auto& session = sessions.emplace_back();
 
-    const vk::CommandBufferBeginInfo begin_info = {
-        .flags = vk::CommandBufferUsageFlagBits::eOneTimeSubmit,
-    };
-    session.primary = command_pool.Commit();
-    Check(session.primary.begin(begin_info));
+    session.primary = static_cast<VkCommandBuffer>(command_pool.Commit());
+    BeginOneTime(session.primary);
 
     // Invalidate dynamic state so it gets applied to the new command buffer.
     dynamic_state.Invalidate();
@@ -235,11 +229,11 @@ void Scheduler::EndSession() {
 
     const auto& session = sessions.back();
     if (session.upload) {
-        Check(session.upload.end());
+        Check(static_cast<vk::Result>(vkEndCommandBuffer(session.upload)));
     }
 
     EndRendering();
-    Check(session.primary.end());
+    Check(static_cast<vk::Result>(vkEndCommandBuffer(session.primary)));
 }
 
 void Scheduler::SubmitExecution(SubmitInfo& info) {
@@ -267,33 +261,38 @@ void Scheduler::SubmitExecution(SubmitInfo& info) {
         const vk::Semaphore timeline{work_semaphore.Handle()};
         info.AddSignal(timeline, signal_value);
 
-        std::array<vk::PipelineStageFlags, std::tuple_size_v<decltype(info.wait_semas)>>
+        std::array<VkPipelineStageFlags, std::tuple_size_v<decltype(info.wait_semas)>>
             wait_stage_masks;
-        wait_stage_masks.fill(vk::PipelineStageFlagBits::eAllCommands);
+        wait_stage_masks.fill(VK_PIPELINE_STAGE_ALL_COMMANDS_BIT);
 
-        const vk::TimelineSemaphoreSubmitInfo timeline_si = {
-            .waitSemaphoreValueCount = info.num_wait_semas,
-            .pWaitSemaphoreValues = info.wait_ticks.data(),
-            .signalSemaphoreValueCount = info.num_signal_semas,
-            .pSignalSemaphoreValues = info.signal_ticks.data(),
-        };
+        VkTimelineSemaphoreSubmitInfo timeline_si{};
+        timeline_si.sType = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO;
+        timeline_si.waitSemaphoreValueCount = info.num_wait_semas;
+        timeline_si.pWaitSemaphoreValues = info.wait_ticks.data();
+        timeline_si.signalSemaphoreValueCount = info.num_signal_semas;
+        timeline_si.pSignalSemaphoreValues = info.signal_ticks.data();
 
-        const vk::SubmitInfo submit_info = {
-            .pNext = &timeline_si,
-            .waitSemaphoreCount = info.num_wait_semas,
-            .pWaitSemaphores = info.wait_semas.data(),
-            .pWaitDstStageMask = wait_stage_masks.data(),
-            .commandBufferCount = static_cast<u32>(cmd_buffers.size()),
-            .pCommandBuffers = cmd_buffers.data(),
-            .signalSemaphoreCount = info.num_signal_semas,
-            .pSignalSemaphores = info.signal_semas.data(),
-        };
+        // vulkan.hpp's handles are the C handles, with nothing added
+        static_assert(sizeof(vk::Semaphore) == sizeof(VkSemaphore));
+        VkSubmitInfo submit_info{};
+        submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+        submit_info.pNext = &timeline_si;
+        submit_info.waitSemaphoreCount = info.num_wait_semas;
+        submit_info.pWaitSemaphores = reinterpret_cast<const VkSemaphore*>(info.wait_semas.data());
+        submit_info.pWaitDstStageMask = wait_stage_masks.data();
+        submit_info.commandBufferCount = static_cast<u32>(cmd_buffers.size());
+        submit_info.pCommandBuffers = cmd_buffers.data();
+        submit_info.signalSemaphoreCount = info.num_signal_semas;
+        submit_info.pSignalSemaphores =
+            reinterpret_cast<const VkSemaphore*>(info.signal_semas.data());
 
-        auto submit_result = instance.GetGraphicsQueue().submit(submit_info, info.fence);
-        if (submit_result == vk::Result::eErrorDeviceLost) {
+        const VkResult submit_result =
+            vkQueueSubmit(static_cast<VkQueue>(instance.GetGraphicsQueue()), 1, &submit_info,
+                          static_cast<VkFence>(info.fence));
+        if (submit_result == VK_ERROR_DEVICE_LOST) {
             instance.ReportDeviceLost();
         }
-        ASSERT_MSG(submit_result != vk::Result::eErrorDeviceLost, "Device lost during submit");
+        ASSERT_MSG(submit_result != VK_ERROR_DEVICE_LOST, "Device lost during submit");
 
         work_semaphore.Refresh();
         BeginSession();
@@ -331,177 +330,187 @@ void Scheduler::PriorityPendingOpsThread() {
     }
 }
 
-void DynamicState::Commit(const Instance& instance, const vk::CommandBuffer& cmdbuf) {
+namespace {
+
+void CmdSetStencilOps(VkCommandBuffer cmdbuf, VkStencilFaceFlags faces, const StencilOps& ops) {
+    vkCmdSetStencilOp(
+        cmdbuf, faces, static_cast<VkStencilOp>(ops.fail_op), static_cast<VkStencilOp>(ops.pass_op),
+        static_cast<VkStencilOp>(ops.depth_fail_op), static_cast<VkCompareOp>(ops.compare_op));
+}
+
+} // Anonymous namespace
+
+void DynamicState::Commit(const Instance& instance, const vk::CommandBuffer& vk_cmdbuf) {
+    const auto cmdbuf = static_cast<VkCommandBuffer>(vk_cmdbuf);
     if (dirty_state.viewports) {
         dirty_state.viewports = false;
-        cmdbuf.setViewportWithCount(viewports);
+        vkCmdSetViewportWithCount(cmdbuf, static_cast<u32>(viewports.size()),
+                                  reinterpret_cast<const VkViewport*>(viewports.data()));
     }
     if (dirty_state.scissors) {
         dirty_state.scissors = false;
-        cmdbuf.setScissorWithCount(scissors);
+        vkCmdSetScissorWithCount(cmdbuf, static_cast<u32>(scissors.size()),
+                                 reinterpret_cast<const VkRect2D*>(scissors.data()));
     }
     if (dirty_state.depth_test_enabled) {
         dirty_state.depth_test_enabled = false;
-        cmdbuf.setDepthTestEnable(depth_test_enabled);
+        vkCmdSetDepthTestEnable(cmdbuf, depth_test_enabled ? VK_TRUE : VK_FALSE);
     }
     if (dirty_state.depth_write_enabled) {
         dirty_state.depth_write_enabled = false;
         // Note that this must be set in a command buffer even if depth test is disabled.
-        cmdbuf.setDepthWriteEnable(depth_write_enabled);
+        vkCmdSetDepthWriteEnable(cmdbuf, depth_write_enabled ? VK_TRUE : VK_FALSE);
     }
     if (depth_test_enabled && dirty_state.depth_compare_op) {
         dirty_state.depth_compare_op = false;
-        cmdbuf.setDepthCompareOp(depth_compare_op);
+        vkCmdSetDepthCompareOp(cmdbuf, static_cast<VkCompareOp>(depth_compare_op));
     }
     if (dirty_state.depth_bounds_test_enabled) {
         dirty_state.depth_bounds_test_enabled = false;
         if (instance.IsDepthBoundsSupported()) {
-            cmdbuf.setDepthBoundsTestEnable(depth_bounds_test_enabled);
+            vkCmdSetDepthBoundsTestEnable(cmdbuf, depth_bounds_test_enabled ? VK_TRUE : VK_FALSE);
         }
     }
     if (depth_bounds_test_enabled && dirty_state.depth_bounds) {
         dirty_state.depth_bounds = false;
         if (instance.IsDepthBoundsSupported()) {
-            cmdbuf.setDepthBounds(depth_bounds_min, depth_bounds_max);
+            vkCmdSetDepthBounds(cmdbuf, depth_bounds_min, depth_bounds_max);
         }
     }
     if (dirty_state.depth_bias_enabled) {
         dirty_state.depth_bias_enabled = false;
-        cmdbuf.setDepthBiasEnable(depth_bias_enabled);
+        vkCmdSetDepthBiasEnable(cmdbuf, depth_bias_enabled ? VK_TRUE : VK_FALSE);
     }
     if (depth_bias_enabled && dirty_state.depth_bias) {
         dirty_state.depth_bias = false;
-        cmdbuf.setDepthBias(depth_bias_constant, depth_bias_clamp, depth_bias_slope);
+        vkCmdSetDepthBias(cmdbuf, depth_bias_constant, depth_bias_clamp, depth_bias_slope);
     }
     if (dirty_state.stencil_test_enabled) {
         dirty_state.stencil_test_enabled = false;
-        cmdbuf.setStencilTestEnable(stencil_test_enabled);
+        vkCmdSetStencilTestEnable(cmdbuf, stencil_test_enabled ? VK_TRUE : VK_FALSE);
     }
     if (stencil_test_enabled) {
         if (dirty_state.stencil_front_ops && dirty_state.stencil_back_ops &&
             stencil_front_ops == stencil_back_ops) {
             dirty_state.stencil_front_ops = false;
             dirty_state.stencil_back_ops = false;
-            cmdbuf.setStencilOp(vk::StencilFaceFlagBits::eFrontAndBack, stencil_front_ops.fail_op,
-                                stencil_front_ops.pass_op, stencil_front_ops.depth_fail_op,
-                                stencil_front_ops.compare_op);
+            CmdSetStencilOps(cmdbuf, VK_STENCIL_FACE_FRONT_AND_BACK, stencil_front_ops);
         } else {
             if (dirty_state.stencil_front_ops) {
                 dirty_state.stencil_front_ops = false;
-                cmdbuf.setStencilOp(vk::StencilFaceFlagBits::eFront, stencil_front_ops.fail_op,
-                                    stencil_front_ops.pass_op, stencil_front_ops.depth_fail_op,
-                                    stencil_front_ops.compare_op);
+                CmdSetStencilOps(cmdbuf, VK_STENCIL_FACE_FRONT_BIT, stencil_front_ops);
             }
             if (dirty_state.stencil_back_ops) {
                 dirty_state.stencil_back_ops = false;
-                cmdbuf.setStencilOp(vk::StencilFaceFlagBits::eBack, stencil_back_ops.fail_op,
-                                    stencil_back_ops.pass_op, stencil_back_ops.depth_fail_op,
-                                    stencil_back_ops.compare_op);
+                CmdSetStencilOps(cmdbuf, VK_STENCIL_FACE_BACK_BIT, stencil_back_ops);
             }
         }
         if (dirty_state.stencil_front_reference && dirty_state.stencil_back_reference &&
             stencil_front_reference == stencil_back_reference) {
             dirty_state.stencil_front_reference = false;
             dirty_state.stencil_back_reference = false;
-            cmdbuf.setStencilReference(vk::StencilFaceFlagBits::eFrontAndBack,
-                                       stencil_front_reference);
+            vkCmdSetStencilReference(cmdbuf, VK_STENCIL_FACE_FRONT_AND_BACK,
+                                     stencil_front_reference);
         } else {
             if (dirty_state.stencil_front_reference) {
                 dirty_state.stencil_front_reference = false;
-                cmdbuf.setStencilReference(vk::StencilFaceFlagBits::eFront,
-                                           stencil_front_reference);
+                vkCmdSetStencilReference(cmdbuf, VK_STENCIL_FACE_FRONT_BIT,
+                                         stencil_front_reference);
             }
             if (dirty_state.stencil_back_reference) {
                 dirty_state.stencil_back_reference = false;
-                cmdbuf.setStencilReference(vk::StencilFaceFlagBits::eBack, stencil_back_reference);
+                vkCmdSetStencilReference(cmdbuf, VK_STENCIL_FACE_BACK_BIT, stencil_back_reference);
             }
         }
         if (dirty_state.stencil_front_write_mask && dirty_state.stencil_back_write_mask &&
             stencil_front_write_mask == stencil_back_write_mask) {
             dirty_state.stencil_front_write_mask = false;
             dirty_state.stencil_back_write_mask = false;
-            cmdbuf.setStencilWriteMask(vk::StencilFaceFlagBits::eFrontAndBack,
-                                       stencil_front_write_mask);
+            vkCmdSetStencilWriteMask(cmdbuf, VK_STENCIL_FACE_FRONT_AND_BACK,
+                                     stencil_front_write_mask);
         } else {
             if (dirty_state.stencil_front_write_mask) {
                 dirty_state.stencil_front_write_mask = false;
-                cmdbuf.setStencilWriteMask(vk::StencilFaceFlagBits::eFront,
-                                           stencil_front_write_mask);
+                vkCmdSetStencilWriteMask(cmdbuf, VK_STENCIL_FACE_FRONT_BIT,
+                                         stencil_front_write_mask);
             }
             if (dirty_state.stencil_back_write_mask) {
                 dirty_state.stencil_back_write_mask = false;
-                cmdbuf.setStencilWriteMask(vk::StencilFaceFlagBits::eBack, stencil_back_write_mask);
+                vkCmdSetStencilWriteMask(cmdbuf, VK_STENCIL_FACE_BACK_BIT, stencil_back_write_mask);
             }
         }
         if (dirty_state.stencil_front_compare_mask && dirty_state.stencil_back_compare_mask &&
             stencil_front_compare_mask == stencil_back_compare_mask) {
             dirty_state.stencil_front_compare_mask = false;
             dirty_state.stencil_back_compare_mask = false;
-            cmdbuf.setStencilCompareMask(vk::StencilFaceFlagBits::eFrontAndBack,
-                                         stencil_front_compare_mask);
+            vkCmdSetStencilCompareMask(cmdbuf, VK_STENCIL_FACE_FRONT_AND_BACK,
+                                       stencil_front_compare_mask);
         } else {
             if (dirty_state.stencil_front_compare_mask) {
                 dirty_state.stencil_front_compare_mask = false;
-                cmdbuf.setStencilCompareMask(vk::StencilFaceFlagBits::eFront,
-                                             stencil_front_compare_mask);
+                vkCmdSetStencilCompareMask(cmdbuf, VK_STENCIL_FACE_FRONT_BIT,
+                                           stencil_front_compare_mask);
             }
             if (dirty_state.stencil_back_compare_mask) {
                 dirty_state.stencil_back_compare_mask = false;
-                cmdbuf.setStencilCompareMask(vk::StencilFaceFlagBits::eBack,
-                                             stencil_back_compare_mask);
+                vkCmdSetStencilCompareMask(cmdbuf, VK_STENCIL_FACE_BACK_BIT,
+                                           stencil_back_compare_mask);
             }
         }
     }
     if (dirty_state.primitive_restart_enable) {
         dirty_state.primitive_restart_enable = false;
-        cmdbuf.setPrimitiveRestartEnable(primitive_restart_enable);
+        vkCmdSetPrimitiveRestartEnable(cmdbuf, primitive_restart_enable ? VK_TRUE : VK_FALSE);
     }
     if (dirty_state.rasterizer_discard_enable) {
         dirty_state.rasterizer_discard_enable = false;
-        cmdbuf.setRasterizerDiscardEnable(rasterizer_discard_enable);
+        vkCmdSetRasterizerDiscardEnable(cmdbuf, rasterizer_discard_enable ? VK_TRUE : VK_FALSE);
     }
     if (dirty_state.cull_mode) {
         dirty_state.cull_mode = false;
-        cmdbuf.setCullMode(cull_mode);
+        vkCmdSetCullMode(cmdbuf, static_cast<VkCullModeFlags>(cull_mode));
     }
     if (dirty_state.front_face) {
         dirty_state.front_face = false;
-        cmdbuf.setFrontFace(front_face);
+        vkCmdSetFrontFace(cmdbuf, static_cast<VkFrontFace>(front_face));
     }
     if (dirty_state.blend_constants) {
         dirty_state.blend_constants = false;
-        cmdbuf.setBlendConstants(blend_constants.data());
+        vkCmdSetBlendConstants(cmdbuf, blend_constants.data());
     }
     if (dirty_state.color_write_masks) {
         dirty_state.color_write_masks = false;
         if (instance.IsDynamicColorWriteMaskSupported()) {
-            cmdbuf.setColorWriteMaskEXT(0, color_write_masks);
+            static_assert(sizeof(vk::ColorComponentFlags) == sizeof(VkColorComponentFlags));
+            vkCmdSetColorWriteMaskEXT(
+                cmdbuf, 0, static_cast<u32>(color_write_masks.size()),
+                reinterpret_cast<const VkColorComponentFlags*>(color_write_masks.data()));
         }
     }
     if (dirty_state.line_width) {
         dirty_state.line_width = false;
-        cmdbuf.setLineWidth(line_width);
+        vkCmdSetLineWidth(cmdbuf, line_width);
     }
     if (dirty_state.sample_locations && sample_locs_grid) {
         dirty_state.sample_locations = false;
-        std::array<vk::SampleLocationEXT, 32> locations;
+        std::array<VkSampleLocationEXT, 32> locations;
         const u32 count = u32(sample_locs_grid) * sample_locs_grid * sample_locs_samples;
         for (u32 i = 0; i < count; ++i) {
-            locations[i] =
-                vk::SampleLocationEXT{sample_locs[i * 2] / 16.0f, sample_locs[i * 2 + 1] / 16.0f};
+            locations[i] = {sample_locs[i * 2] / 16.0f, sample_locs[i * 2 + 1] / 16.0f};
         }
-        cmdbuf.setSampleLocationsEXT(vk::SampleLocationsInfoEXT{
-            .sampleLocationsPerPixel = static_cast<vk::SampleCountFlagBits>(sample_locs_samples),
-            .sampleLocationGridSize = {sample_locs_grid, sample_locs_grid},
-            .sampleLocationsCount = count,
-            .pSampleLocations = locations.data(),
-        });
+        VkSampleLocationsInfoEXT sample_locations{};
+        sample_locations.sType = VK_STRUCTURE_TYPE_SAMPLE_LOCATIONS_INFO_EXT;
+        sample_locations.sampleLocationsPerPixel =
+            static_cast<VkSampleCountFlagBits>(sample_locs_samples);
+        sample_locations.sampleLocationGridSize = {sample_locs_grid, sample_locs_grid};
+        sample_locations.sampleLocationsCount = count;
+        sample_locations.pSampleLocations = locations.data();
+        vkCmdSetSampleLocationsEXT(cmdbuf, &sample_locations);
     }
     if (dirty_state.feedback_loop_enabled && instance.IsAttachmentFeedbackLoopLayoutSupported()) {
         dirty_state.feedback_loop_enabled = false;
-        cmdbuf.setAttachmentFeedbackLoopEnableEXT(feedback_loop_enabled
-                                                      ? vk::ImageAspectFlagBits::eColor
-                                                      : vk::ImageAspectFlagBits::eNone);
+        vkCmdSetAttachmentFeedbackLoopEnableEXT(
+            cmdbuf, feedback_loop_enabled ? VK_IMAGE_ASPECT_COLOR_BIT : VK_IMAGE_ASPECT_NONE);
     }
 }
 
