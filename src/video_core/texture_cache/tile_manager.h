@@ -46,6 +46,9 @@ public:
                          Vulkan::Runtime& runtime, StreamBuffer& stream_buffer);
     ~TileManager();
 
+    TileManager(const TileManager&) = delete;
+    TileManager& operator=(const TileManager&) = delete;
+
     void TileImage(Image& in_image, std::span<vk::BufferImageCopy> buffer_copies,
                    const VideoCore::Buffer* out_buffer, u64 out_offset);
 
@@ -53,16 +56,16 @@ public:
                                               const ImageInfo& info);
 
 private:
-    vk::Pipeline GetTilingPipeline(const ImageInfo& info, bool is_tiler);
+    VkPipeline GetTilingPipeline(const ImageInfo& info, bool is_tiler);
 
 private:
     const Vulkan::Instance& instance;
     Vulkan::Scheduler& scheduler;
     Vulkan::Runtime& runtime;
     StreamBuffer& stream_buffer;
-    vk::UniqueDescriptorSetLayout desc_layout;
-    vk::UniquePipelineLayout pl_layout;
-    std::unordered_map<TilingKey, vk::UniquePipeline, TilingKey::Hash> tiling_pipelines;
+    VkDescriptorSetLayout desc_layout{VK_NULL_HANDLE};
+    VkPipelineLayout pl_layout{VK_NULL_HANDLE};
+    std::unordered_map<TilingKey, VkPipeline, TilingKey::Hash> tiling_pipelines;
     /// A new tiling pipeline's module, written here instead of allocated
     std::array<u32, HOST_SPIRV_MAX_WORDS> spirv_words;
 };

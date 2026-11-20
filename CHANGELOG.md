@@ -4,6 +4,11 @@ What changed in the libretro core of this fork, newest first. Changes that come 
 
 ## Unreleased
 
+- Vulkan, the tile manager on the C API: `TileManager` (`texture_cache/tile_manager`) creates its descriptor set layout, pipeline layout and tiling pipelines, and binds, pushes descriptors and dispatches, with the C API through libretro-common's symbol wrapper.
+  - **What holds the objects:** plain Vulkan handles, its tiling pipelines included, destroyed in its destructor in the same order as before. It can no longer be copied (it never was).
+  - **Less code:** the tiler and detiler share one helper for the bind and the three descriptor writes, instead of two copies.
+  - **Unchanged:** the Vulkan calls and arguments are the same. `TileImage` still takes vulkan.hpp copy regions, since the texture cache passes those.
+  - **Checks:** the Linux and Windows builds pass. Not run in a game yet.
 - Vulkan, the fault manager on the C API: `FaultManager` (`buffer_cache/fault_manager`) creates its descriptor set layout, pipeline layout and compute pipeline, and records its barriers, push descriptors and dispatch, with the C API through libretro-common's symbol wrapper.
   - **What holds the objects:** plain Vulkan handles, destroyed in its own destructor. It can no longer be copied (it never was).
   - **Unchanged:** the Vulkan calls and arguments are the same. Its fault buffer is still handed out as a `Buffer`.
