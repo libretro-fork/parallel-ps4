@@ -12,16 +12,12 @@
 // contiguous, so iterators are plain pointers. They replace Boost.Container's
 // static_vector and small_vector.
 
-#include <algorithm>
-#include <cstddef>
-#include <cstdlib>
-#include <cstring>
+#include <stddef.h>
+#include <string.h>
+
+// Language support only: brace lists, and placement and aligned new
 #include <initializer_list>
-#include <iterator>
-#include <memory>
 #include <new>
-#include <type_traits>
-#include <utility>
 
 #include "common/assert.h"
 
@@ -29,22 +25,96 @@ namespace Common {
 
 namespace Detail {
 
+template <typename T>
+constexpr T&& Move(T& value) noexcept {
+    return static_cast<T&&>(value);
+}
+
+template <typename T>
+void DestroyRange(T* first, T* last) noexcept {
+    for (; first != last; ++first) {
+        first->~T();
+    }
+}
+
+/// Moves [@first, @last) into raw storage at @to
+template <typename T>
+void UninitializedMove(T* first, T* last, T* to) {
+    for (; first != last; ++first, ++to) {
+        ::new (static_cast<void*>(to)) T(Move(*first));
+    }
+}
+
+template <typename T>
+void ReverseRange(T* first, T* last) {
+    while (first < last) {
+        --last;
+        T tmp(Move(*first));
+        *first = Move(*last);
+        *last = Move(tmp);
+        ++first;
+    }
+}
+
+/// [@first, @last) turned so that @mid comes first
+template <typename T>
+void Rotate(T* first, T* mid, T* last) {
+    ReverseRange(first, mid);
+    ReverseRange(mid, last);
+    ReverseRange(first, last);
+}
+
+/// A pointer walked backwards
+template <typename T>
+struct ReverseIterator {
+    T* p;
+
+    T& operator*() const noexcept {
+        return *(p - 1);
+    }
+    T* operator->() const noexcept {
+        return p - 1;
+    }
+    ReverseIterator& operator++() noexcept {
+        --p;
+        return *this;
+    }
+    ReverseIterator operator++(int) noexcept {
+        ReverseIterator old = *this;
+        --p;
+        return old;
+    }
+    friend bool operator==(ReverseIterator a, ReverseIterator b) noexcept {
+        return a.p == b.p;
+    }
+    friend bool operator!=(ReverseIterator a, ReverseIterator b) noexcept {
+        return a.p != b.p;
+    }
+};
+
+/// What can be walked from one to another: a pointer, an iterator
+template <typename It>
+concept InputIterator = requires(It it) {
+    *it;
+    ++it;
+};
+
 // The element-handling half both share; Storage gives data(), capacity()
 // and Grow(), and holds count.
 template <typename Derived, typename T>
 class InlineVectorOps {
 public:
     using value_type = T;
-    using size_type = std::size_t;
-    using difference_type = std::ptrdiff_t;
+    using size_type = size_t;
+    using difference_type = ptrdiff_t;
     using reference = T&;
     using const_reference = const T&;
     using pointer = T*;
     using const_pointer = const T*;
     using iterator = T*;
     using const_iterator = const T*;
-    using reverse_iterator = std::reverse_iterator<iterator>;
-    using const_reverse_iterator = std::reverse_iterator<const_iterator>;
+    using reverse_iterator = ReverseIterator<T>;
+    using const_reverse_iterator = ReverseIterator<const T>;
 
     T* data() noexcept {
         return Self().Data();
@@ -52,10 +122,10 @@ public:
     const T* data() const noexcept {
         return Self().Data();
     }
-    std::size_t size() const noexcept {
+    size_t size() const noexcept {
         return Self().count;
     }
-    std::size_t capacity() const noexcept {
+    size_t capacity() const noexcept {
         return Self().Capacity();
     }
     bool empty() const noexcept {
@@ -93,17 +163,17 @@ public:
         return const_reverse_iterator{begin()};
     }
 
-    T& operator[](std::size_t i) noexcept {
+    T& operator[](size_t i) noexcept {
         return data()[i];
     }
-    const T& operator[](std::size_t i) const noexcept {
+    const T& operator[](size_t i) const noexcept {
         return data()[i];
     }
-    T& at(std::size_t i) {
+    T& at(size_t i) {
         ASSERT(i < size());
         return data()[i];
     }
-    const T& at(std::size_t i) const {
+    const T& at(size_t i) const {
         ASSERT(i < size());
         return data()[i];
     }
@@ -120,7 +190,7 @@ public:
         return data()[size() - 1];
     }
 
-    void reserve(std::size_t n) {
+    void reserve(size_t n) {
         if (n > capacity()) {
             Self().Grow(n);
         }
@@ -130,13 +200,13 @@ public:
     T& emplace_back(Args&&... args) {
         if (size() == capacity()) {
             // The arguments may refer to an element that is about to move
-            T tmp(std::forward<Args>(args)...);
+            T tmp(static_cast<Args&&>(args)...);
             Self().Grow(size() + 1);
-            T* p = ::new (static_cast<void*>(data() + size())) T(std::move(tmp));
+            T* p = ::new (static_cast<void*>(data() + size())) T(Move(tmp));
             ++Self().count;
             return *p;
         }
-        T* p = ::new (static_cast<void*>(data() + size())) T(std::forward<Args>(args)...);
+        T* p = ::new (static_cast<void*>(data() + size())) T(static_cast<Args&&>(args)...);
         ++Self().count;
         return *p;
     }
@@ -144,22 +214,22 @@ public:
         emplace_back(v);
     }
     void push_back(T&& v) {
-        emplace_back(std::move(v));
+        emplace_back(Move(v));
     }
     void pop_back() noexcept {
         --Self().count;
-        std::destroy_at(data() + size());
+        (data() + size())->~T();
     }
 
     void clear() noexcept {
-        std::destroy(begin(), end());
+        DestroyRange(begin(), end());
         Self().count = 0;
     }
 
-    void resize(std::size_t n) {
+    void resize(size_t n) {
         Resize(n, [](T* p) { ::new (static_cast<void*>(p)) T(); });
     }
-    void resize(std::size_t n, const T& v) {
+    void resize(size_t n, const T& v) {
         Resize(n, [&v](T* p) { ::new (static_cast<void*>(p)) T(v); });
     }
 
@@ -170,7 +240,7 @@ public:
             emplace_back(*first);
         }
     }
-    void assign(std::size_t n, const T& v) {
+    void assign(size_t n, const T& v) {
         clear();
         resize(n, v);
     }
@@ -180,25 +250,25 @@ public:
 
     template <typename... Args>
     iterator emplace(const_iterator pos, Args&&... args) {
-        const std::size_t at = static_cast<std::size_t>(pos - begin());
-        emplace_back(std::forward<Args>(args)...);
-        std::rotate(begin() + at, end() - 1, end());
+        const size_t at = static_cast<size_t>(pos - begin());
+        emplace_back(static_cast<Args&&>(args)...);
+        Rotate(begin() + at, end() - 1, end());
         return begin() + at;
     }
     iterator insert(const_iterator pos, const T& v) {
         return emplace(pos, v);
     }
     iterator insert(const_iterator pos, T&& v) {
-        return emplace(pos, std::move(v));
+        return emplace(pos, Move(v));
     }
-    template <typename It, typename = typename std::iterator_traits<It>::iterator_category>
+    template <InputIterator It>
     iterator insert(const_iterator pos, It first, It last) {
-        const std::size_t at = static_cast<std::size_t>(pos - begin());
-        const std::size_t old = size();
+        const size_t at = static_cast<size_t>(pos - begin());
+        const size_t old = size();
         for (; first != last; ++first) {
             emplace_back(*first);
         }
-        std::rotate(begin() + at, begin() + old, end());
+        Rotate(begin() + at, begin() + old, end());
         return begin() + at;
     }
     iterator insert(const_iterator pos, std::initializer_list<T> il) {
@@ -214,14 +284,25 @@ public:
         if (f == l) {
             return f;
         }
-        T* new_end = std::move(l, end(), f);
-        std::destroy(new_end, end());
+        T* new_end = f;
+        for (T* from = l; from != end(); ++from, ++new_end) {
+            *new_end = Move(*from);
+        }
+        DestroyRange(new_end, end());
         Self().count = static_cast<decltype(Self().count)>(new_end - begin());
         return f;
     }
 
     friend bool operator==(const Derived& a, const Derived& b) {
-        return std::equal(a.begin(), a.end(), b.begin(), b.end());
+        if (a.size() != b.size()) {
+            return false;
+        }
+        for (size_t i = 0; i < a.size(); ++i) {
+            if (!(a[i] == b[i])) {
+                return false;
+            }
+        }
+        return true;
     }
 
 protected:
@@ -233,9 +314,9 @@ protected:
     }
 
     template <typename Make>
-    void Resize(std::size_t n, Make make) {
+    void Resize(size_t n, Make make) {
         if (n < size()) {
-            std::destroy(begin() + n, end());
+            DestroyRange(begin() + n, end());
             Self().count = static_cast<decltype(Self().count)>(n);
             return;
         }
@@ -247,14 +328,14 @@ protected:
     }
 
     // Moves @n elements from @from to raw storage at @to and ends them at @from
-    static void Relocate(T* from, std::size_t n, T* to) {
-        if constexpr (std::is_trivially_copyable_v<T>) {
+    static void Relocate(T* from, size_t n, T* to) {
+        if constexpr (__is_trivially_copyable(T)) {
             if (n) {
-                std::memcpy(static_cast<void*>(to), static_cast<const void*>(from), n * sizeof(T));
+                memcpy(static_cast<void*>(to), static_cast<const void*>(from), n * sizeof(T));
             }
         } else {
-            std::uninitialized_move(from, from + n, to);
-            std::destroy(from, from + n);
+            UninitializedMove(from, from + n, to);
+            DestroyRange(from, from + n);
         }
     }
 };
@@ -262,31 +343,31 @@ protected:
 } // namespace Detail
 
 /// At most N elements, all in place.
-template <typename T, std::size_t N>
+template <typename T, size_t N>
 class StaticVector : public Detail::InlineVectorOps<StaticVector<T, N>, T> {
     using Ops = Detail::InlineVectorOps<StaticVector<T, N>, T>;
     friend Ops;
 
 public:
     StaticVector() noexcept = default;
-    explicit StaticVector(std::size_t n) {
+    explicit StaticVector(size_t n) {
         this->resize(n);
     }
-    StaticVector(std::size_t n, const T& v) {
+    StaticVector(size_t n, const T& v) {
         this->resize(n, v);
     }
     StaticVector(std::initializer_list<T> il) {
         this->assign(il.begin(), il.end());
     }
-    template <typename It, typename = typename std::iterator_traits<It>::iterator_category>
+    template <Detail::InputIterator It>
     StaticVector(It first, It last) {
         this->assign(first, last);
     }
     StaticVector(const StaticVector& o) {
         this->assign(o.begin(), o.end());
     }
-    StaticVector(StaticVector&& o) noexcept(std::is_nothrow_move_constructible_v<T>) {
-        std::uninitialized_move(o.begin(), o.end(), Data());
+    StaticVector(StaticVector&& o) noexcept(__is_nothrow_constructible(T, T&&)) {
+        Detail::UninitializedMove(o.begin(), o.end(), Data());
         count = o.count;
         o.clear();
     }
@@ -296,10 +377,10 @@ public:
         }
         return *this;
     }
-    StaticVector& operator=(StaticVector&& o) noexcept(std::is_nothrow_move_constructible_v<T>) {
+    StaticVector& operator=(StaticVector&& o) noexcept(__is_nothrow_constructible(T, T&&)) {
         if (this != &o) {
             this->clear();
-            std::uninitialized_move(o.begin(), o.end(), Data());
+            Detail::UninitializedMove(o.begin(), o.end(), Data());
             count = o.count;
             o.clear();
         }
@@ -313,54 +394,54 @@ public:
         this->clear();
     }
 
-    static constexpr std::size_t max_size() noexcept {
+    static constexpr size_t max_size() noexcept {
         return N;
     }
 
 private:
     T* Data() noexcept {
-        return std::launder(reinterpret_cast<T*>(storage));
+        return reinterpret_cast<T*>(storage);
     }
     const T* Data() const noexcept {
-        return std::launder(reinterpret_cast<const T*>(storage));
+        return reinterpret_cast<const T*>(storage);
     }
-    static constexpr std::size_t Capacity() noexcept {
+    static constexpr size_t Capacity() noexcept {
         return N;
     }
-    void Grow(std::size_t) {
+    void Grow(size_t) {
         ASSERT_MSG(false, "StaticVector of %zu is full", N);
     }
 
     alignas(T) unsigned char storage[N * sizeof(T)];
-    std::size_t count = 0;
+    size_t count = 0;
 };
 
 /// Up to N elements in place, then on the heap. SizeT is the type the count
 /// and capacity are kept in, for structs that want to stay small.
-template <typename T, std::size_t N, typename SizeT = std::size_t>
+template <typename T, size_t N, typename SizeT = size_t>
 class SmallVector : public Detail::InlineVectorOps<SmallVector<T, N, SizeT>, T> {
     using Ops = Detail::InlineVectorOps<SmallVector<T, N, SizeT>, T>;
     friend Ops;
 
 public:
     SmallVector() noexcept = default;
-    explicit SmallVector(std::size_t n) {
+    explicit SmallVector(size_t n) {
         this->resize(n);
     }
-    SmallVector(std::size_t n, const T& v) {
+    SmallVector(size_t n, const T& v) {
         this->resize(n, v);
     }
     SmallVector(std::initializer_list<T> il) {
         this->assign(il.begin(), il.end());
     }
-    template <typename It, typename = typename std::iterator_traits<It>::iterator_category>
+    template <Detail::InputIterator It>
     SmallVector(It first, It last) {
         this->assign(first, last);
     }
     SmallVector(const SmallVector& o) {
         this->assign(o.begin(), o.end());
     }
-    SmallVector(SmallVector&& o) noexcept(std::is_nothrow_move_constructible_v<T>) {
+    SmallVector(SmallVector&& o) noexcept(__is_nothrow_constructible(T, T&&)) {
         TakeFrom(o);
     }
     SmallVector& operator=(const SmallVector& o) {
@@ -369,7 +450,7 @@ public:
         }
         return *this;
     }
-    SmallVector& operator=(SmallVector&& o) noexcept(std::is_nothrow_move_constructible_v<T>) {
+    SmallVector& operator=(SmallVector&& o) noexcept(__is_nothrow_constructible(T, T&&)) {
         if (this != &o) {
             this->clear();
             Release();
@@ -390,20 +471,20 @@ public:
 
 private:
     T* Inline() noexcept {
-        return std::launder(reinterpret_cast<T*>(storage));
+        return reinterpret_cast<T*>(storage);
     }
     T* Data() noexcept {
         return heap ? heap : Inline();
     }
     const T* Data() const noexcept {
-        return heap ? heap : std::launder(reinterpret_cast<const T*>(storage));
+        return heap ? heap : reinterpret_cast<const T*>(storage);
     }
-    std::size_t Capacity() const noexcept {
+    size_t Capacity() const noexcept {
         return heap ? heap_capacity : N;
     }
 
-    void Grow(std::size_t need) {
-        std::size_t cap = std::max<std::size_t>(Capacity() * 2, need);
+    void Grow(size_t need) {
+        size_t cap = Capacity() * 2 > need ? Capacity() * 2 : need;
         T* p = static_cast<T*>(::operator new(cap * sizeof(T), std::align_val_t{alignof(T)}));
         Ops::Relocate(Data(), count, p);
         Release();

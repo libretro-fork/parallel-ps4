@@ -4,6 +4,13 @@ What changed in the libretro core of this fork, newest first. Changes that come 
 
 ## Unreleased
 
+- No STL in the core's small vectors (`common/small_vector.h`), which most of the core's containers are.
+  - **What takes the STL's place:** moves are written as casts, and destroying, moving into raw storage, rotating (for insert) and comparing are short loops of the header's own. The reverse iterator is a pointer walked backwards, and what can be walked is said by a concept instead of `std::iterator_traits`.
+  - **Compiler checks:** whether an element can be copied byte for byte, and whether its move cannot throw, come from the compiler (`__is_trivially_copyable`, `__is_nothrow_constructible`, which GCC, Clang and MSVC have).
+  - **Still included, as language support:** `<initializer_list>` for brace lists and `<new>` for placement and aligned `new`.
+  - **Checked against `std::vector`:** 2,000 rounds of 60 random pushes, inserts (one and several), erases (one and ranges) and resizes of `std::string`s on a vector that moves to the heap past 4, then a move, a copy, a compare and a walk backwards, under AddressSanitizer and UndefinedBehaviorSanitizer: the same contents every step.
+  - **Unchanged:** what the vectors hold and do. `ajm_instance.h`, which had `<cstring>` through this header, includes it itself now.
+  - **Checks:** the Linux and Windows builds pass. Not run in a game yet.
 - No STL in a first set of `common` files: the error messages, the embedded resources, the singletons, the slab heap, quick exit, the clock's constants and a few small ones.
   - **`Common::GetLastErrorMsg`:** returns a C string in a buffer of the calling thread's, instead of a `std::string`. Its callers drop `.c_str()`.
   - **Embedded resources:** `GetEmbeddedResource` takes a C string and returns a pointer and a size; `ForEachEmbeddedResource` takes a C callback with a context, instead of a `std::function`. Their users (the overlays' fonts, the CPU patches' tables, the font library, the trophy sound and icons, the patch catalog) follow.

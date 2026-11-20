@@ -5,6 +5,7 @@
 
 #include <array>
 #include <cstdint>
+#include <cstring>
 
 #include "common/enum.h"
 #include "common/types.h"
