@@ -4,6 +4,7 @@ What changed in the libretro core of this fork, newest first. Changes that come 
 
 ## Unreleased
 
+- USB: `GetMaxPacketSize` on an emulated device (Skylanders, Infinity, Dimensions portals) copied the device descriptor through a null pointer, so it would crash. It now reads the descriptor into a local. GCC 16 found this on Windows: `-Werror=format` from the previous entry also makes GCC's `-Wnonnull` an error, which broke the MinGW build in `usb_backend.h`. Built with GCC at -O3 and with clang. Not seen in a game yet.
 - {fmt} is gone from the core (600 KB of headers and sources, `externals/fmt`). The log macros, the asserts and the core's string formatting now take printf formats, the libretro way. Each call site in `src` was rewritten from `{}` to its printf conversion, chosen from the argument's type.
   - **New pieces:**
     - `Common::StringFromFormat` (printf into a `std::string`).
