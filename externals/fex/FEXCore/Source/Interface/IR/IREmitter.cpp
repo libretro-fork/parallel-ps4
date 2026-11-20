@@ -80,7 +80,7 @@ RegClass IREmitter::WalkFindRegClass(Ref Node) {
     return Op->Class;
     break;
   }
-  default: LOGMAN_MSG_A_FMT("Unhandled op type: {} {} in argument class validation", ToUnderlying(IROp->Op), GetOpName(Node)); break;
+  default: LOGMAN_MSG_A_FMT("Unhandled op type: %u %.*s in argument class validation", ToUnderlying(IROp->Op), static_cast<int>((GetOpName(Node)).size()), (GetOpName(Node)).data()); break;
   }
   return RegClass::Invalid;
 }
@@ -183,8 +183,8 @@ IREmitter::IRPair<IROp_CodeBlock> IREmitter::CreateNewCodeBlockAfter(Ref insertA
 
 void IREmitter::SetCurrentCodeBlock(Ref Node) {
   CurrentCodeBlock = Node;
-  LOGMAN_THROW_A_FMT(Node->Op(DualListData.DataBegin())->Op == OP_CODEBLOCK, "Node wasn't codeblock. It was '{}'",
-                     IR::GetName(Node->Op(DualListData.DataBegin())->Op));
+  LOGMAN_THROW_A_FMT(Node->Op(DualListData.DataBegin())->Op == OP_CODEBLOCK, "Node wasn't codeblock. It was '%.*s'",
+                     static_cast<int>((IR::GetName(Node->Op(DualListData.DataBegin())->Op)).size()), (IR::GetName(Node->Op(DualListData.DataBegin())->Op)).data());
   SetWriteCursor(Node->Op(DualListData.DataBegin())->CW<IROp_CodeBlock>()->Begin.GetNode(DualListData.ListBegin()));
 
   // Constants are pooled only within a single block.

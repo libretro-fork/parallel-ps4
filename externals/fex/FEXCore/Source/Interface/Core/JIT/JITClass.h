@@ -113,7 +113,7 @@ private:
   ARMEmitter::Register GetReg(IR::PhysicalRegister Reg) const {
     const auto RegClass = Reg.AsRegClass();
 
-    LOGMAN_THROW_A_FMT(RegClass == IR::RegClass::GPRFixed || RegClass == IR::RegClass::GPR, "Unexpected Class: {}", Reg.Class);
+    LOGMAN_THROW_A_FMT(RegClass == IR::RegClass::GPRFixed || RegClass == IR::RegClass::GPR, "Unexpected Class: %u", Reg.Class);
 
     if (RegClass == IR::RegClass::GPRFixed) {
       return StaticRegisters[Reg.Reg];
@@ -138,7 +138,7 @@ private:
   ARMEmitter::VRegister GetVReg(IR::PhysicalRegister Reg) const {
     const auto RegClass = Reg.AsRegClass();
 
-    LOGMAN_THROW_A_FMT(RegClass == IR::RegClass::FPRFixed || RegClass == IR::RegClass::FPR, "Unexpected Class: {}", Reg.Class);
+    LOGMAN_THROW_A_FMT(RegClass == IR::RegClass::FPRFixed || RegClass == IR::RegClass::FPR, "Unexpected Class: %u", Reg.Class);
 
     if (RegClass == IR::RegClass::FPRFixed) {
       return StaticFPRegisters[Reg.Reg];

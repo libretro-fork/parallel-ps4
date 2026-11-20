@@ -32,7 +32,7 @@ public:
     const uint32_t ElementSize = 1U << SizeImm;
     const uint32_t MaxIndex = 128U / (ElementSize * 8);
 
-    LOGMAN_THROW_A_FMT(Index < MaxIndex, "Index too large. Index={}, Max Index: {}", Index, MaxIndex);
+    LOGMAN_THROW_A_FMT(Index < MaxIndex, "Index too large. Index=%u, Max Index: %u", Index, MaxIndex);
 
     const uint32_t imm5 = (Index << IndexShift) | ElementSize;
 
@@ -1221,7 +1221,7 @@ public:
   // Floating-point conditional select
   void fcsel(ScalarRegSize size, VRegister rd, VRegister rn, VRegister rm, Condition Cond) {
     LOGMAN_THROW_A_FMT(size == ScalarRegSize::i16Bit || size == ScalarRegSize::i64Bit || size == ScalarRegSize::i32Bit,
-                       "Invalid size selected for {}", __func__);
+                       "Invalid size selected for %s", __func__);
 
     const uint32_t ConvertedSize = size == ScalarRegSize::i64Bit ? 0b01 : size == ScalarRegSize::i32Bit ? 0b00 : 0b11;
 
@@ -1382,7 +1382,7 @@ private:
     LOGMAN_THROW_A_FMT(size != ScalarRegSize::i8Bit, "Scalar size must not be 8-bit");
 
     const auto invalid_bound = 16U >> FEXCore::ToUnderlying(size);
-    LOGMAN_THROW_A_FMT(index < invalid_bound, "Index ({}) must be within [0-{}]", index, invalid_bound - 1);
+    LOGMAN_THROW_A_FMT(index < invalid_bound, "Index (%u) must be within [0-%u]", index, invalid_bound - 1);
 
     uint32_t Instr = 0b0101'1111'0000'0000'0000'0000'0000'0000;
 
@@ -1400,7 +1400,7 @@ private:
     uint32_t H = 0;
     uint32_t LM = 0;
     if (size == ScalarRegSize::i16Bit) {
-      LOGMAN_THROW_A_FMT(rm <= VReg::v15, "rm ({}) must be within [v0-v15]", rm.Idx());
+      LOGMAN_THROW_A_FMT(rm <= VReg::v15, "rm (%u) must be within [v0-v15]", rm.Idx());
       H = (index >> 2) & 1;
       LM = index & 0b11;
     } else if (size == ScalarRegSize::i32Bit) {
@@ -1435,7 +1435,7 @@ private:
   }
   void Float1Source(ScalarRegSize size, uint32_t M, uint32_t S, uint32_t opcode, VRegister rd, VRegister rn) {
     LOGMAN_THROW_A_FMT(size == ScalarRegSize::i16Bit || size == ScalarRegSize::i64Bit || size == ScalarRegSize::i32Bit,
-                       "Invalid size selected for {}", __func__);
+                       "Invalid size selected for %s", __func__);
 
     const uint32_t ConvertedSize = size == ScalarRegSize::i64Bit ? 0b01 : size == ScalarRegSize::i32Bit ? 0b00 : 0b11;
 
@@ -1491,7 +1491,7 @@ private:
 
   void Float2Source(ScalarRegSize size, uint32_t M, uint32_t S, uint32_t opcode, VRegister rd, VRegister rn, VRegister rm) {
     LOGMAN_THROW_A_FMT(size == ScalarRegSize::i16Bit || size == ScalarRegSize::i64Bit || size == ScalarRegSize::i32Bit,
-                       "Invalid size selected for {}", __func__);
+                       "Invalid size selected for %s", __func__);
 
     const uint32_t ConvertedSize = size == ScalarRegSize::i64Bit ? 0b01 : size == ScalarRegSize::i32Bit ? 0b00 : 0b11;
 

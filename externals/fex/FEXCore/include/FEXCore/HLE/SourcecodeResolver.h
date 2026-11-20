@@ -28,12 +28,12 @@ struct SourcecodeSymbolMapping {
     if (Sym) {
       auto SymOffset = FileBegin - Sym->FileGuestBegin;
       if (SymOffset) {
-        return fextl::fmt::format("{}: {}+{} @{:x}", std::filesystem::path(GuestFilename).stem().string(), Sym->Name, SymOffset, HostEntry);
+        return fextl::fmt::format("%s: %s+%llu @%" PRIxPTR, (std::filesystem::path(GuestFilename).stem().string()).c_str(), (Sym->Name).c_str(), static_cast<unsigned long long>(SymOffset), HostEntry);
       } else {
-        return fextl::fmt::format("{}: {} @{:x}", std::filesystem::path(GuestFilename).stem().string(), Sym->Name, HostEntry);
+        return fextl::fmt::format("%s: %s @%" PRIxPTR, (std::filesystem::path(GuestFilename).stem().string()).c_str(), (Sym->Name).c_str(), HostEntry);
       }
     } else {
-      return fextl::fmt::format("{}: +{} @{:x}", std::filesystem::path(GuestFilename).stem().string(), FileBegin, HostEntry);
+      return fextl::fmt::format("%s: +%" PRIuPTR " @%" PRIxPTR, (std::filesystem::path(GuestFilename).stem().string()).c_str(), FileBegin, HostEntry);
     }
   }
 };

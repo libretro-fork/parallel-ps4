@@ -29,7 +29,7 @@ DEF_OP(LoadContext) {
     case IR::OpSize::i16Bit: ldrh(Dst, STATE, Op->Offset); break;
     case IR::OpSize::i32Bit: ldr(Dst.W(), STATE, Op->Offset); break;
     case IR::OpSize::i64Bit: ldr(Dst.X(), STATE, Op->Offset); break;
-    default: LOGMAN_MSG_A_FMT("Unhandled LoadContext size: {}", OpSize); break;
+    default: LOGMAN_MSG_A_FMT("Unhandled LoadContext size: %u", static_cast<unsigned char>(OpSize)); break;
     }
   } else {
     auto Dst = GetVReg(Node);
@@ -44,7 +44,7 @@ DEF_OP(LoadContext) {
       mov(TMP1, Op->Offset);
       ld1b<ARMEmitter::SubRegSize::i8Bit>(Dst.Z(), PRED_TMP_32B.Zeroing(), STATE, TMP1);
       break;
-    default: LOGMAN_MSG_A_FMT("Unhandled LoadContext size: {}", OpSize); break;
+    default: LOGMAN_MSG_A_FMT("Unhandled LoadContext size: %u", static_cast<unsigned char>(OpSize)); break;
     }
   }
 }
@@ -59,7 +59,7 @@ DEF_OP(LoadContextPair) {
     switch (IROp->Size) {
     case IR::OpSize::i32Bit: ldp<ARMEmitter::IndexType::OFFSET>(Dst1.W(), Dst2.W(), STATE, Op->Offset); break;
     case IR::OpSize::i64Bit: ldp<ARMEmitter::IndexType::OFFSET>(Dst1.X(), Dst2.X(), STATE, Op->Offset); break;
-    default: LOGMAN_MSG_A_FMT("Unhandled LoadMemPair size: {}", IROp->Size); break;
+    default: LOGMAN_MSG_A_FMT("Unhandled LoadMemPair size: %u", static_cast<unsigned char>(IROp->Size)); break;
     }
   } else {
     const auto Dst1 = GetVReg(Op->OutValue1);
@@ -69,7 +69,7 @@ DEF_OP(LoadContextPair) {
     case IR::OpSize::i32Bit: ldp<ARMEmitter::IndexType::OFFSET>(Dst1.S(), Dst2.S(), STATE, Op->Offset); break;
     case IR::OpSize::i64Bit: ldp<ARMEmitter::IndexType::OFFSET>(Dst1.D(), Dst2.D(), STATE, Op->Offset); break;
     case IR::OpSize::i128Bit: ldp<ARMEmitter::IndexType::OFFSET>(Dst1.Q(), Dst2.Q(), STATE, Op->Offset); break;
-    default: LOGMAN_MSG_A_FMT("Unhandled LoadMemPair size: {}", IROp->Size); break;
+    default: LOGMAN_MSG_A_FMT("Unhandled LoadMemPair size: %u", static_cast<unsigned char>(IROp->Size)); break;
     }
   }
 }
@@ -86,7 +86,7 @@ DEF_OP(StoreContext) {
     case IR::OpSize::i16Bit: strh(Src, STATE, Op->Offset); break;
     case IR::OpSize::i32Bit: str(Src.W(), STATE, Op->Offset); break;
     case IR::OpSize::i64Bit: str(Src.X(), STATE, Op->Offset); break;
-    default: LOGMAN_MSG_A_FMT("Unhandled StoreContext size: {}", OpSize); break;
+    default: LOGMAN_MSG_A_FMT("Unhandled StoreContext size: %u", static_cast<unsigned char>(OpSize)); break;
     }
   } else {
     const auto Src = GetVReg(Op->Value);
@@ -101,7 +101,7 @@ DEF_OP(StoreContext) {
       mov(TMP1, Op->Offset);
       st1b<ARMEmitter::SubRegSize::i8Bit>(Src.Z(), PRED_TMP_32B, STATE, TMP1);
       break;
-    default: LOGMAN_MSG_A_FMT("Unhandled StoreContext size: {}", OpSize); break;
+    default: LOGMAN_MSG_A_FMT("Unhandled StoreContext size: %u", static_cast<unsigned char>(OpSize)); break;
     }
   }
 }
@@ -117,7 +117,7 @@ DEF_OP(StoreContextPair) {
     switch (OpSize) {
     case IR::OpSize::i32Bit: stp<ARMEmitter::IndexType::OFFSET>(Src1.W(), Src2.W(), STATE, Op->Offset); break;
     case IR::OpSize::i64Bit: stp<ARMEmitter::IndexType::OFFSET>(Src1.X(), Src2.X(), STATE, Op->Offset); break;
-    default: LOGMAN_MSG_A_FMT("Unhandled StoreContext size: {}", OpSize); break;
+    default: LOGMAN_MSG_A_FMT("Unhandled StoreContext size: %u", static_cast<unsigned char>(OpSize)); break;
     }
   } else {
     const auto Src1 = GetVReg(Op->Value1);
@@ -127,7 +127,7 @@ DEF_OP(StoreContextPair) {
     case IR::OpSize::i32Bit: stp<ARMEmitter::IndexType::OFFSET>(Src1.S(), Src2.S(), STATE, Op->Offset); break;
     case IR::OpSize::i64Bit: stp<ARMEmitter::IndexType::OFFSET>(Src1.D(), Src2.D(), STATE, Op->Offset); break;
     case IR::OpSize::i128Bit: stp<ARMEmitter::IndexType::OFFSET>(Src1.Q(), Src2.Q(), STATE, Op->Offset); break;
-    default: LOGMAN_MSG_A_FMT("Unhandled StoreContextPair size: {}", OpSize); break;
+    default: LOGMAN_MSG_A_FMT("Unhandled StoreContextPair size: %u", static_cast<unsigned char>(OpSize)); break;
     }
   }
 }
@@ -153,7 +153,7 @@ DEF_OP(LoadRegister) {
       mov(host.Q(), guest.Q());
     }
   } else {
-    LOGMAN_THROW_A_FMT(false, "Unhandled Op->Class {}", Op->Class);
+    LOGMAN_THROW_A_FMT(false, "Unhandled Op->Class %u", static_cast<unsigned int>(Op->Class));
   }
 }
 
@@ -194,7 +194,7 @@ DEF_OP(StoreRegister) {
       mov(guest.Q(), host.Q());
     }
   } else {
-    LOGMAN_THROW_A_FMT(false, "Unhandled Op->Class {}", RegClass);
+    LOGMAN_THROW_A_FMT(false, "Unhandled Op->Class %u", static_cast<unsigned int>(RegClass));
   }
 }
 
@@ -239,12 +239,12 @@ DEF_OP(LoadContextIndexed) {
       case IR::OpSize::i16Bit: ldrh(Dst, TMP1, Op->BaseOffset); break;
       case IR::OpSize::i32Bit: ldr(Dst.W(), TMP1, Op->BaseOffset); break;
       case IR::OpSize::i64Bit: ldr(Dst.X(), TMP1, Op->BaseOffset); break;
-      default: LOGMAN_MSG_A_FMT("Unhandled LoadContextIndexed size: {}", OpSize); break;
+      default: LOGMAN_MSG_A_FMT("Unhandled LoadContextIndexed size: %u", static_cast<unsigned char>(OpSize)); break;
       }
       break;
     }
     case 16: LOGMAN_MSG_A_FMT("Invalid Class load of size 16"); break;
-    default: LOGMAN_MSG_A_FMT("Unhandled LoadContextIndexed stride: {}", Op->Stride); break;
+    default: LOGMAN_MSG_A_FMT("Unhandled LoadContextIndexed stride: %u", Op->Stride); break;
     }
   } else {
     switch (Op->Stride) {
@@ -274,11 +274,11 @@ DEF_OP(LoadContextIndexed) {
         mov(TMP2, Op->BaseOffset);
         ld1b<ARMEmitter::SubRegSize::i8Bit>(Dst.Z(), PRED_TMP_32B.Zeroing(), TMP1, TMP2);
         break;
-      default: LOGMAN_MSG_A_FMT("Unhandled LoadContextIndexed size: {}", OpSize); break;
+      default: LOGMAN_MSG_A_FMT("Unhandled LoadContextIndexed size: %u", static_cast<unsigned char>(OpSize)); break;
       }
       break;
     }
-    default: LOGMAN_MSG_A_FMT("Unhandled LoadContextIndexed stride: {}", Op->Stride); break;
+    default: LOGMAN_MSG_A_FMT("Unhandled LoadContextIndexed stride: %u", Op->Stride); break;
     }
   }
 }
@@ -304,12 +304,12 @@ DEF_OP(StoreContextIndexed) {
       case IR::OpSize::i16Bit: strh(Value, TMP1, Op->BaseOffset); break;
       case IR::OpSize::i32Bit: str(Value.W(), TMP1, Op->BaseOffset); break;
       case IR::OpSize::i64Bit: str(Value.X(), TMP1, Op->BaseOffset); break;
-      default: LOGMAN_MSG_A_FMT("Unhandled StoreContextIndexed size: {}", OpSize); break;
+      default: LOGMAN_MSG_A_FMT("Unhandled StoreContextIndexed size: %u", static_cast<unsigned char>(OpSize)); break;
       }
       break;
     }
     case 16: LOGMAN_MSG_A_FMT("Invalid Class store of size 16"); break;
-    default: LOGMAN_MSG_A_FMT("Unhandled StoreContextIndexed stride: {}", Op->Stride); break;
+    default: LOGMAN_MSG_A_FMT("Unhandled StoreContextIndexed stride: %u", Op->Stride); break;
     }
   } else {
     const auto Value = GetVReg(Op->Value);
@@ -340,11 +340,11 @@ DEF_OP(StoreContextIndexed) {
         mov(TMP2, Op->BaseOffset);
         st1b<ARMEmitter::SubRegSize::i8Bit>(Value.Z(), PRED_TMP_32B, TMP1, TMP2);
         break;
-      default: LOGMAN_MSG_A_FMT("Unhandled StoreContextIndexed size: {}", OpSize); break;
+      default: LOGMAN_MSG_A_FMT("Unhandled StoreContextIndexed size: %u", static_cast<unsigned char>(OpSize)); break;
       }
       break;
     }
-    default: LOGMAN_MSG_A_FMT("Unhandled StoreContextIndexed stride: {}", Op->Stride); break;
+    default: LOGMAN_MSG_A_FMT("Unhandled StoreContextIndexed stride: %u", Op->Stride); break;
     }
   }
 }
@@ -364,7 +364,7 @@ DEF_OP(FormContextAddress) {
     add(ARMEmitter::Size::i64Bit, Dst, STATE, Index, ARMEmitter::ShiftType::LSL, FEXCore::ilog2(Op->Stride));
     break;
   }
-  default: LOGMAN_MSG_A_FMT("Unhandled FormContextAddress stride: {}", Op->Stride); break;
+  default: LOGMAN_MSG_A_FMT("Unhandled FormContextAddress stride: %u", Op->Stride); break;
   }
 }
 
@@ -412,7 +412,7 @@ DEF_OP(SpillRegister) {
       }
       break;
     }
-    default: LOGMAN_MSG_A_FMT("Unhandled SpillRegister size: {}", OpSize); break;
+    default: LOGMAN_MSG_A_FMT("Unhandled SpillRegister size: %u", static_cast<unsigned char>(OpSize)); break;
     }
   } else if (Op->Class == FEXCore::IR::RegClass::FPR) {
     const auto Src = GetVReg(Op->Value);
@@ -450,10 +450,10 @@ DEF_OP(SpillRegister) {
       st1b<ARMEmitter::SubRegSize::i8Bit>(Src.Z(), PRED_TMP_32B, ARMEmitter::Reg::rsp, TMP3);
       break;
     }
-    default: LOGMAN_MSG_A_FMT("Unhandled SpillRegister size: {}", OpSize); break;
+    default: LOGMAN_MSG_A_FMT("Unhandled SpillRegister size: %u", static_cast<unsigned char>(OpSize)); break;
     }
   } else {
-    LOGMAN_MSG_A_FMT("Unhandled SpillRegister class: {}", Op->Class);
+    LOGMAN_MSG_A_FMT("Unhandled SpillRegister class: %u", static_cast<unsigned int>(Op->Class));
   }
 }
 
@@ -501,7 +501,7 @@ DEF_OP(FillRegister) {
       }
       break;
     }
-    default: LOGMAN_MSG_A_FMT("Unhandled FillRegister size: {}", OpSize); break;
+    default: LOGMAN_MSG_A_FMT("Unhandled FillRegister size: %u", static_cast<unsigned char>(OpSize)); break;
     }
   } else if (Op->Class == FEXCore::IR::RegClass::FPR) {
     const auto Dst = GetVReg(Node);
@@ -539,10 +539,10 @@ DEF_OP(FillRegister) {
       ld1b<ARMEmitter::SubRegSize::i8Bit>(Dst.Z(), PRED_TMP_32B.Zeroing(), ARMEmitter::Reg::rsp, TMP3);
       break;
     }
-    default: LOGMAN_MSG_A_FMT("Unhandled FillRegister size: {}", OpSize); break;
+    default: LOGMAN_MSG_A_FMT("Unhandled FillRegister size: %u", static_cast<unsigned char>(OpSize)); break;
     }
   } else {
-    LOGMAN_MSG_A_FMT("Unhandled FillRegister class: {}", Op->Class);
+    LOGMAN_MSG_A_FMT("Unhandled FillRegister class: %u", static_cast<unsigned int>(Op->Class));
   }
 }
 
@@ -590,7 +590,7 @@ ARMEmitter::ExtendedMemOperand Arm64JITCore::GenerateMemOperand(
     return ARMEmitter::ExtendedMemOperand(Base.X(), ARMEmitter::IndexType::OFFSET, 0);
   } else {
     if (OffsetScale != 1 && OffsetScale != IR::OpSizeToSize(AccessSize)) {
-      LOGMAN_MSG_A_FMT("Unhandled GenerateMemOperand OffsetScale: {}", OffsetScale);
+      LOGMAN_MSG_A_FMT("Unhandled GenerateMemOperand OffsetScale: %u", OffsetScale);
     }
     uint64_t Const;
     if (IsInlineConstant(Offset, &Const)) {
@@ -604,7 +604,7 @@ ARMEmitter::ExtendedMemOperand Arm64JITCore::GenerateMemOperand(
         return ARMEmitter::ExtendedMemOperand(Base.X(), RegOffset.X(), ARMEmitter::ExtendedType::UXTW, FEXCore::ilog2(OffsetScale));
       case IR::MemOffsetType::SXTW:
         return ARMEmitter::ExtendedMemOperand(Base.X(), RegOffset.X(), ARMEmitter::ExtendedType::SXTW, FEXCore::ilog2(OffsetScale));
-      default: LOGMAN_MSG_A_FMT("Unhandled GenerateMemOperand OffsetType: {}", OffsetType); break;
+      default: LOGMAN_MSG_A_FMT("Unhandled GenerateMemOperand OffsetType: %u", static_cast<unsigned char>(OffsetType)); break;
       }
     }
   }
@@ -619,7 +619,7 @@ ARMEmitter::Register Arm64JITCore::ApplyMemOperand(IR::OpSize AccessSize, ARMEmi
   }
 
   if (OffsetScale != 1 && OffsetScale != IR::OpSizeToSize(AccessSize)) {
-    LOGMAN_MSG_A_FMT("Unhandled OffsetScale: {}", OffsetScale);
+    LOGMAN_MSG_A_FMT("Unhandled OffsetScale: %u", OffsetScale);
   }
 
   uint64_t Const;
@@ -644,7 +644,7 @@ ARMEmitter::Register Arm64JITCore::ApplyMemOperand(IR::OpSize AccessSize, ARMEmi
       add(ARMEmitter::Size::i64Bit, Tmp, Base, RegOffset, ARMEmitter::ExtendedType::SXTW, FEXCore::ilog2(OffsetScale));
       break;
 
-    default: LOGMAN_MSG_A_FMT("Unhandled OffsetType: {}", OffsetType); break;
+    default: LOGMAN_MSG_A_FMT("Unhandled OffsetType: %u", static_cast<unsigned char>(OffsetType)); break;
     }
   }
   return Tmp;
@@ -716,7 +716,7 @@ DEF_OP(LoadMem) {
     case IR::OpSize::i16Bit: ldrh(Dst, MemSrc); break;
     case IR::OpSize::i32Bit: ldr(Dst.W(), MemSrc); break;
     case IR::OpSize::i64Bit: ldr(Dst.X(), MemSrc); break;
-    default: LOGMAN_MSG_A_FMT("Unhandled LoadMem size: {}", OpSize); break;
+    default: LOGMAN_MSG_A_FMT("Unhandled LoadMem size: %u", static_cast<unsigned char>(OpSize)); break;
     }
   } else {
     const auto Dst = GetVReg(Node);
@@ -728,12 +728,12 @@ DEF_OP(LoadMem) {
     case IR::OpSize::i64Bit: ldr(Dst.D(), MemSrc); break;
     case IR::OpSize::i128Bit: ldr(Dst.Q(), MemSrc); break;
     case IR::OpSize::i256Bit: {
-      LOGMAN_THROW_A_FMT(HostSupportsSVE256, "Need SVE256 support in order to use {} with 256-bit operation", __func__);
+      LOGMAN_THROW_A_FMT(HostSupportsSVE256, "Need SVE256 support in order to use %s with 256-bit operation", __func__);
       const auto Operand = GenerateSVEMemOperand(OpSize, MemReg, Op->Offset, Op->OffsetType, Op->OffsetScale);
       ld1b<ARMEmitter::SubRegSize::i8Bit>(Dst.Z(), PRED_TMP_32B.Zeroing(), Operand);
       break;
     }
-    default: LOGMAN_MSG_A_FMT("Unhandled LoadMem size: {}", OpSize); break;
+    default: LOGMAN_MSG_A_FMT("Unhandled LoadMem size: %u", static_cast<unsigned char>(OpSize)); break;
     }
   }
 }
@@ -749,7 +749,7 @@ DEF_OP(LoadMemPair) {
     switch (IROp->Size) {
     case IR::OpSize::i32Bit: ldp<ARMEmitter::IndexType::OFFSET>(Dst1.W(), Dst2.W(), Addr, Op->Offset); break;
     case IR::OpSize::i64Bit: ldp<ARMEmitter::IndexType::OFFSET>(Dst1.X(), Dst2.X(), Addr, Op->Offset); break;
-    default: LOGMAN_MSG_A_FMT("Unhandled LoadMemPair size: {}", IROp->Size); break;
+    default: LOGMAN_MSG_A_FMT("Unhandled LoadMemPair size: %u", static_cast<unsigned char>(IROp->Size)); break;
     }
   } else {
     const auto Dst1 = GetVReg(Op->OutValue1);
@@ -759,7 +759,7 @@ DEF_OP(LoadMemPair) {
     case IR::OpSize::i32Bit: ldp<ARMEmitter::IndexType::OFFSET>(Dst1.S(), Dst2.S(), Addr, Op->Offset); break;
     case IR::OpSize::i64Bit: ldp<ARMEmitter::IndexType::OFFSET>(Dst1.D(), Dst2.D(), Addr, Op->Offset); break;
     case IR::OpSize::i128Bit: ldp<ARMEmitter::IndexType::OFFSET>(Dst1.Q(), Dst2.Q(), Addr, Op->Offset); break;
-    default: LOGMAN_MSG_A_FMT("Unhandled LoadMemPair size: {}", IROp->Size); break;
+    default: LOGMAN_MSG_A_FMT("Unhandled LoadMemPair size: %u", static_cast<unsigned char>(IROp->Size)); break;
     }
   }
 }
@@ -793,7 +793,7 @@ DEF_OP(LoadMemTSO) {
       case IR::OpSize::i16Bit: ldapurh(Dst, MemReg, Offset); break;
       case IR::OpSize::i32Bit: ldapur(Dst.W(), MemReg, Offset); break;
       case IR::OpSize::i64Bit: ldapur(Dst.X(), MemReg, Offset); break;
-      default: LOGMAN_MSG_A_FMT("Unhandled LoadMemTSO size: {}", OpSize); break;
+      default: LOGMAN_MSG_A_FMT("Unhandled LoadMemTSO size: %u", static_cast<unsigned char>(OpSize)); break;
       }
       // Half-barrier once back-patched.
       nop();
@@ -808,7 +808,7 @@ DEF_OP(LoadMemTSO) {
       case IR::OpSize::i16Bit: ldaprh(Dst.W(), MemReg); break;
       case IR::OpSize::i32Bit: ldapr(Dst.W(), MemReg); break;
       case IR::OpSize::i64Bit: ldapr(Dst.X(), MemReg); break;
-      default: LOGMAN_MSG_A_FMT("Unhandled LoadMemTSO size: {}", OpSize); break;
+      default: LOGMAN_MSG_A_FMT("Unhandled LoadMemTSO size: %u", static_cast<unsigned char>(OpSize)); break;
       }
       // Half-barrier once back-patched.
       nop();
@@ -823,7 +823,7 @@ DEF_OP(LoadMemTSO) {
       case IR::OpSize::i16Bit: ldarh(Dst, MemReg); break;
       case IR::OpSize::i32Bit: ldar(Dst.W(), MemReg); break;
       case IR::OpSize::i64Bit: ldar(Dst.X(), MemReg); break;
-      default: LOGMAN_MSG_A_FMT("Unhandled LoadMemTSO size: {}", OpSize); break;
+      default: LOGMAN_MSG_A_FMT("Unhandled LoadMemTSO size: %u", static_cast<unsigned char>(OpSize)); break;
       }
       // Half-barrier once back-patched.
       nop();
@@ -838,12 +838,12 @@ DEF_OP(LoadMemTSO) {
     case IR::OpSize::i64Bit: ldr(Dst.D(), MemSrc); break;
     case IR::OpSize::i128Bit: ldr(Dst.Q(), MemSrc); break;
     case IR::OpSize::i256Bit: {
-      LOGMAN_THROW_A_FMT(HostSupportsSVE256, "Need SVE256 support in order to use {} with 256-bit operation", __func__);
+      LOGMAN_THROW_A_FMT(HostSupportsSVE256, "Need SVE256 support in order to use %s with 256-bit operation", __func__);
       const auto MemSrc = GenerateSVEMemOperand(OpSize, MemReg, Op->Offset, Op->OffsetType, Op->OffsetScale);
       ld1b<ARMEmitter::SubRegSize::i8Bit>(Dst.Z(), PRED_TMP_32B.Zeroing(), MemSrc);
       break;
     }
-    default: LOGMAN_MSG_A_FMT("Unhandled LoadMemTSO size: {}", OpSize); break;
+    default: LOGMAN_MSG_A_FMT("Unhandled LoadMemTSO size: %u", static_cast<unsigned char>(OpSize)); break;
     }
     if (CTX->IsVectorAtomicTSOEnabled()) {
       // Half-barrier.
@@ -858,7 +858,7 @@ DEF_OP(VLoadVectorMasked) {
   const auto OpSize = IROp->Size;
 
   const auto Is256Bit = OpSize == IR::OpSize::i256Bit;
-  LOGMAN_THROW_A_FMT(!Is256Bit || HostSupportsSVE256, "Need SVE256 support in order to use {} with 256-bit operation", __func__);
+  LOGMAN_THROW_A_FMT(!Is256Bit || HostSupportsSVE256, "Need SVE256 support in order to use %s with 256-bit operation", __func__);
   const auto SubRegSize = ConvertSubRegSize8(IROp);
 
   const auto CMPPredicate = ARMEmitter::PReg::p0;
@@ -900,7 +900,7 @@ DEF_OP(VLoadVectorMasked) {
       case IR::OpSize::i16Bit: umov<ARMEmitter::SubRegSize::i16Bit>(Dst, Vector, index); break;
       case IR::OpSize::i32Bit: umov<ARMEmitter::SubRegSize::i32Bit>(Dst, Vector, index); break;
       case IR::OpSize::i64Bit: umov<ARMEmitter::SubRegSize::i64Bit>(Dst, Vector, index); break;
-      default: LOGMAN_MSG_A_FMT("Unhandled ExtractElementSize: {}", ElementSize); break;
+      default: LOGMAN_MSG_A_FMT("Unhandled ExtractElementSize: %u", static_cast<unsigned char>(ElementSize)); break;
       }
     };
 
@@ -938,7 +938,7 @@ DEF_OP(VLoadVectorMasked) {
       case IR::OpSize::i32Bit: ld1<ARMEmitter::SubRegSize::i32Bit>(TempDst.Q(), i, TempMemReg); break;
       case IR::OpSize::i64Bit: ld1<ARMEmitter::SubRegSize::i64Bit>(TempDst.Q(), i, TempMemReg); break;
       case IR::OpSize::i128Bit: ldr(TempDst.Q(), TempMemReg, 0); break;
-      default: LOGMAN_MSG_A_FMT("Unhandled {} size: {}", __func__, IROp->ElementSize); return;
+      default: LOGMAN_MSG_A_FMT("Unhandled %s size: %u", __func__, static_cast<unsigned char>(IROp->ElementSize)); return;
       }
 
       (void)Bind(&Skip);
@@ -961,7 +961,7 @@ DEF_OP(VStoreVectorMasked) {
   const auto OpSize = IROp->Size;
 
   const auto Is256Bit = OpSize == IR::OpSize::i256Bit;
-  LOGMAN_THROW_A_FMT(!Is256Bit || HostSupportsSVE256, "Need SVE256 support in order to use {} with 256-bit operation", __func__);
+  LOGMAN_THROW_A_FMT(!Is256Bit || HostSupportsSVE256, "Need SVE256 support in order to use %s with 256-bit operation", __func__);
   const auto SubRegSize = ConvertSubRegSize8(IROp);
 
   const auto CMPPredicate = ARMEmitter::PReg::p0;
@@ -1002,7 +1002,7 @@ DEF_OP(VStoreVectorMasked) {
       case IR::OpSize::i16Bit: umov<ARMEmitter::SubRegSize::i16Bit>(Dst, Vector, index); break;
       case IR::OpSize::i32Bit: umov<ARMEmitter::SubRegSize::i32Bit>(Dst, Vector, index); break;
       case IR::OpSize::i64Bit: umov<ARMEmitter::SubRegSize::i64Bit>(Dst, Vector, index); break;
-      default: LOGMAN_MSG_A_FMT("Unhandled ExtractElementSize: {}", ElementSize); break;
+      default: LOGMAN_MSG_A_FMT("Unhandled ExtractElementSize: %u", static_cast<unsigned char>(ElementSize)); break;
       }
     };
 
@@ -1039,7 +1039,7 @@ DEF_OP(VStoreVectorMasked) {
       case IR::OpSize::i32Bit: st1<ARMEmitter::SubRegSize::i32Bit>(RegData.Q(), i, TempMemReg); break;
       case IR::OpSize::i64Bit: st1<ARMEmitter::SubRegSize::i64Bit>(RegData.Q(), i, TempMemReg); break;
       case IR::OpSize::i128Bit: str(RegData.Q(), TempMemReg, 0); break;
-      default: LOGMAN_MSG_A_FMT("Unhandled {} size: {}", __func__, IROp->ElementSize); return;
+      default: LOGMAN_MSG_A_FMT("Unhandled %s size: %u", __func__, static_cast<unsigned char>(IROp->ElementSize)); return;
       }
 
       (void)Bind(&Skip);
@@ -1067,7 +1067,7 @@ void Arm64JITCore::Emulate128BitGather(IR::OpSize Size, IR::OpSize ElementSize, 
     case IR::OpSize::i16Bit: smov<ARMEmitter::SubRegSize::i16Bit>(Dst.X(), Vector, index); break;
     case IR::OpSize::i32Bit: smov<ARMEmitter::SubRegSize::i32Bit>(Dst.X(), Vector, index); break;
     case IR::OpSize::i64Bit: umov<ARMEmitter::SubRegSize::i64Bit>(Dst.X(), Vector, index); break;
-    default: LOGMAN_MSG_A_FMT("Unhandled ExtractElementSize: {}", ElementSize); break;
+    default: LOGMAN_MSG_A_FMT("Unhandled ExtractElementSize: %u", static_cast<unsigned char>(ElementSize)); break;
     }
   };
 
@@ -1077,7 +1077,7 @@ void Arm64JITCore::Emulate128BitGather(IR::OpSize Size, IR::OpSize ElementSize, 
     case IR::OpSize::i16Bit: umov<ARMEmitter::SubRegSize::i16Bit>(Dst, Vector, index); break;
     case IR::OpSize::i32Bit: umov<ARMEmitter::SubRegSize::i32Bit>(Dst, Vector, index); break;
     case IR::OpSize::i64Bit: umov<ARMEmitter::SubRegSize::i64Bit>(Dst, Vector, index); break;
-    default: LOGMAN_MSG_A_FMT("Unhandled ExtractElementSize: {}", ElementSize); break;
+    default: LOGMAN_MSG_A_FMT("Unhandled ExtractElementSize: %u", static_cast<unsigned char>(ElementSize)); break;
     }
   };
 
@@ -1155,7 +1155,7 @@ void Arm64JITCore::Emulate128BitGather(IR::OpSize Size, IR::OpSize ElementSize, 
     case IR::OpSize::i32Bit: ld1<ARMEmitter::SubRegSize::i32Bit>(ResultReg.Q(), i, TempMemReg); break;
     case IR::OpSize::i64Bit: ld1<ARMEmitter::SubRegSize::i64Bit>(ResultReg.Q(), i, TempMemReg); break;
     case IR::OpSize::i128Bit: ldr(ResultReg.Q(), TempMemReg, 0); break;
-    default: LOGMAN_MSG_A_FMT("Unhandled {} size: {}", __func__, ElementSize); FEX_UNREACHABLE;
+    default: LOGMAN_MSG_A_FMT("Unhandled %s size: %u", __func__, static_cast<unsigned char>(ElementSize)); FEX_UNREACHABLE;
     }
 
     (void)Bind(&Skip);
@@ -1189,7 +1189,7 @@ DEF_OP(VLoadVectorGatherMasked) {
   ///  - AddrBase also doesn't need to exist
   ///     - If the instruction is using 64-bit vector indexing or 32-bit addresses where the top-bit isn't set then this is valid!
   const auto Is256Bit = OpSize == IR::OpSize::i256Bit;
-  LOGMAN_THROW_A_FMT(!Is256Bit || HostSupportsSVE256, "Need SVE256 support in order to use {} with 256-bit operation", __func__);
+  LOGMAN_THROW_A_FMT(!Is256Bit || HostSupportsSVE256, "Need SVE256 support in order to use %s with 256-bit operation", __func__);
 
   const auto Dst = GetVReg(Node);
   const auto IncomingDst = GetVReg(Op->Incoming);
@@ -1374,7 +1374,7 @@ DEF_OP(VLoadVectorElement) {
     case IR::OpSize::i32Bit: ld1<ARMEmitter::SubRegSize::i32Bit>(Dst.Q(), Op->Index, MemReg); break;
     case IR::OpSize::i64Bit: ld1<ARMEmitter::SubRegSize::i64Bit>(Dst.Q(), Op->Index, MemReg); break;
     case IR::OpSize::i128Bit: ldr(Dst.Q(), MemReg); break;
-    default: LOGMAN_MSG_A_FMT("Unhandled {} size: {}", __func__, ElementSize); return;
+    default: LOGMAN_MSG_A_FMT("Unhandled %s size: %u", __func__, static_cast<unsigned char>(ElementSize)); return;
     }
   }
 
@@ -1405,7 +1405,7 @@ DEF_OP(VStoreVectorElement) {
   }
 
   if (Is256Bit) {
-    LOGMAN_MSG_A_FMT("Unsupported 256-bit {}", __func__);
+    LOGMAN_MSG_A_FMT("Unsupported 256-bit %s", __func__);
   } else {
     switch (ElementSize) {
     case IR::OpSize::i8Bit: st1<ARMEmitter::SubRegSize::i8Bit>(Value.Q(), Op->Index, MemReg); break;
@@ -1413,7 +1413,7 @@ DEF_OP(VStoreVectorElement) {
     case IR::OpSize::i32Bit: st1<ARMEmitter::SubRegSize::i32Bit>(Value.Q(), Op->Index, MemReg); break;
     case IR::OpSize::i64Bit: st1<ARMEmitter::SubRegSize::i64Bit>(Value.Q(), Op->Index, MemReg); break;
     case IR::OpSize::i128Bit: str(Value.Q(), MemReg); break;
-    default: LOGMAN_MSG_A_FMT("Unhandled {} size: {}", __func__, ElementSize); return;
+    default: LOGMAN_MSG_A_FMT("Unhandled %s size: %u", __func__, static_cast<unsigned char>(ElementSize)); return;
     }
   }
 }
@@ -1423,7 +1423,7 @@ DEF_OP(VBroadcastFromMem) {
   const auto OpSize = IROp->Size;
 
   const auto Is256Bit = OpSize == IR::OpSize::i256Bit;
-  LOGMAN_THROW_A_FMT(!Is256Bit || HostSupportsSVE256, "Need SVE256 support in order to use {} with 256-bit operation", __func__);
+  LOGMAN_THROW_A_FMT(!Is256Bit || HostSupportsSVE256, "Need SVE256 support in order to use %s with 256-bit operation", __func__);
   const auto ElementSize = IROp->ElementSize;
 
   const auto Dst = GetVReg(Node);
@@ -1443,7 +1443,7 @@ DEF_OP(VBroadcastFromMem) {
     case IR::OpSize::i32Bit: ld1rw(ARMEmitter::SubRegSize::i32Bit, Dst.Z(), GoverningPredicate, MemReg); break;
     case IR::OpSize::i64Bit: ld1rd(Dst.Z(), GoverningPredicate, MemReg); break;
     case IR::OpSize::i128Bit: ld1rqb(Dst.Z(), GoverningPredicate, MemReg); break;
-    default: LOGMAN_MSG_A_FMT("Unhandled VBroadcastFromMem size: {}", ElementSize); return;
+    default: LOGMAN_MSG_A_FMT("Unhandled VBroadcastFromMem size: %u", static_cast<unsigned char>(ElementSize)); return;
     }
   } else {
     switch (ElementSize) {
@@ -1455,7 +1455,7 @@ DEF_OP(VBroadcastFromMem) {
       // Normal load, like ld1rqb with 128-bit regs.
       ldr(Dst.Q(), MemReg);
       break;
-    default: LOGMAN_MSG_A_FMT("Unhandled VBroadcastFromMem size: {}", ElementSize); return;
+    default: LOGMAN_MSG_A_FMT("Unhandled VBroadcastFromMem size: %u", static_cast<unsigned char>(ElementSize)); return;
     }
   }
 
@@ -1518,7 +1518,7 @@ DEF_OP(Push) {
       break;
     }
     default: {
-      LOGMAN_MSG_A_FMT("Unhandled {} size: {}", __func__, ValueSize);
+      LOGMAN_MSG_A_FMT("Unhandled %s size: %u", __func__, ValueSize);
       break;
     }
     }
@@ -1543,7 +1543,7 @@ DEF_OP(Push) {
       break;
     }
     default: {
-      LOGMAN_MSG_A_FMT("Unhandled {} size: {}", __func__, ValueSize);
+      LOGMAN_MSG_A_FMT("Unhandled %s size: %u", __func__, ValueSize);
       break;
     }
     }
@@ -1567,7 +1567,7 @@ DEF_OP(PushTwo) {
     break;
   }
   default: {
-    LOGMAN_MSG_A_FMT("Unhandled {} size: {}", __func__, ValueSize);
+    LOGMAN_MSG_A_FMT("Unhandled %s size: %u", __func__, ValueSize);
     break;
   }
   }
@@ -1599,7 +1599,7 @@ DEF_OP(Pop) {
     break;
   }
   default: {
-    LOGMAN_MSG_A_FMT("Unhandled {} size: {}", __func__, Op->Size);
+    LOGMAN_MSG_A_FMT("Unhandled %s size: %u", __func__, static_cast<unsigned char>(Op->Size));
     break;
   }
   }
@@ -1630,7 +1630,7 @@ DEF_OP(PopTwo) {
     break;
   }
   default: {
-    LOGMAN_MSG_A_FMT("Unhandled {} size: {}", __func__, Op->Size);
+    LOGMAN_MSG_A_FMT("Unhandled %s size: %u", __func__, static_cast<unsigned char>(Op->Size));
     break;
   }
   }
@@ -1650,7 +1650,7 @@ DEF_OP(StoreMem) {
     case IR::OpSize::i16Bit: strh(Src, MemSrc); break;
     case IR::OpSize::i32Bit: str(Src.W(), MemSrc); break;
     case IR::OpSize::i64Bit: str(Src.X(), MemSrc); break;
-    default: LOGMAN_MSG_A_FMT("Unhandled StoreMem size: {}", OpSize); break;
+    default: LOGMAN_MSG_A_FMT("Unhandled StoreMem size: %u", static_cast<unsigned char>(OpSize)); break;
     }
   } else {
     const auto Src = GetVReg(Op->Value);
@@ -1677,12 +1677,12 @@ DEF_OP(StoreMem) {
       break;
     }
     case IR::OpSize::i256Bit: {
-      LOGMAN_THROW_A_FMT(HostSupportsSVE256, "Need SVE256 support in order to use {} with 256-bit operation", __func__);
+      LOGMAN_THROW_A_FMT(HostSupportsSVE256, "Need SVE256 support in order to use %s with 256-bit operation", __func__);
       const auto MemSrc = GenerateSVEMemOperand(OpSize, MemReg, Op->Offset, Op->OffsetType, Op->OffsetScale);
       st1b<ARMEmitter::SubRegSize::i8Bit>(Src.Z(), PRED_TMP_32B, MemSrc);
       break;
     }
-    default: LOGMAN_MSG_A_FMT("Unhandled StoreMem size: {}", OpSize); break;
+    default: LOGMAN_MSG_A_FMT("Unhandled StoreMem size: %u", static_cast<unsigned char>(OpSize)); break;
     }
   }
 }
@@ -1714,7 +1714,7 @@ DEF_OP(StoreMemX87SVEOptPredicate) {
     st1d(RegData.Z(), Predicate, MemDst);
     break;
   }
-  default: LOGMAN_MSG_A_FMT("Unhandled {} element size: {}", __func__, IROp->ElementSize); break;
+  default: LOGMAN_MSG_A_FMT("Unhandled %s element size: %u", __func__, static_cast<unsigned char>(IROp->ElementSize)); break;
   }
 }
 
@@ -1745,7 +1745,7 @@ DEF_OP(LoadMemX87SVEOptPredicate) {
     ld1d(Dst.Z(), Predicate.Zeroing(), MemDst);
     break;
   }
-  default: LOGMAN_MSG_A_FMT("Unhandled {} element size: {}", __func__, IROp->ElementSize); break;
+  default: LOGMAN_MSG_A_FMT("Unhandled %s element size: %u", __func__, static_cast<unsigned char>(IROp->ElementSize)); break;
   }
 }
 
@@ -1760,7 +1760,7 @@ DEF_OP(StoreMemPair) {
     switch (OpSize) {
     case IR::OpSize::i32Bit: stp<ARMEmitter::IndexType::OFFSET>(Src1.W(), Src2.W(), Addr, Op->Offset); break;
     case IR::OpSize::i64Bit: stp<ARMEmitter::IndexType::OFFSET>(Src1.X(), Src2.X(), Addr, Op->Offset); break;
-    default: LOGMAN_MSG_A_FMT("Unhandled StoreMem size: {}", OpSize); break;
+    default: LOGMAN_MSG_A_FMT("Unhandled StoreMem size: %u", static_cast<unsigned char>(OpSize)); break;
     }
   } else {
     const auto Src1 = GetVReg(Op->Value1);
@@ -1770,7 +1770,7 @@ DEF_OP(StoreMemPair) {
     case IR::OpSize::i32Bit: stp<ARMEmitter::IndexType::OFFSET>(Src1.S(), Src2.S(), Addr, Op->Offset); break;
     case IR::OpSize::i64Bit: stp<ARMEmitter::IndexType::OFFSET>(Src1.D(), Src2.D(), Addr, Op->Offset); break;
     case IR::OpSize::i128Bit: stp<ARMEmitter::IndexType::OFFSET>(Src1.Q(), Src2.Q(), Addr, Op->Offset); break;
-    default: LOGMAN_MSG_A_FMT("Unhandled StoreMemPair size: {}", OpSize); break;
+    default: LOGMAN_MSG_A_FMT("Unhandled StoreMemPair size: %u", static_cast<unsigned char>(OpSize)); break;
     }
   }
 }
@@ -1805,7 +1805,7 @@ DEF_OP(StoreMemTSO) {
       case IR::OpSize::i16Bit: stlurh(Src, MemReg, Offset); break;
       case IR::OpSize::i32Bit: stlur(Src.W(), MemReg, Offset); break;
       case IR::OpSize::i64Bit: stlur(Src.X(), MemReg, Offset); break;
-      default: LOGMAN_MSG_A_FMT("Unhandled StoreMemTSO size: {}", OpSize); break;
+      default: LOGMAN_MSG_A_FMT("Unhandled StoreMemTSO size: %u", static_cast<unsigned char>(OpSize)); break;
       }
     }
   } else if (Op->Class == IR::RegClass::GPR) {
@@ -1821,7 +1821,7 @@ DEF_OP(StoreMemTSO) {
       case IR::OpSize::i16Bit: stlrh(Src, MemReg); break;
       case IR::OpSize::i32Bit: stlr(Src.W(), MemReg); break;
       case IR::OpSize::i64Bit: stlr(Src.X(), MemReg); break;
-      default: LOGMAN_MSG_A_FMT("Unhandled StoreMemTSO size: {}", OpSize); break;
+      default: LOGMAN_MSG_A_FMT("Unhandled StoreMemTSO size: %u", static_cast<unsigned char>(OpSize)); break;
       }
     }
   } else {
@@ -1838,12 +1838,12 @@ DEF_OP(StoreMemTSO) {
     case IR::OpSize::i64Bit: str(Src.D(), MemSrc); break;
     case IR::OpSize::i128Bit: str(Src.Q(), MemSrc); break;
     case IR::OpSize::i256Bit: {
-      LOGMAN_THROW_A_FMT(HostSupportsSVE256, "Need SVE256 support in order to use {} with 256-bit operation", __func__);
+      LOGMAN_THROW_A_FMT(HostSupportsSVE256, "Need SVE256 support in order to use %s with 256-bit operation", __func__);
       const auto Operand = GenerateSVEMemOperand(OpSize, MemReg, Op->Offset, Op->OffsetType, Op->OffsetScale);
       st1b<ARMEmitter::SubRegSize::i8Bit>(Src.Z(), PRED_TMP_32B, Operand);
       break;
     }
-    default: LOGMAN_MSG_A_FMT("Unhandled StoreMemTSO size: {}", OpSize); break;
+    default: LOGMAN_MSG_A_FMT("Unhandled StoreMemTSO size: %u", static_cast<unsigned char>(OpSize)); break;
     }
   }
 }
@@ -1894,7 +1894,7 @@ DEF_OP(MemSet) {
     case 2: strh<ARMEmitter::IndexType::POST>(Value.W(), TMP2, Size); break;
     case 4: str<ARMEmitter::IndexType::POST>(Value.W(), TMP2, Size); break;
     case 8: str<ARMEmitter::IndexType::POST>(Value.X(), TMP2, Size); break;
-    default: LOGMAN_MSG_A_FMT("Unhandled {} size: {}", __func__, Size); break;
+    default: LOGMAN_MSG_A_FMT("Unhandled %s size: %d", __func__, Size); break;
     }
   };
 
@@ -1908,7 +1908,7 @@ DEF_OP(MemSet) {
       case 2: stlrh(Value.W(), TMP2); break;
       case 4: stlr(Value.W(), TMP2); break;
       case 8: stlr(Value.X(), TMP2); break;
-      default: LOGMAN_MSG_A_FMT("Unhandled {} size: {}", __func__, Size); break;
+      default: LOGMAN_MSG_A_FMT("Unhandled %s size: %d", __func__, Size); break;
       }
     }
 
@@ -1938,7 +1938,7 @@ DEF_OP(MemSet) {
         case 2:
         case 4:
         case 8: sub(Dst.X(), MemReg.X(), Length.X(), ARMEmitter::ShiftType::LSL, FEXCore::ilog2(Size)); break;
-        default: LOGMAN_MSG_A_FMT("Unhandled MemSet size: {}", Size); break;
+        default: LOGMAN_MSG_A_FMT("Unhandled MemSet size: %u", Size); break;
         }
       } else {
         switch (Size) {
@@ -1946,7 +1946,7 @@ DEF_OP(MemSet) {
         case 2:
         case 4:
         case 8: add(Dst.X(), MemReg.X(), Length.X(), ARMEmitter::ShiftType::LSL, FEXCore::ilog2(Size)); break;
-        default: LOGMAN_MSG_A_FMT("Unhandled MemSet size: {}", Size); break;
+        default: LOGMAN_MSG_A_FMT("Unhandled MemSet size: %u", Size); break;
         }
       }
     };
@@ -2149,7 +2149,7 @@ DEF_OP(MemCpy) {
       ldp<ARMEmitter::IndexType::POST>(VTMP1.Q(), VTMP2.Q(), TMP3, Size);
       stp<ARMEmitter::IndexType::POST>(VTMP1.Q(), VTMP2.Q(), TMP2, Size);
       break;
-    default: LOGMAN_MSG_A_FMT("Unhandled {} size: {}", __func__, Size); break;
+    default: LOGMAN_MSG_A_FMT("Unhandled %s size: %d", __func__, Size); break;
     }
   };
 
@@ -2164,7 +2164,7 @@ DEF_OP(MemCpy) {
         case 2: ldaprh(TMP4.W(), TMP3); break;
         case 4: ldapr(TMP4.W(), TMP3); break;
         case 8: ldapr(TMP4, TMP3); break;
-        default: LOGMAN_MSG_A_FMT("Unhandled {} size: {}", __func__, Size); break;
+        default: LOGMAN_MSG_A_FMT("Unhandled %s size: %d", __func__, Size); break;
         }
 
         // Placeholders for backpatching barriers (one per load/store)
@@ -2175,7 +2175,7 @@ DEF_OP(MemCpy) {
         case 2: stlrh(TMP4.W(), TMP2); break;
         case 4: stlr(TMP4.W(), TMP2); break;
         case 8: stlr(TMP4, TMP2); break;
-        default: LOGMAN_MSG_A_FMT("Unhandled {} size: {}", __func__, Size); break;
+        default: LOGMAN_MSG_A_FMT("Unhandled %s size: %d", __func__, Size); break;
         }
       }
     } else {
@@ -2188,7 +2188,7 @@ DEF_OP(MemCpy) {
         case 2: ldarh(TMP4.W(), TMP3); break;
         case 4: ldar(TMP4.W(), TMP3); break;
         case 8: ldar(TMP4, TMP3); break;
-        default: LOGMAN_MSG_A_FMT("Unhandled {} size: {}", __func__, Size); break;
+        default: LOGMAN_MSG_A_FMT("Unhandled %s size: %d", __func__, Size); break;
         }
 
         // Placeholders for backpatching barriers (one per load/store)
@@ -2199,7 +2199,7 @@ DEF_OP(MemCpy) {
         case 2: stlrh(TMP4.W(), TMP2); break;
         case 4: stlr(TMP4.W(), TMP2); break;
         case 8: stlr(TMP4, TMP2); break;
-        default: LOGMAN_MSG_A_FMT("Unhandled {} size: {}", __func__, Size); break;
+        default: LOGMAN_MSG_A_FMT("Unhandled %s size: %d", __func__, Size); break;
         }
       }
     }
@@ -2230,7 +2230,7 @@ DEF_OP(MemCpy) {
           sub(Dst0.X(), TMP1, TMP3, ARMEmitter::ShiftType::LSL, FEXCore::ilog2(Size));
           sub(Dst1.X(), TMP2, TMP3, ARMEmitter::ShiftType::LSL, FEXCore::ilog2(Size));
           break;
-        default: LOGMAN_MSG_A_FMT("Unhandled MemCpy size: {}", Size); break;
+        default: LOGMAN_MSG_A_FMT("Unhandled MemCpy size: %u", Size); break;
         }
       } else {
         switch (Size) {
@@ -2244,7 +2244,7 @@ DEF_OP(MemCpy) {
           add(Dst0.X(), TMP1, TMP3, ARMEmitter::ShiftType::LSL, FEXCore::ilog2(Size));
           add(Dst1.X(), TMP2, TMP3, ARMEmitter::ShiftType::LSL, FEXCore::ilog2(Size));
           break;
-        default: LOGMAN_MSG_A_FMT("Unhandled MemCpy size: {}", Size); break;
+        default: LOGMAN_MSG_A_FMT("Unhandled MemCpy size: %u", Size); break;
         }
       }
     };
@@ -2506,7 +2506,7 @@ DEF_OP(VStoreNonTemporal) {
   const auto OpSize = IROp->Size;
 
   const auto Is256Bit = OpSize == IR::OpSize::i256Bit;
-  LOGMAN_THROW_A_FMT(!Is256Bit || HostSupportsSVE256, "Need SVE256 support in order to use {} with 256-bit operation", __func__);
+  LOGMAN_THROW_A_FMT(!Is256Bit || HostSupportsSVE256, "Need SVE256 support in order to use %s with 256-bit operation", __func__);
   const auto Is128Bit = OpSize == IR::OpSize::i128Bit;
 
   const auto Value = GetVReg(Op->Value);
@@ -2548,7 +2548,7 @@ DEF_OP(VLoadNonTemporal) {
   const auto OpSize = IROp->Size;
 
   const auto Is256Bit = OpSize == IR::OpSize::i256Bit;
-  LOGMAN_THROW_A_FMT(!Is256Bit || HostSupportsSVE256, "Need SVE256 support in order to use {} with 256-bit operation", __func__);
+  LOGMAN_THROW_A_FMT(!Is256Bit || HostSupportsSVE256, "Need SVE256 support in order to use %s with 256-bit operation", __func__);
   const auto Is128Bit = OpSize == IR::OpSize::i128Bit;
 
   const auto Dst = GetVReg(Node);

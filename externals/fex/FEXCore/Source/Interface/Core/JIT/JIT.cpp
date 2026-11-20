@@ -65,15 +65,15 @@ LDIV(uint64_t SrcHigh, uint64_t SrcLow, int64_t Divisor) {
 
 static void
 PrintValue(uint64_t Value) {
-  LogMan::Msg::DFmt("Value: 0x{:x}", Value);
+  LogMan::Msg::DFmt("Value: 0x%llx", static_cast<unsigned long long>(Value));
 }
 
 static void PrintMsg(const char* Value) {
-  LogMan::Msg::DFmt("{}", Value);
+  LogMan::Msg::DFmt("%s", Value);
 }
 
 static void PrintVectorValue(uint64_t Value, uint64_t ValueUpper) {
-  LogMan::Msg::DFmt("Value: 0x{:016x}'{:016x}", ValueUpper, Value);
+  LogMan::Msg::DFmt("Value: 0x%016llx'%016llx", static_cast<unsigned long long>(ValueUpper), static_cast<unsigned long long>(Value));
 }
 } // namespace
 
@@ -83,7 +83,7 @@ void Arm64JITCore::Op_Unhandled(const IR::IROp_Header* IROp, IR::Ref Node) {
   FallbackInfo Info;
   if (!InterpreterOps::GetFallbackHandler(IROp, &Info)) {
 #if defined(ASSERTIONS_ENABLED) && ASSERTIONS_ENABLED
-    LOGMAN_MSG_A_FMT("Unhandled IR Op: {}", FEXCore::IR::GetName(IROp->Op));
+    LOGMAN_MSG_A_FMT("Unhandled IR Op: %.*s", static_cast<int>((FEXCore::IR::GetName(IROp->Op)).size()), (FEXCore::IR::GetName(IROp->Op)).data());
 #endif
   } else {
     auto FillF80x2Result = [&](auto DstLo, auto DstHi) {
@@ -490,7 +490,7 @@ void Arm64JITCore::Op_Unhandled(const IR::IROp_Header* IROp, IR::Ref Node) {
     case FABI_UNKNOWN:
     default:
 #if defined(ASSERTIONS_ENABLED) && ASSERTIONS_ENABLED
-      LOGMAN_MSG_A_FMT("Unhandled IR Fallback ABI: {} {}", FEXCore::IR::GetName(IROp->Op), ToUnderlying(Info.ABI));
+      LOGMAN_MSG_A_FMT("Unhandled IR Fallback ABI: %.*s %u", static_cast<int>((FEXCore::IR::GetName(IROp->Op)).size()), (FEXCore::IR::GetName(IROp->Op)).data(), ToUnderlying(Info.ABI));
 #endif
       break;
     }
@@ -1133,10 +1133,10 @@ CPUBackend::CompiledCode Arm64JITCore::CompileCode(uint64_t Entry, uint64_t Size
     auto HeaderOp = IR->GetHeader();
     LOGMAN_THROW_A_FMT(HeaderOp->Header.Op == IR::OP_IRHEADER, "First op wasn't IRHeader");
 
-    LogMan::Msg::IFmt("RIP: 0x{:x}", Entry);
-    LogMan::Msg::IFmt("Guest Code instructions: {}", HeaderOp->NumHostInstructions);
-    LogMan::Msg::IFmt("Host Code instructions: {}", CodeOnlySize >> 2);
-    LogMan::Msg::IFmt("Blow-up Amt: {}x", double(CodeOnlySize >> 2) / double(HeaderOp->NumHostInstructions));
+    LogMan::Msg::IFmt("RIP: 0x%llx", static_cast<unsigned long long>(Entry));
+    LogMan::Msg::IFmt("Guest Code instructions: %u", HeaderOp->NumHostInstructions);
+    LogMan::Msg::IFmt("Host Code instructions: %llu", static_cast<unsigned long long>(CodeOnlySize >> 2));
+    LogMan::Msg::IFmt("Blow-up Amt: %gx", double(CodeOnlySize >> 2) / double(HeaderOp->NumHostInstructions));
   }
 
   if (Disassemble() & FEXCore::Config::Disassemble::BLOCKS) {
@@ -1146,7 +1146,7 @@ CPUBackend::CompiledCode Arm64JITCore::CompileCode(uint64_t Entry, uint64_t Size
     for (auto PCToDecode = DisasmBegin; PCToDecode < DisasmEnd; PCToDecode += 4) {
       DisasmDecoder->Decode(PCToDecode);
       auto Output = Disasm->GetOutput();
-      LogMan::Msg::IFmt("{}", Output);
+      LogMan::Msg::IFmt("%s", Output);
     }
     LogMan::Msg::IFmt("Disassemble End");
   }

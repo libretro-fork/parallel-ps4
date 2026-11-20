@@ -3,10 +3,16 @@
 
 #include <FEXCore/Utils/CompilerDefs.h>
 
+#include <cinttypes>
 #include <cstdarg>
+#include <cstdint>
 
-#include <fmt/format.h>
-#include <fmt/color.h>
+// printf formats, checked by the compiler
+#if defined(__GNUC__) || defined(__clang__)
+#define FEX_PRINTF(fmt, first) __attribute__((format(printf, fmt, first)))
+#else
+#define FEX_PRINTF(fmt, first)
+#endif
 
 namespace LogMan {
 enum DebugLevels : uint32_t {
@@ -28,20 +34,9 @@ static inline const char* DebugLevelStr(uint32_t Level) {
   }
 }
 
-static inline fmt::text_style DebugLevelStyle(uint32_t Level) {
-  switch (Level) {
-  case LogMan::ASSERT: return fmt::bg(fmt::color::red) | fmt::emphasis::bold | fmt::fg(fmt::color::white);
-  case LogMan::ERROR: return fmt::fg(fmt::color::red);
-  case LogMan::DEBUG: return fmt::fg(fmt::color::gray);
-  case LogMan::INFO: return fmt::fg(fmt::color::green);
-  default: return {}; break;
-  }
-}
-
 constexpr DebugLevels MSG_LEVEL = INFO;
 
-// Note that all logging functions with the Fmt or _FMT suffix on them expect
-// format strings as used by fmtlib (or C++ std::format).
+// All logging functions with the Fmt or _FMT suffix on them take printf formats.
 
 namespace Throw {
   using ThrowHandler = void (*)(const char* Message);
@@ -49,22 +44,27 @@ namespace Throw {
   FEX_DEFAULT_VISIBILITY void UnInstallHandler();
 
   [[noreturn]]
-  void MFmt(const char* fmt, const fmt::format_args& args);
+  void MFmt(const char* fmt, ...) FEX_PRINTF(1, 2);
 
 #if defined(ASSERTIONS_ENABLED) && ASSERTIONS_ENABLED
-  template<typename... Args>
-  static inline void AFmt(bool Value, const char* fmt, const Args&... args) {
+  [[noreturn]]
+  void VMFmt(const char* fmt, va_list args);
+
+  static inline void AFmt(bool Value, const char* fmt, ...) FEX_PRINTF(2, 3);
+  static inline void AFmt(bool Value, const char* fmt, ...) {
     if (MSG_LEVEL < ASSERT || Value) {
       return;
     }
-    MFmt(fmt, fmt::make_format_args(args...));
+    va_list args;
+    va_start(args, fmt);
+    VMFmt(fmt, args);
   }
 
-#define LOGMAN_THROW_A_FMT(pred, format, ...)                                                                             \
-  do {                                                                                                                    \
-    if (!(pred)) {                                                                                                        \
-      LogMan::Throw::AFmt(false, "{}:{}, {}: " format, __FILE_NAME__, __LINE__, __FUNCTION__ __VA_OPT__(, ) __VA_ARGS__); \
-    }                                                                                                                     \
+#define LOGMAN_THROW_A_FMT(pred, format, ...)                                                                           \
+  do {                                                                                                                  \
+    if (!(pred)) {                                                                                                      \
+      LogMan::Throw::MFmt("%s:%d, %s: " format, __FILE_NAME__, __LINE__, __FUNCTION__ __VA_OPT__(, ) __VA_ARGS__); \
+    }                                                                                                                   \
   } while (0)
 #else
   static inline void AFmt(bool, const char*, ...) {}
@@ -81,46 +81,41 @@ namespace Msg {
   FEX_DEFAULT_VISIBILITY void InstallHandler(MsgHandler Handler);
   FEX_DEFAULT_VISIBILITY void UnInstallHandler();
 
-  // Fmt-capable interface.
+  FEX_DEFAULT_VISIBILITY void MFmtImpl(DebugLevels level, const char* fmt, va_list args);
 
-  FEX_DEFAULT_VISIBILITY void MFmtImpl(DebugLevels level, const char* fmt, const fmt::format_args& args);
-
-  template<typename... Args>
-  static inline void MFmt(DebugLevels level, const char* fmt, const Args&... args) {
-    MFmtImpl(level, fmt, fmt::make_format_args(args...));
+  static inline void MFmt(DebugLevels level, const char* fmt, ...) FEX_PRINTF(2, 3);
+  static inline void MFmt(DebugLevels level, const char* fmt, ...) {
+    va_list args;
+    va_start(args, fmt);
+    MFmtImpl(level, fmt, args);
+    va_end(args);
   }
 
-  template<typename... Args>
-  static inline void EFmt(const char* fmt, const Args&... args) {
-    if (MSG_LEVEL < ERROR) {
-      return;
-    }
-    MFmtImpl(ERROR, fmt, fmt::make_format_args(args...));
+#define FEX_LOGMAN_LEVEL_FMT(Name, Level)                                    \
+  static inline void Name(const char* fmt, ...) FEX_PRINTF(1, 2);           \
+  static inline void Name(const char* fmt, ...) {                           \
+    if (MSG_LEVEL < Level) {                                                \
+      return;                                                               \
+    }                                                                       \
+    va_list args;                                                           \
+    va_start(args, fmt);                                                    \
+    MFmtImpl(Level, fmt, args);                                             \
+    va_end(args);                                                           \
   }
-
-  template<typename... Args>
-  static inline void DFmt(const char* fmt, const Args&... args) {
-    if (MSG_LEVEL < DEBUG) {
-      return;
-    }
-    MFmtImpl(DEBUG, fmt, fmt::make_format_args(args...));
-  }
-
-  template<typename... Args>
-  static inline void IFmt(const char* fmt, const Args&... args) {
-    if (MSG_LEVEL < INFO) {
-      return;
-    }
-    MFmtImpl(INFO, fmt, fmt::make_format_args(args...));
-  }
+  FEX_LOGMAN_LEVEL_FMT(EFmt, ERROR)
+  FEX_LOGMAN_LEVEL_FMT(DFmt, DEBUG)
+  FEX_LOGMAN_LEVEL_FMT(IFmt, INFO)
 
 #if defined(ASSERTIONS_ENABLED) && ASSERTIONS_ENABLED
-  template<typename... Args>
-  static inline void AFmt(const char* fmt, const Args&... args) {
+  static inline void AFmt(const char* fmt, ...) FEX_PRINTF(1, 2);
+  static inline void AFmt(const char* fmt, ...) {
     if (MSG_LEVEL < ASSERT) {
       return;
     }
-    MFmtImpl(ASSERT, fmt, fmt::make_format_args(args...));
+    va_list args;
+    va_start(args, fmt);
+    MFmtImpl(ASSERT, fmt, args);
+    va_end(args);
     FEX_TRAP_EXECUTION;
   }
 #define LOGMAN_MSG_A_FMT(...)       \
@@ -128,12 +123,12 @@ namespace Msg {
     LogMan::Msg::AFmt(__VA_ARGS__); \
   } while (0)
 #else
-  template<typename... Args>
-  static inline void AFmt(const char*, const Args&...) {}
+  static inline void AFmt(const char*, ...) {}
 #define LOGMAN_MSG_A_FMT(...) \
   do {                        \
   } while (0)
 #endif
+#undef FEX_LOGMAN_LEVEL_FMT
 
 #define WARN_ONCE_FMT(...)            \
   do {                                \

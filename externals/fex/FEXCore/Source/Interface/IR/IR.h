@@ -677,14 +677,6 @@ bool IsBlockExit(FEXCore::IR::IROps Op);
 
 void Dump(fextl::stringstream* out, const IRListView* IR);
 
-constexpr auto format_as(FEXCore::IR::NodeID ID) {
-  return ID.Value;
-}
-
-FEX_DEFINE_ENUM_FMT_PASSTHROUGH(FEXCore::IR::FenceType)
-FEX_DEFINE_ENUM_FMT_PASSTHROUGH(FEXCore::IR::MemOffsetType)
-FEX_DEFINE_ENUM_FMT_PASSTHROUGH(FEXCore::IR::OpSize)
-FEX_DEFINE_ENUM_FMT_PASSTHROUGH(FEXCore::IR::RegClass)
 } // namespace FEXCore::IR
 
 template<>

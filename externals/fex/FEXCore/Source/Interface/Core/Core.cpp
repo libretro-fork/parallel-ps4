@@ -507,7 +507,7 @@ static void IRDumper(FEXCore::Core::InternalThreadState* Thread, IR::IREmitter* 
   fextl::stringstream out;
   auto NewIR = IREmitter->ViewIR();
   FEXCore::IR::Dump(&out, &NewIR);
-  fextl::fmt::print(FD, "IR-ShouldDump-{} 0x{:x}:\n{}\n@@@@@\n", NewIR.PostRA() ? "post" : "pre", GuestRIP, out.str());
+  fextl::fmt::print(FD, "IR-ShouldDump-%s 0x%" PRIx64 ":\n%s\n@@@@@\n", NewIR.PostRA() ? "post" : "pre", GuestRIP, (out.str()).c_str());
 };
 
 bool ContextImpl::CheckIfBlockIsCacheable(FEXCore::Core::InternalThreadState& Thread, uint64_t GuestRIP, uint64_t MaxInst) {
@@ -558,7 +558,7 @@ ContextImpl::GenerateIR(FEXCore::Core::InternalThreadState* Thread, uint64_t Gue
     if (FEXCore::Config::Get_X86DISASSEMBLE()) {
       const uint64_t DecodedMin = Thread->FrontendDecoder->DecodedMinAddress;
       const uint64_t DecodedMax = Thread->FrontendDecoder->DecodedMaxAddress;
-      LogMan::Msg::IFmt("Guest x86 Begin (RIP={:#x}, {:#x}-{:#x})", GuestRIP, DecodedMin, DecodedMax);
+      LogMan::Msg::IFmt("Guest x86 Begin (RIP=0x%llx, 0x%" PRIx64 "-0x%" PRIx64 ")", static_cast<unsigned long long>(GuestRIP), DecodedMin, DecodedMax);
     }
 #endif
 
@@ -567,7 +567,7 @@ ContextImpl::GenerateIR(FEXCore::Core::InternalThreadState* Thread, uint64_t Gue
 
 #ifdef ZYDIS_DISASSEMBLER
       if (FEXCore::Config::Get_X86DISASSEMBLE() && CodeBlocks->size() > 1) {
-        LogMan::Msg::IFmt("  Block {} Entry={:#x} NumInsts={}", j, Block.Entry, Block.NumInstructions);
+        LogMan::Msg::IFmt("  Block %zu Entry=0x%llx NumInsts=%llu", j, static_cast<unsigned long long>(Block.Entry), static_cast<unsigned long long>(Block.NumInstructions));
       }
 #endif
 
@@ -608,9 +608,9 @@ ContextImpl::GenerateIR(FEXCore::Core::InternalThreadState* Thread, uint64_t Gue
           const uint8_t* InstBytes = reinterpret_cast<const uint8_t*>(InstAddress);
           ZydisDisassembledInstruction ZydisInst;
           if (ZYAN_SUCCESS(ZydisDisassembleIntel(ZydisMachineMode, InstAddress, InstBytes, DecodedInfo->InstSize, &ZydisInst))) {
-            LogMan::Msg::IFmt("    {:#x}: {}", InstAddress, ZydisInst.text);
+            LogMan::Msg::IFmt("    0x%" PRIx64 ": %s", InstAddress, ZydisInst.text);
           } else {
-            LogMan::Msg::IFmt("    {:#x}: (decode failed, {} bytes)", InstAddress, DecodedInfo->InstSize);
+            LogMan::Msg::IFmt("    0x%" PRIx64 ": (decode failed, %llu bytes)", InstAddress, static_cast<unsigned long long>(DecodedInfo->InstSize));
           }
         }
 #endif
@@ -682,7 +682,7 @@ ContextImpl::GenerateIR(FEXCore::Core::InternalThreadState* Thread, uint64_t Gue
           } else {
             if (Thread->OpDispatcher->HasHandledLock() != IsLocked) {
               HadDispatchError = true;
-              LogMan::Msg::EFmt("Missing LOCK HANDLER at 0x{:x}{{'{}'}}", InstAddress, TableInfo->Name ?: "UND");
+              LogMan::Msg::EFmt("Missing LOCK HANDLER at 0x%llx{'%s'}", static_cast<unsigned long long>(InstAddress), TableInfo->Name ?: "UND");
             }
             BlockInstructionsLength += DecodedInfo->InstSize;
             TotalInstructionsLength += DecodedInfo->InstSize;
@@ -699,7 +699,7 @@ ContextImpl::GenerateIR(FEXCore::Core::InternalThreadState* Thread, uint64_t Gue
             // End blocks upon encountering them and only emit an invalid opcode exception if there are no prior instructions in the block (that could have modified it to be valid).
 
             if (TableInfo) {
-              LogMan::Msg::EFmt("Invalid or Unknown instruction: {} 0x{:x}", TableInfo->Name ?: "UND", Block.Entry - GuestRIP);
+              LogMan::Msg::EFmt("Invalid or Unknown instruction: %s 0x%" PRIx64, TableInfo->Name ?: "UND", Block.Entry - GuestRIP);
             }
 
             if (Block.BlockStatus == Frontend::Decoder::DecodedBlockStatus::INVALID_INST ||
@@ -1001,7 +1001,7 @@ void ContextImpl::ThreadRemoveCodeEntryFromJit(FEXCore::Core::CpuStateFrame* Fra
 
 std::optional<CustomIRResult>
 ContextImpl::AddCustomIREntrypoint(uintptr_t Entrypoint, CustomIREntrypointHandler Handler, void* Creator, void* Data) {
-  LOGMAN_THROW_A_FMT(Config.Is64BitMode || !(Entrypoint >> 32), "64-bit Entrypoint in 32-bit mode {:x}", Entrypoint);
+  LOGMAN_THROW_A_FMT(Config.Is64BitMode || !(Entrypoint >> 32), "64-bit Entrypoint in 32-bit mode %llx", static_cast<unsigned long long>(Entrypoint));
 
   std::unique_lock lk(CustomIRMutex);
 
@@ -1024,7 +1024,7 @@ void ContextImpl::AddThunkTrampolineIRHandler(uintptr_t Entrypoint, uintptr_t Gu
     LOGMAN_THROW_A_FMT((GuestThunkEntrypoint >> 32) == 0, "Tried to link 64-bit address in 32-bit mode");
   }
 
-  LogMan::Msg::DFmt("Thunks: Adding guest trampoline from address {:#x} to guest function {:#x}", Entrypoint, GuestThunkEntrypoint);
+  LogMan::Msg::DFmt("Thunks: Adding guest trampoline from address 0x%llx to guest function 0x%llx", static_cast<unsigned long long>(Entrypoint), static_cast<unsigned long long>(GuestThunkEntrypoint));
 
   auto Result = AddCustomIREntrypoint(
     Entrypoint,
@@ -1078,7 +1078,7 @@ void ContextImpl::MarkMonoBackpatcherBlock(uint64_t BlockEntry) {
 }
 
 void ContextImpl::RemoveCustomIREntrypoint(FEXCore::Core::InternalThreadState* Thread, uintptr_t Entrypoint) {
-  LOGMAN_THROW_A_FMT(Config.Is64BitMode || !(Entrypoint >> 32), "64-bit Entrypoint in 32-bit mode {:x}", Entrypoint);
+  LOGMAN_THROW_A_FMT(Config.Is64BitMode || !(Entrypoint >> 32), "64-bit Entrypoint in 32-bit mode %llx", static_cast<unsigned long long>(Entrypoint));
 
   std::scoped_lock lk(CustomIRMutex);
 
@@ -1098,7 +1098,7 @@ void ContextImpl::MonoBackpatcherWrite(FEXCore::Core::CpuStateFrame* Frame, uint
     } else if (Size == 4) {
       *reinterpret_cast<uint32_t*>(Address) = Value;
     } else {
-      ERROR_AND_DIE_FMT("Unexpected write size for backpatcher: {}", Size);
+      ERROR_AND_DIE_FMT("Unexpected write size for backpatcher: %u", Size);
     }
   }
 

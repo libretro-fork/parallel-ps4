@@ -433,7 +433,7 @@ void Arm64Emitter::LoadConstant(ARMEmitter::Size s, ARMEmitter::Register Reg, ui
   int Segments = MaxBytes ? (MaxBytes / 2) : UpperBound;
 
   LOGMAN_THROW_A_FMT(MaxBytes >= 0 && MaxBytes <= (UpperBound * 2) && (MaxBytes & 1) == 0,
-                     "MaxBytes must be bounded in the range of [0, {}] and 16-bit aligned", UpperBound);
+                     "MaxBytes must be bounded in the range of [0, %d] and 16-bit aligned", UpperBound);
   // If MaxBytes specified then make sure to sanity check incoming data.
   LOGMAN_THROW_A_FMT(MaxBytes == 0 || (Constant >> (MaxBytes * 8)) == 0, "MaxBytes provided but data can't fit within provided range.");
 

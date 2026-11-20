@@ -350,10 +350,11 @@ FEX_SF_INC := -I$(FEX_DIR)/External/SoftFloat-3e/include \
 	-I$(FEX_DIR)/External/SoftFloat-3e/include/SoftFloat-3e
 FEX_INC := -I$(FEX_DIR)/generated -I$(FEX_DIR)/generated/include -I$(FEX_DIR)/Source \
 	-I$(FEX_DIR)/FEXCore/include -I$(FEX_DIR)/External/unordered_dense/include \
-	-I$(FEX_DIR)/External/fmt/include \
 	-I$(FEX_DIR)/FEXHeaderUtils -I$(FEX_DIR)/CodeEmitter -I$(FEX_DIR)/External/cephes/include \
 	$(FEX_SF_INC)
-FEX_CXX := -std=gnu++20 -fomit-frame-pointer -Wno-trigraphs -Wno-deprecated-enum-enum-conversion
+# A log format that does not match its arguments fails the build, as in the core
+FEX_CXX := -std=gnu++20 -fomit-frame-pointer -Wno-trigraphs -Wno-deprecated-enum-enum-conversion \
+	-Werror=format
 # FEXCore
 FEXCORE_SOURCES_CXX := $(addprefix $(FEX_DIR)/FEXCore/Source/,Common/JitSymbols.cpp \
 	Interface/Config/Config.cpp Interface/Context/Context.cpp Interface/GDBJIT/GDBJIT.cpp \
@@ -426,11 +427,9 @@ FEXFLOAT_SOURCES_CXX := $(FEX_DIR)/External/cephes/src/128bit/Impl.cpp
 FEXFLOAT_FLAGS := $(FEX_DEFS) $(FEX_SF_DEFS) -I$(FEX_DIR)/External/SoftFloat-3e -I$(FEX_DIR)/Source \
 	-I$(FEX_DIR)/External/cephes/include $(FEX_SF_INC) -Wno-trigraphs -fno-builtin
 FEXFLOAT_CXXFLAGS := $(FEX_CXX)
-# fmt, tiny-json (XXH3 is libretro-common's)
+# tiny-json (XXH3 is libretro-common's)
 FEXLIBS_SOURCES_C := $(FEX_DIR)/External/tiny-json/tiny-json.c
-FEXLIBS_SOURCES_CXX := $(FEX_DIR)/External/fmt/src/format.cc $(FEX_DIR)/External/fmt/src/os.cc
-FEXLIBS_FLAGS := $(FEX_BASE_DEFS) -I$(FEX_DIR)/External/fmt/include
-FEXLIBS_CXXFLAGS := $(FEX_CXX)
+FEXLIBS_FLAGS := $(FEX_BASE_DEFS)
 # Linked from one archive, so only what the core reaches comes in, as from FEX's own
 FEX_GROUPS := FEXCORE FEXCORESF FEXALLOC FEXRPMALLOC FEXCOMMON FEXFLOAT FEXLIBS
 # libSceFiber HLE, its switches done on the guest's registers (no fiber_context.cpp asm)

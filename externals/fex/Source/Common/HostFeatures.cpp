@@ -22,7 +22,7 @@ void FillMIDRInformationViaLinux(FEXCore::HostFeatures* Features) {
 #ifdef ARCHITECTURE_arm64
   for (size_t i = 0; i < Cores; ++i) {
     std::error_code ec {};
-    fextl::string MIDRPath = fextl::fmt::format("/sys/devices/system/cpu/cpu{}/regs/identification/midr_el1", i);
+    fextl::string MIDRPath = fextl::fmt::format("/sys/devices/system/cpu/cpu%zu/regs/identification/midr_el1", i);
     std::array<char, 18> Data;
     // Needs to be a fixed size since depending on kernel it will try to read a full page of data and fail
     // Only read 18 bytes for a 64bit value prefixed with 0x
@@ -136,7 +136,7 @@ public:
       ValueHex = std::strtoull(Value.data(), &str_end, 16);
 
       if (str_end == Value.data()) {
-        LogMan::Msg::EFmt("Couldn't parse '{}={}'\n", Key, Value);
+        LogMan::Msg::EFmt("Couldn't parse '%.*s=%.*s'\n", static_cast<int>((Key).size()), (Key).data(), static_cast<int>((Value).size()), (Value).data());
         continue;
       }
 
@@ -165,7 +165,7 @@ public:
       } else if (Key == "svevl") {
         SVEVL.SetReg(ValueHex);
       } else {
-        LogMan::Msg::EFmt("Unknown Key: {}", Key);
+        LogMan::Msg::EFmt("Unknown Key: %.*s", static_cast<int>((Key).size()), (Key).data());
       }
     }
 

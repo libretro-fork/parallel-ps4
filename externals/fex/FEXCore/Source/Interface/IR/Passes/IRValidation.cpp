@@ -196,7 +196,7 @@ void IRValidation::Run(IREmitter* IREmit) {
         break;
       }
       default:
-        // LOGMAN_MSG_A_FMT("Unknown IR Op: {}({})", IROp->Op, FEXCore::IR::GetName(IROp->Op));
+        // LOGMAN_MSG_A_FMT("Unknown IR Op: %d(%.*s)", IROp->Op, ...);
         break;
       }
     }
@@ -262,7 +262,7 @@ void IRValidation::Run(IREmitter* IREmit) {
       Out << "Warnings:" << std::endl << Warnings.str() << std::endl;
     }
 
-    LogMan::Msg::EFmt("{}", Out.str());
+    LogMan::Msg::EFmt("%s", (Out.str()).c_str());
 
     LOGMAN_MSG_A_FMT("Encountered IR validation Error");
 

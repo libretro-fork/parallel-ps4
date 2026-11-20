@@ -1,78 +1,109 @@
 // SPDX-License-Identifier: MIT
 #pragma once
-#include <FEXCore/fextl/allocator.h>
 #include <FEXCore/fextl/string.h>
 #include <FEXCore/Utils/File.h>
+#include <FEXCore/Utils/LogManager.h>
 
-#include <fmt/format.h>
-#include <fmt/ranges.h>
+#include <cstdarg>
+#include <cstdio>
 #include <unistd.h>
 
+// printf into a fextl::string, and printf to a file: what FEX used fmt for
 namespace fextl::fmt {
-template<typename T, size_t SIZE = ::fmt::inline_buffer_size, typename Allocator = fextl::FEXAlloc<T>>
-using basic_memory_buffer = ::fmt::basic_memory_buffer<T, SIZE, Allocator>;
-using memory_buffer = fextl::fmt::basic_memory_buffer<char>;
-
-template<class OutputIt, class... Args>
-OutputIt format_to(OutputIt out, ::fmt::format_string<Args...> fmt, Args&&... args) {
-  return ::fmt::vformat_to(out, fmt.str, ::fmt::make_format_args(args...));
+inline fextl::string vformat(const char* fmt, va_list args) {
+  char Stack[256];
+  va_list Copy;
+  va_copy(Copy, args);
+  const int Size = vsnprintf(Stack, sizeof(Stack), fmt, Copy);
+  va_end(Copy);
+  if (Size < 0) {
+    return {};
+  }
+  if (static_cast<size_t>(Size) < sizeof(Stack)) {
+    return fextl::string(Stack, Size);
+  }
+  fextl::string String(Size, '\0');
+  vsnprintf(String.data(), Size + 1, fmt, args);
+  return String;
 }
 
-template<typename Char, size_t SIZE>
-FMT_NODISCARD auto to_string(const fextl::fmt::basic_memory_buffer<Char, SIZE>& buf) -> fextl::basic_string<Char> {
-  auto size = buf.size();
-  ::fmt::detail::assume(size < std::basic_string<Char>().max_size());
-  return fextl::basic_string<Char>(buf.data(), size);
-}
-
-FMT_INLINE fextl::string vformat(::fmt::string_view fmt, ::fmt::format_args args) {
-  // Don't optimize the "{}" case to keep the binary size small and because it
-  // can be better optimized in fmt::format anyway.
-  auto buffer = memory_buffer();
-  ::fmt::detail::vformat_to(buffer, fmt, args);
-  return fextl::fmt::to_string(buffer);
-}
-
-template<typename... T>
-FMT_NODISCARD FMT_INLINE auto format(::fmt::format_string<T...> fmt, T&&... args) -> fextl::string {
-  return fextl::fmt::vformat(fmt, ::fmt::make_format_args(args...));
+[[nodiscard]]
+inline fextl::string format(const char* fmt, ...) FEX_PRINTF(1, 2);
+inline fextl::string format(const char* fmt, ...) {
+  va_list args;
+  va_start(args, fmt);
+  auto String = vformat(fmt, args);
+  va_end(args);
+  return String;
 }
 
 #ifndef _WIN32
-template<typename... T>
-FMT_INLINE auto print(::fmt::format_string<T...> fmt, T&&... args) -> void {
-  auto String = fextl::fmt::vformat(fmt, ::fmt::make_format_args(args...));
+inline void print(const char* fmt, ...) FEX_PRINTF(1, 2);
+inline void print(const char* fmt, ...) {
+  va_list args;
+  va_start(args, fmt);
+  const auto String = vformat(fmt, args);
+  va_end(args);
   write(STDOUT_FILENO, String.c_str(), String.size());
 }
 
-template<typename... T>
-FMT_INLINE auto print(int FD, ::fmt::format_string<T...> fmt, T&&... args) -> void {
-  auto String = fextl::fmt::vformat(fmt, ::fmt::make_format_args(args...));
+inline void print(int FD, const char* fmt, ...) FEX_PRINTF(2, 3);
+inline void print(int FD, const char* fmt, ...) {
+  va_list args;
+  va_start(args, fmt);
+  const auto String = vformat(fmt, args);
+  va_end(args);
   write(FD, String.c_str(), String.size());
 }
+
 #else
-template<typename... T>
-FMT_INLINE auto print(::fmt::format_string<T...> fmt, T&&... args) -> void {
-  auto String = fextl::fmt::vformat(fmt, ::fmt::make_format_args(args...));
-  auto f = FEXCore::File::File::GetStdOUT();
-  f.Write(String.c_str(), String.size());
+inline void print(const char* fmt, ...) FEX_PRINTF(1, 2);
+inline void print(const char* fmt, ...) {
+  va_list args;
+  va_start(args, fmt);
+  const auto String = vformat(fmt, args);
+  va_end(args);
+  FEXCore::File::File::GetStdOUT().Write(String.c_str(), String.size());
 }
 
-template<typename... T>
-FMT_INLINE auto print(HANDLE File, ::fmt::format_string<T...> fmt, T&&... args) -> void {
-  auto String = fextl::fmt::vformat(fmt, ::fmt::make_format_args(args...));
+inline void print(HANDLE File, const char* fmt, ...) FEX_PRINTF(2, 3);
+inline void print(HANDLE File, const char* fmt, ...) {
+  va_list args;
+  va_start(args, fmt);
+  const auto String = vformat(fmt, args);
+  va_end(args);
   WriteFile(File, String.c_str(), String.size(), nullptr, nullptr);
 }
+
 #endif
-template<typename... T>
-FMT_INLINE auto print(FEXCore::File::File& f, ::fmt::format_string<T...> fmt, T&&... args) -> void {
-  auto String = fextl::fmt::vformat(fmt, ::fmt::make_format_args(args...));
+inline void print(FEXCore::File::File& f, const char* fmt, ...) FEX_PRINTF(2, 3);
+inline void print(FEXCore::File::File& f, const char* fmt, ...) {
+  va_list args;
+  va_start(args, fmt);
+  const auto String = vformat(fmt, args);
+  va_end(args);
   f.Write(String.c_str(), String.size());
 }
 
-template<typename... T>
-FMT_INLINE auto print(std::FILE* f, ::fmt::format_string<T...> fmt, T&&... args) -> void {
-  auto String = fextl::fmt::vformat(fmt, ::fmt::make_format_args(args...));
+inline void print(std::FILE* f, const char* fmt, ...) FEX_PRINTF(2, 3);
+inline void print(std::FILE* f, const char* fmt, ...) {
+  va_list args;
+  va_start(args, fmt);
+  const auto String = vformat(fmt, args);
+  va_end(args);
   write(fileno(f), String.c_str(), String.size());
+}
+// The bytes of a range in hex, two digits each and nothing between: what fmt::join(Range, "")
+// gave under {:02x}
+template<typename Range>
+fextl::string HexBytes(const Range& Bytes) {
+  static constexpr char Digits[] = "0123456789abcdef";
+  fextl::string Text;
+  for (const auto Byte : Bytes) {
+    const auto Value = static_cast<uint8_t>(Byte);
+    Text += Digits[Value >> 4];
+    Text += Digits[Value & 15];
+  }
+  return Text;
 }
 } // namespace fextl::fmt

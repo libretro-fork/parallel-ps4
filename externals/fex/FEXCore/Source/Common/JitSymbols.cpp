@@ -19,9 +19,9 @@ void JITSymbols::InitFile() {
   // We can't use FILE here since we must be robust against forking processes closing our FD from under us.
 #ifdef __ANDROID__
   // Android simpleperf looks in /data/local/tmp instead of /tmp
-  const auto PerfMap = fextl::fmt::format("/data/local/tmp/perf-{}.map", getpid());
+  const auto PerfMap = fextl::fmt::format("/data/local/tmp/perf-%d.map", static_cast<int>(getpid()));
 #else
-  const auto PerfMap = fextl::fmt::format("/tmp/perf-{}.map", getpid());
+  const auto PerfMap = fextl::fmt::format("/tmp/perf-%d.map", getpid());
 #endif
   fd = open(PerfMap.c_str(), O_CREAT | O_TRUNC | O_WRONLY | O_APPEND, 0644);
 }
@@ -33,7 +33,7 @@ void JITSymbols::RegisterNamedRegion(const void* HostAddr, uint32_t CodeSize, st
 
   // Linux perf format is very straightforward
   // `<HostPtr> <Size> <Name>\n`
-  const auto Buffer = fextl::fmt::format("{} {:x} {}\n", HostAddr, CodeSize, Name);
+  const auto Buffer = fextl::fmt::format("0x%llx %x %.*s\n", static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(HostAddr)), CodeSize, static_cast<int>((Name).size()), (Name).data());
   auto Result = write(fd, Buffer.c_str(), Buffer.size());
   if (Result == -1 && errno == EBADF) {
     fd = -1;
@@ -47,7 +47,7 @@ void JITSymbols::RegisterJITSpace(const void* HostAddr, uint32_t CodeSize) {
 
   // Linux perf format is very straightforward
   // `<HostPtr> <Size> <Name>\n`
-  const auto Buffer = fextl::fmt::format("{} {:x} FEXJIT\n", HostAddr, CodeSize);
+  const auto Buffer = fextl::fmt::format("0x%llx %x FEXJIT\n", static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(HostAddr)), CodeSize);
   auto Result = write(fd, Buffer.c_str(), Buffer.size());
   if (Result == -1 && errno == EBADF) {
     fd = -1;
@@ -66,8 +66,8 @@ void JITSymbols::Register(FEXCore::JITSymbolBuffer* Buffer, const void* HostAddr
 
   // Linux perf format is very straightforward
   // `<HostPtr> <Size> <Name>\n`
-  const auto FMTResult = fmt::format_to_n(CurrentBufferOffset, RemainingSize, "{} {:x} JIT_0x{:x}_{}\n", HostAddr, CodeSize, GuestAddr, HostAddr);
-  if (FMTResult.out >= &Buffer->Buffer[Buffer->BUFFER_SIZE]) {
+  const int FMTResult = snprintf(CurrentBufferOffset, RemainingSize, "0x%llx %x JIT_0x%" PRIx64 "_0x%llx\n", static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(HostAddr)), CodeSize, GuestAddr, static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(HostAddr)));
+  if (FMTResult < 0 || static_cast<size_t>(FMTResult) >= RemainingSize) {
     // Couldn't fit, need to force a write.
     WriteBuffer(Buffer, true);
     // Rerun
@@ -75,7 +75,7 @@ void JITSymbols::Register(FEXCore::JITSymbolBuffer* Buffer, const void* HostAddr
     return;
   }
 
-  Buffer->Offset += FMTResult.size;
+  Buffer->Offset += FMTResult;
   WriteBuffer(Buffer);
 }
 
@@ -90,9 +90,9 @@ void JITSymbols::Register(FEXCore::JITSymbolBuffer* Buffer, const void* HostAddr
 
   // Linux perf format is very straightforward
   // `<HostPtr> <Size> <Name>\n`
-  const auto FMTResult =
-    fmt::format_to_n(CurrentBufferOffset, RemainingSize, "{} {:x} {}+0x{:x} ({})\n", HostAddr, CodeSize, Name, Offset, HostAddr);
-  if (FMTResult.out >= &Buffer->Buffer[Buffer->BUFFER_SIZE]) {
+  const int FMTResult =
+    snprintf(CurrentBufferOffset, RemainingSize, "0x%llx %x %.*s+0x%" PRIxPTR " (0x%llx)\n", static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(HostAddr)), CodeSize, static_cast<int>((Name).size()), (Name).data(), Offset, static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(HostAddr)));
+  if (FMTResult < 0 || static_cast<size_t>(FMTResult) >= RemainingSize) {
     // Couldn't fit, need to force a write.
     WriteBuffer(Buffer, true);
     // Rerun
@@ -100,7 +100,7 @@ void JITSymbols::Register(FEXCore::JITSymbolBuffer* Buffer, const void* HostAddr
     return;
   }
 
-  Buffer->Offset += FMTResult.size;
+  Buffer->Offset += FMTResult;
   WriteBuffer(Buffer);
 }
 
@@ -115,8 +115,8 @@ void JITSymbols::RegisterNamedRegion(FEXCore::JITSymbolBuffer* Buffer, const voi
 
   // Linux perf format is very straightforward
   // `<HostPtr> <Size> <Name>\n`
-  const auto FMTResult = fmt::format_to_n(CurrentBufferOffset, RemainingSize, "{} {:x} {}\n", HostAddr, CodeSize, Name);
-  if (FMTResult.out >= &Buffer->Buffer[Buffer->BUFFER_SIZE]) {
+  const int FMTResult = snprintf(CurrentBufferOffset, RemainingSize, "0x%llx %x %.*s\n", static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(HostAddr)), CodeSize, static_cast<int>((Name).size()), (Name).data());
+  if (FMTResult < 0 || static_cast<size_t>(FMTResult) >= RemainingSize) {
     // Couldn't fit, need to force a write.
     WriteBuffer(Buffer, true);
     // Rerun
@@ -124,7 +124,7 @@ void JITSymbols::RegisterNamedRegion(FEXCore::JITSymbolBuffer* Buffer, const voi
     return;
   }
 
-  Buffer->Offset += FMTResult.size;
+  Buffer->Offset += FMTResult;
   WriteBuffer(Buffer);
 }
 

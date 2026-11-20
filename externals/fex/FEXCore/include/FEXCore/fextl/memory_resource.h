@@ -7,7 +7,6 @@
 #include <FEXCore/fextl/list.h>
 
 #include <memory_resource>
-#include <fmt/format.h>
 
 namespace fextl {
 namespace pmr {
@@ -137,8 +136,7 @@ namespace pmr {
       Ptr = NewPtr + bytes;
 #if defined(ASSERTIONS_ENABLED) && ASSERTIONS_ENABLED
       if (Ptr >= PtrEnd) {
-        LogMan::Msg::AFmt("Fail: Only allocated: {} ({} this time) bytes. Tried allocating at ptr offset: {}.\n", Size, bytes,
-                          (uint64_t)(Ptr - (PtrEnd - Size)));
+        LogMan::Msg::AFmt("Fail: Only allocated: %llu (%llu this time) bytes. Tried allocating at ptr offset: %" PRIu64 ".\n", static_cast<unsigned long long>(Size), static_cast<unsigned long long>(bytes), (uint64_t)(Ptr - (PtrEnd - Size)));
         FEX_TRAP_EXECUTION;
       }
 #endif

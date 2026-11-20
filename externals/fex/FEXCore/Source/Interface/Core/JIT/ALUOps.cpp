@@ -296,7 +296,7 @@ DEF_OP(SetSmallNZV) {
   LOGMAN_THROW_A_FMT(CTX->HostFeatures.SupportsFlagM, "Unsupported flagm op");
 
   const auto OpSize = IROp->Size;
-  LOGMAN_THROW_A_FMT(OpSize == IR::OpSize::i8Bit || OpSize == IR::OpSize::i16Bit, "Unsupported {} size: {}", __func__, OpSize);
+  LOGMAN_THROW_A_FMT(OpSize == IR::OpSize::i8Bit || OpSize == IR::OpSize::i16Bit, "Unsupported %s size: %u", __func__, static_cast<unsigned char>(OpSize));
 
   if (OpSize == IR::OpSize::i8Bit) {
     setf8(GetReg(Op->Src).W());
@@ -409,7 +409,7 @@ DEF_OP(MulH) {
   auto Op = IROp->C<IR::IROp_MulH>();
   const auto OpSize = IROp->Size;
 
-  LOGMAN_THROW_A_FMT(OpSize == IR::OpSize::i32Bit || OpSize == IR::OpSize::i64Bit, "Unsupported {} size: {}", __func__, OpSize);
+  LOGMAN_THROW_A_FMT(OpSize == IR::OpSize::i32Bit || OpSize == IR::OpSize::i64Bit, "Unsupported %s size: %u", __func__, static_cast<unsigned char>(OpSize));
 
   const auto Dst = GetReg(Node);
   const auto Src1 = GetReg(Op->Src1);
@@ -429,7 +429,7 @@ DEF_OP(UMulH) {
   auto Op = IROp->C<IR::IROp_UMulH>();
   const auto OpSize = IROp->Size;
 
-  LOGMAN_THROW_A_FMT(OpSize == IR::OpSize::i32Bit || OpSize == IR::OpSize::i64Bit, "Unsupported {} size: {}", __func__, OpSize);
+  LOGMAN_THROW_A_FMT(OpSize == IR::OpSize::i32Bit || OpSize == IR::OpSize::i64Bit, "Unsupported %s size: %u", __func__, static_cast<unsigned char>(OpSize));
 
   const auto Dst = GetReg(Node);
   const auto Src1 = GetReg(Op->Src1);
@@ -945,7 +945,7 @@ DEF_OP(Div) {
     (void)Bind(&LongDIVRet);
     break;
   }
-  default: LOGMAN_MSG_A_FMT("Unknown DIV Size: {}", OpSize); break;
+  default: LOGMAN_MSG_A_FMT("Unknown DIV Size: %u", static_cast<unsigned char>(OpSize)); break;
   }
 }
 
@@ -1028,7 +1028,7 @@ DEF_OP(UDiv) {
     (void)Bind(&LongDIVRet);
     break;
   }
-  default: LOGMAN_MSG_A_FMT("Unknown LUDIV Size: {}", OpSize); break;
+  default: LOGMAN_MSG_A_FMT("Unknown LUDIV Size: %u", static_cast<unsigned char>(OpSize)); break;
   }
 }
 
@@ -1060,7 +1060,7 @@ DEF_OP(Popcount) {
       break;
     case IR::OpSize::i32Bit: cnt(ARMEmitter::Size::i32Bit, Dst, Src); break;
     case IR::OpSize::i64Bit: cnt(ARMEmitter::Size::i64Bit, Dst, Src); break;
-    default: LOGMAN_MSG_A_FMT("Unsupported Popcount size: {}", OpSize);
+    default: LOGMAN_MSG_A_FMT("Unsupported Popcount size: %u", static_cast<unsigned char>(OpSize));
     }
   } else {
     switch (OpSize) {
@@ -1087,7 +1087,7 @@ DEF_OP(Popcount) {
       // fmov has zero extended, unused bytes are zero
       addv(ARMEmitter::SubRegSize::i8Bit, VTMP1.D(), VTMP1.D());
       break;
-    default: LOGMAN_MSG_A_FMT("Unsupported Popcount size: {}", OpSize);
+    default: LOGMAN_MSG_A_FMT("Unsupported Popcount size: %u", static_cast<unsigned char>(OpSize));
     }
 
     umov<ARMEmitter::SubRegSize::i8Bit>(Dst, VTMP1, 0);
@@ -1112,7 +1112,7 @@ DEF_OP(FindMSB) {
   const auto OpSize = IROp->Size;
 
   LOGMAN_THROW_A_FMT(OpSize == IR::OpSize::i16Bit || OpSize == IR::OpSize::i32Bit || OpSize == IR::OpSize::i64Bit,
-                     "Unsupported {} size: {}", __func__, OpSize);
+                     "Unsupported %s size: %u", __func__, static_cast<unsigned char>(OpSize));
   const auto EmitSize = ConvertSize(IROp);
 
   const auto Dst = GetReg(Node);
@@ -1135,7 +1135,7 @@ DEF_OP(FindTrailingZeroes) {
   const auto OpSize = IROp->Size;
 
   LOGMAN_THROW_A_FMT(OpSize == IR::OpSize::i16Bit || OpSize == IR::OpSize::i32Bit || OpSize == IR::OpSize::i64Bit,
-                     "Unsupported {} size: {}", __func__, OpSize);
+                     "Unsupported %s size: %u", __func__, static_cast<unsigned char>(OpSize));
   const auto EmitSize = ConvertSize(IROp);
 
   const auto Dst = GetReg(Node);
@@ -1160,7 +1160,7 @@ DEF_OP(CountLeadingZeroes) {
   const auto OpSize = IROp->Size;
 
   LOGMAN_THROW_A_FMT(OpSize == IR::OpSize::i16Bit || OpSize == IR::OpSize::i32Bit || OpSize == IR::OpSize::i64Bit,
-                     "Unsupported {} size: {}", __func__, OpSize);
+                     "Unsupported %s size: %u", __func__, static_cast<unsigned char>(OpSize));
   const auto EmitSize = ConvertSize(IROp);
 
   const auto Dst = GetReg(Node);
@@ -1182,7 +1182,7 @@ DEF_OP(Rev) {
   const auto OpSize = IROp->Size;
 
   LOGMAN_THROW_A_FMT(OpSize == IR::OpSize::i16Bit || OpSize == IR::OpSize::i32Bit || OpSize == IR::OpSize::i64Bit,
-                     "Unsupported {} size: {}", __func__, OpSize);
+                     "Unsupported %s size: %u", __func__, static_cast<unsigned char>(OpSize));
   const auto EmitSize = ConvertSize(IROp);
 
   const auto Dst = GetReg(Node);
@@ -1198,7 +1198,7 @@ DEF_OP(Rbit) {
   auto Op = IROp->C<IR::IROp_Rbit>();
   const auto OpSize = IROp->Size;
 
-  LOGMAN_THROW_A_FMT(OpSize == IR::OpSize::i32Bit || OpSize == IR::OpSize::i64Bit, "Unsupported {} size: {}", __func__, OpSize);
+  LOGMAN_THROW_A_FMT(OpSize == IR::OpSize::i32Bit || OpSize == IR::OpSize::i64Bit, "Unsupported %s size: %u", __func__, static_cast<unsigned char>(OpSize));
   const auto EmitSize = ConvertSize48(IROp);
 
   const auto Dst = GetReg(Node);
@@ -1265,7 +1265,7 @@ DEF_OP(Bfxil) {
 
 DEF_OP(Bfe) {
   auto Op = IROp->C<IR::IROp_Bfe>();
-  LOGMAN_THROW_A_FMT(IROp->Size <= IR::OpSize::i64Bit, "OpSize is too large for BFE: {}", IROp->Size);
+  LOGMAN_THROW_A_FMT(IROp->Size <= IR::OpSize::i64Bit, "OpSize is too large for BFE: %u", static_cast<unsigned char>(IROp->Size));
   LOGMAN_THROW_A_FMT(Op->Width != 0, "Invalid BFE width of 0");
   const auto EmitSize = ConvertSize(IROp);
 
@@ -1402,7 +1402,7 @@ DEF_OP(VExtractToGPR) {
 
   const auto Offset = ElementSizeBits * Op->Index;
   const auto Is256Bit = Offset >= SSERegBitSize;
-  LOGMAN_THROW_A_FMT(!Is256Bit || HostSupportsSVE256, "Need SVE256 support in order to use {} with 256-bit operation", __func__);
+  LOGMAN_THROW_A_FMT(!Is256Bit || HostSupportsSVE256, "Need SVE256 support in order to use %s with 256-bit operation", __func__);
 
   const auto Dst = GetReg(Node);
   const auto Vector = GetVReg(Op->Vector);
@@ -1413,7 +1413,7 @@ DEF_OP(VExtractToGPR) {
     case IR::OpSize::i16Bit: umov<ARMEmitter::SubRegSize::i16Bit>(Dst, Vector, index); break;
     case IR::OpSize::i32Bit: umov<ARMEmitter::SubRegSize::i32Bit>(Dst, Vector, index); break;
     case IR::OpSize::i64Bit: umov<ARMEmitter::SubRegSize::i64Bit>(Dst, Vector, index); break;
-    default: LOGMAN_MSG_A_FMT("Unhandled ExtractElementSize: {}", OpSize); break;
+    default: LOGMAN_MSG_A_FMT("Unhandled ExtractElementSize: %u", static_cast<unsigned char>(OpSize)); break;
     }
   };
 
@@ -1423,8 +1423,8 @@ DEF_OP(VExtractToGPR) {
     // when acting on larger register sizes.
     PerformMove(Vector, Op->Index);
   } else {
-    LOGMAN_THROW_A_FMT(Is256Bit, "Can't perform 256-bit extraction with op side: {}", OpSize);
-    LOGMAN_THROW_A_FMT(Offset < AVXRegBitSize, "Trying to extract element outside bounds of register. Offset={}, Index={}", Offset, Op->Index);
+    LOGMAN_THROW_A_FMT(Is256Bit, "Can't perform 256-bit extraction with op side: %u", static_cast<unsigned char>(OpSize));
+    LOGMAN_THROW_A_FMT(Offset < AVXRegBitSize, "Trying to extract element outside bounds of register. Offset=%d, Index=%u", Offset, Op->Index);
 
     // We need to use the upper 128-bit lane, so lets move it down.
     // Inverting our dedicated predicate for 128-bit operations selects
@@ -1441,7 +1441,7 @@ DEF_OP(VExtractToGPR) {
       case IR::OpSize::i16Bit: return Op->Index - 8;
       case IR::OpSize::i32Bit: return Op->Index - 4;
       case IR::OpSize::i64Bit: return Op->Index - 2;
-      default: LOGMAN_MSG_A_FMT("Unhandled OpSize: {}", OpSize); return 0;
+      default: LOGMAN_MSG_A_FMT("Unhandled OpSize: %u", static_cast<unsigned char>(OpSize)); return 0;
       }
     }();
 

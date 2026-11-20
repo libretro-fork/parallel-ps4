@@ -13761,7 +13761,7 @@ break;
 	}
 
 	uint8_t GetOpElements(const OrderedNode *Op) const {
-		LOGMAN_THROW_A_FMT(OpHasDest(Op), "Op {} has no dest\n", GetOpName(Op));
+		LOGMAN_THROW_A_FMT(OpHasDest(Op), "Op %.*s has no dest\n", static_cast<int>((GetOpName(Op)).size()), (GetOpName(Op)).data());
 		return IR::OpSizeToSize(GetOpSize(Op)) / IR::OpSizeToSize(GetOpElementSize(Op));
 	}
 
@@ -15561,7 +15561,7 @@ break;
 		LOGMAN_THROW_A_FMT(GetOpRegClass(Value) == RegClass::Invalid || WalkFindRegClass(Value) == RegClass::FPR, "GetOpRegClass(Value) == RegClass::Invalid || WalkFindRegClass(Value) == RegClass::FPR");
 		LOGMAN_THROW_A_FMT(GetOpRegClass(Addr) == RegClass::Invalid || WalkFindRegClass(Addr) == RegClass::GPR, "GetOpRegClass(Addr) == RegClass::Invalid || WalkFindRegClass(Addr) == RegClass::GPR");
 		LOGMAN_THROW_A_FMT(RegisterSize == FEXCore::IR::OpSize::i128Bit || RegisterSize == FEXCore::IR::OpSize::i256Bit, "RegisterSize == FEXCore::IR::OpSize::i128Bit || RegisterSize == FEXCore::IR::OpSize::i256Bit");
-		LOGMAN_THROW_A_FMT(Offset % IR::OpSizeToSize(RegisterSize) == 0, "Offset % IR::OpSizeToSize(RegisterSize) == 0");
+		LOGMAN_THROW_A_FMT(Offset % IR::OpSizeToSize(RegisterSize) == 0, "Offset %% IR::OpSizeToSize(RegisterSize) == 0");
 #endif
 		return _VStoreNonTemporal(RegisterSize, Value->Wrapped(ListDataBegin), Addr->Wrapped(ListDataBegin), Offset);
 	}
@@ -15597,7 +15597,7 @@ break;
 		LOGMAN_THROW_A_FMT(GetOpRegClass(ValueHigh) == RegClass::Invalid || WalkFindRegClass(ValueHigh) == RegClass::FPR, "GetOpRegClass(ValueHigh) == RegClass::Invalid || WalkFindRegClass(ValueHigh) == RegClass::FPR");
 		LOGMAN_THROW_A_FMT(GetOpRegClass(Addr) == RegClass::Invalid || WalkFindRegClass(Addr) == RegClass::GPR, "GetOpRegClass(Addr) == RegClass::Invalid || WalkFindRegClass(Addr) == RegClass::GPR");
 		LOGMAN_THROW_A_FMT(RegisterSize == FEXCore::IR::OpSize::i128Bit, "RegisterSize == FEXCore::IR::OpSize::i128Bit");
-		LOGMAN_THROW_A_FMT(Offset % IR::OpSizeToSize(RegisterSize) == 0, "Offset % IR::OpSizeToSize(RegisterSize) == 0");
+		LOGMAN_THROW_A_FMT(Offset % IR::OpSizeToSize(RegisterSize) == 0, "Offset %% IR::OpSizeToSize(RegisterSize) == 0");
 #endif
 		return _VStoreNonTemporalPair(RegisterSize, ValueLow->Wrapped(ListDataBegin), ValueHigh->Wrapped(ListDataBegin), Addr->Wrapped(ListDataBegin), Offset);
 	}
@@ -15627,7 +15627,7 @@ break;
 #if defined(ASSERTIONS_ENABLED) && ASSERTIONS_ENABLED
 		LOGMAN_THROW_A_FMT(GetOpRegClass(Addr) == RegClass::Invalid || WalkFindRegClass(Addr) == RegClass::GPR, "GetOpRegClass(Addr) == RegClass::Invalid || WalkFindRegClass(Addr) == RegClass::GPR");
 		LOGMAN_THROW_A_FMT(RegisterSize == FEXCore::IR::OpSize::i128Bit || RegisterSize == FEXCore::IR::OpSize::i256Bit, "RegisterSize == FEXCore::IR::OpSize::i128Bit || RegisterSize == FEXCore::IR::OpSize::i256Bit");
-		LOGMAN_THROW_A_FMT(Offset % IR::OpSizeToSize(RegisterSize) == 0, "Offset % IR::OpSizeToSize(RegisterSize) == 0");
+		LOGMAN_THROW_A_FMT(Offset % IR::OpSizeToSize(RegisterSize) == 0, "Offset %% IR::OpSizeToSize(RegisterSize) == 0");
 #endif
 		return _VLoadNonTemporal(RegisterSize, Addr->Wrapped(ListDataBegin), Offset);
 	}
@@ -15641,8 +15641,8 @@ break;
 		_Op.first->Size = Size;
 		_Op.first->Header.ElementSize = _Op.first->Header.Size;
 #if defined(ASSERTIONS_ENABLED) && ASSERTIONS_ENABLED
-		LOGMAN_THROW_A_FMT(Offset % 64 == 0, "Offset % 64 == 0");
-		LOGMAN_THROW_A_FMT(Size % 64 == 0, "Size % 64 == 0");
+		LOGMAN_THROW_A_FMT(Offset % 64 == 0, "Offset %% 64 == 0");
+		LOGMAN_THROW_A_FMT(Size % 64 == 0, "Size %% 64 == 0");
 #endif
 		return _Op;
 	}

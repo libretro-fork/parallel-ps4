@@ -113,9 +113,9 @@ public:
     for (size_t i = 0; i < 8; i++) {
       const auto& [Valid, Element] = buffer[i];
       if (Valid == StackSlot::VALID) {
-        LogMan::Msg::DFmt("| ST{}: 0x{:x}", i, (uintptr_t)(Element.StackDataNode));
+        LogMan::Msg::DFmt("| ST%llu: 0x%" PRIxPTR, static_cast<unsigned long long>(i), (uintptr_t)(Element.StackDataNode));
       } else if (Valid == StackSlot::INVALID) {
-        LogMan::Msg::DFmt("| ST{}: INVALID", i);
+        LogMan::Msg::DFmt("| ST%llu: INVALID", static_cast<unsigned long long>(i));
       }
     }
     LogMan::Msg::DFmt("--");

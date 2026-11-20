@@ -262,7 +262,7 @@ void OpDispatchBuilder::SecondaryALUOp(OpcodeArgs) {
   default:
     IROp = FEXCore::IR::IROps::OP_LAST;
     AtomicIROp = FEXCore::IR::IROps::OP_LAST;
-    LogMan::Msg::EFmt("Unknown ALU Op: 0x{:x}", Op->OP);
+    LogMan::Msg::EFmt("Unknown ALU Op: 0x%x", Op->OP);
     DecodeFailure = true;
     return;
   };
@@ -3204,7 +3204,7 @@ void OpDispatchBuilder::DECOp(OpcodeArgs) {
 
 void OpDispatchBuilder::STOSOp(OpcodeArgs) {
   if (Op->Flags & FEXCore::X86Tables::DecodeFlags::FLAG_ADDRESS_SIZE) {
-    LogMan::Msg::EFmt("STOSOp: Can't handle address size override (OP: 0x{:04X}, Flags: 0x{:08X})", Op->OP, Op->Flags);
+    LogMan::Msg::EFmt("STOSOp: Can't handle address size override (OP: 0x%04X, Flags: 0x%08X)", Op->OP, Op->Flags);
     DecodeFailure = true;
     return;
   }
@@ -3249,7 +3249,7 @@ void OpDispatchBuilder::STOSOp(OpcodeArgs) {
 
 void OpDispatchBuilder::MOVSOp(OpcodeArgs) {
   if (Op->Flags & FEXCore::X86Tables::DecodeFlags::FLAG_ADDRESS_SIZE) {
-    LogMan::Msg::EFmt("MOVSOp: Can't handle address size override (OP: 0x{:04X}, Flags: 0x{:08X})", Op->OP, Op->Flags);
+    LogMan::Msg::EFmt("MOVSOp: Can't handle address size override (OP: 0x%04X, Flags: 0x%08X)", Op->OP, Op->Flags);
     DecodeFailure = true;
     return;
   }
@@ -3317,7 +3317,7 @@ IR::OpSize OpDispatchBuilder::GetStringOpSize(X86Tables::DecodedOp Op) const {
 
 void OpDispatchBuilder::CMPSOp(OpcodeArgs) {
   if (!Is64BitMode && (Op->Flags & FEXCore::X86Tables::DecodeFlags::FLAG_ADDRESS_SIZE)) {
-    LogMan::Msg::EFmt("CMPSOp: Address size override (0x67) not supported in 32-bit mode (OP: 0x{:04X}).", Op->OP);
+    LogMan::Msg::EFmt("CMPSOp: Address size override (0x67) not supported in 32-bit mode (OP: 0x%04X).", Op->OP);
     DecodeFailure = true;
     return;
   }
@@ -3454,7 +3454,7 @@ void OpDispatchBuilder::CMPSOp(OpcodeArgs) {
 
 void OpDispatchBuilder::LODSOp(OpcodeArgs) {
   if (!Is64BitMode && (Op->Flags & FEXCore::X86Tables::DecodeFlags::FLAG_ADDRESS_SIZE)) {
-    LogMan::Msg::EFmt("LODSOp: Address size override (0x67) not supported in 32-bit mode (OP: 0x{:04X}).", Op->OP);
+    LogMan::Msg::EFmt("LODSOp: Address size override (0x67) not supported in 32-bit mode (OP: 0x%04X).", Op->OP);
     DecodeFailure = true;
     return;
   }
@@ -3551,7 +3551,7 @@ void OpDispatchBuilder::LODSOp(OpcodeArgs) {
 
 void OpDispatchBuilder::SCASOp(OpcodeArgs) {
   if (!Is64BitMode && (Op->Flags & FEXCore::X86Tables::DecodeFlags::FLAG_ADDRESS_SIZE)) {
-    LogMan::Msg::EFmt("SCASOp: Address size override (0x67) not supported in 32-bit mode (OP: 0x{:04X}).", Op->OP);
+    LogMan::Msg::EFmt("SCASOp: Address size override (0x67) not supported in 32-bit mode (OP: 0x%04X).", Op->OP);
     DecodeFailure = true;
     return;
   }
@@ -4399,7 +4399,7 @@ AddressMode OpDispatchBuilder::DecodeAddress(const X86Tables::DecodedOp& Op, con
   } else if (Operand.IsLiteralRelocation()) {
     A.Base = _EntrypointOffset(GPRSize, Operand.Data.LiteralRelocation.EntrypointOffset);
   } else {
-    LOGMAN_MSG_A_FMT("Unknown Src Type: {}\n", Operand.Type);
+    LOGMAN_MSG_A_FMT("Unknown Src Type: %u\n", static_cast<unsigned char>(Operand.Type));
   }
 
   return A;
@@ -4464,7 +4464,7 @@ Ref OpDispatchBuilder::LoadSource_WithOpSize(RegClass Class, const X86Tables::De
       uint64_t Ptr = CalcAddress(Op, Operand, true);
       if (CTX->BlockDebuggerTracker.ContainsReadWatchPoint(Ptr, OpSizeToSize(OpSize))) {
         // It's up to the developer if they want more advanced debugging logic here.
-        LogMan::Msg::IFmt("Entrypoint 0x{:x} will hit read watch: [0x{:x}, 0x{:x})", Entry, Ptr, Ptr + OpSizeToSize(OpSize));
+        LogMan::Msg::IFmt("Entrypoint 0x%llx will hit read watch: [0x%llx, 0x%" PRIx64 ")", static_cast<unsigned long long>(Entry), static_cast<unsigned long long>(Ptr), Ptr + OpSizeToSize(OpSize));
       }
     }
   }
@@ -4544,7 +4544,7 @@ void OpDispatchBuilder::StoreResult_WithOpSize(RegClass Class, FEXCore::X86Table
         // Partial writes can come from FPRs.
         // TODO: Fix the instructions doing partial writes rather than dealing with it here.
 
-        LOGMAN_THROW_A_FMT(Class != RegClass::GPR, "Partial writes from GPR not allowed. Instruction: {}", Op->TableInfo->Name);
+        LOGMAN_THROW_A_FMT(Class != RegClass::GPR, "Partial writes from GPR not allowed. Instruction: %s", Op->TableInfo->Name);
 
         // XMM-size is handled in implementations.
         if (VectorSize != OpSize::i256Bit || OpSize != OpSize::i128Bit) {
@@ -4563,7 +4563,7 @@ void OpDispatchBuilder::StoreResult_WithOpSize(RegClass Class, FEXCore::X86Table
 
         LOGMAN_THROW_A_FMT(!Operand.Data.GPR.HighBits, "Can't handle 32bit store to high 8bit register");
       } else {
-        LOGMAN_THROW_A_FMT(!(GPRSize == OpSize::i32Bit && OpSize > OpSize::i32Bit), "Oops had a {} GPR load", OpSize);
+        LOGMAN_THROW_A_FMT(!(GPRSize == OpSize::i32Bit && OpSize > OpSize::i32Bit), "Oops had a %u GPR load", static_cast<unsigned char>(OpSize));
 
         if (GPRSize != OpSize) {
           // if the GPR isn't the full size then we need to insert.
@@ -4601,7 +4601,7 @@ void OpDispatchBuilder::StoreResult_WithOpSize(RegClass Class, FEXCore::X86Table
       uint64_t Ptr = CalcAddress(Op, Operand, false);
       if (CTX->BlockDebuggerTracker.ContainsWriteWatchPoint(Ptr, OpSizeToSize(OpSize))) {
         // It's up to the developer if they want more advanced debugging logic here.
-        LogMan::Msg::IFmt("Entrypoint 0x{:x} will hit write watch: [0x{:x}, 0x{:x})", Entry, Ptr, Ptr + OpSizeToSize(OpSize));
+        LogMan::Msg::IFmt("Entrypoint 0x%llx will hit write watch: [0x%llx, 0x%" PRIx64 ")", static_cast<unsigned long long>(Entry), static_cast<unsigned long long>(Ptr), Ptr + OpSizeToSize(OpSize));
       }
     }
   }

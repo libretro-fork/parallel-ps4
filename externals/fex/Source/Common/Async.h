@@ -139,7 +139,7 @@ public:
 
             auto Callback = std::move(callbacks[ActiveFD.fd]);
             if (!Callback) {
-              ERROR_AND_DIE_FMT("Data available for reading on FD {} but no read callback registered", ActiveFD.fd);
+              ERROR_AND_DIE_FMT("Data available for reading on FD %d but no read callback registered", ActiveFD.fd);
             }
             auto Ret = Callback(error::success);
             if (Ret == post_callback::repeat) {

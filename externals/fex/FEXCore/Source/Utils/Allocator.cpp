@@ -244,9 +244,9 @@ fextl::vector<MemoryRegion> StealMemoryRegion(uintptr_t Begin, uintptr_t End) {
       auto Alloc =
         ::mmap(StackRegionIt->Ptr, StackRegionIt->Size, PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_NORESERVE | MAP_PRIVATE | MAP_FIXED, -1, 0);
 
-      LogMan::Throw::AFmt(Alloc != MAP_FAILED, "StealMemoryRegion:Stack: mmap({}, {:x}) failed: {}", fmt::ptr(StackRegionIt->Ptr),
-                          StackRegionIt->Size, errno);
-      LogMan::Throw::AFmt(Alloc == StackRegionIt->Ptr, "mmap returned {} instead of {}", Alloc, fmt::ptr(StackRegionIt->Ptr));
+      LogMan::Throw::AFmt(Alloc != MAP_FAILED, "StealMemoryRegion:Stack: mmap(%p, %zx) failed: %d", StackRegionIt->Ptr,
+                          static_cast<size_t>(StackRegionIt->Size), errno);
+      LogMan::Throw::AFmt(Alloc == StackRegionIt->Ptr, "mmap returned 0x%llx instead of 0x%llx", static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(Alloc)), static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(StackRegionIt->Ptr)));
 
       Regions.erase(StackRegionIt);
     }
@@ -266,8 +266,8 @@ fextl::vector<MemoryRegion> StealMemoryRegion(uintptr_t Begin, uintptr_t End) {
       }
     }
 
-    LogMan::Throw::AFmt(Alloc != MAP_FAILED, "StealMemoryRegion: mmap({}, {:x}) failed: {}", fmt::ptr(RegionIt->Ptr), RegionIt->Size, errno);
-    LogMan::Throw::AFmt(Alloc == RegionIt->Ptr, "mmap returned {} instead of {}", Alloc, fmt::ptr(RegionIt->Ptr));
+    LogMan::Throw::AFmt(Alloc != MAP_FAILED, "StealMemoryRegion: mmap(%p, %zx) failed: %d", RegionIt->Ptr, static_cast<size_t>(RegionIt->Size), errno);
+    LogMan::Throw::AFmt(Alloc == RegionIt->Ptr, "mmap returned 0x%llx instead of 0x%llx", static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(Alloc)), static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(RegionIt->Ptr)));
   }
 
   return Regions;

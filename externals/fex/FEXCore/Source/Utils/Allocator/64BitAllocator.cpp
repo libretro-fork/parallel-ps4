@@ -163,8 +163,7 @@ private:
     size_t SizePlusManagedData = UsedSize + SizeOfLiveRegion;
 
     auto Res = mprotect(reinterpret_cast<void*>(ReservedRegion->Base), SizePlusManagedData, PROT_READ | PROT_WRITE);
-    LOGMAN_THROW_A_FMT(Res != -1, "Couldn't mprotect region: {} '{}' Likely occurs when running out of memory or Maximum VMAs", errno,
-                       strerror(errno));
+    LOGMAN_THROW_A_FMT(Res != -1, "Couldn't mprotect region: %d '%s' Likely occurs when running out of memory or Maximum VMAs", errno, strerror(errno));
 
     FEXCore::Allocator::VirtualName("FEXMem_Misc", reinterpret_cast<void*>(ReservedRegion->Base), SizePlusManagedData);
     LiveVMARegion* LiveRange = new (reinterpret_cast<void*>(ReservedRegion->Base)) LiveVMARegion();
@@ -413,8 +412,7 @@ again:
     LiveRegion->LastPageAllocation = MappedBegin + NumberOfPages;
     LiveRegion->FreeSpace -= PagesSet * FEXCore::Utils::FEX_PAGE_SIZE;
     LOGMAN_THROW_A_FMT(LiveRegion->FreeSpace <= LiveRegion->SlabInfo->RegionSize,
-                       "Corrupt LiveRegion free space! 0x{:x} > 0x{:x}. After allocating 0x{:x} (0x{:x} overlapped)", LiveRegion->FreeSpace,
-                       LiveRegion->SlabInfo->RegionSize, length, PagesSet);
+                       "Corrupt LiveRegion free space! 0x%llx > 0x%llx. After allocating 0x%llx (0x%llx overlapped)", static_cast<unsigned long long>(LiveRegion->FreeSpace), static_cast<unsigned long long>(LiveRegion->SlabInfo->RegionSize), static_cast<unsigned long long>(length), static_cast<unsigned long long>(PagesSet));
   }
 
   if (!AllocatedOffset) {

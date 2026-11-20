@@ -4,6 +4,19 @@ What changed in the libretro core of this fork, newest first. Changes that come 
 
 ## Unreleased
 
+- fmt is gone from FEX too, so no fmt is left anywhere in the core (`externals/fex/External/fmt`, 600 KB, is deleted).
+  - **What takes printf formats now:** FEX's logging (`LogManager.h`: `LogMan::Msg::*Fmt`, `LogMan::Throw::*Fmt`, `LOGMAN_THROW_A_FMT`, `LOGMAN_MSG_A_FMT`, `ERROR_AND_DIE_FMT`) and `fextl::fmt::format`/`print`. They are marked so the compiler checks every call (`FEX_PRINTF`), and `-Werror=format` is on for FEX's C++ as for the core's.
+  - **How the call sites were rewritten:** about 2,300 sites, from each argument's type, by the same AST-driven rewrite as the core's.
+    - Assertions a release build compiles out were rewritten too, so a debug build of FEX formats correctly. With `ASSERTIONS_ENABLED=1`, all of FEX compiles with no format errors.
+    - The rest were by hand: a few uses of `fmt::join`, `fmt::format_to_n` and `FMT_COMPILE`.
+  - **New:** `fextl::fmt::HexBytes` stands in for `fmt::join(bytes, "")` under `{:02x}`.
+  - **Also fixed:** `CPUInfo.cpp`'s CPU path buffer was one byte short for its terminator at the largest CPU number. It is a 64-byte buffer now.
+  - **Log text that reads differently:** a `0` printed with `{:#x}` now reads `0`, not `0x0`, where printf's `%#x` stands in. Assertion messages now show the extra argument a few of them passed and fmt ignored.
+  - **Checks:**
+    - Cross-built for aarch64 with no warnings.
+    - The core has no fmt symbols left.
+    - The FEXCore smoke test passes under qemu.
+  - **Not run on an aarch64 machine yet.**
 - FEX is part of the tree now (`externals/fex`, 8 MB), built by the core's own Makefile like everything else. The aarch64 `ENABLE_FEX_GUEST_CPU=1` build used to clone FEX from GitHub and build it with CMake (`.ci/build-fex.sh`); both are gone.
   - **What is in the tree:** the files of FEX f2b679f that the build compiles or includes, with their licenses. Those are FEXCore, the parts of FEX's `Source/Common` and CommonTools it links, and the used files of SoftFloat 3e, cephes, rpmalloc, tiny-json, fmt, unordered_dense, range-v3 and cpp-optparse.
   - **Generated files:** `generated/` holds what FEX's CMake wrote at configure time (the IR and config tables, the git hash).

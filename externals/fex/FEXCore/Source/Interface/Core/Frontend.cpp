@@ -670,8 +670,7 @@ Decoder::DecodedBlockStatus Decoder::NormalOp(const FEXCore::X86Tables::X86InstI
     return DecodedBlockStatus::UNIMPLEMENTED_INST;
   }
 
-  LOGMAN_THROW_A_FMT(Bytes == 0, "Inst at 0x{:x}: 0x{:04x} '{}' Had an instruction of size {} with {} remaining", DecodeInst->PC,
-                     DecodeInst->OP, DecodeInst->TableInfo->Name ?: "UND", InstructionSize, Bytes);
+  LOGMAN_THROW_A_FMT(Bytes == 0, "Inst at 0x%llx: 0x%04x '%s' Had an instruction of size %u with %u remaining", static_cast<unsigned long long>(DecodeInst->PC), DecodeInst->OP, DecodeInst->TableInfo->Name ?: "UND", InstructionSize, Bytes);
   DecodeInst->InstSize = InstructionSize;
   return DecodedBlockStatus::SUCCESS;
 }
@@ -1521,13 +1520,12 @@ void Decoder::DecodeInstructionsAtEntry(FEXCore::Core::InternalThreadState* Thre
           InstStream -= PCOffset;
           EraseBlock = true;
         } else {
-          LogMan::Msg::EFmt("{} instruction in entry block: {:X}",
+          LogMan::Msg::EFmt("%s instruction in entry block: %llX",
                             BlockIt->BlockStatus == DecodedBlockStatus::INVALID_INST       ? "Invalid" :
                             BlockIt->BlockStatus == DecodedBlockStatus::NOEXEC_INST        ? "NoExec" :
                             BlockIt->BlockStatus == DecodedBlockStatus::BAD_RELOCATION     ? "BadRelocation" :
                             BlockIt->BlockStatus == DecodedBlockStatus::UNIMPLEMENTED_INST ? "Unimplemented" :
-                                                                                             "PartialDecode",
-                            OpAddress);
+                                                                                             "PartialDecode", static_cast<unsigned long long>(OpAddress));
         }
         break;
       }

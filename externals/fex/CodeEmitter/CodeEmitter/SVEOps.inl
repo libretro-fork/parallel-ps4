@@ -272,7 +272,7 @@ public:
   }
   ///< Size is destination size
   void fcvtnt(SubRegSize size, ZRegister zd, PRegisterMerge pg, ZRegister zn) {
-    LOGMAN_THROW_A_FMT(size == SubRegSize::i32Bit || size == SubRegSize::i16Bit, "Unsupported size in {}", __func__);
+    LOGMAN_THROW_A_FMT(size == SubRegSize::i32Bit || size == SubRegSize::i16Bit, "Unsupported size in %s", __func__);
 
     const auto ConvertedDestSize = size == SubRegSize::i16Bit ? 0b00 : size == SubRegSize::i32Bit ? 0b10 : 0b00;
 
@@ -283,7 +283,7 @@ public:
 
   ///< Size is destination size
   void fcvtlt(SubRegSize size, ZRegister zd, PRegisterMerge pg, ZRegister zn) {
-    LOGMAN_THROW_A_FMT(size == SubRegSize::i64Bit || size == SubRegSize::i32Bit, "Unsupported size in {}", __func__);
+    LOGMAN_THROW_A_FMT(size == SubRegSize::i64Bit || size == SubRegSize::i32Bit, "Unsupported size in %s", __func__);
 
     const auto ConvertedDestSize = size == SubRegSize::i32Bit ? 0b01 : size == SubRegSize::i64Bit ? 0b11 : 0b00;
 
@@ -724,16 +724,16 @@ public:
 
   // SVE Index Generation
   void index(SubRegSize size, ZRegister zd, int32_t initial, int32_t increment) {
-    LOGMAN_THROW_A_FMT(initial >= -16 && initial <= 15, "initial value must be within -16-15. initial: {}", initial);
-    LOGMAN_THROW_A_FMT(increment >= -16 && increment <= 15, "increment value must be within -16-15. increment: {}", increment);
+    LOGMAN_THROW_A_FMT(initial >= -16 && initial <= 15, "initial value must be within -16-15. initial: %d", initial);
+    LOGMAN_THROW_A_FMT(increment >= -16 && increment <= 15, "increment value must be within -16-15. increment: %d", increment);
     SVEIndexGeneration(0b00, size, zd, initial, increment);
   }
   void index(SubRegSize size, ZRegister zd, Register initial, int32_t increment) {
-    LOGMAN_THROW_A_FMT(increment >= -16 && increment <= 15, "increment value must be within -16-15. increment: {}", increment);
+    LOGMAN_THROW_A_FMT(increment >= -16 && increment <= 15, "increment value must be within -16-15. increment: %d", increment);
     SVEIndexGeneration(0b01, size, zd, static_cast<int32_t>(initial.Idx()), increment);
   }
   void index(SubRegSize size, ZRegister zd, int32_t initial, Register increment) {
-    LOGMAN_THROW_A_FMT(initial >= -16 && initial <= 15, "initial value must be within -16-15. initial: {}", initial);
+    LOGMAN_THROW_A_FMT(initial >= -16 && initial <= 15, "initial value must be within -16-15. initial: %d", initial);
     SVEIndexGeneration(0b10, size, zd, initial, static_cast<int32_t>(increment.Idx()));
   }
   void index(SubRegSize size, ZRegister zd, Register initial, Register increment) {
@@ -2336,7 +2336,7 @@ public:
     uint32_t opc1, opc2;
     if (srcsize == SubRegSize::i16Bit) {
       // Srcsize = fp16, opc2 encodes dst size
-      LOGMAN_THROW_A_FMT(dstsize == SubRegSize::i16Bit, "Unsupported size in {}", __func__);
+      LOGMAN_THROW_A_FMT(dstsize == SubRegSize::i16Bit, "Unsupported size in %s", __func__);
       opc1 = 0b01;
       opc2 = 0b01;
     } else if (srcsize == SubRegSize::i32Bit) {
@@ -2357,7 +2357,7 @@ public:
     uint32_t opc1, opc2;
     if (srcsize == SubRegSize::i16Bit) {
       // Srcsize = fp16, opc2 encodes dst size
-      LOGMAN_THROW_A_FMT(dstsize == SubRegSize::i16Bit, "Unsupported size in {}", __func__);
+      LOGMAN_THROW_A_FMT(dstsize == SubRegSize::i16Bit, "Unsupported size in %s", __func__);
       opc1 = 0b01;
       opc2 = 0b01;
     } else if (srcsize == SubRegSize::i32Bit) {
@@ -2392,11 +2392,11 @@ public:
       opc2 = dstsize == SubRegSize::i64Bit ? 0b11 : dstsize == SubRegSize::i32Bit ? 0b10 : dstsize == SubRegSize::i16Bit ? 0b01 : 0b00;
     } else if (srcsize == SubRegSize::i32Bit) {
       // Srcsize = fp32, opc1 encodes dst size
-      LOGMAN_THROW_A_FMT(dstsize != SubRegSize::i16Bit, "Unsupported size in {}", __func__);
+      LOGMAN_THROW_A_FMT(dstsize != SubRegSize::i16Bit, "Unsupported size in %s", __func__);
       opc1 = dstsize == SubRegSize::i64Bit ? 0b11 : 0b10;
       opc2 = 0b10;
     } else if (srcsize == SubRegSize::i64Bit) {
-      LOGMAN_THROW_A_FMT(dstsize != SubRegSize::i16Bit, "Unsupported size in {}", __func__);
+      LOGMAN_THROW_A_FMT(dstsize != SubRegSize::i16Bit, "Unsupported size in %s", __func__);
       // SrcSize = fp64, opc2 encodes dst size
       opc1 = 0b11;
       opc2 = dstsize == SubRegSize::i64Bit ? 0b11 : 0b00;
@@ -2413,11 +2413,11 @@ public:
       opc2 = dstsize == SubRegSize::i64Bit ? 0b11 : dstsize == SubRegSize::i32Bit ? 0b10 : dstsize == SubRegSize::i16Bit ? 0b01 : 0b00;
     } else if (srcsize == SubRegSize::i32Bit) {
       // Srcsize = fp32, opc1 encodes dst size
-      LOGMAN_THROW_A_FMT(dstsize != SubRegSize::i16Bit, "Unsupported size in {}", __func__);
+      LOGMAN_THROW_A_FMT(dstsize != SubRegSize::i16Bit, "Unsupported size in %s", __func__);
       opc1 = dstsize == SubRegSize::i64Bit ? 0b11 : 0b10;
       opc2 = 0b10;
     } else if (srcsize == SubRegSize::i64Bit) {
-      LOGMAN_THROW_A_FMT(dstsize != SubRegSize::i16Bit, "Unsupported size in {}", __func__);
+      LOGMAN_THROW_A_FMT(dstsize != SubRegSize::i16Bit, "Unsupported size in %s", __func__);
       // SrcSize = fp64, opc2 encodes dst size
       opc1 = 0b11;
       opc2 = dstsize == SubRegSize::i64Bit ? 0b11 : 0b00;
@@ -3297,7 +3297,7 @@ private:
 
     // We can index up to 512-bit registers with dup
     const auto max_index = (64U >> log2_size_bytes) - 1;
-    LOGMAN_THROW_A_FMT(Index <= max_index, "dup index ({}) too large. Must be within [0, {}].", Index, max_index);
+    LOGMAN_THROW_A_FMT(Index <= max_index, "dup index (%u) too large. Must be within [0, %u].", Index, max_index);
 
     // imm2:tsz make up a 7 bit wide field, with each increasing element size
     // restricting the range of those 7 bits (e.g. B: tsz=xxxx1, H: tsz=xxx10,
@@ -3328,8 +3328,8 @@ private:
     if (!is_uint8_imm) {
       const bool is_uint16_imm = (imm >> 16) == 0;
 
-      LOGMAN_THROW_A_FMT(is_uint16_imm, "Immediate ({}) must be a 16-bit value within [256, 65280]", imm);
-      LOGMAN_THROW_A_FMT((imm % 256) == 0, "Immediate ({}) must be a multiple of 256", imm);
+      LOGMAN_THROW_A_FMT(is_uint16_imm, "Immediate (%u) must be a 16-bit value within [256, 65280]", imm);
+      LOGMAN_THROW_A_FMT((imm % 256) == 0, "Immediate (%u) must be a multiple of 256", imm);
 
       imm /= 256;
       shift = 1;
@@ -3350,9 +3350,9 @@ private:
 
     const bool is_signed = (opc & 1) == 0;
     if (is_signed) {
-      LOGMAN_THROW_A_FMT(imm >= -128 && imm <= 127, "Invalid immediate ({}). Must be within [-127, 128]", imm);
+      LOGMAN_THROW_A_FMT(imm >= -128 && imm <= 127, "Invalid immediate (%d). Must be within [-127, 128]", imm);
     } else {
-      LOGMAN_THROW_A_FMT(imm >= 0 && imm <= 255, "Invalid immediate ({}). Must be within [0, 255]", imm);
+      LOGMAN_THROW_A_FMT(imm >= 0 && imm <= 255, "Invalid immediate (%d). Must be within [0, 255]", imm);
     }
 
     const auto imm8 = static_cast<uint32_t>(imm) & 0xFF;
@@ -3368,7 +3368,7 @@ private:
   void SVEMultiplyImmediateUnpred(uint32_t opc, SubRegSize size, ZRegister zd, ZRegister zn, int32_t imm) {
     LOGMAN_THROW_A_FMT(size != SubRegSize::i128Bit, "Can't use 128-bit element size");
     LOGMAN_THROW_A_FMT(zd == zn, "zd needs to equal zn");
-    LOGMAN_THROW_A_FMT(imm >= -128 && imm <= 127, "Invalid immediate ({}). Must be within [-127, 128]", imm);
+    LOGMAN_THROW_A_FMT(imm >= -128 && imm <= 127, "Invalid immediate (%d). Must be within [-127, 128]", imm);
 
     const auto imm8 = static_cast<uint32_t>(imm) & 0xFF;
 
@@ -3441,7 +3441,7 @@ private:
   }
 
   void SVEAddressGeneration(SubRegSize size, ZRegister zd, ZRegister zn, ZRegister zm, SVEModType mod, uint32_t scale) {
-    LOGMAN_THROW_A_FMT(scale <= 3, "Scale ({}) must be within [0, 3]", scale);
+    LOGMAN_THROW_A_FMT(scale <= 3, "Scale (%u) must be within [0, 3]", scale);
 
     uint32_t Instr = 0b0000'0100'0010'0000'1010'0000'0000'0000;
 
@@ -3882,7 +3882,7 @@ private:
       default: return UINT32_MAX;
       }
     }();
-    LOGMAN_THROW_A_FMT(op != UINT32_MAX, "Invalid conversion op value: {}", op);
+    LOGMAN_THROW_A_FMT(op != UINT32_MAX, "Invalid conversion op value: %u", op);
 
     uint32_t Instr = 0b0110'0101'0000'1000'1010'0000'0000'0000;
     Instr |= op;
@@ -4104,7 +4104,7 @@ private:
     // 0b111 - I - Current
 
     LOGMAN_THROW_A_FMT(pg <= PReg::p7, "Can only use p0-p7 as a governing predicate");
-    LOGMAN_THROW_A_FMT(IsStandardFloatSize(size), "Unsupported size in {}", __func__);
+    LOGMAN_THROW_A_FMT(IsStandardFloatSize(size), "Unsupported size in %s", __func__);
 
     uint32_t Instr = 0b0110'0101'0000'0000'1010'0000'0000'0000;
     Instr |= FEXCore::ToUnderlying(size) << 22;
@@ -4120,9 +4120,9 @@ private:
                             ZRegister zn, ZRegister zd) {
     LOGMAN_THROW_A_FMT(pg <= PReg::p7, "Can only use p0-p7 as a governing predicate");
     LOGMAN_THROW_A_FMT(srcsize == SubRegSize::i16Bit || srcsize == SubRegSize::i32Bit || srcsize == SubRegSize::i64Bit,
-                       "Unsupported src size in {}", __func__);
+                       "Unsupported src size in %s", __func__);
     LOGMAN_THROW_A_FMT(dstsize == SubRegSize::i16Bit || dstsize == SubRegSize::i32Bit || dstsize == SubRegSize::i64Bit,
-                       "Unsupported dst size in {}", __func__);
+                       "Unsupported dst size in %s", __func__);
 
     uint32_t Instr = 0b0110'0101'0001'0000'1010'0000'0000'0000;
     Instr |= opc << 22;
@@ -4154,7 +4154,7 @@ private:
     const bool is_scaled = op_data.scale != 0;
     const auto msize_value = FEXCore::ToUnderlying(msize);
 
-    LOGMAN_THROW_A_FMT(op_data.scale == 0 || op_data.scale == msize_value, "scale may only be 0 or {}", msize_value);
+    LOGMAN_THROW_A_FMT(op_data.scale == 0 || op_data.scale == msize_value, "scale may only be 0 or %u", msize_value);
 
     uint32_t mod_value = FEXCore::ToUnderlying(op_data.mod);
     uint32_t Instr = 0b1000'0100'0000'0000'0000'0000'0000'0000;
@@ -4169,7 +4169,7 @@ private:
       // LSL and no modifier encodings should be setting bit 22 to 1.
       if (is_lsl || is_none) {
         if (is_lsl) {
-          LOGMAN_THROW_A_FMT(op_data.scale == msize_value, "mod type of LSL must have a scale of {}", msize_value);
+          LOGMAN_THROW_A_FMT(op_data.scale == msize_value, "mod type of LSL must have a scale of %u", msize_value);
         } else {
           LOGMAN_THROW_A_FMT(op_data.scale == 0, "mod type of none must have a scale of 0");
         }
@@ -4205,7 +4205,7 @@ private:
     const auto msize_value = FEXCore::ToUnderlying(msize);
     uint32_t mod_value = FEXCore::ToUnderlying(op_data.mod);
 
-    LOGMAN_THROW_A_FMT(op_data.scale == 0 || op_data.scale == msize_value, "scale may only be 0 or {}", msize_value);
+    LOGMAN_THROW_A_FMT(op_data.scale == 0 || op_data.scale == msize_value, "scale may only be 0 or %u", msize_value);
 
     uint32_t Instr = 0b1110'0100'0000'0000'1000'0000'0000'0000;
 
@@ -4216,7 +4216,7 @@ private:
 
       if (is_lsl || is_none) {
         if (is_lsl) {
-          LOGMAN_THROW_A_FMT(op_data.scale == msize_value, "mod type of LSL must have a scale of {}", msize_value);
+          LOGMAN_THROW_A_FMT(op_data.scale == msize_value, "mod type of LSL must have a scale of %u", msize_value);
         } else {
           LOGMAN_THROW_A_FMT(op_data.scale == 0, "mod type of none must have a scale of 0");
         }
@@ -4270,8 +4270,8 @@ private:
     const auto imm = mem_op.MetaType.VectorImmType.Imm;
     const auto imm_to_encode = imm >> msize_value;
 
-    LOGMAN_THROW_A_FMT(imm <= imm_limit, "Immediate must be within [0, {}]", imm_limit);
-    LOGMAN_THROW_A_FMT(imm == 0 || (imm % msize_bytes) == 0, "Immediate must be cleanly divisible by {}", msize_bytes);
+    LOGMAN_THROW_A_FMT(imm <= imm_limit, "Immediate must be within [0, %u]", imm_limit);
+    LOGMAN_THROW_A_FMT(imm == 0 || (imm % msize_bytes) == 0, "Immediate must be cleanly divisible by %u", msize_bytes);
 
     uint32_t Instr = 0b1000'0100'0000'0000'1000'0000'0000'0000;
 
@@ -4308,7 +4308,7 @@ private:
   }
 
   void SVEUnsizedLoadStoreContiguous(uint32_t op2, int32_t imm, ZRegister zt, Register rn, bool is_store) {
-    LOGMAN_THROW_A_FMT(imm >= -256 && imm <= 255, "Immediate offset ({}) too large. Must be within [-256, 255].", imm);
+    LOGMAN_THROW_A_FMT(imm >= -256 && imm <= 255, "Immediate offset (%d) too large. Must be within [-256, 255].", imm);
 
     const auto imm9 = static_cast<uint32_t>(imm) & 0b1'1111'1111;
 
@@ -4330,13 +4330,12 @@ private:
   // SVE load/store multiple structures (scalar plus immediate)
   void SVEContiguousMultipleStructures(int32_t num_regs, bool is_store, uint32_t msz, int32_t imm, ZRegister zt, PRegister pg, Register rn) {
     LOGMAN_THROW_A_FMT(pg <= PReg::p7, "Can only use p0-p7 as a governing predicate");
-    LOGMAN_THROW_A_FMT((imm % num_regs) == 0, "Offset must be a multiple of {}", num_regs);
+    LOGMAN_THROW_A_FMT((imm % num_regs) == 0, "Offset must be a multiple of %d", num_regs);
 
     const auto min_offset = -8 * num_regs;
     const auto max_offset = 7 * num_regs;
     LOGMAN_THROW_A_FMT(imm >= min_offset && imm <= max_offset,
-                       "Invalid load/store offset ({}). Offset must be a multiple of {} and be within [{}, {}]", imm, num_regs, min_offset,
-                       max_offset);
+                       "Invalid load/store offset (%d). Offset must be a multiple of %d and be within [%d, %d]", imm, num_regs, min_offset, max_offset);
 
     const auto imm4 = static_cast<uint32_t>(imm / num_regs) & 0xF;
     const auto opc = static_cast<uint32_t>(num_regs - 1);
@@ -4357,7 +4356,7 @@ private:
   // SVE contiguous non-temporal load (scalar plus immediate)
   void SVEContiguousNontemporalLoad(uint32_t msz, ZRegister zt, PRegister pg, Register rn, int32_t imm) {
     LOGMAN_THROW_A_FMT(pg <= PReg::p7, "Can only use p0-p7 as a governing predicate");
-    LOGMAN_THROW_A_FMT(imm >= -8 && imm <= 7, "Invalid loadstore offset ({}). Must be between [-8, 7]", imm);
+    LOGMAN_THROW_A_FMT(imm >= -8 && imm <= 7, "Invalid loadstore offset (%d). Must be between [-8, 7]", imm);
 
     const auto imm4 = static_cast<uint32_t>(imm) & 0xF;
     uint32_t Instr = 0b1010'0100'0000'0000'1110'0000'0000'0000;
@@ -4372,7 +4371,7 @@ private:
   // SVE contiguous non-temporal store (scalar plus immediate)
   void SVEContiguousNontemporalStore(uint32_t msz, ZRegister zt, PRegister pg, Register rn, int32_t imm) {
     LOGMAN_THROW_A_FMT(pg <= PReg::p7, "Can only use p0-p7 as a governing predicate");
-    LOGMAN_THROW_A_FMT(imm >= -8 && imm <= 7, "Invalid loadstore offset ({}). Must be between [-8, 7]", imm);
+    LOGMAN_THROW_A_FMT(imm >= -8 && imm <= 7, "Invalid loadstore offset (%d). Must be between [-8, 7]", imm);
 
     const auto imm4 = static_cast<uint32_t>(imm) & 0xF;
     uint32_t Instr = 0b1110'0100'0001'0000'1110'0000'0000'0000;
@@ -4386,7 +4385,7 @@ private:
 
   void SVEContiguousLoadImm(bool is_store, uint32_t dtype, int32_t imm, PRegister pg, Register rn, ZRegister zt) {
     LOGMAN_THROW_A_FMT(pg <= PReg::p7, "Can only use p0-p7 as a governing predicate");
-    LOGMAN_THROW_A_FMT(imm >= -8 && imm <= 7, "Invalid loadstore offset ({}). Must be between [-8, 7]", imm);
+    LOGMAN_THROW_A_FMT(imm >= -8 && imm <= 7, "Invalid loadstore offset (%d). Must be between [-8, 7]", imm);
 
     const auto imm4 = static_cast<uint32_t>(imm) & 0xF;
 
@@ -4443,8 +4442,8 @@ private:
     const auto max_imm = (esize << 3) - esize;
     const auto min_imm = -(max_imm + esize);
 
-    LOGMAN_THROW_A_FMT((imm % esize) == 0, "imm ({}) must be a multiple of {}", imm, esize);
-    LOGMAN_THROW_A_FMT(imm >= min_imm && imm <= max_imm, "imm ({}) must be within [{}, {}]", imm, min_imm, max_imm);
+    LOGMAN_THROW_A_FMT((imm % esize) == 0, "imm (%d) must be a multiple of %d", imm, esize);
+    LOGMAN_THROW_A_FMT(imm >= min_imm && imm <= max_imm, "imm (%d) must be within [%d, %d]", imm, min_imm, max_imm);
 
     const auto sanitized_imm = static_cast<uint32_t>(imm / esize) & 0b1111;
 
@@ -4486,7 +4485,7 @@ private:
 
     const auto data_size_bytes = 1U << msize_value;
     const auto max_imm = (64U << msize_value) - data_size_bytes;
-    LOGMAN_THROW_A_FMT((imm % data_size_bytes) == 0 && imm <= max_imm, "imm must be a multiple of {} and be within [0, {}]",
+    LOGMAN_THROW_A_FMT((imm % data_size_bytes) == 0 && imm <= max_imm, "imm must be a multiple of %u and be within [0, %u]",
                        data_size_bytes, max_imm);
 
     const auto sanitized_imm = imm / data_size_bytes;
@@ -4505,7 +4504,7 @@ private:
     // or equal to dtypel. The only time this isn't the case is with signed variants.
     LOGMAN_THROW_A_FMT(is_signed == (dtypeh > dtypel),
                        "Invalid element size used with load broadcast instruction "
-                       "(esize: {}, msize: {})",
+                       "(esize: %u, msize: %u)",
                        esize_value, msize_value);
 
     uint32_t Instr = 0b1000'0100'0100'0000'1000'0000'0000'0000;
@@ -4532,7 +4531,7 @@ private:
 
   void SVEIntegerCompareImm(uint32_t lt, uint32_t ne, uint32_t imm7, SubRegSize size, PRegister pg, ZRegister zn, PRegister pd) {
     LOGMAN_THROW_A_FMT(size != SubRegSize::i128Bit, "Can't use 128-bit size");
-    LOGMAN_THROW_A_FMT(imm7 < 128, "Invalid imm ({}). Must be within [0, 128]", imm7);
+    LOGMAN_THROW_A_FMT(imm7 < 128, "Invalid imm (%u). Must be within [0, 128]", imm7);
     LOGMAN_THROW_A_FMT(pg <= PReg::p7, "Can only use p0-p7 as a governing predicate");
 
     uint32_t Instr = 0b0010'0100'0010'0000'0000'0000'0000'0000;
@@ -4548,7 +4547,7 @@ private:
 
   void SVEIntegerCompareSignedImm(uint32_t op, uint32_t o2, uint32_t ne, int32_t imm5, SubRegSize size, PRegister pg, ZRegister zn, PRegister pd) {
     LOGMAN_THROW_A_FMT(size != SubRegSize::i128Bit, "Can't use 128-bit size");
-    LOGMAN_THROW_A_FMT(imm5 >= -16 && imm5 <= 15, "Invalid imm ({}). Must be within [-16, 15].", imm5);
+    LOGMAN_THROW_A_FMT(imm5 >= -16 && imm5 <= 15, "Invalid imm (%d). Must be within [-16, 15].", imm5);
     LOGMAN_THROW_A_FMT(pg <= PReg::p7, "Can only use p0-p7 as a governing predicate");
 
     uint32_t Instr = 0b0010'0101'0000'0000'0000'0000'0000'0000;
@@ -4713,7 +4712,7 @@ private:
 
   void SVEFloatUnary(uint32_t opc, SubRegSize size, PRegister pg, ZRegister zn, ZRegister zd) {
     LOGMAN_THROW_A_FMT(pg <= PReg::p7, "Can only use p0-p7 as a governing predicate");
-    LOGMAN_THROW_A_FMT(IsStandardFloatSize(size), "Unsupported size in {}", __func__);
+    LOGMAN_THROW_A_FMT(IsStandardFloatSize(size), "Unsupported size in %s", __func__);
 
     uint32_t Instr = 0b0110'0101'0000'1100'1010'0000'0000'0000;
     Instr |= FEXCore::ToUnderlying(size) << 22;
@@ -4862,7 +4861,7 @@ private:
 
     const auto Underlying = FEXCore::ToUnderlying(size);
     const uint32_t IndexMax = (16 / (1U << Underlying)) - 1;
-    LOGMAN_THROW_A_FMT(index <= IndexMax, "Index must be within 0-{}", IndexMax);
+    LOGMAN_THROW_A_FMT(index <= IndexMax, "Index must be within 0-%u", IndexMax);
 
     // Can be bit 20 or 19 depending on whether or not the element size is 64-bit.
     const auto IndexShift = 19 + static_cast<uint32_t>(size == SubRegSize::i64Bit);
@@ -4881,8 +4880,8 @@ private:
   void SVEFPMultiplyAddLongIndexed(uint32_t o2, uint32_t op, uint32_t T, SubRegSize dstsize, ZRegister zda, ZRegister zn, ZRegister zm,
                                    uint32_t index) {
     LOGMAN_THROW_A_FMT(dstsize == SubRegSize::i32Bit, "Destination size must be 32-bit.");
-    LOGMAN_THROW_A_FMT(index <= 7, "Index ({}) must be within [0, 7]", index);
-    LOGMAN_THROW_A_FMT(zm <= ZReg::z7, "zm (z{}) must be within [z0, z7]", zm.Idx());
+    LOGMAN_THROW_A_FMT(index <= 7, "Index (%u) must be within [0, 7]", index);
+    LOGMAN_THROW_A_FMT(zm <= ZReg::z7, "zm (z%u) must be within [z0, z7]", zm.Idx());
 
     uint32_t Inst = 0b0110'0100'1010'0000'0100'0000'0000'0000;
     Inst |= o2 << 22;
@@ -5087,9 +5086,9 @@ private:
     const uint32_t element_size = SubRegSizeInBits(size);
 
     if (is_left_shift) {
-      LOGMAN_THROW_A_FMT(shift < element_size, "Invalid left shift value ({}). Must be within [0, {}]", shift, element_size - 1);
+      LOGMAN_THROW_A_FMT(shift < element_size, "Invalid left shift value (%u). Must be within [0, %u]", shift, element_size - 1);
     } else {
-      LOGMAN_THROW_A_FMT(shift > 0 && shift <= element_size, "Invalid right shift value ({}). Must be within [1, {}]", shift, element_size);
+      LOGMAN_THROW_A_FMT(shift > 0 && shift <= element_size, "Invalid right shift value (%u). Must be within [1, %u]", shift, element_size);
     }
 
     // Both left and right shifts encodes their shift as if it were
@@ -5168,7 +5167,7 @@ private:
 protected:
   static uint32_t FP32ToImm8(float value) {
 #if defined(ASSERTIONS_ENABLED) && ASSERTIONS_ENABLED
-    LOGMAN_THROW_A_FMT(IsValidFPValueForImm8(value), "Value ({}) cannot be encoded into an 8-bit immediate", value);
+    LOGMAN_THROW_A_FMT(IsValidFPValueForImm8(value), "Value (%g) cannot be encoded into an 8-bit immediate", value);
 #endif
 
     const auto bits = std::bit_cast<uint32_t>(value);
@@ -5181,7 +5180,7 @@ protected:
 
   static uint32_t FP64ToImm8(double value) {
 #if defined(ASSERTIONS_ENABLED) && ASSERTIONS_ENABLED
-    LOGMAN_THROW_A_FMT(IsValidFPValueForImm8(value), "Value ({}) cannot be encoded into an 8-bit immediate", value);
+    LOGMAN_THROW_A_FMT(IsValidFPValueForImm8(value), "Value (%g) cannot be encoded into an 8-bit immediate", value);
 #endif
 
     const auto bits = std::bit_cast<uint64_t>(value);
@@ -5210,8 +5209,8 @@ private:
       const int32_t imm16_limit = 32768;
       const bool is_int16_imm = -imm16_limit <= imm && imm < imm16_limit;
 
-      LOGMAN_THROW_A_FMT(is_int16_imm, "Immediate ({}) must be a 16-bit value within [-32768, 32512]", imm);
-      LOGMAN_THROW_A_FMT((imm % 256) == 0, "Immediate ({}) must be a multiple of 256", imm);
+      LOGMAN_THROW_A_FMT(is_int16_imm, "Immediate (%d) must be a 16-bit value within [-32768, 32512]", imm);
+      LOGMAN_THROW_A_FMT((imm % 256) == 0, "Immediate (%d) must be a multiple of 256", imm);
 
       imm /= 256;
       shift = 1;

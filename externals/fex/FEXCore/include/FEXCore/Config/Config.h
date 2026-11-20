@@ -77,7 +77,7 @@ static inline std::optional<fextl::string> EnumParser(const ArrayPairType& EnumP
       std::find_if(EnumPairs.begin(), EnumPairs.end(), [Option](const PairTypes& Value) -> bool { return Value.first == Option; });
 
     if (EnumValue == EnumPairs.end()) {
-      LogMan::Msg::IFmt("Skipping Unknown option: {}", Option);
+      LogMan::Msg::IFmt("Skipping Unknown option: %.*s", static_cast<int>((Option).size()), (Option).data());
     } else {
       EnumMask |= FEXCore::ToUnderlying(EnumValue->second);
     }
@@ -90,7 +90,7 @@ static inline std::optional<fextl::string> EnumParser(const ArrayPairType& EnumP
     Option = View.substr(Begin, End - Begin);
   }
 
-  return fextl::fmt::format("{}", EnumMask);
+  return fextl::fmt::format("%" PRIu64, EnumMask);
 }
 
 using StringArrayType = fextl::list<fextl::string>;

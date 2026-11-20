@@ -3538,7 +3538,7 @@ public:
   }
   void ldr(ARMEmitter::WRegister rt, ARMEmitter::Register rn, ARMEmitter::Register rm, ARMEmitter::ExtendedType Option, uint32_t Shift) {
     LOGMAN_THROW_A_FMT((FEXCore::ToUnderlying(Option) & 0b010) == 0b010, "Unsupported Extendtype");
-    LOGMAN_THROW_A_FMT(Shift == 0 || Shift == 2, "Unsupported shift amount: {}", Shift);
+    LOGMAN_THROW_A_FMT(Shift == 0 || Shift == 2, "Unsupported shift amount: %u", Shift);
     constexpr uint32_t Op = 0b1011'1000'001 << 21 | (0b10 << 10);
     LoadStoreRegisterOffset(Op, 0b01, rt, rn, rm, Option, Shift ? 1 : 0);
   }
@@ -4413,8 +4413,8 @@ private:
   }
 
   void LoadStorePAC(uint32_t size, uint32_t VR, uint32_t M, int32_t imm, IndexType type, Register rn, Register rt) {
-    LOGMAN_THROW_A_FMT((imm % 8) == 0, "Immediate ({}) must be divisible by 8", imm);
-    LOGMAN_THROW_A_FMT(imm >= -4096 && imm <= 4088, "Immediate ({}) must be within [-4096, 4088]", imm);
+    LOGMAN_THROW_A_FMT((imm % 8) == 0, "Immediate (%d) must be divisible by 8", imm);
+    LOGMAN_THROW_A_FMT(imm >= -4096 && imm <= 4088, "Immediate (%d) must be within [-4096, 4088]", imm);
     LOGMAN_THROW_A_FMT(type == IndexType::OFFSET || type == IndexType::PRE, "PAC may only use offset or pre-indexed values");
 
     // The immediate is scaled down in order to fit within the available 10 immediate bits.
@@ -4451,8 +4451,8 @@ private:
     [[maybe_unused]] const uint32_t MaxImm = LSByteMaxUnsignedOffset << SizeShift;
     [[maybe_unused]] const uint32_t ElementSize = 1U << SizeShift;
 
-    LOGMAN_THROW_A_FMT(Imm <= MaxImm, "{}: Offset not valid: Imm: 0x{:x} Max: 0x{:x}", __func__, Imm, MaxImm);
-    LOGMAN_THROW_A_FMT((Imm % ElementSize) == 0, "{}: Offset must be a multiple of {}. Offset: 0x{:x}", __func__, ElementSize, Imm);
+    LOGMAN_THROW_A_FMT(Imm <= MaxImm, "%s: Offset not valid: Imm: 0x%x Max: 0x%x", __func__, Imm, MaxImm);
+    LOGMAN_THROW_A_FMT((Imm % ElementSize) == 0, "%s: Offset must be a multiple of %u. Offset: 0x%x", __func__, ElementSize, Imm);
 
     const uint32_t ShiftedImm = Imm >> SizeShift;
 

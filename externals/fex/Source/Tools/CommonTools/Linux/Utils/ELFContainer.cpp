@@ -125,8 +125,8 @@ ELFContainer::ELFContainer(const fextl::string& Filename, const fextl::string& R
     if (LoadELF(RootFSLink)) {
       // Found the interpreter in the rootfs
     } else if (!LoadELF(RawString)) {
-      LogMan::Msg::EFmt("Failed to find guest ELF's interpter '{}'", RawString);
-      LogMan::Msg::EFmt("Did you forget to set an x86 rootfs? Currently '{}'", RootFS);
+      LogMan::Msg::EFmt("Failed to find guest ELF's interpter '%s'", RawString);
+      LogMan::Msg::EFmt("Did you forget to set an x86 rootfs? Currently '%s'", (RootFS).c_str());
       Loaded = false;
       return;
     }
@@ -257,7 +257,7 @@ void ELFContainer::WriteLoadableSections(MemoryWriter Writer, uint64_t Offset) {
     for (uint32_t i = 0; i < ProgramHeaders.size(); ++i) {
       const Elf32_Phdr* hdr = ProgramHeaders.at(i)._32;
       if (hdr->p_type == PT_LOAD) {
-        // LogMan::Msg::DFmt("PT_LOAD: Base: {} Offset: [0x{:x}, 0x{:x})", Offset, hdr->p_paddr, hdr->p_filesz);
+        // LogMan::Msg::DFmt("PT_LOAD: Base: %u Offset: [0x%x, 0x%x)", Offset, hdr->p_paddr, hdr->p_filesz);
         Writer(&RawFile.at(hdr->p_offset), Offset + hdr->p_paddr, hdr->p_filesz);
       }
 
@@ -791,7 +791,7 @@ void ELFContainer::FixupRelocations(void* ELFBase, uint64_t GuestELFBase, Symbol
             } else {
               // If we set Location to a value then apps crash
               // *Location = 0xDEADBEEFBAD0DAD3ULL;
-              LogMan::Msg::DFmt("TPOFF without Entry? {:x} + {:x} + {:x}", GuestELFBase, TLSHeader._64->p_paddr, Entry->r_addend);
+              LogMan::Msg::DFmt("TPOFF without Entry? %llx + %llx + %" PRIx64, static_cast<unsigned long long>(GuestELFBase), static_cast<unsigned long long>(TLSHeader._64->p_paddr), Entry->r_addend);
               if (1) {
                 *Location = TLSHeader._64->p_paddr + Entry->r_addend;
               } else if (Entry->r_offset == 0x1e3dc8) {
@@ -801,7 +801,7 @@ void ELFContainer::FixupRelocations(void* ELFBase, uint64_t GuestELFBase, Symbol
               }
             }
           } else {
-            LogMan::Msg::DFmt("Unknown relocation type: {}(0x{:x})", Type, Type);
+            LogMan::Msg::DFmt("Unknown relocation type: %u(0x%x)", Type, Type);
           }
         }
       }

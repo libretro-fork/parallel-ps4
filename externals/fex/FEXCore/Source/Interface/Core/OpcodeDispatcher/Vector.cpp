@@ -3633,7 +3633,7 @@ void OpDispatchBuilder::VPFCMPOp(OpcodeArgs, uint8_t CompType) {
   case 0x02: // GT
     Result = _VFCMPGT(Size, OpSize::i32Bit, Dest, Src);
     break;
-  default: LOGMAN_MSG_A_FMT("Unknown Comparison type: {}", CompType); break;
+  default: LOGMAN_MSG_A_FMT("Unknown Comparison type: %u", CompType); break;
   }
 
   StoreResultFPR(Op, Result);

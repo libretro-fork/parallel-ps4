@@ -61,15 +61,15 @@ fextl::unordered_map<fextl::string, ExtendedVolatileMetadata> ParseExtendedVolat
         uint64_t begin {}, end {};
         char* str_end;
         begin = std::strtoull(tso_region_view.data(), &str_end, 16);
-        LOGMAN_THROW_A_FMT(tso_region_view.data() != str_end, "Couldn't parse begin {}", tso_region_view);
+        LOGMAN_THROW_A_FMT(tso_region_view.data() != str_end, "Couldn't parse begin %.*s", static_cast<int>((tso_region_view).size()), (tso_region_view).data());
 
         // Skip `-` separator.
         ++str_end;
 
-        LOGMAN_THROW_A_FMT(str_end != tso_region_view.end(), "Couldn't parse end {}", tso_region_view);
+        LOGMAN_THROW_A_FMT(str_end != tso_region_view.end(), "Couldn't parse end %.*s", static_cast<int>((tso_region_view).size()), (tso_region_view).data());
         auto str_begin = str_end;
         end = std::strtoull(str_begin, &str_end, 16);
-        LOGMAN_THROW_A_FMT(str_begin != str_end, "Couldn't parse end {}", tso_region_view);
+        LOGMAN_THROW_A_FMT(str_begin != str_end, "Couldn't parse end %.*s", static_cast<int>((tso_region_view).size()), (tso_region_view).data());
 
         current_module->second.VolatileValidRanges.Insert({begin, end});
       }
@@ -92,7 +92,7 @@ fextl::unordered_map<fextl::string, ExtendedVolatileMetadata> ParseExtendedVolat
         uint64_t offset {};
         char* str_end;
         offset = std::strtoull(tso_region_view.data(), &str_end, 16);
-        LOGMAN_THROW_A_FMT(tso_region_view.data() != str_end, "Couldn't parse offset {}", tso_region_view);
+        LOGMAN_THROW_A_FMT(tso_region_view.data() != str_end, "Couldn't parse offset %.*s", static_cast<int>((tso_region_view).size()), (tso_region_view).data());
 
         current_module->second.VolatileInstructions.insert(offset);
       }
@@ -100,7 +100,7 @@ fextl::unordered_map<fextl::string, ExtendedVolatileMetadata> ParseExtendedVolat
       ++section;
     }
 
-    LOGMAN_THROW_A_FMT(section == sections_end, "Expected ':' or end of input, got {}", *section);
+    LOGMAN_THROW_A_FMT(section == sections_end, "Expected ':' or end of input, got %.*s", static_cast<int>((*section).size()), (*section).data());
   }
 
   return ExtendedMetaData;

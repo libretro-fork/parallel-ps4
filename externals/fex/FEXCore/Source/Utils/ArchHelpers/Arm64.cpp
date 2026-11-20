@@ -1422,7 +1422,7 @@ static bool HandleAtomicMemOp(uint32_t Instr, uint64_t* GPRs, uint32_t* StrictSp
     case ATOMIC_EOR_OP: DesiredFunction = EORDesired; break;
     case ATOMIC_SET_OP: DesiredFunction = SETDesired; break;
     case ATOMIC_SWAP_OP: DesiredFunction = SWAPDesired; break;
-    default: LogMan::Msg::EFmt("Unhandled JIT SIGBUS Atomic mem op 0x{:02x}", Op); return false;
+    default: LogMan::Msg::EFmt("Unhandled JIT SIGBUS Atomic mem op 0x%02x", Op); return false;
     }
 
     auto Res = DoCAS16<true>(Source,
@@ -1467,7 +1467,7 @@ static bool HandleAtomicMemOp(uint32_t Instr, uint64_t* GPRs, uint32_t* StrictSp
     case ATOMIC_EOR_OP: DesiredFunction = EORDesired; break;
     case ATOMIC_SET_OP: DesiredFunction = SETDesired; break;
     case ATOMIC_SWAP_OP: DesiredFunction = SWAPDesired; break;
-    default: LogMan::Msg::EFmt("Unhandled JIT SIGBUS Atomic mem op 0x{:02x}", Op); return false;
+    default: LogMan::Msg::EFmt("Unhandled JIT SIGBUS Atomic mem op 0x%02x", Op); return false;
     }
 
     auto Res = DoCAS32<true>(Source,
@@ -1512,7 +1512,7 @@ static bool HandleAtomicMemOp(uint32_t Instr, uint64_t* GPRs, uint32_t* StrictSp
     case ATOMIC_EOR_OP: DesiredFunction = EORDesired; break;
     case ATOMIC_SET_OP: DesiredFunction = SETDesired; break;
     case ATOMIC_SWAP_OP: DesiredFunction = SWAPDesired; break;
-    default: LogMan::Msg::EFmt("Unhandled JIT SIGBUS Atomic mem op 0x{:02x}", Op); return false;
+    default: LogMan::Msg::EFmt("Unhandled JIT SIGBUS Atomic mem op 0x%02x", Op); return false;
     }
 
     auto Res = DoCAS64<true>(Source,
@@ -1789,7 +1789,7 @@ static uint64_t HandleAtomicLoadstoreExclusive(uintptr_t ProgramCounter, uint64_
       // This is the last instruction we care about. Leave now
       break;
     } else {
-      LogMan::Msg::AFmt("Unknown instruction 0x{:08x}", NextInstr);
+      LogMan::Msg::AFmt("Unknown instruction 0x%08x", NextInstr);
     }
   }
 
@@ -1857,7 +1857,7 @@ static uint64_t HandleAtomicLoadstoreExclusive(uintptr_t ProgramCounter, uint64_
     case ExclusiveAtomicPairType::TYPE_EOR: DesiredFunction = EORDesired; break;
     case ExclusiveAtomicPairType::TYPE_EON: DesiredFunction = EONDesired; break;
     case ExclusiveAtomicPairType::TYPE_NEG: DesiredFunction = NEGDesired; break;
-    default: LogMan::Msg::EFmt("Unhandled JIT SIGBUS Atomic mem op 0x{:02x}", FEXCore::ToUnderlying(AtomicOp)); return false;
+    default: LogMan::Msg::EFmt("Unhandled JIT SIGBUS Atomic mem op 0x%02x", FEXCore::ToUnderlying(AtomicOp)); return false;
     }
 
     auto Res = DoCAS16<DoRetry>(Source,
@@ -1884,7 +1884,7 @@ static uint64_t HandleAtomicLoadstoreExclusive(uintptr_t ProgramCounter, uint64_
     case ExclusiveAtomicPairType::TYPE_EOR: DesiredFunction = EORDesired; break;
     case ExclusiveAtomicPairType::TYPE_EON: DesiredFunction = EONDesired; break;
     case ExclusiveAtomicPairType::TYPE_NEG: DesiredFunction = NEGDesired; break;
-    default: LogMan::Msg::EFmt("Unhandled JIT SIGBUS Atomic mem op 0x{:02x}", FEXCore::ToUnderlying(AtomicOp)); return false;
+    default: LogMan::Msg::EFmt("Unhandled JIT SIGBUS Atomic mem op 0x%02x", FEXCore::ToUnderlying(AtomicOp)); return false;
     }
 
     auto Res = DoCAS32<DoRetry>(Source,
@@ -1911,7 +1911,7 @@ static uint64_t HandleAtomicLoadstoreExclusive(uintptr_t ProgramCounter, uint64_
     case ExclusiveAtomicPairType::TYPE_EOR: DesiredFunction = EORDesired; break;
     case ExclusiveAtomicPairType::TYPE_EON: DesiredFunction = EONDesired; break;
     case ExclusiveAtomicPairType::TYPE_NEG: DesiredFunction = NEGDesired; break;
-    default: LogMan::Msg::EFmt("Unhandled JIT SIGBUS Atomic mem op 0x{:02x}", FEXCore::ToUnderlying(AtomicOp)); return false;
+    default: LogMan::Msg::EFmt("Unhandled JIT SIGBUS Atomic mem op 0x%02x", FEXCore::ToUnderlying(AtomicOp)); return false;
     }
 
     auto Res = DoCAS64<DoRetry>(Source,
@@ -1960,7 +1960,7 @@ std::optional<int32_t> HandleUnalignedAccess(FEXCore::Core::InternalThreadState*
         // Skip this instruction now
         return 4;
       } else {
-        LogMan::Msg::EFmt("Unhandled JIT SIGBUS CASPAL: PC: 0x{:x} Instruction: 0x{:08x}\n", ProgramCounter, PC[0]);
+        LogMan::Msg::EFmt("Unhandled JIT SIGBUS CASPAL: PC: 0x%llx Instruction: 0x%08x\n", static_cast<unsigned long long>(ProgramCounter), PC[0]);
         return std::nullopt;
       }
     } else if ((Instr & ArchHelpers::Arm64::CASAL_MASK) == ArchHelpers::Arm64::CASAL_INST) { // CASAL
@@ -1968,7 +1968,7 @@ std::optional<int32_t> HandleUnalignedAccess(FEXCore::Core::InternalThreadState*
         // Skip this instruction now
         return 4;
       } else {
-        LogMan::Msg::EFmt("Unhandled JIT SIGBUS CASAL: PC: 0x{:x} Instruction: 0x{:08x}\n", ProgramCounter, PC[0]);
+        LogMan::Msg::EFmt("Unhandled JIT SIGBUS CASAL: PC: 0x%llx Instruction: 0x%08x\n", static_cast<unsigned long long>(ProgramCounter), PC[0]);
         return std::nullopt;
       }
     } else if ((Instr & LDAXR_MASK) == LDAR_INST ||  // LDAR*
@@ -1977,7 +1977,7 @@ std::optional<int32_t> HandleUnalignedAccess(FEXCore::Core::InternalThreadState*
         // Skip this instruction now
         return 4;
       } else {
-        LogMan::Msg::EFmt("Unhandled JIT SIGBUS LDAR*: PC: 0x{:x} Instruction: 0x{:08x}\n", ProgramCounter, PC[0]);
+        LogMan::Msg::EFmt("Unhandled JIT SIGBUS LDAR*: PC: 0x%llx Instruction: 0x%08x\n", static_cast<unsigned long long>(ProgramCounter), PC[0]);
         return std::nullopt;
       }
     } else if ((Instr & LDAXR_MASK) == STLR_INST) { // STLR*
@@ -1985,7 +1985,7 @@ std::optional<int32_t> HandleUnalignedAccess(FEXCore::Core::InternalThreadState*
         // Skip this instruction now
         return 4;
       } else {
-        LogMan::Msg::EFmt("Unhandled JIT SIGBUS STLR*: PC: 0x{:x} Instruction: 0x{:08x}\n", ProgramCounter, PC[0]);
+        LogMan::Msg::EFmt("Unhandled JIT SIGBUS STLR*: PC: 0x%llx Instruction: 0x%08x\n", static_cast<unsigned long long>(ProgramCounter), PC[0]);
         return std::nullopt;
       }
     } else if ((Instr & RCPC2_MASK) == LDAPUR_INST) { // LDAPUR*
@@ -1995,7 +1995,7 @@ std::optional<int32_t> HandleUnalignedAccess(FEXCore::Core::InternalThreadState*
         // Skip this instruction now
         return 4;
       } else {
-        LogMan::Msg::EFmt("Unhandled JIT SIGBUS LDAPUR*: PC: 0x{:x} Instruction: 0x{:08x}\n", ProgramCounter, PC[0]);
+        LogMan::Msg::EFmt("Unhandled JIT SIGBUS LDAPUR*: PC: 0x%llx Instruction: 0x%08x\n", static_cast<unsigned long long>(ProgramCounter), PC[0]);
         return std::nullopt;
       }
     } else if ((Instr & RCPC2_MASK) == STLUR_INST) { // STLUR*
@@ -2005,7 +2005,7 @@ std::optional<int32_t> HandleUnalignedAccess(FEXCore::Core::InternalThreadState*
         // Skip this instruction now
         return 4;
       } else {
-        LogMan::Msg::EFmt("Unhandled JIT SIGBUS LDLUR*: PC: 0x{:x} Instruction: 0x{:08x}\n", ProgramCounter, PC[0]);
+        LogMan::Msg::EFmt("Unhandled JIT SIGBUS LDLUR*: PC: 0x%llx Instruction: 0x%08x\n", static_cast<unsigned long long>(ProgramCounter), PC[0]);
         return std::nullopt;
       }
     } else if ((Instr & ArchHelpers::Arm64::LDAXR_MASK) == ArchHelpers::Arm64::LDAXR_INST) { // LDAXR*
@@ -2036,7 +2036,7 @@ std::optional<int32_t> HandleUnalignedAccess(FEXCore::Core::InternalThreadState*
         return 4;
       } else {
         uint8_t Op = (PC[0] >> 12) & 0xF;
-        LogMan::Msg::EFmt("Unhandled JIT SIGBUS Atomic mem op 0x{:02x}: PC: 0x{:x} Instruction: 0x{:08x}\n", Op, ProgramCounter, PC[0]);
+        LogMan::Msg::EFmt("Unhandled JIT SIGBUS Atomic mem op 0x%02x: PC: 0x%llx Instruction: 0x%08x\n", Op, static_cast<unsigned long long>(ProgramCounter), PC[0]);
         return std::nullopt;
       }
     }
@@ -2056,7 +2056,7 @@ std::optional<int32_t> HandleUnalignedAccess(FEXCore::Core::InternalThreadState*
       // Skip this instruction now
       return 4;
     } else {
-      LogMan::Msg::EFmt("Unhandled JIT SIGBUS CASPAL: PC: 0x{:x} Instruction: 0x{:08x}\n", ProgramCounter, PC[0]);
+      LogMan::Msg::EFmt("Unhandled JIT SIGBUS CASPAL: PC: 0x%llx Instruction: 0x%08x\n", static_cast<unsigned long long>(ProgramCounter), PC[0]);
       return std::nullopt;
     }
   } else if ((Instr & ArchHelpers::Arm64::CASAL_MASK) == ArchHelpers::Arm64::CASAL_INST) { // CASAL
@@ -2064,7 +2064,7 @@ std::optional<int32_t> HandleUnalignedAccess(FEXCore::Core::InternalThreadState*
       // Skip this instruction now
       return 4;
     } else {
-      LogMan::Msg::EFmt("Unhandled JIT SIGBUS CASAL: PC: 0x{:x} Instruction: 0x{:08x}\n", ProgramCounter, PC[0]);
+      LogMan::Msg::EFmt("Unhandled JIT SIGBUS CASAL: PC: 0x%llx Instruction: 0x%08x\n", static_cast<unsigned long long>(ProgramCounter), PC[0]);
       return std::nullopt;
     }
   } else if ((Instr & LDAXR_MASK) == LDAR_INST ||  // LDAR*
@@ -2078,7 +2078,7 @@ std::optional<int32_t> HandleUnalignedAccess(FEXCore::Core::InternalThreadState*
       return 4;
     } else {
       uint8_t Op = (PC[0] >> 12) & 0xF;
-      LogMan::Msg::EFmt("Unhandled JIT SIGBUS Atomic mem op 0x{:02x}: PC: 0x{:x} Instruction: 0x{:08x}\n", Op, ProgramCounter, PC[0]);
+      LogMan::Msg::EFmt("Unhandled JIT SIGBUS Atomic mem op 0x%02x: PC: 0x%llx Instruction: 0x%08x\n", Op, static_cast<unsigned long long>(ProgramCounter), PC[0]);
       return std::nullopt;
     }
   } else if ((Instr & ArchHelpers::Arm64::LDAXR_MASK) == ArchHelpers::Arm64::LDAXR_INST) { // LDAXR*
@@ -2095,7 +2095,7 @@ std::optional<int32_t> HandleUnalignedAccess(FEXCore::Core::InternalThreadState*
       // Skip this instruction now
       return BytesToSkip;
     } else {
-      LogMan::Msg::EFmt("Unhandled JIT SIGBUS CASPAL: PC: 0x{:x} Instruction: 0x{:08x}\n", ProgramCounter, PC[0]);
+      LogMan::Msg::EFmt("Unhandled JIT SIGBUS CASPAL: PC: 0x%llx Instruction: 0x%08x\n", static_cast<unsigned long long>(ProgramCounter), PC[0]);
       return std::nullopt;
     }
   }
@@ -2204,7 +2204,7 @@ std::optional<int32_t> HandleUnalignedAccess(FEXCore::Core::InternalThreadState*
     }
   }
 
-  LogMan::Msg::EFmt("Unhandled JIT SIGBUS: PC: 0x{:x} Instruction: 0x{:08x}\n", ProgramCounter, PC[0]);
+  LogMan::Msg::EFmt("Unhandled JIT SIGBUS: PC: 0x%llx Instruction: 0x%08x\n", static_cast<unsigned long long>(ProgramCounter), PC[0]);
   return std::nullopt;
 }
 

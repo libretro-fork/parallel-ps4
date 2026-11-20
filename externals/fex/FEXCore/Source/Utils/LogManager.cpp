@@ -20,14 +20,27 @@ namespace Throw {
     Handler = nullptr;
   }
 
-  void MFmt(const char* fmt, const fmt::format_args& args) {
+  [[noreturn]]
+  static void Throw(const char* fmt, va_list args) {
     if (Handler) {
-      auto msg = fextl::fmt::vformat(fmt, args);
+      const auto msg = fextl::fmt::vformat(fmt, args);
       Handler(msg.c_str());
     }
 
     FEX_TRAP_EXECUTION;
   }
+
+  void MFmt(const char* fmt, ...) {
+    va_list args;
+    va_start(args, fmt);
+    Throw(fmt, args);
+  }
+
+#if defined(ASSERTIONS_ENABLED) && ASSERTIONS_ENABLED
+  void VMFmt(const char* fmt, va_list args) {
+    Throw(fmt, args);
+  }
+#endif
 } // namespace Throw
 
 namespace Msg {
@@ -39,7 +52,7 @@ namespace Msg {
     Handler = nullptr;
   }
 
-  void MFmtImpl(DebugLevels level, const char* fmt, const fmt::format_args& args) {
+  void MFmtImpl(DebugLevels level, const char* fmt, va_list args) {
     if (Handler) {
       const auto msg = fextl::fmt::vformat(fmt, args);
       Handler(level, msg.c_str());

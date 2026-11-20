@@ -155,7 +155,7 @@ DEF_OP(CRC32) {
   case IR::OpSize::i16Bit: crc32ch(Dst.W(), Src1.W(), Src2.W()); break;
   case IR::OpSize::i32Bit: crc32cw(Dst.W(), Src1.W(), Src2.W()); break;
   case IR::OpSize::i64Bit: crc32cx(Dst.X(), Src1.X(), Src2.X()); break;
-  default: LOGMAN_MSG_A_FMT("Unknown CRC32 size: {}", Op->SrcSize);
+  default: LOGMAN_MSG_A_FMT("Unknown CRC32 size: %u", static_cast<unsigned char>(Op->SrcSize));
   }
 }
 
@@ -325,7 +325,7 @@ DEF_OP(PCLMUL) {
   const auto OpSize = IROp->Size;
 
   const auto Is256Bit = OpSize == IR::OpSize::i256Bit;
-  LOGMAN_THROW_A_FMT(!Is256Bit || HostSupportsSVE256, "Need SVE256 support in order to use {} with 256-bit operation", __func__);
+  LOGMAN_THROW_A_FMT(!Is256Bit || HostSupportsSVE256, "Need SVE256 support in order to use %s with 256-bit operation", __func__);
 
   const auto Dst = GetVReg(Node);
   const auto Src1 = GetVReg(Op->Src1);
@@ -351,7 +351,7 @@ DEF_OP(PCLMUL) {
       break;
     }
     default: {
-      LOGMAN_MSG_A_FMT("Unknown PCLMUL selector: {}", Op->Selector);
+      LOGMAN_MSG_A_FMT("Unknown PCLMUL selector: %u", Op->Selector);
       break;
     }
     }
@@ -376,7 +376,7 @@ DEF_OP(PCLMUL) {
       break;
     }
     default: {
-      LOGMAN_MSG_A_FMT("Unknown PCLMUL selector: {}", Op->Selector);
+      LOGMAN_MSG_A_FMT("Unknown PCLMUL selector: %u", Op->Selector);
       break;
     }
     }

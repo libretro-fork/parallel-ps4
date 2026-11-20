@@ -603,7 +603,7 @@ void Dispatcher::EmitDispatcher() {
   ClearICache(reinterpret_cast<void*>(DispatchPtr), End - reinterpret_cast<uint64_t>(DispatchPtr));
 
   if (CTX->Config.BlockJITNaming()) {
-    fextl::string Name = fextl::fmt::format("Dispatch_{}", FHU::Syscalls::gettid());
+    fextl::string Name = fextl::fmt::format("Dispatch_%d", FHU::Syscalls::gettid());
     CTX->Symbols.RegisterNamedRegion(reinterpret_cast<void*>(DispatchPtr), End - reinterpret_cast<uint64_t>(DispatchPtr), Name);
   }
   if (CTX->Config.GlobalJITNaming()) {
@@ -616,7 +616,7 @@ void Dispatcher::EmitDispatcher() {
     for (auto PCToDecode = DisasmBegin; PCToDecode < DisasmEnd; PCToDecode += 4) {
       DisasmDecoder->Decode(PCToDecode);
       auto Output = Disasm->GetOutput();
-      LogMan::Msg::IFmt("{}", Output);
+      LogMan::Msg::IFmt("%s", Output);
     }
   }
 #endif
@@ -2597,7 +2597,7 @@ uint64_t Dispatcher::GenerateABICall(FallbackABI ABI) {
   case FABI_UNKNOWN:
   default:
 #if defined(ASSERTIONS_ENABLED) && ASSERTIONS_ENABLED
-    LOGMAN_MSG_A_FMT("Unhandled IR Fallback ABI: {}", ToUnderlying(ABI));
+    LOGMAN_MSG_A_FMT("Unhandled IR Fallback ABI: %u", ToUnderlying(ABI));
 #endif
     break;
   }

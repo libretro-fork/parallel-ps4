@@ -126,7 +126,7 @@ bool InterpreterOps::GetFallbackHandler(const IR::IROp_Header* IROp, FallbackInf
       *Info = {FABI_F80_I16_F64_PTR, Core::OPINDEX_F80CVTTO_8};
       return true;
     }
-    default: LogMan::Msg::DFmt("Unhandled size: {}", OpSize);
+    default: LogMan::Msg::DFmt("Unhandled size: %u", static_cast<unsigned char>(OpSize));
     }
     break;
   }
@@ -140,7 +140,7 @@ bool InterpreterOps::GetFallbackHandler(const IR::IROp_Header* IROp, FallbackInf
       *Info = {FABI_F64_I16_F80_PTR, Core::OPINDEX_F80CVT_8};
       return true;
     }
-    default: LogMan::Msg::DFmt("Unhandled size: {}", OpSize);
+    default: LogMan::Msg::DFmt("Unhandled size: %u", static_cast<unsigned char>(OpSize));
     }
     break;
   }
@@ -172,7 +172,7 @@ bool InterpreterOps::GetFallbackHandler(const IR::IROp_Header* IROp, FallbackInf
       }
       return true;
     }
-    default: LogMan::Msg::DFmt("Unhandled size: {}", OpSize);
+    default: LogMan::Msg::DFmt("Unhandled size: %u", static_cast<unsigned char>(OpSize));
     }
     break;
   }
@@ -193,7 +193,7 @@ bool InterpreterOps::GetFallbackHandler(const IR::IROp_Header* IROp, FallbackInf
       *Info = {FABI_F80_I16_I32_PTR, Core::OPINDEX_F80CVTTOINT_4};
       return true;
     }
-    default: LogMan::Msg::DFmt("Unhandled size: {}", OpSize);
+    default: LogMan::Msg::DFmt("Unhandled size: %u", static_cast<unsigned char>(OpSize));
     }
     break;
   }

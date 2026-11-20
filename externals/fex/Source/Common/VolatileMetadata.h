@@ -27,9 +27,9 @@ inline void ApplyFEXExtendedVolatileMetadata(FEX::VolatileMetadata::ExtendedVola
     if (inst_address < EndAddress) {
       VolatileInstructions.emplace(Address + it_inst);
     } else {
-      LogMan::Msg::DFmt("Volatile instruction 0x{:x} couldn't fit in to module range [0x{:x}, 0x{:x}). Not adding anymore volatile "
+      LogMan::Msg::DFmt("Volatile instruction 0x%llx couldn't fit in to module range [0x%llx, 0x%llx). Not adding anymore volatile "
                         "instructions. Inspect your config!",
-                        inst_address, Address, EndAddress);
+                        static_cast<unsigned long long>(inst_address), static_cast<unsigned long long>(Address), static_cast<unsigned long long>(EndAddress));
       return;
     }
   }

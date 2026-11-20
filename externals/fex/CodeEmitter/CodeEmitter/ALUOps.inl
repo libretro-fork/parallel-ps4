@@ -184,22 +184,22 @@ public:
 
   // Min/max immediate
   void smax(ARMEmitter::Size s, ARMEmitter::Register rd, ARMEmitter::Register rn, int64_t Imm) {
-    LOGMAN_THROW_A_FMT(Imm >= -128 && Imm <= 127, "{} Immediate too large", __func__);
+    LOGMAN_THROW_A_FMT(Imm >= -128 && Imm <= 127, "%s Immediate too large", __func__);
     MinMaxImmediate(0b0000, s, rd, rn, Imm);
   }
 
   void umax(ARMEmitter::Size s, ARMEmitter::Register rd, ARMEmitter::Register rn, uint64_t Imm) {
-    LOGMAN_THROW_A_FMT(Imm <= 255, "{} Immediate too large", __func__);
+    LOGMAN_THROW_A_FMT(Imm <= 255, "%s Immediate too large", __func__);
     MinMaxImmediate(0b0001, s, rd, rn, Imm);
   }
 
   void smin(ARMEmitter::Size s, ARMEmitter::Register rd, ARMEmitter::Register rn, int64_t Imm) {
-    LOGMAN_THROW_A_FMT(Imm >= -128 && Imm <= 127, "{} Immediate too large", __func__);
+    LOGMAN_THROW_A_FMT(Imm >= -128 && Imm <= 127, "%s Immediate too large", __func__);
     MinMaxImmediate(0b0010, s, rd, rn, Imm);
   }
 
   void umin(ARMEmitter::Size s, ARMEmitter::Register rd, ARMEmitter::Register rn, uint64_t Imm) {
-    LOGMAN_THROW_A_FMT(Imm <= 255, "{} Immediate too large", __func__);
+    LOGMAN_THROW_A_FMT(Imm <= 255, "%s Immediate too large", __func__);
     MinMaxImmediate(0b0011, s, rd, rn, Imm);
   }
 
@@ -369,8 +369,7 @@ public:
     const auto lsb_p_width = lsb + width;
 
     LOGMAN_THROW_A_FMT(width >= 1, "bfxil needs width >= 1");
-    LOGMAN_THROW_A_FMT(lsb_p_width <= reg_size_bits, "bfxil lsb + width ({}) must be <= {}. lsb={}, width={}", lsb_p_width, reg_size_bits,
-                       lsb, width);
+    LOGMAN_THROW_A_FMT(lsb_p_width <= reg_size_bits, "bfxil lsb + width (%u) must be <= %llu. lsb=%u, width=%u", lsb_p_width, static_cast<unsigned long long>(reg_size_bits), lsb, width);
 
     bfm(s, rd, rn, lsb, lsb_p_width - 1);
   }
@@ -748,8 +747,8 @@ public:
 
   // Rotate right into flags
   void rmif(XRegister rn, uint32_t shift, uint32_t mask) {
-    LOGMAN_THROW_A_FMT(shift <= 63, "Shift must be within 0-63. Shift: {}", shift);
-    LOGMAN_THROW_A_FMT(mask <= 15, "Mask must be within 0-15. Mask: {}", mask);
+    LOGMAN_THROW_A_FMT(shift <= 63, "Shift must be within 0-63. Shift: %u", shift);
+    LOGMAN_THROW_A_FMT(mask <= 15, "Mask must be within 0-15. Mask: %u", mask);
 
     uint32_t Op = 0b1011'1010'0000'0000'0000'0100'0000'0000;
     Op |= rn.Idx() << 5;
@@ -941,7 +940,7 @@ private:
       LSL12 = true;
       Imm >>= 12;
     }
-    LOGMAN_THROW_A_FMT(TooLarge == false, "Imm amount too large: 0x{:x}", Imm);
+    LOGMAN_THROW_A_FMT(TooLarge == false, "Imm amount too large: 0x%x", Imm);
 
     const uint32_t SF = s == ARMEmitter::Size::i64Bit ? (1U << 31) : 0;
 
@@ -1006,7 +1005,7 @@ private:
     const auto lsb_p_width = lsb + width;
     const auto reg_size_bits = RegSizeInBits(s);
 
-    LOGMAN_THROW_A_FMT(lsb_p_width <= reg_size_bits, "lsb + width ({}) must be <= {}. lsb={}, width={}", lsb_p_width, reg_size_bits, lsb, width);
+    LOGMAN_THROW_A_FMT(lsb_p_width <= reg_size_bits, "lsb + width (%u) must be <= %llu. lsb=%u, width=%u", lsb_p_width, static_cast<unsigned long long>(reg_size_bits), lsb, width);
     LOGMAN_THROW_A_FMT(width >= 1, "xbfiz width must be >= 1");
 
     const auto immr = (reg_size_bits - lsb) & (reg_size_bits - 1);

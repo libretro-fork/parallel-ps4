@@ -325,7 +325,17 @@ inline fextl::string LexicallyNormal(const fextl::string& Path) {
 
   // Add a final separator unless the last element is ellipses.
   const bool NeedsFinalSeparator = EndsWithSeparator && (!Parts.empty() && Parts.back() != "." && Parts.back() != "..");
-  return fextl::fmt::format("{}{}{}", IsAbsolutePath ? "/" : "", fmt::join(Parts, "/"), NeedsFinalSeparator ? "/" : "");
+  fextl::string Result = IsAbsolutePath ? "/" : "";
+  for (auto Part = Parts.begin(); Part != Parts.end(); ++Part) {
+    if (Part != Parts.begin()) {
+      Result += '/';
+    }
+    Result.append(Part->data(), Part->size());
+  }
+  if (NeedsFinalSeparator) {
+    Result += '/';
+  }
+  return Result;
 }
 
 inline char* Absolute(const char* Path, char Fill[PATH_MAX]) {

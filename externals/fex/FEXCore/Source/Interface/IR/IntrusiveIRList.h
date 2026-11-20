@@ -203,8 +203,9 @@ public:
 
     // If we are casting to something narrower than just the header, check the opcode.
     if constexpr (!std::is_same<T, IROp_Header>::value) {
-      LOGMAN_THROW_A_FMT(Op->OPCODE == Op->Header.Op, "Expected Node to be '{}'. Found '{}' instead", GetName(Op->OPCODE),
-                         GetName(Op->Header.Op));
+      LOGMAN_THROW_A_FMT(Op->OPCODE == Op->Header.Op, "Expected Node to be '%.*s'. Found '%.*s' instead",
+                         static_cast<int>(GetName(Op->OPCODE).size()), GetName(Op->OPCODE).data(),
+                         static_cast<int>(GetName(Op->Header.Op).size()), GetName(Op->Header.Op).data());
     }
 
     return Op;

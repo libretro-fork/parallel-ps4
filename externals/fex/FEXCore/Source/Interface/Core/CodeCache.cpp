@@ -82,7 +82,7 @@ fextl::string CodeMap::GetBaseFilename(const ExecutableFileInfo& MainExecutable,
 
   std::string_view base_filename = FHU::Filesystem::GetFilename(std::string_view {MainExecutable.Filename});
   if (FileId != 0xffff'ffff'ffff'ffff) {
-    return fextl::fmt::format("{}-{:016x}{}", base_filename, MainExecutable.FileId, AddNombSuffix ? "-nomb" : "");
+    return fextl::fmt::format("%.*s-%016" PRIx64 "%s", static_cast<int>((base_filename).size()), (base_filename).data(), MainExecutable.FileId, AddNombSuffix ? "-nomb" : "");
   }
 
   return "";
@@ -125,7 +125,7 @@ fextl::map<CodeMapFileId, CodeMap::ParsedContents> CodeMap::ParseCodeMap(std::if
         if (Entry.FileId == 0xffff'ffff'ffff'ffff) {
           ERROR_AND_DIE_FMT("Malformed code map");
         } else {
-          LogMan::Msg::EFmt("Code map referenced unknown file id {:016x}", Entry.FileId);
+          LogMan::Msg::EFmt("Code map referenced unknown file id %016llx", static_cast<unsigned long long>(Entry.FileId));
         }
       } else {
         Ret[Entry.FileId].Blocks.insert(Entry.BlockOffset);
@@ -426,7 +426,7 @@ void CodeCache::Validate(const ExecutableFileSectionInfo& Section, fextl::set<ui
   while (CachedCode.size_bytes() > NewCodeBuffer->UsableSize()) {
     ValidationCTX->ClearCodeCache(ValidationThread.get());
     NewCodeBuffer = ValidationCTX->GetLatest();
-    LogMan::Msg::IFmt("Increased cache validation code buffer size to {} MiB", NewCodeBuffer->AllocatedSize / 1024 / 1024);
+    LogMan::Msg::IFmt("Increased cache validation code buffer size to %zu MiB", NewCodeBuffer->AllocatedSize / 1024 / 1024);
   }
 
   std::span<std::byte> CodeBufferRangeRef =
@@ -470,7 +470,7 @@ void CodeCache::Validate(const ExecutableFileSectionInfo& Section, fextl::set<ui
         auto header = reinterpret_cast<CPU::CPUBackend::JITCodeHeader*>(&Buffer[*BlockIt - *HostBlocks.begin() + 4 + addr]);
         auto tail = reinterpret_cast<CPU::CPUBackend::JITCodeTail*>(reinterpret_cast<uintptr_t>(header) + header->OffsetToBlockTail);
         (i == 0 ? GuestBlockAddr : GuestBlockAddrRef) = tail->RIP - Section.FileStartVA;
-        LogMan::Msg::EFmt("Recorded rip {}: {:#x} (offset {:#x})", i, tail->RIP, tail->RIP - Section.FileStartVA);
+        LogMan::Msg::EFmt("Recorded rip %d: 0x%llx (offset 0x%llx)", i, static_cast<unsigned long long>(tail->RIP), static_cast<unsigned long long>(tail->RIP - Section.FileStartVA));
 
         if (i == 1) {
           if (tail->RIP >= Section.BeginVA && tail->RIP < Section.EndVA) {
@@ -478,9 +478,9 @@ void CodeCache::Validate(const ExecutableFileSectionInfo& Section, fextl::set<ui
               ValidationCTX->GenerateIR(ValidationThread.get(), tail->RIP, false, FEXCore::Config::Get_MAXINST());
             fextl::stringstream ss;
             FEXCore::IR::Dump(&ss, &*IRView);
-            LogMan::Msg::EFmt("IR:\n{}", ss.str());
+            LogMan::Msg::EFmt("IR:\n%s", (ss.str()).c_str());
           } else {
-            LogMan::Msg::EFmt("Can't dump IR for out-of-range RIP {:#x}", tail->RIP);
+            LogMan::Msg::EFmt("Can't dump IR for out-of-range RIP 0x%llx", static_cast<unsigned long long>(tail->RIP));
           }
         }
       }
@@ -488,14 +488,16 @@ void CodeCache::Validate(const ExecutableFileSectionInfo& Section, fextl::set<ui
 
     fextl::string GuestBlockInfo = "UNKNOWN";
     if (GuestBlockAddr) {
-      GuestBlockInfo = fextl::fmt::format("{:#x}", GuestBlockAddr.value());
+      GuestBlockInfo = fextl::fmt::format("0x%llx", static_cast<unsigned long long>(GuestBlockAddr.value()));
     }
     if (GuestBlockAddr != GuestBlockAddrRef) {
       GuestBlockInfo += " (MISMATCH)";
     }
-    ERROR_AND_DIE_FMT("Cache validation failed at offset {:#x}: {:02x} <-> {:02x} (at {} <-> {}, guest block {})", Idx,
-                      fmt::join(CachedCode.subspan(Idx, 4), ""), fmt::join(CodeBufferRangeRef.subspan(Idx, 4), ""),
-                      fmt::ptr(CachedCode.data()), fmt::ptr(CodeBufferRangeRef.data()), GuestBlockInfo);
+    ERROR_AND_DIE_FMT("Cache validation failed at offset 0x%llx: %s <-> %s (at %p <-> %p, guest block %s)", static_cast<unsigned long long>(Idx),
+                      fextl::fmt::HexBytes(CachedCode.subspan(Idx, 4)).c_str(),
+                      fextl::fmt::HexBytes(CodeBufferRangeRef.subspan(Idx, 4)).c_str(),
+                      static_cast<const void*>(CachedCode.data()), static_cast<const void*>(CodeBufferRangeRef.data()),
+                      GuestBlockInfo.c_str());
   }
 
   // Reset Context state for next validation
@@ -544,7 +546,7 @@ bool CodeCache::ApplyCodeRelocations(uint64_t GuestEntry, std::span<std::byte> C
       break;
     }
 
-    default: ERROR_AND_DIE_FMT("Unknown relocation type {}", ToUnderlying(Reloc.Header.Type));
+    default: ERROR_AND_DIE_FMT("Unknown relocation type %u", ToUnderlying(Reloc.Header.Type));
     }
   }
 
@@ -569,8 +571,8 @@ CodeCache::LoadCache(std::span<std::byte> CacheFile, const ExecutableFileInfo& F
   }
 
   if (!std::ranges::equal(header.FEXVersion, GIT_HASH)) {
-    LogMan::Msg::IFmt("Cache generated from old FEX version {:02x}, current is {:02x}; skipping", fmt::join(header.FEXVersion, ""),
-                      fmt::join(GIT_HASH, ""));
+    LogMan::Msg::IFmt("Cache generated from old FEX version %s, current is %s; skipping",
+                      fextl::fmt::HexBytes(header.FEXVersion).c_str(), fextl::fmt::HexBytes(GIT_HASH).c_str());
     return nullptr;
   }
 
@@ -685,13 +687,14 @@ bool CodeCache::EnableLoadedSection(Core::InternalThreadState* Thread, MappedCod
     BlockList.erase(BlockList.begin(), begin);
   }
 
-  LogMan::Msg::IFmt("Cache load: {:5} blocks; base={:#14x}; off={:#9x}-{:#09x}; {:016x} {}", BlockList.size(), BinarySection.FileStartVA,
-                    BinarySection.BeginVA - BinarySection.FileStartVA, BinarySection.EndVA - BinarySection.FileStartVA,
-                    BinarySection.FileInfo.FileId, BinarySection.FileInfo.Filename);
+  LogMan::Msg::IFmt("Cache load: %5zu blocks; base=%#14llx; off=%#9llx-0x%07llx; %016llx %s", BlockList.size(),
+                    static_cast<unsigned long long>(BinarySection.FileStartVA), static_cast<unsigned long long>(BinarySection.BeginVA - BinarySection.FileStartVA),
+                    static_cast<unsigned long long>(BinarySection.EndVA - BinarySection.FileStartVA), static_cast<unsigned long long>(BinarySection.FileInfo.FileId),
+                    BinarySection.FileInfo.Filename.c_str());
 
   if (EnableLazyCodeCaching) {
-    LogMan::Msg::IFmt("            lazy mapping: base={:#14x} -> host={}; cache_source={}", BinarySection.FileStartVA,
-                      fmt::ptr(Code.CodeBuffer.data()), fmt::ptr(Code.MappedFile.data()));
+    LogMan::Msg::IFmt("            lazy mapping: base=%#14llx -> host=%p; cache_source=%p", static_cast<unsigned long long>(BinarySection.FileStartVA),
+                      static_cast<const void*>(Code.CodeBuffer.data()), static_cast<const void*>(Code.MappedFile.data()));
   }
   // Register blocks to LookupCache.
   // The host addresses will point into the protected code buffer, so that FEX
@@ -706,8 +709,7 @@ bool CodeCache::EnableLoadedSection(Core::InternalThreadState* Thread, MappedCod
       for (auto& CodePage : Block.CodePages) {
         CodePage += BinarySection.FileStartVA;
       }
-      LOGMAN_THROW_A_FMT(Block.HostCode < Code.CodeBuffer.size_bytes(), "Host offset {:#x} out of range ({:#x})", Block.HostCode,
-                         Code.CodeBuffer.size_bytes());
+      LOGMAN_THROW_A_FMT(Block.HostCode < Code.CodeBuffer.size_bytes(), "Host offset 0x%llx out of range (0x%zx)", static_cast<unsigned long long>(Block.HostCode), Code.CodeBuffer.size_bytes());
       auto HostCode = &Code.CodeBuffer[Block.HostCode];
       LookupCache.AddBlockMapping(Guest + BinarySection.FileStartVA, std::move(Block.CodePages), HostCode, WriteLock);
     }
@@ -776,8 +778,8 @@ std::span<std::byte> AbstractCodeCache::SelectCodeRangeToFinalize(MappedCodeCach
     return {};
   }
 
-  LOGMAN_THROW_A_FMT(StartPage < EndPage, "Invalid page range [{}, {})", StartPage, EndPage);
-  LOGMAN_THROW_A_FMT(EndPage <= Code.NumPages(), "End page {} out of range ({})", EndPage, Code.NumPages());
+  LOGMAN_THROW_A_FMT(StartPage < EndPage, "Invalid page range [%llu, %llu)", static_cast<unsigned long long>(StartPage), static_cast<unsigned long long>(EndPage));
+  LOGMAN_THROW_A_FMT(EndPage <= Code.NumPages(), "End page %llu out of range (%zu)", static_cast<unsigned long long>(EndPage), Code.NumPages());
 
   // Include any pages that have relocations or block link records crossing
   // into the current page range. This ensures we don't attempt to finalize
@@ -861,7 +863,7 @@ void CodeCache::FinalizeCodePages(MappedCodeCacheFile& Code, std::span<std::byte
   // is remapped onto CodeBuffer.
   auto* Staging = reinterpret_cast<std::byte*>(Allocator::VirtualAlloc(nullptr, Size, true));
   if (!Staging) {
-    ERROR_AND_DIE_FMT("Failed to allocate {} bytes of staging memory for code-cache finalization", Size);
+    ERROR_AND_DIE_FMT("Failed to allocate %zu bytes of staging memory for code-cache finalization", Size);
   }
 
   // Copy code from the cache file to the staging buffer
@@ -881,7 +883,7 @@ void CodeCache::FinalizeCodePages(MappedCodeCacheFile& Code, std::span<std::byte
   // through Allocator.
   void* RemapResult = ::mremap(Staging, Size, Size, MREMAP_FIXED | MREMAP_MAYMOVE | MREMAP_DONTUNMAP, CodeRange.data());
   if (RemapResult == MAP_FAILED) {
-    ERROR_AND_DIE_FMT("{}: mremap failed: {}", __FUNCTION__, errno);
+    ERROR_AND_DIE_FMT("%s: mremap failed: %d", __FUNCTION__, errno);
   }
   Allocator::VirtualFree(Staging, Size);
 

@@ -16,7 +16,7 @@ uint64_t GetNamedSymbolLiteral(FEXCore::Context::ContextImpl& CTX, FEXCore::CPU:
   case FEXCore::CPU::RelocNamedSymbolLiteral::NamedSymbol::SYMBOL_LITERAL_EXITFUNCTION_LINKER:
     return CTX.Dispatcher->GetExitFunctionLinkerAddress();
 
-  default: ERROR_AND_DIE_FMT("Unknown named symbol literal: {}", static_cast<uint32_t>(Op));
+  default: ERROR_AND_DIE_FMT("Unknown named symbol literal: %u", static_cast<uint32_t>(Op));
   }
 }
 
@@ -63,7 +63,7 @@ void Arm64JITCore::PlaceNamedSymbolLiteral(NamedSymbolLiteralPair Lit) {
     break;
   }
 
-  default: ERROR_AND_DIE_FMT("Unknown relocation type for {}", __FUNCTION__);
+  default: ERROR_AND_DIE_FMT("Unknown relocation type for %s", __FUNCTION__);
   }
 
   BindOrRestart(&Lit.Loc);

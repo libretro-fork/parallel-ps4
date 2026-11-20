@@ -94,9 +94,9 @@ fextl::string GetApplicationConfig(const std::string_view Program, bool Global) 
   fextl::string ConfigFile = GetConfigDirectory(Global);
 
   if (!Global && !FHU::Filesystem::Exists(ConfigFile) && !FHU::Filesystem::CreateDirectories(ConfigFile)) {
-    LogMan::Msg::DFmt("Couldn't create config directory: '{}'", ConfigFile);
+    LogMan::Msg::DFmt("Couldn't create config directory: '%s'", (ConfigFile).c_str());
     // Let's go local in this case
-    return fextl::fmt::format("./{}.json", Program);
+    return fextl::fmt::format("./%.*s.json", static_cast<int>((Program).size()), (Program).data());
   }
 
   ConfigFile += "AppConfig/";
@@ -104,10 +104,10 @@ fextl::string GetApplicationConfig(const std::string_view Program, bool Global) 
   // Attempt to create the local folder if it doesn't exist
   if (!Global && !FHU::Filesystem::Exists(ConfigFile) && !FHU::Filesystem::CreateDirectories(ConfigFile)) {
     // Let's go local in this case
-    return fextl::fmt::format("./{}.json", Program);
+    return fextl::fmt::format("./%.*s.json", static_cast<int>((Program).size()), (Program).data());
   }
 
-  return fextl::fmt::format("{}{}.json", ConfigFile, Program);
+  return fextl::fmt::format("%s%.*s.json", (ConfigFile).c_str(), static_cast<int>((Program).size()), (Program).data());
 }
 
 static fextl::map<FEXCore::Config::LayerType, fextl::unique_ptr<FEXCore::Config::Layer>> ConfigLayers;
@@ -156,7 +156,7 @@ public:
         OptionMap[Option].emplace<T>(ConvertedValue);
         return ConvertedValue;
       } else {
-        LOGMAN_MSG_A_FMT("Couldn't Convert {} to specified type!", StrVal);
+        LOGMAN_MSG_A_FMT("Couldn't Convert %s to specified type!", (StrVal).c_str());
       }
     }
 
@@ -401,7 +401,7 @@ void ReloadMetaLayer() {
     const auto PathName = *Meta->Get(FEXCore::Config::CONFIG_DUMPIR);
     if (*PathName != "no") {
       Set(FEXCore::Config::ConfigOption::CONFIG_PASSMANAGERDUMPIR,
-          fextl::fmt::format("{}", static_cast<uint64_t>(FEXCore::Config::PassManagerDumpIR::AFTEROPT)));
+          fextl::fmt::format("%" PRIu64, static_cast<uint64_t>(FEXCore::Config::PassManagerDumpIR::AFTEROPT)));
     }
   }
 

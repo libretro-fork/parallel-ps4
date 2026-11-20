@@ -21,7 +21,7 @@ FEXCORE_PRESERVE_ALL_ATTR static softfloat_state SoftFloatStateFromFCW(uint16_t 
     case 0: State.roundingPrecision = 32; break;
     case 2: State.roundingPrecision = 64; break;
     case 3: State.roundingPrecision = 80; break;
-    case 1: LOGMAN_MSG_A_FMT("Invalid x87 precision mode, {}", PC);
+    case 1: LOGMAN_MSG_A_FMT("Invalid x87 precision mode, %d", PC);
     }
   }
 

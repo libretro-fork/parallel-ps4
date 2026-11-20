@@ -838,7 +838,7 @@ void OpDispatchBuilder::X87FCMOV(OpcodeArgs) {
   case 0x3'D8:
     CC = 0xB; // JNP
     break;
-  default: LOGMAN_MSG_A_FMT("Unhandled FCMOV op: 0x{:x}", Opcode); break;
+  default: LOGMAN_MSG_A_FMT("Unhandled FCMOV op: 0x%x", Opcode); break;
   }
 
   Ref VecCond = _VDupFromGPR(OpSize::i128Bit, OpSize::i64Bit, SelectCC0All1(CC));

@@ -31,15 +31,15 @@ namespace FEXCore::IR {
 #include <FEXCore/IR/IRDefines.inc>
 
 static void PrintArg(fextl::stringstream* out, const IRListView*, const SHA256Sum& Arg) {
-  *out << fextl::fmt::format("sha256:{:02x}", fmt::join(Arg.data, ""));
+  *out << "sha256:" + fextl::fmt::HexBytes(Arg.data);
 }
 
 static void PrintArg(fextl::stringstream* out, const IRListView*, uint64_t Arg) {
-  *out << fextl::fmt::format("#{:#x}", Arg);
+  *out << fextl::fmt::format("#0x%" PRIx64, Arg);
 }
 
 static void PrintArg(fextl::stringstream* out, const IRListView*, const char* const Arg) {
-  *out << fextl::fmt::format("'{}'", Arg);
+  *out << fextl::fmt::format("'%s'", Arg);
 }
 
 static void PrintArg(fextl::stringstream* out, const IRListView*, CondClass Arg) {
@@ -349,7 +349,7 @@ static void PrintArg(fextl::stringstream* out, const IRListView*, BranchHint Arg
 }
 
 static void PrintArg(fextl::stringstream* out, const IRListView*, const std::array<uint8_t, 0x10>& Arg) {
-  *out << fextl::fmt::format("{:02x}", fmt::join(Arg, ""));
+  *out << fextl::fmt::HexBytes(Arg);
 }
 
 void Dump(fextl::stringstream* out, const IRListView* IR) {
@@ -364,8 +364,7 @@ void Dump(fextl::stringstream* out, const IRListView* IR) {
 
   ++CurrentIndent;
   AddIndent();
-  *out << fextl::fmt::format("(%0) IRHeader %{}, #{:#x}, #{}, #{}\n", HeaderOp->Blocks.ID(), +HeaderOp->OriginalRIP, +HeaderOp->BlockCount,
-                             +HeaderOp->NumHostInstructions);
+  *out << fextl::fmt::format("(%%0) IRHeader %%%u, #0x%" PRIx64 ", #%u, #%u\n", (HeaderOp->Blocks.ID()).Value, +HeaderOp->OriginalRIP, +HeaderOp->BlockCount, +HeaderOp->NumHostInstructions);
 
   for (auto [BlockNode, BlockHeader] : IR->GetBlocks()) {
     {

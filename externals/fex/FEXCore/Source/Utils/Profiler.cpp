@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: MIT
+#include <algorithm>
 #include <cstdint>
+#include <cstdio>
 #include <fcntl.h>
 #ifndef _WIN32
 #include <linux/magic.h>
@@ -81,7 +83,7 @@ void Init() {
 #else
     constexpr auto flags = O_WRONLY | O_CLOEXEC;
 #endif
-    fextl::string FilePath = fextl::fmt::format("{}/trace_marker", Path);
+    fextl::string FilePath = fextl::fmt::format("%s/trace_marker", Path);
     TraceFD = open(FilePath.c_str(), flags);
     if (TraceFD != -1) {
       // Opened TraceFD, early exit
@@ -102,17 +104,17 @@ void TraceObject(const std::string_view Format, uint64_t Duration) {
     // Print the duration as something that began negative duration ago
     const auto StringSize = Format.size() + strlen(" (lduration=-)\n") + 22;
     auto Event = reinterpret_cast<char*>(alloca(StringSize));
-    auto Res = ::fmt::format_to_n(Event, StringSize, "{} (lduration=-{})\n", Format, Duration);
-    write(TraceFD, Event, Res.size);
+    const int Res = snprintf(Event, StringSize, "%.*s (lduration=-%" PRIu64 ")\n", static_cast<int>(Format.size()), Format.data(), Duration);
+    write(TraceFD, Event, std::min<size_t>(Res, StringSize - 1));
   }
 }
 
 void TraceObject(const std::string_view Format) {
   if (TraceFD != -1) {
-    const auto StringSize = Format.size() + 1;
+    const auto StringSize = Format.size() + 2;
     auto Event = reinterpret_cast<char*>(alloca(StringSize));
-    auto Res = ::fmt::format_to_n(Event, StringSize, "{}\n", Format);
-    write(TraceFD, Event, Res.size);
+    const int Res = snprintf(Event, StringSize, "%.*s\n", static_cast<int>(Format.size()), Format.data());
+    write(TraceFD, Event, std::min<size_t>(Res, StringSize - 1));
   }
 }
 } // namespace GPUVis
@@ -153,7 +155,7 @@ void PostForkAction(bool IsChild) {
 
   if (EnableAfterFork > 1) {
     --EnableAfterFork;
-    LogMan::Msg::IFmt("Tracy profiling will start after {} forks", EnableAfterFork);
+    LogMan::Msg::IFmt("Tracy profiling will start after %d forks", EnableAfterFork);
   } else if (EnableAfterFork == 1) {
     Enable = true;
     EnableAfterFork = 0;

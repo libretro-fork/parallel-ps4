@@ -14,7 +14,6 @@
 #include <FEXHeaderUtils/Filesystem.h>
 #include <FEXHeaderUtils/SymlinkChecks.h>
 #include <cstring>
-#include <fmt/format.h>
 #include <functional>
 #ifndef _WIN32
 #include <linux/limits.h>
@@ -40,7 +39,7 @@ namespace JSON {
     const json_t* json = FEX::JSON::CreateJSON(Data, Pool);
 
     if (!json) {
-      ERROR_AND_DIE_FMT("Failed to parse JSON from file '{}' - invalid JSON format", Config);
+      ERROR_AND_DIE_FMT("Failed to parse JSON from file '%s' - invalid JSON format", (Config).c_str());
     }
 
     const json_t* ConfigList = json_getProperty(json, "Config");
@@ -74,7 +73,7 @@ namespace JSON {
         const char* ConfigString = json_getValue(ConfigItem);
 
         if (!ConfigString) {
-          LogMan::Msg::EFmt("JSON file '{}': Couldn't get value for config item '{}'", Config, ConfigName);
+          LogMan::Msg::EFmt("JSON file '%s': Couldn't get value for config item '%s'", (Config).c_str(), ConfigName);
           return;
         }
         Func(ConfigName, ConfigString);
@@ -229,7 +228,7 @@ void OptionMapper::MapNameToOption(const char* ConfigName, const char* ConfigStr
   }
 
   if (!KeyOptionValue.has_value()) {
-    LogMan::Msg::IFmt("Unknown configuration option '{}' in JSON config file '{}'", ConfigName, CurrentConfigFile);
+    LogMan::Msg::IFmt("Unknown configuration option '%s' in JSON config file '%s'", ConfigName, (CurrentConfigFile).c_str());
     return;
   }
 
@@ -374,7 +373,7 @@ fextl::string RecoverGuestProgramFilename(fextl::string Program, bool ExecFDInte
   // of application name.
   if (ProgramFDFromEnv != -1 && Program.empty()) {
     // Get the `dev` node of the execveat fd string.
-    Program = fextl::fmt::format("/dev/fd/{}", ProgramFDFromEnv);
+    Program = fextl::fmt::format("/dev/fd/%d", ProgramFDFromEnv);
   }
 
   // If we were provided a relative path then we need to canonicalize it to become absolute.
@@ -500,7 +499,7 @@ void LoadConfig(fextl::string ProgramName, char** const envp, const PortableInfo
     if (SteamID) {
       // If a SteamID exists then let's search for Steam application configs as well.
       // We want to key off both the SteamAppId number /and/ the executable since we may not want to thunk all binaries.
-      fextl::string SteamAppName = fextl::fmt::format("Steam_{}_{}", SteamID, ProgramName);
+      fextl::string SteamAppName = fextl::fmt::format("Steam_%s_%s", SteamID, (ProgramName).c_str());
       if (!IsPortable) {
         FEXCore::Config::AddLayer(CreateAppLayer(SteamAppName, FEXCore::Config::LayerType::LAYER_GLOBAL_STEAM_APP));
       }
@@ -623,14 +622,14 @@ fextl::string GetDataDirectory(bool Global, const PortableInformation& PortableI
 #ifdef FEX_STEAM_SUPPORT
   const char* SteamDataPath = getenv("STEAM_COMPAT_DATA_PATH");
   if (SteamDataPath) {
-    return fextl::fmt::format("{}/fex-emu/", SteamDataPath);
+    return fextl::fmt::format("%s/fex-emu/", SteamDataPath);
   }
 #endif
 
   const char* DataOverride = getenv("FEX_APP_DATA_LOCATION");
 
   if (PortableInfo.IsPortable && (Global || !DataOverride)) {
-    return fextl::fmt::format("{}/fex-emu/", PortableInfo.InterpreterPath);
+    return fextl::fmt::format("%s/fex-emu/", (PortableInfo.InterpreterPath).c_str());
   }
 
   if (Global) {
@@ -652,7 +651,7 @@ fextl::string GetDataDirectory(bool Global, const PortableInformation& PortableI
     DataDir = DataOverride;
   } else {
     // use ~/.local/share if XDG_DATA_HOME is unset
-    DataDir = DataXDG ? DataXDG : fmt::format("{}/.local/share", HomeDir);
+    DataDir = DataXDG ? DataXDG : fextl::fmt::format("%s/.local/share", (HomeDir).c_str());
     DataDir += "/fex-emu/";
   }
 
@@ -662,7 +661,7 @@ fextl::string GetDataDirectory(bool Global, const PortableInformation& PortableI
 fextl::string GetConfigDirectory(bool Global, const PortableInformation& PortableInfo) {
   const char* ConfigOverride = getenv("FEX_APP_CONFIG_LOCATION");
   if (PortableInfo.IsPortable && Global) {
-    return fextl::fmt::format("{}/../share/fex-emu/", PortableInfo.InterpreterPath);
+    return fextl::fmt::format("%s/../share/fex-emu/", (PortableInfo.InterpreterPath).c_str());
   } else if (ConfigOverride && !Global) {
     fextl::string AppConfigStr = ConfigOverride;
     if (FHU::Filesystem::IsRelative(AppConfigStr)) {
@@ -675,7 +674,7 @@ fextl::string GetConfigDirectory(bool Global, const PortableInformation& Portabl
 #ifdef FEX_STEAM_SUPPORT
   const char* SteamDataPath = getenv("STEAM_COMPAT_DATA_PATH");
   if (SteamDataPath) {
-    return fextl::fmt::format("{}/fex-emu/", SteamDataPath);
+    return fextl::fmt::format("%s/fex-emu/", SteamDataPath);
   }
 #endif
 
@@ -699,7 +698,7 @@ fextl::string GetConfigDirectory(bool Global, const PortableInformation& Portabl
     ConfigDir = ConfigOverride;
   } else {
     // use ~/.config if XDG_CONFIG_HOME is unset
-    ConfigDir = ConfigXDG ? ConfigXDG : fmt::format("{}/.config", HomeDir);
+    ConfigDir = ConfigXDG ? ConfigXDG : fextl::fmt::format("%s/.config", (HomeDir).c_str());
     ConfigDir += "/fex-emu/";
   }
 
@@ -717,7 +716,7 @@ fextl::string GetCacheDirectory() {
 #ifdef FEX_STEAM_SUPPORT
   const char* SteamDataPath = getenv("STEAM_COMPAT_SHADER_PATH");
   if (SteamDataPath) {
-    return fextl::fmt::format("{}/fex-emu/", SteamDataPath);
+    return fextl::fmt::format("%s/fex-emu/", SteamDataPath);
   }
 #endif
 

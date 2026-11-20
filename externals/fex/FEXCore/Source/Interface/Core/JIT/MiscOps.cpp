@@ -52,7 +52,7 @@ DEF_OP(Fence) {
   case IR::FenceType::LoadStore: dmb(ARMEmitter::BarrierScope::SY); break;
   case IR::FenceType::Store: dmb(ARMEmitter::BarrierScope::ST); break;
   case IR::FenceType::Inst: isb(); break;
-  default: LOGMAN_MSG_A_FMT("Unknown Fence: {}", Op->Fence); break;
+  default: LOGMAN_MSG_A_FMT("Unknown Fence: %u", static_cast<unsigned char>(Op->Fence)); break;
   }
 }
 

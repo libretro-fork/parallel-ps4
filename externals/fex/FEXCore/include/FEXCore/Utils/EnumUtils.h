@@ -54,13 +54,6 @@ namespace FEXCore {
     return static_cast<T>(key) == 0;                                 \
   }
 
-// Macro that defines a fmt formatter for a reasonable case where an enum
-// is formatted as a purely integral type based on its underlying type.
-#define FEX_DEFINE_ENUM_FMT_PASSTHROUGH(type) \
-  constexpr auto format_as(type t) {          \
-    return FEXCore::ToUnderlying(t);          \
-  }
-
 // Equivalent to C++23's std::to_underlying.
 template<typename Enum>
 [[nodiscard]]

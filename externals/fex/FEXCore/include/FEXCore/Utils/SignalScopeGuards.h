@@ -33,14 +33,14 @@ public:
 
   void lock() {
     const auto Result = pthread_mutex_lock(&Mutex);
-    LOGMAN_THROW_A_FMT(Result == 0, "{} failed to lock with {}", __func__, Result);
+    LOGMAN_THROW_A_FMT(Result == 0, "%s failed to lock with %d", __func__, Result);
   }
   bool try_lock() {
     return pthread_mutex_trylock(&Mutex) == 0;
   }
   void unlock() {
     const auto Result = pthread_mutex_unlock(&Mutex);
-    LOGMAN_THROW_A_FMT(Result == 0, "{} failed to unlock with {}", __func__, Result);
+    LOGMAN_THROW_A_FMT(Result == 0, "%s failed to unlock with %d", __func__, Result);
   }
   // Initialize the internal pthread object to its default initializer state.
   // Should only ever be used in the child process when a Linux fork() has occured.
@@ -71,15 +71,15 @@ public:
 
   void lock() {
     const auto Result = pthread_rwlock_wrlock(&Mutex);
-    LOGMAN_THROW_A_FMT(Result == 0, "{} failed to lock with {}", __func__, Result);
+    LOGMAN_THROW_A_FMT(Result == 0, "%s failed to lock with %d", __func__, Result);
   }
   void unlock() {
     const auto Result = pthread_rwlock_unlock(&Mutex);
-    LOGMAN_THROW_A_FMT(Result == 0, "{} failed to unlock with {}", __func__, Result);
+    LOGMAN_THROW_A_FMT(Result == 0, "%s failed to unlock with %d", __func__, Result);
   }
   void lock_shared() {
     const auto Result = pthread_rwlock_rdlock(&Mutex);
-    LOGMAN_THROW_A_FMT(Result == 0, "{} failed to lock with {}", __func__, Result);
+    LOGMAN_THROW_A_FMT(Result == 0, "%s failed to lock with %d", __func__, Result);
   }
 
   void unlock_shared() {
@@ -237,14 +237,14 @@ static auto GuardSignalDeferringSectionWithFallback(MutexType& mutex, FEXCore::C
 class ForkableUniqueMutex final : public std::mutex {
 public:
   void StealAndDropActiveLocks() {
-    LogMan::Msg::AFmt("{} is unsupported on WIN32 builds!", __func__);
+    LogMan::Msg::AFmt("%s is unsupported on WIN32 builds!", __func__);
   }
 };
 
 class ForkableSharedMutex final : public std::shared_mutex {
 public:
   void StealAndDropActiveLocks() {
-    LogMan::Msg::AFmt("{} is unsupported on WIN32 builds!", __func__);
+    LogMan::Msg::AFmt("%s is unsupported on WIN32 builds!", __func__);
   }
 };
 

@@ -21,7 +21,6 @@
 
 #include <bit>
 #include <cstdint>
-#include <fmt/format.h>
 #include <stddef.h>
 #include <utility>
 #include <encodings/xxh3.h>
@@ -124,7 +123,7 @@ class OpDispatchBuilder final : public IREmitter {
 public:
   Ref GetNewJumpBlock(uint64_t RIP) {
     auto it = JumpTargets.find(RIP);
-    LOGMAN_THROW_A_FMT(it != JumpTargets.end(), "Couldn't find block generated for 0x{:x}", RIP);
+    LOGMAN_THROW_A_FMT(it != JumpTargets.end(), "Couldn't find block generated for 0x%llx", static_cast<unsigned long long>(RIP));
     return it->second.BlockEntry;
   }
 
@@ -2732,7 +2731,7 @@ constexpr inline void InstallToTable(auto& FinalTable, const auto& LocalTable) {
       auto& TableOp = FinalTable[OpNum + i];
 #if defined(ASSERTIONS_ENABLED) && ASSERTIONS_ENABLED
       if (TableOp.OpcodeDispatcher.OpDispatch) {
-        ERROR_AND_DIE_FMT("Duplicate Entry {}", TableOp.Name);
+        ERROR_AND_DIE_FMT("Duplicate Entry %s", TableOp.Name);
       }
 #endif
 

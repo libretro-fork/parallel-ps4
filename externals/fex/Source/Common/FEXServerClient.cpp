@@ -132,7 +132,7 @@ fextl::string GetServerMountFolder() {
 fextl::string GetServerSocketName() {
   FEX_CONFIG_OPT(ServerSocketPath, SERVERSOCKETPATH);
   if (ServerSocketPath().empty()) {
-    return fextl::fmt::format("{}.FEXServer.Socket", ::getuid());
+    return fextl::fmt::format("%u.FEXServer.Socket", ::getuid());
   }
   return ServerSocketPath;
 }
@@ -157,7 +157,7 @@ fextl::string GetServerSocketPath(bool ForceTmp) {
     // If we're forcing temporary directory usage then the server socket path has exceeded sun_path 108 byte limit.
     // Let's be a bit nice and put some more metadata in the server socket path.
     const auto SteamID = getenv("SteamAppId") ?: "";
-    return fextl::fmt::format("{}/{}.FEXServer.Socket", GetTempFolder(), SteamID);
+    return fextl::fmt::format("%s/%s.FEXServer.Socket", GetTempFolder().c_str(), SteamID);
   } else {
     // Under Steam the FEXServer's socket is a game-specific directory.
     Folder = GetServerLockFolder();
@@ -165,9 +165,9 @@ fextl::string GetServerSocketPath(bool ForceTmp) {
 #endif
 
   if (name.empty()) {
-    return fextl::fmt::format("{}/{}.FEXServer.Socket", Folder, ::getuid());
+    return fextl::fmt::format("%s/%u.FEXServer.Socket", (Folder).c_str(), ::getuid());
   } else {
-    return fextl::fmt::format("{}/{}", Folder, name);
+    return fextl::fmt::format("%s/%s", (Folder).c_str(), (name).c_str());
   }
 }
 
@@ -184,7 +184,7 @@ int ConnectToServer(ConnectionOption ConnectionOption) {
   // Create the initial unix socket
   SocketFD = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
   if (SocketFD == -1) {
-    LogMan::Msg::EFmt("Couldn't open AF_UNIX socket {}", errno);
+    LogMan::Msg::EFmt("Couldn't open AF_UNIX socket %d", errno);
     return -1;
   }
 
@@ -204,7 +204,7 @@ int ConnectToServer(ConnectionOption ConnectionOption) {
 
   if (connect(SocketFD, reinterpret_cast<struct sockaddr*>(&addr), SizeOfAddr) == -1) {
     if (ConnectionOption == ConnectionOption::Default || errno != ECONNREFUSED) {
-      LogMan::Msg::EFmt("Couldn't connect to FEXServer socket {} {}", ServerSocketName, errno);
+      LogMan::Msg::EFmt("Couldn't connect to FEXServer socket %s %d", ServerSocketName.c_str(), errno);
     }
   } else {
     return SocketFD;
@@ -215,7 +215,7 @@ int ConnectToServer(ConnectionOption ConnectionOption) {
   // placed in a new netns as part of a sandbox.
   auto ServerSocketPath = GetServerSocketPath(false);
   if (ServerSocketPath.size() > sizeof(sockaddr_un::sun_path) - 1) {
-    LogMan::Msg::EFmt("Socket path '{}' too large for Unix domain sockets. Moving to tmp", ServerSocketPath);
+    LogMan::Msg::EFmt("Socket path '%s' too large for Unix domain sockets. Moving to tmp", (ServerSocketPath).c_str());
     ServerSocketPath = FEXServerClient::GetServerSocketPath(true);
   }
 
@@ -225,7 +225,7 @@ int ConnectToServer(ConnectionOption ConnectionOption) {
   SizeOfAddr = sizeof(addr.sun_family) + SizeOfSocketString;
   if (connect(SocketFD, reinterpret_cast<struct sockaddr*>(&addr), SizeOfAddr) == -1) {
     if (ConnectionOption == ConnectionOption::Default || (errno != ECONNREFUSED && errno != ENOENT)) {
-      LogMan::Msg::EFmt("Couldn't connect to FEXServer socket {} {}", ServerSocketPath, errno);
+      LogMan::Msg::EFmt("Couldn't connect to FEXServer socket %s %d", ServerSocketPath.c_str(), errno);
     }
   } else {
     return SocketFD;
@@ -271,7 +271,7 @@ int StartServer(std::string_view InterpreterPath, int watch_fd) {
     InterpreterDir = InterpreterDir.substr(0, LastSlash);
   }
 
-  fextl::string FEXServerPath = fextl::fmt::format("{}/FEXServer", InterpreterDir);
+  fextl::string FEXServerPath = fextl::fmt::format("%s/FEXServer", (InterpreterDir).c_str());
   // Check if a local FEXServer next to FEX exists
   // If it does then it takes priority over the installed one
   if (!FHU::Filesystem::Exists(FEXServerPath)) {
@@ -294,8 +294,8 @@ int StartServer(std::string_view InterpreterPath, int watch_fd) {
 
     const char* argv[6];
 
-    auto pipe_string = fextl::fmt::format("{}", fds[1]);
-    auto watch_fd_string = fextl::fmt::format("{}", watch_fd);
+    auto pipe_string = fextl::fmt::format("%d", fds[1]);
+    auto watch_fd_string = fextl::fmt::format("%d", watch_fd);
     size_t arg_count {};
     argv[arg_count++] = FEXServerPath.c_str();
     argv[arg_count++] = "--wait_pipe";
@@ -314,7 +314,7 @@ int StartServer(std::string_view InterpreterPath, int watch_fd) {
       write(fds[1], &error, sizeof(error));
 
       // Give a hopefully helpful error message for users
-      LogMan::Msg::EFmt("Couldn't execute: {}", argv[0]);
+      LogMan::Msg::EFmt("Couldn't execute: %s", argv[0]);
       LogMan::Msg::EFmt("This means the squashFS rootfs won't be mounted.");
       LogMan::Msg::EFmt("Expect errors!");
       // Destroy this fork
