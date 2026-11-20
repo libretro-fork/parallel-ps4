@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: MIT
 #include "Common/ArgumentLoader.h"
 #include "Common/Config.h"
-#include "Common/JSONPool.h"
 
 #include <FEXCore/Config/Config.h>
 #include <FEXCore/fextl/fmt.h>
@@ -13,6 +12,7 @@
 #include <FEXCore/Utils/WildcardMatcher.h>
 #include <FEXHeaderUtils/Filesystem.h>
 #include <FEXHeaderUtils/SymlinkChecks.h>
+#include <cstdlib>
 #include <cstring>
 #include <functional>
 #ifndef _WIN32
@@ -21,13 +21,102 @@
 #endif
 #include <optional>
 #include <utility>
-#include <tiny-json.h>
+#include <formats/rjson.h>
 
 #include <range/v3/view/split.hpp>
 #include <range/v3/view/transform.hpp>
 
 namespace FEX::Config {
 namespace JSON {
+  // FEX's config files read with libretro-common's span reader: no copy of the file, no tree
+  // built, each value read where it lies
+  struct Span {
+    const char* Data {};
+    size_t Length {};
+    enum rjson_type Type {RJSON_DONE};
+  };
+
+  static Span ToSpan(const rjson_span_t* Value) {
+    return Span {Value->data, Value->length, Value->type};
+  }
+
+  // A quoted span's text, decoded
+  static fextl::string DecodeString(const rjson_span_t* Value) {
+    fextl::string Text(Value->length, '\0');
+    size_t Written {};
+    if (!rjson_decode_string(Value->data, Value->length, Text.data(), Text.size(), &Written)) {
+      return {};
+    }
+    Text.resize(Written);
+    return Text;
+  }
+
+  // A config value's text, as tiny-json gave it: a string's contents, a number's or literal's
+  // text, and nothing for an object or array (tiny-json read those as empty and went on)
+  static fextl::string ValueText(const rjson_span_t* Value) {
+    switch (Value->type) {
+    case RJSON_STRING: return DecodeString(Value);
+    case RJSON_NUMBER:
+    case RJSON_TRUE:
+    case RJSON_FALSE:
+    case RJSON_NULL: return fextl::string(Value->data, Value->length);
+    default: return {};
+    }
+  }
+
+  // The members of an object span, in order
+  template<typename F>
+  static bool ForEachMember(const Span& Object, F& Func) {
+    if (Object.Type != RJSON_OBJECT) {
+      return false;
+    }
+    rjson_span_t Value;
+    return rjson_read_span_validated(
+      Object.Data, Object.Length, &Value,
+      [](void* Context, const rjson_span_t* Name, const rjson_span_t* Member) -> bool {
+        return (*static_cast<F*>(Context))(Name, Member);
+      },
+      &Func);
+  }
+
+  struct Root {
+    Span Config;
+    Span AppOverrides;
+    Span ThunksDB;
+  };
+
+  // The file's top-level sections, or false when it is not JSON
+  static bool ReadRoot(const fextl::vector<char>& Data, Root* Sections) {
+    if (Data.empty()) {
+      return false;
+    }
+    rjson_span_t Value;
+    return rjson_read_span(
+             Data.data(), Data.size(), &Value,
+             [](void* Context, const rjson_span_t* Name, const rjson_span_t* Member) -> bool {
+               auto* Sections = static_cast<Root*>(Context);
+               if (rjson_string_equal(Name->data, Name->length, "Config")) {
+                 // The first of a repeated name, as tiny-json found it
+                 if (Sections->Config.Type == RJSON_DONE) {
+                   Sections->Config = ToSpan(Member);
+                 }
+               } else if (rjson_string_equal(Name->data, Name->length, "AppOverrides")) {
+                 // The first of a repeated name, as tiny-json found it
+                 if (Sections->AppOverrides.Type == RJSON_DONE) {
+                   Sections->AppOverrides = ToSpan(Member);
+                 }
+               } else if (rjson_string_equal(Name->data, Name->length, "ThunksDB")) {
+                 // The first of a repeated name, as tiny-json found it
+                 if (Sections->ThunksDB.Type == RJSON_DONE) {
+                   Sections->ThunksDB = ToSpan(Member);
+                 }
+               }
+               return true;
+             },
+             Sections) &&
+           Value.type == RJSON_OBJECT;
+  }
+
   static void LoadJSonConfig(const fextl::string& Config, std::optional<fextl::string> AppName,
                              std::function<void(const char* Name, const char* ConfigString)> Func) {
     fextl::vector<char> Data;
@@ -35,49 +124,40 @@ namespace JSON {
       return;
     }
 
-    FEX::JSON::JsonAllocator Pool {};
-    const json_t* json = FEX::JSON::CreateJSON(Data, Pool);
-
-    if (!json) {
+    Root Sections {};
+    if (!ReadRoot(Data, &Sections)) {
       ERROR_AND_DIE_FMT("Failed to parse JSON from file '%s' - invalid JSON format", (Config).c_str());
     }
 
-    const json_t* ConfigList = json_getProperty(json, "Config");
-
-    if (!ConfigList) {
+    if (Sections.Config.Type == RJSON_DONE) {
       // This is a non-error if the configuration file exists but no Config section
       return;
     }
 
-    fextl::vector<const json_t*> ConfigBlocks;
-    ConfigBlocks.push_back(ConfigList);
+    fextl::vector<Span> ConfigBlocks;
+    ConfigBlocks.push_back(Sections.Config);
 
-    if (AppName) {
-      const json_t* OverrideList = json_getProperty(json, "AppOverrides");
-      if (OverrideList) {
-        for (const json_t* Item = json_getChild(OverrideList); Item != nullptr; Item = json_getSibling(Item)) {
-          const char* AppPattern = json_getName(Item);
-
-          // Find the first match, then break
-          if (FEXCore::Utils::Wildcard::Matches(AppPattern, *AppName)) {
-            ConfigBlocks.push_back(Item);
-            break;
-          }
+    if (AppName && Sections.AppOverrides.Type != RJSON_DONE) {
+      auto FindOverride = [&](const rjson_span_t* Name, const rjson_span_t* Member) -> bool {
+        const auto AppPattern = DecodeString(Name);
+        // Find the first match, then stop
+        if (FEXCore::Utils::Wildcard::Matches(AppPattern, *AppName)) {
+          ConfigBlocks.push_back(ToSpan(Member));
+          return false;
         }
-      }
+        return true;
+      };
+      ForEachMember(Sections.AppOverrides, FindOverride);
     }
 
-    for (auto ConfigBlock : ConfigBlocks) {
-      for (const json_t* ConfigItem = json_getChild(ConfigBlock); ConfigItem != nullptr; ConfigItem = json_getSibling(ConfigItem)) {
-        const char* ConfigName = json_getName(ConfigItem);
-        const char* ConfigString = json_getValue(ConfigItem);
-
-        if (!ConfigString) {
-          LogMan::Msg::EFmt("JSON file '%s': Couldn't get value for config item '%s'", (Config).c_str(), ConfigName);
-          return;
-        }
-        Func(ConfigName, ConfigString);
-      }
+    for (const auto& ConfigBlock : ConfigBlocks) {
+      auto LoadItem = [&](const rjson_span_t* Name, const rjson_span_t* Member) -> bool {
+        const auto ConfigName = DecodeString(Name);
+        const auto ConfigString = ValueText(Member);
+        Func(ConfigName.c_str(), ConfigString.c_str());
+        return true;
+      };
+      ForEachMember(ConfigBlock, LoadItem);
     }
   }
 } // namespace JSON
@@ -87,8 +167,20 @@ static constexpr std::pair<std::string_view, FEXCore::Config::ConfigOption> Conf
 #include <FEXCore/Config/ConfigValues.inl>
 };
 
-static char* SaveLayerToJSON(char* JsonBuffer, const FEXCore::Config::Layer* Layer) {
-  JsonBuffer = json_objOpen(JsonBuffer, "Config");
+// A JSON object's member name, then its colon
+static void WriteName(rjsonwriter_t* Writer, bool* First, const char* Name) {
+  if (!*First) {
+    rjsonwriter_raw(Writer, ",", 1);
+  }
+  *First = false;
+  rjsonwriter_add_string(Writer, Name);
+  rjsonwriter_raw(Writer, ":", 1);
+}
+
+static void SaveLayerToJSON(rjsonwriter_t* Writer, bool* First, const FEXCore::Config::Layer* Layer) {
+  WriteName(Writer, First, "Config");
+  rjsonwriter_raw(Writer, "{", 1);
+  bool FirstOption = true;
   for (auto& it : Layer->GetOptionMap()) {
     std::string_view Name {};
     for (auto& name_it : ConfigLookup) {
@@ -98,72 +190,69 @@ static char* SaveLayerToJSON(char* JsonBuffer, const FEXCore::Config::Layer* Lay
       }
     }
     if (std::holds_alternative<fextl::string>(it.second)) {
-      JsonBuffer = json_str(JsonBuffer, Name.data(), std::get<fextl::string>(it.second).c_str());
+      WriteName(Writer, &FirstOption, Name.data());
+      rjsonwriter_add_string(Writer, std::get<fextl::string>(it.second).c_str());
     } else if (std::holds_alternative<FEXCore::Config::StringArrayType>(it.second)) {
       for (auto& var : std::get<FEXCore::Config::StringArrayType>(it.second)) {
-        JsonBuffer = json_str(JsonBuffer, Name.data(), var.c_str());
+        WriteName(Writer, &FirstOption, Name.data());
+        rjsonwriter_add_string(Writer, var.c_str());
       }
     } else {
       LogMan::Msg::AFmt("Trying to store config with pre-converted type");
     }
   }
-  return json_objClose(JsonBuffer);
+  rjsonwriter_raw(Writer, "}", 1);
 }
 
 void SaveLayerToJSON(const fextl::string& Filename, const FEXCore::Config::Layer* Layer, const fextl::unordered_map<fextl::string, bool>& HostLibs) {
-  char Buffer[4096];
-  char* Dest {};
-  Dest = json_objOpen(Buffer, nullptr);
-
-  Dest = SaveLayerToJSON(Dest, Layer);
-
-  Dest = json_objOpen(Dest, "ThunksDB");
-  for (auto& [Name, Enabled] : HostLibs) {
-    Dest = json_int(Dest, Name.c_str(), Enabled);
+  rjsonwriter_t* Writer = rjsonwriter_open_memory();
+  if (!Writer) {
+    return;
   }
-  Dest = json_objClose(Dest);
+  bool First = true;
+  rjsonwriter_raw(Writer, "{", 1);
 
-  Dest = json_objClose(Dest);
-  json_end(Dest);
+  SaveLayerToJSON(Writer, &First, Layer);
 
-  LogMan::Throw::AFmt(Dest <= std::end(Buffer), "Exceeded JSON buffer size");
+  WriteName(Writer, &First, "ThunksDB");
+  rjsonwriter_raw(Writer, "{", 1);
+  bool FirstLib = true;
+  for (auto& [Name, Enabled] : HostLibs) {
+    WriteName(Writer, &FirstLib, Name.c_str());
+    rjsonwriter_raw(Writer, Enabled ? "1" : "0", 1);
+  }
+  rjsonwriter_raw(Writer, "}", 1);
+
+  rjsonwriter_raw(Writer, "}", 1);
+
+  int Length = 0;
+  const char* Buffer = rjsonwriter_get_memory_buffer(Writer, &Length);
 
   auto File = FEXCore::File::File(Filename.c_str(),
                                   FEXCore::File::FileModes::WRITE | FEXCore::File::FileModes::CREATE | FEXCore::File::FileModes::TRUNCATE);
 
-  if (File.IsValid()) {
-    File.Write(Buffer, strlen(Buffer));
+  if (Buffer && File.IsValid()) {
+    File.Write(Buffer, Length);
   }
+  rjsonwriter_free(Writer);
 }
 
 void SaveLayerToJSON(const fextl::string& Filename, const FEXCore::Config::Layer* Layer) {
   fextl::unordered_map<fextl::string, bool> HostLibsDB;
 
   // Load existing ThunksDB entry to persist it
-  {
-    fextl::vector<char> FileData;
-    if (!FEXCore::FileLoading::LoadFile(FileData, Filename)) {
-      goto WriteConfig;
-    }
-
-    // Find bounds of previously existing Config entry (if any)
-    FEX::JSON::JsonAllocator Pool {};
-    const json_t* json = FEX::JSON::CreateJSON(FileData, Pool);
-    if (!json) {
-      goto WriteConfig;
-    }
-
-    const json_t* ThunksDB = json_getProperty(json, "ThunksDB");
-    if (!ThunksDB) {
-      goto WriteConfig;
-    }
-
-    for (const json_t* Item = json_getChild(ThunksDB); Item != nullptr; Item = json_getSibling(Item)) {
-      HostLibsDB.emplace(json_getName(Item), (json_getInteger(Item) != 0));
-    }
+  fextl::vector<char> FileData;
+  JSON::Root Sections {};
+  if (FEXCore::FileLoading::LoadFile(FileData, Filename) && JSON::ReadRoot(FileData, &Sections)) {
+    auto LoadLib = [&](const rjson_span_t* Name, const rjson_span_t* Member) -> bool {
+      // A number's text, or a string's, as tiny-json's json_getInteger read either
+      const long long Value = std::strtoll(JSON::ValueText(Member).c_str(), nullptr, 10);
+      HostLibsDB.emplace(JSON::DecodeString(Name), Value != 0);
+      return true;
+    };
+    JSON::ForEachMember(Sections.ThunksDB, LoadLib);
   }
 
-WriteConfig:
   SaveLayerToJSON(Filename, Layer, HostLibsDB);
 }
 

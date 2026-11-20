@@ -398,13 +398,13 @@ FEXRPMALLOC_FLAGS := $(FEX_BASE_DEFS) -DENABLE_ASSERTS=0 -DENABLE_DECOMMIT=1 \
 # FEX's Source/Common, cpp-optparse and CommonTools: the config and host feature code
 FEXCOMMON_SOURCES_CXX := $(addprefix $(FEX_DIR)/Source/,$(addprefix Common/,ArgumentLoader.cpp \
 	CPUInfo.cpp Config.cpp FEXServerClient.cpp FileFormatCheck.cpp HostFeatures.cpp \
-	JSONPool.cpp Linux/SBRKAllocations.cpp SHMStats.cpp VolatileMetadata.cpp \
+	Linux/SBRKAllocations.cpp SHMStats.cpp VolatileMetadata.cpp \
 	cpp-optparse/OptionParser.cpp) \
 	Tools/CommonTools/DummyHandlers.cpp Tools/CommonTools/Linux/Utils/ELFContainer.cpp)
 FEXCOMMON_FLAGS := $(FEX_DEFS) -DRANGES_DISABLE_DEPRECATED_WARNINGS $(FEX_INC) \
 	-I$(FEX_DIR)/Source/Common -I$(FEX_DIR)/Source/Common/cpp-optparse \
-	-I$(FEX_DIR)/Source/Tools/CommonTools -I$(FEX_DIR)/External/tiny-json \
-	-I$(FEX_DIR)/External/range-v3/include
+	-I$(FEX_DIR)/Source/Tools/CommonTools -I$(FEX_DIR)/External/range-v3/include \
+	-I$(LRC_DIR)/include
 FEXCOMMON_CXXFLAGS := $(FEX_CXX)
 # SoftFloat 3e and cephes: x87's 80-bit float and its transcendentals
 FEXFLOAT_SOURCES_C := $(addprefix $(FEX_DIR)/External/SoftFloat-3e/src/,$(addsuffix .c, \
@@ -427,11 +427,8 @@ FEXFLOAT_SOURCES_CXX := $(FEX_DIR)/External/cephes/src/128bit/Impl.cpp
 FEXFLOAT_FLAGS := $(FEX_DEFS) $(FEX_SF_DEFS) -I$(FEX_DIR)/External/SoftFloat-3e -I$(FEX_DIR)/Source \
 	-I$(FEX_DIR)/External/cephes/include $(FEX_SF_INC) -Wno-trigraphs -fno-builtin
 FEXFLOAT_CXXFLAGS := $(FEX_CXX)
-# tiny-json (XXH3 is libretro-common's)
-FEXLIBS_SOURCES_C := $(FEX_DIR)/External/tiny-json/tiny-json.c
-FEXLIBS_FLAGS := $(FEX_BASE_DEFS)
 # Linked from one archive, so only what the core reaches comes in, as from FEX's own
-FEX_GROUPS := FEXCORE FEXCORESF FEXALLOC FEXRPMALLOC FEXCOMMON FEXFLOAT FEXLIBS
+FEX_GROUPS := FEXCORE FEXCORESF FEXALLOC FEXRPMALLOC FEXCOMMON FEXFLOAT
 # libSceFiber HLE, its switches done on the guest's registers (no fiber_context.cpp asm)
 CORE_SOURCES_CXX += src/core/libraries/fiber/fiber.cpp src/core/fex/fex_guest_engine.cpp \
 	$(addprefix src/core/guest_cpu/,fex_guest_cpu.cpp fex_hle_bridge.cpp guest_cpu.cpp \
@@ -441,7 +438,7 @@ CORE_FLAGS += -DSHADPS4_ENABLE_FEX_GUEST_CPU=1 -DFEX_DISABLE_TELEMETRY=1 -DFEX_H
 	'-DFEX_PRESERVE_ALL_ATTR=__attribute__((preserve_all))' -DFEXCORE_HAS_PRESERVE_ALL_ATTR=1 \
 	'-DFEXCORE_PRESERVE_ALL_ATTR=__attribute__((preserve_all))' \
 	-I$(FEX_DIR)/Source/Tools/CommonTools $(FEX_INC) \
-	-I$(FEX_DIR)/Source/Common/cpp-optparse -I$(FEX_DIR)/External/tiny-json \
+	-I$(FEX_DIR)/Source/Common/cpp-optparse \
 	-I$(FEX_DIR)/External/range-v3/include -I$(FEX_DIR)/External/rpmalloc
 endif
 

@@ -4,6 +4,17 @@ What changed in the libretro core of this fork, newest first. Changes that come 
 
 ## Unreleased
 
+- FEX's tiny-json is gone (`externals/fex/External/tiny-json` and FEX's `JSONPool`). FEX's config files (`Source/Common/Config.cpp`) are read and written with libretro-common's JSON code instead.
+  - **Reading:** `rjson_read_span`, zero-copy. The file is read where it lies, with no copy of it and no tree of nodes built.
+  - **Writing:** `rjsonwriter`, in place of tiny-json's fixed 4 KB buffer.
+  - **Same results, checked:** a throwaway harness built the old and new code for aarch64 and ran both under qemu.
+    - **Reading:** seven config files, each read with no app name, a matching one and another. The files cover app overrides, first-match order, duplicate sections, missing sections, escapes, numbers, `true`, `null`, whitespace, trailing data and object values. Both versions read the same names and values, and both reject a UTF-8 byte order mark and comments.
+    - **Writing:** three files, written and kept with their ThunksDB. Both versions write the same JSON content, apart from escaping `/`.
+  - **What reads differently:**
+    - `\u` escapes now decode to UTF-8. tiny-json turned each one into `?`.
+    - An array where a value belongs now reads as empty. tiny-json returned garbage bytes.
+  - **Checks:** built for aarch64 with no warnings, and the FEXCore smoke test passes under qemu.
+  - **Not run on an aarch64 machine yet.**
 - fmt is gone from FEX too, so no fmt is left anywhere in the core (`externals/fex/External/fmt`, 600 KB, is deleted).
   - **What takes printf formats now:** FEX's logging (`LogManager.h`: `LogMan::Msg::*Fmt`, `LogMan::Throw::*Fmt`, `LOGMAN_THROW_A_FMT`, `LOGMAN_MSG_A_FMT`, `ERROR_AND_DIE_FMT`) and `fextl::fmt::format`/`print`. They are marked so the compiler checks every call (`FEX_PRINTF`), and `-Werror=format` is on for FEX's C++ as for the core's.
   - **How the call sites were rewritten:** about 2,300 sites, from each argument's type, by the same AST-driven rewrite as the core's.

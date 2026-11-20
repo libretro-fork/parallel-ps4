@@ -212,9 +212,10 @@ $(FEX_ARCHIVE): $(FEX_OBJECTS)
 	$(AR) rcs $@ $(FEX_OBJECTS)
 
 # FEXCore on its own, embedded the way the core does (.ci/fex/fexcore-smoke.cpp)
-# (with libretro-common's XXH3 and the CPU feature query it takes)
+# (with libretro-common's XXH3, the CPU feature query it takes, and the JSON reader and writer)
 FEX_SMOKE_LRC := $(call obj_of,$(addprefix $(LRC_DIR)/,encodings/encoding_xxh3.c \
-	features/features_cpu.c compat/compat_strl.c))
+	features/features_cpu.c compat/compat_strl.c formats/json/rjson.c string/rstrtod.c \
+	compat/compat_posix_string.c))
 fexcore-smoke: .ci/fex/fexcore-smoke.cpp $(FEX_ARCHIVE) $(FEX_SMOKE_LRC)
 	$(CXX) $(CXXFLAGS) $(FEXCOMMON_FLAGS) $(FEX_CXX) $< -o $@ $(FEX_ARCHIVE) $(FEX_SMOKE_LRC) \
 	-lpthread -ldl
