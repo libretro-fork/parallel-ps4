@@ -3,10 +3,7 @@
 
 #pragma once
 
-#include <algorithm>
-#include <concepts>
-#include <iterator>
-#include <vector>
+#include <stddef.h>
 
 #include "common/small_vector.h"
 #include "common/types.h"
@@ -23,18 +20,31 @@ struct Interval {
     }
 };
 
+namespace Common::Detail {
+template <class A, class B>
+struct IsSameType {
+    static constexpr bool value = false;
+};
+template <class A>
+struct IsSameType<A, A> {
+    static constexpr bool value = true;
+};
+template <class A, class B>
+concept SameAs = IsSameType<A, B>::value;
+} // namespace Common::Detail
+
 template <class IV>
-concept IsInterval = std::derived_from<IV, Interval> && std::is_trivially_copyable_v<IV> &&
+concept IsInterval = __is_base_of(Interval, IV) && __is_trivially_copyable(IV) &&
                      requires(const IV& a, const IV& b, u64 x) {
-                         { a.CanMergeWith(b) } -> std::same_as<bool>;
-                         { a.SubRange(x, x) } -> std::same_as<IV>;
+                         { a.CanMergeWith(b) } -> Common::Detail::SameAs<bool>;
+                         { a.SubRange(x, x) } -> Common::Detail::SameAs<IV>;
                      };
 
 template <class IV = Interval>
     requires IsInterval<IV>
 class IntervalList {
 public:
-    using List = std::vector<IV>;
+    using List = Common::SmallVector<IV, 4>;
     using const_iterator = typename List::const_iterator;
     using iterator = typename List::iterator;
 
@@ -51,10 +61,10 @@ public:
     bool Empty() const {
         return intervals.empty();
     }
-    std::size_t Size() const {
+    size_t Size() const {
         return intervals.size();
     }
-    void Reserve(std::size_t n) {
+    void Reserve(size_t n) {
         intervals.reserve(n);
     }
 
@@ -65,15 +75,17 @@ public:
         }
 
         IV out[3];
-        std::size_t m = 0;
+        size_t m = 0;
 
-        auto [first, last] = OverlapRun(value.start, value.end);
+        iterator first;
+        iterator last;
+        OverlapRun(value.start, value.end, first, last);
         if (first != last) {
             if (first->start < value.start) {
                 out[m++] = first->SubRange(first->start, value.start);
             }
             out[m++] = value;
-            auto prev = std::prev(last);
+            const iterator prev = last - 1;
             if (prev->end > value.end) {
                 out[m++] = prev->SubRange(value.end, prev->end);
             }
@@ -81,7 +93,7 @@ public:
             out[m++] = value;
         }
 
-        const auto at = std::distance(intervals.begin(), first);
+        const size_t at = static_cast<size_t>(first - intervals.begin());
         Splice(first, last, out, m);
         Coalesce(at, m);
     }
@@ -91,8 +103,8 @@ public:
         if (start >= end) [[unlikely]] {
             return;
         }
-        auto first = std::ranges::upper_bound(intervals, start, {}, &IV::end);
-        auto last = first;
+        const iterator first = intervals.begin() + EndAfter(start);
+        iterator last = first;
         while (last != intervals.end() && last->start < end) {
             ++last;
         }
@@ -100,11 +112,11 @@ public:
             return;
         }
         IV out[2];
-        std::size_t m = 0;
+        size_t m = 0;
         if (first->start < start) {
             out[m++] = first->SubRange(first->start, start);
         }
-        const auto prev = std::prev(last);
+        const iterator prev = last - 1;
         if (prev->end > end) {
             out[m++] = prev->SubRange(end, prev->end);
         }
@@ -113,7 +125,7 @@ public:
 
     /// Returns immutable iterator to an interval that contains provided address.
     const_iterator Find(u64 addr) const {
-        auto it = std::ranges::upper_bound(intervals, addr, {}, &IV::end);
+        const const_iterator it = intervals.begin() + EndAfter(addr);
         if (it == intervals.end()) {
             return intervals.end();
         }
@@ -130,7 +142,7 @@ public:
         if (start >= end) [[unlikely]] {
             return false;
         }
-        auto it = std::ranges::upper_bound(intervals, start, {}, &IV::end);
+        const_iterator it = intervals.begin() + EndAfter(start);
         u64 cur = start;
         while (it != intervals.end() && it->start <= cur && cur < end) {
             cur = it->end;
@@ -144,22 +156,23 @@ public:
         if (start >= end) [[unlikely]] {
             return false;
         }
-        auto it = std::ranges::upper_bound(intervals, start, {}, &IV::end);
+        const_iterator it = intervals.begin() + EndAfter(start);
         return it != intervals.end() && it->start < end;
     }
 
     /// Calls 'func' for each gap in provided range.
-    void ForEachGap(u64 start, u64 end, auto&& func) const {
+    template <typename Func>
+    void ForEachGap(u64 start, u64 end, Func&& func) const {
         if (start >= end) [[unlikely]] {
             return;
         }
-        auto it = std::ranges::upper_bound(intervals, start, {}, &IV::end);
+        const_iterator it = intervals.begin() + EndAfter(start);
         u64 cur = start;
         for (; it != intervals.end() && it->start < end; ++it) {
             if (it->start > cur) {
                 func(cur, it->start);
             }
-            cur = std::max(cur, it->end);
+            cur = cur > it->end ? cur : it->end;
         }
         if (cur < end) {
             func(cur, end);
@@ -167,11 +180,12 @@ public:
     }
 
     /// Calls 'func' for each interval that partially overlaps provided range.
-    void ForEachInRange(u64 start, u64 end, auto&& func) const {
+    template <typename Func>
+    void ForEachInRange(u64 start, u64 end, Func&& func) const {
         if (start >= end) [[unlikely]] {
             return;
         }
-        auto it = std::ranges::upper_bound(intervals, start, {}, &IV::end);
+        const_iterator it = intervals.begin() + EndAfter(start);
         if (it == intervals.end()) {
             return;
         }
@@ -183,37 +197,57 @@ public:
 
 protected:
     /// Returns first interval that overlaps range and first interval after range.
-    std::pair<iterator, iterator> OverlapRun(u64 start, u64 end) noexcept {
-        auto first = std::ranges::upper_bound(intervals, start, {}, &IV::end);
-        auto last = first;
+    void OverlapRun(u64 start, u64 end, iterator& first, iterator& last) noexcept {
+        first = intervals.begin() + EndAfter(start);
+        last = first;
         while (last != intervals.end() && last->start <= end) {
             ++last;
         }
-        return {first, last};
+    }
+
+    /// The index of the first interval that ends after @addr
+    size_t EndAfter(u64 addr) const noexcept {
+        size_t first = 0;
+        size_t count = intervals.size();
+        while (count > 0) {
+            const size_t half = count / 2;
+            if (!(addr < intervals[first + half].end)) {
+                first += half + 1;
+                count -= half + 1;
+            } else {
+                count = half;
+            }
+        }
+        return first;
     }
 
     /// Inserts intervals from first until last
-    void Splice(iterator first, iterator last, const IV* src, std::size_t m) noexcept {
+    void Splice(iterator first, iterator last, const IV* src, size_t m) noexcept {
         if (first == last) {
             intervals.insert(first, src, src + m);
             return;
         }
-        const auto slots = std::distance(first, last);
+        const size_t slots = static_cast<size_t>(last - first);
         if (m <= slots) {
-            std::copy(src, src + m, first);
+            for (size_t i = 0; i < m; ++i) {
+                first[i] = src[i];
+            }
             if (m < slots) {
                 intervals.erase(first + m, last);
             }
         } else {
-            std::copy(src, src + slots, first);
+            for (size_t i = 0; i < slots; ++i) {
+                first[i] = src[i];
+            }
             intervals.insert(last, src + slots, src + m);
         }
     }
 
     /// Merges compatible adjacent intervals.
-    void Coalesce(std::size_t start, std::size_t count) {
-        auto stop = std::min(start + count + 1, intervals.size());
-        for (auto i = start ? start - 1 : start; i + 1 < stop;) {
+    void Coalesce(size_t start, size_t count) {
+        size_t stop = start + count + 1;
+        stop = stop < intervals.size() ? stop : intervals.size();
+        for (size_t i = start ? start - 1 : start; i + 1 < stop;) {
             IV& a = intervals[i];
             IV& b = intervals[i + 1];
             if (a.end == b.start && a.CanMergeWith(b)) {
@@ -231,29 +265,32 @@ protected:
 
 template <class IV>
 concept IsDomInterval = IsInterval<IV> && requires(const IV& a, const IV& b) {
-    { a.Dominant(b) } -> std::same_as<bool>;
+    { a.Dominant(b) } -> Common::Detail::SameAs<bool>;
 };
 
 template <class IV = Interval>
     requires IsDomInterval<IV>
 struct DomIntervalList : public IntervalList<IV> {
-    void Add(auto&&... args) {
+    template <typename... Args>
+    void Add(Args&&... args) {
         Add(IV{args...});
     }
 
     void Add(IV value) {
-        auto [first, last] = this->OverlapRun(value.start, value.end);
+        typename IntervalList<IV>::iterator first;
+        typename IntervalList<IV>::iterator last;
+        this->OverlapRun(value.start, value.end, first, last);
         Common::SmallVector<IV, 8> out;
         if (first != last && first->start < value.start) {
             out.emplace_back(first->SubRange(first->start, value.start));
         }
         u64 cur = value.start;
-        for (auto it = first; it != last; ++it) {
+        for (typename IntervalList<IV>::iterator it = first; it != last; ++it) {
             if (!it->Dominant(value)) {
                 continue;
             }
-            const u64 a = std::max(it->start, value.start);
-            const u64 b = std::min(it->end, value.end);
+            const u64 a = it->start > value.start ? it->start : value.start;
+            const u64 b = it->end < value.end ? it->end : value.end;
             if (a >= b) {
                 continue;
             }
@@ -267,13 +304,13 @@ struct DomIntervalList : public IntervalList<IV> {
             out.emplace_back(value.SubRange(cur, value.end));
         }
         if (first != last) {
-            auto prev = std::prev(last);
+            const typename IntervalList<IV>::iterator prev = last - 1;
             if (prev->end > value.end) {
                 out.emplace_back(prev->SubRange(value.end, prev->end));
             }
         }
-        std::size_t w = 0;
-        for (std::size_t r = 1; r < out.size(); ++r) {
+        size_t w = 0;
+        for (size_t r = 1; r < out.size(); ++r) {
             if (out[w].end == out[r].start && out[w].CanMergeWith(out[r])) {
                 out[w].end = out[r].end;
             } else {
@@ -283,7 +320,7 @@ struct DomIntervalList : public IntervalList<IV> {
         if (!out.empty()) {
             out.resize(w + 1);
         }
-        const auto at = std::distance(this->intervals.begin(), first);
+        const size_t at = static_cast<size_t>(first - this->intervals.begin());
         this->Splice(first, last, out.data(), out.size());
         this->Coalesce(at, out.size());
     }

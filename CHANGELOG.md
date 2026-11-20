@@ -4,6 +4,12 @@ What changed in the libretro core of this fork, newest first. Changes that come 
 
 ## Unreleased
 
+- No STL in the interval lists (`common/interval_set.h`) and the bounded queues (`common/bounded_threadsafe_queue.h`).
+  - **Interval lists:** kept in one of the core's small vectors, the first four in place and the rest on the heap, instead of a `std::vector` that was always on the heap. The search for where a range starts is a binary search of their own in place of `std::ranges::upper_bound`, and their checks on what an interval is come from the compiler and a small concept of the header's own.
+  - **Bounded queues:** a plain array of cells and casts for moves; the lock-free scheme is untouched.
+  - **Checked:** 3,000 rounds of 60 random adds and subtracts on an interval list against a bitmap of the same addresses, checking every address, `Contains` and `Overlaps` of each range, every gap, and that the intervals stay sorted, apart and merged, under AddressSanitizer and UndefinedBehaviorSanitizer: the same throughout.
+  - **Unchanged:** what they do. `module.cpp`, which had `<algorithm>` through these headers, includes it itself now.
+  - **Checks:** the Linux and Windows builds pass. Not run in a game yet.
 - No STL in the flat maps and sets (`common/flat_map.h`) and the slot vectors (`common/slot_vector.h`).
   - **Flat maps and sets:** a binary search of their own instead of `std::lower_bound`; an entry is a `KeyValue` with `first` and `second`, and an insert returns an `InsertResult` with the same two names, so their users read the same. Keys are ordered by a `Less` of the header's own.
   - **Slot vectors:** the occupancy bits and the free list are plain arrays, grown with `realloc` as a chunk is committed, as the vectors grew. `SlotId` compares with `==`, `!=` and `<` of its own instead of `<=>`, and its `std::hash`, which nothing used, is gone.
