@@ -109,27 +109,17 @@ size_t ime_utf16_to_utf8(const unsigned short* text, size_t length, char* out, s
 }
 
 size_t ime_utf8_to_utf16(const char* text, size_t length, unsigned short* out, size_t out_size) {
-    const char* end;
-    size_t units = 0;
+    const char* nul;
     if (!out || out_size == 0)
         return 0;
     memset(out, 0, out_size * sizeof(*out));
     if (!text)
         return 0;
-    end = text + length;
-    while (text < end && *text) {
-        const uint32_t c = utf8_walk(&text);
-        const size_t need = c > 0xFFFF ? 2 : 1;
-        if (text > end || units + need >= out_size)
-            break;
-        if (need == 2) {
-            out[units++] = (unsigned short)(0xD800 + ((c - 0x10000) >> 10));
-            out[units++] = (unsigned short)(0xDC00 + ((c - 0x10000) & 0x3FF));
-        } else {
-            out[units++] = (unsigned short)c;
-        }
-    }
-    return units;
+    nul = (const char*)memchr(text, 0, length);
+    if (nul)
+        length = (size_t)(nul - text);
+    /* One unit kept for the terminator */
+    return utf8_conv_utf16((uint16_t*)out, out_size - 1, text, length);
 }
 
 size_t ime_text_splice(char* text, size_t size, size_t start, size_t end, const char* insert,

@@ -4,6 +4,11 @@ What changed in the libretro core of this fork, newest first. Changes that come 
 
 ## Unreleased
 
+- The on-screen keyboard's UTF-8 to UTF-16 conversion is libretro-common's `utf8_conv_utf16` instead of its own encoder.
+  - **libretro-common:** `encoding_utf.c` and `utf.h` synced from RetroArch, which gains `utf8_conv_utf16`.
+  - **Same text:** the IME still stops at a NUL, keeps a unit for the terminator, never cuts a surrogate pair and stops before a character cut off by the length. It gave the same units as before on 500,000 random strings of valid UTF-8, cut and sized at random.
+  - **Not UTF-8:** a stray continuation byte, a lead byte of five or more, or a code point past U+10FFFF now ends the text there. Before, they went on as whatever `utf8_walk` made of them.
+  - **Checks:** the Linux and Windows builds pass. Not run in a game yet.
 - No STL in `common`'s `bit_field.h`, `enum.h`, `combiner.h`, `unique_function.h`, `ring_buffer_queue.h` and `c_bridge.cpp`.
   - **Traits:** `concepts.h` gains `IsReference`, `IsSigned`, `UnderlyingOf` and `MakeUnsigned`. `BitField` and the enum flag operators use them, and the compiler's `__underlying_type` and `__is_trivially_copyable`.
   - **Combiner:** `Run` makes a returned value in place in a buffer on the caller's stack, moves it out and ends it, as `std::optional` did.
