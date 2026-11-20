@@ -10,7 +10,7 @@ namespace Libraries::VideoRecording {
 
 s32 PS4_SYSV_ABI sceVideoRecordingSetInfo(OrbisVideoRecordingInfo set_info, const void* info,
                                           u64 info_len) {
-    LOG_ERROR(Lib_VideoRecording, "(STUBBED) called, set_info = {:#x}, info_len = {:#x}",
+    LOG_ERROR(Lib_VideoRecording, "(STUBBED) called, set_info = 0x%x, info_len = 0x%" PRIx64,
               static_cast<u32>(set_info), info_len);
     if (set_info < OrbisVideoRecordingInfo::Subtitle ||
         (set_info > OrbisVideoRecordingInfo::Subtitle &&

@@ -4,7 +4,6 @@
 #include <map>
 #include <span>
 #include <vector>
-#include <fmt/format.h>
 #include "common/alignment.h"
 #include "common/arch.h"
 #include "common/assert.h"
@@ -12,6 +11,7 @@
 #include "common/elf_info.h"
 #include "common/error.h"
 #include "common/reserve_span.h"
+#include "common/string_util.h"
 #include "core/address_space.h"
 #include "core/emulator_settings.h"
 #include "core/libraries/kernel/memory.h"
@@ -141,10 +141,10 @@ struct AddressSpace::Impl {
             // Only log the message if we're restricting the user max due to operating system.
             // Since higher compiled SDK versions also get reduced max, we don't need to log there.
             if (sdk_ver < Common::ElfInfo::FW_300) {
-                LOG_WARNING(
-                    Core,
-                    "Older Windows version detected, reducing user max to {:#x} to avoid problems",
-                    supported_user_max);
+                LOG_WARNING(Core,
+                            "Older Windows version detected, reducing user max to 0x%" PRIx64
+                            " to avoid problems",
+                            supported_user_max);
             }
         }
 
@@ -153,7 +153,7 @@ struct AddressSpace::Impl {
         MEMORY_BASIC_INFORMATION info{};
         while (next_addr <= supported_user_max) {
             ASSERT_MSG(VirtualQuery(reinterpret_cast<PVOID>(next_addr), &info, sizeof(info)),
-                       "Failed to query memory information for address {:#x}", next_addr);
+                       "Failed to query memory information for address 0x%" PRIxPTR, next_addr);
 
             const VAddr region_start = reinterpret_cast<VAddr>(info.BaseAddress);
             next_addr = Common::AlignUp(region_start + info.RegionSize, alignment);
@@ -179,8 +179,8 @@ struct AddressSpace::Impl {
                 process, reinterpret_cast<PVOID>(region.second.base), region.second.size,
                 MEM_RESERVE | MEM_RESERVE_PLACEHOLDER, PAGE_NOACCESS, NULL, 0));
             // All marked regions should reserve fine since they're free.
-            ASSERT_MSG(addr, "Unable to reserve virtual address space: {}",
-                       Common::GetLastErrorMsg());
+            ASSERT_MSG(addr, "Unable to reserve virtual address space: %s",
+                       (Common::GetLastErrorMsg()).c_str());
         }
 
         // Set these constants to ensure code relying on them works.
@@ -201,18 +201,18 @@ struct AddressSpace::Impl {
                                             PAGE_EXECUTE_READWRITE, SEC_COMMIT, BackingSize,
                                             nullptr, nullptr, 0);
 
-        ASSERT_MSG(backing_handle, "{}", Common::GetLastErrorMsg());
+        ASSERT_MSG(backing_handle, "%s", (Common::GetLastErrorMsg()).c_str());
         // Allocate a virtual memory for the backing file map as placeholder
         backing_base = static_cast<u8*>(VirtualAlloc2(process, nullptr, BackingSize,
                                                       MEM_RESERVE | MEM_RESERVE_PLACEHOLDER,
                                                       PAGE_NOACCESS, nullptr, 0));
-        ASSERT_MSG(backing_base, "{}", Common::GetLastErrorMsg());
+        ASSERT_MSG(backing_base, "%s", (Common::GetLastErrorMsg()).c_str());
 
         // Map backing placeholder. This will commit the pages
         void* const ret =
             MapViewOfFile3(backing_handle, process, backing_base, 0, BackingSize,
                            MEM_REPLACE_PLACEHOLDER, PAGE_EXECUTE_READWRITE, nullptr, 0);
-        ASSERT_MSG(ret == backing_base, "{}", Common::GetLastErrorMsg());
+        ASSERT_MSG(ret == backing_base, "%s", (Common::GetLastErrorMsg()).c_str());
     }
 
     ~Impl() {
@@ -259,7 +259,7 @@ struct AddressSpace::Impl {
                 param.Offset = phys_addr & 0xffffffffull;
                 param.OffsetHigh = (phys_addr & 0xffffffff00000000ull) >> 32;
                 bool ret = ReadFile(backing, ptr, size, &resultvar, &param);
-                ASSERT_MSG(ret, "ReadFile failed. {}", Common::GetLastErrorMsg());
+                ASSERT_MSG(ret, "ReadFile failed. %s", (Common::GetLastErrorMsg()).c_str());
 
                 // ReadFile moves the file pointer, restore it with SetFilePointer
                 s64 size_to_move = -size;
@@ -269,21 +269,24 @@ struct AddressSpace::Impl {
 
                 // Protect the memory area appropriately
                 ret = VirtualProtect(ptr, size, prot, &resultvar);
-                ASSERT_MSG(ret, "VirtualProtect failed. {}", Common::GetLastErrorMsg());
+                ASSERT_MSG(ret, "VirtualProtect failed. %s", (Common::GetLastErrorMsg()).c_str());
             } else {
                 if (prot == PAGE_NOACCESS) {
                     DWORD resultvar;
                     ptr = MapViewOfFile3(backing, process, reinterpret_cast<PVOID>(virtual_addr),
                                          phys_addr, size, MEM_REPLACE_PLACEHOLDER, PAGE_READWRITE,
                                          nullptr, 0);
-                    ASSERT_MSG(ptr, "MapViewOfFile3 failed. {}", Common::GetLastErrorMsg());
+                    ASSERT_MSG(ptr, "MapViewOfFile3 failed. %s",
+                               (Common::GetLastErrorMsg()).c_str());
                     bool ret = VirtualProtect(ptr, size, prot, &resultvar);
-                    ASSERT_MSG(ret, "VirtualProtect failed. {}", Common::GetLastErrorMsg());
+                    ASSERT_MSG(ret, "VirtualProtect failed. %s",
+                               (Common::GetLastErrorMsg()).c_str());
                 } else {
                     ptr =
                         MapViewOfFile3(backing, process, reinterpret_cast<PVOID>(virtual_addr),
                                        phys_addr, size, MEM_REPLACE_PLACEHOLDER, prot, nullptr, 0);
-                    ASSERT_MSG(ptr, "MapViewOfFile3 failed. {}", Common::GetLastErrorMsg());
+                    ASSERT_MSG(ptr, "MapViewOfFile3 failed. %s",
+                               (Common::GetLastErrorMsg()).c_str());
                 }
             }
         } else {
@@ -291,7 +294,7 @@ struct AddressSpace::Impl {
                 VirtualAlloc2(process, reinterpret_cast<PVOID>(virtual_addr), size,
                               MEM_RESERVE | MEM_COMMIT | MEM_REPLACE_PLACEHOLDER, prot, nullptr, 0);
         }
-        ASSERT_MSG(ptr, "{}", Common::GetLastErrorMsg());
+        ASSERT_MSG(ptr, "%s", (Common::GetLastErrorMsg()).c_str());
 
         for (const auto& info : protections) {
             const VAddr info_base = reinterpret_cast<VAddr>(info.BaseAddress);
@@ -303,7 +306,7 @@ struct AddressSpace::Impl {
             DWORD old_flags{};
             const bool ret =
                 VirtualProtectEx(process, LPVOID(begin), end - begin, info.Protect, &old_flags);
-            ASSERT_MSG(ret, "VirtualProtectEx failed. {}", Common::GetLastErrorMsg());
+            ASSERT_MSG(ret, "VirtualProtectEx failed. %s", (Common::GetLastErrorMsg()).c_str());
         }
         return ptr;
     }
@@ -319,7 +322,7 @@ struct AddressSpace::Impl {
             }
             MEMORY_BASIC_INFORMATION info{};
             const bool ret = VirtualQueryEx(process, LPCVOID(addr), &info, sizeof(info));
-            ASSERT_MSG(ret, "VirtualQueryEx failed. {}", Common::GetLastErrorMsg());
+            ASSERT_MSG(ret, "VirtualQueryEx failed. %s", (Common::GetLastErrorMsg()).c_str());
             if (info.Protect != region.prot) {
                 protections.push_back(info);
             }
@@ -343,8 +346,8 @@ struct AddressSpace::Impl {
             ret = VirtualFreeEx(process, reinterpret_cast<PVOID>(virtual_addr), size,
                                 MEM_RELEASE | MEM_PRESERVE_PLACEHOLDER);
         }
-        ASSERT_MSG(ret, "Unmap on virtual_addr {:#x}, size {:#x} failed: {}", virtual_addr, size,
-                   Common::GetLastErrorMsg());
+        ASSERT_MSG(ret, "Unmap on virtual_addr 0x%" PRIxPTR ", size 0x%" PRIx64 " failed: %s",
+                   virtual_addr, size, (Common::GetLastErrorMsg()).c_str());
     }
 
     void SplitRegion(VAddr virtual_addr, u64 size) {
@@ -381,7 +384,7 @@ struct AddressSpace::Impl {
             // Use VirtualFreeEx to create the split.
             if (!VirtualFreeEx(process, LPVOID(region.base), region.size,
                                MEM_RELEASE | MEM_PRESERVE_PLACEHOLDER)) {
-                UNREACHABLE_MSG("Region splitting failed: {}", Common::GetLastErrorMsg());
+                UNREACHABLE_MSG("Region splitting failed: %s", (Common::GetLastErrorMsg()).c_str());
             }
 
             // If the mapping was mapped, remap the region.
@@ -420,7 +423,7 @@ struct AddressSpace::Impl {
             // Use VirtualFreeEx to create the split.
             if (!VirtualFreeEx(process, LPVOID(region.base), region.size,
                                MEM_RELEASE | MEM_PRESERVE_PLACEHOLDER)) {
-                UNREACHABLE_MSG("Region splitting failed: {}", Common::GetLastErrorMsg());
+                UNREACHABLE_MSG("Region splitting failed: %s", (Common::GetLastErrorMsg()).c_str());
             }
 
             // If these regions were mapped, then map the unmapped area beyond the requested range.
@@ -500,7 +503,8 @@ struct AddressSpace::Impl {
         if (can_coalesce) {
             if (!VirtualFreeEx(process, LPVOID(it->first), it->second.size,
                                MEM_RELEASE | MEM_COALESCE_PLACEHOLDERS)) {
-                UNREACHABLE_MSG("Region coalescing failed: {}", Common::GetLastErrorMsg());
+                UNREACHABLE_MSG("Region coalescing failed: %s",
+                                (Common::GetLastErrorMsg()).c_str());
             }
         }
     }
@@ -582,15 +586,16 @@ struct AddressSpace::Impl {
             // If no flags are assigned, then something's gone wrong.
             if (new_flags == 0) {
                 LOG_CRITICAL(Core,
-                             "Unsupported protection flag combination for address {:#x}, size {}, "
-                             "read={}, write={}, execute={}",
+                             "Unsupported protection flag combination for address 0x%" PRIxPTR
+                             ", size %" PRIu64 ", "
+                             "read=%d, write=%d, execute=%d",
                              virtual_addr, size, read, write, execute);
                 return;
             }
 
             const VAddr virtual_end = virtual_addr + size;
             auto it = --regions.upper_bound(virtual_addr);
-            ASSERT_MSG(it != regions.end(), "addr {:#x} out of bounds", virtual_addr);
+            ASSERT_MSG(it != regions.end(), "addr 0x%" PRIxPTR " out of bounds", virtual_addr);
             for (; it->first < virtual_end; it++) {
                 if (!it->second.is_mapped) {
                     continue;
@@ -603,9 +608,10 @@ struct AddressSpace::Impl {
                 if (!VirtualProtectEx(process, LPVOID(range_addr), range_size, new_flags,
                                       &old_flags)) {
                     UNREACHABLE_MSG(
-                        "Failed to change virtual memory protection for address {:#x}, size "
-                        "{:#x}, error {}",
-                        virtual_addr, size, Common::GetLastErrorMsg());
+                        "Failed to change virtual memory protection for address 0x%" PRIxPTR
+                        ", size "
+                        "0x%" PRIx64 ", error %s",
+                        virtual_addr, size, (Common::GetLastErrorMsg()).c_str());
                 }
             }
         });
@@ -731,24 +737,29 @@ struct AddressSpace::Impl {
 #endif
         if (system_managed_base == MAP_FAILED || system_reserved_base == MAP_FAILED ||
             user_base == MAP_FAILED) {
-            LOG_CRITICAL(Kernel_Vmm, "mmap failed: {}", strerror(errno));
+            LOG_CRITICAL(Kernel_Vmm, "mmap failed: %s", strerror(errno));
             throw std::bad_alloc{};
         }
 
-        LOG_INFO(Kernel_Vmm, "System managed virtual memory region: {} - {}",
-                 fmt::ptr(system_managed_base),
-                 fmt::ptr(system_managed_base + system_managed_size - 1));
-        LOG_INFO(Kernel_Vmm, "System reserved virtual memory region: {} - {}",
-                 fmt::ptr(system_reserved_base),
-                 fmt::ptr(system_reserved_base + system_reserved_size - 1));
-        LOG_INFO(Kernel_Vmm, "User virtual memory region: {} - {}", fmt::ptr(user_base),
-                 fmt::ptr(user_base + user_size - 1));
+        LOG_INFO(Kernel_Vmm, "System managed virtual memory region: 0x%llx - 0x%llx",
+                 static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(system_managed_base)),
+                 static_cast<unsigned long long>(
+                     reinterpret_cast<uintptr_t>(system_managed_base + system_managed_size - 1)));
+        LOG_INFO(Kernel_Vmm, "System reserved virtual memory region: 0x%llx - 0x%llx",
+                 static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(system_reserved_base)),
+                 static_cast<unsigned long long>(
+                     reinterpret_cast<uintptr_t>(system_reserved_base + system_reserved_size - 1)));
+        LOG_INFO(Kernel_Vmm, "User virtual memory region: 0x%llx - 0x%llx",
+                 static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(user_base)),
+                 static_cast<unsigned long long>(
+                     reinterpret_cast<uintptr_t>(user_base + user_size - 1)));
 
 #ifdef __APPLE__
-        const auto shm_path = fmt::format("/BackingDmem{}", getpid());
+        const auto shm_path =
+            Common::StringFromFormat("/BackingDmem%d", static_cast<int>(getpid()));
         backing_fd = shm_open(shm_path.c_str(), O_RDWR | O_CREAT | O_EXCL, 0600);
         if (backing_fd < 0) {
-            LOG_CRITICAL(Kernel_Vmm, "shm_open failed: {}", strerror(errno));
+            LOG_CRITICAL(Kernel_Vmm, "shm_open failed: %s", strerror(errno));
             throw std::bad_alloc{};
         }
         shm_unlink(shm_path.c_str());
@@ -762,7 +773,7 @@ struct AddressSpace::Impl {
         // under any circumstances.
         backing_fd = memfd_create("BackingDmem", 0);
         if (backing_fd < 0) {
-            LOG_CRITICAL(Kernel_Vmm, "memfd_create failed: {}", strerror(errno));
+            LOG_CRITICAL(Kernel_Vmm, "memfd_create failed: %s", strerror(errno));
             throw std::bad_alloc{};
         }
 #endif
@@ -770,7 +781,7 @@ struct AddressSpace::Impl {
         // Defined to extend the file with zeros
         int ret = ftruncate(backing_fd, BackingSize);
         if (ret != 0) {
-            LOG_CRITICAL(Kernel_Vmm, "ftruncate failed with {}, are you out-of-memory?",
+            LOG_CRITICAL(Kernel_Vmm, "ftruncate failed with %s, are you out-of-memory?",
                          strerror(errno));
             throw std::bad_alloc{};
         }
@@ -779,7 +790,7 @@ struct AddressSpace::Impl {
         backing_base = static_cast<u8*>(
             mmap(nullptr, BackingSize, PROT_READ | PROT_WRITE, MAP_SHARED, backing_fd, 0));
         if (backing_base == MAP_FAILED) {
-            LOG_CRITICAL(Kernel_Vmm, "mmap failed: {}", strerror(errno));
+            LOG_CRITICAL(Kernel_Vmm, "mmap failed: %s", strerror(errno));
             throw std::bad_alloc{};
         }
     }
@@ -797,7 +808,7 @@ struct AddressSpace::Impl {
         const int flag = phys_addr != -1 ? MAP_SHARED : (MAP_ANONYMOUS | MAP_PRIVATE);
         void* ret = mmap(reinterpret_cast<void*>(virtual_addr), size, prot, MAP_FIXED | flag,
                          handle, host_offset);
-        ASSERT_MSG(ret != MAP_FAILED, "mmap failed: {}", strerror(errno));
+        ASSERT_MSG(ret != MAP_FAILED, "mmap failed: %s", strerror(errno));
         return ret;
     }
 
@@ -809,7 +820,7 @@ struct AddressSpace::Impl {
         map_flags |= MAP_NORESERVE;
 #endif
         void* ret = mmap(reinterpret_cast<void*>(virtual_addr), *size, PROT_NONE, map_flags, -1, 0);
-        ASSERT_MSG(ret != MAP_FAILED, "mmap failed: {}", strerror(errno));
+        ASSERT_MSG(ret != MAP_FAILED, "mmap failed: %s", strerror(errno));
 
         return virtual_addr;
     }
@@ -828,7 +839,7 @@ struct AddressSpace::Impl {
         }
 #endif
         int ret = mprotect(reinterpret_cast<void*>(virtual_addr), size, flags);
-        ASSERT_MSG(ret == 0, "mprotect failed: {}", strerror(errno));
+        ASSERT_MSG(ret == 0, "mprotect failed: %s", strerror(errno));
     }
 
     int backing_fd;

@@ -314,11 +314,11 @@ endif
 
 CORE_FLAGS := -DVK_ENABLE_BETA_EXTENSIONS \
 	-Isrc -I$(LRC_DIR)/include -I. \
-	-isystem $(EXT_DIR)/fmt/include \
 	-isystem $(EXT_DIR)/gcn/include \
 	-isystem $(EXT_DIR)/spirv-headers/include \
 	-isystem $(EXT_DIR)/vulkan-headers/include -isystem $(EXT_DIR)/libusb/libusb
-CORE_CXXFLAGS := -Wno-invalid-offsetof
+# A log or string format that does not match its arguments fails the build
+CORE_CXXFLAGS := -Wno-invalid-offsetof -Werror=format
 
 ifneq ($(X86_64_PARTS_ASM),)
    CORE_SOURCES_ASM += $(X86_64_PARTS_ASM)
@@ -412,8 +412,6 @@ $(OBJ_DIR)/$(LRC_DIR)/formats/zar/zar.c.o: CFLAGS += -DHAVE_RZSTD
 # ----------------------------------------------------------------------------
 # Libraries
 # ----------------------------------------------------------------------------
-FMT_SOURCES_CXX := $(addprefix $(EXT_DIR)/fmt/src/,format.cc os.cc)
-FMT_FLAGS := -I$(EXT_DIR)/fmt/include
 
 
 LIBUSB_DIR := $(EXT_DIR)/libusb/libusb
@@ -431,4 +429,4 @@ LIBUSB_FLAGS := -Ilibretro/libusb-config -I$(LIBUSB_DIR) -I$(LIBUSB_DIR)/os -w
 # libusb's Windows backend uses windows.h's min and max
 LIBUSB_FLAGS += -UNOMINMAX
 
-LIB_GROUPS := CORE LRC FMT LIBUSB
+LIB_GROUPS := CORE LRC LIBUSB

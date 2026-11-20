@@ -95,7 +95,7 @@ void RingAccessElimination(const IR::Program& program, const RuntimeInfo& runtim
         u32 dwords_per_vertex = gs_info.out_vertex_data_size;
         if (info.gs_copy_data.num_comps && info.gs_copy_data.num_comps > dwords_per_vertex) {
             LOG_WARNING(Render_Vulkan,
-                        "VERT_ITEMSIZE {} is different than actual number of dwords per vertex {}",
+                        "VERT_ITEMSIZE %u is different than actual number of dwords per vertex %u",
                         dwords_per_vertex, info.gs_copy_data.num_comps);
             dwords_per_vertex = info.gs_copy_data.num_comps;
         }

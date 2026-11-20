@@ -11,7 +11,6 @@
 #include <string>
 #include <utility>
 #include <vector>
-#include <fmt/format.h>
 
 #include "common/combiner.h"
 #include "common/logging/log.h"
@@ -73,12 +72,18 @@ void LogBroadcast(std::span<const u8> packet, const P2P::Endpoint& from) {
     const size_t shown = std::min<size_t>(packet.size(), 64);
     hex.reserve(shown * 3);
     for (size_t i = 0; i < shown; ++i) {
-        fmt::format_to(std::back_inserter(hex), "{}{:02x}", i == 0 ? "" : " ", packet[i]);
+        static constexpr char digits[] = "0123456789abcdef";
+        if (i != 0) {
+            hex += ' ';
+        }
+        hex += digits[packet[i] >> 4];
+        hex += digits[packet[i] & 15];
     }
     LOG_WARNING(Lib_Net,
                 "P2P broadcast packet received (layout assumed; please report this line): "
-                "from {}:{}, {} bytes: {}{}",
-                address, from.Port(), packet.size(), hex, packet.size() > shown ? " ..." : "");
+                "from %s:%u, %zu bytes: %s%s",
+                address, from.Port(), packet.size(), (hex).c_str(),
+                packet.size() > shown ? " ..." : "");
 }
 
 constexpr u16 P2PPortFallbacks = 16;
@@ -105,11 +110,11 @@ u16 StartLocked(P2PState& state, u16 udp_port, bool allow_fallback) {
     if (!transport) {
         if (state.last_failure != std::pair{udp_port, error}) {
             state.last_failure = {udp_port, error};
-            LOG_ERROR(Lib_Net, "cannot start P2P on UDP port {}: {}", udp_port,
-                      ErrnoName(static_cast<int>(error)));
+            LOG_ERROR(Lib_Net, "cannot start P2P on UDP port %u: %s", udp_port,
+                      (ErrnoName(static_cast<int>(error))).c_str());
         } else {
-            LOG_DEBUG(Lib_Net, "cannot start P2P on UDP port {}: {}", udp_port,
-                      ErrnoName(static_cast<int>(error)));
+            LOG_DEBUG(Lib_Net, "cannot start P2P on UDP port %u: %s", udp_port,
+                      (ErrnoName(static_cast<int>(error))).c_str());
         }
         return 0;
     }
@@ -119,11 +124,11 @@ u16 StartLocked(P2PState& state, u16 udp_port, bool allow_fallback) {
     Core::Net::SetP2PTransport(AF_INET, std::move(transport));
     if (udp_port != 0 && port != udp_port) {
         LOG_WARNING(Lib_Net,
-                    "UDP port {} is in use (another instance?), P2P transport on UDP port {} "
+                    "UDP port %u is in use (another instance?), P2P transport on UDP port %u "
                     "instead. Set p2p_port to choose one.",
                     udp_port, port);
     } else {
-        LOG_INFO(Lib_Net, "P2P transport on UDP port {}", port);
+        LOG_INFO(Lib_Net, "P2P transport on UDP port %u", port);
     }
     return port;
 }
@@ -198,7 +203,7 @@ void ConfigureP2P(u16 udp_port, u32 advertised_addr) {
         state.configured_port = udp_port;
         state.advertised_addr = advertised_addr;
         const u32 ip = sceNetNtohl(advertised_addr);
-        LOG_INFO(Lib_Net, "P2P configured: UDP port {}, advertised address {}.{}.{}.{}", udp_port,
+        LOG_INFO(Lib_Net, "P2P configured: UDP port %u, advertised address %u.%u.%u.%u", udp_port,
                  ip >> 24, (ip >> 16) & 0xff, (ip >> 8) & 0xff, ip & 0xff);
     });
 }
@@ -230,7 +235,7 @@ void StopP2P() {
         Core::Net::SetP2PTransport(AF_INET, nullptr);
     });
     if (stopped != 0) {
-        LOG_INFO(Lib_Net, "P2P transport on UDP port {} stopped", stopped);
+        LOG_INFO(Lib_Net, "P2P transport on UDP port %u stopped", stopped);
     }
     const auto hooks = GetSystemHooks();
     if (stopped != 0 && hooks.p2p_stopped) {

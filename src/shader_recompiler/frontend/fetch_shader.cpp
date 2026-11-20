@@ -133,9 +133,9 @@ bool ParseFetchShader(const Shader::Info& info, FetchShaderData& out_fetch_data)
             const u32 src0 = word0 & 0x1ff;
             const u32 vdst = (word0 >> 17) & 0xff;
             ASSERT(opcode == OpcodeVOP1::V_MOV_B32 && src0 == 242);
-            LOG_WARNING(Render_Recompiler, "Fetch shader has V{} = 1.0 which is ignored", vdst);
+            LOG_WARNING(Render_Recompiler, "Fetch shader has V%u = 1.0 which is ignored", vdst);
         } else {
-            UNREACHABLE_MSG("Unexpected instruction encoding in fetch shader {}", u32(encoding));
+            UNREACHABLE_MSG("Unexpected instruction encoding in fetch shader %u", u32(encoding));
         }
     }
 

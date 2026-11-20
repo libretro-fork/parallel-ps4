@@ -7,7 +7,7 @@
 #include <span>
 #include <unordered_map>
 #include <vector>
-#include <fmt/format.h>
+#include "common/string_util.h"
 #include "shader_recompiler/backend/spirv/spv_ops.h"
 
 #include "shader_recompiler/backend/bindings.h"
@@ -32,13 +32,7 @@ inline std::vector<u32> FinishModule(spv_module_t* m, u32 version) {
 }
 
 /// OpName of @target, the name formatted only when the module writes names
-template <typename... Args>
-u32 NameFmt(spv_module_t* m, u32 target, fmt::format_string<Args...> format, Args&&... args) {
-    if (m->names) {
-        spv_Name(m, target, fmt::format(format, std::forward<Args>(args)...).c_str());
-    }
-    return target;
-}
+u32 NameFmt(spv_module_t* m, u32 target, const char* format, ...) SHAD_PRINTF(3, 4);
 
 /// An id of the SPIR-V module (spv_module.h): a plain word, 0 for none
 using Id = u32;

@@ -63,11 +63,11 @@ int P2PKeyIoctl(P2P::Keyring& keyring, u16 np_port, u64 cmd, void* data) {
         return ORBIS_NET_EINVAL;
     }
     if (control == 0x200050c8) {
-        LOG_DEBUG(Lib_Net, "P2P ioctl {:#x}: enable (no-op)", control);
+        LOG_DEBUG(Lib_Net, "P2P ioctl 0x%x: enable (no-op)", control);
         return 0;
     }
     if ((control & 0xff) == 0xd9) {
-        LOG_DEBUG(Lib_Net, "P2P ioctl {:#x}: communication ID cleared", control);
+        LOG_DEBUG(Lib_Net, "P2P ioctl 0x%x: communication ID cleared", control);
         keyring.SetCommunicationId(std::nullopt);
         return 0;
     }
@@ -76,7 +76,7 @@ int P2PKeyIoctl(P2P::Keyring& keyring, u16 np_port, u64 cmd, void* data) {
     }
     auto* bytes = static_cast<u8*>(data);
     if (control == 0x802450c8 || control == 0x803450c8) {
-        LOG_DEBUG(Lib_Net, "P2P ioctl {:#x}: keys with id {} removed", control, bytes[IdOffset]);
+        LOG_DEBUG(Lib_Net, "P2P ioctl 0x%x: keys with id %u removed", control, bytes[IdOffset]);
         keyring.RemoveKeysWithId(bytes[IdOffset]);
         return 0;
     }
@@ -88,7 +88,7 @@ int P2PKeyIoctl(P2P::Keyring& keyring, u16 np_port, u64 cmd, void* data) {
     switch (control & 0xff) {
     case 0xc9: {
         const auto entry = ReadEntry(bytes);
-        LOG_DEBUG(Lib_Net, "P2P ioctl {:#x}: default key set (id {})", control, entry.id);
+        LOG_DEBUG(Lib_Net, "P2P ioctl 0x%x: default key set (id %u)", control, entry.id);
         keyring.SetDefaultKey(entry.key);
         keyring.AddPeerKey(P2P::Endpoint::IPv4("127.0.0.1", DefaultKeyPort), entry);
         return 0;
@@ -105,8 +105,8 @@ int P2PKeyIoctl(P2P::Keyring& keyring, u16 np_port, u64 cmd, void* data) {
         if (entry.local_port == 0) {
             entry.local_port = np_port;
         }
-        LOG_DEBUG(Lib_Net, "P2P ioctl {:#x}: key for peer {} added (id {}, flags {:#x})", control,
-                  peer_text(), entry.id, entry.flags);
+        LOG_DEBUG(Lib_Net, "P2P ioctl 0x%x: key for peer %s added (id %u, flags 0x%x)", control,
+                  (peer_text()).c_str(), entry.id, entry.flags);
         keyring.AddPeerKey(peer, entry);
         return 0;
     }
@@ -117,12 +117,12 @@ int P2PKeyIoctl(P2P::Keyring& keyring, u16 np_port, u64 cmd, void* data) {
         }
         const auto entry = ReadEntry(bytes);
         const bool released = keyring.ReleasePeerKey(peer, entry.key, entry.id);
-        LOG_DEBUG(Lib_Net, "P2P ioctl {:#x}: key for peer {} (id {}) {}", control, peer_text(),
-                  entry.id, released ? "released" : "not installed");
+        LOG_DEBUG(Lib_Net, "P2P ioctl 0x%x: key for peer %s (id %u) %s", control,
+                  (peer_text()).c_str(), entry.id, released ? "released" : "not installed");
         return released ? 0 : ORBIS_NET_ENOENT;
     }
     case 0xcd:
-        LOG_DEBUG(Lib_Net, "P2P ioctl {:#x}: wildcard key set", control);
+        LOG_DEBUG(Lib_Net, "P2P ioctl 0x%x: wildcard key set", control);
         keyring.SetWildcardKey(ReadEntry(bytes).key);
         return 0;
     case 0xce:
@@ -133,11 +133,11 @@ int P2PKeyIoctl(P2P::Keyring& keyring, u16 np_port, u64 cmd, void* data) {
         std::memcpy(bytes, &np_port, sizeof(np_port));
         return 0;
     case 0xd8:
-        LOG_DEBUG(Lib_Net, "P2P ioctl {:#x}: communication ID set", control);
+        LOG_DEBUG(Lib_Net, "P2P ioctl 0x%x: communication ID set", control);
         keyring.SetCommunicationId(P2P::DeriveCommunicationId(std::span<const u8, 16>(bytes, 16)));
         return 0;
     default:
-        LOG_WARNING(Lib_Net, "P2P ioctl {:#x}: unknown command", control);
+        LOG_WARNING(Lib_Net, "P2P ioctl 0x%x: unknown command", control);
         return ORBIS_NET_EINVAL;
     }
 }

@@ -5,10 +5,10 @@
 #include <algorithm>
 #include <chrono>
 #include <cstring>
-#include <fmt/format.h>
 #include <retro_atomic.h>
 #include "common/elf_info.h"
 #include "common/logging/log.h"
+#include "common/string_util.h"
 #include "core/emulator_settings.h"
 #include "core/libraries/kernel/time.h"
 #include "core/libraries/net/net_p2p.h"
@@ -92,8 +92,8 @@ std::pair<std::string, u16> NpHandler::ParseServerAddress() const {
             port = static_cast<u16>(std::stoi(port_str));
         } catch (const std::exception&) {
             LOG_WARNING(NpHandler,
-                        "shadNet server port '{}' is not a valid number; using default {}",
-                        port_str, port);
+                        "shadNet server port '%s' is not a valid number; using default %u",
+                        (port_str).c_str(), port);
         }
     }
     return {host, port};
@@ -115,12 +115,12 @@ bool NpHandler::ConnectUserById(s32 user_id) {
     if (!u)
         return false;
     if (!u->shadnet_enabled) {
-        LOG_DEBUG(NpHandler, "user_id={} ('{}') shadNet disabled,skipping", u->user_id,
+        LOG_DEBUG(NpHandler, "user_id=%d ('%s') shadNet disabled,skipping", u->user_id,
                   u->user_name);
         return false;
     }
     if (u->shadnet_npid[0] == '\0' || u->shadnet_password[0] == '\0') {
-        LOG_WARNING(NpHandler, "user_id={} ('{}') shadNet enabled but credentials missing,skipping",
+        LOG_WARNING(NpHandler, "user_id=%d ('%s') shadNet enabled but credentials missing,skipping",
                     u->user_id, u->user_name);
         return false;
     }
@@ -161,37 +161,38 @@ void NpHandler::Initialize() {
             switch (probe.result) {
             case ShadNet::ProbeResult::VersionMismatch:
                 LOG_WARNING(NpHandler,
-                            "shadNet server {}:{} protocol version mismatch (server v{}, emulator "
-                            "v{}); disabling shadNet for this run (saved setting unchanged)",
-                            host, port, probe.server_version, ShadNet::SHAD_PROTOCOL_VERSION);
-                ShadNetNotify(
-                    OVL_SHADNET_INFO,
-                    fmt::format("shadNet protocol version mismatch (server v{}, emulator v{}). "
-                                "Please update shadPS4. Online features are disabled for this "
-                                "session.",
-                                probe.server_version, ShadNet::SHAD_PROTOCOL_VERSION));
+                            "shadNet server %s:%u protocol version mismatch (server v%u, emulator "
+                            "v%u); disabling shadNet for this run (saved setting unchanged)",
+                            (host).c_str(), port, probe.server_version,
+                            ShadNet::SHAD_PROTOCOL_VERSION);
+                ShadNetNotify(OVL_SHADNET_INFO,
+                              Common::StringFromFormat(
+                                  "shadNet protocol version mismatch (server v%u, emulator v%u). "
+                                  "Please update shadPS4. Online features are disabled for this "
+                                  "session.",
+                                  probe.server_version, ShadNet::SHAD_PROTOCOL_VERSION));
                 break;
             case ShadNet::ProbeResult::ProtocolError:
                 LOG_WARNING(NpHandler,
-                            "shadNet server {}:{} sent an invalid ServerInfo handshake; disabling "
+                            "shadNet server %s:%u sent an invalid ServerInfo handshake; disabling "
                             "shadNet for this run (saved setting unchanged)",
-                            host, port);
-                ShadNetNotify(
-                    OVL_SHADNET_INFO,
-                    fmt::format("shadNet server ({}:{}) uses an incompatible protocol. Online "
-                                "features are disabled for this session.",
-                                host, port));
+                            (host).c_str(), port);
+                ShadNetNotify(OVL_SHADNET_INFO,
+                              Common::StringFromFormat(
+                                  "shadNet server (%s:%u) uses an incompatible protocol. Online "
+                                  "features are disabled for this session.",
+                                  (host).c_str(), port));
                 break;
             default: // Unreachable
                 LOG_WARNING(NpHandler,
-                            "shadNet server {}:{} is offline/unreachable; disabling shadNet for "
+                            "shadNet server %s:%u is offline/unreachable; disabling shadNet for "
                             "this run (saved setting unchanged)",
-                            host, port);
-                ShadNetNotify(
-                    OVL_SHADNET_INFO,
-                    fmt::format("shadNet server ({}:{}) is offline. Online features are disabled "
-                                "for this session.",
-                                host, port));
+                            (host).c_str(), port);
+                ShadNetNotify(OVL_SHADNET_INFO,
+                              Common::StringFromFormat(
+                                  "shadNet server (%s:%u) is offline. Online features are disabled "
+                                  "for this session.",
+                                  (host).c_str(), port));
                 break;
             }
             return;
@@ -244,8 +245,8 @@ void NpHandler::Shutdown() {
 
 bool NpHandler::ConnectUser(s32 user_id, const std::string& host, u16 port, const std::string& npid,
                             const std::string& password, const std::string& token) {
-    LOG_INFO(NpHandler, "Connecting user_id={} npid='{}' to {}:{} (timeout {}s)", user_id, npid,
-             host, port, ShadNet::SHAD_CONNECT_TIMEOUT_MS / 1000);
+    LOG_INFO(NpHandler, "Connecting user_id=%d npid='%s' to %s:%u (timeout %us)", user_id,
+             (npid).c_str(), (host).c_str(), port, ShadNet::SHAD_CONNECT_TIMEOUT_MS / 1000);
 
     auto client = std::make_shared<ShadNet::ShadNetClient>();
 
@@ -294,15 +295,15 @@ bool NpHandler::ConnectUser(s32 user_id, const std::string& host, u16 port, cons
         emu_settings_set_shadnet_session_disabled(true);
         if (server_ver != 0) {
             LOG_ERROR(NpHandler,
-                      "shadNet protocol version mismatch (server v{}, emulator v{}); disabling "
+                      "shadNet protocol version mismatch (server v%u, emulator v%u); disabling "
                       "shadNet for this run (saved setting unchanged)",
                       server_ver, ShadNet::SHAD_PROTOCOL_VERSION);
-            ShadNetNotify(
-                OVL_SHADNET_INFO,
-                fmt::format("shadNet protocol version mismatch (server v{}, emulator v{}). "
-                            "Please update shadPS4. Online features are disabled for this "
-                            "session.",
-                            server_ver, ShadNet::SHAD_PROTOCOL_VERSION));
+            ShadNetNotify(OVL_SHADNET_INFO,
+                          Common::StringFromFormat(
+                              "shadNet protocol version mismatch (server v%u, emulator v%u). "
+                              "Please update shadPS4. Online features are disabled for this "
+                              "session.",
+                              server_ver, ShadNet::SHAD_PROTOCOL_VERSION));
         } else {
             LOG_ERROR(NpHandler, "shadNet protocol error during handshake; disabling shadNet for "
                                  "this run (saved setting unchanged)");
@@ -315,7 +316,7 @@ bool NpHandler::ConnectUser(s32 user_id, const std::string& host, u16 port, cons
 
     const ShadNet::ShadNetState conn_state = client->WaitForConnection();
     if (conn_state != ShadNet::ShadNetState::Ok) {
-        LOG_ERROR(NpHandler, "user_id={} connection failed (state={})", user_id,
+        LOG_ERROR(NpHandler, "user_id=%d connection failed (state=%d)", user_id,
                   static_cast<int>(conn_state));
         handle_protocol_mismatch(conn_state);
         client->Stop();
@@ -324,15 +325,15 @@ bool NpHandler::ConnectUser(s32 user_id, const std::string& host, u16 port, cons
 
     const ShadNet::ShadNetState auth_state = client->WaitForAuthenticated();
     if (auth_state != ShadNet::ShadNetState::Ok) {
-        LOG_ERROR(NpHandler, "user_id={} authentication failed (state={})", user_id,
+        LOG_ERROR(NpHandler, "user_id=%d authentication failed (state=%d)", user_id,
                   static_cast<int>(auth_state));
         handle_protocol_mismatch(auth_state);
         client->Stop();
         return false;
     }
 
-    LOG_INFO(NpHandler, "user_id={} signed in npid='{}' accountId={}", user_id, npid,
-             client->GetUserId());
+    LOG_INFO(NpHandler, "user_id=%d signed in npid='%s' accountId=%" PRIu64, user_id,
+             (npid).c_str(), client->GetUserId());
 
     Net::UPnPClient::Instance().SetP2PFeaturesEnabled(client->IsMatching2Enabled());
     if (client->IsMatching2Enabled() && emu_settings_get_enable_upnp()) {
@@ -420,7 +421,7 @@ void NpHandler::FailPendingRequests(s32 user_id, s32 error_code) {
         }
     });
     if (failed > 0) {
-        LOG_WARNING(NpHandler, "user_id={} failed {} pending request(s) with {:#x}", user_id,
+        LOG_WARNING(NpHandler, "user_id=%d failed %zu pending request(s) with 0x%x", user_id,
                     failed, static_cast<u32>(error_code));
     }
 }
@@ -443,7 +444,7 @@ void NpHandler::DisconnectUser(s32 user_id) {
     // in-flight request now, or PollAsync spins and WaitAsync blocks forever.
     FailPendingRequests(user_id, ORBIS_NP_ERROR_SIGNED_OUT);
     FireStateCallback(user_id, NpManager::OrbisNpState::SignedOut);
-    LOG_INFO(NpHandler, "user_id={} disconnected", user_id);
+    LOG_INFO(NpHandler, "user_id=%d disconnected", user_id);
 }
 
 void NpHandler::OnUserLoggedIn(s32 user_id) {
@@ -474,7 +475,7 @@ void NpHandler::WorkerThread() {
         });
 
         for (s32 uid : dropped) {
-            LOG_WARNING(NpHandler, "user_id={} connection dropped (network); will retry", uid);
+            LOG_WARNING(NpHandler, "user_id=%d connection dropped (network); will retry", uid);
             DisconnectUser(uid);   // reports SignedOut + stops/removes the dead client
             MarkForReconnect(uid); // schedule transparent reconnect (network drop, not logout)
         }
@@ -518,12 +519,12 @@ void NpHandler::TryReconnect() {
         m_mutex_clients.Run([&] {
             if (ok || m_clients.count(uid)) {
                 m_reconnect.erase(uid);
-                LOG_INFO(NpHandler, "user_id={} reconnected to shadNet", uid);
+                LOG_INFO(NpHandler, "user_id=%d reconnected to shadNet", uid);
             } else if (auto it = m_reconnect.find(uid); it != m_reconnect.end()) {
                 it->second.backoff = std::min(it->second.backoff * 2, kMaxBackoff);
                 it->second.next_attempt = std::chrono::steady_clock::now() + it->second.backoff;
-                LOG_DEBUG(NpHandler, "user_id={} reconnect failed; next attempt in {}ms", uid,
-                          it->second.backoff.count());
+                LOG_DEBUG(NpHandler, "user_id=%d reconnect failed; next attempt in %lldms", uid,
+                          static_cast<long long>(it->second.backoff.count()));
             }
         });
     }
@@ -660,7 +661,7 @@ std::string NpHandler::GetNpCommId(s32 service_label) const {
         com_id = ids[idx];
         if (static_cast<size_t>(service_label) >= ids.size()) {
             LOG_WARNING(NpHandler,
-                        "service_label={} >= npbind entry count {} — falling back "
+                        "service_label=%d >= npbind entry count %zu — falling back "
                         "to index 0",
                         service_label, ids.size());
         }
@@ -699,7 +700,7 @@ void NpHandler::ResolveOnlineId(
     if (m_mutex_clients.Run([&] {
             auto it = m_clients.find(user_id);
             if (it == m_clients.end()) {
-                LOG_WARNING(NpHandler, "No shadNet session for user_id={}", user_id);
+                LOG_WARNING(NpHandler, "No shadNet session for user_id=%d", user_id);
                 if (on_result) {
                     on_result(ORBIS_NP_ERROR_SIGNED_OUT, 0, {});
                 }
@@ -711,7 +712,7 @@ void NpHandler::ResolveOnlineId(
         return;
     }
     if (!client || !client->IsAuthenticated()) {
-        LOG_WARNING(NpHandler, "user_id={} not authenticated", user_id);
+        LOG_WARNING(NpHandler, "user_id=%d not authenticated", user_id);
         if (on_result) {
             on_result(ORBIS_NP_COMMUNITY_ERROR_NO_LOGIN, 0, {});
         }
@@ -733,7 +734,8 @@ void NpHandler::ResolveOnlineId(
             m_pending_lookup.emplace(pkt_id, std::move(pending));
         });
     }
-    LOG_INFO(NpHandler, "user_id={} onlineId='{}' pkt_id={}", user_id, online_id, pkt_id);
+    LOG_INFO(NpHandler, "user_id=%d onlineId='%s' pkt_id=%" PRIu64, user_id, (online_id).c_str(),
+             pkt_id);
 }
 
 void NpHandler::OnLookupReply(s32 user_id, ShadNet::CommandType /*cmd*/, u64 pkt_id,
@@ -755,7 +757,8 @@ void NpHandler::OnLookupReply(s32 user_id, ShadNet::CommandType /*cmd*/, u64 pkt
     }
 
     if (error == ShadNet::ErrorType::NotFound) {
-        LOG_INFO(NpHandler, "LookupOnlineId: user_id={} pkt_id={} -> not found", user_id, pkt_id);
+        LOG_INFO(NpHandler, "LookupOnlineId: user_id=%d pkt_id=%" PRIu64 " -> not found", user_id,
+                 pkt_id);
         on_result(ORBIS_NP_COMMUNITY_SERVER_ERROR_NO_SUCH_USER_NPID, 0, {});
         return;
     }
@@ -764,7 +767,7 @@ void NpHandler::OnLookupReply(s32 user_id, ShadNet::CommandType /*cmd*/, u64 pkt
         return;
     }
     if (error != ShadNet::ErrorType::NoError) {
-        LOG_WARNING(NpHandler, "LookupOnlineId failed: error={}", static_cast<int>(error));
+        LOG_WARNING(NpHandler, "LookupOnlineId failed: error=%d", static_cast<int>(error));
         on_result(ORBIS_NP_COMMUNITY_ERROR_BAD_RESPONSE, 0, {});
         return;
     }
@@ -792,8 +795,10 @@ void NpHandler::OnLookupReply(s32 user_id, ShadNet::CommandType /*cmd*/, u64 pkt
         return;
     }
 
-    LOG_INFO(NpHandler, "LookupOnlineId: user_id={} pkt_id={} -> accountId={} npid='{}'", user_id,
-             pkt_id, pb.account_id, View(pb.npid));
+    LOG_INFO(NpHandler,
+             "LookupOnlineId: user_id=%d pkt_id=%" PRIu64 " -> accountId=%" PRIu64 " npid='%.*s'",
+             user_id, pkt_id, pb.account_id, static_cast<int>((View(pb.npid)).size()),
+             (View(pb.npid)).data());
     on_result(ORBIS_OK, pb.account_id, Str(pb.npid));
 }
 
@@ -804,25 +809,27 @@ void NpHandler::OnClientRejected(s32 user_id, const ShadNet::NotifyClientRejecte
         n.message.empty() ? std::string("The shadNet server doesn't accept this shadPS4 build. "
                                         "Online features are off for this session.")
                           : n.message + " Online features are off for this session.";
-    LOG_ERROR(NpHandler, "user_id={} signed out by the server (reason {}, version '{}'): {}",
-              user_id, n.reason, n.version, n.message);
+    LOG_ERROR(NpHandler, "user_id=%d signed out by the server (reason %u, version '%s'): %s",
+              user_id, n.reason, (n.version).c_str(), (n.message).c_str());
     ShadNetNotify(OVL_SHADNET_WARNING, text);
 }
 
 void NpHandler::OnServiceUnavailable(s32 user_id, const ShadNet::NotifyServiceUnavailable& n) {
     using N = ShadNet::NotifyServiceUnavailable;
     if (n.service != N::ServiceMatching2) {
-        LOG_INFO(NpHandler, "user_id={} server refused service {} (reason {})", user_id, n.service,
+        LOG_INFO(NpHandler, "user_id=%d server refused service %u (reason %u)", user_id, n.service,
                  n.reason);
         return;
     }
     std::string text;
     switch (n.reason) {
     case N::ReasonServerFull:
-        text = n.limit > 0 ? fmt::format("Online matchmaking is full right now ({}/{} players). "
-                                         "Try again in a few minutes.",
-                                         n.inUse, n.limit)
-                           : "Online matchmaking is full right now. Try again in a few minutes.";
+        text =
+            n.limit > 0
+                ? Common::StringFromFormat("Online matchmaking is full right now (%u/%u players). "
+                                           "Try again in a few minutes.",
+                                           n.inUse, n.limit)
+                : "Online matchmaking is full right now. Try again in a few minutes.";
         break;
     case N::ReasonNotAllowed:
         text = "Your shadNet account isn't allowed to use online matchmaking.";
@@ -834,7 +841,7 @@ void NpHandler::OnServiceUnavailable(s32 user_id, const ShadNet::NotifyServiceUn
         text = "The shadNet server refused online matchmaking.";
         break;
     }
-    LOG_WARNING(NpHandler, "user_id={} matchmaking unavailable: {}", user_id, text);
+    LOG_WARNING(NpHandler, "user_id=%d matchmaking unavailable: %s", user_id, (text).c_str());
     ShadNetNotify(OVL_SHADNET_WARNING, std::move(text));
 }
 

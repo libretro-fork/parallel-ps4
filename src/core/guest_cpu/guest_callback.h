@@ -41,8 +41,9 @@ inline u64 RunGuestFunctionOrAbort(const void* function, std::span<const u64> ar
     const auto result = linker->RunGuestFunction(reinterpret_cast<VAddr>(function), arguments,
                                                   stack_top);
     if (const auto* failure = std::get_if<GuestExecutionFailure>(&result)) {
-        LOG_CRITICAL(Core_Linker, "FEX guest callback {} failed at stage {}: {}", label,
-                     static_cast<int>(failure->Stage), failure->Error);
+        LOG_CRITICAL(Core_Linker, "FEX guest callback %.*s failed at stage %d: %d",
+                     static_cast<int>(label.size()), label.data(), static_cast<int>(failure->Stage),
+                     failure->Error);
         std::abort();
     }
     return std::get<u64>(result);

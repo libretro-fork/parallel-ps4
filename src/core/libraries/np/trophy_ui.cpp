@@ -9,14 +9,12 @@
 #include <string>
 #include <type_traits>
 #include <vector>
-#include <fmt/format.h>
 #include <formats/rmp3.h>
 
 #define MINIMP3_IMPLEMENTATION
 
 #include "common/embedded_resources.h"
 #include "common/io_file.h"
-#include "common/logging/formatter.h"
 #include "common/logging/log.h"
 #include "common/path_util.h"
 #include "core/emulator_settings.h"
@@ -134,8 +132,8 @@ static void PreloadTrophySoundInto() {
         if (bytes && DecodeMp3F32(bytes->data(), bytes->size(), pcm, &channels, &hz)) {
             ResampleTrophySound(pcm.data(), pcm.size() / channels, channels, hz);
         } else {
-            LOG_ERROR(Lib_NpTrophy, "Could not decode the custom trophy sound {}",
-                      fmt::UTF(mp3_path.u8string()));
+            LOG_ERROR(Lib_NpTrophy, "Could not decode the custom trophy sound %s",
+                      reinterpret_cast<const char*>((mp3_path.u8string()).c_str()));
         }
         return;
     }
@@ -148,8 +146,8 @@ static void PreloadTrophySoundInto() {
         if (bytes && ParseWav(bytes->data(), bytes->size(), &samples, &frames, &channels, &hz)) {
             ResampleTrophySound(samples, frames, channels, hz);
         } else {
-            LOG_ERROR(Lib_NpTrophy, "The custom trophy sound {} is not 16-bit PCM",
-                      fmt::UTF(wav_path.u8string()));
+            LOG_ERROR(Lib_NpTrophy, "The custom trophy sound %s is not 16-bit PCM",
+                      reinterpret_cast<const char*>((wav_path.u8string()).c_str()));
         }
         return;
     }
@@ -170,8 +168,8 @@ void AddTrophyToQueue(const std::filesystem::path& trophyIconPath, const std::st
         icon = Common::FS::FileView::Map(trophyIconPath);
     }
     if (!icon) {
-        LOG_ERROR(Lib_NpTrophy, "Couldnt load trophy icon at {}",
-                  fmt::UTF(trophyIconPath.u8string()));
+        LOG_ERROR(Lib_NpTrophy, "Couldnt load trophy icon at %s",
+                  reinterpret_cast<const char*>((trophyIconPath.u8string()).c_str()));
     }
     const char* type_name = rarity == "P"   ? "platinum.png"
                             : rarity == "G" ? "gold.png"

@@ -46,7 +46,7 @@ s32 CreateNpAuthRequest(bool async) {
             req_id++;
         }
         g_auth_requests[req_id].async = async;
-        LOG_DEBUG(Lib_NpAuth, "called, async = {}", async);
+        LOG_DEBUG(Lib_NpAuth, "called, async = %s", (async) ? "true" : "false");
         return req_id;
     });
 }
@@ -61,7 +61,7 @@ s32 PS4_SYSV_ABI sceNpAuthCreateAsyncRequest(const OrbisNpAuthCreateAsyncRequest
         return ORBIS_NP_AUTH_ERROR_INVALID_ARGUMENT;
     }
     if (param->size != sizeof(OrbisNpAuthCreateAsyncRequestParameter)) {
-        LOG_ERROR(Lib_NpAuth, "called with invalid parameter size: {}", param->size);
+        LOG_ERROR(Lib_NpAuth, "called with invalid parameter size: %" PRIu64, param->size);
         return ORBIS_NP_AUTH_ERROR_INVALID_SIZE;
     }
 
@@ -70,12 +70,12 @@ s32 PS4_SYSV_ABI sceNpAuthCreateAsyncRequest(const OrbisNpAuthCreateAsyncRequest
 
 static s32 FindRequest(s32 req_id, NpAuthRequest** request) {
     if (req_id <= 0) {
-        LOG_ERROR(Lib_NpAuth, "called with invalid request id: {}", req_id);
+        LOG_ERROR(Lib_NpAuth, "called with invalid request id: %d", req_id);
         return ORBIS_NP_AUTH_ERROR_INVALID_ARGUMENT;
     }
     const auto it = g_auth_requests.find(req_id);
     if (it == g_auth_requests.end()) {
-        LOG_ERROR(Lib_NpAuth, "request not found: {}", req_id);
+        LOG_ERROR(Lib_NpAuth, "request not found: %d", req_id);
         return ORBIS_NP_AUTH_ERROR_REQUEST_NOT_FOUND;
     }
     *request = &it->second;
@@ -89,11 +89,11 @@ static s32 StartRequest(s32 req_id, bool* async, std::shared_ptr<AuthRequestCtx>
             return error;
         }
         if (request->ctx) {
-            LOG_ERROR(Lib_NpAuth, "request already started: {}", req_id);
+            LOG_ERROR(Lib_NpAuth, "request already started: %d", req_id);
             return ORBIS_NP_AUTH_ERROR_INVALID_ARGUMENT;
         }
         if (request->aborted) {
-            LOG_ERROR(Lib_NpAuth, "request already aborted: {}", req_id);
+            LOG_ERROR(Lib_NpAuth, "request already aborted: %d", req_id);
             return ORBIS_NP_AUTH_ERROR_ABORTED;
         }
         request->ctx = std::make_shared<AuthRequestCtx>();
@@ -115,7 +115,7 @@ s32 GetAuthorizationCode(s32 req_id, const OrbisNpAuthGetAuthorizationCodeParame
         return ORBIS_NP_AUTH_ERROR_INVALID_ARGUMENT;
     }
     if (param->size != sizeof(OrbisNpAuthGetAuthorizationCodeParameterA)) {
-        LOG_ERROR(Lib_NpAuth, "called with invalid parameter size: {}", param->size);
+        LOG_ERROR(Lib_NpAuth, "called with invalid parameter size: %" PRIu64, param->size);
         return ORBIS_NP_AUTH_ERROR_INVALID_SIZE;
     }
     if (param->client_id == nullptr || param->scope == nullptr) {
@@ -123,7 +123,7 @@ s32 GetAuthorizationCode(s32 req_id, const OrbisNpAuthGetAuthorizationCodeParame
         return ORBIS_NP_AUTH_ERROR_INVALID_ARGUMENT;
     }
     if (user_manager_get_by_id(param->user_id) == nullptr) {
-        LOG_ERROR(Lib_NpAuth, "user not found: {}", param->user_id);
+        LOG_ERROR(Lib_NpAuth, "user not found: %d", param->user_id);
         return ORBIS_NP_ERROR_USER_NOT_FOUND;
     }
 
@@ -141,8 +141,8 @@ s32 GetAuthorizationCode(s32 req_id, const OrbisNpAuthGetAuthorizationCodeParame
     const std::string client_id(param->client_id->id,
                                 strnlen(param->client_id->id, sizeof(param->client_id->id)));
     const std::string scope = param->scope;
-    LOG_INFO(Lib_NpAuth, "req_id = {:#x}, async = {}, client_id = '{}', scope = '{}'", req_id,
-             async, client_id, scope);
+    LOG_INFO(Lib_NpAuth, "req_id = 0x%x, async = %s, client_id = '%s', scope = '%s'", req_id,
+             (async) ? "true" : "false", (client_id).c_str(), (scope).c_str());
 
     ctx->authCode = auth_code;
     ctx->issuerId = issuer_id;
@@ -162,7 +162,7 @@ sceNpAuthGetAuthorizationCode(s32 req_id, const OrbisNpAuthGetAuthorizationCodeP
         return ORBIS_NP_AUTH_ERROR_INVALID_ARGUMENT;
     }
     if (param->size != sizeof(OrbisNpAuthGetAuthorizationCodeParameter)) {
-        LOG_ERROR(Lib_NpAuth, "called with invalid parameter size: {}", param->size);
+        LOG_ERROR(Lib_NpAuth, "called with invalid parameter size: %" PRIu64, param->size);
         return ORBIS_NP_AUTH_ERROR_INVALID_SIZE;
     }
     if (param->online_id == nullptr || param->client_id == nullptr || param->scope == nullptr) {
@@ -204,8 +204,8 @@ sceNpAuthGetAuthorizationCodeV3(s32 req_id, const OrbisNpAuthGetAuthorizationCod
 s32 PS4_SYSV_ABI sceNpAuthSetTimeout(s32 req_id, s32 resolve_retry, u32 resolve_timeout,
                                      u32 conn_timeout, u32 send_timeout, u32 recv_timeout) {
     LOG_DEBUG(Lib_NpAuth,
-              "called req_id = {:#x}, resolve_retry = {}, resolve_timeout = {}, conn_timeout = {}, "
-              "send_timeout = {}, recv_timeout = {}",
+              "called req_id = 0x%x, resolve_retry = %d, resolve_timeout = %u, conn_timeout = %u, "
+              "send_timeout = %u, recv_timeout = %u",
               req_id, resolve_retry, resolve_timeout, conn_timeout, send_timeout, recv_timeout);
     constexpr u32 MinResolveTimeoutUs = 1000000;
     constexpr u32 MinTransferTimeoutUs = 10000000;
@@ -228,7 +228,7 @@ s32 PS4_SYSV_ABI sceNpAuthSetTimeout(s32 req_id, s32 resolve_retry, u32 resolve_
 }
 
 s32 PS4_SYSV_ABI sceNpAuthAbortRequest(s32 req_id) {
-    LOG_DEBUG(Lib_NpAuth, "called req_id = {:#x}", req_id);
+    LOG_DEBUG(Lib_NpAuth, "called req_id = 0x%x", req_id);
 
     return g_auth_request_mutex.Run([&]() -> s32 {
         NpAuthRequest* request = nullptr;
@@ -268,7 +268,7 @@ s32 PS4_SYSV_ABI sceNpAuthWaitAsync(s32 req_id, s32* result) {
         return error;
     }
     *result = ctx->Wait();
-    LOG_DEBUG(Lib_NpAuth, "called req_id = {:#x}, returning result = {:#x}", req_id,
+    LOG_DEBUG(Lib_NpAuth, "called req_id = 0x%x, returning result = 0x%x", req_id,
               static_cast<u32>(*result));
     return ORBIS_OK;
 }
@@ -288,14 +288,14 @@ s32 PS4_SYSV_ABI sceNpAuthPollAsync(s32 req_id, s32* result) {
             return ORBIS_NP_AUTH_POLL_ASYNC_RET_RUNNING;
         }
         *result = *ctx->result;
-        LOG_DEBUG(Lib_NpAuth, "called req_id = {:#x}, returning result = {:#x}", req_id,
+        LOG_DEBUG(Lib_NpAuth, "called req_id = 0x%x, returning result = 0x%x", req_id,
                   static_cast<u32>(*result));
         return ORBIS_NP_AUTH_POLL_ASYNC_RET_FINISHED;
     });
 }
 
 s32 PS4_SYSV_ABI sceNpAuthDeleteRequest(s32 req_id) {
-    LOG_DEBUG(Lib_NpAuth, "called req_id = {:#x}", req_id);
+    LOG_DEBUG(Lib_NpAuth, "called req_id = 0x%x", req_id);
 
     return g_auth_request_mutex.Run([&]() -> s32 {
         NpAuthRequest* request = nullptr;
@@ -336,7 +336,8 @@ s32 GetIdToken(s32 req_id, const OrbisNpAuthGetIdTokenParameterA* param, s32 fla
         return FinishStartedRequest(async, ctx);
     }
 
-    LOG_ERROR(Lib_NpAuth, "(STUBBED) called, req_id = {:#x}, async = {}", req_id, async);
+    LOG_ERROR(Lib_NpAuth, "(STUBBED) called, req_id = 0x%x, async = %s", req_id,
+              (async) ? "true" : "false");
 
     // Not sure what values are expected here, so zeroing this for now.
     std::memset(token, 0, sizeof(OrbisNpIdToken));

@@ -29,7 +29,7 @@ static IR::Value LoadForRegType(IR::IREmitter& ir, IR::RegTag tag) {
     case IR::RegType::VirtualReg:
         return ir.GetVirtualReg(tag.reg);
     default:
-        UNREACHABLE_MSG("Unknown reg type {}", u32(tag.type));
+        UNREACHABLE_MSG("Unknown reg type %u", u32(tag.type));
     }
 }
 

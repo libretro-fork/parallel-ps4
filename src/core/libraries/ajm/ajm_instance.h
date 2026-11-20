@@ -39,7 +39,7 @@ public:
             }
         }
         if (!pcm.empty()) {
-            LOG_ERROR(Lib_Ajm, "Could not write {} samples", pcm.size());
+            LOG_ERROR(Lib_Ajm, "Could not write %zu samples", pcm.size());
         }
         return samples_written;
     }
@@ -74,7 +74,7 @@ public:
             samples += n * channels;
         }
         if (done < count) {
-            LOG_ERROR(Lib_Ajm, "Could not write {} frames", count - done);
+            LOG_ERROR(Lib_Ajm, "Could not write %zu frames", static_cast<size_t>(count - done));
         }
         return samples;
     }

@@ -126,7 +126,7 @@ std::string convertValueToHex(const std::string type, const std::string valueStr
     } else if (type == "mask" || type == "mask_jump32") {
         result = valueStr;
     } else {
-        LOG_INFO(Loader, "Error applying Patch, unknown type: {}", type);
+        LOG_INFO(Loader, "Error applying Patch, unknown type: %s", (type).c_str());
     }
     return result;
 }
@@ -160,16 +160,17 @@ static void ApplyMetadata(const Common::Xml::Node& node, const std::string& app_
             unsigned long before = 0;
             unsigned long after = 0;
             if (found == 0 || offset.empty() || size.empty()) {
-                LOG_ERROR(Loader, "Patch {}: its pattern is not in the game, not applied: {}",
-                          currentPatchName, pattern);
+                LOG_ERROR(Loader, "Patch %s: its pattern is not in the game, not applied: %s",
+                          (currentPatchName).c_str(), (pattern).c_str());
             } else if (patch_halve_decimal(
                            reinterpret_cast<unsigned char*>(found + std::stoi(offset, 0, 10)),
                            static_cast<size_t>(std::stoul(size, 0, 10)), &before, &after)) {
-                LOG_INFO(Loader, "Applied patch: {}, {} halved to {}", currentPatchName, before,
-                         after);
+                LOG_INFO(Loader, "Applied patch: %s, %llu halved to %llu",
+                         (currentPatchName).c_str(), static_cast<unsigned long long>(before),
+                         static_cast<unsigned long long>(after));
             } else {
-                LOG_ERROR(Loader, "Patch {}: no number to halve where its pattern is, not applied",
-                          currentPatchName);
+                LOG_ERROR(Loader, "Patch %s: no number to halve where its pattern is, not applied",
+                          (currentPatchName).c_str());
             }
             continue;
         }
@@ -187,12 +188,13 @@ static void ApplyMetadata(const Common::Xml::Node& node, const std::string& app_
                 patchValue = convertValueToHex(type, patchValue);
             } catch (std::exception& e) {
                 ASSERT_MSG(false,
-                           "Failed to parse patch value \"{}\" for \"{}\" in "
-                           "patch \"{}\", error: \"{}\"\n"
+                           "Failed to parse patch value \"%s\" for \"%s\" in "
+                           "patch \"%s\", error: \"%s\"\n"
                            "If the patch was working on earlier versions, then it "
                            "was using a format that shadPS4 handled incorrectly, "
                            "and the patch should instead be fixed.",
-                           patchValue, address, currentPatchName, e.what());
+                           (patchValue).c_str(), (address).c_str(), (currentPatchName).c_str(),
+                           e.what());
             }
         }
 
@@ -245,7 +247,7 @@ void ApplyPatchesFromXML(std::filesystem::path path) {
             }
         }
     } else {
-        LOG_ERROR(Loader, "Could not read or parse patch XML: {}", path.string());
+        LOG_ERROR(Loader, "Could not read or parse patch XML: %s", (path.string()).c_str());
     }
 }
 
@@ -289,14 +291,14 @@ static void ApplyCatalogPatches() {
     // Large: kept off the stack
     static patch_catalog_t cat;
     if (!BuildCatalog(cat, catalog_serial)) {
-        LOG_ERROR(Loader, "Out of memory reading the patches for {}", catalog_serial);
+        LOG_ERROR(Loader, "Out of memory reading the patches for %s", catalog_serial);
     }
     for (unsigned i = 0; i < cat.metadata_count; i++) {
         const int entry = cat.metadata[i].entry;
         if (entry < 0 || (catalog_on[entry / 32] & (1u << (entry % 32))) == 0) {
             continue;
         }
-        LOG_INFO(Loader, "Patch Manager: {} ({})", cat.entries[entry].name,
+        LOG_INFO(Loader, "Patch Manager: %s (%s)", cat.entries[entry].name,
                  cat.entries[entry].repository);
         ApplyMetadata(Common::Xml::Node(cat.metadata[i].node), app_version);
     }
@@ -323,7 +325,8 @@ void OnGameLoaded() {
             const auto files_json_path = repo / "files.json";
 
             if (!Common::FS::IsFile(files_json_path)) {
-                LOG_ERROR(Loader, "The folder '{}' does not contain the files.json file.", name);
+                LOG_ERROR(Loader, "The folder '%.*s' does not contain the files.json file.",
+                          static_cast<int>((name).size()), (name).data());
                 return;
             }
 
@@ -360,8 +363,8 @@ void PatchMemory(const patchInfo& patch) {
         // not have them): nothing is written, where 0 + the offset was written to
         const uintptr_t found = PatternScan(patch.offsetStr);
         if (found == 0) {
-            LOG_ERROR(Loader, "Patch {}: its pattern is not in the game, not applied: {}",
-                      patch.modNameStr, patch.offsetStr);
+            LOG_ERROR(Loader, "Patch %s: its pattern is not in the game, not applied: %s",
+                      (patch.modNameStr).c_str(), (patch.offsetStr).c_str());
             return;
         }
         cheatAddress = reinterpret_cast<void*>(found + patch.maskOffset);
@@ -376,15 +379,15 @@ void PatchMemory(const patchInfo& patch) {
             return;
         }
         if (jumpSize > MAX_PATTERN_LENGTH) {
-            LOG_ERROR(Loader, "Jump size must be no more than {} bytes.", MAX_PATTERN_LENGTH);
+            LOG_ERROR(Loader, "Jump size must be no more than %d bytes.", MAX_PATTERN_LENGTH);
             return;
         }
 
         // Find the base address using "Address"
         uintptr_t baseAddress = PatternScan(patch.offsetStr);
         if (baseAddress == 0) {
-            LOG_ERROR(Loader, "PatternScan failed for mask_jump32 with pattern: {}",
-                      patch.offsetStr);
+            LOG_ERROR(Loader, "PatternScan failed for mask_jump32 with pattern: %s",
+                      (patch.offsetStr).c_str());
             return;
         }
         uintptr_t patchAddress = baseAddress + patch.maskOffset;
@@ -396,7 +399,8 @@ void PatchMemory(const patchInfo& patch) {
         // Use "Target" to locate the start of the code cave
         uintptr_t jump_target = PatternScan(patch.targetStr);
         if (jump_target == 0) {
-            LOG_ERROR(Loader, "PatternScan failed to Target with pattern: {}", patch.targetStr);
+            LOG_ERROR(Loader, "PatternScan failed to Target with pattern: %s",
+                      (patch.targetStr).c_str());
             return;
         }
 
@@ -409,7 +413,8 @@ void PatchMemory(const patchInfo& patch) {
             unsigned int byteVal = std::strtoul(byteStr, &endPtr, 16);
 
             if (endPtr != byteStr + 2) {
-                LOG_ERROR(Loader, "Invalid byte in Value: {}", patch.valueStr.substr(i, 2));
+                LOG_ERROR(Loader, "Invalid byte in Value: %s",
+                          (patch.valueStr.substr(i, 2)).c_str());
                 return;
             }
             payload.push_back(static_cast<u8>(byteVal));
@@ -439,14 +444,15 @@ void PatchMemory(const patchInfo& patch) {
         std::memcpy(reinterpret_cast<void*>(code_cave_end), jumpBack, sizeof(jumpBack));
 
         LOG_INFO(Loader,
-                 "Applied Patch mask_jump32: {}, PatchAddress: {:#x}, JumpTarget: {:#x}, "
-                 "CodeCaveEnd: {:#x}, JumpSize: {}",
-                 patch.modNameStr, patchAddress, jump_target, code_cave_end, jumpSize);
+                 "Applied Patch mask_jump32: %s, PatchAddress: 0x%" PRIxPTR
+                 ", JumpTarget: 0x%" PRIxPTR ", "
+                 "CodeCaveEnd: 0x%" PRIxPTR ", JumpSize: %d",
+                 (patch.modNameStr).c_str(), patchAddress, jump_target, code_cave_end, jumpSize);
         return;
     }
 
     if (cheatAddress == nullptr) {
-        LOG_ERROR(Loader, "Failed to get address for patch {}", patch.modNameStr);
+        LOG_ERROR(Loader, "Failed to get address for patch %s", (patch.modNameStr).c_str());
         return;
     }
 
@@ -465,8 +471,8 @@ void PatchMemory(const patchInfo& patch) {
 
     std::memcpy(cheatAddress, bytePatch.data(), bytePatch.size());
 
-    LOG_INFO(Loader, "Applied patch: {}, Offset: {:#x}, Value: {}", patch.modNameStr,
-             (uintptr_t)cheatAddress, patch.valueStr);
+    LOG_INFO(Loader, "Applied patch: %s, Offset: 0x%" PRIxPTR ", Value: %s",
+             (patch.modNameStr).c_str(), (uintptr_t)cheatAddress, (patch.valueStr).c_str());
 }
 
 static std::vector<int32_t> PatternToByte(const std::string& pattern) {

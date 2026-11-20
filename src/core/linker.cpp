@@ -6,7 +6,6 @@
 #include "common/assert.h"
 #include "common/elf_info.h"
 #include "common/io_file.h"
-#include "common/logging/formatter.h"
 #include "common/logging/log.h"
 #include "common/path_util.h"
 #include "common/singleton.h"
@@ -85,8 +84,9 @@ static bool SealGuestExecutableMemory(MemoryManager& memory, std::uintptr_t begi
                                       std::size_t size) {
     const auto result = memory.SealGuestExecutable(begin, size);
     if (result == ORBIS_OK) return true;
-    LOG_ERROR(Core_Linker, "Unable to seal FEX guest code begin={:#x} size={:#x}: {}", begin,
-              size, result);
+    LOG_ERROR(Core_Linker, "Unable to seal FEX guest code begin=0x%llx size=0x%llx: %d",
+              static_cast<unsigned long long>(begin), static_cast<unsigned long long>(size),
+              result);
     return false;
 }
 
@@ -121,7 +121,8 @@ static std::optional<GuestExecutionRange> QueryGuestExecutableMemory(void* conte
 }
 
 static void ReportGuestHleFailure(void*, const GuestCpu::HleCallFailure& failure) {
-    LOG_ERROR(Core_Linker, "FEX HLE call {} failed: {}", failure.name, failure.error);
+    LOG_ERROR(Core_Linker, "FEX HLE call %.*s failed: %d", static_cast<int>(failure.name.size()),
+              failure.name.data(), failure.error);
 }
 #endif
 
@@ -151,11 +152,11 @@ static PS4_SYSV_ABI void* RunMainEntry [[noreturn]](EntryParams* params) {
     auto* linker = Common::Singleton<Linker>::Instance();
     const auto result = linker->RunGuestMain(params);
     if (const auto* failure = std::get_if<GuestExecutionFailure>(&result)) {
-        LOG_CRITICAL(Core_Linker, "FEX main entry failed at stage {}: {}",
+        LOG_CRITICAL(Core_Linker, "FEX main entry failed at stage %d: %d",
                      static_cast<int>(failure->Stage), failure->Error);
     } else {
-        LOG_CRITICAL(Core_Linker, "FEX main entry returned unexpectedly with {:#x}",
-                     std::get<u64>(result));
+        LOG_CRITICAL(Core_Linker, "FEX main entry returned unexpectedly with 0x%llx",
+                     static_cast<unsigned long long>(std::get<u64>(result)));
     }
     std::abort();
 #else
@@ -198,8 +199,8 @@ public:
         if (base != 0) {
             const auto result = memory.UnmapMemory(base, size);
             if (result != ORBIS_OK) {
-                LOG_ERROR(Core_Linker, "Unable to unmap FEX guest stack {:#x}: {}", base,
-                          result);
+                LOG_ERROR(Core_Linker, "Unable to unmap FEX guest stack 0x%llx: %d",
+                          static_cast<unsigned long long>(base), result);
             }
         }
     }
@@ -256,21 +257,23 @@ std::optional<GuestExecutionFailure> NormalizeGuestRanges(
         const auto& range = ranges[index];
         if (range.Begin == 0 || range.Size == 0 || range.Begin + range.Size < range.Begin) {
             LOG_ERROR(Core_Linker,
-                      "Invalid FEX guest range index={} begin={:#x} size={:#x} executable={} "
-                      "writable={}",
-                      index, range.Begin, range.Size, range.Executable, range.Writable);
+                      "Invalid FEX guest range index=%zu begin=0x%llx size=0x%zx executable=%d "
+                      "writable=%d",
+                      index, static_cast<unsigned long long>(range.Begin), range.Size,
+                      range.Executable, range.Writable);
             return GuestExecutionFailure{GuestExecutionStage::Mapping, EINVAL};
         }
         if (index != 0) {
             const auto& previous = ranges[index - 1];
             if (previous.Begin + previous.Size > range.Begin) {
                 LOG_ERROR(Core_Linker,
-                          "FEX guest range overlap previous_index={} previous_begin={:#x} "
-                          "previous_size={:#x} previous_executable={} previous_writable={} "
-                          "index={} begin={:#x} size={:#x} executable={} writable={}",
-                          index - 1, previous.Begin, previous.Size, previous.Executable,
-                          previous.Writable, index, range.Begin, range.Size, range.Executable,
-                          range.Writable);
+                          "FEX guest range overlap previous_index=%zu previous_begin=0x%llx "
+                          "previous_size=0x%zx previous_executable=%d previous_writable=%d "
+                          "index=%zu begin=0x%llx size=0x%zx executable=%d writable=%d",
+                          index - 1, static_cast<unsigned long long>(previous.Begin), previous.Size,
+                          previous.Executable, previous.Writable, index,
+                          static_cast<unsigned long long>(range.Begin), range.Size,
+                          range.Executable, range.Writable);
                 return GuestExecutionFailure{GuestExecutionStage::Mapping, EACCES};
             }
         }
@@ -393,10 +396,13 @@ Linker::GuestFunctionResult Linker::RunGuestFunction(VAddr entry,
     if (state.StopReason != GuestStopReason::Halted ||
         state.Rip < returnAddress || state.Rip >= returnAddress + 0x1000) {
         LOG_CRITICAL(Core_Linker,
-                     "FEX guest function did not halt at return veneer entry={:#x} rip={:#x} "
-                     "last_rip={:#x} rsp={:#x} stop={} return={:#x}",
-                     entry, state.Rip, state.LastRip, state.Rsp,
-                     static_cast<int>(state.StopReason), returnAddress);
+                     "FEX guest function did not halt at return veneer entry=0x%llx rip=0x%llx "
+                     "last_rip=0x%llx rsp=0x%llx stop=%d return=0x%llx",
+                     static_cast<unsigned long long>(entry),
+                     static_cast<unsigned long long>(state.Rip),
+                     static_cast<unsigned long long>(state.LastRip),
+                     static_cast<unsigned long long>(state.Rsp), static_cast<int>(state.StopReason),
+                     static_cast<unsigned long long>(returnAddress));
         return GuestExecutionFailure{GuestExecutionStage::Execute, EPROTO};
     }
     return state.Gpr[0];
@@ -412,8 +418,8 @@ VAddr Linker::AllocateHleVeneer(std::shared_ptr<GuestCpu::HleCallAdapter> adapte
         }
         const auto veneer = m_hle_veneers->Allocate(*registered);
         if (const auto* failure = std::get_if<GuestCpu::HleVeneerFailure>(&veneer)) {
-            LOG_ERROR(Core_Linker, "Unable to allocate an HLE veneer for {}: {}", name,
-                      failure->error);
+            LOG_ERROR(Core_Linker, "Unable to allocate an HLE veneer for %.*s: %d",
+                      static_cast<int>(name.size()), name.data(), failure->error);
             return 0;
         }
         return std::get<u64>(veneer);
@@ -624,9 +630,11 @@ void Linker::Execute(const std::vector<std::string>& args) {
                 return;
             }
             const auto module = custom_mod_directory / Common::FS::PathFromUTF8String(name);
-            LOG_INFO(Core_Linker, "Loading custom module: {}", name);
+            LOG_INFO(Core_Linker, "Loading custom module: %.*s", static_cast<int>((name).size()),
+                     (name).data());
             if (LoadAndStartModule(module, 0, nullptr, nullptr) == -1) {
-                LOG_ERROR(Core_Linker, "Failed to load custom module: {}", name);
+                LOG_ERROR(Core_Linker, "Failed to load custom module: %.*s",
+                          static_cast<int>((name).size()), (name).data());
             }
         });
 
@@ -666,13 +674,15 @@ s32 Linker::LoadModule(const std::filesystem::path& elf_name, bool is_dynamic) {
         }
         if (!handle) {
             if (!Common::FS::Exists(elf_name)) {
-                LOG_ERROR(Core_Linker, "Provided file {} does not exist", elf_name.string());
+                LOG_ERROR(Core_Linker, "Provided file %s does not exist",
+                          (elf_name.string()).c_str());
                 return -1;
             }
             auto host = std::make_unique<Core::FileSys::HostFile>(
                 elf_name, Common::FS::FileAccessMode::Read, /*read_only=*/true);
             if (!host->IsOpen()) {
-                LOG_ERROR(Core_Linker, "Provided file {} could not be opened", elf_name.string());
+                LOG_ERROR(Core_Linker, "Provided file %s could not be opened",
+                          (elf_name.string()).c_str());
                 return -1;
             }
             handle = std::move(host);
@@ -683,8 +693,8 @@ s32 Linker::LoadModule(const std::filesystem::path& elf_name, bool is_dynamic) {
             std::make_unique<Module>(memory, elf_name, std::move(handle), max_tls_index, mod_id);
         ASSERT_MSG(
             module->IsValid(),
-            "Provided file {} is not valid ELF file. This usually indicated a corrupted dump.",
-            elf_name.string());
+            "Provided file %s is not valid ELF file. This usually indicated a corrupted dump.",
+            (elf_name.string()).c_str());
 
         num_static_modules += !is_dynamic;
         m_modules.emplace_back(std::move(module));
@@ -713,7 +723,7 @@ s32 Linker::LoadAndStartModule(const std::filesystem::path& path, u64 args, cons
 
     // Retrieve and verify proc param according to libkernel.
     auto* param = module->GetProcParam<OrbisProcParam*>();
-    ASSERT_MSG(!param || param->size >= 0x18, "Invalid module param size: {}", param->size);
+    ASSERT_MSG(!param || param->size >= 0x18, "Invalid module param size: %" PRIu64, param->size);
     s32 ret = module->Start(args, argp, param);
     if (pRes) {
         *pRes = ret;
@@ -785,7 +795,7 @@ void Linker::Relocate(Module* module) {
                 rel_sym_type = Loader::SymbolType::NoType;
                 break;
             default:
-                ASSERT_MSG(0, "unknown symbol type {}", sym_type);
+                ASSERT_MSG(0, "unknown symbol type %u", sym_type);
             }
 
             if (sym_visibility != 0) {
@@ -808,7 +818,7 @@ void Linker::Relocate(Module* module) {
                 break;
             }
             default:
-                UNREACHABLE_MSG("Unknown bind type {}", sym_bind);
+                UNREACHABLE_MSG("Unknown bind type %u", sym_bind);
             }
 #ifdef SHADPS4_ENABLE_FEX_GUEST_CPU
             if (rel_sym_type == Loader::SymbolType::Function && symrec.hle_adapter != nullptr) {
@@ -817,8 +827,8 @@ void Linker::Relocate(Module* module) {
                 }
                 const auto veneer = m_hle_veneers->Allocate(*symrec.hle_adapter);
                 if (const auto* failure = std::get_if<GuestCpu::HleVeneerFailure>(&veneer)) {
-                    LOG_ERROR(Core_Linker, "Unable to allocate FEX HLE veneer for {}: {}",
-                              symrec.symbol.name, failure->error);
+                    LOG_ERROR(Core_Linker, "Unable to allocate FEX HLE veneer for %s: %d",
+                              symrec.symbol.name.c_str(), failure->error);
                 } else {
                     symbol_virtual_addr = std::get<u64>(veneer);
                 }
@@ -830,13 +840,13 @@ void Linker::Relocate(Module* module) {
             break;
         }
         default:
-            LOG_INFO(Core_Linker, "UNK type {:#010x} rel symbol : {:#010x}", type, symbol);
+            LOG_INFO(Core_Linker, "UNK type 0x%08x rel symbol : 0x%08x", type, symbol);
         }
 
         if (rel_is_resolved) {
             std::memcpy(reinterpret_cast<void*>(rel_virtual_addr), &rel_value, sizeof(rel_value));
         } else if (rel_sym_type == Loader::SymbolType::Function) {
-            LOG_INFO(Core_Linker, "Function not patched! {}", rel_name);
+            LOG_INFO(Core_Linker, "Function not patched! %s", (rel_name).c_str());
         }
     });
 }
@@ -849,10 +859,10 @@ bool Linker::Resolve(const std::string& name, Loader::SymbolType sym_type, Modul
     if (ids.size() != 3 && sym_type != Loader::SymbolType::NoType) {
         return_info->virtual_address = 0;
         return_info->symbol.name = ids.at(0);
-        LOG_ERROR(Core_Linker, "Not Resolved {}", name);
+        LOG_ERROR(Core_Linker, "Not Resolved %s", (name).c_str());
         return false;
     } else if (ids.size() == 1 && sym_type == Loader::SymbolType::NoType) {
-        LOG_DEBUG(Core_Linker, "NoType export {}", name);
+        LOG_DEBUG(Core_Linker, "NoType export %s", (name).c_str());
         library = m->FindLibrary("");
         module = m->FindModule("");
     } else {
@@ -920,8 +930,9 @@ bool Linker::Resolve(const std::string& name, Loader::SymbolType sym_type, Modul
         return_info->symbol.nidName = "Unknown !!!";
     }
     if (library->name != "libc" && library->name != "libSceFios2") {
-        LOG_WARNING(Core_Linker, "Linker: Stub resolved {} as {} (lib: {}, mod: {})", sr.name,
-                    return_info->symbol.nidName, library->name, module->name);
+        LOG_WARNING(Core_Linker, "Linker: Stub resolved %s as %s (lib: %s, mod: %s)",
+                    (sr.name).c_str(), (return_info->symbol.nidName).c_str(),
+                    (library->name).c_str(), (module->name).c_str());
     } else {
         if (library->name == "libc" && return_info->symbol.nidName == "Need_sceLibc") {
             Libraries::SysModule::g_need_scelibc = true;
@@ -1018,7 +1029,7 @@ void* Linker::CallAppHeapMalloc(u64 size) {
     const auto result =
         RunGuestFunction(reinterpret_cast<VAddr>(heap_api->heap_malloc), arguments);
     if (const auto* failure = std::get_if<GuestExecutionFailure>(&result)) {
-        LOG_CRITICAL(Core_Linker, "FEX guest heap malloc failed at stage {}: {}",
+        LOG_CRITICAL(Core_Linker, "FEX guest heap malloc failed at stage %d: %d",
                      static_cast<int>(failure->Stage), failure->Error);
         std::abort();
     }
@@ -1033,7 +1044,7 @@ void Linker::CallAppHeapFree(void* pointer) {
     const std::array<u64, 1> arguments{reinterpret_cast<u64>(pointer)};
     const auto result = RunGuestFunction(reinterpret_cast<VAddr>(heap_api->heap_free), arguments);
     if (const auto* failure = std::get_if<GuestExecutionFailure>(&result)) {
-        LOG_CRITICAL(Core_Linker, "FEX guest heap free failed at stage {}: {}",
+        LOG_CRITICAL(Core_Linker, "FEX guest heap free failed at stage %d: %d",
                      static_cast<int>(failure->Stage), failure->Error);
         std::abort();
     }

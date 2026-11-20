@@ -139,7 +139,7 @@ struct OrbisSaveDataIcon {
             file.Seek(0);
             file.ReadRaw<u8>(buf, std::min(bufSize, dataSize));
         } catch (const fs::filesystem_error& e) {
-            LOG_ERROR(Lib_SaveData, "Failed to load icon: {}", e.what());
+            LOG_ERROR(Lib_SaveData, "Failed to load icon: %s", e.what());
             return Error::INTERNAL;
         }
         return Error::OK;
@@ -466,7 +466,7 @@ static Error saveDataMount(const OrbisSaveDataMount2* mount_info,
         if (e.code() == std::errc::no_space_on_device) {
             return Error::NO_SPACE_FS;
         }
-        LOG_ERROR(Lib_SaveData, "Failed to mount save data: {}", e.what());
+        LOG_ERROR(Lib_SaveData, "Failed to mount save data: %s", e.what());
         return Error::INTERNAL;
     }
 
@@ -492,7 +492,9 @@ static Error Umount(const OrbisSaveDataMountPoint* mountPoint, bool call_backup 
         LOG_INFO(Lib_SaveData, "called with invalid parameter");
         return Error::PARAMETER;
     }
-    LOG_DEBUG(Lib_SaveData, "Umount mountPoint:{}", mountPoint->data.to_view());
+    LOG_DEBUG(Lib_SaveData, "Umount mountPoint:%.*s",
+              static_cast<int>((mountPoint->data.to_view()).size()),
+              (mountPoint->data.to_view()).data());
 
     std::string mount_point_str = mountPoint->data.to_string();
 
@@ -549,7 +551,8 @@ Error PS4_SYSV_ABI sceSaveDataBackup(const OrbisSaveDataBackup* backup) {
     }
 
     const std::string_view dir_name{backup->dirName->data};
-    LOG_DEBUG(Lib_SaveData, "called dirName: {}", dir_name);
+    LOG_DEBUG(Lib_SaveData, "called dirName: %.*s", static_cast<int>((dir_name).size()),
+              (dir_name).data());
 
     std::string_view title{backup->titleId != nullptr ? std::string_view{backup->titleId->data}
                                                       : std::string_view{g_game_serial}};
@@ -598,7 +601,8 @@ Error PS4_SYSV_ABI sceSaveDataCheckBackupData(const OrbisSaveDataCheckBackupData
 
     const std::string_view title{check->titleId != nullptr ? std::string_view{check->titleId->data}
                                                            : std::string_view{g_game_serial}};
-    LOG_DEBUG(Lib_SaveData, "called with titleId={}", title);
+    LOG_DEBUG(Lib_SaveData, "called with titleId=%.*s", static_cast<int>((title).size()),
+              (title).data());
 
     const auto save_path =
         SaveInstance::MakeDirSavePath(check->userId, title, check->dirName->data);
@@ -621,7 +625,8 @@ Error PS4_SYSV_ABI sceSaveDataCheckBackupData(const OrbisSaveDataCheckBackupData
     if (check->param != nullptr) {
         PSF sfo;
         if (!sfo.Open(backup_path / "sce_sys" / "param.sfo")) {
-            LOG_ERROR(Lib_SaveData, "Failed to read SFO at {}", fmt::UTF(backup_path.u8string()));
+            LOG_ERROR(Lib_SaveData, "Failed to read SFO at %s",
+                      reinterpret_cast<const char*>((backup_path.u8string()).c_str()));
             return Error::INTERNAL;
         }
         check->param->FromSFO(sfo);
@@ -737,7 +742,8 @@ Error PS4_SYSV_ABI sceSaveDataDelete(const OrbisSaveDataDelete* del) {
         return Error::PARAMETER;
     }
     const std::string_view dirName{del->dirName->data};
-    LOG_DEBUG(Lib_SaveData, "called dirName: {}", dirName);
+    LOG_DEBUG(Lib_SaveData, "called dirName: %.*s", static_cast<int>((dirName).size()),
+              (dirName).data());
     if (dirName.empty()) {
         return Error::PARAMETER;
     }
@@ -748,7 +754,8 @@ Error PS4_SYSV_ABI sceSaveDataDelete(const OrbisSaveDataDelete* del) {
     }
     const auto save_path = SaveInstance::MakeDirSavePath(del->userId, g_game_serial, dirName);
     if (!Common::FS::RemoveAll(save_path)) {
-        LOG_ERROR(Lib_SaveData, "Failed to delete save data: {}", fmt::UTF(save_path.u8string()));
+        LOG_ERROR(Lib_SaveData, "Failed to delete save data: %s",
+                  reinterpret_cast<const char*>((save_path.u8string()).c_str()));
         return Error::INTERNAL;
     }
     return Error::OK;
@@ -828,7 +835,8 @@ Error PS4_SYSV_ABI sceSaveDataDirNameSearch(const OrbisSaveDataDirNameSearchCond
         const auto sfo_path = SaveInstance::GetParamSFOPath(dir_path);
         PSF sfo;
         if (!sfo.Open(sfo_path)) {
-            LOG_ERROR(Lib_SaveData, "Failed to read SFO: {}", fmt::UTF(sfo_path.u8string()));
+            LOG_ERROR(Lib_SaveData, "Failed to read SFO: %s",
+                      reinterpret_cast<const char*>((sfo_path.u8string()).c_str()));
             ASSERT_MSG(false, "Failed to read SFO");
         }
 
@@ -1025,7 +1033,7 @@ Error PS4_SYSV_ABI sceSaveDataGetParam(const OrbisSaveDataMountPoint* mountPoint
         LOG_INFO(Lib_SaveData, "called with invalid parameter");
         return Error::PARAMETER;
     }
-    LOG_DEBUG(Lib_SaveData, "called: paramType = {}",
+    LOG_DEBUG(Lib_SaveData, "called: paramType = %s",
               enum_name(&enum_names_Libraries_SaveData_OrbisSaveDataParamType,
                         static_cast<s64>(paramType)));
     const PSF* param_sfo = nullptr;
@@ -1266,8 +1274,10 @@ Error PS4_SYSV_ABI sceSaveDataMount(const OrbisSaveDataMount* mount,
         LOG_INFO(Lib_SaveData, "called with invalid parameter");
         return Error::PARAMETER;
     }
-    LOG_DEBUG(Lib_SaveData, "called dirName: {}, mode: {:0b}, blocks: {}",
-              mount->dirName->data.to_view(), (int)mount->mountMode, mount->blocks);
+    LOG_DEBUG(Lib_SaveData, "called dirName: %.*s, mode: %s, blocks: %" PRIu64,
+              static_cast<int>((mount->dirName->data.to_view()).size()),
+              (mount->dirName->data.to_view()).data(),
+              Common::BinaryText((int)mount->mountMode, 0).c_str(), mount->blocks);
 
     OrbisSaveDataMount2 mount_info{};
     mount_info.userId = mount->userId;
@@ -1287,8 +1297,10 @@ Error PS4_SYSV_ABI sceSaveDataMount2(const OrbisSaveDataMount2* mount,
         LOG_INFO(Lib_SaveData, "called with invalid parameter");
         return Error::PARAMETER;
     }
-    LOG_DEBUG(Lib_SaveData, "called dirName: {}, mode: {:0b}, blocks: {}",
-              mount->dirName->data.to_view(), (int)mount->mountMode, mount->blocks);
+    LOG_DEBUG(Lib_SaveData, "called dirName: %.*s, mode: %s, blocks: %" PRIu64,
+              static_cast<int>((mount->dirName->data.to_view()).size()),
+              (mount->dirName->data.to_view()).data(),
+              Common::BinaryText((int)mount->mountMode, 0).c_str(), mount->blocks);
     return saveDataMount(mount, mount_result);
 }
 
@@ -1333,7 +1345,8 @@ Error PS4_SYSV_ABI sceSaveDataRestoreBackupData(const OrbisSaveDataRestoreBackup
     }
 
     const std::string_view dir_name{restore->dirName->data};
-    LOG_DEBUG(Lib_SaveData, "called dirName: {}", dir_name);
+    LOG_DEBUG(Lib_SaveData, "called dirName: %.*s", static_cast<int>((dir_name).size()),
+              (dir_name).data());
 
     std::string_view title{restore->titleId != nullptr ? std::string_view{restore->titleId->data}
                                                        : std::string_view{g_game_serial}};
@@ -1402,7 +1415,7 @@ Error PS4_SYSV_ABI sceSaveDataSaveIcon(const OrbisSaveDataMountPoint* mountPoint
         const Common::FS::IOFile file(path, Common::FS::FileAccessMode::Create);
         file.WriteRaw<u8>(icon->buf, std::min(icon->bufSize, icon->dataSize));
     } catch (const fs::filesystem_error& e) {
-        LOG_ERROR(Lib_SaveData, "Failed to load icon: {}", e.what());
+        LOG_ERROR(Lib_SaveData, "Failed to load icon: %s", e.what());
         return Error::INTERNAL;
     }
 
@@ -1431,7 +1444,7 @@ Error PS4_SYSV_ABI sceSaveDataSetParam(const OrbisSaveDataMountPoint* mountPoint
         LOG_INFO(Lib_SaveData, "called with invalid parameter");
         return Error::PARAMETER;
     }
-    LOG_DEBUG(Lib_SaveData, "called: paramType = {}",
+    LOG_DEBUG(Lib_SaveData, "called: paramType = %s",
               enum_name(&enum_names_Libraries_SaveData_OrbisSaveDataParamType,
                         static_cast<s64>(paramType)));
     PSF* param_sfo = nullptr;
@@ -1543,7 +1556,7 @@ Error PS4_SYSV_ABI sceSaveDataSetSaveDataMemory2(const OrbisSaveDataMemorySet2* 
 Error PS4_SYSV_ABI
 sceSaveDataSetupSaveDataMemory(Libraries::UserService::OrbisUserServiceUserId userId,
                                size_t memorySize, OrbisSaveDataParam* param) {
-    LOG_DEBUG(Lib_SaveData, "called: userId = {}, memorySize = {}", userId, memorySize);
+    LOG_DEBUG(Lib_SaveData, "called: userId = %d, memorySize = %zu", userId, memorySize);
     OrbisSaveDataMemorySetup2 setupParam{};
     setupParam.userId = userId;
     setupParam.memorySize = memorySize;
@@ -1610,7 +1623,7 @@ Error PS4_SYSV_ABI sceSaveDataSetupSaveDataMemory2(const OrbisSaveDataMemorySetu
             result->existedMemorySize = existed_size;
         }
     } catch (const fs::filesystem_error& e) {
-        LOG_ERROR(Lib_SaveData, "Failed to create/load save memory: {}", e.what());
+        LOG_ERROR(Lib_SaveData, "Failed to create/load save memory: %s", e.what());
 
         const MsgDialog::MsgDialogState dialog{MsgDialog::MsgDialogState::UserState{
             .type = MsgDialog::ButtonType::OK,
@@ -1698,8 +1711,11 @@ Error PS4_SYSV_ABI sceSaveDataTransferringMount(const OrbisSaveDataTransferringM
         LOG_INFO(Lib_SaveData, "called with invalid parameter");
         return Error::PARAMETER;
     }
-    LOG_DEBUG(Lib_SaveData, "called titleId: {}, dirName: {}", mount->titleId->data.to_view(),
-              mount->dirName->data.to_view());
+    LOG_DEBUG(Lib_SaveData, "called titleId: %.*s, dirName: %.*s",
+              static_cast<int>((mount->titleId->data.to_view()).size()),
+              (mount->titleId->data.to_view()).data(),
+              static_cast<int>((mount->dirName->data.to_view()).size()),
+              (mount->dirName->data.to_view()).data());
     OrbisSaveDataMount2 mount_info{};
     mount_info.userId = mount->userId;
     mount_info.dirName = mount->dirName;

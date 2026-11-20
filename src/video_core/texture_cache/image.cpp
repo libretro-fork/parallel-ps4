@@ -104,12 +104,12 @@ void UniqueImage::Create(const vk::ImageCreateInfo& image_ci) {
     ASSERT(!image);
     vk::Result result = allocator->CreateImage(image_ci, true, image, allocation);
     if (result == vk::Result::eErrorOutOfDeviceMemory) {
-        LOG_WARNING(Render_Vulkan, "Allocating image of {}x{}x{} over budget.",
+        LOG_WARNING(Render_Vulkan, "Allocating image of %ux%ux%u over budget.",
                     image_ci.extent.width, image_ci.extent.height, image_ci.extent.depth);
         result = allocator->CreateImage(image_ci, false, image, allocation);
     }
-    ASSERT_MSG(result == vk::Result::eSuccess, "Failed allocating image with error {}",
-               vk::to_string(result));
+    ASSERT_MSG(result == vk::Result::eSuccess, "Failed allocating image with error %s",
+               (vk::to_string(result)).c_str());
     size_bytes = allocation->size;
 }
 
@@ -161,9 +161,10 @@ Image::Image(const Vulkan::Instance& instance, Vulkan::Runtime& runtime_,
     const auto image_format_properties =
         instance.GetPhysicalDevice().getImageFormatProperties2(format_info);
     if (image_format_properties.result == vk::Result::eErrorFormatNotSupported) {
-        LOG_ERROR(Render_Vulkan, "image format {} type {} is not supported (flags {}, usage {})",
-                  vk::to_string(supported_format), vk::to_string(format_info.type),
-                  vk::to_string(format_info.flags), vk::to_string(format_info.usage));
+        LOG_ERROR(
+            Render_Vulkan, "image format %s type %s is not supported (flags %s, usage %s)",
+            (vk::to_string(supported_format)).c_str(), (vk::to_string(format_info.type)).c_str(),
+            (vk::to_string(format_info.flags)).c_str(), (vk::to_string(format_info.usage)).c_str());
     }
     supported_samples = image_format_properties.result == vk::Result::eSuccess
                             ? image_format_properties.value.imageFormatProperties.sampleCounts
@@ -191,11 +192,13 @@ Image::Image(const Vulkan::Instance& instance, Vulkan::Runtime& runtime_,
     backing->image = UniqueImage{instance.GetDevice(), instance.GetAllocator()};
     backing->image.Create(image_ci);
 
-    Vulkan::SetObjectName(instance.GetDevice(), GetImage(),
-                          "Image {}x{}x{} {} {} {:#x}:{:#x} L:{} M:{} S:{}", info.size.width,
-                          info.size.height, info.size.depth, AmdGpu::NameOf(info.tile_mode),
-                          vk::to_string(info.pixel_format), info.guest_address, info.guest_size,
-                          info.resources.layers, info.resources.levels, info.num_samples);
+    Vulkan::SetObjectName(
+        instance.GetDevice(), GetImage(),
+        "Image %ux%ux%u %.*s %s 0x%" PRIx64 ":0x%x L:%u M:%u S:%u", info.size.width,
+        info.size.height, info.size.depth, static_cast<int>(AmdGpu::NameOf(info.tile_mode).size()),
+        AmdGpu::NameOf(info.tile_mode).data(), vk::to_string(info.pixel_format).c_str(),
+        info.guest_address, info.guest_size, static_cast<unsigned>(info.resources.layers),
+        static_cast<unsigned>(info.resources.levels), static_cast<unsigned>(info.num_samples));
 }
 
 Image::~Image() = default;

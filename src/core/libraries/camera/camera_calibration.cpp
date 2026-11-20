@@ -10,7 +10,7 @@
 namespace Libraries::Camera {
 
 s32 PS4_SYSV_ABI sceCameraGetCalibData(s32 id, void* calib_data, void* maybe_reserved) {
-    LOG_WARNING(Lib_Camera, "(DUMMY) called, id: {}", id);
+    LOG_WARNING(Lib_Camera, "(DUMMY) called, id: %d", id);
     if (calib_data == nullptr) {
         return ORBIS_CAMERA_ERROR_PARAM;
     }

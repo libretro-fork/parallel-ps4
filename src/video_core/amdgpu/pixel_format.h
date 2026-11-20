@@ -4,7 +4,6 @@
 #pragma once
 
 #include <string_view>
-#include <fmt/format.h>
 #include "common/assert.h"
 #include "common/types.h"
 
@@ -358,7 +357,7 @@ constexpr NumberConversion MapNumberConversion(const NumberFormat num_fmt,
         case DataFormat::Format16_16_16_16:
             return NumberConversion::Sint16ToSnormNz;
         default:
-            UNREACHABLE_MSG("data_fmt = {}", u32(data_fmt));
+            UNREACHABLE_MSG("data_fmt = %u", u32(data_fmt));
         }
     }
     default:
@@ -419,23 +418,3 @@ constexpr u32 NumBitsPerElement(DataFormat format) noexcept {
 }
 
 } // namespace AmdGpu
-
-template <>
-struct fmt::formatter<AmdGpu::DataFormat> {
-    constexpr auto parse(format_parse_context& ctx) {
-        return ctx.begin();
-    }
-    auto format(AmdGpu::DataFormat fmt, format_context& ctx) const {
-        return fmt::format_to(ctx.out(), "{}", AmdGpu::NameOf(fmt));
-    }
-};
-
-template <>
-struct fmt::formatter<AmdGpu::NumberFormat> {
-    constexpr auto parse(format_parse_context& ctx) {
-        return ctx.begin();
-    }
-    auto format(AmdGpu::NumberFormat fmt, format_context& ctx) const {
-        return fmt::format_to(ctx.out(), "{}", AmdGpu::NameOf(fmt));
-    }
-};

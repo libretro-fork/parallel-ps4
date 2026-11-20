@@ -4,11 +4,11 @@
 #include <algorithm>
 #include <chrono>
 #include <cstring>
-#include <fmt/format.h>
 
 #include <retro_atomic.h>
 #include "common/assert.h"
 #include "common/combiner.h"
+#include "common/string_util.h"
 #include "core/libraries/kernel/kernel.h"
 #include "core/libraries/kernel/posix_error.h"
 #include "core/libraries/kernel/threads/pthread.h"
@@ -38,7 +38,7 @@ static int CondInit(PthreadCondT* cond, const PthreadCondAttrT* cond_attr, const
         cvp->name = name;
     } else {
         static retro_atomic_int_t CondId{0};
-        cvp->name = fmt::format("Cond{}", retro_atomic_fetch_add_int(&CondId, 1));
+        cvp->name = Common::StringFromFormat("Cond%d", retro_atomic_fetch_add_int(&CondId, 1));
     }
 
     if (cond_attr == nullptr || *cond_attr == nullptr) {

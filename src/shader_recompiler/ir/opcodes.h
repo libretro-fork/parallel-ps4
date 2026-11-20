@@ -5,7 +5,6 @@
 
 #include <algorithm>
 #include <array>
-#include <fmt/format.h>
 #include "common/types.h"
 #include "shader_recompiler/ir/type.h"
 
@@ -96,14 +95,3 @@ constexpr u8 NUM_ARGS[]{
 [[nodiscard]] std::string_view NameOf(Opcode op);
 
 } // namespace Shader::IR
-
-template <>
-struct fmt::formatter<Shader::IR::Opcode> {
-    constexpr auto parse(format_parse_context& ctx) {
-        return ctx.begin();
-    }
-    template <typename FormatContext>
-    auto format(const Shader::IR::Opcode op, FormatContext& ctx) const {
-        return fmt::format_to(ctx.out(), "{}", Shader::IR::NameOf(op));
-    }
-};

@@ -20,7 +20,6 @@
 #include "core/fex/fex_guest_engine.h"
 #include "core/guest_cpu/guest_callback.h"
 #endif
-#include <fmt/format.h>
 #include <retro_atomic.h>
 #include "core/libraries/kernel/kernel.h"
 #include "core/libraries/kernel/orbis_error.h"
@@ -108,7 +107,8 @@ void PS4_SYSV_ABI posix_pthread_exit(void* status) {
 
     /* Check if this thread is already in the process of exiting: */
     ASSERT_MSG(retro_atomic_load_seq_cst_int(&curthread->cancelling) == 0,
-               "Thread {} has called pthread_exit from a destructor", fmt::ptr(curthread));
+               "Thread 0x%llx has called pthread_exit from a destructor",
+               static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(curthread)));
 
     /* Flag this thread as exiting. */
     (void)retro_atomic_exchange_int(&curthread->cancelling, 1);
@@ -413,7 +413,7 @@ int PS4_SYSV_ABI posix_pthread_create_name_np(PthreadT* thread, const PthreadAtt
     }
     int ret = new_thread->native_thr->Create(RunThread, new_thread);
 
-    ASSERT_MSG(ret == 0, "Failed to create thread with error {}", ret);
+    ASSERT_MSG(ret == 0, "Failed to create thread with error %d", ret);
 
     if (attr != nullptr && *attr != nullptr && (*attr)->cpuset != nullptr) {
         new_thread->SetAffinity((*attr)->cpuset);
@@ -556,7 +556,7 @@ int PS4_SYSV_ABI posix_sched_get_priority_min(SchedPolicy policy) {
 }
 
 int PS4_SYSV_ABI posix_pthread_rename_np(PthreadT thread, const char* name) {
-    LOG_INFO(Kernel_Pthread, "name = {}", name ? name : "(null)");
+    LOG_INFO(Kernel_Pthread, "name = %s", name ? name : "(null)");
     auto* thread_state = ThrState::Instance();
     auto* memory = Core::Memory::Instance();
 
@@ -731,13 +731,13 @@ void InterruptPthreadForCancellation(Pthread* thread) noexcept {
     const u64 result = NtQueueApcThreadEx(reinterpret_cast<HANDLE>(thread->native_thr->GetHandle()),
                                           option, PthreadCancelApc, nullptr, nullptr, nullptr);
     if (result != 0) {
-        LOG_ERROR(Lib_Kernel, "Failed to deliver pthread cancellation APC: {:#x}", result);
+        LOG_ERROR(Lib_Kernel, "Failed to deliver pthread cancellation APC: 0x%" PRIx64, result);
     }
 #else
     const auto native_thread = reinterpret_cast<pthread_t>(thread->native_thr->GetHandle());
     const int result = pthread_kill(native_thread, HostPthreadCancelSignal());
     if (result != 0) {
-        LOG_ERROR(Lib_Kernel, "Failed to deliver pthread cancellation signal: {}", result);
+        LOG_ERROR(Lib_Kernel, "Failed to deliver pthread cancellation signal: %d", result);
     }
 #endif
 }
@@ -870,7 +870,7 @@ void PS4_SYSV_ABI scePthreadTestcancel() {
 }
 
 static void SigIgnHandler(int sig) {
-    LOG_DEBUG(Lib_Kernel, "called, sig: {}", sig);
+    LOG_DEBUG(Lib_Kernel, "called, sig: %d", sig);
 }
 
 static bool SigDflHandler(int sig) {
@@ -903,7 +903,7 @@ static bool SigDflHandler(int sig) {
     case POSIX_SIGTRAP:
         return false;
     default:
-        LOG_DEBUG(Lib_Kernel, "called, sig: {}", sig);
+        LOG_DEBUG(Lib_Kernel, "called, sig: %d", sig);
         return true;
     }
 }
@@ -1086,7 +1086,7 @@ bool Pthread::DispatchSignal(s32 sig, Siginfo* info, Ucontext* context) {
     if (Core::GuestCpu::IsGuestFunctionAddress(reinterpret_cast<const void*>(handler))) {
         if (!Core::Fex::DeliverGuestOrbisSignal(sig, nullptr, nullptr,
                                                 reinterpret_cast<std::uintptr_t>(handler))) {
-            LOG_ERROR(Lib_Kernel, "FEX failed to queue guest signal {}", sig);
+            LOG_ERROR(Lib_Kernel, "FEX failed to queue guest signal %d", sig);
         }
         // A thread waiting in an HLE call (an event flag, a mutex) reaches no safe point of
         // its own until the wait ends, which may be what the handler is for (a GC's stop)

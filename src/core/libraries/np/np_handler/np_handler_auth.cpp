@@ -61,7 +61,8 @@ s32 NpHandler::RequestAuthorizationCode(s32 user_id, const std::string& client_i
         p.req = std::move(ctx);
         p.user_id = user_id;
         m_pending_auth.emplace(pkt_id, std::move(p));
-        LOG_INFO(NpHandler, "user_id={} client_id='{}' pkt_id={}", user_id, client_id, pkt_id);
+        LOG_INFO(NpHandler, "user_id=%d client_id='%s' pkt_id=%" PRIu64, user_id,
+                 (client_id).c_str(), pkt_id);
         return ORBIS_OK;
     });
 }
@@ -85,7 +86,7 @@ void NpHandler::OnAuthReply(s32 user_id, ShadNet::CommandType /*cmd*/, u64 pkt_i
     }
 
     if (error != ShadNet::ErrorType::NoError) {
-        LOG_WARNING(NpHandler, "user_id={} error={}", user_id, static_cast<int>(error));
+        LOG_WARNING(NpHandler, "user_id=%d error=%d", user_id, static_cast<int>(error));
         req->SetResult(AuthErrorFromReply(error));
         return;
     }
@@ -105,11 +106,11 @@ void NpHandler::OnAuthReply(s32 user_id, ShadNet::CommandType /*cmd*/, u64 pkt_i
         return;
     }
     if ((pb.code.size == 0) || pb.code.size >= sizeof(OrbisNpAuthorizationCode::code)) {
-        LOG_WARNING(NpHandler, "code has invalid length {}", pb.code.size);
+        LOG_WARNING(NpHandler, "code has invalid length %zu", pb.code.size);
         req->SetResult(ORBIS_NP_AUTH_ERROR_NO_TOKEN_RECEIVED);
         return;
     }
-    LOG_INFO(NpHandler, "user_id={} pkt_id={} received code", user_id, pkt_id);
+    LOG_INFO(NpHandler, "user_id=%d pkt_id=%" PRIu64 " received code", user_id, pkt_id);
     req->SetAuthorizationCode(Str(pb.code), NpAuthIssuerId);
 }
 

@@ -46,7 +46,8 @@ bool TRP::Extract(const std::filesystem::path& trophyPath, std::string npCommId,
     }
     const auto file = Common::FS::FileView::Map(trophyPath);
     if (!file) {
-        LOG_ERROR(Common_Filesystem, "Unable to open trophy file: {}", trophyPath.string());
+        LOG_ERROR(Common_Filesystem, "Unable to open trophy file: %s",
+                  (trophyPath.string()).c_str());
         return false;
     }
     return Extract(file->Bytes(), std::move(npCommId), outputPath);
@@ -77,8 +78,7 @@ bool TRP::Extract(std::span<const u8> trp, std::string npCommId,
         std::memcpy(&header, trp.data(), sizeof(header));
 
         if (header.magic != TRP_MAGIC) {
-            LOG_ERROR(Common_Filesystem,
-                      "Wrong trophy magic number: got {:#010x}, expected {:#010x}",
+            LOG_ERROR(Common_Filesystem, "Wrong trophy magic number: got 0x%08x, expected 0x%08x",
                       static_cast<u32>(header.magic), TRP_MAGIC);
             return false;
         }
@@ -90,8 +90,8 @@ bool TRP::Extract(std::span<const u8> trp, std::string npCommId,
             Common::FS::CreateDirectories(outputPath / "Xml");
         }
         if (dir_ec) {
-            LOG_ERROR(Common_Filesystem, "Failed to create output directories for {}: {}", npCommId,
-                      dir_ec.message());
+            LOG_ERROR(Common_Filesystem, "Failed to create output directories for %s: %s",
+                      (npCommId).c_str(), (dir_ec.message()).c_str());
             cleanupOnFailure();
             return false;
         }
@@ -128,18 +128,19 @@ bool TRP::Extract(std::span<const u8> trp, std::string npCommId,
                     // Skip this entry but continue
                 }
             } else {
-                LOG_DEBUG(Common_Filesystem, "Unknown entry flag: {} for {}",
-                          static_cast<u32>(entry.flag), name);
+                LOG_DEBUG(Common_Filesystem, "Unknown entry flag: %u for %.*s",
+                          static_cast<u32>(entry.flag), static_cast<int>((name).size()),
+                          (name).data());
             }
             trpFileIndex++;
         }
 
     } catch (const std::filesystem::filesystem_error& e) {
-        LOG_CRITICAL(Common_Filesystem, "Filesystem error during trophy extraction: {}", e.what());
+        LOG_CRITICAL(Common_Filesystem, "Filesystem error during trophy extraction: %s", e.what());
         cleanupOnFailure();
         return false;
     } catch (const std::exception& e) {
-        LOG_CRITICAL(Common_Filesystem, "Error during trophy extraction: {}", e.what());
+        LOG_CRITICAL(Common_Filesystem, "Error during trophy extraction: %s", e.what());
         cleanupOnFailure();
         return false;
     }
@@ -149,8 +150,8 @@ bool TRP::Extract(std::span<const u8> trp, std::string npCommId,
         return false;
     }
 
-    LOG_INFO(Common_Filesystem, "Successfully extracted {} trophy files for {}", trpFileIndex,
-             npCommId);
+    LOG_INFO(Common_Filesystem, "Successfully extracted %d trophy files for %s", trpFileIndex,
+             (npCommId).c_str());
     return true;
 }
 
@@ -176,7 +177,7 @@ bool TRP::ProcessPngEntry(std::span<const u8> trp, const TrpEntry& entry,
     auto outputFile = outputPath / "Icons" / name;
     size_t written = Common::FS::IOFile::WriteBytes(outputFile, icon);
     if (written != icon.size()) {
-        LOG_ERROR(Common_Filesystem, "PNG write failed: wanted {} bytes, wrote {}", icon.size(),
+        LOG_ERROR(Common_Filesystem, "PNG write failed: wanted %zu bytes, wrote %zu", icon.size(),
                   written);
         return false;
     }
@@ -230,7 +231,7 @@ bool TRP::ProcessEncryptedXmlEntry(std::span<const u8> trp, const TrpEntry& entr
     auto outputFile = outputPath / "Xml" / xml_name;
     size_t written = Common::FS::IOFile::WriteBytes(outputFile, XML);
     if (written != XML.size()) {
-        LOG_ERROR(Common_Filesystem, "XML write failed: wanted {} bytes, wrote {}", XML.size(),
+        LOG_ERROR(Common_Filesystem, "XML write failed: wanted %zu bytes, wrote %zu", XML.size(),
                   written);
         return false;
     }

@@ -4,6 +4,7 @@
 #include <algorithm>
 #include "common/assert.h"
 #include "common/logging/log.h"
+#include "common/string_util.h"
 #include "shader_recompiler/frontend/control_flow_graph.h"
 #include "shader_recompiler/ir/condition.h"
 
@@ -83,7 +84,7 @@ static std::optional<u32> ResolveSetPcTarget(std::span<const GcnInst> list, u32 
     const u32 base_pc = pc_map[setpc_index - 3] + getpc.length;
 
     const u32 result_pc = static_cast<u32>(static_cast<s32>(base_pc) + signed_offset);
-    LOG_DEBUG(Render_Recompiler, "SetPC target: {} + {} = {}", base_pc, signed_offset, result_pc);
+    LOG_DEBUG(Render_Recompiler, "SetPC target: %u + %d = %u", base_pc, signed_offset, result_pc);
     return result_pc & ~0x3u;
 }
 
@@ -117,7 +118,7 @@ void CFG::EmitLabels() {
                 } else {
                     ASSERT_MSG(
                         false,
-                        "S_SETPC_B64 without a resolvable offset at PC {:#x} (Index {}): Involved "
+                        "S_SETPC_B64 without a resolvable offset at PC 0x%x (Index %u): Involved "
                         "instructions not recognized or invalid pattern",
                         pc, i);
                 }
@@ -330,7 +331,7 @@ void CFG::LinkBlocks() {
         if (end_inst.opcode == Opcode::S_SETPC_B64) {
             auto tgt = ResolveSetPcTarget(inst_list, block.end_index, index_to_pc);
             ASSERT_MSG(tgt,
-                       "S_SETPC_B64 without a resolvable offset at PC {:#x} (Index {}): Involved "
+                       "S_SETPC_B64 without a resolvable offset at PC 0x%x (Index %u): Involved "
                        "instructions not recognized or invalid pattern",
                        branch_pc, block.end_index);
             target_pc = *tgt;
@@ -367,7 +368,7 @@ void CFG::LinkBlocks() {
 void CFG::RemoveUnreachableBlocks() {
     for (auto it = std::next(blocks.begin()); it != blocks.end();) {
         if (it->num_predecessors == 0) {
-            LOG_WARNING(Render_Recompiler, "Removing unreachable block begin={:#x}", it->begin);
+            LOG_WARNING(Render_Recompiler, "Removing unreachable block begin=0x%x", it->begin);
             it = blocks.erase(it);
         } else {
             it++;
@@ -378,22 +379,27 @@ void CFG::RemoveUnreachableBlocks() {
 std::string CFG::Dot() const {
     int node_uid{0};
 
-    const auto name_of = [](const Block& block) { return fmt::format("\"{:#x}\"", block.begin); };
+    const auto name_of = [](const Block& block) {
+        return Common::StringFromFormat("\"0x%x\"", block.begin);
+    };
 
     std::string dot{"digraph shader {\n"};
-    dot += fmt::format("\tsubgraph cluster_{} {{\n", 0);
-    dot += fmt::format("\t\tnode [style=filled];\n");
+    dot += Common::StringFromFormat("\tsubgraph cluster_%d {\n", 0);
+    dot += Common::StringFromFormat("\t\tnode [style=filled];\n");
     for (const Block& block : blocks) {
         const std::string name{name_of(block)};
         const auto add_branch = [&](Block* branch, bool add_label) {
-            dot += fmt::format("\t\t{}->{}", name, name_of(*branch));
+            dot +=
+                Common::StringFromFormat("\t\t%s->%s", (name).c_str(), (name_of(*branch)).c_str());
             if (add_label && block.cond != IR::Condition::True &&
                 block.cond != IR::Condition::False) {
-                dot += fmt::format(" [label=\"{}\"]", block.cond);
+                dot += Common::StringFromFormat(
+                    " [label=\"%.*s\"]", static_cast<int>(Shader::IR::NameOf(block.cond).size()),
+                    Shader::IR::NameOf(block.cond).data());
             }
             dot += '\n';
         };
-        dot += fmt::format("\t\t{};\n", name);
+        dot += Common::StringFromFormat("\t\t%s;\n", (name).c_str());
         switch (block.end_class) {
         case EndClass::Branch:
             if (block.cond != IR::Condition::False) {
@@ -404,9 +410,9 @@ std::string CFG::Dot() const {
             }
             break;
         case EndClass::Exit:
-            dot += fmt::format("\t\t{}->N{};\n", name, node_uid);
-            dot +=
-                fmt::format("\t\tN{} [label=\"Exit\"][shape=square][style=stripped];\n", node_uid);
+            dot += Common::StringFromFormat("\t\t%s->N%d;\n", (name).c_str(), node_uid);
+            dot += Common::StringFromFormat(
+                "\t\tN%d [label=\"Exit\"][shape=square][style=stripped];\n", node_uid);
             ++node_uid;
             break;
         }
@@ -415,9 +421,9 @@ std::string CFG::Dot() const {
     if (blocks.empty()) {
         dot += "Start;\n";
     } else {
-        dot += fmt::format("\tStart -> {};\n", name_of(*blocks.begin()));
+        dot += Common::StringFromFormat("\tStart -> %s;\n", (name_of(*blocks.begin())).c_str());
     }
-    dot += fmt::format("\tStart [shape=diamond];\n");
+    dot += Common::StringFromFormat("\tStart [shape=diamond];\n");
     dot += "}\n";
     return dot;
 }

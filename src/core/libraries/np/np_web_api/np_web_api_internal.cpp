@@ -311,7 +311,7 @@ OrbisNpWebApiUserContext* findUserContext(OrbisNpWebApiContext* context, s32 tit
 }
 
 s32 createUserContextWithOnlineId(s32 libCtxId, OrbisNpOnlineId* onlineId) {
-    LOG_WARNING(Lib_NpWebApi, "called libCtxId = {}", libCtxId);
+    LOG_WARNING(Lib_NpWebApi, "called libCtxId = %d", libCtxId);
 
     Libraries::UserService::OrbisUserServiceUserId user_id = 0;
     Libraries::UserService::sceUserServiceGetInitialUser(&user_id);
@@ -319,7 +319,7 @@ s32 createUserContextWithOnlineId(s32 libCtxId, OrbisNpOnlineId* onlineId) {
 }
 
 s32 createUserContext(s32 libCtxId, Libraries::UserService::OrbisUserServiceUserId userId) {
-    LOG_INFO(Lib_NpWebApi, "libCtxId = {}, userId = {}", libCtxId, userId);
+    LOG_INFO(Lib_NpWebApi, "libCtxId = %d, userId = %d", libCtxId, userId);
     OrbisNpWebApiContext* context = findAndValidateContext(libCtxId);
     if (context == nullptr) {
         return ORBIS_NP_WEBAPI_ERROR_LIB_CONTEXT_NOT_FOUND;
@@ -815,7 +815,7 @@ s32 sendRequest(s64 requestId, s32 partIndex, const void* pData, u64 dataSize, s
         const s32 tmpl_id = Libraries::Http::sceHttpCreateTemplate(
             context->libHttpCtxId, "libhttp", /*httpVer=*/2, /*isAutoProxyConf=*/0);
         if (tmpl_id < 0) {
-            LOG_ERROR(Lib_NpWebApi, "sceHttpCreateTemplate failed: {:#x}", tmpl_id);
+            LOG_ERROR(Lib_NpWebApi, "sceHttpCreateTemplate failed: 0x%x", tmpl_id);
             releaseRequest(request);
             releaseUserContext(user_context);
             releaseContext(context);
@@ -825,7 +825,7 @@ s32 sendRequest(s64 requestId, s32 partIndex, const void* pData, u64 dataSize, s
         const int conn_id = Libraries::Http::sceHttpCreateConnectionWithURL(
             tmpl_id, base_url.c_str(), /*enableKeepalive=*/true);
         if (conn_id < 0) {
-            LOG_ERROR(Lib_NpWebApi, "sceHttpCreateConnectionWithURL failed: {:#x}", conn_id);
+            LOG_ERROR(Lib_NpWebApi, "sceHttpCreateConnectionWithURL failed: 0x%x", conn_id);
             Libraries::Http::sceHttpDeleteTemplate(tmpl_id);
             request->http_template_id = 0;
             releaseRequest(request);
@@ -859,7 +859,7 @@ s32 sendRequest(s64 requestId, s32 partIndex, const void* pData, u64 dataSize, s
             sceMethod = 8; // out-of-band PATCH marker recognised by libhttp
             break;
         default:
-            LOG_ERROR(Lib_NpWebApi, "unknown method enum value {}",
+            LOG_ERROR(Lib_NpWebApi, "unknown method enum value %d",
                       static_cast<int>(request->userMethod));
             releaseRequest(request);
             releaseUserContext(user_context);
@@ -870,7 +870,7 @@ s32 sendRequest(s64 requestId, s32 partIndex, const void* pData, u64 dataSize, s
         const int req_id = Libraries::Http::sceHttpCreateRequestWithURL(
             conn_id, sceMethod, full_url.c_str(), request->userContentLength);
         if (req_id < 0) {
-            LOG_ERROR(Lib_NpWebApi, "sceHttpCreateRequestWithURL failed: {:#x}", req_id);
+            LOG_ERROR(Lib_NpWebApi, "sceHttpCreateRequestWithURL failed: 0x%x", req_id);
             Libraries::Http::sceHttpDeleteConnection(conn_id);
             request->http_connection_id = 0;
             Libraries::Http::sceHttpDeleteTemplate(tmpl_id);
@@ -897,9 +897,9 @@ s32 sendRequest(s64 requestId, s32 partIndex, const void* pData, u64 dataSize, s
                                                      /*mode=*/0);
         } else {
             LOG_WARNING(Lib_NpWebApi,
-                        "no bearer token for user_id={}; request to '{}' will "
+                        "no bearer token for user_id=%d; request to '%s' will "
                         "be unauthenticated (expect 401 from server)",
-                        user_context->userId, request->userPath);
+                        user_context->userId, (request->userPath).c_str());
         }
 
         // Replay app-supplied headers. Content-Type is already emitted above from the
@@ -936,15 +936,15 @@ s32 sendRequest(s64 requestId, s32 partIndex, const void* pData, u64 dataSize, s
     const s32 send_err =
         Libraries::Http::sceHttpSendRequest(request->http_request_id, sendData, sendSize);
     if (send_err < 0) {
-        LOG_ERROR(Lib_NpWebApi, "sceHttpSendRequest failed: {:#x}", send_err);
+        LOG_ERROR(Lib_NpWebApi, "sceHttpSendRequest failed: 0x%x", send_err);
         releaseRequest(request);
         releaseUserContext(user_context);
         releaseContext(context);
         return send_err;
     }
 
-    LOG_INFO(Lib_NpWebApi, "requestId={:#x} apiGroup='{}' path='{}' method={} httpReqId={}",
-             requestId, request->userApiGroup, request->userPath,
+    LOG_INFO(Lib_NpWebApi, "requestId=0x%" PRIx64 " apiGroup='%s' path='%s' method=%s httpReqId=%d",
+             requestId, (request->userApiGroup).c_str(), (request->userPath).c_str(),
              enum_name(&enum_names_Libraries_Np_NpWebApi_OrbisNpWebApiHttpMethod,
                        static_cast<s64>(request->userMethod)),
              request->http_request_id);
@@ -1239,7 +1239,8 @@ s32 createPushEventFilterInternal(OrbisNpWebApiContext* context,
         for (u64 param_idx = 0; param_idx < filterParamNum; param_idx++) {
             OrbisNpWebApiPushEventFilterParameter copy = OrbisNpWebApiPushEventFilterParameter{};
             memcpy(&copy, &pFilterParam[param_idx], sizeof(OrbisNpWebApiPushEventFilterParameter));
-            LOG_INFO(Lib_NpWebApi, "  filterParam[{}] dataType='{}'", param_idx, copy.dataType.val);
+            LOG_INFO(Lib_NpWebApi, "  filterParam[%" PRIu64 "] dataType='%s'", param_idx,
+                     copy.dataType.val);
             filter->filterParams.emplace_back(copy);
         }
     }
@@ -1249,7 +1250,7 @@ s32 createPushEventFilterInternal(OrbisNpWebApiContext* context,
     }
     const s32 filterId = static_cast<s32>(filter->base.id);
     filter->filterId = filterId;
-    LOG_INFO(Lib_NpWebApi, "filterId={} dataTypeParams={}", filterId, filterParamNum);
+    LOG_INFO(Lib_NpWebApi, "filterId=%d dataTypeParams=%" PRIu64, filterId, filterParamNum);
     return filterId;
 }
 
@@ -1389,7 +1390,7 @@ s32 createServicePushEventFilterInternal(
                 OrbisNpWebApiServicePushEventFilterParameter{};
             memcpy(&copy, &pFilterParam[param_idx],
                    sizeof(OrbisNpWebApiServicePushEventFilterParameter));
-            LOG_INFO(Lib_NpWebApi, "  filterParam[{}] data_type='{}'", param_idx,
+            LOG_INFO(Lib_NpWebApi, "  filterParam[%" PRIu64 "] data_type='%s'", param_idx,
                      copy.dataType.val);
             filter->filterParams.emplace_back(copy);
         }
@@ -1402,7 +1403,7 @@ s32 createServicePushEventFilterInternal(
     }
     const s32 filterId = static_cast<s32>(filter->base.id);
     filter->filterId = filterId;
-    LOG_INFO(Lib_NpWebApi, "filterId={} dataTypeParams={}", filterId, filterParamNum);
+    LOG_INFO(Lib_NpWebApi, "filterId=%d dataTypeParams=%" PRIu64, filterId, filterParamNum);
     return filterId;
 }
 
@@ -1557,7 +1558,7 @@ s32 createExtendedPushEventFilterInternal(
 
     filter->npServiceLabel = npServiceLabel;
 
-    LOG_INFO(Lib_NpWebApi, "service='{}' label={:#x} dataTypeParams={}",
+    LOG_INFO(Lib_NpWebApi, "service='%s' label=0x%x dataTypeParams=%" PRIu64,
              pNpServiceName ? pNpServiceName : "null", npServiceLabel, filterParamNum);
     if (pFilterParam != nullptr && filterParamNum != 0) {
         for (u64 param_idx = 0; param_idx < filterParamNum; param_idx++) {
@@ -1565,12 +1566,12 @@ s32 createExtendedPushEventFilterInternal(
                 OrbisNpWebApiExtdPushEventFilterParameter{};
             memcpy(&copy, &pFilterParam[param_idx],
                    sizeof(OrbisNpWebApiExtdPushEventFilterParameter));
-            LOG_INFO(Lib_NpWebApi, "  filterParam[{}] dataType='{}' extdKeys={}", param_idx,
-                     copy.dataType.val, copy.extdDataKeyNum); // debug
+            LOG_INFO(Lib_NpWebApi, "  filterParam[%" PRIu64 "] dataType='%s' extdKeys=%" PRIu64,
+                     param_idx, copy.dataType.val, copy.extdDataKeyNum); // debug
             std::vector<std::string> keys;
             if (copy.pExtdDataKey != nullptr) {
                 for (u64 k = 0; k < copy.extdDataKeyNum; k++) {
-                    LOG_INFO(Lib_NpWebApi, "    extdDataKey[{}]='{}'", k,
+                    LOG_INFO(Lib_NpWebApi, "    extdDataKey[%" PRIu64 "]='%s'", k,
                              copy.pExtdDataKey[k].val); // debug
                     keys.emplace_back(
                         copy.pExtdDataKey[k].val,
@@ -1592,7 +1593,7 @@ s32 createExtendedPushEventFilterInternal(
     }
     const s32 filterId = static_cast<s32>(filter->base.id);
     filter->filterId = filterId;
-    LOG_INFO(Lib_NpWebApi, "filterId={} dataTypeParams={}", filterId, filterParamNum);
+    LOG_INFO(Lib_NpWebApi, "filterId=%d dataTypeParams=%" PRIu64, filterId, filterParamNum);
     return filterId;
 }
 
@@ -2016,9 +2017,9 @@ s32 PS4_SYSV_ABI readDataInternal(s64 requestId, void* pData, u64 size) {
     }
 
     if (result > 0) {
-        LOG_INFO(Lib_NpWebApi, "reqId={:#x} -> {} bytes: {:.256s}", requestId, result,
-                 std::string(reinterpret_cast<const char*>(pData),
-                             std::min<u64>(result, 256))); // debug to be removed
+        LOG_INFO(Lib_NpWebApi, "reqId=0x%" PRIx64 " -> %d bytes: %.256s", requestId, result,
+                 (std::string(reinterpret_cast<const char*>(pData), std::min<u64>(result, 256)))
+                     .c_str()); // debug to be removed
     }
 
     // Cleanup
@@ -2194,10 +2195,10 @@ void DrainPushEvents() {
                         const OrbisNpWebApiExtdPushEventExtdData* ext_arr =
                             exarr.empty() ? nullptr : exarr.data();
 
-                        LOG_INFO(Lib_NpWebApi, "invoking extd cb ctx={:#x} cbId={} dataType='{}'",
+                        LOG_INFO(Lib_NpWebApi, "invoking extd cb ctx=0x%x cbId=%d dataType='%s'",
                                  title_user_ctx_id, cbId,
-                                 ev.dataType); // debug confirm the listener callback fires. to be
-                                               // removed
+                                 (ev.dataType).c_str()); // debug confirm the listener callback
+                                                         // fires. to be removed
                         reinterpret_cast<ExtdCbA>(raw)(
                             title_user_ctx_id, cbId, svc, flt->npServiceLabel, to_addr_p, to_p,
                             from_addr_p, from_p, &dt, ext_data, ev.data.size(), ext_arr,
@@ -2281,11 +2282,11 @@ void DrainPushEvents() {
                                 break;
                             }
                             LOG_INFO(Lib_NpWebApi,
-                                     "invoking basic cb ctx={:#x} cbId={} "
-                                     "dataType='{}'",
+                                     "invoking basic cb ctx=0x%x cbId=%d "
+                                     "dataType='%s'",
                                      title_user_ctx_id, cbId,
-                                     ev.dataType); // debug confirm the listener callback fires. to
-                                                   // be removed
+                                     (ev.dataType).c_str()); // debug confirm the listener callback
+                                                             // fires. to be removed
                             PushPeerAddress to_peer{};   // notified user (self)
                             PushPeerAddress from_peer{}; // user that caused the event
                             if (ev.hasTo) {

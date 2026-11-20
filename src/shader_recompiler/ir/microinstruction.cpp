@@ -155,7 +155,9 @@ IR::Type Inst::Type() const {
 
 void Inst::SetArg(size_t index, Value value) {
     if (index >= NumArgs()) {
-        UNREACHABLE_MSG("Out of bounds argument index {} in opcode {}", index, op);
+        UNREACHABLE_MSG("Out of bounds argument index %zu in opcode %.*s", index,
+                        static_cast<int>(Shader::IR::NameOf(op).size()),
+                        Shader::IR::NameOf(op).data());
     }
     const IR::Value arg{Arg(index)};
     if (auto* inst = arg.TryInst()) {
@@ -173,10 +175,12 @@ void Inst::SetArg(size_t index, Value value) {
 
 Block* Inst::PhiBlock(size_t index) const {
     if (op != Opcode::Phi) {
-        UNREACHABLE_MSG("{} is not a Phi instruction", op);
+        UNREACHABLE_MSG("%.*s is not a Phi instruction",
+                        static_cast<int>(Shader::IR::NameOf(op).size()),
+                        Shader::IR::NameOf(op).data());
     }
     if (index >= phi_args.size()) {
-        UNREACHABLE_MSG("Out of bounds argument index {} in phi instruction", index);
+        UNREACHABLE_MSG("Out of bounds argument index %zu in phi instruction", index);
     }
     return phi_args[index].first;
 }

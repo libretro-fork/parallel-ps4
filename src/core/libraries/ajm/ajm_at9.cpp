@@ -47,15 +47,15 @@ void AjmAt9Decoder::Reset() {
 
 void AjmAt9Decoder::Initialize(const void* buffer, u32 buffer_size) {
     ASSERT_MSG(buffer_size == sizeof(AjmDecAt9InitializeParameters),
-               "Incorrect At9 initialization buffer size {}", buffer_size);
+               "Incorrect At9 initialization buffer size %u", buffer_size);
     const auto params = reinterpret_cast<const AjmDecAt9InitializeParameters*>(buffer);
     std::memcpy(m_config_data, params->config_data, ORBIS_AT9_CONFIG_DATA_SIZE);
     ratrac9_close(m_decoder);
     m_decoder = ratrac9_open(m_config_data);
     m_is_initialized = m_decoder != nullptr;
     if (!m_decoder) {
-        LOG_ERROR(Lib_Ajm, "Invalid ATRAC9 configuration {:02x}{:02x}{:02x}{:02x}",
-                  m_config_data[0], m_config_data[1], m_config_data[2], m_config_data[3]);
+        LOG_ERROR(Lib_Ajm, "Invalid ATRAC9 configuration %02x%02x%02x%02x", m_config_data[0],
+                  m_config_data[1], m_config_data[2], m_config_data[3]);
         return;
     }
     m_channels = ratrac9_channels(m_decoder);
@@ -181,7 +181,7 @@ DecoderResult AjmAt9Decoder::ProcessData(std::span<u8>& in_buf, SparseOutputBuff
         UNREACHABLE();
     }
     if (ret != 0) {
-        LOG_ERROR(Lib_Ajm, "ATRAC9 decode failed ret = {}", ret);
+        LOG_ERROR(Lib_Ajm, "ATRAC9 decode failed ret = %d", ret);
         result.result = ORBIS_AJM_RESULT_CODEC_ERROR | ORBIS_AJM_RESULT_FATAL;
         result.internal_result = ret;
         return result;

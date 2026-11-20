@@ -3,7 +3,6 @@
 
 #pragma once
 
-#include <fmt/format.h>
 #include "common/assert.h"
 #include "common/types.h"
 
@@ -138,13 +137,3 @@ constexpr bool IsBarycentricCoord(Attribute attribute) noexcept {
 }
 
 } // namespace Shader::IR
-
-template <>
-struct fmt::formatter<Shader::IR::Attribute> {
-    constexpr auto parse(format_parse_context& ctx) {
-        return ctx.begin();
-    }
-    auto format(const Shader::IR::Attribute attribute, format_context& ctx) const {
-        return fmt::format_to(ctx.out(), "{}", Shader::IR::NameOf(attribute));
-    }
-};

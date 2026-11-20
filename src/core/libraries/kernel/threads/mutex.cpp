@@ -1,12 +1,11 @@
 // SPDX-FileCopyrightText: Copyright 2024-2026 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
-#include <fmt/format.h>
-
 #include <retro_atomic.h>
 #include "common/arch.h"
 #include "common/assert.h"
 #include "common/combiner.h"
+#include "common/string_util.h"
 #include "common/types.h"
 #include "core/libraries/kernel/kernel.h"
 #include "core/libraries/kernel/posix_error.h"
@@ -69,8 +68,8 @@ static s32 MutexInit(PthreadMutexT* mutex, const PthreadMutexAttr* mutex_attr, c
         pmutex->name = name;
     } else {
         static retro_atomic_int_t MutexId{0};
-        pmutex->name =
-            fmt::format("Mutex{}", static_cast<s32>(retro_atomic_fetch_add_int(&MutexId, 1)));
+        pmutex->name = Common::StringFromFormat(
+            "Mutex%d", static_cast<s32>(retro_atomic_fetch_add_int(&MutexId, 1)));
     }
 
     pmutex->m_flags = PthreadMutexFlags(attr->m_type);

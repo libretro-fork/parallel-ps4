@@ -75,7 +75,7 @@ struct DiscardShaderEmitter {
             locations_id_len++;
             locations_id[i] = spv_AddGlobalVariable(&m, ptr_id, u32(SpvStorageClassInput), 0);
             spv_Decorate1(&m, locations_id[i], u32(SpvDecorationLocation), u32(locations_v[i]));
-            NameFmt(&m, locations_id[i], "ccdist{}_in", i);
+            NameFmt(&m, locations_id[i], "ccdist%d_in", i);
         }
 
         spv_AddEntryPoint(&m, u32(SpvExecutionModelFragment), main, "main", locations_id.data(),
@@ -86,12 +86,12 @@ struct DiscardShaderEmitter {
         for (auto i = 0; i < locations_id_len; ++i) {
             auto loc_vec = spv_OpLoad(&m, vec4_id, locations_id[i]);
             loc_vec_id[locations_v[i]] = loc_vec;
-            NameFmt(&m, loc_vec, "ccdist{}", i);
+            NameFmt(&m, loc_vec, "ccdist%d", i);
         }
 
         for (auto& [loc, elem] : clip_locations) {
             auto plane = spv_OpCompositeExtract1(&m, float_id, loc_vec_id[loc], u32(elem));
-            NameFmt(&m, plane, "plane{}", loc * 4 + elem);
+            NameFmt(&m, plane, "plane%d", loc * 4 + elem);
 
             auto clipped = spv_OpFOrdLessThan(&m, bool_id, plane, float_zero);
             const Id kill_label{spv_OpLabel(&m)};

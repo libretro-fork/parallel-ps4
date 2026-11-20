@@ -15,7 +15,6 @@
 #include <unordered_set>
 #include <vector>
 #include <encodings/rzstd.h>
-#include <fmt/format.h>
 #include <retro_atomic.h>
 #if defined(_MSC_VER)
 #include <intrin.h>
@@ -125,11 +124,11 @@ static PatchReg ToPatchRegister(const unsigned reg) {
     if (reg >= X64_REG_YMM0 && reg <= X64_REG_YMM31) {
         return {static_cast<int>(reg - X64_REG_YMM0), 256};
     }
-    UNREACHABLE_MSG("Unsupported register: {}", static_cast<u32>(reg));
+    UNREACHABLE_MSG("Unsupported register: %u", static_cast<u32>(reg));
 }
 
 static PatchReg ToPatchRegisterOperand(const x64_operand_t& operand) {
-    ASSERT_MSG(operand.type == X64_OPERAND_REGISTER, "Expected register operand, got type: {}",
+    ASSERT_MSG(operand.type == X64_OPERAND_REGISTER, "Expected register operand, got type: %u",
                static_cast<u32>(operand.type));
 
     return ToPatchRegister(operand.reg);
@@ -137,7 +136,7 @@ static PatchReg ToPatchRegisterOperand(const x64_operand_t& operand) {
 
 static x64_mem_t ToPatchMemoryOperand(void* address, const x64_insn_t& instruction,
                                       const x64_operand_t& operand) {
-    ASSERT_MSG(operand.type == X64_OPERAND_MEMORY, "Expected memory operand, got type: {}",
+    ASSERT_MSG(operand.type == X64_OPERAND_MEMORY, "Expected memory operand, got type: %u",
                static_cast<u32>(operand.type));
 
     if (operand.mem.base == X64_REG_RIP || operand.mem.base == X64_REG_EIP) {
@@ -472,7 +471,7 @@ static void GenerateEXTRQ(void* /* address */, const x64_insn_t&, const x64_oper
         u8 length = operands[1].imm.value & 0x3F;
         u8 index = operands[2].imm.value & 0x3F;
 
-        LOG_DEBUG(Core, "Patching immediate form EXTRQ, length: {}, index: {}", length, index);
+        LOG_DEBUG(Core, "Patching immediate form EXTRQ, length: %u, index: %u", length, index);
 
         const int scratch1 = X64_RAX;
         const int scratch2 = X64_RCX;
@@ -867,8 +866,8 @@ static void TrampolineFull(PatchModule* module, size_t at) {
     module->trampoline_gen.size = at;
     module->trampoline_gen.error = 0;
     if (!module->trampoline_exhausted) {
-        LOG_WARNING(Core, "Patch trampoline space exhausted for module at {}",
-                    fmt::ptr(module->start));
+        LOG_WARNING(Core, "Patch trampoline space exhausted for module at 0x%llx",
+                    static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(module->start)));
         module->trampoline_exhausted = true;
     }
 }
@@ -938,22 +937,23 @@ static std::pair<bool, u64> TryPatch(u8* code, PatchModule* module, bool allow_t
                 } else {
                     patch_info.generator(code, instruction, operands, &patch_gen);
                 }
-                ASSERT_MSG(!patch_gen.error, "Patch past the end of the module at {}",
-                           fmt::ptr(code));
+                ASSERT_MSG(!patch_gen.error, "Patch past the end of the module at 0x%llx",
+                           static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(code)));
 
                 const auto patch_size = x64_curr(&patch_gen) - code;
                 if (patch_size > 0) {
                     ASSERT_MSG(instruction.len >= patch_size,
-                               "Instruction {} with length {} is too short to replace at: {}",
+                               "Instruction %s with length %u is too short to replace at: 0x%llx",
                                x64_mnemonic_name(instruction.mnemonic), instruction.len,
-                               fmt::ptr(code));
+                               static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(code)));
 
                     // Fill remaining space with nops.
                     x64_nop(&patch_gen, instruction.len - patch_size);
 
                     module->patched.insert(code);
-                    LOG_DEBUG(Core, "Patched instruction '{}' at: {}",
-                              x64_mnemonic_name(instruction.mnemonic), fmt::ptr(code));
+                    LOG_DEBUG(Core, "Patched instruction '%s' at: 0x%llx",
+                              x64_mnemonic_name(instruction.mnemonic),
+                              static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(code)));
                     return std::make_pair(true, instruction.len);
                 }
             }
@@ -1016,7 +1016,7 @@ static void* GetXmmPointer(void* ctx, u8 index) {
         CASE(14);
         CASE(15);
     default: {
-        UNREACHABLE_MSG("Invalid XMM register index: {}", index);
+        UNREACHABLE_MSG("Invalid XMM register index: %u", index);
         return nullptr;
     }
     }
@@ -1048,8 +1048,8 @@ static bool TryExecuteIllegalInstruction(void* ctx, void* code_address) {
         x64_insn_t instruction;
         x64_operand_t operands[X64_MAX_OPERANDS];
         const bool decoded = DecodeInstruction(code_address, 15, instruction, operands);
-        LOG_ERROR(Core, "Unhandled illegal instruction at code address {}: {}",
-                  fmt::ptr(code_address),
+        LOG_ERROR(Core, "Unhandled illegal instruction at code address 0x%llx: %s",
+                  static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(code_address)),
                   decoded ? x64_mnemonic_name(instruction.mnemonic) : "Failed to decode");
         return false;
     }
@@ -1093,9 +1093,11 @@ static bool TryExecuteIllegalInstruction(void* ctx, void* code_address) {
             // Undefined behavior if length + index is bigger than 64 according to the spec,
             // we'll warn and continue execution.
             LOG_TRACE(Core,
-                      "extrq at {} with length {} and index {} is bigger than 64, "
+                      "extrq at 0x%llx with length %" PRIu64 " and index %" PRIu64
+                      " is bigger than 64, "
                       "undefined behavior",
-                      fmt::ptr(code_address), length, index);
+                      static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(code_address)),
+                      length, index);
         }
 
         lowQWordDst >>= index;
@@ -1133,9 +1135,11 @@ static bool TryExecuteIllegalInstruction(void* ctx, void* code_address) {
             // Undefined behavior if length + index is bigger than 64 according to the spec,
             // we'll warn and continue execution.
             LOG_TRACE(Core,
-                      "insertq at {} with length {} and index {} is bigger than 64, "
+                      "insertq at 0x%llx with length %" PRIu64 " and index %" PRIu64
+                      " is bigger than 64, "
                       "undefined behavior",
-                      fmt::ptr(code_address), length, index);
+                      static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(code_address)),
+                      length, index);
         }
 
         lowQWordSrc &= mask;
@@ -2487,11 +2491,13 @@ static bool PatchesIllegalInstructionHandler(void* context) {
                 char disassembled[256];
                 x64_format(&instruction, operands, std::bit_cast<u64>(code_address), disassembled,
                            sizeof(disassembled));
-                LOG_ERROR(Core, "Failed to patch address {:x} -- mnemonic: {}, instruction: {}",
+                LOG_ERROR(Core,
+                          "Failed to patch address %" PRIx64 " -- mnemonic: %s, instruction: %s",
                           reinterpret_cast<u64>(code_address),
                           x64_mnemonic_name(instruction.mnemonic), disassembled);
             } else {
-                LOG_ERROR(Core, "Failed to patch address {:x} -- mnemonic: (failed to decode)",
+                LOG_ERROR(Core,
+                          "Failed to patch address %" PRIx64 " -- mnemonic: (failed to decode)",
                           reinterpret_cast<u64>(code_address));
             }
             return false;

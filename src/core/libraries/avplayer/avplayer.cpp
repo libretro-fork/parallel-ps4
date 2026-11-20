@@ -12,7 +12,7 @@
 namespace Libraries::AvPlayer {
 
 s32 PS4_SYSV_ABI sceAvPlayerAddSource(AvPlayerHandle handle, const char* filename) {
-    LOG_TRACE(Lib_AvPlayer, "filename = {}", filename);
+    LOG_TRACE(Lib_AvPlayer, "filename = %s", filename);
     if (handle == nullptr) {
         return ORBIS_AVPLAYER_ERROR_INVALID_PARAMS;
     }
@@ -60,7 +60,7 @@ s32 PS4_SYSV_ABI sceAvPlayerDisableStream(AvPlayerHandle handle, u32 stream_id) 
 }
 
 s32 PS4_SYSV_ABI sceAvPlayerEnableStream(AvPlayerHandle handle, u32 stream_id) {
-    LOG_TRACE(Lib_AvPlayer, "stream_id = {}", stream_id);
+    LOG_TRACE(Lib_AvPlayer, "stream_id = %u", stream_id);
     if (handle == nullptr) {
         return ORBIS_AVPLAYER_ERROR_INVALID_PARAMS;
     }
@@ -77,7 +77,7 @@ bool PS4_SYSV_ABI sceAvPlayerGetAudioData(AvPlayerHandle handle, AvPlayerFrameIn
 
 s32 PS4_SYSV_ABI sceAvPlayerGetStreamInfo(AvPlayerHandle handle, u32 stream_id,
                                           AvPlayerStreamInfo* p_info) {
-    LOG_TRACE(Lib_AvPlayer, "stream_id = {}", stream_id);
+    LOG_TRACE(Lib_AvPlayer, "stream_id = %u", stream_id);
     if (handle == nullptr || p_info == nullptr) {
         return ORBIS_AVPLAYER_ERROR_INVALID_PARAMS;
     }
@@ -153,7 +153,7 @@ bool PS4_SYSV_ABI sceAvPlayerIsActive(AvPlayerHandle handle) {
 }
 
 s32 PS4_SYSV_ABI sceAvPlayerJumpToTime(AvPlayerHandle handle, uint64_t time) {
-    LOG_ERROR(Lib_AvPlayer, "(STUBBED) called, time (msec) = {}", time);
+    LOG_ERROR(Lib_AvPlayer, "(STUBBED) called, time (msec) = %" PRIu64, time);
     if (handle == nullptr) {
         return ORBIS_AVPLAYER_ERROR_INVALID_PARAMS;
     }
@@ -203,7 +203,7 @@ s32 PS4_SYSV_ABI sceAvPlayerSetLogCallback(AvPlayerLogCallback log_cb, void* use
 }
 
 s32 PS4_SYSV_ABI sceAvPlayerSetLooping(AvPlayerHandle handle, bool loop_flag) {
-    LOG_TRACE(Lib_AvPlayer, "called, looping = {}", loop_flag);
+    LOG_TRACE(Lib_AvPlayer, "called, looping = %s", (loop_flag) ? "true" : "false");
     if (handle == nullptr) {
         return ORBIS_AVPLAYER_ERROR_INVALID_PARAMS;
     }
@@ -214,7 +214,7 @@ s32 PS4_SYSV_ABI sceAvPlayerSetLooping(AvPlayerHandle handle, bool loop_flag) {
 }
 
 s32 PS4_SYSV_ABI sceAvPlayerSetTrickSpeed(AvPlayerHandle handle, s32 trick_speed) {
-    LOG_ERROR(Lib_AvPlayer, "(STUBBED) called speed = {}", trick_speed);
+    LOG_ERROR(Lib_AvPlayer, "(STUBBED) called speed = %d", trick_speed);
     if (handle == nullptr) {
         return ORBIS_AVPLAYER_ERROR_INVALID_PARAMS;
     }

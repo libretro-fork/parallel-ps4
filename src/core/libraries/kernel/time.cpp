@@ -692,7 +692,7 @@ s32 PS4_SYSV_ABI sceKernelConvertUtcToLocaltime(time_t time, time_t* local_time,
 }
 
 s32 PS4_SYSV_ABI posix_clock_settime(s32 clock_id, OrbisKernelTimespec* tp) {
-    LOG_ERROR(Lib_Kernel, "(STUBBED) called, clock_id: {}", clock_id);
+    LOG_ERROR(Lib_Kernel, "(STUBBED) called, clock_id: %d", clock_id);
     return ORBIS_OK;
 }
 

@@ -34,8 +34,8 @@ static std::span<const u32> NextPacket(std::span<const u32> span, size_t offset)
     if (offset > span.size()) {
         LOG_ERROR(
             Lib_GnmDriver,
-            ": packet length exceeds remaining submission size. Packet dword count={}, remaining "
-            "submission dwords={}",
+            ": packet length exceeds remaining submission size. Packet dword count=%zu, remaining "
+            "submission dwords=%zu",
             offset, span.size());
         // Return empty subspan so check for next packet bails out
         return {};
@@ -207,7 +207,7 @@ Liverpool::Task Liverpool::ProcessCeUpdate(std::span<const u32> ccb) {
         const u32 type = header->type;
         if (type != 3) {
             // No other types of packets were spotted so far
-            UNREACHABLE_MSG("Invalid PM4 type {}", type);
+            UNREACHABLE_MSG("Invalid PM4 type %u", type);
         }
 
         const PM4ItOpcode opcode = header->type3.opcode;
@@ -258,7 +258,7 @@ Liverpool::Task Liverpool::ProcessCeUpdate(std::span<const u32> ccb) {
         }
         default:
             const u32 count = header->type3.NumWords();
-            UNREACHABLE_MSG("Unknown PM4 type 3 opcode {:#x} with count {}",
+            UNREACHABLE_MSG("Unknown PM4 type 3 opcode 0x%x with count %u",
                             static_cast<u32>(opcode), count);
         }
         ccb = NextPacket(ccb, header->type3.NumWords() + 1);
@@ -276,10 +276,10 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb) {
 
         switch (type) {
         default:
-            UNREACHABLE_MSG("Wrong PM4 type {}", type);
+            UNREACHABLE_MSG("Wrong PM4 type %u", type);
             break;
         case 0:
-            UNREACHABLE_MSG("Unimplemented PM4 type 0, base reg: {}, size: {}",
+            UNREACHABLE_MSG("Unimplemented PM4 type 0, base reg: %u, size: %u",
                             header->type0.base.Value(), header->type0.NumWords());
             break;
         case 2:
@@ -463,7 +463,7 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb) {
                     break;
                 }
                 const auto cmd_address = reinterpret_cast<const void*>(header);
-                rasterizer->ScopeMarker("gfx:{}:DrawIndex2", fmt::make_format_args(cmd_address),
+                rasterizer->ScopeMarker("gfx:0x%llx:DrawIndex2", cmd_address,
                                         [&] { rasterizer->Draw(true); });
                 break;
             }
@@ -477,9 +477,9 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb) {
                     break;
                 }
                 const auto cmd_address = reinterpret_cast<const void*>(header);
-                rasterizer->ScopeMarker(
-                    "gfx:{}:DrawIndexOffset2", fmt::make_format_args(cmd_address),
-                    [&] { rasterizer->Draw(true, draw_index_off->index_offset); });
+                rasterizer->ScopeMarker("gfx:0x%llx:DrawIndexOffset2", cmd_address, [&] {
+                    rasterizer->Draw(true, draw_index_off->index_offset);
+                });
                 break;
             }
             case PM4ItOpcode::DrawIndexAuto: {
@@ -490,7 +490,7 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb) {
                     break;
                 }
                 const auto cmd_address = reinterpret_cast<const void*>(header);
-                rasterizer->ScopeMarker("gfx:{}:DrawIndexAuto", fmt::make_format_args(cmd_address),
+                rasterizer->ScopeMarker("gfx:0x%llx:DrawIndexAuto", cmd_address,
                                         [&] { rasterizer->Draw(false); });
                 break;
             }
@@ -503,7 +503,7 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb) {
                 }
                 const auto cmd_address = reinterpret_cast<const void*>(header);
                 rasterizer->ScopeMarker(
-                    "gfx:{}:DrawIndirect", fmt::make_format_args(cmd_address), [&] {
+                    "gfx:0x%llx:DrawIndirect", cmd_address, [&] {
                         rasterizer->DrawIndirect(false, indirect_args_addr, offset, stride, 1, 0,
                                                  draw_indirect->base_vtx_loc,
                                                  draw_indirect->start_inst_loc);
@@ -520,7 +520,7 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb) {
                 }
                 const auto cmd_address = reinterpret_cast<const void*>(header);
                 rasterizer->ScopeMarker(
-                    "gfx:{}:DrawIndirectCountMulti", fmt::make_format_args(cmd_address), [&] {
+                    "gfx:0x%llx:DrawIndirectCountMulti", cmd_address, [&] {
                         rasterizer->DrawIndirect(
                             false, indirect_args_addr, offset, draw_indirect->stride,
                             draw_indirect->count, draw_indirect->count_addr,
@@ -537,7 +537,7 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb) {
                 }
                 const auto cmd_address = reinterpret_cast<const void*>(header);
                 rasterizer->ScopeMarker(
-                    "gfx:{}:DrawIndirectMulti", fmt::make_format_args(cmd_address), [&] {
+                    "gfx:0x%llx:DrawIndirectMulti", cmd_address, [&] {
                         rasterizer->DrawIndirect(false, indirect_args_addr, offset,
                                                  draw_indirect->stride, draw_indirect->count, 0,
                                                  draw_indirect->base_vtx_loc,
@@ -556,7 +556,7 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb) {
                 }
                 const auto cmd_address = reinterpret_cast<const void*>(header);
                 rasterizer->ScopeMarker(
-                    "gfx:{}:DrawIndexIndirect", fmt::make_format_args(cmd_address), [&] {
+                    "gfx:0x%llx:DrawIndexIndirect", cmd_address, [&] {
                         rasterizer->DrawIndirect(true, indirect_args_addr, offset, stride, 1, 0,
                                                  draw_index_indirect->base_vtx_loc,
                                                  draw_index_indirect->start_inst_loc);
@@ -573,7 +573,7 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb) {
                 }
                 const auto cmd_address = reinterpret_cast<const void*>(header);
                 rasterizer->ScopeMarker(
-                    "gfx:{}:DrawIndexIndirectMulti", fmt::make_format_args(cmd_address), [&] {
+                    "gfx:0x%llx:DrawIndexIndirectMulti", cmd_address, [&] {
                         rasterizer->DrawIndirect(
                             true, indirect_args_addr, offset, draw_index_indirect->stride,
                             draw_index_indirect->count, 0, draw_index_indirect->base_vtx_loc,
@@ -591,7 +591,7 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb) {
                 }
                 const auto cmd_address = reinterpret_cast<const void*>(header);
                 rasterizer->ScopeMarker(
-                    "gfx:{}:DrawIndexIndirectCountMulti", fmt::make_format_args(cmd_address), [&] {
+                    "gfx:0x%llx:DrawIndexIndirectCountMulti", cmd_address, [&] {
                         rasterizer->DrawIndirect(
                             true, indirect_args_addr, offset, draw_index_indirect->stride,
                             draw_index_indirect->count,
@@ -613,7 +613,7 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb) {
                     break;
                 }
                 const auto cmd_address = reinterpret_cast<const void*>(header);
-                rasterizer->ScopeMarker("gfx:{}:DispatchDirect", fmt::make_format_args(cmd_address),
+                rasterizer->ScopeMarker("gfx:0x%llx:DispatchDirect", cmd_address,
                                         [&] { rasterizer->DispatchDirect(); });
                 break;
             }
@@ -627,9 +627,9 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb) {
                     break;
                 }
                 const auto cmd_address = reinterpret_cast<const void*>(header);
-                rasterizer->ScopeMarker(
-                    "gfx:{}:DispatchIndirect", fmt::make_format_args(cmd_address),
-                    [&] { rasterizer->DispatchIndirect(indirect_args_addr, offset, size); });
+                rasterizer->ScopeMarker("gfx:0x%llx:DispatchIndirect", cmd_address, [&] {
+                    rasterizer->DispatchIndirect(indirect_args_addr, offset, size);
+                });
                 break;
             }
             case PM4ItOpcode::NumInstances: {
@@ -656,7 +656,7 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb) {
             }
             case PM4ItOpcode::EventWrite: {
                 const auto* event = reinterpret_cast<const PM4CmdEventWrite*>(header);
-                LOG_DEBUG(Render, "Encountered EventWrite: event_type = {}, event_index = {}",
+                LOG_DEBUG(Render, "Encountered EventWrite: event_type = %s, event_index = %s",
                           enum_name(&enum_names_AmdGpu_EventType,
                                     static_cast<s64>(event->event_type.Value())),
                           enum_name(&enum_names_AmdGpu_EventIndex,
@@ -742,7 +742,7 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb) {
                                            dma_data->SrcAddress<VAddr>(), dma_data->NumBytes(),
                                            false, false);
                 } else {
-                    UNREACHABLE_MSG("WriteData src_sel = {}, dst_sel = {}", u32(dma_data->src_sel),
+                    UNREACHABLE_MSG("WriteData src_sel = %u, dst_sel = %u", u32(dma_data->src_sel),
                                     u32(dma_data->dst_sel));
                 }
                 break;
@@ -765,8 +765,8 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb) {
             case PM4ItOpcode::CopyData: {
                 const auto* copy_data = reinterpret_cast<const PM4CmdCopyData*>(header);
                 LOG_WARNING(Render,
-                            "unhandled IT_COPY_DATA src_sel = {}, dst_sel = {}, "
-                            "count_sel = {}, wr_confirm = {}, engine_sel = {}",
+                            "unhandled IT_COPY_DATA src_sel = %u, dst_sel = %u, "
+                            "count_sel = %u, wr_confirm = %u, engine_sel = %u",
                             u32(copy_data->src_sel.Value()), u32(copy_data->dst_sel.Value()),
                             copy_data->count_sel.Value(), copy_data->wr_confirm.Value(),
                             u32(copy_data->engine_sel.Value()));
@@ -852,8 +852,8 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb) {
             case PM4ItOpcode::StrmoutBufferUpdate: {
                 const auto* strmout = reinterpret_cast<const PM4CmdStrmoutBufferUpdate*>(header);
                 LOG_WARNING(Render_Vulkan,
-                            "Unimplemented IT_STRMOUT_BUFFER_UPDATE, update_memory = {}, "
-                            "source_select = {}, buffer_select = {}",
+                            "Unimplemented IT_STRMOUT_BUFFER_UPDATE, update_memory = %u, "
+                            "source_select = %s, buffer_select = %u",
                             strmout->update_memory.Value(),
                             enum_name(&enum_names_AmdGpu_SourceSelect,
                                       static_cast<s64>(strmout->source_select.Value())),
@@ -878,7 +878,7 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb) {
                 break;
             }
             default:
-                UNREACHABLE_MSG("Unknown PM4 type 3 opcode {:#x} with count {}",
+                UNREACHABLE_MSG("Unknown PM4 type 3 opcode 0x%x with count %u",
                                 static_cast<u32>(opcode), count);
             }
             dcb = NextPacket(dcb, header->type3.NumWords() + 1);
@@ -938,7 +938,7 @@ Liverpool::Task Liverpool::ProcessCompute(std::span<const u32> acb, u32 vqid) {
 
         if (header->type != 3) {
             // No other types of packets were spotted so far
-            UNREACHABLE_MSG("Invalid PM4 type {}", header->type.Value());
+            UNREACHABLE_MSG("Invalid PM4 type %u", header->type.Value());
         }
 
         const PM4ItOpcode opcode = header->type3.opcode;
@@ -1005,7 +1005,7 @@ Liverpool::Task Liverpool::ProcessCompute(std::span<const u32> acb, u32 vqid) {
                     rasterizer->CopyBuffer(dst_addr, src_addr, num_bytes, false, false);
                 }
             } else {
-                UNREACHABLE_MSG("WriteData src_sel = {}, dst_sel = {}", u32(dma_data->src_sel),
+                UNREACHABLE_MSG("WriteData src_sel = %u, dst_sel = %u", u32(dma_data->src_sel),
                                 u32(dma_data->dst_sel));
             }
             break;
@@ -1041,7 +1041,7 @@ Liverpool::Task Liverpool::ProcessCompute(std::span<const u32> acb, u32 vqid) {
         }
         case PM4ItOpcode::SetQueueReg: {
             const auto* set_data = reinterpret_cast<const PM4CmdSetQueueReg*>(header);
-            LOG_WARNING(Render, "Encountered compute SetQueueReg: vqid = {}, reg_offset = {:#x}",
+            LOG_WARNING(Render, "Encountered compute SetQueueReg: vqid = %u, reg_offset = 0x%x",
                         set_data->vqid.Value(), set_data->reg_offset.Value());
             break;
         }
@@ -1062,8 +1062,7 @@ Liverpool::Task Liverpool::ProcessCompute(std::span<const u32> acb, u32 vqid) {
                 break;
             }
             const auto cmd_address = reinterpret_cast<const void*>(header);
-            rasterizer->ScopeMarker("asc[{}]:{}:DispatchDirect",
-                                    fmt::make_format_args(vqid, cmd_address),
+            rasterizer->ScopeMarker("asc[%u]:0x%llx:DispatchDirect", vqid, cmd_address,
                                     [&] { rasterizer->DispatchDirect(); });
             break;
         }
@@ -1077,8 +1076,7 @@ Liverpool::Task Liverpool::ProcessCompute(std::span<const u32> acb, u32 vqid) {
                 break;
             }
             const auto cmd_address = reinterpret_cast<const void*>(header);
-            rasterizer->ScopeMarker("asc[{}]:{}:DispatchIndirect",
-                                    fmt::make_format_args(vqid, cmd_address),
+            rasterizer->ScopeMarker("asc[%u]:0x%llx:DispatchIndirect", vqid, cmd_address,
                                     [&] { rasterizer->DispatchIndirect(ib_address, 0, size); });
             break;
         }
@@ -1135,7 +1133,7 @@ Liverpool::Task Liverpool::ProcessCompute(std::span<const u32> acb, u32 vqid) {
             break;
         }
         default:
-            UNREACHABLE_MSG("Unknown PM4 type 3 opcode {:#x} with count {}",
+            UNREACHABLE_MSG("Unknown PM4 type 3 opcode 0x%x with count %u",
                             static_cast<u32>(opcode), header->type3.NumWords());
         }
 

@@ -55,7 +55,7 @@ Error PS4_SYSV_ABI sceSaveDataDialogGetResult(OrbisSaveDataDialogResult* result)
 
 Status PS4_SYSV_ABI sceSaveDataDialogGetStatus() {
     const auto status = GetStatus();
-    LOG_TRACE(Lib_SaveDataDialog, "called status={}",
+    LOG_TRACE(Lib_SaveDataDialog, "called status=%s",
               enum_name(&enum_names_Libraries_CommonDialog_Status, static_cast<s64>(status)));
     return status;
 }
@@ -91,7 +91,7 @@ Error PS4_SYSV_ABI sceSaveDataDialogOpen(const OrbisSaveDataDialogParam* param) 
         LOG_DEBUG(Lib_SaveDataDialog, "called param:(NULL)");
         return Error::ARG_NULL;
     }
-    LOG_DEBUG(Lib_SaveDataDialog, "called param->mode: {}",
+    LOG_DEBUG(Lib_SaveDataDialog, "called param->mode: %s",
               enum_name(&enum_names_Libraries_SaveData_Dialog_SaveDataDialogMode,
                         static_cast<s64>(param->mode)));
     ASSERT(param->size == sizeof(OrbisSaveDataDialogParam));
@@ -161,7 +161,7 @@ Error PS4_SYSV_ABI sceSaveDataDialogTerminate() {
 
 Status PS4_SYSV_ABI sceSaveDataDialogUpdateStatus() {
     const auto status = GetStatus();
-    LOG_TRACE(Lib_SaveDataDialog, "called status={}",
+    LOG_TRACE(Lib_SaveDataDialog, "called status=%s",
               enum_name(&enum_names_Libraries_CommonDialog_Status, static_cast<s64>(status)));
     return status;
 }

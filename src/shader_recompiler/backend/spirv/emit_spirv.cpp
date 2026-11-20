@@ -39,7 +39,7 @@ static constexpr u32 GetInputPrimitiveType(AmdGpu::PrimitiveType type) {
     case AmdGpu::PrimitiveType::AdjLineList:
         return SpvExecutionModeInputLinesAdjacency;
     default:
-        UNREACHABLE_MSG("Unknown input primitive type {}", u32(type));
+        UNREACHABLE_MSG("Unknown input primitive type %u", u32(type));
     }
 }
 
@@ -52,7 +52,7 @@ static constexpr u32 GetOutputPrimitiveType(AmdGpu::GsOutputPrimitiveType type) 
     case AmdGpu::GsOutputPrimitiveType::TriangleStrip:
         return SpvExecutionModeOutputTriangleStrip;
     default:
-        UNREACHABLE_MSG("Unknown output primitive type {}", u32(type));
+        UNREACHABLE_MSG("Unknown output primitive type %u", u32(type));
     }
 }
 
@@ -132,7 +132,9 @@ void EmitInst(EmitContext& ctx, IR::Inst* inst) {
 #include "shader_recompiler/ir/opcodes.inc"
 #undef OPCODE
     }
-    UNREACHABLE_MSG("Invalid opcode {}", inst->GetOpcode());
+    UNREACHABLE_MSG("Invalid opcode %.*s",
+                    static_cast<int>(Shader::IR::NameOf(inst->GetOpcode()).size()),
+                    Shader::IR::NameOf(inst->GetOpcode()).data());
 }
 
 Id TypeId(const EmitContext& ctx, IR::Type type) {
@@ -152,7 +154,7 @@ Id TypeId(const EmitContext& ctx, IR::Type type) {
     case IR::Type::U64:
         return ctx.U64;
     default:
-        UNREACHABLE_MSG("Phi node type {}", type);
+        UNREACHABLE_MSG("Phi node type %s", Shader::IR::NameOf(type).c_str());
     }
 }
 
@@ -242,7 +244,7 @@ u32 ExecutionMode(AmdGpu::TessellationType primitive) {
     case AmdGpu::TessellationType::Quad:
         return SpvExecutionModeQuads;
     }
-    UNREACHABLE_MSG("Tessellation primitive {}",
+    UNREACHABLE_MSG("Tessellation primitive %s",
                     enum_name(&enum_names_AmdGpu_TessellationType, static_cast<s64>(primitive)));
 }
 
@@ -264,7 +266,7 @@ u32 ExecutionMode(AmdGpu::TessellationPartitioning spacing) {
         break;
     }
     UNREACHABLE_MSG(
-        "Tessellation spacing {}",
+        "Tessellation spacing %s",
         enum_name(&enum_names_AmdGpu_TessellationPartitioning, static_cast<s64>(spacing)));
 }
 
@@ -462,7 +464,7 @@ void DefineEntryPoint(const Info& info, const RuntimeInfo& runtime_info, EmitCon
                               u32(ctx.runtime_info.hw.gs.num_invocations));
         break;
     default:
-        UNREACHABLE_MSG("Stage {}", u32(info.hw_stage));
+        UNREACHABLE_MSG("Stage %u", u32(info.hw_stage));
     }
     spv_AddEntryPoint(&ctx.m, u32(execution_model), main, "main", interfaces.data(),
                       u32(interfaces.size()));
@@ -486,7 +488,7 @@ void SetupDenormFlushMode(EmitContext& ctx, const Profile& profile, const Runtim
                 nullptr);
         }
     } else {
-        LOG_WARNING(Render_Vulkan, "Unknown FP denorm mode {}", u32(fp32_denorm_mode));
+        LOG_WARNING(Render_Vulkan, "Unknown FP denorm mode %u", u32(fp32_denorm_mode));
     }
 
     if (!ctx.info.uses_fp16 && !ctx.info.uses_fp64) {
@@ -563,7 +565,7 @@ void SetupDenormFlushMode(EmitContext& ctx, const Profile& profile, const Runtim
                 nullptr);
         }
     } else {
-        LOG_WARNING(Render_Vulkan, "Unknown Float16/64 denorm mode {}", u32(fp16_64_denorm_mode));
+        LOG_WARNING(Render_Vulkan, "Unknown Float16/64 denorm mode %u", u32(fp16_64_denorm_mode));
     }
 }
 
@@ -585,7 +587,7 @@ void SetupRoundingMode(EmitContext& ctx, const Profile& profile, const RuntimeIn
                 nullptr);
         }
     } else if (fp_round_mode != AmdGpu::FpRoundMode::NearestEven) {
-        LOG_WARNING(Render_Vulkan, "Unimplemented FP rounding mode {}",
+        LOG_WARNING(Render_Vulkan, "Unimplemented FP rounding mode %s",
                     enum_name(&enum_names_AmdGpu_FpRoundMode, static_cast<s64>(fp_round_mode)));
     }
 
@@ -639,7 +641,7 @@ void SetupRoundingMode(EmitContext& ctx, const Profile& profile, const RuntimeIn
                 }
             }
         } else if (fp16_64_round_mode != AmdGpu::FpRoundMode::NearestEven) {
-            LOG_WARNING(Render_Vulkan, "Unknown Float16/64 rounding mode {}",
+            LOG_WARNING(Render_Vulkan, "Unknown Float16/64 rounding mode %u",
                         u32(fp16_64_round_mode));
         }
     }

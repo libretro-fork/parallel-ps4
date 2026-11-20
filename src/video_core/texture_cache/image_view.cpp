@@ -137,25 +137,26 @@ ImageView::ImageView(const Vulkan::Instance& instance, const ImageViewInfo& info
         },
     };
     if (!IsViewTypeCompatible(info.type, image.info.type)) {
-        LOG_ERROR(Render_Vulkan, "image view type {} is incompatible with image type {}",
+        LOG_ERROR(Render_Vulkan, "image view type %s is incompatible with image type %s",
                   enum_name(&enum_names_AmdGpu_ImageType, static_cast<s64>(info.type)),
                   enum_name(&enum_names_AmdGpu_ImageType, static_cast<s64>(image.info.type)));
     }
 
     auto [view_result, view] = instance.GetDevice().createImageViewUnique(image_view_ci);
-    ASSERT_MSG(view_result == vk::Result::eSuccess, "Failed to create image view: {}",
-               vk::to_string(view_result));
+    ASSERT_MSG(view_result == vk::Result::eSuccess, "Failed to create image view: %s",
+               (vk::to_string(view_result)).c_str());
     image_view = std::move(view);
 
     const auto view_aspect = aspect & vk::ImageAspectFlagBits::eDepth     ? "Depth"
                              : aspect & vk::ImageAspectFlagBits::eStencil ? "Stencil"
                                                                           : "Color";
-    Vulkan::SetObjectName(
-        instance.GetDevice(), *image_view, "ImageView {}x{}x{} {:#x}:{:#x} {}:{} {}:{} ({})",
-        image.info.size.width, image.info.size.height, image.info.size.depth,
-        image.info.guest_address, image.info.guest_size, info.range.base.level,
-        info.range.base.level + info.range.extent.levels - 1, info.range.base.layer,
-        info.range.base.layer + info.range.extent.layers - 1, view_aspect);
+    Vulkan::SetObjectName(instance.GetDevice(), *image_view,
+                          "ImageView %ux%ux%u 0x%" PRIxPTR ":0x%x %d:%d %d:%d (%s)",
+                          image.info.size.width, image.info.size.height, image.info.size.depth,
+                          image.info.guest_address, image.info.guest_size, info.range.base.level,
+                          info.range.base.level + info.range.extent.levels - 1,
+                          info.range.base.layer,
+                          info.range.base.layer + info.range.extent.layers - 1, view_aspect);
 }
 
 ImageView::~ImageView() = default;

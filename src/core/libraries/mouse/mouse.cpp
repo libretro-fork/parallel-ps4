@@ -15,7 +15,7 @@ namespace Libraries::Mouse {
 static s32 mouse_handles[2]{-1, -1};
 
 int PS4_SYSV_ABI sceMouseClose(s32 handle) {
-    LOG_INFO(Lib_Mouse, "(DUMMY) called, handle: {}", handle);
+    LOG_INFO(Lib_Mouse, "(DUMMY) called, handle: %d", handle);
     if (mouse_handles[0] != handle && mouse_handles[1] != handle) {
         return ORBIS_MOUSE_ERROR_INVALID_HANDLE;
     }
@@ -66,7 +66,7 @@ int PS4_SYSV_ABI sceMouseMbusInit() {
 
 int PS4_SYSV_ABI sceMouseOpen(Libraries::UserService::OrbisUserServiceUserId userId, s32 type,
                               s32 index, OrbisMouseOpenParam* pParam) {
-    LOG_WARNING(Lib_Mouse, "(DUMMY) called, uid: {}, type: {}, index: {}", userId, type, index);
+    LOG_WARNING(Lib_Mouse, "(DUMMY) called, uid: %d, type: %d, index: %d", userId, type, index);
     auto u = user_manager_get_by_id(userId);
     if (!u || type != 0 || index < 0 || index > 1) {
         LOG_ERROR(Lib_Mouse, "invalid argument");
@@ -83,12 +83,12 @@ int PS4_SYSV_ABI sceMouseOpen(Libraries::UserService::OrbisUserServiceUserId use
         return ORBIS_MOUSE_ERROR_ALREADY_OPENED;
     }
     mouse_handles[index] = index;
-    LOG_INFO(Lib_Mouse, "out handle: {}", mouse_handles[index]);
+    LOG_INFO(Lib_Mouse, "out handle: %d", mouse_handles[index]);
     return mouse_handles[index];
 }
 
 int PS4_SYSV_ABI sceMouseRead(s32 handle, OrbisMouseData* pData, s32 num) {
-    LOG_DEBUG(Lib_Mouse, "(DUMMY) called, h: {}, n: {}", handle, num);
+    LOG_DEBUG(Lib_Mouse, "(DUMMY) called, h: %d, n: %d", handle, num);
     if (!pData || num < 1 || num > 64) {
         return ORBIS_MOUSE_ERROR_INVALID_ARG;
     }

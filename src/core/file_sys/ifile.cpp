@@ -140,7 +140,8 @@ std::optional<std::filesystem::path> ResolveGameFilePath(const std::filesystem::
     Common::FS::CreateDirectories(dest.parent_path());
 
     if (!filestream_write_file(dest_utf8.c_str(), data->data(), static_cast<s64>(data->size()))) {
-        LOG_ERROR(Common_Filesystem, "Failed to write the archive extraction: {}", dest.string());
+        LOG_ERROR(Common_Filesystem, "Failed to write the archive extraction: %s",
+                  (dest.string()).c_str());
         return std::nullopt;
     }
     return dest;

@@ -7,7 +7,6 @@
 #include <string>
 #include <string_view>
 #include <utility>
-#include <fmt/format.h>
 
 #include <retro_atomic.h>
 #include "common/logging/log.h"
@@ -103,9 +102,9 @@ void BuildCreateJoinRoomPayloadCommon(ContextObject& ctx, CallbackPayload& p,
     auto cache = NpHandler::GetInstance().LockMatching2Cache(ctx.ctx_id);
 
     LOG_DEBUG(Lib_NpMatching2,
-              "Room payload: room={} me={} owner={} max={} public/open={}/{} "
-              "private/open={}/{} flags={:#x} passwdMask={:#x} joinedMask={:#x} groups={} "
-              "internalBinAttrs={} members={}",
+              "Room payload: room=%" PRIu64 " me=%u owner=%u max=%u public/open=%u/%u "
+              "private/open=%u/%u flags=0x%x passwdMask=0x%" PRIx64 " joinedMask=0x%x groups=%zu "
+              "internalBinAttrs=%zu members=%zu",
               rd.room_id, resp.me_member_id, resp.owner_member_id, rd.max_slot, rd.public_slots,
               rd.open_public_slots, rd.private_slots, rd.open_private_slots, rd.flags,
               rd.passwd_slot_mask, rd.joined_slot_mask, rd.groups.count,
@@ -114,10 +113,10 @@ void BuildCreateJoinRoomPayloadCommon(ContextObject& ctx, CallbackPayload& p,
     p.room_groups.resize(rd.groups.count);
     for (int i = 0; i < rd.groups.count; ++i) {
         const auto& g = rd.groups.items[i];
-        LOG_DEBUG(Lib_NpMatching2,
-                  "  roomGroup[{}] id={} slots={} members={} hasPasswd={} hasLabel={} labelSize={}",
-                  i, g.group_id, g.slot_count, g.num_members, g.has_passwd, g.has_label,
-                  g.label.size);
+        LOG_DEBUG(
+            Lib_NpMatching2,
+            "  roomGroup[%d] id=%u slots=%u members=%u hasPasswd=%u hasLabel=%u labelSize=%zu", i,
+            g.group_id, g.slot_count, g.num_members, g.has_passwd, g.has_label, g.label.size);
         auto& dst = p.room_groups[i];
         dst.id = static_cast<OrbisNpMatching2RoomGroupId>(g.group_id);
         dst.hasPasswd = g.has_passwd;
@@ -132,9 +131,10 @@ void BuildCreateJoinRoomPayloadCommon(ContextObject& ctx, CallbackPayload& p,
     for (int i = 0; i < rd.bin_attrs_internal.count; ++i) {
         const auto& a = rd.bin_attrs_internal.items[i];
         LOG_DEBUG(Lib_NpMatching2,
-                  "  roomInternalBin[{}] id={:#x} updateMember={} updateDate={} size={} data={}", i,
-                  a.attr_id, a.update_member_id, a.update_date, a.data.size,
-                  HexPreview(View(a.data), 128));
+                  "  roomInternalBin[%d] id=0x%x updateMember=%u updateDate=%" PRIu64
+                  " size=%zu data=%s",
+                  i, a.attr_id, a.update_member_id, a.update_date, a.data.size,
+                  (HexPreview(View(a.data), 128)).c_str());
         p.bin_buffers.emplace_back(a.data.data, a.data.data + a.data.size);
         auto& buf = p.bin_buffers.back();
         auto& dst = p.room_bin_attrs[i];
@@ -218,11 +218,12 @@ void BuildCreateJoinRoomPayloadCommon(ContextObject& ctx, CallbackPayload& p,
     for (int i = 0; i < member_count; ++i) {
         const auto& m = resp.members.items[i];
         LOG_DEBUG(Lib_NpMatching2,
-                  "  member[{}] id={} npid='{}' owner={} team={} nat={} flags={:#x} group={} "
-                  "addr={}:{} account={} platform={} bins={}",
-                  i, m.member_id, View(m.npid), m.is_owner, m.team_id, m.nat_type, m.flag_attr,
-                  m.group_id, View(m.addr), m.port, m.account_id, m.platform,
-                  m.bin_attrs_internal.count);
+                  "  member[%d] id=%u npid='%.*s' owner=%u team=%u nat=%u flags=0x%x group=%u "
+                  "addr=%.*s:%u account=%" PRIu64 " platform=%u bins=%zu",
+                  i, m.member_id, static_cast<int>((View(m.npid)).size()), (View(m.npid)).data(),
+                  m.is_owner, m.team_id, m.nat_type, m.flag_attr, m.group_id,
+                  static_cast<int>((View(m.addr)).size()), (View(m.addr)).data(), m.port,
+                  m.account_id, m.platform, m.bin_attrs_internal.count);
         MemberCache& mc = rc.members[static_cast<OrbisNpMatching2RoomMemberId>(m.member_id)];
         mc = MemberCache{};
         mc.member_id = static_cast<OrbisNpMatching2RoomMemberId>(m.member_id);
@@ -237,8 +238,9 @@ void BuildCreateJoinRoomPayloadCommon(ContextObject& ctx, CallbackPayload& p,
         mc.account_id = static_cast<Libraries::Np::OrbisNpAccountId>(m.account_id);
         mc.platform = static_cast<Libraries::Np::OrbisNpPlatformType>(m.platform);
         for (const auto& a : Items(m.bin_attrs_internal)) {
-            LOG_INFO(Lib_NpMatching2, "    memberBin id={:#x} updateDate={} size={} data={}",
-                     a.attr_id, a.update_date, a.data.size, HexPreview(View(a.data), 128));
+            LOG_INFO(Lib_NpMatching2,
+                     "    memberBin id=0x%x updateDate=%" PRIu64 " size=%zu data=%s", a.attr_id,
+                     a.update_date, a.data.size, (HexPreview(View(a.data), 128)).c_str());
             MemberBinCache& b = mc.bins[a.attr_id];
             b.id = static_cast<OrbisNpMatching2AttributeId>(a.attr_id);
             b.update_date = a.update_date;
@@ -438,31 +440,31 @@ void* BuildSearchRoomPayload(ContextObject& ctx, CallbackPayload& p,
     ReserveExternalRoomPayloadStorage(p, resp);
 
     const int room_count = resp.rooms.count;
-    LOG_INFO(Lib_NpMatching2, "Search response rooms={}", room_count);
+    LOG_INFO(Lib_NpMatching2, "Search response rooms=%d", room_count);
     p.room_data_external.resize(room_count);
     for (int i = 0; i < room_count; ++i) {
         const auto& r = resp.rooms.items[i];
         LOG_DEBUG(Lib_NpMatching2,
-                  "  room[{}] id={} max={} cur={} public/open={}/{} private/open={}/{} "
-                  "flags={:#x} groups={} searchInt={} searchBin={} extBin={}",
+                  "  room[%d] id=%" PRIu64 " max=%u cur=%u public/open=%u/%u private/open=%u/%u "
+                  "flags=0x%x groups=%zu searchInt=%zu searchBin=%zu extBin=%zu",
                   i, r.room_id, r.max_slot, r.cur_members, r.public_slots, r.open_public_slots,
                   r.private_slots, r.open_private_slots, r.flags, r.groups.count,
                   r.external_search_int_attrs.count, r.external_search_bin_attrs.count,
                   r.external_bin_attrs.count);
         for (int a = 0; a < r.external_search_int_attrs.count; ++a) {
             const auto& src = r.external_search_int_attrs.items[a];
-            LOG_DEBUG(Lib_NpMatching2, "    searchInt[{}] id={:#x} value={}", a, src.attr_id,
+            LOG_DEBUG(Lib_NpMatching2, "    searchInt[%d] id=0x%x value=%u", a, src.attr_id,
                       src.attr_value);
         }
         for (int a = 0; a < r.external_search_bin_attrs.count; ++a) {
             const auto& src = r.external_search_bin_attrs.items[a];
-            LOG_DEBUG(Lib_NpMatching2, "    searchBin[{}] id={:#x} size={} data={}", a, src.attr_id,
-                      src.data.size, HexPreview(View(src.data), 128));
+            LOG_DEBUG(Lib_NpMatching2, "    searchBin[%d] id=0x%x size=%zu data=%s", a, src.attr_id,
+                      src.data.size, (HexPreview(View(src.data), 128)).c_str());
         }
         for (int a = 0; a < r.external_bin_attrs.count; ++a) {
             const auto& src = r.external_bin_attrs.items[a];
-            LOG_DEBUG(Lib_NpMatching2, "    extBin[{}] id={:#x} size={} data={}", a, src.attr_id,
-                      src.data.size, HexPreview(View(src.data), 128));
+            LOG_DEBUG(Lib_NpMatching2, "    extBin[%d] id=0x%x size=%zu data=%s", a, src.attr_id,
+                      src.data.size, (HexPreview(View(src.data), 128)).c_str());
         }
         auto& dst = p.room_data_external[i];
         dst = OrbisNpMatching2RoomDataExternal{};
@@ -565,34 +567,34 @@ void* BuildSearchRoomPayloadA(ContextObject& ctx, CallbackPayload& p,
     ReserveExternalRoomPayloadStorage(p, resp);
 
     const int room_count = resp.rooms.count;
-    LOG_INFO(Lib_NpMatching2, "Search response rooms={} range start={} total={} results={}",
+    LOG_INFO(Lib_NpMatching2, "Search response rooms=%d range start=%u total=%u results=%u",
              room_count, resp.range_start, resp.range_total, resp.range_result);
     p.room_data_external_a.resize(room_count);
     for (int i = 0; i < room_count; ++i) {
         const auto& r = resp.rooms.items[i];
         LOG_DEBUG(Lib_NpMatching2,
-                  "  roomA[{}] id={} max={} cur={} public/open={}/{} private/open={}/{} "
-                  "flags={:#x} groups={} searchInt={} searchBin={} extBin={} owner='{}' "
-                  "account={} platform={}",
+                  "  roomA[%d] id=%" PRIu64 " max=%u cur=%u public/open=%u/%u private/open=%u/%u "
+                  "flags=0x%x groups=%zu searchInt=%zu searchBin=%zu extBin=%zu owner='%.*s' "
+                  "account=%" PRIu64 " platform=%u",
                   i, r.room_id, r.max_slot, r.cur_members, r.public_slots, r.open_public_slots,
                   r.private_slots, r.open_private_slots, r.flags, r.groups.count,
                   r.external_search_int_attrs.count, r.external_search_bin_attrs.count,
-                  r.external_bin_attrs.count, View(r.owner_npid), r.owner_account_id,
-                  r.owner_platform);
+                  r.external_bin_attrs.count, static_cast<int>((View(r.owner_npid)).size()),
+                  (View(r.owner_npid)).data(), r.owner_account_id, r.owner_platform);
         for (int a = 0; a < r.external_search_int_attrs.count; ++a) {
             const auto& src = r.external_search_int_attrs.items[a];
-            LOG_DEBUG(Lib_NpMatching2, "    searchIntA[{}] id={:#x} value={}", a, src.attr_id,
+            LOG_DEBUG(Lib_NpMatching2, "    searchIntA[%d] id=0x%x value=%u", a, src.attr_id,
                       src.attr_value);
         }
         for (int a = 0; a < r.external_search_bin_attrs.count; ++a) {
             const auto& src = r.external_search_bin_attrs.items[a];
-            LOG_DEBUG(Lib_NpMatching2, "    searchBinA[{}] id={:#x} size={} data={}", a,
-                      src.attr_id, src.data.size, HexPreview(View(src.data), 128));
+            LOG_DEBUG(Lib_NpMatching2, "    searchBinA[%d] id=0x%x size=%zu data=%s", a,
+                      src.attr_id, src.data.size, (HexPreview(View(src.data), 128)).c_str());
         }
         for (int a = 0; a < r.external_bin_attrs.count; ++a) {
             const auto& src = r.external_bin_attrs.items[a];
-            LOG_DEBUG(Lib_NpMatching2, "    extBinA[{}] id={:#x} size={} data={}", a, src.attr_id,
-                      src.data.size, HexPreview(View(src.data), 128));
+            LOG_DEBUG(Lib_NpMatching2, "    extBinA[%d] id=0x%x size=%zu data=%s", a, src.attr_id,
+                      src.data.size, (HexPreview(View(src.data), 128)).c_str());
         }
         auto& dst = p.room_data_external_a[i];
         dst = OrbisNpMatching2RoomDataExternalA{};
@@ -695,31 +697,31 @@ void* BuildGetRoomDataExternalListPayload(ContextObject& ctx, CallbackPayload& p
     ReserveExternalRoomPayloadStorage(p, resp);
 
     const int room_count = resp.rooms.count;
-    LOG_INFO(Lib_NpMatching2, "getRoomDataExternalList response rooms={}", room_count);
+    LOG_INFO(Lib_NpMatching2, "getRoomDataExternalList response rooms=%d", room_count);
     p.room_data_external.resize(room_count);
     for (int i = 0; i < room_count; ++i) {
         const auto& r = resp.rooms.items[i];
         LOG_DEBUG(Lib_NpMatching2,
-                  "  room[{}] id={} max={} cur={} public/open={}/{} private/open={}/{} "
-                  "flags={:#x} groups={} searchInt={} searchBin={} extBin={}",
+                  "  room[%d] id=%" PRIu64 " max=%u cur=%u public/open=%u/%u private/open=%u/%u "
+                  "flags=0x%x groups=%zu searchInt=%zu searchBin=%zu extBin=%zu",
                   i, r.room_id, r.max_slot, r.cur_members, r.public_slots, r.open_public_slots,
                   r.private_slots, r.open_private_slots, r.flags, r.groups.count,
                   r.external_search_int_attrs.count, r.external_search_bin_attrs.count,
                   r.external_bin_attrs.count);
         for (int a = 0; a < r.external_search_int_attrs.count; ++a) {
             const auto& src = r.external_search_int_attrs.items[a];
-            LOG_DEBUG(Lib_NpMatching2, "    searchInt[{}] id={:#x} value={}", a, src.attr_id,
+            LOG_DEBUG(Lib_NpMatching2, "    searchInt[%d] id=0x%x value=%u", a, src.attr_id,
                       src.attr_value);
         }
         for (int a = 0; a < r.external_search_bin_attrs.count; ++a) {
             const auto& src = r.external_search_bin_attrs.items[a];
-            LOG_DEBUG(Lib_NpMatching2, "    searchBin[{}] id={:#x} size={} data={}", a, src.attr_id,
-                      src.data.size, HexPreview(View(src.data), 128));
+            LOG_DEBUG(Lib_NpMatching2, "    searchBin[%d] id=0x%x size=%zu data=%s", a, src.attr_id,
+                      src.data.size, (HexPreview(View(src.data), 128)).c_str());
         }
         for (int a = 0; a < r.external_bin_attrs.count; ++a) {
             const auto& src = r.external_bin_attrs.items[a];
-            LOG_DEBUG(Lib_NpMatching2, "    extBin[{}] id={:#x} size={} data={}", a, src.attr_id,
-                      src.data.size, HexPreview(View(src.data), 128));
+            LOG_DEBUG(Lib_NpMatching2, "    extBin[%d] id=0x%x size=%zu data=%s", a, src.attr_id,
+                      src.data.size, (HexPreview(View(src.data), 128)).c_str());
         }
         auto& dst = p.room_data_external[i];
         dst = OrbisNpMatching2RoomDataExternal{};
@@ -1287,12 +1289,14 @@ void* BuildRoomMessagePayload(CallbackPayload& p, bool a_variant, OrbisNpMatchin
     void* msg_ptr = p.room_message_data.empty() ? nullptr : p.room_message_data.data();
 
     LOG_INFO(Lib_NpMatching2,
-             "variant={} cast={} dstN={} srcMember={} srcMid={} "
-             "srcAccount={} srcPlatform={} msg={} msgLen={} preview=[{}]",
-             a_variant ? "A" : "regular", castType, dstMembers.size(), fmt::ptr(srcMember),
+             "variant=%s cast=%u dstN=%zu srcMember=0x%llx srcMid=%d "
+             "srcAccount=%" PRIu64 " srcPlatform=%d msg=0x%llx msgLen=%zu preview=[%s]",
+             a_variant ? "A" : "regular", castType, dstMembers.size(),
+             static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(srcMember)),
              srcMember ? srcMember->member_id : 0, srcMember ? srcMember->account_id : 0,
-             srcMember ? static_cast<s32>(srcMember->platform) : 0, fmt::ptr(msg_ptr), msg.size(),
-             HexPreview(msg.data(), msg.size(), 32));
+             srcMember ? static_cast<s32>(srcMember->platform) : 0,
+             static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(msg_ptr)), msg.size(),
+             (HexPreview(msg.data(), msg.size(), 32)).c_str());
 
     if (a_variant) {
         p.room_message_info_a = std::make_unique<OrbisNpMatching2RoomMessageInfoA>();
@@ -1309,15 +1313,26 @@ void* BuildRoomMessagePayload(CallbackPayload& p, bool a_variant, OrbisNpMatchin
         info.msg = msg_ptr;
         info.msgLen = p.room_message_data.size();
         p.room_message_callback_data = p.room_message_info_a.get();
-        LOG_INFO(Lib_NpMatching2,
-                 "RoomMessageInfoA: info={} dst={} srcMember={} msg={} "
-                 "msgLen={} account={} platform={} onlineId='{}'",
-                 fmt::ptr(&info), fmt::ptr(info.dst), fmt::ptr(&info.srcMember), fmt::ptr(info.msg),
-                 info.msgLen, info.srcMember.accountId, static_cast<s32>(info.srcMember.platform),
-                 srcMember ? std::string_view(srcMember->np_id.handle.data,
+        LOG_INFO(
+            Lib_NpMatching2,
+            "RoomMessageInfoA: info=0x%llx dst=0x%llx srcMember=0x%llx msg=0x%llx "
+            "msgLen=%" PRIu64 " account=%" PRIu64 " platform=%d onlineId='%.*s'",
+            static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(&info)),
+            static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(info.dst)),
+            static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(&info.srcMember)),
+            static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(info.msg)), info.msgLen,
+            info.srcMember.accountId, static_cast<s32>(info.srcMember.platform),
+            static_cast<int>(
+                (srcMember ? std::string_view(srcMember->np_id.handle.data,
                                               strnlen(srcMember->np_id.handle.data,
                                                       Libraries::Np::ORBIS_NP_ONLINEID_MAX_LENGTH))
-                           : std::string_view{});
+                           : std::string_view{})
+                    .size()),
+            (srcMember ? std::string_view(srcMember->np_id.handle.data,
+                                          strnlen(srcMember->np_id.handle.data,
+                                                  Libraries::Np::ORBIS_NP_ONLINEID_MAX_LENGTH))
+                       : std::string_view{})
+                .data());
         return p.room_message_callback_data;
     }
 
@@ -1337,13 +1352,24 @@ void* BuildRoomMessagePayload(CallbackPayload& p, bool a_variant, OrbisNpMatchin
     info.msg = msg_ptr;
     info.msgLen = static_cast<u32>(p.room_message_data.size());
     p.room_message_callback_data = p.room_message_info.get();
-    LOG_DEBUG(Lib_NpMatching2, "Payload: info={} dst={} srcNpId={} msg={} msgLen={} onlineId='{}'",
-              fmt::ptr(&info), fmt::ptr(info.dst), fmt::ptr(info.srcMember), fmt::ptr(info.msg),
-              info.msgLen,
-              srcMember ? std::string_view(srcMember->np_id.handle.data,
-                                           strnlen(srcMember->np_id.handle.data,
-                                                   Libraries::Np::ORBIS_NP_ONLINEID_MAX_LENGTH))
-                        : std::string_view{});
+    LOG_DEBUG(
+        Lib_NpMatching2,
+        "Payload: info=0x%llx dst=0x%llx srcNpId=0x%llx msg=0x%llx msgLen=%u onlineId='%.*s'",
+        static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(&info)),
+        static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(info.dst)),
+        static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(info.srcMember)),
+        static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(info.msg)), info.msgLen,
+        static_cast<int>(
+            (srcMember ? std::string_view(srcMember->np_id.handle.data,
+                                          strnlen(srcMember->np_id.handle.data,
+                                                  Libraries::Np::ORBIS_NP_ONLINEID_MAX_LENGTH))
+                       : std::string_view{})
+                .size()),
+        (srcMember ? std::string_view(srcMember->np_id.handle.data,
+                                      strnlen(srcMember->np_id.handle.data,
+                                              Libraries::Np::ORBIS_NP_ONLINEID_MAX_LENGTH))
+                   : std::string_view{})
+            .data());
     return p.room_message_callback_data;
 }
 
@@ -1390,7 +1416,7 @@ s32 ContextManager::CreateContext(const OrbisNpId* owner_np_id, OrbisNpServiceLa
         m_contexts[id] = ctx;
 
         *out_ctx_id = id;
-        LOG_INFO(Lib_NpMatching2, "context{} created: id={} online_id={} serviceLabel={:#x}",
+        LOG_INFO(Lib_NpMatching2, "context%s created: id=%u online_id=%s serviceLabel=0x%x",
                  a_variant ? "A" : "", id, ctx->online_id.data, service_label);
         return ORBIS_OK;
     });
@@ -1408,13 +1434,13 @@ bool ContextManager::Destroy(OrbisNpMatching2ContextId ctx_id) {
         }
         if (ctx->stop_pending) {
             ctx->destroy_pending = true;
-            LOG_INFO(Lib_NpMatching2, "context destroy deferred until stop callback: id={}",
+            LOG_INFO(Lib_NpMatching2, "context destroy deferred until stop callback: id=%u",
                      ctx_id);
             return true;
         }
         NpHandler::GetInstance().ResetMatching2Cache(ctx_id);
         m_contexts[ctx_id].reset();
-        LOG_INFO(Lib_NpMatching2, "context destroyed: id={}", ctx_id);
+        LOG_INFO(Lib_NpMatching2, "context destroyed: id=%u", ctx_id);
         return true;
     });
 }
@@ -1432,7 +1458,7 @@ void ContextManager::CompleteStop(OrbisNpMatching2ContextId ctx_id,
         }
         NpHandler::GetInstance().ResetMatching2Cache(ctx_id);
         m_contexts[ctx_id].reset();
-        LOG_INFO(Lib_NpMatching2, "context destroyed after stop callback: id={}", ctx_id);
+        LOG_INFO(Lib_NpMatching2, "context destroyed after stop callback: id=%u", ctx_id);
     });
 }
 
@@ -1448,7 +1474,7 @@ s32 ContextManager::Start(OrbisNpMatching2ContextId ctx_id) {
         ctx->started = true;
         ctx->stop_pending = false;
         ctx->destroy_pending = false;
-        LOG_INFO(Lib_NpMatching2, "context started: id={}", ctx_id);
+        LOG_INFO(Lib_NpMatching2, "context started: id=%u", ctx_id);
         return ORBIS_OK;
     });
 }
@@ -1464,7 +1490,7 @@ s32 ContextManager::Stop(OrbisNpMatching2ContextId ctx_id) {
         }
         ctx->started = false;
         ctx->stop_pending = true;
-        LOG_INFO(Lib_NpMatching2, "context stopped: id={}", ctx_id);
+        LOG_INFO(Lib_NpMatching2, "context stopped: id=%u", ctx_id);
         return ORBIS_OK;
     });
 }
@@ -1549,8 +1575,9 @@ void LogCallbackObject(std::string_view label, const T* object) {
     if (!object) {
         return;
     }
-    LOG_INFO(Lib_NpMatching2, "Callback payload {}: ptr={} size={:#x} raw={}", label,
-             fmt::ptr(object), sizeof(T), HexPreview(object, sizeof(T), sizeof(T)));
+    LOG_INFO(Lib_NpMatching2, "Callback payload %.*s: ptr=%p size=0x%zx raw=%s",
+             static_cast<int>(label.size()), label.data(), static_cast<const void*>(object),
+             sizeof(T), HexPreview(object, sizeof(T), sizeof(T)).c_str());
 }
 
 bool IsCreateJoinRequestEvent(OrbisNpMatching2Event event) {
@@ -1572,28 +1599,33 @@ void LogCreateJoinCallbackPayload(const PendingEvent& ev) {
 
     const CallbackPayload& payload = *ev.payload_owner;
     LOG_DEBUG(Lib_NpMatching2,
-              "Callback create/join payload begin: ctx={} reqId={} event={:#x} data={} "
-              "normal_members={} a_members={}",
-              ev.ctx_id, ev.req_id, static_cast<u16>(ev.req_event), fmt::ptr(ev.request_data),
+              "Callback create/join payload begin: ctx=%u reqId=%u event=0x%x data=0x%llx "
+              "normal_members=%zu a_members=%zu",
+              ev.ctx_id, ev.req_id, static_cast<u16>(ev.req_event),
+              static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(ev.request_data)),
               payload.member_data.size(), payload.member_data_a.size());
     LogCallbackObject("create_join_response", payload.create_join_response.get());
     LogCallbackObject("create_join_response_a", payload.create_join_response_a.get());
     LogCallbackObject("room_data", payload.room_data.get());
     for (size_t i = 0; i < payload.member_data.size(); ++i) {
         const auto& member = payload.member_data[i];
-        LOG_DEBUG(Lib_NpMatching2,
-                  "Callback payload member[{}]: ptr={} size={:#x} npid='{}' npid_raw={} raw={}", i,
-                  fmt::ptr(&member), sizeof(member), CallbackOnlineId(member.npId),
-                  HexPreview(&member.npId, sizeof(member.npId), sizeof(member.npId)),
-                  HexPreview(&member, sizeof(member), sizeof(member)));
+        LOG_DEBUG(
+            Lib_NpMatching2,
+            "Callback payload member[%zu]: ptr=0x%llx size=0x%llx npid='%s' npid_raw=%s raw=%s", i,
+            static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(&member)),
+            static_cast<unsigned long long>(sizeof(member)),
+            (CallbackOnlineId(member.npId)).c_str(),
+            (HexPreview(&member.npId, sizeof(member.npId), sizeof(member.npId))).c_str(),
+            (HexPreview(&member, sizeof(member), sizeof(member))).c_str());
     }
     for (size_t i = 0; i < payload.member_data_a.size(); ++i) {
         const auto& member = payload.member_data_a[i];
-        LOG_DEBUG(Lib_NpMatching2, "Callback payload member_a[{}]: ptr={} size={:#x} raw={}", i,
-                  fmt::ptr(&member), sizeof(member),
-                  HexPreview(&member, sizeof(member), sizeof(member)));
+        LOG_DEBUG(Lib_NpMatching2, "Callback payload member_a[%zu]: ptr=0x%llx size=0x%llx raw=%s",
+                  i, static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(&member)),
+                  static_cast<unsigned long long>(sizeof(member)),
+                  (HexPreview(&member, sizeof(member), sizeof(member))).c_str());
     }
-    LOG_DEBUG(Lib_NpMatching2, "Callback create/join payload end: ctx={} reqId={} event={:#x}",
+    LOG_DEBUG(Lib_NpMatching2, "Callback create/join payload end: ctx=%u reqId=%u event=0x%x",
               ev.ctx_id, ev.req_id, static_cast<u16>(ev.req_event));
 }
 
@@ -1604,40 +1636,46 @@ void LogMemberJoinedCallbackPayload(const PendingEvent& ev) {
 
     const CallbackPayload& payload = *ev.payload_owner;
     LOG_DEBUG(Lib_NpMatching2,
-              "Callback member-joined payload begin: ctx={} room={} event={:#x} data={}", ev.ctx_id,
-              ev.room_id, static_cast<u16>(ev.room_event), fmt::ptr(ev.room_event_data));
+              "Callback member-joined payload begin: ctx=%u room=%" PRIu64
+              " event=0x%x data=0x%llx",
+              ev.ctx_id, ev.room_id, static_cast<u16>(ev.room_event),
+              static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(ev.room_event_data)));
     LogCallbackObject("room_member_update", payload.room_member_update.get());
     LogCallbackObject("room_member_update_a", payload.room_member_update_a.get());
     if (payload.event_member) {
         const auto& member = *payload.event_member;
-        LOG_DEBUG(Lib_NpMatching2,
-                  "Callback payload joined_member: ptr={} size={:#x} npid='{}' npid_raw={} raw={}",
-                  fmt::ptr(&member), sizeof(member), CallbackOnlineId(member.npId),
-                  HexPreview(&member.npId, sizeof(member.npId), sizeof(member.npId)),
-                  HexPreview(&member, sizeof(member), sizeof(member)));
+        LOG_DEBUG(
+            Lib_NpMatching2,
+            "Callback payload joined_member: ptr=0x%llx size=0x%llx npid='%s' npid_raw=%s raw=%s",
+            static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(&member)),
+            static_cast<unsigned long long>(sizeof(member)),
+            (CallbackOnlineId(member.npId)).c_str(),
+            (HexPreview(&member.npId, sizeof(member.npId), sizeof(member.npId))).c_str(),
+            (HexPreview(&member, sizeof(member), sizeof(member))).c_str());
     }
     LogCallbackObject("joined_member_a", payload.event_member_a.get());
-    LOG_DEBUG(Lib_NpMatching2, "Callback member-joined payload end: ctx={} room={} event={:#x}",
-              ev.ctx_id, ev.room_id, static_cast<u16>(ev.room_event));
+    LOG_DEBUG(Lib_NpMatching2,
+              "Callback member-joined payload end: ctx=%u room=%" PRIu64 " event=0x%x", ev.ctx_id,
+              ev.room_id, static_cast<u16>(ev.room_event));
 }
 
 void FireEvent(const PendingEvent& ev) {
     const auto& ctx = ev.context_owner;
     if (!ctx) {
-        LOG_WARNING(Lib_NpMatching2, "type={} dropped: ctx={} not found", static_cast<int>(ev.type),
+        LOG_WARNING(Lib_NpMatching2, "type=%d dropped: ctx=%u not found", static_cast<int>(ev.type),
                     ev.ctx_id);
         return;
     }
     switch (ev.type) {
     case PendingEvent::CONTEXT_CB:
         if (ctx->context_callback) {
-            LOG_INFO(Lib_NpMatching2, "callback CONTEXT ctx={} event={:#x} cause={} err={:#x}",
+            LOG_INFO(Lib_NpMatching2, "callback CONTEXT ctx=%u event=0x%x cause=%u err=0x%x",
                      ev.ctx_id, static_cast<u16>(ev.ctx_event), static_cast<u8>(ev.ctx_event_cause),
                      ev.error_code);
             ctx->context_callback(ev.ctx_id, ev.ctx_event, ev.ctx_event_cause, ev.error_code,
                                   ctx->context_callback_arg);
         } else {
-            LOG_WARNING(Lib_NpMatching2, "callback CONTEXT ctx={} event={:#x} SKIPPED: no callback",
+            LOG_WARNING(Lib_NpMatching2, "callback CONTEXT ctx=%u event=0x%x SKIPPED: no callback",
                         ev.ctx_id, static_cast<u16>(ev.ctx_event));
         }
         if (ev.ctx_event == ORBIS_NP_MATCHING2_CONTEXT_EVENT_STOPPED) {
@@ -1647,101 +1685,123 @@ void FireEvent(const PendingEvent& ev) {
     case PendingEvent::REQUEST_CB:
         if (ev.request_cb) {
             LOG_INFO(Lib_NpMatching2,
-                     "callback REQUEST ctx={} reqId={} event={:#x} err={:#x} data={}", ev.ctx_id,
+                     "callback REQUEST ctx=%u reqId=%u event=0x%x err=0x%x data=0x%llx", ev.ctx_id,
                      ev.req_id, static_cast<u16>(ev.req_event), ev.error_code,
-                     fmt::ptr(ev.request_data));
+                     static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(ev.request_data)));
             LogCreateJoinCallbackPayload(ev);
             ev.request_cb(ev.ctx_id, ev.req_id, ev.req_event, ev.error_code, ev.request_data,
                           ev.request_cb_arg);
         } else {
             LOG_WARNING(Lib_NpMatching2,
-                        "callback REQUEST ctx={} reqId={} event={:#x} SKIPPED: no callback",
+                        "callback REQUEST ctx=%u reqId=%u event=0x%x SKIPPED: no callback",
                         ev.ctx_id, ev.req_id, static_cast<u16>(ev.req_event));
         }
         break;
     case PendingEvent::SIGNALING_CB:
         if (ctx->signaling_callback) {
             LOG_INFO(Lib_NpMatching2,
-                     "callback SIGNALING ctx={} room={} member={} event={:#x} err={:#x}", ev.ctx_id,
-                     ev.room_id, ev.member_id, static_cast<u16>(ev.sig_event), ev.error_code);
+                     "callback SIGNALING ctx=%u room=%" PRIu64 " member=%u event=0x%x err=0x%x",
+                     ev.ctx_id, ev.room_id, ev.member_id, static_cast<u16>(ev.sig_event),
+                     ev.error_code);
             ctx->signaling_callback(ev.ctx_id, ev.room_id, ev.member_id, ev.sig_event,
                                     ev.error_code, ctx->signaling_callback_arg);
         } else {
             LOG_WARNING(Lib_NpMatching2,
-                        "callback SIGNALING ctx={} room={} event={:#x} SKIPPED: no callback",
+                        "callback SIGNALING ctx=%u room=%" PRIu64
+                        " event=0x%x SKIPPED: no callback",
                         ev.ctx_id, ev.room_id, static_cast<u16>(ev.sig_event));
         }
         break;
     case PendingEvent::ROOM_EVENT_CB:
         if (ctx->room_event_callback) {
-            LOG_INFO(Lib_NpMatching2, "callback ROOM_EVENT ctx={} room={} event={:#x} data={}",
-                     ev.ctx_id, ev.room_id, static_cast<u16>(ev.room_event),
-                     fmt::ptr(ev.room_event_data));
+            LOG_INFO(
+                Lib_NpMatching2,
+                "callback ROOM_EVENT ctx=%u room=%" PRIu64 " event=0x%x data=0x%llx", ev.ctx_id,
+                ev.room_id, static_cast<u16>(ev.room_event),
+                static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(ev.room_event_data)));
             LogMemberJoinedCallbackPayload(ev);
             ctx->room_event_callback(ev.ctx_id, ev.room_id, ev.room_event, ev.room_event_data,
                                      ctx->room_event_callback_arg);
         } else {
             LOG_WARNING(Lib_NpMatching2,
-                        "callback ROOM_EVENT ctx={} room={} event={:#x} SKIPPED: no callback",
+                        "callback ROOM_EVENT ctx=%u room=%" PRIu64
+                        " event=0x%x SKIPPED: no callback",
                         ev.ctx_id, ev.room_id, static_cast<u16>(ev.room_event));
         }
         break;
     case PendingEvent::LOBBY_EVENT_CB:
         if (ctx->lobby_event_callback) {
-            LOG_INFO(Lib_NpMatching2, "callback LOBBY_EVENT ctx={} lobby={} event={:#x} data={}",
-                     ev.ctx_id, ev.lobby_id, static_cast<u16>(ev.lobby_event),
-                     fmt::ptr(ev.lobby_event_data));
+            LOG_INFO(
+                Lib_NpMatching2,
+                "callback LOBBY_EVENT ctx=%u lobby=%" PRIu64 " event=0x%x data=0x%llx", ev.ctx_id,
+                ev.lobby_id, static_cast<u16>(ev.lobby_event),
+                static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(ev.lobby_event_data)));
             ctx->lobby_event_callback(ev.ctx_id, ev.lobby_id, ev.lobby_event, ev.lobby_event_data,
                                       ctx->lobby_event_callback_arg);
         } else {
             LOG_WARNING(Lib_NpMatching2,
-                        "callback LOBBY_EVENT ctx={} lobby={} event={:#x} SKIPPED: no callback",
+                        "callback LOBBY_EVENT ctx=%u lobby=%" PRIu64
+                        " event=0x%x SKIPPED: no callback",
                         ev.ctx_id, ev.lobby_id, static_cast<u16>(ev.lobby_event));
         }
         break;
     case PendingEvent::LOBBY_MESSAGE_CB:
         if (ctx->lobby_message_callback) {
-            LOG_INFO(Lib_NpMatching2, "callback LOBBY_MESSAGE ctx={} lobby={} src={} event={:#x}",
-                     ev.ctx_id, ev.lobby_id, ev.src_member_id, static_cast<u16>(ev.msg_event));
+            LOG_INFO(Lib_NpMatching2,
+                     "callback LOBBY_MESSAGE ctx=%u lobby=%" PRIu64 " src=%u event=0x%x", ev.ctx_id,
+                     ev.lobby_id, ev.src_member_id, static_cast<u16>(ev.msg_event));
             ctx->lobby_message_callback(ev.ctx_id, ev.lobby_id, ev.src_member_id, ev.msg_event,
                                         ev.message_data, ctx->lobby_message_callback_arg);
         } else {
             LOG_WARNING(Lib_NpMatching2,
-                        "callback LOBBY_MESSAGE ctx={} lobby={} SKIPPED: no callback", ev.ctx_id,
-                        ev.lobby_id);
+                        "callback LOBBY_MESSAGE ctx=%u lobby=%" PRIu64 " SKIPPED: no callback",
+                        ev.ctx_id, ev.lobby_id);
         }
         break;
     case PendingEvent::ROOM_MESSAGE_CB:
         if (ctx->room_message_callback) {
             LOG_INFO(Lib_NpMatching2,
-                     "callback ROOM_MESSAGE ctx={} room={} src={} event={:#x} cb={} data={} "
-                     "userdata={} aVariant={}",
+                     "callback ROOM_MESSAGE ctx=%u room=%" PRIu64
+                     " src=%u event=0x%x cb=0x%llx data=0x%llx "
+                     "userdata=0x%llx aVariant=%s",
                      ev.ctx_id, ev.room_id, ev.src_member_id, static_cast<u16>(ev.msg_event),
-                     fmt::ptr(ctx->room_message_callback), fmt::ptr(ev.message_data),
-                     fmt::ptr(ctx->room_message_callback_arg), ctx->a_variant);
+                     static_cast<unsigned long long>(
+                         reinterpret_cast<uintptr_t>(ctx->room_message_callback)),
+                     static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(ev.message_data)),
+                     static_cast<unsigned long long>(
+                         reinterpret_cast<uintptr_t>(ctx->room_message_callback_arg)),
+                     (ctx->a_variant) ? "true" : "false");
             if (ctx->a_variant && ev.message_data) {
                 const auto* info =
                     static_cast<const OrbisNpMatching2RoomMessageInfoA*>(ev.message_data);
-                LOG_DEBUG(Lib_NpMatching2,
-                          "callback ROOM_MESSAGE_A data: filtered={} cast={} dst={} srcMember={} "
-                          "msg={} msgLen={}",
-                          info->filtered, info->castType, fmt::ptr(info->dst),
-                          fmt::ptr(&info->srcMember), fmt::ptr(info->msg), info->msgLen);
+                LOG_DEBUG(
+                    Lib_NpMatching2,
+                    "callback ROOM_MESSAGE_A data: filtered=%s cast=%u dst=0x%llx srcMember=0x%llx "
+                    "msg=0x%llx msgLen=%" PRIu64,
+                    (info->filtered) ? "true" : "false", info->castType,
+                    static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(info->dst)),
+                    static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(&info->srcMember)),
+                    static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(info->msg)),
+                    info->msgLen);
             } else if (ev.message_data) {
                 const auto* info =
                     static_cast<const OrbisNpMatching2RoomMessageInfo*>(ev.message_data);
-                LOG_DEBUG(Lib_NpMatching2,
-                          "callback ROOM_MESSAGE data: filtered={} cast={} dst={} srcNpId={} "
-                          "msg={} msgLen={}",
-                          info->filtered, info->castType, fmt::ptr(info->dst),
-                          fmt::ptr(info->srcMember), fmt::ptr(info->msg), info->msgLen);
+                LOG_DEBUG(
+                    Lib_NpMatching2,
+                    "callback ROOM_MESSAGE data: filtered=%s cast=%u dst=0x%llx srcNpId=0x%llx "
+                    "msg=0x%llx msgLen=%u",
+                    (info->filtered) ? "true" : "false", info->castType,
+                    static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(info->dst)),
+                    static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(info->srcMember)),
+                    static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(info->msg)),
+                    info->msgLen);
             }
             ctx->room_message_callback(ev.ctx_id, ev.room_id, ev.src_member_id, ev.msg_event,
                                        ev.message_data, ctx->room_message_callback_arg);
         } else {
             LOG_WARNING(Lib_NpMatching2,
-                        "callback ROOM_MESSAGE ctx={} room={} SKIPPED: no callback", ev.ctx_id,
-                        ev.room_id);
+                        "callback ROOM_MESSAGE ctx=%u room=%" PRIu64 " SKIPPED: no callback",
+                        ev.ctx_id, ev.room_id);
         }
         break;
     }
@@ -1796,7 +1856,7 @@ void InitEventDispatcher() {
         Libraries::Kernel::ORBIS_KERNEL_PRIO_FIFO_DEFAULT,
         ORBIS_NP_MATCHING2_THREAD_STACK_SIZE_DEFAULT, 0, "SceNpMatching2Ex");
     if (rc < 0) {
-        LOG_ERROR(Lib_NpMatching2, "failed to create event dispatcher thread: {:#x}", rc);
+        LOG_ERROR(Lib_NpMatching2, "failed to create event dispatcher thread: 0x%x", rc);
         (void)retro_atomic_exchange_int(&state.dispatch_running, 0);
         state.dispatch_thread = nullptr;
         return;
@@ -1819,7 +1879,7 @@ void TermEventDispatcher() {
 
 void ScheduleEvent(PendingEvent ev) {
     if (!ev.context_owner) {
-        LOG_WARNING(Lib_NpMatching2, "type={} dropped: ctx={} not found", static_cast<int>(ev.type),
+        LOG_WARNING(Lib_NpMatching2, "type=%d dropped: ctx=%u not found", static_cast<int>(ev.type),
                     ev.ctx_id);
         return;
     }

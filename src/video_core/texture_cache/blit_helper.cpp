@@ -26,7 +26,7 @@ static vk::SampleCountFlagBits ToSampleCount(u32 num_samples) {
     case 16:
         return vk::SampleCountFlagBits::e16;
     default:
-        UNREACHABLE_MSG("Unknown samples count = {}", num_samples);
+        UNREACHABLE_MSG("Unknown samples count = %u", num_samples);
     }
 }
 
@@ -63,8 +63,8 @@ void BlitHelper::ReinterpretColorAsMsDepth(u32 width, u32 height, u32 num_sample
     };
     const auto [color_view_result, color_view] =
         instance.GetDevice().createImageView(color_view_ci);
-    ASSERT_MSG(color_view_result == vk::Result::eSuccess, "Failed to create image view: {}",
-               vk::to_string(color_view_result));
+    ASSERT_MSG(color_view_result == vk::Result::eSuccess, "Failed to create image view: %s",
+               (vk::to_string(color_view_result)).c_str());
     const vk::ImageViewUsageCreateInfo depth_usage_ci{
         .usage = vk::ImageUsageFlagBits::eDepthStencilAttachment};
     const vk::ImageViewCreateInfo depth_view_ci = {
@@ -82,8 +82,8 @@ void BlitHelper::ReinterpretColorAsMsDepth(u32 width, u32 height, u32 num_sample
     };
     const auto [depth_view_result, depth_view] =
         instance.GetDevice().createImageView(depth_view_ci);
-    ASSERT_MSG(depth_view_result == vk::Result::eSuccess, "Failed to create image view: {}",
-               vk::to_string(depth_view_result));
+    ASSERT_MSG(depth_view_result == vk::Result::eSuccess, "Failed to create image view: %s",
+               (vk::to_string(depth_view_result)).c_str());
     scheduler.DeferOperation([device = instance.GetDevice(), color_view, depth_view] {
         device.destroyImageView(color_view);
         device.destroyImageView(depth_view);
@@ -164,8 +164,8 @@ void BlitHelper::CopyBetweenMsImages(u32 width, u32 height, u32 num_samples,
         },
     };
     const auto [src_view_result, src_view] = instance.GetDevice().createImageView(src_view_ci);
-    ASSERT_MSG(src_view_result == vk::Result::eSuccess, "Failed to create image view: {}",
-               vk::to_string(src_view_result));
+    ASSERT_MSG(src_view_result == vk::Result::eSuccess, "Failed to create image view: %s",
+               (vk::to_string(src_view_result)).c_str());
 
     const vk::ImageViewUsageCreateInfo dst_usage_ci{.usage =
                                                         vk::ImageUsageFlagBits::eColorAttachment};
@@ -183,8 +183,8 @@ void BlitHelper::CopyBetweenMsImages(u32 width, u32 height, u32 num_samples,
         },
     };
     const auto [dst_view_result, dst_view] = instance.GetDevice().createImageView(dst_view_ci);
-    ASSERT_MSG(dst_view_result == vk::Result::eSuccess, "Failed to create image view: {}",
-               vk::to_string(dst_view_result));
+    ASSERT_MSG(dst_view_result == vk::Result::eSuccess, "Failed to create image view: %s",
+               (vk::to_string(dst_view_result)).c_str());
     scheduler.DeferOperation([device = instance.GetDevice(), src_view, dst_view] {
         device.destroyImageView(src_view);
         device.destroyImageView(dst_view);
@@ -267,8 +267,8 @@ void BlitHelper::CopyDepthToColor(u32 width, u32 height, u32 dst_samples, vk::Fo
         },
     };
     const auto [src_view_result, src_view] = instance.GetDevice().createImageView(src_view_ci);
-    ASSERT_MSG(src_view_result == vk::Result::eSuccess, "Failed to create image view: {}",
-               vk::to_string(src_view_result));
+    ASSERT_MSG(src_view_result == vk::Result::eSuccess, "Failed to create image view: %s",
+               (vk::to_string(src_view_result)).c_str());
 
     const vk::ImageViewUsageCreateInfo dst_usage_ci{.usage =
                                                         vk::ImageUsageFlagBits::eColorAttachment};
@@ -286,8 +286,8 @@ void BlitHelper::CopyDepthToColor(u32 width, u32 height, u32 dst_samples, vk::Fo
         },
     };
     const auto [dst_view_result, dst_view] = instance.GetDevice().createImageView(dst_view_ci);
-    ASSERT_MSG(dst_view_result == vk::Result::eSuccess, "Failed to create image view: {}",
-               vk::to_string(dst_view_result));
+    ASSERT_MSG(dst_view_result == vk::Result::eSuccess, "Failed to create image view: %s",
+               (vk::to_string(dst_view_result)).c_str());
     scheduler.DeferOperation([device = instance.GetDevice(), src_view, dst_view] {
         device.destroyImageView(src_view);
         device.destroyImageView(dst_view);
@@ -388,7 +388,8 @@ void BlitHelper::CreatePipelineLayouts() {
     auto [layout_result, pipeline_layout] =
         instance.GetDevice().createPipelineLayoutUnique(layout_info);
     ASSERT_MSG(layout_result == vk::Result::eSuccess,
-               "Failed to create graphics pipeline layout: {}", vk::to_string(layout_result));
+               "Failed to create graphics pipeline layout: %s",
+               (vk::to_string(layout_result)).c_str());
     Vulkan::SetObjectName(instance.GetDevice(), *pipeline_layout, "Single texture pipeline layout");
     single_texture_pl_layout = std::move(pipeline_layout);
 }
@@ -453,9 +454,9 @@ void BlitHelper::CreateColorToMSDepthPipeline(const MsPipelineKey& key) {
 
     auto [pipeline_result, pipeline] =
         instance.GetDevice().createGraphicsPipelineUnique(VK_NULL_HANDLE, pipeline_info);
-    ASSERT_MSG(pipeline_result == vk::Result::eSuccess, "Failed to create graphics pipeline: {}",
-               vk::to_string(pipeline_result));
-    Vulkan::SetObjectName(instance.GetDevice(), *pipeline, "Color to MS Depth {}", key.num_samples);
+    ASSERT_MSG(pipeline_result == vk::Result::eSuccess, "Failed to create graphics pipeline: %s",
+               (vk::to_string(pipeline_result)).c_str());
+    Vulkan::SetObjectName(instance.GetDevice(), *pipeline, "Color to MS Depth %u", key.num_samples);
 
     color_to_ms_depth_pl.emplace_back(key, std::move(pipeline));
 }
@@ -531,9 +532,9 @@ void BlitHelper::CreateMsCopyPipeline(const MsPipelineKey& key) {
 
     auto [pipeline_result, pipeline] =
         instance.GetDevice().createGraphicsPipelineUnique(VK_NULL_HANDLE, pipeline_info);
-    ASSERT_MSG(pipeline_result == vk::Result::eSuccess, "Failed to create graphics pipeline: {}",
-               vk::to_string(pipeline_result));
-    Vulkan::SetObjectName(instance.GetDevice(), *pipeline, "Non MS Image to MS Image {}",
+    ASSERT_MSG(pipeline_result == vk::Result::eSuccess, "Failed to create graphics pipeline: %s",
+               (vk::to_string(pipeline_result)).c_str());
+    Vulkan::SetObjectName(instance.GetDevice(), *pipeline, "Non MS Image to MS Image %u",
                           key.num_samples);
 
     ms_image_copy_pl.emplace_back(key, std::move(pipeline));
@@ -614,9 +615,9 @@ void BlitHelper::CreateDepthToColorPipeline(const DepthToColorKey& key) {
 
     auto [pipeline_result, pipeline] =
         instance.GetDevice().createGraphicsPipelineUnique(VK_NULL_HANDLE, pipeline_info);
-    ASSERT_MSG(pipeline_result == vk::Result::eSuccess, "Failed to create graphics pipeline: {}",
-               vk::to_string(pipeline_result));
-    Vulkan::SetObjectName(instance.GetDevice(), *pipeline, "Depth plane to colour {}",
+    ASSERT_MSG(pipeline_result == vk::Result::eSuccess, "Failed to create graphics pipeline: %s",
+               (vk::to_string(pipeline_result)).c_str());
+    Vulkan::SetObjectName(instance.GetDevice(), *pipeline, "Depth plane to colour %u",
                           key.dst_samples);
     instance.GetDevice().destroy(frag);
 

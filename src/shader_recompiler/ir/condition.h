@@ -3,7 +3,6 @@
 
 #pragma once
 
-#include <fmt/format.h>
 #include "common/types.h"
 
 namespace Shader::IR {
@@ -43,10 +42,3 @@ constexpr std::string_view NameOf(Condition condition) {
 }
 
 } // namespace Shader::IR
-
-template <>
-struct fmt::formatter<Shader::IR::Condition> : formatter<std::string_view> {
-    auto format(const Shader::IR::Condition cond, format_context& ctx) const {
-        return formatter<string_view>::format(NameOf(cond), ctx);
-    }
-};

@@ -22,7 +22,7 @@ void NpHandler::ReportTrophyUnlock(s32 user_id, s32 service_label, s32 trophy_id
     if (m_mutex_clients.Run([&] {
             auto it = m_clients.find(user_id);
             if (it == m_clients.end()) {
-                LOG_DEBUG(NpHandler, "no shadNet session for user_id={}; skipping", user_id);
+                LOG_DEBUG(NpHandler, "no shadNet session for user_id=%d; skipping", user_id);
                 return true;
             }
             client = it->second;
@@ -31,16 +31,16 @@ void NpHandler::ReportTrophyUnlock(s32 user_id, s32 service_label, s32 trophy_id
         return;
     }
     if (!client) {
-        LOG_DEBUG(NpHandler, "null client for user_id={}; skipping", user_id);
+        LOG_DEBUG(NpHandler, "null client for user_id=%d; skipping", user_id);
         return;
     }
     if (!client->IsAuthenticated()) {
-        LOG_WARNING(NpHandler, "not authenticated; trophy {} not mirrored", trophy_id);
+        LOG_WARNING(NpHandler, "not authenticated; trophy %d not mirrored", trophy_id);
         return;
     }
     if (!client->IsTrophiesEnabled()) {
         LOG_WARNING(NpHandler,
-                    "server has not advertised trophy support; trophy {} "
+                    "server has not advertised trophy support; trophy %d "
                     "not mirrored",
                     trophy_id);
         return;
@@ -49,15 +49,15 @@ void NpHandler::ReportTrophyUnlock(s32 user_id, s32 service_label, s32 trophy_id
     const std::string com_id = GetNpCommId(service_label);
     if (!IsValidNpCommId(com_id)) {
         LOG_WARNING(NpHandler,
-                    "no valid NP Communication ID for service_label={}; "
-                    "skipping trophy {}",
+                    "no valid NP Communication ID for service_label=%d; "
+                    "skipping trophy %d",
                     service_label, trophy_id);
         return;
     }
 
     const u64 pkt_id = client->UnlockTrophy(com_id, trophy_id, timestamp);
-    LOG_INFO(NpHandler, "user_id={} trophy={} com_id='{}' pkt_id={}", user_id, trophy_id, com_id,
-             pkt_id);
+    LOG_INFO(NpHandler, "user_id=%d trophy=%d com_id='%s' pkt_id=%" PRIu64, user_id, trophy_id,
+             (com_id).c_str(), pkt_id);
 }
 
 void NpHandler::SyncTrophies(
@@ -67,7 +67,7 @@ void NpHandler::SyncTrophies(
     if (m_mutex_clients.Run([&] {
             auto it = m_clients.find(user_id);
             if (it == m_clients.end()) {
-                LOG_DEBUG(NpHandler, "no shadNet session for user_id={}; skipping", user_id);
+                LOG_DEBUG(NpHandler, "no shadNet session for user_id=%d; skipping", user_id);
                 return true;
             }
             client = it->second;
@@ -76,7 +76,7 @@ void NpHandler::SyncTrophies(
         return;
     }
     if (!client) {
-        LOG_DEBUG(NpHandler, "null client for user_id={}; skipping", user_id);
+        LOG_DEBUG(NpHandler, "null client for user_id=%d; skipping", user_id);
         return;
     }
     if (!client->IsAuthenticated()) {
@@ -91,7 +91,7 @@ void NpHandler::SyncTrophies(
 
     const std::string com_id = GetNpCommId(service_label);
     if (!IsValidNpCommId(com_id)) {
-        LOG_WARNING(NpHandler, "no valid NP Communication ID for service_label={}; skipping",
+        LOG_WARNING(NpHandler, "no valid NP Communication ID for service_label=%d; skipping",
                     service_label);
         return;
     }
@@ -100,15 +100,15 @@ void NpHandler::SyncTrophies(
     if (on_merged) {
         m_mutex_pending_trophy.Run([&] { m_pending_trophy.emplace(pkt_id, std::move(on_merged)); });
     }
-    LOG_INFO(NpHandler, "user_id={} uploading {} com_id='{}' pkt_id={}", user_id,
-             local_trophies.size(), com_id, pkt_id);
+    LOG_INFO(NpHandler, "user_id=%d uploading %zu com_id='%s' pkt_id=%" PRIu64, user_id,
+             local_trophies.size(), (com_id).c_str(), pkt_id);
 }
 
 void NpHandler::OnTrophyReply(s32 user_id, ShadNet::CommandType cmd, u64 pkt_id,
                               ShadNet::ErrorType error, const std::vector<u8>& body) {
     if (cmd == ShadNet::CommandType::UnlockTrophy) {
         if (error != ShadNet::ErrorType::NoError) {
-            LOG_WARNING(NpHandler, "UnlockTrophy rejected by server: error={}",
+            LOG_WARNING(NpHandler, "UnlockTrophy rejected by server: error=%d",
                         static_cast<int>(error));
         }
         return;
@@ -129,7 +129,7 @@ void NpHandler::OnTrophyReply(s32 user_id, ShadNet::CommandType cmd, u64 pkt_id,
     }
 
     if (error != ShadNet::ErrorType::NoError) {
-        LOG_WARNING(NpHandler, "SyncTrophies failed: error={}", static_cast<int>(error));
+        LOG_WARNING(NpHandler, "SyncTrophies failed: error=%d", static_cast<int>(error));
         return; // leave local trophies exactly as they were
     }
 
@@ -158,7 +158,7 @@ void NpHandler::OnTrophyReply(s32 user_id, ShadNet::CommandType cmd, u64 pkt_id,
     for (const auto& t : Items(pb.trophies))
         merged.emplace_back(t.trophyId, t.timestamp);
 
-    LOG_INFO(NpHandler, "server holds {} trophies for user_id={}", merged.size(), user_id);
+    LOG_INFO(NpHandler, "server holds %zu trophies for user_id=%d", merged.size(), user_id);
     on_merged(merged);
 }
 

@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright 2024-2026 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include <cstring>
 #include <string_view>
 #include <unordered_map>
 
@@ -179,18 +180,21 @@ static std::unordered_map<PathType, fs::path>& UserPathsRef() {
 
 bool ValidatePath(const fs::path& path) {
     if (path.empty()) {
-        LOG_ERROR(Common_Filesystem, "Input path is empty, path={}", PathToUTF8String(path));
+        LOG_ERROR(Common_Filesystem, "Input path is empty, path=%s",
+                  (PathToUTF8String(path)).c_str());
         return false;
     }
 
 #ifdef _WIN32
     if (path.u16string().size() >= MAX_PATH) {
-        LOG_ERROR(Common_Filesystem, "Input path is too long, path={}", PathToUTF8String(path));
+        LOG_ERROR(Common_Filesystem, "Input path is too long, path=%s",
+                  (PathToUTF8String(path)).c_str());
         return false;
     }
 #else
     if (path.u8string().size() >= MAX_PATH) {
-        LOG_ERROR(Common_Filesystem, "Input path is too long, path={}", PathToUTF8String(path));
+        LOG_ERROR(Common_Filesystem, "Input path is too long, path=%s",
+                  (PathToUTF8String(path)).c_str());
         return false;
     }
 #endif
@@ -227,8 +231,8 @@ std::string GetUserPathString(PathType shad_path) {
 
 void SetUserPath(PathType shad_path, const fs::path& new_path) {
     if (!Common::FS::IsDirectory(new_path)) {
-        LOG_ERROR(Common_Filesystem, "Filesystem object at new_path={} is not a directory",
-                  PathToUTF8String(new_path));
+        LOG_ERROR(Common_Filesystem, "Filesystem object at new_path=%s is not a directory",
+                  (PathToUTF8String(new_path)).c_str());
         return;
     }
 

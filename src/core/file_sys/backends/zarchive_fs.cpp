@@ -45,13 +45,13 @@ ZarArchive::ZarArchive(const std::filesystem::path& path) {
         filestream_open(reinterpret_cast<const char*>(u8path.c_str()), RETRO_VFS_FILE_ACCESS_READ,
                         RETRO_VFS_FILE_ACCESS_HINT_FREQUENT_ACCESS);
     if (!m_file) {
-        LOG_ERROR(Kernel_Fs, "Failed to open ZArchive: {}", path.string());
+        LOG_ERROR(Kernel_Fs, "Failed to open ZArchive: %s", (path.string()).c_str());
         return;
     }
     s64 size = 0;
     const u8* map = filestream_get_mapped_ptr(m_file, &size);
     if (!map || size <= 0) {
-        LOG_ERROR(Kernel_Fs, "Failed to map ZArchive: {}", path.string());
+        LOG_ERROR(Kernel_Fs, "Failed to map ZArchive: %s", (path.string()).c_str());
         return;
     }
     m_size = static_cast<u64>(size);
@@ -60,7 +60,7 @@ ZarArchive::ZarArchive(const std::filesystem::path& path) {
     m_map = map;
     // The archive is opened once here, to refuse a file that is not one.
     if (!Reader()) {
-        LOG_ERROR(Kernel_Fs, "Not a ZArchive: {}", path.string());
+        LOG_ERROR(Kernel_Fs, "Not a ZArchive: %s", (path.string()).c_str());
         m_map = nullptr;
     }
 }
@@ -340,7 +340,8 @@ std::optional<Common::FS::FileView> ZArchiveBackend::ReadFile(std::string_view r
     }
     std::vector<u8> data(file.size);
     if (m_archive->Read(file, 0, data.data(), data.size()) != data.size()) {
-        LOG_ERROR(Common_Filesystem, "Short read from ZArchive entry: {}", rel_path);
+        LOG_ERROR(Common_Filesystem, "Short read from ZArchive entry: %.*s",
+                  static_cast<int>((rel_path).size()), (rel_path).data());
         return std::nullopt;
     }
     // Decompressed into its own buffer, which the view keeps

@@ -24,9 +24,10 @@ void PS4_SYSV_ABI sceVideoOutSetBufferAttribute(BufferAttribute* attribute, Pixe
                                                 u32 tilingMode, u32 aspectRatio, u32 width,
                                                 u32 height, u32 pitchInPixel) {
     LOG_INFO(Lib_VideoOut,
-             "pixelFormat = {}, tilingMode = {}, aspectRatio = {}, width = {}, height = {}, "
-             "pitchInPixel = {}",
-             GetPixelFormatString(pixelFormat), tilingMode, aspectRatio, width, height,
+             "pixelFormat = %.*s, tilingMode = %u, aspectRatio = %u, width = %u, height = %u, "
+             "pitchInPixel = %u",
+             static_cast<int>((GetPixelFormatString(pixelFormat)).size()),
+             (GetPixelFormatString(pixelFormat)).data(), tilingMode, aspectRatio, width, height,
              pitchInPixel);
 
     std::memset(attribute, 0, sizeof(BufferAttribute));
@@ -40,7 +41,7 @@ void PS4_SYSV_ABI sceVideoOutSetBufferAttribute(BufferAttribute* attribute, Pixe
 }
 
 s32 PS4_SYSV_ABI sceVideoOutAddFlipEvent(Kernel::OrbisKernelEqueue eq, s32 handle, void* udata) {
-    LOG_INFO(Lib_VideoOut, "handle = {}", handle);
+    LOG_INFO(Lib_VideoOut, "handle = %d", handle);
 
     auto* port = driver->GetPort(handle);
     if (port == nullptr) {
@@ -83,7 +84,7 @@ s32 PS4_SYSV_ABI sceVideoOutDeleteFlipEvent(Kernel::OrbisKernelEqueue eq, s32 ha
 }
 
 s32 PS4_SYSV_ABI sceVideoOutAddVblankEvent(Kernel::OrbisKernelEqueue eq, s32 handle, void* udata) {
-    LOG_INFO(Lib_VideoOut, "handle = {}", handle);
+    LOG_INFO(Lib_VideoOut, "handle = %d", handle);
 
     auto* port = driver->GetPort(handle);
     if (port == nullptr) {
@@ -134,7 +135,7 @@ s32 PS4_SYSV_ABI sceVideoOutRegisterBuffers(s32 handle, s32 startIndex, void* co
 
     auto* port = driver->GetPort(handle);
     if (!port || !port->is_open) {
-        LOG_ERROR(Lib_VideoOut, "Invalid handle = {}", handle);
+        LOG_ERROR(Lib_VideoOut, "Invalid handle = %d", handle);
         return ORBIS_VIDEO_OUT_ERROR_INVALID_HANDLE;
     }
 
@@ -156,26 +157,26 @@ s32 PS4_SYSV_ABI sceVideoOutIsFlipPending(s32 handle) {
 s32 PS4_SYSV_ABI sceVideoOutSubmitFlip(s32 handle, s32 bufferIndex, s32 flipMode, s64 flipArg) {
     auto* port = driver->GetPort(handle);
     if (!port) {
-        LOG_ERROR(Lib_VideoOut, "Invalid handle = {}", handle);
+        LOG_ERROR(Lib_VideoOut, "Invalid handle = %d", handle);
         return ORBIS_VIDEO_OUT_ERROR_INVALID_HANDLE;
     }
 
     if (flipMode != 1) {
-        LOG_WARNING(Lib_VideoOut, "flipmode = {}", flipMode);
+        LOG_WARNING(Lib_VideoOut, "flipmode = %d", flipMode);
     }
 
     if (bufferIndex < -1 || bufferIndex > 15) {
-        LOG_ERROR(Lib_VideoOut, "Invalid bufferIndex = {}", bufferIndex);
+        LOG_ERROR(Lib_VideoOut, "Invalid bufferIndex = %d", bufferIndex);
         return ORBIS_VIDEO_OUT_ERROR_INVALID_INDEX;
     }
 
     if (bufferIndex != -1 && port->buffer_slots[bufferIndex].group_index < 0) {
-        LOG_ERROR(Lib_VideoOut, "Slot in bufferIndex = {} is not registered", bufferIndex);
+        LOG_ERROR(Lib_VideoOut, "Slot in bufferIndex = %d is not registered", bufferIndex);
         return ORBIS_VIDEO_OUT_ERROR_INVALID_INDEX;
     }
 
-    LOG_DEBUG(Lib_VideoOut, "bufferIndex = {}, flipMode = {}, flipArg = {}", bufferIndex, flipMode,
-              flipArg);
+    LOG_DEBUG(Lib_VideoOut, "bufferIndex = %d, flipMode = %d, flipArg = %" PRId64, bufferIndex,
+              flipMode, flipArg);
 
     if (!driver->SubmitFlip(port, bufferIndex, flipArg)) {
         LOG_ERROR(Lib_VideoOut, "Flip queue is full");
@@ -250,15 +251,16 @@ s32 PS4_SYSV_ABI sceVideoOutGetFlipStatus(s32 handle, FlipStatus* status) {
 
     auto* port = driver->GetPort(handle);
     if (!port) {
-        LOG_ERROR(Lib_VideoOut, "Invalid port handle = {}", handle);
+        LOG_ERROR(Lib_VideoOut, "Invalid port handle = %d", handle);
         return ORBIS_VIDEO_OUT_ERROR_INVALID_HANDLE;
     }
 
     *status = port->GetFlipStatus();
 
     LOG_TRACE(Lib_VideoOut,
-              "count = {}, processTime = {}, tsc = {}, submitTsc = {}, flipArg = {}, gcQueueNum = "
-              "{}, flipPendingNum = {}, currentBuffer = {}",
+              "count = %" PRIu64 ", processTime = %" PRIu64 ", tsc = %" PRIu64
+              ", submitTsc = %" PRIu64 ", flipArg = %" PRId64 ", gcQueueNum = "
+              "%d, flipPendingNum = %d, currentBuffer = %d",
               status->count, status->process_time, status->tsc, status->submit_tsc,
               status->flip_arg, status->gc_queue_num, status->flip_pending_num,
               status->current_buffer);
@@ -273,7 +275,7 @@ s32 PS4_SYSV_ABI sceVideoOutGetVblankStatus(int handle, SceVideoOutVblankStatus*
 
     auto* port = driver->GetPort(handle);
     if (!port) {
-        LOG_ERROR(Lib_VideoOut, "Invalid port handle = {}", handle);
+        LOG_ERROR(Lib_VideoOut, "Invalid port handle = %d", handle);
         return ORBIS_VIDEO_OUT_ERROR_INVALID_HANDLE;
     }
 
@@ -352,7 +354,7 @@ s32 sceVideoOutSubmitEopFlip(s32 handle, u32 buf_id, u32 mode, s64 flip_arg, voi
             // already cleared again here, and the assert ended the emulator mid-game. The
             // flip is still the game's, so it is done.
             if (port->buffer_labels[buf_id] != 1) {
-                LOG_WARNING(Lib_VideoOut, "Out of order flip IRQ for buffer {}", buf_id);
+                LOG_WARNING(Lib_VideoOut, "Out of order flip IRQ for buffer %u", buf_id);
             }
             const auto result = driver->SubmitFlip(port, buf_id, flip_arg, true);
             ASSERT_MSG(result, "EOP flip submission failed");
@@ -460,7 +462,7 @@ s32 PS4_SYSV_ABI sceVideoOutSubmitChangeBufferAttribute(s32 handle, s32 attribut
 }
 
 s32 PS4_SYSV_ABI sceVideoOutSetWindowModeMargins(s32 handle, s32 top, s32 bottom) {
-    LOG_ERROR(Lib_VideoOut, "(STUBBED) called top = {}, bottom = {}", top, bottom);
+    LOG_ERROR(Lib_VideoOut, "(STUBBED) called top = %d, bottom = %d", top, bottom);
     return ORBIS_OK;
 }
 

@@ -93,7 +93,7 @@ void HandleStunEcho(const NpSignaling::StunEcho& echo) {
             retro_atomic_store_release_u16(&ctx.ext_port, echo.ext_port);
             retro_atomic_thread_fence_seq_cst();
             ctx.stun_cv.notify_all();
-            LOG_DEBUG(Lib_NpSignaling, "STUN echo: ctxId={} ext_addr={:#x} ext_port={}", ctx_id,
+            LOG_DEBUG(Lib_NpSignaling, "STUN echo: ctxId=%d ext_addr=0x%x ext_port=%u", ctx_id,
                       echo.ext_ip, Net::sceNetNtohs(echo.ext_port));
         }
     }
@@ -216,9 +216,9 @@ bool PublishSignalingInfo(const OrbisNpOnlineId& online_id) {
 
     const int rc =
         NpSignaling::Transport::SignalingSendTo(&ping, sizeof(ping), server_addr, server_udp);
-    LOG_DEBUG(Lib_NpSignaling, "PublishSignalingInfo: id='{}' server={:#x}:{} local_ip={:#x} rc={}",
-              OnlineIdString(online_id), server_addr, Net::sceNetNtohs(server_udp), ping.local_ip,
-              rc);
+    LOG_DEBUG(Lib_NpSignaling, "PublishSignalingInfo: id='%s' server=0x%x:%u local_ip=0x%x rc=%d",
+              (OnlineIdString(online_id)).c_str(), server_addr, Net::sceNetNtohs(server_udp),
+              ping.local_ip, rc);
     return rc >= 0;
 }
 
@@ -485,7 +485,7 @@ void SendHandshakeLocked(NpSignaling::PeerTransport& transport,
                          const NpSignaling::SignalingHandshake& pkt) {
     if (transport.addr == 0 || transport.port == 0) {
         LOG_DEBUG(
-            Lib_NpSignaling, "Signaling handshake skipped: transport={} kind={} endpoint={:#x}:{}",
+            Lib_NpSignaling, "Signaling handshake skipped: transport=%d kind=%u endpoint=0x%x:%u",
             transport.transport_id, pkt.kind, transport.addr, Net::sceNetNtohs(transport.port));
         return;
     }
@@ -493,7 +493,7 @@ void SendHandshakeLocked(NpSignaling::PeerTransport& transport,
     const int rc =
         NpSignaling::Transport::SignalingSendTo(&pkt, sizeof(pkt), transport.addr, transport.port);
     LOG_DEBUG(
-        Lib_NpSignaling, "Signaling handshake send: transport={} kind={} endpoint={:#x}:{} rc={}",
+        Lib_NpSignaling, "Signaling handshake send: transport=%d kind=%u endpoint=0x%x:%u rc=%d",
         transport.transport_id, pkt.kind, transport.addr, Net::sceNetNtohs(transport.port), rc);
     SyncSig1ConnectionsForTransportLocked(transport.transport_id);
 }
@@ -534,7 +534,7 @@ void SendActivate(const NpSignaling::ConnectionInfo& ci) {
     const auto* transport = GetTransportLocked(ci.transport_id);
     if (!transport || transport->addr == 0 || transport->port == 0) {
         LOG_DEBUG(Lib_NpSignaling,
-                  "Signaling activate skipped: conn={} transport={} endpoint unavailable",
+                  "Signaling activate skipped: conn=%d transport=%d endpoint unavailable",
                   ci.conn_id, ci.transport_id);
         return;
     }
@@ -543,8 +543,8 @@ void SendActivate(const NpSignaling::ConnectionInfo& ci) {
     const int rc =
         NpSignaling::Transport::ControlSendTo(&pkt, sizeof(pkt), transport->addr, transport->port);
     LOG_DEBUG(Lib_NpSignaling,
-              "Signaling activate send: conn={} transport={} peer='{}' endpoint={:#x}:{} rc={}",
-              ci.conn_id, ci.transport_id, OnlineIdString(ci.online_id), transport->addr,
+              "Signaling activate send: conn=%d transport=%d peer='%s' endpoint=0x%x:%u rc=%d",
+              ci.conn_id, ci.transport_id, (OnlineIdString(ci.online_id)).c_str(), transport->addr,
               Net::sceNetNtohs(transport->port), rc);
 }
 
@@ -817,8 +817,8 @@ void ProcessPendingActivations() {
 
         if (!resolved) {
             LOG_DEBUG(Lib_NpSignaling,
-                      "Signaling activation pending: conn={} peer='{}' resolve failed", act.conn_id,
-                      act.peer_online_id);
+                      "Signaling activation pending: conn=%d peer='%s' resolve failed", act.conn_id,
+                      (act.peer_online_id).c_str());
             retry.push_back(act);
             continue;
         }
@@ -840,10 +840,10 @@ void ProcessPendingActivations() {
             transport->port = peer_port;
             SyncSig1StatusLocked(it->second, *transport);
             LOG_DEBUG(Lib_NpSignaling,
-                      "Signaling activation resolved: conn={} transport={} peer='{}' "
-                      "endpoint={:#x}:{} start_handshake={}",
-                      act.conn_id, it->second.transport_id, act.peer_online_id, peer_addr,
-                      Net::sceNetNtohs(peer_port), act.start_handshake);
+                      "Signaling activation resolved: conn=%d transport=%d peer='%s' "
+                      "endpoint=0x%x:%u start_handshake=%s",
+                      act.conn_id, it->second.transport_id, (act.peer_online_id).c_str(), peer_addr,
+                      Net::sceNetNtohs(peer_port), (act.start_handshake) ? "true" : "false");
             SendActivate(it->second);
             already_established = transport->state == NpSignaling::ConnState::Established;
         }
@@ -1043,10 +1043,11 @@ void HandleControlPacket(u32 from_addr, u16 from_port, const NpSignaling::Signal
                 ci.peer_activated = true;
                 ci.transport_id = transport_id;
                 LOG_DEBUG(Lib_NpSignaling,
-                          "Signaling activation request received: conn={} transport={} peer='{}' "
-                          "state={} local_active={}",
-                          conn_id, transport_id, from_id, static_cast<int>(transport.state),
-                          ci.locally_activated);
+                          "Signaling activation request received: conn=%d transport=%d peer='%s' "
+                          "state=%d local_active=%s",
+                          conn_id, transport_id, (from_id).c_str(),
+                          static_cast<int>(transport.state),
+                          (ci.locally_activated) ? "true" : "false");
             }
             SyncSig1ConnectionsForTransportLocked(transport_id);
             if (transport.state == NpSignaling::ConnState::Established) {
@@ -1069,10 +1070,11 @@ void HandleControlPacket(u32 from_addr, u16 from_port, const NpSignaling::Signal
             if (conn_id != 0) {
                 const auto& ci = NpHandler::GetInstance().GetSignalingState().connections[conn_id];
                 LOG_DEBUG(Lib_NpSignaling,
-                          "Signaling activation ack received: conn={} transport={} peer='{}' "
-                          "state={} local_active={}",
-                          conn_id, transport_id, from_id, static_cast<int>(transport.state),
-                          ci.locally_activated);
+                          "Signaling activation ack received: conn=%d transport=%d peer='%s' "
+                          "state=%d local_active=%s",
+                          conn_id, transport_id, (from_id).c_str(),
+                          static_cast<int>(transport.state),
+                          (ci.locally_activated) ? "true" : "false");
             }
             SyncSig1ConnectionsForTransportLocked(transport_id);
         } else if (kind == NpSignaling::ControlKind::Established) {
@@ -1216,7 +1218,8 @@ void SyncMatching2Peers() {
                 static_cast<NpMatching2::OrbisNpMatching2RoomMemberId>(s.member_id),
                 NpMatching2::ORBIS_NP_MATCHING2_SIGNALING_EVENT_ESTABLISHED, ORBIS_OK);
             LOG_INFO(Lib_NpMatching2,
-                     "Matching2 signaling established: ctx={} room={} member={} addr={:#x}:{}",
+                     "Matching2 signaling established: ctx=%d room=%" PRIu64
+                     " member=%u addr=0x%x:%u",
                      s.ctx_id, s.room_id, s.member_id, s.addr, Net::sceNetNtohs(s.port));
         }
     }
@@ -1325,12 +1328,12 @@ void Start() {
     auto& state = NpHandler::GetInstance().GetSignalingState();
     state.runtime_thread_mutex.Run([&] {
         if (stop_thread_started(&state.runtime_thread)) {
-            LOG_DEBUG(Lib_NpSignaling, "Signaling runtime already started refs={}",
+            LOG_DEBUG(Lib_NpSignaling, "Signaling runtime already started refs=%u",
                       state.context_refs);
             return;
         }
         retro_atomic_store_relaxed_int(&state.runtime_stop, 0);
-        LOG_DEBUG(Lib_NpSignaling, "Signaling runtime starting refs={}", state.context_refs);
+        LOG_DEBUG(Lib_NpSignaling, "Signaling runtime starting refs=%u", state.context_refs);
         stop_thread_start(&state.runtime_thread, [](void*) { ThreadMain(); }, nullptr);
         stop_thread_start(&state.activation_thread, [](void*) { ActivationThreadMain(); }, nullptr);
     });
@@ -1357,7 +1360,7 @@ void AddContextRef() {
     auto& state = NpHandler::GetInstance().GetSignalingState();
     u32 refs = 0;
     state.runtime_thread_mutex.Run([&] { refs = ++state.context_refs; });
-    LOG_DEBUG(Lib_NpSignaling, "Signaling runtime ref added refs={}", refs);
+    LOG_DEBUG(Lib_NpSignaling, "Signaling runtime ref added refs=%u", refs);
     Start();
 }
 
@@ -1372,7 +1375,7 @@ void ReleaseContextRef() {
         refs = state.context_refs;
         should_stop = state.context_refs == 0;
     });
-    LOG_DEBUG(Lib_NpSignaling, "Signaling runtime ref released refs={}", refs);
+    LOG_DEBUG(Lib_NpSignaling, "Signaling runtime ref released refs=%u", refs);
     if (should_stop) {
         Stop();
     }
@@ -1505,17 +1508,19 @@ s32 ActivateSig1(NpSignaling::OrbisNpSignalingContextId ctx_id, const OrbisNpId&
         }
         if (queue_activation) {
             LOG_DEBUG(Lib_NpSignaling,
-                      "Signaling activation queued: ctx={} conn={} transport={} peer='{}' "
-                      "start_handshake={} state={} status={}",
-                      ctx_id, conn_id, transport_id, peer_online_id_str, start_handshake,
-                      static_cast<int>(transport.state), transport.status);
+                      "Signaling activation queued: ctx=%d conn=%d transport=%d peer='%s' "
+                      "start_handshake=%s state=%d status=%d",
+                      ctx_id, conn_id, transport_id, (peer_online_id_str).c_str(),
+                      (start_handshake) ? "true" : "false", static_cast<int>(transport.state),
+                      transport.status);
             QueueActivationLocked(conn_id, peer_online_id_str, start_handshake);
         } else {
             LOG_DEBUG(Lib_NpSignaling,
-                      "Signaling activation reused: ctx={} conn={} transport={} peer='{}' "
-                      "state={} status={} established={}",
-                      ctx_id, conn_id, transport_id, peer_online_id_str,
-                      static_cast<int>(transport.state), transport.status, reused_established);
+                      "Signaling activation reused: ctx=%d conn=%d transport=%d peer='%s' "
+                      "state=%d status=%d established=%s",
+                      ctx_id, conn_id, transport_id, (peer_online_id_str).c_str(),
+                      static_cast<int>(transport.state), transport.status,
+                      (reused_established) ? "true" : "false");
         }
     }
 

@@ -21,7 +21,6 @@
 #include <string>
 #include <unordered_map>
 #include <vector>
-#include <fmt/format.h>
 #include <retro_atomic.h>
 
 #include "common/combiner.h"
@@ -78,7 +77,7 @@ s32 CheckPoolId(s32 memid, const std::source_location where = std::source_locati
     }
     return g_pools_mutex.Run([&]() -> s32 {
         if (FindPool(memid) == nullptr) {
-            LOG_ERROR(Lib_Net, "{}: unknown memory pool id {}", where.function_name(), memid);
+            LOG_ERROR(Lib_Net, "%s: unknown memory pool id %d", where.function_name(), memid);
             return ORBIS_NET_EBADF;
         }
         return 0;
@@ -364,7 +363,7 @@ void ApplyPendingMemberships(OrbisNetId s) {
         const auto r = Core::Net::SocketSetHostOption(s, IPPROTO_IP, IP_ADD_MEMBERSHIP,
                                                       request.data(), request.size());
         if (r.error != Error::Ok) {
-            LOG_WARNING(Lib_Net, "multicast join after bind failed: {}", static_cast<int>(r.error));
+            LOG_WARNING(Lib_Net, "multicast join after bind failed: %d", static_cast<int>(r.error));
         }
     }
 }
@@ -558,10 +557,11 @@ static OrbisNetId sceNetAcceptImpl(OrbisNetId s, OrbisNetSockaddr* addr, u32* pa
 OrbisNetId PS4_SYSV_ABI sceNetAccept(OrbisNetId s, OrbisNetSockaddr* addr, u32* paddrlen) {
     const OrbisNetId r = sceNetAcceptImpl(s, addr, paddrlen);
     if (r >= 0) {
-        LOG_DEBUG(Lib_Net, "s = {} -> new socket {}{}", s, r,
-                  addr != nullptr && paddrlen != nullptr
-                      ? " from " + FormatSockaddr(addr, *paddrlen)
-                      : std::string{});
+        LOG_DEBUG(Lib_Net, "s = %d -> new socket %d%s", s, r,
+                  (addr != nullptr && paddrlen != nullptr
+                       ? " from " + FormatSockaddr(addr, *paddrlen)
+                       : std::string{})
+                      .c_str());
     }
     return r;
 }
@@ -622,7 +622,7 @@ s32 PS4_SYSV_ABI sceNetBandwidthControlSetPolicy() {
 }
 
 s32 PS4_SYSV_ABI sceNetBind(OrbisNetId s, const OrbisNetSockaddr* addr, u32 addrlen) {
-    LOG_INFO(Lib_Net, "s = {}, addr = {}", s, FormatSockaddr(addr, addrlen));
+    LOG_INFO(Lib_Net, "s = %d, addr = %s", s, (FormatSockaddr(addr, addrlen)).c_str());
     Core::Net::SocketInfo info{};
     if (const auto r = Core::Net::SocketGetInfo(s, &info); r.error != Error::Ok) {
         return Return(r);
@@ -1014,7 +1014,7 @@ s32 PS4_SYSV_ABI sceNetConfigWlanSetDeviceConfig() {
 }
 
 s32 PS4_SYSV_ABI sceNetConnect(OrbisNetId s, const OrbisNetSockaddr* addr, u32 addrlen) {
-    LOG_DEBUG(Lib_Net, "s = {}, addr = {}", s, FormatSockaddr(addr, addrlen));
+    LOG_DEBUG(Lib_Net, "s = %d, addr = %s", s, (FormatSockaddr(addr, addrlen)).c_str());
     Core::Net::SocketInfo info{};
     if (const auto r = Core::Net::SocketGetInfo(s, &info); r.error != Error::Ok) {
         return Return(r);
@@ -1046,7 +1046,7 @@ s32 PS4_SYSV_ABI sceNetConnect(OrbisNetId s, const OrbisNetSockaddr* addr, u32 a
                 if (const auto r = Core::Net::P2PSocketBind(s, 0); r.error != Error::Ok) {
                     return Return(r);
                 }
-                LOG_DEBUG(Lib_Net, "s = {}: connect on an unbound P2P stream, bound implicitly", s);
+                LOG_DEBUG(Lib_Net, "s = %d: connect on an unbound P2P stream, bound implicitly", s);
             }
         }
         if (kind == P2PKind::Datagram) {
@@ -1146,7 +1146,7 @@ s32 PS4_SYSV_ABI sceNetDuplicateIpStop() {
 }
 
 s32 PS4_SYSV_ABI sceNetEpollAbort(OrbisNetId eid, s32 flags) {
-    LOG_DEBUG(Lib_Net, "eid = {}, flags = {:#x}", eid, flags);
+    LOG_DEBUG(Lib_Net, "eid = %d, flags = 0x%x", eid, flags);
     if (!IsEpoll(eid)) {
         return SetErrno(ORBIS_NET_EBADF);
     }
@@ -1158,12 +1158,12 @@ s32 PS4_SYSV_ABI sceNetEpollAbort(OrbisNetId eid, s32 flags) {
 
 s32 PS4_SYSV_ABI sceNetEpollControl(OrbisNetId eid, s32 op, OrbisNetId id,
                                     OrbisNetEpollEvent* event) {
-    LOG_DEBUG(Lib_Net, "eid = {}, op = {}, id = {}, events = {}", eid,
+    LOG_DEBUG(Lib_Net, "eid = %d, op = %s, id = %d, events = %s", eid,
               op == ORBIS_NET_EPOLL_CTL_ADD   ? "ADD"
               : op == ORBIS_NET_EPOLL_CTL_MOD ? "MOD"
               : op == ORBIS_NET_EPOLL_CTL_DEL ? "DEL"
                                               : "invalid",
-              id, event != nullptr ? EpollEventsName(event->events) : "none");
+              id, (event != nullptr ? EpollEventsName(event->events) : "none").c_str());
     Core::Net::EpollOp guest_op;
     switch (op) {
     case ORBIS_NET_EPOLL_CTL_ADD:
@@ -1209,7 +1209,7 @@ s32 PS4_SYSV_ABI sceNetEpollControl(OrbisNetId eid, s32 op, OrbisNetId id,
 }
 
 OrbisNetId PS4_SYSV_ABI sceNetEpollCreate(const char* name, s32 flags) {
-    LOG_DEBUG(Lib_Net, "name = {}, flags = {:#x}", name != nullptr ? name : "", flags);
+    LOG_DEBUG(Lib_Net, "name = %s, flags = 0x%x", name != nullptr ? name : "", flags);
     if (flags != 0) {
         return SetErrno(ORBIS_NET_EINVAL);
     }
@@ -1221,7 +1221,7 @@ OrbisNetId PS4_SYSV_ABI sceNetEpollCreate(const char* name, s32 flags) {
 }
 
 s32 PS4_SYSV_ABI sceNetEpollDestroy(OrbisNetId eid) {
-    LOG_DEBUG(Lib_Net, "eid = {}", eid);
+    LOG_DEBUG(Lib_Net, "eid = %d", eid);
     const auto kind = Core::Net::GetObjectKind(eid);
     if (kind && *kind != Core::Net::NetObjectKind::Epoll) {
         return SetErrno(ORBIS_NET_EPERM);
@@ -1255,11 +1255,11 @@ s32 PS4_SYSV_ABI sceNetEpollWait(OrbisNetId eid, OrbisNetEpollEvent* events, s32
                                  s32 timeout_us) {
     const s32 r = sceNetEpollWaitImpl(eid, events, maxevents, timeout_us);
     if (r > 0) {
-        LOG_TRACE(Lib_Net, "eid = {}, timeout = {} us -> {} (first: id {} {})", eid, timeout_us, r,
-                  events[0].ident, EpollEventsName(events[0].events));
+        LOG_TRACE(Lib_Net, "eid = %d, timeout = %d us -> %d (first: id %" PRIu64 " %s)", eid,
+                  timeout_us, r, events[0].ident, (EpollEventsName(events[0].events)).c_str());
     } else {
-        LOG_TRACE(Lib_Net, "eid = {}, timeout = {} us -> {}", eid, timeout_us,
-                  r == 0 ? "timed out" : ErrorCodeName(r));
+        LOG_TRACE(Lib_Net, "eid = %d, timeout = %d us -> %s", eid, timeout_us,
+                  (r == 0 ? "timed out" : ErrorCodeName(r)).c_str());
     }
     return r;
 }
@@ -1429,7 +1429,7 @@ s32 PS4_SYSV_ABI sceNetGetIfnameNumList() {
 }
 
 s32 PS4_SYSV_ABI sceNetGetMacAddress(OrbisNetEtherAddr* addr, s32 flags) {
-    LOG_DEBUG(Lib_Net, "flags = {:#x}", flags);
+    LOG_DEBUG(Lib_Net, "flags = 0x%x", flags);
     if (addr == nullptr) {
         return SetErrno(ORBIS_NET_EINVAL);
     }
@@ -1506,7 +1506,7 @@ s32 PS4_SYSV_ABI sceNetGetRouteInfo() {
 }
 
 s32 PS4_SYSV_ABI sceNetGetSockInfo(OrbisNetId s, OrbisNetSockInfo* info, s32 n, s32 flags) {
-    LOG_DEBUG(Lib_Net, "s = {}, n = {}, flags = {:#x}", s, n, flags);
+    LOG_DEBUG(Lib_Net, "s = %d, n = %d, flags = 0x%x", s, n, flags);
     if (info == nullptr) {
         // No buffer and s < 0: return the socket count.
         return s < 0 ? static_cast<s32>(Core::Net::ListSockets().size())
@@ -1728,16 +1728,16 @@ s32 PS4_SYSV_ABI sceNetGetsockopt(OrbisNetId s, s32 level, s32 optname, void* op
     if (r == ORBIS_OK && optval != nullptr && optlen != nullptr && *optlen >= sizeof(s32)) {
         s32 value;
         std::memcpy(&value, optval, sizeof(value));
-        LOG_DEBUG(Lib_Net, "s = {}, {} -> {}", s, OptionName(level, optname), value);
+        LOG_DEBUG(Lib_Net, "s = %d, %s -> %d", s, (OptionName(level, optname)).c_str(), value);
     } else {
-        LOG_DEBUG(Lib_Net, "s = {}, {} -> {}", s, OptionName(level, optname),
-                  r == ORBIS_OK ? "ok" : ErrorCodeName(r));
+        LOG_DEBUG(Lib_Net, "s = %d, %s -> %s", s, (OptionName(level, optname)).c_str(),
+                  (r == ORBIS_OK ? "ok" : ErrorCodeName(r)).c_str());
     }
     return r;
 }
 
 s32 PS4_SYSV_ABI sceNetGetStatisticsInfo(OrbisNetStatisticsInfo* info, s32 flags) {
-    LOG_DEBUG(Lib_Net, "flags = {:#x}", flags);
+    LOG_DEBUG(Lib_Net, "flags = 0x%x", flags);
     if (info == nullptr) {
         return SetErrno(ORBIS_NET_EFAULT);
     }
@@ -1809,7 +1809,7 @@ s32 PS4_SYSV_ABI sceNetInetPton(s32 af, const char* src, void* dst) {
 s32 PS4_SYSV_ABI sceNetInetPtonEx(s32 af, const char* src, void* dst, s32 flags) {
     // TODO: flags unknown (IPv6 scope?). IPv4 needs none.
     if (flags != 0) {
-        LOG_WARNING(Lib_Net, "ignoring flags {:#x}", flags);
+        LOG_WARNING(Lib_Net, "ignoring flags 0x%x", flags);
     }
     return sceNetInetPton(af, src, dst);
 }
@@ -1844,7 +1844,7 @@ s32 PS4_SYSV_ABI sceNetInitParam() {
 }
 
 s32 PS4_SYSV_ABI sceNetIoctl(OrbisNetId s, u64 cmd, void* data) {
-    LOG_DEBUG(Lib_Net, "s = {}, cmd = {:#x}", s, cmd);
+    LOG_DEBUG(Lib_Net, "s = %d, cmd = 0x%" PRIx64, s, cmd);
     Core::Net::SocketInfo info{};
     if (const auto r = Core::Net::SocketGetInfo(s, &info); r.error != Error::Ok) {
         return Return(r);
@@ -1870,20 +1870,20 @@ s32 PS4_SYSV_ABI sceNetIoctl(OrbisNetId s, u64 cmd, void* data) {
             return ORBIS_OK;
         }
         default:
-            LOG_WARNING(Lib_Net, "unsupported ioctl {:#x} on a non-P2P socket", cmd);
+            LOG_WARNING(Lib_Net, "unsupported ioctl 0x%" PRIx64 " on a non-P2P socket", cmd);
             return SetErrno(ORBIS_NET_EINVAL);
         }
     }
     const u16 np_port = sceNetHtons(GetP2PBoundPort());
     if (const int e = P2PKeyIoctl(*GetP2PKeyring(), np_port, cmd, data); e != 0) {
-        LOG_WARNING(Lib_Net, "P2P ioctl {:#x} failed: {}", cmd, e);
+        LOG_WARNING(Lib_Net, "P2P ioctl 0x%" PRIx64 " failed: %d", cmd, e);
         return SetErrno(e);
     }
     return ORBIS_OK;
 }
 
 s32 PS4_SYSV_ABI sceNetListen(OrbisNetId s, s32 backlog) {
-    LOG_INFO(Lib_Net, "s = {}, backlog = {}", s, backlog);
+    LOG_INFO(Lib_Net, "s = %d, backlog = %d", s, backlog);
     Core::Net::SocketInfo info{};
     if (const auto r = Core::Net::SocketGetInfo(s, &info); r.error != Error::Ok) {
         return Return(r);
@@ -1920,7 +1920,7 @@ u16 PS4_SYSV_ABI sceNetNtohs(u16 net16) {
 }
 
 s32 PS4_SYSV_ABI sceNetPoolCreate(const char* name, s32 size, s32 flags) {
-    LOG_INFO(Lib_Net, "name = {}, size = {}, flags = {:#x}", name != nullptr ? name : "", size,
+    LOG_INFO(Lib_Net, "name = %s, size = %d, flags = 0x%x", name != nullptr ? name : "", size,
              flags);
     if (name != nullptr &&
         strnlen(name, ORBIS_NET_DEBUG_NAME_LEN_MAX + 1) > ORBIS_NET_DEBUG_NAME_LEN_MAX) {
@@ -1941,7 +1941,7 @@ s32 PS4_SYSV_ABI sceNetPoolCreate(const char* name, s32 size, s32 flags) {
 }
 
 s32 PS4_SYSV_ABI sceNetPoolDestroy(s32 pool_id) {
-    LOG_INFO(Lib_Net, "pool_id = {}", pool_id);
+    LOG_INFO(Lib_Net, "pool_id = %d", pool_id);
     return g_pools_mutex.Run([&]() -> s32 {
         Pool* pool = FindPool(pool_id);
         if (pool == nullptr) {
@@ -1986,7 +1986,7 @@ static s32 sceNetRecvfromImpl(OrbisNetId s, void* buf, u64 len, s32 flags, Orbis
         addr = nullptr; // FreeBSD: no length, no address, not an error
     }
     if (msg.unsupported != 0) {
-        LOG_WARNING(Lib_Net, "ignoring flags {:#x}", msg.unsupported);
+        LOG_WARNING(Lib_Net, "ignoring flags 0x%x", msg.unsupported);
     }
     Core::Net::SocketInfo info{};
     if (const auto r = Core::Net::SocketGetInfo(s, &info); r.error != Error::Ok) {
@@ -2023,11 +2023,12 @@ s32 PS4_SYSV_ABI sceNetRecvfrom(OrbisNetId s, void* buf, u64 len, s32 flags, Orb
             NoteP2PPeer(s, false, addr, *paddrlen);
         }
     }
-    LOG_TRACE(Lib_Net, "s = {}, len = {}, flags = {:#x} -> {}{}", s, len, flags,
-              r >= 0 ? std::to_string(r) : ErrorCodeName(r),
-              r >= 0 && addr != nullptr && paddrlen != nullptr
-                  ? " from " + FormatSockaddr(addr, *paddrlen)
-                  : std::string{});
+    LOG_TRACE(Lib_Net, "s = %d, len = %" PRIu64 ", flags = 0x%x -> %s%s", s, len, flags,
+              (r >= 0 ? std::to_string(r) : ErrorCodeName(r)).c_str(),
+              (r >= 0 && addr != nullptr && paddrlen != nullptr
+                   ? " from " + FormatSockaddr(addr, *paddrlen)
+                   : std::string{})
+                  .c_str());
     return r;
 }
 
@@ -2065,13 +2066,13 @@ s32 PS4_SYSV_ABI sceNetRecvmsg(OrbisNetId s, OrbisNetMsghdr* msg, s32 flags) {
     if (r > 0) {
         CountTraffic(s, false, r);
     }
-    LOG_TRACE(Lib_Net, "s = {}, flags = {:#x} -> {}", s, flags,
-              r >= 0 ? std::to_string(r) : ErrorCodeName(r));
+    LOG_TRACE(Lib_Net, "s = %d, flags = 0x%x -> %s", s, flags,
+              (r >= 0 ? std::to_string(r) : ErrorCodeName(r)).c_str());
     return r;
 }
 
 s32 PS4_SYSV_ABI sceNetResolverAbort(OrbisNetId rid, s32 flags) {
-    LOG_DEBUG(Lib_Net, "rid = {}, flags = {:#x}", rid, flags);
+    LOG_DEBUG(Lib_Net, "rid = %d, flags = 0x%x", rid, flags);
     const int e = AbortResolver(rid, static_cast<u32>(flags));
     return e == 0 ? ORBIS_OK : SetErrno(e);
 }
@@ -2112,7 +2113,7 @@ void ReleaseResolverPool(OrbisNetId rid) {
 }
 
 OrbisNetId PS4_SYSV_ABI sceNetResolverCreate(const char* name, s32 poolid, s32 flags) {
-    LOG_INFO(Lib_Net, "name = {}, poolid = {}, flags = {:#x}", name != nullptr ? name : "", poolid,
+    LOG_INFO(Lib_Net, "name = %s, poolid = %d, flags = 0x%x", name != nullptr ? name : "", poolid,
              flags);
     if (flags != 0) {
         return SetErrno(ORBIS_NET_EINVAL);
@@ -2124,7 +2125,7 @@ OrbisNetId PS4_SYSV_ABI sceNetResolverCreate(const char* name, s32 poolid, s32 f
     return g_pools_mutex.Run([&]() -> OrbisNetId {
         Pool* pool = FindPool(poolid);
         if (pool == nullptr) {
-            LOG_ERROR(Lib_Net, "unknown memory pool id {}", poolid);
+            LOG_ERROR(Lib_Net, "unknown memory pool id %d", poolid);
             return SetErrno(ORBIS_NET_EBADF);
         }
         const s32 id = CreateResolver(name != nullptr ? name : "");
@@ -2139,7 +2140,7 @@ OrbisNetId PS4_SYSV_ABI sceNetResolverCreate(const char* name, s32 poolid, s32 f
 }
 
 s32 PS4_SYSV_ABI sceNetResolverDestroy(OrbisNetId rid) {
-    LOG_DEBUG(Lib_Net, "rid = {}", rid);
+    LOG_DEBUG(Lib_Net, "rid = %d", rid);
     const int e = DestroyResolver(rid);
     if (e != 0) {
         return SetErrno(e);
@@ -2153,13 +2154,13 @@ s32 PS4_SYSV_ABI sceNetResolverGetError(OrbisNetId rid, s32* status) {
         return SetErrno(ORBIS_NET_EINVAL);
     }
     const int e = ResolverGetError(rid, status);
-    LOG_DEBUG(Lib_Net, "rid = {}, status = {:#x}", rid, static_cast<u32>(e == 0 ? *status : 0));
+    LOG_DEBUG(Lib_Net, "rid = %d, status = 0x%x", rid, static_cast<u32>(e == 0 ? *status : 0));
     return e == 0 ? ORBIS_OK : SetErrno(e);
 }
 
 s32 PS4_SYSV_ABI sceNetResolverStartAton(OrbisNetId rid, const OrbisNetInAddr* addr, char* hostname,
                                          s32 len, s32 timeout, s32 retry, s32 flags) {
-    LOG_INFO(Lib_Net, "rid = {}, timeout = {}, retry = {}, flags = {:#x}", rid, timeout, retry,
+    LOG_INFO(Lib_Net, "rid = %d, timeout = %d, retry = %d, flags = 0x%x", rid, timeout, retry,
              flags);
     return ResolverReturn(
         ResolverStartAton(rid, addr, hostname, len, (flags & ORBIS_NET_RESOLVER_ASYNC) != 0));
@@ -2173,7 +2174,7 @@ s32 PS4_SYSV_ABI sceNetResolverStartAton6() {
 
 s32 PS4_SYSV_ABI sceNetResolverStartNtoa(OrbisNetId rid, const char* hostname, OrbisNetInAddr* addr,
                                          s32 timeout, s32 retry, s32 flags) {
-    LOG_INFO(Lib_Net, "rid = {}, hostname = {}, timeout = {}, retry = {}, flags = {:#x}", rid,
+    LOG_INFO(Lib_Net, "rid = %d, hostname = %s, timeout = %d, retry = %d, flags = 0x%x", rid,
              hostname != nullptr ? hostname : "", timeout, retry, flags);
     return ResolverReturn(
         ResolverStartNtoa(rid, hostname, {addr, nullptr}, (flags & ORBIS_NET_RESOLVER_ASYNC) != 0,
@@ -2189,7 +2190,7 @@ s32 PS4_SYSV_ABI sceNetResolverStartNtoa6() {
 s32 PS4_SYSV_ABI sceNetResolverStartNtoaMultipleRecords(OrbisNetId rid, const char* hostname,
                                                         OrbisNetResolverInfo* info, s32 timeout,
                                                         s32 retry, s32 flags) {
-    LOG_INFO(Lib_Net, "rid = {}, hostname = {}, timeout = {}, retry = {}, flags = {:#x}", rid,
+    LOG_INFO(Lib_Net, "rid = %d, hostname = %s, timeout = %d, retry = %d, flags = 0x%x", rid,
              hostname != nullptr ? hostname : "", timeout, retry, flags);
     return ResolverReturn(
         ResolverStartNtoa(rid, hostname, {nullptr, info}, (flags & ORBIS_NET_RESOLVER_ASYNC) != 0,
@@ -2201,7 +2202,7 @@ s32 PS4_SYSV_ABI sceNetResolverStartNtoaMultipleRecords(OrbisNetId rid, const ch
 s32 PS4_SYSV_ABI sceNetResolverStartNtoaMultipleRecordsEx(OrbisNetId rid, const char* hostname,
                                                           OrbisNetResolverInfo* info, s32 timeout,
                                                           s32 retry, s32 flags) {
-    LOG_INFO(Lib_Net, "rid = {}, hostname = {}, timeout = {}, retry = {}, flags = {:#x}", rid,
+    LOG_INFO(Lib_Net, "rid = %d, hostname = %s, timeout = %d, retry = %d, flags = 0x%x", rid,
              hostname != nullptr ? hostname : "", timeout, retry, flags);
     constexpr u32 Aaaa = 0x1000000;
     constexpr u32 AAndAaaa = 0x2000000;
@@ -2209,7 +2210,7 @@ s32 PS4_SYSV_ABI sceNetResolverStartNtoaMultipleRecordsEx(OrbisNetId rid, const 
         return ResolverReturn(ORBIS_NET_ERROR_EINVAL);
     }
     if ((flags & Aaaa) != 0 && (flags & AAndAaaa) == 0) {
-        LOG_WARNING(Lib_Net, "AAAA lookup of {} not supported",
+        LOG_WARNING(Lib_Net, "AAAA lookup of %s not supported",
                     hostname != nullptr ? hostname : "");
         return ResolverReturn(ORBIS_NET_ERROR_RESOLVER_ENORECORD);
     }
@@ -2227,7 +2228,7 @@ static s32 sceNetSendmsgImpl(OrbisNetId s, const OrbisNetMsghdr* msg, s32 flags)
         return SetErrno(ORBIS_NET_EFAULT);
     }
     if (msg->msg_control != nullptr && msg->msg_controllen != 0) {
-        LOG_WARNING(Lib_Net, "ancillary data ignored ({} bytes)", msg->msg_controllen);
+        LOG_WARNING(Lib_Net, "ancillary data ignored (%u bytes)", msg->msg_controllen);
     }
     // Gather into one buffer so a datagram goes out whole.
     std::vector<u8> buffer;
@@ -2248,8 +2249,8 @@ s32 PS4_SYSV_ABI sceNetSendmsg(OrbisNetId s, const OrbisNetMsghdr* msg, s32 flag
     if (r > 0) {
         CountTraffic(s, true, r);
     }
-    LOG_TRACE(Lib_Net, "s = {}, flags = {:#x} -> {}", s, flags,
-              r >= 0 ? std::to_string(r) : ErrorCodeName(r));
+    LOG_TRACE(Lib_Net, "s = %d, flags = 0x%x -> %s", s, flags,
+              (r >= 0 ? std::to_string(r) : ErrorCodeName(r)).c_str());
     return r;
 }
 
@@ -2260,7 +2261,7 @@ static s32 sceNetSendtoImpl(OrbisNetId s, const void* buf, u64 len, s32 flags,
     }
     const auto msg = ToHostMsgFlags(flags);
     if (msg.unsupported != 0) {
-        LOG_WARNING(Lib_Net, "ignoring flags {:#x}", msg.unsupported);
+        LOG_WARNING(Lib_Net, "ignoring flags 0x%x", msg.unsupported);
     }
     Core::Net::SocketInfo info{};
     if (const auto r = Core::Net::SocketGetInfo(s, &info); r.error != Error::Ok) {
@@ -2321,9 +2322,9 @@ s32 PS4_SYSV_ABI sceNetSendto(OrbisNetId s, const void* buf, u64 len, s32 flags,
         CountTraffic(s, true, r);
         NoteP2PPeer(s, true, addr, addrlen);
     }
-    LOG_TRACE(Lib_Net, "s = {}, len = {}, flags = {:#x}, to = {} -> {}", s, len, flags,
-              addr != nullptr ? FormatSockaddr(addr, addrlen) : "connected peer",
-              r >= 0 ? std::to_string(r) : ErrorCodeName(r));
+    LOG_TRACE(Lib_Net, "s = %d, len = %" PRIu64 ", flags = 0x%x, to = %s -> %s", s, len, flags,
+              (addr != nullptr ? FormatSockaddr(addr, addrlen) : "connected peer").c_str(),
+              (r >= 0 ? std::to_string(r) : ErrorCodeName(r)).c_str());
     return r;
 }
 
@@ -2342,10 +2343,11 @@ s32 PS4_SYSV_ABI sceNetSetsockopt(OrbisNetId s, s32 level, s32 optname, const vo
     if (optval != nullptr && optlen >= sizeof(s32)) {
         s32 logged;
         std::memcpy(&logged, optval, sizeof(logged));
-        LOG_DEBUG(Lib_Net, "s = {}, {} = {} (optlen {})", s, OptionName(level, optname), logged,
-                  optlen);
+        LOG_DEBUG(Lib_Net, "s = %d, %s = %d (optlen %u)", s, (OptionName(level, optname)).c_str(),
+                  logged, optlen);
     } else {
-        LOG_DEBUG(Lib_Net, "s = {}, {} (optlen {})", s, OptionName(level, optname), optlen);
+        LOG_DEBUG(Lib_Net, "s = %d, %s (optlen %u)", s, (OptionName(level, optname)).c_str(),
+                  optlen);
     }
     if (optval == nullptr && optlen != 0) {
         return SetErrno(ORBIS_NET_EFAULT);
@@ -2577,7 +2579,7 @@ s32 PS4_SYSV_ABI sceNetShowIfconfigWithMemory(s32 memid) {
     if (const s32 e = CheckPoolId(memid); e != 0) {
         return SetErrno(e);
     }
-    LOG_ERROR(Lib_Net, "(STUBBED) called, memid = {}", memid);
+    LOG_ERROR(Lib_Net, "(STUBBED) called, memid = %d", memid);
     return ORBIS_OK;
 }
 
@@ -2605,7 +2607,7 @@ s32 PS4_SYSV_ABI sceNetShowNetstatWithMemory(s32 memid) {
     if (const s32 e = CheckPoolId(memid); e != 0) {
         return SetErrno(e);
     }
-    LOG_ERROR(Lib_Net, "(STUBBED) called, memid = {}", memid);
+    LOG_ERROR(Lib_Net, "(STUBBED) called, memid = %d", memid);
     return ORBIS_OK;
 }
 
@@ -2618,7 +2620,7 @@ s32 PS4_SYSV_ABI sceNetShowPolicyWithMemory(s32 memid) {
     if (const s32 e = CheckPoolId(memid); e != 0) {
         return SetErrno(e);
     }
-    LOG_ERROR(Lib_Net, "(STUBBED) called, memid = {}", memid);
+    LOG_ERROR(Lib_Net, "(STUBBED) called, memid = %d", memid);
     return ORBIS_OK;
 }
 
@@ -2641,7 +2643,7 @@ s32 PS4_SYSV_ABI sceNetShowRoute6WithMemory(s32 memid) {
     if (const s32 e = CheckPoolId(memid); e != 0) {
         return SetErrno(e);
     }
-    LOG_ERROR(Lib_Net, "(STUBBED) called, memid = {}", memid);
+    LOG_ERROR(Lib_Net, "(STUBBED) called, memid = %d", memid);
     return ORBIS_OK;
 }
 
@@ -2654,12 +2656,12 @@ s32 PS4_SYSV_ABI sceNetShowRouteWithMemory(s32 memid) {
     if (const s32 e = CheckPoolId(memid); e != 0) {
         return SetErrno(e);
     }
-    LOG_ERROR(Lib_Net, "(STUBBED) called, memid = {}", memid);
+    LOG_ERROR(Lib_Net, "(STUBBED) called, memid = %d", memid);
     return ORBIS_OK;
 }
 
 s32 PS4_SYSV_ABI sceNetShutdown(OrbisNetId s, s32 how) {
-    LOG_DEBUG(Lib_Net, "s = {}, how = {}", s, how);
+    LOG_DEBUG(Lib_Net, "s = %d, how = %d", s, how);
     if (how < ORBIS_NET_SHUT_RD || how > ORBIS_NET_SHUT_RDWR) {
         return SetErrno(ORBIS_NET_EINVAL);
     }
@@ -2693,13 +2695,14 @@ static OrbisNetId sceNetSocketImpl(const char* name, s32 family, s32 type, s32 p
 
 OrbisNetId PS4_SYSV_ABI sceNetSocket(const char* name, s32 family, s32 type, s32 protocol) {
     const OrbisNetId r = sceNetSocketImpl(name, family, type, protocol);
-    LOG_INFO(Lib_Net, "'{}' family {} {} protocol {} -> {}", name != nullptr ? name : "", family,
-             SocketTypeName(type), protocol, r >= 0 ? std::to_string(r) : ErrorCodeName(r));
+    LOG_INFO(Lib_Net, "'%s' family %d %.*s protocol %d -> %s", name != nullptr ? name : "", family,
+             static_cast<int>((SocketTypeName(type)).size()), (SocketTypeName(type)).data(),
+             protocol, (r >= 0 ? std::to_string(r) : ErrorCodeName(r)).c_str());
     return r;
 }
 
 s32 PS4_SYSV_ABI sceNetSocketAbort(OrbisNetId s, s32 flags) {
-    LOG_DEBUG(Lib_Net, "s = {}, flags = {:#x}", s, flags);
+    LOG_DEBUG(Lib_Net, "s = %d, flags = 0x%x", s, flags);
     return Return(Core::Net::SocketAbort(s, static_cast<u32>(flags)));
 }
 
@@ -2781,7 +2784,7 @@ s32 PS4_SYSV_ABI sceNetThreadCreate(Kernel::PthreadT* thread, void* param, const
     const int e =
         Kernel::posix_pthread_create_name_np(&created, nullptr, NetThreadEntry, param, name);
     if (e != 0) {
-        LOG_ERROR(Lib_Net, "thread '{}' not created: {}", name != nullptr ? name : "", e);
+        LOG_ERROR(Lib_Net, "thread '%s' not created: %d", name != nullptr ? name : "", e);
         return ThreadReturn(ORBIS_KERNEL_ERROR_UNKNOWN + e);
     }
     if (thread != nullptr) {

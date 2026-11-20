@@ -3,6 +3,7 @@
 
 #include "common/io_file.h"
 #include "common/path_util.h"
+#include "common/string_util.h"
 #include "core/emulator_settings.h"
 #include "shader_recompiler/frontend/decode.h"
 #include "shader_recompiler/frontend/fetch_shader.h"
@@ -442,7 +443,7 @@ T Translator::GetSrc(const InstOperand& operand) {
         }
         break;
     default:
-        UNREACHABLE_MSG("Unexpected operand: {}", std::to_underlying(operand.field));
+        UNREACHABLE_MSG("Unexpected operand: %u", std::to_underlying(operand.field));
     }
 
     if constexpr (is_float) {
@@ -576,7 +577,7 @@ T Translator::GetSrc16(const InstOperand& operand) {
         }
         break;
     default:
-        UNREACHABLE_MSG("Unexpected operand: {}", std::to_underlying(operand.field));
+        UNREACHABLE_MSG("Unexpected operand: %u", std::to_underlying(operand.field));
     }
 
     if constexpr (is_float) {
@@ -698,7 +699,7 @@ IR::F32 Translator::GetSrcMix(const InstOperand& operand) {
         value = get_imm(static_cast<float>(1.0f / (2.0f * std::numbers::pi)));
         break;
     default:
-        UNREACHABLE_MSG("Unexpected operand: {}", std::to_underlying(operand.field));
+        UNREACHABLE_MSG("Unexpected operand: %u", std::to_underlying(operand.field));
     }
 
     if (operand.input_modifier.neg_hi) {
@@ -799,7 +800,7 @@ T Translator::GetSrc64(const InstOperand& operand) {
         }
         break;
     default:
-        UNREACHABLE_MSG("Unexpected operand: {}", std::to_underlying(operand.field));
+        UNREACHABLE_MSG("Unexpected operand: %u", std::to_underlying(operand.field));
     }
 
     if constexpr (is_float) {
@@ -938,7 +939,7 @@ pk_type<T> Translator::GetSrcPk(const InstOperand& operand) {
         value = extract(ir.GetVccLo());
         break;
     default:
-        UNREACHABLE_MSG("Unexpected operand: {}", std::to_underlying(operand.field));
+        UNREACHABLE_MSG("Unexpected operand: %u", std::to_underlying(operand.field));
     }
 
     if constexpr (is_float) {
@@ -990,7 +991,7 @@ void Translator::SetDst(const InstOperand& operand, const IR::U32F32& value) {
     case OperandField::M0:
         return ir.SetM0(result);
     default:
-        UNREACHABLE_MSG("Unknown field {}", u32(operand.field));
+        UNREACHABLE_MSG("Unknown field %u", u32(operand.field));
     }
 }
 
@@ -1046,7 +1047,7 @@ void Translator::SetDst16(const InstOperand& operand, const IR::U32F32& value) {
         return ir.SetVectorReg(IR::VectorReg(operand.code), new_dst);
     }
     default:
-        UNREACHABLE_MSG("Unexpected operand: {}", std::to_underlying(operand.field));
+        UNREACHABLE_MSG("Unexpected operand: %u", std::to_underlying(operand.field));
     }
 }
 
@@ -1101,7 +1102,7 @@ void Translator::SetDst64(const InstOperand& operand, const IR::U64F64& value_ra
         ir.SetExec(ir.InverseBallot(value_untyped));
         break;
     default:
-        UNREACHABLE_MSG("Unexpected operand: {}", std::to_underlying(operand.field));
+        UNREACHABLE_MSG("Unexpected operand: %u", std::to_underlying(operand.field));
     }
 }
 
@@ -1185,7 +1186,8 @@ void Translator::EmitFetch(const GcnInst& inst) {
         if (!Common::FS::Exists(dump_dir)) {
             Common::FS::CreateDirectories(dump_dir);
         }
-        const auto filename = fmt::format("vs_{:#018x}.fetch.bin", info.pgm_hash);
+        const auto filename =
+            Common::StringFromFormat("vs_0x%016" PRIx64 ".fetch.bin", info.pgm_hash);
         const auto file = IOFile{dump_dir / filename, FileAccessMode::Create};
         const auto* code = GetFetchShaderCode(info, code_sgpr_base);
         file.WriteRaw<u8>(code, fetch_data.size);
@@ -1211,7 +1213,7 @@ void Translator::EmitFetch(const GcnInst& inst) {
 }
 
 void Translator::LogMissingOpcode(const GcnInst& inst) {
-    LOG_ERROR(Render_Recompiler, "Unknown opcode {} ({}, category = {})",
+    LOG_ERROR(Render_Recompiler, "Unknown opcode %s (%u, category = %s)",
               enum_name(&enum_names_Shader_Gcn_Opcode, static_cast<s64>(inst.opcode)),
               u32(inst.opcode),
               enum_name(&enum_names_Shader_Gcn_InstCategory, static_cast<s64>(inst.category)));

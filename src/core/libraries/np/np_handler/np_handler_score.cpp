@@ -29,7 +29,7 @@ s32 NpHandler::RecordScore(s32 user_id, s32 service_label, u32 boardId, s32 pcId
     if (auto returned = m_mutex_clients.Run([&]() -> std::optional<s32> {
             auto it = m_clients.find(user_id);
             if (it == m_clients.end()) {
-                LOG_WARNING(NpHandler, "user_id={} not connected", user_id);
+                LOG_WARNING(NpHandler, "user_id=%d not connected", user_id);
                 return std::optional<s32>{ORBIS_NP_ERROR_SIGNED_OUT};
             }
             client = it->second;
@@ -38,7 +38,7 @@ s32 NpHandler::RecordScore(s32 user_id, s32 service_label, u32 boardId, s32 pcId
         return *returned;
     }
     if (!client->IsAuthenticated()) {
-        LOG_WARNING(NpHandler, "user_id={} not authenticated", user_id);
+        LOG_WARNING(NpHandler, "user_id=%d not authenticated", user_id);
         return ORBIS_NP_COMMUNITY_ERROR_NO_LOGIN;
     }
 
@@ -81,10 +81,10 @@ s32 NpHandler::RecordScore(s32 user_id, s32 service_label, u32 boardId, s32 pcId
         m_pending_score.emplace(pkt_id, std::move(pending));
     });
     LOG_INFO(NpHandler,
-             "user_id={} service_label={} board={} pcId={} score={} commentLen={} "
-             "gameInfoSize={} pkt_id={} com_id='{}'",
+             "user_id=%d service_label=%d board=%u pcId=%d score=%" PRId64 " commentLen=%zu "
+             "gameInfoSize=%zu pkt_id=%" PRIu64 " com_id='%s'",
              user_id, service_label, boardId, pcId, score, commentLen, gameInfoSize, pkt_id,
-             com_id);
+             (com_id).c_str());
     return ORBIS_OK;
 }
 
@@ -95,7 +95,7 @@ s32 NpHandler::RecordGameData(s32 user_id, s32 service_label, u32 boardId, s32 p
     if (auto returned = m_mutex_clients.Run([&]() -> std::optional<s32> {
             auto it = m_clients.find(user_id);
             if (it == m_clients.end()) {
-                LOG_WARNING(NpHandler, "user_id={} not connected", user_id);
+                LOG_WARNING(NpHandler, "user_id=%d not connected", user_id);
                 return std::optional<s32>{ORBIS_NP_ERROR_SIGNED_OUT};
             }
             client = it->second;
@@ -104,7 +104,7 @@ s32 NpHandler::RecordGameData(s32 user_id, s32 service_label, u32 boardId, s32 p
         return *returned;
     }
     if (!client->IsAuthenticated()) {
-        LOG_WARNING(NpHandler, "user_id={} not authenticated", user_id);
+        LOG_WARNING(NpHandler, "user_id=%d not authenticated", user_id);
         return ORBIS_NP_COMMUNITY_ERROR_NO_LOGIN;
     }
 
@@ -144,9 +144,9 @@ s32 NpHandler::RecordGameData(s32 user_id, s32 service_label, u32 boardId, s32 p
         m_pending_score.emplace(pkt_id, std::move(pending));
     });
     LOG_INFO(NpHandler,
-             "user_id={} service_label={} board={} pcId={} score={} dataSize={} "
-             "pkt_id={} com_id='{}'",
-             user_id, service_label, boardId, pcId, score, size, pkt_id, com_id);
+             "user_id=%d service_label=%d board=%u pcId=%d score=%" PRId64 " dataSize=%zu "
+             "pkt_id=%" PRIu64 " com_id='%s'",
+             user_id, service_label, boardId, pcId, score, size, pkt_id, (com_id).c_str());
     return ORBIS_OK;
 }
 
@@ -157,7 +157,7 @@ s32 NpHandler::GetGameData(s32 user_id, s32 service_label, u32 boardId, const st
     if (auto returned = m_mutex_clients.Run([&]() -> std::optional<s32> {
             auto it = m_clients.find(user_id);
             if (it == m_clients.end()) {
-                LOG_WARNING(NpHandler, "user_id={} not connected", user_id);
+                LOG_WARNING(NpHandler, "user_id=%d not connected", user_id);
                 return std::optional<s32>{ORBIS_NP_ERROR_SIGNED_OUT};
             }
             client = it->second;
@@ -166,7 +166,7 @@ s32 NpHandler::GetGameData(s32 user_id, s32 service_label, u32 boardId, const st
         return *returned;
     }
     if (!client->IsAuthenticated()) {
-        LOG_WARNING(NpHandler, "user_id={} not authenticated", user_id);
+        LOG_WARNING(NpHandler, "user_id=%d not authenticated", user_id);
         return ORBIS_NP_COMMUNITY_ERROR_NO_LOGIN;
     }
 
@@ -206,9 +206,10 @@ s32 NpHandler::GetGameData(s32 user_id, s32 service_label, u32 boardId, const st
         m_pending_score.emplace(pkt_id, std::move(pending));
     });
     LOG_INFO(NpHandler,
-             "user_id={} service_label={} board={} npId='{}' pcId={} recvSize={} "
-             "pkt_id={} com_id='{}'",
-             user_id, service_label, boardId, npId, pcId, recvSize, pkt_id, com_id);
+             "user_id=%d service_label=%d board=%u npId='%s' pcId=%d recvSize=%" PRIu64 " "
+             "pkt_id=%" PRIu64 " com_id='%s'",
+             user_id, service_label, boardId, (npId).c_str(), pcId, recvSize, pkt_id,
+             (com_id).c_str());
     return ORBIS_OK;
 }
 
@@ -219,7 +220,7 @@ s32 NpHandler::GetGameDataByAccountId(s32 user_id, s32 service_label, u32 boardI
     if (auto returned = m_mutex_clients.Run([&]() -> std::optional<s32> {
             auto it = m_clients.find(user_id);
             if (it == m_clients.end()) {
-                LOG_WARNING(NpHandler, "user_id={} not connected", user_id);
+                LOG_WARNING(NpHandler, "user_id=%d not connected", user_id);
                 return std::optional<s32>{ORBIS_NP_ERROR_SIGNED_OUT};
             }
             client = it->second;
@@ -228,7 +229,7 @@ s32 NpHandler::GetGameDataByAccountId(s32 user_id, s32 service_label, u32 boardI
         return *returned;
     }
     if (!client->IsAuthenticated()) {
-        LOG_WARNING(NpHandler, "user_id={} not authenticated", user_id);
+        LOG_WARNING(NpHandler, "user_id=%d not authenticated", user_id);
         return ORBIS_NP_COMMUNITY_ERROR_NO_LOGIN;
     }
 
@@ -269,9 +270,9 @@ s32 NpHandler::GetGameDataByAccountId(s32 user_id, s32 service_label, u32 boardI
         m_pending_score.emplace(pkt_id, std::move(pending));
     });
     LOG_INFO(NpHandler,
-             "user_id={} service_label={} board={} accountId={} pcId={} "
-             "recvSize={} pkt_id={} com_id='{}'",
-             user_id, service_label, boardId, accountId, pcId, recvSize, pkt_id, com_id);
+             "user_id=%d service_label=%d board=%u accountId=%" PRIu64 " pcId=%d "
+             "recvSize=%" PRIu64 " pkt_id=%" PRIu64 " com_id='%s'",
+             user_id, service_label, boardId, accountId, pcId, recvSize, pkt_id, (com_id).c_str());
     return ORBIS_OK;
 }
 
@@ -282,7 +283,7 @@ s32 NpHandler::GetBoardInfo(s32 user_id, s32 service_label, u32 boardId,
     if (auto returned = m_mutex_clients.Run([&]() -> std::optional<s32> {
             auto it = m_clients.find(user_id);
             if (it == m_clients.end()) {
-                LOG_WARNING(NpHandler, "user_id={} not connected", user_id);
+                LOG_WARNING(NpHandler, "user_id=%d not connected", user_id);
                 return std::optional<s32>{ORBIS_NP_ERROR_SIGNED_OUT};
             }
             client = it->second;
@@ -291,7 +292,7 @@ s32 NpHandler::GetBoardInfo(s32 user_id, s32 service_label, u32 boardId,
         return *returned;
     }
     if (!client->IsAuthenticated()) {
-        LOG_WARNING(NpHandler, "user_id={} not authenticated", user_id);
+        LOG_WARNING(NpHandler, "user_id=%d not authenticated", user_id);
         return ORBIS_NP_COMMUNITY_ERROR_NO_LOGIN;
     }
 
@@ -318,8 +319,8 @@ s32 NpHandler::GetBoardInfo(s32 user_id, s32 service_label, u32 boardId,
         pending.user_id = user_id;
         m_pending_score.emplace(pkt_id, std::move(pending));
     });
-    LOG_INFO(NpHandler, "user_id={} service_label={} board={} pkt_id={} com_id='{}'", user_id,
-             service_label, boardId, pkt_id, com_id);
+    LOG_INFO(NpHandler, "user_id=%d service_label=%d board=%u pkt_id=%" PRIu64 " com_id='%s'",
+             user_id, service_label, boardId, pkt_id, (com_id).c_str());
     return ORBIS_OK;
 }
 
@@ -333,7 +334,7 @@ s32 NpHandler::GetRankingByNpId(s32 user_id, s32 service_label, u32 boardId,
                                 std::shared_ptr<NpScore::ScoreRequestCtx> req) {
     // pcIds must either be empty (use 0 for everything) or match npIds in size.
     if (!pcIds.empty() && pcIds.size() != npIds.size()) {
-        LOG_ERROR(NpHandler, "pcIds size {} != npIds size {}", pcIds.size(), npIds.size());
+        LOG_ERROR(NpHandler, "pcIds size %zu != npIds size %zu", pcIds.size(), npIds.size());
         return ORBIS_NP_COMMUNITY_ERROR_INVALID_ARGUMENT;
     }
 
@@ -342,7 +343,7 @@ s32 NpHandler::GetRankingByNpId(s32 user_id, s32 service_label, u32 boardId,
     if (auto returned = m_mutex_clients.Run([&]() -> std::optional<s32> {
             auto it = m_clients.find(user_id);
             if (it == m_clients.end()) {
-                LOG_WARNING(NpHandler, "user_id={} not connected", user_id);
+                LOG_WARNING(NpHandler, "user_id=%d not connected", user_id);
                 return std::optional<s32>{ORBIS_NP_ERROR_SIGNED_OUT};
             }
             client = it->second;
@@ -351,7 +352,7 @@ s32 NpHandler::GetRankingByNpId(s32 user_id, s32 service_label, u32 boardId,
         return *returned;
     }
     if (!client->IsAuthenticated()) {
-        LOG_WARNING(NpHandler, "user_id={} not authenticated", user_id);
+        LOG_WARNING(NpHandler, "user_id=%d not authenticated", user_id);
         return ORBIS_NP_COMMUNITY_ERROR_NO_LOGIN;
     }
 
@@ -401,10 +402,11 @@ s32 NpHandler::GetRankingByNpId(s32 user_id, s32 service_label, u32 boardId,
         m_pending_score.emplace(pkt_id, std::move(pending));
     });
     LOG_INFO(NpHandler,
-             "user_id={} service_label={} board={} npIdCount={} "
-             "withPcId={} withComment={} withGameInfo={} pkt_id={} com_id='{}'",
-             user_id, service_label, boardId, npIds.size(), !pcIds.empty(), commentArray != nullptr,
-             infoArray != nullptr, pkt_id, com_id);
+             "user_id=%d service_label=%d board=%u npIdCount=%zu "
+             "withPcId=%s withComment=%s withGameInfo=%s pkt_id=%" PRIu64 " com_id='%s'",
+             user_id, service_label, boardId, npIds.size(), (!pcIds.empty()) ? "true" : "false",
+             (commentArray != nullptr) ? "true" : "false",
+             (infoArray != nullptr) ? "true" : "false", pkt_id, (com_id).c_str());
     return ORBIS_OK;
 }
 
@@ -418,7 +420,7 @@ s32 NpHandler::GetRankingByRange(s32 user_id, s32 service_label, u32 boardId, u3
     if (auto returned = m_mutex_clients.Run([&]() -> std::optional<s32> {
             auto it = m_clients.find(user_id);
             if (it == m_clients.end()) {
-                LOG_WARNING(NpHandler, "user_id={} not connected", user_id);
+                LOG_WARNING(NpHandler, "user_id=%d not connected", user_id);
                 return std::optional<s32>{ORBIS_NP_ERROR_SIGNED_OUT};
             }
             client = it->second;
@@ -427,7 +429,7 @@ s32 NpHandler::GetRankingByRange(s32 user_id, s32 service_label, u32 boardId, u3
         return *returned;
     }
     if (!client->IsAuthenticated()) {
-        LOG_WARNING(NpHandler, "user_id={} not authenticated", user_id);
+        LOG_WARNING(NpHandler, "user_id=%d not authenticated", user_id);
         return ORBIS_NP_COMMUNITY_ERROR_NO_LOGIN;
     }
 
@@ -472,10 +474,11 @@ s32 NpHandler::GetRankingByRange(s32 user_id, s32 service_label, u32 boardId, u3
         m_pending_score.emplace(pkt_id, std::move(pending));
     });
     LOG_INFO(NpHandler,
-             "user_id={} service_label={} board={} startRank={} numRanks={} "
-             "withComment={} withGameInfo={} pkt_id={} com_id='{}'",
-             user_id, service_label, boardId, startSerialRank, arrayNum, commentArray != nullptr,
-             infoArray != nullptr, pkt_id, com_id);
+             "user_id=%d service_label=%d board=%u startRank=%u numRanks=%u "
+             "withComment=%s withGameInfo=%s pkt_id=%" PRIu64 " com_id='%s'",
+             user_id, service_label, boardId, startSerialRank, arrayNum,
+             (commentArray != nullptr) ? "true" : "false",
+             (infoArray != nullptr) ? "true" : "false", pkt_id, (com_id).c_str());
     return ORBIS_OK;
 }
 
@@ -489,7 +492,7 @@ s32 NpHandler::GetRankingByRangeA(s32 user_id, s32 service_label, u32 boardId, u
     if (auto returned = m_mutex_clients.Run([&]() -> std::optional<s32> {
             auto it = m_clients.find(user_id);
             if (it == m_clients.end()) {
-                LOG_WARNING(NpHandler, "user_id={} not connected", user_id);
+                LOG_WARNING(NpHandler, "user_id=%d not connected", user_id);
                 return std::optional<s32>{ORBIS_NP_ERROR_SIGNED_OUT};
             }
             client = it->second;
@@ -498,7 +501,7 @@ s32 NpHandler::GetRankingByRangeA(s32 user_id, s32 service_label, u32 boardId, u
         return *returned;
     }
     if (!client->IsAuthenticated()) {
-        LOG_WARNING(NpHandler, "user_id={} not authenticated", user_id);
+        LOG_WARNING(NpHandler, "user_id=%d not authenticated", user_id);
         return ORBIS_NP_COMMUNITY_ERROR_NO_LOGIN;
     }
 
@@ -543,10 +546,11 @@ s32 NpHandler::GetRankingByRangeA(s32 user_id, s32 service_label, u32 boardId, u
         m_pending_score.emplace(pkt_id, std::move(pending));
     });
     LOG_INFO(NpHandler,
-             "user_id={} service_label={} board={} startRank={} numRanks={} "
-             "withComment={} withGameInfo={} pkt_id={} com_id='{}'",
-             user_id, service_label, boardId, startSerialRank, arrayNum, commentArray != nullptr,
-             infoArray != nullptr, pkt_id, com_id);
+             "user_id=%d service_label=%d board=%u startRank=%u numRanks=%u "
+             "withComment=%s withGameInfo=%s pkt_id=%" PRIu64 " com_id='%s'",
+             user_id, service_label, boardId, startSerialRank, arrayNum,
+             (commentArray != nullptr) ? "true" : "false",
+             (infoArray != nullptr) ? "true" : "false", pkt_id, (com_id).c_str());
     return ORBIS_OK;
 }
 
@@ -562,7 +566,7 @@ s32 NpHandler::GetRankingByAccountId(s32 user_id, s32 service_label, u32 boardId
     if (auto returned = m_mutex_clients.Run([&]() -> std::optional<s32> {
             auto it = m_clients.find(user_id);
             if (it == m_clients.end()) {
-                LOG_WARNING(NpHandler, "user_id={} not connected", user_id);
+                LOG_WARNING(NpHandler, "user_id=%d not connected", user_id);
                 return std::optional<s32>{ORBIS_NP_ERROR_SIGNED_OUT};
             }
             client = it->second;
@@ -620,10 +624,11 @@ s32 NpHandler::GetRankingByAccountId(s32 user_id, s32 service_label, u32 boardId
         m_pending_score.emplace(pkt_id, std::move(pending));
     });
     LOG_INFO(NpHandler,
-             "user_id={} service_label={} board={} accountIdCount={} "
-             "withComment={} withGameInfo={} pkt_id={} com_id='{}'",
-             user_id, service_label, boardId, accountIds.size(), commentArray != nullptr,
-             infoArray != nullptr, pkt_id, com_id);
+             "user_id=%d service_label=%d board=%u accountIdCount=%zu "
+             "withComment=%s withGameInfo=%s pkt_id=%" PRIu64 " com_id='%s'",
+             user_id, service_label, boardId, accountIds.size(),
+             (commentArray != nullptr) ? "true" : "false",
+             (infoArray != nullptr) ? "true" : "false", pkt_id, (com_id).c_str());
     return ORBIS_OK;
 }
 
@@ -637,7 +642,7 @@ s32 NpHandler::GetFriendsRanking(s32 user_id, s32 service_label, u32 boardId, bo
     if (auto returned = m_mutex_clients.Run([&]() -> std::optional<s32> {
             auto it = m_clients.find(user_id);
             if (it == m_clients.end()) {
-                LOG_WARNING(NpHandler, "user_id={} not connected", user_id);
+                LOG_WARNING(NpHandler, "user_id=%d not connected", user_id);
                 return std::optional<s32>{ORBIS_NP_ERROR_SIGNED_OUT};
             }
             client = it->second;
@@ -646,7 +651,7 @@ s32 NpHandler::GetFriendsRanking(s32 user_id, s32 service_label, u32 boardId, bo
         return *returned;
     }
     if (!client->IsAuthenticated()) {
-        LOG_WARNING(NpHandler, "user_id={} not authenticated", user_id);
+        LOG_WARNING(NpHandler, "user_id=%d not authenticated", user_id);
         return ORBIS_NP_COMMUNITY_ERROR_NO_LOGIN;
     }
 
@@ -691,10 +696,11 @@ s32 NpHandler::GetFriendsRanking(s32 user_id, s32 service_label, u32 boardId, bo
         m_pending_score.emplace(pkt_id, std::move(pending));
     });
     LOG_INFO(NpHandler,
-             "user_id={} service_label={} board={} includeSelf={} "
-             "arrayNum={} withComment={} withGameInfo={} pkt_id={} com_id='{}'",
-             user_id, service_label, boardId, includeSelf, arrayNum, commentArray != nullptr,
-             infoArray != nullptr, pkt_id, com_id);
+             "user_id=%d service_label=%d board=%u includeSelf=%s "
+             "arrayNum=%u withComment=%s withGameInfo=%s pkt_id=%" PRIu64 " com_id='%s'",
+             user_id, service_label, boardId, (includeSelf) ? "true" : "false", arrayNum,
+             (commentArray != nullptr) ? "true" : "false",
+             (infoArray != nullptr) ? "true" : "false", pkt_id, (com_id).c_str());
     return ORBIS_OK;
 }
 
@@ -708,7 +714,7 @@ s32 NpHandler::GetFriendsRankingA(s32 user_id, s32 service_label, u32 boardId, b
     if (auto returned = m_mutex_clients.Run([&]() -> std::optional<s32> {
             auto it = m_clients.find(user_id);
             if (it == m_clients.end()) {
-                LOG_WARNING(NpHandler, "user_id={} not connected", user_id);
+                LOG_WARNING(NpHandler, "user_id=%d not connected", user_id);
                 return std::optional<s32>{ORBIS_NP_ERROR_SIGNED_OUT};
             }
             client = it->second;
@@ -717,7 +723,7 @@ s32 NpHandler::GetFriendsRankingA(s32 user_id, s32 service_label, u32 boardId, b
         return *returned;
     }
     if (!client->IsAuthenticated()) {
-        LOG_WARNING(NpHandler, "user_id={} not authenticated", user_id);
+        LOG_WARNING(NpHandler, "user_id=%d not authenticated", user_id);
         return ORBIS_NP_COMMUNITY_ERROR_NO_LOGIN;
     }
 
@@ -762,10 +768,11 @@ s32 NpHandler::GetFriendsRankingA(s32 user_id, s32 service_label, u32 boardId, b
         m_pending_score.emplace(pkt_id, std::move(pending));
     });
     LOG_INFO(NpHandler,
-             "user_id={} service_label={} board={} includeSelf={} "
-             "arrayNum={} withComment={} withGameInfo={} pkt_id={} com_id='{}'",
-             user_id, service_label, boardId, includeSelf, arrayNum, commentArray != nullptr,
-             infoArray != nullptr, pkt_id, com_id);
+             "user_id=%d service_label=%d board=%u includeSelf=%s "
+             "arrayNum=%u withComment=%s withGameInfo=%s pkt_id=%" PRIu64 " com_id='%s'",
+             user_id, service_label, boardId, (includeSelf) ? "true" : "false", arrayNum,
+             (commentArray != nullptr) ? "true" : "false",
+             (infoArray != nullptr) ? "true" : "false", pkt_id, (com_id).c_str());
     return ORBIS_OK;
 }
 
@@ -787,9 +794,9 @@ static u32 FillPlainRankArrayFromProto(const shadnet_GetScoreResponse& resp, u64
         std::memcpy(out.npId.handle.data, npid.data(), cp);
         out.npId.handle.term = 0;
         LOG_INFO(NpHandler,
-                 "out[{}] (resp[{}]) npid='{}' (len={}) rank={} "
-                 "score={}",
-                 out_i, i, npid, npid.size(), r.rank, r.score);
+                 "out[%u] (resp[%d]) npid='%s' (len=%zu) rank=%u "
+                 "score=%" PRId64,
+                 out_i, i, (npid).c_str(), npid.size(), r.rank, r.score);
         out.pcId = r.pcId;
         out.serialRank = r.rank;
         out.rank = r.rank;
@@ -833,9 +840,9 @@ static u32 FillPlainRankArrayAFromProto(const shadnet_GetScoreResponse& resp, u6
         std::memcpy(out.onlineId.data, npid.data(), cp);
         out.onlineId.term = 0;
         LOG_INFO(NpHandler,
-                 "out[{}] (resp[{}]) npid='{}' (len={}) rank={} "
-                 "score={} accountId={}",
-                 out_i, i, npid, npid.size(), r.rank, r.score, r.accountId);
+                 "out[%u] (resp[%d]) npid='%s' (len=%zu) rank=%u "
+                 "score=%" PRId64 " accountId=%" PRId64,
+                 out_i, i, (npid).c_str(), npid.size(), r.rank, r.score, r.accountId);
         out.pcId = r.pcId;
         out.serialRank = r.rank;
         out.rank = r.rank;
@@ -870,7 +877,7 @@ static u32 FillPlayerRankArrayAFromProto(const shadnet_GetScoreResponse& resp, u
     const int n_req = static_cast<int>(requestedCount);
     if (n_resp != n_req) {
         LOG_WARNING(NpHandler,
-                    "response count {} != request count {} — "
+                    "response count %d != request count %d — "
                     "will fill up to min() and leave extras at hasData=0",
                     n_resp, n_req);
     }
@@ -922,7 +929,7 @@ static u32 FillRankArrayFromProto(const shadnet_GetScoreResponse& resp,
     const int n_req = static_cast<int>(requestedNpIds.size());
     if (n_resp != n_req) {
         LOG_WARNING(NpHandler,
-                    "response count {} != request count {} — "
+                    "response count %d != request count %d — "
                     "will fill up to min() and leave extras at hasData=0",
                     n_resp, n_req);
     }
@@ -971,7 +978,7 @@ void NpHandler::OnScoreReply(s32 user_id, ShadNet::CommandType cmd, u64 pkt_id,
     if (m_mutex_pending_score.Run([&] {
             auto it = m_pending_score.find(pkt_id);
             if (it == m_pending_score.end()) {
-                LOG_WARNING(NpHandler, "no pending request for pkt_id={} cmd={}", pkt_id,
+                LOG_WARNING(NpHandler, "no pending request for pkt_id=%" PRIu64 " cmd=%d", pkt_id,
                             static_cast<int>(cmd));
                 return true;
             }
@@ -1010,7 +1017,8 @@ void NpHandler::OnScoreReply(s32 user_id, ShadNet::CommandType cmd, u64 pkt_id,
         default:
             break;
         }
-        LOG_WARNING(NpHandler, "user_id={} pkt_id={} cmd={} server_error={} → orbis_err={:#x}",
+        LOG_WARNING(NpHandler,
+                    "user_id=%d pkt_id=%" PRIu64 " cmd=%d server_error=%d → orbis_err=0x%x",
                     user_id, pkt_id, static_cast<int>(cmd), static_cast<int>(error), orbis_err);
         req->SetResult(orbis_err);
         return;
@@ -1024,14 +1032,15 @@ void NpHandler::OnScoreReply(s32 user_id, ShadNet::CommandType cmd, u64 pkt_id,
             const u32 rank = static_cast<u32>(body[0]) | (static_cast<u32>(body[1]) << 8) |
                              (static_cast<u32>(body[2]) << 16) | (static_cast<u32>(body[3]) << 24);
             *req->tmpRankOut = rank;
-            LOG_INFO(NpHandler, "RecordScore user_id={} pkt_id={} rank={}", user_id, pkt_id, rank);
+            LOG_INFO(NpHandler, "RecordScore user_id=%d pkt_id=%" PRIu64 " rank=%u", user_id,
+                     pkt_id, rank);
         }
         req->SetResult(ORBIS_OK);
         break;
     }
 
     case ShadNet::CommandType::RecordScoreData: {
-        LOG_INFO(NpHandler, "RecordScoreData user_id={} pkt_id={} ok", user_id, pkt_id);
+        LOG_INFO(NpHandler, "RecordScoreData user_id=%d pkt_id=%" PRIu64 " ok", user_id, pkt_id);
         req->SetResult(ORBIS_OK);
         break;
     }
@@ -1042,7 +1051,7 @@ void NpHandler::OnScoreReply(s32 user_id, ShadNet::CommandType cmd, u64 pkt_id,
                                    ? "GetScoreData"
                                    : "GetScoreGameDataByAccId";
         if (body.size() < 4) {
-            LOG_ERROR(NpHandler, "{} body too small ({})", cmd_name, body.size());
+            LOG_ERROR(NpHandler, "%s body too small (%zu)", cmd_name, body.size());
             req->SetResult(ORBIS_NP_COMMUNITY_ERROR_BAD_RESPONSE);
             break;
         }
@@ -1050,7 +1059,7 @@ void NpHandler::OnScoreReply(s32 user_id, ShadNet::CommandType cmd, u64 pkt_id,
                                 (static_cast<u32>(body[2]) << 16) |
                                 (static_cast<u32>(body[3]) << 24);
         if (static_cast<size_t>(4) + stored_size > body.size()) {
-            LOG_ERROR(NpHandler, "{} blob size {} exceeds body size {}", cmd_name, stored_size,
+            LOG_ERROR(NpHandler, "%s blob size %u exceeds body size %zu", cmd_name, stored_size,
                       body.size());
             req->SetResult(ORBIS_NP_COMMUNITY_ERROR_BAD_RESPONSE);
             break;
@@ -1062,19 +1071,20 @@ void NpHandler::OnScoreReply(s32 user_id, ShadNet::CommandType cmd, u64 pkt_id,
             const u64 copy_n = std::min<u64>(static_cast<u64>(stored_size), pending.recvSize);
             std::memcpy(pending.dataOut, body.data() + 4, static_cast<size_t>(copy_n));
             if (copy_n < stored_size) {
-                LOG_WARNING(NpHandler, "{} truncated user_id={} pkt_id={} stored={} recv={}",
+                LOG_WARNING(NpHandler,
+                            "%s truncated user_id=%d pkt_id=%" PRIu64 " stored=%u recv=%" PRIu64,
                             cmd_name, user_id, pkt_id, stored_size, pending.recvSize);
             }
         }
-        LOG_INFO(NpHandler, "{} user_id={} pkt_id={} storedSize={} recvSize={}", cmd_name, user_id,
-                 pkt_id, stored_size, pending.recvSize);
+        LOG_INFO(NpHandler, "%s user_id=%d pkt_id=%" PRIu64 " storedSize=%u recvSize=%" PRIu64,
+                 cmd_name, user_id, pkt_id, stored_size, pending.recvSize);
         req->SetResult(ORBIS_OK);
         break;
     }
 
     case ShadNet::CommandType::GetBoardInfos: {
         if (body.size() < 4) {
-            LOG_ERROR(NpHandler, "GetBoardInfos body too small ({})", body.size());
+            LOG_ERROR(NpHandler, "GetBoardInfos body too small (%zu)", body.size());
             req->SetResult(ORBIS_NP_COMMUNITY_ERROR_BAD_RESPONSE);
             break;
         }
@@ -1082,7 +1092,7 @@ void NpHandler::OnScoreReply(s32 user_id, ShadNet::CommandType cmd, u64 pkt_id,
                                (static_cast<u32>(body[2]) << 16) |
                                (static_cast<u32>(body[3]) << 24);
         if (static_cast<size_t>(4) + proto_size > body.size()) {
-            LOG_ERROR(NpHandler, "GetBoardInfos proto size {} exceeds body size {}", proto_size,
+            LOG_ERROR(NpHandler, "GetBoardInfos proto size %u exceeds body size %zu", proto_size,
                       body.size());
             req->SetResult(ORBIS_NP_COMMUNITY_ERROR_BAD_RESPONSE);
             break;
@@ -1102,8 +1112,8 @@ void NpHandler::OnScoreReply(s32 user_id, ShadNet::CommandType cmd, u64 pkt_id,
             pending.boardInfo->uploadSizeLimit = bi.uploadSizeLimit;
         }
         LOG_INFO(NpHandler,
-                 "GetBoardInfos user_id={} pkt_id={} rankLimit={} updateMode={} "
-                 "sortMode={} uploadNumLimit={} uploadSizeLimit={}",
+                 "GetBoardInfos user_id=%d pkt_id=%" PRIu64 " rankLimit=%u updateMode=%u "
+                 "sortMode=%u uploadNumLimit=%u uploadSizeLimit=%" PRIu64,
                  user_id, pkt_id, bi.rankLimit, bi.updateMode, bi.sortMode, bi.uploadNumLimit,
                  bi.uploadSizeLimit);
         req->SetResult(ORBIS_OK);
@@ -1113,7 +1123,7 @@ void NpHandler::OnScoreReply(s32 user_id, ShadNet::CommandType cmd, u64 pkt_id,
     case ShadNet::CommandType::GetScoreNpid: {
         // Reply body = u32 LE proto size + GetScoreResponse proto bytes.
         if (body.size() < 4) {
-            LOG_ERROR(NpHandler, "GetScoreNpid body too small ({})", body.size());
+            LOG_ERROR(NpHandler, "GetScoreNpid body too small (%zu)", body.size());
             req->SetResult(ORBIS_NP_COMMUNITY_ERROR_BAD_RESPONSE);
             break;
         }
@@ -1121,7 +1131,7 @@ void NpHandler::OnScoreReply(s32 user_id, ShadNet::CommandType cmd, u64 pkt_id,
                                (static_cast<u32>(body[2]) << 16) |
                                (static_cast<u32>(body[3]) << 24);
         if (static_cast<size_t>(4) + proto_size > body.size()) {
-            LOG_ERROR(NpHandler, "GetScoreNpid proto size {} exceeds body size {}", proto_size,
+            LOG_ERROR(NpHandler, "GetScoreNpid proto size %u exceeds body size %zu", proto_size,
                       body.size());
             req->SetResult(ORBIS_NP_COMMUNITY_ERROR_BAD_RESPONSE);
             break;
@@ -1141,14 +1151,15 @@ void NpHandler::OnScoreReply(s32 user_id, ShadNet::CommandType cmd, u64 pkt_id,
         if (pending.totalRecord != nullptr) {
             *pending.totalRecord = resp.totalRecord;
         }
-        LOG_INFO(NpHandler, "GetScoreNpid user_id={} pkt_id={} found={}/{} totalRecord={}", user_id,
-                 pkt_id, found, pending.arrayNum, resp.totalRecord);
+        LOG_INFO(NpHandler,
+                 "GetScoreNpid user_id=%d pkt_id=%" PRIu64 " found=%u/%" PRIu64 " totalRecord=%u",
+                 user_id, pkt_id, found, pending.arrayNum, resp.totalRecord);
         req->SetResult(static_cast<s32>(found));
         break;
     }
     case ShadNet::CommandType::GetScoreAccountId: {
         if (body.size() < 4) {
-            LOG_ERROR(NpHandler, "GetScoreAccountId body too small ({})", body.size());
+            LOG_ERROR(NpHandler, "GetScoreAccountId body too small (%zu)", body.size());
             req->SetResult(ORBIS_NP_COMMUNITY_ERROR_BAD_RESPONSE);
             break;
         }
@@ -1156,8 +1167,8 @@ void NpHandler::OnScoreReply(s32 user_id, ShadNet::CommandType cmd, u64 pkt_id,
                                (static_cast<u32>(body[2]) << 16) |
                                (static_cast<u32>(body[3]) << 24);
         if (static_cast<size_t>(4) + proto_size > body.size()) {
-            LOG_ERROR(NpHandler, "GetScoreAccountId proto size {} exceeds body size {}", proto_size,
-                      body.size());
+            LOG_ERROR(NpHandler, "GetScoreAccountId proto size %u exceeds body size %zu",
+                      proto_size, body.size());
             req->SetResult(ORBIS_NP_COMMUNITY_ERROR_BAD_RESPONSE);
             break;
         }
@@ -1177,7 +1188,9 @@ void NpHandler::OnScoreReply(s32 user_id, ShadNet::CommandType cmd, u64 pkt_id,
         if (pending.totalRecord != nullptr) {
             *pending.totalRecord = resp.totalRecord;
         }
-        LOG_INFO(NpHandler, "GetScoreAccountId user_id={} pkt_id={} found={}/{} totalRecord={}",
+        LOG_INFO(NpHandler,
+                 "GetScoreAccountId user_id=%d pkt_id=%" PRIu64 " found=%u/%" PRIu64
+                 " totalRecord=%u",
                  user_id, pkt_id, found, pending.arrayNum, resp.totalRecord);
         req->SetResult(static_cast<s32>(found));
         break;
@@ -1188,7 +1201,7 @@ void NpHandler::OnScoreReply(s32 user_id, ShadNet::CommandType cmd, u64 pkt_id,
         const char* cmd_name =
             (cmd == ShadNet::CommandType::GetScoreRange) ? "GetScoreRange" : "GetScoreFriends";
         if (body.size() < 4) {
-            LOG_ERROR(NpHandler, "{} body too small ({})", cmd_name, body.size());
+            LOG_ERROR(NpHandler, "%s body too small (%zu)", cmd_name, body.size());
             req->SetResult(ORBIS_NP_COMMUNITY_ERROR_BAD_RESPONSE);
             break;
         }
@@ -1196,7 +1209,7 @@ void NpHandler::OnScoreReply(s32 user_id, ShadNet::CommandType cmd, u64 pkt_id,
                                (static_cast<u32>(body[2]) << 16) |
                                (static_cast<u32>(body[3]) << 24);
         if (static_cast<size_t>(4) + proto_size > body.size()) {
-            LOG_ERROR(NpHandler, "{} proto size {} exceeds body size {}", cmd_name, proto_size,
+            LOG_ERROR(NpHandler, "%s proto size %u exceeds body size %zu", cmd_name, proto_size,
                       body.size());
             req->SetResult(ORBIS_NP_COMMUNITY_ERROR_BAD_RESPONSE);
             break;
@@ -1204,7 +1217,7 @@ void NpHandler::OnScoreReply(s32 user_id, ShadNet::CommandType cmd, u64 pkt_id,
         shadnet_GetScoreResponse resp{};
         Scratch resp_scratch;
         if (!Decode(resp, body.data() + 4, proto_size, resp_scratch)) {
-            LOG_ERROR(NpHandler, "{} proto parse failed", cmd_name);
+            LOG_ERROR(NpHandler, "%s proto parse failed", cmd_name);
             req->SetResult(ORBIS_NP_COMMUNITY_ERROR_BAD_RESPONSE);
             break;
         }
@@ -1222,7 +1235,8 @@ void NpHandler::OnScoreReply(s32 user_id, ShadNet::CommandType cmd, u64 pkt_id,
         if (pending.totalRecord != nullptr) {
             *pending.totalRecord = resp.totalRecord;
         }
-        LOG_INFO(NpHandler, "{} user_id={} pkt_id={} found={}/{} totalRecord={}{}", cmd_name,
+        LOG_INFO(NpHandler,
+                 "%s user_id=%d pkt_id=%" PRIu64 " found=%u/%" PRIu64 " totalRecord=%u%s", cmd_name,
                  user_id, pkt_id, found, pending.arrayNum, resp.totalRecord,
                  pending.aRankArray != nullptr ? " (A-variant)" : "");
         req->SetResult(static_cast<s32>(found));
@@ -1230,7 +1244,7 @@ void NpHandler::OnScoreReply(s32 user_id, ShadNet::CommandType cmd, u64 pkt_id,
     }
 
     default:
-        LOG_WARNING(NpHandler, "unexpected cmd={} pkt_id={}", static_cast<int>(cmd), pkt_id);
+        LOG_WARNING(NpHandler, "unexpected cmd=%d pkt_id=%" PRIu64, static_cast<int>(cmd), pkt_id);
         req->SetResult(ORBIS_NP_COMMUNITY_ERROR_BAD_RESPONSE);
         break;
     }

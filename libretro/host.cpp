@@ -275,7 +275,7 @@ void PumpInput() {
               if (!user) {
                 LOG_WARNING(
                     Input,
-                    "No user for player {}: controller {} stays disconnected",
+                    "No user for player %u: controller %u stays disconnected",
                     pad + 1, pad + 1);
                 continue;
                 }
@@ -286,8 +286,7 @@ void PumpInput() {
                        user->user_id});
                 }
                 controllers[pad]->ConnectController();
-                LOG_INFO(Input, "Controller {} connected from the frontend's port {}", pad + 1,
-                         pad + 1);
+                LOG_INFO(Input, "Controller %u connected from the frontend's port %u", pad + 1, pad + 1);
             }
         }
 
@@ -548,7 +547,7 @@ bool ShareImages(const std::uint64_t* memory_handles, std::uint32_t count, std::
     std::memcpy(CMSG_DATA(part), descriptors, sizeof(int) * count);
     if (sendmsg(shared->options.gpu_socket, &header, MSG_NOSIGNAL) !=
         static_cast<ssize_t>(sizeof(message))) {
-        LOG_ERROR(Render_Vulkan, "The images could not be sent to the frontend: {}",
+        LOG_ERROR(Render_Vulkan, "The images could not be sent to the frontend: %s",
                   std::strerror(errno));
         return false;
     }
@@ -556,7 +555,7 @@ bool ShareImages(const std::uint64_t* memory_handles, std::uint32_t count, std::
     frame_images_init(&emulator_frame_images, &shared->frame_latest,
                       &shared->frame_held, &shared->frames_busy, FRAME_IMAGES);
     (void)retro_atomic_exchange_int(&gpu_frames_active, 1);
-    LOG_INFO(Render_Vulkan, "The picture is handed to the frontend on the GPU: {} images of {}x{}",
+    LOG_INFO(Render_Vulkan, "The picture is handed to the frontend on the GPU: %u images of %ux%u",
              count, width, height);
     return true;
 #else
@@ -575,7 +574,7 @@ void GpuFramesFailed(const char* why) {
         static_cast<std::uint32_t>(retro_atomic_exchange_int(&shared->gpu_frames_state, GPU_FRAMES_FAILED)) == GPU_FRAMES_FAILED) {
         return;
     }
-    LOG_WARNING(Render_Vulkan, "The picture goes through system memory: {}", why);
+    LOG_WARNING(Render_Vulkan, "The picture goes through system memory: %s", why);
 }
 
 std::uint32_t AcquireImage(int &generation) {

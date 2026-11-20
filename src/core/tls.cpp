@@ -123,7 +123,7 @@ static void InitLdtRegion() {
         ReleaseLdtIndex(static_cast<u16>(ldt_index_base + slot));
     }
     ASSERT_MSG(pthread_key_create(&ldt_page_slot, FreeLdtPage) == 0,
-               "Failed to create thread LDT page key: {}", errno);
+               "Failed to create thread LDT page key: %d", errno);
 }
 
 void SetTcbBase(void* image_address) {
@@ -163,8 +163,8 @@ void SetTcbBase(void* image_address) {
     };
     int ret = i386_set_ldt(ldt_index, &ldt, 1);
     ASSERT_MSG(ret == ldt_index,
-               "Failed to set LDT {} at {:#x} for TLS area: syscall returned {}, errno {}",
-               ldt_index, addr, ret, errno);
+               "Failed to set LDT %u at 0x%llx for TLS area: syscall returned %d, errno %d",
+               static_cast<unsigned>(ldt_index), static_cast<unsigned long long>(addr), ret, errno);
 
     // Set the FS segment to the created LDT.
     const sel_t new_selector{
@@ -184,7 +184,7 @@ void SetTcbBase(void* image_address) {
     ldt_page->index = ldt_index;
 
     ASSERT_MSG(pthread_setspecific(ldt_page_slot, ldt_page) == 0,
-               "Failed to store thread LDT page pointer: {}", errno);
+               "Failed to store thread LDT page pointer: %d", errno);
 }
 
 Tcb* GetTcbBase() {
@@ -203,7 +203,7 @@ void SetTcbBase(void* image_address) {
 #else
 void SetTcbBase(void* image_address) {
     const int ret = syscall(SYS_arch_prctl, ARCH_SET_GS, (unsigned long)image_address);
-    ASSERT_MSG(ret == 0, "Failed to set GS base: errno {}", errno);
+    ASSERT_MSG(ret == 0, "Failed to set GS base: errno %d", errno);
 }
 #endif
 

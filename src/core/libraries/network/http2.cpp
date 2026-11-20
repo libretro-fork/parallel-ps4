@@ -20,7 +20,7 @@ s32 PS4_SYSV_ABI sceHttp2AbortRequest(s32 req_id) {
     LOG_ERROR(Lib_Http2, "(STUBBED) called");
     s32 result = Libraries::Http::sceHttpAbortRequest(req_id);
     if (result < 0) {
-        LOG_ERROR(Lib_Http2, "Failed to get abort HTTP request, error = {:#x}", result);
+        LOG_ERROR(Lib_Http2, "Failed to get abort HTTP request, error = 0x%x", result);
     }
     return result;
 }
@@ -35,7 +35,7 @@ s32 PS4_SYSV_ABI sceHttp2AddRequestHeader(s32 template_or_req_id, const char* na
     LOG_ERROR(Lib_Http2, "(STUBBED) called");
     s32 result = Libraries::Http::sceHttpAddRequestHeader(template_or_req_id, name, value, mode);
     if (result < 0) {
-        LOG_ERROR(Lib_Http2, "Failed to add HTTP response header, error = {:#x}", result);
+        LOG_ERROR(Lib_Http2, "Failed to add HTTP response header, error = 0x%x", result);
     }
     return result;
 }
@@ -72,17 +72,17 @@ s32 PS4_SYSV_ABI sceHttp2CreateRequestWithURL(s32 tmpl_id, const char* method, c
         // Http1 has a connection thing to go through first
         s32 conn_id = Libraries::Http::sceHttpCreateConnectionWithURL(tmpl_id, url, true);
         if (conn_id < 0) {
-            LOG_ERROR(Lib_Http2, "Failed to create HTTP connection, error = {:#x}", conn_id);
+            LOG_ERROR(Lib_Http2, "Failed to create HTTP connection, error = 0x%x", conn_id);
             return conn_id;
         }
         s32 req_id =
             Libraries::Http::sceHttpCreateRequestWithURL2(conn_id, method, url, content_length);
         if (req_id < 0) {
-            LOG_ERROR(Lib_Http2, "Failed to create HTTP request, error = {:#x}", req_id);
+            LOG_ERROR(Lib_Http2, "Failed to create HTTP request, error = 0x%x", req_id);
             const s32 del_result = Libraries::Http::sceHttpDeleteConnection(conn_id);
             if (del_result < 0) {
-                LOG_ERROR(Lib_Http2, "Failed to clean up HTTP connection {}, error = {:#x}",
-                          conn_id, del_result);
+                LOG_ERROR(Lib_Http2, "Failed to clean up HTTP connection %d, error = 0x%x", conn_id,
+                          del_result);
             }
             return req_id;
         }
@@ -97,7 +97,7 @@ s32 PS4_SYSV_ABI sceHttp2CreateTemplate(s32 ctx_id, const char* user_agent, s32 
     s32 tmpl_id =
         Libraries::Http::sceHttpCreateTemplate(ctx_id, user_agent, http_ver, auto_proxy_conf);
     if (tmpl_id < 0) {
-        LOG_ERROR(Lib_Http2, "Failed to create HTTP template, error = {:#x}", tmpl_id);
+        LOG_ERROR(Lib_Http2, "Failed to create HTTP template, error = 0x%x", tmpl_id);
     }
     return tmpl_id;
 }
@@ -112,12 +112,12 @@ s32 PS4_SYSV_ABI sceHttp2DeleteRequest(s32 req_id) {
     return g_http2_mutex.Run([&]() -> s32 {
         const s32 result = Libraries::Http::sceHttpDeleteRequest(req_id);
         if (result < 0) {
-            LOG_ERROR(Lib_Http2, "Failed to delete HTTP request, error = {:#x}", result);
+            LOG_ERROR(Lib_Http2, "Failed to delete HTTP request, error = 0x%x", result);
             return result;
         }
         const auto it = requests_to_connections.find(req_id);
         if (it == requests_to_connections.end()) {
-            LOG_DEBUG(Lib_Http2, "No connection tracked for request {}", req_id);
+            LOG_DEBUG(Lib_Http2, "No connection tracked for request %d", req_id);
             return ORBIS_OK;
         }
         const s32 conn_id = it->second;
@@ -126,7 +126,7 @@ s32 PS4_SYSV_ABI sceHttp2DeleteRequest(s32 req_id) {
         const s32 conn_result = Libraries::Http::sceHttpDeleteConnection(conn_id);
         if (conn_result < 0) {
 
-            LOG_ERROR(Lib_Http2, "Failed to delete HTTP connection, error = {:#x}", conn_result);
+            LOG_ERROR(Lib_Http2, "Failed to delete HTTP connection, error = 0x%x", conn_result);
             return conn_result;
         }
         return ORBIS_OK;
@@ -137,7 +137,7 @@ s32 PS4_SYSV_ABI sceHttp2DeleteTemplate(s32 tmpl_id) {
     LOG_ERROR(Lib_Http2, "(STUBBED) called");
     s32 result = Libraries::Http::sceHttpDeleteTemplate(tmpl_id);
     if (result < 0) {
-        LOG_ERROR(Lib_Http2, "Failed to delete HTTP template, error = {:#x}", result);
+        LOG_ERROR(Lib_Http2, "Failed to delete HTTP template, error = 0x%x", result);
     }
     return result;
 }
@@ -146,7 +146,7 @@ s32 PS4_SYSV_ABI sceHttp2GetAllResponseHeaders(s32 req_id, char** header, u64* h
     LOG_ERROR(Lib_Http2, "(STUBBED) called");
     s32 result = Libraries::Http::sceHttpGetAllResponseHeaders(req_id, header, header_size);
     if (result < 0) {
-        LOG_ERROR(Lib_Http2, "Failed to get HTTP response headers, error = {:#x}", result);
+        LOG_ERROR(Lib_Http2, "Failed to get HTTP response headers, error = 0x%x", result);
     }
     return result;
 }
@@ -186,7 +186,7 @@ s32 PS4_SYSV_ABI sceHttp2GetResponseContentLength(s32 req_id, s32* result, u64* 
     s32 res = Libraries::Http::sceHttpGetResponseContentLength(
         req_id, reinterpret_cast<int*>(result), content_length);
     if (res < 0) {
-        LOG_ERROR(Lib_Http2, "Failed to get HTTP response content length, error = {:#x}", res);
+        LOG_ERROR(Lib_Http2, "Failed to get HTTP response content length, error = 0x%x", res);
     }
     return res;
 }
@@ -195,7 +195,7 @@ s32 PS4_SYSV_ABI sceHttp2GetStatusCode(s32 req_id, s32* status_code) {
     LOG_ERROR(Lib_Http2, "(STUBBED) called");
     s32 result = Libraries::Http::sceHttpGetStatusCode(req_id, status_code);
     if (result < 0) {
-        LOG_ERROR(Lib_Http2, "Failed to get HTTP status code, error = {:#x}", result);
+        LOG_ERROR(Lib_Http2, "Failed to get HTTP status code, error = 0x%x", result);
     }
     return result;
 }
@@ -204,7 +204,7 @@ s32 PS4_SYSV_ABI sceHttp2Init(s32 net_id, s32 ssl_id, u64 pool_size, s32 max_req
     LOG_ERROR(Lib_Http2, "(DUMMY) called");
     s32 ctx_id = Libraries::Http::sceHttpInit(net_id, ssl_id, pool_size);
     if (ctx_id < 0) {
-        LOG_ERROR(Lib_Http2, "Failed to init HTTP context, error = {:#x}", ctx_id);
+        LOG_ERROR(Lib_Http2, "Failed to init HTTP context, error = 0x%x", ctx_id);
     }
     return ctx_id;
 }
@@ -213,7 +213,7 @@ s32 PS4_SYSV_ABI sceHttp2ReadData(s32 req_id, void* data, u64 size) {
     LOG_ERROR(Lib_Http2, "(STUBBED) called");
     s32 result = Libraries::Http::sceHttpReadData(req_id, data, size);
     if (result < 0) {
-        LOG_ERROR(Lib_Http2, "Failed to read HTTP data, error = {:#x}", result);
+        LOG_ERROR(Lib_Http2, "Failed to read HTTP data, error = 0x%x", result);
     }
     return result;
 }
@@ -237,7 +237,7 @@ s32 PS4_SYSV_ABI sceHttp2SendRequest(s32 req_id, const void* data, u64 size) {
     LOG_ERROR(Lib_Http2, "(STUBBED) called");
     s32 result = Libraries::Http::sceHttpSendRequest(req_id, data, size);
     if (result < 0) {
-        LOG_ERROR(Lib_Http2, "Failed to send HTTP request, error = {:#x}", result);
+        LOG_ERROR(Lib_Http2, "Failed to send HTTP request, error = 0x%x", result);
     }
     return result;
 }
@@ -332,7 +332,7 @@ s32 PS4_SYSV_ABI sceHttp2SetRequestContentLength(s32 req_id, u64 content_length)
     LOG_ERROR(Lib_Http2, "(STUBBED) called");
     s32 result = Libraries::Http::sceHttpSetRequestContentLength(req_id, content_length);
     if (result < 0) {
-        LOG_ERROR(Lib_Http2, "Failed to set HTTP request content length, error = {:#x}", result);
+        LOG_ERROR(Lib_Http2, "Failed to set HTTP request content length, error = 0x%x", result);
     }
     return result;
 }
@@ -373,10 +373,10 @@ s32 PS4_SYSV_ABI sceHttp2SslEnableOption() {
 }
 
 s32 PS4_SYSV_ABI sceHttp2Term(s32 ctx_id) {
-    LOG_ERROR(Lib_Http2, "(STUBBED) called ctx_id={}", ctx_id);
+    LOG_ERROR(Lib_Http2, "(STUBBED) called ctx_id=%d", ctx_id);
     const s32 result = Libraries::Http::sceHttpTerm(ctx_id);
     if (result < 0) {
-        LOG_ERROR(Lib_Http2, "Failed to terminate HTTP context {}, error = {:#x}", ctx_id, result);
+        LOG_ERROR(Lib_Http2, "Failed to terminate HTTP context %d, error = 0x%x", ctx_id, result);
     }
     return result;
 }

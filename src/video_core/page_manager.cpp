@@ -148,7 +148,8 @@ struct PageManager::Impl {
         const u64 aligned_end = page_end << PM_PAGE_BITS;
         if (!rasterizer->IsMapped(aligned_addr, aligned_end - aligned_addr)) {
             LOG_WARNING(Render,
-                        "Tracking memory region {:#x} - {:#x} which is not fully GPU mapped.",
+                        "Tracking memory region 0x%" PRIx64 " - 0x%" PRIx64
+                        " which is not fully GPU mapped.",
                         aligned_addr, aligned_end);
             EnsurePages(aligned_addr, aligned_end);
         }
@@ -274,8 +275,8 @@ public:
         uffd = syscall(SYS_userfaultfd, O_CLOEXEC | O_NONBLOCK | UFFD_USER_MODE_ONLY);
         if (uffd == -1) {
             LOG_ERROR(Common_Memory,
-                      "userfaultfd syscall failed: {}, falling back to signal implementation",
-                      Common::GetLastErrorMsg());
+                      "userfaultfd syscall failed: %s, falling back to signal implementation",
+                      (Common::GetLastErrorMsg()).c_str());
             throw std::runtime_error("userfaultfd");
         }
 
@@ -286,8 +287,8 @@ public:
         const int ret = ioctl(uffd, UFFDIO_API, &api);
         if (ret != 0) {
             LOG_ERROR(Common_Memory,
-                      "uffdio_api call failed: {}, falling back to signal implementation",
-                      Common::GetLastErrorMsg());
+                      "uffdio_api call failed: %s, falling back to signal implementation",
+                      (Common::GetLastErrorMsg()).c_str());
             throw std::runtime_error("uffdio_api");
         }
 
@@ -310,7 +311,8 @@ public:
         reg.range.len = size;
         reg.mode = UFFDIO_REGISTER_MODE_WP;
         const int ret = ioctl(uffd, UFFDIO_REGISTER, &reg);
-        ASSERT_MSG(ret != -1, "Uffdio register failed with error: {}", Common::GetLastErrorMsg());
+        ASSERT_MSG(ret != -1, "Uffdio register failed with error: %s",
+                   (Common::GetLastErrorMsg()).c_str());
     }
 
     void OnUnmap(VAddr address, size_t size) override {
@@ -318,7 +320,8 @@ public:
         range.start = address;
         range.len = size;
         const int ret = ioctl(uffd, UFFDIO_UNREGISTER, &range);
-        ASSERT_MSG(ret != -1, "Uffdio unregister failed with error: {}", Common::GetLastErrorMsg());
+        ASSERT_MSG(ret != -1, "Uffdio unregister failed with error: %s",
+                   (Common::GetLastErrorMsg()).c_str());
     }
 
     void Protect(VAddr address, size_t size, Core::MemoryPermission perms) override {
@@ -328,8 +331,8 @@ public:
         wp.range.len = size;
         wp.mode = allow_write ? UFFDIO_WRITEPROTECT_MODE_DONTWAKE : UFFDIO_WRITEPROTECT_MODE_WP;
         const int ret = ioctl(uffd, UFFDIO_WRITEPROTECT, &wp);
-        ASSERT_MSG(ret != -1, "Uffdio writeprotect failed with error: {}",
-                   Common::GetLastErrorMsg());
+        ASSERT_MSG(ret != -1, "Uffdio writeprotect failed with error: %s",
+                   (Common::GetLastErrorMsg()).c_str());
     }
 
     void UffdHandler() {
@@ -358,7 +361,7 @@ public:
             case 1:
                 break;
             default:
-                UNREACHABLE_MSG("Unexpected number of descriptors {} out of poll", pollres);
+                UNREACHABLE_MSG("Unexpected number of descriptors %d out of poll", pollres);
             }
 
             // We don't want an error condition to have occured.
@@ -376,8 +379,8 @@ public:
                 if (errno == EAGAIN || errno == EWOULDBLOCK) {
                     continue;
                 }
-                LOG_ERROR(Common_Memory, "Unexpected result of uffd read: {}",
-                          Common::GetLastErrorMsg());
+                LOG_ERROR(Common_Memory, "Unexpected result of uffd read: %s",
+                          (Common::GetLastErrorMsg()).c_str());
                 break;
             }
             ASSERT_MSG(readret == sizeof(msg), "Unexpected short read, exiting");
@@ -395,8 +398,8 @@ public:
             wake.start = msg.arg.pagefault.address;
             wake.len = PageManager::PM_PAGE_SIZE;
             const int ret = ioctl(uffd, UFFDIO_WAKE, &wake);
-            ASSERT_MSG(ret != -1, "Waking thread {} failed with: {}", ptid,
-                       Common::GetLastErrorMsg());
+            ASSERT_MSG(ret != -1, "Waking thread %u failed with: %s", ptid,
+                       (Common::GetLastErrorMsg()).c_str());
         }
     }
 };

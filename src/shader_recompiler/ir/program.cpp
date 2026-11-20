@@ -5,10 +5,9 @@
 #include <map>
 #include <string>
 
-#include <fmt/format.h>
-
 #include "common/io_file.h"
 #include "common/path_util.h"
+#include "common/string_util.h"
 #include "core/emulator_settings.h"
 #include "shader_recompiler/ir/basic_block.h"
 #include "shader_recompiler/ir/program.h"
@@ -28,7 +27,8 @@ void DumpProgram(const Program& program, const Info& info, const std::string& ty
         Common::FS::CreateDirectories(dump_dir);
     }
     const auto ir_filename =
-        fmt::format("{}_{:#018x}.{}irprogram.txt", info.hw_stage, info.pgm_hash, type);
+        Common::StringFromFormat("%s_0x%016" PRIx64 ".%sirprogram.txt",
+                                 Shader::NameOf(info.hw_stage), info.pgm_hash, (type).c_str());
     const auto ir_file = IOFile{dump_dir / ir_filename, FileAccessMode::Create};
 
     size_t index{0};
@@ -46,7 +46,8 @@ void DumpProgram(const Program& program, const Info& info, const std::string& ty
     }
 
     const auto asl_filename =
-        fmt::format("{}_{:#018x}.{}asl.txt", info.hw_stage, info.pgm_hash, type);
+        Common::StringFromFormat("%s_0x%016" PRIx64 ".%sasl.txt", Shader::NameOf(info.hw_stage),
+                                 info.pgm_hash, (type).c_str());
     const auto asl_file = IOFile{dump_dir / asl_filename, FileAccessMode::Create};
 
     for (const auto& node : program.syntax_list) {

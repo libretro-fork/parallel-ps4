@@ -517,115 +517,114 @@ std::tuple<ImageId, int, int> TextureCache::ResolveOverlap(const ImageInfo& imag
         u64 expected_size =
             (static_cast<u64>(image_info.size.width) * static_cast<u64>(image_info.size.height) *
              static_cast<u64>(image_info.size.depth) * static_cast<u64>(image_info.num_bits) / 8);
-        LOG_ERROR(Render_Vulkan,
-                  "Unresolvable image overlap with equal memory address:\n"
-                  "=== OLD IMAGE (cached) ===\n"
-                  "  Address:        {:#x}\n"
-                  "  Size:           {:#x} bytes\n"
-                  "  Format:         {}\n"
-                  "  Type:           {}\n"
-                  "  Width:          {}\n"
-                  "  Height:         {}\n"
-                  "  Depth:          {}\n"
-                  "  Pitch:          {}\n"
-                  "  Mip levels:     {}\n"
-                  "  Array layers:   {}\n"
-                  "  Samples:        {}\n"
-                  "  Tile mode:      {:#x}\n"
-                  "  Block size:     {} bits\n"
-                  "  Is block-comp:  {}\n"
-                  "  Guest size:     {:#x}\n"
-                  "  Last accessed:  tick {}\n"
-                  "  Safe to delete: {}\n"
-                  "  isPow2:         {}\n"
-                  "  Alt tile:       {}\n"
-                  "\n"
-                  "=== NEW IMAGE (requested) ===\n"
-                  "  Address:        {:#x}\n"
-                  "  Size:           {:#x} bytes\n"
-                  "  Format:         {}\n"
-                  "  Type:           {}\n"
-                  "  Width:          {}\n"
-                  "  Height:         {}\n"
-                  "  Depth:          {}\n"
-                  "  Pitch:          {}\n"
-                  "  Mip levels:     {}\n"
-                  "  Array layers:   {}\n"
-                  "  Samples:        {}\n"
-                  "  Tile mode:      {:#x}\n"
-                  "  Block size:     {} bits\n"
-                  "  Is block-comp:  {}\n"
-                  "  Guest size:     {:#x}\n"
-                  "  isPow2:         {}\n"
-                  "  Alt tile:       {}\n"
-                  "\n"
-                  "=== COMPARISON ===\n"
-                  "  Same format:           {}\n"
-                  "  Same type:             {}\n"
-                  "  Same tile mode:        {}\n"
-                  "  Same block size:       {}\n"
-                  "  Same BlockDim:         {}\n"
-                  "  Same pitch:            {}\n"
-                  "  Same pow2:             {}\n"
-                  "  Same alt tile:         {}\n"
-                  "  Old resources <= new:  {} (old: {}, new: {})\n"
-                  "  Old size <= new size:  {}\n"
-                  "  Expected size (calc):  {} bytes\n"
-                  "  Size ratio (new/expected): {:.2f}x\n"
-                  "  Size ratio (new/old):  {:.2f}x\n"
-                  "  Old vs expected diff:  {} bytes ({:+.2f}%)\n"
-                  "  New vs expected diff:  {} bytes ({:+.2f}%)\n"
-                  "  Merged image ID:       {}\n"
-                  "  Binding type:          {}\n"
-                  "  Current tick:          {}\n"
-                  "  Age (ticks since last access): {}",
+        LOG_ERROR(
+            Render_Vulkan,
+            "Unresolvable image overlap with equal memory address:\n"
+            "=== OLD IMAGE (cached) ===\n"
+            "  Address:        0x%" PRIxPTR "\n"
+            "  Size:           0x%x bytes\n"
+            "  Format:         %s\n"
+            "  Type:           %d\n"
+            "  Width:          %u\n"
+            "  Height:         %u\n"
+            "  Depth:          %u\n"
+            "  Pitch:          %u\n"
+            "  Mip levels:     %u\n"
+            "  Array layers:   %u\n"
+            "  Samples:        %u\n"
+            "  Tile mode:      0x%x\n"
+            "  Block size:     %u bits\n"
+            "  Is block-comp:  %d\n"
+            "  Guest size:     0x%x\n"
+            "  Last accessed:  tick %" PRIu64 "\n"
+            "  Safe to delete: %s\n"
+            "  isPow2:         %s\n"
+            "  Alt tile:       %s\n"
+            "\n"
+            "=== NEW IMAGE (requested) ===\n"
+            "  Address:        0x%" PRIxPTR "\n"
+            "  Size:           0x%x bytes\n"
+            "  Format:         %s\n"
+            "  Type:           %d\n"
+            "  Width:          %u\n"
+            "  Height:         %u\n"
+            "  Depth:          %u\n"
+            "  Pitch:          %u\n"
+            "  Mip levels:     %u\n"
+            "  Array layers:   %u\n"
+            "  Samples:        %u\n"
+            "  Tile mode:      0x%x\n"
+            "  Block size:     %u bits\n"
+            "  Is block-comp:  %u\n"
+            "  Guest size:     0x%x\n"
+            "  isPow2:         %s\n"
+            "  Alt tile:       %s\n"
+            "\n"
+            "=== COMPARISON ===\n"
+            "  Same format:           %s\n"
+            "  Same type:             %s\n"
+            "  Same tile mode:        %s\n"
+            "  Same block size:       %s\n"
+            "  Same BlockDim:         %s\n"
+            "  Same pitch:            %s\n"
+            "  Same pow2:             %s\n"
+            "  Same alt tile:         %s\n"
+            "  Old resources <= new:  %s (old: %u, new: %u)\n"
+            "  Old size <= new size:  %s\n"
+            "  Expected size (calc):  %" PRIu64 " bytes\n"
+            "  Size ratio (new/expected): %.2fx\n"
+            "  Size ratio (new/old):  %.2fx\n"
+            "  Old vs expected diff:  %" PRId64 " bytes (%+.2f%%)\n"
+            "  New vs expected diff:  %" PRId64 " bytes (%+.2f%%)\n"
+            "  Merged image ID:       %u\n"
+            "  Binding type:          %d\n"
+            "  Current tick:          %" PRIu64 "\n"
+            "  Age (ticks since last access): %" PRIu64,
 
-                  // Old image details
-                  cache_image.info.guest_address, cache_image.info.guest_size,
-                  vk::to_string(cache_image.info.pixel_format),
-                  static_cast<int>(cache_image.info.type), cache_image.info.size.width,
-                  cache_image.info.size.height, cache_image.info.size.depth, cache_image.info.pitch,
-                  cache_image.info.resources.levels, cache_image.info.resources.layers,
-                  cache_image.info.num_samples, static_cast<u32>(cache_image.info.tile_mode),
-                  cache_image.info.num_bits, +cache_image.info.props.is_block,
-                  cache_image.info.guest_size, cache_image.tick_accessed_last, safe_to_delete,
-                  bool(cache_image.info.props.is_pow2), cache_image.info.alt_tile,
-
-                  // New image details
-                  image_info.guest_address, image_info.guest_size,
-                  vk::to_string(image_info.pixel_format), static_cast<int>(image_info.type),
-                  image_info.size.width, image_info.size.height, image_info.size.depth,
-                  image_info.pitch, image_info.resources.levels, image_info.resources.layers,
-                  image_info.num_samples, static_cast<u32>(image_info.tile_mode),
-                  image_info.num_bits, image_info.props.is_block, image_info.guest_size,
-                  bool(image_info.props.is_pow2), image_info.alt_tile,
-
-                  // Comparison
-                  (image_info.pixel_format == cache_image.info.pixel_format),
-                  (image_info.type == cache_image.info.type),
-                  (image_info.tile_mode == cache_image.info.tile_mode),
-                  (image_info.num_bits == cache_image.info.num_bits),
-                  (image_info.BlockDim() == cache_image.info.BlockDim()),
-                  (image_info.pitch == cache_image.info.pitch),
-                  (image_info.props.is_pow2 == cache_image.info.props.is_pow2),
-                  (image_info.alt_tile == cache_image.info.alt_tile),
-                  (cache_image.info.resources <= image_info.resources),
-                  cache_image.info.resources.levels, image_info.resources.levels,
-                  (cache_image.info.guest_size <= image_info.guest_size), expected_size,
-
-                  // Size ratios
-                  static_cast<double>(image_info.guest_size) / expected_size,
-                  static_cast<double>(image_info.guest_size) / cache_image.info.guest_size,
-
-                  // Difference between actual and expected sizes with percentages
-                  static_cast<s64>(cache_image.info.guest_size) - static_cast<s64>(expected_size),
-                  (static_cast<double>(cache_image.info.guest_size) / expected_size - 1.0) * 100.0,
-
-                  static_cast<s64>(image_info.guest_size) - static_cast<s64>(expected_size),
-                  (static_cast<double>(image_info.guest_size) / expected_size - 1.0) * 100.0,
-
-                  merged_image_id.index, static_cast<int>(binding), scheduler.CurrentTick(),
-                  scheduler.CurrentTick() - cache_image.tick_accessed_last);
+            // Old image details
+            cache_image.info.guest_address, cache_image.info.guest_size,
+            (vk::to_string(cache_image.info.pixel_format)).c_str(),
+            static_cast<int>(cache_image.info.type), cache_image.info.size.width,
+            cache_image.info.size.height, cache_image.info.size.depth, cache_image.info.pitch,
+            cache_image.info.resources.levels, cache_image.info.resources.layers,
+            cache_image.info.num_samples, static_cast<u32>(cache_image.info.tile_mode),
+            cache_image.info.num_bits, +cache_image.info.props.is_block,
+            cache_image.info.guest_size, cache_image.tick_accessed_last,
+            (safe_to_delete) ? "true" : "false",
+            (bool(cache_image.info.props.is_pow2)) ? "true" : "false",
+            (cache_image.info.alt_tile) ? "true" : "false", // New image details
+            image_info.guest_address, image_info.guest_size,
+            (vk::to_string(image_info.pixel_format)).c_str(), static_cast<int>(image_info.type),
+            image_info.size.width, image_info.size.height, image_info.size.depth, image_info.pitch,
+            image_info.resources.levels, image_info.resources.layers, image_info.num_samples,
+            static_cast<u32>(image_info.tile_mode), image_info.num_bits, image_info.props.is_block,
+            image_info.guest_size, (bool(image_info.props.is_pow2)) ? "true" : "false",
+            (image_info.alt_tile) ? "true" : "false",
+            ( // Comparison
+                (image_info.pixel_format == cache_image.info.pixel_format))
+                ? "true"
+                : "false",
+            ((image_info.type == cache_image.info.type)) ? "true" : "false",
+            ((image_info.tile_mode == cache_image.info.tile_mode)) ? "true" : "false",
+            ((image_info.num_bits == cache_image.info.num_bits)) ? "true" : "false",
+            ((image_info.BlockDim() == cache_image.info.BlockDim())) ? "true" : "false",
+            ((image_info.pitch == cache_image.info.pitch)) ? "true" : "false",
+            ((image_info.props.is_pow2 == cache_image.info.props.is_pow2)) ? "true" : "false",
+            ((image_info.alt_tile == cache_image.info.alt_tile)) ? "true" : "false",
+            ((cache_image.info.resources <= image_info.resources)) ? "true" : "false",
+            cache_image.info.resources.levels, image_info.resources.levels,
+            ((cache_image.info.guest_size <= image_info.guest_size)) ? "true" : "false",
+            expected_size, // Size ratios
+            static_cast<double>(image_info.guest_size) / expected_size,
+            static_cast<double>(image_info.guest_size) /
+                cache_image.info
+                    .guest_size, // Difference between actual and expected sizes with percentages
+            static_cast<s64>(cache_image.info.guest_size) - static_cast<s64>(expected_size),
+            (static_cast<double>(cache_image.info.guest_size) / expected_size - 1.0) * 100.0,
+            static_cast<s64>(image_info.guest_size) - static_cast<s64>(expected_size),
+            (static_cast<double>(image_info.guest_size) / expected_size - 1.0) * 100.0,
+            merged_image_id.index, static_cast<int>(binding), scheduler.CurrentTick(),
+            scheduler.CurrentTick() - cache_image.tick_accessed_last);
 
         UNREACHABLE_MSG("Encountered unresolvable image overlap with equal memory address.");
     }
@@ -835,8 +834,8 @@ ImageId TextureCache::FindImageFromRange(VAddr address, size_t size, bool ensure
             }
         }
         LOG_WARNING(Render_Vulkan,
-                    "Failed to find exact image match for copy addr={:#x}, size={:#x}", address,
-                    size);
+                    "Failed to find exact image match for copy addr=0x%" PRIxPTR ", size=0x%zx",
+                    address, size);
     }
     return {};
 }
@@ -1131,10 +1130,12 @@ void TextureCache::UnregisterImage(ImageId image_id) {
     total_used_memory -= Common::AlignUp(image.SizeBytes(), 1024);
     ForEachPage(image.info.guest_address, image.info.guest_size, [this, image_id](u64 page) {
         const auto page_it = page_table.find(page);
-        ASSERT_MSG(page_it, "Unregistering unregistered page={:#x}", page << Traits::PAGE_BITS);
+        ASSERT_MSG(page_it, "Unregistering unregistered page=0x%" PRIx64,
+                   page << Traits::PAGE_BITS);
         auto& entries = page_it->entries;
         const auto vector_it = std::ranges::find(entries, image_id, &BucketEntry::id);
-        ASSERT_MSG(vector_it != entries.end(), "Unregistering unregistered image in page={:#x}",
+        ASSERT_MSG(vector_it != entries.end(),
+                   "Unregistering unregistered image in page=0x%" PRIx64,
                    page << Traits::PAGE_BITS);
         entries.erase(vector_it);
     });

@@ -544,7 +544,7 @@ s32 PS4_SYSV_ABI posix_kqueue() {
 
     // Create the queue
     kqueues[kqueue_handle] = new EqueueInternal(kqueue_handle, name);
-    LOG_INFO(Kernel_Event, "kqueue created with name {}", name);
+    LOG_INFO(Kernel_Event, "kqueue created with name %s", name);
 
     // Return handle.
     return kqueue_handle;
@@ -564,8 +564,8 @@ bool SupportedEqueueFilter(OrbisKernelEvent::Filter filter) {
 s32 PS4_SYSV_ABI posix_kevent(s32 handle, OrbisKernelEvent* changelist, u64 nchanges,
                               OrbisKernelEvent* eventlist, u64 nevents,
                               OrbisKernelTimespec* timeout) {
-    LOG_INFO(Kernel_Event, "called, eq = {}, nchanges = {}, nevents = {}", handle, nchanges,
-             nevents);
+    LOG_INFO(Kernel_Event, "called, eq = %d, nchanges = %" PRIu64 ", nevents = %" PRIu64, handle,
+             nchanges, nevents);
 
     // Get the equeue
     if (!kqueues.contains(handle)) {
@@ -578,7 +578,7 @@ s32 PS4_SYSV_ABI posix_kevent(s32 handle, OrbisKernelEvent* changelist, u64 ncha
     for (u64 i = 0; i < nchanges; i++) {
         auto event = changelist[i];
         if (!SupportedEqueueFilter(event.filter)) {
-            LOG_ERROR(Kernel_Event, "Unsupported event filter {}",
+            LOG_ERROR(Kernel_Event, "Unsupported event filter %s",
                       enum_name(&enum_names_Libraries_Kernel_OrbisKernelEvent_Filter,
                                 static_cast<s64>(event.filter)));
             continue;
@@ -615,7 +615,7 @@ s32 PS4_SYSV_ABI posix_kevent(s32 handle, OrbisKernelEvent* changelist, u64 ncha
                    event.filter != OrbisKernelEvent::Filter::Read &&
                    event.filter != OrbisKernelEvent::Filter::Write) {
             // The title is using filter-specific flags. Right now, these are unhandled.
-            LOG_ERROR(Kernel_Event, "Unhandled fflags {:#x} for event filter {}", event.fflags,
+            LOG_ERROR(Kernel_Event, "Unhandled fflags 0x%x for event filter %s", event.fflags,
                       enum_name(&enum_names_Libraries_Kernel_OrbisKernelEvent_Filter,
                                 static_cast<s64>(event.filter)));
             continue;
@@ -653,7 +653,7 @@ int PS4_SYSV_ABI sceKernelCreateEqueue(OrbisKernelEqueue* eq, const char* name) 
         return ORBIS_KERNEL_ERROR_ENAMETOOLONG;
     }
 
-    LOG_INFO(Kernel_Event, "name = {}", name);
+    LOG_INFO(Kernel_Event, "name = %s", name);
 
     // Reserve a file handle for the kqueue
     auto* handles = Common::Singleton<Core::FileSys::HandleTable>::Instance();
@@ -689,7 +689,8 @@ int PS4_SYSV_ABI sceKernelWaitEqueue(OrbisKernelEqueue eq, OrbisKernelEvent* ev,
 
     auto& equeue = kqueues[eq];
 
-    LOG_TRACE(Kernel_Event, "equeue = {} num = {}", equeue->GetName(), num);
+    LOG_TRACE(Kernel_Event, "equeue = %.*s num = %d", static_cast<int>((equeue->GetName()).size()),
+              (equeue->GetName()).data(), num);
 
     if (ev == nullptr) {
         return ORBIS_KERNEL_ERROR_EFAULT;
@@ -874,7 +875,8 @@ int PS4_SYSV_ABI sceKernelGetEventError(const OrbisKernelEvent* ev) {
 }
 
 int PS4_SYSV_ABI sceKernelAddReadEvent(OrbisKernelEqueue eq, int fd, size_t size, void* udata) {
-    LOG_DEBUG(Kernel_Event, "called, eq = {}, fd = {}, size = {}, udata = {}", eq, fd, size, udata);
+    LOG_DEBUG(Kernel_Event, "called, eq = %" PRId64 ", fd = %d, size = %zu, udata = 0x%llx", eq, fd,
+              size, static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(udata)));
     if (!kqueues.contains(eq) || fd < 0) {
         return ORBIS_KERNEL_ERROR_EBADF;
     }
@@ -891,7 +893,7 @@ int PS4_SYSV_ABI sceKernelAddReadEvent(OrbisKernelEqueue eq, int fd, size_t size
 }
 
 int PS4_SYSV_ABI sceKernelDeleteReadEvent(OrbisKernelEqueue eq, int fd) {
-    LOG_DEBUG(Kernel_Event, "called, eq = {}, fd = {}", eq, fd);
+    LOG_DEBUG(Kernel_Event, "called, eq = %" PRId64 ", fd = %d", eq, fd);
     if (!kqueues.contains(eq) || fd < 0) {
         return ORBIS_KERNEL_ERROR_EBADF;
     }
@@ -903,7 +905,8 @@ int PS4_SYSV_ABI sceKernelDeleteReadEvent(OrbisKernelEqueue eq, int fd) {
 }
 
 int PS4_SYSV_ABI sceKernelAddWriteEvent(OrbisKernelEqueue eq, int fd, size_t size, void* udata) {
-    LOG_DEBUG(Kernel_Event, "called, eq = {}, fd = {}, size = {}, udata = {}", eq, fd, size, udata);
+    LOG_DEBUG(Kernel_Event, "called, eq = %" PRId64 ", fd = %d, size = %zu, udata = 0x%llx", eq, fd,
+              size, static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(udata)));
     if (!kqueues.contains(eq) || fd < 0) {
         return ORBIS_KERNEL_ERROR_EBADF;
     }
@@ -920,7 +923,7 @@ int PS4_SYSV_ABI sceKernelAddWriteEvent(OrbisKernelEqueue eq, int fd, size_t siz
 }
 
 int PS4_SYSV_ABI sceKernelDeleteWriteEvent(OrbisKernelEqueue eq, int fd) {
-    LOG_DEBUG(Kernel_Event, "called, eq = {}, fd = {}", eq, fd);
+    LOG_DEBUG(Kernel_Event, "called, eq = %" PRId64 ", fd = %d", eq, fd);
     if (!kqueues.contains(eq) || fd < 0) {
         return ORBIS_KERNEL_ERROR_EBADF;
     }
@@ -932,8 +935,8 @@ int PS4_SYSV_ABI sceKernelDeleteWriteEvent(OrbisKernelEqueue eq, int fd) {
 }
 
 int PS4_SYSV_ABI sceKernelAddFileEvent(OrbisKernelEqueue eq, int fd, u32 fflags, void* udata) {
-    LOG_DEBUG(Kernel_Event, "called, eq = {}, fd = {}, fflags = {:#x}, udata = {}", eq, fd, fflags,
-              udata);
+    LOG_DEBUG(Kernel_Event, "called, eq = %" PRId64 ", fd = %d, fflags = 0x%x, udata = 0x%llx", eq,
+              fd, fflags, static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(udata)));
     if (!kqueues.contains(eq) || fd < 0) {
         return ORBIS_KERNEL_ERROR_EBADF;
     }
@@ -953,7 +956,7 @@ int PS4_SYSV_ABI sceKernelAddFileEvent(OrbisKernelEqueue eq, int fd, u32 fflags,
 }
 
 int PS4_SYSV_ABI sceKernelDeleteFileEvent(OrbisKernelEqueue eq, int fd) {
-    LOG_DEBUG(Kernel_Event, "called, eq = {}, fd = {}", eq, fd);
+    LOG_DEBUG(Kernel_Event, "called, eq = %" PRId64 ", fd = %d", eq, fd);
     if (!kqueues.contains(eq) || fd < 0) {
         return ORBIS_KERNEL_ERROR_EBADF;
     }

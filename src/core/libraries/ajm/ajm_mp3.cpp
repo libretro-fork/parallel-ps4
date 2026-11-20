@@ -453,13 +453,13 @@ static int ParseMp3HeaderCommon(const u8* p_begin, u32 stream_size, int parse_of
 
 int AjmMp3Decoder::ParseMp3Header(const u8* p_begin, u32 stream_size, int parse_ofl,
                                   AjmDecMp3ParseFrame* frame) {
-    LOG_TRACE(Lib_Ajm, "called stream_size = {} parse_ofl = {}", stream_size, parse_ofl);
+    LOG_TRACE(Lib_Ajm, "called stream_size = %u parse_ofl = %d", stream_size, parse_ofl);
     return ParseMp3HeaderCommon(p_begin, stream_size, parse_ofl, frame, false);
 }
 
 int AjmMp3Decoder::ParseMp3Frame(const u8* p_begin, u32 stream_size, int parse_ofl,
                                  AjmDecMp3ParseFrame* frame) {
-    LOG_TRACE(Lib_Ajm, "called stream_size = {} parse_ofl = {}", stream_size, parse_ofl);
+    LOG_TRACE(Lib_Ajm, "called stream_size = %u parse_ofl = %d", stream_size, parse_ofl);
     return ParseMp3HeaderCommon(p_begin, stream_size, parse_ofl, frame, true);
 }
 

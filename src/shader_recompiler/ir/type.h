@@ -4,7 +4,6 @@
 #pragma once
 
 #include <string>
-#include <fmt/format.h>
 #include "common/enum.h"
 
 namespace Shader::IR {
@@ -46,13 +45,3 @@ DECLARE_ENUM_FLAG_OPERATORS(Type)
 [[nodiscard]] bool AreTypesCompatible(Type lhs, Type rhs) noexcept;
 
 } // namespace Shader::IR
-
-template <>
-struct fmt::formatter<Shader::IR::Type> {
-    constexpr auto parse(format_parse_context& ctx) {
-        return ctx.begin();
-    }
-    auto format(Shader::IR::Type type, format_context& ctx) const {
-        return fmt::format_to(ctx.out(), "{}", Shader::IR::NameOf(type));
-    }
-};

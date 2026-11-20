@@ -40,13 +40,13 @@ static std::pair<Id, bool> OutputAttrComponentType(EmitContext& ctx, IR::Attribu
     case IR::Attribute::StencilRef:
         return {ctx.S32[1], true};
     default:
-        UNREACHABLE_MSG("Write attribute {}", attr);
+        UNREACHABLE_MSG("Write attribute %s", Shader::IR::NameOf(attr).c_str());
     }
 }
 
 Id EmitGetUserData(EmitContext& ctx, IR::ScalarReg reg) {
     const Id ud_reg{ctx.EmitFlatbufferLoad(ctx.ConstU32(static_cast<u32>(reg)))};
-    NameFmt(&ctx.m, ud_reg, "ud_{}", u32(reg));
+    NameFmt(&ctx.m, ud_reg, "ud_%u", u32(reg));
     return ud_reg;
 }
 
@@ -168,7 +168,7 @@ Id EmitGetAttribute(EmitContext& ctx, IR::Attribute attr, Imm32 comp_imm, Imm32 
                           spv_OpAccessChain1(&ctx.m, ctx.input_f32, ctx.bary_coord_nopersp_sample,
                                              ctx.ConstU32(comp)));
     case IR::Attribute::BaryCoordPullModel: {
-        ASSERT_MSG(comp < 3, "Invalid BaryCoordPullModel component {}", comp);
+        ASSERT_MSG(comp < 3, "Invalid BaryCoordPullModel component %u", comp);
 
         if (ctx.profile.supports_amd_shader_explicit_vertex_parameter) {
             return spv_OpLoad(&ctx.m, ctx.F32[1],
@@ -190,7 +190,7 @@ Id EmitGetAttribute(EmitContext& ctx, IR::Attribute attr, Imm32 comp_imm, Imm32 
         return spv_OpFMul(&ctx.m, ctx.F32[1], ij, inv_w);
     }
     default:
-        UNREACHABLE_MSG("Read attribute {}", attr);
+        UNREACHABLE_MSG("Read attribute %s", Shader::IR::NameOf(attr).c_str());
     }
 }
 
@@ -203,7 +203,7 @@ Id EmitGetAttributeU1(EmitContext& ctx, IR::Attribute attr, Imm32 comp_imm) {
     case IR::Attribute::IsHelperInvocation:
         return spv_OpLoad(&ctx.m, ctx.U1[1], ctx.helper_invocation);
     default:
-        UNREACHABLE_MSG("Unsupported U1 attribute {}", attr);
+        UNREACHABLE_MSG("Unsupported U1 attribute %s", Shader::IR::NameOf(attr).c_str());
     }
 }
 
@@ -266,7 +266,7 @@ Id EmitGetAttributeU32(EmitContext& ctx, IR::Attribute attr, Imm32 comp_imm) {
         }
     }
     default:
-        UNREACHABLE_MSG("Read U32 attribute {}", attr);
+        UNREACHABLE_MSG("Read U32 attribute %s", Shader::IR::NameOf(attr).c_str());
     }
 }
 
@@ -339,7 +339,7 @@ void EmitSetAttribute(EmitContext& ctx, IR::Attribute attr, Id value, Imm32 elem
         }
         return;
     default:
-        UNREACHABLE_MSG("Write attribute {}", attr);
+        UNREACHABLE_MSG("Write attribute %s", Shader::IR::NameOf(attr).c_str());
     }
 }
 
@@ -399,7 +399,7 @@ void EmitSetPatch(EmitContext& ctx, IR::Patch patch, Id value) {
             return spv_OpAccessChain1(&ctx.m, ctx.output_f32, ctx.output_tess_level_inner,
                                       ctx.ConstU32(1u));
         default:
-            UNREACHABLE_MSG("Patch {}", u32(patch));
+            UNREACHABLE_MSG("Patch %u", u32(patch));
         }
     }()};
     spv_OpStore(&ctx.m, pointer, value);

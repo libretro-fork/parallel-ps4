@@ -66,7 +66,7 @@ s32 PS4_SYSV_ABI sceNpCommerceDialogClose() {
 
 s8 PS4_SYSV_ABI sceNpCommerceDialogGetStatus() {
     const Status status = DialogStatus();
-    LOG_DEBUG(Lib_NpCommerce, "called, status = {}", static_cast<u32>(status));
+    LOG_DEBUG(Lib_NpCommerce, "called, status = %u", static_cast<u32>(status));
     return static_cast<s8>(status);
 }
 
@@ -77,7 +77,7 @@ s32 PS4_SYSV_ABI sceNpCommerceDialogInitializeInternal() {
 
 s32 PS4_SYSV_ABI sceNpCommerceDialogUpdateStatus() {
     const Status status = DialogStatus();
-    LOG_DEBUG(Lib_NpCommerce, "called, status = {}", static_cast<u32>(status));
+    LOG_DEBUG(Lib_NpCommerce, "called, status = %u", static_cast<u32>(status));
     return static_cast<s32>(status);
 }
 
@@ -94,15 +94,18 @@ s32 PS4_SYSV_ABI sceNpCommerceDialogGetResult(OrbisNpCommerceDialogResult* resul
     result->authorized = g_mode == ORBIS_NP_COMMERCE_DIALOG_MODE_PLUS &&
                          g_result_code == ORBIS_NP_COMMERCE_DIALOG_RESULT_PURCHASED;
     result->userData = g_user_data;
-    LOG_INFO(Lib_NpCommerce, "result={} authorized={}", result->result, result->authorized);
+    LOG_INFO(Lib_NpCommerce, "result=%d authorized=%s", result->result,
+             (result->authorized) ? "true" : "false");
     return g_result_code;
 }
 
 s32 PS4_SYSV_ABI sceNpCommerceDialogOpen(const OrbisNpCommerceDialogParam* param) {
-    LOG_INFO(Lib_NpCommerce, "called, param = {}", static_cast<const void*>(param));
+    LOG_INFO(Lib_NpCommerce, "called, param = 0x%llx",
+             static_cast<unsigned long long>(
+                 reinterpret_cast<uintptr_t>(static_cast<const void*>(param))));
     if (const Status status = DialogStatus();
         status != Status::INITIALIZED && status != Status::FINISHED) {
-        LOG_WARNING(Lib_NpCommerce, "Open in bad state {}", static_cast<u32>(status));
+        LOG_WARNING(Lib_NpCommerce, "Open in bad state %u", static_cast<u32>(status));
         return static_cast<s32>(Error::NOT_INITIALIZED);
     }
     if (param == nullptr) {
@@ -110,7 +113,7 @@ s32 PS4_SYSV_ABI sceNpCommerceDialogOpen(const OrbisNpCommerceDialogParam* param
     }
     if (param->mode < ORBIS_NP_COMMERCE_DIALOG_MODE_CATEGORY ||
         param->mode > ORBIS_NP_COMMERCE_DIALOG_MODE_PLUS) {
-        LOG_ERROR(Lib_NpCommerce, "SceNpCommerceDialog Parameter Error (mode={})", param->mode);
+        LOG_ERROR(Lib_NpCommerce, "SceNpCommerceDialog Parameter Error (mode=%d)", param->mode);
         g_param_error = static_cast<s32>(Error::PARAM_INVALID);
         ovl_commerce_dialog_set_status(static_cast<int>(Status::FINISHED));
         return static_cast<s32>(Error::PARAM_INVALID);
@@ -135,7 +138,7 @@ s32 PS4_SYSV_ABI sceNpCommerceDialogOpen(const OrbisNpCommerceDialogParam* param
     }
 
     if (param->numTargets > ORBIS_NP_COMMERCE_DIALOG_NUM_TARGETS_MAX) {
-        LOG_WARNING(Lib_NpCommerce, "numTargets {} exceeds max {}, clamping", param->numTargets,
+        LOG_WARNING(Lib_NpCommerce, "numTargets %u exceeds max %u, clamping", param->numTargets,
                     ORBIS_NP_COMMERCE_DIALOG_NUM_TARGETS_MAX);
     }
     // The labels the game gave, the null ones left out; the overlay copies them, each up to
@@ -151,7 +154,8 @@ s32 PS4_SYSV_ABI sceNpCommerceDialogOpen(const OrbisNpCommerceDialogParam* param
     }
     shown.targets = targets;
     LOG_INFO(Lib_NpCommerce,
-             "open: mode={} user_id={} serviceLabel={:#x} numTargets={} features={:#x} first='{}'",
+             "open: mode=%d user_id=%d serviceLabel=0x%x numTargets=%u features=0x%" PRIx64
+             " first='%s'",
              param->mode, shown.user_id, shown.service_label, param->numTargets, shown.features,
              shown.target_count == 0 ? "" : targets[0]);
 
@@ -166,9 +170,9 @@ s32 PS4_SYSV_ABI sceNpCommerceHidePsStoreIcon() {
 }
 
 s32 PS4_SYSV_ABI sceNpCommerceSetPsStoreIconLayout(s32 layout) {
-    LOG_INFO(Lib_NpCommerce, "called, layout = {}", layout);
+    LOG_INFO(Lib_NpCommerce, "called, layout = %d", layout);
     if (layout < 0 || layout > 2) {
-        LOG_WARNING(Lib_NpCommerce, "invalid layout {}, ignoring", layout);
+        LOG_WARNING(Lib_NpCommerce, "invalid layout %d, ignoring", layout);
         return ORBIS_OK;
     }
     ovl_store_icon_set_layout(layout);
@@ -176,7 +180,7 @@ s32 PS4_SYSV_ABI sceNpCommerceSetPsStoreIconLayout(s32 layout) {
 }
 
 s32 PS4_SYSV_ABI sceNpCommerceShowPsStoreIcon(s32 pos) {
-    LOG_INFO(Lib_NpCommerce, "called, pos = {}", pos);
+    LOG_INFO(Lib_NpCommerce, "called, pos = %d", pos);
     ovl_store_icon_show(pos >= 0 && pos <= 2 ? pos : OVL_STORE_ICON_CENTER);
     return ORBIS_OK;
 }

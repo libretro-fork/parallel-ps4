@@ -6,6 +6,7 @@
 #include "common/hash.h"
 #include "common/io_file.h"
 #include "common/path_util.h"
+#include "common/string_util.h"
 #include "common/thread_name.h"
 #include "core/emulator_settings.h"
 #include "core/memory.h"
@@ -508,19 +509,19 @@ void PipelineCache::CreateDriverCache(bool from_disk) {
             };
             auto [result, cache] = device.createPipelineCacheUnique(info);
             if (result == vk::Result::eSuccess) {
-                LOG_INFO(Render_Vulkan, "Driver pipeline cache: {} bytes kept", kept->size());
+                LOG_INFO(Render_Vulkan, "Driver pipeline cache: %zu bytes kept", kept->size());
                 pipeline_cache = std::move(cache);
                 return;
             }
-            LOG_WARNING(Render_Vulkan, "Driver pipeline cache not taken: {}",
-                        vk::to_string(result));
+            LOG_WARNING(Render_Vulkan, "Driver pipeline cache not taken: %s",
+                        (vk::to_string(result)).c_str());
         } else if (kept) {
             LOG_INFO(Render_Vulkan, "Driver pipeline cache of another GPU or driver: not taken");
         }
     }
     auto [result, cache] = device.createPipelineCacheUnique({});
-    ASSERT_MSG(result == vk::Result::eSuccess, "Failed to create pipeline cache: {}",
-               vk::to_string(result));
+    ASSERT_MSG(result == vk::Result::eSuccess, "Failed to create pipeline cache: %s",
+               (vk::to_string(result)).c_str());
     pipeline_cache = std::move(cache);
 }
 
@@ -613,7 +614,8 @@ const GraphicsPipeline* PipelineCache::GetGraphicsPipeline(const DrawIndirectPar
                 WaitCompiled();
                 continue;
             }
-            LOG_INFO(Render_Vulkan, "Compiling graphics pipeline {:#x}", pipeline_hash);
+            LOG_INFO(Render_Vulkan, "Compiling graphics pipeline 0x%llx",
+                     static_cast<unsigned long long>(pipeline_hash));
             auto* job = new CompileJob;
             job->kind = CompileJob::Kind::Graphics;
             job->key = graphics_key;
@@ -678,7 +680,8 @@ const ComputePipeline* PipelineCache::GetComputePipeline() {
     ComputePipeline* pipeline = FindComputePipeline(compute_key);
     if (!pipeline) {
         const auto pipeline_hash = std::hash<ComputePipelineKey>{}(compute_key);
-        LOG_INFO(Render_Vulkan, "Compiling compute pipeline {:#x}", pipeline_hash);
+        LOG_INFO(Render_Vulkan, "Compiling compute pipeline 0x%llx",
+                 static_cast<unsigned long long>(pipeline_hash));
 
         ComputePipeline::SerializationSupport sdata{};
         pipeline = new ComputePipeline(instance, scheduler, desc_heap, profile, *pipeline_cache,
@@ -915,7 +918,7 @@ bool PipelineCache::RefreshGraphicsStages() {
         bind_stage(HwStage::Vertex, SwStage::Vertex);
         break;
     default:
-        LOG_WARNING(Render_Vulkan, "unimplemented shader stage {}", (u32)regs.stage_enable.raw);
+        LOG_WARNING(Render_Vulkan, "unimplemented shader stage %u", (u32)regs.stage_enable.raw);
         return false;
     }
 
@@ -930,7 +933,7 @@ bool PipelineCache::RefreshGraphicsStages() {
         for (const auto& attrib : fetch_shader->attributes) {
             const auto& buffer = attrib.GetSharp(*vs_info);
             ASSERT_MSG(vertex_binding < MaxVertexBufferCount,
-                       "Vertex attribute binding count exceeded limit: {} >= {}", vertex_binding,
+                       "Vertex attribute binding count exceeded limit: %u >= %u", vertex_binding,
                        MaxVertexBufferCount);
             key.vertex_buffer_formats[vertex_binding++] =
                 Vulkan::LiverpoolToVK::SurfaceFormat(buffer.GetDataFmt(), buffer.GetNumberFmt());
@@ -952,8 +955,8 @@ bool PipelineCache::RefreshComputeKey() {
 vk::ShaderModule PipelineCache::CompileModule(Shader::Info& info, Shader::RuntimeInfo& runtime_info,
                                               const std::span<const u32>& code, size_t perm_idx,
                                               Shader::Backend::Bindings& binding) {
-    LOG_INFO(Render_Vulkan, "Compiling {} shader {:#x} {}", info.hw_stage, info.pgm_hash,
-             perm_idx != 0 ? "(permutation)" : "");
+    LOG_INFO(Render_Vulkan, "Compiling %s shader 0x%" PRIx64 " %s", Shader::NameOf(info.hw_stage),
+             info.pgm_hash, perm_idx != 0 ? "(permutation)" : "");
     DumpShader(code, info.pgm_hash, info.hw_stage, perm_idx, "bin");
 
     const auto ir_program = Shader::TranslateProgram(code, pools, info, runtime_info, profile);
@@ -978,7 +981,8 @@ vk::ShaderModule PipelineCache::ModuleFromProgram(Shader::Info& info,
                    : std::span<const u32>{};
     const bool is_patched = !patch.empty() && emu_settings_get_patch_shaders();
     if (is_patched) {
-        LOG_INFO(Loader, "Loaded patch for {} shader {:#x}", info.hw_stage, info.pgm_hash);
+        LOG_INFO(Loader, "Loaded patch for %s shader 0x%" PRIx64, Shader::NameOf(info.hw_stage),
+                 info.pgm_hash);
         module = CompileSPV(patch, instance.GetDevice());
     } else {
         module = CompileSPV(spv, instance.GetDevice());
@@ -1229,8 +1233,8 @@ void PipelineCache::RunJobOn(CompileJob& job, const Shader::ShaderParams& params
         }
         // It read nothing of the game's but its user data: made here, as a Program job would
         // make it from the next draw, with the translation already done
-        LOG_INFO(Render_Vulkan, "Compiling {} shader {:#x} (from its discovery)", info.hw_stage,
-                 info.pgm_hash);
+        LOG_INFO(Render_Vulkan, "Compiling %s shader 0x%" PRIx64 " (from its discovery)",
+                 Shader::NameOf(info.hw_stage), info.pgm_hash);
         DumpShader(params.code, info.pgm_hash, info.hw_stage, 0, "bin");
         auto binding = job.start;
         const auto module = ModuleFromProgram(info, runtime, ir_program, 0, binding);
@@ -1265,8 +1269,9 @@ void PipelineCache::RunJobOn(CompileJob& job, const Shader::ShaderParams& params
         job.module = CompileModule(new_info, job.runtime, params.code, job.perm_idx, binding);
         new_info.snapshot = nullptr;
         if (WalkerId(new_info.srt_walker_code) != job.snap_walker) {
-            LOG_WARNING(Render_Vulkan, "{} shader {:#x} permutation {}: another SRT walker",
-                        job.hw_stage, job.hash, job.perm_idx);
+            LOG_WARNING(Render_Vulkan,
+                        "%s shader 0x%" PRIx64 " permutation %zu: another SRT walker",
+                        Shader::NameOf(job.hw_stage), job.hash, job.perm_idx);
         }
         break;
     }
@@ -1281,7 +1286,8 @@ void PipelineCache::RunJobOn(CompileJob& job, const Shader::ShaderParams& params
             Shader::Backend::SPIRV::EmitSPIRV(pools.spv, profile, runtime, ir_program, binding);
         job.fresh.snapshot = nullptr;
         const auto kept_spv = Storage::DataBase::Instance().Load(
-            Storage::BlobType::ShaderBinary, fmt::format("{:#018x}_{}", job.hash, job.perm_idx));
+            Storage::BlobType::ShaderBinary,
+            Common::StringFromFormat("0x%016" PRIx64 "_%zu", job.hash, job.perm_idx));
         job.same_spv = kept_spv && kept_spv->size() == spv.size_bytes() &&
                        std::memcmp(kept_spv->data(), spv.data(), kept_spv->size()) == 0;
         job.same_walker = WalkerId(job.fresh.srt_walker_code) == job.kept_walker &&
@@ -1452,12 +1458,13 @@ void PipelineCache::ReplaceCachedPermutation(CompileJob& job) {
         return;
     }
     auto& cached = program->modules[job.perm_idx];
-    LOG_WARNING(Render_Vulkan,
-                "Pipeline cache: {} shader {:#x} permutation {} differs from its translation "
-                "(SPIR-V {}, SRT walker {}, resources {}); the translation is used, and the cache "
-                "is started again at the next start",
-                job.hw_stage, job.hash, job.perm_idx, job.same_spv ? "same" : "differs",
-                job.same_walker ? "same" : "differs", job.same_resources ? "same" : "differ");
+    LOG_WARNING(
+        Render_Vulkan,
+        "Pipeline cache: %s shader 0x%" PRIx64 " permutation %zu differs from its translation "
+        "(SPIR-V %s, SRT walker %s, resources %s); the translation is used, and the cache "
+        "is started again at the next start",
+        Shader::NameOf(job.hw_stage), job.hash, job.perm_idx, job.same_spv ? "same" : "differs",
+        job.same_walker ? "same" : "differs", job.same_resources ? "same" : "differ");
 
     // The cache is started again at the next start (WarmUp: another build's stamp)
     Storage::DataBase::Instance().Save(Storage::BlobType::ShaderProfile, "build",
@@ -1497,9 +1504,10 @@ void PipelineCache::ReplaceCachedPermutation(CompileJob& job) {
 std::string PipelineCache::GetShaderName(Shader::HwStage stage, u64 hash,
                                          std::optional<size_t> perm) {
     if (perm) {
-        return fmt::format("{}_{:#018x}_{}", stage, hash, *perm);
+        return Common::StringFromFormat("%s_0x%016" PRIx64 "_%llu", Shader::NameOf(stage), hash,
+                                        static_cast<unsigned long long>(*perm));
     }
-    return fmt::format("{}_{:#018x}", stage, hash);
+    return Common::StringFromFormat("%s_0x%016" PRIx64, Shader::NameOf(stage), hash);
 }
 
 void PipelineCache::DumpShader(std::span<const u32> code, u64 hash, Shader::HwStage stage,
@@ -1513,7 +1521,9 @@ void PipelineCache::DumpShader(std::span<const u32> code, u64 hash, Shader::HwSt
     if (!Common::FS::Exists(dump_dir)) {
         Common::FS::CreateDirectories(dump_dir);
     }
-    const auto filename = fmt::format("{}.{}", GetShaderName(stage, hash, perm_idx), ext);
+    const auto filename =
+        Common::StringFromFormat("%s.%.*s", (GetShaderName(stage, hash, perm_idx)).c_str(),
+                                 static_cast<int>((ext).size()), (ext).data());
     const auto file = IOFile{dump_dir / filename, FileAccessMode::Create};
     file.WriteSpan(code);
 }
@@ -1526,7 +1536,9 @@ std::optional<Common::FS::FileView> PipelineCache::GetShaderPatch(u64 hash, Shad
     }
     using namespace Common::FS;
     const auto patch_dir = GetUserPath(PathType::ShaderDir) / "patch";
-    const auto filename = fmt::format("{}.{}", GetShaderName(stage, hash, perm_idx), ext);
+    const auto filename =
+        Common::StringFromFormat("%s.%.*s", (GetShaderName(stage, hash, perm_idx)).c_str(),
+                                 static_cast<int>((ext).size()), (ext).data());
     const auto filepath = patch_dir / filename;
     if (!Common::FS::Exists(filepath)) {
         return {};

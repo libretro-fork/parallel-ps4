@@ -322,7 +322,7 @@ int PS4_SYSV_ABI sceGnmDestroyWorkloadStream() {
 }
 
 void PS4_SYSV_ABI sceGnmDingDong(u32 gnm_vqid, u32 next_offs_dw) {
-    LOG_DEBUG(Lib_GnmDriver, "vqid {}, offset_dw {}", gnm_vqid, next_offs_dw);
+    LOG_DEBUG(Lib_GnmDriver, "vqid %u, offset_dw %u", gnm_vqid, next_offs_dw);
 
     if (gnm_vqid == 0) {
         return;
@@ -1211,7 +1211,7 @@ int PS4_SYSV_ABI sceGnmLogicalCuIndexToPhysicalCuIndex() {
 }
 
 s32 PS4_SYSV_ABI sceGnmLogicalCuMaskToPhysicalCuMask(s64, s32 logical_cu_mask) {
-    LOG_INFO(Lib_GnmDriver, "called, logical_cu_mask: {}", logical_cu_mask);
+    LOG_INFO(Lib_GnmDriver, "called, logical_cu_mask: %d", logical_cu_mask);
     return logical_cu_mask;
 }
 
@@ -1248,7 +1248,7 @@ int PS4_SYSV_ABI sceGnmMapComputeQueue(u32 pipe_id, u32 queue_id, VAddr ring_bas
         liverpool->asc_queues.Insert(VAddr(ring_base_addr), read_ptr_addr, ring_size_dw, pipe_id);
     // We need to offset index as `dingDong` assumes it to be from the range [1..64]
     const auto gnm_vqid = vqid.index + 1;
-    LOG_INFO(Lib_GnmDriver, "ASC pipe {} queue {} mapped to vqueue {}", pipe_id, queue_id,
+    LOG_INFO(Lib_GnmDriver, "ASC pipe %u queue %u mapped to vqueue %u", pipe_id, queue_id,
              gnm_vqid);
 
     const auto& queue = liverpool->asc_queues[vqid];
@@ -1418,7 +1418,7 @@ s32 PS4_SYSV_ABI sceGnmRequestFlipAndSubmitDoneForWorkload(u64 workload, u32* gp
                                                            u32 gpu_addr_size_in_bytes,
                                                            u32 vo_handle, u32 buf_idx,
                                                            u32 flip_mode, s64 flip_arg) {
-    LOG_DEBUG(Lib_GnmDriver, "called [buf = {}]", buf_idx);
+    LOG_DEBUG(Lib_GnmDriver, "called [buf = %u]", buf_idx);
     if (gpu_addr_size_in_bytes < 0x100) {
         return ORBIS_GNM_ERROR_SUBMISSION_NOT_ENOUGH_RESOURCES;
     }
@@ -1583,7 +1583,7 @@ s32 PS4_SYSV_ABI sceGnmSetEmbeddedPsShader(u32* cmdbuf, u32 size, u32 shader_id,
     LOG_TRACE(Lib_GnmDriver, "called");
 
     if (shader_id > 1) {
-        LOG_ERROR(Lib_GnmDriver, "Unknown shader id {}", shader_id);
+        LOG_ERROR(Lib_GnmDriver, "Unknown shader id %u", shader_id);
         return ORBIS_GNM_ERROR_FAILURE;
     }
 
@@ -1652,7 +1652,7 @@ s32 PS4_SYSV_ABI sceGnmSetEmbeddedVsShader(u32* cmdbuf, u32 size, u32 shader_id,
     LOG_TRACE(Lib_GnmDriver, "called");
 
     if (shader_id != 0) {
-        LOG_ERROR(Lib_GnmDriver, "Unknown shader id {}", shader_id);
+        LOG_ERROR(Lib_GnmDriver, "Unknown shader id %u", shader_id);
         return ORBIS_GNM_ERROR_FAILURE;
     }
 
@@ -1731,7 +1731,7 @@ s32 PS4_SYSV_ABI sceGnmSetEsShader(u32* cmdbuf, u32 size, const u32* es_regs, u3
 }
 
 s32 PS4_SYSV_ABI sceGnmSetGsRingSizes(u32 esgs_ring_size, u32 gsvs_ring_size) {
-    LOG_TRACE(Lib_GnmDriver, "esgs_ring_size = {:#x}, gsvs_ring_size = {:#x}", esgs_ring_size,
+    LOG_TRACE(Lib_GnmDriver, "esgs_ring_size = 0x%x, gsvs_ring_size = 0x%x", esgs_ring_size,
               gsvs_ring_size);
     // Sony libSceGnmDriver validates 1 MB alignment and [4 MB, 8 MB] range.
     constexpr u32 MinRingSize = 0x400000;   // 4 MB
@@ -1944,10 +1944,10 @@ s32 PS4_SYSV_ABI sceGnmSetupMipStatsReport(void* output_buffer, u32 size_in_byte
                                            u8 num_reports_before_reset, u32 mip_stats_reset_force) {
     LOG_DEBUG(
         Lib_GnmDriver,
-        "(STUBBED) output_buffer = {}, size_in_bytes = {:#x}, intervals = {}, num_reports = {}, "
-        "force_reset = {}",
-        output_buffer, size_in_bytes, intervals_between_reports, num_reports_before_reset,
-        mip_stats_reset_force);
+        "(STUBBED) output_buffer = 0x%llx, size_in_bytes = 0x%x, intervals = %u, num_reports = %u, "
+        "force_reset = %u",
+        static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(output_buffer)), size_in_bytes,
+        intervals_between_reports, num_reports_before_reset, mip_stats_reset_force);
     if (!output_buffer ||
         (reinterpret_cast<uintptr_t>(output_buffer) & 0xffffff000000003fULL) != 0) {
         return 0x80000001;
@@ -2313,7 +2313,7 @@ s32 PS4_SYSV_ABI sceGnmSubmitAndFlipCommandBuffers(u32 count, u32* dcb_gpu_addrs
 s32 PS4_SYSV_ABI sceGnmSubmitAndFlipCommandBuffersForWorkload(
     u32 workload, u32 count, u32* dcb_gpu_addrs[], u32* dcb_sizes_in_bytes, u32* ccb_gpu_addrs[],
     u32* ccb_sizes_in_bytes, u32 vo_handle, u32 buf_idx, u32 flip_mode, s64 flip_arg) {
-    LOG_DEBUG(Lib_GnmDriver, "called [buf = {}]", buf_idx);
+    LOG_DEBUG(Lib_GnmDriver, "called [buf = %u]", buf_idx);
 
     if (count != 0) {
         if (!dcb_gpu_addrs) {
@@ -2332,16 +2332,16 @@ s32 PS4_SYSV_ABI sceGnmSubmitAndFlipCommandBuffersForWorkload(
 
     for (u32 i = 0; i < count; i++) {
         if (dcb_sizes_in_bytes[i] == 0) {
-            LOG_ERROR(Lib_GnmDriver, "Submitting a null DCB {}", i);
+            LOG_ERROR(Lib_GnmDriver, "Submitting a null DCB %u", i);
             return 0x80d11000;
         }
         if (dcb_sizes_in_bytes[i] > 0x3ffffc) {
-            LOG_ERROR(Lib_GnmDriver, "dcbSizesInBytes[{}] ({}) is limited to (2*20)-1 DWORDS", i,
+            LOG_ERROR(Lib_GnmDriver, "dcbSizesInBytes[%u] (%u) is limited to (2*20)-1 DWORDS", i,
                       dcb_sizes_in_bytes[i]);
             return 0x80d11000;
         }
         if (ccb_sizes_in_bytes && ccb_sizes_in_bytes[i] > 0x3ffffc) {
-            LOG_ERROR(Lib_GnmDriver, "ccbSizesInBytes[{}] ({}) is limited to (2*20)-1 DWORDS", i,
+            LOG_ERROR(Lib_GnmDriver, "ccbSizesInBytes[%u] (%u) is limited to (2*20)-1 DWORDS", i,
                       ccb_sizes_in_bytes[i]);
             return 0x80d11000;
         }
@@ -2378,16 +2378,16 @@ s32 PS4_SYSV_ABI sceGnmSubmitCommandBuffersForWorkload(u32 workload, u32 count,
 
     for (u32 i = 0; i < count; i++) {
         if (dcb_sizes_in_bytes[i] == 0) {
-            LOG_ERROR(Lib_GnmDriver, "Submitting a null DCB {}", i);
+            LOG_ERROR(Lib_GnmDriver, "Submitting a null DCB %u", i);
             return 0x80d11000;
         }
         if (dcb_sizes_in_bytes[i] > 0x3ffffc) {
-            LOG_ERROR(Lib_GnmDriver, "dcbSizesInBytes[{}] ({}) is limited to (2*20)-1 DWORDS", i,
+            LOG_ERROR(Lib_GnmDriver, "dcbSizesInBytes[%u] (%u) is limited to (2*20)-1 DWORDS", i,
                       dcb_sizes_in_bytes[i]);
             return 0x80d11000;
         }
         if (ccb_sizes_in_bytes && ccb_sizes_in_bytes[i] > 0x3ffffc) {
-            LOG_ERROR(Lib_GnmDriver, "ccbSizesInBytes[{}] ({}) is limited to (2*20)-1 DWORDS", i,
+            LOG_ERROR(Lib_GnmDriver, "ccbSizesInBytes[%u] (%u) is limited to (2*20)-1 DWORDS", i,
                       ccb_sizes_in_bytes[i]);
             return 0x80d11000;
         }

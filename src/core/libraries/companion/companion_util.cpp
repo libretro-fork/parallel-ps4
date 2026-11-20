@@ -31,7 +31,7 @@ u32 PS4_SYSV_ABI getEvent(sceCompanionUtilContext* ctx, sceCompanionUtilEvent* o
 s32 PS4_SYSV_ABI sceCompanionUtilGetEvent(sceCompanionUtilEvent* outEvent) {
     u32 ret = ORBIS_COMPANION_UTIL_NO_EVENT;
 
-    LOG_DEBUG(Lib_CompanionUtil, "(STUBBED) called ret: {:#x}", ret);
+    LOG_DEBUG(Lib_CompanionUtil, "(STUBBED) called ret: 0x%x", ret);
     return ret;
 }
 

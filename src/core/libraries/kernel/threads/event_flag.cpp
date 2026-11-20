@@ -303,7 +303,7 @@ struct OrbisKernelEventFlagOptParam {
 int PS4_SYSV_ABI sceKernelCreateEventFlag(OrbisKernelEventFlag* ef, const char* pName, u32 attr,
                                           u64 initPattern,
                                           const OrbisKernelEventFlagOptParam* pOptParam) {
-    LOG_TRACE(Kernel_Event, "called name = {} attr = {:#x} initPattern = {:#x}", pName, attr,
+    LOG_TRACE(Kernel_Event, "called name = %s attr = 0x%x initPattern = 0x%" PRIx64, pName, attr,
               initPattern);
     if (ef == nullptr || pName == nullptr) {
         return ORBIS_KERNEL_ERROR_EINVAL;
@@ -404,7 +404,8 @@ int PS4_SYSV_ABI sceKernelSetEventFlag(OrbisKernelEventFlag ef, u64 bitPattern) 
 
 int PS4_SYSV_ABI sceKernelPollEventFlag(OrbisKernelEventFlag ef, u64 bitPattern, u32 waitMode,
                                         u64* pResultPat) {
-    LOG_DEBUG(Kernel_Event, "called bitPattern = {:#x} waitMode = {:#x}", bitPattern, waitMode);
+    LOG_DEBUG(Kernel_Event, "called bitPattern = 0x%" PRIx64 " waitMode = 0x%x", bitPattern,
+              waitMode);
 
     if (ef == nullptr) {
         return ORBIS_KERNEL_ERROR_ESRCH;
@@ -444,14 +445,15 @@ int PS4_SYSV_ABI sceKernelPollEventFlag(OrbisKernelEventFlag ef, u64 bitPattern,
     auto result = ef->Poll(bitPattern, wait, clear, pResultPat);
 
     if (result != ORBIS_OK && result != ORBIS_KERNEL_ERROR_EBUSY) {
-        LOG_DEBUG(Kernel_Event, "returned {:#x}", result);
+        LOG_DEBUG(Kernel_Event, "returned 0x%x", result);
     }
 
     return result;
 }
 int PS4_SYSV_ABI sceKernelWaitEventFlag(OrbisKernelEventFlag ef, u64 bitPattern, u32 waitMode,
                                         u64* pResultPat, OrbisKernelUseconds* pTimeout) {
-    LOG_DEBUG(Kernel_Event, "called bitPattern = {:#x} waitMode = {:#x}", bitPattern, waitMode);
+    LOG_DEBUG(Kernel_Event, "called bitPattern = 0x%" PRIx64 " waitMode = 0x%x", bitPattern,
+              waitMode);
     if (ef == nullptr) {
         return ORBIS_KERNEL_ERROR_ESRCH;
     }
@@ -489,7 +491,7 @@ int PS4_SYSV_ABI sceKernelWaitEventFlag(OrbisKernelEventFlag ef, u64 bitPattern,
 
     const int result = ef->Wait(bitPattern, wait, clear, pResultPat, pTimeout);
     if (result != ORBIS_OK && result != ORBIS_KERNEL_ERROR_ETIMEDOUT) {
-        LOG_DEBUG(Kernel_Event, "returned {:#x}", result);
+        LOG_DEBUG(Kernel_Event, "returned 0x%x", result);
     }
 
     return result;

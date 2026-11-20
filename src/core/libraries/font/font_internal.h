@@ -29,12 +29,11 @@
 #include <utility>
 #include <vector>
 
-#include <fmt/format.h>
-
 #include "common/combiner.h"
 #include "common/io_file.h"
 #include "common/logging/log.h"
 #include "common/singleton.h"
+#include "common/string_util.h"
 #include "core/file_sys/fs.h"
 #include "core/libraries/error_codes.h"
 #include "core/libraries/font/font.h"
@@ -63,17 +62,24 @@ std::string DescribeValue(const T& value) {
     if constexpr (std::is_same_v<Clean, bool>) {
         return value ? "true" : "false";
     } else if constexpr (std::is_pointer_v<Clean>) {
-        return fmt::format("{}", reinterpret_cast<const void*>(value));
+        return Common::StringFromFormat(
+            "0x%llx", static_cast<unsigned long long>(
+                          reinterpret_cast<uintptr_t>(reinterpret_cast<const void*>(value))));
     } else if constexpr (std::is_floating_point_v<Clean>) {
-        return fmt::format("{:.6g}", value);
+        return Common::StringFromFormat("%.6g", static_cast<double>(value));
     } else if constexpr (std::is_enum_v<Clean>) {
         using Underlying = std::underlying_type_t<Clean>;
         return DescribeValue(static_cast<Underlying>(value));
     } else if constexpr (std::is_same_v<Clean, std::string> ||
                          std::is_same_v<Clean, std::string_view>) {
-        return fmt::format("\"{}\"", value);
+        std::string text = "\"";
+        text.append(value.data(), value.size());
+        text += '"';
+        return text;
+    } else if constexpr (std::is_signed_v<Clean>) {
+        return Common::StringFromFormat("%lld", static_cast<long long>(value));
     } else {
-        return fmt::format("{}", value);
+        return Common::StringFromFormat("%llu", static_cast<unsigned long long>(value));
     }
 }
 
@@ -161,18 +167,18 @@ ParamRecord MakeParamRecord(std::string name, T&& value) {
 }
 
 inline std::string FormatParamRecords(const std::vector<ParamRecord>& records) {
-    fmt::memory_buffer buffer;
-    fmt::format_to(std::back_inserter(buffer), "params:\n");
+    std::string text = "params:\n";
     for (const auto& entry : records) {
-        const bool changed = entry.initial != entry.current;
-        if (changed) {
-            fmt::format_to(std::back_inserter(buffer), "{}: {} -> {}\n", entry.name, entry.initial,
-                           entry.current);
-        } else {
-            fmt::format_to(std::back_inserter(buffer), "{}: {}\n", entry.name, entry.initial);
+        text += entry.name;
+        text += ": ";
+        text += entry.initial;
+        if (entry.initial != entry.current) {
+            text += " -> ";
+            text += entry.current;
         }
+        text += '\n';
     }
-    return fmt::to_string(buffer);
+    return text;
 }
 
 template <typename... Args>
@@ -184,7 +190,7 @@ std::string formatParamsImpl(const char* arg_names, Args&&... args) {
     auto append_record = [&](auto&& value) {
         std::string name = (index < names.size() && !names[index].empty())
                                ? std::move(names[index])
-                               : fmt::format("arg{}", index);
+                               : Common::StringFromFormat("arg%zu", index);
         ++index;
         records.push_back(MakeParamRecord(std::move(name), std::forward<decltype(value)>(value)));
     };
@@ -193,11 +199,11 @@ std::string formatParamsImpl(const char* arg_names, Args&&... args) {
 }
 
 inline void log_info(std::string_view message) {
-    LOG_INFO(Lib_Font, "{}", message);
+    LOG_INFO(Lib_Font, "%.*s", static_cast<int>((message).size()), (message).data());
 }
 
 inline void log_debug(std::string_view message) {
-    LOG_DEBUG(Lib_Font, "{}", message);
+    LOG_DEBUG(Lib_Font, "%.*s", static_cast<int>((message).size()), (message).data());
 }
 
 inline s32 RoundFixedMul16x16ToS32(long fixed_16_16, s32 value) {

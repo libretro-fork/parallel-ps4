@@ -44,7 +44,7 @@ static std::unordered_map<HandleKey, s32, HandleKeyHash> pad_handle_map{};
 static std::unordered_map<s32, GameController*> handle_to_controller_map{};
 
 int PS4_SYSV_ABI scePadClose(s32 handle) {
-    LOG_WARNING(Lib_Pad, "called, handle: {}", handle);
+    LOG_WARNING(Lib_Pad, "called, handle: %d", handle);
     if (handle_to_controller_map.erase(handle) == 0) {
         return ORBIS_PAD_ERROR_INVALID_HANDLE;
     }
@@ -133,7 +133,7 @@ int PS4_SYSV_ABI scePadGetCapability() {
 }
 
 int PS4_SYSV_ABI scePadGetControllerInformation(s32 handle, OrbisPadControllerInformation* pInfo) {
-    LOG_DEBUG(Lib_Pad, "called handle = {}", handle);
+    LOG_DEBUG(Lib_Pad, "called handle = %d", handle);
     auto it = handle_to_controller_map.find(handle);
     if (it == handle_to_controller_map.end()) {
         return ORBIS_PAD_ERROR_INVALID_HANDLE;
@@ -155,8 +155,8 @@ int PS4_SYSV_ABI scePadGetControllerInformation(s32 handle, OrbisPadControllerIn
                                  ? (OrbisPadDeviceClass)emu_settings_get_special_pad_class()
                                  : OrbisPadDeviceClass::Standard;
     }
-    LOG_DEBUG(Lib_Pad, "c: {} cc: {}, ct: {}, dc: {}", pInfo->connected, pInfo->connectedCount,
-              pInfo->connectionType, std::to_underlying(pInfo->deviceClass));
+    LOG_DEBUG(Lib_Pad, "c: %s cc: %u, ct: %u, dc: %d", (pInfo->connected) ? "true" : "false",
+              pInfo->connectedCount, pInfo->connectionType, std::to_underlying(pInfo->deviceClass));
     return ORBIS_OK;
 }
 
@@ -177,7 +177,7 @@ int PS4_SYSV_ABI scePadGetDeviceInfo() {
 
 int PS4_SYSV_ABI scePadGetExtControllerInformation(s32 handle,
                                                    OrbisPadExtendedControllerInformation* pInfo) {
-    LOG_INFO(Lib_Pad, "called handle = {}", handle);
+    LOG_INFO(Lib_Pad, "called handle = %d", handle);
     std::memset(pInfo, 0, sizeof(OrbisPadExtendedControllerInformation));
     return scePadGetControllerInformation(handle, &pInfo->base);
 }
@@ -205,7 +205,7 @@ int PS4_SYSV_ABI scePadGetHandle(Libraries::UserService::OrbisUserServiceUserId 
         return ORBIS_PAD_ERROR_DEVICE_NO_HANDLE;
     }
     s32 pad_handle = it->second;
-    LOG_DEBUG(Lib_Pad, "called, userid: {}, out pad handle: {}", userId, pad_handle);
+    LOG_DEBUG(Lib_Pad, "called, userid: %d, out pad handle: %d", userId, pad_handle);
     return pad_handle;
 }
 
@@ -322,7 +322,7 @@ int PS4_SYSV_ABI scePadOpen(Libraries::UserService::OrbisUserServiceUserId userI
             s32 new_handle = pad_handle_counter++;
             pad_handle_map[{userId, type, index}] = new_handle;
             handle_to_controller_map[new_handle] = controllers[4];
-            LOG_INFO(Lib_Pad, "Opened a TV remote device, out handle: {}", new_handle);
+            LOG_INFO(Lib_Pad, "Opened a TV remote device, out handle: %d", new_handle);
             return new_handle;
         }
         return ORBIS_DEVICE_SERVICE_ERROR_INVALID_USER;
@@ -342,7 +342,7 @@ int PS4_SYSV_ABI scePadOpen(Libraries::UserService::OrbisUserServiceUserId userI
                         ? user_manager_get_by_id(userId)->player_index - 1
                         : 4];
     LOG_INFO(Lib_Pad,
-             "called user_id = {}, type = {}, index = {}, player index = {}, out handle = {}",
+             "called user_id = %d, type = %d, index = %d, player index = %d, out handle = %d",
              userId, type, index, u->player_index, new_handle);
     scePadResetLightBar(new_handle);
     scePadResetOrientation(new_handle);
@@ -450,7 +450,7 @@ int PS4_SYSV_ABI scePadReadBlasterForTracker() {
 }
 
 int PS4_SYSV_ABI scePadReadExt(s32 handle, OrbisPadData* pData, s32 num) {
-    LOG_TRACE(Lib_Pad, "handle: {}, num: {}", handle, num);
+    LOG_TRACE(Lib_Pad, "handle: %d, num: %d", handle, num);
     // We don't currently support extensions, pass through.
     return scePadRead(handle, pData, num);
 }
@@ -466,19 +466,19 @@ int PS4_SYSV_ABI scePadReadHistory() {
 }
 
 int PS4_SYSV_ABI scePadReadState(s32 handle, OrbisPadData* pData) {
-    LOG_TRACE(Lib_Pad, "handle: {}", handle);
+    LOG_TRACE(Lib_Pad, "handle: %d", handle);
     const int result = scePadRead(handle, pData, 1);
     return result < 0 ? result : ORBIS_OK;
 }
 
 int PS4_SYSV_ABI scePadReadStateExt(s32 handle, OrbisPadData* pData) {
-    LOG_TRACE(Lib_Pad, "handle: {}", handle);
+    LOG_TRACE(Lib_Pad, "handle: %d", handle);
     // We don't currently support extensions, pass through.
     return scePadReadState(handle, pData);
 }
 
 int PS4_SYSV_ABI scePadResetLightBar(s32 handle) {
-    LOG_DEBUG(Lib_Pad, "called, handle: {}", handle);
+    LOG_DEBUG(Lib_Pad, "called, handle: %d", handle);
     auto it = handle_to_controller_map.find(handle);
     if (it == handle_to_controller_map.end()) {
         return ORBIS_PAD_ERROR_INVALID_HANDLE;
@@ -490,7 +490,7 @@ int PS4_SYSV_ABI scePadResetLightBar(s32 handle) {
     if (colour_index >= 0 && colour_index <= 3) {
         colour = Input::g_user_colours[colour_index];
     } else {
-        LOG_ERROR(Lib_Pad, "Invalid user colour value {} for controller {}, falling back to blue",
+        LOG_ERROR(Lib_Pad, "Invalid user colour value %d for controller %d, falling back to blue",
                   colour_index, handle);
     }
     controller.SetLightBarRGB(colour);
@@ -508,7 +508,7 @@ int PS4_SYSV_ABI scePadResetLightBarAllByPortType() {
 }
 
 int PS4_SYSV_ABI scePadResetOrientation(s32 handle) {
-    LOG_INFO(Lib_Pad, "scePadResetOrientation called handle = {}", handle);
+    LOG_INFO(Lib_Pad, "scePadResetOrientation called handle = %d", handle);
 
     auto it = handle_to_controller_map.find(handle);
     if (it == handle_to_controller_map.end()) {
@@ -572,7 +572,7 @@ int PS4_SYSV_ABI scePadSetLightBar(s32 handle, const OrbisPadLightBarParam* pPar
     }
     auto& controller = *it->second;
     if (pParam != nullptr) {
-        LOG_DEBUG(Lib_Pad, "called handle = {} rgb = {} {} {}", handle, pParam->r, pParam->g,
+        LOG_DEBUG(Lib_Pad, "called handle = %d rgb = %u %u %u", handle, pParam->r, pParam->g,
                   pParam->b);
 
         if (pParam->r < 0xD && pParam->g < 0xD && pParam->b < 0xD) {
@@ -598,7 +598,7 @@ int PS4_SYSV_ABI scePadSetLightBarBlinking() {
 }
 
 int PS4_SYSV_ABI scePadSetLightBarForTracker(s32 handle, const OrbisPadLightBarParam* pParam) {
-    LOG_INFO(Lib_Pad, "called, r: {} g: {} b: {}", pParam->r, pParam->g, pParam->b);
+    LOG_INFO(Lib_Pad, "called, r: %u g: %u b: %u", pParam->r, pParam->g, pParam->b);
     auto it = handle_to_controller_map.find(handle);
     if (it == handle_to_controller_map.end()) {
         return ORBIS_PAD_ERROR_INVALID_HANDLE;
@@ -655,7 +655,7 @@ int PS4_SYSV_ABI scePadSetVibration(s32 handle, const OrbisPadVibrationParam* pP
     }
     auto& controller = *it->second;
     if (pParam != nullptr) {
-        LOG_DEBUG(Lib_Pad, "scePadSetVibration called handle = {} data = {} , {}", handle,
+        LOG_DEBUG(Lib_Pad, "scePadSetVibration called handle = %d data = %u , %u", handle,
                   pParam->smallMotor, pParam->largeMotor);
         controller.SetVibration(pParam->smallMotor, pParam->largeMotor);
         return ORBIS_OK;

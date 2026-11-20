@@ -107,7 +107,7 @@ FileInfo GetFileInfoFromStat(const struct stat& stat) {
     case SeekOrigin::End:
         return RETRO_VFS_SEEK_POSITION_END;
     default:
-        UNREACHABLE_MSG("Impossible SeekOrigin {}", static_cast<u32>(origin));
+        UNREACHABLE_MSG("Impossible SeekOrigin %u", static_cast<u32>(origin));
     }
 }
 
@@ -213,14 +213,14 @@ int IOFile::Open(const fs::path& path, FileAccessMode mode, FileHint hint) {
         file = filestream_open(utf8.c_str(), RETRO_VFS_FILE_ACCESS_WRITE, hints);
         break;
     default:
-        UNREACHABLE_MSG("Impossible FileAccessMode {}", static_cast<u32>(mode));
+        UNREACHABLE_MSG("Impossible FileAccessMode %u", static_cast<u32>(mode));
     }
 
     if (!IsOpen()) {
         const int result = errno ? errno : ENOENT;
         const auto ec = std::error_code{result, std::generic_category()};
-        LOG_ERROR(Common_Filesystem, "Failed to open the file at path={}, error_message={}", utf8,
-                  ec.message());
+        LOG_ERROR(Common_Filesystem, "Failed to open the file at path=%s, error_message=%s",
+                  (utf8).c_str(), (ec.message()).c_str());
         return result;
     }
     return 0;
@@ -239,8 +239,8 @@ void IOFile::Close() {
     file_mapping = 0;
 
     if (filestream_close(file) != 0) {
-        LOG_ERROR(Common_Filesystem, "Failed to close the file at path={}",
-                  PathToUTF8String(file_path));
+        LOG_ERROR(Common_Filesystem, "Failed to close the file at path=%s",
+                  (PathToUTF8String(file_path)).c_str());
     }
     file = nullptr;
 }
@@ -261,13 +261,13 @@ void IOFile::Unlink() {
     if (hfile == INVALID_HANDLE_VALUE ||
         static_cast<s32>(NtSetInformationFile(hfile, &iosb, &disposition, sizeof(disposition),
                                               FileDispositionInformation)) < 0) {
-        LOG_ERROR(Common_Filesystem, "Failed to unlink the file at path={}",
-                  PathToUTF8String(file_path));
+        LOG_ERROR(Common_Filesystem, "Failed to unlink the file at path=%s",
+                  (PathToUTF8String(file_path)).c_str());
     }
 #else
     if (filestream_delete(PathToUTF8String(file_path).c_str()) != 0) {
-        LOG_ERROR(Common_Filesystem, "Failed to unlink the file at path={}",
-                  PathToUTF8String(file_path));
+        LOG_ERROR(Common_Filesystem, "Failed to unlink the file at path=%s",
+                  (PathToUTF8String(file_path)).c_str());
     }
 #endif
 }
@@ -278,7 +278,8 @@ uintptr_t IOFile::GetFileMapping() {
     }
 #ifdef _WIN64
     const HANDLE hfile = NativeHandle(file);
-    ASSERT_MSG(hfile != INVALID_HANDLE_VALUE, "No handle under {}", PathToUTF8String(file_path));
+    ASSERT_MSG(hfile != INVALID_HANDLE_VALUE, "No handle under %s",
+               (PathToUTF8String(file_path)).c_str());
     HANDLE mapping = nullptr;
 
     if (file_access_mode == FileAccessMode::ReadWrite) {
@@ -289,11 +290,11 @@ uintptr_t IOFile::GetFileMapping() {
     }
 
     file_mapping = std::bit_cast<uintptr_t>(mapping);
-    ASSERT_MSG(file_mapping, "{}", Common::GetLastErrorMsg());
+    ASSERT_MSG(file_mapping, "%s", (Common::GetLastErrorMsg()).c_str());
     return file_mapping;
 #else
     const int fd = Descriptor(file);
-    ASSERT_MSG(fd >= 0, "No descriptor under {}", PathToUTF8String(file_path));
+    ASSERT_MSG(fd >= 0, "No descriptor under %s", (PathToUTF8String(file_path)).c_str());
     file_mapping = static_cast<uintptr_t>(fd);
     return file_mapping;
 #endif
@@ -305,8 +306,8 @@ size_t IOFile::ReadBytes(void* data, size_t size) const {
     }
     const s64 read = filestream_read(file, data, static_cast<s64>(size));
     if (read < 0) {
-        LOG_ERROR(Common_Filesystem, "Failed to read the file at path={}",
-                  PathToUTF8String(file_path));
+        LOG_ERROR(Common_Filesystem, "Failed to read the file at path=%s",
+                  (PathToUTF8String(file_path)).c_str());
         return 0;
     }
     return static_cast<size_t>(read);
@@ -321,8 +322,8 @@ size_t IOFile::WriteBytes(const void* data, size_t size) const {
     }
     const s64 written = filestream_write(file, data, static_cast<s64>(size));
     if (written < 0) {
-        LOG_ERROR(Common_Filesystem, "Failed to write to the file at path={}",
-                  PathToUTF8String(file_path));
+        LOG_ERROR(Common_Filesystem, "Failed to write to the file at path=%s",
+                  (PathToUTF8String(file_path)).c_str());
         return 0;
     }
     return static_cast<size_t>(written);
@@ -371,8 +372,8 @@ bool IOFile::Flush() const {
     }
     const bool flushed = filestream_flush(file) == 0;
     if (!flushed) {
-        LOG_ERROR(Common_Filesystem, "Failed to flush the file at path={}",
-                  PathToUTF8String(file_path));
+        LOG_ERROR(Common_Filesystem, "Failed to flush the file at path=%s",
+                  (PathToUTF8String(file_path)).c_str());
     }
     return flushed;
 }
@@ -392,8 +393,8 @@ bool IOFile::Commit() const {
 #endif
     }
     if (!committed) {
-        LOG_ERROR(Common_Filesystem, "Failed to commit the file at path={}",
-                  PathToUTF8String(file_path));
+        LOG_ERROR(Common_Filesystem, "Failed to commit the file at path=%s",
+                  (PathToUTF8String(file_path)).c_str());
     }
     return committed;
 }
@@ -404,8 +405,8 @@ bool IOFile::SetSize(u64 size) const {
     }
     const bool resized = filestream_truncate(file, static_cast<s64>(size)) == 0;
     if (!resized) {
-        LOG_ERROR(Common_Filesystem, "Failed to resize the file at path={}, size={}",
-                  PathToUTF8String(file_path), size);
+        LOG_ERROR(Common_Filesystem, "Failed to resize the file at path=%s, size=%" PRIu64,
+                  (PathToUTF8String(file_path)).c_str(), size);
     }
     return resized;
 }
@@ -464,8 +465,9 @@ bool IOFile::Seek(s64 offset, SeekOrigin origin) const {
     }
     const bool sought = filestream_seek(file, offset, ToSeekOrigin(origin)) >= 0;
     if (!sought) {
-        LOG_ERROR(Common_Filesystem, "Failed to seek the file at path={}, offset={}, origin={}",
-                  PathToUTF8String(file_path), offset, static_cast<u32>(origin));
+        LOG_ERROR(Common_Filesystem,
+                  "Failed to seek the file at path=%s, offset=%" PRId64 ", origin=%u",
+                  (PathToUTF8String(file_path)).c_str(), offset, static_cast<u32>(origin));
     }
     return sought;
 }
@@ -505,8 +507,8 @@ std::optional<FileView> FileView::Map(const fs::path& path) {
     if (view.file.GetSize() != 0) {
         view.bytes = view.file.Mapped();
         if (view.bytes.empty()) {
-            LOG_ERROR(Common_Filesystem, "Failed to map the file at path={}",
-                      PathToUTF8String(path));
+            LOG_ERROR(Common_Filesystem, "Failed to map the file at path=%s",
+                      (PathToUTF8String(path)).c_str());
             return std::nullopt;
         }
     }

@@ -56,12 +56,13 @@ static void LogGetCharGlyphMetricsFailOnce(std::string_view stage, s32 rc, s32 f
             num_glyphs = static_cast<u32>(face->num_glyphs);
         }
 
-        LOG_WARNING(
-            Lib_Font,
-            "GetCharGlyphMetricsFail: rc={} stage={} ft_err={} is_system={} code={} glyph_index={} "
-            "num_glyphs={} scale_w={} scale_h={}",
-            rc, stage, static_cast<int>(ft_err), is_system, code, glyph_index, num_glyphs, scale_w,
-            scale_h);
+        LOG_WARNING(Lib_Font,
+                    "GetCharGlyphMetricsFail: rc=%d stage=%.*s ft_err=%d is_system=%s code=%u "
+                    "glyph_index=%u "
+                    "num_glyphs=%u scale_w=%g scale_h=%g",
+                    rc, static_cast<int>((stage).size()), (stage).data(), static_cast<int>(ft_err),
+                    (is_system) ? "true" : "false", code, glyph_index, num_glyphs, scale_w,
+                    scale_h);
 
         ++g_get_char_metrics_fail.count;
         return;
@@ -1973,11 +1974,13 @@ s32 RenderCharGlyphImageCore(Libraries::Font::OrbisFontHandle fontHandle, u32 co
                 }
                 LOG_DEBUG(
                     Lib_Font,
-                    "SysfontRender: handle={} code=U+{:04X} mapped=U+{:04X} font_id={} "
-                    "scale_unit={} dpi_x={} dpi_y={} scale_w={} scale_h={} sys_scale_factor={} "
-                    "shift_y_units={}",
-                    static_cast<const void*>(fontHandle), code, mapped_code, font_id, scale_unit,
-                    dpi_x, dpi_y, scale_x_in, scale_y_in, sys_scale_factor, shift_y_units);
+                    "SysfontRender: handle=0x%llx code=U+%04X mapped=U+%04X font_id=%u "
+                    "scale_unit=%u dpi_x=%u dpi_y=%u scale_w=%g scale_h=%g sys_scale_factor=%g "
+                    "shift_y_units=%d",
+                    static_cast<unsigned long long>(
+                        reinterpret_cast<uintptr_t>(static_cast<const void*>(fontHandle))),
+                    code, mapped_code, font_id, scale_unit, dpi_x, dpi_y, scale_x_in, scale_y_in,
+                    sys_scale_factor, shift_y_units);
             }
         });
     }

@@ -95,7 +95,7 @@ void InstallKernelIntegration() {
             [] {
                 const int port = emu_settings_get_p2p_port();
                 if (port < 0 || port > 0xffff) {
-                    LOG_WARNING(Lib_Net, "p2p_port {} is not a UDP port, using 3658", port);
+                    LOG_WARNING(Lib_Net, "p2p_port %d is not a UDP port, using 3658", port);
                     return u16{3658};
                 }
                 return static_cast<u16>(port);
@@ -103,10 +103,10 @@ void InstallKernelIntegration() {
         .p2p_started =
             [](u16 port) {
                 if (!emu_settings_get_connected_to_network() || !emu_settings_get_enable_upnp()) {
-                    LOG_INFO(Lib_Net, "P2P on UDP port {}: UPnP forwarding off", port);
+                    LOG_INFO(Lib_Net, "P2P on UDP port %u: UPnP forwarding off", port);
                     return;
                 }
-                LOG_INFO(Lib_Net, "P2P on UDP port {}: asking the router to forward it (UPnP)",
+                LOG_INFO(Lib_Net, "P2P on UDP port %u: asking the router to forward it (UPnP)",
                          port);
                 auto& upnp = UPnPClient::Instance();
                 upnp.Start(); // no-op if NP already started it
@@ -114,7 +114,7 @@ void InstallKernelIntegration() {
             },
         .p2p_stopped =
             [](u16 port) {
-                LOG_DEBUG(Lib_Net, "P2P on UDP port {} stopped: removing any UPnP mapping", port);
+                LOG_DEBUG(Lib_Net, "P2P on UDP port %u stopped: removing any UPnP mapping", port);
                 UPnPClient::Instance().UnmapPort(port);
             },
         .public_addr =
@@ -130,7 +130,7 @@ void InstallKernelIntegration() {
 
 s32 KernelClose(s32 fd) {
     const auto kind = Core::Net::GetObjectKind(fd);
-    LOG_DEBUG(Lib_Net, "close({}): {}", fd,
+    LOG_DEBUG(Lib_Net, "close(%d): %s", fd,
               !kind                                       ? "not a net object"
               : *kind == Core::Net::NetObjectKind::Socket ? "socket"
               : *kind == Core::Net::NetObjectKind::Epoll  ? "epoll"
@@ -260,7 +260,7 @@ int PS4_SYSV_ABI sys_socket(int family, int type, int protocol) {
 }
 
 int PS4_SYSV_ABI sys_socketpair(int family, int type, int protocol, int sv[2]) {
-    LOG_DEBUG(Lib_Net, "family = {}, type = {}, protocol = {}", family, type, protocol);
+    LOG_DEBUG(Lib_Net, "family = %d, type = %d, protocol = %d", family, type, protocol);
     if (sv == nullptr) {
         return PosixError(ORBIS_NET_EFAULT);
     }

@@ -1,7 +1,6 @@
 // SPDX-FileCopyrightText: Copyright 2024-2026 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
-#include <fmt/chrono.h>
 #include "common/enum_names.h"
 #include "common/io_file.h"
 
@@ -24,13 +23,13 @@ static ::Core::FileSys::MntPoints* g_mnt =
 static std::string SpaceSizeToString(size_t size) {
     std::string size_str;
     if (size > 1024 * 1024 * 1024) { // > 1GB
-        size_str = fmt::format("{:.2f} GB", double(size / 1024 / 1024) / 1024.0f);
+        size_str = Common::StringFromFormat("%.2f GB", double(size / 1024 / 1024) / 1024.0f);
     } else if (size > 1024 * 1024) { // > 1MB
-        size_str = fmt::format("{:.2f} MB", double(size / 1024) / 1024.0f);
+        size_str = Common::StringFromFormat("%.2f MB", double(size / 1024) / 1024.0f);
     } else if (size > 1024) { // > 1KB
-        size_str = fmt::format("{:.2f} KB", double(size) / 1024.0f);
+        size_str = Common::StringFromFormat("%.2f KB", double(size) / 1024.0f);
     } else {
-        size_str = fmt::format("{} B", size);
+        size_str = Common::StringFromFormat("%zu B", size);
     }
     return size_str;
 }
@@ -97,7 +96,9 @@ SaveDialogState::SaveDialogState(const OrbisSaveDataDialogParam& param) {
             param_sfo.Open(param_sfo_path);
 
             auto last_write = std::chrono::system_clock::to_time_t(param_sfo.GetLastWrite());
-            std::string date_str = fmt::format("{:%d %b, %Y %R}", *std::localtime(&last_write));
+            char date[64];
+            std::strftime(date, sizeof(date), "%d %b, %Y %H:%M", std::localtime(&last_write));
+            std::string date_str = date;
 
             size_t size = Common::FS::GetDirectorySize(dir_path);
             std::string size_str = SpaceSizeToString(size);
@@ -214,9 +215,9 @@ SaveDialogState::SystemState::SystemState(const SaveDialogState& state,
         break;
     case SystemMessageType::NOSPACE:
         return_cancel = true;
-        M(fmt::format(
-              "There is not enough space to save the data. To continue {} free space is required.",
-              SpaceSizeToString(sys.value * OrbisSaveDataBlockSize)),
+        M(Common::StringFromFormat(
+              "There is not enough space to save the data. To continue %s free space is required.",
+              SpaceSizeToString(sys.value * OrbisSaveDataBlockSize).c_str()),
           "##UNKNOWN##", "##UNKNOWN##");
         break;
     case SystemMessageType::PROGRESS:
@@ -234,8 +235,9 @@ SaveDialogState::SystemState::SystemState(const SaveDialogState& state,
         break;
     case SystemMessageType::NOSPACE_CONTINUABLE:
         return_cancel = true;
-        M(fmt::format("There is not enough space to save the data. {} free space is required.",
-                      SpaceSizeToString(sys.value * OrbisSaveDataBlockSize)),
+        M(Common::StringFromFormat(
+              "There is not enough space to save the data. %s free space is required.",
+              SpaceSizeToString(sys.value * OrbisSaveDataBlockSize).c_str()),
           "##UNKNOWN##", "##UNKNOWN##");
         break;
     case SystemMessageType::CORRUPTED_AND_DELETED: {
@@ -260,9 +262,10 @@ SaveDialogState::SystemState::SystemState(const SaveDialogState& state,
         M("Cannot create more saved data", "##UNKNOWN##", "##UNKNOWN##");
         break;
     default:
-        msg = fmt::format("Unknown message type: {}",
-                          enum_name(&enum_names_Libraries_SaveData_Dialog_SystemMessageType,
-                                    static_cast<s64>(sys.msgType)));
+        msg = Common::StringFromFormat(
+            "Unknown message type: %s",
+            enum_name(&enum_names_Libraries_SaveData_Dialog_SystemMessageType,
+                      static_cast<s64>(sys.msgType)));
         break;
     }
 
@@ -281,7 +284,7 @@ SaveDialogState::ErrorCodeState::ErrorCodeState(const OrbisSaveDataDialogParam& 
         this->error_msg = "The data is corrupted.";
         break;
     default:
-        this->error_msg = fmt::format("An error has occurred. ({:X})", err.errorCode);
+        this->error_msg = Common::StringFromFormat("An error has occurred. (%X)", err.errorCode);
         break;
     }
 }

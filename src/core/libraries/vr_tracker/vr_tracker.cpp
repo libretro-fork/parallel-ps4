@@ -155,7 +155,7 @@ s32 PS4_SYSV_ABI sceVrTrackerRegisterDevice2(const OrbisVrTrackerDeviceType devi
 
 s32 PS4_SYSV_ABI sceVrTrackerRegisterDeviceInternal(const OrbisVrTrackerDeviceType device_type,
                                                     const s32 handle, s32 unk0, s32 unk1) {
-    LOG_WARNING(Lib_VrTracker, "(STUBBED) called, device_type = {}, handle = {}",
+    LOG_WARNING(Lib_VrTracker, "(STUBBED) called, device_type = %u, handle = %d",
                 static_cast<u32>(device_type), handle);
     if (!g_library_initialized) {
         return ORBIS_VR_TRACKER_ERROR_NOT_INIT;

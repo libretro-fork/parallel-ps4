@@ -14,6 +14,7 @@
 #include "common/path_util.h"
 #include "common/run_once.h"
 #include "common/signal_context.h"
+#include "common/string_util.h"
 #include "common/x64_decode.h"
 #include "common/x64_emit.h"
 #include "core/emulator_settings.h"
@@ -111,7 +112,8 @@ static void DumpSrtProgram(const Shader::Info& info, const u8* code, size_t code
     if (!Common::FS::Exists(dump_dir)) {
         Common::FS::CreateDirectories(dump_dir);
     }
-    const auto filename = fmt::format("{}_{:#018x}.srtprogram.txt", info.hw_stage, info.pgm_hash);
+    const auto filename = Common::StringFromFormat("%s_0x%016" PRIx64 ".srtprogram.txt",
+                                                   Shader::NameOf(info.hw_stage), info.pgm_hash);
     const auto file = IOFile{dump_dir / filename, FileAccessMode::Create};
 
     const u8* const end = code + codesize;
@@ -180,8 +182,9 @@ static bool SrtWalkerSignalHandler(void* context, void* fault_address) {
     // Fill nops
     memset(code_patch + patch_size, 0x90, len - patch_size);
 
-    LOG_WARNING(Render_Recompiler, "Patched SRT walker at {}, fault address {}", code,
-                fault_address);
+    LOG_WARNING(Render_Recompiler, "Patched SRT walker at 0x%llx, fault address 0x%llx",
+                static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(code)),
+                static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(fault_address)));
 
     return true;
 }
@@ -618,8 +621,9 @@ static bool ComputeOffset(x64_code_t* c, int reg, PassInfo& pass_info, const IR:
         ABORT_ON_FAILURE(EmitComputeOffsetBitFieldUExtract(c, reg, pass_info, inst));
         return true;
     default:
-        LOG_ERROR(Render_Recompiler, "Unexpected instruction for offset computation, {}",
-                  Shader::IR::NameOf(inst->GetOpcode()));
+        LOG_ERROR(Render_Recompiler, "Unexpected instruction for offset computation, %.*s",
+                  static_cast<int>((Shader::IR::NameOf(inst->GetOpcode())).size()),
+                  (Shader::IR::NameOf(inst->GetOpcode())).data());
         return false;
     }
 }

@@ -157,7 +157,7 @@ struct StreamBuffer : public Buffer {
     /// Maps and commits a memory region with user provided data
     u64 Copy(auto src, size_t size, size_t alignment = 0) {
         const auto [data, offset] = Map(size, alignment);
-        ASSERT_MSG(data, "Failed to copy {:#x} bytes", size);
+        ASSERT_MSG(data, "Failed to copy 0x%zx bytes", size);
         std::memcpy(data, reinterpret_cast<const void*>(src), size);
         Commit();
         return offset;

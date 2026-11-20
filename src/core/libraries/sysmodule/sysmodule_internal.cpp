@@ -263,7 +263,7 @@ s32 loadModuleInternal(s32 index, s32 argc, const void* argv, s32* res_out) {
         // If the module is missing, the library prints a very helpful message for developers.
         // We'll just log an error.
         if (result < 0) {
-            LOG_ERROR(Lib_SysModule, "Failed to load game library {}", guest_path);
+            LOG_ERROR(Lib_SysModule, "Failed to load game library %s", (guest_path).c_str());
             return result;
         } else {
             // On success, the library validates module params and the module SDK version.
@@ -317,11 +317,12 @@ s32 loadModuleInternal(s32 index, s32 argc, const void* argv, s32* res_out) {
                 sys_module_path / game_info->GameSerial() / mod_name;
             if (Common::FS::Exists(game_specific_module_path)) {
                 // The requested module is present in the game-specific sys_modules, load it.
-                LOG_INFO(Loader, "Loading {} from game serial file {}", mod_name,
-                         game_info->GameSerial());
+                LOG_INFO(Loader, "Loading %s from game serial file %.*s", (mod_name).c_str(),
+                         static_cast<int>((game_info->GameSerial()).size()),
+                         (game_info->GameSerial()).data());
                 s32 handle = linker->LoadAndStartModule(game_specific_module_path, argc, argv,
                                                         &start_result);
-                ASSERT_MSG(handle >= 0, "Failed to load module {}", mod_name);
+                ASSERT_MSG(handle >= 0, "Failed to load module %s", (mod_name).c_str());
                 mod.handle = handle;
                 mod.is_loaded++;
                 if (res_out != nullptr) {
@@ -387,22 +388,22 @@ s32 loadModuleInternal(s32 index, s32 argc, const void* argv, s32* res_out) {
         // Allowed module, check if it exists
         const auto& module_path = sys_module_path / mod_name;
         if (Common::FS::Exists(module_path)) {
-            LOG_INFO(Loader, "Loading {}", mod_name);
+            LOG_INFO(Loader, "Loading %s", (mod_name).c_str());
             s32 handle = linker->LoadAndStartModule(module_path, argc, argv, &start_result);
-            ASSERT_MSG(handle >= 0, "Failed to load module {}", mod_name);
+            ASSERT_MSG(handle >= 0, "Failed to load module %s", (mod_name).c_str());
             mod.handle = handle;
         } else {
             // Allowed LLE that isn't present, log message
             auto& [name, init_func] = *it;
             if (init_func) {
-                LOG_INFO(Loader, "Can't Load {} switching to HLE", mod_name);
+                LOG_INFO(Loader, "Can't Load %s switching to HLE", (mod_name).c_str());
                 init_func(&linker->GetHLESymbols());
 
                 // When loading HLEs, we need to relocate imports
                 // This ensures later module loads can see our HLE functions.
                 linker->RelocateAllImports();
             } else {
-                LOG_INFO(Loader, "No HLE available for {} module", mod_name);
+                LOG_INFO(Loader, "No HLE available for %s module", (mod_name).c_str());
             }
             mod.handle = stub_handle++;
         }
@@ -438,7 +439,7 @@ s32 loadModule(s32 id, s32 argc, const void* argv, s32* res_out) {
         return ORBIS_SYSMODULE_LOCK_FAILED;
     }
 
-    LOG_INFO(Lib_SysModule, "Loading {}", requested_module.name);
+    LOG_INFO(Lib_SysModule, "Loading %s", requested_module.name);
 
     // Loop through every module that requires loading, in reverse order
     for (s64 i = requested_module.num_to_load - 1; i >= 0; i--) {
@@ -595,7 +596,7 @@ s32 preloadModulesForLibkernel() {
                            "libSceFios2.prx cannot be loaded, but the guest attempted to use it. "
                            "This usually indicates a corrupted dump.");
             } else {
-                LOG_CRITICAL(Lib_SysModule, "Failed to preload {}, expect crashes",
+                LOG_CRITICAL(Lib_SysModule, "Failed to preload %s, expect crashes",
                              g_modules_array[module_index].name);
             }
         }

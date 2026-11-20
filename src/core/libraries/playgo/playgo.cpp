@@ -155,7 +155,7 @@ s32 PS4_SYSV_ABI scePlayGoGetLocus(OrbisPlayGoHandle handle, const OrbisPlayGoCh
         return ORBIS_PLAYGO_ERROR_BAD_SIZE;
     }
 
-    LOG_DEBUG(Lib_PlayGo, "called handle = {}, chunkIds = {}, numberOfEntries = {}", handle,
+    LOG_DEBUG(Lib_PlayGo, "called handle = %u, chunkIds = %u, numberOfEntries = %u", handle,
               *chunkIds, numberOfEntries);
 
     if (!playgo) {
@@ -178,7 +178,7 @@ s32 PS4_SYSV_ABI scePlayGoGetLocus(OrbisPlayGoHandle handle, const OrbisPlayGoCh
 
 s32 PS4_SYSV_ABI scePlayGoGetProgress(OrbisPlayGoHandle handle, const OrbisPlayGoChunkId* chunkIds,
                                       uint32_t numberOfEntries, OrbisPlayGoProgress* outProgress) {
-    LOG_DEBUG(Lib_PlayGo, "called handle = {}, numberOfEntries = {}", handle, numberOfEntries);
+    LOG_DEBUG(Lib_PlayGo, "called handle = %u, numberOfEntries = %u", handle, numberOfEntries);
 
     if (handle != PlaygoHandle) {
         return ORBIS_PLAYGO_ERROR_BAD_HANDLE;
@@ -217,7 +217,7 @@ s32 PS4_SYSV_ABI scePlayGoGetProgress(OrbisPlayGoHandle handle, const OrbisPlayG
 
 s32 PS4_SYSV_ABI scePlayGoGetToDoList(OrbisPlayGoHandle handle, OrbisPlayGoToDo* outTodoList,
                                       u32 numberOfEntries, u32* outEntries) {
-    LOG_INFO(Lib_PlayGo, "called handle = {} numberOfEntries = {}", handle, numberOfEntries);
+    LOG_INFO(Lib_PlayGo, "called handle = %u numberOfEntries = %u", handle, numberOfEntries);
 
     if (handle != PlaygoHandle) {
         return ORBIS_PLAYGO_ERROR_BAD_HANDLE;
@@ -244,7 +244,7 @@ u64 scePlayGoConvertLanguage(u64 systemLang) {
 }
 
 s32 PS4_SYSV_ABI scePlayGoInitialize(OrbisPlayGoInitParams* param) {
-    LOG_INFO(Lib_PlayGo, "called, bufSize = {}", param->bufSize);
+    LOG_INFO(Lib_PlayGo, "called, bufSize = %u", param->bufSize);
     if (param->bufAddr == nullptr) {
         return ORBIS_PLAYGO_ERROR_BAD_POINTER;
     }

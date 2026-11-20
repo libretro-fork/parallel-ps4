@@ -500,7 +500,7 @@ void AvPlayerState::OnPlaybackStateChanged(AvState state) {
 bool AvPlayerState::SetState(AvState state) {
     int from = 0;
     if (!avplayer_fsm_set(&m_fsm, static_cast<int>(state), &from)) {
-        LOG_ERROR(Lib_AvPlayer, "Invalid state transition: {} -> {}",
+        LOG_ERROR(Lib_AvPlayer, "Invalid state transition: %s -> %s",
                   enum_name(&enum_names_Libraries_AvPlayer_AvState, static_cast<s64>(from)),
                   enum_name(&enum_names_Libraries_AvPlayer_AvState, static_cast<s64>(state)));
         return false;
@@ -521,7 +521,7 @@ std::optional<bool> AvPlayerState::OnBufferingCheckEvent(u32 num_frames) {
 
 // Called inside CONTROLLER thread
 void AvPlayerState::EmitEvent(AvPlayerEvents event_id, void* event_data) {
-    LOG_INFO(Lib_AvPlayer, "Sending event to the game: id = {}",
+    LOG_INFO(Lib_AvPlayer, "Sending event to the game: id = %s",
              enum_name(&enum_names_Libraries_AvPlayer_AvPlayerEvents, static_cast<s64>(event_id)));
     const auto callback = m_init_data.event_replacement.event_callback;
     if (callback) {

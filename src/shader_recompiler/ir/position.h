@@ -32,7 +32,7 @@ inline void ExportPosition(IREmitter& ir, const StageRuntimeInfo& stage,
                                          output == Output::ViewportIndex;
         if (tess_emulated_primitive && last_stage_required) {
             LOG_WARNING(Render,
-                        "{} is exported in vertex shader but tessellation-based primitive "
+                        "%s is exported in vertex shader but tessellation-based primitive "
                         "emulation is active. Not implemented yet.",
                         enum_name(&enum_names_Shader_Output, static_cast<s64>(output)));
             return;
@@ -74,11 +74,12 @@ inline void ExportPosition(IREmitter& ir, const StageRuntimeInfo& stage,
         ir.SetAttribute(IR::Attribute::ViewportIndex, value);
         break;
     case Output::None:
-        LOG_WARNING(Render_Recompiler, "The {} component of {} isn't mapped, skipping",
-                    "xyzw"[comp], NameOf(attribute));
+        LOG_WARNING(Render_Recompiler, "The %c component of %s isn't mapped, skipping",
+                    "xyzw"[comp], NameOf(attribute).c_str());
         break;
     default:
-        UNREACHABLE_MSG("Unhandled output {} on attribute {}", u32(output), NameOf(attribute));
+        UNREACHABLE_MSG("Unhandled output %u on attribute %s", u32(output),
+                        NameOf(attribute).c_str());
     }
 }
 

@@ -86,7 +86,9 @@ static IR::Value LoadBufferFormat(IR::IREmitter& ir, const IR::Value handle, con
         break;
     }
     default:
-        UNREACHABLE_MSG("Unsupported buffer data format: {}", format_info.data_format);
+        UNREACHABLE_MSG("Unsupported buffer data format: %.*s",
+                        static_cast<int>(AmdGpu::NameOf(format_info.data_format).size()),
+                        AmdGpu::NameOf(format_info.data_format).data());
     }
 
     // Pad to 4 components and apply additional modifications.
@@ -185,7 +187,9 @@ static void StoreBufferFormat(IR::IREmitter& ir, const IR::Value handle, const I
         break;
     }
     default:
-        UNREACHABLE_MSG("Unsupported buffer data format: {}", format_info.data_format);
+        UNREACHABLE_MSG("Unsupported buffer data format: %.*s",
+                        static_cast<int>(AmdGpu::NameOf(format_info.data_format).size()),
+                        AmdGpu::NameOf(format_info.data_format).data());
     }
 }
 

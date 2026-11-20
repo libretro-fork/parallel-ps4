@@ -57,7 +57,7 @@ ProbeInfo ProbeServer(const std::string& host, u16 port, u32 timeout_ms) {
 
     if (::getaddrinfo(host.c_str(), std::to_string(port).c_str(), &hints, &res_list) != 0 ||
         !res_list) {
-        LOG_WARNING(ShadNet, "probe: DNS resolution failed for '{}'", host);
+        LOG_WARNING(ShadNet, "probe: DNS resolution failed for '%s'", (host).c_str());
         return info; // Unreachable
     }
 
@@ -105,8 +105,8 @@ ProbeInfo ProbeServer(const std::string& host, u16 port, u32 timeout_ms) {
 
     if (!connected) {
         SHAD_CLOSE(sock);
-        LOG_WARNING(ShadNet, "probe: server {}:{} is unreachable (timeout {} ms)", host, port,
-                    timeout_ms);
+        LOG_WARNING(ShadNet, "probe: server %s:%u is unreachable (timeout %u ms)", (host).c_str(),
+                    port, timeout_ms);
         return info; // Unreachable
     }
 
@@ -134,50 +134,50 @@ ProbeInfo ProbeServer(const std::string& host, u16 port, u32 timeout_ms) {
     u8 hdr[SHAD_HEADER_SIZE];
     if (!ProbeRecvN(sock, hdr, SHAD_HEADER_SIZE)) {
         SHAD_CLOSE(sock);
-        LOG_WARNING(ShadNet, "probe: {}:{} reachable but no ServerInfo header received", host,
-                    port);
+        LOG_WARNING(ShadNet, "probe: %s:%u reachable but no ServerInfo header received",
+                    (host).c_str(), port);
         return info;
     }
     if (static_cast<PacketType>(hdr[0]) != PacketType::ServerInfo) {
         SHAD_CLOSE(sock);
-        LOG_WARNING(ShadNet, "probe: {}:{} sent packet type {:02x} instead of ServerInfo", host,
-                    port, hdr[0]);
+        LOG_WARNING(ShadNet, "probe: %s:%u sent packet type %02x instead of ServerInfo",
+                    (host).c_str(), port, hdr[0]);
         return info;
     }
 
     const u32 total_sz = ProbeGetLE32(hdr + 3);
     if (total_sz < SHAD_HEADER_SIZE || total_sz > SHAD_MAX_PACKET_SIZE) {
         SHAD_CLOSE(sock);
-        LOG_WARNING(ShadNet, "probe: {}:{} sent corrupt ServerInfo (total_sz={})", host, port,
-                    total_sz);
+        LOG_WARNING(ShadNet, "probe: %s:%u sent corrupt ServerInfo (total_sz=%u)", (host).c_str(),
+                    port, total_sz);
         return info;
     }
     const u32 payload_sz = total_sz - SHAD_HEADER_SIZE;
     std::vector<u8> payload(payload_sz);
     if (payload_sz > 0 && !ProbeRecvN(sock, payload.data(), payload_sz)) {
         SHAD_CLOSE(sock);
-        LOG_WARNING(ShadNet, "probe: {}:{} ServerInfo payload read failed", host, port);
+        LOG_WARNING(ShadNet, "probe: %s:%u ServerInfo payload read failed", (host).c_str(), port);
         return info;
     }
     SHAD_CLOSE(sock);
 
     if (payload_sz < 4) {
         info.result = ProbeResult::Ok;
-        LOG_INFO(ShadNet, "probe: server {}:{} is reachable (no version field in ServerInfo)", host,
-                 port);
+        LOG_INFO(ShadNet, "probe: server %s:%u is reachable (no version field in ServerInfo)",
+                 (host).c_str(), port);
         return info;
     }
 
     info.server_version = ProbeGetLE32(payload.data());
     if (info.server_version != SHAD_PROTOCOL_VERSION) {
         info.result = ProbeResult::VersionMismatch;
-        LOG_WARNING(ShadNet, "probe: server {}:{} protocol version mismatch (server v{}, ours v{})",
-                    host, port, info.server_version, SHAD_PROTOCOL_VERSION);
+        LOG_WARNING(ShadNet, "probe: server %s:%u protocol version mismatch (server v%u, ours v%u)",
+                    (host).c_str(), port, info.server_version, SHAD_PROTOCOL_VERSION);
         return info;
     }
 
     info.result = ProbeResult::Ok;
-    LOG_INFO(ShadNet, "probe: server {}:{} is reachable (protocol v{})", host, port,
+    LOG_INFO(ShadNet, "probe: server %s:%u is reachable (protocol v%u)", (host).c_str(), port,
              info.server_version);
     return info;
 }

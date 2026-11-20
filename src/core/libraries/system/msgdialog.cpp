@@ -52,7 +52,7 @@ Error PS4_SYSV_ABI sceMsgDialogGetResult(DialogResult* result) {
 
 Status PS4_SYSV_ABI sceMsgDialogGetStatus() {
     const Status status = GetStatus();
-    LOG_TRACE(Lib_MsgDlg, "called status={}",
+    LOG_TRACE(Lib_MsgDlg, "called status=%s",
               enum_name(&enum_names_Libraries_CommonDialog_Status, static_cast<s64>(status)));
     return status;
 }
@@ -85,7 +85,7 @@ Error PS4_SYSV_ABI sceMsgDialogOpen(const OrbisParam* param) {
         return Error::ARG_NULL;
     }
     LOG_DEBUG(
-        Lib_MsgDlg, "called param->mode: {}",
+        Lib_MsgDlg, "called param->mode: %s",
         enum_name(&enum_names_Libraries_MsgDialog_MsgDialogMode, static_cast<s64>(param->mode)));
     ASSERT(param->size == sizeof(OrbisParam));
     ASSERT(param->baseParam.size == sizeof(CommonDialog::BaseParam));
@@ -153,7 +153,7 @@ Error PS4_SYSV_ABI sceMsgDialogTerminate() {
 
 Status PS4_SYSV_ABI sceMsgDialogUpdateStatus() {
     const Status status = GetStatus();
-    LOG_TRACE(Lib_MsgDlg, "called status={}",
+    LOG_TRACE(Lib_MsgDlg, "called status=%s",
               enum_name(&enum_names_Libraries_CommonDialog_Status, static_cast<s64>(status)));
     return status;
 }

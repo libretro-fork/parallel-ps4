@@ -22,7 +22,7 @@ static AmdGpu::NumberFormat NumberFormatCompressed(AmdGpu::ShaderExportFormat ex
     case AmdGpu::ShaderExportFormat::ABGR_SINT16:
         return AmdGpu::NumberFormat::Sint;
     default:
-        UNREACHABLE_MSG("Unimplemented compressed export format {}",
+        UNREACHABLE_MSG("Unimplemented compressed export format %u",
                         static_cast<u32>(export_format));
     }
 }
@@ -42,7 +42,7 @@ static u32 MaskFromExportFormat(u8 mask, AmdGpu::ShaderExportFormat export_forma
         // All components
         return mask;
     default:
-        UNREACHABLE_MSG("Unimplemented uncompressed export format {}",
+        UNREACHABLE_MSG("Unimplemented uncompressed export format %u",
                         static_cast<u32>(export_format));
     }
 }

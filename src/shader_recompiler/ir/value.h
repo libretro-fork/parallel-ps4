@@ -160,8 +160,8 @@ public:
     TypedValue(const TypedValue<other_type>& value) : Value(value) {}
 
     explicit TypedValue(const Value& value) : Value(value) {
-        ASSERT_MSG((value.Type() & type_) != IR::Type::Void, "Incompatible types {} and {}", type_,
-                   value.Type());
+        ASSERT_MSG((value.Type() & type_) != IR::Type::Void, "Incompatible types %s and %s",
+                   Shader::IR::NameOf(type_).c_str(), Shader::IR::NameOf(value.Type()).c_str());
     }
 
     explicit TypedValue(IR::Inst* inst_) : TypedValue(Value(inst_)) {}

@@ -32,7 +32,7 @@ static vk::Format ConvertPixelFormat(const VideoOutFormat format) {
     default:
         break;
     }
-    UNREACHABLE_MSG("Unknown format={}", static_cast<u32>(format));
+    UNREACHABLE_MSG("Unknown format=%u", static_cast<u32>(format));
     return {};
 }
 

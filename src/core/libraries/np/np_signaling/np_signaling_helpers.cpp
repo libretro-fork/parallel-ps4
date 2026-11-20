@@ -8,7 +8,6 @@
 #include <cstring>
 #include <string>
 #include <string_view>
-#include <fmt/format.h>
 #include "common/alignment.h"
 #include "common/event_mutex.h"
 #include "common/logging/log.h"
@@ -61,7 +60,7 @@ s16 GetAppTypeStateGate() {
 }
 
 void SetAppTypeMarker(u16 marker) {
-    LOG_DEBUG(Lib_NpSignaling, "marker={:#x}", marker);
+    LOG_DEBUG(Lib_NpSignaling, "marker=0x%x", marker);
 }
 
 std::string HexDumpRow(const u8* bytes, size_t size) {
@@ -90,7 +89,8 @@ std::string AsciiDumpRow(const u8* bytes, size_t size) {
 void LogMemoryWindow(std::string_view label, const void* focus, size_t focus_size, size_t before,
                      size_t after) {
     if (!focus) {
-        LOG_INFO(Lib_NpSignaling, "Invalid activation dump {}: unavailable (null focus)", label);
+        LOG_INFO(Lib_NpSignaling, "Invalid activation dump %.*s: unavailable (null focus)",
+                 static_cast<int>((label).size()), (label).data());
         return;
     }
 
@@ -105,21 +105,26 @@ void LogMemoryWindow(std::string_view label, const void* focus, size_t focus_siz
     auto* memory = Core::Memory::Instance();
     if (size == 0 || !memory || !memory->IsValidMapping(start, size)) {
         LOG_INFO(Lib_NpSignaling,
-                 "Invalid activation dump {}: unavailable start={:#x} size={:#x} focus={:#x}",
-                 label, start, size, focus_addr);
+                 "Invalid activation dump %.*s: unavailable start=0x%" PRIxPTR
+                 " size=0x%zx focus=0x%" PRIxPTR,
+                 static_cast<int>((label).size()), (label).data(), start, size, focus_addr);
         return;
     }
 
     LOG_INFO(Lib_NpSignaling,
-             "Invalid activation dump {}: start={:#x} size={:#x} focus={:#x} focus_offset={:#x} "
-             "focus_size={:#x}",
-             label, start, size, focus_addr, focus_addr - start, focus_size);
+             "Invalid activation dump %.*s: start=0x%" PRIxPTR " size=0x%zx focus=0x%" PRIxPTR
+             " focus_offset=0x%" PRIxPTR " "
+             "focus_size=0x%zx",
+             static_cast<int>((label).size()), (label).data(), start, size, focus_addr,
+             focus_addr - start, focus_size);
     const auto* bytes = reinterpret_cast<const u8*>(start);
     for (size_t offset = 0; offset < size; offset += kDumpRowSize) {
         const size_t row_size = std::min(kDumpRowSize, size - offset);
-        LOG_INFO(Lib_NpSignaling, "Invalid activation dump {} {:#x} +{:#05x}: {} |{}|", label,
-                 start + offset, offset, HexDumpRow(bytes + offset, row_size),
-                 AsciiDumpRow(bytes + offset, row_size));
+        LOG_INFO(Lib_NpSignaling, "Invalid activation dump %.*s 0x%llx +0x%03zx: %s |%s|",
+                 static_cast<int>((label).size()), (label).data(),
+                 static_cast<unsigned long long>(start + offset), offset,
+                 (HexDumpRow(bytes + offset, row_size)).c_str(),
+                 (AsciiDumpRow(bytes + offset, row_size)).c_str());
     }
 }
 
@@ -128,9 +133,12 @@ void LogMemoryWindow(std::string_view label, const void* focus, size_t focus_siz
 void LogInvalidActivationContext(s64 call_time, const void* peer_npid, const void* out_conn_id,
                                  const void* caller, const void* frame) {
     LOG_INFO(Lib_NpSignaling,
-             "Invalid activation context: t={} caller={:p} frame={:p} peerNpId={:p} "
-             "outConnId={:p} peer_to_out_delta={}",
-             call_time, caller, frame, peer_npid, out_conn_id,
+             "Invalid activation context: t=%" PRId64 " caller=0x%llx frame=0x%llx peerNpId=0x%llx "
+             "outConnId=0x%llx peer_to_out_delta=%" PRIdPTR,
+             call_time, static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(caller)),
+             static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(frame)),
+             static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(peer_npid)),
+             static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(out_conn_id)),
              reinterpret_cast<intptr_t>(out_conn_id) - reinterpret_cast<intptr_t>(peer_npid));
 
     // Keep each read within the focus address's host page so diagnostics cannot cross into an
@@ -161,7 +169,7 @@ s32 CheckInitializeAppType(u32* is_app_type_4) {
 }
 
 s32 InitSignalingHeap(s64 pool_size) {
-    LOG_DEBUG(Lib_NpSignaling, "pool_size={}", pool_size);
+    LOG_DEBUG(Lib_NpSignaling, "pool_size=%" PRId64, pool_size);
 
     if (pool_size == 0 || g_signaling_heap_initialized) {
         return ORBIS_NP_SIGNALING_INTERNAL_ERROR_ALLOCATOR;
@@ -217,8 +225,8 @@ s32 CheckAppType() {
 
 s32 StartMainRuntime(s32 thread_priority, s32 cpu_affinity_mask, s64 thread_stack_size) {
     LOG_DEBUG(Lib_NpSignaling,
-              "thread_priority={} cpu_affinity_mask={} "
-              "thread_stack_size={}",
+              "thread_priority=%d cpu_affinity_mask=%d "
+              "thread_stack_size=%" PRId64,
               thread_priority, cpu_affinity_mask, thread_stack_size);
 
     if (!g_runtime_hooks_registered) {
@@ -235,7 +243,7 @@ s32 StartMainRuntime(s32 thread_priority, s32 cpu_affinity_mask, s64 thread_stac
 }
 
 s32 StartEchoRuntime(s32 thread_priority, s32 cpu_affinity_mask) {
-    LOG_DEBUG(Lib_NpSignaling, "thread_priority={} cpu_affinity_mask={}", thread_priority,
+    LOG_DEBUG(Lib_NpSignaling, "thread_priority=%d cpu_affinity_mask=%d", thread_priority,
               cpu_affinity_mask);
 
     // A DGRAM_P2P socket, which also starts the P2P transport.
@@ -245,7 +253,7 @@ s32 StartEchoRuntime(s32 thread_priority, s32 cpu_affinity_mask) {
     if (sock < 0) {
         // Only an emulator-side problem (the P2P UDP port is taken): signaling itself still
         // works without the echo probe, so carry on as the console would.
-        LOG_WARNING(Lib_NpSignaling, "P2P socket for the echo probe failed: {:#x}",
+        LOG_WARNING(Lib_NpSignaling, "P2P socket for the echo probe failed: 0x%x",
                     static_cast<u32>(sock));
         return ORBIS_OK;
     }
@@ -317,15 +325,19 @@ static void DispatchThreadMain() {
         }
 
         if (dispatch.callback) {
-            LOG_INFO(Lib_NpSignaling, "t={} ctxId={} connId={} event={}({}) delay={}ms", NowMs(),
-                     dispatch.ctx_id, dispatch.conn_id, dispatch.event_type,
-                     SignalingEventName(dispatch.event_type), dispatch.delay_ms);
+            LOG_INFO(Lib_NpSignaling, "t=%lld ctxId=%d connId=%d event=%u(%s) delay=%ums",
+                     static_cast<long long>(NowMs()), dispatch.ctx_id, dispatch.conn_id,
+                     dispatch.event_type, SignalingEventName(dispatch.event_type),
+                     dispatch.delay_ms);
             LOG_DEBUG(Lib_NpSignaling,
-                      "INVOKE signaling_cb={} ctxId={} connId={} event={}({}) errorCode={} arg={}",
-                      fmt::ptr(reinterpret_cast<void*>(dispatch.callback)), dispatch.ctx_id,
-                      dispatch.conn_id, dispatch.event_type,
+                      "INVOKE signaling_cb=0x%llx ctxId=%d connId=%d event=%u(%s) errorCode=%u "
+                      "arg=0x%llx",
+                      static_cast<unsigned long long>(
+                          reinterpret_cast<uintptr_t>(reinterpret_cast<void*>(dispatch.callback))),
+                      dispatch.ctx_id, dispatch.conn_id, dispatch.event_type,
                       SignalingEventName(dispatch.event_type), dispatch.error_code,
-                      fmt::ptr(dispatch.callback_arg));
+                      static_cast<unsigned long long>(
+                          reinterpret_cast<uintptr_t>(dispatch.callback_arg)));
             dispatch.callback(static_cast<u32>(dispatch.ctx_id), static_cast<u32>(dispatch.conn_id),
                               dispatch.event_type, dispatch.error_code, dispatch.callback_arg);
         }

@@ -320,7 +320,7 @@ s32 NativeToOrbisSignal(s32 s) {
     default:
         // This is only needed for a few hardware signals now, so it needn't worry about about RT
         // ones anymore.
-        UNREACHABLE_MSG("Signal {} has no job being here", s);
+        UNREACHABLE_MSG("Signal %d has no job being here", s);
     }
 }
 #endif
@@ -574,7 +574,7 @@ s32 PS4_SYSV_ABI posix_pthread_kill(PthreadT thread, s32 sig) {
     }
     char name[WORD_NAME_MAX + 1];
     word_name_get(&thread->name, name);
-    LOG_INFO(Lib_Kernel, "Raising signal {} on thread '{}'", sig, name);
+    LOG_INFO(Lib_Kernel, "Raising signal %d on thread '%s'", sig, name);
     thread->QueueSignal(sig);
 
     if (!thread->IsSignalBlocked(sig)) {
@@ -596,7 +596,7 @@ void PS4_SYSV_ABI sceCallbackHandler(int sig, Siginfo* info, Ucontext* context) 
     // The game's handler is guest code, run by FEX at the thread's next safe point
     if (!Core::Fex::DeliverGuestOrbisSignal(sig, nullptr, nullptr,
                                             reinterpret_cast<std::uintptr_t>(cb))) {
-        LOG_ERROR(Lib_Kernel, "FEX failed to queue the game's handler for signal {}", sig);
+        LOG_ERROR(Lib_Kernel, "FEX failed to queue the game's handler for signal %d", sig);
     }
     if (Core::Fex::InGuestHleCall()) {
         Core::Fex::FlushPendingGuestOrbisSignal();
@@ -623,14 +623,14 @@ s32 PS4_SYSV_ABI sceKernelInstallExceptionHandler(s32 signum, OrbisKernelExcepti
         return ORBIS_KERNEL_ERROR_EAGAIN;
     }
     sceSigactionCallbacks[signum - 1] = handler;
-    LOG_INFO(Lib_Kernel, "Installing signal handler for {}", signum);
+    LOG_INFO(Lib_Kernel, "Installing signal handler for %d", signum);
     Sigaction act = {};
     act.sa_flags = POSIX_SA_SIGINFO | POSIX_SA_RESTART;
     act.__sigaction_handler.sigaction = &sceCallbackHandler;
     posix_sigemptyset(&act.sa_mask);
     s32 const ret = posix_sigaction(signum, &act, nullptr);
     if (ret < 0) {
-        LOG_ERROR(Lib_Kernel, "Failed to add handler for signal {}: {}", signum,
+        LOG_ERROR(Lib_Kernel, "Failed to add handler for signal %d: %s", signum,
                   strerror(*__Error()));
         return ErrnoToSceKernelError(*__Error());
     }
@@ -647,7 +647,7 @@ s32 PS4_SYSV_ABI sceKernelRemoveExceptionHandler(s32 signum) {
     posix_sigemptyset(&act.sa_mask);
     s32 const ret = posix_sigaction(signum, &act, nullptr);
     if (ret < 0) {
-        LOG_ERROR(Lib_Kernel, "Failed to remove handler for signal {}: {}", signum,
+        LOG_ERROR(Lib_Kernel, "Failed to remove handler for signal %d: %s", signum,
                   strerror(*__Error()));
         return ErrnoToSceKernelError(*__Error());
     }
@@ -669,7 +669,7 @@ s32 PS4_SYSV_ABI sceKernelDebugRaiseException(u32 error, s64 unk) {
     if (unk != 0) {
         return ORBIS_KERNEL_ERROR_EINVAL;
     }
-    UNREACHABLE_MSG("error {:#x}", error);
+    UNREACHABLE_MSG("error 0x%x", error);
     return ORBIS_OK;
 }
 
@@ -677,7 +677,7 @@ s32 PS4_SYSV_ABI sceKernelDebugRaiseExceptionOnReleaseMode(u32 error, s64 unk) {
     if (unk != 0) {
         return ORBIS_KERNEL_ERROR_EINVAL;
     }
-    UNREACHABLE_MSG("error {:#x}", error);
+    UNREACHABLE_MSG("error 0x%x", error);
     return ORBIS_OK;
 }
 

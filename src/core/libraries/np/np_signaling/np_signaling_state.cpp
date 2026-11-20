@@ -126,14 +126,14 @@ s32 NormalizeNpId(const void* np_id, OrbisNpId* out_npid, OrbisNpOnlineId* out_o
     if (!IsValidNpId(*out_npid)) {
         const OrbisNpOnlineId& handle = out_npid->handle;
         LOG_INFO(Lib_NpSignaling,
-                 "rejected: reason={} handle_ascii='{}' handle_hex={} term={:#04x} "
-                 "dummy_hex={} opt_hex={} reserved_hex={} raw_hex={}",
-                 OnlineIdValidationFailure(handle), PrintableOnlineId(handle),
-                 HexBytes(handle.data, sizeof(handle.data)), static_cast<u8>(handle.term),
-                 HexBytes(handle.dummy, sizeof(handle.dummy)),
-                 HexBytes(out_npid->opt, sizeof(out_npid->opt)),
-                 HexBytes(out_npid->reserved, sizeof(out_npid->reserved)),
-                 HexBytes(out_npid, sizeof(*out_npid)));
+                 "rejected: reason=%s handle_ascii='%s' handle_hex=%s term=0x%02x "
+                 "dummy_hex=%s opt_hex=%s reserved_hex=%s raw_hex=%s",
+                 OnlineIdValidationFailure(handle), (PrintableOnlineId(handle)).c_str(),
+                 (HexBytes(handle.data, sizeof(handle.data))).c_str(), static_cast<u8>(handle.term),
+                 (HexBytes(handle.dummy, sizeof(handle.dummy))).c_str(),
+                 (HexBytes(out_npid->opt, sizeof(out_npid->opt))).c_str(),
+                 (HexBytes(out_npid->reserved, sizeof(out_npid->reserved))).c_str(),
+                 (HexBytes(out_npid, sizeof(*out_npid))).c_str());
         return ORBIS_NP_SIGNALING_ERROR_INVALID_ARGUMENT;
     }
     if (out_online_id) {

@@ -121,8 +121,9 @@ void LowerWave64BallotPass(IR::Program& program, const RuntimeInfo& runtime_info
             if (is_uniform) {
                 worklist.push_back(&inst);
             } else {
-                LOG_WARNING(Render_Recompiler, "{} instruction in non uniform control flow",
-                            inst.GetOpcode());
+                LOG_WARNING(Render_Recompiler, "%.*s instruction in non uniform control flow",
+                            static_cast<int>(Shader::IR::NameOf(inst.GetOpcode()).size()),
+                            Shader::IR::NameOf(inst.GetOpcode()).data());
             }
         };
         for (IR::Inst& inst : block->Instructions()) {
@@ -155,7 +156,9 @@ void LowerWave64BallotPass(IR::Program& program, const RuntimeInfo& runtime_info
         scratch_base + scratch_size - runtime_info.hw.cs.shared_memory_size;
 
     for (IR::Inst* inst : worklist) {
-        LOG_INFO(Render_Recompiler, "Lowering {} instruction for wave64", inst->GetOpcode());
+        LOG_INFO(Render_Recompiler, "Lowering %.*s instruction for wave64",
+                 static_cast<int>(Shader::IR::NameOf(inst->GetOpcode()).size()),
+                 Shader::IR::NameOf(inst->GetOpcode()).data());
         IR::IREmitter ir{*inst->GetParent(), IR::Block::InstructionList::s_iterator_to(*inst)};
         const IR::U32 invocation_index = ir.GetAttributeU32(IR::Attribute::LocalInvocationIndex);
         const IR::U32 subgroup_id = ir.ShiftRightLogical(invocation_index, ir.Imm32(5));

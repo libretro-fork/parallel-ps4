@@ -26,7 +26,7 @@ static vk::ImageType ConvertImageType(AmdGpu::ImageType type) noexcept {
     case AmdGpu::ImageType::Color3D:
         return vk::ImageType::e3D;
     default:
-        UNREACHABLE_MSG("Unexpected image type {}", u32(type));
+        UNREACHABLE_MSG("Unexpected image type %u", u32(type));
     }
 }
 
@@ -41,11 +41,11 @@ static std::pair<u32, u32> SanitizeCopyLayers(const VideoCore::ImageInfo& src_in
 
     // 3D images can only use 1 layer.
     if (vk_src_type == vk::ImageType::e3D && src_layers != 1) {
-        LOG_WARNING(Render_Vulkan, "Coercing copy 3D source layers {} to 1.", src_layers);
+        LOG_WARNING(Render_Vulkan, "Coercing copy 3D source layers %u to 1.", src_layers);
         src_layers = 1;
     }
     if (vk_dst_type == vk::ImageType::e3D && dst_layers != 1) {
-        LOG_WARNING(Render_Vulkan, "Coercing copy 3D destination layers {} to 1.", dst_layers);
+        LOG_WARNING(Render_Vulkan, "Coercing copy 3D destination layers %u to 1.", dst_layers);
         dst_layers = 1;
     }
 
@@ -53,7 +53,7 @@ static std::pair<u32, u32> SanitizeCopyLayers(const VideoCore::ImageInfo& src_in
     if (vk_src_type == vk_dst_type) {
         if (src_layers != dst_layers) {
             LOG_WARNING(Render_Vulkan,
-                        "Coercing copy source layers {} and destination layers {} to minimum.",
+                        "Coercing copy source layers %u and destination layers %u to minimum.",
                         src_layers, dst_layers);
             src_layers = dst_layers = std::min(src_layers, dst_layers);
         }
@@ -62,14 +62,14 @@ static std::pair<u32, u32> SanitizeCopyLayers(const VideoCore::ImageInfo& src_in
         if (vk_src_type == vk::ImageType::e2D && vk_dst_type == vk::ImageType::e3D &&
             src_layers != depth) {
             LOG_WARNING(Render_Vulkan,
-                        "Coercing copy 2D source layers {} to 3D destination depth {}", src_layers,
+                        "Coercing copy 2D source layers %u to 3D destination depth %u", src_layers,
                         depth);
             src_layers = depth;
         }
         if (vk_src_type == vk::ImageType::e3D && vk_dst_type == vk::ImageType::e2D &&
             dst_layers != depth) {
             LOG_WARNING(Render_Vulkan,
-                        "Coercing copy 2D destination layers {} to 3D source depth {}", dst_layers,
+                        "Coercing copy 2D destination layers %u to 3D source depth %u", dst_layers,
                         depth);
             dst_layers = depth;
         }
@@ -274,7 +274,7 @@ bool Runtime::BlitScaled(VideoCore::Image* src, VideoCore::Image* dst, u32 dst_m
     if (src_aspect != dst_aspect || (depth && src->info.pixel_format != dst->info.pixel_format) ||
         src->info.num_samples > 1 || dst->info.num_samples > 1 || src->info.props.is_volume ||
         dst->info.props.is_volume) {
-        LOG_WARNING(Render_Vulkan, "Render Resolution: no copy from {:#x} to {:#x}",
+        LOG_WARNING(Render_Vulkan, "Render Resolution: no copy from 0x%" PRIxPTR " to 0x%" PRIxPTR,
                     src->info.guest_address, dst->info.guest_address);
         return false;
     }
@@ -334,9 +334,10 @@ void Runtime::CopyImage(VideoCore::Image* src, VideoCore::Image* dst) {
     // Format mismatch warning (safe but useful)
     if (src->info.pixel_format != dst->info.pixel_format) {
         LOG_DEBUG(Render_Vulkan,
-                  "Copy between different formats: src={}, dst={}. "
+                  "Copy between different formats: src=%s, dst=%s. "
                   "Result may be undefined.",
-                  vk::to_string(src->info.pixel_format), vk::to_string(dst->info.pixel_format));
+                  (vk::to_string(src->info.pixel_format)).c_str(),
+                  (vk::to_string(dst->info.pixel_format)).c_str());
     }
 
     const u32 base_width = src->info.size.width;
@@ -842,12 +843,14 @@ void Runtime::SetBackingSamples(VideoCore::Image* image, u32 num_samples, bool c
                 Common::AlignUp(image->SizeBytes(), 1024) - previous_size;
         }
 
-        Vulkan::SetObjectName(instance.GetDevice(), new_backing->image.image,
-                              "Image {}x{}x{} {} {} {:#x}:{:#x} L:{} M:{} S:{} (backing)",
-                              info.size.width, info.size.height, info.size.depth,
-                              AmdGpu::NameOf(info.tile_mode), vk::to_string(info.pixel_format),
-                              info.guest_address, info.guest_size, info.resources.layers,
-                              info.resources.levels, num_samples);
+        Vulkan::SetObjectName(
+            instance.GetDevice(), new_backing->image.image,
+            "Image %ux%ux%u %.*s %s 0x%" PRIx64 ":0x%x L:%u M:%u S:%u (backing)", info.size.width,
+            info.size.height, info.size.depth,
+            static_cast<int>(AmdGpu::NameOf(info.tile_mode).size()),
+            AmdGpu::NameOf(info.tile_mode).data(), vk::to_string(info.pixel_format).c_str(),
+            info.guest_address, info.guest_size, static_cast<unsigned>(info.resources.layers),
+            static_cast<unsigned>(info.resources.levels), static_cast<unsigned>(num_samples));
     } else {
         new_backing = std::addressof(*it);
     }

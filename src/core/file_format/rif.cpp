@@ -18,8 +18,8 @@ bool RIF::Open(const std::filesystem::path& ridx_path, const std::filesystem::pa
     if (!rifa) {
         return false;
     }
-    ASSERT_MSG(!ridx->empty(), "RIDX file at {} is empty!", ridx_path.string());
-    ASSERT_MSG(!rifa->empty(), "RIFA file at {} is empty!", rifa_path.string());
+    ASSERT_MSG(!ridx->empty(), "RIDX file at %s is empty!", (ridx_path.string()).c_str());
+    ASSERT_MSG(!rifa->empty(), "RIFA file at %s is empty!", (rifa_path.string()).c_str());
     return Open(ridx->Bytes(), rifa->Bytes());
 }
 
@@ -38,7 +38,7 @@ bool RIF::Open(std::span<const u8> ridx_buffer, std::span<const u8> rifa_buffer)
         return false;
     }
     if (ridx_header.version != RIDX_VERSION) {
-        LOG_ERROR(Core, "Unsupported RIDX version: 0x{:08x}", ridx_header.version);
+        LOG_ERROR(Core, "Unsupported RIDX version: 0x%08x", ridx_header.version);
         return false;
     }
 
@@ -57,7 +57,7 @@ bool RIF::Open(std::span<const u8> ridx_buffer, std::span<const u8> rifa_buffer)
         std::memcpy(&entry, ridx_data + sizeof(RIDXHeader) + i * sizeof(RIDXEntry), sizeof(entry));
 
         if (entry.rif_size != sizeof(RIFData)) {
-            LOG_ERROR(Core, "Invalid RIF size at {}", i);
+            LOG_ERROR(Core, "Invalid RIF size at %u", i);
             continue;
         }
 
@@ -65,7 +65,7 @@ bool RIF::Open(std::span<const u8> ridx_buffer, std::span<const u8> rifa_buffer)
         std::memcpy(&rif, rifa_data + entry.rif_offset, sizeof(rif));
 
         if (rif.magic != RIF_MAGIC) {
-            LOG_ERROR(Core, "Invalid RIF magic number at {}", i);
+            LOG_ERROR(Core, "Invalid RIF magic number at %u", i);
             continue;
         }
 

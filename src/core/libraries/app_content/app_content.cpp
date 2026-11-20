@@ -9,7 +9,6 @@
 #include <span>
 #include <string>
 #include <vector>
-#include <fmt/format.h>
 
 #include "app_content.h"
 #include "common/assert.h"
@@ -18,6 +17,7 @@
 #include "common/logging/log.h"
 #include "common/path_util.h"
 #include "common/singleton.h"
+#include "common/string_util.h"
 #include "core/emulator_settings.h"
 #include "core/file_format/psf.h"
 #include "core/file_format/rif.h"
@@ -172,7 +172,7 @@ int PS4_SYSV_ABI sceAppContentAddcontMount(u32 service_label,
 
     // Hitting this shouldn't be possible, as it would mean the entitlement was loaded,
     // but the folder it was loaded from doesn't exist.
-    UNREACHABLE_MSG("Folder for loaded entitlement label {} doesn't exist.",
+    UNREACHABLE_MSG("Folder for loaded entitlement label %s doesn't exist.",
                     entitlement_label->data);
 }
 
@@ -194,7 +194,8 @@ int PS4_SYSV_ABI sceAppContentAddcontUnmount(OrbisAppContentMountPoint* mount_po
 
     const std::string_view mp{mount_point->data,
                               strnlen(mount_point->data, sizeof(mount_point->data))};
-    LOG_INFO(Lib_AppContent, "called, mount_point = {}", mp);
+    LOG_INFO(Lib_AppContent, "called, mount_point = %.*s", static_cast<int>((mp).size()),
+             (mp).data());
 
     auto* mnt = Common::Singleton<Core::FileSys::MntPoints>::Instance();
     mnt->Unmount(std::string{mp});
@@ -223,7 +224,7 @@ int PS4_SYSV_ABI sceAppContentAppParamGetInt(OrbisAppContentAppParamId paramId, 
         value = param_sfo->GetInteger("USER_DEFINED_PARAM_4");
         break;
     default:
-        LOG_ERROR(Lib_AppContent, " paramId = {} paramId is not valid", paramId);
+        LOG_ERROR(Lib_AppContent, " paramId = %u paramId is not valid", paramId);
         return ORBIS_APP_CONTENT_ERROR_PARAMETER;
     }
     *out_value = value.value_or(0);
@@ -292,7 +293,7 @@ int PS4_SYSV_ABI sceAppContentGetAddcontInfo(u32 service_label,
             continue;
         }
 
-        LOG_INFO(Lib_AppContent, "found DLC {}", entitlementLabel->data);
+        LOG_INFO(Lib_AppContent, "found DLC %s", entitlementLabel->data);
 
         strncpy(info->entitlement_label.data, addcont_info[i].entitlement_label,
                 ORBIS_NP_UNIFIED_ENTITLEMENT_LABEL_SIZE);
@@ -385,7 +386,8 @@ int PS4_SYSV_ABI sceAppContentGetRegion() {
 
 static bool CanAddEntitlement(u32 service_label, std::string_view entitlement_id) {
     if (addcont_count >= ORBIS_APP_CONTENT_INFO_LIST_MAX_SIZE) {
-        LOG_ERROR(Lib_AppContent, "Too many entitlements, ignoring {}", entitlement_id);
+        LOG_ERROR(Lib_AppContent, "Too many entitlements, ignoring %.*s",
+                  static_cast<int>((entitlement_id).size()), (entitlement_id).data());
         return false;
     }
     for (s32 i = 0; i < addcont_count; i++) {
@@ -420,8 +422,8 @@ static void LoadAddonFolder(const std::filesystem::path& addon_path, u32 service
         auto psf_handle = fs->Open("sce_sys/param.sfo", Common::FS::FileAccessMode::Read);
         if (psf_handle == nullptr) {
             // This content doesn't have a param.sfo
-            LOG_WARNING(Lib_AppContent, "Additional content {} has no param.sfo",
-                        entry.path().filename().string());
+            LOG_WARNING(Lib_AppContent, "Additional content %s has no param.sfo",
+                        (entry.path().filename().string()).c_str());
             continue;
         }
 
@@ -429,37 +431,37 @@ static void LoadAddonFolder(const std::filesystem::path& addon_path, u32 service
         std::unique_ptr<PSF> dlc_params = std::make_unique<PSF>();
         if (!dlc_params->Open(psf_handle)) {
             // The param.sfo is invalid
-            LOG_WARNING(Lib_AppContent, "Additional content {} has an invalid param.sfo",
-                        entry.path().filename().string());
+            LOG_WARNING(Lib_AppContent, "Additional content %s has an invalid param.sfo",
+                        (entry.path().filename().string()).c_str());
             continue;
         }
 
         auto category = dlc_params->GetString("CATEGORY");
         if (category.has_value() && strncmp(category.value().data(), "ac", 2) != 0) {
-            LOG_WARNING(Lib_AppContent, "Additonal content {} is not additional content",
-                        entry.path().filename().string());
+            LOG_WARNING(Lib_AppContent, "Additonal content %s is not additional content",
+                        (entry.path().filename().string()).c_str());
             continue;
         }
 
         // Find the entitlement id from the content id.
         auto content_id = dlc_params->GetString("CONTENT_ID");
         if (!content_id.has_value()) {
-            LOG_WARNING(Lib_AppContent, "Additonal content {} param.sfo is missing CONTENT_ID",
-                        entry.path().filename().string());
+            LOG_WARNING(Lib_AppContent, "Additonal content %s param.sfo is missing CONTENT_ID",
+                        (entry.path().filename().string()).c_str());
             continue;
         }
 
         // Content IDs have consistent formatting, so this will always work.
         // They follow the format UPXXXX-CUSAXXXXX_XX-entitlement
         if (content_id.value().length() <= ORBIS_APP_CONTENT_ENTITLEMENT_LABEL_OFFSET) {
-            LOG_WARNING(Lib_AppContent, "Additonal content {} param.sfo has malformed CONTENT_ID",
-                        entry.path().filename().string());
+            LOG_WARNING(Lib_AppContent, "Additonal content %s param.sfo has malformed CONTENT_ID",
+                        (entry.path().filename().string()).c_str());
             continue;
         }
 
         auto entitlement_id = content_id.value().substr(ORBIS_APP_CONTENT_ENTITLEMENT_LABEL_OFFSET);
-        LOG_INFO(Lib_AppContent, "Entitlement {} found for service_label {}", entitlement_id,
-                 service_label);
+        LOG_INFO(Lib_AppContent, "Entitlement %.*s found for service_label %u",
+                 static_cast<int>((entitlement_id).size()), (entitlement_id).data(), service_label);
 
         // Save the additional content info in addcont_info.
         if (!CanAddEntitlement(service_label, entitlement_id)) {
@@ -482,7 +484,8 @@ static void LoadAddonFolder(const std::filesystem::path& addon_path, u32 service
         if (!license_handle ||
             !license_handle->Seek(key_offset, Common::FS::SeekOrigin::SetOrigin) ||
             !license_handle->Read(info.key.data, sizeof(info.key.data))) {
-            LOG_WARNING(Lib_AppContent, "Could not load entitlement key for {}", entitlement_id);
+            LOG_WARNING(Lib_AppContent, "Could not load entitlement key for %.*s",
+                        static_cast<int>((entitlement_id).size()), (entitlement_id).data());
         }
     }
 }
@@ -490,8 +493,12 @@ static void LoadAddonFolder(const std::filesystem::path& addon_path, u32 service
 static void LoadLicenses(std::string_view service_id, u32 service_label) {
     const std::filesystem::path& licenses_dir =
         Common::FS::GetUserPath(Common::FS::PathType::LicensesDir);
-    std::filesystem::path ridx_path = licenses_dir / fmt::format("{}.idx", service_id);
-    std::filesystem::path rifa_path = licenses_dir / fmt::format("{}.rif", service_id);
+    std::filesystem::path ridx_path =
+        licenses_dir / Common::StringFromFormat("%.*s.idx", static_cast<int>((service_id).size()),
+                                                (service_id).data());
+    std::filesystem::path rifa_path =
+        licenses_dir / Common::StringFromFormat("%.*s.rif", static_cast<int>((service_id).size()),
+                                                (service_id).data());
 
     if (!Common::FS::Exists(ridx_path) || !Common::FS::Exists(rifa_path)) {
         return;
@@ -499,15 +506,17 @@ static void LoadLicenses(std::string_view service_id, u32 service_label) {
 
     RIF rif;
     if (!rif.Open(ridx_path, rifa_path)) {
-        LOG_ERROR(Lib_AppContent, "Could not open license file for {}", service_id);
+        LOG_ERROR(Lib_AppContent, "Could not open license file for %.*s",
+                  static_cast<int>((service_id).size()), (service_id).data());
         return;
     }
 
-    LOG_INFO(Lib_AppContent, "Checking license {} for additional entitlements", service_id);
+    LOG_INFO(Lib_AppContent, "Checking license %.*s for additional entitlements",
+             static_cast<int>((service_id).size()), (service_id).data());
     const auto& entitlements = rif.GetLicenseOnlyEntitlements();
     for (const auto& entitlement : entitlements) {
-        LOG_INFO(Lib_AppContent, "License-only entitlement {} found for service_label {}",
-                 entitlement.first, service_label);
+        LOG_INFO(Lib_AppContent, "License-only entitlement %s found for service_label %u",
+                 (entitlement.first).c_str(), service_label);
         if (!CanAddEntitlement(service_label, entitlement.first)) {
             continue;
         }
@@ -549,11 +558,11 @@ int PS4_SYSV_ABI sceAppContentInitialize(const OrbisAppContentInitParam* initPar
     }
 
     for (u32 i = 1; i <= 7; i++) {
-        const auto key = fmt::format("SERVICE_ID_ADDCONT_ADD_{}", i);
+        const auto key = Common::StringFromFormat("SERVICE_ID_ADDCONT_ADD_%u", i);
         const auto service_id = param_sfo->GetString(key);
         if (service_id.has_value() && !service_id->empty()) {
-            LOG_INFO(Lib_AppContent, "Linked additional content service {} at slot {}", *service_id,
-                     i);
+            LOG_INFO(Lib_AppContent, "Linked additional content service %.*s at slot %u",
+                     static_cast<int>((*service_id).size()), (*service_id).data(), i);
             services.push_back(ServiceEntry{i, std::string(*service_id)});
         }
     }
@@ -659,7 +668,7 @@ int PS4_SYSV_ABI sceAppContentTemporaryDataMount2(OrbisAppContentTemporaryDataOp
     auto* mnt = Common::Singleton<Core::FileSys::MntPoints>::Instance();
     mnt->Mount(mount_temp_dir, std::string{TmpMount});
 
-    LOG_INFO(Lib_AppContent, "option = {}, mountPoint = {}", option, mountPoint->data);
+    LOG_INFO(Lib_AppContent, "option = %u, mountPoint = %s", option, mountPoint->data);
     return ORBIS_OK;
 }
 
@@ -673,7 +682,7 @@ int PS4_SYSV_ABI sceAppContentTemporaryDataUnmount(const OrbisAppContentMountPoi
     }
     const std::string_view mp{mountPoint->data,
                               strnlen(mountPoint->data, sizeof(mountPoint->data))};
-    LOG_INFO(Lib_AppContent, "mountPoint = {}", mp);
+    LOG_INFO(Lib_AppContent, "mountPoint = %.*s", static_cast<int>((mp).size()), (mp).data());
     auto* mnt = Common::Singleton<Core::FileSys::MntPoints>::Instance();
     mnt->Unmount(std::string{mp});
     return ORBIS_OK;

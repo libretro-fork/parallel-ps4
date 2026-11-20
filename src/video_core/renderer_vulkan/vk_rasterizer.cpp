@@ -311,7 +311,7 @@ void Rasterizer::EliminateFastClear() {
     auto& image = texture_cache.GetImage(image_id);
     const auto clear_value = LiverpoolToVK::ColorBufferClearValue(col_buf);
 
-    HostMarkerBegin("EliminateFastClear:MRT={:#x}:M={:#x}", col_buf.Address(),
+    HostMarkerBegin("EliminateFastClear:MRT=0x%" PRIx64 ":M=0x%" PRIxPTR, col_buf.Address(),
                     col_buf.CmaskAddress());
     runtime.ClearImage(&image, desc.view_info.range, clear_value);
     ScopeMarkerEnd();
@@ -1080,7 +1080,7 @@ void Rasterizer::BindBuffers(const Shader::Info& stage, Shader::Backend::Binding
                 lds_buffer.Commit();
                 buffer_infos.emplace_back(lds_buffer.Handle(), offset, lds_size);
             } else {
-                UNREACHABLE_MSG("Unexpected buffer type {}", u32(desc.buffer_type));
+                UNREACHABLE_MSG("Unexpected buffer type %u", u32(desc.buffer_type));
             }
         } else {
             const auto vsharp = desc.GetSharp(stage);
@@ -1089,7 +1089,7 @@ void Rasterizer::BindBuffers(const Shader::Info& stage, Shader::Backend::Binding
             } else {
                 const u64 size = memory->ClampRangeSize(vsharp.base_address, vsharp.GetSize());
                 if (size != vsharp.GetSize()) {
-                    LOG_ERROR(Render, "Clamped size from {} to {} for stage {:#x}",
+                    LOG_ERROR(Render, "Clamped size from %u to %" PRIu64 " for stage 0x%" PRIx64,
                               vsharp.GetSize(), size, stage.pgm_hash);
                 }
                 VideoCore::ObtainBufferFlags flags = {};
@@ -1104,7 +1104,8 @@ void Rasterizer::BindBuffers(const Shader::Info& stage, Shader::Backend::Binding
                 const u64 offset_aligned = Common::AlignDown(offset, alignment);
                 const u64 adjust = offset - offset_aligned;
                 if (adjust % 4 != 0) {
-                    LOG_WARNING(Render_Vulkan, "Buffer binding in shader {:#x} isn't dword aligned",
+                    LOG_WARNING(Render_Vulkan,
+                                "Buffer binding in shader 0x%" PRIx64 " isn't dword aligned",
                                 stage.pgm_hash);
                 }
                 push_data.AddOffset(binding.buffer, adjust);
@@ -1149,9 +1150,10 @@ void Rasterizer::BindTextures(const Shader::Info& stage, Shader::Backend::Bindin
             !enum_name_exists(&enum_names_AmdGpu_DataFormat, static_cast<s64>(data_fmt)) ||
             !enum_name_exists(&enum_names_AmdGpu_NumberFormat, static_cast<s64>(num_fmt))) {
             LOG_WARNING(Render_Vulkan,
-                        "Rejecting invalid T# address={:#x}, pitch={}, width={}, "
-                        "data_format={}, num_format={}",
-                        tsharp.Address(), tsharp.pitch, tsharp.width, static_cast<u32>(data_fmt),
+                        "Rejecting invalid T# address=0x%" PRIxPTR ", pitch=%llu, width=%llu, "
+                        "data_format=%u, num_format=%u",
+                        tsharp.Address(), static_cast<unsigned long long>(tsharp.pitch),
+                        static_cast<unsigned long long>(tsharp.width), static_cast<u32>(data_fmt),
                         static_cast<u32>(num_fmt));
             image_bindings[num_images++].image_id = {};
             image_descriptor_array_sizes.push_back(1);
@@ -1299,13 +1301,13 @@ void Rasterizer::BindTextures(const Shader::Info& stage, Shader::Backend::Bindin
         if (!ssharp.Valid() || (ssharp.border_color_type.Value() == AmdGpu::BorderColor::Custom &&
                                 liverpool->regs.ta_bc_base.Address() == 0)) {
             LOG_WARNING(Render_Vulkan,
-                        "Rejecting invalid S# max_aniso={}, filter_mode={}, mip_filter={}, "
-                        "border_color_type={}, border_color_base={:#x}",
+                        "Rejecting invalid S# max_aniso=%u, filter_mode=%u, mip_filter=%u, "
+                        "border_color_type=%u, border_color_base=0x%llx",
                         static_cast<u32>(ssharp.max_aniso.Value()),
                         static_cast<u32>(ssharp.filter_mode.Value()),
                         static_cast<u32>(ssharp.mip_filter.Value()),
                         static_cast<u32>(ssharp.border_color_type.Value()),
-                        liverpool->regs.ta_bc_base.Address());
+                        static_cast<unsigned long long>(liverpool->regs.ta_bc_base.Address()));
             ssharp = AmdGpu::Sampler{};
         }
         const auto vk_sampler =
@@ -1508,7 +1510,8 @@ void Rasterizer::Resolve() {
     auto& mrt0_image = texture_cache.GetImage(texture_cache.FindImage(mrt0_desc, true));
     auto& mrt1_image = texture_cache.GetImage(texture_cache.FindImage(mrt1_desc, true));
 
-    HostMarkerBegin("Resolve:MRT0={:#x}:MRT1={:#x}", liverpool->regs.color_buffers[0].Address(),
+    HostMarkerBegin("Resolve:MRT0=0x%" PRIx64 ":MRT1=0x%" PRIx64,
+                    liverpool->regs.color_buffers[0].Address(),
                     liverpool->regs.color_buffers[1].Address());
     runtime.ResolveImage(&mrt0_image, &mrt1_image, mrt0_desc.view_info.range,
                          mrt1_desc.view_info.range);
@@ -1535,7 +1538,8 @@ void Rasterizer::DepthStencilCopy(bool is_depth, bool is_stencil) {
     sub_range.base.layer = liverpool->regs.depth_view.slice_start;
     sub_range.extent.layers = liverpool->regs.depth_view.NumSlices() - sub_range.base.layer;
 
-    HostMarkerBegin("DepthStencilCopy:DR={:#x}:SR={:#x}:DW={:#x}:SW={:#x}",
+    HostMarkerBegin("DepthStencilCopy:DR=0x%" PRIx64 ":SR=0x%" PRIx64 ":DW=0x%" PRIx64
+                    ":SW=0x%" PRIx64,
                     regs.depth_buffer.DepthAddress(), regs.depth_buffer.StencilAddress(),
                     regs.depth_buffer.DepthWriteAddress(), regs.depth_buffer.StencilWriteAddress());
 
@@ -1563,9 +1567,9 @@ void Rasterizer::DepthToColor(bool is_stencil, u32 sample) {
     auto& depth_image = texture_cache.GetImage(depth_id);
     auto& color_image = texture_cache.GetImage(color_id);
 
-    HostMarkerBegin("DepthToColor:D={:#x}:C={:#x}:stencil={}:sample={}",
-                    depth_image.info.guest_address, color_image.info.guest_address, is_stencil,
-                    sample);
+    HostMarkerBegin("DepthToColor:D=0x%" PRIxPTR ":C=0x%" PRIxPTR ":stencil=%s:sample=%u",
+                    depth_image.info.guest_address, color_image.info.guest_address,
+                    (is_stencil) ? "true" : "false", sample);
     // The channels of the image the game's mask stands for
     const auto write_mask =
         vk::ColorComponentFlags{col_buf.Swizzle().ApplyMask(regs.color_target_mask.GetMask(0))};
@@ -2000,6 +2004,18 @@ void Rasterizer::UpdateColorBlendingState(const GraphicsPipeline* pipeline) cons
     dynamic_state.SetBlendConstants(regs.blend_constants);
     dynamic_state.SetColorWriteMasks(pipeline->GetGraphicsKey().write_masks);
     dynamic_state.SetAttachmentFeedbackLoopEnabled(attachment_feedback_loop);
+}
+
+void Rasterizer::HostMarkerBegin(const char* format, ...) {
+    if (!host_markers_enabled) {
+        return;
+    }
+    char text[MarkerBytes];
+    va_list args;
+    va_start(args, format);
+    const int n = std::vsnprintf(text, sizeof(text), format, args);
+    va_end(args);
+    ScopeMarkerBegin(MarkerText(text, n > 0 ? static_cast<std::size_t>(n) : 0));
 }
 
 void Rasterizer::ScopeMarkerBegin(const std::string_view& str, bool from_guest) {

@@ -41,7 +41,8 @@ void LowerUserClipPlanes(IR::Program& program, const RuntimeInfo& runtime_info) 
         for (const auto output : runtime_info.hw.vs.outputs[i]) {
             if (output >= Output::ClipDist0 && output <= Output::ClipDist7) {
                 LOG_WARNING(Render_Vulkan,
-                            "Skipping user clip plane lowering: shader {:#x} exports its own clip "
+                            "Skipping user clip plane lowering: shader 0x%" PRIx64
+                            " exports its own clip "
                             "distances",
                             info.pgm_hash);
                 return;

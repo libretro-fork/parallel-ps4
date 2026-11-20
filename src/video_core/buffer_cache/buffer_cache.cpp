@@ -97,7 +97,8 @@ BufferCache::BufferCache(const Vulkan::Instance& instance_, Vulkan::Scheduler& s
         ARENA_PAGE_BITS = MIN_ARENA_PAGE_BITS;
         ARENA_PAGE_SIZE = u64{1} << ARENA_PAGE_BITS;
         NUM_ARENA_PAGES = u64{1} << (ADDRESS_SPACE_BITS - ARENA_PAGE_BITS);
-        LOG_WARNING(Render, "The device has no sparse buffers: arenas of {} MiB backed whole",
+        LOG_WARNING(Render,
+                    "The device has no sparse buffers: arenas of %" PRIu64 " MiB backed whole",
                     ARENA_PAGE_SIZE >> 20);
     } else if (sparse_space != 0 && sparse_space < (u64{64} << DEFAULT_ARENA_PAGE_BITS)) {
         ARENA_PAGE_BITS = std::clamp<u64>(std::bit_width(sparse_space) - 1 - 6, MIN_ARENA_PAGE_BITS,
@@ -105,8 +106,9 @@ BufferCache::BufferCache(const Vulkan::Instance& instance_, Vulkan::Scheduler& s
         ARENA_PAGE_SIZE = u64{1} << ARENA_PAGE_BITS;
         NUM_ARENA_PAGES = u64{1} << (ADDRESS_SPACE_BITS - ARENA_PAGE_BITS);
         LOG_WARNING(Render,
-                    "The device has {} MiB of sparse address space: arena pages of {} MiB, "
-                    "sparse residency {}",
+                    "The device has %" PRIu64
+                    " MiB of sparse address space: arena pages of %" PRIu64 " MiB, "
+                    "sparse residency %s",
                     sparse_space >> 20, ARENA_PAGE_SIZE >> 20,
                     instance.IsSparseResidencyBufferSupported() ? "used" : "not available");
     }
@@ -123,7 +125,7 @@ BufferCache::BufferCache(const Vulkan::Instance& instance_, Vulkan::Scheduler& s
     const auto device = instance.GetDevice();
     const auto reqs = device.getBufferMemoryRequirements(req_info).memoryRequirements;
     block_size = Common::AlignUp(std::max<u64>(reqs.alignment, MIN_BLOCK_SIZE), reqs.alignment);
-    ASSERT_MSG(std::popcount(block_size) == 1, "Sparse block size {} is not a power of 2",
+    ASSERT_MSG(std::popcount(block_size) == 1, "Sparse block size %u is not a power of 2",
                block_size);
     block_shift = std::bit_width(block_size) - 1;
     blocks_per_arena_page = ARENA_PAGE_SIZE / block_size;
@@ -588,7 +590,7 @@ const Buffer* BufferCache::GetArena(u64 first_block, u64 last_block) {
         const bool all_free = std::all_of(address_space.begin() + first_page,
                                           address_space.begin() + last_page + 1,
                                           [](const Buffer* arena) { return arena == nullptr; });
-        ASSERT_MSG(all_free, "Buffer request spans {} VA arena pages, some of them in use",
+        ASSERT_MSG(all_free, "Buffer request spans %" PRIu64 " VA arena pages, some of them in use",
                    last_page - first_page + 1);
         const u64 base_block = Common::AlignDownPow2<u64>(first_block, blocks_per_arena_page);
         const u64 num_pages = last_page - first_page + 1;
@@ -681,7 +683,8 @@ std::pair<vk::DeviceMemory, u64> BufferCache::BackingMemory(u64 blocks) {
     if (blocks > chunk_blocks / 2) {
         // More than half a chunk: memory of its own, and the chunk keeps what it has left
         const vk::DeviceMemory memory = allocate(blocks);
-        ASSERT_MSG(memory, "Out of device memory for {} blocks of buffer residency", blocks);
+        ASSERT_MSG(memory, "Out of device memory for %" PRIu64 " blocks of buffer residency",
+                   blocks);
         return {memory, 0};
     }
     vk::DeviceMemory chunk = allocate(chunk_blocks);
@@ -691,8 +694,8 @@ std::pair<vk::DeviceMemory, u64> BufferCache::BackingMemory(u64 blocks) {
         chunk = allocate(blocks);
         got = blocks;
     }
-    ASSERT_MSG(chunk || blocks == 0, "Out of device memory for {} blocks of buffer residency",
-               blocks);
+    ASSERT_MSG(chunk || blocks == 0,
+               "Out of device memory for %" PRIu64 " blocks of buffer residency", blocks);
     if (!chunk) {
         return {};
     }
@@ -743,7 +746,8 @@ void BufferCache::EnsureResident(const Buffer* arena, u64 first_block, u64 last_
         backing.offset = memory_offset >> block_shift;
         resident_ranges.Add(backing);
 
-        LOG_INFO(Render, "Making range start={}, end={} resident", backing.start, backing.end);
+        LOG_INFO(Render, "Making range start=%" PRIu64 ", end=%" PRIu64 " resident", backing.start,
+                 backing.end);
 
         const auto& bind = binds->binds.emplace_back(vk::SparseMemoryBind{
             .resourceOffset = (range.start << block_shift) - arena->cpu_addr,
@@ -872,8 +876,8 @@ bool BufferCache::SynchronizeMemoryFromImage(const Buffer* arena, VAddr device_a
             const auto expanded_value = CmaskColorExpandedValue(meta->num_samples);
             if (!expanded_value) {
                 LOG_WARNING(Render_Vulkan,
-                            "Unsupported CMask sample count: address={:#x}, size={:#x}, "
-                            "samples={}, owner={}:{}",
+                            "Unsupported CMask sample count: address=0x%" PRIxPTR ", size=0x%x, "
+                            "samples=%u, owner=%u:%" PRIu64,
                             device_addr, size, meta->num_samples, meta->owner_id.index,
                             meta->owner_uid);
                 return false;
@@ -881,7 +885,7 @@ bool BufferCache::SynchronizeMemoryFromImage(const Buffer* arena, VAddr device_a
             runtime.FillBuffer(arena, arena->Offset(device_addr), size, *expanded_value);
             return true;
         } else {
-            LOG_WARNING(Render_Vulkan, "Unhandled metadata type {}",
+            LOG_WARNING(Render_Vulkan, "Unhandled metadata type %s",
                         enum_name(&enum_names_VideoCore_TextureCache_MetaType,
                                   static_cast<s64>(meta->type)));
         }
@@ -896,7 +900,7 @@ bool BufferCache::SynchronizeMemoryFromImage(const Buffer* arena, VAddr device_a
         return false;
     }
     ASSERT_MSG(device_addr == image.info.guest_address,
-               "Texel buffer aliases image subresources {:x} : {:x}", device_addr,
+               "Texel buffer aliases image subresources %" PRIxPTR " : %" PRIxPTR, device_addr,
                image.info.guest_address);
     const u64 arena_offset = arena->Offset(device_addr);
     // The tiler writes the whole image, which may be more than the range that was asked for:

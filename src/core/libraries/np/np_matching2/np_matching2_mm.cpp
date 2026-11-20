@@ -12,7 +12,6 @@
 #include <mutex>
 #include <string>
 #include <vector>
-#include <fmt/format.h>
 
 #include "common/combiner.h"
 #include "common/event_mutex.h"
@@ -129,12 +128,14 @@ std::string HexPreview(const void* data, u32 size, u32 max_bytes = 96) {
 }
 
 void LogBinAttr(std::string_view prefix, u64 index, const OrbisNpMatching2BinAttr& attr) {
-    LOG_INFO(Lib_NpMatching2, "{}[{}]: id={:#x} size={} data={}", prefix, index, attr.id,
-             attr.dataSize, HexPreview(attr.data, attr.dataSize));
+    LOG_INFO(Lib_NpMatching2, "%.*s[%" PRIu64 "]: id=0x%x size=%" PRIu64 " data=%s",
+             static_cast<int>((prefix).size()), (prefix).data(), index, attr.id, attr.dataSize,
+             (HexPreview(attr.data, attr.dataSize)).c_str());
 }
 
 void LogIntAttr(std::string_view prefix, u64 index, const OrbisNpMatching2IntAttr& attr) {
-    LOG_INFO(Lib_NpMatching2, "{}[{}]: id={:#x} value={}", prefix, index, attr.id, attr.num);
+    LOG_INFO(Lib_NpMatching2, "%.*s[%" PRIu64 "]: id=0x%x value=%u",
+             static_cast<int>((prefix).size()), (prefix).data(), index, attr.id, attr.num);
 }
 
 void AppendBinAttr(shadnet_MatchingBinAttr* dst, const OrbisNpMatching2BinAttr& src) {
@@ -151,25 +152,27 @@ void AppendCreateRoomBinAttrById(shadnet_CreateRoomRequest& req, ShadNet::Builde
     case ORBIS_NP_MATCHING2_ROOM_BIN_ATTR_INTERNAL_2_ID:
         AppendBinAttr(req_build.Add(req.internal_bin_attrs), src);
         LOG_INFO(Lib_NpMatching2,
-                 "CreateJoinRoom: routed bin attr id={:#x} from {} to internal size={}", src.id,
-                 source, src.dataSize);
+                 "CreateJoinRoom: routed bin attr id=0x%x from %.*s to internal size=%" PRIu64,
+                 src.id, static_cast<int>((source).size()), (source).data(), src.dataSize);
         break;
     case ORBIS_NP_MATCHING2_ROOM_BIN_ATTR_EXTERNAL_1_ID:
     case ORBIS_NP_MATCHING2_ROOM_BIN_ATTR_EXTERNAL_2_ID:
         AppendBinAttr(req_build.Add(req.external_bin_attrs), src);
         LOG_INFO(Lib_NpMatching2,
-                 "CreateJoinRoom: routed bin attr id={:#x} from {} to external size={}", src.id,
-                 source, src.dataSize);
+                 "CreateJoinRoom: routed bin attr id=0x%x from %.*s to external size=%" PRIu64,
+                 src.id, static_cast<int>((source).size()), (source).data(), src.dataSize);
         break;
     case ORBIS_NP_MATCHING2_ROOM_SEARCHABLE_BIN_ATTR_EXTERNAL_1_ID:
         AppendBinAttr(req_build.Add(req.external_search_bin_attrs), src);
-        LOG_INFO(Lib_NpMatching2,
-                 "CreateJoinRoom: routed bin attr id={:#x} from {} to search external size={}",
-                 src.id, source, src.dataSize);
+        LOG_INFO(
+            Lib_NpMatching2,
+            "CreateJoinRoom: routed bin attr id=0x%x from %.*s to search external size=%" PRIu64,
+            src.id, static_cast<int>((source).size()), (source).data(), src.dataSize);
         break;
     default:
-        LOG_WARNING(Lib_NpMatching2, "CreateJoinRoom: unexpected bin attr id={:#x} from {} size={}",
-                    src.id, source, src.dataSize);
+        LOG_WARNING(Lib_NpMatching2,
+                    "CreateJoinRoom: unexpected bin attr id=0x%x from %.*s size=%" PRIu64, src.id,
+                    static_cast<int>((source).size()), (source).data(), src.dataSize);
         break;
     }
 }
@@ -713,13 +716,13 @@ void HandleRoomEvent(const ShadNet::NotifyRoomEvent& n) {
             break;
         }
         default:
-            LOG_WARNING(Lib_NpMatching2, "unhandled room event {:#x}", n.event);
+            LOG_WARNING(Lib_NpMatching2, "unhandled room event 0x%x", n.event);
             return;
         }
     }
 
-    LOG_DEBUG(Lib_NpMatching2, "RoomEvent ctx={} room={} event={:#x} cause={}", n.ctx_id, n.room_id,
-              n.event, n.event_cause);
+    LOG_DEBUG(Lib_NpMatching2, "RoomEvent ctx=%u room=%" PRIu64 " event=0x%x cause=%u", n.ctx_id,
+              n.room_id, n.event, n.event_cause);
 
     OrbisNpMatching2Event fired_event = event;
     if (ctx->a_variant) {
@@ -829,8 +832,8 @@ void OnMatchingReply(ShadNet::CommandType cmd, u64 pkt_id, ShadNet::ErrorType er
             auto it = g_mm.pending.find(pkt_id);
             if (it == g_mm.pending.end()) {
                 LOG_WARNING(Lib_NpMatching2,
-                            "reply pkt_id={} cmd={} has no pending entry (have {})", pkt_id,
-                            static_cast<u16>(cmd), g_mm.pending.size());
+                            "reply pkt_id=%" PRIu64 " cmd=%u has no pending entry (have %zu)",
+                            pkt_id, static_cast<u16>(cmd), g_mm.pending.size());
                 return true;
             }
             pr = it->second;
@@ -839,8 +842,8 @@ void OnMatchingReply(ShadNet::CommandType cmd, u64 pkt_id, ShadNet::ErrorType er
         })) {
         return;
     }
-    LOG_DEBUG(Lib_NpMatching2, "reply pkt_id={} cmd={} -> ctx={} reqId={} event={:#x}", pkt_id,
-              static_cast<u16>(cmd), pr.ctx_id, pr.req_id, static_cast<u16>(pr.req_event));
+    LOG_DEBUG(Lib_NpMatching2, "reply pkt_id=%" PRIu64 " cmd=%u -> ctx=%u reqId=%u event=0x%x",
+              pkt_id, static_cast<u16>(cmd), pr.ctx_id, pr.req_id, static_cast<u16>(pr.req_event));
     DispatchRequestComplete(pr, error, body);
 }
 
@@ -862,7 +865,8 @@ void SetMmShadNetClient(std::shared_ptr<ShadNet::ShadNetClient> client,
         server_addr = g_mm.server_addr;
         server_udp_port = g_mm.server_udp_port;
     });
-    LOG_INFO(Lib_NpMatching2, "ShadNet features: matching2_enabled={}", matching2_enabled);
+    LOG_INFO(Lib_NpMatching2, "ShadNet features: matching2_enabled=%s",
+             (matching2_enabled) ? "true" : "false");
     Net::UPnPClient::Instance().SetP2PFeaturesEnabled(matching2_enabled);
 
     if (!client) {
@@ -943,20 +947,20 @@ s32 MmSubmitRequest(OrbisNpMatching2ContextId ctx_id, OrbisNpMatching2RequestId 
     std::shared_ptr<ShadNet::ShadNetClient> client;
     g_mm.mutex.Run([&] { client = g_mm.client; });
     if (!client || !client->IsAuthenticated()) {
-        LOG_ERROR(Lib_NpMatching2, "cmd={} not connected", static_cast<u16>(cmd));
+        LOG_ERROR(Lib_NpMatching2, "cmd=%u not connected", static_cast<u16>(cmd));
         return ORBIS_NP_MATCHING2_ERROR_INVALID_CONTEXT_ID;
     }
 
     auto ctx = NpHandler::GetInstance().GetMatching2ContextManager().Get(ctx_id);
     if (!ctx) {
-        LOG_ERROR(Lib_NpMatching2, "cmd={} invalid ctx={}", static_cast<u16>(cmd), ctx_id);
+        LOG_ERROR(Lib_NpMatching2, "cmd=%u invalid ctx=%u", static_cast<u16>(cmd), ctx_id);
         return ORBIS_NP_MATCHING2_ERROR_INVALID_CONTEXT_ID;
     }
     const RequestCallbackInfo request_cb = ConsumeRequestCallback(ctx);
     if (IsMatching2BackendDisabled() && !IsContextLifecycleEvent(req_event)) {
         LOG_INFO(Lib_NpMatching2,
-                 "matching2 backend disabled; failing ctx={} reqId={} "
-                 "event={:#x} cmd={}",
+                 "matching2 backend disabled; failing ctx=%u reqId=%u "
+                 "event=0x%x cmd=%u",
                  ctx_id, req_id, static_cast<u16>(req_event), static_cast<u16>(cmd));
 
         s32 error_code = ORBIS_NP_MATCHING2_ERROR_SERVER_NOT_AVAILABLE;
@@ -996,18 +1000,20 @@ s32 MmSubmitRequest(OrbisNpMatching2ContextId ctx_id, OrbisNpMatching2RequestId 
     }
 
     LOG_INFO(Lib_NpMatching2,
-             "ctx={} reqId={} event={:#x} cmd={} aVariant={} callback={:#x} "
-             "arg={}",
-             ctx_id, req_id, static_cast<u16>(req_event), static_cast<u16>(cmd), a_variant,
-             reinterpret_cast<std::uintptr_t>(request_cb.callback), fmt::ptr(request_cb.arg));
+             "ctx=%u reqId=%u event=0x%x cmd=%u aVariant=%s callback=0x%llx "
+             "arg=0x%llx",
+             ctx_id, req_id, static_cast<u16>(req_event), static_cast<u16>(cmd),
+             (a_variant) ? "true" : "false",
+             static_cast<unsigned long long>(reinterpret_cast<std::uintptr_t>(request_cb.callback)),
+             static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(request_cb.arg)));
 
     const u64 pkt_id = client->SubmitRequest(static_cast<ShadNet::CommandType>(cmd), payload);
     g_mm.pending_mutex.Run([&] {
         g_mm.pending[pkt_id] = {ctx_id,        req_id, req_event, a_variant, request_cb.callback,
                                 request_cb.arg};
     });
-    LOG_DEBUG(Lib_NpMatching2, "submit cmd={} pkt_id={} ctx={} reqId={}", static_cast<u16>(cmd),
-              pkt_id, ctx_id, req_id);
+    LOG_DEBUG(Lib_NpMatching2, "submit cmd=%u pkt_id=%" PRIu64 " ctx=%u reqId=%u",
+              static_cast<u16>(cmd), pkt_id, ctx_id, req_id);
     return ORBIS_OK;
 }
 
@@ -1026,8 +1032,9 @@ s32 MmCreateJoinRoom(OrbisNpMatching2ContextId ctx_id, OrbisNpMatching2RequestId
     req.blocked_user_count = static_cast<u32>(request.blockedUsers);
     req.internal_bin_attr_count = static_cast<u32>(request.internalBinAttrs);
     LOG_INFO(Lib_NpMatching2,
-             "ctx={} reqId={} maxSlot={} world={} lobby={} flags={:#x} "
-             "internalBin={} searchInt={} searchBin={} extBin={} memberBin={}",
+             "ctx=%u reqId=%u maxSlot=%u world=%u lobby=%" PRIu64 " flags=0x%x "
+             "internalBin=%" PRIu64 " searchInt=%" PRIu64 " searchBin=%" PRIu64 " extBin=%" PRIu64
+             " memberBin=%" PRIu64,
              ctx_id, req_id, request.maxSlot, request.worldId, request.lobbyId, request.flags,
              request.internalBinAttrs, request.externalSearchIntAttrs,
              request.externalSearchBinAttrs, request.externalBinAttrs,
@@ -1093,8 +1100,9 @@ s32 MmCreateJoinRoomA(OrbisNpMatching2ContextId ctx_id, OrbisNpMatching2RequestI
     req.blocked_user_count = static_cast<u32>(request.blockedUsers);
     req.internal_bin_attr_count = static_cast<u32>(request.internalBinAttrs);
     LOG_INFO(Lib_NpMatching2,
-             "ctx={} reqId={} maxSlot={} world={} lobby={} flags={:#x} "
-             "internalBin={} searchInt={} searchBin={} extBin={} memberBin={}",
+             "ctx=%u reqId=%u maxSlot=%u world=%u lobby=%" PRIu64 " flags=0x%x "
+             "internalBin=%" PRIu64 " searchInt=%" PRIu64 " searchBin=%" PRIu64 " extBin=%" PRIu64
+             " memberBin=%" PRIu64,
              ctx_id, req_id, request.maxSlot, request.worldId, request.lobbyId, request.flags,
              request.internalBinAttrs, request.externalSearchIntAttrs,
              request.externalSearchBinAttrs, request.externalBinAttrs,
@@ -1221,14 +1229,15 @@ s32 MmSearchRoom(OrbisNpMatching2ContextId ctx_id, OrbisNpMatching2RequestId req
     req.flag_filter = request.flags1;
     req.flag_attr = request.flags2;
     LOG_DEBUG(Lib_NpMatching2,
-              "search world={} lobby={} range={}+{} flags={:#x}/{:#x} intN={} binN={} attrN={}",
+              "search world=%u lobby=%" PRIu64 " range=%u+%u flags=0x%x/0x%x intN=%" PRIu64
+              " binN=%" PRIu64 " attrN=%" PRIu64,
               request.worldId, request.lobbyId, request.rangeFilter.start, request.rangeFilter.max,
               request.flags1, request.flags2, request.intFilters, request.binFilters,
               request.attrs);
     for (u64 i = 0; i < request.intFilters; ++i) {
         const auto& f = request.intFilter[i];
-        LOG_DEBUG(Lib_NpMatching2, "  intFilter[{}] op={} id={:#x} num={}", i, f.searchOperator,
-                  f.attr.id, f.attr.num);
+        LOG_DEBUG(Lib_NpMatching2, "  intFilter[%" PRIu64 "] op=%u id=0x%x num=%u", i,
+                  f.searchOperator, f.attr.id, f.attr.num);
         auto* dst = req_build.Add(req.int_filters);
         dst->op = f.searchOperator;
         dst->attr_id = f.attr.id;
@@ -1263,13 +1272,14 @@ s32 MmGetRoomDataExternalList(OrbisNpMatching2ContextId ctx_id, OrbisNpMatching2
     for (u64 i = 0; i < request.attrIdNum; ++i) {
         req_build.Push(req.attr_ids, request.attrId[i]);
     }
-    LOG_INFO(Lib_NpMatching2, "getRoomDataExternalList roomN={} attrN={}", request.roomIdNum,
-             request.attrIdNum);
+    LOG_INFO(Lib_NpMatching2, "getRoomDataExternalList roomN=%" PRIu64 " attrN=%" PRIu64,
+             request.roomIdNum, request.attrIdNum);
     for (u64 i = 0; i < request.roomIdNum; ++i) {
-        LOG_INFO(Lib_NpMatching2, "  getRoomDataExternalList roomId[{}]={}", i, request.roomId[i]);
+        LOG_INFO(Lib_NpMatching2, "  getRoomDataExternalList roomId[%" PRIu64 "]=%" PRIu64, i,
+                 request.roomId[i]);
     }
     for (u64 i = 0; i < request.attrIdNum; ++i) {
-        LOG_INFO(Lib_NpMatching2, "  getRoomDataExternalList attrId[{}]={:#x}", i,
+        LOG_INFO(Lib_NpMatching2, "  getRoomDataExternalList attrId[%" PRIu64 "]=0x%x", i,
                  request.attrId[i]);
     }
     return MmSubmitRequest(ctx_id, req_id,
@@ -1284,7 +1294,7 @@ s32 MmGetRoomMemberDataExternalList(
     const OrbisNpMatching2GetRoomMemberDataExternalListRequest& request, bool a_variant) {
     shadnet_GetRoomMemberDataExternalListRequest req{};
     req.room_id = request.roomId;
-    LOG_DEBUG(Lib_NpMatching2, "getRoomMemberDataExternalList room={}", request.roomId);
+    LOG_DEBUG(Lib_NpMatching2, "getRoomMemberDataExternalList room=%" PRIu64, request.roomId);
     return MmSubmitRequest(
         ctx_id, req_id,
         a_variant ? ORBIS_NP_MATCHING2_REQUEST_EVENT_GET_ROOM_MEMBER_DATA_EXTERNAL_LIST_A
@@ -1303,7 +1313,7 @@ s32 MmGetUserInfoList(OrbisNpMatching2ContextId ctx_id, OrbisNpMatching2RequestI
         req_build.Push(req.attr_ids, request.attrId[i]);
     }
     req.option = request.option;
-    LOG_DEBUG(Lib_NpMatching2, "getUserInfoList npN={} attrN={}", request.npIdNum,
+    LOG_DEBUG(Lib_NpMatching2, "getUserInfoList npN=%" PRIu64 " attrN=%" PRIu64, request.npIdNum,
               request.attrIdNum);
     return MmSubmitRequest(ctx_id, req_id, ORBIS_NP_MATCHING2_REQUEST_EVENT_GET_USER_INFO_LIST,
                            MmCommand::GetUserInfoList, MakeProtoPayload(req), a_variant);
@@ -1317,7 +1327,7 @@ s32 MmSetUserInfo(OrbisNpMatching2ContextId ctx_id, OrbisNpMatching2RequestId re
     for (u64 i = 0; request.userBinAttr && i < request.userBinAttrs; ++i) {
         AppendBinAttr(req_build.Add(req.user_bin_attrs), request.userBinAttr[i]);
     }
-    LOG_DEBUG(Lib_NpMatching2, "setUserInfo server={} binAttrs={}", request.serverId,
+    LOG_DEBUG(Lib_NpMatching2, "setUserInfo server=%u binAttrs=%" PRIu64, request.serverId,
               request.userBinAttrs);
     return MmSubmitRequest(ctx_id, req_id, ORBIS_NP_MATCHING2_REQUEST_EVENT_SET_USER_INFO,
                            MmCommand::SetUserInfo, MakeProtoPayload(req));
@@ -1344,8 +1354,8 @@ s32 MmSendRoomMessage(OrbisNpMatching2ContextId ctx_id, OrbisNpMatching2RequestI
         req.msg = Bytes(request.msg, request.msgLen);
     }
 
-    LOG_DEBUG(Lib_NpMatching2, "sendRoomMessage room={} cast={} dstN={} bytes={}", request.roomId,
-              request.castType, req.dst_member_ids.count, request.msgLen);
+    LOG_DEBUG(Lib_NpMatching2, "sendRoomMessage room=%" PRIu64 " cast=%u dstN=%zu bytes=%u",
+              request.roomId, request.castType, req.dst_member_ids.count, request.msgLen);
     return MmSubmitRequest(ctx_id, req_id, ORBIS_NP_MATCHING2_REQUEST_EVENT_SEND_ROOM_MESSAGE,
                            MmCommand::SendRoomMessage, MakeProtoPayload(req));
 }
@@ -1358,11 +1368,13 @@ s32 MmSetRoomDataInternal(OrbisNpMatching2ContextId ctx_id, OrbisNpMatching2Requ
     req.room_id = request.roomId;
     req.flag_filter = request.flagFilter;
     req.flag_attr = request.flagAttr;
-    LOG_INFO(Lib_NpMatching2,
-             "ctx={} reqId={} room={} flags={:#x}/{:#x} binAttrs={} "
-             "passwdMask={}",
-             ctx_id, req_id, request.roomId, request.flagFilter, request.flagAttr,
-             request.roomBinAttrInternalNum, fmt::ptr(request.passwordSlotMask));
+    LOG_INFO(
+        Lib_NpMatching2,
+        "ctx=%u reqId=%u room=%" PRIu64 " flags=0x%x/0x%x binAttrs=%" PRIu64 " "
+        "passwdMask=0x%llx",
+        ctx_id, req_id, request.roomId, request.flagFilter, request.flagAttr,
+        request.roomBinAttrInternalNum,
+        static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(request.passwordSlotMask)));
     for (u64 i = 0; i < request.roomBinAttrInternalNum; ++i) {
         LogBinAttr("  internalBin", i, request.roomBinAttrInternal[i]);
         AppendBinAttr(req_build.Add(req.bin_attrs), request.roomBinAttrInternal[i]);
@@ -1386,8 +1398,8 @@ s32 MmSetRoomMemberDataInternal(OrbisNpMatching2ContextId ctx_id, OrbisNpMatchin
     req.flag_filter = request.flagFilter;
     req.flag_attr = request.flagAttr;
     LOG_INFO(Lib_NpMatching2,
-             "ctx={} reqId={} room={} member={} team={} "
-             "flags={:#x}/{:#x} binAttrs={}",
+             "ctx=%u reqId=%u room=%" PRIu64 " member=%u team=%u "
+             "flags=0x%x/0x%x binAttrs=%" PRIu64,
              ctx_id, req_id, request.roomId, request.memberId, request.teamId, request.flagFilter,
              request.flagAttr, request.roomMemberBinAttrInternalNum);
     for (u64 i = 0; i < request.roomMemberBinAttrInternalNum; ++i) {
@@ -1406,8 +1418,8 @@ s32 MmSetRoomDataExternal(OrbisNpMatching2ContextId ctx_id, OrbisNpMatching2Requ
     req.req_id = req_id;
     req.room_id = request.roomId;
     LOG_INFO(Lib_NpMatching2,
-             "ctx={} reqId={} room={} searchInt={} searchBin={} "
-             "extBin={}",
+             "ctx=%u reqId=%u room=%" PRIu64 " searchInt=%" PRIu64 " searchBin=%" PRIu64 " "
+             "extBin=%" PRIu64,
              ctx_id, req_id, request.roomId, request.roomSearchableIntAttrExternalNum,
              request.roomSearchableBinAttrExternalNum, request.roomBinAttrExternalNum);
     for (u64 i = 0; i < request.roomSearchableIntAttrExternalNum; ++i) {
@@ -1462,7 +1474,8 @@ bool RequestSignalingInfos(std::string_view target_online_id, u32* out_addr, u16
     // Room events and replies are handled on the reader thread, which is the one that would
     // read this reply. Waiting there always times out, so leave it to the handshake thread.
     if (ShadNet::ShadNetClient::OnReaderThread()) {
-        LOG_DEBUG(Lib_NpMatching2, "'{}': deferred to the handshake thread", target_online_id);
+        LOG_DEBUG(Lib_NpMatching2, "'%.*s': deferred to the handshake thread",
+                  static_cast<int>((target_online_id).size()), (target_online_id).data());
         return false;
     }
 
@@ -1477,7 +1490,8 @@ bool RequestSignalingInfos(std::string_view target_online_id, u32* out_addr, u16
         std::unique_lock lock(g_mm.sig_mutex);
         if (!g_mm.sig_cv.wait_for(lock, std::chrono::seconds(5),
                                   [&] { return g_mm.sig_replies.count(pkt_id) > 0; })) {
-            LOG_WARNING(Lib_NpMatching2, "timed out for '{}'", target_online_id);
+            LOG_WARNING(Lib_NpMatching2, "timed out for '%.*s'",
+                        static_cast<int>((target_online_id).size()), (target_online_id).data());
             return false;
         }
         reply = std::move(g_mm.sig_replies[pkt_id]);
@@ -1506,8 +1520,9 @@ bool RequestSignalingInfos(std::string_view target_online_id, u32* out_addr, u16
     }
     *out_addr = addr_nbo;
     *out_port = Libraries::Net::sceNetHtons(port_host);
-    LOG_INFO(Lib_NpMatching2, "received peer='{}' ip={} port={} addr_nbo={:#x} port_nbo={:#x}",
-             target_online_id, addr_str, port_host, addr_nbo, *out_port);
+    LOG_INFO(Lib_NpMatching2, "received peer='%.*s' ip=%s port=%u addr_nbo=0x%x port_nbo=0x%x",
+             static_cast<int>((target_online_id).size()), (target_online_id).data(),
+             (addr_str).c_str(), port_host, addr_nbo, *out_port);
     return true;
 }
 

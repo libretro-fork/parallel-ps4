@@ -4,13 +4,13 @@
 
 #include <algorithm>
 #include <chrono>
-#include <fmt/format.h>
 
 #include <retro_atomic.h>
 #include "client.h"
 #include "common/elf_info.h"
 #include "common/logging/log.h"
 #include "common/scm_rev.h"
+#include "common/string_util.h"
 #include "common/thread_name.h"
 #include "core/libraries/kernel/time.h"
 #include "shadnet/messages.h"
@@ -195,8 +195,8 @@ void ShadNetClient::ConnectThread() {
         if ((retro_atomic_load_seq_cst_int(&m_terminate) != 0) ||
             attempt == SHAD_CONNECT_MAX_ATTEMPTS)
             break;
-        LOG_WARNING(ShadNet, "ShadNet: connect attempt {}/{} to {}:{} failed, retrying in {} ms",
-                    attempt, SHAD_CONNECT_MAX_ATTEMPTS, m_host, m_port, backoff_ms);
+        LOG_WARNING(ShadNet, "ShadNet: connect attempt %u/%u to %s:%u failed, retrying in %u ms",
+                    attempt, SHAD_CONNECT_MAX_ATTEMPTS, (m_host).c_str(), m_port, backoff_ms);
         // The backoff is of the game's time; Stop() sets the latch waited on, and ends it
         Libraries::Kernel::GameWait(
             &m_connect_settled.waiters,
@@ -238,7 +238,7 @@ void ShadNetClient::ConnectThread() {
         (void)retro_atomic_exchange_int(&m_state, static_cast<int>(ShadNetState::FailureOther));
         return;
     }
-    LOG_INFO(ShadNet, "Login packet sent for '{}'", m_npid);
+    LOG_INFO(ShadNet, "Login packet sent for '%s'", (m_npid).c_str());
 }
 
 namespace {
@@ -265,7 +265,7 @@ void ShadNetClient::ReaderThread() {
         const u64 pkt_id = GetLE64(hdr + 7);
 
         if (total_sz < SHAD_HEADER_SIZE || total_sz > SHAD_MAX_PACKET_SIZE) {
-            LOG_ERROR(ShadNet, "Corrupt packet (total_sz={})", total_sz);
+            LOG_ERROR(ShadNet, "Corrupt packet (total_sz=%u)", total_sz);
             (void)retro_atomic_exchange_int(&m_state,
                                             static_cast<int>(ShadNetState::FailureProtocol));
             break;
@@ -343,7 +343,7 @@ bool ShadNetClient::DoConnect() {
 
     if (::getaddrinfo(m_host.c_str(), std::to_string(m_port).c_str(), &hints, &res_list) != 0 ||
         !res_list) {
-        LOG_ERROR(ShadNet, "DNS resolution failed for '{}'", m_host);
+        LOG_ERROR(ShadNet, "DNS resolution failed for '%s'", (m_host).c_str());
         (void)retro_atomic_exchange_int(&m_state, static_cast<int>(ShadNetState::FailureResolve));
         return false;
     }
@@ -392,7 +392,7 @@ bool ShadNetClient::DoConnect() {
         }
     }
     if (!connected) {
-        LOG_ERROR(ShadNet, "connect() timed out or failed for {}:{}", m_host, m_port);
+        LOG_ERROR(ShadNet, "connect() timed out or failed for %s:%u", (m_host).c_str(), m_port);
         SHAD_CLOSE(m_sock);
         m_sock = SHAD_INVALID_SOCK;
         (void)retro_atomic_exchange_int(&m_state, static_cast<int>(ShadNetState::FailureConnect));
@@ -422,7 +422,7 @@ bool ShadNetClient::DoConnect() {
     if (::getpeername(m_sock, reinterpret_cast<struct sockaddr*>(&peer), &plen) == 0)
         (void)retro_atomic_exchange_int(&m_addr_server, peer.sin_addr.s_addr);
 
-    LOG_INFO(ShadNet, "TCP connected to {}:{}", m_host, m_port);
+    LOG_INFO(ShadNet, "TCP connected to %s:%u", (m_host).c_str(), m_port);
 
     // Apply receive timeout for the ServerInfo handshake.
     // Cleared after success so ReaderThread's RecvN blocks indefinitely as intended.
@@ -445,7 +445,7 @@ bool ShadNetClient::DoConnect() {
         return false;
     }
     if (static_cast<PacketType>(hdr[0]) != PacketType::ServerInfo) {
-        LOG_ERROR(ShadNet, "Expected ServerInfo, got packet type {:02x}", hdr[0]);
+        LOG_ERROR(ShadNet, "Expected ServerInfo, got packet type %02x", hdr[0]);
         DoDisconnect();
         (void)retro_atomic_exchange_int(&m_state,
                                         static_cast<int>(ShadNetState::FailureServerInfo));
@@ -465,7 +465,7 @@ bool ShadNetClient::DoConnect() {
         const u32 server_ver = GetLE32(si_payload.data());
         (void)retro_atomic_exchange_int(&m_server_protocol_version, server_ver);
         if (server_ver != SHAD_PROTOCOL_VERSION) {
-            LOG_ERROR(ShadNet, "Protocol version mismatch server={} client={}", server_ver,
+            LOG_ERROR(ShadNet, "Protocol version mismatch server=%u client=%u", server_ver,
                       SHAD_PROTOCOL_VERSION);
             DoDisconnect();
             (void)retro_atomic_exchange_int(&m_state,
@@ -473,7 +473,7 @@ bool ShadNetClient::DoConnect() {
             return false;
         }
     }
-    LOG_INFO(ShadNet, "ServerInfo OK (protocol v{})", SHAD_PROTOCOL_VERSION);
+    LOG_INFO(ShadNet, "ServerInfo OK (protocol v%u)", SHAD_PROTOCOL_VERSION);
 
     // Clear the receive timeout ReaderThread handles the socket from here.
 #ifdef _WIN32
@@ -616,13 +616,15 @@ std::string ShadNetClient::BuildVersionString() {
     const bool official = (remote_host == "shadps4-emu" || remote_url.empty());
 
     if (Common::g_is_release) {
-        return official ? fmt::format("shadPS4 v{}", Common::g_version)
-                        : fmt::format("shadPS4 {}/v{}", remote_host, Common::g_version);
+        return official ? Common::StringFromFormat("shadPS4 v%s", Common::g_version)
+                        : Common::StringFromFormat("shadPS4 %s/v%s", (remote_host).c_str(),
+                                                   Common::g_version);
     }
-    return official ? fmt::format("shadPS4 v{} {} {}", Common::g_version, Common::g_scm_branch,
-                                  Common::g_scm_desc)
-                    : fmt::format("shadPS4 v{} {}/{} {}", Common::g_version, remote_host,
-                                  Common::g_scm_branch, Common::g_scm_desc);
+    return official ? Common::StringFromFormat("shadPS4 v%s %s %s", Common::g_version,
+                                               Common::g_scm_branch, Common::g_scm_desc)
+                    : Common::StringFromFormat("shadPS4 v%s %s/%s %s", Common::g_version,
+                                               (remote_host).c_str(), Common::g_scm_branch,
+                                               Common::g_scm_desc);
 }
 
 u64 ShadNetClient::ReportClientVersion() {
@@ -660,7 +662,7 @@ bool ShadNetClient::RequestServerFeatures() {
     std::vector<u8> empty_payload;
     std::vector<u8> pkt = BuildPacket(CommandType::GetServerFeatures, pkt_id, empty_payload);
     QueuePacket(std::move(pkt));
-    LOG_DEBUG(ShadNet, "GetServerFeatures request fired pkt_id={}", pkt_id);
+    LOG_DEBUG(ShadNet, "GetServerFeatures request fired pkt_id=%" PRIu64, pkt_id);
     return true;
 }
 
@@ -691,7 +693,7 @@ void ShadNetClient::DispatchPacket(PacketType type, u16 cmd_raw, u64 pkt_id,
                 }
                 onAsyncReply(static_cast<CommandType>(cmd_raw), pkt_id, err, body);
             } else {
-                LOG_DEBUG(ShadNet, "Unhandled reply cmd={} pkt_id={}", cmd_raw, pkt_id);
+                LOG_DEBUG(ShadNet, "Unhandled reply cmd=%u pkt_id=%" PRIu64, cmd_raw, pkt_id);
             }
             break;
         }
@@ -745,14 +747,14 @@ void ShadNetClient::HandleLoginReply(const std::vector<u8>& payload) {
                 m_user_id = res.userId;
                 m_mutex_friends.Run([&] { m_friends = res.friends; });
                 (void)retro_atomic_exchange_int(&m_authenticated, 1);
-                LOG_INFO(ShadNet, "Logged in npid='{}' userId={} friends={}", m_npid, m_user_id,
-                         m_friends.size());
+                LOG_INFO(ShadNet, "Logged in npid='%s' userId=%" PRIu64 " friends=%zu",
+                         (m_npid).c_str(), m_user_id, m_friends.size());
 
                 const u64 pkt_id = static_cast<u64>(retro_atomic_fetch_add_64(&m_pkt_counter, 1));
                 std::vector<u8> empty_payload;
                 std::vector<u8> pkt = BuildPacket(CommandType::GetToken, pkt_id, empty_payload);
                 QueuePacket(std::move(pkt));
-                LOG_DEBUG(ShadNet, "GetToken request fired pkt_id={}", pkt_id);
+                LOG_DEBUG(ShadNet, "GetToken request fired pkt_id=%" PRIu64, pkt_id);
             } else {
                 res.error = ErrorType::Malformed;
                 LOG_ERROR(ShadNet, "Failed to parse LoginReply proto");
@@ -784,7 +786,7 @@ void ShadNetClient::HandleLoginReply(const std::vector<u8>& payload) {
                                                 static_cast<int>(ShadNetState::FailureAuth));
                 break;
             }
-            LOG_ERROR(ShadNet, "Login rejected error code {}", static_cast<u8>(res.error));
+            LOG_ERROR(ShadNet, "Login rejected error code %u", static_cast<u8>(res.error));
             event_latch_set(&m_login_settled);
             DoDisconnect();
         }
@@ -802,7 +804,7 @@ void ShadNetClient::HandleGetTokenReply(const std::vector<u8>& payload) {
     }
     const ErrorType err = static_cast<ErrorType>(payload[0]);
     if (err != ErrorType::NoError) {
-        LOG_WARNING(ShadNet, "GetToken returned error={} — WebAPI calls will be unauthenticated",
+        LOG_WARNING(ShadNet, "GetToken returned error=%d — WebAPI calls will be unauthenticated",
                     static_cast<int>(err));
         RequestServerFeatures();
         return;
@@ -816,8 +818,10 @@ void ShadNetClient::HandleGetTokenReply(const std::vector<u8>& payload) {
         return;
     }
     m_mutex_bearer.Run([&] { m_bearer_token = Str(pb.token); });
-    LOG_INFO(ShadNet, "Bearer token captured ({} chars) for accountID={} canonical npid='{}'",
-             pb.token.size, pb.user_id, View(pb.npid));
+    LOG_INFO(ShadNet,
+             "Bearer token captured (%zu chars) for accountID=%" PRIu64 " canonical npid='%.*s'",
+             pb.token.size, pb.user_id, static_cast<int>((View(pb.npid)).size()),
+             (View(pb.npid)).data());
     RequestServerFeatures();
 }
 
@@ -839,7 +843,7 @@ void ShadNetClient::HandleServerFeaturesReply(const std::vector<u8>& payload) {
             }
         } else {
             LOG_WARNING(ShadNet,
-                        "GetServerFeatures returned error={} - assuming Matching2 disabled",
+                        "GetServerFeatures returned error=%d - assuming Matching2 disabled",
                         static_cast<int>(err));
         }
     }
@@ -848,7 +852,7 @@ void ShadNetClient::HandleServerFeaturesReply(const std::vector<u8>& payload) {
     (void)retro_atomic_exchange_int(&m_trophies_enabled, trophies_enabled);
     (void)retro_atomic_exchange_int(&m_server_features_received, parsed);
     ReportClientVersion();
-    LOG_INFO(ShadNet, "Server features: matching2_enabled={} trophies_enabled={}{}",
+    LOG_INFO(ShadNet, "Server features: matching2_enabled=%s trophies_enabled=%s%s",
              matching2_enabled ? "true" : "false", trophies_enabled ? "true" : "false",
              parsed ? "" : " (defaulted)");
     event_latch_set(&m_login_settled);
@@ -863,7 +867,7 @@ void ShadNetClient::HandleNotification(u16 cmd_raw, const std::vector<u8>& paylo
         static_cast<NotificationType>(cmd_raw) != NotificationType::WebApiPushEvent) {
         // WebApiPushEvent is multi-field,its first field (service name) may be empty
         // legitimately, so it parses its own payload below rather than relying on blob.
-        LOG_WARNING(ShadNet, "Empty notification payload type={}", cmd_raw);
+        LOG_WARNING(ShadNet, "Empty notification payload type=%u", cmd_raw);
         return;
     }
 
@@ -877,7 +881,7 @@ void ShadNetClient::HandleNotification(u16 cmd_raw, const std::vector<u8>& paylo
         }
         NotifyFriendQuery n;
         n.fromNpid = Str(pb.from_npid);
-        LOG_DEBUG(ShadNet, "FriendQuery from '{}'", n.fromNpid);
+        LOG_DEBUG(ShadNet, "FriendQuery from '%s'", (n.fromNpid).c_str());
         if (onFriendQuery)
             onFriendQuery(n);
         break;
@@ -892,7 +896,8 @@ void ShadNetClient::HandleNotification(u16 cmd_raw, const std::vector<u8>& paylo
         NotifyFriendNew n;
         n.npid = Str(pb.npid);
         n.online = pb.online;
-        LOG_DEBUG(ShadNet, "FriendNew '{}' ({})", n.npid, n.online ? "online" : "offline");
+        LOG_DEBUG(ShadNet, "FriendNew '%s' (%s)", (n.npid).c_str(),
+                  n.online ? "online" : "offline");
         if (onFriendNew)
             onFriendNew(n);
         break;
@@ -906,7 +911,7 @@ void ShadNetClient::HandleNotification(u16 cmd_raw, const std::vector<u8>& paylo
         }
         NotifyFriendLost n;
         n.npid = Str(pb.npid);
-        LOG_DEBUG(ShadNet, "FriendLost '{}'", n.npid);
+        LOG_DEBUG(ShadNet, "FriendLost '%s'", (n.npid).c_str());
         if (onFriendLost)
             onFriendLost(n);
         break;
@@ -922,7 +927,8 @@ void ShadNetClient::HandleNotification(u16 cmd_raw, const std::vector<u8>& paylo
         n.npid = Str(pb.npid);
         n.online = pb.online;
         n.timestamp = pb.timestamp;
-        LOG_DEBUG(ShadNet, "FriendStatus '{}' is {}", n.npid, n.online ? "online" : "offline");
+        LOG_DEBUG(ShadNet, "FriendStatus '%s' is %s", (n.npid).c_str(),
+                  n.online ? "online" : "offline");
         if (onFriendStatus)
             onFriendStatus(n);
         break;
@@ -974,7 +980,7 @@ void ShadNetClient::HandleNotification(u16 cmd_raw, const std::vector<u8>& paylo
             ba.data.assign(a.data.data, a.data.data + a.data.size);
             n.bin_attrs.push_back(std::move(ba));
         }
-        LOG_DEBUG(ShadNet, "RoomEvent room_id={} event={:#x} cause={}", n.room_id, n.event,
+        LOG_DEBUG(ShadNet, "RoomEvent room_id=%" PRIu64 " event=0x%x cause=%u", n.room_id, n.event,
                   n.event_cause);
         if (onRoomEvent)
             onRoomEvent(n);
@@ -1000,7 +1006,7 @@ void ShadNetClient::HandleNotification(u16 cmd_raw, const std::vector<u8>& paylo
         n.src_account_id = pb.src_account_id;
         n.src_platform = pb.src_platform;
         n.msg.assign(pb.msg.data, pb.msg.data + pb.msg.size);
-        LOG_DEBUG(ShadNet, "RoomMessage room_id={} src={} event={:#x} bytes={}", n.room_id,
+        LOG_DEBUG(ShadNet, "RoomMessage room_id=%" PRIu64 " src=%u event=0x%x bytes=%zu", n.room_id,
                   n.src_member_id, n.event, n.msg.size());
         if (onRoomMessage)
             onRoomMessage(n);
@@ -1055,9 +1061,11 @@ void ShadNetClient::HandleNotification(u16 cmd_raw, const std::vector<u8>& paylo
             }
         }
         LOG_INFO(ShadNet,
-                 "WebApiPushEvent svc='{}' type='{}' from='{}'({}) to='{}'({}) bytes={} extd={}",
-                 n.npServiceName, n.dataType, n.fromNpid, n.fromAccountId, n.toNpid, n.toAccountId,
-                 n.data.size(), n.extdData.size());
+                 "WebApiPushEvent svc='%s' type='%s' from='%s'(%" PRIu64 ") to='%s'(%" PRIu64
+                 ") bytes=%zu extd=%zu",
+                 (n.npServiceName).c_str(), (n.dataType).c_str(), (n.fromNpid).c_str(),
+                 n.fromAccountId, (n.toNpid).c_str(), n.toAccountId, n.data.size(),
+                 n.extdData.size());
         if (onWebApiPushEvent)
             onWebApiPushEvent(n);
         break;
@@ -1074,7 +1082,7 @@ void ShadNetClient::HandleNotification(u16 cmd_raw, const std::vector<u8>& paylo
         n.reason = pb.reason;
         n.inUse = pb.in_use;
         n.limit = pb.limit;
-        LOG_INFO(ShadNet, "ServiceUnavailable service={} reason={} in_use={} limit={}", n.service,
+        LOG_INFO(ShadNet, "ServiceUnavailable service=%u reason=%u in_use=%u limit=%u", n.service,
                  n.reason, n.inUse, n.limit);
         if (onServiceUnavailable)
             onServiceUnavailable(n);
@@ -1091,14 +1099,14 @@ void ShadNetClient::HandleNotification(u16 cmd_raw, const std::vector<u8>& paylo
         n.reason = pb.reason;
         n.message = Str(pb.message);
         n.version = Str(pb.version);
-        LOG_ERROR(ShadNet, "Server rejected this client (reason={}, version='{}'): {}", n.reason,
-                  n.version, n.message);
+        LOG_ERROR(ShadNet, "Server rejected this client (reason=%u, version='%s'): %s", n.reason,
+                  (n.version).c_str(), (n.message).c_str());
         if (onClientRejected)
             onClientRejected(n);
         break;
     }
     default:
-        LOG_DEBUG(ShadNet, "Unknown notification type {}", cmd_raw);
+        LOG_DEBUG(ShadNet, "Unknown notification type %u", cmd_raw);
         break;
     }
 }

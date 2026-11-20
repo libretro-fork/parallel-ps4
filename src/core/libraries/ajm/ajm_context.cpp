@@ -59,8 +59,8 @@ s32 AjmContext::ModuleRegister(AjmCodecType type) {
 void AjmContext::ProcessBatch(u32 id, std::span<AjmJob> jobs) {
     // Perform operation requested by control flags.
     for (auto& job : jobs) {
-        LOG_TRACE(Lib_Ajm, "Processing job {} for instance {}. flags = {:#x}", id, job.instance_id,
-                  job.flags.raw);
+        LOG_TRACE(Lib_Ajm, "Processing job %u for instance %u. flags = 0x%" PRIx64, id,
+                  job.instance_id, job.flags.raw);
 
         if (job.instance_id == AJM_INSTANCE_STATISTICS) {
             AjmInstanceStatistics::Getinstance().ExecuteJob(job);
@@ -142,7 +142,7 @@ s32 AjmContext::InstanceCreate(AjmCodecType codec_type, AjmInstanceFlags flags, 
     }
     *out_instance = (static_cast<u32>(*slot) + 1) | (static_cast<u32>(codec_type) << 14);
 
-    LOG_INFO(Lib_Ajm, "instance = {}", *out_instance);
+    LOG_INFO(Lib_Ajm, "instance = %u", *out_instance);
     return ORBIS_OK;
 }
 

@@ -33,7 +33,8 @@ s32 PS4_SYSV_ABI sceKernelHasNeoMode() {
 }
 
 s32 PS4_SYSV_ABI sceKernelIsDevkit() {
-    LOG_INFO(Lib_Kernel, "called, isDevkit: {}", emu_settings_get_dev_kit_mode());
+    LOG_INFO(Lib_Kernel, "called, isDevkit: %s",
+             (emu_settings_get_dev_kit_mode()) ? "true" : "false");
     return emu_settings_get_dev_kit_mode();
 }
 
@@ -90,7 +91,7 @@ void* PS4_SYSV_ABI sceKernelGetProcParam() {
 
 s32 PS4_SYSV_ABI sceKernelLoadStartModule(const char* moduleFileName, u64 args, const void* argp,
                                           u32 flags, const void* pOpt, s32* pRes) {
-    LOG_INFO(Lib_Kernel, "called filename = {}, args = {}", moduleFileName, args);
+    LOG_INFO(Lib_Kernel, "called filename = %s, args = %" PRIu64, moduleFileName, args);
     ASSERT(flags == 0);
 
     auto* linker = Common::Singleton<Core::Linker>::Instance();
@@ -125,7 +126,7 @@ s32 PS4_SYSV_ABI sceKernelLoadStartModule(const char* moduleFileName, u64 args, 
 
 s32 PS4_SYSV_ABI sceKernelStopUnloadModule(s32 handle, u64 args, const void* argp, u32 flags,
                                            const void* pOpt, s32* pRes) {
-    LOG_ERROR(Lib_Kernel, "(STUBBED) handle = {:#x}", handle);
+    LOG_ERROR(Lib_Kernel, "(STUBBED) handle = 0x%x", handle);
     if (pRes) {
         *pRes = 0;
     }
@@ -142,8 +143,9 @@ s32 PS4_SYSV_ABI sceKernelDlsym(s32 handle, const char* symbol, void** addrp) {
     if (*addrp == nullptr) {
         *addrp = module->FindByNid(symbol);
     }
-    LOG_DEBUG(Lib_Kernel, "handle = {}, symbol = '{}', resolved = {}", handle,
-              symbol ? symbol : "null", fmt::ptr(*addrp));
+    LOG_DEBUG(Lib_Kernel, "handle = %d, symbol = '%s', resolved = 0x%llx", handle,
+              symbol ? symbol : "null",
+              static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(*addrp)));
     if (*addrp == nullptr) {
         return ORBIS_KERNEL_ERROR_ESRCH;
     }
@@ -164,7 +166,7 @@ s32 PS4_SYSV_ABI sceKernelGetModuleInfoForUnwind(VAddr addr, s32 flags,
     }
 
     // Find module that contains specified address.
-    LOG_INFO(Lib_Kernel, "called addr = {:#x}, flags = {:#x}", addr, flags);
+    LOG_INFO(Lib_Kernel, "called addr = 0x%" PRIxPTR ", flags = 0x%x", addr, flags);
     auto* linker = Common::Singleton<Core::Linker>::Instance();
     auto* module = linker->FindByAddress(addr);
     if (!module) {
@@ -193,9 +195,14 @@ s32 PS4_SYSV_ABI sceKernelGetModuleInfoFromAddr(VAddr addr, s32 flags,
         return ORBIS_KERNEL_ERROR_EFAULT;
     }
 
-    LOG_DEBUG(Lib_Kernel,
-              "called addr = {:#x}, flags = {:#x}, caller = {:p}, info = {:p}, st_size = {:#x}",
-              addr, flags, __builtin_return_address(0), static_cast<void*>(info), info->st_size);
+    LOG_DEBUG(
+        Lib_Kernel,
+        "called addr = 0x%" PRIxPTR
+        ", flags = 0x%x, caller = 0x%llx, info = 0x%llx, st_size = 0x%" PRIx64,
+        addr, flags,
+        static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(__builtin_return_address(0))),
+        static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(static_cast<void*>(info))),
+        info->st_size);
     auto* linker = Common::Singleton<Core::Linker>::Instance();
     auto* module = linker->FindByAddress(addr);
     if (!module) {
@@ -320,7 +327,7 @@ s32 PS4_SYSV_ABI exit(s32 status) {
 
 s32 PS4_SYSV_ABI sceKernelSetProcessProperty(u32 prop_type, const void* prop_data, size_t prop_size,
                                              u64 unk1, u64 unk2) {
-    LOG_ERROR(Lib_Kernel, "(STUBBED) type = {:#x}, size = {}", prop_type, prop_size);
+    LOG_ERROR(Lib_Kernel, "(STUBBED) type = 0x%x, size = %zu", prop_type, prop_size);
     return ORBIS_OK;
 }
 

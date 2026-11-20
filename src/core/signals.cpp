@@ -5,7 +5,6 @@
 #include <iterator>
 #include <string>
 
-#include <fmt/format.h>
 #include <retro_atomic.h>
 #include "common/arch.h"
 #include "common/assert.h"
@@ -13,6 +12,7 @@
 #include "common/logging/log.h"
 #include "common/quick_exit.h"
 #include "common/signal_context.h"
+#include "common/string_util.h"
 #include "common/x64_decode.h"
 #include "core/cpu_patches.h" // Windows static guest red-zone protection
 #include "core/libraries/kernel/kernel.h"
@@ -138,7 +138,8 @@ static LONG WINAPI SignalHandler(EXCEPTION_POINTERS* pExp) noexcept {
         // Used by OutputDebugString functions.
         return EXCEPTION_CONTINUE_EXECUTION;
     case MS_VC_EXCEPTION:
-        LOG_DEBUG(Debug, "Pass MS_VC_EXCEPTION at {} to handler", address);
+        LOG_DEBUG(Debug, "Pass MS_VC_EXCEPTION at 0x%llx to handler",
+                  static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(address)));
         return EXCEPTION_EXECUTE_HANDLER;
     default:
         break;
@@ -171,7 +172,9 @@ static LONG WINAPI SignalHandler(EXCEPTION_POINTERS* pExp) noexcept {
             CrashReport(pExp);
             break;
         default:
-            LOG_CRITICAL(Debug, "Unhandled Exception code {:#x} at {}", code, address);
+            LOG_CRITICAL(Debug, "Unhandled Exception code 0x%llx at 0x%llx",
+                         static_cast<unsigned long long>(code),
+                         static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(address)));
             break;
         }
         Common::Singleton<Core::Emulator>::Instance()->Shutdown();
@@ -340,23 +343,28 @@ void SignalHandler(int sig, siginfo_t* info, void* raw_context) {
             uint64_t guest_rip = 0;
             uint64_t guest_rax = 0;
             if (::Core::Fex::BachataQueryGuestRipSyscall(&guest_rip, &guest_rax)) {
-                LOG_CRITICAL(Debug, "FEX guest state at fault: rip={:#x} rax={:#x}", guest_rip,
-                             guest_rax);
+                LOG_CRITICAL(Debug, "FEX guest state at fault: rip=0x%llx rax=0x%llx",
+                             static_cast<unsigned long long>(guest_rip),
+                             static_cast<unsigned long long>(guest_rax));
             }
             // The game's threads and their stacks, for a fault in a scan of them (a GC)
             for (const auto* t = Libraries::Kernel::ThrState::Instance()->threads; t != nullptr;
                  t = t->thread_next) {
                 const auto base = reinterpret_cast<u64>(t->attr.stackaddr_attr);
-                LOG_CRITICAL(Debug, "thread '{}': stack {:#x}-{:#x}", t->name, base,
-                             base + t->attr.stacksize_attr);
+                char thread_name[WORD_NAME_MAX + 1];
+                word_name_get(&t->name, thread_name);
+                LOG_CRITICAL(Debug, "thread '%s': stack 0x%llx-0x%llx", thread_name,
+                             static_cast<unsigned long long>(base),
+                             static_cast<unsigned long long>(base + t->attr.stacksize_attr));
             }
 #endif
-            UNREACHABLE_MSG("Unhandled access violation at code address {}: {} address {}",
-                            fmt::ptr(code_address),
-                            is_write  ? "Write to"
-                            : is_exec ? "Executed from"
-                                      : "Read from",
-                            fmt::ptr(info->si_addr));
+            UNREACHABLE_MSG(
+                "Unhandled access violation at code address 0x%llx: %s address 0x%llx",
+                static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(code_address)),
+                is_write  ? "Write to"
+                : is_exec ? "Executed from"
+                          : "Read from",
+                static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(info->si_addr)));
         }
         break;
     }
@@ -376,7 +384,8 @@ void SignalHandler(int sig, siginfo_t* info, void* raw_context) {
             return;
         }
 
-        UNREACHABLE_MSG("Unhandled signal {} at code address {}", sig, fmt::ptr(code_address));
+        UNREACHABLE_MSG("Unhandled signal %d at code address 0x%llx", sig,
+                        static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(code_address)));
     }
     case SIGSLEEP: {
         if (thread) {
@@ -399,7 +408,8 @@ void SignalHandler(int sig, siginfo_t* info, void* raw_context) {
         }
         break;
     default:
-        UNREACHABLE_MSG("Unhandled signal {} at code address {}", sig, fmt::ptr(code_address));
+        UNREACHABLE_MSG("Unhandled signal %d at code address 0x%llx", sig,
+                        static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(code_address)));
     }
 }
 
@@ -416,15 +426,18 @@ static std::string DescribeAddress(u64 address) {
                            reinterpret_cast<LPCSTR>(address), &module) &&
         module && GetModuleFileNameA(module, path, sizeof(path))) {
         const char* name = std::strrchr(path, '\\');
-        return fmt::format("{:#x} ({}+{:#x})", address, name ? name + 1 : path,
-                           address - reinterpret_cast<u64>(module));
+        return Common::StringFromFormat("0x%" PRIx64 " (%s+0x%" PRIx64 ")", address,
+                                        name ? name + 1 : path,
+                                        address - reinterpret_cast<u64>(module));
     }
     // One of the game's own modules, by the address it was loaded at
     if (const auto* guest = Common::Singleton<Core::Linker>::Instance()->FindByAddress(address)) {
-        return fmt::format("{:#x} (the game's {}+{:#x})", address, guest->name,
-                           address - guest->GetBaseAddress());
+        return Common::StringFromFormat(
+            "0x%" PRIx64 " (the game's %s+0x%llx)", address, guest->name.c_str(),
+            static_cast<unsigned long long>(address - guest->GetBaseAddress()));
     }
-    return fmt::format("{:#x} (in no module: generated code or data)", address);
+    return Common::StringFromFormat("0x%" PRIx64 " (in no module: generated code or data)",
+                                    address);
 }
 
 // Memory read for the crash report: false where it cannot be read, never a fault
@@ -455,7 +468,7 @@ static int LogGameCallers(u64 rbp, const char* indent, int depth, int limit) {
             !linker->FindByAddress(frame[1])) {
             break;
         }
-        LOG_CRITICAL(Debug, "{}#{} {}", indent, depth + shown, DescribeAddress(frame[1]));
+        LOG_CRITICAL(Debug, "%s#%d %s", indent, depth + shown, (DescribeAddress(frame[1])).c_str());
         if (frame[0] <= rbp) {
             break; // a caller's frame is above its callee's
         }
@@ -499,14 +512,14 @@ static void LogMemoryAroundRegisters(const CONTEXT& ctx) {
         shown[shown_count][0] = start;
         shown[shown_count][1] = length;
         ++shown_count;
-        LOG_CRITICAL(Debug, "  memory around {} = {:#x}:", reg.name, address);
+        LOG_CRITICAL(Debug, "  memory around %s = 0x%" PRIx64 ":", reg.name, address);
         for (u64 at = start; at < start + length; at += HEX_DUMP_LINE_BYTES) {
             char line[HEX_DUMP_LINE_CHARS];
             if (!ReadMemory(at, bytes, sizeof(bytes))) {
                 continue; // a page that is not there, before or after what is
             }
             hex_dump_line(line, sizeof(line), bytes, sizeof(bytes));
-            LOG_CRITICAL(Debug, "    {:#x}: {}", at, line);
+            LOG_CRITICAL(Debug, "    0x%" PRIx64 ": %s", at, line);
         }
     }
 }
@@ -518,7 +531,7 @@ static void LogMemory(u64 start, u64 length) {
         char line[HEX_DUMP_LINE_CHARS];
         if (ReadMemory(at, bytes, sizeof(bytes))) {
             hex_dump_line(line, sizeof(line), bytes, sizeof(bytes));
-            LOG_CRITICAL(Debug, "    {:#x}: {}", at, line);
+            LOG_CRITICAL(Debug, "    0x%" PRIx64 ": %s", at, line);
         }
     }
 }
@@ -570,8 +583,10 @@ static void LogPackedRun(const char* name, u64 address) {
             end = at + Line;
         }
     }
-    LOG_CRITICAL(Debug, "  {} = {:#x} is inside packed data from {:#x} to {:#x} ({} bytes)", name,
-                 address, start, end, end - start);
+    LOG_CRITICAL(Debug,
+                 "  %s = 0x%" PRIx64 " is inside packed data from 0x%" PRIx64 " to 0x%" PRIx64
+                 " (%" PRIu64 " bytes)",
+                 name, address, start, end, end - start);
     LOG_CRITICAL(Debug, "  where it starts:");
     LogMemory(start >= 0x100 ? start - 0x100 : 0, 0x200);
     LOG_CRITICAL(Debug, "  where it ends:");
@@ -610,9 +625,12 @@ static void LogOtherGameThreads() {
         }
         char thread_name[WORD_NAME_MAX + 1];
         word_name_get(&thread->name, thread_name);
-        LOG_CRITICAL(Debug, "  thread '{}' at {}: rdi={:#x} rsi={:#x} rdx={:#x} rcx={:#x} r8={:#x}",
-                     thread_name, DescribeAddress(ctx.Rip), ctx.Rdi, ctx.Rsi, ctx.Rdx, ctx.Rcx,
-                     ctx.R8);
+        LOG_CRITICAL(
+            Debug, "  thread '%s' at %s: rdi=0x%llx rsi=0x%llx rdx=0x%llx rcx=0x%llx r8=0x%llx",
+            thread_name, (DescribeAddress(ctx.Rip)).c_str(),
+            static_cast<unsigned long long>(ctx.Rdi), static_cast<unsigned long long>(ctx.Rsi),
+            static_cast<unsigned long long>(ctx.Rdx), static_cast<unsigned long long>(ctx.Rcx),
+            static_cast<unsigned long long>(ctx.R8));
         if (LogGameCallers(ctx.Rbp, "    ", 1, 6) != 0) {
             continue;
         }
@@ -625,7 +643,7 @@ static void LogOtherGameThreads() {
                 break;
             }
             if (linker->FindByAddress(value)) {
-                LOG_CRITICAL(Debug, "    on its stack: {}", DescribeAddress(value));
+                LOG_CRITICAL(Debug, "    on its stack: %s", (DescribeAddress(value)).c_str());
                 ++found;
             }
         }
@@ -645,31 +663,41 @@ static LONG WINAPI CrashReport(EXCEPTION_POINTERS* info) noexcept {
     }
     const EXCEPTION_RECORD& record = *info->ExceptionRecord;
     const CONTEXT& ctx = *info->ContextRecord;
-    LOG_CRITICAL(Debug, "The emulator crashed: exception {:#x} at {}", record.ExceptionCode,
-                 DescribeAddress(reinterpret_cast<u64>(record.ExceptionAddress)));
+    LOG_CRITICAL(Debug, "The emulator crashed: exception 0x%llx at %s",
+                 static_cast<unsigned long long>(record.ExceptionCode),
+                 (DescribeAddress(reinterpret_cast<u64>(record.ExceptionAddress))).c_str());
     if (record.ExceptionCode == EXCEPTION_ACCESS_VIOLATION && record.NumberParameters >= 2) {
         static constexpr const char* kinds[] = {"reading", "writing"};
         const u64 kind = record.ExceptionInformation[0];
-        LOG_CRITICAL(Debug, "  {} address {:#x}", kind == 8 ? "executing" : kinds[kind & 1],
-                     record.ExceptionInformation[1]);
+        LOG_CRITICAL(Debug, "  %s address 0x%llx", kind == 8 ? "executing" : kinds[kind & 1],
+                     static_cast<unsigned long long>(record.ExceptionInformation[1]));
     }
     char current_name[WORD_NAME_MAX + 1] = "(not a game thread)";
     if (Libraries::Kernel::g_curthread) {
         word_name_get(&Libraries::Kernel::g_curthread->name, current_name);
     }
-    LOG_CRITICAL(Debug, "  thread {} '{}'", GetCurrentThreadId(), current_name);
+    LOG_CRITICAL(Debug, "  thread %llu '%s'", static_cast<unsigned long long>(GetCurrentThreadId()),
+                 current_name);
 #if defined(_M_X64) || defined(__x86_64__)
-    LOG_CRITICAL(Debug, "  rax={:#x} rbx={:#x} rcx={:#x} rdx={:#x} rsi={:#x} rdi={:#x}", ctx.Rax,
-                 ctx.Rbx, ctx.Rcx, ctx.Rdx, ctx.Rsi, ctx.Rdi);
-    LOG_CRITICAL(Debug, "  rbp={:#x} rsp={:#x} r8={:#x} r9={:#x} r10={:#x} r11={:#x}", ctx.Rbp,
-                 ctx.Rsp, ctx.R8, ctx.R9, ctx.R10, ctx.R11);
-    LOG_CRITICAL(Debug, "  r12={:#x} r13={:#x} r14={:#x} r15={:#x} rip={:#x}", ctx.R12, ctx.R13,
-                 ctx.R14, ctx.R15, ctx.Rip);
+    LOG_CRITICAL(Debug, "  rax=0x%llx rbx=0x%llx rcx=0x%llx rdx=0x%llx rsi=0x%llx rdi=0x%llx",
+                 static_cast<unsigned long long>(ctx.Rax), static_cast<unsigned long long>(ctx.Rbx),
+                 static_cast<unsigned long long>(ctx.Rcx), static_cast<unsigned long long>(ctx.Rdx),
+                 static_cast<unsigned long long>(ctx.Rsi),
+                 static_cast<unsigned long long>(ctx.Rdi));
+    LOG_CRITICAL(Debug, "  rbp=0x%llx rsp=0x%llx r8=0x%llx r9=0x%llx r10=0x%llx r11=0x%llx",
+                 static_cast<unsigned long long>(ctx.Rbp), static_cast<unsigned long long>(ctx.Rsp),
+                 static_cast<unsigned long long>(ctx.R8), static_cast<unsigned long long>(ctx.R9),
+                 static_cast<unsigned long long>(ctx.R10),
+                 static_cast<unsigned long long>(ctx.R11));
+    LOG_CRITICAL(Debug, "  r12=0x%llx r13=0x%llx r14=0x%llx r15=0x%llx rip=0x%llx",
+                 static_cast<unsigned long long>(ctx.R12), static_cast<unsigned long long>(ctx.R13),
+                 static_cast<unsigned long long>(ctx.R14), static_cast<unsigned long long>(ctx.R15),
+                 static_cast<unsigned long long>(ctx.Rip));
     // The callers, as far as the unwind tables go: they end at the game's code
     CONTEXT frame = ctx;
     int depth = 0;
     for (; depth < 24 && frame.Rip != 0; ++depth) {
-        LOG_CRITICAL(Debug, "  #{} {}", depth, DescribeAddress(frame.Rip));
+        LOG_CRITICAL(Debug, "  #%d %s", depth, (DescribeAddress(frame.Rip)).c_str());
         DWORD64 image_base = 0;
         PRUNTIME_FUNCTION function = RtlLookupFunctionEntry(frame.Rip, &image_base, nullptr);
         if (!function) {

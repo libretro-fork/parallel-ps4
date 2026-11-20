@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright 2026 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include <cstring>
 #include <utility>
 
 #include "common/elf_info.h"
@@ -407,7 +408,7 @@ s32 PS4_SYSV_ABI sceCameraSetConfig(s32 handle, OrbisCameraConfig* config) {
         output_config1 = config->configExtention[1];
         break;
     default:
-        LOG_ERROR(Lib_Camera, "Invalid config type {}", std::to_underlying(config->configType));
+        LOG_ERROR(Lib_Camera, "Invalid config type %u", std::to_underlying(config->configType));
         return ORBIS_CAMERA_ERROR_PARAM;
     }
 

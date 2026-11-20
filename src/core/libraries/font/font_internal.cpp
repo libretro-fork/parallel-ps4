@@ -4,6 +4,7 @@
 #include "common/combiner.h"
 #include "common/io_file.h"
 #include "common/run_once.h"
+#include "common/string_util.h"
 #include "font_internal.h"
 
 #include <array>
@@ -49,12 +50,14 @@ std::uint8_t g_external_fonts_ctx_stub{};
 u32 g_device_cache_stub{};
 
 std::string FormatNamedParams(std::initializer_list<NamedParam> params) {
-    fmt::memory_buffer buffer;
-    fmt::format_to(std::back_inserter(buffer), "params:\n");
+    std::string text = "params:\n";
     for (const auto& p : params) {
-        fmt::format_to(std::back_inserter(buffer), "{}: {}\n", p.name, p.value);
+        text += p.name;
+        text += ": ";
+        text += p.value;
+        text += '\n';
     }
-    return fmt::to_string(buffer);
+    return text;
 }
 
 bool HasSfntTables(std::span<const u8> bytes);
@@ -70,12 +73,14 @@ static constexpr u32 kFtLoadFlagsRender = FaceLoadVerticalLayout | FaceLoadRende
 FaceHandle CreateFaceFromBytes(const unsigned char* data, std::size_t size, u32 subfont_index) {
     FaceHandle face = Face::Open(data, size, subfont_index);
     if (!face) {
-        LOG_DEBUG(Lib_Font, "CreateFaceFromBytes: failed size={} subfont_index={}", size,
+        LOG_DEBUG(Lib_Font, "CreateFaceFromBytes: failed size=%zu subfont_index=%u", size,
                   subfont_index);
         return nullptr;
     }
-    LOG_DEBUG(Lib_Font, "CreateFaceFromBytes: ok face={} size={} subfont_index={}",
-              reinterpret_cast<const void*>(face), size, subfont_index);
+    LOG_DEBUG(Lib_Font, "CreateFaceFromBytes: ok face=0x%llx size=%zu subfont_index=%u",
+              static_cast<unsigned long long>(
+                  reinterpret_cast<uintptr_t>(reinterpret_cast<const void*>(face))),
+              size, subfont_index);
     return face;
 }
 
@@ -668,7 +673,7 @@ void LogFontOpenError(s32 rc) {
 }
 
 void LogExternalFormatSupport(u32 formats_mask) {
-    LOG_INFO(Lib_Font, "ExternalFormatsMask=0x{:X}", formats_mask);
+    LOG_INFO(Lib_Font, "ExternalFormatsMask=0x%X", formats_mask);
 }
 
 bool LoadFontFile(const std::filesystem::path& path, FontBlob& out_bytes);
@@ -680,10 +685,11 @@ void LogFontOpenParams(const Libraries::Font::OrbisFontOpenParams* params) {
     }
     LOG_INFO(
         Lib_Font,
-        "OpenFontSetParams: tag=0x{:04X} flags=0x{:X} subfont={} unique_id={} reserved_ptrs=[{}, "
-        "{}]",
-        params->tag, params->flags, params->subfont_index, params->unique_id, params->reserved_ptr1,
-        params->reserved_ptr2);
+        "OpenFontSetParams: tag=0x%04X flags=0x%X subfont=%u unique_id=%d reserved_ptrs=[0x%llx, "
+        "0x%llx]",
+        params->tag, params->flags, params->subfont_index, params->unique_id,
+        static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(params->reserved_ptr1)),
+        static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(params->reserved_ptr2)));
 }
 
 std::filesystem::path ResolveGuestPath(const char* guest_path) {
@@ -892,7 +898,7 @@ bool ResolveFaceAndScale(FontState& st, Libraries::Font::OrbisFontHandle handle,
         bool system_attached = false;
         const std::string sys_log = ReportSystemFaceRequest(st, handle, system_attached);
         if (!sys_log.empty()) {
-            LOG_ERROR(Lib_Font, "{}", sys_log);
+            LOG_ERROR(Lib_Font, "%s", (sys_log).c_str());
         }
         if (system_attached) {
             face_out = st.ext_ft_face;
@@ -917,7 +923,7 @@ bool ResolveFace(FontState& st, Libraries::Font::OrbisFontHandle handle, FaceHan
         bool system_attached = false;
         const std::string sys_log = ReportSystemFaceRequest(st, handle, system_attached);
         if (!sys_log.empty()) {
-            LOG_ERROR(Lib_Font, "{}", sys_log);
+            LOG_ERROR(Lib_Font, "%s", (sys_log).c_str());
         }
         if (system_attached) {
             face_out = st.ext_ft_face;
@@ -1336,7 +1342,7 @@ const GlyphEntry* GetGlyphEntry(FontState& st, Libraries::Font::OrbisFontHandle 
         const std::string sys_log = ReportSystemFaceRequest(st, handle, system_attached);
         if (!sys_log.empty()) {
             LOG_ERROR(Lib_Font, "SYSTEM_FONT_FAILED");
-            LOG_DEBUG(Lib_Font, "{}", sys_log);
+            LOG_DEBUG(Lib_Font, "%s", (sys_log).c_str());
         }
         if (system_attached) {
             face_out = st.ext_ft_face;
@@ -1697,9 +1703,9 @@ static std::filesystem::path GetSysFontBaseDirImpl(bool log_errors) {
         if (log_errors) {
             LOG_ERROR(
                 Lib_Font,
-                "SystemFonts: FontsPath '{}' contains no font files; expected files directly in "
+                "SystemFonts: FontsPath '%s' contains no font files; expected files directly in "
                 "this directory or under 'font'/'font2'",
-                base.string());
+                (base.string()).c_str());
         }
         return {};
     }
@@ -1707,8 +1713,8 @@ static std::filesystem::path GetSysFontBaseDirImpl(bool log_errors) {
         return base.parent_path();
     }
     if (log_errors) {
-        LOG_ERROR(Lib_Font, "SystemFonts: FontsPath '{}' is not a valid directory or file",
-                  base.string());
+        LOG_ERROR(Lib_Font, "SystemFonts: FontsPath '%s' is not a valid directory or file",
+                  (base.string()).c_str());
     }
     return {};
 }
@@ -1765,7 +1771,7 @@ std::filesystem::path ResolveSystemFontPath(u32 font_set_type) {
             return ResolveSystemFontPathCandidate(base_dir, def->default_file);
         }
     }
-    LOG_ERROR(Lib_Font, "SystemFonts: unknown font set type=0x{:08X}", font_set_type);
+    LOG_ERROR(Lib_Font, "SystemFonts: unknown font set type=0x%08X", font_set_type);
     return {};
 }
 
@@ -1787,8 +1793,8 @@ const FontSetCache* EnsureFontSetCache(u32 font_set_type) {
             } else {
                 cache.available = false;
                 LOG_ERROR(Lib_Font,
-                          "SystemFonts: failed to load font for set type=0x{:08X} path='{}'",
-                          font_set_type, path.string());
+                          "SystemFonts: failed to load font for set type=0x%08X path='%s'",
+                          font_set_type, (path.string()).c_str());
             }
         }
         return cache.available ? &cache : nullptr;
@@ -1984,7 +1990,7 @@ bool AttachSystemFont(FontState& st, Libraries::Font::OrbisFontHandle handle) {
         AddBuiltinFallbackFaces(st, st.font_set_type, subfont_index, nullptr);
     }
     if (using_builtin_primary) {
-        LOG_WARNING(Lib_Font, "SystemFonts: using bundled Noto fallback for set type=0x{:08X}",
+        LOG_WARNING(Lib_Font, "SystemFonts: using bundled Noto fallback for set type=0x%08X",
                     st.font_set_type);
         NotifyBuiltinFontFallbackOnce();
     }
@@ -1992,10 +1998,12 @@ bool AttachSystemFont(FontState& st, Libraries::Font::OrbisFontHandle handle) {
     LOG_INFO(Lib_Font, "system font attached");
     LOG_DEBUG(Lib_Font,
               "system font attach params:\n"
-              " handle={}\n"
-              " font_set_type=0x{:08X}\n"
-              " path={}\n",
-              static_cast<const void*>(handle), st.font_set_type, st.system_font_path.string());
+              " handle=0x%llx\n"
+              " font_set_type=0x%08X\n"
+              " path=%s\n",
+              static_cast<unsigned long long>(
+                  reinterpret_cast<uintptr_t>(static_cast<const void*>(handle))),
+              st.font_set_type, (st.system_font_path.string()).c_str());
     return true;
 }
 
@@ -2009,9 +2017,12 @@ std::string ReportSystemFaceRequest(FontState& st, Libraries::Font::OrbisFontHan
     if (!st.system_requested) {
         st.system_requested = true;
         const auto configured = Common::FS::PathFromCString(emu_settings_get_font_dir);
-        return fmt::format("SystemFace: handle={} requested internal font but fontsPath ('{}') "
-                           "could not be loaded",
-                           static_cast<const void*>(handle), configured.string());
+        return Common::StringFromFormat(
+            "SystemFace: handle=0x%llx requested internal font but fontsPath ('%s') "
+            "could not be loaded",
+            static_cast<unsigned long long>(
+                reinterpret_cast<uintptr_t>(static_cast<const void*>(handle))),
+            (configured.string()).c_str());
     }
     return {};
 }
@@ -2027,8 +2038,8 @@ void LogCachedStyleOnce(Libraries::Font::OrbisFontHandle handle,
         s_logged.insert(handle);
 
         LOG_DEBUG(Lib_Font,
-                  "BindRenderer: cached_style snapshot: hDpi={} vDpi={} scaleUnit={} baseScale={} "
-                  "scalePixelW={} scalePixelH={} effectWeightX={} effectWeightY={} slantRatio={}",
+                  "BindRenderer: cached_style snapshot: hDpi=%u vDpi=%u scaleUnit=%u baseScale=%g "
+                  "scalePixelW=%g scalePixelH=%g effectWeightX=%g effectWeightY=%g slantRatio=%g",
                   font.cached_style.hDpi, font.cached_style.vDpi, font.cached_style.scaleUnit,
                   font.cached_style.baseScale, font.cached_style.scalePixelW,
                   font.cached_style.scalePixelH, font.cached_style.effectWeightX,
@@ -2049,13 +2060,15 @@ void LogRenderResultSample(Libraries::Font::OrbisFontHandle handle, u32 code,
         ++count;
         LOG_DEBUG(
             Lib_Font,
-            "RenderSample: handle={} code=U+{:04X} update=[{},{} {}x{}] img=[bx={} by={} adv={} "
-            "stride={} w={} h={}] metrics=[w={} h={} hbx={} hby={} hadv={}]",
-            static_cast<const void*>(handle), code, result.UpdateRect.x, result.UpdateRect.y,
-            result.UpdateRect.w, result.UpdateRect.h, result.ImageMetrics.bearingX,
-            result.ImageMetrics.bearingY, result.ImageMetrics.advance, result.ImageMetrics.stride,
-            result.ImageMetrics.width, result.ImageMetrics.height, metrics.width, metrics.height,
-            metrics.Horizontal.bearingX, metrics.Horizontal.bearingY, metrics.Horizontal.advance);
+            "RenderSample: handle=0x%llx code=U+%04X update=[%u,%u %ux%u] img=[bx=%g by=%g adv=%g "
+            "stride=%g w=%u h=%u] metrics=[w=%g h=%g hbx=%g hby=%g hadv=%g]",
+            static_cast<unsigned long long>(
+                reinterpret_cast<uintptr_t>(static_cast<const void*>(handle))),
+            code, result.UpdateRect.x, result.UpdateRect.y, result.UpdateRect.w,
+            result.UpdateRect.h, result.ImageMetrics.bearingX, result.ImageMetrics.bearingY,
+            result.ImageMetrics.advance, result.ImageMetrics.stride, result.ImageMetrics.width,
+            result.ImageMetrics.height, metrics.width, metrics.height, metrics.Horizontal.bearingX,
+            metrics.Horizontal.bearingY, metrics.Horizontal.advance);
     });
 }
 

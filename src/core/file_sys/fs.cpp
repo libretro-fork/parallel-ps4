@@ -129,12 +129,13 @@ void MntPoints::Mount(const std::filesystem::path& host_folder, const std::strin
         });
         if (it != m_mnt_pairs.end()) {
             if (it->host_path == host_folder && it->read_only == read_only) {
-                LOG_DEBUG(Kernel_Fs, "Mount point {} already mounted to {}, skipping",
-                          guest_folder_sanitized, host_folder.string());
+                LOG_DEBUG(Kernel_Fs, "Mount point %s already mounted to %s, skipping",
+                          (guest_folder_sanitized).c_str(), (host_folder.string()).c_str());
                 return;
             }
-            LOG_INFO(Kernel_Fs, "Replacing mount point {} (old: {}, new: {})",
-                     guest_folder_sanitized, it->host_path.string(), host_folder.string());
+            LOG_INFO(Kernel_Fs, "Replacing mount point %s (old: %s, new: %s)",
+                     (guest_folder_sanitized).c_str(), (it->host_path.string()).c_str(),
+                     (host_folder.string()).c_str());
             m_mnt_pairs.erase(it);
         }
 
@@ -165,8 +166,8 @@ void MntPoints::Mount(const std::filesystem::path& host_folder, const std::strin
         }
 
         std::shared_ptr<IBackend> base = CreateBackend(host_folder, read_only);
-        ASSERT_MSG(base, "Mount: base path does not resolve to a backend: {}",
-                   host_folder.string());
+        ASSERT_MSG(base, "Mount: base path does not resolve to a backend: %s",
+                   (host_folder.string()).c_str());
         stack.push_back(std::move(base));
 
         auto& pair = m_mnt_pairs.emplace_back(host_folder, guest_folder_sanitized, read_only,
@@ -183,7 +184,8 @@ void MntPoints::Mount(const std::filesystem::path& host_folder, const std::strin
         pair.has_patch = Common::FS::Exists(pair.patch_root);
         pair.mods_root = OverlayPath(host_folder, "-mods");
         pair.has_mods = Common::FS::Exists(pair.mods_root);
-        LOG_INFO(Kernel_Fs, "Mounted '{}' -> '{}'", guest_folder_sanitized, host_folder.string());
+        LOG_INFO(Kernel_Fs, "Mounted '%s' -> '%s'", (guest_folder_sanitized).c_str(),
+                 (host_folder.string()).c_str());
     });
 }
 

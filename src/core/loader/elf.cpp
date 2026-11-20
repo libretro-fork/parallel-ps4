@@ -1,9 +1,9 @@
 // SPDX-FileCopyrightText: Copyright 2024 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
-#include <fmt/format.h>
 #include "common/assert.h"
 #include "common/logging/log.h"
+#include "common/string_util.h"
 #include "core/file_sys/backends/host_fs.h"
 #include "core/loader/elf.h"
 
@@ -246,7 +246,7 @@ void Elf::Open(std::unique_ptr<Core::FileSys::IFile> handle) {
 
 bool Elf::IsSelfFile() const {
     if (m_self.magic != self_header::signature) [[unlikely]] {
-        LOG_INFO(Loader, "Not a SELF file. Magic mismatch current = {:#x} expected = {:#x}",
+        LOG_INFO(Loader, "Not a SELF file. Magic mismatch current = 0x%x expected = 0x%x",
                  m_self.magic, self_header::signature);
         return false;
     }
@@ -274,56 +274,56 @@ bool Elf::IsElfFile() const {
         return false;
     }
     if (m_elf_header.e_ident.ei_class != ELF_CLASS_64) {
-        LOG_INFO(Loader, "e_ident[EI_CLASS] expected 0x02 is ({:#x})",
+        LOG_INFO(Loader, "e_ident[EI_CLASS] expected 0x02 is (0x%x)",
                  static_cast<u32>(m_elf_header.e_ident.ei_class));
         return false;
     }
 
     if (m_elf_header.e_ident.ei_data != ELF_DATA_2LSB) {
-        LOG_INFO(Loader, "e_ident[EI_DATA] expected 0x01 is ({:#x})",
+        LOG_INFO(Loader, "e_ident[EI_DATA] expected 0x01 is (0x%x)",
                  static_cast<u32>(m_elf_header.e_ident.ei_data));
         return false;
     }
 
     if (m_elf_header.e_ident.ei_version != ELF_VERSION_CURRENT) {
-        LOG_INFO(Loader, "e_ident[EI_VERSION] expected 0x01 is ({:#x})",
+        LOG_INFO(Loader, "e_ident[EI_VERSION] expected 0x01 is (0x%x)",
                  static_cast<u32>(m_elf_header.e_ident.ei_version));
         return false;
     }
 
     if (m_elf_header.e_ident.ei_osabi != ELF_OSABI_FREEBSD) {
-        LOG_INFO(Loader, "e_ident[EI_OSABI] expected 0x09 is ({:#x})",
+        LOG_INFO(Loader, "e_ident[EI_OSABI] expected 0x09 is (0x%x)",
                  static_cast<u32>(m_elf_header.e_ident.ei_osabi));
         return false;
     }
 
     if (m_elf_header.e_ident.ei_abiversion != ELF_ABI_VERSION_AMDGPU_HSA_V2) {
-        LOG_INFO(Loader, "e_ident[EI_ABIVERSION] expected 0x00 is ({:#x})",
+        LOG_INFO(Loader, "e_ident[EI_ABIVERSION] expected 0x00 is (0x%x)",
                  static_cast<u32>(m_elf_header.e_ident.ei_abiversion));
         return false;
     }
 
     if (m_elf_header.e_type != ET_SCE_DYNEXEC && m_elf_header.e_type != ET_SCE_DYNAMIC &&
         m_elf_header.e_type != ET_SCE_EXEC) {
-        LOG_INFO(Loader, "e_type expected 0xFE10 OR 0xFE18 OR 0xfe00 is ({:#x})",
+        LOG_INFO(Loader, "e_type expected 0xFE10 OR 0xFE18 OR 0xfe00 is (0x%x)",
                  static_cast<u32>(m_elf_header.e_type));
         return false;
     }
 
     if (m_elf_header.e_machine != EM_X86_64) {
-        LOG_INFO(Loader, "e_machine expected 0x3E is ({:#x})",
+        LOG_INFO(Loader, "e_machine expected 0x3E is (0x%x)",
                  static_cast<u32>(m_elf_header.e_machine));
         return false;
     }
 
     if (m_elf_header.e_version != EV_CURRENT) {
-        LOG_INFO(Loader, "m_elf_header.e_version expected 0x01 is ({:#x})",
+        LOG_INFO(Loader, "m_elf_header.e_version expected 0x01 is (0x%x)",
                  static_cast<u32>(m_elf_header.e_version));
         return false;
     }
 
     if (m_elf_header.e_phentsize != sizeof(elf_program_header)) {
-        LOG_INFO(Loader, "e_phentsize ({}) != sizeof(elf_program_header)",
+        LOG_INFO(Loader, "e_phentsize (%u) != sizeof(elf_program_header)",
                  m_elf_header.e_phentsize);
         return false;
     }
@@ -332,7 +332,7 @@ bool Elf::IsElfFile() const {
         m_elf_header.e_shentsize !=
             sizeof(elf_section_header)) // Commercial games doesn't appear to have section headers
     {
-        LOG_INFO(Loader, "e_shentsize ({}) != sizeof(elf_section_header)",
+        LOG_INFO(Loader, "e_shentsize (%u) != sizeof(elf_section_header)",
                  m_elf_header.e_shentsize);
         return false;
     }
@@ -341,73 +341,96 @@ bool Elf::IsElfFile() const {
 }
 
 std::string Elf::SElfHeaderStr() {
-    std::string header = fmt::format("======= SELF HEADER =========\n", m_self.magic);
-    header += fmt::format("magic ..............: 0x{:X}\n", m_self.magic);
-    header += fmt::format("version ............: {}\n", m_self.version);
-    header += fmt::format("mode ...............: {:#04x}\n", m_self.mode);
-    header += fmt::format("endian .............: {}\n", m_self.endian);
-    header += fmt::format("attributes .........: {:#04x}\n", m_self.attributes);
-    header += fmt::format("category ...........: {:#04x}\n", m_self.category);
-    header += fmt::format("program_type........: {:#04x}\n", m_self.program_type);
-    header += fmt::format("padding1 ...........: {:#06x}\n", m_self.padding1);
-    header += fmt::format("header size ........: {}\n", m_self.header_size);
-    header += fmt::format("meta size ..........: {}\n", m_self.meta_size);
-    header += fmt::format("file size ..........: {}\n", m_self.file_size);
-    header += fmt::format("padding2 ...........: {:#010x}\n", m_self.padding2);
-    header += fmt::format("segment count ......: {}\n", m_self.segment_count);
-    header += fmt::format("unknown 1A .........: {:#06x}\n", m_self.unknown1A);
-    header += fmt::format("padding3 ...........: {:#010x}\n", m_self.padding3);
+    std::string header = Common::StringFromFormat("======= SELF HEADER =========\n");
+    header += Common::StringFromFormat("magic ..............: 0x%X\n", m_self.magic);
+    header += Common::StringFromFormat("version ............: %u\n", m_self.version);
+    header += Common::StringFromFormat("mode ...............: 0x%02x\n", m_self.mode);
+    header += Common::StringFromFormat("endian .............: %u\n", m_self.endian);
+    header += Common::StringFromFormat("attributes .........: 0x%02x\n", m_self.attributes);
+    header += Common::StringFromFormat("category ...........: 0x%02x\n", m_self.category);
+    header += Common::StringFromFormat("program_type........: 0x%02x\n", m_self.program_type);
+    header += Common::StringFromFormat("padding1 ...........: 0x%04x\n", m_self.padding1);
+    header += Common::StringFromFormat("header size ........: %u\n", m_self.header_size);
+    header += Common::StringFromFormat("meta size ..........: %u\n", m_self.meta_size);
+    header += Common::StringFromFormat("file size ..........: %u\n", m_self.file_size);
+    header += Common::StringFromFormat("padding2 ...........: 0x%08x\n", m_self.padding2);
+    header += Common::StringFromFormat("segment count ......: %u\n", m_self.segment_count);
+    header += Common::StringFromFormat("unknown 1A .........: 0x%04x\n", m_self.unknown1A);
+    header += Common::StringFromFormat("padding3 ...........: 0x%08x\n", m_self.padding3);
     return header;
 }
 
 std::string Elf::SELFSegHeader(u16 no) {
     const auto segment_header = m_self_segments[no];
-    std::string header = fmt::format("====== SEGMENT HEADER {} ========\n", no);
-    header += fmt::format("flags ............: {:#018x}\n", segment_header.flags);
-    header += fmt::format("file offset ......: {:#018x}\n", segment_header.file_offset);
-    header += fmt::format("file size ........: {}\n", segment_header.file_size);
-    header += fmt::format("memory size ......: {}\n", segment_header.memory_size);
+    std::string header = Common::StringFromFormat("====== SEGMENT HEADER %u ========\n", no);
+    header +=
+        Common::StringFromFormat("flags ............: 0x%016" PRIx64 "\n", segment_header.flags);
+    header += Common::StringFromFormat("file offset ......: 0x%016" PRIx64 "\n",
+                                       segment_header.file_offset);
+    header +=
+        Common::StringFromFormat("file size ........: %" PRIu64 "\n", segment_header.file_size);
+    header +=
+        Common::StringFromFormat("memory size ......: %" PRIu64 "\n", segment_header.memory_size);
     return header;
 }
 
 std::string Elf::ElfHeaderStr() {
-    std::string header = fmt::format("======= Elf header ===========\n");
-    header += fmt::format("ident ............: 0x");
+    std::string header = Common::StringFromFormat("======= Elf header ===========\n");
+    header += Common::StringFromFormat("ident ............: 0x");
     for (auto i : m_elf_header.e_ident.magic) {
-        header += fmt::format("{:02X}", i);
+        header += Common::StringFromFormat("%02X", i);
     }
-    header += fmt::format("\n");
+    header += Common::StringFromFormat("\n");
 
-    header +=
-        fmt::format("ident class.......: {}\n", GetIdentClassName(m_elf_header.e_ident.ei_class));
-    header +=
-        fmt::format("ident data .......: {}\n", GetIdentEndianName(m_elf_header.e_ident.ei_data));
-    header += fmt::format("ident version.....: {}\n",
-                          GetIdentVersionName(m_elf_header.e_ident.ei_version));
-    header +=
-        fmt::format("ident osabi  .....: {}\n", GetIdentOsabiName(m_elf_header.e_ident.ei_osabi));
-    header += fmt::format("ident abiversion..: {}\n",
-                          GetIdentAbiversionName(m_elf_header.e_ident.ei_abiversion));
+    header += Common::StringFromFormat(
+        "ident class.......: %.*s\n",
+        static_cast<int>((GetIdentClassName(m_elf_header.e_ident.ei_class)).size()),
+        (GetIdentClassName(m_elf_header.e_ident.ei_class)).data());
+    header += Common::StringFromFormat(
+        "ident data .......: %.*s\n",
+        static_cast<int>((GetIdentEndianName(m_elf_header.e_ident.ei_data)).size()),
+        (GetIdentEndianName(m_elf_header.e_ident.ei_data)).data());
+    header += Common::StringFromFormat(
+        "ident version.....: %.*s\n",
+        static_cast<int>((GetIdentVersionName(m_elf_header.e_ident.ei_version)).size()),
+        (GetIdentVersionName(m_elf_header.e_ident.ei_version)).data());
+    header += Common::StringFromFormat(
+        "ident osabi  .....: %.*s\n",
+        static_cast<int>((GetIdentOsabiName(m_elf_header.e_ident.ei_osabi)).size()),
+        (GetIdentOsabiName(m_elf_header.e_ident.ei_osabi)).data());
+    header += Common::StringFromFormat(
+        "ident abiversion..: %.*s\n",
+        static_cast<int>((GetIdentAbiversionName(m_elf_header.e_ident.ei_abiversion)).size()),
+        (GetIdentAbiversionName(m_elf_header.e_ident.ei_abiversion)).data());
 
-    header += fmt::format("ident UNK ........: 0x");
+    header += Common::StringFromFormat("ident UNK ........: 0x");
     for (auto i : m_elf_header.e_ident.pad) {
-        header += fmt::format("{:02X}", i);
+        header += Common::StringFromFormat("%02X", i);
     }
-    header += fmt::format("\n");
+    header += Common::StringFromFormat("\n");
 
-    header += fmt::format("type  ............: {}\n", GetType(m_elf_header.e_type));
-    header += fmt::format("machine ..........: {}\n", GetMachine(m_elf_header.e_machine));
-    header += fmt::format("version ..........: {}\n", GetVersion(m_elf_header.e_version));
-    header += fmt::format("entry ............: {:#018x}\n", m_elf_header.e_entry);
-    header += fmt::format("phoff ............: {:#018x}\n", m_elf_header.e_phoff);
-    header += fmt::format("shoff ............: {:#018x}\n", m_elf_header.e_shoff);
-    header += fmt::format("flags ............: {:#010x}\n", m_elf_header.e_flags);
-    header += fmt::format("ehsize ...........: {}\n", m_elf_header.e_ehsize);
-    header += fmt::format("phentsize ........: {}\n", m_elf_header.e_phentsize);
-    header += fmt::format("phnum ............: {}\n", m_elf_header.e_phnum);
-    header += fmt::format("shentsize ........: {}\n", m_elf_header.e_shentsize);
-    header += fmt::format("shnum ............: {}\n", m_elf_header.e_shnum);
-    header += fmt::format("shstrndx .........: {}\n", m_elf_header.e_shstrndx);
+    header += Common::StringFromFormat("type  ............: %.*s\n",
+                                       static_cast<int>((GetType(m_elf_header.e_type)).size()),
+                                       (GetType(m_elf_header.e_type)).data());
+    header += Common::StringFromFormat(
+        "machine ..........: %.*s\n", static_cast<int>((GetMachine(m_elf_header.e_machine)).size()),
+        (GetMachine(m_elf_header.e_machine)).data());
+    header += Common::StringFromFormat(
+        "version ..........: %.*s\n", static_cast<int>((GetVersion(m_elf_header.e_version)).size()),
+        (GetVersion(m_elf_header.e_version)).data());
+    header +=
+        Common::StringFromFormat("entry ............: 0x%016" PRIx64 "\n", m_elf_header.e_entry);
+    header +=
+        Common::StringFromFormat("phoff ............: 0x%016" PRIx64 "\n", m_elf_header.e_phoff);
+    header +=
+        Common::StringFromFormat("shoff ............: 0x%016" PRIx64 "\n", m_elf_header.e_shoff);
+    header += Common::StringFromFormat("flags ............: 0x%08x\n", m_elf_header.e_flags);
+    header += Common::StringFromFormat("ehsize ...........: %u\n", m_elf_header.e_ehsize);
+    header += Common::StringFromFormat("phentsize ........: %u\n", m_elf_header.e_phentsize);
+    header += Common::StringFromFormat("phnum ............: %u\n", m_elf_header.e_phnum);
+    header += Common::StringFromFormat("shentsize ........: %u\n", m_elf_header.e_shentsize);
+    header += Common::StringFromFormat("shnum ............: %u\n", m_elf_header.e_shnum);
+    header += Common::StringFromFormat("shstrndx .........: %u\n", m_elf_header.e_shstrndx);
     return header;
 }
 
@@ -466,15 +489,18 @@ std::string Elf::ElfPheaderFlagsStr(u32 flags) {
 }
 
 std::string Elf::ElfPHeaderStr(u16 no) {
-    std::string header = fmt::format("====== PROGRAM HEADER {} ========\n", no);
-    header += fmt::format("p_type ....: {}\n", ElfPheaderTypeStr(m_elf_phdr[no].p_type));
-    header += fmt::format("p_flags ...: {:#010x}\n", static_cast<u32>(m_elf_phdr[no].p_flags));
-    header += fmt::format("p_offset ..: {:#018x}\n", m_elf_phdr[no].p_offset);
-    header += fmt::format("p_vaddr ...: {:#018x}\n", m_elf_phdr[no].p_vaddr);
-    header += fmt::format("p_paddr ...: {:#018x}\n", m_elf_phdr[no].p_paddr);
-    header += fmt::format("p_filesz ..: {:#018x}\n", m_elf_phdr[no].p_filesz);
-    header += fmt::format("p_memsz ...: {:#018x}\n", m_elf_phdr[no].p_memsz);
-    header += fmt::format("p_align ...: {:#018x}\n", m_elf_phdr[no].p_align);
+    std::string header = Common::StringFromFormat("====== PROGRAM HEADER %u ========\n", no);
+    header += Common::StringFromFormat(
+        "p_type ....: %.*s\n", static_cast<int>((ElfPheaderTypeStr(m_elf_phdr[no].p_type)).size()),
+        (ElfPheaderTypeStr(m_elf_phdr[no].p_type)).data());
+    header +=
+        Common::StringFromFormat("p_flags ...: 0x%08x\n", static_cast<u32>(m_elf_phdr[no].p_flags));
+    header += Common::StringFromFormat("p_offset ..: 0x%016" PRIx64 "\n", m_elf_phdr[no].p_offset);
+    header += Common::StringFromFormat("p_vaddr ...: 0x%016" PRIx64 "\n", m_elf_phdr[no].p_vaddr);
+    header += Common::StringFromFormat("p_paddr ...: 0x%016" PRIx64 "\n", m_elf_phdr[no].p_paddr);
+    header += Common::StringFromFormat("p_filesz ..: 0x%016" PRIx64 "\n", m_elf_phdr[no].p_filesz);
+    header += Common::StringFromFormat("p_memsz ...: 0x%016" PRIx64 "\n", m_elf_phdr[no].p_memsz);
+    header += Common::StringFromFormat("p_align ...: 0x%016" PRIx64 "\n", m_elf_phdr[no].p_align);
     return header;
 }
 

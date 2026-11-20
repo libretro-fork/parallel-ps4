@@ -222,11 +222,11 @@ s32 PS4_SYSV_ABI internal__Fopen(const char* path, u16 mode, bool flag) {
 }
 
 OrbisFILE* PS4_SYSV_ABI internal_fopen(const char* path, const char* mode) {
-    LOG_INFO(Lib_LibcInternal, "called, path {}, mode {}", path, mode);
+    LOG_INFO(Lib_LibcInternal, "called, path %s, mode %s", path, mode);
     OrbisFILE* file = internal__Fofind();
     OrbisFILE* ret_file = internal__Foprep(path, mode, file, -1, 0, 0);
     if (ret_file == nullptr) {
-        LOG_ERROR(Lib_LibcInternal, "failed to open file {}", path);
+        LOG_ERROR(Lib_LibcInternal, "failed to open file %s", path);
     }
     return ret_file;
 }
@@ -339,7 +339,7 @@ s32 PS4_SYSV_ABI internal__Fspos(OrbisFILE* file, Orbisfpos_t* file_pos, s64 off
 
 s32 PS4_SYSV_ABI internal_fseek(OrbisFILE* file, s64 offset, s32 whence) {
     internal__Lockfilelock(file);
-    LOG_TRACE(Lib_LibcInternal, "called, file handle {:#x}, offset {:#x}, whence {:#x}",
+    LOG_TRACE(Lib_LibcInternal, "called, file handle 0x%x, offset 0x%" PRIx64 ", whence 0x%x",
               file->_Handle, offset, whence);
     s32 result = internal__Fspos(file, nullptr, offset, whence);
     internal__Unlockfilelock(file);
@@ -401,8 +401,8 @@ u64 PS4_SYSV_ABI internal_fread(char* ptr, u64 size, u64 nmemb, OrbisFILE* file)
         return 0;
     }
     internal__Lockfilelock(file);
-    LOG_TRACE(Lib_LibcInternal, "called, file handle {:#x}, size {:#x}, nmemb {:#x}", file->_Handle,
-              size, nmemb);
+    LOG_TRACE(Lib_LibcInternal, "called, file handle 0x%x, size 0x%" PRIx64 ", nmemb 0x%" PRIx64,
+              file->_Handle, size, nmemb);
     s64 total_size = size * nmemb;
     s64 remaining_size = total_size;
     if ((file->_Mode & 0x4000) != 0) {
@@ -483,7 +483,7 @@ s32 PS4_SYSV_ABI internal_fclose(OrbisFILE* file) {
         return -1;
     }
 
-    LOG_INFO(Lib_LibcInternal, "called, file handle {:#x}", file->_Handle);
+    LOG_INFO(Lib_LibcInternal, "called, file handle 0x%x", file->_Handle);
     if ((file->_Mode & 3) == 0 || file->_Handle < 0) {
         internal__Fofree(file);
         *Libraries::Kernel::__Error() = POSIX_EBADF;

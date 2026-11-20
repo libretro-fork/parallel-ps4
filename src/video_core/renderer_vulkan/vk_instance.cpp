@@ -1,9 +1,8 @@
 // SPDX-FileCopyrightText: Copyright 2024 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
-#include <fmt/format.h>
-#include <fmt/ranges.h>
 #include "common/small_vector.h"
+#include "common/string_util.h"
 
 #include <array>
 #include <cstring>
@@ -25,16 +24,16 @@ namespace {
 
 std::vector<vk::PhysicalDevice> EnumeratePhysicalDevices(vk::UniqueInstance& instance) {
     auto [devices_result, devices] = instance->enumeratePhysicalDevices();
-    ASSERT_MSG(devices_result == vk::Result::eSuccess, "Failed to enumerate physical devices: {}",
-               vk::to_string(devices_result));
+    ASSERT_MSG(devices_result == vk::Result::eSuccess, "Failed to enumerate physical devices: %s",
+               (vk::to_string(devices_result)).c_str());
     return std::move(devices);
 }
 
 std::vector<std::string> GetSupportedExtensions(vk::PhysicalDevice physical) {
     const auto [extensions_result, extensions] = physical.enumerateDeviceExtensionProperties();
     if (extensions_result != vk::Result::eSuccess) {
-        LOG_ERROR(Render_Vulkan, "Could not query supported extensions: {}",
-                  vk::to_string(extensions_result));
+        LOG_ERROR(Render_Vulkan, "Could not query supported extensions: %s",
+                  (vk::to_string(extensions_result)).c_str());
         return {};
     }
     std::vector<std::string> supported_extensions;
@@ -85,8 +84,8 @@ std::unordered_map<vk::Format, vk::FormatProperties3> GetFormatProperties(
 }
 
 std::string GetReadableVersion(u32 version) {
-    return fmt::format("{}.{}.{}", VK_VERSION_MAJOR(version), VK_VERSION_MINOR(version),
-                       VK_VERSION_PATCH(version));
+    return Common::StringFromFormat("%u.%u.%u", VK_VERSION_MAJOR(version),
+                                    VK_VERSION_MINOR(version), VK_VERSION_PATCH(version));
 }
 
 } // Anonymous namespace
@@ -103,7 +102,7 @@ Instance::Instance(s32 physical_device_index, bool enable_validation, bool enabl
     }
     const std::size_t num_physical_devices = static_cast<u16>(physical_devices.size());
     ASSERT_MSG(num_physical_devices > 0, "No physical devices found");
-    LOG_INFO(Render_Vulkan, "Found {} physical devices", num_physical_devices);
+    LOG_INFO(Render_Vulkan, "Found %zu physical devices", num_physical_devices);
 
     // With the picture handed to the frontend on the GPU, the frontend's GPU: an image's
     // memory cannot be handed from one GPU to another (libretro/gpu_frames.cpp).
@@ -174,7 +173,7 @@ Instance::Instance(s32 physical_device_index, bool enable_validation, bool enabl
         physical_device = physical_devices[std::get<0>(properties2[0])];
     } else {
         ASSERT_MSG(physical_device_index < num_physical_devices,
-                   "Invalid physical device index {} provided when only {} devices exist",
+                   "Invalid physical device index %d provided when only %zu devices exist",
                    physical_device_index, num_physical_devices);
 
         physical_device = physical_devices[physical_device_index];
@@ -186,7 +185,7 @@ Instance::Instance(s32 physical_device_index, bool enable_validation, bool enabl
     memory_properties = physical_device.getMemoryProperties();
     CollectDeviceParameters();
     ASSERT_MSG(properties.apiVersion >= TargetVulkanApiVersion,
-               "Vulkan {}.{} is required, but only {}.{} is supported by device!",
+               "Vulkan %u.%u is required, but only %u.%u is supported by device!",
                VK_VERSION_MAJOR(TargetVulkanApiVersion), VK_VERSION_MINOR(TargetVulkanApiVersion),
                VK_VERSION_MAJOR(properties.apiVersion), VK_VERSION_MINOR(properties.apiVersion));
 
@@ -200,8 +199,8 @@ Instance::~Instance() {
     // Nothing of the overlays' is in use by the device when it goes
     const auto result = GetDevice().waitIdle();
     if (result != vk::Result::eSuccess) {
-        LOG_WARNING(Render_Vulkan, "Failed to wait for Vulkan device idle on shutdown: {}",
-                    vk::to_string(result));
+        LOG_WARNING(Render_Vulkan, "Failed to wait for Vulkan device idle on shutdown: %s",
+                    (vk::to_string(result)).c_str());
     }
     ovl_vk_shutdown();
     allocator.reset();
@@ -216,12 +215,12 @@ std::string Instance::GetDriverVersionName() {
         const u32 minor = (version >> 14) & 0x0ff;
         const u32 secondary = (version >> 6) & 0x0ff;
         const u32 tertiary = version & 0x003f;
-        return fmt::format("{}.{}.{}.{}", major, minor, secondary, tertiary);
+        return Common::StringFromFormat("%u.%u.%u.%u", major, minor, secondary, tertiary);
     }
     if (driver_id == vk::DriverId::eIntelProprietaryWindows) {
         const u32 major = version >> 14;
         const u32 minor = version & 0x3fff;
-        return fmt::format("{}.{}", major, minor);
+        return Common::StringFromFormat("%u.%u", major, minor);
     }
     return GetReadableVersion(version);
 }
@@ -246,7 +245,7 @@ bool Instance::CreateDevice() {
     vk12_props = properties_chain.get<vk::PhysicalDeviceVulkan12Properties>();
     vk13_props = properties_chain.get<vk::PhysicalDeviceVulkan13Properties>();
     push_descriptor_props = properties_chain.get<vk::PhysicalDevicePushDescriptorPropertiesKHR>();
-    LOG_INFO(Render_Vulkan, "Physical device subgroup size {}", vk11_props.subgroupSize);
+    LOG_INFO(Render_Vulkan, "Physical device subgroup size %u", vk11_props.subgroupSize);
 
     if (available_extensions.empty()) {
         LOG_CRITICAL(Render_Vulkan, "No extensions supported by device.");
@@ -261,25 +260,27 @@ bool Instance::CreateDevice() {
                          [&](const std::string& name) { return name == extension; });
 
         if (result != available_extensions.end()) {
-            LOG_INFO(Render_Vulkan, "Enabling extension: {}", extension);
+            LOG_INFO(Render_Vulkan, "Enabling extension: %.*s",
+                     static_cast<int>((extension).size()), (extension).data());
             enabled_extensions.push_back(extension.data());
             return true;
         }
 
-        LOG_WARNING(Render_Vulkan, "Extension {} unavailable.", extension);
+        LOG_WARNING(Render_Vulkan, "Extension %.*s unavailable.",
+                    static_cast<int>((extension).size()), (extension).data());
         return false;
     };
 
     // Required
     ASSERT_MSG(add_extension(VK_KHR_SWAPCHAIN_EXTENSION_NAME),
-               "Required Vulkan extension unavailable: {}", VK_KHR_SWAPCHAIN_EXTENSION_NAME);
+               "Required Vulkan extension unavailable: %s", VK_KHR_SWAPCHAIN_EXTENSION_NAME);
     ASSERT_MSG(add_extension(VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME),
-               "Required Vulkan extension unavailable: {}", VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME);
+               "Required Vulkan extension unavailable: %s", VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME);
     ASSERT_MSG(add_extension(VK_EXT_VERTEX_ATTRIBUTE_DIVISOR_EXTENSION_NAME),
-               "Required Vulkan extension unavailable: {}",
+               "Required Vulkan extension unavailable: %s",
                VK_EXT_VERTEX_ATTRIBUTE_DIVISOR_EXTENSION_NAME);
     ASSERT_MSG(add_extension(VK_EXT_ROBUSTNESS_2_EXTENSION_NAME),
-               "Required Vulkan extension unavailable: {}", VK_EXT_ROBUSTNESS_2_EXTENSION_NAME);
+               "Required Vulkan extension unavailable: %s", VK_EXT_ROBUSTNESS_2_EXTENSION_NAME);
 
     const auto robustness2_features = feature_chain.get<vk::PhysicalDeviceRobustness2FeaturesEXT>();
     ASSERT_MSG(robustness2_features.robustBufferAccess2,
@@ -307,7 +308,7 @@ bool Instance::CreateDevice() {
     if (dynamic_state_3) {
         dynamic_state_3_features =
             feature_chain.get<vk::PhysicalDeviceExtendedDynamicState3FeaturesEXT>();
-        LOG_INFO(Render_Vulkan, "- extendedDynamicState3ColorWriteMask: {}",
+        LOG_INFO(Render_Vulkan, "- extendedDynamicState3ColorWriteMask: %u",
                  dynamic_state_3_features.extendedDynamicState3ColorWriteMask);
     }
     custom_border_color = add_extension(VK_EXT_CUSTOM_BORDER_COLOR_EXTENSION_NAME);
@@ -321,9 +322,9 @@ bool Instance::CreateDevice() {
     if (list_restart) {
         list_restart_features =
             feature_chain.get<vk::PhysicalDevicePrimitiveTopologyListRestartFeaturesEXT>();
-        LOG_INFO(Render_Vulkan, "- primitiveTopologyListRestart: {}",
+        LOG_INFO(Render_Vulkan, "- primitiveTopologyListRestart: %u",
                  list_restart_features.primitiveTopologyListRestart);
-        LOG_INFO(Render_Vulkan, "- primitiveTopologyPatchListRestart: {}",
+        LOG_INFO(Render_Vulkan, "- primitiveTopologyPatchListRestart: %u",
                  list_restart_features.primitiveTopologyPatchListRestart);
     }
     amd_shader_explicit_vertex_parameter =
@@ -359,8 +360,8 @@ bool Instance::CreateDevice() {
                 sample_location_grids[i] = std::min({grid.width, grid.height, 2u});
             }
         }
-        LOG_INFO(Render_Vulkan, "Sample locations: counts {}, grid {}x{}, {} sub-pixel bits",
-                 vk::to_string(props.sampleLocationSampleCounts),
+        LOG_INFO(Render_Vulkan, "Sample locations: counts %s, grid %ux%u, %u sub-pixel bits",
+                 (vk::to_string(props.sampleLocationSampleCounts)).c_str(),
                  props.maxSampleLocationGridSize.width, props.maxSampleLocationGridSize.height,
                  props.sampleLocationSubPixelBits);
     }
@@ -370,9 +371,9 @@ bool Instance::CreateDevice() {
     if (shader_atomic_float2) {
         shader_atomic_float2_features =
             feature_chain.get<vk::PhysicalDeviceShaderAtomicFloat2FeaturesEXT>();
-        LOG_INFO(Render_Vulkan, "- shaderBufferFloat32AtomicMinMax: {}",
+        LOG_INFO(Render_Vulkan, "- shaderBufferFloat32AtomicMinMax: %u",
                  shader_atomic_float2_features.shaderBufferFloat32AtomicMinMax);
-        LOG_INFO(Render_Vulkan, "- shaderImageFloat32AtomicMinMax: {}",
+        LOG_INFO(Render_Vulkan, "- shaderImageFloat32AtomicMinMax: %u",
                  shader_atomic_float2_features.shaderImageFloat32AtomicMinMax);
     }
     workgroup_memory_explicit_layout =
@@ -380,22 +381,22 @@ bool Instance::CreateDevice() {
     if (workgroup_memory_explicit_layout) {
         workgroup_memory_explicit_layout_features =
             feature_chain.get<vk::PhysicalDeviceWorkgroupMemoryExplicitLayoutFeaturesKHR>();
-        LOG_INFO(Render_Vulkan, "- workgroupMemoryExplicitLayout: {}",
+        LOG_INFO(Render_Vulkan, "- workgroupMemoryExplicitLayout: %u",
                  workgroup_memory_explicit_layout_features.workgroupMemoryExplicitLayout);
-        LOG_INFO(Render_Vulkan, "- workgroupMemoryExplicitLayoutScalarBlockLayout: {}",
+        LOG_INFO(Render_Vulkan, "- workgroupMemoryExplicitLayoutScalarBlockLayout: %u",
                  workgroup_memory_explicit_layout_features
                      .workgroupMemoryExplicitLayoutScalarBlockLayout);
         LOG_INFO(
-            Render_Vulkan, "- workgroupMemoryExplicitLayout16BitAccess: {}",
+            Render_Vulkan, "- workgroupMemoryExplicitLayout16BitAccess: %u",
             workgroup_memory_explicit_layout_features.workgroupMemoryExplicitLayout16BitAccess);
     }
     image_2d_view_of_3d = add_extension(VK_EXT_IMAGE_2D_VIEW_OF_3D_EXTENSION_NAME);
     if (image_2d_view_of_3d) {
         image_2d_view_of_3d_features =
             feature_chain.get<vk::PhysicalDeviceImage2DViewOf3DFeaturesEXT>();
-        LOG_INFO(Render_Vulkan, "- image2DViewOf3D: {}",
+        LOG_INFO(Render_Vulkan, "- image2DViewOf3D: %u",
                  image_2d_view_of_3d_features.image2DViewOf3D);
-        LOG_INFO(Render_Vulkan, "- sampler2DViewOf3D: {}",
+        LOG_INFO(Render_Vulkan, "- sampler2DViewOf3D: %u",
                  image_2d_view_of_3d_features.sampler2DViewOf3D);
     }
     image_view_min_lod = add_extension(VK_EXT_IMAGE_VIEW_MIN_LOD_EXTENSION_NAME);
@@ -424,7 +425,7 @@ bool Instance::CreateDevice() {
     shader_clock = add_extension(VK_KHR_SHADER_CLOCK_EXTENSION_NAME);
     if (shader_clock) {
         shader_clock_features = feature_chain.get<vk::PhysicalDeviceShaderClockFeaturesKHR>();
-        LOG_INFO(Render_Vulkan, "- shaderSubgroupClock: {}",
+        LOG_INFO(Render_Vulkan, "- shaderSubgroupClock: %u",
                  shader_clock_features.shaderSubgroupClock);
     }
 
@@ -665,7 +666,8 @@ bool Instance::CreateDevice() {
 
     auto [device_result, dev] = physical_device.createDeviceUnique(device_chain.get());
     if (device_result != vk::Result::eSuccess) {
-        LOG_CRITICAL(Render_Vulkan, "Failed to create device: {}", vk::to_string(device_result));
+        LOG_CRITICAL(Render_Vulkan, "Failed to create device: %s",
+                     (vk::to_string(device_result)).c_str());
         return false;
     }
     device = std::move(dev);
@@ -697,16 +699,21 @@ void Instance::CollectDeviceParameters() {
 
     const std::string model_name{GetModelName()};
     const std::string driver_version = GetDriverVersionName();
-    const std::string driver_name = fmt::format("{} {}", vendor_name, driver_version);
+    const std::string driver_name =
+        Common::StringFromFormat("%s %s", (vendor_name).c_str(), (driver_version).c_str());
     const std::string api_version = GetReadableVersion(properties.apiVersion);
-    const std::string extensions = fmt::format("{}", fmt::join(available_extensions, ", "));
+    std::string extensions;
+    for (const auto& item : available_extensions) {
+        extensions += extensions.empty() ? "" : ", ";
+        extensions += item;
+    }
 
-    LOG_INFO(Render_Vulkan, "GPU_Vendor: {}", vendor_name);
-    LOG_INFO(Render_Vulkan, "GPU_Model: {}", model_name);
-    LOG_INFO(Render_Vulkan, "GPU_Integrated: {}", IsIntegrated() ? "Yes" : "No");
-    LOG_INFO(Render_Vulkan, "GPU_Vulkan_Driver: {}", driver_name);
-    LOG_INFO(Render_Vulkan, "GPU_Vulkan_Version: {}", api_version);
-    LOG_INFO(Render_Vulkan, "GPU_Vulkan_Extensions: {}", extensions);
+    LOG_INFO(Render_Vulkan, "GPU_Vendor: %s", (vendor_name).c_str());
+    LOG_INFO(Render_Vulkan, "GPU_Model: %s", (model_name).c_str());
+    LOG_INFO(Render_Vulkan, "GPU_Integrated: %s", IsIntegrated() ? "Yes" : "No");
+    LOG_INFO(Render_Vulkan, "GPU_Vulkan_Driver: %s", (driver_name).c_str());
+    LOG_INFO(Render_Vulkan, "GPU_Vulkan_Version: %s", (api_version).c_str());
+    LOG_INFO(Render_Vulkan, "GPU_Vulkan_Extensions: %s", (extensions).c_str());
 }
 
 void Instance::CollectPhysicalMemoryInfo() {
@@ -750,7 +757,8 @@ void Instance::CollectPhysicalMemoryInfo() {
         total_memory_budget =
             static_cast<u64>(std::max<s64>(available_memory - 8_GB, static_cast<s64>(2_GB)));
     }
-    LOG_INFO(Render_Vulkan, "GPU memory budget is {} MiB", total_memory_budget / 1_MB);
+    LOG_INFO(Render_Vulkan, "GPU memory budget is %llu MiB",
+             static_cast<unsigned long long>(total_memory_budget / 1_MB));
 }
 
 void Instance::CollectImageFormatInfo() {
@@ -765,28 +773,30 @@ void Instance::CollectImageFormatInfo() {
     const auto block_texel_view_props =
         physical_device.getImageFormatProperties2(block_texel_view_info);
     supports_block_texel_view = block_texel_view_props.result == vk::Result::eSuccess;
-    LOG_INFO(Render_Vulkan, "Block Texel View support: {}",
+    LOG_INFO(Render_Vulkan, "Block Texel View support: %s",
              supports_block_texel_view ? "Yes" : "No");
 
     // Check and log format support details.
     for (const auto& format : LiverpoolToVK::SurfaceFormats()) {
         if (!IsFormatSupported(format.vk_format, format.flags)) {
-            LOG_WARNING(Render_Vulkan,
-                        "Surface format data_format={}, number_format={} is not fully supported "
-                        "(vk_format={}, missing features={})",
-                        static_cast<u32>(format.data_format),
-                        static_cast<u32>(format.number_format), vk::to_string(format.vk_format),
-                        vk::to_string(format.flags & ~GetFormatFeatureFlags(format.vk_format)));
+            LOG_WARNING(
+                Render_Vulkan,
+                "Surface format data_format=%u, number_format=%u is not fully supported "
+                "(vk_format=%s, missing features=%s)",
+                static_cast<u32>(format.data_format), static_cast<u32>(format.number_format),
+                (vk::to_string(format.vk_format)).c_str(),
+                (vk::to_string(format.flags & ~GetFormatFeatureFlags(format.vk_format))).c_str());
         }
     }
     for (const auto& format : LiverpoolToVK::DepthFormats()) {
         if (!IsFormatSupported(format.vk_format, format.flags)) {
-            LOG_WARNING(Render_Vulkan,
-                        "Depth format z_format={}, stencil_format={} is not fully supported "
-                        "(vk_format={}, missing features={})",
-                        static_cast<u32>(format.z_format), static_cast<u32>(format.stencil_format),
-                        vk::to_string(format.vk_format),
-                        vk::to_string(format.flags & ~GetFormatFeatureFlags(format.vk_format)));
+            LOG_WARNING(
+                Render_Vulkan,
+                "Depth format z_format=%u, stencil_format=%u is not fully supported "
+                "(vk_format=%s, missing features=%s)",
+                static_cast<u32>(format.z_format), static_cast<u32>(format.stencil_format),
+                (vk::to_string(format.vk_format)).c_str(),
+                (vk::to_string(format.flags & ~GetFormatFeatureFlags(format.vk_format))).c_str());
         }
     }
 }
@@ -800,13 +810,14 @@ void Instance::CollectToolingInfo() const {
     }
     const auto [tools_result, tools] = physical_device.getToolProperties();
     if (tools_result != vk::Result::eSuccess) {
-        LOG_ERROR(Render_Vulkan, "Could not get Vulkan tool properties: {}",
-                  vk::to_string(tools_result));
+        LOG_ERROR(Render_Vulkan, "Could not get Vulkan tool properties: %s",
+                  (vk::to_string(tools_result)).c_str());
         return;
     }
     for (const vk::PhysicalDeviceToolProperties& tool : tools) {
         const std::string_view name = tool.name;
-        LOG_INFO(Render_Vulkan, "Attached debugging tool: {}", name);
+        LOG_INFO(Render_Vulkan, "Attached debugging tool: %.*s", static_cast<int>((name).size()),
+                 (name).data());
     }
 }
 
@@ -845,7 +856,8 @@ u64 Instance::GetDeviceMemoryUsage() const {
 vk::FormatFeatureFlags2 Instance::GetFormatFeatureFlags(vk::Format format) const {
     const auto it = format_properties.find(format);
     if (it == format_properties.end()) {
-        UNIMPLEMENTED_MSG("Properties of format {} have not been queried.", vk::to_string(format));
+        UNIMPLEMENTED_MSG("Properties of format %s have not been queried.",
+                          (vk::to_string(format)).c_str());
     }
 
     return it->second.optimalTilingFeatures | it->second.bufferFeatures;

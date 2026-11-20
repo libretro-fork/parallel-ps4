@@ -347,7 +347,7 @@ void VdecDecoder::ProcessInput(Command& command) {
     };
     const int ret = m_decoder.Decode(command.au.data(), command.au.size(), meta);
     if (ret < 0) {
-        LOG_ERROR(Lib_Vdecsw, "Error decoding the access unit: {}", ret);
+        LOG_ERROR(Lib_Vdecsw, "Error decoding the access unit: %d", ret);
         CompleteInput(command.input.au_data, 0, ORBIS_VDECSW_ERROR_API_FAIL, command.epoch);
         return;
     }
@@ -407,7 +407,7 @@ s32 VdecDecoder::WriteFrame(OrbisVdecswOutputInfo& output_info, const DecodedFra
         m_is_avc ? sizeof(OrbisVdecswAvcPictureInfo) : sizeof(OrbisVdecswHevcPictureInfo);
     if (frame_buffer.frame_buffer_size < info_size ||
         frame.nv12.size() > frame_buffer.frame_buffer_size - info_size) {
-        LOG_ERROR(Lib_Vdecsw, "The {}x{} picture does not fit the frame buffer", frame.width,
+        LOG_ERROR(Lib_Vdecsw, "The %ux%u picture does not fit the frame buffer", frame.width,
                   frame.height);
         return ORBIS_VDECSW_ERROR_API_FAIL;
     }

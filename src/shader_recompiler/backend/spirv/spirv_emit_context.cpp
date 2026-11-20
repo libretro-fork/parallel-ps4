@@ -1,21 +1,36 @@
 // SPDX-FileCopyrightText: Copyright 2024 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include <cstdarg>
+#include <cstdio>
 #include "common/assert.h"
 #include "common/div_ceil.h"
+#include "common/string_util.h"
 #include "shader_recompiler/backend/spirv/spirv_emit_context.h"
 #include "shader_recompiler/frontend/fetch_shader.h"
 #include "shader_recompiler/ir/attribute.h"
 #include "shader_recompiler/ir/microinstruction.h"
 #include "shader_recompiler/runtime_info.h"
 
-#include <fmt/format.h>
 #include "common/small_vector.h"
 
 #include <numbers>
 #include <string_view>
 
 namespace Shader::Backend::SPIRV {
+
+u32 NameFmt(spv_module_t* m, u32 target, const char* format, ...) {
+    if (m->names) {
+        char name[256];
+        va_list args;
+        va_start(args, format);
+        std::vsnprintf(name, sizeof(name), format, args);
+        va_end(args);
+        spv_Name(m, target, name);
+    }
+    return target;
+}
+
 namespace {
 
 static constexpr u32 NumVertices(AmdGpu::PrimitiveType type) {
@@ -52,7 +67,7 @@ EmitContext::EmitContext(spv_module_t& module, const Profile& profile_,
         spv_SetMemoryModel(&m, u32(SpvAddressingModelLogical), u32(SpvMemoryModelGLSL450));
     }
     if (m.names) {
-        spv_String(&m, fmt::format("{:#x}", info.pgm_hash).c_str());
+        spv_String(&m, Common::StringFromFormat("0x%" PRIx64, info.pgm_hash).c_str());
     }
 
     spv_AddCapability(&m, u32(SpvCapabilityShader));
@@ -84,7 +99,7 @@ Id EmitContext::Def(const IR::Value& value) {
     case IR::Type::StringLiteral:
         return spv_String(&m, std::string(value.StringLiteral()).c_str());
     default:
-        UNREACHABLE_MSG("Immediate type {}", value.Type());
+        UNREACHABLE_MSG("Immediate type %s", Shader::IR::NameOf(value.Type()).c_str());
     }
 }
 
@@ -108,15 +123,15 @@ void EmitContext::DefineArithmeticTypes() {
 
     for (u32 i = 2; i <= 4; i++) {
         if (info.uses_fp16) {
-            F16[i] = NameFmt(&m, spv_TypeVector(&m, F16[1], u32(i)), "f16vec{}_id", i);
+            F16[i] = NameFmt(&m, spv_TypeVector(&m, F16[1], u32(i)), "f16vec%u_id", i);
         }
         if (info.uses_fp64) {
-            F64[i] = NameFmt(&m, spv_TypeVector(&m, F64[1], u32(i)), "f64vec{}_id", i);
+            F64[i] = NameFmt(&m, spv_TypeVector(&m, F64[1], u32(i)), "f64vec%u_id", i);
         }
-        F32[i] = NameFmt(&m, spv_TypeVector(&m, F32[1], u32(i)), "f32vec{}_id", i);
-        S32[i] = NameFmt(&m, spv_TypeVector(&m, S32[1], u32(i)), "i32vec{}_id", i);
-        U32[i] = NameFmt(&m, spv_TypeVector(&m, U32[1], u32(i)), "u32vec{}_id", i);
-        U1[i] = NameFmt(&m, spv_TypeVector(&m, U1[1], u32(i)), "bvec{}_id", i);
+        F32[i] = NameFmt(&m, spv_TypeVector(&m, F32[1], u32(i)), "f32vec%u_id", i);
+        S32[i] = NameFmt(&m, spv_TypeVector(&m, S32[1], u32(i)), "i32vec%u_id", i);
+        U32[i] = NameFmt(&m, spv_TypeVector(&m, U32[1], u32(i)), "u32vec%u_id", i);
+        U1[i] = NameFmt(&m, spv_TypeVector(&m, U1[1], u32(i)), "bvec%u_id", i);
     }
 
     true_value = spv_ConstantTrue(&m, U1[1]);
@@ -178,7 +193,8 @@ const VectorIds& GetAttributeType(EmitContext& ctx, AmdGpu::NumberFormat fmt) {
     default:
         break;
     }
-    UNREACHABLE_MSG("Invalid attribute type {}", fmt);
+    UNREACHABLE_MSG("Invalid attribute type %.*s", static_cast<int>(AmdGpu::NameOf(fmt).size()),
+                    AmdGpu::NameOf(fmt).data());
 }
 
 EmitContext::SpirvAttribute EmitContext::GetAttributeInfo(AmdGpu::NumberFormat fmt, Id id,
@@ -194,7 +210,8 @@ EmitContext::SpirvAttribute EmitContext::GetAttributeInfo(AmdGpu::NumberFormat f
     default:
         break;
     }
-    UNREACHABLE_MSG("Invalid attribute type {}", fmt);
+    UNREACHABLE_MSG("Invalid attribute type %.*s", static_cast<int>(AmdGpu::NameOf(fmt).size()),
+                    AmdGpu::NameOf(fmt).data());
 }
 
 Id EmitContext::GetBufferSize(const u32 sharp_idx) {
@@ -240,24 +257,24 @@ void EmitContext::DefineBufferProperties() {
 
         const Id buf_offset{
             spv_OpBitFieldUExtract(&m, U32[1], value, ConstU32(offset), ConstU32(8U))};
-        NameFmt(&m, buf_offset, "buf{}_off", binding);
+        NameFmt(&m, buf_offset, "buf%u_off", binding);
         buffer.Offset(PointerSize::B8) = buf_offset;
 
         if (True(desc.used_types & IR::Type::U16)) {
             const Id buf_word_offset{spv_OpShiftRightLogical(&m, U32[1], buf_offset, ConstU32(1U))};
-            NameFmt(&m, buf_word_offset, "buf{}_word_off", binding);
+            NameFmt(&m, buf_word_offset, "buf%u_word_off", binding);
             buffer.Offset(PointerSize::B16) = buf_word_offset;
         }
         if (True(desc.used_types & IR::Type::U32)) {
             const Id buf_dword_offset{
                 spv_OpShiftRightLogical(&m, U32[1], buf_offset, ConstU32(2U))};
-            NameFmt(&m, buf_dword_offset, "buf{}_dword_off", binding);
+            NameFmt(&m, buf_dword_offset, "buf%u_dword_off", binding);
             buffer.Offset(PointerSize::B32) = buf_dword_offset;
         }
         if (True(desc.used_types & IR::Type::U64)) {
             const Id buf_qword_offset{
                 spv_OpShiftRightLogical(&m, U32[1], buf_offset, ConstU32(3U))};
-            NameFmt(&m, buf_qword_offset, "buf{}_qword_off", binding);
+            NameFmt(&m, buf_qword_offset, "buf%u_qword_off", binding);
             buffer.Offset(PointerSize::B64) = buf_qword_offset;
         }
     }
@@ -337,9 +354,9 @@ void EmitContext::DefineInputs() {
             const Id type{GetAttributeType(*this, sharp.GetNumberFmt())[4]};
             Id id{DefineInput(type, semantic)};
             if (attrib.GetStepRate() != Gcn::VertexAttribute::InstanceIdType::None) {
-                NameFmt(&m, id, "vs_instance_attr{}", semantic);
+                NameFmt(&m, id, "vs_instance_attr%u", semantic);
             } else {
-                NameFmt(&m, id, "vs_in_attr{}", semantic);
+                NameFmt(&m, id, "vs_in_attr%u", semantic);
             }
             input_params[semantic] = GetAttributeInfo(sharp.GetNumberFmt(), id, 4, false);
         }
@@ -449,9 +466,9 @@ void EmitContext::DefineInputs() {
                     profile.supports_fragment_shader_barycentric) {
                     return NameFmt(
                         &m, DefineInput(spv_TypeArray(&m, type, ConstU32(3U)), bind_location),
-                        "fs_in_attr{}_p", i);
+                        "fs_in_attr%d_p", i);
                 }
-                return NameFmt(&m, DefineInput(type, bind_location), "fs_in_attr{}", i);
+                return NameFmt(&m, DefineInput(type, bind_location), "fs_in_attr%d", i);
             }();
             if (primary == Qualifier::PerVertex) {
                 spv_Decorate0(&m, attr_id,
@@ -474,7 +491,7 @@ void EmitContext::DefineInputs() {
 
         if (has_clip_distance_inputs) {
             const auto type = F32[MaxEmulatedClipDistances];
-            const auto attr_id = NameFmt(&m, DefineInput(type, 0), "cldist_attr{}", 0);
+            const auto attr_id = NameFmt(&m, DefineInput(type, 0), "cldist_attr%d", 0);
             input_params[num_inputs] = GetAttributeInfo(AmdGpu::NumberFormat::Float, attr_id,
                                                         MaxEmulatedClipDistances, false);
         }
@@ -526,7 +543,7 @@ void EmitContext::DefineInputs() {
         for (int param_id = 0; param_id < num_params; ++param_id) {
             const Id type{spv_TypeArray(&m, F32[4], ConstU32(num_verts_in))};
             const Id id{DefineInput(type, param_id)};
-            NameFmt(&m, id, "gs_in_attr{}", param_id);
+            NameFmt(&m, id, "gs_in_attr%d", param_id);
             input_params[param_id] =
                 GetAttributeInfo(AmdGpu::NumberFormat::Float, id, 4, false, false, true);
         }
@@ -569,7 +586,7 @@ void EmitContext::DefineInputs() {
             }
             const Id id{DefineInput(F32[4], patch_base_location + index)};
             spv_Decorate0(&m, id, u32(SpvDecorationPatch));
-            NameFmt(&m, id, "patch_in{}", index);
+            NameFmt(&m, id, "patch_in%zu", index);
             patches[index] = id;
         }
         break;
@@ -635,7 +652,7 @@ void EmitContext::DefineOutputs() {
                 const u32 num_components = info.stores.NumComponents(param);
                 const Id id{
                     DefineOutput(F32[num_components], i + (needs_clip_distance_emulation ? 1 : 0))};
-                NameFmt(&m, id, "out_attr{}", i);
+                NameFmt(&m, id, "out_attr%u", i);
                 output_params[i] =
                     GetAttributeInfo(AmdGpu::NumberFormat::Float, id, num_components, true);
                 ++num_attrs;
@@ -645,7 +662,7 @@ void EmitContext::DefineOutputs() {
                 clip_distances = Id{DefineOutput(F32[MaxEmulatedClipDistances], 0)};
                 output_params[num_attrs] = GetAttributeInfo(
                     AmdGpu::NumberFormat::Float, clip_distances, MaxEmulatedClipDistances, true);
-                NameFmt(&m, clip_distances, "cldist_attr{}", 0);
+                NameFmt(&m, clip_distances, "cldist_attr%d", 0);
             }
         }
         break;
@@ -680,7 +697,7 @@ void EmitContext::DefineOutputs() {
             }
             const Id id{DefineOutput(F32[4], patch_base_location + index)};
             spv_Decorate0(&m, id, u32(SpvDecorationPatch));
-            NameFmt(&m, id, "patch_out{}", index);
+            NameFmt(&m, id, "patch_out%zu", index);
             patches[index] = id;
         }
         break;
@@ -694,7 +711,7 @@ void EmitContext::DefineOutputs() {
             }
             const u32 num_components = info.stores.NumComponents(param);
             const Id id{DefineOutput(F32[num_components], i)};
-            NameFmt(&m, id, "out_attr{}", i);
+            NameFmt(&m, id, "out_attr%u", i);
             output_params[i] =
                 GetAttributeInfo(AmdGpu::NumberFormat::Float, id, num_components, true);
         }
@@ -728,7 +745,7 @@ void EmitContext::DefineOutputs() {
             } else {
                 id = DefineOutput(type, i);
             }
-            NameFmt(&m, id, "frag_color{}", i);
+            NameFmt(&m, id, "frag_color%u", i);
             frag_outputs[i] = GetAttributeInfo(num_format, id, num_components, true);
             ++num_render_targets;
         }
@@ -743,7 +760,7 @@ void EmitContext::DefineOutputs() {
         DefineVertexBlock();
         for (u32 attr_id = 0; attr_id < info.gs_copy_data.num_attrs; attr_id++) {
             const Id id{DefineOutput(F32[4], attr_id)};
-            NameFmt(&m, id, "out_attr{}", attr_id);
+            NameFmt(&m, id, "out_attr%u", attr_id);
             output_params[attr_id] = GetAttributeInfo(AmdGpu::NumberFormat::Float, id, 4, true);
         }
         break;
@@ -833,7 +850,7 @@ EmitContext::BufferSpv EmitContext::DefineBuffer(bool is_written, bool is_cohere
         spv_Name(&m, id, "ssbo_shmem");
         break;
     default:
-        NameFmt(&m, id, "ssbo_{}", binding.buffer);
+        NameFmt(&m, id, "ssbo_%u", binding.buffer);
         break;
     }
     interfaces.push_back(id);
@@ -956,8 +973,11 @@ u32 GetFormat(const AmdGpu::Image& image) {
         image.GetNumberFmt() == AmdGpu::NumberFormat::Float) {
         return SpvImageFormatRgba32f;
     }
-    UNREACHABLE_MSG("Unknown storage format data_format={}, num_format={}", image.GetDataFmt(),
-                    image.GetNumberFmt());
+    UNREACHABLE_MSG("Unknown storage format data_format=%.*s, num_format=%.*s",
+                    static_cast<int>(AmdGpu::NameOf(image.GetDataFmt()).size()),
+                    AmdGpu::NameOf(image.GetDataFmt()).data(),
+                    static_cast<int>(AmdGpu::NameOf(image.GetNumberFmt()).size()),
+                    AmdGpu::NameOf(image.GetNumberFmt()).data());
 }
 
 Id ImageType(EmitContext& ctx, const ImageResource& desc, Id sampled_type) {
@@ -984,7 +1004,8 @@ Id ImageType(EmitContext& ctx, const ImageResource& desc, Id sampled_type) {
     default:
         break;
     }
-    UNREACHABLE_MSG("Invalid texture type {}", type);
+    UNREACHABLE_MSG("Invalid texture type %.*s", static_cast<int>(AmdGpu::NameOf(type).size()),
+                    AmdGpu::NameOf(type).data());
 }
 
 void EmitContext::DefineImagesAndSamplers() {
@@ -1011,7 +1032,7 @@ void EmitContext::DefineImagesAndSamplers() {
         spv_Decorate1(&m, id, u32(SpvDecorationBinding), u32(binding.unified));
         binding.unified += num_bindings;
         spv_Decorate1(&m, id, u32(SpvDecorationDescriptorSet), 0U);
-        NameFmt(&m, id, "{}_{}{}", hw_stage, "img", images.size());
+        NameFmt(&m, id, "%s_%s%zu", Shader::NameOf(hw_stage), "img", images.size());
         images.push_back({
             .data_types = &data_types,
             .id = id,
@@ -1039,7 +1060,7 @@ void EmitContext::DefineImagesAndSamplers() {
                                           u32(SpvStorageClassUniformConstant), 0)};
         spv_Decorate1(&m, id, u32(SpvDecorationBinding), u32(binding.unified++));
         spv_Decorate1(&m, id, u32(SpvDecorationDescriptorSet), 0U);
-        NameFmt(&m, id, "{}_{}{}", hw_stage, "samp", samplers.size());
+        NameFmt(&m, id, "%s_%s%zu", Shader::NameOf(hw_stage), "samp", samplers.size());
         samplers.push_back(id);
         interfaces.push_back(id);
     }
@@ -1336,11 +1357,12 @@ void EmitContext::DefineFunctions() {
     }
 
     if (True(info.readconst_types & Info::ReadConstType::Immediate)) {
-        LOG_DEBUG(Render_Recompiler, "Shader {:#x} uses immediate ReadConst", info.pgm_hash);
+        LOG_DEBUG(Render_Recompiler, "Shader 0x%" PRIx64 " uses immediate ReadConst",
+                  info.pgm_hash);
         read_const = DefineReadConst(false);
     }
     if (True(info.readconst_types & Info::ReadConstType::Dynamic)) {
-        LOG_DEBUG(Render_Recompiler, "Shader {:#x} uses dynamic ReadConst", info.pgm_hash);
+        LOG_DEBUG(Render_Recompiler, "Shader 0x%" PRIx64 " uses dynamic ReadConst", info.pgm_hash);
         read_const_dynamic = DefineReadConst(true);
     }
 }

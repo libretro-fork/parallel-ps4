@@ -806,7 +806,7 @@ struct PM4CmdEventWriteEos {
             break;
         }
         default: {
-            UNREACHABLE_MSG("Unknown command {}", u32(cmd));
+            UNREACHABLE_MSG("Unknown command %u", u32(cmd));
         }
         }
     }
@@ -1236,7 +1236,7 @@ struct PM4CmdMemSemaphore {
             *ptr = 1;
             break;
         default:
-            UNREACHABLE_MSG("Unknown signal type {}", static_cast<u32>(signal_type.Value()));
+            UNREACHABLE_MSG("Unknown signal type %u", static_cast<u32>(signal_type.Value()));
         }
     }
 };

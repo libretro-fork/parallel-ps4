@@ -3,7 +3,6 @@
 
 #pragma once
 
-#include <fmt/format.h>
 #include "common/types.h"
 
 namespace Shader::IR {
@@ -161,13 +160,3 @@ constexpr u32 GenericPatchElement(Patch patch) {
 [[nodiscard]] std::string NameOf(Patch patch);
 
 } // namespace Shader::IR
-
-template <>
-struct fmt::formatter<Shader::IR::Patch> {
-    constexpr auto parse(format_parse_context& ctx) {
-        return ctx.begin();
-    }
-    auto format(const Shader::IR::Patch patch, format_context& ctx) const {
-        return fmt::format_to(ctx.out(), "{}", Shader::IR::NameOf(patch));
-    }
-};

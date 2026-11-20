@@ -541,8 +541,10 @@ void ConstantPropagation(IR::Block& block, IR::Inst& inst) {
     case IR::Opcode::BitFieldUExtract:
         FoldWhenAllImmediates(inst, [](u32 base, u32 shift, u32 count) {
             if (static_cast<size_t>(shift) + static_cast<size_t>(count) > 32) {
-                UNREACHABLE_MSG("Undefined result in {}({}, {}, {})", IR::Opcode::BitFieldUExtract,
-                                base, shift, count);
+                UNREACHABLE_MSG(
+                    "Undefined result in %.*s(%u, %u, %u)",
+                    static_cast<int>(Shader::IR::NameOf(IR::Opcode::BitFieldUExtract).size()),
+                    Shader::IR::NameOf(IR::Opcode::BitFieldUExtract).data(), base, shift, count);
             }
             return (base >> shift) & ((1U << count) - 1);
         });
@@ -553,8 +555,10 @@ void ConstantPropagation(IR::Block& block, IR::Inst& inst) {
             const size_t left_shift{32 - back_shift};
             const size_t right_shift{static_cast<size_t>(32 - count)};
             if (back_shift > 32 || left_shift >= 32 || right_shift >= 32) {
-                UNREACHABLE_MSG("Undefined result in {}({}, {}, {})", IR::Opcode::BitFieldSExtract,
-                                base, shift, count);
+                UNREACHABLE_MSG(
+                    "Undefined result in %.*s(%d, %u, %u)",
+                    static_cast<int>(Shader::IR::NameOf(IR::Opcode::BitFieldSExtract).size()),
+                    Shader::IR::NameOf(IR::Opcode::BitFieldSExtract).data(), base, shift, count);
             }
             return static_cast<u32>((base << left_shift) >> right_shift);
         });
@@ -562,8 +566,11 @@ void ConstantPropagation(IR::Block& block, IR::Inst& inst) {
     case IR::Opcode::BitFieldInsert32:
         FoldWhenAllImmediates(inst, [](u32 base, u32 insert, u32 offset, u32 bits) {
             if (bits >= 32 || offset >= 32) {
-                UNREACHABLE_MSG("Undefined result in {}({}, {}, {}, {})",
-                                IR::Opcode::BitFieldInsert32, base, insert, offset, bits);
+                UNREACHABLE_MSG(
+                    "Undefined result in %.*s(%u, %u, %u, %u)",
+                    static_cast<int>(Shader::IR::NameOf(IR::Opcode::BitFieldInsert32).size()),
+                    Shader::IR::NameOf(IR::Opcode::BitFieldInsert32).data(), base, insert, offset,
+                    bits);
             }
             return (base & ~(~(~0u << bits) << offset)) | (insert << offset);
         });
@@ -571,8 +578,11 @@ void ConstantPropagation(IR::Block& block, IR::Inst& inst) {
     case IR::Opcode::BitFieldInsert64:
         FoldWhenAllImmediates(inst, [](u64 base, u64 insert, u32 offset, u32 bits) {
             if (bits >= 64 || offset >= 64) {
-                UNREACHABLE_MSG("Undefined result in {}({}, {}, {}, {})",
-                                IR::Opcode::BitFieldInsert64, base, insert, offset, bits);
+                UNREACHABLE_MSG(
+                    "Undefined result in %.*s(%" PRIu64 ", %" PRIu64 ", %u, %u)",
+                    static_cast<int>(Shader::IR::NameOf(IR::Opcode::BitFieldInsert64).size()),
+                    Shader::IR::NameOf(IR::Opcode::BitFieldInsert64).data(), base, insert, offset,
+                    bits);
             }
             return (base & ~(~(~u64{0} << bits) << offset)) | (insert << offset);
         });

@@ -11,7 +11,7 @@ std::shared_ptr<BaseDevice> ConsoleDevice::Create(u32 handle, const char*, s32, 
 }
 
 s32 ConsoleDevice::ioctl(u64 cmd, Common::VaCtx* args) {
-    LOG_ERROR(Kernel_Fs, "(STUBBED) called, cmd = {:#x}", cmd);
+    LOG_ERROR(Kernel_Fs, "(STUBBED) called, cmd = 0x%" PRIx64, cmd);
     return 0;
 }
 

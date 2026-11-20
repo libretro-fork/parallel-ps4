@@ -160,7 +160,7 @@ void FaultManager::ProcessFaultBuffer() {
         const u32 fault_count = fault_buf[0];
         for (u32 i = 1; i <= fault_count; ++i) {
             fault_ranges.Add(fault_buf[i], sparse_pagesize);
-            LOG_INFO(Render_Vulkan, "Accessed non-GPU cached memory at {:#x}", fault_buf[i]);
+            LOG_INFO(Render_Vulkan, "Accessed non-GPU cached memory at 0x%" PRIx64, fault_buf[i]);
         }
         fault_ranges.ForEach([&](VAddr start, VAddr end) {
             ASSERT_MSG((end - start) <= std::numeric_limits<u32>::max(),

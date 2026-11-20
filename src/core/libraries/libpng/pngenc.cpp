@@ -36,7 +36,7 @@ s32 PS4_SYSV_ABI scePngEncCreate(const OrbisPngEncCreateParam* param, void* memo
     }
 
     if (param->max_image_width - 1 > 1000000) {
-        LOG_ERROR(Lib_Png, "Invalid Size, width = {}", param->max_image_width);
+        LOG_ERROR(Lib_Png, "Invalid Size, width = %u", param->max_image_width);
         return ORBIS_PNG_ENC_ERROR_INVALID_SIZE;
     }
 
@@ -52,8 +52,11 @@ s32 PS4_SYSV_ABI scePngEncDelete(OrbisPngEncHandle handle) {
 
 s32 PS4_SYSV_ABI scePngEncEncode(OrbisPngEncHandle handle, const OrbisPngEncEncodeParam* param,
                                  OrbisPngEncOutputInfo* outputInfo) {
-    LOG_TRACE(Lib_Png, "called png addr = {}, image addr = {}, image size = {}",
-              (void*)param->png_mem_addr, (void*)param->image_mem_addr, param->image_mem_size);
+    LOG_TRACE(
+        Lib_Png, "called png addr = 0x%llx, image addr = 0x%llx, image size = %u",
+        static_cast<unsigned long long>(reinterpret_cast<uintptr_t>((void*)param->png_mem_addr)),
+        static_cast<unsigned long long>(reinterpret_cast<uintptr_t>((void*)param->image_mem_addr)),
+        param->image_mem_size);
 
     if (handle == nullptr) {
         LOG_ERROR(Lib_Png, "Invalid handle");
@@ -80,7 +83,7 @@ s32 PS4_SYSV_ABI scePngEncEncode(OrbisPngEncHandle handle, const OrbisPngEncEnco
     // each row's filter by itself and compresses at its own level, so the game's filter and
     // level only change how small the file comes out, not what it decodes to.
     if (param->bit_depth != 8) {
-        LOG_WARNING(Lib_Png, "PNG encode at bit depth {}: written at 8", param->bit_depth);
+        LOG_WARNING(Lib_Png, "PNG encode at bit depth %u: written at 8", param->bit_depth);
     }
     const bool bgra = param->pixel_format == OrbisPngEncPixelFormat::B8G8R8A8;
     const bool alpha = param->color_space == OrbisPngEncColorSpace::RGBA;
@@ -123,13 +126,13 @@ s32 PS4_SYSV_ABI scePngEncQueryMemorySize(const OrbisPngEncCreateParam* param) {
     }
 
     if (param->attribute != 0 || param->max_filter_number > 5) {
-        LOG_ERROR(Lib_Png, "Invalid Param, attribute = {}, max_filter_number = {}",
+        LOG_ERROR(Lib_Png, "Invalid Param, attribute = %u, max_filter_number = %u",
                   param->attribute, param->max_filter_number);
         return ORBIS_PNG_ENC_ERROR_INVALID_PARAM;
     }
 
     if (param->max_image_width - 1 > 1000000) {
-        LOG_ERROR(Lib_Png, "Invalid Size, width = {}", param->max_image_width);
+        LOG_ERROR(Lib_Png, "Invalid Size, width = %u", param->max_image_width);
         return ORBIS_PNG_ENC_ERROR_INVALID_SIZE;
     }
 

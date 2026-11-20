@@ -50,7 +50,7 @@ LibraryContext* getLibraryContext(s32 lib_ctx_id) {
 s32 getMemoryPoolStats(s32 lib_ctx_id, OrbisNpWebApi2MemoryPoolStats* stats) {
     LibraryContext* lib_ctx = getLibraryContext(lib_ctx_id);
     if (!lib_ctx) {
-        LOG_ERROR(Lib_NpWebApi2, "No library context with id {:#x}", lib_ctx_id);
+        LOG_ERROR(Lib_NpWebApi2, "No library context with id 0x%x", lib_ctx_id);
         return ORBIS_NP_WEBAPI2_ERROR_LIB_CONTEXT_NOT_FOUND;
     }
 
@@ -65,7 +65,7 @@ s32 getMemoryPoolStats(s32 lib_ctx_id, OrbisNpWebApi2MemoryPoolStats* stats) {
 s32 createPushEventHandle(s32 lib_ctx_id) {
     LibraryContext* lib_ctx = getLibraryContext(lib_ctx_id);
     if (!lib_ctx) {
-        LOG_ERROR(Lib_NpWebApi2, "No library context with id {:#x}", lib_ctx_id);
+        LOG_ERROR(Lib_NpWebApi2, "No library context with id 0x%x", lib_ctx_id);
         return ORBIS_NP_WEBAPI2_ERROR_LIB_CONTEXT_NOT_FOUND;
     }
 
@@ -77,13 +77,13 @@ s32 createPushEventHandle(s32 lib_ctx_id) {
 s32 setHandleTimeout(s32 lib_ctx_id, s32 handle_id, u32 timeout) {
     LibraryContext* lib_ctx = getLibraryContext(lib_ctx_id);
     if (!lib_ctx) {
-        LOG_ERROR(Lib_NpWebApi2, "No library context with id {:#x}", lib_ctx_id);
+        LOG_ERROR(Lib_NpWebApi2, "No library context with id 0x%x", lib_ctx_id);
         return ORBIS_NP_WEBAPI2_ERROR_LIB_CONTEXT_NOT_FOUND;
     }
 
     PushEventHandle* handle = lib_ctx->GetPushEventHandle(handle_id);
     if (!handle) {
-        LOG_ERROR(Lib_NpWebApi2, "No handle with id {:#x}", handle_id);
+        LOG_ERROR(Lib_NpWebApi2, "No handle with id 0x%x", handle_id);
         lib_ctx->RemoveUser();
         return ORBIS_NP_WEBAPI2_ERROR_HANDLE_NOT_FOUND;
     }
@@ -97,13 +97,13 @@ s32 setHandleTimeout(s32 lib_ctx_id, s32 handle_id, u32 timeout) {
 s32 abortPushEventHandle(s32 lib_ctx_id, s32 handle_id) {
     LibraryContext* lib_ctx = getLibraryContext(lib_ctx_id);
     if (!lib_ctx) {
-        LOG_ERROR(Lib_NpWebApi2, "No library context with id {:#x}", lib_ctx_id);
+        LOG_ERROR(Lib_NpWebApi2, "No library context with id 0x%x", lib_ctx_id);
         return ORBIS_NP_WEBAPI2_ERROR_LIB_CONTEXT_NOT_FOUND;
     }
 
     PushEventHandle* handle = lib_ctx->GetPushEventHandle(handle_id);
     if (!handle) {
-        LOG_ERROR(Lib_NpWebApi2, "No handle with id {:#x}", handle_id);
+        LOG_ERROR(Lib_NpWebApi2, "No handle with id 0x%x", handle_id);
         lib_ctx->RemoveUser();
         return ORBIS_NP_WEBAPI2_ERROR_HANDLE_NOT_FOUND;
     }
@@ -117,13 +117,13 @@ s32 abortPushEventHandle(s32 lib_ctx_id, s32 handle_id) {
 s32 deletePushEventHandle(s32 lib_ctx_id, s32 handle_id) {
     LibraryContext* lib_ctx = getLibraryContext(lib_ctx_id);
     if (!lib_ctx) {
-        LOG_ERROR(Lib_NpWebApi2, "No library context with id {:#x}", lib_ctx_id);
+        LOG_ERROR(Lib_NpWebApi2, "No library context with id 0x%x", lib_ctx_id);
         return ORBIS_NP_WEBAPI2_ERROR_LIB_CONTEXT_NOT_FOUND;
     }
 
     PushEventHandle* handle = lib_ctx->GetPushEventHandle(handle_id);
     if (!handle) {
-        LOG_ERROR(Lib_NpWebApi2, "No handle with id {:#x}", handle_id);
+        LOG_ERROR(Lib_NpWebApi2, "No handle with id 0x%x", handle_id);
         lib_ctx->RemoveUser();
         return ORBIS_NP_WEBAPI2_ERROR_HANDLE_NOT_FOUND;
     }
@@ -139,7 +139,7 @@ s32 createPushEventFilter(s32 lib_ctx_id, s32 handle_id, const char* np_service_
                           u64 filter_param_num, bool internal) {
     LibraryContext* lib_ctx = getLibraryContext(lib_ctx_id);
     if (!lib_ctx) {
-        LOG_ERROR(Lib_NpWebApi2, "No library context with id {:#x}", lib_ctx_id);
+        LOG_ERROR(Lib_NpWebApi2, "No library context with id 0x%x", lib_ctx_id);
         return ORBIS_NP_WEBAPI2_ERROR_LIB_CONTEXT_NOT_FOUND;
     }
 
@@ -153,13 +153,13 @@ s32 createPushEventFilter(s32 lib_ctx_id, s32 handle_id, const char* np_service_
 s32 deletePushEventFilter(s32 lib_ctx_id, s32 filter_id) {
     LibraryContext* lib_ctx = getLibraryContext(lib_ctx_id);
     if (!lib_ctx) {
-        LOG_ERROR(Lib_NpWebApi2, "No library context with id {:#x}", lib_ctx_id);
+        LOG_ERROR(Lib_NpWebApi2, "No library context with id 0x%x", lib_ctx_id);
         return ORBIS_NP_WEBAPI2_ERROR_LIB_CONTEXT_NOT_FOUND;
     }
 
     PushEventFilter* filter = lib_ctx->GetPushEventFilter(filter_id);
     if (!filter) {
-        LOG_ERROR(Lib_NpWebApi2, "No filter with id {:#x}", filter_id);
+        LOG_ERROR(Lib_NpWebApi2, "No filter with id 0x%x", filter_id);
         lib_ctx->RemoveUser();
         return ORBIS_NP_WEBAPI2_ERROR_PUSH_EVENT_FILTER_NOT_FOUND;
     }
@@ -172,7 +172,7 @@ s32 deletePushEventFilter(s32 lib_ctx_id, s32 filter_id) {
 s32 terminateLibraryContext(s32 lib_ctx_id) {
     LibraryContext* lib_ctx = getLibraryContext(lib_ctx_id);
     if (!lib_ctx) {
-        LOG_ERROR(Lib_NpWebApi2, "No library context with id {:#x}", lib_ctx_id);
+        LOG_ERROR(Lib_NpWebApi2, "No library context with id 0x%x", lib_ctx_id);
         return ORBIS_NP_WEBAPI2_ERROR_LIB_CONTEXT_NOT_FOUND;
     }
 
@@ -180,7 +180,7 @@ s32 terminateLibraryContext(s32 lib_ctx_id) {
     lib_ctx->AbortAllPushEventHandles();
 
     if (!lib_ctx->MarkForDeletion()) {
-        LOG_ERROR(Lib_NpWebApi2, "Library context with id {:#x} is already deleted", lib_ctx_id);
+        LOG_ERROR(Lib_NpWebApi2, "Library context with id 0x%x is already deleted", lib_ctx_id);
         lib_ctx->RemoveUser();
         return ORBIS_NP_WEBAPI2_ERROR_LIB_CONTEXT_NOT_FOUND;
     }
@@ -198,13 +198,13 @@ s32 terminateLibraryContext(s32 lib_ctx_id) {
 s32 createUserContext(s32 lib_ctx_id, Libraries::UserService::OrbisUserServiceUserId user_id) {
     LibraryContext* lib_ctx = getLibraryContext(lib_ctx_id);
     if (!lib_ctx) {
-        LOG_ERROR(Lib_NpWebApi2, "No library context with id {:#x}", lib_ctx_id);
+        LOG_ERROR(Lib_NpWebApi2, "No library context with id 0x%x", lib_ctx_id);
         return ORBIS_NP_WEBAPI2_ERROR_LIB_CONTEXT_NOT_FOUND;
     }
 
     UserContext* user_ctx = lib_ctx->GetUserContextByUserId(user_id);
     if (user_ctx) {
-        LOG_ERROR(Lib_NpWebApi2, "User context already exists for user id {}", user_id);
+        LOG_ERROR(Lib_NpWebApi2, "User context already exists for user id %d", user_id);
         user_ctx->RemoveUser();
         lib_ctx->RemoveUser();
         return ORBIS_NP_WEBAPI2_ERROR_USER_CONTEXT_ALREADY_EXIST;
@@ -235,20 +235,20 @@ s32 createUserContext(s32 lib_ctx_id, Libraries::UserService::OrbisUserServiceUs
 s32 deleteUserContext(s32 user_ctx_id) {
     LibraryContext* lib_ctx = getLibraryContext(user_ctx_id >> 0x10);
     if (!lib_ctx) {
-        LOG_ERROR(Lib_NpWebApi2, "No library context for user context id {:#x}", user_ctx_id);
+        LOG_ERROR(Lib_NpWebApi2, "No library context for user context id 0x%x", user_ctx_id);
         return ORBIS_NP_WEBAPI2_ERROR_LIB_CONTEXT_NOT_FOUND;
     }
 
     UserContext* user_ctx = lib_ctx->GetUserContext(user_ctx_id);
     if (!user_ctx) {
-        LOG_ERROR(Lib_NpWebApi2, "No user context with id {:#x}", user_ctx_id);
+        LOG_ERROR(Lib_NpWebApi2, "No user context with id 0x%x", user_ctx_id);
         lib_ctx->RemoveUser();
         return ORBIS_NP_WEBAPI2_ERROR_USER_CONTEXT_NOT_FOUND;
     }
 
     user_ctx->AbortAllRequests();
     if (!user_ctx->MarkForDeletion()) {
-        LOG_ERROR(Lib_NpWebApi2, "User context with id {:#x} is already deleted", user_ctx_id);
+        LOG_ERROR(Lib_NpWebApi2, "User context with id 0x%x is already deleted", user_ctx_id);
         user_ctx->RemoveUser();
         lib_ctx->RemoveUser();
         return ORBIS_NP_WEBAPI2_ERROR_USER_CONTEXT_NOT_FOUND;
@@ -268,19 +268,19 @@ s32 registerPushEventCallback(s32 user_ctx_id, s32 filter_id,
                               OrbisNpWebApi2PushEventCallback cb_func, void* user_arg) {
     LibraryContext* lib_ctx = getLibraryContext(user_ctx_id >> 0x10);
     if (!lib_ctx) {
-        LOG_ERROR(Lib_NpWebApi2, "No library context for user context id {:#x}", user_ctx_id);
+        LOG_ERROR(Lib_NpWebApi2, "No library context for user context id 0x%x", user_ctx_id);
         return ORBIS_NP_WEBAPI2_ERROR_LIB_CONTEXT_NOT_FOUND;
     }
 
     UserContext* user_ctx = lib_ctx->GetUserContext(user_ctx_id);
     if (!user_ctx) {
-        LOG_ERROR(Lib_NpWebApi2, "No user context with id {:#x}", user_ctx_id);
+        LOG_ERROR(Lib_NpWebApi2, "No user context with id 0x%x", user_ctx_id);
         lib_ctx->RemoveUser();
         return ORBIS_NP_WEBAPI2_ERROR_USER_CONTEXT_NOT_FOUND;
     }
 
     if (!lib_ctx->HasPushEventFilter(filter_id)) {
-        LOG_ERROR(Lib_NpWebApi2, "No push event filter with id {:#x}", filter_id);
+        LOG_ERROR(Lib_NpWebApi2, "No push event filter with id 0x%x", filter_id);
         user_ctx->RemoveUser();
         lib_ctx->RemoveUser();
         return ORBIS_NP_WEBAPI2_ERROR_PUSH_EVENT_FILTER_NOT_FOUND;
@@ -295,13 +295,13 @@ s32 registerPushEventCallback(s32 user_ctx_id, s32 filter_id,
 s32 unregisterPushEventCallback(s32 user_ctx_id, s32 callback_id) {
     LibraryContext* lib_ctx = getLibraryContext(user_ctx_id >> 0x10);
     if (!lib_ctx) {
-        LOG_ERROR(Lib_NpWebApi2, "No library context for user context id {:#x}", user_ctx_id);
+        LOG_ERROR(Lib_NpWebApi2, "No library context for user context id 0x%x", user_ctx_id);
         return ORBIS_NP_WEBAPI2_ERROR_LIB_CONTEXT_NOT_FOUND;
     }
 
     UserContext* user_ctx = lib_ctx->GetUserContext(user_ctx_id);
     if (!user_ctx) {
-        LOG_ERROR(Lib_NpWebApi2, "No user context with id {:#x}", user_ctx_id);
+        LOG_ERROR(Lib_NpWebApi2, "No user context with id 0x%x", user_ctx_id);
         lib_ctx->RemoveUser();
         return ORBIS_NP_WEBAPI2_ERROR_USER_CONTEXT_NOT_FOUND;
     }
@@ -315,13 +315,13 @@ s32 unregisterPushEventCallback(s32 user_ctx_id, s32 callback_id) {
 s32 createPushContext(s32 user_ctx_id, OrbisNpWebApi2PushEventPushContextId* push_ctx_id) {
     LibraryContext* lib_ctx = getLibraryContext(user_ctx_id >> 0x10);
     if (!lib_ctx) {
-        LOG_ERROR(Lib_NpWebApi2, "No library context for user context id {:#x}", user_ctx_id);
+        LOG_ERROR(Lib_NpWebApi2, "No library context for user context id 0x%x", user_ctx_id);
         return ORBIS_NP_WEBAPI2_ERROR_LIB_CONTEXT_NOT_FOUND;
     }
 
     UserContext* user_ctx = lib_ctx->GetUserContext(user_ctx_id);
     if (!user_ctx) {
-        LOG_ERROR(Lib_NpWebApi2, "No user context with id {:#x}", user_ctx_id);
+        LOG_ERROR(Lib_NpWebApi2, "No user context with id 0x%x", user_ctx_id);
         lib_ctx->RemoveUser();
         return ORBIS_NP_WEBAPI2_ERROR_USER_CONTEXT_NOT_FOUND;
     }
@@ -336,13 +336,13 @@ s32 startPushContextCallback(s32 user_ctx_id,
                              const OrbisNpWebApi2PushEventPushContextId* push_ctx_id) {
     LibraryContext* lib_ctx = getLibraryContext(user_ctx_id >> 0x10);
     if (!lib_ctx) {
-        LOG_ERROR(Lib_NpWebApi2, "No library context for user context id {:#x}", user_ctx_id);
+        LOG_ERROR(Lib_NpWebApi2, "No library context for user context id 0x%x", user_ctx_id);
         return ORBIS_NP_WEBAPI2_ERROR_LIB_CONTEXT_NOT_FOUND;
     }
 
     UserContext* user_ctx = lib_ctx->GetUserContext(user_ctx_id);
     if (!user_ctx) {
-        LOG_ERROR(Lib_NpWebApi2, "No user context with id {:#x}", user_ctx_id);
+        LOG_ERROR(Lib_NpWebApi2, "No user context with id 0x%x", user_ctx_id);
         lib_ctx->RemoveUser();
         return ORBIS_NP_WEBAPI2_ERROR_USER_CONTEXT_NOT_FOUND;
     }
@@ -351,7 +351,7 @@ s32 startPushContextCallback(s32 user_ctx_id,
     if (!push_ctx) {
         s64 raw_id{};
         std::memcpy(&raw_id, push_ctx_id, sizeof(s64));
-        LOG_ERROR(Lib_NpWebApi2, "No push context with id {}", raw_id);
+        LOG_ERROR(Lib_NpWebApi2, "No push context with id %" PRId64, raw_id);
         user_ctx->RemoveUser();
         lib_ctx->RemoveUser();
         return ORBIS_NP_WEBAPI2_ERROR_PUSH_CONTEXT_NOT_FOUND;
@@ -367,13 +367,13 @@ s32 startPushContextCallback(s32 user_ctx_id,
 s32 deletePushContext(s32 user_ctx_id, const OrbisNpWebApi2PushEventPushContextId* push_ctx_id) {
     LibraryContext* lib_ctx = getLibraryContext(user_ctx_id >> 0x10);
     if (!lib_ctx) {
-        LOG_ERROR(Lib_NpWebApi2, "No library context for user context id {:#x}", user_ctx_id);
+        LOG_ERROR(Lib_NpWebApi2, "No library context for user context id 0x%x", user_ctx_id);
         return ORBIS_NP_WEBAPI2_ERROR_LIB_CONTEXT_NOT_FOUND;
     }
 
     UserContext* user_ctx = lib_ctx->GetUserContext(user_ctx_id);
     if (!user_ctx) {
-        LOG_ERROR(Lib_NpWebApi2, "No user context with id {:#x}", user_ctx_id);
+        LOG_ERROR(Lib_NpWebApi2, "No user context with id 0x%x", user_ctx_id);
         lib_ctx->RemoveUser();
         return ORBIS_NP_WEBAPI2_ERROR_USER_CONTEXT_NOT_FOUND;
     }
@@ -382,7 +382,7 @@ s32 deletePushContext(s32 user_ctx_id, const OrbisNpWebApi2PushEventPushContextI
     if (!push_ctx) {
         s64 raw_id{};
         std::memcpy(&raw_id, push_ctx_id, sizeof(s64));
-        LOG_ERROR(Lib_NpWebApi2, "No push context with id {}", raw_id);
+        LOG_ERROR(Lib_NpWebApi2, "No push context with id %" PRId64, raw_id);
         user_ctx->RemoveUser();
         lib_ctx->RemoveUser();
         return ORBIS_NP_WEBAPI2_ERROR_PUSH_CONTEXT_NOT_FOUND;
@@ -399,19 +399,19 @@ s32 registerPushContextCallback(s32 user_ctx_id, s32 filter_id,
                                 void* user_arg) {
     LibraryContext* lib_ctx = getLibraryContext(user_ctx_id >> 0x10);
     if (!lib_ctx) {
-        LOG_ERROR(Lib_NpWebApi2, "No library context for user context id {:#x}", user_ctx_id);
+        LOG_ERROR(Lib_NpWebApi2, "No library context for user context id 0x%x", user_ctx_id);
         return ORBIS_NP_WEBAPI2_ERROR_LIB_CONTEXT_NOT_FOUND;
     }
 
     UserContext* user_ctx = lib_ctx->GetUserContext(user_ctx_id);
     if (!user_ctx) {
-        LOG_ERROR(Lib_NpWebApi2, "No user context with id {:#x}", user_ctx_id);
+        LOG_ERROR(Lib_NpWebApi2, "No user context with id 0x%x", user_ctx_id);
         lib_ctx->RemoveUser();
         return ORBIS_NP_WEBAPI2_ERROR_USER_CONTEXT_NOT_FOUND;
     }
 
     if (!lib_ctx->HasPushEventFilter(filter_id)) {
-        LOG_ERROR(Lib_NpWebApi2, "No push event filter with id {:#x}", filter_id);
+        LOG_ERROR(Lib_NpWebApi2, "No push event filter with id 0x%x", filter_id);
         user_ctx->RemoveUser();
         lib_ctx->RemoveUser();
         return ORBIS_NP_WEBAPI2_ERROR_PUSH_EVENT_FILTER_NOT_FOUND;
@@ -426,13 +426,13 @@ s32 registerPushContextCallback(s32 user_ctx_id, s32 filter_id,
 s32 unregisterPushContextCallback(s32 user_ctx_id, s32 callback_id) {
     LibraryContext* lib_ctx = getLibraryContext(user_ctx_id >> 0x10);
     if (!lib_ctx) {
-        LOG_ERROR(Lib_NpWebApi2, "No library context for user context id {:#x}", user_ctx_id);
+        LOG_ERROR(Lib_NpWebApi2, "No library context for user context id 0x%x", user_ctx_id);
         return ORBIS_NP_WEBAPI2_ERROR_LIB_CONTEXT_NOT_FOUND;
     }
 
     UserContext* user_ctx = lib_ctx->GetUserContext(user_ctx_id);
     if (!user_ctx) {
-        LOG_ERROR(Lib_NpWebApi2, "No user context with id {:#x}", user_ctx_id);
+        LOG_ERROR(Lib_NpWebApi2, "No user context with id 0x%x", user_ctx_id);
         lib_ctx->RemoveUser();
         return ORBIS_NP_WEBAPI2_ERROR_USER_CONTEXT_NOT_FOUND;
     }
@@ -452,13 +452,13 @@ s32 createRequest(s32 user_ctx_id, const char* api_group, const char* path, cons
                   s64* request_id) {
     LibraryContext* lib_ctx = getLibraryContext(user_ctx_id >> 0x10);
     if (!lib_ctx) {
-        LOG_ERROR(Lib_NpWebApi2, "No library context for user context id {:#x}", user_ctx_id);
+        LOG_ERROR(Lib_NpWebApi2, "No library context for user context id 0x%x", user_ctx_id);
         return ORBIS_NP_WEBAPI2_ERROR_LIB_CONTEXT_NOT_FOUND;
     }
 
     UserContext* user_ctx = lib_ctx->GetUserContext(user_ctx_id);
     if (!user_ctx) {
-        LOG_ERROR(Lib_NpWebApi2, "No user context with id {:#x}", user_ctx_id);
+        LOG_ERROR(Lib_NpWebApi2, "No user context with id 0x%x", user_ctx_id);
         lib_ctx->RemoveUser();
         return ORBIS_NP_WEBAPI2_ERROR_USER_CONTEXT_NOT_FOUND;
     }
@@ -493,20 +493,20 @@ s32 addHttpRequestHeader(s64 request_id, const char* field_name, const char* fie
     s32 user_ctx_id = static_cast<s32>(request_id >> 0x20);
     LibraryContext* lib_ctx = getLibraryContext(lib_ctx_id);
     if (!lib_ctx) {
-        LOG_ERROR(Lib_NpWebApi2, "No library context for request id {:#x}", request_id);
+        LOG_ERROR(Lib_NpWebApi2, "No library context for request id 0x%" PRIx64, request_id);
         return ORBIS_NP_WEBAPI2_ERROR_LIB_CONTEXT_NOT_FOUND;
     }
 
     UserContext* user_ctx = lib_ctx->GetUserContext(user_ctx_id);
     if (!user_ctx) {
-        LOG_ERROR(Lib_NpWebApi2, "No user context for request id {:#x}", request_id);
+        LOG_ERROR(Lib_NpWebApi2, "No user context for request id 0x%" PRIx64, request_id);
         lib_ctx->RemoveUser();
         return ORBIS_NP_WEBAPI2_ERROR_USER_CONTEXT_NOT_FOUND;
     }
 
     Request* request = user_ctx->GetRequest(request_id);
     if (!request) {
-        LOG_ERROR(Lib_NpWebApi2, "No request with id {:#x}", request_id);
+        LOG_ERROR(Lib_NpWebApi2, "No request with id 0x%" PRIx64, request_id);
         user_ctx->RemoveUser();
         lib_ctx->RemoveUser();
         return ORBIS_NP_WEBAPI2_ERROR_REQUEST_NOT_FOUND;
@@ -532,20 +532,20 @@ s32 setRequestTimeout(s64 request_id, u32 timeout) {
     s32 user_ctx_id = static_cast<s32>(request_id >> 0x20);
     LibraryContext* lib_ctx = getLibraryContext(lib_ctx_id);
     if (!lib_ctx) {
-        LOG_ERROR(Lib_NpWebApi2, "No library context for request id {:#x}", request_id);
+        LOG_ERROR(Lib_NpWebApi2, "No library context for request id 0x%" PRIx64, request_id);
         return ORBIS_NP_WEBAPI2_ERROR_LIB_CONTEXT_NOT_FOUND;
     }
 
     UserContext* user_ctx = lib_ctx->GetUserContext(user_ctx_id);
     if (!user_ctx) {
-        LOG_ERROR(Lib_NpWebApi2, "No user context for request id {:#x}", request_id);
+        LOG_ERROR(Lib_NpWebApi2, "No user context for request id 0x%" PRIx64, request_id);
         lib_ctx->RemoveUser();
         return ORBIS_NP_WEBAPI2_ERROR_USER_CONTEXT_NOT_FOUND;
     }
 
     Request* request = user_ctx->GetRequest(request_id);
     if (!request) {
-        LOG_ERROR(Lib_NpWebApi2, "No request with id {:#x}", request_id);
+        LOG_ERROR(Lib_NpWebApi2, "No request with id 0x%" PRIx64, request_id);
         user_ctx->RemoveUser();
         lib_ctx->RemoveUser();
         return ORBIS_NP_WEBAPI2_ERROR_REQUEST_NOT_FOUND;
@@ -583,20 +583,20 @@ s32 sendRequest(s64 request_id, s32 part_index, void* data, u64 data_size,
     s32 user_ctx_id = static_cast<s32>(request_id >> 0x20);
     LibraryContext* lib_ctx = getLibraryContext(lib_ctx_id);
     if (!lib_ctx) {
-        LOG_ERROR(Lib_NpWebApi2, "No library context for request id {:#x}", request_id);
+        LOG_ERROR(Lib_NpWebApi2, "No library context for request id 0x%" PRIx64, request_id);
         return ORBIS_NP_WEBAPI2_ERROR_LIB_CONTEXT_NOT_FOUND;
     }
 
     UserContext* user_ctx = lib_ctx->GetUserContext(user_ctx_id);
     if (!user_ctx) {
-        LOG_ERROR(Lib_NpWebApi2, "No user context for request id {:#x}", request_id);
+        LOG_ERROR(Lib_NpWebApi2, "No user context for request id 0x%" PRIx64, request_id);
         lib_ctx->RemoveUser();
         return ORBIS_NP_WEBAPI2_ERROR_USER_CONTEXT_NOT_FOUND;
     }
 
     Request* request = user_ctx->GetRequest(request_id);
     if (!request) {
-        LOG_ERROR(Lib_NpWebApi2, "No request with id {:#x}", request_id);
+        LOG_ERROR(Lib_NpWebApi2, "No request with id 0x%" PRIx64, request_id);
         user_ctx->RemoveUser();
         lib_ctx->RemoveUser();
         return ORBIS_NP_WEBAPI2_ERROR_REQUEST_NOT_FOUND;
@@ -677,7 +677,7 @@ s32 sendRequest(s64 request_id, s32 part_index, void* data, u64 data_size,
                     result = http_status | 0x82f00000;
                 }
             } else {
-                LOG_ERROR(Lib_NpWebApi2, "Failed to get http status code, error = {:#x}", result);
+                LOG_ERROR(Lib_NpWebApi2, "Failed to get http status code, error = 0x%x", result);
             }
         }
     }
@@ -702,20 +702,20 @@ s32 getHttpResponseHeaderData(s64 request_id, const char* field_name, char* valu
     s32 user_ctx_id = static_cast<s32>(request_id >> 0x20);
     LibraryContext* lib_ctx = getLibraryContext(lib_ctx_id);
     if (!lib_ctx) {
-        LOG_ERROR(Lib_NpWebApi2, "No library context for request id {:#x}", request_id);
+        LOG_ERROR(Lib_NpWebApi2, "No library context for request id 0x%" PRIx64, request_id);
         return ORBIS_NP_WEBAPI2_ERROR_LIB_CONTEXT_NOT_FOUND;
     }
 
     UserContext* user_ctx = lib_ctx->GetUserContext(user_ctx_id);
     if (!user_ctx) {
-        LOG_ERROR(Lib_NpWebApi2, "No user context for request id {:#x}", request_id);
+        LOG_ERROR(Lib_NpWebApi2, "No user context for request id 0x%" PRIx64, request_id);
         lib_ctx->RemoveUser();
         return ORBIS_NP_WEBAPI2_ERROR_USER_CONTEXT_NOT_FOUND;
     }
 
     Request* request = user_ctx->GetRequest(request_id);
     if (!request) {
-        LOG_ERROR(Lib_NpWebApi2, "No request with id {:#x}", request_id);
+        LOG_ERROR(Lib_NpWebApi2, "No request with id 0x%" PRIx64, request_id);
         user_ctx->RemoveUser();
         lib_ctx->RemoveUser();
         return ORBIS_NP_WEBAPI2_ERROR_REQUEST_NOT_FOUND;
@@ -733,20 +733,20 @@ s32 readData(s64 request_id, void* data, u64 size) {
     s32 user_ctx_id = static_cast<s32>(request_id >> 0x20);
     LibraryContext* lib_ctx = getLibraryContext(lib_ctx_id);
     if (!lib_ctx) {
-        LOG_ERROR(Lib_NpWebApi2, "No library context for request id {:#x}", request_id);
+        LOG_ERROR(Lib_NpWebApi2, "No library context for request id 0x%" PRIx64, request_id);
         return ORBIS_NP_WEBAPI2_ERROR_LIB_CONTEXT_NOT_FOUND;
     }
 
     UserContext* user_ctx = lib_ctx->GetUserContext(user_ctx_id);
     if (!user_ctx) {
-        LOG_ERROR(Lib_NpWebApi2, "No user context for request id {:#x}", request_id);
+        LOG_ERROR(Lib_NpWebApi2, "No user context for request id 0x%" PRIx64, request_id);
         lib_ctx->RemoveUser();
         return ORBIS_NP_WEBAPI2_ERROR_USER_CONTEXT_NOT_FOUND;
     }
 
     Request* request = user_ctx->GetRequest(request_id);
     if (!request) {
-        LOG_ERROR(Lib_NpWebApi2, "No request with id {:#x}", request_id);
+        LOG_ERROR(Lib_NpWebApi2, "No request with id 0x%" PRIx64, request_id);
         user_ctx->RemoveUser();
         lib_ctx->RemoveUser();
         return ORBIS_NP_WEBAPI2_ERROR_REQUEST_NOT_FOUND;
@@ -784,20 +784,20 @@ s32 abortRequest(s64 request_id) {
     s32 user_ctx_id = static_cast<s32>(request_id >> 0x20);
     LibraryContext* lib_ctx = getLibraryContext(lib_ctx_id);
     if (!lib_ctx) {
-        LOG_ERROR(Lib_NpWebApi2, "No library context for request id {:#x}", request_id);
+        LOG_ERROR(Lib_NpWebApi2, "No library context for request id 0x%" PRIx64, request_id);
         return ORBIS_NP_WEBAPI2_ERROR_LIB_CONTEXT_NOT_FOUND;
     }
 
     UserContext* user_ctx = lib_ctx->GetUserContext(user_ctx_id);
     if (!user_ctx) {
-        LOG_ERROR(Lib_NpWebApi2, "No user context for request id {:#x}", request_id);
+        LOG_ERROR(Lib_NpWebApi2, "No user context for request id 0x%" PRIx64, request_id);
         lib_ctx->RemoveUser();
         return ORBIS_NP_WEBAPI2_ERROR_USER_CONTEXT_NOT_FOUND;
     }
 
     Request* request = user_ctx->GetRequest(request_id);
     if (!request) {
-        LOG_ERROR(Lib_NpWebApi2, "No request with id {:#x}", request_id);
+        LOG_ERROR(Lib_NpWebApi2, "No request with id 0x%" PRIx64, request_id);
         user_ctx->RemoveUser();
         lib_ctx->RemoveUser();
         return ORBIS_NP_WEBAPI2_ERROR_REQUEST_NOT_FOUND;
@@ -815,20 +815,20 @@ s32 deleteRequest(s64 request_id) {
     s32 user_ctx_id = static_cast<s32>(request_id >> 0x20);
     LibraryContext* lib_ctx = getLibraryContext(lib_ctx_id);
     if (!lib_ctx) {
-        LOG_ERROR(Lib_NpWebApi2, "No library context for request id {:#x}", request_id);
+        LOG_ERROR(Lib_NpWebApi2, "No library context for request id 0x%" PRIx64, request_id);
         return ORBIS_NP_WEBAPI2_ERROR_LIB_CONTEXT_NOT_FOUND;
     }
 
     UserContext* user_ctx = lib_ctx->GetUserContext(user_ctx_id);
     if (!user_ctx) {
-        LOG_ERROR(Lib_NpWebApi2, "No user context for request id {:#x}", request_id);
+        LOG_ERROR(Lib_NpWebApi2, "No user context for request id 0x%" PRIx64, request_id);
         lib_ctx->RemoveUser();
         return ORBIS_NP_WEBAPI2_ERROR_USER_CONTEXT_NOT_FOUND;
     }
 
     Request* request = user_ctx->GetRequest(request_id);
     if (!request) {
-        LOG_ERROR(Lib_NpWebApi2, "No request with id {:#x}", request_id);
+        LOG_ERROR(Lib_NpWebApi2, "No request with id 0x%" PRIx64, request_id);
         user_ctx->RemoveUser();
         lib_ctx->RemoveUser();
         return ORBIS_NP_WEBAPI2_ERROR_REQUEST_NOT_FOUND;
@@ -836,7 +836,8 @@ s32 deleteRequest(s64 request_id) {
 
     if (!request->MarkForDeletion()) {
         // Already marked for deletion
-        LOG_ERROR(Lib_NpWebApi2, "Request with id {:#x} is already being deleted", request_id);
+        LOG_ERROR(Lib_NpWebApi2, "Request with id 0x%" PRIx64 " is already being deleted",
+                  request_id);
         request->RemoveUser();
         user_ctx->RemoveUser();
         lib_ctx->RemoveUser();

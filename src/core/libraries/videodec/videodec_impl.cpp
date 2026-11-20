@@ -37,7 +37,7 @@ s32 VdecDecoder::Decode(const OrbisVideodecInputData& pInputDataIn,
     const int ret =
         mDecoder.Decode(static_cast<const u8*>(pInputDataIn.pAuData), pInputDataIn.auSize, meta);
     if (ret < 0) {
-        LOG_ERROR(Lib_Videodec, "Error decoding the access unit: {}", ret);
+        LOG_ERROR(Lib_Videodec, "Error decoding the access unit: %d", ret);
         return ORBIS_VIDEODEC_ERROR_API_FAIL;
     }
     return ret ? Output(pFrameBufferInOut, pPictureInfoOut) : ORBIS_OK;
@@ -62,7 +62,7 @@ s32 VdecDecoder::Output(OrbisVideodecFrameBuffer& pFrameBufferInOut,
                         OrbisVideodecPictureInfo& pPictureInfoOut) {
     if (!mDecoder.WriteNV12(static_cast<u8*>(pFrameBufferInOut.pFrameBuffer),
                             pFrameBufferInOut.frameBufferSize)) {
-        LOG_ERROR(Lib_Videodec, "The {}x{} picture does not fit the frame buffer", mDecoder.Width(),
+        LOG_ERROR(Lib_Videodec, "The %ux%u picture does not fit the frame buffer", mDecoder.Width(),
                   mDecoder.Height());
         return ORBIS_VIDEODEC_ERROR_API_FAIL;
     }

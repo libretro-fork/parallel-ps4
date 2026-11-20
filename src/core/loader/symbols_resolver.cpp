@@ -1,7 +1,6 @@
 // SPDX-FileCopyrightText: Copyright 2024 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
-#include <fmt/format.h>
 #include "common/io_file.h"
 #include "common/string_util.h"
 #include "common/types.h"
@@ -23,7 +22,8 @@ void SymbolsResolver::AddSymbol(const SymbolResolver& s, u64 virtual_addr) {
 
 #ifdef SHADPS4_ENABLE_FEX_GUEST_CPU
 static std::string HleName(const SymbolResolver& s) {
-    return fmt::format("{}#{}#{}", s.name, s.library, s.module);
+    return Common::StringFromFormat("%s#%s#%s", s.name.c_str(), s.library.c_str(),
+                                    s.module.c_str());
 }
 
 void SymbolsResolver::AddFunction(const SymbolResolver& s,
@@ -57,7 +57,7 @@ SymbolsResolver::AddUnsupportedFunction(const SymbolResolver& s) {
     AddFunction(s, GuestCpu::MakeUnsupportedHleCallAdapter());
     ASSERT_MSG(!m_symbols.empty() && m_symbols.back().symbol == s &&
                    m_symbols.back().hle_adapter != nullptr,
-               "Unable to register unsupported HLE function {}", HleName(s));
+               "Unable to register unsupported HLE function %s", HleName(s).c_str());
     m_symbols.back().hle_fallback = true;
     return m_symbols.back().hle_adapter;
 }
@@ -101,7 +101,7 @@ const SymbolRecord* SymbolsResolver::FindSymbol(const SymbolResolver& s) const {
         }
     }
 
-    // LOG_INFO(Core_Linker, "Unresolved! {}", name);
+    // LOG_INFO(Core_Linker, "Unresolved! %s", name.c_str());
     return nullptr;
 }
 
@@ -111,9 +111,11 @@ void SymbolsResolver::DebugDump(const std::filesystem::path& file_name) {
         const auto id = symbol.symbol;
         const auto aeronid = AeroLib::FindByNid(id.name.c_str());
         const auto nid_name = aeronid ? aeronid->name : "UNK";
-        f.WriteString(fmt::format("0x{:<20x} {:<16} {:<60} {:<30} {:<2} {:<30} {:<10}\n",
-                                  symbol.virtual_address, id.name, nid_name, id.library,
-                                  id.library_version, id.module, SymbolTypeToS(id.type)));
+        const std::string_view type = SymbolTypeToS(id.type);
+        f.WriteString(Common::StringFromFormat(
+            "0x%-20" PRIx64 " %-16s %-60s %-30s %-2u %-30s %-10.*s\n", symbol.virtual_address,
+            id.name.c_str(), nid_name, id.library.c_str(), id.library_version, id.module.c_str(),
+            static_cast<int>(type.size()), type.data()));
     }
 }
 

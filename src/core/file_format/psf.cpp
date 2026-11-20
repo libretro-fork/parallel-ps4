@@ -35,7 +35,7 @@ bool PSF::Open(const std::filesystem::path& filepath) {
     if (!file) {
         return false;
     }
-    ASSERT_MSG(!file->empty(), "SFO file at {} is empty!", filepath.string());
+    ASSERT_MSG(!file->empty(), "SFO file at %s is empty!", (filepath.string()).c_str());
     return Open(file->Bytes());
 }
 
@@ -68,7 +68,7 @@ bool PSF::Open(std::span<const u8> psf_buffer) {
         return false;
     }
     if (header.version != PSF_VERSION_1_1 && header.version != PSF_VERSION_1_0) {
-        LOG_ERROR(Core, "Unsupported PSF version: 0x{:08x}", header.version);
+        LOG_ERROR(Core, "Unsupported PSF version: 0x%08x", header.version);
         return false;
     }
 
@@ -117,7 +117,7 @@ bool PSF::Encode(const std::filesystem::path& filepath) const {
     const auto psf_buffer = Encode();
     const size_t written = file.Write(psf_buffer);
     if (written != psf_buffer.size()) {
-        LOG_ERROR(Core, "Failed to write PSF file. Written {} Expected {}", written,
+        LOG_ERROR(Core, "Failed to write PSF file. Written %zu Expected %zu", written,
                   psf_buffer.size());
     }
     file.Close();
@@ -225,7 +225,7 @@ void PSF::AddBinary(std::string key, std::vector<u8> value, bool update) {
     auto [it, index] = FindEntry(key);
     bool exist = it != entry_list.end();
     if (exist && !update) {
-        LOG_ERROR(Core, "PSF: Tried to add binary key that already exists: {}", key);
+        LOG_ERROR(Core, "PSF: Tried to add binary key that already exists: %s", (key).c_str());
         return;
     }
     if (exist) {
@@ -251,7 +251,7 @@ void PSF::AddString(std::string key, std::string value, bool update) {
     auto [it, index] = FindEntry(key);
     bool exist = it != entry_list.end();
     if (exist && !update) {
-        LOG_ERROR(Core, "PSF: Tried to add string key that already exists: {}", key);
+        LOG_ERROR(Core, "PSF: Tried to add string key that already exists: %s", (key).c_str());
         return;
     }
     if (exist) {
@@ -271,7 +271,7 @@ void PSF::AddInteger(std::string key, s32 value, bool update) {
     auto [it, index] = FindEntry(key);
     bool exist = it != entry_list.end();
     if (exist && !update) {
-        LOG_ERROR(Core, "PSF: Tried to add integer key that already exists: {}", key);
+        LOG_ERROR(Core, "PSF: Tried to add integer key that already exists: %s", (key).c_str());
         return;
     }
     if (exist) {

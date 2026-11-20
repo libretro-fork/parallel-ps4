@@ -6,7 +6,6 @@
 #include "core/libraries/libs.h"
 #include "usbd.h"
 
-#include <fmt/format.h>
 #include <libusb.h>
 
 #include "core/emulator_settings.h"
@@ -17,7 +16,7 @@ s32 libusb_to_orbis_error(int retVal) {
     if (retVal == LIBUSB_ERROR_OTHER)
         return 0x802400FF;
     if (retVal < 0) {
-        LOG_ERROR(Lib_Usbd, "libusb returned: {}", libusb_error_name(retVal));
+        LOG_ERROR(Lib_Usbd, "libusb returned: %s", libusb_error_name(retVal));
         return 0x80240000 - retVal;
     }
 

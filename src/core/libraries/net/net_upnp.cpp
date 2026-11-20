@@ -85,7 +85,7 @@ void UPnPClient::Discover(void* self_) {
     inet_pton(AF_INET, external_ip, &ip_nbo);
     (void)retro_atomic_exchange_int(&self->m_external_ip_nbo, ip_nbo);
     self->m_have_gateway = true;
-    LOG_INFO(Lib_Net, "UPNP: IGD found - external IP={} lan={} (port mapping available)",
+    LOG_INFO(Lib_Net, "UPNP: IGD found - external IP=%s lan=%s (port mapping available)",
              external_ip, self->m_gateway.lan_addr);
     Sync(self);
 }
@@ -101,15 +101,15 @@ void UPnPClient::Sync(void* self_) {
     }
     if (self->m_mapped != 0) {
         net_upnp_delete_port_mapping(&self->m_gateway, self->m_mapped, true, RequestTimeoutMs);
-        LOG_INFO(Lib_Net, "UPNP: removed UDP port mapping {}", self->m_mapped);
+        LOG_INFO(Lib_Net, "UPNP: removed UDP port mapping %u", self->m_mapped);
     }
     self->m_mapped = wanted;
     if (wanted != 0) {
         if (net_upnp_add_port_mapping(&self->m_gateway, wanted, true, MappingDescription,
                                       RequestTimeoutMs)) {
-            LOG_INFO(Lib_Net, "UPNP: mapped UDP port {}", wanted);
+            LOG_INFO(Lib_Net, "UPNP: mapped UDP port %u", wanted);
         } else {
-            LOG_WARNING(Lib_Net, "UPNP: failed to map port {}", wanted);
+            LOG_WARNING(Lib_Net, "UPNP: failed to map port %u", wanted);
         }
     }
 }

@@ -13,7 +13,6 @@
 #include <cstring>
 #include <mutex>
 #include <string_view>
-#include <fmt/format.h>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -437,11 +436,11 @@ void CurrentThreadName(char* out, std::size_t size) {
     std::size_t length = 0;
     char guest[WORD_NAME_MAX + 1];
     if (g_curthread && word_name_get(&g_curthread->name, guest) != 0) {
-        const auto result = g_curthread->tcb->tcb_fiber
-                                ? fmt::format_to_n(out, size - 1, "{}@@{}", guest,
-                                                   g_curthread->tcb->tcb_fiber->current_fiber->name)
-                                : fmt::format_to_n(out, size - 1, "{}", guest);
-        length = std::min<std::size_t>(result.size, size - 1);
+        const int result = g_curthread->tcb->tcb_fiber
+                               ? std::snprintf(out, size, "%s@@%s", guest,
+                                               g_curthread->tcb->tcb_fiber->current_fiber->name)
+                               : std::snprintf(out, size, "%s", guest);
+        length = std::min<std::size_t>(result > 0 ? static_cast<std::size_t>(result) : 0, size - 1);
     } else if (*name) {
         length = std::min(std::strlen(name), size - 1);
         std::memcpy(out, name, length);
@@ -455,22 +454,39 @@ void CurrentThreadName(char* out, std::size_t size) {
 
 } // namespace
 
+void Log(Class log_class, Level level, const char* file, int line, const char* func,
+         const char* format, ...) {
+    va_list args;
+    va_start(args, format);
+    VLog(log_class, level, file, line, func, format, args);
+    va_end(args);
+}
+
 void VLog(Class log_class, Level level, const char* file, int line, const char* func,
-          fmt::string_view format, fmt::format_args args) {
+          const char* format, va_list args) {
     if (retro_atomic_load_acquire_int(&g_running) == 0) {
         return;
     }
     char thread[96];
     CurrentThreadName(thread, sizeof(thread));
     const std::string_view fn = std::string_view(func) == "operator()" ? "lambda" : func;
+    const std::string_view class_name = NameOf(log_class);
+    const std::string_view level_name = LEVEL_NAMES[static_cast<std::size_t>(level)];
+    const std::string_view base = BaseName(file);
     char text[MAX_RECORD];
-    const auto head = fmt::format_to_n(
-        text, sizeof(text), "[{}] <{}> ({}) {}:{} {}: ", NameOf(log_class),
-        LEVEL_NAMES[static_cast<std::size_t>(level)], thread, BaseName(file), line, fn);
-    std::size_t length = std::min(head.size, sizeof(text));
-    if (length < sizeof(text)) {
-        const auto body = fmt::vformat_to_n(text + length, sizeof(text) - length, format, args);
-        length = std::min(length + body.size, sizeof(text));
+    // The head, then the line, cut short at the record's size (its last byte is not text)
+    const int head = std::snprintf(
+        text, sizeof(text),
+        "[%.*s] <%.*s> (%s) %.*s:%d %.*s: ", static_cast<int>(class_name.size()), class_name.data(),
+        static_cast<int>(level_name.size()), level_name.data(), thread,
+        static_cast<int>(base.size()), base.data(), line, static_cast<int>(fn.size()), fn.data());
+    std::size_t length = head > 0 ? std::min<std::size_t>(head, sizeof(text) - 1) : 0;
+    if (length < sizeof(text) - 1) {
+        const int body = std::vsnprintf(text + length, sizeof(text) - length, format, args);
+        if (body > 0) {
+            length =
+                std::min<std::size_t>(length + static_cast<std::size_t>(body), sizeof(text) - 1);
+        }
     }
     // Sync logging keeps every line, waiting for room; otherwise only critical lines wait.
     Push(Kind::Line, level, text, length,

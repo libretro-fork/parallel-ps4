@@ -106,11 +106,12 @@ static s32 PS4_SYSV_ABI sceUsbStorageRegisterCallback(s32 event_type, void* call
         return ORBIS_AUTO_MOUNTER_ERROR_INVAL;
     }
     if (event_type != 1 && event_type != 2) {
-        LOG_ERROR(Lib_Usbd, "event_type {} is invalid", event_type);
+        LOG_ERROR(Lib_Usbd, "event_type %d is invalid", event_type);
         return ORBIS_AUTO_MOUNTER_ERROR_INVAL;
     }
-    LOG_ERROR(Lib_Usbd, "(STUBBED) called: event_type = {}, callback = {}, arg = {}", event_type,
-              callback, arg);
+    LOG_ERROR(Lib_Usbd, "(STUBBED) called: event_type = %d, callback = 0x%llx, arg = 0x%llx",
+              event_type, static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(callback)),
+              static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(arg)));
     return ORBIS_OK;
 }
 
@@ -120,10 +121,11 @@ static s32 PS4_SYSV_ABI sceUsbStorageUnregisterCallback(s32 event_type, void* ca
         return ORBIS_AUTO_MOUNTER_ERROR_INVAL;
     }
     if (event_type != 1 && event_type != 2) {
-        LOG_ERROR(Lib_Usbd, "event_type {} is invalid", event_type);
+        LOG_ERROR(Lib_Usbd, "event_type %d is invalid", event_type);
         return ORBIS_AUTO_MOUNTER_ERROR_INVAL;
     }
-    LOG_ERROR(Lib_Usbd, "(STUBBED) called: event_type = {}, callback = {}", event_type, callback);
+    LOG_ERROR(Lib_Usbd, "(STUBBED) called: event_type = %d, callback = 0x%llx", event_type,
+              static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(callback)));
     return ORBIS_OK;
 }
 
@@ -134,8 +136,11 @@ static s32 PS4_SYSV_ABI sceUsbStorageRegisterCallbackForMapAvailable(u32 device_
         LOG_ERROR(Lib_Usbd, "directory or callback is null");
         return ORBIS_AUTO_MOUNTER_ERROR_INVAL;
     }
-    LOG_ERROR(Lib_Usbd, "(STUBBED) called: device_id = {}, directory = {}, callback = {}, arg = {}",
-              device_id, directory, callback, arg);
+    LOG_ERROR(Lib_Usbd,
+              "(STUBBED) called: device_id = %u, directory = %s, callback = 0x%llx, arg = 0x%llx",
+              device_id, directory,
+              static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(callback)),
+              static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(arg)));
     return ORBIS_OK;
 }
 
@@ -146,8 +151,9 @@ static s32 PS4_SYSV_ABI sceUsbStorageUnregisterCallbackForMapAvailable(u32 devic
         LOG_ERROR(Lib_Usbd, "directory or callback is null");
         return ORBIS_AUTO_MOUNTER_ERROR_INVAL;
     }
-    LOG_ERROR(Lib_Usbd, "(STUBBED) called: device_id = {}, directory = {}, callback = {}",
-              device_id, directory, callback);
+    LOG_ERROR(Lib_Usbd, "(STUBBED) called: device_id = %u, directory = %s, callback = 0x%llx",
+              device_id, directory,
+              static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(callback)));
     return ORBIS_OK;
 }
 
@@ -158,8 +164,11 @@ static s32 PS4_SYSV_ABI sceUsbStorageRegisterCallbackForMapUnavailable(u32 devic
         LOG_ERROR(Lib_Usbd, "directory or callback is null");
         return ORBIS_AUTO_MOUNTER_ERROR_INVAL;
     }
-    LOG_ERROR(Lib_Usbd, "(STUBBED) called: device_id = {}, directory = {}, callback = {}, arg = {}",
-              device_id, directory, callback, arg);
+    LOG_ERROR(Lib_Usbd,
+              "(STUBBED) called: device_id = %u, directory = %s, callback = 0x%llx, arg = 0x%llx",
+              device_id, directory,
+              static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(callback)),
+              static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(arg)));
     return ORBIS_OK;
 }
 
@@ -170,8 +179,9 @@ static s32 PS4_SYSV_ABI sceUsbStorageUnregisterCallbackForMapUnavailable(u32 dev
         LOG_ERROR(Lib_Usbd, "directory or callback is null");
         return ORBIS_AUTO_MOUNTER_ERROR_INVAL;
     }
-    LOG_ERROR(Lib_Usbd, "(STUBBED) called: device_id = {}, directory = {}, callback = {}",
-              device_id, directory, callback);
+    LOG_ERROR(Lib_Usbd, "(STUBBED) called: device_id = %u, directory = %s, callback = 0x%llx",
+              device_id, directory,
+              static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(callback)));
     return ORBIS_OK;
 }
 
@@ -203,14 +213,14 @@ static s32 PS4_SYSV_ABI sceUsbStorageGetDeviceInfo(u32 device_id, OrbisUsbStorag
         return ORBIS_AUTO_MOUNTER_ERROR_INVAL;
     }
     if (device_id != 0) {
-        LOG_ERROR(Lib_Usbd, "invalid device_id {}", device_id);
+        LOG_ERROR(Lib_Usbd, "invalid device_id %u", device_id);
         return ORBIS_AUTO_MOUNTER_ERROR_NOENT;
     }
 
     const auto usb_path = GetUsbMountPath(device_id);
     std::error_code ec;
     if (!Common::FS::Exists(usb_path)) {
-        LOG_ERROR(Lib_Usbd, "USB device {} mount path does not exist", device_id);
+        LOG_ERROR(Lib_Usbd, "USB device %u mount path does not exist", device_id);
         return ORBIS_AUTO_MOUNTER_ERROR_NOENT;
     }
 
@@ -231,7 +241,7 @@ static s32 PS4_SYSV_ABI sceUsbStorageGetDeviceInfo(u32 device_id, OrbisUsbStorag
 
     info->additional_features = ORBIS_USB_STORAGE_FEATURE_EXFAT;
 
-    LOG_INFO(Lib_Usbd, "device_id = {}, vendor = '{}', product = '{}', serial = '{}'", device_id,
+    LOG_INFO(Lib_Usbd, "device_id = %u, vendor = '%s', product = '%s', serial = '%s'", device_id,
              info->vendor, info->product, info->serial_number);
     return ORBIS_OK;
 }
@@ -247,7 +257,7 @@ static s32 PS4_SYSV_ABI sceUsbStorageIsExist(u32 device_id) {
 static s32 PS4_SYSV_ABI sceUsbStorageRequestMapWSB(u32 device_id, const char* subpath, s32 flags,
                                                    s32 unk, char* out_mount_path, s32* out_status) {
     if (device_id != 0) {
-        LOG_ERROR(Lib_Usbd, "invalid device_id {}", device_id);
+        LOG_ERROR(Lib_Usbd, "invalid device_id %u", device_id);
         return ORBIS_AUTO_MOUNTER_ERROR_NOENT;
     }
 
@@ -271,7 +281,7 @@ static s32 PS4_SYSV_ABI sceUsbStorageRequestMapWSB(u32 device_id, const char* su
         *out_status = 0;
     }
 
-    LOG_INFO(Lib_Usbd, "mapped device_id {} to '{}'", device_id, mount_path);
+    LOG_INFO(Lib_Usbd, "mapped device_id %u to '%s'", device_id, (mount_path).c_str());
     return ORBIS_OK;
 }
 
@@ -285,7 +295,7 @@ static s32 PS4_SYSV_ABI sceUsbStorageRequestUnmap(u32 device_id, const char* dir
         LOG_ERROR(Lib_Usbd, "directory is null");
         return ORBIS_AUTO_MOUNTER_ERROR_INVAL;
     }
-    LOG_INFO(Lib_Usbd, "unmapped device_id {}, directory '{}'", device_id, directory);
+    LOG_INFO(Lib_Usbd, "unmapped device_id %u, directory '%s'", device_id, directory);
     return ORBIS_OK;
 }
 
@@ -295,7 +305,7 @@ static s32 PS4_SYSV_ABI sceUsbStorageGetdentsOpen(u32 device_id, s32* out_fd, u6
         return ORBIS_AUTO_MOUNTER_ERROR_INVAL;
     }
     if (device_id != 0) {
-        LOG_ERROR(Lib_Usbd, "invalid device_id {}", device_id);
+        LOG_ERROR(Lib_Usbd, "invalid device_id %u", device_id);
         return ORBIS_AUTO_MOUNTER_ERROR_NOENT;
     }
 
@@ -320,8 +330,8 @@ static s32 PS4_SYSV_ABI sceUsbStorageGetdentsOpen(u32 device_id, s32* out_fd, u6
         *out_fd = fd;
         *out_bufsize = 0x8000; // 32 KB buffer
 
-        LOG_INFO(Lib_Usbd, "opened getdents fd = {} for device {}, found {} entries", fd, device_id,
-                 count);
+        LOG_INFO(Lib_Usbd, "opened getdents fd = %d for device %u, found %zu entries", fd,
+                 device_id, count);
         return ORBIS_OK;
     });
 }
@@ -336,7 +346,7 @@ static s32 PS4_SYSV_ABI sceUsbStorageGetdentsRead(s32 fd, void* buffer, u64 bufs
     return g_usb_getdents_mutex.Run([&]() -> s32 {
         auto it = g_usb_getdents_table.find(fd);
         if (it == g_usb_getdents_table.end()) {
-            LOG_ERROR(Lib_Usbd, "invalid fd {}", fd);
+            LOG_ERROR(Lib_Usbd, "invalid fd %d", fd);
             *out_bytes_read = 0;
             return ORBIS_AUTO_MOUNTER_ERROR_NOTSUP;
         }
@@ -363,15 +373,15 @@ static s32 PS4_SYSV_ABI sceUsbStorageGetdentsRead(s32 fd, void* buffer, u64 bufs
             std::memcpy(entry->d_name, item.name.data(), namlen);
             entry->d_name[namlen] = '\0';
 
-            LOG_TRACE(Lib_Usbd, "entry: '{}', type = {}", item.name, entry->d_type);
+            LOG_TRACE(Lib_Usbd, "entry: '%s', type = %u", (item.name).c_str(), entry->d_type);
 
             bytes_written += reclen;
             state.current_index++;
         }
 
         *out_bytes_read = bytes_written;
-        LOG_DEBUG(Lib_Usbd, "fd = {}, returned {} bytes ({}/{} entries)", fd, bytes_written,
-                  state.current_index, state.items.size());
+        LOG_DEBUG(Lib_Usbd, "fd = %d, returned %" PRIu64 " bytes (%zu/%zu entries)", fd,
+                  bytes_written, state.current_index, state.items.size());
         return ORBIS_OK;
     });
 }
@@ -379,7 +389,7 @@ static s32 PS4_SYSV_ABI sceUsbStorageGetdentsRead(s32 fd, void* buffer, u64 bufs
 static s32 PS4_SYSV_ABI sceUsbStorageGetdentsClose(s32 fd) {
     return g_usb_getdents_mutex.Run([&]() -> s32 {
         g_usb_getdents_table.erase(fd);
-        LOG_DEBUG(Lib_Usbd, "closed fd = {}", fd);
+        LOG_DEBUG(Lib_Usbd, "closed fd = %d", fd);
         return ORBIS_OK;
     });
 }

@@ -112,10 +112,11 @@ constexpr IR::Opcode UndefOpcode(IR::RegTag tag) noexcept {
         case IR::Type::U1:
             return IR::Opcode::UndefU1;
         default:
-            UNREACHABLE_MSG("Unknown virtual reg type {}", tag.reg.type);
+            UNREACHABLE_MSG("Unknown virtual reg type %s",
+                            Shader::IR::NameOf(tag.reg.type).c_str());
         }
     default:
-        UNREACHABLE_MSG("Unknown reg type {}",
+        UNREACHABLE_MSG("Unknown reg type %s",
                         enum_name(&enum_names_Shader_IR_RegType, static_cast<s64>(tag.type)));
     }
 }

@@ -151,7 +151,7 @@ void ImeState::SendEnterEvent() {
     }
 
     LOG_DEBUG(Lib_Ime,
-              "IME Event queued: PressEnter caret={} area_num={} edit.index={} edit.length={}",
+              "IME Event queued: PressEnter caret=%u area_num=%u edit.index=%u edit.length=%d",
               text.caret_index, text.area_num, text.text_area[0].index, text.text_area[0].length);
     SendEvent(&enterEvent);
 }
@@ -185,7 +185,7 @@ void ImeState::SendCloseEvent() {
     }
 
     LOG_DEBUG(Lib_Ime,
-              "IME Event queued: PressClose caret={} area_num={} edit.index={} edit.length={}",
+              "IME Event queued: PressClose caret=%u area_num=%u edit.index=%u edit.length=%d",
               text.caret_index, text.area_num, text.text_area[0].index, text.text_area[0].length);
     SendEvent(&closeEvent);
 }
@@ -221,7 +221,7 @@ void ImeState::SetCaret(u32 position) {
     caret_index = next_caret;
     caret_byte_index = Utf8ByteIndexFromUtf16Index(current_text.begin(), next_caret);
     caret_dirty = true;
-    LOG_DEBUG(Lib_Ime, "ImeState::SetCaret requested={}, applied={} (len={})", position,
+    LOG_DEBUG(Lib_Ime, "ImeState::SetCaret requested=%u, applied=%d (len=%d)", position,
               caret_index, len_utf16);
 }
 

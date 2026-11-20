@@ -273,7 +273,9 @@ void PatchImageSharp(const ResourceDiscovery& resource, Info& info, Descriptors&
             case AmdGpu::ImageType::Color2DMsaa:
             case AmdGpu::ImageType::Color2DMsaaArray:
             default:
-                UNREACHABLE_MSG("Invalid image type {}", view_type);
+                UNREACHABLE_MSG("Invalid image type %.*s",
+                                static_cast<int>(AmdGpu::NameOf(view_type).size()),
+                                AmdGpu::NameOf(view_type).data());
             }
         }();
 
@@ -317,7 +319,9 @@ void PatchImageSharp(const ResourceDiscovery& resource, Info& info, Descriptors&
             return;
         }
         default:
-            UNREACHABLE_MSG("Can't patch fmask instruction {}", inst.GetOpcode());
+            UNREACHABLE_MSG("Can't patch fmask instruction %.*s",
+                            static_cast<int>(Shader::IR::NameOf(inst.GetOpcode()).size()),
+                            Shader::IR::NameOf(inst.GetOpcode()).data());
         }
     }
 
@@ -427,7 +431,7 @@ static void RemoveAppendBufferLaneOffset(IR::Inst& vx) {
         if (other.IsImmediate()) {
             ASSERT_MSG(other.U32() == 1u || other.U32() == std::numeric_limits<u32>::max() &&
                                                 vx.GetOpcode() == IR::Opcode::DataConsume,
-                       "Unexpected constant offset {} to DataConsume result", other.U32());
+                       "Unexpected constant offset %u to DataConsume result", other.U32());
             use = FindUniqueUser(user, [](const IR::Inst* inst) {
                 return inst->GetOpcode() == IR::Opcode::IAdd32 ||
                        inst->GetOpcode() == IR::Opcode::ISub32;
@@ -545,7 +549,9 @@ void PatchGlobalDataShareAccess(IR::Inst& inst, Info& info, Descriptors& descrip
         break;
     }
     default:
-        UNREACHABLE_MSG("Unexpected opcode {}", inst.GetOpcode());
+        UNREACHABLE_MSG("Unexpected opcode %.*s",
+                        static_cast<int>(Shader::IR::NameOf(inst.GetOpcode()).size()),
+                        Shader::IR::NameOf(inst.GetOpcode()).data());
     }
 }
 
@@ -887,7 +893,9 @@ void PatchImageArgs(IR::Inst& inst, Info& info) {
         case AmdGpu::ImageType::Color3D:          // x, y, z, [lod]
             return {ir.CompositeConstruct(body->Arg(0), body->Arg(1), body->Arg(2)), body->Arg(3)};
         default:
-            UNREACHABLE_MSG("Unknown image type {}", view_type);
+            UNREACHABLE_MSG("Unknown image type %.*s",
+                            static_cast<int>(AmdGpu::NameOf(view_type).size()),
+                            AmdGpu::NameOf(view_type).data());
         }
     }();
 

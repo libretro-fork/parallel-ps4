@@ -218,12 +218,14 @@ void InitHLELibs(Core::Loader::SymbolsResolver* sym) {
                 auto lle_file = Kernel::sceKernelIsNeoMode() ? "libSceGnmDriverForNeoMode.sprx"
                                                              : mod.module_name;
                 if (Common::FS::Exists(game_specific_modules_path / lle_file)) {
-                    LOG_WARNING(Loader, "{} LLEd", lle_file);
+                    LOG_WARNING(Loader, "%.*s LLEd", static_cast<int>((lle_file).size()),
+                                (lle_file).data());
                 } else {
                     mod.callback(sym);
                 }
             } else if (Common::FS::Exists(game_specific_modules_path / mod.module_name)) {
-                LOG_WARNING(Loader, "{} LLEd", mod.module_name);
+                LOG_WARNING(Loader, "%.*s LLEd", static_cast<int>((mod.module_name).size()),
+                            (mod.module_name).data());
             } else {
                 mod.callback(sym);
             }

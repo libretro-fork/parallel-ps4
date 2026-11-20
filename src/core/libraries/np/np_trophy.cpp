@@ -3,12 +3,12 @@
 
 #include <algorithm>
 #include <unordered_map>
-#include <fmt/format.h>
 #include "common/elf_info.h"
 #include "common/io_file.h"
 #include "common/logging/log.h"
 #include "common/path_util.h"
 #include "common/slot_vector.h"
+#include "common/string_util.h"
 #include "common/xml.h"
 #include "core/emulator_settings.h"
 #include "core/libraries/kernel/time.h"
@@ -82,7 +82,7 @@ static void ApplyUnlockToXmlFile(const std::filesystem::path& xml_path, OrbisNpT
                                  OrbisNpTrophyId platinumId, u64 platinumTimestamp) {
     Common::Xml::Document doc;
     if (!doc.Load(xml_path)) {
-        LOG_WARNING(Lib_NpTrophy, "ApplyUnlock: failed to load {}", xml_path.string());
+        LOG_WARNING(Lib_NpTrophy, "ApplyUnlock: failed to load %s", (xml_path.string()).c_str());
         return;
     }
 
@@ -141,7 +141,8 @@ static u32 ApplyServerTrophies(const std::filesystem::path& xml_save_file,
     }
     Common::Xml::Document doc;
     if (!doc.Load(xml_save_file)) {
-        LOG_WARNING(Lib_NpTrophy, "ApplyServerTrophies: failed to load {}", xml_save_file.string());
+        LOG_WARNING(Lib_NpTrophy, "ApplyServerTrophies: failed to load %s",
+                    (xml_save_file.string()).c_str());
         return 0;
     }
 
@@ -280,7 +281,7 @@ s32 PS4_SYSV_ABI sceNpTrophyCreateContext(OrbisNpTrophyContext* context,
     ctx.service_label = service_label;
     ctx.user_id = user_id;
 
-    LOG_INFO(Lib_NpTrophy, "New context = {}, user_id = {} service label = {}", *context, user_id,
+    LOG_INFO(Lib_NpTrophy, "New context = %d, user_id = %d service label = %u", *context, user_id,
              service_label);
     return ORBIS_OK;
 }
@@ -297,12 +298,12 @@ s32 PS4_SYSV_ABI sceNpTrophyCreateHandle(OrbisNpTrophyHandle* handle) {
     const auto handle_id = trophy_handles.Insert();
 
     *handle = handle_id.index + 1;
-    LOG_INFO(Lib_NpTrophy, "New handle = {}", *handle);
+    LOG_INFO(Lib_NpTrophy, "New handle = %d", *handle);
     return ORBIS_OK;
 }
 
 int PS4_SYSV_ABI sceNpTrophyDestroyContext(OrbisNpTrophyContext context) {
-    LOG_INFO(Lib_NpTrophy, "Destroyed Context {}", context);
+    LOG_INFO(Lib_NpTrophy, "Destroyed Context %d", context);
 
     if (context == ORBIS_NP_TROPHY_INVALID_CONTEXT) {
         return ORBIS_NP_TROPHY_ERROR_INVALID_CONTEXT;
@@ -332,7 +333,7 @@ s32 PS4_SYSV_ABI sceNpTrophyDestroyHandle(OrbisNpTrophyHandle handle) {
 
     s32 handle_index = handle - 1;
     if (handle_index >= trophy_handles.Size()) {
-        LOG_ERROR(Lib_NpTrophy, "Invalid handle {}", handle);
+        LOG_ERROR(Lib_NpTrophy, "Invalid handle %d", handle);
         return ORBIS_NP_TROPHY_ERROR_INVALID_HANDLE;
     }
 
@@ -341,7 +342,7 @@ s32 PS4_SYSV_ABI sceNpTrophyDestroyHandle(OrbisNpTrophyHandle handle) {
     }
 
     trophy_handles.Erase({static_cast<u32>(handle_index)});
-    LOG_INFO(Lib_NpTrophy, "Handle {} destroyed", handle);
+    LOG_INFO(Lib_NpTrophy, "Handle %d destroyed", handle);
     return ORBIS_OK;
 }
 
@@ -374,7 +375,8 @@ int PS4_SYSV_ABI sceNpTrophyGetGameIcon(OrbisNpTrophyContext context, OrbisNpTro
     Common::FS::IOFile icon(icon_file, Common::FS::FileAccessMode::Read,
                             Common::FS::FileHint::Mapped);
     if (!icon.IsOpen()) {
-        LOG_ERROR(Lib_NpTrophy, "Failed to open trophy icon file: {}", icon_file.string());
+        LOG_ERROR(Lib_NpTrophy, "Failed to open trophy icon file: %s",
+                  (icon_file.string()).c_str());
         return ORBIS_NP_TROPHY_ERROR_ICON_FILE_NOT_FOUND;
     }
     u64 icon_size = icon.GetSize();
@@ -428,7 +430,7 @@ int PS4_SYSV_ABI sceNpTrophyGetGameInfo(OrbisNpTrophyContext context, OrbisNpTro
     const bool result = doc.Load(trophy_file);
 
     if (!result) {
-        LOG_ERROR(Lib_NpTrophy, "Failed to parse trophy xml : {}",
+        LOG_ERROR(Lib_NpTrophy, "Failed to parse trophy xml : %s",
                   "the file could not be read or parsed");
         return ORBIS_OK;
     }
@@ -456,7 +458,7 @@ int PS4_SYSV_ABI sceNpTrophyGetGameInfo(OrbisNpTrophyContext context, OrbisNpTro
     const bool save_result = save_doc.Load(ctx.xml_save_file);
 
     if (!save_result) {
-        LOG_ERROR(Lib_NpTrophy, "Failed to parse user trophy xml : {}",
+        LOG_ERROR(Lib_NpTrophy, "Failed to parse user trophy xml : %s",
                   "the file could not be read or parsed");
         return ORBIS_OK;
     }
@@ -518,7 +520,7 @@ int PS4_SYSV_ABI sceNpTrophyGetGroupInfo(OrbisNpTrophyContext context, OrbisNpTr
                                          OrbisNpTrophyGroupId groupId,
                                          OrbisNpTrophyGroupDetails* details,
                                          OrbisNpTrophyGroupData* data) {
-    LOG_INFO(Lib_NpTrophy, "Getting Trophy Group Info for id {}", groupId);
+    LOG_INFO(Lib_NpTrophy, "Getting Trophy Group Info for id %d", groupId);
 
     if (context == ORBIS_NP_TROPHY_INVALID_CONTEXT)
         return ORBIS_NP_TROPHY_ERROR_INVALID_CONTEXT;
@@ -547,7 +549,7 @@ int PS4_SYSV_ABI sceNpTrophyGetGroupInfo(OrbisNpTrophyContext context, OrbisNpTr
     const bool result = doc.Load(trophy_file);
 
     if (!result) {
-        LOG_ERROR(Lib_NpTrophy, "Failed to open trophy xml : {}",
+        LOG_ERROR(Lib_NpTrophy, "Failed to open trophy xml : %s",
                   "the file could not be read or parsed");
         return ORBIS_OK;
     }
@@ -582,7 +584,7 @@ int PS4_SYSV_ABI sceNpTrophyGetGroupInfo(OrbisNpTrophyContext context, OrbisNpTr
     const bool save_result = save_doc.Load(ctx.xml_save_file);
 
     if (!save_result) {
-        LOG_ERROR(Lib_NpTrophy, "Failed to parse user trophy xml : {}",
+        LOG_ERROR(Lib_NpTrophy, "Failed to parse user trophy xml : %s",
                   "the file could not be read or parsed");
         return ORBIS_OK;
     }
@@ -664,7 +666,8 @@ int PS4_SYSV_ABI sceNpTrophyGetTrophyIcon(OrbisNpTrophyContext context, OrbisNpT
     // Check that the trophy is unlocked and icons are only available for earned trophies.
     Common::Xml::Document doc;
     if (!doc.Load(ctx.xml_save_file)) {
-        LOG_ERROR(Lib_NpTrophy, "Failed to open trophy XML: {}", ctx.xml_save_file.string());
+        LOG_ERROR(Lib_NpTrophy, "Failed to open trophy XML: %s",
+                  (ctx.xml_save_file.string()).c_str());
         return ORBIS_NP_TROPHY_ERROR_ICON_FILE_NOT_FOUND;
     }
 
@@ -686,13 +689,13 @@ int PS4_SYSV_ABI sceNpTrophyGetTrophyIcon(OrbisNpTrophyContext context, OrbisNpT
     if (!unlocked)
         return ORBIS_NP_TROPHY_ERROR_TROPHY_NOT_UNLOCKED;
 
-    const std::string icon_name = fmt::format("TROP{:03d}.PNG", trophyId);
+    const std::string icon_name = Common::StringFromFormat("TROP%03d.PNG", trophyId);
     const auto icon_path = ctx.icons_dir / icon_name;
 
     Common::FS::IOFile icon(icon_path, Common::FS::FileAccessMode::Read,
                             Common::FS::FileHint::Mapped);
     if (!icon.IsOpen()) {
-        LOG_ERROR(Lib_NpTrophy, "Failed to open trophy icon: {}", icon_path.string());
+        LOG_ERROR(Lib_NpTrophy, "Failed to open trophy icon: %s", (icon_path.string()).c_str());
         return ORBIS_NP_TROPHY_ERROR_ICON_FILE_NOT_FOUND;
     }
 
@@ -707,7 +710,7 @@ int PS4_SYSV_ABI sceNpTrophyGetTrophyIcon(OrbisNpTrophyContext context, OrbisNpT
 int PS4_SYSV_ABI sceNpTrophyGetTrophyInfo(OrbisNpTrophyContext context, OrbisNpTrophyHandle handle,
                                           OrbisNpTrophyId trophyId, OrbisNpTrophyDetails* details,
                                           OrbisNpTrophyData* data) {
-    LOG_INFO(Lib_NpTrophy, "Getting trophy info for id {}", trophyId);
+    LOG_INFO(Lib_NpTrophy, "Getting trophy info for id %d", trophyId);
 
     if (context == ORBIS_NP_TROPHY_INVALID_CONTEXT)
         return ORBIS_NP_TROPHY_ERROR_INVALID_CONTEXT;
@@ -739,7 +742,7 @@ int PS4_SYSV_ABI sceNpTrophyGetTrophyInfo(OrbisNpTrophyContext context, OrbisNpT
     const bool result = doc.Load(trophy_file);
 
     if (!result) {
-        LOG_ERROR(Lib_NpTrophy, "Failed to open trophy xml : {}",
+        LOG_ERROR(Lib_NpTrophy, "Failed to open trophy xml : %s",
                   "the file could not be read or parsed");
         return ORBIS_OK;
     }
@@ -767,7 +770,7 @@ int PS4_SYSV_ABI sceNpTrophyGetTrophyInfo(OrbisNpTrophyContext context, OrbisNpT
     const bool save_result = save_doc.Load(ctx.xml_save_file);
 
     if (!save_result) {
-        LOG_ERROR(Lib_NpTrophy, "Failed to parse user trophy xml : {}",
+        LOG_ERROR(Lib_NpTrophy, "Failed to parse user trophy xml : %s",
                   "the file could not be read or parsed");
         return ORBIS_OK;
     }
@@ -838,7 +841,7 @@ s32 PS4_SYSV_ABI sceNpTrophyGetTrophyUnlockState(OrbisNpTrophyContext context,
     const bool result = doc.Load(trophy_file);
 
     if (!result) {
-        LOG_ERROR(Lib_NpTrophy, "Failed to open trophy XML: {}",
+        LOG_ERROR(Lib_NpTrophy, "Failed to open trophy XML: %s",
                   "the file could not be read or parsed");
         *count = 0;
         return ORBIS_OK;
@@ -918,14 +921,14 @@ int PS4_SYSV_ABI sceNpTrophyRegisterContext(OrbisNpTrophyContext context,
         // A copy of a game without a readable npbind.dat: it has no trophies here, which is
         // not a reason for the game to put an error on screen. Its trophy files are not found
         // either, as above, and there is nothing to bring over from shadNet.
-        LOG_ERROR(Lib_NpTrophy, "No npCommId found for trophy index/service_label: {}",
+        LOG_ERROR(Lib_NpTrophy, "No npCommId found for trophy index/service_label: %u",
                   ctx.service_label);
         ctx.registered = true;
         return ORBIS_OK;
     }
 
     ctx.registered = true;
-    LOG_INFO(Lib_NpTrophy, "Context {} registered", context);
+    LOG_INFO(Lib_NpTrophy, "Context %d registered", context);
 
     // Sync with shadNet
     {
@@ -935,7 +938,7 @@ int PS4_SYSV_ABI sceNpTrophyRegisterContext(OrbisNpTrophyContext context,
             [save_file](const std::vector<std::pair<s32, u64>>& merged) {
                 const u32 applied = ApplyServerTrophies(save_file, merged);
                 if (applied > 0) {
-                    LOG_INFO(Lib_NpTrophy, "Applied {} trophies from shadNet", applied);
+                    LOG_INFO(Lib_NpTrophy, "Applied %u trophies from shadNet", applied);
                 }
             });
     }
@@ -945,7 +948,7 @@ int PS4_SYSV_ABI sceNpTrophyRegisterContext(OrbisNpTrophyContext context,
 
 int PS4_SYSV_ABI sceNpTrophyUnlockTrophy(OrbisNpTrophyContext context, OrbisNpTrophyHandle handle,
                                          OrbisNpTrophyId trophyId, OrbisNpTrophyId* platinumId) {
-    LOG_INFO(Lib_NpTrophy, "Unlocking trophy id {}", trophyId);
+    LOG_INFO(Lib_NpTrophy, "Unlocking trophy id %d", trophyId);
 
     if (context == ORBIS_NP_TROPHY_INVALID_CONTEXT)
         return ORBIS_NP_TROPHY_ERROR_INVALID_CONTEXT;
@@ -982,7 +985,7 @@ int PS4_SYSV_ABI sceNpTrophyUnlockTrophy(OrbisNpTrophyContext context, OrbisNpTr
     const bool save_result = save_doc.Load(ctx.xml_save_file);
 
     if (!save_result) {
-        LOG_ERROR(Lib_NpTrophy, "Failed to parse user trophy xml : {}",
+        LOG_ERROR(Lib_NpTrophy, "Failed to parse user trophy xml : %s",
                   "the file could not be read or parsed");
         return ORBIS_OK;
     }
@@ -1007,7 +1010,7 @@ int PS4_SYSV_ABI sceNpTrophyUnlockTrophy(OrbisNpTrophyContext context, OrbisNpTr
     const bool result = doc.Load(ctx.xml_save_file);
 
     if (!result) {
-        LOG_ERROR(Lib_NpTrophy, "Failed to parse trophy xml : {}",
+        LOG_ERROR(Lib_NpTrophy, "Failed to parse trophy xml : %s",
                   "the file could not be read or parsed");
         return ORBIS_NP_TROPHY_ERROR_TITLE_NOT_FOUND;
     }
@@ -1015,7 +1018,8 @@ int PS4_SYSV_ABI sceNpTrophyUnlockTrophy(OrbisNpTrophyContext context, OrbisNpTr
     Common::Xml::Document lang_doc;
     const bool has_lang_doc = lang_doc.Load(trophy_file);
     if (!has_lang_doc) {
-        LOG_ERROR(Lib_NpTrophy, "Failed to parse localized trophy xml : {}", trophy_file.string());
+        LOG_ERROR(Lib_NpTrophy, "Failed to parse localized trophy xml : %s",
+                  (trophy_file.string()).c_str());
     }
 
     const auto get_localized_name = [&](int id, const Common::Xml::Node& fallback) -> std::string {
@@ -1077,7 +1081,8 @@ int PS4_SYSV_ABI sceNpTrophyUnlockTrophy(OrbisNpTrophyContext context, OrbisNpTr
             trophy_name = get_localized_name(current_trophy_id, node);
             trophy_type = current_trophy_type;
 
-            const std::string icon_file = fmt::format("TROP{:03d}.PNG", current_trophy_id);
+            const std::string icon_file =
+                Common::StringFromFormat("TROP%03d.PNG", current_trophy_id);
             trophy_icon_path = ctx.icons_dir / icon_file;
         }
     }
@@ -1105,7 +1110,8 @@ int PS4_SYSV_ABI sceNpTrophyUnlockTrophy(OrbisNpTrophyContext context, OrbisNpTr
             platinum_timestamp = trophy_timestamp; // same second is fine
             platinum_name = get_localized_name(platinum_id, platinum_node);
 
-            const std::string plat_icon_file = fmt::format("TROP{:03d}.PNG", platinum_id);
+            const std::string plat_icon_file =
+                Common::StringFromFormat("TROP%03d.PNG", platinum_id);
             platinum_icon_path = ctx.icons_dir / plat_icon_file;
 
             *platinumId = platinum_id;
@@ -1121,7 +1127,7 @@ int PS4_SYSV_ABI sceNpTrophyUnlockTrophy(OrbisNpTrophyContext context, OrbisNpTr
 
     ApplyUnlockToXmlFile(ctx.xml_save_file, trophyId, trophy_timestamp, unlock_platinum,
                          platinum_id, platinum_timestamp);
-    LOG_INFO(Lib_NpTrophy, "Trophy {} successfully saved.", trophyId);
+    LOG_INFO(Lib_NpTrophy, "Trophy %d successfully saved.", trophyId);
     auto& np = NpHandler::GetInstance();
     np.ReportTrophyUnlock(ctx.user_id, ctx.service_label, trophyId, trophy_timestamp);
     if (unlock_platinum) {

@@ -15,7 +15,6 @@
 #include <retro_atomic.h>
 #include <rthreads/retro_eventcount.h>
 #include "common/io_file.h"
-#include "common/logging/formatter.h"
 #include "common/logging/log.h"
 #include "common/path_util.h"
 #include "common/stop_thread.h"
@@ -35,8 +34,9 @@ static void CopyShareReadWrite(const std::filesystem::path& from, const std::fil
     // Through the VFS's copy, which clones each file where the file system can and otherwise
     // moves it without holding all of it
     if (!Common::FS::CopyAll(from, to)) {
-        LOG_ERROR(Lib_SaveData, "Backup: failed to copy {} to {}", fmt::UTF(from.u8string()),
-                  fmt::UTF(to.u8string()));
+        LOG_ERROR(Lib_SaveData, "Backup: failed to copy %s to %s",
+                  reinterpret_cast<const char*>((from.u8string()).c_str()),
+                  reinterpret_cast<const char*>((to.u8string()).c_str()));
     }
 }
 
@@ -126,16 +126,17 @@ static void BackupThreadBody() {
         }
         (void)retro_atomic_exchange_int(&g_backup_status, static_cast<int>(WorkerStatus::Running));
 
-        LOG_INFO(Lib_SaveData, "Backing up the following directory: {}",
-                 fmt::UTF(req.save_path.u8string()));
+        LOG_INFO(Lib_SaveData, "Backing up the following directory: %s",
+                 reinterpret_cast<const char*>((req.save_path.u8string()).c_str()));
         try {
             backup(req.save_path);
         } catch (const std::filesystem::filesystem_error& err) {
-            LOG_ERROR(Lib_SaveData, "Failed to backup {}: {}", fmt::UTF(req.save_path.u8string()),
+            LOG_ERROR(Lib_SaveData, "Failed to backup %s: %s",
+                      reinterpret_cast<const char*>((req.save_path.u8string()).c_str()),
                       err.what());
         }
-        LOG_DEBUG(Lib_SaveData, "Backing up the following directory: {} finished",
-                  fmt::UTF(req.save_path.u8string()));
+        LOG_DEBUG(Lib_SaveData, "Backing up the following directory: %s finished",
+                  reinterpret_cast<const char*>((req.save_path.u8string()).c_str()));
         g_backup_queue_mutex.Run([&] { g_backup_queue.front().done = true; });
         g_backup_queue_mutex.Run([&] {
             g_backup_queue.pop_front();
@@ -194,17 +195,18 @@ bool NewRequest(Libraries::UserService::OrbisUserServiceUserId user_id, std::str
             WorkerStatus::Waiting &&
         static_cast<WorkerStatus>(retro_atomic_load_seq_cst_int(&g_backup_status)) !=
             WorkerStatus::Running) {
-        LOG_ERROR(Lib_SaveData, "Called backup while status is {}. Backup request to {} ignored",
+        LOG_ERROR(Lib_SaveData, "Called backup while status is %s. Backup request to %s ignored",
                   enum_name(&enum_names_Libraries_SaveData_Backup_WorkerStatus,
                             static_cast<s64>(static_cast<WorkerStatus>(
                                 retro_atomic_load_seq_cst_int(&g_backup_status)))),
-                  fmt::UTF(save_path.u8string()));
+                  reinterpret_cast<const char*>((save_path.u8string()).c_str()));
         return false;
     }
     const bool queued = g_backup_queue_mutex.Run([&] {
         for (const auto& it : g_backup_queue) {
             if (it.dir_name == dir_name) {
-                LOG_TRACE(Lib_SaveData, "Backup request to {} ignored. Already queued", dir_name);
+                LOG_TRACE(Lib_SaveData, "Backup request to %.*s ignored. Already queued",
+                          static_cast<int>((dir_name).size()), (dir_name).data());
                 return false;
             }
         }
@@ -225,7 +227,8 @@ bool NewRequest(Libraries::UserService::OrbisUserServiceUserId user_id, std::str
 }
 
 bool Restore(const std::filesystem::path& save_path) {
-    LOG_INFO(Lib_SaveData, "Restoring backup for {}", fmt::UTF(save_path.u8string()));
+    LOG_INFO(Lib_SaveData, "Restoring backup for %s",
+             reinterpret_cast<const char*>((save_path.u8string()).c_str()));
     return g_backup_running_mutex.Run([&]() -> bool {
         if (!Common::FS::Exists(save_path) || !Common::FS::Exists(save_path / backup_dir)) {
             return false;

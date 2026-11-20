@@ -469,7 +469,7 @@ s32 SkylanderBackend::ControlTransfer(libusb_device_handle* dev_handle, u8 bmReq
         break;
     }
     default:
-        LOG_ERROR(Lib_Usbd, "Unhandled Skylander Portal Query: {}", data[0]);
+        LOG_ERROR(Lib_Usbd, "Unhandled Skylander Portal Query: %u", data[0]);
         break;
     }
     return expected_count;

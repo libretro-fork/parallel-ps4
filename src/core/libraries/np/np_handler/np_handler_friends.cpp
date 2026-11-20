@@ -25,7 +25,7 @@ std::optional<std::string> NpHandler::GetFriendNpid(s32 user_id, u32 index) cons
 }
 
 void NpHandler::OnFriendQuery(s32 user_id, const ShadNet::NotifyFriendQuery& n) {
-    LOG_INFO(NpHandler, "user_id={} FriendQuery from '{}'", user_id, n.fromNpid);
+    LOG_INFO(NpHandler, "user_id=%d FriendQuery from '%s'", user_id, (n.fromNpid).c_str());
     ShadNetNotify(OVL_SHADNET_FRIEND_REQUEST, "Friend request from " + n.fromNpid);
     m_mutex_friend_state.Run([&] {
         auto& st = m_friend_state[user_id];
@@ -37,7 +37,7 @@ void NpHandler::OnFriendQuery(s32 user_id, const ShadNet::NotifyFriendQuery& n) 
 }
 
 void NpHandler::OnFriendNew(s32 user_id, const ShadNet::NotifyFriendNew& n) {
-    LOG_INFO(NpHandler, "user_id={} FriendNew '{}' ({})", user_id, n.npid,
+    LOG_INFO(NpHandler, "user_id=%d FriendNew '%s' (%s)", user_id, (n.npid).c_str(),
              n.online ? "online" : "offline");
     ShadNetNotify(OVL_SHADNET_FRIEND_NEW, n.npid + " is now your friend");
     m_mutex_friend_state.Run([&] {
@@ -58,7 +58,7 @@ void NpHandler::OnFriendNew(s32 user_id, const ShadNet::NotifyFriendNew& n) {
 }
 
 void NpHandler::OnFriendLost(s32 user_id, const ShadNet::NotifyFriendLost& n) {
-    LOG_INFO(NpHandler, "user_id={} FriendLost '{}'", user_id, n.npid);
+    LOG_INFO(NpHandler, "user_id=%d FriendLost '%s'", user_id, (n.npid).c_str());
     ShadNetNotify(OVL_SHADNET_FRIEND_LOST, n.npid + " removed you as a friend");
     m_mutex_friend_state.Run([&] {
         auto& st = m_friend_state[user_id];
@@ -69,7 +69,7 @@ void NpHandler::OnFriendLost(s32 user_id, const ShadNet::NotifyFriendLost& n) {
 }
 
 void NpHandler::OnFriendStatus(s32 user_id, const ShadNet::NotifyFriendStatus& n) {
-    LOG_DEBUG(NpHandler, "user_id={} FriendStatus '{}' is {}", user_id, n.npid,
+    LOG_DEBUG(NpHandler, "user_id=%d FriendStatus '%s' is %s", user_id, (n.npid).c_str(),
               n.online ? "online" : "offline");
     if (n.online) {
         ShadNetNotify(OVL_SHADNET_ONLINE, n.npid + " is online");
@@ -100,7 +100,7 @@ void NpHandler::OnLoginResult(s32 user_id, const ShadNet::LoginResult& res) {
     snap.blocked = res.blocked;
     m_mutex_friend_state.Run([&] { m_friend_state[user_id] = std::move(snap); });
     LOG_INFO(NpHandler,
-             "user_id={} friend state seeded: {} friends, {} received, {} sent, {} blocked",
+             "user_id=%d friend state seeded: %zu friends, %zu received, %zu sent, %zu blocked",
              user_id, res.friends.size(), res.requestsReceived.size(), res.requestsSent.size(),
              res.blocked.size());
 
@@ -134,7 +134,7 @@ s32 NpHandler::SendFriendRequest(s32 user_id, const std::string& npid) {
         return ORBIS_NP_ERROR_SIGNED_OUT;
     }
     client->AddFriend(npid);
-    LOG_INFO(NpHandler, "user_id={} AddFriend '{}'", user_id, npid);
+    LOG_INFO(NpHandler, "user_id=%d AddFriend '%s'", user_id, (npid).c_str());
 
     return m_mutex_friend_state.Run([&]() -> s32 {
         auto& st = m_friend_state[user_id];
@@ -164,7 +164,7 @@ s32 NpHandler::RemoveFriend(s32 user_id, const std::string& npid) {
         return ORBIS_NP_ERROR_SIGNED_OUT;
     }
     client->RemoveFriend(npid);
-    LOG_INFO(NpHandler, "user_id={} RemoveFriend '{}'", user_id, npid);
+    LOG_INFO(NpHandler, "user_id=%d RemoveFriend '%s'", user_id, (npid).c_str());
 
     return m_mutex_friend_state.Run([&]() -> s32 {
         auto& st = m_friend_state[user_id];
@@ -196,7 +196,7 @@ s32 NpHandler::BlockUser(s32 user_id, const std::string& npid) {
         return ORBIS_NP_ERROR_SIGNED_OUT;
     }
     client->AddBlock(npid);
-    LOG_INFO(NpHandler, "user_id={} AddBlock '{}'", user_id, npid);
+    LOG_INFO(NpHandler, "user_id=%d AddBlock '%s'", user_id, (npid).c_str());
 
     return m_mutex_friend_state.Run([&]() -> s32 {
         auto& st = m_friend_state[user_id];
@@ -231,7 +231,7 @@ s32 NpHandler::UnblockUser(s32 user_id, const std::string& npid) {
         return ORBIS_NP_ERROR_SIGNED_OUT;
     }
     client->RemoveBlock(npid);
-    LOG_INFO(NpHandler, "user_id={} RemoveBlock '{}'", user_id, npid);
+    LOG_INFO(NpHandler, "user_id=%d RemoveBlock '%s'", user_id, (npid).c_str());
 
     return m_mutex_friend_state.Run([&]() -> s32 {
         auto& st = m_friend_state[user_id];

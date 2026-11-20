@@ -70,8 +70,8 @@ CommandPool::CommandPool(const Instance& instance, Semaphore* work_semaphore)
     };
     const vk::Device device = instance.GetDevice();
     auto [pool_result, pool] = device.createCommandPoolUnique(pool_create_info);
-    ASSERT_MSG(pool_result == vk::Result::eSuccess, "Failed to create command pool: {}",
-               vk::to_string(pool_result));
+    ASSERT_MSG(pool_result == vk::Result::eSuccess, "Failed to create command pool: %s",
+               (vk::to_string(pool_result)).c_str());
     cmd_pool = std::move(pool);
     SetObjectName(device, *cmd_pool, "CommandPool");
 }
@@ -93,7 +93,7 @@ void CommandPool::Allocate(std::size_t begin, std::size_t end) {
     ASSERT(result == vk::Result::eSuccess);
 
     for (std::size_t i = begin; i < end; ++i) {
-        SetObjectName(device, cmd_buffers[i], "CommandPool: Command Buffer {}", i);
+        SetObjectName(device, cmd_buffers[i], "CommandPool: Command Buffer %zu", i);
     }
 }
 
@@ -149,9 +149,9 @@ vk::DescriptorSet DescriptorHeap::Commit(vk::DescriptorSetLayout set_layout) {
     }
 
     // The pool has run out. Record current tick and place it in pending list.
-    ASSERT_MSG(result == vk::Result::eErrorOutOfPoolMemory ||
-                   result == vk::Result::eErrorFragmentedPool,
-               "Unexpected error during descriptor set allocation: {}", vk::to_string(result));
+    ASSERT_MSG(
+        result == vk::Result::eErrorOutOfPoolMemory || result == vk::Result::eErrorFragmentedPool,
+        "Unexpected error during descriptor set allocation: %s", (vk::to_string(result)).c_str());
     pending_pools.emplace_back(curr_pool, work_semaphore->CurrentTick());
     if (const auto [pool, tick] = pending_pools.front(); work_semaphore->IsFree(tick)) {
         curr_pool = pool;
@@ -159,7 +159,8 @@ vk::DescriptorSet DescriptorHeap::Commit(vk::DescriptorSetLayout set_layout) {
 
         const auto reset_result = device.resetDescriptorPool(curr_pool);
         ASSERT_MSG(reset_result == vk::Result::eSuccess,
-                   "Unexpected error resetting descriptor pool: {}", vk::to_string(reset_result));
+                   "Unexpected error resetting descriptor pool: %s",
+                   (vk::to_string(reset_result)).c_str());
     } else {
         CreateDescriptorPool();
     }
@@ -173,7 +174,8 @@ vk::DescriptorSet DescriptorHeap::Commit(vk::DescriptorSetLayout set_layout) {
     alloc_info.descriptorPool = curr_pool;
     result = device.allocateDescriptorSets(&alloc_info, sets);
     ASSERT_MSG(result == vk::Result::eSuccess,
-               "Unexpected error during descriptor set allocation {}", vk::to_string(result));
+               "Unexpected error during descriptor set allocation %s",
+               (vk::to_string(result)).c_str());
     batch->count = DescriptorSetBatch - 1;
     return sets[DescriptorSetBatch - 1];
 }
@@ -186,8 +188,8 @@ void DescriptorHeap::CreateDescriptorPool() {
         .pPoolSizes = pool_sizes.data(),
     };
     auto [pool_result, pool] = device.createDescriptorPool(pool_info);
-    ASSERT_MSG(pool_result == vk::Result::eSuccess, "Failed to create descriptor pool: {}",
-               vk::to_string(pool_result));
+    ASSERT_MSG(pool_result == vk::Result::eSuccess, "Failed to create descriptor pool: %s",
+               (vk::to_string(pool_result)).c_str());
     curr_pool = pool;
 }
 

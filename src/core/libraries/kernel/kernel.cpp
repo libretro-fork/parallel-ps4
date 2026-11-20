@@ -48,10 +48,12 @@ static PS4_SYSV_ABI void stack_chk_fail() {
     auto* linker = Common::Singleton<Core::Linker>::Instance();
     auto* mod = linker ? linker->FindByAddress(reinterpret_cast<VAddr>(caller)) : nullptr;
     if (mod) {
-        LOG_CRITICAL(Lib_Kernel, "called from {:p} (module: {}, offset: {:#x})", caller, mod->name,
-                     reinterpret_cast<VAddr>(caller) - mod->GetBaseAddress());
+        LOG_CRITICAL(Lib_Kernel, "called from 0x%llx (module: %s, offset: 0x%" PRIxPTR ")",
+                     static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(caller)),
+                     (mod->name).c_str(), reinterpret_cast<VAddr>(caller) - mod->GetBaseAddress());
     } else {
-        LOG_CRITICAL(Lib_Kernel, "called from {:p} (unknown module)", caller);
+        LOG_CRITICAL(Lib_Kernel, "called from 0x%llx (unknown module)",
+                     static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(caller)));
     }
     UNREACHABLE();
 }
@@ -119,7 +121,7 @@ s32 NativeToPosixErrno(s32 const e) {
         return POSIX_ETIMEDOUT;
         break;
     default:
-        LOG_WARNING(Kernel, "Unhandled errno {}", e);
+        LOG_WARNING(Kernel, "Unhandled errno %d", e);
         return e;
     }
 }
@@ -159,19 +161,19 @@ s32 PS4_SYSV_ABI kernel_ioctl(s32 fd, u64 cmd, VA_ARGS) {
     auto* h = Common::Singleton<Core::FileSys::HandleTable>::Instance();
     auto* file = h->GetFile(fd);
     if (file == nullptr) {
-        LOG_INFO(Lib_Kernel, "ioctl: fd = {:X} cmd = {:X} file == nullptr", fd, cmd);
+        LOG_INFO(Lib_Kernel, "ioctl: fd = %X cmd = %" PRIX64 " file == nullptr", fd, cmd);
         g_posix_errno = POSIX_EBADF;
         return -1;
     }
     if (static_cast<Core::FileSys::FileType>(retro_atomic_load_seq_cst_int(&file->type)) !=
         Core::FileSys::FileType::Device) {
-        LOG_WARNING(Lib_Kernel, "ioctl: fd = {:X} cmd = {:X} file->type != Device", fd, cmd);
+        LOG_WARNING(Lib_Kernel, "ioctl: fd = %X cmd = %" PRIX64 " file->type != Device", fd, cmd);
         g_posix_errno = ENOTTY;
         return -1;
     }
     VA_CTX(ctx);
     s32 result = file->device->ioctl(cmd, &ctx);
-    LOG_TRACE(Lib_Kernel, "ioctl: fd = {:X} cmd = {:X} result = {}", fd, cmd, result);
+    LOG_TRACE(Lib_Kernel, "ioctl: fd = %X cmd = %" PRIX64 " result = %d", fd, cmd, result);
     if (result < 0) {
         ErrSceToPosix(result);
         return -1;
@@ -210,7 +212,7 @@ s32 PS4_SYSV_ABI sceKernelGetAllowedSdkVersionOnSystem(s32* ver) {
     }
     // Returns the highest game SDK version this PS4 allows.
     *ver = CURRENT_FIRMWARE_VERSION | 0xfff;
-    LOG_INFO(Lib_Kernel, "called, returned sw version: {}", *ver);
+    LOG_INFO(Lib_Kernel, "called, returned sw version: %d", *ver);
     return ORBIS_OK;
 }
 
@@ -222,7 +224,7 @@ s32 PS4_SYSV_ABI sceKernelGetSystemSwVersion(SwVersionStruct* ret) {
     ret->hex_representation = fake_fw;
     std::snprintf(ret->text_representation, 28, "%2x.%03x.%03x", fake_fw >> 0x18,
                   fake_fw >> 0xc & 0xfff, fake_fw & 0xfff);
-    LOG_INFO(Lib_Kernel, "called, returned sw version: {}", ret->text_representation);
+    LOG_INFO(Lib_Kernel, "called, returned sw version: %s", ret->text_representation);
     return ORBIS_OK;
 }
 
@@ -235,7 +237,7 @@ const char** PS4_SYSV_ABI getargv() {
 }
 
 s32 PS4_SYSV_ABI get_authinfo(s32 pid, AuthInfoData* p2) {
-    LOG_WARNING(Lib_Kernel, "(STUBBED) called, pid: {}", pid);
+    LOG_WARNING(Lib_Kernel, "(STUBBED) called, pid: %d", pid);
     if (p2 == nullptr) {
         *Kernel::__Error() = POSIX_EPERM;
         return -1;
@@ -251,7 +253,7 @@ s32 PS4_SYSV_ABI get_authinfo(s32 pid, AuthInfoData* p2) {
 }
 
 s32 PS4_SYSV_ABI sceKernelGetAppInfo(s32 pid, OrbisKernelAppInfo* app_info) {
-    LOG_WARNING(Lib_Kernel, "(STUBBED) called, pid: {}", pid);
+    LOG_WARNING(Lib_Kernel, "(STUBBED) called, pid: %d", pid);
     if (pid != GLOBAL_PID) {
         return ORBIS_KERNEL_ERROR_EPERM;
     }
@@ -268,7 +270,7 @@ s32 PS4_SYSV_ABI sceKernelGetAppInfo(s32 pid, OrbisKernelAppInfo* app_info) {
 
 s32 PS4_SYSV_ABI sceKernelTitleWorkaroundIsEnabled(OrbisKernelTitleWorkaround* tw, s32 bit,
                                                    s32* result) {
-    LOG_ERROR(Lib_Kernel, "(STUBBED) called, bit {:#x}", bit);
+    LOG_ERROR(Lib_Kernel, "(STUBBED) called, bit 0x%x", bit);
     if (!tw || !result) {
         return ORBIS_KERNEL_ERROR_EFAULT;
     }
@@ -284,7 +286,7 @@ s32 PS4_SYSV_ABI sceKernelTitleWorkaroundIsEnabled(OrbisKernelTitleWorkaround* t
 }
 
 s32 PS4_SYSV_ABI sceKernelGetProcessType(s32 pid) {
-    LOG_DEBUG(Lib_Kernel, "called, pid: {}", pid);
+    LOG_DEBUG(Lib_Kernel, "called, pid: %d", pid);
     if (pid != GLOBAL_PID && pid != -1 && pid != 0) {
         return ORBIS_KERNEL_ERROR_ESRCH;
     }
@@ -292,12 +294,13 @@ s32 PS4_SYSV_ABI sceKernelGetProcessType(s32 pid) {
 }
 
 s32 PS4_SYSV_ABI __sys_regmgr_call(u32 op, u32 key, void* result, void* value, u64 len) {
-    LOG_ERROR(Lib_Kernel, "(STUBBED) called, op: {:#x}, key: {}, len: {}", op, key, len);
+    LOG_ERROR(Lib_Kernel, "(STUBBED) called, op: 0x%x, key: %u, len: %" PRIu64, op, key, len);
     return ORBIS_OK;
 }
 
 s32 PS4_SYSV_ABI sceKernelGetOpenPsId(void* psid) {
-    LOG_TRACE(Lib_Kernel, "called, psid = {}", fmt::ptr(psid));
+    LOG_TRACE(Lib_Kernel, "called, psid = 0x%llx",
+              static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(psid)));
     if (!psid) {
         return POSIX_EINVAL;
     }
@@ -422,7 +425,7 @@ u64 PS4_SYSV_ABI posix_sysconf(s32 name) {
     case POSIX_SC_PAGESIZE:
         return posix_getpagesize();
     default:
-        LOG_ERROR(Lib_Kernel, "unhandled {}", name);
+        LOG_ERROR(Lib_Kernel, "unhandled %d", name);
         return 0;
     }
 }

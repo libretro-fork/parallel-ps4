@@ -101,7 +101,7 @@ constexpr vk::Format SurfaceFormat(AmdGpu::DataFormat data_format,
     vk::Format result = surface_format_table[GetSurfaceFormatTableIndex(data_format, num_format)];
     bool found =
         result != vk::Format::eUndefined || data_format == AmdGpu::DataFormat::FormatInvalid;
-    ASSERT_MSG(found, "Unknown data_format={} and num_format={}", static_cast<u32>(data_format),
+    ASSERT_MSG(found, "Unknown data_format=%u and num_format=%u", static_cast<u32>(data_format),
                static_cast<u32>(num_format));
     return result;
 }
@@ -139,7 +139,7 @@ static inline vk::Format PromoteFormatToDepth(vk::Format fmt) {
     } else if (fmt == vk::Format::eR16Unorm) {
         return vk::Format::eD16Unorm;
     }
-    UNREACHABLE_MSG("Unexpected depth format {}", vk::to_string(fmt));
+    UNREACHABLE_MSG("Unexpected depth format %s", (vk::to_string(fmt)).c_str());
 }
 
 } // namespace Vulkan::LiverpoolToVK

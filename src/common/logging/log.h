@@ -4,8 +4,10 @@
 #pragma once
 
 #include <array>
+#include <cinttypes>
+#include <cstdarg>
 #include <cstdint>
-#include <fmt/base.h>
+#include <string_view>
 
 #include "common/logging/classes.h"
 
@@ -37,18 +39,26 @@ void UpdateLogFlushLevel(std::string_view log_flush_level);
     return level == Level::Critical || level >= g_class_levels[static_cast<std::size_t>(log_class)];
 }
 
-void VLog(Class log_class, Level level, const char* file, int line, const char* func,
-          fmt::string_view format, fmt::format_args args);
+// A printf format: the compiler checks each argument against it
+#if defined(__MINGW32__)
+#define SHAD_PRINTF(format_index, first_arg)                                                       \
+    __attribute__((format(gnu_printf, format_index, first_arg)))
+#elif defined(__GNUC__) || defined(__clang__)
+#define SHAD_PRINTF(format_index, first_arg)                                                       \
+    __attribute__((format(printf, format_index, first_arg)))
+#else
+#define SHAD_PRINTF(format_index, first_arg)
+#endif
 
-template <typename... Args>
+void VLog(Class log_class, Level level, const char* file, int line, const char* func,
+          const char* format, va_list args);
+
 void Log(Class log_class, Level level, const char* file, int line, const char* func,
-         fmt::format_string<Args...> format, Args&&... args) {
-    VLog(log_class, level, file, line, func, format, fmt::make_format_args(args...));
-}
+         const char* format, ...) SHAD_PRINTF(6, 7);
 
 } // namespace Common::Log
 
-// Define the fmt lib macros
+// The log macros: a printf format and its arguments
 #define LOG_GENERIC_AT(log_class, log_level, func, ...)                                            \
     do {                                                                                           \
         if (Common::Log::ShouldLog(Common::Log::Class::log_class, log_level)) {                    \

@@ -11,10 +11,9 @@
 #include <string>
 #include <utility>
 
-#include <fmt/format.h>
-
 #include "common/combiner.h"
 #include "common/logging/log.h"
+#include "common/string_util.h"
 #include "core/libraries/net/net.h"
 #include "core/libraries/net/net_error.h"
 #include "core/libraries/net/net_log.h"
@@ -207,7 +206,7 @@ std::string ErrnoName(int orbis_errno) {
     const auto* it =
         std::find_if(std::begin(ErrnoNames), std::end(ErrnoNames),
                      [&](const ErrnoEntry& entry) { return entry.value == orbis_errno; });
-    return it != std::end(ErrnoNames) ? it->name : fmt::format("E{}", orbis_errno);
+    return it != std::end(ErrnoNames) ? it->name : Common::StringFromFormat("E%d", orbis_errno);
 }
 
 std::string ErrorCodeName(s32 code) {
@@ -215,29 +214,33 @@ std::string ErrorCodeName(s32 code) {
     if ((u & 0xffffff00u) == static_cast<u32>(ORBIS_NET_ERROR_BASE)) {
         return ErrnoName(static_cast<int>(u & 0xff));
     }
-    return fmt::format("{:#x}", u);
+    return Common::StringFromFormat("0x%x", u);
 }
 
 void LogFailure(int orbis_errno, const std::source_location& where) {
     const std::string_view function = ShortName(where.function_name());
     const Severity severity = SeverityOf(orbis_errno);
     if (severity == Severity::Routine) {
-        LOG_TRACE(Lib_Net, "{} failed: {}", function, ErrnoName(orbis_errno));
+        LOG_TRACE(Lib_Net, "%.*s failed: %s", static_cast<int>((function).size()),
+                  (function).data(), (ErrnoName(orbis_errno)).c_str());
         return;
     }
     const u64 count = CountFailure(function, orbis_errno);
     if (count > 16 && count % 1000 != 0) {
         return;
     }
-    const std::string repeat = count > 16 ? fmt::format(", {} times so far", count) : "";
+    const std::string repeat =
+        count > 16 ? Common::StringFromFormat(", %" PRIu64 " times so far", count) : "";
     std::string_view file = where.file_name();
     file.remove_prefix(std::min(file.size(), file.find_last_of("/\\") + 1));
     if (severity == Severity::Network) {
-        LOG_DEBUG(Lib_Net, "{} failed: {} ({}:{}{})", function, ErrnoName(orbis_errno), file,
-                  where.line(), repeat);
+        LOG_DEBUG(Lib_Net, "%.*s failed: %s (%.*s:%u%s)", static_cast<int>((function).size()),
+                  (function).data(), (ErrnoName(orbis_errno)).c_str(),
+                  static_cast<int>((file).size()), (file).data(), where.line(), (repeat).c_str());
     } else {
-        LOG_WARNING(Lib_Net, "{} failed: {} ({}:{}{})", function, ErrnoName(orbis_errno), file,
-                    where.line(), repeat);
+        LOG_WARNING(Lib_Net, "%.*s failed: %s (%.*s:%u%s)", static_cast<int>((function).size()),
+                    (function).data(), (ErrnoName(orbis_errno)).c_str(),
+                    static_cast<int>((file).size()), (file).data(), where.line(), (repeat).c_str());
     }
 }
 
@@ -290,7 +293,7 @@ void NoteP2PPeer(OrbisNetId s, bool sent, const OrbisNetSockaddr* addr, u32 len)
         })) {
         return;
     }
-    LOG_INFO(Lib_Net, "socket {}: first P2P packet {} {}", s, sent ? "to" : "from", text);
+    LOG_INFO(Lib_Net, "socket %d: first P2P packet %s %s", s, sent ? "to" : "from", (text).c_str());
 }
 
 void LogSocketClosed(OrbisNetId s) {
@@ -302,7 +305,9 @@ void LogSocketClosed(OrbisNetId s) {
             g_traffic.erase(it);
         }
     });
-    LOG_DEBUG(Lib_Net, "socket {} closed: sent {} bytes in {} calls, received {} bytes in {} calls",
+    LOG_DEBUG(Lib_Net,
+              "socket %d closed: sent %" PRIu64 " bytes in %" PRIu64 " calls, received %" PRIu64
+              " bytes in %" PRIu64 " calls",
               s, t.sent_bytes, t.sent_calls, t.received_bytes, t.received_calls);
 }
 
@@ -311,24 +316,27 @@ std::string FormatSockaddr(const OrbisNetSockaddr* addr, u32 len) {
         return "null";
     }
     if (len < 2) {
-        return fmt::format("(length {})", len);
+        return Common::StringFromFormat("(length %u)", len);
     }
     if (addr->sa_family == ORBIS_NET_AF_INET && len >= sizeof(OrbisNetSockaddrIn)) {
         OrbisNetSockaddrIn in;
         std::memcpy(&in, addr, sizeof(in));
         const u32 ip = sceNetNtohl(in.sin_addr);
-        std::string text = fmt::format("{}.{}.{}.{}:{}", ip >> 24, (ip >> 16) & 0xff,
-                                       (ip >> 8) & 0xff, ip & 0xff, sceNetNtohs(in.sin_port));
+        std::string text =
+            Common::StringFromFormat("%u.%u.%u.%u:%u", ip >> 24, (ip >> 16) & 0xff,
+                                     (ip >> 8) & 0xff, ip & 0xff, sceNetNtohs(in.sin_port));
         if (in.sin_vport != 0) {
-            text += fmt::format(" vport {}", sceNetNtohs(in.sin_vport));
+            text += Common::StringFromFormat(" vport %u", sceNetNtohs(in.sin_vport));
         }
         return text;
     }
     if (addr->sa_family == ORBIS_NET_AF_UNIX) {
         const char* path = reinterpret_cast<const char*>(addr) + 2;
-        return fmt::format("unix:{}", std::string_view{path, strnlen(path, len - 2)});
+        return Common::StringFromFormat(
+            "unix:%.*s", static_cast<int>((std::string_view{path, strnlen(path, len - 2)}).size()),
+            (std::string_view{path, strnlen(path, len - 2)}).data());
     }
-    return fmt::format("family {} (length {})", addr->sa_family, len);
+    return Common::StringFromFormat("family %u (length %u)", addr->sa_family, len);
 }
 
 std::string_view SocketTypeName(s32 type) {
@@ -503,12 +511,12 @@ std::string OptionName(s32 level, s32 name) {
         break;
     }
     if (level_name == nullptr) {
-        return fmt::format("level {:#x}/option {:#x}", level, name);
+        return Common::StringFromFormat("level 0x%x/option 0x%x", level, name);
     }
     if (option == nullptr) {
-        return fmt::format("{}/option {:#x}", level_name, name);
+        return Common::StringFromFormat("%s/option 0x%x", level_name, name);
     }
-    return fmt::format("{}/{}", level_name, option);
+    return Common::StringFromFormat("%s/%s", level_name, option);
 }
 
 std::string EpollEventsName(u32 events) {
@@ -526,7 +534,7 @@ std::string EpollEventsName(u32 events) {
         }
     }
     if (rest != 0) {
-        out += fmt::format("{}{:#x}", out.empty() ? "" : "|", rest);
+        out += Common::StringFromFormat("%s0x%x", out.empty() ? "" : "|", rest);
     }
     return out.empty() ? "0" : out;
 }

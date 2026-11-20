@@ -119,7 +119,7 @@ Program Decode(const u8* code) {
                 operand.imm = source.imm.value; // sign extended when signed
                 break;
             default:
-                UNREACHABLE_MSG("SRT walker operand type {}", static_cast<int>(source.type));
+                UNREACHABLE_MSG("SRT walker operand type %d", static_cast<int>(source.type));
             }
         }
         program.push_back(op);
@@ -309,7 +309,7 @@ struct Machine {
             case X64_MN_RET:
                 return;
             default:
-                UNREACHABLE_MSG("SRT walker instruction {} not interpreted",
+                UNREACHABLE_MSG("SRT walker instruction %s not interpreted",
                                 x64_mnemonic_name(op.mnemonic));
             }
         }

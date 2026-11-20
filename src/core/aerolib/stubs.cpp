@@ -38,11 +38,15 @@ static Common::Combiner g_stub_mutex;
 static u64 PS4_SYSV_ABI CommonStub(u64 index) {
     const auto& e = g_stub_entries[index];
     if (e.nid) {
-        LOG_ERROR(Core, "Stub: {} (nid: {}) called, returning zero to {}", e.nid->name, e.nid->nid,
-                  __builtin_return_address(0));
+        LOG_ERROR(Core, "Stub: %s (nid: %s) called, returning zero to 0x%llx", e.nid->name,
+                  e.nid->nid,
+                  static_cast<unsigned long long>(
+                      reinterpret_cast<uintptr_t>(__builtin_return_address(0))));
     } else {
-        LOG_ERROR(Core, "Stub: Unknown (nid: {}) called, returning zero to {}", e.nid_unknown,
-                  __builtin_return_address(0));
+        LOG_ERROR(Core, "Stub: Unknown (nid: %s) called, returning zero to 0x%llx",
+                  (e.nid_unknown).c_str(),
+                  static_cast<unsigned long long>(
+                      reinterpret_cast<uintptr_t>(__builtin_return_address(0))));
     }
     return 0;
 }

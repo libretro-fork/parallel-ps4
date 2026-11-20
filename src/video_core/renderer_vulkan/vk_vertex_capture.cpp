@@ -63,8 +63,8 @@ void Close() {
         filestream_close(file);
         file = nullptr;
     }
-    LOG_INFO(Render_Vulkan, "Vertex capture: {} draws, {} MiB, in vertex_capture.bin", draws,
-             written >> 20);
+    LOG_INFO(Render_Vulkan, "Vertex capture: %u draws, %" PRIu64 " MiB, in vertex_capture.bin",
+             draws, written >> 20);
     retro_atomic_store_release_int(&state, Idle);
 }
 
@@ -93,7 +93,7 @@ void OnSubmit() {
         file = filestream_open(path.string().c_str(), RETRO_VFS_FILE_ACCESS_WRITE,
                                RETRO_VFS_FILE_ACCESS_HINT_NONE);
         if (!file) {
-            LOG_ERROR(Render_Vulkan, "Vertex capture: cannot write {}", path.string());
+            LOG_ERROR(Render_Vulkan, "Vertex capture: cannot write %s", (path.string()).c_str());
             retro_atomic_store_release_int(&state, Idle);
             return;
         }

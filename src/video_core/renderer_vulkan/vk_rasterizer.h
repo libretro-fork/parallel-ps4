@@ -3,6 +3,10 @@
 
 #pragma once
 
+#include <cstdarg>
+#include <cstdint>
+#include <cstdio>
+
 #include "common/interval_set.h"
 #include "common/published.h"
 #include "video_core/buffer_cache/buffer_cache.h"
@@ -53,11 +57,28 @@ public:
     void DispatchDirect();
     void DispatchIndirect(VAddr address, u32 offset, u32 size);
 
-    void ScopeMarker(fmt::string_view fmt, fmt::format_args args, auto&& func) {
+    /// @func inside a scope marker named for the command at @address: @format holds one
+    /// 0x%llx for it (and before it a %u for @queue). Named only when host markers are on.
+    void ScopeMarker(const char* format, const void* address, auto&& func) {
         if (host_markers_enabled) {
             char text[MarkerBytes];
-            ScopeMarkerBegin(
-                MarkerText(text, fmt::vformat_to_n(text, sizeof(text) - 1, fmt, args).size));
+            const int n = std::snprintf(
+                text, sizeof(text), format,
+                static_cast<unsigned long long>(reinterpret_cast<std::uintptr_t>(address)));
+            ScopeMarkerBegin(MarkerText(text, n > 0 ? static_cast<std::size_t>(n) : 0));
+            func();
+            ScopeMarkerEnd();
+        } else {
+            func();
+        }
+    }
+    void ScopeMarker(const char* format, u32 queue, const void* address, auto&& func) {
+        if (host_markers_enabled) {
+            char text[MarkerBytes];
+            const int n = std::snprintf(
+                text, sizeof(text), format, queue,
+                static_cast<unsigned long long>(reinterpret_cast<std::uintptr_t>(address)));
+            ScopeMarkerBegin(MarkerText(text, n > 0 ? static_cast<std::size_t>(n) : 0));
             func();
             ScopeMarkerEnd();
         } else {
@@ -66,15 +87,7 @@ public:
     }
 
     /// A host marker's label made only when host markers are on, on the stack
-    template <typename... Args>
-    void HostMarkerBegin(fmt::format_string<Args...> fmt, Args&&... args) {
-        if (!host_markers_enabled) {
-            return;
-        }
-        char text[MarkerBytes];
-        ScopeMarkerBegin(MarkerText(
-            text, fmt::format_to_n(text, sizeof(text) - 1, fmt, std::forward<Args>(args)...).size));
-    }
+    void HostMarkerBegin(const char* format, ...) SHAD_PRINTF(2, 3);
 
     void ScopeMarkerBegin(const std::string_view& str, bool from_guest = false);
     static constexpr std::size_t MarkerBytes = 256;

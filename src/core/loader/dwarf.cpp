@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (C) 2001-2024 Free Software Foundation, Inc.
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include <cstring>
 #include "common/assert.h"
 #include "common/logging/log.h"
 #include "core/loader/dwarf.h"
@@ -128,15 +129,15 @@ bool DecodeEHHdr(uintptr_t ehHdrStart, uintptr_t ehHdrEnd, EHHeaderInfo& ehHdrIn
             return false;
         }
         LOG_ERROR(Core_Linker,
-                  "Unsupported .eh_frame_hdr at {:#x} "
-                  "need at least 4 bytes of data but only got {:#x}",
+                  "Unsupported .eh_frame_hdr at 0x%" PRIxPTR " "
+                  "need at least 4 bytes of data but only got 0x%" PRIxPTR,
                   ehHdrStart, ehHdrEnd - ehHdrStart);
         return false;
     }
 
     const u8 version = get<u8>(p++);
     if (version != 1) {
-        LOG_CRITICAL(Core_Linker, "Unsupported .eh_frame_hdr version: {:#x} at {:#x}", version,
+        LOG_CRITICAL(Core_Linker, "Unsupported .eh_frame_hdr version: 0x%x at 0x%" PRIxPTR, version,
                      ehHdrStart);
         return false;
     }

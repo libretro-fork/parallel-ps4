@@ -778,7 +778,7 @@ void NpHandler::OnTusReply(s32 user_id, ShadNet::CommandType cmd, u64 pkt_id,
     if (m_mutex_pending_tus.Run([&] {
             auto it = m_pending_tus.find(pkt_id);
             if (it == m_pending_tus.end()) {
-                LOG_WARNING(NpHandler, "no pending request for pkt_id={} cmd={}", pkt_id,
+                LOG_WARNING(NpHandler, "no pending request for pkt_id=%" PRIu64 " cmd=%d", pkt_id,
                             static_cast<int>(cmd));
                 return true;
             }
@@ -809,7 +809,7 @@ void NpHandler::OnTusReply(s32 user_id, ShadNet::CommandType cmd, u64 pkt_id,
         default:
             break;
         }
-        LOG_WARNING(NpHandler, "user_id={} pkt_id={} cmd={} server_error={} -> orbis {:#x}",
+        LOG_WARNING(NpHandler, "user_id=%d pkt_id=%" PRIu64 " cmd=%d server_error=%d -> orbis 0x%x",
                     user_id, pkt_id, static_cast<int>(cmd), static_cast<int>(error),
                     static_cast<u32>(orbis_err));
         req->SetResult(orbis_err);
@@ -818,7 +818,7 @@ void NpHandler::OnTusReply(s32 user_id, ShadNet::CommandType cmd, u64 pkt_id,
 
     auto parseTusBody = [&](auto& msg, Scratch& msg_scratch) -> bool {
         if (body.size() < 4) {
-            LOG_ERROR(NpHandler, "OnTusReply: cmd={} body too small ({})", static_cast<int>(cmd),
+            LOG_ERROR(NpHandler, "OnTusReply: cmd=%d body too small (%zu)", static_cast<int>(cmd),
                       body.size());
             return false;
         }
@@ -826,12 +826,12 @@ void NpHandler::OnTusReply(s32 user_id, ShadNet::CommandType cmd, u64 pkt_id,
                                (static_cast<u32>(body[2]) << 16) |
                                (static_cast<u32>(body[3]) << 24);
         if (static_cast<size_t>(4) + proto_size > body.size()) {
-            LOG_ERROR(NpHandler, "OnTusReply: cmd={} proto size {} exceeds body size {}",
+            LOG_ERROR(NpHandler, "OnTusReply: cmd=%d proto size %u exceeds body size %zu",
                       static_cast<int>(cmd), proto_size, body.size());
             return false;
         }
         if (!Decode(msg, body.data() + 4, proto_size, msg_scratch)) {
-            LOG_ERROR(NpHandler, "OnTusReply: cmd={} proto parse failed", static_cast<int>(cmd));
+            LOG_ERROR(NpHandler, "OnTusReply: cmd=%d proto parse failed", static_cast<int>(cmd));
             return false;
         }
         return true;
@@ -1068,7 +1068,7 @@ void NpHandler::OnTusReply(s32 user_id, ShadNet::CommandType cmd, u64 pkt_id,
     }
     default:
         // Set*/Delete* carry no payload to fill.
-        LOG_DEBUG(NpHandler, "cmd={} ok (no payload)", static_cast<int>(cmd));
+        LOG_DEBUG(NpHandler, "cmd=%d ok (no payload)", static_cast<int>(cmd));
         break;
     }
     req->SetResult(ORBIS_OK);

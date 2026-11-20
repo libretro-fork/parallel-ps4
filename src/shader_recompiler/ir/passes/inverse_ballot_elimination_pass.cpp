@@ -87,7 +87,8 @@ void InverseBallotEliminationPass(IR::Program& program) {
                 inst->ReplaceUsesWithAndRemove(IR::Value{true});
             } else {
                 LOG_WARNING(Render_Recompiler,
-                            "Unhandled immediate argument {:#x} for InverseBallot", value.U64());
+                            "Unhandled immediate argument 0x%" PRIx64 " for InverseBallot",
+                            value.U64());
             }
             continue;
         }

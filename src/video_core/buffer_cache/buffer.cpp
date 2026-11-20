@@ -72,12 +72,12 @@ void UniqueBuffer::Create(vk::BufferCreateInfo& buffer_ci, MemoryType mem_type) 
         vk::Result result =
             allocator->CreateBuffer(buffer_ci, usage, with_bda, true, buffer, allocation);
         if (result == vk::Result::eErrorOutOfDeviceMemory) {
-            LOG_WARNING(Render_Vulkan, "Allocating buffer of size {} bytes over budget.",
+            LOG_WARNING(Render_Vulkan, "Allocating buffer of size %" PRIu64 " bytes over budget.",
                         buffer_ci.size);
             result = allocator->CreateBuffer(buffer_ci, usage, with_bda, false, buffer, allocation);
         }
-        ASSERT_MSG(result == vk::Result::eSuccess, "Failed allocating buffer with error {}",
-                   vk::to_string(result));
+        ASSERT_MSG(result == vk::Result::eSuccess, "Failed allocating buffer with error %s",
+                   (vk::to_string(result)).c_str());
     } else {
         // The libretro core's Buffer sets the flags itself where the device has no sparse
         // residency
@@ -122,7 +122,8 @@ Buffer::Buffer(const Vulkan::Instance& instance, VAddr cpu_addr_, u64 size_bytes
     if (!debug_name.empty()) {
         Vulkan::SetObjectName(device, Handle(), debug_name);
     } else {
-        Vulkan::SetObjectName(device, Handle(), "Buffer {:#x}:{:#x}", cpu_addr, size_bytes);
+        Vulkan::SetObjectName(device, Handle(), "Buffer 0x%" PRIxPTR ":0x%zx", cpu_addr,
+                              size_bytes);
     }
 
     if (mem_type != MemoryType::Sparse) {
@@ -165,8 +166,9 @@ StreamBuffer::StreamBuffer(const Vulkan::Instance& instance, Vulkan::Scheduler& 
       non_coherent_atom_size{instance.NonCoherentAtomSize()} {
     ReserveWatches(current_watches, WATCHES_INITIAL_RESERVE);
     ReserveWatches(previous_watches, WATCHES_INITIAL_RESERVE);
-    Vulkan::SetObjectName(instance.GetDevice(), Handle(), "StreamBuffer({}):{:#x}",
-                          BufferTypeName(mem_type), size_bytes);
+    Vulkan::SetObjectName(instance.GetDevice(), Handle(), "StreamBuffer(%.*s):0x%" PRIx64,
+                          static_cast<int>((BufferTypeName(mem_type)).size()),
+                          (BufferTypeName(mem_type)).data(), size_bytes);
 }
 
 bool StreamBuffer::PrepareMap(u64 size, u64 alignment, bool allow_wait) {

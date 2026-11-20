@@ -93,8 +93,11 @@ ImeDialogState::ImeDialogState()
 
 ImeDialogState::ImeDialogState(const OrbisImeDialogParam* param,
                                const OrbisImeParamExtended* extended) {
-    LOG_INFO(Lib_ImeDialog, "param={}, text_buffer={}", static_cast<const void*>(param),
-             static_cast<void*>(param ? param->input_text_buffer : nullptr));
+    LOG_INFO(Lib_ImeDialog, "param=0x%llx, text_buffer=0x%llx",
+             static_cast<unsigned long long>(
+                 reinterpret_cast<uintptr_t>(static_cast<const void*>(param))),
+             static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(
+                 static_cast<void*>(param ? param->input_text_buffer : nullptr))));
     if (!param) {
         LOG_ERROR(Lib_ImeDialog, "param==nullptr, returning without init");
         return;
@@ -117,20 +120,21 @@ ImeDialogState::ImeDialogState(const OrbisImeDialogParam* param,
     max_text_length = param->max_text_length;
     text_buffer = param->input_text_buffer;
     LOG_INFO(Lib_ImeDialog,
-             "ImeDialogState: option=0x{:X} (multiline={}, password={}, ext_kbd={}, fixed_pos={}, "
-             "over2k={}), enter_label={}, type={}",
-             static_cast<u32>(param->option), is_multi_line,
-             True(param->option & OrbisImeOption::PASSWORD),
-             True(param->option & OrbisImeOption::EXT_KEYBOARD),
-             True(param->option & OrbisImeOption::FIXED_POSITION),
-             True(param->option & OrbisImeOption::USE_OVER_2K_COORDINATES),
+             "ImeDialogState: option=0x%X (multiline=%s, password=%s, ext_kbd=%s, fixed_pos=%s, "
+             "over2k=%s), enter_label=%u, type=%u",
+             static_cast<u32>(param->option), (is_multi_line) ? "true" : "false",
+             (True(param->option & OrbisImeOption::PASSWORD)) ? "true" : "false",
+             (True(param->option & OrbisImeOption::EXT_KEYBOARD)) ? "true" : "false",
+             (True(param->option & OrbisImeOption::FIXED_POSITION)) ? "true" : "false",
+             (True(param->option & OrbisImeOption::USE_OVER_2K_COORDINATES)) ? "true" : "false",
              static_cast<u32>(enter_label), static_cast<u32>(type));
     LOG_DEBUG(Lib_ImeDialog,
-              "ImeDialogState: user_id={}, type={}, enter_label={}, multiline={}, numeric={}, "
-              "max_len={}, text_filter={}, keyboard_filter={}",
+              "ImeDialogState: user_id=%u, type=%u, enter_label=%u, multiline=%s, numeric=%s, "
+              "max_len=%u, text_filter=0x%llx, keyboard_filter=0x%llx",
               static_cast<u32>(user_id), static_cast<u32>(type), static_cast<u32>(enter_label),
-              is_multi_line, is_numeric, max_text_length, (void*)text_filter,
-              (void*)keyboard_filter);
+              (is_multi_line) ? "true" : "false", (is_numeric) ? "true" : "false", max_text_length,
+              static_cast<unsigned long long>(reinterpret_cast<uintptr_t>((void*)text_filter)),
+              static_cast<unsigned long long>(reinterpret_cast<uintptr_t>((void*)keyboard_filter)));
 
     if (param->title) {
         std::size_t title_len = std::char_traits<char16_t>::length(param->title);
@@ -188,7 +192,7 @@ ImeDialogState::ImeDialogState(const OrbisImeDialogParam* param,
     } else {
         (void)sceImeDialogGetPanelSize(param, &panel_req_width, &panel_req_height);
     }
-    LOG_DEBUG(Lib_ImeDialog, "ImeDialogState: initial_text_len={}", current_text.size());
+    LOG_DEBUG(Lib_ImeDialog, "ImeDialogState: initial_text_len=%zu", current_text.size());
 }
 
 ImeDialogState::ImeDialogState(ImeDialogState&& other) noexcept
@@ -265,7 +269,7 @@ bool ImeDialogState::CopyTextToOrbisBuffer(bool use_original) {
     const std::size_t utf8_len = current_text.size();
     const bool ok = ConvertUTF8ToOrbis(current_text.begin(), utf8_len, text_buffer,
                                        static_cast<std::size_t>(max_text_length) + 1);
-    LOG_DEBUG(Lib_ImeDialog, "CopyTextToOrbisBuffer: {}", ok ? "ok" : "failed");
+    LOG_DEBUG(Lib_ImeDialog, "CopyTextToOrbisBuffer: %s", ok ? "ok" : "failed");
     return ok;
 }
 
@@ -493,7 +497,7 @@ void ImeDialogUi::FinishDialog(OrbisImeDialogEndStatus endstatus, bool restore_o
     state->CopyTextToOrbisBuffer(restore_original);
     *status = OrbisImeDialogStatus::Finished;
     result->endstatus = endstatus;
-    LOG_INFO(Lib_ImeDialog, "ImeDialog {} -> status=Finished", reason ? reason : "Done");
+    LOG_INFO(Lib_ImeDialog, "ImeDialog %s -> status=Finished", reason ? reason : "Done");
     Free();
 }
 
@@ -880,9 +884,9 @@ void ImeDialogUi::Draw() {
             const float req_h = has_layout ? static_cast<float>(layout.height)
                                            : static_cast<float>(state->panel_req_height);
             LOG_INFO(Lib_ImeDialog,
-                     "ImeDialog UI metrics: game_res={}x{}, out_res={}x{}, viewport_pos=({}, {}), "
-                     "viewport_size=({}, {}), base={}x{}, scale=({:.4f}, {:.4f}), "
-                     "panel_req=({}, {}), panel_scaled=({}, {})",
+                     "ImeDialog UI metrics: game_res=%ux%u, out_res=%ux%u, viewport_pos=(%g, %g), "
+                     "viewport_size=(%g, %g), base=%gx%g, scale=(%.4f, %.4f), "
+                     "panel_req=(%g, %g), panel_scaled=(%g, %g)",
                      game_res.first, game_res.second, out_res.first, out_res.second,
                      viewport_offset.x, viewport_offset.y, viewport_size.x, viewport_size.y,
                      viewport.base_w, viewport.base_h, scale_x, scale_y, req_w, req_h,
@@ -1542,8 +1546,8 @@ void ImeDialogUi::Draw() {
         ovl_dummy({metrics.kb_size.x, metrics.kb_size.y + metrics.padding_bottom});
 
         if (accept_pressed) {
-            LOG_INFO(Lib_ImeDialog, "ImeDialog OK text(len={}): \"{}\"", state->current_text.size(),
-                     state->current_text.begin());
+            LOG_INFO(Lib_ImeDialog, "ImeDialog OK text(len=%zu): \"%s\"",
+                     state->current_text.size(), state->current_text.begin());
             FinishDialog(OrbisImeDialogEndStatus::Ok, false, "OK");
         } else if (cancel_pressed) {
             FinishDialog(OrbisImeDialogEndStatus::UserCanceled, true, "Cancel");

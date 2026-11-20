@@ -49,7 +49,8 @@ public:
         retro_atomic_fetch_add_seq_cst_int(&releases, 1);
         s32 have = static_cast<s32>(retro_atomic_load_acquire_int(&count));
         for (;;) {
-            ASSERT_MSG(static_cast<s64>(have) < max, "Semaphore released past its maximum {}", max);
+            ASSERT_MSG(static_cast<s64>(have) < max, "Semaphore released past its maximum %" PRId64,
+                       max);
             if (retro_atomic_cas_int(&count, have, have + 1)) {
                 break;
             }

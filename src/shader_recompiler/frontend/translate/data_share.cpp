@@ -207,7 +207,7 @@ void Translator::DS_WRITE(int bit_size, bool is_signed, bool is_pair, bool strid
     const u32 offset = (inst.control.ds.offset1 << 8u) + inst.control.ds.offset0;
     if (info.hw_stage == HwStage::Fragment) {
         ASSERT_MSG(!is_pair && bit_size == 32 && offset % 256 == 0,
-                   "Unexpected shared memory offset alignment: {}", offset);
+                   "Unexpected shared memory offset alignment: %u", offset);
         ir.SetVectorReg(GetScratchVgpr(offset), ir.GetVectorReg(data0));
         return;
     }
@@ -257,7 +257,7 @@ void Translator::DS_READ(int bit_size, bool is_signed, bool is_pair, bool stride
     const u32 offset = (inst.control.ds.offset1 << 8u) + inst.control.ds.offset0;
     if (info.hw_stage == HwStage::Fragment) {
         ASSERT_MSG(!is_pair && bit_size == 32 && offset % 256 == 0,
-                   "Unexpected shared memory offset alignment: {}", offset);
+                   "Unexpected shared memory offset alignment: %u", offset);
         ir.SetVectorReg(dst_reg, ir.GetVectorReg(GetScratchVgpr(offset)));
         return;
     }

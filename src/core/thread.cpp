@@ -122,14 +122,14 @@ void NativeThread::Initialize() {
     sig_stack_ptr = TakeSigStack();
     if (sig_stack_ptr == nullptr) {
         ASSERT_MSG(posix_memalign(&sig_stack_ptr, page_size, sig_stack_size) == 0,
-                   "Failed to allocate signal stack: {}", errno);
+                   "Failed to allocate signal stack: %d", errno);
     }
 
     stack_t sig_stack;
     sig_stack.ss_sp = sig_stack_ptr;
     sig_stack.ss_size = sig_stack_size;
     sig_stack.ss_flags = 0;
-    ASSERT_MSG(sigaltstack(&sig_stack, nullptr) == 0, "Failed to set signal stack: {}", errno);
+    ASSERT_MSG(sigaltstack(&sig_stack, nullptr) == 0, "Failed to set signal stack: %d", errno);
 #endif
 }
 

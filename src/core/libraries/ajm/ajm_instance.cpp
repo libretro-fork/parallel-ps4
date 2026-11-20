@@ -43,7 +43,7 @@ AjmInstance::AjmInstance(AjmCodecType codec_type, AjmInstanceFlags flags) : m_fl
     }
     default:
         UNREACHABLE_MSG(
-            "Unimplemented codec type {}",
+            "Unimplemented codec type %s",
             enum_name(&enum_names_Libraries_Ajm_AjmCodecType, static_cast<s64>(codec_type)));
     }
 }
@@ -58,11 +58,11 @@ void AjmInstance::ExecuteJob(AjmJob& job) {
     const auto control_flags = job.flags.control_flags;
     job.output.p_result->result = 0;
     if (True(control_flags & AjmJobControlFlags::Reset)) {
-        LOG_TRACE(Lib_Ajm, "Resetting instance {}", job.instance_id);
+        LOG_TRACE(Lib_Ajm, "Resetting instance %u", job.instance_id);
         Reset();
     }
     if (job.input.init_params.has_value()) {
-        LOG_TRACE(Lib_Ajm, "Initializing instance {}", job.instance_id);
+        LOG_TRACE(Lib_Ajm, "Initializing instance %u", job.instance_id);
         auto& params = job.input.init_params.value();
         m_codec->Initialize(&params, sizeof(params));
     }
@@ -120,7 +120,7 @@ void AjmInstance::ExecuteJob(AjmJob& job) {
                 m_total_samples = 0;
             }
             if (!HasEnoughSpace(out_buf)) {
-                LOG_TRACE(Lib_Ajm, "ORBIS_AJM_RESULT_NOT_ENOUGH_ROOM ({} < {})", out_buf.Size(),
+                LOG_TRACE(Lib_Ajm, "ORBIS_AJM_RESULT_NOT_ENOUGH_ROOM (%zu < %u)", out_buf.Size(),
                           m_codec->GetNextFrameSize(m_gapless));
                 job.output.p_result->result |= ORBIS_AJM_RESULT_NOT_ENOUGH_ROOM;
             }

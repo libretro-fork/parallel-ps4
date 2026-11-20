@@ -11,11 +11,11 @@
 #endif
 
 #include <vector>
-#include <fmt/ranges.h>
 
 #include "common/assert.h"
 #include "common/logging/log.h"
 #include "common/path_util.h"
+#include "common/string_util.h"
 #include "core/emulator_settings.h"
 #include "video_core/renderer_vulkan/vk_platform.h"
 
@@ -44,7 +44,7 @@ static VKAPI_ATTR VkBool32 VKAPI_CALL DebugUtilsCallback(
         level = Common::Log::Level::Info;
     }
 
-    LOG_GENERIC(Render_Vulkan, level, "{}: {}",
+    LOG_GENERIC(Render_Vulkan, level, "%s: %s",
                 callback_data->pMessageIdName ? callback_data->pMessageIdName : "<null>",
                 callback_data->pMessage ? callback_data->pMessage : "<null>");
 
@@ -59,8 +59,8 @@ static auto GetLayerExtensions(std::vector<const char*>&& extensions,
         const auto [layer_properties_result, layer_extensions] =
             vk::enumerateInstanceExtensionProperties(std::string(layer_name));
         if (layer_properties_result != vk::Result::eSuccess) {
-            LOG_ERROR(Render_Vulkan, "Failed to query extension properties of {}: {}", layer_name,
-                      vk::to_string(layer_properties_result));
+            LOG_ERROR(Render_Vulkan, "Failed to query extension properties of %s: %s", layer_name,
+                      (vk::to_string(layer_properties_result)).c_str());
         }
         auto found = false;
         for (const auto& extension : layer_extensions) {
@@ -71,7 +71,7 @@ static auto GetLayerExtensions(std::vector<const char*>&& extensions,
             }
         }
         if (!found) {
-            LOG_ERROR(Render_Vulkan, "Settings for layer {} not available.", layer_name);
+            LOG_ERROR(Render_Vulkan, "Settings for layer %s not available.", layer_name);
         }
     }
 
@@ -85,8 +85,8 @@ static auto GetLayerExtensions(std::vector<const char*>&& extensions,
 std::vector<const char*> GetInstanceExtensions(bool enable_debug_utils) {
     const auto [properties_result, properties] = vk::enumerateInstanceExtensionProperties();
     if (properties_result != vk::Result::eSuccess || properties.empty()) {
-        LOG_ERROR(Render_Vulkan, "Failed to query extension properties: {}",
-                  vk::to_string(properties_result));
+        LOG_ERROR(Render_Vulkan, "Failed to query extension properties: %s",
+                  (vk::to_string(properties_result)).c_str());
         return {};
     }
 
@@ -106,7 +106,7 @@ std::vector<const char*> GetInstanceExtensions(bool enable_debug_utils) {
             });
 
         if (it == properties.end()) {
-            LOG_INFO(Render_Vulkan, "Candidate instance extension {} is not available", extension);
+            LOG_INFO(Render_Vulkan, "Candidate instance extension %s is not available", extension);
             return true;
         }
         return false;
@@ -118,8 +118,8 @@ std::vector<const char*> GetInstanceExtensions(bool enable_debug_utils) {
 std::vector<const char*> GetInstanceLayers(bool enable_validation, bool enable_crash_diagnostic) {
     const auto [properties_result, properties] = vk::enumerateInstanceLayerProperties();
     if (properties_result != vk::Result::eSuccess || properties.empty()) {
-        LOG_ERROR(Render_Vulkan, "Failed to query layer properties: {}",
-                  vk::to_string(properties_result));
+        LOG_ERROR(Render_Vulkan, "Failed to query layer properties: %s",
+                  (vk::to_string(properties_result)).c_str());
         return {};
     }
 
@@ -139,7 +139,7 @@ std::vector<const char*> GetInstanceLayers(bool enable_validation, bool enable_c
             return std::strcmp(layer, prop.layerName) == 0;
         });
         if (it == properties.end()) {
-            LOG_ERROR(Render_Vulkan, "Requested layer {} is not available", layer);
+            LOG_ERROR(Render_Vulkan, "Requested layer %s is not available", layer);
             return true;
         }
         return false;
@@ -161,9 +161,10 @@ vk::UniqueInstance CreateInstance(bool enable_validation, bool enable_crash_diag
             ? vk::enumerateInstanceVersion()
             : vk::ResultValue(vk::Result::eSuccess, VK_API_VERSION_1_0);
     ASSERT_MSG(available_version_result == vk::Result::eSuccess,
-               "Failed to query Vulkan API version: {}", vk::to_string(available_version_result));
+               "Failed to query Vulkan API version: %s",
+               (vk::to_string(available_version_result)).c_str());
     ASSERT_MSG(available_version >= TargetVulkanApiVersion,
-               "Vulkan {}.{} is required, but only {}.{} is supported by instance!",
+               "Vulkan %u.%u is required, but only %u.%u is supported by instance!",
                VK_VERSION_MAJOR(TargetVulkanApiVersion), VK_VERSION_MINOR(TargetVulkanApiVersion),
                VK_VERSION_MAJOR(available_version), VK_VERSION_MINOR(available_version));
 
@@ -178,10 +179,18 @@ vk::UniqueInstance CreateInstance(bool enable_validation, bool enable_crash_diag
         .apiVersion = available_version,
     };
 
-    const std::string extensions_string = fmt::format("{}", fmt::join(extensions, ", "));
-    const std::string layers_string = fmt::format("{}", fmt::join(layers, ", "));
-    LOG_INFO(Render_Vulkan, "Enabled instance extensions: {}", extensions_string);
-    LOG_INFO(Render_Vulkan, "Enabled instance layers: {}", layers_string);
+    std::string extensions_string;
+    for (const auto& item : extensions) {
+        extensions_string += extensions_string.empty() ? "" : ", ";
+        extensions_string += item;
+    }
+    std::string layers_string;
+    for (const auto& item : layers) {
+        layers_string += layers_string.empty() ? "" : ", ";
+        layers_string += item;
+    }
+    LOG_INFO(Render_Vulkan, "Enabled instance extensions: %s", (extensions_string).c_str());
+    LOG_INFO(Render_Vulkan, "Enabled instance layers: %s", (layers_string).c_str());
 
     // Validation settings
     vk::Bool32 enable_core = emu_settings_get_vkvalidation_core_enabled() ? vk::True : vk::False;
@@ -296,8 +305,8 @@ vk::UniqueInstance CreateInstance(bool enable_validation, bool enable_crash_diag
     };
 
     auto [instance_result, instance] = vk::createInstanceUnique(instance_ci_chain.get());
-    ASSERT_MSG(instance_result == vk::Result::eSuccess, "Failed to create instance: {}",
-               vk::to_string(instance_result));
+    ASSERT_MSG(instance_result == vk::Result::eSuccess, "Failed to create instance: %s",
+               (vk::to_string(instance_result)).c_str());
 
     VULKAN_HPP_DEFAULT_DISPATCHER.init(*instance);
 
@@ -316,8 +325,8 @@ vk::UniqueDebugUtilsMessengerEXT CreateDebugCallback(vk::Instance instance) {
         .pfnUserCallback = DebugUtilsCallback,
     };
     auto [messenger_result, messenger] = instance.createDebugUtilsMessengerEXTUnique(msg_ci);
-    ASSERT_MSG(messenger_result == vk::Result::eSuccess, "Failed to create debug callback: {}",
-               vk::to_string(messenger_result));
+    ASSERT_MSG(messenger_result == vk::Result::eSuccess, "Failed to create debug callback: %s",
+               (vk::to_string(messenger_result)).c_str());
     return std::move(messenger);
 }
 

@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include "common/assert.h"
+#include "common/string_util.h"
 #include "core/libraries/kernel/process.h"
 #include "shader_recompiler/frontend/decode.h"
 
@@ -112,7 +113,7 @@ GcnInst GcnDecodeContext::decodeInstruction(GcnCodeSlice& code) {
     const uint32_t token = code.at(0);
 
     InstEncoding encoding = GetInstructionEncoding(token);
-    ASSERT_MSG(encoding != InstEncoding::ILLEGAL, "illegal encoding: {:#x}", token);
+    ASSERT_MSG(encoding != InstEncoding::ILLEGAL, "illegal encoding: 0x%x", token);
     uint32_t encodingLen = getEncodingLength(encoding);
 
     // Clear the instruction
@@ -266,7 +267,7 @@ void GcnDecodeContext::updateInstructionMeta(InstEncoding encoding) {
 
     ASSERT_MSG(instFormat.src_type != ScalarType::Undefined &&
                    instFormat.dst_type != ScalarType::Undefined,
-               "Instruction format table incomplete for opcode {} ({}, encoding = 0x{:x})",
+               "Instruction format table incomplete for opcode %s (%u, encoding = 0x%x)",
                enum_name(&enum_names_Shader_Gcn_Opcode, static_cast<s64>(m_instruction.opcode)),
                u32(m_instruction.opcode), u32(encoding));
 
@@ -533,9 +534,11 @@ void GcnDecodeContext::decodeDataParallelPrimitive(InstEncoding encoding, GcnCod
         auto op = dpp.GetOperation();
         LOG_ERROR(
             Render_Recompiler,
-            "unhandled DPP operation: {} ({:#x}), value {}, bc {}, row_mask {:#b}, bank_mask {:#b}",
+            "unhandled DPP operation: %s (0x%x), value %u, bc %s, row_mask 0b%s, bank_mask 0b%s",
             enum_name(&enum_names_Shader_Gcn_DppCtrl, static_cast<s64>(op.op)), u32(op.op),
-            op.value, bool(dpp.bc), u8(dpp.row_mask), u8(dpp.bank_mask));
+            static_cast<u32>(op.value), bool(dpp.bc) ? "true" : "false",
+            Common::BinaryText(u8(dpp.row_mask), 0).c_str(),
+            Common::BinaryText(u8(dpp.bank_mask), 0).c_str());
 
         m_instruction.src[0].dpp = op;
     }

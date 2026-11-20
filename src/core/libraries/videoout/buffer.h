@@ -43,7 +43,7 @@ constexpr std::string_view GetPixelFormatString(PixelFormat format) {
     case PixelFormat::A16R16G16B16Float:
         return "A16R16G16B16Float";
     default:
-        UNREACHABLE_MSG("Unknown pixel format {}", static_cast<u32>(format));
+        UNREACHABLE_MSG("Unknown pixel format %u", static_cast<u32>(format));
         return "";
     }
 }

@@ -173,9 +173,9 @@ s32 PS4_SYSV_ABI sceJpegEncEncode(OrbisJpegEncHandle handle, const OrbisJpegEncE
     }
 
     LOG_ERROR(Lib_Jpeg,
-              "(STUBBED) image_size = {} , jpeg_size = {} , image_width = {} , image_height = {} , "
-              "image_pitch = {} , pixel_format = {} , encode_mode = {} , color_space = {} , "
-              "sampling_type = {} , compression_ratio = {} , restart_interval = {}",
+              "(STUBBED) image_size = %u , jpeg_size = %u , image_width = %u , image_height = %u , "
+              "image_pitch = %u , pixel_format = %s , encode_mode = %s , color_space = %s , "
+              "sampling_type = %s , compression_ratio = %u , restart_interval = %d",
               param->image_size, param->jpeg_size, param->image_width, param->image_height,
               param->image_pitch,
               enum_name(&enum_names_Libraries_JpegEnc_OrbisJpegEncEncodeParamPixelFormat,

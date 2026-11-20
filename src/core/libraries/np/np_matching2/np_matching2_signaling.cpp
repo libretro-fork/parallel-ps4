@@ -70,8 +70,8 @@ bool SendMatching2StunPing(const ContextObject& ctx) {
     const int rc =
         NpSignaling::Transport::SignalingSendTo(&ping, sizeof(ping), server_addr, server_udp);
     LOG_DEBUG(Lib_NpMatching2,
-              "Matching2 STUN ping: ctx={} online_id='{}' server={:#x}:{} local_ip={:#x} rc={}",
-              ctx.ctx_id, OnlineIdToString(ctx.online_id), server_addr,
+              "Matching2 STUN ping: ctx=%u online_id='%s' server=0x%x:%u local_ip=0x%x rc=%d",
+              ctx.ctx_id, (OnlineIdToString(ctx.online_id)).c_str(), server_addr,
               Libraries::Net::sceNetNtohs(server_udp), ping.local_ip, rc);
     return rc >= 0;
 }
@@ -81,8 +81,8 @@ void QueueMatching2SignalingEvent(ContextObject& ctx, OrbisNpMatching2RoomId roo
                                   OrbisNpMatching2Event event, s32 error_code) {
     if (!ctx.signaling_callback) {
         LOG_ERROR(Lib_NpMatching2,
-                  "Event skipped: ctx={} room={} member={} event={:#x} no callback", ctx.ctx_id,
-                  room_id, member_id, static_cast<u16>(event));
+                  "Event skipped: ctx=%u room=%" PRIu64 " member=%u event=0x%x no callback",
+                  ctx.ctx_id, room_id, member_id, static_cast<u16>(event));
         return;
     }
 
@@ -124,7 +124,8 @@ void QueueMatching2DeadForRoomPeers(ContextObject& ctx, OrbisNpMatching2RoomId r
     for (const auto member_id : dead_members) {
         QueueMatching2SignalingEvent(ctx, room_id, member_id,
                                      ORBIS_NP_MATCHING2_SIGNALING_EVENT_DEAD, error_code);
-        LOG_INFO(Lib_NpMatching2, "Matching2 signaling dead: ctx={} room={} member={} reason={:#x}",
+        LOG_INFO(Lib_NpMatching2,
+                 "Matching2 signaling dead: ctx=%u room=%" PRIu64 " member=%u reason=0x%x",
                  ctx.ctx_id, room_id, member_id, static_cast<u32>(error_code));
     }
     SignalingHandler::StopMatching2(ctx, room_id, error_code);
@@ -207,7 +208,7 @@ s32 FillMatching2ConnectionInfo(const ContextObject& ctx, OrbisNpMatching2RoomId
     auto cache = NpHandler::GetInstance().LockMatching2Cache(ctx.ctx_id);
     const auto room_it = cache->rooms.find(roomId);
     if (room_it == cache->rooms.end()) {
-        LOG_INFO(Lib_NpMatching2, "room={} not cached for connection info", roomId);
+        LOG_INFO(Lib_NpMatching2, "room=%" PRIu64 " not cached for connection info", roomId);
         if (a_variant) {
             *static_cast<OrbisNpMatching2SignalingConnectionInfoA*>(connInfo) = {};
         } else {
@@ -254,7 +255,7 @@ s32 FillMatching2ConnectionInfo(const ContextObject& ctx, OrbisNpMatching2RoomId
             }
             break;
         default:
-            LOG_WARNING(Lib_NpMatching2, "unsupported connection info A type={}", infoType);
+            LOG_WARNING(Lib_NpMatching2, "unsupported connection info A type=%u", infoType);
             return ORBIS_NP_MATCHING2_SIGNALING_ERROR_INVALID_ARGUMENT;
         }
     } else {
@@ -289,12 +290,12 @@ s32 FillMatching2ConnectionInfo(const ContextObject& ctx, OrbisNpMatching2RoomId
             out->packetLoss = 0;
             break;
         default:
-            LOG_WARNING(Lib_NpMatching2, "unsupported connection info type={}", infoType);
+            LOG_WARNING(Lib_NpMatching2, "unsupported connection info type=%u", infoType);
             return ORBIS_NP_MATCHING2_SIGNALING_ERROR_INVALID_ARGUMENT;
         }
     }
 
-    LOG_INFO(Lib_NpMatching2, "connection info{}: ctx={} room={} member={} type={} rtt={}",
+    LOG_INFO(Lib_NpMatching2, "connection info%s: ctx=%u room=%" PRIu64 " member=%u type=%u rtt=%u",
              a_variant ? "A" : "", ctx.ctx_id, roomId, memberId, infoType,
              peer ? peer->ping_us : 0);
     return ORBIS_OK;
@@ -303,7 +304,7 @@ s32 FillMatching2ConnectionInfo(const ContextObject& ctx, OrbisNpMatching2RoomId
 s32 FillMatching2LocalNetInfo(void* info) {
     auto* out = static_cast<NpSignaling::OrbisNpSignalingNetInfo*>(info);
     if (!out || out->size != sizeof(NpSignaling::OrbisNpSignalingNetInfo)) {
-        LOG_ERROR(Lib_NpMatching2, "bad net info (size {})", out ? out->size : 0);
+        LOG_ERROR(Lib_NpMatching2, "bad net info (size %" PRIu64 ")", out ? out->size : 0);
         return ORBIS_NP_MATCHING2_ERROR_INVALID_ARGUMENT;
     }
 
@@ -330,7 +331,7 @@ s32 FillMatching2LocalNetInfo(void* info) {
     }
     out->_pad_14 = 0;
 
-    LOG_INFO(Lib_NpMatching2, "localAddr={:#x} mappedAddr={:#x} natStatus={}", out->localAddr,
+    LOG_INFO(Lib_NpMatching2, "localAddr=0x%x mappedAddr=0x%x natStatus=%d", out->localAddr,
              out->mappedAddr, out->natStatus);
     return ORBIS_OK;
 }

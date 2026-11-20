@@ -603,11 +603,11 @@ libusb_transfer_status DimensionsBackend::HandleAsyncTransfer(libusb_transfer* t
         case 0xFF: // LEDS Query
         {
             // Further investigation required
-            LOG_ERROR(Lib_Usbd, "Unimplemented LD Function: {:x}", command);
+            LOG_ERROR(Lib_Usbd, "Unimplemented LD Function: %x", command);
             break;
         }
         default: {
-            LOG_ERROR(Lib_Usbd, "Unknown LD Function: {:x}", command);
+            LOG_ERROR(Lib_Usbd, "Unknown LD Function: %x", command);
             break;
         }
         }

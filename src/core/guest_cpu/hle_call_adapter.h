@@ -330,7 +330,8 @@ private:
 class UnsupportedHleCallAdapter final : public HleCallAdapter {
 public:
     HleCallResult Invoke(HleCallFrame& frame) const override {
-        LOG_ERROR(Core, "Stub: {} called, returning zero", Name());
+        LOG_ERROR(Core, "Stub: %.*s called, returning zero", static_cast<int>(Name().size()),
+                  Name().data());
         frame.gpr[0] = 0;
         return true;
     }

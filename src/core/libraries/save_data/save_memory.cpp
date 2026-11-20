@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright 2024-2026 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include <cstring>
 #include "common/combiner.h"
 #include "common/io_file.h"
 #include "save_memory.h"
@@ -9,7 +10,6 @@
 #include <filesystem>
 #include <mutex>
 #include <utility>
-#include <fmt/format.h>
 
 #include "common/elf_info.h"
 #include "common/logging/log.h"

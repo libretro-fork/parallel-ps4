@@ -4,6 +4,24 @@ What changed in the libretro core of this fork, newest first. Changes that come 
 
 ## Unreleased
 
+- {fmt} is gone from the core (600 KB of headers and sources, `externals/fmt`). The log macros, the asserts and the core's string formatting now take printf formats, the libretro way. Each call site in `src` was rewritten from `{}` to its printf conversion, chosen from the argument's type.
+  - **New pieces:**
+    - `Common::StringFromFormat` (printf into a `std::string`).
+    - `Common::BinaryText`, for the few `{:b}` sites.
+    - `SHAD_PRINTF`, which marks a function as printf-like so the compiler checks its calls. It is `gnu_printf` on MinGW and nothing on MSVC.
+    - The log, assert and unreachable paths are plain variadic functions now, not templates.
+  - **The compiler checks every format:** `-Werror=format` is on for the core's C++. A format that does not match its arguments now fails the Linux and Windows builds. A full clean Linux build and the Windows cross build both pass with it.
+  - **Mismatch found along the way:** the SELF header dump in `elf.cpp` passed an argument its format never printed. The argument is dropped.
+  - **Log text that reads differently:**
+    - A float printed with a plain `{}` now prints with `%g` (6 significant digits) instead of {fmt}'s shortest exact form.
+    - A negative number printed as hex now shows its two's complement instead of a minus sign.
+    - Everything else prints the same text.
+  - **Removed with it:** the custom `fmt::formatter` specializations for shader IR and AmdGpu types. Their call sites use the existing `NameOf` functions, and `Shader::NameOf(HwStage)` is new. `common/logging/formatter.h` is deleted too.
+  - **Left alone:** FEX's own copy of fmt (`External/fmt` in the FEX tree), which the aarch64 FEX build still links.
+  - **Checks:**
+    - Linux and Windows builds pass, and the tests pass.
+    - The aarch64 code paths (FEX on and off) were syntax-checked with the aarch64 compiler. The FEX build itself was not run, because its sources are not here.
+  - **Not run on Windows yet.** Not seen in a game yet.
 - The x86-64 decoder's tables are smaller: the object goes from 288 KB to 252 KB, at the same speed.
   - **Forms:** each form is now one 16-bit word. It holds the form's definition and an index into the 11 sets of widths that occur.
   - **Names:** the register and mnemonic names are one string each, with a 16-bit offset per name. They were arrays of pointers, so the core loses about 1,600 load-time relocations and the pages they dirtied.

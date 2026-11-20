@@ -10,11 +10,10 @@
 #include <utility>
 #include <vector>
 
-#include <fmt/format.h>
-
 #include <rthreads/rthreads.h>
 #include "common/combiner.h"
 #include "common/logging/log.h"
+#include "common/string_util.h"
 #include "core/libraries/net/net_error.h"
 #include "core/libraries/net/net_log.h"
 #include "core/libraries/net/net_resolver.h"
@@ -87,7 +86,7 @@ s32 Lookup(std::string hostname, bool allow_literal, std::vector<u32>* addrs) {
     addrinfo* result = nullptr;
     const int gai = getaddrinfo(hostname.c_str(), nullptr, &hints, &result);
     if (gai != 0) {
-        LOG_WARNING(Lib_Net, "lookup of {} failed: {}", hostname, gai);
+        LOG_WARNING(Lib_Net, "lookup of %s failed: %d", (hostname).c_str(), gai);
         switch (gai) {
         case EAI_NONAME:
 #if defined(EAI_NODATA) && EAI_NODATA != EAI_NONAME
@@ -177,10 +176,10 @@ int AbortResolver(s32 id, u32 flags) {
             resolver->running = false;
             resolver->status = ORBIS_NET_ERROR_EINTR;
             Core::Net::SignalExternal(id, true);
-            LOG_DEBUG(Lib_Net, "resolver {}: running lookup aborted", id);
+            LOG_DEBUG(Lib_Net, "resolver %d: running lookup aborted", id);
             return 0;
         }
-        LOG_DEBUG(Lib_Net, "resolver {}: abort with nothing running, flags {:#x}", id, flags);
+        LOG_DEBUG(Lib_Net, "resolver %d: abort with nothing running, flags 0x%x", id, flags);
         if (flags & ORBIS_NET_RESOLVER_ABORT_FLAG_NTOA_PRESERVATION) {
             resolver->pending_abort[static_cast<size_t>(LookupKind::Ntoa)] = true;
         }
@@ -205,7 +204,7 @@ s32 RunLookup(s32 id, LookupKind kind, bool async, Work work, Deliver deliver) {
                 return std::optional<s32>{ORBIS_NET_ERROR_RESOLVER_EBUSY};
             }
             if (std::exchange(resolver->pending_abort[static_cast<size_t>(kind)], false)) {
-                LOG_DEBUG(Lib_Net, "resolver {}: lookup fails with a preserved abort", id);
+                LOG_DEBUG(Lib_Net, "resolver %d: lookup fails with a preserved abort", id);
                 resolver->status = ORBIS_NET_ERROR_EINTR;
                 return std::optional<s32>{ORBIS_NET_ERROR_EINTR};
             }
@@ -314,12 +313,14 @@ s32 ResolverStartNtoa(s32 id, const char* hostname, ResolverOutput output, bool 
                 std::string list;
                 for (const u32 a : addrs) {
                     const u32 ip = ntohl(a);
-                    list += fmt::format("{}{}.{}.{}.{}", list.empty() ? "" : ", ", ip >> 24,
-                                        (ip >> 16) & 0xff, (ip >> 8) & 0xff, ip & 0xff);
+                    list += Common::StringFromFormat("%s%u.%u.%u.%u", list.empty() ? "" : ", ",
+                                                     ip >> 24, (ip >> 16) & 0xff, (ip >> 8) & 0xff,
+                                                     ip & 0xff);
                 }
-                LOG_INFO(Lib_Net, "{} resolved to {}", host, list);
+                LOG_INFO(Lib_Net, "%s resolved to %s", (host).c_str(), (list).c_str());
             } else {
-                LOG_INFO(Lib_Net, "{} not resolved: {}", host, ErrorCodeName(status));
+                LOG_INFO(Lib_Net, "%s not resolved: %s", (host).c_str(),
+                         (ErrorCodeName(status)).c_str());
             }
             return std::pair{status, std::move(addrs)};
         },
@@ -342,8 +343,9 @@ s32 ResolverStartAton(s32 id, const OrbisNetInAddr* addr, char* hostname, s32 le
             std::string name;
             const s32 status = ReverseLookup(address, &name);
             const u32 ip = ntohl(address);
-            LOG_INFO(Lib_Net, "reverse lookup of {}.{}.{}.{}: {}", ip >> 24, (ip >> 16) & 0xff,
-                     (ip >> 8) & 0xff, ip & 0xff, status == 0 ? name : ErrorCodeName(status));
+            LOG_INFO(Lib_Net, "reverse lookup of %u.%u.%u.%u: %s", ip >> 24, (ip >> 16) & 0xff,
+                     (ip >> 8) & 0xff, ip & 0xff,
+                     (status == 0 ? name : ErrorCodeName(status)).c_str());
             return std::pair{status, std::move(name)};
         },
         [hostname, len](const std::string& name) {

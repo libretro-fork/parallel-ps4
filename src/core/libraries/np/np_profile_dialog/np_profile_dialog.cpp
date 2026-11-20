@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include <cstring>
-#include <fmt/format.h>
 #include "common/enum_names.h"
 #include "common/logging/log.h"
 #include "core/libraries/error_codes.h"
@@ -38,9 +37,9 @@ Libraries::CommonDialog::Error sceNpProfileDialogOpen(OrbisNpProfileDialogParam*
     }
 
     LOG_DEBUG(Lib_NpProfileDialog,
-              "param details: mode={}, userId={}, targetOnlineId='{}', userData={}",
+              "param details: mode=%d, userId=%d, targetOnlineId='%s', userData=0x%llx",
               static_cast<int>(param->mode), param->userId, param->targetOnlineId.data,
-              fmt::ptr(param->userData));
+              static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(param->userData)));
 
     g_user_data = param->userData;
     ovl_profile_dialog_param_t shown{};
@@ -48,7 +47,7 @@ Libraries::CommonDialog::Error sceNpProfileDialogOpen(OrbisNpProfileDialogParam*
     shown.online_id = param->targetOnlineId.data;
     ovl_profile_dialog_open(&shown);
 
-    LOG_INFO(Lib_NpProfileDialog, "dialog opened successfully for user {}", param->userId);
+    LOG_INFO(Lib_NpProfileDialog, "dialog opened successfully for user %d", param->userId);
     return Libraries::CommonDialog::Error::OK;
 }
 
@@ -80,7 +79,7 @@ sceNpProfileDialogGetResult(OrbisNpProfileDialogResult* result) {
         return Libraries::CommonDialog::Error::ARG_NULL;
     }
     if (status != Libraries::CommonDialog::Status::FINISHED) {
-        LOG_ERROR(Lib_NpProfileDialog, "failed: dialog not finished (status={})",
+        LOG_ERROR(Lib_NpProfileDialog, "failed: dialog not finished (status=%d)",
                   static_cast<int>(status));
         return Libraries::CommonDialog::Error::NOT_FINISHED;
     }
@@ -90,14 +89,15 @@ sceNpProfileDialogGetResult(OrbisNpProfileDialogResult* result) {
     result->userAction = static_cast<Libraries::CommonDialog::Result>(ovl_profile_dialog_result());
     result->userData = g_user_data;
 
-    LOG_DEBUG(Lib_NpProfileDialog, "result details: resultCode={}, userAction={}, userData={}",
-              result->result, static_cast<int>(result->userAction), fmt::ptr(result->userData));
+    LOG_DEBUG(Lib_NpProfileDialog, "result details: resultCode=%d, userAction=%d, userData=0x%llx",
+              result->result, static_cast<int>(result->userAction),
+              static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(result->userData)));
     return Libraries::CommonDialog::Error::OK;
 }
 
 Libraries::CommonDialog::Status PS4_SYSV_ABI sceNpProfileDialogGetStatus() {
     const auto status = Status();
-    LOG_TRACE(Lib_NpProfileDialog, "called status={}",
+    LOG_TRACE(Lib_NpProfileDialog, "called status=%s",
               enum_name(&enum_names_Libraries_CommonDialog_Status, static_cast<s64>(status)));
     return status;
 }
@@ -108,7 +108,7 @@ Libraries::CommonDialog::Error PS4_SYSV_ABI sceNpProfileDialogInitialize() {
         return Libraries::CommonDialog::Error::NOT_SYSTEM_INITIALIZED;
     }
     if (const auto status = Status(); status != Libraries::CommonDialog::Status::NONE) {
-        LOG_ERROR(Lib_NpProfileDialog, "failed: already initialized (status={})",
+        LOG_ERROR(Lib_NpProfileDialog, "failed: already initialized (status=%d)",
                   static_cast<int>(status));
         return Libraries::CommonDialog::Error::ALREADY_INITIALIZED;
     }
@@ -136,9 +136,9 @@ sceNpProfileDialogOpenA(OrbisNpProfileDialogParamA* param) {
     }
 
     LOG_DEBUG(Lib_NpProfileDialog,
-              "param details: mode={}, userId={}, targetAccountId='{}', userData={}",
+              "param details: mode=%d, userId=%d, targetAccountId='%" PRIu64 "', userData=0x%llx",
               static_cast<int>(param->mode), param->userId, param->targetAccountId,
-              fmt::ptr(param->userData));
+              static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(param->userData)));
     LOG_ERROR(Lib_NpProfileDialog, "(STUBBED) called");
 
     g_user_data = param->userData;
@@ -148,13 +148,13 @@ sceNpProfileDialogOpenA(OrbisNpProfileDialogParamA* param) {
     shown.account_id = param->targetAccountId;
     ovl_profile_dialog_open(&shown);
 
-    LOG_INFO(Lib_NpProfileDialog, "dialog opened successfully for user {} (account ID variant)",
+    LOG_INFO(Lib_NpProfileDialog, "dialog opened successfully for user %d (account ID variant)",
              param->userId);
     return Libraries::CommonDialog::Error::OK;
 }
 
 Libraries::CommonDialog::Error PS4_SYSV_ABI sceNpProfileDialogTerminate() {
-    LOG_DEBUG(Lib_NpProfileDialog, "called (status={})", static_cast<int>(Status()));
+    LOG_DEBUG(Lib_NpProfileDialog, "called (status=%d)", static_cast<int>(Status()));
 
     if (Status() == Libraries::CommonDialog::Status::RUNNING) {
         LOG_ERROR(Lib_NpProfileDialog, "dialog is running, closing it first");
@@ -174,7 +174,7 @@ Libraries::CommonDialog::Error PS4_SYSV_ABI sceNpProfileDialogTerminate() {
 
 Libraries::CommonDialog::Status PS4_SYSV_ABI sceNpProfileDialogUpdateStatus() {
     const auto status = Status();
-    LOG_TRACE(Lib_NpProfileDialog, "called status={}",
+    LOG_TRACE(Lib_NpProfileDialog, "called status=%s",
               enum_name(&enum_names_Libraries_CommonDialog_Status, static_cast<s64>(status)));
     return status;
 }

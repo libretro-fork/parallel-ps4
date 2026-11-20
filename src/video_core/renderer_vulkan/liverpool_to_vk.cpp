@@ -7,7 +7,10 @@
 #include "video_core/renderer_vulkan/liverpool_to_vk.h"
 
 #define INVALID_NUMBER_FORMAT_COMBO                                                                \
-    LOG_ERROR(Render_Vulkan, "Unsupported number type {} for format {}", number_type, format);
+    LOG_ERROR(Render_Vulkan, "Unsupported number type %.*s for format %.*s",                       \
+              static_cast<int>(AmdGpu::NameOf(number_type).size()),                                \
+              AmdGpu::NameOf(number_type).data(), static_cast<int>(AmdGpu::NameOf(format).size()), \
+              AmdGpu::NameOf(format).data());
 
 namespace Vulkan::LiverpoolToVK {
 
@@ -34,7 +37,7 @@ vk::StencilOp StencilOp(AmdGpu::StencilFunc op) {
     case AmdGpu::StencilFunc::ReplaceOp:
         return vk::StencilOp::eReplace;
     case AmdGpu::StencilFunc::Ones:
-        LOG_WARNING(Render_Vulkan, "Unsupported stencil op {}, using Replace.",
+        LOG_WARNING(Render_Vulkan, "Unsupported stencil op %u, using Replace.",
                     static_cast<u32>(op));
         return vk::StencilOp::eReplace;
     case AmdGpu::StencilFunc::And:
@@ -44,7 +47,7 @@ vk::StencilOp StencilOp(AmdGpu::StencilFunc op) {
     case AmdGpu::StencilFunc::Nor:
     case AmdGpu::StencilFunc::Xnor:
         // Bitwise stencil operations have no Vulkan equivalent; eKeep is the safest fallback.
-        LOG_WARNING(Render_Vulkan, "Unsupported bitwise stencil op {}, using Keep.",
+        LOG_WARNING(Render_Vulkan, "Unsupported bitwise stencil op %u, using Keep.",
                     static_cast<u32>(op));
         return vk::StencilOp::eKeep;
     default:
@@ -136,7 +139,7 @@ vk::PrimitiveTopology PrimitiveType(AmdGpu::PrimitiveType type) {
     case AmdGpu::PrimitiveType::RectList:
         return vk::PrimitiveTopology::ePatchList;
     default:
-        UNREACHABLE_MSG("Unimplemented primitive type: {}", static_cast<u32>(type));
+        UNREACHABLE_MSG("Unimplemented primitive type: %u", static_cast<u32>(type));
         return vk::PrimitiveTopology::eTriangleList;
     }
 }
@@ -225,7 +228,7 @@ vk::BlendFactor BlendFactor(AmdGpu::BlendControl::BlendFactor factor) {
     case BlendFactor::OneMinusConstantAlpha:
         return vk::BlendFactor::eOneMinusConstantAlpha;
     default:
-        UNREACHABLE_MSG("Unknown blend factor: {}", static_cast<u32>(factor));
+        UNREACHABLE_MSG("Unknown blend factor: %u", static_cast<u32>(factor));
     }
 }
 
@@ -256,7 +259,7 @@ vk::BlendOp BlendOp(AmdGpu::BlendControl::BlendFunc func) {
     case BlendFunc::ReverseSubtract:
         return vk::BlendOp::eReverseSubtract;
     default:
-        UNREACHABLE_MSG("Unknown blend op: {}", static_cast<u32>(func));
+        UNREACHABLE_MSG("Unknown blend op: %u", static_cast<u32>(func));
     }
 }
 
@@ -296,7 +299,7 @@ vk::LogicOp LogicOp(AmdGpu::ColorControl::LogicOp logic_op) {
     case LogicOp::Invert:
         return vk::LogicOp::eInvert;
     case LogicOp::BrushXor:
-        LOG_WARNING(Render_Vulkan, "Unimplemented logic op {:#x}, using closest equivalent",
+        LOG_WARNING(Render_Vulkan, "Unimplemented logic op 0x%x, using closest equivalent",
                     u32(logic_op));
         [[fallthrough]];
     case LogicOp::Xor:
@@ -320,7 +323,7 @@ vk::LogicOp LogicOp(AmdGpu::ColorControl::LogicOp logic_op) {
     case LogicOp::Set:
         return vk::LogicOp::eSet;
     default:
-        UNREACHABLE_MSG("Unknown logic op {}", u32(logic_op));
+        UNREACHABLE_MSG("Unknown logic op %u", u32(logic_op));
     }
 }
 
@@ -335,13 +338,13 @@ vk::SamplerAddressMode ClampMode(AmdGpu::ClampMode mode) {
         return vk::SamplerAddressMode::eClampToEdge;
     case AmdGpu::ClampMode::MirrorOnceHalfBorder:
     case AmdGpu::ClampMode::MirrorOnceBorder:
-        LOG_WARNING(Render_Vulkan, "Unimplemented clamp mode {}, using closest equivalent.",
+        LOG_WARNING(Render_Vulkan, "Unimplemented clamp mode %u, using closest equivalent.",
                     static_cast<u32>(mode));
         [[fallthrough]];
     case AmdGpu::ClampMode::MirrorOnceLastTexel:
         return vk::SamplerAddressMode::eMirrorClampToEdge;
     case AmdGpu::ClampMode::ClampHalfBorder:
-        LOG_WARNING(Render_Vulkan, "Unimplemented clamp mode {}, using closest equivalent.",
+        LOG_WARNING(Render_Vulkan, "Unimplemented clamp mode %u, using closest equivalent.",
                     static_cast<u32>(mode));
         [[fallthrough]];
     case AmdGpu::ClampMode::ClampBorder:
@@ -531,7 +534,7 @@ static constexpr vk::FormatFeatureFlags2 GetDataFormatFeatureFlags(
     case AmdGpu::DataFormat::FormatFmask64_S16_F8:
         return ImageRead | ImageWrite;
     }
-    UNREACHABLE_MSG("Missing feature flags for data format {}", static_cast<u32>(data_format));
+    UNREACHABLE_MSG("Missing feature flags for data format %u", static_cast<u32>(data_format));
 }
 
 // Table 8.13 Data and Image Formats [Sea Islands Series Instruction Set Architecture]
@@ -556,7 +559,7 @@ static constexpr vk::FormatFeatureFlags2 GetNumberFormatFeatureFlags(
     case AmdGpu::NumberFormat::Ubscaled:
         return ImageRead;
     }
-    UNREACHABLE_MSG("Missing feature flags for number format {}", static_cast<u32>(number_format));
+    UNREACHABLE_MSG("Missing feature flags for number format %u", static_cast<u32>(number_format));
 }
 
 static constexpr SurfaceFormatInfo CreateSurfaceFormatInfo(const AmdGpu::DataFormat data_format,
@@ -820,7 +823,7 @@ vk::Format DepthFormat(DepthBuffer::ZFormat z_format, DepthBuffer::StencilFormat
         std::find_if(formats.begin(), formats.end(), [&](const DepthFormatInfo& format_info) {
             return format_info.z_format == z_format && format_info.stencil_format == stencil_format;
         });
-    ASSERT_MSG(format != formats.end(), "Unknown z_format={} and stencil_format={}",
+    ASSERT_MSG(format != formats.end(), "Unknown z_format=%u and stencil_format=%u",
                static_cast<u32>(z_format), static_cast<u32>(stencil_format));
     return format->vk_format;
 }
@@ -1148,7 +1151,8 @@ vk::ClearValue ColorBufferClearValue(const AmdGpu::ColorBuffer& color_buffer) {
         color.float32[3] = NumberUtils::U4ToUnorm(c0 >> 12);
         break;
     default:
-        LOG_ERROR(Render_Vulkan, "Unsupported color buffer format: {}", format);
+        LOG_ERROR(Render_Vulkan, "Unsupported color buffer format: %.*s",
+                  static_cast<int>(AmdGpu::NameOf(format).size()), AmdGpu::NameOf(format).data());
         break;
     }
 

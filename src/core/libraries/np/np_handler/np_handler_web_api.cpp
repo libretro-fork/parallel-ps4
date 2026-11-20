@@ -11,8 +11,8 @@
 namespace Libraries::Np {
 
 void NpHandler::OnWebApiPushEvent(s32 user_id, const ShadNet::NotifyWebApiPushEvent& n) {
-    LOG_INFO(NpHandler, "user_id={} WebApiPushEvent svc='{}' type='{}' bytes={}", user_id,
-             n.npServiceName, n.dataType, n.data.size());
+    LOG_INFO(NpHandler, "user_id=%d WebApiPushEvent svc='%s' type='%s' bytes=%zu", user_id,
+             (n.npServiceName).c_str(), (n.dataType).c_str(), n.data.size());
     NpWebApi::PushEventInput ev;
     ev.targetUserId = user_id;
     ev.npServiceName = n.npServiceName;

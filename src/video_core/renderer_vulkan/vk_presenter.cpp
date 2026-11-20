@@ -611,11 +611,11 @@ void Presenter::RecreateFrame(Frame* frame, u32 width, u32 height) {
     const vk::Result result =
         instance.GetAllocator()->CreateImage(image_info, true, frame->image, frame->allocation);
     if (result != vk::Result::eSuccess) [[unlikely]] {
-        LOG_CRITICAL(Render_Vulkan, "Failed allocating texture with error {}",
-                     vk::to_string(result));
+        LOG_CRITICAL(Render_Vulkan, "Failed allocating texture with error %s",
+                     (vk::to_string(result)).c_str());
         UNREACHABLE();
     }
-    SetObjectName(device, frame->image, "Frame image #{}", frame->id);
+    SetObjectName(device, frame->image, "Frame image #%d", frame->id);
 
     const vk::ImageViewCreateInfo view_info = {
         .image = frame->image,
@@ -706,7 +706,7 @@ static vk::Format GetFrameViewFormat(const Libraries::VideoOut::PixelFormat form
     default:
         break;
     }
-    UNREACHABLE_MSG("Unknown format={}", static_cast<u32>(format));
+    UNREACHABLE_MSG("Unknown format=%u", static_cast<u32>(format));
     return {};
 }
 
@@ -896,7 +896,8 @@ void Presenter::Present(Frame* frame, bool is_reusing_frame, bool is_game_frame)
     // Reset fence for queue submission.
     const auto reset_result = instance.GetDevice().resetFences(frame->present_done);
     ASSERT_MSG(reset_result == vk::Result::eSuccess,
-               "Unexpected error resetting present done fence: {}", vk::to_string(reset_result));
+               "Unexpected error resetting present done fence: %s",
+               (vk::to_string(reset_result)).c_str());
 
     {
         // The pad, for the overlays' dialogs

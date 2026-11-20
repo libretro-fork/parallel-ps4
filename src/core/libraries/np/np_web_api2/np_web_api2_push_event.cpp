@@ -13,15 +13,15 @@ s32 PushEventFilter::Initialize(PushEventHandle* handle,
                                 const OrbisNpWebApi2PushEventFilterParameter* filter_param,
                                 u64 filter_param_num) {
     if (handle->IsDeleted()) {
-        LOG_ERROR(Lib_NpWebApi2, "handle {:#x} is invalid", handle->GetId());
+        LOG_ERROR(Lib_NpWebApi2, "handle 0x%x is invalid", handle->GetId());
         return ORBIS_NP_WEBAPI2_ERROR_HANDLE_NOT_FOUND;
     }
     if (handle->IsTimedout()) {
-        LOG_ERROR(Lib_NpWebApi2, "handle {:#x} has timed out", handle->GetId());
+        LOG_ERROR(Lib_NpWebApi2, "handle 0x%x has timed out", handle->GetId());
         return ORBIS_NP_WEBAPI2_ERROR_TIMEOUT;
     }
     if (handle->IsAborted()) {
-        LOG_ERROR(Lib_NpWebApi2, "handle {:#x} was aborted", handle->GetId());
+        LOG_ERROR(Lib_NpWebApi2, "handle 0x%x was aborted", handle->GetId());
         return ORBIS_NP_WEBAPI2_ERROR_ABORTED;
     }
 

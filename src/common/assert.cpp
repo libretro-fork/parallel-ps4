@@ -26,6 +26,28 @@ void assert_fail_impl() {
 }
 
 void assert_fail_debug_msg(const char* msg) {
-    LOG_CRITICAL(Debug, "Assertion Failed!\n{}", msg);
+    LOG_CRITICAL(Debug, "Assertion Failed!\n%s", msg);
     assert_fail_impl();
 }
+
+namespace Common::Detail {
+
+void AssertFail(const char* file, int line, const char* func, const char* format, ...) {
+    va_list args;
+    va_start(args, format);
+    Common::Log::VLog(Common::Log::Class::Debug, Common::Log::Level::Critical, file, line, func,
+                      format, args);
+    va_end(args);
+    assert_fail_impl();
+}
+
+void UnreachableFail(const char* file, int line, const char* func, const char* format, ...) {
+    va_list args;
+    va_start(args, format);
+    Common::Log::VLog(Common::Log::Class::Debug, Common::Log::Level::Critical, file, line, func,
+                      format, args);
+    va_end(args);
+    unreachable_impl();
+}
+
+} // namespace Common::Detail

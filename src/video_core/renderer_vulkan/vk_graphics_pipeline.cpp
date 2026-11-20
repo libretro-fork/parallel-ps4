@@ -59,9 +59,10 @@ GraphicsPipeline::GraphicsPipeline(
     };
     auto [layout_result, layout] = instance.GetDevice().createPipelineLayoutUnique(layout_info);
     ASSERT_MSG(layout_result == vk::Result::eSuccess,
-               "Failed to create graphics pipeline layout: {}", vk::to_string(layout_result));
+               "Failed to create graphics pipeline layout: %s",
+               (vk::to_string(layout_result)).c_str());
     pipeline_layout = std::move(layout);
-    SetObjectName(device, *pipeline_layout, "Graphics PipelineLayout {}", debug_str);
+    SetObjectName(device, *pipeline_layout, "Graphics PipelineLayout %s", debug_str.c_str());
 
     if (!preloading) {
         VertexInputs<AmdGpu::Buffer> guest_buffers;
@@ -272,8 +273,8 @@ GraphicsPipeline::GraphicsPipeline(
         if (!instance.IsFormatSupported(color_format,
                                         vk::FormatFeatureFlagBits2::eColorAttachment)) {
             LOG_WARNING(Render_Vulkan,
-                        "color buffer format {} does not support COLOR_ATTACHMENT_BIT",
-                        vk::to_string(color_format));
+                        "color buffer format %s does not support COLOR_ATTACHMENT_BIT",
+                        (vk::to_string(color_format)).c_str());
         }
         color_formats[i] = color_format;
     }
@@ -339,7 +340,7 @@ GraphicsPipeline::GraphicsPipeline(
         if (key.color_buffers[i].blend_self_scale) {
             LOG_WARNING(
                 Render_Vulkan,
-                "Emulating scaled min/max blend with squared shader output on attachment {}", i);
+                "Emulating scaled min/max blend with squared shader output on attachment %u", i);
             attachments[i].srcColorBlendFactor = vk::BlendFactor::eOne;
             attachments[i].dstColorBlendFactor = vk::BlendFactor::eOne;
         }
@@ -424,10 +425,10 @@ GraphicsPipeline::GraphicsPipeline(
 
     auto [pipeline_result, pipe] =
         device.createGraphicsPipelineUnique(pipeline_cache, pipeline_info);
-    ASSERT_MSG(pipeline_result == vk::Result::eSuccess, "Failed to create graphics pipeline: {}",
-               vk::to_string(pipeline_result));
+    ASSERT_MSG(pipeline_result == vk::Result::eSuccess, "Failed to create graphics pipeline: %s",
+               (vk::to_string(pipeline_result)).c_str());
     pipeline = std::move(pipe);
-    SetObjectName(device, *pipeline, "Graphics Pipeline {}", debug_str);
+    SetObjectName(device, *pipeline, "Graphics Pipeline %s", debug_str.c_str());
 }
 
 GraphicsPipeline::~GraphicsPipeline() = default;
@@ -537,7 +538,8 @@ void GraphicsPipeline::BuildDescSetLayout(bool preloading) {
     auto [layout_result, layout] =
         instance.GetDevice().createDescriptorSetLayoutUnique(desc_layout_ci);
     ASSERT_MSG(layout_result == vk::Result::eSuccess,
-               "Failed to create graphics descriptor set layout: {}", vk::to_string(layout_result));
+               "Failed to create graphics descriptor set layout: %s",
+               (vk::to_string(layout_result)).c_str());
     desc_layout = std::move(layout);
 }
 

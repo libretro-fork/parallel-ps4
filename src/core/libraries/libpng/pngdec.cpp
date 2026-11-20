@@ -73,7 +73,7 @@ s32 PS4_SYSV_ABI scePngDecCreate(const OrbisPngDecCreateParam* param, void* memo
         return ORBIS_PNG_DEC_ERROR_INVALID_ADDR;
     }
     if (param->max_image_width - 1 > 1000000) {
-        LOG_ERROR(Lib_Png, "Invalid size! width = {}", param->max_image_width);
+        LOG_ERROR(Lib_Png, "Invalid size! width = %u", param->max_image_width);
         return ORBIS_PNG_DEC_ERROR_INVALID_SIZE;
     }
     auto pngh = (PngHandler*)memoryAddress;
@@ -96,8 +96,8 @@ s32 PS4_SYSV_ABI scePngDecDecode(OrbisPngDecHandle handle, const OrbisPngDecDeco
         return ORBIS_PNG_DEC_ERROR_INVALID_ADDR;
     }
     LOG_TRACE(Lib_Png,
-              "pngMemSize = {} , imageMemSize = {} , pixelFormat = {} , alphaValue = {} , "
-              "imagePitch = {}",
+              "pngMemSize = %u , imageMemSize = %u , pixelFormat = %d , alphaValue = %u , "
+              "imagePitch = %u",
               param->png_mem_size, param->image_mem_size, int(param->pixel_format),
               param->alpha_value, param->image_pitch);
 
@@ -121,7 +121,7 @@ s32 PS4_SYSV_ABI scePngDecDecode(OrbisPngDecHandle handle, const OrbisPngDecDeco
     if (pitch < row_bytes || pitch % 4 != 0 ||
         pitch * (height - 1) + row_bytes > param->image_mem_size) {
         rpng_free(rpng);
-        LOG_ERROR(Lib_Png, "Image buffer of {} bytes, pitch {}, does not hold {}x{}",
+        LOG_ERROR(Lib_Png, "Image buffer of %u bytes, pitch %" PRIu64 ", does not hold %ux%u",
                   param->image_mem_size, pitch, width, height);
         return ORBIS_PNG_DEC_ERROR_INVALID_SIZE;
     }
@@ -182,7 +182,7 @@ s32 PS4_SYSV_ABI scePngDecParseHeader(const OrbisPngDecParseParam* param,
     FillImageInfo(info, imageInfo);
     LOG_TRACE(
         Lib_Png,
-        "imageWidth = {} , imageHeight = {} , colorSpace = {} , bitDepth = {} , imageFlag = {}",
+        "imageWidth = %u , imageHeight = %u , colorSpace = %d , bitDepth = %u , imageFlag = %d",
         imageInfo->image_width, imageInfo->image_height, int(imageInfo->color_space),
         imageInfo->bit_depth, int(imageInfo->image_flag));
     return ORBIS_OK;
@@ -194,11 +194,11 @@ s32 PS4_SYSV_ABI scePngDecQueryMemorySize(const OrbisPngDecCreateParam* param) {
         return ORBIS_PNG_DEC_ERROR_INVALID_PARAM;
     }
     if (param->attribute > 1) {
-        LOG_ERROR(Lib_Png, "Invalid attribute! attribute = {}", param->attribute);
+        LOG_ERROR(Lib_Png, "Invalid attribute! attribute = %u", param->attribute);
         return ORBIS_PNG_DEC_ERROR_INVALID_ADDR;
     }
     if (param->max_image_width - 1 > 1000000) {
-        LOG_ERROR(Lib_Png, "Invalid size! width = {}", param->max_image_width);
+        LOG_ERROR(Lib_Png, "Invalid size! width = %u", param->max_image_width);
         return ORBIS_PNG_DEC_ERROR_INVALID_SIZE;
     }
     return sizeof(PngHandler);

@@ -55,8 +55,10 @@ public:
 
     s32 SetUsbStorageDeviceInfo(const OrbisMusicPlayerUsbDeviceInfo* devices, u32 count) {
         if (!devices || count == 0 || count > 8) {
-            LOG_ERROR(Lib_AudioOut, "invalid arguments: devices={}, count={}",
-                      static_cast<const void*>(devices), count);
+            LOG_ERROR(Lib_AudioOut, "invalid arguments: devices=0x%llx, count=%u",
+                      static_cast<unsigned long long>(
+                          reinterpret_cast<uintptr_t>(static_cast<const void*>(devices))),
+                      count);
             return ORBIS_MUSIC_PLAYER_SERVICE_ERROR_INVALID_PARAMETER;
         }
 
@@ -66,19 +68,19 @@ public:
             for (u32 i = 0; i < count; ++i) {
                 const auto& dev = devices[i];
                 if (dev.serial_number_len > 255) {
-                    LOG_ERROR(Lib_AudioOut, "device[{}] serial_number_len {} > 255", i,
+                    LOG_ERROR(Lib_AudioOut, "device[%u] serial_number_len %" PRIu64 " > 255", i,
                               dev.serial_number_len);
                     return ORBIS_MUSIC_PLAYER_SERVICE_ERROR_INVALID_PARAMETER;
                 }
                 size_t str_len = strnlen(dev.serial_number, sizeof(dev.serial_number));
                 if (str_len > dev.serial_number_len) {
-                    LOG_ERROR(Lib_AudioOut, "device[{}] strlen {} > serial_number_len {}", i,
+                    LOG_ERROR(Lib_AudioOut, "device[%u] strlen %zu > serial_number_len %" PRIu64, i,
                               str_len, dev.serial_number_len);
                     return ORBIS_MUSIC_PLAYER_SERVICE_ERROR_INVALID_PARAMETER;
                 }
                 std::string serial(dev.serial_number, str_len);
-                LOG_INFO(Lib_AudioOut, "registered USB device_id {} with serial '{}'",
-                         dev.device_id, serial);
+                LOG_INFO(Lib_AudioOut, "registered USB device_id %u with serial '%s'",
+                         dev.device_id, (serial).c_str());
                 m_usb_devices[serial] = dev.device_id;
             }
 
@@ -115,7 +117,7 @@ public:
 
     s32 CreateTrackList(u32 tracklist_id) {
         if (tracklist_id > 99) {
-            LOG_ERROR(Lib_AudioOut, "CreateTrackList: invalid tracklist_id={}", tracklist_id);
+            LOG_ERROR(Lib_AudioOut, "CreateTrackList: invalid tracklist_id=%u", tracklist_id);
             return ORBIS_MUSIC_PLAYER_SERVICE_ERROR_INVALID_PARAMETER;
         }
         return m_mutex.Run([&]() -> s32 {
@@ -130,7 +132,7 @@ public:
 
     s32 RemoveTrackList(u32 tracklist_id) {
         if (tracklist_id > 99) {
-            LOG_ERROR(Lib_AudioOut, "RemoveTrackList: invalid tracklist_id={}", tracklist_id);
+            LOG_ERROR(Lib_AudioOut, "RemoveTrackList: invalid tracklist_id=%u", tracklist_id);
             return ORBIS_MUSIC_PLAYER_SERVICE_ERROR_INVALID_PARAMETER;
         }
         return m_mutex.Run([&]() -> s32 {
@@ -148,7 +150,7 @@ public:
 
     s32 InsertTrackEntry(u32 tracklist_id, u32 track_index, const std::string& uri) {
         if (tracklist_id > 99 || track_index > 3999) {
-            LOG_ERROR(Lib_AudioOut, "InsertTrackEntry: invalid tracklist_id={} or track_index={}",
+            LOG_ERROR(Lib_AudioOut, "InsertTrackEntry: invalid tracklist_id=%u or track_index=%u",
                       tracklist_id, track_index);
             return ORBIS_MUSIC_PLAYER_SERVICE_ERROR_INVALID_PARAMETER;
         }
@@ -169,7 +171,7 @@ public:
 
     s32 RemoveTrackEntry(u32 tracklist_id, u32 track_index) {
         if (tracklist_id > 99 || track_index > 3999) {
-            LOG_ERROR(Lib_AudioOut, "RemoveTrackEntry: invalid tracklist_id={} or track_index={}",
+            LOG_ERROR(Lib_AudioOut, "RemoveTrackEntry: invalid tracklist_id=%u or track_index=%u",
                       tracklist_id, track_index);
             return ORBIS_MUSIC_PLAYER_SERVICE_ERROR_INVALID_PARAMETER;
         }
@@ -462,7 +464,8 @@ private:
             }
 
             if (!Common::FS::Exists(host_path)) {
-                LOG_ERROR(Lib_AudioOut, "Music file does not exist: {}", host_path.string());
+                LOG_ERROR(Lib_AudioOut, "Music file does not exist: %s",
+                          (host_path.string()).c_str());
                 break;
             }
 
@@ -479,8 +482,8 @@ private:
             } else if (ext == ".m4a" || ext == ".mp4") {
                 kind = AUDIO_STREAM_MP4;
             } else {
-                LOG_ERROR(Lib_AudioOut, "Not a format the music player decodes: {}",
-                          host_path.string());
+                LOG_ERROR(Lib_AudioOut, "Not a format the music player decodes: %s",
+                          (host_path.string()).c_str());
                 break;
             }
             // Mapped, and decoded where it lies a block at a time as it is played: the track is
@@ -489,7 +492,8 @@ private:
             audio_stream_t* stream =
                 bytes ? audio_stream_open(bytes->data(), bytes->size(), kind) : nullptr;
             if (!stream) {
-                LOG_ERROR(Lib_AudioOut, "Failed to decode audio file: {}", host_path.string());
+                LOG_ERROR(Lib_AudioOut, "Failed to decode audio file: %s",
+                          (host_path.string()).c_str());
                 break;
             }
             const unsigned hz = audio_stream_rate(stream);
@@ -506,7 +510,7 @@ private:
             // The track goes to the frontend through the core's mix, resampled to its 48 kHz
             // straight from the window it is decoded into, into the input's ring.
             if (channels > 2) {
-                LOG_ERROR(Lib_AudioOut, "Music with {} channels is not played", channels);
+                LOG_ERROR(Lib_AudioOut, "Music with %u channels is not played", channels);
                 audio_stream_close(stream);
                 break;
             }
@@ -668,7 +672,7 @@ private:
             start_time_ms = 0;
             (void)retro_atomic_exchange_int(&m_current_track_idx, track_idx);
             (void)retro_atomic_exchange_64(&m_current_time_ms, 0);
-            LOG_INFO(Lib_AudioOut, "Auto-advancing to track_index={}", track_idx);
+            LOG_INFO(Lib_AudioOut, "Auto-advancing to track_index=%u", track_idx);
         }
 
         if (retro_atomic_load_seq_cst_int(&m_stop_requested) == 0) {
@@ -723,10 +727,11 @@ static s32 PS4_SYSV_ABI sceMusicPlayerServiceInitialize2(size_t pool_size, void*
 
 static s32 PS4_SYSV_ABI sceMusicPlayerServiceInitialize3(size_t pool_size, void* pool_addr,
                                                          u64 unk1, u64 unk2) {
-    LOG_INFO(Lib_AudioOut, "pool_size={:#x}, pool_addr={}", pool_size, pool_addr);
+    LOG_INFO(Lib_AudioOut, "pool_size=0x%zx, pool_addr=0x%llx", pool_size,
+             static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(pool_addr)));
     if (pool_size < 0x200000 || !pool_addr) {
-        LOG_ERROR(Lib_AudioOut, "invalid arguments: pool_size={:#x}, pool_addr={}", pool_size,
-                  pool_addr);
+        LOG_ERROR(Lib_AudioOut, "invalid arguments: pool_size=0x%zx, pool_addr=0x%llx", pool_size,
+                  static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(pool_addr)));
         return ORBIS_MUSIC_PLAYER_SERVICE_ERROR_INVALID_PARAMETER;
     }
     return ORBIS_OK;
@@ -740,12 +745,15 @@ static s32 PS4_SYSV_ABI sceMusicPlayerServiceTerminate() {
 
 static s32 PS4_SYSV_ABI sceMusicPlayerServiceSetUsbStorageDeviceInfo(
     const OrbisMusicPlayerUsbDeviceInfo* devices, u32 count) {
-    LOG_INFO(Lib_AudioOut, "devices={}, count={}", static_cast<const void*>(devices), count);
+    LOG_INFO(Lib_AudioOut, "devices=0x%llx, count=%u",
+             static_cast<unsigned long long>(
+                 reinterpret_cast<uintptr_t>(static_cast<const void*>(devices))),
+             count);
     return MusicPlayerManager::Instance().SetUsbStorageDeviceInfo(devices, count);
 }
 
 static s32 PS4_SYSV_ABI sceMusicPlayerServiceRemoveAllData(s32 player_id) {
-    LOG_INFO(Lib_AudioOut, "player_id={}", player_id);
+    LOG_INFO(Lib_AudioOut, "player_id=%d", player_id);
     MusicPlayerManager::Instance().ClearTracks();
     return ORBIS_OK;
 }
@@ -753,7 +761,8 @@ static s32 PS4_SYSV_ABI sceMusicPlayerServiceRemoveAllData(s32 player_id) {
 static s32 SetTrackListInternal(s32 player_id, const void* tracks, u32 count, u32 flags,
                                 size_t track_entry_size) {
     if (!tracks || count == 0) {
-        LOG_ERROR(Lib_AudioOut, "invalid arguments: tracks={}, count={}", tracks, count);
+        LOG_ERROR(Lib_AudioOut, "invalid arguments: tracks=0x%llx, count=%u",
+                  static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(tracks)), count);
         return ORBIS_MUSIC_PLAYER_SERVICE_ERROR_INVALID_PARAMETER;
     }
 
@@ -761,13 +770,13 @@ static s32 SetTrackListInternal(s32 player_id, const void* tracks, u32 count, u3
     std::vector<std::string> track_uris;
     track_uris.reserve(count);
 
-    LOG_INFO(Lib_AudioOut, "player_id={}, count={}, flags={}, stride={:#x}", player_id, count,
+    LOG_INFO(Lib_AudioOut, "player_id=%d, count=%u, flags=%u, stride=0x%zx", player_id, count,
              flags, track_entry_size);
 
     for (u32 i = 0; i < count; i++) {
         const char* uri_str = reinterpret_cast<const char*>(base + i * track_entry_size);
         track_uris.emplace_back(uri_str);
-        LOG_DEBUG(Lib_AudioOut, "  track[{}]: {}", i, uri_str);
+        LOG_DEBUG(Lib_AudioOut, "  track[%u]: %s", i, uri_str);
     }
 
     MusicPlayerManager::Instance().SetTrackList(track_uris);
@@ -786,8 +795,8 @@ static s32 PS4_SYSV_ABI sceMusicPlayerServiceSetTrackList2(s32 player_id, const 
 
 static s32 PS4_SYSV_ABI sceMusicPlayerServicePlay(s32 player_id, u32 track_index, s64 start_time_s,
                                                   s32 flags) {
-    LOG_INFO(Lib_AudioOut, "player_id={}, track_index={}, start_time_s={}, flags={}", player_id,
-             track_index, start_time_s, flags);
+    LOG_INFO(Lib_AudioOut, "player_id=%d, track_index=%u, start_time_s=%" PRId64 ", flags=%d",
+             player_id, track_index, start_time_s, flags);
     auto& mgr = MusicPlayerManager::Instance();
     u64 start_time_ms = start_time_s > 0 ? static_cast<u64>(start_time_s * 1000) : 0;
     mgr.PlayOrSeek(track_index, start_time_ms);
@@ -796,8 +805,8 @@ static s32 PS4_SYSV_ABI sceMusicPlayerServicePlay(s32 player_id, u32 track_index
 
 static s32 PS4_SYSV_ABI sceMusicPlayerServicePlayStartByTime(s32 player_id, u32 track_index,
                                                              s64 start_time_s) {
-    LOG_INFO(Lib_AudioOut, "player_id={}, track_index={}, start_time_s={}", player_id, track_index,
-             start_time_s);
+    LOG_INFO(Lib_AudioOut, "player_id=%d, track_index=%u, start_time_s=%" PRId64, player_id,
+             track_index, start_time_s);
     auto& mgr = MusicPlayerManager::Instance();
     u64 start_time_ms = start_time_s > 0 ? static_cast<u64>(start_time_s * 1000) : 0;
     mgr.PlayOrSeek(track_index, start_time_ms);
@@ -835,7 +844,7 @@ static s32 PS4_SYSV_ABI sceMusicPlayerServicePreviousTrack() {
 }
 
 static s32 PS4_SYSV_ABI sceMusicPlayerServiceSeek(s32 player_id, u32 track_index, s64 time_s) {
-    LOG_INFO(Lib_AudioOut, "player_id={}, track_index={}, time_s={}", player_id, track_index,
+    LOG_INFO(Lib_AudioOut, "player_id=%d, track_index=%u, time_s=%" PRId64, player_id, track_index,
              time_s);
     auto& mgr = MusicPlayerManager::Instance();
     u64 time_ms = time_s > 0 ? static_cast<u64>(time_s * 1000) : 0;
@@ -844,9 +853,9 @@ static s32 PS4_SYSV_ABI sceMusicPlayerServiceSeek(s32 player_id, u32 track_index
 }
 
 static s32 PS4_SYSV_ABI sceMusicPlayerServiceSetAudioVolume(s32 volume) {
-    LOG_INFO(Lib_AudioOut, "volume={}", volume);
+    LOG_INFO(Lib_AudioOut, "volume=%d", volume);
     if (volume < 0 || volume > 25) {
-        LOG_ERROR(Lib_AudioOut, "invalid volume={}", volume);
+        LOG_ERROR(Lib_AudioOut, "invalid volume=%d", volume);
         return ORBIS_MUSIC_PLAYER_SERVICE_ERROR_INVALID_PARAMETER;
     }
     MusicPlayerManager::Instance().SetVolume(volume);
@@ -864,9 +873,9 @@ static s32 PS4_SYSV_ABI sceMusicPlayerServiceGetAudioVolume(s32* volume, s32* mu
 }
 
 static s32 PS4_SYSV_ABI sceMusicPlayerServiceSetShuffle(u32 mode) {
-    LOG_INFO(Lib_AudioOut, "mode={}", mode);
+    LOG_INFO(Lib_AudioOut, "mode=%u", mode);
     if (mode > 1) {
-        LOG_ERROR(Lib_AudioOut, "invalid mode={}", mode);
+        LOG_ERROR(Lib_AudioOut, "invalid mode=%u", mode);
         return ORBIS_MUSIC_PLAYER_SERVICE_ERROR_INVALID_PARAMETER;
     }
     MusicPlayerManager::Instance().SetShuffle(mode);
@@ -874,9 +883,9 @@ static s32 PS4_SYSV_ABI sceMusicPlayerServiceSetShuffle(u32 mode) {
 }
 
 static s32 PS4_SYSV_ABI sceMusicPlayerServiceSetRepeatMode(u32 mode) {
-    LOG_INFO(Lib_AudioOut, "mode={}", mode);
+    LOG_INFO(Lib_AudioOut, "mode=%u", mode);
     if (mode > 2) {
-        LOG_ERROR(Lib_AudioOut, "invalid mode={}", mode);
+        LOG_ERROR(Lib_AudioOut, "invalid mode=%u", mode);
         return ORBIS_MUSIC_PLAYER_SERVICE_ERROR_INVALID_PARAMETER;
     }
     MusicPlayerManager::Instance().SetRepeatMode(mode);
@@ -959,7 +968,7 @@ static s32 PS4_SYSV_ABI sceMusicPlayerServiceReceiveEvent(void* buffer) {
     auto& mgr = MusicPlayerManager::Instance();
     MusicPlayerManager::MusicEvent ev{};
     if (mgr.PopEvent(ev, 50)) {
-        LOG_DEBUG(Lib_AudioOut, "delivering event_id={}, track_idx={}", ev.event_id,
+        LOG_DEBUG(Lib_AudioOut, "delivering event_id=%u, track_idx=%u", ev.event_id,
                   ev.track_index);
         *reinterpret_cast<u32*>(buf + 0x08) = 1;
         *reinterpret_cast<u32*>(buf + 0x20) = 1;
@@ -981,22 +990,22 @@ static s32 PS4_SYSV_ABI sceMusicPlayerServiceGetTrackInfo(void* a, void* b) {
 }
 
 static s32 PS4_SYSV_ABI sceMusicPlayerServiceBeginTransaction(s32 a) {
-    LOG_INFO(Lib_AudioOut, "called: a={}", a);
+    LOG_INFO(Lib_AudioOut, "called: a=%d", a);
     return MusicPlayerManager::Instance().BeginTransaction();
 }
 
 static s32 PS4_SYSV_ABI sceMusicPlayerServiceEndTransaction(s32 a) {
-    LOG_INFO(Lib_AudioOut, "called: a={}", a);
+    LOG_INFO(Lib_AudioOut, "called: a=%d", a);
     return MusicPlayerManager::Instance().EndTransaction();
 }
 
 static s32 PS4_SYSV_ABI sceMusicPlayerServiceCreateTrackList(u32 tracklist_id) {
-    LOG_INFO(Lib_AudioOut, "called: tracklist_id={}", tracklist_id);
+    LOG_INFO(Lib_AudioOut, "called: tracklist_id=%u", tracklist_id);
     return MusicPlayerManager::Instance().CreateTrackList(tracklist_id);
 }
 
 static s32 PS4_SYSV_ABI sceMusicPlayerServiceRemoveTrackList(u32 tracklist_id) {
-    LOG_INFO(Lib_AudioOut, "called: tracklist_id={}", tracklist_id);
+    LOG_INFO(Lib_AudioOut, "called: tracklist_id=%u", tracklist_id);
     return MusicPlayerManager::Instance().RemoveTrackList(tracklist_id);
 }
 
@@ -1007,13 +1016,13 @@ static s32 PS4_SYSV_ABI sceMusicPlayerServiceInsertTrackEntry(u32 tracklist_id, 
         return ORBIS_MUSIC_PLAYER_SERVICE_ERROR_INVALID_PARAMETER;
     }
     const char* uri_str = reinterpret_cast<const char*>(track_entry);
-    LOG_INFO(Lib_AudioOut, "called: tracklist_id={}, track_index={}, uri={}", tracklist_id,
+    LOG_INFO(Lib_AudioOut, "called: tracklist_id=%u, track_index=%u, uri=%s", tracklist_id,
              track_index, uri_str);
     return MusicPlayerManager::Instance().InsertTrackEntry(tracklist_id, track_index, uri_str);
 }
 
 static s32 PS4_SYSV_ABI sceMusicPlayerServiceRemoveTrackEntry(u32 tracklist_id, u32 track_index) {
-    LOG_INFO(Lib_AudioOut, "called: tracklist_id={}, track_index={}", tracklist_id, track_index);
+    LOG_INFO(Lib_AudioOut, "called: tracklist_id=%u, track_index=%u", tracklist_id, track_index);
     return MusicPlayerManager::Instance().RemoveTrackEntry(tracklist_id, track_index);
 }
 

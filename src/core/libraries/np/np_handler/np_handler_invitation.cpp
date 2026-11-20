@@ -32,7 +32,7 @@ bool NpHandler::SendSessionInvitation(s32 user_id, const std::string& session_id
     }
     const std::string token = GetBearerToken(user_id);
     if (token.empty()) {
-        LOG_ERROR(NpHandler, "no bearer token for user_id={}", user_id);
+        LOG_ERROR(NpHandler, "no bearer token for user_id=%d", user_id);
         return false;
     }
 
@@ -101,14 +101,15 @@ bool NpHandler::SendSessionInvitation(s32 user_id, const std::string& session_id
         net_http_delete(http);
     };
     if (!Core::Net::NetService::Instance().Run(run, &post) || post.status < 0) {
-        LOG_ERROR(NpHandler, "POST {} failed (no response)", path);
+        LOG_ERROR(NpHandler, "POST %s failed (no response)", (path).c_str());
         return false;
     }
     if (post.status != 200 && post.status != 204) {
-        LOG_ERROR(NpHandler, "POST {} -> HTTP {}", path, post.status);
+        LOG_ERROR(NpHandler, "POST %s -> HTTP %d", (path).c_str(), post.status);
         return false;
     }
-    LOG_INFO(NpHandler, "sent invite to {} recipient(s) for session '{}'", to.size(), session_id);
+    LOG_INFO(NpHandler, "sent invite to %zu recipient(s) for session '%s'", to.size(),
+             (session_id).c_str());
     return true;
 }
 
@@ -142,10 +143,10 @@ void NpHandler::PostSessionInvitationEvent(s32 user_id, const std::string& sessi
 
     Libraries::SystemService::PushSystemServiceEvent(event);
     LOG_INFO(NpHandler,
-             "Posted SESSION_INVITATION user_id={} session='{}' invitation='{}' flag={} "
-             "onlineId='{}' referral='{}'({})",
-             user_id, session_id, invitation_id, param->flag, accepter_online_id, inviter_online_id,
-             inviter_account_id);
+             "Posted SESSION_INVITATION user_id=%d session='%s' invitation='%s' flag=%d "
+             "onlineId='%s' referral='%s'(%" PRIu64 ")",
+             user_id, (session_id).c_str(), (invitation_id).c_str(), param->flag,
+             (accepter_online_id).c_str(), (inviter_online_id).c_str(), inviter_account_id);
 }
 
 std::vector<NpHandler::PendingInvitation> NpHandler::GetPendingInvitations(s32 user_id) const {
@@ -189,14 +190,16 @@ bool NpHandler::AcceptSessionInvitation(s32 user_id, const std::string& invitati
     // Whatever surface handled it (RECV dialog or the emulator prompt), retire the other one.
     ovl_invite_remove(invitation_id.c_str());
     if (!found) {
-        LOG_ERROR(NpHandler, "no pending invite '{}' for user_id={}", invitation_id, user_id);
+        LOG_ERROR(NpHandler, "no pending invite '%s' for user_id=%d", (invitation_id).c_str(),
+                  user_id);
         return false;
     }
     // Raise the join event now that the user has explicitly accepted (via the RECV dialog or the
     // emulator's system-UI equivalent).
     PostSessionInvitationEvent(user_id, inv.session_id, invitation_id, inv.to_npid, inv.from_npid,
                                inv.from_account_id);
-    LOG_INFO(NpHandler, "accepted '{}' session='{}'", invitation_id, inv.session_id);
+    LOG_INFO(NpHandler, "accepted '%s' session='%s'", (invitation_id).c_str(),
+             (inv.session_id).c_str());
     return true;
 }
 
@@ -212,7 +215,7 @@ void NpHandler::DeclineSessionInvitation(s32 user_id, const std::string& invitat
                     v.begin(), v.end(),
                     [&](const PendingInvitation& p) { return p.invitation_id == invitation_id; }),
                 v.end());
-        LOG_INFO(NpHandler, "dismissed '{}' for user_id={}", invitation_id, user_id);
+        LOG_INFO(NpHandler, "dismissed '%s' for user_id=%d", (invitation_id).c_str(), user_id);
     });
 }
 

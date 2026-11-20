@@ -85,7 +85,8 @@ bool AvPlayerSource::Init(const AvPlayerInitData& init_data, std::string_view pa
         std::min(std::max(2, init_data.num_output_video_framebuffers), 16);
 
     if (init_data.file_replacement.open != nullptr) {
-        LOG_INFO(Lib_AvPlayer, "Opening {} through the game-provided file replacement", path);
+        LOG_INFO(Lib_AvPlayer, "Opening %.*s through the game-provided file replacement",
+                 static_cast<int>((path).size()), (path).data());
         m_up_data_streamer = std::make_unique<AvPlayerFileStreamer>(init_data.file_replacement);
     } else {
         const auto mnt = Common::Singleton<Core::FileSys::MntPoints>::Instance();
@@ -94,21 +95,23 @@ bool AvPlayerSource::Init(const AvPlayerInitData& init_data, std::string_view pa
             if (auto host = handle->GetHostPath(); host.has_value()) {
                 host_path = *host;
             } else {
-                LOG_INFO(Lib_AvPlayer, "Opening {} through a non-host backend handle", path);
+                LOG_INFO(Lib_AvPlayer, "Opening %.*s through a non-host backend handle",
+                         static_cast<int>((path).size()), (path).data());
                 m_up_data_streamer = std::make_unique<AvPlayerHandleStreamer>(std::move(handle));
             }
         } else {
             host_path = mnt->GetHostPath(path);
         }
         if (!m_up_data_streamer) {
-            LOG_INFO(Lib_AvPlayer, "Opening {} from host path {}", path, host_path.string());
+            LOG_INFO(Lib_AvPlayer, "Opening %.*s from host path %s",
+                     static_cast<int>((path).size()), (path).data(), (host_path.string()).c_str());
             // Mapped, the samples are read in place
             const auto u8path = host_path.u8string();
             m_file = filestream_open(reinterpret_cast<const char*>(u8path.c_str()),
                                      RETRO_VFS_FILE_ACCESS_READ,
                                      RETRO_VFS_FILE_ACCESS_HINT_FREQUENT_ACCESS);
             if (!m_file) {
-                LOG_ERROR(Lib_AvPlayer, "Could not open {}", host_path.string());
+                LOG_ERROR(Lib_AvPlayer, "Could not open %s", (host_path.string()).c_str());
                 return false;
             }
             s64 mapped = 0;
@@ -132,7 +135,8 @@ bool AvPlayerSource::Init(const AvPlayerInitData& init_data, std::string_view pa
         // read into place and handed to the decoders from there
         m_owned = static_cast<u8*>(std::malloc(std::max<size_t>(m_size, 1)));
         if (!m_owned) {
-            LOG_ERROR(Lib_AvPlayer, "Could not allocate {} bytes for {}", m_size, path);
+            LOG_ERROR(Lib_AvPlayer, "Could not allocate %zu bytes for %.*s", m_size,
+                      static_cast<int>((path).size()), (path).data());
             return false;
         }
         m_data = m_owned;
@@ -149,7 +153,7 @@ bool AvPlayerSource::Load(size_t hi) {
     }
     const size_t lo = m_loaded_hi;
     if (m_up_data_streamer->ReadAt(lo, m_owned + lo, hi - lo) != hi - lo) {
-        LOG_ERROR(Lib_AvPlayer, "Could not read bytes {}..{} of the source", lo, hi);
+        LOG_ERROR(Lib_AvPlayer, "Could not read bytes %zu..%zu of the source", lo, hi);
         return false;
     }
     m_loaded_hi = hi;
@@ -216,7 +220,7 @@ bool AvPlayerSource::FindStreams() {
 }
 
 s32 AvPlayerSource::GetStreamCount() {
-    LOG_INFO(Lib_AvPlayer, "Stream Count: {}", m_streams.size());
+    LOG_INFO(Lib_AvPlayer, "Stream Count: %zu", m_streams.size());
     return m_streams.size();
 }
 
@@ -241,20 +245,22 @@ AvPlayerStreamInfo AvPlayerSource::CreateStreamInfo(u32 stream_index) {
     const u8* lang = rmp4_get_track_language(m_demuxer, track_index, &lang_len, &kind);
     const size_t lang_copy = lang ? std::min(lang_len, size_t(3)) : 0;
     if (lang_copy) {
-        LOG_INFO(Lib_AvPlayer, "Stream {} language = {}", stream_index,
-                 std::string_view(reinterpret_cast<const char*>(lang), lang_len));
+        LOG_INFO(Lib_AvPlayer, "Stream %u language = %.*s", stream_index,
+                 static_cast<int>(
+                     (std::string_view(reinterpret_cast<const char*>(lang), lang_len)).size()),
+                 (std::string_view(reinterpret_cast<const char*>(lang), lang_len)).data());
     } else {
-        LOG_WARNING(Lib_AvPlayer, "Stream {} language is unknown", stream_index);
+        LOG_WARNING(Lib_AvPlayer, "Stream %u language is unknown", stream_index);
     }
     if (info.type == AvPlayerStreamType::Video) {
-        LOG_INFO(Lib_AvPlayer, "Stream {} is a video stream.", stream_index);
+        LOG_INFO(Lib_AvPlayer, "Stream %u is a video stream.", stream_index);
         info.details.video.aspect_ratio =
             track.height ? f32(track.width) / f32(track.height) : 0.0f;
         info.details.video.width = Common::AlignUp<u32>(track.width, 16);
         info.details.video.height = Common::AlignUp<u32>(track.height, 16);
         std::memcpy(info.details.video.language_code, lang, lang_copy);
     } else {
-        LOG_INFO(Lib_AvPlayer, "Stream {} is an audio stream.", stream_index);
+        LOG_INFO(Lib_AvPlayer, "Stream %u is an audio stream.", stream_index);
         info.details.audio.channel_count = static_cast<u16>(track.channels);
         info.details.audio.sample_rate = track.sample_rate;
         info.details.audio.size = 0; // sceAvPlayerGetStreamInfo() is expected to set this to 0
@@ -265,7 +271,7 @@ AvPlayerStreamInfo AvPlayerSource::CreateStreamInfo(u32 stream_index) {
 
 bool AvPlayerSource::GetStreamInfo(u32 stream_index, AvPlayerStreamInfo& info) {
     if (stream_index >= m_streams.size()) {
-        LOG_ERROR(Lib_AvPlayer, "Could not get stream {} info.", stream_index);
+        LOG_ERROR(Lib_AvPlayer, "Could not get stream %u info.", stream_index);
         return false;
     }
     info = m_streams[stream_index].info;
@@ -278,10 +284,10 @@ bool AvPlayerSource::EnableStream(u32 stream_index) {
     }
     if (m_streams[stream_index].info.type == AvPlayerStreamType::Video) {
         m_video_stream_index = stream_index;
-        LOG_INFO(Lib_AvPlayer, "Video stream {} enabled", stream_index);
+        LOG_INFO(Lib_AvPlayer, "Video stream %u enabled", stream_index);
     } else {
         m_audio_stream_index = stream_index;
-        LOG_INFO(Lib_AvPlayer, "Audio stream {} enabled", stream_index);
+        LOG_INFO(Lib_AvPlayer, "Audio stream %u enabled", stream_index);
     }
     return true;
 }
@@ -306,7 +312,7 @@ bool AvPlayerSource::Start() {
         m_video_decoder = std::make_unique<Videodec::SwDecoder>(track.codec == RMP4_CODEC_H265);
         if (!m_video_decoder->IsOpen() ||
             !m_video_decoder->SetExtradata(track.codec_private, track.codec_private_size)) {
-            LOG_ERROR(Lib_AvPlayer, "Could not open the decoder for video stream {}.",
+            LOG_ERROR(Lib_AvPlayer, "Could not open the decoder for video stream %d.",
                       m_video_stream_index.value());
             return false;
         }
@@ -327,7 +333,7 @@ bool AvPlayerSource::Start() {
         }
         m_audio_decoder = raac_open(track.codec_private, track.codec_private_size);
         if (!m_audio_decoder) {
-            LOG_ERROR(Lib_AvPlayer, "Could not open the decoder for audio stream {}.",
+            LOG_ERROR(Lib_AvPlayer, "Could not open the decoder for audio stream %d.",
                       m_audio_stream_index.value());
             return false;
         }
@@ -572,7 +578,7 @@ void AvPlayerSource::DemuxerThread() {
             break;
         }
         if (res < 0 || res == RMP4_READ_AGAIN) {
-            LOG_ERROR(Lib_AvPlayer, "Could not read a sample: error = {}", res);
+            LOG_ERROR(Lib_AvPlayer, "Could not read a sample: error = %d", res);
             m_state.OnError();
             return;
         }
@@ -624,7 +630,7 @@ void AvPlayerSource::VideoDecoderThread() {
         const GuestBuffer& buffer = m_video_pool[*spare];
         u8* p_buffer = buffer.GetBuffer();
         if (!decoder.WriteNV12(p_buffer, buffer.Size())) {
-            LOG_ERROR(Lib_AvPlayer, "The {}x{} picture does not fit the frame buffer",
+            LOG_ERROR(Lib_AvPlayer, "The %ux%u picture does not fit the frame buffer",
                       decoder.Width(), decoder.Height());
             return true; // the buffer is kept for the next picture
         }
@@ -666,7 +672,7 @@ void AvPlayerSource::VideoDecoderThread() {
         const Videodec::PictureMeta meta{.pts = packet.timestamp};
         const int res = decoder.Decode(packet.data, packet.size, meta);
         if (res < 0) {
-            LOG_ERROR(Lib_AvPlayer, "Could not decode a video sample. Error = {}", res);
+            LOG_ERROR(Lib_AvPlayer, "Could not decode a video sample. Error = %d", res);
             m_state.OnError();
             return;
         }
@@ -697,7 +703,7 @@ void AvPlayerSource::AudioDecoderThread() {
     const u32 sample_rate = raac_sample_rate(m_audio_decoder);
     if (channels == 0 || channels > MaxAudioChannels ||
         raac_frame_len(m_audio_decoder) > MaxAudioFrame) {
-        LOG_ERROR(Lib_AvPlayer, "Unsupported audio: {} channels, {} samples a frame", channels,
+        LOG_ERROR(Lib_AvPlayer, "Unsupported audio: %u channels, %u samples a frame", channels,
                   raac_frame_len(m_audio_decoder));
         m_state.OnError();
         return;
@@ -716,7 +722,7 @@ void AvPlayerSource::AudioDecoderThread() {
         auto* pcm = reinterpret_cast<s16*>(m_audio_pool[*spare].GetBuffer());
         const int samples = raac_decode_s16(m_audio_decoder, packet.data, packet.size, pcm);
         if (samples < 0) {
-            LOG_ERROR(Lib_AvPlayer, "Could not decode an audio sample. Error = {}", samples);
+            LOG_ERROR(Lib_AvPlayer, "Could not decode an audio sample. Error = %d", samples);
             m_state.OnError();
             return;
         }

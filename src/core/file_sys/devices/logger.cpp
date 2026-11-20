@@ -53,9 +53,11 @@ static void EmitLine(void* ctx, const char* text, size_t len) {
 
 void Logger::Emit(std::string_view line) const {
     if (is_err) {
-        LOG_ERROR(Tty, "[{}] {}", prefix, line);
+        LOG_ERROR(Tty, "[%s] %.*s", (prefix).c_str(), static_cast<int>((line).size()),
+                  (line).data());
     } else {
-        LOG_INFO(Tty, "[{}] {}", prefix, line);
+        LOG_INFO(Tty, "[%s] %.*s", (prefix).c_str(), static_cast<int>((line).size()),
+                 (line).data());
     }
 }
 

@@ -10,8 +10,6 @@
 #include <set>
 #include <sstream>
 #include <features/features_cpu.h>
-#include <fmt/core.h>
-#include <fmt/xchar.h>
 #include <streams/file_stream.h>
 
 #include <chrono>
@@ -225,14 +223,15 @@ std::map<s32, std::string> ExtractTrophies(std::string_view npbind_guest,
         }
 
         if (static_cast<s32>(np_comm_ids.size()) <= trophy_index) {
-            LOG_WARNING(Common_Filesystem, "Trophy index {} does not have a corresponding NPCommId",
+            LOG_WARNING(Common_Filesystem, "Trophy index %d does not have a corresponding NPCommId",
                         trophy_index);
             continue;
         }
 
         const std::string np_comm_id = np_comm_ids[trophy_index];
         trophy_index_map[trophy_index] = np_comm_id;
-        LOG_DEBUG(Loader, "Mapped trophy index {} to NPCommID: {}", trophy_index, np_comm_id);
+        LOG_DEBUG(Loader, "Mapped trophy index %d to NPCommID: %s", trophy_index,
+                  (np_comm_id).c_str());
 
         // Extract the actual trophies if they're not extracted yet.
         const auto& trophy_output_dir =
@@ -242,7 +241,7 @@ std::map<s32, std::string> ExtractTrophies(std::string_view npbind_guest,
             // Mapped where it lies, or decoded out of an archive
             const auto trp_bytes = mnt->ReadFile(entry_guest);
             if (!trp_bytes) {
-                LOG_ERROR(Loader, "Couldn't read trophy file {}", entry.name);
+                LOG_ERROR(Loader, "Couldn't read trophy file %s", (entry.name).c_str());
                 continue;
             }
             const auto trp_source = mnt->GetHostPath(entry_guest);
@@ -254,13 +253,13 @@ std::map<s32, std::string> ExtractTrophies(std::string_view npbind_guest,
                     entry_guest, nullptr, Core::FileSys::MntPoints::HostPathType::Base);
                 if (!base_source.empty() && base_source != trp_source &&
                     Common::FS::IsFile(base_source)) {
-                    LOG_WARNING(Loader, "Retrying trophy extraction with base game file {}",
-                                base_source.string());
+                    LOG_WARNING(Loader, "Retrying trophy extraction with base game file %s",
+                                (base_source.string()).c_str());
                     ok = trp.Extract(base_source, np_comm_id, trophy_output_dir);
                 }
             }
             if (!ok) {
-                LOG_ERROR(Loader, "Couldn't extract trophy file {}", entry.name);
+                LOG_ERROR(Loader, "Couldn't extract trophy file %s", (entry.name).c_str());
                 continue;
             }
         }
@@ -279,15 +278,16 @@ std::map<s32, std::string> ExtractTrophies(std::string_view npbind_guest,
                 Common::FS::CreateDirectories(temp);
                 const auto tropconf = trophy_output_dir / "Xml" / "TROPCONF.XML";
                 if (!Common::FS::CopyAll(tropconf, user_trophy_file)) {
-                    LOG_ERROR(Loader, "Failed to copy {} to {}", tropconf.string(),
-                              user_trophy_file.string());
+                    LOG_ERROR(Loader, "Failed to copy %s to %s", (tropconf.string()).c_str(),
+                              (user_trophy_file.string()).c_str());
                 }
             }
         }
     }
 
     if (trophy_index_map.empty()) {
-        LOG_WARNING(Common_Filesystem, "No usable trophy files found in {}", trophy_dir_guest);
+        LOG_WARNING(Common_Filesystem, "No usable trophy files found in %.*s",
+                    static_cast<int>((trophy_dir_guest).size()), (trophy_dir_guest).data());
     }
 
     return trophy_index_map;
@@ -336,12 +336,12 @@ void Emulator::Run(std::filesystem::path file, std::vector<std::string> args,
     const auto rebase_to_base_game = [](std::filesystem::path& folder) {
         if (const auto base = FileSys::BaseGameFromOverlay(folder)) {
             if (const auto resolved = FileSys::ResolveGameRoot(*base)) {
-                LOG_INFO(Loader, "Launched from overlay {}, using base game {} as /app0",
-                         folder.string(), resolved->string());
+                LOG_INFO(Loader, "Launched from overlay %s, using base game %s as /app0",
+                         (folder.string()).c_str(), (resolved->string()).c_str());
                 folder = *resolved;
             } else {
-                LOG_WARNING(Loader, "Launched from overlay {} but no base game was found",
-                            folder.string());
+                LOG_WARNING(Loader, "Launched from overlay %s but no base game was found",
+                            (folder.string()).c_str());
             }
         }
     };
@@ -362,10 +362,11 @@ void Emulator::Run(std::filesystem::path file, std::vector<std::string> args,
         auto relative_path = std::filesystem::relative(path, base, relative_error);
         if (relative_error) {
             LOG_WARNING(Common_Filesystem,
-                        "Failed to canonicalize executable path {} relative to {}: {}. Falling "
+                        "Failed to canonicalize executable path %s relative to %s: %s. Falling "
                         "back to lexical path resolution.",
-                        Common::FS::PathToUTF8String(path), Common::FS::PathToUTF8String(base),
-                        relative_error.message());
+                        (Common::FS::PathToUTF8String(path)).c_str(),
+                        (Common::FS::PathToUTF8String(base)).c_str(),
+                        (relative_error.message()).c_str());
 
             relative_path = path.lexically_relative(base);
         }
@@ -384,8 +385,9 @@ void Emulator::Run(std::filesystem::path file, std::vector<std::string> args,
     }
 
     if (eboot_name.empty()) {
-        LOG_ERROR(Common_Filesystem, "Failed to derive executable path {} relative to {}",
-                  Common::FS::PathToUTF8String(file), Common::FS::PathToUTF8String(game_folder));
+        LOG_ERROR(Common_Filesystem, "Failed to derive executable path %s relative to %s",
+                  (Common::FS::PathToUTF8String(file)).c_str(),
+                  (Common::FS::PathToUTF8String(game_folder)).c_str());
         return;
     }
 
@@ -481,72 +483,91 @@ void Emulator::Run(std::filesystem::path file, std::vector<std::string> args,
 
     game_info.game_folder = game_folder;
 
-    ASSERT_MSG(mnt->Exists(guest_eboot_path), "Guest app's main executable {} does not exist",
-               guest_eboot_path);
+    ASSERT_MSG(mnt->Exists(guest_eboot_path), "Guest app's main executable %s does not exist",
+               (guest_eboot_path).c_str());
 
-    LOG_INFO(Loader, "Starting shadps4 emulator v{} ", Common::g_version);
-    LOG_INFO(Loader, "Revision {}", Common::g_scm_rev);
-    LOG_INFO(Loader, "Branch {}", Common::g_scm_branch);
-    LOG_INFO(Loader, "Description {}", Common::g_scm_desc);
-    LOG_INFO(Loader, "Remote {}", Common::g_scm_remote_url);
+    LOG_INFO(Loader, "Starting shadps4 emulator v%s ", Common::g_version);
+    LOG_INFO(Loader, "Revision %s", Common::g_scm_rev);
+    LOG_INFO(Loader, "Branch %s", Common::g_scm_branch);
+    LOG_INFO(Loader, "Description %s", Common::g_scm_desc);
+    LOG_INFO(Loader, "Remote %s", Common::g_scm_remote_url);
 
-    LOG_INFO(Config, "Game-specific config used: {}",
-             EmulatorState::GetInstance()->IsGameSpecifigConfigUsed());
+    LOG_INFO(Config, "Game-specific config used: %s",
+             (EmulatorState::GetInstance()->IsGameSpecifigConfigUsed()) ? "true" : "false");
 
-    LOG_INFO(Config, "General isNeo: {}", emu_settings_get_neo_mode());
-    LOG_INFO(Config, "General isDevKit: {}", emu_settings_get_dev_kit_mode());
-    LOG_INFO(Config, "General isConnectedToNetwork: {}", emu_settings_get_connected_to_network());
-    LOG_INFO(Config, "General isShadNetEnabled: {}", emu_settings_is_shadnet_enabled());
+    LOG_INFO(Config, "General isNeo: %s", (emu_settings_get_neo_mode()) ? "true" : "false");
+    LOG_INFO(Config, "General isDevKit: %s", (emu_settings_get_dev_kit_mode()) ? "true" : "false");
+    LOG_INFO(Config, "General isConnectedToNetwork: %s",
+             (emu_settings_get_connected_to_network()) ? "true" : "false");
+    LOG_INFO(Config, "General isShadNetEnabled: %s",
+             (emu_settings_is_shadnet_enabled()) ? "true" : "false");
 #ifdef _WIN32
-    LOG_INFO(Config, "General isRedZonePatchingEnabled: {}", emu_settings_get_redzone_patches());
+    LOG_INFO(Config, "General isRedZonePatchingEnabled: %d", emu_settings_get_redzone_patches());
 #endif
-    LOG_INFO(Config, "General p2pPort: {}", emu_settings_get_p2p_port());
-    LOG_INFO(Config, "Log sync: {}", emu_settings_get_log_sync());
-    LOG_INFO(Config, "Log skipDuplicate: {}", emu_settings_get_log_skip_duplicate());
+    LOG_INFO(Config, "General p2pPort: %d", emu_settings_get_p2p_port());
+    LOG_INFO(Config, "Log sync: %s", (emu_settings_get_log_sync()) ? "true" : "false");
+    LOG_INFO(Config, "Log skipDuplicate: %s",
+             (emu_settings_get_log_skip_duplicate()) ? "true" : "false");
 #ifdef _WIN32
-    LOG_INFO(Config, "Log type: {}", emu_settings_get_log_type());
+    LOG_INFO(Config, "Log type: %s", emu_settings_get_log_type());
 #endif
-    LOG_INFO(Config, "GPU isNullGpu: {}", emu_settings_get_null_gpu());
-    LOG_INFO(Config, "GPU readbacksMode: {}", emu_settings_get_readbacks_mode());
-    LOG_INFO(Config, "GPU readbackLinearImages: {}",
-             emu_settings_get_readback_linear_images_enabled());
-    LOG_INFO(Config, "GPU directMemoryAccess: {}", emu_settings_get_direct_memory_access_enabled());
-    LOG_INFO(Config, "GPU shouldDumpShaders: {}", emu_settings_get_dump_shaders());
-    LOG_INFO(Config, "GPU vblankFrequency: {}", emu_settings_get_vblank_frequency());
-    LOG_INFO(Config, "GPU shouldCopyGPUBuffers: {}", emu_settings_get_copy_gpu_buffers());
+    LOG_INFO(Config, "GPU isNullGpu: %s", (emu_settings_get_null_gpu()) ? "true" : "false");
+    LOG_INFO(Config, "GPU readbacksMode: %u", emu_settings_get_readbacks_mode());
+    LOG_INFO(Config, "GPU readbackLinearImages: %s",
+             (emu_settings_get_readback_linear_images_enabled()) ? "true" : "false");
+    LOG_INFO(Config, "GPU directMemoryAccess: %s",
+             (emu_settings_get_direct_memory_access_enabled()) ? "true" : "false");
+    LOG_INFO(Config, "GPU shouldDumpShaders: %s",
+             (emu_settings_get_dump_shaders()) ? "true" : "false");
+    LOG_INFO(Config, "GPU vblankFrequency: %u", emu_settings_get_vblank_frequency());
+    LOG_INFO(Config, "GPU shouldCopyGPUBuffers: %s",
+             (emu_settings_get_copy_gpu_buffers()) ? "true" : "false");
 #ifdef __linux__
-    LOG_INFO(Config, "GPU userfaultfdTracking: {}", emu_settings_get_userfaultfd());
+    LOG_INFO(Config, "GPU userfaultfdTracking: %s",
+             (emu_settings_get_userfaultfd()) ? "true" : "false");
 #endif
-    LOG_INFO(Config, "GPU inlineFetchShader: {}", emu_settings_get_inline_fetch_shader());
-    LOG_INFO(Config, "GPU fastShaderMath: {}", emu_settings_get_fast_shader_math());
-    LOG_INFO(Config, "Vulkan gpuId: {}", emu_settings_get_gpu_id());
-    LOG_INFO(Config, "Vulkan vkValidation: {}", emu_settings_get_vkvalidation_enabled());
-    LOG_INFO(Config, "Vulkan vkValidationCore: {}", emu_settings_get_vkvalidation_core_enabled());
-    LOG_INFO(Config, "Vulkan vkValidationSync: {}", emu_settings_get_vkvalidation_sync_enabled());
-    LOG_INFO(Config, "Vulkan vkValidationGpu: {}", emu_settings_get_vkvalidation_gpu_enabled());
-    LOG_INFO(Config, "Vulkan crashDiagnostics: {}", emu_settings_get_vkcrash_diagnostic_enabled());
-    LOG_INFO(Config, "Vulkan hostMarkers: {}", emu_settings_get_vkhost_markers());
-    LOG_INFO(Config, "Vulkan guestMarkers: {}", emu_settings_get_vkguest_markers());
-    LOG_INFO(Config, "Vulkan PipelineCacheEnabled: {}", emu_settings_get_pipeline_cache_enabled());
+    LOG_INFO(Config, "GPU inlineFetchShader: %s",
+             (emu_settings_get_inline_fetch_shader()) ? "true" : "false");
+    LOG_INFO(Config, "GPU fastShaderMath: %s",
+             (emu_settings_get_fast_shader_math()) ? "true" : "false");
+    LOG_INFO(Config, "Vulkan gpuId: %d", emu_settings_get_gpu_id());
+    LOG_INFO(Config, "Vulkan vkValidation: %s",
+             (emu_settings_get_vkvalidation_enabled()) ? "true" : "false");
+    LOG_INFO(Config, "Vulkan vkValidationCore: %s",
+             (emu_settings_get_vkvalidation_core_enabled()) ? "true" : "false");
+    LOG_INFO(Config, "Vulkan vkValidationSync: %s",
+             (emu_settings_get_vkvalidation_sync_enabled()) ? "true" : "false");
+    LOG_INFO(Config, "Vulkan vkValidationGpu: %s",
+             (emu_settings_get_vkvalidation_gpu_enabled()) ? "true" : "false");
+    LOG_INFO(Config, "Vulkan crashDiagnostics: %s",
+             (emu_settings_get_vkcrash_diagnostic_enabled()) ? "true" : "false");
+    LOG_INFO(Config, "Vulkan hostMarkers: %s",
+             (emu_settings_get_vkhost_markers()) ? "true" : "false");
+    LOG_INFO(Config, "Vulkan guestMarkers: %s",
+             (emu_settings_get_vkguest_markers()) ? "true" : "false");
+    LOG_INFO(Config, "Vulkan PipelineCacheEnabled: %s",
+             (emu_settings_get_pipeline_cache_enabled()) ? "true" : "false");
 
     char cpu_model[128] = {};
     cpu_features_get_model_name(cpu_model, sizeof(cpu_model));
-    LOG_INFO(Config, "CPU Model: {}", cpu_model);
-    LOG_INFO(Config, "CPU Physical Cores: {}, Logical Cores: {}",
+    LOG_INFO(Config, "CPU Model: %s", cpu_model);
+    LOG_INFO(Config, "CPU Physical Cores: %u, Logical Cores: %u",
              cpu_features_get_core_amount_physical(), cpu_features_get_core_amount());
 
     if (param_sfo_exists) {
-        LOG_INFO(Loader, "Game id: {} Title: {}", id, title);
-        LOG_INFO(Loader, "Fw: {:#x} App Version: {}", fw_version, app_version);
-        LOG_INFO(Loader, "param.sfo SDK version: {:#x}", sdk_version);
-        LOG_INFO(Loader, "eboot SDK version: {:#x}", game_info.sdk_ver);
-        LOG_INFO(Loader, "PSVR Supported: {}", (bool)psf_attributes.support_ps_vr.Value());
-        LOG_INFO(Loader, "PSVR Required: {}", (bool)psf_attributes.require_ps_vr.Value());
+        LOG_INFO(Loader, "Game id: %s Title: %s", (id).c_str(), (title).c_str());
+        LOG_INFO(Loader, "Fw: 0x%x App Version: %s", fw_version, (app_version).c_str());
+        LOG_INFO(Loader, "param.sfo SDK version: 0x%x", sdk_version);
+        LOG_INFO(Loader, "eboot SDK version: 0x%x", game_info.sdk_ver);
+        LOG_INFO(Loader, "PSVR Supported: %s",
+                 ((bool)psf_attributes.support_ps_vr.Value()) ? "true" : "false");
+        LOG_INFO(Loader, "PSVR Required: %s",
+                 ((bool)psf_attributes.require_ps_vr.Value()) ? "true" : "false");
     }
     if (!args.empty()) {
         const auto argc = std::min<size_t>(args.size(), 32);
         for (auto i = 0; i < argc; i++) {
-            LOG_INFO(Loader, "Game argument {}: {}", i, args[i]);
+            LOG_INFO(Loader, "Game argument %d: %s", i, (args[i]).c_str());
         }
         if (args.size() > 32) {
             LOG_ERROR(Loader, "Too many game arguments, only passing the first 32");
@@ -636,7 +657,8 @@ void Emulator::Run(std::filesystem::path file, std::vector<std::string> args,
     mnt->Mount(host_font2_dir, guest_font_dir);
 
     for (auto const& mount_pair : mounts) {
-        LOG_INFO(Loader, "Mounting {} to {}", mount_pair.first.string(), mount_pair.second);
+        LOG_INFO(Loader, "Mounting %s to %s", (mount_pair.first.string()).c_str(),
+                 (mount_pair.second).c_str());
         mnt->Mount(mount_pair.first, mount_pair.second);
     }
 
@@ -647,7 +669,7 @@ void Emulator::Run(std::filesystem::path file, std::vector<std::string> args,
 
     auto env_max = std::min<u64>(env_vars.size(), 63);
     for (int i = 0; i < env_max; i++) {
-        LOG_INFO(Loader, "Env {:02}: {}", i, env_vars[i]);
+        LOG_INFO(Loader, "Env %02d: %s", i, (env_vars[i]).c_str());
         Libraries::Kernel::g_environment[i] = env_vars[i].c_str();
     }
     Libraries::Kernel::g_environment[env_max] = nullptr;
@@ -658,7 +680,7 @@ void Emulator::Run(std::filesystem::path file, std::vector<std::string> args,
     // Load the module with the linker.
     const s32 eboot_index = linker->LoadModule(guest_eboot_path);
     if (eboot_index == -1) {
-        LOG_CRITICAL(Loader, "Failed to load game's eboot.bin: {}", guest_eboot_path);
+        LOG_CRITICAL(Loader, "Failed to load game's eboot.bin: %s", (guest_eboot_path).c_str());
         Common::QuickExit(0);
     }
     // FMOD's hold on the sound output only for a game with FMOD in it, set before any
@@ -667,7 +689,7 @@ void Emulator::Run(std::filesystem::path file, std::vector<std::string> args,
         const bool fmod =
             GameUsesFmod(*linker->GetModule(eboot_index), mnt->GetHostPath("/app0/sce_module"));
         game_clock_set_fmod(Libraries::Kernel::GameClock(), fmod ? 1 : 0);
-        LOG_INFO(Loader, "{}",
+        LOG_INFO(Loader, "%s",
                  fmod ? "FMOD found: the sound output waits for FMOD's mixer"
                       : "No FMOD: the sound output goes at the device's pace alone");
     }
@@ -761,7 +783,12 @@ void Emulator::Restart(std::filesystem::path eboot_path,
     const auto guest_args = std::find(args.begin(), args.end(), "--");
     args.insert(guest_args, {"--wait-for-pid", std::to_string(Debugger::GetCurrentPid())});
 
-    LOG_INFO(Common, "Relaunching the emulator with args: {}", fmt::join(args, " "));
+    std::string joined;
+    for (const std::string& arg : args) {
+        joined += joined.empty() ? "" : " ";
+        joined += arg;
+    }
+    LOG_INFO(Common, "Relaunching the emulator with args: %s", joined.c_str());
     Libraries::Np::NpHandler::GetInstance().Shutdown();
     Common::Log::Shutdown();
 
@@ -786,7 +813,7 @@ void Emulator::Restart(std::filesystem::path eboot_path,
                                   nullptr, nullptr, &si, &pi);
 
     if (!success) {
-        std::cerr << "Failed to restart game: {}" << GetLastError() << std::endl;
+        std::cerr << "Failed to restart game: " << GetLastError() << std::endl;
         Common::QuickExit(1);
     }
 
@@ -861,7 +888,7 @@ void Emulator::UpdatePlayTime(const std::string_view serial) {
     int minutes = (accumulated_seconds % 3600) / 60;
     int seconds = accumulated_seconds % 60;
 
-    std::string playTimeSaved = fmt::format("{:d}:{:02d}:{:02d}", hours, minutes, seconds);
+    std::string playTimeSaved = Common::StringFromFormat("%d:%02d:%02d", hours, minutes, seconds);
 
     const std::time_t last_time_played = std::time(nullptr);
 
@@ -874,7 +901,9 @@ void Emulator::UpdatePlayTime(const std::string_view serial) {
         const std::string_view line = text.substr(pos, end - pos);
         pos = end + 1;
         if (first_word(line) == serial) {
-            out += fmt::format("{} {} {}\n", serial, playTimeSaved, last_time_played);
+            out += Common::StringFromFormat("%.*s %s %lld\n", static_cast<int>((serial).size()),
+                                            (serial).data(), (playTimeSaved).c_str(),
+                                            static_cast<long long>(last_time_played));
             lineUpdated = true;
         } else {
             out += line;
@@ -882,7 +911,9 @@ void Emulator::UpdatePlayTime(const std::string_view serial) {
         }
     }
     if (!lineUpdated) {
-        out += fmt::format("{} {} {}\n", serial, playTimeSaved, last_time_played);
+        out += Common::StringFromFormat("%.*s %s %lld\n", static_cast<int>((serial).size()),
+                                        (serial).data(), (playTimeSaved).c_str(),
+                                        static_cast<long long>(last_time_played));
     }
 
     // Written whole, replacing the old file only once it is complete; the mapping goes first, as
@@ -894,7 +925,8 @@ void Emulator::UpdatePlayTime(const std::string_view serial) {
         return;
     }
 
-    LOG_INFO(Loader, "Playing time for {}: {} {}", serial, playTimeSaved, last_time_played);
+    LOG_INFO(Loader, "Playing time for %.*s: %s %lld", static_cast<int>((serial).size()),
+             (serial).data(), (playTimeSaved).c_str(), static_cast<long long>(last_time_played));
 }
 
 } // namespace Core

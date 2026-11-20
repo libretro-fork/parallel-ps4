@@ -3,6 +3,7 @@
 
 #include "common/scm_rev.h"
 #include "common/serdes.h"
+#include "common/string_util.h"
 #include "core/emulator_settings.h"
 #include "shader_recompiler/frontend/fetch_shader.h"
 #include "shader_recompiler/info.h"
@@ -36,7 +37,8 @@ void RegisterPipelineData(const ComputePipelineKey& key,
     sdata.Serialize(ar);
 
     Storage::DataBase::Instance().Save(Storage::BlobType::PipelineKey,
-                                       fmt::format("c_{:#018x}", key.value), ar.TakeOff());
+                                       Common::StringFromFormat("c_0x%016zx", key.value),
+                                       ar.TakeOff());
 }
 
 void RegisterPipelineData(const GraphicsPipelineKey& key, u64 hash,
@@ -55,7 +57,8 @@ void RegisterPipelineData(const GraphicsPipelineKey& key, u64 hash,
     sdata.Serialize(ar);
 
     Storage::DataBase::Instance().Save(Storage::BlobType::PipelineKey,
-                                       fmt::format("g_{:#018x}", hash), ar.TakeOff());
+                                       Common::StringFromFormat("g_0x%016" PRIx64, hash),
+                                       ar.TakeOff());
 }
 
 void RegisterShaderMeta(const Shader::Info& info,
@@ -79,7 +82,8 @@ void RegisterShaderMeta(const Shader::Info& info,
     info.Serialize(ar);
 
     Storage::DataBase::Instance().Save(Storage::BlobType::ShaderMeta,
-                                       fmt::format("{:#018x}", perm_hash), ar.TakeOff());
+                                       Common::StringFromFormat("0x%016zx", perm_hash),
+                                       ar.TakeOff());
 }
 
 void RegisterShaderBinary(std::span<const u32> spv, u64 pgm_hash, size_t perm_idx) {
@@ -89,9 +93,10 @@ void RegisterShaderBinary(std::span<const u32> spv, u64 pgm_hash, size_t perm_id
 
     // The one copy, for the writer that saves it later: the words lie in the recompiler's
     // module, which the next shader is written into
-    Storage::DataBase::Instance().Save(Storage::BlobType::ShaderBinary,
-                                       fmt::format("{:#018x}_{}", pgm_hash, perm_idx),
-                                       std::vector<u32>(spv.begin(), spv.end()));
+    Storage::DataBase::Instance().Save(
+        Storage::BlobType::ShaderBinary,
+        Common::StringFromFormat("0x%016" PRIx64 "_%zu", pgm_hash, perm_idx),
+        std::vector<u32>(spv.begin(), spv.end()));
 }
 
 bool LoadShaderMeta(Serialization::Archive& ar, Shader::Info& info,
@@ -147,7 +152,7 @@ bool PipelineCache::LoadComputePipeline(Serialization::Archive& ar) {
     sdata.Deserialize(ar);
 
     const auto meta_blob = Storage::DataBase::Instance().Load(
-        Storage::BlobType::ShaderMeta, fmt::format("{:#018x}", compute_key.value));
+        Storage::BlobType::ShaderMeta, Common::StringFromFormat("0x%016zx", compute_key.value));
     if (!meta_blob || meta_blob->empty()) {
         return false;
     }
@@ -217,8 +222,9 @@ bool PipelineCache::LoadGraphicsPipeline(Serialization::Archive& ar) {
             continue;
         }
 
-        const auto meta_blob = Storage::DataBase::Instance().Load(Storage::BlobType::ShaderMeta,
-                                                                  fmt::format("{:#018x}", hash));
+        const auto meta_blob = Storage::DataBase::Instance().Load(
+            Storage::BlobType::ShaderMeta,
+            Common::StringFromFormat("0x%016llx", static_cast<unsigned long long>(hash)));
         if (!meta_blob || meta_blob->empty()) {
             return false;
         }
@@ -256,7 +262,7 @@ bool PipelineCache::LoadPipelineStage(Serialization::Archive& ar, size_t stage) 
     // Mapped where it lies: a mapping starts on a page, so the words are aligned
     const auto spv_blob = Storage::DataBase::Instance().Load(
         Storage::BlobType::ShaderBinary,
-        fmt::format("{:#018x}_{}", program->info.pgm_hash, perm_idx));
+        Common::StringFromFormat("0x%016" PRIx64 "_%zu", program->info.pgm_hash, perm_idx));
     if (!spv_blob || spv_blob->size() < sizeof(u32)) {
         return false;
     }
@@ -282,9 +288,11 @@ bool PipelineCache::LoadPipelineStage(Serialization::Archive& ar, size_t stage) 
             const auto idx = std::distance(cached->modules.begin(), it);
             if (perm_idx != idx) {
                 LOG_WARNING(Render_Vulkan,
-                            "Cached permutation {} of {}_{:x} conflicts with index {}, skipping "
+                            "Cached permutation %zu of %s_%" PRIx64
+                            " conflicts with index %lld, skipping "
                             "preload",
-                            perm_idx, program->info.hw_stage, program->info.pgm_hash, idx);
+                            perm_idx, Shader::NameOf(program->info.hw_stage),
+                            program->info.pgm_hash, static_cast<long long>(idx));
                 return false;
             }
             module = it->module;
@@ -353,8 +361,8 @@ void PipelineCache::WarmUp() {
     }
     if (profile_data->size() != sizeof(Shader::Profile)) {
         LOG_WARNING(Render,
-                    "Pipeline cache profile has unexpected size ({} != {}). Ignoring the cache",
-                    profile_data->size(), sizeof(Shader::Profile));
+                    "Pipeline cache profile has unexpected size (%zu != %llu). Ignoring the cache",
+                    profile_data->size(), static_cast<unsigned long long>(sizeof(Shader::Profile)));
         Storage::DataBase::Instance().Close();
         return;
     }
@@ -402,9 +410,9 @@ void PipelineCache::WarmUp() {
             }
         });
 
-    LOG_INFO(Render, "Preloaded {} pipelines", num_pipelines);
+    LOG_INFO(Render, "Preloaded %u pipelines", num_pipelines);
     if (num_total_pipelines > num_pipelines) {
-        LOG_WARNING(Render, "{} stale pipelines were found. Consider re-generating the cache",
+        LOG_WARNING(Render, "%u stale pipelines were found. Consider re-generating the cache",
                     num_total_pipelines - num_pipelines);
     }
 }

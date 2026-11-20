@@ -1893,7 +1893,7 @@ int PS4_SYSV_ABI sceSystemServiceLoadExec(const char* path, const char* argv[]) 
     auto mnt = Common::Singleton<Core::FileSys::MntPoints>::Instance();
     // Validate through the mount stack so archive-backed targets resolve.
     if (!mnt->Exists(std::string_view(path))) {
-        LOG_INFO(Lib_SystemService, "Restart called with invalid file '{}', exiting.", path);
+        LOG_INFO(Lib_SystemService, "Restart called with invalid file '%s', exiting.", path);
         Common::QuickExit(0);
     }
     std::filesystem::path exec_path;
@@ -1938,7 +1938,7 @@ int PS4_SYSV_ABI sceSystemServiceNavigateToGoHome() {
 
 s32 PS4_SYSV_ABI sceSystemServiceParamGetInt(OrbisSystemServiceParamId param_id, int* value) {
     // TODO this probably should be stored in config for UI configuration
-    LOG_DEBUG(Lib_SystemService, "called param_id {}", u32(param_id));
+    LOG_DEBUG(Lib_SystemService, "called param_id %u", u32(param_id));
     if (value == nullptr) {
         LOG_ERROR(Lib_SystemService, "value is null");
         return ORBIS_SYSTEM_SERVICE_ERROR_PARAMETER;
@@ -2003,7 +2003,7 @@ s32 PS4_SYSV_ABI sceSystemServiceParamGetInt(OrbisSystemServiceParamId param_id,
                                                         : OrbisSystemParamEnterButtonAssign::Cross);
         break;
     default:
-        LOG_ERROR(Lib_SystemService, "param_id {} unsupported!", u32(param_id));
+        LOG_ERROR(Lib_SystemService, "param_id %u unsupported!", u32(param_id));
         *value = 0;
     }
 
@@ -2038,7 +2038,7 @@ s32 PS4_SYSV_ABI sceSystemServiceReceiveEvent(OrbisSystemServiceEvent* event) {
 
         *event = g_event_queue.front();
         g_event_queue.pop();
-        LOG_DEBUG(Lib_SystemService, "delivered event type={:#x} ({} still queued)",
+        LOG_DEBUG(Lib_SystemService, "delivered event type=0x%x (%zu still queued)",
                   static_cast<u32>(event->event_type), g_event_queue.size());
         return ORBIS_OK;
     });

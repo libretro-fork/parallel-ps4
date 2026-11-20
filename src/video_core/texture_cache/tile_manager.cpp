@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright 2024 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include "common/string_util.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_runtime.h"
 #include "video_core/renderer_vulkan/vk_scheduler.h"
@@ -53,8 +54,8 @@ TileManager::TileManager(const Vulkan::Instance& instance_, Vulkan::Scheduler& s
     };
     auto desc_layout_result = device.createDescriptorSetLayoutUnique(desc_layout_ci);
     ASSERT_MSG(desc_layout_result.result == vk::Result::eSuccess,
-               "Failed to create descriptor set layout: {}",
-               vk::to_string(desc_layout_result.result));
+               "Failed to create descriptor set layout: %s",
+               (vk::to_string(desc_layout_result.result)).c_str());
     desc_layout = std::move(desc_layout_result.value);
 
     const vk::DescriptorSetLayout set_layout = *desc_layout;
@@ -65,8 +66,8 @@ TileManager::TileManager(const Vulkan::Instance& instance_, Vulkan::Scheduler& s
         .pPushConstantRanges = nullptr,
     };
     auto [layout_result, layout] = device.createPipelineLayoutUnique(layout_info);
-    ASSERT_MSG(layout_result == vk::Result::eSuccess, "Failed to create pipeline layout: {}",
-               vk::to_string(layout_result));
+    ASSERT_MSG(layout_result == vk::Result::eSuccess, "Failed to create pipeline layout: %s",
+               (vk::to_string(layout_result)).c_str());
     pl_layout = std::move(layout);
 }
 
@@ -122,7 +123,7 @@ vk::Pipeline TileManager::GetTilingPipeline(const ImageInfo& info, bool is_tiler
     case 128:
         break;
     default:
-        UNREACHABLE_MSG("Unsupported tiling pixel width {}", info.num_bits);
+        UNREACHABLE_MSG("Unsupported tiling pixel width %u", info.num_bits);
     }
     const size_t num_words =
         host_spirv_tiling_comp(spirv_words.data(), spirv_words.size(), info.num_bits, is_macro,
@@ -130,10 +131,10 @@ vk::Pipeline TileManager::GetTilingPipeline(const ImageInfo& info, bool is_tiler
     ASSERT_MSG(num_words != 0, "Tiling shader does not fit");
     const auto module = Vulkan::CompileSPV({spirv_words.data(), num_words}, device);
 
-    const auto module_name = fmt::format(
-        "{}_{} {}", enum_name(&enum_names_AmdGpu_TileMode, static_cast<s64>(info.tile_mode)),
+    const auto module_name = Common::StringFromFormat(
+        "%s_%u %s", enum_name(&enum_names_AmdGpu_TileMode, static_cast<s64>(info.tile_mode)),
         info.num_bits, is_tiler ? "tiler" : "detiler");
-    LOG_INFO(Render_Vulkan, "Creating tiling pipeline {}", module_name);
+    LOG_INFO(Render_Vulkan, "Creating tiling pipeline %s", (module_name).c_str());
     Vulkan::SetObjectName(device, module, module_name);
 
     const vk::PipelineShaderStageCreateInfo shader_ci = {
@@ -148,8 +149,8 @@ vk::Pipeline TileManager::GetTilingPipeline(const ImageInfo& info, bool is_tiler
 
     auto [result, pipeline] =
         device.createComputePipelineUnique(VK_NULL_HANDLE, compute_pipeline_ci);
-    ASSERT_MSG(result == vk::Result::eSuccess, "Detiler pipeline creation failed {}",
-               vk::to_string(result));
+    ASSERT_MSG(result == vk::Result::eSuccess, "Detiler pipeline creation failed %s",
+               (vk::to_string(result)).c_str());
     const auto handle = *pipeline;
     tiling_pipelines.emplace(key, std::move(pipeline));
     device.destroyShaderModule(module);

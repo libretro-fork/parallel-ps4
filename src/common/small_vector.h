@@ -328,7 +328,7 @@ private:
         return N;
     }
     void Grow(std::size_t) {
-        ASSERT_MSG(false, "StaticVector of {} is full", N);
+        ASSERT_MSG(false, "StaticVector of %zu is full", N);
     }
 
     alignas(T) unsigned char storage[N * sizeof(T)];

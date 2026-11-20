@@ -160,7 +160,7 @@ struct InstControlVOP3P {
         case 2:
             return (op_sel_hi_2 & 1) == 1;
         default:
-            UNREACHABLE_MSG("get_op_sel_hi: {}", idx);
+            UNREACHABLE_MSG("get_op_sel_hi: %d", idx);
         }
     }
 };

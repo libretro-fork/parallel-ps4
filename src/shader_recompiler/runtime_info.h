@@ -23,6 +23,12 @@ enum class HwStage : u32 {
     Compute,
 };
 
+/// The stage's short name: fs, vs, gs, es, hs, ls or cs
+constexpr const char* NameOf(HwStage stage) {
+    constexpr const char* names[] = {"fs", "vs", "gs", "es", "hs", "ls", "cs"};
+    return names[static_cast<u32>(stage)];
+}
+
 // Vertex intentionally comes after TCS/TES due to order of compilation
 enum class SwStage : u32 {
     Fragment,
@@ -328,14 +334,3 @@ struct RuntimeInfo {
 };
 
 } // namespace Shader
-
-template <>
-struct fmt::formatter<Shader::HwStage> {
-    constexpr auto parse(format_parse_context& ctx) {
-        return ctx.begin();
-    }
-    auto format(const Shader::HwStage stage, format_context& ctx) const {
-        constexpr static std::array names = {"fs", "vs", "gs", "es", "hs", "ls", "cs"};
-        return fmt::format_to(ctx.out(), "{}", names[static_cast<size_t>(stage)]);
-    }
-};

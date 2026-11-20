@@ -22,8 +22,8 @@ Semaphore::Semaphore(const Instance& instance_) : instance{instance_} {
     };
     auto [semaphore_result, sem] =
         instance.GetDevice().createSemaphoreUnique(semaphore_chain.get());
-    ASSERT_MSG(semaphore_result == vk::Result::eSuccess, "Failed to create master semaphore: {}",
-               vk::to_string(semaphore_result));
+    ASSERT_MSG(semaphore_result == vk::Result::eSuccess, "Failed to create master semaphore: %s",
+               (vk::to_string(semaphore_result)).c_str());
     semaphore = std::move(sem);
 }
 
@@ -39,7 +39,8 @@ void Semaphore::Refresh() {
             instance.ReportDeviceLost();
         }
         ASSERT_MSG(counter_result == vk::Result::eSuccess,
-                   "Failed to get master semaphore value: {}", vk::to_string(counter_result));
+                   "Failed to get master semaphore value: %s",
+                   (vk::to_string(counter_result)).c_str());
         counter = cntr;
         if (counter < this_tick) {
             return;

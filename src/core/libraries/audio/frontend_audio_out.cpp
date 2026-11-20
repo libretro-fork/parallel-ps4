@@ -44,17 +44,17 @@ public:
         }
         applied.fill(emu_settings_get_volume_slider() * 0.01f);
         if (!input) {
-            LOG_ERROR(Lib_AudioOut, "No input left in the core's mix: port type {} is silent",
+            LOG_ERROR(Lib_AudioOut, "No input left in the core's mix: port type %d is silent",
                       static_cast<int>(port.type));
             return;
         }
         if (num_channels != 1 && num_channels != 2 && num_channels != 8) {
-            LOG_ERROR(Lib_AudioOut, "Unsupported channel count {}: port is silent", num_channels);
+            LOG_ERROR(Lib_AudioOut, "Unsupported channel count %u: port is silent", num_channels);
             audio_mix_input_close(input);
             input = nullptr;
             return;
         }
-        LOG_INFO(Lib_AudioOut, "Opened audio port type {} for the frontend ({} ch{})",
+        LOG_INFO(Lib_AudioOut, "Opened audio port type %d for the frontend (%u ch%s)",
                  static_cast<int>(port.type), num_channels, wide ? ", as 7.1" : "");
     }
 

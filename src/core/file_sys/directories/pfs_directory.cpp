@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright 2025 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include <cstring>
 #include "common/alignment.h"
 #include "common/assert.h"
 #include "common/logging/log.h"
@@ -52,7 +53,7 @@ s64 PfsDirectory::read(void* buf, u64 nbytes) {
     s64 to_fill =
         (std::min<s64>(directory_size, static_cast<s64>(nbytes))) - bytes_available - file_offset;
     if (to_fill < 0) {
-        LOG_ERROR(Kernel_Fs, "Dirent may have leaked {} bytes", -to_fill);
+        LOG_ERROR(Kernel_Fs, "Dirent may have leaked %" PRId64 " bytes", -to_fill);
         return -to_fill + bytes_available;
     }
     memset(static_cast<u8*>(buf) + bytes_available, 0, to_fill);

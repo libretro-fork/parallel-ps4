@@ -85,8 +85,8 @@ ComputePipeline::ComputePipeline(const Instance& instance, Scheduler& scheduler,
     auto [descriptor_set_result, descriptor_set] =
         device.createDescriptorSetLayoutUnique(desc_layout_ci);
     ASSERT_MSG(descriptor_set_result == vk::Result::eSuccess,
-               "Failed to create compute descriptor set layout: {}",
-               vk::to_string(descriptor_set_result));
+               "Failed to create compute descriptor set layout: %s",
+               (vk::to_string(descriptor_set_result)).c_str());
     desc_layout = std::move(descriptor_set);
 
     const vk::DescriptorSetLayout set_layout = *desc_layout;
@@ -98,9 +98,10 @@ ComputePipeline::ComputePipeline(const Instance& instance, Scheduler& scheduler,
     };
     auto [layout_result, layout] = instance.GetDevice().createPipelineLayoutUnique(layout_info);
     ASSERT_MSG(layout_result == vk::Result::eSuccess,
-               "Failed to create compute pipeline layout: {}", vk::to_string(layout_result));
+               "Failed to create compute pipeline layout: %s",
+               (vk::to_string(layout_result)).c_str());
     pipeline_layout = std::move(layout);
-    SetObjectName(device, *pipeline_layout, "Compute PipelineLayout {}", debug_str);
+    SetObjectName(device, *pipeline_layout, "Compute PipelineLayout %s", debug_str.c_str());
 
     const vk::ComputePipelineCreateInfo compute_pipeline_ci = {
         .stage = shader_ci,
@@ -108,10 +109,10 @@ ComputePipeline::ComputePipeline(const Instance& instance, Scheduler& scheduler,
     };
     auto [pipeline_result, pipe] =
         instance.GetDevice().createComputePipelineUnique(pipeline_cache, compute_pipeline_ci);
-    ASSERT_MSG(pipeline_result == vk::Result::eSuccess, "Failed to create compute pipeline: {}",
-               vk::to_string(pipeline_result));
+    ASSERT_MSG(pipeline_result == vk::Result::eSuccess, "Failed to create compute pipeline: %s",
+               (vk::to_string(pipeline_result)).c_str());
     pipeline = std::move(pipe);
-    SetObjectName(device, *pipeline, "Compute Pipeline {}", debug_str);
+    SetObjectName(device, *pipeline, "Compute Pipeline %s", debug_str.c_str());
 }
 
 ComputePipeline::~ComputePipeline() = default;

@@ -22,7 +22,7 @@ MemoryManager::MemoryManager() {
     u64 total_usable_space = 0;
     for (auto region : regions) {
         vma_map.emplace(region.start, VirtualMemoryArea{region.start, region.end - region.start});
-        LOG_INFO(Kernel_Vmm, "{:#x} - {:#x}", region.start, region.end);
+        LOG_INFO(Kernel_Vmm, "0x%" PRIx64 " - 0x%" PRIx64, region.start, region.end);
     }
 
     // Pre-initialize direct backing
@@ -66,16 +66,19 @@ void MemoryManager::SetupMemoryRegions(u64 flexible_size, bool use_extended_mem1
     }
     s32 extra_dmem = emu_settings_get_extra_dmem_in_mbytes();
     if (extra_dmem != 0) {
-        LOG_WARNING(Kernel_Vmm,
-                    "extraDmemInMbytes is {} MB! Old Direct Size: {:#x} -> New Direct Size: {:#x}",
-                    extra_dmem, total_size, total_size + extra_dmem * 1_MB);
+        LOG_WARNING(
+            Kernel_Vmm,
+            "extraDmemInMbytes is %d MB! Old Direct Size: 0x%llx -> New Direct Size: 0x%llx",
+            extra_dmem, static_cast<unsigned long long>(total_size),
+            static_cast<unsigned long long>(total_size + extra_dmem * 1_MB));
         total_size += extra_dmem * 1_MB;
     }
     s32 extra_fmem = emu_settings_get_extra_fmem_in_mbytes();
     if (extra_fmem != 0) {
-        LOG_WARNING(Kernel_Vmm, "extraFmemInMbytes is {} MB! Old Size: {:#x} -> New Size: {:#x}",
-                    extra_fmem, ORBIS_KERNEL_FLEXIBLE_MEMORY_SIZE,
-                    ORBIS_KERNEL_FLEXIBLE_MEMORY_SIZE + extra_fmem * 1_MB);
+        LOG_WARNING(
+            Kernel_Vmm, "extraFmemInMbytes is %d MB! Old Size: 0x%" PRIx64 " -> New Size: 0x%llx",
+            extra_fmem, ORBIS_KERNEL_FLEXIBLE_MEMORY_SIZE,
+            static_cast<unsigned long long>(ORBIS_KERNEL_FLEXIBLE_MEMORY_SIZE + extra_fmem * 1_MB));
         total_size += extra_fmem * 1_MB;
         flexible_size += extra_fmem * 1_MB;
     }
@@ -99,7 +102,8 @@ void MemoryManager::SetupMemoryRegions(u64 flexible_size, bool use_extended_mem1
                "Unable to shrink dmem map");
     last_dmem_area->second.size -= (old_direct_size - total_direct_size);
 
-    LOG_INFO(Kernel_Vmm, "Configured memory regions: flexible size = {:#x}, direct size = {:#x}",
+    LOG_INFO(Kernel_Vmm,
+             "Configured memory regions: flexible size = 0x%" PRIx64 ", direct size = 0x%" PRIx64,
              total_flexible_size, total_direct_size);
 }
 
@@ -121,7 +125,9 @@ u64 MemoryManager::ClampRangeSize(VAddr virtual_addr, u64 size) {
     // free area and the mapped areas after it were counted.
     const u64 clamped_size = std::min(run_end - virtual_addr, size);
     if (size != clamped_size) {
-        LOG_DEBUG(Kernel_Vmm, "Clamped requested buffer range addr={:#x}, size={:#x} to {:#x}",
+        LOG_DEBUG(Kernel_Vmm,
+                  "Clamped requested buffer range addr=0x%" PRIxPTR ", size=0x%" PRIx64
+                  " to 0x%" PRIx64,
                   virtual_addr, size, clamped_size);
     }
     return clamped_size;
@@ -264,7 +270,8 @@ PAddr MemoryManager::PoolExpand(PAddr search_start, PAddr search_end, u64 size, 
 
         if (dmem_area == dmem_map.end()) {
             // There are no suitable mappings in this range
-            LOG_ERROR(Kernel_Vmm, "Unable to find free direct memory area: size = {:#x}", size);
+            LOG_ERROR(Kernel_Vmm, "Unable to find free direct memory area: size = 0x%" PRIx64,
+                      size);
             return -1;
         }
 
@@ -307,7 +314,8 @@ PAddr MemoryManager::Allocate(PAddr search_start, PAddr search_end, u64 size, u6
 
         if (dmem_area == dmem_map.end() || mapping_end > search_end) {
             // There are no suitable mappings in this range
-            LOG_ERROR(Kernel_Vmm, "Unable to find free direct memory area: size = {:#x}", size);
+            LOG_ERROR(Kernel_Vmm, "Unable to find free direct memory area: size = 0x%" PRIx64,
+                      size);
             return -1;
         }
 
@@ -324,7 +332,8 @@ PAddr MemoryManager::Allocate(PAddr search_start, PAddr search_end, u64 size, u6
 s32 MemoryManager::Free(PAddr phys_addr, u64 size, bool is_checked) {
     // Basic bounds checking
     if (phys_addr > total_direct_size || (is_checked && phys_addr + size > total_direct_size)) {
-        LOG_ERROR(Kernel_Vmm, "phys_addr {:#x}, size {:#x} goes outside dmem map", phys_addr, size);
+        LOG_ERROR(Kernel_Vmm, "phys_addr 0x%" PRIxPTR ", size 0x%" PRIx64 " goes outside dmem map",
+                  phys_addr, size);
         if (is_checked) {
             return ORBIS_KERNEL_ERROR_ENOENT;
         }
@@ -399,7 +408,8 @@ s32 MemoryManager::Free(PAddr phys_addr, u64 size, bool is_checked) {
 #endif
 
         for (const auto& [addr, size] : remove_list) {
-            LOG_INFO(Kernel_Vmm, "Unmapping direct mapping {:#x} with size {:#x}", addr, size);
+            LOG_INFO(Kernel_Vmm, "Unmapping direct mapping 0x%llx with size 0x%llx",
+                     static_cast<unsigned long long>(addr), static_cast<unsigned long long>(size));
             UnmapMemoryImpl(addr, size);
         }
 
@@ -425,8 +435,8 @@ s32 MemoryManager::PoolCommit(VAddr virtual_addr, u64 size, MemoryProt prot, s32
 #ifdef SHADPS4_ENABLE_FEX_GUEST_CPU
         auto mapping_mutation = mapping_generation.BeginMutation();
 #endif
-        ASSERT_MSG(IsValidMapping(virtual_addr, size), "Attempted to access invalid address {:#x}",
-                   virtual_addr);
+        ASSERT_MSG(IsValidMapping(virtual_addr, size),
+                   "Attempted to access invalid address 0x%" PRIxPTR, virtual_addr);
 
         // Input addresses to PoolCommit are treated as fixed, and have a constant alignment.
         const u64 alignment = 64_KB;
@@ -435,16 +445,18 @@ s32 MemoryManager::PoolCommit(VAddr virtual_addr, u64 size, MemoryProt prot, s32
         auto& vma = FindVMA(mapped_addr)->second;
         if (vma.type != VMAType::PoolReserved) {
             // If we're attempting to commit non-pooled memory, return EINVAL
-            LOG_ERROR(Kernel_Vmm, "Attempting to commit non-pooled memory at {:#x}", mapped_addr);
+            LOG_ERROR(Kernel_Vmm, "Attempting to commit non-pooled memory at 0x%" PRIxPTR,
+                      mapped_addr);
             return ORBIS_KERNEL_ERROR_EINVAL;
         }
 
         if (!vma.Contains(mapped_addr, size)) {
             // If there's not enough space to commit, return EINVAL
-            LOG_ERROR(
-                Kernel_Vmm,
-                "Pooled region {:#x} to {:#x} is not large enough to commit from {:#x} to {:#x}",
-                vma.base, vma.base + vma.size, mapped_addr, mapped_addr + size);
+            LOG_ERROR(Kernel_Vmm,
+                      "Pooled region 0x%" PRIxPTR
+                      " to 0x%llx is not large enough to commit from 0x%" PRIxPTR " to 0x%llx",
+                      vma.base, static_cast<unsigned long long>(vma.base + vma.size), mapped_addr,
+                      static_cast<unsigned long long>(mapped_addr + size));
             return ORBIS_KERNEL_ERROR_EINVAL;
         }
 
@@ -569,8 +581,8 @@ s32 MemoryManager::MapMemory(void** out_addr, VAddr virtual_addr, u64 size, Memo
     // the available flexible memory size. Questionable but we need to handle this.
     if (type == VMAType::Flexible && flexible_usage + size > total_flexible_size) {
         LOG_ERROR(Kernel_Vmm,
-                  "Out of flexible memory, available flexible memory = {:#x}"
-                  " requested size = {:#x}",
+                  "Out of flexible memory, available flexible memory = 0x%" PRIx64
+                  " requested size = 0x%" PRIx64,
                   total_flexible_size - flexible_usage, size);
         return ORBIS_KERNEL_ERROR_EINVAL;
     }
@@ -579,7 +591,8 @@ s32 MemoryManager::MapMemory(void** out_addr, VAddr virtual_addr, u64 size, Memo
         // Validate the requested physical address range
         if (phys_addr != -1) {
             if (total_direct_size < phys_addr + size) {
-                LOG_ERROR(Kernel_Vmm, "Unable to map {:#x} bytes at physical address {:#x}", size,
+                LOG_ERROR(Kernel_Vmm,
+                          "Unable to map 0x%" PRIx64 " bytes at physical address 0x%" PRIxPTR, size,
                           phys_addr);
                 return ORBIS_KERNEL_ERROR_ENOMEM;
             }
@@ -590,14 +603,16 @@ s32 MemoryManager::MapMemory(void** out_addr, VAddr virtual_addr, u64 size, Memo
                 // If any requested dmem area is not allocated, return an error.
                 if (dmem_area->second.dma_type != PhysicalMemoryType::Allocated &&
                     dmem_area->second.dma_type != PhysicalMemoryType::Mapped) {
-                    LOG_ERROR(Kernel_Vmm, "Unable to map {:#x} bytes at physical address {:#x}",
+                    LOG_ERROR(Kernel_Vmm,
+                              "Unable to map 0x%" PRIx64 " bytes at physical address 0x%" PRIxPTR,
                               size, phys_addr);
                     return ORBIS_KERNEL_ERROR_ENOMEM;
                 }
 
                 // If we need to perform extra validation, then check for Mapped dmem areas too.
                 if (validate_dmem && dmem_area->second.dma_type == PhysicalMemoryType::Mapped) {
-                    LOG_ERROR(Kernel_Vmm, "Unable to map {:#x} bytes at physical address {:#x}",
+                    LOG_ERROR(Kernel_Vmm,
+                              "Unable to map 0x%" PRIx64 " bytes at physical address 0x%" PRIxPTR,
                               size, phys_addr);
                     return ORBIS_KERNEL_ERROR_EBUSY;
                 }
@@ -609,15 +624,16 @@ s32 MemoryManager::MapMemory(void** out_addr, VAddr virtual_addr, u64 size, Memo
         if (True(flags & MemoryMapFlags::Fixed) && True(flags & MemoryMapFlags::NoOverwrite)) {
             // Perform necessary error checking for Fixed & NoOverwrite case
             if (!IsValidMapping(virtual_addr, size)) {
-                LOG_ERROR(Kernel_Vmm, "addr = {:#x} size = {:#x} is outside the memory map",
+                LOG_ERROR(Kernel_Vmm,
+                          "addr = 0x%" PRIxPTR " size = 0x%" PRIx64 " is outside the memory map",
                           virtual_addr, size);
                 return ORBIS_KERNEL_ERROR_ENOMEM;
             }
             auto vma = FindVMA(virtual_addr)->second;
             auto remaining_size = vma.base + vma.size - virtual_addr;
             if (!vma.IsFree() || remaining_size < size) {
-                LOG_ERROR(Kernel_Vmm, "Unable to map {:#x} bytes at address {:#x}", size,
-                          virtual_addr);
+                LOG_ERROR(Kernel_Vmm, "Unable to map 0x%" PRIx64 " bytes at address 0x%" PRIxPTR,
+                          size, virtual_addr);
                 return ORBIS_KERNEL_ERROR_ENOMEM;
             }
         } else if (False(flags & MemoryMapFlags::Fixed)) {
@@ -760,13 +776,13 @@ s32 MemoryManager::MapFile(void** out_addr, VAddr virtual_addr, u64 size, Memory
         auto* h = Common::Singleton<Core::FileSys::HandleTable>::Instance();
         auto file = h->GetFile(fd);
         if (file == nullptr) {
-            LOG_WARNING(Kernel_Vmm, "Invalid file for mmap, fd {}", fd);
+            LOG_WARNING(Kernel_Vmm, "Invalid file for mmap, fd %d", fd);
             return ORBIS_KERNEL_ERROR_EBADF;
         }
 
         if (static_cast<FileSys::FileType>(retro_atomic_load_seq_cst_int(&file->type)) !=
             Core::FileSys::FileType::Regular) {
-            LOG_WARNING(Kernel_Vmm, "Unsupported file type for mmap, fd {}", fd);
+            LOG_WARNING(Kernel_Vmm, "Unsupported file type for mmap, fd %d", fd);
             return ORBIS_KERNEL_ERROR_EBADF;
         }
 
@@ -806,7 +822,8 @@ s32 MemoryManager::MapFile(void** out_addr, VAddr virtual_addr, u64 size, Memory
 
         if (True(flags & MemoryMapFlags::Fixed) && True(flags & MemoryMapFlags::NoOverwrite)) {
             if (!IsValidMapping(virtual_addr, size)) {
-                LOG_ERROR(Kernel_Vmm, "addr = {:#x} size = {:#x} is outside the memory map",
+                LOG_ERROR(Kernel_Vmm,
+                          "addr = 0x%" PRIxPTR " size = 0x%" PRIx64 " is outside the memory map",
                           virtual_addr, size);
                 return ORBIS_KERNEL_ERROR_ENOMEM;
             }
@@ -814,8 +831,8 @@ s32 MemoryManager::MapFile(void** out_addr, VAddr virtual_addr, u64 size, Memory
 
             auto remaining_size = vma.base + vma.size - virtual_addr;
             if (!vma.IsFree() || remaining_size < size) {
-                LOG_ERROR(Kernel_Vmm, "Unable to map {:#x} bytes at address {:#x}", size,
-                          virtual_addr);
+                LOG_ERROR(Kernel_Vmm, "Unable to map 0x%" PRIx64 " bytes at address 0x%" PRIxPTR,
+                          size, virtual_addr);
                 return ORBIS_KERNEL_ERROR_ENOMEM;
             }
         } else if (False(flags & MemoryMapFlags::Fixed)) {
@@ -886,8 +903,8 @@ s32 MemoryManager::MapFile(void** out_addr, VAddr virtual_addr, u64 size, Memory
 
 s32 MemoryManager::PoolDecommit(VAddr virtual_addr, u64 size) {
     return maps.Run([&]() -> s32 {
-        ASSERT_MSG(IsValidMapping(virtual_addr, size), "Attempted to access invalid address {:#x}",
-                   virtual_addr);
+        ASSERT_MSG(IsValidMapping(virtual_addr, size),
+                   "Attempted to access invalid address 0x%" PRIxPTR, virtual_addr);
 
         // Do an initial search to ensure this decommit is valid.
         auto it = FindVMA(virtual_addr);
@@ -981,7 +998,8 @@ s32 MemoryManager::UnmapMemory(VAddr virtual_addr, u64 size) {
         virtual_addr = Common::AlignDown(virtual_addr, GUEST_PAGE_SIZE);
         size = Common::AlignUp(size, GUEST_PAGE_SIZE);
         if (!IsValidMapping(virtual_addr, size)) {
-            LOG_ERROR(Kernel_Vmm, "addr = {:#x} size = {:#x} is outside the memory map",
+            LOG_ERROR(Kernel_Vmm,
+                      "addr = 0x%" PRIxPTR " size = 0x%" PRIx64 " is outside the memory map",
                       virtual_addr, size);
             return ORBIS_KERNEL_ERROR_EINVAL;
         }
@@ -1092,14 +1110,14 @@ s32 MemoryManager::QueryProtection(VAddr addr, void** start, void** end, u32* pr
     return maps.Run([&]() -> s32 {
         VAddr min_query_addr = impl.SystemManagedVirtualBase();
         if (addr < min_query_addr) {
-            LOG_ERROR(Kernel_Vmm, "Address {:#x} is not mapped", addr);
+            LOG_ERROR(Kernel_Vmm, "Address 0x%" PRIxPTR " is not mapped", addr);
             return ORBIS_KERNEL_ERROR_EACCES;
         }
 
         const auto it = FindVMA(addr);
         const auto& vma = it->second;
         if (vma.IsFree()) {
-            LOG_ERROR(Kernel_Vmm, "Address {:#x} is not mapped", addr);
+            LOG_ERROR(Kernel_Vmm, "Address 0x%" PRIxPTR " is not mapped", addr);
             return ORBIS_KERNEL_ERROR_EACCES;
         }
 #ifdef SHADPS4_ENABLE_FEX_GUEST_CPU
@@ -1430,7 +1448,8 @@ s32 MemoryManager::SetDirectMemoryType(VAddr addr, u64 size, s32 memory_type) {
         const auto mapping_mutation = mapping_generation.BeginMutation();
 #endif
 
-        ASSERT_MSG(IsValidMapping(addr, size), "Attempted to access invalid address {:#x}", addr);
+        ASSERT_MSG(IsValidMapping(addr, size), "Attempted to access invalid address 0x%" PRIxPTR,
+                   addr);
 
         // Search through all VMAs covered by the provided range.
         // We aren't modifying these VMAs, so it's safe to iterate through them.
@@ -1491,7 +1510,7 @@ void MemoryManager::NameVirtualRange(VAddr virtual_addr, u64 size, std::string_v
         VAddr aligned_addr = Common::AlignDown(virtual_addr, GUEST_PAGE_SIZE);
 
         ASSERT_MSG(IsValidMapping(aligned_addr, aligned_size),
-                   "Attempted to access invalid address {:#x}", aligned_addr);
+                   "Attempted to access invalid address 0x%" PRIxPTR, aligned_addr);
         auto it = FindVMA(aligned_addr);
         u64 remaining_size = aligned_size;
         VAddr current_addr = aligned_addr;
@@ -1545,7 +1564,7 @@ s32 MemoryManager::GetDirectMemoryType(PAddr addr, s32* directMemoryTypeOut,
 
 s32 MemoryManager::IsStack(VAddr addr, void** start, void** end) {
     return maps.Run([&]() -> s32 {
-        ASSERT_MSG(IsValidMapping(addr), "Attempted to access invalid address {:#x}", addr);
+        ASSERT_MSG(IsValidMapping(addr), "Attempted to access invalid address 0x%" PRIxPTR, addr);
         const auto& vma = FindVMA(addr)->second;
         if (vma.IsFree()) {
             return ORBIS_KERNEL_ERROR_EACCES;
@@ -1615,7 +1634,7 @@ VAddr MemoryManager::SearchFree(VAddr virtual_addr, u64 size, u32 alignment) {
 
     // If the requested address is beyond the maximum our code can handle, throw an assert
     if (!IsValidMapping(virtual_addr)) {
-        LOG_ERROR(Kernel_Vmm, "addr = {:#x} is outside the memory map", virtual_addr);
+        LOG_ERROR(Kernel_Vmm, "addr = 0x%" PRIxPTR " is outside the memory map", virtual_addr);
         return -1;
     }
 
@@ -1661,7 +1680,8 @@ VAddr MemoryManager::SearchFree(VAddr virtual_addr, u64 size, u32 alignment) {
     }
 
     // Couldn't find a suitable VMA, return an error.
-    LOG_ERROR(Kernel_Vmm, "Couldn't find a free mapping for address {:#x}, size {:#x}",
+    LOG_ERROR(Kernel_Vmm,
+              "Couldn't find a free mapping for address 0x%" PRIxPTR ", size 0x%" PRIx64,
               virtual_addr, size);
     return -1;
 }
@@ -1749,7 +1769,7 @@ MemoryManager::PhysHandle MemoryManager::CarvePhysArea(PhysMap& map, PAddr addr,
 
     const PAddr start_in_area = addr - area.base;
     const PAddr end_in_vma = start_in_area + size;
-    ASSERT_MSG(end_in_vma <= area.size, "Mapping cannot fit inside free region: size = {:#x}",
+    ASSERT_MSG(end_in_vma <= area.size, "Mapping cannot fit inside free region: size = 0x%" PRIx64,
                size);
 
     if (end_in_vma != area.size) {

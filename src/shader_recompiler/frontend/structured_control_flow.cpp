@@ -8,8 +8,8 @@
 #include <unordered_map>
 #include <utility>
 #include <vector>
-#include <fmt/format.h>
 #include "common/intrusive_list_cpp.h"
+#include "common/string_util.h"
 #include "shader_recompiler/frontend/structured_control_flow.h"
 #include "shader_recompiler/frontend/translate/translate.h"
 #include "shader_recompiler/ir/ir_emitter.h"
@@ -125,13 +125,16 @@ struct Statement : ListBaseHook {
 std::string DumpExpr(const Statement* stmt) {
     switch (stmt->type) {
     case StatementType::Identity:
-        return fmt::format("{}", stmt->guest_cond);
+        return Common::StringFromFormat(
+            "%.*s", static_cast<int>(Shader::IR::NameOf(stmt->guest_cond).size()),
+            Shader::IR::NameOf(stmt->guest_cond).data());
     case StatementType::Not:
-        return fmt::format("!{}", DumpExpr(stmt->op));
+        return Common::StringFromFormat("!%s", (DumpExpr(stmt->op)).c_str());
     case StatementType::Or:
-        return fmt::format("{} || {}", DumpExpr(stmt->op_a), DumpExpr(stmt->op_b));
+        return Common::StringFromFormat("%s || %s", (DumpExpr(stmt->op_a)).c_str(),
+                                        (DumpExpr(stmt->op_b)).c_str());
     case StatementType::Variable:
-        return fmt::format("goto_L{}", stmt->id);
+        return Common::StringFromFormat("goto_L%u", stmt->id);
     default:
         return "<invalid type>";
     }
@@ -143,38 +146,42 @@ std::string DumpExpr(const Statement* stmt) {
     for (const auto& stmt : tree) {
         switch (stmt.type) {
         case StatementType::Code:
-            ret += fmt::format("{}    Block {:04x} -> {:04x} (0x{:016x});\n", indent,
-                               stmt.block->begin, stmt.block->end,
-                               reinterpret_cast<uintptr_t>(stmt.block));
+            ret += Common::StringFromFormat("%s    Block %04x -> %04x (0x%016" PRIxPTR ");\n",
+                                            (indent).c_str(), stmt.block->begin, stmt.block->end,
+                                            reinterpret_cast<uintptr_t>(stmt.block));
             break;
         case StatementType::Goto:
-            ret += fmt::format("{}    if ({}) goto L{};\n", indent, DumpExpr(stmt.cond),
-                               stmt.label->id);
+            ret += Common::StringFromFormat("%s    if (%s) goto L%u;\n", (indent).c_str(),
+                                            (DumpExpr(stmt.cond)).c_str(), stmt.label->id);
             break;
         case StatementType::Label:
-            ret += fmt::format("{}L{}:\n", indent, stmt.id);
+            ret += Common::StringFromFormat("%sL%u:\n", (indent).c_str(), stmt.id);
             break;
         case StatementType::If:
-            ret += fmt::format("{}    if ({}) {{\n", indent, DumpExpr(stmt.cond));
+            ret += Common::StringFromFormat("%s    if (%s) {\n", (indent).c_str(),
+                                            (DumpExpr(stmt.cond)).c_str());
             ret += DumpTree(stmt.children, indentation + 4);
-            ret += fmt::format("{}    }}\n", indent);
+            ret += Common::StringFromFormat("%s    }\n", (indent).c_str());
             break;
         case StatementType::Loop:
-            ret += fmt::format("{}    do {{\n", indent);
+            ret += Common::StringFromFormat("%s    do {\n", (indent).c_str());
             ret += DumpTree(stmt.children, indentation + 4);
-            ret += fmt::format("{}    }} while ({});\n", indent, DumpExpr(stmt.cond));
+            ret += Common::StringFromFormat("%s    } while (%s);\n", (indent).c_str(),
+                                            (DumpExpr(stmt.cond)).c_str());
             break;
         case StatementType::Break:
-            ret += fmt::format("{}    if ({}) break;\n", indent, DumpExpr(stmt.cond));
+            ret += Common::StringFromFormat("%s    if (%s) break;\n", (indent).c_str(),
+                                            (DumpExpr(stmt.cond)).c_str());
             break;
         case StatementType::Return:
-            ret += fmt::format("{}    return;\n", indent);
+            ret += Common::StringFromFormat("%s    return;\n", (indent).c_str());
             break;
         case StatementType::Unreachable:
-            ret += fmt::format("{}    unreachable;\n", indent);
+            ret += Common::StringFromFormat("%s    unreachable;\n", (indent).c_str());
             break;
         case StatementType::SetVariable:
-            ret += fmt::format("{}    goto_L{} = {};\n", indent, stmt.id, DumpExpr(stmt.op));
+            ret += Common::StringFromFormat("%s    goto_L%u = %s;\n", (indent).c_str(), stmt.id,
+                                            (DumpExpr(stmt.op)).c_str());
             break;
         case StatementType::Function:
         case StatementType::Identity:
@@ -590,7 +597,7 @@ private:
     case StatementType::Variable:
         return ir.GetGotoVariable(stmt.id);
     default:
-        UNREACHABLE_MSG("Statement type {}", u32(stmt.type));
+        UNREACHABLE_MSG("Statement type %u", u32(stmt.type));
     }
 }
 
@@ -767,7 +774,7 @@ private:
                 break;
             }
             default:
-                UNREACHABLE_MSG("Statement type {}", u32(stmt.type));
+                UNREACHABLE_MSG("Statement type %u", u32(stmt.type));
             }
         }
         if (current_block) {

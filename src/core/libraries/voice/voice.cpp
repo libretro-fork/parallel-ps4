@@ -68,19 +68,19 @@ s32 InitInternal(const OrbisVoiceInitParam* param) {
 } // namespace
 
 s32 PS4_SYSV_ABI sceVoiceConnectIPortToOPort(u32 in_port_id, u32 out_port_id) {
-    LOG_INFO(Lib_Voice, "in_port_id = {}, out_port_id = {}", in_port_id, out_port_id);
+    LOG_INFO(Lib_Voice, "in_port_id = %u, out_port_id = %u", in_port_id, out_port_id);
     return g_state.mutex.Run([&]() -> s32 {
         if (!g_state.initialized) {
             LOG_ERROR(Lib_Voice, "Voice is not initialized");
             return ORBIS_VOICE_ERROR_NOT_INIT;
         }
         if (in_port_id >= ORBIS_VOICE_MAX_PORT || out_port_id >= ORBIS_VOICE_MAX_PORT) {
-            LOG_ERROR(Lib_Voice, "Invalid port: in_port_id = {}, out_port_id = {}", in_port_id,
+            LOG_ERROR(Lib_Voice, "Invalid port: in_port_id = %u, out_port_id = %u", in_port_id,
                       out_port_id);
             return ORBIS_VOICE_ERROR_PORT_INVALID;
         }
         if (!FindPort(in_port_id) || !FindPort(out_port_id)) {
-            LOG_ERROR(Lib_Voice, "Port not allocated: in_port_id = {}, out_port_id = {}",
+            LOG_ERROR(Lib_Voice, "Port not allocated: in_port_id = %u, out_port_id = %u",
                       in_port_id, out_port_id);
             return ORBIS_VOICE_ERROR_TOPOLOGY;
         }
@@ -101,7 +101,7 @@ s32 PS4_SYSV_ABI sceVoiceCreatePort(s32* port_id, const OrbisVoicePortParam* par
         }
         if (param->type < ORBIS_VOICE_PORTTYPE_IN_DEVICE ||
             param->type > ORBIS_VOICE_PORTTYPE_OUT_DEVICE) {
-            LOG_ERROR(Lib_Voice, "Invalid port type: {}", param->type);
+            LOG_ERROR(Lib_Voice, "Invalid port type: %d", param->type);
             return ORBIS_VOICE_ERROR_ARGUMENT_INVALID;
         }
         const auto it =
@@ -117,15 +117,15 @@ s32 PS4_SYSV_ABI sceVoiceCreatePort(s32* port_id, const OrbisVoicePortParam* par
 }
 
 s32 PS4_SYSV_ABI sceVoiceDeletePort(u32 port_id) {
-    LOG_INFO(Lib_Voice, "port_id = {}", port_id);
+    LOG_INFO(Lib_Voice, "port_id = %u", port_id);
     return g_state.mutex.Run([&]() -> s32 {
         if (const s32 ret = CheckPort(port_id); ret != ORBIS_OK) {
-            LOG_ERROR(Lib_Voice, "Port check failed: port_id = {}, error = {:#x}", port_id,
+            LOG_ERROR(Lib_Voice, "Port check failed: port_id = %u, error = 0x%x", port_id,
                       static_cast<u32>(ret));
             return ret;
         }
         if (!FindPort(port_id)) {
-            LOG_ERROR(Lib_Voice, "Port {} is not allocated", port_id);
+            LOG_ERROR(Lib_Voice, "Port %u is not allocated", port_id);
             return ORBIS_VOICE_ERROR_PORT_INVALID;
         }
         g_state.ports[port_id] = Port{};
@@ -134,19 +134,19 @@ s32 PS4_SYSV_ABI sceVoiceDeletePort(u32 port_id) {
 }
 
 s32 PS4_SYSV_ABI sceVoiceDisconnectIPortFromOPort(u32 in_port_id, u32 out_port_id) {
-    LOG_INFO(Lib_Voice, "in_port_id = {}, out_port_id = {}", in_port_id, out_port_id);
+    LOG_INFO(Lib_Voice, "in_port_id = %u, out_port_id = %u", in_port_id, out_port_id);
     return g_state.mutex.Run([&]() -> s32 {
         if (!g_state.initialized) {
             LOG_ERROR(Lib_Voice, "Voice is not initialized");
             return ORBIS_VOICE_ERROR_NOT_INIT;
         }
         if (in_port_id >= ORBIS_VOICE_MAX_PORT || out_port_id >= ORBIS_VOICE_MAX_PORT) {
-            LOG_ERROR(Lib_Voice, "Invalid port: in_port_id = {}, out_port_id = {}", in_port_id,
+            LOG_ERROR(Lib_Voice, "Invalid port: in_port_id = %u, out_port_id = %u", in_port_id,
                       out_port_id);
             return ORBIS_VOICE_ERROR_PORT_INVALID;
         }
         if (!FindPort(in_port_id) || !FindPort(out_port_id)) {
-            LOG_ERROR(Lib_Voice, "Port not allocated: in_port_id = {}, out_port_id = {}",
+            LOG_ERROR(Lib_Voice, "Port not allocated: in_port_id = %u, out_port_id = %u",
                       in_port_id, out_port_id);
             return ORBIS_VOICE_ERROR_TOPOLOGY;
         }
@@ -168,10 +168,10 @@ s32 PS4_SYSV_ABI sceVoiceEnd() {
 }
 
 s32 PS4_SYSV_ABI sceVoiceGetBitRate(u32 port_id, u32* bitrate) {
-    LOG_TRACE(Lib_Voice, "port_id = {}", port_id);
+    LOG_TRACE(Lib_Voice, "port_id = %u", port_id);
     return g_state.mutex.Run([&]() -> s32 {
         if (const s32 ret = CheckPort(port_id); ret != ORBIS_OK) {
-            LOG_ERROR(Lib_Voice, "Port check failed: port_id = {}, error = {:#x}", port_id,
+            LOG_ERROR(Lib_Voice, "Port check failed: port_id = %u, error = 0x%x", port_id,
                       static_cast<u32>(ret));
             return ret;
         }
@@ -181,7 +181,7 @@ s32 PS4_SYSV_ABI sceVoiceGetBitRate(u32 port_id, u32* bitrate) {
         }
         const Port* port = FindPort(port_id);
         if (!port) {
-            LOG_ERROR(Lib_Voice, "Port {} is not allocated", port_id);
+            LOG_ERROR(Lib_Voice, "Port %u is not allocated", port_id);
             return ORBIS_VOICE_ERROR_PORT_INVALID;
         }
         *bitrate = port->bitrate;
@@ -190,10 +190,10 @@ s32 PS4_SYSV_ABI sceVoiceGetBitRate(u32 port_id, u32* bitrate) {
 }
 
 s32 PS4_SYSV_ABI sceVoiceGetMuteFlag(u32 port_id, bool* mute) {
-    LOG_TRACE(Lib_Voice, "port_id = {}", port_id);
+    LOG_TRACE(Lib_Voice, "port_id = %u", port_id);
     return g_state.mutex.Run([&]() -> s32 {
         if (const s32 ret = CheckPort(port_id); ret != ORBIS_OK) {
-            LOG_ERROR(Lib_Voice, "Port check failed: port_id = {}, error = {:#x}", port_id,
+            LOG_ERROR(Lib_Voice, "Port check failed: port_id = %u, error = 0x%x", port_id,
                       static_cast<u32>(ret));
             return ret;
         }
@@ -203,7 +203,7 @@ s32 PS4_SYSV_ABI sceVoiceGetMuteFlag(u32 port_id, bool* mute) {
         }
         const Port* port = FindPort(port_id);
         if (!port) {
-            LOG_ERROR(Lib_Voice, "Port {} is not allocated", port_id);
+            LOG_ERROR(Lib_Voice, "Port %u is not allocated", port_id);
             return ORBIS_VOICE_ERROR_PORT_INVALID;
         }
         *mute = port->muted;
@@ -212,10 +212,10 @@ s32 PS4_SYSV_ABI sceVoiceGetMuteFlag(u32 port_id, bool* mute) {
 }
 
 s32 PS4_SYSV_ABI sceVoiceGetPortAttr(u32 port_id, s32 attr_id, void* value, u32 size) {
-    LOG_TRACE(Lib_Voice, "port_id = {}, attr_id = {}, size = {}", port_id, attr_id, size);
+    LOG_TRACE(Lib_Voice, "port_id = %u, attr_id = %d, size = %u", port_id, attr_id, size);
     return g_state.mutex.Run([&]() -> s32 {
         if (const s32 ret = CheckPort(port_id); ret != ORBIS_OK) {
-            LOG_ERROR(Lib_Voice, "Port check failed: port_id = {}, error = {:#x}", port_id,
+            LOG_ERROR(Lib_Voice, "Port check failed: port_id = %u, error = 0x%x", port_id,
                       static_cast<u32>(ret));
             return ret;
         }
@@ -243,21 +243,21 @@ s32 PS4_SYSV_ABI sceVoiceGetPortAttr(u32 port_id, s32 attr_id, void* value, u32 
             required_type = ORBIS_VOICE_PORTTYPE_OUT_DEVICE;
             break;
         default:
-            LOG_ERROR(Lib_Voice, "Invalid attr_id: {}", attr_id);
+            LOG_ERROR(Lib_Voice, "Invalid attr_id: %d", attr_id);
             return ORBIS_VOICE_ERROR_ARGUMENT_INVALID;
         }
         if (size != expected_size) {
-            LOG_ERROR(Lib_Voice, "Invalid size {} for attr_id {} (expected {})", size, attr_id,
+            LOG_ERROR(Lib_Voice, "Invalid size %u for attr_id %d (expected %u)", size, attr_id,
                       expected_size);
             return ORBIS_VOICE_ERROR_ARGUMENT_INVALID;
         }
         const Port* port = FindPort(port_id);
         if (!port) {
-            LOG_ERROR(Lib_Voice, "Port {} is not allocated", port_id);
+            LOG_ERROR(Lib_Voice, "Port %u is not allocated", port_id);
             return ORBIS_VOICE_ERROR_PORT_INVALID;
         }
         if (port->type != required_type) {
-            LOG_ERROR(Lib_Voice, "Port {} has the wrong type for attr_id {}", port_id, attr_id);
+            LOG_ERROR(Lib_Voice, "Port %u has the wrong type for attr_id %d", port_id, attr_id);
             return ORBIS_VOICE_ERROR_ARGUMENT_INVALID;
         }
         const u32 result =
@@ -278,10 +278,10 @@ s32 PS4_SYSV_ABI sceVoiceGetPortAttr(u32 port_id, s32 attr_id, void* value, u32 
 }
 
 s32 PS4_SYSV_ABI sceVoiceGetPortInfo(u32 port_id, OrbisVoicePortInfo* info) {
-    LOG_TRACE(Lib_Voice, "port_id = {}", port_id);
+    LOG_TRACE(Lib_Voice, "port_id = %u", port_id);
     return g_state.mutex.Run([&]() -> s32 {
         if (const s32 ret = CheckPort(port_id); ret != ORBIS_OK) {
-            LOG_ERROR(Lib_Voice, "Port check failed: port_id = {}, error = {:#x}", port_id,
+            LOG_ERROR(Lib_Voice, "Port check failed: port_id = %u, error = 0x%x", port_id,
                       static_cast<u32>(ret));
             return ret;
         }
@@ -291,7 +291,7 @@ s32 PS4_SYSV_ABI sceVoiceGetPortInfo(u32 port_id, OrbisVoicePortInfo* info) {
         }
         const Port* port = FindPort(port_id);
         if (!port) {
-            LOG_ERROR(Lib_Voice, "Port {} is not allocated", port_id);
+            LOG_ERROR(Lib_Voice, "Port %u is not allocated", port_id);
             return ORBIS_VOICE_ERROR_TOPOLOGY;
         }
         info->port_type = port->type;
@@ -321,10 +321,10 @@ s32 PS4_SYSV_ABI sceVoiceGetResourceInfo(OrbisVoiceResourceInfo* info) {
 }
 
 s32 PS4_SYSV_ABI sceVoiceGetVolume(u32 port_id, float* volume) {
-    LOG_TRACE(Lib_Voice, "port_id = {}", port_id);
+    LOG_TRACE(Lib_Voice, "port_id = %u", port_id);
     return g_state.mutex.Run([&]() -> s32 {
         if (const s32 ret = CheckPort(port_id); ret != ORBIS_OK) {
-            LOG_ERROR(Lib_Voice, "Port check failed: port_id = {}, error = {:#x}", port_id,
+            LOG_ERROR(Lib_Voice, "Port check failed: port_id = %u, error = 0x%x", port_id,
                       static_cast<u32>(ret));
             return ret;
         }
@@ -334,7 +334,7 @@ s32 PS4_SYSV_ABI sceVoiceGetVolume(u32 port_id, float* volume) {
         }
         const Port* port = FindPort(port_id);
         if (!port) {
-            LOG_ERROR(Lib_Voice, "Port {} is not allocated", port_id);
+            LOG_ERROR(Lib_Voice, "Port %u is not allocated", port_id);
             return ORBIS_VOICE_ERROR_PORT_INVALID;
         }
         *volume = port->volume;
@@ -343,25 +343,25 @@ s32 PS4_SYSV_ABI sceVoiceGetVolume(u32 port_id, float* volume) {
 }
 
 s32 PS4_SYSV_ABI sceVoiceInit(const OrbisVoiceInitParam* param, s32 container) {
-    LOG_INFO(Lib_Voice, "called, container = {}", container);
+    LOG_INFO(Lib_Voice, "called, container = %d", container);
     return InitInternal(param);
 }
 
 s32 PS4_SYSV_ABI sceVoiceInitHQ(const OrbisVoiceInitParam* param, s32 container) {
-    LOG_INFO(Lib_Voice, "called, container = {}", container);
+    LOG_INFO(Lib_Voice, "called, container = %d", container);
     return InitInternal(param);
 }
 
 s32 PS4_SYSV_ABI sceVoicePausePort(u32 port_id) {
-    LOG_INFO(Lib_Voice, "port_id = {}", port_id);
+    LOG_INFO(Lib_Voice, "port_id = %u", port_id);
     return g_state.mutex.Run([&]() -> s32 {
         if (const s32 ret = CheckPort(port_id); ret != ORBIS_OK) {
-            LOG_ERROR(Lib_Voice, "Port check failed: port_id = {}, error = {:#x}", port_id,
+            LOG_ERROR(Lib_Voice, "Port check failed: port_id = %u, error = 0x%x", port_id,
                       static_cast<u32>(ret));
             return ret;
         }
         if (!FindPort(port_id)) {
-            LOG_ERROR(Lib_Voice, "Port {} is not allocated", port_id);
+            LOG_ERROR(Lib_Voice, "Port %u is not allocated", port_id);
             return ORBIS_VOICE_ERROR_PORT_INVALID;
         }
         return ORBIS_OK;
@@ -380,10 +380,10 @@ s32 PS4_SYSV_ABI sceVoicePausePortAll() {
 }
 
 s32 PS4_SYSV_ABI sceVoiceReadFromOPort(u32 port_id, void* data, u32* size) {
-    LOG_TRACE(Lib_Voice, "port_id = {}", port_id);
+    LOG_TRACE(Lib_Voice, "port_id = %u", port_id);
     return g_state.mutex.Run([&]() -> s32 {
         if (const s32 ret = CheckPort(port_id); ret != ORBIS_OK) {
-            LOG_ERROR(Lib_Voice, "Port check failed: port_id = {}, error = {:#x}", port_id,
+            LOG_ERROR(Lib_Voice, "Port check failed: port_id = %u, error = 0x%x", port_id,
                       static_cast<u32>(ret));
             return ret;
         }
@@ -394,7 +394,7 @@ s32 PS4_SYSV_ABI sceVoiceReadFromOPort(u32 port_id, void* data, u32* size) {
         *size = 0;
         const Port* port = FindPort(port_id);
         if (!port) {
-            LOG_ERROR(Lib_Voice, "Port {} is not allocated", port_id);
+            LOG_ERROR(Lib_Voice, "Port %u is not allocated", port_id);
             return ORBIS_VOICE_ERROR_TOPOLOGY;
         }
         switch (port->type) {
@@ -402,26 +402,26 @@ s32 PS4_SYSV_ABI sceVoiceReadFromOPort(u32 port_id, void* data, u32* size) {
         case ORBIS_VOICE_PORTTYPE_OUT_VOICE:
             return ORBIS_OK;
         case ORBIS_VOICE_PORTTYPE_OUT_DEVICE:
-            LOG_ERROR(Lib_Voice, "Cannot read from a device output port: port_id = {}", port_id);
+            LOG_ERROR(Lib_Voice, "Cannot read from a device output port: port_id = %u", port_id);
             return ORBIS_VOICE_ERROR_ARGUMENT_INVALID;
         default:
-            LOG_ERROR(Lib_Voice, "Port {} is not an output port (type = {})", port_id, port->type);
+            LOG_ERROR(Lib_Voice, "Port %u is not an output port (type = %d)", port_id, port->type);
             return ORBIS_VOICE_ERROR_TOPOLOGY;
         }
     });
 }
 
 s32 PS4_SYSV_ABI sceVoiceResetPort(u32 port_id) {
-    LOG_INFO(Lib_Voice, "port_id = {}", port_id);
+    LOG_INFO(Lib_Voice, "port_id = %u", port_id);
     return g_state.mutex.Run([&]() -> s32 {
         if (const s32 ret = CheckPort(port_id); ret != ORBIS_OK) {
-            LOG_ERROR(Lib_Voice, "Port check failed: port_id = {}, error = {:#x}", port_id,
+            LOG_ERROR(Lib_Voice, "Port check failed: port_id = %u, error = 0x%x", port_id,
                       static_cast<u32>(ret));
             return ret;
         }
         Port* port = FindPort(port_id);
         if (!port) {
-            LOG_ERROR(Lib_Voice, "Port {} is not allocated", port_id);
+            LOG_ERROR(Lib_Voice, "Port %u is not allocated", port_id);
             return ORBIS_VOICE_ERROR_PORT_INVALID;
         }
         *port = Port{.allocated = true, .type = port->type};
@@ -430,15 +430,15 @@ s32 PS4_SYSV_ABI sceVoiceResetPort(u32 port_id) {
 }
 
 s32 PS4_SYSV_ABI sceVoiceResumePort(u32 port_id) {
-    LOG_INFO(Lib_Voice, "port_id = {}", port_id);
+    LOG_INFO(Lib_Voice, "port_id = %u", port_id);
     return g_state.mutex.Run([&]() -> s32 {
         if (const s32 ret = CheckPort(port_id); ret != ORBIS_OK) {
-            LOG_ERROR(Lib_Voice, "Port check failed: port_id = {}, error = {:#x}", port_id,
+            LOG_ERROR(Lib_Voice, "Port check failed: port_id = %u, error = 0x%x", port_id,
                       static_cast<u32>(ret));
             return ret;
         }
         if (!FindPort(port_id)) {
-            LOG_ERROR(Lib_Voice, "Port {} is not allocated", port_id);
+            LOG_ERROR(Lib_Voice, "Port %u is not allocated", port_id);
             return ORBIS_VOICE_ERROR_PORT_INVALID;
         }
         return ORBIS_OK;
@@ -457,16 +457,16 @@ s32 PS4_SYSV_ABI sceVoiceResumePortAll() {
 }
 
 s32 PS4_SYSV_ABI sceVoiceSetBitRate(u32 port_id, u32 bitrate) {
-    LOG_INFO(Lib_Voice, "port_id = {}, bitrate = {}", port_id, bitrate);
+    LOG_INFO(Lib_Voice, "port_id = %u, bitrate = %u", port_id, bitrate);
     return g_state.mutex.Run([&]() -> s32 {
         if (const s32 ret = CheckPort(port_id); ret != ORBIS_OK) {
-            LOG_ERROR(Lib_Voice, "Port check failed: port_id = {}, error = {:#x}", port_id,
+            LOG_ERROR(Lib_Voice, "Port check failed: port_id = %u, error = 0x%x", port_id,
                       static_cast<u32>(ret));
             return ret;
         }
         Port* port = FindPort(port_id);
         if (!port) {
-            LOG_ERROR(Lib_Voice, "Port {} is not allocated", port_id);
+            LOG_ERROR(Lib_Voice, "Port %u is not allocated", port_id);
             return ORBIS_VOICE_ERROR_PORT_INVALID;
         }
         port->bitrate = bitrate;
@@ -475,16 +475,16 @@ s32 PS4_SYSV_ABI sceVoiceSetBitRate(u32 port_id, u32 bitrate) {
 }
 
 s32 PS4_SYSV_ABI sceVoiceSetMuteFlag(u32 port_id, bool mute) {
-    LOG_INFO(Lib_Voice, "port_id = {}, mute = {}", port_id, mute);
+    LOG_INFO(Lib_Voice, "port_id = %u, mute = %s", port_id, (mute) ? "true" : "false");
     return g_state.mutex.Run([&]() -> s32 {
         if (const s32 ret = CheckPort(port_id); ret != ORBIS_OK) {
-            LOG_ERROR(Lib_Voice, "Port check failed: port_id = {}, error = {:#x}", port_id,
+            LOG_ERROR(Lib_Voice, "Port check failed: port_id = %u, error = 0x%x", port_id,
                       static_cast<u32>(ret));
             return ret;
         }
         Port* port = FindPort(port_id);
         if (!port) {
-            LOG_ERROR(Lib_Voice, "Port {} is not allocated", port_id);
+            LOG_ERROR(Lib_Voice, "Port %u is not allocated", port_id);
             return ORBIS_VOICE_ERROR_PORT_INVALID;
         }
         port->muted = mute;
@@ -493,7 +493,7 @@ s32 PS4_SYSV_ABI sceVoiceSetMuteFlag(u32 port_id, bool mute) {
 }
 
 s32 PS4_SYSV_ABI sceVoiceSetMuteFlagAll(bool mute) {
-    LOG_INFO(Lib_Voice, "mute = {}", mute);
+    LOG_INFO(Lib_Voice, "mute = %s", (mute) ? "true" : "false");
     return g_state.mutex.Run([&]() -> s32 {
         if (!g_state.initialized) {
             LOG_ERROR(Lib_Voice, "Voice is not initialized");
@@ -512,16 +512,16 @@ s32 PS4_SYSV_ABI sceVoiceSetThreadsParams() {
 }
 
 s32 PS4_SYSV_ABI sceVoiceSetVolume(u32 port_id, float volume) {
-    LOG_INFO(Lib_Voice, "port_id = {}, volume = {}", port_id, volume);
+    LOG_INFO(Lib_Voice, "port_id = %u, volume = %g", port_id, volume);
     return g_state.mutex.Run([&]() -> s32 {
         if (const s32 ret = CheckPort(port_id); ret != ORBIS_OK) {
-            LOG_ERROR(Lib_Voice, "Port check failed: port_id = {}, error = {:#x}", port_id,
+            LOG_ERROR(Lib_Voice, "Port check failed: port_id = %u, error = 0x%x", port_id,
                       static_cast<u32>(ret));
             return ret;
         }
         Port* port = FindPort(port_id);
         if (!port) {
-            LOG_ERROR(Lib_Voice, "Port {} is not allocated", port_id);
+            LOG_ERROR(Lib_Voice, "Port %u is not allocated", port_id);
             return ORBIS_VOICE_ERROR_PORT_INVALID;
         }
         port->volume = std::isfinite(volume) ? volume : 0.0f;
@@ -556,10 +556,10 @@ s32 PS4_SYSV_ABI sceVoiceStop() {
 }
 
 s32 PS4_SYSV_ABI sceVoiceUpdatePort(u32 port_id, const OrbisVoicePortParam* param) {
-    LOG_INFO(Lib_Voice, "port_id = {}", port_id);
+    LOG_INFO(Lib_Voice, "port_id = %u", port_id);
     return g_state.mutex.Run([&]() -> s32 {
         if (const s32 ret = CheckPort(port_id); ret != ORBIS_OK) {
-            LOG_ERROR(Lib_Voice, "Port check failed: port_id = {}, error = {:#x}", port_id,
+            LOG_ERROR(Lib_Voice, "Port check failed: port_id = %u, error = 0x%x", port_id,
                       static_cast<u32>(ret));
             return ret;
         }
@@ -568,7 +568,7 @@ s32 PS4_SYSV_ABI sceVoiceUpdatePort(u32 port_id, const OrbisVoicePortParam* para
             return ORBIS_VOICE_ERROR_ARGUMENT_INVALID;
         }
         if (!FindPort(port_id)) {
-            LOG_ERROR(Lib_Voice, "Port {} is not allocated", port_id);
+            LOG_ERROR(Lib_Voice, "Port %u is not allocated", port_id);
             return ORBIS_VOICE_ERROR_PORT_INVALID;
         }
         return ORBIS_OK;
@@ -576,24 +576,24 @@ s32 PS4_SYSV_ABI sceVoiceUpdatePort(u32 port_id, const OrbisVoicePortParam* para
 }
 
 s32 PS4_SYSV_ABI sceVoiceVADAdjustment(float param1, float param2) {
-    LOG_INFO(Lib_Voice, "param1 = {}, param2 = {}", param1, param2);
+    LOG_INFO(Lib_Voice, "param1 = %g, param2 = %g", param1, param2);
     return ORBIS_OK;
 }
 
 s32 PS4_SYSV_ABI sceVoiceVADSetVersion(s32 version) {
-    LOG_INFO(Lib_Voice, "version = {}", version);
+    LOG_INFO(Lib_Voice, "version = %d", version);
     if (version != 0 && version != 1) {
-        LOG_ERROR(Lib_Voice, "Invalid version: {}", version);
+        LOG_ERROR(Lib_Voice, "Invalid version: %d", version);
         return ORBIS_VOICE_ERROR_ARGUMENT_INVALID;
     }
     return ORBIS_OK;
 }
 
 s32 PS4_SYSV_ABI sceVoiceWriteToIPort(u32 port_id, const void* data, u32* size, s16 unk) {
-    LOG_TRACE(Lib_Voice, "port_id = {}, unk = {}", port_id, unk);
+    LOG_TRACE(Lib_Voice, "port_id = %u, unk = %d", port_id, unk);
     return g_state.mutex.Run([&]() -> s32 {
         if (const s32 ret = CheckPort(port_id); ret != ORBIS_OK) {
-            LOG_ERROR(Lib_Voice, "Port check failed: port_id = {}, error = {:#x}", port_id,
+            LOG_ERROR(Lib_Voice, "Port check failed: port_id = %u, error = 0x%x", port_id,
                       static_cast<u32>(ret));
             return ret;
         }
@@ -603,13 +603,13 @@ s32 PS4_SYSV_ABI sceVoiceWriteToIPort(u32 port_id, const void* data, u32* size, 
         }
         const Port* port = FindPort(port_id);
         if (!port) {
-            LOG_ERROR(Lib_Voice, "Port {} is not allocated", port_id);
+            LOG_ERROR(Lib_Voice, "Port %u is not allocated", port_id);
             *size = 0;
             return ORBIS_VOICE_ERROR_TOPOLOGY;
         }
         if (port->type != ORBIS_VOICE_PORTTYPE_IN_PCMAUDIO &&
             port->type != ORBIS_VOICE_PORTTYPE_IN_VOICE) {
-            LOG_ERROR(Lib_Voice, "Port {} is not an input port (type = {})", port_id, port->type);
+            LOG_ERROR(Lib_Voice, "Port %u is not an input port (type = %d)", port_id, port->type);
             *size = 0;
             return ORBIS_VOICE_ERROR_ARGUMENT_INVALID;
         }

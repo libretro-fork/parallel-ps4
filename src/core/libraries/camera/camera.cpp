@@ -64,7 +64,7 @@ s32 PS4_SYSV_ABI sceCameraChangeAppModuleState() {
 }
 
 s32 PS4_SYSV_ABI sceCameraClose(s32 handle) {
-    LOG_INFO(Lib_Camera, "called, handle: {}", handle);
+    LOG_INFO(Lib_Camera, "called, handle: %d", handle);
     if (handle < 1) {
         return ORBIS_CAMERA_ERROR_PARAM;
     }
@@ -107,7 +107,7 @@ s32 PS4_SYSV_ABI sceCameraGetFrameData(s32 handle, OrbisCameraFrameData* frame_d
     if (frame_data == nullptr) {
         return ORBIS_CAMERA_ERROR_PARAM;
     }
-    LOG_DEBUG(Lib_Camera, "called, read mode: {:#x}", frame_data->readMode);
+    LOG_DEBUG(Lib_Camera, "called, read mode: 0x%x", frame_data->readMode);
     frame_data->status[0] = -1;
     frame_data->status[1] = -1;
     if (handle < 1 || frame_data->sizeThis > 584) {
@@ -344,7 +344,7 @@ s32 PS4_SYSV_ABI sceCameraStartByHandle(s32 handle, OrbisCameraStartParameter* p
 }
 
 s32 PS4_SYSV_ABI sceCameraStop(s32 handle) {
-    LOG_INFO(Lib_Camera, "called, handle: {}", handle);
+    LOG_INFO(Lib_Camera, "called, handle: %d", handle);
     if (handle < 1) {
         return ORBIS_CAMERA_ERROR_PARAM;
     }

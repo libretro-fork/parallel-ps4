@@ -61,7 +61,7 @@ struct IrqController {
     void Signal(InterruptId irq) {
         auto& ctx = Context(irq);
         ctx.combiner.Run([&] {
-            LOG_TRACE(Core, "IRQ signaled: {}",
+            LOG_TRACE(Core, "IRQ signaled: %s",
                       enum_name(&enum_names_Platform_InterruptId, static_cast<s64>(irq)));
 
             for (auto& [uid, h] : ctx.persistent_handlers) {

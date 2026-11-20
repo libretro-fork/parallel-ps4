@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include <utility>
-#include <fmt/format.h>
 #include "common/enum_names.h"
+#include "common/string_util.h"
 
 #include "common/assert.h"
 #include "common/logging/log.h"
@@ -46,7 +46,7 @@ Error PS4_SYSV_ABI sceErrorDialogClose() {
 
 Status PS4_SYSV_ABI sceErrorDialogGetStatus() {
     const Status status = GetStatus();
-    LOG_TRACE(Lib_ErrorDialog, "called status={}",
+    LOG_TRACE(Lib_ErrorDialog, "called status=%s",
               enum_name(&enum_names_Libraries_CommonDialog_Status, static_cast<s64>(status)));
     return status;
 }
@@ -71,10 +71,11 @@ Error PS4_SYSV_ABI sceErrorDialogOpen(const Param* param) {
         return Error::ARG_NULL;
     }
     const auto err = static_cast<u32>(param->errorCode);
-    LOG_DEBUG(Lib_ErrorDialog, "called param->errorCode = {:#x}", err);
+    LOG_DEBUG(Lib_ErrorDialog, "called param->errorCode = 0x%x", err);
     ASSERT(param->size == sizeof(Param));
 
-    const std::string err_message = fmt::format("An error has occurred. \nCode: {:#X}", err);
+    const std::string err_message =
+        Common::StringFromFormat("An error has occurred. \nCode: 0X%X", err);
     ovl_msg_dialog_param_t overlay_param{};
     overlay_param.mode = OVL_MSG_MODE_ERROR;
     overlay_param.msg = err_message.c_str();
@@ -106,7 +107,7 @@ Error PS4_SYSV_ABI sceErrorDialogTerminate() {
 
 Status PS4_SYSV_ABI sceErrorDialogUpdateStatus() {
     const Status status = GetStatus();
-    LOG_TRACE(Lib_ErrorDialog, "called status={}",
+    LOG_TRACE(Lib_ErrorDialog, "called status=%s",
               enum_name(&enum_names_Libraries_CommonDialog_Status, static_cast<s64>(status)));
     return status;
 }

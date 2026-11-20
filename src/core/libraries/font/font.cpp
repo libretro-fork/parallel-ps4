@@ -24,7 +24,6 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
-#include <fmt/format.h>
 #include <retro_atomic.h>
 #include "common/combiner.h"
 #include "common/io_file.h"
@@ -471,7 +470,8 @@ static bool PopulateWritingStep(HleFontWriting& writing, HleFontString& font_str
         if (metrics_rc == ORBIS_OK) {
             FillWritingMetricsFromGlyph(writing, glyph_metrics);
         } else {
-            LOG_WARNING(Lib_Font, "sceFontWriting step metrics failed for code={} rc={} (index={})",
+            LOG_WARNING(Lib_Font,
+                        "sceFontWriting step metrics failed for code=%u rc=%d (index=%zu)",
                         character.characterCode, metrics_rc, index);
         }
     }
@@ -596,12 +596,13 @@ constexpr std::uintptr_t kFtRendererDestroyFnAddr = 0x0100f790u;
 
 s32 PS4_SYSV_ABI sceFontAttachDeviceCacheBuffer(OrbisFontLib library, void* buffer, u32 size) {
     LOG_INFO(Lib_Font, "called");
-    LOG_DEBUG(Lib_Font, "{}",
-              formatParams({
-                  Param("library", library),
-                  Param("buffer", buffer),
-                  Param("size", size),
-              }));
+    LOG_DEBUG(Lib_Font, "%s",
+              (formatParams({
+                   Param("library", library),
+                   Param("buffer", buffer),
+                   Param("size", size),
+               }))
+                  .c_str());
 
     if (!library) {
         LOG_ERROR(Lib_Font, "INVALID_LIBRARY");
@@ -704,11 +705,12 @@ s32 PS4_SYSV_ABI sceFontAttachDeviceCacheBuffer(OrbisFontLib library, void* buff
 
 s32 PS4_SYSV_ABI sceFontBindRenderer(OrbisFontHandle fontHandle, OrbisFontRenderer renderer) {
     LOG_INFO(Lib_Font, "called");
-    LOG_DEBUG(Lib_Font, "{}",
-              formatParams({
-                  Param("fontHandle", fontHandle),
-                  Param("renderer", renderer),
-              }));
+    LOG_DEBUG(Lib_Font, "%s",
+              (formatParams({
+                   Param("fontHandle", fontHandle),
+                   Param("renderer", renderer),
+               }))
+                  .c_str());
 
     auto* font = GetNativeFont(fontHandle);
     if (!font) {
@@ -959,13 +961,14 @@ s32 PS4_SYSV_ABI sceFontCreateLibraryWithEdition(const OrbisFontMem* memory,
                                                  OrbisFontLibCreateParams create_params,
                                                  u64 edition, OrbisFontLib* pLibrary) {
     LOG_INFO(Lib_Font, "called");
-    LOG_DEBUG(Lib_Font, "{}",
-              formatParams({
-                  Param("memory", memory),
-                  Param("create_params", create_params),
-                  Param("edition", edition),
-                  Param("pLibrary", pLibrary),
-              }));
+    LOG_DEBUG(Lib_Font, "%s",
+              (formatParams({
+                   Param("memory", memory),
+                   Param("create_params", create_params),
+                   Param("edition", edition),
+                   Param("pLibrary", pLibrary),
+               }))
+                  .c_str());
 
     if (pLibrary) {
         *pLibrary = nullptr;
@@ -1122,9 +1125,12 @@ s32 PS4_SYSV_ABI sceFontDestroyLibrary(OrbisFontLib* pLibrary) {
     LOG_INFO(Lib_Font, "library destroy requested");
     LOG_DEBUG(Lib_Font,
               "library destroy params:\n"
-              " library_handle_ptr={}\n"
-              " library_handle={}\n",
-              static_cast<const void*>(pLibrary), static_cast<const void*>(lib));
+              " library_handle_ptr=0x%llx\n"
+              " library_handle=0x%llx\n",
+              static_cast<unsigned long long>(
+                  reinterpret_cast<uintptr_t>(static_cast<const void*>(pLibrary))),
+              static_cast<unsigned long long>(
+                  reinterpret_cast<uintptr_t>(static_cast<const void*>(lib))));
     auto* native = static_cast<Internal::FontLibOpaque*>(lib);
     if (native->magic != 0x0F01) {
         return ORBIS_FONT_ERROR_INVALID_LIBRARY;
@@ -1155,13 +1161,14 @@ s32 PS4_SYSV_ABI sceFontCreateRendererWithEdition(const OrbisFontMem* memory,
                                                   u64 edition, OrbisFontRenderer* pRenderer) {
     LOG_INFO(Lib_Font, "called");
 
-    LOG_DEBUG(Lib_Font, "{}",
-              formatParams({
-                  Param("memory", memory),
-                  Param("create_params", create_params),
-                  Param("edition", edition),
-                  Param("pRenderer", pRenderer),
-              }));
+    LOG_DEBUG(Lib_Font, "%s",
+              (formatParams({
+                   Param("memory", memory),
+                   Param("create_params", create_params),
+                   Param("edition", edition),
+                   Param("pRenderer", pRenderer),
+               }))
+                  .c_str());
 
     s32 rc = ORBIS_FONT_ERROR_INVALID_PARAMETER;
     if (!memory) {
@@ -1289,9 +1296,17 @@ s32 PS4_SYSV_ABI sceFontCreateString(const OrbisFontMem* fontMemory,
                                      OrbisFontTextSource* fontTextSource,
                                      const OrbisFontCreateStringDetail* stringDetail,
                                      OrbisFontString* pFontString) {
-    LOG_INFO(Lib_Font, "called fontMemory={} fontTextSource={} stringDetail={} pFontString={}",
-             static_cast<const void*>(fontMemory), static_cast<const void*>(fontTextSource),
-             static_cast<const void*>(stringDetail), static_cast<const void*>(pFontString));
+    LOG_INFO(
+        Lib_Font,
+        "called fontMemory=0x%llx fontTextSource=0x%llx stringDetail=0x%llx pFontString=0x%llx",
+        static_cast<unsigned long long>(
+            reinterpret_cast<uintptr_t>(static_cast<const void*>(fontMemory))),
+        static_cast<unsigned long long>(
+            reinterpret_cast<uintptr_t>(static_cast<const void*>(fontTextSource))),
+        static_cast<unsigned long long>(
+            reinterpret_cast<uintptr_t>(static_cast<const void*>(stringDetail))),
+        static_cast<unsigned long long>(
+            reinterpret_cast<uintptr_t>(static_cast<const void*>(pFontString))));
 
     if (!fontMemory || !fontTextSource || !pFontString) {
         if (pFontString) {
@@ -1301,19 +1316,30 @@ s32 PS4_SYSV_ABI sceFontCreateString(const OrbisFontMem* fontMemory,
         return ORBIS_FONT_ERROR_INVALID_PARAMETER;
     }
 
-    LOG_INFO(Lib_Font,
-             "probe textSource: systemUse0=0x{:016x} start={} end={} current={} parser={} "
-             "object={} defaultFont={}",
-             fontTextSource->systemUse0, fontTextSource->start, fontTextSource->end,
-             fontTextSource->current, reinterpret_cast<const void*>(fontTextSource->textParser),
-             fontTextSource->textObject, static_cast<void*>(fontTextSource->defaultFont));
+    LOG_INFO(
+        Lib_Font,
+        "probe textSource: systemUse0=0x%016" PRIx64
+        " start=0x%llx end=0x%llx current=0x%llx parser=0x%llx "
+        "object=0x%llx defaultFont=0x%llx",
+        fontTextSource->systemUse0,
+        static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(fontTextSource->start)),
+        static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(fontTextSource->end)),
+        static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(fontTextSource->current)),
+        static_cast<unsigned long long>(
+            reinterpret_cast<uintptr_t>(reinterpret_cast<const void*>(fontTextSource->textParser))),
+        static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(fontTextSource->textObject)),
+        static_cast<unsigned long long>(
+            reinterpret_cast<uintptr_t>(static_cast<void*>(fontTextSource->defaultFont))));
 
-    LOG_INFO(Lib_Font,
-             "probe memory: mem_kind=0x{:04x} attr_bits=0x{:04x} region_size=0x{:x} base={} "
-             "mspace={} iface={}",
-             fontMemory->mem_kind, fontMemory->attr_bits, fontMemory->region_size,
-             fontMemory->region_base, fontMemory->mspace_handle,
-             static_cast<const void*>(fontMemory->iface));
+    LOG_INFO(
+        Lib_Font,
+        "probe memory: mem_kind=0x%04x attr_bits=0x%04x region_size=0x%x base=0x%llx "
+        "mspace=0x%llx iface=0x%llx",
+        fontMemory->mem_kind, fontMemory->attr_bits, fontMemory->region_size,
+        static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(fontMemory->region_base)),
+        static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(fontMemory->mspace_handle)),
+        static_cast<unsigned long long>(
+            reinterpret_cast<uintptr_t>(static_cast<const void*>(fontMemory->iface))));
 
     if (!fontTextSource->textParser) {
         if (pFontString) {
@@ -1351,12 +1377,18 @@ s32 PS4_SYSV_ABI sceFontCreateString(const OrbisFontMem* fontMemory,
 
     const auto alloc_fn = reinterpret_cast<Internal::FontAllocFn>(fontMemory->iface->alloc);
     const auto free_fn = reinterpret_cast<Internal::FontFreeFn>(fontMemory->iface->dealloc);
-    LOG_INFO(Lib_Font, "sceFontCreateString allocator probe: alloc_fn={} free_fn={} mspace={}",
-             reinterpret_cast<const void*>(alloc_fn), reinterpret_cast<const void*>(free_fn),
-             fontMemory->mspace_handle);
+    LOG_INFO(
+        Lib_Font,
+        "sceFontCreateString allocator probe: alloc_fn=0x%llx free_fn=0x%llx mspace=0x%llx",
+        static_cast<unsigned long long>(
+            reinterpret_cast<uintptr_t>(reinterpret_cast<const void*>(alloc_fn))),
+        static_cast<unsigned long long>(
+            reinterpret_cast<uintptr_t>(reinterpret_cast<const void*>(free_fn))),
+        static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(fontMemory->mspace_handle)));
 
     auto* raw = alloc_fn(fontMemory->mspace_handle, sizeof(HleFontString));
-    LOG_INFO(Lib_Font, "sceFontCreateString allocator returned {}", raw);
+    LOG_INFO(Lib_Font, "sceFontCreateString allocator returned 0x%llx",
+             static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(raw)));
     if (!raw) {
         *pFontString = nullptr;
         LOG_ERROR(Lib_Font, "ALLOCATION_FAILED");
@@ -1389,7 +1421,7 @@ s32 PS4_SYSV_ABI sceFontCreateString(const OrbisFontMem* fontMemory,
             auto char_font =
                 parse_result.FontCode.font ? parse_result.FontCode.font : s->default_font;
             if (!char_font) {
-                LOG_ERROR(Lib_Font, "INVALID_TEXT_SOURCE parser returned code={} without a font",
+                LOG_ERROR(Lib_Font, "INVALID_TEXT_SOURCE parser returned code=%u without a font",
                           parse_result.FontCode.code);
                 parser_state = ORBIS_FONT_ERROR_INVALID_TEXT_SOURCE;
                 break;
@@ -1412,11 +1444,11 @@ s32 PS4_SYSV_ABI sceFontCreateString(const OrbisFontMem* fontMemory,
             parser_state = (parse_result.Error.errorCode < 0)
                                ? parse_result.Error.errorCode
                                : ORBIS_FONT_ERROR_INVALID_TEXT_SOURCE;
-            LOG_ERROR(Lib_Font, "sceFontCreateString parser reported error rc={}", parser_state);
+            LOG_ERROR(Lib_Font, "sceFontCreateString parser reported error rc=%d", parser_state);
             break;
         }
 
-        LOG_ERROR(Lib_Font, "sceFontCreateString parser returned unexpected state {}",
+        LOG_ERROR(Lib_Font, "sceFontCreateString parser returned unexpected state %d",
                   parser_state);
         parser_state = ORBIS_FONT_ERROR_INVALID_TEXT_SOURCE;
         break;
@@ -1429,7 +1461,7 @@ s32 PS4_SYSV_ABI sceFontCreateString(const OrbisFontMem* fontMemory,
 
     if (s->character_storage->characters.size() == kMaxParsedStringCharacters &&
         parser_state != ORBIS_OK) {
-        LOG_ERROR(Lib_Font, "sceFontCreateString exceeded parser safety limit ({})",
+        LOG_ERROR(Lib_Font, "sceFontCreateString exceeded parser safety limit (%zu)",
                   kMaxParsedStringCharacters);
     }
 
@@ -1447,17 +1479,24 @@ s32 PS4_SYSV_ABI sceFontCreateString(const OrbisFontMem* fontMemory,
 
     const std::string ascii_text = ExtractAsciiText(*s);
     if (!ascii_text.empty() && ascii_text.size() <= 160) {
-        LOG_INFO(Lib_Font, "AsciiString: len={} text=\"{}\"", ascii_text.size(), ascii_text);
+        LOG_INFO(Lib_Font, "AsciiString: len=%zu text=\"%s\"", ascii_text.size(),
+                 (ascii_text).c_str());
     }
 
     *pFontString = reinterpret_cast<OrbisFontString>(s);
-    LOG_INFO(Lib_Font,
-             "created HleFontString at {} (memory iface={} default_font={} text_count={} "
-             "first_code={} terminate_code={})",
-             static_cast<const void*>(*pFontString), static_cast<const void*>(fontMemory->iface),
-             static_cast<const void*>(s->default_font), s->text_count,
-             s->text_count != 0 ? s->character_storage->characters.front().characterCode : 0,
-             s->terminate_code);
+    LOG_INFO(
+        Lib_Font,
+        "created HleFontString at 0x%llx (memory iface=0x%llx default_font=0x%llx text_count=%u "
+        "first_code=%u terminate_code=%u)",
+        static_cast<unsigned long long>(
+            reinterpret_cast<uintptr_t>(static_cast<const void*>(*pFontString))),
+        static_cast<unsigned long long>(
+            reinterpret_cast<uintptr_t>(static_cast<const void*>(fontMemory->iface))),
+        static_cast<unsigned long long>(
+            reinterpret_cast<uintptr_t>(static_cast<const void*>(s->default_font))),
+        s->text_count,
+        s->text_count != 0 ? s->character_storage->characters.front().characterCode : 0,
+        s->terminate_code);
     return ORBIS_OK;
 }
 
@@ -1480,10 +1519,12 @@ s32 PS4_SYSV_ABI sceFontDeleteGlyph(const OrbisFontMem* memory, OrbisFontGlyph* 
     LOG_INFO(Lib_Font, "glyph delete requested");
     LOG_DEBUG(Lib_Font,
               "glyph delete params:\n"
-              " memory={}\n"
-              " glyph_ptr={}\n",
-              static_cast<const void*>(memory),
-              glyph ? static_cast<const void*>(*glyph) : static_cast<const void*>(nullptr));
+              " memory=0x%llx\n"
+              " glyph_ptr=0x%llx\n",
+              static_cast<unsigned long long>(
+                  reinterpret_cast<uintptr_t>(static_cast<const void*>(memory))),
+              static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(
+                  glyph ? static_cast<const void*>(*glyph) : static_cast<const void*>(nullptr))));
 
     if (!glyph) {
         return ORBIS_FONT_ERROR_INVALID_PARAMETER;
@@ -1577,7 +1618,7 @@ s32 PS4_SYSV_ABI sceFontDestroyRenderer(OrbisFontRenderer* pRenderer) {
 
 s32 PS4_SYSV_ABI sceFontDestroyString(OrbisFontString* pFontString) {
     LOG_INFO(Lib_Font, "called");
-    LOG_DEBUG(Lib_Font, "{}", formatParams({Param("pFontString", pFontString)}));
+    LOG_DEBUG(Lib_Font, "%s", (formatParams({Param("pFontString", pFontString)})).c_str());
 
     if (!pFontString) {
         LOG_ERROR(Lib_Font, "INVALID_PARAMETER");
@@ -1595,8 +1636,11 @@ s32 PS4_SYSV_ABI sceFontDestroyString(OrbisFontString* pFontString) {
     void* alloc_ctx = s->memory->mspace_handle;
     void* raw = s;
     ReleaseCharacterStorage(s->character_storage);
-    LOG_DEBUG(Lib_Font, "destroying HleFontString {} (memory iface={})",
-              static_cast<const void*>(s), static_cast<const void*>(s->memory->iface));
+    LOG_DEBUG(
+        Lib_Font, "destroying HleFontString 0x%llx (memory iface=0x%llx)",
+        static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(static_cast<const void*>(s))),
+        static_cast<unsigned long long>(
+            reinterpret_cast<uintptr_t>(static_cast<const void*>(s->memory->iface))));
     s->~HleFontString();
     free_fn(alloc_ctx, raw);
     *pFontString = nullptr;
@@ -1625,20 +1669,22 @@ s32 PS4_SYSV_ABI sceFontGenerateCharGlyph(OrbisFontHandle glyph_handle, u32 code
     LOG_INFO(Lib_Font, "glyph generation requested");
     LOG_DEBUG(Lib_Font,
               "glyph generation params:\n"
-              " handle={}\n"
-              " codepoint={}\n"
-              " id=0x{:04X}\n"
-              " glyph_form={}\n"
-              " metrics_form={}\n"
-              " form_options=0x{:X}\n"
-              " mem={}\n",
-              static_cast<const void*>(glyph_handle), codepoint,
-              gen_params ? static_cast<u32>(gen_params->id) : 0u,
+              " handle=0x%llx\n"
+              " codepoint=%u\n"
+              " id=0x%04X\n"
+              " glyph_form=%u\n"
+              " metrics_form=%u\n"
+              " form_options=0x%X\n"
+              " mem=0x%llx\n",
+              static_cast<unsigned long long>(
+                  reinterpret_cast<uintptr_t>(static_cast<const void*>(glyph_handle))),
+              codepoint, gen_params ? static_cast<u32>(gen_params->id) : 0u,
               gen_params ? static_cast<u32>(gen_params->glyph_form) : 0u,
               gen_params ? static_cast<u32>(gen_params->metrics_form) : 0u,
               gen_params ? static_cast<u32>(gen_params->form_options) : 0u,
-              gen_params ? static_cast<const void*>(gen_params->mem)
-                         : static_cast<const void*>(nullptr));
+              static_cast<unsigned long long>(
+                  reinterpret_cast<uintptr_t>(gen_params ? static_cast<const void*>(gen_params->mem)
+                                                         : static_cast<const void*>(nullptr))));
 
     if (!glyph_out) {
         return ORBIS_FONT_ERROR_INVALID_PARAMETER;
@@ -1730,12 +1776,13 @@ s32 PS4_SYSV_ABI sceFontGetCharGlyphCode() {
 
 s32 PS4_SYSV_ABI sceFontGetCharGlyphMetrics(OrbisFontHandle fontHandle, u32 code,
                                             OrbisFontGlyphMetrics* metrics) {
-    LOG_DEBUG(Lib_Font, "{}",
-              formatParams({
-                  Param("fontHandle", fontHandle),
-                  Param("code", code),
-                  Param("metrics", metrics),
-              }));
+    LOG_DEBUG(Lib_Font, "%s",
+              (formatParams({
+                   Param("fontHandle", fontHandle),
+                   Param("code", code),
+                   Param("metrics", metrics),
+               }))
+                  .c_str());
 
     const s32 rc = Internal::GetCharGlyphMetrics(fontHandle, code, metrics, false);
     if (rc != ORBIS_OK) {
@@ -1750,11 +1797,12 @@ s32 PS4_SYSV_ABI sceFontGetCharGlyphMetrics(OrbisFontHandle fontHandle, u32 code
 
 s32 PS4_SYSV_ABI sceFontGetEffectSlant(OrbisFontHandle fontHandle, float* slantRatio) {
     LOG_INFO(Lib_Font, "called");
-    LOG_DEBUG(Lib_Font, "{}",
-              formatParams({
-                  Param("fontHandle", fontHandle),
-                  Param("slantRatio", slantRatio),
-              }));
+    LOG_DEBUG(Lib_Font, "%s",
+              (formatParams({
+                   Param("fontHandle", fontHandle),
+                   Param("slantRatio", slantRatio),
+               }))
+                  .c_str());
 
     auto* font = GetNativeFont(fontHandle);
     if (!font || font->magic != 0x0F02) {
@@ -1789,13 +1837,14 @@ s32 PS4_SYSV_ABI sceFontGetEffectSlant(OrbisFontHandle fontHandle, float* slantR
 s32 PS4_SYSV_ABI sceFontGetEffectWeight(OrbisFontHandle fontHandle, float* weightXScale,
                                         float* weightYScale, u32* mode) {
     LOG_INFO(Lib_Font, "called");
-    LOG_DEBUG(Lib_Font, "{}",
-              formatParams({
-                  Param("fontHandle", fontHandle),
-                  Param("weightXScale", weightXScale),
-                  Param("weightYScale", weightYScale),
-                  Param("mode", mode),
-              }));
+    LOG_DEBUG(Lib_Font, "%s",
+              (formatParams({
+                   Param("fontHandle", fontHandle),
+                   Param("weightXScale", weightXScale),
+                   Param("weightYScale", weightYScale),
+                   Param("mode", mode),
+               }))
+                  .c_str());
 
     auto* font = GetNativeFont(fontHandle);
     if (!font || font->magic != 0x0F02) {
@@ -1912,11 +1961,12 @@ s32 PS4_SYSV_ABI sceFontGetHorizontalLayout(OrbisFontHandle fontHandle,
         return ORBIS_FONT_ERROR_INVALID_PARAMETER;
     }
 
-    LOG_DEBUG(Lib_Font, "{}",
-              formatParams({
-                  Param("fontHandle", fontHandle),
-                  Param("layout", layout),
-              }));
+    LOG_DEBUG(Lib_Font, "%s",
+              (formatParams({
+                   Param("fontHandle", fontHandle),
+                   Param("layout", layout),
+               }))
+                  .c_str());
 
     Internal::HorizontalLayoutBlocks layout_blocks{};
     const s32 rc =
@@ -1932,19 +1982,21 @@ s32 PS4_SYSV_ABI sceFontGetHorizontalLayout(OrbisFontHandle fontHandle,
             static retro_atomic_int_t s_layout_trace_budget{120};
             const int remaining = retro_atomic_fetch_sub_int(&s_layout_trace_budget, 1);
             if (remaining > 0) {
-                LOG_INFO(Lib_Font,
-                         "GetHorizontalLayoutTrace: handle={} flags=0x{:02X} unit={} dpi=({}, {}) "
-                         "scalePx=({}, {}) weight=({}, {}) slant={} out baseline={} "
-                         "lineAdvance={} decoration={}",
-                         static_cast<const void*>(fontHandle),
-                         static_cast<u32>(style_frame->flags1), style_frame->scaleUnit,
-                         style_frame->hDpi, style_frame->vDpi, style_frame->scalePixelW,
-                         style_frame->scalePixelH, style_frame->effectWeightX,
-                         style_frame->effectWeightY, style_frame->slantRatio,
-                         layout->baselineOffset, layout->lineAdvance, layout->decorationExtent);
+                LOG_INFO(
+                    Lib_Font,
+                    "GetHorizontalLayoutTrace: handle=0x%llx flags=0x%02X unit=%u dpi=(%u, %u) "
+                    "scalePx=(%g, %g) weight=(%g, %g) slant=%g out baseline=%g "
+                    "lineAdvance=%g decoration=%g",
+                    static_cast<unsigned long long>(
+                        reinterpret_cast<uintptr_t>(static_cast<const void*>(fontHandle))),
+                    static_cast<u32>(style_frame->flags1), style_frame->scaleUnit,
+                    style_frame->hDpi, style_frame->vDpi, style_frame->scalePixelW,
+                    style_frame->scalePixelH, style_frame->effectWeightX,
+                    style_frame->effectWeightY, style_frame->slantRatio, layout->baselineOffset,
+                    layout->lineAdvance, layout->decorationExtent);
             }
         }
-        LOG_DEBUG(Lib_Font, "GetHorizontalLayout: out baseLineY={} lineHeight={} effectHeight={}",
+        LOG_DEBUG(Lib_Font, "GetHorizontalLayout: out baseLineY=%g lineHeight=%g effectHeight=%g",
                   layout->baselineOffset, layout->lineAdvance, layout->decorationExtent);
         return ORBIS_OK;
     }
@@ -1953,21 +2005,23 @@ s32 PS4_SYSV_ABI sceFontGetHorizontalLayout(OrbisFontHandle fontHandle,
     if (const auto* rec =
             static_cast<const Internal::FontSetRecordHeader*>(font->open_info.fontset_record)) {
         LOG_DEBUG(Lib_Font,
-                  "GetHorizontalLayout: fail detail rc={} fontset_record={} magic=0x{:08X} "
-                  "entry_count={} ctx_entry_index={} sub_font_index={}",
-                  rc, static_cast<const void*>(font->open_info.fontset_record), rec->magic,
-                  rec->entry_count, font->open_info.ctx_entry_index,
+                  "GetHorizontalLayout: fail detail rc=%d fontset_record=0x%llx magic=0x%08X "
+                  "entry_count=%u ctx_entry_index=%u sub_font_index=%u",
+                  rc,
+                  static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(
+                      static_cast<const void*>(font->open_info.fontset_record))),
+                  rec->magic, rec->entry_count, font->open_info.ctx_entry_index,
                   font->open_info.sub_font_index);
         const u32 entry_count = rec->entry_count;
         const auto* entries = reinterpret_cast<const u32*>(rec + 1);
         for (u32 i = 0; i < entry_count; ++i) {
-            LOG_DEBUG(Lib_Font, "GetHorizontalLayout: fail detail fontset_entry[{}]={}", i,
+            LOG_DEBUG(Lib_Font, "GetHorizontalLayout: fail detail fontset_entry[%u]=%u", i,
                       entries[i]);
         }
     } else {
         LOG_DEBUG(Lib_Font,
-                  "GetHorizontalLayout: fail detail rc={} fontset_record=null ctx_entry_index={} "
-                  "sub_font_index={}",
+                  "GetHorizontalLayout: fail detail rc=%d fontset_record=null ctx_entry_index=%u "
+                  "sub_font_index=%u",
                   rc, font->open_info.ctx_entry_index, font->open_info.sub_font_index);
     }
     LOG_ERROR(Lib_Font, "FAILED");
@@ -1986,7 +2040,7 @@ s32 PS4_SYSV_ABI sceFontGetKerning(OrbisFontHandle fontHandle, u32 preCode, u32 
         const std::string sys_log =
             Internal::ReportSystemFaceRequest(st, fontHandle, system_attached);
         if (!sys_log.empty()) {
-            LOG_ERROR(Lib_Font, "{}", sys_log);
+            LOG_ERROR(Lib_Font, "%s", (sys_log).c_str());
         }
     }
 
@@ -2051,12 +2105,13 @@ s32 PS4_SYSV_ABI sceFontGetPixelResolution() {
 
 s32 PS4_SYSV_ABI sceFontGetRenderCharGlyphMetrics(OrbisFontHandle fontHandle, u32 codepoint,
                                                   OrbisFontGlyphMetrics* out_metrics) {
-    LOG_DEBUG(Lib_Font, "{}",
-              formatParams({
-                  Param("fontHandle", fontHandle),
-                  Param("codepoint", codepoint),
-                  Param("out_metrics", out_metrics),
-              }));
+    LOG_DEBUG(Lib_Font, "%s",
+              (formatParams({
+                   Param("fontHandle", fontHandle),
+                   Param("codepoint", codepoint),
+                   Param("out_metrics", out_metrics),
+               }))
+                  .c_str());
 
     const s32 rc = Internal::GetCharGlyphMetrics(fontHandle, codepoint, out_metrics, true);
     if (rc != ORBIS_OK) {
@@ -2203,12 +2258,13 @@ s32 PS4_SYSV_ABI sceFontGetScalePixel(OrbisFontHandle fontHandle, float* out_w, 
         return ORBIS_FONT_ERROR_INVALID_FONT_HANDLE;
     }
 
-    LOG_DEBUG(Lib_Font, "{}",
-              formatParams({
-                  Param("fontHandle", fontHandle),
-                  Param("out_w", out_w),
-                  Param("out_h", out_h),
-              }));
+    LOG_DEBUG(Lib_Font, "%s",
+              (formatParams({
+                   Param("fontHandle", fontHandle),
+                   Param("out_w", out_w),
+                   Param("out_h", out_h),
+               }))
+                  .c_str());
 
     s32 rc = ORBIS_FONT_ERROR_INVALID_FONT_HANDLE;
     auto* font = GetNativeFont(fontHandle);
@@ -2668,16 +2724,17 @@ s32 PS4_SYSV_ABI sceFontMemoryInit(OrbisFontMem* mem_desc, void* region_addr, u3
         return ORBIS_FONT_ERROR_INVALID_PARAMETER;
     }
 
-    LOG_DEBUG(Lib_Font, "{}",
-              formatParams({
-                  Param("mem_desc", mem_desc),
-                  Param("region_addr", region_addr),
-                  Param("region_size", region_size),
-                  Param("iface", iface),
-                  Param("mspace_obj", mspace_obj),
-                  Param("destroy_cb", reinterpret_cast<const void*>(destroy_cb)),
-                  Param("destroy_ctx", destroy_ctx),
-              }));
+    LOG_DEBUG(Lib_Font, "%s",
+              (formatParams({
+                   Param("mem_desc", mem_desc),
+                   Param("region_addr", region_addr),
+                   Param("region_size", region_size),
+                   Param("iface", iface),
+                   Param("mspace_obj", mspace_obj),
+                   Param("destroy_cb", reinterpret_cast<const void*>(destroy_cb)),
+                   Param("destroy_ctx", destroy_ctx),
+               }))
+                  .c_str());
 
     if (!iface) {
         mem_desc->mem_kind = 0;
@@ -2738,14 +2795,15 @@ s32 PS4_SYSV_ABI sceFontOpenFontFile(OrbisFontLib library, const char* guest_pat
                                      OrbisFontHandle* out_handle) {
     LOG_INFO(Lib_Font, "called");
 
-    LOG_DEBUG(Lib_Font, "{}",
-              formatParams({
-                  Param("library", library),
-                  Param("guest_path", guest_path),
-                  Param("open_mode", open_mode),
-                  Param("open_detail", open_detail),
-                  Param("out_handle", out_handle),
-              }));
+    LOG_DEBUG(Lib_Font, "%s",
+              (formatParams({
+                   Param("library", library),
+                   Param("guest_path", guest_path),
+                   Param("open_mode", open_mode),
+                   Param("open_detail", open_detail),
+                   Param("out_handle", out_handle),
+               }))
+                  .c_str());
 
     if (!library) {
         if (out_handle) {
@@ -3072,8 +3130,8 @@ s32 PS4_SYSV_ABI sceFontOpenFontFile(OrbisFontLib library, const char* guest_pat
     }
 
     if (rc == ORBIS_OK) {
-        LOG_WARNING(Lib_Font, "font file served: requested=\"{}\" served=\"{}\"", guest_name,
-                    host_path_str);
+        LOG_WARNING(Lib_Font, "font file served: requested=\"%s\" served=\"%s\"",
+                    (guest_name).c_str(), (host_path_str).c_str());
         const u32 next_lock = updated_lock + 1;
         updated_lock = next_lock;
 
@@ -3243,12 +3301,13 @@ s32 PS4_SYSV_ABI sceFontOpenFontInstance(OrbisFontHandle fontHandle, OrbisFontHa
         return ORBIS_FONT_ERROR_INVALID_PARAMETER;
     }
 
-    LOG_DEBUG(Lib_Font, "{}",
-              formatParams({
-                  Param("fontHandle", fontHandle),
-                  Param("setupFont", setupFont),
-                  Param("pFontHandle", pFontHandle),
-              }));
+    LOG_DEBUG(Lib_Font, "%s",
+              (formatParams({
+                   Param("fontHandle", fontHandle),
+                   Param("setupFont", setupFont),
+                   Param("pFontHandle", pFontHandle),
+               }))
+                  .c_str());
 
     auto* src = GetNativeFont(fontHandle);
     if (!src || src->magic != 0x0F02) {
@@ -3625,14 +3684,15 @@ s32 PS4_SYSV_ABI sceFontOpenFontMemory(OrbisFontLib library, const void* fontAdd
                                        OrbisFontHandle* pFontHandle) {
     LOG_INFO(Lib_Font, "called");
 
-    LOG_DEBUG(Lib_Font, "{}",
-              formatParams({
-                  Param("library", library),
-                  Param("fontAddress", fontAddress),
-                  Param("fontSize", fontSize),
-                  Param("open_params", open_params),
-                  Param("pFontHandle", pFontHandle),
-              }));
+    LOG_DEBUG(Lib_Font, "%s",
+              (formatParams({
+                   Param("library", library),
+                   Param("fontAddress", fontAddress),
+                   Param("fontSize", fontSize),
+                   Param("open_params", open_params),
+                   Param("pFontHandle", pFontHandle),
+               }))
+                  .c_str());
 
     s32 rc = ORBIS_FONT_ERROR_INVALID_LIBRARY;
     if (!library) {
@@ -3699,8 +3759,11 @@ s32 PS4_SYSV_ABI sceFontOpenFontMemory(OrbisFontLib library, const void* fontAdd
         return ORBIS_FONT_ERROR_INVALID_PARAMETER;
     }
 
-    LOG_WARNING(Lib_Font, "font memory requested: addr={} size={} subfont_index={} unique_id={}",
-                static_cast<const void*>(fontAddress), fontSize, sub_font_index, unique_id);
+    LOG_WARNING(Lib_Font,
+                "font memory requested: addr=0x%llx size=%u subfont_index=%u unique_id=%d",
+                static_cast<unsigned long long>(
+                    reinterpret_cast<uintptr_t>(static_cast<const void*>(fontAddress))),
+                fontSize, sub_font_index, unique_id);
 
     OrbisFontHandle handle = *pFontHandle;
     if (handle) {
@@ -4036,14 +4099,15 @@ s32 PS4_SYSV_ABI sceFontOpenFontSet(OrbisFontLib library, u32 fontSetType, u32 o
                                     const OrbisFontOpenParams* open_params,
                                     OrbisFontHandle* pFontHandle) {
     LOG_INFO(Lib_Font, "called");
-    LOG_DEBUG(Lib_Font, "{}",
-              formatParams({
-                  Param("library", library),
-                  Param("fontSetType", fontSetType),
-                  Param("openMode", openMode),
-                  Param("open_params", open_params),
-                  Param("pFontHandle", pFontHandle),
-              }));
+    LOG_DEBUG(Lib_Font, "%s",
+              (formatParams({
+                   Param("library", library),
+                   Param("fontSetType", fontSetType),
+                   Param("openMode", openMode),
+                   Param("open_params", open_params),
+                   Param("pFontHandle", pFontHandle),
+               }))
+                  .c_str());
 
     {
         auto* lib_local = static_cast<Internal::FontLibOpaque*>(library);
@@ -4123,14 +4187,15 @@ s32 PS4_SYSV_ABI sceFontOpenFontSet(OrbisFontLib library, u32 fontSetType, u32 o
                 primary_path = builtin_selection.primary_path;
                 using_builtin_primary = true;
             } else {
-                LOG_ERROR(Lib_Font, "FONT_OPEN_FAILED path='{}' fontsPath='{}'",
-                          primary_path.string(),
-                          Common::FS::PathFromCString(emu_settings_get_font_dir).string());
+                LOG_ERROR(
+                    Lib_Font, "FONT_OPEN_FAILED path='%s' fontsPath='%s'",
+                    (primary_path.string()).c_str(),
+                    (Common::FS::PathFromCString(emu_settings_get_font_dir).string()).c_str());
                 return release_library_and_clear_out(ORBIS_FONT_ERROR_FONT_OPEN_FAILED);
             }
         }
         if (using_builtin_primary) {
-            LOG_WARNING(Lib_Font, "SystemFonts: using bundled Noto fallback for set type=0x{:08X}",
+            LOG_WARNING(Lib_Font, "SystemFonts: using bundled Noto fallback for set type=0x%08X",
                         fontSetType);
             Internal::NotifyBuiltinFontFallbackOnce();
         }
@@ -4265,8 +4330,8 @@ s32 PS4_SYSV_ABI sceFontOpenFontSet(OrbisFontLib library, u32 fontSetType, u32 o
         st.system_font_scale_factor =
             Internal::ComputeSysfontScaleFactor(st.ext_ft_face, st.ext_units_per_em);
         st.system_font_shift_value = Internal::ComputeSysfontShiftValue(st.ext_ft_face);
-        LOG_DEBUG(Lib_Font, "SystemFonts: primary='{}' unitsPerEm={} scaleFactor={} shiftValue={}",
-                  primary_path.filename().string(), st.ext_units_per_em,
+        LOG_DEBUG(Lib_Font, "SystemFonts: primary='%s' unitsPerEm=%d scaleFactor=%g shiftValue=%d",
+                  (primary_path.filename().string()).c_str(), st.ext_units_per_em,
                   st.system_font_scale_factor, st.system_font_shift_value);
 
         std::string preferred_latin_name_lower;
@@ -4990,7 +5055,7 @@ s32 PS4_SYSV_ABI sceFontRebindRenderer(OrbisFontHandle fontHandle) {
         return ORBIS_FONT_ERROR_INVALID_FONT_HANDLE;
     }
 
-    LOG_DEBUG(Lib_Font, "{}", formatParams({Param("fontHandle", fontHandle)}));
+    LOG_DEBUG(Lib_Font, "%s", (formatParams({Param("fontHandle", fontHandle)})).c_str());
 
     auto* font = GetNativeFont(fontHandle);
     if (!font || font->magic != 0x0F02) {
@@ -5072,16 +5137,17 @@ s32 PS4_SYSV_ABI sceFontRenderCharGlyphImage(OrbisFontHandle fontHandle, u32 cod
         return ORBIS_FONT_ERROR_INVALID_FONT_HANDLE;
     }
 
-    LOG_DEBUG(Lib_Font, "{}",
-              formatParams({
-                  Param("fontHandle", fontHandle),
-                  Param("code", code),
-                  Param("surf", surf),
-                  Param("x", x),
-                  Param("y", y),
-                  Param("metrics", metrics),
-                  Param("result", result),
-              }));
+    LOG_DEBUG(Lib_Font, "%s",
+              (formatParams({
+                   Param("fontHandle", fontHandle),
+                   Param("code", code),
+                   Param("surf", surf),
+                   Param("x", x),
+                   Param("y", y),
+                   Param("metrics", metrics),
+                   Param("result", result),
+               }))
+                  .c_str());
 
     u32 prev_lock_word = 0;
     if (!AcquireFontLock(font, prev_lock_word)) {
@@ -5165,10 +5231,11 @@ s32 PS4_SYSV_ABI sceFontRenderCharGlyphImage(OrbisFontHandle fontHandle, u32 cod
                 int& count = s_baseline_log_counts[fontHandle];
                 if (count < 5) {
                     LOG_DEBUG(Lib_Font,
-                              "RenderBaseline: handle={} code=U+{:04X} y_in={} baseline_add={} "
-                              "y_used={} pre_rc={}",
-                              static_cast<const void*>(fontHandle), code, y, baseline_add, y_used,
-                              pre_rc);
+                              "RenderBaseline: handle=0x%llx code=U+%04X y_in=%g baseline_add=%g "
+                              "y_used=%g pre_rc=%d",
+                              static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(
+                                  static_cast<const void*>(fontHandle))),
+                              code, y, baseline_add, y_used, pre_rc);
                     ++count;
                 }
             });
@@ -5308,16 +5375,17 @@ s32 PS4_SYSV_ABI sceFontRenderCharGlyphImageHorizontal(OrbisFontHandle fontHandl
         return ORBIS_FONT_ERROR_INVALID_PARAMETER;
     }
 
-    LOG_DEBUG(Lib_Font, "{}",
-              formatParams({
-                  Param("fontHandle", fontHandle),
-                  Param("code", code),
-                  Param("surf", surf),
-                  Param("x", x),
-                  Param("y", y),
-                  Param("metrics", metrics),
-                  Param("result", result),
-              }));
+    LOG_DEBUG(Lib_Font, "%s",
+              (formatParams({
+                   Param("fontHandle", fontHandle),
+                   Param("code", code),
+                   Param("surf", surf),
+                   Param("x", x),
+                   Param("y", y),
+                   Param("metrics", metrics),
+                   Param("result", result),
+               }))
+                  .c_str());
 
     u32 prev_lock_word = 0;
     if (!AcquireFontLock(font, prev_lock_word)) {
@@ -5334,11 +5402,12 @@ s32 PS4_SYSV_ABI sceFontRenderCharGlyphImageHorizontal(OrbisFontHandle fontHandl
 
     if (rc != ORBIS_OK) {
         ClearRenderOutputs(metrics, result);
-        LOG_ERROR(Lib_Font,
-                  "FAILED rc={} code={} surf(buffer={}, widthByte={}, pixelSizeByte={}, width={}, "
-                  "height={}, styleFlag={})",
-                  rc, code, surf->buffer, surf->widthByte, surf->pixelSizeByte, surf->width,
-                  surf->height, surf->styleFlag);
+        LOG_ERROR(
+            Lib_Font,
+            "FAILED rc=%d code=%u surf(buffer=0x%llx, widthByte=%d, pixelSizeByte=%d, width=%d, "
+            "height=%d, styleFlag=%u)",
+            rc, code, static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(surf->buffer)),
+            surf->widthByte, surf->pixelSizeByte, surf->width, surf->height, surf->styleFlag);
         return rc;
     }
     if (g_prompt_render_trace.active && g_prompt_render_trace.glyph_code == code) {
@@ -5369,23 +5438,26 @@ s32 PS4_SYSV_ABI sceFontRenderCharGlyphImageHorizontal(OrbisFontHandle fontHandl
                 }
             }
         }
-        LOG_INFO(Lib_Font,
-                 "TextRender[{}]: index={} code=U+{:04X} call_xy=({}, {}) step_xy=({}, {}) "
-                 "surf=[buffer={} widthByte={} pixelSizeByte={} width={} height={} scissor=({}, "
-                 "{})-({}, {})] "
-                 "surfaceImage.address={} "
-                 "update=[{},{} {}x{}] img=[bx={} by={} adv={} stride={} w={} h={}] "
-                 "coverage=[nz={} sum={} max={}]",
-                 g_prompt_render_trace.label ? g_prompt_render_trace.label : "Text",
-                 g_prompt_render_trace.index, code, x, y, g_prompt_render_trace.step_x,
-                 g_prompt_render_trace.step_y, surf->buffer, surf->widthByte, surf->pixelSizeByte,
-                 surf->width, surf->height, surf->sc_x0, surf->sc_y0, surf->sc_x1, surf->sc_y1,
-                 static_cast<const void*>(result->SurfaceImage.address), result->UpdateRect.x,
-                 result->UpdateRect.y, result->UpdateRect.w, result->UpdateRect.h,
-                 result->ImageMetrics.bearingX, result->ImageMetrics.bearingY,
-                 result->ImageMetrics.advance, result->ImageMetrics.stride,
-                 result->ImageMetrics.width, result->ImageMetrics.height, coverage_nonzero,
-                 coverage_sum, coverage_max);
+        LOG_INFO(
+            Lib_Font,
+            "TextRender[%s]: index=%zu code=U+%04X call_xy=(%g, %g) step_xy=(%g, %g) "
+            "surf=[buffer=0x%llx widthByte=%d pixelSizeByte=%d width=%d height=%d scissor=(%u, "
+            "%u)-(%u, %u)] "
+            "surfaceImage.address=0x%llx "
+            "update=[%u,%u %ux%u] img=[bx=%g by=%g adv=%g stride=%g w=%u h=%u] "
+            "coverage=[nz=%u sum=%u max=%u]",
+            g_prompt_render_trace.label ? g_prompt_render_trace.label : "Text",
+            g_prompt_render_trace.index, code, x, y, g_prompt_render_trace.step_x,
+            g_prompt_render_trace.step_y,
+            static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(surf->buffer)),
+            surf->widthByte, surf->pixelSizeByte, surf->width, surf->height, surf->sc_x0,
+            surf->sc_y0, surf->sc_x1, surf->sc_y1,
+            static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(
+                static_cast<const void*>(result->SurfaceImage.address))),
+            result->UpdateRect.x, result->UpdateRect.y, result->UpdateRect.w, result->UpdateRect.h,
+            result->ImageMetrics.bearingX, result->ImageMetrics.bearingY,
+            result->ImageMetrics.advance, result->ImageMetrics.stride, result->ImageMetrics.width,
+            result->ImageMetrics.height, coverage_nonzero, coverage_sum, coverage_max);
         g_prompt_render_trace = {};
     }
     LogRenderResultSample(fontHandle, code, *metrics, *result);
@@ -5423,16 +5495,17 @@ s32 PS4_SYSV_ABI sceFontRenderCharGlyphImageVertical(OrbisFontHandle fontHandle,
         return ORBIS_FONT_ERROR_INVALID_PARAMETER;
     }
 
-    LOG_DEBUG(Lib_Font, "{}",
-              formatParams({
-                  Param("fontHandle", fontHandle),
-                  Param("code", code),
-                  Param("surf", surf),
-                  Param("x", x),
-                  Param("y", y),
-                  Param("metrics", metrics),
-                  Param("result", result),
-              }));
+    LOG_DEBUG(Lib_Font, "%s",
+              (formatParams({
+                   Param("fontHandle", fontHandle),
+                   Param("code", code),
+                   Param("surf", surf),
+                   Param("x", x),
+                   Param("y", y),
+                   Param("metrics", metrics),
+                   Param("result", result),
+               }))
+                  .c_str());
 
     u32 prev_lock_word = 0;
     if (!AcquireFontLock(font, prev_lock_word)) {
@@ -5471,11 +5544,12 @@ s32 PS4_SYSV_ABI sceFontRendererGetOutlineBufferSize(OrbisFontRenderer fontRende
         return ORBIS_FONT_ERROR_INVALID_RENDERER;
     }
 
-    LOG_DEBUG(Lib_Font, "{}",
-              formatParams({
-                  Param("fontRenderer", fontRenderer),
-                  Param("size", size),
-              }));
+    LOG_DEBUG(Lib_Font, "%s",
+              (formatParams({
+                   Param("fontRenderer", fontRenderer),
+                   Param("size", size),
+               }))
+                  .c_str());
 
     *size = static_cast<u32>(renderer->workspace_size);
     return ORBIS_OK;
@@ -5490,7 +5564,7 @@ s32 PS4_SYSV_ABI sceFontRendererResetOutlineBuffer(OrbisFontRenderer fontRendere
         return ORBIS_FONT_ERROR_INVALID_RENDERER;
     }
 
-    LOG_DEBUG(Lib_Font, "{}", formatParams({Param("fontRenderer", fontRenderer)}));
+    LOG_DEBUG(Lib_Font, "%s", (formatParams({Param("fontRenderer", fontRenderer)})).c_str());
 
     if (renderer->workspace && renderer->workspace_size) {
         std::memset(renderer->workspace, 0, static_cast<std::size_t>(renderer->workspace_size));
@@ -5510,13 +5584,14 @@ s32 PS4_SYSV_ABI sceFontRendererSetOutlineBufferPolicy(OrbisFontRenderer fontRen
         return ORBIS_FONT_ERROR_INVALID_RENDERER;
     }
 
-    LOG_DEBUG(Lib_Font, "{}",
-              formatParams({
-                  Param("fontRenderer", fontRenderer),
-                  Param("bufferPolicy", bufferPolicy),
-                  Param("basalSize", basalSize),
-                  Param("limitSize", limitSize),
-              }));
+    LOG_DEBUG(Lib_Font, "%s",
+              (formatParams({
+                   Param("fontRenderer", fontRenderer),
+                   Param("bufferPolicy", bufferPolicy),
+                   Param("basalSize", basalSize),
+                   Param("limitSize", limitSize),
+               }))
+                  .c_str());
 
     if (limitSize != 0 && basalSize > limitSize) {
         LOG_ERROR(Lib_Font, "INVALID_PARAMETER");
@@ -5569,15 +5644,16 @@ void PS4_SYSV_ABI sceFontRenderSurfaceInit(OrbisFontRenderSurface* renderSurface
         return;
     }
 
-    LOG_DEBUG(Lib_Font, "{}",
-              formatParams({
-                  Param("renderSurface", renderSurface),
-                  Param("buffer", buffer),
-                  Param("bufWidthByte", bufWidthByte),
-                  Param("pixelSizeByte", pixelSizeByte),
-                  Param("widthPixel", widthPixel),
-                  Param("heightPixel", heightPixel),
-              }));
+    LOG_DEBUG(Lib_Font, "%s",
+              (formatParams({
+                   Param("renderSurface", renderSurface),
+                   Param("buffer", buffer),
+                   Param("bufWidthByte", bufWidthByte),
+                   Param("pixelSizeByte", pixelSizeByte),
+                   Param("widthPixel", widthPixel),
+                   Param("heightPixel", heightPixel),
+               }))
+                  .c_str());
 
     LOG_DEBUG(Lib_Font, "RenderSurfaceInit: writing struct");
     const u32 w_nonneg = (widthPixel < 0) ? 0u : static_cast<u32>(widthPixel);
@@ -5606,14 +5682,15 @@ void PS4_SYSV_ABI sceFontRenderSurfaceSetScissor(OrbisFontRenderSurface* renderS
         return;
     }
 
-    LOG_DEBUG(Lib_Font, "{}",
-              formatParams({
-                  Param("renderSurface", renderSurface),
-                  Param("x0", x0),
-                  Param("y0", y0),
-                  Param("w", w),
-                  Param("h", h),
-              }));
+    LOG_DEBUG(Lib_Font, "%s",
+              (formatParams({
+                   Param("renderSurface", renderSurface),
+                   Param("x0", x0),
+                   Param("y0", y0),
+                   Param("w", w),
+                   Param("h", h),
+               }))
+                  .c_str());
 
     const u32 surface_w = static_cast<u32>(renderSurface->width);
     if (surface_w != 0) {
@@ -5697,21 +5774,24 @@ s32 PS4_SYSV_ABI sceFontRenderSurfaceSetStyleFrame(OrbisFontRenderSurface* rende
         auto* memory = Core::Memory::Instance();
         if (memory && !memory->IsValidMapping(reinterpret_cast<VAddr>(renderSurface),
                                               sizeof(OrbisFontRenderSurface))) {
-            LOG_ERROR(Lib_Font, "INVALID_ADDR renderSurface={}", fmt::ptr(renderSurface));
+            LOG_ERROR(Lib_Font, "INVALID_ADDR renderSurface=0x%llx",
+                      static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(renderSurface)));
             return ORBIS_FONT_ERROR_INVALID_PARAMETER;
         }
         if (styleFrame && !memory->IsValidMapping(reinterpret_cast<VAddr>(styleFrame),
                                                   sizeof(OrbisFontStyleFrame))) {
-            LOG_ERROR(Lib_Font, "INVALID_ADDR styleFrame={}", fmt::ptr(styleFrame));
+            LOG_ERROR(Lib_Font, "INVALID_ADDR styleFrame=0x%llx",
+                      static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(styleFrame)));
             return ORBIS_FONT_ERROR_INVALID_PARAMETER;
         }
     }
 
-    LOG_DEBUG(Lib_Font, "{}",
-              formatParams({
-                  Param("renderSurface", renderSurface),
-                  Param("styleFrame", styleFrame),
-              }));
+    LOG_DEBUG(Lib_Font, "%s",
+              (formatParams({
+                   Param("renderSurface", renderSurface),
+                   Param("styleFrame", styleFrame),
+               }))
+                  .c_str());
     if (!styleFrame) {
         renderSurface->styleFlag &= ~u8{0x1};
         renderSurface->reserved_q[0] = 0;
@@ -5730,11 +5810,12 @@ s32 PS4_SYSV_ABI sceFontRenderSurfaceSetStyleFrame(OrbisFontRenderSurface* rende
 
 s32 PS4_SYSV_ABI sceFontSetEffectSlant(OrbisFontHandle fontHandle, float slantRatio) {
     LOG_INFO(Lib_Font, "called");
-    LOG_DEBUG(Lib_Font, "{}",
-              formatParams({
-                  Param("fontHandle", fontHandle),
-                  Param("slantRatio", slantRatio),
-              }));
+    LOG_DEBUG(Lib_Font, "%s",
+              (formatParams({
+                   Param("fontHandle", fontHandle),
+                   Param("slantRatio", slantRatio),
+               }))
+                  .c_str());
 
     auto* font = GetNativeFont(fontHandle);
     if (!font || font->magic != 0x0F02) {
@@ -5758,13 +5839,14 @@ s32 PS4_SYSV_ABI sceFontSetEffectSlant(OrbisFontHandle fontHandle, float slantRa
 s32 PS4_SYSV_ABI sceFontSetEffectWeight(OrbisFontHandle fontHandle, float weightXScale,
                                         float weightYScale, u32 mode) {
     LOG_INFO(Lib_Font, "called");
-    LOG_DEBUG(Lib_Font, "{}",
-              formatParams({
-                  Param("fontHandle", fontHandle),
-                  Param("weightXScale", weightXScale),
-                  Param("weightYScale", weightYScale),
-                  Param("mode", mode),
-              }));
+    LOG_DEBUG(Lib_Font, "%s",
+              (formatParams({
+                   Param("fontHandle", fontHandle),
+                   Param("weightXScale", weightXScale),
+                   Param("weightYScale", weightYScale),
+                   Param("mode", mode),
+               }))
+                  .c_str());
 
     if (mode != 0) {
         LOG_ERROR(Lib_Font, "INVALID_PARAMETER");
@@ -5792,11 +5874,12 @@ s32 PS4_SYSV_ABI sceFontSetEffectWeight(OrbisFontHandle fontHandle, float weight
 
 s32 PS4_SYSV_ABI sceFontSetFontsOpenMode(OrbisFontLib library, u32 openMode) {
     LOG_INFO(Lib_Font, "called");
-    LOG_DEBUG(Lib_Font, "{}",
-              formatParams({
-                  Param("library", library),
-                  Param("openMode", openMode),
-              }));
+    LOG_DEBUG(Lib_Font, "%s",
+              (formatParams({
+                   Param("library", library),
+                   Param("openMode", openMode),
+               }))
+                  .c_str());
 
     if (!library) {
         LOG_ERROR(Lib_Font, "INVALID_LIBRARY");
@@ -5851,8 +5934,9 @@ s32 PS4_SYSV_ABI sceFontSetScalePixel(OrbisFontHandle fontHandle, float w, float
         return ORBIS_FONT_ERROR_INVALID_FONT_HANDLE;
     }
 
-    LOG_DEBUG(Lib_Font, "{}",
-              formatParams({Param("fontHandle", fontHandle), Param("w", w), Param("h", h)}));
+    LOG_DEBUG(
+        Lib_Font, "%s",
+        (formatParams({Param("fontHandle", fontHandle), Param("w", w), Param("h", h)})).c_str());
 
     auto* font = GetNativeFont(fontHandle);
     if (!font || font->magic != 0x0F02) {
@@ -5889,8 +5973,9 @@ s32 PS4_SYSV_ABI sceFontSetScalePoint(OrbisFontHandle fontHandle, float w, float
         return ORBIS_FONT_ERROR_INVALID_FONT_HANDLE;
     }
 
-    LOG_DEBUG(Lib_Font, "{}",
-              formatParams({Param("fontHandle", fontHandle), Param("w", w), Param("h", h)}));
+    LOG_DEBUG(
+        Lib_Font, "%s",
+        (formatParams({Param("fontHandle", fontHandle), Param("w", w), Param("h", h)})).c_str());
 
     auto* font = GetNativeFont(fontHandle);
     if (!font || font->magic != 0x0F02) {
@@ -5937,11 +6022,12 @@ s32 PS4_SYSV_ABI sceFontSetupRenderEffectSlant(OrbisFontHandle fontHandle, float
         return ORBIS_FONT_ERROR_INVALID_FONT_HANDLE;
     }
 
-    LOG_DEBUG(Lib_Font, "{}",
-              formatParams({
-                  Param("fontHandle", fontHandle),
-                  Param("slantRatio", slantRatio),
-              }));
+    LOG_DEBUG(Lib_Font, "%s",
+              (formatParams({
+                   Param("fontHandle", fontHandle),
+                   Param("slantRatio", slantRatio),
+               }))
+                  .c_str());
 
     auto* font = GetNativeFont(fontHandle);
     if (!font || font->magic != 0x0F02) {
@@ -5983,13 +6069,14 @@ s32 PS4_SYSV_ABI sceFontSetupRenderEffectWeight(OrbisFontHandle fontHandle, floa
         return ORBIS_FONT_ERROR_INVALID_FONT_HANDLE;
     }
 
-    LOG_DEBUG(Lib_Font, "{}",
-              formatParams({
-                  Param("fontHandle", fontHandle),
-                  Param("weightXScale", weightXScale),
-                  Param("weightYScale", weightYScale),
-                  Param("mode", mode),
-              }));
+    LOG_DEBUG(Lib_Font, "%s",
+              (formatParams({
+                   Param("fontHandle", fontHandle),
+                   Param("weightXScale", weightXScale),
+                   Param("weightYScale", weightYScale),
+                   Param("mode", mode),
+               }))
+                  .c_str());
 
     auto* font = GetNativeFont(fontHandle);
     if (!font || font->magic != 0x0F02) {
@@ -6036,8 +6123,9 @@ s32 PS4_SYSV_ABI sceFontSetupRenderScalePixel(OrbisFontHandle fontHandle, float 
         return ORBIS_FONT_ERROR_INVALID_FONT_HANDLE;
     }
 
-    LOG_DEBUG(Lib_Font, "{}",
-              formatParams({Param("fontHandle", fontHandle), Param("w", w), Param("h", h)}));
+    LOG_DEBUG(
+        Lib_Font, "%s",
+        (formatParams({Param("fontHandle", fontHandle), Param("w", w), Param("h", h)})).c_str());
 
     auto* font = GetNativeFont(fontHandle);
     if (!font || font->magic != 0x0F02) {
@@ -6122,13 +6210,14 @@ OrbisFontRenderCharacter PS4_SYSV_ABI sceFontStringRefersRenderCharacters(
     OrbisFontString fontString, OrbisFontTextCharacter* startCharacter,
     OrbisFontTextCharacter* lastCharacter, u32* characterCount) {
     LOG_INFO(Lib_Font, "called");
-    LOG_DEBUG(Lib_Font, "{}",
-              formatParams({
-                  Param("fontString", fontString),
-                  Param("startCharacter", startCharacter),
-                  Param("lastCharacter", lastCharacter),
-                  Param("characterCount", characterCount),
-              }));
+    LOG_DEBUG(Lib_Font, "%s",
+              (formatParams({
+                   Param("fontString", fontString),
+                   Param("startCharacter", startCharacter),
+                   Param("lastCharacter", lastCharacter),
+                   Param("characterCount", characterCount),
+               }))
+                  .c_str());
 
     auto* s = GetHleFontString(fontString);
     if (!s || !characterCount || s->render_count == 0) {
@@ -6313,11 +6402,12 @@ OrbisFontRenderCharacter PS4_SYSV_ABI sceFontStringRefersRenderCharacters(
 OrbisFontTextCharacter* PS4_SYSV_ABI sceFontStringRefersTextCharacters(OrbisFontString fontString,
                                                                        u32* characterCount) {
     LOG_INFO(Lib_Font, "called");
-    LOG_DEBUG(Lib_Font, "{}",
-              formatParams({
-                  Param("fontString", fontString),
-                  Param("characterCount", characterCount),
-              }));
+    LOG_DEBUG(Lib_Font, "%s",
+              (formatParams({
+                   Param("fontString", fontString),
+                   Param("characterCount", characterCount),
+               }))
+                  .c_str());
 
     auto* s = GetHleFontString(fontString);
     if (!s || s->text_count == 0) {
@@ -6580,12 +6670,13 @@ s32 PS4_SYSV_ABI sceFontStyleFrameUnsetScale(OrbisFontStyleFrame* styleFrame) {
 
 s32 PS4_SYSV_ABI sceFontSupportExternalFonts(OrbisFontLib library, u32 fontMax, u32 formats) {
     LOG_INFO(Lib_Font, "called");
-    LOG_DEBUG(Lib_Font, "{}",
-              formatParams({
-                  Param("library", library),
-                  Param("fontMax", fontMax),
-                  Param("formats", formats),
-              }));
+    LOG_DEBUG(Lib_Font, "%s",
+              (formatParams({
+                   Param("library", library),
+                   Param("fontMax", fontMax),
+                   Param("formats", formats),
+               }))
+                  .c_str());
 
     if (!library) {
         LOG_ERROR(Lib_Font, "INVALID_LIBRARY");
@@ -6678,7 +6769,7 @@ s32 PS4_SYSV_ABI sceFontSupportGlyphs() {
 
 s32 PS4_SYSV_ABI sceFontSupportSystemFonts(OrbisFontLib library) {
     LOG_INFO(Lib_Font, "called");
-    LOG_DEBUG(Lib_Font, "{}", formatParams({Param("library", library)}));
+    LOG_DEBUG(Lib_Font, "%s", (formatParams({Param("library", library)})).c_str());
 
     if (!library) {
         LOG_ERROR(Lib_Font, "INVALID_LIBRARY");
@@ -6770,14 +6861,15 @@ s32 PS4_SYSV_ABI sceFontTextSourceInit(OrbisFontTextSource* fontTextSource, cons
                                        u32 textSizeByte, OrbisFontTextParser textParser,
                                        void* textObject) {
     LOG_INFO(Lib_Font, "called");
-    LOG_DEBUG(Lib_Font, "{}",
-              formatParams({
-                  Param("fontTextSource", fontTextSource),
-                  Param("textAddress", textAddress),
-                  Param("textSizeByte", textSizeByte),
-                  Param("textParser", reinterpret_cast<const void*>(textParser)),
-                  Param("textObject", textObject),
-              }));
+    LOG_DEBUG(Lib_Font, "%s",
+              (formatParams({
+                   Param("fontTextSource", fontTextSource),
+                   Param("textAddress", textAddress),
+                   Param("textSizeByte", textSizeByte),
+                   Param("textParser", reinterpret_cast<const void*>(textParser)),
+                   Param("textObject", textObject),
+               }))
+                  .c_str());
 
     if (!fontTextSource) {
         LOG_ERROR(Lib_Font, "INVALID_PARAMETER");
@@ -6819,7 +6911,7 @@ s32 PS4_SYSV_ABI sceFontTextSourceInit(OrbisFontTextSource* fontTextSource, cons
 
 s32 PS4_SYSV_ABI sceFontTextSourceRewind(OrbisFontTextSource* fontTextSource) {
     LOG_INFO(Lib_Font, "called");
-    LOG_DEBUG(Lib_Font, "{}", formatParams({Param("fontTextSource", fontTextSource)}));
+    LOG_DEBUG(Lib_Font, "%s", (formatParams({Param("fontTextSource", fontTextSource)})).c_str());
 
     if (!fontTextSource) {
         LOG_ERROR(Lib_Font, "INVALID_PARAMETER");
@@ -6845,11 +6937,12 @@ s32 PS4_SYSV_ABI sceFontTextSourceRewind(OrbisFontTextSource* fontTextSource) {
 s32 PS4_SYSV_ABI sceFontTextSourceSetDefaultFont(OrbisFontTextSource* fontTextSource,
                                                  OrbisFontHandle defaultFont) {
     LOG_INFO(Lib_Font, "called");
-    LOG_DEBUG(Lib_Font, "{}",
-              formatParams({
-                  Param("fontTextSource", fontTextSource),
-                  Param("defaultFont", defaultFont),
-              }));
+    LOG_DEBUG(Lib_Font, "%s",
+              (formatParams({
+                   Param("fontTextSource", fontTextSource),
+                   Param("defaultFont", defaultFont),
+               }))
+                  .c_str());
 
     if (!fontTextSource) {
         LOG_ERROR(Lib_Font, "INVALID_PARAMETER");
@@ -6870,11 +6963,12 @@ s32 PS4_SYSV_ABI sceFontTextSourceSetDefaultFont(OrbisFontTextSource* fontTextSo
 s32 PS4_SYSV_ABI sceFontTextSourceSetWritingForm(OrbisFontTextSource* fontTextSource,
                                                  s32 writingForm) {
     LOG_INFO(Lib_Font, "called");
-    LOG_DEBUG(Lib_Font, "{}",
-              formatParams({
-                  Param("fontTextSource", fontTextSource),
-                  Param("writingForm", writingForm),
-              }));
+    LOG_DEBUG(Lib_Font, "%s",
+              (formatParams({
+                   Param("fontTextSource", fontTextSource),
+                   Param("writingForm", writingForm),
+               }))
+                  .c_str());
 
     if (!fontTextSource) {
         LOG_ERROR(Lib_Font, "INVALID_PARAMETER");
@@ -6898,7 +6992,7 @@ s32 PS4_SYSV_ABI sceFontTextSourceSetWritingForm(OrbisFontTextSource* fontTextSo
 
 s32 PS4_SYSV_ABI sceFontUnbindRenderer(OrbisFontHandle fontHandle) {
     LOG_INFO(Lib_Font, "called");
-    LOG_DEBUG(Lib_Font, "{}", formatParams({Param("fontHandle", fontHandle)}));
+    LOG_DEBUG(Lib_Font, "%s", (formatParams({Param("fontHandle", fontHandle)})).c_str());
 
     auto* font = GetNativeFont(fontHandle);
     if (!font) {
@@ -6940,11 +7034,12 @@ s32 PS4_SYSV_ABI sceFontWordsFindWordCharacters() {
 s32 PS4_SYSV_ABI sceFontWritingGetRenderMetrics(OrbisFontWriting* fontWriting,
                                                 OrbisFontWritingMetrics* writingMetrics) {
     LOG_INFO(Lib_Font, "called");
-    LOG_DEBUG(Lib_Font, "{}",
-              formatParams({
-                  Param("fontWriting", fontWriting),
-                  Param("writingMetrics", writingMetrics),
-              }));
+    LOG_DEBUG(Lib_Font, "%s",
+              (formatParams({
+                   Param("fontWriting", fontWriting),
+                   Param("writingMetrics", writingMetrics),
+               }))
+                  .c_str());
 
     if (!fontWriting || !writingMetrics) {
         ZeroWritingMetrics(writingMetrics);
@@ -6961,7 +7056,7 @@ s32 PS4_SYSV_ABI sceFontWritingGetRenderMetrics(OrbisFontWriting* fontWriting,
 
     *writingMetrics = w->metrics;
     if (w->debug_trace_label) {
-        LOG_INFO(Lib_Font, "TextMetrics[{}]: advanceX={} advanceY={} extent=[l={} r={} t={} b={}]",
+        LOG_INFO(Lib_Font, "TextMetrics[%s]: advanceX=%g advanceY=%g extent=[l=%g r=%g t=%g b=%g]",
                  w->debug_trace_label, writingMetrics->advanceX, writingMetrics->advanceY,
                  writingMetrics->Extent.left, writingMetrics->Extent.right,
                  writingMetrics->Extent.top, writingMetrics->Extent.bottom);
@@ -6972,12 +7067,13 @@ s32 PS4_SYSV_ABI sceFontWritingGetRenderMetrics(OrbisFontWriting* fontWriting,
 s32 PS4_SYSV_ABI sceFontWritingInit(OrbisFontWriting* fontWriting, OrbisFontString fontString,
                                     OrbisFontRenderCharacter fontCharacter) {
     LOG_INFO(Lib_Font, "called");
-    LOG_DEBUG(Lib_Font, "{}",
-              formatParams({
-                  Param("fontWriting", fontWriting),
-                  Param("fontString", fontString),
-                  Param("fontCharacter", fontCharacter),
-              }));
+    LOG_DEBUG(Lib_Font, "%s",
+              (formatParams({
+                   Param("fontWriting", fontWriting),
+                   Param("fontString", fontString),
+                   Param("fontCharacter", fontCharacter),
+               }))
+                  .c_str());
 
     if (!fontWriting || !fontString || !fontCharacter) {
         LOG_ERROR(Lib_Font, "INVALID_PARAMETER");
@@ -7029,13 +7125,13 @@ s32 PS4_SYSV_ABI sceFontWritingInit(OrbisFontWriting* fontWriting, OrbisFontStri
 
     LOG_INFO(
         Lib_Font,
-        "sceFontWritingInit: prepared first render step code={} advanceX={} width={} height={} "
-        "bearingX={} bearingY={}",
+        "sceFontWritingInit: prepared first render step code=%u advanceX=%g width=%g height=%g "
+        "bearingX=%g bearingY=%g",
         w->step.glyphCode, w->step.advanceX, w->step.GlyphMetrics.width,
         w->step.GlyphMetrics.height, w->step.GlyphMetrics.Horizontal.bearingX,
         w->step.GlyphMetrics.Horizontal.bearingY);
     if (w->debug_trace_label) {
-        LOG_INFO(Lib_Font, "TextTrace[{}]: writing init start_index={} text_count={}",
+        LOG_INFO(Lib_Font, "TextTrace[%s]: writing init start_index=%zu text_count=%u",
                  w->debug_trace_label, static_cast<size_t>(start_index), s->text_count);
     }
     w->pen_x = 0.0f;
@@ -7073,7 +7169,7 @@ s32 PS4_SYSV_ABI sceFontWritingLineWritesOrder() {
 OrbisFontWritingRenderStep PS4_SYSV_ABI
 sceFontWritingRefersRenderStep(OrbisFontWriting* fontWriting) {
     LOG_INFO(Lib_Font, "called");
-    LOG_DEBUG(Lib_Font, "{}", formatParams({Param("fontWriting", fontWriting)}));
+    LOG_DEBUG(Lib_Font, "%s", (formatParams({Param("fontWriting", fontWriting)})).c_str());
 
     auto* w = GetHleFontWriting(fontWriting);
     if (!w) {
@@ -7099,9 +7195,9 @@ sceFontWritingRefersRenderStep(OrbisFontWriting* fontWriting) {
         g_prompt_render_trace.step_x = w->step.x;
         g_prompt_render_trace.step_y = w->step.y;
         LOG_INFO(Lib_Font,
-                 "TextTrace[{}]: step index={} code=U+{:04X} x={} y={} advanceX={} advanceY={} "
-                 "anchor=({}, {}) bearingX={} bearingY={} width={} height={} profile[count={} "
-                 "invisible={}]",
+                 "TextTrace[%s]: step index=%zu code=U+%04X x=%g y=%g advanceX=%g advanceY=%g "
+                 "anchor=(%g, %g) bearingX=%g bearingY=%g width=%g height=%g profile[count=%u "
+                 "invisible=%u]",
                  w->debug_trace_label, w->next_index, w->step.glyphCode, w->step.x, w->step.y,
                  w->step.advanceX, w->step.advanceY, w->step.Positioning.x, w->step.Positioning.y,
                  w->step.GlyphMetrics.Horizontal.bearingX, w->step.GlyphMetrics.Horizontal.bearingY,
@@ -7116,11 +7212,12 @@ sceFontWritingRefersRenderStep(OrbisFontWriting* fontWriting) {
 OrbisFontTextCharacter* PS4_SYSV_ABI sceFontWritingRefersRenderStepCharacter(
     OrbisFontWriting* fontWriting, OrbisFontWritingLetterStep* pLetterStep) {
     LOG_INFO(Lib_Font, "called");
-    LOG_DEBUG(Lib_Font, "{}",
-              formatParams({
-                  Param("fontWriting", fontWriting),
-                  Param("pLetterStep", pLetterStep),
-              }));
+    LOG_DEBUG(Lib_Font, "%s",
+              (formatParams({
+                   Param("fontWriting", fontWriting),
+                   Param("pLetterStep", pLetterStep),
+               }))
+                  .c_str());
 
     if (pLetterStep) {
         std::memset(pLetterStep, 0, sizeof(*pLetterStep));
@@ -7153,11 +7250,12 @@ OrbisFontTextCharacter* PS4_SYSV_ABI sceFontWritingRefersRenderStepCharacter(
 
 s32 PS4_SYSV_ABI sceFontWritingSetMaskInvisible(OrbisFontWriting* fontWriting, s32 mask) {
     LOG_INFO(Lib_Font, "called");
-    LOG_DEBUG(Lib_Font, "{}",
-              formatParams({
-                  Param("fontWriting", fontWriting),
-                  Param("mask", mask),
-              }));
+    LOG_DEBUG(Lib_Font, "%s",
+              (formatParams({
+                   Param("fontWriting", fontWriting),
+                   Param("mask", mask),
+               }))
+                  .c_str());
 
     auto* w = GetHleFontWriting(fontWriting);
     if (!w) {

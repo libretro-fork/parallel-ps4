@@ -76,7 +76,7 @@ s32 PS4_SYSV_ABI sceNpScoreCreateNpTitleCtx(OrbisNpServiceLabel serviceLabel,
     }
     return g_mutex.Run([&]() -> s32 {
         if (static_cast<s32>(g_title_ctxs.size()) >= ORBIS_NP_SCORE_MAX_CTX_NUM) {
-            LOG_ERROR(Lib_NpScore, "Too many title contexts already exist ({})",
+            LOG_ERROR(Lib_NpScore, "Too many title contexts already exist (%zu)",
                       g_title_ctxs.size());
             return ORBIS_NP_COMMUNITY_ERROR_TOO_MANY_OBJECTS;
         }
@@ -84,7 +84,7 @@ s32 PS4_SYSV_ABI sceNpScoreCreateNpTitleCtx(OrbisNpServiceLabel serviceLabel,
             Libraries::Np::NpHandler::GetInstance().GetUserIdByOnlineId(selfNpId->handle);
         const OrbisNpScoreTitleCtxId id = g_next_ctx_id++;
         g_title_ctxs[id] = ScoreTitleCtx{.serviceLabel = serviceLabel, .userId = userId};
-        LOG_INFO(Lib_NpScore, "CreateNpTitleCtx id={} serviceLabel={} userId={}", id, serviceLabel,
+        LOG_INFO(Lib_NpScore, "CreateNpTitleCtx id=%d serviceLabel=%u userId=%d", id, serviceLabel,
                  userId);
         return id;
     });
@@ -94,7 +94,7 @@ s32 PS4_SYSV_ABI sceNpScoreCreateNpTitleCtxA(OrbisNpServiceLabel npServiceLabel,
                                              UserService::OrbisUserServiceUserId selfId) {
 
     if (!Libraries::Np::NpHandler::GetInstance().IsPsnSignedIn(selfId)) {
-        LOG_ERROR(Lib_NpScore, "userId {} is not signed in to NP", selfId);
+        LOG_ERROR(Lib_NpScore, "userId %d is not signed in to NP", selfId);
         return ORBIS_NP_ERROR_SIGNED_OUT;
     }
     if (npServiceLabel == static_cast<OrbisNpServiceLabel>(ORBIS_NP_INVALID_SERVICE_LABEL)) {
@@ -103,13 +103,13 @@ s32 PS4_SYSV_ABI sceNpScoreCreateNpTitleCtxA(OrbisNpServiceLabel npServiceLabel,
     }
     return g_mutex.Run([&]() -> s32 {
         if (static_cast<s32>(g_title_ctxs.size()) >= ORBIS_NP_SCORE_MAX_CTX_NUM) {
-            LOG_ERROR(Lib_NpScore, "Too many title contexts already exist ({})",
+            LOG_ERROR(Lib_NpScore, "Too many title contexts already exist (%zu)",
                       g_title_ctxs.size());
             return ORBIS_NP_COMMUNITY_ERROR_TOO_MANY_OBJECTS;
         }
         const OrbisNpScoreTitleCtxId id = g_next_ctx_id++;
         g_title_ctxs[id] = ScoreTitleCtx{.serviceLabel = npServiceLabel, .userId = selfId};
-        LOG_INFO(Lib_NpScore, "CreateNpTitleCtxA id={} serviceLabel={} userId={}", id,
+        LOG_INFO(Lib_NpScore, "CreateNpTitleCtxA id=%d serviceLabel=%u userId=%d", id,
                  npServiceLabel, selfId);
         return id;
     });
@@ -118,7 +118,7 @@ s32 PS4_SYSV_ABI sceNpScoreCreateNpTitleCtxA(OrbisNpServiceLabel npServiceLabel,
 s32 PS4_SYSV_ABI sceNpScoreDeleteNpTitleCtx(s32 titleCtxId) {
     return g_mutex.Run([&]() -> s32 {
         if (!g_title_ctxs.contains(titleCtxId)) {
-            LOG_ERROR(Lib_NpScore, "invalid titleCtxId {}", titleCtxId);
+            LOG_ERROR(Lib_NpScore, "invalid titleCtxId %d", titleCtxId);
             return ORBIS_NP_COMMUNITY_ERROR_INVALID_ID;
         }
 
@@ -131,7 +131,7 @@ s32 PS4_SYSV_ABI sceNpScoreDeleteNpTitleCtx(s32 titleCtxId) {
             }
         }
         g_title_ctxs.erase(titleCtxId);
-        LOG_INFO(Lib_NpScore, "DeleteNpTitleCtx id={}", titleCtxId);
+        LOG_INFO(Lib_NpScore, "DeleteNpTitleCtx id=%d", titleCtxId);
         return ORBIS_OK;
     });
 }
@@ -143,11 +143,11 @@ s32 PS4_SYSV_ABI sceNpScoreCreateRequest(s32 titleCtxId) {
     return g_mutex.Run([&]() -> s32 {
         auto* tc = LookupTitleCtxUnlocked(titleCtxId);
         if (!tc) {
-            LOG_ERROR(Lib_NpScore, "invalid titleCtxId {}", titleCtxId);
+            LOG_ERROR(Lib_NpScore, "invalid titleCtxId %d", titleCtxId);
             return ORBIS_NP_COMMUNITY_ERROR_INVALID_ID;
         }
         if (static_cast<s32>(g_requests.size()) >= ORBIS_NP_SCORE_MAX_CTX_NUM) {
-            LOG_ERROR(Lib_NpScore, "too many requests ({})", g_requests.size());
+            LOG_ERROR(Lib_NpScore, "too many requests (%zu)", g_requests.size());
             return ORBIS_NP_COMMUNITY_ERROR_TOO_MANY_OBJECTS;
         }
         const OrbisNpScoreRequestId id = g_next_req_id++;
@@ -156,17 +156,17 @@ s32 PS4_SYSV_ABI sceNpScoreCreateRequest(s32 titleCtxId) {
         req->userId = tc->userId;
         req->pcId = tc->pcId;
         g_requests[id] = std::move(req);
-        LOG_INFO(Lib_NpScore, "CreateRequest id={} titleCtxId={}", id, titleCtxId);
+        LOG_INFO(Lib_NpScore, "CreateRequest id=%d titleCtxId=%d", id, titleCtxId);
         return id;
     });
 }
 
 s32 PS4_SYSV_ABI sceNpScoreDeleteRequest(s32 reqId) {
-    LOG_INFO(Lib_NpScore, "DeleteRequest reqId={}", reqId);
+    LOG_INFO(Lib_NpScore, "DeleteRequest reqId=%d", reqId);
     return g_mutex.Run([&]() -> s32 {
         auto req = LookupRequestUnlocked(reqId);
         if (!req) {
-            LOG_ERROR(Lib_NpScore, "invalid reqId {}", reqId);
+            LOG_ERROR(Lib_NpScore, "invalid reqId %d", reqId);
             return ORBIS_NP_COMMUNITY_ERROR_INVALID_ID;
         }
         req->SetResult(ORBIS_NP_COMMUNITY_ERROR_ABORTED);
@@ -176,11 +176,11 @@ s32 PS4_SYSV_ABI sceNpScoreDeleteRequest(s32 reqId) {
 }
 
 s32 PS4_SYSV_ABI sceNpScoreAbortRequest(s32 reqId) {
-    LOG_INFO(Lib_NpScore, "AbortRequest reqId={}", reqId);
+    LOG_INFO(Lib_NpScore, "AbortRequest reqId=%d", reqId);
     std::shared_ptr<ScoreRequestCtx> req;
     g_mutex.Run([&] { req = LookupRequestUnlocked(reqId); });
     if (!req) {
-        LOG_ERROR(Lib_NpScore, "invalid reqId {}", reqId);
+        LOG_ERROR(Lib_NpScore, "invalid reqId %d", reqId);
         return ORBIS_NP_COMMUNITY_ERROR_INVALID_ID;
     }
     req->SetResult(ORBIS_NP_COMMUNITY_ERROR_ABORTED);
@@ -197,7 +197,7 @@ s32 PS4_SYSV_ABI sceNpScorePollAsync(s32 reqId, s32* result) {
     std::shared_ptr<ScoreRequestCtx> req;
     g_mutex.Run([&] { req = LookupRequestUnlocked(reqId); });
     if (!req) {
-        LOG_ERROR(Lib_NpScore, "PollAsync invalid reqId {}", reqId);
+        LOG_ERROR(Lib_NpScore, "PollAsync invalid reqId %d", reqId);
         return ORBIS_NP_COMMUNITY_ERROR_INVALID_ID;
     }
     return req->mutex.Run([&]() -> s32 {
@@ -207,7 +207,7 @@ s32 PS4_SYSV_ABI sceNpScorePollAsync(s32 reqId, s32* result) {
         if (result != nullptr) {
             *result = *req->result;
         }
-        LOG_INFO(Lib_NpScore, "PollAsync reqId={} completed (result={:#x})", reqId, *req->result);
+        LOG_INFO(Lib_NpScore, "PollAsync reqId=%d completed (result=0x%x)", reqId, *req->result);
         return 0;
     });
 }
@@ -218,14 +218,14 @@ s32 PS4_SYSV_ABI sceNpScoreWaitAsync(s32 reqId, s32* result) {
     std::shared_ptr<ScoreRequestCtx> req;
     g_mutex.Run([&] { req = LookupRequestUnlocked(reqId); });
     if (!req) {
-        LOG_ERROR(Lib_NpScore, "WaitAsync invalid reqId {}", reqId);
+        LOG_ERROR(Lib_NpScore, "WaitAsync invalid reqId %d", reqId);
         return ORBIS_NP_COMMUNITY_ERROR_INVALID_ID;
     }
     const s32 res = req->Wait();
     if (result != nullptr) {
         *result = res;
     }
-    LOG_INFO(Lib_NpScore, "WaitAsync reqId={} completed (result={:#x})", reqId, res);
+    LOG_INFO(Lib_NpScore, "WaitAsync reqId=%d completed (result=0x%x)", reqId, res);
     return 0;
 }
 
@@ -239,16 +239,21 @@ s32 PS4_SYSV_ABI sceNpScoreRecordScore(s32 reqId, OrbisNpScoreBoardId boardId,
                                        OrbisNpScoreRankNumber* tmpRank,
                                        const Rtc::OrbisRtcTick* compareDate, void* option) {
     LOG_INFO(Lib_NpScore,
-             "reqId={} boardId={} score={} scoreComment={} gameInfo={} tmpRank={} "
-             "compareDate={} option={}",
-             reqId, boardId, score, PTR(scoreComment), PTR(gameInfo), PTR(tmpRank),
-             PTR(compareDate), PTR(option));
+             "reqId=%d boardId=%u score=%" PRId64
+             " scoreComment=0x%llx gameInfo=0x%llx tmpRank=0x%llx "
+             "compareDate=0x%llx option=0x%llx",
+             reqId, boardId, score,
+             static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(scoreComment))),
+             static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(gameInfo))),
+             static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(tmpRank))),
+             static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(compareDate))),
+             static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(option))));
 
     if (option != nullptr) {
         return ORBIS_NP_COMMUNITY_ERROR_INVALID_ARGUMENT;
     }
     if (gameInfo != nullptr && gameInfo->infoSize > ORBIS_NP_SCORE_GAMEINFO_MAXSIZE) {
-        LOG_ERROR(Lib_NpScore, "gameInfo->infoSize {} exceeds max {}", gameInfo->infoSize,
+        LOG_ERROR(Lib_NpScore, "gameInfo->infoSize %" PRIu64 " exceeds max %d", gameInfo->infoSize,
                   ORBIS_NP_SCORE_GAMEINFO_MAXSIZE);
         return ORBIS_NP_COMMUNITY_ERROR_INVALID_ARGUMENT;
     }
@@ -257,7 +262,7 @@ s32 PS4_SYSV_ABI sceNpScoreRecordScore(s32 reqId, OrbisNpScoreBoardId boardId,
     if (auto returned = g_mutex.Run([&]() -> std::optional<s32> {
             req = LookupRequestUnlocked(reqId);
             if (!req) {
-                LOG_ERROR(Lib_NpScore, "invalid reqId {}", reqId);
+                LOG_ERROR(Lib_NpScore, "invalid reqId %d", reqId);
                 return std::optional<s32>{ORBIS_NP_COMMUNITY_ERROR_INVALID_ID};
             }
             if (IsRequestAborted(req)) {
@@ -294,16 +299,21 @@ s32 PS4_SYSV_ABI sceNpScoreRecordScoreAsync(s32 reqId, OrbisNpScoreBoardId board
                                             const OrbisNpScoreGameInfo* gameInfo,
                                             OrbisNpScoreRankNumber* tmpRank,
                                             const Rtc::OrbisRtcTick* compareDate, void* option) {
-    LOG_INFO(Lib_NpScore,
-             "called reqId={}, boardId={}, score={}, "
-             "scoreComment={}, gameInfo={}, tmpRank={}, compareDate={}, option={}",
-             reqId, boardId, score, PTR(scoreComment), PTR(gameInfo), PTR(tmpRank),
-             PTR(compareDate), PTR(option));
+    LOG_INFO(
+        Lib_NpScore,
+        "called reqId=%d, boardId=%u, score=%" PRId64 ", "
+        "scoreComment=0x%llx, gameInfo=0x%llx, tmpRank=0x%llx, compareDate=0x%llx, option=0x%llx",
+        reqId, boardId, score,
+        static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(scoreComment))),
+        static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(gameInfo))),
+        static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(tmpRank))),
+        static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(compareDate))),
+        static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(option))));
     if (option != nullptr) {
         return ORBIS_NP_COMMUNITY_ERROR_INVALID_ARGUMENT;
     }
     if (gameInfo != nullptr && gameInfo->infoSize > ORBIS_NP_SCORE_GAMEINFO_MAXSIZE) {
-        LOG_ERROR(Lib_NpScore, "gameInfo->infoSize {} exceeds max {}", gameInfo->infoSize,
+        LOG_ERROR(Lib_NpScore, "gameInfo->infoSize %" PRIu64 " exceeds max %d", gameInfo->infoSize,
                   ORBIS_NP_SCORE_GAMEINFO_MAXSIZE);
         return ORBIS_NP_COMMUNITY_ERROR_INVALID_ARGUMENT;
     }
@@ -312,7 +322,7 @@ s32 PS4_SYSV_ABI sceNpScoreRecordScoreAsync(s32 reqId, OrbisNpScoreBoardId board
     if (auto returned = g_mutex.Run([&]() -> std::optional<s32> {
             req = LookupRequestUnlocked(reqId);
             if (!req) {
-                LOG_ERROR(Lib_NpScore, "invalid reqId {}", reqId);
+                LOG_ERROR(Lib_NpScore, "invalid reqId %d", reqId);
                 return std::optional<s32>{ORBIS_NP_COMMUNITY_ERROR_INVALID_ID};
             }
             if (IsRequestAborted(req)) {
@@ -361,7 +371,7 @@ static int GetRankingByRangeImpl(s32 reqId, OrbisNpScoreBoardId boardId,
         return ORBIS_NP_COMMUNITY_ERROR_INVALID_ARGUMENT;
     }
     if (arrayNum > ORBIS_NP_SCORE_MAX_RANGE_NUM_PER_REQUEST) {
-        LOG_ERROR(Lib_NpScore, "arrayNum {} exceeds max {}", arrayNum,
+        LOG_ERROR(Lib_NpScore, "arrayNum %" PRIu64 " exceeds max %d", arrayNum,
                   ORBIS_NP_SCORE_MAX_RANGE_NUM_PER_REQUEST);
         return ORBIS_NP_COMMUNITY_ERROR_INVALID_ARGUMENT;
     }
@@ -372,10 +382,12 @@ static int GetRankingByRangeImpl(s32 reqId, OrbisNpScoreBoardId boardId,
 
     const bool is_a_variant = (aRankArrayIn != nullptr);
     if (is_a_variant == (rankArray != nullptr)) {
-        LOG_ERROR(Lib_NpScore,
-                  "GetRankingByRangeImpl: exactly one of rankArray ({}) and aRankArray ({}) "
-                  "must be non-null",
-                  PTR(rankArray), PTR(aRankArrayIn));
+        LOG_ERROR(
+            Lib_NpScore,
+            "GetRankingByRangeImpl: exactly one of rankArray (0x%llx) and aRankArray (0x%llx) "
+            "must be non-null",
+            static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(rankArray))),
+            static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(aRankArrayIn))));
         return ORBIS_NP_COMMUNITY_ERROR_INSUFFICIENT_ARGUMENT;
     }
     if (arrayNum == 0) {
@@ -387,7 +399,8 @@ static int GetRankingByRangeImpl(s32 reqId, OrbisNpScoreBoardId boardId,
         arrayNum * (is_a_variant ? sizeof(OrbisNpScoreRankDataA) : sizeof(OrbisNpScoreRankData));
     if (rankArraySize != expected_size) {
         LOG_ERROR(Lib_NpScore,
-                  "Invalid alignment for rankArray (got {}, expected {} for {} variant)",
+                  "Invalid alignment for rankArray (got %" PRIu64 ", expected %" PRIu64
+                  " for %s variant)",
                   rankArraySize, expected_size, is_a_variant ? "A" : "non-A");
         return ORBIS_NP_COMMUNITY_ERROR_INVALID_ALIGNMENT;
     }
@@ -417,7 +430,7 @@ static int GetRankingByRangeImpl(s32 reqId, OrbisNpScoreBoardId boardId,
     if (auto returned = g_mutex.Run([&]() -> std::optional<int> {
             req = LookupRequestUnlocked(reqId);
             if (!req) {
-                LOG_ERROR(Lib_NpScore, "invalid reqId {}", reqId);
+                LOG_ERROR(Lib_NpScore, "invalid reqId %d", reqId);
                 return std::optional<int>{ORBIS_NP_COMMUNITY_ERROR_INVALID_ID};
             }
             if (IsRequestAborted(req)) {
@@ -454,8 +467,8 @@ s32 PS4_SYSV_ABI sceNpScoreGetRankingByRange(
     OrbisNpScoreRankData* rankArray, u64 rankArraySize, OrbisNpScoreComment* commentArray,
     u64 commentArraySize, OrbisNpScoreGameInfo* infoArray, u64 infoArraySize, u64 arrayNum,
     Rtc::OrbisRtcTick* lastSortDate, OrbisNpScoreRankNumber* totalRecord, void* option) {
-    LOG_INFO(Lib_NpScore, "called reqId={}, boardId={}, startSerialRank={}, arrayNum={}", reqId,
-             boardId, startSerialRank, arrayNum);
+    LOG_INFO(Lib_NpScore, "called reqId=%d, boardId=%u, startSerialRank=%u, arrayNum=%" PRIu64,
+             reqId, boardId, startSerialRank, arrayNum);
     return GetRankingByRangeImpl(reqId, boardId, startSerialRank, rankArray,
                                  /*aRankArrayIn=*/nullptr, rankArraySize, commentArray,
                                  commentArraySize, infoArray, infoArraySize, arrayNum, lastSortDate,
@@ -467,13 +480,21 @@ s32 PS4_SYSV_ABI sceNpScoreGetRankingByRangeAsync(
     OrbisNpScoreRankData* rankArray, u64 rankArraySize, OrbisNpScoreComment* commentArray,
     u64 commentArraySize, OrbisNpScoreGameInfo* infoArray, u64 infoArraySize, u64 arrayNum,
     Rtc::OrbisRtcTick* lastSortDate, OrbisNpScoreRankNumber* totalRecord, void* option) {
-    LOG_INFO(Lib_NpScore,
-             "called reqId={}, boardId={}, startSerialRank={}, "
-             "rankArray={}, rankArraySize={}, commentArray={}, commentArraySize={}, infoArray={}, "
-             "infoArraySize={}, arrayNum={}, lastSortDate={}, totalRecord={}, option={}",
-             reqId, boardId, startSerialRank, PTR(rankArray), rankArraySize, PTR(commentArray),
-             commentArraySize, PTR(infoArray), infoArraySize, arrayNum, PTR(lastSortDate),
-             PTR(totalRecord), PTR(option));
+    LOG_INFO(
+        Lib_NpScore,
+        "called reqId=%d, boardId=%u, startSerialRank=%u, "
+        "rankArray=0x%llx, rankArraySize=%" PRIu64
+        ", commentArray=0x%llx, commentArraySize=%" PRIu64 ", infoArray=0x%llx, "
+        "infoArraySize=%" PRIu64 ", arrayNum=%" PRIu64
+        ", lastSortDate=0x%llx, totalRecord=0x%llx, option=0x%llx",
+        reqId, boardId, startSerialRank,
+        static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(rankArray))), rankArraySize,
+        static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(commentArray))),
+        commentArraySize,
+        static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(infoArray))), infoArraySize,
+        arrayNum, static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(lastSortDate))),
+        static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(totalRecord))),
+        static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(option))));
     return GetRankingByRangeImpl(reqId, boardId, startSerialRank, rankArray,
                                  /*aRankArrayIn=*/nullptr, rankArraySize, commentArray,
                                  commentArraySize, infoArray, infoArraySize, arrayNum, lastSortDate,
@@ -485,13 +506,21 @@ s32 PS4_SYSV_ABI sceNpScoreGetRankingByRangeA(
     OrbisNpScoreRankDataA* rankArray, u64 rankArraySize, OrbisNpScoreComment* commentArray,
     u64 commentArraySize, OrbisNpScoreGameInfo* infoArray, u64 infoArraySize, u64 arrayNum,
     Rtc::OrbisRtcTick* lastSortDate, OrbisNpScoreRankNumber* totalRecord, void* option) {
-    LOG_INFO(Lib_NpScore,
-             "called reqId={}, boardId={}, startSerialRank={}, "
-             "rankArray={}, rankArraySize={}, commentArray={}, commentArraySize={}, infoArray={}, "
-             "infoArraySize={}, arrayNum={}, lastSortDate={}, totalRecord={}, option={}",
-             reqId, boardId, startSerialRank, PTR(rankArray), rankArraySize, PTR(commentArray),
-             commentArraySize, PTR(infoArray), infoArraySize, arrayNum, PTR(lastSortDate),
-             PTR(totalRecord), PTR(option));
+    LOG_INFO(
+        Lib_NpScore,
+        "called reqId=%d, boardId=%u, startSerialRank=%u, "
+        "rankArray=0x%llx, rankArraySize=%" PRIu64
+        ", commentArray=0x%llx, commentArraySize=%" PRIu64 ", infoArray=0x%llx, "
+        "infoArraySize=%" PRIu64 ", arrayNum=%" PRIu64
+        ", lastSortDate=0x%llx, totalRecord=0x%llx, option=0x%llx",
+        reqId, boardId, startSerialRank,
+        static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(rankArray))), rankArraySize,
+        static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(commentArray))),
+        commentArraySize,
+        static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(infoArray))), infoArraySize,
+        arrayNum, static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(lastSortDate))),
+        static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(totalRecord))),
+        static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(option))));
     return GetRankingByRangeImpl(reqId, boardId, startSerialRank, /*rankArray=*/nullptr, rankArray,
                                  rankArraySize, commentArray, commentArraySize, infoArray,
                                  infoArraySize, arrayNum, lastSortDate, totalRecord, option, false);
@@ -502,13 +531,21 @@ s32 PS4_SYSV_ABI sceNpScoreGetRankingByRangeAAsync(
     OrbisNpScoreRankDataA* rankArray, u64 rankArraySize, OrbisNpScoreComment* commentArray,
     u64 commentArraySize, OrbisNpScoreGameInfo* infoArray, u64 infoArraySize, u64 arrayNum,
     Rtc::OrbisRtcTick* lastSortDate, OrbisNpScoreRankNumber* totalRecord, void* option) {
-    LOG_INFO(Lib_NpScore,
-             "called reqId={}, boardId={}, startSerialRank={}, "
-             "rankArray={}, rankArraySize={}, commentArray={}, commentArraySize={}, infoArray={}, "
-             "infoArraySize={}, arrayNum={}, lastSortDate={}, totalRecord={}, option={}",
-             reqId, boardId, startSerialRank, PTR(rankArray), rankArraySize, PTR(commentArray),
-             commentArraySize, PTR(infoArray), infoArraySize, arrayNum, PTR(lastSortDate),
-             PTR(totalRecord), PTR(option));
+    LOG_INFO(
+        Lib_NpScore,
+        "called reqId=%d, boardId=%u, startSerialRank=%u, "
+        "rankArray=0x%llx, rankArraySize=%" PRIu64
+        ", commentArray=0x%llx, commentArraySize=%" PRIu64 ", infoArray=0x%llx, "
+        "infoArraySize=%" PRIu64 ", arrayNum=%" PRIu64
+        ", lastSortDate=0x%llx, totalRecord=0x%llx, option=0x%llx",
+        reqId, boardId, startSerialRank,
+        static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(rankArray))), rankArraySize,
+        static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(commentArray))),
+        commentArraySize,
+        static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(infoArray))), infoArraySize,
+        arrayNum, static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(lastSortDate))),
+        static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(totalRecord))),
+        static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(option))));
     return GetRankingByRangeImpl(reqId, boardId, startSerialRank, /*rankArray=*/nullptr, rankArray,
                                  rankArraySize, commentArray, commentArraySize, infoArray,
                                  infoArraySize, arrayNum, lastSortDate, totalRecord, option, true);
@@ -528,31 +565,34 @@ static int GetRankingByNpIdImpl(s32 reqId, OrbisNpScoreBoardId boardId, const Or
         return ORBIS_NP_COMMUNITY_ERROR_INVALID_ARGUMENT;
     }
     if (arrayNum > ORBIS_NP_SCORE_MAX_NPID_NUM_PER_REQUEST) {
-        LOG_ERROR(Lib_NpScore, "Too many npIds requested: {}", arrayNum);
+        LOG_ERROR(Lib_NpScore, "Too many npIds requested: %" PRIu64, arrayNum);
         return ORBIS_NP_COMMUNITY_ERROR_TOO_MANY_NPID;
     }
     if (npIdArray == nullptr || rankArray == nullptr) {
-        LOG_ERROR(Lib_NpScore, "insufficient argument: npIdArray={}, rankArray={}", PTR(npIdArray),
-                  PTR(rankArray));
+        LOG_ERROR(Lib_NpScore, "insufficient argument: npIdArray=0x%llx, rankArray=0x%llx",
+                  static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(npIdArray))),
+                  static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(rankArray))));
         return ORBIS_NP_COMMUNITY_ERROR_INSUFFICIENT_ARGUMENT;
     }
     if (npIdArraySize != arrayNum * sizeof(OrbisNpId) ||
         rankArraySize != arrayNum * sizeof(OrbisNpScorePlayerRankData)) {
-        LOG_ERROR(Lib_NpScore, "Invalid alignment: npIdArraySize={}, rankArraySize={}",
+        LOG_ERROR(Lib_NpScore,
+                  "Invalid alignment: npIdArraySize=%" PRIu64 ", rankArraySize=%" PRIu64,
                   npIdArraySize, rankArraySize);
         return ORBIS_NP_COMMUNITY_ERROR_INVALID_ALIGNMENT;
     }
     std::memset(rankArray, 0, rankArraySize);
     if (commentArray != nullptr) {
         if (commentArraySize != arrayNum * sizeof(OrbisNpScoreComment)) {
-            LOG_ERROR(Lib_NpScore, "Invalid alignment: commentArraySize={}", commentArraySize);
+            LOG_ERROR(Lib_NpScore, "Invalid alignment: commentArraySize=%" PRIu64,
+                      commentArraySize);
             return ORBIS_NP_COMMUNITY_ERROR_INVALID_ALIGNMENT;
         }
         std::memset(commentArray, 0, commentArraySize);
     }
     if (infoArray != nullptr) {
         if (infoArraySize != arrayNum * sizeof(OrbisNpScoreGameInfo)) {
-            LOG_ERROR(Lib_NpScore, "Invalid alignment: infoArraySize={}", infoArraySize);
+            LOG_ERROR(Lib_NpScore, "Invalid alignment: infoArraySize=%" PRIu64, infoArraySize);
             return ORBIS_NP_COMMUNITY_ERROR_INVALID_ALIGNMENT;
         }
         std::memset(infoArray, 0, infoArraySize);
@@ -562,7 +602,7 @@ static int GetRankingByNpIdImpl(s32 reqId, OrbisNpScoreBoardId boardId, const Or
     if (auto returned = g_mutex.Run([&]() -> std::optional<int> {
             req = LookupRequestUnlocked(reqId);
             if (!req) {
-                LOG_ERROR(Lib_NpScore, "invalid reqId {}", reqId);
+                LOG_ERROR(Lib_NpScore, "invalid reqId %d", reqId);
                 return std::optional<int>{ORBIS_NP_COMMUNITY_ERROR_INVALID_ID};
             }
             if (IsRequestAborted(req)) {
@@ -599,14 +639,23 @@ s32 PS4_SYSV_ABI sceNpScoreGetRankingByNpId(
     OrbisNpScorePlayerRankData* rankArray, u64 rankArraySize, OrbisNpScoreComment* commentArray,
     u64 commentArraySize, OrbisNpScoreGameInfo* infoArray, u64 infoArraySize, u64 arrayNum,
     Rtc::OrbisRtcTick* lastSortDate, OrbisNpScoreRankNumber* totalRecord, void* option) {
-    LOG_INFO(Lib_NpScore,
-             "called reqId={}, boardId={}, npIdArray={}, npIdArraySize={}, "
-             "rankArray={}, rankArraySize={}, commentArray={}, commentArraySize={}, "
-             "infoArray={}, infoArraySize={}, arrayNum={}, lastSortDate={}, totalRecord={}, "
-             "option={}",
-             reqId, boardId, PTR(npIdArray), npIdArraySize, PTR(rankArray), rankArraySize,
-             PTR(commentArray), commentArraySize, PTR(infoArray), infoArraySize, arrayNum,
-             PTR(lastSortDate), PTR(totalRecord), PTR(option));
+    LOG_INFO(
+        Lib_NpScore,
+        "called reqId=%d, boardId=%u, npIdArray=0x%llx, npIdArraySize=%" PRIu64 ", "
+        "rankArray=0x%llx, rankArraySize=%" PRIu64
+        ", commentArray=0x%llx, commentArraySize=%" PRIu64 ", "
+        "infoArray=0x%llx, infoArraySize=%" PRIu64 ", arrayNum=%" PRIu64
+        ", lastSortDate=0x%llx, totalRecord=0x%llx, "
+        "option=0x%llx",
+        reqId, boardId,
+        static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(npIdArray))), npIdArraySize,
+        static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(rankArray))), rankArraySize,
+        static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(commentArray))),
+        commentArraySize,
+        static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(infoArray))), infoArraySize,
+        arrayNum, static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(lastSortDate))),
+        static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(totalRecord))),
+        static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(option))));
     return GetRankingByNpIdImpl(reqId, boardId, npIdArray, npIdArraySize, rankArray, rankArraySize,
                                 commentArray, commentArraySize, infoArray, infoArraySize, arrayNum,
                                 lastSortDate, totalRecord, option, false);
@@ -617,7 +666,8 @@ s32 PS4_SYSV_ABI sceNpScoreGetRankingByNpIdAsync(
     OrbisNpScorePlayerRankData* rankArray, u64 rankArraySize, OrbisNpScoreComment* commentArray,
     u64 commentArraySize, OrbisNpScoreGameInfo* infoArray, u64 infoArraySize, u64 arrayNum,
     Rtc::OrbisRtcTick* lastSortDate, OrbisNpScoreRankNumber* totalRecord, void* option) {
-    LOG_INFO(Lib_NpScore, "called reqId={}, boardId={}, arrayNum={}", reqId, boardId, arrayNum);
+    LOG_INFO(Lib_NpScore, "called reqId=%d, boardId=%u, arrayNum=%" PRIu64, reqId, boardId,
+             arrayNum);
     return GetRankingByNpIdImpl(reqId, boardId, npIdArray, npIdArraySize, rankArray, rankArraySize,
                                 commentArray, commentArraySize, infoArray, infoArraySize, arrayNum,
                                 lastSortDate, totalRecord, option, true);
@@ -639,33 +689,40 @@ static int GetRankingByAccountIdImpl(s32 reqId, OrbisNpScoreBoardId boardId,
         return ORBIS_NP_COMMUNITY_ERROR_INVALID_ARGUMENT;
     }
     if (arrayNum > ORBIS_NP_SCORE_MAX_ID_NUM_PER_REQUEST) {
-        LOG_ERROR(Lib_NpScore, "Too many accountIds requested: {}", arrayNum);
+        LOG_ERROR(Lib_NpScore, "Too many accountIds requested: %" PRIu64, arrayNum);
         return ORBIS_NP_COMMUNITY_ERROR_INVALID_ARGUMENT;
     }
     if (arrayNum == 0 || rankArray == nullptr || accountIdArray == nullptr) {
-        LOG_ERROR(Lib_NpScore,
-                  "Insufficient arguments: arrayNum={}, rankArray={}, accountIdArray={}", arrayNum,
-                  PTR(rankArray), PTR(accountIdArray));
+        LOG_ERROR(
+            Lib_NpScore,
+            "Insufficient arguments: arrayNum=%" PRIu64 ", rankArray=0x%llx, accountIdArray=0x%llx",
+            arrayNum, static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(rankArray))),
+            static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(accountIdArray))));
         return ORBIS_NP_COMMUNITY_ERROR_INSUFFICIENT_ARGUMENT;
     }
     if (accountIdArraySize != arrayNum * sizeof(OrbisNpAccountId)) {
         LOG_ERROR(Lib_NpScore,
-                  "Invalid alignment for accountIdArray: size {} does not match expected {}",
-                  accountIdArraySize, arrayNum * sizeof(OrbisNpAccountId));
+                  "Invalid alignment for accountIdArray: size %" PRIu64
+                  " does not match expected %llu",
+                  accountIdArraySize,
+                  static_cast<unsigned long long>(arrayNum * sizeof(OrbisNpAccountId)));
         return ORBIS_NP_COMMUNITY_ERROR_INVALID_ALIGNMENT;
     }
     if (rankArraySize != arrayNum * sizeof(OrbisNpScorePlayerRankDataA)) {
         LOG_ERROR(Lib_NpScore,
-                  "Invalid alignment for rankArray: size {} does not match expected {}",
-                  rankArraySize, arrayNum * sizeof(OrbisNpScorePlayerRankDataA));
+                  "Invalid alignment for rankArray: size %" PRIu64 " does not match expected %llu",
+                  rankArraySize,
+                  static_cast<unsigned long long>(arrayNum * sizeof(OrbisNpScorePlayerRankDataA)));
         return ORBIS_NP_COMMUNITY_ERROR_INVALID_ALIGNMENT;
     }
     std::memset(rankArray, 0, rankArraySize);
     if (commentArray != nullptr) {
         if (commentArraySize != arrayNum * sizeof(OrbisNpScoreComment)) {
             LOG_ERROR(Lib_NpScore,
-                      "Invalid alignment for commentArray: size {} does not match expected {}",
-                      commentArraySize, arrayNum * sizeof(OrbisNpScoreComment));
+                      "Invalid alignment for commentArray: size %" PRIu64
+                      " does not match expected %llu",
+                      commentArraySize,
+                      static_cast<unsigned long long>(arrayNum * sizeof(OrbisNpScoreComment)));
             return ORBIS_NP_COMMUNITY_ERROR_INVALID_ALIGNMENT;
         }
         std::memset(commentArray, 0, commentArraySize);
@@ -673,8 +730,10 @@ static int GetRankingByAccountIdImpl(s32 reqId, OrbisNpScoreBoardId boardId,
     if (infoArray != nullptr) {
         if (infoArraySize != arrayNum * sizeof(OrbisNpScoreGameInfo)) {
             LOG_ERROR(Lib_NpScore,
-                      "Invalid alignment for infoArray: size {} does not match expected {}",
-                      infoArraySize, arrayNum * sizeof(OrbisNpScoreGameInfo));
+                      "Invalid alignment for infoArray: size %" PRIu64
+                      " does not match expected %llu",
+                      infoArraySize,
+                      static_cast<unsigned long long>(arrayNum * sizeof(OrbisNpScoreGameInfo)));
             return ORBIS_NP_COMMUNITY_ERROR_INVALID_ALIGNMENT;
         }
         std::memset(infoArray, 0, infoArraySize);
@@ -716,14 +775,24 @@ s32 PS4_SYSV_ABI sceNpScoreGetRankingByAccountId(
     OrbisNpScoreComment* commentArray, u64 commentArraySize, OrbisNpScoreGameInfo* infoArray,
     u64 infoArraySize, u64 arrayNum, Rtc::OrbisRtcTick* lastSortDate,
     OrbisNpScoreRankNumber* totalRecord, void* option) {
-    LOG_INFO(Lib_NpScore,
-             "called reqId={}, boardId={}, accountIdArray={}, "
-             "accountIdArraySize={}, rankArray={}, rankArraySize={}, commentArray={}, "
-             "commentArraySize={}, infoArray={}, infoArraySize={}, arrayNum={}, lastSortDate={}, "
-             "totalRecord={}, option={}",
-             reqId, boardId, PTR(accountIdArray), accountIdArraySize, PTR(rankArray), rankArraySize,
-             PTR(commentArray), commentArraySize, PTR(infoArray), infoArraySize, arrayNum,
-             PTR(lastSortDate), PTR(totalRecord), PTR(option));
+    LOG_INFO(
+        Lib_NpScore,
+        "called reqId=%d, boardId=%u, accountIdArray=0x%llx, "
+        "accountIdArraySize=%" PRIu64 ", rankArray=0x%llx, rankArraySize=%" PRIu64
+        ", commentArray=0x%llx, "
+        "commentArraySize=%" PRIu64 ", infoArray=0x%llx, infoArraySize=%" PRIu64
+        ", arrayNum=%" PRIu64 ", lastSortDate=0x%llx, "
+        "totalRecord=0x%llx, option=0x%llx",
+        reqId, boardId,
+        static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(accountIdArray))),
+        accountIdArraySize,
+        static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(rankArray))), rankArraySize,
+        static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(commentArray))),
+        commentArraySize,
+        static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(infoArray))), infoArraySize,
+        arrayNum, static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(lastSortDate))),
+        static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(totalRecord))),
+        static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(option))));
     return GetRankingByAccountIdImpl(reqId, boardId, accountIdArray, accountIdArraySize, rankArray,
                                      rankArraySize, commentArray, commentArraySize, infoArray,
                                      infoArraySize, arrayNum, lastSortDate, totalRecord, option,
@@ -736,17 +805,31 @@ s32 PS4_SYSV_ABI sceNpScoreGetRankingByAccountIdAsync(
     OrbisNpScoreComment* commentArray, u64 commentArraySize, OrbisNpScoreGameInfo* infoArray,
     u64 infoArraySize, u64 arrayNum, Rtc::OrbisRtcTick* lastSortDate,
     OrbisNpScoreRankNumber* totalRecord, void* option) {
+    LOG_INFO(
+        Lib_NpScore,
+        "called reqId=%d, boardId=%u, "
+        "accountIdArray=0x%llx, accountIdArraySize=%" PRIu64
+        ", rankArray=0x%llx, rankArraySize=%" PRIu64 ", "
+        "commentArray=0x%llx, commentArraySize=%" PRIu64
+        ", infoArray=0x%llx, infoArraySize=%" PRIu64 ", arrayNum=%" PRIu64 ", "
+        "lastSortDate=0x%llx, totalRecord=0x%llx, option=0x%llx",
+        reqId, boardId,
+        static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(accountIdArray))),
+        accountIdArraySize,
+        static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(rankArray))), rankArraySize,
+        static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(commentArray))),
+        commentArraySize,
+        static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(infoArray))), infoArraySize,
+        arrayNum, static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(lastSortDate))),
+        static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(totalRecord))),
+        static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(option))));
     LOG_INFO(Lib_NpScore,
-             "called reqId={}, boardId={}, "
-             "accountIdArray={}, accountIdArraySize={}, rankArray={}, rankArraySize={}, "
-             "commentArray={}, commentArraySize={}, infoArray={}, infoArraySize={}, arrayNum={}, "
-             "lastSortDate={}, totalRecord={}, option={}",
-             reqId, boardId, PTR(accountIdArray), accountIdArraySize, PTR(rankArray), rankArraySize,
-             PTR(commentArray), commentArraySize, PTR(infoArray), infoArraySize, arrayNum,
-             PTR(lastSortDate), PTR(totalRecord), PTR(option));
-    LOG_INFO(Lib_NpScore,
-             "reqId={} boardId={} accountIdArray={} accountIdArraySize={} arrayNum={} option={}",
-             reqId, boardId, PTR(accountIdArray), accountIdArraySize, arrayNum, PTR(option));
+             "reqId=%d boardId=%u accountIdArray=0x%llx accountIdArraySize=%" PRIu64
+             " arrayNum=%" PRIu64 " option=0x%llx",
+             reqId, boardId,
+             static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(accountIdArray))),
+             accountIdArraySize, arrayNum,
+             static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(option))));
     return GetRankingByAccountIdImpl(reqId, boardId, accountIdArray, accountIdArraySize, rankArray,
                                      rankArraySize, commentArray, commentArraySize, infoArray,
                                      infoArraySize, arrayNum, lastSortDate, totalRecord, option,
@@ -764,17 +847,20 @@ static int GetFriendsRankingImpl(s32 reqId, OrbisNpScoreBoardId boardId, s32 inc
                                  OrbisNpScoreRankNumber* totalRecord, void* option, bool is_async) {
     const bool is_a_variant = (aRankArrayIn != nullptr);
     if (is_a_variant == (rankArray != nullptr)) {
-        LOG_ERROR(Lib_NpScore,
-                  "GetFriendsRankingImpl: exactly one of rankArray ({}) and aRankArray ({}) "
-                  "must be non-null",
-                  PTR(rankArray), PTR(aRankArrayIn));
+        LOG_ERROR(
+            Lib_NpScore,
+            "GetFriendsRankingImpl: exactly one of rankArray (0x%llx) and aRankArray (0x%llx) "
+            "must be non-null",
+            static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(rankArray))),
+            static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(aRankArrayIn))));
         return ORBIS_NP_COMMUNITY_ERROR_INVALID_ARGUMENT;
     }
     const u64 expected_size =
         arrayNum * (is_a_variant ? sizeof(OrbisNpScoreRankDataA) : sizeof(OrbisNpScoreRankData));
     if (rankArraySize != expected_size) {
         LOG_ERROR(Lib_NpScore,
-                  "Invalid alignment for rankArray (got {}, expected {} for {} variant)",
+                  "Invalid alignment for rankArray (got %" PRIu64 ", expected %" PRIu64
+                  " for %s variant)",
                   rankArraySize, expected_size, is_a_variant ? "A" : "non-A");
         return ORBIS_NP_COMMUNITY_ERROR_INVALID_ALIGNMENT;
     }
@@ -787,7 +873,7 @@ static int GetFriendsRankingImpl(s32 reqId, OrbisNpScoreBoardId boardId, s32 inc
         }
     } else if (opt != nullptr) {
         if (opt->size != sizeof(OrbisNpScoreGetFriendRankingOptParam)) {
-            LOG_ERROR(Lib_NpScore, "Invalid size for option struct: {}", opt->size);
+            LOG_ERROR(Lib_NpScore, "Invalid size for option struct: %" PRIu64, opt->size);
             return ORBIS_NP_COMMUNITY_ERROR_INVALID_ARGUMENT;
         }
         if (opt->startSerialRank != nullptr) {
@@ -795,7 +881,7 @@ static int GetFriendsRankingImpl(s32 reqId, OrbisNpScoreBoardId boardId, s32 inc
         }
     }
     if (arrayNum > ORBIS_NP_SCORE_MAX_RANGE_NUM_PER_REQUEST) {
-        LOG_ERROR(Lib_NpScore, "arrayNum {} exceeds max {}", arrayNum,
+        LOG_ERROR(Lib_NpScore, "arrayNum %" PRIu64 " exceeds max %d", arrayNum,
                   ORBIS_NP_SCORE_MAX_RANGE_NUM_PER_REQUEST);
         return ORBIS_NP_COMMUNITY_ERROR_INVALID_ARGUMENT;
     }
@@ -832,7 +918,7 @@ static int GetFriendsRankingImpl(s32 reqId, OrbisNpScoreBoardId boardId, s32 inc
     if (auto returned = g_mutex.Run([&]() -> std::optional<int> {
             req = LookupRequestUnlocked(reqId);
             if (!req) {
-                LOG_ERROR(Lib_NpScore, "invalid reqId {}", reqId);
+                LOG_ERROR(Lib_NpScore, "invalid reqId %d", reqId);
                 return std::optional<int>{ORBIS_NP_COMMUNITY_ERROR_INVALID_ID};
             }
             if (IsRequestAborted(req)) {
@@ -874,13 +960,21 @@ s32 PS4_SYSV_ABI sceNpScoreGetFriendsRanking(s32 reqId, OrbisNpScoreBoardId boar
                                              u64 infoArraySize, u64 arrayNum,
                                              Rtc::OrbisRtcTick* lastSortDate,
                                              OrbisNpScoreRankNumber* totalRecord, void* option) {
-    LOG_INFO(Lib_NpScore,
-             "called reqId={}, boardId={}, includeSelf={}, "
-             "rankArray={}, rankArraySize={}, commentArray={}, commentArraySize={}, infoArray={}, "
-             "infoArraySize={}, arrayNum={}, lastSortDate={}, totalRecord={}, option={}",
-             reqId, boardId, includeSelf, PTR(rankArray), rankArraySize, PTR(commentArray),
-             commentArraySize, PTR(infoArray), infoArraySize, arrayNum, PTR(lastSortDate),
-             PTR(totalRecord), PTR(option));
+    LOG_INFO(
+        Lib_NpScore,
+        "called reqId=%d, boardId=%u, includeSelf=%d, "
+        "rankArray=0x%llx, rankArraySize=%" PRIu64
+        ", commentArray=0x%llx, commentArraySize=%" PRIu64 ", infoArray=0x%llx, "
+        "infoArraySize=%" PRIu64 ", arrayNum=%" PRIu64
+        ", lastSortDate=0x%llx, totalRecord=0x%llx, option=0x%llx",
+        reqId, boardId, includeSelf,
+        static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(rankArray))), rankArraySize,
+        static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(commentArray))),
+        commentArraySize,
+        static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(infoArray))), infoArraySize,
+        arrayNum, static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(lastSortDate))),
+        static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(totalRecord))),
+        static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(option))));
     return GetFriendsRankingImpl(reqId, boardId, includeSelf, rankArray, /*aRankArrayIn=*/nullptr,
                                  rankArraySize, commentArray, commentArraySize, infoArray,
                                  infoArraySize, arrayNum, lastSortDate, totalRecord, option, false);
@@ -892,13 +986,21 @@ s32 PS4_SYSV_ABI sceNpScoreGetFriendsRankingAsync(
     OrbisNpScoreGameInfo* infoArray, u64 infoArraySize, u64 arrayNum,
     Rtc::OrbisRtcTick* lastSortDate, OrbisNpScoreRankNumber* totalRecord,
     OrbisNpScoreGetFriendRankingOptParam* option) {
-    LOG_INFO(Lib_NpScore,
-             "called reqId={}, boardId={}, includeSelf={}, "
-             "rankArray={}, rankArraySize={}, commentArray={}, commentArraySize={}, infoArray={}, "
-             "infoArraySize={}, arrayNum={}, lastSortDate={}, totalRecord={}, option={}",
-             reqId, boardId, includeSelf, PTR(rankArray), rankArraySize, PTR(commentArray),
-             commentArraySize, PTR(infoArray), infoArraySize, arrayNum, PTR(lastSortDate),
-             PTR(totalRecord), PTR(option));
+    LOG_INFO(
+        Lib_NpScore,
+        "called reqId=%d, boardId=%u, includeSelf=%d, "
+        "rankArray=0x%llx, rankArraySize=%" PRIu64
+        ", commentArray=0x%llx, commentArraySize=%" PRIu64 ", infoArray=0x%llx, "
+        "infoArraySize=%" PRIu64 ", arrayNum=%" PRIu64
+        ", lastSortDate=0x%llx, totalRecord=0x%llx, option=0x%llx",
+        reqId, boardId, includeSelf,
+        static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(rankArray))), rankArraySize,
+        static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(commentArray))),
+        commentArraySize,
+        static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(infoArray))), infoArraySize,
+        arrayNum, static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(lastSortDate))),
+        static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(totalRecord))),
+        static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(option))));
     return GetFriendsRankingImpl(reqId, boardId, includeSelf, rankArray, /*aRankArrayIn=*/nullptr,
                                  rankArraySize, commentArray, commentArraySize, infoArray,
                                  infoArraySize, arrayNum, lastSortDate, totalRecord, option, true);
@@ -911,13 +1013,21 @@ s32 PS4_SYSV_ABI sceNpScoreGetFriendsRankingA(s32 reqId, OrbisNpScoreBoardId boa
                                               Rtc::OrbisRtcTick* lastSortDate,
                                               OrbisNpScoreRankNumber* totalRecord,
                                               OrbisNpScoreGetFriendRankingOptParam* option) {
-    LOG_INFO(Lib_NpScore,
-             "called reqId={}, boardId={}, includeSelf={}, "
-             "rankArray={}, rankArraySize={}, commentArray={}, commentArraySize={}, infoArray={}, "
-             "infoArraySize={}, arrayNum={}, lastSortDate={}, totalRecord={}, option={}",
-             reqId, boardId, includeSelf, PTR(rankArray), rankArraySize, PTR(commentArray),
-             commentArraySize, PTR(infoArray), infoArraySize, arrayNum, PTR(lastSortDate),
-             PTR(totalRecord), PTR(option));
+    LOG_INFO(
+        Lib_NpScore,
+        "called reqId=%d, boardId=%u, includeSelf=%d, "
+        "rankArray=0x%llx, rankArraySize=%" PRIu64
+        ", commentArray=0x%llx, commentArraySize=%" PRIu64 ", infoArray=0x%llx, "
+        "infoArraySize=%" PRIu64 ", arrayNum=%" PRIu64
+        ", lastSortDate=0x%llx, totalRecord=0x%llx, option=0x%llx",
+        reqId, boardId, includeSelf,
+        static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(rankArray))), rankArraySize,
+        static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(commentArray))),
+        commentArraySize,
+        static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(infoArray))), infoArraySize,
+        arrayNum, static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(lastSortDate))),
+        static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(totalRecord))),
+        static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(option))));
     return GetFriendsRankingImpl(reqId, boardId, includeSelf, /*rankArray=*/nullptr, rankArray,
                                  rankArraySize, commentArray, commentArraySize, infoArray,
                                  infoArraySize, arrayNum, lastSortDate, totalRecord, option, false);
@@ -929,13 +1039,21 @@ s32 PS4_SYSV_ABI sceNpScoreGetFriendsRankingAAsync(
     OrbisNpScoreGameInfo* infoArray, u64 infoArraySize, u64 arrayNum,
     Rtc::OrbisRtcTick* lastSortDate, OrbisNpScoreRankNumber* totalRecord,
     OrbisNpScoreGetFriendRankingOptParam* option) {
-    LOG_INFO(Lib_NpScore,
-             "called reqId={}, boardId={}, includeSelf={}, "
-             "rankArray={}, rankArraySize={}, commentArray={}, commentArraySize={}, infoArray={}, "
-             "infoArraySize={}, arrayNum={}, lastSortDate={}, totalRecord={}, option={}",
-             reqId, boardId, includeSelf, PTR(rankArray), rankArraySize, PTR(commentArray),
-             commentArraySize, PTR(infoArray), infoArraySize, arrayNum, PTR(lastSortDate),
-             PTR(totalRecord), PTR(option));
+    LOG_INFO(
+        Lib_NpScore,
+        "called reqId=%d, boardId=%u, includeSelf=%d, "
+        "rankArray=0x%llx, rankArraySize=%" PRIu64
+        ", commentArray=0x%llx, commentArraySize=%" PRIu64 ", infoArray=0x%llx, "
+        "infoArraySize=%" PRIu64 ", arrayNum=%" PRIu64
+        ", lastSortDate=0x%llx, totalRecord=0x%llx, option=0x%llx",
+        reqId, boardId, includeSelf,
+        static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(rankArray))), rankArraySize,
+        static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(commentArray))),
+        commentArraySize,
+        static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(infoArray))), infoArraySize,
+        arrayNum, static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(lastSortDate))),
+        static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(totalRecord))),
+        static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(option))));
     return GetFriendsRankingImpl(reqId, boardId, includeSelf, /*rankArray=*/nullptr, rankArray,
                                  rankArraySize, commentArray, commentArraySize, infoArray,
                                  infoArraySize, arrayNum, lastSortDate, totalRecord, option, true);
@@ -958,31 +1076,35 @@ static int GetRankingByNpIdPcIdImpl(s32 reqId, OrbisNpScoreBoardId boardId,
     }
 
     if (idArray == nullptr || arrayNum == 0 || rankArray == nullptr) {
-        LOG_ERROR(Lib_NpScore, "insufficient argument: idArray={}, arrayNum={}, rankArray={}",
-                  PTR(idArray), arrayNum, PTR(rankArray));
+        LOG_ERROR(Lib_NpScore,
+                  "insufficient argument: idArray=0x%llx, arrayNum=%" PRIu64 ", rankArray=0x%llx",
+                  static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(idArray))),
+                  arrayNum,
+                  static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(rankArray))));
         return ORBIS_NP_COMMUNITY_ERROR_INSUFFICIENT_ARGUMENT;
     }
     if (arrayNum > ORBIS_NP_SCORE_MAX_NPID_NUM_PER_REQUEST) {
-        LOG_ERROR(Lib_NpScore, "Too many npIds requested: {}", arrayNum);
+        LOG_ERROR(Lib_NpScore, "Too many npIds requested: %" PRIu64, arrayNum);
         return ORBIS_NP_COMMUNITY_ERROR_TOO_MANY_NPID;
     }
     if (idArraySize != arrayNum * sizeof(OrbisNpScoreNpIdPcId) ||
         rankArraySize != arrayNum * sizeof(OrbisNpScorePlayerRankData)) {
-        LOG_ERROR(Lib_NpScore, "Invalid alignment: idArraySize={}, rankArraySize={}", idArraySize,
-                  rankArraySize);
+        LOG_ERROR(Lib_NpScore, "Invalid alignment: idArraySize=%" PRIu64 ", rankArraySize=%" PRIu64,
+                  idArraySize, rankArraySize);
         return ORBIS_NP_COMMUNITY_ERROR_INVALID_ALIGNMENT;
     }
     std::memset(rankArray, 0, rankArraySize);
     if (commentArray != nullptr) {
         if (commentArraySize != arrayNum * sizeof(OrbisNpScoreComment)) {
-            LOG_ERROR(Lib_NpScore, "Invalid alignment: commentArraySize={}", commentArraySize);
+            LOG_ERROR(Lib_NpScore, "Invalid alignment: commentArraySize=%" PRIu64,
+                      commentArraySize);
             return ORBIS_NP_COMMUNITY_ERROR_INVALID_ALIGNMENT;
         }
         std::memset(commentArray, 0, commentArraySize);
     }
     if (infoArray != nullptr) {
         if (infoArraySize != arrayNum * sizeof(OrbisNpScoreGameInfo)) {
-            LOG_ERROR(Lib_NpScore, "Invalid alignment: infoArraySize={}", infoArraySize);
+            LOG_ERROR(Lib_NpScore, "Invalid alignment: infoArraySize=%" PRIu64, infoArraySize);
             return ORBIS_NP_COMMUNITY_ERROR_INVALID_ALIGNMENT;
         }
         std::memset(infoArray, 0, infoArraySize);
@@ -992,7 +1114,7 @@ static int GetRankingByNpIdPcIdImpl(s32 reqId, OrbisNpScoreBoardId boardId,
     if (auto returned = g_mutex.Run([&]() -> std::optional<int> {
             req = LookupRequestUnlocked(reqId);
             if (!req) {
-                LOG_ERROR(Lib_NpScore, "invalid reqId {}", reqId);
+                LOG_ERROR(Lib_NpScore, "invalid reqId %d", reqId);
                 return std::optional<int>{ORBIS_NP_COMMUNITY_ERROR_INVALID_ID};
             }
             if (IsRequestAborted(req)) {
@@ -1032,10 +1154,13 @@ s32 PS4_SYSV_ABI sceNpScoreGetRankingByNpIdPcId(
     OrbisNpScorePlayerRankData* rankArray, u64 rankArraySize, OrbisNpScoreComment* commentArray,
     u64 commentArraySize, OrbisNpScoreGameInfo* infoArray, u64 infoArraySize, u64 arrayNum,
     Rtc::OrbisRtcTick* lastSortDate, OrbisNpScoreRankNumber* totalRecord, void* option) {
-    LOG_ERROR(Lib_NpScore,
-              "called reqId={}, boardId={}, idArray={}, idArraySize={}, "
-              "rankArray={}, rankArraySize={}, arrayNum={}",
-              reqId, boardId, PTR(idArray), idArraySize, PTR(rankArray), rankArraySize, arrayNum);
+    LOG_ERROR(
+        Lib_NpScore,
+        "called reqId=%d, boardId=%u, idArray=0x%llx, idArraySize=%" PRIu64 ", "
+        "rankArray=0x%llx, rankArraySize=%" PRIu64 ", arrayNum=%" PRIu64,
+        reqId, boardId, static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(idArray))),
+        idArraySize, static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(rankArray))),
+        rankArraySize, arrayNum);
     return GetRankingByNpIdPcIdImpl(reqId, boardId, idArray, idArraySize, rankArray, rankArraySize,
                                     commentArray, commentArraySize, infoArray, infoArraySize,
                                     arrayNum, lastSortDate, totalRecord, option, false);
@@ -1046,7 +1171,8 @@ s32 PS4_SYSV_ABI sceNpScoreGetRankingByNpIdPcIdAsync(
     OrbisNpScorePlayerRankData* rankArray, u64 rankArraySize, OrbisNpScoreComment* commentArray,
     u64 commentArraySize, OrbisNpScoreGameInfo* infoArray, u64 infoArraySize, u64 arrayNum,
     Rtc::OrbisRtcTick* lastSortDate, OrbisNpScoreRankNumber* totalRecord, void* option) {
-    LOG_ERROR(Lib_NpScore, "called reqId={}, boardId={}, arrayNum={}", reqId, boardId, arrayNum);
+    LOG_ERROR(Lib_NpScore, "called reqId=%d, boardId=%u, arrayNum=%" PRIu64, reqId, boardId,
+              arrayNum);
     return GetRankingByNpIdPcIdImpl(reqId, boardId, idArray, idArraySize, rankArray, rankArraySize,
                                     commentArray, commentArraySize, infoArray, infoArraySize,
                                     arrayNum, lastSortDate, totalRecord, option, true);
@@ -1068,31 +1194,39 @@ static int GetRankingByAccountIdPcIdImpl(s32 reqId, OrbisNpScoreBoardId boardId,
         return ORBIS_NP_COMMUNITY_ERROR_INVALID_ARGUMENT;
     }
     if (arrayNum > ORBIS_NP_SCORE_MAX_ID_NUM_PER_REQUEST) {
-        LOG_ERROR(Lib_NpScore, "Too many accountIds requested: {}", arrayNum);
+        LOG_ERROR(Lib_NpScore, "Too many accountIds requested: %" PRIu64, arrayNum);
         return ORBIS_NP_COMMUNITY_ERROR_INVALID_ARGUMENT;
     }
     if (arrayNum == 0 || rankArray == nullptr || idArray == nullptr) {
-        LOG_ERROR(Lib_NpScore, "Insufficient arguments: arrayNum={}, rankArray={}, idArray={}",
-                  arrayNum, PTR(rankArray), PTR(idArray));
+        LOG_ERROR(Lib_NpScore,
+                  "Insufficient arguments: arrayNum=%" PRIu64 ", rankArray=0x%llx, idArray=0x%llx",
+                  arrayNum,
+                  static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(rankArray))),
+                  static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(idArray))));
         return ORBIS_NP_COMMUNITY_ERROR_INSUFFICIENT_ARGUMENT;
     }
     if (idArraySize != arrayNum * sizeof(OrbisNpScoreAccountIdPcId)) {
-        LOG_ERROR(Lib_NpScore, "Invalid alignment for idArray: size {} does not match expected {}",
-                  idArraySize, arrayNum * sizeof(OrbisNpScoreAccountIdPcId));
+        LOG_ERROR(Lib_NpScore,
+                  "Invalid alignment for idArray: size %" PRIu64 " does not match expected %llu",
+                  idArraySize,
+                  static_cast<unsigned long long>(arrayNum * sizeof(OrbisNpScoreAccountIdPcId)));
         return ORBIS_NP_COMMUNITY_ERROR_INVALID_ALIGNMENT;
     }
     if (rankArraySize != arrayNum * sizeof(OrbisNpScorePlayerRankDataA)) {
         LOG_ERROR(Lib_NpScore,
-                  "Invalid alignment for rankArray: size {} does not match expected {}",
-                  rankArraySize, arrayNum * sizeof(OrbisNpScorePlayerRankDataA));
+                  "Invalid alignment for rankArray: size %" PRIu64 " does not match expected %llu",
+                  rankArraySize,
+                  static_cast<unsigned long long>(arrayNum * sizeof(OrbisNpScorePlayerRankDataA)));
         return ORBIS_NP_COMMUNITY_ERROR_INVALID_ALIGNMENT;
     }
     std::memset(rankArray, 0, rankArraySize);
     if (commentArray != nullptr) {
         if (commentArraySize != arrayNum * sizeof(OrbisNpScoreComment)) {
             LOG_ERROR(Lib_NpScore,
-                      "Invalid alignment for commentArray: size {} does not match expected {}",
-                      commentArraySize, arrayNum * sizeof(OrbisNpScoreComment));
+                      "Invalid alignment for commentArray: size %" PRIu64
+                      " does not match expected %llu",
+                      commentArraySize,
+                      static_cast<unsigned long long>(arrayNum * sizeof(OrbisNpScoreComment)));
             return ORBIS_NP_COMMUNITY_ERROR_INVALID_ALIGNMENT;
         }
         std::memset(commentArray, 0, commentArraySize);
@@ -1100,8 +1234,10 @@ static int GetRankingByAccountIdPcIdImpl(s32 reqId, OrbisNpScoreBoardId boardId,
     if (infoArray != nullptr) {
         if (infoArraySize != arrayNum * sizeof(OrbisNpScoreGameInfo)) {
             LOG_ERROR(Lib_NpScore,
-                      "Invalid alignment for infoArray: size {} does not match expected {}",
-                      infoArraySize, arrayNum * sizeof(OrbisNpScoreGameInfo));
+                      "Invalid alignment for infoArray: size %" PRIu64
+                      " does not match expected %llu",
+                      infoArraySize,
+                      static_cast<unsigned long long>(arrayNum * sizeof(OrbisNpScoreGameInfo)));
             return ORBIS_NP_COMMUNITY_ERROR_INVALID_ALIGNMENT;
         }
         std::memset(infoArray, 0, infoArraySize);
@@ -1148,12 +1284,20 @@ s32 PS4_SYSV_ABI sceNpScoreGetRankingByAccountIdPcId(
     OrbisNpScoreRankNumber* totalRecord, void* option) {
     LOG_INFO(
         Lib_NpScore,
-        "called reqId={}, boardId={}, idArray={}, "
-        "idArraySize={}, rankArray={}, rankArraySize={}, commentArray={}, commentArraySize={}, "
-        "infoArray={}, infoArraySize={}, arrayNum={}, lastSortDate={}, totalRecord={}, option={}",
-        reqId, boardId, PTR(idArray), idArraySize, PTR(rankArray), rankArraySize, PTR(commentArray),
-        commentArraySize, PTR(infoArray), infoArraySize, arrayNum, PTR(lastSortDate),
-        PTR(totalRecord), PTR(option));
+        "called reqId=%d, boardId=%u, idArray=0x%llx, "
+        "idArraySize=%" PRIu64 ", rankArray=0x%llx, rankArraySize=%" PRIu64
+        ", commentArray=0x%llx, commentArraySize=%" PRIu64 ", "
+        "infoArray=0x%llx, infoArraySize=%" PRIu64 ", arrayNum=%" PRIu64
+        ", lastSortDate=0x%llx, totalRecord=0x%llx, option=0x%llx",
+        reqId, boardId, static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(idArray))),
+        idArraySize, static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(rankArray))),
+        rankArraySize,
+        static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(commentArray))),
+        commentArraySize,
+        static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(infoArray))), infoArraySize,
+        arrayNum, static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(lastSortDate))),
+        static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(totalRecord))),
+        static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(option))));
     return GetRankingByAccountIdPcIdImpl(reqId, boardId, idArray, idArraySize, rankArray,
                                          rankArraySize, commentArray, commentArraySize, infoArray,
                                          infoArraySize, arrayNum, lastSortDate, totalRecord, option,
@@ -1168,12 +1312,20 @@ s32 PS4_SYSV_ABI sceNpScoreGetRankingByAccountIdPcIdAsync(
     OrbisNpScoreRankNumber* totalRecord, void* option) {
     LOG_INFO(
         Lib_NpScore,
-        "called reqId={}, boardId={}, idArray={}, "
-        "idArraySize={}, rankArray={}, rankArraySize={}, commentArray={}, commentArraySize={}, "
-        "infoArray={}, infoArraySize={}, arrayNum={}, lastSortDate={}, totalRecord={}, option={}",
-        reqId, boardId, PTR(idArray), idArraySize, PTR(rankArray), rankArraySize, PTR(commentArray),
-        commentArraySize, PTR(infoArray), infoArraySize, arrayNum, PTR(lastSortDate),
-        PTR(totalRecord), PTR(option));
+        "called reqId=%d, boardId=%u, idArray=0x%llx, "
+        "idArraySize=%" PRIu64 ", rankArray=0x%llx, rankArraySize=%" PRIu64
+        ", commentArray=0x%llx, commentArraySize=%" PRIu64 ", "
+        "infoArray=0x%llx, infoArraySize=%" PRIu64 ", arrayNum=%" PRIu64
+        ", lastSortDate=0x%llx, totalRecord=0x%llx, option=0x%llx",
+        reqId, boardId, static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(idArray))),
+        idArraySize, static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(rankArray))),
+        rankArraySize,
+        static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(commentArray))),
+        commentArraySize,
+        static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(infoArray))), infoArraySize,
+        arrayNum, static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(lastSortDate))),
+        static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(totalRecord))),
+        static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(option))));
     return GetRankingByAccountIdPcIdImpl(reqId, boardId, idArray, idArraySize, rankArray,
                                          rankArraySize, commentArray, commentArraySize, infoArray,
                                          infoArraySize, arrayNum, lastSortDate, totalRecord, option,
@@ -1185,7 +1337,8 @@ s32 PS4_SYSV_ABI sceNpScoreGetRankingByAccountIdPcIdAsync(
 static int GetBoardInfoImpl(s32 reqId, OrbisNpScoreBoardId boardId,
                             OrbisNpScoreBoardInfo* boardInfo, void* option, bool is_async) {
     if (option != nullptr) {
-        LOG_ERROR(Lib_NpScore, "GetBoardInfo: option must be null, got {}", PTR(option));
+        LOG_ERROR(Lib_NpScore, "GetBoardInfo: option must be null, got 0x%llx",
+                  static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(option))));
         return ORBIS_NP_COMMUNITY_ERROR_INVALID_ARGUMENT;
     }
     if (g_firmware_version >= 0 && g_firmware_version >= Common::ElfInfo::FW_250 &&
@@ -1198,7 +1351,7 @@ static int GetBoardInfoImpl(s32 reqId, OrbisNpScoreBoardId boardId,
     if (auto returned = g_mutex.Run([&]() -> std::optional<int> {
             req = LookupRequestUnlocked(reqId);
             if (!req) {
-                LOG_ERROR(Lib_NpScore, "invalid reqId {}", reqId);
+                LOG_ERROR(Lib_NpScore, "invalid reqId %d", reqId);
                 return std::optional<int>{ORBIS_NP_COMMUNITY_ERROR_INVALID_ID};
             }
             if (IsRequestAborted(req)) {
@@ -1230,15 +1383,17 @@ static int GetBoardInfoImpl(s32 reqId, OrbisNpScoreBoardId boardId,
 
 s32 PS4_SYSV_ABI sceNpScoreGetBoardInfo(s32 reqId, OrbisNpScoreBoardId boardId,
                                         OrbisNpScoreBoardInfo* boardInfo, void* option) {
-    LOG_INFO(Lib_NpScore, "called reqId={}, boardId={}, boardInfo={}, option={}", reqId, boardId,
-             PTR(boardInfo), PTR(option));
+    LOG_INFO(Lib_NpScore, "called reqId=%d, boardId=%u, boardInfo=0x%llx, option=0x%llx", reqId,
+             boardId, static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(boardInfo))),
+             static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(option))));
     return GetBoardInfoImpl(reqId, boardId, boardInfo, option, false);
 }
 
 s32 PS4_SYSV_ABI sceNpScoreGetBoardInfoAsync(s32 reqId, OrbisNpScoreBoardId boardId,
                                              OrbisNpScoreBoardInfo* boardInfo, void* option) {
-    LOG_INFO(Lib_NpScore, "called reqId={}, boardId={}, boardInfo={}, option={}", reqId, boardId,
-             PTR(boardInfo), PTR(option));
+    LOG_INFO(Lib_NpScore, "called reqId=%d, boardId=%u, boardInfo=0x%llx, option=0x%llx", reqId,
+             boardId, static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(boardInfo))),
+             static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(option))));
     return GetBoardInfoImpl(reqId, boardId, boardInfo, option, true);
 }
 
@@ -1252,7 +1407,8 @@ static int GetGameDataImpl(s32 reqId, OrbisNpScoreBoardId boardId, const OrbisNp
         return ORBIS_NP_COMMUNITY_ERROR_INSUFFICIENT_ARGUMENT;
     }
     if (option != nullptr) {
-        LOG_ERROR(Lib_NpScore, "GetGameData: option must be null, got {}", PTR(option));
+        LOG_ERROR(Lib_NpScore, "GetGameData: option must be null, got 0x%llx",
+                  static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(option))));
         return ORBIS_NP_COMMUNITY_ERROR_INVALID_ARGUMENT;
     }
 
@@ -1260,7 +1416,7 @@ static int GetGameDataImpl(s32 reqId, OrbisNpScoreBoardId boardId, const OrbisNp
     if (auto returned = g_mutex.Run([&]() -> std::optional<int> {
             req = LookupRequestUnlocked(reqId);
             if (!req) {
-                LOG_ERROR(Lib_NpScore, "invalid reqId {}", reqId);
+                LOG_ERROR(Lib_NpScore, "invalid reqId %d", reqId);
                 return std::optional<int>{ORBIS_NP_COMMUNITY_ERROR_INVALID_ID};
             }
             if (IsRequestAborted(req)) {
@@ -1297,7 +1453,8 @@ static int GetGameDataByAccountIdImpl(s32 reqId, OrbisNpScoreBoardId boardId,
                                       OrbisNpAccountId accountId, u64* totalSize, u64 recvSize,
                                       void* data, void* option, bool is_async) {
     if (option != nullptr) {
-        LOG_ERROR(Lib_NpScore, "GetGameDataByAccountId: option must be null, got {}", PTR(option));
+        LOG_ERROR(Lib_NpScore, "GetGameDataByAccountId: option must be null, got 0x%llx",
+                  static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(option))));
         return ORBIS_NP_COMMUNITY_ERROR_INVALID_ARGUMENT;
     }
     if (accountId == 0) {
@@ -1309,7 +1466,7 @@ static int GetGameDataByAccountIdImpl(s32 reqId, OrbisNpScoreBoardId boardId,
     if (auto returned = g_mutex.Run([&]() -> std::optional<int> {
             req = LookupRequestUnlocked(reqId);
             if (!req) {
-                LOG_ERROR(Lib_NpScore, "invalid reqId {}", reqId);
+                LOG_ERROR(Lib_NpScore, "invalid reqId %d", reqId);
                 return std::optional<int>{ORBIS_NP_COMMUNITY_ERROR_INVALID_ID};
             }
             if (IsRequestAborted(req)) {
@@ -1339,8 +1496,13 @@ s32 PS4_SYSV_ABI sceNpScoreGetGameData(s32 reqId, OrbisNpScoreBoardId boardId,
                                        const OrbisNpId* npId, u64* totalSize, u64 recvSize,
                                        void* data, void* option) {
     LOG_INFO(Lib_NpScore,
-             "called reqId={}, boardId={}, npId={}, totalSize={}, recvSize={}, data={}, option={}",
-             reqId, boardId, PTR(npId), PTR(totalSize), recvSize, PTR(data), PTR(option));
+             "called reqId=%d, boardId=%u, npId=0x%llx, totalSize=0x%llx, recvSize=%" PRIu64
+             ", data=0x%llx, option=0x%llx",
+             reqId, boardId,
+             static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(npId))),
+             static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(totalSize))), recvSize,
+             static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(data))),
+             static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(option))));
     return GetGameDataImpl(reqId, boardId, npId, totalSize, recvSize, data, option, false);
 }
 
@@ -1348,8 +1510,13 @@ s32 PS4_SYSV_ABI sceNpScoreGetGameDataAsync(s32 reqId, OrbisNpScoreBoardId board
                                             const OrbisNpId* npId, u64* totalSize, u64 recvSize,
                                             void* data, void* option) {
     LOG_INFO(Lib_NpScore,
-             "called reqId={}, boardId={}, npId={}, totalSize={}, recvSize={}, data={}, option={}",
-             reqId, boardId, PTR(npId), PTR(totalSize), recvSize, PTR(data), PTR(option));
+             "called reqId=%d, boardId=%u, npId=0x%llx, totalSize=0x%llx, recvSize=%" PRIu64
+             ", data=0x%llx, option=0x%llx",
+             reqId, boardId,
+             static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(npId))),
+             static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(totalSize))), recvSize,
+             static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(data))),
+             static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(option))));
     return GetGameDataImpl(reqId, boardId, npId, totalSize, recvSize, data, option, true);
 }
 
@@ -1357,9 +1524,13 @@ s32 PS4_SYSV_ABI sceNpScoreGetGameDataByAccountId(s32 reqId, OrbisNpScoreBoardId
                                                   OrbisNpAccountId accountId, u64* totalSize,
                                                   u64 recvSize, void* data, void* option) {
     LOG_INFO(Lib_NpScore,
-             "called reqId={}, boardId={}, accountId={}, totalSize={}, recvSize={}, data={}, "
-             "option={}",
-             reqId, boardId, accountId, PTR(totalSize), recvSize, PTR(data), PTR(option));
+             "called reqId=%d, boardId=%u, accountId=%" PRIu64
+             ", totalSize=0x%llx, recvSize=%" PRIu64 ", data=0x%llx, "
+             "option=0x%llx",
+             reqId, boardId, accountId,
+             static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(totalSize))), recvSize,
+             static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(data))),
+             static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(option))));
     return GetGameDataByAccountIdImpl(reqId, boardId, accountId, totalSize, recvSize, data, option,
                                       false);
 }
@@ -1368,9 +1539,13 @@ s32 PS4_SYSV_ABI sceNpScoreGetGameDataByAccountIdAsync(s32 reqId, OrbisNpScoreBo
                                                        OrbisNpAccountId accountId, u64* totalSize,
                                                        u64 recvSize, void* data, void* option) {
     LOG_INFO(Lib_NpScore,
-             "called reqId={}, boardId={}, accountId={}, totalSize={}, recvSize={}, data={}, "
-             "option={}",
-             reqId, boardId, accountId, PTR(totalSize), recvSize, PTR(data), PTR(option));
+             "called reqId=%d, boardId=%u, accountId=%" PRIu64
+             ", totalSize=0x%llx, recvSize=%" PRIu64 ", data=0x%llx, "
+             "option=0x%llx",
+             reqId, boardId, accountId,
+             static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(totalSize))), recvSize,
+             static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(data))),
+             static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(option))));
     return GetGameDataByAccountIdImpl(reqId, boardId, accountId, totalSize, recvSize, data, option,
                                       true);
 }
@@ -1382,7 +1557,8 @@ static int RecordGameDataImpl(s32 reqId, OrbisNpScoreBoardId boardId, OrbisNpSco
                               u64 totalSize, u64 sendSize, const void* data, void* option,
                               bool is_async) {
     if (option != nullptr) {
-        LOG_ERROR(Lib_NpScore, "RecordGameData: option must be null, got {}", PTR(option));
+        LOG_ERROR(Lib_NpScore, "RecordGameData: option must be null, got 0x%llx",
+                  static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(option))));
         return ORBIS_NP_COMMUNITY_ERROR_INVALID_ARGUMENT;
     }
     if (data == nullptr) {
@@ -1398,7 +1574,8 @@ static int RecordGameDataImpl(s32 reqId, OrbisNpScoreBoardId boardId, OrbisNpSco
         // stores whatever bytes arrive in this single command as the
         // complete blob. Warn so callers can spot the truncation.
         LOG_WARNING(Lib_NpScore,
-                    "RecordGameData: chunked send not supported (totalSize={} sendSize={}); "
+                    "RecordGameData: chunked send not supported (totalSize=%" PRIu64
+                    " sendSize=%" PRIu64 "); "
                     "storing first chunk only",
                     totalSize, sendSize);
     }
@@ -1407,7 +1584,7 @@ static int RecordGameDataImpl(s32 reqId, OrbisNpScoreBoardId boardId, OrbisNpSco
     if (auto returned = g_mutex.Run([&]() -> std::optional<int> {
             req = LookupRequestUnlocked(reqId);
             if (!req) {
-                LOG_ERROR(Lib_NpScore, "invalid reqId {}", reqId);
+                LOG_ERROR(Lib_NpScore, "invalid reqId %d", reqId);
                 return std::optional<int>{ORBIS_NP_COMMUNITY_ERROR_INVALID_ID};
             }
             if (IsRequestAborted(req)) {
@@ -1437,8 +1614,11 @@ s32 PS4_SYSV_ABI sceNpScoreRecordGameData(s32 reqId, OrbisNpScoreBoardId boardId
                                           OrbisNpScoreValue score, u64 totalSize, u64 sendSize,
                                           const void* data, void* option) {
     LOG_INFO(Lib_NpScore,
-             "called reqId={}, boardId={}, score={}, totalSize={}, sendSize={}, data={}, option={}",
-             reqId, boardId, score, totalSize, sendSize, PTR(data), PTR(option));
+             "called reqId=%d, boardId=%u, score=%" PRId64 ", totalSize=%" PRIu64
+             ", sendSize=%" PRIu64 ", data=0x%llx, option=0x%llx",
+             reqId, boardId, score, totalSize, sendSize,
+             static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(data))),
+             static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(option))));
     return RecordGameDataImpl(reqId, boardId, score, totalSize, sendSize, data, option, false);
 }
 
@@ -1446,8 +1626,11 @@ s32 PS4_SYSV_ABI sceNpScoreRecordGameDataAsync(s32 reqId, OrbisNpScoreBoardId bo
                                                OrbisNpScoreValue score, u64 totalSize, u64 sendSize,
                                                const void* data, void* option) {
     LOG_INFO(Lib_NpScore,
-             "called reqId={}, boardId={}, score={}, totalSize={}, sendSize={}, data={}, option={}",
-             reqId, boardId, score, totalSize, sendSize, PTR(data), PTR(option));
+             "called reqId=%d, boardId=%u, score=%" PRId64 ", totalSize=%" PRIu64
+             ", sendSize=%" PRIu64 ", data=0x%llx, option=0x%llx",
+             reqId, boardId, score, totalSize, sendSize,
+             static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(data))),
+             static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(option))));
     return RecordGameDataImpl(reqId, boardId, score, totalSize, sendSize, data, option, true);
 }
 //***********************************
@@ -1455,7 +1638,8 @@ s32 PS4_SYSV_ABI sceNpScoreRecordGameDataAsync(s32 reqId, OrbisNpScoreBoardId bo
 //***********************************
 static int CensorCommentImpl(s32 reqId, const char* comment, void* option, bool is_async) {
     if (option != nullptr) {
-        LOG_ERROR(Lib_NpScore, "CensorComment: option must be null, got {}", PTR(option));
+        LOG_ERROR(Lib_NpScore, "CensorComment: option must be null, got 0x%llx",
+                  static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(option))));
         return ORBIS_NP_COMMUNITY_ERROR_INVALID_ARGUMENT;
     }
     if (comment == nullptr) {
@@ -1467,7 +1651,7 @@ static int CensorCommentImpl(s32 reqId, const char* comment, void* option, bool 
     if (auto returned = g_mutex.Run([&]() -> std::optional<int> {
             req = LookupRequestUnlocked(reqId);
             if (!req) {
-                LOG_ERROR(Lib_NpScore, "invalid reqId {}", reqId);
+                LOG_ERROR(Lib_NpScore, "invalid reqId %d", reqId);
                 return std::optional<int>{ORBIS_NP_COMMUNITY_ERROR_INVALID_ID};
             }
             if (IsRequestAborted(req)) {
@@ -1481,13 +1665,13 @@ static int CensorCommentImpl(s32 reqId, const char* comment, void* option, bool 
     constexpr size_t probe = ORBIS_NP_SCORE_CENSOR_COMMENT_MAXLEN + 1;
     const size_t len = strnlen(comment, probe);
     if (len > ORBIS_NP_SCORE_CENSOR_COMMENT_MAXLEN) {
-        LOG_ERROR(Lib_NpScore, "CensorComment: comment too long (max {} chars + null)",
+        LOG_ERROR(Lib_NpScore, "CensorComment: comment too long (max %d chars + null)",
                   ORBIS_NP_SCORE_CENSOR_COMMENT_MAXLEN);
         return ORBIS_NP_COMMUNITY_ERROR_INVALID_ARGUMENT;
     }
 
     // Passthrough
-    LOG_INFO(Lib_NpScore, "CensorComment: reqId={} len={} (passthrough)", reqId, len);
+    LOG_INFO(Lib_NpScore, "CensorComment: reqId=%d len=%zu (passthrough)", reqId, len);
     req->SetResult(ORBIS_OK);
     if (is_async) {
         return ORBIS_OK;
@@ -1496,14 +1680,16 @@ static int CensorCommentImpl(s32 reqId, const char* comment, void* option, bool 
 }
 
 s32 PS4_SYSV_ABI sceNpScoreCensorComment(s32 reqId, const char* comment, void* option) {
-    LOG_INFO(Lib_NpScore, "called reqId={}, comment={}, option={}", reqId,
-             comment ? comment : "null", PTR(option));
+    LOG_INFO(Lib_NpScore, "called reqId=%d, comment=%s, option=0x%llx", reqId,
+             comment ? comment : "null",
+             static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(option))));
     return CensorCommentImpl(reqId, comment, option, false);
 }
 
 s32 PS4_SYSV_ABI sceNpScoreCensorCommentAsync(s32 reqId, const char* comment, void* option) {
-    LOG_INFO(Lib_NpScore, "called reqId={}, comment={}, option={}", reqId,
-             comment ? comment : "null", PTR(option));
+    LOG_INFO(Lib_NpScore, "called reqId=%d, comment=%s, option=0x%llx", reqId,
+             comment ? comment : "null",
+             static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(option))));
     return CensorCommentImpl(reqId, comment, option, true);
 }
 
@@ -1513,7 +1699,8 @@ s32 PS4_SYSV_ABI sceNpScoreCensorCommentAsync(s32 reqId, const char* comment, vo
 static int SanitizeCommentImpl(s32 reqId, const char* comment, char* sanitizedComment, void* option,
                                bool is_async) {
     if (option != nullptr) {
-        LOG_ERROR(Lib_NpScore, "SanitizeComment: option must be null, got {}", PTR(option));
+        LOG_ERROR(Lib_NpScore, "SanitizeComment: option must be null, got 0x%llx",
+                  static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(option))));
         return ORBIS_NP_COMMUNITY_ERROR_INVALID_ARGUMENT;
     }
     if (comment == nullptr) {
@@ -1530,7 +1717,7 @@ static int SanitizeCommentImpl(s32 reqId, const char* comment, char* sanitizedCo
     if (auto returned = g_mutex.Run([&]() -> std::optional<int> {
             req = LookupRequestUnlocked(reqId);
             if (!req) {
-                LOG_ERROR(Lib_NpScore, "invalid reqId {}", reqId);
+                LOG_ERROR(Lib_NpScore, "invalid reqId %d", reqId);
                 return std::optional<int>{ORBIS_NP_COMMUNITY_ERROR_INVALID_ID};
             }
             if (IsRequestAborted(req)) {
@@ -1544,7 +1731,7 @@ static int SanitizeCommentImpl(s32 reqId, const char* comment, char* sanitizedCo
     constexpr size_t probe = ORBIS_NP_SCORE_SANITIZE_COMMENT_MAXLEN + 1;
     const size_t len = strnlen(comment, probe);
     if (len > ORBIS_NP_SCORE_SANITIZE_COMMENT_MAXLEN) {
-        LOG_ERROR(Lib_NpScore, "SanitizeComment: comment too long (max {} chars + null)",
+        LOG_ERROR(Lib_NpScore, "SanitizeComment: comment too long (max %d chars + null)",
                   ORBIS_NP_SCORE_SANITIZE_COMMENT_MAXLEN);
         return ORBIS_NP_COMMUNITY_ERROR_INVALID_ARGUMENT;
     }
@@ -1553,7 +1740,7 @@ static int SanitizeCommentImpl(s32 reqId, const char* comment, char* sanitizedCo
     std::memcpy(sanitizedComment, comment, len);
     sanitizedComment[len] = '\0';
 
-    LOG_INFO(Lib_NpScore, "SanitizeComment: reqId={} len={} (passthrough)", reqId, len);
+    LOG_INFO(Lib_NpScore, "SanitizeComment: reqId=%d len=%zu (passthrough)", reqId, len);
     req->SetResult(ORBIS_OK);
     if (is_async) {
         return ORBIS_OK;
@@ -1563,15 +1750,19 @@ static int SanitizeCommentImpl(s32 reqId, const char* comment, char* sanitizedCo
 
 s32 PS4_SYSV_ABI sceNpScoreSanitizeComment(s32 reqId, const char* comment, char* sanitizedComment,
                                            void* option) {
-    LOG_INFO(Lib_NpScore, "called reqId={}, comment={}, sanitizedComment={}, option={}", reqId,
-             comment ? comment : "null", PTR(sanitizedComment), PTR(option));
+    LOG_INFO(Lib_NpScore, "called reqId=%d, comment=%s, sanitizedComment=0x%llx, option=0x%llx",
+             reqId, comment ? comment : "null",
+             static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(sanitizedComment))),
+             static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(option))));
     return SanitizeCommentImpl(reqId, comment, sanitizedComment, option, false);
 }
 
 s32 PS4_SYSV_ABI sceNpScoreSanitizeCommentAsync(s32 reqId, const char* comment,
                                                 char* sanitizedComment, void* option) {
-    LOG_INFO(Lib_NpScore, "called reqId={}, comment={}, sanitizedComment={}, option={}", reqId,
-             comment ? comment : "null", PTR(sanitizedComment), PTR(option));
+    LOG_INFO(Lib_NpScore, "called reqId=%d, comment=%s, sanitizedComment=0x%llx, option=0x%llx",
+             reqId, comment ? comment : "null",
+             static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(sanitizedComment))),
+             static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(option))));
     return SanitizeCommentImpl(reqId, comment, sanitizedComment, option, true);
 }
 
@@ -1580,7 +1771,7 @@ s32 PS4_SYSV_ABI sceNpScoreSanitizeCommentAsync(s32 reqId, const char* comment,
 //***********************************
 s32 PS4_SYSV_ABI sceNpScoreSetPlayerCharacterId(s32 ctxId, OrbisNpScorePcId pcId) {
     if (pcId < 0) {
-        LOG_ERROR(Lib_NpScore, "SetPlayerCharacterId: pcId={} < 0", pcId);
+        LOG_ERROR(Lib_NpScore, "SetPlayerCharacterId: pcId=%d < 0", pcId);
         return ORBIS_NP_COMMUNITY_ERROR_INVALID_ARGUMENT;
     }
     return g_mutex.Run([&]() -> s32 {
@@ -1588,7 +1779,7 @@ s32 PS4_SYSV_ABI sceNpScoreSetPlayerCharacterId(s32 ctxId, OrbisNpScorePcId pcId
         // subsequent CreateRequest will inherit.
         if (auto* tc = LookupTitleCtxUnlocked(ctxId)) {
             tc->pcId = pcId;
-            LOG_INFO(Lib_NpScore, "SetPlayerCharacterId: titleCtxId={} pcId={}", ctxId, pcId);
+            LOG_INFO(Lib_NpScore, "SetPlayerCharacterId: titleCtxId=%d pcId=%d", ctxId, pcId);
             return ORBIS_OK;
         }
 
@@ -1596,11 +1787,11 @@ s32 PS4_SYSV_ABI sceNpScoreSetPlayerCharacterId(s32 ctxId, OrbisNpScorePcId pcId
         // operations dispatched on this specific request
         if (auto req = LookupRequestUnlocked(ctxId)) {
             req->pcId = pcId;
-            LOG_INFO(Lib_NpScore, "SetPlayerCharacterId: reqId={} pcId={}", ctxId, pcId);
+            LOG_INFO(Lib_NpScore, "SetPlayerCharacterId: reqId=%d pcId=%d", ctxId, pcId);
             return ORBIS_OK;
         }
 
-        LOG_ERROR(Lib_NpScore, "SetPlayerCharacterId: invalid id {}", ctxId);
+        LOG_ERROR(Lib_NpScore, "SetPlayerCharacterId: invalid id %d", ctxId);
         return ORBIS_NP_COMMUNITY_ERROR_INVALID_ID;
     });
 }
@@ -1625,13 +1816,21 @@ int PS4_SYSV_ABI sceNpScoreGetFriendsRankingForCrossSave(
     OrbisNpScoreComment* commentArray, u64 commentArraySize, OrbisNpScoreGameInfo* infoArray,
     u64 infoArraySize, u64 arrayNum, Rtc::OrbisRtcTick* lastSortDate,
     OrbisNpScoreRankNumber* totalRecord, OrbisNpScoreGetFriendRankingOptParam* option) {
-    LOG_ERROR(Lib_NpScore,
-              "(STUBBED) called reqId={}, boardId={}, includeSelf={}, "
-              "rankArray={}, rankArraySize={}, commentArray={}, commentArraySize={}, infoArray={}, "
-              "infoArraySize={}, arrayNum={}, lastSortDate={}, totalRecord={}, option={}",
-              reqId, boardId, includeSelf, PTR(rankArray), rankArraySize, PTR(commentArray),
-              commentArraySize, PTR(infoArray), infoArraySize, arrayNum, PTR(lastSortDate),
-              PTR(totalRecord), PTR(option));
+    LOG_ERROR(
+        Lib_NpScore,
+        "(STUBBED) called reqId=%d, boardId=%u, includeSelf=%d, "
+        "rankArray=0x%llx, rankArraySize=%" PRIu64
+        ", commentArray=0x%llx, commentArraySize=%" PRIu64 ", infoArray=0x%llx, "
+        "infoArraySize=%" PRIu64 ", arrayNum=%" PRIu64
+        ", lastSortDate=0x%llx, totalRecord=0x%llx, option=0x%llx",
+        reqId, boardId, includeSelf,
+        static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(rankArray))), rankArraySize,
+        static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(commentArray))),
+        commentArraySize,
+        static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(infoArray))), infoArraySize,
+        arrayNum, static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(lastSortDate))),
+        static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(totalRecord))),
+        static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(option))));
     return ORBIS_OK;
 }
 
@@ -1643,12 +1842,19 @@ int PS4_SYSV_ABI sceNpScoreGetFriendsRankingForCrossSaveAsync(
     OrbisNpScoreRankNumber* totalRecord, OrbisNpScoreGetFriendRankingOptParam* option) {
     LOG_ERROR(
         Lib_NpScore,
-        "(STUBBED) called reqId={}, boardId={}, "
-        "includeSelf={}, rankArray={}, rankArraySize={}, commentArray={}, commentArraySize={}, "
-        "infoArray={}, infoArraySize={}, arrayNum={}, lastSortDate={}, totalRecord={}, option={}",
-        reqId, boardId, includeSelf, PTR(rankArray), rankArraySize, PTR(commentArray),
-        commentArraySize, PTR(infoArray), infoArraySize, arrayNum, PTR(lastSortDate),
-        PTR(totalRecord), PTR(option));
+        "(STUBBED) called reqId=%d, boardId=%u, "
+        "includeSelf=%d, rankArray=0x%llx, rankArraySize=%" PRIu64
+        ", commentArray=0x%llx, commentArraySize=%" PRIu64 ", "
+        "infoArray=0x%llx, infoArraySize=%" PRIu64 ", arrayNum=%" PRIu64
+        ", lastSortDate=0x%llx, totalRecord=0x%llx, option=0x%llx",
+        reqId, boardId, includeSelf,
+        static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(rankArray))), rankArraySize,
+        static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(commentArray))),
+        commentArraySize,
+        static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(infoArray))), infoArraySize,
+        arrayNum, static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(lastSortDate))),
+        static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(totalRecord))),
+        static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(option))));
     return ORBIS_OK;
 }
 
@@ -1658,14 +1864,24 @@ int PS4_SYSV_ABI sceNpScoreGetRankingByAccountIdForCrossSave(
     OrbisNpScoreComment* commentArray, u64 commentArraySize, OrbisNpScoreGameInfo* infoArray,
     u64 infoArraySize, u64 arrayNum, Rtc::OrbisRtcTick* lastSortDate,
     OrbisNpScoreRankNumber* totalRecord, void* option) {
-    LOG_ERROR(Lib_NpScore,
-              "(STUBBED) called reqId={}, boardId={}, "
-              "accountIdArray={}, accountIdArraySize={}, rankArray={}, rankArraySize={}, "
-              "commentArray={}, commentArraySize={}, infoArray={}, infoArraySize={}, arrayNum={}, "
-              "lastSortDate={}, totalRecord={}, option={}",
-              reqId, boardId, PTR(accountIdArray), accountIdArraySize, PTR(rankArray),
-              rankArraySize, PTR(commentArray), commentArraySize, PTR(infoArray), infoArraySize,
-              arrayNum, PTR(lastSortDate), PTR(totalRecord), PTR(option));
+    LOG_ERROR(
+        Lib_NpScore,
+        "(STUBBED) called reqId=%d, boardId=%u, "
+        "accountIdArray=0x%llx, accountIdArraySize=%" PRIu64
+        ", rankArray=0x%llx, rankArraySize=%" PRIu64 ", "
+        "commentArray=0x%llx, commentArraySize=%" PRIu64
+        ", infoArray=0x%llx, infoArraySize=%" PRIu64 ", arrayNum=%" PRIu64 ", "
+        "lastSortDate=0x%llx, totalRecord=0x%llx, option=0x%llx",
+        reqId, boardId,
+        static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(accountIdArray))),
+        accountIdArraySize,
+        static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(rankArray))), rankArraySize,
+        static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(commentArray))),
+        commentArraySize,
+        static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(infoArray))), infoArraySize,
+        arrayNum, static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(lastSortDate))),
+        static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(totalRecord))),
+        static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(option))));
     return ORBIS_OK;
 }
 
@@ -1675,14 +1891,24 @@ int PS4_SYSV_ABI sceNpScoreGetRankingByAccountIdForCrossSaveAsync(
     OrbisNpScoreComment* commentArray, u64 commentArraySize, OrbisNpScoreGameInfo* infoArray,
     u64 infoArraySize, u64 arrayNum, Rtc::OrbisRtcTick* lastSortDate,
     OrbisNpScoreRankNumber* totalRecord, void* option) {
-    LOG_ERROR(Lib_NpScore,
-              "(STUBBED) called reqId={}, boardId={}, "
-              "accountIdArray={}, accountIdArraySize={}, rankArray={}, rankArraySize={}, "
-              "commentArray={}, commentArraySize={}, infoArray={}, infoArraySize={}, arrayNum={}, "
-              "lastSortDate={}, totalRecord={}, option={}",
-              reqId, boardId, PTR(accountIdArray), accountIdArraySize, PTR(rankArray),
-              rankArraySize, PTR(commentArray), commentArraySize, PTR(infoArray), infoArraySize,
-              arrayNum, PTR(lastSortDate), PTR(totalRecord), PTR(option));
+    LOG_ERROR(
+        Lib_NpScore,
+        "(STUBBED) called reqId=%d, boardId=%u, "
+        "accountIdArray=0x%llx, accountIdArraySize=%" PRIu64
+        ", rankArray=0x%llx, rankArraySize=%" PRIu64 ", "
+        "commentArray=0x%llx, commentArraySize=%" PRIu64
+        ", infoArray=0x%llx, infoArraySize=%" PRIu64 ", arrayNum=%" PRIu64 ", "
+        "lastSortDate=0x%llx, totalRecord=0x%llx, option=0x%llx",
+        reqId, boardId,
+        static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(accountIdArray))),
+        accountIdArraySize,
+        static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(rankArray))), rankArraySize,
+        static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(commentArray))),
+        commentArraySize,
+        static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(infoArray))), infoArraySize,
+        arrayNum, static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(lastSortDate))),
+        static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(totalRecord))),
+        static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(option))));
     return ORBIS_OK;
 }
 
@@ -1692,14 +1918,23 @@ int PS4_SYSV_ABI sceNpScoreGetRankingByAccountIdPcIdForCrossSave(
     OrbisNpScoreComment* commentArray, u64 commentArraySize, OrbisNpScoreGameInfo* infoArray,
     u64 infoArraySize, u64 arrayNum, Rtc::OrbisRtcTick* lastSortDate,
     OrbisNpScoreRankNumber* totalRecord, void* option) {
-    LOG_ERROR(Lib_NpScore,
-              "(STUBBED) called reqId={}, boardId={}, "
-              "idArray={}, idArraySize={}, rankArray={}, rankArraySize={}, commentArray={}, "
-              "commentArraySize={}, infoArray={}, infoArraySize={}, arrayNum={}, lastSortDate={}, "
-              "totalRecord={}, option={}",
-              reqId, boardId, PTR(idArray), idArraySize, PTR(rankArray), rankArraySize,
-              PTR(commentArray), commentArraySize, PTR(infoArray), infoArraySize, arrayNum,
-              PTR(lastSortDate), PTR(totalRecord), PTR(option));
+    LOG_ERROR(
+        Lib_NpScore,
+        "(STUBBED) called reqId=%d, boardId=%u, "
+        "idArray=0x%llx, idArraySize=%" PRIu64 ", rankArray=0x%llx, rankArraySize=%" PRIu64
+        ", commentArray=0x%llx, "
+        "commentArraySize=%" PRIu64 ", infoArray=0x%llx, infoArraySize=%" PRIu64
+        ", arrayNum=%" PRIu64 ", lastSortDate=0x%llx, "
+        "totalRecord=0x%llx, option=0x%llx",
+        reqId, boardId, static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(idArray))),
+        idArraySize, static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(rankArray))),
+        rankArraySize,
+        static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(commentArray))),
+        commentArraySize,
+        static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(infoArray))), infoArraySize,
+        arrayNum, static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(lastSortDate))),
+        static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(totalRecord))),
+        static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(option))));
     return ORBIS_OK;
 }
 
@@ -1709,14 +1944,23 @@ int PS4_SYSV_ABI sceNpScoreGetRankingByAccountIdPcIdForCrossSaveAsync(
     OrbisNpScoreComment* commentArray, u64 commentArraySize, OrbisNpScoreGameInfo* infoArray,
     u64 infoArraySize, u64 arrayNum, Rtc::OrbisRtcTick* lastSortDate,
     OrbisNpScoreRankNumber* totalRecord, void* option) {
-    LOG_ERROR(Lib_NpScore,
-              "(STUBBED) called reqId={}, boardId={}, "
-              "idArray={}, idArraySize={}, rankArray={}, rankArraySize={}, commentArray={}, "
-              "commentArraySize={}, infoArray={}, infoArraySize={}, arrayNum={}, lastSortDate={}, "
-              "totalRecord={}, option={}",
-              reqId, boardId, PTR(idArray), idArraySize, PTR(rankArray), rankArraySize,
-              PTR(commentArray), commentArraySize, PTR(infoArray), infoArraySize, arrayNum,
-              PTR(lastSortDate), PTR(totalRecord), PTR(option));
+    LOG_ERROR(
+        Lib_NpScore,
+        "(STUBBED) called reqId=%d, boardId=%u, "
+        "idArray=0x%llx, idArraySize=%" PRIu64 ", rankArray=0x%llx, rankArraySize=%" PRIu64
+        ", commentArray=0x%llx, "
+        "commentArraySize=%" PRIu64 ", infoArray=0x%llx, infoArraySize=%" PRIu64
+        ", arrayNum=%" PRIu64 ", lastSortDate=0x%llx, "
+        "totalRecord=0x%llx, option=0x%llx",
+        reqId, boardId, static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(idArray))),
+        idArraySize, static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(rankArray))),
+        rankArraySize,
+        static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(commentArray))),
+        commentArraySize,
+        static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(infoArray))), infoArraySize,
+        arrayNum, static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(lastSortDate))),
+        static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(totalRecord))),
+        static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(option))));
     return ORBIS_OK;
 }
 
@@ -1728,12 +1972,19 @@ int PS4_SYSV_ABI sceNpScoreGetRankingByRangeForCrossSave(
     OrbisNpScoreRankNumber* totalRecord, void* option) {
     LOG_ERROR(
         Lib_NpScore,
-        "(STUBBED) called reqId={}, boardId={}, "
-        "startSerialRank={}, rankArray={}, rankArraySize={}, commentArray={}, commentArraySize={}, "
-        "infoArray={}, infoArraySize={}, arrayNum={}, lastSortDate={}, totalRecord={}, option={}",
-        reqId, boardId, startSerialRank, PTR(rankArray), rankArraySize, PTR(commentArray),
-        commentArraySize, PTR(infoArray), infoArraySize, arrayNum, PTR(lastSortDate),
-        PTR(totalRecord), PTR(option));
+        "(STUBBED) called reqId=%d, boardId=%u, "
+        "startSerialRank=%u, rankArray=0x%llx, rankArraySize=%" PRIu64
+        ", commentArray=0x%llx, commentArraySize=%" PRIu64 ", "
+        "infoArray=0x%llx, infoArraySize=%" PRIu64 ", arrayNum=%" PRIu64
+        ", lastSortDate=0x%llx, totalRecord=0x%llx, option=0x%llx",
+        reqId, boardId, startSerialRank,
+        static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(rankArray))), rankArraySize,
+        static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(commentArray))),
+        commentArraySize,
+        static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(infoArray))), infoArraySize,
+        arrayNum, static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(lastSortDate))),
+        static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(totalRecord))),
+        static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(option))));
     return ORBIS_OK;
 }
 
@@ -1745,17 +1996,24 @@ int PS4_SYSV_ABI sceNpScoreGetRankingByRangeForCrossSaveAsync(
     OrbisNpScoreRankNumber* totalRecord, void* option) {
     LOG_ERROR(
         Lib_NpScore,
-        "(STUBBED) called reqId={}, boardId={}, "
-        "startSerialRank={}, rankArray={}, rankArraySize={}, commentArray={}, commentArraySize={}, "
-        "infoArray={}, infoArraySize={}, arrayNum={}, lastSortDate={}, totalRecord={}, option={}",
-        reqId, boardId, startSerialRank, PTR(rankArray), rankArraySize, PTR(commentArray),
-        commentArraySize, PTR(infoArray), infoArraySize, arrayNum, PTR(lastSortDate),
-        PTR(totalRecord), PTR(option));
+        "(STUBBED) called reqId=%d, boardId=%u, "
+        "startSerialRank=%u, rankArray=0x%llx, rankArraySize=%" PRIu64
+        ", commentArray=0x%llx, commentArraySize=%" PRIu64 ", "
+        "infoArray=0x%llx, infoArraySize=%" PRIu64 ", arrayNum=%" PRIu64
+        ", lastSortDate=0x%llx, totalRecord=0x%llx, option=0x%llx",
+        reqId, boardId, startSerialRank,
+        static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(rankArray))), rankArraySize,
+        static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(commentArray))),
+        commentArraySize,
+        static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(infoArray))), infoArraySize,
+        arrayNum, static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(lastSortDate))),
+        static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(totalRecord))),
+        static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(PTR(option))));
     return ORBIS_OK;
 }
 
 int PS4_SYSV_ABI sceNpScoreSetThreadParam(s32 threadPriority, u64 cpuAffinityMask) {
-    LOG_ERROR(Lib_NpScore, "(STUBBED) called threadPriority={}, cpuAffinityMask={:#x}",
+    LOG_ERROR(Lib_NpScore, "(STUBBED) called threadPriority=%d, cpuAffinityMask=0x%" PRIx64,
               threadPriority, cpuAffinityMask);
     return ORBIS_OK;
 }
@@ -1763,8 +2021,8 @@ int PS4_SYSV_ABI sceNpScoreSetThreadParam(s32 threadPriority, u64 cpuAffinityMas
 int PS4_SYSV_ABI sceNpScoreSetTimeout(s32 id, s32 resolveRetry, s32 resolveTimeout, s32 connTimeout,
                                       s32 sendTimeout, s32 recvTimeout) {
     LOG_ERROR(Lib_NpScore,
-              "(STUBBED) called id={}, resolveRetry={}, resolveTimeout={}, "
-              "connTimeout={}, sendTimeout={}, recvTimeout={}",
+              "(STUBBED) called id=%d, resolveRetry=%d, resolveTimeout=%d, "
+              "connTimeout=%d, sendTimeout=%d, recvTimeout=%d",
               id, resolveRetry, resolveTimeout, connTimeout, sendTimeout, recvTimeout);
     return ORBIS_OK;
 }

@@ -60,7 +60,7 @@ u64 Value::Hash() const noexcept {
     default:
         break;
     }
-    UNREACHABLE_MSG("Invalid type {}", type);
+    UNREACHABLE_MSG("Invalid type %s", Shader::IR::NameOf(type).c_str());
 }
 
 bool Value::operator==(const Value& other) const {
@@ -108,7 +108,7 @@ bool Value::operator==(const Value& other) const {
     default:
         break;
     }
-    UNREACHABLE_MSG("Invalid type {}", type);
+    UNREACHABLE_MSG("Invalid type %s", Shader::IR::NameOf(type).c_str());
 }
 
 bool Value::operator!=(const Value& other) const {

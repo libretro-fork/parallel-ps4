@@ -29,10 +29,10 @@ std::shared_ptr<PkgReader> SharedReader(const std::filesystem::path& path) {
         std::string error;
         const auto keys = PkgKeysFile(Common::FS::GetUserPath(Common::FS::PathType::UserDir));
         if (!reader->Open(path, keys, error)) {
-            LOG_ERROR(Loader, "PKG {} cannot be read: {}", path.string(), error);
+            LOG_ERROR(Loader, "PKG %s cannot be read: %s", (path.string()).c_str(), (error).c_str());
             return nullptr;
         }
-        LOG_INFO(Loader, "PKG {}: {} files, read in place", path.string(), reader->Files().size());
+        LOG_INFO(Loader, "PKG %s: %zu files, read in place", (path.string()).c_str(), reader->Files().size());
         readers[path] = reader;
         return reader;
     });

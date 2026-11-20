@@ -95,7 +95,7 @@ Swapchain::Swapchain(const Instance& instance_, const Frontend::Window& window_)
             LOG_ERROR(Render_Vulkan, "The UI font is not among the core's resources: the "
                                      "overlays are off (a clean build puts it back)");
         } else if (!ovl_vk_init(&info)) {
-            LOG_ERROR(Render_Vulkan, "The overlays could not be made ({}): they are off",
+            LOG_ERROR(Render_Vulkan, "The overlays could not be made (%s): they are off",
                       ovl_vk_error());
         }
     }
@@ -131,7 +131,7 @@ void Swapchain::Create(u32 width_, u32 height_) {
 }
 
 void Swapchain::Recreate(u32 width_, u32 height_) {
-    LOG_DEBUG(Render_Vulkan, "Recreate the swapchain: width={} height={}", width_, height_);
+    LOG_DEBUG(Render_Vulkan, "Recreate the swapchain: width=%u height=%u", width_, height_);
     Create(width_, height_);
 }
 
@@ -149,8 +149,8 @@ void Swapchain::Destroy() {
     vk::Device device = instance.GetDevice();
     const auto wait_result = device.waitIdle();
     if (wait_result != vk::Result::eSuccess) {
-        LOG_WARNING(Render_Vulkan, "Failed to wait for device to become idle: {}",
-                    vk::to_string(wait_result));
+        LOG_WARNING(Render_Vulkan, "Failed to wait for device to become idle: %s",
+                    (vk::to_string(wait_result)).c_str());
     }
 
     for (auto& image_view : images_view) {
@@ -253,8 +253,8 @@ bool Swapchain::CreateSharedImages() {
         };
         auto [image_result, image] = device.createImage(image_info);
         if (image_result != vk::Result::eSuccess) {
-            LOG_WARNING(Render_Vulkan, "No exportable image for the frontend: {}",
-                        vk::to_string(image_result));
+            LOG_WARNING(Render_Vulkan, "No exportable image for the frontend: %s",
+                        (vk::to_string(image_result)).c_str());
             return give_up();
         }
         images.push_back(image);
@@ -288,8 +288,8 @@ bool Swapchain::CreateSharedImages() {
         };
         auto [memory_result, memory] = device.allocateMemory(allocate_info);
         if (memory_result != vk::Result::eSuccess) {
-            LOG_WARNING(Render_Vulkan, "No exportable memory for the frontend's images: {}",
-                        vk::to_string(memory_result));
+            LOG_WARNING(Render_Vulkan, "No exportable memory for the frontend's images: %s",
+                        (vk::to_string(memory_result)).c_str());
             return give_up();
         }
         offscreen_memory.push_back(memory);
@@ -355,8 +355,8 @@ void Swapchain::CreateOffscreenImages() {
             .initialLayout = vk::ImageLayout::eUndefined,
         };
         auto [image_result, image] = device.createImage(image_info);
-        ASSERT_MSG(image_result == vk::Result::eSuccess, "Failed to create offscreen image: {}",
-                   vk::to_string(image_result));
+        ASSERT_MSG(image_result == vk::Result::eSuccess, "Failed to create offscreen image: %s",
+                   (vk::to_string(image_result)).c_str());
         images[i] = image;
 
         const auto requirements = device.getImageMemoryRequirements(image);
@@ -380,12 +380,13 @@ void Swapchain::CreateOffscreenImages() {
         };
         auto [memory_result, memory] = device.allocateMemory(allocate_info);
         ASSERT_MSG(memory_result == vk::Result::eSuccess,
-                   "Failed to allocate offscreen image memory: {}", vk::to_string(memory_result));
+                   "Failed to allocate offscreen image memory: %s",
+                   (vk::to_string(memory_result)).c_str());
         offscreen_memory[i] = memory;
 
         const auto bind_result = device.bindImageMemory(image, memory, 0);
-        ASSERT_MSG(bind_result == vk::Result::eSuccess,
-                   "Failed to bind offscreen image memory: {}", vk::to_string(bind_result));
+        ASSERT_MSG(bind_result == vk::Result::eSuccess, "Failed to bind offscreen image memory: %s",
+                   (vk::to_string(bind_result)).c_str());
     }
 }
 
@@ -407,14 +408,14 @@ void Swapchain::SetupImages() {
                     .layerCount = 1,
                 },
         });
-        ASSERT_MSG(im_view_result == vk::Result::eSuccess, "Failed to create image view: {}",
-                   vk::to_string(im_view_result));
+        ASSERT_MSG(im_view_result == vk::Result::eSuccess, "Failed to create image view: %s",
+                   (vk::to_string(im_view_result)).c_str());
         images_view[i] = im_view;
     }
 
     for (u32 i = 0; i < image_count; ++i) {
-        SetObjectName(device, images[i], "Swapchain Image {}", i);
-        SetObjectName(device, images_view[i], "Swapchain ImageView {}", i);
+        SetObjectName(device, images[i], "Swapchain Image %u", i);
+        SetObjectName(device, images_view[i], "Swapchain ImageView %u", i);
     }
 }
 

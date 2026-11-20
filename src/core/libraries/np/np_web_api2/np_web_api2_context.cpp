@@ -83,7 +83,7 @@ s32 LibraryContext::DeletePushEventHandle(PushEventHandle* handle) {
     s32 handle_id = handle->GetId();
     if (!handle->MarkForDeletion()) {
         handle->RemoveUser();
-        LOG_ERROR(Lib_NpWebApi2, "handle with id {:#x} is already deleted", handle_id);
+        LOG_ERROR(Lib_NpWebApi2, "handle with id 0x%x is already deleted", handle_id);
         return ORBIS_NP_WEBAPI2_ERROR_HANDLE_NOT_FOUND;
     }
 
@@ -101,7 +101,7 @@ s32 LibraryContext::CreatePushEventFilter(
     bool internal) {
     PushEventHandle* handle = GetPushEventHandle(handle_id);
     if (handle == nullptr) {
-        LOG_ERROR(Lib_NpWebApi2, "No push event handle with id {:#x}", handle_id);
+        LOG_ERROR(Lib_NpWebApi2, "No push event handle with id 0x%x", handle_id);
         return ORBIS_NP_WEBAPI2_ERROR_HANDLE_NOT_FOUND;
     }
 
@@ -157,7 +157,7 @@ s32 PS4_SYSV_ABI internalPreSendCallback(s32 http_request_id, s32 ssl_id,
                                          void* user_arg) {
     s64 user_ctx_id = reinterpret_cast<s64>(user_arg);
     LOG_ERROR(Lib_NpWebApi2,
-              "Unimplemented, http_request_id = {:#x}, ssl_id = {:#x}, user_ctx_id = {:#x}",
+              "Unimplemented, http_request_id = 0x%x, ssl_id = 0x%x, user_ctx_id = 0x%" PRIx64,
               http_request_id, ssl_id, user_ctx_id);
     return ORBIS_OK;
 }
@@ -184,14 +184,14 @@ s32 UserContext::Initialize() {
         http_ctx_id, user_agent_buf,
         Libraries::Http2::OrbisHttp2HttpVersion::ORBIS_HTTP2_VERSION_2_0, 0);
     if (http_template_id < 0) {
-        LOG_ERROR(Lib_NpWebApi2, "Failed to create HTTP template, error = {:#x}", http_template_id);
+        LOG_ERROR(Lib_NpWebApi2, "Failed to create HTTP template, error = 0x%x", http_template_id);
         return http_template_id;
     }
 
     s32 result = Libraries::Http2::sceHttp2SetPreSendCallback(
         http_template_id, internalPreSendCallback, reinterpret_cast<void*>(head.id));
     if (result < 0) {
-        LOG_ERROR(Lib_NpWebApi2, "Failed to set pre-send callback, error = {:#x}", result);
+        LOG_ERROR(Lib_NpWebApi2, "Failed to set pre-send callback, error = 0x%x", result);
         return result;
     }
 
@@ -240,7 +240,7 @@ static bool DeleteById(obj_table_t* table, s64 id) {
 
 s32 UserContext::DeletePushEventCallback(s32 callback_id) {
     if (!DeleteById(&push_event_callbacks, callback_id)) {
-        LOG_ERROR(Lib_NpWebApi2, "No push event callback with id {:#x}", callback_id);
+        LOG_ERROR(Lib_NpWebApi2, "No push event callback with id 0x%x", callback_id);
         return ORBIS_NP_WEBAPI2_ERROR_PUSH_EVENT_CALLBACK_NOT_FOUND;
     }
     return ORBIS_OK;
@@ -305,7 +305,7 @@ s32 UserContext::CreatePushContextCallback(s32 filter_id,
 
 s32 UserContext::DeletePushContextCallback(s32 callback_id) {
     if (!DeleteById(&push_context_callbacks, callback_id)) {
-        LOG_ERROR(Lib_NpWebApi2, "No push event push context callback with id {:#x}", callback_id);
+        LOG_ERROR(Lib_NpWebApi2, "No push event push context callback with id 0x%x", callback_id);
         return ORBIS_NP_WEBAPI2_ERROR_PUSH_EVENT_CALLBACK_NOT_FOUND;
     }
     return ORBIS_OK;
@@ -378,7 +378,7 @@ static bool IsInternalHeader(const char* header_name) {
 
 s32 Request::AddHttpRequestHeader(const char* field_name, const char* field_value) {
     if (!this->parent_ctx->IsInternal() && IsInternalHeader(field_name)) {
-        LOG_WARNING(Lib_NpWebApi2, "This is not an internal context, skipping field name {}",
+        LOG_WARNING(Lib_NpWebApi2, "This is not an internal context, skipping field name %s",
                     field_name);
         return ORBIS_OK;
     }
@@ -393,21 +393,20 @@ s32 Request::CreateHttpRequest(s32 http_template_id, const char* url) {
     s32 http_request_id = Libraries::Http2::sceHttp2CreateRequestWithURL(http_template_id, method,
                                                                          url, this->content_length);
     if (http_request_id < 0) {
-        LOG_ERROR(Lib_NpWebApi2, "Failed to create Http2 request, error = {:#x}", http_request_id);
+        LOG_ERROR(Lib_NpWebApi2, "Failed to create Http2 request, error = 0x%x", http_request_id);
         return http_request_id;
     }
     this->http_request_id = http_request_id;
     s32 result = Libraries::Http2::sceHttp2AddRequestHeader(http_request_id, "Content-Type",
                                                             this->content_type.data(), 0);
     if (result < 0) {
-        LOG_ERROR(Lib_NpWebApi2, "Failed to add Content-Type request header, error = {:#x}",
-                  result);
+        LOG_ERROR(Lib_NpWebApi2, "Failed to add Content-Type request header, error = 0x%x", result);
         return result;
     }
 
     UserContext* user_ctx = this->parent_ctx->GetUserContext(static_cast<s32>(head.id >> 0x20));
     if (user_ctx == nullptr) {
-        LOG_ERROR(Lib_NpWebApi2, "No user context for request id {:#x}", head.id);
+        LOG_ERROR(Lib_NpWebApi2, "No user context for request id 0x%" PRIx64, head.id);
         return ORBIS_NP_WEBAPI2_ERROR_USER_CONTEXT_NOT_FOUND;
     }
     const std::string bearer = NpHandler::GetInstance().GetBearerToken(user_ctx->GetUserId());
@@ -428,7 +427,7 @@ s32 Request::CreateHttpRequest(s32 http_template_id, const char* url) {
             http_request_id, header->field_name.data(), header->field_value.data(), 0);
         if (result < 0) {
             LOG_ERROR(Lib_NpWebApi2,
-                      "Failed to add request header, name = {}, value = {}, error = {:#x}",
+                      "Failed to add request header, name = %s, value = %s, error = 0x%x",
                       header->field_name.data(), header->field_value.data(), result);
             user_ctx->RemoveUser();
             return result;
@@ -446,14 +445,14 @@ s32 Request::SendHttpRequest(void* data, u64 data_size) {
         result = Libraries::Http2::sceHttp2SetRequestContentLength(this->http_request_id,
                                                                    this->content_length);
         if (result < 0) {
-            LOG_ERROR(Lib_NpWebApi2, "Failed to set content length, error = {:#x}", result);
+            LOG_ERROR(Lib_NpWebApi2, "Failed to set content length, error = 0x%x", result);
             return result;
         }
     }
     if (!data || data_size == 0 || this->content_length == 0) {
         result = Libraries::Http2::sceHttp2SendRequest(this->http_request_id, nullptr, 0);
         if (result < 0) {
-            LOG_ERROR(Lib_NpWebApi2, "Failed to send request, error = {:#x}", result);
+            LOG_ERROR(Lib_NpWebApi2, "Failed to send request, error = 0x%x", result);
             return result;
         }
     }
@@ -465,7 +464,7 @@ s32 Request::SendHttpRequest(void* data, u64 data_size) {
     }
     result = Libraries::Http2::sceHttp2SendRequest(this->http_request_id, data, actual_size);
     if (result < 0) {
-        LOG_ERROR(Lib_NpWebApi2, "Failed to send request, error = {:#x}", result);
+        LOG_ERROR(Lib_NpWebApi2, "Failed to send request, error = 0x%x", result);
         return result;
     }
     this->sent_data += actual_size;
@@ -478,7 +477,7 @@ s32 Request::GetAllHttpResponseHeaders() {
     s32 result =
         Libraries::Http2::sceHttp2GetAllResponseHeaders(this->http_request_id, &header, &size);
     if (result < 0) {
-        LOG_ERROR(Lib_NpWebApi2, "Failed to get response headers, error = {:#x}", result);
+        LOG_ERROR(Lib_NpWebApi2, "Failed to get response headers, error = 0x%x", result);
         return result;
     }
     this->http_response_headers = header;
@@ -521,7 +520,7 @@ s32 Request::Abort() {
         // In the middle of an Http request, that needs aborting.
         result = Libraries::Http2::sceHttp2AbortRequest(this->http_request_id);
         if (result < 0) {
-            LOG_ERROR(Lib_NpWebApi2, "Failed to abort http request, error = {:#x}", result);
+            LOG_ERROR(Lib_NpWebApi2, "Failed to abort http request, error = 0x%x", result);
         }
     }
     return result;

@@ -119,7 +119,7 @@ int PS4_SYSV_ABI sceUserServiceGetDiscPlayerFlag() {
 std::queue<OrbisUserServiceEvent> user_service_event_queue = {};
 
 void AddUserServiceEvent(const OrbisUserServiceEvent e) {
-    LOG_DEBUG(Lib_UserService, "Event added to queue: {} {}", (u8)e.event, e.userId);
+    LOG_DEBUG(Lib_UserService, "Event added to queue: %u %d", (u8)e.event, e.userId);
     user_service_event_queue.push(e);
 }
 
@@ -132,7 +132,7 @@ s32 PS4_SYSV_ABI sceUserServiceGetEvent(OrbisUserServiceEvent* event) {
         event->userId = temp.userId;
         user_service_event_queue.pop();
         Libraries::Np::NpManager::NotifyNpStateFromUserServiceEvent(temp.event, temp.userId);
-        LOG_INFO(Lib_UserService, "Event processed by the game: {} {}", (u8)temp.event,
+        LOG_INFO(Lib_UserService, "Event processed by the game: %u %d", (u8)temp.event,
                  temp.userId);
         return ORBIS_OK;
     }
@@ -600,7 +600,7 @@ s32 PS4_SYSV_ABI sceUserServiceGetLoginUserIdList(OrbisUserServiceLoginUserIdLis
         const struct user* u = user_manager_get_logged_in(static_cast<unsigned>(i));
         s32 id = u ? u->user_id : ORBIS_USER_SERVICE_USER_ID_INVALID;
         userIdList->user_id[i] = id;
-        LOG_DEBUG(Lib_UserService, "Slot {}: User ID {} (port {})", i, id,
+        LOG_DEBUG(Lib_UserService, "Slot %d: User ID %d (port %d)", i, id,
                   u ? u->player_index : -1);
     }
     return ORBIS_OK;
@@ -1067,7 +1067,7 @@ int PS4_SYSV_ABI sceUserServiceGetTraditionalChineseInputType() {
 
 s32 PS4_SYSV_ABI sceUserServiceGetUserColor(int user_id, OrbisUserServiceUserColor* color) {
     // TODO fix me better
-    LOG_DEBUG(Lib_UserService, "called user_id = {}", user_id);
+    LOG_DEBUG(Lib_UserService, "called user_id = %d", user_id);
     if (color == nullptr) {
         LOG_ERROR(Lib_UserService, "color is null");
         return ORBIS_USER_SERVICE_ERROR_INVALID_ARGUMENT;
@@ -1092,7 +1092,7 @@ int PS4_SYSV_ABI sceUserServiceGetUserGroupNum() {
 }
 
 s32 PS4_SYSV_ABI sceUserServiceGetUserName(int user_id, char* user_name, std::size_t size) {
-    LOG_DEBUG(Lib_UserService, "called user_id = {}, size = {} ", user_id, size);
+    LOG_DEBUG(Lib_UserService, "called user_id = %d, size = %zu ", user_id, size);
     if (user_id == ORBIS_USER_SERVICE_USER_ID_INVALID) {
         LOG_ERROR(Lib_UserService, "invalid user_id");
         return ORBIS_USER_SERVICE_ERROR_INVALID_ARGUMENT;

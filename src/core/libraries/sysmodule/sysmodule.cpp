@@ -69,7 +69,7 @@ s32 PS4_SYSV_ABI sceSysmoduleIsLoadedInternal(OrbisSysModuleInternal id) {
 }
 
 s32 PS4_SYSV_ABI sceSysmoduleLoadModule(OrbisSysModule id) {
-    LOG_INFO(Lib_SysModule, "called, id = {:#x}", id);
+    LOG_INFO(Lib_SysModule, "called, id = 0x%x", id);
     s32 result = validateModuleId(id);
     if (result < ORBIS_OK) {
         return result;
@@ -99,7 +99,7 @@ s32 PS4_SYSV_ABI sceSysmoduleLoadModuleByNameInternal() {
 }
 
 s32 PS4_SYSV_ABI sceSysmoduleLoadModuleInternal(OrbisSysModuleInternal id) {
-    LOG_INFO(Lib_SysModule, "called, id = {:#x}", id);
+    LOG_INFO(Lib_SysModule, "called, id = 0x%x", id);
     s32 result = validateModuleId(id);
     if (result < ORBIS_OK) {
         return result;
@@ -114,7 +114,7 @@ s32 PS4_SYSV_ABI sceSysmoduleLoadModuleInternal(OrbisSysModuleInternal id) {
 
 s32 PS4_SYSV_ABI sceSysmoduleLoadModuleInternalWithArg(OrbisSysModuleInternal id, s32 argc,
                                                        const void* argv, u64 unk, s32* res_out) {
-    LOG_INFO(Lib_SysModule, "called, id = {:#x}", id);
+    LOG_INFO(Lib_SysModule, "called, id = 0x%x", id);
     s32 result = validateModuleId(id);
     if (result < ORBIS_OK) {
         return result;
@@ -138,7 +138,7 @@ s32 PS4_SYSV_ABI sceSysmodulePreloadModuleForLibkernel() {
 }
 
 s32 PS4_SYSV_ABI sceSysmoduleUnloadModule(OrbisSysModule id) {
-    LOG_ERROR(Lib_SysModule, "(STUBBED) called, id = {:#x}", id);
+    LOG_ERROR(Lib_SysModule, "(STUBBED) called, id = 0x%x", id);
     if (id == 0) {
         return ORBIS_SYSMODULE_INVALID_ID;
     }

@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <new>
 #include "common/logging/log.h"
+#include "common/string_util.h"
 #include "core/emulator_settings.h"
 #include "core/libraries/error_codes.h"
 #include "core/libraries/kernel/kernel.h"
@@ -239,7 +240,8 @@ static void CommitDialogResultIfNeeded() {
     const bool restore_original = (g_ime_dlg_result.endstatus != OrbisImeDialogEndStatus::Ok);
     g_ime_dlg_state.CopyTextToOrbisBuffer(restore_original);
     g_ime_dlg_result_committed = true;
-    LOG_DEBUG(Lib_ImeDialog, "Committed result (restore_original={})", restore_original);
+    LOG_DEBUG(Lib_ImeDialog, "Committed result (restore_original=%s)",
+              (restore_original) ? "true" : "false");
 }
 
 static bool UseOver2kCoordinates(const OrbisImeDialogParam& param) {
@@ -546,7 +548,7 @@ static Error ValidateImeDialogParam(const OrbisImeDialogParam* param,
 }
 
 Error PS4_SYSV_ABI sceImeDialogAbort() {
-    LOG_INFO(Lib_ImeDialog, "Abort called (status={}, client_state={})",
+    LOG_INFO(Lib_ImeDialog, "Abort called (status=%u, client_state=%d)",
              static_cast<u32>(g_ime_dlg_status),
              g_ime_dlg_client ? g_ime_dlg_client->dialog_state : -1);
     if (!g_ime_dlg_client) {
@@ -554,7 +556,7 @@ Error PS4_SYSV_ABI sceImeDialogAbort() {
         return Error::DIALOG_NOT_IN_USE;
     }
     if (g_ime_dlg_status != OrbisImeDialogStatus::Running) {
-        LOG_INFO(Lib_ImeDialog, "Abort rejected: status is not Running ({})",
+        LOG_INFO(Lib_ImeDialog, "Abort rejected: status is not Running (%u)",
                  static_cast<u32>(g_ime_dlg_status));
         return Error::DIALOG_NOT_RUNNING;
     }
@@ -569,7 +571,7 @@ Error PS4_SYSV_ABI sceImeDialogAbort() {
 }
 
 Error PS4_SYSV_ABI sceImeDialogForceClose() {
-    LOG_INFO(Lib_ImeDialog, "ForceClose called (status={}, client_state={})",
+    LOG_INFO(Lib_ImeDialog, "ForceClose called (status=%u, client_state=%d)",
              static_cast<u32>(g_ime_dlg_status),
              g_ime_dlg_client ? g_ime_dlg_client->dialog_state : -1);
     if (!g_ime_dlg_client) {
@@ -605,7 +607,7 @@ Error PS4_SYSV_ABI sceImeDialogForTestFunction() {
 }
 
 int PS4_SYSV_ABI sceImeDialogGetCurrentStarState(s64 param_1) {
-    LOG_INFO(Lib_ImeDialog, "GetCurrentStarState called (client_state={}, addr=0x{:X})",
+    LOG_INFO(Lib_ImeDialog, "GetCurrentStarState called (client_state=%d, addr=0x%X)",
              g_ime_dlg_client ? g_ime_dlg_client->dialog_state : -1, static_cast<u32>(param_1));
     if (!g_ime_dlg_client) {
         return static_cast<int>(Error::DIALOG_NOT_IN_USE);
@@ -623,7 +625,7 @@ int PS4_SYSV_ABI sceImeDialogGetCurrentStarState(s64 param_1) {
 }
 
 int PS4_SYSV_ABI sceImeDialogGetPanelPositionAndForm(OrbisImePositionAndForm* posForm) {
-    LOG_INFO(Lib_ImeDialog, "GetPanelPositionAndForm called (client_state={})",
+    LOG_INFO(Lib_ImeDialog, "GetPanelPositionAndForm called (client_state=%d)",
              g_ime_dlg_client ? g_ime_dlg_client->dialog_state : -1);
     if (!g_ime_dlg_client) {
         return static_cast<int>(Error::DIALOG_NOT_IN_USE);
@@ -660,7 +662,7 @@ int PS4_SYSV_ABI sceImeDialogGetPanelPositionAndForm(OrbisImePositionAndForm* po
         posForm->width = width;
         posForm->height = height;
     }
-    LOG_INFO(Lib_ImeDialog, "GetPanelPositionAndForm: type={}, pos=({}, {}), size={}x{}",
+    LOG_INFO(Lib_ImeDialog, "GetPanelPositionAndForm: type=%u, pos=(%g, %g), size=%ux%u",
              static_cast<u32>(posForm->type), posForm->posx, posForm->posy, posForm->width,
              posForm->height);
     return static_cast<int>(Error::OK);
@@ -684,7 +686,7 @@ static Error ComputeImeDialogPanelSize(const OrbisImeDialogParam* param, u32* wi
         return Error::INVALID_ADDRESS;
     }
     if (static_cast<u32>(param->type) > static_cast<u32>(OrbisImeType::Number)) {
-        LOG_ERROR(Lib_ImeDialog, "Unknown OrbisImeType: {}", static_cast<u32>(param->type));
+        LOG_ERROR(Lib_ImeDialog, "Unknown OrbisImeType: %u", static_cast<u32>(param->type));
         return Error::INVALID_TYPE;
     }
 
@@ -693,10 +695,11 @@ static Error ComputeImeDialogPanelSize(const OrbisImeDialogParam* param, u32* wi
     const u32 invalid_bits = option & (option_mask ^ 0xfffffdffU);
     if (invalid_bits != 0) {
         if (log) {
-            LOG_ERROR(Lib_ImeDialog, "Invalid option: {:032b}", option);
+            LOG_ERROR(Lib_ImeDialog, "Invalid option: %s", Common::BinaryText(option, 32).c_str());
             return Error::INVALID_OPTION;
         }
-        LOG_DEBUG(Lib_ImeDialog, "Masking invalid option bits: {:032b}", invalid_bits);
+        LOG_DEBUG(Lib_ImeDialog, "Masking invalid option bits: %s",
+                  Common::BinaryText(invalid_bits, 32).c_str());
         const u32 over2k_bit = static_cast<u32>(OrbisImeOption::USE_OVER_2K_COORDINATES);
         const u32 preserve_over2k = option & over2k_bit;
         option = (option & ~invalid_bits) | preserve_over2k;
@@ -705,8 +708,8 @@ static Error ComputeImeDialogPanelSize(const OrbisImeDialogParam* param, u32* wi
     const u64 lang_mask = GetImeDialogLanguageMask();
     if ((~lang_mask & static_cast<u64>(param->supported_languages)) != 0) {
         if (log) {
-            LOG_ERROR(Lib_ImeDialog, "Invalid supported_languages: {:064b}",
-                      static_cast<u64>(param->supported_languages));
+            LOG_ERROR(Lib_ImeDialog, "Invalid supported_languages: %s",
+                      Common::BinaryText(static_cast<u64>(param->supported_languages), 64).c_str());
             return Error::INVALID_SUPPORTED_LANGUAGES;
         }
         LOG_DEBUG(Lib_ImeDialog, "Masking invalid supported_languages bits");
@@ -742,7 +745,7 @@ done:
         *height <<= 1;
     }
     if (log) {
-        LOG_DEBUG(Lib_ImeDialog, "PanelSize: type={}, option=0x{:X}, sdk=0x{:X}, size={}x{}",
+        LOG_DEBUG(Lib_ImeDialog, "PanelSize: type=%u, option=0x%X, sdk=0x%X, size=%ux%u",
                   static_cast<u32>(param->type), option, sdk, *width, *height);
     }
     return Error::OK;
@@ -812,7 +815,7 @@ static Error ComputeImeDialogPanelSizeExtended(const OrbisImeDialogParam* param,
             *height <<= 1;
         }
         if (log) {
-            LOG_DEBUG(Lib_ImeDialog, "PanelSizeExt: type={}, option=0x{:X}, sdk=0x{:X}, size={}x{}",
+            LOG_DEBUG(Lib_ImeDialog, "PanelSizeExt: type=%u, option=0x%X, sdk=0x%X, size=%ux%u",
                       static_cast<u32>(param->type), option, sdk, *width, *height);
         }
         return Error::OK;
@@ -903,14 +906,14 @@ static Error ComputeImeDialogPanelSizeExtended(const OrbisImeDialogParam* param,
     }
 
     if (log) {
-        LOG_DEBUG(Lib_ImeDialog, "PanelSizeExt: type={}, option=0x{:X}, sdk=0x{:X}, size={}x{}",
+        LOG_DEBUG(Lib_ImeDialog, "PanelSizeExt: type=%u, option=0x%X, sdk=0x%X, size=%ux%u",
                   static_cast<u32>(param->type), option, sdk, *width, *height);
     }
     return Error::OK;
 }
 
 Error PS4_SYSV_ABI sceImeDialogGetResult(OrbisImeDialogResult* result) {
-    LOG_INFO(Lib_ImeDialog, "GetResult called (status={}, client_state={})",
+    LOG_INFO(Lib_ImeDialog, "GetResult called (status=%u, client_state=%d)",
              static_cast<u32>(g_ime_dlg_status),
              g_ime_dlg_client ? g_ime_dlg_client->dialog_state : -1);
     if (!g_ime_dlg_client) {
@@ -944,12 +947,12 @@ Error PS4_SYSV_ABI sceImeDialogGetResult(OrbisImeDialogResult* result) {
 
     CommitDialogResultIfNeeded();
     result->endstatus = g_ime_dlg_result.endstatus;
-    LOG_INFO(Lib_ImeDialog, "GetResult -> endstatus={}", static_cast<u32>(result->endstatus));
+    LOG_INFO(Lib_ImeDialog, "GetResult -> endstatus=%u", static_cast<u32>(result->endstatus));
     return Error::OK;
 }
 
 OrbisImeDialogStatus PS4_SYSV_ABI sceImeDialogGetStatus() {
-    LOG_TRACE(Lib_ImeDialog, "GetStatus called (status={}, client_state={})",
+    LOG_TRACE(Lib_ImeDialog, "GetStatus called (status=%u, client_state=%d)",
               static_cast<u32>(g_ime_dlg_status),
               g_ime_dlg_client ? g_ime_dlg_client->dialog_state : -1);
     if (!g_ime_dlg_client) {
@@ -983,7 +986,7 @@ OrbisImeDialogStatus PS4_SYSV_ABI sceImeDialogGetStatus() {
         NotifyExtKeyboardFilterState(false);
     }
 
-    LOG_DEBUG(Lib_ImeDialog, "GetStatus -> {}", static_cast<u32>(g_ime_dlg_status));
+    LOG_DEBUG(Lib_ImeDialog, "GetStatus -> %u", static_cast<u32>(g_ime_dlg_status));
     return g_ime_dlg_status;
 }
 
@@ -1000,7 +1003,7 @@ static Error SetupDialogState(OrbisImeDialogParam* param, OrbisImeParamExtended*
     g_ime_dlg_ext_keyboard_filter_registered = false;
 
     if (param->max_text_length == 0 || param->max_text_length > ORBIS_IME_MAX_TEXT_LENGTH) {
-        LOG_ERROR(Lib_ImeDialog, "sceImeDialogInit: invalid max_text_length={}",
+        LOG_ERROR(Lib_ImeDialog, "sceImeDialogInit: invalid max_text_length=%u",
                   param->max_text_length);
         return Error::INVALID_MAX_TEXT_LENGTH;
     }
@@ -1050,7 +1053,7 @@ static Error InitDialogCommon(OrbisImeDialogParam* param, OrbisImeParamExtended*
         return Error::INVALID_ADDRESS;
     }
     if (g_ime_dlg_client != nullptr || g_ime_dlg_status != OrbisImeDialogStatus::None) {
-        LOG_ERROR(Lib_ImeDialog, "busy (status={})", (u32)g_ime_dlg_status);
+        LOG_ERROR(Lib_ImeDialog, "busy (status=%u)", (u32)g_ime_dlg_status);
         return Error::BUSY;
     }
 
@@ -1063,8 +1066,10 @@ static Error InitDialogCommon(OrbisImeDialogParam* param, OrbisImeParamExtended*
 }
 
 Error PS4_SYSV_ABI sceImeDialogInit(OrbisImeDialogParam* param, OrbisImeParamExtended* extended) {
-    LOG_INFO(Lib_ImeDialog, "Init called, param={}, extended={}", static_cast<void*>(param),
-             static_cast<void*>(extended));
+    LOG_INFO(
+        Lib_ImeDialog, "Init called, param=0x%llx, extended=0x%llx",
+        static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(static_cast<void*>(param))),
+        static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(static_cast<void*>(extended))));
 
     if (g_ime_dlg_client != nullptr || g_ime_dlg_status != OrbisImeDialogStatus::None) {
         LOG_INFO(Lib_ImeDialog, "sceImeDialogInit: busy");
@@ -1072,68 +1077,75 @@ Error PS4_SYSV_ABI sceImeDialogInit(OrbisImeDialogParam* param, OrbisImeParamExt
     }
 
     if (param != nullptr) {
-        LOG_DEBUG(Lib_ImeDialog, "param->user_id: {}", static_cast<u32>(param->user_id));
-        LOG_DEBUG(Lib_ImeDialog, "param->type: {}", static_cast<u32>(param->type));
-        LOG_DEBUG(Lib_ImeDialog, "param->supported_languages: {:064b}",
-                  static_cast<u64>(param->supported_languages));
-        LOG_DEBUG(Lib_ImeDialog, "param->enter_label: {}", static_cast<u32>(param->enter_label));
-        LOG_DEBUG(Lib_ImeDialog, "param->input_method: {}", static_cast<u32>(param->input_method));
-        LOG_DEBUG(Lib_ImeDialog, "param->filter: {}", (void*)param->filter);
-        LOG_DEBUG(Lib_ImeDialog, "param->option: {:032b}", static_cast<u32>(param->option));
+        LOG_DEBUG(Lib_ImeDialog, "param->user_id: %u", static_cast<u32>(param->user_id));
+        LOG_DEBUG(Lib_ImeDialog, "param->type: %u", static_cast<u32>(param->type));
+        LOG_DEBUG(Lib_ImeDialog, "param->supported_languages: %s",
+                  Common::BinaryText(static_cast<u64>(param->supported_languages), 64).c_str());
+        LOG_DEBUG(Lib_ImeDialog, "param->enter_label: %u", static_cast<u32>(param->enter_label));
+        LOG_DEBUG(Lib_ImeDialog, "param->input_method: %u", static_cast<u32>(param->input_method));
+        LOG_DEBUG(
+            Lib_ImeDialog, "param->filter: 0x%llx",
+            static_cast<unsigned long long>(reinterpret_cast<uintptr_t>((void*)param->filter)));
+        LOG_DEBUG(Lib_ImeDialog, "param->option: %s",
+                  Common::BinaryText(static_cast<u32>(param->option), 32).c_str());
         LOG_DEBUG(Lib_ImeDialog,
-                  "  opt flags: multiline={}, password={}, ext_kbd={}, fixed_pos={}, over2k={}",
-                  True(param->option & OrbisImeOption::MULTILINE),
-                  True(param->option & OrbisImeOption::PASSWORD),
-                  True(param->option & OrbisImeOption::EXT_KEYBOARD),
-                  True(param->option & OrbisImeOption::FIXED_POSITION),
-                  True(param->option & OrbisImeOption::USE_OVER_2K_COORDINATES));
-        LOG_DEBUG(Lib_ImeDialog, "param->max_text_length: {}", param->max_text_length);
-        LOG_DEBUG(Lib_ImeDialog, "param->input_text_buffer: {}", (void*)param->input_text_buffer);
-        LOG_DEBUG(Lib_ImeDialog, "param->posx: {}", param->posx);
-        LOG_DEBUG(Lib_ImeDialog, "param->posy: {}", param->posy);
-        LOG_DEBUG(Lib_ImeDialog, "param->horizontal_alignment: {}",
+                  "  opt flags: multiline=%s, password=%s, ext_kbd=%s, fixed_pos=%s, over2k=%s",
+                  (True(param->option & OrbisImeOption::MULTILINE)) ? "true" : "false",
+                  (True(param->option & OrbisImeOption::PASSWORD)) ? "true" : "false",
+                  (True(param->option & OrbisImeOption::EXT_KEYBOARD)) ? "true" : "false",
+                  (True(param->option & OrbisImeOption::FIXED_POSITION)) ? "true" : "false",
+                  (True(param->option & OrbisImeOption::USE_OVER_2K_COORDINATES)) ? "true"
+                                                                                  : "false");
+        LOG_DEBUG(Lib_ImeDialog, "param->max_text_length: %u", param->max_text_length);
+        LOG_DEBUG(Lib_ImeDialog, "param->input_text_buffer: 0x%llx",
+                  static_cast<unsigned long long>(
+                      reinterpret_cast<uintptr_t>((void*)param->input_text_buffer)));
+        LOG_DEBUG(Lib_ImeDialog, "param->posx: %g", param->posx);
+        LOG_DEBUG(Lib_ImeDialog, "param->posy: %g", param->posy);
+        LOG_DEBUG(Lib_ImeDialog, "param->horizontal_alignment: %u",
                   static_cast<u32>(param->horizontal_alignment));
-        LOG_DEBUG(Lib_ImeDialog, "param->vertical_alignment: {}",
+        LOG_DEBUG(Lib_ImeDialog, "param->vertical_alignment: %u",
                   static_cast<u32>(param->vertical_alignment));
-        LOG_DEBUG(Lib_ImeDialog, "param->placeholder: {}",
+        LOG_DEBUG(Lib_ImeDialog, "param->placeholder: %s",
                   param->placeholder ? "<non-null>" : "NULL");
-        LOG_DEBUG(Lib_ImeDialog, "param.title: {}", param->title ? "<non-null>" : "NULL");
+        LOG_DEBUG(Lib_ImeDialog, "param.title: %s", param->title ? "<non-null>" : "NULL");
     }
 
     if (extended) {
-        LOG_DEBUG(Lib_ImeDialog, "extended->option: {:032b}", static_cast<u32>(extended->option));
-        LOG_DEBUG(Lib_ImeDialog, "extended->color_base: {{{},{},{},{}}}", extended->color_base.r,
+        LOG_DEBUG(Lib_ImeDialog, "extended->option: %s",
+                  Common::BinaryText(static_cast<u32>(extended->option), 32).c_str());
+        LOG_DEBUG(Lib_ImeDialog, "extended->color_base: {%u,%u,%u,%u}", extended->color_base.r,
                   extended->color_base.g, extended->color_base.b, extended->color_base.a);
-        LOG_DEBUG(Lib_ImeDialog, "extended->color_line: {{{},{},{},{}}}", extended->color_line.r,
+        LOG_DEBUG(Lib_ImeDialog, "extended->color_line: {%u,%u,%u,%u}", extended->color_line.r,
                   extended->color_line.g, extended->color_line.b, extended->color_line.a);
-        LOG_DEBUG(Lib_ImeDialog, "extended->color_text_field: {{{},{},{},{}}}",
+        LOG_DEBUG(Lib_ImeDialog, "extended->color_text_field: {%u,%u,%u,%u}",
                   extended->color_text_field.r, extended->color_text_field.g,
                   extended->color_text_field.b, extended->color_text_field.a);
-        LOG_DEBUG(Lib_ImeDialog, "extended->color_preedit: {{{},{},{},{}}}",
+        LOG_DEBUG(Lib_ImeDialog, "extended->color_preedit: {%u,%u,%u,%u}",
                   extended->color_preedit.r, extended->color_preedit.g, extended->color_preedit.b,
                   extended->color_preedit.a);
-        LOG_DEBUG(Lib_ImeDialog, "extended->color_button_default: {{{},{},{},{}}}",
+        LOG_DEBUG(Lib_ImeDialog, "extended->color_button_default: {%u,%u,%u,%u}",
                   extended->color_button_default.r, extended->color_button_default.g,
                   extended->color_button_default.b, extended->color_button_default.a);
-        LOG_DEBUG(Lib_ImeDialog, "extended->color_button_function: {{{},{},{},{}}}",
+        LOG_DEBUG(Lib_ImeDialog, "extended->color_button_function: {%u,%u,%u,%u}",
                   extended->color_button_function.r, extended->color_button_function.g,
                   extended->color_button_function.b, extended->color_button_function.a);
-        LOG_DEBUG(Lib_ImeDialog, "extended->color_button_symbol: {{{},{},{},{}}}",
+        LOG_DEBUG(Lib_ImeDialog, "extended->color_button_symbol: {%u,%u,%u,%u}",
                   extended->color_button_symbol.r, extended->color_button_symbol.g,
                   extended->color_button_symbol.b, extended->color_button_symbol.a);
-        LOG_DEBUG(Lib_ImeDialog, "extended->color_text: {{{},{},{},{}}}", extended->color_text.r,
+        LOG_DEBUG(Lib_ImeDialog, "extended->color_text: {%u,%u,%u,%u}", extended->color_text.r,
                   extended->color_text.g, extended->color_text.b, extended->color_text.a);
-        LOG_DEBUG(Lib_ImeDialog, "extended->color_special: {{{},{},{},{}}}",
+        LOG_DEBUG(Lib_ImeDialog, "extended->color_special: {%u,%u,%u,%u}",
                   extended->color_special.r, extended->color_special.g, extended->color_special.b,
                   extended->color_special.a);
 
-        LOG_DEBUG(Lib_ImeDialog, "extended->priority: {:032b}",
-                  static_cast<u32>(extended->priority));
-        LOG_DEBUG(Lib_ImeDialog, "extended->disable_device: {:032b}",
-                  static_cast<u32>(extended->disable_device));
-        LOG_DEBUG(Lib_ImeDialog, "extended->ext_keyboard_mode: {:032b}",
-                  static_cast<u32>(extended->ext_keyboard_mode));
-        LOG_DEBUG(Lib_ImeDialog, "extended->additional_dictionary_path: {}",
+        LOG_DEBUG(Lib_ImeDialog, "extended->priority: %s",
+                  Common::BinaryText(static_cast<u32>(extended->priority), 32).c_str());
+        LOG_DEBUG(Lib_ImeDialog, "extended->disable_device: %s",
+                  Common::BinaryText(static_cast<u32>(extended->disable_device), 32).c_str());
+        LOG_DEBUG(Lib_ImeDialog, "extended->ext_keyboard_mode: %s",
+                  Common::BinaryText(static_cast<u32>(extended->ext_keyboard_mode), 32).c_str());
+        LOG_DEBUG(Lib_ImeDialog, "extended->additional_dictionary_path: %s",
                   extended->additional_dictionary_path ? extended->additional_dictionary_path
                                                        : "NULL");
     } else {
@@ -1177,7 +1189,7 @@ Error PS4_SYSV_ABI sceImeDialogInit(OrbisImeDialogParam* param, OrbisImeParamExt
     const int connect_ret =
         ImeDialogClientConnect(g_ime_dlg_client, 2, g_ime_dlg_resource_id, param->user_id, false);
     if ((static_cast<u32>(connect_ret) & 0xfffffffeU) == kImeDialogServiceNotActive) {
-        LOG_INFO(Lib_ImeDialog, "sceImeDialogInit: connect returned NOT_ACTIVE (0x{:X})",
+        LOG_INFO(Lib_ImeDialog, "sceImeDialogInit: connect returned NOT_ACTIVE (0x%X)",
                  static_cast<u32>(connect_ret));
         ImeDialogClientShutdown(g_ime_dlg_client);
         DestroyImeDialogClient();
@@ -1191,7 +1203,7 @@ Error PS4_SYSV_ABI sceImeDialogInit(OrbisImeDialogParam* param, OrbisImeParamExt
     }
     if (connect_ret == static_cast<int>(Error::NOT_ACTIVE) ||
         static_cast<u32>(connect_ret) == kImeDialogServiceRetry) {
-        LOG_INFO(Lib_ImeDialog, "sceImeDialogInit: connect fallback (0x{:X})",
+        LOG_INFO(Lib_ImeDialog, "sceImeDialogInit: connect fallback (0x%X)",
                  static_cast<u32>(connect_ret));
         const int fallback_ret = ImeDialogClientStartFallback(g_ime_dlg_client, param_ptr, extended,
                                                               user_flags, user_value);
@@ -1209,7 +1221,7 @@ Error PS4_SYSV_ABI sceImeDialogInit(OrbisImeDialogParam* param, OrbisImeParamExt
         return static_cast<Error>(fallback_ret);
     }
     if (connect_ret != 0) {
-        LOG_INFO(Lib_ImeDialog, "sceImeDialogInit: connect failed (0x{:X})",
+        LOG_INFO(Lib_ImeDialog, "sceImeDialogInit: connect failed (0x%X)",
                  static_cast<u32>(connect_ret));
         ImeDialogClientShutdown(g_ime_dlg_client);
         DestroyImeDialogClient();
@@ -1231,7 +1243,7 @@ Error PS4_SYSV_ABI sceImeDialogInit(OrbisImeDialogParam* param, OrbisImeParamExt
                 RegisterExtKeyboardFilter(param->user_id, extended->ext_keyboard_filter);
             if (reg_ret >= 0) {
                 g_ime_dlg_ext_keyboard_filter_registered = true;
-                LOG_DEBUG(Lib_ImeDialog, "ext_keyboard_filter registered (user_id={})",
+                LOG_DEBUG(Lib_ImeDialog, "ext_keyboard_filter registered (user_id=%u)",
                           static_cast<u32>(g_ime_dlg_ext_keyboard_filter_user_id));
             } else {
                 g_ime_dlg_ext_keyboard_filter = nullptr;
@@ -1244,7 +1256,7 @@ Error PS4_SYSV_ABI sceImeDialogInit(OrbisImeDialogParam* param, OrbisImeParamExt
     }
 
     if (static_cast<u32>(start_ret) == kImeDialogServiceRetry) {
-        LOG_INFO(Lib_ImeDialog, "sceImeDialogInit: start fallback (0x{:X})",
+        LOG_INFO(Lib_ImeDialog, "sceImeDialogInit: start fallback (0x%X)",
                  static_cast<u32>(start_ret));
         const int fallback_ret = ImeDialogClientStartFallback(g_ime_dlg_client, param_ptr, extended,
                                                               user_flags, user_value);
@@ -1259,7 +1271,7 @@ Error PS4_SYSV_ABI sceImeDialogInit(OrbisImeDialogParam* param, OrbisImeParamExt
         }
         start_ret = static_cast<int>(Error::NOT_ACTIVE);
     } else {
-        LOG_INFO(Lib_ImeDialog, "sceImeDialogInit: start failed (0x{:X})",
+        LOG_INFO(Lib_ImeDialog, "sceImeDialogInit: start failed (0x%X)",
                  static_cast<u32>(start_ret));
         ImeDialogClientShutdown(g_ime_dlg_client);
     }
@@ -1270,8 +1282,10 @@ Error PS4_SYSV_ABI sceImeDialogInit(OrbisImeDialogParam* param, OrbisImeParamExt
 
 int PS4_SYSV_ABI sceImeDialogInitInternal(OrbisImeDialogParam* param,
                                           OrbisImeParamExtended* extended) {
-    LOG_INFO(Lib_ImeDialog, "InitInternal called, param={}, extended={}", static_cast<void*>(param),
-             static_cast<void*>(extended));
+    LOG_INFO(
+        Lib_ImeDialog, "InitInternal called, param=0x%llx, extended=0x%llx",
+        static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(static_cast<void*>(param))),
+        static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(static_cast<void*>(extended))));
     u32 user_flags = 0x11;
     s64 user_value = 0;
     if (param) {
@@ -1282,8 +1296,11 @@ int PS4_SYSV_ABI sceImeDialogInitInternal(OrbisImeDialogParam* param,
 }
 
 int PS4_SYSV_ABI sceImeDialogInitInternal2(int* param_1, u32* param_2, u32 param_3, u64 param_4) {
-    LOG_INFO(Lib_ImeDialog, "InitInternal2 called (param={}, extended={}, flags=0x{:X})",
-             static_cast<void*>(param_1), static_cast<void*>(param_2), param_3);
+    LOG_INFO(
+        Lib_ImeDialog, "InitInternal2 called (param=0x%llx, extended=0x%llx, flags=0x%X)",
+        static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(static_cast<void*>(param_1))),
+        static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(static_cast<void*>(param_2))),
+        param_3);
     auto* param = reinterpret_cast<OrbisImeDialogParam*>(param_1);
     auto* extended = reinterpret_cast<OrbisImeParamExtended*>(param_2);
     return InitDialogInternalWithClient(param, extended, param_3, static_cast<s64>(param_4), 0, 0,
@@ -1292,9 +1309,12 @@ int PS4_SYSV_ABI sceImeDialogInitInternal2(int* param_1, u32* param_2, u32 param
 
 int PS4_SYSV_ABI sceImeDialogInitInternal3(int* param_1, u32* param_2, u32 param_3, u64 param_4,
                                            u32 param_5, u32 param_6) {
-    LOG_INFO(Lib_ImeDialog,
-             "InitInternal3 called (param={}, extended={}, flags=0x{:X}, resource_id=0x{:X})",
-             static_cast<void*>(param_1), static_cast<void*>(param_2), param_3, param_5);
+    LOG_INFO(
+        Lib_ImeDialog,
+        "InitInternal3 called (param=0x%llx, extended=0x%llx, flags=0x%X, resource_id=0x%X)",
+        static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(static_cast<void*>(param_1))),
+        static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(static_cast<void*>(param_2))),
+        param_3, param_5);
     auto* param = reinterpret_cast<OrbisImeDialogParam*>(param_1);
     auto* extended = reinterpret_cast<OrbisImeParamExtended*>(param_2);
     return InitDialogInternalWithClient(param, extended, param_3, static_cast<s64>(param_4),
@@ -1302,7 +1322,7 @@ int PS4_SYSV_ABI sceImeDialogInitInternal3(int* param_1, u32* param_2, u32 param
 }
 
 int PS4_SYSV_ABI sceImeDialogSetPanelPosition(s32 posx, s32 posy) {
-    LOG_INFO(Lib_ImeDialog, "SetPanelPosition called (client_state={}, pos=({}, {}))",
+    LOG_INFO(Lib_ImeDialog, "SetPanelPosition called (client_state=%d, pos=(%d, %d))",
              g_ime_dlg_client ? g_ime_dlg_client->dialog_state : -1, posx, posy);
     if (!g_ime_dlg_client) {
         return static_cast<int>(Error::DIALOG_NOT_IN_USE);
@@ -1314,13 +1334,13 @@ int PS4_SYSV_ABI sceImeDialogSetPanelPosition(s32 posx, s32 posy) {
     }
     g_ime_dlg_param.posx = ClampInternalX(ToInternalCoord(static_cast<f32>(posx), g_ime_dlg_param));
     g_ime_dlg_param.posy = ClampInternalY(ToInternalCoord(static_cast<f32>(posy), g_ime_dlg_param));
-    LOG_DEBUG(Lib_ImeDialog, "SetPanelPosition: pos=({}, {})", g_ime_dlg_param.posx,
+    LOG_DEBUG(Lib_ImeDialog, "SetPanelPosition: pos=(%g, %g)", g_ime_dlg_param.posx,
               g_ime_dlg_param.posy);
     return static_cast<int>(Error::OK);
 }
 
 Error PS4_SYSV_ABI sceImeDialogTerm() {
-    LOG_INFO(Lib_ImeDialog, "Term called (status={}, client_state={})",
+    LOG_INFO(Lib_ImeDialog, "Term called (status=%u, client_state=%d)",
              static_cast<u32>(g_ime_dlg_status),
              g_ime_dlg_client ? g_ime_dlg_client->dialog_state : -1);
     if (!g_ime_dlg_client) {
@@ -1328,12 +1348,12 @@ Error PS4_SYSV_ABI sceImeDialogTerm() {
         return Error::DIALOG_NOT_IN_USE;
     }
     if (g_ime_dlg_status != OrbisImeDialogStatus::Finished) {
-        LOG_INFO(Lib_ImeDialog, "Term rejected: status is not Finished ({})",
+        LOG_INFO(Lib_ImeDialog, "Term rejected: status is not Finished (%u)",
                  static_cast<u32>(g_ime_dlg_status));
         return Error::DIALOG_NOT_FINISHED;
     }
 
-    LOG_DEBUG(Lib_ImeDialog, "Term: status={}, endstatus={}", static_cast<u32>(g_ime_dlg_status),
+    LOG_DEBUG(Lib_ImeDialog, "Term: status=%u, endstatus=%u", static_cast<u32>(g_ime_dlg_status),
               static_cast<u32>(g_ime_dlg_result.endstatus));
     CommitDialogResultIfNeeded();
     (void)ImeDialogClientDisconnect(g_ime_dlg_client);

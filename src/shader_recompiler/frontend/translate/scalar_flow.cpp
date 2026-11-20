@@ -57,7 +57,7 @@ void Translator::S_GETREG_B32(const GcnInst& inst) {
     const u32 offset = (selector >> 6) & 0x1f;
     const u32 width = ((selector >> 11) & 0x1f) + 1;
     if (register_id != 4 || offset < 13 || offset + width > 15) {
-        UNREACHABLE_MSG("Unsupported S_GETREG_B32 register={} offset={} width={}", register_id,
+        UNREACHABLE_MSG("Unsupported S_GETREG_B32 register=%u offset=%u width=%u", register_id,
                         offset, width);
     }
     // Vulkan exposes no shader-engine placement; use one virtual shader engine.

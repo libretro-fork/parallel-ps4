@@ -314,7 +314,7 @@ libusb_transfer_status InfinityBackend::HandleAsyncTransfer(libusb_transfer* tra
     case 0x01: {
         const u8 command = transfer->buffer[2];
         const u8 sequence = transfer->buffer[3];
-        LOG_INFO(Lib_Usbd, "Infinity Backend Transfer command: {:x}", command);
+        LOG_INFO(Lib_Usbd, "Infinity Backend Transfer command: %x", command);
 
         std::array<u8, 32> q_result{};
 
@@ -371,7 +371,7 @@ libusb_transfer_status InfinityBackend::HandleAsyncTransfer(libusb_transfer* tra
             break;
         }
         default:
-            LOG_ERROR(Lib_Usbd, "Unhandled Infinity Query: {}", command);
+            LOG_ERROR(Lib_Usbd, "Unhandled Infinity Query: %u", command);
             break;
         }
 
@@ -379,7 +379,7 @@ libusb_transfer_status InfinityBackend::HandleAsyncTransfer(libusb_transfer* tra
         break;
     }
     default:
-        LOG_ERROR(Lib_Usbd, "Unhandled Infinity Endpoint: {}", transfer->endpoint);
+        LOG_ERROR(Lib_Usbd, "Unhandled Infinity Endpoint: %u", transfer->endpoint);
         break;
     }
     return LIBUSB_TRANSFER_COMPLETED;

@@ -138,7 +138,7 @@ int VideoOutDriver::RegisterBuffers(VideoOutPort* port, s32 startIndex, void* co
     if (startIndex + bufferNum > MaxDisplayBuffers || startIndex > MaxDisplayBuffers ||
         bufferNum > MaxDisplayBuffers) {
         LOG_ERROR(Lib_VideoOut,
-                  "Attempted to register too many buffers startIndex = {}, bufferNum = {}",
+                  "Attempted to register too many buffers startIndex = %d, bufferNum = %d",
                   startIndex, bufferNum);
         return ORBIS_VIDEO_OUT_ERROR_INVALID_VALUE;
     }
@@ -155,26 +155,28 @@ int VideoOutDriver::RegisterBuffers(VideoOutPort* port, s32 startIndex, void* co
         return ORBIS_VIDEO_OUT_ERROR_INVALID_VALUE;
     }
     if (attribute->aspect_ratio != 0) {
-        LOG_ERROR(Lib_VideoOut, "Invalid aspect ratio = {}", attribute->aspect_ratio);
+        LOG_ERROR(Lib_VideoOut, "Invalid aspect ratio = %d", attribute->aspect_ratio);
         return ORBIS_VIDEO_OUT_ERROR_INVALID_ASPECT_RATIO;
     }
     if (attribute->width > attribute->pitch_in_pixel) {
-        LOG_ERROR(Lib_VideoOut, "Buffer width {} is larger than pitch {}", attribute->width,
+        LOG_ERROR(Lib_VideoOut, "Buffer width %u is larger than pitch %u", attribute->width,
                   attribute->pitch_in_pixel);
         return ORBIS_VIDEO_OUT_ERROR_INVALID_PITCH;
     }
     if (attribute->tiling_mode < TilingMode::Tile || attribute->tiling_mode > TilingMode::Linear) {
-        LOG_ERROR(Lib_VideoOut, "Invalid tilingMode = {}",
+        LOG_ERROR(Lib_VideoOut, "Invalid tilingMode = %u",
                   static_cast<u32>(attribute->tiling_mode));
         return ORBIS_VIDEO_OUT_ERROR_INVALID_TILING_MODE;
     }
 
     LOG_INFO(Lib_VideoOut,
-             "startIndex = {}, bufferNum = {}, pixelFormat = {}, aspectRatio = {}, "
-             "tilingMode = {}, width = {}, height = {}, pitchInPixel = {}, option = {:#x}",
-             startIndex, bufferNum, GetPixelFormatString(attribute->pixel_format),
-             attribute->aspect_ratio, static_cast<u32>(attribute->tiling_mode), attribute->width,
-             attribute->height, attribute->pitch_in_pixel, attribute->option);
+             "startIndex = %d, bufferNum = %d, pixelFormat = %.*s, aspectRatio = %d, "
+             "tilingMode = %u, width = %u, height = %u, pitchInPixel = %u, option = 0x%x",
+             startIndex, bufferNum,
+             static_cast<int>((GetPixelFormatString(attribute->pixel_format)).size()),
+             (GetPixelFormatString(attribute->pixel_format)).data(), attribute->aspect_ratio,
+             static_cast<u32>(attribute->tiling_mode), attribute->width, attribute->height,
+             attribute->pitch_in_pixel, attribute->option);
 
     auto& group = port->groups[group_index];
     std::memcpy(&group.attrib, attribute, sizeof(BufferAttribute));
@@ -193,7 +195,7 @@ int VideoOutDriver::RegisterBuffers(VideoOutPort* port, s32 startIndex, void* co
         port->SignalVoLabel();
 
         presenter->RegisterVideoOutSurface(group, address);
-        LOG_INFO(Lib_VideoOut, "buffers[{}] = {:#x}", i + startIndex, address);
+        LOG_INFO(Lib_VideoOut, "buffers[%u] = 0x%" PRIxPTR, i + startIndex, address);
     }
 
     return group_index;
@@ -201,7 +203,7 @@ int VideoOutDriver::RegisterBuffers(VideoOutPort* port, s32 startIndex, void* co
 
 int VideoOutDriver::UnregisterBuffers(VideoOutPort* port, s32 attributeIndex) {
     if (attributeIndex >= MaxDisplayBufferGroups || !port->groups[attributeIndex].is_occupied) {
-        LOG_ERROR(Lib_VideoOut, "Invalid attribute index {}", attributeIndex);
+        LOG_ERROR(Lib_VideoOut, "Invalid attribute index %d", attributeIndex);
         return ORBIS_VIDEO_OUT_ERROR_INVALID_VALUE;
     }
 
@@ -221,7 +223,7 @@ int VideoOutDriver::UnregisterBuffers(VideoOutPort* port, s32 attributeIndex) {
 int VideoOutDriver::ChangeBufferAttribute(VideoOutPort* port, s32 attributeIndex,
                                           const BufferAttribute* attribute) {
     if (attributeIndex >= MaxDisplayBufferGroups || !port->groups[attributeIndex].is_occupied) {
-        LOG_ERROR(Lib_VideoOut, "Invalid attribute index {}", attributeIndex);
+        LOG_ERROR(Lib_VideoOut, "Invalid attribute index %d", attributeIndex);
         return ORBIS_VIDEO_OUT_ERROR_INVALID_VALUE;
     }
 
@@ -230,24 +232,26 @@ int VideoOutDriver::ChangeBufferAttribute(VideoOutPort* port, s32 attributeIndex
         return ORBIS_VIDEO_OUT_ERROR_INVALID_VALUE;
     }
     if (attribute->aspect_ratio != 0) {
-        LOG_ERROR(Lib_VideoOut, "Invalid aspect ratio = {}", attribute->aspect_ratio);
+        LOG_ERROR(Lib_VideoOut, "Invalid aspect ratio = %d", attribute->aspect_ratio);
         return ORBIS_VIDEO_OUT_ERROR_INVALID_ASPECT_RATIO;
     }
     if (attribute->width > attribute->pitch_in_pixel) {
-        LOG_ERROR(Lib_VideoOut, "Buffer width {} is larger than pitch {}", attribute->width,
+        LOG_ERROR(Lib_VideoOut, "Buffer width %u is larger than pitch %u", attribute->width,
                   attribute->pitch_in_pixel);
         return ORBIS_VIDEO_OUT_ERROR_INVALID_PITCH;
     }
     if (attribute->tiling_mode < TilingMode::Tile || attribute->tiling_mode > TilingMode::Linear) {
-        LOG_ERROR(Lib_VideoOut, "Invalid tilingMode = {}",
+        LOG_ERROR(Lib_VideoOut, "Invalid tilingMode = %u",
                   static_cast<u32>(attribute->tiling_mode));
         return ORBIS_VIDEO_OUT_ERROR_INVALID_TILING_MODE;
     }
 
     LOG_INFO(Lib_VideoOut,
-             "attributeIndex = {}, pixelFormat = {}, aspectRatio = {}, "
-             "tilingMode = {}, width = {}, height = {}, pitchInPixel = {}, option = {:#x}",
-             attributeIndex, GetPixelFormatString(attribute->pixel_format), attribute->aspect_ratio,
+             "attributeIndex = %d, pixelFormat = %.*s, aspectRatio = %d, "
+             "tilingMode = %u, width = %u, height = %u, pitchInPixel = %u, option = 0x%x",
+             attributeIndex,
+             static_cast<int>((GetPixelFormatString(attribute->pixel_format)).size()),
+             (GetPixelFormatString(attribute->pixel_format)).data(), attribute->aspect_ratio,
              static_cast<u32>(attribute->tiling_mode), attribute->width, attribute->height,
              attribute->pitch_in_pixel, attribute->option);
 

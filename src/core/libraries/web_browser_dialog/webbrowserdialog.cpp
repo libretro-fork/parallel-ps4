@@ -31,7 +31,7 @@ s32 PS4_SYSV_ABI sceWebBrowserDialogGetResult() {
 }
 
 Libraries::CommonDialog::Status PS4_SYSV_ABI sceWebBrowserDialogGetStatus() {
-    LOG_TRACE(Lib_WebBrowserDialog, "called status={}",
+    LOG_TRACE(Lib_WebBrowserDialog, "called status=%s",
               enum_name(&enum_names_Libraries_CommonDialog_Status, static_cast<s64>(g_status)));
     return g_status;
 }
@@ -101,7 +101,7 @@ Libraries::CommonDialog::Error PS4_SYSV_ABI sceWebBrowserDialogTerminate() {
 }
 
 Libraries::CommonDialog::Status PS4_SYSV_ABI sceWebBrowserDialogUpdateStatus() {
-    LOG_TRACE(Lib_WebBrowserDialog, "called status={}",
+    LOG_TRACE(Lib_WebBrowserDialog, "called status=%s",
               enum_name(&enum_names_Libraries_CommonDialog_Status, static_cast<s64>(g_status)));
     if (g_status == Libraries::CommonDialog::Status::RUNNING) {
         g_status = Libraries::CommonDialog::Status::FINISHED; // TODO removed it when implementing

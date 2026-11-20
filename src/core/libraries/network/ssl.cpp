@@ -703,7 +703,7 @@ int PS4_SYSV_ABI sceSslGetSubjectName() {
 }
 
 int PS4_SYSV_ABI sceSslInit(std::size_t poolSize) {
-    LOG_ERROR(Lib_Ssl, "(DUMMY) called poolSize = {}", poolSize);
+    LOG_ERROR(Lib_Ssl, "(DUMMY) called poolSize = %zu", poolSize);
     // return a value >1
     static int id = 0;
     return ++id;

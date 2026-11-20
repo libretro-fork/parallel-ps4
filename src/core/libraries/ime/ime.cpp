@@ -6,6 +6,7 @@
 #include <queue>
 #include "common/event_mutex.h"
 #include "common/logging/log.h"
+#include "common/string_util.h"
 #include "core/libraries/ime/ime.h"
 #include "core/libraries/ime/ime_dialog.h"
 #include "core/libraries/ime/ime_error.h"
@@ -172,9 +173,9 @@ public:
     }
     ImeHandler(const OrbisImeParam* param, const OrbisImeParamExtended* extended = nullptr) {
 
-        LOG_DEBUG(Lib_Ime, "param->work: 0x{:X}",
+        LOG_DEBUG(Lib_Ime, "param->work: 0x%" PRIX64,
                   static_cast<u64>(reinterpret_cast<uintptr_t>(param->work)));
-        LOG_DEBUG(Lib_Ime, "param->inputTextBuffer: 0x{:X}",
+        LOG_DEBUG(Lib_Ime, "param->inputTextBuffer: 0x%" PRIX64,
                   static_cast<u64>(reinterpret_cast<uintptr_t>(param->arg)));
         Init(param, extended, true);
     }
@@ -183,9 +184,9 @@ public:
     void Init(const void* param, const OrbisImeParamExtended* extended, bool ime_mode) {
         if (ime_mode) {
             m_param.ime = *(OrbisImeParam*)param;
-            LOG_DEBUG(Lib_Ime, "m_param.ime.work: 0x{:X}",
+            LOG_DEBUG(Lib_Ime, "m_param.ime.work: 0x%" PRIX64,
                       static_cast<u64>(reinterpret_cast<uintptr_t>(m_param.ime.work)));
-            LOG_DEBUG(Lib_Ime, "m_param.ime.inputTextBuffer: 0x{:X}",
+            LOG_DEBUG(Lib_Ime, "m_param.ime.inputTextBuffer: 0x%" PRIX64,
                       static_cast<u64>(reinterpret_cast<uintptr_t>(m_param.ime.inputTextBuffer)));
             if (extended)
                 m_param.ime_ext = *extended;
@@ -223,7 +224,7 @@ public:
             g_ime_ui = std::make_unique<ImeUi>(g_ime_state.get(), &m_param.ime, &m_param.ime_ext);
 
             // Queue the Open event so it is delivered on next sceImeUpdate
-            LOG_DEBUG(Lib_Ime, "IME Event queued: Open rect x={}, y={}, w={}, h={}",
+            LOG_DEBUG(Lib_Ime, "IME Event queued: Open rect x=%g, y=%g, w=%u, h=%u",
                       openEvent.param.rect.x, openEvent.param.rect.y, openEvent.param.rect.width,
                       openEvent.param.rect.height);
             g_ime_state->SendEvent(&openEvent);
@@ -485,7 +486,7 @@ Error PS4_SYSV_ABI sceImeKeyboardClose(Libraries::UserService::OrbisUserServiceU
     // TODO: Check for valid user IDs.
     if (userId == Libraries::UserService::ORBIS_USER_SERVICE_USER_ID_INVALID) {
         // Maybe g_keyboard_handler should hold a user ID and I must compare it here?
-        LOG_ERROR(Lib_Ime, "Invalid userId: {}", userId);
+        LOG_ERROR(Lib_Ime, "Invalid userId: %d", userId);
         return Error::INVALID_USER_ID;
     }
 
@@ -495,7 +496,7 @@ Error PS4_SYSV_ABI sceImeKeyboardClose(Libraries::UserService::OrbisUserServiceU
         return Error::INTERNAL;
     }
 
-    LOG_DEBUG(Lib_Ime, "Keyboard handler closed successfully for user ID: {}", userId);
+    LOG_DEBUG(Lib_Ime, "Keyboard handler closed successfully for user ID: %d", userId);
     return Error::OK;
 }
 
@@ -519,7 +520,7 @@ sceImeKeyboardGetResourceId(Libraries::UserService::OrbisUserServiceUserId userI
 
     // TODO: Check for valid user IDs.
     if (userId == Libraries::UserService::ORBIS_USER_SERVICE_USER_ID_INVALID) {
-        LOG_ERROR(Lib_Ime, "Invalid userId: {}", userId);
+        LOG_ERROR(Lib_Ime, "Invalid userId: %d", userId);
         /*
         resourceIdArray->user_id = userId;
         for (u32& id : resourceIdArray->resource_id) {
@@ -563,10 +564,12 @@ Error PS4_SYSV_ABI sceImeKeyboardOpen(Libraries::UserService::OrbisUserServiceUs
         return Error::INVALID_HANDLER;
     }
 
-    LOG_DEBUG(Lib_Ime, "  userId: {}", static_cast<u32>(userId));
-    LOG_DEBUG(Lib_Ime, "  param->option: {:032b}", static_cast<u32>(param->option));
-    LOG_DEBUG(Lib_Ime, "  param->arg: {}", param->arg);
-    LOG_DEBUG(Lib_Ime, "  param->handler: 0x{:X}",
+    LOG_DEBUG(Lib_Ime, "  userId: %u", static_cast<u32>(userId));
+    LOG_DEBUG(Lib_Ime, "  param->option: %s",
+              Common::BinaryText(static_cast<u32>(param->option), 32).c_str());
+    LOG_DEBUG(Lib_Ime, "  param->arg: 0x%llx",
+              static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(param->arg)));
+    LOG_DEBUG(Lib_Ime, "  param->handler: 0x%" PRIX64,
               static_cast<u64>(reinterpret_cast<uintptr_t>(param->handler)));
 
     // seems like arg is optional, need to check if it is used in the handler
@@ -578,15 +581,16 @@ Error PS4_SYSV_ABI sceImeKeyboardOpen(Libraries::UserService::OrbisUserServiceUs
     if (static_cast<u32>(param->option) & ~kValidOrbisImeKeyboardOptionMask) {
         LOG_ERROR(Lib_Ime,
                   "Invalid param->option\n"
-                  "option:    {:032b}\n"
-                  "validMask: {:032b}",
-                  static_cast<u32>(param->option), kValidOrbisImeKeyboardOptionMask);
+                  "option:    %s\n"
+                  "validMask: %s",
+                  Common::BinaryText(static_cast<u32>(param->option), 32).c_str(),
+                  Common::BinaryText(kValidOrbisImeKeyboardOptionMask, 32).c_str());
         return Error::INVALID_OPTION;
     }
 
     // TODO: Check for valid user IDs.
     if (userId == Libraries::UserService::ORBIS_USER_SERVICE_USER_ID_INVALID) {
-        LOG_ERROR(Lib_Ime, "Invalid userId: {}", userId);
+        LOG_ERROR(Lib_Ime, "Invalid userId: %d", userId);
         return Error::INVALID_USER_ID;
     }
     for (size_t i = 0; i < sizeof(param->reserved1); ++i) {
@@ -618,7 +622,7 @@ Error PS4_SYSV_ABI sceImeKeyboardOpen(Libraries::UserService::OrbisUserServiceUs
         LOG_ERROR(Lib_Ime, "Failed to create keyboard handler");
         return Error::INTERNAL; // or Error::NO_MEMORY;
     }
-    LOG_DEBUG(Lib_Ime, "Keyboard handler created successfully for user ID: {}", userId);
+    LOG_DEBUG(Lib_Ime, "Keyboard handler created successfully for user ID: %d", userId);
     return Error::OK;
 }
 
@@ -653,72 +657,81 @@ Error PS4_SYSV_ABI sceImeOpen(const OrbisImeParam* param, const OrbisImeParamExt
         return Error::INVALID_ADDRESS;
     } else {
         // LOG_DEBUG values for debugging purposes
-        LOG_DEBUG(Lib_Ime, "param->user_id: {}", param->user_id);
-        LOG_DEBUG(Lib_Ime, "param->type: {}", static_cast<u32>(param->type));
-        LOG_DEBUG(Lib_Ime, "param->supported_languages: {:064b}",
-                  static_cast<u64>(param->supported_languages));
-        LOG_DEBUG(Lib_Ime, "param->enter_label: {}", static_cast<u32>(param->enter_label));
-        LOG_DEBUG(Lib_Ime, "param->input_method: {}", static_cast<u32>(param->input_method));
-        LOG_DEBUG(Lib_Ime, "param->filter: {:p}", reinterpret_cast<void*>(param->filter));
-        LOG_DEBUG(Lib_Ime, "param->option: {:032b}", static_cast<u32>(param->option));
-        LOG_DEBUG(Lib_Ime, "param->maxTextLength: {}", param->maxTextLength);
-        LOG_DEBUG(Lib_Ime, "param->inputTextBuffer: {:p}",
-                  static_cast<const void*>(param->inputTextBuffer));
-        LOG_DEBUG(Lib_Ime, "param->posx: {}", param->posx);
-        LOG_DEBUG(Lib_Ime, "param->posy: {}", param->posy);
-        LOG_DEBUG(Lib_Ime, "param->horizontal_alignment: {}",
+        LOG_DEBUG(Lib_Ime, "param->user_id: %d", param->user_id);
+        LOG_DEBUG(Lib_Ime, "param->type: %u", static_cast<u32>(param->type));
+        LOG_DEBUG(Lib_Ime, "param->supported_languages: %s",
+                  Common::BinaryText(static_cast<u64>(param->supported_languages), 64).c_str());
+        LOG_DEBUG(Lib_Ime, "param->enter_label: %u", static_cast<u32>(param->enter_label));
+        LOG_DEBUG(Lib_Ime, "param->input_method: %u", static_cast<u32>(param->input_method));
+        LOG_DEBUG(Lib_Ime, "param->filter: 0x%llx",
+                  static_cast<unsigned long long>(
+                      reinterpret_cast<uintptr_t>(reinterpret_cast<void*>(param->filter))));
+        LOG_DEBUG(Lib_Ime, "param->option: %s",
+                  Common::BinaryText(static_cast<u32>(param->option), 32).c_str());
+        LOG_DEBUG(Lib_Ime, "param->maxTextLength: %u", param->maxTextLength);
+        LOG_DEBUG(Lib_Ime, "param->inputTextBuffer: 0x%llx",
+                  static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(
+                      static_cast<const void*>(param->inputTextBuffer))));
+        LOG_DEBUG(Lib_Ime, "param->posx: %g", param->posx);
+        LOG_DEBUG(Lib_Ime, "param->posy: %g", param->posy);
+        LOG_DEBUG(Lib_Ime, "param->horizontal_alignment: %u",
                   static_cast<u32>(param->horizontal_alignment));
-        LOG_DEBUG(Lib_Ime, "param->vertical_alignment: {}",
+        LOG_DEBUG(Lib_Ime, "param->vertical_alignment: %u",
                   static_cast<u32>(param->vertical_alignment));
-        LOG_DEBUG(Lib_Ime, "param->work: {:p}", param->work);
-        LOG_DEBUG(Lib_Ime, "param->arg: {:p}", param->arg);
-        LOG_DEBUG(Lib_Ime, "  param->handler: 0x{:X}",
+        LOG_DEBUG(Lib_Ime, "param->work: 0x%llx",
+                  static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(param->work)));
+        LOG_DEBUG(Lib_Ime, "param->arg: 0x%llx",
+                  static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(param->arg)));
+        LOG_DEBUG(Lib_Ime, "  param->handler: 0x%" PRIX64,
                   static_cast<u64>(reinterpret_cast<uintptr_t>(param->handler)));
     }
 
     if (!extended) {
         LOG_DEBUG(Lib_Ime, "Not used extended: NULL");
     } else {
-        LOG_DEBUG(Lib_Ime, "extended->option: {:032b}", static_cast<u32>(extended->option));
-        LOG_DEBUG(Lib_Ime, "extended->color_base: {{{},{},{},{}}}", extended->color_base.r,
+        LOG_DEBUG(Lib_Ime, "extended->option: %s",
+                  Common::BinaryText(static_cast<u32>(extended->option), 32).c_str());
+        LOG_DEBUG(Lib_Ime, "extended->color_base: {%u,%u,%u,%u}", extended->color_base.r,
                   extended->color_base.g, extended->color_base.b, extended->color_base.a);
-        LOG_DEBUG(Lib_Ime, "extended->color_line: {{{},{},{},{}}}", extended->color_line.r,
+        LOG_DEBUG(Lib_Ime, "extended->color_line: {%u,%u,%u,%u}", extended->color_line.r,
                   extended->color_line.g, extended->color_line.b, extended->color_line.a);
-        LOG_DEBUG(Lib_Ime, "extended->color_text_field: {{{},{},{},{}}}",
+        LOG_DEBUG(Lib_Ime, "extended->color_text_field: {%u,%u,%u,%u}",
                   extended->color_text_field.r, extended->color_text_field.g,
                   extended->color_text_field.b, extended->color_text_field.a);
-        LOG_DEBUG(Lib_Ime, "extended->color_preedit: {{{},{},{},{}}}", extended->color_preedit.r,
+        LOG_DEBUG(Lib_Ime, "extended->color_preedit: {%u,%u,%u,%u}", extended->color_preedit.r,
                   extended->color_preedit.g, extended->color_preedit.b, extended->color_preedit.a);
-        LOG_DEBUG(Lib_Ime, "extended->color_button_default: {{{},{},{},{}}}",
+        LOG_DEBUG(Lib_Ime, "extended->color_button_default: {%u,%u,%u,%u}",
                   extended->color_button_default.r, extended->color_button_default.g,
                   extended->color_button_default.b, extended->color_button_default.a);
-        LOG_DEBUG(Lib_Ime, "extended->color_button_function: {{{},{},{},{}}}",
+        LOG_DEBUG(Lib_Ime, "extended->color_button_function: {%u,%u,%u,%u}",
                   extended->color_button_function.r, extended->color_button_function.g,
                   extended->color_button_function.b, extended->color_button_function.a);
-        LOG_DEBUG(Lib_Ime, "extended->color_button_symbol: {{{},{},{},{}}}",
+        LOG_DEBUG(Lib_Ime, "extended->color_button_symbol: {%u,%u,%u,%u}",
                   extended->color_button_symbol.r, extended->color_button_symbol.g,
                   extended->color_button_symbol.b, extended->color_button_symbol.a);
-        LOG_DEBUG(Lib_Ime, "extended->color_text: {{{},{},{},{}}}", extended->color_text.r,
+        LOG_DEBUG(Lib_Ime, "extended->color_text: {%u,%u,%u,%u}", extended->color_text.r,
                   extended->color_text.g, extended->color_text.b, extended->color_text.a);
-        LOG_DEBUG(Lib_Ime, "extended->color_special: {{{},{},{},{}}}", extended->color_special.r,
+        LOG_DEBUG(Lib_Ime, "extended->color_special: {%u,%u,%u,%u}", extended->color_special.r,
                   extended->color_special.g, extended->color_special.b, extended->color_special.a);
-        LOG_DEBUG(Lib_Ime, "extended->priority: {}", static_cast<u32>(extended->priority));
-        LOG_DEBUG(Lib_Ime, "extended->additional_dictionary_path: {:p}",
-                  static_cast<const void*>(extended->additional_dictionary_path));
-        LOG_DEBUG(Lib_Ime, "extended->ext_keyboard_filter: {:p}",
-                  reinterpret_cast<void*>(extended->ext_keyboard_filter));
-        LOG_DEBUG(Lib_Ime, "extended->disable_device: {:032b}",
-                  static_cast<u32>(extended->disable_device));
-        LOG_DEBUG(Lib_Ime, "extended->ext_keyboard_mode: {}", extended->ext_keyboard_mode);
+        LOG_DEBUG(Lib_Ime, "extended->priority: %u", static_cast<u32>(extended->priority));
+        LOG_DEBUG(Lib_Ime, "extended->additional_dictionary_path: 0x%llx",
+                  static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(
+                      static_cast<const void*>(extended->additional_dictionary_path))));
+        LOG_DEBUG(Lib_Ime, "extended->ext_keyboard_filter: 0x%llx",
+                  static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(
+                      reinterpret_cast<void*>(extended->ext_keyboard_filter))));
+        LOG_DEBUG(Lib_Ime, "extended->disable_device: %s",
+                  Common::BinaryText(static_cast<u32>(extended->disable_device), 32).c_str());
+        LOG_DEBUG(Lib_Ime, "extended->ext_keyboard_mode: %u", extended->ext_keyboard_mode);
     }
 
     if (!IsValidImeUserId(param->user_id)) {
-        LOG_ERROR(Lib_Ime, "Invalid user_id: {}", static_cast<u32>(param->user_id));
+        LOG_ERROR(Lib_Ime, "Invalid user_id: %u", static_cast<u32>(param->user_id));
         return Error::INVALID_USER_ID;
     }
 
     if (static_cast<u32>(param->type) > static_cast<u32>(OrbisImeType::Number)) {
-        LOG_ERROR(Lib_Ime, "Invalid type: {}", static_cast<u32>(param->type));
+        LOG_ERROR(Lib_Ime, "Invalid type: %u", static_cast<u32>(param->type));
         return Error::INVALID_TYPE;
     }
 
@@ -726,25 +739,26 @@ Error PS4_SYSV_ABI sceImeOpen(const OrbisImeParam* param, const OrbisImeParamExt
     if ((~lang_mask & static_cast<u64>(param->supported_languages)) != 0) {
         LOG_ERROR(Lib_Ime,
                   "Invalid supported_languages\n"
-                  "supported_languages: {:064b}\n"
-                  "valid_mask:          {:064b}",
-                  static_cast<u64>(param->supported_languages), lang_mask);
+                  "supported_languages: %s\n"
+                  "valid_mask:          %s",
+                  Common::BinaryText(static_cast<u64>(param->supported_languages), 64).c_str(),
+                  Common::BinaryText(lang_mask, 64).c_str());
         return Error::INVALID_SUPPORTED_LANGUAGES;
     }
 
     if (static_cast<u32>(param->enter_label) > static_cast<u32>(OrbisImeEnterLabel::Go)) {
-        LOG_ERROR(Lib_Ime, "Invalid enter_label: {}", static_cast<u32>(param->enter_label));
+        LOG_ERROR(Lib_Ime, "Invalid enter_label: %u", static_cast<u32>(param->enter_label));
         return Error::INVALID_ENTER_LABEL;
     }
 
     if (param->input_method != OrbisImeInputMethod::Default) {
-        LOG_ERROR(Lib_Ime, "Invalid input_method: {}", static_cast<u32>(param->input_method));
+        LOG_ERROR(Lib_Ime, "Invalid input_method: %u", static_cast<u32>(param->input_method));
         return Error::INVALID_INPUT_METHOD;
     }
 
     const u32 option = static_cast<u32>(param->option);
     if (HasInvalidImeOption(option)) {
-        LOG_ERROR(Lib_Ime, "option has invalid bits set (0x{:X}), mask=(0x{:X})", option,
+        LOG_ERROR(Lib_Ime, "option has invalid bits set (0x%X), mask=(0x%X)", option,
                   GetImeOptionMask());
         return Error::INVALID_OPTION;
     }
@@ -757,19 +771,19 @@ Error PS4_SYSV_ABI sceImeOpen(const OrbisImeParam* param, const OrbisImeParamExt
     }
     if (multiline && param->type != OrbisImeType::Default &&
         param->type != OrbisImeType::BasicLatin) {
-        LOG_ERROR(Lib_Ime, "MULTILINE requires type Default or BasicLatin, got {}",
+        LOG_ERROR(Lib_Ime, "MULTILINE requires type Default or BasicLatin, got %u",
                   static_cast<u32>(param->type));
         return Error::INVALID_PARAM;
     }
     if (password && param->type != OrbisImeType::BasicLatin &&
         param->type != OrbisImeType::Number) {
-        LOG_ERROR(Lib_Ime, "PASSWORD requires type BasicLatin or Number, got {}",
+        LOG_ERROR(Lib_Ime, "PASSWORD requires type BasicLatin or Number, got %u",
                   static_cast<u32>(param->type));
         return Error::INVALID_PARAM;
     }
 
     if (param->maxTextLength == 0 || param->maxTextLength > ORBIS_IME_DIALOG_MAX_TEXT_LENGTH) {
-        LOG_ERROR(Lib_Ime, "Invalid maxTextLength: {}", param->maxTextLength);
+        LOG_ERROR(Lib_Ime, "Invalid maxTextLength: %u", param->maxTextLength);
         return Error::INVALID_MAX_TEXT_LENGTH;
     }
 
@@ -788,21 +802,21 @@ Error PS4_SYSV_ABI sceImeOpen(const OrbisImeParam* param, const OrbisImeParamExt
     }
 
     if (param->posx < 0.0f || param->posx >= maxWidth) {
-        LOG_ERROR(Lib_Ime, "Invalid posx: {}, range: 0.0 - {}", param->posx, maxWidth);
+        LOG_ERROR(Lib_Ime, "Invalid posx: %g, range: 0.0 - %g", param->posx, maxWidth);
         return Error::INVALID_POSX;
     }
     if (param->posy < 0.0f || param->posy >= maxHeight) {
-        LOG_ERROR(Lib_Ime, "Invalid posy: {}, range: 0.0 - {}", param->posy, maxHeight);
+        LOG_ERROR(Lib_Ime, "Invalid posy: %g, range: 0.0 - %g", param->posy, maxHeight);
         return Error::INVALID_POSY;
     }
 
     if (static_cast<u32>(param->horizontal_alignment) > 2U) {
-        LOG_ERROR(Lib_Ime, "Invalid horizontal_alignment: {}",
+        LOG_ERROR(Lib_Ime, "Invalid horizontal_alignment: %u",
                   static_cast<u32>(param->horizontal_alignment));
         return Error::INVALID_HORIZONTALIGNMENT;
     }
     if (static_cast<u32>(param->vertical_alignment) > 2U) {
-        LOG_ERROR(Lib_Ime, "Invalid vertical_alignment: {}",
+        LOG_ERROR(Lib_Ime, "Invalid vertical_alignment: %u",
                   static_cast<u32>(param->vertical_alignment));
         return Error::INVALID_VERTICALALIGNMENT;
     }
@@ -810,7 +824,7 @@ Error PS4_SYSV_ABI sceImeOpen(const OrbisImeParam* param, const OrbisImeParamExt
     if (extended) {
         if (static_cast<u32>(extended->priority) >
             static_cast<u32>(OrbisImePanelPriority::Accent)) {
-            LOG_ERROR(Lib_Ime, "Invalid extended->priority: {}",
+            LOG_ERROR(Lib_Ime, "Invalid extended->priority: %u",
                       static_cast<u32>(extended->priority));
             return Error::INVALID_EXTENDED;
         }
@@ -819,14 +833,14 @@ Error PS4_SYSV_ABI sceImeOpen(const OrbisImeParam* param, const OrbisImeParamExt
         if (!IsValidImeExtOption(ext_option_value)) {
             LOG_ERROR(Lib_Ime,
                       "Invalid extended->option\n"
-                      "option: {:032b}\n"
-                      "sdk: 0x{:X}",
-                      ext_option_value, sdk);
+                      "option: %s\n"
+                      "sdk: 0x%X",
+                      Common::BinaryText(ext_option_value, 32).c_str(), sdk);
             return Error::INVALID_EXTENDED;
         }
 
         if ((extended->ext_keyboard_mode & 0xe3fffffcU) != 0) {
-            LOG_ERROR(Lib_Ime, "Invalid extended->ext_keyboard_mode: 0x{:X}",
+            LOG_ERROR(Lib_Ime, "Invalid extended->ext_keyboard_mode: 0x%X",
                       extended->ext_keyboard_mode);
             return Error::INVALID_EXTENDED;
         }
@@ -846,7 +860,7 @@ Error PS4_SYSV_ABI sceImeOpen(const OrbisImeParam* param, const OrbisImeParamExt
                 return Error::INVALID_EXTENDED;
             }
         } else if (disable_device > 7U) {
-            LOG_ERROR(Lib_Ime, "Invalid extended->disable_device: {}", disable_device);
+            LOG_ERROR(Lib_Ime, "Invalid extended->disable_device: %u", disable_device);
             return Error::INVALID_EXTENDED;
         }
     }
@@ -856,7 +870,8 @@ Error PS4_SYSV_ABI sceImeOpen(const OrbisImeParam* param, const OrbisImeParamExt
         return Error::INVALID_WORK;
     }
     if ((reinterpret_cast<uintptr_t>(param->work) & 0x3U) != 0) {
-        LOG_ERROR(Lib_Ime, "Invalid work alignment: {:p}", param->work);
+        LOG_ERROR(Lib_Ime, "Invalid work alignment: 0x%llx",
+                  static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(param->work)));
         return Error::INVALID_WORK;
     }
 

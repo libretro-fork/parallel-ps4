@@ -161,7 +161,7 @@ int PS4_SYSV_ABI sceNetCtlGetIfStat() {
 }
 
 int PS4_SYSV_ABI sceNetCtlGetInfo(int code, OrbisNetCtlInfo* info) {
-    LOG_DEBUG(Lib_NetCtl, "code = {}", code);
+    LOG_DEBUG(Lib_NetCtl, "code = %d", code);
     if (!emu_settings_get_connected_to_network()) {
         return ORBIS_NET_CTL_ERROR_NOT_CONNECTED;
     }
@@ -198,7 +198,7 @@ int PS4_SYSV_ABI sceNetCtlGetInfo(int code, OrbisNetCtlInfo* info) {
         auto success = netinfo->RetrieveNetmask();
         if (success) {
             strncpy(info->netmask, netinfo->GetNetmask().data(), sizeof(info->netmask));
-            LOG_DEBUG(Lib_NetCtl, "netmask: {}", info->netmask);
+            LOG_DEBUG(Lib_NetCtl, "netmask: %s", info->netmask);
         } else {
             LOG_WARNING(Lib_NetCtl, "netmask: failed to retrieve");
         }
@@ -209,7 +209,7 @@ int PS4_SYSV_ABI sceNetCtlGetInfo(int code, OrbisNetCtlInfo* info) {
         if (success) {
             strncpy(info->default_route, netinfo->GetDefaultGateway().data(),
                     sizeof(info->default_route));
-            LOG_DEBUG(Lib_NetCtl, "default gateway: {}", info->default_route);
+            LOG_DEBUG(Lib_NetCtl, "default gateway: %s", info->default_route);
         } else {
             LOG_WARNING(Lib_NetCtl, "default gateway: failed to retrieve");
         }
@@ -217,15 +217,15 @@ int PS4_SYSV_ABI sceNetCtlGetInfo(int code, OrbisNetCtlInfo* info) {
     }
     case ORBIS_NET_CTL_INFO_HTTP_PROXY_CONFIG:
         info->http_proxy_config = 0; // off
-        LOG_DEBUG(Lib_NetCtl, "http proxy config: {}", info->http_proxy_config);
+        LOG_DEBUG(Lib_NetCtl, "http proxy config: %u", info->http_proxy_config);
         break;
     case ORBIS_NET_CTL_INFO_PRIMARY_DNS:
         strcpy(info->primary_dns, "1.1.1.1");
-        LOG_DEBUG(Lib_NetCtl, "http primary dns: {}", info->primary_dns);
+        LOG_DEBUG(Lib_NetCtl, "http primary dns: %s", info->primary_dns);
         break;
     case ORBIS_NET_CTL_INFO_SECONDARY_DNS:
         strcpy(info->secondary_dns, "1.1.1.1");
-        LOG_DEBUG(Lib_NetCtl, "http secondary dns: {}", info->secondary_dns);
+        LOG_DEBUG(Lib_NetCtl, "http secondary dns: %s", info->secondary_dns);
         break;
     case ORBIS_NET_CTL_INFO_HTTP_PROXY_SERVER:
         info->http_proxy_server[0] = '\0';
@@ -233,17 +233,17 @@ int PS4_SYSV_ABI sceNetCtlGetInfo(int code, OrbisNetCtlInfo* info) {
         break;
     case ORBIS_NET_CTL_INFO_HTTP_PROXY_PORT:
         info->http_proxy_port = 0;
-        LOG_DEBUG(Lib_NetCtl, "http proxy config: {}", info->http_proxy_port);
+        LOG_DEBUG(Lib_NetCtl, "http proxy config: %u", info->http_proxy_port);
         break;
     case ORBIS_NET_CTL_INFO_IP_CONFIG:
         info->ip_config = 1; // static
-        LOG_DEBUG(Lib_NetCtl, "ip config: {}", info->ip_config);
+        LOG_DEBUG(Lib_NetCtl, "ip config: %u", info->ip_config);
         break;
     case ORBIS_NET_CTL_INFO_DHCP_HOSTNAME:
         LOG_DEBUG(Lib_NetCtl, "dhcp hostname: none");
         break;
     default:
-        LOG_ERROR(Lib_NetCtl, "{} unsupported code", code);
+        LOG_ERROR(Lib_NetCtl, "%d unsupported code", code);
     }
     return ORBIS_OK;
 }
@@ -280,7 +280,7 @@ int PS4_SYSV_ABI sceNetCtlGetNatInfo(OrbisNetCtlNatInfo* nat_info) {
         }
     }
 
-    LOG_DEBUG(Lib_NetCtl, "stun_status={} nat_type={} mapped_addr={:#x}", nat_info->stun_status,
+    LOG_DEBUG(Lib_NetCtl, "stun_status=%d nat_type=%d mapped_addr=0x%x", nat_info->stun_status,
               nat_info->nat_type, nat_info->mapped_addr);
     return ORBIS_OK;
 }
@@ -299,7 +299,7 @@ int PS4_SYSV_ABI sceNetCtlGetResult(int eventType, int* errorCode) {
     if (!errorCode) {
         return ORBIS_NET_CTL_ERROR_INVALID_ADDR;
     }
-    LOG_DEBUG(Lib_NetCtl, "(STUBBED) called eventType = {} ", eventType);
+    LOG_DEBUG(Lib_NetCtl, "(STUBBED) called eventType = %d ", eventType);
     *errorCode = 0;
     return ORBIS_OK;
 }
@@ -341,7 +341,7 @@ int PS4_SYSV_ABI sceNetCtlGetScanInfoForSsidScanIpcInt() {
 
 int PS4_SYSV_ABI sceNetCtlGetState(int* state) {
     const auto connected = emu_settings_get_connected_to_network();
-    LOG_DEBUG(Lib_NetCtl, "connected = {}", connected);
+    LOG_DEBUG(Lib_NetCtl, "connected = %s", (connected) ? "true" : "false");
     const auto current_state =
         connected ? ORBIS_NET_CTL_STATE_IPOBTAINED : ORBIS_NET_CTL_STATE_DISCONNECTED;
     *state = current_state;

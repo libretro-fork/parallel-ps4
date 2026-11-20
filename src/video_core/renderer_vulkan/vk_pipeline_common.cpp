@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include "common/small_vector.h"
+#include "common/string_util.h"
 
 #include "shader_recompiler/resource.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
@@ -54,7 +55,8 @@ std::string Pipeline::GetDebugString() const {
             if (stage_desc.empty()) {
                 stage_desc = shader_name;
             } else {
-                stage_desc = fmt::format("{},{}", stage_desc, shader_name);
+                stage_desc =
+                    Common::StringFromFormat("%s,%s", (stage_desc).c_str(), (shader_name).c_str());
             }
         }
     }

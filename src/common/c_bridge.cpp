@@ -48,7 +48,9 @@ extern "C" void c_log(c_log_class log_class, c_log_level level, const char* func
     va_start(ap, fmt);
     std::vsnprintf(buf, sizeof(buf), fmt, ap);
     va_end(ap);
-    Common::Log::Log(cls, lvl, "c", 0, func, "{}", std::string_view(buf));
+    Common::Log::Log(cls, lvl, "c", 0, func, "%.*s",
+                     static_cast<int>((std::string_view(buf)).size()),
+                     (std::string_view(buf)).data());
 }
 
 extern "C" size_t c_get_user_path(c_user_path type, char* s, size_t len) {

@@ -27,7 +27,7 @@ ThreadState::ThreadState() {
     const int ret = memory->MapMemory(&heap_addr, impl.SystemReservedVirtualBase(), ThrHeapSize,
                                       Core::MemoryProt::CpuReadWrite, Core::MemoryMapFlags::NoFlags,
                                       Core::VMAType::File, "ThrHeap");
-    ASSERT_MSG(ret == 0, "Unable to allocate thread heap memory {}", ret);
+    ASSERT_MSG(ret == 0, "Unable to allocate thread heap memory %d", ret);
     thread_heap.Initialize(heap_addr, ThrHeapSize);
     thread_live.assign(thread_heap.GetSlabHeapSize(), 0);
 }

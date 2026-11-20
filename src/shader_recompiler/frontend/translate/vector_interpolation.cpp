@@ -25,7 +25,7 @@ static Interpolation GetInterpolation(IR::Attribute attribute) {
     case IR::Attribute::BaryCoordPullModel:
         return {Qualifier::Smooth, Qualifier::None};
     default:
-        UNREACHABLE_MSG("Unhandled barycentric attribute {}", NameOf(attribute));
+        UNREACHABLE_MSG("Unhandled barycentric attribute %s", (NameOf(attribute)).c_str());
     }
 }
 
@@ -101,7 +101,7 @@ void Translator::V_INTERP_MOV_F32(const GcnInst& inst) {
     const auto& attr = runtime_info.hw.fs.inputs[attr_index];
     auto& interp = info.fs_interpolation[attr_index];
     const u32 src_select = inst.src[0].code;
-    ASSERT_MSG(src_select < 3, "Invalid V_INTERP_MOV_F32 selector {}", src_select);
+    ASSERT_MSG(src_select < 3, "Invalid V_INTERP_MOV_F32 selector %u", src_select);
     ASSERT(attr.is_flat || src_select == 2 ||
            profile.supports_amd_shader_explicit_vertex_parameter ||
            profile.supports_fragment_shader_barycentric);

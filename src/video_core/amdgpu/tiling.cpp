@@ -48,7 +48,7 @@ PipeConfig GetPipeConfig(TileMode tile_mode) {
     case TileMode::DisplayLinearGeneral:
         return PipeConfig::P2;
     default:
-        UNREACHABLE_MSG("Unknown tile mode = {}", u32(tile_mode));
+        UNREACHABLE_MSG("Unknown tile mode = %u", u32(tile_mode));
     }
 }
 
@@ -85,7 +85,7 @@ PipeConfig GetAltPipeConfig(TileMode tile_mode) {
     case TileMode::DisplayLinearGeneral:
         return PipeConfig::P2;
     default:
-        UNREACHABLE_MSG("Unknown tile mode = {}", u32(tile_mode));
+        UNREACHABLE_MSG("Unknown tile mode = %u", u32(tile_mode));
     }
 }
 
@@ -122,7 +122,7 @@ u32 GetSampleSplit(TileMode tile_mode) {
     case TileMode::Thin3DThinPrt:
         return 2;
     default:
-        UNREACHABLE_MSG("Unknown tile mode = {}", u32(tile_mode));
+        UNREACHABLE_MSG("Unknown tile mode = %u", u32(tile_mode));
     }
 }
 
@@ -162,7 +162,7 @@ u32 GetTileSplitHw(TileMode tile_mode) {
     case TileMode::Depth2DThinPrt1K:
         return 1024;
     default:
-        UNREACHABLE_MSG("Unknown tile mode = {}", u32(tile_mode));
+        UNREACHABLE_MSG("Unknown tile mode = %u", u32(tile_mode));
     }
 }
 
@@ -186,7 +186,7 @@ u32 GetBankWidth(MacroTileMode mode) {
     case MacroTileMode::Mode_1x1_2_Dup3:
         return 1;
     default:
-        UNREACHABLE_MSG("Unknown macro tile mode = {}", u32(mode));
+        UNREACHABLE_MSG("Unknown macro tile mode = %u", u32(mode));
     }
 }
 
@@ -213,7 +213,7 @@ u32 GetBankHeight(MacroTileMode mode) {
     case MacroTileMode::Mode_1x8_16:
         return 8;
     default:
-        UNREACHABLE_MSG("Unknown macro tile mode = {}", u32(mode));
+        UNREACHABLE_MSG("Unknown macro tile mode = %u", u32(mode));
     }
 }
 
@@ -240,7 +240,7 @@ u32 GetNumBanks(MacroTileMode mode) {
     case MacroTileMode::Mode_1x1_16_Dup2:
         return 16;
     default:
-        UNREACHABLE_MSG("Unknown macro tile mode = {}", u32(mode));
+        UNREACHABLE_MSG("Unknown macro tile mode = %u", u32(mode));
     }
 }
 
@@ -266,7 +266,7 @@ u32 GetMacrotileAspect(MacroTileMode mode) {
     case MacroTileMode::Mode_1x4_16_Dup:
         return 4;
     default:
-        UNREACHABLE_MSG("Unknown macro tile mode = {}", u32(mode));
+        UNREACHABLE_MSG("Unknown macro tile mode = %u", u32(mode));
     }
 }
 
@@ -292,7 +292,7 @@ u32 GetAltBankHeight(MacroTileMode mode) {
     case MacroTileMode::Mode_1x4_16_Dup:
         return 4;
     default:
-        UNREACHABLE_MSG("Unknown macro tile mode = {}", u32(mode));
+        UNREACHABLE_MSG("Unknown macro tile mode = %u", u32(mode));
     }
 }
 
@@ -317,7 +317,7 @@ u32 GetAltMacrotileAspect(MacroTileMode mode) {
     case MacroTileMode::Mode_1x4_16_Dup:
         return 2;
     default:
-        UNREACHABLE_MSG("Unknown macro tile mode = {}", u32(mode));
+        UNREACHABLE_MSG("Unknown macro tile mode = %u", u32(mode));
     }
 }
 
@@ -342,7 +342,7 @@ bool IsPrt(ArrayMode array_mode) {
     case ArrayMode::Array3DTiledXThick:
         return false;
     default:
-        UNREACHABLE_MSG("Unknown array mode = {}", u32(array_mode));
+        UNREACHABLE_MSG("Unknown array mode = %u", u32(array_mode));
     }
 }
 
@@ -356,7 +356,7 @@ u32 GetPipeCount(PipeConfig pipe_cfg) {
     case PipeConfig::P16_32x32_8x16:
         return 16;
     default:
-        UNREACHABLE_MSG("Unknown pipe config = {}", u32(pipe_cfg));
+        UNREACHABLE_MSG("Unknown pipe config = %u", u32(pipe_cfg));
     }
 }
 
@@ -373,9 +373,9 @@ u32 CalculateTileSplit(TileMode tile_mode, ArrayMode array_mode, MicroTileMode m
 }
 
 MacroTileMode CalculateMacrotileMode(TileMode tile_mode, u32 bpp, u32 num_samples) {
-    ASSERT_MSG(std::has_single_bit(num_samples) && num_samples <= 16, "Invalid sample count {}",
+    ASSERT_MSG(std::has_single_bit(num_samples) && num_samples <= 16, "Invalid sample count %u",
                num_samples);
-    ASSERT_MSG(bpp >= 1 && bpp <= 128, "Invalid bpp {}", bpp);
+    ASSERT_MSG(bpp >= 1 && bpp <= 128, "Invalid bpp %u", bpp);
 
     const ArrayMode array_mode = GetArrayMode(tile_mode);
     ASSERT_MSG(IsMacroTiled(array_mode), "Tile mode not macro tiled");

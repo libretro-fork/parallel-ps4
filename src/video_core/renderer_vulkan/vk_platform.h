@@ -3,7 +3,8 @@
 
 #pragma once
 
-#include <fmt/format.h>
+#include <cstdarg>
+#include <cstdio>
 
 #include "common/assert.h"
 #include "common/logging/log.h"
@@ -31,34 +32,44 @@ void SetObjectName(vk::Device device, const HandleType& handle, std::string_view
     };
     auto result = device.setDebugUtilsObjectNameEXT(name_info);
     if (result != vk::Result::eSuccess) {
-        LOG_DEBUG(Render_Vulkan, "Could not set object debug name: {}", vk::to_string(result));
+        LOG_DEBUG(Render_Vulkan, "Could not set object debug name: %s",
+                  vk::to_string(result).c_str());
     }
 }
 
-template <VulkanHandleType HandleType, typename... Args>
-void SetObjectName(vk::Device device, const HandleType& handle, const char* format,
-                   const Args&... args) {
-    const std::string debug_name = fmt::vformat(format, fmt::make_format_args(args...));
-    SetObjectName(device, handle, debug_name);
+/// The name a printf format makes, on the stack
+template <VulkanHandleType HandleType>
+void SetObjectName(vk::Device device, const HandleType& handle, const char* format, ...)
+    SHAD_PRINTF(3, 4);
+
+template <VulkanHandleType HandleType>
+void SetObjectName(vk::Device device, const HandleType& handle, const char* format, ...) {
+    char name[256];
+    va_list args;
+    va_start(args, format);
+    std::vsnprintf(name, sizeof(name), format, args);
+    va_end(args);
+    SetObjectName(device, handle, std::string_view{name});
 }
 
 template <StringLiteral msg = "">
 static void Check(vk::Result r) {
     if constexpr (msg.len <= 1) {
-        ASSERT_MSG(r == vk::Result::eSuccess, "vk::Result={}", vk::to_string(r));
+        ASSERT_MSG(r == vk::Result::eSuccess, "vk::Result=%s", vk::to_string(r).c_str());
     } else {
-        ASSERT_MSG(r == vk::Result::eSuccess, "Failed to {}: vk::Result={}", msg.value,
-                   vk::to_string(r));
+        ASSERT_MSG(r == vk::Result::eSuccess, "Failed to %s: vk::Result=%s", msg.value,
+                   vk::to_string(r).c_str());
     }
 }
 
 template <StringLiteral msg = "", typename T>
 static T Check(vk::ResultValue<T> r) {
     if constexpr (msg.len <= 1) {
-        ASSERT_MSG(r.result == vk::Result::eSuccess, "vk::Result={}", vk::to_string(r.result));
+        ASSERT_MSG(r.result == vk::Result::eSuccess, "vk::Result=%s",
+                   vk::to_string(r.result).c_str());
     } else {
-        ASSERT_MSG(r.result == vk::Result::eSuccess, "Failed to {}: vk::Result={}", msg.value,
-                   vk::to_string(r.result));
+        ASSERT_MSG(r.result == vk::Result::eSuccess, "Failed to %s: vk::Result=%s", msg.value,
+                   vk::to_string(r.result).c_str());
     }
     return std::move(r.value);
 }

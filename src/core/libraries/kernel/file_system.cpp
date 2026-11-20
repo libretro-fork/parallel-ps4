@@ -154,7 +154,7 @@ void ReleaseFlockState(Core::FileSys::File* file) {
 } // anonymous namespace
 
 s32 PS4_SYSV_ABI open(const char* raw_path, s32 flags, u16 mode) {
-    LOG_INFO(Kernel_Fs, "path = {} flags = {:#x} mode = {:#o}", raw_path, flags, mode);
+    LOG_INFO(Kernel_Fs, "path = %s flags = 0x%x mode = %#o", raw_path, flags, mode);
 
     auto* h = Common::Singleton<Core::FileSys::HandleTable>::Instance();
     auto* mnt = Common::Singleton<Core::FileSys::MntPoints>::Instance();
@@ -166,13 +166,13 @@ s32 PS4_SYSV_ABI open(const char* raw_path, s32 flags, u16 mode) {
     if (!read && !write && !rdwr) {
         // Start by checking for invalid flags.
         *__Error() = POSIX_EINVAL;
-        LOG_ERROR(Kernel_Fs, "Opening path {} failed, invalid flags {:#x}", raw_path, flags);
+        LOG_ERROR(Kernel_Fs, "Opening path %s failed, invalid flags 0x%x", raw_path, flags);
         return -1;
     }
 
     if (strlen(raw_path) > 255) {
         *__Error() = POSIX_ENAMETOOLONG;
-        LOG_ERROR(Kernel_Fs, "Opening path {} failed, path is too long", raw_path);
+        LOG_ERROR(Kernel_Fs, "Opening path %s failed, path is too long", raw_path);
         return -1;
     }
 
@@ -188,13 +188,13 @@ s32 PS4_SYSV_ABI open(const char* raw_path, s32 flags, u16 mode) {
     bool directory = (flags & ORBIS_KERNEL_O_DIRECTORY) != 0;
 
     if (sync || direct || dsync || nonblock) {
-        LOG_WARNING(Kernel_Fs, "flags {:#x} not fully handled", flags);
+        LOG_WARNING(Kernel_Fs, "flags 0x%x not fully handled", flags);
     }
 
     const auto sanitized_path = Core::FileSys::MntPoints::SanitizeGuestPath(raw_path);
     if (!sanitized_path) {
         *__Error() = POSIX_EINVAL;
-        LOG_ERROR(Kernel_Fs, "Opening path {} failed, invalid path", raw_path);
+        LOG_ERROR(Kernel_Fs, "Opening path %s failed, invalid path", raw_path);
         return -1;
     }
     const std::string& path = *sanitized_path;
@@ -226,7 +226,7 @@ s32 PS4_SYSV_ABI open(const char* raw_path, s32 flags, u16 mode) {
             // Error if file exists
             h->DeleteHandle(handle);
             *__Error() = POSIX_EEXIST;
-            LOG_ERROR(Kernel_Fs, "Creating {} failed, file already exists", raw_path);
+            LOG_ERROR(Kernel_Fs, "Creating %s failed, file already exists", raw_path);
             return -1;
         }
 
@@ -235,7 +235,7 @@ s32 PS4_SYSV_ABI open(const char* raw_path, s32 flags, u16 mode) {
                 // Can't create files in a read only directory
                 h->DeleteHandle(handle);
                 *__Error() = POSIX_EROFS;
-                LOG_ERROR(Kernel_Fs, "Creating {} failed, path is read-only", raw_path);
+                LOG_ERROR(Kernel_Fs, "Creating %s failed, path is read-only", raw_path);
                 return -1;
             }
             // Create a file if it doesn't exist
@@ -246,7 +246,7 @@ s32 PS4_SYSV_ABI open(const char* raw_path, s32 flags, u16 mode) {
         // If we're not creating a file, and it doesn't exist, return ENOENT
         h->DeleteHandle(handle);
         *__Error() = POSIX_ENOENT;
-        LOG_ERROR(Kernel_Fs, "Opening path {} failed, file does not exist", raw_path);
+        LOG_ERROR(Kernel_Fs, "Opening path %s failed, file does not exist", raw_path);
         return -1;
     }
 
@@ -262,7 +262,7 @@ s32 PS4_SYSV_ABI open(const char* raw_path, s32 flags, u16 mode) {
             // This will trigger when create & directory is specified, this is expected.
             h->DeleteHandle(handle);
             *__Error() = POSIX_ENOTDIR;
-            LOG_ERROR(Kernel_Fs, "Opening directory {} failed, file is not a directory", raw_path);
+            LOG_ERROR(Kernel_Fs, "Opening directory %s failed, file is not a directory", raw_path);
             return -1;
         }
 
@@ -270,7 +270,7 @@ s32 PS4_SYSV_ABI open(const char* raw_path, s32 flags, u16 mode) {
             // Cannot open directories with any type of write access
             h->DeleteHandle(handle);
             *__Error() = POSIX_EISDIR;
-            LOG_ERROR(Kernel_Fs, "Opening directory {} failed, cannot open directories for writing",
+            LOG_ERROR(Kernel_Fs, "Opening directory %s failed, cannot open directories for writing",
                       raw_path);
             return -1;
         }
@@ -279,7 +279,7 @@ s32 PS4_SYSV_ABI open(const char* raw_path, s32 flags, u16 mode) {
             // Cannot open directories with truncate
             h->DeleteHandle(handle);
             *__Error() = POSIX_EISDIR;
-            LOG_ERROR(Kernel_Fs, "Opening directory {} failed, cannot truncate directories",
+            LOG_ERROR(Kernel_Fs, "Opening directory %s failed, cannot truncate directories",
                       raw_path);
             return -1;
         }
@@ -302,7 +302,7 @@ s32 PS4_SYSV_ABI open(const char* raw_path, s32 flags, u16 mode) {
         if ((write || rdwr || truncate) && read_only) {
             h->DeleteHandle(handle);
             *__Error() = POSIX_EROFS;
-            LOG_ERROR(Kernel_Fs, "Opening {} for writing failed, path is read-only", raw_path);
+            LOG_ERROR(Kernel_Fs, "Opening %s for writing failed, path is read-only", raw_path);
             return -1;
         }
 
@@ -329,7 +329,7 @@ s32 PS4_SYSV_ABI open(const char* raw_path, s32 flags, u16 mode) {
             *__Error() =
                 mount ? (write || rdwr || truncate) && mount->read_only ? POSIX_EROFS : POSIX_EIO
                       : POSIX_EINVAL;
-            LOG_ERROR(Kernel_Fs, "Opening {} failed, backend did not serve the file", raw_path);
+            LOG_ERROR(Kernel_Fs, "Opening %s failed, backend did not serve the file", raw_path);
             return -1;
         }
 
@@ -377,7 +377,7 @@ s32 PS4_SYSV_ABI close(s32 fd) {
         file->handle.reset();
     }
     (void)retro_atomic_exchange_int(&file->is_opened, 0);
-    LOG_INFO(Kernel_Fs, "Closing {}", file->m_guest_name);
+    LOG_INFO(Kernel_Fs, "Closing %s", (file->m_guest_name).c_str());
     // FIXME: Lock file mutex before deleting it?
     h->DeleteHandle(fd);
     return ORBIS_OK;
@@ -390,7 +390,7 @@ s32 PS4_SYSV_ABI posix_close(s32 fd) {
 s32 PS4_SYSV_ABI sceKernelClose(s32 fd) {
     s32 result = close(fd);
     if (result < 0) {
-        LOG_ERROR(Kernel_Fs, "error = {}", *__Error());
+        LOG_ERROR(Kernel_Fs, "error = %d", *__Error());
         return ErrnoToSceKernelError(*__Error());
     }
     return result;
@@ -439,7 +439,7 @@ s64 PS4_SYSV_ABI posix_write(s32 fd, const void* buf, u64 nbytes) {
 s64 PS4_SYSV_ABI sceKernelWrite(s32 fd, const void* buf, u64 nbytes) {
     s64 result = write(fd, buf, nbytes);
     if (result < 0) {
-        LOG_ERROR(Kernel_Fs, "error = {}", *__Error());
+        LOG_ERROR(Kernel_Fs, "error = %d", *__Error());
         return ErrnoToSceKernelError(*__Error());
     }
     return result;
@@ -555,7 +555,7 @@ s64 PS4_SYSV_ABI posix_readv(s32 fd, const OrbisKernelIovec* iov, s32 iovcnt) {
 s64 PS4_SYSV_ABI sceKernelReadv(s32 fd, const OrbisKernelIovec* iov, s32 iovcnt) {
     s64 result = readv(fd, iov, iovcnt);
     if (result < 0) {
-        LOG_ERROR(Kernel_Fs, "error = {}", *__Error());
+        LOG_ERROR(Kernel_Fs, "error = %d", *__Error());
         return ErrnoToSceKernelError(*__Error());
     }
     return result;
@@ -604,7 +604,7 @@ s64 PS4_SYSV_ABI posix_writev(s32 fd, const OrbisKernelIovec* iov, s32 iovcnt) {
 s64 PS4_SYSV_ABI sceKernelWritev(s32 fd, const OrbisKernelIovec* iov, s32 iovcnt) {
     s64 result = writev(fd, iov, iovcnt);
     if (result < 0) {
-        LOG_ERROR(Kernel_Fs, "error = {}", *__Error());
+        LOG_ERROR(Kernel_Fs, "error = %d", *__Error());
         return ErrnoToSceKernelError(*__Error());
     }
     return result;
@@ -677,7 +677,7 @@ s64 PS4_SYSV_ABI posix_lseek(s32 fd, s64 offset, s32 whence) {
 s64 PS4_SYSV_ABI sceKernelLseek(s32 fd, s64 offset, s32 whence) {
     s64 result = posix_lseek(fd, offset, whence);
     if (result < 0) {
-        LOG_ERROR(Kernel_Fs, "error = {}", *__Error());
+        LOG_ERROR(Kernel_Fs, "error = %d", *__Error());
         return ErrnoToSceKernelError(*__Error());
     }
     return result;
@@ -730,7 +730,7 @@ s64 PS4_SYSV_ABI posix_read(s32 fd, void* buf, u64 nbytes) {
 s64 PS4_SYSV_ABI sceKernelRead(s32 fd, void* buf, u64 nbytes) {
     s64 result = read(fd, buf, nbytes);
     if (result < 0) {
-        LOG_ERROR(Kernel_Fs, "error = {}", *__Error());
+        LOG_ERROR(Kernel_Fs, "error = %d", *__Error());
         return ErrnoToSceKernelError(*__Error());
     }
     return result;
@@ -741,7 +741,7 @@ s32 PS4_SYSV_ABI posix_mkdir(const char* path, u16 mode) {
         *__Error() = POSIX_EFAULT;
         return -1;
     }
-    LOG_INFO(Kernel_Fs, "path = {} mode = {:#o}", path, mode);
+    LOG_INFO(Kernel_Fs, "path = %s mode = %#o", path, mode);
     if (strlen(path) > 255) {
         *__Error() = POSIX_ENAMETOOLONG;
         return -1;
@@ -754,7 +754,7 @@ s32 PS4_SYSV_ABI posix_mkdir(const char* path, u16 mode) {
     auto* mnt = Common::Singleton<Core::FileSys::MntPoints>::Instance();
     bool ro = false;
     const auto dir_name = mnt->GetHostPath(sanitized_path, &ro);
-    LOG_INFO(Kernel_Fs, "path = {} -> host = {}", path, dir_name.string());
+    LOG_INFO(Kernel_Fs, "path = %s -> host = %s", path, (dir_name.string()).c_str());
 
     if (mnt->Exists(sanitized_path)) {
         *__Error() = POSIX_EEXIST;
@@ -790,7 +790,7 @@ s32 PS4_SYSV_ABI posix_mkdir(const char* path, u16 mode) {
 s32 PS4_SYSV_ABI sceKernelMkdir(const char* path, u16 mode) {
     s32 result = posix_mkdir(path, mode);
     if (result < 0) {
-        LOG_ERROR(Kernel_Fs, "error = {}", *__Error());
+        LOG_ERROR(Kernel_Fs, "error = %d", *__Error());
         return ErrnoToSceKernelError(*__Error());
     }
     return result;
@@ -815,13 +815,13 @@ s32 PS4_SYSV_ABI posix_rmdir(const char* path) {
 
     const auto* mount = mnt->GetMount(sanitized_path);
     if (sanitized_path == "/" || (mount && sanitized_path == mount->mount)) {
-        LOG_WARNING(Kernel_Fs, "Cannot remove mount point '{}'", sanitized_path);
+        LOG_WARNING(Kernel_Fs, "Cannot remove mount point '%s'", (sanitized_path).c_str());
         *__Error() = POSIX_EBUSY;
         return -1;
     }
 
     const fs::path dir_name = mnt->GetHostPath(sanitized_path, &ro);
-    LOG_INFO(Kernel_Fs, "path = {} -> host = {}", path, dir_name.string());
+    LOG_INFO(Kernel_Fs, "path = %s -> host = %s", path, (dir_name.string()).c_str());
 
     if (ro) {
         *__Error() = POSIX_EROFS;
@@ -847,7 +847,7 @@ s32 PS4_SYSV_ABI posix_rmdir(const char* path) {
             *__Error() = POSIX_ENOTEMPTY;
             return -1;
         }
-        LOG_ERROR(Kernel_Fs, "rmdir failed: errno {}", error);
+        LOG_ERROR(Kernel_Fs, "rmdir failed: errno %d", error);
         *__Error() = (error == EACCES || error == EPERM) ? POSIX_EACCES : POSIX_EIO;
         return -1;
     }
@@ -857,14 +857,14 @@ s32 PS4_SYSV_ABI posix_rmdir(const char* path) {
 s32 PS4_SYSV_ABI sceKernelRmdir(const char* path) {
     s32 result = posix_rmdir(path);
     if (result < 0) {
-        LOG_ERROR(Kernel_Fs, "error = {}", *__Error());
+        LOG_ERROR(Kernel_Fs, "error = %d", *__Error());
         return ErrnoToSceKernelError(*__Error());
     }
     return result;
 }
 
 s32 PS4_SYSV_ABI posix_access(const char* path, s32 mode) {
-    LOG_INFO(Kernel_Fs, "(PARTIAL) path = {}, mode = {}", path, mode);
+    LOG_INFO(Kernel_Fs, "(PARTIAL) path = %s, mode = %d", path, mode);
     if (strlen(path) > 255) {
         *__Error() = POSIX_ENAMETOOLONG;
         return -1;
@@ -885,12 +885,12 @@ s32 PS4_SYSV_ABI posix_access(const char* path, s32 mode) {
 }
 
 s32 PS4_SYSV_ABI posix_chdir(const char* path) {
-    LOG_ERROR(Kernel_Fs, "(STUBBED) path = {}", path ? path : "null");
+    LOG_ERROR(Kernel_Fs, "(STUBBED) path = %s", path ? path : "null");
     return 0;
 }
 
 s32 PS4_SYSV_ABI posix_stat(const char* path, OrbisKernelStat* sb) {
-    LOG_DEBUG(Kernel_Fs, "(PARTIAL) path = {}", path);
+    LOG_DEBUG(Kernel_Fs, "(PARTIAL) path = %s", path);
     if (strlen(path) > 255) {
         *__Error() = POSIX_ENAMETOOLONG;
         return -1;
@@ -928,7 +928,7 @@ s32 PS4_SYSV_ABI posix_stat(const char* path, OrbisKernelStat* sb) {
         sb->st_mode = 0000777u | 0100000u;
         Core::FileSys::FileStat fst{};
         if (!mnt->Stat(path, fst)) {
-            LOG_ERROR(Kernel_Fs, "Could not get metadata for {}", path);
+            LOG_ERROR(Kernel_Fs, "Could not get metadata for %s", path);
             *__Error() = POSIX_EIO;
             return -1;
         }
@@ -963,7 +963,7 @@ s32 PS4_SYSV_ABI posix_lstat(const char* path, OrbisKernelStat* sb) {
 s32 PS4_SYSV_ABI sceKernelStat(const char* path, OrbisKernelStat* sb) {
     s32 result = posix_stat(path, sb);
     if (result < 0) {
-        LOG_ERROR(Kernel_Fs, "error = {}", *__Error());
+        LOG_ERROR(Kernel_Fs, "error = %d", *__Error());
         return ErrnoToSceKernelError(*__Error());
     }
     return result;
@@ -992,7 +992,7 @@ s32 PS4_SYSV_ABI sceKernelCheckReachability(const char* path) {
 }
 
 s32 PS4_SYSV_ABI fstat(s32 fd, OrbisKernelStat* sb) {
-    LOG_DEBUG(Kernel_Fs, "(PARTIAL) fd = {}", fd);
+    LOG_DEBUG(Kernel_Fs, "(PARTIAL) fd = %d", fd);
     if (sb == nullptr) {
         *__Error() = POSIX_EFAULT;
         return -1;
@@ -1049,14 +1049,14 @@ s32 PS4_SYSV_ABI fstat(s32 fd, OrbisKernelStat* sb) {
         return Libraries::Net::KernelFstat(fd, sb);
     }
     case Core::FileSys::FileType::Equeue: {
-        LOG_ERROR(Kernel_Fs, "(STUBBED) file type {}",
+        LOG_ERROR(Kernel_Fs, "(STUBBED) file type %s",
                   enum_name(&enum_names_Core_FileSys_FileType,
                             static_cast<s64>(static_cast<Core::FileSys::FileType>(
                                 retro_atomic_load_seq_cst_int(&file->type)))));
         break;
     }
     default:
-        UNREACHABLE_MSG("{}", u32(static_cast<Core::FileSys::FileType>(
+        UNREACHABLE_MSG("%u", u32(static_cast<Core::FileSys::FileType>(
                                   retro_atomic_load_seq_cst_int(&file->type))));
     }
     return ORBIS_OK;
@@ -1069,7 +1069,7 @@ s32 PS4_SYSV_ABI posix_fstat(s32 fd, OrbisKernelStat* sb) {
 s32 PS4_SYSV_ABI sceKernelFstat(s32 fd, OrbisKernelStat* sb) {
     s32 result = fstat(fd, sb);
     if (result < 0) {
-        LOG_ERROR(Kernel_Fs, "error = {}", *__Error());
+        LOG_ERROR(Kernel_Fs, "error = %d", *__Error());
         return ErrnoToSceKernelError(*__Error());
     }
     return result;
@@ -1125,7 +1125,7 @@ s32 PS4_SYSV_ABI posix_ftruncate(s32 fd, s64 length) {
 s32 PS4_SYSV_ABI sceKernelFtruncate(s32 fd, s64 length) {
     s32 result = posix_ftruncate(fd, length);
     if (result < 0) {
-        LOG_ERROR(Kernel_Fs, "error = {}", *__Error());
+        LOG_ERROR(Kernel_Fs, "error = %d", *__Error());
         return ErrnoToSceKernelError(*__Error());
     }
     return result;
@@ -1181,8 +1181,8 @@ s32 PS4_SYSV_ABI posix_truncate(const char* path, s64 length) {
 s32 PS4_SYSV_ABI sceKernelTruncate(const char* path, s64 length) {
     s32 result = posix_truncate(path, length);
     if (result < 0) {
-        LOG_ERROR(Kernel_Fs, "path = {}, length = {}, error = {}", path ? path : "(null)", length,
-                  *__Error());
+        LOG_ERROR(Kernel_Fs, "path = %s, length = %" PRId64 ", error = %d", path ? path : "(null)",
+                  length, *__Error());
         return ErrnoToSceKernelError(*__Error());
     }
     return result;
@@ -1226,7 +1226,7 @@ s32 PS4_SYSV_ABI posix_chmod(const char* path, u32 mode) {
 s32 PS4_SYSV_ABI sceKernelChmod(const char* path, u32 mode) {
     s32 result = posix_chmod(path, mode);
     if (result < 0) {
-        LOG_ERROR(Kernel_Fs, "path = {}, mode = {:o}, error = {}", path ? path : "(null)", mode,
+        LOG_ERROR(Kernel_Fs, "path = %s, mode = %o, error = %d", path ? path : "(null)", mode,
                   *__Error());
         return ErrnoToSceKernelError(*__Error());
     }
@@ -1273,7 +1273,7 @@ s32 PS4_SYSV_ABI posix_fchmod(s32 fd, u32 mode) {
 s32 PS4_SYSV_ABI sceKernelFchmod(s32 fd, u32 mode) {
     s32 result = posix_fchmod(fd, mode);
     if (result < 0) {
-        LOG_ERROR(Kernel_Fs, "fd = {}, mode = {:o}, error = {}", fd, mode, *__Error());
+        LOG_ERROR(Kernel_Fs, "fd = %d, mode = %o, error = %d", fd, mode, *__Error());
         return ErrnoToSceKernelError(*__Error());
     }
     return result;
@@ -1354,7 +1354,7 @@ s32 PS4_SYSV_ABI posix_utimes(const char* path, const OrbisKernelTimeval* times)
 s32 PS4_SYSV_ABI sceKernelUtimes(const char* path, const OrbisKernelTimeval* times) {
     s32 result = posix_utimes(path, times);
     if (result < 0) {
-        LOG_ERROR(Kernel_Fs, "path = {}, error = {}", path ? path : "(null)", *__Error());
+        LOG_ERROR(Kernel_Fs, "path = %s, error = %d", path ? path : "(null)", *__Error());
         return ErrnoToSceKernelError(*__Error());
     }
     return result;
@@ -1436,7 +1436,7 @@ s32 PS4_SYSV_ABI posix_futimes(s32 fd, const OrbisKernelTimeval* times) {
 s32 PS4_SYSV_ABI sceKernelFutimes(s32 fd, const OrbisKernelTimeval* times) {
     s32 result = posix_futimes(fd, times);
     if (result < 0) {
-        LOG_ERROR(Kernel_Fs, "fd = {}, error = {}", fd, *__Error());
+        LOG_ERROR(Kernel_Fs, "fd = %d, error = %d", fd, *__Error());
         return ErrnoToSceKernelError(*__Error());
     }
     return result;
@@ -1537,7 +1537,7 @@ s32 PS4_SYSV_ABI posix_rename(const char* from, const char* to) {
 s32 PS4_SYSV_ABI sceKernelRename(const char* from, const char* to) {
     s32 result = posix_rename(from, to);
     if (result < 0) {
-        LOG_ERROR(Kernel_Fs, "error = {}", *__Error());
+        LOG_ERROR(Kernel_Fs, "error = %d", *__Error());
         return ErrnoToSceKernelError(*__Error());
     }
     return result;
@@ -1638,7 +1638,7 @@ s64 PS4_SYSV_ABI posix_preadv(s32 fd, OrbisKernelIovec* iov, s32 iovcnt, s64 off
 s64 PS4_SYSV_ABI sceKernelPreadv(s32 fd, OrbisKernelIovec* iov, s32 iovcnt, s64 offset) {
     s64 result = posix_preadv(fd, iov, iovcnt, offset);
     if (result < 0) {
-        LOG_ERROR(Kernel_Fs, "error = {}", *__Error());
+        LOG_ERROR(Kernel_Fs, "error = %d", *__Error());
         return ErrnoToSceKernelError(*__Error());
     }
     return result;
@@ -1680,7 +1680,7 @@ s32 PS4_SYSV_ABI posix_fsync(s32 fd) {
 s32 PS4_SYSV_ABI sceKernelFsync(s32 fd) {
     s32 result = posix_fsync(fd);
     if (result < 0) {
-        LOG_ERROR(Kernel_Fs, "error = {}", *__Error());
+        LOG_ERROR(Kernel_Fs, "error = %d", *__Error());
         return ErrnoToSceKernelError(*__Error());
     }
     return result;
@@ -1693,7 +1693,7 @@ s32 PS4_SYSV_ABI posix_fdatasync(s32 fd) {
 s32 PS4_SYSV_ABI sceKernelFdatasync(s32 fd) {
     s32 result = posix_fdatasync(fd);
     if (result < 0) {
-        LOG_ERROR(Kernel_Fs, "error = {}", *__Error());
+        LOG_ERROR(Kernel_Fs, "error = %d", *__Error());
         return ErrnoToSceKernelError(*__Error());
     }
     return result;
@@ -1709,7 +1709,7 @@ void PS4_SYSV_ABI sceKernelSync() {
 }
 
 s32 PS4_SYSV_ABI posix_flock(s32 fd, s32 operation) {
-    LOG_TRACE(Kernel_Fs, "fd = {}, operation = {:#x}", fd, operation);
+    LOG_TRACE(Kernel_Fs, "fd = %d, operation = 0x%x", fd, operation);
 
     auto* h = Common::Singleton<Core::FileSys::HandleTable>::Instance();
     auto* file = h->GetFile(fd);
@@ -1803,7 +1803,7 @@ s32 PS4_SYSV_ABI posix_flock(s32 fd, s32 operation) {
                 if (!can_acquire()) {
                     if (non_blocking) {
                         *__Error() = POSIX_EWOULDBLOCK;
-                        LOG_TRACE(Kernel_Fs, "flock: fd = {} LOCK_EX would block", fd);
+                        LOG_TRACE(Kernel_Fs, "flock: fd = %d LOCK_EX would block", fd);
                         return -1;
                     }
                     // Counted while it waits, so the state stays in the map
@@ -1842,7 +1842,7 @@ s32 PS4_SYSV_ABI posix_flock(s32 fd, s32 operation) {
                 if (!can_acquire()) {
                     if (non_blocking) {
                         *__Error() = POSIX_EWOULDBLOCK;
-                        LOG_TRACE(Kernel_Fs, "flock: fd = {} LOCK_SH would block", fd);
+                        LOG_TRACE(Kernel_Fs, "flock: fd = %d LOCK_SH would block", fd);
                         return -1;
                     }
                     // Counted while it waits, so the state stays in the map
@@ -1903,7 +1903,7 @@ s32 PS4_SYSV_ABI sceKernelFlock(s32 fd, s32 operation) {
     s32 result = posix_flock(fd, operation);
     if (result < 0) {
         if (*__Error() != POSIX_EWOULDBLOCK) {
-            LOG_ERROR(Kernel_Fs, "error = {}", *__Error());
+            LOG_ERROR(Kernel_Fs, "error = %d", *__Error());
         }
         return ErrnoToSceKernelError(*__Error());
     }
@@ -1961,7 +1961,7 @@ s64 PS4_SYSV_ABI posix_getdents(s32 fd, char* buf, u64 nbytes) {
 s64 PS4_SYSV_ABI sceKernelGetdents(s32 fd, char* buf, u64 nbytes) {
     s64 result = posix_getdents(fd, buf, nbytes);
     if (result < 0) {
-        LOG_ERROR(Kernel_Fs, "error = {}", *__Error());
+        LOG_ERROR(Kernel_Fs, "error = %d", *__Error());
         return ErrnoToSceKernelError(*__Error());
     }
     return result;
@@ -1978,7 +1978,7 @@ s64 PS4_SYSV_ABI posix_getdirentries(s32 fd, char* buf, u64 nbytes, s64* basep) 
 s64 PS4_SYSV_ABI sceKernelGetdirentries(s32 fd, char* buf, u64 nbytes, s64* basep) {
     s64 result = GetDents(fd, buf, nbytes, basep);
     if (result < 0) {
-        LOG_ERROR(Kernel_Fs, "error = {}", *__Error());
+        LOG_ERROR(Kernel_Fs, "error = %d", *__Error());
         return ErrnoToSceKernelError(*__Error());
     }
     return result;
@@ -2041,7 +2041,7 @@ s64 PS4_SYSV_ABI posix_pwrite(s32 fd, void* buf, u64 nbytes, s64 offset) {
 s64 PS4_SYSV_ABI sceKernelPwrite(s32 fd, void* buf, u64 nbytes, s64 offset) {
     s64 result = posix_pwrite(fd, buf, nbytes, offset);
     if (result < 0) {
-        LOG_ERROR(Kernel_Fs, "error = {}", *__Error());
+        LOG_ERROR(Kernel_Fs, "error = %d", *__Error());
         return ErrnoToSceKernelError(*__Error());
     }
     return result;
@@ -2050,7 +2050,7 @@ s64 PS4_SYSV_ABI sceKernelPwrite(s32 fd, void* buf, u64 nbytes, s64 offset) {
 s64 PS4_SYSV_ABI sceKernelPwritev(s32 fd, const OrbisKernelIovec* iov, s32 iovcnt, s64 offset) {
     s64 result = posix_pwritev(fd, iov, iovcnt, offset);
     if (result < 0) {
-        LOG_ERROR(Kernel_Fs, "error = {}", *__Error());
+        LOG_ERROR(Kernel_Fs, "error = %d", *__Error());
         return ErrnoToSceKernelError(*__Error());
     }
     return result;
@@ -2102,14 +2102,14 @@ s32 PS4_SYSV_ABI posix_unlink(const char* path) {
         host->Unlink();
     }
 
-    LOG_INFO(Kernel_Fs, "Unlinked {}", path);
+    LOG_INFO(Kernel_Fs, "Unlinked %s", path);
     return ORBIS_OK;
 }
 
 s32 PS4_SYSV_ABI sceKernelUnlink(const char* path) {
     s32 result = posix_unlink(path);
     if (result < 0) {
-        LOG_ERROR(Kernel_Fs, "error = {}", *__Error());
+        LOG_ERROR(Kernel_Fs, "error = %d", *__Error());
         return ErrnoToSceKernelError(*__Error());
     }
     return result;
@@ -2134,8 +2134,13 @@ void GuestFdSetBit(GuestFdSet* set, s32 fd) {
 
 s32 PS4_SYSV_ABI posix_select(s32 nfds, GuestFdSet* readfds, GuestFdSet* writefds,
                               GuestFdSet* exceptfds, OrbisKernelTimeval* timeout) {
-    LOG_DEBUG(Kernel_Fs, "nfds = {}, readfds = {}, writefds = {}, exceptfds = {}, timeout = {}",
-              nfds, fmt::ptr(readfds), fmt::ptr(writefds), fmt::ptr(exceptfds), fmt::ptr(timeout));
+    LOG_DEBUG(
+        Kernel_Fs,
+        "nfds = %d, readfds = 0x%llx, writefds = 0x%llx, exceptfds = 0x%llx, timeout = 0x%llx",
+        nfds, static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(readfds)),
+        static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(writefds)),
+        static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(exceptfds)),
+        static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(timeout)));
     if (nfds < 0 || nfds > kGuestFdSetSize) {
         *__Error() = POSIX_EINVAL;
         return -1;
@@ -2175,7 +2180,7 @@ s32 PS4_SYSV_ABI posix_select(s32 nfds, GuestFdSet* readfds, GuestFdSet* writefd
              (static_cast<Core::FileSys::FileType>(retro_atomic_load_seq_cst_int(&file->type)) ==
                   Core::FileSys::FileType::Socket &&
               retro_atomic_load_seq_cst_int(&file->is_opened) == 0))) {
-            LOG_ERROR(Kernel_Fs, "fd {} is null or not opened", i);
+            LOG_ERROR(Kernel_Fs, "fd %d is null or not opened", i);
             *__Error() = POSIX_EBADF;
             return -1;
         }

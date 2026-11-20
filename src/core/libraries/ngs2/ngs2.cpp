@@ -61,7 +61,7 @@ s32 PS4_SYSV_ABI sceNgs2ParseWaveformData(const void* data, size_t dataSize,
     const s32 result =
         ngs2_parse_waveform_data(data, dataSize, reinterpret_cast<ngs2_waveform_info*>(outInfo));
     if (result != ORBIS_OK) {
-        LOG_ERROR(Lib_Ngs2, "dataSize = {}: {:#x}", dataSize, u32(result));
+        LOG_ERROR(Lib_Ngs2, "dataSize = %zu: 0x%x", dataSize, u32(result));
     }
     return result;
 }
@@ -108,7 +108,7 @@ s32 PS4_SYSV_ABI sceNgs2ParseWaveformFile(const char* path, u64 offset,
     RFILE* const file =
         filestream_open(host.c_str(), RETRO_VFS_FILE_ACCESS_READ, RETRO_VFS_FILE_ACCESS_HINT_NONE);
     if (!file) {
-        LOG_ERROR(Lib_Ngs2, "cannot open {}", path);
+        LOG_ERROR(Lib_Ngs2, "cannot open %s", path);
         return ORBIS_NGS2_ERROR_INVALID_WAVEFORM_DATA;
     }
     const s64 size = filestream_get_size(file);
@@ -120,7 +120,7 @@ s32 PS4_SYSV_ABI sceNgs2ParseWaveformFile(const char* path, u64 offset,
     }
     filestream_close(file);
     if (result != ORBIS_OK) {
-        LOG_ERROR(Lib_Ngs2, "path = {}, offset = {}: {:#x}", path, offset, u32(result));
+        LOG_ERROR(Lib_Ngs2, "path = %s, offset = %" PRIu64 ": 0x%x", path, offset, u32(result));
         return result;
     }
     // Where things are in the file, not in the waveform that starts at the offset
@@ -145,7 +145,7 @@ s32 PS4_SYSV_ABI sceNgs2ParseWaveformUser(OrbisNgs2ParseReadHandler handler, uin
     const s32 result = ngs2_parse_waveform(ReadUserSource, &source, 0xffffffffull,
                                            reinterpret_cast<ngs2_waveform_info*>(outInfo));
     if (result != ORBIS_OK) {
-        LOG_ERROR(Lib_Ngs2, "{:#x}", u32(result));
+        LOG_ERROR(Lib_Ngs2, "0x%x", u32(result));
     }
     return result;
 }
@@ -506,7 +506,7 @@ s32 CreateSystem(const OrbisNgs2SystemOption* option, const OrbisNgs2ContextBuff
     object->lock = new (base + sizeof(Object)) SystemLock;
     ngs2_system_set_host_data(system, object->lock);
     *out_handle = reinterpret_cast<OrbisNgs2Handle>(system);
-    LOG_INFO(Lib_Ngs2, "system '{}': {} Hz, grains of {} (at most {})", setting.name, setting.rate,
+    LOG_INFO(Lib_Ngs2, "system '%s': %u Hz, grains of %u (at most %u)", setting.name, setting.rate,
              setting.grain, setting.max_grain);
     return ORBIS_OK;
 }
@@ -534,7 +534,7 @@ s32 CreateRack(ngs2_system* system, u32 rack_id, const OrbisNgs2RackOption* opti
     }
     new (base) Object{buffer, free, nullptr};
     *out_handle = reinterpret_cast<OrbisNgs2Handle>(rack);
-    LOG_INFO(Lib_Ngs2, "rack {:#x} '{}': {} voices, {} channels, {} ports, {} matrices, {} modules",
+    LOG_INFO(Lib_Ngs2, "rack 0x%x '%s': %u voices, %u channels, %u ports, %u matrices, %u modules",
              rack_id, desc.name, desc.max_voices, desc.max_channels, desc.max_ports,
              desc.max_matrices, desc.num_modules);
     for (u32 i = 0; i < desc.num_modules; i++) {
@@ -542,7 +542,7 @@ s32 CreateRack(ngs2_system* system, u32 rack_id, const OrbisNgs2RackOption* opti
         // The modules the engine has; another passes its sound on as it came
         const bool known =
             m.id == 0x13 || m.id == 0x15 || m.id == 0x19 || m.id == 0x1b || m.id == 0x1f;
-        LOG_INFO(Lib_Ngs2, "  module {}: {:#x}{}, buffer {} to {}", i, m.id,
+        LOG_INFO(Lib_Ngs2, "  module %u: 0x%x%s, buffer %u to %u", i, m.id,
                  known ? "" : " (not in: passed through)", m.source_buffer, m.dest_buffer);
     }
     return ORBIS_OK;
@@ -591,7 +591,7 @@ s32 PS4_SYSV_ABI sceNgs2RackCreate(OrbisNgs2Handle systemHandle, u32 rackId,
     }
     const s32 result = CreateRack(system, rackId, option, *bufferInfo, nullptr, outHandle);
     if (result != ORBIS_OK) {
-        LOG_ERROR(Lib_Ngs2, "rack {:#x} not made: {:#x}", rackId, static_cast<u32>(result));
+        LOG_ERROR(Lib_Ngs2, "rack 0x%x not made: 0x%x", rackId, static_cast<u32>(result));
     }
     return result;
 }
@@ -622,7 +622,7 @@ s32 PS4_SYSV_ABI sceNgs2RackCreateWithAllocator(OrbisNgs2Handle systemHandle, u3
     }
     result = CreateRack(system, rackId, option, buffer, allocator->freeHandler, outHandle);
     if (result != ORBIS_OK) {
-        LOG_ERROR(Lib_Ngs2, "rack {:#x} not made: {:#x}", rackId, static_cast<u32>(result));
+        LOG_ERROR(Lib_Ngs2, "rack 0x%x not made: 0x%x", rackId, static_cast<u32>(result));
         if (allocator->freeHandler) {
             Core::CallGuest(allocator->freeHandler, &buffer);
         }
@@ -719,7 +719,7 @@ s32 PS4_SYSV_ABI sceNgs2RackQueryBufferSize(u32 rackId, const OrbisNgs2RackOptio
     }
     ngs2_rack_desc desc;
     if (const s32 result = ReadRackOption(rackId, option, desc); result != ORBIS_OK) {
-        LOG_ERROR(Lib_Ngs2, "rack {:#x}: {:#x}", rackId, static_cast<u32>(result));
+        LOG_ERROR(Lib_Ngs2, "rack 0x%x: 0x%x", rackId, static_cast<u32>(result));
         return result;
     }
     *outBufferInfo = {};
@@ -755,7 +755,7 @@ s32 PS4_SYSV_ABI sceNgs2SystemCreate(const OrbisNgs2SystemOption* option,
     }
     const s32 result = CreateSystem(option, *bufferInfo, nullptr, outHandle);
     if (result != ORBIS_OK) {
-        LOG_ERROR(Lib_Ngs2, "system not made: {:#x}", static_cast<u32>(result));
+        LOG_ERROR(Lib_Ngs2, "system not made: 0x%x", static_cast<u32>(result));
     }
     return result;
 }
@@ -781,7 +781,7 @@ s32 PS4_SYSV_ABI sceNgs2SystemCreateWithAllocator(const OrbisNgs2SystemOption* o
     }
     result = CreateSystem(option, buffer, allocator->freeHandler, outHandle);
     if (result != ORBIS_OK) {
-        LOG_ERROR(Lib_Ngs2, "system not made: {:#x}", static_cast<u32>(result));
+        LOG_ERROR(Lib_Ngs2, "system not made: 0x%x", static_cast<u32>(result));
         if (allocator->freeHandler) {
             Core::CallGuest(allocator->freeHandler, &buffer);
         }
@@ -816,7 +816,7 @@ s32 PS4_SYSV_ABI sceNgs2SystemDestroy(OrbisNgs2Handle systemHandle,
 }
 
 s32 PS4_SYSV_ABI sceNgs2SystemEnumHandles(OrbisNgs2Handle* aOutHandle, u32 maxHandles) {
-    LOG_ERROR(Lib_Ngs2, "(STUBBED) maxHandles = {}", maxHandles);
+    LOG_ERROR(Lib_Ngs2, "(STUBBED) maxHandles = %u", maxHandles);
     return 0;
 }
 
@@ -997,7 +997,7 @@ s32 PS4_SYSV_ABI sceNgs2VoiceControl(OrbisNgs2Handle voiceHandle,
         if (param && param->size >= 12) {
             std::memcpy(&word, param + 1, sizeof(word));
         }
-        LOG_ERROR(Lib_Ngs2, "voice {} of rack {:#x}: {:#x} (list starts with {:#x}, {:#x})",
+        LOG_ERROR(Lib_Ngs2, "voice %u of rack 0x%x: 0x%x (list starts with 0x%x, 0x%x)",
                   ngs2_voice_index(voice), ngs2_rack_description(ngs2_voice_rack(voice))->rack_id,
                   static_cast<u32>(result), param ? param->id : 0, word);
     }
@@ -1151,7 +1151,7 @@ s32 PS4_SYSV_ABI sceNgs2VoiceGetStateFlags(OrbisNgs2Handle voiceHandle, u32* out
 s32 PS4_SYSV_ABI sceNgs2CustomRackGetModuleInfo(OrbisNgs2Handle rackHandle, u32 moduleIndex,
                                                 OrbisNgs2CustomModuleInfo* outInfo,
                                                 size_t infoSize) {
-    LOG_ERROR(Lib_Ngs2, "moduleIndex = {}, infoSize = {}", moduleIndex, infoSize);
+    LOG_ERROR(Lib_Ngs2, "moduleIndex = %u, infoSize = %zu", moduleIndex, infoSize);
     return ORBIS_OK;
 }
 
@@ -1199,7 +1199,7 @@ s32 PS4_SYSV_ABI sceNgs2PanGetVolumeMatrix(OrbisNgs2PanWork* work, const OrbisNg
 
 s32 PS4_SYSV_ABI sceNgs2ReportRegisterHandler(u32 reportType, OrbisNgs2ReportHandler handler,
                                               uintptr_t userData, OrbisNgs2Handle* outHandle) {
-    LOG_INFO(Lib_Ngs2, "reportType = {}, userData = {}", reportType, userData);
+    LOG_INFO(Lib_Ngs2, "reportType = %u, userData = %" PRIuPTR, reportType, userData);
     if (!handler) {
         LOG_ERROR(Lib_Ngs2, "handler is nullptr");
         return ORBIS_NGS2_ERROR_INVALID_REPORT_HANDLE;

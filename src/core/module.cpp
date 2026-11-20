@@ -1,7 +1,6 @@
 // SPDX-FileCopyrightText: Copyright 2024-2026 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
-#include <fmt/format.h>
 #include <lrc_hash.h>
 
 #include "common/alignment.h"
@@ -106,7 +105,7 @@ Module::Module(Core::MemoryManager* memory_, const std::filesystem::path& file_,
 Module::~Module() = default;
 
 s32 Module::Start(u64 args, const void* argp, void* param) {
-    LOG_INFO(Core_Linker, "Module started : {}", name);
+    LOG_INFO(Core_Linker, "Module started : %s", (name).c_str());
     const VAddr addr = dynamic_info.init_virtual_addr + GetBaseAddress();
 #ifdef SHADPS4_ENABLE_FEX_GUEST_CPU
     const std::array<u64, 3> arguments{args, reinterpret_cast<u64>(argp),
@@ -114,7 +113,7 @@ s32 Module::Start(u64 args, const void* argp, void* param) {
     auto* linker = Common::Singleton<Linker>::Instance();
     const auto result = linker->RunGuestFunction(addr, arguments);
     if (const auto* failure = std::get_if<GuestExecutionFailure>(&result)) {
-        LOG_ERROR(Core_Linker, "FEX module start {} failed at stage {}: {}", name,
+        LOG_ERROR(Core_Linker, "FEX module start %s failed at stage %d: %d", name.c_str(),
                   static_cast<int>(failure->Stage), failure->Error);
         return failure->Error == 0 ? -1 : -failure->Error;
     }
@@ -144,8 +143,9 @@ void Module::LoadModuleToMemory(u32& max_tls_index) {
     s32 result =
         memory->MapMemory(out_addr, load_base, aligned_base_size + TrampolineSize,
                           MemoryProt::NoAccess, MemoryMapFlags::NoFlags, VMAType::Reserved, name);
-    ASSERT_MSG(result == ORBIS_OK, "Failed to reserve memory for module {}", name);
-    LOG_INFO(Core_Linker, "Loading module {} to {}", name, fmt::ptr(*out_addr));
+    ASSERT_MSG(result == ORBIS_OK, "Failed to reserve memory for module %s", (name).c_str());
+    LOG_INFO(Core_Linker, "Loading module %s to 0x%llx", (name).c_str(),
+             static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(*out_addr)));
 
 #ifdef ARCH_X86_64
     // Initialize trampoline generator.
@@ -154,14 +154,14 @@ void Module::LoadModuleToMemory(u32& max_tls_index) {
     result = memory->MapMemory(&trampoline_addr, trampoline_vaddr, TrampolineSize,
                                MemoryProt::CpuReadWrite | MemoryProt::CpuExec,
                                MemoryMapFlags::Fixed, VMAType::Code, name);
-    ASSERT_MSG(result == ORBIS_OK, "Failed to map trampoline area for module {}", name);
+    ASSERT_MSG(result == ORBIS_OK, "Failed to map trampoline area for module %s", (name).c_str());
     RegisterPatchModule(*out_addr, aligned_base_size, trampoline_addr, TrampolineSize);
 #endif
 
     LOG_INFO(Core_Linker, "======== Load Module to Memory ========");
-    LOG_INFO(Core_Linker, "base_virtual_addr ......: {:#018x}", base_virtual_addr);
-    LOG_INFO(Core_Linker, "base_size ..............: {:#018x}", base_size);
-    LOG_INFO(Core_Linker, "aligned_base_size ......: {:#018x}", aligned_base_size);
+    LOG_INFO(Core_Linker, "base_virtual_addr ......: 0x%016" PRIxPTR, base_virtual_addr);
+    LOG_INFO(Core_Linker, "base_size ..............: 0x%016" PRIx64, base_size);
+    LOG_INFO(Core_Linker, "aligned_base_size ......: 0x%016" PRIx64, aligned_base_size);
 
     const auto add_segment = [this](const elf_program_header& phdr, bool do_map = true) {
         const VAddr segment_vaddr = base_virtual_addr + phdr.p_vaddr;
@@ -184,8 +184,8 @@ void Module::LoadModuleToMemory(u32& max_tls_index) {
             const auto memory_type = IsSystemLib() ? VMAType::Code : VMAType::Flexible;
             s32 result = memory->MapMemory(&segment_addr, segment_vaddr, segment_size, segment_prot,
                                            MemoryMapFlags::Fixed, memory_type, name);
-            ASSERT_MSG(result == ORBIS_OK, "Failed to map segment at {:#x} for module {}",
-                       segment_vaddr, name);
+            ASSERT_MSG(result == ORBIS_OK, "Failed to map segment at 0x%" PRIxPTR " for module %s",
+                       segment_vaddr, (name).c_str());
             elf.LoadSegment(segment_vaddr, phdr.p_offset, phdr.p_filesz);
         }
         if (info.num_segments < 4) {
@@ -216,7 +216,8 @@ void Module::LoadModuleToMemory(u32& max_tls_index) {
         case PT_LOAD:
         case PT_SCE_RELRO: {
             if (elf_pheader[i].p_memsz == 0) {
-                LOG_ERROR(Core_Linker, "p_memsz==0 in type {}", header_type);
+                LOG_ERROR(Core_Linker, "p_memsz==0 in type %.*s",
+                          static_cast<int>((header_type).size()), (header_type).data());
                 continue;
             }
 
@@ -224,11 +225,12 @@ void Module::LoadModuleToMemory(u32& max_tls_index) {
             const u64 segment_file_size = elf_pheader[i].p_filesz;
             const u64 segment_memory_size = GetAlignedSize(elf_pheader[i]);
             const auto segment_mode = elf.ElfPheaderFlagsStr(elf_pheader[i].p_flags);
-            LOG_INFO(Core_Linker, "program header = [{}] type = {}", i, header_type);
-            LOG_INFO(Core_Linker, "segment_addr ..........: {:#018x}", segment_addr);
-            LOG_INFO(Core_Linker, "segment_file_size .....: {:#018x}", segment_file_size);
-            LOG_INFO(Core_Linker, "segment_memory_size ...: {:#018x}", segment_memory_size);
-            LOG_INFO(Core_Linker, "segment_mode ..........: {}", segment_mode);
+            LOG_INFO(Core_Linker, "program header = [%u] type = %.*s", i,
+                     static_cast<int>((header_type).size()), (header_type).data());
+            LOG_INFO(Core_Linker, "segment_addr ..........: 0x%016" PRIx64, segment_addr);
+            LOG_INFO(Core_Linker, "segment_file_size .....: 0x%016" PRIx64, segment_file_size);
+            LOG_INFO(Core_Linker, "segment_memory_size ...: 0x%016" PRIx64, segment_memory_size);
+            LOG_INFO(Core_Linker, "segment_mode ..........: %s", (segment_mode).c_str());
 
             add_segment(elf_pheader[i]);
 #ifdef ARCH_X86_64
@@ -248,7 +250,8 @@ void Module::LoadModuleToMemory(u32& max_tls_index) {
                 const VAddr segment_addr = std::bit_cast<VAddr>(m_dynamic.data());
                 elf.LoadSegment(segment_addr, elf_pheader[i].p_offset, elf_pheader[i].p_filesz);
             } else {
-                LOG_ERROR(Core_Linker, "p_filesz==0 in type {}", header_type);
+                LOG_ERROR(Core_Linker, "p_filesz==0 in type %.*s",
+                          static_cast<int>((header_type).size()), (header_type).data());
             }
             break;
         case PT_SCE_DYNLIBDATA:
@@ -257,7 +260,8 @@ void Module::LoadModuleToMemory(u32& max_tls_index) {
                 const VAddr segment_addr = std::bit_cast<VAddr>(m_dynamic_data.data());
                 elf.LoadSegment(segment_addr, elf_pheader[i].p_offset, elf_pheader[i].p_filesz);
             } else {
-                LOG_ERROR(Core_Linker, "p_filesz==0 in type {}", header_type);
+                LOG_ERROR(Core_Linker, "p_filesz==0 in type %.*s",
+                          static_cast<int>((header_type).size()), (header_type).data());
             }
             break;
         case PT_TLS:
@@ -266,8 +270,8 @@ void Module::LoadModuleToMemory(u32& max_tls_index) {
             tls.image_virtual_addr = elf_pheader[i].p_vaddr + base_virtual_addr;
             tls.image_size = GetAlignedSize(elf_pheader[i]);
             tls.modid = ++max_tls_index;
-            LOG_INFO(Core_Linker, "TLS virtual address = {:#x}", tls.image_virtual_addr);
-            LOG_INFO(Core_Linker, "TLS image size      = {}", tls.image_size);
+            LOG_INFO(Core_Linker, "TLS virtual address = 0x%" PRIxPTR, tls.image_virtual_addr);
+            LOG_INFO(Core_Linker, "TLS image size      = %u", tls.image_size);
             break;
         case PT_SCE_PROCPARAM:
             proc_param_virtual_addr = elf_pheader[i].p_vaddr + base_virtual_addr;
@@ -285,7 +289,8 @@ void Module::LoadModuleToMemory(u32& max_tls_index) {
 #ifdef ARCH_X86_64
                 if (use_static_patching &&
                     !Dwarf::DecodeEHHdrTable(hdr_info, eh_hdr_end, function_starts)) {
-                    LOG_ERROR(Core_Linker, "Failed to decode EH frame search table for {}", name);
+                    LOG_ERROR(Core_Linker, "Failed to decode EH frame search table for %s",
+                              (name).c_str());
                 }
 #endif
                 eh_frame_addr = hdr_info.eh_frame_ptr - base_virtual_addr;
@@ -298,12 +303,13 @@ void Module::LoadModuleToMemory(u32& max_tls_index) {
             break;
         }
         default:
-            LOG_ERROR(Core_Linker, "Unimplemented type {}", header_type);
+            LOG_ERROR(Core_Linker, "Unimplemented type %.*s",
+                      static_cast<int>((header_type).size()), (header_type).data());
         }
     }
 
     const VAddr entry_addr = base_virtual_addr + elf.GetElfEntry();
-    LOG_INFO(Core_Linker, "program entry addr ..........: {:#018x}", entry_addr);
+    LOG_INFO(Core_Linker, "program entry addr ..........: 0x%016" PRIxPTR, entry_addr);
 
     if (MemoryPatcher::g_eboot_address == 0) {
         // TODO: Come up with a more reliable way to detect the main executable.
@@ -333,47 +339,55 @@ void Module::LoadModuleToMemory(u32& max_tls_index) {
         if (total.function_count == 0) {
             if (!executable_segments.empty()) {
                 LOG_WARNING(Core_Linker,
-                            "Static patching could not find function boundaries for {}; it was "
+                            "Static patching could not find function boundaries for %s; it was "
                             "not applied",
-                            name);
+                            (name).c_str());
             }
         } else if (red_zone_protection) {
-            LOG_DEBUG(
-                Core_Linker,
-                "Windows guest red-zone static patching for {}: {} functions, {} instructions, "
-                "{} red-zone functions, {}/{} memory instructions patched "
-                "({} short, {} stack-dependent, {} control-flow, {} unrelocatable), "
-                "{}/{} short CPU patches applied ({} unsupported), {} indirect red-zone "
-                "functions",
-                name, total.function_count, total.instruction_count, total.red_zone_function_count,
-                total.patched_memory_instruction_count, total.memory_instruction_count,
-                total.short_memory_instruction_count,
-                total.stack_dependent_memory_instruction_count,
-                total.control_flow_memory_instruction_count,
-                total.unrelocatable_memory_instruction_count,
-                total.patched_cpu_patch_instruction_count, total.cpu_patch_instruction_count,
-                total.unsupported_cpu_patch_instruction_count,
-                total.indirect_red_zone_function_count);
+            LOG_DEBUG(Core_Linker,
+                      "Windows guest red-zone static patching for %s: %" PRIu64
+                      " functions, %" PRIu64 " instructions, "
+                      "%" PRIu64 " red-zone functions, %" PRIu64 "/%" PRIu64
+                      " memory instructions patched "
+                      "(%" PRIu64 " short, %" PRIu64 " stack-dependent, %" PRIu64
+                      " control-flow, %" PRIu64 " unrelocatable), "
+                      "%" PRIu64 "/%" PRIu64 " short CPU patches applied (%" PRIu64
+                      " unsupported), %" PRIu64 " indirect red-zone "
+                      "functions",
+                      (name).c_str(), total.function_count, total.instruction_count,
+                      total.red_zone_function_count, total.patched_memory_instruction_count,
+                      total.memory_instruction_count, total.short_memory_instruction_count,
+                      total.stack_dependent_memory_instruction_count,
+                      total.control_flow_memory_instruction_count,
+                      total.unrelocatable_memory_instruction_count,
+                      total.patched_cpu_patch_instruction_count, total.cpu_patch_instruction_count,
+                      total.unsupported_cpu_patch_instruction_count,
+                      total.indirect_red_zone_function_count);
             if (total.stack_dependent_memory_instruction_count != 0 ||
                 total.control_flow_memory_instruction_count != 0 ||
                 total.unrelocatable_memory_instruction_count != 0 ||
                 total.unsupported_cpu_patch_instruction_count != 0) {
-                LOG_WARNING(
-                    Core_Linker,
-                    "Windows guest red-zone static patching for {} is partial: {} "
-                    "stack-dependent, {} control-flow, and {} unrelocatable memory instructions "
-                    "were not protected; {} CPU patch instructions were unsupported",
-                    name, total.stack_dependent_memory_instruction_count,
-                    total.control_flow_memory_instruction_count,
-                    total.unrelocatable_memory_instruction_count,
-                    total.unsupported_cpu_patch_instruction_count);
+                LOG_WARNING(Core_Linker,
+                            "Windows guest red-zone static patching for %s is partial: %" PRIu64 " "
+                            "stack-dependent, %" PRIu64 " control-flow, and %" PRIu64
+                            " unrelocatable memory instructions "
+                            "were not protected; %" PRIu64
+                            " CPU patch instructions were unsupported",
+                            (name).c_str(), total.stack_dependent_memory_instruction_count,
+                            total.control_flow_memory_instruction_count,
+                            total.unrelocatable_memory_instruction_count,
+                            total.unsupported_cpu_patch_instruction_count);
             }
         } else {
             LOG_INFO(Core_Linker,
-                     "Static CPU patching for {}: {} functions, {} instructions patched in place, "
-                     "{}/{} short instructions relocated ({} left to the exception handler); "
-                     "outside functions: {} patched in place, {} left to the exception handler",
-                     name, total.function_count, total.inplace_cpu_patch_instruction_count,
+                     "Static CPU patching for %s: %" PRIu64 " functions, %" PRIu64
+                     " instructions patched in place, "
+                     "%" PRIu64 "/%" PRIu64 " short instructions relocated (%" PRIu64
+                     " left to the exception handler); "
+                     "outside functions: %" PRIu64 " patched in place, %" PRIu64
+                     " left to the exception handler",
+                     (name).c_str(), total.function_count,
+                     total.inplace_cpu_patch_instruction_count,
                      total.patched_cpu_patch_instruction_count, total.cpu_patch_instruction_count,
                      total.unsupported_cpu_patch_instruction_count,
                      total.uncovered_inplace_cpu_patch_instruction_count,
@@ -508,13 +522,14 @@ void Module::LoadDynamicInfo() {
             // the given app. How exactly this is generated isn't known, however it is not necessary
             // to have a valid fingerprint. While an invalid fingerprint will cause a warning to be
             // printed to the kernel log, the ELF will still load and run.
-            LOG_INFO(Core_Linker, "DT_SCE_FINGERPRINT value = {:#018x}", dyn->d_un.d_val);
+            LOG_INFO(Core_Linker, "DT_SCE_FINGERPRINT value = 0x%016" PRIx64, dyn->d_un.d_val);
             std::memcpy(info.fingerprint.data(), &dyn->d_un.d_val, sizeof(SCE_DBG_NUM_FINGERPRINT));
             break;
         case DT_SCE_IMPORT_LIB_ATTR:
             // The upper 32-bits should contain the module index multiplied by 0x10000. The lower
             // 32-bits should be a constant 0x9.
-            LOG_INFO(Core_Linker, "unsupported DT_SCE_IMPORT_LIB_ATTR value = ......: {:#018x}",
+            LOG_INFO(Core_Linker,
+                     "unsupported DT_SCE_IMPORT_LIB_ATTR value = ......: 0x%016" PRIx64,
                      dyn->d_un.d_val);
             break;
         case DT_SCE_ORIGINAL_FILENAME:
@@ -530,7 +545,8 @@ void Module::LoadDynamicInfo() {
             break;
         };
         case DT_SCE_MODULE_ATTR:
-            LOG_INFO(Core_Linker, "unsupported DT_SCE_MODULE_ATTR value = ..........: {:#018x}",
+            LOG_INFO(Core_Linker,
+                     "unsupported DT_SCE_MODULE_ATTR value = ..........: 0x%016" PRIx64,
                      dyn->d_un.d_val);
             break;
         case DT_SCE_EXPORT_LIB: {
@@ -541,7 +557,7 @@ void Module::LoadDynamicInfo() {
             break;
         }
         default:
-            LOG_INFO(Core_Linker, "unsupported dynamic tag ..........: {:#018x}", dyn->d_tag);
+            LOG_INFO(Core_Linker, "unsupported dynamic tag ..........: 0x%016" PRIx64, dyn->d_tag);
         }
     }
     const u32 relabits_num = dynamic_info.relocation_table_size / sizeof(elf_relocation) +

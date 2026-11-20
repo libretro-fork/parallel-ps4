@@ -53,7 +53,7 @@ static void LowerPackedAncillary(IR::Inst& value) {
                     ir.BitFieldExtract(mrt_index, ir.Imm32(offset - 16), ir.Imm32(bits)));
             }
         } else {
-            UNREACHABLE_MSG("Unhandled bitfield extract from ancillary VGPR offset={}, bits={}",
+            UNREACHABLE_MSG("Unhandled bitfield extract from ancillary VGPR offset=%u, bits=%u",
                             offset, bits);
         }
     }
