@@ -3,10 +3,6 @@
 
 #pragma once
 
-#include <algorithm>
-#include <array>
-#include <optional>
-
 #include "common/combiner.h"
 #include "common/enum.h"
 #include "common/incremental_id.h"
@@ -54,22 +50,31 @@ struct UniqueImage {
     UniqueImage& operator=(const UniqueImage&) = delete;
 
     UniqueImage(UniqueImage&& other) noexcept
-        : device{other.device}, allocator{std::exchange(other.allocator, nullptr)},
-          allocation{std::exchange(other.allocation, nullptr)},
-          image{std::exchange(other.image, VK_NULL_HANDLE)}, image_ci{std::move(other.image_ci)},
-          size_bytes{std::exchange(other.size_bytes, 0)} {}
+        : device{other.device}, allocator{other.allocator}, allocation{other.allocation},
+          image{other.image}, image_ci{other.image_ci}, size_bytes{other.size_bytes} {
+        other.Release();
+    }
     UniqueImage& operator=(UniqueImage&& other) noexcept {
         if (this != &other) {
             // The image this one held goes first, not left behind with its memory
             Destroy();
             device = other.device;
-            image = std::exchange(other.image, VK_NULL_HANDLE);
-            allocator = std::exchange(other.allocator, nullptr);
-            allocation = std::exchange(other.allocation, nullptr);
-            image_ci = std::move(other.image_ci);
-            size_bytes = std::exchange(other.size_bytes, 0);
+            image = other.image;
+            allocator = other.allocator;
+            allocation = other.allocation;
+            image_ci = other.image_ci;
+            size_bytes = other.size_bytes;
+            other.Release();
         }
         return *this;
+    }
+
+    /// Forgets the image without destroying it: it has been moved elsewhere
+    void Release() {
+        allocator = nullptr;
+        allocation = nullptr;
+        image = vk::Image{};
+        size_bytes = 0;
     }
 
     void Create(const vk::ImageCreateInfo& image_ci);
@@ -128,10 +133,11 @@ struct Image : public Common::LRUNode<> {
         if (!IsScaled()) {
             return info.size;
         }
-        const auto scaled = [this](u32 value) {
-            return std::max(static_cast<u32>(u64(value) * scale_num / scale_den), 1u);
-        };
-        return Extent3D{scaled(info.size.width), scaled(info.size.height), info.size.depth};
+        u32 width = static_cast<u32>(u64(info.size.width) * scale_num / scale_den);
+        u32 height = static_cast<u32>(u64(info.size.height) * scale_num / scale_den);
+        width = width ? width : 1;
+        height = height ? height : 1;
+        return Extent3D{width, height, info.size.depth};
     }
 
     bool HasGpuValidData() const {
@@ -154,9 +160,11 @@ struct Image : public Common::LRUNode<> {
     }
 
     vk::DeviceSize SizeBytes() const {
-        return std::accumulate(
-            backing_images.begin(), backing_images.end(), vk::DeviceSize(0),
-            [](vk::DeviceSize sum, const BackingImage& bi) { return sum + bi.image.size_bytes; });
+        vk::DeviceSize sum = 0;
+        for (size_t i = 0; i < backing_images.size(); ++i) {
+            sum += backing_images[i].image.size_bytes;
+        }
+        return sum;
     }
 
     ImageView& FindView(const ImageViewInfo& view_info, bool ensure_guest_samples = true);
@@ -164,7 +172,7 @@ struct Image : public Common::LRUNode<> {
     using Barriers = Common::SmallVector<vk::ImageMemoryBarrier2, 32>;
     void GetBarriers(Barriers& out_barriers, vk::ImageLayout dst_layout, vk::AccessFlags2 dst_mask,
                      vk::PipelineStageFlags2 dst_stage,
-                     std::optional<SubresourceRange> subres_range = {});
+                     const SubresourceRange* subres_range = nullptr);
 
 public:
     Vulkan::Runtime* runtime;
@@ -185,7 +193,7 @@ public:
     /// side of the pixel block (0: Vulkan's positions), samples, and x, y in sixteenths
     u8 sample_locs_grid{};
     u8 sample_locs_samples{};
-    std::array<u8, 64> sample_locs{};
+    u8 sample_locs[64]{};
     u64 depth_uid{};
 
     vk::ImageUsageFlags usage_flags;
@@ -196,9 +204,54 @@ public:
         vk::ImageLayout layout = vk::ImageLayout::eUndefined;
     };
     struct BackingImage {
+        BackingImage() = default;
+        ~BackingImage() {
+            delete[] subresource_states;
+        }
+        BackingImage(const BackingImage&) = delete;
+        BackingImage& operator=(const BackingImage&) = delete;
+        BackingImage(BackingImage&& other) noexcept
+            : image{static_cast<UniqueImage&&>(other.image)}, state{other.state},
+              subresource_states{other.subresource_states},
+              subresource_capacity{other.subresource_capacity},
+              num_subresource_states{other.num_subresource_states},
+              image_view_infos{
+                  static_cast<Common::SmallVector<ImageViewInfo, 2>&&>(other.image_view_infos)},
+              image_view_ids{
+                  static_cast<Common::SmallVector<ImageViewId, 2>&&>(other.image_view_ids)},
+              num_samples{other.num_samples} {
+            other.subresource_states = nullptr;
+            other.subresource_capacity = 0;
+            other.num_subresource_states = 0;
+        }
+        BackingImage& operator=(BackingImage&& other) noexcept {
+            if (this != &other) {
+                image = static_cast<UniqueImage&&>(other.image);
+                state = other.state;
+                delete[] subresource_states;
+                subresource_states = other.subresource_states;
+                subresource_capacity = other.subresource_capacity;
+                num_subresource_states = other.num_subresource_states;
+                other.subresource_states = nullptr;
+                other.subresource_capacity = 0;
+                other.num_subresource_states = 0;
+                image_view_infos =
+                    static_cast<Common::SmallVector<ImageViewInfo, 2>&&>(other.image_view_infos);
+                image_view_ids =
+                    static_cast<Common::SmallVector<ImageViewId, 2>&&>(other.image_view_ids);
+                num_samples = other.num_samples;
+            }
+            return *this;
+        }
+
         UniqueImage image;
         State state;
-        std::vector<State> subresource_states;
+        /// Each mip's and layer's state, while they are not all in one: made on the first
+        /// partial transition, kept for the image's life, in use while num_subresource_states
+        /// is not 0
+        State* subresource_states{};
+        u32 subresource_capacity{};
+        u32 num_subresource_states{};
         Common::SmallVector<ImageViewInfo, 2> image_view_infos;
         Common::SmallVector<ImageViewId, 2> image_view_ids;
         u32 num_samples;

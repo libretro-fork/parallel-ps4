@@ -4,6 +4,12 @@ What changed in the libretro core of this fork, newest first. Changes that come 
 
 ## Unreleased
 
+- No STL or `auto` in the images (`texture_cache/image`).
+  - **Subresource states:** an image's per-mip, per-layer states, made on its first partial transition, are a plain array kept for the image's life, as the vector's room was kept after a clear. A count of 0 says they are not in use, as an empty vector did.
+  - **Backing images:** have their own move, which hands the array over, since the texture cache's small vectors move them.
+  - **The rest:** the sample positions are a plain array, `GetBarriers` takes the range as a pointer (null for the whole image) instead of a `std::optional`, and the view lookup, the scaled size and the size sum are written out.
+  - **Unchanged:** the barriers recorded, and the same Vulkan calls and arguments.
+  - **Checks:** the Linux and Windows builds pass. Not run in a game yet.
 - No STL or `auto` in the buffers (`buffer_cache/buffer`).
   - **`mapped_data`:** a plain pointer to where the whole buffer is mapped (`size_bytes` from there), null when it is not, instead of a `std::span`. Its five users follow.
   - **Stream buffers:** their watches are plain arrays, grown with `realloc` as the vectors grew. `Reserve` returns whether it reserved and writes the offset, instead of a `std::optional`, and the staging pool follows. Stream buffers can no longer be copied or moved (nothing did, and they own their watches now).

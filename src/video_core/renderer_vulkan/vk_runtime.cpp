@@ -171,7 +171,8 @@ bool Runtime::Transit(VideoCore::Image* image, vk::ImageLayout dst_layout,
                       vk::PipelineStageFlags2 dst_stage, vk::AccessFlags2 dst_access,
                       std::optional<VideoCore::SubresourceRange> subres_range) {
     const size_t prev_num_barriers = static_cast<size_t>(image_barriers.size());
-    image->GetBarriers(image_barriers, dst_layout, dst_access, dst_stage, subres_range);
+    image->GetBarriers(image_barriers, dst_layout, dst_access, dst_stage,
+                       subres_range ? &*subres_range : nullptr);
     if (image->sample_locs_grid && image_barriers.size() != prev_num_barriers &&
         num_barrier_sample_locs < barrier_sample_locs.size()) {
         auto& entry = barrier_sample_locs[num_barrier_sample_locs];

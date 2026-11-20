@@ -149,8 +149,9 @@ Image::Image(const Vulkan::Instance& instance, Vulkan::Runtime& runtime_,
         }
     }
 
-    constexpr auto tiling = vk::ImageTiling::eOptimal;
-    const auto supported_format = instance.GetSupportedFormat(info.pixel_format, format_features);
+    constexpr vk::ImageTiling tiling = vk::ImageTiling::eOptimal;
+    const vk::Format supported_format =
+        instance.GetSupportedFormat(info.pixel_format, format_features);
     VkPhysicalDeviceImageFormatInfo2 format_info{};
     format_info.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_IMAGE_FORMAT_INFO_2;
     format_info.format = static_cast<VkFormat>(supported_format);
@@ -211,34 +212,41 @@ ImageView& Image::FindView(const ImageViewInfo& view_info, bool ensure_guest_sam
     if (ensure_guest_samples && backing->num_samples > 1 != info.num_samples > 1) {
         runtime->SetBackingSamples(this, info.num_samples);
     }
-    const auto& view_infos = backing->image_view_infos;
-    const auto it = std::ranges::find(view_infos, view_info);
-    if (it != view_infos.end()) {
-        const auto view_id = backing->image_view_ids[std::distance(view_infos.begin(), it)];
-        return (*slot_image_views)[view_id];
+    const Common::SmallVector<ImageViewInfo, 2>& view_infos = backing->image_view_infos;
+    for (size_t i = 0; i < view_infos.size(); ++i) {
+        if (view_infos[i] == view_info) {
+            return (*slot_image_views)[backing->image_view_ids[i]];
+        }
     }
-    const auto view_id = slot_image_views->Insert(runtime->GetInstance(), view_info, *this);
+    const ImageViewId view_id = slot_image_views->Insert(runtime->GetInstance(), view_info, *this);
     backing->image_view_infos.emplace_back(view_info);
     backing->image_view_ids.emplace_back(view_id);
     return (*slot_image_views)[view_id];
 }
 
 void Image::GetBarriers(Barriers& barriers, vk::ImageLayout dst_layout, vk::AccessFlags2 dst_mask,
-                        vk::PipelineStageFlags2 dst_stage,
-                        std::optional<SubresourceRange> subres_range) {
-    auto& last_state = backing->state;
-    auto& subresource_states = backing->subresource_states;
+                        vk::PipelineStageFlags2 dst_stage, const SubresourceRange* subres_range) {
+    State& last_state = backing->state;
 
     const bool needs_partial_transition =
         subres_range &&
         (subres_range->base != SubresourceBase{} || subres_range->extent != info.resources);
-    const bool partially_transited = !subresource_states.empty();
+    const bool partially_transited = backing->num_subresource_states != 0;
 
     if (needs_partial_transition || partially_transited) {
         if (!partially_transited) {
-            subresource_states.resize(info.resources.levels * info.resources.layers);
-            std::fill(subresource_states.begin(), subresource_states.end(), last_state);
+            const u32 count = u32(info.resources.levels) * info.resources.layers;
+            if (backing->subresource_capacity < count) {
+                delete[] backing->subresource_states;
+                backing->subresource_states = new State[count];
+                backing->subresource_capacity = count;
+            }
+            for (u32 i = 0; i < count; ++i) {
+                backing->subresource_states[i] = last_state;
+            }
+            backing->num_subresource_states = count;
         }
+        State* const subresource_states = backing->subresource_states;
 
         // In case of partial transition, we need to change the specified subresources only.
         // Otherwise all subresources need to be set to the same state so we can use a full
@@ -255,13 +263,13 @@ void Image::GetBarriers(Barriers& barriers, vk::ImageLayout dst_layout, vk::Acce
             for (u32 layer = start_layer; layer < end_layer; ++layer) {
                 // NOTE: these loops may produce a lot of small barriers.
                 // If this becomes a problem, we can optimize it by merging adjacent barriers.
-                const auto subres_idx = mip * info.resources.layers + layer;
-                ASSERT(subres_idx < subresource_states.size());
-                auto& state = subresource_states[subres_idx];
+                const u32 subres_idx = mip * info.resources.layers + layer;
+                ASSERT(subres_idx < backing->num_subresource_states);
+                State& state = subresource_states[subres_idx];
 
-                constexpr auto write_flags = vk::AccessFlagBits2::eTransferWrite |
-                                             vk::AccessFlagBits2::eShaderWrite |
-                                             vk::AccessFlagBits2::eMemoryWrite;
+                constexpr vk::AccessFlags2 write_flags = vk::AccessFlagBits2::eTransferWrite |
+                                                         vk::AccessFlagBits2::eShaderWrite |
+                                                         vk::AccessFlagBits2::eMemoryWrite;
                 const bool is_write = static_cast<bool>(state.access_mask & write_flags);
                 if (state.layout != dst_layout || state.access_mask != dst_mask || is_write) {
                     barriers.emplace_back(vk::ImageMemoryBarrier2{
@@ -290,12 +298,12 @@ void Image::GetBarriers(Barriers& barriers, vk::ImageLayout dst_layout, vk::Acce
         }
 
         if (!needs_partial_transition) {
-            subresource_states.clear();
+            backing->num_subresource_states = 0;
         }
     } else { // Full resource transition
-        constexpr auto write_flags = vk::AccessFlagBits2::eTransferWrite |
-                                     vk::AccessFlagBits2::eShaderWrite |
-                                     vk::AccessFlagBits2::eMemoryWrite;
+        constexpr vk::AccessFlags2 write_flags = vk::AccessFlagBits2::eTransferWrite |
+                                                 vk::AccessFlagBits2::eShaderWrite |
+                                                 vk::AccessFlagBits2::eMemoryWrite;
         const bool is_write = static_cast<bool>(last_state.access_mask & write_flags);
         if (last_state.layout == dst_layout && last_state.access_mask == dst_mask && !is_write) {
             return;

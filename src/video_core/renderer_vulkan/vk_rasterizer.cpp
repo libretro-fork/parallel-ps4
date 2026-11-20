@@ -1415,7 +1415,7 @@ RenderState Rasterizer::BeginRendering(const GraphicsPipeline* pipeline) {
         if (key.sample_locations) {
             image.sample_locs_grid = static_cast<u8>(amdgpu_sample_locs(
                 regs.aa_sample_locs, key.num_samples, instance.SampleLocationGrid(key.num_samples),
-                image.sample_locs.data()));
+                image.sample_locs));
             image.sample_locs_samples = key.num_samples;
         }
 
