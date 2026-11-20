@@ -12,7 +12,7 @@
 
 namespace Common {
 
-void* ReserveMemoryPages(std::size_t size) noexcept {
+void* ReserveMemoryPages(size_t size) noexcept {
 #ifdef _WIN32
     void* const base = VirtualAlloc(nullptr, size, MEM_RESERVE, PAGE_NOACCESS);
     ASSERT(base);
@@ -24,7 +24,7 @@ void* ReserveMemoryPages(std::size_t size) noexcept {
     return base;
 }
 
-void CommitMemoryPages(void* address, std::size_t size) noexcept {
+void CommitMemoryPages(void* address, size_t size) noexcept {
 #ifdef _WIN32
     void* const result = VirtualAlloc(address, size, MEM_COMMIT, PAGE_READWRITE);
 #else
@@ -34,7 +34,7 @@ void CommitMemoryPages(void* address, std::size_t size) noexcept {
     ASSERT(result == address);
 }
 
-void ReleaseMemoryPages(void* base, [[maybe_unused]] std::size_t size) noexcept {
+void ReleaseMemoryPages(void* base, [[maybe_unused]] size_t size) noexcept {
     if (!base) {
         return;
     }

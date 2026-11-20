@@ -12,6 +12,7 @@
 #include <mutex>
 #include <optional>
 #include <set>
+#include <unordered_map>
 #include <unordered_set>
 #include <vector>
 #include <encodings/rzstd.h>
@@ -67,19 +68,22 @@ static bool InitializeIndexTables() {
     if (rcp_index_tables_initialized) {
         return true;
     }
-    const auto rcp_file = Common::GetEmbeddedResource("src/resources/amd_rcp_index_table.bin.zstd");
+    size_t rcp_file_size = 0;
+    const u8* const rcp_file =
+        Common::GetEmbeddedResource("src/resources/amd_rcp_index_table.bin.zstd", &rcp_file_size);
     size_t rcp_size = 0;
-    if (rzstd_decode(reinterpret_cast<u8*>(rcp_index_table.data()), rcp_index_table_size,
-                     rcp_file.data(), rcp_file.size(), &rcp_size) != RZSTD_PROCESS_END ||
+    if (rzstd_decode(reinterpret_cast<u8*>(rcp_index_table.data()), rcp_index_table_size, rcp_file,
+                     rcp_file_size, &rcp_size) != RZSTD_PROCESS_END ||
         rcp_size != rcp_index_table_size) {
         LOG_WARNING(Core, "Failed to decompress AMD RCP index table");
         return false;
     }
-    const auto rsqrt_file =
-        Common::GetEmbeddedResource("src/resources/amd_rsqrt_index_table.bin.zstd");
+    size_t rsqrt_file_size = 0;
+    const u8* const rsqrt_file = Common::GetEmbeddedResource(
+        "src/resources/amd_rsqrt_index_table.bin.zstd", &rsqrt_file_size);
     size_t rsqrt_size = 0;
     if (rzstd_decode(reinterpret_cast<u8*>(rsqrt_index_table.data()), rcp_index_table_size,
-                     rsqrt_file.data(), rsqrt_file.size(), &rsqrt_size) != RZSTD_PROCESS_END ||
+                     rsqrt_file, rsqrt_file_size, &rsqrt_size) != RZSTD_PROCESS_END ||
         rsqrt_size != rcp_index_table_size) {
         LOG_WARNING(Core, "Failed to decompress AMD RSQRT index table");
         return false;

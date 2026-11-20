@@ -9,9 +9,9 @@ namespace Common {
 
 NativeClock::NativeClock()
     : rdtsc_frequency{EstimateRDTSCFrequency()},
-      ns_rdtsc_factor{GetFixedPoint64Factor(std::nano::den, rdtsc_frequency)},
-      us_rdtsc_factor{GetFixedPoint64Factor(std::micro::den, rdtsc_frequency)},
-      ms_rdtsc_factor{GetFixedPoint64Factor(std::milli::den, rdtsc_frequency)} {}
+      ns_rdtsc_factor{GetFixedPoint64Factor(1000000000, rdtsc_frequency)},
+      us_rdtsc_factor{GetFixedPoint64Factor(1000000, rdtsc_frequency)},
+      ms_rdtsc_factor{GetFixedPoint64Factor(1000, rdtsc_frequency)} {}
 
 u64 NativeClock::GetTimeNS(u64 base_ptc /*= 0*/) const {
     return MultiplyHigh(GetUptime() - base_ptc, ns_rdtsc_factor);

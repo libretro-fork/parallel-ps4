@@ -180,7 +180,7 @@ struct AddressSpace::Impl {
                 MEM_RESERVE | MEM_RESERVE_PLACEHOLDER, PAGE_NOACCESS, NULL, 0));
             // All marked regions should reserve fine since they're free.
             ASSERT_MSG(addr, "Unable to reserve virtual address space: %s",
-                       (Common::GetLastErrorMsg()).c_str());
+                       Common::GetLastErrorMsg());
         }
 
         // Set these constants to ensure code relying on them works.
@@ -201,18 +201,18 @@ struct AddressSpace::Impl {
                                             PAGE_EXECUTE_READWRITE, SEC_COMMIT, BackingSize,
                                             nullptr, nullptr, 0);
 
-        ASSERT_MSG(backing_handle, "%s", (Common::GetLastErrorMsg()).c_str());
+        ASSERT_MSG(backing_handle, "%s", Common::GetLastErrorMsg());
         // Allocate a virtual memory for the backing file map as placeholder
         backing_base = static_cast<u8*>(VirtualAlloc2(process, nullptr, BackingSize,
                                                       MEM_RESERVE | MEM_RESERVE_PLACEHOLDER,
                                                       PAGE_NOACCESS, nullptr, 0));
-        ASSERT_MSG(backing_base, "%s", (Common::GetLastErrorMsg()).c_str());
+        ASSERT_MSG(backing_base, "%s", Common::GetLastErrorMsg());
 
         // Map backing placeholder. This will commit the pages
         void* const ret =
             MapViewOfFile3(backing_handle, process, backing_base, 0, BackingSize,
                            MEM_REPLACE_PLACEHOLDER, PAGE_EXECUTE_READWRITE, nullptr, 0);
-        ASSERT_MSG(ret == backing_base, "%s", (Common::GetLastErrorMsg()).c_str());
+        ASSERT_MSG(ret == backing_base, "%s", Common::GetLastErrorMsg());
     }
 
     ~Impl() {
@@ -259,7 +259,7 @@ struct AddressSpace::Impl {
                 param.Offset = phys_addr & 0xffffffffull;
                 param.OffsetHigh = (phys_addr & 0xffffffff00000000ull) >> 32;
                 bool ret = ReadFile(backing, ptr, size, &resultvar, &param);
-                ASSERT_MSG(ret, "ReadFile failed. %s", (Common::GetLastErrorMsg()).c_str());
+                ASSERT_MSG(ret, "ReadFile failed. %s", Common::GetLastErrorMsg());
 
                 // ReadFile moves the file pointer, restore it with SetFilePointer
                 s64 size_to_move = -size;
@@ -269,24 +269,21 @@ struct AddressSpace::Impl {
 
                 // Protect the memory area appropriately
                 ret = VirtualProtect(ptr, size, prot, &resultvar);
-                ASSERT_MSG(ret, "VirtualProtect failed. %s", (Common::GetLastErrorMsg()).c_str());
+                ASSERT_MSG(ret, "VirtualProtect failed. %s", Common::GetLastErrorMsg());
             } else {
                 if (prot == PAGE_NOACCESS) {
                     DWORD resultvar;
                     ptr = MapViewOfFile3(backing, process, reinterpret_cast<PVOID>(virtual_addr),
                                          phys_addr, size, MEM_REPLACE_PLACEHOLDER, PAGE_READWRITE,
                                          nullptr, 0);
-                    ASSERT_MSG(ptr, "MapViewOfFile3 failed. %s",
-                               (Common::GetLastErrorMsg()).c_str());
+                    ASSERT_MSG(ptr, "MapViewOfFile3 failed. %s", Common::GetLastErrorMsg());
                     bool ret = VirtualProtect(ptr, size, prot, &resultvar);
-                    ASSERT_MSG(ret, "VirtualProtect failed. %s",
-                               (Common::GetLastErrorMsg()).c_str());
+                    ASSERT_MSG(ret, "VirtualProtect failed. %s", Common::GetLastErrorMsg());
                 } else {
                     ptr =
                         MapViewOfFile3(backing, process, reinterpret_cast<PVOID>(virtual_addr),
                                        phys_addr, size, MEM_REPLACE_PLACEHOLDER, prot, nullptr, 0);
-                    ASSERT_MSG(ptr, "MapViewOfFile3 failed. %s",
-                               (Common::GetLastErrorMsg()).c_str());
+                    ASSERT_MSG(ptr, "MapViewOfFile3 failed. %s", Common::GetLastErrorMsg());
                 }
             }
         } else {
@@ -294,7 +291,7 @@ struct AddressSpace::Impl {
                 VirtualAlloc2(process, reinterpret_cast<PVOID>(virtual_addr), size,
                               MEM_RESERVE | MEM_COMMIT | MEM_REPLACE_PLACEHOLDER, prot, nullptr, 0);
         }
-        ASSERT_MSG(ptr, "%s", (Common::GetLastErrorMsg()).c_str());
+        ASSERT_MSG(ptr, "%s", Common::GetLastErrorMsg());
 
         for (const auto& info : protections) {
             const VAddr info_base = reinterpret_cast<VAddr>(info.BaseAddress);
@@ -306,7 +303,7 @@ struct AddressSpace::Impl {
             DWORD old_flags{};
             const bool ret =
                 VirtualProtectEx(process, LPVOID(begin), end - begin, info.Protect, &old_flags);
-            ASSERT_MSG(ret, "VirtualProtectEx failed. %s", (Common::GetLastErrorMsg()).c_str());
+            ASSERT_MSG(ret, "VirtualProtectEx failed. %s", Common::GetLastErrorMsg());
         }
         return ptr;
     }
@@ -322,7 +319,7 @@ struct AddressSpace::Impl {
             }
             MEMORY_BASIC_INFORMATION info{};
             const bool ret = VirtualQueryEx(process, LPCVOID(addr), &info, sizeof(info));
-            ASSERT_MSG(ret, "VirtualQueryEx failed. %s", (Common::GetLastErrorMsg()).c_str());
+            ASSERT_MSG(ret, "VirtualQueryEx failed. %s", Common::GetLastErrorMsg());
             if (info.Protect != region.prot) {
                 protections.push_back(info);
             }
@@ -347,7 +344,7 @@ struct AddressSpace::Impl {
                                 MEM_RELEASE | MEM_PRESERVE_PLACEHOLDER);
         }
         ASSERT_MSG(ret, "Unmap on virtual_addr 0x%" PRIxPTR ", size 0x%" PRIx64 " failed: %s",
-                   virtual_addr, size, (Common::GetLastErrorMsg()).c_str());
+                   virtual_addr, size, Common::GetLastErrorMsg());
     }
 
     void SplitRegion(VAddr virtual_addr, u64 size) {
@@ -384,7 +381,7 @@ struct AddressSpace::Impl {
             // Use VirtualFreeEx to create the split.
             if (!VirtualFreeEx(process, LPVOID(region.base), region.size,
                                MEM_RELEASE | MEM_PRESERVE_PLACEHOLDER)) {
-                UNREACHABLE_MSG("Region splitting failed: %s", (Common::GetLastErrorMsg()).c_str());
+                UNREACHABLE_MSG("Region splitting failed: %s", Common::GetLastErrorMsg());
             }
 
             // If the mapping was mapped, remap the region.
@@ -423,7 +420,7 @@ struct AddressSpace::Impl {
             // Use VirtualFreeEx to create the split.
             if (!VirtualFreeEx(process, LPVOID(region.base), region.size,
                                MEM_RELEASE | MEM_PRESERVE_PLACEHOLDER)) {
-                UNREACHABLE_MSG("Region splitting failed: %s", (Common::GetLastErrorMsg()).c_str());
+                UNREACHABLE_MSG("Region splitting failed: %s", Common::GetLastErrorMsg());
             }
 
             // If these regions were mapped, then map the unmapped area beyond the requested range.
@@ -503,8 +500,7 @@ struct AddressSpace::Impl {
         if (can_coalesce) {
             if (!VirtualFreeEx(process, LPVOID(it->first), it->second.size,
                                MEM_RELEASE | MEM_COALESCE_PLACEHOLDERS)) {
-                UNREACHABLE_MSG("Region coalescing failed: %s",
-                                (Common::GetLastErrorMsg()).c_str());
+                UNREACHABLE_MSG("Region coalescing failed: %s", Common::GetLastErrorMsg());
             }
         }
     }
@@ -611,7 +607,7 @@ struct AddressSpace::Impl {
                         "Failed to change virtual memory protection for address 0x%" PRIxPTR
                         ", size "
                         "0x%" PRIx64 ", error %s",
-                        virtual_addr, size, (Common::GetLastErrorMsg()).c_str());
+                        virtual_addr, size, Common::GetLastErrorMsg());
                 }
             }
         });

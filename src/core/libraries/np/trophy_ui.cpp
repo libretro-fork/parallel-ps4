@@ -151,8 +151,9 @@ static void PreloadTrophySoundInto() {
         }
         return;
     }
-    const auto file = Common::GetEmbeddedResource("src/resources/trophy.wav");
-    if (ParseWav(file.data(), file.size(), &samples, &frames, &channels, &hz)) {
+    size_t file_size = 0;
+    const u8* const file = Common::GetEmbeddedResource("src/resources/trophy.wav", &file_size);
+    if (ParseWav(file, file_size, &samples, &frames, &channels, &hz)) {
         ResampleTrophySound(samples, frames, channels, hz);
     }
 }
@@ -183,8 +184,10 @@ void AddTrophyToQueue(const std::filesystem::path& trophyIconPath, const std::st
             type_icon = Common::FS::FileView::Map(custom);
         } else {
             // Embedded in the core: lent, not copied
-            type_icon = Common::FS::FileView::Borrow(
-                Common::GetEmbeddedResource(std::string("src/resources/") + type_name));
+            const std::string path = std::string("src/resources/") + type_name;
+            size_t size = 0;
+            const u8* const bytes = Common::GetEmbeddedResource(path.c_str(), &size);
+            type_icon = Common::FS::FileView::Borrow({bytes, size});
         }
     }
     // Decoded here, on the game's thread, before the overlay shows it

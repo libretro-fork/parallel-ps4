@@ -950,17 +950,17 @@ s32 PS4_SYSV_ABI sceKernelReleaseFlexibleMemory(void* addr, u64 len) {
 
 #if defined(_WIN32)
     if (!VirtualAlloc(addr, len, MEM_RESET, PAGE_READWRITE)) {
-        LOG_ERROR(Kernel_Vmm, "VirtualAlloc failed: %s", (Common::GetLastErrorMsg()).c_str());
+        LOG_ERROR(Kernel_Vmm, "VirtualAlloc failed: %s", Common::GetLastErrorMsg());
         return ORBIS_KERNEL_ERROR_EINVAL;
     }
 #elif defined(__APPLE__)
     if (madvise(addr, len, MADV_FREE) != 0) {
-        LOG_ERROR(Kernel_Vmm, "madvise failed: %s", Common::GetLastErrorMsg().c_str());
+        LOG_ERROR(Kernel_Vmm, "madvise failed: %s", Common::GetLastErrorMsg());
         return ORBIS_KERNEL_ERROR_EINVAL;
     }
 #else
     if (madvise(addr, len, MADV_DONTNEED) != 0) {
-        LOG_ERROR(Kernel_Vmm, "madvise failed: %s", (Common::GetLastErrorMsg()).c_str());
+        LOG_ERROR(Kernel_Vmm, "madvise failed: %s", Common::GetLastErrorMsg());
         return ORBIS_KERNEL_ERROR_EINVAL;
     }
 #endif

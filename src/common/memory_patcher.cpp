@@ -14,6 +14,7 @@
 #include "common/patch_halve.h"
 #include "common/patch_index.h"
 #include "common/path_util.h"
+#include "common/small_vector.h"
 #include "common/xml.h"
 #include "core/file_format/psf.h"
 #include "memory_patcher.h"
@@ -251,24 +252,35 @@ void ApplyPatchesFromXML(std::filesystem::path path) {
     }
 }
 
-bool BuildCatalog(patch_catalog_t& cat, const char* serial) {
-    static constexpr std::string_view prefix = "src/resources/patches/";
-    std::vector<patch_catalog_source_t> sources;
-    Common::ForEachEmbeddedResource(prefix, [&](std::string_view path, std::span<const u8> data) {
-        // The repository is the folder the file is in, named by a string that lasts
-        const std::string_view rest = path.substr(prefix.size());
-        const auto slash = rest.find('/');
-        if (slash == std::string_view::npos) {
+namespace {
+
+constexpr const char PatchPrefix[] = "src/resources/patches/";
+
+using CatalogSources = Common::SmallVector<patch_catalog_source_t, 256>;
+
+/// A patch file the core carries, filed under its repository: the folder it is in, named by a
+/// string that lasts
+void AddCatalogSource(void* ctx, const char* path, const u8* data, size_t size) {
+    static constexpr const char* repositories[] = {"shadPS4", "GoldHEN", "ParaLLEl"};
+    const char* const rest = path + sizeof(PatchPrefix) - 1;
+    const char* const slash = strchr(rest, '/');
+    if (!slash) {
+        return;
+    }
+    const size_t length = static_cast<size_t>(slash - rest);
+    for (const char* repository : repositories) {
+        if (strlen(repository) == length && strncmp(rest, repository, length) == 0) {
+            static_cast<CatalogSources*>(ctx)->push_back({repository, data, size});
             return;
         }
-        static constexpr std::string_view repositories[] = {"shadPS4", "GoldHEN", "ParaLLEl"};
-        for (const std::string_view repository : repositories) {
-            if (rest.substr(0, slash) == repository) {
-                sources.push_back({repository.data(), data.data(), data.size()});
-                return;
-            }
-        }
-    });
+    }
+}
+
+} // Anonymous namespace
+
+bool BuildCatalog(patch_catalog_t& cat, const char* serial) {
+    CatalogSources sources;
+    Common::ForEachEmbeddedResource(PatchPrefix, AddCatalogSource, &sources);
     return patch_catalog_build(&cat, sources.data(), sources.size(), serial) != 0;
 }
 

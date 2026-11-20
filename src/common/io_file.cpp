@@ -290,7 +290,7 @@ uintptr_t IOFile::GetFileMapping() {
     }
 
     file_mapping = std::bit_cast<uintptr_t>(mapping);
-    ASSERT_MSG(file_mapping, "%s", (Common::GetLastErrorMsg()).c_str());
+    ASSERT_MSG(file_mapping, "%s", Common::GetLastErrorMsg());
     return file_mapping;
 #else
     const int fd = Descriptor(file);

@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright 2021 yuzu Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include <stdlib.h>
 #include "common/arch.h"
 #include "common/assert.h"
 #include "core/signals.h"
@@ -22,7 +23,7 @@ void assert_fail_impl() {
 
 [[noreturn]] void unreachable_impl() {
     assert_fail_impl();
-    throw std::runtime_error("Unreachable code");
+    abort();
 }
 
 void assert_fail_debug_msg(const char* msg) {

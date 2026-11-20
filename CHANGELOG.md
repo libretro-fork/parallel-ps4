@@ -4,6 +4,12 @@ What changed in the libretro core of this fork, newest first. Changes that come 
 
 ## Unreleased
 
+- No STL in a first set of `common` files: the error messages, the embedded resources, the singletons, the slab heap, quick exit, the clock's constants and a few small ones.
+  - **`Common::GetLastErrorMsg`:** returns a C string in a buffer of the calling thread's, instead of a `std::string`. Its callers drop `.c_str()`.
+  - **Embedded resources:** `GetEmbeddedResource` takes a C string and returns a pointer and a size; `ForEachEmbeddedResource` takes a C callback with a context, instead of a `std::function`. Their users (the overlays' fonts, the CPU patches' tables, the font library, the trophy sound and icons, the patch catalog) follow.
+  - **The rest:** a singleton holds a plain pointer made once for the process's life, instead of a `std::unique_ptr` (it was never reset); the slab heap constructs and destroys in place without `std::construct_at`; `unreachable_impl` aborts instead of throwing; `std::quick_exit`, the ratio constants, `std::copy_n` and `auto` give way to their plain forms.
+  - **Unchanged:** what the core does. `cpu_patches.cpp` now includes `<unordered_map>` itself, which it had through another header.
+  - **Checks:** the Linux and Windows builds pass. Not run in a game yet.
 - No `auto` and much less STL in the pipeline cache (`vk_pipeline_cache`).
   - **Lambdas made functions:** the draw's skip check (`SkipUnready`), binding a stage (`BindStage`), making a job (`MakeJob`), what every stage takes from its program's registers (`BuildCommon`) and the primitive a tessellation hands the geometry stage are functions of their own.
   - **Jobs:** a compile job's user data, stage copies, runtimes and modules are plain arrays. The fetch shader data a job carries is a value with a flag instead of a `std::optional`, and the program it makes is a plain pointer it deletes, instead of a `std::unique_ptr`.

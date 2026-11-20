@@ -46,15 +46,17 @@ Swapchain::Swapchain(const Instance& instance_, const Frontend::Window& window_)
     Create(window.GetWidth(), window.GetHeight());
     {
         // The overlays, with the UI font read in place from what the core carries
-        const auto font = Common::GetEmbeddedResource("src/resources/fonts/NotoSans-Regular.ttf");
+        size_t font_size = 0;
+        const u8* const font =
+            Common::GetEmbeddedResource("src/resources/fonts/NotoSans-Regular.ttf", &font_size);
         ovl_vk_info_t info{};
         info.get_device_proc = VULKAN_HPP_DEFAULT_DISPATCHER.vkGetDeviceProcAddr;
         info.device = static_cast<VkDevice>(instance.GetDevice());
         info.memory_properties = instance.GetPhysicalDevice().getMemoryProperties();
         info.image_count = image_count;
         info.surface_format = static_cast<VkFormat>(surface_format.format);
-        info.font = font.data();
-        info.font_size = font.size();
+        info.font = font;
+        info.font_size = font_size;
         // The fonts after it, tried in turn for what it lacks: Arabic, Thai, symbols, then the
         // CJK collection's face for the console's language
         static constexpr const char* fallbacks[] = {
@@ -65,9 +67,9 @@ Swapchain::Swapchain(const Instance& instance_, const Frontend::Window& window_)
         };
         ovl_face_desc_t faces[std::size(fallbacks)]{};
         for (size_t i = 0; i < std::size(fallbacks); i++) {
-            const auto data = Common::GetEmbeddedResource(fallbacks[i]);
-            faces[i].data = data.data();
-            faces[i].size = data.size();
+            size_t size = 0;
+            faces[i].data = Common::GetEmbeddedResource(fallbacks[i], &size);
+            faces[i].size = size;
         }
         // The collection's faces: Japanese, Korean, Simplified and Traditional Chinese; the
         // console's languages 9, 11 and 10 are the last three, any other reads the Japanese
@@ -91,7 +93,7 @@ Swapchain::Swapchain(const Instance& instance_, const Frontend::Window& window_)
         info.splash = splash.data();
         info.splash_size = splash.size();
         // Without them the game still runs: no FPS counter, notifications or trophy popups
-        if (font.empty()) {
+        if (!font) {
             LOG_ERROR(Render_Vulkan, "The UI font is not among the core's resources: the "
                                      "overlays are off (a clean build puts it back)");
         } else if (!ovl_vk_init(&info)) {

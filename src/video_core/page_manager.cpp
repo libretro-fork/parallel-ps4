@@ -276,7 +276,7 @@ public:
         if (uffd == -1) {
             LOG_ERROR(Common_Memory,
                       "userfaultfd syscall failed: %s, falling back to signal implementation",
-                      (Common::GetLastErrorMsg()).c_str());
+                      Common::GetLastErrorMsg());
             throw std::runtime_error("userfaultfd");
         }
 
@@ -288,7 +288,7 @@ public:
         if (ret != 0) {
             LOG_ERROR(Common_Memory,
                       "uffdio_api call failed: %s, falling back to signal implementation",
-                      (Common::GetLastErrorMsg()).c_str());
+                      Common::GetLastErrorMsg());
             throw std::runtime_error("uffdio_api");
         }
 
@@ -311,8 +311,7 @@ public:
         reg.range.len = size;
         reg.mode = UFFDIO_REGISTER_MODE_WP;
         const int ret = ioctl(uffd, UFFDIO_REGISTER, &reg);
-        ASSERT_MSG(ret != -1, "Uffdio register failed with error: %s",
-                   (Common::GetLastErrorMsg()).c_str());
+        ASSERT_MSG(ret != -1, "Uffdio register failed with error: %s", Common::GetLastErrorMsg());
     }
 
     void OnUnmap(VAddr address, size_t size) override {
@@ -320,8 +319,7 @@ public:
         range.start = address;
         range.len = size;
         const int ret = ioctl(uffd, UFFDIO_UNREGISTER, &range);
-        ASSERT_MSG(ret != -1, "Uffdio unregister failed with error: %s",
-                   (Common::GetLastErrorMsg()).c_str());
+        ASSERT_MSG(ret != -1, "Uffdio unregister failed with error: %s", Common::GetLastErrorMsg());
     }
 
     void Protect(VAddr address, size_t size, Core::MemoryPermission perms) override {
@@ -332,7 +330,7 @@ public:
         wp.mode = allow_write ? UFFDIO_WRITEPROTECT_MODE_DONTWAKE : UFFDIO_WRITEPROTECT_MODE_WP;
         const int ret = ioctl(uffd, UFFDIO_WRITEPROTECT, &wp);
         ASSERT_MSG(ret != -1, "Uffdio writeprotect failed with error: %s",
-                   (Common::GetLastErrorMsg()).c_str());
+                   Common::GetLastErrorMsg());
     }
 
     void UffdHandler() {
@@ -380,7 +378,7 @@ public:
                     continue;
                 }
                 LOG_ERROR(Common_Memory, "Unexpected result of uffd read: %s",
-                          (Common::GetLastErrorMsg()).c_str());
+                          Common::GetLastErrorMsg());
                 break;
             }
             ASSERT_MSG(readret == sizeof(msg), "Unexpected short read, exiting");
@@ -399,7 +397,7 @@ public:
             wake.len = PageManager::PM_PAGE_SIZE;
             const int ret = ioctl(uffd, UFFDIO_WAKE, &wake);
             ASSERT_MSG(ret != -1, "Waking thread %u failed with: %s", ptid,
-                       (Common::GetLastErrorMsg()).c_str());
+                       Common::GetLastErrorMsg());
         }
     }
 };

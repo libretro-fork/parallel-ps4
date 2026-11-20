@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include <new>
+
 #include <memory>
 #include <retro_atomic.h>
 #include "common/assert.h"
@@ -168,13 +170,13 @@ public:
         T* obj = static_cast<T*>(BaseHeap::Allocate());
 
         if (obj != nullptr) [[likely]] {
-            std::construct_at(obj);
+            new (obj) T();
         }
         return obj;
     }
 
     void Free(T* obj) {
-        std::destroy_at(obj);
+        obj->~T();
         BaseHeap::Free(obj);
     }
 

@@ -3,14 +3,14 @@
 
 #pragma once
 
-#include <algorithm>
-
 template <size_t N, typename C = char>
 struct StringLiteral {
     static constexpr size_t len = N;
 
     constexpr StringLiteral(const C (&str)[N]) {
-        std::copy_n(str, N, value);
+        for (size_t i = 0; i < N; ++i) {
+            value[i] = str[i];
+        }
     }
 
     C value[N]{};

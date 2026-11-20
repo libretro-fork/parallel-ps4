@@ -3,8 +3,6 @@
 
 #pragma once
 
-#include <memory>
-
 namespace Common {
 
 template <class T>
@@ -12,14 +10,15 @@ class Singleton {
 public:
     static T* Instance() {
         if (!m_instance) {
-            m_instance = std::make_unique<T>();
+            // Made once, kept for the process's life
+            m_instance = new T();
         }
-        return m_instance.get();
+        return m_instance;
     }
 
     /// The instance if there is one yet, never making it: for a crash report
     static T* Peek() {
-        return m_instance.get();
+        return m_instance;
     }
 
 protected:
@@ -27,7 +26,7 @@ protected:
     ~Singleton();
 
 private:
-    static inline std::unique_ptr<T> m_instance{};
+    static inline T* m_instance{};
 };
 
 } // namespace Common

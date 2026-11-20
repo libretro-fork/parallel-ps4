@@ -15,7 +15,7 @@ static constexpr size_t SecondToNanoseconds = 1000000000ULL;
 
 template <u64 Nearest>
 static u64 RoundToNearest(u64 value) {
-    const auto mod = value % Nearest;
+    const u64 mod = value % Nearest;
     return mod >= (Nearest / 2) ? (value - mod + Nearest) : (value - mod);
 }
 
@@ -45,12 +45,12 @@ u64 EstimateRDTSCFrequency() {
     FencedRDTSC();
 
     // Get the current time.
-    const auto start_time = GetTimeNs();
+    const u64 start_time = GetTimeNs();
     const u64 tsc_start = FencedRDTSC();
     // Wait for 100 milliseconds: of the host's time, which is what the counter's rate is
     // measured against. Once, as the emulator starts, before there is a game.
     retro_sleep(100);
-    const auto end_time = GetTimeNs();
+    const u64 end_time = GetTimeNs();
     const u64 tsc_end = FencedRDTSC();
     // Calculate differences.
     const u64 tsc_diff = tsc_end - tsc_start;

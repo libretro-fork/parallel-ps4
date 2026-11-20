@@ -109,10 +109,12 @@ struct BuiltinFontBlob {
 };
 
 static FontBlob BorrowEmbeddedFont(std::string_view name) {
-    const auto bytes = Common::GetEmbeddedResource(name);
-    return bytes.empty()
-               ? FontBlob{}
-               : std::make_shared<const Common::FS::FileView>(Common::FS::FileView::Borrow(bytes));
+    const std::string path{name};
+    size_t size = 0;
+    const u8* const bytes = Common::GetEmbeddedResource(path.c_str(), &size);
+    return !bytes ? FontBlob{}
+                  : std::make_shared<const Common::FS::FileView>(
+                        Common::FS::FileView::Borrow({bytes, size}));
 }
 
 static const std::array<BuiltinFontBlob, 8> kBuiltinFontBlobs = [] {

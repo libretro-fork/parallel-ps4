@@ -4,18 +4,10 @@
 
 #pragma once
 
-#include <string>
-
 namespace Common {
 
-// Generic function to get last error message.
-// Call directly after the command or use the error num.
-// This function might change the error code.
-// Defined in error.cpp.
-[[nodiscard]] std::string GetLastErrorMsg();
-
-// Like GetLastErrorMsg(), but passing an explicit error code.
-// Defined in error.cpp.
-[[nodiscard]] std::string NativeErrorToString(int e);
+/// The last system error, in words: in a buffer of the calling thread's, good until its next
+/// call
+[[nodiscard]] const char* GetLastErrorMsg();
 
 } // namespace Common

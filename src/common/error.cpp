@@ -2,55 +2,53 @@
 // SPDX-FileCopyrightText: 2014 Citra Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
-#include <cstddef>
+#include <stddef.h>
 #ifdef _WIN32
 #include <windows.h>
 #else
-#include <cerrno>
-#include <cstring>
+#include <errno.h>
+#include <string.h>
 #endif
 
 #include "common/error.h"
 
 namespace Common {
 
-std::string NativeErrorToString(int e) {
-#ifdef _WIN32
-    LPSTR err_str;
+namespace {
 
-    DWORD res = FormatMessageA(FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_ALLOCATE_BUFFER |
-                                   FORMAT_MESSAGE_IGNORE_INSERTS,
-                               nullptr, e, MAKELANGID(LANG_ENGLISH, SUBLANG_ENGLISH_US),
-                               reinterpret_cast<LPSTR>(&err_str), 1, nullptr);
+/// @e in words, into @out
+const char* NativeErrorToString(int e, char* out, size_t size) {
+#ifdef _WIN32
+    const DWORD res = FormatMessageA(FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
+                                     nullptr, e, MAKELANGID(LANG_ENGLISH, SUBLANG_ENGLISH_US), out,
+                                     static_cast<DWORD>(size), nullptr);
     if (!res) {
         return "(FormatMessageA failed to format error)";
     }
-    std::string ret(err_str);
-    LocalFree(err_str);
-    return ret;
+    return out;
 #else
-    char err_str[255];
 #if defined(__GLIBC__) && (_GNU_SOURCE || (_POSIX_C_SOURCE < 200112L && _XOPEN_SOURCE < 600)) ||   \
     defined(ANDROID)
     // Thread safe (GNU-specific)
-    const char* str = strerror_r(e, err_str, sizeof(err_str));
-    return std::string(str);
+    return strerror_r(e, out, size);
 #else
     // Thread safe (XSI-compliant)
-    int second_err = strerror_r(e, err_str, sizeof(err_str));
-    if (second_err != 0) {
+    if (strerror_r(e, out, size) != 0) {
         return "(strerror_r failed to format error)";
     }
-    return std::string(err_str);
+    return out;
 #endif // GLIBC etc.
 #endif // _WIN32
 }
 
-std::string GetLastErrorMsg() {
+} // Anonymous namespace
+
+const char* GetLastErrorMsg() {
+    static thread_local char message[256];
 #ifdef _WIN32
-    return NativeErrorToString(GetLastError());
+    return NativeErrorToString(static_cast<int>(GetLastError()), message, sizeof(message));
 #else
-    return NativeErrorToString(errno);
+    return NativeErrorToString(errno, message, sizeof(message));
 #endif
 }
 

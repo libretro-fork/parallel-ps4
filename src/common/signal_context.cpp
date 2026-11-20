@@ -26,7 +26,7 @@ static u64 LinuxArm64Esr(void* ctx) {
     const u8* record = reinterpret_cast<const u8*>(((ucontext_t*)ctx)->uc_mcontext.__reserved);
     const u8* end = record + sizeof(((ucontext_t*)ctx)->uc_mcontext.__reserved);
     while (record + sizeof(_aarch64_ctx) <= end) {
-        const auto* head = reinterpret_cast<const _aarch64_ctx*>(record);
+        const _aarch64_ctx* head = reinterpret_cast<const _aarch64_ctx*>(record);
         if (head->magic == ESR_MAGIC) {
             return reinterpret_cast<const esr_context*>(record)->esr;
         }

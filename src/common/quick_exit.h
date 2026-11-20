@@ -3,8 +3,8 @@
 
 #pragma once
 
-#include <cstdlib>
 #include <retro_atomic.h>
+#include <stdlib.h>
 
 #if defined(__MINGW32__) && !defined(_UCRT)
 #include <stdlib.h>
@@ -44,11 +44,11 @@ inline int AtQuickExit(void (*handler)()) {
 #else
 
 inline int AtQuickExit(void (*handler)()) {
-    return std::at_quick_exit(handler);
+    return ::at_quick_exit(handler);
 }
 
 [[noreturn]] inline void QuickExit(int status) {
-    std::quick_exit(status);
+    ::quick_exit(status);
 }
 
 #endif

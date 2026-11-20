@@ -3,20 +3,19 @@
 
 #pragma once
 
-#include <functional>
-#include <span>
-#include <string_view>
+#include <stddef.h>
 
 #include "common/types.h"
 
 namespace Common {
 
-/// A file carried in the core (src/resources), named by its path from the top of the source
-/// tree, lent in place; empty when there is none by that name.
-std::span<const u8> GetEmbeddedResource(std::string_view path);
+/// The resource the core carries at @path, and its size in *@size; null (and 0) when there is
+/// none
+const u8* GetEmbeddedResource(const char* path, size_t* size);
 
-/// Each file carried whose path starts with @prefix, in the order the build embedded them.
-void ForEachEmbeddedResource(std::string_view prefix,
-                             const std::function<void(std::string_view, std::span<const u8>)>& fn);
+/// @fn(@ctx, its path, its bytes, their size) for each resource whose path starts with @prefix
+void ForEachEmbeddedResource(const char* prefix,
+                             void (*fn)(void* ctx, const char* path, const u8* data, size_t size),
+                             void* ctx);
 
 } // namespace Common
