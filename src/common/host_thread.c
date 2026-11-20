@@ -21,6 +21,13 @@ typedef jmp_buf host_thread_jump_t;
 typedef jmp_buf host_thread_jump_t;
 #define HOST_THREAD_SETJMP(buf) _setjmp(buf, NULL)
 #define HOST_THREAD_LONGJMP(buf) longjmp(buf, 1)
+#elif !defined(__x86_64__) && !defined(__i386__)
+/* clang has no __builtin_setjmp on aarch64: the C library's, without the signal mask */
+#include <setjmp.h>
+#define HOST_THREAD_LOCAL __thread
+typedef jmp_buf host_thread_jump_t;
+#define HOST_THREAD_SETJMP(buf) _setjmp(buf)
+#define HOST_THREAD_LONGJMP(buf) _longjmp(buf, 1)
 #else
 #define HOST_THREAD_LOCAL __thread
 /* Frame, stack and resume addresses: what __builtin_setjmp keeps */

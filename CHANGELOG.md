@@ -4,6 +4,7 @@ What changed in the libretro core of this fork, newest first. Changes that come 
 
 ## Unreleased
 
+- aarch64 build: `host_thread.c` did not compile with clang there, because clang has no `__builtin_setjmp` on aarch64. The aarch64 core now uses the C library's `_setjmp`/`_longjmp` (no signal mask) to end a thread from inside it. x86-64 keeps `__builtin_setjmp`, and Windows keeps its own paths. `host_thread_test` now also runs on aarch64 under qemu, built with GCC and clang (when `qemu-aarch64` and an aarch64 compiler are installed): 2,001 threads ended from inside, all pass. Not run on an aarch64 machine yet.
 - USB: `GetMaxPacketSize` on an emulated device (Skylanders, Infinity, Dimensions portals) copied the device descriptor through a null pointer, so it would crash. It now reads the descriptor into a local. GCC 16 found this on Windows: `-Werror=format` from the previous entry also makes GCC's `-Wnonnull` an error, which broke the MinGW build in `usb_backend.h`. Built with GCC at -O3 and with clang. Not seen in a game yet.
 - {fmt} is gone from the core (600 KB of headers and sources, `externals/fmt`). The log macros, the asserts and the core's string formatting now take printf formats, the libretro way. Each call site in `src` was rewritten from `{}` to its printf conversion, chosen from the argument's type.
   - **New pieces:**

@@ -352,6 +352,17 @@ for san in address,undefined thread; do
         $L/features/features_cpu.c -o "$OUT/host_thread_test" -lpthread
     "$OUT/host_thread_test"
 done
+# The same on aarch64, where the jump out is the C library's (clang has no __builtin_setjmp
+# there), under qemu when it and an aarch64 compiler are installed
+if command -v qemu-aarch64 >/dev/null 2>&1 && command -v aarch64-linux-gnu-gcc >/dev/null 2>&1; then
+    for cc in aarch64-linux-gnu-gcc "$CC --target=aarch64-linux-gnu"; do
+        $cc -std=gnu89 -O1 -g -Wall -Wdeclaration-after-statement -Isrc -I$L/include \
+            libretro/tests/host_thread_test.c src/common/host_thread.c $L/rthreads/rthreads.c \
+            $L/features/features_cpu.c $L/compat/compat_strl.c -static \
+            -o "$OUT/host_thread_test-aarch64" -lpthread
+        qemu-aarch64 "$OUT/host_thread_test-aarch64"
+    done
+fi
 # A thread's name, its own, on four threads
 for san in address,undefined thread; do
     $CC -std=gnu89 -O1 -g -Wall -Wdeclaration-after-statement -fsanitize=$san -Isrc -I$L/include \
