@@ -349,7 +349,7 @@ void Rasterizer::Draw(bool is_indexed, u32 index_offset) {
         runtime.FlushBarriers();
     }
 
-    pipeline->BindResources(set_writes, push_data);
+    pipeline->BindResources(set_writes.data(), static_cast<u32>(set_writes.size()), push_data);
     UpdateDynamicState(pipeline, is_indexed);
     scheduler.BeginRendering(state);
 
@@ -426,7 +426,7 @@ void Rasterizer::DrawIndirect(bool is_indexed, VAddr arg_address, u32 offset, u3
         runtime.FlushBarriers();
     }
 
-    pipeline->BindResources(set_writes, push_data);
+    pipeline->BindResources(set_writes.data(), static_cast<u32>(set_writes.size()), push_data);
     UpdateDynamicState(pipeline, is_indexed);
     scheduler.BeginRendering(state);
 
@@ -486,7 +486,7 @@ void Rasterizer::DispatchDirect() {
     }
 
     scheduler.EndRendering();
-    pipeline->BindResources(set_writes, push_data);
+    pipeline->BindResources(set_writes.data(), static_cast<u32>(set_writes.size()), push_data);
 
     const auto cmdbuf = scheduler.CommandBuffer();
     cmdbuf.bindPipeline(vk::PipelineBindPoint::eCompute, pipeline->Handle());
@@ -523,7 +523,7 @@ void Rasterizer::DispatchIndirect(VAddr address, u32 offset, u32 size) {
     }
 
     scheduler.EndRendering();
-    pipeline->BindResources(set_writes, push_data);
+    pipeline->BindResources(set_writes.data(), static_cast<u32>(set_writes.size()), push_data);
 
     const auto cmdbuf = scheduler.CommandBuffer();
     cmdbuf.bindPipeline(vk::PipelineBindPoint::eCompute, pipeline->Handle());
@@ -576,7 +576,10 @@ bool Rasterizer::BindResources(const Pipeline* pipeline) {
     // Bind resource buffers and textures.
     Shader::Backend::Bindings binding{};
     push_data = MakeUserData(liverpool->regs);
-    for (const auto* stage : pipeline->GetStages()) {
+    const Shader::Info* const* stages = nullptr;
+    const u32 num_stages = pipeline->GetStages(&stages);
+    for (u32 i = 0; i < num_stages; ++i) {
+        const Shader::Info* const stage = stages[i];
         if (!stage) {
             continue;
         }

@@ -4,6 +4,13 @@ What changed in the libretro core of this fork, newest first. Changes that come 
 
 ## Unreleased
 
+- No STL or `auto` in the pipeline base and compute pipelines (`vk_pipeline_common`, `vk_compute_pipeline`).
+  - **Stages:** a pipeline's stages are a plain array. `GetStages` hands back a pointer and a count instead of a `std::span`, and `SetStages` takes a pointer; the rasterizer and the pipeline cache follow.
+  - **Binding:** `BindResources` takes a pointer and a count of descriptor writes instead of a `std::vector`.
+  - **Debug names:** a pipeline's shader names are written into a buffer on the stack instead of a `std::string`. The shader names themselves still come from the pipeline cache as strings, until that file's turn.
+  - **Removed:** the `std::hash` for compute pipeline keys; its one use, a log line, prints the key itself.
+  - **Unchanged:** the Vulkan calls and arguments.
+  - **Checks:** the Linux and Windows builds pass. Not run in a game yet.
 - No STL or `auto` in the scheduler (`vk_scheduler`).
   - **Sessions:** the sessions of a submission and the command buffers handed to the queue are plain arrays, room for 64 sessions (and twice that in command buffers) made at start and doubled only past that, as the vectors' reserved room was.
   - **`SubmitInfo`:** holds plain Vulkan semaphores and a fence, handed to the queue as they are. `AddWait` and `AddSignal` still take vulkan.hpp handles from their callers.

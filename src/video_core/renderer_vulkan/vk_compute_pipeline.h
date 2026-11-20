@@ -55,10 +55,3 @@ private:
 };
 
 } // namespace Vulkan
-
-template <>
-struct std::hash<Vulkan::ComputePipelineKey> {
-    std::size_t operator()(const Vulkan::ComputePipelineKey& key) const noexcept {
-        return std::hash<size_t>{}(key.value);
-    }
-};

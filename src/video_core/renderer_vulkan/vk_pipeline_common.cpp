@@ -1,8 +1,7 @@
 // SPDX-FileCopyrightText: Copyright 2024 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
-#include "common/small_vector.h"
-#include "common/string_util.h"
+#include <stdio.h>
 
 #include "shader_recompiler/resource.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
@@ -54,31 +53,31 @@ void Pipeline::CreatePipelineLayout(VkShaderStageFlags stage_flags, const char* 
                vk::to_string(static_cast<vk::Result>(result)).c_str());
 }
 
-void Pipeline::BindResources(DescriptorWrites& set_writes,
+void Pipeline::BindResources(vk::WriteDescriptorSet* set_writes, u32 num_writes,
                              const Shader::PushData& push_data) const {
-    const auto cmdbuf = static_cast<VkCommandBuffer>(scheduler.CommandBuffer());
-    const auto bind_point =
+    const VkCommandBuffer cmdbuf = static_cast<VkCommandBuffer>(scheduler.CommandBuffer());
+    const VkPipelineBindPoint bind_point =
         IsCompute() ? VK_PIPELINE_BIND_POINT_COMPUTE : VK_PIPELINE_BIND_POINT_GRAPHICS;
 
-    const auto stage_flags = IsCompute() ? VkShaderStageFlags{VK_SHADER_STAGE_COMPUTE_BIT}
-                                         : static_cast<VkShaderStageFlags>(AllGraphicsStageBits);
+    const VkShaderStageFlags stage_flags =
+        IsCompute() ? VkShaderStageFlags{VK_SHADER_STAGE_COMPUTE_BIT}
+                    : static_cast<VkShaderStageFlags>(AllGraphicsStageBits);
     vkCmdPushConstants(cmdbuf, pipeline_layout, stage_flags, 0u, sizeof(push_data), &push_data);
 
     // Bind descriptor set.
-    if (set_writes.empty()) {
+    if (num_writes == 0) {
         return;
     }
 
     // vulkan.hpp's structs are layout-compatible with the C ones
     static_assert(sizeof(vk::WriteDescriptorSet) == sizeof(VkWriteDescriptorSet));
-    auto* writes = reinterpret_cast<VkWriteDescriptorSet*>(set_writes.data());
-    const auto num_writes = static_cast<u32>(set_writes.size());
+    VkWriteDescriptorSet* const writes = reinterpret_cast<VkWriteDescriptorSet*>(set_writes);
     if (uses_push_descriptors) {
         vkCmdPushDescriptorSetKHR(cmdbuf, bind_point, pipeline_layout, 0, num_writes, writes);
         return;
     }
 
-    const auto desc_set =
+    const VkDescriptorSet desc_set =
         static_cast<VkDescriptorSet>(desc_heap.Commit(vk::DescriptorSetLayout{desc_layout}));
     for (u32 i = 0; i < num_writes; ++i) {
         writes[i].dstSet = desc_set;
@@ -87,20 +86,21 @@ void Pipeline::BindResources(DescriptorWrites& set_writes,
     vkCmdBindDescriptorSets(cmdbuf, bind_point, pipeline_layout, 0, 1, &desc_set, 0, nullptr);
 }
 
-std::string Pipeline::GetDebugString() const {
-    std::string stage_desc;
-    for (const auto& stage : stages) {
-        if (stage) {
-            const auto shader_name = PipelineCache::GetShaderName(stage->hw_stage, stage->pgm_hash);
-            if (stage_desc.empty()) {
-                stage_desc = shader_name;
-            } else {
-                stage_desc =
-                    Common::StringFromFormat("%s,%s", (stage_desc).c_str(), (shader_name).c_str());
-            }
+void Pipeline::GetDebugString(char* out, size_t size) const {
+    size_t length = 0;
+    out[0] = '\0';
+    for (u32 i = 0; i < Shader::MaxStageTypes; ++i) {
+        const Shader::Info* const stage = stages[i];
+        if (!stage || length >= size) {
+            continue;
+        }
+        const int written =
+            snprintf(out + length, size - length, "%s%s", length ? "," : "",
+                     PipelineCache::GetShaderName(stage->hw_stage, stage->pgm_hash).c_str());
+        if (written > 0) {
+            length += static_cast<size_t>(written);
         }
     }
-    return stage_desc;
 }
 
 } // namespace Vulkan

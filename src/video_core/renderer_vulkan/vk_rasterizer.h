@@ -201,7 +201,7 @@ private:
     std::vector<VideoCore::ImageId> bound_images;
 
     u32 set_write_index{};
-    Pipeline::DescriptorWrites set_writes;
+    std::vector<vk::WriteDescriptorSet> set_writes;
     Shader::PushData push_data;
 
     bool attachment_feedback_loop{};

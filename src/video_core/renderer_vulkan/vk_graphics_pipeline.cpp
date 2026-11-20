@@ -40,12 +40,13 @@ GraphicsPipeline::GraphicsPipeline(
     }
 
     const vk::Device vk_device{device};
-    std::ranges::copy(infos, stages.begin());
+    SetStages(infos.data());
     BuildDescSetLayout(preloading);
-    const auto debug_str = GetDebugString();
+    char debug_str[DebugStringSize];
+    GetDebugString(debug_str, sizeof(debug_str));
 
     CreatePipelineLayout(static_cast<VkShaderStageFlags>(AllGraphicsStageBits), "graphics");
-    SetObjectName(vk_device, GetLayout(), "Graphics PipelineLayout %s", debug_str.c_str());
+    SetObjectName(vk_device, GetLayout(), "Graphics PipelineLayout %s", debug_str);
 
     if (!preloading) {
         VertexInputs<AmdGpu::Buffer> guest_buffers;
@@ -411,7 +412,7 @@ GraphicsPipeline::GraphicsPipeline(
         &static_cast<const VkGraphicsPipelineCreateInfo&>(pipeline_info), nullptr, &pipeline);
     ASSERT_MSG(pipeline_result == VK_SUCCESS, "Failed to create graphics pipeline: %s",
                vk::to_string(static_cast<vk::Result>(pipeline_result)).c_str());
-    SetObjectName(vk_device, Handle(), "Graphics Pipeline %s", debug_str.c_str());
+    SetObjectName(vk_device, Handle(), "Graphics Pipeline %s", debug_str);
 }
 
 GraphicsPipeline::~GraphicsPipeline() = default;

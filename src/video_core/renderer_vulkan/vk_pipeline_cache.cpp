@@ -698,7 +698,7 @@ const ComputePipeline* PipelineCache::GetComputePipeline() {
     }
     ComputePipeline* pipeline = FindComputePipeline(compute_key);
     if (!pipeline) {
-        const auto pipeline_hash = std::hash<ComputePipelineKey>{}(compute_key);
+        const u64 pipeline_hash = compute_key.value;
         LOG_INFO(Render_Vulkan, "Compiling compute pipeline 0x%llx",
                  static_cast<unsigned long long>(pipeline_hash));
 
@@ -1461,7 +1461,7 @@ void PipelineCache::FileJob(CompileJob& job) {
                 stage_ptrs[stage] = program ? &program->info : nullptr;
             }
         }
-        job.pipeline->SetStages(stage_ptrs);
+        job.pipeline->SetStages(stage_ptrs.data());
         if (FindGraphicsPipeline(job.key, job.key_hash)) {
             // Made twice (its shader was replaced meanwhile): the first stays
             scheduler.DeferOperation([p = job.pipeline] { delete p; });

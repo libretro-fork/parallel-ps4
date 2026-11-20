@@ -10,6 +10,23 @@
 
 namespace Vulkan {
 
+namespace {
+
+using LayoutBindings = Common::SmallVector<VkDescriptorSetLayoutBinding, 32>;
+
+/// Adds the binding of @count descriptors of @type at *@binding, and moves *@binding past it
+void AddBinding(LayoutBindings& bindings, u32& binding, VkDescriptorType type, u32 count) {
+    VkDescriptorSetLayoutBinding layout_binding{};
+    layout_binding.binding = binding;
+    layout_binding.descriptorType = type;
+    layout_binding.descriptorCount = count;
+    layout_binding.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+    bindings.push_back(layout_binding);
+    binding += count;
+}
+
+} // Anonymous namespace
+
 ComputePipeline::ComputePipeline(const Instance& instance, Scheduler& scheduler,
                                  DescriptorHeap& desc_heap, const Shader::Profile& profile,
                                  vk::PipelineCache pipeline_cache, ComputePipelineKey compute_key_,
@@ -17,40 +34,33 @@ ComputePipeline::ComputePipeline(const Instance& instance, Scheduler& scheduler,
                                  SerializationSupport& sdata, bool preloading /*=false*/)
     : Pipeline{instance, scheduler, desc_heap, profile, pipeline_cache, true},
       compute_key{compute_key_} {
-    auto& info = stages[int(Shader::SwStage::Compute)];
-    info = &info_;
-    const auto debug_str = GetDebugString();
+    stages[int(Shader::SwStage::Compute)] = &info_;
+    const Shader::Info* const info = &info_;
+    char debug_str[DebugStringSize];
+    GetDebugString(debug_str, sizeof(debug_str));
 
     u32 binding{};
-    Common::SmallVector<VkDescriptorSetLayoutBinding, 32> bindings;
-    const auto add_binding = [&](VkDescriptorType type, u32 count) {
-        VkDescriptorSetLayoutBinding layout_binding{};
-        layout_binding.binding = binding;
-        layout_binding.descriptorType = type;
-        layout_binding.descriptorCount = count;
-        layout_binding.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
-        bindings.push_back(layout_binding);
-        binding += count;
-    };
+    LayoutBindings bindings;
     // During deserialization the sharps are out of reach, and only the "is storage" flag (not
     // even effective yet) would come from them, so every buffer is a storage buffer
     for (size_t i = 0; i < info->buffers.size(); ++i) {
-        add_binding(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1);
+        AddBinding(bindings, binding, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1);
     }
-    for (const auto& image : info->images) {
-        add_binding(image.is_written ? VK_DESCRIPTOR_TYPE_STORAGE_IMAGE
-                                     : VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
-                    image.NumBindings(*info));
+    for (const Shader::ImageResource& image : info->images) {
+        AddBinding(bindings, binding,
+                   image.is_written ? VK_DESCRIPTOR_TYPE_STORAGE_IMAGE
+                                    : VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
+                   image.NumBindings(*info));
     }
     for (size_t i = 0; i < info->samplers.size(); ++i) {
-        add_binding(VK_DESCRIPTOR_TYPE_SAMPLER, 1);
+        AddBinding(bindings, binding, VK_DESCRIPTOR_TYPE_SAMPLER, 1);
     }
 
     uses_push_descriptors = binding < instance.MaxPushDescriptors();
     CreateDescSetLayout(bindings.data(), static_cast<u32>(bindings.size()), "compute");
     CreatePipelineLayout(VK_SHADER_STAGE_COMPUTE_BIT, "compute");
     const vk::Device vk_device{device};
-    SetObjectName(vk_device, GetLayout(), "Compute PipelineLayout %s", debug_str.c_str());
+    SetObjectName(vk_device, GetLayout(), "Compute PipelineLayout %s", debug_str);
 
     VkPipelineShaderStageRequiredSubgroupSizeCreateInfo subgroup_size_ci{};
     subgroup_size_ci.sType =
@@ -70,7 +80,7 @@ ComputePipeline::ComputePipeline(const Instance& instance, Scheduler& scheduler,
                                  &compute_pipeline_ci, nullptr, &pipeline);
     ASSERT_MSG(pipeline_result == VK_SUCCESS, "Failed to create compute pipeline: %s",
                vk::to_string(static_cast<vk::Result>(pipeline_result)).c_str());
-    SetObjectName(vk_device, Handle(), "Compute Pipeline %s", debug_str.c_str());
+    SetObjectName(vk_device, Handle(), "Compute Pipeline %s", debug_str);
 }
 
 ComputePipeline::~ComputePipeline() = default;
