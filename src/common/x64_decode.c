@@ -28,10 +28,12 @@ struct dec_def {
 #define P_FAR 0x100u
 /* A form: a definition at an operand width (eosz: 0 16, 1 32, 2 64 bits), with its operand
  * width and its address width without and with 67 */
-struct dec_form {
-    uint16_t def;
+struct dec_fattr {
     uint8_t eosz, opw, asw0, asw1;
 };
+/* dec_forms: its definition << 4 | its dec_fattrs */
+#define FORM_DEF(f) (&dec_defs[(f) >> 4])
+#define FORM_ATTR(f) (&dec_fattrs[(f) & 15u])
 /* A register: its class, number in the class, width and the 64-bit register it is part of */
 struct dec_reg {
     uint8_t cls, id;
@@ -130,7 +132,7 @@ unsigned x64_decode(const uint8_t* p, size_t avail_bytes, x64_insn_t* in) {
     unsigned id_reg, id_rm, id_nds, id_index = 0;
     int now3d = 0;
     uint16_t e;
-    const struct dec_form* form;
+    const struct dec_fattr* form;
     const struct dec_def* def;
     memset(in, 0, sizeof(*in));
     in->base = in->index = -1;
@@ -256,8 +258,8 @@ unsigned x64_decode(const uint8_t* p, size_t avail_bytes, x64_insn_t* in) {
             if (e & 0x8000)
                 e = dec_subs[e & 0x7FFF][m & 7];
         }
-        form = &dec_forms[e];
-        def = &dec_defs[form->def];
+        form = FORM_ATTR(dec_forms[e]);
+        def = FORM_DEF(dec_forms[e]);
         rec = def->rec | (e ? R_VALID : 0);
         rec |= (unsigned)(def->imm >> (3 * form->eosz) & 7) << 4;
         rec |= (unsigned)(def->imm >> (9 + 2 * form->eosz) & 3) << 9;
@@ -367,8 +369,8 @@ unsigned x64_decode(const uint8_t* p, size_t avail_bytes, x64_insn_t* in) {
         if (!e)
             return 0;
     }
-    form = &dec_forms[e];
-    def = &dec_defs[form->def];
+    form = FORM_ATTR(dec_forms[e]);
+    def = FORM_DEF(dec_forms[e]);
     in->form = e;
     in->mnemonic = def->mnemonic;
     in->category = def->category;
@@ -465,8 +467,8 @@ static unsigned width_class(unsigned bits) {
 }
 
 unsigned x64_operands(const x64_insn_t* in, x64_operand_t out[X64_MAX_OPERANDS]) {
-    const struct dec_form* form = &dec_forms[in->form];
-    const struct dec_def* def = &dec_defs[form->def];
+    const struct dec_fattr* form = FORM_ATTR(dec_forms[in->form]);
+    const struct dec_def* def = FORM_DEF(dec_forms[in->form]);
     const uint32_t(*od)[3] = &dec_opdefs[def->ops];
     const unsigned rec = def->rec;
     const unsigned r = in->rex >> 2 & 1, x = in->rex >> 1 & 1, b = in->rex & 1;
@@ -792,11 +794,11 @@ int x64_operand_address(const x64_insn_t* in, const x64_operand_t* o, uint64_t a
 }
 
 const char* x64_mnemonic_name(unsigned mnemonic) {
-    return mnemonic < X64_MN_COUNT ? dec_mnemonic_names[mnemonic] : "invalid";
+    return mnemonic < X64_MN_COUNT ? dec_mnemonic_text + dec_mnemonic_name[mnemonic] : "invalid";
 }
 
 const char* x64_register_name(unsigned reg) {
-    return reg < X64_REG_COUNT ? dec_reg_names[reg] : "none";
+    return reg < X64_REG_COUNT ? dec_reg_text + dec_reg_name[reg] : "none";
 }
 
 unsigned x64_register_largest(unsigned reg) {
@@ -869,7 +871,7 @@ static unsigned explicit_size(const x64_insn_t* in, const x64_operand_t* ops, un
 
 size_t x64_format(const x64_insn_t* in, const x64_operand_t* ops, uint64_t address, char* buf,
                   size_t size) {
-    const struct dec_def* def = &dec_defs[dec_forms[in->form].def];
+    const struct dec_def* def = FORM_DEF(dec_forms[in->form]);
     const unsigned pfx = def->pfx;
     text_t t;
     unsigned i, shown = 0;

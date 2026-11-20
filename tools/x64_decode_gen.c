@@ -320,9 +320,24 @@ int main(void) {
         for (i = 0; i < nopd; i++) fprintf(f, "    {0x%08x, 0x%08x, 0x%08x}%s\n", opdefs[i][0], opdefs[i][1], opdefs[i][2], i + 1 < nopd ? "," : "");
         if (!nopd) fprintf(f, "    {0, 0, 0}\n");
         fprintf(f, "};\n\n");
-        fprintf(f, "/* Forms: a definition, its operand width index (0 16, 1 32, 2 64), its operand width and\n * its address width without and with 67 */\nstatic const struct dec_form dec_forms[%d] = {\n    {0, 0, 0, 0, 0}", nforms);
-        for (i = 1; i < nforms; i++) fprintf(f, ",\n    {%u, %u, %u, %u, %u}", forms[i].def, forms[i].eosz, forms[i].opw, forms[i].asw0, forms[i].asw1);
-        fprintf(f, "\n};\n\nstatic const uint16_t dec_alt90[12] = {");
+        {
+            /* A form packs into 16 bits: its definition, and which of the few width sets it has */
+            unsigned attr[16][4], nattr = 1;
+            memset(attr, 0, sizeof attr);
+            if (ndefs > 4096) { fprintf(stderr, "defs %d: more than a form can name\n", ndefs); exit(7); }
+            fprintf(f, "/* Forms: a definition (above 4 bits) and its widths (dec_fattrs, below) */\nstatic const uint16_t dec_forms[%d] = {\n    0", nforms);
+            for (i = 1; i < nforms; i++) {
+                const unsigned w[4] = {forms[i].eosz, forms[i].opw, forms[i].asw0, forms[i].asw1};
+                unsigned a;
+                for (a = 0; a < nattr && memcmp(attr[a], w, sizeof w); a++) {}
+                if (a == nattr) { if (nattr == 16) { fprintf(stderr, "more than 16 width sets\n"); exit(7); } memcpy(attr[nattr++], w, sizeof w); }
+                fprintf(f, "%s%u", i % 16 ? ", " : ",\n    ", forms[i].def << 4 | a);
+            }
+            fprintf(f, "\n};\n\n/* A form's operand width index (0 16, 1 32, 2 64), operand width and address widths\n * without and with 67 */\nstatic const struct dec_fattr dec_fattrs[%u] = {\n", nattr);
+            for (i = 0; i < (int)nattr; i++) fprintf(f, "    {%u, %u, %u, %u}%s\n", attr[i][0], attr[i][1], attr[i][2], attr[i][3], i + 1 < (int)nattr ? "," : "");
+            fprintf(f, "};");
+        }
+        fprintf(f, "\n\nstatic const uint16_t dec_alt90[12] = {");
         for (i = 0; i < 12; i++) fprintf(f, "%s%u", i ? ", " : "", alt90[i]);
         fprintf(f, "};\nstatic const uint16_t dec_altE3[12] = {");
         for (i = 0; i < 12; i++) fprintf(f, "%s%u", i ? ", " : "", altE3[i]);
@@ -349,11 +364,35 @@ int main(void) {
     for (i = 0; i <= ZYDIS_REGCLASS_MAX_VALUE; i++) fprintf(f, "%s%d", i ? ", " : "", i ? ZydisRegisterEncode((ZydisRegisterClass)i, 0) : 0);
     fprintf(f, "};\nstatic const uint8_t dec_class_count[%d] = {", ZYDIS_REGCLASS_MAX_VALUE + 1);
     for (i = 0; i <= ZYDIS_REGCLASS_MAX_VALUE; i++) { int c = 0; while (c < 64 && ZydisRegisterEncode((ZydisRegisterClass)i, (ZyanU8)c) != ZYDIS_REGISTER_NONE) c++; fprintf(f, "%s%d", i ? ", " : "", c); }
-    fprintf(f, "};\n\nstatic const char* const dec_reg_names[%d] = {\n", ZYDIS_REGISTER_MAX_VALUE + 1);
-    for (i = 0; i <= ZYDIS_REGISTER_MAX_VALUE; i++) { const char* s = ZydisRegisterGetString((ZydisRegister)i); fprintf(f, "    \"%s\"%s\n", s ? s : "none", i < ZYDIS_REGISTER_MAX_VALUE ? "," : ""); }
-    fprintf(f, "};\n\nstatic const char* const dec_mnemonic_names[%d] = {\n    \"invalid\"", nmn);
-    for (i = 1; i < nmn; i++) fprintf(f, ",\n    \"%s\"", ZydisMnemonicGetString((ZydisMnemonic)mn_zydis[i]));
-    fprintf(f, "\n};\n\n/* clang-format on */\n");
+    fprintf(f, "};\n\n");
+    /* Names: one string of them each, and where each starts (no pointers to relocate) */
+    {
+        static const char* nm[4096]; unsigned cnt, k2;
+        for (k2 = 0; k2 < 2; k2++) {
+            const char* tname = k2 ? "dec_mnemonic" : "dec_reg";
+            unsigned total = 0, col = 0, at = 0, c2;
+            cnt = k2 ? (unsigned)nmn : ZYDIS_REGISTER_MAX_VALUE + 1;
+            for (c2 = 0; c2 < cnt; c2++) {
+                const char* x = k2 ? (c2 ? ZydisMnemonicGetString((ZydisMnemonic)mn_zydis[c2]) : "invalid") : ZydisRegisterGetString((ZydisRegister)c2);
+                nm[c2] = x ? x : "none"; total += (unsigned)strlen(nm[c2]) + 1;
+            }
+            if (total > 65535) { fprintf(stderr, "names too long\n"); exit(7); }
+            fprintf(f, "static const char %s_text[%u] = {\n   ", tname, total);
+            for (c2 = 0; c2 < cnt; c2++) {
+                const char* x;
+                for (x = nm[c2];; x++) {
+                    if (col == 20) { fprintf(f, "\n   "); col = 0; }
+                    if (*x) fprintf(f, " '%c',", *x); else fprintf(f, " 0,");
+                    col++;
+                    if (!*x) break;
+                }
+            }
+            fprintf(f, "\n};\nstatic const uint16_t %s_name[%u] = {", tname, cnt);
+            for (c2 = 0; c2 < cnt; c2++) { fprintf(f, "%s%u", c2 % 16 ? ", " : c2 ? ",\n    " : "\n    ", at); at += (unsigned)strlen(nm[c2]) + 1; }
+            fprintf(f, "\n};\n\n");
+        }
+    }
+    fprintf(f, "/* clang-format on */\n");
     fclose(f);
     /* x64_names.h: the public numbers */
     f = fopen("x64_names.h", "w");

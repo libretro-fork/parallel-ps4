@@ -4,6 +4,12 @@ What changed in the libretro core of this fork, newest first. Changes that come 
 
 ## Unreleased
 
+- The x86-64 decoder's tables are smaller: the object goes from 288 KB to 252 KB, at the same speed.
+  - **Forms:** each form is now one 16-bit word. It holds the form's definition and an index into the 11 sets of widths that occur.
+  - **Names:** the register and mnemonic names are one string each, with a 16-bit offset per name. They were arrays of pointers, so the core loses about 1,600 load-time relocations and the pages they dirtied.
+  - **Left as they are, on purpose:** packing the ModRM tables further would save another 70 KB, and packing the definitions about 28 KB. But each sits on the five-lookup chain every instruction decode takes, and every way tried made a sweep of a game's code 2–4% slower.
+  - **Tool:** `tools/x64_decode_gen.c` writes the new layout.
+  - **Checks:** `x64_decode_test` passes unchanged. The sweep of a game's code still takes about 43 ms (best of 10, alternating with the old tables).
 - Windows red-zone protection: a short Jcc or JMP moved into a trampoline that can no longer reach its target from there now takes its near form (`0F 8x rel32`, `E9 rel32`) instead of failing.
   - **Why it failed before:** the trampolines sit right after the module, out of reach of a short branch. So every span holding a short branch failed to move. When the relay pass could not rescue it either, the red-zone access stayed unprotected ("unrelocatable memory instructions were not protected" in the log). This kept Zydis's behaviour from the previous entries.
   - **How many more sites:** in a game's code, short Jcc and JMP are about 70% of all relative branches. A simulation of the span rules over that code, counting every memory instruction as a site (an upper bound), moves 99.05% of them with widening against 97.44% before, about 10,600 more.
