@@ -151,24 +151,28 @@ Image::Image(const Vulkan::Instance& instance, Vulkan::Runtime& runtime_,
 
     constexpr auto tiling = vk::ImageTiling::eOptimal;
     const auto supported_format = instance.GetSupportedFormat(info.pixel_format, format_features);
-    const vk::PhysicalDeviceImageFormatInfo2 format_info{
-        .format = supported_format,
-        .type = ConvertImageType(info.type),
-        .tiling = tiling,
-        .usage = usage_flags,
-        .flags = flags,
-    };
-    const auto image_format_properties =
-        instance.GetPhysicalDevice().getImageFormatProperties2(format_info);
-    if (image_format_properties.result == vk::Result::eErrorFormatNotSupported) {
-        LOG_ERROR(
-            Render_Vulkan, "image format %s type %s is not supported (flags %s, usage %s)",
-            (vk::to_string(supported_format)).c_str(), (vk::to_string(format_info.type)).c_str(),
-            (vk::to_string(format_info.flags)).c_str(), (vk::to_string(format_info.usage)).c_str());
+    VkPhysicalDeviceImageFormatInfo2 format_info{};
+    format_info.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_IMAGE_FORMAT_INFO_2;
+    format_info.format = static_cast<VkFormat>(supported_format);
+    format_info.type = static_cast<VkImageType>(ConvertImageType(info.type));
+    format_info.tiling = static_cast<VkImageTiling>(tiling);
+    format_info.usage = static_cast<VkImageUsageFlags>(usage_flags);
+    format_info.flags = static_cast<VkImageCreateFlags>(flags);
+    VkImageFormatProperties2 image_format_properties{};
+    image_format_properties.sType = VK_STRUCTURE_TYPE_IMAGE_FORMAT_PROPERTIES_2;
+    const VkResult format_result = vkGetPhysicalDeviceImageFormatProperties2(
+        static_cast<VkPhysicalDevice>(instance.GetPhysicalDevice()), &format_info,
+        &image_format_properties);
+    if (format_result == VK_ERROR_FORMAT_NOT_SUPPORTED) {
+        LOG_ERROR(Render_Vulkan, "image format %s type %s is not supported (flags %s, usage %s)",
+                  vk::to_string(supported_format).c_str(),
+                  vk::to_string(ConvertImageType(info.type)).c_str(), vk::to_string(flags).c_str(),
+                  vk::to_string(usage_flags).c_str());
     }
-    supported_samples = image_format_properties.result == vk::Result::eSuccess
-                            ? image_format_properties.value.imageFormatProperties.sampleCounts
-                            : vk::SampleCountFlagBits::e1;
+    supported_samples =
+        format_result == VK_SUCCESS
+            ? vk::SampleCountFlags{image_format_properties.imageFormatProperties.sampleCounts}
+            : vk::SampleCountFlagBits::e1;
 
     const vk::ImageCreateInfo image_ci = {
         .flags = flags,

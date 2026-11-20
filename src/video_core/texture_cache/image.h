@@ -53,17 +53,22 @@ struct UniqueImage {
     UniqueImage(const UniqueImage&) = delete;
     UniqueImage& operator=(const UniqueImage&) = delete;
 
-    UniqueImage(UniqueImage&& other)
-        : allocator{std::exchange(other.allocator, nullptr)},
+    UniqueImage(UniqueImage&& other) noexcept
+        : device{other.device}, allocator{std::exchange(other.allocator, nullptr)},
           allocation{std::exchange(other.allocation, nullptr)},
           image{std::exchange(other.image, VK_NULL_HANDLE)}, image_ci{std::move(other.image_ci)},
           size_bytes{std::exchange(other.size_bytes, 0)} {}
-    UniqueImage& operator=(UniqueImage&& other) {
-        image = std::exchange(other.image, VK_NULL_HANDLE);
-        allocator = std::exchange(other.allocator, nullptr);
-        allocation = std::exchange(other.allocation, nullptr);
-        image_ci = std::move(other.image_ci);
-        size_bytes = std::exchange(other.size_bytes, 0);
+    UniqueImage& operator=(UniqueImage&& other) noexcept {
+        if (this != &other) {
+            // The image this one held goes first, not left behind with its memory
+            Destroy();
+            device = other.device;
+            image = std::exchange(other.image, VK_NULL_HANDLE);
+            allocator = std::exchange(other.allocator, nullptr);
+            allocation = std::exchange(other.allocation, nullptr);
+            image_ci = std::move(other.image_ci);
+            size_bytes = std::exchange(other.size_bytes, 0);
+        }
         return *this;
     }
 

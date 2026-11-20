@@ -4,6 +4,11 @@ What changed in the libretro core of this fork, newest first. Changes that come 
 
 ## Unreleased
 
+- Vulkan, images: `Image` asks for its format's sample counts with the C API (`vkGetPhysicalDeviceImageFormatProperties2`, through libretro-common's symbol wrapper). Its fields and barriers stay vulkan.hpp types for now, since much of the texture cache reads them.
+  - **`UniqueImage`'s move-assignment:** it overwrote the image it held without destroying it, leaking the image and its memory. It now destroys that image first.
+  - **`UniqueImage`'s moves:** neither carried the device across. Now both do.
+  - **Whether the leak was hit:** neither of today's two move-assignments was, because both assign into a just-made backing image.
+  - **Checks:** the Linux and Windows builds pass. Not run in a game yet.
 - Vulkan, image views on the C API: `ImageView` (`texture_cache/image_view`) creates and destroys its view with the C API through libretro-common's symbol wrapper.
   - **What changes:** it holds a plain Vulkan handle and has its own move, so a view moved in the texture cache's slot vector still destroys its handle once. Its users get the view from `Handle()`, as a vulkan.hpp handle for now.
   - **Unchanged:** the Vulkan calls and arguments are the same.
