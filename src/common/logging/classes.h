@@ -4,7 +4,6 @@
 #pragma once
 
 #include <array>
-#include <string_view>
 
 namespace Common::Log {
 
@@ -125,6 +124,6 @@ enum class Class {
 };
 static constexpr int NUM_LOG_CLASSES = static_cast<int>(Class::Count);
 
-std::string_view NameOf(Class log_class);
+const char* NameOf(Class log_class);
 
 } // namespace Common::Log

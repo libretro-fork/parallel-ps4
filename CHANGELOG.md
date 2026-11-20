@@ -4,6 +4,14 @@ What changed in the libretro core of this fork, newest first. Changes that come 
 
 ## Unreleased
 
+- No STL in the log (`common/logging`), and no spinning in it.
+  - **Waits:** a line that must wait for room in the ring (sync logging, or a critical line) now parks until the writer frees cells, and the writer parks until a line it has started to take is all in, instead of both spinning on `sthread_yield`. The writer wakes them as it frees cells and as it stops.
+  - **Clock:** the time a line is taken at, used only to skip a duplicate line within the set window, is libretro-common's (`cpu_features_get_time_usec`) instead of `std::chrono::steady_clock`.
+  - **API:** `Setup`, `Switch`, `UpdateLogLevels` and `UpdateLogFlushLevel` take C strings, `NameOf` gives one, and the class levels are a plain array. The log files' paths are joined with libretro-common under the log directory's UTF-8 path.
+  - **Unchanged:** the lines written, the filter's syntax and its errors, what is skipped and dropped.
+  - **Removed:** `Common::FS::FindGameByID`, `ValidatePath` and `SetUserPath`, which nothing used, and `GetUserPathString`: its one caller, the crash-diagnostics path in `vk_platform.cpp`, takes `GetUserPathUTF8`.
+  - **Headers:** `shader_recompiler/ir/attribute.h` and `patch.h`, which had `<string>` through `log.h`, include it themselves now.
+  - **Checks:** the Linux and Windows builds pass. Not run in a game yet.
 - No STL in the game patches (`common/memory_patcher`) and the XML reader they and the trophies use (`common/xml`).
   - **Game patches:** values turned into bytes with `snprintf` and `strtoull`, `strtof` and `strtod` instead of string streams and `std::stoul`; strings borrowed from the patch file while a line is applied, instead of copied into `std::string`s; the patches folder walked with libretro-common (`retro_opendir`, `fill_pathname_join_special`); the executable's name and the game's serial in plain arrays.
   - **What a patch may now do that it could not:**

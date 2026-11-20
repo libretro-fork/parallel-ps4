@@ -5,7 +5,7 @@
 
 namespace Common::Log {
 
-std::string_view NameOf(Class log_class) {
+const char* NameOf(Class log_class) {
     switch (log_class) {
     case Class::Log:
         return "Log";

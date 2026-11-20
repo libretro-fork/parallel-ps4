@@ -460,9 +460,9 @@ void Emulator::Run(std::filesystem::path file, std::vector<std::string> args,
     // Before the game runs: a trophy unlocked in play decodes nothing.
     Libraries::Np::NpTrophy::PreloadTrophySound();
     // Switch to configured log
-    Common::Log::Switch((!id.empty() && emu_settings_get_log_separate()) ? id + ".log"
-                                                                         : "shad_log.txt",
-                        append_log);
+    const std::string log_name =
+        (!id.empty() && emu_settings_get_log_separate()) ? id + ".log" : "shad_log.txt";
+    Common::Log::Switch(log_name.c_str(), append_log);
 
     auto guest_eboot_path = "/app0/" + eboot_name.generic_string();
 

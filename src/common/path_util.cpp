@@ -13,7 +13,6 @@
 #include "common/path_util.h"
 #include "common/scope_exit.h"
 #include "common/types.h"
-#include "core/file_sys/ifile.h"
 
 namespace Common::FS {
 
@@ -92,36 +91,6 @@ void SetLibretroUserDir(const std::filesystem::path& dir) {
 }
 
 // The longest path the host takes: UTF-16 code units on Windows, UTF-8 ones elsewhere
-#ifdef _WIN32
-constexpr size_t MaxPathUnits = 260;
-#else
-constexpr size_t MaxPathUnits = 1024;
-#endif
-
-bool ValidatePath(const fs::path& path) {
-    if (path.empty()) {
-        LOG_ERROR(Common_Filesystem, "Input path is empty, path=%s",
-                  (PathToUTF8String(path)).c_str());
-        return false;
-    }
-
-#ifdef _WIN32
-    if (path.u16string().size() >= MaxPathUnits) {
-        LOG_ERROR(Common_Filesystem, "Input path is too long, path=%s",
-                  (PathToUTF8String(path)).c_str());
-        return false;
-    }
-#else
-    if (path.u8string().size() >= MaxPathUnits) {
-        LOG_ERROR(Common_Filesystem, "Input path is too long, path=%s",
-                  (PathToUTF8String(path)).c_str());
-        return false;
-    }
-#endif
-
-    return true;
-}
-
 std::string PathToUTF8String(const std::filesystem::path& path) {
     const auto u8_string = path.u8string();
     return std::string{u8_string.begin(), u8_string.end()};
@@ -147,76 +116,6 @@ const fs::path& GetUserPath(PathType shad_path) {
 
 const char* GetUserPathUTF8(PathType shad_path) {
     return UserPaths().utf8[static_cast<size_t>(shad_path)];
-}
-
-std::string GetUserPathString(PathType shad_path) {
-    return GetUserPathUTF8(shad_path);
-}
-
-void SetUserPath(PathType shad_path, const fs::path& new_path) {
-    if (!Common::FS::IsDirectory(new_path)) {
-        LOG_ERROR(Common_Filesystem, "Filesystem object at new_path=%s is not a directory",
-                  (PathToUTF8String(new_path)).c_str());
-        return;
-    }
-
-    SetTableEntry(UserPaths(), static_cast<size_t>(shad_path), PathToUTF8String(new_path).c_str());
-}
-
-std::optional<fs::path> FindGameByID(const fs::path& dir, const std::string& game_id,
-                                     int max_depth) {
-    const auto boot_path_for = [](const fs::path& root) -> std::optional<fs::path> {
-        std::error_code ec;
-        if (Common::FS::IsDirectory(root) && !ec) {
-            if (!Common::FS::Exists(root / "sce_sys" / "param.sfo")) {
-                return std::nullopt;
-            }
-            if (auto eboot_path = root / "eboot.bin"; Common::FS::Exists(eboot_path)) {
-                return eboot_path;
-            }
-            return std::nullopt;
-        }
-        if (Core::FileSys::IsZArchiveFile(root) &&
-            Core::FileSys::ReadGameFile(root, "sce_sys/param.sfo").has_value()) {
-            return root;
-        }
-        return std::nullopt;
-    };
-
-    bool is_different_game_root = false;
-
-    // Check if this is a valid game root
-    if (auto found = boot_path_for(dir)) {
-        if (dir.filename() == game_id) { // Check if this is the game we're looking for
-            return found;
-        } else { // if not, don't waste time looking through game data folders in a different game
-            is_different_game_root = true;
-        }
-    }
-
-    if (is_different_game_root) {
-        return std::nullopt;
-    } else {
-        if (auto found = boot_path_for(dir / game_id)) {
-            return found;
-        }
-        if (auto found = boot_path_for(dir / (game_id + ".zar"))) {
-            return found;
-        }
-    }
-
-    if (max_depth <= 0) {
-        return std::nullopt;
-    }
-
-    // Recursively search subdirectories
-    std::optional<fs::path> found;
-    ForEachEntry(dir, [&](std::string_view name, bool is_dir) {
-        if (is_dir && !found) {
-            found = FindGameByID(dir / PathFromUTF8String(name), game_id, max_depth - 1);
-        }
-    });
-    return found;
 }
 
 } // namespace Common::FS

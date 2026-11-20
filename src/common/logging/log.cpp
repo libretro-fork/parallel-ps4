@@ -6,18 +6,16 @@
 // takes a lock or allocates. When the ring is full a line waits for room if logging is sync or
 // the line is critical; otherwise it is dropped and counted. Flush() waits for the writer.
 
-#include <algorithm>
-#include <chrono>
-#include <cstdio>
-#include <cstdlib>
-#include <cstring>
-#include <mutex>
-#include <string_view>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
 #ifdef _WIN32
 #include <windows.h>
 #endif
 
+#include <compat/strl.h>
+#include <features/features_cpu.h>
 #include <file/file_path.h>
 #include <rthreads/retro_eventcount.h>
 #include <streams/file_stream.h>
@@ -37,13 +35,13 @@
 
 namespace Common::Log {
 
-std::array<Level, NUM_LOG_CLASSES> g_class_levels{};
+Level g_class_levels[NUM_LOG_CLASSES]{};
 
 namespace {
 
-constexpr std::size_t CELL_BYTES = 248;
-constexpr std::size_t NUM_CELLS = 8192; // 2 MiB
-constexpr std::size_t MAX_RECORD = 4096;
+constexpr size_t CELL_BYTES = 248;
+constexpr size_t NUM_CELLS = 8192; // 2 MiB
+constexpr size_t MAX_RECORD = 4096;
 
 enum class Kind : u8 { Line, Session, Flush };
 
@@ -57,8 +55,13 @@ struct Cell {
     char text[CELL_BYTES];
 };
 
-constexpr std::array<std::string_view, 7> LEVEL_NAMES{"Trace", "Debug",    "Info", "Warning",
-                                                      "Error", "Critical", "Off"};
+constexpr const char* LEVEL_NAMES[] = {"Trace", "Debug",    "Info", "Warning",
+                                       "Error", "Critical", "Off"};
+constexpr size_t NUM_LEVELS = sizeof(LEVEL_NAMES) / sizeof(LEVEL_NAMES[0]);
+
+size_t MinSize(size_t a, size_t b) {
+    return a < b ? a : b;
+}
 
 Cell g_ring[NUM_CELLS];
 alignas(64) retro_atomic_64_t g_tail{0};
@@ -68,6 +71,8 @@ retro_atomic_64_t g_flushed{0};
 retro_atomic_int_t g_running{0};
 retro_atomic_int_t g_stop{0};
 retro_eventcount_t g_writer_ec{};
+// Notified by the writer as it frees cells: a line that must wait for room parks on it
+retro_eventcount_t g_room_ec{};
 retro_eventcount_t g_flush_ec{};
 stop_thread_t g_writer = STOP_THREAD_INIT;
 Common::Combiner g_control; // Setup/Shutdown only
@@ -82,10 +87,9 @@ retro_atomic_int_t g_flush_level{static_cast<int>(Level::Off)};
 bool g_debugger_console = false;
 #endif
 
+// Only to tell how long apart two same lines were, for skipping duplicates
 s64 NowMs() {
-    return std::chrono::duration_cast<std::chrono::milliseconds>(
-               std::chrono::steady_clock::now().time_since_epoch())
-        .count();
+    return static_cast<s64>(cpu_features_get_time_usec() / 1000);
 }
 
 void InitRing() {
@@ -93,10 +97,11 @@ void InitRing() {
     run_once(
         &once,
         [](void*) {
-            for (std::size_t i = 0; i < NUM_CELLS; ++i) {
+            for (size_t i = 0; i < NUM_CELLS; ++i) {
                 retro_atomic_store_relaxed_64(&g_ring[i].seq, i);
             }
             retro_eventcount_init(&g_writer_ec);
+            retro_eventcount_init(&g_room_ec);
             retro_eventcount_init(&g_flush_ec);
         },
         nullptr);
@@ -104,8 +109,9 @@ void InitRing() {
 
 // Claims room for the record, copies it in and publishes it. Returns its last ticket + 1, or 0
 // when the ring is full.
-u64 TryPush(Kind kind, Level level, const char* data, std::size_t length) {
-    const std::size_t cells = std::max<std::size_t>(1, (length + CELL_BYTES - 1) / CELL_BYTES);
+u64 TryPush(Kind kind, Level level, const char* data, size_t length) {
+    size_t cells = (length + CELL_BYTES - 1) / CELL_BYTES;
+    cells = cells ? cells : 1;
     u64 pos = static_cast<u64>(retro_atomic_load_relaxed_64(&g_tail));
     for (;;) {
         // The writer frees cells in order, so if the last one is free, all of them are.
@@ -130,26 +136,35 @@ u64 TryPush(Kind kind, Level level, const char* data, std::size_t length) {
     first.length = static_cast<u32>(length);
     first.cells = static_cast<u16>(cells);
     first.time_ms = NowMs();
-    for (std::size_t i = 0; i < cells; ++i) {
+    for (size_t i = 0; i < cells; ++i) {
         Cell& cell = g_ring[(pos + i) % NUM_CELLS];
-        const std::size_t offset = i * CELL_BYTES;
-        std::memcpy(cell.text, data + offset, std::min(CELL_BYTES, length - offset));
+        const size_t offset = i * CELL_BYTES;
+        memcpy(cell.text, data + offset, MinSize(CELL_BYTES, length - offset));
         retro_atomic_store_release_64(&cell.seq, pos + i + 1);
     }
     retro_eventcount_notify(&g_writer_ec);
     return pos + cells;
 }
 
-u64 Push(Kind kind, Level level, const char* data, std::size_t length, bool must) {
+u64 Push(Kind kind, Level level, const char* data, size_t length, bool must) {
     for (;;) {
+        // Asked for before the try: room the writer frees after it wakes this one
+        const int key = must ? retro_eventcount_prepare_wait(&g_room_ec) : 0;
         if (const u64 end = TryPush(kind, level, data, length)) {
+            if (must) {
+                retro_eventcount_cancel_wait(&g_room_ec);
+            }
             return end;
         }
         if (!must || (retro_atomic_load_acquire_int(&g_stop) != 0)) {
+            if (must) {
+                retro_eventcount_cancel_wait(&g_room_ec);
+            }
             retro_atomic_fetch_add_64(&g_dropped, 1);
             return 0;
         }
-        sthread_yield();
+        // Parked until the writer frees cells, not spun on
+        retro_eventcount_commit_wait(&g_room_ec, key);
     }
 }
 
@@ -160,7 +175,7 @@ struct Writer {
     u64 session_size = 0;
     char record[MAX_RECORD + 1];
     char last[MAX_RECORD];
-    std::size_t last_length = 0;
+    size_t last_length = 0;
     s64 last_time = 0;
     u64 skipped = 0;
     u64 reported_drops = 0;
@@ -169,7 +184,7 @@ Writer g_w;
 
 RFILE* OpenFile(const char* path, bool truncate) {
     char dir[MAX_RECORD];
-    std::snprintf(dir, sizeof(dir), "%s", path);
+    snprintf(dir, sizeof(dir), "%s", path);
     path_basedir(dir);
     if (dir[0] != '\0') {
         path_mkdir(dir);
@@ -196,7 +211,7 @@ void CloseFile(RFILE*& file) {
     }
 }
 
-void ConsoleWrite(Level level, const char* text, std::size_t length) {
+void ConsoleWrite(Level level, const char* text, size_t length) {
 #ifdef _WIN32
     if (g_debugger_console) {
         OutputDebugStringA(text);
@@ -216,7 +231,7 @@ void ConsoleWrite(Level level, const char* text, std::size_t length) {
     CONSOLE_SCREEN_BUFFER_INFO info{};
     const bool console = GetConsoleScreenBufferInfo(out, &info) != 0;
     if (console) {
-        SetConsoleTextAttribute(out, colors[static_cast<std::size_t>(level)]);
+        SetConsoleTextAttribute(out, colors[static_cast<size_t>(level)]);
     }
     DWORD written = 0;
     WriteFile(out, text, static_cast<DWORD>(length), &written, nullptr);
@@ -225,14 +240,14 @@ void ConsoleWrite(Level level, const char* text, std::size_t length) {
     }
     WriteFile(out, "\r\n", 2, &written, nullptr);
 #else
-    static constexpr std::string_view colors[] = {
+    static constexpr const char* colors[] = {
         "\x1b[1;30m", "\x1b[0;36m", "\x1b[0;37m", "\x1b[1;33m",
         "\x1b[1;31m", "\x1b[1;35m", "\x1b[0;37m",
     };
-    const std::string_view color = colors[static_cast<std::size_t>(level)];
-    std::fwrite(color.data(), 1, color.size(), stdout);
-    std::fwrite(text, 1, length, stdout);
-    std::fwrite("\x1b[0m\n", 1, 5, stdout);
+    // Each is 7 bytes
+    fwrite(colors[static_cast<size_t>(level)], 1, 7, stdout);
+    fwrite(text, 1, length, stdout);
+    fwrite("\x1b[0m\n", 1, 5, stdout);
 #endif
 }
 
@@ -243,10 +258,10 @@ void FlushOutputs() {
     if (g_w.session) {
         filestream_flush(g_w.session);
     }
-    std::fflush(stdout);
+    fflush(stdout);
 }
 
-void Emit(Level level, const char* text, std::size_t length) {
+void Emit(Level level, const char* text, size_t length) {
     ConsoleWrite(level, text, length);
     if (!g_w.session) {
         // Before a game starts everything goes to the main file; it stays small.
@@ -273,38 +288,38 @@ void ReportSkipped(Level level) {
         return;
     }
     char text[64];
-    const int length = std::snprintf(text, sizeof(text), "Skipped %llu duplicate messages..",
-                                     static_cast<unsigned long long>(g_w.skipped));
-    Emit(level, text, static_cast<std::size_t>(length));
+    const int length = snprintf(text, sizeof(text), "Skipped %llu duplicate messages..",
+                                static_cast<unsigned long long>(g_w.skipped));
+    Emit(level, text, static_cast<size_t>(length));
     g_w.skipped = 0;
 }
 
-void WriteLine(Level level, s64 time_ms, const char* text, std::size_t length) {
+void WriteLine(Level level, s64 time_ms, const char* text, size_t length) {
     const u64 dropped = static_cast<u64>(retro_atomic_load_relaxed_64(&g_dropped));
     if (dropped != g_w.reported_drops) {
         char note[96];
         const int note_length =
-            std::snprintf(note, sizeof(note), "[Log] <Warning> %llu messages dropped, ring full",
-                          static_cast<unsigned long long>(dropped - g_w.reported_drops));
+            snprintf(note, sizeof(note), "[Log] <Warning> %llu messages dropped, ring full",
+                     static_cast<unsigned long long>(dropped - g_w.reported_drops));
         g_w.reported_drops = dropped;
-        Emit(Level::Warning, note, static_cast<std::size_t>(note_length));
+        Emit(Level::Warning, note, static_cast<size_t>(note_length));
     }
     if (retro_atomic_load_relaxed_int(&g_skip_duplicate) != 0) {
-        if (length == g_w.last_length && std::memcmp(text, g_w.last, length) == 0 &&
+        if (length == g_w.last_length && memcmp(text, g_w.last, length) == 0 &&
             time_ms - g_w.last_time <
                 static_cast<u32>(retro_atomic_load_relaxed_int(&g_max_skip_ms))) {
             ++g_w.skipped;
             return;
         }
         ReportSkipped(level);
-        std::memcpy(g_w.last, text, length);
+        memcpy(g_w.last, text, length);
         g_w.last_length = length;
         g_w.last_time = time_ms;
     }
     Emit(level, text, length);
 }
 
-void OpenSession(const char* payload, std::size_t length) {
+void OpenSession(const char* payload, size_t length) {
     // "<truncate flag><path>"
     if (length < 2) {
         return;
@@ -321,22 +336,29 @@ bool PopRecord() {
     if (static_cast<u64>(retro_atomic_load_acquire_64(&first.seq)) != g_head + 1) {
         return false;
     }
-    const std::size_t cells = first.cells;
-    const std::size_t length = std::min<std::size_t>(first.length, MAX_RECORD);
+    const size_t cells = first.cells;
+    const size_t length = MinSize(first.length, MAX_RECORD);
     const Kind kind = first.kind;
     const Level level = first.level;
     const s64 time_ms = first.time_ms;
-    for (std::size_t i = 0; i < cells; ++i) {
+    for (size_t i = 0; i < cells; ++i) {
         Cell& cell = g_ring[(g_head + i) % NUM_CELLS];
-        // The producer that claimed this record is still filling it.
-        while (static_cast<u64>(retro_atomic_load_acquire_64(&cell.seq)) != g_head + i + 1) {
-            sthread_yield();
+        // The producer that claimed this record is still filling it: parked until it says it
+        // has (it notifies once the record is in)
+        for (;;) {
+            const int key = retro_eventcount_prepare_wait(&g_writer_ec);
+            if (static_cast<u64>(retro_atomic_load_acquire_64(&cell.seq)) == g_head + i + 1) {
+                retro_eventcount_cancel_wait(&g_writer_ec);
+                break;
+            }
+            retro_eventcount_commit_wait(&g_writer_ec, key);
         }
-        const std::size_t offset = i * CELL_BYTES;
-        std::memcpy(g_w.record + offset, cell.text, std::min(CELL_BYTES, length - offset));
+        const size_t offset = i * CELL_BYTES;
+        memcpy(g_w.record + offset, cell.text, MinSize(CELL_BYTES, length - offset));
         retro_atomic_store_release_64(&cell.seq, g_head + i + NUM_CELLS);
     }
     g_head += cells;
+    retro_eventcount_notify(&g_room_ec);
     g_w.record[length] = '\0';
     switch (kind) {
     case Kind::Line:
@@ -368,11 +390,17 @@ void WriterLoop() {
         }
         FlushOutputs();
         if (retro_atomic_load_acquire_int(&g_stop) != 0) {
-            // Lines claimed before the stop are being filled; take them too.
+            // Lines claimed before the stop are being filled; take them too, parked until one
+            // is in (PopRecord waits for the rest of it)
             if (g_head == static_cast<u64>(retro_atomic_load_acquire_64(&g_tail))) {
                 break;
             }
-            sthread_yield();
+            const int key = retro_eventcount_prepare_wait(&g_writer_ec);
+            if (RecordReady()) {
+                retro_eventcount_cancel_wait(&g_writer_ec);
+            } else {
+                retro_eventcount_commit_wait(&g_writer_ec, key);
+            }
             continue;
         }
         const int key = retro_eventcount_prepare_wait(&g_writer_ec);
@@ -388,29 +416,38 @@ void WriterLoop() {
     CloseFile(g_w.main);
     retro_atomic_store_release_64(&g_flushed, g_head);
     retro_eventcount_notify(&g_flush_ec);
+    retro_eventcount_notify(&g_room_ec);
 }
 
-Level LevelFromString(std::string_view name) {
-    const auto equals = [](std::string_view a, std::string_view b) {
-        return a.size() == b.size() &&
-               std::equal(a.begin(), a.end(), b.begin(),
-                          [](char x, char y) { return (x | 0x20) == (y | 0x20); });
-    };
-    for (std::size_t i = 0; i < LEVEL_NAMES.size(); ++i) {
-        if (equals(name, LEVEL_NAMES[i])) {
+// The @length bytes at @a are @b, ASCII case aside
+bool EqualsIgnoreCase(const char* a, size_t length, const char* b) {
+    if (strlen(b) != length) {
+        return false;
+    }
+    for (size_t i = 0; i < length; ++i) {
+        if ((a[i] | 0x20) != (b[i] | 0x20)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+Level LevelFromString(const char* name, size_t length) {
+    for (size_t i = 0; i < NUM_LEVELS; ++i) {
+        if (EqualsIgnoreCase(name, length, LEVEL_NAMES[i])) {
             return static_cast<Level>(i);
         }
     }
-    if (equals(name, "warn")) {
+    if (EqualsIgnoreCase(name, length, "warn")) {
         return Level::Warning;
     }
-    if (equals(name, "err")) {
+    if (EqualsIgnoreCase(name, length, "err")) {
         return Level::Error;
     }
     return Level::Off;
 }
 
-std::string_view BaseName(const char* file) {
+const char* BaseName(const char* file) {
     const char* base = file;
     for (const char* p = file; *p; ++p) {
         if (*p == '/' || *p == '\\') {
@@ -420,34 +457,34 @@ std::string_view BaseName(const char* file) {
     return base;
 }
 
-void PushSession(const std::string& path, bool truncate) {
+void PushSession(const char* path, bool truncate) {
     char payload[MAX_RECORD];
-    const std::size_t length = std::min(path.size(), sizeof(payload) - 1);
+    const size_t length = MinSize(strlen(path), sizeof(payload) - 1);
     payload[0] = truncate ? '1' : '0';
-    std::memcpy(payload + 1, path.data(), length);
+    memcpy(payload + 1, path, length);
     Push(Kind::Session, Level::Info, payload, length + 1, true);
 }
 
 /// A guest thread's name (and its fiber's), else the name the host thread gave itself
 /// (thread_name.h): read from memory, no system call.
-void CurrentThreadName(char* out, std::size_t size) {
+void CurrentThreadName(char* out, size_t size) {
     using namespace Libraries::Kernel;
     const char* name = thread_name_get();
-    std::size_t length = 0;
+    size_t length = 0;
     char guest[WORD_NAME_MAX + 1];
     if (g_curthread && word_name_get(&g_curthread->name, guest) != 0) {
         const int result = g_curthread->tcb->tcb_fiber
-                               ? std::snprintf(out, size, "%s@@%s", guest,
-                                               g_curthread->tcb->tcb_fiber->current_fiber->name)
-                               : std::snprintf(out, size, "%s", guest);
-        length = std::min<std::size_t>(result > 0 ? static_cast<std::size_t>(result) : 0, size - 1);
+                               ? snprintf(out, size, "%s@@%s", guest,
+                                          g_curthread->tcb->tcb_fiber->current_fiber->name)
+                               : snprintf(out, size, "%s", guest);
+        length = MinSize(result > 0 ? static_cast<size_t>(result) : 0, size - 1);
     } else if (*name) {
-        length = std::min(std::strlen(name), size - 1);
-        std::memcpy(out, name, length);
+        length = MinSize(strlen(name), size - 1);
+        memcpy(out, name, length);
     } else {
         static constexpr char unknown[] = "<unknown name>";
-        length = std::min(sizeof(unknown) - 1, size - 1);
-        std::memcpy(out, unknown, length);
+        length = MinSize(sizeof(unknown) - 1, size - 1);
+        memcpy(out, unknown, length);
     }
     out[length] = '\0';
 }
@@ -469,23 +506,17 @@ void VLog(Class log_class, Level level, const char* file, int line, const char* 
     }
     char thread[96];
     CurrentThreadName(thread, sizeof(thread));
-    const std::string_view fn = std::string_view(func) == "operator()" ? "lambda" : func;
-    const std::string_view class_name = NameOf(log_class);
-    const std::string_view level_name = LEVEL_NAMES[static_cast<std::size_t>(level)];
-    const std::string_view base = BaseName(file);
+    const char* const fn = strcmp(func, "operator()") == 0 ? "lambda" : func;
     char text[MAX_RECORD];
     // The head, then the line, cut short at the record's size (its last byte is not text)
-    const int head = std::snprintf(
-        text, sizeof(text),
-        "[%.*s] <%.*s> (%s) %.*s:%d %.*s: ", static_cast<int>(class_name.size()), class_name.data(),
-        static_cast<int>(level_name.size()), level_name.data(), thread,
-        static_cast<int>(base.size()), base.data(), line, static_cast<int>(fn.size()), fn.data());
-    std::size_t length = head > 0 ? std::min<std::size_t>(head, sizeof(text) - 1) : 0;
+    const int head =
+        snprintf(text, sizeof(text), "[%s] <%s> (%s) %s:%d %s: ", NameOf(log_class),
+                 LEVEL_NAMES[static_cast<size_t>(level)], thread, BaseName(file), line, fn);
+    size_t length = head > 0 ? MinSize(static_cast<size_t>(head), sizeof(text) - 1) : 0;
     if (length < sizeof(text) - 1) {
-        const int body = std::vsnprintf(text + length, sizeof(text) - length, format, args);
+        const int body = vsnprintf(text + length, sizeof(text) - length, format, args);
         if (body > 0) {
-            length =
-                std::min<std::size_t>(length + static_cast<std::size_t>(body), sizeof(text) - 1);
+            length = MinSize(length + static_cast<size_t>(body), sizeof(text) - 1);
         }
     }
     // Sync logging keeps every line, waiting for room; otherwise only critical lines wait.
@@ -493,12 +524,12 @@ void VLog(Class log_class, Level level, const char* file, int line, const char* 
          level == Level::Critical || (retro_atomic_load_relaxed_int(&g_sync) != 0));
 }
 
-void Setup(std::string_view shadps4_filename) {
+void Setup(const char* shadps4_filename) {
     static run_once_t already_registered = RUN_ONCE_INIT;
     run_once(
         &already_registered,
         [](void*) {
-            std::atexit(Shutdown);
+            atexit(Shutdown);
             Common::AtQuickExit(Flush);
         },
         nullptr);
@@ -509,21 +540,23 @@ void Setup(std::string_view shadps4_filename) {
             return;
         }
 #ifdef _WIN32
-        g_debugger_console = std::string_view(emu_settings_get_log_type()) != "wincolor";
+        g_debugger_console = strcmp(emu_settings_get_log_type(), "wincolor") != 0;
 #endif
         retro_atomic_store_relaxed_64(&g_size_limit, emu_settings_get_log_size_limit());
         UpdateSinks();
 
         // The writer starts with nothing queued, so it can own the files from here on.
-        g_w.main = OpenFile(
-            (GetUserPath(Common::FS::PathType::LogDir) / shadps4_filename).string().c_str(), false);
+        char main_path[MAX_RECORD];
+        fill_pathname_join_special(main_path, GetUserPathUTF8(Common::FS::PathType::LogDir),
+                                   shadps4_filename, sizeof(main_path));
+        g_w.main = OpenFile(main_path, false);
         retro_atomic_store_relaxed_int(&g_stop, 0);
         stop_thread_start(&g_writer, [](void*) { WriterLoop(); }, nullptr);
         retro_atomic_store_release_int(&g_running, 1);
     });
 }
 
-void Switch(std::string_view game_filename, bool append_log) {
+void Switch(const char* game_filename, bool append_log) {
     UpdateSinks();
     UpdateLogLevels(emu_settings_get_log_filter());
     UpdateLogFlushLevel(emu_settings_get_log_flush_level());
@@ -531,8 +564,10 @@ void Switch(std::string_view game_filename, bool append_log) {
     if (retro_atomic_load_acquire_int(&g_running) == 0) {
         return;
     }
-    PushSession((GetUserPath(Common::FS::PathType::LogDir) / game_filename).string(),
-                !(append_log || emu_settings_get_log_append()));
+    char session_path[MAX_RECORD];
+    fill_pathname_join_special(session_path, GetUserPathUTF8(Common::FS::PathType::LogDir),
+                               game_filename, sizeof(session_path));
+    PushSession(session_path, !(append_log || emu_settings_get_log_append()));
 }
 
 void Shutdown() {
@@ -568,46 +603,54 @@ void UpdateSinks() {
     retro_atomic_store_relaxed_int(&g_max_skip_ms, emu_settings_get_log_max_skip_duration());
 }
 
-void UpdateLogLevels(std::string_view log_filter) {
+void UpdateLogLevels(const char* log_filter) {
     if (!emu_settings_get_log_enable()) {
-        g_class_levels.fill(Level::Off);
+        for (size_t i = 0; i < NUM_LOG_CLASSES; ++i) {
+            g_class_levels[i] = Level::Off;
+        }
         return;
     }
     Level default_level = Level::Info;
-    std::array<Level, NUM_LOG_CLASSES> levels;
-    std::array<bool, NUM_LOG_CLASSES> named{};
-    while (!log_filter.empty()) {
-        const std::size_t space = log_filter.find(' ');
-        const std::string_view entry = log_filter.substr(0, space);
-        log_filter =
-            space == std::string_view::npos ? std::string_view{} : log_filter.substr(space + 1);
-        const std::size_t colon = entry.find(':');
-        if (colon == std::string_view::npos ||
-            entry.find(':', colon + 1) != std::string_view::npos) {
+    Level levels[NUM_LOG_CLASSES];
+    bool named[NUM_LOG_CLASSES]{};
+    // Entries "class:level", apart by spaces; "*" for the class sets every other one
+    for (const char* entry = log_filter; *entry;) {
+        const char* const space = strchr(entry, ' ');
+        const size_t length = space ? static_cast<size_t>(space - entry) : strlen(entry);
+        const char* const colon = static_cast<const char*>(memchr(entry, ':', length));
+        if (!colon || memchr(colon + 1, ':', length - (colon + 1 - entry))) {
             LOG_ERROR(Config, "bad log filter provided");
-            continue;
-        }
-        const std::string_view name = entry.substr(0, colon);
-        const Level level = LevelFromString(entry.substr(colon + 1));
-        if (!name.empty() && name[0] == '*') {
-            default_level = level;
-            continue;
-        }
-        for (std::size_t i = 0; i < NUM_LOG_CLASSES; ++i) {
-            if (NameOf(static_cast<Class>(i)) == name) {
-                levels[i] = level;
-                named[i] = true;
+        } else {
+            const size_t name_length = static_cast<size_t>(colon - entry);
+            const Level level = LevelFromString(colon + 1, length - name_length - 1);
+            if (name_length && entry[0] == '*') {
+                default_level = level;
+            } else {
+                for (size_t i = 0; i < NUM_LOG_CLASSES; ++i) {
+                    const char* const class_name = NameOf(static_cast<Class>(i));
+                    if (strlen(class_name) == name_length &&
+                        memcmp(class_name, entry, name_length) == 0) {
+                        levels[i] = level;
+                        named[i] = true;
+                    }
+                }
             }
         }
+        entry += length;
+        if (*entry == ' ') {
+            ++entry;
+        }
     }
-    for (std::size_t i = 0; i < NUM_LOG_CLASSES; ++i) {
+    for (size_t i = 0; i < NUM_LOG_CLASSES; ++i) {
         g_class_levels[i] = named[i] ? levels[i] : default_level;
     }
 }
 
-void UpdateLogFlushLevel(std::string_view log_flush_level) {
-    if (!log_flush_level.empty()) {
-        retro_atomic_store_relaxed_int(&g_flush_level, LevelFromString(log_flush_level));
+void UpdateLogFlushLevel(const char* log_flush_level) {
+    if (log_flush_level[0]) {
+        retro_atomic_store_relaxed_int(
+            &g_flush_level,
+            static_cast<int>(LevelFromString(log_flush_level, strlen(log_flush_level))));
     }
 }
 

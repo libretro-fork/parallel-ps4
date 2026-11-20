@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <string>
 #include "common/assert.h"
 #include "common/types.h"
 

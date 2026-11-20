@@ -3,17 +3,16 @@
 
 #pragma once
 
-#include <array>
-#include <cinttypes>
-#include <cstdarg>
-#include <cstdint>
-#include <string_view>
+#include <inttypes.h>
+#include <stdarg.h>
+#include <stddef.h>
+#include <stdint.h>
 
 #include "common/logging/classes.h"
 
 namespace Common::Log {
 
-enum class Level : std::uint8_t {
+enum class Level : uint8_t {
     Trace = 0,
     Debug,
     Info,
@@ -22,21 +21,21 @@ enum class Level : std::uint8_t {
     Critical,
     Off,
 };
-extern std::array<Level, NUM_LOG_CLASSES> g_class_levels;
+extern Level g_class_levels[NUM_LOG_CLASSES];
 
-void Setup(std::string_view shadps4_filename);
-void Switch(std::string_view game_filename, bool append_log);
+void Setup(const char* shadps4_filename);
+void Switch(const char* game_filename, bool append_log);
 void Shutdown();
 void Flush();
 void Terminate();
 void UpdateSinks();
-void UpdateLogLevels(std::string_view log_filter);
-void UpdateLogFlushLevel(std::string_view log_flush_level);
+void UpdateLogLevels(const char* log_filter);
+void UpdateLogFlushLevel(const char* log_flush_level);
 
 [[nodiscard]] inline bool ShouldLog(Class log_class, Level level) {
     // A critical line is written whatever the filter says, and with logging off: it is what
     // a crash or a stop leaves behind
-    return level == Level::Critical || level >= g_class_levels[static_cast<std::size_t>(log_class)];
+    return level == Level::Critical || level >= g_class_levels[static_cast<size_t>(log_class)];
 }
 
 // A printf format: the compiler checks each argument against it

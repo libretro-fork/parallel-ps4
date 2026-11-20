@@ -203,9 +203,7 @@ vk::UniqueInstance CreateInstance(bool enable_validation, bool enable_crash_diag
     vk::Bool32 enable_gpuav = emu_settings_get_vkvalidation_gpu_enabled() ? vk::True : vk::False;
 
     // Crash diagnostics settings
-    static const auto crash_diagnostic_path =
-        Common::FS::GetUserPathString(Common::FS::PathType::LogDir);
-    const char* log_path = crash_diagnostic_path.c_str();
+    const char* log_path = Common::FS::GetUserPathUTF8(Common::FS::PathType::LogDir);
     vk::Bool32 enable_force_barriers = vk::True;
 
     const std::array layer_setings = {
