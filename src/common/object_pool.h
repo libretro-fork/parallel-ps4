@@ -3,106 +3,110 @@
 
 #pragma once
 
-#include <memory>
-#include <type_traits>
-#include <utility>
-#include <vector>
+#include <new>
+#include <stddef.h>
+#include <stdlib.h>
+
+#include "common/assert.h"
 
 namespace Common {
 
+/// Objects made one after another in chunks and all given back at once (ReleaseContents):
+/// what the shader recompiler makes its instructions, blocks and statements in
 template <typename T>
-    requires std::is_destructible_v<T>
 class ObjectPool {
+    static_assert(alignof(T) <= alignof(max_align_t), "malloc does not align this far");
+
 public:
     explicit ObjectPool(size_t chunk_size = 1024) : new_chunk_size{chunk_size} {
-        node = &chunks.emplace_back(new_chunk_size);
+        AddChunk(new_chunk_size);
     }
 
+    ~ObjectPool() {
+        for (size_t i = 0; i < num_chunks; ++i) {
+            DestroyChunk(chunks[i]);
+        }
+        free(chunks);
+    }
+
+    ObjectPool(const ObjectPool&) = delete;
+    ObjectPool& operator=(const ObjectPool&) = delete;
+
     template <typename... Args>
-        requires std::is_constructible_v<T, Args...>
     [[nodiscard]] T* Create(Args&&... args) {
-        return std::construct_at(Memory(), std::forward<Args>(args)...);
+        return ::new (static_cast<void*>(Memory())) T(static_cast<Args&&>(args)...);
     }
 
     void ReleaseContents() {
-        if (chunks.empty()) {
+        if (num_chunks == 0) {
             return;
         }
-        Chunk& root{chunks.front()};
+        Chunk& root = chunks[0];
         if (root.used_objects == root.num_objects) {
             // Root chunk has been filled, squash allocations into it
-            const size_t total_objects{root.num_objects + new_chunk_size * (chunks.size() - 1)};
-            chunks.clear();
-            chunks.emplace_back(total_objects);
+            const size_t total_objects = root.num_objects + new_chunk_size * (num_chunks - 1);
+            for (size_t i = 0; i < num_chunks; ++i) {
+                DestroyChunk(chunks[i]);
+            }
+            num_chunks = 0;
+            AddChunk(total_objects);
         } else {
-            root.Release();
-            chunks.resize(1);
+            ReleaseObjects(root);
+            for (size_t i = 1; i < num_chunks; ++i) {
+                DestroyChunk(chunks[i]);
+            }
+            num_chunks = 1;
         }
-        chunks.shrink_to_fit();
-        node = &chunks.front();
+        node = 0;
     }
 
 private:
-    struct NonTrivialDummy {
-        NonTrivialDummy() noexcept {}
-    };
-
-    union Storage {
-        Storage() noexcept {}
-        ~Storage() noexcept {}
-
-        NonTrivialDummy dummy{};
-        T object;
-    };
-
     struct Chunk {
-        explicit Chunk() = default;
-        explicit Chunk(size_t size)
-            : num_objects{size}, storage{std::make_unique<Storage[]>(size)} {}
-
-        Chunk& operator=(Chunk&& rhs) noexcept {
-            Release();
-            used_objects = std::exchange(rhs.used_objects, 0);
-            num_objects = std::exchange(rhs.num_objects, 0);
-            storage = std::move(rhs.storage);
-            return *this;
-        }
-
-        Chunk(Chunk&& rhs) noexcept
-            : used_objects{std::exchange(rhs.used_objects, 0)},
-              num_objects{std::exchange(rhs.num_objects, 0)}, storage{std::move(rhs.storage)} {}
-
-        ~Chunk() {
-            Release();
-        }
-
-        void Release() {
-            for (size_t i = 0; i < used_objects; i++) {
-                storage[i].object.~T();
-            }
-            used_objects = 0;
-        }
-
-        size_t used_objects{};
-        size_t num_objects{};
-        std::unique_ptr<Storage[]> storage;
+        T* storage;
+        size_t used_objects;
+        size_t num_objects;
     };
+
+    static void ReleaseObjects(Chunk& chunk) {
+        for (size_t i = 0; i < chunk.used_objects; i++) {
+            chunk.storage[i].~T();
+        }
+        chunk.used_objects = 0;
+    }
+
+    static void DestroyChunk(Chunk& chunk) {
+        ReleaseObjects(chunk);
+        free(chunk.storage);
+        chunk.storage = nullptr;
+        chunk.num_objects = 0;
+    }
+
+    void AddChunk(size_t size) {
+        if (num_chunks == chunk_capacity) {
+            const size_t capacity = chunk_capacity ? chunk_capacity * 2 : 4;
+            Chunk* const grown = static_cast<Chunk*>(realloc(chunks, capacity * sizeof(Chunk)));
+            ASSERT_MSG(grown, "Out of memory growing an object pool");
+            chunks = grown;
+            chunk_capacity = capacity;
+        }
+        T* const storage = static_cast<T*>(malloc(size * sizeof(T)));
+        ASSERT_MSG(storage, "Out of memory making an object pool's chunk");
+        chunks[num_chunks] = Chunk{storage, 0, size};
+        node = num_chunks++;
+    }
 
     [[nodiscard]] T* Memory() {
-        Chunk* const chunk{FreeChunk()};
-        return &chunk->storage[chunk->used_objects++].object;
-    }
-
-    [[nodiscard]] Chunk* FreeChunk() {
-        if (node->used_objects != node->num_objects) {
-            return node;
+        if (chunks[node].used_objects == chunks[node].num_objects) {
+            AddChunk(new_chunk_size);
         }
-        node = &chunks.emplace_back(new_chunk_size);
-        return node;
+        Chunk& chunk = chunks[node];
+        return &chunk.storage[chunk.used_objects++];
     }
 
-    Chunk* node{};
-    std::vector<Chunk> chunks;
+    Chunk* chunks{};
+    size_t num_chunks{};
+    size_t chunk_capacity{};
+    size_t node{};
     size_t new_chunk_size{};
 };
 

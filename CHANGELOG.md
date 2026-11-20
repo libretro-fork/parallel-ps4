@@ -4,6 +4,11 @@ What changed in the libretro core of this fork, newest first. Changes that come 
 
 ## Unreleased
 
+- No STL in the object pools (`common/object_pool.h`), which the shader recompiler makes its instructions, blocks and statements in; `common/slot_array.h`, which nothing used, is gone.
+  - **Object pools:** their chunks are plain blocks from `malloc` in a list grown with `realloc`, instead of `std::unique_ptr` arrays in a `std::vector`; objects are made in place with placement `new`. Giving everything back works as before: a full first chunk takes the size of all of them, otherwise it is kept and the others go.
+  - **Checked:** 50 rounds of up to 300 objects holding strings in a pool of 16-object chunks, each round given back at once, and a pool destroyed with objects in it, under AddressSanitizer and UndefinedBehaviorSanitizer: every object made right, and every one destroyed once.
+  - **Unchanged:** what they do. `control_flow_graph.h`, which had `<vector>` through this header, includes it itself now.
+  - **Checks:** the Linux and Windows builds pass. Not run in a game yet.
 - No STL in the interval lists (`common/interval_set.h`) and the bounded queues (`common/bounded_threadsafe_queue.h`).
   - **Interval lists:** kept in one of the core's small vectors, the first four in place and the rest on the heap, instead of a `std::vector` that was always on the heap. The search for where a range starts is a binary search of their own in place of `std::ranges::upper_bound`, and their checks on what an interval is come from the compiler and a small concept of the header's own.
   - **Bounded queues:** a plain array of cells and casts for moves; the lock-free scheme is untouched.

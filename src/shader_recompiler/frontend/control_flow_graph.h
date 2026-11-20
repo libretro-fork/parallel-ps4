@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <span>
 #include <string>
+#include <vector>
 #include "common/intrusive_list_cpp.h"
 #include "common/small_vector.h"
 
