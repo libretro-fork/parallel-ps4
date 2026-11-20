@@ -134,8 +134,10 @@ void x64_bind(x64_code_t* c, size_t at);
 
 struct x64_insn;
 /* A copy of the guest instruction @in (decoded by common/x64_decode.h from @bytes, at @from),
- * written to run where the code goes: byte for byte, but that a relative branch (in its own
- * form, short or near) reaches the same target and a rip-relative operand the same address.
+ * written to run where the code goes: byte for byte, but that a relative branch reaches the same
+ * target and a rip-relative operand the same address. A branch keeps its form, short or near;
+ * a short Jcc or JMP that no longer reaches takes its near form (LOOP, JRCXZ and JECXZ have
+ * none, nor does a branch with a 66, 67, F2, F3, REX or FS/GS prefix).
  * 0 when the copy cannot reach (nothing is written, and no error set); also 0, with the error
  * set, when there is no room. */
 int x64_relocate(x64_code_t* c, const uint8_t* bytes, const struct x64_insn* in, uint64_t from);

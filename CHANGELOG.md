@@ -4,6 +4,21 @@ What changed in the libretro core of this fork, newest first. Changes that come 
 
 ## Unreleased
 
+- Windows red-zone protection: a short Jcc or JMP moved into a trampoline that can no longer reach its target from there now takes its near form (`0F 8x rel32`, `E9 rel32`) instead of failing.
+  - **Why it failed before:** the trampolines sit right after the module, out of reach of a short branch. So every span holding a short branch failed to move. When the relay pass could not rescue it either, the red-zone access stayed unprotected ("unrelocatable memory instructions were not protected" in the log). This kept Zydis's behaviour from the previous entries.
+  - **How many more sites:** in a game's code, short Jcc and JMP are about 70% of all relative branches. A simulation of the span rules over that code, counting every memory instruction as a site (an upper bound), moves 99.05% of them with widening against 97.44% before, about 10,600 more.
+  - **Why it is safe:**
+    - A branch still goes to its original absolute target.
+    - The site's patch and the span limits are worked out from the guest's own bytes, so nothing depends on the copy keeping its length.
+    - A span still ends at any instruction that a branch in the function targets. Widening changes only whether the copy can be written, not which spans are taken.
+  - **Still refused:**
+    - LOOP, JRCXZ and JECXZ, which have no near form;
+    - a short branch with a 66, 67, F2, F3, REX or FS/GS prefix;
+    - a branch that would need more than ±2 GB.
+
+    A branch hint (2E, 3E) is dropped.
+  - **Checks:** relocated over a game's code at 4 KB, 8 MB and -1 GB, all 415,065 widened branches decode back to the same mnemonic and the same target. `x64_emit_test` checks short Jcc and JMP widened, a hinted Jcc, and the refused 66 Jcc, LOOP and out-of-range cases.
+  - **Not run on Windows yet.** On a real game, the "unrelocatable memory instructions" count in the log should go down.
 - Zydis (with Zycore) is gone from the tree: 13 MB, 18 C files and their tables, a C library dependency fewer. Nothing in the core has used it since the previous entries: the core's own C89 decoder (`src/common/x64_decode.c`) and encoder (`src/common/x64_emit.c`) do what it did. `tools/x64_decode_gen.c` still needs a Zydis checkout to remake the decoder's tables, and names the commit they came from (120e0e7, Zycore 38d4f02). Built on Linux and Windows; the tests pass.
 - The CPU patches (`src/core/cpu_patches.cpp`) read the game's code with the core's own x86-64 decoder (`src/common/x64_decode.c`) in place of Zydis. Nothing in the core uses Zydis now, and `src/common/decoder.cpp`, the wrapper around it, is gone. Zydis itself leaves the tree in the next patch.
   - **Same decisions:** the patches find instructions by the same mnemonics and filter them on the same operands. Those are what Zydis gave at every offset of a game's code (previous entries), so the same instructions are found, the same sites patched and the same code generated for them. This includes the Windows red-zone analysis, which reads every operand of every instruction of a function.

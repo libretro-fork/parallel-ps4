@@ -760,6 +760,26 @@ int x64_relocate(x64_code_t* c, const uint8_t* bytes, const x64_insn_t* in, uint
         /* A relative branch keeps its form (as Zydis's encoder relocated it): its offset moved */
         const uint64_t target = x64_target(in, from);
         const int64_t off = (int64_t)(target - (at + in->len));
+        if (in->imm_size == 1 && !is_s8(off) && in->enc == X64_ENC_LEGACY &&
+            in->map == X64_MAP_ONE && ((in->op >= 0x70 && in->op <= 0x7F) || in->op == 0xEB) &&
+            !in->p66 && !in->p67 && !in->lock && !in->rep && !in->rex && !in->fsgs) {
+            /* A short Jcc or JMP that no longer reaches: its near form (a branch hint, 2E or 3E,
+             * left behind). LOOP and JRCXZ have none. */
+            const unsigned n = in->op == 0xEB ? 5 : 6;
+            const int64_t near_off = (int64_t)(target - (at + n));
+            if (!fits_s32(near_off))
+                return 0;
+            if (!room(c, n))
+                return 0;
+            if (in->op == 0xEB) {
+                b(c, 0xE9);
+            } else {
+                b(c, 0x0F);
+                b(c, (uint8_t)(0x80 | (in->op & 0x0F)));
+            }
+            d32(c, (uint32_t)near_off);
+            return 1;
+        }
         if ((in->imm_size == 1 && !is_s8(off)) ||
             (in->imm_size == 2 && (off < -32768 || off > 32767)) ||
             (in->imm_size == 4 && !fits_s32(off)))
