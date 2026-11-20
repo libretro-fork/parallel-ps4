@@ -9,8 +9,7 @@
 
 #pragma once
 
-#include <bit>
-#include <concepts>
+#include "common/concepts.h"
 #include "common/types.h"
 
 namespace Common {
@@ -21,7 +20,8 @@ namespace Common {
 template <typename T>
 using NativeEndian = T;
 
-template <std::integral T>
+template <typename T>
+    requires IsIntegral<T>
 class SwappedEndian {
 public:
     const T& Raw() const {
@@ -29,7 +29,7 @@ public:
     }
 
     T Swap() const {
-        return std::byteswap(data);
+        return ByteSwap(data);
     }
 
     void FromRaw(const T& value) {
@@ -37,7 +37,7 @@ public:
     }
 
     void FromSwap(const T& value) {
-        data = std::byteswap(value);
+        data = ByteSwap(value);
     }
 
     operator const T() const {
@@ -223,13 +223,15 @@ private:
     T data;
 };
 
-template <typename T>
-using LittleEndian = std::conditional_t<std::endian::native == std::endian::little, NativeEndian<T>,
-                                        SwappedEndian<T>>;
+#if !defined(__BYTE_ORDER__) || __BYTE_ORDER__ != __ORDER_LITTLE_ENDIAN__
+#error "Common::LittleEndian and BigEndian are for a little-endian host"
+#endif
 
 template <typename T>
-using BigEndian =
-    std::conditional_t<std::endian::native == std::endian::big, NativeEndian<T>, SwappedEndian<T>>;
+using LittleEndian = NativeEndian<T>;
+
+template <typename T>
+using BigEndian = SwappedEndian<T>;
 
 } // namespace Common
 

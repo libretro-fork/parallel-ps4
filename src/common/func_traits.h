@@ -3,7 +3,9 @@
 
 #pragma once
 
-#include <tuple>
+#include <stddef.h>
+
+#include "common/concepts.h"
 
 namespace Common {
 
@@ -17,16 +19,16 @@ struct FuncTraits<ReturnType_ (*)(Args...)> {
     static constexpr size_t NUM_ARGS = sizeof...(Args);
 
     template <size_t I>
-    using ArgType = std::tuple_element_t<I, std::tuple<Args...>>;
+    using ArgType = typename TypeAt<I, Args...>::Type;
 };
 
 template <typename Func>
-struct LambdaTraits : LambdaTraits<decltype(&std::remove_reference_t<Func>::operator())> {};
+struct LambdaTraits : LambdaTraits<decltype(&RemoveReference<Func>::Type::operator())> {};
 
 template <typename ReturnType, typename LambdaType, typename... Args>
 struct LambdaTraits<ReturnType (LambdaType::*)(Args...) const> {
     template <size_t I>
-    using ArgType = std::tuple_element_t<I, std::tuple<Args...>>;
+    using ArgType = typename TypeAt<I, Args...>::Type;
 
     static constexpr size_t NUM_ARGS{sizeof...(Args)};
 };

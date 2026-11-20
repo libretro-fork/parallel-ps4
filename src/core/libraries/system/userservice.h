@@ -4,6 +4,8 @@
 // https://github.com/OpenOrbis/OpenOrbis-PS4-Toolchain/blob/master/include/orbis/_types/user.h
 #pragma once
 
+#include <stddef.h>
+
 #include "common/types.h"
 
 namespace Core::Loader {
@@ -264,7 +266,7 @@ s32 PS4_SYSV_ABI sceUserServiceGetUserColor(int user_id, OrbisUserServiceUserCol
 int PS4_SYSV_ABI sceUserServiceGetUserGroupName();
 int PS4_SYSV_ABI sceUserServiceGetUserGroupNameList();
 int PS4_SYSV_ABI sceUserServiceGetUserGroupNum();
-s32 PS4_SYSV_ABI sceUserServiceGetUserName(int user_id, char* user_name, std::size_t size);
+s32 PS4_SYSV_ABI sceUserServiceGetUserName(int user_id, char* user_name, size_t size);
 int PS4_SYSV_ABI sceUserServiceGetUserStatus();
 int PS4_SYSV_ABI sceUserServiceGetVibrationEnabled();
 int PS4_SYSV_ABI sceUserServiceGetVoiceRecognitionLastUsedOsk();

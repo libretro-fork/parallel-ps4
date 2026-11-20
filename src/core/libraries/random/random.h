@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include <stddef.h>
+
 #include "common/types.h"
 
 namespace Core::Loader {
@@ -13,7 +15,7 @@ namespace Libraries::Random {
 
 constexpr s32 SCE_RANDOM_MAX_SIZE = 64;
 
-s32 PS4_SYSV_ABI sceRandomGetRandomNumber(u8* buf, std::size_t size);
+s32 PS4_SYSV_ABI sceRandomGetRandomNumber(u8* buf, size_t size);
 
 void RegisterLib(Core::Loader::SymbolsResolver* sym);
 

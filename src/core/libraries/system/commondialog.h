@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include <stddef.h>
+
 #include "common/types.h"
 
 namespace Core::Loader {
@@ -47,8 +49,8 @@ extern bool g_isInitialized;
 extern bool g_isUsed;
 
 struct BaseParam {
-    std::size_t size;
-    std::array<u8, 36> reserved;
+    size_t size;
+    u8 reserved[36];
     u32 magic;
 };
 

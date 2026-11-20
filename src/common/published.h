@@ -3,8 +3,6 @@
 
 #pragma once
 
-#include <utility>
-
 #include <queues/retro_retire.h>
 
 #include <retro_atomic.h>
@@ -26,7 +24,7 @@ template <typename T>
 class Published {
 public:
     template <typename... Args>
-    explicit Published(Args&&... args) : current{new Node{{}, T(std::forward<Args>(args)...)}} {
+    explicit Published(Args&&... args) : current{new Node{{}, T(static_cast<Args&&>(args)...)}} {
         retro_retire_init(&retire);
     }
     ~Published() {
@@ -47,8 +45,8 @@ public:
                 retro_retire_leave(retire, Free);
             }
         } leave{&retire};
-        return func(
-            std::as_const(static_cast<Node*>(retro_atomic_load_acquire_ptr(&current))->value));
+        const T& value = static_cast<Node*>(retro_atomic_load_acquire_ptr(&current))->value;
+        return func(value);
     }
 
     /// Calls @func on a copy of the current value, then publishes the copy.

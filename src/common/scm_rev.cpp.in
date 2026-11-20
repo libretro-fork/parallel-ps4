@@ -1,7 +1,9 @@
 // SPDX-FileCopyrightText: Copyright 2024 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
-#include <string>
+#include <string.h>
+
+#include <compat/strl.h>
 
 #include "common/scm_rev.h"
 
@@ -17,25 +19,49 @@ constexpr char g_scm_remote_name[] = "@GIT_REMOTE_NAME@";
 constexpr char g_scm_remote_url[]  = "@GIT_REMOTE_URL@";
 constexpr char g_scm_date[]        = "@BUILD_DATE@";
 
-const std::string GetRemoteNameFromLink() {
-    std::string remote_url(Common::g_scm_remote_url);
-    std::string remote_host;
-    try {
-        if (remote_url.starts_with("http")) {
-            if (*remote_url.rbegin() == '/') {
-                remote_url.pop_back();
-            }
-            remote_host = remote_url.substr(19, remote_url.rfind('/') - 19);
-        } else if (remote_url.starts_with("git@")) {
-            auto after_comma_pos = remote_url.find(':') + 1, slash_pos = remote_url.find('/');
-            remote_host = remote_url.substr(after_comma_pos, slash_pos - after_comma_pos);
-        } else {
-            remote_host = "unknown";
+void GetRemoteNameFromLink(char* out, size_t size) {
+    const char* url = g_scm_remote_url;
+    size_t len = strlen(url);
+    size_t start = 0;
+    size_t count = 0;
+    if (strncmp(url, "http", 4) == 0) {
+        if (url[len - 1] == '/') {
+            len--;
         }
-    } catch (...) {
-        remote_host = "unknown";
+        // After "https://github.com/", up to the last slash
+        start = 19;
+        if (start > len) {
+            strlcpy(out, "unknown", size);
+            return;
+        }
+        size_t slash = len;
+        while (slash > 0 && url[slash - 1] != '/') {
+            slash--;
+        }
+        slash--; // "http" has a slash after it, so one is found
+        count = (slash >= start) ? slash - start : len - start;
+    } else if (strncmp(url, "git@", 4) == 0) {
+        // Between the colon and the first slash
+        const char* colon = static_cast<const char*>(memchr(url, ':', len));
+        start = colon ? static_cast<size_t>(colon - url) + 1 : 0;
+        const char* slash = static_cast<const char*>(memchr(url, '/', len));
+        const size_t at = slash ? static_cast<size_t>(slash - url) : len;
+        count = (slash && at >= start) ? at - start : len - start;
+    } else {
+        strlcpy(out, "unknown", size);
+        return;
     }
-    return remote_host;
+    if (count > len - start) {
+        count = len - start;
+    }
+    if (size == 0) {
+        return;
+    }
+    if (count >= size) {
+        count = size - 1;
+    }
+    memcpy(out, url + start, count);
+    out[count] = '\0';
 }
 
 } // namespace

@@ -5,7 +5,6 @@
 
 #include <new>
 
-#include <memory>
 #include <retro_atomic.h>
 #include "common/assert.h"
 #include "common/types.h"

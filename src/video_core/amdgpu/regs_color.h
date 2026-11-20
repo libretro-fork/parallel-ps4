@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <array>
 #include "video_core/amdgpu/pixel_format.h"
 #include "video_core/amdgpu/tiling.h"
 

@@ -3,14 +3,14 @@
 
 #pragma once
 
-#include <type_traits>
-
 #include <retro_atomic.h>
+
+#include "common/concepts.h"
 
 namespace Common {
 template <typename CounterType>
 class IncrementalIdProvider {
-    static_assert(std::is_integral_v<CounterType> && sizeof(CounterType) <= 8);
+    static_assert(IsIntegral<CounterType> && sizeof(CounterType) <= 8);
 
 public:
     IncrementalIdProvider() {

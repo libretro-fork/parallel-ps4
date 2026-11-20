@@ -4,6 +4,14 @@ What changed in the libretro core of this fork, newest first. Changes that come 
 
 ## Unreleased
 
+- No STL in `common`'s small headers: `types.h`, `concepts.h`, `endian.h`, `alignment.h`, `div_ceil.h`, `func_traits.h`, `incremental_id.h`, `lru_cache.h`, `multi_level_page_table.h`, `published.h`, `scope_exit.h`, `uint128.h`, `scm_rev`, and the includes of `logging/classes.h`, `native_clock.h` and `slab_heap.h`.
+  - **Traits:** `concepts.h` holds the core's own, written out by hand: `IsIntegral`, `IsUnsigned`, `IsSame`, `RemoveCV`, `RemoveReference`, `TypeAt` and `ByteSwap`. `IsContiguousContainer` asks for an iterator type, `data()` and `size()`. The unused `DerivedFrom`, `ConvertibleTo`, `IsArithmetic` and the old `IsIntegral` concept are gone.
+  - **Endian:** `LittleEndian` and `BigEndian` are chosen for a little-endian host, which the build now checks, instead of through `<bit>`.
+  - **u128:** the `std::array` type, and `Multiply64Into128` and `Divide128On32` that used it, are gone: nothing else used them. `MultiplyAndDivide64` and `GetFixedPoint64Factor` keep two words in a plain array on MSVC.
+  - **LRU cache:** `ForEachItemBelow` stops when its callback returns true, as it was written to. Its check compared a trait's struct to `bool`, so it was never true and the walk went on to the end of the list. The texture cache's image and sampler callbacks return true only once they have nothing left to free, so what is freed is the same; the walk is shorter.
+  - **scm_rev:** `GetRemoteNameFromLink` writes into a caller's buffer. It gave the same owner as the old one on 13 URLs, odd ones included.
+  - **Headers:** some core files that had `<array>`, `std::size_t` or `std::uint8_t` through `types.h` include them or use the plain names now: `memory.h`, `msgdialog_ui.h`, `net_util.h`, `net_ctl_obj.h`, `commondialog.h`, `userservice.h`, `random.h`, `companion_util.h`, and others the build named.
+  - **Checks:** the traits, the endian types and the LRU stop were checked in a small program. The Linux and Windows builds pass. Not run in a game yet.
 - No STL in `common/elf_info`.
   - **Strings:** the game's serial, title, app version and folder (UTF-8) are C strings, copied once when the game is loaded, and handed out as `const char*`.
   - **NP Communication IDs:** they are one array, made once from npbind.dat, each with its bytes as they were there and whether the game has a trophy file for it. That replaces the vector of IDs and the map of trophy index to ID, which held the same ID twice. The trophy setup looks an index up in the array; the NP handler picks an ID by service label as before, falling back to the first.

@@ -612,7 +612,9 @@ static std::vector<u8> MakeComIdPayload(const std::string& com_id, const T& msg)
 
 std::string ShadNetClient::BuildVersionString() {
     const std::string remote_url(Common::g_scm_remote_url);
-    const std::string remote_host = Common::GetRemoteNameFromLink();
+    char remote_host_buf[256];
+    Common::GetRemoteNameFromLink(remote_host_buf, sizeof(remote_host_buf));
+    const std::string remote_host = remote_host_buf;
     const bool official = (remote_host == "shadps4-emu" || remote_url.empty());
 
     if (Common::g_is_release) {

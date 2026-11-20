@@ -3,8 +3,6 @@
 
 #pragma once
 
-#include <utility>
-
 #ifdef _MSC_VER
 #ifndef __clang__
 #define HAS_INTRINSICS
@@ -14,8 +12,6 @@
 #pragma intrinsic(_udiv128)
 #else
 #endif
-#else
-#include <cstring>
 #endif
 
 #include "common/types.h"
@@ -25,7 +21,7 @@ namespace Common {
 // This function multiplies 2 u64 values and divides it by a u64 value.
 [[nodiscard]] static inline u64 MultiplyAndDivide64(u64 a, u64 b, u64 d) {
 #ifdef HAS_INTRINSICS
-    u128 r{};
+    u64 r[2]{};
     r[0] = _umul128(a, b, &r[1]);
     u64 remainder;
     return _udiv128(r[1], r[0], d, &remainder);
@@ -38,30 +34,17 @@ namespace Common {
 #endif
 }
 
-// This function multiplies 2 u64 values and produces a u128 value;
-[[nodiscard]] static inline u128 Multiply64Into128(u64 a, u64 b) {
-    u128 result;
-#ifdef HAS_INTRINSICS
-    result[0] = _umul128(a, b, &result[1]);
-#else
-    unsigned __int128 tmp = a;
-    tmp *= b;
-    std::memcpy(&result, &tmp, sizeof(u128));
-#endif
-    return result;
-}
-
 [[nodiscard]] static inline u64 GetFixedPoint64Factor(u64 numerator, u64 divisor) {
 #ifdef __SIZEOF_INT128__
     const auto base = static_cast<unsigned __int128>(numerator) << 64ULL;
     return static_cast<u64>(base / divisor);
 #elif defined(_M_X64) || defined(_M_ARM64)
-    std::array<u64, 2> r = {0, numerator};
+    u64 r[2] = {0, numerator};
     u64 remainder;
     return _udiv128(r[1], r[0], divisor, &remainder);
 #else
     // This one is bit more inaccurate.
-    return MultiplyAndDivide64(std::numeric_limits<u64>::max(), numerator, divisor);
+    return MultiplyAndDivide64(~u64{0}, numerator, divisor);
 #endif
 }
 
@@ -90,26 +73,6 @@ namespace Common {
 
     return multhi;
 #endif
-}
-
-// This function divides a u128 by a u32 value and produces two u64 values:
-// the result of division and the remainder
-[[nodiscard]] static inline std::pair<u64, u64> Divide128On32(const u128& dividend, u32 divisor) {
-    u64 remainder = dividend[0] % divisor;
-    u64 accum = dividend[0] / divisor;
-    if (dividend[1] == 0)
-        return {accum, remainder};
-    // We ignore dividend[1] / divisor as that overflows
-    const u64 first_segment = (dividend[1] % divisor) << 32;
-    accum += (first_segment / divisor) << 32;
-    const u64 second_segment = (first_segment % divisor) << 32;
-    accum += (second_segment / divisor);
-    remainder += second_segment % divisor;
-    if (remainder >= divisor) {
-        accum++;
-        remainder -= divisor;
-    }
-    return {accum, remainder};
 }
 
 } // namespace Common

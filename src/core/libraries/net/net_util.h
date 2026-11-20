@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <array>
 #include <mutex>
 #include "common/combiner.h"
 #include "common/types.h"

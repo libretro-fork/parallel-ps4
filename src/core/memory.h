@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <array>
 #include <map>
 #include <string>
 #include <string_view>

@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <array>
 #include <optional>
 
 #include "common/assert.h"

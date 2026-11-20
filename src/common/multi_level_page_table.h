@@ -3,7 +3,6 @@
 
 #pragma once
 
-#include <memory>
 #include <retro_atomic.h>
 
 namespace Common {
@@ -17,19 +16,28 @@ class MultiLevelPageTable final {
     static constexpr size_t NUM_L1_ENTRIES = 1ULL << L2_BITS;
     static constexpr bool NULL_CHECK = Traits::NULL_CHECK;
 
-    using L1Page = std::array<Entry, NUM_L1_ENTRIES>;
+    struct L1Page {
+        Entry entries[NUM_L1_ENTRIES]{};
+        Entry& operator[](size_t i) {
+            return entries[i];
+        }
+        const Entry& operator[](size_t i) const {
+            return entries[i];
+        }
+    };
 
 public:
     /// The second-level pages are made when first wanted, by whichever thread wants one first:
     /// it publishes its page with a compare-exchange, and a thread that loses the race frees
     /// its own and takes the winner's. No lock, and a reader never waits.
     explicit MultiLevelPageTable(size_t /*chunk_size*/ = 64)
-        : top_level{std::make_unique<retro_atomic_ptr_t[]>(TopSize)} {}
+        : top_level{new retro_atomic_ptr_t[TopSize]{}} {}
 
     ~MultiLevelPageTable() noexcept {
         for (size_t i = 0; i < TopSize; ++i) {
             delete static_cast<L1Page*>(retro_atomic_load_relaxed_ptr(&top_level[i]));
         }
+        delete[] top_level;
     }
 
     MultiLevelPageTable(const MultiLevelPageTable&) = delete;
@@ -95,7 +103,7 @@ private:
         return l1;
     }
 
-    std::unique_ptr<retro_atomic_ptr_t[]> top_level;
+    retro_atomic_ptr_t* top_level;
 };
 
 } // namespace Common

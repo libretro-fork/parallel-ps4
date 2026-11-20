@@ -3,8 +3,7 @@
 
 #pragma once
 
-#include <concepts>
-#include <type_traits>
+#include "common/concepts.h"
 #include "common/types.h"
 
 namespace Common {
@@ -18,7 +17,7 @@ struct LRUNode {
 };
 
 template <typename ObjectType, typename TickType = u64>
-    requires std::derived_from<ObjectType, LRUNode<TickType>>
+    requires(__is_base_of(LRUNode<TickType>, ObjectType))
 class LRUCache {
     using Node = LRUNode<TickType>;
 
@@ -60,7 +59,7 @@ public:
     template <typename Func>
     void ForEachItemBelow(TickType tick, Func&& func) {
         static constexpr bool RETURNS_BOOL =
-            std::is_same_v<std::invoke_result<Func, ObjectType>, bool>;
+            IsSame<decltype(func(*static_cast<ObjectType*>(nullptr))), bool>;
         Node* it = first;
         while (it) {
             if (static_cast<s64>(tick) - static_cast<s64>(it->tick) < 0) {

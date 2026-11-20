@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include <string>
+#include <stddef.h>
 
 namespace Common {
 
@@ -17,6 +17,8 @@ extern const char g_scm_remote_name[];
 extern const char g_scm_remote_url[];
 extern const char g_scm_date[];
 
-const std::string GetRemoteNameFromLink();
+/// The owner in g_scm_remote_url (github.com/<owner>/... or git@host:<owner>/...), into @out;
+/// "unknown" when the URL is neither form
+void GetRemoteNameFromLink(char* out, size_t size);
 
 } // namespace Common

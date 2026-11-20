@@ -3,8 +3,6 @@
 
 #pragma once
 
-#include <utility>
-
 namespace detail {
 template <class F>
 class ScopeGuard {
@@ -13,7 +11,7 @@ private:
     bool active;
 
 public:
-    constexpr ScopeGuard(F f_) : f(std::move(f_)), active(true) {}
+    constexpr ScopeGuard(F f_) : f(static_cast<F&&>(f_)), active(true) {}
     constexpr ~ScopeGuard() {
         if (active) {
             f();
@@ -23,7 +21,7 @@ public:
         active = false;
     }
 
-    constexpr ScopeGuard(ScopeGuard&& rhs) : f(std::move(rhs.f)), active(rhs.active) {
+    constexpr ScopeGuard(ScopeGuard&& rhs) : f(static_cast<F&&>(rhs.f)), active(rhs.active) {
         rhs.Cancel();
     }
 
@@ -32,14 +30,14 @@ public:
 
 template <class F>
 constexpr ScopeGuard<F> MakeScopeGuard(F f) {
-    return ScopeGuard<F>(std::move(f));
+    return ScopeGuard<F>(static_cast<F&&>(f));
 }
 
 enum class ScopeGuardOnExit {};
 
 template <typename F>
 constexpr ScopeGuard<F> operator+(ScopeGuardOnExit, F&& f) {
-    return ScopeGuard<F>(std::forward<F>(f));
+    return ScopeGuard<F>(static_cast<F&&>(f));
 }
 
 } // namespace detail
