@@ -4,6 +4,12 @@ What changed in the libretro core of this fork, newest first. Changes that come 
 
 ## Unreleased
 
+- No STL or `auto` in the buffers (`buffer_cache/buffer`).
+  - **`mapped_data`:** a plain pointer to where the whole buffer is mapped (`size_bytes` from there), null when it is not, instead of a `std::span`. Its five users follow.
+  - **Stream buffers:** their watches are plain arrays, grown with `realloc` as the vectors grew. `Reserve` returns whether it reserved and writes the offset, instead of a `std::optional`, and the staging pool follows. Stream buffers can no longer be copied or moved (nothing did, and they own their watches now).
+  - **The rest:** debug names are C strings, a buffer's move is written out instead of `std::exchange`, and the alignment of a mapped, non-coherent stream buffer is the least common multiple worked out with a small GCD in place of `std::lcm`.
+  - **One check added:** a new staging block that cannot hold a request now stops with a message; before, it read an empty `std::optional`. A request reaches a block only when it fits one, so this is not expected to happen.
+  - **Checks:** the Linux and Windows builds pass. Not run in a game yet.
 - Tests: the suite (`libretro/tests/run.sh`) keeps each test's build and takes it again when nothing it was made from has changed, instead of compiling every sanitizer build each run.
   - **How:** a build is kept in `build-tests/.cache` under its whole command line, with the list of files the compiler read for it (`-M`, the in-tree Vulkan and SPIR-V headers included). A run with the same command and none of those files newer links it back in place of compiling. `NO_CACHE=1` compiles everything.
   - **Time on this box (2 CPUs):** 9 min 16 s for a run that compiles everything, 2 min 1 s for one after it with nothing changed. The two minutes left are the tests running.

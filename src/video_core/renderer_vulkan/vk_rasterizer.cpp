@@ -1638,7 +1638,7 @@ void Rasterizer::CopyBuffer(VAddr dst, VAddr src, u32 num_bytes, bool dst_gds, b
 u32 Rasterizer::ReadDataFromGds(u32 gds_offset) {
     auto* gds_buf = buffer_cache.GetGdsBuffer();
     u32 value;
-    std::memcpy(&value, gds_buf->mapped_data.data() + gds_offset, sizeof(u32));
+    std::memcpy(&value, gds_buf->mapped_data + gds_offset, sizeof(u32));
     return value;
 }
 

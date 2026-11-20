@@ -73,10 +73,11 @@ StagingBufferRef StagingBufferPool::RequestFromRing(Ring& ring, u64 size, u64 al
     for (size_t i = 0; i < ring.blocks.size(); ++i) {
         const size_t index = (ring.current + i) % ring.blocks.size();
         Block* block = &ring.blocks[index];
-        if (const auto offset = block->buffer->Reserve(size, alignment, false)) {
+        u64 offset = 0;
+        if (block->buffer->Reserve(size, &offset, alignment, false)) {
             ring.current = index;
             best = block;
-            best_offset = *offset;
+            best_offset = offset;
             break;
         }
     }
@@ -92,7 +93,8 @@ StagingBufferRef StagingBufferPool::RequestFromRing(Ring& ring, u64 size, u64 al
                 .last_used_frame = frame,
             });
             ring.current = ring.blocks.size() - 1;
-            best_offset = *best->buffer->Reserve(size, alignment, false);
+            const bool reserved = best->buffer->Reserve(size, &best_offset, alignment, false);
+            ASSERT_MSG(reserved, "A new staging block cannot hold 0x%" PRIx64 " bytes", size);
         }
     }
 
@@ -105,8 +107,8 @@ StagingBufferRef StagingBufferPool::RequestFromRing(Ring& ring, u64 size, u64 al
         .size = size,
         .type = type,
     };
-    if (!buffer.mapped_data.empty()) {
-        ref.mapped = buffer.mapped_data.data() + best_offset;
+    if (buffer.mapped_data) {
+        ref.mapped = buffer.mapped_data + best_offset;
     }
     return ref;
 }
@@ -149,8 +151,8 @@ StagingBufferRef StagingBufferPool::RequestLarge(u64 size, MemoryType type, bool
         .size = size,
         .type = type,
     };
-    if (!buffer.mapped_data.empty()) {
-        ref.mapped = buffer.mapped_data.data();
+    if (buffer.mapped_data) {
+        ref.mapped = buffer.mapped_data;
     }
     return ref;
 }

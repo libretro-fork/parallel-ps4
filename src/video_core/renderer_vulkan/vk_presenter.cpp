@@ -1094,8 +1094,8 @@ void Presenter::Present(Frame* frame, bool is_reusing_frame, bool is_game_frame)
             const u64 size = static_cast<u64>(readback->width) * readback->height * 4;
             auto& buffer = readback->Buffer();
             buffer.Invalidate(0, size);
-            if (buffer.mapped_data.size() >= size) {
-                Libretro::PushFrame(buffer.mapped_data.data(), readback->width, readback->height,
+            if (buffer.mapped_data && buffer.size_bytes >= size) {
+                Libretro::PushFrame(buffer.mapped_data, readback->width, readback->height,
                                     readback->in_order);
             }
             ReturnFrameReadback(readback);

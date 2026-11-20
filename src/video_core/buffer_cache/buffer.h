@@ -3,13 +3,8 @@
 
 #pragma once
 
-#include <cstddef>
-#include <memory>
-#include <optional>
-#include <span>
-#include <string_view>
-#include <utility>
-#include <vector>
+#include <stddef.h>
+#include <string.h>
 
 #include "common/assert.h"
 #include "common/types.h"
@@ -50,23 +45,32 @@ struct UniqueBuffer {
     UniqueBuffer& operator=(const UniqueBuffer&) = delete;
 
     UniqueBuffer(UniqueBuffer&& other) noexcept
-        : device{other.device}, buffer{std::exchange(other.buffer, VK_NULL_HANDLE)},
-          bda_addr{std::exchange(other.bda_addr, 0)},
-          allocator{std::exchange(other.allocator, nullptr)},
-          allocation{std::exchange(other.allocation, nullptr)},
-          borrowed{std::exchange(other.borrowed, false)} {}
+        : device{other.device}, buffer{other.buffer}, bda_addr{other.bda_addr},
+          allocator{other.allocator}, allocation{other.allocation}, borrowed{other.borrowed} {
+        other.Release();
+    }
 
     UniqueBuffer& operator=(UniqueBuffer&& other) noexcept {
         if (this != &other) {
             Destroy();
             device = other.device;
-            buffer = std::exchange(other.buffer, VK_NULL_HANDLE);
-            bda_addr = std::exchange(other.bda_addr, 0);
-            allocator = std::exchange(other.allocator, nullptr);
-            allocation = std::exchange(other.allocation, nullptr);
-            borrowed = std::exchange(other.borrowed, false);
+            buffer = other.buffer;
+            bda_addr = other.bda_addr;
+            allocator = other.allocator;
+            allocation = other.allocation;
+            borrowed = other.borrowed;
+            other.Release();
         }
         return *this;
+    }
+
+    /// Forgets the buffer without destroying it: it has been moved elsewhere
+    void Release() {
+        buffer = VK_NULL_HANDLE;
+        bda_addr = 0;
+        allocator = nullptr;
+        allocation = nullptr;
+        borrowed = false;
     }
 
     void Create(vk::BufferCreateInfo& buffer_ci, MemoryType mem_type);
@@ -84,12 +88,12 @@ struct UniqueBuffer {
 
 struct Buffer {
     explicit Buffer(const Vulkan::Instance& instance, VAddr cpu_addr_, u64 size_bytes_,
-                    MemoryType mem_type, std::string_view debug_name = "");
+                    MemoryType mem_type, const char* debug_name = nullptr);
 
     /// A buffer over @handle, made and destroyed by someone else, so that it can be copied to
     /// and from as any other (the game's memory imported, guest_import.h)
     explicit Buffer(const Vulkan::Instance& instance, vk::Buffer handle, u64 size_bytes_,
-                    std::string_view debug_name);
+                    const char* debug_name);
 
     Buffer& operator=(const Buffer&) = delete;
     Buffer(const Buffer&) = delete;
@@ -130,7 +134,8 @@ struct Buffer {
 
     VAddr cpu_addr = 0;
     size_t size_bytes = 0;
-    std::span<u8> mapped_data{};
+    /// Where the whole buffer is mapped (size_bytes from there), null when it is not
+    u8* mapped_data{};
     bool is_coherent{};
     MemoryType mem_type{MemoryType::DeviceLocal};
     UniqueBuffer buffer;
@@ -139,6 +144,12 @@ struct Buffer {
 struct StreamBuffer : public Buffer {
     explicit StreamBuffer(const Vulkan::Instance& instance, Vulkan::Scheduler& scheduler,
                           MemoryType mem_type, u64 size_bytes);
+    ~StreamBuffer();
+
+    StreamBuffer(const StreamBuffer&) = delete;
+    StreamBuffer& operator=(const StreamBuffer&) = delete;
+    StreamBuffer(StreamBuffer&&) = delete;
+    StreamBuffer& operator=(StreamBuffer&&) = delete;
 
     /// Reserves a region of memory from the stream buffer, at *@out_offset in it, and returns
     /// where it is mapped (null when it could not be reserved). Must be followed by Commit().
@@ -147,8 +158,8 @@ struct StreamBuffer : public Buffer {
     /// Ensures that reserved bytes of memory are available to the GPU.
     void Commit();
 
-    /// Reserves and commits a region in one step.
-    std::optional<u64> Reserve(u64 size, u64 alignment = 0, bool allow_wait = true);
+    /// Reserves and commits a region in one step, at *@out_offset. False when it cannot.
+    bool Reserve(u64 size, u64* out_offset, u64 alignment = 0, bool allow_wait = true);
 
     /// Tick of the most recent commit into this buffer, 0 if never used.
     [[nodiscard]] u64 LastTick() const noexcept {
@@ -156,13 +167,13 @@ struct StreamBuffer : public Buffer {
     }
 
     /// Maps and commits a memory region with user provided data
-    u64 Copy(auto src, size_t size, size_t alignment = 0) {
-        u64 offset = 0;
-        u8* const data = Map(size, &offset, alignment);
+    u64 Copy(const void* src, size_t size, size_t alignment = 0) {
+        u64 copy_offset = 0;
+        u8* const data = Map(size, &copy_offset, alignment);
         ASSERT_MSG(data, "Failed to copy 0x%zx bytes", size);
-        std::memcpy(data, reinterpret_cast<const void*>(src), size);
+        memcpy(data, src, size);
         Commit();
-        return offset;
+        return copy_offset;
     }
 
 private:
@@ -179,7 +190,7 @@ private:
     void AdvanceAndWatch();
 
     /// Increases the amount of watches available.
-    void ReserveWatches(std::vector<Watch>& watches, std::size_t grow_size);
+    static void ReserveWatches(Watch*& watches, size_t& count, size_t grow_size);
 
     /// Waits pending watches until requested upper bound.
     bool WaitPendingOperations(u64 requested_upper_bound, bool allow_wait);
@@ -190,11 +201,15 @@ private:
     u64 offset{};
     u64 mapped_size{};
     u64 last_tick{};
-    std::vector<Watch> current_watches;
-    std::size_t current_watch_cursor{};
-    std::optional<size_t> invalidation_mark;
-    std::vector<Watch> previous_watches;
-    std::size_t wait_cursor{};
+    Watch* current_watches{};
+    size_t num_current_watches{};
+    size_t current_watch_cursor{};
+    /// Since the buffer last wrapped: the watches used before it, still to be waited on
+    bool has_invalidation_mark{};
+    size_t invalidation_mark{};
+    Watch* previous_watches{};
+    size_t num_previous_watches{};
+    size_t wait_cursor{};
     u64 wait_bound{};
 };
 

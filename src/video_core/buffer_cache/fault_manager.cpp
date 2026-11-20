@@ -87,7 +87,7 @@ void FaultManager::ProcessFaultBuffer() {
     }
 
     const u32 offset = current_area * PageFaultAreaSize;
-    u8* mapped = download_buffer.mapped_data.data() + offset;
+    u8* mapped = download_buffer.mapped_data + offset;
     memset(mapped, 0, PageFaultAreaSize);
 
     const VkBuffer fault_handle = static_cast<VkBuffer>(fault_buffer.Handle());

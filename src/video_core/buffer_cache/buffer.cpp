@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright 2024 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
-#include <numeric>
+#include <stdlib.h>
 
 #include "common/alignment.h"
 #include "common/assert.h"
@@ -13,7 +13,7 @@
 
 namespace VideoCore {
 
-std::string_view BufferTypeName(MemoryType type) {
+const char* BufferTypeName(MemoryType type) {
     switch (type) {
     case MemoryType::HostUncached:
         return "HostUncached";
@@ -68,7 +68,7 @@ void UniqueBuffer::Create(vk::BufferCreateInfo& buffer_ci, MemoryType mem_type) 
     const bool with_bda = bool(buffer_ci.usage & vk::BufferUsageFlagBits::eShaderDeviceAddress);
     if (mem_type != MemoryType::Sparse) {
         // A buffer with a device address gets memory of its own, as it did under VMA
-        const auto usage = MemoryUsageOf(mem_type);
+        const Vulkan::MemoryUsage usage = MemoryUsageOf(mem_type);
         vk::Buffer created{};
         vk::Result result =
             allocator->CreateBuffer(buffer_ci, usage, with_bda, true, created, allocation);
@@ -104,7 +104,7 @@ void UniqueBuffer::Create(vk::BufferCreateInfo& buffer_ci, MemoryType mem_type) 
 }
 
 Buffer::Buffer(const Vulkan::Instance& instance, VAddr cpu_addr_, u64 size_bytes_,
-               MemoryType mem_type_, std::string_view debug_name)
+               MemoryType mem_type_, const char* debug_name)
     : cpu_addr{cpu_addr_}, size_bytes{size_bytes_}, mem_type{mem_type_},
       buffer{instance.GetDevice(), instance.GetAllocator()} {
 
@@ -123,9 +123,9 @@ Buffer::Buffer(const Vulkan::Instance& instance, VAddr cpu_addr_, u64 size_bytes
     }
     buffer.Create(buffer_ci, mem_type);
 
-    const auto device = instance.GetDevice();
-    if (!debug_name.empty()) {
-        Vulkan::SetObjectName(device, Handle(), debug_name);
+    const vk::Device device = instance.GetDevice();
+    if (debug_name && debug_name[0]) {
+        Vulkan::SetObjectName(device, Handle(), "%s", debug_name);
     } else {
         Vulkan::SetObjectName(device, Handle(), "Buffer 0x%" PRIxPTR ":0x%zx", cpu_addr,
                               size_bytes);
@@ -134,29 +134,29 @@ Buffer::Buffer(const Vulkan::Instance& instance, VAddr cpu_addr_, u64 size_bytes
     if (mem_type != MemoryType::Sparse) {
         // Lent by the heap: the block's one mapping, at this buffer's offset
         if (buffer.allocation->mapped) {
-            mapped_data = std::span<u8>{static_cast<u8*>(buffer.allocation->mapped), size_bytes};
+            mapped_data = static_cast<u8*>(buffer.allocation->mapped);
         }
         is_coherent = buffer.allocation->flags & VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
     }
 }
 
 Buffer::Buffer(const Vulkan::Instance& instance, vk::Buffer handle, u64 size_bytes_,
-               std::string_view debug_name)
+               const char* debug_name)
     : size_bytes{size_bytes_}, buffer{instance.GetDevice(), instance.GetAllocator()} {
     buffer.buffer = static_cast<VkBuffer>(handle);
     buffer.borrowed = true;
-    Vulkan::SetObjectName(instance.GetDevice(), Handle(), debug_name);
+    Vulkan::SetObjectName(instance.GetDevice(), Handle(), "%s", debug_name);
 }
 
 void Buffer::Flush(u64 offset, u64 size) {
-    if (mapped_data.empty() || is_coherent) {
+    if (!mapped_data || is_coherent) {
         return;
     }
     buffer.allocator->Flush(buffer.allocation, offset, size);
 }
 
 void Buffer::Invalidate(u64 offset, u64 size) {
-    if (mapped_data.empty() || is_coherent) {
+    if (!mapped_data || is_coherent) {
         return;
     }
     buffer.allocator->Invalidate(buffer.allocation, offset, size);
@@ -169,18 +169,37 @@ StreamBuffer::StreamBuffer(const Vulkan::Instance& instance, Vulkan::Scheduler& 
                            MemoryType mem_type, u64 size_bytes)
     : Buffer{instance, 0, size_bytes, mem_type}, scheduler{scheduler_},
       non_coherent_atom_size{instance.NonCoherentAtomSize()} {
-    ReserveWatches(current_watches, WATCHES_INITIAL_RESERVE);
-    ReserveWatches(previous_watches, WATCHES_INITIAL_RESERVE);
-    Vulkan::SetObjectName(instance.GetDevice(), Handle(), "StreamBuffer(%.*s):0x%" PRIx64,
-                          static_cast<int>((BufferTypeName(mem_type)).size()),
-                          (BufferTypeName(mem_type)).data(), size_bytes);
+    ReserveWatches(current_watches, num_current_watches, WATCHES_INITIAL_RESERVE);
+    ReserveWatches(previous_watches, num_previous_watches, WATCHES_INITIAL_RESERVE);
+    Vulkan::SetObjectName(instance.GetDevice(), Handle(), "StreamBuffer(%s):0x%" PRIx64,
+                          BufferTypeName(mem_type), size_bytes);
 }
 
+StreamBuffer::~StreamBuffer() {
+    free(current_watches);
+    free(previous_watches);
+}
+
+namespace {
+
+u64 Gcd(u64 a, u64 b) {
+    while (b != 0) {
+        const u64 rest = a % b;
+        a = b;
+        b = rest;
+    }
+    return a;
+}
+
+} // Anonymous namespace
+
 bool StreamBuffer::PrepareMap(u64 size, u64 alignment, bool allow_wait) {
-    if (!mapped_data.empty() && !is_coherent) {
+    if (mapped_data && !is_coherent) {
         size = Common::AlignUp(size, non_coherent_atom_size);
-        alignment =
-            alignment > 0 ? std::lcm(alignment, non_coherent_atom_size) : non_coherent_atom_size;
+        // The least common multiple of the two
+        alignment = alignment > 0 ? alignment / Gcd(alignment, non_coherent_atom_size) *
+                                        non_coherent_atom_size
+                                  : non_coherent_atom_size;
     }
 
     if (size > this->size_bytes) {
@@ -193,12 +212,18 @@ bool StreamBuffer::PrepareMap(u64 size, u64 alignment, bool allow_wait) {
 
     if (offset + size > this->size_bytes) {
         // The buffer would overflow, save the amount of used watches and reset the state.
+        has_invalidation_mark = true;
         invalidation_mark = current_watch_cursor;
         current_watch_cursor = 0;
         offset = 0;
 
         // Swap watches and reset waiting cursors.
-        std::swap(previous_watches, current_watches);
+        Watch* const watches = previous_watches;
+        const size_t num_watches = num_previous_watches;
+        previous_watches = current_watches;
+        num_previous_watches = num_current_watches;
+        current_watches = watches;
+        num_current_watches = num_watches;
         wait_cursor = 0;
         wait_bound = 0;
     }
@@ -217,7 +242,7 @@ u8* StreamBuffer::Map(u64 size, u64* out_offset, u64 alignment, bool allow_wait)
         return nullptr;
     }
     *out_offset = offset;
-    return mapped_data.empty() ? nullptr : mapped_data.data() + offset;
+    return mapped_data ? mapped_data + offset : nullptr;
 }
 
 void StreamBuffer::Commit() {
@@ -229,13 +254,13 @@ void StreamBuffer::Commit() {
     AdvanceAndWatch();
 }
 
-std::optional<u64> StreamBuffer::Reserve(u64 size, u64 alignment, bool allow_wait) {
+bool StreamBuffer::Reserve(u64 size, u64* out_offset, u64 alignment, bool allow_wait) {
     if (!PrepareMap(size, alignment, allow_wait)) {
-        return std::nullopt;
+        return false;
     }
-    const u64 reserved_offset = offset;
+    *out_offset = offset;
     AdvanceAndWatch();
-    return reserved_offset;
+    return true;
 }
 
 void StreamBuffer::AdvanceAndWatch() {
@@ -249,26 +274,30 @@ void StreamBuffer::AdvanceAndWatch() {
         return;
     }
 
-    if (current_watch_cursor + 1 >= current_watches.size()) {
+    if (current_watch_cursor + 1 >= num_current_watches) {
         // Ensure that there are enough watches.
-        ReserveWatches(current_watches, WATCHES_RESERVE_CHUNK);
+        ReserveWatches(current_watches, num_current_watches, WATCHES_RESERVE_CHUNK);
     }
 
-    auto& watch = current_watches[current_watch_cursor++];
+    Watch& watch = current_watches[current_watch_cursor++];
     watch.upper_bound = offset;
     watch.tick = tick;
 }
 
-void StreamBuffer::ReserveWatches(std::vector<Watch>& watches, std::size_t grow_size) {
-    watches.resize(watches.size() + grow_size);
+void StreamBuffer::ReserveWatches(Watch*& watches, size_t& count, size_t grow_size) {
+    Watch* const grown = static_cast<Watch*>(realloc(watches, (count + grow_size) * sizeof(Watch)));
+    ASSERT_MSG(grown, "Out of memory growing a stream buffer's watches");
+    memset(grown + count, 0, grow_size * sizeof(Watch));
+    watches = grown;
+    count += grow_size;
 }
 
 bool StreamBuffer::WaitPendingOperations(u64 requested_upper_bound, bool allow_wait) {
-    if (!invalidation_mark) {
+    if (!has_invalidation_mark) {
         return true;
     }
-    while (requested_upper_bound > wait_bound && wait_cursor < *invalidation_mark) {
-        auto& watch = previous_watches[wait_cursor];
+    while (requested_upper_bound > wait_bound && wait_cursor < invalidation_mark) {
+        const Watch& watch = previous_watches[wait_cursor];
         if (!scheduler.IsFree(watch.tick) && !allow_wait) {
             return false;
         }
