@@ -4,6 +4,7 @@ What changed in the libretro core of this fork, newest first. Changes that come 
 
 ## Unreleased
 
+- `externals/gcn` is gone: two AMD register headers (`si_ci_vi_merged_offset.h`, `si_ci_vi_merged_pm4_it_opcodes.h`, 1.3 MB) that nothing in the core includes. Only the include path and its REUSE entry referred to them. The Linux and Windows builds pass without them.
 - FEX's rpmalloc is gone. FEX's allocator hooks (`AllocatorHooks.cpp`) are built without `ENABLE_FEX_ALLOCATOR`, the branch upstream has for that. FEX now allocates with the C library's malloc, as the rest of the core does.
   - **Why it can go:** the core never called FEX's allocator setup (`SetupHooks`), so rpmalloc ran on its defaults and kept no guest memory out of the way.
   - **What goes with it:** rpmalloc's TLS-model patch (only needed because the frontend dlopens the core) and its 512 MB address-space reservation at FEX's first allocation.

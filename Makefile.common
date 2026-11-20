@@ -313,7 +313,6 @@ endif
 
 CORE_FLAGS := -DVK_ENABLE_BETA_EXTENSIONS \
 	-Isrc -I$(LRC_DIR)/include -I. \
-	-isystem $(EXT_DIR)/gcn/include \
 	-isystem $(EXT_DIR)/spirv-headers/include \
 	-isystem $(EXT_DIR)/vulkan-headers/include -isystem $(EXT_DIR)/libusb/libusb
 # A log or string format that does not match its arguments fails the build
