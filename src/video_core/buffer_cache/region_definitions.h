@@ -3,9 +3,6 @@
 
 #pragma once
 
-#include <array>
-#include <utility>
-
 #include "common/types.h"
 
 namespace VideoCore {
@@ -34,11 +31,11 @@ enum class StateOp : u8 {
 };
 
 constexpr bool operator&(Type a, Type b) noexcept {
-    return std::to_underlying(a) & std::to_underlying(b);
+    return (static_cast<u8>(a) & static_cast<u8>(b)) != 0;
 }
 
 constexpr Type operator|(Type a, Type b) noexcept {
-    return static_cast<Type>(std::to_underlying(a) | std::to_underlying(b));
+    return static_cast<Type>(static_cast<u8>(a) | static_cast<u8>(b));
 }
 
 struct Bounds {
@@ -60,7 +57,9 @@ struct alignas(64) RegionBits {
         const u64 value = bit ? ~u64{0} : u64{0};
         set_summary = value;
         clear_summary = ~value;
-        data.fill(value);
+        for (u64 i = 0; i < NUM_REGION_WORDS; ++i) {
+            data[i] = value;
+        }
     }
 
     constexpr bool GetPage(u64 page) const {
@@ -77,7 +76,7 @@ struct alignas(64) RegionBits {
 
     u64 set_summary;
     u64 clear_summary;
-    std::array<u64, NUM_REGION_WORDS> data;
+    u64 data[NUM_REGION_WORDS];
 };
 
 } // namespace VideoCore

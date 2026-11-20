@@ -42,12 +42,11 @@ public:
                            vk::Image& image, MemoryAllocation& allocation);
 
     /// Creates a buffer with memory for @usage bound; @dedicated gives it memory of its own.
-    vk::Result CreateBuffer(const vk::BufferCreateInfo& buffer_ci, MemoryUsage usage,
-                            bool dedicated, bool within_budget, vk::Buffer& buffer,
-                            MemoryAllocation& allocation);
+    VkResult CreateBuffer(const VkBufferCreateInfo& buffer_ci, MemoryUsage usage, bool dedicated,
+                          bool within_budget, VkBuffer& buffer, MemoryAllocation& allocation);
 
     void DestroyImage(vk::Image image, MemoryAllocation allocation);
-    void DestroyBuffer(vk::Buffer buffer, MemoryAllocation allocation);
+    void DestroyBuffer(VkBuffer buffer, MemoryAllocation allocation);
 
     /// For noncoherent memory; nothing to do for coherent memory. From any thread.
     void Flush(MemoryAllocation allocation, u64 offset, u64 size) const;

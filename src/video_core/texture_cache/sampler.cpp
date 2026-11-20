@@ -70,8 +70,7 @@ Sampler::Sampler(const Vulkan::Instance& instance, const AmdGpu::Sampler& sample
 
     device = static_cast<VkDevice>(instance.GetDevice());
     const VkResult result = vkCreateSampler(device, &sampler_ci, nullptr, &handle);
-    ASSERT_MSG(result == VK_SUCCESS, "Failed to create sampler: %s",
-               vk::to_string(static_cast<vk::Result>(result)).c_str());
+    ASSERT_MSG(result == VK_SUCCESS, "Failed to create sampler: %s", Vulkan::ResultName(result));
 }
 
 Sampler::~Sampler() {

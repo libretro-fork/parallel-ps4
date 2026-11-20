@@ -4,6 +4,12 @@ What changed in the libretro core of this fork, newest first. Changes that come 
 
 ## Unreleased
 
+- The rest of `video_core/buffer_cache` on the Vulkan C API, with no STL or `auto`: `buffer.h`/`.cpp`, the memory tracker, the region manager, the range set and the region definitions.
+  - **Buffers:** `Buffer::Handle` gives a `VkBuffer` and `BufferDeviceAddress` a `VkDeviceAddress`; buffers are made from a `VkBufferCreateInfo`, through the memory allocator's `CreateBuffer`/`DestroyBuffer`, which take and give C types now.
+  - **Result names:** `Vulkan::ResultName` names a `VkResult` for a log line with no string made. The asserts that printed vulkan.hpp's `to_string` of a result (pipelines, the pipeline cache, shader modules, the semaphore, the resource pools, the tile manager, image views, samplers and buffers) use it.
+  - **Memory tracker:** its regions come from pools of 32 made with one allocation each, handed out from the last pool, instead of a deque of arrays and a vector of free ones; the table of regions is a plain array.
+  - **Region manager:** a change runs in a member function under the region's combiner instead of a stored lambda; its masks come from `StartMask`/`EndMask` instead of a pair; the bit scans are the compiler's. The bit-run iteration gave the same runs as before on 2,000,000 random words.
+  - **Checks:** the Linux and Windows builds pass. Not run in a game yet.
 - The buffer cache (`buffer_cache.h`/`.cpp`) on the Vulkan C API, with no STL or `auto`.
   - **C API:** the sparse binds, their submit (`vkQueueBindSparse`), residency memory (`vkAllocateMemory`), the arena memory requirements (`vkGetDeviceBufferMemoryRequirements`) and every copy are Vulkan's C structs. `Runtime::CopyBuffer` takes a pointer and a count and records `vkCmdCopyBuffer`, and records nothing for no copies.
   - **Containers:** the arena table is one array made at start, the arenas a list of pointers to them, the binds and their submit infos arrays that keep the room they have grown to, as the vectors did. The tracker, fault manager, page table, null index buffer and the game memory's chunk buffers are plain pointers freed with the cache, in the order they were before.

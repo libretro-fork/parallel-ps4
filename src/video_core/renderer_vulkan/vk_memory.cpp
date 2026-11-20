@@ -127,15 +127,14 @@ vk::Result MemoryAllocator::CreateImage(const vk::ImageCreateInfo& image_ci, boo
     return vk::Result::eSuccess;
 }
 
-vk::Result MemoryAllocator::CreateBuffer(const vk::BufferCreateInfo& buffer_ci, MemoryUsage usage,
-                                         bool dedicated_, bool within_budget, vk::Buffer& buffer,
-                                         MemoryAllocation& allocation) {
+VkResult MemoryAllocator::CreateBuffer(const VkBufferCreateInfo& buffer_ci, MemoryUsage usage,
+                                       bool dedicated_, bool within_budget, VkBuffer& buffer,
+                                       MemoryAllocation& allocation) {
     allocation = nullptr;
     VkBuffer new_buffer = VK_NULL_HANDLE;
-    VkResult result = vkCreateBuffer(device, &static_cast<const VkBufferCreateInfo&>(buffer_ci),
-                                     nullptr, &new_buffer);
+    VkResult result = vkCreateBuffer(device, &buffer_ci, nullptr, &new_buffer);
     if (result != VK_SUCCESS) {
-        return static_cast<vk::Result>(result);
+        return result;
     }
     VkBufferMemoryRequirementsInfo2 requirements_info{};
     requirements_info.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_REQUIREMENTS_INFO_2;
@@ -166,10 +165,10 @@ vk::Result MemoryAllocator::CreateBuffer(const vk::BufferCreateInfo& buffer_ci, 
         vkDestroyBuffer(device, new_buffer, nullptr);
         Free(allocation);
         allocation = nullptr;
-        return static_cast<vk::Result>(result);
+        return result;
     }
-    buffer = vk::Buffer{new_buffer};
-    return vk::Result::eSuccess;
+    buffer = new_buffer;
+    return VK_SUCCESS;
 }
 
 void MemoryAllocator::DestroyImage(vk::Image image, MemoryAllocation allocation) {
@@ -179,9 +178,9 @@ void MemoryAllocator::DestroyImage(vk::Image image, MemoryAllocation allocation)
     Free(allocation);
 }
 
-void MemoryAllocator::DestroyBuffer(vk::Buffer buffer, MemoryAllocation allocation) {
-    if (buffer) {
-        vkDestroyBuffer(device, static_cast<VkBuffer>(buffer), nullptr);
+void MemoryAllocator::DestroyBuffer(VkBuffer buffer, MemoryAllocation allocation) {
+    if (buffer != VK_NULL_HANDLE) {
+        vkDestroyBuffer(device, buffer, nullptr);
     }
     Free(allocation);
 }

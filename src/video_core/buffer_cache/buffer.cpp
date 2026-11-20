@@ -44,8 +44,8 @@ const char* BufferTypeName(MemoryType type) {
     }
 }
 
-UniqueBuffer::UniqueBuffer(vk::Device device_, Vulkan::MemoryAllocator* allocator_)
-    : device{static_cast<VkDevice>(device_)}, allocator{allocator_} {}
+UniqueBuffer::UniqueBuffer(VkDevice device_, Vulkan::MemoryAllocator* allocator_)
+    : device{device_}, allocator{allocator_} {}
 
 UniqueBuffer::~UniqueBuffer() {
     Destroy();
@@ -55,7 +55,7 @@ void UniqueBuffer::Destroy() {
     if (borrowed) {
         borrowed = false;
     } else if (allocation) {
-        allocator->DestroyBuffer(vk::Buffer{buffer}, allocation);
+        allocator->DestroyBuffer(buffer, allocation);
     } else if (buffer != VK_NULL_HANDLE) {
         vkDestroyBuffer(device, buffer, nullptr);
     }
@@ -64,34 +64,33 @@ void UniqueBuffer::Destroy() {
     bda_addr = 0;
 }
 
-void UniqueBuffer::Create(vk::BufferCreateInfo& buffer_ci, MemoryType mem_type) {
-    const bool with_bda = bool(buffer_ci.usage & vk::BufferUsageFlagBits::eShaderDeviceAddress);
+void UniqueBuffer::Create(VkBufferCreateInfo& buffer_ci, MemoryType mem_type) {
+    const bool with_bda = (buffer_ci.usage & VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT) != 0;
     if (mem_type != MemoryType::Sparse) {
         // A buffer with a device address gets memory of its own, as it did under VMA
         const Vulkan::MemoryUsage usage = MemoryUsageOf(mem_type);
-        vk::Buffer created{};
-        vk::Result result =
+        VkBuffer created = VK_NULL_HANDLE;
+        VkResult result =
             allocator->CreateBuffer(buffer_ci, usage, with_bda, true, created, allocation);
-        if (result == vk::Result::eErrorOutOfDeviceMemory) {
+        if (result == VK_ERROR_OUT_OF_DEVICE_MEMORY) {
             LOG_WARNING(Render_Vulkan, "Allocating buffer of size %" PRIu64 " bytes over budget.",
                         buffer_ci.size);
             result =
                 allocator->CreateBuffer(buffer_ci, usage, with_bda, false, created, allocation);
         }
-        ASSERT_MSG(result == vk::Result::eSuccess, "Failed allocating buffer with error %s",
-                   (vk::to_string(result)).c_str());
-        buffer = static_cast<VkBuffer>(created);
+        ASSERT_MSG(result == VK_SUCCESS, "Failed allocating buffer with error %s",
+                   Vulkan::ResultName(result));
+        buffer = created;
     } else {
         // The libretro core's Buffer sets the flags itself where the device has no sparse
         // residency
-        if (!(buffer_ci.flags & vk::BufferCreateFlagBits::eSparseBinding)) {
-            buffer_ci.flags |= vk::BufferCreateFlagBits::eSparseBinding |
-                               vk::BufferCreateFlagBits::eSparseResidency;
+        if (!(buffer_ci.flags & VK_BUFFER_CREATE_SPARSE_BINDING_BIT)) {
+            buffer_ci.flags |=
+                VK_BUFFER_CREATE_SPARSE_BINDING_BIT | VK_BUFFER_CREATE_SPARSE_RESIDENCY_BIT;
         }
-        const VkResult result = vkCreateBuffer(
-            device, &static_cast<const VkBufferCreateInfo&>(buffer_ci), nullptr, &buffer);
+        const VkResult result = vkCreateBuffer(device, &buffer_ci, nullptr, &buffer);
         ASSERT_MSG(result == VK_SUCCESS, "Failed to create sparse buffer: %s",
-                   vk::to_string(static_cast<vk::Result>(result)).c_str());
+                   Vulkan::ResultName(result));
     }
 
     if (with_bda) {
@@ -106,28 +105,28 @@ void UniqueBuffer::Create(vk::BufferCreateInfo& buffer_ci, MemoryType mem_type) 
 Buffer::Buffer(const Vulkan::Instance& instance, VAddr cpu_addr_, u64 size_bytes_,
                MemoryType mem_type_, const char* debug_name)
     : cpu_addr{cpu_addr_}, size_bytes{size_bytes_}, mem_type{mem_type_},
-      buffer{instance.GetDevice(), instance.GetAllocator()} {
+      buffer{static_cast<VkDevice>(instance.GetDevice()), instance.GetAllocator()} {
 
-    vk::BufferCreateInfo buffer_ci = {
-        .size = size_bytes,
-        .usage = AllFlags,
-        .sharingMode = vk::SharingMode::eExclusive,
-    };
+    VkBufferCreateInfo buffer_ci{};
+    buffer_ci.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    buffer_ci.size = size_bytes;
+    buffer_ci.usage = AllFlags;
+    buffer_ci.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
     // A device without sparse buffers (Intel Gen9 under Mesa) gets arenas fully backed by
     // memory of their own, made when the buffer cache first needs them
     if (mem_type == MemoryType::Sparse && !instance.IsSparseBindingSupported()) {
         mem_type = MemoryType::DeviceLocal;
     }
     if (mem_type == MemoryType::Sparse && !instance.IsSparseResidencyBufferSupported()) {
-        buffer_ci.flags |= vk::BufferCreateFlagBits::eSparseBinding;
+        buffer_ci.flags |= VK_BUFFER_CREATE_SPARSE_BINDING_BIT;
     }
     buffer.Create(buffer_ci, mem_type);
 
     const vk::Device device = instance.GetDevice();
     if (debug_name && debug_name[0]) {
-        Vulkan::SetObjectName(device, Handle(), "%s", debug_name);
+        Vulkan::SetObjectName(device, vk::Buffer{Handle()}, "%s", debug_name);
     } else {
-        Vulkan::SetObjectName(device, Handle(), "Buffer 0x%" PRIxPTR ":0x%zx", cpu_addr,
+        Vulkan::SetObjectName(device, vk::Buffer{Handle()}, "Buffer 0x%" PRIxPTR ":0x%zx", cpu_addr,
                               size_bytes);
     }
 
@@ -140,12 +139,13 @@ Buffer::Buffer(const Vulkan::Instance& instance, VAddr cpu_addr_, u64 size_bytes
     }
 }
 
-Buffer::Buffer(const Vulkan::Instance& instance, vk::Buffer handle, u64 size_bytes_,
+Buffer::Buffer(const Vulkan::Instance& instance, VkBuffer handle, u64 size_bytes_,
                const char* debug_name)
-    : size_bytes{size_bytes_}, buffer{instance.GetDevice(), instance.GetAllocator()} {
-    buffer.buffer = static_cast<VkBuffer>(handle);
+    : size_bytes{size_bytes_},
+      buffer{static_cast<VkDevice>(instance.GetDevice()), instance.GetAllocator()} {
+    buffer.buffer = handle;
     buffer.borrowed = true;
-    Vulkan::SetObjectName(instance.GetDevice(), Handle(), "%s", debug_name);
+    Vulkan::SetObjectName(instance.GetDevice(), vk::Buffer{Handle()}, "%s", debug_name);
 }
 
 void Buffer::Flush(u64 offset, u64 size) {
@@ -171,7 +171,7 @@ StreamBuffer::StreamBuffer(const Vulkan::Instance& instance, Vulkan::Scheduler& 
       non_coherent_atom_size{instance.NonCoherentAtomSize()} {
     ReserveWatches(current_watches, num_current_watches, WATCHES_INITIAL_RESERVE);
     ReserveWatches(previous_watches, num_previous_watches, WATCHES_INITIAL_RESERVE);
-    Vulkan::SetObjectName(instance.GetDevice(), Handle(), "StreamBuffer(%s):0x%" PRIx64,
+    Vulkan::SetObjectName(instance.GetDevice(), vk::Buffer{Handle()}, "StreamBuffer(%s):0x%" PRIx64,
                           BufferTypeName(mem_type), size_bytes);
 }
 

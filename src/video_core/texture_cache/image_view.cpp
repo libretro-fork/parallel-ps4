@@ -151,7 +151,7 @@ ImageView::ImageView(const Vulkan::Instance& instance, const ImageViewInfo& info
     device = static_cast<VkDevice>(instance.GetDevice());
     const VkResult view_result = vkCreateImageView(device, &image_view_ci, nullptr, &image_view);
     ASSERT_MSG(view_result == VK_SUCCESS, "Failed to create image view: %s",
-               vk::to_string(static_cast<vk::Result>(view_result)).c_str());
+               Vulkan::ResultName(view_result));
 
     const char* const view_aspect = aspect & vk::ImageAspectFlagBits::eDepth     ? "Depth"
                                     : aspect & vk::ImageAspectFlagBits::eStencil ? "Stencil"

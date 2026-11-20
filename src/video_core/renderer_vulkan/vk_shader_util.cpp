@@ -15,8 +15,7 @@ vk::ShaderModule CompileSPV(const u32* code, size_t num_words, vk::Device device
     VkShaderModule module = VK_NULL_HANDLE;
     const VkResult result =
         vkCreateShaderModule(static_cast<VkDevice>(device), &shader_info, nullptr, &module);
-    ASSERT_MSG(result == VK_SUCCESS, "Failed to compile SPIR-V shader: %s",
-               vk::to_string(static_cast<vk::Result>(result)).c_str());
+    ASSERT_MSG(result == VK_SUCCESS, "Failed to compile SPIR-V shader: %s", ResultName(result));
     return vk::ShaderModule{module};
 }
 

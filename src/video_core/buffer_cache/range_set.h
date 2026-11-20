@@ -3,8 +3,6 @@
 
 #pragma once
 
-#include <algorithm>
-
 #include "common/interval_set.h"
 #include "common/types.h"
 
@@ -54,8 +52,8 @@ struct RangeSet {
         const VAddr start_address = base_addr;
         const VAddr end_address = start_address + size;
         m_ranges.ForEachInRange(start_address, end_address, [&](const Interval& range) {
-            func(std::max<VAddr>(range.start, start_address),
-                 std::min<VAddr>(range.end, end_address));
+            func(range.start > start_address ? range.start : start_address,
+                 range.end < end_address ? range.end : end_address);
         });
     }
 

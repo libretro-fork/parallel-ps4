@@ -34,7 +34,7 @@ void Pipeline::CreateDescSetLayout(const VkDescriptorSetLayoutBinding* bindings,
     const VkResult result =
         vkCreateDescriptorSetLayout(device, &desc_layout_ci, nullptr, &desc_layout);
     ASSERT_MSG(result == VK_SUCCESS, "Failed to create %s descriptor set layout: %s", kind,
-               vk::to_string(static_cast<vk::Result>(result)).c_str());
+               ResultName(result));
 }
 
 void Pipeline::CreatePipelineLayout(VkShaderStageFlags stage_flags, const char* kind) {
@@ -50,7 +50,7 @@ void Pipeline::CreatePipelineLayout(VkShaderStageFlags stage_flags, const char* 
     layout_info.pPushConstantRanges = &push_constants;
     const VkResult result = vkCreatePipelineLayout(device, &layout_info, nullptr, &pipeline_layout);
     ASSERT_MSG(result == VK_SUCCESS, "Failed to create %s pipeline layout: %s", kind,
-               vk::to_string(static_cast<vk::Result>(result)).c_str());
+               ResultName(result));
 }
 
 void Pipeline::BindResources(vk::WriteDescriptorSet* set_writes, u32 num_writes,

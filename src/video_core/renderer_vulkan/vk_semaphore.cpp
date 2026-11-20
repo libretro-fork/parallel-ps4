@@ -23,8 +23,7 @@ Semaphore::Semaphore(const Instance& instance_)
     semaphore_ci.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
     semaphore_ci.pNext = &type_ci;
     const VkResult result = vkCreateSemaphore(device, &semaphore_ci, nullptr, &semaphore);
-    ASSERT_MSG(result == VK_SUCCESS, "Failed to create master semaphore: %s",
-               vk::to_string(static_cast<vk::Result>(result)).c_str());
+    ASSERT_MSG(result == VK_SUCCESS, "Failed to create master semaphore: %s", ResultName(result));
 }
 
 Semaphore::~Semaphore() {
@@ -41,7 +40,7 @@ void Semaphore::Refresh() {
             instance.ReportDeviceLost();
         }
         ASSERT_MSG(counter_result == VK_SUCCESS, "Failed to get master semaphore value: %s",
-                   vk::to_string(static_cast<vk::Result>(counter_result)).c_str());
+                   ResultName(counter_result));
         if (counter < this_tick) {
             return;
         }

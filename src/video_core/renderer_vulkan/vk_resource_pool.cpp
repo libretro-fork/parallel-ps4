@@ -75,8 +75,7 @@ CommandPool::CommandPool(const Instance& instance, Semaphore* work_semaphore)
         VK_COMMAND_POOL_CREATE_TRANSIENT_BIT | VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
     pool_create_info.queueFamilyIndex = instance.GetGraphicsQueueFamilyIndex();
     const VkResult result = vkCreateCommandPool(device, &pool_create_info, nullptr, &cmd_pool);
-    ASSERT_MSG(result == VK_SUCCESS, "Failed to create command pool: %s",
-               vk::to_string(static_cast<vk::Result>(result)).c_str());
+    ASSERT_MSG(result == VK_SUCCESS, "Failed to create command pool: %s", ResultName(result));
     SetObjectName(instance.GetDevice(), vk::CommandPool{cmd_pool}, "CommandPool");
 }
 
@@ -171,8 +170,7 @@ vk::DescriptorSet DescriptorHeap::Commit(vk::DescriptorSetLayout set_layout) {
 
     // The pool has run out. Record current tick and place it in pending list.
     ASSERT_MSG(result == VK_ERROR_OUT_OF_POOL_MEMORY || result == VK_ERROR_FRAGMENTED_POOL,
-               "Unexpected error during descriptor set allocation: %s",
-               vk::to_string(static_cast<vk::Result>(result)).c_str());
+               "Unexpected error during descriptor set allocation: %s", ResultName(result));
     if (pending_count == pending_capacity) {
         // Unrolled into a ring twice the size
         PendingPool* const grown =
@@ -197,7 +195,7 @@ vk::DescriptorSet DescriptorHeap::Commit(vk::DescriptorSetLayout set_layout) {
 
         const VkResult reset_result = vkResetDescriptorPool(device, curr_pool, 0);
         ASSERT_MSG(reset_result == VK_SUCCESS, "Unexpected error resetting descriptor pool: %s",
-                   vk::to_string(static_cast<vk::Result>(reset_result)).c_str());
+                   ResultName(reset_result));
     } else {
         CreateDescriptorPool();
     }
@@ -210,7 +208,7 @@ vk::DescriptorSet DescriptorHeap::Commit(vk::DescriptorSetLayout set_layout) {
     alloc_info.descriptorPool = curr_pool;
     result = vkAllocateDescriptorSets(device, &alloc_info, batch->sets);
     ASSERT_MSG(result == VK_SUCCESS, "Unexpected error during descriptor set allocation %s",
-               vk::to_string(static_cast<vk::Result>(result)).c_str());
+               ResultName(result));
     batch->count = DescriptorSetBatch - 1;
     return vk::DescriptorSet{batch->sets[DescriptorSetBatch - 1]};
 }
@@ -223,8 +221,7 @@ void DescriptorHeap::CreateDescriptorPool() {
     pool_info.poolSizeCount = num_pool_sizes;
     pool_info.pPoolSizes = pool_sizes;
     const VkResult result = vkCreateDescriptorPool(device, &pool_info, nullptr, &curr_pool);
-    ASSERT_MSG(result == VK_SUCCESS, "Failed to create descriptor pool: %s",
-               vk::to_string(static_cast<vk::Result>(result)).c_str());
+    ASSERT_MSG(result == VK_SUCCESS, "Failed to create descriptor pool: %s", ResultName(result));
 }
 
 } // namespace Vulkan

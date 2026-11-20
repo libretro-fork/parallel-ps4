@@ -27,7 +27,7 @@ FaultManager::FaultManager(const Vulkan::Instance& instance, Vulkan::Scheduler& 
       fault_buffer{instance, 0, fault_buffer_size, MemoryType::DeviceLocal},
       download_buffer{instance, 0, MaxPendingFaults * PageFaultAreaSize, MemoryType::HostCached} {
     const vk::Device vk_device{device};
-    Vulkan::SetObjectName(vk_device, fault_buffer.Handle(), "Fault Buffer");
+    Vulkan::SetObjectName(vk_device, vk::Buffer{fault_buffer.Handle()}, "Fault Buffer");
 
     VkDescriptorSetLayoutBinding bindings[2]{};
     for (u32 i = 0; i < 2; ++i) {

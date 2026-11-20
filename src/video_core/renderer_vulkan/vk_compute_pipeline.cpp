@@ -79,7 +79,7 @@ ComputePipeline::ComputePipeline(const Instance& instance, Scheduler& scheduler,
         vkCreateComputePipelines(device, static_cast<VkPipelineCache>(pipeline_cache), 1,
                                  &compute_pipeline_ci, nullptr, &pipeline);
     ASSERT_MSG(pipeline_result == VK_SUCCESS, "Failed to create compute pipeline: %s",
-               vk::to_string(static_cast<vk::Result>(pipeline_result)).c_str());
+               ResultName(pipeline_result));
     SetObjectName(vk_device, Handle(), "Compute Pipeline %s", debug_str);
 }
 

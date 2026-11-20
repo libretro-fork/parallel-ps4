@@ -57,7 +57,7 @@ TileManager::TileManager(const Vulkan::Instance& instance_, Vulkan::Scheduler& s
     const VkResult desc_layout_result =
         vkCreateDescriptorSetLayout(device, &desc_layout_ci, nullptr, &desc_layout);
     ASSERT_MSG(desc_layout_result == VK_SUCCESS, "Failed to create descriptor set layout: %s",
-               vk::to_string(static_cast<vk::Result>(desc_layout_result)).c_str());
+               Vulkan::ResultName(desc_layout_result));
 
     VkPipelineLayoutCreateInfo layout_info{};
     layout_info.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
@@ -66,7 +66,7 @@ TileManager::TileManager(const Vulkan::Instance& instance_, Vulkan::Scheduler& s
     const VkResult layout_result =
         vkCreatePipelineLayout(device, &layout_info, nullptr, &pl_layout);
     ASSERT_MSG(layout_result == VK_SUCCESS, "Failed to create pipeline layout: %s",
-               vk::to_string(static_cast<vk::Result>(layout_result)).c_str());
+               Vulkan::ResultName(layout_result));
 }
 
 TileManager::~TileManager() {
@@ -218,7 +218,7 @@ VkPipeline TileManager::GetTilingPipeline(const ImageInfo& info, bool is_tiler) 
     const VkResult result = vkCreateComputePipelines(raw_device, VK_NULL_HANDLE, 1,
                                                      &compute_pipeline_ci, nullptr, &handle);
     ASSERT_MSG(result == VK_SUCCESS, "Detiler pipeline creation failed %s",
-               vk::to_string(static_cast<vk::Result>(result)).c_str());
+               Vulkan::ResultName(result));
     *static_cast<VkPipeline*>(u64_map_insert(&tiling_pipelines, key, nullptr)) = handle;
     vkDestroyShaderModule(raw_device, static_cast<VkShaderModule>(module), nullptr);
     return handle;

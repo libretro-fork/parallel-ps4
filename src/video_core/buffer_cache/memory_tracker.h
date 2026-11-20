@@ -3,11 +3,13 @@
 
 #pragma once
 
-#include <algorithm>
-#include <deque>
-#include <vector>
+#include <stdlib.h>
+
+#include <new>
 
 #include <retro_atomic.h>
+#include "common/assert.h"
+#include "common/concepts.h"
 #include "common/types.h"
 #include "video_core/buffer_cache/region_manager.h"
 #include "video_core/buffer_cache/write_snapshots.h"
@@ -24,7 +26,17 @@ public:
     explicit MemoryTracker(PageManager& tracker_, write_snapshots_t* snapshots_)
         : tracker{&tracker_}, snapshots{snapshots_},
           readbacks_mode{emu_settings_get_readbacks_mode()} {}
-    ~MemoryTracker() = default;
+    ~MemoryTracker() {
+        for (u32 pool = 0; pool < num_pools; ++pool) {
+            for (u64 i = 0; i < MANAGER_POOL_SIZE; ++i) {
+                pools[pool][i].~RegionManager();
+            }
+            ::operator delete(pools[pool], std::align_val_t{alignof(RegionManager)});
+        }
+        free(pools);
+    }
+    MemoryTracker(const MemoryTracker&) = delete;
+    MemoryTracker& operator=(const MemoryTracker&) = delete;
 
     /// Returns true if a region has been modified from the GPU
     bool IsRegionGpuModified(VAddr cpu_addr, u64 size) noexcept {
@@ -66,7 +78,8 @@ public:
     }
 
     /// Removes all protection from a page and ensures GPU data has been flushed if requested
-    void InvalidateRegion(VAddr cpu_addr, u64 size, auto&& on_flush) noexcept {
+    template <typename OnFlush>
+    void InvalidateRegion(VAddr cpu_addr, u64 size, OnFlush&& on_flush) noexcept {
         if (readbacks_mode == EMU_READBACKS_DISABLED) {
             // A write the guest is about to make (a fault: a page or two), where the GPU has
             // written too: the pages are kept as they are now, so that their upload can tell
@@ -106,7 +119,8 @@ public:
     }
 
     /// Call 'func' for each CPU modified range and unmark those pages as CPU modified
-    void ForEachUploadRange(VAddr cpu_addr, u64 size, bool is_written, auto&& func) {
+    template <typename Func>
+    void ForEachUploadRange(VAddr cpu_addr, u64 size, bool is_written, Func&& func) {
         IteratePages<true>(
             cpu_addr, size, [&func, is_written](RegionManager* manager, u64 offset, u64 size) {
                 if (is_written) {
@@ -121,9 +135,9 @@ public:
     }
 
     /// Call 'func' for each GPU modified range and unmark those pages as GPU modified
-    template <bool clear>
-    void ForEachDownloadRange(VAddr cpu_addr, u64 size, auto&& func) {
-        constexpr auto gpu_op = clear ? StateOp::Clear : StateOp::None;
+    template <bool clear, typename Func>
+    void ForEachDownloadRange(VAddr cpu_addr, u64 size, Func&& func) {
+        constexpr StateOp gpu_op = clear ? StateOp::Clear : StateOp::None;
         IteratePages(cpu_addr, size, [&func](RegionManager* manager, u64 offset, u64 size) {
             manager->template ForEachModifiedRange<Type::GPU, StateOp::None, gpu_op>(offset, size,
                                                                                      func);
@@ -133,14 +147,16 @@ public:
 private:
     template <bool create_region_on_fail = false, typename Func>
     bool IteratePages(VAddr cpu_address, u64 size, Func&& func) {
-        using FuncReturn = typename std::invoke_result<Func, RegionManager*, u64, size_t>::type;
-        static constexpr bool BOOL_BREAK = std::is_same_v<FuncReturn, bool>;
+        using FuncReturn = decltype(func(static_cast<RegionManager*>(nullptr), u64{}, size_t{}));
+        static constexpr bool BOOL_BREAK = Common::IsSame<FuncReturn, bool>;
         u64 remaining_size = size;
         u64 page_index = cpu_address >> HIGHER_PAGE_BITS;
         u64 page_offset = cpu_address & HIGHER_PAGE_MASK;
         while (remaining_size > 0) {
-            const u64 copy_amount = std::min(HIGHER_PAGE_SIZE - page_offset, remaining_size);
-            if (auto* region = static_cast<RegionManager*>(
+            const u64 copy_amount = HIGHER_PAGE_SIZE - page_offset < remaining_size
+                                        ? HIGHER_PAGE_SIZE - page_offset
+                                        : remaining_size;
+            if (RegionManager* region = static_cast<RegionManager*>(
                     retro_atomic_load_acquire_ptr(&top_tier[page_index]));
                 region) {
                 if constexpr (BOOL_BREAK) {
@@ -169,19 +185,27 @@ private:
 
     RegionManager* CreateRegion(u64 page_index) {
         const VAddr base_cpu_addr = page_index << HIGHER_PAGE_BITS;
-        if (free_managers.empty()) {
-            manager_pool.emplace_back();
-            auto& last_pool = manager_pool.back();
-            for (size_t i = 0; i < MANAGER_POOL_SIZE; i++) {
-                // Made anew over the default one, which is ended first
-                std::destroy_at(&last_pool[i]);
-                std::construct_at(&last_pool[i], tracker, 0);
-                free_managers.push_back(&last_pool[i]);
+        if (num_free == 0) {
+            // A pool of MANAGER_POOL_SIZE more, handed out from the last one down
+            if (num_pools == pools_room) {
+                const u32 room = pools_room ? pools_room * 2 : 8;
+                RegionManager** const grown =
+                    static_cast<RegionManager**>(realloc(pools, room * sizeof(RegionManager*)));
+                ASSERT_MSG(grown, "Out of memory for the memory tracker's regions");
+                pools = grown;
+                pools_room = room;
             }
+            RegionManager* const pool = static_cast<RegionManager*>(
+                ::operator new(MANAGER_POOL_SIZE * sizeof(RegionManager),
+                               std::align_val_t{alignof(RegionManager)}));
+            for (u64 i = 0; i < MANAGER_POOL_SIZE; i++) {
+                new (&pool[i]) RegionManager(tracker, 0);
+            }
+            pools[num_pools++] = pool;
+            num_free = MANAGER_POOL_SIZE;
         }
-        auto* new_manager = free_managers.back();
+        RegionManager* new_manager = &pools[num_pools - 1][--num_free];
         new_manager->SetCpuAddress(base_cpu_addr);
-        free_managers.pop_back();
         // Published once made: the fault handler's thread reads the table meanwhile
         retro_atomic_store_release_ptr(&top_tier[page_index], new_manager);
         return new_manager;
@@ -190,11 +214,15 @@ private:
     PageManager* tracker;
     write_snapshots_t* snapshots;
     const u32 readbacks_mode;
-    std::deque<std::array<RegionManager, MANAGER_POOL_SIZE>> manager_pool;
-    std::vector<RegionManager*> free_managers;
+    /// The regions, made MANAGER_POOL_SIZE at a time; those of the last pool from num_free down
+    /// are not handed out yet
+    RegionManager** pools{};
+    u32 num_pools{};
+    u32 pools_room{};
+    u64 num_free{};
     /// Made by the GPU thread (the regions are made only where it marks or uploads), read by
     /// any.
-    std::array<retro_atomic_ptr_t, NUM_HIGH_PAGES> top_tier{};
+    retro_atomic_ptr_t top_tier[NUM_HIGH_PAGES]{};
 };
 
 } // namespace VideoCore

@@ -29,16 +29,16 @@ enum class MemoryType : u8 {
     Sparse,       ///< Requires an unbacked sparse resident buffer.
 };
 
-constexpr vk::BufferUsageFlags ReadFlags =
-    vk::BufferUsageFlagBits::eTransferSrc | vk::BufferUsageFlagBits::eUniformBuffer |
-    vk::BufferUsageFlagBits::eIndexBuffer | vk::BufferUsageFlagBits::eVertexBuffer |
-    vk::BufferUsageFlagBits::eIndirectBuffer | vk::BufferUsageFlagBits::eShaderDeviceAddress;
+constexpr VkBufferUsageFlags ReadFlags =
+    VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT |
+    VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT |
+    VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
 
-constexpr vk::BufferUsageFlags AllFlags =
-    ReadFlags | vk::BufferUsageFlagBits::eTransferDst | vk::BufferUsageFlagBits::eStorageBuffer;
+constexpr VkBufferUsageFlags AllFlags =
+    ReadFlags | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
 
 struct UniqueBuffer {
-    explicit UniqueBuffer(vk::Device device, Vulkan::MemoryAllocator* allocator);
+    explicit UniqueBuffer(VkDevice device, Vulkan::MemoryAllocator* allocator);
     ~UniqueBuffer();
 
     UniqueBuffer(const UniqueBuffer&) = delete;
@@ -73,7 +73,7 @@ struct UniqueBuffer {
         borrowed = false;
     }
 
-    void Create(vk::BufferCreateInfo& buffer_ci, MemoryType mem_type);
+    void Create(VkBufferCreateInfo& buffer_ci, MemoryType mem_type);
 
     void Destroy();
 
@@ -92,7 +92,7 @@ struct Buffer {
 
     /// A buffer over @handle, made and destroyed by someone else, so that it can be copied to
     /// and from as any other (the game's memory imported, guest_import.h)
-    explicit Buffer(const Vulkan::Instance& instance, vk::Buffer handle, u64 size_bytes_,
+    explicit Buffer(const Vulkan::Instance& instance, VkBuffer handle, u64 size_bytes_,
                     const char* debug_name);
 
     Buffer& operator=(const Buffer&) = delete;
@@ -117,11 +117,11 @@ struct Buffer {
         return size_bytes;
     }
 
-    vk::Buffer Handle() const noexcept {
-        return vk::Buffer{buffer.buffer};
+    VkBuffer Handle() const noexcept {
+        return buffer.buffer;
     }
 
-    vk::DeviceAddress BufferDeviceAddress() const noexcept {
+    VkDeviceAddress BufferDeviceAddress() const noexcept {
         ASSERT_MSG(buffer.bda_addr != 0, "Can't get BDA from a non BDA buffer");
         return buffer.bda_addr;
     }
@@ -197,7 +197,7 @@ private:
 
 private:
     Vulkan::Scheduler& scheduler;
-    vk::DeviceSize non_coherent_atom_size{};
+    VkDeviceSize non_coherent_atom_size{};
     u64 offset{};
     u64 mapped_size{};
     u64 last_tick{};

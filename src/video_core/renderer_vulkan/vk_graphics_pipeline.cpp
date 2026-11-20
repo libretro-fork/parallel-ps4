@@ -411,7 +411,7 @@ GraphicsPipeline::GraphicsPipeline(
         device, static_cast<VkPipelineCache>(pipeline_cache), 1,
         &static_cast<const VkGraphicsPipelineCreateInfo&>(pipeline_info), nullptr, &pipeline);
     ASSERT_MSG(pipeline_result == VK_SUCCESS, "Failed to create graphics pipeline: %s",
-               vk::to_string(static_cast<vk::Result>(pipeline_result)).c_str());
+               ResultName(pipeline_result));
     SetObjectName(vk_device, Handle(), "Graphics Pipeline %s", debug_str);
 }
 

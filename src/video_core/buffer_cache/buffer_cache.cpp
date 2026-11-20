@@ -315,8 +315,8 @@ const Buffer* BufferCache::GuestChunk(u32 chunk, VkBuffer handle) {
     if (!slot) {
         constexpr u64 chunk_size = u64{1} << GUEST_IMPORT_CHUNK_SHIFT;
         const u64 start = u64{chunk} << GUEST_IMPORT_CHUNK_SHIFT;
-        slot = new Buffer(instance, vk::Buffer{handle},
-                          MinU64(chunk_size, memory->BackingBytes() - start), "Game memory");
+        slot = new Buffer(instance, handle, MinU64(chunk_size, memory->BackingBytes() - start),
+                          "Game memory");
     }
     return slot;
 }

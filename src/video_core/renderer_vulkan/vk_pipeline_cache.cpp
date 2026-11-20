@@ -534,8 +534,7 @@ void PipelineCache::CreateDriverCache(bool from_disk) {
                 return;
             }
             pipeline_cache = VK_NULL_HANDLE;
-            LOG_WARNING(Render_Vulkan, "Driver pipeline cache not taken: %s",
-                        vk::to_string(static_cast<vk::Result>(result)).c_str());
+            LOG_WARNING(Render_Vulkan, "Driver pipeline cache not taken: %s", ResultName(result));
             info.initialDataSize = 0;
             info.pInitialData = nullptr;
         } else if (kept) {
@@ -543,8 +542,7 @@ void PipelineCache::CreateDriverCache(bool from_disk) {
         }
     }
     const VkResult result = vkCreatePipelineCache(device, &info, nullptr, &pipeline_cache);
-    ASSERT_MSG(result == VK_SUCCESS, "Failed to create pipeline cache: %s",
-               vk::to_string(static_cast<vk::Result>(result)).c_str());
+    ASSERT_MSG(result == VK_SUCCESS, "Failed to create pipeline cache: %s", ResultName(result));
 }
 
 void PipelineCache::SaveDriverCache() {

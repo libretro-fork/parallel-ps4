@@ -1030,7 +1030,7 @@ void Presenter::Present(Frame* frame, bool is_reusing_frame, bool is_game_frame)
             frame_slot = readback.in_order ? AcquireFrameSlot(extent.width, extent.height)
                                            : FrameSlotTarget{};
             const vk::Buffer target =
-                frame_slot.buffer ? frame_slot.buffer : readback.Buffer().Handle();
+                frame_slot.buffer ? frame_slot.buffer : vk::Buffer{readback.Buffer().Handle()};
             if (readback.narrow) {
                 NarrowToReadback(cmdbuf, swapchain_image, readback, target);
             } else {
