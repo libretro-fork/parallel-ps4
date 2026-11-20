@@ -4,6 +4,12 @@ What changed in the libretro core of this fork, newest first. Changes that come 
 
 ## Unreleased
 
+- No STL in `common/elf_info`.
+  - **Strings:** the game's serial, title, app version and folder (UTF-8) are C strings, copied once when the game is loaded, and handed out as `const char*`.
+  - **NP Communication IDs:** they are one array, made once from npbind.dat, each with its bytes as they were there and whether the game has a trophy file for it. That replaces the vector of IDs and the map of trophy index to ID, which held the same ID twice. The trophy setup looks an index up in the array; the NP handler picks an ID by service label as before, falling back to the first.
+  - **Splash:** `GetSplashData` gives the bytes and their count instead of a span.
+  - **Callers:** the kernel's app info, the module loaders, the swapchain's splash, the NP handler, the trophy setup and the relaunch take the new forms.
+  - **Checks:** the Linux and Windows builds pass. Not run in a game yet.
 - No STL in `common/string_util`, apart from `StringFromFormat`, which stays a `std::string` until its callers convert.
   - **Lowercase:** `ToLower`, which made a new string, is gone. Callers lower a string in place with `ToLowerInPlace(char*, size_t)`, or compare with the new `EqualsIgnoreCase`, which makes no copy. Both work on ASCII, as `tolower` did in the C locale.
   - **Split:** `SplitString` gives pieces borrowed from the string, into a caller's array, instead of a vector of new strings. The pieces are the same as `getline` gave, an empty last one dropped. The linker and module symbol lookups use it with no copies.

@@ -128,9 +128,8 @@ void InitHLELibs(Core::Loader::SymbolsResolver* sym) {
 
     auto* game_info = Common::Singleton<Common::ElfInfo>::Instance();
     const auto& sys_module_path = Common::FS::PathFromCString(emu_settings_get_sys_modules_dir);
-    const auto& game_specific_modules_path =
-        sys_module_path /
-        (game_info->GameSerial().empty() ? std::string_view("no_serial") : game_info->GameSerial());
+    const char* serial = game_info->GameSerial();
+    const auto& game_specific_modules_path = sys_module_path / (serial[0] ? serial : "no_serial");
     {
         constexpr auto ModulesToLoad = std::to_array<Core::SysModules>({
             {"libkernel.sprx", Libraries::Kernel::RegisterLib},

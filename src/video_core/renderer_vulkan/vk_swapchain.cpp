@@ -89,9 +89,9 @@ Swapchain::Swapchain(const Instance& instance_, const Frontend::Window& window_)
         info.fallback_faces = faces;
         info.fallback_count = static_cast<unsigned>(std::size(fallbacks));
         // The splash screen, read where the game's files lent it
-        const auto splash = Common::ElfInfo::Instance().GetSplashData();
-        info.splash = splash.data();
-        info.splash_size = splash.size();
+        size_t splash_size = 0;
+        info.splash = Common::ElfInfo::Instance().GetSplashData(&splash_size);
+        info.splash_size = splash_size;
         // Without them the game still runs: no FPS counter, notifications or trophy popups
         if (!font) {
             LOG_ERROR(Render_Vulkan, "The UI font is not among the core's resources: the "

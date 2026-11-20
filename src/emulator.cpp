@@ -168,9 +168,11 @@ s32 ReadCompiledSdkVersion(const std::string& guest_or_host_path) {
     return 0;
 }
 
-std::map<s32, std::string> ExtractTrophies(std::string_view npbind_guest,
-                                           std::string_view trophy_dir_guest) {
-    std::map<s32, std::string> trophy_index_map{};
+/// Marks in ElfInfo the NP Communication IDs the game has trophy files for, and extracts them
+void ExtractTrophies(std::string_view npbind_guest, std::string_view trophy_dir_guest) {
+    auto& game_info = Common::ElfInfo::Instance();
+    game_info.ClearTrophyMarks();
+    bool any_trophies = false;
 
     auto* mnt = Common::Singleton<Core::FileSys::MntPoints>::Instance();
 
@@ -178,25 +180,28 @@ std::map<s32, std::string> ExtractTrophies(std::string_view npbind_guest,
     const auto npbind_bytes = mnt->ReadFile(npbind_guest);
     if (!npbind_bytes || !npbind.Load(npbind_bytes->Bytes())) {
         LOG_WARNING(Common_Filesystem, "Failed to load npbind.dat file");
-        return trophy_index_map;
+        return;
     }
 
     auto np_comm_ids = npbind.GetNpCommIds();
     if (np_comm_ids.empty()) {
         LOG_WARNING(Common_Filesystem, "No NPCommIDs in npbind.dat");
-        return trophy_index_map;
+        return;
     }
-    auto& game_info = Common::ElfInfo::Instance();
-    game_info.SetNpCommIds(np_comm_ids);
+    if (game_info.SetNumNpCommIds(static_cast<u32>(np_comm_ids.size()))) {
+        for (u32 i = 0; i < game_info.NumNpCommIds(); ++i) {
+            game_info.SetNpCommId(i, np_comm_ids[i].data(), np_comm_ids[i].size());
+        }
+    }
 
     if (!mnt->IsDirectory(trophy_dir_guest)) {
         LOG_WARNING(Common_Filesystem, "Game does not contain a trophy directory");
-        return trophy_index_map;
+        return;
     }
 
     auto dir = mnt->OpenDir(trophy_dir_guest);
     if (!dir) {
-        return trophy_index_map;
+        return;
     }
 
     const std::string pattern = "trophy";
@@ -232,7 +237,8 @@ std::map<s32, std::string> ExtractTrophies(std::string_view npbind_guest,
         }
 
         const std::string np_comm_id = np_comm_ids[trophy_index];
-        trophy_index_map[trophy_index] = np_comm_id;
+        game_info.MarkTrophies(static_cast<u32>(trophy_index));
+        any_trophies = true;
         LOG_DEBUG(Loader, "Mapped trophy index %d to NPCommID: %s", trophy_index,
                   (np_comm_id).c_str());
 
@@ -288,12 +294,10 @@ std::map<s32, std::string> ExtractTrophies(std::string_view npbind_guest,
         }
     }
 
-    if (trophy_index_map.empty()) {
+    if (!any_trophies) {
         LOG_WARNING(Common_Filesystem, "No usable trophy files found in %.*s",
                     static_cast<int>((trophy_dir_guest).size()), (trophy_dir_guest).data());
     }
-
-    return trophy_index_map;
 }
 
 void Emulator::Run(std::filesystem::path file, std::vector<std::string> args,
@@ -470,9 +474,9 @@ void Emulator::Run(std::filesystem::path file, std::vector<std::string> args,
 
     auto& game_info = Common::ElfInfo::Instance();
     game_info.initialized = true;
-    game_info.game_serial = id;
-    game_info.title = title;
-    game_info.app_ver = app_version;
+    Common::ElfInfo::SetString(game_info.game_serial, id.c_str());
+    Common::ElfInfo::SetString(game_info.title, title.c_str());
+    Common::ElfInfo::SetString(game_info.app_ver, app_version.c_str());
     game_info.firmware_ver = fw_version & 0xFFF00000;
     game_info.raw_firmware_ver = fw_version;
     game_info.sdk_ver = ReadCompiledSdkVersion(guest_eboot_path);
@@ -484,7 +488,8 @@ void Emulator::Run(std::filesystem::path file, std::vector<std::string> args,
         LOG_INFO(Loader, "No splash image found at /app0/sce_sys/pic1.png");
     }
 
-    game_info.game_folder = game_folder;
+    Common::ElfInfo::SetString(game_info.game_folder,
+                               Common::FS::PathToUTF8String(game_folder).c_str());
 
     ASSERT_MSG(mnt->Exists(guest_eboot_path), "Guest app's main executable %s does not exist",
                (guest_eboot_path).c_str());
@@ -607,8 +612,7 @@ void Emulator::Run(std::filesystem::path file, std::vector<std::string> args,
     }
 
     // Extract and load trophies.
-    game_info.trophy_index_map =
-        ExtractTrophies("/app0/sce_sys/npbind.dat", "/app0/sce_sys/trophy");
+    ExtractTrophies("/app0/sce_sys/npbind.dat", "/app0/sce_sys/trophy");
 
     window = std::make_unique<Frontend::Window>(emu_settings_get_window_width(),
                                                 emu_settings_get_window_height());
@@ -728,7 +732,8 @@ void Emulator::Restart(std::filesystem::path eboot_path,
     std::vector<std::string> args;
 
     auto& game_info = Common::ElfInfo::Instance();
-    const auto& game_folder = game_info.GetGameFolder();
+    const std::filesystem::path game_folder =
+        Common::FS::PathFromUTF8String(game_info.GetGameFolder());
     const bool from_archive =
         Common::FS::IsFile(game_folder) &&
         (game_folder.extension() == ".zar" || game_folder.extension() == ".pkg");

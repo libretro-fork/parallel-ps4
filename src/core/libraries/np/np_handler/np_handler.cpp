@@ -652,18 +652,19 @@ bool IsValidNpCommId(const std::string& id) {
 std::string NpHandler::GetNpCommId(s32 service_label) const {
     // TODO complete guess of how commid is mapping to service_label.
     constexpr size_t COM_ID_LEN = 12;
-    const auto& ids = Common::ElfInfo::Instance().GetNpCommIds();
+    const auto& game_info = Common::ElfInfo::Instance();
+    const u32 num_ids = game_info.NumNpCommIds();
     std::string com_id;
-    if (!ids.empty()) {
-        const size_t idx = (service_label >= 0 && static_cast<size_t>(service_label) < ids.size())
-                               ? static_cast<size_t>(service_label)
-                               : 0;
-        com_id = ids[idx];
-        if (static_cast<size_t>(service_label) >= ids.size()) {
+    if (num_ids != 0) {
+        const u32 idx =
+            (service_label >= 0 && static_cast<u32>(service_label) < num_ids) ? service_label : 0;
+        const Common::NpCommIdEntry& id = game_info.GetNpCommId(idx);
+        com_id.assign(id.data ? id.data : "", id.size);
+        if (static_cast<u32>(service_label) >= num_ids) {
             LOG_WARNING(NpHandler,
-                        "service_label=%d >= npbind entry count %zu — falling back "
+                        "service_label=%d >= npbind entry count %u — falling back "
                         "to index 0",
-                        service_label, ids.size());
+                        service_label, num_ids);
         }
     }
     if (com_id.size() < COM_ID_LEN) {

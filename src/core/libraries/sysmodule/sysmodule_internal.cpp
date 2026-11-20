@@ -312,14 +312,12 @@ s32 loadModuleInternal(s32 index, s32 argc, const void* argv, s32* res_out) {
         // Now we need to check if the requested library is allowed to LLE.
         // First, we allow all modules from game-specific sys_modules
         const auto& sys_module_path = Common::FS::PathFromCString(emu_settings_get_sys_modules_dir);
-        if (!game_info->GameSerial().empty()) {
-            const auto& game_specific_module_path =
-                sys_module_path / game_info->GameSerial() / mod_name;
+        const char* serial = game_info->GameSerial();
+        if (serial[0]) {
+            const auto& game_specific_module_path = sys_module_path / serial / mod_name;
             if (Common::FS::Exists(game_specific_module_path)) {
                 // The requested module is present in the game-specific sys_modules, load it.
-                LOG_INFO(Loader, "Loading %s from game serial file %.*s", (mod_name).c_str(),
-                         static_cast<int>((game_info->GameSerial()).size()),
-                         (game_info->GameSerial()).data());
+                LOG_INFO(Loader, "Loading %s from game serial file %s", (mod_name).c_str(), serial);
                 s32 handle = linker->LoadAndStartModule(game_specific_module_path, argc, argv,
                                                         &start_result);
                 ASSERT_MSG(handle >= 0, "Failed to load module %s", (mod_name).c_str());

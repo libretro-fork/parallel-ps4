@@ -899,11 +899,11 @@ int PS4_SYSV_ABI sceNpTrophyRegisterContext(OrbisNpTrophyContext context,
 
     // Resolve trophy-related paths using the context's service_label
     std::string np_comm_id;
-    const auto& trophyMap = Common::ElfInfo::Instance().GetTrophyIndexMap();
-    auto it = trophyMap.find(ctx.service_label);
-    if (it != trophyMap.end()) {
+    const Common::NpCommIdEntry* trophy_id =
+        Common::ElfInfo::Instance().GetTrophyNpCommId(static_cast<s32>(ctx.service_label));
+    if (trophy_id) {
         // If we have an NP communication ID, prepare proper trophy paths
-        np_comm_id = it->second;
+        np_comm_id.assign(trophy_id->data ? trophy_id->data : "", trophy_id->size);
 
         const auto trophy_base =
             Common::FS::GetUserPath(Common::FS::PathType::TrophyDir) / np_comm_id;

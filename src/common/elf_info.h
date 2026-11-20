@@ -3,12 +3,9 @@
 
 #pragma once
 
-#include <filesystem>
-#include <string>
-#include <string_view>
-#include <vector>
+#include <stdlib.h>
+#include <string.h>
 
-#include <map>
 #include "assert.h"
 #include "bit_field.h"
 #include "common/io_file.h"
@@ -61,14 +58,22 @@ union PSFAttributes {
 };
 static_assert(sizeof(PSFAttributes) == 4);
 
+/// One NP Communication ID from npbind.dat, its bytes as they were there
+struct NpCommIdEntry {
+    char* data;
+    size_t size;
+    /// The game has a trophy file for this index (sce_sys/trophy/trophyNN.trp)
+    bool has_trophies;
+};
+
 class ElfInfo {
     friend class Core::Emulator;
 
     bool initialized = false;
 
-    std::string game_serial{};
-    std::string title{};
-    std::string app_ver{};
+    char* game_serial = nullptr;
+    char* title = nullptr;
+    char* app_ver = nullptr;
     u32 firmware_ver = 0;
     u32 raw_firmware_ver = 0;
     u32 sdk_ver = 0;
@@ -76,9 +81,37 @@ class ElfInfo {
 
     /// pic1.png, mapped where it lies for the session
     Common::FS::FileView splash_data{};
-    std::filesystem::path game_folder{};
-    std::vector<std::string> npCommIds{};
-    std::map<s32, std::string> trophy_index_map{};
+    /// The game's folder or archive, in UTF-8
+    char* game_folder = nullptr;
+    NpCommIdEntry* np_comm_ids = nullptr;
+    u32 num_np_comm_ids = 0;
+
+    /// Copies @src (@size bytes) into @dst, with a NUL after it
+    static void SetBytes(char*& dst, const char* src, size_t size) {
+        free(dst);
+        dst = static_cast<char*>(malloc(size + 1));
+        if (dst) {
+            memcpy(dst, src, size);
+            dst[size] = '\0';
+        }
+    }
+
+    static void SetString(char*& dst, const char* src) {
+        SetBytes(dst, src, strlen(src));
+    }
+
+    static const char* OrEmpty(const char* s) {
+        return s ? s : "";
+    }
+
+    void ClearNpCommIds() {
+        for (u32 i = 0; i < num_np_comm_ids; i++) {
+            free(np_comm_ids[i].data);
+        }
+        free(np_comm_ids);
+        np_comm_ids = nullptr;
+        num_np_comm_ids = 0;
+    }
 
 public:
     static constexpr u32 FW_100 = 0x1000000;
@@ -105,19 +138,19 @@ public:
         return *Singleton<ElfInfo>::Instance();
     }
 
-    [[nodiscard]] std::string_view GameSerial() const {
+    [[nodiscard]] const char* GameSerial() const {
         ASSERT(initialized);
-        return Instance().game_serial;
+        return OrEmpty(Instance().game_serial);
     }
 
-    [[nodiscard]] std::string_view Title() const {
+    [[nodiscard]] const char* Title() const {
         ASSERT(initialized);
-        return title;
+        return OrEmpty(title);
     }
 
-    [[nodiscard]] std::string_view AppVer() const {
+    [[nodiscard]] const char* AppVer() const {
         ASSERT(initialized);
-        return app_ver;
+        return OrEmpty(app_ver);
     }
 
     [[nodiscard]] u32 FirmwareVer() const {
@@ -140,24 +173,61 @@ public:
         return psf_attributes;
     }
 
-    [[nodiscard]] std::span<const u8> GetSplashData() const {
-        return splash_data.Bytes();
+    /// pic1.png's bytes, lent for the session; @size gets how many
+    [[nodiscard]] const u8* GetSplashData(size_t* size) const {
+        *size = splash_data.size();
+        return splash_data.data();
     }
 
-    [[nodiscard]] const std::filesystem::path& GetGameFolder() const {
-        return game_folder;
+    [[nodiscard]] const char* GetGameFolder() const {
+        return OrEmpty(game_folder);
     }
 
-    [[nodiscard]] const std::map<s32, std::string>& GetTrophyIndexMap() const {
-        return trophy_index_map;
+    [[nodiscard]] u32 NumNpCommIds() const {
+        return num_np_comm_ids;
     }
 
-    [[nodiscard]] const std::vector<std::string>& GetNpCommIds() const {
-        return npCommIds;
+    [[nodiscard]] const NpCommIdEntry& GetNpCommId(u32 index) const {
+        return np_comm_ids[index];
     }
 
-    void SetNpCommIds(std::vector<std::string> ids) {
-        npCommIds = std::move(ids);
+    /// The NP Communication ID of trophy file @index, or null when the game has none for it
+    [[nodiscard]] const NpCommIdEntry* GetTrophyNpCommId(s32 index) const {
+        if (index < 0 || static_cast<u32>(index) >= num_np_comm_ids ||
+            !np_comm_ids[index].has_trophies) {
+            return nullptr;
+        }
+        return &np_comm_ids[index];
+    }
+
+    /// Makes room for @count IDs, all empty; false when memory ran out
+    bool SetNumNpCommIds(u32 count) {
+        ClearNpCommIds();
+        if (count == 0) {
+            return true;
+        }
+        np_comm_ids = static_cast<NpCommIdEntry*>(calloc(count, sizeof(NpCommIdEntry)));
+        if (!np_comm_ids) {
+            return false;
+        }
+        num_np_comm_ids = count;
+        return true;
+    }
+
+    void SetNpCommId(u32 index, const char* data, size_t size) {
+        SetBytes(np_comm_ids[index].data, data, size);
+        np_comm_ids[index].size = np_comm_ids[index].data ? size : 0;
+    }
+
+    /// No ID has trophy files until marked again
+    void ClearTrophyMarks() {
+        for (u32 i = 0; i < num_np_comm_ids; i++) {
+            np_comm_ids[i].has_trophies = false;
+        }
+    }
+
+    void MarkTrophies(u32 index) {
+        np_comm_ids[index].has_trophies = true;
     }
 };
 
