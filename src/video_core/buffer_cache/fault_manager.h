@@ -16,6 +16,10 @@ class FaultManager {
 public:
     explicit FaultManager(const Vulkan::Instance& instance, Vulkan::Scheduler& scheduler,
                           BufferCache& buffer_cache, u32 sparse_pagebits, u64 sparse_num_pages);
+    ~FaultManager();
+
+    FaultManager(const FaultManager&) = delete;
+    FaultManager& operator=(const FaultManager&) = delete;
 
     [[nodiscard]] Buffer* GetFaultBuffer() noexcept {
         return &fault_buffer;
@@ -24,6 +28,7 @@ public:
     void ProcessFaultBuffer();
 
 private:
+    VkDevice device;
     Vulkan::Scheduler& scheduler;
     BufferCache& buffer_cache;
     RangeSet fault_ranges;
@@ -34,9 +39,9 @@ private:
     Buffer download_buffer;
     std::array<u64, MaxPendingFaults> fault_areas{};
     u32 current_area{};
-    vk::UniqueDescriptorSetLayout fault_process_desc_layout;
-    vk::UniquePipeline fault_process_pipeline;
-    vk::UniquePipelineLayout fault_process_pipeline_layout;
+    VkDescriptorSetLayout fault_process_desc_layout{VK_NULL_HANDLE};
+    VkPipeline fault_process_pipeline{VK_NULL_HANDLE};
+    VkPipelineLayout fault_process_pipeline_layout{VK_NULL_HANDLE};
 };
 
 } // namespace VideoCore

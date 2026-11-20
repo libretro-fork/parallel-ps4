@@ -4,6 +4,10 @@ What changed in the libretro core of this fork, newest first. Changes that come 
 
 ## Unreleased
 
+- Vulkan, the fault manager on the C API: `FaultManager` (`buffer_cache/fault_manager`) creates its descriptor set layout, pipeline layout and compute pipeline, and records its barriers, push descriptors and dispatch, with the C API through libretro-common's symbol wrapper.
+  - **What holds the objects:** plain Vulkan handles, destroyed in its own destructor. It can no longer be copied (it never was).
+  - **Unchanged:** the Vulkan calls and arguments are the same. Its fault buffer is still handed out as a `Buffer`.
+  - **Checks:** the Linux and Windows builds pass. Not run in a game yet.
 - Vulkan, images: `Image` asks for its format's sample counts with the C API (`vkGetPhysicalDeviceImageFormatProperties2`, through libretro-common's symbol wrapper). Its fields and barriers stay vulkan.hpp types for now, since much of the texture cache reads them.
   - **`UniqueImage`'s move-assignment:** it overwrote the image it held without destroying it, leaking the image and its memory. It now destroys that image first.
   - **`UniqueImage`'s moves:** neither carried the device across. Now both do.
