@@ -1388,7 +1388,8 @@ RenderState Rasterizer::BeginRendering(const GraphicsPipeline* pipeline) {
         auto& attachment = state.color_attachments[cb];
         attachment.image_view = image_view.Handle();
         attachment.image_layout = image->backing->state.layout;
-        attachment.clear_value = clear_value.color.uint32;
+        memcpy(attachment.clear_value, clear_value.color.uint32.data(),
+               sizeof(attachment.clear_value));
         attachment.is_clear = is_clear;
 
         image->usage.render_target = 1u;
@@ -1401,7 +1402,7 @@ RenderState Rasterizer::BeginRendering(const GraphicsPipeline* pipeline) {
                       u64(col_buf.attrib.raw) | u64(image_id.index) << 32, col_buf.CmaskAddress(),
                       col_buf.FmaskAddress());
     }
-    for (u32 cb = state.num_color_attachments; cb < state.color_attachments.size(); ++cb) {
+    for (u32 cb = state.num_color_attachments; cb < RenderState::MaxColorAttachments; ++cb) {
         state.color_attachments[cb] = {};
     }
 
@@ -1455,7 +1456,7 @@ RenderState Rasterizer::BeginRendering(const GraphicsPipeline* pipeline) {
         auto& attachment = state.depth_stencil_attachment;
         attachment.image_view = image_view.Handle();
         attachment.image_layout = image.backing->state.layout;
-        attachment.clear_value = {};
+        memset(attachment.clear_value, 0, sizeof(attachment.clear_value));
         attachment.is_clear = 0;
         instance.Note("depth target 2: z info|stencil info<<32, depth read at, stencil read at, "
                       "image number|htile at<<32",
@@ -2002,8 +2003,8 @@ void Rasterizer::UpdateRasterizationState() const {
 void Rasterizer::UpdateColorBlendingState(const GraphicsPipeline* pipeline) const {
     const auto& regs = liverpool->regs;
     auto& dynamic_state = scheduler.GetDynamicState();
-    dynamic_state.SetBlendConstants(regs.blend_constants);
-    dynamic_state.SetColorWriteMasks(pipeline->GetGraphicsKey().write_masks);
+    dynamic_state.SetBlendConstants(regs.blend_constants.data());
+    dynamic_state.SetColorWriteMasks(pipeline->GetGraphicsKey().write_masks.data());
     dynamic_state.SetAttachmentFeedbackLoopEnabled(attachment_feedback_loop);
 }
 

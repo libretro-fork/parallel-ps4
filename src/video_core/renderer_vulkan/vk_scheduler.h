@@ -3,10 +3,8 @@
 
 #pragma once
 
-#include <array>
-#include <cstring>
 #include <new>
-#include <type_traits>
+#include <string.h>
 
 #include <queues/mpsc_stack.h>
 #include <retro_atomic.h>
@@ -30,7 +28,7 @@ class Instance;
 struct RenderAttachment {
     vk::ImageView image_view;
     vk::ImageLayout image_layout;
-    std::array<u32, 4> clear_value;
+    u32 clear_value[4];
     union {
         u32 is_clear;
         struct {
@@ -41,10 +39,11 @@ struct RenderAttachment {
         };
     };
 };
-static_assert(std::has_unique_object_representations_v<RenderAttachment>);
+static_assert(__has_unique_object_representations(RenderAttachment));
 
 struct RenderState {
-    std::array<RenderAttachment, 8> color_attachments;
+    static constexpr u32 MaxColorAttachments = 8;
+    RenderAttachment color_attachments[MaxColorAttachments];
     RenderAttachment depth_stencil_attachment;
     u16 width;
     u16 height;
@@ -52,38 +51,39 @@ struct RenderState {
     u16 num_color_attachments;
 
     bool operator==(const RenderState& other) const noexcept {
-        return std::memcmp(this, &other, sizeof(RenderState)) == 0;
+        return memcmp(this, &other, sizeof(RenderState)) == 0;
     }
 };
-static_assert(std::has_unique_object_representations_v<RenderState>);
+static_assert(__has_unique_object_representations(RenderState));
 
 struct SubmitInfo {
-    std::array<vk::Semaphore, 4> wait_semas;
-    std::array<u64, 4> wait_ticks;
-    std::array<vk::Semaphore, 4> signal_semas;
-    std::array<u64, 4> signal_ticks;
-    vk::Fence fence;
+    static constexpr u32 MaxSemaphores = 4;
+    VkSemaphore wait_semas[MaxSemaphores];
+    u64 wait_ticks[MaxSemaphores];
+    VkSemaphore signal_semas[MaxSemaphores];
+    u64 signal_ticks[MaxSemaphores];
+    VkFence fence;
     u32 num_wait_semas;
     u32 num_signal_semas;
 
     void AddWait(vk::Semaphore semaphore, u64 tick = 1) {
-        wait_semas[num_wait_semas] = semaphore;
+        wait_semas[num_wait_semas] = static_cast<VkSemaphore>(semaphore);
         wait_ticks[num_wait_semas++] = tick;
     }
 
     void AddSignal(vk::Semaphore semaphore, u64 tick = 1) {
-        signal_semas[num_signal_semas] = semaphore;
+        signal_semas[num_signal_semas] = static_cast<VkSemaphore>(semaphore);
         signal_ticks[num_signal_semas++] = tick;
     }
 
-    void AddSignal(vk::Fence fence) {
-        this->fence = fence;
+    void AddSignal(vk::Fence fence_) {
+        fence = static_cast<VkFence>(fence_);
     }
 };
 
 using Viewports = Common::StaticVector<vk::Viewport, AmdGpu::NUM_VIEWPORTS>;
 using Scissors = Common::StaticVector<vk::Rect2D, AmdGpu::NUM_VIEWPORTS>;
-using ColorWriteMasks = std::array<vk::ColorComponentFlags, AmdGpu::NUM_COLOR_BUFFERS>;
+
 struct StencilOps {
     vk::StencilOp fail_op{};
     vk::StencilOp pass_op{};
@@ -163,33 +163,33 @@ struct DynamicState {
     vk::CullModeFlags cull_mode{};
     vk::FrontFace front_face{};
 
-    std::array<float, 4> blend_constants{};
-    ColorWriteMasks color_write_masks{};
+    float blend_constants[4]{};
+    vk::ColorComponentFlags color_write_masks[AmdGpu::NUM_COLOR_BUFFERS]{};
     float line_width{};
     bool feedback_loop_enabled{};
     /// The game's sample positions: side of the pixel block they repeat over (0: none set),
     /// samples in a pixel, and an x and a y for each in sixteenths of a pixel
     u8 sample_locs_grid{};
     u8 sample_locs_samples{};
-    std::array<u8, 64> sample_locs{};
+    u8 sample_locs[64]{};
 
     /// Commits the dynamic state to the provided command buffer.
     void Commit(const Instance& instance, const vk::CommandBuffer& cmdbuf);
 
     /// Invalidates all dynamic state to be flushed into the next command buffer.
     void Invalidate() {
-        std::memset(&dirty_state, 0xFF, sizeof(dirty_state));
+        memset(&dirty_state, 0xFF, sizeof(dirty_state));
     }
 
     void SetViewports(const Viewports& viewports_) {
-        if (!std::ranges::equal(viewports, viewports_)) {
+        if (!(viewports == viewports_)) {
             viewports = viewports_;
             dirty_state.viewports = true;
         }
     }
 
     void SetScissors(const Scissors& scissors_) {
-        if (!std::ranges::equal(scissors, scissors_)) {
+        if (!(scissors == scissors_)) {
             scissors = scissors_;
             dirty_state.scissors = true;
         }
@@ -320,9 +320,9 @@ struct DynamicState {
         }
     }
 
-    void SetBlendConstants(const std::array<float, 4> blend_constants_) {
-        if (blend_constants != blend_constants_) {
-            blend_constants = blend_constants_;
+    void SetBlendConstants(const float* blend_constants_) {
+        if (memcmp(blend_constants, blend_constants_, sizeof(blend_constants)) != 0) {
+            memcpy(blend_constants, blend_constants_, sizeof(blend_constants));
             dirty_state.blend_constants = true;
         }
     }
@@ -334,9 +334,10 @@ struct DynamicState {
         }
     }
 
-    void SetColorWriteMasks(const ColorWriteMasks& color_write_masks_) {
-        if (!std::ranges::equal(color_write_masks, color_write_masks_)) {
-            color_write_masks = color_write_masks_;
+    /// @color_write_masks_ holds one mask per colour buffer
+    void SetColorWriteMasks(const vk::ColorComponentFlags* color_write_masks_) {
+        if (memcmp(color_write_masks, color_write_masks_, sizeof(color_write_masks)) != 0) {
+            memcpy(color_write_masks, color_write_masks_, sizeof(color_write_masks));
             dirty_state.color_write_masks = true;
         }
     }
@@ -351,10 +352,10 @@ struct DynamicState {
     void SetSampleLocations(u8 grid, u8 samples, const u8* locs) {
         const size_t bytes = size_t(grid) * grid * samples * 2;
         if (sample_locs_grid != grid || sample_locs_samples != samples ||
-            std::memcmp(sample_locs.data(), locs, bytes) != 0) {
+            memcmp(sample_locs, locs, bytes) != 0) {
             sample_locs_grid = grid;
             sample_locs_samples = samples;
-            std::memcpy(sample_locs.data(), locs, bytes);
+            memcpy(sample_locs, locs, bytes);
             dirty_state.sample_locations = true;
         }
     }
@@ -406,12 +407,12 @@ public:
 
     /// Sets a function to be called on every session finalization.
     void SetSessionCallback(SessionFunc&& on_session) {
-        this->on_session = std::move(on_session);
+        this->on_session = static_cast<SessionFunc&&>(on_session);
     }
 
     /// Sets a function to be called on every scheduler submission.
     void SetSubmitCallback(SubmitFunc&& on_submit) {
-        this->on_submit = std::move(on_submit);
+        this->on_submit = static_cast<SubmitFunc&&>(on_submit);
     }
 
     /// Returns the current render state.
@@ -426,7 +427,7 @@ public:
 
     /// Returns the current command buffer.
     vk::CommandBuffer CommandBuffer() const {
-        return vk::CommandBuffer{sessions.back().primary};
+        return vk::CommandBuffer{sessions[num_sessions - 1].primary};
     }
 
     /// Returns the current command buffer tick.
@@ -486,13 +487,17 @@ private:
         VkCommandBuffer upload{VK_NULL_HANDLE};
         VkCommandBuffer primary{VK_NULL_HANDLE};
     };
-    std::vector<Session> sessions;
-    /// The command buffers of a submission, made up front with the sessions' room
-    std::vector<VkCommandBuffer> submit_buffers;
+    /// The sessions of the submission being recorded, the last the current one: room made up
+    /// front, doubled past it
+    Session* sessions{};
+    u32 num_sessions{};
+    u32 session_capacity{};
+    /// The command buffers of a submission, two a session, with the sessions' room
+    VkCommandBuffer* submit_buffers{};
 
 public:
     /// Room for an operation's captures, kept in the operation itself
-    static constexpr std::size_t PendingOpBytes = 224;
+    static constexpr size_t PendingOpBytes = 224;
     /// A deferred operation: the function made in place in it, run and destroyed through
     /// two pointers. Taken from a pool made up front (AcquireOp, ReleaseOp in
     /// vk_scheduler.cpp), so deferring an operation does not allocate.

@@ -4,6 +4,13 @@ What changed in the libretro core of this fork, newest first. Changes that come 
 
 ## Unreleased
 
+- No STL or `auto` in the scheduler (`vk_scheduler`).
+  - **Sessions:** the sessions of a submission and the command buffers handed to the queue are plain arrays, room for 64 sessions (and twice that in command buffers) made at start and doubled only past that, as the vectors' reserved room was.
+  - **`SubmitInfo`:** holds plain Vulkan semaphores and a fence, handed to the queue as they are. `AddWait` and `AddSignal` still take vulkan.hpp handles from their callers.
+  - **Render state and dynamic state:** the attachments, clear values, blend constants, colour write masks and sample positions are plain arrays. `SetBlendConstants` and `SetColorWriteMasks` take a pointer, and their caller in the rasterizer follows.
+  - **The rest:** `memcmp` and `memcpy` in place of `std::` ones and of `std::bit_cast`, the compiler's own check that the render state has no padding (`__has_unique_object_representations`, which GCC, Clang and MSVC have), and explicit types for `auto`.
+  - **Unchanged:** the Vulkan calls and arguments.
+  - **Checks:** the Linux and Windows builds pass. Not run in a game yet.
 - No STL or `auto` in the images (`texture_cache/image`).
   - **Subresource states:** an image's per-mip, per-layer states, made on its first partial transition, are a plain array kept for the image's life, as the vector's room was kept after a clear. A count of 0 says they are not in use, as an empty vector did.
   - **Backing images:** have their own move, which hands the array over, since the texture cache's small vectors move them.

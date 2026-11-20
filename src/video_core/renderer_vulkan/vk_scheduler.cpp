@@ -18,15 +18,15 @@ namespace {
 // The deferred operations of every scheduler, made when the first scheduler is: a game keeps
 // at most a few hundred in flight. The free ones are a lock-free pool (common/node_pool.h).
 // Should they all be in flight, one more is made, and kept in the pool once given back.
-constexpr std::size_t OpPoolSize = 4096;
+constexpr size_t OpPoolSize = 4096;
 
 struct OpPool {
     node_pool_t free_ops;
 
     OpPool() {
         node_pool_init(&free_ops);
-        auto* const block = new Scheduler::PendingOp[OpPoolSize];
-        for (std::size_t i = 0; i < OpPoolSize; ++i) {
+        Scheduler::PendingOp* const block = new Scheduler::PendingOp[OpPoolSize];
+        for (size_t i = 0; i < OpPoolSize; ++i) {
             node_pool_push(&free_ops, &block[i].free_link);
         }
     }
@@ -64,8 +64,11 @@ Scheduler::Scheduler(const Instance& instance)
     retro_eventcount_init(&priority_pending_ops_ec);
     // Made here, not in play: the pool, and room for the sessions of a submission
     (void)Pool();
-    sessions.reserve(64);
-    submit_buffers.reserve(128);
+    session_capacity = 64;
+    sessions = static_cast<Session*>(malloc(session_capacity * sizeof(Session)));
+    submit_buffers =
+        static_cast<VkCommandBuffer*>(malloc(session_capacity * 2 * sizeof(VkCommandBuffer)));
+    ASSERT_MSG(sessions && submit_buffers, "Out of memory making the scheduler");
     BeginSession();
     stop_thread_start(
         &priority_pending_ops_thread,
@@ -78,6 +81,8 @@ Scheduler::~Scheduler() {
     retro_eventcount_notify(&priority_pending_ops_ec);
     stop_thread_join(&priority_pending_ops_thread);
     retro_eventcount_free(&priority_pending_ops_ec);
+    free(sessions);
+    free(submit_buffers);
 }
 
 void Scheduler::BeginRendering(const RenderState& new_state) {
@@ -88,9 +93,9 @@ void Scheduler::BeginRendering(const RenderState& new_state) {
     is_rendering = true;
     render_state = new_state;
 
-    std::array<VkRenderingAttachmentInfo, 8> color_attachments;
+    VkRenderingAttachmentInfo color_attachments[RenderState::MaxColorAttachments];
     for (u32 i = 0; i < render_state.num_color_attachments; ++i) {
-        const auto& cb = render_state.color_attachments[i];
+        const RenderAttachment& cb = render_state.color_attachments[i];
         VkRenderingAttachmentInfo& attachment = color_attachments[i];
         attachment = {};
         attachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
@@ -98,11 +103,10 @@ void Scheduler::BeginRendering(const RenderState& new_state) {
         attachment.imageLayout = static_cast<VkImageLayout>(cb.image_layout);
         attachment.loadOp = cb.is_clear ? VK_ATTACHMENT_LOAD_OP_CLEAR : VK_ATTACHMENT_LOAD_OP_LOAD;
         attachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-        std::memcpy(attachment.clearValue.color.uint32, cb.clear_value.data(),
-                    sizeof(cb.clear_value));
+        memcpy(attachment.clearValue.color.uint32, cb.clear_value, sizeof(cb.clear_value));
     }
 
-    const auto& db = render_state.depth_stencil_attachment;
+    const RenderAttachment& db = render_state.depth_stencil_attachment;
     VkRenderingAttachmentInfo depth_attachment{};
     depth_attachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
     depth_attachment.imageView = static_cast<VkImageView>(db.image_view);
@@ -111,7 +115,7 @@ void Scheduler::BeginRendering(const RenderState& new_state) {
     VkRenderingAttachmentInfo stencil_attachment = depth_attachment;
     depth_attachment.loadOp =
         db.depth_clear ? VK_ATTACHMENT_LOAD_OP_CLEAR : VK_ATTACHMENT_LOAD_OP_LOAD;
-    depth_attachment.clearValue.depthStencil.depth = std::bit_cast<float>(db.clear_value[0]);
+    memcpy(&depth_attachment.clearValue.depthStencil.depth, &db.clear_value[0], sizeof(float));
     stencil_attachment.loadOp =
         db.stencil_clear ? VK_ATTACHMENT_LOAD_OP_CLEAR : VK_ATTACHMENT_LOAD_OP_LOAD;
     stencil_attachment.clearValue.depthStencil.stencil = db.clear_value[1];
@@ -121,7 +125,7 @@ void Scheduler::BeginRendering(const RenderState& new_state) {
     rendering_info.renderArea.extent = {render_state.width, render_state.height};
     rendering_info.layerCount = render_state.num_layers;
     rendering_info.colorAttachmentCount = render_state.num_color_attachments;
-    rendering_info.pColorAttachments = color_attachments.data();
+    rendering_info.pColorAttachments = color_attachments;
     rendering_info.pDepthAttachment = db.has_depth ? &depth_attachment : nullptr;
     rendering_info.pStencilAttachment = db.has_stencil ? &stencil_attachment : nullptr;
 
@@ -130,7 +134,7 @@ void Scheduler::BeginRendering(const RenderState& new_state) {
                   u64(render_state.num_color_attachments) | u64(db.has_depth) << 8 |
                       u64(db.has_stencil) << 9,
                   render_state.num_layers);
-    vkCmdBeginRendering(sessions.back().primary, &rendering_info);
+    vkCmdBeginRendering(sessions[num_sessions - 1].primary, &rendering_info);
 }
 
 void Scheduler::EndRendering() {
@@ -138,11 +142,11 @@ void Scheduler::EndRendering() {
         return;
     }
     is_rendering = false;
-    vkCmdEndRendering(sessions.back().primary);
+    vkCmdEndRendering(sessions[num_sessions - 1].primary);
 }
 
 vk::CommandBuffer Scheduler::UploadCommandBuffer() {
-    auto& upload_cmdbuf = sessions.back().upload;
+    VkCommandBuffer& upload_cmdbuf = sessions[num_sessions - 1].upload;
     if (upload_cmdbuf) {
         return vk::CommandBuffer{upload_cmdbuf};
     }
@@ -209,7 +213,18 @@ void Scheduler::RunPendingOperations() {
 void Scheduler::BeginSession() {
     EndSession();
 
-    auto& session = sessions.emplace_back();
+    if (num_sessions == session_capacity) {
+        session_capacity *= 2;
+        Session* const grown =
+            static_cast<Session*>(realloc(sessions, session_capacity * sizeof(Session)));
+        VkCommandBuffer* const grown_buffers = static_cast<VkCommandBuffer*>(
+            realloc(submit_buffers, session_capacity * 2 * sizeof(VkCommandBuffer)));
+        ASSERT_MSG(grown && grown_buffers, "Out of memory growing the scheduler's sessions");
+        sessions = grown;
+        submit_buffers = grown_buffers;
+    }
+    Session& session = sessions[num_sessions++];
+    session = {};
 
     session.primary = static_cast<VkCommandBuffer>(command_pool.Commit());
     BeginOneTime(session.primary);
@@ -219,7 +234,7 @@ void Scheduler::BeginSession() {
 }
 
 void Scheduler::EndSession() {
-    if (sessions.empty()) {
+    if (num_sessions == 0) {
         return;
     }
 
@@ -227,7 +242,7 @@ void Scheduler::EndSession() {
         on_session();
     }
 
-    const auto& session = sessions.back();
+    const Session& session = sessions[num_sessions - 1];
     if (session.upload) {
         Check(static_cast<vk::Result>(vkEndCommandBuffer(session.upload)));
     }
@@ -247,48 +262,43 @@ void Scheduler::SubmitExecution(SubmitInfo& info) {
         EndSession();
 
         // Kept, so a submission does not allocate
-        auto& cmd_buffers = submit_buffers;
-        cmd_buffers.clear();
-
-        for (const auto& session : sessions) {
-            if (session.upload) {
-                cmd_buffers.push_back(session.upload);
+        u32 num_cmd_buffers = 0;
+        for (u32 i = 0; i < num_sessions; ++i) {
+            if (sessions[i].upload) {
+                submit_buffers[num_cmd_buffers++] = sessions[i].upload;
             }
-            cmd_buffers.push_back(session.primary);
+            submit_buffers[num_cmd_buffers++] = sessions[i].primary;
         }
-        sessions.clear();
+        num_sessions = 0;
 
         const vk::Semaphore timeline{work_semaphore.Handle()};
         info.AddSignal(timeline, signal_value);
 
-        std::array<VkPipelineStageFlags, std::tuple_size_v<decltype(info.wait_semas)>>
-            wait_stage_masks;
-        wait_stage_masks.fill(VK_PIPELINE_STAGE_ALL_COMMANDS_BIT);
+        VkPipelineStageFlags wait_stage_masks[SubmitInfo::MaxSemaphores];
+        for (u32 i = 0; i < SubmitInfo::MaxSemaphores; ++i) {
+            wait_stage_masks[i] = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
+        }
 
         VkTimelineSemaphoreSubmitInfo timeline_si{};
         timeline_si.sType = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO;
         timeline_si.waitSemaphoreValueCount = info.num_wait_semas;
-        timeline_si.pWaitSemaphoreValues = info.wait_ticks.data();
+        timeline_si.pWaitSemaphoreValues = info.wait_ticks;
         timeline_si.signalSemaphoreValueCount = info.num_signal_semas;
-        timeline_si.pSignalSemaphoreValues = info.signal_ticks.data();
+        timeline_si.pSignalSemaphoreValues = info.signal_ticks;
 
-        // vulkan.hpp's handles are the C handles, with nothing added
-        static_assert(sizeof(vk::Semaphore) == sizeof(VkSemaphore));
         VkSubmitInfo submit_info{};
         submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
         submit_info.pNext = &timeline_si;
         submit_info.waitSemaphoreCount = info.num_wait_semas;
-        submit_info.pWaitSemaphores = reinterpret_cast<const VkSemaphore*>(info.wait_semas.data());
-        submit_info.pWaitDstStageMask = wait_stage_masks.data();
-        submit_info.commandBufferCount = static_cast<u32>(cmd_buffers.size());
-        submit_info.pCommandBuffers = cmd_buffers.data();
+        submit_info.pWaitSemaphores = info.wait_semas;
+        submit_info.pWaitDstStageMask = wait_stage_masks;
+        submit_info.commandBufferCount = num_cmd_buffers;
+        submit_info.pCommandBuffers = submit_buffers;
         submit_info.signalSemaphoreCount = info.num_signal_semas;
-        submit_info.pSignalSemaphores =
-            reinterpret_cast<const VkSemaphore*>(info.signal_semas.data());
+        submit_info.pSignalSemaphores = info.signal_semas;
 
-        const VkResult submit_result =
-            vkQueueSubmit(static_cast<VkQueue>(instance.GetGraphicsQueue()), 1, &submit_info,
-                          static_cast<VkFence>(info.fence));
+        const VkResult submit_result = vkQueueSubmit(
+            static_cast<VkQueue>(instance.GetGraphicsQueue()), 1, &submit_info, info.fence);
         if (submit_result == VK_ERROR_DEVICE_LOST) {
             instance.ReportDeviceLost();
         }
@@ -341,7 +351,7 @@ void CmdSetStencilOps(VkCommandBuffer cmdbuf, VkStencilFaceFlags faces, const St
 } // Anonymous namespace
 
 void DynamicState::Commit(const Instance& instance, const vk::CommandBuffer& vk_cmdbuf) {
-    const auto cmdbuf = static_cast<VkCommandBuffer>(vk_cmdbuf);
+    const VkCommandBuffer cmdbuf = static_cast<VkCommandBuffer>(vk_cmdbuf);
     if (dirty_state.viewports) {
         dirty_state.viewports = false;
         vkCmdSetViewportWithCount(cmdbuf, static_cast<u32>(viewports.size()),
@@ -476,15 +486,15 @@ void DynamicState::Commit(const Instance& instance, const vk::CommandBuffer& vk_
     }
     if (dirty_state.blend_constants) {
         dirty_state.blend_constants = false;
-        vkCmdSetBlendConstants(cmdbuf, blend_constants.data());
+        vkCmdSetBlendConstants(cmdbuf, blend_constants);
     }
     if (dirty_state.color_write_masks) {
         dirty_state.color_write_masks = false;
         if (instance.IsDynamicColorWriteMaskSupported()) {
             static_assert(sizeof(vk::ColorComponentFlags) == sizeof(VkColorComponentFlags));
             vkCmdSetColorWriteMaskEXT(
-                cmdbuf, 0, static_cast<u32>(color_write_masks.size()),
-                reinterpret_cast<const VkColorComponentFlags*>(color_write_masks.data()));
+                cmdbuf, 0, AmdGpu::NUM_COLOR_BUFFERS,
+                reinterpret_cast<const VkColorComponentFlags*>(color_write_masks));
         }
     }
     if (dirty_state.line_width) {
@@ -493,7 +503,7 @@ void DynamicState::Commit(const Instance& instance, const vk::CommandBuffer& vk_
     }
     if (dirty_state.sample_locations && sample_locs_grid) {
         dirty_state.sample_locations = false;
-        std::array<VkSampleLocationEXT, 32> locations;
+        VkSampleLocationEXT locations[32];
         const u32 count = u32(sample_locs_grid) * sample_locs_grid * sample_locs_samples;
         for (u32 i = 0; i < count; ++i) {
             locations[i] = {sample_locs[i * 2] / 16.0f, sample_locs[i * 2 + 1] / 16.0f};
@@ -504,7 +514,7 @@ void DynamicState::Commit(const Instance& instance, const vk::CommandBuffer& vk_
             static_cast<VkSampleCountFlagBits>(sample_locs_samples);
         sample_locations.sampleLocationGridSize = {sample_locs_grid, sample_locs_grid};
         sample_locations.sampleLocationsCount = count;
-        sample_locations.pSampleLocations = locations.data();
+        sample_locations.pSampleLocations = locations;
         vkCmdSetSampleLocationsEXT(cmdbuf, &sample_locations);
     }
     if (dirty_state.feedback_loop_enabled && instance.IsAttachmentFeedbackLoopLayoutSupported()) {
