@@ -456,6 +456,11 @@ public:
         return image_view_min_lod;
     }
 
+    /// Whether storage images can be of the extended formats (R8ui, R16ui, Rg32ui and others)
+    bool IsStorageImageExtendedFormatsSupported() const {
+        return features.shaderStorageImageExtendedFormats;
+    }
+
     /// Returns whether shaderStorageImageMultisample is supported.
     bool IsMultisampleStorageImageSupported() const {
         return features.shaderStorageImageMultisample;

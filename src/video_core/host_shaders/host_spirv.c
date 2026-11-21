@@ -1155,40 +1155,120 @@ static uint32_t addr_macro_tiled(hspv_t* m, const tiling_t* t, uint32_t x, uint3
                        NUM_PIPE_INTERLEAVE_BITS + t->num_pipe_bits + t->num_bank_bits));
 }
 
-size_t host_spirv_tiling_comp(uint32_t* out, size_t cap, unsigned bits_per_pixel, int macro_tiled,
-                              int word_access, const uint32_t* params, size_t num_params) {
-    tiling_t t;
+/* The image's tiling from @params, the values tile_manager.cpp folds into the
+ * shader, in their order */
+static void tiling_from_params(tiling_t* t, unsigned bits_per_pixel, int macro_tiled,
+                               const uint32_t* params, size_t num_params) {
     uint32_t p[12];
-    uint32_t bytes_per_pixel = bits_per_pixel / 8, block_t, block_stride, gid, tiled_data;
-    uint32_t linear_data, mip_t, members[4], mips_t, info_t, info, uni_u32, sb_block;
-    uint32_t texel_var, mip_var, mip_size_var, global_id, num_mips, header, cond, body, cont;
-    uint32_t merge, more, next_mip, texel, mip, pitch_height, pitch, height, x, y, slice;
-    uint32_t in_mips, done, in_data, done_data, inside;
-    uint32_t tiled_offset, micro, macro, is_micro, i;
-    hspv_t module, *m = &module;
-
+    size_t i;
     memset(p, 0, sizeof(p));
     for (i = 0; i < 12 && i < num_params; i++)
         p[i] = params[i];
-    memset(&t, 0, sizeof(t));
-    t.bpp = bits_per_pixel;
-    t.num_samples = p[0];
-    t.micro_tile_mode = p[1];
-    t.micro_tile_thickness = p[2];
-    t.is_tiler = p[3];
+    memset(t, 0, sizeof(*t));
+    t->bpp = bits_per_pixel;
+    t->num_samples = p[0];
+    t->micro_tile_mode = p[1];
+    t->micro_tile_thickness = p[2];
+    t->is_tiler = p[3];
     if (macro_tiled) {
-        t.array_mode = p[4];
-        t.pipe_config = p[5];
-        t.bank_width = p[6];
-        t.bank_height = p[7];
-        t.num_banks = p[8];
-        t.num_bank_bits = p[9];
-        t.tile_split_bytes = p[10];
-        t.macro_tile_aspect = p[11];
+        t->array_mode = p[4];
+        t->pipe_config = p[5];
+        t->bank_width = p[6];
+        t->bank_height = p[7];
+        t->num_banks = p[8];
+        t->num_bank_bits = p[9];
+        t->tile_split_bytes = p[10];
+        t->macro_tile_aspect = p[11];
     }
-    t.num_pipes = t.pipe_config == PIPE_P2 ? 2 : 8;
-    t.num_pipe_bits = t.pipe_config == PIPE_P2 ? 1 : 3;
+    t->num_pipes = t->pipe_config == PIPE_P2 ? 2 : 8;
+    t->num_pipe_bits = t->pipe_config == PIPE_P2 ? 1 : 3;
+}
 
+/* uniform TilingInfo { uint bank_swizzle, micro_tiled_mips, num_mips;
+ *                      MipInfo { uint size, pitch_height, offset; } mips[16]; }
+ * at binding 2 */
+static uint32_t tiling_info_binding(hspv_t* m) {
+    uint32_t members[4], mip_t, mips_t, info_t, i;
+    members[0] = m->t_u32;
+    members[1] = m->t_u32;
+    members[2] = m->t_u32;
+    mip_t = spv_type_own(m, SpvOpTypeStruct, 3, members);
+    for (i = 0; i < 3; i++)
+        spv_member_offset(m, mip_t, i, i * 4);
+    members[0] = mip_t;
+    members[1] = k_u32(m, 16);
+    mips_t = spv_type_own(m, SpvOpTypeArray, 2, members);
+    spv_decorate(m, mips_t, SpvDecorationArrayStride, 1, 12);
+    members[0] = m->t_u32;
+    members[1] = m->t_u32;
+    members[2] = m->t_u32;
+    members[3] = mips_t;
+    info_t = spv_type_own(m, SpvOpTypeStruct, 4, members);
+    spv_decorate(m, info_t, SpvDecorationBlock, 0, 0);
+    for (i = 0; i < 4; i++)
+        spv_member_offset(m, info_t, i, i * 4);
+    return spv_binding(m, SpvStorageClassUniform, info_t, 2);
+}
+
+/* A word of the TilingInfo uniform @info, and of its mip @mip */
+static uint32_t info_word(hspv_t* m, uint32_t uni_u32, uint32_t info, int member) {
+    return load(m, m->t_u32, op2(m, SpvOpAccessChain, uni_u32, info, k_s32(m, member)));
+}
+static uint32_t mip_word(hspv_t* m, uint32_t uni_u32, uint32_t info, uint32_t mip, int member) {
+    return load(m, m->t_u32,
+                op4(m, SpvOpAccessChain, uni_u32, info, k_s32(m, 3), mip, k_s32(m, member)));
+}
+
+/* Where @texel of @mip is in the mip's linear layout: x, y and slice, with the
+ * mip's pitch and height */
+static void mip_texel_coords(hspv_t* m, uint32_t uni_u32, uint32_t info, uint32_t mip,
+                             uint32_t texel, uint32_t* x, uint32_t* y, uint32_t* slice,
+                             uint32_t* pitch_out, uint32_t* height_out) {
+    uint32_t pitch_height = mip_word(m, uni_u32, info, mip, 1), pitch, height;
+    /* No division by nothing for a mip with no pitch or height */
+    pitch = u_andk(m, pitch_height, 0xffffu);
+    pitch = op3(m, SpvOpSelect, m->t_u32, op2(m, SpvOpIEqual, m->t_bool, pitch, k_u32(m, 0)),
+                k_u32(m, 1), pitch);
+    height = u_shrk(m, pitch_height, 16);
+    height = op3(m, SpvOpSelect, m->t_u32, op2(m, SpvOpIEqual, m->t_bool, height, k_u32(m, 0)),
+                 k_u32(m, 1), height);
+    *x = u_mod(m, texel, pitch);
+    *y = u_mod(m, u_div(m, texel, pitch), height);
+    *slice = u_div(m, texel, u_mul(m, pitch, height));
+    *pitch_out = pitch;
+    *height_out = height;
+}
+
+/* The byte offset in the tiled data of texel @x, @y, @slice of @mip */
+static uint32_t tiled_texel_offset(hspv_t* m, const tiling_t* t, int macro_tiled, uint32_t uni_u32,
+                                   uint32_t info, uint32_t mip, uint32_t x, uint32_t y,
+                                   uint32_t slice, uint32_t pitch, uint32_t height) {
+    uint32_t tiled_offset = mip_word(m, uni_u32, info, mip, 2), micro, macro, is_micro;
+    if (macro_tiled) {
+        micro = addr_micro_tiled(m, t, x, y, slice, pitch, height,
+                                 t->micro_tile_thickness < 4 ? t->micro_tile_thickness : 4);
+        macro = addr_macro_tiled(m, t, x, y, slice, pitch, height, info_word(m, uni_u32, info, 0));
+        is_micro =
+            op2(m, SpvOpINotEqual, m->t_bool,
+                u_and(m, info_word(m, uni_u32, info, 1), u_shl(m, k_u32(m, 1), mip)), k_u32(m, 0));
+        return u_add(m, tiled_offset, op3(m, SpvOpSelect, m->t_u32, is_micro, micro, macro));
+    }
+    return u_add(m, tiled_offset,
+                 addr_micro_tiled(m, t, x, y, slice, pitch, height, t->micro_tile_thickness));
+}
+
+size_t host_spirv_tiling_comp(uint32_t* out, size_t cap, unsigned bits_per_pixel, int macro_tiled,
+                              int word_access, const uint32_t* params, size_t num_params) {
+    tiling_t t;
+    uint32_t bytes_per_pixel = bits_per_pixel / 8, block_t, block_stride, gid, tiled_data;
+    uint32_t linear_data, info, uni_u32, sb_block;
+    uint32_t texel_var, mip_var, mip_size_var, global_id, num_mips, header, cond, body, cont;
+    uint32_t merge, more, next_mip, texel, mip, pitch, height, x, y, slice;
+    uint32_t in_mips, done, in_data, done_data, inside;
+    uint32_t tiled_offset;
+    hspv_t module, *m = &module;
+
+    tiling_from_params(&t, bits_per_pixel, macro_tiled, params, num_params);
     spv_begin(m);
     /* The block each invocation moves */
     block_stride = bytes_per_pixel;
@@ -1219,27 +1299,7 @@ size_t host_spirv_tiling_comp(uint32_t* out, size_t cap, unsigned bits_per_pixel
     tiled_data = storage_array(m, block_t, block_stride, 0);
     linear_data = storage_array(m, block_t, block_stride, 1);
 
-    /* uniform TilingInfo { uint bank_swizzle, micro_tiled_mips, num_mips;
-     *                      MipInfo { uint size, pitch_height, offset; } mips[16]; } */
-    members[0] = m->t_u32;
-    members[1] = m->t_u32;
-    members[2] = m->t_u32;
-    mip_t = spv_type_own(m, SpvOpTypeStruct, 3, members);
-    for (i = 0; i < 3; i++)
-        spv_member_offset(m, mip_t, i, i * 4);
-    members[0] = mip_t;
-    members[1] = k_u32(m, 16);
-    mips_t = spv_type_own(m, SpvOpTypeArray, 2, members);
-    spv_decorate(m, mips_t, SpvDecorationArrayStride, 1, 12);
-    members[0] = m->t_u32;
-    members[1] = m->t_u32;
-    members[2] = m->t_u32;
-    members[3] = mips_t;
-    info_t = spv_type_own(m, SpvOpTypeStruct, 4, members);
-    spv_decorate(m, info_t, SpvDecorationBlock, 0, 0);
-    for (i = 0; i < 4; i++)
-        spv_member_offset(m, info_t, i, i * 4);
-    info = spv_binding(m, SpvStorageClassUniform, info_t, 2);
+    info = tiling_info_binding(m);
     uni_u32 = t_ptr(m, SpvStorageClassUniform, m->t_u32);
     sb_block = t_ptr(m, SpvStorageClassStorageBuffer, block_t);
 
@@ -1248,19 +1308,13 @@ size_t host_spirv_tiling_comp(uint32_t* out, size_t cap, unsigned bits_per_pixel
     mip_var = local(m, m->t_u32);
     mip_size_var = local(m, m->t_u32);
 
-#define INFO_WORD(member)                                                                          \
-    load(m, m->t_u32, op2(m, SpvOpAccessChain, uni_u32, info, k_s32(m, member)))
-#define MIP_WORD(mip_id, member)                                                                   \
-    load(m, m->t_u32,                                                                              \
-         op4(m, SpvOpAccessChain, uni_u32, info, k_s32(m, 3), (mip_id), k_s32(m, member)))
-
     global_id = global_id_x(m, gid);
-    num_mips = INFO_WORD(2);
+    num_mips = info_word(m, uni_u32, info, 2);
 
     /* GetMipLevel: walk the mips until the texel falls in one */
     store(m, texel_var, global_id);
     store(m, mip_var, k_u32(m, 0));
-    store(m, mip_size_var, u_divk(m, MIP_WORD(k_u32(m, 0), 0), bytes_per_pixel));
+    store(m, mip_size_var, u_divk(m, mip_word(m, uni_u32, info, k_u32(m, 0), 0), bytes_per_pixel));
     header = spv_id(m);
     cond = spv_id(m);
     body = spv_id(m);
@@ -1280,7 +1334,7 @@ size_t host_spirv_tiling_comp(uint32_t* out, size_t cap, unsigned bits_per_pixel
     store(m, texel_var, u_sub(m, load(m, m->t_u32, texel_var), load(m, m->t_u32, mip_size_var)));
     next_mip = u_addk(m, load(m, m->t_u32, mip_var), 1);
     store(m, mip_var, next_mip);
-    store(m, mip_size_var, u_divk(m, MIP_WORD(next_mip, 0), bytes_per_pixel));
+    store(m, mip_size_var, u_divk(m, mip_word(m, uni_u32, info, next_mip, 0), bytes_per_pixel));
     opv(m, SpvOpBranch, 1, cont);
     label(m, cont);
     opv(m, SpvOpBranch, 1, header);
@@ -1298,34 +1352,9 @@ size_t host_spirv_tiling_comp(uint32_t* out, size_t cap, unsigned bits_per_pixel
     opv(m, SpvOpSelectionMerge, 2, done, (uint32_t)SpvSelectionControlMaskNone);
     opv(m, SpvOpBranchConditional, 3, inside, in_mips, done);
     label(m, in_mips);
-    pitch_height = MIP_WORD(mip, 1);
-    /* No division by nothing for a mip with no pitch or height */
-    pitch = u_andk(m, pitch_height, 0xffffu);
-    pitch = op3(m, SpvOpSelect, m->t_u32, op2(m, SpvOpIEqual, m->t_bool, pitch, k_u32(m, 0)),
-                k_u32(m, 1), pitch);
-    height = u_shrk(m, pitch_height, 16);
-    height = op3(m, SpvOpSelect, m->t_u32, op2(m, SpvOpIEqual, m->t_bool, height, k_u32(m, 0)),
-                 k_u32(m, 1), height);
-    x = u_mod(m, texel, pitch);
-    y = u_mod(m, u_div(m, texel, pitch), height);
-    slice = u_div(m, texel, u_mul(m, pitch, height));
-
-    tiled_offset = MIP_WORD(mip, 2);
-    if (macro_tiled) {
-        micro = addr_micro_tiled(m, &t, x, y, slice, pitch, height,
-                                 t.micro_tile_thickness < 4 ? t.micro_tile_thickness : 4);
-        macro = addr_macro_tiled(m, &t, x, y, slice, pitch, height, INFO_WORD(0));
-        is_micro = op2(m, SpvOpINotEqual, m->t_bool,
-                       u_and(m, INFO_WORD(1), u_shl(m, k_u32(m, 1), mip)), k_u32(m, 0));
-        tiled_offset =
-            u_add(m, tiled_offset, op3(m, SpvOpSelect, m->t_u32, is_micro, micro, macro));
-    } else {
-        tiled_offset =
-            u_add(m, tiled_offset,
-                  addr_micro_tiled(m, &t, x, y, slice, pitch, height, t.micro_tile_thickness));
-    }
-#undef INFO_WORD
-#undef MIP_WORD
+    mip_texel_coords(m, uni_u32, info, mip, texel, &x, &y, &slice, &pitch, &height);
+    tiled_offset =
+        tiled_texel_offset(m, &t, macro_tiled, uni_u32, info, mip, x, y, slice, pitch, height);
 
     /* Nor for a place past the end of the tiled data that is bound */
     in_data = spv_id(m);
@@ -1370,6 +1399,134 @@ size_t host_spirv_tiling_comp(uint32_t* out, size_t cap, unsigned bits_per_pixel
     }
     opv(m, SpvOpBranch, 1, done_data);
     label(m, done_data);
+    opv(m, SpvOpBranch, 1, done);
+    label(m, done);
+    compute_mode(m);
+    return spv_end(m, SpvExecutionModelGLCompute, out, cap);
+}
+
+size_t host_spirv_detile_image_comp(uint32_t* out, size_t cap, unsigned bits_per_pixel,
+                                    int macro_tiled, int volume, const uint32_t* params,
+                                    size_t num_params) {
+    tiling_t t;
+    uint32_t bytes_per_pixel = bits_per_pixel / 8, block_t, block_stride, gid, tiled_data;
+    uint32_t image_t, image, info, uni_u32, sb_block, members[4], pc_t, pc, pc_u32, v[7];
+    uint32_t global_id, mip, mip_texels, width, height_px, depth, x, y, slice, pitch, height;
+    uint32_t tiled_offset, index, inside, write, done, block, value, parts[4], coord, i;
+    uint32_t t_u32x4, t_s32x3, image_format;
+    hspv_t module, *m = &module;
+
+    /* A texel is the image format's only channels: 8, 16 and 32 bits are one
+     * uint, 64 two and 128 four */
+    switch (bits_per_pixel) {
+    case 8:
+        image_format = SpvImageFormatR8ui;
+        break;
+    case 16:
+        image_format = SpvImageFormatR16ui;
+        break;
+    case 32:
+        image_format = SpvImageFormatR32ui;
+        break;
+    case 64:
+        image_format = SpvImageFormatRg32ui;
+        break;
+    case 128:
+        image_format = SpvImageFormatRgba32ui;
+        break;
+    default:
+        return 0;
+    }
+    tiling_from_params(&t, bits_per_pixel, macro_tiled, params, num_params);
+    if (t.is_tiler)
+        return 0;
+
+    spv_begin(m);
+    if (bits_per_pixel != 32 && bits_per_pixel != 128)
+        spv_capability(m, SpvCapabilityStorageImageExtendedFormats);
+    /* 8- and 16-bit texels are read out of their 32-bit word: no 8- or 16-bit
+     * storage buffer access is needed */
+    block_stride = bytes_per_pixel < 4 ? 4 : bytes_per_pixel;
+    block_t =
+        bits_per_pixel <= 32 ? m->t_u32 : t2(m, SpvOpTypeVector, m->t_u32, bits_per_pixel / 32);
+    t_u32x4 = t2(m, SpvOpTypeVector, m->t_u32, 4);
+    t_s32x3 = t2(m, SpvOpTypeVector, m->t_s32, 3);
+
+    gid = spv_builtin(m, SpvStorageClassInput, m->t_u32x3, SpvBuiltInGlobalInvocationId);
+    tiled_data = storage_array(m, block_t, block_stride, 0);
+    /* The image's mip, a 2D array (each layer a slice) or a 3D image */
+    v[0] = m->t_u32;
+    v[1] = volume ? SpvDim3D : SpvDim2D;
+    v[2] = 0;              /* depth */
+    v[3] = volume ? 0 : 1; /* arrayed */
+    v[4] = 0;              /* multisampled */
+    v[5] = 2;              /* storage */
+    v[6] = image_format;
+    image_t = spv_unique(m, SpvOpTypeImage, 0, 7, v);
+    image = spv_binding(m, SpvStorageClassUniformConstant, image_t, 1);
+    info = tiling_info_binding(m);
+    /* push_constant { uint mip, width, height, depth; }: the mip written, and
+     * its size in the image */
+    for (i = 0; i < 4; i++)
+        members[i] = m->t_u32;
+    pc_t = spv_type_own(m, SpvOpTypeStruct, 4, members);
+    spv_decorate(m, pc_t, SpvDecorationBlock, 0, 0);
+    for (i = 0; i < 4; i++)
+        spv_member_offset(m, pc_t, i, i * 4);
+    pc = spv_global(m, SpvStorageClassPushConstant, pc_t);
+    uni_u32 = t_ptr(m, SpvStorageClassUniform, m->t_u32);
+    sb_block = t_ptr(m, SpvStorageClassStorageBuffer, block_t);
+    pc_u32 = t_ptr(m, SpvStorageClassPushConstant, m->t_u32);
+
+    spv_main(m);
+    global_id = global_id_x(m, gid);
+    mip = load(m, m->t_u32, op2(m, SpvOpAccessChain, pc_u32, pc, k_s32(m, 0)));
+    width = load(m, m->t_u32, op2(m, SpvOpAccessChain, pc_u32, pc, k_s32(m, 1)));
+    height_px = load(m, m->t_u32, op2(m, SpvOpAccessChain, pc_u32, pc, k_s32(m, 2)));
+    depth = load(m, m->t_u32, op2(m, SpvOpAccessChain, pc_u32, pc, k_s32(m, 3)));
+    mip_texels = u_divk(m, mip_word(m, uni_u32, info, mip, 0), bytes_per_pixel);
+
+    mip_texel_coords(m, uni_u32, info, mip, global_id, &x, &y, &slice, &pitch, &height);
+    tiled_offset =
+        tiled_texel_offset(m, &t, macro_tiled, uni_u32, info, mip, x, y, slice, pitch, height);
+    index =
+        bytes_per_pixel < 4 ? u_shrk(m, tiled_offset, 2) : u_divk(m, tiled_offset, bytes_per_pixel);
+
+    /* Only a texel of the mip that is in the image (the pitch can be wider than
+     * the image, and the mip's height taller), and whose place is in the tiled
+     * data that is bound */
+    inside = op2(m, SpvOpULessThan, m->t_bool, global_id, mip_texels);
+    inside =
+        op2(m, SpvOpLogicalAnd, m->t_bool, inside, op2(m, SpvOpULessThan, m->t_bool, x, width));
+    inside =
+        op2(m, SpvOpLogicalAnd, m->t_bool, inside, op2(m, SpvOpULessThan, m->t_bool, y, height_px));
+    inside =
+        op2(m, SpvOpLogicalAnd, m->t_bool, inside, op2(m, SpvOpULessThan, m->t_bool, slice, depth));
+    inside = op2(m, SpvOpLogicalAnd, m->t_bool, inside,
+                 op2(m, SpvOpULessThan, m->t_bool, index,
+                     op2(m, SpvOpArrayLength, m->t_u32, tiled_data, 0)));
+    write = spv_id(m);
+    done = spv_id(m);
+    opv(m, SpvOpSelectionMerge, 2, done, (uint32_t)SpvSelectionControlMaskNone);
+    opv(m, SpvOpBranchConditional, 3, inside, write, done);
+    label(m, write);
+    block = load(m, block_t, op3(m, SpvOpAccessChain, sb_block, tiled_data, k_s32(m, 0), index));
+    parts[1] = parts[2] = parts[3] = k_u32(m, 0);
+    if (bits_per_pixel < 32) {
+        value = u_shr(m, block, u_mulk(m, u_andk(m, tiled_offset, 3), 8));
+        parts[0] = u_andk(m, value, (1u << bits_per_pixel) - 1u);
+    } else if (bits_per_pixel == 32) {
+        parts[0] = block;
+    } else {
+        for (i = 0; i < bits_per_pixel / 32; i++)
+            parts[i] = op2(m, SpvOpCompositeExtract, m->t_u32, block, i);
+    }
+    value = opn(m, SpvOpCompositeConstruct, t_u32x4, 4, parts);
+    parts[0] = x;
+    parts[1] = y;
+    parts[2] = slice;
+    coord = op1(m, SpvOpBitcast, t_s32x3, opn(m, SpvOpCompositeConstruct, m->t_u32x3, 3, parts));
+    opv(m, SpvOpImageWrite, 3, load(m, image_t, image), coord, value);
     opv(m, SpvOpBranch, 1, done);
     label(m, done);
     compute_mode(m);

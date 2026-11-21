@@ -37,8 +37,15 @@ public:
     const Buffer* DetileImage(const VideoCore::Buffer* in_buffer, u64 in_offset,
                               const ImageInfo& info, u64* out_offset);
 
+    /// Detiles the image at @in_offset of @in_buffer straight into @image, each mip written by
+    /// a compute shader with no linear copy in between. False, with nothing done, for an image
+    /// that cannot be written so (block compressed, depth, multisampled, 96-bit, or without a
+    /// storage view of its pixel width): DetileImage and an upload are for that.
+    bool DetileIntoImage(const VideoCore::Buffer* in_buffer, u64 in_offset, Image& image);
+
 private:
     VkPipeline GetTilingPipeline(const ImageInfo& info, bool is_tiler);
+    VkPipeline GetDetileImagePipeline(const ImageInfo& info, bool volume);
 
 private:
     const Vulkan::Instance& instance;
@@ -47,6 +54,9 @@ private:
     StreamBuffer& stream_buffer;
     VkDescriptorSetLayout desc_layout{VK_NULL_HANDLE};
     VkPipelineLayout pl_layout{VK_NULL_HANDLE};
+    /// DetileIntoImage's: a storage image at binding 1, and the mip and its size pushed
+    VkDescriptorSetLayout image_desc_layout{VK_NULL_HANDLE};
+    VkPipelineLayout image_pl_layout{VK_NULL_HANDLE};
     /// Tiling pipelines by their packed key (TilingKey in tile_manager.cpp): VkPipeline values
     u64_map_t tiling_pipelines{};
     /// A new tiling pipeline's module, written here instead of allocated

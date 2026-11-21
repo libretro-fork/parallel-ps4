@@ -1087,6 +1087,11 @@ void TextureCache::RefreshImage(Image& image) {
     u64 in_offset = 0;
     const Buffer* in_buffer = buffer_cache.ObtainBufferForImage(image.info.guest_address,
                                                                 image.info.guest_size, &in_offset);
+    // A tiled image the GPU can write as a storage image is detiled straight into it; the rest
+    // are detiled into a buffer and copied in
+    if (tile_manager.DetileIntoImage(in_buffer, in_offset, image)) {
+        return;
+    }
     u64 offset = 0;
     const Buffer* const buffer =
         tile_manager.DetileImage(in_buffer, in_offset, image.info, &offset);

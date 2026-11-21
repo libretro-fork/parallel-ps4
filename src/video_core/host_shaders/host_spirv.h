@@ -69,6 +69,17 @@ size_t host_spirv_fault_buffer_process_comp(uint32_t* out, size_t cap, uint32_t 
 size_t host_spirv_tiling_comp(uint32_t* out, size_t cap, unsigned bits_per_pixel, int macro_tiled,
                               int word_access, const uint32_t* params, size_t num_params);
 
+/* Detiles one image straight into its mip, with no linear copy in between:
+ * tiled data at binding 0, the mip as a storage image at 1 (a 2D array, or a
+ * 3D image for @volume, of R8ui, R16ui, R32ui, Rg32ui or Rgba32ui for 8 to 128
+ * bits), the TilingInfo uniform at 2, and push constants { mip, width, height,
+ * depth }: the mip and its size in the image. One invocation per texel of the
+ * mip. @params are those of host_spirv_tiling_comp, which must not tile. 0 for
+ * a pixel width it has no format for (96 bits). */
+size_t host_spirv_detile_image_comp(uint32_t* out, size_t cap, unsigned bits_per_pixel,
+                                    int macro_tiled, int volume, const uint32_t* params,
+                                    size_t num_params);
+
 RETRO_END_DECLS
 
 #endif
