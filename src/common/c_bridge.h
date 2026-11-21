@@ -20,6 +20,8 @@ enum c_log_class {
     C_LOG_LIB_AUDIODEC,
     C_LOG_LIB_HTTP,
     C_LOG_LIB_ULT,
+    C_LOG_LIB_CAMERA,
+    C_LOG_LIB_VR_TRACKER,
     C_LOG_LIB_JPEG,
     C_LOG_LIB_SYSTEM_GESTURE,
     C_LOG_LIB_COMPANION_HTTPD,
@@ -60,6 +62,25 @@ void c_log(enum c_log_class log_class, enum c_log_level level, const char* func,
 /* Logs msg as unreachable code was reached, and stops the emulator, as UNREACHABLE_MSG
  * does. Does not return. */
 void c_unreachable(const char* file, int line, const char* func, const char* msg);
+
+/* Logs that the assertion @msg failed, and stops the emulator, as ASSERT_MSG does. */
+void c_assert_fail(const char* file, int line, const char* func, const char* msg);
+
+/* ASSERT for C: @func names the calling function (C89 has no __func__) */
+#define C_ASSERT(cond, func)                                                                       \
+    do {                                                                                           \
+        if (!(cond)) {                                                                             \
+            c_assert_fail(__FILE__, __LINE__, func, #cond);                                        \
+        }                                                                                          \
+    } while (0)
+
+/* ASSERT_MSG for C: @msg logged when @cond does not hold */
+#define C_ASSERT_MSG(cond, func, msg)                                                              \
+    do {                                                                                           \
+        if (!(cond)) {                                                                             \
+            c_assert_fail(__FILE__, __LINE__, func, msg);                                          \
+        }                                                                                          \
+    } while (0)
 
 /* Same order as Common::FS::PathType. */
 enum c_user_path {

@@ -4,6 +4,14 @@ What changed in the libretro core of this fork, newest first. Changes that come 
 
 ## Unreleased
 
+- The camera and VR tracker libraries are MSVC C89, with the same functions, behaviour and log lines; both are registered in `libs.cpp`.
+  - **The camera's backend** (where frames would come from) is a table of C functions instead of a C++ class. It is still the one that is never attached, until the frontend's camera is passed through.
+  - **The configuration table** of types 1 to 5 moved from the header into `camera_config.c`, written without designated initializers; it is byte for byte the table it was. Every camera and VR tracker structure keeps its size, checked against the C++ headers.
+  - **`kernel/kernel_c.h`** gives the C libraries the kernel calls they make: mapping system flexible memory, the compiled SDK version, the process time, and the memory manager's GPU mapping and virtual query. Each is a small function beside the C++ one it calls. `kernel_process_time_usec` moved there from the controller header.
+  - **`C_ASSERT` and `C_ASSERT_MSG`** in the C bridge, the C versions of `ASSERT` and `ASSERT_MSG`.
+  - Five log lines named the wrong function: three in the companion library's C conversion and two in the VR tracker's, where a function's name was on the line after its return type. They name their own function again.
+  - Not run in a game yet.
+
 - **libSceJpegDec is implemented.** Before, a game without the system's own `libSceJpegDec.sprx` got nothing: every call it made landed on an unresolved symbol. It now decodes with libretro-common's rjpeg (`formats/jpeg/rjpeg.c`, synced from RetroArch): baseline and progressive, any common chroma subsampling, restart markers and greyscale.
   - RGBA and BGRA at full size are decoded straight into the game's buffer, row by row, with no copy. Greyscale, YUYV and the 2, 4 and 8 downscales are made from rjpeg's one row as each is decoded. The decoder is made at `sceJpegDecCreate` and kept until `sceJpegDecDelete`, so after the first image of a size, decoding takes no memory.
   - The structures, NIDs, argument checks, memory size and header parsing follow upstream shadPS4's libSceJpegDec (which decodes with stb_image into a copy). YUYV output is written here at two bytes a pixel; upstream accepts it and writes nothing.

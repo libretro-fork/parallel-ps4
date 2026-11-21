@@ -9,12 +9,12 @@
 #include "common/game_clock.h"
 #include "common/native_clock.h"
 #include "core/libraries/kernel/kernel.h"
+#include "core/libraries/kernel/kernel_c.h"
 #include "core/libraries/kernel/orbis_error.h"
 #include "core/libraries/kernel/posix_error.h"
 #include "core/libraries/kernel/threads/pthread.h"
 #include "core/libraries/kernel/time.h"
 #include "core/libraries/libs.h"
-#include "input/controller.h"
 
 #ifdef _WIN64
 #include <windows.h>

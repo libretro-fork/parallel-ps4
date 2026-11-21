@@ -18,7 +18,7 @@ s32 PS4_SYSV_ABI sceCompanionHttpdAddHeader(const char* key, const char* value,
 }
 
 s32 PS4_SYSV_ABI sceCompanionHttpdGet2ndScreenStatus(s32 userId) {
-    c_log(C_LOG_LIB_COMPANION_HTTPD, C_LOG_LEVEL_ERROR, "sceCompanionHttpdAddHeader",
+    c_log(C_LOG_LIB_COMPANION_HTTPD, C_LOG_LEVEL_ERROR, "sceCompanionHttpdGet2ndScreenStatus",
           "(STUBBED) called");
     return ORBIS_OK;
 }
@@ -31,7 +31,7 @@ s32 PS4_SYSV_ABI sceCompanionHttpdGetEvent(OrbisCompanionHttpdEvent* pEvent) {
 }
 
 s32 PS4_SYSV_ABI sceCompanionHttpdGetUserId(u32 addr, s32* userId) {
-    c_log(C_LOG_LIB_COMPANION_HTTPD, C_LOG_LEVEL_ERROR, "sceCompanionHttpdGetEvent",
+    c_log(C_LOG_LIB_COMPANION_HTTPD, C_LOG_LEVEL_ERROR, "sceCompanionHttpdGetUserId",
           "(STUBBED) called");
     return ORBIS_OK;
 }
@@ -63,8 +63,8 @@ s32 PS4_SYSV_ABI sceCompanionHttpdRegisterRequestBodyReceptionCallback(
 
 s32 PS4_SYSV_ABI
 sceCompanionHttpdRegisterRequestCallback(OrbisCompanionHttpdRequestCallback function, void* param) {
-    c_log(C_LOG_LIB_COMPANION_HTTPD, C_LOG_LEVEL_ERROR,
-          "sceCompanionHttpdRegisterRequestBodyReceptionCallback", "(STUBBED) called");
+    c_log(C_LOG_LIB_COMPANION_HTTPD, C_LOG_LEVEL_ERROR, "sceCompanionHttpdRegisterRequestCallback",
+          "(STUBBED) called");
     return ORBIS_OK;
 }
 

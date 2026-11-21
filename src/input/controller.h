@@ -141,8 +141,6 @@ bool input_controller_set_vibration(input_controller_t* c, uint8_t small_motor,
 
 /* What the controller module calls in the C++ parts of the core */
 
-/* The game's process time, in microseconds (sceKernelGetProcessTime) */
-uint64_t kernel_process_time_usec(void);
 /* Rumble on the frontend's port @pad */
 void libretro_set_rumble(uint32_t pad, uint8_t small_motor, uint8_t large_motor);
 /* Tells the game @user_id logged in */

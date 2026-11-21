@@ -26,6 +26,10 @@ static Common::Log::Class ToClass(c_log_class log_class) {
         return Common::Log::Class::Lib_Http;
     case C_LOG_LIB_ULT:
         return Common::Log::Class::Lib_Ult;
+    case C_LOG_LIB_CAMERA:
+        return Common::Log::Class::Lib_Camera;
+    case C_LOG_LIB_VR_TRACKER:
+        return Common::Log::Class::Lib_VrTracker;
     case C_LOG_LIB_JPEG:
         return Common::Log::Class::Lib_Jpeg;
     case C_LOG_LIB_SYSTEM_GESTURE:
@@ -85,6 +89,10 @@ extern "C" void c_log(c_log_class log_class, c_log_level level, const char* func
     vsnprintf(buf, sizeof(buf), fmt, ap);
     va_end(ap);
     Common::Log::Log(cls, lvl, "c", 0, func, "%s", buf);
+}
+
+extern "C" void c_assert_fail(const char* file, int line, const char* func, const char* msg) {
+    Common::Detail::AssertFail(file, line, func, "Assertion Failed!\n%s", msg);
 }
 
 extern "C" void c_unreachable(const char* file, int line, const char* func, const char* msg) {

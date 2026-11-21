@@ -8,6 +8,7 @@
 #include "common/quick_exit.h"
 #include "core/emulator_settings.h"
 #include "core/file_sys/fs.h"
+#include "core/libraries/kernel/kernel_c.h"
 #include "core/libraries/kernel/orbis_error.h"
 #include "core/libraries/kernel/process.h"
 #include "core/libraries/libs.h"
@@ -364,3 +365,8 @@ void RegisterProcess(Core::Loader::SymbolsResolver* sym) {
 }
 
 } // namespace Libraries::Kernel
+
+// For the libraries written in C (kernel_c.h)
+extern "C" s32 kernel_get_compiled_sdk_version(s32* ver) {
+    return Libraries::Kernel::sceKernelGetCompiledSdkVersion(ver);
+}

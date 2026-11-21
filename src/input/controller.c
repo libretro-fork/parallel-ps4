@@ -4,6 +4,7 @@
 #include <math.h>
 #include <string.h>
 
+#include "core/libraries/kernel/kernel_c.h"
 #include "core/user_manager.h"
 #include "input/controller.h"
 

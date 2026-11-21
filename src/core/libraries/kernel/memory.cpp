@@ -16,6 +16,7 @@
 #include "common/scope_exit.h"
 #include "common/singleton.h"
 #include "core/libraries/kernel/kernel.h"
+#include "core/libraries/kernel/kernel_c.h"
 #include "core/libraries/kernel/memory.h"
 #include "core/libraries/kernel/orbis_error.h"
 #include "core/libraries/kernel/posix_error.h"
@@ -1084,3 +1085,21 @@ void RegisterMemory(Core::Loader::SymbolsResolver* sym) {
 }
 
 } // namespace Libraries::Kernel
+
+// For the libraries written in C (kernel_c.h)
+extern "C" s32 kernel_map_named_system_flexible_memory(void** addr_in_out, u64 len, s32 prot,
+                                                       s32 flags, const char* name) {
+    return Libraries::Kernel::sceKernelMapNamedSystemFlexibleMemory(addr_in_out, len, prot, flags,
+                                                                    name);
+}
+
+extern "C" bool kernel_is_valid_gpu_mapping(uintptr_t addr, u64 size) {
+    return Core::Memory::Instance()->IsValidGpuMapping(addr, size);
+}
+
+extern "C" s32 kernel_virtual_query_end(uintptr_t addr, uintptr_t* end) {
+    Libraries::Kernel::OrbisVirtualQueryInfo info{};
+    const s32 result = Core::Memory::Instance()->VirtualQuery(addr, 0, &info);
+    *end = info.end;
+    return result;
+}
