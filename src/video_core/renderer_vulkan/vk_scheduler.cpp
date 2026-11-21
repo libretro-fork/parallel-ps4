@@ -41,7 +41,8 @@ void BeginOneTime(VkCommandBuffer cmdbuf) {
     VkCommandBufferBeginInfo begin_info{};
     begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     begin_info.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-    Check(static_cast<vk::Result>(vkBeginCommandBuffer(cmdbuf, &begin_info)));
+    const VkResult result = vkBeginCommandBuffer(cmdbuf, &begin_info);
+    ASSERT_MSG(result == VK_SUCCESS, "Failed to begin a command buffer: %s", ResultName(result));
 }
 
 } // Anonymous namespace
@@ -145,14 +146,14 @@ void Scheduler::EndRendering() {
     vkCmdEndRendering(sessions[num_sessions - 1].primary);
 }
 
-vk::CommandBuffer Scheduler::UploadCommandBuffer() {
+VkCommandBuffer Scheduler::UploadCommandBuffer() {
     VkCommandBuffer& upload_cmdbuf = sessions[num_sessions - 1].upload;
     if (upload_cmdbuf) {
-        return vk::CommandBuffer{upload_cmdbuf};
+        return upload_cmdbuf;
     }
     upload_cmdbuf = static_cast<VkCommandBuffer>(command_pool.Commit());
     BeginOneTime(upload_cmdbuf);
-    return vk::CommandBuffer{upload_cmdbuf};
+    return upload_cmdbuf;
 }
 
 void Scheduler::Flush(SubmitInfo& info) {
@@ -244,11 +245,14 @@ void Scheduler::EndSession() {
 
     const Session& session = sessions[num_sessions - 1];
     if (session.upload) {
-        Check(static_cast<vk::Result>(vkEndCommandBuffer(session.upload)));
+        const VkResult upload_result = vkEndCommandBuffer(session.upload);
+        ASSERT_MSG(upload_result == VK_SUCCESS, "Failed to end a command buffer: %s",
+                   ResultName(upload_result));
     }
 
     EndRendering();
-    Check(static_cast<vk::Result>(vkEndCommandBuffer(session.primary)));
+    const VkResult result = vkEndCommandBuffer(session.primary);
+    ASSERT_MSG(result == VK_SUCCESS, "Failed to end a command buffer: %s", ResultName(result));
 }
 
 void Scheduler::SubmitExecution(SubmitInfo& info) {
@@ -271,8 +275,7 @@ void Scheduler::SubmitExecution(SubmitInfo& info) {
         }
         num_sessions = 0;
 
-        const vk::Semaphore timeline{work_semaphore.Handle()};
-        info.AddSignal(timeline, signal_value);
+        info.AddSignal(static_cast<VkSemaphore>(work_semaphore.Handle()), signal_value);
 
         VkPipelineStageFlags wait_stage_masks[SubmitInfo::MaxSemaphores];
         for (u32 i = 0; i < SubmitInfo::MaxSemaphores; ++i) {
@@ -343,24 +346,19 @@ void Scheduler::PriorityPendingOpsThread() {
 namespace {
 
 void CmdSetStencilOps(VkCommandBuffer cmdbuf, VkStencilFaceFlags faces, const StencilOps& ops) {
-    vkCmdSetStencilOp(
-        cmdbuf, faces, static_cast<VkStencilOp>(ops.fail_op), static_cast<VkStencilOp>(ops.pass_op),
-        static_cast<VkStencilOp>(ops.depth_fail_op), static_cast<VkCompareOp>(ops.compare_op));
+    vkCmdSetStencilOp(cmdbuf, faces, ops.fail_op, ops.pass_op, ops.depth_fail_op, ops.compare_op);
 }
 
 } // Anonymous namespace
 
-void DynamicState::Commit(const Instance& instance, const vk::CommandBuffer& vk_cmdbuf) {
-    const VkCommandBuffer cmdbuf = static_cast<VkCommandBuffer>(vk_cmdbuf);
+void DynamicState::Commit(const Instance& instance, VkCommandBuffer cmdbuf) {
     if (dirty_state.viewports) {
         dirty_state.viewports = false;
-        vkCmdSetViewportWithCount(cmdbuf, static_cast<u32>(viewports.size()),
-                                  reinterpret_cast<const VkViewport*>(viewports.data()));
+        vkCmdSetViewportWithCount(cmdbuf, num_viewports, viewports);
     }
     if (dirty_state.scissors) {
         dirty_state.scissors = false;
-        vkCmdSetScissorWithCount(cmdbuf, static_cast<u32>(scissors.size()),
-                                 reinterpret_cast<const VkRect2D*>(scissors.data()));
+        vkCmdSetScissorWithCount(cmdbuf, num_scissors, scissors);
     }
     if (dirty_state.depth_test_enabled) {
         dirty_state.depth_test_enabled = false;
@@ -373,7 +371,7 @@ void DynamicState::Commit(const Instance& instance, const vk::CommandBuffer& vk_
     }
     if (depth_test_enabled && dirty_state.depth_compare_op) {
         dirty_state.depth_compare_op = false;
-        vkCmdSetDepthCompareOp(cmdbuf, static_cast<VkCompareOp>(depth_compare_op));
+        vkCmdSetDepthCompareOp(cmdbuf, depth_compare_op);
     }
     if (dirty_state.depth_bounds_test_enabled) {
         dirty_state.depth_bounds_test_enabled = false;
@@ -478,11 +476,11 @@ void DynamicState::Commit(const Instance& instance, const vk::CommandBuffer& vk_
     }
     if (dirty_state.cull_mode) {
         dirty_state.cull_mode = false;
-        vkCmdSetCullMode(cmdbuf, static_cast<VkCullModeFlags>(cull_mode));
+        vkCmdSetCullMode(cmdbuf, cull_mode);
     }
     if (dirty_state.front_face) {
         dirty_state.front_face = false;
-        vkCmdSetFrontFace(cmdbuf, static_cast<VkFrontFace>(front_face));
+        vkCmdSetFrontFace(cmdbuf, front_face);
     }
     if (dirty_state.blend_constants) {
         dirty_state.blend_constants = false;
@@ -491,7 +489,6 @@ void DynamicState::Commit(const Instance& instance, const vk::CommandBuffer& vk_
     if (dirty_state.color_write_masks) {
         dirty_state.color_write_masks = false;
         if (instance.IsDynamicColorWriteMaskSupported()) {
-            static_assert(sizeof(vk::ColorComponentFlags) == sizeof(VkColorComponentFlags));
             vkCmdSetColorWriteMaskEXT(cmdbuf, 0, AmdGpu::NUM_COLOR_BUFFERS, color_write_masks);
         }
     }

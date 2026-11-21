@@ -55,7 +55,7 @@ void Pipeline::CreatePipelineLayout(VkShaderStageFlags stage_flags, const char* 
 
 void Pipeline::BindResources(VkWriteDescriptorSet* writes, u32 num_writes,
                              const Shader::PushData& push_data) const {
-    const VkCommandBuffer cmdbuf = static_cast<VkCommandBuffer>(scheduler.CommandBuffer());
+    const VkCommandBuffer cmdbuf = scheduler.CommandBuffer();
     const VkPipelineBindPoint bind_point =
         IsCompute() ? VK_PIPELINE_BIND_POINT_COMPUTE : VK_PIPELINE_BIND_POINT_GRAPHICS;
 

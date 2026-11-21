@@ -364,7 +364,7 @@ void Rasterizer::Draw(bool is_indexed, u32 index_offset) {
     u32 instance_offset;
     GetDrawOffsets(regs, vs_info, fetch_shader, &vertex_offset, &instance_offset);
 
-    const VkCommandBuffer cmdbuf = static_cast<VkCommandBuffer>(scheduler.CommandBuffer());
+    const VkCommandBuffer cmdbuf = scheduler.CommandBuffer();
     vkCmdBindPipeline(cmdbuf, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline->Handle());
     instance.Note("draw: vertex shader, fragment shader, indices|indexed<<32, instances",
                   vs_info.pgm_hash, pipeline->StageHash(Shader::SwStage::Fragment),
@@ -438,7 +438,7 @@ void Rasterizer::DrawIndirect(bool is_indexed, VAddr arg_address, u32 offset, u3
     UpdateDynamicState(pipeline, is_indexed);
     scheduler.BeginRendering(state);
 
-    const VkCommandBuffer cmdbuf = static_cast<VkCommandBuffer>(scheduler.CommandBuffer());
+    const VkCommandBuffer cmdbuf = scheduler.CommandBuffer();
     vkCmdBindPipeline(cmdbuf, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline->Handle());
     instance.Note("indirect draw: vertex shader, fragment shader, arguments at, count",
                   pipeline->StageHash(Shader::SwStage::Vertex),
@@ -496,7 +496,7 @@ void Rasterizer::DispatchDirect() {
     scheduler.EndRendering();
     pipeline->BindResources(set_writes.data(), static_cast<u32>(set_writes.size()), push_data);
 
-    const VkCommandBuffer cmdbuf = static_cast<VkCommandBuffer>(scheduler.CommandBuffer());
+    const VkCommandBuffer cmdbuf = scheduler.CommandBuffer();
     vkCmdBindPipeline(cmdbuf, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline->Handle());
     instance.Mark(cmdbuf, "dispatch: shader, x, y, z", cs.pgm_hash, cs_program.dim_x,
                   cs_program.dim_y, cs_program.dim_z);
@@ -534,7 +534,7 @@ void Rasterizer::DispatchIndirect(VAddr address, u32 offset, u32 size) {
     scheduler.EndRendering();
     pipeline->BindResources(set_writes.data(), static_cast<u32>(set_writes.size()), push_data);
 
-    const VkCommandBuffer cmdbuf = static_cast<VkCommandBuffer>(scheduler.CommandBuffer());
+    const VkCommandBuffer cmdbuf = scheduler.CommandBuffer();
     vkCmdBindPipeline(cmdbuf, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline->Handle());
     instance.Mark(cmdbuf, "indirect dispatch: shader, arguments at",
                   pipeline->GetStage(Shader::SwStage::Compute).pgm_hash, address + offset);
@@ -661,9 +661,9 @@ void Rasterizer::BindVertexBuffers(const GraphicsPipeline* pipeline) {
 
     if (instance.IsVertexInputDynamicState()) {
         // Update current vertex inputs.
-        vkCmdSetVertexInputEXT(static_cast<VkCommandBuffer>(scheduler.CommandBuffer()),
-                               static_cast<u32>(bindings.size()), bindings.data(),
-                               static_cast<u32>(attributes.size()), attributes.data());
+        vkCmdSetVertexInputEXT(scheduler.CommandBuffer(), static_cast<u32>(bindings.size()),
+                               bindings.data(), static_cast<u32>(attributes.size()),
+                               attributes.data());
     }
 
     if (bindings.empty()) {
@@ -800,7 +800,7 @@ void Rasterizer::BindVertexBuffers(const GraphicsPipeline* pipeline) {
         }
     }
 
-    const VkCommandBuffer cmdbuf = static_cast<VkCommandBuffer>(scheduler.CommandBuffer());
+    const VkCommandBuffer cmdbuf = scheduler.CommandBuffer();
     const u32 num_buffers = static_cast<u32>(guest_buffers.size());
     if (instance.IsVertexInputDynamicState()) {
         vkCmdBindVertexBuffers(cmdbuf, 0, num_buffers, host_buffers.data(), host_offsets.data());
@@ -845,7 +845,7 @@ void Rasterizer::BindIndexBuffer(u32 index_offset, bool is_indirect) {
         index_buffer = null_buffer->Handle();
     }
 
-    const VkCommandBuffer cmdbuf = static_cast<VkCommandBuffer>(scheduler.CommandBuffer());
+    const VkCommandBuffer cmdbuf = scheduler.CommandBuffer();
     if (instance.IsMaintenance5Supported()) {
         vkCmdBindIndexBuffer2KHR(cmdbuf, index_buffer, buffer_offset, index_buffer_size,
                                  index_type);
@@ -1792,9 +1792,8 @@ void Rasterizer::UpdateViewportScissorState() const {
         regs.generic_scissor.bottom_right_y,
         enable_offset ? regs.window_offset.window_y_offset : 0);
 
-    // The scheduler keeps them as vulkan.hpp's until it is on the C API
-    Common::StaticVector<vk::Viewport, AmdGpu::NUM_VIEWPORTS> viewports;
-    Common::StaticVector<vk::Rect2D, AmdGpu::NUM_VIEWPORTS> scissors;
+    Common::StaticVector<VkViewport, AmdGpu::NUM_VIEWPORTS> viewports;
+    Common::StaticVector<VkRect2D, AmdGpu::NUM_VIEWPORTS> scissors;
 
     if (regs.polygon_control.enable_window_offset &&
         (regs.window_offset.window_x_offset != 0 || regs.window_offset.window_y_offset != 0)) {
@@ -1813,7 +1812,7 @@ void Rasterizer::UpdateViewportScissorState() const {
         const float zoffset = vp_ctl.zoffset_enable ? vp.zoffset : 0.f;
         const float zscale = vp_ctl.zscale_enable ? vp.zscale : 1.f;
 
-        vk::Viewport viewport{};
+        VkViewport viewport{};
 
         // https://gitlab.freedesktop.org/mesa/mesa/-/blob/209a0ed/src/amd/vulkan/radv_pipeline_graphics.c#L688-689
         // https://gitlab.freedesktop.org/mesa/mesa/-/blob/209a0ed/src/amd/vulkan/radv_cmd_buffer.c#L3103-3109
@@ -1873,7 +1872,7 @@ void Rasterizer::UpdateViewportScissorState() const {
             vp_scsr.bottom_right_y = Common::Min(AmdGpu::Scissor::Clamp(vp_scsr.bottom_right_y),
                                                  regs.viewport_scissors[i].bottom_right_y);
         }
-        vk::Rect2D scissor{
+        VkRect2D scissor{
             .offset = {vp_scsr.top_left_x, vp_scsr.top_left_y},
             .extent = {vp_scsr.GetWidth(), vp_scsr.GetHeight()},
         };
@@ -1885,16 +1884,16 @@ void Rasterizer::UpdateViewportScissorState() const {
             const s64 y0 = s64(scissor.offset.y) * num / den;
             const s64 x1 = (s64(scissor.offset.x) + scissor.extent.width) * num / den + 1;
             const s64 y1 = (s64(scissor.offset.y) + scissor.extent.height) * num / den + 1;
-            scissor.offset = vk::Offset2D{static_cast<s32>(x0), static_cast<s32>(y0)};
-            scissor.extent = vk::Extent2D{static_cast<u32>(Common::Max<s64>(x1 - x0, 0)),
-                                          static_cast<u32>(Common::Max<s64>(y1 - y0, 0))};
+            scissor.offset = VkOffset2D{static_cast<s32>(x0), static_cast<s32>(y0)};
+            scissor.extent = VkExtent2D{static_cast<u32>(Common::Max<s64>(x1 - x0, 0)),
+                                        static_cast<u32>(Common::Max<s64>(y1 - y0, 0))};
         }
         scissors.push_back(scissor);
     }
 
     if (viewports.empty()) {
         // Vulkan requires providing at least one viewport.
-        constexpr vk::Viewport empty_viewport = {
+        constexpr VkViewport empty_viewport = {
             .x = -1.0f,
             .y = -1.0f,
             .width = 1.0f,
@@ -1902,7 +1901,7 @@ void Rasterizer::UpdateViewportScissorState() const {
             .minDepth = 0.0f,
             .maxDepth = 1.0f,
         };
-        constexpr vk::Rect2D empty_scissor = {
+        constexpr VkRect2D empty_scissor = {
             .offset = {0, 0},
             .extent = {1, 1},
         };
@@ -1911,8 +1910,8 @@ void Rasterizer::UpdateViewportScissorState() const {
     }
 
     DynamicState& dynamic_state = scheduler.GetDynamicState();
-    dynamic_state.SetViewports(viewports);
-    dynamic_state.SetScissors(scissors);
+    dynamic_state.SetViewports(viewports.data(), static_cast<u32>(viewports.size()));
+    dynamic_state.SetScissors(scissors.data(), static_cast<u32>(scissors.size()));
 }
 
 /// Whether a face's stencil ops write the op value (GCN's REPLACE_OP)
@@ -1938,7 +1937,8 @@ void Rasterizer::UpdateDepthStencilState() const {
     if (depth_test_enabled) {
         dynamic_state.SetDepthWriteEnabled(regs.depth_control.depth_write_enable &&
                                            !regs.depth_render_control.depth_clear_enable);
-        dynamic_state.SetDepthCompareOp(LiverpoolToVK::CompareOp(regs.depth_control.depth_func));
+        dynamic_state.SetDepthCompareOp(
+            static_cast<VkCompareOp>(LiverpoolToVK::CompareOp(regs.depth_control.depth_func)));
     }
 
     const u32 depth_bounds_test_enabled = regs.depth_control.depth_bounds_enable;
@@ -1962,16 +1962,20 @@ void Rasterizer::UpdateDepthStencilState() const {
     dynamic_state.SetStencilTestEnabled(stencil_test_enabled);
     if (stencil_test_enabled) {
         const StencilOps front_ops{
-            .fail_op = LiverpoolToVK::StencilOp(regs.stencil_control.stencil_fail_front),
-            .pass_op = LiverpoolToVK::StencilOp(regs.stencil_control.stencil_zpass_front),
-            .depth_fail_op = LiverpoolToVK::StencilOp(regs.stencil_control.stencil_zfail_front),
-            .compare_op = LiverpoolToVK::CompareOp(regs.depth_control.stencil_ref_func),
+            .fail_op = static_cast<VkStencilOp>(
+                LiverpoolToVK::StencilOp(regs.stencil_control.stencil_fail_front)),
+            .pass_op = static_cast<VkStencilOp>(
+                LiverpoolToVK::StencilOp(regs.stencil_control.stencil_zpass_front)),
+            .depth_fail_op = static_cast<VkStencilOp>(
+                LiverpoolToVK::StencilOp(regs.stencil_control.stencil_zfail_front)),
+            .compare_op = static_cast<VkCompareOp>(
+                LiverpoolToVK::CompareOp(regs.depth_control.stencil_ref_func)),
         };
         const StencilOps back_ops = regs.depth_control.backface_enable ? StencilOps{
-            .fail_op = LiverpoolToVK::StencilOp(regs.stencil_control.stencil_fail_back),
-            .pass_op = LiverpoolToVK::StencilOp(regs.stencil_control.stencil_zpass_back),
-            .depth_fail_op = LiverpoolToVK::StencilOp(regs.stencil_control.stencil_zfail_back),
-            .compare_op = LiverpoolToVK::CompareOp(regs.depth_control.stencil_bf_func),
+            .fail_op = static_cast<VkStencilOp>(LiverpoolToVK::StencilOp(regs.stencil_control.stencil_fail_back)),
+            .pass_op = static_cast<VkStencilOp>(LiverpoolToVK::StencilOp(regs.stencil_control.stencil_zpass_back)),
+            .depth_fail_op = static_cast<VkStencilOp>(LiverpoolToVK::StencilOp(regs.stencil_control.stencil_zfail_back)),
+            .compare_op = static_cast<VkCompareOp>(LiverpoolToVK::CompareOp(regs.depth_control.stencil_bf_func)),
         } : front_ops;
         dynamic_state.SetStencilOps(front_ops, back_ops);
 
@@ -2030,11 +2034,12 @@ void Rasterizer::UpdatePrimitiveState(const bool is_indexed) const {
                    regs.primitive_restart_index == 0xFFFFFFFF,
                "Primitive restart index other than -1 is not supported yet");
 
-    const vk::CullModeFlags cull_mode =
-        LiverpoolToVK::IsPrimitiveCulled(regs.primitive_type)
-            ? LiverpoolToVK::CullMode(regs.polygon_control.CullingMode())
-            : vk::CullModeFlagBits::eNone;
-    const vk::FrontFace front_face = LiverpoolToVK::FrontFace(regs.polygon_control.front_face);
+    const VkCullModeFlags cull_mode = LiverpoolToVK::IsPrimitiveCulled(regs.primitive_type)
+                                          ? static_cast<VkCullModeFlags>(LiverpoolToVK::CullMode(
+                                                regs.polygon_control.CullingMode()))
+                                          : VK_CULL_MODE_NONE;
+    const VkFrontFace front_face =
+        static_cast<VkFrontFace>(LiverpoolToVK::FrontFace(regs.polygon_control.front_face));
 
     dynamic_state.SetPrimitiveRestartEnabled(prim_restart);
     dynamic_state.SetRasterizerDiscardEnabled(regs.clipper_control.dx_rasterization_kill);
@@ -2073,7 +2078,7 @@ void Rasterizer::ScopeMarkerBegin(const char* str, bool from_guest) {
         (!from_guest && !emu_settings_get_vkhost_markers())) {
         return;
     }
-    const VkCommandBuffer cmdbuf = static_cast<VkCommandBuffer>(scheduler.CommandBuffer());
+    const VkCommandBuffer cmdbuf = scheduler.CommandBuffer();
     const VkDebugUtilsLabelEXT label{
         .sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_LABEL_EXT,
         .pLabelName = str,
@@ -2086,7 +2091,7 @@ void Rasterizer::ScopeMarkerEnd(bool from_guest) {
         (!from_guest && !emu_settings_get_vkhost_markers())) {
         return;
     }
-    const VkCommandBuffer cmdbuf = static_cast<VkCommandBuffer>(scheduler.CommandBuffer());
+    const VkCommandBuffer cmdbuf = scheduler.CommandBuffer();
     vkCmdEndDebugUtilsLabelEXT(cmdbuf);
 }
 
@@ -2095,7 +2100,7 @@ void Rasterizer::ScopedMarkerInsert(const char* str, bool from_guest) {
         (!from_guest && !emu_settings_get_vkhost_markers())) {
         return;
     }
-    const VkCommandBuffer cmdbuf = static_cast<VkCommandBuffer>(scheduler.CommandBuffer());
+    const VkCommandBuffer cmdbuf = scheduler.CommandBuffer();
     const VkDebugUtilsLabelEXT label{
         .sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_LABEL_EXT,
         .pLabelName = str,
@@ -2108,7 +2113,7 @@ void Rasterizer::ScopedMarkerInsertColor(const char* str, const u32 color, bool 
         (!from_guest && !emu_settings_get_vkhost_markers())) {
         return;
     }
-    const VkCommandBuffer cmdbuf = static_cast<VkCommandBuffer>(scheduler.CommandBuffer());
+    const VkCommandBuffer cmdbuf = scheduler.CommandBuffer();
     const VkDebugUtilsLabelEXT label{
         .sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_LABEL_EXT,
         .pLabelName = str,

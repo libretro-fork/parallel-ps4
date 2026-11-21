@@ -99,7 +99,7 @@ VkImageView BlitHelper::TransientView(VkImage image, VkFormat format, VkImageAsp
 void BlitHelper::Draw(const Vulkan::RenderState& state, VkPipeline pipeline, VkImageView src_view) {
     scheduler.BeginRendering(state);
 
-    const VkCommandBuffer cmdbuf = static_cast<VkCommandBuffer>(scheduler.CommandBuffer());
+    const VkCommandBuffer cmdbuf = scheduler.CommandBuffer();
     VkDescriptorImageInfo image_info{};
     image_info.sampler = VK_NULL_HANDLE;
     image_info.imageView = src_view;

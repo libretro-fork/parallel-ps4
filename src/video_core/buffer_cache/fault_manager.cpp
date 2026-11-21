@@ -135,7 +135,7 @@ void FaultManager::ProcessFaultBuffer() {
     post_dependency.pBufferMemoryBarriers = &post_barrier;
 
     scheduler.EndRendering();
-    const VkCommandBuffer cmdbuf = static_cast<VkCommandBuffer>(scheduler.CommandBuffer());
+    const VkCommandBuffer cmdbuf = scheduler.CommandBuffer();
     vkCmdPipelineBarrier2(cmdbuf, &pre_dependency);
     vkCmdBindPipeline(cmdbuf, VK_PIPELINE_BIND_POINT_COMPUTE, fault_process_pipeline);
     vkCmdPushDescriptorSetKHR(cmdbuf, VK_PIPELINE_BIND_POINT_COMPUTE, fault_process_pipeline_layout,

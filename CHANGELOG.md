@@ -4,6 +4,12 @@ What changed in the libretro core of this fork, newest first. Changes that come 
 
 ## Unreleased
 
+- The scheduler (`vk_scheduler.h`/`.cpp`) on the Vulkan C API.
+  - **Command buffers:** `CommandBuffer()` and `UploadCommandBuffer()` give a `VkCommandBuffer`, so the runtime, tile manager, rasterizer, blit helper and fault manager record into it with no casts. The presenter wraps it until it is converted itself.
+  - **Dynamic state:** the stencil ops, depth compare op, cull mode and front face are C types. The viewports and scissors are C arrays with a count, set from a pointer and compared with `memcmp`, so the rasterizer builds them as C structs too.
+  - **Submits:** `SubmitInfo` takes C semaphores and fences, and the scheduler checks its command buffer results with `ResultName` in place of vulkan.hpp's `Check`.
+  - Not run in a game yet.
+
 - The pipelines (`vk_graphics_pipeline`, `vk_compute_pipeline`, `vk_pipeline_common`) on the Vulkan C API, with no `auto`.
   - **Graphics pipeline:** its states are C structs with their structure types, and the rasterization chain is linked by hand where the device has the provoking vertex and depth clip extensions. Its vertex inputs are C structs too, so the rasterizer hands them to `vkCmdSetVertexInputEXT` as they are.
   - **Key:** the graphics pipeline key's arrays are C arrays, its formats and write masks C types, and it hashes itself with `Hash()` in place of a `std::hash` specialisation. Its bytes are as they were, so pipelines already on disk still match.

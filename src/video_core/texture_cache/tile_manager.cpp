@@ -241,17 +241,17 @@ const Buffer* TileManager::DetileImage(const VideoCore::Buffer* in_buffer, u64 i
     scheduler.EndRendering();
     runtime.FlushBarriers();
 
-    const vk::CommandBuffer cmdbuf = scheduler.CommandBuffer();
-    BindTiling(static_cast<VkCommandBuffer>(cmdbuf), GetTilingPipeline(info, false), pl_layout,
-               in_buffer->Handle(), in_offset, staging.buffer->Handle(), staging.offset,
-               info.guest_size, stream_buffer.Handle(), params_offset, sizeof(TilingInfo));
+    const VkCommandBuffer cmdbuf = scheduler.CommandBuffer();
+    BindTiling(cmdbuf, GetTilingPipeline(info, false), pl_layout, in_buffer->Handle(), in_offset,
+               staging.buffer->Handle(), staging.offset, info.guest_size, stream_buffer.Handle(),
+               params_offset, sizeof(TilingInfo));
 
     const u32 dim_x = (info.guest_size / (info.num_bits / 8)) / 64;
     instance.Mark(cmdbuf, "detile: image at, size, mode|bits<<8|mips<<16, w|h<<16|d<<32",
                   info.guest_address, info.guest_size,
                   u64(info.tile_mode) | u64(info.num_bits) << 8 | u64(info.resources.levels) << 16,
                   u64(info.size.width) | u64(info.size.height) << 16 | u64(info.size.depth) << 32);
-    vkCmdDispatch(static_cast<VkCommandBuffer>(cmdbuf), dim_x, 1, 1);
+    vkCmdDispatch(cmdbuf, dim_x, 1, 1);
 
     runtime.AccessBuffer(staging.buffer, staging.offset, info.guest_size,
                          VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_WRITE_BIT);
@@ -284,17 +284,17 @@ void TileManager::TileImage(Image& in_image, VkBufferImageCopy* buffer_copies, u
     runtime.DownloadImage(&in_image, staging.buffer, buffer_copies, num_copies);
     runtime.FlushBarriers();
 
-    const vk::CommandBuffer cmdbuf = scheduler.CommandBuffer();
-    BindTiling(static_cast<VkCommandBuffer>(cmdbuf), GetTilingPipeline(info, true), pl_layout,
-               out_buffer->Handle(), out_offset, staging.buffer->Handle(), staging.offset,
-               info.guest_size, stream_buffer.Handle(), params_offset, sizeof(TilingInfo));
+    const VkCommandBuffer cmdbuf = scheduler.CommandBuffer();
+    BindTiling(cmdbuf, GetTilingPipeline(info, true), pl_layout, out_buffer->Handle(), out_offset,
+               staging.buffer->Handle(), staging.offset, info.guest_size, stream_buffer.Handle(),
+               params_offset, sizeof(TilingInfo));
 
     const u32 dim_x = (info.guest_size / (info.num_bits / 8)) / 64;
     instance.Mark(cmdbuf, "tile: image at, size, mode|bits<<8|mips<<16, w|h<<16|d<<32",
                   info.guest_address, info.guest_size,
                   u64(info.tile_mode) | u64(info.num_bits) << 8 | u64(num_mips) << 16,
                   u64(info.size.width) | u64(info.size.height) << 16 | u64(info.size.depth) << 32);
-    vkCmdDispatch(static_cast<VkCommandBuffer>(cmdbuf), dim_x, 1, 1);
+    vkCmdDispatch(cmdbuf, dim_x, 1, 1);
 
     runtime.AccessBuffer(staging.buffer, staging.offset, info.guest_size,
                          VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_READ_BIT);

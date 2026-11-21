@@ -533,9 +533,9 @@ Presenter::~Presenter() {
     draw_scheduler.Finish();
     present_scheduler.Finish();
     flip_scheduler.Finish();
-    Check(draw_scheduler.CommandBuffer().reset());
-    Check(present_scheduler.CommandBuffer().reset());
-    Check(flip_scheduler.CommandBuffer().reset());
+    Check(vk::Result(vkResetCommandBuffer(draw_scheduler.CommandBuffer(), 0)));
+    Check(vk::Result(vkResetCommandBuffer(present_scheduler.CommandBuffer(), 0)));
+    Check(vk::Result(vkResetCommandBuffer(flip_scheduler.CommandBuffer(), 0)));
 
     for (auto& frame_slot_import : frame_slot_imports) {
         guest_import_destroy(frame_slot_import.import);
@@ -663,7 +663,7 @@ Frame* Presenter::PrepareLastFrame() {
 
     auto& scheduler = flip_scheduler;
     scheduler.EndRendering();
-    const auto cmdbuf = scheduler.CommandBuffer();
+    const vk::CommandBuffer cmdbuf{scheduler.CommandBuffer()};
 
     const auto frame_subresources = vk::ImageSubresourceRange{
         .aspectMask = vk::ImageAspectFlagBits::eColor,
@@ -758,7 +758,7 @@ Frame* Presenter::PrepareFrame(const Libraries::VideoOut::BufferAttributeGroup& 
     };
 
     draw_scheduler.EndRendering();
-    const auto cmdbuf = draw_scheduler.CommandBuffer();
+    const vk::CommandBuffer cmdbuf{draw_scheduler.CommandBuffer()};
     cmdbuf.pipelineBarrier2(vk::DependencyInfo{
         .imageMemoryBarrierCount = 1,
         .pImageMemoryBarriers = &pre_barrier,
@@ -809,7 +809,7 @@ Frame* Presenter::PrepareBlankFrame(bool present_thread) {
     auto& scheduler = present_thread ? present_scheduler : draw_scheduler;
     scheduler.EndRendering();
 
-    const auto cmdbuf = scheduler.CommandBuffer();
+    const vk::CommandBuffer cmdbuf{scheduler.CommandBuffer()};
 
     constexpr vk::ImageSubresourceRange simple_subresource = {
         .aspectMask = vk::ImageAspectFlagBits::eColor,
@@ -914,7 +914,7 @@ void Presenter::Present(Frame* frame, bool is_reusing_frame, bool is_game_frame)
     const vk::ImageView swapchain_image_view = swapchain.ImageView();
 
     auto& scheduler = present_scheduler;
-    const auto cmdbuf = scheduler.CommandBuffer();
+    const vk::CommandBuffer cmdbuf{scheduler.CommandBuffer()};
     // The frame for the frontend, when it does not draw from the image itself, and the slot of
     // the shared memory it is read back into where it goes there directly
     std::shared_ptr<FrameReadback> frame_readback;

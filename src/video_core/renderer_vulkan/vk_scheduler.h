@@ -66,29 +66,26 @@ struct SubmitInfo {
     u32 num_wait_semas;
     u32 num_signal_semas;
 
-    void AddWait(vk::Semaphore semaphore, u64 tick = 1) {
-        wait_semas[num_wait_semas] = static_cast<VkSemaphore>(semaphore);
+    void AddWait(VkSemaphore semaphore, u64 tick = 1) {
+        wait_semas[num_wait_semas] = semaphore;
         wait_ticks[num_wait_semas++] = tick;
     }
 
-    void AddSignal(vk::Semaphore semaphore, u64 tick = 1) {
-        signal_semas[num_signal_semas] = static_cast<VkSemaphore>(semaphore);
+    void AddSignal(VkSemaphore semaphore, u64 tick = 1) {
+        signal_semas[num_signal_semas] = semaphore;
         signal_ticks[num_signal_semas++] = tick;
     }
 
-    void AddSignal(vk::Fence fence_) {
-        fence = static_cast<VkFence>(fence_);
+    void AddSignal(VkFence fence_) {
+        fence = fence_;
     }
 };
 
-using Viewports = Common::StaticVector<vk::Viewport, AmdGpu::NUM_VIEWPORTS>;
-using Scissors = Common::StaticVector<vk::Rect2D, AmdGpu::NUM_VIEWPORTS>;
-
 struct StencilOps {
-    vk::StencilOp fail_op{};
-    vk::StencilOp pass_op{};
-    vk::StencilOp depth_fail_op{};
-    vk::CompareOp compare_op{};
+    VkStencilOp fail_op{};
+    VkStencilOp pass_op{};
+    VkStencilOp depth_fail_op{};
+    VkCompareOp compare_op{};
 
     bool operator==(const StencilOps& other) const {
         return fail_op == other.fail_op && pass_op == other.pass_op &&
@@ -132,12 +129,14 @@ struct DynamicState {
         bool sample_locations : 1;
     } dirty_state{};
 
-    Viewports viewports{};
-    Scissors scissors{};
+    VkViewport viewports[AmdGpu::NUM_VIEWPORTS]{};
+    VkRect2D scissors[AmdGpu::NUM_VIEWPORTS]{};
+    u32 num_viewports{};
+    u32 num_scissors{};
 
     bool depth_test_enabled{};
     bool depth_write_enabled{};
-    vk::CompareOp depth_compare_op{};
+    VkCompareOp depth_compare_op{};
 
     bool depth_bounds_test_enabled{};
     float depth_bounds_min{};
@@ -160,8 +159,8 @@ struct DynamicState {
 
     bool primitive_restart_enable{};
     bool rasterizer_discard_enable{};
-    vk::CullModeFlags cull_mode{};
-    vk::FrontFace front_face{};
+    VkCullModeFlags cull_mode{};
+    VkFrontFace front_face{};
 
     float blend_constants[4]{};
     VkColorComponentFlags color_write_masks[AmdGpu::NUM_COLOR_BUFFERS]{};
@@ -174,23 +173,28 @@ struct DynamicState {
     u8 sample_locs[64]{};
 
     /// Commits the dynamic state to the provided command buffer.
-    void Commit(const Instance& instance, const vk::CommandBuffer& cmdbuf);
+    void Commit(const Instance& instance, VkCommandBuffer cmdbuf);
 
     /// Invalidates all dynamic state to be flushed into the next command buffer.
     void Invalidate() {
         memset(&dirty_state, 0xFF, sizeof(dirty_state));
     }
 
-    void SetViewports(const Viewports& viewports_) {
-        if (!(viewports == viewports_)) {
-            viewports = viewports_;
+    /// The @count viewports at @viewports_, no more than AmdGpu::NUM_VIEWPORTS
+    void SetViewports(const VkViewport* viewports_, u32 count) {
+        if (num_viewports != count ||
+            memcmp(viewports, viewports_, count * sizeof(VkViewport)) != 0) {
+            memcpy(viewports, viewports_, count * sizeof(VkViewport));
+            num_viewports = count;
             dirty_state.viewports = true;
         }
     }
 
-    void SetScissors(const Scissors& scissors_) {
-        if (!(scissors == scissors_)) {
-            scissors = scissors_;
+    /// The @count scissors at @scissors_, no more than AmdGpu::NUM_VIEWPORTS
+    void SetScissors(const VkRect2D* scissors_, u32 count) {
+        if (num_scissors != count || memcmp(scissors, scissors_, count * sizeof(VkRect2D)) != 0) {
+            memcpy(scissors, scissors_, count * sizeof(VkRect2D));
+            num_scissors = count;
             dirty_state.scissors = true;
         }
     }
@@ -209,7 +213,7 @@ struct DynamicState {
         }
     }
 
-    void SetDepthCompareOp(const vk::CompareOp compare_op) {
+    void SetDepthCompareOp(const VkCompareOp compare_op) {
         if (depth_compare_op != compare_op) {
             depth_compare_op = compare_op;
             dirty_state.depth_compare_op = true;
@@ -306,14 +310,14 @@ struct DynamicState {
         }
     }
 
-    void SetCullMode(const vk::CullModeFlags cull_mode_) {
+    void SetCullMode(const VkCullModeFlags cull_mode_) {
         if (cull_mode != cull_mode_) {
             cull_mode = cull_mode_;
             dirty_state.cull_mode = true;
         }
     }
 
-    void SetFrontFace(const vk::FrontFace front_face_) {
+    void SetFrontFace(const VkFrontFace front_face_) {
         if (front_face != front_face_) {
             front_face = front_face_;
             dirty_state.front_face = true;
@@ -403,7 +407,7 @@ public:
     void BeginSession();
 
     /// Returns the current command buffer used for uploads.
-    vk::CommandBuffer UploadCommandBuffer();
+    VkCommandBuffer UploadCommandBuffer();
 
     /// Sets a function to be called on every session finalization.
     void SetSessionCallback(SessionFunc&& on_session) {
@@ -426,8 +430,8 @@ public:
     }
 
     /// Returns the current command buffer.
-    vk::CommandBuffer CommandBuffer() const {
-        return vk::CommandBuffer{sessions[num_sessions - 1].primary};
+    VkCommandBuffer CommandBuffer() const {
+        return sessions[num_sessions - 1].primary;
     }
 
     /// Returns the current command buffer tick.

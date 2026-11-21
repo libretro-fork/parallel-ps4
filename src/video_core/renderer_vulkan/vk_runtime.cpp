@@ -135,7 +135,7 @@ void Runtime::CopyBuffer(const VideoCore::Buffer* src, const VideoCore::Buffer* 
                   dst->SizeBytes(), num_copies == 0 ? 0 : copies[0].dstOffset,
                   num_copies == 0 ? 0 : copies[0].size, static_cast<size_t>(num_copies));
     if (num_copies != 0) {
-        vkCmdCopyBuffer(static_cast<VkCommandBuffer>(cmdbuf), static_cast<VkBuffer>(src->Handle()),
+        vkCmdCopyBuffer(cmdbuf, static_cast<VkBuffer>(src->Handle()),
                         static_cast<VkBuffer>(dst->Handle()), num_copies, copies);
     }
 
@@ -155,10 +155,10 @@ void Runtime::FillBuffer(const VideoCore::Buffer* dst, u64 offset, u64 size, u32
         FlushBarriers();
     }
 
-    const vk::CommandBuffer cmdbuf = scheduler.CommandBuffer();
+    const VkCommandBuffer cmdbuf = scheduler.CommandBuffer();
     instance.Mark(cmdbuf, "buffer fill: buffer of size, offset, size, value", dst->SizeBytes(),
                   offset, size, value);
-    vkCmdFillBuffer(static_cast<VkCommandBuffer>(cmdbuf), dst->Handle(), offset, size, value);
+    vkCmdFillBuffer(cmdbuf, dst->Handle(), offset, size, value);
 
     AccessBuffer(dst, offset, size, VK_PIPELINE_STAGE_2_CLEAR_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT);
 }
@@ -170,11 +170,10 @@ void Runtime::InlineData(VideoCore::Buffer* dst, u64 offset, u32 value) {
         FlushBarriers();
     }
 
-    const vk::CommandBuffer cmdbuf = scheduler.CommandBuffer();
+    const VkCommandBuffer cmdbuf = scheduler.CommandBuffer();
     instance.Mark(cmdbuf, "buffer word: buffer of size, offset, value", dst->SizeBytes(), offset,
                   value);
-    vkCmdUpdateBuffer(static_cast<VkCommandBuffer>(cmdbuf), dst->Handle(), offset, sizeof(value),
-                      &value);
+    vkCmdUpdateBuffer(cmdbuf, dst->Handle(), offset, sizeof(value), &value);
 
     AccessBuffer(dst, offset, sizeof(value), VK_PIPELINE_STAGE_2_COPY_BIT,
                  VK_ACCESS_2_TRANSFER_WRITE_BIT);
@@ -237,8 +236,7 @@ void Runtime::UploadImage(VideoCore::Image* dst, const VideoCore::Buffer* src,
                       u64(dst->info.size.depth) << 32,
                   u64(num_copies) | u64(src->SizeBytes()) << 8);
     if (num_copies != 0) {
-        vkCmdCopyBufferToImage(static_cast<VkCommandBuffer>(cmdbuf), src->Handle(),
-                               static_cast<VkImage>(dst->GetImage()),
+        vkCmdCopyBufferToImage(cmdbuf, src->Handle(), static_cast<VkImage>(dst->GetImage()),
                                VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, num_copies, copies);
     }
 
@@ -275,9 +273,9 @@ void Runtime::DownloadImage(VideoCore::Image* src, const VideoCore::Buffer* dst,
                       u64(src->info.size.depth) << 32,
                   dst->SizeBytes());
     if (num_copies != 0) {
-        vkCmdCopyImageToBuffer(
-            static_cast<VkCommandBuffer>(cmdbuf), static_cast<VkImage>(src->GetImage()),
-            VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, dst->Handle(), num_copies, copies);
+        vkCmdCopyImageToBuffer(cmdbuf, static_cast<VkImage>(src->GetImage()),
+                               VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, dst->Handle(), num_copies,
+                               copies);
     }
 
     for (u32 i = 0; i < num_copies; ++i) {
@@ -337,10 +335,10 @@ bool Runtime::BlitScaled(VideoCore::Image* src, VideoCore::Image* dst, u32 dst_m
                       u64(src->info.size.depth) << 32,
                   u64(dst->info.size.width) | u64(dst->info.size.height) << 16 |
                       u64(dst->info.size.depth) << 32);
-    vkCmdBlitImage(static_cast<VkCommandBuffer>(scheduler.CommandBuffer()), src->GetImage(),
-                   VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, dst->GetImage(),
-                   VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, static_cast<u32>(regions.size()),
-                   regions.data(), depth ? VK_FILTER_NEAREST : VK_FILTER_LINEAR);
+    vkCmdBlitImage(scheduler.CommandBuffer(), src->GetImage(), VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                   dst->GetImage(), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                   static_cast<u32>(regions.size()), regions.data(),
+                   depth ? VK_FILTER_NEAREST : VK_FILTER_LINEAR);
 
     dst->flags |= (src->flags & VideoCore::ImageFlagBits::GpuModified);
     dst->flags &= ~VideoCore::ImageFlagBits::Dirty;
@@ -443,15 +441,14 @@ void Runtime::CopyImage(VideoCore::Image* src, VideoCore::Image* dst) {
         FlushBarriers();
     }
 
-    const vk::CommandBuffer cmdbuf = scheduler.CommandBuffer();
+    const VkCommandBuffer cmdbuf = scheduler.CommandBuffer();
     instance.Mark(cmdbuf, "image copy: from image at, to image at, from w|h, to w|h",
                   src->info.guest_address, dst->info.guest_address,
                   u64(src->info.size.width) | u64(src->info.size.height) << 16 |
                       u64(src->info.size.depth) << 32,
                   u64(dst->info.size.width) | u64(dst->info.size.height) << 16 |
                       u64(dst->info.size.depth) << 32);
-    vkCmdCopyImage(static_cast<VkCommandBuffer>(cmdbuf), src->GetImage(),
-                   VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, dst->GetImage(),
+    vkCmdCopyImage(cmdbuf, src->GetImage(), VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, dst->GetImage(),
                    VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, static_cast<u32>(regions.size()),
                    regions.data());
 
@@ -506,16 +503,16 @@ void Runtime::CopyImageWithBuffer(VideoCore::Image* src, VideoCore::Image* dst,
         FlushBarriers();
     }
 
-    const vk::CommandBuffer cmdbuf = scheduler.CommandBuffer();
+    const VkCommandBuffer cmdbuf = scheduler.CommandBuffer();
     instance.Mark(cmdbuf, "image copy through buffer: from image at, to image at, from w|h, to w|h",
                   src->info.guest_address, dst->info.guest_address,
                   u64(src->info.size.width) | u64(src->info.size.height) << 16 |
                       u64(src->info.size.depth) << 32,
                   u64(dst->info.size.width) | u64(dst->info.size.height) << 16 |
                       u64(dst->info.size.depth) << 32);
-    vkCmdCopyImageToBuffer(static_cast<VkCommandBuffer>(cmdbuf), src->GetImage(),
-                           VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, buffer->Handle(),
-                           static_cast<u32>(buffer_copies.size()), buffer_copies.data());
+    vkCmdCopyImageToBuffer(cmdbuf, src->GetImage(), VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                           buffer->Handle(), static_cast<u32>(buffer_copies.size()),
+                           buffer_copies.data());
 
     const VkMemoryBarrier2 post_copy_barrier = {
         .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2,
@@ -530,13 +527,13 @@ void Runtime::CopyImageWithBuffer(VideoCore::Image* src, VideoCore::Image* dst,
         .memoryBarrierCount = 1u,
         .pMemoryBarriers = &post_copy_barrier,
     };
-    vkCmdPipelineBarrier2(static_cast<VkCommandBuffer>(cmdbuf), &post_copy_dep);
+    vkCmdPipelineBarrier2(cmdbuf, &post_copy_dep);
 
     for (size_t i = 0; i < buffer_copies.size(); ++i) {
         buffer_copies[i].imageSubresource.aspectMask =
             dst->aspect_mask & ~VK_IMAGE_ASPECT_STENCIL_BIT;
     }
-    vkCmdCopyBufferToImage(static_cast<VkCommandBuffer>(cmdbuf), buffer->Handle(), dst->GetImage(),
+    vkCmdCopyBufferToImage(cmdbuf, buffer->Handle(), dst->GetImage(),
                            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                            static_cast<u32>(buffer_copies.size()), buffer_copies.data());
 
@@ -592,15 +589,14 @@ void Runtime::CopyMip(VideoCore::Image* src, VideoCore::Image* dst, u32 mip, u32
         FlushBarriers();
     }
 
-    const vk::CommandBuffer cmdbuf = scheduler.CommandBuffer();
+    const VkCommandBuffer cmdbuf = scheduler.CommandBuffer();
     instance.Mark(cmdbuf, "mip copy: from image at, to image at, from w|h, to w|h",
                   src->info.guest_address, dst->info.guest_address,
                   u64(src->info.size.width) | u64(src->info.size.height) << 16 |
                       u64(src->info.size.depth) << 32,
                   u64(dst->info.size.width) | u64(dst->info.size.height) << 16 |
                       u64(dst->info.size.depth) << 32);
-    vkCmdCopyImage(static_cast<VkCommandBuffer>(cmdbuf), src->GetImage(),
-                   VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, dst->GetImage(),
+    vkCmdCopyImage(cmdbuf, src->GetImage(), VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, dst->GetImage(),
                    VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &image_copy);
 
     dst->flags |= (src->flags & VideoCore::ImageFlagBits::GpuModified);
@@ -684,15 +680,14 @@ void Runtime::CopyDepthStencil(VideoCore::Image* src, VideoCore::Image* dst,
         .extent = {dst->HostSize().width, dst->HostSize().height, 1},
     };
 
-    const vk::CommandBuffer cmdbuf = scheduler.CommandBuffer();
+    const VkCommandBuffer cmdbuf = scheduler.CommandBuffer();
     instance.Mark(cmdbuf, "depth copy: from image at, to image at, from w|h, to w|h",
                   src->info.guest_address, dst->info.guest_address,
                   u64(src->info.size.width) | u64(src->info.size.height) << 16 |
                       u64(src->info.size.depth) << 32,
                   u64(dst->info.size.width) | u64(dst->info.size.height) << 16 |
                       u64(dst->info.size.depth) << 32);
-    vkCmdCopyImage(static_cast<VkCommandBuffer>(cmdbuf), src->GetImage(),
-                   VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, dst->GetImage(),
+    vkCmdCopyImage(cmdbuf, src->GetImage(), VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, dst->GetImage(),
                    VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
 
     dst->flags |= VideoCore::ImageFlagBits::GpuModified;
@@ -763,7 +758,7 @@ void Runtime::ResolveImage(VideoCore::Image* src, VideoCore::Image* dst,
         FlushBarriers();
     }
 
-    const vk::CommandBuffer cmdbuf = scheduler.CommandBuffer();
+    const VkCommandBuffer cmdbuf = scheduler.CommandBuffer();
     u32 src_layers;
     u32 dst_layers;
     SanitizeCopyLayers(src->info, dst->info, 1, &src_layers, &dst_layers);
@@ -791,9 +786,8 @@ void Runtime::ResolveImage(VideoCore::Image* src, VideoCore::Image* dst,
                           u64(src->info.size.depth) << 32,
                       u64(dst->info.size.width) | u64(dst->info.size.height) << 16 |
                           u64(dst->info.size.depth) << 32);
-        vkCmdCopyImage(static_cast<VkCommandBuffer>(cmdbuf), src->GetImage(),
-                       VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, dst->GetImage(),
-                       VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
+        vkCmdCopyImage(cmdbuf, src->GetImage(), VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                       dst->GetImage(), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
     } else {
         const VkImageResolve region = {
             .srcSubresource{
@@ -818,9 +812,8 @@ void Runtime::ResolveImage(VideoCore::Image* src, VideoCore::Image* dst,
                           u64(src->info.size.depth) << 32,
                       u64(dst->info.size.width) | u64(dst->info.size.height) << 16 |
                           u64(dst->info.size.depth) << 32);
-        vkCmdResolveImage(static_cast<VkCommandBuffer>(cmdbuf), src->GetImage(),
-                          VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, dst->GetImage(),
-                          VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
+        vkCmdResolveImage(cmdbuf, src->GetImage(), VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                          dst->GetImage(), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
     }
 
     dst->flags |= VideoCore::ImageFlagBits::GpuModified;
@@ -845,13 +838,13 @@ void Runtime::ClearImage(VideoCore::Image* dst, const VideoCore::SubresourceRang
         .baseArrayLayer = range.base.layer,
         .layerCount = range.extent.layers,
     };
-    const vk::CommandBuffer cmdbuf = scheduler.CommandBuffer();
+    const VkCommandBuffer cmdbuf = scheduler.CommandBuffer();
     instance.Mark(cmdbuf, "clear: image at, size, w|h<<16|d<<32", dst->info.guest_address,
                   dst->info.guest_size,
                   u64(dst->info.size.width) | u64(dst->info.size.height) << 16 |
                       u64(dst->info.size.depth) << 32);
-    vkCmdClearColorImage(static_cast<VkCommandBuffer>(cmdbuf), dst->GetImage(),
-                         VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &clear_value.color, 1, &vk_range);
+    vkCmdClearColorImage(cmdbuf, dst->GetImage(), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                         &clear_value.color, 1, &vk_range);
 
     dst->flags |= VideoCore::ImageFlagBits::GpuModified;
     dst->flags &= ~VideoCore::ImageFlagBits::Dirty;
@@ -1009,8 +1002,8 @@ void Runtime::FlushBarriers() {
     }
 
     scheduler.EndRendering();
-    const vk::CommandBuffer cmdbuf = scheduler.CommandBuffer();
-    vkCmdPipelineBarrier2(static_cast<VkCommandBuffer>(cmdbuf), &dep_info);
+    const VkCommandBuffer cmdbuf = scheduler.CommandBuffer();
+    vkCmdPipelineBarrier2(cmdbuf, &dep_info);
 
     memory_barrier.srcStageMask = VK_PIPELINE_STAGE_2_NONE;
     memory_barrier.srcAccessMask = VK_ACCESS_2_NONE;
