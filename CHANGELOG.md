@@ -4,6 +4,7 @@ What changed in the libretro core of this fork, newest first. Changes that come 
 
 ## Unreleased
 
+- The build writes no dependency files (`.d`) any more: `-MMD -MP` and the `-include` of them are gone from `Makefile` and `Makefile.common`. A header changed in a tree built before is not noticed by `make`: `make clean` first then. The test runner's cache keeps the files a test reads as `<binary>.inputs`. The 56 `.d` files still committed at the top of the tree are removed.
 - Files that were committed by mistake are gone: compiler dependency files (`*.d`) at the top of the tree, `custom_trophy/Notice.txt`, and two test binaries in `build-tests/`. `.gitignore` now keeps them out.
 - The shader recompiler's variables say their types: 770 of the 986 `auto`s in its sources are the types the compiler deduced for them, written out (`IR::F32`, `IR::U32` and the other IR value types where those are what was deduced).
   - **Checked:** each of the 51 sources changed compiles to the same machine code as before, instruction for instruction.

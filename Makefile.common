@@ -77,10 +77,9 @@ LIBRETRO_HOST      := $(OBJ_DIR)/gen/parallel_ps4_libretro_host
 LIBRETRO_HOST_BLOB := $(OBJ_DIR)/gen/libretro_host_blob.c
 $(LIBRETRO_HOST): libretro/host_main.c
 	@mkdir -p $(@D)
-	$(CC) $(filter-out -fPIC -fvisibility=hidden,$(CFLAGS)) -fPIE -pie -Isrc -MMD -MP $< -o $@ -ldl
+	$(CC) $(filter-out -fPIC -fvisibility=hidden,$(CFLAGS)) -fPIE -pie -Isrc $< -o $@ -ldl
 $(LIBRETRO_HOST_BLOB): $(LIBRETRO_HOST) libretro/embed.sh
 	sh libretro/embed.sh host $@ $<
--include $(LIBRETRO_HOST).d
 endif
 
 # aarch64: box64 and the x86-64 build, carried in the core, which writes them

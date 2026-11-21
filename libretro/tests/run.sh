@@ -28,11 +28,11 @@ build() {
     fi
     key=$(printf '%s\n' "$*" | cksum | cut -d' ' -f1)
     cached="$OUT/.cache/${out##*/}.$key"
-    if [ -z "$NO_CACHE" ] && [ -f "$cached" ] && [ -f "$cached.d" ] && built_after "$cached"; then
+    if [ -z "$NO_CACHE" ] && [ -f "$cached" ] && [ -f "$cached.inputs" ] && built_after "$cached"; then
         ln -f "$cached" "$out"
         return 0
     fi
-    rm -f "$out" "$cached" "$cached.d"
+    rm -f "$out" "$cached" "$cached.inputs"
     "$@"
     ln -f "$out" "$cached"
     # The same command without its output, asked for the files it reads
@@ -48,11 +48,11 @@ build() {
         fi
     done
     shift $n
-    "$@" -M > "$cached.d" 2>/dev/null || rm -f "$cached.d"
+    "$@" -M > "$cached.inputs" 2>/dev/null || rm -f "$cached.inputs"
 }
-# Whether every file in $1.d is older than $1
+# Whether every file in $1.inputs is older than $1
 built_after() {
-    for f in $(sed -e 's/^[^:]*://' -e 's/\\$//' "$1.d"); do
+    for f in $(sed -e 's/^[^:]*://' -e 's/\\$//' "$1.inputs"); do
         [ "$f" -nt "$1" ] && return 1
     done
     return 0

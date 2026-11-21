@@ -174,7 +174,6 @@ OBJECTS :=
 FEX_OBJECTS :=
 $(foreach g,$(LIB_GROUPS),$(eval $(call LIB_template,$(g),OBJECTS)))
 $(foreach g,$(FEX_GROUPS),$(eval $(call LIB_template,$(g),FEX_OBJECTS)))
-DEPS := $(OBJECTS:.o=.d) $(FEX_OBJECTS:.o=.d)
 
 # FEX (ENABLE_FEX_GUEST_CPU) is linked from an archive, so only the objects the core
 # reaches come in
@@ -195,8 +194,6 @@ BUILD_TAG_STATUS := $(shell \
 .DEFAULT_GOAL := all
 
 all: $(TARGET)
-
--include $(DEPS)
 
 # The object list outgrows the 32 KiB Windows command line, so there the
 # linker reads it from a response file ($(file) needs GNU make 4.0).
@@ -230,22 +227,22 @@ endif
 $(OBJ_DIR)/%.c.o: %.c
 	@mkdir -p $(@D)
 	@$(if $(E),echo CC $<,)
-	$(CC) $(CFLAGS) $($(GROUP)_FLAGS) $($(GROUP)_CFLAGS) -MMD -MP -c $< -o $@
+	$(CC) $(CFLAGS) $($(GROUP)_FLAGS) $($(GROUP)_CFLAGS) -c $< -o $@
 
 $(OBJ_DIR)/%.cpp.o: %.cpp
 	@mkdir -p $(@D)
 	@$(if $(E),echo CXX $<,)
-	$(CXX) $(CXXFLAGS) $($(GROUP)_FLAGS) $($(GROUP)_CXXFLAGS) -MMD -MP -c $< -o $@
+	$(CXX) $(CXXFLAGS) $($(GROUP)_FLAGS) $($(GROUP)_CXXFLAGS) -c $< -o $@
 
 $(OBJ_DIR)/%.cc.o: %.cc
 	@mkdir -p $(@D)
 	@$(if $(E),echo CXX $<,)
-	$(CXX) $(CXXFLAGS) $($(GROUP)_FLAGS) $($(GROUP)_CXXFLAGS) -MMD -MP -c $< -o $@
+	$(CXX) $(CXXFLAGS) $($(GROUP)_FLAGS) $($(GROUP)_CXXFLAGS) -c $< -o $@
 
 $(OBJ_DIR)/%.S.o: %.S
 	@mkdir -p $(@D)
 	@$(if $(E),echo AS $<,)
-	$(CC) $(CFLAGS) $($(GROUP)_FLAGS) -MMD -MP -c $< -o $@
+	$(CC) $(CFLAGS) $($(GROUP)_FLAGS) -c $< -o $@
 
 clean:
 	rm -rf obj
