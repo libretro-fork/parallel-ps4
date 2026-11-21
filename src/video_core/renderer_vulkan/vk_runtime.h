@@ -22,7 +22,7 @@ class Scheduler;
 class Runtime {
 public:
     explicit Runtime(const Instance& instance, Scheduler& scheduler);
-    ~Runtime() = default;
+    ~Runtime();
 
     const Instance& GetInstance() const {
         return instance;
@@ -42,9 +42,9 @@ public:
 
     void InlineData(VideoCore::Buffer* dst, u64 offset, u32 value);
 
-    bool Transit(VideoCore::Image* image, vk::ImageLayout dst_layout,
-                 vk::PipelineStageFlags2 dst_stage, vk::AccessFlags2 dst_access,
-                 std::optional<VideoCore::SubresourceRange> subres_range = {});
+    bool Transit(VideoCore::Image* image, VkImageLayout dst_layout, VkPipelineStageFlags2 dst_stage,
+                 VkAccessFlags2 dst_access,
+                 const VideoCore::SubresourceRange* subres_range = nullptr);
 
     /// Copies @num_copies regions at @copies of @src into @dst
     void UploadImage(VideoCore::Image* dst, const VideoCore::Buffer* src,
@@ -72,17 +72,17 @@ public:
                       const VideoCore::SubresourceRange& src_range,
                       const VideoCore::SubresourceRange& dst_range);
     void ClearImage(VideoCore::Image* dst, const VideoCore::SubresourceRange& range,
-                    const vk::ClearValue& clear_value);
+                    const VkClearValue& clear_value);
 
     /// One plane of a depth buffer, from one of its samples, into a colour image
     void CopyDepthToColor(VideoCore::Image* src, VideoCore::Image* dst, bool stencil, bool uint_out,
-                          vk::ColorComponentFlags write_mask, u32 sample, u32 src_layer,
+                          VkColorComponentFlags write_mask, u32 sample, u32 src_layer,
                           u32 dst_layer);
 
     void SetBackingSamples(VideoCore::Image* image, u32 num_samples, bool copy_backing = true);
 
     void AccessBuffer(const VideoCore::Buffer* handle, u64 offset, u64 size,
-                      vk::PipelineStageFlags2 src_stage, vk::AccessFlags2 src_access);
+                      VkPipelineStageFlags2 src_stage, VkAccessFlags2 src_access);
 
     bool IsBufferAccessed(const VideoCore::Buffer* handle, u64 offset, u64 size,
                           bool check_read_access = false);
@@ -95,7 +95,7 @@ private:
 private:
     const Instance& instance;
     Scheduler& scheduler;
-    std::unique_ptr<VideoCore::BlitHelper> blit_helper;
+    VideoCore::BlitHelper* blit_helper;
     StagingBufferPool staging_pool;
     struct BufferBarriers {
         const VideoCore::Buffer* handle;
@@ -104,17 +104,18 @@ private:
         AccessList write_ranges;
     };
     BufferBarriers* resource{};
-    std::vector<BufferBarriers> resources;
+    Common::SmallVector<BufferBarriers, 8> resources;
     VideoCore::Image::Barriers image_barriers;
     /// The sample positions that go with a pending layout change of a depth buffer last drawn
     /// with the game's own; without them the change leaves its contents undefined
     struct BarrierSampleLocs {
-        vk::SampleLocationsInfoEXT info;
-        std::array<vk::SampleLocationEXT, 32> locations;
+        VkSampleLocationsInfoEXT info;
+        VkSampleLocationEXT locations[32];
     };
-    std::array<BarrierSampleLocs, 16> barrier_sample_locs;
+    static constexpr u32 MaxBarrierSampleLocs = 16;
+    BarrierSampleLocs barrier_sample_locs[MaxBarrierSampleLocs];
     u32 num_barrier_sample_locs{};
-    vk::MemoryBarrier2 memory_barrier{};
+    VkMemoryBarrier2 memory_barrier{.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2};
 };
 
 } // namespace Vulkan

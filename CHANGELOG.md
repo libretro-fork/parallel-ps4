@@ -4,6 +4,13 @@ What changed in the libretro core of this fork, newest first. Changes that come 
 
 ## Unreleased
 
+- The texture cache's image (`image.h`/`.cpp`) and the runtime (`vk_runtime.h`/`.cpp`) on the Vulkan C API, with no STL or `auto`.
+  - **The image:** its handle, create info, barriers, aspect, samples, usage and format features are C types, and so is the layout state of its backings. The memory allocator's image calls take C types too.
+  - **The runtime:** its copies, blits, resolves, clears and barriers are `vkCmd*` calls. `Transit` takes a pointer to the subresource range (none for all of it), `ClearImage` a `VkClearValue`, and the layer count helper hands back two out-params. The blit helper is a plain pointer the runtime deletes, and the pending buffer barriers and sample positions are a small vector and C arrays.
+  - **Callers:** the rasterizer, presenter, tile manager and texture cache pass C layouts, stages, access flags and clear values.
+  - The one vulkan.hpp piece left in the runtime is the format block size, until the core has its own table.
+  - Not run in a game yet.
+
 - The blit helper (`blit_helper.h`/`.cpp`) on the Vulkan C API, with no STL or `auto`.
   - **One path:** the three blits (colour as multisampled depth, between multisampled images, a depth plane into colour) share one function for their short-lived views, one for the draw, and one for making their pipelines. The views, descriptor, pipeline state and draw are the same as before.
   - **Pipelines:** each kind's pipelines are a small array of key and `VkPipeline`, found by a walk as the vectors were, and destroyed with the helper. The keys compare with a defaulted `==`.

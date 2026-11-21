@@ -1,6 +1,8 @@
 // SPDX-FileCopyrightText: Copyright 2025 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include <string.h>
+
 #include "common/alignment.h"
 #include "video_core/buffer_cache/buffer.h"
 #include "video_core/renderer_vulkan/liverpool_to_vk.h"
@@ -14,7 +16,7 @@
 
 namespace Vulkan {
 
-static vk::ImageType ConvertImageType(AmdGpu::ImageType type) noexcept {
+static VkImageType ConvertImageType(AmdGpu::ImageType type) noexcept {
     switch (type) {
     case AmdGpu::ImageType::Color1D:
     case AmdGpu::ImageType::Color1DArray:
@@ -22,29 +24,31 @@ static vk::ImageType ConvertImageType(AmdGpu::ImageType type) noexcept {
     case AmdGpu::ImageType::Color2DMsaa:
     case AmdGpu::ImageType::Color2DArray:
     case AmdGpu::ImageType::Cube:
-        return vk::ImageType::e2D;
+        return VK_IMAGE_TYPE_2D;
     case AmdGpu::ImageType::Color3D:
-        return vk::ImageType::e3D;
+        return VK_IMAGE_TYPE_3D;
     default:
         UNREACHABLE_MSG("Unexpected image type %u", u32(type));
     }
 }
 
-static std::pair<u32, u32> SanitizeCopyLayers(const VideoCore::ImageInfo& src_info,
-                                              const VideoCore::ImageInfo& dst_info,
-                                              const u32 depth) {
-    const auto vk_src_type = ConvertImageType(src_info.type);
-    const auto vk_dst_type = ConvertImageType(dst_info.type);
+/// The layers a copy between @src_info and @dst_info can take of each, into *@out_src_layers
+/// and *@out_dst_layers
+static void SanitizeCopyLayers(const VideoCore::ImageInfo& src_info,
+                               const VideoCore::ImageInfo& dst_info, const u32 depth,
+                               u32* out_src_layers, u32* out_dst_layers) {
+    const VkImageType vk_src_type = ConvertImageType(src_info.type);
+    const VkImageType vk_dst_type = ConvertImageType(dst_info.type);
 
     u32 src_layers = src_info.resources.layers;
     u32 dst_layers = dst_info.resources.layers;
 
     // 3D images can only use 1 layer.
-    if (vk_src_type == vk::ImageType::e3D && src_layers != 1) {
+    if (vk_src_type == VK_IMAGE_TYPE_3D && src_layers != 1) {
         LOG_WARNING(Render_Vulkan, "Coercing copy 3D source layers %u to 1.", src_layers);
         src_layers = 1;
     }
-    if (vk_dst_type == vk::ImageType::e3D && dst_layers != 1) {
+    if (vk_dst_type == VK_IMAGE_TYPE_3D && dst_layers != 1) {
         LOG_WARNING(Render_Vulkan, "Coercing copy 3D destination layers %u to 1.", dst_layers);
         dst_layers = 1;
     }
@@ -55,18 +59,18 @@ static std::pair<u32, u32> SanitizeCopyLayers(const VideoCore::ImageInfo& src_in
             LOG_WARNING(Render_Vulkan,
                         "Coercing copy source layers %u and destination layers %u to minimum.",
                         src_layers, dst_layers);
-            src_layers = dst_layers = std::min(src_layers, dst_layers);
+            src_layers = dst_layers = Common::Min(src_layers, dst_layers);
         }
     } else {
         // For 2D <-> 3D copies, 2D layer count must equal 3D depth.
-        if (vk_src_type == vk::ImageType::e2D && vk_dst_type == vk::ImageType::e3D &&
+        if (vk_src_type == VK_IMAGE_TYPE_2D && vk_dst_type == VK_IMAGE_TYPE_3D &&
             src_layers != depth) {
             LOG_WARNING(Render_Vulkan,
                         "Coercing copy 2D source layers %u to 3D destination depth %u", src_layers,
                         depth);
             src_layers = depth;
         }
-        if (vk_src_type == vk::ImageType::e3D && vk_dst_type == vk::ImageType::e2D &&
+        if (vk_src_type == VK_IMAGE_TYPE_3D && vk_dst_type == VK_IMAGE_TYPE_2D &&
             dst_layers != depth) {
             LOG_WARNING(Render_Vulkan,
                         "Coercing copy 2D destination layers %u to 3D source depth %u", dst_layers,
@@ -75,14 +79,16 @@ static std::pair<u32, u32> SanitizeCopyLayers(const VideoCore::ImageInfo& src_in
         }
     }
 
-    return std::make_pair(src_layers, dst_layers);
+    *out_src_layers = src_layers;
+    *out_dst_layers = dst_layers;
 }
 
-static u32 BufferImageCopySize(const vk::BufferImageCopy& copy, const vk::Format pixel_format) {
+static u32 BufferImageCopySize(const VkBufferImageCopy& copy, const vk::Format pixel_format) {
     const u32 row_length = copy.bufferRowLength ? copy.bufferRowLength : copy.imageExtent.width;
     const u32 height = copy.bufferImageHeight ? copy.bufferImageHeight : copy.imageExtent.height;
 
-    const auto block = vk::blockExtent(pixel_format);
+    // vulkan.hpp's format traits, the one thing of it here, until a table of the core's own
+    const std::array<u8, 3> block = vk::blockExtent(pixel_format);
     const u32 block_size = vk::blockSize(pixel_format);
     const u32 row_pitch = (row_length / block[0]) * block_size;
     const u32 slice_pitch = (height / block[1]) * row_pitch;
@@ -97,11 +103,14 @@ static u32 BufferImageCopySize(const vk::BufferImageCopy& copy, const vk::Format
 
 Runtime::Runtime(const Instance& instance_, Scheduler& scheduler_)
     : instance{instance_}, scheduler{scheduler_}, staging_pool{instance_, scheduler_} {
-    blit_helper = std::make_unique<VideoCore::BlitHelper>(instance, scheduler);
+    blit_helper = new VideoCore::BlitHelper(instance, scheduler);
 
-    memory_barrier.dstStageMask = vk::PipelineStageFlagBits2::eAllCommands;
-    memory_barrier.dstAccessMask =
-        vk::AccessFlagBits2::eMemoryRead | vk::AccessFlagBits2::eMemoryWrite;
+    memory_barrier.dstStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+    memory_barrier.dstAccessMask = VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT;
+}
+
+Runtime::~Runtime() {
+    delete blit_helper;
 }
 
 void Runtime::TickFrame() {
@@ -121,7 +130,7 @@ void Runtime::CopyBuffer(const VideoCore::Buffer* src, const VideoCore::Buffer* 
         FlushBarriers();
     }
 
-    const vk::CommandBuffer cmdbuf = scheduler.CommandBuffer();
+    const VkCommandBuffer cmdbuf = scheduler.CommandBuffer();
     instance.Mark(cmdbuf, "buffer copy: to buffer of size, first offset, first size, copies",
                   dst->SizeBytes(), num_copies == 0 ? 0 : copies[0].dstOffset,
                   num_copies == 0 ? 0 : copies[0].size, static_cast<size_t>(num_copies));
@@ -132,10 +141,10 @@ void Runtime::CopyBuffer(const VideoCore::Buffer* src, const VideoCore::Buffer* 
 
     for (u32 i = 0; i < num_copies; ++i) {
         const VkBufferCopy& copy = copies[i];
-        AccessBuffer(src, copy.srcOffset, copy.size, vk::PipelineStageFlagBits2::eCopy,
-                     vk::AccessFlagBits2::eTransferRead);
-        AccessBuffer(dst, copy.dstOffset, copy.size, vk::PipelineStageFlagBits2::eCopy,
-                     vk::AccessFlagBits2::eTransferWrite);
+        AccessBuffer(src, copy.srcOffset, copy.size, VK_PIPELINE_STAGE_2_COPY_BIT,
+                     VK_ACCESS_2_TRANSFER_READ_BIT);
+        AccessBuffer(dst, copy.dstOffset, copy.size, VK_PIPELINE_STAGE_2_COPY_BIT,
+                     VK_ACCESS_2_TRANSFER_WRITE_BIT);
     }
 }
 
@@ -146,13 +155,12 @@ void Runtime::FillBuffer(const VideoCore::Buffer* dst, u64 offset, u64 size, u32
         FlushBarriers();
     }
 
-    const auto cmdbuf = scheduler.CommandBuffer();
+    const vk::CommandBuffer cmdbuf = scheduler.CommandBuffer();
     instance.Mark(cmdbuf, "buffer fill: buffer of size, offset, size, value", dst->SizeBytes(),
                   offset, size, value);
-    cmdbuf.fillBuffer(dst->Handle(), offset, size, value);
+    vkCmdFillBuffer(static_cast<VkCommandBuffer>(cmdbuf), dst->Handle(), offset, size, value);
 
-    AccessBuffer(dst, offset, size, vk::PipelineStageFlagBits2::eClear,
-                 vk::AccessFlagBits2::eTransferWrite);
+    AccessBuffer(dst, offset, size, VK_PIPELINE_STAGE_2_CLEAR_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT);
 }
 
 void Runtime::InlineData(VideoCore::Buffer* dst, u64 offset, u32 value) {
@@ -162,36 +170,37 @@ void Runtime::InlineData(VideoCore::Buffer* dst, u64 offset, u32 value) {
         FlushBarriers();
     }
 
-    const auto cmdbuf = scheduler.CommandBuffer();
+    const vk::CommandBuffer cmdbuf = scheduler.CommandBuffer();
     instance.Mark(cmdbuf, "buffer word: buffer of size, offset, value", dst->SizeBytes(), offset,
                   value);
-    cmdbuf.updateBuffer(dst->Handle(), offset, sizeof(value), &value);
+    vkCmdUpdateBuffer(static_cast<VkCommandBuffer>(cmdbuf), dst->Handle(), offset, sizeof(value),
+                      &value);
 
-    AccessBuffer(dst, offset, sizeof(value), vk::PipelineStageFlagBits2::eCopy,
-                 vk::AccessFlagBits2::eTransferWrite);
+    AccessBuffer(dst, offset, sizeof(value), VK_PIPELINE_STAGE_2_COPY_BIT,
+                 VK_ACCESS_2_TRANSFER_WRITE_BIT);
 }
 
-bool Runtime::Transit(VideoCore::Image* image, vk::ImageLayout dst_layout,
-                      vk::PipelineStageFlags2 dst_stage, vk::AccessFlags2 dst_access,
-                      std::optional<VideoCore::SubresourceRange> subres_range) {
+bool Runtime::Transit(VideoCore::Image* image, VkImageLayout dst_layout,
+                      VkPipelineStageFlags2 dst_stage, VkAccessFlags2 dst_access,
+                      const VideoCore::SubresourceRange* subres_range) {
     const size_t prev_num_barriers = static_cast<size_t>(image_barriers.size());
-    image->GetBarriers(image_barriers, dst_layout, dst_access, dst_stage,
-                       subres_range ? &*subres_range : nullptr);
+    image->GetBarriers(image_barriers, dst_layout, dst_access, dst_stage, subres_range);
     if (image->sample_locs_grid && image_barriers.size() != prev_num_barriers &&
-        num_barrier_sample_locs < barrier_sample_locs.size()) {
-        auto& entry = barrier_sample_locs[num_barrier_sample_locs];
+        num_barrier_sample_locs < MaxBarrierSampleLocs) {
+        BarrierSampleLocs& entry = barrier_sample_locs[num_barrier_sample_locs];
         const u32 grid = image->sample_locs_grid;
         const u32 count = grid * grid * image->sample_locs_samples;
         for (u32 i = 0; i < count; ++i) {
-            entry.locations[i] = vk::SampleLocationEXT{image->sample_locs[i * 2] / 16.0f,
-                                                       image->sample_locs[i * 2 + 1] / 16.0f};
+            entry.locations[i] = VkSampleLocationEXT{image->sample_locs[i * 2] / 16.0f,
+                                                     image->sample_locs[i * 2 + 1] / 16.0f};
         }
-        entry.info = vk::SampleLocationsInfoEXT{
+        entry.info = VkSampleLocationsInfoEXT{
+            .sType = VK_STRUCTURE_TYPE_SAMPLE_LOCATIONS_INFO_EXT,
             .sampleLocationsPerPixel =
-                static_cast<vk::SampleCountFlagBits>(image->sample_locs_samples),
+                static_cast<VkSampleCountFlagBits>(image->sample_locs_samples),
             .sampleLocationGridSize = {grid, grid},
             .sampleLocationsCount = count,
-            .pSampleLocations = entry.locations.data(),
+            .pSampleLocations = entry.locations,
         };
         bool used = false;
         for (size_t i = prev_num_barriers; i < image_barriers.size(); ++i) {
@@ -210,19 +219,18 @@ void Runtime::UploadImage(VideoCore::Image* dst, const VideoCore::Buffer* src,
     SetBackingSamples(dst, dst->info.num_samples, false);
     scheduler.EndRendering();
 
-    bool needs_flush =
-        Transit(dst, vk::ImageLayout::eTransferDstOptimal, vk::PipelineStageFlagBits2::eCopy,
-                vk::AccessFlagBits2::eTransferWrite);
+    bool needs_flush = Transit(dst, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                               VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT);
     for (u32 i = 0; i < num_copies; ++i) {
         const u32 copy_size = BufferImageCopySize(
-            reinterpret_cast<const vk::BufferImageCopy&>(copies[i]), dst->info.pixel_format);
+            reinterpret_cast<const VkBufferImageCopy&>(copies[i]), dst->info.pixel_format);
         needs_flush |= IsBufferAccessed(src, copies[i].bufferOffset, copy_size);
     }
     if (needs_flush) {
         FlushBarriers();
     }
 
-    const vk::CommandBuffer cmdbuf = scheduler.CommandBuffer();
+    const VkCommandBuffer cmdbuf = scheduler.CommandBuffer();
     instance.Mark(cmdbuf, "buffer to image: image at, size, w|h<<16|d<<32, copies|buffer size<<8",
                   dst->info.guest_address, dst->info.guest_size,
                   u64(dst->info.size.width) | u64(dst->info.size.height) << 16 |
@@ -236,9 +244,9 @@ void Runtime::UploadImage(VideoCore::Image* dst, const VideoCore::Buffer* src,
 
     for (u32 i = 0; i < num_copies; ++i) {
         const u32 copy_size = BufferImageCopySize(
-            reinterpret_cast<const vk::BufferImageCopy&>(copies[i]), dst->info.pixel_format);
-        AccessBuffer(src, copies[i].bufferOffset, copy_size, vk::PipelineStageFlagBits2::eCopy,
-                     vk::AccessFlagBits2::eTransferRead);
+            reinterpret_cast<const VkBufferImageCopy&>(copies[i]), dst->info.pixel_format);
+        AccessBuffer(src, copies[i].bufferOffset, copy_size, VK_PIPELINE_STAGE_2_COPY_BIT,
+                     VK_ACCESS_2_TRANSFER_READ_BIT);
     }
 
     dst->flags &= ~VideoCore::ImageFlagBits::Dirty;
@@ -249,19 +257,18 @@ void Runtime::DownloadImage(VideoCore::Image* src, const VideoCore::Buffer* dst,
     SetBackingSamples(src, src->info.num_samples);
     scheduler.EndRendering();
 
-    bool needs_flush =
-        Transit(src, vk::ImageLayout::eTransferSrcOptimal, vk::PipelineStageFlagBits2::eCopy,
-                vk::AccessFlagBits2::eTransferRead);
+    bool needs_flush = Transit(src, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                               VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_READ_BIT);
     for (u32 i = 0; i < num_copies; ++i) {
         const u32 copy_size = BufferImageCopySize(
-            reinterpret_cast<const vk::BufferImageCopy&>(copies[i]), src->info.pixel_format);
+            reinterpret_cast<const VkBufferImageCopy&>(copies[i]), src->info.pixel_format);
         needs_flush |= IsBufferAccessed(dst, copies[i].bufferOffset, copy_size, true);
     }
     if (needs_flush) {
         FlushBarriers();
     }
 
-    const vk::CommandBuffer cmdbuf = scheduler.CommandBuffer();
+    const VkCommandBuffer cmdbuf = scheduler.CommandBuffer();
     instance.Mark(cmdbuf, "image to buffer: image at, size, w|h<<16|d<<32, buffer of size",
                   src->info.guest_address, src->info.guest_size,
                   u64(src->info.size.width) | u64(src->info.size.height) << 16 |
@@ -275,16 +282,16 @@ void Runtime::DownloadImage(VideoCore::Image* src, const VideoCore::Buffer* dst,
 
     for (u32 i = 0; i < num_copies; ++i) {
         const u32 copy_size = BufferImageCopySize(
-            reinterpret_cast<const vk::BufferImageCopy&>(copies[i]), src->info.pixel_format);
-        AccessBuffer(dst, copies[i].bufferOffset, copy_size, vk::PipelineStageFlagBits2::eCopy,
-                     vk::AccessFlagBits2::eTransferWrite);
+            reinterpret_cast<const VkBufferImageCopy&>(copies[i]), src->info.pixel_format);
+        AccessBuffer(dst, copies[i].bufferOffset, copy_size, VK_PIPELINE_STAGE_2_COPY_BIT,
+                     VK_ACCESS_2_TRANSFER_WRITE_BIT);
     }
 }
 
 bool Runtime::BlitScaled(VideoCore::Image* src, VideoCore::Image* dst, u32 dst_mip,
                          u32 dst_layer) {
-    const auto src_aspect = src->aspect_mask;
-    const auto dst_aspect = dst->aspect_mask;
+    const VkImageAspectFlags src_aspect = src->aspect_mask;
+    const VkImageAspectFlags dst_aspect = dst->aspect_mask;
     const bool depth = src->info.props.is_depth || dst->info.props.is_depth;
     if (src_aspect != dst_aspect || (depth && src->info.pixel_format != dst->info.pixel_format) ||
         src->info.num_samples > 1 || dst->info.num_samples > 1 || src->info.props.is_volume ||
@@ -295,31 +302,32 @@ bool Runtime::BlitScaled(VideoCore::Image* src, VideoCore::Image* dst, u32 dst_m
     }
     SetBackingSamples(dst, 1, false);
     SetBackingSamples(src, 1);
-    const auto src_size = src->HostSize();
-    const auto dst_size = dst->HostSize();
-    const u32 layers = std::min<u32>(src->info.resources.layers, dst->info.resources.layers - dst_layer);
-    const u32 levels = std::min<u32>(src->info.resources.levels, dst->info.resources.levels - dst_mip);
-    Common::SmallVector<vk::ImageBlit, 8> regions;
+    const VideoCore::Extent3D src_size = src->HostSize();
+    const VideoCore::Extent3D dst_size = dst->HostSize();
+    const u32 layers =
+        Common::Min<u32>(src->info.resources.layers, dst->info.resources.layers - dst_layer);
+    const u32 levels =
+        Common::Min<u32>(src->info.resources.levels, dst->info.resources.levels - dst_mip);
+    Common::SmallVector<VkImageBlit, 8> regions;
     for (u32 mip = 0; mip < levels; ++mip) {
-        vk::ImageBlit region{
+        VkImageBlit region{
             .srcSubresource{src_aspect, mip, 0, layers},
             .dstSubresource{dst_aspect, dst_mip + mip, dst_layer, layers},
         };
-        region.srcOffsets[1] = vk::Offset3D{static_cast<s32>(std::max(src_size.width >> mip, 1u)),
-                                            static_cast<s32>(std::max(src_size.height >> mip, 1u)),
-                                            1};
+        region.srcOffsets[1] =
+            VkOffset3D{static_cast<s32>(Common::Max(src_size.width >> mip, 1u)),
+                       static_cast<s32>(Common::Max(src_size.height >> mip, 1u)), 1};
         region.dstOffsets[1] =
-            vk::Offset3D{static_cast<s32>(std::max(dst_size.width >> (dst_mip + mip), 1u)),
-                         static_cast<s32>(std::max(dst_size.height >> (dst_mip + mip), 1u)), 1};
+            VkOffset3D{static_cast<s32>(Common::Max(dst_size.width >> (dst_mip + mip), 1u)),
+                       static_cast<s32>(Common::Max(dst_size.height >> (dst_mip + mip), 1u)), 1};
         regions.push_back(region);
     }
 
     scheduler.EndRendering();
-    bool needs_flush =
-        Transit(src, vk::ImageLayout::eTransferSrcOptimal, vk::PipelineStageFlagBits2::eBlit,
-                vk::AccessFlagBits2::eTransferRead);
-    needs_flush |= Transit(dst, vk::ImageLayout::eTransferDstOptimal,
-                           vk::PipelineStageFlagBits2::eBlit, vk::AccessFlagBits2::eTransferWrite);
+    bool needs_flush = Transit(src, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                               VK_PIPELINE_STAGE_2_BLIT_BIT, VK_ACCESS_2_TRANSFER_READ_BIT);
+    needs_flush |= Transit(dst, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_PIPELINE_STAGE_2_BLIT_BIT,
+                           VK_ACCESS_2_TRANSFER_WRITE_BIT);
     if (needs_flush) {
         FlushBarriers();
     }
@@ -329,10 +337,10 @@ bool Runtime::BlitScaled(VideoCore::Image* src, VideoCore::Image* dst, u32 dst_m
                       u64(src->info.size.depth) << 32,
                   u64(dst->info.size.width) | u64(dst->info.size.height) << 16 |
                       u64(dst->info.size.depth) << 32);
-    scheduler.CommandBuffer().blitImage(
-        src->GetImage(), vk::ImageLayout::eTransferSrcOptimal, dst->GetImage(),
-        vk::ImageLayout::eTransferDstOptimal, regions,
-        depth ? vk::Filter::eNearest : vk::Filter::eLinear);
+    vkCmdBlitImage(static_cast<VkCommandBuffer>(scheduler.CommandBuffer()), src->GetImage(),
+                   VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, dst->GetImage(),
+                   VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, static_cast<u32>(regions.size()),
+                   regions.data(), depth ? VK_FILTER_NEAREST : VK_FILTER_LINEAR);
 
     dst->flags |= (src->flags & VideoCore::ImageFlagBits::GpuModified);
     dst->flags &= ~VideoCore::ImageFlagBits::Dirty;
@@ -344,15 +352,15 @@ void Runtime::CopyImage(VideoCore::Image* src, VideoCore::Image* dst) {
         BlitScaled(src, dst);
         return;
     }
-    const u32 num_mips = std::min(src->info.resources.levels, dst->info.resources.levels);
+    const u32 num_mips = Common::Min(src->info.resources.levels, dst->info.resources.levels);
 
     // Format mismatch warning (safe but useful)
     if (src->info.pixel_format != dst->info.pixel_format) {
         LOG_DEBUG(Render_Vulkan,
-                  "Copy between different formats: src=%s, dst=%s. "
+                  "Copy between different formats: src=%d, dst=%d. "
                   "Result may be undefined.",
-                  (vk::to_string(src->info.pixel_format)).c_str(),
-                  (vk::to_string(dst->info.pixel_format)).c_str());
+                  static_cast<int>(src->info.pixel_format),
+                  static_cast<int>(dst->info.pixel_format));
     }
 
     const u32 base_width = src->info.size.width;
@@ -364,29 +372,31 @@ void Runtime::CopyImage(VideoCore::Image* src, VideoCore::Image* dst) {
     SetBackingSamples(dst, dst->info.num_samples, false);
     SetBackingSamples(src, src->info.num_samples);
 
-    Common::SmallVector<vk::ImageCopy, 8> regions;
+    Common::SmallVector<VkImageCopy, 8> regions;
 
-    const vk::ImageAspectFlags src_aspect = src->aspect_mask & ~vk::ImageAspectFlagBits::eStencil;
-    const vk::ImageAspectFlags dst_aspect = dst->aspect_mask & ~vk::ImageAspectFlagBits::eStencil;
+    const VkImageAspectFlags src_aspect = src->aspect_mask & ~VK_IMAGE_ASPECT_STENCIL_BIT;
+    const VkImageAspectFlags dst_aspect = dst->aspect_mask & ~VK_IMAGE_ASPECT_STENCIL_BIT;
 
-    const bool src_is_2d = ConvertImageType(src->info.type) == vk::ImageType::e2D;
-    const bool src_is_3d = ConvertImageType(src->info.type) == vk::ImageType::e3D;
+    const bool src_is_2d = ConvertImageType(src->info.type) == VK_IMAGE_TYPE_2D;
+    const bool src_is_3d = ConvertImageType(src->info.type) == VK_IMAGE_TYPE_3D;
 
-    const bool dst_is_2d = ConvertImageType(dst->info.type) == vk::ImageType::e2D;
-    const bool dst_is_3d = ConvertImageType(dst->info.type) == vk::ImageType::e3D;
+    const bool dst_is_2d = ConvertImageType(dst->info.type) == VK_IMAGE_TYPE_2D;
+    const bool dst_is_3d = ConvertImageType(dst->info.type) == VK_IMAGE_TYPE_3D;
 
     const bool is_2d_to_3d = src_is_2d && dst_is_3d;
     const bool is_3d_to_2d = src_is_3d && dst_is_2d;
     const bool is_same_type = !is_2d_to_3d && !is_3d_to_2d;
 
     for (u32 mip = 0; mip < num_mips; ++mip) {
-        const u32 mip_w = std::max(base_width >> mip, 1u);
-        const u32 mip_h = std::max(base_height >> mip, 1u);
-        const u32 mip_d = std::max(base_depth >> mip, 1u);
+        const u32 mip_w = Common::Max(base_width >> mip, 1u);
+        const u32 mip_h = Common::Max(base_height >> mip, 1u);
+        const u32 mip_d = Common::Max(base_depth >> mip, 1u);
 
-        const auto [src_layers, dst_layers] = SanitizeCopyLayers(src->info, dst->info, mip_d);
+        u32 src_layers;
+        u32 dst_layers;
+        SanitizeCopyLayers(src->info, dst->info, mip_d, &src_layers, &dst_layers);
 
-        vk::ImageCopy region{};
+        VkImageCopy region{};
         region.srcSubresource.aspectMask = src_aspect;
         region.srcSubresource.mipLevel = mip;
         region.srcSubresource.baseArrayLayer = 0;
@@ -400,24 +410,24 @@ void Runtime::CopyImage(VideoCore::Image* src, VideoCore::Image* dst) {
                 // 3D images must use layerCount=1
                 region.srcSubresource.layerCount = 1;
                 region.dstSubresource.layerCount = 1;
-                region.extent = vk::Extent3D(mip_w, mip_h, mip_d);
+                region.extent = VkExtent3D{mip_w, mip_h, mip_d};
             } else {
                 // Array images
-                const u32 copy_layers = std::min(src_layers, dst_layers);
+                const u32 copy_layers = Common::Min(src_layers, dst_layers);
                 region.srcSubresource.layerCount = copy_layers;
                 region.dstSubresource.layerCount = copy_layers;
-                region.extent = vk::Extent3D(mip_w, mip_h, 1);
+                region.extent = VkExtent3D{mip_w, mip_h, 1};
             }
         } else if (is_2d_to_3d) {
             // 2D array -> 3D volume
             region.srcSubresource.layerCount = src_layers;
             region.dstSubresource.layerCount = 1;
-            region.extent = vk::Extent3D(mip_w, mip_h, src_layers);
+            region.extent = VkExtent3D{mip_w, mip_h, src_layers};
         } else if (is_3d_to_2d) {
             // 3D volume -> 2D array
             region.srcSubresource.layerCount = 1;
             region.dstSubresource.layerCount = dst_layers;
-            region.extent = vk::Extent3D(mip_w, mip_h, dst_layers);
+            region.extent = VkExtent3D{mip_w, mip_h, dst_layers};
         }
 
         regions.push_back(region);
@@ -425,24 +435,25 @@ void Runtime::CopyImage(VideoCore::Image* src, VideoCore::Image* dst) {
 
     scheduler.EndRendering();
 
-    bool needs_flush =
-        Transit(src, vk::ImageLayout::eTransferSrcOptimal, vk::PipelineStageFlagBits2::eCopy,
-                vk::AccessFlagBits2::eTransferRead);
-    needs_flush |= Transit(dst, vk::ImageLayout::eTransferDstOptimal,
-                           vk::PipelineStageFlagBits2::eCopy, vk::AccessFlagBits2::eTransferWrite);
+    bool needs_flush = Transit(src, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                               VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_READ_BIT);
+    needs_flush |= Transit(dst, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_PIPELINE_STAGE_2_COPY_BIT,
+                           VK_ACCESS_2_TRANSFER_WRITE_BIT);
     if (needs_flush) {
         FlushBarriers();
     }
 
-    auto cmdbuf = scheduler.CommandBuffer();
+    const vk::CommandBuffer cmdbuf = scheduler.CommandBuffer();
     instance.Mark(cmdbuf, "image copy: from image at, to image at, from w|h, to w|h",
                   src->info.guest_address, dst->info.guest_address,
                   u64(src->info.size.width) | u64(src->info.size.height) << 16 |
                       u64(src->info.size.depth) << 32,
                   u64(dst->info.size.width) | u64(dst->info.size.height) << 16 |
                       u64(dst->info.size.depth) << 32);
-    cmdbuf.copyImage(src->GetImage(), vk::ImageLayout::eTransferSrcOptimal, dst->GetImage(),
-                     vk::ImageLayout::eTransferDstOptimal, regions);
+    vkCmdCopyImage(static_cast<VkCommandBuffer>(cmdbuf), src->GetImage(),
+                   VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, dst->GetImage(),
+                   VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, static_cast<u32>(regions.size()),
+                   regions.data());
 
     dst->flags |= (src->flags & VideoCore::ImageFlagBits::GpuModified);
     dst->flags &= ~VideoCore::ImageFlagBits::Dirty;
@@ -450,18 +461,18 @@ void Runtime::CopyImage(VideoCore::Image* src, VideoCore::Image* dst) {
 
 void Runtime::CopyImageWithBuffer(VideoCore::Image* src, VideoCore::Image* dst,
                                   const VideoCore::Buffer* buffer, u64 offset) {
-    const u32 num_mips = std::min(src->info.resources.levels, dst->info.resources.levels);
-    const u32 num_layers = std::min(src->info.resources.layers, dst->info.resources.layers);
+    const u32 num_mips = Common::Min(src->info.resources.levels, dst->info.resources.levels);
+    const u32 num_layers = Common::Min(src->info.resources.layers, dst->info.resources.layers);
 
     SetBackingSamples(dst, dst->info.num_samples, false);
     SetBackingSamples(src, src->info.num_samples);
 
-    vk::BufferImageCopy buffer_copy = {
+    VkBufferImageCopy buffer_copy = {
         .bufferOffset = offset,
         .bufferRowLength = 0,
         .bufferImageHeight = 0,
         .imageSubresource{
-            .aspectMask = src->aspect_mask & ~vk::ImageAspectFlagBits::eStencil,
+            .aspectMask = src->aspect_mask & ~VK_IMAGE_ASPECT_STENCIL_BIT,
             .mipLevel = 0u,
             .baseArrayLayer = 0,
             .layerCount = num_layers,
@@ -470,15 +481,15 @@ void Runtime::CopyImageWithBuffer(VideoCore::Image* src, VideoCore::Image* dst,
         .imageExtent = {src->HostSize().width, src->HostSize().height, src->HostSize().depth},
     };
     u64 copy_size = BufferImageCopySize(buffer_copy, src->info.pixel_format);
-    Common::SmallVector<vk::BufferImageCopy, 8> buffer_copies;
+    Common::SmallVector<VkBufferImageCopy, 8> buffer_copies;
     buffer_copies.push_back(buffer_copy);
     for (u32 mip = 1; mip < num_mips; ++mip) {
-        auto mip_copy = buffer_copy;
+        VkBufferImageCopy mip_copy = buffer_copy;
         mip_copy.bufferOffset = Common::AlignUp(offset + copy_size, 16);
         mip_copy.imageSubresource.mipLevel = mip;
-        mip_copy.imageExtent = vk::Extent3D{std::max(src->HostSize().width >> mip, 1u),
-                                            std::max(src->HostSize().height >> mip, 1u),
-                                            std::max(src->HostSize().depth >> mip, 1u)};
+        mip_copy.imageExtent = VkExtent3D{Common::Max(src->HostSize().width >> mip, 1u),
+                                          Common::Max(src->HostSize().height >> mip, 1u),
+                                          Common::Max(src->HostSize().depth >> mip, 1u)};
         copy_size =
             mip_copy.bufferOffset - offset + BufferImageCopySize(mip_copy, src->info.pixel_format);
         buffer_copies.push_back(mip_copy);
@@ -486,43 +497,48 @@ void Runtime::CopyImageWithBuffer(VideoCore::Image* src, VideoCore::Image* dst,
 
     scheduler.EndRendering();
 
-    bool needs_flush =
-        Transit(src, vk::ImageLayout::eTransferSrcOptimal, vk::PipelineStageFlagBits2::eCopy,
-                vk::AccessFlagBits2::eTransferRead);
-    needs_flush |= Transit(dst, vk::ImageLayout::eTransferDstOptimal,
-                           vk::PipelineStageFlagBits2::eCopy, vk::AccessFlagBits2::eTransferWrite);
+    bool needs_flush = Transit(src, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                               VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_READ_BIT);
+    needs_flush |= Transit(dst, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_PIPELINE_STAGE_2_COPY_BIT,
+                           VK_ACCESS_2_TRANSFER_WRITE_BIT);
     needs_flush |= IsBufferAccessed(buffer, offset, copy_size);
     if (needs_flush) {
         FlushBarriers();
     }
 
-    auto cmdbuf = scheduler.CommandBuffer();
+    const vk::CommandBuffer cmdbuf = scheduler.CommandBuffer();
     instance.Mark(cmdbuf, "image copy through buffer: from image at, to image at, from w|h, to w|h",
                   src->info.guest_address, dst->info.guest_address,
                   u64(src->info.size.width) | u64(src->info.size.height) << 16 |
                       u64(src->info.size.depth) << 32,
                   u64(dst->info.size.width) | u64(dst->info.size.height) << 16 |
                       u64(dst->info.size.depth) << 32);
-    cmdbuf.copyImageToBuffer(src->GetImage(), vk::ImageLayout::eTransferSrcOptimal,
-                             buffer->Handle(), buffer_copies);
+    vkCmdCopyImageToBuffer(static_cast<VkCommandBuffer>(cmdbuf), src->GetImage(),
+                           VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, buffer->Handle(),
+                           static_cast<u32>(buffer_copies.size()), buffer_copies.data());
 
-    const vk::MemoryBarrier2 post_copy_barrier = {
-        .srcStageMask = vk::PipelineStageFlagBits2::eCopy,
-        .srcAccessMask = vk::AccessFlagBits2::eTransferWrite,
-        .dstStageMask = vk::PipelineStageFlagBits2::eCopy,
-        .dstAccessMask = vk::AccessFlagBits2::eTransferRead,
+    const VkMemoryBarrier2 post_copy_barrier = {
+        .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2,
+        .srcStageMask = VK_PIPELINE_STAGE_2_COPY_BIT,
+        .srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT,
+        .dstStageMask = VK_PIPELINE_STAGE_2_COPY_BIT,
+        .dstAccessMask = VK_ACCESS_2_TRANSFER_READ_BIT,
     };
-    cmdbuf.pipelineBarrier2(vk::DependencyInfo{
-        .dependencyFlags = vk::DependencyFlagBits::eByRegion,
+    const VkDependencyInfo post_copy_dep{
+        .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+        .dependencyFlags = VK_DEPENDENCY_BY_REGION_BIT,
         .memoryBarrierCount = 1u,
         .pMemoryBarriers = &post_copy_barrier,
-    });
+    };
+    vkCmdPipelineBarrier2(static_cast<VkCommandBuffer>(cmdbuf), &post_copy_dep);
 
-    for (auto& copy : buffer_copies) {
-        copy.imageSubresource.aspectMask = dst->aspect_mask & ~vk::ImageAspectFlagBits::eStencil;
+    for (size_t i = 0; i < buffer_copies.size(); ++i) {
+        buffer_copies[i].imageSubresource.aspectMask =
+            dst->aspect_mask & ~VK_IMAGE_ASPECT_STENCIL_BIT;
     }
-    cmdbuf.copyBufferToImage(buffer->Handle(), dst->GetImage(),
-                             vk::ImageLayout::eTransferDstOptimal, buffer_copies);
+    vkCmdCopyBufferToImage(static_cast<VkCommandBuffer>(cmdbuf), buffer->Handle(), dst->GetImage(),
+                           VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                           static_cast<u32>(buffer_copies.size()), buffer_copies.data());
 
     dst->flags |= (src->flags & VideoCore::ImageFlagBits::GpuModified);
     dst->flags &= ~VideoCore::ImageFlagBits::Dirty;
@@ -533,20 +549,21 @@ void Runtime::CopyMip(VideoCore::Image* src, VideoCore::Image* dst, u32 mip, u32
         BlitScaled(src, dst, mip, slice);
         return;
     }
-    const auto dst_dim = dst->info.props.is_block ? 2 : 0;
-    const auto mip_block_w = std::max(dst->info.size.width >> (mip + dst_dim), 1u);
-    const auto mip_block_h = std::max(dst->info.size.height >> (mip + dst_dim), 1u);
-    const auto mip_block_p = std::max<u32>(dst->info.mips_layout[mip].pitch >> dst_dim, 1u);
+    const u32 dst_dim = dst->info.props.is_block ? 2 : 0;
+    const u32 mip_block_w = Common::Max(dst->info.size.width >> (mip + dst_dim), 1u);
+    const u32 mip_block_h = Common::Max(dst->info.size.height >> (mip + dst_dim), 1u);
+    const u32 mip_block_p = Common::Max<u32>(dst->info.mips_layout[mip].pitch >> dst_dim, 1u);
 
-    const auto src_dim = src->info.props.is_block ? 2 : 0;
+    const u32 src_dim = src->info.props.is_block ? 2 : 0;
     ASSERT(mip_block_w == (src->info.size.width >> src_dim));
     ASSERT(mip_block_h == (src->info.size.height >> src_dim));
     ASSERT(mip_block_p == (src->info.pitch >> src_dim));
 
-    const auto [src_layers, dst_layers] =
-        SanitizeCopyLayers(src->info, dst->info, src->info.size.depth);
+    u32 src_layers;
+    u32 dst_layers;
+    SanitizeCopyLayers(src->info, dst->info, src->info.size.depth, &src_layers, &dst_layers);
 
-    const vk::ImageCopy image_copy{
+    const VkImageCopy image_copy{
         .srcSubresource{
             .aspectMask = src->aspect_mask,
             .mipLevel = 0,
@@ -567,24 +584,24 @@ void Runtime::CopyMip(VideoCore::Image* src, VideoCore::Image* dst, u32 mip, u32
 
     scheduler.EndRendering();
 
-    bool needs_flush =
-        Transit(src, vk::ImageLayout::eTransferSrcOptimal, vk::PipelineStageFlagBits2::eCopy,
-                vk::AccessFlagBits2::eTransferRead);
-    needs_flush |= Transit(dst, vk::ImageLayout::eTransferDstOptimal,
-                           vk::PipelineStageFlagBits2::eCopy, vk::AccessFlagBits2::eTransferWrite);
+    bool needs_flush = Transit(src, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                               VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_READ_BIT);
+    needs_flush |= Transit(dst, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_PIPELINE_STAGE_2_COPY_BIT,
+                           VK_ACCESS_2_TRANSFER_WRITE_BIT);
     if (needs_flush) {
         FlushBarriers();
     }
 
-    const auto cmdbuf = scheduler.CommandBuffer();
+    const vk::CommandBuffer cmdbuf = scheduler.CommandBuffer();
     instance.Mark(cmdbuf, "mip copy: from image at, to image at, from w|h, to w|h",
                   src->info.guest_address, dst->info.guest_address,
                   u64(src->info.size.width) | u64(src->info.size.height) << 16 |
                       u64(src->info.size.depth) << 32,
                   u64(dst->info.size.width) | u64(dst->info.size.height) << 16 |
                       u64(dst->info.size.depth) << 32);
-    cmdbuf.copyImage(src->GetImage(), vk::ImageLayout::eTransferSrcOptimal, dst->GetImage(),
-                     vk::ImageLayout::eTransferDstOptimal, image_copy);
+    vkCmdCopyImage(static_cast<VkCommandBuffer>(cmdbuf), src->GetImage(),
+                   VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, dst->GetImage(),
+                   VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &image_copy);
 
     dst->flags |= (src->flags & VideoCore::ImageFlagBits::GpuModified);
     dst->flags &= ~VideoCore::ImageFlagBits::Dirty;
@@ -603,7 +620,7 @@ void Runtime::CopyColorAndDepth(VideoCore::Image* src, VideoCore::Image* dst) {
         } else {
             // Perform depth from/to color copy using the intermediate copy buffer.
             static constexpr size_t COPY_BUFFER_SIZE = 128_MB;
-            const auto copy_ref =
+            const StagingBufferRef copy_ref =
                 staging_pool.Request(COPY_BUFFER_SIZE, VideoCore::MemoryType::DeviceLocal);
             CopyImageWithBuffer(src, dst, copy_ref.buffer, copy_ref.offset);
         }
@@ -611,12 +628,12 @@ void Runtime::CopyColorAndDepth(VideoCore::Image* src, VideoCore::Image* dst) {
                dst->info.props.is_depth) {
         // Perform a rendering pass to transfer the channels of source as samples in dest.
         bool needs_flush =
-            Transit(src, vk::ImageLayout::eShaderReadOnlyOptimal,
-                    vk::PipelineStageFlagBits2::eFragmentShader, vk::AccessFlagBits2::eShaderRead);
-        needs_flush |= Transit(dst, vk::ImageLayout::eDepthStencilAttachmentOptimal,
-                               vk::PipelineStageFlagBits2::eEarlyFragmentTests |
-                                   vk::PipelineStageFlagBits2::eLateFragmentTests,
-                               vk::AccessFlagBits2::eDepthStencilAttachmentWrite);
+            Transit(src, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                    VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_READ_BIT);
+        needs_flush |= Transit(dst, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+                               VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT |
+                                   VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
+                               VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT);
         if (needs_flush) {
             FlushBarriers();
         }
@@ -639,18 +656,17 @@ void Runtime::CopyDepthStencil(VideoCore::Image* src, VideoCore::Image* dst,
     }
     scheduler.EndRendering();
 
-    bool needs_flush =
-        Transit(src, vk::ImageLayout::eTransferSrcOptimal, vk::PipelineStageFlagBits2::eCopy,
-                vk::AccessFlagBits2::eTransferRead);
-    needs_flush |= Transit(dst, vk::ImageLayout::eTransferDstOptimal,
-                           vk::PipelineStageFlagBits2::eCopy, vk::AccessFlagBits2::eTransferWrite);
+    bool needs_flush = Transit(src, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                               VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_READ_BIT);
+    needs_flush |= Transit(dst, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_PIPELINE_STAGE_2_COPY_BIT,
+                           VK_ACCESS_2_TRANSFER_WRITE_BIT);
     if (needs_flush) {
         FlushBarriers();
     }
 
-    const auto aspect_mask = src->aspect_mask & dst->aspect_mask;
+    const VkImageAspectFlags aspect_mask = src->aspect_mask & dst->aspect_mask;
 
-    const vk::ImageCopy region = {
+    const VkImageCopy region = {
         .srcSubresource{
             .aspectMask = aspect_mask,
             .mipLevel = 0,
@@ -668,26 +684,27 @@ void Runtime::CopyDepthStencil(VideoCore::Image* src, VideoCore::Image* dst,
         .extent = {dst->HostSize().width, dst->HostSize().height, 1},
     };
 
-    const auto cmdbuf = scheduler.CommandBuffer();
+    const vk::CommandBuffer cmdbuf = scheduler.CommandBuffer();
     instance.Mark(cmdbuf, "depth copy: from image at, to image at, from w|h, to w|h",
                   src->info.guest_address, dst->info.guest_address,
                   u64(src->info.size.width) | u64(src->info.size.height) << 16 |
                       u64(src->info.size.depth) << 32,
                   u64(dst->info.size.width) | u64(dst->info.size.height) << 16 |
                       u64(dst->info.size.depth) << 32);
-    cmdbuf.copyImage(src->GetImage(), vk::ImageLayout::eTransferSrcOptimal, dst->GetImage(),
-                     vk::ImageLayout::eTransferDstOptimal, region);
+    vkCmdCopyImage(static_cast<VkCommandBuffer>(cmdbuf), src->GetImage(),
+                   VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, dst->GetImage(),
+                   VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
 
     dst->flags |= VideoCore::ImageFlagBits::GpuModified;
     dst->flags &= ~VideoCore::ImageFlagBits::Dirty;
 }
 
 void Runtime::CopyDepthToColor(VideoCore::Image* src, VideoCore::Image* dst, bool stencil,
-                               bool uint_out, vk::ColorComponentFlags write_mask, u32 sample,
+                               bool uint_out, VkColorComponentFlags write_mask, u32 sample,
                                u32 src_layer, u32 dst_layer) {
-    const auto plane =
-        stencil ? vk::ImageAspectFlagBits::eStencil : vk::ImageAspectFlagBits::eDepth;
-    if (!(src->aspect_mask & plane) || !(dst->aspect_mask & vk::ImageAspectFlagBits::eColor)) {
+    const VkImageAspectFlags plane =
+        stencil ? VK_IMAGE_ASPECT_STENCIL_BIT : VK_IMAGE_ASPECT_DEPTH_BIT;
+    if (!(src->aspect_mask & plane) || !(dst->aspect_mask & VK_IMAGE_ASPECT_COLOR_BIT)) {
         return;
     }
     // Channels outside the mask keep what they hold
@@ -695,19 +712,19 @@ void Runtime::CopyDepthToColor(VideoCore::Image* src, VideoCore::Image* dst, boo
     scheduler.EndRendering();
 
     bool needs_flush =
-        Transit(src, vk::ImageLayout::eShaderReadOnlyOptimal,
-                vk::PipelineStageFlagBits2::eFragmentShader, vk::AccessFlagBits2::eShaderRead);
-    needs_flush |= Transit(dst, vk::ImageLayout::eColorAttachmentOptimal,
-                           vk::PipelineStageFlagBits2::eColorAttachmentOutput,
-                           vk::AccessFlagBits2::eColorAttachmentRead |
-                               vk::AccessFlagBits2::eColorAttachmentWrite);
+        Transit(src, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_READ_BIT);
+    needs_flush |=
+        Transit(dst, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+                VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT);
     if (needs_flush) {
         FlushBarriers();
     }
 
     const u32 src_samples = src->backing->num_samples;
-    const u32 width = std::min(src->HostSize().width, dst->HostSize().width);
-    const u32 height = std::min(src->HostSize().height, dst->HostSize().height);
+    const u32 width = Common::Min(src->HostSize().width, dst->HostSize().width);
+    const u32 height = Common::Min(src->HostSize().height, dst->HostSize().height);
     instance.Mark(scheduler.CommandBuffer(),
                   "depth to colour: from image at, to image at, stencil|sample<<8|samples<<16, "
                   "w|h<<16",
@@ -717,9 +734,8 @@ void Runtime::CopyDepthToColor(VideoCore::Image* src, VideoCore::Image* dst, boo
     blit_helper->CopyDepthToColor(
         width, height, dst->backing->num_samples, static_cast<VkFormat>(src->info.pixel_format),
         static_cast<VkFormat>(dst->info.pixel_format), src_samples > 1, stencil, uint_out,
-        static_cast<VkColorComponentFlags>(write_mask), std::min(sample, src_samples - 1),
-        static_cast<VkImage>(src->GetImage()), src_layer, static_cast<VkImage>(dst->GetImage()),
-        dst_layer);
+        write_mask, Common::Min(sample, src_samples - 1), static_cast<VkImage>(src->GetImage()),
+        src_layer, static_cast<VkImage>(dst->GetImage()), dst_layer);
 
     dst->flags |= VideoCore::ImageFlagBits::GpuModified;
     dst->flags &= ~VideoCore::ImageFlagBits::Dirty;
@@ -736,30 +752,32 @@ void Runtime::ResolveImage(VideoCore::Image* src, VideoCore::Image* dst,
     scheduler.EndRendering();
 
     const bool needs_resolve = src->backing->num_samples != 1;
-    const auto dst_stage =
-        needs_resolve ? vk::PipelineStageFlagBits2::eResolve : vk::PipelineStageFlagBits2::eCopy;
+    const VkPipelineStageFlags2 dst_stage =
+        needs_resolve ? VK_PIPELINE_STAGE_2_RESOLVE_BIT : VK_PIPELINE_STAGE_2_COPY_BIT;
 
-    bool needs_flush = Transit(src, vk::ImageLayout::eTransferSrcOptimal, dst_stage,
-                               vk::AccessFlagBits2::eTransferRead);
-    needs_flush |= Transit(dst, vk::ImageLayout::eTransferDstOptimal, dst_stage,
-                           vk::AccessFlagBits2::eTransferWrite);
+    bool needs_flush = Transit(src, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, dst_stage,
+                               VK_ACCESS_2_TRANSFER_READ_BIT);
+    needs_flush |= Transit(dst, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, dst_stage,
+                           VK_ACCESS_2_TRANSFER_WRITE_BIT);
     if (needs_flush) {
         FlushBarriers();
     }
 
-    const auto cmdbuf = scheduler.CommandBuffer();
-    const auto [src_layers, dst_layers] = SanitizeCopyLayers(src->info, dst->info, 1);
+    const vk::CommandBuffer cmdbuf = scheduler.CommandBuffer();
+    u32 src_layers;
+    u32 dst_layers;
+    SanitizeCopyLayers(src->info, dst->info, 1, &src_layers, &dst_layers);
     if (!needs_resolve) {
-        const vk::ImageCopy region = {
+        const VkImageCopy region = {
             .srcSubresource{
-                .aspectMask = vk::ImageAspectFlagBits::eColor,
+                .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
                 .mipLevel = 0,
                 .baseArrayLayer = src_range.base.layer,
                 .layerCount = src_layers,
             },
             .srcOffset = {0, 0, 0},
             .dstSubresource{
-                .aspectMask = vk::ImageAspectFlagBits::eColor,
+                .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
                 .mipLevel = 0,
                 .baseArrayLayer = dst_range.base.layer,
                 .layerCount = dst_layers,
@@ -773,19 +791,20 @@ void Runtime::ResolveImage(VideoCore::Image* src, VideoCore::Image* dst,
                           u64(src->info.size.depth) << 32,
                       u64(dst->info.size.width) | u64(dst->info.size.height) << 16 |
                           u64(dst->info.size.depth) << 32);
-        cmdbuf.copyImage(src->GetImage(), vk::ImageLayout::eTransferSrcOptimal, dst->GetImage(),
-                         vk::ImageLayout::eTransferDstOptimal, region);
+        vkCmdCopyImage(static_cast<VkCommandBuffer>(cmdbuf), src->GetImage(),
+                       VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, dst->GetImage(),
+                       VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
     } else {
-        const vk::ImageResolve region = {
+        const VkImageResolve region = {
             .srcSubresource{
-                .aspectMask = vk::ImageAspectFlagBits::eColor,
+                .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
                 .mipLevel = 0,
                 .baseArrayLayer = src_range.base.layer,
                 .layerCount = src_layers,
             },
             .srcOffset = {0, 0, 0},
             .dstSubresource{
-                .aspectMask = vk::ImageAspectFlagBits::eColor,
+                .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
                 .mipLevel = 0,
                 .baseArrayLayer = dst_range.base.layer,
                 .layerCount = dst_layers,
@@ -799,8 +818,9 @@ void Runtime::ResolveImage(VideoCore::Image* src, VideoCore::Image* dst,
                           u64(src->info.size.depth) << 32,
                       u64(dst->info.size.width) | u64(dst->info.size.height) << 16 |
                           u64(dst->info.size.depth) << 32);
-        cmdbuf.resolveImage(src->GetImage(), vk::ImageLayout::eTransferSrcOptimal, dst->GetImage(),
-                            vk::ImageLayout::eTransferDstOptimal, region);
+        vkCmdResolveImage(static_cast<VkCommandBuffer>(cmdbuf), src->GetImage(),
+                          VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, dst->GetImage(),
+                          VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
     }
 
     dst->flags |= VideoCore::ImageFlagBits::GpuModified;
@@ -808,54 +828,60 @@ void Runtime::ResolveImage(VideoCore::Image* src, VideoCore::Image* dst,
 }
 
 void Runtime::ClearImage(VideoCore::Image* dst, const VideoCore::SubresourceRange& range,
-                         const vk::ClearValue& clear_value) {
+                         const VkClearValue& clear_value) {
     scheduler.EndRendering();
 
     const bool needs_flush =
-        Transit(dst, vk::ImageLayout::eTransferDstOptimal, vk::PipelineStageFlagBits2::eClear,
-                vk::AccessFlagBits2::eTransferWrite, range);
+        Transit(dst, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_PIPELINE_STAGE_2_CLEAR_BIT,
+                VK_ACCESS_2_TRANSFER_WRITE_BIT, &range);
     if (needs_flush) {
         FlushBarriers();
     }
 
-    const vk::ImageSubresourceRange vk_range = {
-        .aspectMask = vk::ImageAspectFlagBits::eColor,
+    const VkImageSubresourceRange vk_range = {
+        .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
         .baseMipLevel = range.base.level,
         .levelCount = range.extent.levels,
         .baseArrayLayer = range.base.layer,
         .layerCount = range.extent.layers,
     };
-    const auto cmdbuf = scheduler.CommandBuffer();
+    const vk::CommandBuffer cmdbuf = scheduler.CommandBuffer();
     instance.Mark(cmdbuf, "clear: image at, size, w|h<<16|d<<32", dst->info.guest_address,
                   dst->info.guest_size,
                   u64(dst->info.size.width) | u64(dst->info.size.height) << 16 |
                       u64(dst->info.size.depth) << 32);
-    cmdbuf.clearColorImage(dst->GetImage(), vk::ImageLayout::eTransferDstOptimal, clear_value.color,
-                           vk_range);
+    vkCmdClearColorImage(static_cast<VkCommandBuffer>(cmdbuf), dst->GetImage(),
+                         VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &clear_value.color, 1, &vk_range);
 
     dst->flags |= VideoCore::ImageFlagBits::GpuModified;
     dst->flags &= ~VideoCore::ImageFlagBits::Dirty;
 }
 
 void Runtime::SetBackingSamples(VideoCore::Image* image, u32 num_samples, bool copy_backing) {
-    auto& backing = image->backing;
-    auto& backing_images = image->backing_images;
-    const auto& info = image->info;
+    VideoCore::Image::BackingImage*& backing = image->backing;
+    Common::SmallVector<VideoCore::Image::BackingImage, 2>& backing_images = image->backing_images;
+    const VideoCore::ImageInfo& info = image->info;
     if (!backing || backing->num_samples == num_samples) {
         return;
     }
     ASSERT_MSG(!image->info.props.is_depth, "Swapping samples is only valid for color images");
-    VideoCore::Image::BackingImage* new_backing;
-    auto it = std::ranges::find(backing_images, num_samples,
-                                &VideoCore::Image::BackingImage::num_samples);
-    if (it == backing_images.end()) {
-        const auto previous_size = Common::AlignUp(image->SizeBytes(), 1024);
-        auto new_image_ci = backing->image.image_ci;
-        new_image_ci.samples = LiverpoolToVK::NumSamples(num_samples, image->supported_samples);
+    VideoCore::Image::BackingImage* new_backing = nullptr;
+    for (size_t i = 0; i < backing_images.size(); ++i) {
+        if (backing_images[i].num_samples == num_samples) {
+            new_backing = &backing_images[i];
+            break;
+        }
+    }
+    if (!new_backing) {
+        const u64 previous_size = Common::AlignUp(image->SizeBytes(), 1024);
+        VkImageCreateInfo new_image_ci = backing->image.image_ci;
+        new_image_ci.samples = static_cast<VkSampleCountFlagBits>(
+            LiverpoolToVK::NumSamples(num_samples, vk::SampleCountFlags{image->supported_samples}));
 
         new_backing = &backing_images.emplace_back();
         new_backing->num_samples = num_samples;
-        new_backing->image = VideoCore::UniqueImage{instance.GetDevice(), instance.GetAllocator()};
+        new_backing->image = VideoCore::UniqueImage{static_cast<VkDevice>(instance.GetDevice()),
+                                                    instance.GetAllocator()};
         new_backing->image.Create(new_image_ci);
         if (image->memory_usage_counter) {
             *image->memory_usage_counter +=
@@ -863,15 +889,13 @@ void Runtime::SetBackingSamples(VideoCore::Image* image, u32 num_samples, bool c
         }
 
         Vulkan::SetObjectName(
-            instance.GetDevice(), new_backing->image.image,
-            "Image %ux%ux%u %.*s %s 0x%" PRIx64 ":0x%x L:%u M:%u S:%u (backing)", info.size.width,
+            instance.GetDevice(), vk::Image{new_backing->image.image},
+            "Image %ux%ux%u %.*s %d 0x%" PRIx64 ":0x%x L:%u M:%u S:%u (backing)", info.size.width,
             info.size.height, info.size.depth,
             static_cast<int>(AmdGpu::NameOf(info.tile_mode).size()),
-            AmdGpu::NameOf(info.tile_mode).data(), vk::to_string(info.pixel_format).c_str(),
+            AmdGpu::NameOf(info.tile_mode).data(), static_cast<int>(info.pixel_format),
             info.guest_address, info.guest_size, static_cast<unsigned>(info.resources.layers),
             static_cast<unsigned>(info.resources.levels), static_cast<unsigned>(num_samples));
-    } else {
-        new_backing = std::addressof(*it);
     }
 
     if (copy_backing) {
@@ -879,20 +903,21 @@ void Runtime::SetBackingSamples(VideoCore::Image* image, u32 num_samples, bool c
         ASSERT(image->info.resources.levels == 1 && image->info.resources.layers == 1);
 
         // Transition current backing to shader read layout
-        Transit(image, vk::ImageLayout::eShaderReadOnlyOptimal,
-                vk::PipelineStageFlagBits2::eFragmentShader, vk::AccessFlagBits2::eShaderRead);
+        Transit(image, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_READ_BIT);
 
         // Transition dest backing to color attachment layout, not caring of previous contents
-        constexpr auto dst_stage = vk::PipelineStageFlagBits2::eColorAttachmentOutput;
-        constexpr auto dst_access =
-            vk::AccessFlagBits2::eColorAttachmentRead | vk::AccessFlagBits2::eColorAttachmentWrite;
-        constexpr auto dst_layout = vk::ImageLayout::eColorAttachmentOptimal;
-        image_barriers.push_back(vk::ImageMemoryBarrier2{
-            .srcStageMask = vk::PipelineStageFlagBits2::eAllCommands,
-            .srcAccessMask = vk::AccessFlagBits2::eMemoryRead | vk::AccessFlagBits2::eMemoryWrite,
+        constexpr VkPipelineStageFlags2 dst_stage = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
+        constexpr VkAccessFlags2 dst_access =
+            VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT;
+        constexpr VkImageLayout dst_layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+        image_barriers.push_back(VkImageMemoryBarrier2{
+            .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
+            .srcStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+            .srcAccessMask = VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT,
             .dstStageMask = dst_stage,
             .dstAccessMask = dst_access,
-            .oldLayout = vk::ImageLayout::eUndefined,
+            .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
             .newLayout = dst_layout,
             .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
             .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
@@ -915,8 +940,7 @@ void Runtime::SetBackingSamples(VideoCore::Image* image, u32 num_samples, bool c
         blit_helper->CopyBetweenMsImages(
             image->HostSize().width, image->HostSize().height, new_backing->num_samples,
             static_cast<VkFormat>(info.pixel_format), backing->num_samples > 1,
-            static_cast<VkImage>(vk::Image{backing->image}),
-            static_cast<VkImage>(vk::Image{new_backing->image}));
+            static_cast<VkImage>(backing->image), static_cast<VkImage>(new_backing->image));
 
         // Update current layout in tracker to new backings layout
         new_backing->state.layout = dst_layout;
@@ -938,7 +962,7 @@ bool Runtime::IsBufferAccessed(const VideoCore::Buffer* handle, u64 offset, u64 
 }
 
 void Runtime::AccessBuffer(const VideoCore::Buffer* handle, u64 offset, u64 size,
-                           vk::PipelineStageFlags2 src_stage, vk::AccessFlags2 src_access) {
+                           VkPipelineStageFlags2 src_stage, VkAccessFlags2 src_access) {
     MakeCurrent(handle);
 
     const Interval range = {
@@ -946,17 +970,16 @@ void Runtime::AccessBuffer(const VideoCore::Buffer* handle, u64 offset, u64 size
         .end = offset + size,
     };
 
-    constexpr static vk::AccessFlags2 READ_MASK =
-        vk::AccessFlagBits2::eIndexRead | vk::AccessFlagBits2::eVertexAttributeRead |
-        vk::AccessFlagBits2::eUniformRead | vk::AccessFlagBits2::eShaderRead |
-        vk::AccessFlagBits2::eColorAttachmentRead |
-        vk::AccessFlagBits2::eDepthStencilAttachmentRead | vk::AccessFlagBits2::eTransferRead |
-        vk::AccessFlagBits2::eMemoryRead;
+    constexpr static VkAccessFlags2 READ_MASK =
+        VK_ACCESS_2_INDEX_READ_BIT | VK_ACCESS_2_VERTEX_ATTRIBUTE_READ_BIT |
+        VK_ACCESS_2_UNIFORM_READ_BIT | VK_ACCESS_2_SHADER_READ_BIT |
+        VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT |
+        VK_ACCESS_2_TRANSFER_READ_BIT | VK_ACCESS_2_MEMORY_READ_BIT;
 
-    constexpr static vk::AccessFlags2 WRITE_MASK =
-        vk::AccessFlagBits2::eShaderWrite | vk::AccessFlagBits2::eColorAttachmentWrite |
-        vk::AccessFlagBits2::eDepthStencilAttachmentWrite | vk::AccessFlagBits2::eTransferWrite |
-        vk::AccessFlagBits2::eMemoryWrite | vk::AccessFlagBits2::eTransformFeedbackWriteEXT;
+    constexpr static VkAccessFlags2 WRITE_MASK =
+        VK_ACCESS_2_SHADER_WRITE_BIT | VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT |
+        VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT | VK_ACCESS_2_TRANSFER_WRITE_BIT |
+        VK_ACCESS_2_MEMORY_WRITE_BIT | VK_ACCESS_2_TRANSFORM_FEEDBACK_WRITE_BIT_EXT;
 
     if (src_access & WRITE_MASK) {
         resource->write_ranges.Add(range);
@@ -970,7 +993,7 @@ void Runtime::AccessBuffer(const VideoCore::Buffer* handle, u64 offset, u64 size
 }
 
 void Runtime::FlushBarriers() {
-    vk::DependencyInfo dep_info{};
+    VkDependencyInfo dep_info{.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO};
 
     if (memory_barrier.srcStageMask) {
         dep_info.pMemoryBarriers = &memory_barrier;
@@ -986,17 +1009,17 @@ void Runtime::FlushBarriers() {
     }
 
     scheduler.EndRendering();
-    const auto cmdbuf = scheduler.CommandBuffer();
-    cmdbuf.pipelineBarrier2(dep_info);
+    const vk::CommandBuffer cmdbuf = scheduler.CommandBuffer();
+    vkCmdPipelineBarrier2(static_cast<VkCommandBuffer>(cmdbuf), &dep_info);
 
-    memory_barrier.srcStageMask = vk::PipelineStageFlagBits2::eNone;
-    memory_barrier.srcAccessMask = vk::AccessFlagBits2::eNone;
+    memory_barrier.srcStageMask = VK_PIPELINE_STAGE_2_NONE;
+    memory_barrier.srcAccessMask = VK_ACCESS_2_NONE;
 
     image_barriers.clear();
     num_barrier_sample_locs = 0;
-    for (auto& resource : resources) {
-        resource.read_ranges.Clear();
-        resource.write_ranges.Clear();
+    for (size_t i = 0; i < resources.size(); ++i) {
+        resources[i].read_ranges.Clear();
+        resources[i].write_ranges.Clear();
     }
     resources.clear();
     resource = nullptr;
@@ -1006,12 +1029,14 @@ void Runtime::MakeCurrent(const VideoCore::Buffer* handle) {
     if (resource && resource->handle == handle) {
         return;
     }
-    auto it = std::ranges::find(resources, handle, &BufferBarriers::handle);
-    if (it != resources.end()) {
-        resource = std::addressof(*it);
-        return;
+    for (size_t i = 0; i < resources.size(); ++i) {
+        if (resources[i].handle == handle) {
+            resource = &resources[i];
+            return;
+        }
     }
-    resource = &resources.emplace_back(handle);
+    resource = &resources.emplace_back();
+    resource->handle = handle;
 }
 
 } // namespace Vulkan

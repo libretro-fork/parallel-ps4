@@ -42,7 +42,7 @@ DECLARE_ENUM_FLAG_OPERATORS(ImageFlagBits)
 
 struct UniqueImage {
     explicit UniqueImage() = default;
-    explicit UniqueImage(vk::Device device, Vulkan::MemoryAllocator* allocator)
+    explicit UniqueImage(VkDevice device, Vulkan::MemoryAllocator* allocator)
         : device{device}, allocator{allocator} {}
     ~UniqueImage();
 
@@ -73,29 +73,29 @@ struct UniqueImage {
     void Release() {
         allocator = nullptr;
         allocation = nullptr;
-        image = vk::Image{};
+        image = VK_NULL_HANDLE;
         size_bytes = 0;
     }
 
-    void Create(const vk::ImageCreateInfo& image_ci);
+    void Create(const VkImageCreateInfo& image_ci);
 
     void Destroy();
 
-    operator vk::Image() const {
+    operator VkImage() const {
         return image;
     }
 
     operator bool() const {
-        return image;
+        return image != VK_NULL_HANDLE;
     }
 
 public:
-    vk::Device device{};
+    VkDevice device{};
     Vulkan::MemoryAllocator* allocator{};
     vk_heap_span* allocation{};
-    vk::Image image{};
-    vk::ImageCreateInfo image_ci{};
-    vk::DeviceSize size_bytes{};
+    VkImage image{VK_NULL_HANDLE};
+    VkImageCreateInfo image_ci{.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
+    VkDeviceSize size_bytes{};
 };
 
 struct Image : public Common::LRUNode<> {
@@ -114,7 +114,7 @@ struct Image : public Common::LRUNode<> {
         return info.guest_address < (addr + size) && addr < (info.guest_address + info.guest_size);
     }
 
-    vk::Image GetImage() const {
+    VkImage GetImage() const {
         return backing->image.image;
     }
 
@@ -160,8 +160,8 @@ struct Image : public Common::LRUNode<> {
         depth_uid = {};
     }
 
-    vk::DeviceSize SizeBytes() const {
-        vk::DeviceSize sum = 0;
+    VkDeviceSize SizeBytes() const {
+        VkDeviceSize sum = 0;
         for (size_t i = 0; i < backing_images.size(); ++i) {
             sum += backing_images[i].image.size_bytes;
         }
@@ -170,9 +170,9 @@ struct Image : public Common::LRUNode<> {
 
     ImageView& FindView(const ImageViewInfo& view_info, bool ensure_guest_samples = true);
 
-    using Barriers = Common::SmallVector<vk::ImageMemoryBarrier2, 32>;
-    void GetBarriers(Barriers& out_barriers, vk::ImageLayout dst_layout, vk::AccessFlags2 dst_mask,
-                     vk::PipelineStageFlags2 dst_stage,
+    using Barriers = Common::SmallVector<VkImageMemoryBarrier2, 32>;
+    void GetBarriers(Barriers& out_barriers, VkImageLayout dst_layout, VkAccessFlags2 dst_mask,
+                     VkPipelineStageFlags2 dst_stage,
                      const SubresourceRange* subres_range = nullptr);
 
 public:
@@ -184,8 +184,8 @@ public:
     ImageInfo info;
     u32 scale_num = 1;
     u32 scale_den = 1;
-    vk::ImageAspectFlags aspect_mask = vk::ImageAspectFlagBits::eColor;
-    vk::SampleCountFlags supported_samples = vk::SampleCountFlagBits::e1;
+    VkImageAspectFlags aspect_mask = VK_IMAGE_ASPECT_COLOR_BIT;
+    VkSampleCountFlags supported_samples = VK_SAMPLE_COUNT_1_BIT;
     ImageFlagBits flags = ImageFlagBits::Dirty;
     VAddr track_addr = 0;
     VAddr track_addr_end = 0;
@@ -197,12 +197,12 @@ public:
     u8 sample_locs[64]{};
     u64 depth_uid{};
 
-    vk::ImageUsageFlags usage_flags;
-    vk::FormatFeatureFlags2 format_features;
+    VkImageUsageFlags usage_flags;
+    VkFormatFeatureFlags2 format_features;
     struct State {
-        vk::PipelineStageFlags2 pl_stage = vk::PipelineStageFlagBits2::eAllCommands;
-        vk::AccessFlags2 access_mask = vk::AccessFlagBits2::eNone;
-        vk::ImageLayout layout = vk::ImageLayout::eUndefined;
+        VkPipelineStageFlags2 pl_stage = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+        VkAccessFlags2 access_mask = VK_ACCESS_2_NONE;
+        VkImageLayout layout = VK_IMAGE_LAYOUT_UNDEFINED;
     };
     struct BackingImage {
         BackingImage() = default;

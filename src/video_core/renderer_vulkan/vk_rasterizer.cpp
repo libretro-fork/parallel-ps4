@@ -313,7 +313,7 @@ void Rasterizer::EliminateFastClear() {
 
     HostMarkerBegin("EliminateFastClear:MRT=0x%" PRIx64 ":M=0x%" PRIxPTR, col_buf.Address(),
                     col_buf.CmaskAddress());
-    runtime.ClearImage(&image, desc.view_info.range, clear_value);
+    runtime.ClearImage(&image, desc.view_info.range, static_cast<VkClearValue>(clear_value));
     ScopeMarkerEnd();
 }
 
@@ -868,9 +868,10 @@ void Rasterizer::ResetBindings(bool is_compute) {
         texture_cache.GetImage(image_id).binding = {};
     }
     for (const auto [buffer, offset, size, src_access] : bound_buffers) {
-        const auto dst_stage = is_compute ? vk::PipelineStageFlagBits2::eComputeShader
-                                          : vk::PipelineStageFlagBits2::eAllGraphics;
-        runtime.AccessBuffer(buffer, offset, size, dst_stage, src_access);
+        const VkPipelineStageFlags2 dst_stage = is_compute ? VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT
+                                                           : VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT;
+        runtime.AccessBuffer(buffer, offset, size, dst_stage,
+                             static_cast<VkAccessFlags2>(src_access));
     }
     bound_images.clear();
     bound_buffers.clear();
@@ -1018,9 +1019,11 @@ bool Rasterizer::IsComputeImageClear(const Pipeline* pipeline) {
 
     // Perform image clear
     const float* values = reinterpret_cast<float*>(buf0.base_address);
-    const vk::ClearValue clear = {
-        .color = {.float32 = std::array<float, 4>{values[0], values[1], values[2], values[3]}},
-    };
+    VkClearValue clear;
+    clear.color.float32[0] = values[0];
+    clear.color.float32[1] = values[1];
+    clear.color.float32[2] = values[2];
+    clear.color.float32[3] = values[3];
     const VideoCore::SubresourceRange range = {
         .base =
             {
@@ -1255,34 +1258,34 @@ void Rasterizer::BindTextures(const Shader::Info& stage, Shader::Backend::Bindin
             if ((binding.force_general || binding.is_target) && !image.info.props.is_depth) {
                 if (instance.IsAttachmentFeedbackLoopLayoutSupported() && image.binding.is_target) {
                     needs_barrier |= runtime.Transit(
-                        &image, vk::ImageLayout::eAttachmentFeedbackLoopOptimalEXT,
-                        vk::PipelineStageFlagBits2::eAllGraphics, vk::AccessFlagBits2::eShaderRead);
+                        &image, VK_IMAGE_LAYOUT_ATTACHMENT_FEEDBACK_LOOP_OPTIMAL_EXT,
+                        VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT, VK_ACCESS_2_SHADER_READ_BIT);
                 } else {
                     needs_barrier |= runtime.Transit(
-                        &image, vk::ImageLayout::eGeneral, vk::PipelineStageFlagBits2::eAllCommands,
-                        vk::AccessFlagBits2::eShaderRead | vk::AccessFlagBits2::eShaderWrite,
-                        desc.view_info.range);
+                        &image, VK_IMAGE_LAYOUT_GENERAL, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+                        VK_ACCESS_2_SHADER_READ_BIT | VK_ACCESS_2_SHADER_WRITE_BIT,
+                        &desc.view_info.range);
                 }
             } else {
                 if (is_storage) {
                     needs_barrier |= runtime.Transit(
-                        &image, vk::ImageLayout::eGeneral, vk::PipelineStageFlagBits2::eAllCommands,
-                        vk::AccessFlagBits2::eShaderRead | vk::AccessFlagBits2::eShaderWrite,
-                        desc.view_info.range);
+                        &image, VK_IMAGE_LAYOUT_GENERAL, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+                        VK_ACCESS_2_SHADER_READ_BIT | VK_ACCESS_2_SHADER_WRITE_BIT,
+                        &desc.view_info.range);
                 } else {
-                    const auto new_layout = image.info.props.is_depth
-                                                ? vk::ImageLayout::eDepthStencilReadOnlyOptimal
-                                                : vk::ImageLayout::eShaderReadOnlyOptimal;
-                    needs_barrier |= runtime.Transit(
-                        &image, new_layout, vk::PipelineStageFlagBits2::eAllCommands,
-                        vk::AccessFlagBits2::eShaderRead, desc.view_info.range);
+                    const VkImageLayout new_layout =
+                        image.info.props.is_depth ? VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL
+                                                  : VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+                    needs_barrier |=
+                        runtime.Transit(&image, new_layout, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+                                        VK_ACCESS_2_SHADER_READ_BIT, &desc.view_info.range);
                 }
             }
             image.usage.storage |= is_storage;
             image.usage.texture |= !is_storage;
 
             image_infos.emplace_back(VK_NULL_HANDLE, image_view.Handle(),
-                                     image.backing->state.layout);
+                                     static_cast<vk::ImageLayout>(image.backing->state.layout));
         }
     }
 
@@ -1368,21 +1371,20 @@ RenderState Rasterizer::BeginRendering(const GraphicsPipeline* pipeline) {
             ASSERT_MSG(!image->binding.force_general,
                        "Having image both as storage and render target is unsupported");
             runtime.FlushBarriers();
-            needs_barrier |=
-                runtime.Transit(image,
-                                instance.IsAttachmentFeedbackLoopLayoutSupported()
-                                    ? vk::ImageLayout::eAttachmentFeedbackLoopOptimalEXT
-                                    : vk::ImageLayout::eGeneral,
-                                vk::PipelineStageFlagBits2::eColorAttachmentOutput,
-                                vk::AccessFlagBits2::eColorAttachmentWrite |
-                                    vk::AccessFlagBits2::eColorAttachmentRead);
+            needs_barrier |= runtime.Transit(
+                image,
+                instance.IsAttachmentFeedbackLoopLayoutSupported()
+                    ? VK_IMAGE_LAYOUT_ATTACHMENT_FEEDBACK_LOOP_OPTIMAL_EXT
+                    : VK_IMAGE_LAYOUT_GENERAL,
+                VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+                VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT);
             attachment_feedback_loop = true;
         } else {
-            needs_barrier |= runtime.Transit(image, vk::ImageLayout::eColorAttachmentOptimal,
-                                             vk::PipelineStageFlagBits2::eColorAttachmentOutput,
-                                             vk::AccessFlagBits2::eColorAttachmentWrite |
-                                                 vk::AccessFlagBits2::eColorAttachmentRead,
-                                             desc.view_info.range);
+            needs_barrier |= runtime.Transit(image, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                                             VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+                                             VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT |
+                                                 VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT,
+                                             &desc.view_info.range);
         }
 
         state.width = std::min<u32>(state.width, std::max(image->HostSize().width >> mip, 1u));
@@ -1441,19 +1443,19 @@ RenderState Rasterizer::BeginRendering(const GraphicsPipeline* pipeline) {
         // Stencil writes can be enabled while depth writes are off.
         const bool stencil_write =
             has_stencil && regs.depth_control.stencil_enable && !desc.view_info.is_storage;
-        const auto new_layout = desc.view_info.is_storage
-                                    ? has_stencil ? vk::ImageLayout::eDepthStencilAttachmentOptimal
-                                                  : vk::ImageLayout::eDepthAttachmentOptimal
-                                : stencil_write
-                                    ? vk::ImageLayout::eDepthReadOnlyStencilAttachmentOptimal
-                                : has_stencil ? vk::ImageLayout::eDepthStencilReadOnlyOptimal
-                                              : vk::ImageLayout::eDepthReadOnlyOptimal;
+        const VkImageLayout new_layout =
+            desc.view_info.is_storage ? has_stencil
+                                            ? VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL
+                                            : VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL
+            : stencil_write           ? VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_STENCIL_ATTACHMENT_OPTIMAL
+            : has_stencil             ? VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL
+                                      : VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_OPTIMAL;
         needs_barrier |= runtime.Transit(&image, new_layout,
-                                         vk::PipelineStageFlagBits2::eEarlyFragmentTests |
-                                             vk::PipelineStageFlagBits2::eLateFragmentTests,
-                                         vk::AccessFlagBits2::eDepthStencilAttachmentWrite |
-                                             vk::AccessFlagBits2::eDepthStencilAttachmentRead,
-                                         desc.view_info.range);
+                                         VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT |
+                                             VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
+                                         VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT |
+                                             VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT,
+                                         &desc.view_info.range);
 
         state.width = std::min<u32>(state.width, image.HostSize().width);
         state.height = std::min<u32>(state.height, image.HostSize().height);
@@ -1476,10 +1478,8 @@ RenderState Rasterizer::BeginRendering(const GraphicsPipeline* pipeline) {
         // Only the planes the image has: the game may name a stencil format for a depth buffer
         // made without one (and the other way round), and a pass that wrote to a plane that is
         // not there lost the GPU device with a write to address nothing
-        const bool image_has_depth =
-            static_cast<bool>(image.aspect_mask & vk::ImageAspectFlagBits::eDepth);
-        const bool image_has_stencil =
-            static_cast<bool>(image.aspect_mask & vk::ImageAspectFlagBits::eStencil);
+        const bool image_has_depth = (image.aspect_mask & VK_IMAGE_ASPECT_DEPTH_BIT) != 0;
+        const bool image_has_stencil = (image.aspect_mask & VK_IMAGE_ASPECT_STENCIL_BIT) != 0;
         instance.Note("depth target: image at, format|samples<<16|layout<<32, w|h<<16, asked "
                       "depth|stencil<<1|has depth<<2|has stencil<<3",
                       image.info.guest_address,
@@ -1581,8 +1581,8 @@ void Rasterizer::DepthToColor(bool is_stencil, u32 sample) {
                     depth_image.info.guest_address, color_image.info.guest_address,
                     (is_stencil) ? "true" : "false", sample);
     // The channels of the image the game's mask stands for
-    const auto write_mask =
-        vk::ColorComponentFlags{col_buf.Swizzle().ApplyMask(regs.color_target_mask.GetMask(0))};
+    const VkColorComponentFlags write_mask =
+        col_buf.Swizzle().ApplyMask(regs.color_target_mask.GetMask(0));
     runtime.CopyDepthToColor(&depth_image, &color_image, is_stencil,
                              AmdGpu::IsInteger(col_buf.GetNumberFmt()), write_mask, sample,
                              regs.depth_view.slice_start, color_view.info.range.base.layer);

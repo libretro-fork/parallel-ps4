@@ -135,8 +135,8 @@ ImageView::ImageView(const Vulkan::Instance& instance, const ImageViewInfo& info
     image_view_ci.pNext = &usage_ci;
     image_view_ci.image = static_cast<VkImage>(image.GetImage());
     image_view_ci.viewType = ConvertImageViewType(info.type);
-    image_view_ci.format =
-        static_cast<VkFormat>(instance.GetSupportedFormat(format, image.format_features));
+    image_view_ci.format = static_cast<VkFormat>(
+        instance.GetSupportedFormat(format, vk::FormatFeatureFlags2{image.format_features}));
     image_view_ci.components = static_cast<VkComponentMapping>(components);
     image_view_ci.subresourceRange.aspectMask = aspect;
     image_view_ci.subresourceRange.baseMipLevel = info.range.base.level;

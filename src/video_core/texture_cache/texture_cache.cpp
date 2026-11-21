@@ -1039,7 +1039,7 @@ void TextureCache::RefreshImage(Image& image) {
             SubresourceRange range{};
             range.extent.levels = 1;
             range.extent.layers = image.info.resources.layers;
-            runtime.ClearImage(&image, range, vk::ClearValue{});
+            runtime.ClearImage(&image, range, VkClearValue{});
         }
         return;
     }

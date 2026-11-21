@@ -38,14 +38,14 @@ public:
 
     /// Creates an image with device local memory bound. Over the heap's budget it fails with
     /// eErrorOutOfDeviceMemory unless !@within_budget.
-    vk::Result CreateImage(const vk::ImageCreateInfo& image_ci, bool within_budget,
-                           vk::Image& image, MemoryAllocation& allocation);
+    VkResult CreateImage(const VkImageCreateInfo& image_ci, bool within_budget, VkImage& image,
+                         MemoryAllocation& allocation);
 
     /// Creates a buffer with memory for @usage bound; @dedicated gives it memory of its own.
     VkResult CreateBuffer(const VkBufferCreateInfo& buffer_ci, MemoryUsage usage, bool dedicated,
                           bool within_budget, VkBuffer& buffer, MemoryAllocation& allocation);
 
-    void DestroyImage(vk::Image image, MemoryAllocation allocation);
+    void DestroyImage(VkImage image, MemoryAllocation allocation);
     void DestroyBuffer(VkBuffer buffer, MemoryAllocation allocation);
 
     /// For noncoherent memory; nothing to do for coherent memory. From any thread.

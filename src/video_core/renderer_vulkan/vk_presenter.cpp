@@ -245,11 +245,13 @@ struct FrameReadback {
             .tiling = vk::ImageTiling::eOptimal,
             .usage = vk::ImageUsageFlagBits::eTransferDst | vk::ImageUsageFlagBits::eTransferSrc,
         };
-        if (instance_.GetAllocator()->CreateImage(image_info, false, narrow, narrow_allocation) !=
-            vk::Result::eSuccess) {
+        VkImage created = VK_NULL_HANDLE;
+        if (instance_.GetAllocator()->CreateImage(image_info, false, created, narrow_allocation) !=
+            VK_SUCCESS) {
             LOG_CRITICAL(Render_Vulkan, "No image to read a frame back through");
             UNREACHABLE();
         }
+        narrow = vk::Image{created};
         in_order = true;
     }
 
@@ -608,11 +610,12 @@ void Presenter::RecreateFrame(Frame* frame, u32 width, u32 height) {
                  vk::ImageUsageFlagBits::eTransferSrc | vk::ImageUsageFlagBits::eSampled,
     };
 
-    const vk::Result result =
-        instance.GetAllocator()->CreateImage(image_info, true, frame->image, frame->allocation);
-    if (result != vk::Result::eSuccess) [[unlikely]] {
-        LOG_CRITICAL(Render_Vulkan, "Failed allocating texture with error %s",
-                     (vk::to_string(result)).c_str());
+    VkImage created = VK_NULL_HANDLE;
+    const VkResult result =
+        instance.GetAllocator()->CreateImage(image_info, true, created, frame->allocation);
+    frame->image = vk::Image{created};
+    if (result != VK_SUCCESS) [[unlikely]] {
+        LOG_CRITICAL(Render_Vulkan, "Failed allocating texture with error %s", ResultName(result));
         UNREACHABLE();
     }
     SetObjectName(device, frame->image, "Frame image #%d", frame->id);
@@ -772,8 +775,8 @@ Frame* Presenter::PrepareFrame(const Libraries::VideoOut::BufferAttributeGroup& 
     const vk::Extent2D image_size = {image.HostSize().width, image.HostSize().height};
     expected_ratio = static_cast<float>(image_size.width) / static_cast<float>(image_size.height);
 
-    runtime.Transit(&image, vk::ImageLayout::eShaderReadOnlyOptimal,
-                    vk::PipelineStageFlagBits2::eFragmentShader, vk::AccessFlagBits2::eShaderRead);
+    runtime.Transit(&image, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                    VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_READ_BIT);
     runtime.FlushBarriers();
 
     // Vulkan has no sRGB variant of the 10-bit format, so an A2R10G10B10Srgb buffer reaches

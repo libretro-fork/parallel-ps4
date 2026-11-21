@@ -254,8 +254,7 @@ const Buffer* TileManager::DetileImage(const VideoCore::Buffer* in_buffer, u64 i
     vkCmdDispatch(static_cast<VkCommandBuffer>(cmdbuf), dim_x, 1, 1);
 
     runtime.AccessBuffer(staging.buffer, staging.offset, info.guest_size,
-                         vk::PipelineStageFlagBits2::eComputeShader,
-                         vk::AccessFlagBits2::eShaderWrite);
+                         VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_WRITE_BIT);
 
     *out_offset = staging.offset;
     return staging.buffer;
@@ -298,11 +297,9 @@ void TileManager::TileImage(Image& in_image, VkBufferImageCopy* buffer_copies, u
     vkCmdDispatch(static_cast<VkCommandBuffer>(cmdbuf), dim_x, 1, 1);
 
     runtime.AccessBuffer(staging.buffer, staging.offset, info.guest_size,
-                         vk::PipelineStageFlagBits2::eComputeShader,
-                         vk::AccessFlagBits2::eShaderRead);
+                         VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_READ_BIT);
     runtime.AccessBuffer(out_buffer, out_offset, info.guest_size,
-                         vk::PipelineStageFlagBits2::eComputeShader,
-                         vk::AccessFlagBits2::eShaderWrite);
+                         VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_WRITE_BIT);
 }
 
 } // namespace VideoCore

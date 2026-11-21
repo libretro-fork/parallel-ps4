@@ -84,14 +84,13 @@ void MemoryAllocator::Free(MemoryAllocation allocation) {
     }
 }
 
-vk::Result MemoryAllocator::CreateImage(const vk::ImageCreateInfo& image_ci, bool within_budget,
-                                        vk::Image& image, MemoryAllocation& allocation) {
+VkResult MemoryAllocator::CreateImage(const VkImageCreateInfo& image_ci, bool within_budget,
+                                      VkImage& image, MemoryAllocation& allocation) {
     allocation = nullptr;
     VkImage new_image = VK_NULL_HANDLE;
-    VkResult result = vkCreateImage(device, &static_cast<const VkImageCreateInfo&>(image_ci),
-                                    nullptr, &new_image);
+    VkResult result = vkCreateImage(device, &image_ci, nullptr, &new_image);
     if (result != VK_SUCCESS) {
-        return static_cast<vk::Result>(result);
+        return result;
     }
     VkImageMemoryRequirementsInfo2 requirements_info{};
     requirements_info.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_REQUIREMENTS_INFO_2;
@@ -104,7 +103,7 @@ vk::Result MemoryAllocator::CreateImage(const vk::ImageCreateInfo& image_ci, boo
     vkGetImageMemoryRequirements2(device, &requirements_info, &requirements2);
     vk_heap_request_t request = RequestFor(MemoryUsage::DeviceLocal);
     request.image = new_image;
-    if (image_ci.tiling == vk::ImageTiling::eLinear) {
+    if (image_ci.tiling == VK_IMAGE_TILING_LINEAR) {
         request.flags |= VK_HEAP_LINEAR;
     }
     if (within_budget) {
@@ -121,10 +120,10 @@ vk::Result MemoryAllocator::CreateImage(const vk::ImageCreateInfo& image_ci, boo
         vkDestroyImage(device, new_image, nullptr);
         Free(allocation);
         allocation = nullptr;
-        return static_cast<vk::Result>(result);
+        return result;
     }
-    image = vk::Image{new_image};
-    return vk::Result::eSuccess;
+    image = new_image;
+    return VK_SUCCESS;
 }
 
 VkResult MemoryAllocator::CreateBuffer(const VkBufferCreateInfo& buffer_ci, MemoryUsage usage,
@@ -171,9 +170,9 @@ VkResult MemoryAllocator::CreateBuffer(const VkBufferCreateInfo& buffer_ci, Memo
     return VK_SUCCESS;
 }
 
-void MemoryAllocator::DestroyImage(vk::Image image, MemoryAllocation allocation) {
-    if (image) {
-        vkDestroyImage(device, static_cast<VkImage>(image), nullptr);
+void MemoryAllocator::DestroyImage(VkImage image, MemoryAllocation allocation) {
+    if (image != VK_NULL_HANDLE) {
+        vkDestroyImage(device, image, nullptr);
     }
     Free(allocation);
 }
