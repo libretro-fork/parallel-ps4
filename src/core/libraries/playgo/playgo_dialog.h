@@ -1,38 +1,42 @@
-// SPDX-FileCopyrightText: Copyright 2024 shadPS4 Emulator Project
-// SPDX-License-Identifier: GPL-2.0-or-later
+/* SPDX-FileCopyrightText: Copyright 2024 shadPS4 Emulator Project
+ * SPDX-License-Identifier: GPL-2.0-or-later */
 
-#pragma once
+#ifndef SHADPS4_LIBRARIES_PLAYGO_DIALOG_H
+#define SHADPS4_LIBRARIES_PLAYGO_DIALOG_H
+
+/* libScePlayGoDialog: no dialog is shown; its result lets the game go on. Defined in
+ * playgo_dialog.c, registered in libs.cpp. */
+
+#include <retro_common_api.h>
 
 #include "common/types.h"
-#include "core/libraries/system/commondialog.h"
+#include "core/libraries/system/commondialog_c.h"
 
-namespace Core::Loader {
-class SymbolsResolver;
-}
+RETRO_BEGIN_DECLS
 
-namespace Libraries::PlayGo::Dialog {
-
-struct OrbisPlayGoDialogParam {
-    CommonDialog::BaseParam baseParam;
+typedef struct OrbisPlayGoDialogParam {
+    common_dialog_base_param baseParam;
     s32 size;
     u8 unk[0x30];
-};
-static_assert(sizeof(OrbisPlayGoDialogParam) == 0x68);
+} OrbisPlayGoDialogParam;
+typedef char playgo_dialog_param_size_check[sizeof(OrbisPlayGoDialogParam) == 0x68 ? 1 : -1];
 
-struct OrbisPlayGoDialogResult {
+typedef struct OrbisPlayGoDialogResult {
     u8 unk1[0x4];
-    CommonDialog::Result result;
+    u32 result; /* COMMON_DIALOG_RESULT_* */
     u8 unk2[0x20];
-};
-static_assert(sizeof(OrbisPlayGoDialogResult) == 0x28);
+} OrbisPlayGoDialogResult;
+typedef char playgo_dialog_result_size_check[sizeof(OrbisPlayGoDialogResult) == 0x28 ? 1 : -1];
 
-CommonDialog::Error PS4_SYSV_ABI scePlayGoDialogClose();
-CommonDialog::Error PS4_SYSV_ABI scePlayGoDialogGetResult(OrbisPlayGoDialogResult* result);
-CommonDialog::Status PS4_SYSV_ABI scePlayGoDialogGetStatus();
-CommonDialog::Error PS4_SYSV_ABI scePlayGoDialogInitialize();
-CommonDialog::Error PS4_SYSV_ABI scePlayGoDialogOpen(const OrbisPlayGoDialogParam* param);
-CommonDialog::Error PS4_SYSV_ABI scePlayGoDialogTerminate();
-CommonDialog::Status PS4_SYSV_ABI scePlayGoDialogUpdateStatus();
+/* The errors are COMMON_DIALOG_ERROR_*, the statuses COMMON_DIALOG_STATUS_* */
+u32 PS4_SYSV_ABI scePlayGoDialogClose(void);
+u32 PS4_SYSV_ABI scePlayGoDialogGetResult(OrbisPlayGoDialogResult* result);
+u32 PS4_SYSV_ABI scePlayGoDialogGetStatus(void);
+u32 PS4_SYSV_ABI scePlayGoDialogInitialize(void);
+u32 PS4_SYSV_ABI scePlayGoDialogOpen(const OrbisPlayGoDialogParam* param);
+u32 PS4_SYSV_ABI scePlayGoDialogTerminate(void);
+u32 PS4_SYSV_ABI scePlayGoDialogUpdateStatus(void);
 
-void RegisterLib(Core::Loader::SymbolsResolver* sym);
-} // namespace Libraries::PlayGo::Dialog
+RETRO_END_DECLS
+
+#endif

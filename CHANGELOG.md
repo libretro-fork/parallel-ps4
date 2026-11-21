@@ -4,6 +4,11 @@ What changed in the libretro core of this fork, newest first. Changes that come 
 
 ## Unreleased
 
+- The common dialog library (`libSceCommonDialog`), the PlayGo dialog (`libScePlayGoDialog`) and the web browser dialog (`libSceWebBrowserDialog`) are MSVC C89, registered in `libs.cpp`.
+  - **What every dialog shares is now C** (`system/commondialog_c.h`): the status, result and error values, the base parameter, and the two flags saying the common dialog is initialized and a dialog is in use, held in `commondialog.c`. The C++ dialogs that are left (message, save data, error, invitation, NP and the others) still see `CommonDialog::Status`, `Result` and `Error` as enum classes in `commondialog.h`, whose values are checked against the C ones when built, and the two flags through references to the C ones: none of them changed.
+  - Functions named after the console's C++ symbols (`_ZN3sce16CommonDialogUtil...`) and the unnamed ones (`Func_...`) are prefixed in C (`CommonDialog_`, `WebBrowserDialog_`), as with the other libraries; their log lines keep the old names.
+  - **The same answers:** the C and C++ versions, linked into one program, were given 1 million random calls across the three libraries, the two shared flags compared after each: no difference in 3.2 million checks.
+  - Not run in a game yet.
 - The PlayGo library (`libScePlayGo`) and its file reader (`playgo_chunk`) are MSVC C89; the library is registered in `libs.cpp`. The PlayGo dialog stays C++ for now, with the common dialog.
   - **The file is read where it lies.** The C++ copied each of the file's four tables into a `std::string`, made a `std::vector` of chunks, and a `std::string` label for each chunk that nothing read. The C reads the sizes it needs straight out of the mapped file, field by field, and keeps only each chunk's size, in a table made once (the largest a file can have, 65,536 chunks; untouched memory past the chunks a game has). Nothing is allocated at `scePlayGoInitialize`, and nothing is copied.
   - **A broken file can no longer be read past its end.** The C++ checked that each table lay inside the file, but not that a chunk's entry, its list of pieces or a piece's entry lay inside its table. The C checks all three, and a file that fails is treated as one that could not be read.

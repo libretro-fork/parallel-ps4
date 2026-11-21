@@ -1,31 +1,35 @@
-// SPDX-FileCopyrightText: Copyright 2024-2026 shadPS4 Emulator Project
-// SPDX-License-Identifier: GPL-2.0-or-later
+/* SPDX-FileCopyrightText: Copyright 2024-2026 shadPS4 Emulator Project
+ * SPDX-License-Identifier: GPL-2.0-or-later */
 
-#pragma once
+#ifndef SHADPS4_LIBRARIES_WEBBROWSERDIALOG_H
+#define SHADPS4_LIBRARIES_WEBBROWSERDIALOG_H
 
-#include <core/libraries/system/commondialog.h>
+/* libSceWebBrowserDialog: the dialog's states, with no browser shown; one opened is finished
+ * at its next status update. Defined in webbrowserdialog.c, registered in libs.cpp. */
+
+#include <retro_common_api.h>
+
 #include "common/types.h"
+#include "core/libraries/system/commondialog_c.h"
 
-namespace Core::Loader {
-class SymbolsResolver;
-}
+RETRO_BEGIN_DECLS
 
-namespace Libraries::WebBrowserDialog {
+/* The errors are COMMON_DIALOG_ERROR_*, the statuses COMMON_DIALOG_STATUS_* */
+u32 PS4_SYSV_ABI sceWebBrowserDialogClose(void);
+s32 PS4_SYSV_ABI sceWebBrowserDialogGetEvent(void);
+s32 PS4_SYSV_ABI sceWebBrowserDialogGetResult(void);
+u32 PS4_SYSV_ABI sceWebBrowserDialogGetStatus(void);
+u32 PS4_SYSV_ABI sceWebBrowserDialogInitialize(void);
+s32 PS4_SYSV_ABI sceWebBrowserDialogNavigate(void);
+u32 PS4_SYSV_ABI sceWebBrowserDialogOpen(void);
+s32 PS4_SYSV_ABI sceWebBrowserDialogOpenForPredeterminedContent(void);
+s32 PS4_SYSV_ABI sceWebBrowserDialogResetCookie(void);
+s32 PS4_SYSV_ABI sceWebBrowserDialogSetCookie(void);
+s32 PS4_SYSV_ABI sceWebBrowserDialogSetZoom(void);
+u32 PS4_SYSV_ABI sceWebBrowserDialogTerminate(void);
+u32 PS4_SYSV_ABI sceWebBrowserDialogUpdateStatus(void);
+s32 PS4_SYSV_ABI WebBrowserDialog_Func_F2BE042771625F8C(void);
 
-Libraries::CommonDialog::Error PS4_SYSV_ABI sceWebBrowserDialogClose();
-s32 PS4_SYSV_ABI sceWebBrowserDialogGetEvent();
-s32 PS4_SYSV_ABI sceWebBrowserDialogGetResult();
-Libraries::CommonDialog::Status PS4_SYSV_ABI sceWebBrowserDialogGetStatus();
-Libraries::CommonDialog::Error PS4_SYSV_ABI sceWebBrowserDialogInitialize();
-s32 PS4_SYSV_ABI sceWebBrowserDialogNavigate();
-Libraries::CommonDialog::Error PS4_SYSV_ABI sceWebBrowserDialogOpen();
-s32 PS4_SYSV_ABI sceWebBrowserDialogOpenForPredeterminedContent();
-s32 PS4_SYSV_ABI sceWebBrowserDialogResetCookie();
-s32 PS4_SYSV_ABI sceWebBrowserDialogSetCookie();
-s32 PS4_SYSV_ABI sceWebBrowserDialogSetZoom();
-Libraries::CommonDialog::Error PS4_SYSV_ABI sceWebBrowserDialogTerminate();
-Libraries::CommonDialog::Status PS4_SYSV_ABI sceWebBrowserDialogUpdateStatus();
-s32 PS4_SYSV_ABI Func_F2BE042771625F8C();
+RETRO_END_DECLS
 
-void RegisterLib(Core::Loader::SymbolsResolver* sym);
-} // namespace Libraries::WebBrowserDialog
+#endif

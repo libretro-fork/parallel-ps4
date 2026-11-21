@@ -736,6 +736,112 @@ static void RegisterVrTracker(Core::Loader::SymbolsResolver* sym) {
                  sceVrTrackerStopLiveCapture);
 }
 
+static void RegisterCommonDialog(Core::Loader::SymbolsResolver* sym) {
+    LIB_FUNCTION("2RdicdHhtGA", "libSceCommonDialog", 1, "libSceCommonDialog",
+                 CommonDialog_ZN3sce16CommonDialogUtil12getSelfAppIdEv);
+    LIB_FUNCTION("I+tdxsCap08", "libSceCommonDialog", 1, "libSceCommonDialog",
+                 CommonDialog_ZN3sce16CommonDialogUtil6Client11closeModuleEv);
+    LIB_FUNCTION("v4+gzuTkv6k", "libSceCommonDialog", 1, "libSceCommonDialog",
+                 CommonDialog_ZN3sce16CommonDialogUtil6Client11updateStateEv);
+    LIB_FUNCTION("CwCzG0nnLg8", "libSceCommonDialog", 1, "libSceCommonDialog",
+                 CommonDialog_ZN3sce16CommonDialogUtil6Client15launchCmnDialogEv);
+    LIB_FUNCTION("Ib1SMmbr07k", "libSceCommonDialog", 1, "libSceCommonDialog",
+                 CommonDialog_ZN3sce16CommonDialogUtil6ClientD0Ev);
+    LIB_FUNCTION("6TIMpGvsrC4", "libSceCommonDialog", 1, "libSceCommonDialog",
+                 CommonDialog_ZN3sce16CommonDialogUtil6ClientD1Ev);
+    LIB_FUNCTION("+UyKxWAnqIU", "libSceCommonDialog", 1, "libSceCommonDialog",
+                 CommonDialog_ZN3sce16CommonDialogUtil6ClientD2Ev);
+    LIB_FUNCTION("bUCx72-9f0g", "libSceCommonDialog", 1, "libSceCommonDialog",
+                 CommonDialog_ZNK3sce16CommonDialogUtil6Client10isCloseReqEv);
+    LIB_FUNCTION("xZtXq554Lbg", "libSceCommonDialog", 1, "libSceCommonDialog",
+                 CommonDialog_ZNK3sce16CommonDialogUtil6Client13getFinishDataEPvm);
+    LIB_FUNCTION("C-EZ3PkhibQ", "libSceCommonDialog", 1, "libSceCommonDialog",
+                 CommonDialog_ZNK3sce16CommonDialogUtil6Client14getClientStateEv);
+    LIB_FUNCTION("70niEKUAnZ0", "libSceCommonDialog", 1, "libSceCommonDialog",
+                 CommonDialog_ZNK3sce16CommonDialogUtil6Client19isInitializedStatusEv);
+    LIB_FUNCTION("mdJgdwoM0Mo", "libSceCommonDialog", 1, "libSceCommonDialog",
+                 CommonDialog_ZNK3sce16CommonDialogUtil6Client8getAppIdEv);
+    LIB_FUNCTION("87GekE1nowg", "libSceCommonDialog", 1, "libSceCommonDialog",
+                 CommonDialog_ZNK3sce16CommonDialogUtil6Client8isFinishEv);
+    LIB_FUNCTION("6ljeTSi+fjs", "libSceCommonDialog", 1, "libSceCommonDialog",
+                 CommonDialog_ZNK3sce16CommonDialogUtil6Client9getResultEv);
+    LIB_FUNCTION("W2MzrWix2mM", "libSceCommonDialog", 1, "libSceCommonDialog",
+                 CommonDialog_ZTVN3sce16CommonDialogUtil6ClientE);
+    LIB_FUNCTION("uoUpLGNkygk", "libSceCommonDialog", 1, "libSceCommonDialog",
+                 sceCommonDialogInitialize);
+    LIB_FUNCTION("BQ3tey0JmQM", "libSceCommonDialog", 1, "libSceCommonDialog",
+                 sceCommonDialogIsUsed);
+    LIB_FUNCTION("D-V35OhFeIM", "libSceCommonDialog", 1, "libSceCommonDialog",
+                 CommonDialog_Func_0FF577E4E8457883);
+    LIB_FUNCTION("QXFsLON5QWw", "libSceCommonDialog", 1, "libSceCommonDialog",
+                 CommonDialog_Func_41716C2CE379416C);
+    LIB_FUNCTION("SDpCfY9uB0g", "libSceCommonDialog", 1, "libSceCommonDialog",
+                 CommonDialog_Func_483A427D8F6E0748);
+    LIB_FUNCTION("aUS4PgJye98", "libSceCommonDialog", 1, "libSceCommonDialog",
+                 CommonDialog_Func_6944B83E02727BDF);
+    LIB_FUNCTION("afLdI6i0lQw", "libSceCommonDialog", 1, "libSceCommonDialog",
+                 CommonDialog_Func_69F2DD23A8B4950C);
+    LIB_FUNCTION("mVRnPerBcK0", "libSceCommonDialog", 1, "libSceCommonDialog",
+                 CommonDialog_Func_9954673DEAC170AD);
+    LIB_FUNCTION("p9TTq4bLdFU", "libSceCommonDialog", 1, "libSceCommonDialog",
+                 CommonDialog_Func_A7D4D3AB86CB7455);
+    LIB_FUNCTION("reTFEla4NQw", "libSceCommonDialog", 1, "libSceCommonDialog",
+                 CommonDialog_Func_ADE4C51256B8350C);
+    LIB_FUNCTION("txNJzxX6yrA", "libSceCommonDialog", 1, "libSceCommonDialog",
+                 CommonDialog_Func_B71349CF15FACAB0);
+    LIB_FUNCTION("yxjgDvqUbGQ", "libSceCommonDialog", 1, "libSceCommonDialog",
+                 CommonDialog_Func_CB18E00EFA946C64);
+    LIB_FUNCTION("8q7icGBWIrA", "libSceCommonDialog", 1, "libSceCommonDialog",
+                 CommonDialog_Func_F2AEE270605622B0);
+}
+
+static void RegisterPlayGoDialog(Core::Loader::SymbolsResolver* sym) {
+    LIB_FUNCTION("fbigNQiZpm0", "libScePlayGoDialog", 1, "libScePlayGoDialog",
+                 scePlayGoDialogClose);
+    LIB_FUNCTION("wx9TDplJKB4", "libScePlayGoDialog", 1, "libScePlayGoDialog",
+                 scePlayGoDialogGetResult);
+    LIB_FUNCTION("NOAMxY2EGS0", "libScePlayGoDialog", 1, "libScePlayGoDialog",
+                 scePlayGoDialogGetStatus);
+    LIB_FUNCTION("fECamTJKpsM", "libScePlayGoDialog", 1, "libScePlayGoDialog",
+                 scePlayGoDialogInitialize);
+    LIB_FUNCTION("kHd72ukqbxw", "libScePlayGoDialog", 1, "libScePlayGoDialog", scePlayGoDialogOpen);
+    LIB_FUNCTION("okgIGdr5Iz0", "libScePlayGoDialog", 1, "libScePlayGoDialog",
+                 scePlayGoDialogTerminate);
+    LIB_FUNCTION("Yb60K7BST48", "libScePlayGoDialog", 1, "libScePlayGoDialog",
+                 scePlayGoDialogUpdateStatus);
+}
+
+static void RegisterWebBrowserDialog(Core::Loader::SymbolsResolver* sym) {
+    LIB_FUNCTION("PSK+Eik919Q", "libSceWebBrowserDialog", 1, "libSceWebBrowserDialog",
+                 sceWebBrowserDialogClose);
+    LIB_FUNCTION("Wit4LjeoeX4", "libSceWebBrowserDialog", 1, "libSceWebBrowserDialog",
+                 sceWebBrowserDialogGetEvent);
+    LIB_FUNCTION("vCaW0fgVQmc", "libSceWebBrowserDialog", 1, "libSceWebBrowserDialog",
+                 sceWebBrowserDialogGetResult);
+    LIB_FUNCTION("CFTG6a8TjOU", "libSceWebBrowserDialog", 1, "libSceWebBrowserDialog",
+                 sceWebBrowserDialogGetStatus);
+    LIB_FUNCTION("jqb7HntFQFc", "libSceWebBrowserDialog", 1, "libSceWebBrowserDialog",
+                 sceWebBrowserDialogInitialize);
+    LIB_FUNCTION("uYELOMVnmNQ", "libSceWebBrowserDialog", 1, "libSceWebBrowserDialog",
+                 sceWebBrowserDialogNavigate);
+    LIB_FUNCTION("FraP7debcdg", "libSceWebBrowserDialog", 1, "libSceWebBrowserDialog",
+                 sceWebBrowserDialogOpen);
+    LIB_FUNCTION("O7dIZQrwVFY", "libSceWebBrowserDialog", 1, "libSceWebBrowserDialog",
+                 sceWebBrowserDialogOpenForPredeterminedContent);
+    LIB_FUNCTION("Cya+jvTtPqg", "libSceWebBrowserDialog", 1, "libSceWebBrowserDialog",
+                 sceWebBrowserDialogResetCookie);
+    LIB_FUNCTION("TZnDVkP91Rg", "libSceWebBrowserDialog", 1, "libSceWebBrowserDialog",
+                 sceWebBrowserDialogSetCookie);
+    LIB_FUNCTION("RLhKBOoNyXY", "libSceWebBrowserDialog", 1, "libSceWebBrowserDialog",
+                 sceWebBrowserDialogSetZoom);
+    LIB_FUNCTION("ocHtyBwHfys", "libSceWebBrowserDialog", 1, "libSceWebBrowserDialog",
+                 sceWebBrowserDialogTerminate);
+    LIB_FUNCTION("h1dR-t5ISgg", "libSceWebBrowserDialog", 1, "libSceWebBrowserDialog",
+                 sceWebBrowserDialogUpdateStatus);
+    LIB_FUNCTION("8r4EJ3FiX4w", "libSceWebBrowserDialogLimited", 1, "libSceWebBrowserDialog",
+                 WebBrowserDialog_Func_F2BE042771625F8C);
+}
+
 static void RegisterPlayGo(Core::Loader::SymbolsResolver* sym) {
     LIB_FUNCTION("uEqMfMITvEI", "libSceDbgPlayGo", 1, "libScePlayGo", sceDbgPlayGoRequestNextChunk);
     LIB_FUNCTION("vU+FqrH+pEY", "libSceDbgPlayGo", 1, "libScePlayGo", sceDbgPlayGoSnapshot);
@@ -822,7 +928,7 @@ void InitHLELibs(Core::Loader::SymbolsResolver* sym) {
             {"libSceUserService.sprx", Libraries::UserService::RegisterLib},
             {"libSceSystemService.sprx", Libraries::SystemService::RegisterLib},
             {"libScePad.sprx", Libraries::Pad::RegisterLib},
-            {"libSceCommonDialog.sprx", Libraries::CommonDialog::RegisterLib},
+            {"libSceCommonDialog.sprx", RegisterCommonDialog},
             {"libSceMsgDialog.sprx", Libraries::MsgDialog::RegisterLib},
             {"libSceAudioOut.sprx", Libraries::AudioOut::RegisterLib},
             {"libSceAudioIn.sprx", Libraries::AudioIn::RegisterLib},
@@ -853,7 +959,7 @@ void InitHLELibs(Core::Loader::SymbolsResolver* sym) {
             {"libSceScreenShot.sprx", RegisterScreenShot},
             {"libSceAppContent.sprx", Libraries::AppContent::RegisterLib},
             {"libScePlayGo.sprx", RegisterPlayGo},
-            {"libScePlayGoDialog.sprx", Libraries::PlayGo::Dialog::RegisterLib},
+            {"libScePlayGoDialog.sprx", RegisterPlayGoDialog},
             {"libSceRandom.sprx", RegisterRandom},
             {"libSceUsbd.sprx", Libraries::Usbd::RegisterLib},
             {"libSceUsbStorage.sprx", Libraries::UsbStorage::RegisterLib},
@@ -872,7 +978,7 @@ void InitHLELibs(Core::Loader::SymbolsResolver* sym) {
             {"libSceMove.sprx", RegisterMove},
             {"libSceMouse.sprx", RegisterMouse},
             {"libSceKeyboard.sprx", RegisterKeyboard},
-            {"libSceWebBrowserDialog.sprx", Libraries::WebBrowserDialog::RegisterLib},
+            {"libSceWebBrowserDialog.sprx", RegisterWebBrowserDialog},
             {"libSceZlib.sprx", RegisterZlib},
             {"libSceHmd.sprx", Libraries::Hmd::RegisterLib},
             {"libSceHmdSetupDialog.sprx", Libraries::HmdSetupDialog::RegisterLib},

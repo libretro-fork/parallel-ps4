@@ -184,13 +184,12 @@ CORE_SOURCES_CXX += $(addprefix src/core/libraries/np/np_web_api/,np_web_api.cpp
 CORE_SOURCES_CXX += $(addprefix src/core/libraries/np/np_web_api2/,np_web_api2.cpp \
 	np_web_api2_context.cpp np_web_api2_internal.cpp np_web_api2_push_event.cpp)
 CORE_SOURCES_CXX += $(addprefix src/core/libraries/pad/,pad.cpp)
-CORE_SOURCES_CXX += $(addprefix src/core/libraries/playgo/,playgo_dialog.cpp)
 CORE_SOURCES_CXX += $(addprefix src/core/libraries/save_data/dialog/,savedatadialog.cpp \
 	savedatadialog_ui.cpp)
 CORE_SOURCES_CXX += $(addprefix src/core/libraries/save_data/,save_backup.cpp save_instance.cpp \
 	save_memory.cpp savedata.cpp)
 CORE_SOURCES_CXX += $(addprefix src/core/libraries/sysmodule/,sysmodule.cpp sysmodule_internal.cpp)
-CORE_SOURCES_CXX += $(addprefix src/core/libraries/system/,commondialog.cpp msgdialog.cpp \
+CORE_SOURCES_CXX += $(addprefix src/core/libraries/system/,msgdialog.cpp \
 	msgdialog_ui.cpp systemservice.cpp userservice.cpp)
 CORE_SOURCES_CXX += $(addprefix src/core/libraries/usbd/emulated/,dimensions.cpp infinity.cpp \
 	skylander.cpp)
@@ -198,7 +197,6 @@ CORE_SOURCES_CXX += $(addprefix src/core/libraries/usbd/,usbd.cpp usbstorage.cpp
 CORE_SOURCES_CXX += $(addprefix src/core/libraries/videodec/,vdecsw.cpp vdecsw_impl.cpp \
 	video_utils.cpp videodec.cpp videodec2.cpp videodec2_impl.cpp videodec_impl.cpp)
 CORE_SOURCES_CXX += $(addprefix src/core/libraries/videoout/,driver.cpp video_out.cpp)
-CORE_SOURCES_CXX += $(addprefix src/core/libraries/web_browser_dialog/,webbrowserdialog.cpp)
 CORE_SOURCES_CXX += $(addprefix src/core/loader/,dwarf.cpp elf.cpp symbols_resolver.cpp)
 CORE_SOURCES_CXX += $(addprefix src/core/net/,guest_net.cpp host_net.cpp net_service.cpp \
 	p2p_codec.cpp p2p_crypto.cpp p2p_tcp.cpp p2p_transport.cpp)
@@ -270,7 +268,8 @@ CORE_SOURCES_C += $(addprefix src/core/libraries/,companion/companion_httpd.c \
 	remote_play/remoteplay.c rtc/rtc.c rudp/rudp.c screenshot/screenshot.c share_play/shareplay.c \
 	signin_dialog/signindialog.c system_gesture/system_gesture.c ulobjmgr/ulobjmgr.c \
 	video_recording/video_recording.c voice/voice.c vr_tracker/vr_tracker.c \
-	playgo/playgo.c zlib/zlib.c)
+	playgo/playgo.c playgo/playgo_dialog.c system/commondialog.c \
+	web_browser_dialog/webbrowserdialog.c zlib/zlib.c)
 CORE_SOURCES_C += $(addprefix src/shader_recompiler/backend/spirv/,spv_module.c)
 CORE_SOURCES_C += $(addprefix src/core/libraries/np/np_handler/,np_invitation_json.c)
 CORE_SOURCES_C += $(addprefix src/shadnet/,pb_wire.c shadnet_msg.c)
