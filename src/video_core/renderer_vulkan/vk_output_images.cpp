@@ -311,8 +311,8 @@ void OutputImages::CreateViews() {
         };
         const VkResult result = vkCreateImageView(device, &view_ci, nullptr, &views[i]);
         ASSERT_MSG(result == VK_SUCCESS, "Failed to create image view: %s", ResultName(result));
-        SetObjectName(vk_device, vk::Image{images[i]}, "Output Image %u", i);
-        SetObjectName(vk_device, vk::ImageView{views[i]}, "Output ImageView %u", i);
+        SetObjectName(vk_device, images[i], "Output Image %u", i);
+        SetObjectName(vk_device, views[i], "Output ImageView %u", i);
     }
 }
 

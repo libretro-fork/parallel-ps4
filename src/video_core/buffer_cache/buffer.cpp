@@ -124,9 +124,9 @@ Buffer::Buffer(const Vulkan::Instance& instance, VAddr cpu_addr_, u64 size_bytes
 
     const vk::Device device = instance.GetDevice();
     if (debug_name && debug_name[0]) {
-        Vulkan::SetObjectName(device, vk::Buffer{Handle()}, "%s", debug_name);
+        Vulkan::SetObjectName(device, Handle(), "%s", debug_name);
     } else {
-        Vulkan::SetObjectName(device, vk::Buffer{Handle()}, "Buffer 0x%" PRIxPTR ":0x%zx", cpu_addr,
+        Vulkan::SetObjectName(device, Handle(), "Buffer 0x%" PRIxPTR ":0x%zx", cpu_addr,
                               size_bytes);
     }
 
@@ -145,7 +145,7 @@ Buffer::Buffer(const Vulkan::Instance& instance, VkBuffer handle, u64 size_bytes
       buffer{static_cast<VkDevice>(instance.GetDevice()), instance.GetAllocator()} {
     buffer.buffer = handle;
     buffer.borrowed = true;
-    Vulkan::SetObjectName(instance.GetDevice(), vk::Buffer{Handle()}, "%s", debug_name);
+    Vulkan::SetObjectName(instance.GetDevice(), Handle(), "%s", debug_name);
 }
 
 void Buffer::Flush(u64 offset, u64 size) {
@@ -171,7 +171,7 @@ StreamBuffer::StreamBuffer(const Vulkan::Instance& instance, Vulkan::Scheduler& 
       non_coherent_atom_size{instance.NonCoherentAtomSize()} {
     ReserveWatches(current_watches, num_current_watches, WATCHES_INITIAL_RESERVE);
     ReserveWatches(previous_watches, num_previous_watches, WATCHES_INITIAL_RESERVE);
-    Vulkan::SetObjectName(instance.GetDevice(), vk::Buffer{Handle()}, "StreamBuffer(%s):0x%" PRIx64,
+    Vulkan::SetObjectName(instance.GetDevice(), Handle(), "StreamBuffer(%s):0x%" PRIx64,
                           BufferTypeName(mem_type), size_bytes);
 }
 

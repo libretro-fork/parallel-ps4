@@ -3,12 +3,6 @@
 
 #pragma once
 
-#include <array>
-#include <bit>
-#include <memory>
-#include <span>
-#include <unordered_map>
-
 #include "video_core/renderer_vulkan/vk_platform.h"
 
 struct guest_import_info;
@@ -23,36 +17,28 @@ public:
     Instance(s32 physical_device_index, bool enable_validation, bool enable_crash_diagnostic);
     ~Instance();
 
-    /// Returns a formatted string for the driver version
-    std::string GetDriverVersionName();
-
     /// Gets a compatibility format if the format is not supported.
     [[nodiscard]] vk::Format GetSupportedFormat(vk::Format format,
                                                 vk::FormatFeatureFlags2 flags) const;
 
     /// Returns the Vulkan instance
     vk::Instance GetInstance() const {
-        return *instance;
+        return vk::Instance{instance};
     }
 
     /// Returns the current physical device
     vk::PhysicalDevice GetPhysicalDevice() const {
-        return physical_device;
+        return vk::PhysicalDevice{physical_device};
     }
 
     /// Returns the Vulkan device
     vk::Device GetDevice() const {
-        return *device;
+        return vk::Device{device};
     }
 
     /// Returns the device memory allocator
     MemoryAllocator* GetAllocator() const {
-        return allocator.get();
-    }
-
-    /// Returns a list of the available physical devices
-    std::span<const vk::PhysicalDevice> GetPhysicalDevices() const {
-        return physical_devices;
+        return allocator;
     }
 
     /// Retrieve queue information
@@ -60,16 +46,8 @@ public:
         return queue_family_index;
     }
 
-    u32 GetPresentQueueFamilyIndex() const {
-        return queue_family_index;
-    }
-
     vk::Queue GetGraphicsQueue() const {
-        return graphics_queue;
-    }
-
-    vk::Queue GetPresentQueue() const {
-        return present_queue;
+        return vk::Queue{graphics_queue};
     }
 
     /// Returns true if anisotropic filtering is supported
@@ -259,7 +237,7 @@ public:
     /// sample positions (VK_EXT_sample_locations); 0 when it cannot be given any
     u32 SampleLocationGrid(u32 num_samples) const {
         return num_samples == 2 || num_samples == 4 || num_samples == 8
-                   ? sample_location_grids[std::countr_zero(num_samples)]
+                   ? sample_location_grids[__builtin_ctz(num_samples)]
                    : 0;
     }
 
@@ -296,7 +274,7 @@ public:
 
     /// Returns the driver ID.
     vk::DriverId GetDriverID() const {
-        return driver_id;
+        return static_cast<vk::DriverId>(driver_id);
     }
 
     /// Returns the current driver version provided in Vulkan-formatted version numbers.
@@ -309,24 +287,9 @@ public:
         return properties.apiVersion;
     }
 
-    /// Returns the vendor name reported from Vulkan.
-    std::string_view GetVendorName() const {
-        return vendor_name;
-    }
-
-    /// Returns the list of available extensions.
-    std::span<const std::string> GetAvailableExtensions() const {
-        return available_extensions;
-    }
-
-    /// Returns the device name.
-    std::string_view GetModelName() const {
-        return properties.deviceName;
-    }
-
     /// Returns if the device is an integrated GPU.
     bool IsIntegrated() const {
-        return properties.deviceType == vk::PhysicalDeviceType::eIntegratedGpu;
+        return properties.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU;
     }
 
     /// Whether the device can export an image's memory - as a descriptor on Linux, an NT
@@ -342,7 +305,7 @@ public:
     }
 
     /// The alignment of a host pointer and size to import
-    vk::DeviceSize GetMinImportedHostPointerAlignment() const {
+    VkDeviceSize GetMinImportedHostPointerAlignment() const {
         return min_imported_host_pointer_alignment;
     }
 
@@ -350,8 +313,8 @@ public:
     /// (buffer_cache/guest_import.h), for buffers of @usage, imported as they are first wanted
     void FillHostImport(guest_import_info* info, void* base, u64 size, u32 usage) const;
 
-    /// Returns the pipeline cache unique identifier
-    const auto GetPipelineCacheUUID() const {
+    /// Returns the pipeline cache unique identifier, VK_UUID_SIZE bytes
+    const u8* GetPipelineCacheUUID() const {
         return properties.pipelineCacheUUID;
     }
 
@@ -366,22 +329,22 @@ public:
     }
 
     /// Returns how much address space all sparse resources of the device share
-    vk::DeviceSize SparseAddressSpaceSize() const {
+    VkDeviceSize SparseAddressSpaceSize() const {
         return properties.limits.sparseAddressSpaceSize;
     }
 
     /// Returns the minimum required alignment for uniforms
-    vk::DeviceSize UniformMinAlignment() const {
+    VkDeviceSize UniformMinAlignment() const {
         return properties.limits.minUniformBufferOffsetAlignment;
     }
 
     /// Returns the minimum required alignment for storage buffers
-    vk::DeviceSize StorageMinAlignment() const {
+    VkDeviceSize StorageMinAlignment() const {
         return properties.limits.minStorageBufferOffsetAlignment;
     }
 
     /// Returns the minimum alignment required for accessing host-mapped device memory
-    vk::DeviceSize NonCoherentAtomSize() const {
+    VkDeviceSize NonCoherentAtomSize() const {
         return properties.limits.nonCoherentAtomSize;
     }
 
@@ -411,17 +374,17 @@ public:
     }
 
     /// Returns the maximum size of a single VkDeviceMemory
-    vk::DeviceSize MaxMemoryAllocationSize() const {
+    VkDeviceSize MaxMemoryAllocationSize() const {
         return vk11_props.maxMemoryAllocationSize;
     }
 
     /// Returns the vulkan 1.2 physical device properties.
-    const vk::PhysicalDeviceVulkan12Properties& GetVk12Properties() const noexcept {
+    const VkPhysicalDeviceVulkan12Properties& GetVk12Properties() const noexcept {
         return vk12_props;
     }
 
     /// Returns the memory properties of the physical device.
-    const vk::PhysicalDeviceMemoryProperties& GetMemoryProperties() const noexcept {
+    const VkPhysicalDeviceMemoryProperties& GetMemoryProperties() const noexcept {
         return memory_properties;
     }
 
@@ -452,7 +415,7 @@ public:
 
     /// Returns the maximum number of samplers that can be allocated at once.
     u32 GetMaxSamplerAllocationCount() const {
-        if (driver_id == vk::DriverId::eMesaKosmickrisp) {
+        if (driver_id == VK_DRIVER_ID_MESA_KOSMICKRISP) {
             // FIXME: KosmicKrisp has an internal 1024 unique sampler limit before
             // vkCreateSampler starts returning VK_ERROR_OUT_OF_HOST_MEMORY. Work
             // around this for now by reducing the value to 1024.
@@ -463,13 +426,13 @@ public:
 
     /// Returns the sample count flags supported by color buffers.
     vk::SampleCountFlags GetColorSampleCounts() const {
-        return properties.limits.framebufferColorSampleCounts;
+        return vk::SampleCountFlags{properties.limits.framebufferColorSampleCounts};
     }
 
     /// Returns the sample count flags supported by depth buffer.
     vk::SampleCountFlags GetDepthSampleCounts() const {
-        return properties.limits.framebufferDepthSampleCounts &
-               properties.limits.framebufferStencilSampleCounts;
+        return vk::SampleCountFlags{properties.limits.framebufferDepthSampleCounts &
+                                    properties.limits.framebufferStencilSampleCounts};
     }
 
     /// Returns true if logic ops are supported by the device.
@@ -528,51 +491,71 @@ public:
     [[nodiscard]] bool IsFormatSupported(vk::Format format, vk::FormatFeatureFlags2 flags) const;
 
 private:
+    /// Picks the physical device: the frontend's where the picture is handed to it on the GPU,
+    /// else the one at @physical_device_index, else the best there is
+    void PickPhysicalDevice(s32 physical_device_index);
+
     /// Creates the logical device opportunistically enabling extensions
     bool CreateDevice();
 
-    /// Creates the device memory allocator
-    void CreateAllocator();
+    /// Whether the device offers the extension @name
+    bool HasExtension(const char* name) const;
 
     /// Collects various information from the device.
     void CollectDeviceParameters();
+    void CollectFormatProperties();
     void CollectPhysicalMemoryInfo();
     void CollectImageFormatInfo();
     void CollectToolingInfo() const;
 
-    /// Gets the supported feature flags for a format.
-    [[nodiscard]] vk::FormatFeatureFlags2 GetFormatFeatureFlags(vk::Format format) const;
+    /// The supported feature flags for @format, which is among those queried
+    [[nodiscard]] VkFormatFeatureFlags2 GetFormatFeatureFlags(VkFormat format) const;
+
+    /// Where @format's properties are kept (format_properties), -1 for one not queried
+    s32 FormatSlot(VkFormat format) const;
+
+    /// Queries @format's properties, once
+    void QueryFormat(VkFormat format);
 
 private:
-    vk::UniqueInstance instance;
-    vk::PhysicalDevice physical_device;
-    vk::UniqueDevice device;
-    vk::PhysicalDeviceProperties properties;
-    vk::PhysicalDeviceMemoryProperties memory_properties;
-    vk::PhysicalDeviceVulkan11Properties vk11_props;
-    vk::PhysicalDeviceVulkan12Properties vk12_props;
-    vk::PhysicalDeviceVulkan13Properties vk13_props;
-    vk::PhysicalDevicePushDescriptorPropertiesKHR push_descriptor_props;
-    vk::PhysicalDeviceFeatures features;
-    vk::PhysicalDeviceVulkan12Features vk12_features;
-    vk::PhysicalDeviceVulkan13Features vk13_features;
+    VkInstance instance{VK_NULL_HANDLE};
+    VkPhysicalDevice physical_device{VK_NULL_HANDLE};
+    VkDevice device{VK_NULL_HANDLE};
+    VkPhysicalDeviceProperties properties{};
+    VkPhysicalDeviceMemoryProperties memory_properties{};
+    VkPhysicalDeviceVulkan11Properties vk11_props{};
+    VkPhysicalDeviceVulkan12Properties vk12_props{};
+    VkPhysicalDeviceVulkan13Properties vk13_props{};
+    VkPhysicalDevicePushDescriptorPropertiesKHR push_descriptor_props{};
+    VkPhysicalDeviceFeatures features{};
+    VkPhysicalDeviceVulkan12Features vk12_features{};
+    VkPhysicalDeviceVulkan13Features vk13_features{};
     bool storage_buffer_16bit_access{};
-    vk::PhysicalDeviceExtendedDynamicState3FeaturesEXT dynamic_state_3_features;
-    vk::PhysicalDeviceShaderAtomicFloat2FeaturesEXT shader_atomic_float2_features;
-    vk::PhysicalDeviceWorkgroupMemoryExplicitLayoutFeaturesKHR
-        workgroup_memory_explicit_layout_features;
-    vk::PhysicalDeviceImage2DViewOf3DFeaturesEXT image_2d_view_of_3d_features;
-    vk::PhysicalDevicePrimitiveTopologyListRestartFeaturesEXT list_restart_features;
-    vk::PhysicalDeviceShaderClockFeaturesKHR shader_clock_features;
-    vk::DriverIdKHR driver_id;
-    vk::UniqueDebugUtilsMessengerEXT debug_callback{};
-    std::string vendor_name;
-    std::unique_ptr<MemoryAllocator> allocator;
-    vk::Queue present_queue;
-    vk::Queue graphics_queue;
-    std::vector<vk::PhysicalDevice> physical_devices;
-    std::vector<std::string> available_extensions;
-    std::unordered_map<vk::Format, vk::FormatProperties3> format_properties;
+    VkPhysicalDeviceExtendedDynamicState3FeaturesEXT dynamic_state_3_features{};
+    VkPhysicalDeviceShaderAtomicFloat2FeaturesEXT shader_atomic_float2_features{};
+    VkPhysicalDeviceWorkgroupMemoryExplicitLayoutFeaturesKHR
+        workgroup_memory_explicit_layout_features{};
+    VkPhysicalDeviceImage2DViewOf3DFeaturesEXT image_2d_view_of_3d_features{};
+    VkPhysicalDevicePrimitiveTopologyListRestartFeaturesEXT list_restart_features{};
+    VkPhysicalDeviceShaderClockFeaturesKHR shader_clock_features{};
+    VkDriverId driver_id{};
+    VkDebugUtilsMessengerEXT debug_callback{VK_NULL_HANDLE};
+    bool debug_utils{};
+    char vendor_name[VK_MAX_DRIVER_NAME_SIZE]{};
+    MemoryAllocator* allocator{};
+    VkQueue graphics_queue{VK_NULL_HANDLE};
+    /// The device's extensions (malloc'd)
+    VkExtensionProperties* available_extensions{};
+    u32 num_available_extensions{};
+    /// The properties of the formats the core uses: core formats by their value, the few of
+    /// extensions after them (FormatSlot)
+    static constexpr u32 NumCoreFormatSlots = VK_FORMAT_ASTC_12x12_SRGB_BLOCK + 1;
+    static constexpr u32 MaxExtensionFormats = 32;
+    static constexpr u32 NumFormatSlots = NumCoreFormatSlots + MaxExtensionFormats;
+    VkFormatProperties3 format_properties[NumFormatSlots]{};
+    bool format_queried[NumFormatSlots]{};
+    VkFormat extension_formats[MaxExtensionFormats]{};
+    u32 num_extension_formats{};
     u32 queue_family_index{0};
     bool custom_border_color{};
     bool fragment_shader_barycentric{};
@@ -589,7 +572,7 @@ private:
     bool amd_gcn_shader{};
     bool amd_shader_trinary_minmax{};
     bool nv_framebuffer_mixed_samples{};
-    std::array<u32, 4> sample_location_grids{};
+    u32 sample_location_grids[4]{};
     bool amd_mixed_attachment_samples{};
     bool shader_atomic_float{};
     bool shader_atomic_float2{};
@@ -606,10 +589,12 @@ private:
     bool device_checkpoints{};
     bool external_memory_export{};
     bool external_memory_host{};
-    vk::DeviceSize min_imported_host_pointer_alignment{};
+    VkDeviceSize min_imported_host_pointer_alignment{};
     bool supports_block_texel_view{};
     u64 total_memory_budget{};
-    std::vector<size_t> valid_heaps;
+    /// The heaps counted in the memory used (GetDeviceMemoryUsage)
+    u32 valid_heaps[VK_MAX_MEMORY_HEAPS]{};
+    u32 num_valid_heaps{};
 };
 
 } // namespace Vulkan

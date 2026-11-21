@@ -4,6 +4,19 @@ What changed in the libretro core of this fork, newest first. Changes that come 
 
 ## Unreleased
 
+- The instance (`vk_instance.h`/`.cpp`) and the platform code (`vk_platform.h`/`.cpp`) on the Vulkan C API, with no STL or `auto`.
+  - **Loading Vulkan:** the system's Vulkan loader is opened with libretro-common's `dylib_load`, synced from RetroArch's libretro-common as it is, in place of vulkan.hpp's dynamic loader. The instance, its layers and layer settings, and the debug messenger are made with the C calls. The debug utils' own entry points are loaded once they are enabled, as RetroArch does.
+  - **The device:** the feature structs are asked for and enabled through pNext chains built by hand, each linked only where its extension is, as before.
+  - **No STL:**
+    - The device's extensions are a malloc'd array.
+    - The format properties are a table indexed by format: core formats by their value, the few extension formats after them. That replaces an `unordered_map`.
+    - The heaps counted in memory use are a C array.
+    - The allocator is a plain pointer.
+  - **Object names:** `SetObjectName` takes C handles. Its object type comes from the handle's type, and nothing is named when the debug utils are off.
+  - **Callers:** the allocator, pipeline cache, buffer cache and fault manager take the C types, and the callers no longer wrap the handles they name.
+  - **For now:** the instance's getters still hand out vulkan.hpp's types, and vulkan.hpp's dispatcher is still filled in for the code that uses them.
+  - Checked: an instance and device made on lavapipe with validation on, a buffer allocated and named. Not run in a game yet.
+
 - The presenter (`vk_presenter.h`/`.cpp`) and the post-processing pass (`host_passes/pp_pass.h`/`.cpp`) on the Vulkan C API, with no STL or `auto`.
   - **Frames:** the presenter's frames hold C handles in a fixed array, made up front as before, and their fences are waited on and reset with the C calls.
   - **Readbacks:** the frames read back for the frontend come from a fixed pool, one for each frame that can be in flight and two over. Each is taken and given back with an atomic flag, in place of a list of shared pointers behind a combiner. A readback found free at an old size has its buffer and narrowing image freed, where the old list leaked the image.

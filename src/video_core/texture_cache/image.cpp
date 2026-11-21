@@ -197,7 +197,7 @@ Image::Image(const Vulkan::Instance& instance, Vulkan::Runtime& runtime_,
     backing->image.Create(image_ci);
 
     Vulkan::SetObjectName(
-        instance.GetDevice(), vk::Image{GetImage()},
+        instance.GetDevice(), GetImage(),
         "Image %ux%ux%u %.*s format %d 0x%" PRIx64 ":0x%x L:%u M:%u S:%u", info.size.width,
         info.size.height, info.size.depth, static_cast<int>(AmdGpu::NameOf(info.tile_mode).size()),
         AmdGpu::NameOf(info.tile_mode).data(), static_cast<int>(info.pixel_format),

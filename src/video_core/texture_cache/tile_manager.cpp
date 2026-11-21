@@ -204,7 +204,7 @@ VkPipeline TileManager::GetTilingPipeline(const ImageInfo& info, bool is_tiler) 
              enum_name(&enum_names_AmdGpu_TileMode, static_cast<s64>(info.tile_mode)),
              info.num_bits, is_tiler ? "tiler" : "detiler");
     LOG_INFO(Render_Vulkan, "Creating tiling pipeline %s", module_name);
-    Vulkan::SetObjectName(vk::Device{device}, vk::ShaderModule{module}, "%s", module_name);
+    Vulkan::SetObjectName(vk::Device{device}, module, "%s", module_name);
 
     VkComputePipelineCreateInfo compute_pipeline_ci{};
     compute_pipeline_ci.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;

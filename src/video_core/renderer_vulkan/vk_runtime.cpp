@@ -882,7 +882,7 @@ void Runtime::SetBackingSamples(VideoCore::Image* image, u32 num_samples, bool c
         }
 
         Vulkan::SetObjectName(
-            instance.GetDevice(), vk::Image{new_backing->image.image},
+            instance.GetDevice(), new_backing->image.image,
             "Image %ux%ux%u %.*s %d 0x%" PRIx64 ":0x%x L:%u M:%u S:%u (backing)", info.size.width,
             info.size.height, info.size.depth,
             static_cast<int>(AmdGpu::NameOf(info.tile_mode).size()),

@@ -1,11 +1,9 @@
 // SPDX-FileCopyrightText: Copyright 2024 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
-#include "common/small_vector.h"
-#include "common/string_util.h"
+#include <stdlib.h>
+#include <string.h>
 
-#include <array>
-#include <cstring>
 #include "common/assert.h"
 #include "common/types.h"
 #include "core/emulator_settings.h"
@@ -22,167 +20,113 @@ namespace Vulkan {
 
 namespace {
 
-std::vector<vk::PhysicalDevice> EnumeratePhysicalDevices(vk::UniqueInstance& instance) {
-    auto [devices_result, devices] = instance->enumeratePhysicalDevices();
-    ASSERT_MSG(devices_result == vk::Result::eSuccess, "Failed to enumerate physical devices: %s",
-               (vk::to_string(devices_result)).c_str());
-    return std::move(devices);
+/// Appends @link to the pNext chain whose last next pointer *@tail is, and moves @tail on to it
+template <typename T>
+void Chain(void**& tail, T& link) {
+    *tail = &link;
+    tail = &link.pNext;
 }
 
-std::vector<std::string> GetSupportedExtensions(vk::PhysicalDevice physical) {
-    const auto [extensions_result, extensions] = physical.enumerateDeviceExtensionProperties();
-    if (extensions_result != vk::Result::eSuccess) {
-        LOG_ERROR(Render_Vulkan, "Could not query supported extensions: %s",
-                  (vk::to_string(extensions_result)).c_str());
-        return {};
-    }
-    std::vector<std::string> supported_extensions;
-    supported_extensions.reserve(extensions.size());
-    for (const auto& extension : extensions) {
-        supported_extensions.emplace_back(extension.extensionName.data());
-    }
-    return supported_extensions;
+/// The physical devices of @instance (malloc'd), how many into *@out_count
+VkPhysicalDevice* EnumeratePhysicalDevices(VkInstance instance, u32* out_count) {
+    u32 count = 0;
+    VkResult result = vkEnumeratePhysicalDevices(instance, &count, nullptr);
+    ASSERT_MSG(result == VK_SUCCESS, "Failed to enumerate physical devices: %s",
+               ResultName(result));
+    VkPhysicalDevice* const devices =
+        static_cast<VkPhysicalDevice*>(malloc((count ? count : 1) * sizeof(VkPhysicalDevice)));
+    ASSERT_MSG(devices, "Out of memory enumerating physical devices");
+    result = vkEnumeratePhysicalDevices(instance, &count, devices);
+    ASSERT_MSG(result == VK_SUCCESS || result == VK_INCOMPLETE,
+               "Failed to enumerate physical devices: %s", ResultName(result));
+    *out_count = count;
+    return devices;
 }
 
-vk::FormatProperties3 GetFormatProperties(vk::PhysicalDevice physical, vk::Format format) {
-    vk::FormatProperties3 properties3{};
-    vk::FormatProperties2 properties2 = {
-        .pNext = &properties3,
-    };
-    physical.getFormatProperties2(format, &properties2);
-    return properties3;
-}
-
-std::unordered_map<vk::Format, vk::FormatProperties3> GetFormatProperties(
-    vk::PhysicalDevice physical) {
-    std::unordered_map<vk::Format, vk::FormatProperties3> format_properties;
-    for (const auto& format_info : LiverpoolToVK::SurfaceFormats()) {
-        const auto format = format_info.vk_format;
-        if (!format_properties.contains(format)) {
-            format_properties.emplace(format, GetFormatProperties(physical, format));
+/// The device-local memory of the biggest such heap of @physical
+VkDeviceSize LargestLocalHeap(VkPhysicalDevice physical) {
+    VkPhysicalDeviceMemoryProperties mem;
+    vkGetPhysicalDeviceMemoryProperties(physical, &mem);
+    VkDeviceSize max = 0;
+    for (u32 i = 0; i < mem.memoryHeapCount; i++) {
+        const VkMemoryHeap& heap = mem.memoryHeaps[i];
+        if ((heap.flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT) && heap.size > max) {
+            max = heap.size;
         }
     }
-    for (const auto& format_info : LiverpoolToVK::DepthFormats()) {
-        const auto format = format_info.vk_format;
-        if (!format_properties.contains(format)) {
-            format_properties.emplace(format, GetFormatProperties(physical, format));
-        }
-    }
-    // Other miscellaneous formats, e.g. for color buffers, swizzles, or compatibility
-    static constexpr std::array misc_formats = {
-        vk::Format::eA2R10G10B10UnormPack32,
-        vk::Format::eB8G8R8A8Unorm,
-        vk::Format::eB8G8R8A8Srgb,
-        vk::Format::eD24UnormS8Uint,
-    };
-    for (const auto& format : misc_formats) {
-        if (!format_properties.contains(format)) {
-            format_properties.emplace(format, GetFormatProperties(physical, format));
-        }
-    }
-    return format_properties;
+    return max;
 }
 
-std::string GetReadableVersion(u32 version) {
-    return Common::StringFromFormat("%u.%u.%u", VK_VERSION_MAJOR(version),
-                                    VK_VERSION_MINOR(version), VK_VERSION_PATCH(version));
+/// Whether @left is a better device to run on than @right: the Vulkan version wanted, then a
+/// discrete GPU, then real hardware, then the most memory
+bool BetterDevice(VkPhysicalDevice left, VkPhysicalDevice right) {
+    VkPhysicalDeviceProperties left_prop;
+    VkPhysicalDeviceProperties right_prop;
+    vkGetPhysicalDeviceProperties(left, &left_prop);
+    vkGetPhysicalDeviceProperties(right, &right_prop);
+    const bool left_supports_api = left_prop.apiVersion >= TargetVulkanApiVersion;
+    const bool right_supports_api = right_prop.apiVersion >= TargetVulkanApiVersion;
+    if (left_supports_api != right_supports_api) {
+        return left_supports_api;
+    }
+    const bool left_is_discrete = left_prop.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU;
+    const bool right_is_discrete = right_prop.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU;
+    if (left_is_discrete != right_is_discrete) {
+        return left_is_discrete;
+    }
+    // Software renderers advertise system memory as device local, so they
+    // would win the memory comparison below against real hardware.
+    const bool left_is_cpu = left_prop.deviceType == VK_PHYSICAL_DEVICE_TYPE_CPU;
+    const bool right_is_cpu = right_prop.deviceType == VK_PHYSICAL_DEVICE_TYPE_CPU;
+    if (left_is_cpu != right_is_cpu) {
+        return right_is_cpu;
+    }
+    return LargestLocalHeap(left) > LargestLocalHeap(right);
+}
+
+/// The driver's version as people know it, into @out
+void DriverVersionName(VkDriverId driver_id, u32 version, char* out, size_t size) {
+    // Extracted from
+    // https://github.com/SaschaWillems/vulkan.gpuinfo.org/blob/5dddea46ea1120b0df14eef8f15ff8e318e35462/functions.php#L308-L314
+    if (driver_id == VK_DRIVER_ID_NVIDIA_PROPRIETARY) {
+        snprintf(out, size, "%u.%u.%u.%u", (version >> 22) & 0x3ff, (version >> 14) & 0x0ff,
+                 (version >> 6) & 0x0ff, version & 0x003f);
+    } else if (driver_id == VK_DRIVER_ID_INTEL_PROPRIETARY_WINDOWS) {
+        snprintf(out, size, "%u.%u", version >> 14, version & 0x3fff);
+    } else {
+        snprintf(out, size, "%u.%u.%u", VK_VERSION_MAJOR(version), VK_VERSION_MINOR(version),
+                 VK_VERSION_PATCH(version));
+    }
 }
 
 } // Anonymous namespace
 
 Instance::Instance(bool enable_validation, bool enable_crash_diagnostic)
-    : instance{CreateInstance(enable_validation, enable_crash_diagnostic)},
-      physical_devices{EnumeratePhysicalDevices(instance)} {}
+    : instance{CreateInstance(enable_validation, enable_crash_diagnostic, &debug_utils)} {}
 
 Instance::Instance(s32 physical_device_index, bool enable_validation, bool enable_crash_diagnostic)
-    : instance{CreateInstance(enable_validation, enable_crash_diagnostic)},
-      physical_devices{EnumeratePhysicalDevices(instance)} {
-    if (enable_validation) {
-        debug_callback = CreateDebugCallback(*instance);
+    : instance{CreateInstance(enable_validation, enable_crash_diagnostic, &debug_utils)} {
+    if (enable_validation && debug_utils) {
+        debug_callback = CreateDebugCallback(instance);
     }
-    const std::size_t num_physical_devices = static_cast<u16>(physical_devices.size());
-    ASSERT_MSG(num_physical_devices > 0, "No physical devices found");
-    LOG_INFO(Render_Vulkan, "Found %zu physical devices", num_physical_devices);
+    PickPhysicalDevice(physical_device_index);
 
-    // With the picture handed to the frontend on the GPU, the frontend's GPU: an image's
-    // memory cannot be handed from one GPU to another (libretro/gpu_frames.cpp).
-    bool on_frontend_gpu = false;
-    std::array<u8, VK_UUID_SIZE> frontend_gpu{};
-    if (Libretro::FrontendGpu(frontend_gpu.data())) {
-        for (const auto& physical : physical_devices) {
-            const auto ids = physical
-                                 .getProperties2<vk::PhysicalDeviceProperties2,
-                                                 vk::PhysicalDeviceIDProperties>()
-                                 .get<vk::PhysicalDeviceIDProperties>();
-            if (std::memcmp(ids.deviceUUID.data(), frontend_gpu.data(), VK_UUID_SIZE) == 0) {
-                physical_device = physical;
-                on_frontend_gpu = true;
-                break;
-            }
-        }
-    }
-    if (on_frontend_gpu) {
-        LOG_INFO(Render_Vulkan, "Using the frontend's GPU");
-    } else if (physical_device_index < 0) {
-        std::vector<
-            std::tuple<size_t, vk::PhysicalDeviceProperties2, vk::PhysicalDeviceMemoryProperties>>
-            properties2{};
-        for (auto const& physical : physical_devices) {
-            properties2.emplace_back(properties2.size(), physical.getProperties2(),
-                                     physical.getMemoryProperties());
-        }
-        std::sort(properties2.begin(), properties2.end(), [](const auto& left, const auto& right) {
-            const vk::PhysicalDeviceProperties& left_prop = std::get<1>(left).properties;
-            const vk::PhysicalDeviceProperties& right_prop = std::get<1>(right).properties;
-            const bool left_supports_api = left_prop.apiVersion >= TargetVulkanApiVersion;
-            const bool right_supports_api = right_prop.apiVersion >= TargetVulkanApiVersion;
-            if (left_supports_api != right_supports_api) {
-                return left_supports_api;
-            }
-
-            const bool left_is_discrete =
-                left_prop.deviceType == vk::PhysicalDeviceType::eDiscreteGpu;
-            const bool right_is_discrete =
-                right_prop.deviceType == vk::PhysicalDeviceType::eDiscreteGpu;
-            if (left_is_discrete != right_is_discrete) {
-                return left_is_discrete;
-            }
-
-            // Software renderers advertise system memory as device local, so they
-            // would win the memory comparison below against real hardware.
-            const bool left_is_cpu = left_prop.deviceType == vk::PhysicalDeviceType::eCpu;
-            const bool right_is_cpu = right_prop.deviceType == vk::PhysicalDeviceType::eCpu;
-            if (left_is_cpu != right_is_cpu) {
-                return right_is_cpu;
-            }
-
-            constexpr auto get_mem = [](const vk::PhysicalDeviceMemoryProperties& mem) -> size_t {
-                size_t max = 0;
-                for (u32 i = 0; i < mem.memoryHeapCount; i++) {
-                    const vk::MemoryHeap& heap = mem.memoryHeaps[i];
-                    if (heap.flags & vk::MemoryHeapFlagBits::eDeviceLocal && heap.size > max) {
-                        max = heap.size;
-                    }
-                }
-                return max;
-            };
-            size_t left_mem_size = get_mem(std::get<2>(left));
-            size_t right_mem_size = get_mem(std::get<2>(right));
-            return left_mem_size > right_mem_size;
-        });
-        physical_device = physical_devices[std::get<0>(properties2[0])];
+    u32 count = 0;
+    VkResult result =
+        vkEnumerateDeviceExtensionProperties(physical_device, nullptr, &count, nullptr);
+    if (result == VK_SUCCESS && count != 0) {
+        available_extensions =
+            static_cast<VkExtensionProperties*>(malloc(count * sizeof(VkExtensionProperties)));
+        ASSERT_MSG(available_extensions, "Out of memory querying device extensions");
+        result = vkEnumerateDeviceExtensionProperties(physical_device, nullptr, &count,
+                                                      available_extensions);
+        num_available_extensions = result == VK_SUCCESS || result == VK_INCOMPLETE ? count : 0;
     } else {
-        ASSERT_MSG(physical_device_index < num_physical_devices,
-                   "Invalid physical device index %d provided when only %zu devices exist",
-                   physical_device_index, num_physical_devices);
-
-        physical_device = physical_devices[physical_device_index];
+        LOG_ERROR(Render_Vulkan, "Could not query supported extensions: %s", ResultName(result));
     }
-
-    available_extensions = GetSupportedExtensions(physical_device);
-    format_properties = GetFormatProperties(physical_device);
-    properties = physical_device.getProperties();
-    memory_properties = physical_device.getMemoryProperties();
+    CollectFormatProperties();
+    vkGetPhysicalDeviceProperties(physical_device, &properties);
+    vkGetPhysicalDeviceMemoryProperties(physical_device, &memory_properties);
     CollectDeviceParameters();
     ASSERT_MSG(properties.apiVersion >= TargetVulkanApiVersion,
                "Vulkan %u.%u is required, but only %u.%u is supported by device!",
@@ -196,78 +140,177 @@ Instance::Instance(s32 physical_device_index, bool enable_validation, bool enabl
 }
 
 Instance::~Instance() {
-    // Nothing of the overlays' is in use by the device when it goes
-    const auto result = GetDevice().waitIdle();
-    if (result != vk::Result::eSuccess) {
-        LOG_WARNING(Render_Vulkan, "Failed to wait for Vulkan device idle on shutdown: %s",
-                    (vk::to_string(result)).c_str());
+    if (device != VK_NULL_HANDLE) {
+        // Nothing of the overlays' is in use by the device when it goes
+        const VkResult result = vkDeviceWaitIdle(device);
+        if (result != VK_SUCCESS) {
+            LOG_WARNING(Render_Vulkan, "Failed to wait for Vulkan device idle on shutdown: %s",
+                        ResultName(result));
+        }
+        ovl_vk_shutdown();
+        delete allocator;
+        allocator = nullptr;
+        vkDestroyDevice(device, nullptr);
     }
-    ovl_vk_shutdown();
-    allocator.reset();
+    if (debug_callback != VK_NULL_HANDLE && vkDestroyDebugUtilsMessengerEXT) {
+        vkDestroyDebugUtilsMessengerEXT(instance, debug_callback, nullptr);
+    }
+    free(available_extensions);
+    vkDestroyInstance(instance, nullptr);
 }
 
-std::string Instance::GetDriverVersionName() {
-    // Extracted from
-    // https://github.com/SaschaWillems/vulkan.gpuinfo.org/blob/5dddea46ea1120b0df14eef8f15ff8e318e35462/functions.php#L308-L314
-    const u32 version = properties.driverVersion;
-    if (driver_id == vk::DriverId::eNvidiaProprietary) {
-        const u32 major = (version >> 22) & 0x3ff;
-        const u32 minor = (version >> 14) & 0x0ff;
-        const u32 secondary = (version >> 6) & 0x0ff;
-        const u32 tertiary = version & 0x003f;
-        return Common::StringFromFormat("%u.%u.%u.%u", major, minor, secondary, tertiary);
+void Instance::PickPhysicalDevice(s32 physical_device_index) {
+    u32 num_physical_devices = 0;
+    VkPhysicalDevice* const physical_devices =
+        EnumeratePhysicalDevices(instance, &num_physical_devices);
+    ASSERT_MSG(num_physical_devices > 0, "No physical devices found");
+    LOG_INFO(Render_Vulkan, "Found %u physical devices", num_physical_devices);
+
+    // With the picture handed to the frontend on the GPU, the frontend's GPU: an image's
+    // memory cannot be handed from one GPU to another (libretro/gpu_frames.cpp).
+    u8 frontend_gpu[VK_UUID_SIZE]{};
+    if (Libretro::FrontendGpu(frontend_gpu)) {
+        for (u32 i = 0; i < num_physical_devices; ++i) {
+            VkPhysicalDeviceIDProperties ids = {
+                .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ID_PROPERTIES,
+            };
+            VkPhysicalDeviceProperties2 props = {
+                .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2,
+                .pNext = &ids,
+            };
+            vkGetPhysicalDeviceProperties2(physical_devices[i], &props);
+            if (memcmp(ids.deviceUUID, frontend_gpu, VK_UUID_SIZE) == 0) {
+                physical_device = physical_devices[i];
+                break;
+            }
+        }
     }
-    if (driver_id == vk::DriverId::eIntelProprietaryWindows) {
-        const u32 major = version >> 14;
-        const u32 minor = version & 0x3fff;
-        return Common::StringFromFormat("%u.%u", major, minor);
+    if (physical_device != VK_NULL_HANDLE) {
+        LOG_INFO(Render_Vulkan, "Using the frontend's GPU");
+    } else if (physical_device_index < 0) {
+        // The best there is; the first of equals, as before
+        physical_device = physical_devices[0];
+        for (u32 i = 1; i < num_physical_devices; ++i) {
+            if (BetterDevice(physical_devices[i], physical_device)) {
+                physical_device = physical_devices[i];
+            }
+        }
+    } else {
+        ASSERT_MSG(static_cast<u32>(physical_device_index) < num_physical_devices,
+                   "Invalid physical device index %d provided when only %u devices exist",
+                   physical_device_index, num_physical_devices);
+        physical_device = physical_devices[physical_device_index];
     }
-    return GetReadableVersion(version);
+    free(physical_devices);
+}
+
+bool Instance::HasExtension(const char* name) const {
+    for (u32 i = 0; i < num_available_extensions; ++i) {
+        if (strcmp(available_extensions[i].extensionName, name) == 0) {
+            return true;
+        }
+    }
+    return false;
 }
 
 bool Instance::CreateDevice() {
-    const vk::StructureChain feature_chain = physical_device.getFeatures2<
-        vk::PhysicalDeviceFeatures2, vk::PhysicalDeviceVulkan11Features,
-        vk::PhysicalDeviceVulkan12Features, vk::PhysicalDeviceVulkan13Features,
-        vk::PhysicalDeviceRobustness2FeaturesEXT,
-        vk::PhysicalDeviceExtendedDynamicState3FeaturesEXT,
-        vk::PhysicalDevicePrimitiveTopologyListRestartFeaturesEXT,
-        vk::PhysicalDeviceShaderAtomicFloat2FeaturesEXT,
-        vk::PhysicalDeviceWorkgroupMemoryExplicitLayoutFeaturesKHR,
-        vk::PhysicalDeviceImage2DViewOf3DFeaturesEXT, vk::PhysicalDeviceShaderClockFeaturesKHR>();
-    features = feature_chain.get().features;
+    // What the device has, every feature struct asked for at once
+    VkPhysicalDeviceShaderClockFeaturesKHR query_shader_clock = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_CLOCK_FEATURES_KHR,
+    };
+    VkPhysicalDeviceImage2DViewOf3DFeaturesEXT query_2d_view_of_3d = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_IMAGE_2D_VIEW_OF_3D_FEATURES_EXT,
+    };
+    VkPhysicalDeviceWorkgroupMemoryExplicitLayoutFeaturesKHR query_workgroup_layout = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_WORKGROUP_MEMORY_EXPLICIT_LAYOUT_FEATURES_KHR,
+    };
+    VkPhysicalDeviceShaderAtomicFloat2FeaturesEXT query_atomic_float2 = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_ATOMIC_FLOAT_2_FEATURES_EXT,
+    };
+    VkPhysicalDevicePrimitiveTopologyListRestartFeaturesEXT query_list_restart = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PRIMITIVE_TOPOLOGY_LIST_RESTART_FEATURES_EXT,
+    };
+    VkPhysicalDeviceExtendedDynamicState3FeaturesEXT query_dynamic_state_3 = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTENDED_DYNAMIC_STATE_3_FEATURES_EXT,
+    };
+    VkPhysicalDeviceRobustness2FeaturesEXT robustness2_features = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ROBUSTNESS_2_FEATURES_EXT,
+    };
+    VkPhysicalDeviceVulkan13Features query_vk13 = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES,
+    };
+    VkPhysicalDeviceVulkan12Features query_vk12 = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES,
+    };
+    VkPhysicalDeviceVulkan11Features vk11_features = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES,
+    };
+    VkPhysicalDeviceFeatures2 query_features = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2,
+    };
+    {
+        void** tail = &query_features.pNext;
+        Chain(tail, vk11_features);
+        Chain(tail, query_vk12);
+        Chain(tail, query_vk13);
+        Chain(tail, robustness2_features);
+        Chain(tail, query_dynamic_state_3);
+        Chain(tail, query_list_restart);
+        Chain(tail, query_atomic_float2);
+        Chain(tail, query_workgroup_layout);
+        Chain(tail, query_2d_view_of_3d);
+        Chain(tail, query_shader_clock);
+    }
+    vkGetPhysicalDeviceFeatures2(physical_device, &query_features);
+    features = query_features.features;
 
-    const vk::StructureChain properties_chain = physical_device.getProperties2<
-        vk::PhysicalDeviceProperties2, vk::PhysicalDeviceVulkan11Properties,
-        vk::PhysicalDeviceVulkan12Properties, vk::PhysicalDeviceVulkan13Properties,
-        vk::PhysicalDevicePushDescriptorPropertiesKHR>();
-    vk11_props = properties_chain.get<vk::PhysicalDeviceVulkan11Properties>();
-    vk12_props = properties_chain.get<vk::PhysicalDeviceVulkan12Properties>();
-    vk13_props = properties_chain.get<vk::PhysicalDeviceVulkan13Properties>();
-    push_descriptor_props = properties_chain.get<vk::PhysicalDevicePushDescriptorPropertiesKHR>();
+    VkPhysicalDevicePushDescriptorPropertiesKHR query_push_descriptor = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PUSH_DESCRIPTOR_PROPERTIES_KHR,
+    };
+    VkPhysicalDeviceVulkan13Properties query_vk13_props = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_PROPERTIES,
+        .pNext = &query_push_descriptor,
+    };
+    VkPhysicalDeviceVulkan12Properties query_vk12_props = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_PROPERTIES,
+        .pNext = &query_vk13_props,
+    };
+    VkPhysicalDeviceVulkan11Properties query_vk11_props = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_PROPERTIES,
+        .pNext = &query_vk12_props,
+    };
+    VkPhysicalDeviceProperties2 query_properties = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2,
+        .pNext = &query_vk11_props,
+    };
+    vkGetPhysicalDeviceProperties2(physical_device, &query_properties);
+    // Kept without the chain they were asked through
+    vk11_props = query_vk11_props;
+    vk11_props.pNext = nullptr;
+    vk12_props = query_vk12_props;
+    vk12_props.pNext = nullptr;
+    vk13_props = query_vk13_props;
+    vk13_props.pNext = nullptr;
+    push_descriptor_props = query_push_descriptor;
+    push_descriptor_props.pNext = nullptr;
     LOG_INFO(Render_Vulkan, "Physical device subgroup size %u", vk11_props.subgroupSize);
 
-    if (available_extensions.empty()) {
+    if (num_available_extensions == 0) {
         LOG_CRITICAL(Render_Vulkan, "No extensions supported by device.");
         return false;
     }
 
     // Room for the one the libretro core adds below.
-    Common::StaticVector<const char*, 48> enabled_extensions;
-    const auto add_extension = [&](std::string_view extension) -> bool {
-        const auto result =
-            std::find_if(available_extensions.begin(), available_extensions.end(),
-                         [&](const std::string& name) { return name == extension; });
-
-        if (result != available_extensions.end()) {
-            LOG_INFO(Render_Vulkan, "Enabling extension: %.*s",
-                     static_cast<int>((extension).size()), (extension).data());
-            enabled_extensions.push_back(extension.data());
+    const char* enabled_extensions[48];
+    u32 num_enabled_extensions = 0;
+    const auto add_extension = [&](const char* extension) -> bool {
+        if (HasExtension(extension)) {
+            LOG_INFO(Render_Vulkan, "Enabling extension: %s", extension);
+            ASSERT(num_enabled_extensions < sizeof(enabled_extensions) / sizeof(const char*));
+            enabled_extensions[num_enabled_extensions++] = extension;
             return true;
         }
-
-        LOG_WARNING(Render_Vulkan, "Extension %.*s unavailable.",
-                    static_cast<int>((extension).size()), (extension).data());
+        LOG_WARNING(Render_Vulkan, "Extension %s unavailable.", extension);
         return false;
     };
 
@@ -282,7 +325,6 @@ bool Instance::CreateDevice() {
     ASSERT_MSG(add_extension(VK_EXT_ROBUSTNESS_2_EXTENSION_NAME),
                "Required Vulkan extension unavailable: %s", VK_EXT_ROBUSTNESS_2_EXTENSION_NAME);
 
-    const auto robustness2_features = feature_chain.get<vk::PhysicalDeviceRobustness2FeaturesEXT>();
     ASSERT_MSG(robustness2_features.robustBufferAccess2,
                "Required Vulkan feature unavailable: robustBufferAccess2");
     ASSERT_MSG(robustness2_features.robustImageAccess2,
@@ -300,14 +342,13 @@ bool Instance::CreateDevice() {
             add_extension(VK_EXT_ATTACHMENT_FEEDBACK_LOOP_DYNAMIC_STATE_EXTENSION_NAME);
         if (!attachment_feedback_loop) {
             // We want both extensions so remove the first if the second isn't available
-            enabled_extensions.pop_back();
+            --num_enabled_extensions;
         }
     }
     depth_range_unrestricted = add_extension(VK_EXT_DEPTH_RANGE_UNRESTRICTED_EXTENSION_NAME);
     dynamic_state_3 = add_extension(VK_EXT_EXTENDED_DYNAMIC_STATE_3_EXTENSION_NAME);
     if (dynamic_state_3) {
-        dynamic_state_3_features =
-            feature_chain.get<vk::PhysicalDeviceExtendedDynamicState3FeaturesEXT>();
+        dynamic_state_3_features = query_dynamic_state_3;
         LOG_INFO(Render_Vulkan, "- extendedDynamicState3ColorWriteMask: %u",
                  dynamic_state_3_features.extendedDynamicState3ColorWriteMask);
     }
@@ -317,11 +358,10 @@ bool Instance::CreateDevice() {
     vertex_input_dynamic_state = add_extension(VK_EXT_VERTEX_INPUT_DYNAMIC_STATE_EXTENSION_NAME);
     // Games excessively leave restart enabled with lists when it isn't actually needed, and it
     // slows down KosmicKrisp due to unrolling. Revisit if KosmicKrisp moves this to mesh shaders.
-    list_restart = driver_id != vk::DriverId::eMesaKosmickrisp &&
+    list_restart = driver_id != VK_DRIVER_ID_MESA_KOSMICKRISP &&
                    add_extension(VK_EXT_PRIMITIVE_TOPOLOGY_LIST_RESTART_EXTENSION_NAME);
     if (list_restart) {
-        list_restart_features =
-            feature_chain.get<vk::PhysicalDevicePrimitiveTopologyListRestartFeaturesEXT>();
+        list_restart_features = query_list_restart;
         LOG_INFO(Render_Vulkan, "- primitiveTopologyListRestart: %u",
                  list_restart_features.primitiveTopologyListRestart);
         LOG_INFO(Render_Vulkan, "- primitiveTopologyPatchListRestart: %u",
@@ -341,27 +381,34 @@ bool Instance::CreateDevice() {
     nv_framebuffer_mixed_samples = add_extension(VK_NV_FRAMEBUFFER_MIXED_SAMPLES_EXTENSION_NAME);
     if (emu_settings_get_sample_positions() &&
         add_extension(VK_EXT_SAMPLE_LOCATIONS_EXTENSION_NAME)) {
-        const auto chain =
-            physical_device.getProperties2<vk::PhysicalDeviceProperties2,
-                                           vk::PhysicalDeviceSampleLocationsPropertiesEXT>();
-        const auto& props = chain.get<vk::PhysicalDeviceSampleLocationsPropertiesEXT>();
+        VkPhysicalDeviceSampleLocationsPropertiesEXT props = {
+            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SAMPLE_LOCATIONS_PROPERTIES_EXT,
+        };
+        VkPhysicalDeviceProperties2 props2 = {
+            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2,
+            .pNext = &props,
+        };
+        vkGetPhysicalDeviceProperties2(physical_device, &props2);
         // Sixteenths of a pixel, anywhere in the pixel, is what the game's registers hold
         if (props.sampleLocationSubPixelBits >= 4 &&
             props.sampleLocationCoordinateRange[0] <= 0.0f &&
             props.sampleLocationCoordinateRange[1] >= 0.9375f) {
             // The block of pixels the positions can vary over, for 2, 4 and 8 samples
-            for (u32 i = 1; i < sample_location_grids.size(); ++i) {
-                const auto count = static_cast<vk::SampleCountFlagBits>(1u << i);
+            for (u32 i = 1; i < sizeof(sample_location_grids) / sizeof(u32); ++i) {
+                const VkSampleCountFlagBits count = static_cast<VkSampleCountFlagBits>(1u << i);
                 if (!(props.sampleLocationSampleCounts & count)) {
                     continue;
                 }
-                const auto grid =
-                    physical_device.getMultisamplePropertiesEXT(count).maxSampleLocationGridSize;
-                sample_location_grids[i] = std::min({grid.width, grid.height, 2u});
+                VkMultisamplePropertiesEXT multisample = {
+                    .sType = VK_STRUCTURE_TYPE_MULTISAMPLE_PROPERTIES_EXT,
+                };
+                vkGetPhysicalDeviceMultisamplePropertiesEXT(physical_device, count, &multisample);
+                const VkExtent2D grid = multisample.maxSampleLocationGridSize;
+                sample_location_grids[i] = Common::Min(Common::Min(grid.width, grid.height), 2u);
             }
         }
-        LOG_INFO(Render_Vulkan, "Sample locations: counts %s, grid %ux%u, %u sub-pixel bits",
-                 (vk::to_string(props.sampleLocationSampleCounts)).c_str(),
+        LOG_INFO(Render_Vulkan, "Sample locations: counts 0x%x, grid %ux%u, %u sub-pixel bits",
+                 static_cast<u32>(props.sampleLocationSampleCounts),
                  props.maxSampleLocationGridSize.width, props.maxSampleLocationGridSize.height,
                  props.sampleLocationSubPixelBits);
     }
@@ -369,8 +416,7 @@ bool Instance::CreateDevice() {
     shader_atomic_float = add_extension(VK_EXT_SHADER_ATOMIC_FLOAT_EXTENSION_NAME);
     shader_atomic_float2 = add_extension(VK_EXT_SHADER_ATOMIC_FLOAT_2_EXTENSION_NAME);
     if (shader_atomic_float2) {
-        shader_atomic_float2_features =
-            feature_chain.get<vk::PhysicalDeviceShaderAtomicFloat2FeaturesEXT>();
+        shader_atomic_float2_features = query_atomic_float2;
         LOG_INFO(Render_Vulkan, "- shaderBufferFloat32AtomicMinMax: %u",
                  shader_atomic_float2_features.shaderBufferFloat32AtomicMinMax);
         LOG_INFO(Render_Vulkan, "- shaderImageFloat32AtomicMinMax: %u",
@@ -379,8 +425,7 @@ bool Instance::CreateDevice() {
     workgroup_memory_explicit_layout =
         add_extension(VK_KHR_WORKGROUP_MEMORY_EXPLICIT_LAYOUT_EXTENSION_NAME);
     if (workgroup_memory_explicit_layout) {
-        workgroup_memory_explicit_layout_features =
-            feature_chain.get<vk::PhysicalDeviceWorkgroupMemoryExplicitLayoutFeaturesKHR>();
+        workgroup_memory_explicit_layout_features = query_workgroup_layout;
         LOG_INFO(Render_Vulkan, "- workgroupMemoryExplicitLayout: %u",
                  workgroup_memory_explicit_layout_features.workgroupMemoryExplicitLayout);
         LOG_INFO(Render_Vulkan, "- workgroupMemoryExplicitLayoutScalarBlockLayout: %u",
@@ -392,8 +437,7 @@ bool Instance::CreateDevice() {
     }
     image_2d_view_of_3d = add_extension(VK_EXT_IMAGE_2D_VIEW_OF_3D_EXTENSION_NAME);
     if (image_2d_view_of_3d) {
-        image_2d_view_of_3d_features =
-            feature_chain.get<vk::PhysicalDeviceImage2DViewOf3DFeaturesEXT>();
+        image_2d_view_of_3d_features = query_2d_view_of_3d;
         LOG_INFO(Render_Vulkan, "- image2DViewOf3D: %u",
                  image_2d_view_of_3d_features.image2DViewOf3D);
         LOG_INFO(Render_Vulkan, "- sampler2DViewOf3D: %u",
@@ -415,335 +459,423 @@ bool Instance::CreateDevice() {
     // Game memory the GPU writes a readback straight into (buffer_cache/guest_import.h)
     external_memory_host = add_extension(VK_EXT_EXTERNAL_MEMORY_HOST_EXTENSION_NAME);
     if (external_memory_host) {
-        const auto host_chain =
-            physical_device.getProperties2<vk::PhysicalDeviceProperties2,
-                                           vk::PhysicalDeviceExternalMemoryHostPropertiesEXT>();
-        min_imported_host_pointer_alignment =
-            host_chain.get<vk::PhysicalDeviceExternalMemoryHostPropertiesEXT>()
-                .minImportedHostPointerAlignment;
+        VkPhysicalDeviceExternalMemoryHostPropertiesEXT host_props = {
+            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTERNAL_MEMORY_HOST_PROPERTIES_EXT,
+        };
+        VkPhysicalDeviceProperties2 props2 = {
+            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2,
+            .pNext = &host_props,
+        };
+        vkGetPhysicalDeviceProperties2(physical_device, &props2);
+        min_imported_host_pointer_alignment = host_props.minImportedHostPointerAlignment;
     }
     shader_clock = add_extension(VK_KHR_SHADER_CLOCK_EXTENSION_NAME);
     if (shader_clock) {
-        shader_clock_features = feature_chain.get<vk::PhysicalDeviceShaderClockFeaturesKHR>();
+        shader_clock_features = query_shader_clock;
         LOG_INFO(Render_Vulkan, "- shaderSubgroupClock: %u",
                  shader_clock_features.shaderSubgroupClock);
     }
 
-    const auto family_properties = physical_device.getQueueFamilyProperties();
-    if (family_properties.empty()) {
+    u32 num_families = 0;
+    vkGetPhysicalDeviceQueueFamilyProperties(physical_device, &num_families, nullptr);
+    if (num_families == 0) {
         LOG_CRITICAL(Render_Vulkan, "Physical device reported no queues.");
         return false;
     }
-
+    VkQueueFamilyProperties* const family_properties = static_cast<VkQueueFamilyProperties*>(
+        malloc(num_families * sizeof(VkQueueFamilyProperties)));
+    ASSERT_MSG(family_properties, "Out of memory querying queue families");
+    vkGetPhysicalDeviceQueueFamilyProperties(physical_device, &num_families, family_properties);
     bool graphics_queue_found = false;
-    for (std::size_t i = 0; i < family_properties.size(); i++) {
-        const u32 index = static_cast<u32>(i);
-        if (family_properties[i].queueFlags & vk::QueueFlagBits::eGraphics) {
-            queue_family_index = index;
+    for (u32 i = 0; i < num_families; i++) {
+        if (family_properties[i].queueFlags & VK_QUEUE_GRAPHICS_BIT) {
+            queue_family_index = i;
             graphics_queue_found = true;
         }
     }
+    free(family_properties);
 
     if (!graphics_queue_found) {
         LOG_CRITICAL(Render_Vulkan, "Unable to find graphics and/or present queues.");
         return false;
     }
 
-    static constexpr std::array queue_priorities = {1.0f};
-    const vk::DeviceQueueCreateInfo queue_info = {
+    static constexpr float queue_priority = 1.0f;
+    const VkDeviceQueueCreateInfo queue_info = {
+        .sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
         .queueFamilyIndex = queue_family_index,
-        .queueCount = static_cast<u32>(queue_priorities.size()),
-        .pQueuePriorities = queue_priorities.data(),
+        .queueCount = 1,
+        .pQueuePriorities = &queue_priority,
     };
 
-    const auto vk11_features = feature_chain.get<vk::PhysicalDeviceVulkan11Features>();
     storage_buffer_16bit_access = vk11_features.storageBuffer16BitAccess;
-    vk12_features = feature_chain.get<vk::PhysicalDeviceVulkan12Features>();
-    vk13_features = feature_chain.get<vk::PhysicalDeviceVulkan13Features>();
-    vk::StructureChain device_chain = {
-        vk::DeviceCreateInfo{
-            .queueCreateInfoCount = 1u,
-            .pQueueCreateInfos = &queue_info,
-            .enabledExtensionCount = static_cast<u32>(enabled_extensions.size()),
-            .ppEnabledExtensionNames = enabled_extensions.data(),
-        },
-        vk::PhysicalDeviceFeatures2{
-            .features{
-                .robustBufferAccess = features.robustBufferAccess,
-                .imageCubeArray = features.imageCubeArray,
-                .independentBlend = features.independentBlend,
-                .geometryShader = features.geometryShader,
-                .tessellationShader = features.tessellationShader,
-                .sampleRateShading = features.sampleRateShading,
-                .dualSrcBlend = features.dualSrcBlend,
-                .logicOp = features.logicOp,
-                .multiDrawIndirect = features.multiDrawIndirect,
-                .depthClamp = features.depthClamp,
-                .depthBiasClamp = features.depthBiasClamp,
-                .fillModeNonSolid = features.fillModeNonSolid,
-                .depthBounds = features.depthBounds,
-                .wideLines = features.wideLines,
-                .multiViewport = features.multiViewport,
-                .samplerAnisotropy = features.samplerAnisotropy,
-                .vertexPipelineStoresAndAtomics = features.vertexPipelineStoresAndAtomics,
-                .fragmentStoresAndAtomics = features.fragmentStoresAndAtomics,
-                .shaderImageGatherExtended = features.shaderImageGatherExtended,
-                .shaderStorageImageExtendedFormats = features.shaderStorageImageExtendedFormats,
-                .shaderStorageImageMultisample = features.shaderStorageImageMultisample,
-                .shaderClipDistance = features.shaderClipDistance,
-                .shaderFloat64 = features.shaderFloat64,
-                .shaderInt64 = features.shaderInt64,
-                .shaderInt16 = features.shaderInt16,
-                .sparseBinding = features.sparseBinding,
-                .sparseResidencyBuffer = features.sparseResidencyBuffer,
-            },
-        },
-        vk::PhysicalDeviceVulkan11Features{
-            .storageBuffer16BitAccess = vk11_features.storageBuffer16BitAccess,
-            .shaderDrawParameters = vk11_features.shaderDrawParameters,
-        },
-        vk::PhysicalDeviceVulkan12Features{
-            .samplerMirrorClampToEdge = vk12_features.samplerMirrorClampToEdge,
-            .drawIndirectCount = vk12_features.drawIndirectCount,
-            .storageBuffer8BitAccess = vk12_features.storageBuffer8BitAccess,
-            .shaderBufferInt64Atomics = vk12_features.shaderBufferInt64Atomics,
-            .shaderSharedInt64Atomics = vk12_features.shaderSharedInt64Atomics,
-            .shaderFloat16 = vk12_features.shaderFloat16,
-            .shaderInt8 = vk12_features.shaderInt8,
-            .scalarBlockLayout = vk12_features.scalarBlockLayout,
-            .uniformBufferStandardLayout = vk12_features.uniformBufferStandardLayout,
-            .separateDepthStencilLayouts = vk12_features.separateDepthStencilLayouts,
-            .hostQueryReset = vk12_features.hostQueryReset,
-            .timelineSemaphore = vk12_features.timelineSemaphore,
-            .bufferDeviceAddress = vk12_features.bufferDeviceAddress,
-            .shaderOutputLayer = vk12_features.shaderOutputLayer,
-        },
-        vk::PhysicalDeviceVulkan13Features{
-            .robustImageAccess = vk13_features.robustImageAccess,
-            .shaderDemoteToHelperInvocation = vk13_features.shaderDemoteToHelperInvocation,
-            .subgroupSizeControl = vk13_features.subgroupSizeControl,
-            .synchronization2 = vk13_features.synchronization2,
-            .dynamicRendering = vk13_features.dynamicRendering,
-            .maintenance4 = vk13_features.maintenance4,
-        },
-        // Extensions
-        vk::PhysicalDeviceCustomBorderColorFeaturesEXT{
-            .customBorderColors = true,
-            .customBorderColorWithoutFormat = true,
-        },
-        vk::PhysicalDeviceExtendedDynamicState3FeaturesEXT{
-            .extendedDynamicState3ColorWriteMask =
-                dynamic_state_3_features.extendedDynamicState3ColorWriteMask,
-        },
-        vk::PhysicalDeviceDepthClipControlFeaturesEXT{
-            .depthClipControl = true,
-        },
-        vk::PhysicalDeviceDepthClipEnableFeaturesEXT{
-            .depthClipEnable = true,
-        },
-        vk::PhysicalDeviceRobustness2FeaturesEXT{
-            .robustBufferAccess2 = true,
-            .robustImageAccess2 = true,
-            .nullDescriptor = true,
-        },
-        vk::PhysicalDeviceVertexInputDynamicStateFeaturesEXT{
-            .vertexInputDynamicState = true,
-        },
-        vk::PhysicalDevicePrimitiveTopologyListRestartFeaturesEXT{
-            .primitiveTopologyListRestart = list_restart_features.primitiveTopologyListRestart,
-            .primitiveTopologyPatchListRestart =
-                list_restart_features.primitiveTopologyPatchListRestart,
-        },
-        vk::PhysicalDeviceFragmentShaderBarycentricFeaturesKHR{
-            .fragmentShaderBarycentric = true,
-        },
-        vk::PhysicalDeviceProvokingVertexFeaturesEXT{
-            .provokingVertexLast = true,
-        },
-        vk::PhysicalDeviceVertexAttributeDivisorFeatures{
-            .vertexAttributeInstanceRateDivisor = true,
-        },
-        vk::PhysicalDeviceMaintenance5FeaturesKHR{
-            .maintenance5 = true,
-        },
-        vk::PhysicalDeviceMaintenance6FeaturesKHR{
-            .maintenance6 = true,
-        },
-        vk::PhysicalDeviceMaintenance8FeaturesKHR{
-            .maintenance8 = true,
-        },
-        vk::PhysicalDeviceAttachmentFeedbackLoopLayoutFeaturesEXT{
-            .attachmentFeedbackLoopLayout = true,
-        },
-        vk::PhysicalDeviceAttachmentFeedbackLoopDynamicStateFeaturesEXT{
-            .attachmentFeedbackLoopDynamicState = true,
-        },
-        vk::PhysicalDeviceShaderAtomicFloat2FeaturesEXT{
-            .shaderBufferFloat32AtomicMinMax =
-                shader_atomic_float2_features.shaderBufferFloat32AtomicMinMax,
-            .shaderImageFloat32AtomicMinMax =
-                shader_atomic_float2_features.shaderImageFloat32AtomicMinMax,
-        },
-        vk::PhysicalDeviceWorkgroupMemoryExplicitLayoutFeaturesKHR{
-            .workgroupMemoryExplicitLayout =
-                workgroup_memory_explicit_layout_features.workgroupMemoryExplicitLayout,
-            .workgroupMemoryExplicitLayoutScalarBlockLayout =
-                workgroup_memory_explicit_layout_features
-                    .workgroupMemoryExplicitLayoutScalarBlockLayout,
-            .workgroupMemoryExplicitLayout16BitAccess =
-                workgroup_memory_explicit_layout_features.workgroupMemoryExplicitLayout16BitAccess,
-        },
-        vk::PhysicalDeviceImage2DViewOf3DFeaturesEXT{
-            .image2DViewOf3D = image_2d_view_of_3d_features.image2DViewOf3D,
-            .sampler2DViewOf3D = image_2d_view_of_3d_features.sampler2DViewOf3D,
-        },
-        vk::PhysicalDeviceImageViewMinLodFeaturesEXT{
-            .minLod = true,
-        },
-        vk::PhysicalDeviceFaultFeaturesEXT{
-            .deviceFault = true,
-        },
-        vk::PhysicalDeviceShaderClockFeaturesKHR{
-            .shaderSubgroupClock = shader_clock_features.shaderSubgroupClock,
+    vk12_features = query_vk12;
+    vk12_features.pNext = nullptr;
+    vk13_features = query_vk13;
+    vk13_features.pNext = nullptr;
+
+    // What is enabled: each struct linked only where its extension is
+    VkPhysicalDeviceFeatures2 enable_features = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2,
+        .features{
+            .robustBufferAccess = features.robustBufferAccess,
+            .imageCubeArray = features.imageCubeArray,
+            .independentBlend = features.independentBlend,
+            .geometryShader = features.geometryShader,
+            .tessellationShader = features.tessellationShader,
+            .sampleRateShading = features.sampleRateShading,
+            .dualSrcBlend = features.dualSrcBlend,
+            .logicOp = features.logicOp,
+            .multiDrawIndirect = features.multiDrawIndirect,
+            .depthClamp = features.depthClamp,
+            .depthBiasClamp = features.depthBiasClamp,
+            .fillModeNonSolid = features.fillModeNonSolid,
+            .depthBounds = features.depthBounds,
+            .wideLines = features.wideLines,
+            .multiViewport = features.multiViewport,
+            .samplerAnisotropy = features.samplerAnisotropy,
+            .vertexPipelineStoresAndAtomics = features.vertexPipelineStoresAndAtomics,
+            .fragmentStoresAndAtomics = features.fragmentStoresAndAtomics,
+            .shaderImageGatherExtended = features.shaderImageGatherExtended,
+            .shaderStorageImageExtendedFormats = features.shaderStorageImageExtendedFormats,
+            .shaderStorageImageMultisample = features.shaderStorageImageMultisample,
+            .shaderClipDistance = features.shaderClipDistance,
+            .shaderFloat64 = features.shaderFloat64,
+            .shaderInt64 = features.shaderInt64,
+            .shaderInt16 = features.shaderInt16,
+            .sparseBinding = features.sparseBinding,
+            .sparseResidencyBuffer = features.sparseResidencyBuffer,
         },
     };
+    VkPhysicalDeviceVulkan11Features enable_vk11 = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES,
+        .storageBuffer16BitAccess = vk11_features.storageBuffer16BitAccess,
+        .shaderDrawParameters = vk11_features.shaderDrawParameters,
+    };
+    VkPhysicalDeviceVulkan12Features enable_vk12 = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES,
+        .samplerMirrorClampToEdge = vk12_features.samplerMirrorClampToEdge,
+        .drawIndirectCount = vk12_features.drawIndirectCount,
+        .storageBuffer8BitAccess = vk12_features.storageBuffer8BitAccess,
+        .shaderBufferInt64Atomics = vk12_features.shaderBufferInt64Atomics,
+        .shaderSharedInt64Atomics = vk12_features.shaderSharedInt64Atomics,
+        .shaderFloat16 = vk12_features.shaderFloat16,
+        .shaderInt8 = vk12_features.shaderInt8,
+        .scalarBlockLayout = vk12_features.scalarBlockLayout,
+        .uniformBufferStandardLayout = vk12_features.uniformBufferStandardLayout,
+        .separateDepthStencilLayouts = vk12_features.separateDepthStencilLayouts,
+        .hostQueryReset = vk12_features.hostQueryReset,
+        .timelineSemaphore = vk12_features.timelineSemaphore,
+        .bufferDeviceAddress = vk12_features.bufferDeviceAddress,
+        .shaderOutputLayer = vk12_features.shaderOutputLayer,
+    };
+    VkPhysicalDeviceVulkan13Features enable_vk13 = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES,
+        .robustImageAccess = vk13_features.robustImageAccess,
+        .shaderDemoteToHelperInvocation = vk13_features.shaderDemoteToHelperInvocation,
+        .subgroupSizeControl = vk13_features.subgroupSizeControl,
+        .synchronization2 = vk13_features.synchronization2,
+        .dynamicRendering = vk13_features.dynamicRendering,
+        .maintenance4 = vk13_features.maintenance4,
+    };
+    VkPhysicalDeviceCustomBorderColorFeaturesEXT enable_border_color = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_CUSTOM_BORDER_COLOR_FEATURES_EXT,
+        .customBorderColors = VK_TRUE,
+        .customBorderColorWithoutFormat = VK_TRUE,
+    };
+    VkPhysicalDeviceExtendedDynamicState3FeaturesEXT enable_dynamic_state_3 = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTENDED_DYNAMIC_STATE_3_FEATURES_EXT,
+        .extendedDynamicState3ColorWriteMask =
+            dynamic_state_3_features.extendedDynamicState3ColorWriteMask,
+    };
+    VkPhysicalDeviceDepthClipControlFeaturesEXT enable_clip_control = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DEPTH_CLIP_CONTROL_FEATURES_EXT,
+        .depthClipControl = VK_TRUE,
+    };
+    VkPhysicalDeviceDepthClipEnableFeaturesEXT enable_clip_enable = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DEPTH_CLIP_ENABLE_FEATURES_EXT,
+        .depthClipEnable = VK_TRUE,
+    };
+    VkPhysicalDeviceRobustness2FeaturesEXT enable_robustness2 = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ROBUSTNESS_2_FEATURES_EXT,
+        .robustBufferAccess2 = VK_TRUE,
+        .robustImageAccess2 = VK_TRUE,
+        .nullDescriptor = VK_TRUE,
+    };
+    VkPhysicalDeviceVertexInputDynamicStateFeaturesEXT enable_vertex_input = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VERTEX_INPUT_DYNAMIC_STATE_FEATURES_EXT,
+        .vertexInputDynamicState = VK_TRUE,
+    };
+    VkPhysicalDevicePrimitiveTopologyListRestartFeaturesEXT enable_list_restart = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PRIMITIVE_TOPOLOGY_LIST_RESTART_FEATURES_EXT,
+        .primitiveTopologyListRestart = list_restart_features.primitiveTopologyListRestart,
+        .primitiveTopologyPatchListRestart =
+            list_restart_features.primitiveTopologyPatchListRestart,
+    };
+    VkPhysicalDeviceFragmentShaderBarycentricFeaturesKHR enable_barycentric = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_SHADER_BARYCENTRIC_FEATURES_KHR,
+        .fragmentShaderBarycentric = VK_TRUE,
+    };
+    VkPhysicalDeviceProvokingVertexFeaturesEXT enable_provoking = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROVOKING_VERTEX_FEATURES_EXT,
+        .provokingVertexLast = VK_TRUE,
+    };
+    VkPhysicalDeviceVertexAttributeDivisorFeatures enable_divisor = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VERTEX_ATTRIBUTE_DIVISOR_FEATURES,
+        .vertexAttributeInstanceRateDivisor = VK_TRUE,
+    };
+    VkPhysicalDeviceMaintenance5FeaturesKHR enable_maintenance5 = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_5_FEATURES_KHR,
+        .maintenance5 = VK_TRUE,
+    };
+    VkPhysicalDeviceMaintenance6FeaturesKHR enable_maintenance6 = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_6_FEATURES_KHR,
+        .maintenance6 = VK_TRUE,
+    };
+    VkPhysicalDeviceMaintenance8FeaturesKHR enable_maintenance8 = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_8_FEATURES_KHR,
+        .maintenance8 = VK_TRUE,
+    };
+    VkPhysicalDeviceAttachmentFeedbackLoopLayoutFeaturesEXT enable_feedback_layout = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ATTACHMENT_FEEDBACK_LOOP_LAYOUT_FEATURES_EXT,
+        .attachmentFeedbackLoopLayout = VK_TRUE,
+    };
+    VkPhysicalDeviceAttachmentFeedbackLoopDynamicStateFeaturesEXT enable_feedback_dynamic = {
+        .sType =
+            VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ATTACHMENT_FEEDBACK_LOOP_DYNAMIC_STATE_FEATURES_EXT,
+        .attachmentFeedbackLoopDynamicState = VK_TRUE,
+    };
+    VkPhysicalDeviceShaderAtomicFloat2FeaturesEXT enable_atomic_float2 = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_ATOMIC_FLOAT_2_FEATURES_EXT,
+        .shaderBufferFloat32AtomicMinMax =
+            shader_atomic_float2_features.shaderBufferFloat32AtomicMinMax,
+        .shaderImageFloat32AtomicMinMax =
+            shader_atomic_float2_features.shaderImageFloat32AtomicMinMax,
+    };
+    VkPhysicalDeviceWorkgroupMemoryExplicitLayoutFeaturesKHR enable_workgroup_layout = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_WORKGROUP_MEMORY_EXPLICIT_LAYOUT_FEATURES_KHR,
+        .workgroupMemoryExplicitLayout =
+            workgroup_memory_explicit_layout_features.workgroupMemoryExplicitLayout,
+        .workgroupMemoryExplicitLayoutScalarBlockLayout =
+            workgroup_memory_explicit_layout_features
+                .workgroupMemoryExplicitLayoutScalarBlockLayout,
+        .workgroupMemoryExplicitLayout16BitAccess =
+            workgroup_memory_explicit_layout_features.workgroupMemoryExplicitLayout16BitAccess,
+    };
+    VkPhysicalDeviceImage2DViewOf3DFeaturesEXT enable_2d_view_of_3d = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_IMAGE_2D_VIEW_OF_3D_FEATURES_EXT,
+        .image2DViewOf3D = image_2d_view_of_3d_features.image2DViewOf3D,
+        .sampler2DViewOf3D = image_2d_view_of_3d_features.sampler2DViewOf3D,
+    };
+    VkPhysicalDeviceImageViewMinLodFeaturesEXT enable_min_lod = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_IMAGE_VIEW_MIN_LOD_FEATURES_EXT,
+        .minLod = VK_TRUE,
+    };
+    VkPhysicalDeviceFaultFeaturesEXT enable_fault = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FAULT_FEATURES_EXT,
+        .deviceFault = VK_TRUE,
+    };
+    VkPhysicalDeviceShaderClockFeaturesKHR enable_shader_clock = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_CLOCK_FEATURES_KHR,
+        .shaderSubgroupClock = shader_clock_features.shaderSubgroupClock,
+    };
+    {
+        void** tail = &enable_features.pNext;
+        Chain(tail, enable_vk11);
+        Chain(tail, enable_vk12);
+        Chain(tail, enable_vk13);
+        if (custom_border_color) {
+            Chain(tail, enable_border_color);
+        }
+        if (dynamic_state_3) {
+            Chain(tail, enable_dynamic_state_3);
+        }
+        if (depth_clip_control) {
+            Chain(tail, enable_clip_control);
+        }
+        if (depth_clip_enable) {
+            Chain(tail, enable_clip_enable);
+        }
+        Chain(tail, enable_robustness2);
+        if (vertex_input_dynamic_state) {
+            Chain(tail, enable_vertex_input);
+        }
+        if (list_restart) {
+            Chain(tail, enable_list_restart);
+        }
+        if (fragment_shader_barycentric) {
+            Chain(tail, enable_barycentric);
+        }
+        if (provoking_vertex) {
+            Chain(tail, enable_provoking);
+        }
+        Chain(tail, enable_divisor);
+        if (maintenance_5) {
+            Chain(tail, enable_maintenance5);
+        }
+        if (maintenance_6) {
+            Chain(tail, enable_maintenance6);
+        }
+        if (maintenance_8) {
+            Chain(tail, enable_maintenance8);
+        }
+        if (attachment_feedback_loop) {
+            Chain(tail, enable_feedback_layout);
+            Chain(tail, enable_feedback_dynamic);
+        }
+        if (shader_atomic_float2) {
+            Chain(tail, enable_atomic_float2);
+        }
+        if (workgroup_memory_explicit_layout) {
+            Chain(tail, enable_workgroup_layout);
+        }
+        if (image_2d_view_of_3d) {
+            Chain(tail, enable_2d_view_of_3d);
+        }
+        if (image_view_min_lod) {
+            Chain(tail, enable_min_lod);
+        }
+        if (device_fault) {
+            Chain(tail, enable_fault);
+        }
+        if (shader_clock) {
+            Chain(tail, enable_shader_clock);
+        }
+    }
+    const VkDeviceCreateInfo device_ci = {
+        .sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
+        .pNext = &enable_features,
+        .queueCreateInfoCount = 1u,
+        .pQueueCreateInfos = &queue_info,
+        .enabledExtensionCount = num_enabled_extensions,
+        .ppEnabledExtensionNames = enabled_extensions,
+    };
 
-    if (!custom_border_color) {
-        device_chain.unlink<vk::PhysicalDeviceCustomBorderColorFeaturesEXT>();
-    }
-    if (!dynamic_state_3) {
-        device_chain.unlink<vk::PhysicalDeviceExtendedDynamicState3FeaturesEXT>();
-    }
-    if (!depth_clip_control) {
-        device_chain.unlink<vk::PhysicalDeviceDepthClipControlFeaturesEXT>();
-    }
-    if (!depth_clip_enable) {
-        device_chain.unlink<vk::PhysicalDeviceDepthClipEnableFeaturesEXT>();
-    }
-    if (!vertex_input_dynamic_state) {
-        device_chain.unlink<vk::PhysicalDeviceVertexInputDynamicStateFeaturesEXT>();
-    }
-    if (!list_restart) {
-        device_chain.unlink<vk::PhysicalDevicePrimitiveTopologyListRestartFeaturesEXT>();
-    }
-    if (!fragment_shader_barycentric) {
-        device_chain.unlink<vk::PhysicalDeviceFragmentShaderBarycentricFeaturesKHR>();
-    }
-    if (!provoking_vertex) {
-        device_chain.unlink<vk::PhysicalDeviceProvokingVertexFeaturesEXT>();
-    }
-    if (!maintenance_5) {
-        device_chain.unlink<vk::PhysicalDeviceMaintenance5FeaturesKHR>();
-    }
-    if (!maintenance_6) {
-        device_chain.unlink<vk::PhysicalDeviceMaintenance6FeaturesKHR>();
-    }
-    if (!maintenance_8) {
-        device_chain.unlink<vk::PhysicalDeviceMaintenance8FeaturesKHR>();
-    }
-    if (!attachment_feedback_loop) {
-        device_chain.unlink<vk::PhysicalDeviceAttachmentFeedbackLoopLayoutFeaturesEXT>();
-        device_chain.unlink<vk::PhysicalDeviceAttachmentFeedbackLoopDynamicStateFeaturesEXT>();
-    }
-    if (!shader_atomic_float2) {
-        device_chain.unlink<vk::PhysicalDeviceShaderAtomicFloat2FeaturesEXT>();
-    }
-    if (!workgroup_memory_explicit_layout) {
-        device_chain.unlink<vk::PhysicalDeviceWorkgroupMemoryExplicitLayoutFeaturesKHR>();
-    }
-    if (!image_2d_view_of_3d) {
-        device_chain.unlink<vk::PhysicalDeviceImage2DViewOf3DFeaturesEXT>();
-    }
-    if (!image_view_min_lod) {
-        device_chain.unlink<vk::PhysicalDeviceImageViewMinLodFeaturesEXT>();
-    }
-    if (!shader_clock) {
-        device_chain.unlink<vk::PhysicalDeviceShaderClockFeaturesKHR>();
-    }
-    if (!device_fault) {
-        device_chain.unlink<vk::PhysicalDeviceFaultFeaturesEXT>();
-    }
-
-    auto [device_result, dev] = physical_device.createDeviceUnique(device_chain.get());
-    if (device_result != vk::Result::eSuccess) {
-        LOG_CRITICAL(Render_Vulkan, "Failed to create device: %s",
-                     (vk::to_string(device_result)).c_str());
+    const VkResult device_result = vkCreateDevice(physical_device, &device_ci, nullptr, &device);
+    if (device_result != VK_SUCCESS) {
+        LOG_CRITICAL(Render_Vulkan, "Failed to create device: %s", ResultName(device_result));
+        device = VK_NULL_HANDLE;
         return false;
     }
-    device = std::move(dev);
 
-    VULKAN_HPP_DEFAULT_DISPATCHER.init(*device);
-    if (!vulkan_symbol_wrapper_load_core_device_symbols(*device)) {
+    // vulkan.hpp's entry points too, for the code not yet on the C API
+    VULKAN_HPP_DEFAULT_DISPATCHER.init(vk::Device{device});
+    if (!vulkan_symbol_wrapper_load_core_device_symbols(device)) {
         LOG_CRITICAL(Render_Vulkan, "Failed to load Vulkan's device entry points");
         return false;
     }
-    vulkan_symbol_wrapper_load_extended_symbols(*instance, *device);
+    vulkan_symbol_wrapper_load_extended_symbols(instance, device);
 
-    graphics_queue = device->getQueue(queue_family_index, 0);
-    present_queue = device->getQueue(queue_family_index, 0);
+    vkGetDeviceQueue(device, queue_family_index, 0, &graphics_queue);
 
-    CreateAllocator();
+    allocator = new MemoryAllocator(physical_device, device, memory_properties, properties.limits,
+                                    vk12_features.bufferDeviceAddress, supports_memory_budget);
     return true;
 }
 
-void Instance::CreateAllocator() {
-    allocator = std::make_unique<MemoryAllocator>(
-        physical_device, *device, physical_device.getMemoryProperties(), properties.limits,
-        vk12_features.bufferDeviceAddress, supports_memory_budget);
-}
-
 void Instance::CollectDeviceParameters() {
-    const vk::StructureChain property_chain =
-        physical_device
-            .getProperties2<vk::PhysicalDeviceProperties2, vk::PhysicalDeviceDriverProperties>();
-    const vk::PhysicalDeviceDriverProperties driver =
-        property_chain.get<vk::PhysicalDeviceDriverProperties>();
+    VkPhysicalDeviceDriverProperties driver = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRIVER_PROPERTIES,
+    };
+    VkPhysicalDeviceProperties2 props2 = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2,
+        .pNext = &driver,
+    };
+    vkGetPhysicalDeviceProperties2(physical_device, &props2);
 
     driver_id = driver.driverID;
-    vendor_name = driver.driverName.data();
+    memcpy(vendor_name, driver.driverName, sizeof(vendor_name));
+    vendor_name[sizeof(vendor_name) - 1] = '\0';
 
-    const std::string model_name{GetModelName()};
-    const std::string driver_version = GetDriverVersionName();
-    const std::string driver_name =
-        Common::StringFromFormat("%s %s", (vendor_name).c_str(), (driver_version).c_str());
-    const std::string api_version = GetReadableVersion(properties.apiVersion);
-    std::string extensions;
-    for (const auto& item : available_extensions) {
-        extensions += extensions.empty() ? "" : ", ";
-        extensions += item;
-    }
+    char driver_version[32];
+    DriverVersionName(driver_id, properties.driverVersion, driver_version, sizeof(driver_version));
 
-    LOG_INFO(Render_Vulkan, "GPU_Vendor: %s", (vendor_name).c_str());
-    LOG_INFO(Render_Vulkan, "GPU_Model: %s", (model_name).c_str());
+    LOG_INFO(Render_Vulkan, "GPU_Vendor: %s", vendor_name);
+    LOG_INFO(Render_Vulkan, "GPU_Model: %s", properties.deviceName);
     LOG_INFO(Render_Vulkan, "GPU_Integrated: %s", IsIntegrated() ? "Yes" : "No");
-    LOG_INFO(Render_Vulkan, "GPU_Vulkan_Driver: %s", (driver_name).c_str());
-    LOG_INFO(Render_Vulkan, "GPU_Vulkan_Version: %s", (api_version).c_str());
-    LOG_INFO(Render_Vulkan, "GPU_Vulkan_Extensions: %s", (extensions).c_str());
+    LOG_INFO(Render_Vulkan, "GPU_Vulkan_Driver: %s %s", vendor_name, driver_version);
+    LOG_INFO(Render_Vulkan, "GPU_Vulkan_Version: %u.%u.%u", VK_VERSION_MAJOR(properties.apiVersion),
+             VK_VERSION_MINOR(properties.apiVersion), VK_VERSION_PATCH(properties.apiVersion));
+    for (u32 i = 0; i < num_available_extensions; ++i) {
+        LOG_INFO(Render_Vulkan, "GPU_Vulkan_Extension: %s", available_extensions[i].extensionName);
+    }
+}
+
+s32 Instance::FormatSlot(VkFormat format) const {
+    const u32 value = static_cast<u32>(format);
+    if (value < NumCoreFormatSlots) {
+        return static_cast<s32>(value);
+    }
+    for (u32 i = 0; i < num_extension_formats; ++i) {
+        if (extension_formats[i] == format) {
+            return static_cast<s32>(NumCoreFormatSlots + i);
+        }
+    }
+    return -1;
+}
+
+void Instance::QueryFormat(VkFormat format) {
+    s32 slot = FormatSlot(format);
+    if (slot < 0) {
+        ASSERT_MSG(num_extension_formats < MaxExtensionFormats,
+                   "More extension formats than are kept (%u)", MaxExtensionFormats);
+        extension_formats[num_extension_formats] = format;
+        slot = static_cast<s32>(NumCoreFormatSlots + num_extension_formats++);
+    }
+    if (format_queried[slot]) {
+        return;
+    }
+    VkFormatProperties3& properties3 = format_properties[slot];
+    properties3 = VkFormatProperties3{.sType = VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_3};
+    VkFormatProperties2 properties2 = {
+        .sType = VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2,
+        .pNext = &properties3,
+    };
+    vkGetPhysicalDeviceFormatProperties2(physical_device, format, &properties2);
+    properties3.pNext = nullptr;
+    format_queried[slot] = true;
+}
+
+void Instance::CollectFormatProperties() {
+    for (const LiverpoolToVK::SurfaceFormatInfo& format_info : LiverpoolToVK::SurfaceFormats()) {
+        QueryFormat(static_cast<VkFormat>(format_info.vk_format));
+    }
+    for (const LiverpoolToVK::DepthFormatInfo& format_info : LiverpoolToVK::DepthFormats()) {
+        QueryFormat(static_cast<VkFormat>(format_info.vk_format));
+    }
+    // Other miscellaneous formats, e.g. for color buffers, swizzles, or compatibility
+    static constexpr VkFormat misc_formats[] = {
+        VK_FORMAT_A2R10G10B10_UNORM_PACK32,
+        VK_FORMAT_B8G8R8A8_UNORM,
+        VK_FORMAT_B8G8R8A8_SRGB,
+        VK_FORMAT_D24_UNORM_S8_UINT,
+    };
+    for (const VkFormat format : misc_formats) {
+        QueryFormat(format);
+    }
 }
 
 void Instance::CollectPhysicalMemoryInfo() {
-    vk::PhysicalDeviceMemoryBudgetPropertiesEXT budget{};
-    vk::PhysicalDeviceMemoryProperties2 props = {
+    VkPhysicalDeviceMemoryBudgetPropertiesEXT budget = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_BUDGET_PROPERTIES_EXT,
+    };
+    VkPhysicalDeviceMemoryProperties2 props = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_PROPERTIES_2,
         .pNext = supports_memory_budget ? &budget : nullptr,
     };
-    physical_device.getMemoryProperties2(&props);
-    const auto& memory_props = props.memoryProperties;
-    const size_t num_props = memory_props.memoryHeapCount;
+    vkGetPhysicalDeviceMemoryProperties2(physical_device, &props);
+    const VkPhysicalDeviceMemoryProperties& memory_props = props.memoryProperties;
+    const u32 num_props = memory_props.memoryHeapCount;
     total_memory_budget = 0;
     u64 device_initial_usage = 0;
-    u64 local_memory = 0;
-    for (size_t i = 0; i < num_props; ++i) {
+    for (u32 i = 0; i < num_props; ++i) {
         const bool is_device_local =
-            (memory_props.memoryHeaps[i].flags & vk::MemoryHeapFlagBits::eDeviceLocal) !=
-            vk::MemoryHeapFlags{};
+            (memory_props.memoryHeaps[i].flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT) != 0;
         if (!IsIntegrated() && !is_device_local) {
             // Ignore non-device local memory on discrete GPUs.
             continue;
         }
-        valid_heaps.push_back(i);
-        if (is_device_local) {
-            local_memory += memory_props.memoryHeaps[i].size;
-        }
+        valid_heaps[num_valid_heaps++] = i;
         if (supports_memory_budget) {
             device_initial_usage += budget.heapUsage[i];
             total_memory_budget += budget.heapBudget[i];
@@ -754,13 +886,13 @@ void Instance::CollectPhysicalMemoryInfo() {
     }
     if (!IsIntegrated()) {
         // We reserve some memory for the system.
-        const u64 system_memory = std::min<u64>(total_memory_budget / 8, 1_GB);
+        const u64 system_memory = Common::Min<u64>(total_memory_budget / 8, 1_GB);
         total_memory_budget -= system_memory;
     } else {
         // Leave at least 8 GB for the system on integrated GPUs.
         const s64 available_memory = static_cast<s64>(total_memory_budget - device_initial_usage);
         total_memory_budget =
-            static_cast<u64>(std::max<s64>(available_memory - 8_GB, static_cast<s64>(2_GB)));
+            static_cast<u64>(Common::Max<s64>(available_memory - 8_GB, static_cast<s64>(2_GB)));
     }
     LOG_INFO(Render_Vulkan, "GPU memory budget is %llu MiB",
              static_cast<unsigned long long>(total_memory_budget / 1_MB));
@@ -768,69 +900,79 @@ void Instance::CollectPhysicalMemoryInfo() {
 
 void Instance::CollectImageFormatInfo() {
     // Check for block texel view support using basic image format info.
-    const vk::PhysicalDeviceImageFormatInfo2 block_texel_view_info{
-        .format = vk::Format::eBc1RgbaUnormBlock,
-        .type = vk::ImageType::e2D,
-        .tiling = vk::ImageTiling::eOptimal,
-        .usage = vk::ImageUsageFlagBits::eSampled,
-        .flags = vk::ImageCreateFlagBits::eBlockTexelViewCompatible,
+    const VkPhysicalDeviceImageFormatInfo2 block_texel_view_info = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_IMAGE_FORMAT_INFO_2,
+        .format = VK_FORMAT_BC1_RGBA_UNORM_BLOCK,
+        .type = VK_IMAGE_TYPE_2D,
+        .tiling = VK_IMAGE_TILING_OPTIMAL,
+        .usage = VK_IMAGE_USAGE_SAMPLED_BIT,
+        .flags = VK_IMAGE_CREATE_BLOCK_TEXEL_VIEW_COMPATIBLE_BIT,
     };
-    const auto block_texel_view_props =
-        physical_device.getImageFormatProperties2(block_texel_view_info);
-    supports_block_texel_view = block_texel_view_props.result == vk::Result::eSuccess;
+    VkImageFormatProperties2 block_texel_view_props = {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_FORMAT_PROPERTIES_2,
+    };
+    supports_block_texel_view =
+        vkGetPhysicalDeviceImageFormatProperties2(physical_device, &block_texel_view_info,
+                                                  &block_texel_view_props) == VK_SUCCESS;
     LOG_INFO(Render_Vulkan, "Block Texel View support: %s",
              supports_block_texel_view ? "Yes" : "No");
 
     // Check and log format support details.
-    for (const auto& format : LiverpoolToVK::SurfaceFormats()) {
-        if (!IsFormatSupported(format.vk_format, format.flags)) {
-            LOG_WARNING(
-                Render_Vulkan,
-                "Surface format data_format=%u, number_format=%u is not fully supported "
-                "(vk_format=%s, missing features=%s)",
-                static_cast<u32>(format.data_format), static_cast<u32>(format.number_format),
-                (vk::to_string(format.vk_format)).c_str(),
-                (vk::to_string(format.flags & ~GetFormatFeatureFlags(format.vk_format))).c_str());
+    for (const LiverpoolToVK::SurfaceFormatInfo& format : LiverpoolToVK::SurfaceFormats()) {
+        const VkFormat vk_format = static_cast<VkFormat>(format.vk_format);
+        const VkFormatFeatureFlags2 flags = static_cast<VkFormatFeatureFlags2>(format.flags);
+        if ((GetFormatFeatureFlags(vk_format) & flags) != flags &&
+            vk_format != VK_FORMAT_UNDEFINED) {
+            LOG_WARNING(Render_Vulkan,
+                        "Surface format data_format=%u, number_format=%u is not fully supported "
+                        "(vk_format=%d, missing features=0x%llx)",
+                        static_cast<u32>(format.data_format),
+                        static_cast<u32>(format.number_format), static_cast<int>(vk_format),
+                        static_cast<unsigned long long>(flags & ~GetFormatFeatureFlags(vk_format)));
         }
     }
-    for (const auto& format : LiverpoolToVK::DepthFormats()) {
-        if (!IsFormatSupported(format.vk_format, format.flags)) {
-            LOG_WARNING(
-                Render_Vulkan,
-                "Depth format z_format=%u, stencil_format=%u is not fully supported "
-                "(vk_format=%s, missing features=%s)",
-                static_cast<u32>(format.z_format), static_cast<u32>(format.stencil_format),
-                (vk::to_string(format.vk_format)).c_str(),
-                (vk::to_string(format.flags & ~GetFormatFeatureFlags(format.vk_format))).c_str());
+    for (const LiverpoolToVK::DepthFormatInfo& format : LiverpoolToVK::DepthFormats()) {
+        const VkFormat vk_format = static_cast<VkFormat>(format.vk_format);
+        const VkFormatFeatureFlags2 flags = static_cast<VkFormatFeatureFlags2>(format.flags);
+        if ((GetFormatFeatureFlags(vk_format) & flags) != flags &&
+            vk_format != VK_FORMAT_UNDEFINED) {
+            LOG_WARNING(Render_Vulkan,
+                        "Depth format z_format=%u, stencil_format=%u is not fully supported "
+                        "(vk_format=%d, missing features=0x%llx)",
+                        static_cast<u32>(format.z_format), static_cast<u32>(format.stencil_format),
+                        static_cast<int>(vk_format),
+                        static_cast<unsigned long long>(flags & ~GetFormatFeatureFlags(vk_format)));
         }
     }
 }
 
 void Instance::CollectToolingInfo() const {
-    if (driver_id == vk::DriverId::eAmdProprietary ||
-        driver_id == vk::DriverId::eIntelProprietaryWindows) {
+    if (driver_id == VK_DRIVER_ID_AMD_PROPRIETARY ||
+        driver_id == VK_DRIVER_ID_INTEL_PROPRIETARY_WINDOWS) {
         // AMD: Causes issues with Reshade.
         // Intel: Causes crash on start.
         return;
     }
-    const auto [tools_result, tools] = physical_device.getToolProperties();
-    if (tools_result != vk::Result::eSuccess) {
-        LOG_ERROR(Render_Vulkan, "Could not get Vulkan tool properties: %s",
-                  (vk::to_string(tools_result)).c_str());
+    VkPhysicalDeviceToolProperties tools[16];
+    u32 num_tools = sizeof(tools) / sizeof(tools[0]);
+    for (u32 i = 0; i < num_tools; ++i) {
+        tools[i] = VkPhysicalDeviceToolProperties{
+            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TOOL_PROPERTIES,
+        };
+    }
+    const VkResult result = vkGetPhysicalDeviceToolProperties(physical_device, &num_tools, tools);
+    if (result != VK_SUCCESS && result != VK_INCOMPLETE) {
+        LOG_ERROR(Render_Vulkan, "Could not get Vulkan tool properties: %s", ResultName(result));
         return;
     }
-    for (const vk::PhysicalDeviceToolProperties& tool : tools) {
-        const std::string_view name = tool.name;
-        LOG_INFO(Render_Vulkan, "Attached debugging tool: %.*s", static_cast<int>((name).size()),
-                 (name).data());
+    for (u32 i = 0; i < num_tools; ++i) {
+        LOG_INFO(Render_Vulkan, "Attached debugging tool: %s", tools[i].name);
     }
 }
 
 void Instance::ReportDeviceLost() const {
-    vk_device_fault_report(
-        *device, device_fault ? VULKAN_HPP_DEFAULT_DISPATCHER.vkGetDeviceFaultInfoEXT : nullptr,
-        graphics_queue,
-        device_checkpoints ? VULKAN_HPP_DEFAULT_DISPATCHER.vkGetQueueCheckpointDataNV : nullptr);
+    vk_device_fault_report(device, device_fault ? vkGetDeviceFaultInfoEXT : nullptr, graphics_queue,
+                           device_checkpoints ? vkGetQueueCheckpointDataNV : nullptr);
 }
 
 void Instance::Note(const char* what, u64 a, u64 b, u64 c, u64 d) const {
@@ -845,32 +987,37 @@ void Instance::Mark(VkCommandBuffer cmdbuf, const char* what, u64 a, u64 b, u64 
 }
 
 u64 Instance::GetDeviceMemoryUsage() const {
-    vk::PhysicalDeviceMemoryBudgetPropertiesEXT memory_budget_props{};
-    vk::PhysicalDeviceMemoryProperties2 props = {
+    VkPhysicalDeviceMemoryBudgetPropertiesEXT memory_budget_props = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_BUDGET_PROPERTIES_EXT,
+    };
+    VkPhysicalDeviceMemoryProperties2 props = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_PROPERTIES_2,
         .pNext = &memory_budget_props,
     };
-    physical_device.getMemoryProperties2(&props);
+    vkGetPhysicalDeviceMemoryProperties2(physical_device, &props);
 
     u64 total_usage = 0;
-    for (const size_t heap : valid_heaps) {
-        total_usage += memory_budget_props.heapUsage[heap];
+    for (u32 i = 0; i < num_valid_heaps; ++i) {
+        total_usage += memory_budget_props.heapUsage[valid_heaps[i]];
     }
     return total_usage;
 }
 
-vk::FormatFeatureFlags2 Instance::GetFormatFeatureFlags(vk::Format format) const {
-    const auto it = format_properties.find(format);
-    if (it == format_properties.end()) {
-        UNIMPLEMENTED_MSG("Properties of format %s have not been queried.",
-                          (vk::to_string(format)).c_str());
+VkFormatFeatureFlags2 Instance::GetFormatFeatureFlags(VkFormat format) const {
+    const s32 slot = FormatSlot(format);
+    if (slot < 0 || !format_queried[slot]) {
+        UNIMPLEMENTED_MSG("Properties of format %d have not been queried.",
+                          static_cast<int>(format));
+        return 0;
     }
-
-    return it->second.optimalTilingFeatures | it->second.bufferFeatures;
+    return format_properties[slot].optimalTilingFeatures | format_properties[slot].bufferFeatures;
 }
 
-bool Instance::IsFormatSupported(const vk::Format format,
-                                 const vk::FormatFeatureFlags2 flags) const {
-    if (format == vk::Format::eUndefined) [[unlikely]] {
+bool Instance::IsFormatSupported(const vk::Format vk_format,
+                                 const vk::FormatFeatureFlags2 vk_flags) const {
+    const VkFormat format = static_cast<VkFormat>(vk_format);
+    const VkFormatFeatureFlags2 flags = static_cast<VkFormatFeatureFlags2>(vk_flags);
+    if (format == VK_FORMAT_UNDEFINED) [[unlikely]] {
         return true;
     }
     return (GetFormatFeatureFlags(format) & flags) == flags;
@@ -906,22 +1053,21 @@ vk::Format Instance::GetSupportedFormat(const vk::Format format,
 }
 
 void Instance::FillHostImport(guest_import_info* info, void* base, u64 size, u32 usage) const {
-    const auto& dispatch = VULKAN_HPP_DEFAULT_DISPATCHER;
     *info = {};
-    info->device = static_cast<VkDevice>(*device);
-    info->memory = static_cast<VkPhysicalDeviceMemoryProperties>(memory_properties);
+    info->device = device;
+    info->memory = memory_properties;
     info->alignment = min_imported_host_pointer_alignment;
     info->base = static_cast<uint8_t*>(base);
     info->size = size;
     info->usage = usage;
     info->import_on_use = 1;
-    info->fns.allocate_memory = dispatch.vkAllocateMemory;
-    info->fns.free_memory = dispatch.vkFreeMemory;
-    info->fns.create_buffer = dispatch.vkCreateBuffer;
-    info->fns.destroy_buffer = dispatch.vkDestroyBuffer;
-    info->fns.get_buffer_memory_requirements = dispatch.vkGetBufferMemoryRequirements;
-    info->fns.bind_buffer_memory = dispatch.vkBindBufferMemory;
-    info->fns.get_memory_host_pointer_properties = dispatch.vkGetMemoryHostPointerPropertiesEXT;
+    info->fns.allocate_memory = vkAllocateMemory;
+    info->fns.free_memory = vkFreeMemory;
+    info->fns.create_buffer = vkCreateBuffer;
+    info->fns.destroy_buffer = vkDestroyBuffer;
+    info->fns.get_buffer_memory_requirements = vkGetBufferMemoryRequirements;
+    info->fns.bind_buffer_memory = vkBindBufferMemory;
+    info->fns.get_memory_host_pointer_properties = vkGetMemoryHostPointerPropertiesEXT;
 }
 
 } // namespace Vulkan

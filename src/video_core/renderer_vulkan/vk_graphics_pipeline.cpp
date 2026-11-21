@@ -84,8 +84,7 @@ GraphicsPipeline::GraphicsPipeline(const Instance& instance, Scheduler& schedule
     GetDebugString(debug_str, sizeof(debug_str));
 
     CreatePipelineLayout(AllGraphicsStageBits, "graphics");
-    SetObjectName(vk_device, vk::PipelineLayout{pipeline_layout}, "Graphics PipelineLayout %s",
-                  debug_str);
+    SetObjectName(vk_device, pipeline_layout, "Graphics PipelineLayout %s", debug_str);
 
     const Shader::HwFragmentRuntimeInfo& fs_info =
         runtime_infos[u32(Shader::SwStage::Fragment)].hw.fs;
@@ -447,7 +446,7 @@ GraphicsPipeline::GraphicsPipeline(const Instance& instance, Scheduler& schedule
         vkCreateGraphicsPipelines(device, pipeline_cache, 1, &pipeline_info, nullptr, &pipeline);
     ASSERT_MSG(pipeline_result == VK_SUCCESS, "Failed to create graphics pipeline: %s",
                ResultName(pipeline_result));
-    SetObjectName(vk_device, vk::Pipeline{pipeline}, "Graphics Pipeline %s", debug_str);
+    SetObjectName(vk_device, pipeline, "Graphics Pipeline %s", debug_str);
 }
 
 GraphicsPipeline::~GraphicsPipeline() = default;

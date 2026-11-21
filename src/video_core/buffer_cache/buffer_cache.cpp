@@ -152,9 +152,9 @@ BufferCache::BufferCache(const Vulkan::Instance& instance_, Vulkan::Scheduler& s
     block_shift = BitWidth(block_size) - 1;
     blocks_per_arena_page = ARENA_PAGE_SIZE / block_size;
     blocks_per_arena_page_shift = ARENA_PAGE_BITS - block_shift;
-    const bool found_type = FindMemoryType(
-        reinterpret_cast<const VkPhysicalDeviceMemoryProperties&>(instance.GetMemoryProperties()),
-        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, reqs.memoryTypeBits, &arena_memory_type_index);
+    const bool found_type =
+        FindMemoryType(instance.GetMemoryProperties(), VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+                       reqs.memoryTypeBits, &arena_memory_type_index);
     ASSERT_MSG(found_type, "No device-local memory for the buffer arenas");
 
     const u64 bda_pagetable_size =

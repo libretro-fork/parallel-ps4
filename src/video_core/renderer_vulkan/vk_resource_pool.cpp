@@ -76,7 +76,7 @@ CommandPool::CommandPool(const Instance& instance, Semaphore* work_semaphore)
     pool_create_info.queueFamilyIndex = instance.GetGraphicsQueueFamilyIndex();
     const VkResult result = vkCreateCommandPool(device, &pool_create_info, nullptr, &cmd_pool);
     ASSERT_MSG(result == VK_SUCCESS, "Failed to create command pool: %s", ResultName(result));
-    SetObjectName(instance.GetDevice(), vk::CommandPool{cmd_pool}, "CommandPool");
+    SetObjectName(instance.GetDevice(), cmd_pool, "CommandPool");
 }
 
 CommandPool::~CommandPool() {
@@ -102,8 +102,7 @@ void CommandPool::Allocate(size_t begin, size_t end) {
     ASSERT(result == VK_SUCCESS);
 
     for (size_t i = begin; i < end; ++i) {
-        SetObjectName(instance.GetDevice(), vk::CommandBuffer{cmd_buffers[i]},
-                      "CommandPool: Command Buffer %zu", i);
+        SetObjectName(instance.GetDevice(), cmd_buffers[i], "CommandPool: Command Buffer %zu", i);
     }
 }
 

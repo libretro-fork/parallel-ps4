@@ -383,7 +383,7 @@ PipelineCache::PipelineCache(const Instance& instance_, Scheduler& scheduler_,
     ptr_table_init(&program_cache, 4096);
     ptr_table_init(&compute_pipelines, 1024);
     ptr_table_init(&graphics_pipelines, 8192);
-    const vk::PhysicalDeviceVulkan12Properties& vk12_props = instance.GetVk12Properties();
+    const VkPhysicalDeviceVulkan12Properties& vk12_props = instance.GetVk12Properties();
     profile = Shader::Profile{
         .max_viewport_width = instance.GetMaxViewportWidth(),
         .max_viewport_height = instance.GetMaxViewportHeight(),
@@ -397,9 +397,9 @@ PipelineCache::PipelineCache(const Instance& instance_, Scheduler& scheduler_,
         .support_float16 = instance.IsShaderFloat16Supported(),
         .support_float64 = instance.IsShaderFloat64Supported(),
         .supports_denorm_behavior_independence =
-            vk12_props.denormBehaviorIndependence != vk::ShaderFloatControlsIndependence::eNone,
+            vk12_props.denormBehaviorIndependence != VK_SHADER_FLOAT_CONTROLS_INDEPENDENCE_NONE,
         .supports_rounding_mode_independence =
-            vk12_props.roundingModeIndependence != vk::ShaderFloatControlsIndependence::eNone,
+            vk12_props.roundingModeIndependence != VK_SHADER_FLOAT_CONTROLS_INDEPENDENCE_NONE,
         .support_fp16_denorm_preserve = bool(vk12_props.shaderDenormPreserveFloat16),
         .support_fp16_denorm_flush = bool(vk12_props.shaderDenormFlushToZeroFloat16),
         .support_fp16_round_to_zero = bool(vk12_props.shaderRoundingModeRTZFloat16),
@@ -523,9 +523,9 @@ void PipelineCache::CreateDriverCache(bool from_disk) {
         // Mapped, and handed to the driver where it lies
         const std::optional<Common::FS::FileView> kept =
             Storage::DataBase::Instance().Load(Storage::BlobType::DriverCache, "driver");
-        if (kept && pipeline_cache_blob_fits(kept->data(), kept->size(), instance.GetVendorID(),
-                                             instance.GetDeviceID(),
-                                             instance.GetPipelineCacheUUID().data())) {
+        if (kept &&
+            pipeline_cache_blob_fits(kept->data(), kept->size(), instance.GetVendorID(),
+                                     instance.GetDeviceID(), instance.GetPipelineCacheUUID())) {
             info.initialDataSize = kept->size();
             info.pInitialData = kept->data();
             const VkResult result = vkCreatePipelineCache(device, &info, nullptr, &pipeline_cache);
@@ -1013,7 +1013,7 @@ vk::ShaderModule PipelineCache::ModuleFromProgram(Shader::Info& info,
 
     char name[ShaderNameSize];
     GetShaderName(name, sizeof(name), info.hw_stage, info.pgm_hash, static_cast<int>(perm_idx));
-    Vulkan::SetObjectName(instance.GetDevice(), module, "%s", name);
+    Vulkan::SetObjectName(instance.GetDevice(), static_cast<VkShaderModule>(module), "%s", name);
     return module;
 }
 

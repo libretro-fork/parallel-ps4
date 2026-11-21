@@ -27,7 +27,7 @@ FaultManager::FaultManager(const Vulkan::Instance& instance, Vulkan::Scheduler& 
       fault_buffer{instance, 0, fault_buffer_size, MemoryType::DeviceLocal},
       download_buffer{instance, 0, MaxPendingFaults * PageFaultAreaSize, MemoryType::HostCached} {
     const vk::Device vk_device{device};
-    Vulkan::SetObjectName(vk_device, vk::Buffer{fault_buffer.Handle()}, "Fault Buffer");
+    Vulkan::SetObjectName(vk_device, fault_buffer.Handle(), "Fault Buffer");
 
     VkDescriptorSetLayoutBinding bindings[2]{};
     for (u32 i = 0; i < 2; ++i) {
@@ -41,8 +41,12 @@ FaultManager::FaultManager(const Vulkan::Instance& instance, Vulkan::Scheduler& 
     desc_layout_ci.flags = VK_DESCRIPTOR_SET_LAYOUT_CREATE_PUSH_DESCRIPTOR_BIT_KHR;
     desc_layout_ci.bindingCount = 2;
     desc_layout_ci.pBindings = bindings;
-    Vulkan::Check(static_cast<vk::Result>(
-        vkCreateDescriptorSetLayout(device, &desc_layout_ci, nullptr, &fault_process_desc_layout)));
+    {
+        const VkResult result = vkCreateDescriptorSetLayout(device, &desc_layout_ci, nullptr,
+                                                            &fault_process_desc_layout);
+        ASSERT_MSG(result == VK_SUCCESS, "Failed to make the fault buffer parser: %s",
+                   Vulkan::ResultName(result));
+    }
 
     // Made once, at start: the module's words on the heap rather than the stack (32 KiB)
     u32* words = new u32[HOST_SPIRV_MAX_WORDS];
@@ -50,14 +54,18 @@ FaultManager::FaultManager(const Vulkan::Instance& instance, Vulkan::Scheduler& 
                                                                   sparse_pagebits, MaxPageFaults);
     const vk::ShaderModule module = Vulkan::CompileSPV(words, num_words, vk_device);
     delete[] words;
-    Vulkan::SetObjectName(vk_device, module, "Fault Buffer Parser");
+    Vulkan::SetObjectName(vk_device, static_cast<VkShaderModule>(module), "Fault Buffer Parser");
 
     VkPipelineLayoutCreateInfo layout_info{};
     layout_info.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
     layout_info.setLayoutCount = 1U;
     layout_info.pSetLayouts = &fault_process_desc_layout;
-    Vulkan::Check(static_cast<vk::Result>(
-        vkCreatePipelineLayout(device, &layout_info, nullptr, &fault_process_pipeline_layout)));
+    {
+        const VkResult result =
+            vkCreatePipelineLayout(device, &layout_info, nullptr, &fault_process_pipeline_layout);
+        ASSERT_MSG(result == VK_SUCCESS, "Failed to make the fault buffer parser: %s",
+                   Vulkan::ResultName(result));
+    }
 
     VkComputePipelineCreateInfo pipeline_info{};
     pipeline_info.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
@@ -66,10 +74,13 @@ FaultManager::FaultManager(const Vulkan::Instance& instance, Vulkan::Scheduler& 
     pipeline_info.stage.module = static_cast<VkShaderModule>(module);
     pipeline_info.stage.pName = "main";
     pipeline_info.layout = fault_process_pipeline_layout;
-    Vulkan::Check(static_cast<vk::Result>(vkCreateComputePipelines(
-        device, VK_NULL_HANDLE, 1, &pipeline_info, nullptr, &fault_process_pipeline)));
-    Vulkan::SetObjectName(vk_device, vk::Pipeline{fault_process_pipeline},
-                          "Fault Buffer Parser Pipeline");
+    {
+        const VkResult result = vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, &pipeline_info,
+                                                         nullptr, &fault_process_pipeline);
+        ASSERT_MSG(result == VK_SUCCESS, "Failed to make the fault buffer parser: %s",
+                   Vulkan::ResultName(result));
+    }
+    Vulkan::SetObjectName(vk_device, fault_process_pipeline, "Fault Buffer Parser Pipeline");
 
     vkDestroyShaderModule(device, static_cast<VkShaderModule>(module), nullptr);
 }

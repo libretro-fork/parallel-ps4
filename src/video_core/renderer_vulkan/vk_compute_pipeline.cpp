@@ -60,8 +60,7 @@ ComputePipeline::ComputePipeline(const Instance& instance, Scheduler& scheduler,
     CreateDescSetLayout(bindings.data(), static_cast<u32>(bindings.size()), "compute");
     CreatePipelineLayout(VK_SHADER_STAGE_COMPUTE_BIT, "compute");
     const vk::Device vk_device{device};
-    SetObjectName(vk_device, vk::PipelineLayout{pipeline_layout}, "Compute PipelineLayout %s",
-                  debug_str);
+    SetObjectName(vk_device, pipeline_layout, "Compute PipelineLayout %s", debug_str);
 
     VkPipelineShaderStageRequiredSubgroupSizeCreateInfo subgroup_size_ci{};
     subgroup_size_ci.sType =
@@ -80,7 +79,7 @@ ComputePipeline::ComputePipeline(const Instance& instance, Scheduler& scheduler,
         device, pipeline_cache, 1, &compute_pipeline_ci, nullptr, &pipeline);
     ASSERT_MSG(pipeline_result == VK_SUCCESS, "Failed to create compute pipeline: %s",
                ResultName(pipeline_result));
-    SetObjectName(vk_device, vk::Pipeline{pipeline}, "Compute Pipeline %s", debug_str);
+    SetObjectName(vk_device, pipeline, "Compute Pipeline %s", debug_str);
 }
 
 ComputePipeline::~ComputePipeline() = default;

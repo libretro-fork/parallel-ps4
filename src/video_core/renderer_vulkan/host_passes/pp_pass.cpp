@@ -20,7 +20,7 @@ static VkShaderModule HostModule(VkDevice device, u32* words,
     const VkShaderModule module =
         static_cast<VkShaderModule>(CompileSPV(words, num_words, vk_device));
     ASSERT(module);
-    SetObjectName(vk_device, vk::ShaderModule{module}, "%s", name);
+    SetObjectName(vk_device, module, "%s", name);
     return module;
 }
 

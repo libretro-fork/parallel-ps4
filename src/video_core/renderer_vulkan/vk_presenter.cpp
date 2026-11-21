@@ -652,7 +652,7 @@ void Presenter::RecreateFrame(Frame* frame, u32 width, u32 height) {
         LOG_CRITICAL(Render_Vulkan, "Failed allocating texture with error %s", ResultName(result));
         UNREACHABLE();
     }
-    SetObjectName(instance.GetDevice(), vk::Image{frame->image}, "Frame image #%d", frame->id);
+    SetObjectName(instance.GetDevice(), frame->image, "Frame image #%d", frame->id);
 
     const VkImageViewCreateInfo view_info = {
         .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,

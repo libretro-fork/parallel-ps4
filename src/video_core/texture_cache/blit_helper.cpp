@@ -244,7 +244,7 @@ void BlitHelper::CreatePipelineLayouts() {
         vkCreatePipelineLayout(device, &layout_info, nullptr, &single_texture_pl_layout);
     ASSERT_MSG(layout_result == VK_SUCCESS, "Failed to create graphics pipeline layout: %s",
                Vulkan::ResultName(layout_result));
-    Vulkan::SetObjectName(instance.GetDevice(), vk::PipelineLayout{single_texture_pl_layout},
+    Vulkan::SetObjectName(instance.GetDevice(), single_texture_pl_layout,
                           "Single texture pipeline layout");
 }
 
@@ -332,8 +332,7 @@ VkPipeline BlitHelper::CreateBlitPipeline(VkShaderModule frag, u32 num_samples,
 VkPipeline BlitHelper::CreateColorToMSDepthPipeline(const MsPipelineKey& key) {
     const VkPipeline pipeline = CreateBlitPipeline(color_to_ms_depth_frag, key.num_samples,
                                                    VK_FORMAT_UNDEFINED, 0, key.attachment_format);
-    Vulkan::SetObjectName(instance.GetDevice(), vk::Pipeline{pipeline}, "Color to MS Depth %u",
-                          key.num_samples);
+    Vulkan::SetObjectName(instance.GetDevice(), pipeline, "Color to MS Depth %u", key.num_samples);
     return pipeline;
 }
 
@@ -344,8 +343,8 @@ VkPipeline BlitHelper::CreateMsCopyPipeline(const MsPipelineKey& key) {
                            VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
                                VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT,
                            VK_FORMAT_UNDEFINED);
-    Vulkan::SetObjectName(instance.GetDevice(), vk::Pipeline{pipeline},
-                          "Non MS Image to MS Image %u", key.num_samples);
+    Vulkan::SetObjectName(instance.GetDevice(), pipeline, "Non MS Image to MS Image %u",
+                          key.num_samples);
     return pipeline;
 }
 
@@ -356,7 +355,7 @@ VkPipeline BlitHelper::CreateDepthToColorPipeline(const DepthToColorKey& key) {
         static_cast<VkShaderModule>(Vulkan::CompileSPV(words, num_words, vk::Device{device}));
     const VkPipeline pipeline = CreateBlitPipeline(frag, key.dst_samples, key.attachment_format,
                                                    key.write_mask, VK_FORMAT_UNDEFINED);
-    Vulkan::SetObjectName(instance.GetDevice(), vk::Pipeline{pipeline}, "Depth plane to colour %u",
+    Vulkan::SetObjectName(instance.GetDevice(), pipeline, "Depth plane to colour %u",
                           key.dst_samples);
     vkDestroyShaderModule(device, frag, nullptr);
     return pipeline;

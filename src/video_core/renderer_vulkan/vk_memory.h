@@ -27,10 +27,9 @@ enum class MemoryUsage : u8 {
 /// runs in it.
 class MemoryAllocator {
 public:
-    MemoryAllocator(vk::PhysicalDevice physical_device, vk::Device device,
-                    const vk::PhysicalDeviceMemoryProperties& memory,
-                    const vk::PhysicalDeviceLimits& limits, bool device_address,
-                    bool memory_budget);
+    MemoryAllocator(VkPhysicalDevice physical_device, VkDevice device,
+                    const VkPhysicalDeviceMemoryProperties& memory,
+                    const VkPhysicalDeviceLimits& limits, bool device_address, bool memory_budget);
     ~MemoryAllocator();
 
     MemoryAllocator(const MemoryAllocator&) = delete;
@@ -53,8 +52,8 @@ public:
     void Invalidate(MemoryAllocation allocation, u64 offset, u64 size) const;
 
 private:
-    vk::Result Allocate(const VkMemoryRequirements& requirements, bool driver_dedicated,
-                        const vk_heap_request_t& request, MemoryAllocation& allocation);
+    VkResult Allocate(const VkMemoryRequirements& requirements, bool driver_dedicated,
+                      const vk_heap_request_t& request, MemoryAllocation& allocation);
     void Free(MemoryAllocation allocation);
 
     VkDevice device;

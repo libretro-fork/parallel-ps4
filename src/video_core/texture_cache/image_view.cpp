@@ -157,13 +157,12 @@ ImageView::ImageView(const Vulkan::Instance& instance, const ImageViewInfo& info
     const char* const view_aspect = (aspect & VK_IMAGE_ASPECT_DEPTH_BIT)     ? "Depth"
                                     : (aspect & VK_IMAGE_ASPECT_STENCIL_BIT) ? "Stencil"
                                                                              : "Color";
-    Vulkan::SetObjectName(instance.GetDevice(), vk::ImageView{Handle()},
-                          "ImageView %ux%ux%u 0x%" PRIxPTR ":0x%x %d:%d %d:%d (%s)",
-                          image.info.size.width, image.info.size.height, image.info.size.depth,
-                          image.info.guest_address, image.info.guest_size, info.range.base.level,
-                          info.range.base.level + info.range.extent.levels - 1,
-                          info.range.base.layer,
-                          info.range.base.layer + info.range.extent.layers - 1, view_aspect);
+    Vulkan::SetObjectName(
+        instance.GetDevice(), Handle(), "ImageView %ux%ux%u 0x%" PRIxPTR ":0x%x %d:%d %d:%d (%s)",
+        image.info.size.width, image.info.size.height, image.info.size.depth,
+        image.info.guest_address, image.info.guest_size, info.range.base.level,
+        info.range.base.level + info.range.extent.levels - 1, info.range.base.layer,
+        info.range.base.layer + info.range.extent.layers - 1, view_aspect);
 }
 
 ImageView::~ImageView() {

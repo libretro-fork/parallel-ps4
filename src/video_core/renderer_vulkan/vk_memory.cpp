@@ -40,15 +40,15 @@ vk_heap_request_t RequestFor(MemoryUsage usage) {
 
 } // Anonymous namespace
 
-MemoryAllocator::MemoryAllocator(vk::PhysicalDevice physical_device, vk::Device device_,
-                                 const vk::PhysicalDeviceMemoryProperties& memory,
-                                 const vk::PhysicalDeviceLimits& limits, bool device_address,
+MemoryAllocator::MemoryAllocator(VkPhysicalDevice physical_device, VkDevice device_,
+                                 const VkPhysicalDeviceMemoryProperties& memory,
+                                 const VkPhysicalDeviceLimits& limits, bool device_address,
                                  bool memory_budget)
-    : device{static_cast<VkDevice>(device_)} {
+    : device{device_} {
     vk_heap_info_t info{};
-    info.physical_device = static_cast<VkPhysicalDevice>(physical_device);
+    info.physical_device = physical_device;
     info.device = device;
-    info.memory = static_cast<VkPhysicalDeviceMemoryProperties>(memory);
+    info.memory = memory;
     info.buffer_image_granularity = limits.bufferImageGranularity;
     info.non_coherent_atom_size = limits.nonCoherentAtomSize;
     info.device_address = device_address;
@@ -69,12 +69,10 @@ MemoryAllocator::~MemoryAllocator() {
     vk_heap_destroy(heap);
 }
 
-vk::Result MemoryAllocator::Allocate(const VkMemoryRequirements& requirements,
-                                     bool driver_dedicated, const vk_heap_request_t& request,
-                                     MemoryAllocation& allocation) {
+VkResult MemoryAllocator::Allocate(const VkMemoryRequirements& requirements, bool driver_dedicated,
+                                   const vk_heap_request_t& request, MemoryAllocation& allocation) {
     return combiner.Run([&] {
-        return vk::Result{
-            vk_heap_alloc(heap, &requirements, driver_dedicated, &request, &allocation)};
+        return vk_heap_alloc(heap, &requirements, driver_dedicated, &request, &allocation);
     });
 }
 
@@ -109,10 +107,9 @@ VkResult MemoryAllocator::CreateImage(const VkImageCreateInfo& image_ci, bool wi
     if (within_budget) {
         request.flags |= VK_HEAP_WITHIN_BUDGET;
     }
-    result = static_cast<VkResult>(
-        Allocate(requirements2.memoryRequirements,
-                 dedicated.requiresDedicatedAllocation || dedicated.prefersDedicatedAllocation,
-                 request, allocation));
+    result = Allocate(requirements2.memoryRequirements,
+                      dedicated.requiresDedicatedAllocation || dedicated.prefersDedicatedAllocation,
+                      request, allocation);
     if (result == VK_SUCCESS) {
         result = vkBindImageMemory(device, new_image, allocation->memory, allocation->offset);
     }
@@ -153,10 +150,9 @@ VkResult MemoryAllocator::CreateBuffer(const VkBufferCreateInfo& buffer_ci, Memo
     if (within_budget) {
         request.flags |= VK_HEAP_WITHIN_BUDGET;
     }
-    result = static_cast<VkResult>(
-        Allocate(requirements2.memoryRequirements,
-                 dedicated.requiresDedicatedAllocation || dedicated.prefersDedicatedAllocation,
-                 request, allocation));
+    result = Allocate(requirements2.memoryRequirements,
+                      dedicated.requiresDedicatedAllocation || dedicated.prefersDedicatedAllocation,
+                      request, allocation);
     if (result == VK_SUCCESS) {
         result = vkBindBufferMemory(device, new_buffer, allocation->memory, allocation->offset);
     }
