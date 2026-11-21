@@ -7,7 +7,7 @@
 #include "video_core/renderer_vulkan/vk_common.h"
 
 namespace Vulkan {
-class Frame;
+struct Frame;
 }
 
 namespace Vulkan::HostPasses {
@@ -22,16 +22,24 @@ public:
         float pq_white = 0.0f;
     };
 
-    void Create(vk::Device device, vk::Format surface_format);
+    PostProcessingPass() = default;
+    ~PostProcessingPass();
 
-    void Render(vk::CommandBuffer cmdbuf, vk::ImageView input, vk::Extent2D input_size,
-                Frame& output, Settings settings);
+    PostProcessingPass(const PostProcessingPass&) = delete;
+    PostProcessingPass& operator=(const PostProcessingPass&) = delete;
+
+    void Create(VkDevice device, VkFormat surface_format);
+
+    /// Draws @input, @input_size, into @output's image with @settings
+    void Render(VkCommandBuffer cmdbuf, VkImageView input, VkExtent2D input_size, Frame& output,
+                Settings settings);
 
 private:
-    vk::UniquePipeline pipeline{};
-    vk::UniquePipelineLayout pipeline_layout{};
-    vk::UniqueDescriptorSetLayout desc_set_layout{};
-    vk::UniqueSampler sampler{};
+    VkDevice device{VK_NULL_HANDLE};
+    VkPipeline pipeline{VK_NULL_HANDLE};
+    VkPipelineLayout pipeline_layout{VK_NULL_HANDLE};
+    VkDescriptorSetLayout desc_set_layout{VK_NULL_HANDLE};
+    VkSampler sampler{VK_NULL_HANDLE};
 };
 
 } // namespace Vulkan::HostPasses

@@ -3,8 +3,6 @@
 
 #pragma once
 
-#include <array>
-
 #include "common/bounded_threadsafe_queue.h"
 #include "core/emulator_settings.h"
 #include "core/libraries/videoout/buffer.h"
@@ -29,10 +27,10 @@ struct Frame {
     u32 width;
     u32 height;
     vk_heap_span* allocation;
-    vk::Image image;
-    vk::ImageView image_view;
-    vk::Fence present_done;
-    vk::Semaphore ready_semaphore;
+    VkImage image;
+    VkImageView image_view;
+    VkFence present_done;
+    VkSemaphore ready_semaphore;
     u64 ready_tick;
     bool is_hdr{false};
     u8 id{};
@@ -56,7 +54,7 @@ public:
     }
 
     Rasterizer& GetRasterizer() const {
-        return *rasterizer.get();
+        return *rasterizer;
     }
 
     // HDR Output (libretro core option), with a frontend that takes HDR10: the game is told
@@ -70,9 +68,9 @@ public:
         vo_buffers_addr.emplace_back(cpu_address);
         // Resolution: Default hands over the game's own size
         Libretro::SetGameSize(attribute.attrib.width, attribute.attrib.height);
-        auto desc = VideoCore::TextureCache::ImageDesc{attribute, cpu_address};
-        const auto image_id = texture_cache.FindImage(desc);
-        auto& image = texture_cache.GetImage(image_id);
+        VideoCore::TextureCache::ImageDesc desc{attribute, cpu_address};
+        const VideoCore::ImageId image_id = texture_cache.FindImage(desc);
+        VideoCore::Image& image = texture_cache.GetImage(image_id);
         image.usage.vo_surface = 1u;
         return image;
     }
@@ -99,7 +97,7 @@ private:
     /// (Libretro::AcquireFrameSlot); no buffer when none is free or the device cannot write
     /// there
     struct FrameSlotTarget {
-        vk::Buffer buffer{};
+        VkBuffer buffer{VK_NULL_HANDLE};
         u32 slot{};
     };
     FrameSlotTarget AcquireFrameSlot(u32 width, u32 height);
@@ -118,21 +116,21 @@ private:
     Scheduler flip_scheduler;
     OutputImages output_images;
     Runtime runtime;
-    std::unique_ptr<Rasterizer> rasterizer;
+    Rasterizer* rasterizer;
     VideoCore::TextureCache& texture_cache;
-    vk::UniqueCommandPool command_pool;
-    std::vector<Frame> present_frames;
+    Frame present_frames[OutputImages::MaxCount]{};
+    u32 num_present_frames{};
     // The frames free to draw into: the output images' count at most, far below the
     // capacity
     Common::MPMCQueue<Frame*, 64> free_queue;
-    Frame* last_submit_frame;
-    std::vector<VAddr> vo_buffers_addr;
+    Frame* last_submit_frame{};
+    Common::SmallVector<VAddr, 16> vo_buffers_addr;
     // Each slot of the shared memory lent to the GPU, and how much of it
     struct FrameSlotImport {
         ::guest_import* import{};
         u64 bytes{};
     };
-    std::array<FrameSlotImport, Libretro::FRAME_SLOTS> frame_slot_imports{};
+    FrameSlotImport frame_slot_imports[Libretro::FRAME_SLOTS]{};
 };
 
 } // namespace Vulkan

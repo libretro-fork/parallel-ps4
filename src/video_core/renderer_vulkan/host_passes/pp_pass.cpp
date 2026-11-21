@@ -3,8 +3,6 @@
 
 #include "video_core/renderer_vulkan/host_passes/pp_pass.h"
 
-#include <vector>
-
 #include "common/assert.h"
 #include "core/emulator_settings.h"
 #include "video_core/host_shaders/host_spirv.h"
@@ -12,87 +10,103 @@
 #include "video_core/renderer_vulkan/vk_presenter.h"
 #include "video_core/renderer_vulkan/vk_shader_util.h"
 
-#include "common/small_vector.h"
-
 namespace Vulkan::HostPasses {
 
-void PostProcessingPass::Create(vk::Device device, const vk::Format surface_format) {
-    Common::StaticVector<vk::DescriptorSetLayoutBinding, 2> bindings{
-        {
-            .binding = 0,
-            .descriptorType = vk::DescriptorType::eCombinedImageSampler,
-            .descriptorCount = 1,
-            .stageFlags = vk::ShaderStageFlagBits::eFragment,
-        },
+/// A module of the host shader @emit writes into @words, named @name
+static VkShaderModule HostModule(VkDevice device, u32* words,
+                                 size_t (*emit)(u32* words, size_t max_words), const char* name) {
+    const size_t num_words = emit(words, HOST_SPIRV_MAX_WORDS);
+    const vk::Device vk_device{device};
+    const VkShaderModule module =
+        static_cast<VkShaderModule>(CompileSPV(words, num_words, vk_device));
+    ASSERT(module);
+    SetObjectName(vk_device, vk::ShaderModule{module}, "%s", name);
+    return module;
+}
+
+PostProcessingPass::~PostProcessingPass() {
+    if (device == VK_NULL_HANDLE) {
+        return;
+    }
+    vkDestroySampler(device, sampler, nullptr);
+    vkDestroyPipeline(device, pipeline, nullptr);
+    vkDestroyPipelineLayout(device, pipeline_layout, nullptr);
+    vkDestroyDescriptorSetLayout(device, desc_set_layout, nullptr);
+}
+
+void PostProcessingPass::Create(VkDevice device_, const VkFormat surface_format) {
+    device = device_;
+    const VkDescriptorSetLayoutBinding binding = {
+        .binding = 0,
+        .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+        .descriptorCount = 1,
+        .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
     };
-
-    const vk::DescriptorSetLayoutCreateInfo desc_layout_ci{
-        .flags = vk::DescriptorSetLayoutCreateFlagBits::ePushDescriptorKHR,
-        .bindingCount = static_cast<u32>(bindings.size()),
-        .pBindings = bindings.data(),
+    const VkDescriptorSetLayoutCreateInfo desc_layout_ci = {
+        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+        .flags = VK_DESCRIPTOR_SET_LAYOUT_CREATE_PUSH_DESCRIPTOR_BIT_KHR,
+        .bindingCount = 1,
+        .pBindings = &binding,
     };
+    VkResult result =
+        vkCreateDescriptorSetLayout(device, &desc_layout_ci, nullptr, &desc_set_layout);
+    ASSERT_MSG(result == VK_SUCCESS, "Failed to create pp descriptor set layout: %s",
+               ResultName(result));
 
-    desc_set_layout = Check<"create pp descriptor set layout">(
-        device.createDescriptorSetLayoutUnique(desc_layout_ci));
-
-    const vk::PushConstantRange push_constants{
-        .stageFlags = vk::ShaderStageFlagBits::eFragment,
+    const VkPushConstantRange push_constants = {
+        .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
         .offset = 0,
         .size = sizeof(Settings),
     };
 
-    std::vector<u32> words(HOST_SPIRV_MAX_WORDS);
-    const auto& vs_module =
-        CompileSPV({words.data(), host_spirv_fs_tri_vert(words.data(), words.size())}, device);
-    ASSERT(vs_module);
-    SetObjectName(device, vs_module, "fs_tri.vert");
+    // The two shaders' words, one after the other through the same room
+    static u32 words[HOST_SPIRV_MAX_WORDS];
+    const VkShaderModule vs_module =
+        HostModule(device, words, host_spirv_fs_tri_vert, "fs_tri.vert");
+    const VkShaderModule fs_module =
+        HostModule(device, words, host_spirv_post_process_frag, "post_process.frag");
 
-    const auto& fs_module = CompileSPV(
-        {words.data(), host_spirv_post_process_frag(words.data(), words.size())}, device);
-    ASSERT(fs_module);
-    SetObjectName(device, fs_module, "post_process.frag");
-
-    const std::array shaders_ci{
-        vk::PipelineShaderStageCreateInfo{
-            .stage = vk::ShaderStageFlagBits::eVertex,
+    const VkPipelineShaderStageCreateInfo shaders_ci[] = {
+        {
+            .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+            .stage = VK_SHADER_STAGE_VERTEX_BIT,
             .module = vs_module,
             .pName = "main",
         },
-        vk::PipelineShaderStageCreateInfo{
-            .stage = vk::ShaderStageFlagBits::eFragment,
+        {
+            .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+            .stage = VK_SHADER_STAGE_FRAGMENT_BIT,
             .module = fs_module,
             .pName = "main",
         },
     };
 
-    const vk::PipelineLayoutCreateInfo layout_info{
+    const VkPipelineLayoutCreateInfo layout_info = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
         .setLayoutCount = 1U,
-        .pSetLayouts = &*desc_set_layout,
+        .pSetLayouts = &desc_set_layout,
         .pushConstantRangeCount = 1,
         .pPushConstantRanges = &push_constants,
     };
+    result = vkCreatePipelineLayout(device, &layout_info, nullptr, &pipeline_layout);
+    ASSERT_MSG(result == VK_SUCCESS, "Failed to create pp pipeline layout: %s", ResultName(result));
 
-    pipeline_layout =
-        Check<"create pp pipeline layout">(device.createPipelineLayoutUnique(layout_info));
-
-    const std::array pp_color_formats{
-        surface_format,
-    };
-    const vk::PipelineRenderingCreateInfo pipeline_rendering_ci{
-        .colorAttachmentCount = pp_color_formats.size(),
-        .pColorAttachmentFormats = pp_color_formats.data(),
+    const VkPipelineRenderingCreateInfo pipeline_rendering_ci = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO,
+        .colorAttachmentCount = 1,
+        .pColorAttachmentFormats = &surface_format,
     };
 
-    const vk::PipelineVertexInputStateCreateInfo vertex_input_info{
-        .vertexBindingDescriptionCount = 0u,
-        .vertexAttributeDescriptionCount = 0u,
+    const VkPipelineVertexInputStateCreateInfo vertex_input_info = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
     };
 
-    const vk::PipelineInputAssemblyStateCreateInfo input_assembly{
-        .topology = vk::PrimitiveTopology::eTriangleList,
+    const VkPipelineInputAssemblyStateCreateInfo input_assembly = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
+        .topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
     };
 
-    const vk::Viewport viewport{
+    const VkViewport viewport = {
         .x = 0.0f,
         .y = 0.0f,
         .width = 1.0f,
@@ -101,62 +115,66 @@ void PostProcessingPass::Create(vk::Device device, const vk::Format surface_form
         .maxDepth = 1.0f,
     };
 
-    const vk::Rect2D scissor = {
+    const VkRect2D scissor = {
         .offset = {0, 0},
         .extent = {1, 1},
     };
 
-    const vk::PipelineViewportStateCreateInfo viewport_info{
+    const VkPipelineViewportStateCreateInfo viewport_info = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO,
         .viewportCount = 1,
         .pViewports = &viewport,
         .scissorCount = 1,
         .pScissors = &scissor,
     };
 
-    const vk::PipelineRasterizationStateCreateInfo raster_state{
-        .depthClampEnable = false,
-        .rasterizerDiscardEnable = false,
-        .polygonMode = vk::PolygonMode::eFill,
-        .cullMode = vk::CullModeFlagBits::eBack,
-        .frontFace = vk::FrontFace::eClockwise,
-        .depthBiasEnable = false,
+    const VkPipelineRasterizationStateCreateInfo raster_state = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
+        .depthClampEnable = VK_FALSE,
+        .rasterizerDiscardEnable = VK_FALSE,
+        .polygonMode = VK_POLYGON_MODE_FILL,
+        .cullMode = VK_CULL_MODE_BACK_BIT,
+        .frontFace = VK_FRONT_FACE_CLOCKWISE,
+        .depthBiasEnable = VK_FALSE,
         .lineWidth = 1.0f,
     };
 
-    const vk::PipelineMultisampleStateCreateInfo multisampling{
-        .rasterizationSamples = vk::SampleCountFlagBits::e1,
+    const VkPipelineMultisampleStateCreateInfo multisampling = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
+        .rasterizationSamples = VK_SAMPLE_COUNT_1_BIT,
     };
 
-    const std::array attachments{
-        vk::PipelineColorBlendAttachmentState{
-            .blendEnable = false,
-            .colorWriteMask = vk::ColorComponentFlagBits::eR | vk::ColorComponentFlagBits::eG |
-                              vk::ColorComponentFlagBits::eB | vk::ColorComponentFlagBits::eA,
-        },
+    const VkPipelineColorBlendAttachmentState attachment = {
+        .blendEnable = VK_FALSE,
+        .colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
+                          VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT,
     };
 
-    const vk::PipelineColorBlendStateCreateInfo color_blending{
-        .logicOpEnable = false,
-        .logicOp = vk::LogicOp::eCopy,
-        .attachmentCount = attachments.size(),
-        .pAttachments = attachments.data(),
-        .blendConstants = std::array{1.0f, 1.0f, 1.0f, 1.0f},
+    const VkPipelineColorBlendStateCreateInfo color_blending = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
+        .logicOpEnable = VK_FALSE,
+        .logicOp = VK_LOGIC_OP_COPY,
+        .attachmentCount = 1,
+        .pAttachments = &attachment,
+        .blendConstants = {1.0f, 1.0f, 1.0f, 1.0f},
     };
 
-    const std::array dynamic_states{
-        vk::DynamicState::eViewport,
-        vk::DynamicState::eScissor,
+    static constexpr VkDynamicState dynamic_states[] = {
+        VK_DYNAMIC_STATE_VIEWPORT,
+        VK_DYNAMIC_STATE_SCISSOR,
     };
 
-    const vk::PipelineDynamicStateCreateInfo dynamic_info{
-        .dynamicStateCount = dynamic_states.size(),
-        .pDynamicStates = dynamic_states.data(),
+    const VkPipelineDynamicStateCreateInfo dynamic_info = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO,
+        .dynamicStateCount = 2,
+        .pDynamicStates = dynamic_states,
     };
 
-    const vk::GraphicsPipelineCreateInfo pipeline_info{
+    const VkGraphicsPipelineCreateInfo pipeline_info = {
+        .sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
         .pNext = &pipeline_rendering_ci,
-        .stageCount = shaders_ci.size(),
-        .pStages = shaders_ci.data(),
+        .stageCount = 2,
+        .pStages = shaders_ci,
         .pVertexInputState = &vertex_input_info,
         .pInputAssemblyState = &input_assembly,
         .pViewportState = &viewport_info,
@@ -164,49 +182,50 @@ void PostProcessingPass::Create(vk::Device device, const vk::Format surface_form
         .pMultisampleState = &multisampling,
         .pColorBlendState = &color_blending,
         .pDynamicState = &dynamic_info,
-        .layout = *pipeline_layout,
+        .layout = pipeline_layout,
     };
-
-    pipeline = Check<"create post process pipeline">(device.createGraphicsPipelineUnique(
-        /*pipeline_cache*/ {}, pipeline_info));
+    result =
+        vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &pipeline_info, nullptr, &pipeline);
+    ASSERT_MSG(result == VK_SUCCESS, "Failed to create post process pipeline: %s",
+               ResultName(result));
 
     // Once pipeline is compiled, we don't need the shader module anymore
-    device.destroyShaderModule(vs_module);
-    device.destroyShaderModule(fs_module);
+    vkDestroyShaderModule(device, vs_module, nullptr);
+    vkDestroyShaderModule(device, fs_module, nullptr);
 
     // Create sampler resource
-    const vk::SamplerCreateInfo sampler_ci{
-        .magFilter = vk::Filter::eLinear,
-        .minFilter = vk::Filter::eLinear,
-        .mipmapMode = vk::SamplerMipmapMode::eNearest,
-        .addressModeU = vk::SamplerAddressMode::eClampToEdge,
-        .addressModeV = vk::SamplerAddressMode::eClampToEdge,
+    const VkSamplerCreateInfo sampler_ci = {
+        .sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
+        .magFilter = VK_FILTER_LINEAR,
+        .minFilter = VK_FILTER_LINEAR,
+        .mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST,
+        .addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+        .addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
     };
-    sampler = Check<"create pp sampler">(device.createSamplerUnique(sampler_ci));
+    result = vkCreateSampler(device, &sampler_ci, nullptr, &sampler);
+    ASSERT_MSG(result == VK_SUCCESS, "Failed to create pp sampler: %s", ResultName(result));
 }
 
-void PostProcessingPass::Render(vk::CommandBuffer cmdbuf, vk::ImageView input,
-                                vk::Extent2D input_size, Frame& frame, Settings settings) {
+void PostProcessingPass::Render(VkCommandBuffer cmdbuf, VkImageView input, VkExtent2D input_size,
+                                Frame& frame, Settings settings) {
+    (void)input_size;
     if (emu_settings_get_vkhost_markers()) {
-        cmdbuf.beginDebugUtilsLabelEXT(vk::DebugUtilsLabelEXT{
+        const VkDebugUtilsLabelEXT label = {
+            .sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_LABEL_EXT,
             .pLabelName = "Host/Post processing",
-        });
+        };
+        vkCmdBeginDebugUtilsLabelEXT(cmdbuf, &label);
     }
 
-    constexpr vk::ImageSubresourceRange simple_subresource = {
-        .aspectMask = vk::ImageAspectFlagBits::eColor,
-        .levelCount = 1,
-        .layerCount = 1,
+    const VkRenderingAttachmentInfo attachment = {
+        .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
+        .imageView = frame.image_view,
+        .imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+        .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
+        .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
     };
-    const std::array<vk::RenderingAttachmentInfo, 1> attachments{{
-        {
-            .imageView = frame.image_view,
-            .imageLayout = vk::ImageLayout::eColorAttachmentOptimal,
-            .loadOp = vk::AttachmentLoadOp::eClear,
-            .storeOp = vk::AttachmentStoreOp::eStore,
-        },
-    }};
-    const vk::RenderingInfo rendering_info{
+    const VkRenderingInfo rendering_info = {
+        .sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
         .renderArea{
             .extent{
                 .width = frame.width,
@@ -214,72 +233,77 @@ void PostProcessingPass::Render(vk::CommandBuffer cmdbuf, vk::ImageView input,
             },
         },
         .layerCount = 1,
-        .colorAttachmentCount = attachments.size(),
-        .pColorAttachments = attachments.data(),
+        .colorAttachmentCount = 1,
+        .pColorAttachments = &attachment,
     };
 
-    vk::DescriptorImageInfo image_info{
-        .sampler = *sampler,
+    const VkDescriptorImageInfo image_info = {
+        .sampler = sampler,
         .imageView = input,
-        .imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal,
+        .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
     };
 
-    const std::array set_writes{
-        vk::WriteDescriptorSet{
-            .dstSet = VK_NULL_HANDLE,
-            .dstBinding = 0,
-            .dstArrayElement = 0,
-            .descriptorCount = 1,
-            .descriptorType = vk::DescriptorType::eCombinedImageSampler,
-            .pImageInfo = &image_info,
+    const VkWriteDescriptorSet set_write = {
+        .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+        .dstSet = VK_NULL_HANDLE,
+        .dstBinding = 0,
+        .dstArrayElement = 0,
+        .descriptorCount = 1,
+        .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+        .pImageInfo = &image_info,
+    };
+
+    vkCmdBindPipeline(cmdbuf, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
+
+    const VkViewport viewport = {
+        .width = static_cast<float>(frame.width),
+        .height = static_cast<float>(frame.height),
+        .minDepth = 0.0f,
+        .maxDepth = 1.0f,
+    };
+    vkCmdSetViewport(cmdbuf, 0, 1, &viewport);
+    const VkRect2D scissor = {
+        .extent{
+            .width = frame.width,
+            .height = frame.height,
         },
     };
+    vkCmdSetScissor(cmdbuf, 0, 1, &scissor);
 
-    cmdbuf.bindPipeline(vk::PipelineBindPoint::eGraphics, *pipeline);
+    vkCmdPushDescriptorSetKHR(cmdbuf, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_layout, 0, 1,
+                              &set_write);
+    vkCmdPushConstants(cmdbuf, pipeline_layout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(Settings),
+                       &settings);
 
-    const std::array viewports = {
-        vk::Viewport{
-            .width = static_cast<float>(frame.width),
-            .height = static_cast<float>(frame.height),
-            .minDepth = 0.0f,
-            .maxDepth = 1.0f,
-        },
-    };
+    vkCmdBeginRendering(cmdbuf, &rendering_info);
+    vkCmdDraw(cmdbuf, 3, 1, 0, 0);
+    vkCmdEndRendering(cmdbuf);
 
-    cmdbuf.setViewport(0, viewports);
-    cmdbuf.setScissor(0, vk::Rect2D{
-                             .extent{
-                                 .width = frame.width,
-                                 .height = frame.height,
-                             },
-                         });
-
-    cmdbuf.pushDescriptorSetKHR(vk::PipelineBindPoint::eGraphics, *pipeline_layout, 0, set_writes);
-    cmdbuf.pushConstants(*pipeline_layout, vk::ShaderStageFlagBits::eFragment, 0, sizeof(Settings),
-                         &settings);
-
-    cmdbuf.beginRendering(rendering_info);
-    cmdbuf.draw(3, 1, 0, 0);
-    cmdbuf.endRendering();
-
-    const auto post_barrier = vk::ImageMemoryBarrier2{
-        .srcStageMask = vk::PipelineStageFlagBits2::eColorAttachmentOutput,
-        .srcAccessMask = vk::AccessFlagBits2::eColorAttachmentWrite,
-        .dstStageMask = vk::PipelineStageFlagBits2::eFragmentShader,
-        .dstAccessMask = vk::AccessFlagBits2::eShaderRead,
-        .oldLayout = vk::ImageLayout::eColorAttachmentOptimal,
-        .newLayout = vk::ImageLayout::eGeneral,
+    const VkImageMemoryBarrier2 post_barrier = {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
+        .srcStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+        .srcAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+        .dstStageMask = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+        .dstAccessMask = VK_ACCESS_2_SHADER_READ_BIT,
+        .oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+        .newLayout = VK_IMAGE_LAYOUT_GENERAL,
         .image = frame.image,
-        .subresourceRange = simple_subresource,
+        .subresourceRange =
+            {
+                .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+                .levelCount = 1,
+                .layerCount = 1,
+            },
     };
-
-    cmdbuf.pipelineBarrier2(vk::DependencyInfo{
+    const VkDependencyInfo dependency = {
+        .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
         .imageMemoryBarrierCount = 1,
         .pImageMemoryBarriers = &post_barrier,
-    });
+    };
+    vkCmdPipelineBarrier2(cmdbuf, &dependency);
 
     if (emu_settings_get_vkhost_markers()) {
-        cmdbuf.endDebugUtilsLabelEXT();
+        vkCmdEndDebugUtilsLabelEXT(cmdbuf);
     }
 }
 

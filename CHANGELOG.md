@@ -4,6 +4,17 @@ What changed in the libretro core of this fork, newest first. Changes that come 
 
 ## Unreleased
 
+- The presenter (`vk_presenter.h`/`.cpp`) and the post-processing pass (`host_passes/pp_pass.h`/`.cpp`) on the Vulkan C API, with no STL or `auto`.
+  - **Frames:** the presenter's frames hold C handles in a fixed array, made up front as before, and their fences are waited on and reset with the C calls.
+  - **Readbacks:** the frames read back for the frontend come from a fixed pool, one for each frame that can be in flight and two over. Each is taken and given back with an atomic flag, in place of a list of shared pointers behind a combiner. A readback found free at an old size has its buffer and narrowing image freed, where the old list leaked the image.
+  - **Post-processing pass:** it owns C handles and destroys them itself.
+  - **Smaller pieces:**
+    - The overlays' frame time is read with libretro-common's `cpu_features_get_time_usec` in place of `std::chrono`. It is still a clock, and is still to be looked at in the review of the clocks.
+    - The frame notes folder is joined with libretro-common's path functions.
+    - The unused command pool is gone.
+    - The last submitted frame starts out as none rather than unset.
+  - Not run in a game yet.
+
 - The swapchain is gone: the images the presenter draws each frame into are `OutputImages` (`vk_output_images.h`/`.cpp`, renamed from `vk_swapchain`), on the Vulkan C API with no STL or `auto`.
   - **No waiting on a size change:** images made before a new size are destroyed once the present scheduler's GPU work so far is done, in place of the device wait the old `Destroy` made. Frames already submitted go on.
   - **No images at boot with Resolution: Default:** they are made at the game's size once it says it, or at the option's size at the first frame if it has not by then. They are no longer made at boot only to be thrown away.
