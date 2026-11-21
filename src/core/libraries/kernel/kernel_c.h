@@ -95,6 +95,8 @@ void kernel_service_thread_join(kernel_service_thread_t* t);
 
 struct retro_eventcount;
 
+/* The game's time now, in nanoseconds (Kernel::GameNow) */
+u64 kernel_game_now(void);
 /* A deadline @ns from now on the game's time, never 0 (Kernel::GameDeadlineIn) */
 u64 kernel_game_deadline_in(u64 ns);
 /* Waits on @ec until @ready(@ctx) is nonzero (true) or the game's time reaches @deadline

@@ -7,12 +7,14 @@
 #include "common/assert.h"
 #include "common/logging/log.h"
 #include "common/path_util.h"
+#include "common/singleton.h"
 #include "common/string_util.h"
 #include "core/file_sys/backends/host_fs.h"
 #include "core/file_sys/backends/zarchive_fs.h"
 #include "core/file_sys/devices/logger.h"
 #include "core/file_sys/devices/nop_device.h"
 #include "core/file_sys/fs.h"
+#include "core/file_sys/fs_c.h"
 #include "libretro/pkg_backend.h"
 
 namespace Core::FileSys {
@@ -817,3 +819,14 @@ void HandleTable::FlushAll() {
 }
 
 } // namespace Core::FileSys
+
+extern "C" bool fs_lend_guest_file(const char* guest_path,
+                                   void (*use)(const u8* data, size_t size, void* ctx), void* ctx) {
+    auto* mnt = Common::Singleton<Core::FileSys::MntPoints>::Instance();
+    const auto bytes = mnt->ReadFile(guest_path);
+    if (!bytes) {
+        return false;
+    }
+    use(bytes->data(), bytes->size(), ctx);
+    return true;
+}

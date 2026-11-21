@@ -12,6 +12,7 @@
 #include "core/libraries/libs.h"
 #include "core/libraries/music/music_player_service.h"
 #include "core/libraries/system/systemservice.h"
+#include "core/libraries/system/systemservice_c.h"
 #include "core/libraries/system/systemservice_error.h"
 #include "emulator.h"
 
@@ -3449,3 +3450,10 @@ void RegisterLib(Core::Loader::SymbolsResolver* sym) {
 };
 
 } // namespace Libraries::SystemService
+
+extern "C" s32 system_service_param_get_int(s32 param_id, s32* value) {
+    static_assert(SYSTEM_SERVICE_PARAM_ID_LANG ==
+                  static_cast<s32>(Libraries::SystemService::OrbisSystemServiceParamId::Lang));
+    return Libraries::SystemService::sceSystemServiceParamGetInt(
+        static_cast<Libraries::SystemService::OrbisSystemServiceParamId>(param_id), value);
+}

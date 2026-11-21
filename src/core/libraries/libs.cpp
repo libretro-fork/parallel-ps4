@@ -736,6 +736,26 @@ static void RegisterVrTracker(Core::Loader::SymbolsResolver* sym) {
                  sceVrTrackerStopLiveCapture);
 }
 
+static void RegisterPlayGo(Core::Loader::SymbolsResolver* sym) {
+    LIB_FUNCTION("uEqMfMITvEI", "libSceDbgPlayGo", 1, "libScePlayGo", sceDbgPlayGoRequestNextChunk);
+    LIB_FUNCTION("vU+FqrH+pEY", "libSceDbgPlayGo", 1, "libScePlayGo", sceDbgPlayGoSnapshot);
+    LIB_FUNCTION("Uco1I0dlDi8", "libScePlayGo", 1, "libScePlayGo", scePlayGoClose);
+    LIB_FUNCTION("73fF1MFU8hA", "libScePlayGo", 1, "libScePlayGo", scePlayGoGetChunkId);
+    LIB_FUNCTION("v6EZ-YWRdMs", "libScePlayGo", 1, "libScePlayGo", scePlayGoGetEta);
+    LIB_FUNCTION("rvBSfTimejE", "libScePlayGo", 1, "libScePlayGo", scePlayGoGetInstallSpeed);
+    LIB_FUNCTION("3OMbYZBaa50", "libScePlayGo", 1, "libScePlayGo", scePlayGoGetLanguageMask);
+    LIB_FUNCTION("uWIYLFkkwqk", "libScePlayGo", 1, "libScePlayGo", scePlayGoGetLocus);
+    LIB_FUNCTION("-RJWNMK3fC8", "libScePlayGo", 1, "libScePlayGo", scePlayGoGetProgress);
+    LIB_FUNCTION("Nn7zKwnA5q0", "libScePlayGo", 1, "libScePlayGo", scePlayGoGetToDoList);
+    LIB_FUNCTION("ts6GlZOKRrE", "libScePlayGo", 1, "libScePlayGo", scePlayGoInitialize);
+    LIB_FUNCTION("M1Gma1ocrGE", "libScePlayGo", 1, "libScePlayGo", scePlayGoOpen);
+    LIB_FUNCTION("-Q1-u1a7p0g", "libScePlayGo", 1, "libScePlayGo", scePlayGoPrefetch);
+    LIB_FUNCTION("4AAcTU9R3XM", "libScePlayGo", 1, "libScePlayGo", scePlayGoSetInstallSpeed);
+    LIB_FUNCTION("LosLlHOpNqQ", "libScePlayGo", 1, "libScePlayGo", scePlayGoSetLanguageMask);
+    LIB_FUNCTION("gUPGiOQ1tmQ", "libScePlayGo", 1, "libScePlayGo", scePlayGoSetToDoList);
+    LIB_FUNCTION("MPe0EeBGM-E", "libScePlayGo", 1, "libScePlayGo", scePlayGoTerminate);
+}
+
 static void RegisterZlib(Core::Loader::SymbolsResolver* sym) {
     zlib_library_init();
 
@@ -832,7 +852,7 @@ void InitHLELibs(Core::Loader::SymbolsResolver* sym) {
             {"libSceNpTus.sprx", Libraries::Np::NpTus::RegisterLib},
             {"libSceScreenShot.sprx", RegisterScreenShot},
             {"libSceAppContent.sprx", Libraries::AppContent::RegisterLib},
-            {"libScePlayGo.sprx", Libraries::PlayGo::RegisterLib},
+            {"libScePlayGo.sprx", RegisterPlayGo},
             {"libScePlayGoDialog.sprx", Libraries::PlayGo::Dialog::RegisterLib},
             {"libSceRandom.sprx", RegisterRandom},
             {"libSceUsbd.sprx", Libraries::Usbd::RegisterLib},

@@ -119,7 +119,7 @@ CORE_SOURCES_CXX += $(addprefix src/common/logging/,classes.cpp log.cpp)
 CORE_SOURCES_CXX += $(addprefix src/core/,address_space.cpp debugger.cpp \
 	emulator_state.cpp linker.cpp memory.cpp module.cpp signals.cpp thread.cpp tls.cpp)
 CORE_SOURCES_CXX += $(addprefix src/core/aerolib/,aerolib.cpp stubs.cpp)
-CORE_SOURCES_CXX += $(addprefix src/core/file_format/,npbind.cpp playgo_chunk.cpp psf.cpp rif.cpp \
+CORE_SOURCES_CXX += $(addprefix src/core/file_format/,npbind.cpp psf.cpp rif.cpp \
 	trp.cpp)
 CORE_SOURCES_CXX += $(addprefix src/core/file_sys/backends/,host_fs.cpp zarchive_fs.cpp)
 CORE_SOURCES_CXX += $(addprefix src/core/file_sys/devices/,base_device.cpp console_device.cpp \
@@ -184,7 +184,7 @@ CORE_SOURCES_CXX += $(addprefix src/core/libraries/np/np_web_api/,np_web_api.cpp
 CORE_SOURCES_CXX += $(addprefix src/core/libraries/np/np_web_api2/,np_web_api2.cpp \
 	np_web_api2_context.cpp np_web_api2_internal.cpp np_web_api2_push_event.cpp)
 CORE_SOURCES_CXX += $(addprefix src/core/libraries/pad/,pad.cpp)
-CORE_SOURCES_CXX += $(addprefix src/core/libraries/playgo/,playgo.cpp playgo_dialog.cpp)
+CORE_SOURCES_CXX += $(addprefix src/core/libraries/playgo/,playgo_dialog.cpp)
 CORE_SOURCES_CXX += $(addprefix src/core/libraries/save_data/dialog/,savedatadialog.cpp \
 	savedatadialog_ui.cpp)
 CORE_SOURCES_CXX += $(addprefix src/core/libraries/save_data/,save_backup.cpp save_instance.cpp \
@@ -250,7 +250,7 @@ CORE_SOURCES_C :=
 CORE_SOURCES_C += $(addprefix src/common/,audio_stream.c enum_names.c event_latch.c game_clock.c host_thread.c json_util.c key_manager.c \
 	hex_dump.c line_buffer.c mpsc_ring.c node_pool.c obj_table.c patch_catalog.c patch_halve.c patch_index.c pin_gate.c ptr_table.c range_runs.c reserve_span.c run_once.c rw_word.c slot_table.c stop_thread.c thread_life.c thread_name.c \
 	u64_map.c vblank_clock.c word_name.c x64_decode.c x64_emit.c)
-CORE_SOURCES_C += $(addprefix src/core/,emulator_settings.c user_manager.c)
+CORE_SOURCES_C += $(addprefix src/core/,emulator_settings.c user_manager.c file_format/playgo_chunk.c)
 CORE_SOURCES_C += src/common/combine.c src/input/controller.c
 CORE_SOURCES_C += $(addprefix src/core/libraries/avplayer/,avplayer_clock.c avplayer_fsm.c)
 CORE_SOURCES_C += $(addprefix src/core/libraries/audio3d/,audio3d_port.c)
@@ -270,7 +270,7 @@ CORE_SOURCES_C += $(addprefix src/core/libraries/,companion/companion_httpd.c \
 	remote_play/remoteplay.c rtc/rtc.c rudp/rudp.c screenshot/screenshot.c share_play/shareplay.c \
 	signin_dialog/signindialog.c system_gesture/system_gesture.c ulobjmgr/ulobjmgr.c \
 	video_recording/video_recording.c voice/voice.c vr_tracker/vr_tracker.c \
-	zlib/zlib.c)
+	playgo/playgo.c zlib/zlib.c)
 CORE_SOURCES_C += $(addprefix src/shader_recompiler/backend/spirv/,spv_module.c)
 CORE_SOURCES_C += $(addprefix src/core/libraries/np/np_handler/,np_invitation_json.c)
 CORE_SOURCES_C += $(addprefix src/shadnet/,pb_wire.c shadnet_msg.c)

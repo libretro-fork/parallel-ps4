@@ -1,125 +1,58 @@
-// SPDX-FileCopyrightText: Copyright 2024-2026 shadPS4 Emulator Project
-// SPDX-License-Identifier: GPL-2.0-or-later
+/* SPDX-FileCopyrightText: Copyright 2024-2026 shadPS4 Emulator Project
+ * SPDX-License-Identifier: GPL-2.0-or-later */
 
-#pragma once
-#include <filesystem>
-#include <mutex>
-#include <span>
-#include <vector>
-#include "common/event_mutex.h"
-#include "common/io_file.h"
-#include "core/libraries/playgo/playgo_types.h"
+#ifndef SHADPS4_FILE_FORMAT_PLAYGO_CHUNK_H
+#define SHADPS4_FILE_FORMAT_PLAYGO_CHUNK_H
 
-constexpr u32 PLAYGO_MAGIC = 0x6F676C70;
+/* A game's PlayGo file (sce_sys/playgo-chunk.dat): its chunks, and how many bytes each is.
+ * Read where it lies, field by field, little-endian: nothing is copied out of it but the
+ * sizes. Defined in playgo_chunk.c. */
 
-struct chunk_t {
-    u32 offset;
-    u32 length;
-} __attribute__((packed));
+#include <stddef.h>
 
-struct PlaygoHeader {
-    u32 magic;
+#include <boolean.h>
+#include <retro_common_api.h>
 
-    u16 version_major;
-    u16 version_minor;
-    u16 image_count;    // [0;1]
-    u16 chunk_count;    // [0;1000]
-    u16 mchunk_count;   // [0;8000]
-    u16 scenario_count; // [0;32]
+#include "common/types.h"
 
+RETRO_BEGIN_DECLS
+
+#define PLAYGO_MAGIC 0x6F676C70u
+
+/* The header's size, and where in it what is read lies */
+#define PLAYGO_HEADER_SIZE 256
+#define PLAYGO_HEADER_MAGIC 0
+#define PLAYGO_HEADER_CHUNK_COUNT 10
+#define PLAYGO_HEADER_FILE_SIZE 16
+#define PLAYGO_HEADER_CHUNK_ATTRS 192   /* offset and length, two u32 */
+#define PLAYGO_HEADER_CHUNK_MCHUNKS 200 /* the same */
+#define PLAYGO_HEADER_CHUNK_LABELS 208  /* the same */
+#define PLAYGO_HEADER_MCHUNK_ATTRS 216  /* the same */
+
+/* A chunk's attributes: 32 bytes, its mchunks' count (u16) at 14, where their ids (u16) start
+ * in the mchunk list (u32) at 24 */
+#define PLAYGO_CHUNK_ATTR_SIZE 32
+#define PLAYGO_CHUNK_ATTR_MCHUNK_COUNT 14
+#define PLAYGO_CHUNK_ATTR_MCHUNKS_OFFSET 24
+/* An mchunk's attributes: 16 bytes, its size in the low 48 bits of the u64 at 8 */
+#define PLAYGO_MCHUNK_ATTR_SIZE 16
+#define PLAYGO_MCHUNK_ATTR_SIZE_FIELD 8
+
+/* The header's chunk count is a u16 */
+#define PLAYGO_MAX_CHUNKS 65536
+
+typedef struct playgo_file {
+    /* The header's file size: 0 for a file too short to have a header */
     u32 file_size;
-    u16 default_scenario_id;
-    u16 attrib;
-    u32 sdk_version;
-    u16 disc_count; // [0;2] (if equals to 0 then disc count = 1)
-    u16 layer_bmp;
+    /* The chunks read, and their sizes in bytes: 0 chunks unless the whole file was read */
+    u32 chunk_count;
+    u64 chunk_sizes[PLAYGO_MAX_CHUNKS];
+} playgo_file_t;
 
-    u8 reserved[32];
-    char content_id[128];
+/* Reads @data (@size bytes) into @f: false if it is not a PlayGo file, or any table in it
+ * lies outside it. */
+bool playgo_file_open(playgo_file_t* f, const u8* data, size_t size);
 
-    chunk_t chunk_attrs; // [0;32000]
-    chunk_t chunk_mchunks;
-    chunk_t chunk_labels;   // [0;16000]
-    chunk_t mchunk_attrs;   // [0;12800]
-    chunk_t scenario_attrs; // [0;1024]
-    chunk_t scenario_chunks;
-    chunk_t scenario_labels;
-    chunk_t inner_mchunk_attrs; // [0;12800]
-} __attribute__((packed));
+RETRO_END_DECLS
 
-struct playgo_scenario_attr_entry_t {
-    u8 _type;
-    u8 _unk[19];
-    u16 initial_chunk_count;
-    u16 chunk_count;
-    u32 chunks_offset; //<-scenario_chunks
-    u32 label_offset;  //<-scenario_labels
-} __attribute__((packed));
-
-struct image_disc_layer_no_t {
-    u8 layer_no : 2;
-    u8 disc_no : 2;
-    u8 image_no : 4;
-} __attribute__((packed));
-
-struct playgo_chunk_attr_entry_t {
-    u8 flag;
-    image_disc_layer_no_t image_disc_layer_no;
-    u8 req_locus;
-    u8 unk[11];
-    u16 mchunk_count;
-    u64 language_mask;
-    u32 mchunks_offset; //<-chunk_mchunks
-    u32 label_offset;   //<-chunk_labels
-} __attribute__((packed));
-
-struct playgo_chunk_loc_t {
-    u64 offset : 48;
-    u64 _align1 : 8;
-    u64 image_no : 4;
-    u64 _align2 : 4;
-} __attribute__((packed));
-
-struct playgo_chunk_size_t {
-    u64 size : 48;
-    u64 _align : 16;
-} __attribute__((packed));
-
-struct playgo_mchunk_attr_entry_t {
-    playgo_chunk_loc_t loc;
-    playgo_chunk_size_t size;
-} __attribute__((packed));
-
-struct PlaygoChunk {
-    u64 req_locus;
-    u64 language_mask;
-    u64 total_size;
-    std::string label_name;
-};
-
-class PlaygoFile {
-public:
-    OrbisPlayGoHandle handle = 0;
-    OrbisPlayGoChunkId id = 0;
-    OrbisPlayGoLocus locus = OrbisPlayGoLocus::NotDownloaded;
-    // The install speed (low 8 bits) and the game's time it was set at, in milliseconds (the
-    // rest): one atomic word, set and read by any thread
-    retro_atomic_64_t speed_word{static_cast<s64>(OrbisPlayGoInstallSpeed::Full)};
-    OrbisPlayGoEta eta = 0;
-    OrbisPlayGoLanguageMask langMask = 0;
-    std::vector<PlaygoChunk> chunks;
-
-public:
-    explicit PlaygoFile() = default;
-    ~PlaygoFile() = default;
-
-    bool Open(const std::filesystem::path& filepath);
-    bool Open(std::span<const u8> data);
-
-    PlaygoHeader& GetPlaygoHeader() {
-        return playgoHeader;
-    }
-
-private:
-    PlaygoHeader playgoHeader;
-};
+#endif

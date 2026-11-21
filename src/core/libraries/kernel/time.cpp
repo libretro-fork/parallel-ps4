@@ -806,6 +806,10 @@ extern "C" s32 kernel_errno_error(void) {
     return Libraries::Kernel::ErrnoToSceKernelError(*Libraries::Kernel::__Error());
 }
 
+extern "C" u64 kernel_game_now(void) {
+    return Libraries::Kernel::GameNow();
+}
+
 extern "C" u64 kernel_game_deadline_in(u64 ns) {
     return Libraries::Kernel::GameDeadlineIn(ns);
 }

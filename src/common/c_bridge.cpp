@@ -28,6 +28,8 @@ static Common::Log::Class ToClass(c_log_class log_class) {
         return Common::Log::Class::Lib_Ult;
     case C_LOG_LIB_ZLIB:
         return Common::Log::Class::Lib_Zlib;
+    case C_LOG_LIB_PLAYGO:
+        return Common::Log::Class::Lib_PlayGo;
     case C_LOG_LIB_VOICE:
         return Common::Log::Class::Lib_Voice;
     case C_LOG_LIB_RTC:

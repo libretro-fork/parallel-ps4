@@ -1,20 +1,21 @@
-// SPDX-FileCopyrightText: Copyright 2024 shadPS4 Emulator Project
-// SPDX-License-Identifier: GPL-2.0-or-later
+/* SPDX-FileCopyrightText: Copyright 2024 shadPS4 Emulator Project
+ * SPDX-License-Identifier: GPL-2.0-or-later */
 
-#pragma once
+#ifndef SHADPS4_LIBRARIES_PLAYGO_H
+#define SHADPS4_LIBRARIES_PLAYGO_H
+
+/* libScePlayGo: every chunk of the game is installed, and fast. Defined in playgo.c, registered
+ * in libs.cpp. */
+
+#include <retro_common_api.h>
 
 #include "common/types.h"
-#include "playgo_types.h"
+#include "core/libraries/playgo/playgo_types.h"
 
-namespace Core::Loader {
-class SymbolsResolver;
-}
+RETRO_BEGIN_DECLS
 
-namespace Libraries::PlayGo {
-constexpr int shadMagic = 0x53484144;
-
-s32 PS4_SYSV_ABI sceDbgPlayGoRequestNextChunk();
-s32 PS4_SYSV_ABI sceDbgPlayGoSnapshot();
+s32 PS4_SYSV_ABI sceDbgPlayGoRequestNextChunk(void);
+s32 PS4_SYSV_ABI sceDbgPlayGoSnapshot(void);
 s32 PS4_SYSV_ABI scePlayGoClose(OrbisPlayGoHandle handle);
 s32 PS4_SYSV_ABI scePlayGoGetChunkId(OrbisPlayGoHandle handle, OrbisPlayGoChunkId* outChunkIdList,
                                      u32 numberOfEntries, u32* outEntries);
@@ -25,9 +26,9 @@ s32 PS4_SYSV_ABI scePlayGoGetInstallSpeed(OrbisPlayGoHandle handle,
 s32 PS4_SYSV_ABI scePlayGoGetLanguageMask(OrbisPlayGoHandle handle,
                                           OrbisPlayGoLanguageMask* outLanguageMask);
 s32 PS4_SYSV_ABI scePlayGoGetLocus(OrbisPlayGoHandle handle, const OrbisPlayGoChunkId* chunkIds,
-                                   uint32_t numberOfEntries, OrbisPlayGoLocus* outLoci);
+                                   u32 numberOfEntries, OrbisPlayGoLocus* outLoci);
 s32 PS4_SYSV_ABI scePlayGoGetProgress(OrbisPlayGoHandle handle, const OrbisPlayGoChunkId* chunkIds,
-                                      uint32_t numberOfEntries, OrbisPlayGoProgress* outProgress);
+                                      u32 numberOfEntries, OrbisPlayGoProgress* outProgress);
 s32 PS4_SYSV_ABI scePlayGoGetToDoList(OrbisPlayGoHandle handle, OrbisPlayGoToDo* outTodoList,
                                       u32 numberOfEntries, u32* outEntries);
 s32 PS4_SYSV_ABI scePlayGoInitialize(OrbisPlayGoInitParams* param);
@@ -38,8 +39,9 @@ s32 PS4_SYSV_ABI scePlayGoSetInstallSpeed(OrbisPlayGoHandle handle, OrbisPlayGoI
 s32 PS4_SYSV_ABI scePlayGoSetLanguageMask(OrbisPlayGoHandle handle,
                                           OrbisPlayGoLanguageMask languageMask);
 s32 PS4_SYSV_ABI scePlayGoSetToDoList(OrbisPlayGoHandle handle, const OrbisPlayGoToDo* todoList,
-                                      uint32_t numberOfEntries);
-s32 PS4_SYSV_ABI scePlayGoTerminate();
+                                      u32 numberOfEntries);
+s32 PS4_SYSV_ABI scePlayGoTerminate(void);
 
-void RegisterLib(Core::Loader::SymbolsResolver* sym);
-} // namespace Libraries::PlayGo
+RETRO_END_DECLS
+
+#endif
