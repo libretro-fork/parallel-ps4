@@ -3,26 +3,11 @@
 
 #pragma once
 
-// Include vulkan-hpp header. VK_ENABLE_BETA_EXTENSIONS is the build's, for every file: the C
-// headers some include before this one must take Vulkan in the same way.
+// The Vulkan C API, its entry points as libretro-common's symbol wrapper loads them.
+// VK_ENABLE_BETA_EXTENSIONS is the build's, for every file: the C headers some include before
+// this one must take Vulkan in the same way.
 #define VK_NO_PROTOTYPES
-#define VULKAN_HPP_DISPATCH_LOADER_DYNAMIC 1
-#define VULKAN_HPP_NO_CONSTRUCTORS
-#define VULKAN_HPP_NO_STRUCT_SETTERS
-#define VULKAN_HPP_HAS_SPACESHIP_OPERATOR
-#define VULKAN_HPP_NO_EXCEPTIONS
-// Define assert-on-result to nothing to instead return the result for our handling.
-#define VULKAN_HPP_ASSERT_ON_RESULT
-
-// libretro-common's Vulkan symbol wrapper, the C API's entry points as it loads them, first:
-// the C code being moved off vulkan.hpp calls through it, and vulkan.hpp's dispatcher is
-// named after it in every file alike
 #include <vulkan/vulkan_symbol_wrapper.h>
-
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wunused-value"
-#include <vulkan/vulkan.hpp>
-#pragma clang diagnostic pop
 
 namespace Vulkan {
 

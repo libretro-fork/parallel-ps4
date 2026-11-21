@@ -18,22 +18,21 @@ public:
     ~Instance();
 
     /// Gets a compatibility format if the format is not supported.
-    [[nodiscard]] vk::Format GetSupportedFormat(vk::Format format,
-                                                vk::FormatFeatureFlags2 flags) const;
+    [[nodiscard]] VkFormat GetSupportedFormat(VkFormat format, VkFormatFeatureFlags2 flags) const;
 
     /// Returns the Vulkan instance
-    vk::Instance GetInstance() const {
-        return vk::Instance{instance};
+    VkInstance GetInstance() const {
+        return instance;
     }
 
     /// Returns the current physical device
-    vk::PhysicalDevice GetPhysicalDevice() const {
-        return vk::PhysicalDevice{physical_device};
+    VkPhysicalDevice GetPhysicalDevice() const {
+        return physical_device;
     }
 
     /// Returns the Vulkan device
-    vk::Device GetDevice() const {
-        return vk::Device{device};
+    VkDevice GetDevice() const {
+        return device;
     }
 
     /// Returns the device memory allocator
@@ -46,8 +45,8 @@ public:
         return queue_family_index;
     }
 
-    vk::Queue GetGraphicsQueue() const {
-        return vk::Queue{graphics_queue};
+    VkQueue GetGraphicsQueue() const {
+        return graphics_queue;
     }
 
     /// Returns true if anisotropic filtering is supported
@@ -273,8 +272,8 @@ public:
     }
 
     /// Returns the driver ID.
-    vk::DriverId GetDriverID() const {
-        return static_cast<vk::DriverId>(driver_id);
+    VkDriverId GetDriverID() const {
+        return driver_id;
     }
 
     /// Returns the current driver version provided in Vulkan-formatted version numbers.
@@ -425,14 +424,14 @@ public:
     }
 
     /// Returns the sample count flags supported by color buffers.
-    vk::SampleCountFlags GetColorSampleCounts() const {
-        return vk::SampleCountFlags{properties.limits.framebufferColorSampleCounts};
+    VkSampleCountFlags GetColorSampleCounts() const {
+        return properties.limits.framebufferColorSampleCounts;
     }
 
     /// Returns the sample count flags supported by depth buffer.
-    vk::SampleCountFlags GetDepthSampleCounts() const {
-        return vk::SampleCountFlags{properties.limits.framebufferDepthSampleCounts &
-                                    properties.limits.framebufferStencilSampleCounts};
+    VkSampleCountFlags GetDepthSampleCounts() const {
+        return properties.limits.framebufferDepthSampleCounts &
+               properties.limits.framebufferStencilSampleCounts;
     }
 
     /// Returns true if logic ops are supported by the device.
@@ -488,7 +487,7 @@ public:
     }
 
     /// Determines if a format is supported for a set of feature flags.
-    [[nodiscard]] bool IsFormatSupported(vk::Format format, vk::FormatFeatureFlags2 flags) const;
+    [[nodiscard]] bool IsFormatSupported(VkFormat format, VkFormatFeatureFlags2 flags) const;
 
 private:
     /// Picks the physical device: the frontend's where the picture is handed to it on the GPU,

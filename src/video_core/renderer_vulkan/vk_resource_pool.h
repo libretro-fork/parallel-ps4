@@ -52,7 +52,7 @@ public:
 
     void Allocate(size_t begin, size_t end) override;
 
-    vk::CommandBuffer Commit();
+    VkCommandBuffer Commit();
 
 private:
     const Instance& instance;
@@ -74,7 +74,7 @@ public:
                             u32 descriptor_heap_count = 1024);
     ~DescriptorHeap();
 
-    vk::DescriptorSet Commit(vk::DescriptorSetLayout set_layout);
+    VkDescriptorSet Commit(VkDescriptorSetLayout set_layout);
 
 private:
     void CreateDescriptorPool();

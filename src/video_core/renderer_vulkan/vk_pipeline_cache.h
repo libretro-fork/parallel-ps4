@@ -17,7 +17,6 @@
 #include "video_core/renderer_vulkan/vk_compute_pipeline.h"
 #include "video_core/renderer_vulkan/vk_graphics_pipeline.h"
 #include "video_core/renderer_vulkan/vk_resource_pool.h"
-#include "vulkan/vulkan.hpp"
 
 namespace AmdGpu {
 class Liverpool;
@@ -33,19 +32,13 @@ struct Info;
 
 namespace Vulkan {
 
-/// The cache's vulkan.hpp modules as the C API's handles, which they hold bit for bit
-inline const VkShaderModule* ModuleHandles(const vk::ShaderModule* modules) {
-    static_assert(sizeof(vk::ShaderModule) == sizeof(VkShaderModule));
-    return reinterpret_cast<const VkShaderModule*>(modules);
-}
-
 class Instance;
 class Scheduler;
 class ShaderCache;
 
 struct Program {
     struct Module {
-        vk::ShaderModule module;
+        VkShaderModule module;
         Shader::StageSpecialization spec;
         /// Loaded from the pipeline cache, and not yet checked against a translation of the
         /// game's shader (a check job of the compiler thread)
@@ -73,11 +66,11 @@ struct Program {
     Program(Shader::HwStage stage, Shader::SwStage l_stage, Shader::ShaderParams params)
         : info{stage, l_stage, params} {}
 
-    void AddPermut(vk::ShaderModule module, Shader::StageSpecialization&& spec) {
+    void AddPermut(VkShaderModule module, Shader::StageSpecialization&& spec) {
         modules.emplace_back(module, static_cast<Shader::StageSpecialization&&>(spec));
     }
 
-    void InsertPermut(vk::ShaderModule module, Shader::StageSpecialization&& spec, size_t perm_idx,
+    void InsertPermut(VkShaderModule module, Shader::StageSpecialization&& spec, size_t perm_idx,
                       bool from_cache = false) {
         if (modules.size() < perm_idx + 1) {
             modules.resize(perm_idx + 1); // <-- beware of realloc
@@ -122,7 +115,7 @@ public:
     /// hash; all null while it is being compiled
     struct Result {
         const Shader::Info* info;
-        vk::ShaderModule module;
+        VkShaderModule module;
         u64 hash;
     };
     Result GetProgram(Shader::HwStage hw_stage, Shader::SwStage sw_stage,
@@ -208,14 +201,14 @@ private:
     static constexpr u32 MaxPendingPipelines = 256;
     u64 pending_pipelines[MaxPendingPipelines]{};
     u32 num_pending_pipelines = 0;
-    vk::ShaderModule CompileModule(Shader::Info& info, Shader::RuntimeInfo& runtime_info,
-                                   const std::span<const u32>& code, size_t perm_idx,
-                                   Shader::Backend::Bindings& binding);
+    VkShaderModule CompileModule(Shader::Info& info, Shader::RuntimeInfo& runtime_info,
+                                 const std::span<const u32>& code, size_t perm_idx,
+                                 Shader::Backend::Bindings& binding);
     /// The rest of CompileModule, from a program translated: its SPIR-V, dumped, kept and made
     /// into a Vulkan module
-    vk::ShaderModule ModuleFromProgram(Shader::Info& info, Shader::RuntimeInfo& runtime_info,
-                                       const Shader::IR::Program& ir_program, size_t perm_idx,
-                                       Shader::Backend::Bindings& binding);
+    VkShaderModule ModuleFromProgram(Shader::Info& info, Shader::RuntimeInfo& runtime_info,
+                                     const Shader::IR::Program& ir_program, size_t perm_idx,
+                                     Shader::Backend::Bindings& binding);
     const Shader::RuntimeInfo& BuildRuntimeInfo(Shader::HwStage stage, Shader::SwStage l_stage);
 
     [[nodiscard]] bool IsPipelineCacheDirty() const {
@@ -245,7 +238,7 @@ private:
     GraphicsPipeline* FindGraphicsPipeline(const GraphicsPipelineKey& key, u64 hash) const;
     Shader::RuntimeInfo runtime_infos[MaxShaderStages]{};
     const Shader::Info* infos[MaxShaderStages]{};
-    vk::ShaderModule modules[MaxShaderStages]{};
+    VkShaderModule modules[MaxShaderStages]{};
     Shader::Gcn::FetchShaderData* fetch_shader{};
     GraphicsPipelineKey graphics_key{};
     ComputePipelineKey compute_key{};

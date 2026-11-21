@@ -8,7 +8,6 @@
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/texture_cache/image.h"
 #include "video_core/texture_cache/image_view.h"
-#include "vulkan/vulkan.hpp"
 
 #include "common/enum_names.h"
 
@@ -111,7 +110,7 @@ ImageView::ImageView(const Vulkan::Instance& instance, const ImageViewInfo& info
         usage_ci.pNext = &min_lod_ci;
     }
     // When sampling D32/D16 texture from shader, the T# specifies R32/R16 format so adjust it.
-    vk::Format format = info.format;
+    VkFormat format = info.format;
     const VkImageAspectFlags image_aspect = static_cast<VkImageAspectFlags>(image.aspect_mask);
     VkImageAspectFlags aspect = image_aspect;
     if ((image_aspect & VK_IMAGE_ASPECT_DEPTH_BIT) &&
@@ -125,9 +124,9 @@ ImageView::ImageView(const Vulkan::Instance& instance, const ImageViewInfo& info
         aspect = VK_IMAGE_ASPECT_STENCIL_BIT;
     }
 
-    const vk::ComponentMapping components =
+    const VkComponentMapping components =
         info.mapping == AmdGpu::IdentityMapping
-            ? vk::ComponentMapping{}
+            ? VkComponentMapping{}
             : Vulkan::LiverpoolToVK::ComponentMapping(info.mapping);
 
     VkImageViewCreateInfo image_view_ci{};
@@ -136,7 +135,7 @@ ImageView::ImageView(const Vulkan::Instance& instance, const ImageViewInfo& info
     image_view_ci.image = static_cast<VkImage>(image.GetImage());
     image_view_ci.viewType = ConvertImageViewType(info.type);
     image_view_ci.format = static_cast<VkFormat>(
-        instance.GetSupportedFormat(format, vk::FormatFeatureFlags2{image.format_features}));
+        instance.GetSupportedFormat(format, VkFormatFeatureFlags2{image.format_features}));
     image_view_ci.components = static_cast<VkComponentMapping>(components);
     image_view_ci.subresourceRange.aspectMask = aspect;
     image_view_ci.subresourceRange.baseMipLevel = info.range.base.level;
@@ -149,7 +148,7 @@ ImageView::ImageView(const Vulkan::Instance& instance, const ImageViewInfo& info
                   enum_name(&enum_names_AmdGpu_ImageType, static_cast<s64>(image.info.type)));
     }
 
-    device = static_cast<VkDevice>(instance.GetDevice());
+    device = instance.GetDevice();
     const VkResult view_result = vkCreateImageView(device, &image_view_ci, nullptr, &image_view);
     ASSERT_MSG(view_result == VK_SUCCESS, "Failed to create image view: %s",
                Vulkan::ResultName(view_result));

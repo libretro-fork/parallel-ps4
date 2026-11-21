@@ -54,8 +54,7 @@ void BlitHelper::PipelineList<Key>::Destroy(VkDevice device) {
 }
 
 BlitHelper::BlitHelper(const Vulkan::Instance& instance_, Vulkan::Scheduler& scheduler_)
-    : instance{instance_}, scheduler{scheduler_},
-      device{static_cast<VkDevice>(instance_.GetDevice())} {
+    : instance{instance_}, scheduler{scheduler_}, device{instance_.GetDevice()} {
     CreateShaders();
     CreatePipelineLayouts();
 }
@@ -207,7 +206,7 @@ void BlitHelper::CopyDepthToColor(u32 width, u32 height, u32 dst_samples, VkForm
 }
 
 void BlitHelper::CreateShaders() {
-    const vk::Device vk_device{device};
+    const VkDevice vk_device{device};
     fs_tri_vertex = static_cast<VkShaderModule>(
         Vulkan::CompileSPV(words, host_spirv_fs_tri_vert(words, HOST_SPIRV_MAX_WORDS), vk_device));
     color_to_ms_depth_frag = static_cast<VkShaderModule>(Vulkan::CompileSPV(
@@ -352,7 +351,7 @@ VkPipeline BlitHelper::CreateDepthToColorPipeline(const DepthToColorKey& key) {
     const size_t num_words = host_spirv_depth_to_color_frag(
         words, HOST_SPIRV_MAX_WORDS, key.src_msaa, key.stencil, key.uint_out, key.sample);
     const VkShaderModule frag =
-        static_cast<VkShaderModule>(Vulkan::CompileSPV(words, num_words, vk::Device{device}));
+        static_cast<VkShaderModule>(Vulkan::CompileSPV(words, num_words, VkDevice{device}));
     const VkPipeline pipeline = CreateBlitPipeline(frag, key.dst_samples, key.attachment_format,
                                                    key.write_mask, VK_FORMAT_UNDEFINED);
     Vulkan::SetObjectName(instance.GetDevice(), pipeline, "Depth plane to colour %u",

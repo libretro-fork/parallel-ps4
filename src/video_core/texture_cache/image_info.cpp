@@ -20,17 +20,17 @@ using namespace Vulkan;
 using Libraries::VideoOut::TilingMode;
 using VideoOutFormat = Libraries::VideoOut::PixelFormat;
 
-static vk::Format ConvertPixelFormat(const VideoOutFormat format) {
+static VkFormat ConvertPixelFormat(const VideoOutFormat format) {
     switch (format) {
     case VideoOutFormat::A8B8G8R8Srgb:
     // Remaining formats are mapped to RGBA for internal consistency and changed to BGRA in the
     // frame image view.
     case VideoOutFormat::A8R8G8B8Srgb:
-        return vk::Format::eR8G8B8A8Srgb;
+        return VK_FORMAT_R8G8B8A8_SRGB;
     case VideoOutFormat::A2R10G10B10:
     case VideoOutFormat::A2R10G10B10Srgb:
     case VideoOutFormat::A2R10G10B10Bt2020Pq:
-        return vk::Format::eA2B10G10R10UnormPack32;
+        return VK_FORMAT_A2B10G10R10_UNORM_PACK32;
     default:
         break;
     }
@@ -178,8 +178,8 @@ ImageInfo::ImageInfo(const AmdGpu::Image& sharp, const Shader::ImageResource& de
 }
 
 bool ImageInfo::IsCompatible(const ImageInfo& info) const {
-    const VkFormat format = static_cast<VkFormat>(pixel_format);
-    const VkFormat info_format = static_cast<VkFormat>(info.pixel_format);
+    const VkFormat format = pixel_format;
+    const VkFormat info_format = info.pixel_format;
     return (IsVulkanFormatCompatible(format, info_format) ||
             IsVulkanFormatCompatible(info_format, format)) &&
            num_samples == info.num_samples && num_bits == info.num_bits;

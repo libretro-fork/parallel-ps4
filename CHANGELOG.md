@@ -4,6 +4,16 @@ What changed in the libretro core of this fork, newest first. Changes that come 
 
 ## Unreleased
 
+- vulkan.hpp is gone from the core: the renderer is on the Vulkan C API throughout, through libretro-common's symbol wrapper, and vulkan.hpp's dispatcher (`vk_common.cpp`) is gone with it.
+  - **The last of it:**
+    - `liverpool_to_vk` (formats, blends, compare ops, samples, clear values) and the instance's getters give C types.
+    - The image's pixel format and the image view's format are `VkFormat`.
+    - The resource pools and `CompileSPV` give C handles.
+    - The pipeline cache keeps C shader modules.
+  - **Format traits:** a texel block's size and extent come from `vk_format_traits.c`, a new MSVC C89 module made from the Vulkan headers' `vulkan_format_traits.hpp` by a script. It is checked to give the same as vulkan.hpp for all 264 formats it knows.
+  - **No STL in what changed:** the format tables are C arrays walked through a small view, and the colour swizzle works on C arrays.
+  - Checked on lavapipe: an instance and device made, a buffer filled on the GPU and read back, the output images made and remade at a new size. Not run in a game yet.
+
 - The instance (`vk_instance.h`/`.cpp`) and the platform code (`vk_platform.h`/`.cpp`) on the Vulkan C API, with no STL or `auto`.
   - **Loading Vulkan:** the system's Vulkan loader is opened with libretro-common's `dylib_load`, synced from RetroArch's libretro-common as it is, in place of vulkan.hpp's dynamic loader. The instance, its layers and layer settings, and the debug messenger are made with the C calls. The debug utils' own entry points are loaded once they are enabled, as RetroArch does.
   - **The device:** the feature structs are asked for and enabled through pNext chains built by hand, each linked only where its extension is, as before.

@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright 2024 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -758,8 +759,6 @@ bool Instance::CreateDevice() {
         return false;
     }
 
-    // vulkan.hpp's entry points too, for the code not yet on the C API
-    VULKAN_HPP_DEFAULT_DISPATCHER.init(vk::Device{device});
     if (!vulkan_symbol_wrapper_load_core_device_symbols(device)) {
         LOG_CRITICAL(Render_Vulkan, "Failed to load Vulkan's device entry points");
         return false;
@@ -838,10 +837,10 @@ void Instance::QueryFormat(VkFormat format) {
 
 void Instance::CollectFormatProperties() {
     for (const LiverpoolToVK::SurfaceFormatInfo& format_info : LiverpoolToVK::SurfaceFormats()) {
-        QueryFormat(static_cast<VkFormat>(format_info.vk_format));
+        QueryFormat(format_info.vk_format);
     }
     for (const LiverpoolToVK::DepthFormatInfo& format_info : LiverpoolToVK::DepthFormats()) {
-        QueryFormat(static_cast<VkFormat>(format_info.vk_format));
+        QueryFormat(format_info.vk_format);
     }
     // Other miscellaneous formats, e.g. for color buffers, swizzles, or compatibility
     static constexpr VkFormat misc_formats[] = {
@@ -919,8 +918,8 @@ void Instance::CollectImageFormatInfo() {
 
     // Check and log format support details.
     for (const LiverpoolToVK::SurfaceFormatInfo& format : LiverpoolToVK::SurfaceFormats()) {
-        const VkFormat vk_format = static_cast<VkFormat>(format.vk_format);
-        const VkFormatFeatureFlags2 flags = static_cast<VkFormatFeatureFlags2>(format.flags);
+        const VkFormat vk_format = format.vk_format;
+        const VkFormatFeatureFlags2 flags = format.flags;
         if ((GetFormatFeatureFlags(vk_format) & flags) != flags &&
             vk_format != VK_FORMAT_UNDEFINED) {
             LOG_WARNING(Render_Vulkan,
@@ -932,8 +931,8 @@ void Instance::CollectImageFormatInfo() {
         }
     }
     for (const LiverpoolToVK::DepthFormatInfo& format : LiverpoolToVK::DepthFormats()) {
-        const VkFormat vk_format = static_cast<VkFormat>(format.vk_format);
-        const VkFormatFeatureFlags2 flags = static_cast<VkFormatFeatureFlags2>(format.flags);
+        const VkFormat vk_format = format.vk_format;
+        const VkFormatFeatureFlags2 flags = format.flags;
         if ((GetFormatFeatureFlags(vk_format) & flags) != flags &&
             vk_format != VK_FORMAT_UNDEFINED) {
             LOG_WARNING(Render_Vulkan,
@@ -1013,36 +1012,33 @@ VkFormatFeatureFlags2 Instance::GetFormatFeatureFlags(VkFormat format) const {
     return format_properties[slot].optimalTilingFeatures | format_properties[slot].bufferFeatures;
 }
 
-bool Instance::IsFormatSupported(const vk::Format vk_format,
-                                 const vk::FormatFeatureFlags2 vk_flags) const {
-    const VkFormat format = static_cast<VkFormat>(vk_format);
-    const VkFormatFeatureFlags2 flags = static_cast<VkFormatFeatureFlags2>(vk_flags);
+bool Instance::IsFormatSupported(const VkFormat format, const VkFormatFeatureFlags2 flags) const {
     if (format == VK_FORMAT_UNDEFINED) [[unlikely]] {
         return true;
     }
     return (GetFormatFeatureFlags(format) & flags) == flags;
 }
 
-vk::Format Instance::GetSupportedFormat(const vk::Format format,
-                                        const vk::FormatFeatureFlags2 flags) const {
+VkFormat Instance::GetSupportedFormat(const VkFormat format,
+                                      const VkFormatFeatureFlags2 flags) const {
     if (!IsFormatSupported(format, flags)) [[unlikely]] {
         switch (format) {
-        case vk::Format::eD16UnormS8Uint:
-            if (IsFormatSupported(vk::Format::eD24UnormS8Uint, flags)) {
-                return vk::Format::eD24UnormS8Uint;
+        case VK_FORMAT_D16_UNORM_S8_UINT:
+            if (IsFormatSupported(VK_FORMAT_D24_UNORM_S8_UINT, flags)) {
+                return VK_FORMAT_D24_UNORM_S8_UINT;
             }
-            if (IsFormatSupported(vk::Format::eD32SfloatS8Uint, flags)) {
-                return vk::Format::eD32SfloatS8Uint;
-            }
-            break;
-        case vk::Format::eR8Srgb:
-            if (IsFormatSupported(vk::Format::eR8Unorm, flags)) {
-                return vk::Format::eR8Unorm;
+            if (IsFormatSupported(VK_FORMAT_D32_SFLOAT_S8_UINT, flags)) {
+                return VK_FORMAT_D32_SFLOAT_S8_UINT;
             }
             break;
-        case vk::Format::eR8G8Srgb:
-            if (IsFormatSupported(vk::Format::eR8G8Unorm, flags)) {
-                return vk::Format::eR8G8Unorm;
+        case VK_FORMAT_R8_SRGB:
+            if (IsFormatSupported(VK_FORMAT_R8_UNORM, flags)) {
+                return VK_FORMAT_R8_UNORM;
+            }
+            break;
+        case VK_FORMAT_R8G8_SRGB:
+            if (IsFormatSupported(VK_FORMAT_R8G8_UNORM, flags)) {
+                return VK_FORMAT_R8G8_UNORM;
             }
             break;
         default:

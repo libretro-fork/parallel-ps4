@@ -314,11 +314,11 @@ void Rasterizer::EliminateFastClear() {
         texture_cache.TouchMeta(col_buf.CmaskAddress(), slice, false);
     }
     VideoCore::Image& image = texture_cache.GetImage(image_id);
-    const vk::ClearValue clear_value = LiverpoolToVK::ColorBufferClearValue(col_buf);
+    const VkClearValue clear_value = LiverpoolToVK::ColorBufferClearValue(col_buf);
 
     HostMarkerBegin("EliminateFastClear:MRT=0x%" PRIx64 ":M=0x%" PRIxPTR, col_buf.Address(),
                     col_buf.CmaskAddress());
-    runtime.ClearImage(&image, desc.view_info.range, static_cast<VkClearValue>(clear_value));
+    runtime.ClearImage(&image, desc.view_info.range, clear_value);
     ScopeMarkerEnd();
 }
 
@@ -1428,13 +1428,12 @@ RenderState Rasterizer::BeginRendering(const GraphicsPipeline* pipeline) {
         target_scale_den = image->scale_den;
         state.num_layers = Common::Min<u32>(state.num_layers, image_view.info.range.extent.layers);
 
-        const vk::ClearValue clear_value =
-            is_clear ? LiverpoolToVK::ColorBufferClearValue(col_buf) : vk::ClearValue{};
+        const VkClearValue clear_value =
+            is_clear ? LiverpoolToVK::ColorBufferClearValue(col_buf) : VkClearValue{};
         Vulkan::RenderAttachment& attachment = state.color_attachments[cb];
         attachment.image_view = image_view.Handle();
         attachment.image_layout = static_cast<VkImageLayout>(image->backing->state.layout);
-        memcpy(attachment.clear_value, clear_value.color.uint32.data(),
-               sizeof(attachment.clear_value));
+        memcpy(attachment.clear_value, clear_value.color.uint32, sizeof(attachment.clear_value));
         attachment.is_clear = is_clear;
 
         image->usage.render_target = 1u;

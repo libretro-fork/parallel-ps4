@@ -13,8 +13,7 @@ namespace Vulkan {
 constexpr u64 WAIT_TIMEOUT = UINT64_MAX;
 
 Semaphore::Semaphore(const Instance& instance_)
-    : instance{instance_}, device{static_cast<VkDevice>(instance_.GetDevice())},
-      semaphore{VK_NULL_HANDLE} {
+    : instance{instance_}, device{instance_.GetDevice()}, semaphore{VK_NULL_HANDLE} {
     VkSemaphoreTypeCreateInfo type_ci{};
     type_ci.sType = VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO;
     type_ci.semaphoreType = VK_SEMAPHORE_TYPE_TIMELINE;

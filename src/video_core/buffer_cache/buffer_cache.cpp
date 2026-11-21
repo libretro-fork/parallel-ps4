@@ -143,8 +143,7 @@ BufferCache::BufferCache(const Vulkan::Instance& instance_, Vulkan::Scheduler& s
     req_info.pCreateInfo = &probe_ci;
     VkMemoryRequirements2 reqs2{};
     reqs2.sType = VK_STRUCTURE_TYPE_MEMORY_REQUIREMENTS_2;
-    vkGetDeviceBufferMemoryRequirements(static_cast<VkDevice>(instance.GetDevice()), &req_info,
-                                        &reqs2);
+    vkGetDeviceBufferMemoryRequirements(instance.GetDevice(), &req_info, &reqs2);
     const VkMemoryRequirements& reqs = reqs2.memoryRequirements;
     block_size = Common::AlignUp(MaxU64(reqs.alignment, MIN_BLOCK_SIZE), reqs.alignment);
     ASSERT_MSG(__builtin_popcount(block_size) == 1, "Sparse block size %u is not a power of 2",
@@ -798,7 +797,7 @@ VkDeviceMemory BufferCache::BackingMemory(u64 blocks, u64* out_first) {
     const u64 budget = instance.GetTotalMemoryBudget();
     const u64 chunk_bytes = Common::AlignUp(ClampU64(budget / 64, 16_MB, 128_MB), u64{block_size});
     const u64 chunk_blocks = chunk_bytes >> block_shift;
-    const VkDevice device = static_cast<VkDevice>(instance.GetDevice());
+    const VkDevice device = instance.GetDevice();
     if (blocks > chunk_blocks / 2) {
         // More than half a chunk: memory of its own, and the chunk keeps what it has left
         const VkDeviceMemory memory =
@@ -1150,9 +1149,9 @@ void BufferCache::SubmitPendingArenaBinds(Vulkan::SubmitInfo& info) {
     sparse_info.signalSemaphoreCount = 1u;
     sparse_info.pSignalSemaphores = &signal_sema;
 
-    info.AddWait(vk::Semaphore{signal_sema}, signal_tick);
-    const VkResult submit_result = vkQueueBindSparse(
-        static_cast<VkQueue>(instance.GetGraphicsQueue()), 1, &sparse_info, VK_NULL_HANDLE);
+    info.AddWait(VkSemaphore{signal_sema}, signal_tick);
+    const VkResult submit_result =
+        vkQueueBindSparse(instance.GetGraphicsQueue(), 1, &sparse_info, VK_NULL_HANDLE);
     if (submit_result == VK_ERROR_DEVICE_LOST) {
         instance.ReportDeviceLost();
     }

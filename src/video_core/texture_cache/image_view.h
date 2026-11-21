@@ -32,7 +32,7 @@ struct ImageViewInfo {
                   AmdGpu::DepthControl ctl);
 
     AmdGpu::ImageType type = AmdGpu::ImageType::Color2D;
-    vk::Format format = vk::Format::eR8G8B8A8Unorm;
+    VkFormat format = VK_FORMAT_R8G8B8A8_UNORM;
     SubresourceRange range;
     AmdGpu::CompMapping mapping{AmdGpu::IdentityMapping};
     u32 min_lod = 0;

@@ -55,9 +55,9 @@ static bool IsScaledMinMax(VkBlendOp op, VkBlendFactor src, VkBlendFactor dst) {
 /// LiverpoolToVK's min/max normalisation of one blend, on the C API's enums
 static void NormalizeMinMaxBlend(VkBlendOp& op, VkBlendFactor& src, VkBlendFactor& dst,
                                  AmdGpu::NumberFormat num_format) {
-    vk::BlendOp vk_op = static_cast<vk::BlendOp>(op);
-    vk::BlendFactor vk_src = static_cast<vk::BlendFactor>(src);
-    vk::BlendFactor vk_dst = static_cast<vk::BlendFactor>(dst);
+    VkBlendOp vk_op = static_cast<VkBlendOp>(op);
+    VkBlendFactor vk_src = static_cast<VkBlendFactor>(src);
+    VkBlendFactor vk_dst = static_cast<VkBlendFactor>(dst);
     LiverpoolToVK::NormalizeMinMaxBlend(vk_op, vk_src, vk_dst, num_format);
     op = static_cast<VkBlendOp>(vk_op);
     src = static_cast<VkBlendFactor>(vk_src);
@@ -77,7 +77,7 @@ GraphicsPipeline::GraphicsPipeline(const Instance& instance, Scheduler& schedule
         fetch_shader = *fetch_shader_;
     }
 
-    const vk::Device vk_device{device};
+    const VkDevice vk_device{device};
     SetStages(infos);
     BuildDescSetLayout(preloading);
     char debug_str[DebugStringSize];
@@ -277,16 +277,15 @@ GraphicsPipeline::GraphicsPipeline(const Instance& instance, Scheduler& schedule
 
     const VkFormat depth_format = static_cast<VkFormat>(
         instance.GetSupportedFormat(LiverpoolToVK::DepthFormat(key.z_format, key.stencil_format),
-                                    vk::FormatFeatureFlagBits2::eDepthStencilAttachment));
+                                    VK_FORMAT_FEATURE_2_DEPTH_STENCIL_ATTACHMENT_BIT));
     VkFormat color_formats[Shader::IR::NumRenderTargets];
     for (u32 i = 0; i < key.num_color_attachments; ++i) {
         const Shader::PsColorBuffer& col_buf = key.color_buffers[i];
-        const vk::Format format =
+        const VkFormat format =
             LiverpoolToVK::SurfaceFormat(col_buf.data_format, col_buf.num_format);
-        const vk::Format color_format =
-            instance.GetSupportedFormat(format, vk::FormatFeatureFlagBits2::eColorAttachment);
-        if (!instance.IsFormatSupported(color_format,
-                                        vk::FormatFeatureFlagBits2::eColorAttachment)) {
+        const VkFormat color_format =
+            instance.GetSupportedFormat(format, VK_FORMAT_FEATURE_2_COLOR_ATTACHMENT_BIT);
+        if (!instance.IsFormatSupported(color_format, VK_FORMAT_FEATURE_2_COLOR_ATTACHMENT_BIT)) {
             LOG_WARNING(Render_Vulkan,
                         "color buffer format %d does not support COLOR_ATTACHMENT_BIT",
                         static_cast<int>(color_format));

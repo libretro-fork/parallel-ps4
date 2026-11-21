@@ -115,7 +115,7 @@ Image::Image(const Vulkan::Instance& instance, Vulkan::Runtime& runtime_,
              u32 scale_num_, u32 scale_den_)
     : runtime{&runtime_}, slot_image_views{&slot_image_views_}, info{info_},
       scale_num{scale_num_}, scale_den{scale_den_} {
-    if (info.pixel_format == vk::Format::eUndefined) {
+    if (info.pixel_format == VK_FORMAT_UNDEFINED) {
         return;
     }
 
@@ -148,7 +148,7 @@ Image::Image(const Vulkan::Instance& instance, Vulkan::Runtime& runtime_,
 
     constexpr VkImageTiling tiling = VK_IMAGE_TILING_OPTIMAL;
     const VkFormat supported_format = static_cast<VkFormat>(
-        instance.GetSupportedFormat(info.pixel_format, vk::FormatFeatureFlags2{format_features}));
+        instance.GetSupportedFormat(info.pixel_format, VkFormatFeatureFlags2{format_features}));
     VkPhysicalDeviceImageFormatInfo2 format_info{};
     format_info.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_IMAGE_FORMAT_INFO_2;
     format_info.format = supported_format;
@@ -159,8 +159,7 @@ Image::Image(const Vulkan::Instance& instance, Vulkan::Runtime& runtime_,
     VkImageFormatProperties2 image_format_properties{};
     image_format_properties.sType = VK_STRUCTURE_TYPE_IMAGE_FORMAT_PROPERTIES_2;
     const VkResult format_result = vkGetPhysicalDeviceImageFormatProperties2(
-        static_cast<VkPhysicalDevice>(instance.GetPhysicalDevice()), &format_info,
-        &image_format_properties);
+        instance.GetPhysicalDevice(), &format_info, &image_format_properties);
     if (format_result == VK_ERROR_FORMAT_NOT_SUPPORTED) {
         LOG_ERROR(Render_Vulkan,
                   "image format %d type %d is not supported (flags 0x%x, usage 0x%x)",
@@ -184,7 +183,7 @@ Image::Image(const Vulkan::Instance& instance, Vulkan::Runtime& runtime_,
         .mipLevels = static_cast<u32>(info.resources.levels),
         .arrayLayers = static_cast<u32>(info.resources.layers),
         .samples = static_cast<VkSampleCountFlagBits>(
-            LiverpoolToVK::NumSamples(info.num_samples, vk::SampleCountFlags{supported_samples})),
+            LiverpoolToVK::NumSamples(info.num_samples, VkSampleCountFlags{supported_samples})),
         .tiling = tiling,
         .usage = usage_flags,
         .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
@@ -192,8 +191,7 @@ Image::Image(const Vulkan::Instance& instance, Vulkan::Runtime& runtime_,
 
     backing = &backing_images.emplace_back();
     backing->num_samples = info.num_samples;
-    backing->image =
-        UniqueImage{static_cast<VkDevice>(instance.GetDevice()), instance.GetAllocator()};
+    backing->image = UniqueImage{instance.GetDevice(), instance.GetAllocator()};
     backing->image.Create(image_ci);
 
     Vulkan::SetObjectName(

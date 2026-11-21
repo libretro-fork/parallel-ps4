@@ -233,9 +233,9 @@ struct FrameReadback {
             narrow_format = VK_FORMAT_A2R10G10B10_UNORM_PACK32;
             in_order = format != VK_FORMAT_A2B10G10R10_UNORM_PACK32;
             if (in_order ||
-                !instance_.IsFormatSupported(static_cast<vk::Format>(narrow_format),
-                                             vk::FormatFeatureFlagBits2::eBlitDst |
-                                                 vk::FormatFeatureFlagBits2::eTransferSrc)) {
+                !instance_.IsFormatSupported(static_cast<VkFormat>(narrow_format),
+                                             VK_FORMAT_FEATURE_2_BLIT_DST_BIT |
+                                                 VK_FORMAT_FEATURE_2_TRANSFER_SRC_BIT)) {
                 return;
             }
         } else if (format == VK_FORMAT_B8G8R8A8_UNORM) {
@@ -463,9 +463,8 @@ static void InitOverlays(const Instance& instance, VkFormat format, u32 frame_co
         Common::GetEmbeddedResource("src/resources/fonts/NotoSans-Regular.ttf", &font_size);
     ovl_vk_info_t info{};
     info.get_device_proc = vkGetDeviceProcAddr;
-    info.device = static_cast<VkDevice>(instance.GetDevice());
-    vkGetPhysicalDeviceMemoryProperties(static_cast<VkPhysicalDevice>(instance.GetPhysicalDevice()),
-                                        &info.memory_properties);
+    info.device = instance.GetDevice();
+    vkGetPhysicalDeviceMemoryProperties(instance.GetPhysicalDevice(), &info.memory_properties);
     info.image_count = frame_count;
     info.surface_format = format;
     info.font = font;
@@ -532,7 +531,7 @@ Presenter::Presenter(AmdGpu::Liverpool* liverpool_)
     }
     num_present_frames =
         output_images.Made() ? output_images.Count() : OutputImages::OffscreenCount;
-    const VkDevice device = static_cast<VkDevice>(instance.GetDevice());
+    const VkDevice device = instance.GetDevice();
 
     // Create presentation frames.
     const VkFenceCreateInfo fence_ci = {
@@ -567,7 +566,7 @@ Presenter::~Presenter() {
         guest_import_destroy(frame_slot_import.import);
     }
 
-    const VkDevice device = static_cast<VkDevice>(instance.GetDevice());
+    const VkDevice device = instance.GetDevice();
     for (u32 i = 0; i < num_present_frames; i++) {
         Frame& frame = present_frames[i];
         instance.GetAllocator()->DestroyImage(frame.image, frame.allocation);
@@ -624,7 +623,7 @@ bool Presenter::IsVideoOutSurface(const AmdGpu::ColorBuffer& color_buffer) const
 }
 
 void Presenter::RecreateFrame(Frame* frame, u32 width, u32 height) {
-    const VkDevice device = static_cast<VkDevice>(instance.GetDevice());
+    const VkDevice device = instance.GetDevice();
     if (frame->image_view) {
         vkDestroyImageView(device, frame->image_view, nullptr);
     }
@@ -669,7 +668,7 @@ void Presenter::RecreateFrame(Frame* frame, u32 width, u32 height) {
 
 /// Waits for @frame's last presentation to be done with it
 static void WaitPresentDone(const Instance& instance, const Frame& frame) {
-    const VkDevice device = static_cast<VkDevice>(instance.GetDevice());
+    const VkDevice device = instance.GetDevice();
     while (true) {
         const VkResult result = vkWaitForFences(device, 1, &frame.present_done, VK_FALSE, ~0ULL);
         if (result == VK_SUCCESS) {
@@ -714,16 +713,16 @@ Frame* Presenter::PrepareLastFrame() {
     return frame;
 }
 
-static vk::Format GetFrameViewFormat(const Libraries::VideoOut::PixelFormat format) {
+static VkFormat GetFrameViewFormat(const Libraries::VideoOut::PixelFormat format) {
     switch (format) {
     case Libraries::VideoOut::PixelFormat::A8B8G8R8Srgb:
-        return vk::Format::eR8G8B8A8Srgb;
+        return VK_FORMAT_R8G8B8A8_SRGB;
     case Libraries::VideoOut::PixelFormat::A8R8G8B8Srgb:
-        return vk::Format::eB8G8R8A8Srgb;
+        return VK_FORMAT_B8G8R8A8_SRGB;
     case Libraries::VideoOut::PixelFormat::A2R10G10B10:
     case Libraries::VideoOut::PixelFormat::A2R10G10B10Srgb:
     case Libraries::VideoOut::PixelFormat::A2R10G10B10Bt2020Pq:
-        return vk::Format::eA2R10G10B10UnormPack32;
+        return VK_FORMAT_A2R10G10B10_UNORM_PACK32;
     default:
         break;
     }
@@ -874,8 +873,7 @@ void Presenter::Present(Frame* frame, bool is_reusing_frame, bool is_game_frame)
     output_images.Acquire();
 
     // Reset fence for queue submission.
-    const VkResult reset_result =
-        vkResetFences(static_cast<VkDevice>(instance.GetDevice()), 1, &frame->present_done);
+    const VkResult reset_result = vkResetFences(instance.GetDevice(), 1, &frame->present_done);
     ASSERT_MSG(reset_result == VK_SUCCESS, "Unexpected error resetting present done fence: %s",
                ResultName(reset_result));
 

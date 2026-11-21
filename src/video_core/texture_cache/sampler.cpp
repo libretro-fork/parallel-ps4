@@ -68,7 +68,7 @@ Sampler::Sampler(const Vulkan::Instance& instance, const AmdGpu::Sampler& sample
     sampler_ci.borderColor = border_color;
     sampler_ci.unnormalizedCoordinates = VK_FALSE; // Handled in shader due to Vulkan limitations.
 
-    device = static_cast<VkDevice>(instance.GetDevice());
+    device = instance.GetDevice();
     const VkResult result = vkCreateSampler(device, &sampler_ci, nullptr, &handle);
     ASSERT_MSG(result == VK_SUCCESS, "Failed to create sampler: %s", Vulkan::ResultName(result));
 }

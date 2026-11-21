@@ -16,7 +16,7 @@ namespace Vulkan::HostPasses {
 static VkShaderModule HostModule(VkDevice device, u32* words,
                                  size_t (*emit)(u32* words, size_t max_words), const char* name) {
     const size_t num_words = emit(words, HOST_SPIRV_MAX_WORDS);
-    const vk::Device vk_device{device};
+    const VkDevice vk_device{device};
     const VkShaderModule module =
         static_cast<VkShaderModule>(CompileSPV(words, num_words, vk_device));
     ASSERT(module);

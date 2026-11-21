@@ -12,18 +12,17 @@
 namespace Vulkan {
 
 OutputImages::OutputImages(const Instance& instance_)
-    : instance{instance_}, device{static_cast<VkDevice>(instance_.GetDevice())} {
+    : instance{instance_}, device{instance_.GetDevice()} {
     // Ten bits a channel, so a game that outputs ten (A2R10G10B10) reaches the frontend with
     // all of them: RetroArch draws from an image of any format. A frame read back for a
     // frontend that cannot share the images is narrowed to its XRGB8888 there, once
     // (vk_presenter.cpp). Eight bits where the device cannot draw to, blit from and sample
     // the ten-bit format, which Vulkan requires of every device.
-    static constexpr vk::FormatFeatureFlags2 Needed =
-        vk::FormatFeatureFlagBits2::eColorAttachment |
-        vk::FormatFeatureFlagBits2::eColorAttachmentBlend |
-        vk::FormatFeatureFlagBits2::eSampledImage | vk::FormatFeatureFlagBits2::eBlitSrc |
-        vk::FormatFeatureFlagBits2::eTransferSrc | vk::FormatFeatureFlagBits2::eTransferDst;
-    format = instance.IsFormatSupported(vk::Format::eA2B10G10R10UnormPack32, Needed)
+    static constexpr VkFormatFeatureFlags2 Needed =
+        VK_FORMAT_FEATURE_2_COLOR_ATTACHMENT_BIT | VK_FORMAT_FEATURE_2_COLOR_ATTACHMENT_BLEND_BIT |
+        VK_FORMAT_FEATURE_2_SAMPLED_IMAGE_BIT | VK_FORMAT_FEATURE_2_BLIT_SRC_BIT |
+        VK_FORMAT_FEATURE_2_TRANSFER_SRC_BIT | VK_FORMAT_FEATURE_2_TRANSFER_DST_BIT;
+    format = instance.IsFormatSupported(VK_FORMAT_A2B10G10R10_UNORM_PACK32, Needed)
                  ? VK_FORMAT_A2B10G10R10_UNORM_PACK32
                  : VK_FORMAT_B8G8R8A8_UNORM;
     // HDR10 is ten bits a channel, which Vulkan requires of every device; without them PQ
@@ -103,8 +102,7 @@ bool OutputImages::CreateImage(u32 i, const VkImageCreateInfo& image_ci, const v
     vkGetImageMemoryRequirements(device, images[i], &requirements);
     if (memory_type == ~0u) {
         VkPhysicalDeviceMemoryProperties memory_properties;
-        vkGetPhysicalDeviceMemoryProperties(
-            static_cast<VkPhysicalDevice>(instance.GetPhysicalDevice()), &memory_properties);
+        vkGetPhysicalDeviceMemoryProperties(instance.GetPhysicalDevice(), &memory_properties);
         for (u32 type = 0; type < memory_properties.memoryTypeCount; ++type) {
             if ((requirements.memoryTypeBits & (1u << type)) != 0 &&
                 (memory_properties.memoryTypes[type].propertyFlags &
@@ -150,8 +148,7 @@ bool OutputImages::CreateSharedImages() {
         Libretro::GpuFramesFailed("the emulator's Vulkan device cannot export memory");
         return false;
     }
-    const VkPhysicalDevice physical_device =
-        static_cast<VkPhysicalDevice>(instance.GetPhysicalDevice());
+    const VkPhysicalDevice physical_device = instance.GetPhysicalDevice();
 #if defined(_WIN32)
     const VkExternalMemoryHandleTypeFlagBits handle_type =
         VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32_BIT;
@@ -295,7 +292,7 @@ void OutputImages::CreateOffscreenImages() {
 }
 
 void OutputImages::CreateViews() {
-    const vk::Device vk_device{device};
+    const VkDevice vk_device{device};
     for (u32 i = 0; i < count; ++i) {
         const VkImageViewCreateInfo view_ci = {
             .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,

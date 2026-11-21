@@ -264,7 +264,7 @@ CORE_SOURCES_CXX += $(addprefix src/video_core/buffer_cache/,buffer.cpp buffer_c
 	fault_manager.cpp)
 CORE_SOURCES_CXX += $(addprefix src/video_core/,cache_storage.cpp page_manager.cpp)
 CORE_SOURCES_CXX += $(addprefix src/video_core/renderer_vulkan/host_passes/,pp_pass.cpp)
-CORE_SOURCES_CXX += $(addprefix src/video_core/renderer_vulkan/,liverpool_to_vk.cpp vk_common.cpp \
+CORE_SOURCES_CXX += $(addprefix src/video_core/renderer_vulkan/,liverpool_to_vk.cpp \
 	vk_compute_pipeline.cpp vk_graphics_pipeline.cpp vk_instance.cpp vk_memory.cpp \
 	vk_output_images.cpp vk_pipeline_cache.cpp vk_pipeline_common.cpp \
 	vk_pipeline_serialization.cpp vk_platform.cpp vk_presenter.cpp vk_rasterizer.cpp \
@@ -294,7 +294,8 @@ CORE_SOURCES_C += $(addprefix src/video_core/host_shaders/,host_spirv.c)
 CORE_SOURCES_C += $(addprefix src/video_core/overlay/,ovl_commerce.c ovl_draw.c ovl_font.c ovl_fps.c ovl_invdialog.c ovl_invite.c \
 	ovl_msgdialog.c ovl_notify.c ovl_profile.c ovl_savedialog.c ovl_shadnet.c ovl_splash.c ovl_tex.c \
 	ovl_trophy.c ovl_ttf.c ovl_ui.c vk_overlay.c)
-CORE_SOURCES_C += $(addprefix src/video_core/renderer_vulkan/,vk_heap.c vk_device_fault.c frame_notes.c pipeline_cache_blob.c)
+CORE_SOURCES_C += $(addprefix src/video_core/renderer_vulkan/,vk_heap.c vk_device_fault.c frame_notes.c pipeline_cache_blob.c \
+	vk_format_traits.c)
 CORE_SOURCES_C += src/video_core/blob_pack.c
 CORE_SOURCES_C += src/video_core/amdgpu/sample_locs.c src/video_core/amdgpu/cmd_copy_ring.c
 CORE_SOURCES_C += $(addprefix src/video_core/buffer_cache/,write_snapshots.c guest_import.c)

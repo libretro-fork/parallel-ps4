@@ -6,13 +6,12 @@
 #include "common/alignment.h"
 #include "video_core/buffer_cache/buffer.h"
 #include "video_core/renderer_vulkan/liverpool_to_vk.h"
+#include "video_core/renderer_vulkan/vk_format_traits.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_runtime.h"
 #include "video_core/renderer_vulkan/vk_scheduler.h"
 #include "video_core/texture_cache/blit_helper.h"
 #include "video_core/texture_cache/image.h"
-
-#include <vulkan/vulkan_format_traits.hpp>
 
 namespace Vulkan {
 
@@ -83,13 +82,13 @@ static void SanitizeCopyLayers(const VideoCore::ImageInfo& src_info,
     *out_dst_layers = dst_layers;
 }
 
-static u32 BufferImageCopySize(const VkBufferImageCopy& copy, const vk::Format pixel_format) {
+static u32 BufferImageCopySize(const VkBufferImageCopy& copy, const VkFormat pixel_format) {
     const u32 row_length = copy.bufferRowLength ? copy.bufferRowLength : copy.imageExtent.width;
     const u32 height = copy.bufferImageHeight ? copy.bufferImageHeight : copy.imageExtent.height;
 
-    // vulkan.hpp's format traits, the one thing of it here, until a table of the core's own
-    const std::array<u8, 3> block = vk::blockExtent(pixel_format);
-    const u32 block_size = vk::blockSize(pixel_format);
+    unsigned block[3];
+    vk_format_block_extent(pixel_format, &block[0], &block[1], &block[2]);
+    const u32 block_size = vk_format_block_size(pixel_format);
     const u32 row_pitch = (row_length / block[0]) * block_size;
     const u32 slice_pitch = (height / block[1]) * row_pitch;
 
@@ -636,8 +635,7 @@ void Runtime::CopyColorAndDepth(VideoCore::Image* src, VideoCore::Image* dst) {
 
         blit_helper->ReinterpretColorAsMsDepth(
             dst->HostSize().width, dst->HostSize().height, dst->info.num_samples,
-            static_cast<VkFormat>(src->info.pixel_format),
-            static_cast<VkFormat>(dst->info.pixel_format), static_cast<VkImage>(src->GetImage()),
+            src->info.pixel_format, dst->info.pixel_format, static_cast<VkImage>(src->GetImage()),
             static_cast<VkImage>(dst->GetImage()));
     } else {
         LOG_WARNING(Render_Vulkan, "Unimplemented depth overlap copy");
@@ -726,11 +724,11 @@ void Runtime::CopyDepthToColor(VideoCore::Image* src, VideoCore::Image* dst, boo
                   src->info.guest_address, dst->info.guest_address,
                   u64(stencil) | u64(sample) << 8 | u64(src_samples) << 16,
                   u64(width) | u64(height) << 16);
-    blit_helper->CopyDepthToColor(
-        width, height, dst->backing->num_samples, static_cast<VkFormat>(src->info.pixel_format),
-        static_cast<VkFormat>(dst->info.pixel_format), src_samples > 1, stencil, uint_out,
-        write_mask, Common::Min(sample, src_samples - 1), static_cast<VkImage>(src->GetImage()),
-        src_layer, static_cast<VkImage>(dst->GetImage()), dst_layer);
+    blit_helper->CopyDepthToColor(width, height, dst->backing->num_samples, src->info.pixel_format,
+                                  dst->info.pixel_format, src_samples > 1, stencil, uint_out,
+                                  write_mask, Common::Min(sample, src_samples - 1),
+                                  static_cast<VkImage>(src->GetImage()), src_layer,
+                                  static_cast<VkImage>(dst->GetImage()), dst_layer);
 
     dst->flags |= VideoCore::ImageFlagBits::GpuModified;
     dst->flags &= ~VideoCore::ImageFlagBits::Dirty;
@@ -869,12 +867,11 @@ void Runtime::SetBackingSamples(VideoCore::Image* image, u32 num_samples, bool c
         const u64 previous_size = Common::AlignUp(image->SizeBytes(), 1024);
         VkImageCreateInfo new_image_ci = backing->image.image_ci;
         new_image_ci.samples = static_cast<VkSampleCountFlagBits>(
-            LiverpoolToVK::NumSamples(num_samples, vk::SampleCountFlags{image->supported_samples}));
+            LiverpoolToVK::NumSamples(num_samples, VkSampleCountFlags{image->supported_samples}));
 
         new_backing = &backing_images.emplace_back();
         new_backing->num_samples = num_samples;
-        new_backing->image = VideoCore::UniqueImage{static_cast<VkDevice>(instance.GetDevice()),
-                                                    instance.GetAllocator()};
+        new_backing->image = VideoCore::UniqueImage{instance.GetDevice(), instance.GetAllocator()};
         new_backing->image.Create(new_image_ci);
         if (image->memory_usage_counter) {
             *image->memory_usage_counter +=
@@ -932,8 +929,8 @@ void Runtime::SetBackingSamples(VideoCore::Image* image, u32 num_samples, bool c
         // Copy between ms and non ms backing images
         blit_helper->CopyBetweenMsImages(
             image->HostSize().width, image->HostSize().height, new_backing->num_samples,
-            static_cast<VkFormat>(info.pixel_format), backing->num_samples > 1,
-            static_cast<VkImage>(backing->image), static_cast<VkImage>(new_backing->image));
+            info.pixel_format, backing->num_samples > 1, static_cast<VkImage>(backing->image),
+            static_cast<VkImage>(new_backing->image));
 
         // Update current layout in tracker to new backings layout
         new_backing->state.layout = dst_layout;

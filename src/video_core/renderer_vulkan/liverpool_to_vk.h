@@ -15,69 +15,83 @@
 
 namespace Vulkan::LiverpoolToVK {
 
-vk::StencilOp StencilOp(AmdGpu::StencilFunc op);
+VkStencilOp StencilOp(AmdGpu::StencilFunc op);
 
-vk::CompareOp CompareOp(AmdGpu::CompareFunc func);
+VkCompareOp CompareOp(AmdGpu::CompareFunc func);
 
 bool IsPrimitiveCulled(AmdGpu::PrimitiveType type);
 
-vk::PrimitiveTopology PrimitiveType(AmdGpu::PrimitiveType type);
+VkPrimitiveTopology PrimitiveType(AmdGpu::PrimitiveType type);
 
-vk::PolygonMode PolygonMode(AmdGpu::PolygonMode mode);
+VkPolygonMode PolygonMode(AmdGpu::PolygonMode mode);
 
-vk::CullModeFlags CullMode(AmdGpu::CullMode mode);
+VkCullModeFlags CullMode(AmdGpu::CullMode mode);
 
-vk::FrontFace FrontFace(AmdGpu::FrontFace mode);
+VkFrontFace FrontFace(AmdGpu::FrontFace mode);
 
-vk::BlendFactor BlendFactor(AmdGpu::BlendControl::BlendFactor factor);
+VkBlendFactor BlendFactor(AmdGpu::BlendControl::BlendFactor factor);
 
 bool IsDualSourceBlendFactor(AmdGpu::BlendControl::BlendFactor factor);
 
-vk::BlendOp BlendOp(AmdGpu::BlendControl::BlendFunc func);
+VkBlendOp BlendOp(AmdGpu::BlendControl::BlendFunc func);
 
-void NormalizeMinMaxBlend(vk::BlendOp& op, vk::BlendFactor& src, vk::BlendFactor& dst,
+void NormalizeMinMaxBlend(VkBlendOp& op, VkBlendFactor& src, VkBlendFactor& dst,
                           AmdGpu::NumberFormat format);
 
-vk::LogicOp LogicOp(AmdGpu::ColorControl::LogicOp logic_op);
+VkLogicOp LogicOp(AmdGpu::ColorControl::LogicOp logic_op);
 
-vk::SamplerAddressMode ClampMode(AmdGpu::ClampMode mode);
+VkSamplerAddressMode ClampMode(AmdGpu::ClampMode mode);
 
-vk::CompareOp DepthCompare(AmdGpu::DepthCompare comp);
+VkCompareOp DepthCompare(AmdGpu::DepthCompare comp);
 
-vk::Filter Filter(AmdGpu::Filter filter);
+VkFilter Filter(AmdGpu::Filter filter);
 
-vk::SamplerReductionMode FilterMode(AmdGpu::FilterMode mode);
+VkSamplerReductionMode FilterMode(AmdGpu::FilterMode mode);
 
-vk::SamplerMipmapMode MipFilter(AmdGpu::MipFilter filter);
+VkSamplerMipmapMode MipFilter(AmdGpu::MipFilter filter);
 
-vk::BorderColor BorderColor(AmdGpu::BorderColor color);
+VkBorderColor BorderColor(AmdGpu::BorderColor color);
 
-vk::ComponentSwizzle ComponentSwizzle(AmdGpu::CompSwizzle comp_swizzle);
+VkComponentSwizzle ComponentSwizzle(AmdGpu::CompSwizzle comp_swizzle);
 
-vk::ComponentMapping ComponentMapping(AmdGpu::CompMapping comp_mapping);
+VkComponentMapping ComponentMapping(AmdGpu::CompMapping comp_mapping);
+
+/// A run of table entries, walked with a range for
+template <typename T>
+struct TableView {
+    const T* items;
+    u32 count;
+
+    const T* begin() const {
+        return items;
+    }
+    const T* end() const {
+        return items + count;
+    }
+};
 
 struct SurfaceFormatInfo {
     AmdGpu::DataFormat data_format;
     AmdGpu::NumberFormat number_format;
-    vk::Format vk_format;
-    vk::FormatFeatureFlags2 flags;
+    VkFormat vk_format;
+    VkFormatFeatureFlags2 flags;
 };
-std::span<const SurfaceFormatInfo> SurfaceFormats();
+TableView<SurfaceFormatInfo> SurfaceFormats();
 
 struct DepthFormatInfo {
     AmdGpu::DepthBuffer::ZFormat z_format;
     AmdGpu::DepthBuffer::StencilFormat stencil_format;
-    vk::Format vk_format;
-    vk::FormatFeatureFlags2 flags;
+    VkFormat vk_format;
+    VkFormatFeatureFlags2 flags;
 };
-std::span<const DepthFormatInfo> DepthFormats();
+TableView<DepthFormatInfo> DepthFormats();
 
-vk::Format DepthFormat(AmdGpu::DepthBuffer::ZFormat z_format,
-                       AmdGpu::DepthBuffer::StencilFormat stencil_format);
+VkFormat DepthFormat(AmdGpu::DepthBuffer::ZFormat z_format,
+                     AmdGpu::DepthBuffer::StencilFormat stencil_format);
 
-vk::ClearValue ColorBufferClearValue(const AmdGpu::ColorBuffer& color_buffer);
+VkClearValue ColorBufferClearValue(const AmdGpu::ColorBuffer& color_buffer);
 
-vk::SampleCountFlagBits NumSamples(u32 num_samples, vk::SampleCountFlags supported_flags);
+VkSampleCountFlagBits NumSamples(u32 num_samples, VkSampleCountFlags supported_flags);
 
 // Table 8.13 Data and Image Formats [Sea Islands Series Instruction Set Architecture]
 constexpr size_t amd_gpu_data_format_bit_size = 6;   // All values are under 64
@@ -85,7 +99,11 @@ constexpr size_t amd_gpu_number_format_bit_size = 4; // All values are under 16
 constexpr size_t surface_format_table_size =
     (1u << amd_gpu_data_format_bit_size) * (1u << amd_gpu_number_format_bit_size);
 
-extern const std::array<vk::Format, surface_format_table_size> surface_format_table;
+/// The Vulkan format of each data and number format pair (GetSurfaceFormatTableIndex)
+struct SurfaceFormatTable {
+    VkFormat formats[surface_format_table_size];
+};
+extern const SurfaceFormatTable surface_format_table;
 
 constexpr size_t GetSurfaceFormatTableIndex(AmdGpu::DataFormat data_format,
                                             AmdGpu::NumberFormat num_format) {
@@ -96,50 +114,50 @@ constexpr size_t GetSurfaceFormatTableIndex(AmdGpu::DataFormat data_format,
     return result;
 }
 
-constexpr vk::Format SurfaceFormat(AmdGpu::DataFormat data_format,
-                                   AmdGpu::NumberFormat num_format) noexcept {
-    vk::Format result = surface_format_table[GetSurfaceFormatTableIndex(data_format, num_format)];
-    bool found =
-        result != vk::Format::eUndefined || data_format == AmdGpu::DataFormat::FormatInvalid;
+constexpr VkFormat SurfaceFormat(AmdGpu::DataFormat data_format,
+                                 AmdGpu::NumberFormat num_format) noexcept {
+    VkFormat result =
+        surface_format_table.formats[GetSurfaceFormatTableIndex(data_format, num_format)];
+    bool found = result != VK_FORMAT_UNDEFINED || data_format == AmdGpu::DataFormat::FormatInvalid;
     ASSERT_MSG(found, "Unknown data_format=%u and num_format=%u", static_cast<u32>(data_format),
                static_cast<u32>(num_format));
     return result;
 }
 
-static inline bool IsFormatDepthCompatible(vk::Format fmt) {
+static inline bool IsFormatDepthCompatible(VkFormat fmt) {
     switch (fmt) {
     // 32-bit float compatible
-    case vk::Format::eD32Sfloat:
-    case vk::Format::eR32Sfloat:
-    case vk::Format::eR32Uint:
+    case VK_FORMAT_D32_SFLOAT:
+    case VK_FORMAT_R32_SFLOAT:
+    case VK_FORMAT_R32_UINT:
     // 16-bit unorm compatible
-    case vk::Format::eD16Unorm:
-    case vk::Format::eR16Unorm:
+    case VK_FORMAT_D16_UNORM:
+    case VK_FORMAT_R16_UNORM:
         return true;
     default:
         return false;
     }
 }
 
-static inline bool IsFormatStencilCompatible(vk::Format fmt) {
+static inline bool IsFormatStencilCompatible(VkFormat fmt) {
     switch (fmt) {
     // 8-bit uint compatible
-    case vk::Format::eS8Uint:
-    case vk::Format::eR8Uint:
-    case vk::Format::eR8Unorm:
+    case VK_FORMAT_S8_UINT:
+    case VK_FORMAT_R8_UINT:
+    case VK_FORMAT_R8_UNORM:
         return true;
     default:
         return false;
     }
 }
 
-static inline vk::Format PromoteFormatToDepth(vk::Format fmt) {
-    if (fmt == vk::Format::eR32Sfloat || fmt == vk::Format::eR32Uint) {
-        return vk::Format::eD32Sfloat;
-    } else if (fmt == vk::Format::eR16Unorm) {
-        return vk::Format::eD16Unorm;
+static inline VkFormat PromoteFormatToDepth(VkFormat fmt) {
+    if (fmt == VK_FORMAT_R32_SFLOAT || fmt == VK_FORMAT_R32_UINT) {
+        return VK_FORMAT_D32_SFLOAT;
+    } else if (fmt == VK_FORMAT_R16_UNORM) {
+        return VK_FORMAT_D16_UNORM;
     }
-    UNREACHABLE_MSG("Unexpected depth format %s", (vk::to_string(fmt)).c_str());
+    UNREACHABLE_MSG("Unexpected depth format %d", static_cast<int>(fmt));
 }
 
 } // namespace Vulkan::LiverpoolToVK

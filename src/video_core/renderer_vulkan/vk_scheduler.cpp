@@ -300,8 +300,8 @@ void Scheduler::SubmitExecution(SubmitInfo& info) {
         submit_info.signalSemaphoreCount = info.num_signal_semas;
         submit_info.pSignalSemaphores = info.signal_semas;
 
-        const VkResult submit_result = vkQueueSubmit(
-            static_cast<VkQueue>(instance.GetGraphicsQueue()), 1, &submit_info, info.fence);
+        const VkResult submit_result =
+            vkQueueSubmit(instance.GetGraphicsQueue(), 1, &submit_info, info.fence);
         if (submit_result == VK_ERROR_DEVICE_LOST) {
             instance.ReportDeviceLost();
         }

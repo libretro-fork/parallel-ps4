@@ -15,7 +15,7 @@ Pipeline::Pipeline(const Instance& instance_, Scheduler& scheduler_, DescriptorH
                    const Shader::Profile& profile_, VkPipelineCache pipeline_cache,
                    bool is_compute_ /*= false*/)
     : instance{instance_}, scheduler{scheduler_}, desc_heap{desc_heap_}, profile{profile_},
-      device{static_cast<VkDevice>(instance_.GetDevice())}, is_compute{is_compute_} {}
+      device{instance_.GetDevice()}, is_compute{is_compute_} {}
 
 Pipeline::~Pipeline() {
     vkDestroyPipeline(device, pipeline, nullptr);
@@ -74,7 +74,7 @@ void Pipeline::BindResources(VkWriteDescriptorSet* writes, u32 num_writes,
     }
 
     const VkDescriptorSet desc_set =
-        static_cast<VkDescriptorSet>(desc_heap.Commit(vk::DescriptorSetLayout{desc_layout}));
+        static_cast<VkDescriptorSet>(desc_heap.Commit(VkDescriptorSetLayout{desc_layout}));
     for (u32 i = 0; i < num_writes; ++i) {
         writes[i].dstSet = desc_set;
     }

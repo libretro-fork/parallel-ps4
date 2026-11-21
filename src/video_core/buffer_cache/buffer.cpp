@@ -105,7 +105,7 @@ void UniqueBuffer::Create(VkBufferCreateInfo& buffer_ci, MemoryType mem_type) {
 Buffer::Buffer(const Vulkan::Instance& instance, VAddr cpu_addr_, u64 size_bytes_,
                MemoryType mem_type_, const char* debug_name)
     : cpu_addr{cpu_addr_}, size_bytes{size_bytes_}, mem_type{mem_type_},
-      buffer{static_cast<VkDevice>(instance.GetDevice()), instance.GetAllocator()} {
+      buffer{instance.GetDevice(), instance.GetAllocator()} {
 
     VkBufferCreateInfo buffer_ci{};
     buffer_ci.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
@@ -122,7 +122,7 @@ Buffer::Buffer(const Vulkan::Instance& instance, VAddr cpu_addr_, u64 size_bytes
     }
     buffer.Create(buffer_ci, mem_type);
 
-    const vk::Device device = instance.GetDevice();
+    const VkDevice device = instance.GetDevice();
     if (debug_name && debug_name[0]) {
         Vulkan::SetObjectName(device, Handle(), "%s", debug_name);
     } else {
@@ -141,8 +141,7 @@ Buffer::Buffer(const Vulkan::Instance& instance, VAddr cpu_addr_, u64 size_bytes
 
 Buffer::Buffer(const Vulkan::Instance& instance, VkBuffer handle, u64 size_bytes_,
                const char* debug_name)
-    : size_bytes{size_bytes_},
-      buffer{static_cast<VkDevice>(instance.GetDevice()), instance.GetAllocator()} {
+    : size_bytes{size_bytes_}, buffer{instance.GetDevice(), instance.GetAllocator()} {
     buffer.buffer = handle;
     buffer.borrowed = true;
     Vulkan::SetObjectName(instance.GetDevice(), Handle(), "%s", debug_name);

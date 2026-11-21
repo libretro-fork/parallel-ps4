@@ -6,7 +6,7 @@
 
 namespace Vulkan {
 
-vk::ShaderModule CompileSPV(const u32* code, size_t num_words, vk::Device device) {
+VkShaderModule CompileSPV(const u32* code, size_t num_words, VkDevice device) {
     VkShaderModuleCreateInfo shader_info{};
     shader_info.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
     shader_info.codeSize = num_words * sizeof(u32);
@@ -16,10 +16,10 @@ vk::ShaderModule CompileSPV(const u32* code, size_t num_words, vk::Device device
     const VkResult result =
         vkCreateShaderModule(static_cast<VkDevice>(device), &shader_info, nullptr, &module);
     ASSERT_MSG(result == VK_SUCCESS, "Failed to compile SPIR-V shader: %s", ResultName(result));
-    return vk::ShaderModule{module};
+    return VkShaderModule{module};
 }
 
-vk::ShaderModule CompileSPV(std::span<const u32> code, vk::Device device) {
+VkShaderModule CompileSPV(std::span<const u32> code, VkDevice device) {
     return CompileSPV(code.data(), code.size(), device);
 }
 

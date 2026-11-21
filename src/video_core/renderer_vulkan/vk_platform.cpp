@@ -134,8 +134,6 @@ VkInstance CreateInstance(bool enable_validation, bool enable_crash_diagnostic,
     // The Vulkan the frontend's environment provides; the core brings none of its own.
     static const PFN_vkGetInstanceProcAddr get_instance_proc_addr = LoadVulkan();
     ASSERT_MSG(get_instance_proc_addr, "No Vulkan loader to be found");
-    // vulkan.hpp's entry points too, for the code not yet on the C API
-    VULKAN_HPP_DEFAULT_DISPATCHER.init(get_instance_proc_addr);
     vulkan_symbol_wrapper_init(get_instance_proc_addr);
     ASSERT_MSG(vulkan_symbol_wrapper_load_global_symbols(),
                "Failed to load Vulkan's global entry points");
@@ -261,7 +259,6 @@ VkInstance CreateInstance(bool enable_validation, bool enable_crash_diagnostic,
     ASSERT_MSG(instance_result == VK_SUCCESS, "Failed to create instance: %s",
                ResultName(instance_result));
 
-    VULKAN_HPP_DEFAULT_DISPATCHER.init(vk::Instance{instance});
     ASSERT_MSG(vulkan_symbol_wrapper_load_core_instance_symbols(instance),
                "Failed to load Vulkan's instance entry points");
     vulkan_symbol_wrapper_load_extended_symbols(instance, VK_NULL_HANDLE);

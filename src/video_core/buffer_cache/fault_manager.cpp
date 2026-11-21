@@ -21,12 +21,12 @@ static constexpr size_t PageFaultAreaSize = MaxPageFaults * sizeof(u64);
 
 FaultManager::FaultManager(const Vulkan::Instance& instance, Vulkan::Scheduler& scheduler_,
                            BufferCache& buffer_cache_, u32 sparse_pagebits, u64 sparse_num_pages_)
-    : device{static_cast<VkDevice>(instance.GetDevice())}, scheduler{scheduler_},
-      buffer_cache{buffer_cache_}, sparse_pagesize{1ULL << sparse_pagebits},
-      sparse_num_pages{sparse_num_pages_}, fault_buffer_size{sparse_num_pages_ / 8},
+    : device{instance.GetDevice()}, scheduler{scheduler_}, buffer_cache{buffer_cache_},
+      sparse_pagesize{1ULL << sparse_pagebits}, sparse_num_pages{sparse_num_pages_},
+      fault_buffer_size{sparse_num_pages_ / 8},
       fault_buffer{instance, 0, fault_buffer_size, MemoryType::DeviceLocal},
       download_buffer{instance, 0, MaxPendingFaults * PageFaultAreaSize, MemoryType::HostCached} {
-    const vk::Device vk_device{device};
+    const VkDevice vk_device{device};
     Vulkan::SetObjectName(vk_device, fault_buffer.Handle(), "Fault Buffer");
 
     VkDescriptorSetLayoutBinding bindings[2]{};
@@ -52,7 +52,7 @@ FaultManager::FaultManager(const Vulkan::Instance& instance, Vulkan::Scheduler& 
     u32* words = new u32[HOST_SPIRV_MAX_WORDS];
     const size_t num_words = host_spirv_fault_buffer_process_comp(words, HOST_SPIRV_MAX_WORDS,
                                                                   sparse_pagebits, MaxPageFaults);
-    const vk::ShaderModule module = Vulkan::CompileSPV(words, num_words, vk_device);
+    const VkShaderModule module = Vulkan::CompileSPV(words, num_words, vk_device);
     delete[] words;
     Vulkan::SetObjectName(vk_device, static_cast<VkShaderModule>(module), "Fault Buffer Parser");
 

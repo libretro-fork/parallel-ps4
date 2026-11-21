@@ -88,7 +88,7 @@ struct PipelineCache::CompileJob {
     // Program: the translated program. Permutation: the module.
     /// Owned by the job until filed
     Program* program{};
-    vk::ShaderModule module{};
+    VkShaderModule module{};
 
     // Check: what the cache kept, and what the translation made
     u64 kept_walker{}; // WalkerId
@@ -109,7 +109,7 @@ struct PipelineCache::CompileJob {
     Shader::RuntimeInfo runtimes[MaxShaderStages]{};
     Shader::Gcn::FetchShaderData fetch{};
     bool has_fetch{};
-    vk::ShaderModule modules[MaxShaderStages]{};
+    VkShaderModule modules[MaxShaderStages]{};
     GraphicsPipeline* pipeline{};
     GraphicsPipeline::SerializationSupport sdata{};
 
@@ -430,12 +430,12 @@ PipelineCache::PipelineCache(const Instance& instance_, Scheduler& scheduler_,
         .supports_fragment_shader_barycentric = instance_.IsFragmentShaderBarycentricSupported(),
         .supports_shader_subgroup_clock = instance_.IsShaderSubgroupClockSupported(),
         .needs_manual_interpolation = instance.IsFragmentShaderBarycentricSupported() &&
-                                      instance.GetDriverID() == vk::DriverId::eNvidiaProprietary,
-        .needs_lds_barriers = instance.GetDriverID() == vk::DriverId::eNvidiaProprietary ||
-                              instance.GetDriverID() == vk::DriverId::eMesaKosmickrisp,
+                                      instance.GetDriverID() == VK_DRIVER_ID_NVIDIA_PROPRIETARY,
+        .needs_lds_barriers = instance.GetDriverID() == VK_DRIVER_ID_NVIDIA_PROPRIETARY ||
+                              instance.GetDriverID() == VK_DRIVER_ID_MESA_KOSMICKRISP,
         .needs_buffer_offsets = instance.StorageMinAlignment() > 4,
-        .needs_unorm_fixup = instance.GetDriverID() == vk::DriverId::eMesaKosmickrisp,
-        .needs_clip_distance_emulation = instance.GetDriverID() == vk::DriverId::eNvidiaProprietary,
+        .needs_unorm_fixup = instance.GetDriverID() == VK_DRIVER_ID_MESA_KOSMICKRISP,
+        .needs_clip_distance_emulation = instance.GetDriverID() == VK_DRIVER_ID_NVIDIA_PROPRIETARY,
         .supports_shader_stencil_export = instance_.IsShaderStencilExportSupported(),
         .fast_shader_math = emu_settings_get_fast_shader_math(),
     };
@@ -501,7 +501,7 @@ PipelineCache::~PipelineCache() {
         delete p;
     }
     pos = 0;
-    const VkDevice device = static_cast<VkDevice>(instance.GetDevice());
+    const VkDevice device = instance.GetDevice();
     while (Program* p = static_cast<Program*>(ptr_table_next(&program_cache, &pos))) {
         // Each module is its program's own, and every pipeline made from it is gone by now
         for (const Program::Module& module : p->modules) {
@@ -516,7 +516,7 @@ PipelineCache::~PipelineCache() {
 }
 
 void PipelineCache::CreateDriverCache(bool from_disk) {
-    const VkDevice device = static_cast<VkDevice>(instance.GetDevice());
+    const VkDevice device = instance.GetDevice();
     VkPipelineCacheCreateInfo info{};
     info.sType = VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO;
     if (from_disk) {
@@ -551,7 +551,7 @@ void PipelineCache::SaveDriverCache() {
     }
     // The driver's cache is its own to lock: read while pipelines are made into it. The driver
     // writes it straight into the vector handed to the disk cache.
-    const VkDevice device = static_cast<VkDevice>(instance.GetDevice());
+    const VkDevice device = instance.GetDevice();
     std::vector<u8> data;
     VkResult result;
     do {
@@ -858,7 +858,7 @@ bool PipelineCache::RefreshGraphicsStages() {
 
     for (u32 i = 0; i < MaxShaderStages; ++i) {
         infos[i] = nullptr;
-        modules[i] = vk::ShaderModule{};
+        modules[i] = VkShaderModule{};
     }
 
     BindStage(binding, HwStage::Fragment, SwStage::Fragment);
@@ -971,9 +971,9 @@ bool PipelineCache::RefreshComputeKey() {
     return true;
 }
 
-vk::ShaderModule PipelineCache::CompileModule(Shader::Info& info, Shader::RuntimeInfo& runtime_info,
-                                              const std::span<const u32>& code, size_t perm_idx,
-                                              Shader::Backend::Bindings& binding) {
+VkShaderModule PipelineCache::CompileModule(Shader::Info& info, Shader::RuntimeInfo& runtime_info,
+                                            const std::span<const u32>& code, size_t perm_idx,
+                                            Shader::Backend::Bindings& binding) {
     LOG_INFO(Render_Vulkan, "Compiling %s shader 0x%" PRIx64 " %s", Shader::NameOf(info.hw_stage),
              info.pgm_hash, perm_idx != 0 ? "(permutation)" : "");
     DumpShader(code, info.pgm_hash, info.hw_stage, perm_idx, "bin");
@@ -983,16 +983,16 @@ vk::ShaderModule PipelineCache::CompileModule(Shader::Info& info, Shader::Runtim
     return ModuleFromProgram(info, runtime_info, ir_program, perm_idx, binding);
 }
 
-vk::ShaderModule PipelineCache::ModuleFromProgram(Shader::Info& info,
-                                                  Shader::RuntimeInfo& runtime_info,
-                                                  const Shader::IR::Program& ir_program,
-                                                  size_t perm_idx,
-                                                  Shader::Backend::Bindings& binding) {
+VkShaderModule PipelineCache::ModuleFromProgram(Shader::Info& info,
+                                                Shader::RuntimeInfo& runtime_info,
+                                                const Shader::IR::Program& ir_program,
+                                                size_t perm_idx,
+                                                Shader::Backend::Bindings& binding) {
     const std::span<const u32> spv =
         Shader::Backend::SPIRV::EmitSPIRV(pools.spv, profile, runtime_info, ir_program, binding);
     DumpShader(spv, info.pgm_hash, info.hw_stage, perm_idx, "spv");
 
-    vk::ShaderModule module;
+    VkShaderModule module;
 
     const std::optional<Common::FS::FileView> patch_file =
         GetShaderPatch(info.pgm_hash, info.hw_stage, perm_idx, "spv");
@@ -1109,7 +1109,7 @@ PipelineCache::Result PipelineCache::GetProgram(HwStage hw_stage, SwStage sw_sta
         // Another permutation: filed now with its specialization, compiled on the thread
         const size_t perm_idx = program->modules.size();
         program->modules.push_back(
-            {vk::ShaderModule{}, static_cast<Shader::StageSpecialization&&>(spec), false, true});
+            {VkShaderModule{}, static_cast<Shader::StageSpecialization&&>(spec), false, true});
         CompileJob* job = MakeJob(hw_stage, sw_stage, params, runtime_info, binding,
                                   CompileJob::Kind::Permutation, perm_idx, program);
         CaptureSnapshot(*job, info);
@@ -1213,13 +1213,13 @@ void PipelineCache::RunJob(CompileJob& job) {
         // Changed while it was being translated: what was made from it goes
         job.code_changed = true;
         if (job.module) {
-            vkDestroyShaderModule(static_cast<VkDevice>(instance.GetDevice()),
-                                  static_cast<VkShaderModule>(job.module), nullptr);
-            job.module = vk::ShaderModule{};
+            vkDestroyShaderModule(instance.GetDevice(), static_cast<VkShaderModule>(job.module),
+                                  nullptr);
+            job.module = VkShaderModule{};
         }
         if (job.program) {
             for (Program::Module& module : job.program->modules) {
-                vkDestroyShaderModule(static_cast<VkDevice>(instance.GetDevice()),
+                vkDestroyShaderModule(instance.GetDevice(),
                                       static_cast<VkShaderModule>(module.module), nullptr);
             }
             job.program->modules.clear();
@@ -1247,7 +1247,7 @@ void PipelineCache::RunJobOn(CompileJob& job, const Shader::ShaderParams& params
                  Shader::NameOf(info.hw_stage), info.pgm_hash);
         DumpShader(params.code, info.pgm_hash, info.hw_stage, 0, "bin");
         Shader::Backend::Bindings binding = job.start;
-        const vk::ShaderModule module = ModuleFromProgram(info, runtime, ir_program, 0, binding);
+        const VkShaderModule module = ModuleFromProgram(info, runtime, ir_program, 0, binding);
         Shader::StageSpecialization spec(info, runtime, profile, job.start);
         info.snapshot = nullptr;
         RegisterShaderMeta(info, spec.fetch_shader_data, spec, HashCombine(job.hash, 0), 0);
@@ -1260,14 +1260,14 @@ void PipelineCache::RunJobOn(CompileJob& job, const Shader::ShaderParams& params
         Shader::Info& info = job.program->info;
         info.snapshot = &job.snapshot;
         Shader::Backend::Bindings binding = job.start;
-        const vk::ShaderModule module = CompileModule(info, job.runtime, params.code, 0, binding);
+        const VkShaderModule module = CompileModule(info, job.runtime, params.code, 0, binding);
         Shader::StageSpecialization spec(info, job.runtime, profile, job.start);
         info.snapshot = nullptr;
         job.stale = WalkerId(info.srt_walker_code) != job.snap_walker;
         if (job.stale) {
             // Its flat buffer was of another layout: thrown away, the walker it made kept
-            vkDestroyShaderModule(static_cast<VkDevice>(instance.GetDevice()),
-                                  static_cast<VkShaderModule>(module), nullptr);
+            vkDestroyShaderModule(instance.GetDevice(), static_cast<VkShaderModule>(module),
+                                  nullptr);
             break;
         }
         RegisterShaderMeta(info, spec.fetch_shader_data, spec, HashCombine(job.hash, 0), 0);
@@ -1323,7 +1323,7 @@ void PipelineCache::RunJobOn(CompileJob& job, const Shader::ShaderParams& params
         job.pipeline = new GraphicsPipeline(
             instance, scheduler, desc_heap, profile, job.key,
             static_cast<VkPipelineCache>(pipeline_cache), stage_ptrs, job.runtimes,
-            job.has_fetch ? &job.fetch : nullptr, ModuleHandles(job.modules), job.sdata, false);
+            job.has_fetch ? &job.fetch : nullptr, job.modules, job.sdata, false);
         ++driver_cache_unsaved;
         for (Shader::Info& info : job.stage_infos) {
             info.snapshot = nullptr;
@@ -1519,7 +1519,7 @@ void PipelineCache::ReplaceCachedPermutation(CompileJob& job) {
 
     const VkShaderModule old_module = static_cast<VkShaderModule>(cached.module);
     cached.module = job.module;
-    scheduler.DeferOperation([device = static_cast<VkDevice>(instance.GetDevice()), old_module] {
+    scheduler.DeferOperation([device = instance.GetDevice(), old_module] {
         vkDestroyShaderModule(device, old_module, nullptr);
     });
     // The permutations share the program's description: the translation's from now on
@@ -1594,7 +1594,7 @@ PipelineCache::CompileJob* PipelineCache::MakeJob(HwStage hw_stage, SwStage sw_s
 
 PipelineCache::Result PipelineCache::PendingResult() {
     stage_pending = true;
-    return Result{nullptr, vk::ShaderModule{}, 0};
+    return Result{nullptr, VkShaderModule{}, 0};
 }
 
 void PipelineCache::GetShaderName(char* out, size_t size, Shader::HwStage stage, u64 hash,

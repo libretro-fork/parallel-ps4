@@ -172,7 +172,7 @@ bool PipelineCache::LoadComputePipeline(Serialization::Archive& ar) {
 
     for (u32 i = 0; i < MaxShaderStages; ++i) {
         infos[i] = nullptr;
-        modules[i] = vk::ShaderModule{};
+        modules[i] = VkShaderModule{};
     }
 
     return true;
@@ -245,12 +245,11 @@ bool PipelineCache::LoadGraphicsPipeline(Serialization::Archive& ar) {
     ptr_table_insert(&graphics_pipelines, pipeline_hash,
                      new GraphicsPipeline(instance, scheduler, desc_heap, profile, graphics_key,
                                           static_cast<VkPipelineCache>(pipeline_cache), infos,
-                                          runtime_infos, fetch_shader, ModuleHandles(modules),
-                                          sdata, true));
+                                          runtime_infos, fetch_shader, modules, sdata, true));
 
     for (u32 i = 0; i < MaxShaderStages; ++i) {
         infos[i] = nullptr;
-        modules[i] = vk::ShaderModule{};
+        modules[i] = VkShaderModule{};
     }
     fetch_shader = nullptr;
 
@@ -279,7 +278,7 @@ bool PipelineCache::LoadPipelineStage(Serialization::Archive& ar, size_t stage) 
     // Permutation hash depends on shader variation index. To prevent collisions, we need insert it
     // at the exact position rather than append
 
-    vk::ShaderModule module{};
+    VkShaderModule module{};
 
     Program* cached = FindProgram(program->info.pgm_hash);
     if (!cached) {

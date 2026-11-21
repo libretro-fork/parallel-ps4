@@ -33,7 +33,7 @@ static bool ExecuteCopyShaderHLE(const Shader::Info& info, const AmdGpu::Compute
     ASSERT(ctl_buf_sharp.GetStride() == sizeof(CopyShaderControl));
     const auto ctl_buf = reinterpret_cast<const CopyShaderControl*>(ctl_buf_sharp.base_address);
 
-    static std::vector<vk::BufferCopy> copies;
+    static std::vector<VkBufferCopy> copies;
     copies.clear();
     copies.reserve(cs_program.dim_x);
 
@@ -45,7 +45,7 @@ static bool ExecuteCopyShaderHLE(const Shader::Info& info, const AmdGpu::Compute
         copies.emplace_back(local_src_offset, local_dst_offset, local_size);
     }
 
-    static constexpr vk::DeviceSize MaxDistanceForMerge = 64_MB;
+    static constexpr VkDeviceSize MaxDistanceForMerge = 64_MB;
     u32 batch_start = 0;
     u32 batch_end = 0;
 

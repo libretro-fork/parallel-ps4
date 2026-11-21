@@ -152,7 +152,7 @@ bool TextureCache::DumpImagePixels(ImageId image_id, u32 seq) {
     }
     const bool is_depth = info.props.is_depth;
     const u32 bpp =
-        is_depth ? (info.pixel_format == vk::Format::eD16Unorm ? 2 : 4) : info.num_bits / 8;
+        is_depth ? (info.pixel_format == VK_FORMAT_D16_UNORM ? 2 : 4) : info.num_bits / 8;
     const u32 width = image.HostSize().width;
     const u32 height = image.HostSize().height;
     if (bpp == 0 || bpp > 16 || width == 0 || height == 0) {
@@ -523,8 +523,7 @@ TextureCache::OverlapResult TextureCache::ResolveOverlap(const ImageInfo& image_
             const ImageId result_id = merged_image_id ? merged_image_id : cache_image_id;
             const Image& result_image = slot_images[result_id];
             const bool is_compatible =
-                IsVulkanFormatCompatible(static_cast<VkFormat>(result_image.info.pixel_format),
-                                         static_cast<VkFormat>(image_info.pixel_format));
+                IsVulkanFormatCompatible(result_image.info.pixel_format, image_info.pixel_format);
             return {is_compatible ? result_id : ImageId{}, -1, -1};
         }
 
@@ -765,8 +764,7 @@ ImageId TextureCache::FindImage(ImageDesc& desc, bool exact_fmt) {
         if (cache_image.info.size != info.size) {
             continue;
         }
-        if (!IsVulkanFormatCompatible(static_cast<VkFormat>(cache_image.info.pixel_format),
-                                      static_cast<VkFormat>(info.pixel_format)) ||
+        if (!IsVulkanFormatCompatible(cache_image.info.pixel_format, info.pixel_format) ||
             (cache_image.info.type != info.type && info.size != Extent3D{1, 1, 1})) {
             continue;
         }
@@ -1009,7 +1007,7 @@ void TextureCache::AssociateStencil(ImageId depth_id, const ImageInfo& depth_inf
             if (image.info.guest_address != depth_info.stencil_addr) {
                 return;
             }
-            if (image.info.pixel_format == vk::Format::eUndefined ||
+            if (image.info.pixel_format == VK_FORMAT_UNDEFINED ||
                 Vulkan::LiverpoolToVK::IsFormatStencilCompatible(image.info.pixel_format)) {
                 stencil_id = image_id;
             }

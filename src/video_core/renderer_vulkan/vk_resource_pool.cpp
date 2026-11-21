@@ -68,7 +68,7 @@ constexpr size_t COMMAND_BUFFER_POOL_SIZE = 4;
 
 CommandPool::CommandPool(const Instance& instance, Semaphore* work_semaphore)
     : ResourcePool{work_semaphore, COMMAND_BUFFER_POOL_SIZE}, instance{instance},
-      device{static_cast<VkDevice>(instance.GetDevice())} {
+      device{instance.GetDevice()} {
     VkCommandPoolCreateInfo pool_create_info{};
     pool_create_info.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
     pool_create_info.flags =
@@ -106,15 +106,15 @@ void CommandPool::Allocate(size_t begin, size_t end) {
     }
 }
 
-vk::CommandBuffer CommandPool::Commit() {
+VkCommandBuffer CommandPool::Commit() {
     const size_t index = CommitResource();
-    return vk::CommandBuffer{cmd_buffers[index]};
+    return VkCommandBuffer{cmd_buffers[index]};
 }
 
 DescriptorHeap::DescriptorHeap(const Instance& instance, Semaphore* work_semaphore_,
                                const VkDescriptorPoolSize* pool_sizes_, u32 num_pool_sizes_,
                                u32 descriptor_heap_count_)
-    : device{static_cast<VkDevice>(instance.GetDevice())}, work_semaphore{work_semaphore_},
+    : device{instance.GetDevice()}, work_semaphore{work_semaphore_},
       descriptor_heap_count{descriptor_heap_count_}, pool_sizes{pool_sizes_},
       num_pool_sizes{num_pool_sizes_} {
     // Room for a few pools waiting on the GPU, made here: it doubles only past that
@@ -137,7 +137,7 @@ DescriptorHeap::~DescriptorHeap() {
     free(pending_pools);
 }
 
-vk::DescriptorSet DescriptorHeap::Commit(vk::DescriptorSetLayout set_layout) {
+VkDescriptorSet DescriptorHeap::Commit(VkDescriptorSetLayout set_layout) {
     const VkDescriptorSetLayout layout = static_cast<VkDescriptorSetLayout>(set_layout);
     const u64 set_key = reinterpret_cast<u64>(layout);
     DescSetBatch* batch =
@@ -146,7 +146,7 @@ vk::DescriptorSet DescriptorHeap::Commit(vk::DescriptorSetLayout set_layout) {
 
     // Check if allocated sets exist and pick one.
     if (batch->count != 0) {
-        return vk::DescriptorSet{batch->sets[--batch->count]};
+        return VkDescriptorSet{batch->sets[--batch->count]};
     }
 
     VkDescriptorSetLayout layouts[DescriptorSetBatch];
@@ -164,7 +164,7 @@ vk::DescriptorSet DescriptorHeap::Commit(vk::DescriptorSetLayout set_layout) {
     VkResult result = vkAllocateDescriptorSets(device, &alloc_info, batch->sets);
     if (result == VK_SUCCESS) {
         batch->count = DescriptorSetBatch - 1;
-        return vk::DescriptorSet{batch->sets[DescriptorSetBatch - 1]};
+        return VkDescriptorSet{batch->sets[DescriptorSetBatch - 1]};
     }
 
     // The pool has run out. Record current tick and place it in pending list.
@@ -209,7 +209,7 @@ vk::DescriptorSet DescriptorHeap::Commit(vk::DescriptorSetLayout set_layout) {
     ASSERT_MSG(result == VK_SUCCESS, "Unexpected error during descriptor set allocation %s",
                ResultName(result));
     batch->count = DescriptorSetBatch - 1;
-    return vk::DescriptorSet{batch->sets[DescriptorSetBatch - 1]};
+    return VkDescriptorSet{batch->sets[DescriptorSetBatch - 1]};
 }
 
 void DescriptorHeap::CreateDescriptorPool() {

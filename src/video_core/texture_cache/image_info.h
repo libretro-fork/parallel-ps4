@@ -67,7 +67,7 @@ struct ImageInfo {
     } meta_info{};
 
     ImageProperties props;
-    vk::Format pixel_format;
+    VkFormat pixel_format;
     AmdGpu::ImageType type;
     SubresourceExtent resources;
     Extent3D size;

@@ -39,7 +39,7 @@ TileManager::TileManager(const Vulkan::Instance& instance_, Vulkan::Scheduler& s
     : instance{instance_}, scheduler{scheduler_}, runtime{runtime_}, stream_buffer{stream_buffer_} {
     // Made once: a game uses a few dozen tiling pipelines
     u64_map_init(&tiling_pipelines, sizeof(VkPipeline), 64);
-    const VkDevice device = static_cast<VkDevice>(instance.GetDevice());
+    const VkDevice device = instance.GetDevice();
     VkDescriptorSetLayoutBinding bindings[3]{};
     for (u32 i = 0; i < 3; ++i) {
         bindings[i].binding = i;
@@ -70,7 +70,7 @@ TileManager::TileManager(const Vulkan::Instance& instance_, Vulkan::Scheduler& s
 }
 
 TileManager::~TileManager() {
-    const VkDevice device = static_cast<VkDevice>(instance.GetDevice());
+    const VkDevice device = instance.GetDevice();
     size_t pos = 0;
     while (const VkPipeline* pipeline =
                static_cast<const VkPipeline*>(u64_map_next(&tiling_pipelines, &pos, nullptr))) {
@@ -147,7 +147,7 @@ VkPipeline TileManager::GetTilingPipeline(const ImageInfo& info, bool is_tiler) 
         return *found;
     }
 
-    const VkDevice device = static_cast<VkDevice>(instance.GetDevice());
+    const VkDevice device = instance.GetDevice();
     const AmdGpu::MicroTileMode micro_tile_mode = AmdGpu::GetMicroTileMode(info.tile_mode);
     const bool is_macro = AmdGpu::IsMacroTiled(info.array_mode);
     // The image's tiling parameters, folded into the shader
@@ -197,14 +197,14 @@ VkPipeline TileManager::GetTilingPipeline(const ImageInfo& info, bool is_tiler) 
                                word_access, params, is_macro ? 12 : 4);
     ASSERT_MSG(num_words != 0, "Tiling shader does not fit");
     const VkShaderModule module =
-        static_cast<VkShaderModule>(Vulkan::CompileSPV(spirv_words, num_words, vk::Device{device}));
+        static_cast<VkShaderModule>(Vulkan::CompileSPV(spirv_words, num_words, VkDevice{device}));
 
     char module_name[96];
     snprintf(module_name, sizeof(module_name), "%s_%u %s",
              enum_name(&enum_names_AmdGpu_TileMode, static_cast<s64>(info.tile_mode)),
              info.num_bits, is_tiler ? "tiler" : "detiler");
     LOG_INFO(Render_Vulkan, "Creating tiling pipeline %s", module_name);
-    Vulkan::SetObjectName(vk::Device{device}, module, "%s", module_name);
+    Vulkan::SetObjectName(VkDevice{device}, module, "%s", module_name);
 
     VkComputePipelineCreateInfo compute_pipeline_ci{};
     compute_pipeline_ci.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;

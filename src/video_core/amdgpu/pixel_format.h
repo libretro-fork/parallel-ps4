@@ -123,14 +123,14 @@ union CompMapping {
         return array == other.array;
     }
 
+    /// The four components of @data swizzled, in place
     template <typename T>
-    [[nodiscard]] std::array<T, 4> Apply(const std::array<T, 4>& data) const {
-        return {
-            ApplySingle(data, r),
-            ApplySingle(data, g),
-            ApplySingle(data, b),
-            ApplySingle(data, a),
-        };
+    void Apply(T (&data)[4]) const {
+        const T in[4] = {data[0], data[1], data[2], data[3]};
+        data[0] = ApplySingle(in, r);
+        data[1] = ApplySingle(in, g);
+        data[2] = ApplySingle(in, b);
+        data[3] = ApplySingle(in, a);
     }
 
     [[nodiscard]] u32 ApplyMask(u32 mask) const {
@@ -158,7 +158,7 @@ union CompMapping {
 
 private:
     template <typename T>
-    T ApplySingle(const std::array<T, 4>& data, const CompSwizzle swizzle) const {
+    T ApplySingle(const T* data, const CompSwizzle swizzle) const {
         switch (swizzle) {
         case CompSwizzle::Zero:
             return T(0);

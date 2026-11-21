@@ -59,7 +59,7 @@ ComputePipeline::ComputePipeline(const Instance& instance, Scheduler& scheduler,
     uses_push_descriptors = binding < instance.MaxPushDescriptors();
     CreateDescSetLayout(bindings.data(), static_cast<u32>(bindings.size()), "compute");
     CreatePipelineLayout(VK_SHADER_STAGE_COMPUTE_BIT, "compute");
-    const vk::Device vk_device{device};
+    const VkDevice vk_device{device};
     SetObjectName(vk_device, pipeline_layout, "Compute PipelineLayout %s", debug_str);
 
     VkPipelineShaderStageRequiredSubgroupSizeCreateInfo subgroup_size_ci{};
