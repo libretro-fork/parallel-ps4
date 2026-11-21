@@ -4,6 +4,7 @@ What changed in the libretro core of this fork, newest first. Changes that come 
 
 ## Unreleased
 
+- The log of the run before is kept: when a run starts its log anew, the old one is renamed to `shad_log.prev.txt` (or `<serial>.prev.log` with separate logs) first. A run that crashed then still has its log after the next one, which used to write over it.
 - The staging pool, the page manager, the vertex capture and `CompileSPV` are off the STL.
   - **Staging pool:** its ring blocks and large buffers are kept in `SmallVector`s with room for the usual number (32 blocks, 16 large buffers per type), owning their buffers; the trimming that `std::erase_if` did is a plain loop.
   - **Page manager:** userfaultfd that cannot be set up is reported by the constructor instead of by an exception, and its descriptor is closed; the signal handler is used then, as before.

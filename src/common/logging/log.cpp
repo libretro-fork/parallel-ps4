@@ -189,6 +189,19 @@ RFILE* OpenFile(const char* path, bool truncate) {
     if (dir[0] != '\0') {
         path_mkdir(dir);
     }
+    // A log started anew keeps the one before it as "<name>.prev<ext>": a run that ended badly
+    // then still has its log after the next run
+    if (truncate) {
+        char prev[MAX_RECORD];
+        const char* const ext = path_get_extension(path);
+        const size_t stem = ext[0] ? static_cast<size_t>(ext - path) - 1 : strlen(path);
+        snprintf(prev, sizeof(prev), "%.*s.prev%s%s", static_cast<int>(stem), path,
+                 ext[0] ? "." : "", ext);
+        if (path_is_valid(path)) {
+            filestream_delete(prev);
+            filestream_rename(path, prev);
+        }
+    }
     // Appending opens the file as it is; a missing one is created.
     RFILE* file =
         truncate
