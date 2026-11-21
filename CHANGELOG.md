@@ -4,6 +4,12 @@ What changed in the libretro core of this fork, newest first. Changes that come 
 
 ## Unreleased
 
+- The voice library (`libSceVoice`) is MSVC C89, registered in `libs.cpp`.
+  - **Each call still runs under the library's combiner**, now the C one (`common/combine.h`): what ran in a lambda is a function of its own, given the call's arguments and result in a small struct. `voice_library_init` makes the combiner and the ports once, from the registration, where the C++ did it in a static constructor.
+  - **The same answers:** the C and C++ versions, linked into one program, were given the same 2 million random calls (null pointers, ports out of range, NaN and infinite volumes among them): no difference in 2.77 million checks.
+  - Its log lines inside the combiner name their function; in C++ they ran in a lambda and named it `operator()`.
+  - Not run in a game yet.
+
 - **libretro-common is RetroArch's again** (RetroArch 1eb3197): the 24 files that had fallen behind are synced, among them `retro_atomic.h`, `libretro.h`, `file/file_path.c`, `formats/mp4/rmp4.c`, `crypto/x509.c` (which now takes its calendar from `time/rtime.h`, as RTC does), `encodings/encoding_base64.c`, `string/stdstring.c`, `rthreads/rthreads.c`, `vfs/vfs_implementation.c` and `features/features_cpu.c`. Every file the core carries is now byte for byte RetroArch's.
   - Not run in a game yet.
 

@@ -198,7 +198,6 @@ CORE_SOURCES_CXX += $(addprefix src/core/libraries/usbd/,usbd.cpp usbstorage.cpp
 CORE_SOURCES_CXX += $(addprefix src/core/libraries/videodec/,vdecsw.cpp vdecsw_impl.cpp \
 	video_utils.cpp videodec.cpp videodec2.cpp videodec2_impl.cpp videodec_impl.cpp)
 CORE_SOURCES_CXX += $(addprefix src/core/libraries/videoout/,driver.cpp video_out.cpp)
-CORE_SOURCES_CXX += $(addprefix src/core/libraries/voice/,voice.cpp)
 CORE_SOURCES_CXX += $(addprefix src/core/libraries/web_browser_dialog/,webbrowserdialog.cpp)
 CORE_SOURCES_CXX += $(addprefix src/core/libraries/zlib/,zlib.cpp)
 CORE_SOURCES_CXX += $(addprefix src/core/loader/,dwarf.cpp elf.cpp symbols_resolver.cpp)
@@ -271,7 +270,7 @@ CORE_SOURCES_C += $(addprefix src/core/libraries/,companion/companion_httpd.c \
 	libpng/pngenc.c mouse/mouse.c move/move.c random/random.c razor_cpu/razor_cpu.c \
 	remote_play/remoteplay.c rtc/rtc.c rudp/rudp.c screenshot/screenshot.c share_play/shareplay.c \
 	signin_dialog/signindialog.c system_gesture/system_gesture.c ulobjmgr/ulobjmgr.c \
-	video_recording/video_recording.c vr_tracker/vr_tracker.c)
+	video_recording/video_recording.c voice/voice.c vr_tracker/vr_tracker.c)
 CORE_SOURCES_C += $(addprefix src/shader_recompiler/backend/spirv/,spv_module.c)
 CORE_SOURCES_C += $(addprefix src/core/libraries/np/np_handler/,np_invitation_json.c)
 CORE_SOURCES_C += $(addprefix src/shadnet/,pb_wire.c shadnet_msg.c)

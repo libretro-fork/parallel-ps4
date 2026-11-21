@@ -1,11 +1,16 @@
-// SPDX-FileCopyrightText: Copyright 2026 shadPS4 Emulator Project
-// SPDX-License-Identifier: GPL-2.0-or-later
+/* SPDX-FileCopyrightText: Copyright 2026 shadPS4 Emulator Project
+ * SPDX-License-Identifier: GPL-2.0-or-later */
 
-#pragma once
+#ifndef SHADPS4_LIBRARIES_VOICE_ERROR_H
+#define SHADPS4_LIBRARIES_VOICE_ERROR_H
 
-constexpr int ORBIS_VOICE_ERROR_NOT_INIT = 0x804E0801;
-constexpr int ORBIS_VOICE_ERROR_ALREADY_INIT = 0x804E0802;
-constexpr int ORBIS_VOICE_ERROR_PORT_INVALID = 0x804E0804;
-constexpr int ORBIS_VOICE_ERROR_ARGUMENT_INVALID = 0x804E0805;
-constexpr int ORBIS_VOICE_ERROR_TOPOLOGY = 0x804E0807;
-constexpr int ORBIS_VOICE_ERROR_RESOURCE_INSUFFICIENT = 0x804E0808;
+#include <stdint.h>
+
+#define ORBIS_VOICE_ERROR_NOT_INIT ((int32_t)0x804E0801)
+#define ORBIS_VOICE_ERROR_ALREADY_INIT ((int32_t)0x804E0802)
+#define ORBIS_VOICE_ERROR_PORT_INVALID ((int32_t)0x804E0804)
+#define ORBIS_VOICE_ERROR_ARGUMENT_INVALID ((int32_t)0x804E0805)
+#define ORBIS_VOICE_ERROR_TOPOLOGY ((int32_t)0x804E0807)
+#define ORBIS_VOICE_ERROR_RESOURCE_INSUFFICIENT ((int32_t)0x804E0808)
+
+#endif
