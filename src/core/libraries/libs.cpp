@@ -85,7 +85,7 @@
 #include "core/libraries/voice/voice.h"
 #include "core/libraries/vr_tracker/vr_tracker.h"
 #include "core/libraries/web_browser_dialog/webbrowserdialog.h"
-#include "core/libraries/zlib/zlib_sce.h"
+#include "core/libraries/zlib/zlib.h"
 #include "emulator.h"
 
 #include <array>
@@ -736,6 +736,16 @@ static void RegisterVrTracker(Core::Loader::SymbolsResolver* sym) {
                  sceVrTrackerStopLiveCapture);
 }
 
+static void RegisterZlib(Core::Loader::SymbolsResolver* sym) {
+    zlib_library_init();
+
+    LIB_FUNCTION("m1YErdIXCp4", "libSceZlib", 1, "libSceZlib", sceZlibInitialize);
+    LIB_FUNCTION("6na+Sa-B83w", "libSceZlib", 1, "libSceZlib", sceZlibFinalize);
+    LIB_FUNCTION("TLar1HULv1Q", "libSceZlib", 1, "libSceZlib", sceZlibInflate);
+    LIB_FUNCTION("uB8VlDD4e0s", "libSceZlib", 1, "libSceZlib", sceZlibWaitForDone);
+    LIB_FUNCTION("2eDcGHC0YaM", "libSceZlib", 1, "libSceZlib", sceZlibGetResult);
+}
+
 static void RegisterVoice(Core::Loader::SymbolsResolver* sym) {
     voice_library_init();
 
@@ -843,7 +853,7 @@ void InitHLELibs(Core::Loader::SymbolsResolver* sym) {
             {"libSceMouse.sprx", RegisterMouse},
             {"libSceKeyboard.sprx", RegisterKeyboard},
             {"libSceWebBrowserDialog.sprx", Libraries::WebBrowserDialog::RegisterLib},
-            {"libSceZlib.sprx", Libraries::Zlib::RegisterLib},
+            {"libSceZlib.sprx", RegisterZlib},
             {"libSceHmd.sprx", Libraries::Hmd::RegisterLib},
             {"libSceHmdSetupDialog.sprx", Libraries::HmdSetupDialog::RegisterLib},
             {"libSceDiscMap.sprx", RegisterDiscMap},

@@ -20,6 +20,7 @@ enum c_log_class {
     C_LOG_LIB_AUDIODEC,
     C_LOG_LIB_HTTP,
     C_LOG_LIB_ULT,
+    C_LOG_LIB_ZLIB,
     C_LOG_LIB_VOICE,
     C_LOG_LIB_RTC,
     C_LOG_LIB_CAMERA,

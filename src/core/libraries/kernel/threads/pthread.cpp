@@ -22,6 +22,7 @@
 #endif
 #include <retro_atomic.h>
 #include "core/libraries/kernel/kernel.h"
+#include "core/libraries/kernel/kernel_c.h"
 #include "core/libraries/kernel/orbis_error.h"
 #include "core/libraries/kernel/posix_error.h"
 #include "core/libraries/kernel/threads.h"
@@ -1580,3 +1581,49 @@ void RegisterThread(Core::Loader::SymbolsResolver* sym) {
 }
 
 } // namespace Libraries::Kernel
+
+namespace {
+
+// What Kernel::Thread::RunWrapper does, for a C library's thread (kernel_c.h)
+void* PS4_SYSV_ABI KernelServiceThreadRun(void* arg) {
+    auto* t = static_cast<kernel_service_thread_t*>(arg);
+    Libraries::Kernel::SetGameThread(false);
+    game_clock_idle(Libraries::Kernel::GameClock());
+    t->run(t->arg);
+    // Counted again for its end, unless what ran counted itself
+    if (!Libraries::Kernel::IsGameThread()) {
+        game_clock_busy(Libraries::Kernel::GameClock());
+        Libraries::Kernel::SetGameThread(true);
+    }
+    return nullptr;
+}
+
+} // namespace
+
+extern "C" bool kernel_service_thread_start(kernel_service_thread_t* t, void (*run)(void* arg),
+                                            void* arg) {
+    using namespace Libraries::Kernel;
+    if (t->thread) {
+        return false;
+    }
+    t->run = run;
+    t->arg = arg;
+    PthreadAttrT attr{};
+    PthreadT thread{};
+    posix_pthread_attr_init(&attr);
+    const int ret = posix_pthread_create(&thread, &attr, HOST_CALL(KernelServiceThreadRun), t);
+    posix_pthread_attr_destroy(&attr);
+    if (ret != 0) {
+        return false;
+    }
+    t->thread = thread;
+    return true;
+}
+
+extern "C" void kernel_service_thread_join(kernel_service_thread_t* t) {
+    if (t->thread) {
+        Libraries::Kernel::posix_pthread_join(static_cast<Libraries::Kernel::PthreadT>(t->thread),
+                                              nullptr);
+        t->thread = nullptr;
+    }
+}

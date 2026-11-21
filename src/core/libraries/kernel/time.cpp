@@ -805,3 +805,13 @@ extern "C" s32 kernel_posix_clock_settime(s32 clock_id, kernel_timespec_t* tp) {
 extern "C" s32 kernel_errno_error(void) {
     return Libraries::Kernel::ErrnoToSceKernelError(*Libraries::Kernel::__Error());
 }
+
+extern "C" u64 kernel_game_deadline_in(u64 ns) {
+    return Libraries::Kernel::GameDeadlineIn(ns);
+}
+
+extern "C" bool kernel_game_wait(struct retro_eventcount* ec, u64 deadline, int (*ready)(void* ctx),
+                                 void* ctx) {
+    return game_clock_wait(Libraries::Kernel::GameClock(), ec, deadline, ready, ctx,
+                           Libraries::Kernel::GameThreadSelf()) != 0;
+}

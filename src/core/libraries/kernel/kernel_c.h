@@ -6,7 +6,7 @@
 
 /* The kernel's functions and the memory manager's queries the libraries written in C call.
  * Each is the C++ function of the same name, called as it is; defined beside it, in the kernel's
- * own files (memory.cpp, process.cpp, time.cpp). */
+ * own files (memory.cpp, process.cpp, time.cpp, threads/pthread.cpp). */
 
 #include <stddef.h>
 #include <stdint.h>
@@ -78,6 +78,29 @@ bool kernel_is_valid_gpu_mapping(uintptr_t addr, u64 size);
 /* Core::Memory::VirtualQuery with no flags: 0 and the end of the area @addr is in, or the
  * kernel's error */
 s32 kernel_virtual_query_end(uintptr_t addr, uintptr_t* end);
+
+/* A service thread of the emulator's, as Kernel::Thread (threads.h) makes one: a thread of the
+ * game's pthreads that runs host code, not counted by the game's time. Zeroed: not started. */
+typedef struct kernel_service_thread {
+    void* thread; /* the PthreadT, NULL while not started */
+    void (*run)(void* arg);
+    void* arg;
+} kernel_service_thread_t;
+
+/* Starts @run(@arg) on a thread of its own: false if none could be made, or one is started */
+bool kernel_service_thread_start(kernel_service_thread_t* t, void (*run)(void* arg), void* arg);
+/* Waits for the thread to end, if one was started; it can then be started again. It does not
+ * ask the thread to stop: whoever made it has its own flag for that, and wakes it first. */
+void kernel_service_thread_join(kernel_service_thread_t* t);
+
+struct retro_eventcount;
+
+/* A deadline @ns from now on the game's time, never 0 (Kernel::GameDeadlineIn) */
+u64 kernel_game_deadline_in(u64 ns);
+/* Waits on @ec until @ready(@ctx) is nonzero (true) or the game's time reaches @deadline
+ * (false; 0: none), as the calling thread is counted (Kernel::GameWait) */
+bool kernel_game_wait(struct retro_eventcount* ec, u64 deadline, int (*ready)(void* ctx),
+                      void* ctx);
 
 RETRO_END_DECLS
 

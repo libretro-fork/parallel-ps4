@@ -1,18 +1,21 @@
-// SPDX-FileCopyrightText: Copyright 2024 shadPS4 Emulator Project
-// SPDX-License-Identifier: GPL-2.0-or-later
+/* SPDX-FileCopyrightText: Copyright 2024 shadPS4 Emulator Project
+ * SPDX-License-Identifier: GPL-2.0-or-later */
 
-#pragma once
+#ifndef SHADPS4_LIBRARIES_ZLIB_ERROR_H
+#define SHADPS4_LIBRARIES_ZLIB_ERROR_H
 
-#include "core/libraries/error_codes.h"
+#include <stdint.h>
 
-// Zlib library
-constexpr int ORBIS_ZLIB_ERROR_NOT_FOUND = 0x81120002;
-constexpr int ORBIS_ZLIB_ERROR_BUSY = 0x8112000B;
-constexpr int ORBIS_ZLIB_ERROR_FAULT = 0x8112000E;
-constexpr int ORBIS_ZLIB_ERROR_INVALID = 0x81120016;
-constexpr int ORBIS_ZLIB_ERROR_NOSPACE = 0x8112001C;
-constexpr int ORBIS_ZLIB_ERROR_NOT_SUPPORTED = 0x81120025;
-constexpr int ORBIS_ZLIB_ERROR_TIMEDOUT = 0x81120027;
-constexpr int ORBIS_ZLIB_ERROR_NOT_INITIALIZED = 0x81120032;
-constexpr int ORBIS_ZLIB_ERROR_ALREADY_INITIALIZED = 0x81120033;
-constexpr int ORBIS_ZLIB_ERROR_FATAL = 0x811200FF;
+/* Zlib library */
+#define ORBIS_ZLIB_ERROR_NOT_FOUND ((int32_t)0x81120002)
+#define ORBIS_ZLIB_ERROR_BUSY ((int32_t)0x8112000B)
+#define ORBIS_ZLIB_ERROR_FAULT ((int32_t)0x8112000E)
+#define ORBIS_ZLIB_ERROR_INVALID ((int32_t)0x81120016)
+#define ORBIS_ZLIB_ERROR_NOSPACE ((int32_t)0x8112001C)
+#define ORBIS_ZLIB_ERROR_NOT_SUPPORTED ((int32_t)0x81120025)
+#define ORBIS_ZLIB_ERROR_TIMEDOUT ((int32_t)0x81120027)
+#define ORBIS_ZLIB_ERROR_NOT_INITIALIZED ((int32_t)0x81120032)
+#define ORBIS_ZLIB_ERROR_ALREADY_INITIALIZED ((int32_t)0x81120033)
+#define ORBIS_ZLIB_ERROR_FATAL ((int32_t)0x811200FF)
+
+#endif
