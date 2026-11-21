@@ -521,23 +521,23 @@ void PipelineCache::CreateDriverCache(bool from_disk) {
     info.sType = VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO;
     if (from_disk) {
         // Mapped, and handed to the driver where it lies
-        const std::optional<Common::FS::FileView> kept =
+        const Common::Span<const u8> kept =
             Storage::DataBase::Instance().Load(Storage::BlobType::DriverCache, "driver");
-        if (kept &&
-            pipeline_cache_blob_fits(kept->data(), kept->size(), instance.GetVendorID(),
+        if (!kept.empty() &&
+            pipeline_cache_blob_fits(kept.data(), kept.size(), instance.GetVendorID(),
                                      instance.GetDeviceID(), instance.GetPipelineCacheUUID())) {
-            info.initialDataSize = kept->size();
-            info.pInitialData = kept->data();
+            info.initialDataSize = kept.size();
+            info.pInitialData = kept.data();
             const VkResult result = vkCreatePipelineCache(device, &info, nullptr, &pipeline_cache);
             if (result == VK_SUCCESS) {
-                LOG_INFO(Render_Vulkan, "Driver pipeline cache: %zu bytes kept", kept->size());
+                LOG_INFO(Render_Vulkan, "Driver pipeline cache: %zu bytes kept", kept.size());
                 return;
             }
             pipeline_cache = VK_NULL_HANDLE;
             LOG_WARNING(Render_Vulkan, "Driver pipeline cache not taken: %s", ResultName(result));
             info.initialDataSize = 0;
             info.pInitialData = nullptr;
-        } else if (kept) {
+        } else if (!kept.empty()) {
             LOG_INFO(Render_Vulkan, "Driver pipeline cache of another GPU or driver: not taken");
         }
     }
@@ -550,25 +550,31 @@ void PipelineCache::SaveDriverCache() {
         return;
     }
     // The driver's cache is its own to lock: read while pipelines are made into it. The driver
-    // writes it straight into the vector handed to the disk cache.
+    // writes it straight into the buffer handed to the disk cache.
     const VkDevice device = instance.GetDevice();
-    std::vector<u8> data;
+    u8* data = nullptr;
+    size_t size = 0;
     VkResult result;
     do {
-        size_t size = 0;
+        size = 0;
         result = vkGetPipelineCacheData(device, pipeline_cache, &size, nullptr);
         if (result != VK_SUCCESS || size == 0) {
+            free(data);
             return;
         }
-        data.resize(size);
-        result = vkGetPipelineCacheData(device, pipeline_cache, &size, data.data());
-        data.resize(size);
+        u8* const grown = static_cast<u8*>(realloc(data, size));
+        if (!grown) {
+            free(data);
+            return;
+        }
+        data = grown;
+        result = vkGetPipelineCacheData(device, pipeline_cache, &size, data);
     } while (result == VK_INCOMPLETE);
-    if (result != VK_SUCCESS || data.empty()) {
+    if (result != VK_SUCCESS || size == 0) {
+        free(data);
         return;
     }
-    Storage::DataBase::Instance().Save(Storage::BlobType::DriverCache, "driver",
-                                       static_cast<std::vector<u8>&&>(data));
+    Storage::DataBase::Instance().Save(Storage::BlobType::DriverCache, "driver", data, size);
 }
 
 static int MatchGraphicsKey(const void* pipeline, const void* key) {
@@ -1299,10 +1305,10 @@ void PipelineCache::RunJobOn(CompileJob& job, const Shader::ShaderParams& params
         job.fresh.snapshot = nullptr;
         char kept_name[40];
         snprintf(kept_name, sizeof(kept_name), "0x%016" PRIx64 "_%zu", job.hash, job.perm_idx);
-        const std::optional<Common::FS::FileView> kept_spv =
+        const Common::Span<const u8> kept_spv =
             Storage::DataBase::Instance().Load(Storage::BlobType::ShaderBinary, kept_name);
-        job.same_spv = kept_spv && kept_spv->size() == spv.size_bytes() &&
-                       memcmp(kept_spv->data(), spv.data(), kept_spv->size()) == 0;
+        job.same_spv = !kept_spv.empty() && kept_spv.size() == spv.size_bytes() &&
+                       memcmp(kept_spv.data(), spv.data(), kept_spv.size()) == 0;
         job.same_walker = WalkerId(job.fresh.srt_walker_code) == job.kept_walker &&
                           job.fresh.srt_info.flattened_bufsize_dw == job.kept_flatbuf_dw;
         job.same_resources = job.kept_resources[0] == static_cast<u32>(job.fresh.buffers.size()) &&
@@ -1486,8 +1492,7 @@ void PipelineCache::ReplaceCachedPermutation(CompileJob& job) {
         job.same_walker ? "same" : "differs", job.same_resources ? "same" : "differ");
 
     // The cache is started again at the next start (WarmUp: another build's stamp)
-    Storage::DataBase::Instance().Save(Storage::BlobType::ShaderProfile, "build",
-                                       std::vector<u8>{'-'});
+    Storage::DataBase::Instance().SaveCopy(Storage::BlobType::ShaderProfile, "build", "-", 1);
 
     // The pipelines made with the kept permutation go, once the GPU is done with them
     const u64 perm_hash = HashCombine(job.hash, job.perm_idx);

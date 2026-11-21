@@ -3,16 +3,13 @@
 
 #pragma once
 
+#include <retro_atomic.h>
+#include <retro_miscellaneous.h>
+
+#include "common/concepts.h"
 #include "common/io_file.h"
-#include "common/path_util.h"
 #include "common/singleton.h"
 #include "common/types.h"
-
-#include <functional>
-#include <optional>
-#include <string>
-#include <vector>
-#include <retro_atomic.h>
 
 #include "video_core/blob_pack.h"
 
@@ -50,25 +47,32 @@ public:
         return (retro_atomic_load_acquire_int(&opened) != 0);
     }
 
-    /// Hands @data to the writer thread, which writes it from where it lies. Any thread;
-    /// does not wait. False when the cache is not open.
-    bool Save(BlobType type, std::string name, std::vector<u8>&& data);
-    bool Save(BlobType type, std::string name, std::vector<u32>&& data);
+    /// The longest blob name, its terminator not counted
+    static constexpr size_t MaxNameLength = 63;
 
-    /// The blob where it lies, as the cache was when it opened; nothing when there is none.
+    /// Hands the @size bytes at @data, made with malloc, to the writer thread, which writes
+    /// them from where they lie and frees them. Any thread; does not wait. False when the
+    /// cache is not open (@data is freed then too).
+    bool Save(BlobType type, const char* name, void* data, size_t size);
+    /// The same with a copy of @data, which stays the caller's
+    bool SaveCopy(BlobType type, const char* name, const void* data, size_t size);
+
+    /// The blob where it lies, as the cache was when it opened; empty when there is none.
     /// Lent from the pack's mapping, which outlives Close (a check on the compiler thread may
-    /// still read one as the cache closes) and goes at the next Open.
-    std::optional<Common::FS::FileView> Load(BlobType type, const std::string& name);
+    /// still read one as the cache closes) and goes at the next Open. The driver's cache is
+    /// lent from a mapping of its own file, kept until the next Load of it.
+    Common::Span<const u8> Load(BlobType type, const char* name);
 
     /// @hook (nullptr: none) called by Close before it closes; it lives until it is cleared.
     void SetCloseHook(const CloseHook* hook);
 
-    /// Calls @func with each blob of @type the cache had when it opened, lent until it returns.
-    void ForEachBlob(BlobType type, const std::function<void(std::span<const u8> data)>& func);
+    /// Calls @func with @user and each blob of @type the cache had when it opened, lent until
+    /// it returns.
+    void ForEachBlob(BlobType type, void (*func)(void* user, Common::Span<const u8> data),
+                     void* user);
 
 private:
     static void ProcessIO(void* arg);
-    bool Push(BlobType type, std::string&& name, std::vector<u8>&& bytes, std::vector<u32>&& words);
     /// Maps the pack and indexes it: a new one when there is none (or it is not one); written
     /// again with its live records only when it ends in a record cut short or holds many dead
     void OpenPack();
@@ -76,11 +80,13 @@ private:
     bool WriteNewPack() const;
 
     sthread* io_worker{};
-    std::filesystem::path cache_path{};
+    char cache_path[PATH_MAX_LENGTH]{};
     /// Every blob but the driver's cache, in one file (blob_pack.h): appended to by the writer,
     /// read through the mapping made as the cache opened
-    std::filesystem::path pack_path{};
-    std::optional<Common::FS::FileView> pack_view{};
+    char pack_path[PATH_MAX_LENGTH]{};
+    Common::FS::IOFile pack_file{};
+    /// The driver's cache as last loaded, mapped
+    Common::FS::IOFile driver_file{};
     blob_pack_index_t pack_index{};
     retro_atomic_int_t opened{};
     retro_atomic_ptr_t close_hook{};

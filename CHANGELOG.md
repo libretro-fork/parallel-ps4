@@ -4,6 +4,11 @@ What changed in the libretro core of this fork, newest first. Changes that come 
 
 ## Unreleased
 
+- The pipeline cache's storage and the serialization archive are off the STL.
+  - **Storage:** a blob is handed to `Storage::DataBase::Save` as a malloc'd buffer that the writer frees once written, or copied by `SaveCopy`; names are C strings (63 bytes at most). `Load` lends the blob as a `Common::Span`; the driver's cache is mapped into a file the database keeps. Paths, renames, removals and the folder listing go through libretro-common (`fill_pathname_join_special`, `filestream_rename`/`filestream_delete`, `retro_dirent`).
+  - **Archive** (`common/serdes.h`): written into a buffer grown by doubling, handed over whole by `TakeOff`; nothing is copied on the way to the cache.
+  - **The cache's files are as they were:** the pack, the driver's cache file, and the stage specialization's resource bits, which are written and read as the same 128 characters as before.
+  - **Checked:** blobs saved, read back after the cache is closed and opened again (from the pack and the driver's cache file), a blob saved again found by its last record, counted by `ForEachBlob`, and gone after `Clear`. Not run in a game yet.
 - The log of the run before is kept: when a run starts its log anew, the old one is renamed to `shad_log.prev.txt` (or `<serial>.prev.log` with separate logs) first. A run that crashed then still has its log after the next one, which used to write over it.
 - The staging pool, the page manager, the vertex capture and `CompileSPV` are off the STL.
   - **Staging pool:** its ring blocks and large buffers are kept in `SmallVector`s with room for the usual number (32 blocks, 16 large buffers per type), owning their buffers; the trimming that `std::erase_if` did is a plain loop.

@@ -98,6 +98,14 @@ public:
     /// The driver's pipeline cache handed to the disk cache, to be written as it is
     void SaveDriverCache();
 
+    /// WarmUp's count of the pipelines in the cache, and of those loaded
+    struct WarmUpCount {
+        PipelineCache* cache;
+        u32 total;
+        u32 loaded;
+    };
+    /// Loads the pipeline of one key blob (Storage::DataBase::ForEachBlob)
+    static void WarmUpBlob(void* user, Common::Span<const u8> data);
     bool LoadComputePipeline(Serialization::Archive& ar);
     bool LoadGraphicsPipeline(Serialization::Archive& ar);
     bool LoadPipelineStage(Serialization::Archive& ar, size_t stage);

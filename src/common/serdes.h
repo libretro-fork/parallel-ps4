@@ -6,39 +6,46 @@
 #include "common/assert.h"
 #include "common/types.h"
 
-#include <cstddef>
-#include <cstring>
-#include <span>
-#include <string>
-#include <vector>
+#include <stddef.h>
+#include <stdlib.h>
+#include <string.h>
+
+#include "common/concepts.h"
 
 namespace Serialization {
 
+/// What Writer and Reader take whole, with a count first: a container of elements
 template <typename T>
 concept Container = requires(T t) {
     typename T::iterator;
-    { t.begin() } -> std::same_as<typename T::iterator>;
-    { t.end() } -> std::same_as<typename T::iterator>;
-    { t.size() } -> std::convertible_to<std::size_t>;
+    requires Common::IsSame<decltype(t.begin()), typename T::iterator>;
+    requires Common::IsSame<decltype(t.end()), typename T::iterator>;
+    static_cast<size_t>(t.size());
 };
 
-/// Bytes to serialize into, owned, or to deserialize from, owned or lent (a mapped cache file
-/// read where it lies).
+/// Bytes to serialize into, owned (on the heap, grown as written), or to deserialize from,
+/// owned or lent (a mapped cache file read where it lies).
 struct Archive {
-    void Alloc(size_t size) {
-        container.resize(size);
-        Own();
+    /// @n zeroed bytes, the whole archive
+    void Alloc(size_t n) {
+        used = 0;
+        Grow(n);
     }
 
-    void Grow(size_t size) {
-        container.resize(container.size() + size);
+    /// @n zeroed bytes more
+    void Grow(size_t n) {
+        Reserve(used + n);
+        memset(buffer + used, 0, n);
+        used += n;
         Own();
     }
 
     void Merge(const Archive& ar) {
-        container.insert(container.end(), ar.base, ar.base + ar.size);
+        Reserve(used + ar.size);
+        memcpy(buffer + used, ar.base, ar.size);
+        used += ar.size;
         Own();
-        offset = container.size();
+        offset = static_cast<u32>(used);
     }
 
     [[nodiscard]] size_t SizeBytes() const {
@@ -46,8 +53,8 @@ struct Archive {
     }
 
     u8* CurrPtr() {
-        ASSERT_MSG(base == container.data(), "Writing into lent bytes");
-        return container.data() + offset;
+        ASSERT_MSG(base == buffer, "Writing into lent bytes");
+        return buffer + offset;
     }
 
     const u8* ReadPtr() const {
@@ -57,14 +64,21 @@ struct Archive {
     void Advance(size_t bytes) {
         ASSERT_MSG(offset + bytes <= size,
                    "Invalid or corrupted deserialization container/shader cache");
-        offset += bytes;
+        offset += static_cast<u32>(bytes);
     }
 
-    std::vector<u8>&& TakeOff() {
+    /// The bytes written, handed over: made with malloc, for the caller to free; their count
+    /// in *@out_size. The archive is empty after.
+    u8* TakeOff(size_t* out_size) {
+        u8* const taken = buffer;
+        *out_size = used;
+        buffer = nullptr;
+        used = 0;
+        capacity = 0;
         offset = 0;
         base = nullptr;
         size = 0;
-        return std::move(container);
+        return taken;
     }
 
     [[nodiscard]] bool IsEoS() const {
@@ -72,23 +86,40 @@ struct Archive {
     }
 
     Archive() = default;
-    explicit Archive(std::vector<u8>&& v) : container{std::move(v)} {
-        Own();
-    }
     /// Reads @lent in place; it must outlive the archive.
-    explicit Archive(std::span<const u8> lent) : base{lent.data()}, size{lent.size()} {}
+    explicit Archive(Common::Span<const u8> lent) : base{lent.data()}, size{lent.size()} {}
+    ~Archive() {
+        free(buffer);
+    }
 
     Archive(const Archive&) = delete;
     Archive& operator=(const Archive&) = delete;
 
 private:
     void Own() {
-        base = container.data();
-        size = container.size();
+        base = buffer;
+        size = used;
+    }
+
+    /// Room for @n bytes, doubled as it grows
+    void Reserve(size_t n) {
+        if (n <= capacity) {
+            return;
+        }
+        size_t grown = capacity ? capacity * 2 : 256;
+        while (grown < n) {
+            grown *= 2;
+        }
+        u8* const moved = static_cast<u8*>(realloc(buffer, grown));
+        ASSERT_MSG(moved, "Out of memory for a serialization archive");
+        buffer = moved;
+        capacity = grown;
     }
 
     u32 offset{};
-    std::vector<u8> container{};
+    u8* buffer{};
+    size_t used{};
+    size_t capacity{};
     const u8* base{};
     size_t size{};
 
@@ -102,27 +133,23 @@ struct Writer {
         if (ar.offset + size >= ar.size) {
             ar.Grow(size);
         }
-        std::memcpy(ar.CurrPtr(), reinterpret_cast<const void*>(ptr), size);
+        memcpy(ar.CurrPtr(), reinterpret_cast<const void*>(ptr), size);
         ar.Advance(size);
     }
 
     template <typename T>
         requires(!Container<T>)
     void Write(const T& value) {
-        const auto size = sizeof(value);
-        Write(&value, size);
+        Write(&value, sizeof(value));
     }
 
-    void Write(const auto& v) {
+    template <typename C>
+        requires Container<C>
+    void Write(const C& v) {
         Write(v.size());
-        for (const auto& elem : v) {
+        for (const typename C::value_type& elem : v) {
             Write(elem);
         }
-    }
-
-    void Write(const std::string& s) {
-        Write(s.size());
-        Write(s.c_str(), s.size());
     }
 
     Writer() = delete;
@@ -136,31 +163,25 @@ struct Reader {
     void Read(T* ptr, size_t size) {
         ASSERT_MSG(ar.offset + size <= ar.size,
                    "Invalid or corrupted deserialization container/shader cache");
-        std::memcpy(reinterpret_cast<void*>(ptr), ar.ReadPtr(), size);
+        memcpy(reinterpret_cast<void*>(ptr), ar.ReadPtr(), size);
         ar.Advance(size);
     }
 
     template <typename T>
         requires(!Container<T>)
     void Read(T& value) {
-        const auto size = sizeof(value);
-        Read(&value, size);
+        Read(&value, sizeof(value));
     }
 
-    void Read(auto& v) {
+    template <typename C>
+        requires Container<C>
+    void Read(C& v) {
         size_t num_elements{};
         Read(num_elements);
-        for (int i = 0; i < num_elements; ++i) {
+        for (size_t i = 0; i < num_elements; ++i) {
             v.emplace_back();
             Read(v.back());
         }
-    }
-
-    void Read(std::string& s) {
-        size_t length{};
-        Read(length);
-        s.resize(length);
-        Read(s.data(), length);
     }
 
     Reader() = delete;

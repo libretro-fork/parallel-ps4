@@ -36,9 +36,11 @@ void RegisterPipelineData(const ComputePipelineKey& key,
     key.Serialize(ar);
     sdata.Serialize(ar);
 
-    Storage::DataBase::Instance().Save(Storage::BlobType::PipelineKey,
-                                       Common::StringFromFormat("c_0x%016zx", key.value),
-                                       ar.TakeOff());
+    char name[32];
+    snprintf(name, sizeof(name), "c_0x%016zx", key.value);
+    size_t size = 0;
+    u8* const bytes = ar.TakeOff(&size);
+    Storage::DataBase::Instance().Save(Storage::BlobType::PipelineKey, name, bytes, size);
 }
 
 void RegisterPipelineData(const GraphicsPipelineKey& key, u64 hash,
@@ -56,9 +58,11 @@ void RegisterPipelineData(const GraphicsPipelineKey& key, u64 hash,
     key.Serialize(ar);
     sdata.Serialize(ar);
 
-    Storage::DataBase::Instance().Save(Storage::BlobType::PipelineKey,
-                                       Common::StringFromFormat("g_0x%016" PRIx64, hash),
-                                       ar.TakeOff());
+    char name[32];
+    snprintf(name, sizeof(name), "g_0x%016" PRIx64, hash);
+    size_t size = 0;
+    u8* const bytes = ar.TakeOff(&size);
+    Storage::DataBase::Instance().Save(Storage::BlobType::PipelineKey, name, bytes, size);
 }
 
 void RegisterShaderMeta(const Shader::Info& info,
@@ -81,22 +85,24 @@ void RegisterShaderMeta(const Shader::Info& info,
     spec.Serialize(ar);
     info.Serialize(ar);
 
-    Storage::DataBase::Instance().Save(Storage::BlobType::ShaderMeta,
-                                       Common::StringFromFormat("0x%016zx", perm_hash),
-                                       ar.TakeOff());
+    char name[32];
+    snprintf(name, sizeof(name), "0x%016zx", perm_hash);
+    size_t size = 0;
+    u8* const bytes = ar.TakeOff(&size);
+    Storage::DataBase::Instance().Save(Storage::BlobType::ShaderMeta, name, bytes, size);
 }
 
-void RegisterShaderBinary(std::span<const u32> spv, u64 pgm_hash, size_t perm_idx) {
+void RegisterShaderBinary(Common::Span<const u32> spv, u64 pgm_hash, size_t perm_idx) {
     if (!Storage::DataBase::Instance().IsOpened()) {
         return;
     }
 
     // The one copy, for the writer that saves it later: the words lie in the recompiler's
     // module, which the next shader is written into
-    Storage::DataBase::Instance().Save(
-        Storage::BlobType::ShaderBinary,
-        Common::StringFromFormat("0x%016" PRIx64 "_%zu", pgm_hash, perm_idx),
-        std::vector<u32>(spv.begin(), spv.end()));
+    char name[48];
+    snprintf(name, sizeof(name), "0x%016" PRIx64 "_%zu", pgm_hash, perm_idx);
+    Storage::DataBase::Instance().SaveCopy(Storage::BlobType::ShaderBinary, name, spv.data(),
+                                           spv.size_bytes());
 }
 
 bool LoadShaderMeta(Serialization::Archive& ar, Shader::Info& info,
@@ -151,13 +157,15 @@ bool PipelineCache::LoadComputePipeline(Serialization::Archive& ar) {
     ComputePipeline::SerializationSupport sdata{};
     sdata.Deserialize(ar);
 
-    const std::optional<Common::FS::FileView> meta_blob = Storage::DataBase::Instance().Load(
-        Storage::BlobType::ShaderMeta, Common::StringFromFormat("0x%016zx", compute_key.value));
-    if (!meta_blob || meta_blob->empty()) {
+    char meta_name[32];
+    snprintf(meta_name, sizeof(meta_name), "0x%016zx", compute_key.value);
+    const Common::Span<const u8> meta_blob =
+        Storage::DataBase::Instance().Load(Storage::BlobType::ShaderMeta, meta_name);
+    if (meta_blob.empty()) {
         return false;
     }
 
-    Serialization::Archive meta_ar{meta_blob->Bytes()};
+    Serialization::Archive meta_ar{meta_blob};
 
     if (!LoadPipelineStage(meta_ar, 0)) {
         return false;
@@ -226,14 +234,15 @@ bool PipelineCache::LoadGraphicsPipeline(Serialization::Archive& ar) {
             continue;
         }
 
-        const std::optional<Common::FS::FileView> meta_blob = Storage::DataBase::Instance().Load(
-            Storage::BlobType::ShaderMeta,
-            Common::StringFromFormat("0x%016llx", static_cast<unsigned long long>(hash)));
-        if (!meta_blob || meta_blob->empty()) {
+        char meta_name[32];
+        snprintf(meta_name, sizeof(meta_name), "0x%016" PRIx64, static_cast<u64>(hash));
+        const Common::Span<const u8> meta_blob =
+            Storage::DataBase::Instance().Load(Storage::BlobType::ShaderMeta, meta_name);
+        if (meta_blob.empty()) {
             return false;
         }
 
-        Serialization::Archive meta_ar{meta_blob->Bytes()};
+        Serialization::Archive meta_ar{meta_blob};
 
         if (!LoadPipelineStage(meta_ar, stage_idx)) {
             return false;
@@ -266,14 +275,15 @@ bool PipelineCache::LoadPipelineStage(Serialization::Archive& ar, size_t stage) 
     }
 
     // Mapped where it lies: a mapping starts on a page, so the words are aligned
-    const std::optional<Common::FS::FileView> spv_blob = Storage::DataBase::Instance().Load(
-        Storage::BlobType::ShaderBinary,
-        Common::StringFromFormat("0x%016" PRIx64 "_%zu", program->info.pgm_hash, perm_idx));
-    if (!spv_blob || spv_blob->size() < sizeof(u32)) {
+    char spv_name[48];
+    snprintf(spv_name, sizeof(spv_name), "0x%016" PRIx64 "_%zu", program->info.pgm_hash, perm_idx);
+    const Common::Span<const u8> spv_blob =
+        Storage::DataBase::Instance().Load(Storage::BlobType::ShaderBinary, spv_name);
+    if (spv_blob.size() < sizeof(u32)) {
         return false;
     }
-    const std::span<const u32> spv{reinterpret_cast<const u32*>(spv_blob->data()),
-                                   spv_blob->size() / sizeof(u32)};
+    const Common::Span<const u32> spv{reinterpret_cast<const u32*>(spv_blob.data()),
+                                      spv_blob.size() / sizeof(u32)};
 
     // Permutation hash depends on shader variation index. To prevent collisions, we need insert it
     // at the exact position rather than append
@@ -331,52 +341,47 @@ void PipelineCache::WarmUp() {
     // again, where it was read as if this one had made it (Bloodborne crashed in its own code
     // on the shaders an earlier build had kept)
     {
-        const std::string_view build =
-            Common::g_scm_rev[0] ? Common::g_scm_rev : Common::g_scm_date;
+        const char* const build = Common::g_scm_rev[0] ? Common::g_scm_rev : Common::g_scm_date;
+        const size_t build_len = strlen(build);
         bool same_build = false;
         {
             // Let go before the files are removed: Windows keeps a mapped file
-            const std::optional<Common::FS::FileView> stamp =
+            const Common::Span<const u8> stamp =
                 Storage::DataBase::Instance().Load(Storage::BlobType::ShaderProfile, "build");
-            same_build = stamp && stamp->size() == build.size() &&
-                         memcmp(stamp->data(), build.data(), build.size()) == 0;
-            if (stamp && !same_build) {
+            same_build = !stamp.empty() && stamp.size() == build_len &&
+                         memcmp(stamp.data(), build, build_len) == 0;
+            if (!stamp.empty() && !same_build) {
                 LOG_INFO(Render, "Pipeline cache made by another build: started again");
             }
         }
         if (!same_build) {
             Storage::DataBase::Instance().Clear();
-            std::vector<u8> new_build(build.begin(), build.end());
-            Storage::DataBase::Instance().Save(Storage::BlobType::ShaderProfile, "build",
-                                               std::move(new_build));
-            std::vector<u8> new_profile(sizeof(profile));
-            memcpy(new_profile.data(), &profile, sizeof(profile));
-            Storage::DataBase::Instance().Save(Storage::BlobType::ShaderProfile, "profile",
-                                               std::move(new_profile));
+            Storage::DataBase::Instance().SaveCopy(Storage::BlobType::ShaderProfile, "build", build,
+                                                   build_len);
+            Storage::DataBase::Instance().SaveCopy(Storage::BlobType::ShaderProfile, "profile",
+                                                   &profile, sizeof(profile));
             return;
         }
     }
 
     // Check if cache is compatible
-    const std::optional<Common::FS::FileView> profile_data =
+    const Common::Span<const u8> profile_data =
         Storage::DataBase::Instance().Load(Storage::BlobType::ShaderProfile, "profile");
-    if (!profile_data || profile_data->empty()) {
-        std::vector<u8> new_profile(sizeof(profile));
-        memcpy(new_profile.data(), &profile, sizeof(profile));
-        Storage::DataBase::Instance().Save(Storage::BlobType::ShaderProfile, "profile",
-                                           std::move(new_profile));
+    if (profile_data.empty()) {
+        Storage::DataBase::Instance().SaveCopy(Storage::BlobType::ShaderProfile, "profile",
+                                               &profile, sizeof(profile));
         return;
     }
-    if (profile_data->size() != sizeof(Shader::Profile)) {
+    if (profile_data.size() != sizeof(Shader::Profile)) {
         LOG_WARNING(Render,
                     "Pipeline cache profile has unexpected size (%zu != %llu). Ignoring the cache",
-                    profile_data->size(), static_cast<unsigned long long>(sizeof(Shader::Profile)));
+                    profile_data.size(), static_cast<unsigned long long>(sizeof(Shader::Profile)));
         Storage::DataBase::Instance().Close();
         return;
     }
 
     Shader::Profile cached_profile{};
-    memcpy(&cached_profile, profile_data->data(), sizeof(cached_profile));
+    memcpy(&cached_profile, profile_data.data(), sizeof(cached_profile));
     if (cached_profile != profile) {
         LOG_WARNING(Render,
                     "Pipeline cache isn't compatible with current system. Ignoring the cache");
@@ -390,38 +395,42 @@ void PipelineCache::WarmUp() {
     u32 num_pipelines{};
     u32 num_total_pipelines{};
 
-    Storage::DataBase::Instance().ForEachBlob(
-        Storage::BlobType::PipelineKey, [&](std::span<const u8> data) {
-            ++num_total_pipelines;
-
-            Serialization::Archive ar{data};
-            Serialization::Reader pldata{ar};
-
-            u32 version{};
-            pldata.Read(version);
-            if (version != Serialization::PipelineKeyVersion) {
-                return;
-            }
-
-            u32 is_compute{};
-            pldata.Read(is_compute);
-
-            bool result{};
-            if (is_compute) {
-                result = LoadComputePipeline(ar);
-            } else {
-                result = LoadGraphicsPipeline(ar);
-            }
-
-            if (result) {
-                ++num_pipelines;
-            }
-        });
+    WarmUpCount count{this, 0, 0};
+    Storage::DataBase::Instance().ForEachBlob(Storage::BlobType::PipelineKey, WarmUpBlob, &count);
+    num_pipelines = count.loaded;
+    num_total_pipelines = count.total;
 
     LOG_INFO(Render, "Preloaded %u pipelines", num_pipelines);
     if (num_total_pipelines > num_pipelines) {
         LOG_WARNING(Render, "%u stale pipelines were found. Consider re-generating the cache",
                     num_total_pipelines - num_pipelines);
+    }
+}
+
+void PipelineCache::WarmUpBlob(void* user, Common::Span<const u8> data) {
+    WarmUpCount& count = *static_cast<WarmUpCount*>(user);
+    ++count.total;
+
+    Serialization::Archive ar{data};
+    Serialization::Reader pldata{ar};
+
+    u32 version{};
+    pldata.Read(version);
+    if (version != Serialization::PipelineKeyVersion) {
+        return;
+    }
+
+    u32 is_compute{};
+    pldata.Read(is_compute);
+
+    bool result{};
+    if (is_compute) {
+        result = count.cache->LoadComputePipeline(ar);
+    } else {
+        result = count.cache->LoadGraphicsPipeline(ar);
+    }
+    if (result) {
+        ++count.loaded;
     }
 }
 
@@ -560,7 +569,13 @@ void StageSpecialization::Serialize(Serialization::Archive& ar) const {
     spec.Write(start);
     spec.Write(runtime_info);
 
-    spec.Write(bitset.to_string());
+    // As std::bitset::to_string spelled it, behind its length: '0' or '1', the last bit first
+    char bits[MaxStageResources];
+    for (size_t i = 0; i < MaxStageResources; ++i) {
+        bits[i] = bitset[MaxStageResources - 1 - i] ? '1' : '0';
+    }
+    spec.Write(static_cast<size_t>(MaxStageResources));
+    spec.Write(bits, sizeof(bits));
 
     if (!fetch_shader_data.Empty()) {
         spec.Write(sizeof(fetch_shader_data));
@@ -582,9 +597,21 @@ bool StageSpecialization::Deserialize(Serialization::Archive& ar) {
     spec.Read(start);
     spec.Read(runtime_info);
 
-    std::string bits{};
-    spec.Read(bits);
-    bitset = std::bitset<MaxStageResources>(bits);
+    size_t num_bits{};
+    spec.Read(num_bits);
+    if (num_bits > MaxStageResources) {
+        return false;
+    }
+    char bits[MaxStageResources];
+    spec.Read(bits, num_bits);
+    bitset.reset();
+    for (size_t i = 0; i < num_bits; ++i) {
+        if (bits[num_bits - 1 - i] == '1') {
+            bitset[i] = true;
+        } else if (bits[num_bits - 1 - i] != '0') {
+            return false;
+        }
+    }
 
     u64 fetch_data_size{};
     spec.Read(fetch_data_size);
