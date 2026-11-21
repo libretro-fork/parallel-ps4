@@ -4,6 +4,7 @@ What changed in the libretro core of this fork, newest first. Changes that come 
 
 ## Unreleased
 
+- Files that were committed by mistake are gone: compiler dependency files (`*.d`) at the top of the tree, `custom_trophy/Notice.txt`, and two test binaries in `build-tests/`. `.gitignore` now keeps them out.
 - The shader recompiler's variables say their types: 770 of the 986 `auto`s in its sources are the types the compiler deduced for them, written out (`IR::F32`, `IR::U32` and the other IR value types where those are what was deduced).
   - **Checked:** each of the 51 sources changed compiles to the same machine code as before, instruction for instruction.
   - **Left for the next patches:** the other 216, the lambdas, structured bindings, iterators and generic parameters, which want the code around them changed.

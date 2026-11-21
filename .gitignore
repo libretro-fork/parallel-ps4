@@ -425,3 +425,8 @@ result
 # The static Makefile build
 *_libretro.so
 *_libretro.dll
+
+# The libretro core's build: dependency files, the tests' build and what a test run makes
+*.d
+/build-tests/
+/custom_trophy/
