@@ -206,8 +206,11 @@ void GraphicsPipeline::SerializationSupport::Serialize(Serialization::Archive& a
     sdata.Write(&vertex_bindings, sizeof(vertex_bindings));
     sdata.Write(&divisors, sizeof(divisors));
     sdata.Write(multisampling);
-    sdata.Write(tcs);
-    sdata.Write(tes);
+    // Each as its count and then its words, as when they were vectors
+    sdata.Write(tcs.size());
+    sdata.Write(tcs.data(), tcs.size_bytes());
+    sdata.Write(tes.size());
+    sdata.Write(tes.data(), tes.size_bytes());
 }
 
 bool GraphicsPipeline::SerializationSupport::Deserialize(Serialization::Archive& ar) {
@@ -217,8 +220,16 @@ bool GraphicsPipeline::SerializationSupport::Deserialize(Serialization::Archive&
     sdata.Read(&vertex_bindings, sizeof(vertex_bindings));
     sdata.Read(&divisors, sizeof(divisors));
     sdata.Read(multisampling);
-    sdata.Read(tcs);
-    sdata.Read(tes);
+    Common::HeapArray<u32>* const words[2] = {&tcs, &tes};
+    for (Common::HeapArray<u32>* aux : words) {
+        size_t count{};
+        sdata.Read(count);
+        if (count > ar.SizeBytes() / sizeof(u32)) {
+            return false;
+        }
+        aux->Resize(count);
+        sdata.Read(aux->data(), aux->size_bytes());
+    }
     return true;
 }
 

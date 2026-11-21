@@ -4,6 +4,14 @@ What changed in the libretro core of this fork, newest first. Changes that come 
 
 ## Unreleased
 
+- The shader recompiler's SPIR-V backend is off the STL and has no `auto` left.
+  - **Word lists** handed to the module (`std::array{...}.data()` temporaries) are `Words<N>{{...}}.v`, and constant composites are plain arrays.
+  - **Optional decorations:** `DefineInput`, `DefineOutput` and `DefineVariable` take `EmitContext::NoDecoration` for no location or builtin, and 0 for no initializer, instead of `std::optional`.
+  - **Pairs and tuples** are small named structs (the atomics' scope and semantics, an output's component type), the shared memory types are made by a member function instead of a lambda returning a tuple, and the bit field helpers take arrays of fields instead of a variadic pack.
+  - **The instruction dispatch** takes the emitter as `template <typename F, F func>` with `Common::MakeIndexSequence` (added to `common/func_traits.h`) instead of `template <auto func>` and `std::index_sequence`.
+  - **The label map** of the phi patching is a `u64_map_t`; the clip distance and quad/rect shader emitters use fixed arrays and `SmallVector`s; the shaders they make are `Common::HeapArray<u32>` (added to `common/concepts.h`), serialized as before.
+  - **`Common::PopCount`** (added to `common/alignment.h`) replaces `std::popcount`.
+  - **Checked:** 380 of the 420 emitters the harness reaches, each run alone on a fragment and a compute context with a buffer and an image, make the same SPIR-V words as before, word for word (the others assert without a real shader around them, as they did before). Not run in a game yet.
 - The build writes no dependency files (`.d`) any more: `-MMD -MP` and the `-include` of them are gone from `Makefile` and `Makefile.common`. A header changed in a tree built before is not noticed by `make`: `make clean` first then. The test runner's cache keeps the files a test reads as `<binary>.inputs`. The 56 `.d` files still committed at the top of the tree are removed.
 - Files that were committed by mistake are gone: compiler dependency files (`*.d`) at the top of the tree, `custom_trophy/Notice.txt`, and two test binaries in `build-tests/`. `.gitignore` now keeps them out.
 - The shader recompiler's variables say their types: 770 of the 986 `auto`s in its sources are the types the compiler deduced for them, written out (`IR::F32`, `IR::U32` and the other IR value types where those are what was deduced).

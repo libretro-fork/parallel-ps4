@@ -45,9 +45,9 @@ Id EmitWriteLane(EmitContext& ctx, Id value, Id write_value, Imm32 lane_imm) {
 
 Id EmitBallot(EmitContext& ctx, Id bit) {
     const Id ballot{spv_OpGroupNonUniformBallot(&ctx.m, ctx.U32[4], SubgroupScope(ctx), bit)};
-    return spv_OpBitcast(&ctx.m, ctx.U64,
-                         spv_OpVectorShuffle(&ctx.m, ctx.U32[2], ballot, ballot,
-                                             std::array<u32, 2>{0, 1}.data(), 2));
+    return spv_OpBitcast(
+        &ctx.m, ctx.U64,
+        spv_OpVectorShuffle(&ctx.m, ctx.U32[2], ballot, ballot, Words<2>{{0, 1}}.v, 2));
 }
 
 Id EmitBallotFindLsb(EmitContext& ctx, Id mask) {

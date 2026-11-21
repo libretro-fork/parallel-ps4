@@ -37,7 +37,7 @@ static VkPipelineShaderStageCreateInfo ShaderStage(VkShaderStageFlagBits stage_b
 }
 
 /// A module of the SPIR-V the shader recompiler made for a stage it adds
-static VkShaderModule AuxModule(const std::vector<u32>& code, const Instance& instance) {
+static VkShaderModule AuxModule(const Common::HeapArray<u32>& code, const Instance& instance) {
     return static_cast<VkShaderModule>(CompileSPV(code.data(), code.size(), instance.GetDevice()));
 }
 
@@ -261,7 +261,7 @@ GraphicsPipeline::GraphicsPipeline(const Instance& instance, Scheduler& schedule
         if (!preloading) {
             const Shader::HwVertexRuntimeInfo& vs =
                 runtime_infos[static_cast<u32>(Shader::SwStage::Vertex)].hw.vs;
-            sdata.fragment = Shader::Backend::SPIRV::EmitDiscardFragmentShader(vs.outputs);
+            sdata.fragment = Shader::Backend::SPIRV::EmitDiscardFragmentShader(vs.outputs.data());
         }
         shader_stages.push_back(
             ShaderStage(VK_SHADER_STAGE_FRAGMENT_BIT, AuxModule(sdata.fragment, instance)));

@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include <vector>
+#include "common/concepts.h"
 #include "common/types.h"
 
 namespace Shader {
@@ -18,7 +18,7 @@ enum class AuxShaderType : u32 {
     PassthroughTES,
 };
 
-[[nodiscard]] std::vector<u32> EmitAuxilaryTessShader(AuxShaderType type,
-                                                      const HwFragmentRuntimeInfo& fs_info);
+[[nodiscard]] Common::HeapArray<u32> EmitAuxilaryTessShader(AuxShaderType type,
+                                                            const HwFragmentRuntimeInfo& fs_info);
 
 } // namespace Shader::Backend::SPIRV

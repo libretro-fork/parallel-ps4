@@ -83,9 +83,9 @@ public:
         VkPipelineMultisampleStateCreateInfo multisampling{
             .sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO};
         // The SPIR-V the shader recompiler emits for the stages it adds, as it hands them over
-        std::vector<u32> tcs{};
-        std::vector<u32> tes{};
-        std::vector<u32> fragment{};
+        Common::HeapArray<u32> tcs{};
+        Common::HeapArray<u32> tes{};
+        Common::HeapArray<u32> fragment{};
 
         void Serialize(Serialization::Archive& ar) const;
         bool Deserialize(Serialization::Archive& ar);

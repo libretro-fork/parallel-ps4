@@ -15,16 +15,21 @@ namespace Shader::Backend::SPIRV {
 using PointerType = EmitContext::PointerType;
 using PointerSize = EmitContext::PointerSize;
 
-static std::pair<Id, bool> OutputAttrComponentType(EmitContext& ctx, IR::Attribute attr) {
+/// An output attribute's component type, and whether it is an integer one
+struct AttrComponent {
+    Id type;
+    bool is_integer;
+};
+
+static AttrComponent OutputAttrComponentType(EmitContext& ctx, IR::Attribute attr) {
     if (IR::IsParam(attr)) {
         const u32 index{u32(attr) - u32(IR::Attribute::Param0)};
-        const Shader::Backend::SPIRV::EmitContext::SpirvAttribute& info{
-            ctx.output_params.at(index)};
+        const Shader::Backend::SPIRV::EmitContext::SpirvAttribute& info{ctx.output_params[index]};
         return {info.component_type, info.is_integer};
     }
     if (IR::IsMrt(attr)) {
         const u32 index{u32(attr) - u32(IR::Attribute::RenderTarget0)};
-        const Shader::Backend::SPIRV::EmitContext::SpirvAttribute& info{ctx.frag_outputs.at(index)};
+        const Shader::Backend::SPIRV::EmitContext::SpirvAttribute& info{ctx.frag_outputs[index]};
         return {info.component_type, info.is_integer};
     }
     switch (attr) {
@@ -58,7 +63,7 @@ Id EmitReadConst(EmitContext& ctx, IR::Inst* inst, Id addr, Id offset) {
     }
     if (flatbuf_off_dw == 0) {
         return spv_OpFunctionCall(&ctx.m, ctx.U32[1], ctx.read_const_dynamic,
-                                  std::array<u32, 2>{addr, offset}.data(), 2);
+                                  Words<2>{{addr, offset}}.v, 2);
     } else {
         return ctx.EmitFlatbufferLoad(ctx.ConstU32(flatbuf_off_dw));
     }
@@ -70,7 +75,9 @@ Id EmitReadConstBuffer(EmitContext& ctx, Imm32 handle_imm, Id index) {
     if (const Id offset = buffer.Offset(PointerSize::B32); (offset != 0)) {
         index = spv_OpIAdd(&ctx.m, ctx.U32[1], index, offset);
     }
-    const auto [id, pointer_type] = buffer.Alias(PointerType::U32);
+    const EmitContext::BufferSpv& buffer_alias = buffer.Alias(PointerType::U32);
+    const Id id = buffer_alias.id;
+    const Id pointer_type = buffer_alias.pointer_type;
     const Id ptr{spv_OpAccessChain2(&ctx.m, pointer_type, id, ctx.u32_zero_value, index)};
     const Id result{spv_OpLoad(&ctx.m, ctx.U32[1], ptr)};
     return result;
@@ -82,7 +89,7 @@ Id EmitGetAttribute(EmitContext& ctx, IR::Attribute attr, Imm32 comp_imm, Imm32 
     if (IR::IsParam(attr)) {
         const u32 param_index{u32(attr) - u32(IR::Attribute::Param0)};
         const Shader::Backend::SPIRV::EmitContext::SpirvAttribute& param{
-            ctx.input_params.at(param_index)};
+            ctx.input_params[param_index]};
         const Id value = [&] {
             if (param.is_array) {
                 ASSERT(param.num_components > 1);
@@ -272,73 +279,82 @@ Id EmitGetAttributeU32(EmitContext& ctx, IR::Attribute attr, Imm32 comp_imm) {
     }
 }
 
+/// Stores @value at @pointer, an output of @attr, cast to the output's integer type if it has one
+static void StoreOutput(EmitContext& ctx, IR::Attribute attr, Id value, Id pointer) {
+    const AttrComponent component = OutputAttrComponentType(ctx, attr);
+    if (component.is_integer) {
+        spv_OpStore(&ctx.m, pointer, spv_OpBitcast(&ctx.m, component.type, value));
+    } else {
+        spv_OpStore(&ctx.m, pointer, value);
+    }
+}
+
 void EmitSetAttribute(EmitContext& ctx, IR::Attribute attr, Id value, Imm32 element_imm) {
     u32 element = element_imm;
-    const auto op_store = [&](Id pointer) {
-        const auto [component_type, is_integer] = OutputAttrComponentType(ctx, attr);
-        if (is_integer) {
-            spv_OpStore(&ctx.m, pointer, spv_OpBitcast(&ctx.m, component_type, value));
-        } else {
-            spv_OpStore(&ctx.m, pointer, value);
-        }
-    };
     if (IR::IsParam(attr)) {
         const u32 attr_index{u32(attr) - u32(IR::Attribute::Param0)};
         if (ctx.hw_stage == HwStage::Local) {
             const uint32_t component_ptr =
                 spv_TypePointer(&ctx.m, u32(SpvStorageClassOutput), ctx.F32[1]);
-            return op_store(spv_OpAccessChain2(&ctx.m, component_ptr, ctx.output_attr_array,
-                                               ctx.ConstU32(attr_index), ctx.ConstU32(element)));
+            return StoreOutput(ctx, attr, value,
+                               spv_OpAccessChain2(&ctx.m, component_ptr, ctx.output_attr_array,
+                                                  ctx.ConstU32(attr_index), ctx.ConstU32(element)));
         } else {
             const Shader::Backend::SPIRV::EmitContext::SpirvAttribute& info{
-                ctx.output_params.at(attr_index)};
+                ctx.output_params[attr_index]};
             ASSERT(info.num_components > 0);
             if (info.num_components == 1) {
-                return op_store(info.id);
+                return StoreOutput(ctx, attr, value, info.id);
             } else {
-                return op_store(
+                return StoreOutput(
+                    ctx, attr, value,
                     spv_OpAccessChain1(&ctx.m, info.pointer_type, info.id, ctx.ConstU32(element)));
             }
         }
     }
     if (IR::IsMrt(attr)) {
         const u32 index{u32(attr) - u32(IR::Attribute::RenderTarget0)};
-        const Shader::Backend::SPIRV::EmitContext::SpirvAttribute& info{ctx.frag_outputs.at(index)};
+        const Shader::Backend::SPIRV::EmitContext::SpirvAttribute& info{ctx.frag_outputs[index]};
         if (element < 3 && ctx.runtime_info.hw.fs.color_buffers[index].blend_self_scale) {
             // Emulates GCN's factor-scaled min/max blend: min/max(src*src, dst*dst).
             value = spv_OpFMul(&ctx.m, ctx.F32[1], value, value);
         }
         if (info.num_components == 1) {
-            return op_store(info.id);
+            return StoreOutput(ctx, attr, value, info.id);
         } else {
-            return op_store(
+            return StoreOutput(
+                ctx, attr, value,
                 spv_OpAccessChain1(&ctx.m, info.pointer_type, info.id, ctx.ConstU32(element)));
         }
     }
     switch (attr) {
     case IR::Attribute::Position0:
-        return op_store(
+        return StoreOutput(
+            ctx, attr, value,
             spv_OpAccessChain1(&ctx.m, ctx.output_f32, ctx.output_position, ctx.ConstU32(element)));
     case IR::Attribute::ClipDistance:
-        return op_store(
+        return StoreOutput(
+            ctx, attr, value,
             spv_OpAccessChain1(&ctx.m, ctx.output_f32, ctx.clip_distances, ctx.ConstU32(element)));
     case IR::Attribute::CullDistance:
-        return op_store(
+        return StoreOutput(
+            ctx, attr, value,
             spv_OpAccessChain1(&ctx.m, ctx.output_f32, ctx.cull_distances, ctx.ConstU32(element)));
     case IR::Attribute::PointSize:
-        return op_store(ctx.output_point_size);
+        return StoreOutput(ctx, attr, value, ctx.output_point_size);
     case IR::Attribute::RenderTargetIndex:
-        return op_store(ctx.output_layer);
+        return StoreOutput(ctx, attr, value, ctx.output_layer);
     case IR::Attribute::ViewportIndex:
-        return op_store(ctx.output_viewport_index);
+        return StoreOutput(ctx, attr, value, ctx.output_viewport_index);
     case IR::Attribute::Depth:
-        return op_store(ctx.frag_depth);
+        return StoreOutput(ctx, attr, value, ctx.frag_depth);
     case IR::Attribute::SampleMask:
-        return op_store(
+        return StoreOutput(
+            ctx, attr, value,
             spv_OpAccessChain1(&ctx.m, ctx.output_u32, ctx.sample_mask, ctx.u32_zero_value));
     case IR::Attribute::StencilRef:
         if (ctx.profile.supports_shader_stencil_export) {
-            return op_store(ctx.stencil_ref);
+            return StoreOutput(ctx, attr, value, ctx.stencil_ref);
         }
         return;
     default:
@@ -374,7 +390,7 @@ Id EmitGetPatch(EmitContext& ctx, IR::Patch patch) {
     const u32 index{IR::GenericPatchIndex(patch)};
     const Id element{ctx.ConstU32(IR::GenericPatchElement(patch))};
     const Id type{ctx.sw_stage == SwStage::TessellationControl ? ctx.output_f32 : ctx.input_f32};
-    const Id pointer{spv_OpAccessChain1(&ctx.m, type, ctx.patches.at(index), element)};
+    const Id pointer{spv_OpAccessChain1(&ctx.m, type, ctx.patches[index], element)};
     return spv_OpLoad(&ctx.m, ctx.F32[1], pointer);
 }
 
@@ -383,7 +399,7 @@ void EmitSetPatch(EmitContext& ctx, IR::Patch patch, Id value) {
         if (IR::IsGeneric(patch)) {
             const u32 index{IR::GenericPatchIndex(patch)};
             const Id element{ctx.ConstU32(IR::GenericPatchElement(patch))};
-            return spv_OpAccessChain1(&ctx.m, ctx.output_f32, ctx.patches.at(index), element);
+            return spv_OpAccessChain1(&ctx.m, ctx.output_f32, ctx.patches[index], element);
         }
         switch (patch) {
         case IR::Patch::TessellationLodLeft:
@@ -416,7 +432,9 @@ static Id EmitLoadBufferB32xN(EmitContext& ctx, IR::Inst* inst, u32 handle, Id a
     }
     const Shader::Backend::SPIRV::VectorIds& data_types =
         alias == PointerType::U32 ? ctx.U32 : ctx.F32;
-    const auto [id, pointer_type] = spv_buffer.Alias(alias);
+    const EmitContext::BufferSpv& spv_buffer_alias = spv_buffer.Alias(alias);
+    const Id id = spv_buffer_alias.id;
+    const Id pointer_type = spv_buffer_alias.pointer_type;
 
     Common::StaticVector<Id, N> ids;
     for (u32 i = 0; i < N; i++) {
@@ -439,7 +457,9 @@ Id EmitLoadBufferU8(EmitContext& ctx, IR::Inst* inst, Imm32 handle_imm, Id addre
     if (const Id offset = spv_buffer.Offset(PointerSize::B8); (offset != 0)) {
         address = spv_OpIAdd(&ctx.m, ctx.U32[1], address, offset);
     }
-    const auto [id, pointer_type] = spv_buffer.Alias(PointerType::U8);
+    const EmitContext::BufferSpv& spv_buffer_alias = spv_buffer.Alias(PointerType::U8);
+    const Id id = spv_buffer_alias.id;
+    const Id pointer_type = spv_buffer_alias.pointer_type;
     const Id ptr{spv_OpAccessChain2(&ctx.m, pointer_type, id, ctx.u32_zero_value, address)};
     const Id result{spv_OpLoad(&ctx.m, ctx.U8, ptr)};
     return result;
@@ -451,7 +471,9 @@ Id EmitLoadBufferU16(EmitContext& ctx, IR::Inst* inst, Imm32 handle_imm, Id addr
     if (const Id offset = spv_buffer.Offset(PointerSize::B16); (offset != 0)) {
         address = spv_OpIAdd(&ctx.m, ctx.U32[1], address, offset);
     }
-    const auto [id, pointer_type] = spv_buffer.Alias(PointerType::U16);
+    const EmitContext::BufferSpv& spv_buffer_alias = spv_buffer.Alias(PointerType::U16);
+    const Id id = spv_buffer_alias.id;
+    const Id pointer_type = spv_buffer_alias.pointer_type;
     const Id ptr{spv_OpAccessChain2(&ctx.m, pointer_type, id, ctx.u32_zero_value, address)};
     const Id result{spv_OpLoad(&ctx.m, ctx.U16, ptr)};
     return result;
@@ -483,7 +505,9 @@ Id EmitLoadBufferU64(EmitContext& ctx, IR::Inst* inst, Imm32 handle_imm, Id addr
     if (const Id offset = spv_buffer.Offset(PointerSize::B64); (offset != 0)) {
         address = spv_OpIAdd(&ctx.m, ctx.U32[1], address, offset);
     }
-    const auto [id, pointer_type] = spv_buffer.Alias(PointerType::U64);
+    const EmitContext::BufferSpv& spv_buffer_alias = spv_buffer.Alias(PointerType::U64);
+    const Id id = spv_buffer_alias.id;
+    const Id pointer_type = spv_buffer_alias.pointer_type;
     const Id ptr{spv_OpAccessChain2(&ctx.m, pointer_type, id, ctx.u64_zero_value, address)};
     const Id result{spv_OpLoad(&ctx.m, ctx.U64, ptr)};
     return result;
@@ -523,7 +547,9 @@ static void EmitStoreBufferB32xN(EmitContext& ctx, IR::Inst* inst, u32 handle, I
     }
     const Shader::Backend::SPIRV::VectorIds& data_types =
         alias == PointerType::U32 ? ctx.U32 : ctx.F32;
-    const auto [id, pointer_type] = spv_buffer.Alias(alias);
+    const EmitContext::BufferSpv& spv_buffer_alias = spv_buffer.Alias(alias);
+    const Id id = spv_buffer_alias.id;
+    const Id pointer_type = spv_buffer_alias.pointer_type;
 
     for (u32 i = 0; i < N; i++) {
         const Id index_i =
@@ -541,7 +567,9 @@ void EmitStoreBufferU8(EmitContext& ctx, IR::Inst*, Imm32 handle_imm, Id address
     if (const Id offset = spv_buffer.Offset(PointerSize::B8); (offset != 0)) {
         address = spv_OpIAdd(&ctx.m, ctx.U32[1], address, offset);
     }
-    const auto [id, pointer_type] = spv_buffer.Alias(PointerType::U8);
+    const EmitContext::BufferSpv& spv_buffer_alias = spv_buffer.Alias(PointerType::U8);
+    const Id id = spv_buffer_alias.id;
+    const Id pointer_type = spv_buffer_alias.pointer_type;
     const Id ptr{spv_OpAccessChain2(&ctx.m, pointer_type, id, ctx.u32_zero_value, address)};
     spv_OpStore(&ctx.m, ptr, value);
 }
@@ -552,7 +580,9 @@ void EmitStoreBufferU16(EmitContext& ctx, IR::Inst*, Imm32 handle_imm, Id addres
     if (const Id offset = spv_buffer.Offset(PointerSize::B16); (offset != 0)) {
         address = spv_OpIAdd(&ctx.m, ctx.U32[1], address, offset);
     }
-    const auto [id, pointer_type] = spv_buffer.Alias(PointerType::U16);
+    const EmitContext::BufferSpv& spv_buffer_alias = spv_buffer.Alias(PointerType::U16);
+    const Id id = spv_buffer_alias.id;
+    const Id pointer_type = spv_buffer_alias.pointer_type;
     const Id ptr{spv_OpAccessChain2(&ctx.m, pointer_type, id, ctx.u32_zero_value, address)};
     spv_OpStore(&ctx.m, ptr, value);
 }
@@ -586,7 +616,9 @@ void EmitStoreBufferU64(EmitContext& ctx, IR::Inst*, Imm32 handle_imm, Id addres
     if (const Id offset = spv_buffer.Offset(PointerSize::B64); (offset != 0)) {
         address = spv_OpIAdd(&ctx.m, ctx.U32[1], address, offset);
     }
-    const auto [id, pointer_type] = spv_buffer.Alias(PointerType::U64);
+    const EmitContext::BufferSpv& spv_buffer_alias = spv_buffer.Alias(PointerType::U64);
+    const Id id = spv_buffer_alias.id;
+    const Id pointer_type = spv_buffer_alias.pointer_type;
     const Id ptr{spv_OpAccessChain2(&ctx.m, pointer_type, id, ctx.u64_zero_value, address)};
     spv_OpStore(&ctx.m, ptr, value);
 }

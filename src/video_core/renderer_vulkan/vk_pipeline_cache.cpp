@@ -3,6 +3,9 @@
 
 #include <ranges>
 
+#include <file/file_path.h>
+#include <retro_miscellaneous.h>
+
 #include "common/hash.h"
 #include "common/io_file.h"
 #include "common/path_util.h"
@@ -994,7 +997,7 @@ VkShaderModule PipelineCache::ModuleFromProgram(Shader::Info& info,
                                                 const Shader::IR::Program& ir_program,
                                                 size_t perm_idx,
                                                 Shader::Backend::Bindings& binding) {
-    const std::span<const u32> spv =
+    const Common::Span<const u32> spv =
         Shader::Backend::SPIRV::EmitSPIRV(pools.spv, profile, runtime_info, ir_program, binding);
     DumpShader(spv, info.pgm_hash, info.hw_stage, perm_idx, "spv");
 
@@ -1002,10 +1005,10 @@ VkShaderModule PipelineCache::ModuleFromProgram(Shader::Info& info,
 
     const std::optional<Common::FS::FileView> patch_file =
         GetShaderPatch(info.pgm_hash, info.hw_stage, perm_idx, "spv");
-    const std::span<const u32> patch =
-        patch_file ? std::span<const u32>{reinterpret_cast<const u32*>(patch_file->data()),
-                                          patch_file->size() / sizeof(u32)}
-                   : std::span<const u32>{};
+    const Common::Span<const u32> patch =
+        patch_file ? Common::Span<const u32>{reinterpret_cast<const u32*>(patch_file->data()),
+                                             patch_file->size() / sizeof(u32)}
+                   : Common::Span<const u32>{};
     const bool is_patched = !patch.empty() && emu_settings_get_patch_shaders();
     if (is_patched) {
         LOG_INFO(Loader, "Loaded patch for %s shader 0x%" PRIx64, Shader::NameOf(info.hw_stage),
@@ -1300,7 +1303,7 @@ void PipelineCache::RunJobOn(CompileJob& job, const Shader::ShaderParams& params
         Shader::Backend::Bindings binding = job.start;
         const Shader::IR::Program ir_program =
             Shader::TranslateProgram(params.code, pools, job.fresh, runtime, profile);
-        const std::span<const u32> spv =
+        const Common::Span<const u32> spv =
             Shader::Backend::SPIRV::EmitSPIRV(pools.spv, profile, runtime, ir_program, binding);
         job.fresh.snapshot = nullptr;
         char kept_name[40];
@@ -1611,23 +1614,27 @@ void PipelineCache::GetShaderName(char* out, size_t size, Shader::HwStage stage,
     }
 }
 
-void PipelineCache::DumpShader(std::span<const u32> code, u64 hash, Shader::HwStage stage,
+void PipelineCache::DumpShader(Common::Span<const u32> code, u64 hash, Shader::HwStage stage,
                                size_t perm_idx, const char* ext) {
     if (!emu_settings_get_dump_shaders()) {
         return;
     }
 
-    using namespace Common::FS;
-    const std::filesystem::path dump_dir = GetUserPath(PathType::ShaderDir) / "dumps";
-    if (!Common::FS::Exists(dump_dir)) {
-        Common::FS::CreateDirectories(dump_dir);
+    char dump_dir[PATH_MAX_LENGTH];
+    fill_pathname_join_special(dump_dir,
+                               Common::FS::GetUserPathUTF8(Common::FS::PathType::ShaderDir),
+                               "dumps", sizeof(dump_dir));
+    if (!path_is_directory(dump_dir)) {
+        path_mkdir(dump_dir);
     }
     char name[ShaderNameSize];
     GetShaderName(name, sizeof(name), stage, hash, static_cast<int>(perm_idx));
     char filename[ShaderNameSize + 16];
     snprintf(filename, sizeof(filename), "%s.%s", name, ext);
-    const IOFile file{dump_dir / filename, FileAccessMode::Create};
-    file.WriteSpan(code);
+    char path[PATH_MAX_LENGTH];
+    fill_pathname_join_special(path, dump_dir, filename, sizeof(path));
+    const Common::FS::IOFile file{path, Common::FS::FileAccessMode::Create};
+    file.WriteRaw<u32>(code.data(), code.size());
 }
 
 std::optional<Common::FS::FileView> PipelineCache::GetShaderPatch(u64 hash, Shader::HwStage stage,

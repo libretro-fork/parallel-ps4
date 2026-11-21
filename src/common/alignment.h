@@ -23,6 +23,11 @@ template <typename T>
 }
 
 /// The number of bits @value takes, 0 for 0 (std::bit_width)
+/// The set bits of @value (std::popcount)
+[[nodiscard]] constexpr u32 PopCount(unsigned long long value) {
+    return static_cast<u32>(__builtin_popcountll(value));
+}
+
 [[nodiscard]] constexpr u32 BitWidth(unsigned long long value) {
     return value ? 64u - static_cast<u32>(__builtin_clzll(value)) : 0u;
 }

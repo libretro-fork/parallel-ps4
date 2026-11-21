@@ -3,11 +3,11 @@
 
 #pragma once
 
-#include <array>
-#include <span>
-#include <unordered_map>
-#include <vector>
+#include "common/alignment.h"
+#include "common/concepts.h"
+#include "common/small_vector.h"
 #include "common/string_util.h"
+#include "common/u64_map.h"
 #include "shader_recompiler/backend/spirv/spv_ops.h"
 
 #include "shader_recompiler/backend/bindings.h"
@@ -18,7 +18,7 @@
 namespace Shader::Backend::SPIRV {
 
 /// The module's words (spv_module_finish), where they lie: the module's until its next reset
-inline std::span<const u32> ModuleWords(spv_module_t* m, u32 version) {
+inline Common::Span<const u32> ModuleWords(spv_module_t* m, u32 version) {
     size_t words = 0;
     const u32* module = spv_module_finish(m, version, 0, &words);
     ASSERT_MSG(module, "SPIR-V module: out of memory");
@@ -26,9 +26,9 @@ inline std::span<const u32> ModuleWords(spv_module_t* m, u32 version) {
 }
 
 /// The same, copied out, for a module that goes before its words are used
-inline std::vector<u32> FinishModule(spv_module_t* m, u32 version) {
-    const auto words = ModuleWords(m, version);
-    return std::vector<u32>(words.begin(), words.end());
+inline Common::HeapArray<u32> FinishModule(spv_module_t* m, u32 version) {
+    const Common::Span<const u32> words = ModuleWords(m, version);
+    return Common::HeapArray<u32>(words.data(), words.size());
 }
 
 /// OpName of @target, the name formatted only when the module writes names
@@ -36,6 +36,13 @@ u32 NameFmt(spv_module_t* m, u32 target, const char* format, ...) SHAD_PRINTF(3,
 
 /// An id of the SPIR-V module (spv_module.h): a plain word, 0 for none
 using Id = u32;
+
+/// Words handed to a call of the module that takes them with their count: a braced list that
+/// lives until the call returns (Words<2>{{a, b}}.v)
+template <u32 N>
+struct Words {
+    u32 v[N];
+};
 
 struct VectorIds {
     [[nodiscard]] Id& operator[](u32 index) {
@@ -54,7 +61,7 @@ struct VectorIds {
         return ids[index - 1];
     }
 
-    std::array<Id, 4> ids;
+    Id ids[4];
 };
 
 class EmitContext final {
@@ -63,6 +70,9 @@ public:
 
     explicit EmitContext(spv_module_t& module, const Profile& profile,
                          const RuntimeInfo& runtime_info, Info& info, Bindings& binding);
+    ~EmitContext();
+    EmitContext(const EmitContext&) = delete;
+    EmitContext& operator=(const EmitContext&) = delete;
 
     Id Def(const IR::Value& value);
 
@@ -70,20 +80,22 @@ public:
     void DefineAmdPerVertexAttribs();
     void DefineWorkgroupIndex();
 
-    [[nodiscard]] Id DefineInput(Id type, std::optional<u32> location = std::nullopt,
-                                 std::optional<u32> builtin = std::nullopt) {
+    /// No location or builtin decoration
+    static constexpr u32 NoDecoration = ~0u;
+
+    [[nodiscard]] Id DefineInput(Id type, u32 location = NoDecoration, u32 builtin = NoDecoration) {
         const Id input_id{DefineVariable(type, builtin, SpvStorageClassInput)};
-        if (location) {
-            spv_Decorate1(&m, input_id, u32(SpvDecorationLocation), u32(*location));
+        if (location != NoDecoration) {
+            spv_Decorate1(&m, input_id, u32(SpvDecorationLocation), u32(location));
         }
         return input_id;
     }
 
-    [[nodiscard]] Id DefineOutput(Id type, std::optional<u32> location = std::nullopt,
-                                  std::optional<u32> builtin = std::nullopt) {
+    [[nodiscard]] Id DefineOutput(Id type, u32 location = NoDecoration,
+                                  u32 builtin = NoDecoration) {
         const Id output_id{DefineVariable(type, builtin, SpvStorageClassOutput)};
-        if (location) {
-            spv_Decorate1(&m, output_id, u32(SpvDecorationLocation), u32(*location));
+        if (location != NoDecoration) {
+            spv_Decorate1(&m, output_id, u32(SpvDecorationLocation), u32(location));
         }
         return output_id;
     }
@@ -99,20 +111,17 @@ public:
     }
 
     template <bool global = true>
-    [[nodiscard]] Id DefineVar(Id type, u32 storage_class,
-                               std::optional<Id> initializer = std::nullopt) {
+    /// @initializer 0: none
+    [[nodiscard]] Id DefineVar(Id type, u32 storage_class, Id initializer = 0) {
         const Id pointer_type_id{spv_TypePointer(&m, u32(storage_class), type)};
-        return global ? spv_AddGlobalVariable(&m, pointer_type_id, u32(storage_class),
-                                              initializer.value_or(0))
-                      : spv_AddLocalVariable(&m, pointer_type_id, u32(storage_class),
-                                             initializer.value_or(0));
+        return global ? spv_AddGlobalVariable(&m, pointer_type_id, u32(storage_class), initializer)
+                      : spv_AddLocalVariable(&m, pointer_type_id, u32(storage_class), initializer);
     }
 
-    [[nodiscard]] Id DefineVariable(Id type, std::optional<u32> builtin, u32 storage_class,
-                                    std::optional<Id> initializer = std::nullopt) {
+    [[nodiscard]] Id DefineVariable(Id type, u32 builtin, u32 storage_class, Id initializer = 0) {
         const Id id{DefineVar(type, storage_class, initializer)};
-        if (builtin) {
-            spv_Decorate1(&m, id, u32(SpvDecorationBuiltIn), u32(*builtin));
+        if (builtin != NoDecoration) {
+            spv_Decorate1(&m, id, u32(SpvDecorationBuiltIn), u32(builtin));
         }
         interfaces.push_back(id);
         return id;
@@ -126,9 +135,9 @@ public:
     [[nodiscard]] Id ConstU32(Args&&... values) {
         constexpr u32 size = static_cast<u32>(sizeof...(values));
         static_assert(size >= 2);
-        const std::array constituents{spv_Constant32(&m, U32[1], u32(values))...};
+        const Id constituents[size] = {spv_Constant32(&m, U32[1], u32(values))...};
         const Id type = size <= 4 ? U32[size] : spv_TypeArray(&m, U32[1], ConstU32(size));
-        return spv_ConstantComposite(&m, type, constituents.data(), u32(constituents.size()));
+        return spv_ConstantComposite(&m, type, constituents, size);
     }
 
     [[nodiscard]] Id ConstS32(s32 value) {
@@ -139,9 +148,9 @@ public:
     [[nodiscard]] Id ConstS32(Args&&... values) {
         constexpr u32 size = static_cast<u32>(sizeof...(values));
         static_assert(size >= 2);
-        const std::array constituents{spv_Constant32(&m, S32[1], u32(values))...};
+        const Id constituents[size] = {spv_Constant32(&m, S32[1], u32(values))...};
         const Id type = size <= 4 ? S32[size] : spv_TypeArray(&m, S32[1], ConstU32(size));
-        return spv_ConstantComposite(&m, type, constituents.data(), u32(constituents.size()));
+        return spv_ConstantComposite(&m, type, constituents, size);
     }
 
     [[nodiscard]] Id ConstF32(f32 value) {
@@ -152,9 +161,9 @@ public:
     [[nodiscard]] Id ConstF32(Args... values) {
         constexpr u32 size = static_cast<u32>(sizeof...(values));
         static_assert(size >= 2);
-        const std::array constituents{spv_ConstantF32(&m, F32[1], f32(values))...};
+        const Id constituents[size] = {spv_ConstantF32(&m, F32[1], f32(values))...};
         const Id type = size <= 4 ? F32[size] : spv_TypeArray(&m, F32[1], ConstU32(size));
-        return spv_ConstantComposite(&m, type, constituents.data(), u32(constituents.size()));
+        return spv_ConstantComposite(&m, type, constituents, size);
     }
 
     inline Id AddLabel() {
@@ -167,13 +176,13 @@ public:
         return last_label;
     }
 
-    Id EmitDwordMemoryRead(Id address, auto&& fallback) {
+    template <typename Fallback>
+    Id EmitDwordMemoryRead(Id address, Fallback&& fallback) {
         const Id available_label = spv_OpLabel(&m);
         const Id fallback_label = spv_OpLabel(&m);
         const Id merge_label = spv_OpLabel(&m);
 
-        const Id addr =
-            spv_OpFunctionCall(&m, U64, get_bda_pointer, std::array<u32, 1>{address}.data(), 1);
+        const Id addr = spv_OpFunctionCall(&m, U64, get_bda_pointer, &address, 1);
         const Id is_available = spv_OpINotEqual(&m, U1[1], addr, u64_zero_value);
         spv_OpSelectionMerge(&m, merge_label, u32(SpvSelectionControlMaskNone));
         spv_OpBranchConditional(&m, is_available, available_label, fallback_label);
@@ -192,13 +201,12 @@ public:
         // Merge
         AddLabel(merge_label);
         const Id final_result = spv_OpPhi(
-            &m, U32[1],
-            std::array<u32, 4>{fallback_result, fallback_label, result, available_label}.data(), 4);
+            &m, U32[1], Words<4>{{fallback_result, fallback_label, result, available_label}}.v, 4);
         return final_result;
     }
 
     Id EmitSharedMemoryAccess(const Id result_type, const Id shared_mem, const Id index) {
-        if (std::popcount(static_cast<u32>(info.shared_types)) > 1) {
+        if (Common::PopCount(static_cast<u32>(info.shared_types)) > 1) {
             return spv_OpAccessChain2(&m, result_type, shared_mem, u32_zero_value, index);
         }
         // Workgroup layout struct omitted.
@@ -206,12 +214,11 @@ public:
     }
 
     Id EmitFlatbufferLoad(Id flatbuf_offset) {
-        const auto& flatbuf_buffer{buffers[flatbuf_index]};
+        const BufferDefinition& flatbuf_buffer{buffers[flatbuf_index]};
         ASSERT(flatbuf_buffer.binding >= 0 && flatbuf_buffer.buffer_type == BufferType::Flatbuf);
-        const auto [flatbuf_buffer_id, flatbuf_pointer_type] =
-            flatbuf_buffer.aliases[u32(PointerType::U32)];
-        const auto ptr{spv_OpAccessChain2(&m, flatbuf_pointer_type, flatbuf_buffer_id,
-                                          u32_zero_value, flatbuf_offset)};
+        const BufferSpv& flatbuf_alias = flatbuf_buffer.aliases[u32(PointerType::U32)];
+        const Id ptr{spv_OpAccessChain2(&m, flatbuf_alias.pointer_type, flatbuf_alias.id,
+                                        u32_zero_value, flatbuf_offset)};
         return spv_OpLoad(&m, U32[1], ptr);
     }
 
@@ -295,7 +302,7 @@ public:
     Id output_tess_level_outer{};
     Id output_tess_level_inner{};
     Id tess_coord;
-    std::array<Id, 30> patches{};
+    Id patches[30]{};
 
     Id workgroup_id{};
     Id num_workgroups_id{};
@@ -361,17 +368,21 @@ public:
     struct BufferDefinition {
         u32 binding;
         BufferType buffer_type;
-        std::array<Id, u32(PointerSize::NumClass)> offsets;
-        std::array<BufferSpv, u32(PointerType::NumAlias)> aliases;
+        Id offsets[u32(PointerSize::NumClass)];
+        BufferSpv aliases[u32(PointerType::NumAlias)];
 
-        template <class Self>
-        auto& Alias(this Self& self, PointerType alias) {
-            return self.aliases[u32(alias)];
+        BufferSpv& Alias(PointerType alias) {
+            return aliases[u32(alias)];
+        }
+        const BufferSpv& Alias(PointerType alias) const {
+            return aliases[u32(alias)];
         }
 
-        template <class Self>
-        auto& Offset(this Self& self, PointerSize size) {
-            return self.offsets[u32(size)];
+        Id& Offset(PointerSize size) {
+            return offsets[u32(size)];
+        }
+        const Id& Offset(PointerSize size) const {
+            return offsets[u32(size)];
         }
     };
 
@@ -380,7 +391,8 @@ public:
     Common::SmallVector<BufferDefinition, 16> buffers;
     Common::SmallVector<TextureDefinition, 8> images;
     Common::SmallVector<Id, 4> samplers;
-    std::unordered_map<u32, Id> first_to_last_label_map;
+    /// The label a block ends in, by the label it starts with: Id values
+    u64_map_t first_to_last_label_map{};
 
     size_t flatbuf_index{};
     size_t bda_pagetable_index{};
@@ -393,7 +405,7 @@ public:
     struct SpirvAttribute {
         union {
             Id id;
-            std::array<Id, 3> id_array;
+            Id id_array[3];
         };
         Id pointer_type;
         Id component_type;
@@ -404,9 +416,9 @@ public:
     };
     Id input_attr_array;
     Id output_attr_array;
-    std::array<SpirvAttribute, IR::NumParams> input_params{};
-    std::array<SpirvAttribute, IR::NumParams> output_params{};
-    std::array<SpirvAttribute, IR::NumRenderTargets> frag_outputs{};
+    SpirvAttribute input_params[IR::NumParams]{};
+    SpirvAttribute output_params[IR::NumParams]{};
+    SpirvAttribute frag_outputs[IR::NumRenderTargets]{};
 
     Id uf11_to_f32{};
     Id f32_to_uf11{};
@@ -436,8 +448,13 @@ private:
     BufferSpv DefineBuffer(bool is_written, bool is_coherent, u32 elem_shift,
                            BufferType buffer_type, Id data_type);
 
-    Id DefineFloat32ToUfloatM5(u32 mantissa_bits, std::string_view name);
-    Id DefineUfloatM5ToFloat32(u32 mantissa_bits, std::string_view name);
+    /// The shared memory variable of elements of @type, and its pointer types: none when the
+    /// shader uses no shared memory of that type
+    void DefineSharedMemoryType(IR::Type type, Id element_type, u32 element_size, const char* name,
+                                u32 shared_memory_size, int num_types, Id* out_variable,
+                                Id* out_element_pointer, Id* out_pointer);
+    Id DefineFloat32ToUfloatM5(u32 mantissa_bits, const char* name);
+    Id DefineUfloatM5ToFloat32(u32 mantissa_bits, const char* name);
 
     Id DefineGetBdaPointer();
 

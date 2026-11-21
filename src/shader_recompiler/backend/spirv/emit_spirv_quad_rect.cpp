@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright 2024 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include "common/small_vector.h"
 #include "shader_recompiler/backend/spirv/emit_spirv_quad_rect.h"
 #include "shader_recompiler/backend/spirv/spirv_emit_context.h"
 #include "shader_recompiler/runtime_info.h"
@@ -34,8 +35,8 @@ struct QuadRectListEmitter {
         int_zero = spv_Constant32(&m, int_id, u32(0));
 
         const Id float_arr{spv_TypeArray(&m, float_id, spv_Constant32(&m, uint_id, u32(1U)))};
-        gl_per_vertex_type = spv_TypeStruct(
-            &m, std::array<u32, 4>{vec4_id, float_id, float_arr, float_arr}.data(), 4);
+        gl_per_vertex_type =
+            spv_TypeStruct(&m, Words<4>{{vec4_id, float_id, float_arr, float_arr}}.v, 4);
         spv_Decorate0(&m, gl_per_vertex_type, u32(SpvDecorationBlock));
         spv_MemberDecorate1(&m, gl_per_vertex_type, 0U, u32(SpvDecorationBuiltIn),
                             u32(static_cast<u32>(SpvBuiltInPosition)));
@@ -48,6 +49,14 @@ struct QuadRectListEmitter {
     }
 
     /// Emits tessellation control shader for interpolating the 4th vertex of rectange primitive
+    /// v0 * bary.x + v1 * bary.y + v2 * bary.z
+    Id Interpolate(const Id* bary, Id v0, Id v1, Id v2) {
+        const Id p0{spv_OpVectorTimesScalar(&m, vec4_id, v0, bary[0])};
+        const Id p1{spv_OpVectorTimesScalar(&m, vec4_id, v1, bary[1])};
+        const Id p2{spv_OpVectorTimesScalar(&m, vec4_id, v2, bary[2])};
+        return spv_OpFAdd(&m, vec4_id, p0, spv_OpFAdd(&m, vec4_id, p1, p2));
+    }
+
     void EmitRectListTCS() {
         DefineEntry(SpvExecutionModelTessellationControl);
 
@@ -67,25 +76,25 @@ struct QuadRectListEmitter {
 
         // Emit interpolation block of the 4th vertex in rect.
         // Load positions
-        std::array<Id, 3> pos;
+        Id pos[3];
         for (int i = 0; i < 3; i++) {
             pos[i] = spv_OpLoad(&m, vec4_id,
                                 spv_OpAccessChain2(&m, input_vec4, gl_in, Int(i), int_zero));
         }
 
-        std::array<Id, 3> point_coord_equal;
+        Id point_coord_equal[3];
         for (int i = 0; i < 3; i++) {
             // point_coord_equal[i] = equal(gl_in[i].gl_Position.xy, gl_in[(i + 1) %
             // 3].gl_Position.xy);
-            const Id pos_l_xy{spv_OpVectorShuffle(&m, vec2_id, pos[i], pos[i],
-                                                  std::array<u32, 2>{0, 1}.data(), 2)};
+            const Id pos_l_xy{
+                spv_OpVectorShuffle(&m, vec2_id, pos[i], pos[i], Words<2>{{0, 1}}.v, 2)};
             const Id pos_r_xy{spv_OpVectorShuffle(&m, vec2_id, pos[(i + 1) % 3], pos[(i + 1) % 3],
-                                                  std::array<u32, 2>{0, 1}.data(), 2)};
+                                                  Words<2>{{0, 1}}.v, 2)};
             point_coord_equal[i] = spv_OpFOrdEqual(&m, bvec2_id, pos_l_xy, pos_r_xy);
         }
 
-        std::array<Id, 3> bary_coord;
-        std::array<Id, 3> is_edge_vertex;
+        Id bary_coord[3];
+        Id is_edge_vertex[3];
         for (int i = 0; i < 3; i++) {
             // bool xy_equal = point_coord_equal[i].x && point_coord_equal[(i + 2) % 3].y;
             const Id xy_equal{spv_OpLogicalAnd(
@@ -100,14 +109,6 @@ struct QuadRectListEmitter {
             bary_coord[i] = spv_OpSelect(&m, float_id, is_edge_vertex[i], float_min_one, float_one);
         }
 
-        const auto interpolate = [&](Id v0, Id v1, Id v2) {
-            // return v0 * bary_coord.x + v1 * bary_coord.y + v2 * bary_coord.z;
-            const Id p0{spv_OpVectorTimesScalar(&m, vec4_id, v0, bary_coord[0])};
-            const Id p1{spv_OpVectorTimesScalar(&m, vec4_id, v1, bary_coord[1])};
-            const Id p2{spv_OpVectorTimesScalar(&m, vec4_id, v2, bary_coord[2])};
-            return spv_OpFAdd(&m, vec4_id, p0, spv_OpFAdd(&m, vec4_id, p1, p2));
-        };
-
         // int vertex_index_id = is_edge_vertex[1] ? 1 : (is_edge_vertex[2] ? 2 : 0);
         Id vertex_index{spv_OpSelect(&m, int_id, is_edge_vertex[2], Int(2), Int(0))};
         vertex_index = spv_OpSelect(&m, int_id, is_edge_vertex[1], Int(1), vertex_index);
@@ -120,7 +121,7 @@ struct QuadRectListEmitter {
 
         // gl_out[gl_InvocationID].gl_Position = gl_InvocationID == 3 ? pos3 :
         // gl_in[index].gl_Position;
-        const Id pos3{interpolate(pos[0], pos[1], pos[2])};
+        const Id pos3{Interpolate(bary_coord, pos[0], pos[1], pos[2])};
         const Id in_ptr{spv_OpAccessChain2(&m, input_vec4, gl_in, index, Int(0))};
         const Id position{
             spv_OpSelect(&m, vec4_id, invocation_3, pos3, spv_OpLoad(&m, vec4_id, in_ptr))};
@@ -136,7 +137,7 @@ struct QuadRectListEmitter {
                 spv_OpLoad(&m, vec4_id, spv_OpAccessChain1(&m, input_vec4, inputs[i], Int(1)))};
             const Id v2{
                 spv_OpLoad(&m, vec4_id, spv_OpAccessChain1(&m, input_vec4, inputs[i], Int(2)))};
-            const Id in_param3{interpolate(v0, v1, v2)};
+            const Id in_param3{Interpolate(bary_coord, v0, v1, v2)};
             // out_paramN[gl_InvocationID] = gl_InvocationID == 3 ? in_paramN3 : in_paramN[index];
             const Id in_param{
                 spv_OpLoad(&m, vec4_id, spv_OpAccessChain1(&m, input_vec4, inputs[i], index))};
@@ -153,8 +154,8 @@ struct QuadRectListEmitter {
     void EmitQuadListTCS() {
         DefineEntry(SpvExecutionModelTessellationControl);
         const Id array_type{spv_TypeArray(&m, int_id, Int(4))};
-        const Id values{spv_ConstantComposite(
-            &m, array_type, std::array<u32, 4>{Int(1), Int(2), Int(0), Int(3)}.data(), 4)};
+        const Id values{
+            spv_ConstantComposite(&m, array_type, Words<4>{{Int(1), Int(2), Int(0), Int(3)}}.v, 4)};
         const Id indices{
             spv_AddLocalVariable(&m, spv_TypePointer(&m, u32(SpvStorageClassFunction), array_type),
                                  u32(SpvStorageClassFunction), values)};
@@ -350,12 +351,13 @@ private:
         Id gl_tess_coord;
         Id gl_invocation_id;
     };
-    std::vector<Id> inputs;
-    std::vector<Id> outputs;
-    std::vector<Id> interfaces;
+    Common::SmallVector<Id, 32> inputs;
+    Common::SmallVector<Id, 32> outputs;
+    Common::SmallVector<Id, 72> interfaces;
 };
 
-std::vector<u32> EmitAuxilaryTessShader(AuxShaderType type, const HwFragmentRuntimeInfo& fs_info) {
+Common::HeapArray<u32> EmitAuxilaryTessShader(AuxShaderType type,
+                                              const HwFragmentRuntimeInfo& fs_info) {
     QuadRectListEmitter ctx{fs_info};
     switch (type) {
     case AuxShaderType::RectListTCS:

@@ -24,7 +24,7 @@ u32 NameFmt(spv_module_t* m, u32 target, const char* format, ...) {
         char name[256];
         va_list args;
         va_start(args, format);
-        std::vsnprintf(name, sizeof(name), format, args);
+        vsnprintf(name, sizeof(name), format, args);
         va_end(args);
         spv_Name(m, target, name);
     }
@@ -59,6 +59,8 @@ EmitContext::EmitContext(spv_module_t& module, const Profile& profile_,
                          const RuntimeInfo& runtime_info_, Info& info_, Bindings& binding_)
     : m{module}, info{info_}, runtime_info{runtime_info_}, profile{profile_},
       hw_stage{info.hw_stage}, sw_stage{info.sw_stage}, binding{binding_} {
+    // A shader has a few dozen blocks; the table grows for more
+    u64_map_init(&first_to_last_label_map, sizeof(Id), 64);
     ASSERT_MSG(spv_module_reset(&m, 4096), "SPIR-V module: out of memory");
     if (info.uses_dma) {
         spv_SetMemoryModel(&m, u32(SpvAddressingModelPhysicalStorageBuffer64),
@@ -79,6 +81,10 @@ EmitContext::EmitContext(spv_module_t& module, const Profile& profile_,
     DefineFunctions();
 }
 
+EmitContext::~EmitContext() {
+    u64_map_free(&first_to_last_label_map);
+}
+
 Id EmitContext::Def(const IR::Value& value) {
     if (!value.IsImmediate()) {
         return value.Inst()->Definition<Id>();
@@ -97,7 +103,7 @@ Id EmitContext::Def(const IR::Value& value) {
     case IR::Type::F64:
         return spv_ConstantF64(&m, F64[1], f64(value.F64()));
     case IR::Type::StringLiteral:
-        return spv_String(&m, std::string(value.StringLiteral()).c_str());
+        return spv_String(&m, value.StringLiteral());
     default:
         UNREACHABLE_MSG("Immediate type %s", Shader::IR::NameOf(value.Type()).c_str());
     }
@@ -146,7 +152,7 @@ void EmitContext::DefineArithmeticTypes() {
     u64_one_value = spv_Constant64(&m, U64, u64(1ULL));
     u64_zero_value = spv_Constant64(&m, U64, u64(0ULL));
 
-    pi_x2 = ConstF32(2.0f * float{std::numbers::pi});
+    pi_x2 = ConstF32(2.0f * 3.14159265358979323846f);
 
     input_f32 = spv_Name(&m, spv_TypePointer(&m, u32(SpvStorageClassInput), F32[1]), "input_f32");
     input_u32 = spv_Name(&m, spv_TypePointer(&m, u32(SpvStorageClassInput), U32[1]), "input_u32");
@@ -159,16 +165,15 @@ void EmitContext::DefineArithmeticTypes() {
     output_s32 =
         spv_Name(&m, spv_TypePointer(&m, u32(SpvStorageClassOutput), S32[1]), "output_s32");
 
-    full_result_i32x2 = spv_Name(
-        &m, spv_TypeStruct(&m, std::array<u32, 2>{S32[1], S32[1]}.data(), 2), "full_result_i32x2");
-    full_result_u32x2 = spv_Name(
-        &m, spv_TypeStruct(&m, std::array<u32, 2>{U32[1], U32[1]}.data(), 2), "full_result_u32x2");
-    frexp_result_f32 = spv_Name(
-        &m, spv_TypeStruct(&m, std::array<u32, 2>{F32[1], S32[1]}.data(), 2), "frexp_result_f32");
+    full_result_i32x2 =
+        spv_Name(&m, spv_TypeStruct(&m, Words<2>{{S32[1], S32[1]}}.v, 2), "full_result_i32x2");
+    full_result_u32x2 =
+        spv_Name(&m, spv_TypeStruct(&m, Words<2>{{U32[1], U32[1]}}.v, 2), "full_result_u32x2");
+    frexp_result_f32 =
+        spv_Name(&m, spv_TypeStruct(&m, Words<2>{{F32[1], S32[1]}}.v, 2), "frexp_result_f32");
     if (info.uses_fp64) {
         frexp_result_f64 =
-            spv_Name(&m, spv_TypeStruct(&m, std::array<u32, 2>{F64[1], S32[1]}.data(), 2),
-                     "frexp_result_f64");
+            spv_Name(&m, spv_TypeStruct(&m, Words<2>{{F64[1], S32[1]}}.v, 2), "frexp_result_f64");
     }
     if (info.uses_dma) {
         physical_pointer_type_u32 =
@@ -217,7 +222,9 @@ Id EmitContext::GetBufferSize(const u32 sharp_idx) {
     Shader::Backend::SPIRV::EmitContext::BufferDefinition const& srt_flatbuf =
         buffers[flatbuf_index];
     ASSERT(srt_flatbuf.buffer_type == BufferType::Flatbuf);
-    const auto [id, pointer_type] = srt_flatbuf.Alias(PointerType::U32);
+    const EmitContext::BufferSpv& srt_flatbuf_alias = srt_flatbuf.Alias(PointerType::U32);
+    const Id id = srt_flatbuf_alias.id;
+    const Id pointer_type = srt_flatbuf_alias.pointer_type;
 
     const uint32_t rsrc1{spv_OpLoad(
         &m, U32[1],
@@ -457,7 +464,8 @@ void EmitContext::DefineInputs() {
             }
             const IR::Attribute param = IR::Attribute::Param0 + i;
             const u32 num_components = info.loads.NumComponents(param);
-            const auto [primary, auxiliary] = info.fs_interpolation[i];
+            const Qualifier primary = info.fs_interpolation[i].primary;
+            const Qualifier auxiliary = info.fs_interpolation[i].auxiliary;
             const Id type = F32[num_components];
             const Id attr_id = [&] {
                 const int bind_location = input.param_index + (has_clip_distance_inputs ? 1 : 0);
@@ -519,9 +527,7 @@ void EmitContext::DefineInputs() {
         const uint32_t gl_per_vertex = spv_Name(
             &m,
             spv_TypeStruct(
-                &m,
-                std::array<u32, 3>{F32[4], F32[1], spv_TypeArray(&m, F32[1], ConstU32(1u))}.data(),
-                3),
+                &m, Words<3>{{F32[4], F32[1], spv_TypeArray(&m, F32[1], ConstU32(1u))}}.v, 3),
             "gl_PerVertex");
         spv_MemberName(&m, gl_per_vertex, 0, "gl_Position");
         spv_MemberName(&m, gl_per_vertex, 1, "gl_PointSize");
@@ -565,7 +571,7 @@ void EmitContext::DefineInputs() {
         break;
     }
     case SwStage::TessellationEval: {
-        tess_coord = DefineInput(F32[3], std::nullopt, SpvBuiltInTessCoord);
+        tess_coord = DefineInput(F32[3], NoDecoration, SpvBuiltInTessCoord);
         primitive_id = DefineVariable(U32[1], SpvBuiltInPrimitiveId, SpvStorageClassInput);
 
         const u32 num_attrs = Common::AlignUp(runtime_info.sw.tes.hs_output_cp_stride, 16) >> 4;
@@ -596,8 +602,8 @@ void EmitContext::DefineInputs() {
 }
 
 void EmitContext::DefineVertexBlock() {
-    const std::array<Id, 8> zero{f32_zero_value, f32_zero_value, f32_zero_value, f32_zero_value,
-                                 f32_zero_value, f32_zero_value, f32_zero_value, f32_zero_value};
+    const Id zero[8] = {f32_zero_value, f32_zero_value, f32_zero_value, f32_zero_value,
+                        f32_zero_value, f32_zero_value, f32_zero_value, f32_zero_value};
     output_position = DefineVariable(F32[4], SpvBuiltInPosition, SpvStorageClassOutput);
     const bool needs_clip_distance_emulation = sw_stage == SwStage::Vertex &&
                                                hw_stage == HwStage::Vertex &&
@@ -605,13 +611,13 @@ void EmitContext::DefineVertexBlock() {
     const bool has_clip_distance_outputs = info.stores.GetAny(IR::Attribute::ClipDistance);
     if (has_clip_distance_outputs && !needs_clip_distance_emulation) {
         const Id type{spv_TypeArray(&m, F32[1], ConstU32(8U))};
-        const Id initializer{spv_ConstantComposite(&m, type, zero.data(), u32(zero.size()))};
+        const Id initializer{spv_ConstantComposite(&m, type, zero, 8u)};
         clip_distances =
             DefineVariable(type, SpvBuiltInClipDistance, SpvStorageClassOutput, initializer);
     }
     if (info.stores.GetAny(IR::Attribute::CullDistance)) {
         const Id type{spv_TypeArray(&m, F32[1], ConstU32(8U))};
-        const Id initializer{spv_ConstantComposite(&m, type, zero.data(), u32(zero.size()))};
+        const Id initializer{spv_ConstantComposite(&m, type, zero, 8u)};
         cull_distances =
             DefineVariable(type, SpvBuiltInCullDistance, SpvStorageClassOutput, initializer);
     }
@@ -669,12 +675,12 @@ void EmitContext::DefineOutputs() {
     case SwStage::TessellationControl: {
         if (info.stores_tess_level_outer) {
             const Id type{spv_TypeArray(&m, F32[1], ConstU32(4U))};
-            output_tess_level_outer = DefineOutput(type, std::nullopt, SpvBuiltInTessLevelOuter);
+            output_tess_level_outer = DefineOutput(type, NoDecoration, SpvBuiltInTessLevelOuter);
             spv_Decorate0(&m, output_tess_level_outer, u32(SpvDecorationPatch));
         }
         if (info.stores_tess_level_inner) {
             const Id type{spv_TypeArray(&m, F32[1], ConstU32(2U))};
-            output_tess_level_inner = DefineOutput(type, std::nullopt, SpvBuiltInTessLevelInner);
+            output_tess_level_inner = DefineOutput(type, NoDecoration, SpvBuiltInTessLevelInner);
             spv_Decorate0(&m, output_tess_level_inner, u32(SpvDecorationPatch));
         }
 
@@ -775,9 +781,7 @@ void EmitContext::DefinePushDataBlock() {
     // Create push constants block for instance steps rates
     const Id struct_type{spv_Name(
         &m,
-        spv_TypeStruct(
-            &m, std::array<u32, 7>{F32[1], F32[1], F32[1], F32[1], U32[4], U32[4], U32[2]}.data(),
-            7),
+        spv_TypeStruct(&m, Words<7>{{F32[1], F32[1], F32[1], F32[1], U32[4], U32[4], U32[2]}}.v, 7),
         "AuxData")};
     spv_Decorate0(&m, struct_type, u32(SpvDecorationBlock));
     spv_MemberName(&m, struct_type, u32(PushData::XOffsetIndex), "xoffset");
@@ -808,7 +812,11 @@ EmitContext::BufferSpv EmitContext::DefineBuffer(bool is_written, bool is_cohere
     const Id record_array_type{spv_TypeRuntimeArray(&m, data_type)};
     // Define block struct type. Don't perform decorations twice on the same Id.
     const Id struct_type{spv_TypeStruct1(&m, record_array_type)};
-    if (std::ranges::find(buf_type_ids, record_array_type) == buf_type_ids.end()) {
+    bool decorated = false;
+    for (const Id id : buf_type_ids) {
+        decorated |= id == record_array_type;
+    }
+    if (!decorated) {
         spv_Decorate1(&m, record_array_type, u32(SpvDecorationArrayStride), u32(1 << elem_shift));
         spv_Decorate0(&m, struct_type, u32(SpvDecorationBlock));
         spv_MemberName(&m, struct_type, 0, "data");
@@ -1041,8 +1049,11 @@ void EmitContext::DefineImagesAndSamplers() {
         });
         interfaces.push_back(id);
     }
-    if (std::ranges::any_of(info.images,
-                            [](const ImageResource& image) { return image.is_atomic; })) {
+    bool any_atomic = false;
+    for (const ImageResource& image : info.images) {
+        any_atomic |= image.is_atomic;
+    }
+    if (any_atomic) {
         image_u32 = spv_TypePointer(&m, u32(SpvStorageClassImage), U32[1]);
         image_f32 = spv_TypePointer(&m, u32(SpvStorageClassImage), F32[1]);
     }
@@ -1063,7 +1074,7 @@ void EmitContext::DefineImagesAndSamplers() {
 }
 
 void EmitContext::DefineSharedMemory() {
-    const int num_types = std::popcount(static_cast<u32>(info.shared_types));
+    const int num_types = static_cast<int>(Common::PopCount(static_cast<u32>(info.shared_types)));
     if (num_types == 0) {
         return;
     }
@@ -1071,54 +1082,62 @@ void EmitContext::DefineSharedMemory() {
     const u32 shared_memory_size =
         runtime_info.hw.cs.shared_memory_size + info.shared_memory_scratch_size;
 
-    const auto make_type = [&](IR::Type type, Id element_type, u32 element_size,
-                               std::string_view name) {
-        if (False(info.shared_types & type)) {
-            // Skip unused shared memory types.
-            return std::make_tuple(Id{}, Id{}, Id{});
-        }
-
-        const u32 num_elements{Common::DivCeil(shared_memory_size, element_size)};
-        const Id array_type{spv_TypeArray(&m, element_type, ConstU32(num_elements))};
-
-        const unsigned int mem_type = [&] {
-            if (num_types > 1) {
-                const Id struct_type{spv_TypeStruct1(&m, array_type)};
-                spv_Decorate0(&m, struct_type, u32(SpvDecorationBlock));
-                spv_MemberDecorate1(&m, struct_type, 0u, u32(SpvDecorationOffset), 0u);
-                return struct_type;
-            } else {
-                return array_type;
-            }
-        }();
-
-        const Id pointer = spv_TypePointer(&m, u32(SpvStorageClassWorkgroup), mem_type);
-        const Id element_pointer = spv_TypePointer(&m, u32(SpvStorageClassWorkgroup), element_type);
-        const Id variable = spv_AddGlobalVariable(&m, pointer, u32(SpvStorageClassWorkgroup), 0);
-        spv_Name(&m, variable, std::string(name).c_str());
-        interfaces.push_back(variable);
-
-        if (num_types > 1) {
-            spv_Decorate1(&m, array_type, u32(SpvDecorationArrayStride), u32(element_size));
-            spv_Decorate0(&m, variable, u32(SpvDecorationAliased));
-        }
-
-        return std::make_tuple(variable, element_pointer, pointer);
-    };
-    std::tie(shared_memory_u16, shared_u16, shared_memory_u16_type) =
-        make_type(IR::Type::U16, U16, 2u, "shared_mem_u16");
-    std::tie(shared_memory_u32, shared_u32, shared_memory_u32_type) =
-        make_type(IR::Type::U32, U32[1], 4u, "shared_mem_u32");
-    std::tie(shared_memory_u64, shared_u64, shared_memory_u64_type) =
-        make_type(IR::Type::U64, U64, 8u, "shared_mem_u64");
+    DefineSharedMemoryType(IR::Type::U16, U16, 2u, "shared_mem_u16", shared_memory_size, num_types,
+                           &shared_memory_u16, &shared_u16, &shared_memory_u16_type);
+    DefineSharedMemoryType(IR::Type::U32, U32[1], 4u, "shared_mem_u32", shared_memory_size,
+                           num_types, &shared_memory_u32, &shared_u32, &shared_memory_u32_type);
+    DefineSharedMemoryType(IR::Type::U64, U64, 8u, "shared_mem_u64", shared_memory_size, num_types,
+                           &shared_memory_u64, &shared_u64, &shared_memory_u64_type);
 }
 
-Id EmitContext::DefineFloat32ToUfloatM5(u32 mantissa_bits, const std::string_view name) {
+void EmitContext::DefineSharedMemoryType(IR::Type type, Id element_type, u32 element_size,
+                                         const char* name, u32 shared_memory_size, int num_types,
+                                         Id* out_variable, Id* out_element_pointer,
+                                         Id* out_pointer) {
+    if (False(info.shared_types & type)) {
+        // Skip unused shared memory types.
+        *out_variable = Id{};
+        *out_element_pointer = Id{};
+        *out_pointer = Id{};
+        return;
+    }
+
+    const u32 num_elements{Common::DivCeil(shared_memory_size, element_size)};
+    const Id array_type{spv_TypeArray(&m, element_type, ConstU32(num_elements))};
+
+    const unsigned int mem_type = [&] {
+        if (num_types > 1) {
+            const Id struct_type{spv_TypeStruct1(&m, array_type)};
+            spv_Decorate0(&m, struct_type, u32(SpvDecorationBlock));
+            spv_MemberDecorate1(&m, struct_type, 0u, u32(SpvDecorationOffset), 0u);
+            return struct_type;
+        } else {
+            return array_type;
+        }
+    }();
+
+    const Id pointer = spv_TypePointer(&m, u32(SpvStorageClassWorkgroup), mem_type);
+    const Id element_pointer = spv_TypePointer(&m, u32(SpvStorageClassWorkgroup), element_type);
+    const Id variable = spv_AddGlobalVariable(&m, pointer, u32(SpvStorageClassWorkgroup), 0);
+    spv_Name(&m, variable, name);
+    interfaces.push_back(variable);
+
+    if (num_types > 1) {
+        spv_Decorate1(&m, array_type, u32(SpvDecorationArrayStride), u32(element_size));
+        spv_Decorate0(&m, variable, u32(SpvDecorationAliased));
+    }
+
+    *out_variable = variable;
+    *out_element_pointer = element_pointer;
+    *out_pointer = pointer;
+}
+
+Id EmitContext::DefineFloat32ToUfloatM5(u32 mantissa_bits, const char* name) {
     // https://gitlab.freedesktop.org/mesa/mesa/-/blob/main/src/util/format_r11g11b10f.h
-    const uint32_t func_type{spv_TypeFunction(&m, U32[1], std::array<u32, 1>{F32[1]}.data(), 1)};
+    const uint32_t func_type{spv_TypeFunction(&m, U32[1], Words<1>{{F32[1]}}.v, 1)};
     const uint32_t func{spv_OpFunction(&m, U32[1], u32(SpvFunctionControlMaskNone), func_type)};
     const uint32_t value{spv_OpFunctionParameter(&m, F32[1])};
-    spv_Name(&m, func, std::string(name).c_str());
+    spv_Name(&m, func, name);
     AddLabel();
 
     const uint32_t raw_value{spv_OpBitcast(&m, U32[1], value)};
@@ -1179,12 +1198,12 @@ Id EmitContext::DefineFloat32ToUfloatM5(u32 mantissa_bits, const std::string_vie
     return func;
 }
 
-Id EmitContext::DefineUfloatM5ToFloat32(u32 mantissa_bits, const std::string_view name) {
+Id EmitContext::DefineUfloatM5ToFloat32(u32 mantissa_bits, const char* name) {
     // https://gitlab.freedesktop.org/mesa/mesa/-/blob/main/src/util/format_r11g11b10f.h
-    const uint32_t func_type{spv_TypeFunction(&m, F32[1], std::array<u32, 1>{U32[1]}.data(), 1)};
+    const uint32_t func_type{spv_TypeFunction(&m, F32[1], Words<1>{{U32[1]}}.v, 1)};
     const uint32_t func{spv_OpFunction(&m, F32[1], u32(SpvFunctionControlMaskNone), func_type)};
     const uint32_t value{spv_OpFunctionParameter(&m, U32[1])};
-    spv_Name(&m, func, std::string(name).c_str());
+    spv_Name(&m, func, name);
     AddLabel();
 
     const Id exponent{
@@ -1230,7 +1249,7 @@ Id EmitContext::DefineGetBdaPointer() {
     const uint32_t caching_pagemask{
         spv_Constant64(&m, U64, u64(static_cast<u64>((1u << profile.sparse_page_shift) - 1)))};
 
-    const uint32_t func_type{spv_TypeFunction(&m, U64, std::array<u32, 1>{U64}.data(), 1)};
+    const uint32_t func_type{spv_TypeFunction(&m, U64, Words<1>{{U64}}.v, 1)};
     const uint32_t func{spv_OpFunction(&m, U64, u32(SpvFunctionControlMaskNone), func_type)};
     const uint32_t address{spv_OpFunctionParameter(&m, U64)};
     spv_Name(&m, func, "get_bda_pointer");
@@ -1260,7 +1279,9 @@ Id EmitContext::DefineGetBdaPointer() {
     const uint32_t page32{spv_OpUConvert(&m, U32[1], page)};
     Shader::Backend::SPIRV::EmitContext::BufferDefinition const& bda_buffer{
         buffers[bda_pagetable_index]};
-    const auto [bda_buffer_id, bda_pointer_type] = bda_buffer.Alias(PointerType::U64);
+    const EmitContext::BufferSpv& bda_buffer_alias = bda_buffer.Alias(PointerType::U64);
+    const Id bda_buffer_id = bda_buffer_alias.id;
+    const Id bda_pointer_type = bda_buffer_alias.pointer_type;
     const uint32_t bda_ptr{
         spv_OpAccessChain2(&m, bda_pointer_type, bda_buffer_id, u32_zero_value, page32)};
     const uint32_t bda{spv_OpLoad(&m, U64, bda_ptr)};
@@ -1274,7 +1295,9 @@ Id EmitContext::DefineGetBdaPointer() {
     AddLabel(fault_label);
     Shader::Backend::SPIRV::EmitContext::BufferDefinition const& fault_buffer{
         buffers[fault_buffer_index]};
-    const auto [fault_buffer_id, fault_pointer_type] = fault_buffer.Alias(PointerType::U32);
+    const EmitContext::BufferSpv& fault_buffer_alias = fault_buffer.Alias(PointerType::U32);
+    const Id fault_buffer_id = fault_buffer_alias.id;
+    const Id fault_pointer_type = fault_buffer_alias.pointer_type;
     const uint32_t page_div32{spv_OpShiftRightLogical(&m, U32[1], page32, ConstU32(5U))};
     const uint32_t page_mod32{spv_OpBitwiseAnd(&m, U32[1], page32, ConstU32(31U))};
     const uint32_t page_mask{spv_OpShiftLeftLogical(&m, U32[1], u32_one_value, page_mod32)};
@@ -1296,15 +1319,13 @@ Id EmitContext::DefineGetBdaPointer() {
 
     // Merge
     AddLabel(merge_label);
-    const uint32_t looked_up{spv_OpPhi(
-        &m, U64, std::array<u32, 4>{addr, available_label, fallback_result, fault_label}.data(),
-        4)};
+    const uint32_t looked_up{
+        spv_OpPhi(&m, U64, Words<4>{{addr, available_label, fallback_result, fault_label}}.v, 4)};
     spv_OpBranch(&m, end_label);
 
     AddLabel(end_label);
-    const uint32_t result{spv_OpPhi(
-        &m, U64, std::array<u32, 4>{looked_up, merge_label, u64_zero_value, entry_label}.data(),
-        4)};
+    const uint32_t result{
+        spv_OpPhi(&m, U64, Words<4>{{looked_up, merge_label, u64_zero_value, entry_label}}.v, 4)};
     spv_OpReturnValue(&m, result);
     spv_OpFunctionEnd(&m);
     return func;
@@ -1312,14 +1333,13 @@ Id EmitContext::DefineGetBdaPointer() {
 
 Id EmitContext::DefineReadConst(bool dynamic) {
     const uint32_t func_type{
-        !dynamic
-            ? spv_TypeFunction(&m, U32[1], std::array<u32, 3>{U32[2], U32[1], U32[1]}.data(), 3)
-            : spv_TypeFunction(&m, U32[1], std::array<u32, 2>{U32[2], U32[1]}.data(), 2)};
+        !dynamic ? spv_TypeFunction(&m, U32[1], Words<3>{{U32[2], U32[1], U32[1]}}.v, 3)
+                 : spv_TypeFunction(&m, U32[1], Words<2>{{U32[2], U32[1]}}.v, 2)};
     const uint32_t func{spv_OpFunction(&m, U32[1], u32(SpvFunctionControlMaskNone), func_type)};
     const uint32_t base{spv_OpFunctionParameter(&m, U32[2])};
     const uint32_t offset{spv_OpFunctionParameter(&m, U32[1])};
     const uint32_t flatbuf_offset{!dynamic ? spv_OpFunctionParameter(&m, U32[1]) : Id{}};
-    spv_Name(&m, func, std::string(dynamic ? "read_const_dynamic" : "read_const").c_str());
+    spv_Name(&m, func, dynamic ? "read_const_dynamic" : "read_const");
     AddLabel();
 
     const uint32_t base_lo{spv_OpUConvert(&m, U64, spv_OpCompositeExtract1(&m, U32[1], base, 0))};

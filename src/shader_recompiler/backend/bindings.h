@@ -11,7 +11,7 @@ struct Bindings {
     u32 unified{};
     u32 buffer{};
 
-    auto operator<=>(const Bindings&) const = default;
+    bool operator==(const Bindings&) const = default;
 };
 
 } // namespace Shader::Backend

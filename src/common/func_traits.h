@@ -33,4 +33,19 @@ struct LambdaTraits<ReturnType (LambdaType::*)(Args...) const> {
     static constexpr size_t NUM_ARGS{sizeof...(Args)};
 };
 
+/// The indices 0 to N - 1 as a pack (what std::index_sequence was)
+template <size_t... I>
+struct IndexSequence {};
+
+template <size_t N, size_t... I>
+struct MakeIndexSequenceT : MakeIndexSequenceT<N - 1, N - 1, I...> {};
+
+template <size_t... I>
+struct MakeIndexSequenceT<0, I...> {
+    using Type = IndexSequence<I...>;
+};
+
+template <size_t N>
+using MakeIndexSequence = typename MakeIndexSequenceT<N>::Type;
+
 } // namespace Common

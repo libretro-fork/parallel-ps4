@@ -29,9 +29,9 @@ Id EmitIAdd32(EmitContext& ctx, IR::Inst* inst, Id a, Id b) {
     return spv_OpIAdd(&ctx.m, ctx.U32[1], a, b);
     // Id result{};
     // if (IR::Inst* const carry{inst->GetAssociatedPseudoOperation(IR::Opcode::GetCarryFromOp)}) {
-    //     const Id carry_type{spv_TypeStruct(&ctx.m, std::array<u32, 2>{ctx.U32[1],
-    //     ctx.U32[1]}.data(), 2)}; const Id carry_result{spv_OpIAddCarry(&ctx.m, carry_type, a,
-    //     b)}; result = spv_OpCompositeExtract1(&ctx.m, ctx.U32[1], carry_result, 0U);
+    //     const Id carry_type{spv_TypeStruct(&ctx.m, Words<2>{{ctx.U32[1], // ctx.U32[1]}}.v, 2)};
+    //     const Id carry_result{spv_OpIAddCarry(&ctx.m, carry_type, a, b)}; result =
+    //     spv_OpCompositeExtract1(&ctx.m, ctx.U32[1], carry_result, 0U);
 
     //    const Id carry_value{spv_OpCompositeExtract1(&ctx.m, ctx.U32[1], carry_result, 1U)};
     //    carry->SetDefinition(spv_OpINotEqual(&ctx.m, ctx.U1[1][1], carry_value,

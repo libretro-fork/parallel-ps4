@@ -56,18 +56,17 @@ void ConvertPositionToClipSpace(EmitContext& ctx) {
                            ctx.push_data_block, ctx.ConstU32(PushData::YScaleIndex))};
     const Id yscale{spv_OpLoad(&ctx.m, type, yscale_ptr)};
     const Id vport_w = spv_ConstantF32(
-        &ctx.m, type, f32(float(std::min<u32>(ctx.profile.max_viewport_width / 2, 8_KB))));
+        &ctx.m, type, f32(float(Common::Min<u32>(ctx.profile.max_viewport_width / 2, 8_KB))));
     const Id wnd_x = spv_OpFAdd(&ctx.m, type, spv_OpFMul(&ctx.m, type, x, xscale), xoffset);
     const Id ndc_x = spv_OpFSub(&ctx.m, type, spv_OpFDiv(&ctx.m, type, wnd_x, vport_w),
                                 spv_ConstantF32(&ctx.m, type, f32(1.f)));
     const Id vport_h = spv_ConstantF32(
-        &ctx.m, type, f32(float(std::min<u32>(ctx.profile.max_viewport_height / 2, 8_KB))));
+        &ctx.m, type, f32(float(Common::Min<u32>(ctx.profile.max_viewport_height / 2, 8_KB))));
     const Id wnd_y = spv_OpFAdd(&ctx.m, type, spv_OpFMul(&ctx.m, type, y, yscale), yoffset);
     const Id ndc_y = spv_OpFSub(&ctx.m, type, spv_OpFDiv(&ctx.m, type, wnd_y, vport_h),
                                 spv_ConstantF32(&ctx.m, type, f32(1.f)));
-    const Id vector{spv_OpCompositeConstruct(
-        &ctx.m, ctx.F32[4], (std::array<Id, 4>({ndc_x, ndc_y, z, w})).data(),
-        u32((std::array<Id, 4>({ndc_x, ndc_y, z, w})).size()))};
+    const Id vector{
+        spv_OpCompositeConstruct(&ctx.m, ctx.F32[4], Words<4>{{ndc_x, ndc_y, z, w}}.v, 4u)};
     spv_OpStore(&ctx.m, ctx.output_position, vector);
 }
 
@@ -114,16 +113,13 @@ void EmitEndPrimitive(EmitContext& ctx, const IR::Value& stream) {
 
 void EmitDebugPrint(EmitContext& ctx, IR::Inst* inst, Id fmt, Id arg0, Id arg1, Id arg2, Id arg3) {
     IR::DebugPrintFlags flags = inst->Flags<IR::DebugPrintFlags>();
-    std::array<Id, IR::DEBUGPRINT_NUM_FORMAT_ARGS> fmt_args = {arg0, arg1, arg2, arg3};
-    std::span<unsigned int> fmt_args_span =
-        std::span<Id>(fmt_args.begin(), fmt_args.begin() + flags.num_args);
-    spv_OpDebugPrintf(&ctx.m, fmt, fmt_args_span.data(), u32(fmt_args_span.size()));
+    const Id fmt_args[IR::DEBUGPRINT_NUM_FORMAT_ARGS] = {arg0, arg1, arg2, arg3};
+    spv_OpDebugPrintf(&ctx.m, fmt, fmt_args, u32(flags.num_args));
 }
 
 Id EmitMemtime(EmitContext& ctx) {
     if (ctx.profile.supports_shader_subgroup_clock) {
-        return spv_OpReadClockKHR(&ctx.m, ctx.U64,
-                                  ctx.ConstU32(std::to_underlying(SpvScopeSubgroup)));
+        return spv_OpReadClockKHR(&ctx.m, ctx.U64, ctx.ConstU32(u32(SpvScopeSubgroup)));
     } else {
         return spv_Constant64(&ctx.m, ctx.U64, u64(1U));
     }

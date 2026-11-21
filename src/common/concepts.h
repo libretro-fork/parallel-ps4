@@ -251,4 +251,71 @@ struct Span {
     }
 };
 
+/// @count Ts on the heap, owned: what a std::vector that is filled once was. Moved, never
+/// copied.
+template <typename T>
+struct HeapArray {
+    T* items = nullptr;
+    size_t count = 0;
+
+    HeapArray() = default;
+    explicit HeapArray(size_t n) {
+        Resize(n);
+    }
+    HeapArray(const T* from, size_t n) {
+        Resize(n);
+        for (size_t i = 0; i < n; ++i) {
+            items[i] = from[i];
+        }
+    }
+    ~HeapArray() {
+        delete[] items;
+    }
+    HeapArray(HeapArray&& other) noexcept : items{other.items}, count{other.count} {
+        other.items = nullptr;
+        other.count = 0;
+    }
+    HeapArray& operator=(HeapArray&& other) noexcept {
+        if (this != &other) {
+            delete[] items;
+            items = other.items;
+            count = other.count;
+            other.items = nullptr;
+            other.count = 0;
+        }
+        return *this;
+    }
+    HeapArray(const HeapArray&) = delete;
+    HeapArray& operator=(const HeapArray&) = delete;
+
+    /// @n value-initialized Ts, the old ones let go
+    void Resize(size_t n) {
+        delete[] items;
+        items = n ? new T[n]() : nullptr;
+        count = n;
+    }
+
+    T* data() const {
+        return items;
+    }
+    size_t size() const {
+        return count;
+    }
+    size_t size_bytes() const {
+        return count * sizeof(T);
+    }
+    bool empty() const {
+        return count == 0;
+    }
+    T& operator[](size_t i) const {
+        return items[i];
+    }
+    T* begin() const {
+        return items;
+    }
+    T* end() const {
+        return items + count;
+    }
+};
+
 } // namespace Common

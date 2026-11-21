@@ -146,7 +146,7 @@ private:
     bool RefreshGraphicsStages();
     bool RefreshComputeKey();
 
-    void DumpShader(std::span<const u32> code, u64 hash, Shader::HwStage stage, size_t perm_idx,
+    void DumpShader(Common::Span<const u32> code, u64 hash, Shader::HwStage stage, size_t perm_idx,
                     const char* ext);
     std::optional<Common::FS::FileView> GetShaderPatch(u64 hash, Shader::HwStage stage,
                                                        size_t perm_idx, const char* ext);

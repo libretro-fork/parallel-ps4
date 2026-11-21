@@ -3,12 +3,12 @@
 
 #pragma once
 
-#include <vector>
+#include "common/concepts.h"
 #include "common/types.h"
 #include "shader_recompiler/runtime_info.h"
 
 namespace Shader::Backend::SPIRV {
 
-[[nodiscard]] std::vector<u32> EmitDiscardFragmentShader(std::array<Shader::OutputMap, 3> outputs);
+[[nodiscard]] Common::HeapArray<u32> EmitDiscardFragmentShader(const Shader::OutputMap* outputs);
 
 } // namespace Shader::Backend::SPIRV

@@ -9,10 +9,10 @@ namespace Shader::Backend::SPIRV {
 
 template <typename... Args>
 Id EmitCompositeConstruct(EmitContext& ctx, IR::Inst* inst, Id type, Args&&... args) {
-    const std::array<Id, sizeof...(Args)> parts{args...};
+    const Id parts[sizeof...(Args)] = {args...};
     return inst->AreAllArgsImmediates()
-               ? spv_ConstantComposite(&ctx.m, type, parts.data(), u32(parts.size()))
-               : spv_OpCompositeConstruct(&ctx.m, type, parts.data(), u32(parts.size()));
+               ? spv_ConstantComposite(&ctx.m, type, parts, u32(sizeof...(Args)))
+               : spv_OpCompositeConstruct(&ctx.m, type, parts, u32(sizeof...(Args)));
 }
 
 Id EmitCompositeConstructU32x2(EmitContext& ctx, IR::Inst* inst, Id e1, Id e2) {
@@ -66,7 +66,7 @@ Id EmitCompositeShuffleU32x2(EmitContext& ctx, Id composite1, Id composite2, Imm
     u32 comp0 = comp0_imm;
     u32 comp1 = comp1_imm;
     return spv_OpVectorShuffle(&ctx.m, ctx.U32[2], composite1, composite2,
-                               std::array<u32, 2>{u32(comp0), u32(comp1)}.data(), 2);
+                               Words<2>{{u32(comp0), u32(comp1)}}.v, 2);
 }
 
 Id EmitCompositeShuffleU32x3(EmitContext& ctx, Id composite1, Id composite2, Imm32 comp0_imm,
@@ -75,7 +75,7 @@ Id EmitCompositeShuffleU32x3(EmitContext& ctx, Id composite1, Id composite2, Imm
     u32 comp1 = comp1_imm;
     u32 comp2 = comp2_imm;
     return spv_OpVectorShuffle(&ctx.m, ctx.U32[3], composite1, composite2,
-                               std::array<u32, 3>{u32(comp0), u32(comp1), u32(comp2)}.data(), 3);
+                               Words<3>{{u32(comp0), u32(comp1), u32(comp2)}}.v, 3);
 }
 
 Id EmitCompositeShuffleU32x4(EmitContext& ctx, Id composite1, Id composite2, Imm32 comp0_imm,
@@ -84,9 +84,8 @@ Id EmitCompositeShuffleU32x4(EmitContext& ctx, Id composite1, Id composite2, Imm
     u32 comp1 = comp1_imm;
     u32 comp2 = comp2_imm;
     u32 comp3 = comp3_imm;
-    return spv_OpVectorShuffle(
-        &ctx.m, ctx.U32[4], composite1, composite2,
-        std::array<u32, 4>{u32(comp0), u32(comp1), u32(comp2), u32(comp3)}.data(), 4);
+    return spv_OpVectorShuffle(&ctx.m, ctx.U32[4], composite1, composite2,
+                               Words<4>{{u32(comp0), u32(comp1), u32(comp2), u32(comp3)}}.v, 4);
 }
 
 Id EmitCompositeConstructF32x2(EmitContext& ctx, IR::Inst* inst, Id e1, Id e2) {
@@ -140,7 +139,7 @@ Id EmitCompositeShuffleF32x2(EmitContext& ctx, Id composite1, Id composite2, Imm
     u32 comp0 = comp0_imm;
     u32 comp1 = comp1_imm;
     return spv_OpVectorShuffle(&ctx.m, ctx.F32[2], composite1, composite2,
-                               std::array<u32, 2>{u32(comp0), u32(comp1)}.data(), 2);
+                               Words<2>{{u32(comp0), u32(comp1)}}.v, 2);
 }
 
 Id EmitCompositeShuffleF32x3(EmitContext& ctx, Id composite1, Id composite2, Imm32 comp0_imm,
@@ -149,7 +148,7 @@ Id EmitCompositeShuffleF32x3(EmitContext& ctx, Id composite1, Id composite2, Imm
     u32 comp1 = comp1_imm;
     u32 comp2 = comp2_imm;
     return spv_OpVectorShuffle(&ctx.m, ctx.F32[3], composite1, composite2,
-                               std::array<u32, 3>{u32(comp0), u32(comp1), u32(comp2)}.data(), 3);
+                               Words<3>{{u32(comp0), u32(comp1), u32(comp2)}}.v, 3);
 }
 
 Id EmitCompositeShuffleF32x4(EmitContext& ctx, Id composite1, Id composite2, Imm32 comp0_imm,
@@ -158,9 +157,8 @@ Id EmitCompositeShuffleF32x4(EmitContext& ctx, Id composite1, Id composite2, Imm
     u32 comp1 = comp1_imm;
     u32 comp2 = comp2_imm;
     u32 comp3 = comp3_imm;
-    return spv_OpVectorShuffle(
-        &ctx.m, ctx.F32[4], composite1, composite2,
-        std::array<u32, 4>{u32(comp0), u32(comp1), u32(comp2), u32(comp3)}.data(), 4);
+    return spv_OpVectorShuffle(&ctx.m, ctx.F32[4], composite1, composite2,
+                               Words<4>{{u32(comp0), u32(comp1), u32(comp2), u32(comp3)}}.v, 4);
 }
 
 } // namespace Shader::Backend::SPIRV

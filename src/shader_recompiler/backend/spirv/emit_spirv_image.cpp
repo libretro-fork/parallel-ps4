@@ -261,6 +261,17 @@ Id EmitImageGatherDref(EmitContext& ctx, IR::Inst* inst, Imm32 handle_imm, Id co
     return texture.is_integer ? spv_OpBitcast(&ctx.m, ctx.F32[4], texels) : texels;
 }
 
+/// The levels of @image, 0 for one without mips
+static Id QueryLevels(EmitContext& ctx, Id image, bool has_mips) {
+    return has_mips ? spv_OpImageQueryLevels(&ctx.m, ctx.U32[1], image) : ctx.u32_zero_value;
+}
+
+/// The size of @image as @type, at @lod when the image has levels to ask of
+static Id QuerySize(EmitContext& ctx, Id type, Id image, Id lod, bool uses_lod) {
+    return uses_lod ? spv_OpImageQuerySizeLod(&ctx.m, type, image, lod)
+                    : spv_OpImageQuerySize(&ctx.m, type, image);
+}
+
 Id EmitImageQueryDimensions(EmitContext& ctx, IR::Inst* inst, Imm32 handle_imm, Id lod,
                             bool has_mips) {
     u32 handle = handle_imm;
@@ -268,31 +279,32 @@ Id EmitImageQueryDimensions(EmitContext& ctx, IR::Inst* inst, Imm32 handle_imm, 
         ctx.images[handle & 0xFFFF];
     const Id image = spv_OpLoad(&ctx.m, texture.image_type, texture.id);
     const Id zero = ctx.u32_zero_value;
-    const auto mips{
-        [&] { return has_mips ? spv_OpImageQueryLevels(&ctx.m, ctx.U32[1], image) : zero; }};
     const bool uses_lod{texture.view_type != AmdGpu::ImageType::Color2DMsaa && !texture.is_storage};
-    const auto query{[&](Id type) {
-        return uses_lod ? spv_OpImageQuerySizeLod(&ctx.m, type, image, lod)
-                        : spv_OpImageQuerySize(&ctx.m, type, image);
-    }};
     switch (texture.view_type) {
     case AmdGpu::ImageType::Color1D: {
-        const uint32_t width = spv_OpCompositeExtract1(&ctx.m, ctx.U32[1], query(ctx.U32[2]), 0U);
-        return spv_OpCompositeConstruct4(&ctx.m, ctx.U32[4], width, zero, zero, mips());
+        const uint32_t width = spv_OpCompositeExtract1(
+            &ctx.m, ctx.U32[1], QuerySize(ctx, ctx.U32[2], image, lod, uses_lod), 0U);
+        return spv_OpCompositeConstruct4(&ctx.m, ctx.U32[4], width, zero, zero,
+                                         QueryLevels(ctx, image, has_mips));
     }
     case AmdGpu::ImageType::Color1DArray: {
-        const uint32_t base = query(ctx.U32[3]);
+        const uint32_t base = QuerySize(ctx, ctx.U32[3], image, lod, uses_lod);
         const uint32_t width = spv_OpCompositeExtract1(&ctx.m, ctx.U32[1], base, 0U);
         const uint32_t slices = spv_OpCompositeExtract1(&ctx.m, ctx.U32[1], base, 2U);
-        return spv_OpCompositeConstruct4(&ctx.m, ctx.U32[4], width, slices, zero, mips());
+        return spv_OpCompositeConstruct4(&ctx.m, ctx.U32[4], width, slices, zero,
+                                         QueryLevels(ctx, image, has_mips));
     }
     case AmdGpu::ImageType::Color2D:
     case AmdGpu::ImageType::Color2DMsaa:
-        return spv_OpCompositeConstruct3(&ctx.m, ctx.U32[4], query(ctx.U32[2]), zero, mips());
+        return spv_OpCompositeConstruct3(&ctx.m, ctx.U32[4],
+                                         QuerySize(ctx, ctx.U32[2], image, lod, uses_lod), zero,
+                                         QueryLevels(ctx, image, has_mips));
     case AmdGpu::ImageType::Color2DArray:
     case AmdGpu::ImageType::Cube:
     case AmdGpu::ImageType::Color3D:
-        return spv_OpCompositeConstruct2(&ctx.m, ctx.U32[4], query(ctx.U32[3]), mips());
+        return spv_OpCompositeConstruct2(&ctx.m, ctx.U32[4],
+                                         QuerySize(ctx, ctx.U32[3], image, lod, uses_lod),
+                                         QueryLevels(ctx, image, has_mips));
     default:
         UNREACHABLE_MSG("SPIR-V Instruction");
     }
@@ -370,8 +382,7 @@ Id EmitImageRead(EmitContext& ctx, IR::Inst* inst, Imm32 handle_imm, Id coords, 
             ASSERT(texture.mip_fallback_mode == MipStorageFallbackMode::DynamicIndex);
             const Id single_image_ptr_type =
                 spv_TypePointer(&ctx.m, u32(SpvStorageClassUniformConstant), texture.image_type);
-            image_ptr = spv_OpAccessChain(&ctx.m, single_image_ptr_type, image_ptr,
-                                          (std::array{lod}).data(), u32((std::array{lod}).size()));
+            image_ptr = spv_OpAccessChain(&ctx.m, single_image_ptr_type, image_ptr, &lod, 1u);
 #endif
         }
         const Id image = spv_OpLoad(&ctx.m, texture.image_type, image_ptr);
@@ -398,8 +409,7 @@ void EmitImageWrite(EmitContext& ctx, IR::Inst* inst, Imm32 handle_imm, Id coord
         ASSERT(texture.mip_fallback_mode == MipStorageFallbackMode::DynamicIndex);
         const Id single_image_ptr_type =
             spv_TypePointer(&ctx.m, u32(SpvStorageClassUniformConstant), texture.image_type);
-        image_ptr = spv_OpAccessChain(&ctx.m, single_image_ptr_type, image_ptr,
-                                      (std::array{lod}).data(), u32((std::array{lod}).size()));
+        image_ptr = spv_OpAccessChain(&ctx.m, single_image_ptr_type, image_ptr, &lod, 1u);
     }
     const Id image = spv_OpLoad(&ctx.m, texture.image_type, image_ptr);
     const Id texel = texture.is_integer ? spv_OpBitcast(&ctx.m, color_type, color) : color;

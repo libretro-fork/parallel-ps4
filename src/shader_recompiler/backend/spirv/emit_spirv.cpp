@@ -1,14 +1,10 @@
 // SPDX-FileCopyrightText: Copyright 2024 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
-#include <mutex>
-#include <span>
-#include <type_traits>
-#include <utility>
-#include <vector>
 #include "common/enum_names.h"
 #include "common/run_once.h"
 
+#include "common/alignment.h"
 #include "common/assert.h"
 #include "common/func_traits.h"
 #include "core/emulator_settings.h"
@@ -56,49 +52,49 @@ static constexpr u32 GetOutputPrimitiveType(AmdGpu::GsOutputPrimitiveType type) 
     }
 }
 
-template <auto func, typename... Args>
+template <typename F, F func, typename... Args>
 void SetDefinition(EmitContext& ctx, IR::Inst* inst, Args... args) {
-    inst->SetDefinition<Id>(func(ctx, std::forward<Args>(args)...));
+    inst->SetDefinition<Id>(func(ctx, static_cast<Args&&>(args)...));
 }
 
 template <typename ArgType>
 ArgType Arg(EmitContext& ctx, const IR::Value& arg) {
-    if constexpr (std::is_same_v<ArgType, Id>) {
+    if constexpr (Common::IsSame<ArgType, Id>) {
         return ctx.Def(arg);
-    } else if constexpr (std::is_same_v<ArgType, const IR::Value&>) {
+    } else if constexpr (Common::IsSame<ArgType, const IR::Value&>) {
         return arg;
-    } else if constexpr (std::is_same_v<ArgType, Imm32>) {
+    } else if constexpr (Common::IsSame<ArgType, Imm32>) {
         return Imm32(arg.U32());
-    } else if constexpr (std::is_same_v<ArgType, u32>) {
+    } else if constexpr (Common::IsSame<ArgType, u32>) {
         return arg.U32();
-    } else if constexpr (std::is_same_v<ArgType, u64>) {
+    } else if constexpr (Common::IsSame<ArgType, u64>) {
         return arg.U64();
-    } else if constexpr (std::is_same_v<ArgType, bool>) {
+    } else if constexpr (Common::IsSame<ArgType, bool>) {
         return arg.U1();
-    } else if constexpr (std::is_same_v<ArgType, IR::Attribute>) {
+    } else if constexpr (Common::IsSame<ArgType, IR::Attribute>) {
         return arg.Attribute();
-    } else if constexpr (std::is_same_v<ArgType, IR::ScalarReg>) {
+    } else if constexpr (Common::IsSame<ArgType, IR::ScalarReg>) {
         return arg.ScalarReg();
-    } else if constexpr (std::is_same_v<ArgType, IR::VectorReg>) {
+    } else if constexpr (Common::IsSame<ArgType, IR::VectorReg>) {
         return arg.VectorReg();
-    } else if constexpr (std::is_same_v<ArgType, const char*>) {
+    } else if constexpr (Common::IsSame<ArgType, const char*>) {
         return arg.StringLiteral();
-    } else if constexpr (std::is_same_v<ArgType, IR::Patch>) {
+    } else if constexpr (Common::IsSame<ArgType, IR::Patch>) {
         return arg.Patch();
     }
     UNREACHABLE();
 }
 
-template <auto func, bool is_first_arg_inst, size_t... I>
-void Invoke(EmitContext& ctx, IR::Inst* inst, std::index_sequence<I...>) {
-    using Traits = Common::FuncTraits<decltype(func)>;
-    if constexpr (std::is_same_v<typename Traits::ReturnType, Id>) {
+template <typename F, F func, bool is_first_arg_inst, size_t... I>
+void Invoke(EmitContext& ctx, IR::Inst* inst, Common::IndexSequence<I...>) {
+    using Traits = Common::FuncTraits<F>;
+    if constexpr (Common::IsSame<typename Traits::ReturnType, Id>) {
         if constexpr (is_first_arg_inst) {
-            SetDefinition<func>(
+            SetDefinition<F, func>(
                 ctx, inst, inst,
                 Arg<typename Traits::template ArgType<I + 2>>(ctx, inst->Arg(I))...);
         } else {
-            SetDefinition<func>(
+            SetDefinition<F, func>(
                 ctx, inst, Arg<typename Traits::template ArgType<I + 1>>(ctx, inst->Arg(I))...);
         }
     } else {
@@ -110,17 +106,17 @@ void Invoke(EmitContext& ctx, IR::Inst* inst, std::index_sequence<I...>) {
     }
 }
 
-template <auto func>
+template <typename F, F func>
 void Invoke(EmitContext& ctx, IR::Inst* inst) {
-    using Traits = Common::FuncTraits<decltype(func)>;
+    using Traits = Common::FuncTraits<F>;
     static_assert(Traits::NUM_ARGS >= 1, "Insufficient arguments");
     if constexpr (Traits::NUM_ARGS == 1) {
-        Invoke<func, false>(ctx, inst, std::make_index_sequence<0>{});
+        Invoke<F, func, false>(ctx, inst, Common::MakeIndexSequence<0>{});
     } else {
         using FirstArgType = typename Traits::template ArgType<1>;
-        static constexpr bool is_first_arg_inst = std::is_same_v<FirstArgType, IR::Inst*>;
-        using Indices = std::make_index_sequence<Traits::NUM_ARGS - (is_first_arg_inst ? 2 : 1)>;
-        Invoke<func, is_first_arg_inst>(ctx, inst, Indices{});
+        static constexpr bool is_first_arg_inst = Common::IsSame<FirstArgType, IR::Inst*>;
+        using Indices = Common::MakeIndexSequence<Traits::NUM_ARGS - (is_first_arg_inst ? 2 : 1)>;
+        Invoke<F, func, is_first_arg_inst>(ctx, inst, Indices{});
     }
 }
 
@@ -128,7 +124,7 @@ void EmitInst(EmitContext& ctx, IR::Inst* inst) {
     switch (inst->GetOpcode()) {
 #define OPCODE(name, result_type, ...)                                                             \
     case IR::Opcode::name:                                                                         \
-        return Invoke<&Emit##name>(ctx, inst);
+        return Invoke<decltype(&Emit##name), &Emit##name>(ctx, inst);
 #include "shader_recompiler/ir/opcodes.inc"
 #undef OPCODE
     }
@@ -172,7 +168,8 @@ void Traverse(EmitContext& ctx, const IR::Program& program) {
             for (IR::Inst& inst : node.data.block->Instructions()) {
                 EmitInst(ctx, &inst);
             }
-            ctx.first_to_last_label_map[label] = ctx.last_label;
+            *static_cast<Id*>(u64_map_insert(&ctx.first_to_last_label_map, label, nullptr)) =
+                ctx.last_label;
             break;
         }
         case IR::AbstractSyntaxNode::Type::If: {
@@ -378,7 +375,8 @@ void SetupCapabilities(const Info& info, const Profile& profile, const RuntimeIn
         spv_AddCapability(&ctx.m, u32(SpvCapabilityPhysicalStorageBufferAddresses));
         spv_AddExtension(&ctx.m, "SPV_KHR_physical_storage_buffer");
     }
-    const int shared_type_count = std::popcount(static_cast<u32>(info.shared_types));
+    const int shared_type_count =
+        static_cast<int>(Common::PopCount(static_cast<u32>(info.shared_types)));
     if (shared_type_count > 1 && profile.supports_workgroup_explicit_memory_layout) {
         spv_AddExtension(&ctx.m, "SPV_KHR_workgroup_memory_explicit_layout");
         spv_AddCapability(&ctx.m, u32(SpvCapabilityWorkgroupMemoryExplicitLayoutKHR));
@@ -401,11 +399,10 @@ void SetupCapabilities(const Info& info, const Profile& profile, const RuntimeIn
 
 void DefineEntryPoint(const Info& info, const RuntimeInfo& runtime_info, EmitContext& ctx,
                       Id main) {
-    const std::span interfaces(ctx.interfaces.data(), ctx.interfaces.size());
     u32 execution_model{};
     switch (info.sw_stage) {
     case SwStage::Compute: {
-        const std::array<u32, 3> workgroup_size{ctx.runtime_info.hw.cs.workgroup_size};
+        const u32* const workgroup_size = &ctx.runtime_info.hw.cs.workgroup_size[0];
         execution_model = SpvExecutionModelGLCompute;
         spv_AddExecutionMode3(&ctx.m, main, u32(SpvExecutionModeLocalSize), u32(workgroup_size[0]),
                               u32(workgroup_size[1]), u32(workgroup_size[2]));
@@ -466,8 +463,8 @@ void DefineEntryPoint(const Info& info, const RuntimeInfo& runtime_info, EmitCon
     default:
         UNREACHABLE_MSG("Stage %u", u32(info.hw_stage));
     }
-    spv_AddEntryPoint(&ctx.m, u32(execution_model), main, "main", interfaces.data(),
-                      u32(interfaces.size()));
+    spv_AddEntryPoint(&ctx.m, u32(execution_model), main, "main", ctx.interfaces.data(),
+                      u32(ctx.interfaces.size()));
 }
 
 void SetupDenormFlushMode(EmitContext& ctx, const Profile& profile, const RuntimeInfo& runtime_info,
@@ -734,7 +731,9 @@ void PatchPhiArg(void* arg_ctx, u32 phi_arg, u32 first_parent, u32* value_out, u
     }
     ASSERT(p.inst != p.program.blocks[p.block_index]->end());
     *value_out = p.ctx.Def(p.inst->Arg(phi_arg));
-    *parent_out = p.ctx.first_to_last_label_map[first_parent];
+    const Id* const last =
+        static_cast<const Id*>(u64_map_find(&p.ctx.first_to_last_label_map, first_parent));
+    *parent_out = last ? *last : 0;
 }
 
 void PatchPhiNodes(const IR::Program& program, EmitContext& ctx) {
@@ -743,9 +742,9 @@ void PatchPhiNodes(const IR::Program& program, EmitContext& ctx) {
 }
 } // Anonymous namespace
 
-std::span<const u32> EmitSPIRV(spv_module_t& module, const Profile& profile,
-                               const RuntimeInfo& runtime_info, const IR::Program& program,
-                               Bindings& binding) {
+Common::Span<const u32> EmitSPIRV(spv_module_t& module, const Profile& profile,
+                                  const RuntimeInfo& runtime_info, const IR::Program& program,
+                                  Bindings& binding) {
     // Debug names only for a shader that is dumped, where they are read
     module.names = emu_settings_get_dump_shaders() ? 1 : 0;
     EmitContext ctx{module, profile, runtime_info, program.info, binding};
