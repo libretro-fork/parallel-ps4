@@ -1,22 +1,25 @@
-// SPDX-FileCopyrightText: Copyright 2026 shadPS4 Emulator Project
-// SPDX-License-Identifier: GPL-2.0-or-later
+/* SPDX-FileCopyrightText: Copyright 2026 shadPS4 Emulator Project
+ * SPDX-License-Identifier: GPL-2.0-or-later */
 
-#pragma once
+#ifndef SHADPS4_LIBC_INTERNAL_THREADS_H
+#define SHADPS4_LIBC_INTERNAL_THREADS_H
 
-#include <mutex>
+/* libSceLibcInternal's mutexes (_Mtxinit and the rest): the game's recursive pthread mutexes,
+ * returning 1 on any failure. Defined in libc_internal_threads.c, registered in
+ * libc_internal.cpp. */
+
+#include <retro_common_api.h>
+
 #include "common/types.h"
-#include "core/libraries/kernel/threads.h"
+#include "core/libraries/kernel/kernel_c.h"
 
-namespace Core::Loader {
-class SymbolsResolver;
-}
+RETRO_BEGIN_DECLS
 
-namespace Libraries::LibcInternal {
+s32 PS4_SYSV_ABI internal__Mtxinit(kernel_pthread_mutex_t* mtx, const char* name);
+s32 PS4_SYSV_ABI internal__Mtxlock(kernel_pthread_mutex_t* mtx);
+s32 PS4_SYSV_ABI internal__Mtxunlock(kernel_pthread_mutex_t* mtx);
+s32 PS4_SYSV_ABI internal__Mtxdst(kernel_pthread_mutex_t* mtx);
 
-s32 PS4_SYSV_ABI internal__Mtxinit(Libraries::Kernel::PthreadMutexT* mtx, const char* name);
-s32 PS4_SYSV_ABI internal__Mtxlock(Libraries::Kernel::PthreadMutexT* mtx);
-s32 PS4_SYSV_ABI internal__Mtxunlock(Libraries::Kernel::PthreadMutexT* mtx);
-s32 PS4_SYSV_ABI internal__Mtxdst(Libraries::Kernel::PthreadMutexT* mtx);
+RETRO_END_DECLS
 
-void RegisterlibSceLibcInternalThreads(Core::Loader::SymbolsResolver* sym);
-} // namespace Libraries::LibcInternal
+#endif

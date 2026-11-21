@@ -102,8 +102,8 @@ OrbisFILE* PS4_SYSV_ABI internal__Foprep(const char* path, const char* mode, Orb
     }
 
     // Preserve mode and index
-    Libraries::Kernel::PthreadMutexT mtx = file->_Mutex;
-    Libraries::Kernel::PthreadMutexT* mtx_ptr = &file->_Mutex;
+    kernel_pthread_mutex_t mtx = file->_Mutex;
+    kernel_pthread_mutex_t* mtx_ptr = &file->_Mutex;
     u8 file_index = file->_Idx;
     u16 file_mode = file->_Mode & 0x80;
 

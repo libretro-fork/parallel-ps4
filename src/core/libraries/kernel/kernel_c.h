@@ -104,6 +104,24 @@ u64 kernel_game_deadline_in(u64 ns);
 bool kernel_game_wait(struct retro_eventcount* ec, u64 deadline, int (*ready)(void* ctx),
                       void* ctx);
 
+/* Libraries::Kernel::PthreadMutexT and PthreadMutexAttrT, the game's mutexes: pointers to the
+ * kernel's objects, as the game holds them */
+typedef struct kernel_pthread_mutex* kernel_pthread_mutex_t;
+typedef struct kernel_pthread_mutexattr* kernel_pthread_mutexattr_t;
+/* PthreadMutexType::Recursive */
+#define KERNEL_PTHREAD_MUTEX_RECURSIVE 2u
+
+/* posix_pthread_mutexattr_init, _settype and _destroy; scePthreadMutexInit (named);
+ * posix_pthread_mutex_lock, _unlock and _destroy (threads/mutex.cpp) */
+s32 kernel_pthread_mutexattr_init(kernel_pthread_mutexattr_t* attr);
+s32 kernel_pthread_mutexattr_settype(kernel_pthread_mutexattr_t* attr, u32 type);
+s32 kernel_pthread_mutexattr_destroy(kernel_pthread_mutexattr_t* attr);
+s32 kernel_pthread_mutex_init_named(kernel_pthread_mutex_t* mutex,
+                                    const kernel_pthread_mutexattr_t* attr, const char* name);
+s32 kernel_pthread_mutex_lock(kernel_pthread_mutex_t* mutex);
+s32 kernel_pthread_mutex_unlock(kernel_pthread_mutex_t* mutex);
+s32 kernel_pthread_mutex_destroy(kernel_pthread_mutex_t* mutex);
+
 RETRO_END_DECLS
 
 #endif

@@ -8,6 +8,7 @@
 #include "common/string_util.h"
 #include "common/types.h"
 #include "core/libraries/kernel/kernel.h"
+#include "core/libraries/kernel/kernel_c.h"
 #include "core/libraries/kernel/posix_error.h"
 #include "core/libraries/kernel/threads/pthread.h"
 #include "core/libraries/libs.h"
@@ -584,3 +585,48 @@ void RegisterMutex(Core::Loader::SymbolsResolver* sym) {
 }
 
 } // namespace Libraries::Kernel
+
+// The game's mutexes for C (kernel_c.h): the handles are the kernel's own pointers
+static_assert(sizeof(kernel_pthread_mutex_t) == sizeof(Libraries::Kernel::PthreadMutexT));
+static_assert(sizeof(kernel_pthread_mutexattr_t) == sizeof(Libraries::Kernel::PthreadMutexAttrT));
+static_assert(KERNEL_PTHREAD_MUTEX_RECURSIVE ==
+              static_cast<u32>(Libraries::Kernel::PthreadMutexType::Recursive));
+
+extern "C" s32 kernel_pthread_mutexattr_init(kernel_pthread_mutexattr_t* attr) {
+    return Libraries::Kernel::posix_pthread_mutexattr_init(
+        reinterpret_cast<Libraries::Kernel::PthreadMutexAttrT*>(attr));
+}
+
+extern "C" s32 kernel_pthread_mutexattr_settype(kernel_pthread_mutexattr_t* attr, u32 type) {
+    return Libraries::Kernel::posix_pthread_mutexattr_settype(
+        reinterpret_cast<Libraries::Kernel::PthreadMutexAttrT*>(attr),
+        static_cast<Libraries::Kernel::PthreadMutexType>(type));
+}
+
+extern "C" s32 kernel_pthread_mutexattr_destroy(kernel_pthread_mutexattr_t* attr) {
+    return Libraries::Kernel::posix_pthread_mutexattr_destroy(
+        reinterpret_cast<Libraries::Kernel::PthreadMutexAttrT*>(attr));
+}
+
+extern "C" s32 kernel_pthread_mutex_init_named(kernel_pthread_mutex_t* mutex,
+                                               const kernel_pthread_mutexattr_t* attr,
+                                               const char* name) {
+    return Libraries::Kernel::scePthreadMutexInit(
+        reinterpret_cast<Libraries::Kernel::PthreadMutexT*>(mutex),
+        reinterpret_cast<const Libraries::Kernel::PthreadMutexAttrT*>(attr), name);
+}
+
+extern "C" s32 kernel_pthread_mutex_lock(kernel_pthread_mutex_t* mutex) {
+    return Libraries::Kernel::posix_pthread_mutex_lock(
+        reinterpret_cast<Libraries::Kernel::PthreadMutexT*>(mutex));
+}
+
+extern "C" s32 kernel_pthread_mutex_unlock(kernel_pthread_mutex_t* mutex) {
+    return Libraries::Kernel::posix_pthread_mutex_unlock(
+        reinterpret_cast<Libraries::Kernel::PthreadMutexT*>(mutex));
+}
+
+extern "C" s32 kernel_pthread_mutex_destroy(kernel_pthread_mutex_t* mutex) {
+    return Libraries::Kernel::posix_pthread_mutex_destroy(
+        reinterpret_cast<Libraries::Kernel::PthreadMutexT*>(mutex));
+}

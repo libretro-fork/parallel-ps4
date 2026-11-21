@@ -4,7 +4,8 @@
 #pragma once
 
 #include "common/types.h"
-#include "core/libraries/kernel/threads.h"
+#include "common/va_ctx.h"
+#include "core/libraries/kernel/kernel_c.h"
 
 namespace Core::Loader {
 class SymbolsResolver;
@@ -46,7 +47,7 @@ struct OrbisFILE {
     u8* _Tmpnam;
     u8 _Back[6], _Cbuf;
     u8 unk2;
-    Libraries::Kernel::PthreadMutexT _Mutex;
+    kernel_pthread_mutex_t _Mutex; // Libraries::Kernel::PthreadMutexT
     u8* _p;
     s32 _r;
     s32 _w;
