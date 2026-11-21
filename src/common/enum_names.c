@@ -581,37 +581,6 @@ static const enum_name_entry_t enum_names_Libraries_CommonDialog_Status_entries[
 const enum_names_t enum_names_Libraries_CommonDialog_Status = {enum_names_Libraries_CommonDialog_Status_entries,
     sizeof(enum_names_Libraries_CommonDialog_Status_entries) / sizeof(enum_names_Libraries_CommonDialog_Status_entries[0])};
 
-static const enum_name_entry_t enum_names_Libraries_JpegEnc_OrbisJpegEncEncodeParamPixelFormat_entries[] = {
-    {(int64_t)0, "ORBIS_JPEG_ENC_PIXEL_FORMAT_R8G8B8A8"},
-    {(int64_t)1, "ORBIS_JPEG_ENC_PIXEL_FORMAT_B8G8R8A8"},
-    {(int64_t)10, "ORBIS_JPEG_ENC_PIXEL_FORMAT_Y8U8Y8V8"},
-    {(int64_t)11, "ORBIS_JPEG_ENC_PIXEL_FORMAT_Y8"},
-};
-const enum_names_t enum_names_Libraries_JpegEnc_OrbisJpegEncEncodeParamPixelFormat = {enum_names_Libraries_JpegEnc_OrbisJpegEncEncodeParamPixelFormat_entries,
-    sizeof(enum_names_Libraries_JpegEnc_OrbisJpegEncEncodeParamPixelFormat_entries) / sizeof(enum_names_Libraries_JpegEnc_OrbisJpegEncEncodeParamPixelFormat_entries[0])};
-
-static const enum_name_entry_t enum_names_Libraries_JpegEnc_OrbisJpengEncEncodeParamColorSpace_entries[] = {
-    {(int64_t)1, "ORBIS_JPEG_ENC_COLOR_SPACE_YCC"},
-    {(int64_t)2, "ORBIS_JPEG_ENC_COLOR_SPACE_GRAYSCALE"},
-};
-const enum_names_t enum_names_Libraries_JpegEnc_OrbisJpengEncEncodeParamColorSpace = {enum_names_Libraries_JpegEnc_OrbisJpengEncEncodeParamColorSpace_entries,
-    sizeof(enum_names_Libraries_JpegEnc_OrbisJpengEncEncodeParamColorSpace_entries) / sizeof(enum_names_Libraries_JpegEnc_OrbisJpengEncEncodeParamColorSpace_entries[0])};
-
-static const enum_name_entry_t enum_names_Libraries_JpegEnc_OrbisJpengEncEncodeParamEncodeMode_entries[] = {
-    {(int64_t)0, "ORBIS_JPEG_ENC_ENCODE_MODE_NORMAL"},
-    {(int64_t)1, "ORBIS_JPEG_ENC_ENCODE_MODE_MJPEG"},
-};
-const enum_names_t enum_names_Libraries_JpegEnc_OrbisJpengEncEncodeParamEncodeMode = {enum_names_Libraries_JpegEnc_OrbisJpengEncEncodeParamEncodeMode_entries,
-    sizeof(enum_names_Libraries_JpegEnc_OrbisJpengEncEncodeParamEncodeMode_entries) / sizeof(enum_names_Libraries_JpegEnc_OrbisJpengEncEncodeParamEncodeMode_entries[0])};
-
-static const enum_name_entry_t enum_names_Libraries_JpegEnc_OrbisJpengEncEncodeParamSamplingType_entries[] = {
-    {(int64_t)0, "ORBIS_JPEG_ENC_SAMPLING_TYPE_FULL"},
-    {(int64_t)1, "ORBIS_JPEG_ENC_SAMPLING_TYPE_422"},
-    {(int64_t)2, "ORBIS_JPEG_ENC_SAMPLING_TYPE_420"},
-};
-const enum_names_t enum_names_Libraries_JpegEnc_OrbisJpengEncEncodeParamSamplingType = {enum_names_Libraries_JpegEnc_OrbisJpengEncEncodeParamSamplingType_entries,
-    sizeof(enum_names_Libraries_JpegEnc_OrbisJpengEncEncodeParamSamplingType_entries) / sizeof(enum_names_Libraries_JpegEnc_OrbisJpengEncEncodeParamSamplingType_entries[0])};
-
 static const enum_name_entry_t enum_names_Libraries_Kernel_MemoryTypes_entries[] = {
     {(int64_t)0, "ORBIS_KERNEL_WB_ONION"},
     {(int64_t)3, "ORBIS_KERNEL_WC_GARLIC"},
@@ -848,6 +817,37 @@ static const enum_name_entry_t enum_names_OrbisImeOption_entries[] = {
 };
 const enum_names_t enum_names_OrbisImeOption = {enum_names_OrbisImeOption_entries,
     sizeof(enum_names_OrbisImeOption_entries) / sizeof(enum_names_OrbisImeOption_entries[0])};
+
+static const enum_name_entry_t enum_names_OrbisJpegEncEncodeParamPixelFormat_entries[] = {
+    {(int64_t)0, "ORBIS_JPEG_ENC_PIXEL_FORMAT_R8G8B8A8"},
+    {(int64_t)1, "ORBIS_JPEG_ENC_PIXEL_FORMAT_B8G8R8A8"},
+    {(int64_t)10, "ORBIS_JPEG_ENC_PIXEL_FORMAT_Y8U8Y8V8"},
+    {(int64_t)11, "ORBIS_JPEG_ENC_PIXEL_FORMAT_Y8"},
+};
+const enum_names_t enum_names_OrbisJpegEncEncodeParamPixelFormat = {enum_names_OrbisJpegEncEncodeParamPixelFormat_entries,
+    sizeof(enum_names_OrbisJpegEncEncodeParamPixelFormat_entries) / sizeof(enum_names_OrbisJpegEncEncodeParamPixelFormat_entries[0])};
+
+static const enum_name_entry_t enum_names_OrbisJpengEncEncodeParamColorSpace_entries[] = {
+    {(int64_t)1, "ORBIS_JPEG_ENC_COLOR_SPACE_YCC"},
+    {(int64_t)2, "ORBIS_JPEG_ENC_COLOR_SPACE_GRAYSCALE"},
+};
+const enum_names_t enum_names_OrbisJpengEncEncodeParamColorSpace = {enum_names_OrbisJpengEncEncodeParamColorSpace_entries,
+    sizeof(enum_names_OrbisJpengEncEncodeParamColorSpace_entries) / sizeof(enum_names_OrbisJpengEncEncodeParamColorSpace_entries[0])};
+
+static const enum_name_entry_t enum_names_OrbisJpengEncEncodeParamEncodeMode_entries[] = {
+    {(int64_t)0, "ORBIS_JPEG_ENC_ENCODE_MODE_NORMAL"},
+    {(int64_t)1, "ORBIS_JPEG_ENC_ENCODE_MODE_MJPEG"},
+};
+const enum_names_t enum_names_OrbisJpengEncEncodeParamEncodeMode = {enum_names_OrbisJpengEncEncodeParamEncodeMode_entries,
+    sizeof(enum_names_OrbisJpengEncEncodeParamEncodeMode_entries) / sizeof(enum_names_OrbisJpengEncEncodeParamEncodeMode_entries[0])};
+
+static const enum_name_entry_t enum_names_OrbisJpengEncEncodeParamSamplingType_entries[] = {
+    {(int64_t)0, "ORBIS_JPEG_ENC_SAMPLING_TYPE_FULL"},
+    {(int64_t)1, "ORBIS_JPEG_ENC_SAMPLING_TYPE_422"},
+    {(int64_t)2, "ORBIS_JPEG_ENC_SAMPLING_TYPE_420"},
+};
+const enum_names_t enum_names_OrbisJpengEncEncodeParamSamplingType = {enum_names_OrbisJpengEncEncodeParamSamplingType_entries,
+    sizeof(enum_names_OrbisJpengEncEncodeParamSamplingType_entries) / sizeof(enum_names_OrbisJpengEncEncodeParamSamplingType_entries[0])};
 
 static const enum_name_entry_t enum_names_Shader_Gcn_DppCtrl_entries[] = {
     {(int64_t)0, "DppQuadPerm"},

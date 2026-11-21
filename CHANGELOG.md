@@ -4,6 +4,11 @@ What changed in the libretro core of this fork, newest first. Changes that come 
 
 ## Unreleased
 
+- The JPEG encoder and system gesture libraries are MSVC C89. Both are registered in `sysmodule_internal.cpp`, with the same functions, behaviour and log lines as before.
+  - **The JPEG encoder's enums** are plain C enums. The struct fields that held them are `u16`/`u8` as before, and the structs keep their sizes.
+  - **The enum name tables were regenerated** (`gen_enum_names.py`): the JPEG tables now go by the C enum names (`enum_names_OrbisJpegEncEncodeParamPixelFormat`), and every other table came out the same. The generator's list dropped `DebugStateType::QueueType`, left over from the developer tools: it stopped the generator from running at all.
+  - Not run in a game yet.
+
 - Seven more HLE libraries are MSVC C89: companion (httpd and util), game live streaming, PNG decode and encode, Razor CPU, Remote Play and RUDP.
   - Same shape as the first eleven: a `.c` file and a C header each, with the same functions, behaviour and log lines. The PNG libraries still decode and encode through libretro-common's rpng, straight between the game's buffers. PNG and RUDP are registered in `sysmodule_internal.cpp`, the others in `libs.cpp`.
   - **`c_unreachable`** is added to the C bridge (`common/c_bridge.h`): the C version of `UNREACHABLE_MSG`, which logs and stops the emulator.

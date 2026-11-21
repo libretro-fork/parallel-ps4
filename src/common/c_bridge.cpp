@@ -26,6 +26,10 @@ static Common::Log::Class ToClass(c_log_class log_class) {
         return Common::Log::Class::Lib_Http;
     case C_LOG_LIB_ULT:
         return Common::Log::Class::Lib_Ult;
+    case C_LOG_LIB_JPEG:
+        return Common::Log::Class::Lib_Jpeg;
+    case C_LOG_LIB_SYSTEM_GESTURE:
+        return Common::Log::Class::Lib_SystemGesture;
     case C_LOG_LIB_COMPANION_HTTPD:
         return Common::Log::Class::Lib_CompanionHttpd;
     case C_LOG_LIB_COMPANION_UTIL:

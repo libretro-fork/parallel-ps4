@@ -79,6 +79,60 @@ static s32 UltCallEntry(ult_entry entry, u64 arg) {
     return Core::CallGuest(reinterpret_cast<s32 PS4_SYSV_ABI (*)(u64)>(entry), arg);
 }
 
+static void RegisterJpegEnc(Core::Loader::SymbolsResolver* sym) {
+    LIB_FUNCTION("K+rocojkr-I", "libSceJpegEnc", 1, "libSceJpegEnc", sceJpegEncCreate);
+    LIB_FUNCTION("j1LyMdaM+C0", "libSceJpegEnc", 1, "libSceJpegEnc", sceJpegEncDelete);
+    LIB_FUNCTION("QbrU0cUghEM", "libSceJpegEnc", 1, "libSceJpegEnc", sceJpegEncEncode);
+    LIB_FUNCTION("o6ZgXfFdWXQ", "libSceJpegEnc", 1, "libSceJpegEnc", sceJpegEncQueryMemorySize);
+}
+
+static void RegisterSystemGesture(Core::Loader::SymbolsResolver* sym) {
+    LIB_FUNCTION("1MMK0W-kMgA", "libSceSystemGesture", 1, "libSceSystemGesture",
+                 sceSystemGestureAppendTouchRecognizer);
+    LIB_FUNCTION("j4yXIA2jJ68", "libSceSystemGesture", 1, "libSceSystemGesture",
+                 sceSystemGestureClose);
+    LIB_FUNCTION("FWF8zkhr854", "libSceSystemGesture", 1, "libSceSystemGesture",
+                 sceSystemGestureCreateTouchRecognizer);
+    LIB_FUNCTION("3QYCmMlOlCY", "libSceSystemGesture", 1, "libSceSystemGesture",
+                 sceSystemGestureFinalizePrimitiveTouchRecognizer);
+    LIB_FUNCTION("KAeP0+cQPVU", "libSceSystemGesture", 1, "libSceSystemGesture",
+                 sceSystemGestureGetPrimitiveTouchEventByIndex);
+    LIB_FUNCTION("yBaQ0h9m1NM", "libSceSystemGesture", 1, "libSceSystemGesture",
+                 sceSystemGestureGetPrimitiveTouchEventByPrimitiveID);
+    LIB_FUNCTION("L8YmemOeSNY", "libSceSystemGesture", 1, "libSceSystemGesture",
+                 sceSystemGestureGetPrimitiveTouchEvents);
+    LIB_FUNCTION("JhwByySf9FY", "libSceSystemGesture", 1, "libSceSystemGesture",
+                 sceSystemGestureGetPrimitiveTouchEventsCount);
+    LIB_FUNCTION("lpsXm7tzeoc", "libSceSystemGesture", 1, "libSceSystemGesture",
+                 sceSystemGestureGetTouchEventByEventID);
+    LIB_FUNCTION("TSKvgSz5ChU", "libSceSystemGesture", 1, "libSceSystemGesture",
+                 sceSystemGestureGetTouchEventByIndex);
+    LIB_FUNCTION("fLTseA7XiWY", "libSceSystemGesture", 1, "libSceSystemGesture",
+                 sceSystemGestureGetTouchEvents);
+    LIB_FUNCTION("h8uongcBNVs", "libSceSystemGesture", 1, "libSceSystemGesture",
+                 sceSystemGestureGetTouchEventsCount);
+    LIB_FUNCTION("0KrW5eMnrwY", "libSceSystemGesture", 1, "libSceSystemGesture",
+                 sceSystemGestureGetTouchRecognizerInformation);
+    LIB_FUNCTION("3pcAvmwKCvM", "libSceSystemGesture", 1, "libSceSystemGesture",
+                 sceSystemGestureInitializePrimitiveTouchRecognizer);
+    LIB_FUNCTION("qpo-mEOwje0", "libSceSystemGesture", 1, "libSceSystemGesture",
+                 sceSystemGestureOpen);
+    LIB_FUNCTION("ELvBVG-LKT0", "libSceSystemGesture", 1, "libSceSystemGesture",
+                 sceSystemGestureRemoveTouchRecognizer);
+    LIB_FUNCTION("o11J529VaAE", "libSceSystemGesture", 1, "libSceSystemGesture",
+                 sceSystemGestureResetPrimitiveTouchRecognizer);
+    LIB_FUNCTION("oBuH3zFWYIg", "libSceSystemGesture", 1, "libSceSystemGesture",
+                 sceSystemGestureResetTouchRecognizer);
+    LIB_FUNCTION("wPJGwI2RM2I", "libSceSystemGesture", 1, "libSceSystemGesture",
+                 sceSystemGestureUpdateAllTouchRecognizer);
+    LIB_FUNCTION("GgFMb22sbbI", "libSceSystemGesture", 1, "libSceSystemGesture",
+                 sceSystemGestureUpdatePrimitiveTouchRecognizer);
+    LIB_FUNCTION("j4h82CQWENo", "libSceSystemGesture", 1, "libSceSystemGesture",
+                 sceSystemGestureUpdateTouchRecognizer);
+    LIB_FUNCTION("4WOA1eTx3V8", "libSceSystemGesture", 1, "libSceSystemGesture",
+                 sceSystemGestureUpdateTouchRecognizerRectangle);
+}
+
 static void RegisterPngDec(Core::Loader::SymbolsResolver* sym) {
     LIB_FUNCTION("m0uW+8pFyaw", "libScePngDec", 1, "libScePngDec", scePngDecCreate);
     LIB_FUNCTION("WC216DD3El4", "libScePngDec", 1, "libScePngDec", scePngDecDecode);
@@ -395,7 +449,7 @@ s32 loadModuleInternal(s32 index, s32 argc, const void* argv, s32* res_out) {
              {"libSceAvPlayerStreaming.sprx", nullptr},
              {"libSceRtc.sprx", &Libraries::Rtc::RegisterLib},
              {"libSceJpegDec.sprx", nullptr},
-             {"libSceJpegEnc.sprx", &Libraries::JpegEnc::RegisterLib},
+             {"libSceJpegEnc.sprx", &RegisterJpegEnc},
              {"libScePngDec.sprx", &RegisterPngDec},
              {"libScePngEnc.sprx", &RegisterPngEnc},
              {"libSceJson.sprx", nullptr},
@@ -421,7 +475,7 @@ s32 loadModuleInternal(s32 index, s32 argc, const void* argv, s32* res_out) {
              {"libSceDepth.sprx", nullptr},
              {"libScePadTracker.sprx", nullptr},
              {"libSceMoveTracker.sprx", nullptr},
-             {"libSceSystemGesture.sprx", &Libraries::SystemGesture::RegisterLib},
+             {"libSceSystemGesture.sprx", &RegisterSystemGesture},
              {"libSceXml.sprx", nullptr}});
 
         // Iterate through the allowed array

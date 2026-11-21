@@ -1,39 +1,40 @@
-// SPDX-FileCopyrightText: Copyright 2025 shadPS4 Emulator Project
-// SPDX-License-Identifier: GPL-2.0-or-later
+/* SPDX-FileCopyrightText: Copyright 2025 shadPS4 Emulator Project
+ * SPDX-License-Identifier: GPL-2.0-or-later */
 
-#pragma once
+#ifndef SHADPS4_LIBRARIES_SYSTEM_GESTURE_H
+#define SHADPS4_LIBRARIES_SYSTEM_GESTURE_H
 
-#include "common/enum.h"
+/* libSceSystemGesture. Registered in sysmodule_internal.cpp. */
+
+#include <retro_common_api.h>
+
 #include "common/types.h"
 
-namespace Core::Loader {
-class SymbolsResolver;
-}
+RETRO_BEGIN_DECLS
 
-namespace Libraries::SystemGesture {
+int PS4_SYSV_ABI sceSystemGestureAppendTouchRecognizer(void);
+int PS4_SYSV_ABI sceSystemGestureClose(void);
+int PS4_SYSV_ABI sceSystemGestureCreateTouchRecognizer(void);
+int PS4_SYSV_ABI sceSystemGestureFinalizePrimitiveTouchRecognizer(void);
+int PS4_SYSV_ABI sceSystemGestureGetPrimitiveTouchEventByIndex(void);
+int PS4_SYSV_ABI sceSystemGestureGetPrimitiveTouchEventByPrimitiveID(void);
+int PS4_SYSV_ABI sceSystemGestureGetPrimitiveTouchEvents(void);
+int PS4_SYSV_ABI sceSystemGestureGetPrimitiveTouchEventsCount(void);
+int PS4_SYSV_ABI sceSystemGestureGetTouchEventByEventID(void);
+int PS4_SYSV_ABI sceSystemGestureGetTouchEventByIndex(void);
+int PS4_SYSV_ABI sceSystemGestureGetTouchEvents(void);
+int PS4_SYSV_ABI sceSystemGestureGetTouchEventsCount(void);
+int PS4_SYSV_ABI sceSystemGestureGetTouchRecognizerInformation(void);
+int PS4_SYSV_ABI sceSystemGestureInitializePrimitiveTouchRecognizer(void);
+int PS4_SYSV_ABI sceSystemGestureOpen(void);
+int PS4_SYSV_ABI sceSystemGestureRemoveTouchRecognizer(void);
+int PS4_SYSV_ABI sceSystemGestureResetPrimitiveTouchRecognizer(void);
+int PS4_SYSV_ABI sceSystemGestureResetTouchRecognizer(void);
+int PS4_SYSV_ABI sceSystemGestureUpdateAllTouchRecognizer(void);
+int PS4_SYSV_ABI sceSystemGestureUpdatePrimitiveTouchRecognizer(void);
+int PS4_SYSV_ABI sceSystemGestureUpdateTouchRecognizer(void);
+int PS4_SYSV_ABI sceSystemGestureUpdateTouchRecognizerRectangle(void);
 
-int PS4_SYSV_ABI sceSystemGestureAppendTouchRecognizer();
-int PS4_SYSV_ABI sceSystemGestureClose();
-int PS4_SYSV_ABI sceSystemGestureCreateTouchRecognizer();
-int PS4_SYSV_ABI sceSystemGestureFinalizePrimitiveTouchRecognizer();
-int PS4_SYSV_ABI sceSystemGestureGetPrimitiveTouchEventByIndex();
-int PS4_SYSV_ABI sceSystemGestureGetPrimitiveTouchEventByPrimitiveID();
-int PS4_SYSV_ABI sceSystemGestureGetPrimitiveTouchEvents();
-int PS4_SYSV_ABI sceSystemGestureGetPrimitiveTouchEventsCount();
-int PS4_SYSV_ABI sceSystemGestureGetTouchEventByEventID();
-int PS4_SYSV_ABI sceSystemGestureGetTouchEventByIndex();
-int PS4_SYSV_ABI sceSystemGestureGetTouchEvents();
-int PS4_SYSV_ABI sceSystemGestureGetTouchEventsCount();
-int PS4_SYSV_ABI sceSystemGestureGetTouchRecognizerInformation();
-int PS4_SYSV_ABI sceSystemGestureInitializePrimitiveTouchRecognizer();
-int PS4_SYSV_ABI sceSystemGestureOpen();
-int PS4_SYSV_ABI sceSystemGestureRemoveTouchRecognizer();
-int PS4_SYSV_ABI sceSystemGestureResetPrimitiveTouchRecognizer();
-int PS4_SYSV_ABI sceSystemGestureResetTouchRecognizer();
-int PS4_SYSV_ABI sceSystemGestureUpdateAllTouchRecognizer();
-int PS4_SYSV_ABI sceSystemGestureUpdatePrimitiveTouchRecognizer();
-int PS4_SYSV_ABI sceSystemGestureUpdateTouchRecognizer();
-int PS4_SYSV_ABI sceSystemGestureUpdateTouchRecognizerRectangle();
+RETRO_END_DECLS
 
-void RegisterLib(Core::Loader::SymbolsResolver* sym);
-} // namespace Libraries::SystemGesture
+#endif

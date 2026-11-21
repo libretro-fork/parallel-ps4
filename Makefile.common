@@ -147,7 +147,6 @@ CORE_SOURCES_CXX += $(addprefix src/core/libraries/hmd/,hmd.cpp hmd_distortion.c
 CORE_SOURCES_CXX += $(addprefix src/core/libraries/ime/,error_dialog.cpp ime.cpp ime_dialog.cpp \
 	ime_dialog_ui.cpp ime_kb_layout.cpp ime_ui.cpp ime_ui_shared.cpp)
 CORE_SOURCES_CXX += $(addprefix src/core/libraries/invitation_dialog/,invitation_dialog.cpp)
-CORE_SOURCES_CXX += $(addprefix src/core/libraries/jpeg/,jpegenc.cpp)
 CORE_SOURCES_CXX += $(addprefix src/core/libraries/kernel/,aio.cpp debug.cpp equeue.cpp \
 	file_system.cpp kernel.cpp memory.cpp process.cpp threads.cpp time.cpp)
 CORE_SOURCES_CXX += $(addprefix src/core/libraries/kernel/coredump/,coredump.cpp)
@@ -196,7 +195,6 @@ CORE_SOURCES_CXX += $(addprefix src/core/libraries/save_data/,save_backup.cpp sa
 CORE_SOURCES_CXX += $(addprefix src/core/libraries/sysmodule/,sysmodule.cpp sysmodule_internal.cpp)
 CORE_SOURCES_CXX += $(addprefix src/core/libraries/system/,commondialog.cpp msgdialog.cpp \
 	msgdialog_ui.cpp systemservice.cpp userservice.cpp)
-CORE_SOURCES_CXX += $(addprefix src/core/libraries/system_gesture/,system_gesture.cpp)
 CORE_SOURCES_CXX += $(addprefix src/core/libraries/usbd/emulated/,dimensions.cpp infinity.cpp \
 	skylander.cpp)
 CORE_SOURCES_CXX += $(addprefix src/core/libraries/usbd/,usbd.cpp usbstorage.cpp)
@@ -271,10 +269,11 @@ CORE_SOURCES_C += $(addprefix src/core/libraries/ult/,ult.c ult_sync.c)
 # The small HLE libraries written in C, registered in libs.cpp and sysmodule_internal.cpp
 CORE_SOURCES_C += $(addprefix src/core/libraries/,companion/companion_httpd.c \
 	companion/companion_util.c content_export/content_export.c disc_map/disc_map.c \
-	game_live_streaming/gamelivestreaming.c keyboard/keyboard.c libpng/pngdec.c libpng/pngenc.c \
-	mouse/mouse.c move/move.c random/random.c razor_cpu/razor_cpu.c remote_play/remoteplay.c \
-	rudp/rudp.c screenshot/screenshot.c share_play/shareplay.c signin_dialog/signindialog.c \
-	ulobjmgr/ulobjmgr.c video_recording/video_recording.c)
+	game_live_streaming/gamelivestreaming.c jpeg/jpegenc.c keyboard/keyboard.c libpng/pngdec.c \
+	libpng/pngenc.c mouse/mouse.c move/move.c random/random.c razor_cpu/razor_cpu.c \
+	remote_play/remoteplay.c rudp/rudp.c screenshot/screenshot.c share_play/shareplay.c \
+	signin_dialog/signindialog.c system_gesture/system_gesture.c ulobjmgr/ulobjmgr.c \
+	video_recording/video_recording.c)
 CORE_SOURCES_C += $(addprefix src/shader_recompiler/backend/spirv/,spv_module.c)
 CORE_SOURCES_C += $(addprefix src/core/libraries/np/np_handler/,np_invitation_json.c)
 CORE_SOURCES_C += $(addprefix src/shadnet/,pb_wire.c shadnet_msg.c)
