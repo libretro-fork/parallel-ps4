@@ -4,6 +4,14 @@ What changed in the libretro core of this fork, newest first. Changes that come 
 
 ## Unreleased
 
+- The texture cache itself (`texture_cache.h`/`.cpp`) with no STL or `auto`.
+  - **Copies:** the mip copies of a download and of an upload are made by one `MipCopy` function, as Vulkan's C `VkBufferImageCopy`, with the same values as before. `Runtime::UploadImage` takes a pointer and a count like `DownloadImage`, records `vkCmdCopyBufferToImage`, and nothing for no copies.
+  - **Read backs:** what a download does once the GPU is done is a member function, called at once for a synchronous one and from the deferred operation otherwise, instead of a stored lambda moved into it.
+  - **Garbage collection:** each pass is a small local struct with its state and a call operator, handed to the LRU walk, instead of two stored lambdas.
+  - **API:** `ResolveOverlap` gives an `OverlapResult` struct instead of a tuple; `GetMetaInfo` gives a bool and the metadata through a pointer, and `IsMeta` a bool, instead of `std::optional`s; `GetSampler` a `VkSampler`.
+  - **Frame dumps:** an image's dump file is opened when the dump is queued, under the name the frame has then, and written once the GPU's copy is done. The path no longer rides along as a `std::string`: the scheduler keeps a deferred operation's captures inline, and a path buffer does not fit there.
+  - **Unchanged:** `ForEachPage` checked its callback's return type against a trait's struct, so it never stopped early; no callback returns a bool, so what runs is the same, and the check is now right.
+  - **Checks:** the Linux and Windows builds pass. Not run in a game yet.
 - Part of the texture cache with no STL or `auto`: the tile tables (`tile.h`), host format compatibility, image info, the subresource types, image views, samplers and the tile manager.
   - **Tile tables:** the macro tile extents are plain arrays of `TileExtent {width, height}`, the size functions give an `ImageSize` struct instead of a tuple, and the power-of-two BCn tables are made at compile time by one function for both bit widths. A program gave the same extents, mip layouts and table entries from the old and new header over a grid of tile modes, array modes, sizes, bit widths and mip counts.
   - **Format compatibility:** the `std::unordered_map` from format to compatibility class is a `switch` over the same 137 formats, made from vulkan.hpp's own name-to-`VK_FORMAT` mapping; a format it does not know stops the run as the map's `at` did. `IsVulkanFormatCompatible` takes `VkFormat`.

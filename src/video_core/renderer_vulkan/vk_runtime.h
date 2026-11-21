@@ -46,8 +46,9 @@ public:
                  vk::PipelineStageFlags2 dst_stage, vk::AccessFlags2 dst_access,
                  std::optional<VideoCore::SubresourceRange> subres_range = {});
 
+    /// Copies @num_copies regions at @copies of @src into @dst
     void UploadImage(VideoCore::Image* dst, const VideoCore::Buffer* src,
-                     std::span<const vk::BufferImageCopy> upload_copies);
+                     const VkBufferImageCopy* copies, u32 num_copies);
     /// Copies @num_copies regions at @copies of @src into @dst
     void DownloadImage(VideoCore::Image* src, const VideoCore::Buffer* dst,
                        const VkBufferImageCopy* copies, u32 num_copies);

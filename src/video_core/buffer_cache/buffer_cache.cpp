@@ -996,9 +996,9 @@ bool BufferCache::SynchronizeMemory(const Buffer* arena, VAddr device_addr, u32 
 }
 
 bool BufferCache::SynchronizeMemoryFromImage(const Buffer* arena, VAddr device_addr, u32 size) {
-    // The texture cache's own optional, until it converts
-    const std::optional<TextureCache::MetaDataInfo> meta = texture_cache.GetMetaInfo(device_addr);
-    if (meta) {
+    TextureCache::MetaDataInfo meta_info{};
+    if (texture_cache.GetMetaInfo(device_addr, &meta_info)) {
+        const TextureCache::MetaDataInfo* meta = &meta_info;
         if (meta->type == TextureCache::MetaType::HTile) {
             static constexpr u32 ZmaskUncompressed = 0xf;
             runtime.FillBuffer(arena, arena->Offset(device_addr), size, ZmaskUncompressed);

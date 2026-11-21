@@ -59,7 +59,7 @@ struct ImageInfo {
     bool IsCompatible(const ImageInfo& info) const;
     void UpdateSize() noexcept;
 
-    struct {
+    struct MetaInfo {
         VAddr cmask_addr;
         VAddr fmask_addr;
         VAddr htile_addr;
