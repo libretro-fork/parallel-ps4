@@ -122,6 +122,7 @@ extern long syscall(long number, ...);
 
 #if defined(HAVE_LIBNX)
 #include <switch.h>
+#include <retro_horizon.h>
 #endif
 
 #if defined(_3DS)
@@ -201,6 +202,9 @@ retro_perf_tick_t cpu_features_get_perf_counter(void)
       __asm__ __volatile__ ("rdtsc" : "=a" (a), "=d" (d));
       time_ticks = (retro_perf_tick_t)a | ((retro_perf_tick_t)d << 32);
    }
+#elif defined(HAVE_LIBNX)
+   /* cntpct_el0: the counter Horizon gives the process */
+   RETRO_HORIZON_TICK(time_ticks);
 #elif defined(__GNUC__) && defined(__aarch64__)
    __asm__ __volatile__ ("mrs %0, cntvct_el0" : "=r" (time_ticks));
 #elif defined(__GNUC__) && defined(__ARM_ARCH_6__)
@@ -237,8 +241,6 @@ retro_perf_tick_t cpu_features_get_perf_counter(void)
    time_ticks = svcGetSystemTick();
 #elif defined(WIIU)
    time_ticks = OSGetSystemTime();
-#elif defined(HAVE_LIBNX)
-   time_ticks = armGetSystemTick();
 #elif defined(__EMSCRIPTEN__)
    time_ticks = emscripten_get_now() * 1000;
 #endif
@@ -270,7 +272,15 @@ retro_time_t cpu_features_get_time_usec(void)
 #elif defined(WIIU)
    return ticks_to_us(OSGetSystemTime());
 #elif defined(SWITCH) || defined(HAVE_LIBNX)
-   return (svcGetSystemTick() * 10) / 192;
+   {
+      /* At the counter's own rate: 19.2 MHz on the Switch, 31.25 MHz
+       * on the Switch 2. Split so the scale cannot overflow. */
+      uint64_t t;
+      uint64_t f;
+      RETRO_HORIZON_TICK(t);
+      RETRO_HORIZON_TICK_FREQ(f);
+      return (retro_time_t)((t / f) * 1000000 + ((t % f) * 1000000) / f);
+   }
 #elif defined(_3DS)
    return osGetTime() * 1000;
 #elif defined(_POSIX_MONOTONIC_CLOCK) || defined(__QNX__) || defined(ANDROID) || defined(__MACH__)
@@ -306,6 +316,10 @@ static int cpu_features_perf_rate_stated(void)
    return 0;
 #elif defined(__GNUC__) && (defined(__i386__) || defined(__x86_64__))
    return 0;
+#elif defined(HAVE_LIBNX)
+   uint64_t hz;
+   RETRO_HORIZON_TICK_FREQ(hz);
+   return (int)(hz / 1000);
 #elif defined(__GNUC__) && defined(__aarch64__)
    uint64_t hz;
    __asm__ __volatile__ ("mrs %0, cntfrq_el0" : "=r" (hz));
@@ -1258,8 +1272,19 @@ unsigned cpu_features_get_core_amount(void)
    return 1; /* Only one PPU, SPUs don't really count */
 #elif defined(VITA)
    return 4;
-#elif defined(HAVE_LIBNX) || defined(SWITCH)
-   return 4;
+#elif defined(HAVE_LIBNX)
+   {
+      /* The cores the process may run on, not the console's */
+      uint64_t mask = 0;
+      uint32_t rc;
+      unsigned n    = 0;
+      RETRO_HORIZON_CORE_MASK(rc, mask);
+      if (rc)
+         return 3;
+      for (; mask; mask &= mask - 1)
+         n++;
+      return n ? n : 1;
+   }
 #elif defined(_3DS)
    u8 device_model = 0xFF;
    CFGU_GetSystemModel(&device_model);/*(0 = O3DS, 1 = O3DSXL, 2 = N3DS, 3 = 2DS, 4 = N3DSXL, 5 = N2DSXL)*/

@@ -4,6 +4,9 @@ What changed in the libretro core of this fork, newest first. Changes that come 
 
 ## Unreleased
 
+- **libretro-common is RetroArch's again** (RetroArch 1eb3197): the 24 files that had fallen behind are synced, among them `retro_atomic.h`, `libretro.h`, `file/file_path.c`, `formats/mp4/rmp4.c`, `crypto/x509.c` (which now takes its calendar from `time/rtime.h`, as RTC does), `encodings/encoding_base64.c`, `string/stdstring.c`, `rthreads/rthreads.c`, `vfs/vfs_implementation.c` and `features/features_cpu.c`. Every file the core carries is now byte for byte RetroArch's.
+  - Not run in a game yet.
+
 - RTC's calendar is libretro-common's: `time/rtime.h`, synced from RetroArch with its new `rtime_days_from_civil`, `rtime_civil_from_days`, `rtime_is_leap_year`, `rtime_days_in_month` and `rtime_weekday`, gives the month lengths, the leap years and the day of the week the RTC library had worked out itself. `time/rtime.c` is synced with it. (`crypto/x509.c`, which uses the calendar too in RetroArch, is left as it was: its newer version needs newer `encodings/base64`, `crypto/x509.h` and `retro_atomic.h`, a resync of its own.)
   - The same answers: the comparison against the C++ RTC was run again, 20.8 million calls, no difference.
   - Not run in a game yet.
