@@ -4,8 +4,8 @@
 #ifndef SHADPS4_LIBRARIES_JPEGENC_H
 #define SHADPS4_LIBRARIES_JPEGENC_H
 
-/* libSceJpegEnc. Checks its arguments, encodes nothing. Registered in
- * sysmodule_internal.cpp. */
+/* libSceJpegEnc, encoded by libretro-common's rjpeg straight from the game's image into its
+ * buffer. Registered in sysmodule_internal.cpp. */
 
 #include <retro_common_api.h>
 

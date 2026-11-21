@@ -4,6 +4,12 @@ What changed in the libretro core of this fork, newest first. Changes that come 
 
 ## Unreleased
 
+- **libSceJpegEnc encodes.** It wrote nothing before; it now encodes the game's picture with libretro-common's rjpeg (`formats/jpeg/rjpeg_encode.c`, synced from RetroArch with its new `rjpeg_encode_blocks`), straight from the game's image into its buffer, a block at a time: no copy of the picture is made and nothing is allocated.
+  - RGBA and BGRA at 4:2:2 or 4:2:0, packed YUYV (`Y8U8Y8V8`) at 4:2:2 or 4:2:0, and greyscale (`Y8`) as a one-component JPEG; the game's restart interval is written as restart markers.
+  - The game's compression ratio is taken as 1 the least compression (quality 100) to 255 the most (quality 1). The PS4's own scale is not known; that is a guess.
+  - An output buffer too small for the picture gives `ORBIS_JPEG_ENC_ERROR_INVALID_SIZE` and no size.
+  - Checked outside a game: every format encoded through `sceJpegEncEncode` and decoded with an independent decoder (PIL) against its source. Not run in a game yet.
+
 - The JPEG encoder and system gesture libraries are MSVC C89. Both are registered in `sysmodule_internal.cpp`, with the same functions, behaviour and log lines as before.
   - **The JPEG encoder's enums** are plain C enums. The struct fields that held them are `u16`/`u8` as before, and the structs keep their sizes.
   - **The enum name tables were regenerated** (`gen_enum_names.py`): the JPEG tables now go by the C enum names (`enum_names_OrbisJpegEncEncodeParamPixelFormat`), and every other table came out the same. The generator's list dropped `DebugStateType::QueueType`, left over from the developer tools: it stopped the generator from running at all.
