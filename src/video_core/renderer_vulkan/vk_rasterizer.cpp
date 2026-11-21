@@ -365,8 +365,7 @@ void Rasterizer::Draw(bool is_indexed, u32 index_offset) {
     GetDrawOffsets(regs, vs_info, fetch_shader, &vertex_offset, &instance_offset);
 
     const VkCommandBuffer cmdbuf = static_cast<VkCommandBuffer>(scheduler.CommandBuffer());
-    vkCmdBindPipeline(cmdbuf, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                      static_cast<VkPipeline>(pipeline->Handle()));
+    vkCmdBindPipeline(cmdbuf, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline->Handle());
     instance.Note("draw: vertex shader, fragment shader, indices|indexed<<32, instances",
                   vs_info.pgm_hash, pipeline->StageHash(Shader::SwStage::Fragment),
                   u64(regs.num_indices) | u64(is_indexed) << 32, regs.num_instances.NumInstances());
@@ -440,8 +439,7 @@ void Rasterizer::DrawIndirect(bool is_indexed, VAddr arg_address, u32 offset, u3
     scheduler.BeginRendering(state);
 
     const VkCommandBuffer cmdbuf = static_cast<VkCommandBuffer>(scheduler.CommandBuffer());
-    vkCmdBindPipeline(cmdbuf, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                      static_cast<VkPipeline>(pipeline->Handle()));
+    vkCmdBindPipeline(cmdbuf, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline->Handle());
     instance.Note("indirect draw: vertex shader, fragment shader, arguments at, count",
                   pipeline->StageHash(Shader::SwStage::Vertex),
                   pipeline->StageHash(Shader::SwStage::Fragment), arg_address + offset, max_count);
@@ -499,8 +497,7 @@ void Rasterizer::DispatchDirect() {
     pipeline->BindResources(set_writes.data(), static_cast<u32>(set_writes.size()), push_data);
 
     const VkCommandBuffer cmdbuf = static_cast<VkCommandBuffer>(scheduler.CommandBuffer());
-    vkCmdBindPipeline(cmdbuf, VK_PIPELINE_BIND_POINT_COMPUTE,
-                      static_cast<VkPipeline>(pipeline->Handle()));
+    vkCmdBindPipeline(cmdbuf, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline->Handle());
     instance.Mark(cmdbuf, "dispatch: shader, x, y, z", cs.pgm_hash, cs_program.dim_x,
                   cs_program.dim_y, cs_program.dim_z);
     vkCmdDispatch(cmdbuf, cs_program.dim_x, cs_program.dim_y, cs_program.dim_z);
@@ -538,8 +535,7 @@ void Rasterizer::DispatchIndirect(VAddr address, u32 offset, u32 size) {
     pipeline->BindResources(set_writes.data(), static_cast<u32>(set_writes.size()), push_data);
 
     const VkCommandBuffer cmdbuf = static_cast<VkCommandBuffer>(scheduler.CommandBuffer());
-    vkCmdBindPipeline(cmdbuf, VK_PIPELINE_BIND_POINT_COMPUTE,
-                      static_cast<VkPipeline>(pipeline->Handle()));
+    vkCmdBindPipeline(cmdbuf, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline->Handle());
     instance.Mark(cmdbuf, "indirect dispatch: shader, arguments at",
                   pipeline->GetStage(Shader::SwStage::Compute).pgm_hash, address + offset);
     vkCmdDispatchIndirect(cmdbuf, buffer->Handle(), base);
@@ -656,26 +652,18 @@ void Rasterizer::CaptureDrawVertices(const GraphicsPipeline* pipeline, bool is_i
 
 void Rasterizer::BindVertexBuffers(const GraphicsPipeline* pipeline) {
     const AmdGpu::Regs& regs = liverpool->regs;
-    // The graphics pipeline fills these as vulkan.hpp's structs until it is on the C API
-    VertexInputs<vk::VertexInputAttributeDescription2EXT> attributes;
-    VertexInputs<vk::VertexInputBindingDescription2EXT> bindings;
-    VertexInputs<vk::VertexInputBindingDivisorDescriptionEXT> divisors;
+    VertexInputs<VkVertexInputAttributeDescription2EXT> attributes;
+    VertexInputs<VkVertexInputBindingDescription2EXT> bindings;
+    VertexInputs<VkVertexInputBindingDivisorDescriptionEXT> divisors;
     VertexInputs<AmdGpu::Buffer> guest_buffers;
     pipeline->GetVertexInputs(attributes, bindings, divisors, guest_buffers,
                               regs.vgt_instance_step_rate_0, regs.vgt_instance_step_rate_1);
 
     if (instance.IsVertexInputDynamicState()) {
         // Update current vertex inputs.
-        static_assert(sizeof(vk::VertexInputBindingDescription2EXT) ==
-                      sizeof(VkVertexInputBindingDescription2EXT));
-        static_assert(sizeof(vk::VertexInputAttributeDescription2EXT) ==
-                      sizeof(VkVertexInputAttributeDescription2EXT));
-        vkCmdSetVertexInputEXT(
-            static_cast<VkCommandBuffer>(scheduler.CommandBuffer()),
-            static_cast<u32>(bindings.size()),
-            reinterpret_cast<const VkVertexInputBindingDescription2EXT*>(bindings.data()),
-            static_cast<u32>(attributes.size()),
-            reinterpret_cast<const VkVertexInputAttributeDescription2EXT*>(attributes.data()));
+        vkCmdSetVertexInputEXT(static_cast<VkCommandBuffer>(scheduler.CommandBuffer()),
+                               static_cast<u32>(bindings.size()), bindings.data(),
+                               static_cast<u32>(attributes.size()), attributes.data());
     }
 
     if (bindings.empty()) {
@@ -768,7 +756,7 @@ void Rasterizer::BindVertexBuffers(const GraphicsPipeline* pipeline) {
         for (u32 i = 0; i < guest_buffers.size(); ++i) {
             const AmdGpu::Buffer& buffer = guest_buffers[i];
             const bool present = buffer.base_address != 0 && buffer.GetSize() > 0;
-            u32 flags = bindings[i].inputRate == vk::VertexInputRate::eInstance
+            u32 flags = bindings[i].inputRate == VK_VERTEX_INPUT_RATE_INSTANCE
                             ? VertexCapture::BindingPerInstance
                             : 0;
             if (present && buffer_cache.IsRangeGpuWritten(buffer.base_address, buffer.GetSize())) {
@@ -2064,7 +2052,7 @@ void Rasterizer::UpdateColorBlendingState(const GraphicsPipeline* pipeline) cons
     const AmdGpu::Regs& regs = liverpool->regs;
     DynamicState& dynamic_state = scheduler.GetDynamicState();
     dynamic_state.SetBlendConstants(regs.blend_constants.data());
-    dynamic_state.SetColorWriteMasks(pipeline->GetGraphicsKey().write_masks.data());
+    dynamic_state.SetColorWriteMasks(pipeline->GetGraphicsKey().write_masks);
     dynamic_state.SetAttachmentFeedbackLoopEnabled(attachment_feedback_loop);
 }
 

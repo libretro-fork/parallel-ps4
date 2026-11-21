@@ -164,7 +164,7 @@ struct DynamicState {
     vk::FrontFace front_face{};
 
     float blend_constants[4]{};
-    vk::ColorComponentFlags color_write_masks[AmdGpu::NUM_COLOR_BUFFERS]{};
+    VkColorComponentFlags color_write_masks[AmdGpu::NUM_COLOR_BUFFERS]{};
     float line_width{};
     bool feedback_loop_enabled{};
     /// The game's sample positions: side of the pixel block they repeat over (0: none set),
@@ -335,7 +335,7 @@ struct DynamicState {
     }
 
     /// @color_write_masks_ holds one mask per colour buffer
-    void SetColorWriteMasks(const vk::ColorComponentFlags* color_write_masks_) {
+    void SetColorWriteMasks(const VkColorComponentFlags* color_write_masks_) {
         if (memcmp(color_write_masks, color_write_masks_, sizeof(color_write_masks)) != 0) {
             memcpy(color_write_masks, color_write_masks_, sizeof(color_write_masks));
             dirty_state.color_write_masks = true;

@@ -166,8 +166,9 @@ bool PipelineCache::LoadComputePipeline(Serialization::Archive& ar) {
     ASSERT(!FindComputePipeline(compute_key));
     ptr_table_insert(&compute_pipelines, compute_key.value,
                      new ComputePipeline(instance, scheduler, desc_heap, profile,
-                                         vk::PipelineCache{pipeline_cache}, compute_key, *infos[0],
-                                         modules[0], sdata, true));
+                                         static_cast<VkPipelineCache>(pipeline_cache), compute_key,
+                                         *infos[0], static_cast<VkShaderModule>(modules[0]), sdata,
+                                         true));
 
     for (u32 i = 0; i < MaxShaderStages; ++i) {
         infos[i] = nullptr;
@@ -239,12 +240,13 @@ bool PipelineCache::LoadGraphicsPipeline(Serialization::Archive& ar) {
         }
     }
 
-    const u64 pipeline_hash = std::hash<GraphicsPipelineKey>{}(graphics_key);
+    const u64 pipeline_hash = graphics_key.Hash();
     ASSERT(!FindGraphicsPipeline(graphics_key, pipeline_hash));
     ptr_table_insert(&graphics_pipelines, pipeline_hash,
                      new GraphicsPipeline(instance, scheduler, desc_heap, profile, graphics_key,
-                                          vk::PipelineCache{pipeline_cache}, infos, runtime_infos,
-                                          fetch_shader, modules, sdata, true));
+                                          static_cast<VkPipelineCache>(pipeline_cache), infos,
+                                          runtime_infos, fetch_shader, ModuleHandles(modules),
+                                          sdata, true));
 
     for (u32 i = 0; i < MaxShaderStages; ++i) {
         infos[i] = nullptr;

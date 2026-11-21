@@ -30,18 +30,18 @@ template <typename T>
 using VertexInputs = Common::StaticVector<T, MaxVertexBufferCount>;
 
 struct GraphicsPipelineKey {
-    std::array<size_t, MaxShaderStages> stage_hashes;
-    std::array<vk::Format, MaxVertexBufferCount> vertex_buffer_formats;
+    size_t stage_hashes[MaxShaderStages];
+    VkFormat vertex_buffer_formats[MaxVertexBufferCount];
     u32 patch_control_points;
     u32 num_color_attachments;
-    std::array<Shader::PsColorBuffer, AmdGpu::NUM_COLOR_BUFFERS> color_buffers;
-    std::array<AmdGpu::BlendControl, AmdGpu::NUM_COLOR_BUFFERS> blend_controls;
-    std::array<vk::ColorComponentFlags, AmdGpu::NUM_COLOR_BUFFERS> write_masks;
+    Shader::PsColorBuffer color_buffers[AmdGpu::NUM_COLOR_BUFFERS];
+    AmdGpu::BlendControl blend_controls[AmdGpu::NUM_COLOR_BUFFERS];
+    VkColorComponentFlags write_masks[AmdGpu::NUM_COLOR_BUFFERS];
     AmdGpu::ColorBufferMask cb_shader_mask;
     AmdGpu::ColorControl::LogicOp logic_op;
     u8 num_samples;
     u8 depth_samples;
-    std::array<u8, AmdGpu::NUM_COLOR_BUFFERS> color_samples;
+    u8 color_samples[AmdGpu::NUM_COLOR_BUFFERS];
     u32 mrt_mask;
     struct {
         AmdGpu::DepthBuffer::ZFormat z_format : 2;
@@ -58,11 +58,16 @@ struct GraphicsPipelineKey {
     };
 
     GraphicsPipelineKey() {
-        std::memset(this, 0, sizeof(*this));
+        memset(this, 0, sizeof(*this));
     }
 
     bool operator==(const GraphicsPipelineKey& key) const noexcept {
-        return std::memcmp(this, &key, sizeof(key)) == 0;
+        return memcmp(this, &key, sizeof(key)) == 0;
+    }
+
+    /// The key's bytes hashed, as the pipeline cache files it
+    u64 Hash() const noexcept {
+        return xxh3_64(this, sizeof(*this), 0);
     }
 
     void Serialize(Serialization::Archive& ar) const;
@@ -72,10 +77,12 @@ struct GraphicsPipelineKey {
 class GraphicsPipeline : public Pipeline {
 public:
     struct SerializationSupport {
-        VertexInputs<vk::VertexInputAttributeDescription> vertex_attributes{};
-        VertexInputs<vk::VertexInputBindingDescription> vertex_bindings{};
-        VertexInputs<vk::VertexInputBindingDivisorDescriptionEXT> divisors{};
-        vk::PipelineMultisampleStateCreateInfo multisampling{};
+        VertexInputs<VkVertexInputAttributeDescription> vertex_attributes{};
+        VertexInputs<VkVertexInputBindingDescription> vertex_bindings{};
+        VertexInputs<VkVertexInputBindingDivisorDescriptionEXT> divisors{};
+        VkPipelineMultisampleStateCreateInfo multisampling{
+            .sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO};
+        // The SPIR-V the shader recompiler emits for the stages it adds, as it hands them over
         std::vector<u32> tcs{};
         std::vector<u32> tes{};
         std::vector<u32> fragment{};
@@ -84,14 +91,13 @@ public:
         bool Deserialize(Serialization::Archive& ar);
     };
 
+    /// @stages, @runtime_infos and @modules hold MaxShaderStages each
     GraphicsPipeline(const Instance& instance, Scheduler& scheduler, DescriptorHeap& desc_heap,
                      const Shader::Profile& profile, const GraphicsPipelineKey& key,
-                     vk::PipelineCache pipeline_cache,
-                     std::span<const Shader::Info*, MaxShaderStages> stages,
-                     std::span<const Shader::RuntimeInfo, MaxShaderStages> runtime_infos,
+                     VkPipelineCache pipeline_cache, const Shader::Info* const* stages,
+                     const Shader::RuntimeInfo* runtime_infos,
                      const Shader::Gcn::FetchShaderData* fetch_shader,
-                     std::span<const vk::ShaderModule> modules, SerializationSupport& sdata,
-                     bool preloading);
+                     const VkShaderModule* modules, SerializationSupport& sdata, bool preloading);
     ~GraphicsPipeline();
 
     const Shader::Gcn::FetchShaderData& GetFetchShader() const noexcept {
@@ -105,7 +111,7 @@ public:
     /// Gets the attributes and bindings for vertex inputs.
     template <typename Attribute, typename Binding>
     void GetVertexInputs(VertexInputs<Attribute>& attributes, VertexInputs<Binding>& bindings,
-                         VertexInputs<vk::VertexInputBindingDivisorDescriptionEXT>& divisors,
+                         VertexInputs<VkVertexInputBindingDivisorDescriptionEXT>& divisors,
                          VertexInputs<AmdGpu::Buffer>& guest_buffers, u32 step_rate_0,
                          u32 step_rate_1) const;
 
@@ -117,26 +123,4 @@ private:
     Shader::Gcn::FetchShaderData fetch_shader{};
 };
 
-struct ClipDistanceShaderKey {
-    std::array<std::tuple<u8, u8>, 8> clip_locations;
-
-    bool operator==(const ClipDistanceShaderKey& key) const noexcept {
-        return std::memcmp(this, &key, sizeof(key)) == 0;
-    }
-};
-
 } // namespace Vulkan
-
-template <>
-struct std::hash<Vulkan::GraphicsPipelineKey> {
-    std::size_t operator()(const Vulkan::GraphicsPipelineKey& key) const noexcept {
-        return xxh3_64(&key, sizeof(key), 0);
-    }
-};
-
-template <>
-struct std::hash<Vulkan::ClipDistanceShaderKey> {
-    std::size_t operator()(const Vulkan::ClipDistanceShaderKey& key) const noexcept {
-        return xxh3_64(&key, sizeof(key), 0);
-    }
-};

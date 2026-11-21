@@ -29,8 +29,8 @@ void AddBinding(LayoutBindings& bindings, u32& binding, VkDescriptorType type, u
 
 ComputePipeline::ComputePipeline(const Instance& instance, Scheduler& scheduler,
                                  DescriptorHeap& desc_heap, const Shader::Profile& profile,
-                                 vk::PipelineCache pipeline_cache, ComputePipelineKey compute_key_,
-                                 const Shader::Info& info_, vk::ShaderModule module,
+                                 VkPipelineCache pipeline_cache, ComputePipelineKey compute_key_,
+                                 const Shader::Info& info_, VkShaderModule module,
                                  SerializationSupport& sdata, bool preloading /*=false*/)
     : Pipeline{instance, scheduler, desc_heap, profile, pipeline_cache, true},
       compute_key{compute_key_} {
@@ -60,7 +60,8 @@ ComputePipeline::ComputePipeline(const Instance& instance, Scheduler& scheduler,
     CreateDescSetLayout(bindings.data(), static_cast<u32>(bindings.size()), "compute");
     CreatePipelineLayout(VK_SHADER_STAGE_COMPUTE_BIT, "compute");
     const vk::Device vk_device{device};
-    SetObjectName(vk_device, GetLayout(), "Compute PipelineLayout %s", debug_str);
+    SetObjectName(vk_device, vk::PipelineLayout{pipeline_layout}, "Compute PipelineLayout %s",
+                  debug_str);
 
     VkPipelineShaderStageRequiredSubgroupSizeCreateInfo subgroup_size_ci{};
     subgroup_size_ci.sType =
@@ -72,15 +73,14 @@ ComputePipeline::ComputePipeline(const Instance& instance, Scheduler& scheduler,
     compute_pipeline_ci.stage.pNext =
         instance.IsSubgroupSize64Supported() ? &subgroup_size_ci : nullptr;
     compute_pipeline_ci.stage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-    compute_pipeline_ci.stage.module = static_cast<VkShaderModule>(module);
+    compute_pipeline_ci.stage.module = module;
     compute_pipeline_ci.stage.pName = "main";
     compute_pipeline_ci.layout = pipeline_layout;
-    const VkResult pipeline_result =
-        vkCreateComputePipelines(device, static_cast<VkPipelineCache>(pipeline_cache), 1,
-                                 &compute_pipeline_ci, nullptr, &pipeline);
+    const VkResult pipeline_result = vkCreateComputePipelines(
+        device, pipeline_cache, 1, &compute_pipeline_ci, nullptr, &pipeline);
     ASSERT_MSG(pipeline_result == VK_SUCCESS, "Failed to create compute pipeline: %s",
                ResultName(pipeline_result));
-    SetObjectName(vk_device, Handle(), "Compute Pipeline %s", debug_str);
+    SetObjectName(vk_device, vk::Pipeline{pipeline}, "Compute Pipeline %s", debug_str);
 }
 
 ComputePipeline::~ComputePipeline() = default;

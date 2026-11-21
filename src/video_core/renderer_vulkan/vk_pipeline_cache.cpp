@@ -629,7 +629,7 @@ const GraphicsPipeline* PipelineCache::GetGraphicsPipeline(const DrawIndirectPar
             WaitCompiled();
             continue;
         }
-        const u64 pipeline_hash = std::hash<GraphicsPipelineKey>{}(graphics_key);
+        const u64 pipeline_hash = graphics_key.Hash();
         if (GraphicsPipeline* pipeline = FindGraphicsPipeline(graphics_key, pipeline_hash)) {
             return pipeline;
         }
@@ -715,9 +715,9 @@ const ComputePipeline* PipelineCache::GetComputePipeline() {
                  static_cast<unsigned long long>(pipeline_hash));
 
         ComputePipeline::SerializationSupport sdata{};
-        pipeline = new ComputePipeline(instance, scheduler, desc_heap, profile,
-                                       vk::PipelineCache{pipeline_cache}, compute_key, *infos[0],
-                                       modules[0], sdata, false);
+        pipeline = new ComputePipeline(
+            instance, scheduler, desc_heap, profile, static_cast<VkPipelineCache>(pipeline_cache),
+            compute_key, *infos[0], static_cast<VkShaderModule>(modules[0]), sdata, false);
         ptr_table_insert(&compute_pipelines, compute_key.value, pipeline);
         RegisterPipelineData(compute_key, sdata);
         ++num_new_pipelines;
@@ -803,8 +803,7 @@ bool PipelineCache::RefreshGraphicsKey() {
         }
 
         // Apply swizzle to target mask
-        key.write_masks[cb] =
-            vk::ColorComponentFlags{key.color_buffers[cb].swizzle.ApplyMask(target_mask)};
+        key.write_masks[cb] = key.color_buffers[cb].swizzle.ApplyMask(target_mask);
 
         // Fill color samples
         const u8 prev_color_samples = color_samples;
@@ -833,7 +832,7 @@ bool PipelineCache::RefreshGraphicsKey() {
             all_color_samples_same && depth_mismatch &&
                 (!instance.IsMixedDepthSamplesSupported() ||
                  (per_sample && color_samples < key.depth_samples))) {
-            key.color_samples.fill(key.depth_samples);
+            memset(key.color_samples, key.depth_samples, sizeof(key.color_samples));
             key.num_samples = key.depth_samples;
         }
     }
@@ -953,8 +952,8 @@ bool PipelineCache::RefreshGraphicsStages() {
             ASSERT_MSG(vertex_binding < MaxVertexBufferCount,
                        "Vertex attribute binding count exceeded limit: %u >= %u", vertex_binding,
                        MaxVertexBufferCount);
-            key.vertex_buffer_formats[vertex_binding++] =
-                Vulkan::LiverpoolToVK::SurfaceFormat(buffer.GetDataFmt(), buffer.GetNumberFmt());
+            key.vertex_buffer_formats[vertex_binding++] = static_cast<VkFormat>(
+                Vulkan::LiverpoolToVK::SurfaceFormat(buffer.GetDataFmt(), buffer.GetNumberFmt()));
         }
     }
 
@@ -1321,10 +1320,10 @@ void PipelineCache::RunJobOn(CompileJob& job, const Shader::ShaderParams& params
         for (u32 stage = 0; stage < MaxShaderStages; ++stage) {
             stage_ptrs[stage] = job.has_stage[stage] ? &job.stage_infos[stage] : nullptr;
         }
-        job.pipeline = new GraphicsPipeline(instance, scheduler, desc_heap, profile, job.key,
-                                            vk::PipelineCache{pipeline_cache}, stage_ptrs,
-                                            job.runtimes, job.has_fetch ? &job.fetch : nullptr,
-                                            job.modules, job.sdata, false);
+        job.pipeline = new GraphicsPipeline(
+            instance, scheduler, desc_heap, profile, job.key,
+            static_cast<VkPipelineCache>(pipeline_cache), stage_ptrs, job.runtimes,
+            job.has_fetch ? &job.fetch : nullptr, ModuleHandles(job.modules), job.sdata, false);
         ++driver_cache_unsaved;
         for (Shader::Info& info : job.stage_infos) {
             info.snapshot = nullptr;
@@ -1503,7 +1502,7 @@ void PipelineCache::ReplaceCachedPermutation(CompileJob& job) {
         const GraphicsPipelineKey& key = p->GetGraphicsKey();
         for (u32 stage = 0; stage < MaxShaderStages; ++stage) {
             if (key.stage_hashes[stage] == perm_hash) {
-                stale.push_back({std::hash<GraphicsPipelineKey>{}(key), p});
+                stale.push_back({key.Hash(), p});
                 break;
             }
         }

@@ -4,6 +4,13 @@ What changed in the libretro core of this fork, newest first. Changes that come 
 
 ## Unreleased
 
+- The pipelines (`vk_graphics_pipeline`, `vk_compute_pipeline`, `vk_pipeline_common`) on the Vulkan C API, with no `auto`.
+  - **Graphics pipeline:** its states are C structs with their structure types, and the rasterization chain is linked by hand where the device has the provoking vertex and depth clip extensions. Its vertex inputs are C structs too, so the rasterizer hands them to `vkCmdSetVertexInputEXT` as they are.
+  - **Key:** the graphics pipeline key's arrays are C arrays, its formats and write masks C types, and it hashes itself with `Hash()` in place of a `std::hash` specialisation. Its bytes are as they were, so pipelines already on disk still match.
+  - **Smaller pieces:** the pipelines take C pipeline caches and shader modules, `Handle()` and `GetLayout()` give C handles, the scheduler keeps C colour write masks, and the unused `ClipDistanceShaderKey` is gone.
+  - **Boundaries left:** the SPIR-V the shader recompiler emits for the stages it adds still comes as its vectors, until the recompiler is converted.
+  - Not run in a game yet.
+
 - The rasterizer (`vk_rasterizer.h`/`.cpp`) on the Vulkan C API, with no STL or `auto`.
   - **Commands:** its draws, dispatches, pipeline binds, vertex and index buffer binds, vertex input and debug labels are `vkCmd*` calls. The descriptor writes it hands the pipeline are `VkWriteDescriptorSet`, made with their structure type, and `Pipeline::BindResources` takes them as they are.
   - **No STL:** the bound buffers, bound images, descriptor writes and captured indices are small vectors, the image bindings C arrays, and the draw offsets two out-params. The vertex ranges are sorted in place and searched with a loop. The lambdas are static functions, and the markers take C strings.

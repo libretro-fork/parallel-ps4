@@ -12,7 +12,7 @@
 namespace Vulkan {
 
 Pipeline::Pipeline(const Instance& instance_, Scheduler& scheduler_, DescriptorHeap& desc_heap_,
-                   const Shader::Profile& profile_, vk::PipelineCache pipeline_cache,
+                   const Shader::Profile& profile_, VkPipelineCache pipeline_cache,
                    bool is_compute_ /*= false*/)
     : instance{instance_}, scheduler{scheduler_}, desc_heap{desc_heap_}, profile{profile_},
       device{static_cast<VkDevice>(instance_.GetDevice())}, is_compute{is_compute_} {}
@@ -60,8 +60,7 @@ void Pipeline::BindResources(VkWriteDescriptorSet* writes, u32 num_writes,
         IsCompute() ? VK_PIPELINE_BIND_POINT_COMPUTE : VK_PIPELINE_BIND_POINT_GRAPHICS;
 
     const VkShaderStageFlags stage_flags =
-        IsCompute() ? VkShaderStageFlags{VK_SHADER_STAGE_COMPUTE_BIT}
-                    : static_cast<VkShaderStageFlags>(AllGraphicsStageBits);
+        IsCompute() ? VkShaderStageFlags{VK_SHADER_STAGE_COMPUTE_BIT} : AllGraphicsStageBits;
     vkCmdPushConstants(cmdbuf, pipeline_layout, stage_flags, 0u, sizeof(push_data), &push_data);
 
     // Bind descriptor set.

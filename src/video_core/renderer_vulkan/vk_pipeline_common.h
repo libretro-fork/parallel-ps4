@@ -16,10 +16,10 @@ struct PushData;
 
 namespace Vulkan {
 
-static constexpr vk::ShaderStageFlags AllGraphicsStageBits =
-    vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eTessellationControl |
-    vk::ShaderStageFlagBits::eTessellationEvaluation | vk::ShaderStageFlagBits::eGeometry |
-    vk::ShaderStageFlagBits::eFragment;
+static constexpr VkShaderStageFlags AllGraphicsStageBits =
+    VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT |
+    VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT | VK_SHADER_STAGE_GEOMETRY_BIT |
+    VK_SHADER_STAGE_FRAGMENT_BIT;
 
 class Instance;
 class Scheduler;
@@ -28,19 +28,19 @@ class DescriptorHeap;
 class Pipeline {
 public:
     Pipeline(const Instance& instance, Scheduler& scheduler, DescriptorHeap& desc_heap,
-             const Shader::Profile& profile, vk::PipelineCache pipeline_cache,
+             const Shader::Profile& profile, VkPipelineCache pipeline_cache,
              bool is_compute = false);
     virtual ~Pipeline();
 
     Pipeline(const Pipeline&) = delete;
     Pipeline& operator=(const Pipeline&) = delete;
 
-    vk::Pipeline Handle() const noexcept {
-        return vk::Pipeline{pipeline};
+    VkPipeline Handle() const noexcept {
+        return pipeline;
     }
 
-    vk::PipelineLayout GetLayout() const noexcept {
-        return vk::PipelineLayout{pipeline_layout};
+    VkPipelineLayout GetLayout() const noexcept {
+        return pipeline_layout;
     }
 
     /// The stages the pipeline binds from, at *@out (some null for a graphics pipeline): the

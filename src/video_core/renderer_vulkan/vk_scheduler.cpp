@@ -492,9 +492,7 @@ void DynamicState::Commit(const Instance& instance, const vk::CommandBuffer& vk_
         dirty_state.color_write_masks = false;
         if (instance.IsDynamicColorWriteMaskSupported()) {
             static_assert(sizeof(vk::ColorComponentFlags) == sizeof(VkColorComponentFlags));
-            vkCmdSetColorWriteMaskEXT(
-                cmdbuf, 0, AmdGpu::NUM_COLOR_BUFFERS,
-                reinterpret_cast<const VkColorComponentFlags*>(color_write_masks));
+            vkCmdSetColorWriteMaskEXT(cmdbuf, 0, AmdGpu::NUM_COLOR_BUFFERS, color_write_masks);
         }
     }
     if (dirty_state.line_width) {

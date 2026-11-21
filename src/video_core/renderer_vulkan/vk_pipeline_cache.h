@@ -33,6 +33,12 @@ struct Info;
 
 namespace Vulkan {
 
+/// The cache's vulkan.hpp modules as the C API's handles, which they hold bit for bit
+inline const VkShaderModule* ModuleHandles(const vk::ShaderModule* modules) {
+    static_assert(sizeof(vk::ShaderModule) == sizeof(VkShaderModule));
+    return reinterpret_cast<const VkShaderModule*>(modules);
+}
+
 class Instance;
 class Scheduler;
 class ShaderCache;
