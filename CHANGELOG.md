@@ -4,6 +4,12 @@ What changed in the libretro core of this fork, newest first. Changes that come 
 
 ## Unreleased
 
+- The staging pool, the page manager, the vertex capture and `CompileSPV` are off the STL.
+  - **Staging pool:** its ring blocks and large buffers are kept in `SmallVector`s with room for the usual number (32 blocks, 16 large buffers per type), owning their buffers; the trimming that `std::erase_if` did is a plain loop.
+  - **Page manager:** userfaultfd that cannot be set up is reported by the constructor instead of by an exception, and its descriptor is closed; the signal handler is used then, as before.
+  - **Vertex capture:** its file's path is joined with libretro-common's `fill_pathname_join_special`.
+  - **`CompileSPV`** takes a `Common::Span`.
+  - No change in behaviour intended. Not run in a game yet.
 - The GPU command processor and register headers (`video_core/amdgpu`) are off the STL.
   - **Registers:** the register file, viewports, blend controls, user data, padding and the shader binary signature are plain arrays; their layout is the same.
   - **Command buffers:** the command processor takes `Common::Span` (a pointer and a count, added to `common/concepts.h`) instead of `std::span`.

@@ -19,7 +19,7 @@ VkShaderModule CompileSPV(const u32* code, size_t num_words, VkDevice device) {
     return VkShaderModule{module};
 }
 
-VkShaderModule CompileSPV(std::span<const u32> code, VkDevice device) {
+VkShaderModule CompileSPV(Common::Span<const u32> code, VkDevice device) {
     return CompileSPV(code.data(), code.size(), device);
 }
 

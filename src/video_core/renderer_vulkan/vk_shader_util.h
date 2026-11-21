@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include <span>
+#include "common/concepts.h"
 
 #include "common/types.h"
 #include "video_core/renderer_vulkan/vk_common.h"
@@ -18,6 +18,6 @@ namespace Vulkan {
 /// Makes a shader module of @num_words SPIR-V words at @code
 VkShaderModule CompileSPV(const u32* code, size_t num_words, VkDevice device);
 
-VkShaderModule CompileSPV(std::span<const u32> code, VkDevice device);
+VkShaderModule CompileSPV(Common::Span<const u32> code, VkDevice device);
 
 } // namespace Vulkan

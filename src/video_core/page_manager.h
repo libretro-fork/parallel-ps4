@@ -4,7 +4,6 @@
 #pragma once
 
 #include <cstddef>
-#include <memory>
 #include "common/alignment.h"
 #include "common/types.h"
 #include "video_core/buffer_cache/region_definitions.h"
@@ -64,7 +63,8 @@ private:
     friend struct UffdImpl;
     friend struct SignalImpl;
     struct Impl;
-    std::unique_ptr<Impl> impl;
+    /// Owned
+    Impl* impl{};
 };
 
 } // namespace VideoCore

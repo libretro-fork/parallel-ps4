@@ -1,9 +1,6 @@
 // SPDX-FileCopyrightText: Copyright 2026 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
-#include <algorithm>
-#include <bit>
-
 #include "common/alignment.h"
 #include "common/assert.h"
 #include "common/types.h"
@@ -25,11 +22,10 @@ constexpr u64 BLOCK_SIZE = 16_MB;
 // upload of a game, and the first after a quiet spell, allocates nothing. Blocks past them are
 // made as a burst needs them and let go once idle.
 constexpr size_t RING_KEPT_BLOCKS = 2;
-// Room for the blocks of a ring, so that adding one does not move the others
-constexpr size_t RING_BLOCKS_ROOM = 32;
 
 u64 RoundAllocationSize(u64 size) {
-    const u64 step = Common::Max(std::bit_floor(size) / 4, LARGE_MIN_GRANULARITY);
+    const u64 step =
+        Common::Max((size ? u64(1) << (Common::BitWidth(size) - 1) : 0) / 4, LARGE_MIN_GRANULARITY);
     return Common::AlignUp(size, step);
 }
 
@@ -39,7 +35,6 @@ StagingBufferPool::StagingBufferPool(const Instance& instance_, Scheduler& sched
     : instance{instance_}, scheduler{scheduler_} {
     for (size_t type = 0; type < NUM_TYPES; ++type) {
         Ring& ring = rings[type];
-        ring.blocks.reserve(RING_BLOCKS_ROOM);
         // Read backs mostly go straight into the game's memory or their own buffers
         // (RequestLarge); their ring is made as it is wanted
         if (static_cast<MemoryType>(type) == MemoryType::HostCached) {
@@ -47,15 +42,26 @@ StagingBufferPool::StagingBufferPool(const Instance& instance_, Scheduler& sched
         }
         for (size_t i = 0; i < RING_KEPT_BLOCKS; ++i) {
             ring.blocks.push_back(Block{
-                .buffer = std::make_unique<VideoCore::StreamBuffer>(
-                    instance, scheduler, static_cast<MemoryType>(type), BLOCK_SIZE),
+                .buffer = new VideoCore::StreamBuffer(instance, scheduler,
+                                                      static_cast<MemoryType>(type), BLOCK_SIZE),
                 .last_used_frame = 0,
             });
         }
     }
 }
 
-StagingBufferPool::~StagingBufferPool() = default;
+StagingBufferPool::~StagingBufferPool() {
+    for (Ring& ring : rings) {
+        for (Block& block : ring.blocks) {
+            delete block.buffer;
+        }
+    }
+    for (LargeCache& cache : large_caches) {
+        for (LargeBuffer& entry : cache) {
+            delete entry.buffer;
+        }
+    }
+}
 
 StagingBufferRef StagingBufferPool::Request(u64 size, MemoryType type, u64 alignment, bool deferred,
                                             bool unsynchronized) {
@@ -88,8 +94,7 @@ StagingBufferRef StagingBufferPool::RequestFromRing(Ring& ring, u64 size, u64 al
             best_offset = 0;
         } else {
             best = &ring.blocks.emplace_back(Block{
-                .buffer = std::make_unique<VideoCore::StreamBuffer>(instance, scheduler, type,
-                                                                    BLOCK_SIZE),
+                .buffer = new VideoCore::StreamBuffer(instance, scheduler, type, BLOCK_SIZE),
                 .last_used_frame = frame,
             });
             ring.current = ring.blocks.size() - 1;
@@ -115,7 +120,7 @@ StagingBufferRef StagingBufferPool::RequestFromRing(Ring& ring, u64 size, u64 al
 
 StagingBufferRef StagingBufferPool::RequestLarge(u64 size, MemoryType type, bool deferred,
                                                  bool unsynchronized) {
-    std::vector<Vulkan::StagingBufferPool::LargeBuffer>& cache = large_caches[u32(type)];
+    LargeCache& cache = large_caches[u32(type)];
     const u64 max_size = Common::Max(size + size / 4, RoundAllocationSize(size));
 
     LargeBuffer* best{};
@@ -132,8 +137,8 @@ StagingBufferRef StagingBufferPool::RequestLarge(u64 size, MemoryType type, bool
 
     if (!best) {
         best = &cache.emplace_back(LargeBuffer{
-            .buffer = std::make_unique<VideoCore::Buffer>(instance, 0, RoundAllocationSize(size),
-                                                          type, "StagingBufferPool:Dedicated"),
+            .buffer = new VideoCore::Buffer(instance, 0, RoundAllocationSize(size), type,
+                                            "StagingBufferPool:Dedicated"),
             .tick = 0,
             .last_used_frame = frame,
             .held = false,
@@ -158,10 +163,10 @@ StagingBufferRef StagingBufferPool::RequestLarge(u64 size, MemoryType type, bool
 }
 
 void StagingBufferPool::FreeDeferred(const StagingBufferRef& ref) {
-    std::vector<Vulkan::StagingBufferPool::LargeBuffer>& cache = large_caches[u32(ref.type)];
+    LargeCache& cache = large_caches[u32(ref.type)];
     LargeBuffer* it = nullptr;
     for (LargeBuffer& entry : cache) {
-        if (entry.buffer.get() == ref.buffer) {
+        if (entry.buffer == ref.buffer) {
             it = &entry;
             break;
         }
@@ -177,19 +182,20 @@ void StagingBufferPool::TickFrame() {
     for (Ring& ring : rings) {
         TrimRing(ring);
     }
-    for (std::vector<Vulkan::StagingBufferPool::LargeBuffer>& cache : large_caches) {
+    for (LargeCache& cache : large_caches) {
         TrimLarge(cache);
     }
 }
 
 void StagingBufferPool::TrimRing(Ring& ring) {
-    std::vector<Vulkan::StagingBufferPool::Block>& blocks = ring.blocks;
+    Common::SmallVector<Block, RING_BLOCKS_ROOM>& blocks = ring.blocks;
     for (size_t i = blocks.size(); i-- > RING_KEPT_BLOCKS;) {
         const Block& block = blocks[i];
         if (frame - block.last_used_frame < RING_IDLE_FRAMES ||
             !scheduler.IsFree(block.buffer->LastTick())) {
             continue;
         }
+        delete block.buffer;
         blocks.erase(blocks.begin() + i);
         if (i < ring.current) {
             --ring.current;
@@ -202,11 +208,15 @@ void StagingBufferPool::TrimRing(Ring& ring) {
     }
 }
 
-void StagingBufferPool::TrimLarge(std::vector<LargeBuffer>& cache) {
-    std::erase_if(cache, [this](const LargeBuffer& entry) {
-        return !entry.held && frame - entry.last_used_frame >= LARGE_IDLE_FRAMES &&
-               scheduler.IsFree(entry.tick);
-    });
+void StagingBufferPool::TrimLarge(LargeCache& cache) {
+    for (size_t i = cache.size(); i-- > 0;) {
+        const LargeBuffer& entry = cache[i];
+        if (!entry.held && frame - entry.last_used_frame >= LARGE_IDLE_FRAMES &&
+            scheduler.IsFree(entry.tick)) {
+            delete entry.buffer;
+            cache.erase(cache.begin() + i);
+        }
+    }
 }
 
 } // namespace Vulkan

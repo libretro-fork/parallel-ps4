@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include <span>
+#include "common/concepts.h"
 
 #include <retro_atomic.h>
 
@@ -49,7 +49,7 @@ void OnFlip();
 /// Records a draw; its number, for the data that follows. @num_vertices vertices from
 /// @first_vertex of each input are the ones the draw reads, 0 when that is not known.
 u32 Draw(u32 primitive, u32 num_indices, u32 num_instances, u32 first_vertex, u32 num_vertices,
-         std::span<const Binding> bindings);
+         Common::Span<const Binding> bindings);
 
 /// True if this range's bytes are still wanted: not past the capture's size, and not a
 /// range already recorded that the GPU has not written.

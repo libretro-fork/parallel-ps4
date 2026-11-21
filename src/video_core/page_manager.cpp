@@ -1,8 +1,6 @@
 // SPDX-FileCopyrightText: Copyright 2024 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
-#include <algorithm>
-#include <utility>
 #include "common/assert.h"
 #include "common/combiner.h"
 #include "common/div_ceil.h"
@@ -29,6 +27,7 @@
 #include <poll.h>
 #include <sys/ioctl.h>
 #include <sys/syscall.h>
+#include <unistd.h>
 #else
 #endif
 
@@ -71,7 +70,7 @@ struct PageManager::Impl {
                 } else if (read_op == PageOp::Untrack) {
                     ASSERT_MSG(num_read_watchers > 0, "Not enough watchers");
                 }
-                num_read_watchers += std::to_underlying(read_op);
+                num_read_watchers += static_cast<s8>(read_op);
             }
             if (update_write) {
                 if (write_op == PageOp::Track) {
@@ -79,7 +78,7 @@ struct PageManager::Impl {
                 } else if (write_op == PageOp::Untrack) {
                     ASSERT_MSG(num_write_watchers > 0, "Not enough watchers");
                 }
-                num_write_watchers += std::to_underlying(write_op);
+                num_write_watchers += static_cast<s8>(write_op);
             }
             return Perms();
         }
@@ -263,6 +262,8 @@ struct UffdImpl : public PageManager::Impl {
 private:
     stop_thread_t ufd_thread = STOP_THREAD_INIT;
     int uffd;
+    /// Whether userfaultfd could be set up (and the handler thread runs)
+    bool started = false;
 
 public:
     UffdImpl(Vulkan::Rasterizer* rasterizer_) : Impl() {
@@ -272,7 +273,7 @@ public:
             LOG_ERROR(Common_Memory,
                       "userfaultfd syscall failed: %s, falling back to signal implementation",
                       Common::GetLastErrorMsg());
-            throw std::runtime_error("userfaultfd");
+            return;
         }
 
         // Request uffdio features from kernel.
@@ -284,10 +285,13 @@ public:
             LOG_ERROR(Common_Memory,
                       "uffdio_api call failed: %s, falling back to signal implementation",
                       Common::GetLastErrorMsg());
-            throw std::runtime_error("uffdio_api");
+            close(uffd);
+            uffd = -1;
+            return;
         }
 
         // Create uffd handler thread
+        started = true;
         stop_thread_start(
             &ufd_thread, [](void* self) { static_cast<UffdImpl*>(self)->UffdHandler(); }, this);
     }
@@ -295,8 +299,14 @@ public:
     // As the jthread it was: asked to stop and waited for. The thread sits in poll, so this
     // returns once a fault has come; the object lives as long as the emulator's process.
     ~UffdImpl() {
-        stop_thread_request(&ufd_thread);
-        stop_thread_join(&ufd_thread);
+        if (started) {
+            stop_thread_request(&ufd_thread);
+            stop_thread_join(&ufd_thread);
+        }
+    }
+
+    bool Started() const {
+        return started;
     }
 
     void OnMap(VAddr address, size_t size) override {
@@ -403,7 +413,7 @@ struct SignalImpl : public PageManager::Impl {
         rasterizer = rasterizer_;
 
         // Should be called first.
-        constexpr const unsigned int priority = std::numeric_limits<u32>::min();
+        constexpr const unsigned int priority = 0;
         Core::Signals::Instance()->RegisterAccessViolationHandler(GuestFaultSignalHandler,
                                                                   priority);
     }
@@ -433,20 +443,23 @@ struct SignalImpl : public PageManager::Impl {
 PageManager::PageManager(Vulkan::Rasterizer* rasterizer_) {
 #ifdef __linux__
     if (emu_settings_get_userfaultfd()) {
-        try {
-            impl = std::make_unique<UffdImpl>(rasterizer_);
+        UffdImpl* const uffd_impl = new UffdImpl(rasterizer_);
+        if (uffd_impl->Started()) {
+            impl = uffd_impl;
             LOG_INFO(Config, "Memory tracking method: userfaultfd");
             return;
-        } catch (const std::runtime_error& e) {
-            // if uffd is unsupported, falls back to SignalImpl
         }
+        // userfaultfd is not supported: signals instead
+        delete uffd_impl;
     }
     LOG_INFO(Config, "Memory tracking method: signals");
 #endif
-    impl = std::make_unique<SignalImpl>(rasterizer_);
+    impl = new SignalImpl(rasterizer_);
 }
 
-PageManager::~PageManager() = default;
+PageManager::~PageManager() {
+    delete impl;
+}
 
 void PageManager::OnGpuMap(VAddr address, size_t size) {
     impl->OnMap(address, size);

@@ -1,9 +1,10 @@
 // SPDX-FileCopyrightText: Copyright 2026 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
-#include <array>
 #include <cstdio>
-#include <cstring>
+#include <file/file_path.h>
+#include <retro_miscellaneous.h>
+#include <string.h>
 
 #include <streams/file_stream.h>
 
@@ -41,7 +42,7 @@ u32 submits_left{};
 u32 flips_left{};
 u32 host_pending{};
 /// Ranges recorded already, by address and size: the GPU's own are recorded each time
-std::array<u64, 4096> seen{};
+u64 seen[4096]{};
 
 void Chunk(u32 type, u32 draw, const void* head, u64 head_size, const void* body, u64 body_size) {
     if (!file) {
@@ -88,12 +89,12 @@ void Request() {
 void OnSubmit() {
     const int now = retro_atomic_load_relaxed_int(&state);
     if (now == Asked) {
-        const std::filesystem::path path =
-            Common::FS::GetUserPath(Common::FS::PathType::LogDir) / "vertex_capture.bin";
-        file = filestream_open(path.string().c_str(), RETRO_VFS_FILE_ACCESS_WRITE,
-                               RETRO_VFS_FILE_ACCESS_HINT_NONE);
+        char path[PATH_MAX_LENGTH];
+        fill_pathname_join_special(path, Common::FS::GetUserPathUTF8(Common::FS::PathType::LogDir),
+                                   "vertex_capture.bin", sizeof(path));
+        file = filestream_open(path, RETRO_VFS_FILE_ACCESS_WRITE, RETRO_VFS_FILE_ACCESS_HINT_NONE);
         if (!file) {
-            LOG_ERROR(Render_Vulkan, "Vertex capture: cannot write %s", (path.string()).c_str());
+            LOG_ERROR(Render_Vulkan, "Vertex capture: cannot write %s", path);
             retro_atomic_store_release_int(&state, Idle);
             return;
         }
@@ -103,7 +104,7 @@ void OnSubmit() {
         host_pending = 0;
         submits_left = SubmitsCaptured;
         flips_left = FlipsCaptured;
-        seen.fill(0);
+        memset(seen, 0, sizeof(seen));
         retro_atomic_store_release_int(&state, Recording);
     } else if (now == Recording && --submits_left == 0) {
         Finish();
@@ -117,7 +118,7 @@ void OnFlip() {
 }
 
 u32 Draw(u32 primitive, u32 num_indices, u32 num_instances, u32 first_vertex, u32 num_vertices,
-         std::span<const Binding> bindings) {
+         Common::Span<const Binding> bindings) {
     const u32 head[6] = {primitive,     num_indices,
                          num_instances, static_cast<u32>(bindings.size()),
                          first_vertex,  num_vertices};
@@ -133,7 +134,7 @@ bool Wants(u64 address, u64 size, bool gpu_written) {
         return true;
     }
     const u64 key = address * 0x9E3779B97F4A7C15ull ^ size;
-    u64& slot = seen[(key >> 20) % seen.size()];
+    u64& slot = seen[(key >> 20) % (sizeof(seen) / sizeof(seen[0]))];
     if (slot == key) {
         return false;
     }
