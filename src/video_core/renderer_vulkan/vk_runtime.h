@@ -48,8 +48,9 @@ public:
 
     void UploadImage(VideoCore::Image* dst, const VideoCore::Buffer* src,
                      std::span<const vk::BufferImageCopy> upload_copies);
+    /// Copies @num_copies regions at @copies of @src into @dst
     void DownloadImage(VideoCore::Image* src, const VideoCore::Buffer* dst,
-                       std::span<const vk::BufferImageCopy> download_copies);
+                       const VkBufferImageCopy* copies, u32 num_copies);
 
     void CopyImage(VideoCore::Image* src, VideoCore::Image* dst);
     // Between images of the same layout made at different sizes on the GPU (the libretro

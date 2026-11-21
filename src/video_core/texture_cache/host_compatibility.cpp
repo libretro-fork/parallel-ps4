@@ -4,7 +4,7 @@
 // Copyright © 2015-2023 Valve Corporation
 // Copyright © 2015-2023 LunarG, Inc.
 
-#include <unordered_map>
+#include "common/assert.h"
 #include "common/enum.h"
 #include "video_core/texture_cache/host_compatibility.h"
 
@@ -52,168 +52,178 @@ DECLARE_ENUM_FLAG_OPERATORS(CompatibilityClass)
  * @url
  * https://github.com/KhronosGroup/Vulkan-ValidationLayers/blob/d37c676f/layers/generated/vk_format_utils.cpp#L70-L812
  */
-static const std::unordered_map<vk::Format, CompatibilityClass> FORMAT_TABLE = {
-    {vk::Format::eA1R5G5B5UnormPack16, CompatibilityClass::_16BIT},
-    {vk::Format::eA2B10G10R10SintPack32, CompatibilityClass::_32BIT},
-    {vk::Format::eA2B10G10R10SnormPack32, CompatibilityClass::_32BIT},
-    {vk::Format::eA2B10G10R10SscaledPack32, CompatibilityClass::_32BIT},
-    {vk::Format::eA2B10G10R10UintPack32, CompatibilityClass::_32BIT},
-    {vk::Format::eA2B10G10R10UnormPack32, CompatibilityClass::_32BIT},
-    {vk::Format::eA2B10G10R10UscaledPack32, CompatibilityClass::_32BIT},
-    {vk::Format::eA2R10G10B10SintPack32, CompatibilityClass::_32BIT},
-    {vk::Format::eA2R10G10B10SnormPack32, CompatibilityClass::_32BIT},
-    {vk::Format::eA2R10G10B10SscaledPack32, CompatibilityClass::_32BIT},
-    {vk::Format::eA2R10G10B10UintPack32, CompatibilityClass::_32BIT},
-    {vk::Format::eA2R10G10B10UnormPack32, CompatibilityClass::_32BIT},
-    {vk::Format::eA2R10G10B10UscaledPack32, CompatibilityClass::_32BIT},
-    {vk::Format::eA4B4G4R4UnormPack16, CompatibilityClass::_16BIT},
-    {vk::Format::eA4R4G4B4UnormPack16, CompatibilityClass::_16BIT},
-    {vk::Format::eA8B8G8R8SintPack32, CompatibilityClass::_32BIT},
-    {vk::Format::eA8B8G8R8SnormPack32, CompatibilityClass::_32BIT},
-    {vk::Format::eA8B8G8R8SrgbPack32, CompatibilityClass::_32BIT},
-    {vk::Format::eA8B8G8R8SscaledPack32, CompatibilityClass::_32BIT},
-    {vk::Format::eA8B8G8R8UintPack32, CompatibilityClass::_32BIT},
-    {vk::Format::eA8B8G8R8UnormPack32, CompatibilityClass::_32BIT},
-    {vk::Format::eA8B8G8R8UscaledPack32, CompatibilityClass::_32BIT},
-    {vk::Format::eB10G11R11UfloatPack32, CompatibilityClass::_32BIT},
-    {vk::Format::eB4G4R4A4UnormPack16, CompatibilityClass::_16BIT},
-    {vk::Format::eB5G5R5A1UnormPack16, CompatibilityClass::_16BIT},
-    {vk::Format::eB5G6R5UnormPack16, CompatibilityClass::_16BIT},
-    {vk::Format::eB8G8R8A8Sint, CompatibilityClass::_32BIT},
-    {vk::Format::eB8G8R8A8Snorm, CompatibilityClass::_32BIT},
-    {vk::Format::eB8G8R8A8Srgb, CompatibilityClass::_32BIT},
-    {vk::Format::eB8G8R8A8Sscaled, CompatibilityClass::_32BIT},
-    {vk::Format::eB8G8R8A8Uint, CompatibilityClass::_32BIT},
-    {vk::Format::eB8G8R8A8Unorm, CompatibilityClass::_32BIT},
-    {vk::Format::eB8G8R8A8Uscaled, CompatibilityClass::_32BIT},
-    {vk::Format::eB8G8R8Sint, CompatibilityClass::_24BIT},
-    {vk::Format::eB8G8R8Snorm, CompatibilityClass::_24BIT},
-    {vk::Format::eB8G8R8Srgb, CompatibilityClass::_24BIT},
-    {vk::Format::eB8G8R8Sscaled, CompatibilityClass::_24BIT},
-    {vk::Format::eB8G8R8Uint, CompatibilityClass::_24BIT},
-    {vk::Format::eB8G8R8Unorm, CompatibilityClass::_24BIT},
-    {vk::Format::eB8G8R8Uscaled, CompatibilityClass::_24BIT},
-    {vk::Format::eBc1RgbaSrgbBlock, CompatibilityClass::BC1_RGBA | CompatibilityClass::_64BIT},
-    {vk::Format::eBc1RgbaUnormBlock, CompatibilityClass::BC1_RGBA | CompatibilityClass::_64BIT},
-    {vk::Format::eBc1RgbSrgbBlock, CompatibilityClass::BC1_RGB | CompatibilityClass::_64BIT},
-    {vk::Format::eBc1RgbUnormBlock, CompatibilityClass::BC1_RGB | CompatibilityClass::_64BIT},
-    {vk::Format::eBc2SrgbBlock, CompatibilityClass::BC2 | CompatibilityClass::_128BIT},
-    {vk::Format::eBc2UnormBlock, CompatibilityClass::BC2 | CompatibilityClass::_128BIT},
-    {vk::Format::eBc3SrgbBlock, CompatibilityClass::BC3 | CompatibilityClass::_128BIT},
-    {vk::Format::eBc3UnormBlock, CompatibilityClass::BC3 | CompatibilityClass::_128BIT},
-    {vk::Format::eBc4SnormBlock, CompatibilityClass::BC4 | CompatibilityClass::_64BIT},
-    {vk::Format::eBc4UnormBlock, CompatibilityClass::BC4 | CompatibilityClass::_64BIT},
-    {vk::Format::eBc5SnormBlock, CompatibilityClass::BC5 | CompatibilityClass::_128BIT},
-    {vk::Format::eBc5UnormBlock, CompatibilityClass::BC5 | CompatibilityClass::_128BIT},
-    {vk::Format::eBc6HSfloatBlock, CompatibilityClass::BC6H | CompatibilityClass::_128BIT},
-    {vk::Format::eBc6HUfloatBlock, CompatibilityClass::BC6H | CompatibilityClass::_128BIT},
-    {vk::Format::eBc7SrgbBlock, CompatibilityClass::BC7 | CompatibilityClass::_128BIT},
-    {vk::Format::eBc7UnormBlock, CompatibilityClass::BC7 | CompatibilityClass::_128BIT},
-    {vk::Format::eD16Unorm, CompatibilityClass::D16},
-    {vk::Format::eD16UnormS8Uint, CompatibilityClass::D16S8},
-    {vk::Format::eD24UnormS8Uint, CompatibilityClass::D24S8},
-    {vk::Format::eD32Sfloat, CompatibilityClass::D32},
-    {vk::Format::eD32SfloatS8Uint, CompatibilityClass::D32S8},
-    {vk::Format::eE5B9G9R9UfloatPack32, CompatibilityClass::_32BIT},
-    {vk::Format::eR10X6G10X6Unorm2Pack16, CompatibilityClass::_32BIT},
-    {vk::Format::eR10X6UnormPack16, CompatibilityClass::_16BIT},
-    {vk::Format::eR12X4G12X4Unorm2Pack16, CompatibilityClass::_32BIT},
-    {vk::Format::eR12X4UnormPack16, CompatibilityClass::_16BIT},
-    {vk::Format::eR16G16B16A16Sfloat, CompatibilityClass::_64BIT},
-    {vk::Format::eR16G16B16A16Sint, CompatibilityClass::_64BIT},
-    {vk::Format::eR16G16B16A16Snorm, CompatibilityClass::_64BIT},
-    {vk::Format::eR16G16B16A16Sscaled, CompatibilityClass::_64BIT},
-    {vk::Format::eR16G16B16A16Uint, CompatibilityClass::_64BIT},
-    {vk::Format::eR16G16B16A16Unorm, CompatibilityClass::_64BIT},
-    {vk::Format::eR16G16B16A16Uscaled, CompatibilityClass::_64BIT},
-    {vk::Format::eR16G16B16Sfloat, CompatibilityClass::_48BIT},
-    {vk::Format::eR16G16B16Sint, CompatibilityClass::_48BIT},
-    {vk::Format::eR16G16B16Snorm, CompatibilityClass::_48BIT},
-    {vk::Format::eR16G16B16Sscaled, CompatibilityClass::_48BIT},
-    {vk::Format::eR16G16B16Uint, CompatibilityClass::_48BIT},
-    {vk::Format::eR16G16B16Unorm, CompatibilityClass::_48BIT},
-    {vk::Format::eR16G16B16Uscaled, CompatibilityClass::_48BIT},
-    {vk::Format::eR16G16Sfloat, CompatibilityClass::_32BIT},
-    {vk::Format::eR16G16Sint, CompatibilityClass::_32BIT},
-    {vk::Format::eR16G16Snorm, CompatibilityClass::_32BIT},
-    {vk::Format::eR16G16Sscaled, CompatibilityClass::_32BIT},
-    {vk::Format::eR16G16Uint, CompatibilityClass::_32BIT},
-    {vk::Format::eR16G16Unorm, CompatibilityClass::_32BIT},
-    {vk::Format::eR16G16Uscaled, CompatibilityClass::_32BIT},
-    {vk::Format::eR16Sfloat, CompatibilityClass::_16BIT},
-    {vk::Format::eR16Sint, CompatibilityClass::_16BIT},
-    {vk::Format::eR16Snorm, CompatibilityClass::_16BIT},
-    {vk::Format::eR16Sscaled, CompatibilityClass::_16BIT},
-    {vk::Format::eR16Uint, CompatibilityClass::_16BIT},
-    {vk::Format::eR16Unorm, CompatibilityClass::_16BIT},
-    {vk::Format::eR16Uscaled, CompatibilityClass::_16BIT},
-    {vk::Format::eR32G32B32A32Sfloat, CompatibilityClass::_128BIT},
-    {vk::Format::eR32G32B32A32Sint, CompatibilityClass::_128BIT},
-    {vk::Format::eR32G32B32A32Uint, CompatibilityClass::_128BIT},
-    {vk::Format::eR32G32B32Sfloat, CompatibilityClass::_96BIT},
-    {vk::Format::eR32G32B32Sint, CompatibilityClass::_96BIT},
-    {vk::Format::eR32G32B32Uint, CompatibilityClass::_96BIT},
-    {vk::Format::eR32G32Sfloat, CompatibilityClass::_64BIT},
-    {vk::Format::eR32G32Sint, CompatibilityClass::_64BIT},
-    {vk::Format::eR32G32Uint, CompatibilityClass::_64BIT},
-    {vk::Format::eR32Sfloat, CompatibilityClass::_32BIT},
-    {vk::Format::eR32Sint, CompatibilityClass::_32BIT},
-    {vk::Format::eR32Uint, CompatibilityClass::_32BIT},
-    {vk::Format::eR4G4B4A4UnormPack16, CompatibilityClass::_16BIT},
-    {vk::Format::eR4G4UnormPack8, CompatibilityClass::_8BIT},
-    {vk::Format::eR5G5B5A1UnormPack16, CompatibilityClass::_16BIT},
-    {vk::Format::eR5G6B5UnormPack16, CompatibilityClass::_16BIT},
-    {vk::Format::eR64G64B64A64Sfloat, CompatibilityClass::_256BIT},
-    {vk::Format::eR64G64B64A64Sint, CompatibilityClass::_256BIT},
-    {vk::Format::eR64G64B64A64Uint, CompatibilityClass::_256BIT},
-    {vk::Format::eR64G64B64Sfloat, CompatibilityClass::_192BIT},
-    {vk::Format::eR64G64B64Sint, CompatibilityClass::_192BIT},
-    {vk::Format::eR64G64B64Uint, CompatibilityClass::_192BIT},
-    {vk::Format::eR64G64Sfloat, CompatibilityClass::_128BIT},
-    {vk::Format::eR64G64Sint, CompatibilityClass::_128BIT},
-    {vk::Format::eR64G64Uint, CompatibilityClass::_128BIT},
-    {vk::Format::eR64Sfloat, CompatibilityClass::_64BIT},
-    {vk::Format::eR64Sint, CompatibilityClass::_64BIT},
-    {vk::Format::eR64Uint, CompatibilityClass::_64BIT},
-    {vk::Format::eR8G8B8A8Sint, CompatibilityClass::_32BIT},
-    {vk::Format::eR8G8B8A8Snorm, CompatibilityClass::_32BIT},
-    {vk::Format::eR8G8B8A8Srgb, CompatibilityClass::_32BIT},
-    {vk::Format::eR8G8B8A8Sscaled, CompatibilityClass::_32BIT},
-    {vk::Format::eR8G8B8A8Uint, CompatibilityClass::_32BIT},
-    {vk::Format::eR8G8B8A8Unorm, CompatibilityClass::_32BIT},
-    {vk::Format::eR8G8B8A8Uscaled, CompatibilityClass::_32BIT},
-    {vk::Format::eR8G8B8Sint, CompatibilityClass::_24BIT},
-    {vk::Format::eR8G8B8Snorm, CompatibilityClass::_24BIT},
-    {vk::Format::eR8G8B8Srgb, CompatibilityClass::_24BIT},
-    {vk::Format::eR8G8B8Sscaled, CompatibilityClass::_24BIT},
-    {vk::Format::eR8G8B8Uint, CompatibilityClass::_24BIT},
-    {vk::Format::eR8G8B8Unorm, CompatibilityClass::_24BIT},
-    {vk::Format::eR8G8B8Uscaled, CompatibilityClass::_24BIT},
-    {vk::Format::eR8G8Sint, CompatibilityClass::_16BIT},
-    {vk::Format::eR8G8Snorm, CompatibilityClass::_16BIT},
-    {vk::Format::eR8G8Srgb, CompatibilityClass::_16BIT},
-    {vk::Format::eR8G8Sscaled, CompatibilityClass::_16BIT},
-    {vk::Format::eR8G8Uint, CompatibilityClass::_16BIT},
-    {vk::Format::eR8G8Unorm, CompatibilityClass::_16BIT},
-    {vk::Format::eR8G8Uscaled, CompatibilityClass::_16BIT},
-    {vk::Format::eR8Sint, CompatibilityClass::_8BIT},
-    {vk::Format::eR8Snorm, CompatibilityClass::_8BIT},
-    {vk::Format::eR8Srgb, CompatibilityClass::_8BIT},
-    {vk::Format::eR8Sscaled, CompatibilityClass::_8BIT},
-    {vk::Format::eR8Uint, CompatibilityClass::_8BIT},
-    {vk::Format::eR8Unorm, CompatibilityClass::_8BIT},
-    {vk::Format::eR8Uscaled, CompatibilityClass::_8BIT},
-    {vk::Format::eS8Uint, CompatibilityClass::S8},
-    {vk::Format::eX8D24UnormPack32, CompatibilityClass::D24},
-    {vk::Format::eUndefined, CompatibilityClass::NONE},
-};
+/// @format's compatibility class; the formats the table had, as before
+static CompatibilityClass ClassOf(VkFormat format) {
+    switch (format) {
+    case VK_FORMAT_A1R5G5B5_UNORM_PACK16:
+    case VK_FORMAT_A4B4G4R4_UNORM_PACK16:
+    case VK_FORMAT_A4R4G4B4_UNORM_PACK16:
+    case VK_FORMAT_B4G4R4A4_UNORM_PACK16:
+    case VK_FORMAT_B5G5R5A1_UNORM_PACK16:
+    case VK_FORMAT_B5G6R5_UNORM_PACK16:
+    case VK_FORMAT_R10X6_UNORM_PACK16:
+    case VK_FORMAT_R12X4_UNORM_PACK16:
+    case VK_FORMAT_R16_SFLOAT:
+    case VK_FORMAT_R16_SINT:
+    case VK_FORMAT_R16_SNORM:
+    case VK_FORMAT_R16_SSCALED:
+    case VK_FORMAT_R16_UINT:
+    case VK_FORMAT_R16_UNORM:
+    case VK_FORMAT_R16_USCALED:
+    case VK_FORMAT_R4G4B4A4_UNORM_PACK16:
+    case VK_FORMAT_R5G5B5A1_UNORM_PACK16:
+    case VK_FORMAT_R5G6B5_UNORM_PACK16:
+    case VK_FORMAT_R8G8_SINT:
+    case VK_FORMAT_R8G8_SNORM:
+    case VK_FORMAT_R8G8_SRGB:
+    case VK_FORMAT_R8G8_SSCALED:
+    case VK_FORMAT_R8G8_UINT:
+    case VK_FORMAT_R8G8_UNORM:
+    case VK_FORMAT_R8G8_USCALED:
+        return CompatibilityClass::_16BIT;
+    case VK_FORMAT_A2B10G10R10_SINT_PACK32:
+    case VK_FORMAT_A2B10G10R10_SNORM_PACK32:
+    case VK_FORMAT_A2B10G10R10_SSCALED_PACK32:
+    case VK_FORMAT_A2B10G10R10_UINT_PACK32:
+    case VK_FORMAT_A2B10G10R10_UNORM_PACK32:
+    case VK_FORMAT_A2B10G10R10_USCALED_PACK32:
+    case VK_FORMAT_A2R10G10B10_SINT_PACK32:
+    case VK_FORMAT_A2R10G10B10_SNORM_PACK32:
+    case VK_FORMAT_A2R10G10B10_SSCALED_PACK32:
+    case VK_FORMAT_A2R10G10B10_UINT_PACK32:
+    case VK_FORMAT_A2R10G10B10_UNORM_PACK32:
+    case VK_FORMAT_A2R10G10B10_USCALED_PACK32:
+    case VK_FORMAT_A8B8G8R8_SINT_PACK32:
+    case VK_FORMAT_A8B8G8R8_SNORM_PACK32:
+    case VK_FORMAT_A8B8G8R8_SRGB_PACK32:
+    case VK_FORMAT_A8B8G8R8_SSCALED_PACK32:
+    case VK_FORMAT_A8B8G8R8_UINT_PACK32:
+    case VK_FORMAT_A8B8G8R8_UNORM_PACK32:
+    case VK_FORMAT_A8B8G8R8_USCALED_PACK32:
+    case VK_FORMAT_B10G11R11_UFLOAT_PACK32:
+    case VK_FORMAT_B8G8R8A8_SINT:
+    case VK_FORMAT_B8G8R8A8_SNORM:
+    case VK_FORMAT_B8G8R8A8_SRGB:
+    case VK_FORMAT_B8G8R8A8_SSCALED:
+    case VK_FORMAT_B8G8R8A8_UINT:
+    case VK_FORMAT_B8G8R8A8_UNORM:
+    case VK_FORMAT_B8G8R8A8_USCALED:
+    case VK_FORMAT_E5B9G9R9_UFLOAT_PACK32:
+    case VK_FORMAT_R10X6G10X6_UNORM_2PACK16:
+    case VK_FORMAT_R12X4G12X4_UNORM_2PACK16:
+    case VK_FORMAT_R16G16_SFLOAT:
+    case VK_FORMAT_R16G16_SINT:
+    case VK_FORMAT_R16G16_SNORM:
+    case VK_FORMAT_R16G16_SSCALED:
+    case VK_FORMAT_R16G16_UINT:
+    case VK_FORMAT_R16G16_UNORM:
+    case VK_FORMAT_R16G16_USCALED:
+    case VK_FORMAT_R32_SFLOAT:
+    case VK_FORMAT_R32_SINT:
+    case VK_FORMAT_R32_UINT:
+    case VK_FORMAT_R8G8B8A8_SINT:
+    case VK_FORMAT_R8G8B8A8_SNORM:
+    case VK_FORMAT_R8G8B8A8_SRGB:
+    case VK_FORMAT_R8G8B8A8_SSCALED:
+    case VK_FORMAT_R8G8B8A8_UINT:
+    case VK_FORMAT_R8G8B8A8_UNORM:
+    case VK_FORMAT_R8G8B8A8_USCALED:
+        return CompatibilityClass::_32BIT;
+    case VK_FORMAT_B8G8R8_SINT:
+    case VK_FORMAT_B8G8R8_SNORM:
+    case VK_FORMAT_B8G8R8_SRGB:
+    case VK_FORMAT_B8G8R8_SSCALED:
+    case VK_FORMAT_B8G8R8_UINT:
+    case VK_FORMAT_B8G8R8_UNORM:
+    case VK_FORMAT_B8G8R8_USCALED:
+    case VK_FORMAT_R8G8B8_SINT:
+    case VK_FORMAT_R8G8B8_SNORM:
+    case VK_FORMAT_R8G8B8_SRGB:
+    case VK_FORMAT_R8G8B8_SSCALED:
+    case VK_FORMAT_R8G8B8_UINT:
+    case VK_FORMAT_R8G8B8_UNORM:
+    case VK_FORMAT_R8G8B8_USCALED:
+        return CompatibilityClass::_24BIT;
+    case VK_FORMAT_D16_UNORM:
+        return CompatibilityClass::D16;
+    case VK_FORMAT_D16_UNORM_S8_UINT:
+        return CompatibilityClass::D16S8;
+    case VK_FORMAT_D24_UNORM_S8_UINT:
+        return CompatibilityClass::D24S8;
+    case VK_FORMAT_D32_SFLOAT:
+        return CompatibilityClass::D32;
+    case VK_FORMAT_D32_SFLOAT_S8_UINT:
+        return CompatibilityClass::D32S8;
+    case VK_FORMAT_R16G16B16A16_SFLOAT:
+    case VK_FORMAT_R16G16B16A16_SINT:
+    case VK_FORMAT_R16G16B16A16_SNORM:
+    case VK_FORMAT_R16G16B16A16_SSCALED:
+    case VK_FORMAT_R16G16B16A16_UINT:
+    case VK_FORMAT_R16G16B16A16_UNORM:
+    case VK_FORMAT_R16G16B16A16_USCALED:
+    case VK_FORMAT_R32G32_SFLOAT:
+    case VK_FORMAT_R32G32_SINT:
+    case VK_FORMAT_R32G32_UINT:
+    case VK_FORMAT_R64_SFLOAT:
+    case VK_FORMAT_R64_SINT:
+    case VK_FORMAT_R64_UINT:
+        return CompatibilityClass::_64BIT;
+    case VK_FORMAT_R16G16B16_SFLOAT:
+    case VK_FORMAT_R16G16B16_SINT:
+    case VK_FORMAT_R16G16B16_SNORM:
+    case VK_FORMAT_R16G16B16_SSCALED:
+    case VK_FORMAT_R16G16B16_UINT:
+    case VK_FORMAT_R16G16B16_UNORM:
+    case VK_FORMAT_R16G16B16_USCALED:
+        return CompatibilityClass::_48BIT;
+    case VK_FORMAT_R32G32B32A32_SFLOAT:
+    case VK_FORMAT_R32G32B32A32_SINT:
+    case VK_FORMAT_R32G32B32A32_UINT:
+    case VK_FORMAT_R64G64_SFLOAT:
+    case VK_FORMAT_R64G64_SINT:
+    case VK_FORMAT_R64G64_UINT:
+        return CompatibilityClass::_128BIT;
+    case VK_FORMAT_R32G32B32_SFLOAT:
+    case VK_FORMAT_R32G32B32_SINT:
+    case VK_FORMAT_R32G32B32_UINT:
+        return CompatibilityClass::_96BIT;
+    case VK_FORMAT_R4G4_UNORM_PACK8:
+    case VK_FORMAT_R8_SINT:
+    case VK_FORMAT_R8_SNORM:
+    case VK_FORMAT_R8_SRGB:
+    case VK_FORMAT_R8_SSCALED:
+    case VK_FORMAT_R8_UINT:
+    case VK_FORMAT_R8_UNORM:
+    case VK_FORMAT_R8_USCALED:
+        return CompatibilityClass::_8BIT;
+    case VK_FORMAT_R64G64B64A64_SFLOAT:
+    case VK_FORMAT_R64G64B64A64_SINT:
+    case VK_FORMAT_R64G64B64A64_UINT:
+        return CompatibilityClass::_256BIT;
+    case VK_FORMAT_R64G64B64_SFLOAT:
+    case VK_FORMAT_R64G64B64_SINT:
+    case VK_FORMAT_R64G64B64_UINT:
+        return CompatibilityClass::_192BIT;
+    case VK_FORMAT_S8_UINT:
+        return CompatibilityClass::S8;
+    case VK_FORMAT_X8_D24_UNORM_PACK32:
+        return CompatibilityClass::D24;
+    case VK_FORMAT_UNDEFINED:
+        return CompatibilityClass::NONE;
+    default:
+        break;
+    }
+    // The table had no other format: its lookup ended the run there
+    UNREACHABLE_MSG("No compatibility class for format %d", static_cast<int>(format));
+    return CompatibilityClass::NONE;
+}
 
-bool IsVulkanFormatCompatible(vk::Format base, vk::Format view) {
+bool IsVulkanFormatCompatible(VkFormat base, VkFormat view) {
     if (base == view) {
         return true;
     }
-    const auto base_comp = FORMAT_TABLE.at(base);
-    const auto view_comp = FORMAT_TABLE.at(view);
+    const CompatibilityClass base_comp = ClassOf(base);
+    const CompatibilityClass view_comp = ClassOf(view);
     return (base_comp & view_comp) == view_comp;
 }
 

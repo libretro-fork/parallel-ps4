@@ -1034,7 +1034,7 @@ bool BufferCache::SynchronizeMemoryFromImage(const Buffer* arena, VAddr device_a
     }
     EnsureResident(arena, device_addr >> block_shift,
                    (device_addr + image.info.guest_size - 1) >> block_shift);
-    Common::SmallVector<vk::BufferImageCopy, 8> buffer_copies;
+    Common::SmallVector<VkBufferImageCopy, 8> buffer_copies;
     for (u32 mip = 0; mip < image.info.resources.levels; mip++) {
         const MipInfo& mip_info = image.info.mips_layout[mip];
         const u32 width = static_cast<u32>(MaxU64(image.info.size.width >> mip, 1u));
@@ -1043,19 +1043,18 @@ bool BufferCache::SynchronizeMemoryFromImage(const Buffer* arena, VAddr device_a
         if (arena_offset + mip_info.offset + mip_info.size > arena->size_bytes) {
             break;
         }
-        buffer_copies.push_back(vk::BufferImageCopy{
-            .bufferOffset = mip_info.offset,
-            .bufferRowLength = mip_info.pitch,
-            .bufferImageHeight = mip_info.height,
-            .imageSubresource{
-                .aspectMask = image.aspect_mask & ~vk::ImageAspectFlagBits::eStencil,
-                .mipLevel = mip,
-                .baseArrayLayer = 0,
-                .layerCount = image.info.resources.layers,
-            },
-            .imageOffset = {0, 0, 0},
-            .imageExtent = {width, height, depth},
-        });
+        VkBufferImageCopy copy{};
+        copy.bufferOffset = mip_info.offset;
+        copy.bufferRowLength = mip_info.pitch;
+        copy.bufferImageHeight = mip_info.height;
+        copy.imageSubresource.aspectMask =
+            static_cast<VkImageAspectFlags>(image.aspect_mask) & ~VK_IMAGE_ASPECT_STENCIL_BIT;
+        copy.imageSubresource.mipLevel = mip;
+        copy.imageSubresource.baseArrayLayer = 0;
+        copy.imageSubresource.layerCount = image.info.resources.layers;
+        copy.imageOffset = {0, 0, 0};
+        copy.imageExtent = {width, height, depth};
+        buffer_copies.push_back(copy);
     }
     if (buffer_copies.empty()) {
         return false;

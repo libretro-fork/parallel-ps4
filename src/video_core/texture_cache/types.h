@@ -57,14 +57,28 @@ struct SubresourceBase {
     u16 level = 0;
     u16 layer = 0;
 
-    auto operator<=>(const SubresourceBase&) const = default;
+    bool operator==(const SubresourceBase&) const = default;
 };
 
 struct SubresourceExtent {
     u16 levels = 1;
     u16 layers = 1;
 
-    auto operator<=>(const SubresourceExtent&) const = default;
+    bool operator==(const SubresourceExtent&) const = default;
+
+    /// Ordered by levels, then layers, as the defaulted <=> ordered them
+    bool operator<(const SubresourceExtent& other) const {
+        return levels != other.levels ? levels < other.levels : layers < other.layers;
+    }
+    bool operator>(const SubresourceExtent& other) const {
+        return other < *this;
+    }
+    bool operator<=(const SubresourceExtent& other) const {
+        return !(other < *this);
+    }
+    bool operator>=(const SubresourceExtent& other) const {
+        return !(*this < other);
+    }
 };
 
 struct SubresourceRange {
@@ -83,8 +97,8 @@ struct ImageCopy {
 };
 
 struct BufferImageCopy {
-    std::size_t buffer_offset;
-    std::size_t buffer_size;
+    size_t buffer_offset;
+    size_t buffer_size;
     u32 buffer_row_length;
     u32 buffer_image_height;
     SubresourceLayers image_subresource;
@@ -95,7 +109,7 @@ struct BufferImageCopy {
 struct BufferCopy {
     u64 src_offset;
     u64 dst_offset;
-    std::size_t size;
+    size_t size;
 };
 
 } // namespace VideoCore

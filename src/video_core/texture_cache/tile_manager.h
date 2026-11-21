@@ -29,7 +29,7 @@ public:
 
     /// Copies @in_image into @out_buffer at @out_offset, tiled as the guest has it. The
     /// offsets of @buffer_copies are moved by where the copy lands.
-    void TileImage(Image& in_image, vk::BufferImageCopy* buffer_copies, u32 num_copies,
+    void TileImage(Image& in_image, VkBufferImageCopy* buffer_copies, u32 num_copies,
                    const VideoCore::Buffer* out_buffer, u64 out_offset);
 
     /// The buffer holding the image at @in_offset of @in_buffer untiled, with the offset at

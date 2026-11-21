@@ -53,8 +53,8 @@ struct ImageView {
     ImageView(ImageView&& other) noexcept;
     ImageView& operator=(ImageView&& other) noexcept;
 
-    vk::ImageView Handle() const noexcept {
-        return vk::ImageView{image_view};
+    VkImageView Handle() const noexcept {
+        return image_view;
     }
 
     ImageViewInfo info;

@@ -240,33 +240,38 @@ void Runtime::UploadImage(VideoCore::Image* dst, const VideoCore::Buffer* src,
 }
 
 void Runtime::DownloadImage(VideoCore::Image* src, const VideoCore::Buffer* dst,
-                            std::span<const vk::BufferImageCopy> download_copies) {
+                            const VkBufferImageCopy* copies, u32 num_copies) {
     SetBackingSamples(src, src->info.num_samples);
     scheduler.EndRendering();
 
     bool needs_flush =
         Transit(src, vk::ImageLayout::eTransferSrcOptimal, vk::PipelineStageFlagBits2::eCopy,
                 vk::AccessFlagBits2::eTransferRead);
-    for (const auto& copy : download_copies) {
-        const auto copy_size = BufferImageCopySize(copy, src->info.pixel_format);
-        needs_flush |= IsBufferAccessed(dst, copy.bufferOffset, copy_size, true);
+    for (u32 i = 0; i < num_copies; ++i) {
+        const u32 copy_size = BufferImageCopySize(
+            reinterpret_cast<const vk::BufferImageCopy&>(copies[i]), src->info.pixel_format);
+        needs_flush |= IsBufferAccessed(dst, copies[i].bufferOffset, copy_size, true);
     }
     if (needs_flush) {
         FlushBarriers();
     }
 
-    auto cmdbuf = scheduler.CommandBuffer();
+    const vk::CommandBuffer cmdbuf = scheduler.CommandBuffer();
     instance.Mark(cmdbuf, "image to buffer: image at, size, w|h<<16|d<<32, buffer of size",
                   src->info.guest_address, src->info.guest_size,
                   u64(src->info.size.width) | u64(src->info.size.height) << 16 |
                       u64(src->info.size.depth) << 32,
                   dst->SizeBytes());
-    cmdbuf.copyImageToBuffer(src->GetImage(), vk::ImageLayout::eTransferSrcOptimal, dst->Handle(),
-                             download_copies);
+    if (num_copies != 0) {
+        vkCmdCopyImageToBuffer(
+            static_cast<VkCommandBuffer>(cmdbuf), static_cast<VkImage>(src->GetImage()),
+            VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, dst->Handle(), num_copies, copies);
+    }
 
-    for (const auto& copy : download_copies) {
-        const auto copy_size = BufferImageCopySize(copy, src->info.pixel_format);
-        AccessBuffer(dst, copy.bufferOffset, copy_size, vk::PipelineStageFlagBits2::eCopy,
+    for (u32 i = 0; i < num_copies; ++i) {
+        const u32 copy_size = BufferImageCopySize(
+            reinterpret_cast<const vk::BufferImageCopy&>(copies[i]), src->info.pixel_format);
+        AccessBuffer(dst, copies[i].bufferOffset, copy_size, vk::PipelineStageFlagBits2::eCopy,
                      vk::AccessFlagBits2::eTransferWrite);
     }
 }

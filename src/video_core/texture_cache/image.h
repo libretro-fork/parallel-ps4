@@ -146,7 +146,8 @@ struct Image : public Common::LRUNode<> {
 
     bool CanBeDownloaded() {
         return HasGpuValidData() && info.num_samples == 1 && !info.props.has_stencil &&
-               IsVulkanFormatCompatible(info.pixel_format, backing->image.image_ci.format);
+               IsVulkanFormatCompatible(static_cast<VkFormat>(info.pixel_format),
+                                        static_cast<VkFormat>(backing->image.image_ci.format));
     }
 
     void AssociateDepth(ImageId depth_image_id, u64 depth_image_uid) {

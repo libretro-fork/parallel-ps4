@@ -154,7 +154,8 @@ bool TextureCache::DumpImagePixels(ImageId image_id, u32 seq) {
         .imageOffset = {0, 0, 0},
         .imageExtent = {width, height, 1},
     };
-    runtime.DownloadImage(&image, download.buffer, std::span{&copy, 1});
+    runtime.DownloadImage(&image, download.buffer,
+                          reinterpret_cast<const VkBufferImageCopy*>(&copy), 1);
 
     // Written once the GPU has done the copy, in its own time. Waiting for it here would end
     // the command buffer after every image: a frame of a hundred of them then counts as a
@@ -240,7 +241,8 @@ void TextureCache::DownloadImageMemory(ImageId image_id, DownloadMemoryFlags fla
                 is_sync ? -1
                         : buffer_cache.BeginWriteback(image_addr,
                                                       tiled ? image.info.guest_size : copy_size);
-            tile_manager.TileImage(image, buffer_copies.data(),
+            tile_manager.TileImage(image,
+                                   reinterpret_cast<VkBufferImageCopy*>(buffer_copies.data()),
                                    static_cast<u32>(buffer_copies.size()), target, target_offset);
             const auto written = [this, image_addr, copy_size, discard_buffer_cache, writeback] {
                 if (discard_buffer_cache) {
@@ -264,8 +266,9 @@ void TextureCache::DownloadImageMemory(ImageId image_id, DownloadMemoryFlags fla
     const auto download =
         runtime.GetStagingPool().Request(copy_size, MemoryType::HostCached, 16, !is_sync);
 
-    tile_manager.TileImage(image, buffer_copies.data(), static_cast<u32>(buffer_copies.size()),
-                           download.buffer, download.offset);
+    tile_manager.TileImage(image, reinterpret_cast<VkBufferImageCopy*>(buffer_copies.data()),
+                           static_cast<u32>(buffer_copies.size()), download.buffer,
+                           download.offset);
 
     const auto write_data = [this, image_addr, copy_size, download, discard_buffer_cache, is_sync,
                              writeback] {
@@ -496,7 +499,8 @@ std::tuple<ImageId, int, int> TextureCache::ResolveOverlap(const ImageInfo& imag
             auto result_id = merged_image_id ? merged_image_id : cache_image_id;
             const auto& result_image = slot_images[result_id];
             const bool is_compatible =
-                IsVulkanFormatCompatible(result_image.info.pixel_format, image_info.pixel_format);
+                IsVulkanFormatCompatible(static_cast<VkFormat>(result_image.info.pixel_format),
+                                         static_cast<VkFormat>(image_info.pixel_format));
             return {is_compatible ? result_id : ImageId{}, -1, -1};
         }
 
@@ -737,7 +741,8 @@ ImageId TextureCache::FindImage(ImageDesc& desc, bool exact_fmt) {
         if (cache_image.info.size != info.size) {
             continue;
         }
-        if (!IsVulkanFormatCompatible(cache_image.info.pixel_format, info.pixel_format) ||
+        if (!IsVulkanFormatCompatible(static_cast<VkFormat>(cache_image.info.pixel_format),
+                                      static_cast<VkFormat>(info.pixel_format)) ||
             (cache_image.info.type != info.type && info.size != Extent3D{1, 1, 1})) {
             continue;
         }

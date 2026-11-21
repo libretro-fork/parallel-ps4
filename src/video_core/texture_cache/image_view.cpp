@@ -14,18 +14,18 @@
 
 namespace VideoCore {
 
-vk::ImageViewType ConvertImageViewType(AmdGpu::ImageType type) {
+VkImageViewType ConvertImageViewType(AmdGpu::ImageType type) {
     switch (type) {
     case AmdGpu::ImageType::Color1D:
     case AmdGpu::ImageType::Color2D:
     case AmdGpu::ImageType::Color2DMsaa:
-        return vk::ImageViewType::e2D;
+        return VK_IMAGE_VIEW_TYPE_2D;
     case AmdGpu::ImageType::Color1DArray:
     case AmdGpu::ImageType::Color2DArray:
     case AmdGpu::ImageType::Cube:
-        return vk::ImageViewType::e2DArray;
+        return VK_IMAGE_VIEW_TYPE_2D_ARRAY;
     case AmdGpu::ImageType::Color3D:
-        return vk::ImageViewType::e3D;
+        return VK_IMAGE_VIEW_TYPE_3D;
     default:
         UNREACHABLE();
     }
@@ -112,16 +112,17 @@ ImageView::ImageView(const Vulkan::Instance& instance, const ImageViewInfo& info
     }
     // When sampling D32/D16 texture from shader, the T# specifies R32/R16 format so adjust it.
     vk::Format format = info.format;
-    vk::ImageAspectFlags aspect = image.aspect_mask;
-    if (image.aspect_mask & vk::ImageAspectFlagBits::eDepth &&
+    const VkImageAspectFlags image_aspect = static_cast<VkImageAspectFlags>(image.aspect_mask);
+    VkImageAspectFlags aspect = image_aspect;
+    if ((image_aspect & VK_IMAGE_ASPECT_DEPTH_BIT) &&
         Vulkan::LiverpoolToVK::IsFormatDepthCompatible(format)) {
         format = image.info.pixel_format;
-        aspect = vk::ImageAspectFlagBits::eDepth;
+        aspect = VK_IMAGE_ASPECT_DEPTH_BIT;
     }
-    if (image.aspect_mask & vk::ImageAspectFlagBits::eStencil &&
+    if ((image_aspect & VK_IMAGE_ASPECT_STENCIL_BIT) &&
         Vulkan::LiverpoolToVK::IsFormatStencilCompatible(format)) {
         format = image.info.pixel_format;
-        aspect = vk::ImageAspectFlagBits::eStencil;
+        aspect = VK_IMAGE_ASPECT_STENCIL_BIT;
     }
 
     const vk::ComponentMapping components =
@@ -133,11 +134,11 @@ ImageView::ImageView(const Vulkan::Instance& instance, const ImageViewInfo& info
     image_view_ci.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
     image_view_ci.pNext = &usage_ci;
     image_view_ci.image = static_cast<VkImage>(image.GetImage());
-    image_view_ci.viewType = static_cast<VkImageViewType>(ConvertImageViewType(info.type));
+    image_view_ci.viewType = ConvertImageViewType(info.type);
     image_view_ci.format =
         static_cast<VkFormat>(instance.GetSupportedFormat(format, image.format_features));
     image_view_ci.components = static_cast<VkComponentMapping>(components);
-    image_view_ci.subresourceRange.aspectMask = static_cast<VkImageAspectFlags>(aspect);
+    image_view_ci.subresourceRange.aspectMask = aspect;
     image_view_ci.subresourceRange.baseMipLevel = info.range.base.level;
     image_view_ci.subresourceRange.levelCount = info.range.extent.levels;
     image_view_ci.subresourceRange.baseArrayLayer = info.range.base.layer;
@@ -153,15 +154,16 @@ ImageView::ImageView(const Vulkan::Instance& instance, const ImageViewInfo& info
     ASSERT_MSG(view_result == VK_SUCCESS, "Failed to create image view: %s",
                Vulkan::ResultName(view_result));
 
-    const char* const view_aspect = aspect & vk::ImageAspectFlagBits::eDepth     ? "Depth"
-                                    : aspect & vk::ImageAspectFlagBits::eStencil ? "Stencil"
-                                                                                 : "Color";
-    Vulkan::SetObjectName(
-        instance.GetDevice(), Handle(), "ImageView %ux%ux%u 0x%" PRIxPTR ":0x%x %d:%d %d:%d (%s)",
-        image.info.size.width, image.info.size.height, image.info.size.depth,
-        image.info.guest_address, image.info.guest_size, info.range.base.level,
-        info.range.base.level + info.range.extent.levels - 1, info.range.base.layer,
-        info.range.base.layer + info.range.extent.layers - 1, view_aspect);
+    const char* const view_aspect = (aspect & VK_IMAGE_ASPECT_DEPTH_BIT)     ? "Depth"
+                                    : (aspect & VK_IMAGE_ASPECT_STENCIL_BIT) ? "Stencil"
+                                                                             : "Color";
+    Vulkan::SetObjectName(instance.GetDevice(), vk::ImageView{Handle()},
+                          "ImageView %ux%ux%u 0x%" PRIxPTR ":0x%x %d:%d %d:%d (%s)",
+                          image.info.size.width, image.info.size.height, image.info.size.depth,
+                          image.info.guest_address, image.info.guest_size, info.range.base.level,
+                          info.range.base.level + info.range.extent.levels - 1,
+                          info.range.base.layer,
+                          info.range.base.layer + info.range.extent.layers - 1, view_aspect);
 }
 
 ImageView::~ImageView() {

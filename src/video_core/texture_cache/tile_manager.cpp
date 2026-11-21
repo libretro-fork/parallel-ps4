@@ -147,7 +147,7 @@ VkPipeline TileManager::GetTilingPipeline(const ImageInfo& info, bool is_tiler) 
         return *found;
     }
 
-    const vk::Device device = instance.GetDevice();
+    const VkDevice device = static_cast<VkDevice>(instance.GetDevice());
     const AmdGpu::MicroTileMode micro_tile_mode = AmdGpu::GetMicroTileMode(info.tile_mode);
     const bool is_macro = AmdGpu::IsMacroTiled(info.array_mode);
     // The image's tiling parameters, folded into the shader
@@ -196,31 +196,31 @@ VkPipeline TileManager::GetTilingPipeline(const ImageInfo& info, bool is_tiler) 
         host_spirv_tiling_comp(spirv_words, HOST_SPIRV_MAX_WORDS, info.num_bits, is_macro,
                                word_access, params, is_macro ? 12 : 4);
     ASSERT_MSG(num_words != 0, "Tiling shader does not fit");
-    const vk::ShaderModule module = Vulkan::CompileSPV(spirv_words, num_words, device);
+    const VkShaderModule module =
+        static_cast<VkShaderModule>(Vulkan::CompileSPV(spirv_words, num_words, vk::Device{device}));
 
     char module_name[96];
     snprintf(module_name, sizeof(module_name), "%s_%u %s",
              enum_name(&enum_names_AmdGpu_TileMode, static_cast<s64>(info.tile_mode)),
              info.num_bits, is_tiler ? "tiler" : "detiler");
     LOG_INFO(Render_Vulkan, "Creating tiling pipeline %s", module_name);
-    Vulkan::SetObjectName(device, module, "%s", module_name);
+    Vulkan::SetObjectName(vk::Device{device}, vk::ShaderModule{module}, "%s", module_name);
 
     VkComputePipelineCreateInfo compute_pipeline_ci{};
     compute_pipeline_ci.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
     compute_pipeline_ci.stage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
     compute_pipeline_ci.stage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-    compute_pipeline_ci.stage.module = static_cast<VkShaderModule>(module);
+    compute_pipeline_ci.stage.module = module;
     compute_pipeline_ci.stage.pName = "main";
     compute_pipeline_ci.layout = pl_layout;
 
-    const VkDevice raw_device = static_cast<VkDevice>(device);
     VkPipeline handle = VK_NULL_HANDLE;
-    const VkResult result = vkCreateComputePipelines(raw_device, VK_NULL_HANDLE, 1,
-                                                     &compute_pipeline_ci, nullptr, &handle);
+    const VkResult result =
+        vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, &compute_pipeline_ci, nullptr, &handle);
     ASSERT_MSG(result == VK_SUCCESS, "Detiler pipeline creation failed %s",
                Vulkan::ResultName(result));
     *static_cast<VkPipeline*>(u64_map_insert(&tiling_pipelines, key, nullptr)) = handle;
-    vkDestroyShaderModule(raw_device, static_cast<VkShaderModule>(module), nullptr);
+    vkDestroyShaderModule(device, module, nullptr);
     return handle;
 }
 
@@ -243,9 +243,8 @@ const Buffer* TileManager::DetileImage(const VideoCore::Buffer* in_buffer, u64 i
 
     const vk::CommandBuffer cmdbuf = scheduler.CommandBuffer();
     BindTiling(static_cast<VkCommandBuffer>(cmdbuf), GetTilingPipeline(info, false), pl_layout,
-               static_cast<VkBuffer>(in_buffer->Handle()), in_offset,
-               static_cast<VkBuffer>(staging.buffer->Handle()), staging.offset, info.guest_size,
-               static_cast<VkBuffer>(stream_buffer.Handle()), params_offset, sizeof(TilingInfo));
+               in_buffer->Handle(), in_offset, staging.buffer->Handle(), staging.offset,
+               info.guest_size, stream_buffer.Handle(), params_offset, sizeof(TilingInfo));
 
     const u32 dim_x = (info.guest_size / (info.num_bits / 8)) / 64;
     instance.Mark(cmdbuf, "detile: image at, size, mode|bits<<8|mips<<16, w|h<<16|d<<32",
@@ -262,14 +261,14 @@ const Buffer* TileManager::DetileImage(const VideoCore::Buffer* in_buffer, u64 i
     return staging.buffer;
 }
 
-void TileManager::TileImage(Image& in_image, vk::BufferImageCopy* buffer_copies, u32 num_copies,
+void TileManager::TileImage(Image& in_image, VkBufferImageCopy* buffer_copies, u32 num_copies,
                             const VideoCore::Buffer* out_buffer, u64 out_offset) {
     const ImageInfo& info = in_image.info;
     if (!info.props.is_tiled) {
         for (u32 i = 0; i < num_copies; ++i) {
             buffer_copies[i].bufferOffset += out_offset;
         }
-        runtime.DownloadImage(&in_image, out_buffer, {buffer_copies, num_copies});
+        runtime.DownloadImage(&in_image, out_buffer, buffer_copies, num_copies);
         return;
     }
 
@@ -283,14 +282,13 @@ void TileManager::TileImage(Image& in_image, vk::BufferImageCopy* buffer_copies,
         buffer_copies[i].bufferOffset += staging.offset;
     }
 
-    runtime.DownloadImage(&in_image, staging.buffer, {buffer_copies, num_copies});
+    runtime.DownloadImage(&in_image, staging.buffer, buffer_copies, num_copies);
     runtime.FlushBarriers();
 
     const vk::CommandBuffer cmdbuf = scheduler.CommandBuffer();
     BindTiling(static_cast<VkCommandBuffer>(cmdbuf), GetTilingPipeline(info, true), pl_layout,
-               static_cast<VkBuffer>(out_buffer->Handle()), out_offset,
-               static_cast<VkBuffer>(staging.buffer->Handle()), staging.offset, info.guest_size,
-               static_cast<VkBuffer>(stream_buffer.Handle()), params_offset, sizeof(TilingInfo));
+               out_buffer->Handle(), out_offset, staging.buffer->Handle(), staging.offset,
+               info.guest_size, stream_buffer.Handle(), params_offset, sizeof(TilingInfo));
 
     const u32 dim_x = (info.guest_size / (info.num_bits / 8)) / 64;
     instance.Mark(cmdbuf, "tile: image at, size, mode|bits<<8|mips<<16, w|h<<16|d<<32",

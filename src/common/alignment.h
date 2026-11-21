@@ -6,13 +6,41 @@
 #include <stddef.h>
 
 #include "common/concepts.h"
+#include "common/types.h"
 
 namespace Common {
+
+/// The larger of @a and @b
+template <typename T>
+[[nodiscard]] constexpr T Max(T a, T b) {
+    return a < b ? b : a;
+}
+
+/// The smaller of @a and @b
+template <typename T>
+[[nodiscard]] constexpr T Min(T a, T b) {
+    return b < a ? b : a;
+}
+
+/// The number of bits @value takes, 0 for 0 (std::bit_width)
+[[nodiscard]] constexpr u32 BitWidth(unsigned long long value) {
+    return value ? 64u - static_cast<u32>(__builtin_clzll(value)) : 0u;
+}
+
+/// The smallest power of two not below @value, 1 for 0 (std::bit_ceil)
+[[nodiscard]] constexpr u32 BitCeil(u32 value) {
+    return value <= 1 ? 1u : 1u << BitWidth(value - 1);
+}
+
+/// Whether @value is a power of two (std::has_single_bit)
+[[nodiscard]] constexpr bool HasSingleBit(unsigned long long value) {
+    return value != 0 && (value & (value - 1)) == 0;
+}
 
 template <typename T>
 [[nodiscard]] constexpr T AlignUp(T value, size_t size) {
     static_assert(IsUnsigned<T>, "T must be an unsigned value.");
-    auto mod{static_cast<T>(value % size)};
+    const T mod{static_cast<T>(value % size)};
     value -= mod;
     return static_cast<T>(mod == T{0} ? value : value + size);
 }

@@ -49,7 +49,7 @@ struct ImageInfo {
     }
 
     Extent2D BlockDim() const {
-        const auto dim = props.is_block ? 2 : 0;
+        const u32 dim = props.is_block ? 2 : 0;
         return Extent2D{pitch >> dim, size.height >> dim};
     }
 
@@ -76,7 +76,7 @@ struct ImageInfo {
     u32 pitch;
     AmdGpu::TileMode tile_mode;
     AmdGpu::ArrayMode array_mode;
-    std::array<MipInfo, MAX_MIPS> mips_layout;
+    MipInfo mips_layout[MAX_MIPS];
     u32 micro_tiled_mips{};
     VAddr guest_address;
     u32 guest_size;

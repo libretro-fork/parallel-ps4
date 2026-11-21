@@ -1,6 +1,8 @@
 // SPDX-FileCopyrightText: Copyright 2024-2026 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include <string.h>
+
 #include "common/assert.h"
 #include "core/libraries/kernel/process.h"
 #include "core/libraries/videoout/buffer.h"
@@ -38,7 +40,7 @@ static vk::Format ConvertPixelFormat(const VideoOutFormat format) {
 
 ImageInfo::ImageInfo(const Libraries::VideoOut::BufferAttributeGroup& group,
                      VAddr cpu_address) noexcept {
-    const auto& attrib = group.attrib;
+    const Libraries::VideoOut::BufferAttribute& attrib = group.attrib;
     props = ImageProperties{
         .is_tiled = attrib.tiling_mode == TilingMode::Tile,
     };
@@ -82,8 +84,8 @@ ImageInfo::ImageInfo(const AmdGpu::ColorBuffer& buffer, AmdGpu::CbDbExtent hint)
         guest_size = buffer.GetColorSliceSize() * resources.layers;
         mips_layout[0] = MipInfo(guest_size, pitch, buffer.Height(), 0);
     } else {
-        std::tie(std::ignore, std::ignore, guest_size) =
-            ImageSizeLinearAligned(pitch, size.height, num_bits, num_samples);
+        guest_size = static_cast<u32>(
+            ImageSizeLinearAligned(pitch, size.height, num_bits, num_samples).size);
         guest_size *= resources.layers;
         mips_layout[0] = MipInfo(guest_size, pitch, size.height, 0);
     }
@@ -115,8 +117,8 @@ ImageInfo::ImageInfo(const AmdGpu::DepthBuffer& buffer, u32 num_slices, VAddr ht
         if (props.is_tiled) {
             stencil_size = buffer.GetStencilSliceSize() * resources.layers;
         } else {
-            std::tie(std::ignore, std::ignore, stencil_size) =
-                ImageSizeLinearAligned(pitch, size.height, 8, num_samples);
+            stencil_size =
+                static_cast<u32>(ImageSizeLinearAligned(pitch, size.height, 8, num_samples).size);
             stencil_size *= resources.layers;
         }
     }
@@ -127,8 +129,8 @@ ImageInfo::ImageInfo(const AmdGpu::DepthBuffer& buffer, u32 num_slices, VAddr ht
             guest_size = buffer.GetDepthSliceSize() * resources.layers;
             mips_layout[0] = MipInfo(guest_size, pitch, buffer.Height(), 0);
         } else {
-            std::tie(std::ignore, std::ignore, guest_size) =
-                ImageSizeLinearAligned(pitch, size.height, num_bits, num_samples);
+            guest_size = static_cast<u32>(
+                ImageSizeLinearAligned(pitch, size.height, num_bits, num_samples).size);
             guest_size *= resources.layers;
             mips_layout[0] = MipInfo(guest_size, pitch, size.height, 0);
         }
@@ -143,8 +145,8 @@ ImageInfo::ImageInfo(const AmdGpu::DepthBuffer& buffer, u32 num_slices, VAddr ht
 
 ImageInfo::ImageInfo(const AmdGpu::Image& sharp, const Shader::ImageResource& desc) noexcept {
     const bool is_depth = desc.is_depth;
-    const auto image = sharp;
-    const auto data_fmt = image.GetDataFmt();
+    const AmdGpu::Image image = sharp;
+    const AmdGpu::DataFormat data_fmt = image.GetDataFmt();
     tile_mode = image.GetTileMode();
     array_mode = AmdGpu::GetArrayMode(tile_mode);
     pixel_format = LiverpoolToVK::SurfaceFormat(data_fmt, image.GetNumberFmt());
@@ -176,27 +178,29 @@ ImageInfo::ImageInfo(const AmdGpu::Image& sharp, const Shader::ImageResource& de
 }
 
 bool ImageInfo::IsCompatible(const ImageInfo& info) const {
-    return (IsVulkanFormatCompatible(pixel_format, info.pixel_format) ||
-            IsVulkanFormatCompatible(info.pixel_format, pixel_format)) &&
+    const VkFormat format = static_cast<VkFormat>(pixel_format);
+    const VkFormat info_format = static_cast<VkFormat>(info.pixel_format);
+    return (IsVulkanFormatCompatible(format, info_format) ||
+            IsVulkanFormatCompatible(info_format, format)) &&
            num_samples == info.num_samples && num_bits == info.num_bits;
 }
 
 void ImageInfo::UpdateSize() noexcept {
     ASSERT_MSG(array_mode != AmdGpu::ArrayMode::ArrayLinearGeneral,
                "Unhandled array mode: ArrayLinearGeneral");
-    if (std::has_single_bit(pitch) && std::bit_width(pitch) <= MAX_DIM_LOG2 &&
-        pitch == size.height && size.depth == 1 && resources.levels == std::bit_width(pitch) &&
+    if (Common::HasSingleBit(pitch) && Common::BitWidth(pitch) <= MAX_DIM_LOG2 &&
+        pitch == size.height && size.depth == 1 && resources.levels == Common::BitWidth(pitch) &&
         resources.layers == 1 && num_samples == 1 && props.is_block && props.is_pow2 && !alt_tile &&
         tile_mode == AmdGpu::TileMode::Thin1DThin) {
         if (num_bits == 128) {
-            const auto& entry = Pow2Bcn128ImageTable[std::bit_width(pitch) - 1];
-            mips_layout = entry.mips_layout;
+            const TableEntry& entry = Pow2Bcn128ImageTable[Common::BitWidth(pitch) - 1];
+            memcpy(mips_layout, entry.mips_layout, sizeof(mips_layout));
             guest_size = entry.guest_size;
             micro_tiled_mips = entry.micro_tiled_mips;
             return;
         } else if (num_bits == 64) {
-            const auto& entry = Pow2Bcn64ImageTable[std::bit_width(pitch) - 1];
-            mips_layout = entry.mips_layout;
+            const TableEntry& entry = Pow2Bcn64ImageTable[Common::BitWidth(pitch) - 1];
+            memcpy(mips_layout, entry.mips_layout, sizeof(mips_layout));
             guest_size = entry.guest_size;
             micro_tiled_mips = entry.micro_tiled_mips;
             return;
@@ -204,7 +208,7 @@ void ImageInfo::UpdateSize() noexcept {
     }
     ComputeImageSize(pitch, size.height, size.depth, resources.levels, resources.layers, num_bits,
                      num_samples, props.is_block, props.is_pow2, alt_tile, tile_mode, array_mode,
-                     &guest_size, &micro_tiled_mips, mips_layout.data());
+                     &guest_size, &micro_tiled_mips, mips_layout);
 }
 
 s32 ImageInfo::MipOf(const ImageInfo& info) const {
@@ -221,13 +225,15 @@ s32 ImageInfo::MipOf(const ImageInfo& info) const {
         return -1;
     }
 
-    const auto info_dim = info.props.is_block ? 2 : 0;
-    const auto this_dim = props.is_block ? 2 : 0;
+    const u32 info_dim = info.props.is_block ? 2 : 0;
+    const u32 this_dim = props.is_block ? 2 : 0;
 
     // Find mip
-    auto mip = -1;
-    for (auto m = 0; m < info.resources.levels; ++m) {
-        const auto& [mip_size, mip_pitch, mip_height, mip_ofs] = info.mips_layout[m];
+    s32 mip = -1;
+    for (s32 m = 0; m < static_cast<s32>(info.resources.levels); ++m) {
+        const u32 mip_size = info.mips_layout[m].size;
+        const u32 mip_pitch = info.mips_layout[m].pitch;
+        const u32 mip_ofs = info.mips_layout[m].offset;
         const VAddr mip_base = info.guest_address + mip_ofs;
         const VAddr mip_end = mip_base + mip_size;
         const u32 slice_size = mip_size / info.resources.layers;
@@ -244,15 +250,15 @@ s32 ImageInfo::MipOf(const ImageInfo& info) const {
     }
 
     // 2D block dimensions of both images should be the same.
-    const auto mip_w = std::max(info.size.width >> (mip + info_dim), 1u);
-    const auto mip_h = std::max(info.size.height >> (mip + info_dim), 1u);
-    const auto this_w = std::max(size.width >> this_dim, 1u);
-    const auto this_h = std::max(size.height >> this_dim, 1u);
+    const u32 mip_w = Common::Max(info.size.width >> (mip + info_dim), 1u);
+    const u32 mip_h = Common::Max(info.size.height >> (mip + info_dim), 1u);
+    const u32 this_w = Common::Max(size.width >> this_dim, 1u);
+    const u32 this_h = Common::Max(size.height >> this_dim, 1u);
     if ((this_w != mip_w) || (this_h != mip_h)) {
         return -1;
     }
 
-    const auto mip_d = std::max(info.size.depth >> mip, 1u);
+    const u32 mip_d = Common::Max(info.size.depth >> mip, 1u);
     if (info.type == AmdGpu::ImageType::Color3D && type == AmdGpu::ImageType::Color2D) {
         // In case of 2D array to 3D copy, make sure we have proper number of layers.
         if (resources.layers != mip_d) {
@@ -278,15 +284,15 @@ s32 ImageInfo::SliceOf(const ImageInfo& info, s32 mip) const {
     }
 
     // 2D block dimensions of both images should be the same.
-    const auto info_dim = info.props.is_block ? 2 : 0;
-    const auto mip_w = std::max(info.size.width >> (mip + info_dim), 1u);
-    const auto mip_h = std::max(info.size.height >> (mip + info_dim), 1u);
-    const auto mip_p = std::max<u32>(info.mips_layout[mip].pitch >> info_dim, 1u);
+    const u32 info_dim = info.props.is_block ? 2 : 0;
+    const u32 mip_w = Common::Max(info.size.width >> (mip + info_dim), 1u);
+    const u32 mip_h = Common::Max(info.size.height >> (mip + info_dim), 1u);
+    const u32 mip_p = Common::Max<u32>(info.mips_layout[mip].pitch >> info_dim, 1u);
 
-    const auto this_dim = props.is_block ? 2 : 0;
-    const auto this_w = std::max(size.width >> this_dim, 1u);
-    const auto this_h = std::max(size.height >> this_dim, 1u);
-    const auto this_p = std::max(pitch >> this_dim, 1u);
+    const u32 this_dim = props.is_block ? 2 : 0;
+    const u32 this_w = Common::Max(size.width >> this_dim, 1u);
+    const u32 this_h = Common::Max(size.height >> this_dim, 1u);
+    const u32 this_p = Common::Max(pitch >> this_dim, 1u);
     if ((this_w != mip_w) || (this_h != mip_h) || (this_p != mip_p)) {
         return -1;
     }
@@ -298,7 +304,7 @@ s32 ImageInfo::SliceOf(const ImageInfo& info, s32 mip) const {
     }
 
     // Ensure that address is aligned too.
-    const auto addr_diff = guest_address - (info.guest_address + info.mips_layout[mip].offset);
+    const VAddr addr_diff = guest_address - (info.guest_address + info.mips_layout[mip].offset);
     if ((addr_diff % guest_size) != 0) {
         return -1;
     }

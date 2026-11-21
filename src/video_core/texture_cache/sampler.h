@@ -26,8 +26,8 @@ public:
     Sampler(Sampler&& other) noexcept;
     Sampler& operator=(Sampler&& other) noexcept;
 
-    vk::Sampler Handle() const noexcept {
-        return vk::Sampler{handle};
+    VkSampler Handle() const noexcept {
+        return handle;
     }
 
     u64 hash;

@@ -4,6 +4,14 @@ What changed in the libretro core of this fork, newest first. Changes that come 
 
 ## Unreleased
 
+- Part of the texture cache with no STL or `auto`: the tile tables (`tile.h`), host format compatibility, image info, the subresource types, image views, samplers and the tile manager.
+  - **Tile tables:** the macro tile extents are plain arrays of `TileExtent {width, height}`, the size functions give an `ImageSize` struct instead of a tuple, and the power-of-two BCn tables are made at compile time by one function for both bit widths. A program gave the same extents, mip layouts and table entries from the old and new header over a grid of tile modes, array modes, sizes, bit widths and mip counts.
+  - **Format compatibility:** the `std::unordered_map` from format to compatibility class is a `switch` over the same 137 formats, made from vulkan.hpp's own name-to-`VK_FORMAT` mapping; a format it does not know stops the run as the map's `at` did. `IsVulkanFormatCompatible` takes `VkFormat`.
+  - **Image info:** the mip layout is a plain array. `SubresourceExtent` and `SubresourceBase` compare with their own operators, ordered as the defaulted `<=>` ordered them.
+  - **Views and samplers:** `ImageView::Handle` gives a `VkImageView` and `Sampler::Handle` a `VkSampler`; the view type and aspect are worked out in Vulkan's C types.
+  - **Copies:** `TileManager::TileImage` and `Runtime::DownloadImage` take `VkBufferImageCopy` pointers and a count; `DownloadImage` records `vkCmdCopyImageToBuffer`, and nothing for no copies.
+  - **Common:** `alignment.h` gains `Max`, `Min`, `BitWidth`, `BitCeil` and `HasSingleBit`, all `constexpr`.
+  - **Checks:** the Linux and Windows builds pass. Not run in a game yet.
 - The rest of `video_core/buffer_cache` on the Vulkan C API, with no STL or `auto`: `buffer.h`/`.cpp`, the memory tracker, the region manager, the range set and the region definitions.
   - **Buffers:** `Buffer::Handle` gives a `VkBuffer` and `BufferDeviceAddress` a `VkDeviceAddress`; buffers are made from a `VkBufferCreateInfo`, through the memory allocator's `CreateBuffer`/`DestroyBuffer`, which take and give C types now.
   - **Result names:** `Vulkan::ResultName` names a `VkResult` for a log line with no string made. The asserts that printed vulkan.hpp's `to_string` of a result (pipelines, the pipeline cache, shader modules, the semaphore, the resource pools, the tile manager, image views, samplers and buffers) use it.
