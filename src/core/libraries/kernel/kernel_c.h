@@ -32,6 +32,40 @@ RETRO_BEGIN_DECLS
 #define KERNEL_FW_350 0x3500000
 #define KERNEL_FW_450 0x4500000
 
+/* The kernel's time structures, as OrbisKernelTimespec, OrbisKernelTimeval and
+ * OrbisKernelTimezone (time.h) */
+typedef struct kernel_timespec {
+    s64 tv_sec;
+    s64 tv_nsec;
+} kernel_timespec_t;
+
+typedef struct kernel_timeval {
+    s64 tv_sec;
+    s64 tv_usec;
+} kernel_timeval_t;
+
+typedef struct kernel_timezone {
+    s32 tz_minuteswest;
+    s32 tz_dsttime;
+} kernel_timezone_t;
+
+/* ORBIS_CLOCK_REALTIME */
+#define KERNEL_CLOCK_REALTIME 0
+
+/* sceKernelClockGettime */
+s32 kernel_clock_gettime(u32 clock_id, kernel_timespec_t* tp);
+/* sceKernelGettimezone */
+s32 kernel_gettimezone(kernel_timezone_t* tz);
+/* sceKernelConvertLocaltimeToUtc */
+s32 kernel_convert_localtime_to_utc(s64 local_time, s64 param_2, s64* seconds,
+                                    kernel_timezone_t* timezone, s32* dst_seconds);
+/* sceKernelSettimeofday */
+s32 kernel_settimeofday(kernel_timeval_t* tv, kernel_timezone_t* tz);
+/* posix_clock_settime */
+s32 kernel_posix_clock_settime(s32 clock_id, kernel_timespec_t* tp);
+/* The kernel error of the calling thread's errno: ErrnoToSceKernelError(*__Error()) */
+s32 kernel_errno_error(void);
+
 /* The game's process time, in microseconds (sceKernelGetProcessTime); defined in time.cpp */
 uint64_t kernel_process_time_usec(void);
 /* sceKernelMapNamedSystemFlexibleMemory */

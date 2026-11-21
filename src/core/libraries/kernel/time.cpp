@@ -763,3 +763,45 @@ void RegisterTime(Core::Loader::SymbolsResolver* sym) {
 extern "C" uint64_t kernel_process_time_usec(void) {
     return Libraries::Kernel::sceKernelGetProcessTime();
 }
+
+// The structures kernel_c.h gives C are these, field for field
+static_assert(sizeof(kernel_timespec_t) == sizeof(Libraries::Kernel::OrbisKernelTimespec));
+static_assert(sizeof(kernel_timeval_t) == sizeof(Libraries::Kernel::OrbisKernelTimeval));
+static_assert(sizeof(kernel_timezone_t) == sizeof(Libraries::Kernel::OrbisKernelTimezone));
+
+extern "C" s32 kernel_clock_gettime(u32 clock_id, kernel_timespec_t* tp) {
+    return Libraries::Kernel::sceKernelClockGettime(
+        clock_id, reinterpret_cast<Libraries::Kernel::OrbisKernelTimespec*>(tp));
+}
+
+extern "C" s32 kernel_gettimezone(kernel_timezone_t* tz) {
+    return Libraries::Kernel::sceKernelGettimezone(
+        reinterpret_cast<Libraries::Kernel::OrbisKernelTimezone*>(tz));
+}
+
+extern "C" s32 kernel_convert_localtime_to_utc(s64 local_time, s64 param_2, s64* seconds,
+                                               kernel_timezone_t* timezone, s32* dst_seconds) {
+    time_t secs = 0;
+    const s32 ret = Libraries::Kernel::sceKernelConvertLocaltimeToUtc(
+        static_cast<time_t>(local_time), param_2, seconds ? &secs : nullptr,
+        reinterpret_cast<Libraries::Kernel::OrbisKernelTimezone*>(timezone), dst_seconds);
+    if (seconds) {
+        *seconds = static_cast<s64>(secs);
+    }
+    return ret;
+}
+
+extern "C" s32 kernel_settimeofday(kernel_timeval_t* tv, kernel_timezone_t* tz) {
+    return Libraries::Kernel::sceKernelSettimeofday(
+        reinterpret_cast<Libraries::Kernel::OrbisKernelTimeval*>(tv),
+        reinterpret_cast<Libraries::Kernel::OrbisKernelTimezone*>(tz));
+}
+
+extern "C" s32 kernel_posix_clock_settime(s32 clock_id, kernel_timespec_t* tp) {
+    return Libraries::Kernel::posix_clock_settime(
+        clock_id, reinterpret_cast<Libraries::Kernel::OrbisKernelTimespec*>(tp));
+}
+
+extern "C" s32 kernel_errno_error(void) {
+    return Libraries::Kernel::ErrnoToSceKernelError(*Libraries::Kernel::__Error());
+}

@@ -185,7 +185,6 @@ CORE_SOURCES_CXX += $(addprefix src/core/libraries/np/np_web_api2/,np_web_api2.c
 	np_web_api2_context.cpp np_web_api2_internal.cpp np_web_api2_push_event.cpp)
 CORE_SOURCES_CXX += $(addprefix src/core/libraries/pad/,pad.cpp)
 CORE_SOURCES_CXX += $(addprefix src/core/libraries/playgo/,playgo.cpp playgo_dialog.cpp)
-CORE_SOURCES_CXX += $(addprefix src/core/libraries/rtc/,rtc.cpp)
 CORE_SOURCES_CXX += $(addprefix src/core/libraries/save_data/dialog/,savedatadialog.cpp \
 	savedatadialog_ui.cpp)
 CORE_SOURCES_CXX += $(addprefix src/core/libraries/save_data/,save_backup.cpp save_instance.cpp \
@@ -270,7 +269,7 @@ CORE_SOURCES_C += $(addprefix src/core/libraries/,companion/companion_httpd.c \
 	companion/companion_util.c content_export/content_export.c disc_map/disc_map.c \
 	game_live_streaming/gamelivestreaming.c jpeg/jpegdec.c jpeg/jpegenc.c keyboard/keyboard.c libpng/pngdec.c \
 	libpng/pngenc.c mouse/mouse.c move/move.c random/random.c razor_cpu/razor_cpu.c \
-	remote_play/remoteplay.c rudp/rudp.c screenshot/screenshot.c share_play/shareplay.c \
+	remote_play/remoteplay.c rtc/rtc.c rudp/rudp.c screenshot/screenshot.c share_play/shareplay.c \
 	signin_dialog/signindialog.c system_gesture/system_gesture.c ulobjmgr/ulobjmgr.c \
 	video_recording/video_recording.c vr_tracker/vr_tracker.c)
 CORE_SOURCES_C += $(addprefix src/shader_recompiler/backend/spirv/,spv_module.c)

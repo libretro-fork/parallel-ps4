@@ -789,8 +789,7 @@ s32 PS4_SYSV_ABI sceNpTusSetDataAAsync(int reqId, OrbisNpAccountId targetAccount
                                        u64 totalSize, u64 sendSize, const void* data,
                                        const OrbisNpTusDataInfo* info, u64 infoStructSize,
                                        const OrbisNpAccountId* isLastChangedAuthor,
-                                       const Libraries::Rtc::OrbisRtcTick* isLastChangedDate,
-                                       void* option) {
+                                       const OrbisRtcTick* isLastChangedDate, void* option) {
     LOG_INFO(Lib_NpTus,
              "reqId = %d, targetAccountId = %" PRIu64 ", slotId = %d, totalSize = %" PRIu64
              ", sendSize = %" PRIu64 ", "
@@ -929,11 +928,13 @@ s32 PS4_SYSV_ABI sceNpTusGetDataAVUserAsync(int reqId,
     return ORBIS_OK;
 }
 
-s32 PS4_SYSV_ABI sceNpTusSetDataAVUserAsync(
-    int reqId, const OrbisNpTusVirtualUserId* targetVirtualUserId, s32 slotId, u64 totalSize,
-    u64 sendSize, const void* data, const OrbisNpTusDataInfo* info, u64 infoStructSize,
-    const OrbisNpAccountId* isLastChangedAuthor,
-    const Libraries::Rtc::OrbisRtcTick* isLastChangedDate, void* option) {
+s32 PS4_SYSV_ABI sceNpTusSetDataAVUserAsync(int reqId,
+                                            const OrbisNpTusVirtualUserId* targetVirtualUserId,
+                                            s32 slotId, u64 totalSize, u64 sendSize,
+                                            const void* data, const OrbisNpTusDataInfo* info,
+                                            u64 infoStructSize,
+                                            const OrbisNpAccountId* isLastChangedAuthor,
+                                            const OrbisRtcTick* isLastChangedDate, void* option) {
     LOG_INFO(Lib_NpTus,
              "reqId = %d, targetVirtualUserId = %s, slotId = %d, totalSize = %" PRIu64
              ", sendSize = %" PRIu64 ", "
@@ -1017,7 +1018,7 @@ s32 PS4_SYSV_ABI sceNpTusSetDataAVUserAsync(
 
 s32 PS4_SYSV_ABI sceNpTusAddAndGetVariable(int reqId, const OrbisNpId* targetNpId, s32 slotId,
                                            s64 inVariable, const OrbisNpId* isLastChangedAuthor,
-                                           const Libraries::Rtc::OrbisRtcTick* isLastChangedDate,
+                                           const OrbisRtcTick* isLastChangedDate,
                                            OrbisNpTusVariable* outVariable, u64 outVariableSize,
                                            void* option) {
     auto ret =
@@ -1033,10 +1034,12 @@ s32 PS4_SYSV_ABI sceNpTusAddAndGetVariable(int reqId, const OrbisNpId* targetNpI
     return ret;
 }
 
-s32 PS4_SYSV_ABI sceNpTusAddAndGetVariableAsync(
-    int reqId, const OrbisNpId* targetNpId, s32 slotId, s64 inVariable,
-    const OrbisNpId* isLastChangedAuthor, const Libraries::Rtc::OrbisRtcTick* isLastChangedDate,
-    OrbisNpTusVariable* outVariable, u64 outVariableSize, void* option) {
+s32 PS4_SYSV_ABI sceNpTusAddAndGetVariableAsync(int reqId, const OrbisNpId* targetNpId, s32 slotId,
+                                                s64 inVariable,
+                                                const OrbisNpId* isLastChangedAuthor,
+                                                const OrbisRtcTick* isLastChangedDate,
+                                                OrbisNpTusVariable* outVariable,
+                                                u64 outVariableSize, void* option) {
     LOG_INFO(Lib_NpTus,
              "reqId = %d, targetNpId = %s, slotId = %d, inVariable = %" PRId64
              ", outVariable = 0x%llx, "
@@ -1093,7 +1096,7 @@ s32 PS4_SYSV_ABI sceNpTusAddAndGetVariableAsync(
 
 s32 PS4_SYSV_ABI sceNpTusAddAndGetVariableVUser(
     int reqId, const OrbisNpTusVirtualUserId* targetVirtualUserId, s32 slotId, s64 inVariable,
-    const OrbisNpId* isLastChangedAuthor, const Libraries::Rtc::OrbisRtcTick* isLastChangedDate,
+    const OrbisNpId* isLastChangedAuthor, const OrbisRtcTick* isLastChangedDate,
     OrbisNpTusVariable* outVariable, u64 outVariableSize, void* option) {
     auto ret = sceNpTusAddAndGetVariableVUserAsync(reqId, targetVirtualUserId, slotId, inVariable,
                                                    isLastChangedAuthor, isLastChangedDate,
@@ -1109,7 +1112,7 @@ s32 PS4_SYSV_ABI sceNpTusAddAndGetVariableVUser(
 
 s32 PS4_SYSV_ABI sceNpTusAddAndGetVariableVUserAsync(
     int reqId, const OrbisNpTusVirtualUserId* targetVirtualUserId, s32 slotId, s64 inVariable,
-    const OrbisNpId* isLastChangedAuthor, const Libraries::Rtc::OrbisRtcTick* isLastChangedDate,
+    const OrbisNpId* isLastChangedAuthor, const OrbisRtcTick* isLastChangedDate,
     OrbisNpTusVariable* outVariable, u64 outVariableSize, void* option) {
     LOG_INFO(Lib_NpTus,
              "reqId = %d, targetVirtualUserId = %s, slotId = %d, inVariable = %" PRId64 ", "
@@ -1590,8 +1593,7 @@ s32 PS4_SYSV_ABI sceNpTusSetDataAsync(int reqId, const OrbisNpId* targetNpId, s3
                                       u64 totalSize, u64 sendSize, const void* data,
                                       const OrbisNpTusDataInfo* info, u64 infoStructSize,
                                       const OrbisNpId* isLastChangedAuthor,
-                                      const Libraries::Rtc::OrbisRtcTick* isLastChangedDate,
-                                      void* option) {
+                                      const OrbisRtcTick* isLastChangedDate, void* option) {
     LOG_INFO(Lib_NpTus,
              "reqId = %d, targetNpId = %s, slotId = %d, totalSize = %" PRIu64
              ", sendSize = %" PRIu64 ", data = 0x%llx, "
@@ -1672,8 +1674,7 @@ s32 PS4_SYSV_ABI sceNpTusSetDataVUserAsync(int reqId,
                                            s32 slotId, u64 totalSize, u64 sendSize,
                                            const void* data, const OrbisNpTusDataInfo* info,
                                            u64 infoStructSize, const OrbisNpId* isLastChangedAuthor,
-                                           const Libraries::Rtc::OrbisRtcTick* isLastChangedDate,
-                                           void* option) {
+                                           const OrbisRtcTick* isLastChangedDate, void* option) {
     LOG_INFO(Lib_NpTus,
              "reqId = %d, targetVirtualUserId = %s, slotId = %d, totalSize = %" PRIu64
              ", sendSize = %" PRIu64 ", "
@@ -1758,7 +1759,7 @@ s32 PS4_SYSV_ABI sceNpTusSetDataVUserAsync(int reqId,
 s32 PS4_SYSV_ABI sceNpTusTryAndSetVariable(int reqId, const OrbisNpId* targetNpId, s32 slotId,
                                            s32 opeType, s64 variable, const s64* compareValue,
                                            const OrbisNpId* isLastChangedAuthor,
-                                           const Libraries::Rtc::OrbisRtcTick* isLastChangedDate,
+                                           const OrbisRtcTick* isLastChangedDate,
                                            OrbisNpTusVariable* resultVariable,
                                            u64 resultVariableSize, void* option) {
     auto ret = sceNpTusTryAndSetVariableAsync(reqId, targetNpId, slotId, opeType, variable,
@@ -1774,11 +1775,12 @@ s32 PS4_SYSV_ABI sceNpTusTryAndSetVariable(int reqId, const OrbisNpId* targetNpI
     return ret;
 }
 
-s32 PS4_SYSV_ABI sceNpTusTryAndSetVariableAsync(
-    int reqId, const OrbisNpId* targetNpId, s32 slotId, s32 opeType, s64 variable,
-    const s64* compareValue, const OrbisNpId* isLastChangedAuthor,
-    const Libraries::Rtc::OrbisRtcTick* isLastChangedDate, OrbisNpTusVariable* resultVariable,
-    u64 resultVariableSize, void* option) {
+s32 PS4_SYSV_ABI sceNpTusTryAndSetVariableAsync(int reqId, const OrbisNpId* targetNpId, s32 slotId,
+                                                s32 opeType, s64 variable, const s64* compareValue,
+                                                const OrbisNpId* isLastChangedAuthor,
+                                                const OrbisRtcTick* isLastChangedDate,
+                                                OrbisNpTusVariable* resultVariable,
+                                                u64 resultVariableSize, void* option) {
     LOG_INFO(Lib_NpTus,
              "reqId = %d, targetNpId = %s, slotId = %d, opeType = %d, variable = %" PRId64 ", "
              "compareValue = 0x%llx, resultVariable = 0x%llx, resultVariableSize = %" PRIu64
@@ -1840,7 +1842,7 @@ s32 PS4_SYSV_ABI sceNpTusTryAndSetVariableAsync(
 s32 PS4_SYSV_ABI sceNpTusTryAndSetVariableVUser(
     int reqId, const OrbisNpTusVirtualUserId* targetVirtualUserId, s32 slotId, s32 opeType,
     s64 variable, const s64* compareValue, const OrbisNpId* isLastChangedAuthor,
-    const Libraries::Rtc::OrbisRtcTick* isLastChangedDate, OrbisNpTusVariable* resultVariable,
+    const OrbisRtcTick* isLastChangedDate, OrbisNpTusVariable* resultVariable,
     u64 resultVariableSize, void* option) {
     auto ret = sceNpTusTryAndSetVariableVUserAsync(
         reqId, targetVirtualUserId, slotId, opeType, variable, compareValue, isLastChangedAuthor,
@@ -1857,7 +1859,7 @@ s32 PS4_SYSV_ABI sceNpTusTryAndSetVariableVUser(
 s32 PS4_SYSV_ABI sceNpTusTryAndSetVariableVUserAsync(
     int reqId, const OrbisNpTusVirtualUserId* targetVirtualUserId, s32 slotId, s32 opeType,
     s64 variable, const s64* compareValue, const OrbisNpId* isLastChangedAuthor,
-    const Libraries::Rtc::OrbisRtcTick* isLastChangedDate, OrbisNpTusVariable* resultVariable,
+    const OrbisRtcTick* isLastChangedDate, OrbisNpTusVariable* resultVariable,
     u64 resultVariableSize, void* option) {
     LOG_INFO(
         Lib_NpTus,
@@ -1925,7 +1927,7 @@ s32 PS4_SYSV_ABI sceNpTusTryAndSetVariableVUserAsync(
 s32 PS4_SYSV_ABI sceNpTusAddAndGetVariableA(int reqId, OrbisNpAccountId targetAccountId, s32 slotId,
                                             s64 inVariable,
                                             const OrbisNpAccountId* isLastChangedAuthor,
-                                            const Libraries::Rtc::OrbisRtcTick* isLastChangedDate,
+                                            const OrbisRtcTick* isLastChangedDate,
                                             OrbisNpTusVariableA* outVariable, u64 outVariableSize,
                                             void* option) {
     auto ret = sceNpTusAddAndGetVariableAAsync(reqId, targetAccountId, slotId, inVariable,
@@ -1941,11 +1943,12 @@ s32 PS4_SYSV_ABI sceNpTusAddAndGetVariableA(int reqId, OrbisNpAccountId targetAc
     return ret;
 }
 
-s32 PS4_SYSV_ABI sceNpTusAddAndGetVariableAAsync(
-    int reqId, OrbisNpAccountId targetAccountId, s32 slotId, s64 inVariable,
-    const OrbisNpAccountId* isLastChangedAuthor,
-    const Libraries::Rtc::OrbisRtcTick* isLastChangedDate, OrbisNpTusVariableA* outVariable,
-    u64 outVariableSize, void* option) {
+s32 PS4_SYSV_ABI sceNpTusAddAndGetVariableAAsync(int reqId, OrbisNpAccountId targetAccountId,
+                                                 s32 slotId, s64 inVariable,
+                                                 const OrbisNpAccountId* isLastChangedAuthor,
+                                                 const OrbisRtcTick* isLastChangedDate,
+                                                 OrbisNpTusVariableA* outVariable,
+                                                 u64 outVariableSize, void* option) {
     LOG_INFO(Lib_NpTus,
              "reqId = %d, targetAccountId = %" PRIu64 ", slotId = %d, inVariable = %" PRId64
              ", outVariable = 0x%llx, "
@@ -1995,9 +1998,8 @@ s32 PS4_SYSV_ABI sceNpTusAddAndGetVariableAAsync(
 
 s32 PS4_SYSV_ABI sceNpTusAddAndGetVariableAVUser(
     int reqId, const OrbisNpTusVirtualUserId* targetVirtualUserId, s32 slotId, s64 inVariable,
-    const OrbisNpAccountId* isLastChangedAuthor,
-    const Libraries::Rtc::OrbisRtcTick* isLastChangedDate, OrbisNpTusVariableA* outVariable,
-    u64 outVariableSize, void* option) {
+    const OrbisNpAccountId* isLastChangedAuthor, const OrbisRtcTick* isLastChangedDate,
+    OrbisNpTusVariableA* outVariable, u64 outVariableSize, void* option) {
     auto ret = sceNpTusAddAndGetVariableAVUserAsync(reqId, targetVirtualUserId, slotId, inVariable,
                                                     isLastChangedAuthor, isLastChangedDate,
                                                     outVariable, outVariableSize, option);
@@ -2012,9 +2014,8 @@ s32 PS4_SYSV_ABI sceNpTusAddAndGetVariableAVUser(
 
 s32 PS4_SYSV_ABI sceNpTusAddAndGetVariableAVUserAsync(
     int reqId, const OrbisNpTusVirtualUserId* targetVirtualUserId, s32 slotId, s64 inVariable,
-    const OrbisNpAccountId* isLastChangedAuthor,
-    const Libraries::Rtc::OrbisRtcTick* isLastChangedDate, OrbisNpTusVariableA* outVariable,
-    u64 outVariableSize, void* option) {
+    const OrbisNpAccountId* isLastChangedAuthor, const OrbisRtcTick* isLastChangedDate,
+    OrbisNpTusVariableA* outVariable, u64 outVariableSize, void* option) {
     LOG_INFO(Lib_NpTus,
              "reqId = %d, targetVirtualUserId = %s, slotId = %d, inVariable = %" PRId64 ", "
              "outVariable = 0x%llx, outVariableSize = %" PRIu64 ", option = 0x%llx",
@@ -2858,8 +2859,7 @@ s32 PS4_SYSV_ABI sceNpTusGetMultiUserVariableVUserAsync(
 s32 PS4_SYSV_ABI sceNpTusSetData(int reqId, const OrbisNpId* targetNpId, s32 slotId, u64 totalSize,
                                  u64 sendSize, const void* data, const OrbisNpTusDataInfo* info,
                                  u64 infoStructSize, const OrbisNpId* isLastChangedAuthor,
-                                 const Libraries::Rtc::OrbisRtcTick* isLastChangedDate,
-                                 void* option) {
+                                 const OrbisRtcTick* isLastChangedDate, void* option) {
     auto ret = sceNpTusSetDataAsync(reqId, targetNpId, slotId, totalSize, sendSize, data, info,
                                     infoStructSize, isLastChangedAuthor, isLastChangedDate, option);
     if (ret < 0) {
@@ -2876,8 +2876,7 @@ s32 PS4_SYSV_ABI sceNpTusSetDataA(int reqId, OrbisNpAccountId targetAccountId, s
                                   u64 totalSize, u64 sendSize, const void* data,
                                   const OrbisNpTusDataInfo* info, u64 infoStructSize,
                                   const OrbisNpAccountId* isLastChangedAuthor,
-                                  const Libraries::Rtc::OrbisRtcTick* isLastChangedDate,
-                                  void* option) {
+                                  const OrbisRtcTick* isLastChangedDate, void* option) {
     auto ret =
         sceNpTusSetDataAAsync(reqId, targetAccountId, slotId, totalSize, sendSize, data, info,
                               infoStructSize, isLastChangedAuthor, isLastChangedDate, option);
@@ -2896,8 +2895,7 @@ s32 PS4_SYSV_ABI sceNpTusSetDataAVUser(int reqId,
                                        s32 slotId, u64 totalSize, u64 sendSize, const void* data,
                                        const OrbisNpTusDataInfo* info, u64 infoStructSize,
                                        const OrbisNpAccountId* isLastChangedAuthor,
-                                       const Libraries::Rtc::OrbisRtcTick* isLastChangedDate,
-                                       void* option) {
+                                       const OrbisRtcTick* isLastChangedDate, void* option) {
     auto ret = sceNpTusSetDataAVUserAsync(reqId, targetVirtualUserId, slotId, totalSize, sendSize,
                                           data, info, infoStructSize, isLastChangedAuthor,
                                           isLastChangedDate, option);
@@ -2914,8 +2912,7 @@ s32 PS4_SYSV_ABI sceNpTusSetDataVUser(int reqId, const OrbisNpTusVirtualUserId* 
                                       s32 slotId, u64 totalSize, u64 sendSize, const void* data,
                                       const OrbisNpTusDataInfo* info, u64 infoStructSize,
                                       const OrbisNpId* isLastChangedAuthor,
-                                      const Libraries::Rtc::OrbisRtcTick* isLastChangedDate,
-                                      void* option) {
+                                      const OrbisRtcTick* isLastChangedDate, void* option) {
     auto ret = sceNpTusSetDataVUserAsync(reqId, targetVirtualUserId, slotId, totalSize, sendSize,
                                          data, info, infoStructSize, isLastChangedAuthor,
                                          isLastChangedDate, option);
@@ -2946,7 +2943,7 @@ s32 PS4_SYSV_ABI sceNpTusSetMultiSlotVariableA(int reqId, OrbisNpAccountId targe
 s32 PS4_SYSV_ABI sceNpTusTryAndSetVariableA(int reqId, OrbisNpAccountId targetAccountId, s32 slotId,
                                             s32 opeType, s64 variable, const s64* compareValue,
                                             const OrbisNpAccountId* isLastChangedAuthor,
-                                            const Libraries::Rtc::OrbisRtcTick* isLastChangedDate,
+                                            const OrbisRtcTick* isLastChangedDate,
                                             OrbisNpTusVariableA* resultVariable,
                                             u64 resultVariableSize, void* option) {
     auto ret = sceNpTusTryAndSetVariableAAsync(reqId, targetAccountId, slotId, opeType, variable,
@@ -2962,11 +2959,13 @@ s32 PS4_SYSV_ABI sceNpTusTryAndSetVariableA(int reqId, OrbisNpAccountId targetAc
     return ret;
 }
 
-s32 PS4_SYSV_ABI sceNpTusTryAndSetVariableAAsync(
-    int reqId, OrbisNpAccountId targetAccountId, s32 slotId, s32 opeType, s64 variable,
-    const s64* compareValue, const OrbisNpAccountId* isLastChangedAuthor,
-    const Libraries::Rtc::OrbisRtcTick* isLastChangedDate, OrbisNpTusVariableA* resultVariable,
-    u64 resultVariableSize, void* option) {
+s32 PS4_SYSV_ABI sceNpTusTryAndSetVariableAAsync(int reqId, OrbisNpAccountId targetAccountId,
+                                                 s32 slotId, s32 opeType, s64 variable,
+                                                 const s64* compareValue,
+                                                 const OrbisNpAccountId* isLastChangedAuthor,
+                                                 const OrbisRtcTick* isLastChangedDate,
+                                                 OrbisNpTusVariableA* resultVariable,
+                                                 u64 resultVariableSize, void* option) {
     LOG_INFO(Lib_NpTus,
              "reqId = %d, targetAccountId = %" PRIu64
              ", slotId = %d, opeType = %d, variable = %" PRId64 ", "
@@ -3026,7 +3025,7 @@ s32 PS4_SYSV_ABI sceNpTusTryAndSetVariableAAsync(
 s32 PS4_SYSV_ABI sceNpTusTryAndSetVariableAVUser(
     int reqId, const OrbisNpTusVirtualUserId* targetVirtualUserId, s32 slotId, s32 opeType,
     s64 variable, const s64* compareValue, const OrbisNpAccountId* isLastChangedAuthor,
-    const Libraries::Rtc::OrbisRtcTick* isLastChangedDate, OrbisNpTusVariableA* resultVariable,
+    const OrbisRtcTick* isLastChangedDate, OrbisNpTusVariableA* resultVariable,
     u64 resultVariableSize, void* option) {
     auto ret = sceNpTusTryAndSetVariableAVUserAsync(
         reqId, targetVirtualUserId, slotId, opeType, variable, compareValue, isLastChangedAuthor,
@@ -3043,7 +3042,7 @@ s32 PS4_SYSV_ABI sceNpTusTryAndSetVariableAVUser(
 s32 PS4_SYSV_ABI sceNpTusTryAndSetVariableAVUserAsync(
     int reqId, const OrbisNpTusVirtualUserId* targetVirtualUserId, s32 slotId, s32 opeType,
     s64 variable, const s64* compareValue, const OrbisNpAccountId* isLastChangedAuthor,
-    const Libraries::Rtc::OrbisRtcTick* isLastChangedDate, OrbisNpTusVariableA* resultVariable,
+    const OrbisRtcTick* isLastChangedDate, OrbisNpTusVariableA* resultVariable,
     u64 resultVariableSize, void* option) {
     LOG_INFO(
         Lib_NpTus,
@@ -3809,11 +3808,12 @@ s32 PS4_SYSV_ABI sceNpTusGetMultiUserVariableAVUserAsync(
     return ORBIS_OK;
 }
 
-s32 PS4_SYSV_ABI sceNpTusAddAndGetVariableForCrossSave(
-    int reqId, OrbisNpAccountId targetAccountId, s32 slotId, s64 inVariable,
-    const OrbisNpAccountId* isLastChangedAuthor,
-    const Libraries::Rtc::OrbisRtcTick* isLastChangedDate,
-    OrbisNpTusVariableForCrossSave* outVariable, u64 outVariableSize, void* option) {
+s32 PS4_SYSV_ABI sceNpTusAddAndGetVariableForCrossSave(int reqId, OrbisNpAccountId targetAccountId,
+                                                       s32 slotId, s64 inVariable,
+                                                       const OrbisNpAccountId* isLastChangedAuthor,
+                                                       const OrbisRtcTick* isLastChangedDate,
+                                                       OrbisNpTusVariableForCrossSave* outVariable,
+                                                       u64 outVariableSize, void* option) {
     auto ret = sceNpTusAddAndGetVariableForCrossSaveAsync(
         reqId, targetAccountId, slotId, inVariable, isLastChangedAuthor, isLastChangedDate,
         outVariable, outVariableSize, option);
@@ -3828,8 +3828,7 @@ s32 PS4_SYSV_ABI sceNpTusAddAndGetVariableForCrossSave(
 
 s32 PS4_SYSV_ABI sceNpTusAddAndGetVariableForCrossSaveAsync(
     int reqId, OrbisNpAccountId targetAccountId, s32 slotId, s64 inVariable,
-    const OrbisNpAccountId* isLastChangedAuthor,
-    const Libraries::Rtc::OrbisRtcTick* isLastChangedDate,
+    const OrbisNpAccountId* isLastChangedAuthor, const OrbisRtcTick* isLastChangedDate,
     OrbisNpTusVariableForCrossSave* outVariable, u64 outVariableSize, void* option) {
     LOG_INFO(Lib_NpTus,
              "reqId = %d, targetAccountId = %" PRIu64 ", slotId = %d, inVariable = %" PRId64
@@ -3882,8 +3881,7 @@ s32 PS4_SYSV_ABI sceNpTusAddAndGetVariableForCrossSaveAsync(
 
 s32 PS4_SYSV_ABI sceNpTusAddAndGetVariableForCrossSaveVUser(
     int reqId, const OrbisNpTusVirtualUserId* targetVirtualUserId, s32 slotId, s64 inVariable,
-    const OrbisNpAccountId* isLastChangedAuthor,
-    const Libraries::Rtc::OrbisRtcTick* isLastChangedDate,
+    const OrbisNpAccountId* isLastChangedAuthor, const OrbisRtcTick* isLastChangedDate,
     OrbisNpTusVariableForCrossSave* outVariable, u64 outVariableSize, void* option) {
     auto ret = sceNpTusAddAndGetVariableForCrossSaveVUserAsync(
         reqId, targetVirtualUserId, slotId, inVariable, isLastChangedAuthor, isLastChangedDate,
@@ -3899,8 +3897,7 @@ s32 PS4_SYSV_ABI sceNpTusAddAndGetVariableForCrossSaveVUser(
 
 s32 PS4_SYSV_ABI sceNpTusAddAndGetVariableForCrossSaveVUserAsync(
     int reqId, const OrbisNpTusVirtualUserId* targetVirtualUserId, s32 slotId, s64 inVariable,
-    const OrbisNpAccountId* isLastChangedAuthor,
-    const Libraries::Rtc::OrbisRtcTick* isLastChangedDate,
+    const OrbisNpAccountId* isLastChangedAuthor, const OrbisRtcTick* isLastChangedDate,
     OrbisNpTusVariableForCrossSave* outVariable, u64 outVariableSize, void* option) {
     LOG_INFO(Lib_NpTus,
              "reqId = %d, targetVirtualUserId = %s, slotId = %d, inVariable = %" PRId64 ", "
@@ -4933,8 +4930,8 @@ s32 PS4_SYSV_ABI sceNpTusGetMultiUserVariableForCrossSaveVUserAsync(
 s32 PS4_SYSV_ABI sceNpTusTryAndSetVariableForCrossSave(
     int reqId, OrbisNpAccountId targetAccountId, s32 slotId, s32 opeType, s64 variable,
     const s64* compareValue, const OrbisNpAccountId* isLastChangedAuthor,
-    const Libraries::Rtc::OrbisRtcTick* isLastChangedDate,
-    OrbisNpTusVariableForCrossSave* resultVariable, u64 resultVariableSize, void* option) {
+    const OrbisRtcTick* isLastChangedDate, OrbisNpTusVariableForCrossSave* resultVariable,
+    u64 resultVariableSize, void* option) {
     auto ret = sceNpTusTryAndSetVariableForCrossSaveAsync(
         reqId, targetAccountId, slotId, opeType, variable, compareValue, isLastChangedAuthor,
         isLastChangedDate, resultVariable, resultVariableSize, option);
@@ -4950,8 +4947,8 @@ s32 PS4_SYSV_ABI sceNpTusTryAndSetVariableForCrossSave(
 s32 PS4_SYSV_ABI sceNpTusTryAndSetVariableForCrossSaveAsync(
     int reqId, OrbisNpAccountId targetAccountId, s32 slotId, s32 opeType, s64 variable,
     const s64* compareValue, const OrbisNpAccountId* isLastChangedAuthor,
-    const Libraries::Rtc::OrbisRtcTick* isLastChangedDate,
-    OrbisNpTusVariableForCrossSave* resultVariable, u64 resultVariableSize, void* option) {
+    const OrbisRtcTick* isLastChangedDate, OrbisNpTusVariableForCrossSave* resultVariable,
+    u64 resultVariableSize, void* option) {
     LOG_INFO(Lib_NpTus,
              "reqId = %d, targetAccountId = %" PRIu64
              ", slotId = %d, opeType = %d, variable = %" PRId64 ", "
@@ -5012,8 +5009,8 @@ s32 PS4_SYSV_ABI sceNpTusTryAndSetVariableForCrossSaveAsync(
 s32 PS4_SYSV_ABI sceNpTusTryAndSetVariableForCrossSaveVUser(
     int reqId, const OrbisNpTusVirtualUserId* targetVirtualUserId, s32 slotId, s32 opeType,
     s64 variable, const s64* compareValue, const OrbisNpAccountId* isLastChangedAuthor,
-    const Libraries::Rtc::OrbisRtcTick* isLastChangedDate,
-    OrbisNpTusVariableForCrossSave* resultVariable, u64 resultVariableSize, void* option) {
+    const OrbisRtcTick* isLastChangedDate, OrbisNpTusVariableForCrossSave* resultVariable,
+    u64 resultVariableSize, void* option) {
     auto ret = sceNpTusTryAndSetVariableForCrossSaveVUserAsync(
         reqId, targetVirtualUserId, slotId, opeType, variable, compareValue, isLastChangedAuthor,
         isLastChangedDate, resultVariable, resultVariableSize, option);
@@ -5029,8 +5026,8 @@ s32 PS4_SYSV_ABI sceNpTusTryAndSetVariableForCrossSaveVUser(
 s32 PS4_SYSV_ABI sceNpTusTryAndSetVariableForCrossSaveVUserAsync(
     int reqId, const OrbisNpTusVirtualUserId* targetVirtualUserId, s32 slotId, s32 opeType,
     s64 variable, const s64* compareValue, const OrbisNpAccountId* isLastChangedAuthor,
-    const Libraries::Rtc::OrbisRtcTick* isLastChangedDate,
-    OrbisNpTusVariableForCrossSave* resultVariable, u64 resultVariableSize, void* option) {
+    const OrbisRtcTick* isLastChangedDate, OrbisNpTusVariableForCrossSave* resultVariable,
+    u64 resultVariableSize, void* option) {
     LOG_INFO(
         Lib_NpTus,
         "reqId = %d, targetVirtualUserId = %s, slotId = %d, opeType = %d, variable = %" PRId64 ", "

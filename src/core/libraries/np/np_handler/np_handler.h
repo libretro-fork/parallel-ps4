@@ -236,49 +236,43 @@ public:
                          const std::vector<std::string>& npIds, const std::vector<s32>& pcIds,
                          NpScore::OrbisNpScorePlayerRankData* rankArray,
                          NpScore::OrbisNpScoreComment* commentArray,
-                         NpScore::OrbisNpScoreGameInfo* infoArray,
-                         Libraries::Rtc::OrbisRtcTick* lastSortDate, u32* totalRecord,
-                         std::shared_ptr<NpScore::ScoreRequestCtx> req);
+                         NpScore::OrbisNpScoreGameInfo* infoArray, OrbisRtcTick* lastSortDate,
+                         u32* totalRecord, std::shared_ptr<NpScore::ScoreRequestCtx> req);
 
     // Submit a GetRankingByRange request to the shadNet server.
     s32 GetRankingByRange(s32 user_id, s32 service_label, u32 boardId, u32 startSerialRank,
                           u32 arrayNum, NpScore::OrbisNpScoreRankData* rankArray,
                           NpScore::OrbisNpScoreComment* commentArray,
-                          NpScore::OrbisNpScoreGameInfo* infoArray,
-                          Libraries::Rtc::OrbisRtcTick* lastSortDate, u32* totalRecord,
-                          std::shared_ptr<NpScore::ScoreRequestCtx> req);
+                          NpScore::OrbisNpScoreGameInfo* infoArray, OrbisRtcTick* lastSortDate,
+                          u32* totalRecord, std::shared_ptr<NpScore::ScoreRequestCtx> req);
 
     // A-variant of GetRankingByRange.
     s32 GetRankingByRangeA(s32 user_id, s32 service_label, u32 boardId, u32 startSerialRank,
                            u32 arrayNum, NpScore::OrbisNpScoreRankDataA* rankArray,
                            NpScore::OrbisNpScoreComment* commentArray,
-                           NpScore::OrbisNpScoreGameInfo* infoArray,
-                           Libraries::Rtc::OrbisRtcTick* lastSortDate, u32* totalRecord,
-                           std::shared_ptr<NpScore::ScoreRequestCtx> req);
+                           NpScore::OrbisNpScoreGameInfo* infoArray, OrbisRtcTick* lastSortDate,
+                           u32* totalRecord, std::shared_ptr<NpScore::ScoreRequestCtx> req);
 
     s32 GetRankingByAccountId(s32 user_id, s32 service_label, u32 boardId,
                               const std::vector<u64>& accountIds, const std::vector<s32>& pcIds,
                               NpScore::OrbisNpScorePlayerRankDataA* rankArray,
                               NpScore::OrbisNpScoreComment* commentArray,
-                              NpScore::OrbisNpScoreGameInfo* infoArray,
-                              Libraries::Rtc::OrbisRtcTick* lastSortDate, u32* totalRecord,
-                              std::shared_ptr<NpScore::ScoreRequestCtx> req);
+                              NpScore::OrbisNpScoreGameInfo* infoArray, OrbisRtcTick* lastSortDate,
+                              u32* totalRecord, std::shared_ptr<NpScore::ScoreRequestCtx> req);
 
     // Submit a GetFriendsRanking request to the shadNet server.
     s32 GetFriendsRanking(s32 user_id, s32 service_label, u32 boardId, bool includeSelf,
                           u32 arrayNum, NpScore::OrbisNpScoreRankData* rankArray,
                           NpScore::OrbisNpScoreComment* commentArray,
-                          NpScore::OrbisNpScoreGameInfo* infoArray,
-                          Libraries::Rtc::OrbisRtcTick* lastSortDate, u32* totalRecord,
-                          std::shared_ptr<NpScore::ScoreRequestCtx> req);
+                          NpScore::OrbisNpScoreGameInfo* infoArray, OrbisRtcTick* lastSortDate,
+                          u32* totalRecord, std::shared_ptr<NpScore::ScoreRequestCtx> req);
 
     // A-variant of GetFriendsRanking
     s32 GetFriendsRankingA(s32 user_id, s32 service_label, u32 boardId, bool includeSelf,
                            u32 arrayNum, NpScore::OrbisNpScoreRankDataA* rankArray,
                            NpScore::OrbisNpScoreComment* commentArray,
-                           NpScore::OrbisNpScoreGameInfo* infoArray,
-                           Libraries::Rtc::OrbisRtcTick* lastSortDate, u32* totalRecord,
-                           std::shared_ptr<NpScore::ScoreRequestCtx> req);
+                           NpScore::OrbisNpScoreGameInfo* infoArray, OrbisRtcTick* lastSortDate,
+                           u32* totalRecord, std::shared_ptr<NpScore::ScoreRequestCtx> req);
 
     // Title User Storage (TUS)
     s32 TusGetMultiSlotVariable(s32 user_id, s32 service_label, const std::string& ownerNpId,
@@ -472,7 +466,7 @@ private:
         void* dataOut = nullptr;
         u64 recvSize = 0;
         u64* totalSizeOut = nullptr;
-        Libraries::Rtc::OrbisRtcTick* lastSortDate = nullptr;
+        OrbisRtcTick* lastSortDate = nullptr;
         u32* totalRecord = nullptr;
         u64 arrayNum = 0;
     };

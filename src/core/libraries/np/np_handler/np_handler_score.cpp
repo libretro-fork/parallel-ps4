@@ -324,14 +324,11 @@ s32 NpHandler::GetBoardInfo(s32 user_id, s32 service_label, u32 boardId,
     return ORBIS_OK;
 }
 
-s32 NpHandler::GetRankingByNpId(s32 user_id, s32 service_label, u32 boardId,
-                                const std::vector<std::string>& npIds,
-                                const std::vector<s32>& pcIds,
-                                NpScore::OrbisNpScorePlayerRankData* rankArray,
-                                NpScore::OrbisNpScoreComment* commentArray,
-                                NpScore::OrbisNpScoreGameInfo* infoArray,
-                                Libraries::Rtc::OrbisRtcTick* lastSortDate, u32* totalRecord,
-                                std::shared_ptr<NpScore::ScoreRequestCtx> req) {
+s32 NpHandler::GetRankingByNpId(
+    s32 user_id, s32 service_label, u32 boardId, const std::vector<std::string>& npIds,
+    const std::vector<s32>& pcIds, NpScore::OrbisNpScorePlayerRankData* rankArray,
+    NpScore::OrbisNpScoreComment* commentArray, NpScore::OrbisNpScoreGameInfo* infoArray,
+    OrbisRtcTick* lastSortDate, u32* totalRecord, std::shared_ptr<NpScore::ScoreRequestCtx> req) {
     // pcIds must either be empty (use 0 for everything) or match npIds in size.
     if (!pcIds.empty() && pcIds.size() != npIds.size()) {
         LOG_ERROR(NpHandler, "pcIds size %zu != npIds size %zu", pcIds.size(), npIds.size());
@@ -414,7 +411,7 @@ s32 NpHandler::GetRankingByRange(s32 user_id, s32 service_label, u32 boardId, u3
                                  u32 arrayNum, NpScore::OrbisNpScoreRankData* rankArray,
                                  NpScore::OrbisNpScoreComment* commentArray,
                                  NpScore::OrbisNpScoreGameInfo* infoArray,
-                                 Libraries::Rtc::OrbisRtcTick* lastSortDate, u32* totalRecord,
+                                 OrbisRtcTick* lastSortDate, u32* totalRecord,
                                  std::shared_ptr<NpScore::ScoreRequestCtx> req) {
     std::shared_ptr<ShadNet::ShadNetClient> client;
     if (auto returned = m_mutex_clients.Run([&]() -> std::optional<s32> {
@@ -486,7 +483,7 @@ s32 NpHandler::GetRankingByRangeA(s32 user_id, s32 service_label, u32 boardId, u
                                   u32 arrayNum, NpScore::OrbisNpScoreRankDataA* rankArray,
                                   NpScore::OrbisNpScoreComment* commentArray,
                                   NpScore::OrbisNpScoreGameInfo* infoArray,
-                                  Libraries::Rtc::OrbisRtcTick* lastSortDate, u32* totalRecord,
+                                  OrbisRtcTick* lastSortDate, u32* totalRecord,
                                   std::shared_ptr<NpScore::ScoreRequestCtx> req) {
     std::shared_ptr<ShadNet::ShadNetClient> client;
     if (auto returned = m_mutex_clients.Run([&]() -> std::optional<s32> {
@@ -554,14 +551,11 @@ s32 NpHandler::GetRankingByRangeA(s32 user_id, s32 service_label, u32 boardId, u
     return ORBIS_OK;
 }
 
-s32 NpHandler::GetRankingByAccountId(s32 user_id, s32 service_label, u32 boardId,
-                                     const std::vector<u64>& accountIds,
-                                     const std::vector<s32>& pcIds,
-                                     NpScore::OrbisNpScorePlayerRankDataA* rankArray,
-                                     NpScore::OrbisNpScoreComment* commentArray,
-                                     NpScore::OrbisNpScoreGameInfo* infoArray,
-                                     Libraries::Rtc::OrbisRtcTick* lastSortDate, u32* totalRecord,
-                                     std::shared_ptr<NpScore::ScoreRequestCtx> req) {
+s32 NpHandler::GetRankingByAccountId(
+    s32 user_id, s32 service_label, u32 boardId, const std::vector<u64>& accountIds,
+    const std::vector<s32>& pcIds, NpScore::OrbisNpScorePlayerRankDataA* rankArray,
+    NpScore::OrbisNpScoreComment* commentArray, NpScore::OrbisNpScoreGameInfo* infoArray,
+    OrbisRtcTick* lastSortDate, u32* totalRecord, std::shared_ptr<NpScore::ScoreRequestCtx> req) {
     std::shared_ptr<ShadNet::ShadNetClient> client;
     if (auto returned = m_mutex_clients.Run([&]() -> std::optional<s32> {
             auto it = m_clients.find(user_id);
@@ -636,7 +630,7 @@ s32 NpHandler::GetFriendsRanking(s32 user_id, s32 service_label, u32 boardId, bo
                                  u32 arrayNum, NpScore::OrbisNpScoreRankData* rankArray,
                                  NpScore::OrbisNpScoreComment* commentArray,
                                  NpScore::OrbisNpScoreGameInfo* infoArray,
-                                 Libraries::Rtc::OrbisRtcTick* lastSortDate, u32* totalRecord,
+                                 OrbisRtcTick* lastSortDate, u32* totalRecord,
                                  std::shared_ptr<NpScore::ScoreRequestCtx> req) {
     std::shared_ptr<ShadNet::ShadNetClient> client;
     if (auto returned = m_mutex_clients.Run([&]() -> std::optional<s32> {
@@ -708,7 +702,7 @@ s32 NpHandler::GetFriendsRankingA(s32 user_id, s32 service_label, u32 boardId, b
                                   u32 arrayNum, NpScore::OrbisNpScoreRankDataA* rankArray,
                                   NpScore::OrbisNpScoreComment* commentArray,
                                   NpScore::OrbisNpScoreGameInfo* infoArray,
-                                  Libraries::Rtc::OrbisRtcTick* lastSortDate, u32* totalRecord,
+                                  OrbisRtcTick* lastSortDate, u32* totalRecord,
                                   std::shared_ptr<NpScore::ScoreRequestCtx> req) {
     std::shared_ptr<ShadNet::ShadNetClient> client;
     if (auto returned = m_mutex_clients.Run([&]() -> std::optional<s32> {

@@ -370,7 +370,7 @@ static_assert(sizeof(OrbisNpMatching2RoomMessageInfoA) == 0x48);
 
 // Room-internal binary attribute
 struct OrbisNpMatching2RoomBinAttrInternal {
-    Libraries::Rtc::OrbisRtcTick lastUpdate;
+    OrbisRtcTick lastUpdate;
     OrbisNpMatching2RoomMemberId memberId;
     u8 pad[6];
     OrbisNpMatching2BinAttr binAttr;
@@ -378,7 +378,7 @@ struct OrbisNpMatching2RoomBinAttrInternal {
 
 // Room member internal binary attribute
 struct OrbisNpMatching2RoomMemberBinAttrInternal {
-    Libraries::Rtc::OrbisRtcTick lastUpdate;
+    OrbisRtcTick lastUpdate;
     OrbisNpMatching2BinAttr binAttr;
 };
 
@@ -491,7 +491,7 @@ static_assert(sizeof(OrbisNpMatching2RoomMemberDataInternal) == 0x58);
 // Room-internal room member information (account-id variant)
 struct OrbisNpMatching2RoomMemberDataInternalA {
     OrbisNpMatching2RoomMemberDataInternalA* next;
-    Libraries::Rtc::OrbisRtcTick joinDateTicks;
+    OrbisRtcTick joinDateTicks;
     Libraries::Np::OrbisNpPeerAddressA user;
     Libraries::Np::OrbisNpOnlineId onlineId;
     u8 pad[4];
@@ -524,7 +524,7 @@ struct OrbisNpMatching2RoomMemberDataInternalListA {
 struct OrbisNpMatching2RoomMemberDataExternal {
     OrbisNpMatching2RoomMemberDataExternal* next;
     Libraries::Np::OrbisNpId npId;
-    Libraries::Rtc::OrbisRtcTick joinDate;
+    OrbisRtcTick joinDate;
     OrbisNpMatching2Role role;
     u8 padding[7];
 };
@@ -534,7 +534,7 @@ struct OrbisNpMatching2RoomMemberDataExternalA {
     OrbisNpMatching2RoomMemberDataExternalA* next;
     Libraries::Np::OrbisNpPeerAddressA user;
     Libraries::Np::OrbisNpOnlineId onlineId;
-    Libraries::Rtc::OrbisRtcTick joinDate;
+    OrbisRtcTick joinDate;
     OrbisNpMatching2Role role;
     u8 padding[7];
 };
@@ -870,7 +870,7 @@ struct OrbisNpMatching2JoinedSessionInfo {
     OrbisNpMatching2WorldId worldId;
     OrbisNpMatching2LobbyId lobbyId;
     OrbisNpMatching2RoomId roomId;
-    Libraries::Rtc::OrbisRtcTick joinDate;
+    OrbisRtcTick joinDate;
 };
 
 // User information

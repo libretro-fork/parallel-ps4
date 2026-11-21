@@ -49,7 +49,7 @@ struct OrbisNpTrophyData {
     OrbisNpTrophyId trophy_id;
     bool unlocked;
     u8 reserved[3];
-    Rtc::OrbisRtcTick timestamp;
+    OrbisRtcTick timestamp;
 };
 
 using OrbisNpTrophyGrade = s32;

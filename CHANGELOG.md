@@ -4,6 +4,14 @@ What changed in the libretro core of this fork, newest first. Changes that come 
 
 ## Unreleased
 
+- The RTC library (`libSceRtc`: the game's clock, dates and ticks) is MSVC C89, registered in `sysmodule_internal.cpp`.
+  - **The same answers:** checked against the C++ version, linked into one program, on 20.8 million calls of every function over random and edge dates, ticks, time zones and both SDK checks: no difference. Its quirks are kept, such as `sceRtcGetTick` adjusting the date it is given, and `sceRtcTickAddMonths` starting from its output tick.
+  - **`std::chrono`** gave the length of a month and the day of the week; they are worked out in C, proleptic Gregorian as chrono's are. The formatting builds the same strings with `sprintf` instead of `std::string`.
+  - **A malformed date string no longer stops the emulator.** The parsers used `std::stoi`, which throws when a field is not a number (a date before the year 1000 written as RFC 3339, for one), and nothing caught it. A field that is not a number now reads as 0, as when it is absent. 28,947 of the test's 1.6 million parsed strings did this.
+  - **`kernel_c.h`** gains the kernel's clock and time zone calls for C, with its time structures field for field (checked by `static_assert` in `time.cpp`).
+  - The RTC's types lost their namespace: the NP and IME headers that use `OrbisRtcTick` name it without `Libraries::Rtc::`.
+  - Not run in a game yet.
+
 - The camera and VR tracker libraries are MSVC C89, with the same functions, behaviour and log lines; both are registered in `libs.cpp`.
   - **The camera's backend** (where frames would come from) is a table of C functions instead of a C++ class. It is still the one that is never attached, until the frontend's camera is passed through.
   - **The configuration table** of types 1 to 5 moved from the header into `camera_config.c`, written without designated initializers; it is byte for byte the table it was. Every camera and VR tracker structure keeps its size, checked against the C++ headers.

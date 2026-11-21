@@ -404,7 +404,7 @@ struct OrbisImeKeycode {
     OrbisImeKeyboardType type;
     Libraries::UserService::OrbisUserServiceUserId user_id;
     u32 resource_id;
-    Libraries::Rtc::OrbisRtcTick timestamp;
+    OrbisRtcTick timestamp;
 };
 
 struct OrbisImeKeyboardResourceIdArray {
