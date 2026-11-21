@@ -4,6 +4,8 @@ What changed in the libretro core of this fork, newest first. Changes that come 
 
 ## Unreleased
 
+- A crash after loading a save in Bloodborne ("No compatibility class for format 134") is addressed: the format compatibility switch made from the old lookup table had lost the 16 block-compressed formats (BC1 to BC7), whose entries had two classes each. They are back, with the classes the table gave them; the other 137 formats are as they were.
+  - **Checked:** every BC format now has its class, and BC1 sRGB is compatible with BC1 UNORM and with R32G32_UINT, as before. Not run in a game yet.
 - No `auto` is left in `video_core`: each variable says its type, and the lambdas held in `auto` variables are plain loops, member functions or small structs.
   - **Where:** the command processor (`liverpool`), the page manager, the pipeline cache's loading and saving, the shader HLE copy, the staging pool, the instance's extension list, and the GPU register and PM4 headers.
   - **The shader HLE copy** no longer uses a `std::vector`: its copies are kept in a `SmallVector` from call to call, so it grows only for a dispatch with more copies than any before.

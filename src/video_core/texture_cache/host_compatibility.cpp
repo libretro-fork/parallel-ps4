@@ -144,6 +144,30 @@ static CompatibilityClass ClassOf(VkFormat format) {
     case VK_FORMAT_R8G8B8_UNORM:
     case VK_FORMAT_R8G8B8_USCALED:
         return CompatibilityClass::_24BIT;
+    case VK_FORMAT_BC1_RGBA_SRGB_BLOCK:
+    case VK_FORMAT_BC1_RGBA_UNORM_BLOCK:
+        return CompatibilityClass::BC1_RGBA | CompatibilityClass::_64BIT;
+    case VK_FORMAT_BC1_RGB_SRGB_BLOCK:
+    case VK_FORMAT_BC1_RGB_UNORM_BLOCK:
+        return CompatibilityClass::BC1_RGB | CompatibilityClass::_64BIT;
+    case VK_FORMAT_BC2_SRGB_BLOCK:
+    case VK_FORMAT_BC2_UNORM_BLOCK:
+        return CompatibilityClass::BC2 | CompatibilityClass::_128BIT;
+    case VK_FORMAT_BC3_SRGB_BLOCK:
+    case VK_FORMAT_BC3_UNORM_BLOCK:
+        return CompatibilityClass::BC3 | CompatibilityClass::_128BIT;
+    case VK_FORMAT_BC4_SNORM_BLOCK:
+    case VK_FORMAT_BC4_UNORM_BLOCK:
+        return CompatibilityClass::BC4 | CompatibilityClass::_64BIT;
+    case VK_FORMAT_BC5_SNORM_BLOCK:
+    case VK_FORMAT_BC5_UNORM_BLOCK:
+        return CompatibilityClass::BC5 | CompatibilityClass::_128BIT;
+    case VK_FORMAT_BC6H_SFLOAT_BLOCK:
+    case VK_FORMAT_BC6H_UFLOAT_BLOCK:
+        return CompatibilityClass::BC6H | CompatibilityClass::_128BIT;
+    case VK_FORMAT_BC7_SRGB_BLOCK:
+    case VK_FORMAT_BC7_UNORM_BLOCK:
+        return CompatibilityClass::BC7 | CompatibilityClass::_128BIT;
     case VK_FORMAT_D16_UNORM:
         return CompatibilityClass::D16;
     case VK_FORMAT_D16_UNORM_S8_UINT:
