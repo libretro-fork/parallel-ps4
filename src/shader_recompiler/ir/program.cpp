@@ -22,14 +22,14 @@ void DumpProgram(const Program& program, const Info& info, const std::string& ty
         return;
     }
 
-    const auto dump_dir = GetUserPath(PathType::ShaderDir) / "dumps";
+    const std::filesystem::path dump_dir = GetUserPath(PathType::ShaderDir) / "dumps";
     if (!Common::FS::Exists(dump_dir)) {
         Common::FS::CreateDirectories(dump_dir);
     }
-    const auto ir_filename =
+    const std::string ir_filename =
         Common::StringFromFormat("%s_0x%016" PRIx64 ".%sirprogram.txt",
                                  Shader::NameOf(info.hw_stage), info.pgm_hash, (type).c_str());
-    const auto ir_file = IOFile{dump_dir / ir_filename, FileAccessMode::Create};
+    const Common::FS::IOFile ir_file = IOFile{dump_dir / ir_filename, FileAccessMode::Create};
 
     size_t index{0};
     std::map<const IR::Inst*, size_t> inst_to_index;
@@ -40,17 +40,17 @@ void DumpProgram(const Program& program, const Info& info, const std::string& ty
         ++index;
     }
 
-    for (const auto& block : program.blocks) {
+    for (Shader::IR::Block* const& block : program.blocks) {
         std::string s = IR::DumpBlock(*block, block_to_index, inst_to_index, index) + '\n';
         ir_file.WriteString(s);
     }
 
-    const auto asl_filename =
+    const std::string asl_filename =
         Common::StringFromFormat("%s_0x%016" PRIx64 ".%sasl.txt", Shader::NameOf(info.hw_stage),
                                  info.pgm_hash, (type).c_str());
-    const auto asl_file = IOFile{dump_dir / asl_filename, FileAccessMode::Create};
+    const Common::FS::IOFile asl_file = IOFile{dump_dir / asl_filename, FileAccessMode::Create};
 
-    for (const auto& node : program.syntax_list) {
+    for (const Shader::IR::AbstractSyntaxNode& node : program.syntax_list) {
         std::string s = IR::DumpASLNode(node, block_to_index, inst_to_index) + '\n';
         asl_file.WriteString(s);
     }

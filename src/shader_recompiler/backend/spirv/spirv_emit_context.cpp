@@ -214,22 +214,23 @@ EmitContext::SpirvAttribute EmitContext::GetAttributeInfo(AmdGpu::NumberFormat f
 
 Id EmitContext::GetBufferSize(const u32 sharp_idx) {
     // Can this be done with memory access? Like we do now with ReadConst
-    const auto& srt_flatbuf = buffers[flatbuf_index];
+    Shader::Backend::SPIRV::EmitContext::BufferDefinition const& srt_flatbuf =
+        buffers[flatbuf_index];
     ASSERT(srt_flatbuf.buffer_type == BufferType::Flatbuf);
     const auto [id, pointer_type] = srt_flatbuf.Alias(PointerType::U32);
 
-    const auto rsrc1{spv_OpLoad(
+    const uint32_t rsrc1{spv_OpLoad(
         &m, U32[1],
         spv_OpAccessChain2(&m, pointer_type, id, u32_zero_value, ConstU32(sharp_idx + 1)))};
-    const auto rsrc2{spv_OpLoad(
+    const uint32_t rsrc2{spv_OpLoad(
         &m, U32[1],
         spv_OpAccessChain2(&m, pointer_type, id, u32_zero_value, ConstU32(sharp_idx + 2)))};
 
-    const auto stride{spv_OpBitFieldUExtract(&m, U32[1], rsrc1, ConstU32(16u), ConstU32(14u))};
-    const auto num_records{rsrc2};
+    const uint32_t stride{spv_OpBitFieldUExtract(&m, U32[1], rsrc1, ConstU32(16u), ConstU32(14u))};
+    const uint32_t num_records{rsrc2};
 
-    const auto stride_zero{spv_OpIEqual(&m, U1[1], stride, u32_zero_value)};
-    const auto stride_size{spv_OpIMul(&m, U32[1], num_records, stride)};
+    const uint32_t stride_zero{spv_OpIEqual(&m, U1[1], stride, u32_zero_value)};
+    const uint32_t stride_size{spv_OpIMul(&m, U32[1], num_records, stride)};
     return spv_OpSelect(&m, U32[1], stride_zero, num_records, stride_size);
 }
 
@@ -238,8 +239,8 @@ void EmitContext::DefineBufferProperties() {
         return;
     }
     for (u32 i = 0; i < buffers.size(); i++) {
-        auto& buffer = buffers[i];
-        const auto& desc = info.buffers[i];
+        Shader::Backend::SPIRV::EmitContext::BufferDefinition& buffer = buffers[i];
+        Shader::BufferResource const& desc = info.buffers[i];
         const u32 binding = buffer.binding;
         if (buffer.buffer_type != BufferType::Guest) {
             continue;
@@ -283,11 +284,11 @@ void EmitContext::DefineAmdPerVertexAttribs() {
         return;
     }
     for (s32 i = 0; i < runtime_info.hw.fs.num_inputs; i++) {
-        const auto& input = runtime_info.hw.fs.inputs[i];
+        const Shader::HwFragmentRuntimeInfo::PsInput& input = runtime_info.hw.fs.inputs[i];
         if (input.IsDefault() || info.fs_interpolation[i].primary != Qualifier::PerVertex) {
             continue;
         }
-        auto& param = input_params[i];
+        Shader::Backend::SPIRV::EmitContext::SpirvAttribute& param = input_params[i];
         const Id pointer = param.id;
         param.id_array[0] =
             spv_OpInterpolateAtVertexAMD(&m, F32[param.num_components], pointer, ConstU32(0U));
@@ -347,8 +348,8 @@ void EmitContext::DefineInputs() {
         }
         ASSERT(fetch_shader.attributes.size() <= IR::NumParams);
         for (u32 semantic = 0; semantic < fetch_shader.attributes.size(); ++semantic) {
-            const auto& attrib = fetch_shader.attributes[semantic];
-            const auto sharp = attrib.GetSharp(info);
+            Shader::Gcn::VertexAttribute const& attrib = fetch_shader.attributes[semantic];
+            const AmdGpu::Buffer sharp = attrib.GetSharp(info);
             const Id type{GetAttributeType(*this, sharp.GetNumberFmt())[4]};
             Id id{DefineInput(type, semantic)};
             if (attrib.GetStepRate() != Gcn::VertexAttribute::InstanceIdType::None) {
@@ -447,10 +448,10 @@ void EmitContext::DefineInputs() {
 
         const bool has_clip_distance_inputs = runtime_info.hw.fs.clip_distance_emulation;
         // Clip distances attribute vector is the last in inputs array
-        const auto num_inputs = runtime_info.hw.fs.num_inputs - (has_clip_distance_inputs ? 1 : 0);
+        const u32 num_inputs = runtime_info.hw.fs.num_inputs - (has_clip_distance_inputs ? 1 : 0);
 
         for (s32 i = 0; i < num_inputs; i++) {
-            const auto& input = runtime_info.hw.fs.inputs[i];
+            const Shader::HwFragmentRuntimeInfo::PsInput& input = runtime_info.hw.fs.inputs[i];
             if (input.IsDefault()) {
                 continue;
             }
@@ -459,7 +460,7 @@ void EmitContext::DefineInputs() {
             const auto [primary, auxiliary] = info.fs_interpolation[i];
             const Id type = F32[num_components];
             const Id attr_id = [&] {
-                const auto bind_location = input.param_index + (has_clip_distance_inputs ? 1 : 0);
+                const int bind_location = input.param_index + (has_clip_distance_inputs ? 1 : 0);
                 if (primary == Qualifier::PerVertex &&
                     profile.supports_fragment_shader_barycentric) {
                     return NameFmt(
@@ -488,8 +489,8 @@ void EmitContext::DefineInputs() {
         }
 
         if (has_clip_distance_inputs) {
-            const auto type = F32[MaxEmulatedClipDistances];
-            const auto attr_id = NameFmt(&m, DefineInput(type, 0), "cldist_attr%d", 0);
+            const unsigned int type = F32[MaxEmulatedClipDistances];
+            const u32 attr_id = NameFmt(&m, DefineInput(type, 0), "cldist_attr%d", 0);
             input_params[num_inputs] = GetAttributeInfo(AmdGpu::NumberFormat::Float, attr_id,
                                                         MaxEmulatedClipDistances, false);
         }
@@ -515,7 +516,7 @@ void EmitContext::DefineInputs() {
         break;
     case SwStage::Geometry: {
         primitive_id = DefineVariable(U32[1], SpvBuiltInPrimitiveId, SpvStorageClassInput);
-        const auto gl_per_vertex = spv_Name(
+        const uint32_t gl_per_vertex = spv_Name(
             &m,
             spv_TypeStruct(
                 &m,
@@ -532,12 +533,12 @@ void EmitContext::DefineInputs() {
         spv_MemberDecorate1(&m, gl_per_vertex, 2, u32(SpvDecorationBuiltIn),
                             u32(static_cast<u32>(SpvBuiltInClipDistance)));
         spv_Decorate0(&m, gl_per_vertex, u32(SpvDecorationBlock));
-        const auto num_verts_in = NumVertices(runtime_info.hw.gs.in_primitive);
-        const auto vertices_in = spv_TypeArray(&m, gl_per_vertex, ConstU32(num_verts_in));
+        const u32 num_verts_in = NumVertices(runtime_info.hw.gs.in_primitive);
+        const uint32_t vertices_in = spv_TypeArray(&m, gl_per_vertex, ConstU32(num_verts_in));
         gl_in = spv_Name(&m, DefineVar(vertices_in, SpvStorageClassInput), "gl_in");
         interfaces.push_back(gl_in);
 
-        const auto num_params = runtime_info.hw.gs.in_vertex_data_size / 4 - 1u;
+        const unsigned int num_params = runtime_info.hw.gs.in_vertex_data_size / 4 - 1u;
         for (int param_id = 0; param_id < num_params; ++param_id) {
             const Id type{spv_TypeArray(&m, F32[4], ConstU32(num_verts_in))};
             const Id id{DefineInput(type, param_id)};
@@ -601,7 +602,7 @@ void EmitContext::DefineVertexBlock() {
     const bool needs_clip_distance_emulation = sw_stage == SwStage::Vertex &&
                                                hw_stage == HwStage::Vertex &&
                                                profile.needs_clip_distance_emulation;
-    const auto has_clip_distance_outputs = info.stores.GetAny(IR::Attribute::ClipDistance);
+    const bool has_clip_distance_outputs = info.stores.GetAny(IR::Attribute::ClipDistance);
     if (has_clip_distance_outputs && !needs_clip_distance_emulation) {
         const Id type{spv_TypeArray(&m, F32[1], ConstU32(8U))};
         const Id initializer{spv_ConstantComposite(&m, type, zero.data(), u32(zero.size()))};
@@ -815,7 +816,7 @@ EmitContext::BufferSpv EmitContext::DefineBuffer(bool is_written, bool is_cohere
         buf_type_ids.push_back(record_array_type);
     }
     // Define buffer binding interface.
-    constexpr auto storage_class = SpvStorageClassStorageBuffer;
+    constexpr const SpvStorageClass_ storage_class = SpvStorageClassStorageBuffer;
     const Id struct_pointer_type{spv_TypePointer(&m, u32(storage_class), struct_type)};
     const Id pointer_type = spv_TypePointer(&m, u32(storage_class), data_type);
     const Id id{spv_AddGlobalVariable(&m, struct_pointer_type, u32(storage_class), 0)};
@@ -856,8 +857,8 @@ EmitContext::BufferSpv EmitContext::DefineBuffer(bool is_written, bool is_cohere
 };
 
 void EmitContext::DefineBuffers() {
-    for (const auto& desc : info.buffers) {
-        const auto buf_sharp = desc.GetSharp(info);
+    for (Shader::BufferResource const& desc : info.buffers) {
+        const AmdGpu::Buffer buf_sharp = desc.GetSharp(info);
         // MTYPE class 3 marks guest buffers shared between invocations; shared
         // memory lowered to a storage buffer needs the same guarantee.
         const bool is_coherent =
@@ -873,7 +874,8 @@ void EmitContext::DefineBuffers() {
         }
 
         // Define aliases depending on the shader usage.
-        auto& spv_buffer = buffers.emplace_back(binding.buffer++, desc.buffer_type);
+        Shader::Backend::SPIRV::EmitContext::BufferDefinition& spv_buffer =
+            buffers.emplace_back(binding.buffer++, desc.buffer_type);
         if (True(desc.used_types & IR::Type::U64)) {
             spv_buffer.Alias(PointerType::U64) =
                 DefineBuffer(desc.is_written, is_coherent, 3, desc.buffer_type, U64);
@@ -976,9 +978,9 @@ u32 GetFormat(const AmdGpu::Image& image) {
 }
 
 Id ImageType(EmitContext& ctx, const ImageResource& desc, Id sampled_type) {
-    const auto image = desc.GetSharp(ctx.info);
-    const auto format = desc.is_atomic ? GetFormat(image) : SpvImageFormatUnknown;
-    const auto type = image.GetViewType(desc.is_array);
+    const AmdGpu::Image image = desc.GetSharp(ctx.info);
+    const u32 format = desc.is_atomic ? GetFormat(image) : SpvImageFormatUnknown;
+    const AmdGpu::ImageType type = image.GetViewType(desc.is_array);
     const u32 sampled = desc.is_written ? 2 : 1;
     switch (type) {
     case AmdGpu::ImageType::Color1D:
@@ -1003,9 +1005,9 @@ Id ImageType(EmitContext& ctx, const ImageResource& desc, Id sampled_type) {
 }
 
 void EmitContext::DefineImagesAndSamplers() {
-    for (const auto& image_desc : info.images) {
-        const auto sharp = image_desc.GetSharp(info);
-        const auto nfmt = sharp.GetNumberFmt();
+    for (Shader::ImageResource const& image_desc : info.images) {
+        const AmdGpu::Image sharp = image_desc.GetSharp(info);
+        const AmdGpu::NumberFormat nfmt = sharp.GetNumberFmt();
         const bool is_integer = AmdGpu::IsInteger(nfmt);
         const bool is_storage = image_desc.is_written;
         const MipStorageFallbackMode mip_fallback_mode = image_desc.mip_fallback_mode;
@@ -1049,7 +1051,7 @@ void EmitContext::DefineImagesAndSamplers() {
     }
     sampler_type = spv_TypeSampler(&m);
     sampler_pointer_type = spv_TypePointer(&m, u32(SpvStorageClassUniformConstant), sampler_type);
-    for (const auto& samp_desc : info.samplers) {
+    for (Shader::SamplerResource const& samp_desc : info.samplers) {
         const Id id{spv_AddGlobalVariable(&m, sampler_pointer_type,
                                           u32(SpvStorageClassUniformConstant), 0)};
         spv_Decorate1(&m, id, u32(SpvDecorationBinding), u32(binding.unified++));
@@ -1061,7 +1063,7 @@ void EmitContext::DefineImagesAndSamplers() {
 }
 
 void EmitContext::DefineSharedMemory() {
-    const auto num_types = std::popcount(static_cast<u32>(info.shared_types));
+    const int num_types = std::popcount(static_cast<u32>(info.shared_types));
     if (num_types == 0) {
         return;
     }
@@ -1079,7 +1081,7 @@ void EmitContext::DefineSharedMemory() {
         const u32 num_elements{Common::DivCeil(shared_memory_size, element_size)};
         const Id array_type{spv_TypeArray(&m, element_type, ConstU32(num_elements))};
 
-        const auto mem_type = [&] {
+        const unsigned int mem_type = [&] {
             if (num_types > 1) {
                 const Id struct_type{spv_TypeStruct1(&m, array_type)};
                 spv_Decorate0(&m, struct_type, u32(SpvDecorationBlock));
@@ -1113,59 +1115,60 @@ void EmitContext::DefineSharedMemory() {
 
 Id EmitContext::DefineFloat32ToUfloatM5(u32 mantissa_bits, const std::string_view name) {
     // https://gitlab.freedesktop.org/mesa/mesa/-/blob/main/src/util/format_r11g11b10f.h
-    const auto func_type{spv_TypeFunction(&m, U32[1], std::array<u32, 1>{F32[1]}.data(), 1)};
-    const auto func{spv_OpFunction(&m, U32[1], u32(SpvFunctionControlMaskNone), func_type)};
-    const auto value{spv_OpFunctionParameter(&m, F32[1])};
+    const uint32_t func_type{spv_TypeFunction(&m, U32[1], std::array<u32, 1>{F32[1]}.data(), 1)};
+    const uint32_t func{spv_OpFunction(&m, U32[1], u32(SpvFunctionControlMaskNone), func_type)};
+    const uint32_t value{spv_OpFunctionParameter(&m, F32[1])};
     spv_Name(&m, func, std::string(name).c_str());
     AddLabel();
 
-    const auto raw_value{spv_OpBitcast(&m, U32[1], value)};
-    const auto exponent{spv_OpBitcast(
+    const uint32_t raw_value{spv_OpBitcast(&m, U32[1], value)};
+    const uint32_t exponent{spv_OpBitcast(
         &m, S32[1], spv_OpBitFieldSExtract(&m, U32[1], raw_value, ConstU32(23U), ConstU32(8U)))};
-    const auto sign{spv_OpBitFieldUExtract(&m, U32[1], raw_value, ConstU32(31U), ConstU32(1U))};
+    const uint32_t sign{spv_OpBitFieldUExtract(&m, U32[1], raw_value, ConstU32(31U), ConstU32(1U))};
 
-    const auto is_zero{spv_OpLogicalOr(&m, U1[1], spv_OpIEqual(&m, U1[1], raw_value, ConstU32(0U)),
-                                       spv_OpIEqual(&m, U1[1], sign, ConstU32(1U)))};
-    const auto is_nan{spv_OpIsNan(&m, U1[1], value)};
-    const auto is_inf{spv_OpIsInf(&m, U1[1], value)};
-    const auto is_denorm{spv_OpSLessThanEqual(&m, U1[1], exponent, ConstS32(-15))};
+    const uint32_t is_zero{spv_OpLogicalOr(&m, U1[1],
+                                           spv_OpIEqual(&m, U1[1], raw_value, ConstU32(0U)),
+                                           spv_OpIEqual(&m, U1[1], sign, ConstU32(1U)))};
+    const uint32_t is_nan{spv_OpIsNan(&m, U1[1], value)};
+    const uint32_t is_inf{spv_OpIsInf(&m, U1[1], value)};
+    const uint32_t is_denorm{spv_OpSLessThanEqual(&m, U1[1], exponent, ConstS32(-15))};
 
-    const auto denorm_mantissa{spv_OpConvertFToU(
+    const uint32_t denorm_mantissa{spv_OpConvertFToU(
         &m, U32[1],
         spv_OpRoundEven(&m, F32[1],
                         spv_OpFMul(&m, F32[1], value,
                                    ConstF32(static_cast<float>(1 << (mantissa_bits + 14))))))};
-    const auto denorm_overflow{spv_OpINotEqual(
+    const uint32_t denorm_overflow{spv_OpINotEqual(
         &m, U1[1], spv_OpShiftRightLogical(&m, U32[1], denorm_mantissa, ConstU32(mantissa_bits)),
         ConstU32(0U))};
-    const auto denorm{
+    const uint32_t denorm{
         spv_OpSelect(&m, U32[1], denorm_overflow, ConstU32(1U << mantissa_bits), denorm_mantissa)};
 
-    const auto norm_mantissa{spv_OpConvertFToU(
+    const uint32_t norm_mantissa{spv_OpConvertFToU(
         &m, U32[1],
         spv_OpRoundEven(
             &m, F32[1],
             spv_OpLdexp(
                 &m, F32[1], value,
                 spv_OpISub(&m, S32[1], ConstS32(static_cast<int>(mantissa_bits)), exponent))))};
-    const auto norm_overflow{
+    const uint32_t norm_overflow{
         spv_OpUGreaterThanEqual(&m, U1[1], norm_mantissa, ConstU32(2U << mantissa_bits))};
-    const auto norm_final_mantissa{spv_OpBitwiseAnd(
+    const uint32_t norm_final_mantissa{spv_OpBitwiseAnd(
         &m, U32[1],
         spv_OpSelect(&m, U32[1], norm_overflow,
                      spv_OpShiftRightLogical(&m, U32[1], norm_mantissa, ConstU32(1U)),
                      norm_mantissa),
         ConstU32((1U << mantissa_bits) - 1))};
-    const auto norm_final_exponent{spv_OpBitcast(
+    const uint32_t norm_final_exponent{spv_OpBitcast(
         &m, U32[1],
         spv_OpIAdd(&m, S32[1],
                    spv_OpSelect(&m, S32[1], norm_overflow,
                                 spv_OpIAdd(&m, S32[1], exponent, ConstS32(1)), exponent),
                    ConstS32(15)))};
-    const auto norm{spv_OpBitFieldInsert(&m, U32[1], norm_final_mantissa, norm_final_exponent,
-                                         ConstU32(mantissa_bits), ConstU32(5U))};
+    const uint32_t norm{spv_OpBitFieldInsert(&m, U32[1], norm_final_mantissa, norm_final_exponent,
+                                             ConstU32(mantissa_bits), ConstU32(5U))};
 
-    const auto result{spv_OpSelect(
+    const uint32_t result{spv_OpSelect(
         &m, U32[1], is_zero, ConstU32(0U),
         spv_OpSelect(&m, U32[1], is_nan, ConstU32(31u << mantissa_bits | 1U),
                      spv_OpSelect(&m, U32[1], is_inf, ConstU32(31U << mantissa_bits),
@@ -1178,9 +1181,9 @@ Id EmitContext::DefineFloat32ToUfloatM5(u32 mantissa_bits, const std::string_vie
 
 Id EmitContext::DefineUfloatM5ToFloat32(u32 mantissa_bits, const std::string_view name) {
     // https://gitlab.freedesktop.org/mesa/mesa/-/blob/main/src/util/format_r11g11b10f.h
-    const auto func_type{spv_TypeFunction(&m, F32[1], std::array<u32, 1>{U32[1]}.data(), 1)};
-    const auto func{spv_OpFunction(&m, F32[1], u32(SpvFunctionControlMaskNone), func_type)};
-    const auto value{spv_OpFunctionParameter(&m, U32[1])};
+    const uint32_t func_type{spv_TypeFunction(&m, F32[1], std::array<u32, 1>{U32[1]}.data(), 1)};
+    const uint32_t func{spv_OpFunction(&m, F32[1], u32(SpvFunctionControlMaskNone), func_type)};
+    const uint32_t value{spv_OpFunctionParameter(&m, U32[1])};
     spv_Name(&m, func, std::string(name).c_str());
     AddLabel();
 
@@ -1222,28 +1225,28 @@ Id EmitContext::DefineUfloatM5ToFloat32(u32 mantissa_bits, const std::string_vie
 static constexpr u64 GUEST_ADDRESS_SPACE_BITS = 40;
 
 Id EmitContext::DefineGetBdaPointer() {
-    const auto caching_pagebits{
+    const uint32_t caching_pagebits{
         spv_Constant64(&m, U64, u64(static_cast<u64>(profile.sparse_page_shift)))};
-    const auto caching_pagemask{
+    const uint32_t caching_pagemask{
         spv_Constant64(&m, U64, u64(static_cast<u64>((1u << profile.sparse_page_shift) - 1)))};
 
-    const auto func_type{spv_TypeFunction(&m, U64, std::array<u32, 1>{U64}.data(), 1)};
-    const auto func{spv_OpFunction(&m, U64, u32(SpvFunctionControlMaskNone), func_type)};
-    const auto address{spv_OpFunctionParameter(&m, U64)};
+    const uint32_t func_type{spv_TypeFunction(&m, U64, std::array<u32, 1>{U64}.data(), 1)};
+    const uint32_t func{spv_OpFunction(&m, U64, u32(SpvFunctionControlMaskNone), func_type)};
+    const uint32_t address{spv_OpFunctionParameter(&m, U64)};
     spv_Name(&m, func, "get_bda_pointer");
-    const auto entry_label{AddLabel()};
+    const unsigned int entry_label{AddLabel()};
 
-    const auto lookup_label{spv_OpLabel(&m)};
-    const auto fault_label{spv_OpLabel(&m)};
-    const auto available_label{spv_OpLabel(&m)};
-    const auto merge_label{spv_OpLabel(&m)};
-    const auto end_label{spv_OpLabel(&m)};
+    const uint32_t lookup_label{spv_OpLabel(&m)};
+    const uint32_t fault_label{spv_OpLabel(&m)};
+    const uint32_t available_label{spv_OpLabel(&m)};
+    const uint32_t merge_label{spv_OpLabel(&m)};
+    const uint32_t end_label{spv_OpLabel(&m)};
 
     // An address outside the guest's address space (what a shader takes for a pointer need not
     // be one) has no page in the table and no bit in the fault buffer: looking it up read past
     // the table, and marking the fault wrote past the fault buffer, which lost the GPU device
     // ("write to an invalid address"; Sekiro after its intro movie). It reads as nothing.
-    const auto in_space{
+    const uint32_t in_space{
         spv_OpIEqual(&m, U1[1],
                      spv_OpShiftRightLogical(
                          &m, U64, address, spv_Constant64(&m, U64, u64(GUEST_ADDRESS_SPACE_BITS))),
@@ -1253,51 +1256,53 @@ Id EmitContext::DefineGetBdaPointer() {
     AddLabel(lookup_label);
 
     // Get page BDA
-    const auto page{spv_OpShiftRightLogical(&m, U64, address, caching_pagebits)};
-    const auto page32{spv_OpUConvert(&m, U32[1], page)};
-    const auto& bda_buffer{buffers[bda_pagetable_index]};
+    const uint32_t page{spv_OpShiftRightLogical(&m, U64, address, caching_pagebits)};
+    const uint32_t page32{spv_OpUConvert(&m, U32[1], page)};
+    Shader::Backend::SPIRV::EmitContext::BufferDefinition const& bda_buffer{
+        buffers[bda_pagetable_index]};
     const auto [bda_buffer_id, bda_pointer_type] = bda_buffer.Alias(PointerType::U64);
-    const auto bda_ptr{
+    const uint32_t bda_ptr{
         spv_OpAccessChain2(&m, bda_pointer_type, bda_buffer_id, u32_zero_value, page32)};
-    const auto bda{spv_OpLoad(&m, U64, bda_ptr)};
+    const uint32_t bda{spv_OpLoad(&m, U64, bda_ptr)};
 
     // Check if page is GPU cached
-    const auto is_fault{spv_OpIEqual(&m, U1[1], bda, u64_zero_value)};
+    const uint32_t is_fault{spv_OpIEqual(&m, U1[1], bda, u64_zero_value)};
     spv_OpSelectionMerge(&m, merge_label, u32(SpvSelectionControlMaskNone));
     spv_OpBranchConditional(&m, is_fault, fault_label, available_label);
 
     // First time acces, mark as fault
     AddLabel(fault_label);
-    const auto& fault_buffer{buffers[fault_buffer_index]};
+    Shader::Backend::SPIRV::EmitContext::BufferDefinition const& fault_buffer{
+        buffers[fault_buffer_index]};
     const auto [fault_buffer_id, fault_pointer_type] = fault_buffer.Alias(PointerType::U32);
-    const auto page_div32{spv_OpShiftRightLogical(&m, U32[1], page32, ConstU32(5U))};
-    const auto page_mod32{spv_OpBitwiseAnd(&m, U32[1], page32, ConstU32(31U))};
-    const auto page_mask{spv_OpShiftLeftLogical(&m, U32[1], u32_one_value, page_mod32)};
-    const auto fault_ptr{
+    const uint32_t page_div32{spv_OpShiftRightLogical(&m, U32[1], page32, ConstU32(5U))};
+    const uint32_t page_mod32{spv_OpBitwiseAnd(&m, U32[1], page32, ConstU32(31U))};
+    const uint32_t page_mask{spv_OpShiftLeftLogical(&m, U32[1], u32_one_value, page_mod32)};
+    const uint32_t fault_ptr{
         spv_OpAccessChain2(&m, fault_pointer_type, fault_buffer_id, u32_zero_value, page_div32)};
-    const auto fault_value{spv_OpLoad(&m, U32[1], fault_ptr)};
-    const auto fault_value_masked{spv_OpBitwiseOr(&m, U32[1], fault_value, page_mask)};
+    const uint32_t fault_value{spv_OpLoad(&m, U32[1], fault_ptr)};
+    const uint32_t fault_value_masked{spv_OpBitwiseOr(&m, U32[1], fault_value, page_mask)};
     spv_OpStore(&m, fault_ptr, fault_value_masked);
 
     // Return null pointer
-    const auto fallback_result{u64_zero_value};
+    const unsigned int fallback_result{u64_zero_value};
     spv_OpBranch(&m, merge_label);
 
     // Value is available, compute address
     AddLabel(available_label);
-    const auto offset_in_bda{spv_OpBitwiseAnd(&m, U64, address, caching_pagemask)};
-    const auto addr{spv_OpIAdd(&m, U64, bda, offset_in_bda)};
+    const uint32_t offset_in_bda{spv_OpBitwiseAnd(&m, U64, address, caching_pagemask)};
+    const uint32_t addr{spv_OpIAdd(&m, U64, bda, offset_in_bda)};
     spv_OpBranch(&m, merge_label);
 
     // Merge
     AddLabel(merge_label);
-    const auto looked_up{spv_OpPhi(
+    const uint32_t looked_up{spv_OpPhi(
         &m, U64, std::array<u32, 4>{addr, available_label, fallback_result, fault_label}.data(),
         4)};
     spv_OpBranch(&m, end_label);
 
     AddLabel(end_label);
-    const auto result{spv_OpPhi(
+    const uint32_t result{spv_OpPhi(
         &m, U64, std::array<u32, 4>{looked_up, merge_label, u64_zero_value, entry_label}.data(),
         4)};
     spv_OpReturnValue(&m, result);
@@ -1306,25 +1311,25 @@ Id EmitContext::DefineGetBdaPointer() {
 }
 
 Id EmitContext::DefineReadConst(bool dynamic) {
-    const auto func_type{
+    const uint32_t func_type{
         !dynamic
             ? spv_TypeFunction(&m, U32[1], std::array<u32, 3>{U32[2], U32[1], U32[1]}.data(), 3)
             : spv_TypeFunction(&m, U32[1], std::array<u32, 2>{U32[2], U32[1]}.data(), 2)};
-    const auto func{spv_OpFunction(&m, U32[1], u32(SpvFunctionControlMaskNone), func_type)};
-    const auto base{spv_OpFunctionParameter(&m, U32[2])};
-    const auto offset{spv_OpFunctionParameter(&m, U32[1])};
-    const auto flatbuf_offset{!dynamic ? spv_OpFunctionParameter(&m, U32[1]) : Id{}};
+    const uint32_t func{spv_OpFunction(&m, U32[1], u32(SpvFunctionControlMaskNone), func_type)};
+    const uint32_t base{spv_OpFunctionParameter(&m, U32[2])};
+    const uint32_t offset{spv_OpFunctionParameter(&m, U32[1])};
+    const uint32_t flatbuf_offset{!dynamic ? spv_OpFunctionParameter(&m, U32[1]) : Id{}};
     spv_Name(&m, func, std::string(dynamic ? "read_const_dynamic" : "read_const").c_str());
     AddLabel();
 
-    const auto base_lo{spv_OpUConvert(&m, U64, spv_OpCompositeExtract1(&m, U32[1], base, 0))};
-    const auto base_hi{spv_OpUConvert(&m, U64, spv_OpCompositeExtract1(&m, U32[1], base, 1))};
-    const auto base_shift{spv_OpShiftLeftLogical(&m, U64, base_hi, ConstU32(32U))};
-    const auto base_addr{spv_OpBitwiseOr(&m, U64, base_lo, base_shift)};
-    const auto offset_bytes{spv_OpShiftLeftLogical(&m, U32[1], offset, ConstU32(2U))};
-    const auto addr{spv_OpIAdd(&m, U64, base_addr, spv_OpUConvert(&m, U64, offset_bytes))};
+    const uint32_t base_lo{spv_OpUConvert(&m, U64, spv_OpCompositeExtract1(&m, U32[1], base, 0))};
+    const uint32_t base_hi{spv_OpUConvert(&m, U64, spv_OpCompositeExtract1(&m, U32[1], base, 1))};
+    const uint32_t base_shift{spv_OpShiftLeftLogical(&m, U64, base_hi, ConstU32(32U))};
+    const uint32_t base_addr{spv_OpBitwiseOr(&m, U64, base_lo, base_shift)};
+    const uint32_t offset_bytes{spv_OpShiftLeftLogical(&m, U32[1], offset, ConstU32(2U))};
+    const uint32_t addr{spv_OpIAdd(&m, U64, base_addr, spv_OpUConvert(&m, U64, offset_bytes))};
 
-    const auto result = EmitDwordMemoryRead(addr, [&]() {
+    const unsigned int result = EmitDwordMemoryRead(addr, [&]() {
         if (dynamic) {
             return u32_zero_value;
         } else {

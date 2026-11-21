@@ -288,7 +288,7 @@ private:
         }
         outputs.reserve(fs_info.num_inputs);
         for (int i = 0; i < fs_info.num_inputs; i++) {
-            const auto& input = fs_info.inputs[i];
+            const Shader::HwFragmentRuntimeInfo::PsInput& input = fs_info.inputs[i];
             if (input.IsDefault()) {
                 continue;
             }
@@ -314,7 +314,7 @@ private:
         const Id float_arr{spv_TypeArray(&m, vec4_id, Int(32))};
         inputs.reserve(fs_info.num_inputs);
         for (int i = 0; i < fs_info.num_inputs; i++) {
-            const auto& input = fs_info.inputs[i];
+            const Shader::HwFragmentRuntimeInfo::PsInput& input = fs_info.inputs[i];
             if (input.IsDefault()) {
                 continue;
             }

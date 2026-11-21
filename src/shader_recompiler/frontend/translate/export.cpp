@@ -48,7 +48,7 @@ static u32 MaskFromExportFormat(u8 mask, AmdGpu::ShaderExportFormat export_forma
 }
 
 void Translator::ExportRenderTarget(const GcnInst& inst) {
-    const auto& exp = inst.control.exp;
+    const Shader::Gcn::InstControlEXP& exp = inst.control.exp;
     const IR::Attribute mrt{exp.target};
     info.mrt_mask |= 1u << static_cast<u8>(mrt);
 
@@ -58,7 +58,7 @@ void Translator::ExportRenderTarget(const GcnInst& inst) {
         color_buffer_idx = 0;
     }
 
-    const auto color_buffer = runtime_info.hw.fs.color_buffers[color_buffer_idx];
+    const Shader::PsColorBuffer color_buffer = runtime_info.hw.fs.color_buffers[color_buffer_idx];
     if (color_buffer.export_format == AmdGpu::ShaderExportFormat::Zero || exp.en == 0) {
         // No export
         return;
@@ -67,7 +67,7 @@ void Translator::ExportRenderTarget(const GcnInst& inst) {
     std::array<IR::F32, 4> components{};
     if (exp.compr) {
         // Components are float16 packed into a VGPR
-        const auto num_format = NumberFormatCompressed(color_buffer.export_format);
+        const AmdGpu::NumberFormat num_format = NumberFormatCompressed(color_buffer.export_format);
         // Export R, G
         if (exp.en & 1) {
             const IR::Value unpacked_value =
@@ -95,7 +95,7 @@ void Translator::ExportRenderTarget(const GcnInst& inst) {
 
     // Metal seems to have an issue where 8-bit unorm/snorm/sRGB outputs to render target
     // need a bias applied to round correctly; detect and set the flag for that here.
-    const auto needs_unorm_fixup = profile.needs_unorm_fixup &&
+    const bool needs_unorm_fixup = profile.needs_unorm_fixup &&
                                    (color_buffer.num_format == AmdGpu::NumberFormat::Unorm ||
                                     color_buffer.num_format == AmdGpu::NumberFormat::Snorm ||
                                     color_buffer.num_format == AmdGpu::NumberFormat::Srgb) &&
@@ -105,11 +105,12 @@ void Translator::ExportRenderTarget(const GcnInst& inst) {
 
     // Swizzle components and export
     for (u32 i = 0; i < 4; ++i) {
-        const auto swizzled_comp = components[color_buffer.swizzle.Map(i)];
+        const IR::F32 swizzled_comp = components[color_buffer.swizzle.Map(i)];
         if (swizzled_comp.IsEmpty()) {
             continue;
         }
-        auto converted = ApplyWriteNumberConversion(ir, swizzled_comp, color_buffer.num_conversion);
+        IR::F32 converted =
+            ApplyWriteNumberConversion(ir, swizzled_comp, color_buffer.num_conversion);
         if (needs_unorm_fixup) {
             // FIXME: Fix-up for GPUs where float-to-unorm rounding is off from expected.
             converted = ir.FPSub(converted, ir.Imm32(1.f / 127500.f));
@@ -119,7 +120,7 @@ void Translator::ExportRenderTarget(const GcnInst& inst) {
 }
 
 void Translator::ExportDepth(const GcnInst& inst) {
-    const auto& exp = inst.control.exp;
+    const Shader::Gcn::InstControlEXP& exp = inst.control.exp;
     if (exp.en == 0) {
         // No export
         return;
@@ -128,7 +129,8 @@ void Translator::ExportDepth(const GcnInst& inst) {
     std::array<IR::F32, 4> components{};
     if (exp.compr) {
         // Components are float16 packed into a VGPR
-        const auto num_format = NumberFormatCompressed(runtime_info.hw.fs.z_export_format);
+        const AmdGpu::NumberFormat num_format =
+            NumberFormatCompressed(runtime_info.hw.fs.z_export_format);
         // Export R, G
         if (exp.en & 1) {
             const IR::Value unpacked_value =
@@ -188,7 +190,7 @@ void Translator::EmitExport(const GcnInst& inst) {
         if ((mask & 1) == 0) {
             continue;
         }
-        const auto value = ir.GetVectorReg<IR::F32>(IR::VectorReg(inst.src[i].code));
+        IR::F32 const value = ir.GetVectorReg<IR::F32>(IR::VectorReg(inst.src[i].code));
         if (IsPosition(attrib)) {
             IR::ExportPosition(ir, runtime_info.hw.vs, tess_emulated_primitive, attrib, i, value);
         } else {

@@ -28,7 +28,7 @@ static IR::VectorReg IterateBarycentrics(const RuntimeInfo& runtime_info, auto&&
         return IR::VectorReg::V0;
     }
     u32 dst_vreg{};
-    const auto addr_flags = runtime_info.hw.fs.addr_flags;
+    const AmdGpu::PsInput addr_flags = runtime_info.hw.fs.addr_flags;
     if (addr_flags.persp_sample_ena) {
         set_attribute(dst_vreg++, IR::Attribute::BaryCoordSmoothSample, 0); // I
         set_attribute(dst_vreg++, IR::Attribute::BaryCoordSmoothSample, 1); // J
@@ -176,8 +176,8 @@ void Translator::EmitPrologue(IR::Block* first_block) {
                     ir.SetVectorReg(IR::VectorReg(vreg), ir.GetAttribute(attrib, comp));
                 }
             });
-        const auto addr_flags = runtime_info.hw.fs.addr_flags;
-        const auto en_flags = runtime_info.hw.fs.en_flags;
+        const AmdGpu::PsInput addr_flags = runtime_info.hw.fs.addr_flags;
+        const AmdGpu::PsInput en_flags = runtime_info.hw.fs.en_flags;
         if (addr_flags.pos_x_float_ena) {
             if (en_flags.pos_x_float_ena) {
                 ir.SetVectorReg(dst_vreg++, ir.GetAttribute(IR::Attribute::FragCoord, 0));
@@ -329,7 +329,7 @@ IR::VectorReg Translator::GetScratchVgpr(u32 offset) {
     const auto [it, is_new] = vgpr_map.try_emplace(offset);
     if (is_new) {
         ASSERT_MSG(next_vgpr_num < 256, "Out of VGPRs");
-        const auto new_vgpr = static_cast<IR::VectorReg>(next_vgpr_num++);
+        const IR::VectorReg new_vgpr = static_cast<IR::VectorReg>(next_vgpr_num++);
         it->second = new_vgpr;
     }
     return it->second;
@@ -504,7 +504,7 @@ T Translator::GetSrc16(const InstOperand& operand) {
         }
     };
 
-    const auto op_sel = operand.op_sel.op_sel;
+    const bool op_sel = operand.op_sel.op_sel;
 
     T value{};
     switch (operand.field) {
@@ -726,8 +726,8 @@ T Translator::GetSrc64(const InstOperand& operand) {
     T value{};
     switch (operand.field) {
     case OperandField::ScalarGPR: {
-        const auto value_lo = ir.GetScalarReg(IR::ScalarReg(operand.code));
-        const auto value_hi = ir.GetScalarReg(IR::ScalarReg(operand.code + 1));
+        IR::U32 const value_lo = ir.GetScalarReg(IR::ScalarReg(operand.code));
+        IR::U32 const value_hi = ir.GetScalarReg(IR::ScalarReg(operand.code + 1));
         if constexpr (is_float) {
             value = ir.PackDouble2x32(ir.CompositeConstruct(value_lo, value_hi));
         } else {
@@ -736,8 +736,8 @@ T Translator::GetSrc64(const InstOperand& operand) {
         break;
     }
     case OperandField::VectorGPR: {
-        const auto value_lo = ir.GetVectorReg(IR::VectorReg(operand.code));
-        const auto value_hi = ir.GetVectorReg(IR::VectorReg(operand.code + 1));
+        IR::U32 const value_lo = ir.GetVectorReg(IR::VectorReg(operand.code));
+        IR::U32 const value_hi = ir.GetVectorReg(IR::VectorReg(operand.code + 1));
         if constexpr (is_float) {
             value = ir.PackDouble2x32(ir.CompositeConstruct(value_lo, value_hi));
         } else {
@@ -815,16 +815,16 @@ T Translator::GetSrc64(const InstOperand& operand) {
         // 64-bit values). Unpack, modify the high dword's bit 31, repack.
         if (operand.input_modifier.abs) {
             const auto unpacked = ir.UnpackUint2x32(value);
-            const auto lo = IR::U32{ir.CompositeExtract(unpacked, 0)};
-            const auto hi = IR::U32{ir.CompositeExtract(unpacked, 1)};
-            const auto hi_abs = ir.BitwiseAnd(hi, ir.Imm32(0x7FFFFFFFu));
+            const IR::U32 lo = IR::U32{ir.CompositeExtract(unpacked, 0)};
+            const IR::U32 hi = IR::U32{ir.CompositeExtract(unpacked, 1)};
+            const IR::U32U64 hi_abs = ir.BitwiseAnd(hi, ir.Imm32(0x7FFFFFFFu));
             value = ir.PackUint2x32(ir.CompositeConstruct(lo, hi_abs));
         }
         if (operand.input_modifier.neg) {
             const auto unpacked = ir.UnpackUint2x32(value);
-            const auto lo = IR::U32{ir.CompositeExtract(unpacked, 0)};
-            const auto hi = IR::U32{ir.CompositeExtract(unpacked, 1)};
-            const auto hi_neg = ir.BitwiseXor(hi, ir.Imm32(0x80000000u));
+            const IR::U32 lo = IR::U32{ir.CompositeExtract(unpacked, 0)};
+            const IR::U32 hi = IR::U32{ir.CompositeExtract(unpacked, 1)};
+            const IR::U32U64 hi_neg = ir.BitwiseXor(hi, ir.Imm32(0x80000000u));
             value = ir.PackUint2x32(ir.CompositeConstruct(lo, hi_neg));
         }
     }
@@ -850,7 +850,7 @@ pk_type<T> Translator::GetSrcPk(const InstOperand& operand) {
         }
     };
 
-    constexpr auto number_format = [&]() {
+    constexpr const auto number_format = [&]() {
         if constexpr (is_float) {
             return AmdGpu::NumberFormat::Float;
         } else {
@@ -1029,18 +1029,18 @@ void Translator::SetDst16(const InstOperand& operand, const IR::U32F32& value) {
         }
     };
 
-    const auto op_sel = operand.op_sel.op_sel;
+    const bool op_sel = operand.op_sel.op_sel;
 
     switch (operand.field) {
     case OperandField::ScalarGPR: {
-        const auto prev_dst = ir.GetScalarReg<IR::U32>(IR::ScalarReg(operand.code));
+        IR::U32 const prev_dst = ir.GetScalarReg<IR::U32>(IR::ScalarReg(operand.code));
         const auto result_16 = cast(result);
         const auto new_dst =
             ir.BitFieldInsert(prev_dst, result_16, ir.Imm32(op_sel ? 16 : 0), ir.Imm32(16));
         return ir.SetScalarReg(IR::ScalarReg(operand.code), new_dst);
     }
     case OperandField::VectorGPR: {
-        const auto prev_dst = ir.GetVectorReg<IR::U32>(IR::VectorReg(operand.code));
+        IR::U32 const prev_dst = ir.GetVectorReg<IR::U32>(IR::VectorReg(operand.code));
         const auto result_16 = cast(result);
         const auto new_dst =
             ir.BitFieldInsert(prev_dst, result_16, ir.Imm32(op_sel ? 16 : 0), ir.Imm32(16));
@@ -1122,11 +1122,11 @@ void Translator::SetDstPk(const InstOperand& operand, const pk_type<T>& value) {
     } else {
         if (operand.output_modifier.clamp) {
             if constexpr (is_signed) {
-                auto lower = ir.Imm32(-32768);
-                auto upper = ir.Imm32(32767);
+                IR::U32 lower = ir.Imm32(-32768);
+                IR::U32 upper = ir.Imm32(32767);
                 v = {ir.SClamp(v.first, lower, upper), ir.SClamp(v.second, lower, upper)};
             } else {
-                auto imm = ir.Imm32(0xFFFF);
+                IR::U32 imm = ir.Imm32(0xFFFF);
                 v = {ir.UMin(v.first, imm), ir.UMin(v.second, imm)};
             }
         }
@@ -1152,17 +1152,17 @@ template void Translator::SetDstPk<IR::F32, false>(const InstOperand& operand,
                                                    const pk_type<IR::F32>& value);
 
 void Translator::EmitFetch(const GcnInst& inst) {
-    const auto code_sgpr_base = inst.src[0].code;
+    const u32 code_sgpr_base = inst.src[0].code;
 
     if (emu_settings_get_inline_fetch_shader()) {
         // Translate fetch shader inline using regular buffer bindings; useful for debugging.
-        const auto* code = GetFetchShaderCode(info, code_sgpr_base);
+        const u32* code = GetFetchShaderCode(info, code_sgpr_base);
         GcnCodeSlice slice(code, code + std::numeric_limits<u32>::max());
         GcnDecodeContext decoder;
 
         // Decode and save instructions
         while (!slice.atEnd()) {
-            const auto sub_inst = decoder.decodeInstruction(slice);
+            const Shader::Gcn::GcnInst sub_inst = decoder.decodeInstruction(slice);
             if (sub_inst.opcode == Opcode::S_SETPC_B64) {
                 // Assume we're swapping back to the main shader.
                 break;
@@ -1182,30 +1182,30 @@ void Translator::EmitFetch(const GcnInst& inst) {
 
     if (emu_settings_get_dump_shaders()) {
         using namespace Common::FS;
-        const auto dump_dir = GetUserPath(PathType::ShaderDir) / "dumps";
+        const std::filesystem::path dump_dir = GetUserPath(PathType::ShaderDir) / "dumps";
         if (!Common::FS::Exists(dump_dir)) {
             Common::FS::CreateDirectories(dump_dir);
         }
-        const auto filename =
+        const std::string filename =
             Common::StringFromFormat("vs_0x%016" PRIx64 ".fetch.bin", info.pgm_hash);
-        const auto file = IOFile{dump_dir / filename, FileAccessMode::Create};
-        const auto* code = GetFetchShaderCode(info, code_sgpr_base);
+        const Common::FS::IOFile file = IOFile{dump_dir / filename, FileAccessMode::Create};
+        const u32* code = GetFetchShaderCode(info, code_sgpr_base);
         file.WriteRaw<u8>(code, fetch_data.size);
     }
 
     for (u32 semantic = 0; semantic < fetch_data.attributes.size(); ++semantic) {
-        const auto& attrib = fetch_data.attributes[semantic];
+        Shader::Gcn::VertexAttribute const& attrib = fetch_data.attributes[semantic];
         const IR::Attribute attr{IR::Attribute::Param0 + semantic};
         IR::VectorReg dst_reg{attrib.dest_vgpr};
 
         // Read the V# of the attribute to figure out component number and type.
-        const auto buffer = attrib.GetSharp(info);
-        const auto values =
+        const AmdGpu::Buffer buffer = attrib.GetSharp(info);
+        const Shader::IR::Value values =
             ir.CompositeConstruct(ir.GetAttribute(attr, 0), ir.GetAttribute(attr, 1),
                                   ir.GetAttribute(attr, 2), ir.GetAttribute(attr, 3));
-        const auto converted =
+        const Shader::IR::Value converted =
             IR::ApplyReadNumberConversionVec4(ir, values, buffer.GetNumberConversion());
-        const auto swizzled = ApplySwizzle(ir, converted, buffer.DstSelect());
+        const Shader::IR::Value swizzled = ApplySwizzle(ir, converted, buffer.DstSelect());
         for (u32 i = 0; i < attrib.num_elements; i++) {
             ir.SetVectorReg(dst_reg++, IR::F32{ir.CompositeExtract(swizzled, i)});
         }
@@ -1227,7 +1227,7 @@ void Translator::Translate(IR::Block* block, u32 start_pc, IR::Condition cond,
     }
     ir = IR::IREmitter{*block, block->begin()};
     pc = start_pc;
-    for (const auto& inst : inst_list) {
+    for (const Shader::Gcn::GcnInst& inst : inst_list) {
         pc += inst.length;
 
         // Special case for emitting fetch shader.

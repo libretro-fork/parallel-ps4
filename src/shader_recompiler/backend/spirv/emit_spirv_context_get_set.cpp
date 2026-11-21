@@ -18,12 +18,13 @@ using PointerSize = EmitContext::PointerSize;
 static std::pair<Id, bool> OutputAttrComponentType(EmitContext& ctx, IR::Attribute attr) {
     if (IR::IsParam(attr)) {
         const u32 index{u32(attr) - u32(IR::Attribute::Param0)};
-        const auto& info{ctx.output_params.at(index)};
+        const Shader::Backend::SPIRV::EmitContext::SpirvAttribute& info{
+            ctx.output_params.at(index)};
         return {info.component_type, info.is_integer};
     }
     if (IR::IsMrt(attr)) {
         const u32 index{u32(attr) - u32(IR::Attribute::RenderTarget0)};
-        const auto& info{ctx.frag_outputs.at(index)};
+        const Shader::Backend::SPIRV::EmitContext::SpirvAttribute& info{ctx.frag_outputs.at(index)};
         return {info.component_type, info.is_integer};
     }
     switch (attr) {
@@ -65,7 +66,7 @@ Id EmitReadConst(EmitContext& ctx, IR::Inst* inst, Id addr, Id offset) {
 
 Id EmitReadConstBuffer(EmitContext& ctx, Imm32 handle_imm, Id index) {
     u32 handle = handle_imm;
-    const auto& buffer = ctx.buffers[handle];
+    Shader::Backend::SPIRV::EmitContext::BufferDefinition const& buffer = ctx.buffers[handle];
     if (const Id offset = buffer.Offset(PointerSize::B32); (offset != 0)) {
         index = spv_OpIAdd(&ctx.m, ctx.U32[1], index, offset);
     }
@@ -80,7 +81,8 @@ Id EmitGetAttribute(EmitContext& ctx, IR::Attribute attr, Imm32 comp_imm, Imm32 
     u32 index = index_imm;
     if (IR::IsParam(attr)) {
         const u32 param_index{u32(attr) - u32(IR::Attribute::Param0)};
-        const auto& param{ctx.input_params.at(param_index)};
+        const Shader::Backend::SPIRV::EmitContext::SpirvAttribute& param{
+            ctx.input_params.at(param_index)};
         const Id value = [&] {
             if (param.is_array) {
                 ASSERT(param.num_components > 1);
@@ -283,12 +285,13 @@ void EmitSetAttribute(EmitContext& ctx, IR::Attribute attr, Id value, Imm32 elem
     if (IR::IsParam(attr)) {
         const u32 attr_index{u32(attr) - u32(IR::Attribute::Param0)};
         if (ctx.hw_stage == HwStage::Local) {
-            const auto component_ptr =
+            const uint32_t component_ptr =
                 spv_TypePointer(&ctx.m, u32(SpvStorageClassOutput), ctx.F32[1]);
             return op_store(spv_OpAccessChain2(&ctx.m, component_ptr, ctx.output_attr_array,
                                                ctx.ConstU32(attr_index), ctx.ConstU32(element)));
         } else {
-            const auto& info{ctx.output_params.at(attr_index)};
+            const Shader::Backend::SPIRV::EmitContext::SpirvAttribute& info{
+                ctx.output_params.at(attr_index)};
             ASSERT(info.num_components > 0);
             if (info.num_components == 1) {
                 return op_store(info.id);
@@ -300,7 +303,7 @@ void EmitSetAttribute(EmitContext& ctx, IR::Attribute attr, Id value, Imm32 elem
     }
     if (IR::IsMrt(attr)) {
         const u32 index{u32(attr) - u32(IR::Attribute::RenderTarget0)};
-        const auto& info{ctx.frag_outputs.at(index)};
+        const Shader::Backend::SPIRV::EmitContext::SpirvAttribute& info{ctx.frag_outputs.at(index)};
         if (element < 3 && ctx.runtime_info.hw.fs.color_buffers[index].blend_self_scale) {
             // Emulates GCN's factor-scaled min/max blend: min/max(src*src, dst*dst).
             value = spv_OpFMul(&ctx.m, ctx.F32[1], value, value);
@@ -344,7 +347,7 @@ void EmitSetAttribute(EmitContext& ctx, IR::Attribute attr, Id value, Imm32 elem
 }
 
 Id EmitGetTessGenericAttribute(EmitContext& ctx, Id vertex_index, Id attr_index, Id comp_index) {
-    const auto attr_comp_ptr = spv_TypePointer(&ctx.m, u32(SpvStorageClassInput), ctx.F32[1]);
+    const uint32_t attr_comp_ptr = spv_TypePointer(&ctx.m, u32(SpvStorageClassInput), ctx.F32[1]);
     return spv_OpLoad(&ctx.m, ctx.F32[1],
                       spv_OpAccessChain3(&ctx.m, attr_comp_ptr, ctx.input_attr_array, vertex_index,
                                          attr_index, comp_index));
@@ -352,7 +355,7 @@ Id EmitGetTessGenericAttribute(EmitContext& ctx, Id vertex_index, Id attr_index,
 
 Id EmitReadTcsGenericOuputAttribute(EmitContext& ctx, Id vertex_index, Id attr_index,
                                     Id comp_index) {
-    const auto attr_comp_ptr = spv_TypePointer(&ctx.m, u32(SpvStorageClassOutput), ctx.F32[1]);
+    const uint32_t attr_comp_ptr = spv_TypePointer(&ctx.m, u32(SpvStorageClassOutput), ctx.F32[1]);
     return spv_OpLoad(&ctx.m, ctx.F32[1],
                       spv_OpAccessChain3(&ctx.m, attr_comp_ptr, ctx.output_attr_array, vertex_index,
                                          attr_index, comp_index));
@@ -360,7 +363,7 @@ Id EmitReadTcsGenericOuputAttribute(EmitContext& ctx, Id vertex_index, Id attr_i
 
 void EmitSetTcsGenericAttribute(EmitContext& ctx, Id value, Id attr_index, Id comp_index) {
     // Implied vertex index is invocation_id
-    const auto component_ptr = spv_TypePointer(&ctx.m, u32(SpvStorageClassOutput), ctx.F32[1]);
+    const uint32_t component_ptr = spv_TypePointer(&ctx.m, u32(SpvStorageClassOutput), ctx.F32[1]);
     Id pointer = spv_OpAccessChain3(&ctx.m, component_ptr, ctx.output_attr_array,
                                     spv_OpLoad(&ctx.m, ctx.U32[1], ctx.invocation_id), attr_index,
                                     comp_index);
@@ -407,11 +410,12 @@ void EmitSetPatch(EmitContext& ctx, IR::Patch patch, Id value) {
 
 template <u32 N, PointerType alias>
 static Id EmitLoadBufferB32xN(EmitContext& ctx, IR::Inst* inst, u32 handle, Id address) {
-    const auto& spv_buffer = ctx.buffers[handle];
+    Shader::Backend::SPIRV::EmitContext::BufferDefinition const& spv_buffer = ctx.buffers[handle];
     if (const Id offset = spv_buffer.Offset(PointerSize::B32); (offset != 0)) {
         address = spv_OpIAdd(&ctx.m, ctx.U32[1], address, offset);
     }
-    const auto& data_types = alias == PointerType::U32 ? ctx.U32 : ctx.F32;
+    const Shader::Backend::SPIRV::VectorIds& data_types =
+        alias == PointerType::U32 ? ctx.U32 : ctx.F32;
     const auto [id, pointer_type] = spv_buffer.Alias(alias);
 
     Common::StaticVector<Id, N> ids;
@@ -431,7 +435,7 @@ static Id EmitLoadBufferB32xN(EmitContext& ctx, IR::Inst* inst, u32 handle, Id a
 
 Id EmitLoadBufferU8(EmitContext& ctx, IR::Inst* inst, Imm32 handle_imm, Id address) {
     u32 handle = handle_imm;
-    const auto& spv_buffer = ctx.buffers[handle];
+    Shader::Backend::SPIRV::EmitContext::BufferDefinition const& spv_buffer = ctx.buffers[handle];
     if (const Id offset = spv_buffer.Offset(PointerSize::B8); (offset != 0)) {
         address = spv_OpIAdd(&ctx.m, ctx.U32[1], address, offset);
     }
@@ -443,7 +447,7 @@ Id EmitLoadBufferU8(EmitContext& ctx, IR::Inst* inst, Imm32 handle_imm, Id addre
 
 Id EmitLoadBufferU16(EmitContext& ctx, IR::Inst* inst, Imm32 handle_imm, Id address) {
     u32 handle = handle_imm;
-    const auto& spv_buffer = ctx.buffers[handle];
+    Shader::Backend::SPIRV::EmitContext::BufferDefinition const& spv_buffer = ctx.buffers[handle];
     if (const Id offset = spv_buffer.Offset(PointerSize::B16); (offset != 0)) {
         address = spv_OpIAdd(&ctx.m, ctx.U32[1], address, offset);
     }
@@ -475,7 +479,7 @@ Id EmitLoadBufferU32x4(EmitContext& ctx, IR::Inst* inst, Imm32 handle_imm, Id ad
 
 Id EmitLoadBufferU64(EmitContext& ctx, IR::Inst* inst, Imm32 handle_imm, Id address) {
     u32 handle = handle_imm;
-    const auto& spv_buffer = ctx.buffers[handle];
+    Shader::Backend::SPIRV::EmitContext::BufferDefinition const& spv_buffer = ctx.buffers[handle];
     if (const Id offset = spv_buffer.Offset(PointerSize::B64); (offset != 0)) {
         address = spv_OpIAdd(&ctx.m, ctx.U32[1], address, offset);
     }
@@ -513,11 +517,12 @@ Id EmitLoadBufferFormatF32(EmitContext& ctx, IR::Inst* inst, Imm32 handle_imm, I
 template <u32 N, PointerType alias>
 static void EmitStoreBufferB32xN(EmitContext& ctx, IR::Inst* inst, u32 handle, Id address,
                                  Id value) {
-    const auto& spv_buffer = ctx.buffers[handle];
+    Shader::Backend::SPIRV::EmitContext::BufferDefinition const& spv_buffer = ctx.buffers[handle];
     if (const Id offset = spv_buffer.Offset(PointerSize::B32); (offset != 0)) {
         address = spv_OpIAdd(&ctx.m, ctx.U32[1], address, offset);
     }
-    const auto& data_types = alias == PointerType::U32 ? ctx.U32 : ctx.F32;
+    const Shader::Backend::SPIRV::VectorIds& data_types =
+        alias == PointerType::U32 ? ctx.U32 : ctx.F32;
     const auto [id, pointer_type] = spv_buffer.Alias(alias);
 
     for (u32 i = 0; i < N; i++) {
@@ -532,7 +537,7 @@ static void EmitStoreBufferB32xN(EmitContext& ctx, IR::Inst* inst, u32 handle, I
 
 void EmitStoreBufferU8(EmitContext& ctx, IR::Inst*, Imm32 handle_imm, Id address, Id value) {
     u32 handle = handle_imm;
-    const auto& spv_buffer = ctx.buffers[handle];
+    Shader::Backend::SPIRV::EmitContext::BufferDefinition const& spv_buffer = ctx.buffers[handle];
     if (const Id offset = spv_buffer.Offset(PointerSize::B8); (offset != 0)) {
         address = spv_OpIAdd(&ctx.m, ctx.U32[1], address, offset);
     }
@@ -543,7 +548,7 @@ void EmitStoreBufferU8(EmitContext& ctx, IR::Inst*, Imm32 handle_imm, Id address
 
 void EmitStoreBufferU16(EmitContext& ctx, IR::Inst*, Imm32 handle_imm, Id address, Id value) {
     u32 handle = handle_imm;
-    const auto& spv_buffer = ctx.buffers[handle];
+    Shader::Backend::SPIRV::EmitContext::BufferDefinition const& spv_buffer = ctx.buffers[handle];
     if (const Id offset = spv_buffer.Offset(PointerSize::B16); (offset != 0)) {
         address = spv_OpIAdd(&ctx.m, ctx.U32[1], address, offset);
     }
@@ -577,7 +582,7 @@ void EmitStoreBufferU32x4(EmitContext& ctx, IR::Inst* inst, Imm32 handle_imm, Id
 
 void EmitStoreBufferU64(EmitContext& ctx, IR::Inst*, Imm32 handle_imm, Id address, Id value) {
     u32 handle = handle_imm;
-    const auto& spv_buffer = ctx.buffers[handle];
+    Shader::Backend::SPIRV::EmitContext::BufferDefinition const& spv_buffer = ctx.buffers[handle];
     if (const Id offset = spv_buffer.Offset(PointerSize::B64); (offset != 0)) {
         address = spv_OpIAdd(&ctx.m, ctx.U32[1], address, offset);
     }

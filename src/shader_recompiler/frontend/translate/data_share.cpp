@@ -267,7 +267,7 @@ void Translator::DS_READ(int bit_size, bool is_signed, bool is_pair, bool stride
         const IR::U32 addr0 = ir.IAdd(addr, ir.Imm32(u32(inst.control.ds.offset0 * adj)));
         const IR::Value data0 = ir.LoadShared(bit_size, is_signed, addr0, is_gds);
         if (bit_size == 64) {
-            const auto vector = ir.UnpackUint2x32(IR::U64{data0});
+            const Shader::IR::Value vector = ir.UnpackUint2x32(IR::U64{data0});
             ir.SetVectorReg(dst_reg++, IR::U32{ir.CompositeExtract(vector, 0)});
             ir.SetVectorReg(dst_reg++, IR::U32{ir.CompositeExtract(vector, 1)});
         } else if (bit_size == 32) {
@@ -278,7 +278,7 @@ void Translator::DS_READ(int bit_size, bool is_signed, bool is_pair, bool stride
         const IR::U32 addr1 = ir.IAdd(addr, ir.Imm32(u32(inst.control.ds.offset1 * adj)));
         const IR::Value data1 = ir.LoadShared(bit_size, is_signed, addr1, is_gds);
         if (bit_size == 64) {
-            const auto vector = ir.UnpackUint2x32(IR::U64{data1});
+            const Shader::IR::Value vector = ir.UnpackUint2x32(IR::U64{data1});
             ir.SetVectorReg(dst_reg++, IR::U32{ir.CompositeExtract(vector, 0)});
             ir.SetVectorReg(dst_reg++, IR::U32{ir.CompositeExtract(vector, 1)});
         } else if (bit_size == 32) {
@@ -290,7 +290,7 @@ void Translator::DS_READ(int bit_size, bool is_signed, bool is_pair, bool stride
         const IR::U32 addr0 = ir.IAdd(addr, ir.Imm32(offset));
         const IR::Value data = ir.LoadShared(bit_size, is_signed, addr0, is_gds);
         if (bit_size == 64) {
-            const auto vector = ir.UnpackUint2x32(IR::U64{data});
+            const Shader::IR::Value vector = ir.UnpackUint2x32(IR::U64{data});
             ir.SetVectorReg(dst_reg, IR::U32{ir.CompositeExtract(vector, 0)});
             ir.SetVectorReg(dst_reg + 1, IR::U32{ir.CompositeExtract(vector, 1)});
         } else if (bit_size == 32) {

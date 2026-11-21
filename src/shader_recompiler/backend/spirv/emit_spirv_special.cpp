@@ -115,7 +115,8 @@ void EmitEndPrimitive(EmitContext& ctx, const IR::Value& stream) {
 void EmitDebugPrint(EmitContext& ctx, IR::Inst* inst, Id fmt, Id arg0, Id arg1, Id arg2, Id arg3) {
     IR::DebugPrintFlags flags = inst->Flags<IR::DebugPrintFlags>();
     std::array<Id, IR::DEBUGPRINT_NUM_FORMAT_ARGS> fmt_args = {arg0, arg1, arg2, arg3};
-    auto fmt_args_span = std::span<Id>(fmt_args.begin(), fmt_args.begin() + flags.num_args);
+    std::span<unsigned int> fmt_args_span =
+        std::span<Id>(fmt_args.begin(), fmt_args.begin() + flags.num_args);
     spv_OpDebugPrintf(&ctx.m, fmt, fmt_args_span.data(), u32(fmt_args_span.size()));
 }
 

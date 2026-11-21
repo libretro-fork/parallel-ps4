@@ -12,7 +12,7 @@ namespace Shader::Optimization {
 
 void SsaRepairPass(IR::Program& program) {
     // Compute dominance on the current CFG
-    auto& post_order = program.post_order_blocks;
+    std::vector<Shader::IR::Block*>& post_order = program.post_order_blocks;
     IR::ComputeDominators(post_order);
     IR::ComputeDominanceFrontiers(post_order);
 
@@ -23,7 +23,7 @@ void SsaRepairPass(IR::Program& program) {
                 continue;
             }
 
-            for (const auto& use : inst.Uses()) {
+            for (Shader::IR::Use const& use : inst.Uses()) {
                 IR::Block* use_block = use.user->GetParent();
                 if (!Dominates(block, use_block)) {
                     invalid_uses.push_back(use);

@@ -9,7 +9,7 @@ namespace Shader::Optimization {
 
 static void LowerCmpClass(IR::Block& block, IR::Inst& inst) {
     ASSERT_MSG(inst.Arg(1).IsImmediate(), "Unable to resolve compare operation");
-    const auto class_mask = static_cast<IR::FloatClassFunc>(inst.Arg(1).U32());
+    const IR::FloatClassFunc class_mask = static_cast<IR::FloatClassFunc>(inst.Arg(1).U32());
     if ((class_mask & IR::FloatClassFunc::NaN) == IR::FloatClassFunc::NaN) {
         inst.ReplaceOpcode(IR::Opcode::FPIsNan32);
     } else if ((class_mask & IR::FloatClassFunc::Infinity) == IR::FloatClassFunc::Infinity) {
@@ -37,7 +37,7 @@ static void LowerPackedAncillary(IR::Inst& value) {
         const u32 bits = inst->Arg(2).U32();
         IR::IREmitter ir{*inst->GetParent(), IR::Block::InstructionList::s_iterator_to(*inst)};
         if (offset >= 8 && offset + bits <= 12) {
-            const auto sample_index = ir.GetAttributeU32(IR::Attribute::SampleIndex);
+            const IR::U32 sample_index = ir.GetAttributeU32(IR::Attribute::SampleIndex);
             if (offset == 8 && bits == 4) {
                 inst->ReplaceUsesWithAndRemove(sample_index);
             } else {
@@ -45,7 +45,7 @@ static void LowerPackedAncillary(IR::Inst& value) {
                     ir.BitFieldExtract(sample_index, ir.Imm32(offset - 8), ir.Imm32(bits)));
             }
         } else if (offset >= 16 && offset + bits <= 27) {
-            const auto mrt_index = ir.GetAttributeU32(IR::Attribute::RenderTargetIndex);
+            const IR::U32 mrt_index = ir.GetAttributeU32(IR::Attribute::RenderTargetIndex);
             if (offset == 16 && bits == 11) {
                 inst->ReplaceUsesWithAndRemove(mrt_index);
             } else {

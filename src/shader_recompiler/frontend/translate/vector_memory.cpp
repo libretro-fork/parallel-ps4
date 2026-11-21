@@ -211,7 +211,7 @@ void Translator::EmitVectorMemory(const GcnInst& inst) {
 
 void Translator::BUFFER_LOAD(u32 num_dwords, bool is_inst_typed, bool is_buffer_typed,
                              const GcnInst& inst, u32 scalar_width, bool is_signed) {
-    const auto& mubuf = inst.control.mubuf;
+    const Shader::Gcn::InstControlMUBUF& mubuf = inst.control.mubuf;
     const IR::VectorReg vaddr{inst.src[0].code};
     const IR::ScalarReg sharp{inst.src[2].code * 4};
 
@@ -229,7 +229,7 @@ void Translator::BUFFER_LOAD(u32 num_dwords, bool is_inst_typed, bool is_buffer_
     buffer_info.system_coherent.Assign(mubuf.slc);
     buffer_info.typed.Assign(is_inst_typed || is_buffer_typed);
     if (is_inst_typed) {
-        const auto& mtbuf = inst.control.mtbuf;
+        const Shader::Gcn::InstControlMTBUF& mtbuf = inst.control.mtbuf;
         buffer_info.inst_data_fmt.Assign(static_cast<AmdGpu::DataFormat>(mtbuf.dfmt));
         buffer_info.inst_num_fmt.Assign(static_cast<AmdGpu::NumberFormat>(mtbuf.nfmt));
     } else {
@@ -279,7 +279,7 @@ void Translator::BUFFER_LOAD(u32 num_dwords, bool is_inst_typed, bool is_buffer_
 
 void Translator::BUFFER_STORE(u32 num_dwords, bool is_inst_typed, bool is_buffer_typed,
                               const GcnInst& inst, u32 scalar_width) {
-    const auto& mubuf = inst.control.mubuf;
+    const Shader::Gcn::InstControlMUBUF& mubuf = inst.control.mubuf;
     const IR::VectorReg vaddr{inst.src[0].code};
     const IR::ScalarReg sharp{inst.src[2].code * 4};
 
@@ -297,7 +297,7 @@ void Translator::BUFFER_STORE(u32 num_dwords, bool is_inst_typed, bool is_buffer
     buffer_info.system_coherent.Assign(mubuf.slc);
     buffer_info.typed.Assign(is_inst_typed || is_buffer_typed);
     if (is_inst_typed) {
-        const auto& mtbuf = inst.control.mtbuf;
+        const Shader::Gcn::InstControlMTBUF& mtbuf = inst.control.mtbuf;
         buffer_info.inst_data_fmt.Assign(static_cast<AmdGpu::DataFormat>(mtbuf.dfmt));
         buffer_info.inst_num_fmt.Assign(static_cast<AmdGpu::NumberFormat>(mtbuf.nfmt));
     } else {
@@ -312,7 +312,7 @@ void Translator::BUFFER_STORE(u32 num_dwords, bool is_inst_typed, bool is_buffer
 
     Common::StaticVector<IR::Value, 4> comps;
     for (u32 i = 0; i < num_dwords; i++) {
-        const auto src_reg_i = src_reg + i;
+        Shader::IR::VectorReg const src_reg_i = src_reg + i;
         if (buffer_info.typed) {
             comps.push_back(ir.GetVectorReg<IR::F32>(src_reg_i));
         } else {
@@ -347,7 +347,7 @@ void Translator::BUFFER_STORE(u32 num_dwords, bool is_inst_typed, bool is_buffer
 
 template <typename T>
 void Translator::BUFFER_ATOMIC(AtomicOp op, const GcnInst& inst) {
-    const auto& mubuf = inst.control.mubuf;
+    const Shader::Gcn::InstControlMUBUF& mubuf = inst.control.mubuf;
     const IR::VectorReg vaddr{inst.src[0].code};
     const IR::VectorReg vdata{inst.src[1].code};
     const IR::ScalarReg srsrc{inst.src[2].code * 4};
@@ -436,7 +436,7 @@ void Translator::BUFFER_ATOMIC(AtomicOp op, const GcnInst& inst) {
 // MIMG
 
 void Translator::IMAGE_LOAD(bool has_mip, const GcnInst& inst) {
-    const auto& mimg = inst.control.mimg;
+    const Shader::Gcn::InstControlMIMG& mimg = inst.control.mimg;
     IR::VectorReg addr_reg{inst.src[0].code};
     IR::VectorReg dest_reg{inst.dst[0].code};
     const IR::ScalarReg tsharp_reg{inst.src[2].code * 4};
@@ -471,7 +471,7 @@ void Translator::IMAGE_LOAD(bool has_mip, const GcnInst& inst) {
 }
 
 void Translator::IMAGE_STORE(bool has_mip, const GcnInst& inst) {
-    const auto& mimg = inst.control.mimg;
+    const Shader::Gcn::InstControlMIMG& mimg = inst.control.mimg;
     IR::VectorReg addr_reg{inst.src[0].code};
     IR::VectorReg data_reg{inst.dst[0].code};
     const IR::ScalarReg tsharp_reg{inst.src[2].code * 4};
@@ -507,10 +507,11 @@ void Translator::IMAGE_STORE(bool has_mip, const GcnInst& inst) {
 }
 
 void Translator::IMAGE_GET_RESINFO(const GcnInst& inst) {
-    const auto& mimg = inst.control.mimg;
+    const Shader::Gcn::InstControlMIMG& mimg = inst.control.mimg;
     IR::VectorReg dst_reg{inst.dst[0].code};
     const IR::ScalarReg tsharp_reg{inst.src[2].code * 4};
-    const auto flags = ImageResFlags(inst.control.mimg.dmask);
+    const Common::Flags<Shader::Gcn::ImageResComponent> flags =
+        ImageResFlags(inst.control.mimg.dmask);
     const bool has_mips = flags.test(ImageResComponent::MipCount);
     const IR::U32 lod = ir.GetVectorReg(IR::VectorReg(inst.src[0].code));
     const IR::Value tsharp_low =
@@ -545,7 +546,7 @@ void Translator::IMAGE_GET_RESINFO(const GcnInst& inst) {
 }
 
 void Translator::IMAGE_ATOMIC(AtomicOp op, const GcnInst& inst) {
-    const auto& mimg = inst.control.mimg;
+    const Shader::Gcn::InstControlMIMG& mimg = inst.control.mimg;
     IR::VectorReg val_reg{inst.dst[0].code};
     IR::VectorReg addr_reg{inst.src[0].code};
     const IR::ScalarReg tsharp_reg{inst.src[2].code * 4};
@@ -612,8 +613,8 @@ void Translator::IMAGE_ATOMIC(AtomicOp op, const GcnInst& inst) {
 IR::Value EmitImageSample(IR::IREmitter& ir, const GcnInst& inst, const IR::ScalarReg tsharp_reg,
                           const IR::ScalarReg sampler_reg, const IR::VectorReg addr_reg,
                           bool gather, u32 pc) {
-    const auto& mimg = inst.control.mimg;
-    const auto flags = MimgModifierFlags(mimg.mod);
+    const Shader::Gcn::InstControlMIMG& mimg = inst.control.mimg;
+    const Common::Flags<Shader::Gcn::MimgModifier> flags = MimgModifierFlags(mimg.mod);
 
     IR::TextureInstInfo info{};
     info.is_depth.Assign(flags.test(MimgModifier::Pcf));
@@ -696,12 +697,12 @@ IR::Value EmitImageSample(IR::IREmitter& ir, const GcnInst& inst, const IR::Scal
 }
 
 void Translator::IMAGE_SAMPLE(const GcnInst& inst) {
-    const auto& mimg = inst.control.mimg;
+    const Shader::Gcn::InstControlMIMG& mimg = inst.control.mimg;
     IR::VectorReg addr_reg{inst.src[0].code};
     IR::VectorReg dest_reg{inst.dst[0].code};
     const IR::ScalarReg tsharp_reg{inst.src[2].code * 4};
     const IR::ScalarReg sampler_reg{inst.src[3].code * 4};
-    const auto flags = MimgModifierFlags(mimg.mod);
+    const Common::Flags<Shader::Gcn::MimgModifier> flags = MimgModifierFlags(mimg.mod);
 
     const IR::Value texel = EmitImageSample(ir, inst, tsharp_reg, sampler_reg, addr_reg, false, pc);
     for (u32 i = 0; i < 4; i++) {
@@ -719,12 +720,12 @@ void Translator::IMAGE_SAMPLE(const GcnInst& inst) {
 }
 
 void Translator::IMAGE_GATHER(const GcnInst& inst) {
-    const auto& mimg = inst.control.mimg;
+    const Shader::Gcn::InstControlMIMG& mimg = inst.control.mimg;
     IR::VectorReg addr_reg{inst.src[0].code};
     IR::VectorReg dest_reg{inst.dst[0].code};
     const IR::ScalarReg tsharp_reg{inst.src[2].code * 4};
     const IR::ScalarReg sampler_reg{inst.src[3].code * 4};
-    const auto flags = MimgModifierFlags(mimg.mod);
+    const Common::Flags<Shader::Gcn::MimgModifier> flags = MimgModifierFlags(mimg.mod);
 
     // For gather4 instructions dmask selects which component to read and must have
     // only one bit set to 1
@@ -740,7 +741,7 @@ void Translator::IMAGE_GATHER(const GcnInst& inst) {
 }
 
 void Translator::IMAGE_GET_LOD(const GcnInst& inst) {
-    const auto& mimg = inst.control.mimg;
+    const Shader::Gcn::InstControlMIMG& mimg = inst.control.mimg;
     IR::VectorReg dst_reg{inst.dst[0].code};
     IR::VectorReg addr_reg{inst.src[0].code};
     const IR::ScalarReg tsharp_reg{inst.src[2].code * 4};

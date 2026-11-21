@@ -621,7 +621,7 @@ void Translator::S_SAVEEXEC_B64(NegateMode negate, bool is_or, const GcnInst& in
 }
 
 void Translator::S_ABS_I32(const GcnInst& inst) {
-    const auto result = ir.IAbs(GetSrc(inst.src[0]));
+    const IR::U32 result = ir.IAbs(GetSrc(inst.src[0]));
     SetDst(inst.dst[0], result);
     ir.SetScc(ir.INotEqual(result, ir.Imm32(0)));
 }

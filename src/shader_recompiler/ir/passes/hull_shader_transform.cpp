@@ -338,7 +338,7 @@ static IR::U32 TryOptimizeAddressModulo(IR::U32 addr, u32 stride, IR::IREmitter&
     std::vector<IR::U32> addends;
     if (TryOptimizeAddendInModulo(addr, stride, addends)) {
         addr = ir.Imm32(0);
-        for (auto& addend : addends) {
+        for (IR::U32& addend : addends) {
             addr = ir.IAdd(addr, addend);
         }
     }
@@ -373,7 +373,7 @@ void HullShaderTransform(IR::Program& program, const RuntimeInfo& runtime_info) 
 
     for (IR::Block* block : program.blocks) {
         for (IR::Inst& inst : block->Instructions()) {
-            const auto opcode = inst.GetOpcode();
+            const IR::Opcode opcode = inst.GetOpcode();
             switch (opcode) {
             case IR::Opcode::StoreBufferU32:
             case IR::Opcode::StoreBufferU32x2:
@@ -386,7 +386,7 @@ void HullShaderTransform(IR::Program& program, const RuntimeInfo& runtime_info) 
                     break;
                 }
 
-                const auto info = inst.Flags<IR::BufferInstInfo>();
+                Shader::IR::BufferInstInfo const info = inst.Flags<IR::BufferInstInfo>();
                 IR::IREmitter ir{*block, IR::Block::InstructionList::s_iterator_to(inst)};
 
                 IR::Value voffset;
@@ -401,7 +401,7 @@ void HullShaderTransform(IR::Program& program, const RuntimeInfo& runtime_info) 
                 const u32 num_dwords = u32(opcode) - u32(IR::Opcode::StoreBufferU32) + 1;
 
                 const auto GetValue = [&](IR::Value data) -> IR::F32 {
-                    if (auto* inst = data.TryInst();
+                    if (IR::Inst* inst = data.TryInst();
                         inst && inst->GetOpcode() == IR::Opcode::BitCastU32F32) {
                         return IR::F32{inst->Arg(0)};
                     }
@@ -440,7 +440,7 @@ void HullShaderTransform(IR::Program& program, const RuntimeInfo& runtime_info) 
                     ir.SetPatch(get_factor_attr(gcn_factor_idx), GetValue(data));
                     break;
                 }
-                auto* inst = data.TryInst();
+                IR::Inst* inst = data.TryInst();
                 ASSERT(inst && (inst->GetOpcode() == IR::Opcode::CompositeConstructU32x2 ||
                                 inst->GetOpcode() == IR::Opcode::CompositeConstructU32x3 ||
                                 inst->GetOpcode() == IR::Opcode::CompositeConstructU32x4));
@@ -487,7 +487,7 @@ void HullShaderTransform(IR::Program& program, const RuntimeInfo& runtime_info) 
                 if (num_dwords == 1) {
                     SetOutput(addr, IR::U32{data}, region, 0);
                 } else {
-                    for (auto i = 0; i < num_dwords; i++) {
+                    for (int i = 0; i < num_dwords; i++) {
                         SetOutput(addr, IR::U32{ir.CompositeExtract(data, i)}, region, i);
                     }
                 }
@@ -513,7 +513,7 @@ void HullShaderTransform(IR::Program& program, const RuntimeInfo& runtime_info) 
                         ReadTessControlPointAttribute(addr, stride, ir, 0, is_tcs_output_read));
                 } else {
                     Common::StaticVector<IR::Value, 4> read_components;
-                    for (auto i = 0; i < num_dwords; i++) {
+                    for (int i = 0; i < num_dwords; i++) {
                         const IR::F32 component =
                             ReadTessControlPointAttribute(addr, stride, ir, i, is_tcs_output_read);
                         read_components.push_back(ir.BitCast<IR::U32>(component));
@@ -548,7 +548,7 @@ void HullShaderTransform(IR::Program& program, const RuntimeInfo& runtime_info) 
         IR::IREmitter ir{*entry_block, it};
 
         u32 num_attributes = Common::AlignUp(runtime_info.sw.tcs.ls_stride, 16) >> 4;
-        const auto invocation_id = ir.GetAttributeU32(IR::Attribute::InvocationId);
+        const IR::U32 invocation_id = ir.GetAttributeU32(IR::Attribute::InvocationId);
         for (u32 attr_no = 0; attr_no < num_attributes; attr_no++) {
             for (u32 comp = 0; comp < 4; comp++) {
                 IR::F32 attr_read =
@@ -572,7 +572,7 @@ void DomainShaderTransform(const IR::Program& program, const RuntimeInfo& runtim
     for (IR::Block* block : program.blocks) {
         for (IR::Inst& inst : block->Instructions()) {
             IR::IREmitter ir{*block, IR::Block::InstructionList::s_iterator_to(inst)};
-            const auto opcode = inst.GetOpcode();
+            const IR::Opcode opcode = inst.GetOpcode();
             switch (inst.GetOpcode()) {
             case IR::Opcode::LoadSharedU32:
             case IR::Opcode::LoadSharedU64: {
@@ -593,7 +593,7 @@ void DomainShaderTransform(const IR::Program& program, const RuntimeInfo& runtim
                     attr_read = ir.BitCast<IR::U32>(GetInput(addr, 0));
                 } else {
                     Common::StaticVector<IR::Value, 4> read_components;
-                    for (auto i = 0; i < num_dwords; i++) {
+                    for (int i = 0; i < num_dwords; i++) {
                         const IR::F32 component = GetInput(addr, i);
                         read_components.push_back(ir.BitCast<IR::U32>(component));
                     }
@@ -616,14 +616,14 @@ void TessellationPreprocess(IR::Program& program, RuntimeInfo& runtime_info) {
     // Find the TessellationDataConstantBuffer V#
     for (IR::Block* block : program.blocks) {
         for (IR::Inst& inst : block->Instructions()) {
-            auto found_tess_consts_sharp = [&]() -> bool {
+            bool found_tess_consts_sharp = [&]() -> bool {
                 switch (inst.GetOpcode()) {
                 case IR::Opcode::LoadSharedU32:
                 case IR::Opcode::LoadSharedU64:
                 case IR::Opcode::WriteSharedU32:
                 case IR::Opcode::WriteSharedU64: {
                     IR::Value addr = inst.Arg(0);
-                    auto read_const_buffer = IR::BreadthFirstSearch(
+                    std::optional<Shader::IR::Inst*> read_const_buffer = IR::BreadthFirstSearch(
                         addr, [](IR::Inst* maybe_tess_const) -> std::optional<IR::Inst*> {
                             if (maybe_tess_const->GetOpcode() == IR::Opcode::ReadConstBuffer) {
                                 return maybe_tess_const;
@@ -631,7 +631,8 @@ void TessellationPreprocess(IR::Program& program, RuntimeInfo& runtime_info) {
                             return std::nullopt;
                         });
                     if (read_const_buffer) {
-                        auto sharp_location = FindTessConstantSharp(read_const_buffer.value());
+                        std::optional<TessSharpLocation> sharp_location =
+                            FindTessConstantSharp(read_const_buffer.value());
                         if (sharp_location) {
                             if (info.tess_consts_dword_offset >= 0) {
                                 // Its possible theres a readconstbuffer that contributes to an
@@ -670,7 +671,7 @@ void TessellationPreprocess(IR::Program& program, RuntimeInfo& runtime_info) {
     for (IR::Block* block : program.blocks) {
         for (IR::Inst& inst : block->Instructions()) {
             if (inst.GetOpcode() == IR::Opcode::ReadConstBuffer) {
-                auto sharp_location = FindTessConstantSharp(&inst);
+                std::optional<TessSharpLocation> sharp_location = FindTessConstantSharp(&inst);
                 if (sharp_location && sharp_location->ptr_base == info.tess_consts_ptr_base &&
                     sharp_location->dword_off == info.tess_consts_dword_offset) {
                     // The shader is reading from the TessConstants V#
@@ -682,7 +683,8 @@ void TessellationPreprocess(IR::Program& program, RuntimeInfo& runtime_info) {
                     ASSERT(off_dw <=
                            static_cast<u32>(TessConstantAttribute::FirstEdgeTessFactorIndex));
 
-                    auto tess_const_attr = static_cast<TessConstantAttribute>(off_dw);
+                    Shader::TessConstantAttribute tess_const_attr =
+                        static_cast<TessConstantAttribute>(off_dw);
                     switch (tess_const_attr) {
                     case TessConstantAttribute::LsStride:
                         // If not, we may need to make this runtime state for TES

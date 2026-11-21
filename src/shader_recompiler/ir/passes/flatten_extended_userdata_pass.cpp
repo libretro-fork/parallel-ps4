@@ -108,13 +108,13 @@ namespace {
 static void DumpSrtProgram(const Shader::Info& info, const u8* code, size_t codesize) {
     using namespace Common::FS;
 
-    const auto dump_dir = GetUserPath(PathType::ShaderDir) / "dumps";
+    const std::filesystem::path dump_dir = GetUserPath(PathType::ShaderDir) / "dumps";
     if (!Common::FS::Exists(dump_dir)) {
         Common::FS::CreateDirectories(dump_dir);
     }
-    const auto filename = Common::StringFromFormat("%s_0x%016" PRIx64 ".srtprogram.txt",
-                                                   Shader::NameOf(info.hw_stage), info.pgm_hash);
-    const auto file = IOFile{dump_dir / filename, FileAccessMode::Create};
+    const std::string filename = Common::StringFromFormat(
+        "%s_0x%016" PRIx64 ".srtprogram.txt", Shader::NameOf(info.hw_stage), info.pgm_hash);
+    const Common::FS::IOFile file = IOFile{dump_dir / filename, FileAccessMode::Create};
 
     const u8* const end = code + codesize;
     for (const u8* ip = code; ip < end;) {
@@ -201,10 +201,10 @@ struct PassInfo {
             if (a.IsImmediate() && b.IsImmediate()) {
                 return a.U32() < b.U32();
             } else if (!a.IsImmediate() && !b.IsImmediate()) {
-                auto a_inst = a.Inst();
-                auto b_inst = b.Inst();
-                auto a_block = a_inst->GetParent();
-                auto b_block = b_inst->GetParent();
+                IR::Inst* a_inst = a.Inst();
+                IR::Inst* b_inst = b.Inst();
+                IR::Block* a_block = a_inst->GetParent();
+                IR::Block* b_block = b_inst->GetParent();
                 if (a_block != b_block) {
                     return a_block < b_block; // Sort by block address
                 }
@@ -262,7 +262,7 @@ namespace {
 
 static inline u16 GetFlatbufOffset(const IR::Inst* inst) {
     if (inst->GetOpcode() == IR::Opcode::ReadConstBuffer) {
-        auto inst_info = inst->Flags<IR::BufferInstInfo>();
+        Shader::IR::BufferInstInfo inst_info = inst->Flags<IR::BufferInstInfo>();
         return inst_info.flatbuf_off_dw;
     }
     if (inst->GetOpcode() == IR::Opcode::ReadConst) {
@@ -273,7 +273,7 @@ static inline u16 GetFlatbufOffset(const IR::Inst* inst) {
 
 static inline void SetFlatbufOffset(IR::Inst* inst, u16 offset) {
     if (inst->GetOpcode() == IR::Opcode::ReadConstBuffer) {
-        auto inst_info = inst->Flags<IR::BufferInstInfo>();
+        Shader::IR::BufferInstInfo inst_info = inst->Flags<IR::BufferInstInfo>();
         inst_info.flatbuf_off_dw.Assign(offset);
         inst->SetFlags(inst_info);
         return;
@@ -572,7 +572,7 @@ static bool IsAllowedOffsetInstruction(const IR::Inst* inst) {
 
 static bool ComputeOffset(x64_code_t* c, int reg, PassInfo& pass_info, const IR::Value& off_dw) {
     ASSERT(reg != X64_RCX && reg != X64_RDX);
-    auto inst = off_dw.Inst();
+    IR::Inst* inst = off_dw.Inst();
     switch (inst->GetOpcode()) {
     case IR::Opcode::GetUserData:
         x64_mov_rm(c, 32, reg, x64_m(X64_RSI, (static_cast<u32>(inst->Arg(0).ScalarReg()) << 2)));
@@ -710,7 +710,7 @@ static void GenerateSrtProgram(Info& info, PassInfo& pass_info) {
     if (false) {
 #endif
         g_srt_codegen_start = x64_curr(c);
-        auto* signals = Core::Signals::Instance();
+        Core::SignalDispatch* signals = Core::Signals::Instance();
         // Call after the memory invalidation handler
         constexpr u32 priority = 1;
         signals->RegisterAccessViolationHandler(SrtWalkerSignalHandler, priority);
@@ -752,7 +752,7 @@ static void GenerateSrtProgram(Info& info, PassInfo& pass_info) {
 }
 
 static bool IsReadConstSource(const IR::Value base) {
-    auto* inst = base.TryInst();
+    IR::Inst* inst = base.TryInst();
     if (!inst) {
         return false;
     }
@@ -824,7 +824,7 @@ void SimplifyReadConstAddressAdd(IR::Inst& inst) {
 } // Anonymous namespace
 
 void FlattenExtendedUserdataPass(IR::Program& program) {
-    auto& post_order = program.post_order_blocks;
+    std::vector<Shader::IR::Block*>& post_order = program.post_order_blocks;
     PassInfo pass_info;
 
     // traverse at end and assign offsets to duplicate readconsts, using
@@ -843,7 +843,7 @@ void FlattenExtendedUserdataPass(IR::Program& program) {
             if (inst.GetOpcode() == IR::Opcode::ReadConstBuffer) {
                 // Only flatten ReadConstBuffer if it was marked as a sharp source in the
                 // resource discovery pass
-                auto inst_info = inst.Flags<IR::BufferInstInfo>();
+                Shader::IR::BufferInstInfo inst_info = inst.Flags<IR::BufferInstInfo>();
                 if (!inst_info.sharp_source) {
                     continue;
                 }
@@ -853,7 +853,7 @@ void FlattenExtendedUserdataPass(IR::Program& program) {
 
             all_readconsts.push_back(&inst);
 
-            auto offset = inst.Arg(1);
+            Shader::IR::Value offset = inst.Arg(1);
             if (offset.IsImmediate()) {
                 continue;
             }
@@ -864,12 +864,12 @@ void FlattenExtendedUserdataPass(IR::Program& program) {
                 queue.pop();
 
                 if (inst->GetOpcode() == IR::Opcode::ReadConstBuffer) {
-                    auto buffer_inst_info = inst->Flags<IR::BufferInstInfo>();
+                    Shader::IR::BufferInstInfo buffer_inst_info = inst->Flags<IR::BufferInstInfo>();
                     if (!buffer_inst_info.sharp_source.Value()) {
                         all_readconsts.push_back(inst);
-                        auto offset = inst->Arg(1);
+                        Shader::IR::Value offset = inst->Arg(1);
                         if (!offset.IsImmediate()) {
-                            auto arg_inst = offset.Inst();
+                            IR::Inst* arg_inst = offset.Inst();
                             if (std::ranges::find(visited, arg_inst) == visited.end()) {
                                 visited.push_back(arg_inst);
                                 queue.push(arg_inst);
@@ -898,14 +898,14 @@ void FlattenExtendedUserdataPass(IR::Program& program) {
         }
     }
 
-    for (auto inst : all_readconsts) {
+    for (Shader::IR::Inst* inst : all_readconsts) {
         if (pass_info.DeduplicateInstruction(inst) != inst) {
             // This is a duplicate of a readconst we've already visited
             continue;
         }
 
         IR::Inst* base = inst->Arg(0).Inst();
-        if (auto* inst = base->Arg(0).TryInst();
+        if (IR::Inst* inst = base->Arg(0).TryInst();
             inst && inst->GetOpcode() == IR::Opcode::ReadFirstLane) {
             continue;
         }

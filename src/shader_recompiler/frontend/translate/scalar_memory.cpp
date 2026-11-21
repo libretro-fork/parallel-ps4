@@ -40,7 +40,7 @@ void Translator::EmitScalarMemory(const GcnInst& inst) {
 // SMRD
 
 void Translator::S_LOAD_DWORD(int num_dwords, const GcnInst& inst) {
-    const auto& smrd = inst.control.smrd;
+    const Shader::Gcn::InstControlSMRD& smrd = inst.control.smrd;
     const IR::ScalarReg sbase{inst.src[0].code * 2};
     const IR::U32 dword_offset = [&] -> IR::U32 {
         if (smrd.imm) {
@@ -61,7 +61,7 @@ void Translator::S_LOAD_DWORD(int num_dwords, const GcnInst& inst) {
 }
 
 void Translator::S_BUFFER_LOAD_DWORD(int num_dwords, const GcnInst& inst) {
-    const auto& smrd = inst.control.smrd;
+    const Shader::Gcn::InstControlSMRD& smrd = inst.control.smrd;
     const IR::ScalarReg sbase{inst.src[0].code * 2};
     const IR::U32 dword_offset = [&] -> IR::U32 {
         if (smrd.imm) {

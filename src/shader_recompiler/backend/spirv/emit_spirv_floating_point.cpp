@@ -207,22 +207,22 @@ Id EmitFPFract64(EmitContext& ctx, Id value) {
 }
 
 Id EmitFPFrexpSig32(EmitContext& ctx, Id value) {
-    const auto frexp = spv_OpFrexpStruct(&ctx.m, ctx.frexp_result_f32, value);
+    const uint32_t frexp = spv_OpFrexpStruct(&ctx.m, ctx.frexp_result_f32, value);
     return spv_OpCompositeExtract1(&ctx.m, ctx.F32[1], frexp, 0);
 }
 
 Id EmitFPFrexpSig64(EmitContext& ctx, Id value) {
-    const auto frexp = spv_OpFrexpStruct(&ctx.m, ctx.frexp_result_f64, value);
+    const uint32_t frexp = spv_OpFrexpStruct(&ctx.m, ctx.frexp_result_f64, value);
     return spv_OpCompositeExtract1(&ctx.m, ctx.F64[1], frexp, 0);
 }
 
 Id EmitFPFrexpExp32(EmitContext& ctx, Id value) {
-    const auto frexp = spv_OpFrexpStruct(&ctx.m, ctx.frexp_result_f32, value);
+    const uint32_t frexp = spv_OpFrexpStruct(&ctx.m, ctx.frexp_result_f32, value);
     return spv_OpBitcast(&ctx.m, ctx.U32[1], spv_OpCompositeExtract1(&ctx.m, ctx.S32[1], frexp, 1));
 }
 
 Id EmitFPFrexpExp64(EmitContext& ctx, Id value) {
-    const auto frexp = spv_OpFrexpStruct(&ctx.m, ctx.frexp_result_f64, value);
+    const uint32_t frexp = spv_OpFrexpStruct(&ctx.m, ctx.frexp_result_f64, value);
     return spv_OpBitcast(&ctx.m, ctx.U32[1], spv_OpCompositeExtract1(&ctx.m, ctx.S32[1], frexp, 1));
 }
 

@@ -10,34 +10,34 @@ namespace Shader::Backend::SPIRV {
 
 template <bool is_float>
 static Id FixImageCoords(EmitContext& ctx, Id coords, AmdGpu::ImageType image_type) {
-    const auto coord_type = is_float ? ctx.F32 : ctx.U32;
-    const auto zero = is_float ? ctx.f32_zero_value : ctx.u32_zero_value;
+    const Shader::Backend::SPIRV::VectorIds coord_type = is_float ? ctx.F32 : ctx.U32;
+    const unsigned int zero = is_float ? ctx.f32_zero_value : ctx.u32_zero_value;
 
     switch (image_type) {
     case AmdGpu::ImageType::Color1D: {
         // Lowered to 2D with height 1
-        const auto x = coords;
+        const unsigned int x = coords;
         return spv_OpCompositeConstruct2(&ctx.m, coord_type[2], x, zero);
     }
     case AmdGpu::ImageType::Color1DArray: {
         // Lowered to 2D array with height 1
-        const auto x = spv_OpCompositeExtract1(&ctx.m, coord_type[1], coords, 0U);
-        const auto slice = spv_OpCompositeExtract1(&ctx.m, coord_type[1], coords, 1U);
+        const uint32_t x = spv_OpCompositeExtract1(&ctx.m, coord_type[1], coords, 0U);
+        const uint32_t slice = spv_OpCompositeExtract1(&ctx.m, coord_type[1], coords, 1U);
         return spv_OpCompositeConstruct3(&ctx.m, coord_type[3], x, zero, slice);
     }
     case AmdGpu::ImageType::Cube: {
         // Lowered to 2D array
         if (is_float) {
-            const auto x = spv_OpCompositeExtract1(&ctx.m, coord_type[1], coords, 0U);
-            const auto y = spv_OpCompositeExtract1(&ctx.m, coord_type[1], coords, 1U);
-            const auto face = spv_OpCompositeExtract1(&ctx.m, coord_type[1], coords, 2U);
+            const uint32_t x = spv_OpCompositeExtract1(&ctx.m, coord_type[1], coords, 0U);
+            const uint32_t y = spv_OpCompositeExtract1(&ctx.m, coord_type[1], coords, 1U);
+            const uint32_t face = spv_OpCompositeExtract1(&ctx.m, coord_type[1], coords, 2U);
 
             // AMD cube math results in coordinates in the range [1.0, 2.0]. We need
             // to convert this to the range [0.0, 1.0] to get correct results.
-            const auto one = ctx.ConstF32(1.f);
-            const auto fixed_x = spv_OpFSub(&ctx.m, coord_type[1], x, one);
-            const auto fixed_y = spv_OpFSub(&ctx.m, coord_type[1], y, one);
-            const auto fixed_face =
+            const unsigned int one = ctx.ConstF32(1.f);
+            const uint32_t fixed_x = spv_OpFSub(&ctx.m, coord_type[1], x, one);
+            const uint32_t fixed_y = spv_OpFSub(&ctx.m, coord_type[1], y, one);
+            const uint32_t fixed_face =
                 spv_OpFma(&ctx.m, coord_type[1],
                           spv_OpFloor(&ctx.m, coord_type[1],
                                       spv_OpFDiv(&ctx.m, coord_type[1], face, ctx.ConstF32(8.f))),
@@ -54,8 +54,8 @@ static Id FixImageCoords(EmitContext& ctx, Id coords, AmdGpu::ImageType image_ty
 template <bool is_float>
 static Id PadImageOperand(EmitContext& ctx, Id operand, AmdGpu::ImageType image_type) {
     if (image_type == AmdGpu::ImageType::Color1D || image_type == AmdGpu::ImageType::Color1DArray) {
-        const auto coord_type = is_float ? ctx.F32 : ctx.U32;
-        const auto zero = is_float ? ctx.f32_zero_value : ctx.u32_zero_value;
+        const Shader::Backend::SPIRV::VectorIds coord_type = is_float ? ctx.F32 : ctx.U32;
+        const unsigned int zero = is_float ? ctx.f32_zero_value : ctx.u32_zero_value;
         return spv_OpCompositeConstruct2(&ctx.m, coord_type[2], operand, zero);
     }
     return operand;
@@ -147,7 +147,8 @@ Id EmitImageSampleRaw(EmitContext& ctx, IR::Inst* inst, Imm32 handle_imm, Id add
 Id EmitImageSampleImplicitLod(EmitContext& ctx, IR::Inst* inst, Imm32 handle_imm, Id coords,
                               Id bias, const IR::Value& offset) {
     u32 handle = handle_imm;
-    const auto& texture = ctx.images[handle & 0xFFFF];
+    Shader::Backend::SPIRV::EmitContext::TextureDefinition const& texture =
+        ctx.images[handle & 0xFFFF];
     const Id image = spv_OpLoad(&ctx.m, texture.image_type, texture.id);
     const Id result_type = texture.data_types->Get(4);
     const Id sampler = spv_OpLoad(&ctx.m, ctx.sampler_type, ctx.samplers[handle >> 16]);
@@ -165,7 +166,8 @@ Id EmitImageSampleImplicitLod(EmitContext& ctx, IR::Inst* inst, Imm32 handle_imm
 Id EmitImageSampleExplicitLod(EmitContext& ctx, IR::Inst* inst, Imm32 handle_imm, Id coords, Id lod,
                               const IR::Value& offset) {
     u32 handle = handle_imm;
-    const auto& texture = ctx.images[handle & 0xFFFF];
+    Shader::Backend::SPIRV::EmitContext::TextureDefinition const& texture =
+        ctx.images[handle & 0xFFFF];
     const Id image = spv_OpLoad(&ctx.m, texture.image_type, texture.id);
     const Id result_type = texture.data_types->Get(4);
     const Id sampler = spv_OpLoad(&ctx.m, ctx.sampler_type, ctx.samplers[handle >> 16]);
@@ -183,7 +185,8 @@ Id EmitImageSampleExplicitLod(EmitContext& ctx, IR::Inst* inst, Imm32 handle_imm
 Id EmitImageSampleDrefImplicitLod(EmitContext& ctx, IR::Inst* inst, Imm32 handle_imm, Id coords,
                                   Id dref, Id bias, const IR::Value& offset) {
     u32 handle = handle_imm;
-    const auto& texture = ctx.images[handle & 0xFFFF];
+    Shader::Backend::SPIRV::EmitContext::TextureDefinition const& texture =
+        ctx.images[handle & 0xFFFF];
     const Id image = spv_OpLoad(&ctx.m, texture.image_type, texture.id);
     const Id result_type = texture.data_types->Get(1);
     const Id sampler = spv_OpLoad(&ctx.m, ctx.sampler_type, ctx.samplers[handle >> 16]);
@@ -203,7 +206,8 @@ Id EmitImageSampleDrefImplicitLod(EmitContext& ctx, IR::Inst* inst, Imm32 handle
 Id EmitImageSampleDrefExplicitLod(EmitContext& ctx, IR::Inst* inst, Imm32 handle_imm, Id coords,
                                   Id dref, Id lod, const IR::Value& offset) {
     u32 handle = handle_imm;
-    const auto& texture = ctx.images[handle & 0xFFFF];
+    Shader::Backend::SPIRV::EmitContext::TextureDefinition const& texture =
+        ctx.images[handle & 0xFFFF];
     const Id image = spv_OpLoad(&ctx.m, texture.image_type, texture.id);
     const Id result_type = texture.data_types->Get(1);
     const Id sampler = spv_OpLoad(&ctx.m, ctx.sampler_type, ctx.samplers[handle >> 16]);
@@ -223,7 +227,8 @@ Id EmitImageSampleDrefExplicitLod(EmitContext& ctx, IR::Inst* inst, Imm32 handle
 Id EmitImageGather(EmitContext& ctx, IR::Inst* inst, Imm32 handle_imm, Id coords,
                    const IR::Value& offset) {
     u32 handle = handle_imm;
-    const auto& texture = ctx.images[handle & 0xFFFF];
+    Shader::Backend::SPIRV::EmitContext::TextureDefinition const& texture =
+        ctx.images[handle & 0xFFFF];
     const Id image = spv_OpLoad(&ctx.m, texture.image_type, texture.id);
     const Id result_type = texture.data_types->Get(4);
     const Id sampler = spv_OpLoad(&ctx.m, ctx.sampler_type, ctx.samplers[handle >> 16]);
@@ -241,7 +246,8 @@ Id EmitImageGather(EmitContext& ctx, IR::Inst* inst, Imm32 handle_imm, Id coords
 Id EmitImageGatherDref(EmitContext& ctx, IR::Inst* inst, Imm32 handle_imm, Id coords,
                        const IR::Value& offset, Id dref) {
     u32 handle = handle_imm;
-    const auto& texture = ctx.images[handle & 0xFFFF];
+    Shader::Backend::SPIRV::EmitContext::TextureDefinition const& texture =
+        ctx.images[handle & 0xFFFF];
     const Id image = spv_OpLoad(&ctx.m, texture.image_type, texture.id);
     const Id result_type = texture.data_types->Get(4);
     const Id sampler = spv_OpLoad(&ctx.m, ctx.sampler_type, ctx.samplers[handle >> 16]);
@@ -258,7 +264,8 @@ Id EmitImageGatherDref(EmitContext& ctx, IR::Inst* inst, Imm32 handle_imm, Id co
 Id EmitImageQueryDimensions(EmitContext& ctx, IR::Inst* inst, Imm32 handle_imm, Id lod,
                             bool has_mips) {
     u32 handle = handle_imm;
-    const auto& texture = ctx.images[handle & 0xFFFF];
+    Shader::Backend::SPIRV::EmitContext::TextureDefinition const& texture =
+        ctx.images[handle & 0xFFFF];
     const Id image = spv_OpLoad(&ctx.m, texture.image_type, texture.id);
     const Id zero = ctx.u32_zero_value;
     const auto mips{
@@ -270,13 +277,13 @@ Id EmitImageQueryDimensions(EmitContext& ctx, IR::Inst* inst, Imm32 handle_imm, 
     }};
     switch (texture.view_type) {
     case AmdGpu::ImageType::Color1D: {
-        const auto width = spv_OpCompositeExtract1(&ctx.m, ctx.U32[1], query(ctx.U32[2]), 0U);
+        const uint32_t width = spv_OpCompositeExtract1(&ctx.m, ctx.U32[1], query(ctx.U32[2]), 0U);
         return spv_OpCompositeConstruct4(&ctx.m, ctx.U32[4], width, zero, zero, mips());
     }
     case AmdGpu::ImageType::Color1DArray: {
-        const auto base = query(ctx.U32[3]);
-        const auto width = spv_OpCompositeExtract1(&ctx.m, ctx.U32[1], base, 0U);
-        const auto slices = spv_OpCompositeExtract1(&ctx.m, ctx.U32[1], base, 2U);
+        const uint32_t base = query(ctx.U32[3]);
+        const uint32_t width = spv_OpCompositeExtract1(&ctx.m, ctx.U32[1], base, 0U);
+        const uint32_t slices = spv_OpCompositeExtract1(&ctx.m, ctx.U32[1], base, 2U);
         return spv_OpCompositeConstruct4(&ctx.m, ctx.U32[4], width, slices, zero, mips());
     }
     case AmdGpu::ImageType::Color2D:
@@ -293,7 +300,8 @@ Id EmitImageQueryDimensions(EmitContext& ctx, IR::Inst* inst, Imm32 handle_imm, 
 
 Id EmitImageQueryLod(EmitContext& ctx, IR::Inst* inst, Imm32 handle_imm, Id coords) {
     u32 handle = handle_imm;
-    const auto& texture = ctx.images[handle & 0xFFFF];
+    Shader::Backend::SPIRV::EmitContext::TextureDefinition const& texture =
+        ctx.images[handle & 0xFFFF];
     const Id image = spv_OpLoad(&ctx.m, texture.image_type, texture.id);
     const Id sampler = spv_OpLoad(&ctx.m, ctx.sampler_type, ctx.samplers[handle >> 16]);
     const Id sampled_image = spv_OpSampledImage(&ctx.m, texture.sampled_type, image, sampler);
@@ -305,7 +313,8 @@ Id EmitImageGradient(EmitContext& ctx, IR::Inst* inst, Imm32 handle_imm, Id coor
                      Id derivatives_dx, Id derivatives_dy, const IR::Value& offset,
                      const IR::Value& lod_clamp) {
     u32 handle = handle_imm;
-    const auto& texture = ctx.images[handle & 0xFFFF];
+    Shader::Backend::SPIRV::EmitContext::TextureDefinition const& texture =
+        ctx.images[handle & 0xFFFF];
     const Id image = spv_OpLoad(&ctx.m, texture.image_type, texture.id);
     const Id result_type = texture.data_types->Get(4);
     const Id sampler = spv_OpLoad(&ctx.m, ctx.sampler_type, ctx.samplers[handle >> 16]);
@@ -322,7 +331,8 @@ Id EmitImageGradient(EmitContext& ctx, IR::Inst* inst, Imm32 handle_imm, Id coor
 
 Id EmitImageRead(EmitContext& ctx, IR::Inst* inst, Imm32 handle_imm, Id coords, Id lod, Id ms) {
     u32 handle = handle_imm;
-    const auto& texture = ctx.images[handle & 0xFFFF];
+    Shader::Backend::SPIRV::EmitContext::TextureDefinition const& texture =
+        ctx.images[handle & 0xFFFF];
     const Id color_type = texture.data_types->Get(4);
     const Id fixed_coords = FixImageCoords<false>(ctx, coords, texture.view_type);
     ImageOperands operands;
@@ -374,7 +384,8 @@ Id EmitImageRead(EmitContext& ctx, IR::Inst* inst, Imm32 handle_imm, Id coords, 
 void EmitImageWrite(EmitContext& ctx, IR::Inst* inst, Imm32 handle_imm, Id coords, Id lod, Id ms,
                     Id color) {
     u32 handle = handle_imm;
-    const auto& texture = ctx.images[handle & 0xFFFF];
+    Shader::Backend::SPIRV::EmitContext::TextureDefinition const& texture =
+        ctx.images[handle & 0xFFFF];
     Id image_ptr = texture.id;
     const Id color_type = texture.data_types->Get(4);
     const Id fixed_coords = FixImageCoords<false>(ctx, coords, texture.view_type);
@@ -397,14 +408,14 @@ void EmitImageWrite(EmitContext& ctx, IR::Inst* inst, Imm32 handle_imm, Id coord
 }
 
 static Id SelectCubeResult(EmitContext& ctx, Id x, Id y, Id z, Id x_res, Id y_res, Id z_res) {
-    const auto abs_x = spv_OpFAbs(&ctx.m, ctx.F32[1], x);
-    const auto abs_y = spv_OpFAbs(&ctx.m, ctx.F32[1], y);
-    const auto abs_z = spv_OpFAbs(&ctx.m, ctx.F32[1], z);
+    const uint32_t abs_x = spv_OpFAbs(&ctx.m, ctx.F32[1], x);
+    const uint32_t abs_y = spv_OpFAbs(&ctx.m, ctx.F32[1], y);
+    const uint32_t abs_z = spv_OpFAbs(&ctx.m, ctx.F32[1], z);
 
-    const auto z_face_cond{spv_OpLogicalAnd(
+    const uint32_t z_face_cond{spv_OpLogicalAnd(
         &ctx.m, ctx.U1[1], spv_OpFOrdGreaterThanEqual(&ctx.m, ctx.U1[1], abs_z, abs_x),
         spv_OpFOrdGreaterThanEqual(&ctx.m, ctx.U1[1], abs_z, abs_y))};
-    const auto y_face_cond{spv_OpFOrdGreaterThanEqual(&ctx.m, ctx.U1[1], abs_y, abs_x)};
+    const uint32_t y_face_cond{spv_OpFOrdGreaterThanEqual(&ctx.m, ctx.U1[1], abs_y, abs_x)};
 
     return spv_OpSelect(&ctx.m, ctx.F32[1], z_face_cond, z_res,
                         spv_OpSelect(&ctx.m, ctx.F32[1], y_face_cond, y_res, x_res));
@@ -416,45 +427,45 @@ Id EmitCubeFaceIndex(EmitContext& ctx, IR::Inst* inst, Id x, Id y, Id z) {
                                       spv_OpCompositeConstruct3(&ctx.m, ctx.F32[3], x, y, z));
     }
 
-    const auto x_neg_cond{spv_OpFOrdLessThan(&ctx.m, ctx.U1[1], x, ctx.f32_zero_value)};
-    const auto y_neg_cond{spv_OpFOrdLessThan(&ctx.m, ctx.U1[1], y, ctx.f32_zero_value)};
-    const auto z_neg_cond{spv_OpFOrdLessThan(&ctx.m, ctx.U1[1], z, ctx.f32_zero_value)};
-    const auto x_face{
+    const uint32_t x_neg_cond{spv_OpFOrdLessThan(&ctx.m, ctx.U1[1], x, ctx.f32_zero_value)};
+    const uint32_t y_neg_cond{spv_OpFOrdLessThan(&ctx.m, ctx.U1[1], y, ctx.f32_zero_value)};
+    const uint32_t z_neg_cond{spv_OpFOrdLessThan(&ctx.m, ctx.U1[1], z, ctx.f32_zero_value)};
+    const uint32_t x_face{
         spv_OpSelect(&ctx.m, ctx.F32[1], x_neg_cond, ctx.ConstF32(1.f), ctx.ConstF32(0.f))};
-    const auto y_face{
+    const uint32_t y_face{
         spv_OpSelect(&ctx.m, ctx.F32[1], y_neg_cond, ctx.ConstF32(3.f), ctx.ConstF32(2.f))};
-    const auto z_face{
+    const uint32_t z_face{
         spv_OpSelect(&ctx.m, ctx.F32[1], z_neg_cond, ctx.ConstF32(5.f), ctx.ConstF32(4.f))};
 
     return SelectCubeResult(ctx, x, y, z, x_face, y_face, z_face);
 }
 
 Id EmitCubeFaceCoordS(EmitContext& ctx, IR::Inst* inst, Id x, Id y, Id z) {
-    const auto x_neg_cond{spv_OpFOrdLessThan(&ctx.m, ctx.U1[1], x, ctx.f32_zero_value)};
-    const auto z_neg_cond{spv_OpFOrdLessThan(&ctx.m, ctx.U1[1], z, ctx.f32_zero_value)};
-    const auto x_sc{
+    const uint32_t x_neg_cond{spv_OpFOrdLessThan(&ctx.m, ctx.U1[1], x, ctx.f32_zero_value)};
+    const uint32_t z_neg_cond{spv_OpFOrdLessThan(&ctx.m, ctx.U1[1], z, ctx.f32_zero_value)};
+    const uint32_t x_sc{
         spv_OpSelect(&ctx.m, ctx.F32[1], x_neg_cond, z, spv_OpFNegate(&ctx.m, ctx.F32[1], z))};
-    const auto y_sc{x};
-    const auto z_sc{
+    const unsigned int y_sc{x};
+    const uint32_t z_sc{
         spv_OpSelect(&ctx.m, ctx.F32[1], z_neg_cond, spv_OpFNegate(&ctx.m, ctx.F32[1], x), x)};
 
     return SelectCubeResult(ctx, x, y, z, x_sc, y_sc, z_sc);
 }
 
 Id EmitCubeFaceCoordT(EmitContext& ctx, IR::Inst* inst, Id x, Id y, Id z) {
-    const auto y_neg_cond{spv_OpFOrdLessThan(&ctx.m, ctx.U1[1], y, ctx.f32_zero_value)};
-    const auto x_z_tc{spv_OpFNegate(&ctx.m, ctx.F32[1], y)};
-    const auto y_tc{
+    const uint32_t y_neg_cond{spv_OpFOrdLessThan(&ctx.m, ctx.U1[1], y, ctx.f32_zero_value)};
+    const uint32_t x_z_tc{spv_OpFNegate(&ctx.m, ctx.F32[1], y)};
+    const uint32_t y_tc{
         spv_OpSelect(&ctx.m, ctx.F32[1], y_neg_cond, spv_OpFNegate(&ctx.m, ctx.F32[1], z), z)};
 
     return SelectCubeResult(ctx, x, y, z, x_z_tc, y_tc, x_z_tc);
 }
 
 Id EmitCubeFaceMajorAxis(EmitContext& ctx, IR::Inst* inst, Id x, Id y, Id z) {
-    const auto two{ctx.ConstF32(2.f)};
-    const auto x_major_axis{spv_OpFMul(&ctx.m, ctx.F32[1], x, two)};
-    const auto y_major_axis{spv_OpFMul(&ctx.m, ctx.F32[1], y, two)};
-    const auto z_major_axis{spv_OpFMul(&ctx.m, ctx.F32[1], z, two)};
+    const unsigned int two{ctx.ConstF32(2.f)};
+    const uint32_t x_major_axis{spv_OpFMul(&ctx.m, ctx.F32[1], x, two)};
+    const uint32_t y_major_axis{spv_OpFMul(&ctx.m, ctx.F32[1], y, two)};
+    const uint32_t z_major_axis{spv_OpFMul(&ctx.m, ctx.F32[1], z, two)};
 
     return SelectCubeResult(ctx, x, y, z, x_major_axis, y_major_axis, z_major_axis);
 }

@@ -114,7 +114,7 @@ void LowerWave64BallotPass(IR::Program& program, const RuntimeInfo& runtime_info
     }
 
     std::vector<IR::Inst*> worklist;
-    const auto uniform_blocks = FindUniformBlocks(program);
+    const std::vector<Shader::IR::Block*> uniform_blocks = FindUniformBlocks(program);
     for (IR::Block* block : program.blocks) {
         const bool is_uniform = std::ranges::contains(uniform_blocks, block);
         const auto push_worklist = [&](IR::Inst& inst) {

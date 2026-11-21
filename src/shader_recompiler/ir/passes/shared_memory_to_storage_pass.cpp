@@ -8,7 +8,7 @@
 namespace Shader::Optimization {
 
 static bool IsSharedAccess(const IR::Inst& inst) {
-    const auto opcode = inst.GetOpcode();
+    const IR::Opcode opcode = inst.GetOpcode();
     switch (opcode) {
     case IR::Opcode::LoadSharedU16:
     case IR::Opcode::LoadSharedU32:
@@ -110,7 +110,7 @@ void SharedMemoryToStoragePass(IR::Program& program, const RuntimeInfo& runtime_
     //   * Requested shared memory size is too large for the host shared memory.
     //   * Workgroup explicit memory is not supported and multiple shared memory types are used.
     const u32 shared_memory_size = runtime_info.hw.cs.shared_memory_size;
-    const auto used_types = CalculateSharedMemoryTypes(program);
+    const IR::Type used_types = CalculateSharedMemoryTypes(program);
     if (used_types == IR::Type::Void || (shared_memory_size <= profile.max_shared_memory_size &&
                                          (profile.supports_workgroup_explicit_memory_layout ||
                                           std::popcount(static_cast<u32>(used_types)) == 1))) {

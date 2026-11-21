@@ -65,13 +65,13 @@ struct DiscardShaderEmitter {
         const Id void_function{spv_TypeFunction0(&m, void_id)};
         main = spv_OpFunction(&m, void_id, u32(SpvFunctionControlMaskNone), void_function);
 
-        auto ptr_id = spv_TypePointer(&m, u32(SpvStorageClassInput), vec4_id);
+        uint32_t ptr_id = spv_TypePointer(&m, u32(SpvStorageClassInput), vec4_id);
 
         std::array<Id, 2> locations_id = {0};
         std::vector<u8> locations_v(locations.begin(), locations.end());
         std::map<u8, Id> loc_vec_id;
-        auto locations_id_len = 0;
-        for (auto i = 0; i < locations_v.size(); ++i) {
+        int locations_id_len = 0;
+        for (int i = 0; i < locations_v.size(); ++i) {
             locations_id_len++;
             locations_id[i] = spv_AddGlobalVariable(&m, ptr_id, u32(SpvStorageClassInput), 0);
             spv_Decorate1(&m, locations_id[i], u32(SpvDecorationLocation), u32(locations_v[i]));
@@ -83,17 +83,17 @@ struct DiscardShaderEmitter {
         spv_AddExecutionMode0(&m, main, u32(SpvExecutionModeOriginUpperLeft));
         spv_AddLabel(&m, spv_OpLabel(&m));
 
-        for (auto i = 0; i < locations_id_len; ++i) {
-            auto loc_vec = spv_OpLoad(&m, vec4_id, locations_id[i]);
+        for (int i = 0; i < locations_id_len; ++i) {
+            uint32_t loc_vec = spv_OpLoad(&m, vec4_id, locations_id[i]);
             loc_vec_id[locations_v[i]] = loc_vec;
             NameFmt(&m, loc_vec, "ccdist%d", i);
         }
 
         for (auto& [loc, elem] : clip_locations) {
-            auto plane = spv_OpCompositeExtract1(&m, float_id, loc_vec_id[loc], u32(elem));
+            uint32_t plane = spv_OpCompositeExtract1(&m, float_id, loc_vec_id[loc], u32(elem));
             NameFmt(&m, plane, "plane%d", loc * 4 + elem);
 
-            auto clipped = spv_OpFOrdLessThan(&m, bool_id, plane, float_zero);
+            uint32_t clipped = spv_OpFOrdLessThan(&m, bool_id, plane, float_zero);
             const Id kill_label{spv_OpLabel(&m)};
             const Id merge_label{spv_OpLabel(&m)};
             spv_OpSelectionMerge(&m, merge_label, u32(SpvSelectionControlMaskNone));

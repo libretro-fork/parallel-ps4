@@ -61,9 +61,9 @@ static std::optional<u32> ResolveSetPcTarget(std::span<const GcnInst> list, u32 
         return std::nullopt;
     }
 
-    const auto& getpc = list[setpc_index - 3];
-    const auto& arith = list[setpc_index - 2];
-    const auto& setpc = list[setpc_index];
+    const Shader::Gcn::GcnInst& getpc = list[setpc_index - 3];
+    const Shader::Gcn::GcnInst& arith = list[setpc_index - 2];
+    const Shader::Gcn::GcnInst& setpc = list[setpc_index];
 
     if (getpc.opcode != Opcode::S_GETPC_B64 ||
         !(arith.opcode == Opcode::S_ADD_U32 || arith.opcode == Opcode::S_SUB_U32) ||
@@ -113,7 +113,7 @@ void CFG::EmitLabels() {
         if (inst.IsUnconditionalBranch()) {
             u32 target = inst.BranchTarget(pc);
             if (inst.opcode == Opcode::S_SETPC_B64) {
-                if (auto t = ResolveSetPcTarget(inst_list, i, index_to_pc)) {
+                if (std::optional<unsigned int> t = ResolveSetPcTarget(inst_list, i, index_to_pc)) {
                     target = *t;
                 } else {
                     ASSERT_MSG(
@@ -174,7 +174,7 @@ void CFG::SplitDivergenceScopes() {
         auto next_blk = std::next(blk);
         s32 curr_begin = -1;
         for (size_t index = blk->begin_index; index <= blk->end_index; index++) {
-            const auto& inst = inst_list[index];
+            const Shader::Gcn::GcnInst& inst = inst_list[index];
             const bool is_close = is_close_scope(inst);
             if ((is_close || index == blk->end_index) && curr_begin != -1) {
                 // If there are no instructions inside scope don't do anything.
@@ -234,7 +234,7 @@ void CFG::SplitDivergenceScopes() {
                     } else {
                         // No epilogue block is needed since the divergence block
                         // also ends the parent block. Inherit the end condition.
-                        auto& parent_blk = *blk;
+                        Shader::Gcn::Block& parent_blk = *blk;
                         ASSERT(blk->cond == IR::Condition::True && blk->branch_true);
                         block->cond = IR::Condition::True;
                         block->branch_true = blk->branch_true;
@@ -270,7 +270,7 @@ void CFG::SplitDivergenceScopes() {
 void CFG::EmitBlocks() {
     for (auto it = labels.cbegin(); it != labels.cend(); ++it) {
         const Label start = *it;
-        const auto next_it = std::next(it);
+        const unsigned int* const next_it = std::next(it);
         const bool is_last = (next_it == labels.cend());
         if (is_last) {
             // Last label is special.
@@ -280,7 +280,7 @@ void CFG::EmitBlocks() {
         // The end instruction of this block is the previous one.
         const Label end = *next_it;
         const size_t end_index = GetIndex(end) - 1;
-        const auto& end_inst = inst_list[end_index];
+        const Shader::Gcn::GcnInst& end_inst = inst_list[end_index];
 
         // Insert block between the labels using the last instruction
         // as an indicator for branching type.
@@ -310,13 +310,13 @@ void CFG::LinkBlocks() {
     };
 
     for (auto it = blocks.begin(); it != blocks.end(); it++) {
-        auto& block = *it;
-        const auto end_inst{block.end_inst};
+        Shader::Gcn::Block& block = *it;
+        const Shader::Gcn::GcnInst end_inst{block.end_inst};
 
         // If the block doesn't end with a branch we simply
         // need to link with the next block.
         if (!end_inst.IsTerminateInstruction()) {
-            auto* next_block = get_block(block.end);
+            Shader::Gcn::Block* next_block = get_block(block.end);
             block.cond = IR::Condition::True;
             block.branch_true = next_block;
             block.end_class = EndClass::Branch;
@@ -329,7 +329,8 @@ void CFG::LinkBlocks() {
         const u32 branch_pc = block.end - end_inst.length;
         u32 target_pc = 0;
         if (end_inst.opcode == Opcode::S_SETPC_B64) {
-            auto tgt = ResolveSetPcTarget(inst_list, block.end_index, index_to_pc);
+            std::optional<unsigned int> tgt =
+                ResolveSetPcTarget(inst_list, block.end_index, index_to_pc);
             ASSERT_MSG(tgt,
                        "S_SETPC_B64 without a resolvable offset at PC 0x%x (Index %u): Involved "
                        "instructions not recognized or invalid pattern",
@@ -340,15 +341,15 @@ void CFG::LinkBlocks() {
         }
 
         if (end_inst.IsUnconditionalBranch()) {
-            auto* target_block = get_block(target_pc);
+            Shader::Gcn::Block* target_block = get_block(target_pc);
             block.branch_true = target_block;
             block.end_class = EndClass::Branch;
             target_block->num_predecessors++;
         } else if (end_inst.IsConditionalBranch()) {
-            auto* end_block = get_block(block.end);
+            Shader::Gcn::Block* end_block = get_block(block.end);
             block.end_class = EndClass::Branch;
             if (target_pc != block.end) {
-                auto* target_block = get_block(target_pc);
+                Shader::Gcn::Block* target_block = get_block(target_pc);
                 block.branch_true = target_block;
                 block.branch_false = end_block;
                 target_block->num_predecessors++;

@@ -61,25 +61,25 @@ bool ParseFetchShader(const Shader::Info& info, FetchShaderData& out_fetch_data)
     };
     std::array<VsharpLoad, 104> loads{};
 
-    const auto* code = GetFetchShaderCode(info, info.fetch_shader_sgpr_base);
+    const u32* code = GetFetchShaderCode(info, info.fetch_shader_sgpr_base);
     const u32* ptr = code;
     while (true) {
         const u32 word0 = *(ptr++);
-        const auto encoding = GetInstructionEncoding(word0);
+        const Shader::Gcn::InstEncoding encoding = GetInstructionEncoding(word0);
 
         if (encoding == InstEncoding::SOP1) {
-            const auto opcode = OpcodeSOP1((word0 >> 8) & 0xff);
+            const Shader::Gcn::OpcodeSOP1 opcode = OpcodeSOP1((word0 >> 8) & 0xff);
             ASSERT(opcode == OpcodeSOP1::S_SETPC_B64);
             break;
         } else if (encoding == InstEncoding::SMRD) {
-            const auto opcode = OpcodeSMRD((word0 >> 22) & 0x1f);
+            const Shader::Gcn::OpcodeSMRD opcode = OpcodeSMRD((word0 >> 22) & 0x1f);
             const u32 sdst = (word0 >> 15) & 0x7f;
             const u32 sbase = (word0 >> 9) & 0x3f;
             const u32 offset = word0 & 0xff;
             ASSERT(opcode == OpcodeSMRD::S_LOAD_DWORDX4);
             loads[sdst] = VsharpLoad{offset, sbase * 2};
         } else if (encoding == InstEncoding::VOP2) {
-            const auto opcode = OpcodeVOP2((word0 >> 25) & 0x3f);
+            const Shader::Gcn::OpcodeVOP2 opcode = OpcodeVOP2((word0 >> 25) & 0x3f);
             const u32 src0 = word0 & 0x1ff;
             const u32 vsrc1 = (word0 >> 9) & 0xff;
             const u32 vdst = (word0 >> 17) & 0xff;
@@ -97,17 +97,17 @@ bool ParseFetchShader(const Shader::Info& info, FetchShaderData& out_fetch_data)
             // SRSRC is in units of 4 SPGRs while SBASE is in pairs of SGPRs
             const u32 word1 = *(ptr++);
             const u32 srsrc = ((word1 >> 16) & 0x1f) * 4;
-            auto& attrib = out_fetch_data.attributes.emplace_back();
+            Shader::Gcn::VertexAttribute& attrib = out_fetch_data.attributes.emplace_back();
             attrib.dest_vgpr = (word1 >> 8) & 0xff;
             if (encoding == InstEncoding::MUBUF) {
-                const auto opcode = OpcodeMUBUF((word0 >> 18) & 0x7f);
+                const Shader::Gcn::OpcodeMUBUF opcode = OpcodeMUBUF((word0 >> 18) & 0x7f);
                 ASSERT(opcode >= OpcodeMUBUF::BUFFER_LOAD_FORMAT_X &&
                        opcode <= OpcodeMUBUF::BUFFER_LOAD_FORMAT_XYZW);
                 attrib.num_elements = (std::to_underlying(opcode) -
                                        std::to_underlying(OpcodeMUBUF::BUFFER_LOAD_FORMAT_X)) +
                                       1;
             } else {
-                const auto opcode = OpcodeMTBUF((word0 >> 16) & 0x7);
+                const Shader::Gcn::OpcodeMTBUF opcode = OpcodeMTBUF((word0 >> 16) & 0x7);
                 ASSERT(opcode >= OpcodeMTBUF::TBUFFER_LOAD_FORMAT_X &&
                        opcode <= OpcodeMTBUF::TBUFFER_LOAD_FORMAT_XYZW);
                 attrib.num_elements = (std::to_underlying(opcode) -
@@ -126,10 +126,10 @@ bool ParseFetchShader(const Shader::Info& info, FetchShaderData& out_fetch_data)
                 attrib.num_format = 0;
             }
         } else if (encoding == InstEncoding::SOPP) {
-            const auto opcode = OpcodeSOPP((word0 >> 16) & 0x7f);
+            const Shader::Gcn::OpcodeSOPP opcode = OpcodeSOPP((word0 >> 16) & 0x7f);
             ASSERT(opcode == OpcodeSOPP::S_WAITCNT);
         } else if (encoding == InstEncoding::VOP1) {
-            const auto opcode = OpcodeVOP1((word0 >> 9) & 0xff);
+            const Shader::Gcn::OpcodeVOP1 opcode = OpcodeVOP1((word0 >> 9) & 0xff);
             const u32 src0 = word0 & 0x1ff;
             const u32 vdst = (word0 >> 17) & 0xff;
             ASSERT(opcode == OpcodeVOP1::V_MOV_B32 && src0 == 242);

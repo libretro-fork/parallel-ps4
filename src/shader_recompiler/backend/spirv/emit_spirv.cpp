@@ -328,7 +328,7 @@ void SetupCapabilities(const Info& info, const Profile& profile, const RuntimeIn
                         " that your Vulkan instance does not advertise. Results may vary");
         }
     }
-    const auto stage = info.sw_stage;
+    const Shader::SwStage stage = info.sw_stage;
     if (stage == SwStage::Vertex) {
         spv_AddExtension(&ctx.m, "SPV_KHR_shader_draw_parameters");
         spv_AddCapability(&ctx.m, u32(SpvCapabilityDrawParameters));
@@ -378,7 +378,7 @@ void SetupCapabilities(const Info& info, const Profile& profile, const RuntimeIn
         spv_AddCapability(&ctx.m, u32(SpvCapabilityPhysicalStorageBufferAddresses));
         spv_AddExtension(&ctx.m, "SPV_KHR_physical_storage_buffer");
     }
-    const auto shared_type_count = std::popcount(static_cast<u32>(info.shared_types));
+    const int shared_type_count = std::popcount(static_cast<u32>(info.shared_types));
     if (shared_type_count > 1 && profile.supports_workgroup_explicit_memory_layout) {
         spv_AddExtension(&ctx.m, "SPV_KHR_workgroup_memory_explicit_layout");
         spv_AddCapability(&ctx.m, u32(SpvCapabilityWorkgroupMemoryExplicitLayoutKHR));
@@ -472,7 +472,7 @@ void DefineEntryPoint(const Info& info, const RuntimeInfo& runtime_info, EmitCon
 
 void SetupDenormFlushMode(EmitContext& ctx, const Profile& profile, const RuntimeInfo& runtime_info,
                           Id main_func) {
-    const auto fp32_denorm_mode = runtime_info.props.fp_denorm_mode32;
+    const AmdGpu::FpDenormMode fp32_denorm_mode = runtime_info.props.fp_denorm_mode32;
     if (fp32_denorm_mode == AmdGpu::FpDenormMode::InOutFlush) {
         if (profile.support_fp32_denorm_flush) {
             spv_AddCapability(&ctx.m, u32(SpvCapabilityDenormFlushToZero));
@@ -495,8 +495,8 @@ void SetupDenormFlushMode(EmitContext& ctx, const Profile& profile, const Runtim
         return;
     }
 
-    const auto fp16_64_denorm_mode = runtime_info.props.fp_denorm_mode16_64;
-    const auto same_denorm_mode = fp16_64_denorm_mode == fp32_denorm_mode;
+    const AmdGpu::FpDenormMode fp16_64_denorm_mode = runtime_info.props.fp_denorm_mode16_64;
+    const bool same_denorm_mode = fp16_64_denorm_mode == fp32_denorm_mode;
     if (!same_denorm_mode && !profile.supports_denorm_behavior_independence) {
         static run_once_t logged = RUN_ONCE_INIT;
         run_once(
@@ -571,7 +571,7 @@ void SetupDenormFlushMode(EmitContext& ctx, const Profile& profile, const Runtim
 
 void SetupRoundingMode(EmitContext& ctx, const Profile& profile, const RuntimeInfo& runtime_info,
                        Id main_func) {
-    const auto fp_round_mode = runtime_info.props.fp_round_mode32;
+    const AmdGpu::FpRoundMode fp_round_mode = runtime_info.props.fp_round_mode32;
     if (fp_round_mode == AmdGpu::FpRoundMode::ToZero) {
         if (profile.support_fp32_round_to_zero) {
             spv_AddCapability(&ctx.m, u32(SpvCapabilityRoundingModeRTZ));
@@ -592,8 +592,8 @@ void SetupRoundingMode(EmitContext& ctx, const Profile& profile, const RuntimeIn
     }
 
     if (ctx.info.uses_fp16 || ctx.info.uses_fp64) {
-        const auto fp16_64_round_mode = runtime_info.props.fp_round_mode16_64;
-        const auto same_round_mode = fp16_64_round_mode == fp_round_mode;
+        const AmdGpu::FpRoundMode fp16_64_round_mode = runtime_info.props.fp_round_mode16_64;
+        const bool same_round_mode = fp16_64_round_mode == fp_round_mode;
         if (!same_round_mode && !profile.supports_rounding_mode_independence) {
             static run_once_t logged = RUN_ONCE_INIT;
             run_once(
@@ -723,7 +723,7 @@ struct PhiPatch {
 };
 
 void PatchPhiArg(void* arg_ctx, u32 phi_arg, u32 first_parent, u32* value_out, u32* parent_out) {
-    auto& p = *static_cast<PhiPatch*>(arg_ctx);
+    PhiPatch& p = *static_cast<PhiPatch*>(arg_ctx);
     if (phi_arg == 0) {
         ++p.inst;
         while (p.inst == p.program.blocks[p.block_index]->end() ||

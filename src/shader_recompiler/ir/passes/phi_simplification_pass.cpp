@@ -116,7 +116,7 @@ struct PhiScc {
             phi->SetFlags(new_type);
 
             IR::Inst* replacement{};
-            auto& uses = phi->Uses();
+            const std::list<Shader::IR::Use>& uses = phi->Uses();
             for (auto it = uses.begin(); it != uses.end();) {
                 auto [user, operand] = *it;
                 ++it;
@@ -260,7 +260,7 @@ private:
 
         while (!dfs.empty()) {
             auto& [phi, arg_idx] = dfs.back();
-            auto& info = nodes[phi];
+            Shader::Optimization::PhiSccFinder::NodeInfo& info = nodes[phi];
             bool pushed_child = false;
 
             for (; arg_idx < phi->NumArgs(); arg_idx++) {
@@ -272,7 +272,7 @@ private:
                     continue;
                 }
 
-                auto& arg_info = nodes[arg];
+                Shader::Optimization::PhiSccFinder::NodeInfo& arg_info = nodes[arg];
                 if (arg_info.index == std::numeric_limits<u32>::max()) {
                     arg_idx++;
                     push_phi(arg, arg_info);
@@ -287,7 +287,7 @@ private:
             }
 
             if (info.lowlink == info.index) {
-                auto& scc = sccs.emplace_back();
+                Shader::Optimization::PhiScc& scc = sccs.emplace_back();
                 IR::Inst* w;
                 do {
                     w = stack.back();
@@ -299,7 +299,7 @@ private:
 
             dfs.pop_back();
             if (!dfs.empty()) {
-                auto& parent_info = nodes[dfs.back().phi];
+                Shader::Optimization::PhiSccFinder::NodeInfo& parent_info = nodes[dfs.back().phi];
                 parent_info.lowlink = std::min(parent_info.lowlink, info.lowlink);
             }
         }
@@ -318,14 +318,14 @@ static void FoldSccCommonOps(std::vector<PhiScc>& sccs) {
         const u32 scc_idx = worklist.back();
         worklist.pop_back();
 
-        auto& scc = sccs[scc_idx];
+        Shader::Optimization::PhiScc& scc = sccs[scc_idx];
         scc.queued = false;
 
         CommonOp op;
         if (!scc.HasCommonOp(op)) {
             continue;
         }
-        auto scc_uses = scc.SccUses();
+        Common::SmallVector<Shader::IR::Inst*, 4> scc_uses = scc.SccUses();
         do {
             scc.FoldCommonOp(op);
         } while (scc.HasCommonOp(op));
@@ -345,33 +345,33 @@ static void DeduplicateSccs(std::vector<PhiScc>& sccs) {
     };
     std::unordered_map<u64, SccGroup, std::identity> scc_groups;
     for (size_t scc_idx = 0; scc_idx < sccs.size(); ++scc_idx) {
-        auto& scc = sccs[scc_idx];
+        Shader::Optimization::PhiScc& scc = sccs[scc_idx];
         scc.ComputeStructureHash();
         scc_groups[scc.hash].sccs.emplace_back(scc_idx);
     }
 
     std::vector<SccGroup*> worklist;
     worklist.reserve(scc_groups.size());
-    for (const auto& scc : sccs) {
-        auto& group = scc_groups.at(scc.hash);
+    for (Shader::Optimization::PhiScc const& scc : sccs) {
+        SccGroup& group = scc_groups.at(scc.hash);
         if (group.sccs.size() > 1 && !std::exchange(group.queued, true)) {
             worklist.push_back(&group);
         }
     }
 
     while (!worklist.empty()) {
-        auto* group = worklist.back();
+        SccGroup* group = worklist.back();
         worklist.pop_back();
         group->queued = false;
 
         for (size_t i = 0; i < group->sccs.size(); ++i) {
-            auto& scc = sccs[group->sccs[i]];
+            Shader::Optimization::PhiScc& scc = sccs[group->sccs[i]];
             if (scc.dead) {
                 continue;
             }
             for (size_t j = i + 1; j < group->sccs.size(); ++j) {
                 const u32 remove_idx = group->sccs[j];
-                auto& remove = sccs[remove_idx];
+                Shader::Optimization::PhiScc& remove = sccs[remove_idx];
                 if (remove.dead) {
                     continue;
                 }
@@ -381,14 +381,14 @@ static void DeduplicateSccs(std::vector<PhiScc>& sccs) {
                 for (size_t k = 0; k < remove.phis.size(); k++) {
                     IR::Inst* old_phi = remove.phis[k];
                     IR::Inst* new_phi = scc.phis[k];
-                    const auto uses = old_phi->Uses();
+                    const std::list<Shader::IR::Use> uses = old_phi->Uses();
                     for (const auto& [user, operand] : uses) {
                         if (user->GetOpcode() == IR::Opcode::Phi) {
                             if (user->scc_index == old_phi->scc_index) {
                                 continue;
                             }
-                            auto& user_scc = sccs[user->scc_index];
-                            auto& user_group = scc_groups[user_scc.hash];
+                            Shader::Optimization::PhiScc& user_scc = sccs[user->scc_index];
+                            SccGroup& user_group = scc_groups[user_scc.hash];
                             if (!std::exchange(user_group.queued, true)) {
                                 worklist.push_back(&user_group);
                             }
@@ -417,7 +417,7 @@ void PhiSimplificationPass(IR::Program& program) {
     }
 
     PhiSccFinder finder{all_phis};
-    auto& sccs = finder.sccs;
+    std::vector<Shader::Optimization::PhiScc>& sccs = finder.sccs;
     FoldSccCommonOps(sccs);
     DeduplicateSccs(sccs);
 }

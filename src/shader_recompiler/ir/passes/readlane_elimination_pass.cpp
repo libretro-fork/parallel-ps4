@@ -40,7 +40,7 @@ static bool IsPossibleToEliminate(IR::Inst* inst, u32 lane) {
             return false;
         }
         for (size_t arg = inst->NumArgs(); arg--;) {
-            auto arg_value{inst->Arg(arg)};
+            Shader::IR::Value arg_value{inst->Arg(arg)};
             if (arg_value.IsImmediate()) {
                 continue;
             }

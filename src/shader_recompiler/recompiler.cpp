@@ -34,10 +34,10 @@ IR::BlockList GenerateBlocks(const IR::AbstractSyntaxList& syntax_list) {
 void EmitControlFlowGraph(IR::Program& program, Pools& pools, Gcn::CFG& cfg,
                           RuntimeInfo& runtime_info, const Profile& profile) {
     Gcn::Translator translator{program.info, runtime_info, profile};
-    for (auto& block : cfg) {
+    for (Shader::Gcn::Block& block : cfg) {
         const u32 start = block.begin_index;
         const u32 size = block.end_index - start + 1;
-        auto* ir_block = pools.block_pool.Create(pools.inst_pool);
+        Shader::IR::Block* ir_block = pools.block_pool.Create(pools.inst_pool);
         ir_block->cfg_block = &block;
         block.ir_block = ir_block;
         translator.Translate(ir_block, block.begin, block.cond,
@@ -46,14 +46,14 @@ void EmitControlFlowGraph(IR::Program& program, Pools& pools, Gcn::CFG& cfg,
     }
     translator.EmitPrologue(program.blocks.front());
     ASSERT_MSG(!program.info.translation_failed, "Shader translation has failed");
-    for (auto& block : cfg) {
-        auto* ir_block = block.ir_block;
+    for (Shader::Gcn::Block& block : cfg) {
+        IR::Block* ir_block = block.ir_block;
         if (block.branch_true) {
-            auto* true_block = block.branch_true->ir_block;
+            IR::Block* true_block = block.branch_true->ir_block;
             ir_block->AddBranch(true_block);
         }
         if (block.branch_false) {
-            auto* false_block = block.branch_false->ir_block;
+            IR::Block* false_block = block.branch_false->ir_block;
             ir_block->AddBranch(false_block);
         }
     }
@@ -76,7 +76,7 @@ IR::Program TranslateProgram(const std::span<const u32>& code, Pools& pools, Inf
 
     // Decode and save instructions, into the storage the last translation left
     IR::Program program{info};
-    auto& ins_list = pools.gcn_insts;
+    std::vector<Shader::Gcn::GcnInst>& ins_list = pools.gcn_insts;
     ins_list.clear();
     ins_list.reserve(code.size());
     while (!slice.atEnd()) {
@@ -107,7 +107,8 @@ IR::Program TranslateProgram(const std::span<const u32>& code, Pools& pools, Inf
     }
     Shader::Optimization::RingAccessElimination(program, runtime_info);
     Shader::IR::DumpProgram(program, info, "pre-res-discover.");
-    auto resources = Shader::Optimization::ResourceDiscoverPass(program, profile);
+    Common::SmallVector<Shader::Optimization::ResourceDiscovery, 32> resources =
+        Shader::Optimization::ResourceDiscoverPass(program, profile);
     Shader::Optimization::FlattenExtendedUserdataPass(program);
     if (info.snapshot && info.snapshot->discover_only) {
         // The walker is made: all a discovery is for (GuestSnapshot), unless the shader reads
@@ -134,7 +135,7 @@ IR::Program TranslateProgram(const std::span<const u32>& code, Pools& pools, Inf
     Shader::IR::DumpProgram(program, info, "pre-lower-phi.");
 
     // Prepare for structurization by clearing flow graph and lowering phis
-    for (auto* ir_block : program.blocks) {
+    for (Shader::IR::Block* ir_block : program.blocks) {
         ir_block->imm_predecessors.clear();
         ir_block->imm_successors.clear();
         ir_block->ssa_state.Reset();

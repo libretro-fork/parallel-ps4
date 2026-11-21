@@ -31,7 +31,7 @@ void Visit(Info& info, const IR::Inst& inst) {
         AddFlatbuf(info);
         break;
     case IR::Opcode::SetPatch: {
-        const auto patch = inst.Arg(0).Patch();
+        const IR::Patch patch = inst.Arg(0).Patch();
         if (patch <= IR::Patch::TessellationLodBottom) {
             info.stores_tess_level_outer = true;
         } else if (patch <= IR::Patch::TessellationLodInteriorV) {
@@ -42,7 +42,7 @@ void Visit(Info& info, const IR::Inst& inst) {
         break;
     }
     case IR::Opcode::GetPatch: {
-        const auto patch = inst.Arg(0).Patch();
+        const IR::Patch patch = inst.Arg(0).Patch();
         info.uses_patches |= 1U << IR::GenericPatchIndex(patch);
         break;
     }

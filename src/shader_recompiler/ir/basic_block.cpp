@@ -148,7 +148,7 @@ std::string DumpBlock(const Block& block, const std::map<const Block*, size_t>& 
         ret += Common::StringFromFormat(" $%llu", static_cast<unsigned long long>(it->second));
     }
     ret += " predecessors [";
-    for (auto* block : block.ImmPredecessors()) {
+    for (Shader::IR::Block* block : block.ImmPredecessors()) {
         const auto it{block_to_index.find(block)};
         ASSERT(it != block_to_index.end());
         ret += Common::StringFromFormat("$%llu, ", static_cast<unsigned long long>(it->second));
@@ -174,7 +174,7 @@ std::string DumpBlock(const Block& block, const std::map<const Block*, size_t>& 
         if (op == Opcode::ReadConst || op == Opcode::ImageSampleRaw) {
             ret += Common::StringFromFormat(" (flags=0x%x) ", inst.Flags<u32>());
         } else if (op == Opcode::ReadConstBuffer) {
-            const auto info = inst.Flags<BufferInstInfo>();
+            Shader::IR::BufferInstInfo const info = inst.Flags<BufferInstInfo>();
             ret += Common::StringFromFormat(
                 " (sharp_source=%s, flatbuf_off_dw=0x%llx) ",
                 (bool(info.sharp_source)) ? "true" : "false",
@@ -204,7 +204,7 @@ std::string DumpBlock(const Block& block, const std::map<const Block*, size_t>& 
         }
         if (TypeOf(op) != Type::Void) {
             ret += Common::StringFromFormat(" (uses: %d)", inst.UseCount());
-            if (auto tag = inst.GetRegTag()) {
+            if (Shader::IR::RegTag tag = inst.GetRegTag()) {
                 ret += Common::StringFromFormat(" (tag: %s)", (RegTagInfo(tag)).c_str());
             }
             if (op == Opcode::Phi) {

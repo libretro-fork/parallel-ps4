@@ -104,7 +104,7 @@ public:
                    desc.post_op_dw1_mask == existing.post_op_dw1_mask &&
                    desc.buffer_type == existing.buffer_type;
         })};
-        auto& buffer = buffer_resources[index];
+        Shader::BufferResource& buffer = buffer_resources[index];
         buffer.used_types |= desc.used_types;
         buffer.is_written |= desc.is_written;
         buffer.is_formatted |= desc.is_formatted;
@@ -118,7 +118,7 @@ public:
                    desc.constant_mip_index == existing.constant_mip_index &&
                    desc.post_op == existing.post_op;
         })};
-        auto& image = image_resources[index];
+        Shader::ImageResource& image = image_resources[index];
         image.is_atomic |= desc.is_atomic;
         image.is_written |= desc.is_written;
         return index;
@@ -183,7 +183,7 @@ SharpFetch<T> ConstructSharpFetch(const SharpReference& sharp) {
     using Summary = SharpFetch<T>::Summary;
     SharpFetch<T> sharp_fetch{};
     for (u32 i = 0; i < sharp.num_dwords; i++) {
-        auto dword = sharp.dwords[i];
+        Shader::IR::Value dword = sharp.dwords[i];
         if (dword.IsImmediate()) {
             sharp_fetch.immediates[i] = dword.U32();
         } else {
@@ -232,7 +232,7 @@ void PatchImageSharp(const ResourceDiscovery& resource, Info& info, Descriptors&
     IR::Inst& inst = *resource.user;
 
     // Read image sharp.
-    const auto inst_info = inst.Flags<IR::TextureInstInfo>();
+    Shader::IR::TextureInstInfo const inst_info = inst.Flags<IR::TextureInstInfo>();
     const bool is_atomic = IsImageAtomicInstruction(inst);
     const bool is_written = inst.GetOpcode() == IR::Opcode::ImageWrite || is_atomic;
     // ImageRead with !is_written gets emitted as OpImageFetch with LOD operand, doesn't
@@ -249,17 +249,17 @@ void PatchImageSharp(const ResourceDiscovery& resource, Info& info, Descriptors&
         .post_op = resource.sharps[0].post_op,
     };
 
-    auto image = image_res.GetSharp(info);
+    AmdGpu::Image image = image_res.GetSharp(info);
     ASSERT(image.GetType() != AmdGpu::ImageType::Invalid);
 
     if (needs_mip_storage_fallback) {
         // If the mip level to IMAGE_(LOAD/STORE)_MIP is a constant, set up ImageResource
         // so that we will only bind a single level.
         // If index is dynamic, we will bind levels as an array
-        const auto view_type = image.GetViewType(image_res.is_array);
+        const AmdGpu::ImageType view_type = image.GetViewType(image_res.is_array);
 
         IR::Inst* body = inst.Arg(1).Inst();
-        const auto lod_arg = [&] -> IR::Value {
+        const IR::Value lod_arg = [&] -> IR::Value {
             switch (view_type) {
             case AmdGpu::ImageType::Color1D: // x, [lod]
                 return body->Arg(1);
@@ -328,7 +328,7 @@ void PatchImageSharp(const ResourceDiscovery& resource, Info& info, Descriptors&
     IR::IREmitter ir{*inst.GetParent(), IR::Block::InstructionList::s_iterator_to(inst)};
 
     if (inst.GetOpcode() == IR::Opcode::ImageSampleRaw) {
-        auto& lod_prod = resource.sharps[1].post_op_data.lod_prod;
+        const IR::Value& lod_prod = resource.sharps[1].post_op_data.lod_prod;
         const u32 sampler_binding = descriptors.Add(SamplerResource{
             .sharp_fetch = ConstructSharpFetch<AmdGpu::Sampler>(resource.sharps[1]),
             .post_op = resource.sharps[1].post_op,
@@ -369,7 +369,7 @@ static IR::Value IsMbcntWithExec(IR::Value value, bool is_hi, IR::U1 exec) {
 
 static IR::Use FindUniqueUser(IR::Inst* inst, auto&& pred) {
     IR::Use picked{};
-    for (auto& use : inst->Uses()) {
+    for (const Shader::IR::Use& use : inst->Uses()) {
         if (pred(use.user)) {
             ASSERT(!picked.user);
             picked = use;
@@ -405,19 +405,19 @@ static void RemoveAppendBufferLaneOffset(IR::Inst& vx) {
     // v_sub_i32       idx, vcc, vK, vZ
 
     IR::U1 exec{vx.Arg(1)};
-    const auto uses = vx.Uses();
-    for (auto use : uses) {
+    const std::list<Shader::IR::Use> uses = vx.Uses();
+    for (Shader::IR::Use use : uses) {
         const auto& [user, operand] = use;
         if (user->GetOpcode() == IR::Opcode::MaskedBitCount32) {
             // First pattern
             ASSERT(vx.GetOpcode() == IR::Opcode::DataAppend);
             IR::Inst* vy = user;
-            auto vx_2 = IsMbcntWithExec(IR::Value{vy}, true, exec);
+            IR::Value vx_2 = IsMbcntWithExec(IR::Value{vy}, true, exec);
             ASSERT(!vx_2.IsEmpty() && vx_2 == IR::Value{&vx});
             const auto [idx, operand] = FindUniqueUser(vy, [](const IR::Inst* inst) {
                 return inst->GetOpcode() == IR::Opcode::MaskedBitCount32;
             });
-            auto vy_2 = IsMbcntWithExec(IR::Value{idx}, false, exec);
+            IR::Value vy_2 = IsMbcntWithExec(IR::Value{idx}, false, exec);
             ASSERT(!vy_2.IsEmpty() && vy_2 == IR::Value{vy});
             idx->ReplaceUsesWithAndRemove(IR::Value{&vx});
             continue;
@@ -425,7 +425,7 @@ static void RemoveAppendBufferLaneOffset(IR::Inst& vx) {
         if (user->GetOpcode() != IR::Opcode::IAdd32 && user->GetOpcode() != IR::Opcode::ISub32) {
             continue;
         }
-        const auto other = user->Arg(1 - operand);
+        const Shader::IR::Value other = user->Arg(1 - operand);
         if (other.IsImmediate()) {
             ASSERT_MSG(other.U32() == 1u || other.U32() == std::numeric_limits<u32>::max() &&
                                                 vx.GetOpcode() == IR::Opcode::DataConsume,
@@ -437,10 +437,10 @@ static void RemoveAppendBufferLaneOffset(IR::Inst& vx) {
         }
 
         // Other patterns
-        auto vz = user->Arg(1 - operand);
-        auto vy = IsMbcntWithExec(vz, false, exec);
+        Shader::IR::Value vz = user->Arg(1 - operand);
+        IR::Value vy = IsMbcntWithExec(vz, false, exec);
         ASSERT(!vy.IsEmpty() && !vy.IsImmediate());
-        auto zero_const = IsMbcntWithExec(vy, true, exec);
+        IR::Value zero_const = IsMbcntWithExec(vy, true, exec);
         ASSERT(!zero_const.IsEmpty() && zero_const.IsImmediate() && zero_const.U32() == 0u);
         user->SetArg(1 - operand, IR::Value{u32{0u}});
     }
@@ -467,7 +467,7 @@ void PatchGlobalDataShareAccess(IR::Inst& inst, Info& info, Descriptors& descrip
     }
 
     // Convert shared memory opcode to storage buffer atomic to GDS buffer.
-    auto& buffer = info.buffers[binding];
+    Shader::BufferResource& buffer = info.buffers[binding];
     const IR::U32 offset = IR::U32{inst.Arg(0)};
     const IR::U32 address_words = ir.ShiftRightLogical(offset, ir.Imm32(1));
     const IR::U32 address_dwords = ir.ShiftRightLogical(offset, ir.Imm32(2));
@@ -555,12 +555,12 @@ void PatchGlobalDataShareAccess(IR::Inst& inst, Info& info, Descriptors& descrip
 
 IR::U32 CalculateBufferAddress(IR::IREmitter& ir, const IR::Inst& inst, const Info& info,
                                const AmdGpu::Buffer& buffer, u32 stride) {
-    const auto inst_info = inst.Flags<IR::BufferInstInfo>();
+    Shader::IR::BufferInstInfo const inst_info = inst.Flags<IR::BufferInstInfo>();
     const u32 inst_offset = inst_info.inst_offset.Value();
-    const auto is_inst_typed = inst_info.inst_data_fmt != AmdGpu::DataFormat::FormatInvalid;
-    const auto data_format = is_inst_typed
-                                 ? AmdGpu::RemapDataFormat(inst_info.inst_data_fmt.Value())
-                                 : buffer.GetDataFmt();
+    const bool is_inst_typed = inst_info.inst_data_fmt != AmdGpu::DataFormat::FormatInvalid;
+    const AmdGpu::DataFormat data_format =
+        is_inst_typed ? AmdGpu::RemapDataFormat(inst_info.inst_data_fmt.Value())
+                      : buffer.GetDataFmt();
     const u32 shift = BufferAddressShift(inst, data_format);
     const u32 mask = (1 << shift) - 1;
     const IR::U32 soffset = IR::GetBufferSOffsetArg(&inst);
@@ -630,9 +630,9 @@ IR::U32 CalculateBufferAddress(IR::IREmitter& ir, const IR::Inst& inst, const In
 }
 
 void PatchBufferArgs(IR::Inst& inst, Info& info) {
-    const auto handle = inst.Arg(0);
-    const auto buffer_res = info.buffers[handle.U32()];
-    const auto buffer = buffer_res.GetSharp(info);
+    const Shader::IR::Value handle = inst.Arg(0);
+    Shader::BufferResource const buffer_res = info.buffers[handle.U32()];
+    const AmdGpu::Buffer buffer = buffer_res.GetSharp(info);
 
     // Address of constant buffer reads can be calculated at IR emission time.
     if (inst.GetOpcode() == IR::Opcode::ReadConstBuffer) {
@@ -646,13 +646,13 @@ void PatchBufferArgs(IR::Inst& inst, Info& info) {
 
 void PatchImageSampleArgs(IR::Inst& inst, Info& info, const ImageResource& image_res,
                           const AmdGpu::Image& image) {
-    const auto handle = inst.Arg(0);
-    const auto& sampler_res = info.samplers[(handle.U32() >> 16) & 0xFFFF];
-    const auto sampler = sampler_res.GetSharp(info);
+    const Shader::IR::Value handle = inst.Arg(0);
+    Shader::SamplerResource const& sampler_res = info.samplers[(handle.U32() >> 16) & 0xFFFF];
+    const AmdGpu::Sampler sampler = sampler_res.GetSharp(info);
 
     IR::IREmitter ir{*inst.GetParent(), IR::Block::InstructionList::s_iterator_to(inst)};
-    const auto inst_info = inst.Flags<IR::TextureInstInfo>();
-    const auto view_type = image.GetViewType(image_res.is_array);
+    Shader::IR::TextureInstInfo const inst_info = inst.Flags<IR::TextureInstInfo>();
+    const AmdGpu::ImageType view_type = image.GetViewType(image_res.is_array);
 
     IR::Inst* body1 = inst.Arg(2).Inst();
     IR::Inst* body2 = inst.Arg(3).Inst();
@@ -750,24 +750,24 @@ void PatchImageSampleArgs(IR::Inst& inst, Info& info, const ImageResource& image
                          view_type == AmdGpu::ImageType::Color2DMsaaArray;
     const bool unnormalized = sampler.force_unnormalized || inst_info.is_unnormalized;
     const bool needs_dimentions = (!is_msaa && unnormalized) || (is_msaa && !unnormalized);
-    const auto dimensions =
+    const Shader::IR::Value dimensions =
         needs_dimentions ? ir.ImageQueryDimension(handle, ir.Imm32(0u), ir.Imm1(false), inst_info)
                          : IR::Value{};
     const auto get_coord = [&](u32 coord_idx, u32 dim_idx) -> IR::Value {
-        const auto coord = get_addr_reg(coord_idx);
+        const IR::F32 coord = get_addr_reg(coord_idx);
         if (is_msaa) {
             // For MSAA images preserve the unnormalized coord or manually unnormalize it
             if (unnormalized) {
                 return ir.ConvertFToU(32, coord);
             } else {
-                const auto dim =
+                const IR::F32F64 dim =
                     ir.ConvertUToF(32, 32, IR::U32{ir.CompositeExtract(dimensions, dim_idx)});
                 return ir.ConvertFToU(32, ir.FPMul(coord, dim));
             }
         }
         if (unnormalized) {
             // Normalize the coordinate for sampling, dividing by its corresponding dimension.
-            const auto dim =
+            const IR::F32F64 dim =
                 ir.ConvertUToF(32, 32, IR::U32{ir.CompositeExtract(dimensions, dim_idx)});
             return ir.FPDiv(coord, dim);
         }
@@ -803,7 +803,7 @@ void PatchImageSampleArgs(IR::Inst& inst, Info& info, const ImageResource& image
                                                  : IR::F32{};
     const IR::F32 lod_clamp = inst_info.has_lod_clamp ? get_addr_reg(addr_reg++) : IR::F32{};
 
-    auto texel = [&] -> IR::Value {
+    IR::Value texel = [&] -> IR::Value {
         if (is_msaa) {
             return ir.ImageRead(handle, coords, {}, ir.Imm32(0U), inst_info);
         }
@@ -829,7 +829,8 @@ void PatchImageSampleArgs(IR::Inst& inst, Info& info, const ImageResource& image
         return ir.ImageSampleImplicitLod(handle, coords, bias, offset, inst_info);
     }();
 
-    auto converted = ApplyReadNumberConversionVec4(ir, texel, image.GetNumberConversion());
+    Shader::IR::Value converted =
+        ApplyReadNumberConversionVec4(ir, texel, image.GetNumberConversion());
     if (sampler.force_degamma && image.GetNumberFmt() != AmdGpu::NumberFormat::Srgb) {
         converted = ApplyForceDegamma(ir, texel);
     }
@@ -842,10 +843,10 @@ void PatchImageArgs(IR::Inst& inst, Info& info) {
         return;
     }
 
-    const auto image_handle = inst.Arg(0);
-    const auto binding_index = image_handle.U32() & 0xFFFF;
-    const auto& image_res = info.images[binding_index];
-    auto image = image_res.GetSharp(info);
+    const Shader::IR::Value image_handle = inst.Arg(0);
+    const u32 binding_index = image_handle.U32() & 0xFFFF;
+    Shader::ImageResource const& image_res = info.images[binding_index];
+    AmdGpu::Image image = image_res.GetSharp(info);
 
     // Sample instructions must be handled separately using address register data.
     if (inst.GetOpcode() == IR::Opcode::ImageSampleRaw) {
@@ -853,8 +854,8 @@ void PatchImageArgs(IR::Inst& inst, Info& info) {
     }
 
     IR::IREmitter ir{*inst.GetParent(), IR::Block::InstructionList::s_iterator_to(inst)};
-    auto inst_info = inst.Flags<IR::TextureInstInfo>();
-    const auto view_type = image.GetViewType(image_res.is_array);
+    Shader::IR::TextureInstInfo inst_info = inst.Flags<IR::TextureInstInfo>();
+    const AmdGpu::ImageType view_type = image.GetViewType(image_res.is_array);
 
     // Now that we know the image type, adjust texture coordinate vector.
     IR::Inst* body = inst.Arg(1).Inst();
@@ -867,9 +868,9 @@ void PatchImageArgs(IR::Inst& inst, Info& info) {
             return {ir.CompositeConstruct(body->Arg(0), body->Arg(1)), body->Arg(2)};
         case AmdGpu::ImageType::Color2DMsaa: // x, y. (sample is passed on different argument)
         {
-            auto skip_lod = false;
+            bool skip_lod = false;
             if (inst_info.has_lod) {
-                const auto mipid = body->Arg(2);
+                const Shader::IR::Value mipid = body->Arg(2);
                 if (mipid.IsImmediate() && mipid.U32() == 0) {
                     // if image_x_mip refers to a MSAA image, and mipid is 0, it is safe to be
                     // skipped and fragid is taken from the next arg
@@ -895,24 +896,24 @@ void PatchImageArgs(IR::Inst& inst, Info& info) {
         }
     }();
 
-    const auto has_ms = view_type == AmdGpu::ImageType::Color2DMsaa ||
+    const bool has_ms = view_type == AmdGpu::ImageType::Color2DMsaa ||
                         view_type == AmdGpu::ImageType::Color2DMsaaArray;
     ASSERT(!inst_info.has_lod || !has_ms);
     // If we are binding a single mip level as fallback, drop the argument
-    const auto lod =
+    const IR::U32 lod =
         (inst_info.has_lod && image_res.mip_fallback_mode != MipStorageFallbackMode::ConstantIndex)
             ? IR::U32{arg}
             : IR::U32{};
-    const auto ms = has_ms ? IR::U32{arg} : IR::U32{};
+    const IR::U32 ms = has_ms ? IR::U32{arg} : IR::U32{};
 
-    const auto is_storage = image_res.is_written;
+    const bool is_storage = image_res.is_written;
     if (inst.GetOpcode() == IR::Opcode::ImageRead) {
-        auto texel = ir.ImageRead(image_handle, coords, lod, ms, inst_info);
+        Shader::IR::Value texel = ir.ImageRead(image_handle, coords, lod, ms, inst_info);
         if (is_storage) {
             // Storage image requires shader swizzle.
             texel = ApplySwizzle(ir, texel, image.DstSelect());
         }
-        const auto converted =
+        const Shader::IR::Value converted =
             ApplyReadNumberConversionVec4(ir, texel, image.GetNumberConversion());
         inst.ReplaceUsesWith(converted);
     } else {
@@ -921,12 +922,12 @@ void PatchImageArgs(IR::Inst& inst, Info& info) {
             inst.SetArg(2, lod);
             inst.SetArg(3, ms);
 
-            auto texel = inst.Arg(4);
+            Shader::IR::Value texel = inst.Arg(4);
             if (is_storage) {
                 // Storage image requires shader swizzle.
                 texel = ApplySwizzle(ir, texel, image.DstSelect().Inverse());
             }
-            const auto converted =
+            const Shader::IR::Value converted =
                 ApplyWriteNumberConversionVec4(ir, texel, image.GetNumberConversion());
             inst.SetArg(4, converted);
         }
@@ -938,7 +939,7 @@ void ResourcePatchingPass(Shader::Info& info, const ResourceDiscoveryList& resou
     // Iterate over discovered resources and patch them after finding the sharp.
     // Pass 1: Track resource sharps
     Descriptors descriptors{info};
-    for (const auto& usage : resources) {
+    for (Shader::Optimization::ResourceDiscovery const& usage : resources) {
         IR::Inst& inst = *usage.user;
         if (IsBufferInstruction(inst)) {
             PatchBufferSharp(usage, info, descriptors, profile);
@@ -948,7 +949,7 @@ void ResourcePatchingPass(Shader::Info& info, const ResourceDiscoveryList& resou
     }
 
     // Pass 2: Patch instruction args
-    for (const auto& usage : resources) {
+    for (Shader::Optimization::ResourceDiscovery const& usage : resources) {
         IR::Inst& inst = *usage.user;
         if (IsBufferInstruction(inst)) {
             PatchBufferArgs(inst, info);

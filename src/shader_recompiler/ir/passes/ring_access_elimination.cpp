@@ -14,7 +14,7 @@
 namespace Shader::Optimization {
 
 void RingAccessElimination(const IR::Program& program, const RuntimeInfo& runtime_info) {
-    auto& info = program.info;
+    Shader::Info& info = program.info;
 
     const auto& ForEachInstruction = [&](auto func) {
         for (IR::Block* block : program.blocks) {
@@ -28,7 +28,7 @@ void RingAccessElimination(const IR::Program& program, const RuntimeInfo& runtim
     switch (program.info.hw_stage) {
     case HwStage::Local: {
         ForEachInstruction([=](IR::IREmitter& ir, IR::Inst& inst) {
-            const auto opcode = inst.GetOpcode();
+            const IR::Opcode opcode = inst.GetOpcode();
             switch (opcode) {
             case IR::Opcode::WriteSharedU64:
             case IR::Opcode::WriteSharedU32: {
@@ -41,8 +41,8 @@ void RingAccessElimination(const IR::Program& program, const RuntimeInfo& runtim
                 IR::Value data =
                     is_composite ? ir.UnpackUint2x32(IR::U64{inst.Arg(1)}) : inst.Arg(1);
                 for (s32 i = 0; i < num_components; i++) {
-                    const auto attrib = IR::Attribute::Param0 + (offset / 16);
-                    const auto comp = (offset / 4) % 4;
+                    const Shader::IR::Attribute attrib = IR::Attribute::Param0 + (offset / 16);
+                    const u32 comp = (offset / 4) % 4;
                     const IR::U32 value =
                         IR::U32{is_composite ? ir.CompositeExtract(data, i) : data};
                     ir.SetAttribute(attrib, ir.BitCast<IR::F32, IR::U32>(value), comp);
@@ -59,18 +59,18 @@ void RingAccessElimination(const IR::Program& program, const RuntimeInfo& runtim
     }
     case HwStage::Export: {
         ForEachInstruction([=](IR::IREmitter& ir, IR::Inst& inst) {
-            const auto opcode = inst.GetOpcode();
+            const IR::Opcode opcode = inst.GetOpcode();
             switch (opcode) {
             case IR::Opcode::StoreBufferU32: {
-                const auto info = inst.Flags<IR::BufferInstInfo>();
+                Shader::IR::BufferInstInfo const info = inst.Flags<IR::BufferInstInfo>();
                 if (!info.system_coherent || !info.globally_coherent) {
                     break;
                 }
 
-                const auto offset = inst.Flags<IR::BufferInstInfo>().inst_offset.Value();
+                const u64 offset = inst.Flags<IR::BufferInstInfo>().inst_offset.Value();
                 ASSERT(offset < runtime_info.hw.es.vertex_data_size * 4);
-                const auto data = ir.BitCast<IR::F32>(IR::U32{inst.Arg(2)});
-                const auto attrib =
+                IR::F32 const data = ir.BitCast<IR::F32>(IR::U32{inst.Arg(2)});
+                const IR::Value attrib =
                     IR::Value{offset < 16 ? IR::Attribute::Position0
                                           : IR::Attribute::Param0 + (offset / 16 - 1)};
                 const u32 comp = (offset / 4) % 4;
@@ -89,7 +89,7 @@ void RingAccessElimination(const IR::Program& program, const RuntimeInfo& runtim
         break;
     }
     case HwStage::Geometry: {
-        const auto& gs_info = runtime_info.hw.gs;
+        const Shader::HwGeometryRuntimeInfo& gs_info = runtime_info.hw.gs;
         info.gs_copy_data = Shader::ParseCopyShader(gs_info.vs_copy);
 
         u32 dwords_per_vertex = gs_info.out_vertex_data_size;
@@ -101,42 +101,44 @@ void RingAccessElimination(const IR::Program& program, const RuntimeInfo& runtim
         }
 
         ForEachInstruction([&](IR::IREmitter& ir, IR::Inst& inst) {
-            const auto opcode = inst.GetOpcode();
+            const IR::Opcode opcode = inst.GetOpcode();
             switch (opcode) {
             case IR::Opcode::LoadBufferU32: {
-                const auto info = inst.Flags<IR::BufferInstInfo>();
+                Shader::IR::BufferInstInfo const info = inst.Flags<IR::BufferInstInfo>();
                 if (!info.system_coherent || !info.globally_coherent) {
                     break;
                 }
 
-                const auto vertex_id = (info.index_enable ? IR::GetBufferIndexArg(&inst)
-                                                          : IR::GetBufferVOffsetArg(&inst))
-                                           .U32() >>
-                                       2;
-                const auto soffset = IR::GetBufferSOffsetArg(&inst);
-                const auto bucket = soffset.U32() / 256u;
-                const auto attrib = bucket < 4 ? IR::Attribute::Position0
-                                               : IR::Attribute::Param0 + (bucket / 4 - 1);
-                const auto comp = bucket % 4;
+                const u32 vertex_id = (info.index_enable ? IR::GetBufferIndexArg(&inst)
+                                                         : IR::GetBufferVOffsetArg(&inst))
+                                          .U32() >>
+                                      2;
+                const IR::U32 soffset = IR::GetBufferSOffsetArg(&inst);
+                const unsigned int bucket = soffset.U32() / 256u;
+                const Shader::IR::Attribute attrib = bucket < 4
+                                                         ? IR::Attribute::Position0
+                                                         : IR::Attribute::Param0 + (bucket / 4 - 1);
+                const unsigned int comp = bucket % 4;
 
-                auto attr_value = ir.GetAttribute(attrib, comp, vertex_id);
+                IR::F32 attr_value = ir.GetAttribute(attrib, comp, vertex_id);
                 inst.ReplaceOpcode(IR::Opcode::BitCastU32F32);
                 inst.ClearArgs();
                 inst.SetArg(0, attr_value);
                 break;
             }
             case IR::Opcode::StoreBufferU32: {
-                const auto buffer_info = inst.Flags<IR::BufferInstInfo>();
+                Shader::IR::BufferInstInfo const buffer_info = inst.Flags<IR::BufferInstInfo>();
                 if (!buffer_info.system_coherent || !buffer_info.globally_coherent) {
                     break;
                 }
 
-                const auto offset = inst.Flags<IR::BufferInstInfo>().inst_offset.Value();
-                const auto data = ir.BitCast<IR::F32>(IR::U32{inst.Arg(2)});
-                const auto comp_ofs = info.gs_copy_data.output_vertices * sizeof(u32);
-                const auto output_size = gs_info.output_vertices * dwords_per_vertex * sizeof(u32);
+                const u64 offset = inst.Flags<IR::BufferInstInfo>().inst_offset.Value();
+                IR::F32 const data = ir.BitCast<IR::F32>(IR::U32{inst.Arg(2)});
+                const size_t comp_ofs = info.gs_copy_data.output_vertices * sizeof(u32);
+                const size_t output_size =
+                    gs_info.output_vertices * dwords_per_vertex * sizeof(u32);
 
-                const auto vc_read_ofs = (((offset / comp_ofs) * comp_ofs) % output_size) * 16u;
+                const u64 vc_read_ofs = (((offset / comp_ofs) * comp_ofs) % output_size) * 16u;
                 const auto& it = info.gs_copy_data.attr_map.find(vc_read_ofs);
                 ASSERT(it != info.gs_copy_data.attr_map.cend());
                 const auto& [attr, comp] = it->second;

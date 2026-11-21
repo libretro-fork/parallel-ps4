@@ -67,7 +67,7 @@ void SharedMemorySimplifyPass(IR::Program& program, const Profile& profile) {
         return;
     }
 
-    const auto atomic_types = CalculateSpecialSharedAtomicTypes(program);
+    const IR::Type atomic_types = CalculateSpecialSharedAtomicTypes(program);
     if (True(atomic_types & IR::Type::U16) && True(atomic_types & IR::Type::U64)) {
         // If both other atomic types are used, there is nothing to do.
         return;

@@ -29,7 +29,7 @@ StridePatchResult CheckStridePatchPattern(IR::Value value) {
     // s_movk_i32      s0, 0x6d0
     // buffer_load_dwordx4 v[17:20], v59, s[36:39], s0 idxen
 
-    auto* inst = value.TryInst();
+    IR::Inst* inst = value.TryInst();
     if (!inst) {
         return {value, 0, false};
     }
@@ -51,7 +51,7 @@ ClearStrideAndPatchRecordsResult CheckClearStrideAndPatchRecordsPattern(IR::Valu
     // s_lshl_b32      s22, s22, <imm>
     // s_buffer_load_dwordx4 s[20:23], s[20:23], 0x0
 
-    auto* dw1_inst = dword1.TryInst();
+    IR::Inst* dw1_inst = dword1.TryInst();
     if (!dw1_inst) {
         return {dword1, dword2, false};
     }
@@ -59,7 +59,7 @@ ClearStrideAndPatchRecordsResult CheckClearStrideAndPatchRecordsPattern(IR::Valu
         dw1_inst->Arg(1).U32() != 0xffffu) {
         return {dword1, dword2, false};
     }
-    auto* dw2_inst = dword2.TryInst();
+    IR::Inst* dw2_inst = dword2.TryInst();
     if (!dw2_inst) {
         return {dword1, dword2, false};
     }
@@ -86,7 +86,7 @@ InlineCbufResult CheckInlineCbufPattern(IR::Value value) {
     //  buffer_load_format_xyz v[8:10], v1, s[32:35], 0 ...
     // is used to define an inline constant buffer
 
-    auto* inst = value.TryInst();
+    IR::Inst* inst = value.TryInst();
     if (!inst) {
         return {value, false};
     }
@@ -95,7 +95,7 @@ InlineCbufResult CheckInlineCbufPattern(IR::Value value) {
         return {value, false};
     }
     const u32 offset = inst->Arg(0).IsImmediate() ? inst->Arg(0).U32() : inst->Arg(1).U32();
-    auto* prod = inst->Arg(0).IsImmediate() ? inst->Arg(1).Inst() : inst->Arg(0).Inst();
+    IR::Inst* prod = inst->Arg(0).IsImmediate() ? inst->Arg(1).Inst() : inst->Arg(0).Inst();
     if (prod->GetOpcode() != IR::Opcode::GetPcLo) {
         return {value, false};
     }
@@ -122,7 +122,7 @@ CubeTo2DArrayResult CheckCubeTo2DArrayPattern(IR::Value dword3, IR::Value dword4
     // is used to convert the resource from cubemap to 2d-array
 
     // Check pattern that forces type to Color2DArray
-    auto* dw3_inst = dword3.TryInst();
+    IR::Inst* dw3_inst = dword3.TryInst();
     if (!dw3_inst) {
         return {dword3, dword4, false};
     }
@@ -132,14 +132,14 @@ CubeTo2DArrayResult CheckCubeTo2DArrayPattern(IR::Value dword3, IR::Value dword4
         return {dword3, dword4, false};
     }
 
-    auto* dw3_and = dw3_inst->Arg(1).Inst();
+    IR::Inst* dw3_and = dw3_inst->Arg(1).Inst();
     if (dw3_and->GetOpcode() != IR::Opcode::BitwiseAnd32 || !dw3_and->Arg(1).IsImmediate() ||
         dw3_and->Arg(1).U32() != 0xfffffffu) {
         return {dword3, dword4, false};
     }
 
     // Check pattern that translates cubemap depth to slices
-    auto* dw4_inst = dword4.TryInst();
+    IR::Inst* dw4_inst = dword4.TryInst();
     if (!dw4_inst) {
         return {dword3, dword4, false};
     }
@@ -149,7 +149,7 @@ CubeTo2DArrayResult CheckCubeTo2DArrayPattern(IR::Value dword3, IR::Value dword4
         return {dword3, dword4, false};
     }
 
-    auto* dw4_rhs = dw4_inst->Arg(1).Inst();
+    IR::Inst* dw4_rhs = dw4_inst->Arg(1).Inst();
     if (dw4_rhs->GetOpcode() != IR::Opcode::BitwiseAnd32 || !dw4_rhs->Arg(1).IsImmediate() ||
         dw4_rhs->Arg(1).U32() != 0xffffe000u) {
         return {dword3, dword4, false};
@@ -173,7 +173,7 @@ AnisoLod0Result CheckDisableAnisoLod0Pattern(IR::Value value) {
     //  s_mov_b32     s12, s0
     // is used to disable anisotropy in the sampler if the sampled texture doesn't have mips
 
-    auto* inst = value.TryInst();
+    IR::Inst* inst = value.TryInst();
     if (!inst) {
         return {value, {}, false};
     }
@@ -183,13 +183,13 @@ AnisoLod0Result CheckDisableAnisoLod0Pattern(IR::Value value) {
     }
 
     // Select should be based on zero check
-    const auto* prod0 = inst->Arg(0).Inst();
+    const IR::Inst* prod0 = inst->Arg(0).Inst();
     if (prod0->GetOpcode() != IR::Opcode::IEqual32 ||
         !(prod0->Arg(1).IsImmediate() && prod0->Arg(1).U32() == 0u)) {
         return {value, {}, false};
     }
 
-    auto* prod0_arg0 = prod0->Arg(0).Inst();
+    IR::Inst* prod0_arg0 = prod0->Arg(0).Inst();
     ASSERT(prod0_arg0->GetOpcode() != IR::Opcode::Phi);
 
     // The bits range is for lods (note that constants are changed after constant propagation pass)
@@ -200,13 +200,13 @@ AnisoLod0Result CheckDisableAnisoLod0Pattern(IR::Value value) {
     }
 
     // Make sure mask is masking out anisotropy
-    const auto* prod1 = inst->Arg(1).Inst();
+    const IR::Inst* prod1 = inst->Arg(1).Inst();
     if (prod1->GetOpcode() != IR::Opcode::BitwiseAnd32 || prod1->Arg(1).U32() != 0xfffff1ff) {
         return {value, {}, false};
     }
 
     // We're working on the first dword of S#
-    auto* prod2 = inst->Arg(2).Inst();
+    IR::Inst* prod2 = inst->Arg(2).Inst();
     ASSERT(prod2->GetOpcode() != IR::Opcode::Phi);
     return {inst->Arg(2), prod0_arg0->Arg(0), true};
 }
@@ -219,7 +219,7 @@ SamplerPatchResult CheckForceClampToWrapPattern(IR::Value value) {
     // s_and_b32 s12, 0xfffffe00, s12
     // is used to force clamp_x/y/z to wrap
 
-    auto* inst = value.TryInst();
+    IR::Inst* inst = value.TryInst();
     if (!inst) {
         return {value, false};
     }
@@ -237,7 +237,7 @@ SamplerPatchResult CheckForceClampToLastTexelPattern(IR::Value value) {
     // s_or_b32  0x12, s12
     // is used to force clamp_x/y to last texel
 
-    auto* inst = value.TryInst();
+    IR::Inst* inst = value.TryInst();
     if (!inst) {
         return {value, false};
     }
@@ -247,7 +247,7 @@ SamplerPatchResult CheckForceClampToLastTexelPattern(IR::Value value) {
         return {value, false};
     }
 
-    auto* prod = inst->Arg(1).Inst();
+    IR::Inst* prod = inst->Arg(1).Inst();
     if (prod->GetOpcode() != IR::Opcode::BitwiseAnd32 || !prod->Arg(0).IsImmediate() ||
         prod->Arg(0).U32() != 0xfffffe00u) {
         return {value, false};
@@ -260,7 +260,7 @@ SamplerPatchResult CheckClearAnisoRatioAndThresholdPattern(IR::Value value) {
     // s_and_b32 s12, s12, 0xfff8f1ff
     // is used to clear anisotropy ratio and threshold fields
 
-    auto* inst = value.TryInst();
+    IR::Inst* inst = value.TryInst();
     if (!inst) {
         return {value, false};
     }
@@ -288,7 +288,7 @@ void MarkReadConstBufferSharpSources(const SharpReference& sharp) {
         }
         ASSERT(IsSharpSource(source));
         if (source->GetOpcode() == IR::Opcode::ReadConstBuffer) {
-            auto flags = source->Flags<IR::BufferInstInfo>();
+            Shader::IR::BufferInstInfo flags = source->Flags<IR::BufferInstInfo>();
             flags.sharp_source.Assign(1u);
             source->SetFlags(flags);
         }
@@ -297,14 +297,14 @@ void MarkReadConstBufferSharpSources(const SharpReference& sharp) {
 
 void DiscoverBufferSharp(IR::Block& block, IR::Inst& inst, ResourceDiscoveryList& resources) {
     IR::Inst* handle = inst.Arg(0).Inst();
-    auto& resource = resources.emplace_back(&inst);
-    auto& vsharp = resource.sharps[0];
+    Shader::Optimization::ResourceDiscovery& resource = resources.emplace_back(&inst);
+    Shader::Optimization::SharpReference& vsharp = resource.sharps[0];
 
     // Gather V# dwords
     vsharp.num_dwords = handle->NumArgs();
     for (size_t i = 0; i < handle->NumArgs(); ++i) {
         vsharp.dwords[i] = handle->Arg(i);
-        if (auto* inst = vsharp.dwords[i].TryInst();
+        if (IR::Inst* inst = vsharp.dwords[i].TryInst();
             inst && inst->GetOpcode() == IR::Opcode::ReadFirstLane) {
             vsharp.dwords[i] = inst->Arg(0);
         }
@@ -334,15 +334,15 @@ void DiscoverBufferSharp(IR::Block& block, IR::Inst& inst, ResourceDiscoveryList
 void DiscoverImageSharp(IR::Block& block, IR::Inst& inst, ResourceDiscoveryList& resources) {
     IR::Inst* image_handle = inst.Arg(0).Inst();
     ASSERT(image_handle->GetOpcode() == IR::Opcode::ImageHandle);
-    auto& resource = resources.emplace_back(&inst);
-    auto& tsharp = resource.sharps[0];
+    Shader::Optimization::ResourceDiscovery& resource = resources.emplace_back(&inst);
+    Shader::Optimization::SharpReference& tsharp = resource.sharps[0];
 
     // Gather T# dwords
     IR::Inst* tsharp_low = image_handle->Arg(0).Inst();
     for (size_t i = 0; i < tsharp_low->NumArgs(); ++i) {
         tsharp.dwords[tsharp.num_dwords++] = tsharp_low->Arg(i);
     }
-    if (auto tsharp_high = image_handle->Arg(1).TryInst()) {
+    if (IR::Inst* tsharp_high = image_handle->Arg(1).TryInst()) {
         for (size_t i = 0; i < tsharp_high->NumArgs(); ++i) {
             tsharp.dwords[tsharp.num_dwords++] = tsharp_high->Arg(i);
         }
@@ -364,7 +364,7 @@ void DiscoverImageSharp(IR::Block& block, IR::Inst& inst, ResourceDiscoveryList&
 
     // Gather S# dwords
     const IR::Inst* sampler = inst.Arg(1).Inst();
-    auto& ssharp = resource.sharps[1];
+    Shader::Optimization::SharpReference& ssharp = resource.sharps[1];
     for (size_t i = 0; i < sampler->NumArgs(); ++i) {
         ssharp.dwords[ssharp.num_dwords++] = sampler->Arg(i);
     }

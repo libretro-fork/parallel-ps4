@@ -71,7 +71,8 @@ void Translator::S_GETPC_B64(const GcnInst& inst) {
 }
 
 void Translator::S_SENDMSG(const GcnInst& inst) {
-    const auto& simm = reinterpret_cast<const SendMsgSimm&>(inst.control.sopp.simm);
+    const Shader::Gcn::SendMsgSimm& simm =
+        reinterpret_cast<const SendMsgSimm&>(inst.control.sopp.simm);
     switch (simm.msg) {
     case SendMsgSimm::Message::Gs: {
         switch (simm.op) {

@@ -34,14 +34,14 @@ static IR::Value LoadBufferFormat(IR::IREmitter& ir, const IR::Value handle, con
         interpreted = ir.Imm32(0.f);
         break;
     case AmdGpu::DataFormat::Format8: {
-        const auto raw = ir.UConvert(32, ir.LoadBufferU8(handle, address, info));
-        const auto unpacked = ir.Unpack4x8(format_info.num_format, raw);
+        const IR::U8U16U32U64 raw = ir.UConvert(32, ir.LoadBufferU8(handle, address, info));
+        const Shader::IR::Value unpacked = ir.Unpack4x8(format_info.num_format, raw);
         interpreted = ir.CompositeExtract(unpacked, 0);
         break;
     }
     case AmdGpu::DataFormat::Format8_8: {
-        const auto raw = ir.UConvert(32, ir.LoadBufferU16(handle, address, info));
-        const auto unpacked = ir.Unpack4x8(format_info.num_format, raw);
+        const IR::U8U16U32U64 raw = ir.UConvert(32, ir.LoadBufferU16(handle, address, info));
+        const Shader::IR::Value unpacked = ir.Unpack4x8(format_info.num_format, raw);
         interpreted = ir.CompositeConstruct(ir.CompositeExtract(unpacked, 0),
                                             ir.CompositeExtract(unpacked, 1));
         break;
@@ -51,8 +51,8 @@ static IR::Value LoadBufferFormat(IR::IREmitter& ir, const IR::Value handle, con
                                    IR::U32{ir.LoadBufferU32(1, handle, address, info)});
         break;
     case AmdGpu::DataFormat::Format16: {
-        const auto raw = ir.UConvert(32, ir.LoadBufferU16(handle, address, info));
-        const auto unpacked = ir.Unpack2x16(format_info.num_format, raw);
+        const IR::U8U16U32U64 raw = ir.UConvert(32, ir.LoadBufferU16(handle, address, info));
+        const Shader::IR::Value unpacked = ir.Unpack2x16(format_info.num_format, raw);
         interpreted = ir.CompositeExtract(unpacked, 0);
         break;
     }
@@ -69,7 +69,7 @@ static IR::Value LoadBufferFormat(IR::IREmitter& ir, const IR::Value handle, con
                                           IR::U32{ir.LoadBufferU32(1, handle, address, info)});
         break;
     case AmdGpu::DataFormat::Format16_16_16_16: {
-        const auto raw = ir.LoadBufferU32(2, handle, address, info);
+        const Shader::IR::Value raw = ir.LoadBufferU32(2, handle, address, info);
         interpreted = ir.CompositeConstruct(
             ir.Unpack2x16(format_info.num_format, IR::U32{ir.CompositeExtract(raw, 0)}),
             ir.Unpack2x16(format_info.num_format, IR::U32{ir.CompositeExtract(raw, 1)}));
@@ -94,7 +94,7 @@ static IR::Value LoadBufferFormat(IR::IREmitter& ir, const IR::Value handle, con
     Common::StaticVector<IR::Value, 4> components;
     for (u32 i = 0; i < 4; i++) {
         if (i < format_info.num_components) {
-            const auto component =
+            const IR::F32 component =
                 IR::F32{format_info.num_components == 1 ? interpreted
                                                         : ir.CompositeExtract(interpreted, i)};
             components.push_back(
@@ -103,7 +103,8 @@ static IR::Value LoadBufferFormat(IR::IREmitter& ir, const IR::Value handle, con
             components.push_back(ir.Imm32(0.f));
         }
     }
-    const auto swizzled = ApplySwizzle(ir, ir.CompositeConstruct(components), format_info.swizzle);
+    const Shader::IR::Value swizzled =
+        ApplySwizzle(ir, ir.CompositeConstruct(components), format_info.swizzle);
     return swizzled;
 }
 
@@ -111,61 +112,61 @@ static void StoreBufferFormat(IR::IREmitter& ir, const IR::Value handle, const I
                               const IR::Value& value, const IR::BufferInstInfo info,
                               const FormatInfo& format_info) {
     // Extract actual number of components and apply additional modifications.
-    const auto swizzled = ApplySwizzle(ir, value, format_info.swizzle.Inverse());
+    const Shader::IR::Value swizzled = ApplySwizzle(ir, value, format_info.swizzle.Inverse());
     Common::StaticVector<IR::Value, 4> components;
     for (u32 i = 0; i < format_info.num_components; i++) {
-        const auto component = IR::F32{ir.CompositeExtract(swizzled, i)};
+        const IR::F32 component = IR::F32{ir.CompositeExtract(swizzled, i)};
         components.push_back(ApplyWriteNumberConversion(ir, component, format_info.num_conversion));
     }
-    const auto real_value =
+    const Shader::IR::Value real_value =
         components.size() == 1 ? components[0] : ir.CompositeConstruct(components);
 
     switch (format_info.data_format) {
     case AmdGpu::DataFormat::FormatInvalid:
         break;
     case AmdGpu::DataFormat::Format8: {
-        const auto packed =
+        const IR::U32 packed =
             ir.Pack4x8(format_info.num_format, ir.CompositeConstruct(real_value, ir.Imm32(0.f),
                                                                      ir.Imm32(0.f), ir.Imm32(0.f)));
         ir.StoreBufferU8(handle, address, ir.UConvert(8, packed), info);
         break;
     }
     case AmdGpu::DataFormat::Format8_8: {
-        const auto packed = ir.Pack4x8(format_info.num_format,
-                                       ir.CompositeConstruct(ir.CompositeExtract(real_value, 0),
-                                                             ir.CompositeExtract(real_value, 1),
-                                                             ir.Imm32(0.f), ir.Imm32(0.f)));
+        const IR::U32 packed = ir.Pack4x8(format_info.num_format,
+                                          ir.CompositeConstruct(ir.CompositeExtract(real_value, 0),
+                                                                ir.CompositeExtract(real_value, 1),
+                                                                ir.Imm32(0.f), ir.Imm32(0.f)));
         ir.StoreBufferU16(handle, address, ir.UConvert(16, packed), info);
         break;
     }
     case AmdGpu::DataFormat::Format8_8_8_8: {
-        auto packed = ir.Pack4x8(format_info.num_format, real_value);
+        IR::U32 packed = ir.Pack4x8(format_info.num_format, real_value);
         ir.StoreBufferU32(1, handle, address, packed, info);
         break;
     }
     case AmdGpu::DataFormat::Format16: {
-        const auto packed =
+        const IR::U32 packed =
             ir.Pack2x16(format_info.num_format, ir.CompositeConstruct(real_value, ir.Imm32(0.f)));
         ir.StoreBufferU16(handle, address, ir.UConvert(16, packed), info);
         break;
     }
     case AmdGpu::DataFormat::Format16_16: {
-        const auto packed = ir.Pack2x16(format_info.num_format, real_value);
+        const IR::U32 packed = ir.Pack2x16(format_info.num_format, real_value);
         ir.StoreBufferU32(1, handle, address, packed, info);
         break;
     }
     case AmdGpu::DataFormat::Format10_11_11: {
-        const auto packed = ir.Pack10_11_11(format_info.num_format, real_value);
+        const IR::U32 packed = ir.Pack10_11_11(format_info.num_format, real_value);
         ir.StoreBufferU32(1, handle, address, packed, info);
         break;
     }
     case AmdGpu::DataFormat::Format2_10_10_10: {
-        const auto packed = ir.Pack2_10_10_10(format_info.num_format, real_value);
+        const IR::U32 packed = ir.Pack2_10_10_10(format_info.num_format, real_value);
         ir.StoreBufferU32(1, handle, address, packed, info);
         break;
     }
     case AmdGpu::DataFormat::Format16_16_16_16: {
-        const auto packed = ir.CompositeConstruct(
+        const Shader::IR::Value packed = ir.CompositeConstruct(
             ir.Pack2x16(format_info.num_format,
                         ir.CompositeConstruct(ir.CompositeExtract(real_value, 0),
                                               ir.CompositeExtract(real_value, 1))),
@@ -193,14 +194,14 @@ static void StoreBufferFormat(IR::IREmitter& ir, const IR::Value handle, const I
 
 static void LowerBufferFormatInst(IR::Block& block, IR::Inst& inst, Info& info) {
     IR::IREmitter ir{block, IR::Block::InstructionList::s_iterator_to(inst)};
-    const auto flags = inst.Flags<IR::BufferInstInfo>();
-    const auto desc{info.buffers[inst.Arg(0).U32()]};
-    const auto buffer{desc.GetSharp(info)};
+    Shader::IR::BufferInstInfo const flags = inst.Flags<IR::BufferInstInfo>();
+    Shader::BufferResource const desc{info.buffers[inst.Arg(0).U32()]};
+    const AmdGpu::Buffer buffer{desc.GetSharp(info)};
 
-    const auto is_inst_typed = flags.inst_data_fmt != AmdGpu::DataFormat::FormatInvalid;
-    const auto data_format =
+    const bool is_inst_typed = flags.inst_data_fmt != AmdGpu::DataFormat::FormatInvalid;
+    const AmdGpu::DataFormat data_format =
         is_inst_typed ? AmdGpu::RemapDataFormat(flags.inst_data_fmt.Value()) : buffer.GetDataFmt();
-    const auto format_info = FormatInfo{
+    const Shader::Optimization::FormatInfo format_info = FormatInfo{
         .data_format = data_format,
         .num_format = is_inst_typed
                           ? AmdGpu::RemapNumberFormat(flags.inst_num_fmt.Value(), data_format)
@@ -226,7 +227,7 @@ static void LowerBufferFormatInst(IR::Block& block, IR::Inst& inst, Info& info) 
     }
 
     if (IsBufferFormatLoad(inst)) {
-        const auto interpreted =
+        const IR::Value interpreted =
             LoadBufferFormat(ir, inst.Arg(0), IR::U32{inst.Arg(1)}, flags, format_info);
         inst.ReplaceUsesWithAndRemove(interpreted);
     } else if (IsBufferFormatStore(inst)) {
@@ -236,7 +237,7 @@ static void LowerBufferFormatInst(IR::Block& block, IR::Inst& inst, Info& info) 
 }
 
 void LowerBufferFormatToRaw(IR::Program& program) {
-    auto& info = program.info;
+    Shader::Info& info = program.info;
     for (IR::Block* const block : program.blocks) {
         for (IR::Inst& inst : block->Instructions()) {
             if (IsBufferFormatLoad(inst) || IsBufferFormatStore(inst)) {

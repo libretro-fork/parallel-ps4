@@ -21,9 +21,9 @@ CopyShaderData ParseCopyShader(std::span<const u32> code) {
     sources.fill(-1);
 
     CopyShaderData data{};
-    auto last_attr{IR::Attribute::Position0};
+    Shader::IR::Attribute last_attr{IR::Attribute::Position0};
     while (!code_slice.atEnd()) {
-        auto inst = decoder.decodeInstruction(code_slice);
+        Shader::Gcn::GcnInst inst = decoder.decodeInstruction(code_slice);
         switch (inst.opcode) {
         case Gcn::Opcode::S_LSHL_B32: {
             ASSERT(inst.src[0].field == Gcn::OperandField::SignedConstIntPos &&
@@ -48,19 +48,19 @@ CopyShaderData ParseCopyShader(std::span<const u32> code) {
         case Gcn::Opcode::S_BFM_B32: {
             ASSERT(inst.src[0].field == Gcn::OperandField::SignedConstIntPos &&
                    inst.src[1].field == Gcn::OperandField::SignedConstIntPos);
-            const auto src0 = inst.src[0].code - Gcn::OperandFieldRange::SignedConstIntPosMin + 1;
-            const auto src1 = inst.src[1].code - Gcn::OperandFieldRange::SignedConstIntPosMin + 1;
+            const u32 src0 = inst.src[0].code - Gcn::OperandFieldRange::SignedConstIntPosMin + 1;
+            const u32 src1 = inst.src[1].code - Gcn::OperandFieldRange::SignedConstIntPosMin + 1;
             sources[inst.dst[0].code] = ((1 << src0) - 1) << src1;
             break;
         }
         case Gcn::Opcode::EXP: {
-            const auto& exp = inst.control.exp;
+            const Shader::Gcn::InstControlEXP& exp = inst.control.exp;
             const IR::Attribute semantic = static_cast<IR::Attribute>(exp.target);
             for (int i = 0; i < inst.src_count; ++i) {
                 if ((exp.en & (1 << i)) == 0) {
                     continue;
                 }
-                const auto ofs = offsets[inst.src[i].code];
+                const int ofs = offsets[inst.src[i].code];
                 if (ofs != -1) {
                     data.attr_map[ofs] = {semantic, i};
                     if (semantic > last_attr) {

@@ -19,7 +19,8 @@ T extract(T value, u32 lst, u32 fst) {
 } // namespace bit
 
 InstEncoding GetInstructionEncoding(u32 token) {
-    auto encoding = static_cast<InstEncoding>(token & (u32)EncodingMask::MASK_9bit);
+    Shader::Gcn::InstEncoding encoding =
+        static_cast<InstEncoding>(token & (u32)EncodingMask::MASK_9bit);
     switch (encoding) {
     case InstEncoding::SOP1:
     case InstEncoding::SOPP:
@@ -531,7 +532,7 @@ void GcnDecodeContext::decodeDataParallelPrimitive(InstEncoding encoding, GcnCod
             m_instruction.src[1].input_modifier.neg = true;
         }
 
-        auto op = dpp.GetOperation();
+        Shader::Gcn::DppOperation op = dpp.GetOperation();
         LOG_ERROR(
             Render_Recompiler,
             "unhandled DPP operation: %s (0x%x), value %u, bc %s, row_mask 0b%s, bank_mask 0b%s",
@@ -803,10 +804,10 @@ void GcnDecodeContext::decodeInstructionVOP3(uint64_t hexInstruction) {
     m_instruction.control.vop3 = *reinterpret_cast<InstControlVOP3*>(&hexInstruction);
 
     // update input modifier
-    auto& control = m_instruction.control.vop3;
+    Shader::Gcn::InstControlVOP3& control = m_instruction.control.vop3;
 
     // update output modifier
-    auto& outputMod = m_instruction.dst[0].output_modifier;
+    Shader::Gcn::OutputModifiers& outputMod = m_instruction.dst[0].output_modifier;
 
     if (!IsVop3BEncoding(m_instruction.opcode)) {
         for (u32 i = 0; i != 3; ++i) {
@@ -868,7 +869,7 @@ void GcnDecodeContext::decodeInstructionVOP3P(uint64_t hexInstruction) {
     m_instruction.control.vop3p = *reinterpret_cast<InstControlVOP3P*>(&hexInstruction);
 
     // update input modifier
-    auto& control = m_instruction.control.vop3p;
+    Shader::Gcn::InstControlVOP3P& control = m_instruction.control.vop3p;
     for (u32 i = 0; i != 3; ++i) {
         if (control.neg & (1u << i)) {
             m_instruction.src[i].input_modifier.neg = true;
@@ -888,7 +889,7 @@ void GcnDecodeContext::decodeInstructionVOP3P(uint64_t hexInstruction) {
     }
 
     // update output modifier
-    auto& outputMod = m_instruction.dst[0].output_modifier;
+    Shader::Gcn::OutputModifiers& outputMod = m_instruction.dst[0].output_modifier;
 
     outputMod.clamp = static_cast<bool>(control.clamp);
 }
@@ -1236,7 +1237,7 @@ void GcnDecodeContext::decodeInstructionDS(uint64_t hexInstruction) {
 
     m_instruction.control.ds = *reinterpret_cast<InstControlDS*>(&hexInstruction);
 
-    auto instFormat = InstructionFormat(InstEncoding::DS, (u32)op);
+    Shader::Gcn::InstFormat instFormat = InstructionFormat(InstEncoding::DS, (u32)op);
 
     m_instruction.control.ds.dual =
         op == OpcodeDS::DS_WRITE2_B32 || op == OpcodeDS::DS_WRXCHG2_RTN_B32 ||

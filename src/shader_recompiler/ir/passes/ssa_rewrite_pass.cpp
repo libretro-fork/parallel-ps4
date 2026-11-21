@@ -137,7 +137,7 @@ public:
                 break;
             }
 
-            const auto preds = block->ImmPredecessors();
+            const std::span<Shader::IR::Block* const> preds = block->ImmPredecessors();
             if (preds.size() == 1) {
                 // Optimize the common case of one predecessor: no phi needed
                 chain.push_back(std::exchange(block, preds.front()));
@@ -177,7 +177,7 @@ public:
     }
 
     void ResolveTrivialPhis() {
-        auto worklist = std::move(m_pending_phis);
+        std::vector<Shader::IR::Inst*> worklist = std::move(m_pending_phis);
         while (!worklist.empty()) {
             IR::Inst* phi = worklist.back();
             worklist.pop_back();
@@ -208,7 +208,7 @@ public:
             IR::Block* block = phi->GetParent();
             if (same.IsEmpty()) {
                 // All operands are self-references or phi has no operands
-                auto& list = block->Instructions();
+                Common::IntrusiveList<Shader::IR::Inst>& list = block->Instructions();
                 auto reinsert_point = std::ranges::find_if_not(list, IR::IsPhi);
                 same = IR::Value{
                     &*block->PrependNewInst(reinsert_point, UndefOpcode(phi->GetRegTag()))};

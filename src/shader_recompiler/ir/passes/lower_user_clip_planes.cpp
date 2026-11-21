@@ -38,7 +38,7 @@ void LowerUserClipPlanes(IR::Program& program, const RuntimeInfo& runtime_info) 
     // skipped for such shaders, which restores the previous behavior of clipping by the exported
     // distances alone.
     for (u32 i = 0; i < runtime_info.hw.vs.num_outputs; ++i) {
-        for (const auto output : runtime_info.hw.vs.outputs[i]) {
+        for (const Shader::Output output : runtime_info.hw.vs.outputs[i]) {
             if (output >= Output::ClipDist0 && output <= Output::ClipDist7) {
                 LOG_WARNING(Render_Vulkan,
                             "Skipping user clip plane lowering: shader 0x%" PRIx64

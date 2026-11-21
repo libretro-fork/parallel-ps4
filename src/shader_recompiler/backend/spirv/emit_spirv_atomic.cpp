@@ -73,7 +73,7 @@ Id SharedAtomicU64CmpSwap(EmitContext& ctx, Id offset, Id value, Id cmp_value) {
 template <bool is_float = false>
 Id BufferAtomicU32(EmitContext& ctx, IR::Inst* inst, u32 handle, Id address, Id value,
                    Id (*atomic_func)(spv_module_t*, Id, Id, Id, Id, Id)) {
-    const auto& buffer = ctx.buffers[handle];
+    Shader::Backend::SPIRV::EmitContext::BufferDefinition const& buffer = ctx.buffers[handle];
     const Id type = is_float ? ctx.F32[1] : ctx.U32[1];
     if (const Id offset = buffer.Offset(PointerSize::B32); (offset != 0)) {
         address = spv_OpIAdd(&ctx.m, ctx.U32[1], address, offset);
@@ -86,7 +86,7 @@ Id BufferAtomicU32(EmitContext& ctx, IR::Inst* inst, u32 handle, Id address, Id 
 
 Id BufferAtomicU32IncDec(EmitContext& ctx, IR::Inst* inst, u32 handle, Id address,
                          Id (*atomic_func)(spv_module_t*, Id, Id, Id, Id)) {
-    const auto& buffer = ctx.buffers[handle];
+    Shader::Backend::SPIRV::EmitContext::BufferDefinition const& buffer = ctx.buffers[handle];
     if (const Id offset = buffer.Offset(PointerSize::B32); (offset != 0)) {
         address = spv_OpIAdd(&ctx.m, ctx.U32[1], address, offset);
     }
@@ -99,7 +99,7 @@ Id BufferAtomicU32IncDec(EmitContext& ctx, IR::Inst* inst, u32 handle, Id addres
 Id BufferAtomicU32CmpSwap(EmitContext& ctx, IR::Inst* inst, u32 handle, Id address, Id value,
                           Id cmp_value,
                           Id (*atomic_func)(spv_module_t*, Id, Id, Id, Id, Id, Id, Id)) {
-    const auto& buffer = ctx.buffers[handle];
+    Shader::Backend::SPIRV::EmitContext::BufferDefinition const& buffer = ctx.buffers[handle];
     if (const Id offset = buffer.Offset(PointerSize::B32); (offset != 0)) {
         address = spv_OpIAdd(&ctx.m, ctx.U32[1], address, offset);
     }
@@ -111,7 +111,7 @@ Id BufferAtomicU32CmpSwap(EmitContext& ctx, IR::Inst* inst, u32 handle, Id addre
 
 Id BufferAtomicU64(EmitContext& ctx, IR::Inst* inst, u32 handle, Id address, Id value,
                    Id (*atomic_func)(spv_module_t*, Id, Id, Id, Id, Id)) {
-    const auto& buffer = ctx.buffers[handle];
+    Shader::Backend::SPIRV::EmitContext::BufferDefinition const& buffer = ctx.buffers[handle];
     if (const Id offset = buffer.Offset(PointerSize::B64); (offset != 0)) {
         address = spv_OpIAdd(&ctx.m, ctx.U32[1], address, offset);
     }
@@ -125,13 +125,13 @@ Id FixImageAtomicCoords(EmitContext& ctx, Id coords, AmdGpu::ImageType image_typ
     switch (image_type) {
     case AmdGpu::ImageType::Color1D: {
         // Lowered to 2D with height 1
-        const auto x = coords;
+        const unsigned int x = coords;
         return spv_OpCompositeConstruct2(&ctx.m, ctx.U32[2], x, ctx.u32_zero_value);
     }
     case AmdGpu::ImageType::Color1DArray: {
         // Lowered to 2D array with height 1
-        const auto x = spv_OpCompositeExtract1(&ctx.m, ctx.U32[1], coords, 0U);
-        const auto slice = spv_OpCompositeExtract1(&ctx.m, ctx.U32[1], coords, 1U);
+        const uint32_t x = spv_OpCompositeExtract1(&ctx.m, ctx.U32[1], coords, 0U);
+        const uint32_t slice = spv_OpCompositeExtract1(&ctx.m, ctx.U32[1], coords, 1U);
         return spv_OpCompositeConstruct3(&ctx.m, ctx.U32[3], x, ctx.u32_zero_value, slice);
     }
     default:
@@ -141,7 +141,8 @@ Id FixImageAtomicCoords(EmitContext& ctx, Id coords, AmdGpu::ImageType image_typ
 
 Id ImageAtomicU32(EmitContext& ctx, IR::Inst* inst, u32 handle, Id coords, Id value,
                   Id (*atomic_func)(spv_module_t*, Id, Id, Id, Id, Id)) {
-    const auto& texture = ctx.images[handle & 0xFFFF];
+    Shader::Backend::SPIRV::EmitContext::TextureDefinition const& texture =
+        ctx.images[handle & 0xFFFF];
     const Id fixed_coords{FixImageAtomicCoords(ctx, coords, texture.view_type)};
     const Id pointer{
         spv_OpImageTexelPointer(&ctx.m, ctx.image_u32, texture.id, fixed_coords, ctx.ConstU32(0U))};
@@ -151,7 +152,8 @@ Id ImageAtomicU32(EmitContext& ctx, IR::Inst* inst, u32 handle, Id coords, Id va
 
 Id ImageAtomicF32(EmitContext& ctx, IR::Inst* inst, u32 handle, Id coords, Id value,
                   Id (*atomic_func)(spv_module_t*, Id, Id, Id, Id, Id)) {
-    const auto& texture = ctx.images[handle & 0xFFFF];
+    Shader::Backend::SPIRV::EmitContext::TextureDefinition const& texture =
+        ctx.images[handle & 0xFFFF];
     const Id fixed_coords{FixImageAtomicCoords(ctx, coords, texture.view_type)};
     const Id pointer{
         spv_OpImageTexelPointer(&ctx.m, ctx.image_f32, texture.id, fixed_coords, ctx.ConstU32(0U))};
@@ -162,7 +164,8 @@ Id ImageAtomicF32(EmitContext& ctx, IR::Inst* inst, u32 handle, Id coords, Id va
 Id ImageAtomicU32CmpSwap(EmitContext& ctx, IR::Inst* inst, u32 handle, Id coords, Id value,
                          Id cmp_value,
                          Id (*atomic_func)(spv_module_t*, Id, Id, Id, Id, Id, Id, Id)) {
-    const auto& texture = ctx.images[handle & 0xFFFF];
+    Shader::Backend::SPIRV::EmitContext::TextureDefinition const& texture =
+        ctx.images[handle & 0xFFFF];
     const Id fixed_coords{FixImageAtomicCoords(ctx, coords, texture.view_type)};
     const Id pointer{
         spv_OpImageTexelPointer(&ctx.m, ctx.image_u32, texture.id, fixed_coords, ctx.ConstU32(0U))};
@@ -433,10 +436,10 @@ Id EmitBufferAtomicCmpSwap32(EmitContext& ctx, IR::Inst* inst, Imm32 handle_imm,
 Id EmitBufferAtomicFCmpSwap32(EmitContext& ctx, IR::Inst* inst, Imm32 handle_imm, Id address,
                               Id value, Id cmp_value) {
     u32 handle = handle_imm;
-    const auto u32_value = spv_OpBitcast(&ctx.m, ctx.U32[1], value);
-    const auto u32_cmp = spv_OpBitcast(&ctx.m, ctx.U32[1], cmp_value);
-    const auto result = BufferAtomicU32CmpSwap(ctx, inst, handle, address, u32_value, u32_cmp,
-                                               &spv_OpAtomicCompareExchange);
+    const uint32_t u32_value = spv_OpBitcast(&ctx.m, ctx.U32[1], value);
+    const uint32_t u32_cmp = spv_OpBitcast(&ctx.m, ctx.U32[1], cmp_value);
+    const unsigned int result = BufferAtomicU32CmpSwap(ctx, inst, handle, address, u32_value,
+                                                       u32_cmp, &spv_OpAtomicCompareExchange);
     return spv_OpBitcast(&ctx.m, ctx.F32[1], result);
 }
 

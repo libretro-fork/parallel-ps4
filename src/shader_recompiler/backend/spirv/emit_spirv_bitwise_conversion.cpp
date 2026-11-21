@@ -104,14 +104,14 @@ Id EmitUnpackSnorm2x16(EmitContext& ctx, Id value) {
 }
 
 Id EmitPackUint2x16(EmitContext& ctx, Id value) {
-    const auto unpacked{spv_OpBitcast(&ctx.m, ctx.U32[2], value)};
+    const uint32_t unpacked{spv_OpBitcast(&ctx.m, ctx.U32[2], value)};
     const auto [x, y] = ExtractComposite<2>(ctx, ctx.U32, unpacked);
     return InsertBitFields(ctx, {x, y}, R(0, 16), R(16, 16));
 }
 
 Id EmitUnpackUint2x16(EmitContext& ctx, Id value) {
     const auto [x, y] = ExtractBitFields<false>(ctx, value, R(0, 16), R(16, 16));
-    const auto unpacked{spv_OpCompositeConstruct2(&ctx.m, ctx.U32[2], x, y)};
+    const uint32_t unpacked{spv_OpCompositeConstruct2(&ctx.m, ctx.U32[2], x, y)};
     return spv_OpBitcast(&ctx.m, ctx.F32[2], unpacked);
 }
 
@@ -121,7 +121,7 @@ Id EmitPackSint2x16(EmitContext& ctx, Id value) {
 
 Id EmitUnpackSint2x16(EmitContext& ctx, Id value) {
     const auto [x, y] = ExtractBitFields<true>(ctx, value, R(0, 16), R(16, 16));
-    const auto unpacked{spv_OpCompositeConstruct2(&ctx.m, ctx.U32[2], x, y)};
+    const uint32_t unpacked{spv_OpCompositeConstruct2(&ctx.m, ctx.U32[2], x, y)};
     return spv_OpBitcast(&ctx.m, ctx.F32[2], unpacked);
 }
 
@@ -150,7 +150,7 @@ Id EmitUnpackSnorm4x8(EmitContext& ctx, Id value) {
 }
 
 Id EmitPackUint4x8(EmitContext& ctx, Id value) {
-    const auto unpacked{spv_OpBitcast(&ctx.m, ctx.U32[4], value)};
+    const uint32_t unpacked{spv_OpBitcast(&ctx.m, ctx.U32[4], value)};
     const auto [x, y, z, w] = ExtractComposite<4>(ctx, ctx.U32, unpacked);
     return InsertBitFields(ctx, {x, y, z, w}, R(0, 8), R(8, 8), R(16, 8), R(24, 8));
 }
@@ -158,7 +158,7 @@ Id EmitPackUint4x8(EmitContext& ctx, Id value) {
 Id EmitUnpackUint4x8(EmitContext& ctx, Id value) {
     const auto [x, y, z, w] =
         ExtractBitFields<false>(ctx, value, R(0, 8), R(8, 8), R(16, 8), R(24, 8));
-    const auto unpacked{spv_OpCompositeConstruct4(&ctx.m, ctx.U32[4], x, y, z, w)};
+    const uint32_t unpacked{spv_OpCompositeConstruct4(&ctx.m, ctx.U32[4], x, y, z, w)};
     return spv_OpBitcast(&ctx.m, ctx.F32[4], unpacked);
 }
 
@@ -169,62 +169,63 @@ Id EmitPackSint4x8(EmitContext& ctx, Id value) {
 Id EmitUnpackSint4x8(EmitContext& ctx, Id value) {
     const auto [x, y, z, w] =
         ExtractBitFields<true>(ctx, value, R(0, 8), R(8, 8), R(16, 8), R(24, 8));
-    const auto unpacked{spv_OpCompositeConstruct4(&ctx.m, ctx.U32[4], x, y, z, w)};
+    const uint32_t unpacked{spv_OpCompositeConstruct4(&ctx.m, ctx.U32[4], x, y, z, w)};
     return spv_OpBitcast(&ctx.m, ctx.F32[4], unpacked);
 }
 
 Id EmitPackUfloat10_11_11(EmitContext& ctx, Id value) {
     const auto [x, y, z] = ExtractComposite<3>(ctx, ctx.F32, value);
-    const auto cvt_x{
+    const uint32_t cvt_x{
         spv_OpFunctionCall(&ctx.m, ctx.U32[1], ctx.f32_to_uf11, std::array<u32, 1>{x}.data(), 1)};
-    const auto cvt_y{
+    const uint32_t cvt_y{
         spv_OpFunctionCall(&ctx.m, ctx.U32[1], ctx.f32_to_uf11, std::array<u32, 1>{y}.data(), 1)};
-    const auto cvt_z{
+    const uint32_t cvt_z{
         spv_OpFunctionCall(&ctx.m, ctx.U32[1], ctx.f32_to_uf10, std::array<u32, 1>{z}.data(), 1)};
     return InsertBitFields(ctx, {cvt_x, cvt_y, cvt_z}, R(0, 11), R(11, 11), R(22, 10));
 }
 
 Id EmitUnpackUfloat10_11_11(EmitContext& ctx, Id value) {
     const auto [x, y, z] = ExtractBitFields<false>(ctx, value, R(0, 11), R(11, 11), R(22, 10));
-    const auto cvt_x{
+    const uint32_t cvt_x{
         spv_OpFunctionCall(&ctx.m, ctx.F32[1], ctx.uf11_to_f32, std::array<u32, 1>{x}.data(), 1)};
-    const auto cvt_y{
+    const uint32_t cvt_y{
         spv_OpFunctionCall(&ctx.m, ctx.F32[1], ctx.uf11_to_f32, std::array<u32, 1>{y}.data(), 1)};
-    const auto cvt_z{
+    const uint32_t cvt_z{
         spv_OpFunctionCall(&ctx.m, ctx.F32[1], ctx.uf10_to_f32, std::array<u32, 1>{z}.data(), 1)};
     return spv_OpCompositeConstruct3(&ctx.m, ctx.F32[3], cvt_x, cvt_y, cvt_z);
 }
 
 Id EmitPackUnorm2_10_10_10(EmitContext& ctx, Id value) {
-    const auto unorm_min{
+    const uint32_t unorm_min{
         spv_ConstantComposite(&ctx.m, ctx.F32[4],
                               std::array<u32, 4>{ctx.ConstF32(0.f), ctx.ConstF32(0.f),
                                                  ctx.ConstF32(0.f), ctx.ConstF32(0.f)}
                                   .data(),
                               4)};
-    const auto unorm_max{
+    const uint32_t unorm_max{
         spv_ConstantComposite(&ctx.m, ctx.F32[4],
                               std::array<u32, 4>{ctx.ConstF32(1.f), ctx.ConstF32(1.f),
                                                  ctx.ConstF32(1.f), ctx.ConstF32(1.f)}
                                   .data(),
                               4)};
-    const auto clamped{spv_OpFClamp(&ctx.m, ctx.F32[4], value, unorm_min, unorm_max)};
-    const auto unorm_mul{
+    const uint32_t clamped{spv_OpFClamp(&ctx.m, ctx.F32[4], value, unorm_min, unorm_max)};
+    const uint32_t unorm_mul{
         spv_ConstantComposite(&ctx.m, ctx.F32[4],
                               std::array<u32, 4>{ctx.ConstF32(1023.f), ctx.ConstF32(1023.f),
                                                  ctx.ConstF32(1023.f), ctx.ConstF32(3.f)}
                                   .data(),
                               4)};
-    const auto as_float{spv_OpFMul(&ctx.m, ctx.F32[4], clamped, unorm_mul)};
-    const auto as_uint{
+    const uint32_t as_float{spv_OpFMul(&ctx.m, ctx.F32[4], clamped, unorm_mul)};
+    const uint32_t as_uint{
         spv_OpConvertFToU(&ctx.m, ctx.U32[4], spv_OpRoundEven(&ctx.m, ctx.F32[4], as_float))};
     return EmitPackUint2_10_10_10(ctx, spv_OpBitcast(&ctx.m, ctx.F32[4], as_uint));
 }
 
 Id EmitUnpackUnorm2_10_10_10(EmitContext& ctx, Id value) {
-    const auto unpacked{spv_OpBitcast(&ctx.m, ctx.U32[4], EmitUnpackUint2_10_10_10(ctx, value))};
-    const auto as_float{spv_OpConvertUToF(&ctx.m, ctx.F32[4], unpacked)};
-    const auto unorm_div{
+    const uint32_t unpacked{
+        spv_OpBitcast(&ctx.m, ctx.U32[4], EmitUnpackUint2_10_10_10(ctx, value))};
+    const uint32_t as_float{spv_OpConvertUToF(&ctx.m, ctx.F32[4], unpacked)};
+    const uint32_t unorm_div{
         spv_ConstantComposite(&ctx.m, ctx.F32[4],
                               std::array<u32, 4>{ctx.ConstF32(1023.f), ctx.ConstF32(1023.f),
                                                  ctx.ConstF32(1023.f), ctx.ConstF32(3.f)}
@@ -234,35 +235,36 @@ Id EmitUnpackUnorm2_10_10_10(EmitContext& ctx, Id value) {
 }
 
 Id EmitPackSnorm2_10_10_10(EmitContext& ctx, Id value) {
-    const auto snorm_min{
+    const uint32_t snorm_min{
         spv_ConstantComposite(&ctx.m, ctx.F32[4],
                               std::array<u32, 4>{ctx.ConstF32(-1.f), ctx.ConstF32(-1.f),
                                                  ctx.ConstF32(-1.f), ctx.ConstF32(-1.f)}
                                   .data(),
                               4)};
-    const auto snorm_max{
+    const uint32_t snorm_max{
         spv_ConstantComposite(&ctx.m, ctx.F32[4],
                               std::array<u32, 4>{ctx.ConstF32(1.f), ctx.ConstF32(1.f),
                                                  ctx.ConstF32(1.f), ctx.ConstF32(1.f)}
                                   .data(),
                               4)};
-    const auto clamped{spv_OpFClamp(&ctx.m, ctx.F32[4], value, snorm_min, snorm_max)};
-    const auto snorm_mul{
+    const uint32_t clamped{spv_OpFClamp(&ctx.m, ctx.F32[4], value, snorm_min, snorm_max)};
+    const uint32_t snorm_mul{
         spv_ConstantComposite(&ctx.m, ctx.F32[4],
                               std::array<u32, 4>{ctx.ConstF32(511.f), ctx.ConstF32(511.f),
                                                  ctx.ConstF32(511.f), ctx.ConstF32(1.f)}
                                   .data(),
                               4)};
-    const auto as_float{spv_OpFMul(&ctx.m, ctx.F32[4], clamped, snorm_mul)};
-    const auto as_sint{
+    const uint32_t as_float{spv_OpFMul(&ctx.m, ctx.F32[4], clamped, snorm_mul)};
+    const uint32_t as_sint{
         spv_OpConvertFToS(&ctx.m, ctx.U32[4], spv_OpRoundEven(&ctx.m, ctx.F32[4], as_float))};
     return EmitPackSint2_10_10_10(ctx, spv_OpBitcast(&ctx.m, ctx.F32[4], as_sint));
 }
 
 Id EmitUnpackSnorm2_10_10_10(EmitContext& ctx, Id value) {
-    const auto unpacked{spv_OpBitcast(&ctx.m, ctx.U32[4], EmitUnpackSint2_10_10_10(ctx, value))};
-    const auto as_float{spv_OpConvertSToF(&ctx.m, ctx.F32[4], unpacked)};
-    const auto snorm_div{
+    const uint32_t unpacked{
+        spv_OpBitcast(&ctx.m, ctx.U32[4], EmitUnpackSint2_10_10_10(ctx, value))};
+    const uint32_t as_float{spv_OpConvertSToF(&ctx.m, ctx.F32[4], unpacked)};
+    const uint32_t snorm_div{
         spv_ConstantComposite(&ctx.m, ctx.F32[4],
                               std::array<u32, 4>{ctx.ConstF32(511.f), ctx.ConstF32(511.f),
                                                  ctx.ConstF32(511.f), ctx.ConstF32(1.f)}
@@ -272,7 +274,7 @@ Id EmitUnpackSnorm2_10_10_10(EmitContext& ctx, Id value) {
 }
 
 Id EmitPackUint2_10_10_10(EmitContext& ctx, Id value) {
-    const auto unpacked{spv_OpBitcast(&ctx.m, ctx.U32[4], value)};
+    const uint32_t unpacked{spv_OpBitcast(&ctx.m, ctx.U32[4], value)};
     const auto [x, y, z, w] = ExtractComposite<4>(ctx, ctx.U32, unpacked);
     return InsertBitFields(ctx, {x, y, z, w}, R(0, 10), R(10, 10), R(20, 10), R(30, 2));
 }
@@ -280,7 +282,7 @@ Id EmitPackUint2_10_10_10(EmitContext& ctx, Id value) {
 Id EmitUnpackUint2_10_10_10(EmitContext& ctx, Id value) {
     const auto [x, y, z, w] =
         ExtractBitFields<false>(ctx, value, R(0, 10), R(10, 10), R(20, 10), R(30, 2));
-    const auto unpacked{spv_OpCompositeConstruct4(&ctx.m, ctx.U32[4], x, y, z, w)};
+    const uint32_t unpacked{spv_OpCompositeConstruct4(&ctx.m, ctx.U32[4], x, y, z, w)};
     return spv_OpBitcast(&ctx.m, ctx.F32[4], unpacked);
 }
 
@@ -291,7 +293,7 @@ Id EmitPackSint2_10_10_10(EmitContext& ctx, Id value) {
 Id EmitUnpackSint2_10_10_10(EmitContext& ctx, Id value) {
     const auto [x, y, z, w] =
         ExtractBitFields<true>(ctx, value, R(0, 10), R(10, 10), R(20, 10), R(30, 2));
-    const auto unpacked{spv_OpCompositeConstruct4(&ctx.m, ctx.U32[4], x, y, z, w)};
+    const uint32_t unpacked{spv_OpCompositeConstruct4(&ctx.m, ctx.U32[4], x, y, z, w)};
     return spv_OpBitcast(&ctx.m, ctx.F32[4], unpacked);
 }
 

@@ -47,7 +47,7 @@ void LowerPhisToRegsPass(IR::Program& program) {
             }
 
             IR::IREmitter ir{*block, it};
-            if (const auto tag = inst.GetRegTag()) {
+            if (const Shader::IR::RegTag tag = inst.GetRegTag()) {
                 inst.ReplaceUsesWithAndRemove(LoadForRegType(ir, tag));
                 continue;
             }

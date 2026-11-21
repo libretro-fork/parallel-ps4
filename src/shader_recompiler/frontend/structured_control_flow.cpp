@@ -143,7 +143,7 @@ std::string DumpExpr(const Statement* stmt) {
 [[maybe_unused]] std::string DumpTree(const Tree& tree, u32 indentation = 0) {
     std::string ret;
     std::string indent(indentation, ' ');
-    for (const auto& stmt : tree) {
+    for (const Statement& stmt : tree) {
         switch (stmt.type) {
         case StatementType::Code:
             ret += Common::StringFromFormat("%s    Block %04x -> %04x (0x%016" PRIxPTR ");\n",
@@ -622,14 +622,14 @@ private:
         if (!code_stmt) {
             current_block = block_pool.Create(inst_pool);
             insert_point = current_block->end();
-            auto& node{syntax_list.emplace_back()};
+            Shader::IR::AbstractSyntaxNode& node{syntax_list.emplace_back()};
             node.type = IR::AbstractSyntaxNode::Type::Block;
             node.data.block = current_block;
         } else {
             current_block = code_stmt->block->ir_block;
             insert_point = current_block->begin();
         }
-        for (auto& child : tree) {
+        for (Statement& child : tree) {
             Statement& stmt{child};
             switch (stmt.type) {
             case StatementType::Label:
@@ -641,12 +641,12 @@ private:
                 }
                 current_block = stmt.block->ir_block;
                 insert_point = current_block->end();
-                for (auto& node : syntax_list) {
+                for (Shader::IR::AbstractSyntaxNode& node : syntax_list) {
                     if (node.type == IR::AbstractSyntaxNode::Type::Block) {
                         ASSERT(node.data.block != current_block);
                     }
                 }
-                auto& node{syntax_list.emplace_back()};
+                Shader::IR::AbstractSyntaxNode& node{syntax_list.emplace_back()};
                 node.type = IR::AbstractSyntaxNode::Type::Block;
                 node.data.block = current_block;
                 break;
@@ -676,13 +676,13 @@ private:
                 current_block = merge_block;
                 insert_point = current_block->begin();
 
-                auto& if_node{syntax_list[if_node_index]};
+                Shader::IR::AbstractSyntaxNode& if_node{syntax_list[if_node_index]};
                 if_node.type = IR::AbstractSyntaxNode::Type::If;
                 if_node.data.if_node.cond = cond;
                 if_node.data.if_node.body = then_block;
                 if_node.data.if_node.merge = merge_block;
 
-                auto& endif_node{syntax_list.emplace_back()};
+                Shader::IR::AbstractSyntaxNode& endif_node{syntax_list.emplace_back()};
                 endif_node.type = IR::AbstractSyntaxNode::Type::EndIf;
                 endif_node.data.end_if.merge = merge_block;
                 break;
@@ -692,7 +692,7 @@ private:
                 if (current_block) {
                     current_block->AddBranch(loop_header_block);
                 }
-                auto& header_node{syntax_list.emplace_back()};
+                Shader::IR::AbstractSyntaxNode& header_node{syntax_list.emplace_back()};
                 header_node.type = IR::AbstractSyntaxNode::Type::Block;
                 header_node.data.block = loop_header_block;
 
@@ -719,17 +719,17 @@ private:
                 current_block = merge_block;
                 insert_point = current_block->begin();
 
-                auto& loop{syntax_list[loop_node_index]};
+                Shader::IR::AbstractSyntaxNode& loop{syntax_list[loop_node_index]};
                 loop.type = IR::AbstractSyntaxNode::Type::Loop;
                 loop.data.loop.body = body_block;
                 loop.data.loop.continue_block = continue_block;
                 loop.data.loop.merge = merge_block;
 
-                auto& continue_block_node{syntax_list.emplace_back()};
+                Shader::IR::AbstractSyntaxNode& continue_block_node{syntax_list.emplace_back()};
                 continue_block_node.type = IR::AbstractSyntaxNode::Type::Block;
                 continue_block_node.data.block = continue_block;
 
-                auto& repeat{syntax_list.emplace_back()};
+                Shader::IR::AbstractSyntaxNode& repeat{syntax_list.emplace_back()};
                 repeat.type = IR::AbstractSyntaxNode::Type::Repeat;
                 repeat.data.repeat.cond = cond;
                 repeat.data.repeat.loop_header = loop_header_block;
@@ -746,7 +746,7 @@ private:
                 current_block = skip_block;
                 insert_point = current_block->end();
 
-                auto& break_node{syntax_list.emplace_back()};
+                Shader::IR::AbstractSyntaxNode& break_node{syntax_list.emplace_back()};
                 break_node.type = IR::AbstractSyntaxNode::Type::Break;
                 break_node.data.break_node.cond = cond;
                 break_node.data.break_node.merge = break_block;
@@ -758,7 +758,7 @@ private:
                 IR::IREmitter{*return_block}.Epilogue();
                 current_block->AddBranch(return_block);
 
-                auto& merge{syntax_list.emplace_back()};
+                Shader::IR::AbstractSyntaxNode& merge{syntax_list.emplace_back()};
                 merge.type = IR::AbstractSyntaxNode::Type::Block;
                 merge.data.block = return_block;
 
@@ -794,7 +794,7 @@ private:
         if (!merge_stmt) {
             // Create a merge block we can visit later
             Block* dummy_flow_block = new Block{.is_dummy = true};
-            auto* ir_block = block_pool.Create(inst_pool);
+            Shader::IR::Block* ir_block = block_pool.Create(inst_pool);
             dummy_flow_block->ir_block = ir_block;
             ir_block->cfg_block = dummy_flow_block;
             merge_stmt = stmt_pool.Create(dummy_flow_block, &parent);

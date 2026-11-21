@@ -160,10 +160,10 @@ void Inst::SetArg(size_t index, Value value) {
                         Shader::IR::NameOf(op).data());
     }
     const IR::Value arg{Arg(index)};
-    if (auto* inst = arg.TryInst()) {
+    if (IR::Inst* inst = arg.TryInst()) {
         UndoUse(inst, index);
     }
-    if (auto* inst = value.TryInst()) {
+    if (IR::Inst* inst = value.TryInst()) {
         Use(inst, index);
     }
     if (op == Opcode::Phi) {
@@ -186,7 +186,7 @@ Block* Inst::PhiBlock(size_t index) const {
 }
 
 void Inst::AddPhiOperand(Block* predecessor, const Value& value) {
-    if (auto* inst = value.TryInst()) {
+    if (IR::Inst* inst = value.TryInst()) {
         Use(inst, phi_args.size());
     }
     phi_args.emplace_back(predecessor, value);
@@ -199,18 +199,18 @@ void Inst::Invalidate() {
 
 void Inst::ClearArgs() {
     if (op == Opcode::Phi) {
-        for (auto i = 0; i < phi_args.size(); i++) {
-            auto& pair = phi_args[i];
+        for (int i = 0; i < phi_args.size(); i++) {
+            std::pair<Shader::IR::Block*, Shader::IR::Value>& pair = phi_args[i];
             IR::Value& value{pair.second};
-            if (auto* inst = value.TryInst()) {
+            if (IR::Inst* inst = value.TryInst()) {
                 UndoUse(inst, i);
             }
         }
         phi_args.clear();
     } else {
-        for (auto i = 0; i < args.size(); i++) {
-            auto& value = args[i];
-            if (auto* inst = value.TryInst()) {
+        for (int i = 0; i < args.size(); i++) {
+            Shader::IR::Value& value = args[i];
+            if (IR::Inst* inst = value.TryInst()) {
                 UndoUse(inst, i);
             }
         }

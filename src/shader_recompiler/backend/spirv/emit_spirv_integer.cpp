@@ -68,15 +68,15 @@ Id EmitISub64(EmitContext& ctx, Id a, Id b) {
 }
 
 Id EmitSMulHi(EmitContext& ctx, Id a, Id b) {
-    const auto signed_a{spv_OpBitcast(&ctx.m, ctx.S32[1], a)};
-    const auto signed_b{spv_OpBitcast(&ctx.m, ctx.S32[1], b)};
-    const auto mul_ext{spv_OpSMulExtended(&ctx.m, ctx.full_result_i32x2, signed_a, signed_b)};
-    const auto signed_hi{spv_OpCompositeExtract1(&ctx.m, ctx.S32[1], mul_ext, 1)};
+    const uint32_t signed_a{spv_OpBitcast(&ctx.m, ctx.S32[1], a)};
+    const uint32_t signed_b{spv_OpBitcast(&ctx.m, ctx.S32[1], b)};
+    const uint32_t mul_ext{spv_OpSMulExtended(&ctx.m, ctx.full_result_i32x2, signed_a, signed_b)};
+    const uint32_t signed_hi{spv_OpCompositeExtract1(&ctx.m, ctx.S32[1], mul_ext, 1)};
     return spv_OpBitcast(&ctx.m, ctx.U32[1], signed_hi);
 }
 
 Id EmitUMulHi(EmitContext& ctx, Id a, Id b) {
-    const auto mul_ext{spv_OpUMulExtended(&ctx.m, ctx.full_result_u32x2, a, b)};
+    const uint32_t mul_ext{spv_OpUMulExtended(&ctx.m, ctx.full_result_u32x2, a, b)};
     return spv_OpCompositeExtract1(&ctx.m, ctx.U32[1], mul_ext, 1);
 }
 

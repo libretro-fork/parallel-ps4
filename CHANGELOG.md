@@ -4,6 +4,9 @@ What changed in the libretro core of this fork, newest first. Changes that come 
 
 ## Unreleased
 
+- The shader recompiler's variables say their types: 770 of the 986 `auto`s in its sources are the types the compiler deduced for them, written out (`IR::F32`, `IR::U32` and the other IR value types where those are what was deduced).
+  - **Checked:** each of the 51 sources changed compiles to the same machine code as before, instruction for instruction.
+  - **Left for the next patches:** the other 216, the lambdas, structured bindings, iterators and generic parameters, which want the code around them changed.
 - The pipeline cache's storage and the serialization archive are off the STL.
   - **Storage:** a blob is handed to `Storage::DataBase::Save` as a malloc'd buffer that the writer frees once written, or copied by `SaveCopy`; names are C strings (63 bytes at most). `Load` lends the blob as a `Common::Span`; the driver's cache is mapped into a file the database keeps. Paths, renames, removals and the folder listing go through libretro-common (`fill_pathname_join_special`, `filestream_rename`/`filestream_delete`, `retro_dirent`).
   - **Archive** (`common/serdes.h`): written into a buffer grown by doubling, handed over whole by `TakeOff`; nothing is copied on the way to the cache.

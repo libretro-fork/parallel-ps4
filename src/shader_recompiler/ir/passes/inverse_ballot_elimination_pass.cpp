@@ -164,7 +164,7 @@ void InverseBallotEliminationPass(IR::Program& program) {
             }
         }
 
-        auto uses = prod->Uses();
+        std::list<Shader::IR::Use> uses = prod->Uses();
         for (auto [user, operand] : uses) {
             if (user->GetOpcode() == IR::Opcode::InverseBallot) {
                 user->ReplaceUsesWithAndRemove(it->second);
