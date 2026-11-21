@@ -3,9 +3,9 @@
 
 #pragma once
 
-#include <cstdarg>
-#include <cstdint>
-#include <cstdio>
+#include <stdarg.h>
+#include <stdint.h>
+#include <stdio.h>
 
 #include "common/interval_set.h"
 #include "common/published.h"
@@ -59,26 +59,28 @@ public:
 
     /// @func inside a scope marker named for the command at @address: @format holds one
     /// 0x%llx for it (and before it a %u for @queue). Named only when host markers are on.
-    void ScopeMarker(const char* format, const void* address, auto&& func) {
+    template <typename Func>
+    void ScopeMarker(const char* format, const void* address, Func&& func) {
         if (host_markers_enabled) {
             char text[MarkerBytes];
-            const int n = std::snprintf(
-                text, sizeof(text), format,
-                static_cast<unsigned long long>(reinterpret_cast<std::uintptr_t>(address)));
-            ScopeMarkerBegin(MarkerText(text, n > 0 ? static_cast<std::size_t>(n) : 0));
+            const int n =
+                snprintf(text, sizeof(text), format,
+                         static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(address)));
+            ScopeMarkerBegin(MarkerText(text, n > 0 ? static_cast<size_t>(n) : 0));
             func();
             ScopeMarkerEnd();
         } else {
             func();
         }
     }
-    void ScopeMarker(const char* format, u32 queue, const void* address, auto&& func) {
+    template <typename Func>
+    void ScopeMarker(const char* format, u32 queue, const void* address, Func&& func) {
         if (host_markers_enabled) {
             char text[MarkerBytes];
-            const int n = std::snprintf(
-                text, sizeof(text), format, queue,
-                static_cast<unsigned long long>(reinterpret_cast<std::uintptr_t>(address)));
-            ScopeMarkerBegin(MarkerText(text, n > 0 ? static_cast<std::size_t>(n) : 0));
+            const int n =
+                snprintf(text, sizeof(text), format, queue,
+                         static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(address)));
+            ScopeMarkerBegin(MarkerText(text, n > 0 ? static_cast<size_t>(n) : 0));
             func();
             ScopeMarkerEnd();
         } else {
@@ -89,18 +91,18 @@ public:
     /// A host marker's label made only when host markers are on, on the stack
     void HostMarkerBegin(const char* format, ...) SHAD_PRINTF(2, 3);
 
-    void ScopeMarkerBegin(const std::string_view& str, bool from_guest = false);
-    static constexpr std::size_t MarkerBytes = 256;
+    /// @str is the label, ended by a NUL
+    void ScopeMarkerBegin(const char* str, bool from_guest = false);
+    static constexpr size_t MarkerBytes = 256;
     /// The label in @text, cut to its room and ended by a NUL, as Vulkan reads it
-    static std::string_view MarkerText(char* text, std::size_t size) {
+    static const char* MarkerText(char* text, size_t size) {
         size = size < MarkerBytes - 1 ? size : MarkerBytes - 1;
         text[size] = '\0';
-        return {text, size};
+        return text;
     }
     void ScopeMarkerEnd(bool from_guest = false);
-    void ScopedMarkerInsert(const std::string_view& str, bool from_guest = false);
-    void ScopedMarkerInsertColor(const std::string_view& str, const u32 color,
-                                 bool from_guest = false);
+    void ScopedMarkerInsert(const char* str, bool from_guest = false);
+    void ScopedMarkerInsertColor(const char* str, const u32 color, bool from_guest = false);
 
     void FillBuffer(VAddr address, u32 num_bytes, u32 value, bool is_gds);
     void CopyBuffer(VAddr dst, VAddr src, u32 num_bytes, bool dst_gds, bool src_gds);
@@ -184,24 +186,24 @@ private:
         VideoCore::ImageId image_id;
         VideoCore::TextureCache::ImageDesc desc;
     };
-    std::array<ImageBinding, Shader::NUM_IMAGES> image_bindings;
-    std::array<ImageBinding, AmdGpu::NUM_COLOR_BUFFERS> cb_descs;
+    ImageBinding image_bindings[Shader::NUM_IMAGES];
+    ImageBinding cb_descs[AmdGpu::NUM_COLOR_BUFFERS];
     ImageBinding db_desc;
 
-    Common::StaticVector<vk::DescriptorImageInfo, Shader::NUM_IMAGES> image_infos;
-    Common::StaticVector<vk::DescriptorBufferInfo, Shader::NUM_BUFFERS> buffer_infos;
+    Common::StaticVector<VkDescriptorImageInfo, Shader::NUM_IMAGES> image_infos;
+    Common::StaticVector<VkDescriptorBufferInfo, Shader::NUM_BUFFERS> buffer_infos;
 
     struct BoundBuffer {
         const VideoCore::Buffer* buffer;
         u64 offset;
         u32 size;
-        vk::AccessFlags2 src_access;
+        VkAccessFlags2 src_access;
     };
-    std::vector<BoundBuffer> bound_buffers;
-    std::vector<VideoCore::ImageId> bound_images;
+    Common::SmallVector<BoundBuffer, 64> bound_buffers;
+    Common::SmallVector<VideoCore::ImageId, 64> bound_images;
 
     u32 set_write_index{};
-    std::vector<vk::WriteDescriptorSet> set_writes;
+    Common::SmallVector<VkWriteDescriptorSet, 64> set_writes;
     Shader::PushData push_data;
 
     bool attachment_feedback_loop{};
@@ -219,7 +221,7 @@ private:
     /// to find them
     u32 capture_first_vertex{};
     u32 capture_num_vertices{};
-    std::vector<u8> capture_indices;
+    Common::SmallVector<u8, 1> capture_indices;
 };
 
 } // namespace Vulkan

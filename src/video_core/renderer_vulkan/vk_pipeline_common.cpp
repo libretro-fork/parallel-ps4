@@ -53,7 +53,7 @@ void Pipeline::CreatePipelineLayout(VkShaderStageFlags stage_flags, const char* 
                ResultName(result));
 }
 
-void Pipeline::BindResources(vk::WriteDescriptorSet* set_writes, u32 num_writes,
+void Pipeline::BindResources(VkWriteDescriptorSet* writes, u32 num_writes,
                              const Shader::PushData& push_data) const {
     const VkCommandBuffer cmdbuf = static_cast<VkCommandBuffer>(scheduler.CommandBuffer());
     const VkPipelineBindPoint bind_point =
@@ -69,9 +69,6 @@ void Pipeline::BindResources(vk::WriteDescriptorSet* set_writes, u32 num_writes,
         return;
     }
 
-    // vulkan.hpp's structs are layout-compatible with the C ones
-    static_assert(sizeof(vk::WriteDescriptorSet) == sizeof(VkWriteDescriptorSet));
-    VkWriteDescriptorSet* const writes = reinterpret_cast<VkWriteDescriptorSet*>(set_writes);
     if (uses_push_descriptors) {
         vkCmdPushDescriptorSetKHR(cmdbuf, bind_point, pipeline_layout, 0, num_writes, writes);
         return;

@@ -837,10 +837,10 @@ void Instance::Note(const char* what, u64 a, u64 b, u64 c, u64 d) const {
     vk_device_fault_mark(what, a, b, c, d);
 }
 
-void Instance::Mark(vk::CommandBuffer cmdbuf, const char* what, u64 a, u64 b, u64 c, u64 d) const {
+void Instance::Mark(VkCommandBuffer cmdbuf, const char* what, u64 a, u64 b, u64 c, u64 d) const {
     const void* const mark = vk_device_fault_mark(what, a, b, c, d);
     if (device_checkpoints) {
-        cmdbuf.setCheckpointNV(mark);
+        vkCmdSetCheckpointNV(cmdbuf, mark);
     }
 }
 

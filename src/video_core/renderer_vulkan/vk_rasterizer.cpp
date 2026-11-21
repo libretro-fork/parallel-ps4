@@ -67,12 +67,12 @@ bool Rasterizer::TargetsDrawnLastFrame() {
     // A draw is left out while its pipeline is made only if the game drew into every image
     // it draws into the frame before (common/target_frames.h): an image it draws once is
     // never made again, and one it has just started on holds nothing yet
-    const auto& regs = liverpool->regs;
+    const AmdGpu::Regs& regs = liverpool->regs;
     bool any = false;
     bool all = true;
     if (regs.color_control.mode != AmdGpu::ColorControl::OperationMode::Disable) {
         for (s32 cb = 0; cb < AmdGpu::NUM_COLOR_BUFFERS; ++cb) {
-            const auto& col_buf = regs.color_buffers[cb];
+            const AmdGpu::ColorBuffer& col_buf = regs.color_buffers[cb];
             if (col_buf && regs.color_target_mask.GetMask(cb)) {
                 any = true;
                 // Every one is asked, and so noted: no stopping at the first that says no
@@ -105,7 +105,7 @@ template <typename T>
 static u32 Raw(const T& reg) {
     u32 raw;
     static_assert(sizeof(T) == sizeof(raw));
-    std::memcpy(&raw, &reg, sizeof(raw));
+    memcpy(&raw, &reg, sizeof(raw));
     return raw;
 }
 
@@ -124,7 +124,7 @@ static void NoteRegisters(const Instance& instance, const AmdGpu::Regs& regs) {
     }
     if (!sinking) {
         sinking = true;
-        std::memset(seen, 0, sizeof(seen));
+        memset(seen, 0, sizeof(seen));
     }
     u64 pairs[4];
     u32 num = 0;
@@ -154,7 +154,7 @@ static void NoteRegisters(const Instance& instance, const AmdGpu::Regs& regs) {
 }
 
 bool Rasterizer::FilterDraw() {
-    const auto& regs = liverpool->regs;
+    const AmdGpu::Regs& regs = liverpool->regs;
     frame_notes_draw();
     NoteRegisters(instance, regs);
     // Every draw the game asks for, before anything is made of it
@@ -196,7 +196,7 @@ bool Rasterizer::FilterDraw() {
         return false;
     }
 
-    const auto& db_control = regs.depth_render_control;
+    const AmdGpu::DepthRenderControl& db_control = regs.depth_render_control;
     if ((db_control.depth_copy || db_control.stencil_copy) && regs.color_buffers[0] &&
         regs.depth_buffer.NumSamples() > 1) {
         // The depth block writes what it reads to the first colour target in place of the
@@ -218,11 +218,11 @@ bool Rasterizer::FilterDraw() {
 
     const bool cb_disabled =
         regs.color_control.mode == AmdGpu::ColorControl::OperationMode::Disable;
-    const auto depth_copy =
+    const bool depth_copy =
         regs.depth_render_override.force_z_dirty && regs.depth_render_override.force_z_valid &&
         regs.depth_buffer.DepthValid() && regs.depth_buffer.DepthWriteValid() &&
         regs.depth_buffer.DepthAddress() != regs.depth_buffer.DepthWriteAddress();
-    const auto stencil_copy =
+    const bool stencil_copy =
         regs.depth_render_override.force_stencil_dirty &&
         regs.depth_render_override.force_stencil_valid && regs.depth_buffer.StencilValid() &&
         regs.depth_buffer.StencilWriteValid() &&
@@ -241,46 +241,50 @@ bool Rasterizer::FilterDraw() {
 
 void Rasterizer::PrepareRenderState(const GraphicsPipeline* pipeline) {
     // Prefetch render targets to handle overlaps with bound textures (e.g. mipgen)
-    const auto& key = pipeline->GetGraphicsKey();
-    const auto& regs = liverpool->regs;
+    const Vulkan::GraphicsPipelineKey& key = pipeline->GetGraphicsKey();
+    const AmdGpu::Regs& regs = liverpool->regs;
     if (regs.color_control.degamma_enable) {
         LOG_WARNING(Render_Vulkan, "Color buffers require gamma correction");
     }
 
     const bool skip_cb_binding =
         regs.color_control.mode == AmdGpu::ColorControl::OperationMode::Disable;
-    for (s32 cb = 0; cb < std::bit_width(key.mrt_mask); ++cb) {
-        auto& [image_id, desc] = cb_descs[cb];
-        const auto& col_buf = regs.color_buffers[cb];
+    for (s32 cb = 0; cb < static_cast<s32>(Common::BitWidth(key.mrt_mask)); ++cb) {
+        VideoCore::ImageId& image_id = cb_descs[cb].image_id;
+        VideoCore::TextureCache::ImageDesc& desc = cb_descs[cb].desc;
+        const AmdGpu::ColorBuffer& col_buf = regs.color_buffers[cb];
         const u32 target_mask = regs.color_target_mask.GetMask(cb);
         if (skip_cb_binding || !col_buf || !target_mask || (key.mrt_mask & (1 << cb)) == 0) {
             image_id = {};
             continue;
         }
-        const auto& hint = liverpool->last_cb_extent[cb];
-        std::construct_at(&desc, col_buf, hint);
+        const AmdGpu::CbDbExtent& hint = liverpool->last_cb_extent[cb];
+        new (&desc) VideoCore::TextureCache::ImageDesc(col_buf, hint);
         image_id = bound_images.emplace_back(texture_cache.FindImage(desc));
-        auto& image = texture_cache.GetImage(image_id);
+        VideoCore::Image& image = texture_cache.GetImage(image_id);
         image.binding.is_target = 1u;
     }
 
     if ((regs.depth_control.depth_enable && regs.depth_buffer.DepthValid()) ||
         (regs.depth_control.stencil_enable && regs.depth_buffer.StencilValid())) {
-        const auto htile_address = regs.depth_htile_data_base.GetAddress();
-        const auto& hint = liverpool->last_db_extent;
-        auto& [image_id, desc] = db_desc;
-        std::construct_at(&desc, regs.depth_buffer, regs.depth_view, regs.depth_control,
-                          htile_address, hint);
+        const VAddr htile_address = regs.depth_htile_data_base.GetAddress();
+        const AmdGpu::CbDbExtent& hint = liverpool->last_db_extent;
+        VideoCore::ImageId& image_id = db_desc.image_id;
+        VideoCore::TextureCache::ImageDesc& desc = db_desc.desc;
+        new (&desc) VideoCore::TextureCache::ImageDesc(regs.depth_buffer, regs.depth_view,
+                                                       regs.depth_control, htile_address, hint);
         image_id = bound_images.emplace_back(texture_cache.FindImage(desc));
-        auto& image = texture_cache.GetImage(image_id);
+        VideoCore::Image& image = texture_cache.GetImage(image_id);
         image.binding.is_target = 1u;
     } else {
         db_desc.image_id = {};
     }
 }
 
-static std::pair<u32, u32> GetDrawOffsets(const AmdGpu::Regs& regs, const Shader::Info& info,
-                                          const Shader::Gcn::FetchShaderData& fetch_shader) {
+/// The draw's first vertex and first instance, into *@out_vertex_offset and *@out_instance_offset
+static void GetDrawOffsets(const AmdGpu::Regs& regs, const Shader::Info& info,
+                           const Shader::Gcn::FetchShaderData& fetch_shader, u32* out_vertex_offset,
+                           u32* out_instance_offset) {
     u32 vertex_offset = regs.index_offset;
     u32 instance_offset = 0;
     if (!fetch_shader.Empty()) {
@@ -291,25 +295,26 @@ static std::pair<u32, u32> GetDrawOffsets(const AmdGpu::Regs& regs, const Shader
             instance_offset = info.user_data[fetch_shader.instance_offset_sgpr];
         }
     }
-    return {vertex_offset, instance_offset};
+    *out_vertex_offset = vertex_offset;
+    *out_instance_offset = instance_offset;
 }
 
 void Rasterizer::EliminateFastClear() {
-    auto& col_buf = liverpool->regs.color_buffers[0];
+    AmdGpu::ColorBuffer& col_buf = liverpool->regs.color_buffers[0];
     if (!col_buf || !col_buf.info.fast_clear) {
         return;
     }
     VideoCore::TextureCache::ImageDesc desc(col_buf, liverpool->last_cb_extent[0]);
-    const auto image_id = texture_cache.FindImage(desc);
-    const auto& image_view = texture_cache.FindRenderTarget(image_id, desc);
+    const VideoCore::ImageId image_id = texture_cache.FindImage(desc);
+    const VideoCore::ImageView& image_view = texture_cache.FindRenderTarget(image_id, desc);
     if (!texture_cache.IsMetaCleared(col_buf.CmaskAddress(), col_buf.view.slice_start)) {
         return;
     }
     for (u32 slice = col_buf.view.slice_start; slice <= col_buf.view.slice_max; ++slice) {
         texture_cache.TouchMeta(col_buf.CmaskAddress(), slice, false);
     }
-    auto& image = texture_cache.GetImage(image_id);
-    const auto clear_value = LiverpoolToVK::ColorBufferClearValue(col_buf);
+    VideoCore::Image& image = texture_cache.GetImage(image_id);
+    const vk::ClearValue clear_value = LiverpoolToVK::ColorBufferClearValue(col_buf);
 
     HostMarkerBegin("EliminateFastClear:MRT=0x%" PRIx64 ":M=0x%" PRIxPTR, col_buf.Address(),
                     col_buf.CmaskAddress());
@@ -325,7 +330,7 @@ void Rasterizer::Draw(bool is_indexed, u32 index_offset) {
         return;
     }
 
-    const auto& regs = liverpool->regs;
+    const AmdGpu::Regs& regs = liverpool->regs;
     const GraphicsPipeline* pipeline = DrawPipeline();
     if (!pipeline) {
         return;
@@ -335,7 +340,7 @@ void Rasterizer::Draw(bool is_indexed, u32 index_offset) {
     if (!BindResources(pipeline)) {
         return;
     }
-    const auto state = BeginRendering(pipeline);
+    const Vulkan::RenderState state = BeginRendering(pipeline);
 
     if (VertexCapture::Active()) [[unlikely]] {
         CaptureDrawVertices(pipeline, is_indexed, index_offset);
@@ -353,22 +358,25 @@ void Rasterizer::Draw(bool is_indexed, u32 index_offset) {
     UpdateDynamicState(pipeline, is_indexed);
     scheduler.BeginRendering(state);
 
-    const auto& vs_info = pipeline->GetStage(Shader::SwStage::Vertex);
-    const auto& fetch_shader = pipeline->GetFetchShader();
-    const auto [vertex_offset, instance_offset] = GetDrawOffsets(regs, vs_info, fetch_shader);
+    const Shader::Info& vs_info = pipeline->GetStage(Shader::SwStage::Vertex);
+    const Shader::Gcn::FetchShaderData& fetch_shader = pipeline->GetFetchShader();
+    u32 vertex_offset;
+    u32 instance_offset;
+    GetDrawOffsets(regs, vs_info, fetch_shader, &vertex_offset, &instance_offset);
 
-    const auto cmdbuf = scheduler.CommandBuffer();
-    cmdbuf.bindPipeline(vk::PipelineBindPoint::eGraphics, pipeline->Handle());
+    const VkCommandBuffer cmdbuf = static_cast<VkCommandBuffer>(scheduler.CommandBuffer());
+    vkCmdBindPipeline(cmdbuf, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                      static_cast<VkPipeline>(pipeline->Handle()));
     instance.Note("draw: vertex shader, fragment shader, indices|indexed<<32, instances",
                   vs_info.pgm_hash, pipeline->StageHash(Shader::SwStage::Fragment),
                   u64(regs.num_indices) | u64(is_indexed) << 32, regs.num_instances.NumInstances());
 
     if (is_indexed) {
-        cmdbuf.drawIndexed(regs.num_indices, regs.num_instances.NumInstances(), 0,
-                           s32(vertex_offset), instance_offset);
+        vkCmdDrawIndexed(cmdbuf, regs.num_indices, regs.num_instances.NumInstances(), 0,
+                         s32(vertex_offset), instance_offset);
     } else {
-        cmdbuf.draw(regs.num_indices, regs.num_instances.NumInstances(), vertex_offset,
-                    instance_offset);
+        vkCmdDraw(cmdbuf, regs.num_indices, regs.num_instances.NumInstances(), vertex_offset,
+                  instance_offset);
     }
 
     ResetBindings(false);
@@ -401,18 +409,18 @@ void Rasterizer::DrawIndirect(bool is_indexed, VAddr arg_address, u32 offset, u3
     if (!BindResources(pipeline)) {
         return;
     }
-    const auto state = BeginRendering(pipeline);
+    const Vulkan::RenderState state = BeginRendering(pipeline);
 
     BindVertexBuffers(pipeline);
     if (is_indexed) {
         BindIndexBuffer(0, true);
     }
 
-    const auto size = stride * max_count;
+    const u32 size = stride * max_count;
     u64 base = 0;
     const VideoCore::Buffer* buffer = buffer_cache.ObtainBuffer(arg_address + offset, size, &base);
     needs_barrier |= runtime.IsBufferAccessed(buffer, base, size);
-    bound_buffers.emplace_back(buffer, base, size, vk::AccessFlagBits2::eIndirectCommandRead);
+    bound_buffers.emplace_back(buffer, base, size, VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT);
 
     const VideoCore::Buffer* count_buffer;
     u64 count_offset;
@@ -420,7 +428,7 @@ void Rasterizer::DrawIndirect(bool is_indexed, VAddr arg_address, u32 offset, u3
         count_buffer = buffer_cache.ObtainBuffer(count_address, 4, &count_offset);
         needs_barrier |= runtime.IsBufferAccessed(count_buffer, count_offset, 4);
         bound_buffers.emplace_back(count_buffer, count_offset, 4,
-                                   vk::AccessFlagBits2::eIndirectCommandRead);
+                                   VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT);
     }
 
     if (needs_barrier) {
@@ -431,8 +439,9 @@ void Rasterizer::DrawIndirect(bool is_indexed, VAddr arg_address, u32 offset, u3
     UpdateDynamicState(pipeline, is_indexed);
     scheduler.BeginRendering(state);
 
-    const auto cmdbuf = scheduler.CommandBuffer();
-    cmdbuf.bindPipeline(vk::PipelineBindPoint::eGraphics, pipeline->Handle());
+    const VkCommandBuffer cmdbuf = static_cast<VkCommandBuffer>(scheduler.CommandBuffer());
+    vkCmdBindPipeline(cmdbuf, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                      static_cast<VkPipeline>(pipeline->Handle()));
     instance.Note("indirect draw: vertex shader, fragment shader, arguments at, count",
                   pipeline->StageHash(Shader::SwStage::Vertex),
                   pipeline->StageHash(Shader::SwStage::Fragment), arg_address + offset, max_count);
@@ -441,19 +450,19 @@ void Rasterizer::DrawIndirect(bool is_indexed, VAddr arg_address, u32 offset, u3
         ASSERT(sizeof(VkDrawIndexedIndirectCommand) == stride);
 
         if (count_address != 0) {
-            cmdbuf.drawIndexedIndirectCount(buffer->Handle(), base, count_buffer->Handle(),
-                                            count_offset, max_count, stride);
+            vkCmdDrawIndexedIndirectCount(cmdbuf, buffer->Handle(), base, count_buffer->Handle(),
+                                          count_offset, max_count, stride);
         } else {
-            cmdbuf.drawIndexedIndirect(buffer->Handle(), base, max_count, stride);
+            vkCmdDrawIndexedIndirect(cmdbuf, buffer->Handle(), base, max_count, stride);
         }
     } else {
         ASSERT(sizeof(VkDrawIndirectCommand) == stride);
 
         if (count_address != 0) {
-            cmdbuf.drawIndirectCount(buffer->Handle(), base, count_buffer->Handle(), count_offset,
-                                     max_count, stride);
+            vkCmdDrawIndirectCount(cmdbuf, buffer->Handle(), base, count_buffer->Handle(),
+                                   count_offset, max_count, stride);
         } else {
-            cmdbuf.drawIndirect(buffer->Handle(), base, max_count, stride);
+            vkCmdDrawIndirect(cmdbuf, buffer->Handle(), base, max_count, stride);
         }
     }
 
@@ -467,13 +476,13 @@ void Rasterizer::DispatchDirect() {
 
     scheduler.PopPendingOperations();
 
-    const auto& cs_program = liverpool->GetCsRegs();
+    const AmdGpu::ComputeProgram& cs_program = liverpool->GetCsRegs();
     const ComputePipeline* pipeline = pipeline_cache.GetComputePipeline();
     if (!pipeline) {
         return;
     }
 
-    const auto& cs = pipeline->GetStage(Shader::SwStage::Compute);
+    const Shader::Info& cs = pipeline->GetStage(Shader::SwStage::Compute);
     if (ExecuteShaderHLE(cs, liverpool->regs, cs_program, *this)) {
         return;
     }
@@ -489,11 +498,12 @@ void Rasterizer::DispatchDirect() {
     scheduler.EndRendering();
     pipeline->BindResources(set_writes.data(), static_cast<u32>(set_writes.size()), push_data);
 
-    const auto cmdbuf = scheduler.CommandBuffer();
-    cmdbuf.bindPipeline(vk::PipelineBindPoint::eCompute, pipeline->Handle());
+    const VkCommandBuffer cmdbuf = static_cast<VkCommandBuffer>(scheduler.CommandBuffer());
+    vkCmdBindPipeline(cmdbuf, VK_PIPELINE_BIND_POINT_COMPUTE,
+                      static_cast<VkPipeline>(pipeline->Handle()));
     instance.Mark(cmdbuf, "dispatch: shader, x, y, z", cs.pgm_hash, cs_program.dim_x,
                   cs_program.dim_y, cs_program.dim_z);
-    cmdbuf.dispatch(cs_program.dim_x, cs_program.dim_y, cs_program.dim_z);
+    vkCmdDispatch(cmdbuf, cs_program.dim_x, cs_program.dim_y, cs_program.dim_z);
 
     ResetBindings(true);
     if (!capture_textures.empty()) [[unlikely]] {
@@ -505,7 +515,7 @@ void Rasterizer::DispatchIndirect(VAddr address, u32 offset, u32 size) {
 
     scheduler.PopPendingOperations();
 
-    const auto& cs_program = liverpool->GetCsRegs();
+    const AmdGpu::ComputeProgram& cs_program = liverpool->GetCsRegs();
     const ComputePipeline* pipeline = pipeline_cache.GetComputePipeline();
     if (!pipeline) {
         return;
@@ -518,7 +528,7 @@ void Rasterizer::DispatchIndirect(VAddr address, u32 offset, u32 size) {
     u64 base = 0;
     const VideoCore::Buffer* buffer = buffer_cache.ObtainBuffer(address + offset, size, &base);
     needs_barrier |= runtime.IsBufferAccessed(buffer, base, size);
-    bound_buffers.emplace_back(buffer, base, size, vk::AccessFlagBits2::eIndirectCommandRead);
+    bound_buffers.emplace_back(buffer, base, size, VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT);
 
     if (needs_barrier) {
         runtime.FlushBarriers();
@@ -527,11 +537,12 @@ void Rasterizer::DispatchIndirect(VAddr address, u32 offset, u32 size) {
     scheduler.EndRendering();
     pipeline->BindResources(set_writes.data(), static_cast<u32>(set_writes.size()), push_data);
 
-    const auto cmdbuf = scheduler.CommandBuffer();
-    cmdbuf.bindPipeline(vk::PipelineBindPoint::eCompute, pipeline->Handle());
+    const VkCommandBuffer cmdbuf = static_cast<VkCommandBuffer>(scheduler.CommandBuffer());
+    vkCmdBindPipeline(cmdbuf, VK_PIPELINE_BIND_POINT_COMPUTE,
+                      static_cast<VkPipeline>(pipeline->Handle()));
     instance.Mark(cmdbuf, "indirect dispatch: shader, arguments at",
                   pipeline->GetStage(Shader::SwStage::Compute).pgm_hash, address + offset);
-    cmdbuf.dispatchIndirect(buffer->Handle(), base);
+    vkCmdDispatchIndirect(cmdbuf, buffer->Handle(), base);
 
     ResetBindings(true);
     if (!capture_textures.empty()) [[unlikely]] {
@@ -586,7 +597,8 @@ bool Rasterizer::BindResources(const Pipeline* pipeline) {
             continue;
         }
         set_writes.resize(set_writes.size() + stage->buffers.size() + stage->images.size() +
-                          stage->samplers.size());
+                              stage->samplers.size(),
+                          VkWriteDescriptorSet{.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET});
         BindBuffers(*stage, binding, push_data);
         BindTextures(*stage, binding);
         uses_dma |= stage->uses_dma;
@@ -603,9 +615,11 @@ void Rasterizer::CaptureDrawVertices(const GraphicsPipeline* pipeline, bool is_i
                                      u32 index_offset) {
     // For a vertex capture: which vertices of its inputs this draw reads. The bytes bound
     // after them are another mesh's.
-    const auto& regs = liverpool->regs;
-    const auto [vertex_offset, instance_offset] = GetDrawOffsets(
-        regs, pipeline->GetStage(Shader::SwStage::Vertex), pipeline->GetFetchShader());
+    const AmdGpu::Regs& regs = liverpool->regs;
+    u32 vertex_offset;
+    u32 instance_offset;
+    GetDrawOffsets(regs, pipeline->GetStage(Shader::SwStage::Vertex), pipeline->GetFetchShader(),
+                   &vertex_offset, &instance_offset);
     capture_first_vertex = vertex_offset;
     capture_num_vertices = regs.num_indices;
     if (!is_indexed) {
@@ -615,7 +629,7 @@ void Rasterizer::CaptureDrawVertices(const GraphicsPipeline* pipeline, bool is_i
     const u32 index_size = is_index16 ? sizeof(u16) : sizeof(u32);
     const VAddr base_address = regs.index_base_address.Address<VAddr>();
     const VAddr address = base_address + u64(index_offset) * index_size;
-    const u64 wanted = u64(std::min(regs.num_indices, regs.max_index_size)) * index_size;
+    const u64 wanted = u64(Common::Min(regs.num_indices, regs.max_index_size)) * index_size;
     const u64 size = base_address != 0 ? memory->ClampRangeSize(address, wanted) : 0;
     capture_num_vertices = 0;
     if (size < index_size) {
@@ -626,13 +640,13 @@ void Rasterizer::CaptureDrawVertices(const GraphicsPipeline* pipeline, bool is_i
     u32 lowest = UINT32_MAX, highest = 0;
     for (u64 at = 0; at + index_size <= size; at += index_size) {
         u32 index = 0;
-        std::memcpy(&index, capture_indices.data() + at, index_size);
+        memcpy(&index, capture_indices.data() + at, index_size);
         // The index that restarts a strip names no vertex
         if (index == (is_index16 ? 0xFFFFu : 0xFFFFFFFFu)) {
             continue;
         }
-        lowest = std::min(lowest, index);
-        highest = std::max(highest, index);
+        lowest = Common::Min(lowest, index);
+        highest = Common::Max(highest, index);
     }
     if (lowest <= highest) {
         capture_first_vertex = vertex_offset + lowest;
@@ -641,7 +655,8 @@ void Rasterizer::CaptureDrawVertices(const GraphicsPipeline* pipeline, bool is_i
 }
 
 void Rasterizer::BindVertexBuffers(const GraphicsPipeline* pipeline) {
-    const auto& regs = liverpool->regs;
+    const AmdGpu::Regs& regs = liverpool->regs;
+    // The graphics pipeline fills these as vulkan.hpp's structs until it is on the C API
     VertexInputs<vk::VertexInputAttributeDescription2EXT> attributes;
     VertexInputs<vk::VertexInputBindingDescription2EXT> bindings;
     VertexInputs<vk::VertexInputBindingDivisorDescriptionEXT> divisors;
@@ -651,8 +666,16 @@ void Rasterizer::BindVertexBuffers(const GraphicsPipeline* pipeline) {
 
     if (instance.IsVertexInputDynamicState()) {
         // Update current vertex inputs.
-        const auto cmdbuf = scheduler.CommandBuffer();
-        cmdbuf.setVertexInputEXT(bindings, attributes);
+        static_assert(sizeof(vk::VertexInputBindingDescription2EXT) ==
+                      sizeof(VkVertexInputBindingDescription2EXT));
+        static_assert(sizeof(vk::VertexInputAttributeDescription2EXT) ==
+                      sizeof(VkVertexInputAttributeDescription2EXT));
+        vkCmdSetVertexInputEXT(
+            static_cast<VkCommandBuffer>(scheduler.CommandBuffer()),
+            static_cast<u32>(bindings.size()),
+            reinterpret_cast<const VkVertexInputBindingDescription2EXT*>(bindings.data()),
+            static_cast<u32>(attributes.size()),
+            reinterpret_cast<const VkVertexInputAttributeDescription2EXT*>(attributes.data()));
     }
 
     if (bindings.empty()) {
@@ -673,7 +696,7 @@ void Rasterizer::BindVertexBuffers(const GraphicsPipeline* pipeline) {
 
     // Build list of ranges covering the requested buffers
     VertexInputs<BufferRange> ranges{};
-    for (const auto& buffer : guest_buffers) {
+    for (const AmdGpu::Buffer& buffer : guest_buffers) {
         if (buffer.base_address != 0 && buffer.GetSize() > 0) {
             ranges.emplace_back(buffer.base_address, buffer.base_address + buffer.GetSize());
         }
@@ -682,42 +705,51 @@ void Rasterizer::BindVertexBuffers(const GraphicsPipeline* pipeline) {
     // Merge connecting ranges together
     VertexInputs<BufferRange> ranges_merged{};
     if (!ranges.empty()) {
-        std::ranges::sort(ranges, [](const BufferRange& lhv, const BufferRange& rhv) {
-            return lhv.base_address < rhv.base_address;
-        });
+        // By base address; there are no more than a vertex buffer's few
+        for (size_t i = 1; i < ranges.size(); ++i) {
+            const BufferRange moved = ranges[i];
+            size_t j = i;
+            for (; j > 0 && moved.base_address < ranges[j - 1].base_address; --j) {
+                ranges[j] = ranges[j - 1];
+            }
+            ranges[j] = moved;
+        }
         ranges_merged.emplace_back(ranges[0]);
-        for (auto range : ranges) {
-            auto& prev_range = ranges_merged.back();
+        for (const BufferRange& range : ranges) {
+            BufferRange& prev_range = ranges_merged.back();
             if (prev_range.end_address < range.base_address) {
                 ranges_merged.emplace_back(range);
             } else {
-                prev_range.end_address = std::max(prev_range.end_address, range.end_address);
+                prev_range.end_address = Common::Max(prev_range.end_address, range.end_address);
             }
         }
     }
 
     // Map buffers for merged ranges
-    for (auto& range : ranges_merged) {
+    for (BufferRange& range : ranges_merged) {
         const u64 size = memory->ClampRangeSize(range.base_address, range.GetSize());
         range.buffer = buffer_cache.ObtainBuffer(range.base_address, size, &range.offset);
         needs_barrier |= runtime.IsBufferAccessed(range.buffer, range.offset, size);
         bound_buffers.emplace_back(range.buffer, range.offset, size,
-                                   vk::AccessFlagBits2::eVertexAttributeRead);
+                                   VK_ACCESS_2_VERTEX_ATTRIBUTE_READ_BIT);
     }
 
     // Bind vertex buffers
-    VertexInputs<vk::Buffer> host_buffers;
-    VertexInputs<vk::DeviceSize> host_offsets;
-    VertexInputs<vk::DeviceSize> host_sizes;
-    VertexInputs<vk::DeviceSize> host_strides;
-    for (const auto& buffer : guest_buffers) {
+    VertexInputs<VkBuffer> host_buffers;
+    VertexInputs<VkDeviceSize> host_offsets;
+    VertexInputs<VkDeviceSize> host_sizes;
+    VertexInputs<VkDeviceSize> host_strides;
+    for (const AmdGpu::Buffer& buffer : guest_buffers) {
         if (buffer.base_address != 0 && buffer.GetSize() > 0) {
-            const auto host_buffer_info =
-                std::ranges::find_if(ranges_merged, [&](const BufferRange& range) {
-                    return buffer.base_address >= range.base_address &&
-                           buffer.base_address < range.end_address;
-                });
-            ASSERT(host_buffer_info != ranges_merged.cend());
+            const BufferRange* host_buffer_info = nullptr;
+            for (const BufferRange& range : ranges_merged) {
+                if (buffer.base_address >= range.base_address &&
+                    buffer.base_address < range.end_address) {
+                    host_buffer_info = &range;
+                    break;
+                }
+            }
+            ASSERT(host_buffer_info);
             host_buffers.emplace_back(host_buffer_info->buffer->Handle());
             host_offsets.push_back(host_buffer_info->offset + buffer.base_address -
                                    host_buffer_info->base_address);
@@ -734,7 +766,7 @@ void Rasterizer::BindVertexBuffers(const GraphicsPipeline* pipeline) {
         // game's memory and as the GPU is given them (vk_vertex_capture.h)
         VertexInputs<VertexCapture::Binding> captured;
         for (u32 i = 0; i < guest_buffers.size(); ++i) {
-            const auto& buffer = guest_buffers[i];
+            const AmdGpu::Buffer& buffer = guest_buffers[i];
             const bool present = buffer.base_address != 0 && buffer.GetSize() > 0;
             u32 flags = bindings[i].inputRate == vk::VertexInputRate::eInstance
                             ? VertexCapture::BindingPerInstance
@@ -752,8 +784,8 @@ void Rasterizer::BindVertexBuffers(const GraphicsPipeline* pipeline) {
                                              regs.num_indices, regs.num_instances.NumInstances(),
                                              capture_first_vertex, capture_num_vertices, captured);
         capture_num_vertices = 0;
-        auto& staging_pool = runtime.GetStagingPool();
-        for (const auto& range : ranges_merged) {
+        Vulkan::StagingBufferPool& staging_pool = runtime.GetStagingPool();
+        for (const BufferRange& range : ranges_merged) {
             const u64 size = memory->ClampRangeSize(range.base_address, range.GetSize());
             if (size == 0 || size > 64_MB ||
                 !VertexCapture::Wants(range.base_address, size,
@@ -762,7 +794,7 @@ void Rasterizer::BindVertexBuffers(const GraphicsPipeline* pipeline) {
             }
             // The GPU's copy first: read back from where the draw reads it, once the GPU has
             // got this far
-            const auto readback =
+            const Vulkan::StagingBufferRef readback =
                 staging_pool.Request(size, VideoCore::MemoryType::HostCached, 16, true);
             const VkBufferCopy copy{range.offset, readback.offset, size};
             runtime.CopyBuffer(range.buffer, readback.buffer, &copy, 1);
@@ -773,70 +805,71 @@ void Rasterizer::BindVertexBuffers(const GraphicsPipeline* pipeline) {
                     VertexCapture::Host(draw, address, readback.mapped, size);
                     staging_pool.FreeDeferred(readback);
                 });
-            const auto guest = staging_pool.Request(size, VideoCore::MemoryType::HostCached);
+            const Vulkan::StagingBufferRef guest =
+                staging_pool.Request(size, VideoCore::MemoryType::HostCached);
             memory->CopySparseMemory(range.base_address, guest.mapped, size);
             VertexCapture::Guest(draw, range.base_address, guest.mapped, size);
         }
     }
 
-    const auto cmdbuf = scheduler.CommandBuffer();
-    const auto num_buffers = guest_buffers.size();
+    const VkCommandBuffer cmdbuf = static_cast<VkCommandBuffer>(scheduler.CommandBuffer());
+    const u32 num_buffers = static_cast<u32>(guest_buffers.size());
     if (instance.IsVertexInputDynamicState()) {
-        cmdbuf.bindVertexBuffers(0, num_buffers, host_buffers.data(), host_offsets.data());
+        vkCmdBindVertexBuffers(cmdbuf, 0, num_buffers, host_buffers.data(), host_offsets.data());
     } else {
-        cmdbuf.bindVertexBuffers2(0, num_buffers, host_buffers.data(), host_offsets.data(),
-                                  host_sizes.data(), host_strides.data());
+        vkCmdBindVertexBuffers2(cmdbuf, 0, num_buffers, host_buffers.data(), host_offsets.data(),
+                                host_sizes.data(), host_strides.data());
     }
 }
 
 void Rasterizer::BindIndexBuffer(u32 index_offset, bool is_indirect) {
-    const auto& regs = liverpool->regs;
+    const AmdGpu::Regs& regs = liverpool->regs;
 
     // Figure out index type and size.
     const bool is_index16 = regs.index_buffer_type.index_type == AmdGpu::IndexType::Index16;
-    const vk::IndexType index_type = is_index16 ? vk::IndexType::eUint16 : vk::IndexType::eUint32;
+    const VkIndexType index_type = is_index16 ? VK_INDEX_TYPE_UINT16 : VK_INDEX_TYPE_UINT32;
     const u32 index_size = is_index16 ? sizeof(u16) : sizeof(u32);
     const VAddr base_address = regs.index_base_address.Address<VAddr>();
     const VAddr index_address = base_address + u64(index_offset) * index_size;
 
     // Bind index buffer.
     const u32 num_indices =
-        is_indirect ? regs.max_index_size : std::min(regs.num_indices, regs.max_index_size);
+        is_indirect ? regs.max_index_size : Common::Min(regs.num_indices, regs.max_index_size);
     const u64 requested_size = u64(num_indices) * index_size;
     const u64 mapped_size =
         base_address != 0 ? memory->ClampRangeSize(index_address, requested_size) : 0;
     u32 index_buffer_size = static_cast<u32>(Common::AlignDown(mapped_size, index_size));
-    vk::Buffer index_buffer{};
+    VkBuffer index_buffer{};
     u64 buffer_offset{};
     if (index_buffer_size != 0) {
         u64 offset = 0;
         const VideoCore::Buffer* buffer =
             buffer_cache.ObtainBuffer(index_address, index_buffer_size, &offset);
         needs_barrier |= runtime.IsBufferAccessed(buffer, offset, index_buffer_size);
-        bound_buffers.emplace_back(buffer, offset, index_buffer_size,
-                                   vk::AccessFlagBits2::eIndexRead);
+        bound_buffers.emplace_back(buffer, offset, index_buffer_size, VK_ACCESS_2_INDEX_READ_BIT);
         index_buffer = buffer->Handle();
         buffer_offset = offset;
     } else if (!instance.IsMaintenance6Supported()) {
-        const auto* null_buffer = buffer_cache.GetNullIndexBuffer();
+        const VideoCore::Buffer* null_buffer = buffer_cache.GetNullIndexBuffer();
         index_buffer_size = static_cast<u32>(null_buffer->SizeBytes());
         needs_barrier |= runtime.IsBufferAccessed(null_buffer, 0, index_buffer_size);
-        bound_buffers.emplace_back(null_buffer, 0, index_buffer_size,
-                                   vk::AccessFlagBits2::eIndexRead);
+        bound_buffers.emplace_back(null_buffer, 0, index_buffer_size, VK_ACCESS_2_INDEX_READ_BIT);
         index_buffer = null_buffer->Handle();
     }
 
-    const auto cmdbuf = scheduler.CommandBuffer();
+    const VkCommandBuffer cmdbuf = static_cast<VkCommandBuffer>(scheduler.CommandBuffer());
     if (instance.IsMaintenance5Supported()) {
-        cmdbuf.bindIndexBuffer2KHR(index_buffer, buffer_offset, index_buffer_size, index_type);
+        vkCmdBindIndexBuffer2KHR(cmdbuf, index_buffer, buffer_offset, index_buffer_size,
+                                 index_type);
     } else {
-        cmdbuf.bindIndexBuffer(index_buffer, buffer_offset, index_type);
+        vkCmdBindIndexBuffer(cmdbuf, index_buffer, buffer_offset, index_type);
     }
 }
 
 void Rasterizer::DumpCapturedTextures() {
     // Each image once in a frame, as it is when a shader first reads it
-    static std::array<u32, 512> seen;
+    static constexpr u32 MaxSeen = 512;
+    static u32 seen[MaxSeen];
     static u32 num_seen;
     static unsigned long frame;
     const unsigned long now = frame_notes_frame();
@@ -845,14 +878,20 @@ void Rasterizer::DumpCapturedTextures() {
         num_seen = 0;
     }
     for (const u32 index : capture_textures) {
-        if (now == 0 || num_seen == seen.size() ||
-            std::find(seen.begin(), seen.begin() + num_seen, index) != seen.begin() + num_seen) {
+        if (now == 0 || num_seen == MaxSeen) {
+            continue;
+        }
+        bool was_seen = false;
+        for (u32 i = 0; i < num_seen; ++i) {
+            was_seen |= seen[i] == index;
+        }
+        if (was_seen) {
             continue;
         }
         seen[num_seen] = index;
         const VideoCore::ImageId image_id{index};
         if (texture_cache.DumpImagePixels(image_id, num_seen)) {
-            const auto& image = texture_cache.GetImage(image_id);
+            const VideoCore::Image& image = texture_cache.GetImage(image_id);
             instance.Note("pixels written: image at, number in the file's name, format, "
                           "w|h<<16",
                           image.info.guest_address, num_seen, u64(image.info.pixel_format),
@@ -864,14 +903,13 @@ void Rasterizer::DumpCapturedTextures() {
 }
 
 void Rasterizer::ResetBindings(bool is_compute) {
-    for (auto& image_id : bound_images) {
+    for (const VideoCore::ImageId& image_id : bound_images) {
         texture_cache.GetImage(image_id).binding = {};
     }
-    for (const auto [buffer, offset, size, src_access] : bound_buffers) {
-        const VkPipelineStageFlags2 dst_stage = is_compute ? VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT
-                                                           : VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT;
-        runtime.AccessBuffer(buffer, offset, size, dst_stage,
-                             static_cast<VkAccessFlags2>(src_access));
+    const VkPipelineStageFlags2 dst_stage =
+        is_compute ? VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT : VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT;
+    for (const BoundBuffer& bound : bound_buffers) {
+        runtime.AccessBuffer(bound.buffer, bound.offset, bound.size, dst_stage, bound.src_access);
     }
     bound_images.clear();
     bound_buffers.clear();
@@ -887,10 +925,10 @@ bool Rasterizer::IsComputeMetaClear(const Pipeline* pipeline) {
     // we can skip the whole dispatch and update the tracked state instead. Also, it is not
     // intended to be consumed and in such rare cases (e.g. HTile introspection, CRAA) we
     // will need its full emulation anyways.
-    const auto& info = pipeline->GetStage(Shader::SwStage::Compute);
+    const Shader::Info& info = pipeline->GetStage(Shader::SwStage::Compute);
 
     // Assume if a shader reads metadata, it is a copy shader.
-    for (const auto& desc : info.buffers) {
+    for (const Shader::BufferResource& desc : info.buffers) {
         const VAddr address = desc.GetSharp(info).base_address;
         if (!desc.IsSpecial() && !desc.is_written && texture_cache.IsMeta(address)) {
             return false;
@@ -903,7 +941,7 @@ bool Rasterizer::IsComputeMetaClear(const Pipeline* pipeline) {
     // operation so use it as a heuristic for metadata writes that are probably not clears.
     if (!info.has_bitwise_xor) {
         // Assume if a shader writes metadata without address calculation, it is a clear shader.
-        for (const auto& desc : info.buffers) {
+        for (const Shader::BufferResource& desc : info.buffers) {
             const VAddr address = desc.GetSharp(info).base_address;
             if (!desc.IsSpecial() && desc.is_written && texture_cache.ClearMeta(address)) {
                 // Assume all slices were updates
@@ -921,16 +959,16 @@ bool Rasterizer::IsComputeImageCopy(const Pipeline* pipeline) {
     }
 
     // Ensure shader only has 2 bound buffers
-    const auto& cs_pgm = liverpool->GetCsRegs();
-    const auto& info = pipeline->GetStage(Shader::SwStage::Compute);
+    const AmdGpu::ComputeProgram& cs_pgm = liverpool->GetCsRegs();
+    const Shader::Info& info = pipeline->GetStage(Shader::SwStage::Compute);
     if (cs_pgm.num_thread_x.full != 64 || info.buffers.size() < 2 || info.buffers.size() > 3 ||
         !info.images.empty()) {
         return false;
     }
 
     // Those 2 buffers must both be formatted. One must be source and another destination.
-    const auto& desc0 = info.buffers[0];
-    const auto& desc1 = info.buffers[1];
+    const Shader::BufferResource& desc0 = info.buffers[0];
+    const Shader::BufferResource& desc1 = info.buffers[1];
     if (!desc0.is_formatted || !desc1.is_formatted || desc0.is_written == desc1.is_written) {
         return false;
     }
@@ -946,11 +984,12 @@ bool Rasterizer::IsComputeImageCopy(const Pipeline* pipeline) {
     }
 
     // Find images the buffer alias
-    const auto image0_id = texture_cache.FindImageFromRange(buf0.base_address, buf0.GetSize());
+    const VideoCore::ImageId image0_id =
+        texture_cache.FindImageFromRange(buf0.base_address, buf0.GetSize());
     if (!image0_id) {
         return false;
     }
-    const auto image1_id =
+    const VideoCore::ImageId image1_id =
         texture_cache.FindImageFromRange(buf1.base_address, buf1.GetSize(), false);
     if (!image1_id) {
         return false;
@@ -978,16 +1017,16 @@ bool Rasterizer::IsComputeImageClear(const Pipeline* pipeline) {
     }
 
     // Ensure shader only has 2 bound buffers
-    const auto& cs_pgm = liverpool->GetCsRegs();
-    const auto& info = pipeline->GetStage(Shader::SwStage::Compute);
+    const AmdGpu::ComputeProgram& cs_pgm = liverpool->GetCsRegs();
+    const Shader::Info& info = pipeline->GetStage(Shader::SwStage::Compute);
     if (cs_pgm.num_thread_x.full != 64 || info.buffers.size() < 2 || info.buffers.size() > 3 ||
         !info.images.empty()) {
         return false;
     }
 
     // From those 2 buffers, first must hold the clear vector and second the image being cleared
-    const auto& desc0 = info.buffers[0];
-    const auto& desc1 = info.buffers[1];
+    const Shader::BufferResource& desc0 = info.buffers[0];
+    const Shader::BufferResource& desc1 = info.buffers[1];
     if (desc0.is_formatted || !desc1.is_formatted || desc0.is_written || !desc1.is_written) {
         return false;
     }
@@ -1004,7 +1043,7 @@ bool Rasterizer::IsComputeImageClear(const Pipeline* pipeline) {
     }
 
     // Find image the buffer alias
-    const auto image1_id =
+    const VideoCore::ImageId image1_id =
         texture_cache.FindImageFromRange(buf1.base_address, buf1.GetSize(), false);
     if (!image1_id) {
         return false;
@@ -1039,19 +1078,19 @@ bool Rasterizer::IsComputeImageClear(const Pipeline* pipeline) {
 void Rasterizer::BindBuffers(const Shader::Info& stage, Shader::Backend::Bindings& binding,
                              Shader::PushData& push_data) {
     const u64 alignment = instance.StorageMinAlignment();
-    for (const auto& desc : stage.buffers) {
-        const auto src_access =
-            vk::AccessFlagBits2::eShaderRead |
-            (desc.is_written ? vk::AccessFlagBits2::eShaderWrite : vk::AccessFlagBits2::eNone);
+    for (const Shader::BufferResource& desc : stage.buffers) {
+        const VkAccessFlags2 src_access =
+            VK_ACCESS_2_SHADER_READ_BIT |
+            (desc.is_written ? VK_ACCESS_2_SHADER_WRITE_BIT : VK_ACCESS_2_NONE);
         if (desc.IsSpecial()) {
             if (desc.buffer_type == Shader::BufferType::GdsBuffer) {
-                const auto* gds_buf = buffer_cache.GetGdsBuffer();
+                const VideoCore::Buffer* gds_buf = buffer_cache.GetGdsBuffer();
                 buffer_infos.emplace_back(gds_buf->Handle(), 0, gds_buf->SizeBytes());
                 needs_barrier |=
                     runtime.IsBufferAccessed(gds_buf, 0, gds_buf->SizeBytes(), desc.is_written);
                 bound_buffers.emplace_back(gds_buf, 0, gds_buf->SizeBytes(), src_access);
             } else if (desc.buffer_type == Shader::BufferType::Flatbuf) {
-                auto& vk_buffer = buffer_cache.GetStreamBuffer();
+                VideoCore::StreamBuffer& vk_buffer = buffer_cache.GetStreamBuffer();
                 const u32 ubo_size = stage.flattened_ud_buf.size() * sizeof(u32);
                 const u64 offset =
                     vk_buffer.Copy(stage.flattened_ud_buf.data(), ubo_size, alignment);
@@ -1062,39 +1101,39 @@ void Rasterizer::BindBuffers(const Shader::Info& stage, Shader::Backend::Binding
                 if (liverpool->regs.clipper_control.user_clip_plane_enable == 0) {
                     buffer_infos.emplace_back(VK_NULL_HANDLE, 0, VK_WHOLE_SIZE);
                 } else {
-                    auto& vk_buffer = buffer_cache.GetStreamBuffer();
-                    std::array<float, AmdGpu::NUM_CLIP_PLANES * 4> planes{};
+                    VideoCore::StreamBuffer& vk_buffer = buffer_cache.GetStreamBuffer();
+                    float planes[AmdGpu::NUM_CLIP_PLANES * 4] = {};
                     for (u32 i = 0; i < AmdGpu::NUM_CLIP_PLANES; ++i) {
-                        const auto& plane = liverpool->regs.clip_user_data[i];
-                        planes[i * 4 + 0] = std::bit_cast<float>(plane.data_x);
-                        planes[i * 4 + 1] = std::bit_cast<float>(plane.data_y);
-                        planes[i * 4 + 2] = std::bit_cast<float>(plane.data_z);
-                        planes[i * 4 + 3] = std::bit_cast<float>(plane.data_w);
+                        const AmdGpu::ClipUserData& plane = liverpool->regs.clip_user_data[i];
+                        planes[i * 4 + 0] = Common::BitCast<float>(plane.data_x);
+                        planes[i * 4 + 1] = Common::BitCast<float>(plane.data_y);
+                        planes[i * 4 + 2] = Common::BitCast<float>(plane.data_z);
+                        planes[i * 4 + 3] = Common::BitCast<float>(plane.data_w);
                     }
                     const u32 ubo_size = static_cast<u32>(sizeof(planes));
-                    const u64 offset = vk_buffer.Copy(planes.data(), ubo_size, alignment);
+                    const u64 offset = vk_buffer.Copy(planes, ubo_size, alignment);
                     buffer_infos.emplace_back(vk_buffer.Handle(), offset, ubo_size);
                 }
             } else if (desc.buffer_type == Shader::BufferType::BdaPagetable) {
-                const auto* bda_buffer = buffer_cache.GetBdaPageTableBuffer();
+                const VideoCore::Buffer* bda_buffer = buffer_cache.GetBdaPageTableBuffer();
                 buffer_infos.emplace_back(bda_buffer->Handle(), 0, bda_buffer->SizeBytes());
             } else if (desc.buffer_type == Shader::BufferType::FaultBuffer) {
-                const auto* fault_buffer = buffer_cache.GetFaultBuffer();
+                const VideoCore::Buffer* fault_buffer = buffer_cache.GetFaultBuffer();
                 buffer_infos.emplace_back(fault_buffer->Handle(), 0, fault_buffer->SizeBytes());
             } else if (desc.buffer_type == Shader::BufferType::SharedMemory) {
-                auto& lds_buffer = buffer_cache.GetStreamBuffer();
-                const auto& cs_program = liverpool->GetCsRegs();
-                const auto lds_size = cs_program.SharedMemSize() * cs_program.NumWorkgroups();
+                VideoCore::StreamBuffer& lds_buffer = buffer_cache.GetStreamBuffer();
+                const AmdGpu::ComputeProgram& cs_program = liverpool->GetCsRegs();
+                const u32 lds_size = cs_program.SharedMemSize() * cs_program.NumWorkgroups();
                 u64 offset = 0;
                 u8* const data = lds_buffer.Map(lds_size, &offset, alignment);
-                std::memset(data, 0, lds_size);
+                memset(data, 0, lds_size);
                 lds_buffer.Commit();
                 buffer_infos.emplace_back(lds_buffer.Handle(), offset, lds_size);
             } else {
                 UNREACHABLE_MSG("Unexpected buffer type %u", u32(desc.buffer_type));
             }
         } else {
-            const auto vsharp = desc.GetSharp(stage);
+            const AmdGpu::Buffer vsharp = desc.GetSharp(stage);
             if (vsharp.base_address == 0 || vsharp.GetSize() == 0) {
                 buffer_infos.emplace_back(VK_NULL_HANDLE, 0, VK_WHOLE_SIZE);
             } else {
@@ -1131,12 +1170,12 @@ void Rasterizer::BindBuffers(const Shader::Info& stage, Shader::Backend::Binding
             }
         }
 
-        auto& set_write = set_writes[set_write_index++];
+        VkWriteDescriptorSet& set_write = set_writes[set_write_index++];
         set_write.dstSet = VK_NULL_HANDLE;
         set_write.dstBinding = binding.unified++;
         set_write.dstArrayElement = 0;
         set_write.descriptorCount = 1;
-        set_write.descriptorType = vk::DescriptorType::eStorageBuffer;
+        set_write.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
         set_write.pBufferInfo = &buffer_infos.back();
         ++binding.buffer;
     }
@@ -1148,10 +1187,10 @@ void Rasterizer::BindTextures(const Shader::Info& stage, Shader::Backend::Bindin
     Common::SmallVector<u32, 8> image_descriptor_array_sizes;
 
     u32 num_images{};
-    for (const auto& image_desc : stage.images) {
-        const auto tsharp = image_desc.GetSharp(stage);
-        const auto data_fmt = tsharp.GetDataFmt();
-        const auto num_fmt = tsharp.GetNumberFmt();
+    for (const Shader::ImageResource& image_desc : stage.images) {
+        const AmdGpu::Image tsharp = image_desc.GetSharp(stage);
+        const AmdGpu::DataFormat data_fmt = tsharp.GetDataFmt();
+        const AmdGpu::NumberFormat num_fmt = tsharp.GetNumberFmt();
         if (tsharp.Address() == 0 || data_fmt == AmdGpu::DataFormat::FormatInvalid) {
             image_bindings[num_images++].image_id = {};
             image_descriptor_array_sizes.push_back(1);
@@ -1175,9 +1214,11 @@ void Rasterizer::BindTextures(const Shader::Info& stage, Shader::Backend::Bindin
         const Shader::MipStorageFallbackMode mip_fallback_mode = image_desc.mip_fallback_mode;
         const u32 num_bindings = image_desc.NumBindings(stage);
 
-        for (auto i = 0; i < num_bindings; i++) {
-            auto& [image_id, desc] = image_bindings[num_images++];
-            std::construct_at(&desc, tsharp, image_desc);
+        for (u32 i = 0; i < num_bindings; i++) {
+            VideoCore::ImageId& image_id = image_bindings[num_images].image_id;
+            VideoCore::TextureCache::ImageDesc& desc = image_bindings[num_images].desc;
+            ++num_images;
+            new (&desc) VideoCore::TextureCache::ImageDesc(tsharp, image_desc);
 
             if (mip_fallback_mode == Shader::MipStorageFallbackMode::ConstantIndex) {
                 ASSERT(num_bindings == 1);
@@ -1189,9 +1230,9 @@ void Rasterizer::BindTextures(const Shader::Info& stage, Shader::Backend::Bindin
             }
 
             image_id = texture_cache.FindImage(desc);
-            const auto found_id = image_id;
-            auto* image = &texture_cache.GetImage(image_id);
-            if (auto depth_image_id = texture_cache.GetAssociatedDepth(*image)) {
+            const VideoCore::ImageId found_id = image_id;
+            VideoCore::Image* image = &texture_cache.GetImage(image_id);
+            if (VideoCore::ImageId depth_image_id = texture_cache.GetAssociatedDepth(*image)) {
                 // If this image has an associated depth image, it's a stencil attachment.
                 // Redirect the access to the actual depth-stencil buffer.
                 image_id = depth_image_id;
@@ -1235,12 +1276,13 @@ void Rasterizer::BindTextures(const Shader::Info& stage, Shader::Backend::Bindin
 
     // Second pass to re-bind images that were updated after binding
     for (u32 i = 0; i < num_images; ++i) {
-        auto& [image_id, desc] = image_bindings[i];
-        bool is_storage = desc.type == VideoCore::TextureCache::BindingType::Storage;
+        VideoCore::ImageId& image_id = image_bindings[i].image_id;
+        VideoCore::TextureCache::ImageDesc& desc = image_bindings[i].desc;
+        const bool is_storage = desc.type == VideoCore::TextureCache::BindingType::Storage;
         if (!image_id) {
-            image_infos.emplace_back(VK_NULL_HANDLE, VK_NULL_HANDLE, vk::ImageLayout::eGeneral);
+            image_infos.emplace_back(VK_NULL_HANDLE, VK_NULL_HANDLE, VK_IMAGE_LAYOUT_GENERAL);
         } else {
-            if (auto& old_image = texture_cache.GetImage(image_id);
+            if (VideoCore::Image& old_image = texture_cache.GetImage(image_id);
                 old_image.binding.needs_rebind) {
                 old_image.binding = {};
                 image_id = texture_cache.FindImage(desc);
@@ -1248,14 +1290,16 @@ void Rasterizer::BindTextures(const Shader::Info& stage, Shader::Backend::Bindin
 
             bound_images.emplace_back(image_id);
 
-            auto& image = texture_cache.GetImage(image_id);
-            auto& image_view = texture_cache.FindTexture(image_id, desc);
-            const auto binding = image.binding;
+            VideoCore::Image& image = texture_cache.GetImage(image_id);
+            VideoCore::ImageView& image_view = texture_cache.FindTexture(image_id, desc);
+            // As the image was bound before this one changes it
+            const bool was_general = image.binding.force_general;
+            const bool was_target = image.binding.is_target;
 
             // The image is either bound as storage in a separate descriptor or bound as render
             // target in feedback loop. Depth images are excluded because they can't be bound as
             // storage and feedback loop doesn't make sense for them
-            if ((binding.force_general || binding.is_target) && !image.info.props.is_depth) {
+            if ((was_general || was_target) && !image.info.props.is_depth) {
                 if (instance.IsAttachmentFeedbackLoopLayoutSupported() && image.binding.is_target) {
                     needs_barrier |= runtime.Transit(
                         &image, VK_IMAGE_LAYOUT_ATTACHMENT_FEEDBACK_LOOP_OPTIMAL_EXT,
@@ -1285,22 +1329,22 @@ void Rasterizer::BindTextures(const Shader::Info& stage, Shader::Backend::Bindin
             image.usage.texture |= !is_storage;
 
             image_infos.emplace_back(VK_NULL_HANDLE, image_view.Handle(),
-                                     static_cast<vk::ImageLayout>(image.backing->state.layout));
+                                     static_cast<VkImageLayout>(image.backing->state.layout));
         }
     }
 
     u32 image_info_idx = first_image_idx;
     u32 image_binding_idx = 0;
     for (u32 array_size : image_descriptor_array_sizes) {
-        const auto& [_, desc] = image_bindings[image_binding_idx];
+        const VideoCore::TextureCache::ImageDesc& desc = image_bindings[image_binding_idx].desc;
         const bool is_storage = desc.type == VideoCore::TextureCache::BindingType::Storage;
-        auto& set_write = set_writes[set_write_index++];
+        VkWriteDescriptorSet& set_write = set_writes[set_write_index++];
         set_write.dstSet = VK_NULL_HANDLE;
         set_write.dstBinding = binding.unified;
         set_write.dstArrayElement = 0;
         set_write.descriptorCount = array_size;
         set_write.descriptorType =
-            is_storage ? vk::DescriptorType::eStorageImage : vk::DescriptorType::eSampledImage;
+            is_storage ? VK_DESCRIPTOR_TYPE_STORAGE_IMAGE : VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
         set_write.pImageInfo = &image_infos[image_info_idx];
 
         image_info_idx += array_size;
@@ -1308,8 +1352,8 @@ void Rasterizer::BindTextures(const Shader::Info& stage, Shader::Backend::Bindin
         binding.unified += array_size;
     }
 
-    for (const auto& sampler : stage.samplers) {
-        auto ssharp = sampler.GetSharp(stage);
+    for (const Shader::SamplerResource& sampler : stage.samplers) {
+        AmdGpu::Sampler ssharp = sampler.GetSharp(stage);
         if (!ssharp.Valid() || (ssharp.border_color_type.Value() == AmdGpu::BorderColor::Custom &&
                                 liverpool->regs.ta_bc_base.Address() == 0)) {
             LOG_WARNING(Render_Vulkan,
@@ -1322,15 +1366,15 @@ void Rasterizer::BindTextures(const Shader::Info& stage, Shader::Backend::Bindin
                         static_cast<unsigned long long>(liverpool->regs.ta_bc_base.Address()));
             ssharp = AmdGpu::Sampler{};
         }
-        const auto vk_sampler =
+        VkSampler_T* const vk_sampler =
             texture_cache.GetSampler(ssharp, liverpool->regs.ta_bc_base, sampler.is_depth);
-        image_infos.emplace_back(vk_sampler, VK_NULL_HANDLE, vk::ImageLayout::eGeneral);
-        auto& set_write = set_writes[set_write_index++];
+        image_infos.emplace_back(vk_sampler, VK_NULL_HANDLE, VK_IMAGE_LAYOUT_GENERAL);
+        VkWriteDescriptorSet& set_write = set_writes[set_write_index++];
         set_write.dstSet = VK_NULL_HANDLE;
         set_write.dstBinding = binding.unified++;
         set_write.dstArrayElement = 0;
         set_write.descriptorCount = 1;
-        set_write.descriptorType = vk::DescriptorType::eSampler;
+        set_write.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER;
         set_write.pImageInfo = &image_infos.back();
     }
 }
@@ -1339,31 +1383,32 @@ RenderState Rasterizer::BeginRendering(const GraphicsPipeline* pipeline) {
     attachment_feedback_loop = false;
     target_scale_num = 1;
     target_scale_den = 1;
-    const auto& regs = liverpool->regs;
-    const auto& key = pipeline->GetGraphicsKey();
+    const AmdGpu::Regs& regs = liverpool->regs;
+    const Vulkan::GraphicsPipelineKey& key = pipeline->GetGraphicsKey();
     RenderState state;
     state.width = instance.GetMaxFramebufferWidth();
     state.height = instance.GetMaxFramebufferHeight();
-    state.num_layers = std::numeric_limits<u16>::max();
-    state.num_color_attachments = std::bit_width(key.mrt_mask);
-    for (auto cb = 0u; cb < state.num_color_attachments; ++cb) {
-        auto& [image_id, desc] = cb_descs[cb];
+    state.num_layers = 0xffff;
+    state.num_color_attachments = Common::BitWidth(key.mrt_mask);
+    for (u32 cb = 0u; cb < state.num_color_attachments; ++cb) {
+        VideoCore::ImageId& image_id = cb_descs[cb].image_id;
+        VideoCore::TextureCache::ImageDesc& desc = cb_descs[cb].desc;
         if (!image_id) {
             state.color_attachments[cb] = {};
             continue;
         }
-        auto* image = &texture_cache.GetImage(image_id);
+        VideoCore::Image* image = &texture_cache.GetImage(image_id);
         if (image->binding.needs_rebind) {
             image_id = bound_images.emplace_back(texture_cache.FindImage(desc));
             image = &texture_cache.GetImage(image_id);
         }
         texture_cache.UpdateImage(image_id);
         runtime.SetBackingSamples(image, key.color_samples[cb]);
-        const auto& image_view = texture_cache.FindRenderTarget(image_id, desc);
-        const auto slice = image_view.info.range.base.layer;
-        const auto mip = image_view.info.range.base.level;
+        const VideoCore::ImageView& image_view = texture_cache.FindRenderTarget(image_id, desc);
+        const u16 slice = image_view.info.range.base.layer;
+        const u16 mip = image_view.info.range.base.level;
 
-        const auto& col_buf = regs.color_buffers[cb];
+        const AmdGpu::ColorBuffer& col_buf = regs.color_buffers[cb];
         const bool is_clear = texture_cache.IsMetaCleared(col_buf.CmaskAddress(), slice);
         texture_cache.TouchMeta(col_buf.CmaskAddress(), slice, false);
 
@@ -1387,15 +1432,17 @@ RenderState Rasterizer::BeginRendering(const GraphicsPipeline* pipeline) {
                                              &desc.view_info.range);
         }
 
-        state.width = std::min<u32>(state.width, std::max(image->HostSize().width >> mip, 1u));
-        state.height = std::min<u32>(state.height, std::max(image->HostSize().height >> mip, 1u));
+        state.width =
+            Common::Min<u32>(state.width, Common::Max(image->HostSize().width >> mip, 1u));
+        state.height =
+            Common::Min<u32>(state.height, Common::Max(image->HostSize().height >> mip, 1u));
         target_scale_num = image->scale_num;
         target_scale_den = image->scale_den;
-        state.num_layers = std::min<u32>(state.num_layers, image_view.info.range.extent.layers);
+        state.num_layers = Common::Min<u32>(state.num_layers, image_view.info.range.extent.layers);
 
-        const auto clear_value =
+        const vk::ClearValue clear_value =
             is_clear ? LiverpoolToVK::ColorBufferClearValue(col_buf) : vk::ClearValue{};
-        auto& attachment = state.color_attachments[cb];
+        Vulkan::RenderAttachment& attachment = state.color_attachments[cb];
         attachment.image_view = image_view.Handle();
         attachment.image_layout = static_cast<VkImageLayout>(image->backing->state.layout);
         memcpy(attachment.clear_value, clear_value.color.uint32.data(),
@@ -1416,11 +1463,11 @@ RenderState Rasterizer::BeginRendering(const GraphicsPipeline* pipeline) {
         state.color_attachments[cb] = {};
     }
 
-    if (auto image_id = db_desc.image_id; image_id) {
-        auto& desc = db_desc.desc;
-        const auto htile_address = regs.depth_htile_data_base.GetAddress();
-        const auto& image_view = texture_cache.FindDepthTarget(image_id, desc);
-        auto& image = texture_cache.GetImage(image_id);
+    if (VideoCore::ImageId image_id = db_desc.image_id; image_id) {
+        VideoCore::TextureCache::ImageDesc& desc = db_desc.desc;
+        const VAddr htile_address = regs.depth_htile_data_base.GetAddress();
+        const VideoCore::ImageView& image_view = texture_cache.FindDepthTarget(image_id, desc);
+        VideoCore::Image& image = texture_cache.GetImage(image_id);
         // What the samples' positions are from here on goes with the buffer's layout changes
         image.sample_locs_grid = 0;
         if (key.sample_locations) {
@@ -1430,7 +1477,7 @@ RenderState Rasterizer::BeginRendering(const GraphicsPipeline* pipeline) {
             image.sample_locs_samples = key.num_samples;
         }
 
-        const auto slice = image_view.info.range.base.layer;
+        const u16 slice = image_view.info.range.base.layer;
         const bool is_depth_clear =
             (regs.depth_render_control.depth_clear_enable && regs.depth_control.depth_enable &&
              regs.depth_control.depth_write_enable) ||
@@ -1457,13 +1504,13 @@ RenderState Rasterizer::BeginRendering(const GraphicsPipeline* pipeline) {
                                              VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT,
                                          &desc.view_info.range);
 
-        state.width = std::min<u32>(state.width, image.HostSize().width);
-        state.height = std::min<u32>(state.height, image.HostSize().height);
+        state.width = Common::Min<u32>(state.width, image.HostSize().width);
+        state.height = Common::Min<u32>(state.height, image.HostSize().height);
         target_scale_num = image.scale_num;
         target_scale_den = image.scale_den;
-        state.num_layers = std::min<u32>(state.num_layers, image_view.info.range.extent.layers);
+        state.num_layers = Common::Min<u32>(state.num_layers, image_view.info.range.extent.layers);
 
-        auto& attachment = state.depth_stencil_attachment;
+        Vulkan::RenderAttachment& attachment = state.depth_stencil_attachment;
         attachment.image_view = image_view.Handle();
         attachment.image_layout = static_cast<VkImageLayout>(image.backing->state.layout);
         memset(attachment.clear_value, 0, sizeof(attachment.clear_value));
@@ -1490,7 +1537,8 @@ RenderState Rasterizer::BeginRendering(const GraphicsPipeline* pipeline) {
                           u64(regs.depth_buffer.StencilValid()) << 1 | u64(image_has_depth) << 2 |
                           u64(image_has_stencil) << 3);
         if (regs.depth_buffer.DepthValid() && image_has_depth) {
-            attachment.clear_value[0] = is_depth_clear ? std::bit_cast<u32>(regs.depth_clear) : 0u;
+            attachment.clear_value[0] =
+                is_depth_clear ? Common::BitCast<u32>(regs.depth_clear) : 0u;
             attachment.has_depth = true;
             attachment.depth_clear = is_depth_clear;
         }
@@ -1505,7 +1553,7 @@ RenderState Rasterizer::BeginRendering(const GraphicsPipeline* pipeline) {
         state.depth_stencil_attachment = {};
     }
 
-    if (state.num_layers == std::numeric_limits<u16>::max()) {
+    if (state.num_layers == 0xffff) {
         state.num_layers = 1;
     }
 
@@ -1513,12 +1561,12 @@ RenderState Rasterizer::BeginRendering(const GraphicsPipeline* pipeline) {
 }
 
 void Rasterizer::Resolve() {
-    const auto& mrt0_hint = liverpool->last_cb_extent[0];
-    const auto& mrt1_hint = liverpool->last_cb_extent[1];
+    const AmdGpu::CbDbExtent& mrt0_hint = liverpool->last_cb_extent[0];
+    const AmdGpu::CbDbExtent& mrt1_hint = liverpool->last_cb_extent[1];
     VideoCore::TextureCache::ImageDesc mrt0_desc{liverpool->regs.color_buffers[0], mrt0_hint};
     VideoCore::TextureCache::ImageDesc mrt1_desc{liverpool->regs.color_buffers[1], mrt1_hint};
-    auto& mrt0_image = texture_cache.GetImage(texture_cache.FindImage(mrt0_desc, true));
-    auto& mrt1_image = texture_cache.GetImage(texture_cache.FindImage(mrt1_desc, true));
+    VideoCore::Image& mrt0_image = texture_cache.GetImage(texture_cache.FindImage(mrt0_desc, true));
+    VideoCore::Image& mrt1_image = texture_cache.GetImage(texture_cache.FindImage(mrt1_desc, true));
 
     HostMarkerBegin("Resolve:MRT0=0x%" PRIx64 ":MRT1=0x%" PRIx64,
                     liverpool->regs.color_buffers[0].Address(),
@@ -1529,18 +1577,18 @@ void Rasterizer::Resolve() {
 }
 
 void Rasterizer::DepthStencilCopy(bool is_depth, bool is_stencil) {
-    auto& regs = liverpool->regs;
+    AmdGpu::Regs& regs = liverpool->regs;
 
-    auto read_desc = VideoCore::TextureCache::ImageDesc(
+    VideoCore::TextureCache::ImageDesc read_desc = VideoCore::TextureCache::ImageDesc(
         regs.depth_buffer, regs.depth_view, regs.depth_control,
         regs.depth_htile_data_base.GetAddress(), liverpool->last_db_extent, false);
-    auto write_desc = VideoCore::TextureCache::ImageDesc(
+    VideoCore::TextureCache::ImageDesc write_desc = VideoCore::TextureCache::ImageDesc(
         regs.depth_buffer, regs.depth_view, regs.depth_control,
         regs.depth_htile_data_base.GetAddress(), liverpool->last_db_extent, true);
 
-    auto& read_image = texture_cache.GetImage(texture_cache.FindImage(read_desc));
-    const auto write_id = texture_cache.FindImage(write_desc);
-    auto& write_image = texture_cache.GetImage(write_id);
+    VideoCore::Image& read_image = texture_cache.GetImage(texture_cache.FindImage(read_desc));
+    const VideoCore::ImageId write_id = texture_cache.FindImage(write_desc);
+    VideoCore::Image& write_image = texture_cache.GetImage(write_id);
     // The copy destination is never bound as a target, so its stencil plane is linked here.
     texture_cache.AssociateStencil(write_id, write_desc.info);
 
@@ -1559,23 +1607,24 @@ void Rasterizer::DepthStencilCopy(bool is_depth, bool is_stencil) {
 }
 
 void Rasterizer::DepthToColor(bool is_stencil, u32 sample) {
-    const auto& regs = liverpool->regs;
-    const auto& col_buf = regs.color_buffers[0];
+    const AmdGpu::Regs& regs = liverpool->regs;
+    const AmdGpu::ColorBuffer& col_buf = regs.color_buffers[0];
 
-    auto depth_desc = VideoCore::TextureCache::ImageDesc(
+    VideoCore::TextureCache::ImageDesc depth_desc = VideoCore::TextureCache::ImageDesc(
         regs.depth_buffer, regs.depth_view, regs.depth_control,
         regs.depth_htile_data_base.GetAddress(), liverpool->last_db_extent, false);
-    auto color_desc = VideoCore::TextureCache::ImageDesc(col_buf, liverpool->last_cb_extent[0]);
+    VideoCore::TextureCache::ImageDesc color_desc =
+        VideoCore::TextureCache::ImageDesc(col_buf, liverpool->last_cb_extent[0]);
 
-    const auto depth_id = texture_cache.FindImage(depth_desc);
-    const auto color_id = texture_cache.FindImage(color_desc);
+    const VideoCore::ImageId depth_id = texture_cache.FindImage(depth_desc);
+    const VideoCore::ImageId color_id = texture_cache.FindImage(color_desc);
     texture_cache.UpdateImage(depth_id);
     // Marks the target as written by the GPU and keeps its cmask and fmask known
-    const auto& color_view = texture_cache.FindRenderTarget(color_id, color_desc);
+    const VideoCore::ImageView& color_view = texture_cache.FindRenderTarget(color_id, color_desc);
     texture_cache.TouchMeta(col_buf.CmaskAddress(), color_view.info.range.base.layer, false);
 
-    auto& depth_image = texture_cache.GetImage(depth_id);
-    auto& color_image = texture_cache.GetImage(color_id);
+    VideoCore::Image& depth_image = texture_cache.GetImage(depth_id);
+    VideoCore::Image& color_image = texture_cache.GetImage(color_id);
 
     HostMarkerBegin("DepthToColor:D=0x%" PRIxPTR ":C=0x%" PRIxPTR ":stencil=%s:sample=%u",
                     depth_image.info.guest_address, color_image.info.guest_address,
@@ -1595,8 +1644,10 @@ void Rasterizer::FillBuffer(VAddr address, u32 num_bytes, u32 value, bool is_gds
     if (!is_gds) {
         texture_cache.ClearMeta(address);
         if (!buffer_cache.IsRegionGpuModified(address, num_bytes)) {
-            u32* buffer = std::bit_cast<u32*>(address);
-            std::fill(buffer, buffer + (num_bytes / sizeof(u32)), value);
+            u32* const buffer = reinterpret_cast<u32*>(address);
+            for (u32 i = 0; i < num_bytes / sizeof(u32); ++i) {
+                buffer[i] = value;
+            }
             return;
         }
     }
@@ -1613,12 +1664,12 @@ void Rasterizer::CopyBuffer(VAddr dst, VAddr src, u32 num_bytes, bool dst_gds, b
         if (!src_gds && !buffer_cache.IsRegionGpuModified(src, num_bytes) &&
             !texture_cache.FindImageFromRange(src, num_bytes)) {
             // Both buffers were not transferred to GPU yet. Can safely copy in host memory.
-            std::memcpy(std::bit_cast<void*>(dst), std::bit_cast<void*>(src), num_bytes);
+            memcpy(reinterpret_cast<void*>(dst), reinterpret_cast<const void*>(src), num_bytes);
             return;
         }
     }
     texture_cache.InvalidateMemoryFromGPU(dst, num_bytes);
-    const auto* gds_buffer = buffer_cache.GetGdsBuffer();
+    const VideoCore::Buffer* gds_buffer = buffer_cache.GetGdsBuffer();
     u64 src_offset = src;
     const VideoCore::Buffer* src_buffer =
         src_gds ? gds_buffer
@@ -1635,9 +1686,9 @@ void Rasterizer::CopyBuffer(VAddr dst, VAddr src, u32 num_bytes, bool dst_gds, b
 }
 
 u32 Rasterizer::ReadDataFromGds(u32 gds_offset) {
-    auto* gds_buf = buffer_cache.GetGdsBuffer();
+    const VideoCore::Buffer* gds_buf = buffer_cache.GetGdsBuffer();
     u32 value;
-    std::memcpy(&value, gds_buf->mapped_data + gds_offset, sizeof(u32));
+    memcpy(&value, gds_buf->mapped_data + gds_offset, sizeof(u32));
     return value;
 }
 
@@ -1667,7 +1718,7 @@ bool Rasterizer::IsMapped(VAddr addr, u64 size) {
         // There is no memory, so not mapped.
         return false;
     }
-    if (static_cast<u64>(addr) > std::numeric_limits<u64>::max() - size) {
+    if (static_cast<u64>(addr) > ~u64{0} - size) {
         // Memory range wrapped the address space, cannot be mapped.
         return false;
     }
@@ -1676,7 +1727,7 @@ bool Rasterizer::IsMapped(VAddr addr, u64 size) {
 }
 
 bool Rasterizer::TouchesMapped(VAddr addr, u64 size) {
-    if (size == 0 || static_cast<u64>(addr) > std::numeric_limits<u64>::max() - size) {
+    if (size == 0 || static_cast<u64>(addr) > ~u64{0} - size) {
         return false;
     }
     return mapped_ranges.Read(
@@ -1708,8 +1759,8 @@ void Rasterizer::UpdateDynamicState(const GraphicsPipeline* pipeline, const bool
     UpdateRasterizationState();
     UpdateColorBlendingState(pipeline);
 
-    auto& dynamic_state = scheduler.GetDynamicState();
-    if (const auto& key = pipeline->GetGraphicsKey(); key.sample_locations) {
+    DynamicState& dynamic_state = scheduler.GetDynamicState();
+    if (const Vulkan::GraphicsPipelineKey& key = pipeline->GetGraphicsKey(); key.sample_locations) {
         u8 locs[AMDGPU_SAMPLE_LOCS_MAX];
         if (const u32 grid =
                 amdgpu_sample_locs(liverpool->regs.aa_sample_locs, key.num_samples,
@@ -1720,35 +1771,40 @@ void Rasterizer::UpdateDynamicState(const GraphicsPipeline* pipeline, const bool
     dynamic_state.Commit(instance, scheduler.CommandBuffer());
 }
 
-void Rasterizer::UpdateViewportScissorState() const {
-    const auto& regs = liverpool->regs;
+/// A scissor's top left edge: the innermost of the screen's, the window's and the generic one
+static s16 CombinedScissorTopLeft(s16 scr, s16 win, s16 gen, s16 win_offset) {
+    return Common::Max(scr, Common::Max(s16(win + win_offset), s16(gen + win_offset)));
+}
 
-    const auto combined_scissor_value_tl = [](s16 scr, s16 win, s16 gen, s16 win_offset) {
-        return std::max({scr, s16(win + win_offset), s16(gen + win_offset)});
-    };
-    const auto combined_scissor_value_br = [](s16 scr, s16 win, s16 gen, s16 win_offset) {
-        return std::min({scr, s16(win + win_offset), s16(gen + win_offset)});
-    };
+/// A scissor's bottom right edge, the same way
+static s16 CombinedScissorBottomRight(s16 scr, s16 win, s16 gen, s16 win_offset) {
+    return Common::Min(scr, Common::Min(s16(win + win_offset), s16(gen + win_offset)));
+}
+
+void Rasterizer::UpdateViewportScissorState() const {
+    const AmdGpu::Regs& regs = liverpool->regs;
+
     const bool enable_offset = !regs.window_scissor.window_offset_disable;
 
     AmdGpu::Scissor scsr{};
-    scsr.top_left_x = combined_scissor_value_tl(
-        regs.screen_scissor.top_left_x, s16(regs.window_scissor.top_left_x),
-        s16(regs.generic_scissor.top_left_x),
-        enable_offset ? regs.window_offset.window_x_offset : 0);
-    scsr.top_left_y = combined_scissor_value_tl(
-        regs.screen_scissor.top_left_y, s16(regs.window_scissor.top_left_y),
-        s16(regs.generic_scissor.top_left_y),
-        enable_offset ? regs.window_offset.window_y_offset : 0);
-    scsr.bottom_right_x = combined_scissor_value_br(
+    scsr.top_left_x =
+        CombinedScissorTopLeft(regs.screen_scissor.top_left_x, s16(regs.window_scissor.top_left_x),
+                               s16(regs.generic_scissor.top_left_x),
+                               enable_offset ? regs.window_offset.window_x_offset : 0);
+    scsr.top_left_y =
+        CombinedScissorTopLeft(regs.screen_scissor.top_left_y, s16(regs.window_scissor.top_left_y),
+                               s16(regs.generic_scissor.top_left_y),
+                               enable_offset ? regs.window_offset.window_y_offset : 0);
+    scsr.bottom_right_x = CombinedScissorBottomRight(
         regs.screen_scissor.bottom_right_x, regs.window_scissor.bottom_right_x,
         regs.generic_scissor.bottom_right_x,
         enable_offset ? regs.window_offset.window_x_offset : 0);
-    scsr.bottom_right_y = combined_scissor_value_br(
+    scsr.bottom_right_y = CombinedScissorBottomRight(
         regs.screen_scissor.bottom_right_y, regs.window_scissor.bottom_right_y,
         regs.generic_scissor.bottom_right_y,
         enable_offset ? regs.window_offset.window_y_offset : 0);
 
+    // The scheduler keeps them as vulkan.hpp's until it is on the C API
     Common::StaticVector<vk::Viewport, AmdGpu::NUM_VIEWPORTS> viewports;
     Common::StaticVector<vk::Rect2D, AmdGpu::NUM_VIEWPORTS> scissors;
 
@@ -1758,16 +1814,16 @@ void Rasterizer::UpdateViewportScissorState() const {
                   "PA_SU_SC_MODE_CNTL.VTX_WINDOW_OFFSET_ENABLE support is not yet implemented.");
     }
 
-    const auto& vp_ctl = regs.viewport_control;
+    const AmdGpu::ViewportControl& vp_ctl = regs.viewport_control;
     for (u32 i = 0; i < AmdGpu::NUM_VIEWPORTS; i++) {
-        const auto& vp = regs.viewports[i];
-        const auto& vp_d = regs.viewport_depths[i];
+        const AmdGpu::ViewportBounds& vp = regs.viewports[i];
+        const AmdGpu::ViewportDepth& vp_d = regs.viewport_depths[i];
         if (vp.xscale == 0) {
             continue;
         }
 
-        const auto zoffset = vp_ctl.zoffset_enable ? vp.zoffset : 0.f;
-        const auto zscale = vp_ctl.zscale_enable ? vp.zscale : 1.f;
+        const float zoffset = vp_ctl.zoffset_enable ? vp.zoffset : 0.f;
+        const float zscale = vp_ctl.zscale_enable ? vp.zscale : 1.f;
 
         vk::Viewport viewport{};
 
@@ -1785,8 +1841,8 @@ void Rasterizer::UpdateViewportScissorState() const {
 
         if (!instance.IsDepthRangeUnrestrictedSupported()) {
             // Unrestricted depth range not supported by device. Restrict to valid range.
-            viewport.minDepth = std::max(viewport.minDepth, 0.f);
-            viewport.maxDepth = std::min(viewport.maxDepth, 1.f);
+            viewport.minDepth = Common::Max(viewport.minDepth, 0.f);
+            viewport.maxDepth = Common::Min(viewport.maxDepth, 1.f);
         }
 
         if (regs.IsClipDisabled()) {
@@ -1795,13 +1851,13 @@ void Rasterizer::UpdateViewportScissorState() const {
             // window range [0..16383, 0..16383] and setting the viewport to its size.
             viewport.x = 0.f;
             viewport.y = 0.f;
-            viewport.width = float(std::min<u32>(instance.GetMaxViewportWidth(), 16_KB));
-            viewport.height = float(std::min<u32>(instance.GetMaxViewportHeight(), 16_KB));
+            viewport.width = float(Common::Min<u32>(instance.GetMaxViewportWidth(), 16_KB));
+            viewport.height = float(Common::Min<u32>(instance.GetMaxViewportHeight(), 16_KB));
         } else {
-            const auto xoffset = vp_ctl.xoffset_enable ? vp.xoffset : 0.f;
-            const auto xscale = vp_ctl.xscale_enable ? vp.xscale : 1.f;
-            const auto yoffset = vp_ctl.yoffset_enable ? vp.yoffset : 0.f;
-            const auto yscale = vp_ctl.yscale_enable ? vp.yscale : 1.f;
+            const float xoffset = vp_ctl.xoffset_enable ? vp.xoffset : 0.f;
+            const float xscale = vp_ctl.xscale_enable ? vp.xscale : 1.f;
+            const float yoffset = vp_ctl.yoffset_enable ? vp.yoffset : 0.f;
+            const float yscale = vp_ctl.yscale_enable ? vp.yscale : 1.f;
 
             viewport.x = xoffset - xscale;
             viewport.y = yoffset - yscale;
@@ -1818,16 +1874,16 @@ void Rasterizer::UpdateViewportScissorState() const {
         }
         viewports.push_back(viewport);
 
-        auto vp_scsr = scsr;
+        AmdGpu::Scissor vp_scsr = scsr;
         if (regs.mode_control.vport_scissor_enable) {
             vp_scsr.top_left_x =
-                std::max(vp_scsr.top_left_x, s16(regs.viewport_scissors[i].top_left_x));
+                Common::Max(vp_scsr.top_left_x, s16(regs.viewport_scissors[i].top_left_x));
             vp_scsr.top_left_y =
-                std::max(vp_scsr.top_left_y, s16(regs.viewport_scissors[i].top_left_y));
-            vp_scsr.bottom_right_x = std::min(AmdGpu::Scissor::Clamp(vp_scsr.bottom_right_x),
-                                              regs.viewport_scissors[i].bottom_right_x);
-            vp_scsr.bottom_right_y = std::min(AmdGpu::Scissor::Clamp(vp_scsr.bottom_right_y),
-                                              regs.viewport_scissors[i].bottom_right_y);
+                Common::Max(vp_scsr.top_left_y, s16(regs.viewport_scissors[i].top_left_y));
+            vp_scsr.bottom_right_x = Common::Min(AmdGpu::Scissor::Clamp(vp_scsr.bottom_right_x),
+                                                 regs.viewport_scissors[i].bottom_right_x);
+            vp_scsr.bottom_right_y = Common::Min(AmdGpu::Scissor::Clamp(vp_scsr.bottom_right_y),
+                                                 regs.viewport_scissors[i].bottom_right_y);
         }
         vk::Rect2D scissor{
             .offset = {vp_scsr.top_left_x, vp_scsr.top_left_y},
@@ -1842,8 +1898,8 @@ void Rasterizer::UpdateViewportScissorState() const {
             const s64 x1 = (s64(scissor.offset.x) + scissor.extent.width) * num / den + 1;
             const s64 y1 = (s64(scissor.offset.y) + scissor.extent.height) * num / den + 1;
             scissor.offset = vk::Offset2D{static_cast<s32>(x0), static_cast<s32>(y0)};
-            scissor.extent = vk::Extent2D{static_cast<u32>(std::max<s64>(x1 - x0, 0)),
-                                          static_cast<u32>(std::max<s64>(y1 - y0, 0))};
+            scissor.extent = vk::Extent2D{static_cast<u32>(Common::Max<s64>(x1 - x0, 0)),
+                                          static_cast<u32>(Common::Max<s64>(y1 - y0, 0))};
         }
         scissors.push_back(scissor);
     }
@@ -1866,16 +1922,29 @@ void Rasterizer::UpdateViewportScissorState() const {
         scissors.push_back(empty_scissor);
     }
 
-    auto& dynamic_state = scheduler.GetDynamicState();
+    DynamicState& dynamic_state = scheduler.GetDynamicState();
     dynamic_state.SetViewports(viewports);
     dynamic_state.SetScissors(scissors);
 }
 
-void Rasterizer::UpdateDepthStencilState() const {
-    const auto& regs = liverpool->regs;
-    auto& dynamic_state = scheduler.GetDynamicState();
+/// Whether a face's stencil ops write the op value (GCN's REPLACE_OP)
+static bool StencilUsesOpVal(AmdGpu::StencilFunc fail, AmdGpu::StencilFunc zpass,
+                             AmdGpu::StencilFunc zfail) {
+    return fail == AmdGpu::StencilFunc::ReplaceOp || zpass == AmdGpu::StencilFunc::ReplaceOp ||
+           zfail == AmdGpu::StencilFunc::ReplaceOp;
+}
 
-    const auto depth_test_enabled =
+/// Whether a face's test reads a reference other than the one its ops write
+static bool StencilRefConflict(AmdGpu::CompareFunc func, const AmdGpu::StencilRefMask& ref) {
+    return func != AmdGpu::CompareFunc::Always && func != AmdGpu::CompareFunc::Never &&
+           ref.stencil_test_val != ref.stencil_op_val;
+}
+
+void Rasterizer::UpdateDepthStencilState() const {
+    const AmdGpu::Regs& regs = liverpool->regs;
+    DynamicState& dynamic_state = scheduler.GetDynamicState();
+
+    const bool depth_test_enabled =
         regs.depth_control.depth_enable && regs.depth_buffer.DepthValid();
     dynamic_state.SetDepthTestEnabled(depth_test_enabled);
     if (depth_test_enabled) {
@@ -1884,13 +1953,13 @@ void Rasterizer::UpdateDepthStencilState() const {
         dynamic_state.SetDepthCompareOp(LiverpoolToVK::CompareOp(regs.depth_control.depth_func));
     }
 
-    const auto depth_bounds_test_enabled = regs.depth_control.depth_bounds_enable;
+    const u32 depth_bounds_test_enabled = regs.depth_control.depth_bounds_enable;
     dynamic_state.SetDepthBoundsTestEnabled(depth_bounds_test_enabled);
     if (depth_bounds_test_enabled) {
         dynamic_state.SetDepthBounds(regs.depth_bounds_min, regs.depth_bounds_max);
     }
 
-    const auto depth_bias_enabled = regs.polygon_control.NeedsBias();
+    const bool depth_bias_enabled = regs.polygon_control.NeedsBias();
     dynamic_state.SetDepthBiasEnabled(depth_bias_enabled);
     if (depth_bias_enabled) {
         const bool front = regs.polygon_control.enable_polygon_offset_front;
@@ -1900,7 +1969,7 @@ void Rasterizer::UpdateDepthStencilState() const {
             (front ? regs.poly_offset.front_scale : regs.poly_offset.back_scale) / 16.f);
     }
 
-    const auto stencil_test_enabled =
+    const bool stencil_test_enabled =
         regs.depth_control.stencil_enable && regs.depth_buffer.StencilValid();
     dynamic_state.SetStencilTestEnabled(stencil_test_enabled);
     if (stencil_test_enabled) {
@@ -1919,31 +1988,21 @@ void Rasterizer::UpdateDepthStencilState() const {
         dynamic_state.SetStencilOps(front_ops, back_ops);
 
         const bool stencil_clear = regs.depth_render_control.stencil_clear_enable;
-        const auto front = regs.stencil_ref_front;
-        const auto back =
+        const AmdGpu::StencilRefMask front = regs.stencil_ref_front;
+        const AmdGpu::StencilRefMask back =
             regs.depth_control.backface_enable ? regs.stencil_ref_back : regs.stencil_ref_front;
         // GCN REPLACE_OP writes DB_STENCILREFMASK.STENCILOPVAL, so a face whose stencil ops
         // include ReplaceOp takes its Vulkan reference from op_val.
-        const auto& sc = regs.stencil_control;
-        const auto uses_op_val = [](AmdGpu::StencilFunc fail, AmdGpu::StencilFunc zpass,
-                                    AmdGpu::StencilFunc zfail) {
-            return fail == AmdGpu::StencilFunc::ReplaceOp ||
-                   zpass == AmdGpu::StencilFunc::ReplaceOp ||
-                   zfail == AmdGpu::StencilFunc::ReplaceOp;
-        };
+        const AmdGpu::StencilControl& sc = regs.stencil_control;
         const bool front_op =
-            uses_op_val(sc.stencil_fail_front, sc.stencil_zpass_front, sc.stencil_zfail_front);
-        const bool back_op =
-            regs.depth_control.backface_enable
-                ? uses_op_val(sc.stencil_fail_back, sc.stencil_zpass_back, sc.stencil_zfail_back)
-                : front_op;
-        const auto ref_conflict = [](AmdGpu::CompareFunc func, const AmdGpu::StencilRefMask& ref) {
-            return func != AmdGpu::CompareFunc::Always && func != AmdGpu::CompareFunc::Never &&
-                   ref.stencil_test_val != ref.stencil_op_val;
-        };
-        if ((front_op && ref_conflict(regs.depth_control.stencil_ref_func, front)) ||
+            StencilUsesOpVal(sc.stencil_fail_front, sc.stencil_zpass_front, sc.stencil_zfail_front);
+        const bool back_op = regs.depth_control.backface_enable
+                                 ? StencilUsesOpVal(sc.stencil_fail_back, sc.stencil_zpass_back,
+                                                    sc.stencil_zfail_back)
+                                 : front_op;
+        if ((front_op && StencilRefConflict(regs.depth_control.stencil_ref_func, front)) ||
             (back_op && regs.depth_control.backface_enable &&
-             ref_conflict(regs.depth_control.stencil_bf_func, back))) {
+             StencilRefConflict(regs.depth_control.stencil_bf_func, back))) {
             LOG_WARNING(Render_Vulkan, "Stencil test requires test_val while ReplaceOp requires "
                                        "op_val; the stencil test will use op_val");
         }
@@ -1955,36 +2014,39 @@ void Rasterizer::UpdateDepthStencilState() const {
     }
 }
 
+static bool IsListTopology(const AmdGpu::PrimitiveType type) {
+    const VkPrimitiveTopology topology =
+        static_cast<VkPrimitiveTopology>(LiverpoolToVK::PrimitiveType(type));
+    return topology == VK_PRIMITIVE_TOPOLOGY_POINT_LIST ||
+           topology == VK_PRIMITIVE_TOPOLOGY_LINE_LIST ||
+           topology == VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST ||
+           topology == VK_PRIMITIVE_TOPOLOGY_LINE_LIST_WITH_ADJACENCY ||
+           topology == VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST_WITH_ADJACENCY;
+}
+
+static bool IsPatchListTopology(const AmdGpu::PrimitiveType type) {
+    // Quad and rect lists are emulated using tessellation.
+    return type == AmdGpu::PrimitiveType::PatchPrimitive ||
+           type == AmdGpu::PrimitiveType::QuadList || type == AmdGpu::PrimitiveType::RectList;
+}
+
 void Rasterizer::UpdatePrimitiveState(const bool is_indexed) const {
-    const auto& regs = liverpool->regs;
-    auto& dynamic_state = scheduler.GetDynamicState();
+    const AmdGpu::Regs& regs = liverpool->regs;
+    DynamicState& dynamic_state = scheduler.GetDynamicState();
 
-    const auto is_list_topology = [](const AmdGpu::PrimitiveType type) {
-        const auto topology = LiverpoolToVK::PrimitiveType(type);
-        return topology == vk::PrimitiveTopology::ePointList ||
-               topology == vk::PrimitiveTopology::eLineList ||
-               topology == vk::PrimitiveTopology::eTriangleList ||
-               topology == vk::PrimitiveTopology::eLineListWithAdjacency ||
-               topology == vk::PrimitiveTopology::eTriangleListWithAdjacency;
-    };
-    const auto is_patch_list_topology = [](const AmdGpu::PrimitiveType type) {
-        // Quad and rect lists are emulated using tessellation.
-        return type == AmdGpu::PrimitiveType::PatchPrimitive ||
-               type == AmdGpu::PrimitiveType::QuadList || type == AmdGpu::PrimitiveType::RectList;
-    };
-
-    const auto prim_restart =
+    const bool prim_restart =
         (regs.enable_primitive_restart & 1) != 0 &&
-        (instance.IsListRestartSupported() || !is_list_topology(regs.primitive_type)) &&
-        (instance.IsPatchListRestartSupported() || !is_patch_list_topology(regs.primitive_type));
+        (instance.IsListRestartSupported() || !IsListTopology(regs.primitive_type)) &&
+        (instance.IsPatchListRestartSupported() || !IsPatchListTopology(regs.primitive_type));
     ASSERT_MSG(!is_indexed || !prim_restart || regs.primitive_restart_index == 0xFFFF ||
                    regs.primitive_restart_index == 0xFFFFFFFF,
                "Primitive restart index other than -1 is not supported yet");
 
-    const auto cull_mode = LiverpoolToVK::IsPrimitiveCulled(regs.primitive_type)
-                               ? LiverpoolToVK::CullMode(regs.polygon_control.CullingMode())
-                               : vk::CullModeFlagBits::eNone;
-    const auto front_face = LiverpoolToVK::FrontFace(regs.polygon_control.front_face);
+    const vk::CullModeFlags cull_mode =
+        LiverpoolToVK::IsPrimitiveCulled(regs.primitive_type)
+            ? LiverpoolToVK::CullMode(regs.polygon_control.CullingMode())
+            : vk::CullModeFlagBits::eNone;
+    const vk::FrontFace front_face = LiverpoolToVK::FrontFace(regs.polygon_control.front_face);
 
     dynamic_state.SetPrimitiveRestartEnabled(prim_restart);
     dynamic_state.SetRasterizerDiscardEnabled(regs.clipper_control.dx_rasterization_kill);
@@ -1993,14 +2055,14 @@ void Rasterizer::UpdatePrimitiveState(const bool is_indexed) const {
 }
 
 void Rasterizer::UpdateRasterizationState() const {
-    const auto& regs = liverpool->regs;
-    auto& dynamic_state = scheduler.GetDynamicState();
+    const AmdGpu::Regs& regs = liverpool->regs;
+    DynamicState& dynamic_state = scheduler.GetDynamicState();
     dynamic_state.SetLineWidth(regs.line_control.Width());
 }
 
 void Rasterizer::UpdateColorBlendingState(const GraphicsPipeline* pipeline) const {
-    const auto& regs = liverpool->regs;
-    auto& dynamic_state = scheduler.GetDynamicState();
+    const AmdGpu::Regs& regs = liverpool->regs;
+    DynamicState& dynamic_state = scheduler.GetDynamicState();
     dynamic_state.SetBlendConstants(regs.blend_constants.data());
     dynamic_state.SetColorWriteMasks(pipeline->GetGraphicsKey().write_masks.data());
     dynamic_state.SetAttachmentFeedbackLoopEnabled(attachment_feedback_loop);
@@ -2013,20 +2075,22 @@ void Rasterizer::HostMarkerBegin(const char* format, ...) {
     char text[MarkerBytes];
     va_list args;
     va_start(args, format);
-    const int n = std::vsnprintf(text, sizeof(text), format, args);
+    const int n = vsnprintf(text, sizeof(text), format, args);
     va_end(args);
-    ScopeMarkerBegin(MarkerText(text, n > 0 ? static_cast<std::size_t>(n) : 0));
+    ScopeMarkerBegin(MarkerText(text, n > 0 ? static_cast<size_t>(n) : 0));
 }
 
-void Rasterizer::ScopeMarkerBegin(const std::string_view& str, bool from_guest) {
+void Rasterizer::ScopeMarkerBegin(const char* str, bool from_guest) {
     if ((from_guest && !emu_settings_get_vkguest_markers()) ||
         (!from_guest && !emu_settings_get_vkhost_markers())) {
         return;
     }
-    const auto cmdbuf = scheduler.CommandBuffer();
-    cmdbuf.beginDebugUtilsLabelEXT(vk::DebugUtilsLabelEXT{
-        .pLabelName = str.data(),
-    });
+    const VkCommandBuffer cmdbuf = static_cast<VkCommandBuffer>(scheduler.CommandBuffer());
+    const VkDebugUtilsLabelEXT label{
+        .sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_LABEL_EXT,
+        .pLabelName = str,
+    };
+    vkCmdBeginDebugUtilsLabelEXT(cmdbuf, &label);
 }
 
 void Rasterizer::ScopeMarkerEnd(bool from_guest) {
@@ -2034,33 +2098,36 @@ void Rasterizer::ScopeMarkerEnd(bool from_guest) {
         (!from_guest && !emu_settings_get_vkhost_markers())) {
         return;
     }
-    const auto cmdbuf = scheduler.CommandBuffer();
-    cmdbuf.endDebugUtilsLabelEXT();
+    const VkCommandBuffer cmdbuf = static_cast<VkCommandBuffer>(scheduler.CommandBuffer());
+    vkCmdEndDebugUtilsLabelEXT(cmdbuf);
 }
 
-void Rasterizer::ScopedMarkerInsert(const std::string_view& str, bool from_guest) {
+void Rasterizer::ScopedMarkerInsert(const char* str, bool from_guest) {
     if ((from_guest && !emu_settings_get_vkguest_markers()) ||
         (!from_guest && !emu_settings_get_vkhost_markers())) {
         return;
     }
-    const auto cmdbuf = scheduler.CommandBuffer();
-    cmdbuf.insertDebugUtilsLabelEXT(vk::DebugUtilsLabelEXT{
-        .pLabelName = str.data(),
-    });
+    const VkCommandBuffer cmdbuf = static_cast<VkCommandBuffer>(scheduler.CommandBuffer());
+    const VkDebugUtilsLabelEXT label{
+        .sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_LABEL_EXT,
+        .pLabelName = str,
+    };
+    vkCmdInsertDebugUtilsLabelEXT(cmdbuf, &label);
 }
 
-void Rasterizer::ScopedMarkerInsertColor(const std::string_view& str, const u32 color,
-                                         bool from_guest) {
+void Rasterizer::ScopedMarkerInsertColor(const char* str, const u32 color, bool from_guest) {
     if ((from_guest && !emu_settings_get_vkguest_markers()) ||
         (!from_guest && !emu_settings_get_vkhost_markers())) {
         return;
     }
-    const auto cmdbuf = scheduler.CommandBuffer();
-    cmdbuf.insertDebugUtilsLabelEXT(vk::DebugUtilsLabelEXT{
-        .pLabelName = str.data(),
-        .color = std::array<f32, 4>(
-            {(f32)((color >> 16) & 0xff) / 255.0f, (f32)((color >> 8) & 0xff) / 255.0f,
-             (f32)(color & 0xff) / 255.0f, (f32)((color >> 24) & 0xff) / 255.0f})});
+    const VkCommandBuffer cmdbuf = static_cast<VkCommandBuffer>(scheduler.CommandBuffer());
+    const VkDebugUtilsLabelEXT label{
+        .sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_LABEL_EXT,
+        .pLabelName = str,
+        .color = {(f32)((color >> 16) & 0xff) / 255.0f, (f32)((color >> 8) & 0xff) / 255.0f,
+                  (f32)(color & 0xff) / 255.0f, (f32)((color >> 24) & 0xff) / 255.0f},
+    };
+    vkCmdInsertDebugUtilsLabelEXT(cmdbuf, &label);
 }
 
 uintptr_t Rasterizer::GetGpuCommandProcessorThread() {

@@ -4,6 +4,13 @@ What changed in the libretro core of this fork, newest first. Changes that come 
 
 ## Unreleased
 
+- The rasterizer (`vk_rasterizer.h`/`.cpp`) on the Vulkan C API, with no STL or `auto`.
+  - **Commands:** its draws, dispatches, pipeline binds, vertex and index buffer binds, vertex input and debug labels are `vkCmd*` calls. The descriptor writes it hands the pipeline are `VkWriteDescriptorSet`, made with their structure type, and `Pipeline::BindResources` takes them as they are.
+  - **No STL:** the bound buffers, bound images, descriptor writes and captured indices are small vectors, the image bindings C arrays, and the draw offsets two out-params. The vertex ranges are sorted in place and searched with a loop. The lambdas are static functions, and the markers take C strings.
+  - **Boundaries:** the graphics pipeline's vertex inputs and the scheduler's viewports and scissors stay vulkan.hpp's structs at their edges until those are on the C API.
+  - `Instance::Mark` takes a `VkCommandBuffer`, and `common/concepts.h` has `Common::BitCast`.
+  - Not run in a game yet.
+
 - The texture cache's image (`image.h`/`.cpp`) and the runtime (`vk_runtime.h`/`.cpp`) on the Vulkan C API, with no STL or `auto`.
   - **The image:** its handle, create info, barriers, aspect, samples, usage and format features are C types, and so is the layout state of its backings. The memory allocator's image calls take C types too.
   - **The runtime:** its copies, blits, resolves, clears and barriers are `vkCmd*` calls. `Transit` takes a pointer to the subresource range (none for all of it), `ClearImage` a `VkClearValue`, and the layer count helper hands back two out-params. The blit helper is a plain pointer the runtime deletes, and the pending buffer barriers and sample positions are a small vector and C arrays.

@@ -85,7 +85,7 @@ public:
 
     /// Binds the push data and @num_writes descriptor writes at @set_writes (their dstSet is
     /// filled in where a descriptor set is used)
-    void BindResources(vk::WriteDescriptorSet* set_writes, u32 num_writes,
+    void BindResources(VkWriteDescriptorSet* writes, u32 num_writes,
                        const Shader::PushData& push_data) const;
 
 protected:

@@ -513,7 +513,7 @@ public:
     /// Notes an operation about to be recorded into @cmdbuf, for that report: what it is and
     /// numbers that say which. Where the driver keeps checkpoints the report names the last
     /// the GPU reached.
-    void Mark(vk::CommandBuffer cmdbuf, const char* what, u64 a = 0, u64 b = 0, u64 c = 0,
+    void Mark(VkCommandBuffer cmdbuf, const char* what, u64 a = 0, u64 b = 0, u64 c = 0,
               u64 d = 0) const;
 
     /// The same for what is not a command of its own (what the next one works on)

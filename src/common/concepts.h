@@ -184,4 +184,11 @@ template <typename T>
     }
 }
 
+/// The bits of @from read as a To of the same size
+template <typename To, typename From>
+[[nodiscard]] constexpr To BitCast(const From& from) {
+    static_assert(sizeof(To) == sizeof(From));
+    return __builtin_bit_cast(To, from);
+}
+
 } // namespace Common
