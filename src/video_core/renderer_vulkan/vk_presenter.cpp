@@ -7,6 +7,7 @@
 #include "common/singleton.h"
 #include "core/debug_state.h"
 #include "core/emulator_settings.h"
+#include "core/libraries/pad/pad.h"
 #include "core/libraries/system/systemservice.h"
 #include "input/controller.h"
 #include "video_core/buffer_cache/buffer.h"
@@ -105,14 +106,14 @@ static void BlitCorners(VkOffset3D* corners, s32 x0, s32 y0, s32 x1, s32 y1) {
 // read, the left stick past a quarter of its throw scrolling
 /// One stick @axis of @state to the overlays: @low past a quarter of its throw one way, @high
 /// the other
-static void StickToOverlay(const Input::State& state, Input::Axis axis, ovl_key low, ovl_key high) {
-    const float v = (static_cast<float>(state.axes[static_cast<u32>(axis)]) - 128.0f) / 127.0f;
+static void StickToOverlay(const input_state_t& state, input_axis axis, ovl_key low, ovl_key high) {
+    const float v = (static_cast<float>(state.axes[axis]) - 128.0f) / 127.0f;
     const float dead = 0.25f;
     ovl_key_analog_event(low, v < -dead, v < -dead ? Common::Min(-v, 1.0f) : 0.0f);
     ovl_key_analog_event(high, v > dead, v > dead ? Common::Min(v, 1.0f) : 0.0f);
 }
 
-static void PadToOverlay(const Input::State& state) {
+static void PadToOverlay(const input_state_t& state) {
     using Libraries::Pad::OrbisPadButtonDataOffset;
     struct Key {
         OrbisPadButtonDataOffset button;
@@ -139,10 +140,10 @@ static void PadToOverlay(const Input::State& state) {
         return;
     }
     for (const Key& k : keys) {
-        ovl_key_event(k.key, True(state.buttonsState & k.button));
+        ovl_key_event(k.key, (state.buttons & static_cast<u32>(k.button)) != 0);
     }
-    StickToOverlay(state, Input::Axis::LeftX, OVL_KEY_PAD_LSTICK_LEFT, OVL_KEY_PAD_LSTICK_RIGHT);
-    StickToOverlay(state, Input::Axis::LeftY, OVL_KEY_PAD_LSTICK_UP, OVL_KEY_PAD_LSTICK_DOWN);
+    StickToOverlay(state, INPUT_AXIS_LEFT_X, OVL_KEY_PAD_LSTICK_LEFT, OVL_KEY_PAD_LSTICK_RIGHT);
+    StickToOverlay(state, INPUT_AXIS_LEFT_Y, OVL_KEY_PAD_LSTICK_UP, OVL_KEY_PAD_LSTICK_DOWN);
 }
 
 // The overlays' frame: the time since the last, and on a frame of the game's own its frame rate
@@ -879,9 +880,7 @@ void Presenter::Present(Frame* frame, bool is_reusing_frame, bool is_game_frame)
 
     {
         // The pad, for the overlays' dialogs
-        Input::GameControllers& controllers =
-            *Common::Singleton<Input::GameControllers>::Instance();
-        const Input::State pad = controllers[0]->ReadState();
+        const input_state_t pad = input_controller_read_state(input_controller_get(0));
         PadToOverlay(pad);
     }
     const VkExtent2D extent = output_images.Extent();

@@ -197,14 +197,14 @@ static void FrameThread(void*) {
 // queues a state for the game to read.
 //
 // The first controller is connected by the emulator itself when the game loads
-// the pad library (GameControllers::ConnectFirstController). The others, as
+// the pad library (input_connect_first_controller). The others, as
 // many as the Controllers option says, are connected here the same way: the
 // user of that player number is logged in and the controller marked connected.
 //
 // Each connected controller also reports its state every 4 ms whether or not it
 // changed, as a pad does: a game reading several states at once gets the
-// history it expects. Between reports the thread is parked until the core writes
-// a change, which it hands on at once.
+// history it expects. Between reports the thread is parked until the core
+// writes a change, which it hands on at once.
 void PumpInput() {
     using Libraries::Pad::OrbisPadButtonDataOffset;
     static constexpr OrbisPadButtonDataOffset buttons[] = {
@@ -217,9 +217,9 @@ void PumpInput() {
         OrbisPadButtonDataOffset::Circle,   OrbisPadButtonDataOffset::Cross,
         OrbisPadButtonDataOffset::Square,   OrbisPadButtonDataOffset::TouchPad,
     };
-    static constexpr Input::Axis axes[Libretro::SHARED_AXIS_COUNT] = {
-        Input::Axis::LeftX,  Input::Axis::LeftY,       Input::Axis::RightX,
-        Input::Axis::RightY, Input::Axis::TriggerLeft, Input::Axis::TriggerRight,
+    static constexpr input_axis axes[Libretro::SHARED_AXIS_COUNT] = {
+        INPUT_AXIS_LEFT_X,  INPUT_AXIS_LEFT_Y,       INPUT_AXIS_RIGHT_X,
+        INPUT_AXIS_RIGHT_Y, INPUT_AXIS_TRIGGER_LEFT, INPUT_AXIS_TRIGGER_RIGHT,
     };
 
     std::uint32_t held[Libretro::MAX_PADS] = {};
@@ -261,11 +261,10 @@ void PumpInput() {
             wait(key);
             continue;
         }
-        auto& controllers = *Common::Singleton<Input::GameControllers>::Instance();
         // Not before the emulator has logged the first controller in.
-        if (!controllers[0] || controllers[0]->user_id < 0) {
-            wait(key);
-            continue;
+        if (input_controller_get(0)->user_id < 0) {
+          wait(key);
+          continue;
         }
         if (!others_connected) {
             others_connected = true;
@@ -279,27 +278,27 @@ void PumpInput() {
                     pad + 1, pad + 1);
                 continue;
                 }
-                controllers[pad]->user_id = user->user_id;
+                input_controller_get(pad)->user_id = user->user_id;
                 if (user_manager_login(user, static_cast<s32>(pad) + 1)) {
                   Libraries::UserService::AddUserServiceEvent(
                       {Libraries::UserService::OrbisUserServiceEventType::Login,
                        user->user_id});
                 }
-                controllers[pad]->ConnectController();
+                input_controller_connect(input_controller_get(pad));
                 LOG_INFO(Input, "Controller %u connected from the frontend's port %u", pad + 1, pad + 1);
             }
         }
 
         for (std::uint32_t pad = 0; pad < pads; ++pad) {
-            auto* controller = controllers[pad];
-            if (!controller || controller->user_id < 0) {
-                continue;
-            }
+          input_controller_t *controller = input_controller_get(pad);
+          if (controller->user_id < 0) {
+            continue;
+          }
             const std::uint32_t now = static_cast<std::uint32_t>(retro_atomic_load_acquire_int(&shared->buttons[pad]));
             for (const auto button : buttons) {
                 const auto bit = static_cast<std::uint32_t>(button);
                 if ((now ^ held[pad]) & bit) {
-                    controller->Button(button, (now & bit) != 0);
+                  input_controller_button(controller, bit, (now & bit) != 0);
                 }
             }
             held[pad] = now;
@@ -309,7 +308,8 @@ void PumpInput() {
                     static_cast<std::uint32_t>(retro_atomic_load_acquire_int(&shared->axes[pad][i]));
                 if (value != axis_value[pad][i]) {
                     axis_value[pad][i] = value;
-                    controller->Axis(axes[i], static_cast<int>(value), false);
+                    input_controller_axis(controller, axes[i],
+                                          static_cast<int>(value), false);
                 }
             }
             // The touchpad's slots: a change handed on, which queues a state of its own
@@ -318,13 +318,13 @@ void PumpInput() {
                     retro_atomic_load_acquire_int(&shared->touch[pad][slot]));
                 if (word != touch_value[pad][slot]) {
                     touch_value[pad][slot] = word;
-                    controller->SetTouchpadState(slot, (word & TOUCH_DOWN) != 0,
-                                                 TOUCH_X(word) / 32768.0f,
-                                                 TOUCH_Y(word) / 32768.0f);
+                    input_controller_set_touchpad(
+                        controller, slot, (word & TOUCH_DOWN) != 0,
+                        TOUCH_X(word) / 32768.0f, TOUCH_Y(word) / 32768.0f);
                 }
             }
             if (report) {
-              controller->PollState();
+              input_controller_poll(controller);
             }
         }
         wait(key);
@@ -683,6 +683,12 @@ bool WaitVblankTicks(std::uint32_t seen, retro_atomic_int_t *stop) {
 }
 
 } // namespace Libretro
+
+// The controllers' (input/controller.c) way to the frontend's rumble
+extern "C" void libretro_set_rumble(uint32_t pad, uint8_t small_motor,
+                                    uint8_t large_motor) {
+  Libretro::SetRumble(pad, small_motor, large_motor);
+}
 
 #ifdef _WIN32
 

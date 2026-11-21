@@ -11,8 +11,6 @@
 
 namespace Libraries::SystemGesture {
 
-using Input::GameController;
-
 int PS4_SYSV_ABI sceSystemGestureAppendTouchRecognizer() {
     LOG_ERROR(Lib_SystemGesture, "(STUBBED) called");
     return ORBIS_OK;

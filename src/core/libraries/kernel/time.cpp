@@ -14,6 +14,7 @@
 #include "core/libraries/kernel/threads/pthread.h"
 #include "core/libraries/kernel/time.h"
 #include "core/libraries/libs.h"
+#include "input/controller.h"
 
 #ifdef _WIN64
 #include <windows.h>
@@ -757,3 +758,8 @@ void RegisterTime(Core::Loader::SymbolsResolver* sym) {
 }
 
 } // namespace Libraries::Kernel
+
+// The controllers' (input/controller.c) clock
+extern "C" uint64_t kernel_process_time_usec(void) {
+    return Libraries::Kernel::sceKernelGetProcessTime();
+}

@@ -3062,3 +3062,9 @@ void RegisterLib(Core::Loader::SymbolsResolver* sym) {
 };
 
 } // namespace Libraries::UserService
+
+// The controllers' (input/controller.c) way to tell the game a user logged in
+extern "C" void userservice_push_login(int32_t user_id) {
+    Libraries::UserService::AddUserServiceEvent(
+        {Libraries::UserService::OrbisUserServiceEventType::Login, user_id});
+}

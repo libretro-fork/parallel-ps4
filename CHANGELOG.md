@@ -4,6 +4,13 @@ What changed in the libretro core of this fork, newest first. Changes that come 
 
 ## Unreleased
 
+- The input module is MSVC C89, the first step of moving the whole core to C89.
+  - **`src/input/controller.c`** replaces `controller.cpp` and `controller_state.cpp`: the five controllers are a static array of `input_controller_t`, reached with `input_controller_get(i)` instead of a `Singleton<GameControllers>`, and the user and controller id lookups return -1 for none instead of `std::optional`.
+  - **The state** is `input_state_t`, its buttons a plain `u32` mask and its axes indexed by `INPUT_AXIS_*`. The history ring, the smoothing, the orientation, the touchpad and the light bar work as before.
+  - **`src/common/combine.c`** is the combiner the controllers publish through, in C: the same algorithm, with the owner taken from the thread id instead of a `thread_local`. The C++ `Common::Combiner` is now a thin wrapper over it, with no lambdas.
+  - The pad library, the IME, the overlays and the frontend's input thread use the C calls. Three small C++ functions give the C code the process time, the frontend's rumble and the user login event.
+  - Not run in a game yet.
+
 - The shader recompiler's SPIR-V backend is off the STL and has no `auto` left.
   - **Word lists** handed to the module (`std::array{...}.data()` temporaries) are `Words<N>{{...}}.v`, and constant composites are plain arrays.
   - **Optional decorations:** `DefineInput`, `DefineOutput` and `DefineVariable` take `EmitContext::NoDecoration` for no location or builtin, and 0 for no initializer, instead of `std::optional`.

@@ -9,7 +9,6 @@
 
 #include <encodings/utf.h>
 
-#include "common/singleton.h"
 #include "input/controller.h"
 #include "video_core/overlay/ovl_layers.h"
 
@@ -72,44 +71,26 @@ float ToAxisUnit(const s32 axis) {
 }
 
 bool ReadControllerState(Libraries::UserService::OrbisUserServiceUserId user_id,
-                         Input::State* out_state) {
+                         input_state_t* out_state) {
     if (!out_state) {
         return false;
     }
-    auto* controllers = Common::Singleton<Input::GameControllers>::Instance();
-    if (!controllers) {
-        return false;
-    }
-
-    const auto read_state = [&](u8 index, bool* has_state) {
-        if (has_state) {
-            *has_state = false;
-        }
-        Input::State pad_state = (*controllers)[index]->ReadState();
-        if (!pad_state.connected) {
-            return false;
-        }
-        if (has_state) {
-            *has_state = true;
-        }
-        *out_state = pad_state;
-        return true;
-    };
-
-    const auto mapped = Input::GameControllers::GetControllerIndexFromUserID(user_id);
-    if (mapped.has_value() && *mapped < 5) {
-        bool has_state = false;
-        if (read_state(*mapped, &has_state) && has_state) {
+    const int mapped = input_controller_index_from_user_id(user_id);
+    if (mapped >= 0 && mapped < INPUT_CONTROLLERS) {
+        input_state_t pad_state = input_controller_read_state(input_controller_get(mapped));
+        if (pad_state.connected) {
+            *out_state = pad_state;
             return true;
         }
     }
 
-    for (u8 index = 0; index < 5; ++index) {
-        if (mapped.has_value() && index == *mapped) {
+    for (int index = 0; index < INPUT_CONTROLLERS; ++index) {
+        if (index == mapped) {
             continue;
         }
-        bool has_state = false;
-        if (read_state(index, &has_state) && has_state) {
+        input_state_t pad_state = input_controller_read_state(input_controller_get(index));
+        if (pad_state.connected) {
+            *out_state = pad_state;
             return true;
         }
     }
@@ -568,21 +549,16 @@ VirtualPadSnapshot ReadVirtualPadSnapshot(Libraries::UserService::OrbisUserServi
     float ry = 0.0f;
     float l2_analog = 0.0f;
     u32 buttons = 0;
-    Input::State state{};
+    input_state_t state;
+    std::memset(&state, 0, sizeof(state));
     if (UiShared::ReadControllerState(user_id, &state)) {
-        buttons = static_cast<u32>(state.buttonsState);
-        lx = ApplyAxisDeadzone(
-            UiShared::ToAxisUnit(state.axes[static_cast<std::size_t>(Input::Axis::LeftX)]));
-        ly = ApplyAxisDeadzone(
-            UiShared::ToAxisUnit(state.axes[static_cast<std::size_t>(Input::Axis::LeftY)]));
-        rx = ApplyAxisDeadzone(
-            UiShared::ToAxisUnit(state.axes[static_cast<std::size_t>(Input::Axis::RightX)]));
-        ry = ApplyAxisDeadzone(
-            UiShared::ToAxisUnit(state.axes[static_cast<std::size_t>(Input::Axis::RightY)]));
-        l2_analog = std::clamp(
-            static_cast<float>(state.axes[static_cast<std::size_t>(Input::Axis::TriggerLeft)]) /
-                255.0f,
-            0.0f, 1.0f);
+        buttons = state.buttons;
+        lx = ApplyAxisDeadzone(UiShared::ToAxisUnit(state.axes[INPUT_AXIS_LEFT_X]));
+        ly = ApplyAxisDeadzone(UiShared::ToAxisUnit(state.axes[INPUT_AXIS_LEFT_Y]));
+        rx = ApplyAxisDeadzone(UiShared::ToAxisUnit(state.axes[INPUT_AXIS_RIGHT_X]));
+        ry = ApplyAxisDeadzone(UiShared::ToAxisUnit(state.axes[INPUT_AXIS_RIGHT_Y]));
+        l2_analog = std::clamp(static_cast<float>(state.axes[INPUT_AXIS_TRIGGER_LEFT]) / 255.0f,
+                               0.0f, 1.0f);
     }
 
     snapshot.buttons = buttons;

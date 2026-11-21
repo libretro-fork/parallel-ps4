@@ -54,7 +54,6 @@ private:
     void LoadSystemModules(const std::string& game_serial);
 
     Core::MemoryManager* memory;
-    Input::GameControllers* controllers;
     Core::Linker* linker;
     // The game's time (nanoseconds) the play time was last counted up to; 0: not counting
     u64 start_time{};

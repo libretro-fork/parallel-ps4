@@ -601,7 +601,7 @@ void Emulator::Run(std::filesystem::path file, std::vector<std::string> args,
 
     // Initialize components
     memory = Core::Memory::Instance();
-    controllers = Common::Singleton<Input::GameControllers>::Instance();
+    input_controllers_init();
     linker = Common::Singleton<Core::Linker>::Instance();
 
     // Initialize patcher
