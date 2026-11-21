@@ -226,7 +226,7 @@ struct Image {
     [[nodiscard]] u32 NumLayers() const noexcept {
         // Depth is the number of layers for Array images.
         u32 slices = depth + 1;
-        const auto image_type = GetType();
+        const ImageType image_type = GetType();
         if (image_type == ImageType::Color3D) {
             // Depth is the actual texture depth for 3D images.
             slices = 1;
@@ -280,20 +280,20 @@ struct Image {
     }
 
     u8 GetBankSwizzle() const {
-        const auto tile_mode = GetTileMode();
-        const auto array_mode = GetArrayMode(tile_mode);
-        const auto dfmt = GetDataFmt();
+        const TileMode tile_mode = GetTileMode();
+        const ArrayMode array_mode = GetArrayMode(tile_mode);
+        const DataFormat dfmt = GetDataFmt();
         if (!alt_tile_mode || dfmt == DataFormat::FormatInvalid || !IsMacroTiled(array_mode)) {
             return 0;
         }
         const u32 bpp = NumBitsPerElement(dfmt);
-        const auto macro_tile_mode = CalculateMacrotileMode(tile_mode, bpp, NumSamples());
+        const MacroTileMode macro_tile_mode = CalculateMacrotileMode(tile_mode, bpp, NumSamples());
         const u32 banks = GetAltNumBanks(macro_tile_mode);
         return (((banks - 1) << 4) & base_address) >> 4;
     }
 
     ImageType GetBaseType() const noexcept {
-        const auto base_type = GetType();
+        const ImageType base_type = GetType();
         if (base_type == ImageType::Color1DArray) {
             return ImageType::Color1D;
         }
@@ -305,7 +305,7 @@ struct Image {
     }
 
     ImageType GetViewType(const bool is_array) const noexcept {
-        const auto base_type = GetType();
+        const ImageType base_type = GetType();
         if (base_type == ImageType::Color1DArray && !is_array) {
             return ImageType::Color1D;
         }
@@ -325,7 +325,7 @@ struct Image {
             return 1;
         default:
             // Constrain to actual number of available levels.
-            const auto max_level = std::min<u32>(last_level + 1, NumLevels());
+            const u32 max_level = Common::Min<u32>(last_level + 1, NumLevels());
             return max_level > base_level ? max_level - base_level : 1;
         }
     }
@@ -339,7 +339,7 @@ struct Image {
             return 1;
         default:
             // Constrain to actual number of available layers.
-            const auto max_array = std::min<u32>(last_array + 1, NumLayers());
+            const u32 max_array = Common::Min<u32>(last_array + 1, NumLayers());
             return max_array > base_array ? max_array - base_array : 1;
         }
     }

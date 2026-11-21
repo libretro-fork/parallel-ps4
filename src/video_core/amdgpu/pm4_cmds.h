@@ -344,11 +344,11 @@ static u64 GetGpuClock64() {
 }
 
 static u64 GetGpuPerfCounter() {
-    const auto cpu_freq = Libraries::Kernel::sceKernelGetTscFrequency();
-    const auto gpu_freq = Libraries::GnmDriver::sceGnmGetGpuCoreClockFrequency();
+    const u64 cpu_freq = Libraries::Kernel::sceKernelGetTscFrequency();
+    const u32 gpu_freq = Libraries::GnmDriver::sceGnmGetGpuCoreClockFrequency();
 
-    const auto cpu_cycles = Libraries::Kernel::sceKernelReadTsc();
-    const auto gpu_cycles = Common::MultiplyAndDivide64(cpu_cycles, gpu_freq, cpu_freq);
+    const u64 cpu_cycles = Libraries::Kernel::sceKernelReadTsc();
+    const u64 gpu_cycles = Common::MultiplyAndDivide64(cpu_cycles, gpu_freq, cpu_freq);
 
     return gpu_cycles;
 }
@@ -464,7 +464,8 @@ struct PM4CmdEventWriteEop {
         return data_lo | u64(data_hi) << 32;
     }
 
-    void SignalFence(auto&& write_mem, auto&& signal_irq) const {
+    template <typename WriteMem, typename SignalIrq>
+    void SignalFence(WriteMem&& write_mem, SignalIrq&& signal_irq) const {
         u32* address = Address<u32>();
         switch (data_sel.Value()) {
         case DataSelect::None: {
@@ -795,8 +796,9 @@ struct PM4CmdEventWriteEos {
         return this->data;
     }
 
-    void SignalFence(auto&& write_mem) const {
-        const auto cmd = command.Value();
+    template <typename WriteMem>
+    void SignalFence(WriteMem&& write_mem) const {
+        const Command cmd = command.Value();
         switch (cmd) {
         case Command::SignalFence: {
             write_mem(Address(), DataDWord(), sizeof(u32));
@@ -948,7 +950,8 @@ struct PM4CmdReleaseMem {
         return data_lo | u64(data_hi) << 32;
     }
 
-    void SignalFence(auto&& signal_irq, auto&& gds_to_mem) const {
+    template <typename SignalIrq, typename GdsToMem>
+    void SignalFence(SignalIrq&& signal_irq, GdsToMem&& gds_to_mem) const {
         switch (data_sel.Value()) {
         case DataSelect::Data32Low: {
             *Address<u32*>() = DataDWord();
@@ -1227,7 +1230,7 @@ struct PM4CmdMemSemaphore {
     }
 
     void Signal() const {
-        auto* ptr = Address<u64*>();
+        u64* ptr = Address<u64*>();
         switch (signal_type) {
         case SignalType::Increment:
             *ptr += 1;

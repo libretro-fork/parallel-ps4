@@ -151,7 +151,7 @@ bool PipelineCache::LoadComputePipeline(Serialization::Archive& ar) {
     ComputePipeline::SerializationSupport sdata{};
     sdata.Deserialize(ar);
 
-    const auto meta_blob = Storage::DataBase::Instance().Load(
+    const std::optional<Common::FS::FileView> meta_blob = Storage::DataBase::Instance().Load(
         Storage::BlobType::ShaderMeta, Common::StringFromFormat("0x%016zx", compute_key.value));
     if (!meta_blob || meta_blob->empty()) {
         return false;
@@ -221,12 +221,12 @@ bool PipelineCache::LoadGraphicsPipeline(Serialization::Archive& ar) {
     sdata.Deserialize(ar);
 
     for (int stage_idx = 0; stage_idx < MaxShaderStages; ++stage_idx) {
-        const auto& hash = graphics_key.stage_hashes[stage_idx];
+        const size_t& hash = graphics_key.stage_hashes[stage_idx];
         if (!hash) {
             continue;
         }
 
-        const auto meta_blob = Storage::DataBase::Instance().Load(
+        const std::optional<Common::FS::FileView> meta_blob = Storage::DataBase::Instance().Load(
             Storage::BlobType::ShaderMeta,
             Common::StringFromFormat("0x%016llx", static_cast<unsigned long long>(hash)));
         if (!meta_blob || meta_blob->empty()) {
@@ -257,7 +257,7 @@ bool PipelineCache::LoadGraphicsPipeline(Serialization::Archive& ar) {
 }
 
 bool PipelineCache::LoadPipelineStage(Serialization::Archive& ar, size_t stage) {
-    auto program = std::make_unique<Program>();
+    std::unique_ptr<Program> program = std::make_unique<Program>();
     Shader::StageSpecialization spec{};
     spec.info = &program->info;
     size_t perm_idx{};
@@ -266,7 +266,7 @@ bool PipelineCache::LoadPipelineStage(Serialization::Archive& ar, size_t stage) 
     }
 
     // Mapped where it lies: a mapping starts on a page, so the words are aligned
-    const auto spv_blob = Storage::DataBase::Instance().Load(
+    const std::optional<Common::FS::FileView> spv_blob = Storage::DataBase::Instance().Load(
         Storage::BlobType::ShaderBinary,
         Common::StringFromFormat("0x%016" PRIx64 "_%zu", program->info.pgm_hash, perm_idx));
     if (!spv_blob || spv_blob->size() < sizeof(u32)) {
@@ -286,22 +286,23 @@ bool PipelineCache::LoadPipelineStage(Serialization::Archive& ar, size_t stage) 
         cached = program.release();
         ptr_table_insert(&program_cache, cached->info.pgm_hash, cached);
     } else {
-        const auto& it = std::ranges::find(cached->modules, spec, &Program::Module::spec);
-        if (it != cached->modules.end()) {
+        u32 idx = 0;
+        while (idx < cached->modules.size() && !(cached->modules[idx].spec == spec)) {
+            ++idx;
+        }
+        if (idx < cached->modules.size()) {
             // A matching permutation is valid only at its original index. A different index means
             // the store holds entries from more than one cache generation, so this pipeline is
             // left to compile at runtime.
-            const auto idx = std::distance(cached->modules.begin(), it);
             if (perm_idx != idx) {
-                LOG_WARNING(Render_Vulkan,
-                            "Cached permutation %zu of %s_%" PRIx64
-                            " conflicts with index %lld, skipping "
-                            "preload",
-                            perm_idx, Shader::NameOf(program->info.hw_stage),
-                            program->info.pgm_hash, static_cast<long long>(idx));
+                LOG_WARNING(
+                    Render_Vulkan,
+                    "Cached permutation %zu of %s_%" PRIx64 " conflicts with index %u, skipping "
+                    "preload",
+                    perm_idx, Shader::NameOf(program->info.hw_stage), program->info.pgm_hash, idx);
                 return false;
             }
-            module = it->module;
+            module = cached->modules[idx].module;
         } else {
             module = CompileSPV(spv, instance.GetDevice());
         }
@@ -310,7 +311,8 @@ bool PipelineCache::LoadPipelineStage(Serialization::Archive& ar, size_t stage) 
 
     infos[stage] = &cached->info;
     modules[stage] = module;
-    if (auto& fetch = cached->modules[perm_idx].spec.fetch_shader_data; !fetch.Empty()) {
+    if (Shader::Gcn::FetchShaderData& fetch = cached->modules[perm_idx].spec.fetch_shader_data;
+        !fetch.Empty()) {
         fetch_shader = &fetch;
     }
 
@@ -334,7 +336,7 @@ void PipelineCache::WarmUp() {
         bool same_build = false;
         {
             // Let go before the files are removed: Windows keeps a mapped file
-            const auto stamp =
+            const std::optional<Common::FS::FileView> stamp =
                 Storage::DataBase::Instance().Load(Storage::BlobType::ShaderProfile, "build");
             same_build = stamp && stamp->size() == build.size() &&
                          std::memcmp(stamp->data(), build.data(), build.size()) == 0;
@@ -356,7 +358,7 @@ void PipelineCache::WarmUp() {
     }
 
     // Check if cache is compatible
-    const auto profile_data =
+    const std::optional<Common::FS::FileView> profile_data =
         Storage::DataBase::Instance().Load(Storage::BlobType::ShaderProfile, "profile");
     if (!profile_data || profile_data->empty()) {
         std::vector<u8> new_profile(sizeof(profile));
@@ -433,6 +435,22 @@ namespace Shader {
 
 // What the translation found besides InfoPersistent, kept so that a pipeline from the cache is
 // described as the one compiled was: field by field, as some hold padding or a map
+/// InfoExtras' writer and reader of a field
+struct InfoFieldWriter {
+    Serialization::Writer& writer;
+    template <typename T>
+    void operator()(const T& field) const {
+        writer.Write(&field, sizeof(field));
+    }
+};
+struct InfoFieldReader {
+    Serialization::Reader& reader;
+    template <typename T>
+    void operator()(T& field) const {
+        reader.Read(&field, sizeof(field));
+    }
+};
+
 template <typename Io, typename InfoT>
 static void InfoExtras(Io&& io, InfoT& info) {
     io(info.loads);
@@ -478,12 +496,12 @@ void Info::Serialize(Serialization::Archive& ar) const {
     if (srt_info.walker_func_size) {
         info.Write(srt_walker_code.data(), srt_walker_code.size());
     }
-    InfoExtras([&](const auto& field) { info.Write(&field, sizeof(field)); }, *this);
+    InfoExtras(InfoFieldWriter{info}, *this);
     info.Write(static_cast<u64>(gs_copy_data.attr_map.size()));
-    for (const auto& [key, value] : gs_copy_data.attr_map) {
-        info.Write(key);
-        info.Write(value.first);
-        info.Write(value.second);
+    for (const std::pair<const u32, std::pair<IR::Attribute, u32>>& entry : gs_copy_data.attr_map) {
+        info.Write(entry.first);
+        info.Write(entry.second.first);
+        info.Write(entry.second.second);
     }
 }
 
@@ -500,7 +518,7 @@ bool Info::Deserialize(Serialization::Archive& ar) {
         srt_info.walker_func = RegisterWalkerCode(ar.ReadPtr(), srt_info.walker_func_size);
         ar.Advance(srt_info.walker_func_size);
     }
-    InfoExtras([&](auto& field) { info.Read(&field, sizeof(field)); }, *this);
+    InfoExtras(InfoFieldReader{info}, *this);
     u64 attrs{};
     info.Read(attrs);
     gs_copy_data.attr_map.clear();

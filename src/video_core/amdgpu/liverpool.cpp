@@ -59,23 +59,21 @@ Liverpool::~Liverpool() {
     stop_thread_request(&process_thread);
     retro_eventcount_notify(&work_ec);
     stop_thread_join(&process_thread);
-    auto destroy_all = [](TaskQueue& queue) {
+    // ce_submits, then each queue's
+    for (u32 q = 0; q <= NumTotalQueues; ++q) {
+        TaskQueue& queue = q == 0 ? ce_submits : mapped_queues[q - 1].submits;
         queue.Take();
         while (!queue.Empty()) {
             const Task::Handle task = queue.Front();
             queue.Pop();
             task.destroy();
         }
-    };
-    destroy_all(ce_submits);
-    for (auto& queue : mapped_queues) {
-        destroy_all(queue.submits);
     }
     cmd_copy_ring_free(copy_ring);
     // Commands nobody will run: only the allocated ones are left, as a sender that waits
     // for its command does so before the GPU thread is stopped
     for (mpsc_stack_node_t* node = mpsc_stack_drain(&commands); node;) {
-        auto* command = reinterpret_cast<Command*>(node);
+        AmdGpu::Liverpool::Command* command = reinterpret_cast<Command*>(node);
         node = node->next;
         if (!command->done) {
             delete command;
@@ -114,7 +112,7 @@ void Liverpool::ProcessCommands() {
     while (static_cast<u32>(retro_atomic_load_relaxed_int(&num_commands))) {
         mpsc_stack_node_t* node = mpsc_stack_reverse(mpsc_stack_drain(&commands));
         while (node) {
-            auto* command = reinterpret_cast<Command*>(node);
+            AmdGpu::Liverpool::Command* command = reinterpret_cast<Command*>(node);
             node = node->next;
             command->func();
             retro_atomic_fetch_sub_int(&num_commands, 1);
@@ -129,6 +127,13 @@ void Liverpool::ProcessCommands() {
     }
 }
 
+bool Liverpool::HasWork() {
+    return static_cast<u32>(retro_atomic_load_seq_cst_int(&num_commands)) ||
+           static_cast<u32>(retro_atomic_load_seq_cst_int(&num_submits)) ||
+           (retro_atomic_load_acquire_int(&submit_done) != 0) ||
+           stop_thread_stopping(&process_thread);
+}
+
 void Liverpool::Process() {
     thread_name_set("shadPS4:GpuCommandProcessor");
     gpu_id = sthread_get_current_thread_id();
@@ -136,17 +141,10 @@ void Liverpool::Process() {
     gpu_tid = gettid();
 #endif
 
-    const auto has_work = [&] {
-        return static_cast<u32>(retro_atomic_load_seq_cst_int(&num_commands)) ||
-               static_cast<u32>(retro_atomic_load_seq_cst_int(&num_submits)) ||
-               (retro_atomic_load_acquire_int(&submit_done) != 0) ||
-               stop_thread_stopping(&process_thread);
-    };
-
     while (!stop_thread_stopping(&process_thread)) {
-        while (!has_work()) {
+        while (!HasWork()) {
             const int key = retro_eventcount_prepare_wait(&work_ec);
-            if (has_work()) {
+            if (HasWork()) {
                 retro_eventcount_cancel_wait(&work_ec);
                 break;
             }
@@ -167,7 +165,7 @@ void Liverpool::Process() {
             curr_qid = (curr_qid + 1) %
                        static_cast<u32>(retro_atomic_load_acquire_int(&num_mapped_queues));
 
-            auto& queue = mapped_queues[curr_qid];
+            AmdGpu::Liverpool::GpuQueue& queue = mapped_queues[curr_qid];
 
             queue.submits.Take();
             if (queue.submits.Empty()) {
@@ -203,7 +201,7 @@ Liverpool::Task Liverpool::ProcessCeUpdate(std::span<const u32> ccb) {
     while (!ccb.empty()) {
         ProcessCommands();
 
-        const auto* header = reinterpret_cast<const PM4Header*>(ccb.data());
+        const AmdGpu::PM4Header* header = reinterpret_cast<const PM4Header*>(ccb.data());
         const u32 type = header->type;
         if (type != 3) {
             // No other types of packets were spotted so far
@@ -211,20 +209,22 @@ Liverpool::Task Liverpool::ProcessCeUpdate(std::span<const u32> ccb) {
         }
 
         const PM4ItOpcode opcode = header->type3.opcode;
-        const auto* it_body = reinterpret_cast<const u32*>(header) + 1;
+        const u32* it_body = reinterpret_cast<const u32*>(header) + 1;
         switch (opcode) {
         case PM4ItOpcode::Nop: {
             // const auto* nop = reinterpret_cast<const PM4CmdNop*>(header);
             break;
         }
         case PM4ItOpcode::WriteConstRam: {
-            const auto* write_const = reinterpret_cast<const PM4WriteConstRam*>(header);
+            const AmdGpu::PM4WriteConstRam* write_const =
+                reinterpret_cast<const PM4WriteConstRam*>(header);
             memcpy(cblock.constants_heap.data() + write_const->Offset(), &write_const->data,
                    write_const->Size());
             break;
         }
         case PM4ItOpcode::DumpConstRam: {
-            const auto* dump_const = reinterpret_cast<const PM4DumpConstRam*>(header);
+            const AmdGpu::PM4DumpConstRam* dump_const =
+                reinterpret_cast<const PM4DumpConstRam*>(header);
             memcpy(dump_const->Address<void*>(),
                    cblock.constants_heap.data() + dump_const->Offset(), dump_const->Size());
             break;
@@ -234,7 +234,7 @@ Liverpool::Task Liverpool::ProcessCeUpdate(std::span<const u32> ccb) {
             break;
         }
         case PM4ItOpcode::WaitOnDeCounterDiff: {
-            const auto diff = it_body[0];
+            const u32 diff = it_body[0];
             while (cblock.ce_count >= cblock.de_count &&
                    (cblock.ce_count - cblock.de_count) >= diff) {
                 YIELD_CE();
@@ -242,8 +242,9 @@ Liverpool::Task Liverpool::ProcessCeUpdate(std::span<const u32> ccb) {
             break;
         }
         case PM4ItOpcode::IndirectBufferConst: {
-            const auto* indirect_buffer = reinterpret_cast<const PM4CmdIndirectBuffer*>(header);
-            auto task =
+            const AmdGpu::PM4CmdIndirectBuffer* indirect_buffer =
+                reinterpret_cast<const PM4CmdIndirectBuffer*>(header);
+            Liverpool::Task task =
                 ProcessCeUpdate({indirect_buffer->Address<const u32>(), indirect_buffer->ib_size});
             SCOPE_EXIT {
                 task.handle.destroy();
@@ -267,11 +268,11 @@ Liverpool::Task Liverpool::ProcessCeUpdate(std::span<const u32> ccb) {
 
 Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb) {
 
-    const auto base_addr = reinterpret_cast<uintptr_t>(dcb.data());
+    const uintptr_t base_addr = reinterpret_cast<uintptr_t>(dcb.data());
     while (!dcb.empty()) {
         ProcessCommands();
 
-        const auto* header = reinterpret_cast<const PM4Header*>(dcb.data());
+        const AmdGpu::PM4Header* header = reinterpret_cast<const PM4Header*>(dcb.data());
         const u32 type = header->type;
 
         switch (type) {
@@ -291,7 +292,7 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb) {
             const PM4ItOpcode opcode = header->type3.opcode;
             switch (opcode) {
             case PM4ItOpcode::Nop: {
-                const auto* nop = reinterpret_cast<const PM4CmdNop*>(header);
+                const AmdGpu::PM4CmdNop* nop = reinterpret_cast<const PM4CmdNop*>(header);
                 if (nop->header.count.Value() == 0) {
                     break;
                 }
@@ -341,16 +342,18 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb) {
                 break;
             }
             case PM4ItOpcode::SetConfigReg: {
-                const auto* set_data = reinterpret_cast<const PM4CmdSetData*>(header);
-                const auto reg_addr = Regs::ConfigRegWordOffset + set_data->reg_offset;
-                const auto* payload = reinterpret_cast<const u32*>(header + 2);
+                const AmdGpu::PM4CmdSetData* set_data =
+                    reinterpret_cast<const PM4CmdSetData*>(header);
+                const unsigned int reg_addr = Regs::ConfigRegWordOffset + set_data->reg_offset;
+                const u32* payload = reinterpret_cast<const u32*>(header + 2);
                 std::memcpy(&regs.reg_array[reg_addr], payload, (count - 1) * sizeof(u32));
                 break;
             }
             case PM4ItOpcode::SetContextReg: {
-                const auto* set_data = reinterpret_cast<const PM4CmdSetData*>(header);
-                const auto reg_addr = Regs::ContextRegWordOffset + set_data->reg_offset;
-                const auto* payload = reinterpret_cast<const u32*>(header + 2);
+                const AmdGpu::PM4CmdSetData* set_data =
+                    reinterpret_cast<const PM4CmdSetData*>(header);
+                const unsigned int reg_addr = Regs::ContextRegWordOffset + set_data->reg_offset;
+                const u32* payload = reinterpret_cast<const u32*>(header + 2);
 
                 std::memcpy(&regs.reg_array[reg_addr], payload, (count - 1) * sizeof(u32));
 
@@ -370,11 +373,12 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb) {
                 case ContextRegs::CbColor5Base:
                 case ContextRegs::CbColor6Base:
                 case ContextRegs::CbColor7Base: {
-                    const auto col_buf_id = (reg_addr - ContextRegs::CbColor0Base) /
-                                            (ContextRegs::CbColor1Base - ContextRegs::CbColor0Base);
+                    const unsigned int col_buf_id =
+                        (reg_addr - ContextRegs::CbColor0Base) /
+                        (ContextRegs::CbColor1Base - ContextRegs::CbColor0Base);
                     ASSERT(col_buf_id < NUM_COLOR_BUFFERS);
 
-                    const auto nop_offset = header->type3.count;
+                    const BitField<16, 14, unsigned int> nop_offset = header->type3.count;
                     if (nop_offset == 0x0e || nop_offset == 0x0d || nop_offset == 0x0b) {
                         ASSERT_MSG(payload[nop_offset] == 0xc0001000,
                                    "NOP hint is missing in CB setup sequence");
@@ -392,12 +396,12 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb) {
                 case ContextRegs::CbColor5Cmask:
                 case ContextRegs::CbColor6Cmask:
                 case ContextRegs::CbColor7Cmask: {
-                    const auto col_buf_id =
+                    const unsigned int col_buf_id =
                         (reg_addr - ContextRegs::CbColor0Cmask) /
                         (ContextRegs::CbColor1Cmask - ContextRegs::CbColor0Cmask);
                     ASSERT(col_buf_id < NUM_COLOR_BUFFERS);
 
-                    const auto nop_offset = header->type3.count;
+                    const BitField<16, 14, unsigned int> nop_offset = header->type3.count;
                     if (nop_offset == 0x04) {
                         ASSERT_MSG(payload[nop_offset] == 0xc0001000,
                                    "NOP hint is missing in CB setup sequence");
@@ -421,14 +425,15 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb) {
                 break;
             }
             case PM4ItOpcode::SetShReg: {
-                const auto* set_data = reinterpret_cast<const PM4CmdSetData*>(header);
-                const auto set_size = (count - 1) * sizeof(u32);
+                const AmdGpu::PM4CmdSetData* set_data =
+                    reinterpret_cast<const PM4CmdSetData*>(header);
+                const size_t set_size = (count - 1) * sizeof(u32);
 
                 if (set_data->reg_offset >= 0x200 &&
                     set_data->reg_offset <= (0x200 + sizeof(ComputeProgram) / 4)) {
                     ASSERT(set_size <= sizeof(ComputeProgram));
-                    auto* addr = reinterpret_cast<u32*>(&mapped_queues[GfxQueueId].cs_state) +
-                                 (set_data->reg_offset - 0x200);
+                    u32* addr = reinterpret_cast<u32*>(&mapped_queues[GfxQueueId].cs_state) +
+                                (set_data->reg_offset - 0x200);
                     std::memcpy(addr, header + 2, set_size);
                 } else {
                     std::memcpy(&regs.reg_array[Regs::ShRegWordOffset + set_data->reg_offset],
@@ -437,7 +442,8 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb) {
                 break;
             }
             case PM4ItOpcode::SetUconfigReg: {
-                const auto* set_data = reinterpret_cast<const PM4CmdSetData*>(header);
+                const AmdGpu::PM4CmdSetData* set_data =
+                    reinterpret_cast<const PM4CmdSetData*>(header);
                 std::memcpy(&regs.reg_array[Regs::UconfigRegWordOffset + set_data->reg_offset],
                             header + 2, (count - 1) * sizeof(u32));
                 break;
@@ -447,12 +453,14 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb) {
                 break;
             }
             case PM4ItOpcode::IndexType: {
-                const auto* index_type = reinterpret_cast<const PM4CmdDrawIndexType*>(header);
+                const AmdGpu::PM4CmdDrawIndexType* index_type =
+                    reinterpret_cast<const PM4CmdDrawIndexType*>(header);
                 regs.index_buffer_type.raw = index_type->raw;
                 break;
             }
             case PM4ItOpcode::DrawIndex2: {
-                const auto* draw_index = reinterpret_cast<const PM4CmdDrawIndex2*>(header);
+                const AmdGpu::PM4CmdDrawIndex2* draw_index =
+                    reinterpret_cast<const PM4CmdDrawIndex2*>(header);
                 regs.max_index_size = draw_index->max_size;
                 regs.index_base_address.base_addr_lo = draw_index->index_base_lo;
                 regs.index_base_address.base_addr_hi = draw_index->index_base_hi;
@@ -461,13 +469,13 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb) {
                 if (!rasterizer) {
                     break;
                 }
-                const auto cmd_address = reinterpret_cast<const void*>(header);
+                const void* const cmd_address = reinterpret_cast<const void*>(header);
                 rasterizer->ScopeMarker("gfx:0x%llx:DrawIndex2", cmd_address,
                                         [&] { rasterizer->Draw(true); });
                 break;
             }
             case PM4ItOpcode::DrawIndexOffset2: {
-                const auto* draw_index_off =
+                const AmdGpu::PM4CmdDrawIndexOffset2* draw_index_off =
                     reinterpret_cast<const PM4CmdDrawIndexOffset2*>(header);
                 regs.max_index_size = draw_index_off->max_size;
                 regs.num_indices = draw_index_off->index_count;
@@ -475,32 +483,34 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb) {
                 if (!rasterizer) {
                     break;
                 }
-                const auto cmd_address = reinterpret_cast<const void*>(header);
+                const void* const cmd_address = reinterpret_cast<const void*>(header);
                 rasterizer->ScopeMarker("gfx:0x%llx:DrawIndexOffset2", cmd_address, [&] {
                     rasterizer->Draw(true, draw_index_off->index_offset);
                 });
                 break;
             }
             case PM4ItOpcode::DrawIndexAuto: {
-                const auto* draw_index = reinterpret_cast<const PM4CmdDrawIndexAuto*>(header);
+                const AmdGpu::PM4CmdDrawIndexAuto* draw_index =
+                    reinterpret_cast<const PM4CmdDrawIndexAuto*>(header);
                 regs.num_indices = draw_index->index_count;
                 regs.draw_initiator = draw_index->draw_initiator;
                 if (!rasterizer) {
                     break;
                 }
-                const auto cmd_address = reinterpret_cast<const void*>(header);
+                const void* const cmd_address = reinterpret_cast<const void*>(header);
                 rasterizer->ScopeMarker("gfx:0x%llx:DrawIndexAuto", cmd_address,
                                         [&] { rasterizer->Draw(false); });
                 break;
             }
             case PM4ItOpcode::DrawIndirect: {
-                const auto* draw_indirect = reinterpret_cast<const PM4CmdDrawIndirect*>(header);
-                const auto offset = draw_indirect->data_offset;
-                const auto stride = sizeof(DrawIndirectArgs);
+                const AmdGpu::PM4CmdDrawIndirect* draw_indirect =
+                    reinterpret_cast<const PM4CmdDrawIndirect*>(header);
+                const u32 offset = draw_indirect->data_offset;
+                const size_t stride = sizeof(DrawIndirectArgs);
                 if (!rasterizer) {
                     break;
                 }
-                const auto cmd_address = reinterpret_cast<const void*>(header);
+                const void* const cmd_address = reinterpret_cast<const void*>(header);
                 rasterizer->ScopeMarker(
                     "gfx:0x%llx:DrawIndirect", cmd_address, [&] {
                         rasterizer->DrawIndirect(false, indirect_args_addr, offset, stride, 1, 0,
@@ -510,14 +520,14 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb) {
                 break;
             }
             case PM4ItOpcode::DrawIndirectCountMulti: {
-                const auto* draw_indirect =
+                const AmdGpu::PM4CmdDrawIndirectCountMulti* draw_indirect =
                     reinterpret_cast<const PM4CmdDrawIndirectCountMulti*>(header);
-                const auto offset = draw_indirect->data_offset;
-                const auto stride = sizeof(DrawIndirectArgs);
+                const u32 offset = draw_indirect->data_offset;
+                const size_t stride = sizeof(DrawIndirectArgs);
                 if (!rasterizer) {
                     break;
                 }
-                const auto cmd_address = reinterpret_cast<const void*>(header);
+                const void* const cmd_address = reinterpret_cast<const void*>(header);
                 rasterizer->ScopeMarker(
                     "gfx:0x%llx:DrawIndirectCountMulti", cmd_address, [&] {
                         rasterizer->DrawIndirect(
@@ -528,13 +538,13 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb) {
                 break;
             }
             case PM4ItOpcode::DrawIndirectMulti: {
-                const auto* draw_indirect =
+                const AmdGpu::PM4CmdDrawIndirectMulti* draw_indirect =
                     reinterpret_cast<const PM4CmdDrawIndirectMulti*>(header);
-                const auto offset = draw_indirect->data_offset;
+                const u32 offset = draw_indirect->data_offset;
                 if (!rasterizer) {
                     break;
                 }
-                const auto cmd_address = reinterpret_cast<const void*>(header);
+                const void* const cmd_address = reinterpret_cast<const void*>(header);
                 rasterizer->ScopeMarker(
                     "gfx:0x%llx:DrawIndirectMulti", cmd_address, [&] {
                         rasterizer->DrawIndirect(false, indirect_args_addr, offset,
@@ -545,15 +555,15 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb) {
                 break;
             }
             case PM4ItOpcode::DrawIndexIndirect: {
-                const auto* draw_index_indirect =
+                const AmdGpu::PM4CmdDrawIndexIndirect* draw_index_indirect =
                     reinterpret_cast<const PM4CmdDrawIndexIndirect*>(header);
-                const auto offset = draw_index_indirect->data_offset;
-                const auto stride = sizeof(DrawIndexedIndirectArgs);
+                const u32 offset = draw_index_indirect->data_offset;
+                const size_t stride = sizeof(DrawIndexedIndirectArgs);
                 regs.max_index_size = index_buffer_num_indices;
                 if (!rasterizer) {
                     break;
                 }
-                const auto cmd_address = reinterpret_cast<const void*>(header);
+                const void* const cmd_address = reinterpret_cast<const void*>(header);
                 rasterizer->ScopeMarker(
                     "gfx:0x%llx:DrawIndexIndirect", cmd_address, [&] {
                         rasterizer->DrawIndirect(true, indirect_args_addr, offset, stride, 1, 0,
@@ -563,14 +573,14 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb) {
                 break;
             }
             case PM4ItOpcode::DrawIndexIndirectMulti: {
-                const auto* draw_index_indirect =
+                const AmdGpu::PM4CmdDrawIndexIndirectMulti* draw_index_indirect =
                     reinterpret_cast<const PM4CmdDrawIndexIndirectMulti*>(header);
-                const auto offset = draw_index_indirect->data_offset;
+                const u32 offset = draw_index_indirect->data_offset;
                 regs.max_index_size = index_buffer_num_indices;
                 if (!rasterizer) {
                     break;
                 }
-                const auto cmd_address = reinterpret_cast<const void*>(header);
+                const void* const cmd_address = reinterpret_cast<const void*>(header);
                 rasterizer->ScopeMarker(
                     "gfx:0x%llx:DrawIndexIndirectMulti", cmd_address, [&] {
                         rasterizer->DrawIndirect(
@@ -581,14 +591,14 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb) {
                 break;
             }
             case PM4ItOpcode::DrawIndexIndirectCountMulti: {
-                const auto* draw_index_indirect =
+                const AmdGpu::PM4CmdDrawIndexIndirectCountMulti* draw_index_indirect =
                     reinterpret_cast<const PM4CmdDrawIndexIndirectCountMulti*>(header);
-                const auto offset = draw_index_indirect->data_offset;
+                const u32 offset = draw_index_indirect->data_offset;
                 regs.max_index_size = index_buffer_num_indices;
                 if (!rasterizer) {
                     break;
                 }
-                const auto cmd_address = reinterpret_cast<const void*>(header);
+                const void* const cmd_address = reinterpret_cast<const void*>(header);
                 rasterizer->ScopeMarker(
                     "gfx:0x%llx:DrawIndexIndirectCountMulti", cmd_address, [&] {
                         rasterizer->DrawIndirect(
@@ -602,8 +612,9 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb) {
                 break;
             }
             case PM4ItOpcode::DispatchDirect: {
-                const auto* dispatch_direct = reinterpret_cast<const PM4CmdDispatchDirect*>(header);
-                auto& cs_program = GetCsRegs();
+                const AmdGpu::PM4CmdDispatchDirect* dispatch_direct =
+                    reinterpret_cast<const PM4CmdDispatchDirect*>(header);
+                AmdGpu::ComputeProgram& cs_program = GetCsRegs();
                 cs_program.dim_x = dispatch_direct->dim_x;
                 cs_program.dim_y = dispatch_direct->dim_y;
                 cs_program.dim_z = dispatch_direct->dim_z;
@@ -611,50 +622,55 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb) {
                 if (!rasterizer || (cs_program.dispatch_initiator & 1) == 0) {
                     break;
                 }
-                const auto cmd_address = reinterpret_cast<const void*>(header);
+                const void* const cmd_address = reinterpret_cast<const void*>(header);
                 rasterizer->ScopeMarker("gfx:0x%llx:DispatchDirect", cmd_address,
                                         [&] { rasterizer->DispatchDirect(); });
                 break;
             }
             case PM4ItOpcode::DispatchIndirect: {
-                const auto* dispatch_indirect =
+                const AmdGpu::PM4CmdDispatchIndirect* dispatch_indirect =
                     reinterpret_cast<const PM4CmdDispatchIndirect*>(header);
-                auto& cs_program = GetCsRegs();
-                const auto offset = dispatch_indirect->data_offset;
-                const auto size = sizeof(PM4CmdDispatchIndirect::GroupDimensions);
+                AmdGpu::ComputeProgram& cs_program = GetCsRegs();
+                const u32 offset = dispatch_indirect->data_offset;
+                const size_t size = sizeof(PM4CmdDispatchIndirect::GroupDimensions);
                 if (!rasterizer || (cs_program.dispatch_initiator & 1) == 0) {
                     break;
                 }
-                const auto cmd_address = reinterpret_cast<const void*>(header);
+                const void* const cmd_address = reinterpret_cast<const void*>(header);
                 rasterizer->ScopeMarker("gfx:0x%llx:DispatchIndirect", cmd_address, [&] {
                     rasterizer->DispatchIndirect(indirect_args_addr, offset, size);
                 });
                 break;
             }
             case PM4ItOpcode::NumInstances: {
-                const auto* num_instances = reinterpret_cast<const PM4CmdDrawNumInstances*>(header);
+                const AmdGpu::PM4CmdDrawNumInstances* num_instances =
+                    reinterpret_cast<const PM4CmdDrawNumInstances*>(header);
                 regs.num_instances.num_instances = num_instances->num_instances;
                 break;
             }
             case PM4ItOpcode::IndexBase: {
-                const auto* index_base = reinterpret_cast<const PM4CmdDrawIndexBase*>(header);
+                const AmdGpu::PM4CmdDrawIndexBase* index_base =
+                    reinterpret_cast<const PM4CmdDrawIndexBase*>(header);
                 regs.index_base_address.base_addr_lo = index_base->addr_lo;
                 regs.index_base_address.base_addr_hi = index_base->addr_hi;
                 break;
             }
             case PM4ItOpcode::IndexBufferSize: {
-                const auto* index_size = reinterpret_cast<const PM4CmdDrawIndexBufferSize*>(header);
+                const AmdGpu::PM4CmdDrawIndexBufferSize* index_size =
+                    reinterpret_cast<const PM4CmdDrawIndexBufferSize*>(header);
                 index_buffer_num_indices = index_size->num_indices;
                 break;
             }
             case PM4ItOpcode::SetBase: {
-                const auto* set_base = reinterpret_cast<const PM4CmdSetBase*>(header);
+                const AmdGpu::PM4CmdSetBase* set_base =
+                    reinterpret_cast<const PM4CmdSetBase*>(header);
                 ASSERT(set_base->base_index == PM4CmdSetBase::BaseIndex::DrawIndexIndirPatchTable);
                 indirect_args_addr = set_base->Address<u64>();
                 break;
             }
             case PM4ItOpcode::EventWrite: {
-                const auto* event = reinterpret_cast<const PM4CmdEventWrite*>(header);
+                const AmdGpu::PM4CmdEventWrite* event =
+                    reinterpret_cast<const PM4CmdEventWrite*>(header);
                 LOG_DEBUG(Render, "Encountered EventWrite: event_type = %s, event_index = %s",
                           enum_name(&enum_names_AmdGpu_EventType,
                                     static_cast<s64>(event->event_type.Value())),
@@ -678,12 +694,13 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb) {
                 break;
             }
             case PM4ItOpcode::EventWriteEos: {
-                const auto* event_eos = reinterpret_cast<const PM4CmdEventWriteEos*>(header);
+                const AmdGpu::PM4CmdEventWriteEos* event_eos =
+                    reinterpret_cast<const PM4CmdEventWriteEos*>(header);
                 if (rasterizer) {
                     rasterizer->OnFence();
                 }
                 event_eos->SignalFence([](void* address, u64 data, u32 num_bytes) {
-                    auto* memory = Core::Memory::Instance();
+                    Core::MemoryManager* memory = Core::Memory::Instance();
                     ASSERT(memory->TryWriteBacking(address, &data, num_bytes));
                 });
                 if (event_eos->command == PM4CmdEventWriteEos::Command::GdsStore) {
@@ -697,20 +714,21 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb) {
                 break;
             }
             case PM4ItOpcode::EventWriteEop: {
-                const auto* event_eop = reinterpret_cast<const PM4CmdEventWriteEop*>(header);
+                const AmdGpu::PM4CmdEventWriteEop* event_eop =
+                    reinterpret_cast<const PM4CmdEventWriteEop*>(header);
                 if (rasterizer) {
                     rasterizer->OnFence();
                 }
                 event_eop->SignalFence(
                     [](void* address, u64 data, u32 num_bytes) {
-                        auto* memory = Core::Memory::Instance();
+                        Core::MemoryManager* memory = Core::Memory::Instance();
                         ASSERT(memory->TryWriteBacking(address, &data, num_bytes));
                     },
                     [] { Platform::IrqC::Instance()->Signal(Platform::InterruptId::GfxEop); });
                 break;
             }
             case PM4ItOpcode::DmaData: {
-                const auto* dma_data = reinterpret_cast<const PM4DmaData*>(header);
+                const AmdGpu::PM4DmaData* dma_data = reinterpret_cast<const PM4DmaData*>(header);
                 if (dma_data->dst_addr_lo == 0x3022C || !rasterizer) {
                     break;
                 }
@@ -747,7 +765,8 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb) {
                 break;
             }
             case PM4ItOpcode::WriteData: {
-                const auto* write_data = reinterpret_cast<const PM4CmdWriteData*>(header);
+                const AmdGpu::PM4CmdWriteData* write_data =
+                    reinterpret_cast<const PM4CmdWriteData*>(header);
                 ASSERT(write_data->dst_sel.Value() == 2 || write_data->dst_sel.Value() == 5);
                 const u32 data_size = (header->type3.count.Value() - 2) * 4;
                 u64* address = write_data->Address<u64*>();
@@ -762,7 +781,8 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb) {
                 break;
             }
             case PM4ItOpcode::CopyData: {
-                const auto* copy_data = reinterpret_cast<const PM4CmdCopyData*>(header);
+                const AmdGpu::PM4CmdCopyData* copy_data =
+                    reinterpret_cast<const PM4CmdCopyData*>(header);
                 LOG_WARNING(Render,
                             "unhandled IT_COPY_DATA src_sel = %u, dst_sel = %u, "
                             "count_sel = %u, wr_confirm = %u, engine_sel = %u",
@@ -772,7 +792,8 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb) {
                 break;
             }
             case PM4ItOpcode::MemSemaphore: {
-                const auto* mem_semaphore = reinterpret_cast<const PM4CmdMemSemaphore*>(header);
+                const AmdGpu::PM4CmdMemSemaphore* mem_semaphore =
+                    reinterpret_cast<const PM4CmdMemSemaphore*>(header);
                 if (mem_semaphore->IsSignaling()) {
                     mem_semaphore->Signal();
                 } else {
@@ -798,7 +819,8 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb) {
                 break;
             }
             case PM4ItOpcode::WaitRegMem: {
-                const auto* wait_reg_mem = reinterpret_cast<const PM4CmdWaitRegMem*>(header);
+                const AmdGpu::PM4CmdWaitRegMem* wait_reg_mem =
+                    reinterpret_cast<const PM4CmdWaitRegMem*>(header);
                 // ASSERT(wait_reg_mem->engine.Value() == PM4CmdWaitRegMem::Engine::Me);
                 // Optimization: VO label waits are special because the emulator
                 // will write to the label when presentation is finished. So if
@@ -821,8 +843,9 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb) {
                 break;
             }
             case PM4ItOpcode::IndirectBuffer: {
-                const auto* indirect_buffer = reinterpret_cast<const PM4CmdIndirectBuffer*>(header);
-                auto task = ProcessGraphics(
+                const AmdGpu::PM4CmdIndirectBuffer* indirect_buffer =
+                    reinterpret_cast<const PM4CmdIndirectBuffer*>(header);
+                Liverpool::Task task = ProcessGraphics(
                     {indirect_buffer->Address<const u32>(), indirect_buffer->ib_size});
                 SCOPE_EXIT {
                     task.handle.destroy();
@@ -849,7 +872,8 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb) {
                 break;
             }
             case PM4ItOpcode::StrmoutBufferUpdate: {
-                const auto* strmout = reinterpret_cast<const PM4CmdStrmoutBufferUpdate*>(header);
+                const AmdGpu::PM4CmdStrmoutBufferUpdate* strmout =
+                    reinterpret_cast<const PM4CmdStrmoutBufferUpdate*>(header);
                 LOG_WARNING(Render_Vulkan,
                             "Unimplemented IT_STRMOUT_BUFFER_UPDATE, update_memory = %u, "
                             "source_select = %s, buffer_select = %u",
@@ -864,11 +888,12 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb) {
                 break;
             }
             case PM4ItOpcode::CondExec: {
-                const auto* cond_exec = reinterpret_cast<const PM4CmdCondExec*>(header);
+                const AmdGpu::PM4CmdCondExec* cond_exec =
+                    reinterpret_cast<const PM4CmdCondExec*>(header);
                 if (cond_exec->command.Value() != 0) {
                     LOG_WARNING(Render, "IT_COND_EXEC used a reserved command");
                 }
-                const auto skip = *cond_exec->Address() == false;
+                const bool skip = *cond_exec->Address() == false;
                 if (skip) {
                     dcb = NextPacket(dcb,
                                      header->type3.NumWords() + 1 + cond_exec->exec_count.Value());
@@ -888,7 +913,7 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb) {
 
 template <bool is_indirect>
 Liverpool::Task Liverpool::ProcessCompute(std::span<const u32> acb, u32 vqid) {
-    auto& queue = asc_queues[{vqid}];
+    AmdGpu::Liverpool::AscQueueInfo& queue = asc_queues[{vqid}];
 
     struct IndirectPatch {
         const PM4Header* header;
@@ -896,12 +921,12 @@ Liverpool::Task Liverpool::ProcessCompute(std::span<const u32> acb, u32 vqid) {
     };
     Common::SmallVector<IndirectPatch, 4> indirect_patches;
 
-    auto base_addr = reinterpret_cast<VAddr>(acb.data());
+    VAddr base_addr = reinterpret_cast<VAddr>(acb.data());
     size_t acb_size = acb.size_bytes();
     while (!acb.empty()) {
         ProcessCommands();
 
-        auto* header = reinterpret_cast<const PM4Header*>(acb.data());
+        const AmdGpu::PM4Header* header = reinterpret_cast<const PM4Header*>(acb.data());
         u32 next_dw_off = header->type3.NumWords() + 1;
 
         // If we have a buffered packet, use it.
@@ -942,15 +967,16 @@ Liverpool::Task Liverpool::ProcessCompute(std::span<const u32> acb, u32 vqid) {
 
         const PM4ItOpcode opcode = header->type3.opcode;
 
-        const auto* it_body = reinterpret_cast<const u32*>(header) + 1;
+        const u32* it_body = reinterpret_cast<const u32*>(header) + 1;
         switch (opcode) {
         case PM4ItOpcode::Nop: {
-            const auto* nop = reinterpret_cast<const PM4CmdNop*>(header);
+            const AmdGpu::PM4CmdNop* nop = reinterpret_cast<const PM4CmdNop*>(header);
             break;
         }
         case PM4ItOpcode::IndirectBuffer: {
-            const auto* indirect_buffer = reinterpret_cast<const PM4CmdIndirectBuffer*>(header);
-            auto task = ProcessCompute<true>(
+            const AmdGpu::PM4CmdIndirectBuffer* indirect_buffer =
+                reinterpret_cast<const PM4CmdIndirectBuffer*>(header);
+            Liverpool::Task task = ProcessCompute<true>(
                 {indirect_buffer->Address<const u32>(), indirect_buffer->ib_size}, vqid);
             SCOPE_EXIT {
                 task.handle.destroy();
@@ -964,7 +990,7 @@ Liverpool::Task Liverpool::ProcessCompute(std::span<const u32> acb, u32 vqid) {
             break;
         }
         case PM4ItOpcode::DmaData: {
-            const auto* dma_data = reinterpret_cast<const PM4DmaData*>(header);
+            const AmdGpu::PM4DmaData* dma_data = reinterpret_cast<const PM4DmaData*>(header);
             if (dma_data->dst_addr_lo == 0x3022C || !rasterizer) {
                 break;
             }
@@ -1023,14 +1049,14 @@ Liverpool::Task Liverpool::ProcessCompute(std::span<const u32> acb, u32 vqid) {
             break;
         }
         case PM4ItOpcode::SetShReg: {
-            const auto* set_data = reinterpret_cast<const PM4CmdSetData*>(header);
-            const auto set_size = (header->type3.NumWords() - 1) * sizeof(u32);
+            const AmdGpu::PM4CmdSetData* set_data = reinterpret_cast<const PM4CmdSetData*>(header);
+            const size_t set_size = (header->type3.NumWords() - 1) * sizeof(u32);
 
             if (set_data->reg_offset >= 0x200 &&
                 set_data->reg_offset <= (0x200 + sizeof(ComputeProgram) / 4)) {
                 ASSERT(set_size <= sizeof(ComputeProgram));
-                auto* addr = reinterpret_cast<u32*>(&mapped_queues[vqid + 1].cs_state) +
-                             (set_data->reg_offset - 0x200);
+                u32* addr = reinterpret_cast<u32*>(&mapped_queues[vqid + 1].cs_state) +
+                            (set_data->reg_offset - 0x200);
                 std::memcpy(addr, header + 2, set_size);
             } else {
                 std::memcpy(&regs.reg_array[Regs::ShRegWordOffset + set_data->reg_offset],
@@ -1039,20 +1065,28 @@ Liverpool::Task Liverpool::ProcessCompute(std::span<const u32> acb, u32 vqid) {
             break;
         }
         case PM4ItOpcode::SetQueueReg: {
-            const auto* set_data = reinterpret_cast<const PM4CmdSetQueueReg*>(header);
+            const AmdGpu::PM4CmdSetQueueReg* set_data =
+                reinterpret_cast<const PM4CmdSetQueueReg*>(header);
             LOG_WARNING(Render, "Encountered compute SetQueueReg: vqid = %u, reg_offset = 0x%x",
                         set_data->vqid.Value(), set_data->reg_offset.Value());
             break;
         }
         case PM4ItOpcode::DispatchDirect: {
-            const auto* dispatch_direct = reinterpret_cast<const PM4CmdDispatchDirect*>(header);
-            if (auto it = std::ranges::find(indirect_patches, header, &IndirectPatch::header);
-                it != indirect_patches.end()) {
-                const auto size = sizeof(PM4CmdDispatchIndirect::GroupDimensions);
-                rasterizer->DispatchIndirect(it->indirect_addr, 0, size);
+            const AmdGpu::PM4CmdDispatchDirect* dispatch_direct =
+                reinterpret_cast<const PM4CmdDispatchDirect*>(header);
+            const IndirectPatch* patch = nullptr;
+            for (const IndirectPatch& candidate : indirect_patches) {
+                if (candidate.header == header) {
+                    patch = &candidate;
+                    break;
+                }
+            }
+            if (patch) {
+                const size_t size = sizeof(PM4CmdDispatchIndirect::GroupDimensions);
+                rasterizer->DispatchIndirect(patch->indirect_addr, 0, size);
                 break;
             }
-            auto& cs_program = GetCsRegs();
+            AmdGpu::ComputeProgram& cs_program = GetCsRegs();
             cs_program.dim_x = dispatch_direct->dim_x;
             cs_program.dim_y = dispatch_direct->dim_y;
             cs_program.dim_z = dispatch_direct->dim_z;
@@ -1060,27 +1094,28 @@ Liverpool::Task Liverpool::ProcessCompute(std::span<const u32> acb, u32 vqid) {
             if (!rasterizer || (cs_program.dispatch_initiator & 1) == 0) {
                 break;
             }
-            const auto cmd_address = reinterpret_cast<const void*>(header);
+            const void* const cmd_address = reinterpret_cast<const void*>(header);
             rasterizer->ScopeMarker("asc[%u]:0x%llx:DispatchDirect", vqid, cmd_address,
                                     [&] { rasterizer->DispatchDirect(); });
             break;
         }
         case PM4ItOpcode::DispatchIndirect: {
-            const auto* dispatch_indirect =
+            const AmdGpu::PM4CmdDispatchIndirectMec* dispatch_indirect =
                 reinterpret_cast<const PM4CmdDispatchIndirectMec*>(header);
-            auto& cs_program = GetCsRegs();
-            const auto ib_address = dispatch_indirect->Address<VAddr>();
-            const auto size = sizeof(PM4CmdDispatchIndirect::GroupDimensions);
+            AmdGpu::ComputeProgram& cs_program = GetCsRegs();
+            const VAddr ib_address = dispatch_indirect->Address<VAddr>();
+            const size_t size = sizeof(PM4CmdDispatchIndirect::GroupDimensions);
             if (!rasterizer || (cs_program.dispatch_initiator & 1) == 0) {
                 break;
             }
-            const auto cmd_address = reinterpret_cast<const void*>(header);
+            const void* const cmd_address = reinterpret_cast<const void*>(header);
             rasterizer->ScopeMarker("asc[%u]:0x%llx:DispatchIndirect", vqid, cmd_address,
                                     [&] { rasterizer->DispatchIndirect(ib_address, 0, size); });
             break;
         }
         case PM4ItOpcode::WriteData: {
-            const auto* write_data = reinterpret_cast<const PM4CmdWriteData*>(header);
+            const AmdGpu::PM4CmdWriteData* write_data =
+                reinterpret_cast<const PM4CmdWriteData*>(header);
             ASSERT(write_data->dst_sel.Value() == 2 || write_data->dst_sel.Value() == 5);
             const u32 data_size = (header->type3.count.Value() - 2) * 4;
             if (!write_data->wr_one_addr.Value()) {
@@ -1094,7 +1129,8 @@ Liverpool::Task Liverpool::ProcessCompute(std::span<const u32> acb, u32 vqid) {
             break;
         }
         case PM4ItOpcode::MemSemaphore: {
-            const auto* mem_semaphore = reinterpret_cast<const PM4CmdMemSemaphore*>(header);
+            const AmdGpu::PM4CmdMemSemaphore* mem_semaphore =
+                reinterpret_cast<const PM4CmdMemSemaphore*>(header);
             if (mem_semaphore->IsSignaling()) {
                 mem_semaphore->Signal();
             } else {
@@ -1106,7 +1142,8 @@ Liverpool::Task Liverpool::ProcessCompute(std::span<const u32> acb, u32 vqid) {
             break;
         }
         case PM4ItOpcode::WaitRegMem: {
-            const auto* wait_reg_mem = reinterpret_cast<const PM4CmdWaitRegMem*>(header);
+            const AmdGpu::PM4CmdWaitRegMem* wait_reg_mem =
+                reinterpret_cast<const PM4CmdWaitRegMem*>(header);
             ASSERT(wait_reg_mem->engine.Value() == PM4CmdWaitRegMem::Engine::Me);
             while (!wait_reg_mem->Test(regs.reg_array)) {
                 YIELD_ASC(vqid);
@@ -1114,7 +1151,8 @@ Liverpool::Task Liverpool::ProcessCompute(std::span<const u32> acb, u32 vqid) {
             break;
         }
         case PM4ItOpcode::ReleaseMem: {
-            const auto* release_mem = reinterpret_cast<const PM4CmdReleaseMem*>(header);
+            const AmdGpu::PM4CmdReleaseMem* release_mem =
+                reinterpret_cast<const PM4CmdReleaseMem*>(header);
             if (rasterizer) {
                 rasterizer->OnFence();
             }
@@ -1159,13 +1197,13 @@ Liverpool::CmdBuffer Liverpool::CopyCmdBuffers(std::span<const u32> dcb, std::sp
 }
 
 void Liverpool::SubmitGfx(std::span<const u32> dcb, std::span<const u32> ccb) {
-    auto& queue = mapped_queues[GfxQueueId];
+    AmdGpu::Liverpool::GpuQueue& queue = mapped_queues[GfxQueueId];
 
     if (emu_settings_get_copy_gpu_buffers()) {
         std::tie(dcb, ccb) = CopyCmdBuffers(dcb, ccb);
     }
 
-    auto task = ProcessGraphics(dcb);
+    Liverpool::Task task = ProcessGraphics(dcb);
     // Counted before the GPU thread can finish it, as everything below is
     if (copy_ring) {
         cmd_copy_ring_submitted(copy_ring, !ccb.empty());
@@ -1182,10 +1220,10 @@ void Liverpool::SubmitGfx(std::span<const u32> dcb, std::span<const u32> ccb) {
 
 void Liverpool::SubmitAsc(u32 gnm_vqid, std::span<const u32> acb) {
     ASSERT_MSG(gnm_vqid > 0 && gnm_vqid < NumTotalQueues, "Invalid virtual ASC queue index");
-    auto& queue = mapped_queues[gnm_vqid];
+    AmdGpu::Liverpool::GpuQueue& queue = mapped_queues[gnm_vqid];
 
-    const auto vqid = gnm_vqid - 1;
-    const auto& task = ProcessCompute(acb, vqid);
+    const u32 vqid = gnm_vqid - 1;
+    const Liverpool::Task& task = ProcessCompute(acb, vqid);
     u32 mapped = static_cast<u32>(retro_atomic_load_relaxed_int(&num_mapped_queues));
     while (mapped < gnm_vqid + 1 &&
            !(retro_atomic_cas_int(&num_mapped_queues, mapped, gnm_vqid + 1) ||

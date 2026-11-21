@@ -4,6 +4,10 @@ What changed in the libretro core of this fork, newest first. Changes that come 
 
 ## Unreleased
 
+- No `auto` is left in `video_core`: each variable says its type, and the lambdas held in `auto` variables are plain loops, member functions or small structs.
+  - **Where:** the command processor (`liverpool`), the page manager, the pipeline cache's loading and saving, the shader HLE copy, the staging pool, the instance's extension list, and the GPU register and PM4 headers.
+  - **The shader HLE copy** no longer uses a `std::vector`: its copies are kept in a `SmallVector` from call to call, so it grows only for a dispatch with more copies than any before.
+  - **No change in behaviour intended.** Builds on Linux and Windows; the tests pass. Not run in a game yet.
 - Tiled textures are detiled straight into the image: a compute shader reads the tiled texels and writes each mip as a storage image, with no staging buffer and no buffer-to-image copy in between.
   - **Which images:** 8-, 16-, 32-, 64- and 128-bit colour images, single sampled, 2D (with their layers) or 3D. Block-compressed, depth and stencil, multisampled and 96-bit images, and devices without a storage view of the texel's width, keep the staging buffer and the copy.
   - **The shader:** `host_spirv_detile_image_comp`, built from the same tiling code as the buffer detiler. 8- and 16-bit texels are read out of their 32-bit word, so it does not need 8- or 16-bit storage buffer access. One dispatch per mip; texels past the image's width or height (the pitch can be wider) are not written.

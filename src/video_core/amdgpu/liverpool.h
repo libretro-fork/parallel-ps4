@@ -106,8 +106,8 @@ public:
 
     /// Runs @func on the GPU thread, before its next submission; with @wait_done, waits until
     /// it has run. Any thread; pushed onto a lock-free stack.
-    template <bool wait_done = false>
-    void SendCommand(auto&& func) {
+    template <bool wait_done = false, typename F>
+    void SendCommand(F&& func) {
         if constexpr (wait_done) {
             // On this thread's stack until it has run
             retro_atomic_int_t done{0};
@@ -167,7 +167,7 @@ private:
             // Links the task into a queue's lock-free stack (TaskQueue)
             mpsc_stack_node_t node{};
 
-            auto get_return_object() {
+            Task get_return_object() {
                 Task task{};
                 task.handle = std::coroutine_handle<promise_type>::from_promise(*this);
                 return task;
@@ -209,6 +209,8 @@ private:
     /// One submission fewer; the last wakes WaitGpuIdle.
     void SubmitFinished();
     void Process();
+    /// Whether the command processor has anything to do (or is to stop)
+    bool HasWork();
 
     /// Submissions in order: pushed by any thread onto a lock-free stack, and taken by the GPU
     /// thread into a list of its own, oldest first, which only it touches.
@@ -245,7 +247,7 @@ private:
             return head == nullptr;
         }
         Task::Handle Front() const {
-            auto* promise = reinterpret_cast<Task::promise_type*>(
+            Task::promise_type* promise = reinterpret_cast<Task::promise_type*>(
                 reinterpret_cast<char*>(head) - offsetof(Task::promise_type, node));
             return Task::Handle::from_promise(*promise);
         }

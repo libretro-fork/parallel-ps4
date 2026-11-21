@@ -88,7 +88,7 @@ void Request() {
 void OnSubmit() {
     const int now = retro_atomic_load_relaxed_int(&state);
     if (now == Asked) {
-        const auto path =
+        const std::filesystem::path path =
             Common::FS::GetUserPath(Common::FS::PathType::LogDir) / "vertex_capture.bin";
         file = filestream_open(path.string().c_str(), RETRO_VFS_FILE_ACCESS_WRITE,
                                RETRO_VFS_FILE_ACCESS_HINT_NONE);

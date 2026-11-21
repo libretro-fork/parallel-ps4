@@ -92,7 +92,7 @@ static bool AppendRecord(const Common::FS::IOFile& file, u64& at, u32 type, std:
 }
 
 void DataBase::ProcessIO(void* arg) {
-    const auto* db = static_cast<const DataBase*>(arg);
+    const Storage::DataBase* db = static_cast<const DataBase*>(arg);
     thread_name_set("shadPS4:PipelineCacheIO");
     // Appended to from the first blob on, closed as the writer goes
     Common::FS::IOFile pack;
@@ -115,7 +115,7 @@ void DataBase::ProcessIO(void* arg) {
 
         // Oldest first, as they were saved
         for (node = mpsc_stack_reverse(node); node;) {
-            auto* request = reinterpret_cast<Request*>(node);
+            Request* request = reinterpret_cast<Request*>(node);
             node = node->next;
 
             if (request->type != BlobType::DriverCache) {
@@ -139,12 +139,12 @@ void DataBase::ProcessIO(void* arg) {
             }
 
             // The driver's cache, saved whole again and again: a file of its own
-            auto path = db->cache_path / request->name;
+            std::filesystem::path path = db->cache_path / request->name;
             path.replace_extension(GetBlobFileExtension(request->type));
             // Written aside and renamed into place: the emulator's process is ended when the
             // content is closed, and a blob cut short by that was read back at the next start
             // as a broken shader
-            auto part = path;
+            std::filesystem::path part = path;
             part += ".part";
             using namespace Common::FS;
             bool written = false;
@@ -169,7 +169,7 @@ void DataBase::Open() {
         return;
     }
 
-    const auto& game_info = Common::ElfInfo::Instance();
+    const Common::ElfInfo& game_info = Common::ElfInfo::Instance();
 
     using namespace Common::FS;
     cache_path = GetUserPath(PathType::CacheDir) / game_info.GameSerial();
@@ -184,7 +184,7 @@ void DataBase::Open() {
             parts.emplace_back(name);
         }
     });
-    for (const auto& name : parts) {
+    for (const std::string& name : parts) {
         Remove(cache_path / PathFromUTF8String(name));
     }
     pack_path = cache_path / PackName;
@@ -232,7 +232,7 @@ void DataBase::OpenPack() {
     if (cut_short) {
         LOG_WARNING(Render, "Pipeline cache: a record cut short at the end dropped");
     }
-    auto part = pack_path;
+    std::filesystem::path part = pack_path;
     part += ".part";
     bool written = false;
     {
@@ -272,7 +272,7 @@ void DataBase::Clear() {
             names.emplace_back(name);
         }
     });
-    for (const auto& name : names) {
+    for (const std::string& name : names) {
         Common::FS::Remove(cache_path / Common::FS::PathFromUTF8String(name));
     }
     (void)WriteNewPack();
@@ -284,7 +284,7 @@ void DataBase::Close() {
     }
 
     // Its last word, while Saves still go through
-    if (const auto* hook =
+    if (const Storage::CloseHook* hook =
             static_cast<const CloseHook*>(retro_atomic_exchange_ptr(&close_hook, nullptr))) {
         hook->func(hook->arg);
     }
@@ -316,7 +316,7 @@ bool DataBase::Push(BlobType type, std::string&& name, std::vector<u8>&& bytes,
         LeaveSave();
         return false;
     }
-    auto* request = new Request{{}, type, std::move(name), std::move(bytes), std::move(words)};
+    Request* request = new Request{{}, type, std::move(name), std::move(bytes), std::move(words)};
     mpsc_stack_push(&g_pending, &request->node);
     LeaveSave();
     retro_eventcount_notify(&g_work);
@@ -340,7 +340,7 @@ std::optional<Common::FS::FileView> DataBase::Load(BlobType type, const std::str
         return std::nullopt;
     }
     if (type == BlobType::DriverCache) {
-        auto path = cache_path / name;
+        std::filesystem::path path = cache_path / name;
         path.replace_extension(GetBlobFileExtension(type));
         return Common::FS::FileView::Map(path);
     }

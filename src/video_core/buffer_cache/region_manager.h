@@ -147,7 +147,7 @@ public:
     /// Runs @func with no other change to this region at the same time; it may make the
     /// unlocked (locked = false) calls.
     template <typename F>
-    auto Exclusive(F&& func) -> decltype(func()) {
+    decltype((*static_cast<F*>(nullptr))()) Exclusive(F&& func) {
         return combiner.Run(static_cast<F&&>(func));
     }
 

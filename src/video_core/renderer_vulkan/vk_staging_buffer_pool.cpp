@@ -98,7 +98,7 @@ StagingBufferRef StagingBufferPool::RequestFromRing(Ring& ring, u64 size, u64 al
         }
     }
 
-    auto& buffer = *best->buffer;
+    VideoCore::StreamBuffer& buffer = *best->buffer;
     best->last_used_frame = frame;
 
     StagingBufferRef ref{
@@ -115,7 +115,7 @@ StagingBufferRef StagingBufferPool::RequestFromRing(Ring& ring, u64 size, u64 al
 
 StagingBufferRef StagingBufferPool::RequestLarge(u64 size, MemoryType type, bool deferred,
                                                  bool unsynchronized) {
-    auto& cache = large_caches[u32(type)];
+    std::vector<Vulkan::StagingBufferPool::LargeBuffer>& cache = large_caches[u32(type)];
     const u64 max_size = std::max(size + size / 4, RoundAllocationSize(size));
 
     LargeBuffer* best{};
@@ -158,10 +158,15 @@ StagingBufferRef StagingBufferPool::RequestLarge(u64 size, MemoryType type, bool
 }
 
 void StagingBufferPool::FreeDeferred(const StagingBufferRef& ref) {
-    auto& cache = large_caches[u32(ref.type)];
-    const auto it = std::ranges::find_if(
-        cache, [&](const LargeBuffer& entry) { return entry.buffer.get() == ref.buffer; });
-    ASSERT_MSG(it != cache.end() && it->held, "FreeDeferred on an allocation that is not held");
+    std::vector<Vulkan::StagingBufferPool::LargeBuffer>& cache = large_caches[u32(ref.type)];
+    LargeBuffer* it = nullptr;
+    for (LargeBuffer& entry : cache) {
+        if (entry.buffer.get() == ref.buffer) {
+            it = &entry;
+            break;
+        }
+    }
+    ASSERT_MSG(it && it->held, "FreeDeferred on an allocation that is not held");
     it->held = false;
     it->tick = scheduler.CurrentTick();
     it->last_used_frame = frame;
@@ -172,13 +177,13 @@ void StagingBufferPool::TickFrame() {
     for (Ring& ring : rings) {
         TrimRing(ring);
     }
-    for (auto& cache : large_caches) {
+    for (std::vector<Vulkan::StagingBufferPool::LargeBuffer>& cache : large_caches) {
         TrimLarge(cache);
     }
 }
 
 void StagingBufferPool::TrimRing(Ring& ring) {
-    auto& blocks = ring.blocks;
+    std::vector<Vulkan::StagingBufferPool::Block>& blocks = ring.blocks;
     for (size_t i = blocks.size(); i-- > RING_KEPT_BLOCKS;) {
         const Block& block = blocks[i];
         if (frame - block.last_used_frame < RING_IDLE_FRAMES ||

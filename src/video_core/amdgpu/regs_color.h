@@ -234,8 +234,8 @@ struct ColorBuffer {
     }
 
     u32 GetColorSliceSize() const {
-        const auto num_bytes_per_element = NumBitsPerBlock(DataFormat(info.format)) / 8u;
-        const auto slice_size = num_bytes_per_element * (slice.tile_max + 1) * 64u * NumSamples();
+        const u32 num_bytes_per_element = NumBitsPerBlock(DataFormat(info.format)) / 8u;
+        const u32 slice_size = num_bytes_per_element * (slice.tile_max + 1) * 64u * NumSamples();
         return slice_size;
     }
 
@@ -293,15 +293,15 @@ struct ColorBuffer {
             }},
         }};
         // clang-format on
-        const auto swap_idx = static_cast<u32>(info.comp_swap);
-        const auto components_idx = NumComponents(DataFormat(info.format)) - 1;
-        const auto mrt_swizzle = mrt_swizzles[swap_idx][components_idx];
+        const u32 swap_idx = static_cast<u32>(info.comp_swap);
+        const u32 components_idx = NumComponents(DataFormat(info.format)) - 1;
+        const CompMapping mrt_swizzle = mrt_swizzles[swap_idx][components_idx];
         return RemapSwizzle(DataFormat(info.format), mrt_swizzle);
     }
 
     NumberFormat GetFixedNumberFormat() const {
         // There is a small difference between T# and CB number types, account for it.
-        const auto number_fmt = NumberFormat(info.number_type);
+        const NumberFormat number_fmt = NumberFormat(info.number_type);
         return number_fmt == NumberFormat::SnormNz ? NumberFormat::Srgb : number_fmt;
     }
 };

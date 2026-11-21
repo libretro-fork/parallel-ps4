@@ -283,7 +283,7 @@ struct DepthBuffer {
         if (z_info.format == ZFormat::Invalid) {
             return 0;
         }
-        const auto bpe = NumBits() >> 3; // in bytes
+        const u32 bpe = NumBits() >> 3; // in bytes
         return (depth_slice.tile_max + 1) * 64 * bpe * NumSamples();
     }
 

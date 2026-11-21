@@ -304,16 +304,26 @@ bool Instance::CreateDevice() {
     // Room for the one the libretro core adds below.
     const char* enabled_extensions[48];
     u32 num_enabled_extensions = 0;
-    const auto add_extension = [&](const char* extension) -> bool {
-        if (HasExtension(extension)) {
-            LOG_INFO(Render_Vulkan, "Enabling extension: %s", extension);
-            ASSERT(num_enabled_extensions < sizeof(enabled_extensions) / sizeof(const char*));
-            enabled_extensions[num_enabled_extensions++] = extension;
-            return true;
+    /// Enables an extension the device has; false for one it has not
+    struct ExtensionAdder {
+        const Instance& self;
+        const char** list;
+        u32& count;
+        u32 capacity;
+        bool operator()(const char* extension) const {
+            if (self.HasExtension(extension)) {
+                LOG_INFO(Render_Vulkan, "Enabling extension: %s", extension);
+                ASSERT(count < capacity);
+                list[count++] = extension;
+                return true;
+            }
+            LOG_WARNING(Render_Vulkan, "Extension %s unavailable.", extension);
+            return false;
         }
-        LOG_WARNING(Render_Vulkan, "Extension %s unavailable.", extension);
-        return false;
     };
+    const ExtensionAdder add_extension{
+        *this, enabled_extensions, num_enabled_extensions,
+        static_cast<u32>(sizeof(enabled_extensions) / sizeof(enabled_extensions[0]))};
 
     // Required
     ASSERT_MSG(add_extension(VK_KHR_SWAPCHAIN_EXTENSION_NAME),

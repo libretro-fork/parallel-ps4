@@ -126,6 +126,16 @@ struct PageManager::Impl {
         });
     }
 
+    /// Applies the pending (un)protection of @range_pages pages from @range_begin, if any
+    void ReleasePending(u64 range_begin, u64& range_pages, u64& potential_pages,
+                        Core::MemoryPermission perms) {
+        if (range_pages > 0) {
+            Protect(range_begin << PM_PAGE_BITS, range_pages << PM_PAGE_BITS, perms);
+            range_pages = 0;
+            potential_pages = 0;
+        }
+    }
+
     void UpdatePageWatchersOwned(VAddr addr, u64 size, PageOp write_op) {
         const u64 page_start = addr >> PM_PAGE_BITS;
         const u64 page_end = Common::DivCeil(addr + size, PM_PAGE_SIZE);
@@ -134,14 +144,6 @@ struct PageManager::Impl {
         u64 range_begin = page_start;
         u64 range_pages = 0;
         u64 potential_pages = 0;
-
-        const auto release_pending = [&] {
-            if (range_pages > 0) {
-                Protect(range_begin << PM_PAGE_BITS, range_pages << PM_PAGE_BITS, perms);
-                range_pages = 0;
-                potential_pages = 0;
-            }
-        };
 
         // Iterate requested pages
         const u64 aligned_addr = page_start << PM_PAGE_BITS;
@@ -160,16 +162,16 @@ struct PageManager::Impl {
                 continue;
             }
 
-            const auto old_perms = state->Perms();
+            const Core::MemoryPermission old_perms = state->Perms();
             if (page == page_start) {
                 perms = old_perms;
             }
 
             // Apply the change to the page state
-            const auto new_perms = state->Update(write_op);
+            const Core::MemoryPermission new_perms = state->Update(write_op);
             if (new_perms != perms) [[unlikely]] {
                 // If the protection changed add pending (un)protect action
-                release_pending();
+                ReleasePending(range_begin, range_pages, potential_pages, perms);
                 perms = new_perms;
             } else if (range_pages != 0) {
                 ++potential_pages;
@@ -188,7 +190,7 @@ struct PageManager::Impl {
         }
 
         // Add pending (un)protect action
-        release_pending();
+        ReleasePending(range_begin, range_pages, potential_pages, perms);
     }
 
     void UpdatePageWatchersForRegionOwned(VAddr base_addr, const Bounds& bounds,
@@ -203,21 +205,13 @@ struct PageManager::Impl {
         u64 range_pages = 0;
         u64 potential_pages = 0;
 
-        const auto release_pending = [&] {
-            if (range_pages > 0) {
-                Protect(range_begin << PM_PAGE_BITS, range_pages << PM_PAGE_BITS, perms);
-                range_pages = 0;
-                potential_pages = 0;
-            }
-        };
-
         for (u64 page = page_start; page != page_end; ++page) {
             PageState* state = cached_pages.find(base_page + page);
             if (!state) {
                 continue;
             }
 
-            const auto old_perms = state->Perms();
+            const Core::MemoryPermission old_perms = state->Perms();
             if (page == page_start) {
                 perms = old_perms;
             }
@@ -225,11 +219,12 @@ struct PageManager::Impl {
             // Apply the change to the page state
             const bool update_write = write_op != PageOp::None && write_mask.GetPage(page);
             const bool update_read = read_op != PageOp::None && read_mask.GetPage(page);
-            const auto new_perms = state->Update(write_op, update_write, read_op, update_read);
+            const Core::MemoryPermission new_perms =
+                state->Update(write_op, update_write, read_op, update_read);
 
             if (new_perms != perms) [[unlikely]] {
                 // If the protection changed add pending (un)protect action
-                release_pending();
+                ReleasePending(range_begin, range_pages, potential_pages, perms);
                 perms = new_perms;
             } else if (range_pages != 0) {
                 // If the protection did not change, extend the potential range
@@ -249,7 +244,7 @@ struct PageManager::Impl {
         }
 
         // Add pending (un)protect action
-        release_pending();
+        ReleasePending(range_begin, range_pages, potential_pages, perms);
     }
 
     struct PageTraits {
@@ -336,8 +331,8 @@ public:
     void UffdHandler() {
         thread_name_set("shadPS4:Uffd");
 
-        auto regions = Core::Memory::Instance()->GetAddressSpace().GetUsableRegions();
-        for (auto& region : regions) {
+        IntervalList<> regions = Core::Memory::Instance()->GetAddressSpace().GetUsableRegions();
+        for (const Interval& region : regions) {
             OnMap(region.start, region.end);
         }
         LOG_INFO(Common_Memory, "registered reserved memory with userfaultfd");
@@ -386,7 +381,7 @@ public:
 
             // Notify rasterizer about the fault.
             const VAddr addr = msg.arg.pagefault.address;
-            const auto ptid = msg.arg.pagefault.feat.ptid;
+            const unsigned int ptid = msg.arg.pagefault.feat.ptid;
             rasterizer->InvalidateMemory(addr, 1,
                                          ptid == rasterizer->GetGpuCommandProcessorThreadId());
 
@@ -408,23 +403,23 @@ struct SignalImpl : public PageManager::Impl {
         rasterizer = rasterizer_;
 
         // Should be called first.
-        constexpr auto priority = std::numeric_limits<u32>::min();
+        constexpr const unsigned int priority = std::numeric_limits<u32>::min();
         Core::Signals::Instance()->RegisterAccessViolationHandler(GuestFaultSignalHandler,
                                                                   priority);
     }
 
     void Protect(VAddr address, size_t size, Core::MemoryPermission perms) override {
-        auto* memory = Core::Memory::Instance();
-        auto& impl = memory->GetAddressSpace();
+        Core::MemoryManager* memory = Core::Memory::Instance();
+        Core::AddressSpace& impl = memory->GetAddressSpace();
         ASSERT_MSG(perms != Core::MemoryPermission::Write,
                    "Attempted to protect region as write-only which is not a valid permission");
         impl.Protect(address, size, perms);
     }
 
     static bool GuestFaultSignalHandler(void* context, void* fault_address) {
-        const auto addr = reinterpret_cast<VAddr>(fault_address);
-        const auto size = std::min<u64>(8, PageManager::GetNextPageAddr(addr) - addr);
-        const auto is_gpu_thread =
+        const VAddr addr = reinterpret_cast<VAddr>(fault_address);
+        const u64 size = std::min<u64>(8, PageManager::GetNextPageAddr(addr) - addr);
+        const bool is_gpu_thread =
             sthread_get_current_thread_id() == rasterizer->GetGpuCommandProcessorThread();
         if (Common::IsWriteError(context)) {
             return rasterizer->InvalidateMemory(addr, size, is_gpu_thread);
