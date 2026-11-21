@@ -5,7 +5,7 @@
 #define SHADPS4_LIBC_INTERNAL_MATH_H
 
 /* libSceLibcInternal's maths: the host's. Defined in libc_internal_math.c, registered in
- * libc_internal.cpp. */
+ * libs.cpp. */
 
 #include <stddef.h>
 

@@ -40,6 +40,7 @@
 #include "core/file_sys/directories/pfs_directory.h"
 #include "core/file_sys/fs.h"
 #include "core/libraries/kernel/file_system.h"
+#include "core/libraries/kernel/kernel_c.h"
 #include "core/libraries/kernel/orbis_error.h"
 #include "core/libraries/kernel/posix_error.h"
 #include "core/libraries/libs.h"
@@ -2340,3 +2341,23 @@ void RegisterFileSystem(Core::Loader::SymbolsResolver* sym) {
 }
 
 } // namespace Libraries::Kernel
+
+extern "C" s32 kernel_posix_open(const char* path, s32 flags, u16 mode) {
+    return Libraries::Kernel::posix_open(path, flags, mode);
+}
+
+extern "C" s32 kernel_posix_close(s32 fd) {
+    return Libraries::Kernel::posix_close(fd);
+}
+
+extern "C" s64 kernel_posix_lseek(s32 fd, s64 offset, s32 whence) {
+    return Libraries::Kernel::posix_lseek(fd, offset, whence);
+}
+
+extern "C" s64 kernel_write(s32 fd, const void* buf, u64 nbytes) {
+    return Libraries::Kernel::sceKernelWrite(fd, buf, nbytes);
+}
+
+extern "C" s64 kernel_read(s32 fd, void* buf, u64 nbytes) {
+    return Libraries::Kernel::sceKernelRead(fd, buf, nbytes);
+}

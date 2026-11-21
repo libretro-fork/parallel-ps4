@@ -151,8 +151,6 @@ CORE_SOURCES_CXX += $(addprefix src/core/libraries/kernel/threads/,barrier.cpp c
 	event_flag.cpp exception.cpp mutex.cpp pthread.cpp pthread_attr.cpp pthread_clean.cpp \
 	pthread_spec.cpp rwlock.cpp semaphore.cpp sleepq.cpp stack.cpp stack_asm.cpp tcb.cpp \
 	thread_state.cpp)
-CORE_SOURCES_CXX += $(addprefix src/core/libraries/libc_internal/,libc_internal.cpp \
-	libc_internal_io.cpp)
 CORE_SOURCES_CXX += $(addprefix src/core/libraries/,libs.cpp)
 CORE_SOURCES_CXX += $(addprefix src/core/libraries/music/,music_player_service.cpp)
 CORE_SOURCES_CXX += $(addprefix src/core/libraries/net/,net.cpp net_kernel.cpp net_log.cpp \
@@ -266,7 +264,8 @@ CORE_SOURCES_C += $(addprefix src/core/libraries/,companion/companion_httpd.c \
 	remote_play/remoteplay.c rtc/rtc.c rudp/rudp.c screenshot/screenshot.c share_play/shareplay.c \
 	signin_dialog/signindialog.c system_gesture/system_gesture.c ulobjmgr/ulobjmgr.c \
 	video_recording/video_recording.c voice/voice.c vr_tracker/vr_tracker.c \
-	invitation_dialog/invitation_dialog.c libc_internal/libc_internal_math.c \
+	invitation_dialog/invitation_dialog.c libc_internal/libc_internal_io.c \
+	libc_internal/libc_internal_math.c libc_internal/libc_internal_printf.c \
 	libc_internal/libc_internal_memory.c libc_internal/libc_internal_str.c \
 	libc_internal/libc_internal_threads.c playgo/playgo.c playgo/playgo_dialog.c system/commondialog.c \
 	web_browser_dialog/webbrowserdialog.c zlib/zlib.c)

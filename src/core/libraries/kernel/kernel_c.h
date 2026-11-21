@@ -122,6 +122,16 @@ s32 kernel_pthread_mutex_lock(kernel_pthread_mutex_t* mutex);
 s32 kernel_pthread_mutex_unlock(kernel_pthread_mutex_t* mutex);
 s32 kernel_pthread_mutex_destroy(kernel_pthread_mutex_t* mutex);
 
+/* The calling thread's errno, the game's (__Error; defined in time.cpp) */
+s32* kernel_errno_ptr(void);
+
+/* posix_open, posix_close, posix_lseek, sceKernelWrite and sceKernelRead (file_system.cpp) */
+s32 kernel_posix_open(const char* path, s32 flags, u16 mode);
+s32 kernel_posix_close(s32 fd);
+s64 kernel_posix_lseek(s32 fd, s64 offset, s32 whence);
+s64 kernel_write(s32 fd, const void* buf, u64 nbytes);
+s64 kernel_read(s32 fd, void* buf, u64 nbytes);
+
 RETRO_END_DECLS
 
 #endif

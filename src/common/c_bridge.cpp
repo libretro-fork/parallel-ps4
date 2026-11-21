@@ -40,6 +40,8 @@ static Common::Log::Class ToClass(c_log_class log_class) {
         return Common::Log::Class::Lib_NpProfileDialog;
     case C_LOG_LIB_INVITATION_DIALOG:
         return Common::Log::Class::Lib_InvitationDialog;
+    case C_LOG_LIB_LIBC_INTERNAL:
+        return Common::Log::Class::Lib_LibcInternal;
     case C_LOG_LIB_VOICE:
         return Common::Log::Class::Lib_Voice;
     case C_LOG_LIB_RTC:

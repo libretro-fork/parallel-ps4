@@ -5,7 +5,7 @@
 #define SHADPS4_LIBC_INTERNAL_STR_H
 
 /* libSceLibcInternal's string functions: the host's. Defined in libc_internal_str.c,
- * registered in libc_internal.cpp. */
+ * registered in libs.cpp. */
 
 #include <stddef.h>
 

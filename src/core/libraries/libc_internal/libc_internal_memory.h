@@ -5,7 +5,7 @@
 #define SHADPS4_LIBC_INTERNAL_MEMORY_H
 
 /* libSceLibcInternal's memory functions: the host's, and the heap's trace info, which shows
- * an empty heap. Defined in libc_internal_memory.c, registered in libc_internal.cpp. */
+ * an empty heap. Defined in libc_internal_memory.c, registered in libs.cpp. */
 
 #include <stddef.h>
 

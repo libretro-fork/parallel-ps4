@@ -18,7 +18,7 @@ s32 RngDevice::ioctl(u64 cmd, Common::VaCtx* args) {
     LOG_INFO(Kernel_Pthread, "called, cmd = 0x%" PRIx64, cmd);
     // Both commands are for generating a random number
     if (cmd == 0x40445301 || cmd == 0x40445302) {
-        auto& data = *vaArgPtr<GetRandomArgs>(&args->va_list);
+        auto& data = *Common::vaArgPtr<GetRandomArgs>(&args->list);
         data.result = 0;
         for (u64 i = 0; i < 64; i++) {
             data.buf[i] = std::rand();

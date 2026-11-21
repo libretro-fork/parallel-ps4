@@ -11,8 +11,7 @@ class SymbolsResolver;
 
 namespace Libraries::LibcInternal {
 
-// I won't manage definitons of 3000+ functions, and they don't need to be accessed externally,
-// so everything is just in the .cpp file
+// The library's functions are C (libc_internal_*.c); this registers them, in libs.cpp
 
 void RegisterLib(Core::Loader::SymbolsResolver* sym);
 } // namespace Libraries::LibcInternal

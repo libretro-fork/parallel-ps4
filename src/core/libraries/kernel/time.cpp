@@ -802,6 +802,10 @@ extern "C" s32 kernel_posix_clock_settime(s32 clock_id, kernel_timespec_t* tp) {
         clock_id, reinterpret_cast<Libraries::Kernel::OrbisKernelTimespec*>(tp));
 }
 
+extern "C" s32* kernel_errno_ptr(void) {
+    return Libraries::Kernel::__Error();
+}
+
 extern "C" s32 kernel_errno_error(void) {
     return Libraries::Kernel::ErrnoToSceKernelError(*Libraries::Kernel::__Error());
 }

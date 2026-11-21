@@ -6,7 +6,7 @@
 
 /* libSceLibcInternal's mutexes (_Mtxinit and the rest): the game's recursive pthread mutexes,
  * returning 1 on any failure. Defined in libc_internal_threads.c, registered in
- * libc_internal.cpp. */
+ * libs.cpp. */
 
 #include <retro_common_api.h>
 
