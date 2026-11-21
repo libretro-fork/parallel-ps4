@@ -117,6 +117,183 @@ void LinkFunctionImpl(Core::Loader::SymbolsResolver* sym, char const* nid, char 
 
 namespace Libraries {
 
+// The libraries written in C: their functions, registered for the game
+static void RegisterRandom(Core::Loader::SymbolsResolver* sym) {
+    LIB_FUNCTION("PI7jIZj4pcE", "libSceRandom", 1, "libSceRandom", sceRandomGetRandomNumber);
+}
+
+static void RegisterVideoRecording(Core::Loader::SymbolsResolver* sym) {
+    LIB_FUNCTION("Fc8qxlKINYQ", "libSceVideoRecording", 1, "libSceVideoRecording",
+                 sceVideoRecordingSetInfo);
+}
+
+static void RegisterDiscMap(Core::Loader::SymbolsResolver* sym) {
+    LIB_FUNCTION("fl1eoDnwQ4s", "libSceDiscMap", 1, "libSceDiscMap", sceDiscMapGetPackageSize);
+    LIB_FUNCTION("lbQKqsERhtE", "libSceDiscMap", 1, "libSceDiscMap", sceDiscMapIsRequestOnHDD);
+    LIB_FUNCTION("fJgP+wqifno", "libSceDiscMap", 1, "libSceDiscMap", DiscMap_Func_7C980FFB0AA27E7A);
+    LIB_FUNCTION("ioKMruft1ek", "libSceDiscMap", 1, "libSceDiscMap", DiscMap_Func_8A828CAEE7EDD5E9);
+    LIB_FUNCTION("5+vOlukvkfg", "libSceDiscMap", 1, "libSceDiscMap", DiscMap_Func_E7EBCE96E92F91F8);
+}
+
+static void RegisterUlobjmgr(Core::Loader::SymbolsResolver* sym) {
+    LIB_FUNCTION("BG26hBGiNlw", "ulobjmgr", 1, "ulobjmgr", _sceUlobjmgrRegisterObject);
+    LIB_FUNCTION("Smf+fUNblPc", "ulobjmgr", 1, "ulobjmgr", _sceUlobjmgrUnregisterObject);
+    LIB_FUNCTION("HZ9Q2c+4BU4", "ulobjmgr", 1, "ulobjmgr", Ulobjmgr_Func_1D9F50D9CFB8054E);
+    LIB_FUNCTION("SweJO7t3pkk", "ulobjmgr", 1, "ulobjmgr", Ulobjmgr_Func_4B07893BBB77A649);
+}
+
+static void RegisterContentExport(Core::Loader::SymbolsResolver* sym) {
+    LIB_FUNCTION("FzEWeYnAFlI", "libSceContentExport", 1, "libSceContentExport",
+                 sceContentExportInit);
+    LIB_FUNCTION("0GnN4QCgIfs", "libSceContentExport", 1, "libSceContentExport",
+                 sceContentExportInit2);
+    LIB_FUNCTION("+KDWny9Y-6k", "libSceContentExport", 1, "libSceContentExport",
+                 sceContentExportTerm);
+}
+
+static void RegisterSigninDialog(Core::Loader::SymbolsResolver* sym) {
+    LIB_FUNCTION("mlYGfmqE3fQ", "libSceSigninDialog", 1, "libSceSigninDialog",
+                 sceSigninDialogInitialize);
+    LIB_FUNCTION("JlpJVoRWv7U", "libSceSigninDialog", 1, "libSceSigninDialog", sceSigninDialogOpen);
+    LIB_FUNCTION("2m077aeC+PA", "libSceSigninDialog", 1, "libSceSigninDialog",
+                 sceSigninDialogGetStatus);
+    LIB_FUNCTION("Bw31liTFT3A", "libSceSigninDialog", 1, "libSceSigninDialog",
+                 sceSigninDialogUpdateStatus);
+    LIB_FUNCTION("nqG7rqnYw1U", "libSceSigninDialog", 1, "libSceSigninDialog",
+                 sceSigninDialogGetResult);
+    LIB_FUNCTION("M3OkENHcyiU", "libSceSigninDialog", 1, "libSceSigninDialog",
+                 sceSigninDialogClose);
+    LIB_FUNCTION("LXlmS6PvJdU", "libSceSigninDialog", 1, "libSceSigninDialog",
+                 sceSigninDialogTerminate);
+}
+
+static void RegisterScreenShot(Core::Loader::SymbolsResolver* sym) {
+    LIB_FUNCTION("AS45QoYHjc4", "libSceScreenShot", 1, "libSceScreenShot", ScreenShot_dummy);
+    LIB_FUNCTION("JuMLLmmvRgk", "libSceScreenShot", 1, "libSceScreenShot", sceScreenShotCapture);
+    LIB_FUNCTION("tIYf0W5VTi8", "libSceScreenShot", 1, "libSceScreenShot", sceScreenShotDisable);
+    LIB_FUNCTION("ysfza71rm9M", "libSceScreenShot", 1, "libSceScreenShot",
+                 sceScreenShotDisableNotification);
+    LIB_FUNCTION("2xxUtuC-RzE", "libSceScreenShot", 1, "libSceScreenShot", sceScreenShotEnable);
+    LIB_FUNCTION("BDUaqlVdSAY", "libSceScreenShot", 1, "libSceScreenShot",
+                 sceScreenShotEnableNotification);
+    LIB_FUNCTION("hNmK4SdhPT0", "libSceScreenShot", 1, "libSceScreenShot", sceScreenShotGetAppInfo);
+    LIB_FUNCTION("VlAQIgXa2R0", "libSceScreenShot", 1, "libSceScreenShot",
+                 sceScreenShotGetDrcParam);
+    LIB_FUNCTION("-SV-oTNGFQk", "libSceScreenShot", 1, "libSceScreenShot", sceScreenShotIsDisabled);
+    LIB_FUNCTION("ICNJ-1POs84", "libSceScreenShot", 1, "libSceScreenShot",
+                 sceScreenShotIsVshScreenCaptureDisabled);
+    LIB_FUNCTION("ahHhOf+QNkQ", "libSceScreenShot", 1, "libSceScreenShot",
+                 sceScreenShotSetOverlayImage);
+    LIB_FUNCTION("73WQ4Jj0nJI", "libSceScreenShot", 1, "libSceScreenShot",
+                 sceScreenShotSetOverlayImageWithOrigin);
+    LIB_FUNCTION("G7KlmIYFIZc", "libSceScreenShot", 1, "libSceScreenShot", sceScreenShotSetParam);
+    LIB_FUNCTION("itlWFWV3Tzc", "libSceScreenShotDrc", 1, "libSceScreenShot",
+                 sceScreenShotSetDrcParam);
+}
+
+static void RegisterMouse(Core::Loader::SymbolsResolver* sym) {
+    LIB_FUNCTION("cAnT0Rw-IwU", "libSceMouse", 1, "libSceMouse", sceMouseClose);
+    LIB_FUNCTION("Ymyy1HSSJLQ", "libSceMouse", 1, "libSceMouse", sceMouseConnectPort);
+    LIB_FUNCTION("BRXOoXQtb+k", "libSceMouse", 1, "libSceMouse", sceMouseDebugGetDeviceId);
+    LIB_FUNCTION("WiGKINCZWkc", "libSceMouse", 1, "libSceMouse", sceMouseDeviceOpen);
+    LIB_FUNCTION("eDQTFHbgeTU", "libSceMouse", 1, "libSceMouse", sceMouseDisconnectDevice);
+    LIB_FUNCTION("jJP1vYMEPd4", "libSceMouse", 1, "libSceMouse", sceMouseDisconnectPort);
+    LIB_FUNCTION("QA9Qupz3Zjw", "libSceMouse", 1, "libSceMouse", sceMouseGetDeviceInfo);
+    LIB_FUNCTION("Qs0wWulgl7U", "libSceMouse", 1, "libSceMouse", sceMouseInit);
+    LIB_FUNCTION("1FeceR5YhAo", "libSceMouse", 1, "libSceMouse", sceMouseMbusInit);
+    LIB_FUNCTION("RaqxZIf6DvE", "libSceMouse", 1, "libSceMouse", sceMouseOpen);
+    LIB_FUNCTION("x8qnXqh-tiM", "libSceMouse", 1, "libSceMouse", sceMouseRead);
+    LIB_FUNCTION("crkFfp-cmFo", "libSceMouse", 1, "libSceMouse", sceMouseSetHandType);
+    LIB_FUNCTION("ghLUU2Z5Lcg", "libSceMouse", 1, "libSceMouse", sceMouseSetPointerSpeed);
+    LIB_FUNCTION("6aANndpS0Wo", "libSceMouse", 1, "libSceMouse", sceMouseSetProcessPrivilege);
+}
+
+static void RegisterMove(Core::Loader::SymbolsResolver* sym) {
+    LIB_FUNCTION("j1ITE-EoJmE", "libSceMove", 1, "libSceMove", sceMoveInit);
+    LIB_FUNCTION("HzC60MfjJxU", "libSceMove", 1, "libSceMove", sceMoveOpen);
+    LIB_FUNCTION("GWXTyxs4QbE", "libSceMove", 1, "libSceMove", sceMoveGetDeviceInfo);
+    LIB_FUNCTION("ttU+JOhShl4", "libSceMove", 1, "libSceMove", sceMoveReadStateLatest);
+    LIB_FUNCTION("f2bcpK6kJfg", "libSceMove", 1, "libSceMove", sceMoveReadStateRecent);
+    LIB_FUNCTION("y5h7f8H1Jnk", "libSceMove", 1, "libSceMove", sceMoveGetExtensionPortInfo);
+    LIB_FUNCTION("IFQwtT2CeY0", "libSceMove", 1, "libSceMove", sceMoveSetVibration);
+    LIB_FUNCTION("T8KYHPs1JE8", "libSceMove", 1, "libSceMove", sceMoveSetLightSphere);
+    LIB_FUNCTION("zuxWAg3HAac", "libSceMove", 1, "libSceMove", sceMoveResetLightSphere);
+    LIB_FUNCTION("XX6wlxpHyeo", "libSceMove", 1, "libSceMove", sceMoveClose);
+    LIB_FUNCTION("tsZi60H4ypY", "libSceMove", 1, "libSceMove", sceMoveTerm);
+}
+
+static void RegisterKeyboard(Core::Loader::SymbolsResolver* sym) {
+    LIB_FUNCTION("0LWei+c7RNc", "libSceKeyboard", 1, "libSceKeyboard", sceKeyboardClose);
+    LIB_FUNCTION("cKyUWdEKBME", "libSceKeyboard", 1, "libSceKeyboard", sceKeyboardConnectPort);
+    LIB_FUNCTION("qkHOAYtCFxg", "libSceKeyboard", 1, "libSceKeyboard", sceKeyboardDebugGetDeviceId);
+    LIB_FUNCTION("0lAFLqZonXI", "libSceKeyboard", 1, "libSceKeyboard", sceKeyboardDeviceOpen);
+    LIB_FUNCTION("DhTavziiZ80", "libSceKeyboard", 1, "libSceKeyboard", sceKeyboardDisconnectDevice);
+    LIB_FUNCTION("Hdm6rO0xlnw", "libSceKeyboard", 1, "libSceKeyboard", sceKeyboardDisconnectPort);
+    LIB_FUNCTION("XNArvUsT18s", "libSceKeyboard", 1, "libSceKeyboard", sceKeyboardGetConnection);
+    LIB_FUNCTION("84mvEJFMYK4", "libSceKeyboard", 1, "libSceKeyboard", sceKeyboardGetDeviceInfo);
+    LIB_FUNCTION("yO9JwdRhtSA", "libSceKeyboard", 1, "libSceKeyboard", sceKeyboardGetKey2Char);
+    LIB_FUNCTION("wadT3QBCGY0", "libSceKeyboard", 1, "libSceKeyboard", sceKeyboardInit);
+    LIB_FUNCTION("6zKouhabgjM", "libSceKeyboard", 1, "libSceKeyboard", sceKeyboardMbusInit);
+    LIB_FUNCTION("HJ+KnEHcaxI", "libSceKeyboard", 1, "libSceKeyboard", sceKeyboardOpen);
+    LIB_FUNCTION("xybbGMCr738", "libSceKeyboard", 1, "libSceKeyboard", sceKeyboardRead);
+    LIB_FUNCTION("6HpE68bzX6M", "libSceKeyboard", 1, "libSceKeyboard", sceKeyboardReadState);
+    LIB_FUNCTION("jqRcNtZmLuE", "libSceKeyboard", 1, "libSceKeyboard", sceKeyboardSetProcessFocus);
+    LIB_FUNCTION("K1A7IJp5xYc", "libSceKeyboard", 1, "libSceKeyboard",
+                 sceKeyboardSetProcessPrivilege);
+    LIB_FUNCTION("l76jptHfizM", "libSceKeyboard", 1, "libSceKeyboard",
+                 Keyboard_Func_97BEA3A6D1DF8B33);
+    LIB_FUNCTION("FU9dBtKaM90", "libSceDbgKeyboard", 1, "libSceKeyboard", sceDbgKeyboardClose);
+    LIB_FUNCTION("61ykjnH3AR4", "libSceDbgKeyboard", 1, "libSceKeyboard",
+                 sceDbgKeyboardGetKey2Char);
+    LIB_FUNCTION("bRuUeIPXFDM", "libSceDbgKeyboard", 1, "libSceKeyboard", sceDbgKeyboardInit);
+    LIB_FUNCTION("TESmX5D-i54", "libSceDbgKeyboard", 1, "libSceKeyboard", sceDbgKeyboardOpen);
+    LIB_FUNCTION("vKbf07G7KPE", "libSceDbgKeyboard", 1, "libSceKeyboard", sceDbgKeyboardRead);
+    LIB_FUNCTION("HJMS5pu4dvY", "libSceDbgKeyboard", 1, "libSceKeyboard", sceDbgKeyboardReadState);
+}
+
+static void RegisterSharePlay(Core::Loader::SymbolsResolver* sym) {
+    LIB_FUNCTION("ggnCfalLU-8", "libSceSharePlay", 1, "libSceSharePlay", sceSharePlayCrashDaemon);
+    LIB_FUNCTION("OOrLKB0bSDs", "libSceSharePlay", 1, "libSceSharePlay",
+                 sceSharePlayGetCurrentConnectionInfo);
+    LIB_FUNCTION("+MCXJlWdi+s", "libSceSharePlay", 1, "libSceSharePlay",
+                 sceSharePlayGetCurrentConnectionInfoA);
+    LIB_FUNCTION("vUMkWXQff3w", "libSceSharePlay", 1, "libSceSharePlay",
+                 sceSharePlayGetCurrentInfo);
+    LIB_FUNCTION("Md7Mdkr8LBc", "libSceSharePlay", 1, "libSceSharePlay", sceSharePlayGetEvent);
+    LIB_FUNCTION("isruqthpYcw", "libSceSharePlay", 1, "libSceSharePlay", sceSharePlayInitialize);
+    LIB_FUNCTION("9zwJpai7jGc", "libSceSharePlay", 1, "libSceSharePlay",
+                 sceSharePlayNotifyDialogOpen);
+    LIB_FUNCTION("VUW2V9cUTP4", "libSceSharePlay", 1, "libSceSharePlay",
+                 sceSharePlayNotifyForceCloseForCdlg);
+    LIB_FUNCTION("XL0WwUJoQPg", "libSceSharePlay", 1, "libSceSharePlay",
+                 sceSharePlayNotifyOpenQuickMenu);
+    LIB_FUNCTION("6-1fKaa5HlY", "libSceSharePlay", 1, "libSceSharePlay",
+                 sceSharePlayResumeScreenForCdlg);
+    LIB_FUNCTION("U28jAuLHj6c", "libSceSharePlay", 1, "libSceSharePlay", sceSharePlayServerLock);
+    LIB_FUNCTION("3Oaux9ITEtY", "libSceSharePlay", 1, "libSceSharePlay", sceSharePlayServerUnLock);
+    LIB_FUNCTION("QZy+KmyqKPU", "libSceSharePlay", 1, "libSceSharePlay", sceSharePlaySetMode);
+    LIB_FUNCTION("co2NCj--pnc", "libSceSharePlay", 1, "libSceSharePlay",
+                 sceSharePlaySetProhibition);
+    LIB_FUNCTION("KADsbjNCgPo", "libSceSharePlay", 1, "libSceSharePlay",
+                 sceSharePlaySetProhibitionModeWithAppId);
+    LIB_FUNCTION("-F6NddfUsa4", "libSceSharePlay", 1, "libSceSharePlay", sceSharePlayStartStandby);
+    LIB_FUNCTION("rWVNHNnEx6g", "libSceSharePlay", 1, "libSceSharePlay",
+                 sceSharePlayStartStreaming);
+    LIB_FUNCTION("zEDkUWLVwFI", "libSceSharePlay", 1, "libSceSharePlay", sceSharePlayStopStandby);
+    LIB_FUNCTION("aGlema+JxUU", "libSceSharePlay", 1, "libSceSharePlay", sceSharePlayStopStreaming);
+    LIB_FUNCTION("UaLjloJinow", "libSceSharePlay", 1, "libSceSharePlay", sceSharePlayTerminate);
+    LIB_FUNCTION("LpPA6mprZ8Q", "libSceSharePlay", 1, "libSceSharePlay",
+                 SharePlay_Func_2E93C0EA6A6B67C4);
+    LIB_FUNCTION("wcI2co2I4Xc", "libSceSharePlay", 1, "libSceSharePlay",
+                 SharePlay_Func_C1C236728D88E177);
+    LIB_FUNCTION("6egMR0eB8RU", "libSceSharePlay", 1, "libSceSharePlay",
+                 SharePlay_Func_E9E80C474781F115);
+    LIB_FUNCTION("891hmdoV7UQ", "libSceSharePlay", 1, "libSceSharePlay",
+                 SharePlay_Func_F3DD6199DA15ED44);
+    LIB_FUNCTION("OOrLKB0bSDs", "libSceSharePlayCompat", 1, "libSceSharePlay",
+                 sceSharePlayGetCurrentConnectionInfo);
+}
+
 static void RegisterAudio3d(Core::Loader::SymbolsResolver* sym) {
     // The frontend plays the sound: Audio3D goes out through AudioOut, never to a device of
     // its own.
@@ -166,11 +343,11 @@ void InitHLELibs(Core::Loader::SymbolsResolver* sym) {
             {"libSceNpParty.sprx", Libraries::Np::NpParty::RegisterLib},
             {"libSceNpPartner001.sprx", Libraries::Np::NpPartner::RegisterLib},
             {"libSceNpTus.sprx", Libraries::Np::NpTus::RegisterLib},
-            {"libSceScreenShot.sprx", Libraries::ScreenShot::RegisterLib},
+            {"libSceScreenShot.sprx", RegisterScreenShot},
             {"libSceAppContent.sprx", Libraries::AppContent::RegisterLib},
             {"libScePlayGo.sprx", Libraries::PlayGo::RegisterLib},
             {"libScePlayGoDialog.sprx", Libraries::PlayGo::Dialog::RegisterLib},
-            {"libSceRandom.sprx", Libraries::Random::RegisterLib},
+            {"libSceRandom.sprx", RegisterRandom},
             {"libSceUsbd.sprx", Libraries::Usbd::RegisterLib},
             {"libSceUsbStorage.sprx", Libraries::UsbStorage::RegisterLib},
             {"libSceMusicPlayerService.sprx", Libraries::MusicPlayerService::RegisterLib},
@@ -182,26 +359,26 @@ void InitHLELibs(Core::Loader::SymbolsResolver* sym) {
             {"libSceVideodec2.sprx", Libraries::Videodec2::RegisterLib},
             {"libSceIme.sprx", Libraries::Ime::RegisterLib},
             {"libSceGameLiveStreaming.sprx", Libraries::GameLiveStreaming::RegisterLib},
-            {"libSceSharePlay.sprx", Libraries::SharePlay::RegisterLib},
+            {"libSceSharePlay.sprx", RegisterSharePlay},
             {"libSceRemoteplay.sprx", Libraries::Remoteplay::RegisterLib},
             {"libSceRazorCpu.sprx", Libraries::RazorCpu::RegisterLib},
-            {"libSceMove.sprx", Libraries::Move::RegisterLib},
-            {"libSceMouse.sprx", Libraries::Mouse::RegisterLib},
-            {"libSceKeyboard.sprx", Libraries::Keyboard::RegisterLib},
+            {"libSceMove.sprx", RegisterMove},
+            {"libSceMouse.sprx", RegisterMouse},
+            {"libSceKeyboard.sprx", RegisterKeyboard},
             {"libSceWebBrowserDialog.sprx", Libraries::WebBrowserDialog::RegisterLib},
             {"libSceZlib.sprx", Libraries::Zlib::RegisterLib},
             {"libSceHmd.sprx", Libraries::Hmd::RegisterLib},
             {"libSceHmdSetupDialog.sprx", Libraries::HmdSetupDialog::RegisterLib},
-            {"libSceDiscMap.sprx", Libraries::DiscMap::RegisterLib},
-            {"ulobjmgr.sprx", Libraries::Ulobjmgr::RegisterLib},
-            {"libSceSigninDialog.sprx", Libraries::SigninDialog::RegisterLib},
+            {"libSceDiscMap.sprx", RegisterDiscMap},
+            {"ulobjmgr.sprx", RegisterUlobjmgr},
+            {"libSceSigninDialog.sprx", RegisterSigninDialog},
             {"libSceCamera.sprx", Libraries::Camera::RegisterLib},
             {"libSceCompanionHttpd.sprx", Libraries::CompanionHttpd::RegisterLib},
             {"libSceCompanionUtil.sprx", Libraries::CompanionUtil::RegisterLib},
             {"libSceVoice.sprx", Libraries::Voice::RegisterLib},
             {"libSceVrTracker.sprx", Libraries::VrTracker::RegisterLib},
-            {"libSceContentExport.sprx", Libraries::ContentExport::RegisterLib},
-            {"libSceVideoRecording.sprx", Libraries::VideoRecording::RegisterLib},
+            {"libSceContentExport.sprx", RegisterContentExport},
+            {"libSceVideoRecording.sprx", RegisterVideoRecording},
             {"libSceInvitationDialog.sprx", Libraries::InvitationDialog::RegisterLib},
             {"libSceNpUtility.sprx", Libraries::Np::NpUtility::RegisterLib},
 #if defined(ARCH_X86_64) || defined(SHADPS4_ENABLE_FEX_GUEST_CPU)

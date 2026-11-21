@@ -1,18 +1,20 @@
-// SPDX-FileCopyrightText: Copyright 2024-2026 shadPS4 Emulator Project
-// SPDX-License-Identifier: GPL-2.0-or-later
+/* SPDX-FileCopyrightText: Copyright 2024-2026 shadPS4 Emulator Project
+ * SPDX-License-Identifier: GPL-2.0-or-later */
 
-#pragma once
+#ifndef SHADPS4_LIBRARIES_MOUSE_H
+#define SHADPS4_LIBRARIES_MOUSE_H
 
-#include "common/enum.h"
-#include "core/libraries/system/userservice.h"
+/* libSceMouse. The core has no mouse: the library opens, and a mouse reads as not connected.
+ * Registered in libs.cpp. */
 
-namespace Core::Loader {
-class SymbolsResolver;
-}
+#include <boolean.h>
+#include <retro_common_api.h>
 
-namespace Libraries::Mouse {
+#include "common/types.h"
 
-struct OrbisMouseData {
+RETRO_BEGIN_DECLS
+
+typedef struct OrbisMouseData {
     u64 timestamp;
     bool connected;
     u32 buttons;
@@ -21,34 +23,32 @@ struct OrbisMouseData {
     s32 wheel;
     s32 tilt;
     u8 reserve[8];
-};
+} OrbisMouseData;
 
-enum class MouseOpenBehaviour : u8 {
-    Normal = 0,
-    Merged = 1,
-};
-DECLARE_ENUM_FLAG_OPERATORS(MouseOpenBehaviour);
+/* OrbisMouseOpenParam.flag */
+#define ORBIS_MOUSE_OPEN_NORMAL 0
+#define ORBIS_MOUSE_OPEN_MERGED 1
 
-struct OrbisMouseOpenParam {
-    MouseOpenBehaviour flag;
+typedef struct OrbisMouseOpenParam {
+    u8 flag;
     u8 reserve[7];
-};
+} OrbisMouseOpenParam;
 
-s32 PS4_SYSV_ABI sceMouseClose(s32 handle);
-s32 PS4_SYSV_ABI sceMouseConnectPort();
-s32 PS4_SYSV_ABI sceMouseDebugGetDeviceId();
-s32 PS4_SYSV_ABI sceMouseDeviceOpen();
-s32 PS4_SYSV_ABI sceMouseDisconnectDevice();
-s32 PS4_SYSV_ABI sceMouseDisconnectPort();
-s32 PS4_SYSV_ABI sceMouseGetDeviceInfo();
-s32 PS4_SYSV_ABI sceMouseInit();
-s32 PS4_SYSV_ABI sceMouseMbusInit();
-s32 PS4_SYSV_ABI sceMouseOpen(Libraries::UserService::OrbisUserServiceUserId userId, s32 type,
-                              s32 index, OrbisMouseOpenParam* pParam);
-s32 PS4_SYSV_ABI sceMouseRead(s32 handle, OrbisMouseData* pData, s32 num);
-s32 PS4_SYSV_ABI sceMouseSetHandType();
-s32 PS4_SYSV_ABI sceMouseSetPointerSpeed();
-s32 PS4_SYSV_ABI sceMouseSetProcessPrivilege();
+int PS4_SYSV_ABI sceMouseClose(s32 handle);
+int PS4_SYSV_ABI sceMouseConnectPort(void);
+int PS4_SYSV_ABI sceMouseDebugGetDeviceId(void);
+int PS4_SYSV_ABI sceMouseDeviceOpen(void);
+int PS4_SYSV_ABI sceMouseDisconnectDevice(void);
+int PS4_SYSV_ABI sceMouseDisconnectPort(void);
+int PS4_SYSV_ABI sceMouseGetDeviceInfo(void);
+int PS4_SYSV_ABI sceMouseInit(void);
+int PS4_SYSV_ABI sceMouseMbusInit(void);
+int PS4_SYSV_ABI sceMouseOpen(s32 userId, s32 type, s32 index, OrbisMouseOpenParam* pParam);
+int PS4_SYSV_ABI sceMouseRead(s32 handle, OrbisMouseData* pData, s32 num);
+int PS4_SYSV_ABI sceMouseSetHandType(void);
+int PS4_SYSV_ABI sceMouseSetPointerSpeed(void);
+int PS4_SYSV_ABI sceMouseSetProcessPrivilege(void);
 
-void RegisterLib(Core::Loader::SymbolsResolver* sym);
-} // namespace Libraries::Mouse
+RETRO_END_DECLS
+
+#endif

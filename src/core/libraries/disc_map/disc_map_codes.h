@@ -1,10 +1,15 @@
-// SPDX-FileCopyrightText: Copyright 2024 shadPS4 Emulator Project
-// SPDX-License-Identifier: GPL-2.0-or-later
+/* SPDX-FileCopyrightText: Copyright 2024 shadPS4 Emulator Project
+ * SPDX-License-Identifier: GPL-2.0-or-later */
 
-#pragma once
+#ifndef SHADPS4_LIBRARIES_DISC_MAP_CODES_H
+#define SHADPS4_LIBRARIES_DISC_MAP_CODES_H
 
-constexpr int ORBIS_DISC_MAP_ERROR_INVALID_ARGUMENT = 0x81100001;
-constexpr int ORBIS_DISC_MAP_ERROR_LOCATION_NOT_MAPPED = 0x81100002;
-constexpr int ORBIS_DISC_MAP_ERROR_FILE_NOT_FOUND = 0x81100003;
-constexpr int ORBIS_DISC_MAP_ERROR_NO_BITMAP_INFO = 0x81100004;
-constexpr int ORBIS_DISC_MAP_ERROR_FATAL = 0x811000FF;
+#include <stdint.h>
+
+#define ORBIS_DISC_MAP_ERROR_INVALID_ARGUMENT ((int32_t)0x81100001)
+#define ORBIS_DISC_MAP_ERROR_LOCATION_NOT_MAPPED ((int32_t)0x81100002)
+#define ORBIS_DISC_MAP_ERROR_FILE_NOT_FOUND ((int32_t)0x81100003)
+#define ORBIS_DISC_MAP_ERROR_NO_BITMAP_INFO ((int32_t)0x81100004)
+#define ORBIS_DISC_MAP_ERROR_FATAL ((int32_t)0x811000FF)
+
+#endif

@@ -1,128 +1,133 @@
-// SPDX-FileCopyrightText: Copyright 2024 shadPS4 Emulator Project
-// SPDX-License-Identifier: GPL-2.0-or-later
+/* SPDX-FileCopyrightText: Copyright 2024 shadPS4 Emulator Project */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 
-#pragma once
+#ifndef SHADPS4_LIBRARIES_KERNEL_POSIX_ERROR_H
+#define SHADPS4_LIBRARIES_KERNEL_POSIX_ERROR_H
+
+#include <stdint.h>
 
 #include "core/libraries/error_codes.h"
 
-// Posix error codes
-constexpr int POSIX_EPERM = 1;
-constexpr int POSIX_ENOENT = 2;
-constexpr int POSIX_ESRCH = 3;
-constexpr int POSIX_EINTR = 4;
-constexpr int POSIX_EIO = 5;
-constexpr int POSIX_ENXIO = 6;
-constexpr int POSIX_E2BIG = 7;
-constexpr int POSIX_ENOEXEC = 8;
-constexpr int POSIX_EBADF = 9;
-constexpr int POSIX_ECHILD = 10;
-constexpr int POSIX_EDEADLK = 11;
-constexpr int POSIX_ENOMEM = 12;
-constexpr int POSIX_EACCES = 13;
-constexpr int POSIX_EFAULT = 14;
-constexpr int POSIX_ENOTBLK = 15;
-constexpr int POSIX_EBUSY = 16;
-constexpr int POSIX_EEXIST = 17;
-constexpr int POSIX_EXDEV = 18;
-constexpr int POSIX_ENODEV = 19;
-constexpr int POSIX_ENOTDIR = 20;
-constexpr int POSIX_EISDIR = 21;
-constexpr int POSIX_EINVAL = 22;
-constexpr int POSIX_ENFILE = 23;
-constexpr int POSIX_EMFILE = 24;
-constexpr int POSIX_ENOTTY = 25;
-constexpr int POSIX_ETXTBSY = 26;
-constexpr int POSIX_EFBIG = 27;
-constexpr int POSIX_ENOSPC = 28;
-constexpr int POSIX_ESPIPE = 29;
-constexpr int POSIX_EROFS = 30;
-constexpr int POSIX_EMLINK = 31;
-constexpr int POSIX_EPIPE = 32;
-constexpr int POSIX_EDOM = 33;
-constexpr int POSIX_ERANGE = 34;
-constexpr int POSIX_EAGAIN = 35;
-constexpr int POSIX_EWOULDBLOCK = 35;
-constexpr int POSIX_EINPROGRESS = 36;
-constexpr int POSIX_EALREADY = 37;
-constexpr int POSIX_ENOTSOCK = 38;
-constexpr int POSIX_EDESTADDRREQ = 39;
-constexpr int POSIX_EMSGSIZE = 40;
-constexpr int POSIX_EPROTOTYPE = 41;
-constexpr int POSIX_ENOPROTOOPT = 42;
-constexpr int POSIX_EPROTONOSUPPORT = 43;
-constexpr int POSIX_ESOCKTNOSUPPORT = 44;
-constexpr int POSIX_EOPNOTSUPP = 45;
-constexpr int POSIX_ENOTSUP = 45;
-constexpr int POSIX_EPFNOSUPPORT = 46;
-constexpr int POSIX_EAFNOSUPPORT = 47;
-constexpr int POSIX_EADDRINUSE = 48;
-constexpr int POSIX_EADDRNOTAVAIL = 49;
-constexpr int POSIX_ENETDOWN = 50;
-constexpr int POSIX_ENETUNREACH = 51;
-constexpr int POSIX_ENETRESET = 52;
-constexpr int POSIX_ECONNABORTED = 53;
-constexpr int POSIX_ECONNRESET = 54;
-constexpr int POSIX_ENOBUFS = 55;
-constexpr int POSIX_EISCONN = 56;
-constexpr int POSIX_ENOTCONN = 57;
-constexpr int POSIX_ESHUTDOWN = 58;
-constexpr int POSIX_ETOOMANYREFS = 59;
-constexpr int POSIX_ETIMEDOUT = 60;
-constexpr int POSIX_ECONNREFUSED = 61;
-constexpr int POSIX_ELOOP = 62;
-constexpr int POSIX_ENAMETOOLONG = 63;
-constexpr int POSIX_EHOSTDOWN = 64;
-constexpr int POSIX_EHOSTUNREACH = 65;
-constexpr int POSIX_ENOTEMPTY = 66;
-constexpr int POSIX_EPROCLIM = 67;
-constexpr int POSIX_EUSERS = 68;
-constexpr int POSIX_EDQUOT = 69;
-constexpr int POSIX_ESTALE = 70;
-constexpr int POSIX_EREMOTE = 71;
-constexpr int POSIX_EBADRPC = 72;
-constexpr int POSIX_ERPCMISMATCH = 73;
-constexpr int POSIX_EPROGUNAVAIL = 74;
-constexpr int POSIX_EPROGMISMATCH = 75;
-constexpr int POSIX_EPROCUNAVAIL = 76;
-constexpr int POSIX_ENOLCK = 77;
-constexpr int POSIX_ENOSYS = 78;
-constexpr int POSIX_EFTYPE = 79;
-constexpr int POSIX_EAUTH = 80;
-constexpr int POSIX_ENEEDAUTH = 81;
-constexpr int POSIX_EIDRM = 82;
-constexpr int POSIX_ENOMSG = 83;
-constexpr int POSIX_EOVERFLOW = 84;
-constexpr int POSIX_ECANCELED = 85;
-constexpr int POSIX_EILSEQ = 86;
-constexpr int POSIX_ENOATTR = 87;
-constexpr int POSIX_EDOOFUS = 88;
-constexpr int POSIX_EBADMSG = 89;
-constexpr int POSIX_EMULTIHOP = 90;
-constexpr int POSIX_ENOLINK = 91;
-constexpr int POSIX_EPROTO = 92;
-constexpr int POSIX_ENOTCAPABLE = 93;
-constexpr int POSIX_ECAPMODE = 94;
-constexpr int POSIX_ENOBLK = 95;
-constexpr int POSIX_EICV = 96;
-constexpr int POSIX_ENOPLAYGOENT = 97;
-constexpr int POSIX_EREVOKE = 98;
-constexpr int POSIX_ESDKVERSION = 99;
-constexpr int POSIX_ESTART = 100;
-constexpr int POSIX_ESTOP = 101;
-constexpr int POSIX_EINVALID2MB = 102;
-constexpr int POSIX_ELAST = 102;
-constexpr int POSIX_EADHOC = 160;
-constexpr int POSIX_EINACTIVEDISABLED = 163;
-constexpr int POSIX_ENETNODATA = 164;
-constexpr int POSIX_ENETDESC = 165;
-constexpr int POSIX_ENETDESCTIMEDOUT = 166;
-constexpr int POSIX_ENETINTR = 167;
-constexpr int POSIX_ERETURN = 205;
-constexpr int POSIX_EFPOS = 152;
-constexpr int POSIX_ENODATA = 1040;
-constexpr int POSIX_ENOSR = 1050;
-constexpr int POSIX_ENOSTR = 1051;
-constexpr int POSIX_ENOTRECOVERABLE = 1056;
-constexpr int POSIX_EOTHER = 1062;
-constexpr int POSIX_EOWNERDEAD = 1064;
-constexpr int POSIX_ETIME = 1074;
+/* Posix error codes */
+#define POSIX_EPERM ((int32_t)1)
+#define POSIX_ENOENT ((int32_t)2)
+#define POSIX_ESRCH ((int32_t)3)
+#define POSIX_EINTR ((int32_t)4)
+#define POSIX_EIO ((int32_t)5)
+#define POSIX_ENXIO ((int32_t)6)
+#define POSIX_E2BIG ((int32_t)7)
+#define POSIX_ENOEXEC ((int32_t)8)
+#define POSIX_EBADF ((int32_t)9)
+#define POSIX_ECHILD ((int32_t)10)
+#define POSIX_EDEADLK ((int32_t)11)
+#define POSIX_ENOMEM ((int32_t)12)
+#define POSIX_EACCES ((int32_t)13)
+#define POSIX_EFAULT ((int32_t)14)
+#define POSIX_ENOTBLK ((int32_t)15)
+#define POSIX_EBUSY ((int32_t)16)
+#define POSIX_EEXIST ((int32_t)17)
+#define POSIX_EXDEV ((int32_t)18)
+#define POSIX_ENODEV ((int32_t)19)
+#define POSIX_ENOTDIR ((int32_t)20)
+#define POSIX_EISDIR ((int32_t)21)
+#define POSIX_EINVAL ((int32_t)22)
+#define POSIX_ENFILE ((int32_t)23)
+#define POSIX_EMFILE ((int32_t)24)
+#define POSIX_ENOTTY ((int32_t)25)
+#define POSIX_ETXTBSY ((int32_t)26)
+#define POSIX_EFBIG ((int32_t)27)
+#define POSIX_ENOSPC ((int32_t)28)
+#define POSIX_ESPIPE ((int32_t)29)
+#define POSIX_EROFS ((int32_t)30)
+#define POSIX_EMLINK ((int32_t)31)
+#define POSIX_EPIPE ((int32_t)32)
+#define POSIX_EDOM ((int32_t)33)
+#define POSIX_ERANGE ((int32_t)34)
+#define POSIX_EAGAIN ((int32_t)35)
+#define POSIX_EWOULDBLOCK ((int32_t)35)
+#define POSIX_EINPROGRESS ((int32_t)36)
+#define POSIX_EALREADY ((int32_t)37)
+#define POSIX_ENOTSOCK ((int32_t)38)
+#define POSIX_EDESTADDRREQ ((int32_t)39)
+#define POSIX_EMSGSIZE ((int32_t)40)
+#define POSIX_EPROTOTYPE ((int32_t)41)
+#define POSIX_ENOPROTOOPT ((int32_t)42)
+#define POSIX_EPROTONOSUPPORT ((int32_t)43)
+#define POSIX_ESOCKTNOSUPPORT ((int32_t)44)
+#define POSIX_EOPNOTSUPP ((int32_t)45)
+#define POSIX_ENOTSUP ((int32_t)45)
+#define POSIX_EPFNOSUPPORT ((int32_t)46)
+#define POSIX_EAFNOSUPPORT ((int32_t)47)
+#define POSIX_EADDRINUSE ((int32_t)48)
+#define POSIX_EADDRNOTAVAIL ((int32_t)49)
+#define POSIX_ENETDOWN ((int32_t)50)
+#define POSIX_ENETUNREACH ((int32_t)51)
+#define POSIX_ENETRESET ((int32_t)52)
+#define POSIX_ECONNABORTED ((int32_t)53)
+#define POSIX_ECONNRESET ((int32_t)54)
+#define POSIX_ENOBUFS ((int32_t)55)
+#define POSIX_EISCONN ((int32_t)56)
+#define POSIX_ENOTCONN ((int32_t)57)
+#define POSIX_ESHUTDOWN ((int32_t)58)
+#define POSIX_ETOOMANYREFS ((int32_t)59)
+#define POSIX_ETIMEDOUT ((int32_t)60)
+#define POSIX_ECONNREFUSED ((int32_t)61)
+#define POSIX_ELOOP ((int32_t)62)
+#define POSIX_ENAMETOOLONG ((int32_t)63)
+#define POSIX_EHOSTDOWN ((int32_t)64)
+#define POSIX_EHOSTUNREACH ((int32_t)65)
+#define POSIX_ENOTEMPTY ((int32_t)66)
+#define POSIX_EPROCLIM ((int32_t)67)
+#define POSIX_EUSERS ((int32_t)68)
+#define POSIX_EDQUOT ((int32_t)69)
+#define POSIX_ESTALE ((int32_t)70)
+#define POSIX_EREMOTE ((int32_t)71)
+#define POSIX_EBADRPC ((int32_t)72)
+#define POSIX_ERPCMISMATCH ((int32_t)73)
+#define POSIX_EPROGUNAVAIL ((int32_t)74)
+#define POSIX_EPROGMISMATCH ((int32_t)75)
+#define POSIX_EPROCUNAVAIL ((int32_t)76)
+#define POSIX_ENOLCK ((int32_t)77)
+#define POSIX_ENOSYS ((int32_t)78)
+#define POSIX_EFTYPE ((int32_t)79)
+#define POSIX_EAUTH ((int32_t)80)
+#define POSIX_ENEEDAUTH ((int32_t)81)
+#define POSIX_EIDRM ((int32_t)82)
+#define POSIX_ENOMSG ((int32_t)83)
+#define POSIX_EOVERFLOW ((int32_t)84)
+#define POSIX_ECANCELED ((int32_t)85)
+#define POSIX_EILSEQ ((int32_t)86)
+#define POSIX_ENOATTR ((int32_t)87)
+#define POSIX_EDOOFUS ((int32_t)88)
+#define POSIX_EBADMSG ((int32_t)89)
+#define POSIX_EMULTIHOP ((int32_t)90)
+#define POSIX_ENOLINK ((int32_t)91)
+#define POSIX_EPROTO ((int32_t)92)
+#define POSIX_ENOTCAPABLE ((int32_t)93)
+#define POSIX_ECAPMODE ((int32_t)94)
+#define POSIX_ENOBLK ((int32_t)95)
+#define POSIX_EICV ((int32_t)96)
+#define POSIX_ENOPLAYGOENT ((int32_t)97)
+#define POSIX_EREVOKE ((int32_t)98)
+#define POSIX_ESDKVERSION ((int32_t)99)
+#define POSIX_ESTART ((int32_t)100)
+#define POSIX_ESTOP ((int32_t)101)
+#define POSIX_EINVALID2MB ((int32_t)102)
+#define POSIX_ELAST ((int32_t)102)
+#define POSIX_EADHOC ((int32_t)160)
+#define POSIX_EINACTIVEDISABLED ((int32_t)163)
+#define POSIX_ENETNODATA ((int32_t)164)
+#define POSIX_ENETDESC ((int32_t)165)
+#define POSIX_ENETDESCTIMEDOUT ((int32_t)166)
+#define POSIX_ENETINTR ((int32_t)167)
+#define POSIX_ERETURN ((int32_t)205)
+#define POSIX_EFPOS ((int32_t)152)
+#define POSIX_ENODATA ((int32_t)1040)
+#define POSIX_ENOSR ((int32_t)1050)
+#define POSIX_ENOSTR ((int32_t)1051)
+#define POSIX_ENOTRECOVERABLE ((int32_t)1056)
+#define POSIX_EOTHER ((int32_t)1062)
+#define POSIX_EOWNERDEAD ((int32_t)1064)
+#define POSIX_ETIME ((int32_t)1074)
+
+#endif

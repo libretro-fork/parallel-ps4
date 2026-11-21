@@ -4,6 +4,12 @@ What changed in the libretro core of this fork, newest first. Changes that come 
 
 ## Unreleased
 
+- Eleven small HLE libraries are MSVC C89: content export, disc map, keyboard, mouse, Move, random, screenshot, SharePlay, sign-in dialog, ulobjmgr and video recording.
+  - Each is a `.c` file with a C header. The functions the game calls are the same, with the same behaviour and log lines. They are registered for the game in `libs.cpp`, as the ULT library already was.
+  - Their C++ enums and `constexpr` error codes are plain C enums and `#define`s. The `Func_<nid>` functions carry their library's name (`Keyboard_Func_...`), because C has no namespaces to tell them apart.
+  - **`common/types.h`, `error_codes.h` and `kernel/posix_error.h`** now work from C as well as C++: `typedef`s instead of `using`, and `#define`s instead of `constexpr`. This is what lets the rest of the libraries move over.
+  - Not run in a game yet.
+
 - The input module is MSVC C89, the first step of moving the whole core to C89.
   - **`src/input/controller.c`** replaces `controller.cpp` and `controller_state.cpp`: the five controllers are a static array of `input_controller_t`, reached with `input_controller_get(i)` instead of a `Singleton<GameControllers>`, and the user and controller id lookups return -1 for none instead of `std::optional`.
   - **The state** is `input_state_t`, its buttons a plain `u32` mask and its axes indexed by `INPUT_AXIS_*`. The history ring, the smoothing, the orientation, the touchpad and the light bar work as before.

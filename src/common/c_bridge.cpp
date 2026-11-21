@@ -25,6 +25,24 @@ static Common::Log::Class ToClass(c_log_class log_class) {
         return Common::Log::Class::Lib_Http;
     case C_LOG_LIB_ULT:
         return Common::Log::Class::Lib_Ult;
+    case C_LOG_LIB_CONTENT_EXPORT:
+        return Common::Log::Class::Lib_ContentExport;
+    case C_LOG_LIB_KEYBOARD:
+        return Common::Log::Class::Lib_Keyboard;
+    case C_LOG_LIB_MOUSE:
+        return Common::Log::Class::Lib_Mouse;
+    case C_LOG_LIB_MOVE:
+        return Common::Log::Class::Lib_Move;
+    case C_LOG_LIB_RANDOM:
+        return Common::Log::Class::Lib_Random;
+    case C_LOG_LIB_SCREENSHOT:
+        return Common::Log::Class::Lib_Screenshot;
+    case C_LOG_LIB_SHARE_PLAY:
+        return Common::Log::Class::Lib_SharePlay;
+    case C_LOG_LIB_SIGNIN_DIALOG:
+        return Common::Log::Class::Lib_SigninDialog;
+    case C_LOG_LIB_VIDEO_RECORDING:
+        return Common::Log::Class::Lib_VideoRecording;
     case C_LOG_LOADER:
         return Common::Log::Class::Loader;
     case C_LOG_NP_HANDLER:

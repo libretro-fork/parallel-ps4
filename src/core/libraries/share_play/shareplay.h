@@ -1,55 +1,62 @@
-// SPDX-FileCopyrightText: Copyright 2024-2026 shadPS4 Emulator Project
-// SPDX-License-Identifier: GPL-2.0-or-later
+/* SPDX-FileCopyrightText: Copyright 2024 shadPS4 Emulator Project
+ * SPDX-License-Identifier: GPL-2.0-or-later */
 
-#pragma once
+#ifndef SHADPS4_LIBRARIES_SHARE_PLAY_H
+#define SHADPS4_LIBRARIES_SHARE_PLAY_H
 
-#include <core/libraries/system/userservice.h>
+/* libSceSharePlay. Registered in libs.cpp. */
+
+#include <retro_common_api.h>
+
 #include "common/types.h"
-#include "core/libraries/np/np_types.h"
 
-namespace Core::Loader {
-class SymbolsResolver;
-}
+RETRO_BEGIN_DECLS
 
-namespace Libraries::SharePlay {
+#define ORBIS_SHARE_PLAY_CONNECTION_STATUS_DORMANT 0x00
+#define ORBIS_SHARE_PLAY_CONNECTION_STATUS_READY 0x01
+#define ORBIS_SHARE_PLAY_CONNECTION_STATUS_CONNECTED 0x02
 
-constexpr int ORBIS_SHARE_PLAY_CONNECTION_STATUS_DORMANT = 0x00;
-constexpr int ORBIS_SHARE_PLAY_CONNECTION_STATUS_READY = 0x01;
-constexpr int ORBIS_SHARE_PLAY_CONNECTION_STATUS_CONNECTED = 0x02;
+/* The layout of OrbisNpOnlineId (np_types.h) */
+typedef struct OrbisSharePlayOnlineId {
+    char data[16];
+    s8 term;
+    s8 dummy[3];
+} OrbisSharePlayOnlineId;
 
-struct OrbisSharePlayConnectionInfo {
+typedef struct OrbisSharePlayConnectionInfo {
     int status;
     int mode;
-    Libraries::Np::OrbisNpOnlineId hostOnlineId;
-    Libraries::Np::OrbisNpOnlineId visitorOnlineId;
-    Libraries::UserService::OrbisUserServiceUserId hostUserId;
-    Libraries::UserService::OrbisUserServiceUserId visitorUserId;
-};
+    OrbisSharePlayOnlineId hostOnlineId;
+    OrbisSharePlayOnlineId visitorOnlineId;
+    s32 hostUserId;
+    s32 visitorUserId;
+} OrbisSharePlayConnectionInfo;
 
-int PS4_SYSV_ABI sceSharePlayCrashDaemon();
+int PS4_SYSV_ABI sceSharePlayCrashDaemon(void);
 int PS4_SYSV_ABI sceSharePlayGetCurrentConnectionInfo(OrbisSharePlayConnectionInfo* pInfo);
-int PS4_SYSV_ABI sceSharePlayGetCurrentConnectionInfoA();
-int PS4_SYSV_ABI sceSharePlayGetCurrentInfo();
-int PS4_SYSV_ABI sceSharePlayGetEvent();
-int PS4_SYSV_ABI sceSharePlayInitialize();
-int PS4_SYSV_ABI sceSharePlayNotifyDialogOpen();
-int PS4_SYSV_ABI sceSharePlayNotifyForceCloseForCdlg();
-int PS4_SYSV_ABI sceSharePlayNotifyOpenQuickMenu();
-int PS4_SYSV_ABI sceSharePlayResumeScreenForCdlg();
-int PS4_SYSV_ABI sceSharePlayServerLock();
-int PS4_SYSV_ABI sceSharePlayServerUnLock();
-int PS4_SYSV_ABI sceSharePlaySetMode();
-int PS4_SYSV_ABI sceSharePlaySetProhibition();
-int PS4_SYSV_ABI sceSharePlaySetProhibitionModeWithAppId();
-int PS4_SYSV_ABI sceSharePlayStartStandby();
-int PS4_SYSV_ABI sceSharePlayStartStreaming();
-int PS4_SYSV_ABI sceSharePlayStopStandby();
-int PS4_SYSV_ABI sceSharePlayStopStreaming();
-int PS4_SYSV_ABI sceSharePlayTerminate();
-int PS4_SYSV_ABI Func_2E93C0EA6A6B67C4();
-int PS4_SYSV_ABI Func_C1C236728D88E177();
-int PS4_SYSV_ABI Func_E9E80C474781F115();
-int PS4_SYSV_ABI Func_F3DD6199DA15ED44();
+int PS4_SYSV_ABI sceSharePlayGetCurrentConnectionInfoA(void);
+int PS4_SYSV_ABI sceSharePlayGetCurrentInfo(void);
+int PS4_SYSV_ABI sceSharePlayGetEvent(void);
+int PS4_SYSV_ABI sceSharePlayInitialize(void);
+int PS4_SYSV_ABI sceSharePlayNotifyDialogOpen(void);
+int PS4_SYSV_ABI sceSharePlayNotifyForceCloseForCdlg(void);
+int PS4_SYSV_ABI sceSharePlayNotifyOpenQuickMenu(void);
+int PS4_SYSV_ABI sceSharePlayResumeScreenForCdlg(void);
+int PS4_SYSV_ABI sceSharePlayServerLock(void);
+int PS4_SYSV_ABI sceSharePlayServerUnLock(void);
+int PS4_SYSV_ABI sceSharePlaySetMode(void);
+int PS4_SYSV_ABI sceSharePlaySetProhibition(void);
+int PS4_SYSV_ABI sceSharePlaySetProhibitionModeWithAppId(void);
+int PS4_SYSV_ABI sceSharePlayStartStandby(void);
+int PS4_SYSV_ABI sceSharePlayStartStreaming(void);
+int PS4_SYSV_ABI sceSharePlayStopStandby(void);
+int PS4_SYSV_ABI sceSharePlayStopStreaming(void);
+int PS4_SYSV_ABI sceSharePlayTerminate(void);
+int PS4_SYSV_ABI SharePlay_Func_2E93C0EA6A6B67C4(void);
+int PS4_SYSV_ABI SharePlay_Func_C1C236728D88E177(void);
+int PS4_SYSV_ABI SharePlay_Func_E9E80C474781F115(void);
+int PS4_SYSV_ABI SharePlay_Func_F3DD6199DA15ED44(void);
 
-void RegisterLib(Core::Loader::SymbolsResolver* sym);
-} // namespace Libraries::SharePlay
+RETRO_END_DECLS
+
+#endif
