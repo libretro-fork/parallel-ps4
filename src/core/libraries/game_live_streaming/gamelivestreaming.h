@@ -1,26 +1,28 @@
-// SPDX-FileCopyrightText: Copyright 2024-2026 shadPS4 Emulator Project
-// SPDX-License-Identifier: GPL-2.0-or-later
+/* SPDX-FileCopyrightText: Copyright 2024 shadPS4 Emulator Project
+ * SPDX-License-Identifier: GPL-2.0-or-later */
 
-#pragma once
+#ifndef SHADPS4_LIBRARIES_GAME_LIVE_STREAMING_H
+#define SHADPS4_LIBRARIES_GAME_LIVE_STREAMING_H
 
+/* libSceGameLiveStreaming. Registered in libs.cpp. */
+
+#include <retro_common_api.h>
+
+#include <boolean.h>
 #include "common/types.h"
-#include "core/libraries/system/userservice.h"
 
-namespace Core::Loader {
-class SymbolsResolver;
-}
+RETRO_BEGIN_DECLS
 
-namespace Libraries::GameLiveStreaming {
-
-struct OrbisGameLiveStreamingStatus {
+typedef struct OrbisGameLiveStreamingStatus {
     bool isOnAir;
     u8 align[3];
     u32 spectatorCounts;
-    Libraries::UserService::OrbisUserServiceUserId userId;
+    s32 userId;
     u8 reserved[60];
-};
-struct OrbisGameLiveStreamingStatus2 {
-    Libraries::UserService::OrbisUserServiceUserId userId;
+} OrbisGameLiveStreamingStatus;
+
+typedef struct OrbisGameLiveStreamingStatus2 {
+    s32 userId;
     bool isOnAir;
     u8 align[3];
     u32 spectatorCounts;
@@ -28,55 +30,56 @@ struct OrbisGameLiveStreamingStatus2 {
     u32 commandMessageCounts;
     u32 broadcastVideoResolution;
     u8 reserved[48];
-};
+} OrbisGameLiveStreamingStatus2;
 
-int PS4_SYSV_ABI sceGameLiveStreamingStartDebugBroadcast();
-int PS4_SYSV_ABI sceGameLiveStreamingStopDebugBroadcast();
-int PS4_SYSV_ABI sceGameLiveStreamingApplySocialFeedbackMessageFilter();
-int PS4_SYSV_ABI sceGameLiveStreamingCheckCallback();
-int PS4_SYSV_ABI sceGameLiveStreamingClearPresetSocialFeedbackCommands();
-int PS4_SYSV_ABI sceGameLiveStreamingClearSocialFeedbackMessages();
-int PS4_SYSV_ABI sceGameLiveStreamingClearSpoilerTag();
-int PS4_SYSV_ABI sceGameLiveStreamingEnableLiveStreaming();
-int PS4_SYSV_ABI sceGameLiveStreamingEnableSocialFeedback();
-int PS4_SYSV_ABI sceGameLiveStreamingGetCurrentBroadcastScreenLayout();
+int PS4_SYSV_ABI sceGameLiveStreamingStartDebugBroadcast(void);
+int PS4_SYSV_ABI sceGameLiveStreamingStopDebugBroadcast(void);
+int PS4_SYSV_ABI sceGameLiveStreamingApplySocialFeedbackMessageFilter(void);
+int PS4_SYSV_ABI sceGameLiveStreamingCheckCallback(void);
+int PS4_SYSV_ABI sceGameLiveStreamingClearPresetSocialFeedbackCommands(void);
+int PS4_SYSV_ABI sceGameLiveStreamingClearSocialFeedbackMessages(void);
+int PS4_SYSV_ABI sceGameLiveStreamingClearSpoilerTag(void);
+int PS4_SYSV_ABI sceGameLiveStreamingEnableLiveStreaming(void);
+int PS4_SYSV_ABI sceGameLiveStreamingEnableSocialFeedback(void);
+int PS4_SYSV_ABI sceGameLiveStreamingGetCurrentBroadcastScreenLayout(void);
 int PS4_SYSV_ABI sceGameLiveStreamingGetCurrentStatus(OrbisGameLiveStreamingStatus* status);
-int PS4_SYSV_ABI sceGameLiveStreamingGetCurrentStatus2();
-int PS4_SYSV_ABI sceGameLiveStreamingGetProgramInfo();
-int PS4_SYSV_ABI sceGameLiveStreamingGetSocialFeedbackMessages();
-int PS4_SYSV_ABI sceGameLiveStreamingGetSocialFeedbackMessagesCount();
-int PS4_SYSV_ABI sceGameLiveStreamingInitialize();
-int PS4_SYSV_ABI sceGameLiveStreamingLaunchLiveViewer();
-int PS4_SYSV_ABI sceGameLiveStreamingLaunchLiveViewerA();
-int PS4_SYSV_ABI sceGameLiveStreamingPermitLiveStreaming();
-int PS4_SYSV_ABI sceGameLiveStreamingPermitServerSideRecording();
-int PS4_SYSV_ABI sceGameLiveStreamingPostSocialMessage();
-int PS4_SYSV_ABI sceGameLiveStreamingRegisterCallback();
-int PS4_SYSV_ABI sceGameLiveStreamingScreenCloseSeparateMode();
-int PS4_SYSV_ABI sceGameLiveStreamingScreenConfigureSeparateMode();
-int PS4_SYSV_ABI sceGameLiveStreamingScreenInitialize();
-int PS4_SYSV_ABI sceGameLiveStreamingScreenInitializeSeparateModeParameter();
-int PS4_SYSV_ABI sceGameLiveStreamingScreenOpenSeparateMode();
-int PS4_SYSV_ABI sceGameLiveStreamingScreenSetMode();
-int PS4_SYSV_ABI sceGameLiveStreamingScreenTerminate();
-int PS4_SYSV_ABI sceGameLiveStreamingSetCameraFrameSetting();
-int PS4_SYSV_ABI sceGameLiveStreamingSetDefaultServiceProviderPermission();
-int PS4_SYSV_ABI sceGameLiveStreamingSetGuardAreas();
-int PS4_SYSV_ABI sceGameLiveStreamingSetInvitationSessionId();
-int PS4_SYSV_ABI sceGameLiveStreamingSetLinkCommentPreset();
-int PS4_SYSV_ABI sceGameLiveStreamingSetMaxBitrate();
-int PS4_SYSV_ABI sceGameLiveStreamingSetMetadata();
-int PS4_SYSV_ABI sceGameLiveStreamingSetPresetSocialFeedbackCommands();
-int PS4_SYSV_ABI sceGameLiveStreamingSetPresetSocialFeedbackCommandsDescription();
-int PS4_SYSV_ABI sceGameLiveStreamingSetServiceProviderPermission();
-int PS4_SYSV_ABI sceGameLiveStreamingSetSpoilerTag();
-int PS4_SYSV_ABI sceGameLiveStreamingSetStandbyScreenResource();
-int PS4_SYSV_ABI sceGameLiveStreamingStartGenerateStandbyScreenResource();
-int PS4_SYSV_ABI sceGameLiveStreamingStartSocialFeedbackMessageFiltering();
-int PS4_SYSV_ABI sceGameLiveStreamingStopGenerateStandbyScreenResource();
-int PS4_SYSV_ABI sceGameLiveStreamingStopSocialFeedbackMessageFiltering();
-int PS4_SYSV_ABI sceGameLiveStreamingTerminate();
-int PS4_SYSV_ABI sceGameLiveStreamingUnregisterCallback();
+int PS4_SYSV_ABI sceGameLiveStreamingGetCurrentStatus2(void);
+int PS4_SYSV_ABI sceGameLiveStreamingGetProgramInfo(void);
+int PS4_SYSV_ABI sceGameLiveStreamingGetSocialFeedbackMessages(void);
+int PS4_SYSV_ABI sceGameLiveStreamingGetSocialFeedbackMessagesCount(void);
+int PS4_SYSV_ABI sceGameLiveStreamingInitialize(void);
+int PS4_SYSV_ABI sceGameLiveStreamingLaunchLiveViewer(void);
+int PS4_SYSV_ABI sceGameLiveStreamingLaunchLiveViewerA(void);
+int PS4_SYSV_ABI sceGameLiveStreamingPermitLiveStreaming(void);
+int PS4_SYSV_ABI sceGameLiveStreamingPermitServerSideRecording(void);
+int PS4_SYSV_ABI sceGameLiveStreamingPostSocialMessage(void);
+int PS4_SYSV_ABI sceGameLiveStreamingRegisterCallback(void);
+int PS4_SYSV_ABI sceGameLiveStreamingScreenCloseSeparateMode(void);
+int PS4_SYSV_ABI sceGameLiveStreamingScreenConfigureSeparateMode(void);
+int PS4_SYSV_ABI sceGameLiveStreamingScreenInitialize(void);
+int PS4_SYSV_ABI sceGameLiveStreamingScreenInitializeSeparateModeParameter(void);
+int PS4_SYSV_ABI sceGameLiveStreamingScreenOpenSeparateMode(void);
+int PS4_SYSV_ABI sceGameLiveStreamingScreenSetMode(void);
+int PS4_SYSV_ABI sceGameLiveStreamingScreenTerminate(void);
+int PS4_SYSV_ABI sceGameLiveStreamingSetCameraFrameSetting(void);
+int PS4_SYSV_ABI sceGameLiveStreamingSetDefaultServiceProviderPermission(void);
+int PS4_SYSV_ABI sceGameLiveStreamingSetGuardAreas(void);
+int PS4_SYSV_ABI sceGameLiveStreamingSetInvitationSessionId(void);
+int PS4_SYSV_ABI sceGameLiveStreamingSetLinkCommentPreset(void);
+int PS4_SYSV_ABI sceGameLiveStreamingSetMaxBitrate(void);
+int PS4_SYSV_ABI sceGameLiveStreamingSetMetadata(void);
+int PS4_SYSV_ABI sceGameLiveStreamingSetPresetSocialFeedbackCommands(void);
+int PS4_SYSV_ABI sceGameLiveStreamingSetPresetSocialFeedbackCommandsDescription(void);
+int PS4_SYSV_ABI sceGameLiveStreamingSetServiceProviderPermission(void);
+int PS4_SYSV_ABI sceGameLiveStreamingSetSpoilerTag(void);
+int PS4_SYSV_ABI sceGameLiveStreamingSetStandbyScreenResource(void);
+int PS4_SYSV_ABI sceGameLiveStreamingStartGenerateStandbyScreenResource(void);
+int PS4_SYSV_ABI sceGameLiveStreamingStartSocialFeedbackMessageFiltering(void);
+int PS4_SYSV_ABI sceGameLiveStreamingStopGenerateStandbyScreenResource(void);
+int PS4_SYSV_ABI sceGameLiveStreamingStopSocialFeedbackMessageFiltering(void);
+int PS4_SYSV_ABI sceGameLiveStreamingTerminate(void);
+int PS4_SYSV_ABI sceGameLiveStreamingUnregisterCallback(void);
 
-void RegisterLib(Core::Loader::SymbolsResolver* sym);
-} // namespace Libraries::GameLiveStreaming
+RETRO_END_DECLS
+
+#endif

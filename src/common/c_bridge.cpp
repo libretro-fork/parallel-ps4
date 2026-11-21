@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "common/assert.h"
 #include "common/c_bridge.h"
 #include "common/logging/log.h"
 #include "common/path_util.h"
@@ -25,6 +26,20 @@ static Common::Log::Class ToClass(c_log_class log_class) {
         return Common::Log::Class::Lib_Http;
     case C_LOG_LIB_ULT:
         return Common::Log::Class::Lib_Ult;
+    case C_LOG_LIB_COMPANION_HTTPD:
+        return Common::Log::Class::Lib_CompanionHttpd;
+    case C_LOG_LIB_COMPANION_UTIL:
+        return Common::Log::Class::Lib_CompanionUtil;
+    case C_LOG_LIB_GAME_LIVE_STREAMING:
+        return Common::Log::Class::Lib_GameLiveStreaming;
+    case C_LOG_LIB_PNG:
+        return Common::Log::Class::Lib_Png;
+    case C_LOG_LIB_RAZOR_CPU:
+        return Common::Log::Class::Lib_RazorCpu;
+    case C_LOG_LIB_REMOTEPLAY:
+        return Common::Log::Class::Lib_Remoteplay;
+    case C_LOG_LIB_RUDP:
+        return Common::Log::Class::Lib_Rudp;
     case C_LOG_LIB_CONTENT_EXPORT:
         return Common::Log::Class::Lib_ContentExport;
     case C_LOG_LIB_KEYBOARD:
@@ -66,6 +81,10 @@ extern "C" void c_log(c_log_class log_class, c_log_level level, const char* func
     vsnprintf(buf, sizeof(buf), fmt, ap);
     va_end(ap);
     Common::Log::Log(cls, lvl, "c", 0, func, "%s", buf);
+}
+
+extern "C" void c_unreachable(const char* file, int line, const char* func, const char* msg) {
+    Common::Detail::UnreachableFail(file, line, func, "Unreachable code!\n%s", msg);
 }
 
 extern "C" size_t c_get_user_path(c_user_path type, char* s, size_t len) {

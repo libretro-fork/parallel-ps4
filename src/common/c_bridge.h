@@ -20,6 +20,13 @@ enum c_log_class {
     C_LOG_LIB_AUDIODEC,
     C_LOG_LIB_HTTP,
     C_LOG_LIB_ULT,
+    C_LOG_LIB_COMPANION_HTTPD,
+    C_LOG_LIB_COMPANION_UTIL,
+    C_LOG_LIB_GAME_LIVE_STREAMING,
+    C_LOG_LIB_PNG,
+    C_LOG_LIB_RAZOR_CPU,
+    C_LOG_LIB_REMOTEPLAY,
+    C_LOG_LIB_RUDP,
     C_LOG_LIB_CONTENT_EXPORT,
     C_LOG_LIB_KEYBOARD,
     C_LOG_LIB_MOUSE,
@@ -47,6 +54,10 @@ enum c_log_level {
 /* printf-style logging. func names the calling function. */
 void c_log(enum c_log_class log_class, enum c_log_level level, const char* func, const char* fmt,
            ...);
+
+/* Logs msg as unreachable code was reached, and stops the emulator, as UNREACHABLE_MSG
+ * does. Does not return. */
+void c_unreachable(const char* file, int line, const char* func, const char* msg);
 
 /* Same order as Common::FS::PathType. */
 enum c_user_path {

@@ -139,11 +139,8 @@ CORE_SOURCES_CXX += $(addprefix src/core/libraries/avplayer/,avplayer.cpp avplay
 	avplayer_state.cpp)
 CORE_SOURCES_CXX += $(addprefix src/core/libraries/camera/,camera.cpp camera_audio.cpp \
 	camera_calibration.cpp camera_config.cpp camera_device.cpp camera_helpers.cpp)
-CORE_SOURCES_CXX += $(addprefix src/core/libraries/companion/,companion_httpd.cpp \
-	companion_util.cpp)
 CORE_SOURCES_CXX += $(addprefix src/core/libraries/font/,font.cpp font_face.cpp font_internal.cpp \
 	fontft.cpp fontft_internal.cpp)
-CORE_SOURCES_CXX += $(addprefix src/core/libraries/game_live_streaming/,gamelivestreaming.cpp)
 CORE_SOURCES_CXX += $(addprefix src/core/libraries/gnmdriver/,gnmdriver.cpp)
 CORE_SOURCES_CXX += $(addprefix src/core/libraries/hmd/,hmd.cpp hmd_distortion.cpp \
 	hmd_reprojection.cpp hmd_setup_dialog.cpp)
@@ -161,7 +158,6 @@ CORE_SOURCES_CXX += $(addprefix src/core/libraries/kernel/threads/,barrier.cpp c
 CORE_SOURCES_CXX += $(addprefix src/core/libraries/libc_internal/,libc_internal.cpp \
 	libc_internal_io.cpp libc_internal_math.cpp libc_internal_memory.cpp libc_internal_str.cpp \
 	libc_internal_threads.cpp)
-CORE_SOURCES_CXX += $(addprefix src/core/libraries/libpng/,pngdec.cpp pngenc.cpp)
 CORE_SOURCES_CXX += $(addprefix src/core/libraries/,libs.cpp)
 CORE_SOURCES_CXX += $(addprefix src/core/libraries/music/,music_player_service.cpp)
 CORE_SOURCES_CXX += $(addprefix src/core/libraries/net/,net.cpp net_kernel.cpp net_log.cpp \
@@ -192,10 +188,7 @@ CORE_SOURCES_CXX += $(addprefix src/core/libraries/np/np_web_api2/,np_web_api2.c
 	np_web_api2_context.cpp np_web_api2_internal.cpp np_web_api2_push_event.cpp)
 CORE_SOURCES_CXX += $(addprefix src/core/libraries/pad/,pad.cpp)
 CORE_SOURCES_CXX += $(addprefix src/core/libraries/playgo/,playgo.cpp playgo_dialog.cpp)
-CORE_SOURCES_CXX += $(addprefix src/core/libraries/razor_cpu/,razor_cpu.cpp)
-CORE_SOURCES_CXX += $(addprefix src/core/libraries/remote_play/,remoteplay.cpp)
 CORE_SOURCES_CXX += $(addprefix src/core/libraries/rtc/,rtc.cpp)
-CORE_SOURCES_CXX += $(addprefix src/core/libraries/rudp/,rudp.cpp)
 CORE_SOURCES_CXX += $(addprefix src/core/libraries/save_data/dialog/,savedatadialog.cpp \
 	savedatadialog_ui.cpp)
 CORE_SOURCES_CXX += $(addprefix src/core/libraries/save_data/,save_backup.cpp save_instance.cpp \
@@ -275,10 +268,12 @@ CORE_SOURCES_C += $(addprefix src/core/libraries/ngs2/,ngs2_core.c ngs2_util.c)
 CORE_SOURCES_C += $(addprefix src/core/libraries/audiodec/,audiodec.c)
 CORE_SOURCES_C += $(addprefix src/core/libraries/ime/,ime_support.c)
 CORE_SOURCES_C += $(addprefix src/core/libraries/ult/,ult.c ult_sync.c)
-# The small HLE libraries written in C, registered in libs.cpp
-CORE_SOURCES_C += $(addprefix src/core/libraries/,content_export/content_export.c \
-	disc_map/disc_map.c keyboard/keyboard.c mouse/mouse.c move/move.c random/random.c \
-	screenshot/screenshot.c share_play/shareplay.c signin_dialog/signindialog.c \
+# The small HLE libraries written in C, registered in libs.cpp and sysmodule_internal.cpp
+CORE_SOURCES_C += $(addprefix src/core/libraries/,companion/companion_httpd.c \
+	companion/companion_util.c content_export/content_export.c disc_map/disc_map.c \
+	game_live_streaming/gamelivestreaming.c keyboard/keyboard.c libpng/pngdec.c libpng/pngenc.c \
+	mouse/mouse.c move/move.c random/random.c razor_cpu/razor_cpu.c remote_play/remoteplay.c \
+	rudp/rudp.c screenshot/screenshot.c share_play/shareplay.c signin_dialog/signindialog.c \
 	ulobjmgr/ulobjmgr.c video_recording/video_recording.c)
 CORE_SOURCES_C += $(addprefix src/shader_recompiler/backend/spirv/,spv_module.c)
 CORE_SOURCES_C += $(addprefix src/core/libraries/np/np_handler/,np_invitation_json.c)

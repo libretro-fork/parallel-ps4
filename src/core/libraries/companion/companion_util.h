@@ -1,33 +1,33 @@
-// SPDX-FileCopyrightText: Copyright 2025 shadPS4 Emulator Project
-// SPDX-License-Identifier: GPL-2.0-or-later
+/* SPDX-FileCopyrightText: Copyright 2025 shadPS4 Emulator Project
+ * SPDX-License-Identifier: GPL-2.0-or-later */
 
-#pragma once
+#ifndef SHADPS4_LIBRARIES_COMPANION_UTIL_H
+#define SHADPS4_LIBRARIES_COMPANION_UTIL_H
+
+/* libSceCompanionUtil. Registered in libs.cpp. */
+
+#include <retro_common_api.h>
 
 #include "common/types.h"
 
-namespace Core::Loader {
-class SymbolsResolver;
-}
+RETRO_BEGIN_DECLS
 
-namespace Libraries::CompanionUtil {
+#define ORBIS_COMPANION_UTIL_OK 0
 
-constexpr u32 ORBIS_COMPANION_UTIL_OK = 0;
+typedef struct sceCompanionUtilEvent {
+    u8 blob[0x104]; /* 0x104 bytes of data, dont know what it is exactly */
+} sceCompanionUtilEvent;
 
-struct sceCompanionUtilEvent {
-    u8 blob[0x104]{}; /// 0x104 bytes of data, dont know what it is exactly
-};
+typedef struct sceCompanionUtilContext {
+    u8 blob[0x27B]; /* 0x27B bytes of data, dont know what it is exactly */
+} sceCompanionUtilContext;
 
-struct sceCompanionUtilContext {
-    u8 blob[0x27B]{}; /// 0x27B bytes of data, dont know what it is exactly
-};
-
-u32 PS4_SYSV_ABI getEvent(sceCompanionUtilContext* ctx, sceCompanionUtilEvent* outEvent,
-                          s32 param_3);
 s32 PS4_SYSV_ABI sceCompanionUtilGetEvent(sceCompanionUtilEvent* outEvent);
-s32 PS4_SYSV_ABI sceCompanionUtilGetRemoteOskEvent();
-s32 PS4_SYSV_ABI sceCompanionUtilInitialize();
-s32 PS4_SYSV_ABI sceCompanionUtilOptParamInitialize();
-s32 PS4_SYSV_ABI sceCompanionUtilTerminate();
+s32 PS4_SYSV_ABI sceCompanionUtilGetRemoteOskEvent(void);
+s32 PS4_SYSV_ABI sceCompanionUtilInitialize(void);
+s32 PS4_SYSV_ABI sceCompanionUtilOptParamInitialize(void);
+s32 PS4_SYSV_ABI sceCompanionUtilTerminate(void);
 
-void RegisterLib(Core::Loader::SymbolsResolver* sym);
-} // namespace Libraries::CompanionUtil
+RETRO_END_DECLS
+
+#endif

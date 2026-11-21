@@ -294,6 +294,287 @@ static void RegisterSharePlay(Core::Loader::SymbolsResolver* sym) {
                  sceSharePlayGetCurrentConnectionInfo);
 }
 
+static void RegisterCompanionHttpd(Core::Loader::SymbolsResolver* sym) {
+    LIB_FUNCTION("8pWltDG7h6A", "libSceCompanionHttpd", 1, "libSceCompanionHttpd",
+                 sceCompanionHttpdAddHeader);
+    LIB_FUNCTION("B-QBMeFdNgY", "libSceCompanionHttpd", 1, "libSceCompanionHttpd",
+                 sceCompanionHttpdGet2ndScreenStatus);
+    LIB_FUNCTION("Vku4big+IYM", "libSceCompanionHttpd", 1, "libSceCompanionHttpd",
+                 sceCompanionHttpdGetEvent);
+    LIB_FUNCTION("0SySxcuVNG0", "libSceCompanionHttpd", 1, "libSceCompanionHttpd",
+                 sceCompanionHttpdGetUserId);
+    LIB_FUNCTION("ykNpWs3ktLY", "libSceCompanionHttpd", 1, "libSceCompanionHttpd",
+                 sceCompanionHttpdInitialize);
+    LIB_FUNCTION("OA6FbORefbo", "libSceCompanionHttpd", 1, "libSceCompanionHttpd",
+                 sceCompanionHttpdInitialize2);
+    LIB_FUNCTION("r-2-a0c7Kfc", "libSceCompanionHttpd", 1, "libSceCompanionHttpd",
+                 sceCompanionHttpdOptParamInitialize);
+    LIB_FUNCTION("fHNmij7kAUM", "libSceCompanionHttpd", 1, "libSceCompanionHttpd",
+                 sceCompanionHttpdRegisterRequestBodyReceptionCallback);
+    LIB_FUNCTION("OaWw+IVEdbI", "libSceCompanionHttpd", 1, "libSceCompanionHttpd",
+                 sceCompanionHttpdRegisterRequestCallback);
+    LIB_FUNCTION("-0c9TCTwnGs", "libSceCompanionHttpd", 1, "libSceCompanionHttpd",
+                 sceCompanionHttpdRegisterRequestCallback2);
+    LIB_FUNCTION("h3OvVxzX4qM", "libSceCompanionHttpd", 1, "libSceCompanionHttpd",
+                 sceCompanionHttpdSetBody);
+    LIB_FUNCTION("w7oz0AWHpT4", "libSceCompanionHttpd", 1, "libSceCompanionHttpd",
+                 sceCompanionHttpdSetStatus);
+    LIB_FUNCTION("k7F0FcDM-Xc", "libSceCompanionHttpd", 1, "libSceCompanionHttpd",
+                 sceCompanionHttpdStart);
+    LIB_FUNCTION("0SCgzfVQHpo", "libSceCompanionHttpd", 1, "libSceCompanionHttpd",
+                 sceCompanionHttpdStop);
+    LIB_FUNCTION("+-du9tWgE9s", "libSceCompanionHttpd", 1, "libSceCompanionHttpd",
+                 sceCompanionHttpdTerminate);
+    LIB_FUNCTION("ZSHiUfYK+QI", "libSceCompanionHttpd", 1, "libSceCompanionHttpd",
+                 sceCompanionHttpdUnregisterRequestBodyReceptionCallback);
+    LIB_FUNCTION("xweOi2QT-BE", "libSceCompanionHttpd", 1, "libSceCompanionHttpd",
+                 sceCompanionHttpdUnregisterRequestCallback);
+}
+
+static void RegisterCompanionUtil(Core::Loader::SymbolsResolver* sym) {
+    LIB_FUNCTION("cE5Msy11WhU", "libSceCompanionUtil", 1, "libSceCompanionUtil",
+                 sceCompanionUtilGetEvent);
+    LIB_FUNCTION("MaVrz79mT5o", "libSceCompanionUtil", 1, "libSceCompanionUtil",
+                 sceCompanionUtilGetRemoteOskEvent);
+    LIB_FUNCTION("xb1xlIhf0QY", "libSceCompanionUtil", 1, "libSceCompanionUtil",
+                 sceCompanionUtilInitialize);
+    LIB_FUNCTION("IPN-FRSrafk", "libSceCompanionUtil", 1, "libSceCompanionUtil",
+                 sceCompanionUtilOptParamInitialize);
+    LIB_FUNCTION("H1fYQd5lFAI", "libSceCompanionUtil", 1, "libSceCompanionUtil",
+                 sceCompanionUtilTerminate);
+}
+
+static void RegisterGameLiveStreaming(Core::Loader::SymbolsResolver* sym) {
+    LIB_FUNCTION("caqgDl+V9qA", "libSceGameLiveStreaming_debug", 1, "libSceGameLiveStreaming",
+                 sceGameLiveStreamingStartDebugBroadcast);
+    LIB_FUNCTION("0i8Lrllxwow", "libSceGameLiveStreaming_debug", 1, "libSceGameLiveStreaming",
+                 sceGameLiveStreamingStopDebugBroadcast);
+    LIB_FUNCTION("NqkTzemliC0", "libSceGameLiveStreaming", 1, "libSceGameLiveStreaming",
+                 sceGameLiveStreamingApplySocialFeedbackMessageFilter);
+    LIB_FUNCTION("PC4jq87+YQI", "libSceGameLiveStreaming", 1, "libSceGameLiveStreaming",
+                 sceGameLiveStreamingCheckCallback);
+    LIB_FUNCTION("FcHBfHjFXkA", "libSceGameLiveStreaming", 1, "libSceGameLiveStreaming",
+                 sceGameLiveStreamingClearPresetSocialFeedbackCommands);
+    LIB_FUNCTION("lZ2Sd0uEvpo", "libSceGameLiveStreaming", 1, "libSceGameLiveStreaming",
+                 sceGameLiveStreamingClearSocialFeedbackMessages);
+    LIB_FUNCTION("6c2zGtThFww", "libSceGameLiveStreaming", 1, "libSceGameLiveStreaming",
+                 sceGameLiveStreamingClearSpoilerTag);
+    LIB_FUNCTION("dWM80AX39o4", "libSceGameLiveStreaming", 1, "libSceGameLiveStreaming",
+                 sceGameLiveStreamingEnableLiveStreaming);
+    LIB_FUNCTION("wBOQWjbWMfU", "libSceGameLiveStreaming", 1, "libSceGameLiveStreaming",
+                 sceGameLiveStreamingEnableSocialFeedback);
+    LIB_FUNCTION("aRSQNqbats4", "libSceGameLiveStreaming", 1, "libSceGameLiveStreaming",
+                 sceGameLiveStreamingGetCurrentBroadcastScreenLayout);
+    LIB_FUNCTION("CoPMx369EqM", "libSceGameLiveStreaming", 1, "libSceGameLiveStreaming",
+                 sceGameLiveStreamingGetCurrentStatus);
+    LIB_FUNCTION("lK8dLBNp9OE", "libSceGameLiveStreaming", 1, "libSceGameLiveStreaming",
+                 sceGameLiveStreamingGetCurrentStatus2);
+    LIB_FUNCTION("OIIm19xu+NM", "libSceGameLiveStreaming", 1, "libSceGameLiveStreaming",
+                 sceGameLiveStreamingGetProgramInfo);
+    LIB_FUNCTION("PMx7N4WqNdo", "libSceGameLiveStreaming", 1, "libSceGameLiveStreaming",
+                 sceGameLiveStreamingGetSocialFeedbackMessages);
+    LIB_FUNCTION("yeQKjHETi40", "libSceGameLiveStreaming", 1, "libSceGameLiveStreaming",
+                 sceGameLiveStreamingGetSocialFeedbackMessagesCount);
+    LIB_FUNCTION("kvYEw2lBndk", "libSceGameLiveStreaming", 1, "libSceGameLiveStreaming",
+                 sceGameLiveStreamingInitialize);
+    LIB_FUNCTION("ysWfX5PPbfc", "libSceGameLiveStreaming", 1, "libSceGameLiveStreaming",
+                 sceGameLiveStreamingLaunchLiveViewer);
+    LIB_FUNCTION("cvRCb7DTAig", "libSceGameLiveStreaming", 1, "libSceGameLiveStreaming",
+                 sceGameLiveStreamingLaunchLiveViewerA);
+    LIB_FUNCTION("K0QxEbD7q+c", "libSceGameLiveStreaming", 1, "libSceGameLiveStreaming",
+                 sceGameLiveStreamingPermitLiveStreaming);
+    LIB_FUNCTION("-EHnU68gExU", "libSceGameLiveStreaming", 1, "libSceGameLiveStreaming",
+                 sceGameLiveStreamingPermitServerSideRecording);
+    LIB_FUNCTION("hggKhPySVgI", "libSceGameLiveStreaming", 1, "libSceGameLiveStreaming",
+                 sceGameLiveStreamingPostSocialMessage);
+    LIB_FUNCTION("nFP8qT9YXbo", "libSceGameLiveStreaming", 1, "libSceGameLiveStreaming",
+                 sceGameLiveStreamingRegisterCallback);
+    LIB_FUNCTION("b5RaMD2J0So", "libSceGameLiveStreaming", 1, "libSceGameLiveStreaming",
+                 sceGameLiveStreamingScreenCloseSeparateMode);
+    LIB_FUNCTION("hBdd8n6kuvE", "libSceGameLiveStreaming", 1, "libSceGameLiveStreaming",
+                 sceGameLiveStreamingScreenConfigureSeparateMode);
+    LIB_FUNCTION("uhCmn81s-mU", "libSceGameLiveStreaming", 1, "libSceGameLiveStreaming",
+                 sceGameLiveStreamingScreenInitialize);
+    LIB_FUNCTION("fo5B8RUaBxQ", "libSceGameLiveStreaming", 1, "libSceGameLiveStreaming",
+                 sceGameLiveStreamingScreenInitializeSeparateModeParameter);
+    LIB_FUNCTION("iorzW0pKOiA", "libSceGameLiveStreaming", 1, "libSceGameLiveStreaming",
+                 sceGameLiveStreamingScreenOpenSeparateMode);
+    LIB_FUNCTION("gDSvt78H3Oo", "libSceGameLiveStreaming", 1, "libSceGameLiveStreaming",
+                 sceGameLiveStreamingScreenSetMode);
+    LIB_FUNCTION("HE93dr-5rx4", "libSceGameLiveStreaming", 1, "libSceGameLiveStreaming",
+                 sceGameLiveStreamingScreenTerminate);
+    LIB_FUNCTION("3PSiwAzFISE", "libSceGameLiveStreaming", 1, "libSceGameLiveStreaming",
+                 sceGameLiveStreamingSetCameraFrameSetting);
+    LIB_FUNCTION("TwuUzTKKeek", "libSceGameLiveStreaming", 1, "libSceGameLiveStreaming",
+                 sceGameLiveStreamingSetDefaultServiceProviderPermission);
+    LIB_FUNCTION("Gw6S4oqlY7E", "libSceGameLiveStreaming", 1, "libSceGameLiveStreaming",
+                 sceGameLiveStreamingSetGuardAreas);
+    LIB_FUNCTION("QmQYwQ7OTJI", "libSceGameLiveStreaming", 1, "libSceGameLiveStreaming",
+                 sceGameLiveStreamingSetInvitationSessionId);
+    LIB_FUNCTION("Sb5bAXyUt5c", "libSceGameLiveStreaming", 1, "libSceGameLiveStreaming",
+                 sceGameLiveStreamingSetLinkCommentPreset);
+    LIB_FUNCTION("q-kxuaF7URU", "libSceGameLiveStreaming", 1, "libSceGameLiveStreaming",
+                 sceGameLiveStreamingSetMaxBitrate);
+    LIB_FUNCTION("hUY-mSOyGL0", "libSceGameLiveStreaming", 1, "libSceGameLiveStreaming",
+                 sceGameLiveStreamingSetMetadata);
+    LIB_FUNCTION("ycodiP2I0xo", "libSceGameLiveStreaming", 1, "libSceGameLiveStreaming",
+                 sceGameLiveStreamingSetPresetSocialFeedbackCommands);
+    LIB_FUNCTION("x6deXUpQbBo", "libSceGameLiveStreaming", 1, "libSceGameLiveStreaming",
+                 sceGameLiveStreamingSetPresetSocialFeedbackCommandsDescription);
+    LIB_FUNCTION("mCoz3k3zPmA", "libSceGameLiveStreaming", 1, "libSceGameLiveStreaming",
+                 sceGameLiveStreamingSetServiceProviderPermission);
+    LIB_FUNCTION("ZuX+zzz2DkA", "libSceGameLiveStreaming", 1, "libSceGameLiveStreaming",
+                 sceGameLiveStreamingSetSpoilerTag);
+    LIB_FUNCTION("MLvYI86FFAo", "libSceGameLiveStreaming", 1, "libSceGameLiveStreaming",
+                 sceGameLiveStreamingSetStandbyScreenResource);
+    LIB_FUNCTION("y0KkAydy9xE", "libSceGameLiveStreaming", 1, "libSceGameLiveStreaming",
+                 sceGameLiveStreamingStartGenerateStandbyScreenResource);
+    LIB_FUNCTION("Y1WxX7dPMCw", "libSceGameLiveStreaming", 1, "libSceGameLiveStreaming",
+                 sceGameLiveStreamingStartSocialFeedbackMessageFiltering);
+    LIB_FUNCTION("D7dg5QJ4FlE", "libSceGameLiveStreaming", 1, "libSceGameLiveStreaming",
+                 sceGameLiveStreamingStopGenerateStandbyScreenResource);
+    LIB_FUNCTION("bYuGUBuIsaY", "libSceGameLiveStreaming", 1, "libSceGameLiveStreaming",
+                 sceGameLiveStreamingStopSocialFeedbackMessageFiltering);
+    LIB_FUNCTION("9yK6Fk8mKOQ", "libSceGameLiveStreaming", 1, "libSceGameLiveStreaming",
+                 sceGameLiveStreamingTerminate);
+    LIB_FUNCTION("5XHaH3kL+bA", "libSceGameLiveStreaming", 1, "libSceGameLiveStreaming",
+                 sceGameLiveStreamingUnregisterCallback);
+    LIB_FUNCTION("caqgDl+V9qA", "libSceGameLiveStreaming_direct_streaming", 1,
+                 "libSceGameLiveStreaming", sceGameLiveStreamingStartDebugBroadcast);
+    LIB_FUNCTION("0i8Lrllxwow", "libSceGameLiveStreaming_direct_streaming", 1,
+                 "libSceGameLiveStreaming", sceGameLiveStreamingStopDebugBroadcast);
+    LIB_FUNCTION("CoPMx369EqM", "libSceGameLiveStreamingCompat", 1, "libSceGameLiveStreaming",
+                 sceGameLiveStreamingGetCurrentStatus);
+    LIB_FUNCTION("ysWfX5PPbfc", "libSceGameLiveStreamingCompat", 1, "libSceGameLiveStreaming",
+                 sceGameLiveStreamingLaunchLiveViewer);
+}
+
+static void RegisterRazorCpu(Core::Loader::SymbolsResolver* sym) {
+    LIB_FUNCTION("JFzLJBlYIJE", "libSceRazorCpu", 1, "libSceRazorCpu",
+                 sceRazorCpuBeginLogicalFileAccess);
+    LIB_FUNCTION("SfRTRZ1Sh+U", "libSceRazorCpu", 1, "libSceRazorCpu",
+                 sceRazorCpuDisableFiberUserMarkers);
+    LIB_FUNCTION("gVioM9cbiDs", "libSceRazorCpu", 1, "libSceRazorCpu",
+                 sceRazorCpuEndLogicalFileAccess);
+    LIB_FUNCTION("G90IIOtgFQ0", "libSceRazorCpu", 1, "libSceRazorCpu",
+                 sceRazorCpuFiberLogNameChange);
+    LIB_FUNCTION("PAytDtFGpqY", "libSceRazorCpu", 1, "libSceRazorCpu", sceRazorCpuFiberSwitch);
+    LIB_FUNCTION("sPhrQD31ClM", "libSceRazorCpu", 1, "libSceRazorCpu", sceRazorCpuFlushOccurred);
+    LIB_FUNCTION("B782NptkGUc", "libSceRazorCpu", 1, "libSceRazorCpu",
+                 sceRazorCpuGetDataTagStorageSize);
+    LIB_FUNCTION("EH9Au2RlSrE", "libSceRazorCpu", 1, "libSceRazorCpu", sceRazorCpuGpuMarkerSync);
+    LIB_FUNCTION("A7oRMdaOJP8", "libSceRazorCpu", 1, "libSceRazorCpu", sceRazorCpuInitDataTags);
+    LIB_FUNCTION("NFwh-J-BrI0", "libSceRazorCpu", 1, "libSceRazorCpu",
+                 sceRazorCpuInitializeGpuMarkerContext);
+    LIB_FUNCTION("ElNyedXaa4o", "libSceRazorCpu", 1, "libSceRazorCpu",
+                 sceRazorCpuInitializeInternal);
+    LIB_FUNCTION("EboejOQvLL4", "libSceRazorCpu", 1, "libSceRazorCpu", sceRazorCpuIsCapturing);
+    LIB_FUNCTION("dnEdyY4+klQ", "libSceRazorCpu", 1, "libSceRazorCpu",
+                 sceRazorCpuJobManagerDispatch);
+    LIB_FUNCTION("KP+TBWGHlgs", "libSceRazorCpu", 1, "libSceRazorCpu", sceRazorCpuJobManagerJob);
+    LIB_FUNCTION("9FowWFMEIM8", "libSceRazorCpu", 1, "libSceRazorCpu",
+                 sceRazorCpuJobManagerSequence);
+    LIB_FUNCTION("XCuZoBSVFG8", "libSceRazorCpu", 1, "libSceRazorCpu", sceRazorCpuNamedSync);
+    LIB_FUNCTION("njGikRrxkC0", "libSceRazorCpu", 1, "libSceRazorCpu", sceRazorCpuPlotValue);
+    LIB_FUNCTION("YpkGsMXP3ew", "libSceRazorCpu", 1, "libSceRazorCpu", sceRazorCpuPopMarker);
+    LIB_FUNCTION("zw+celG7zSI", "libSceRazorCpu", 1, "libSceRazorCpu", sceRazorCpuPushMarker);
+    LIB_FUNCTION("uZrOwuNJX-M", "libSceRazorCpu", 1, "libSceRazorCpu", sceRazorCpuPushMarkerStatic);
+    LIB_FUNCTION("D0yUjM33QqU", "libSceRazorCpu", 1, "libSceRazorCpu",
+                 sceRazorCpuResizeTaggedBuffer);
+    LIB_FUNCTION("jqYWaTfgZs0", "libSceRazorCpu", 1, "libSceRazorCpu",
+                 sceRazorCpuSetPopMarkerCallback);
+    LIB_FUNCTION("DJsHcEb94n0", "libSceRazorCpu", 1, "libSceRazorCpu",
+                 sceRazorCpuSetPushMarkerCallback);
+    LIB_FUNCTION("EZtqozPTS4M", "libSceRazorCpu", 1, "libSceRazorCpu",
+                 sceRazorCpuSetPushMarkerStaticCallback);
+    LIB_FUNCTION("emklx7RK-LY", "libSceRazorCpu", 1, "libSceRazorCpu", sceRazorCpuShutdownDataTags);
+    LIB_FUNCTION("TIytAjYeaik", "libSceRazorCpu", 1, "libSceRazorCpu",
+                 sceRazorCpuStartCaptureInternal);
+    LIB_FUNCTION("jWpkVWdMrsM", "libSceRazorCpu", 1, "libSceRazorCpu",
+                 sceRazorCpuStopCaptureInternal);
+    LIB_FUNCTION("Ax7NjOzctIM", "libSceRazorCpu", 1, "libSceRazorCpu", sceRazorCpuSync);
+    LIB_FUNCTION("we3oTKSPSTw", "libSceRazorCpu", 1, "libSceRazorCpu", sceRazorCpuTagArray);
+    LIB_FUNCTION("vyjdThnQfQQ", "libSceRazorCpu", 1, "libSceRazorCpu", sceRazorCpuTagBuffer);
+    LIB_FUNCTION("0yNHPIkVTmw", "libSceRazorCpu", 1, "libSceRazorCpu", sceRazorCpuUnTagBuffer);
+    LIB_FUNCTION("Crha9LvwvJM", "libSceRazorCpu", 1, "libSceRazorCpu", sceRazorCpuWorkloadRunBegin);
+    LIB_FUNCTION("q1GxBfGHO0s", "libSceRazorCpu", 1, "libSceRazorCpu", sceRazorCpuWorkloadRunEnd);
+    LIB_FUNCTION("6rUvx-6QmYc", "libSceRazorCpu", 1, "libSceRazorCpu", sceRazorCpuWorkloadSubmit);
+    LIB_FUNCTION("G3brhegfyNg", "libSceRazorCpu", 1, "libSceRazorCpu", sceRazorCpuWriteBookmark);
+}
+
+static void RegisterRemoteplay(Core::Loader::SymbolsResolver* sym) {
+    LIB_FUNCTION("xQeIryTX7dY", "libSceRemoteplay", 1, "libSceRemoteplay", sceRemoteplayApprove);
+    LIB_FUNCTION("IYZ+Mu+8tPo", "libSceRemoteplay", 1, "libSceRemoteplay",
+                 sceRemoteplayChangeEnterKey);
+    LIB_FUNCTION("ZYUsJtcAnqA", "libSceRemoteplay", 1, "libSceRemoteplay",
+                 sceRemoteplayClearAllRegistData);
+    LIB_FUNCTION("cCheyCbF7qw", "libSceRemoteplay", 1, "libSceRemoteplay",
+                 sceRemoteplayClearConnectHistory);
+    LIB_FUNCTION("tPYT-kGbZh8", "libSceRemoteplay", 1, "libSceRemoteplay",
+                 sceRemoteplayConfirmDeviceRegist);
+    LIB_FUNCTION("6Lg4BNleJWc", "libSceRemoteplay", 1, "libSceRemoteplay", sceRemoteplayDisconnect);
+    LIB_FUNCTION("j98LdSGy4eY", "libSceRemoteplay", 1, "libSceRemoteplay",
+                 sceRemoteplayGeneratePinCode);
+    LIB_FUNCTION("L+cL-M-DP3w", "libSceRemoteplay", 1, "libSceRemoteplay", sceRemoteplayGetApMode);
+    LIB_FUNCTION("g4K51cY+PEw", "libSceRemoteplay", 1, "libSceRemoteplay",
+                 sceRemoteplayGetConnectHistory);
+    LIB_FUNCTION("g3PNjYKWqnQ", "libSceRemoteplay", 1, "libSceRemoteplay",
+                 sceRemoteplayGetConnectionStatus);
+    LIB_FUNCTION("3eBNV9A0BUM", "libSceRemoteplay", 1, "libSceRemoteplay",
+                 sceRemoteplayGetConnectUserId);
+    LIB_FUNCTION("ufesWMVX6iU", "libSceRemoteplay", 1, "libSceRemoteplay",
+                 sceRemoteplayGetMbusDeviceInfo);
+    LIB_FUNCTION("DxU4JGh4S2k", "libSceRemoteplay", 1, "libSceRemoteplay",
+                 sceRemoteplayGetOperationStatus);
+    LIB_FUNCTION("n5OxFJEvPlc", "libSceRemoteplay", 1, "libSceRemoteplay",
+                 sceRemoteplayGetRemoteplayStatus);
+    LIB_FUNCTION("Cekhs6LSHC0", "libSceRemoteplay", 1, "libSceRemoteplay", sceRemoteplayGetRpMode);
+    LIB_FUNCTION("ig1ocbR7Ptw", "libSceRemoteplay", 1, "libSceRemoteplay", sceRemoteplayImeClose);
+    LIB_FUNCTION("gV9-8cJPM3I", "libSceRemoteplay", 1, "libSceRemoteplay",
+                 sceRemoteplayImeFilterResult);
+    LIB_FUNCTION("cMk57DZXe6c", "libSceRemoteplay", 1, "libSceRemoteplay",
+                 sceRemoteplayImeGetEvent);
+    LIB_FUNCTION("-gwkQpOCl68", "libSceRemoteplay", 1, "libSceRemoteplay", sceRemoteplayImeNotify);
+    LIB_FUNCTION("58v9tSlRxc8", "libSceRemoteplay", 1, "libSceRemoteplay",
+                 sceRemoteplayImeNotifyEventResult);
+    LIB_FUNCTION("C3r2zT5ebMg", "libSceRemoteplay", 1, "libSceRemoteplay", sceRemoteplayImeOpen);
+    LIB_FUNCTION("oB730zwoz0s", "libSceRemoteplay", 1, "libSceRemoteplay",
+                 sceRemoteplayImeSetCaret);
+    LIB_FUNCTION("rOTg1Nljp8w", "libSceRemoteplay", 1, "libSceRemoteplay", sceRemoteplayImeSetText);
+    LIB_FUNCTION("k1SwgkMSOM8", "libSceRemoteplay", 1, "libSceRemoteplay", sceRemoteplayInitialize);
+    LIB_FUNCTION("R8RZC1ZIkzU", "libSceRemoteplay", 1, "libSceRemoteplay",
+                 sceRemoteplayIsRemoteOskReady);
+    LIB_FUNCTION("uYhiELUtLgA", "libSceRemoteplay", 1, "libSceRemoteplay",
+                 sceRemoteplayIsRemotePlaying);
+    LIB_FUNCTION("d-BBSEq1nfc", "libSceRemoteplay", 1, "libSceRemoteplay",
+                 sceRemoteplayNotifyMbusDeviceRegistComplete);
+    LIB_FUNCTION("Yytq7NE38R8", "libSceRemoteplay", 1, "libSceRemoteplay",
+                 sceRemoteplayNotifyNpPushWakeup);
+    LIB_FUNCTION("Wg-w8xjMZA4", "libSceRemoteplay", 1, "libSceRemoteplay",
+                 sceRemoteplayNotifyPinCodeError);
+    LIB_FUNCTION("yheulqylKwI", "libSceRemoteplay", 1, "libSceRemoteplay",
+                 sceRemoteplayNotifyUserDelete);
+    LIB_FUNCTION("t5ZvUiZ1hpE", "libSceRemoteplay", 1, "libSceRemoteplay",
+                 sceRemoteplayPrintAllRegistData);
+    LIB_FUNCTION("mrNh78tBpmg", "libSceRemoteplay", 1, "libSceRemoteplay", sceRemoteplayProhibit);
+    LIB_FUNCTION("7QLrixwVHcU", "libSceRemoteplay", 1, "libSceRemoteplay",
+                 sceRemoteplayProhibitStreaming);
+    LIB_FUNCTION("-ThIlThsN80", "libSceRemoteplay", 1, "libSceRemoteplay", sceRemoteplayServerLock);
+    LIB_FUNCTION("0Z-Pm5rZJOI", "libSceRemoteplay", 1, "libSceRemoteplay",
+                 sceRemoteplayServerUnLock);
+    LIB_FUNCTION("xSrhtSLIjOc", "libSceRemoteplay", 1, "libSceRemoteplay", sceRemoteplaySetApMode);
+    LIB_FUNCTION("5-2agAeaE+c", "libSceRemoteplay", 1, "libSceRemoteplay",
+                 sceRemoteplaySetLogLevel);
+    LIB_FUNCTION("Rf0XMVR7xPw", "libSceRemoteplay", 1, "libSceRemoteplay",
+                 sceRemoteplaySetProhibition);
+    LIB_FUNCTION("n4l3FTZtNQM", "libSceRemoteplay", 1, "libSceRemoteplay",
+                 sceRemoteplaySetProhibitionForVsh);
+    LIB_FUNCTION("-BPcEQ1w8xc", "libSceRemoteplay", 1, "libSceRemoteplay", sceRemoteplaySetRpMode);
+    LIB_FUNCTION("BOwybKVa3Do", "libSceRemoteplay", 1, "libSceRemoteplay", sceRemoteplayTerminate);
+    LIB_FUNCTION("HV7jZe1frbM", "libSceRemoteplay", 1, "libSceRemoteplay",
+                 Remoteplay_Func_1D5EE365ED5FADB3);
+}
+
 static void RegisterAudio3d(Core::Loader::SymbolsResolver* sym) {
     // The frontend plays the sound: Audio3D goes out through AudioOut, never to a device of
     // its own.
@@ -358,10 +639,10 @@ void InitHLELibs(Core::Loader::SymbolsResolver* sym) {
             {"libSceVideodec.sprx", Libraries::Videodec::RegisterLib},
             {"libSceVideodec2.sprx", Libraries::Videodec2::RegisterLib},
             {"libSceIme.sprx", Libraries::Ime::RegisterLib},
-            {"libSceGameLiveStreaming.sprx", Libraries::GameLiveStreaming::RegisterLib},
+            {"libSceGameLiveStreaming.sprx", RegisterGameLiveStreaming},
             {"libSceSharePlay.sprx", RegisterSharePlay},
-            {"libSceRemoteplay.sprx", Libraries::Remoteplay::RegisterLib},
-            {"libSceRazorCpu.sprx", Libraries::RazorCpu::RegisterLib},
+            {"libSceRemoteplay.sprx", RegisterRemoteplay},
+            {"libSceRazorCpu.sprx", RegisterRazorCpu},
             {"libSceMove.sprx", RegisterMove},
             {"libSceMouse.sprx", RegisterMouse},
             {"libSceKeyboard.sprx", RegisterKeyboard},
@@ -373,8 +654,8 @@ void InitHLELibs(Core::Loader::SymbolsResolver* sym) {
             {"ulobjmgr.sprx", RegisterUlobjmgr},
             {"libSceSigninDialog.sprx", RegisterSigninDialog},
             {"libSceCamera.sprx", Libraries::Camera::RegisterLib},
-            {"libSceCompanionHttpd.sprx", Libraries::CompanionHttpd::RegisterLib},
-            {"libSceCompanionUtil.sprx", Libraries::CompanionUtil::RegisterLib},
+            {"libSceCompanionHttpd.sprx", RegisterCompanionHttpd},
+            {"libSceCompanionUtil.sprx", RegisterCompanionUtil},
             {"libSceVoice.sprx", Libraries::Voice::RegisterLib},
             {"libSceVrTracker.sprx", Libraries::VrTracker::RegisterLib},
             {"libSceContentExport.sprx", RegisterContentExport},

@@ -4,6 +4,12 @@ What changed in the libretro core of this fork, newest first. Changes that come 
 
 ## Unreleased
 
+- Seven more HLE libraries are MSVC C89: companion (httpd and util), game live streaming, PNG decode and encode, Razor CPU, Remote Play and RUDP.
+  - Same shape as the first eleven: a `.c` file and a C header each, with the same functions, behaviour and log lines. The PNG libraries still decode and encode through libretro-common's rpng, straight between the game's buffers. PNG and RUDP are registered in `sysmodule_internal.cpp`, the others in `libs.cpp`.
+  - **`c_unreachable`** is added to the C bridge (`common/c_bridge.h`): the C version of `UNREACHABLE_MSG`, which logs and stops the emulator.
+  - The companion library's `getEvent` was never called and is gone.
+  - Not run in a game yet.
+
 - Eleven small HLE libraries are MSVC C89: content export, disc map, keyboard, mouse, Move, random, screenshot, SharePlay, sign-in dialog, ulobjmgr and video recording.
   - Each is a `.c` file with a C header. The functions the game calls are the same, with the same behaviour and log lines. They are registered for the game in `libs.cpp`, as the ULT library already was.
   - Their C++ enums and `constexpr` error codes are plain C enums and `#define`s. The `Func_<nid>` functions carry their library's name (`Keyboard_Func_...`), because C has no namespaces to tell them apart.

@@ -1,39 +1,49 @@
-// SPDX-FileCopyrightText: Copyright 2026 shadPS4 Emulator Project
-// SPDX-License-Identifier: GPL-2.0-or-later
+/* SPDX-FileCopyrightText: Copyright 2026 shadPS4 Emulator Project
+ * SPDX-License-Identifier: GPL-2.0-or-later */
 
-#pragma once
+#ifndef SHADPS4_LIBRARIES_PNGENC_H
+#define SHADPS4_LIBRARIES_PNGENC_H
+
+/* libScePngEnc, encoded by libretro-common's rpng. Registered in sysmodule_internal.cpp. */
+
+#include <retro_common_api.h>
 
 #include "common/types.h"
 
-namespace Core::Loader {
-class SymbolsResolver;
-}
+RETRO_BEGIN_DECLS
 
-namespace Libraries::PngEnc {
+enum OrbisPngEncAttribute { ORBIS_PNG_ENC_ATTRIBUTE_NONE = 0 };
 
-enum class OrbisPngEncAttribute { None = 0 };
-
-enum class OrbisPngEncColorSpace : u16 { RGB = 3, RGBA = 19 };
-
-enum class OrbisPngEncPixelFormat : u16 { R8G8B8A8 = 0, B8G8R8A8 };
-
-enum class OrbisPngEncFilterType : u16 {
-    None = 0,
-    Sub = 1,
-    Up = 2,
-    Average = 4,
-    Paeth = 8,
-    All = 15
+/* OrbisPngEncEncodeParam.color_space (u16) */
+enum OrbisPngEncColorSpace {
+    ORBIS_PNG_ENC_COLOR_SPACE_RGB = 3,
+    ORBIS_PNG_ENC_COLOR_SPACE_RGBA = 19
 };
 
-struct OrbisPngEncCreateParam {
+/* OrbisPngEncEncodeParam.pixel_format (u16) */
+enum OrbisPngEncPixelFormat {
+    ORBIS_PNG_ENC_PIXEL_FORMAT_R8G8B8A8 = 0,
+    ORBIS_PNG_ENC_PIXEL_FORMAT_B8G8R8A8 = 1
+};
+
+/* OrbisPngEncEncodeParam.filter_type bits (u16) */
+enum OrbisPngEncFilterType {
+    ORBIS_PNG_ENC_FILTER_NONE = 0,
+    ORBIS_PNG_ENC_FILTER_SUB = 1,
+    ORBIS_PNG_ENC_FILTER_UP = 2,
+    ORBIS_PNG_ENC_FILTER_AVERAGE = 4,
+    ORBIS_PNG_ENC_FILTER_PAETH = 8,
+    ORBIS_PNG_ENC_FILTER_ALL = 15
+};
+
+typedef struct OrbisPngEncCreateParam {
     u32 this_size;
     u32 attribute;
     u32 max_image_width;
     u32 max_filter_number;
-};
+} OrbisPngEncCreateParam;
 
-struct OrbisPngEncEncodeParam {
+typedef struct OrbisPngEncEncodeParam {
     const u8* image_mem_addr;
     u8* png_mem_addr;
     u32 image_mem_size;
@@ -41,27 +51,28 @@ struct OrbisPngEncEncodeParam {
     u32 image_width;
     u32 image_height;
     u32 image_pitch;
-    OrbisPngEncPixelFormat pixel_format;
-    OrbisPngEncColorSpace color_space;
+    u16 pixel_format; /* OrbisPngEncPixelFormat */
+    u16 color_space;  /* OrbisPngEncColorSpace */
     u16 bit_depth;
     u16 clut_number;
     u16 filter_type;
     u16 compression_level;
-};
+} OrbisPngEncEncodeParam;
 
-struct OrbisPngEncOutputInfo {
+typedef struct OrbisPngEncOutputInfo {
     u32 data_size;
     u32 processed_height;
-};
+} OrbisPngEncOutputInfo;
 
-using OrbisPngEncHandle = void*;
+typedef void* OrbisPngEncHandle;
 
 s32 PS4_SYSV_ABI scePngEncCreate(const OrbisPngEncCreateParam* param, void* memoryAddress,
                                  u32 memorySize, OrbisPngEncHandle* handle);
 s32 PS4_SYSV_ABI scePngEncDelete(OrbisPngEncHandle handle);
-s32 PS4_SYSV_ABI scePngEncEncode(OrbisPngEncHandle, const OrbisPngEncEncodeParam* param,
+s32 PS4_SYSV_ABI scePngEncEncode(OrbisPngEncHandle handle, const OrbisPngEncEncodeParam* param,
                                  OrbisPngEncOutputInfo* outputInfo);
 s32 PS4_SYSV_ABI scePngEncQueryMemorySize(const OrbisPngEncCreateParam* param);
 
-void RegisterLib(Core::Loader::SymbolsResolver* sym);
-} // namespace Libraries::PngEnc
+RETRO_END_DECLS
+
+#endif
