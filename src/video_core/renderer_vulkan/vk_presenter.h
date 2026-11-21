@@ -11,14 +11,10 @@
 #include "libretro/libretro_bridge.h"
 #include "video_core/renderer_vulkan/host_passes/pp_pass.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
+#include "video_core/renderer_vulkan/vk_output_images.h"
 #include "video_core/renderer_vulkan/vk_runtime.h"
 #include "video_core/renderer_vulkan/vk_scheduler.h"
-#include "video_core/renderer_vulkan/vk_swapchain.h"
 #include "video_core/texture_cache/texture_cache.h"
-
-namespace Frontend {
-class Window;
-}
 
 struct vk_heap_span;
 struct guest_import;
@@ -52,15 +48,11 @@ class Rasterizer;
 
 class Presenter {
 public:
-    Presenter(Frontend::Window& window, AmdGpu::Liverpool* liverpool);
+    explicit Presenter(AmdGpu::Liverpool* liverpool);
     ~Presenter();
 
     HostPasses::PostProcessingPass::Settings& GetPPSettingsRef() {
         return pp_settings;
-    }
-
-    Frontend::Window& GetWindow() const {
-        return window;
     }
 
     Rasterizer& GetRasterizer() const {
@@ -117,7 +109,6 @@ private:
     u32 expected_frame_width{1920};
     u32 expected_frame_height{1080};
 
-    Frontend::Window& window;
     Instance instance;
     HostPasses::PostProcessingPass::Settings pp_settings{};
     HostPasses::PostProcessingPass pp_pass;
@@ -125,13 +116,13 @@ private:
     Scheduler draw_scheduler;
     Scheduler present_scheduler;
     Scheduler flip_scheduler;
-    Swapchain swapchain;
+    OutputImages output_images;
     Runtime runtime;
     std::unique_ptr<Rasterizer> rasterizer;
     VideoCore::TextureCache& texture_cache;
     vk::UniqueCommandPool command_pool;
     std::vector<Frame> present_frames;
-    // The frames free to draw into: the swapchain's image count at most, far below the
+    // The frames free to draw into: the output images' count at most, far below the
     // capacity
     Common::MPMCQueue<Frame*, 64> free_queue;
     Frame* last_submit_frame;

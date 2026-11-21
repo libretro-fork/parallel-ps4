@@ -4,6 +4,13 @@ What changed in the libretro core of this fork, newest first. Changes that come 
 
 ## Unreleased
 
+- The swapchain is gone: the images the presenter draws each frame into are `OutputImages` (`vk_output_images.h`/`.cpp`, renamed from `vk_swapchain`), on the Vulkan C API with no STL or `auto`.
+  - **No waiting on a size change:** images made before a new size are destroyed once the present scheduler's GPU work so far is done, in place of the device wait the old `Destroy` made. Frames already submitted go on.
+  - **No images at boot with Resolution: Default:** they are made at the game's size once it says it, or at the option's size at the first frame if it has not by then. They are no longer made at boot only to be thrown away.
+  - **Gone:** the frame index nothing read, the width and height kept beside the extent, `Recreate`, the window size check that could never fire, and `Frontend::Window` with it (the presenter reads the Resolution option itself). One memory type search for both kinds of image, where there were two.
+  - **Overlays:** they are set up by the presenter, with a frame of theirs for each frame the presenter can have in flight, as before.
+  - Not run in a game yet.
+
 - The scheduler (`vk_scheduler.h`/`.cpp`) on the Vulkan C API.
   - **Command buffers:** `CommandBuffer()` and `UploadCommandBuffer()` give a `VkCommandBuffer`, so the runtime, tile manager, rasterizer, blit helper and fault manager record into it with no casts. The presenter wraps it until it is converted itself.
   - **Dynamic state:** the stencil ops, depth compare op, cull mode and front face are C types. The viewports and scissors are C arrays with a count, set from a pointer and compared with `memcmp`, so the rasterizer builds them as C structs too.

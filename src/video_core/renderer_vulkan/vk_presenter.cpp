@@ -2,13 +2,14 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include "common/combiner.h"
+#include "common/elf_info.h"
+#include "common/embedded_resources.h"
 #include "common/io_file.h"
 #include "common/path_util.h"
 #include "common/singleton.h"
 #include "core/debug_state.h"
 #include "core/emulator_settings.h"
 #include "core/libraries/system/systemservice.h"
-#include "frontend_window.h"
 #include "input/controller.h"
 #include "video_core/buffer_cache/buffer.h"
 #include "video_core/buffer_cache/guest_import.h"
@@ -504,15 +505,89 @@ static void CopyGameToImage(const vk::CommandBuffer& cmdbuf, const Frame& frame,
                            {}, {}, {}, barriers);
 }
 
-Presenter::Presenter(Frontend::Window& window_, AmdGpu::Liverpool* liverpool_)
-    : window{window_}, liverpool{liverpool_},
+/// The overlays, for @frame_count frames in flight, drawn in @format, with the UI font read in
+/// place from what the core carries
+static void InitOverlays(const Instance& instance, VkFormat format, u32 frame_count) {
+    size_t font_size = 0;
+    const u8* const font =
+        Common::GetEmbeddedResource("src/resources/fonts/NotoSans-Regular.ttf", &font_size);
+    ovl_vk_info_t info{};
+    info.get_device_proc = vkGetDeviceProcAddr;
+    info.device = static_cast<VkDevice>(instance.GetDevice());
+    vkGetPhysicalDeviceMemoryProperties(static_cast<VkPhysicalDevice>(instance.GetPhysicalDevice()),
+                                        &info.memory_properties);
+    info.image_count = frame_count;
+    info.surface_format = format;
+    info.font = font;
+    info.font_size = font_size;
+    // The fonts after it, tried in turn for what it lacks: Arabic, Thai, symbols, then the
+    // CJK collection's face for the console's language
+    static constexpr const char* fallbacks[] = {
+        "src/resources/fonts/NotoSansArabic-Regular.ttf",
+        "src/resources/fonts/NotoSansThai-Regular.ttf",
+        "src/resources/fonts/NotoSansSymbols2-Regular.ttf",
+        "src/resources/fonts/NotoSansCJK-Regular.ttc",
+    };
+    static constexpr u32 NumFallbacks = sizeof(fallbacks) / sizeof(fallbacks[0]);
+    ovl_face_desc_t faces[NumFallbacks]{};
+    for (u32 i = 0; i < NumFallbacks; i++) {
+        size_t size = 0;
+        faces[i].data = Common::GetEmbeddedResource(fallbacks[i], &size);
+        faces[i].size = size;
+    }
+    // The collection's faces: Japanese, Korean, Simplified and Traditional Chinese; the
+    // console's languages 9, 11 and 10 are the last three, any other reads the Japanese
+    switch (emu_settings_get_console_language()) {
+    case 9:
+        faces[3].index = 1;
+        break;
+    case 11:
+        faces[3].index = 2;
+        break;
+    case 10:
+        faces[3].index = 3;
+        break;
+    default:
+        break;
+    }
+    info.fallback_faces = faces;
+    info.fallback_count = NumFallbacks;
+    // The splash screen, read where the game's files lent it
+    size_t splash_size = 0;
+    info.splash = Common::ElfInfo::Instance().GetSplashData(&splash_size);
+    info.splash_size = splash_size;
+    // Without them the game still runs: no FPS counter, notifications or trophy popups
+    if (!font) {
+        LOG_ERROR(Render_Vulkan, "The UI font is not among the core's resources: the "
+                                 "overlays are off (a clean build puts it back)");
+    } else if (!ovl_vk_init(&info)) {
+        LOG_ERROR(Render_Vulkan, "The overlays could not be made (%s): they are off",
+                  ovl_vk_error());
+    }
+}
+
+/// The output images' size as vulkan.hpp's, for the code here not yet on the C API
+static vk::Extent2D VkppExtent(const OutputImages& images) {
+    const VkExtent2D extent = images.Extent();
+    return vk::Extent2D{extent.width, extent.height};
+}
+
+Presenter::Presenter(AmdGpu::Liverpool* liverpool_)
+    : liverpool{liverpool_},
       instance{emu_settings_get_gpu_id(), emu_settings_get_vkvalidation_enabled(),
                emu_settings_get_vkcrash_diagnostic_enabled()},
       draw_scheduler{instance}, present_scheduler{instance}, flip_scheduler{instance},
-      swapchain{instance, window}, runtime{instance, draw_scheduler},
+      output_images{instance}, runtime{instance, draw_scheduler},
       rasterizer{std::make_unique<Rasterizer>(instance, draw_scheduler, runtime, liverpool)},
       texture_cache{rasterizer->GetTextureCache()} {
-    const u32 num_images = swapchain.GetImageCount();
+    // The images at the Resolution option's size; with Resolution: Default they are made at
+    // the game's, once it has said it (Present)
+    if (!Libretro::GameSizePending()) {
+        output_images.Create(emu_settings_get_window_width(), emu_settings_get_window_height(),
+                             present_scheduler);
+    }
+    const u32 num_images =
+        output_images.Made() ? output_images.Count() : OutputImages::OffscreenCount;
     const vk::Device device = instance.GetDevice();
 
     // Create presentation frames.
@@ -526,13 +601,17 @@ Presenter::Presenter(Frontend::Window& window_, AmdGpu::Liverpool* liverpool_)
         free_queue.TryEmplace(&frame);
     }
 
-    pp_pass.Create(device, swapchain.GetSurfaceFormat().format);
+    pp_pass.Create(device, static_cast<vk::Format>(output_images.Format()));
+    // One of the overlays' frames for each of the presenter's, as many as can be in flight
+    InitOverlays(instance, output_images.Format(), num_images);
 }
 
 Presenter::~Presenter() {
     draw_scheduler.Finish();
     present_scheduler.Finish();
     flip_scheduler.Finish();
+    // Output images made before the last ones go now the GPU is done with them
+    present_scheduler.PopPendingOperations();
     Check(vk::Result(vkResetCommandBuffer(draw_scheduler.CommandBuffer(), 0)));
     Check(vk::Result(vkResetCommandBuffer(present_scheduler.CommandBuffer(), 0)));
     Check(vk::Result(vkResetCommandBuffer(flip_scheduler.CommandBuffer(), 0)));
@@ -597,7 +676,7 @@ void Presenter::RecreateFrame(Frame* frame, u32 width, u32 height) {
         instance.GetAllocator()->DestroyImage(frame->image, frame->allocation);
     }
 
-    const vk::Format format = swapchain.GetSurfaceFormat().format;
+    const vk::Format format = static_cast<vk::Format>(output_images.Format());
     const vk::ImageCreateInfo image_info = {
         .flags = vk::ImageCreateFlagBits::eMutableFormat,
         .imageType = vk::ImageType::e2D,
@@ -886,15 +965,15 @@ void Presenter::Present(Frame* frame, bool is_reusing_frame, bool is_game_frame)
 
     // Resolution: Default - the picture at the game's size, once it has said it
     if (u32 game_width, game_height; Libretro::TakeGameSize(game_width, game_height)) {
-        window.SetSize(game_width, game_height);
-        swapchain.Recreate(game_width, game_height);
+        output_images.Create(game_width, game_height, present_scheduler);
     }
-    // Recreate the swapchain if the window was resized.
-    if (window.GetWidth() != swapchain.GetWidth() || window.GetHeight() != swapchain.GetHeight()) {
-        swapchain.Recreate(window.GetWidth(), window.GetHeight());
+    // A game that never says its size is shown at the Resolution option's
+    if (!output_images.Made()) {
+        output_images.Create(emu_settings_get_window_width(), emu_settings_get_window_height(),
+                             present_scheduler);
     }
 
-    swapchain.AcquireNextImage();
+    output_images.Acquire();
 
     // Reset fence for queue submission.
     const auto reset_result = instance.GetDevice().resetFences(frame->present_done);
@@ -908,10 +987,11 @@ void Presenter::Present(Frame* frame, bool is_reusing_frame, bool is_game_frame)
         const Input::State pad = controllers[0]->ReadState();
         PadToOverlay(pad);
     }
-    NewOverlayFrame(window.GetWidth(), window.GetHeight(), is_reusing_frame);
+    const VkExtent2D output_extent = output_images.Extent();
+    NewOverlayFrame(output_extent.width, output_extent.height, is_reusing_frame);
 
-    const vk::Image swapchain_image = swapchain.Image();
-    const vk::ImageView swapchain_image_view = swapchain.ImageView();
+    const vk::Image swapchain_image{output_images.Image()};
+    const vk::ImageView swapchain_image_view{output_images.ImageView()};
 
     auto& scheduler = present_scheduler;
     const vk::CommandBuffer cmdbuf{scheduler.CommandBuffer()};
@@ -927,7 +1007,7 @@ void Presenter::Present(Frame* frame, bool is_reusing_frame, bool is_game_frame)
     }
 
     {
-        const vk::Extent2D extent = swapchain.GetExtent();
+        const vk::Extent2D extent = VkppExtent(output_images);
         // The game's picture is copied into the image, and the overlays drawn over it; or, while
         // the game shows its splash screen and it is decoded, the splash drawn in its place.
         // The frame image goes back to being sampled after (PrepareLastFrame).
@@ -982,8 +1062,8 @@ void Presenter::Present(Frame* frame, bool is_reusing_frame, bool is_game_frame)
                                    vk::PipelineStageFlagBits::eFragmentShader |
                                    vk::PipelineStageFlagBits::eTransfer,
                                {}, {}, {}, pre_barriers);
-        const s32 area_width = static_cast<s32>(window.GetWidth());
-        const s32 area_height = static_cast<s32>(window.GetHeight());
+        const s32 area_width = static_cast<s32>(extent.width);
+        const s32 area_height = static_cast<s32>(extent.height);
         SetExpectedGameSize(area_width, area_height);
         if (direct) {
             // Where the game's picture goes, in the image's pixels
@@ -998,14 +1078,14 @@ void Presenter::Present(Frame* frame, bool is_reusing_frame, bool is_game_frame)
                                  static_cast<VkImageView>(swapchain_image_view), extent);
         }
         ovl_vk_render(static_cast<VkCommandBuffer>(cmdbuf),
-                      static_cast<VkImageView>(swapchain_image_view), swapchain.GetExtent());
+                      static_cast<VkImageView>(swapchain_image_view), output_images.Extent());
 
         // Every frame is read back for the frontend, after the overlays are drawn,
         // into a buffer that is used again - unless the frontend draws from the image itself.
         const bool read_back_frame = !Libretro::GpuFramesActive();
         if (read_back_frame) {
             frame_readback = TakeFrameReadback(instance, extent.width, extent.height,
-                                               swapchain.GetSurfaceFormat().format);
+                                               static_cast<vk::Format>(output_images.Format()));
             auto& readback = *frame_readback;
 
             const vk::ImageMemoryBarrier to_transfer{
@@ -1079,9 +1159,9 @@ void Presenter::Present(Frame* frame, bool is_reusing_frame, bool is_game_frame)
     // Flush vulkan commands.
     if (Libretro::GpuFramesActive()) {
         // The frame is the image: published once the GPU has drawn it.
-        const vk::Extent2D shown = swapchain.GetExtent();
+        const VkExtent2D shown = output_images.Extent();
         scheduler.DeferPriorityOperation(
-            [image = swapchain.GetImageIndex(), generation = swapchain.GetImageGeneration(),
+            [image = output_images.Index(), generation = output_images.Generation(),
              width = shown.width,
              height = shown.height]() { Libretro::PushImage(image, generation, width, height); });
     }
@@ -1109,8 +1189,6 @@ void Presenter::Present(Frame* frame, bool is_reusing_frame, bool is_game_frame)
     info.AddWait(frame->ready_semaphore, frame->ready_tick);
     info.AddSignal(frame->present_done);
     scheduler.Flush(info);
-
-    swapchain.Present();
 
     free_frame();
 }

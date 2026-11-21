@@ -10,32 +10,6 @@
 
 namespace Frontend {
 
-// What the emulator keeps of a window in the core, where the frontend shows the picture and
-// there is no window of the system's: the size of the picture - the Resolution option's, or with
-// Resolution: Default the game's own (the presenter sets it) - read by the presenter on the
-// renderer's thread.
-class Window {
-public:
-    Window(s32 width_, s32 height_) : width{width_}, height{height_} {}
-
-    s32 GetWidth() const {
-        return width;
-    }
-
-    s32 GetHeight() const {
-        return height;
-    }
-
-    void SetSize(s32 width_, s32 height_) {
-        width = width_;
-        height = height_;
-    }
-
-private:
-    s32 width;
-    s32 height;
-};
-
 // The emulator is asked to end (IPC's STOP, the quit dialog). Its main thread, waiting in
 // WaitForQuit once the game runs, ends the process the way it ends on the core's word.
 inline retro_atomic_int_t quit_requested{0};

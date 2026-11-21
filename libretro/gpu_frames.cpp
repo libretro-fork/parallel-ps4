@@ -3,7 +3,7 @@
 
 // The picture handed to the frontend on the GPU: the frontend's side. See gpu_frames.h.
 //
-// The emulator draws each frame into one of a few images of its own (vk_swapchain.cpp). With
+// The emulator draws each frame into one of a few images of its own (vk_output_images.cpp). With
 // this it makes them of memory that can be exported, and hands over each image's memory once
 // (host.cpp): on Linux a descriptor over a socket, on Windows an NT handle in the shared memory,
 // which is duplicated from the emulator's process into this one. Here the same images are made in the frontend's
@@ -480,7 +480,7 @@ void Import() {
         VkExternalMemoryImageCreateInfo external{};
         external.sType = VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMAGE_CREATE_INFO;
         external.handleTypes = HANDLE_TYPE;
-        // The same image as the emulator's (vk_swapchain.cpp, CreateOffscreenImages).
+        // The same image as the emulator's (vk_output_images.cpp, CreateOffscreenImages).
         VkImageCreateInfo image_info{};
         image_info.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
         image_info.pNext = &external;

@@ -56,7 +56,6 @@ private:
     Core::MemoryManager* memory;
     Input::GameControllers* controllers;
     Core::Linker* linker;
-    std::unique_ptr<Frontend::Window> window;
     // The game's time (nanoseconds) the play time was last counted up to; 0: not counting
     u64 start_time{};
     stop_thread_t play_time_thread = STOP_THREAD_INIT;

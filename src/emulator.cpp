@@ -60,8 +60,6 @@
 #endif
 #include <core/file_format/npbind.h>
 
-Frontend::Window* g_window = nullptr;
-
 namespace Libraries::Kernel {
 extern char const* g_environment[64];
 }
@@ -613,11 +611,6 @@ void Emulator::Run(std::filesystem::path file, std::vector<std::string> args,
 
     // Extract and load trophies.
     ExtractTrophies("/app0/sce_sys/npbind.dat", "/app0/sce_sys/trophy");
-
-    window = std::make_unique<Frontend::Window>(emu_settings_get_window_width(),
-                                                emu_settings_get_window_height());
-
-    g_window = window.get();
 
     const auto& mount_data_dir = Common::FS::GetUserPath(Common::FS::PathType::GameDataDir);
     mnt->Mount(mount_data_dir, "/data");
