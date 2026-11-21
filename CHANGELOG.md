@@ -4,6 +4,12 @@ What changed in the libretro core of this fork, newest first. Changes that come 
 
 ## Unreleased
 
+- The blit helper (`blit_helper.h`/`.cpp`) on the Vulkan C API, with no STL or `auto`.
+  - **One path:** the three blits (colour as multisampled depth, between multisampled images, a depth plane into colour) share one function for their short-lived views, one for the draw, and one for making their pipelines. The views, descriptor, pipeline state and draw are the same as before.
+  - **Pipelines:** each kind's pipelines are a small array of key and `VkPipeline`, found by a walk as the vectors were, and destroyed with the helper. The keys compare with a defaulted `==`.
+  - **Shaders:** their words are written into a buffer the helper holds instead of a vector made each time.
+  - **Render state:** `RenderAttachment`'s view and layout are `VkImageView` and `VkImageLayout`; the rasterizer's two targets cast their image's layout.
+  - **Checks:** the Linux and Windows builds pass. Not run in a game yet.
 - The texture cache itself (`texture_cache.h`/`.cpp`) with no STL or `auto`.
   - **Copies:** the mip copies of a download and of an upload are made by one `MipCopy` function, as Vulkan's C `VkBufferImageCopy`, with the same values as before. `Runtime::UploadImage` takes a pointer and a count like `DownloadImage`, records `vkCmdCopyBufferToImage`, and nothing for no copies.
   - **Read backs:** what a download does once the GPU is done is a member function, called at once for a synchronous one and from the deferred operation otherwise, instead of a stored lambda moved into it.

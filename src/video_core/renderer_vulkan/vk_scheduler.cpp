@@ -99,8 +99,8 @@ void Scheduler::BeginRendering(const RenderState& new_state) {
         VkRenderingAttachmentInfo& attachment = color_attachments[i];
         attachment = {};
         attachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
-        attachment.imageView = static_cast<VkImageView>(cb.image_view);
-        attachment.imageLayout = static_cast<VkImageLayout>(cb.image_layout);
+        attachment.imageView = cb.image_view;
+        attachment.imageLayout = cb.image_layout;
         attachment.loadOp = cb.is_clear ? VK_ATTACHMENT_LOAD_OP_CLEAR : VK_ATTACHMENT_LOAD_OP_LOAD;
         attachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
         memcpy(attachment.clearValue.color.uint32, cb.clear_value, sizeof(cb.clear_value));
@@ -109,8 +109,8 @@ void Scheduler::BeginRendering(const RenderState& new_state) {
     const RenderAttachment& db = render_state.depth_stencil_attachment;
     VkRenderingAttachmentInfo depth_attachment{};
     depth_attachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
-    depth_attachment.imageView = static_cast<VkImageView>(db.image_view);
-    depth_attachment.imageLayout = static_cast<VkImageLayout>(db.image_layout);
+    depth_attachment.imageView = db.image_view;
+    depth_attachment.imageLayout = db.image_layout;
     depth_attachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
     VkRenderingAttachmentInfo stencil_attachment = depth_attachment;
     depth_attachment.loadOp =

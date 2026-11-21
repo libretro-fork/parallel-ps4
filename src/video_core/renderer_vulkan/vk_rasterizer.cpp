@@ -1395,7 +1395,7 @@ RenderState Rasterizer::BeginRendering(const GraphicsPipeline* pipeline) {
             is_clear ? LiverpoolToVK::ColorBufferClearValue(col_buf) : vk::ClearValue{};
         auto& attachment = state.color_attachments[cb];
         attachment.image_view = image_view.Handle();
-        attachment.image_layout = image->backing->state.layout;
+        attachment.image_layout = static_cast<VkImageLayout>(image->backing->state.layout);
         memcpy(attachment.clear_value, clear_value.color.uint32.data(),
                sizeof(attachment.clear_value));
         attachment.is_clear = is_clear;
@@ -1463,7 +1463,7 @@ RenderState Rasterizer::BeginRendering(const GraphicsPipeline* pipeline) {
 
         auto& attachment = state.depth_stencil_attachment;
         attachment.image_view = image_view.Handle();
-        attachment.image_layout = image.backing->state.layout;
+        attachment.image_layout = static_cast<VkImageLayout>(image.backing->state.layout);
         memset(attachment.clear_value, 0, sizeof(attachment.clear_value));
         attachment.is_clear = 0;
         instance.Note("depth target 2: z info|stencil info<<32, depth read at, stencil read at, "

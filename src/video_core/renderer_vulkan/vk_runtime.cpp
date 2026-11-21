@@ -623,7 +623,9 @@ void Runtime::CopyColorAndDepth(VideoCore::Image* src, VideoCore::Image* dst) {
 
         blit_helper->ReinterpretColorAsMsDepth(
             dst->HostSize().width, dst->HostSize().height, dst->info.num_samples,
-            src->info.pixel_format, dst->info.pixel_format, src->GetImage(), dst->GetImage());
+            static_cast<VkFormat>(src->info.pixel_format),
+            static_cast<VkFormat>(dst->info.pixel_format), static_cast<VkImage>(src->GetImage()),
+            static_cast<VkImage>(dst->GetImage()));
     } else {
         LOG_WARNING(Render_Vulkan, "Unimplemented depth overlap copy");
     }
@@ -712,10 +714,12 @@ void Runtime::CopyDepthToColor(VideoCore::Image* src, VideoCore::Image* dst, boo
                   src->info.guest_address, dst->info.guest_address,
                   u64(stencil) | u64(sample) << 8 | u64(src_samples) << 16,
                   u64(width) | u64(height) << 16);
-    blit_helper->CopyDepthToColor(width, height, dst->backing->num_samples, src->info.pixel_format,
-                                  dst->info.pixel_format, src_samples > 1, stencil, uint_out,
-                                  write_mask, std::min(sample, src_samples - 1), src->GetImage(),
-                                  src_layer, dst->GetImage(), dst_layer);
+    blit_helper->CopyDepthToColor(
+        width, height, dst->backing->num_samples, static_cast<VkFormat>(src->info.pixel_format),
+        static_cast<VkFormat>(dst->info.pixel_format), src_samples > 1, stencil, uint_out,
+        static_cast<VkColorComponentFlags>(write_mask), std::min(sample, src_samples - 1),
+        static_cast<VkImage>(src->GetImage()), src_layer, static_cast<VkImage>(dst->GetImage()),
+        dst_layer);
 
     dst->flags |= VideoCore::ImageFlagBits::GpuModified;
     dst->flags &= ~VideoCore::ImageFlagBits::Dirty;
@@ -909,8 +913,10 @@ void Runtime::SetBackingSamples(VideoCore::Image* image, u32 num_samples, bool c
                       u64(image->HostSize().width) | u64(image->HostSize().height) << 16);
         // Copy between ms and non ms backing images
         blit_helper->CopyBetweenMsImages(
-            image->HostSize().width, image->HostSize().height, new_backing->num_samples, info.pixel_format,
-            backing->num_samples > 1, backing->image, new_backing->image);
+            image->HostSize().width, image->HostSize().height, new_backing->num_samples,
+            static_cast<VkFormat>(info.pixel_format), backing->num_samples > 1,
+            static_cast<VkImage>(vk::Image{backing->image}),
+            static_cast<VkImage>(vk::Image{new_backing->image}));
 
         // Update current layout in tracker to new backings layout
         new_backing->state.layout = dst_layout;

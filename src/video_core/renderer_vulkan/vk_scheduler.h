@@ -26,8 +26,8 @@ namespace Vulkan {
 class Instance;
 
 struct RenderAttachment {
-    vk::ImageView image_view;
-    vk::ImageLayout image_layout;
+    VkImageView image_view;
+    VkImageLayout image_layout;
     u32 clear_value[4];
     union {
         u32 is_clear;
