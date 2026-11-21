@@ -14,6 +14,7 @@
 #include "core/libraries/disc_map/disc_map.h"
 #include "core/libraries/font/font.h"
 #include "core/libraries/font/fontft.h"
+#include "core/libraries/jpeg/jpegdec.h"
 #include "core/libraries/jpeg/jpegenc.h"
 #include "core/libraries/kernel/kernel.h"
 #include "core/libraries/kernel/orbis_error.h"
@@ -77,6 +78,16 @@ static void UltSelfSet(void* value) {
 
 static s32 UltCallEntry(ult_entry entry, u64 arg) {
     return Core::CallGuest(reinterpret_cast<s32 PS4_SYSV_ABI (*)(u64)>(entry), arg);
+}
+
+static void RegisterJpegDec(Core::Loader::SymbolsResolver* sym) {
+    LIB_FUNCTION("uNAUmANZMEw", "libSceJpegDec", 1, "libSceJpegDec", sceJpegDecQueryMemorySize);
+    LIB_FUNCTION("JPh3Zgg0Zwc", "libSceJpegDec", 1, "libSceJpegDec", sceJpegDecCreate);
+    LIB_FUNCTION("Hwh11+m5KoI", "libSceJpegDec", 1, "libSceJpegDec", sceJpegDecDelete);
+    LIB_FUNCTION("1kzQRoWEgSA", "libSceJpegDec", 1, "libSceJpegDec", sceJpegDecDecode);
+    LIB_FUNCTION("LSinoSQH790", "libSceJpegDec", 1, "libSceJpegDec", sceJpegDecParseHeader);
+    LIB_FUNCTION("919MhccOiII", "libSceJpegDec_jvm", 1, "libSceJpegDec",
+                 sceJpegDecDecodeWithInputControl);
 }
 
 static void RegisterJpegEnc(Core::Loader::SymbolsResolver* sym) {
@@ -448,7 +459,7 @@ s32 loadModuleInternal(s32 index, s32 argc, const void* argv, s32* res_out) {
              {"libSceAvPlayer.sprx", &Libraries::AvPlayer::RegisterLib},
              {"libSceAvPlayerStreaming.sprx", nullptr},
              {"libSceRtc.sprx", &Libraries::Rtc::RegisterLib},
-             {"libSceJpegDec.sprx", nullptr},
+             {"libSceJpegDec.sprx", &RegisterJpegDec},
              {"libSceJpegEnc.sprx", &RegisterJpegEnc},
              {"libScePngDec.sprx", &RegisterPngDec},
              {"libScePngEnc.sprx", &RegisterPngEnc},

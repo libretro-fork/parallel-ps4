@@ -269,7 +269,7 @@ CORE_SOURCES_C += $(addprefix src/core/libraries/ult/,ult.c ult_sync.c)
 # The small HLE libraries written in C, registered in libs.cpp and sysmodule_internal.cpp
 CORE_SOURCES_C += $(addprefix src/core/libraries/,companion/companion_httpd.c \
 	companion/companion_util.c content_export/content_export.c disc_map/disc_map.c \
-	game_live_streaming/gamelivestreaming.c jpeg/jpegenc.c keyboard/keyboard.c libpng/pngdec.c \
+	game_live_streaming/gamelivestreaming.c jpeg/jpegdec.c jpeg/jpegenc.c keyboard/keyboard.c libpng/pngdec.c \
 	libpng/pngenc.c mouse/mouse.c move/move.c random/random.c razor_cpu/razor_cpu.c \
 	remote_play/remoteplay.c rudp/rudp.c screenshot/screenshot.c share_play/shareplay.c \
 	signin_dialog/signindialog.c system_gesture/system_gesture.c ulobjmgr/ulobjmgr.c \
@@ -436,7 +436,7 @@ LRC_SOURCES_C += $(addprefix $(LRC_DIR)/formats/atrac9/,ratrac9.c)
 LRC_SOURCES_C += $(addprefix $(LRC_DIR)/formats/flac/,rflac.c)
 LRC_SOURCES_C += $(addprefix $(LRC_DIR)/formats/h264/,rh264.c)
 LRC_SOURCES_C += $(addprefix $(LRC_DIR)/formats/h265/,rh265.c rh265_sps_crop.c)
-LRC_SOURCES_C += $(addprefix $(LRC_DIR)/formats/jpeg/,rjpeg_encode.c)
+LRC_SOURCES_C += $(addprefix $(LRC_DIR)/formats/jpeg/,rjpeg.c rjpeg_encode.c)
 LRC_SOURCES_C += $(addprefix $(LRC_DIR)/formats/json/,rjson.c)
 LRC_SOURCES_C += $(addprefix $(LRC_DIR)/formats/mp3/,rmp3.c)
 LRC_SOURCES_C += $(addprefix $(LRC_DIR)/formats/mp4/,rmp4.c)

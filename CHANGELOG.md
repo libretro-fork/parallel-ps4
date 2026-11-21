@@ -4,6 +4,11 @@ What changed in the libretro core of this fork, newest first. Changes that come 
 
 ## Unreleased
 
+- **libSceJpegDec is implemented.** Before, a game without the system's own `libSceJpegDec.sprx` got nothing: every call it made landed on an unresolved symbol. It now decodes with libretro-common's rjpeg (`formats/jpeg/rjpeg.c`, synced from RetroArch): baseline and progressive, any common chroma subsampling, restart markers and greyscale.
+  - RGBA and BGRA at full size are decoded straight into the game's buffer, row by row, with no copy. Greyscale, YUYV and the 2, 4 and 8 downscales are made from rjpeg's one row as each is decoded. The decoder is made at `sceJpegDecCreate` and kept until `sceJpegDecDelete`, so after the first image of a size, decoding takes no memory.
+  - The structures, NIDs, argument checks, memory size and header parsing follow upstream shadPS4's libSceJpegDec (which decodes with stb_image into a copy). YUYV output is written here at two bytes a pixel; upstream accepts it and writes nothing.
+  - Checked outside a game: JPEGs made by libjpeg (through PIL), decoded through `sceJpegDecDecode` in every pixel format and downscale, match libjpeg's own decode at 52 dB or better; a buffer too small and a broken file give their errors. Not run in a game yet.
+
 - **libSceJpegEnc encodes.** It wrote nothing before; it now encodes the game's picture with libretro-common's rjpeg (`formats/jpeg/rjpeg_encode.c`, synced from RetroArch with its new `rjpeg_encode_blocks`), straight from the game's image into its buffer, a block at a time: no copy of the picture is made and nothing is allocated.
   - RGBA and BGRA at 4:2:2 or 4:2:0, packed YUYV (`Y8U8Y8V8`) at 4:2:2 or 4:2:0, and greyscale (`Y8`) as a one-component JPEG; the game's restart interval is written as restart markers.
   - The game's compression ratio is taken as 1 the least compression (quality 100) to 255 the most (quality 1). The PS4's own scale is not known; that is a guess.
