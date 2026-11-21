@@ -4,6 +4,10 @@ What changed in the libretro core of this fork, newest first. Changes that come 
 
 ## Unreleased
 
+- RTC's calendar is libretro-common's: `time/rtime.h`, synced from RetroArch with its new `rtime_days_from_civil`, `rtime_civil_from_days`, `rtime_is_leap_year`, `rtime_days_in_month` and `rtime_weekday`, gives the month lengths, the leap years and the day of the week the RTC library had worked out itself. `time/rtime.c` is synced with it. (`crypto/x509.c`, which uses the calendar too in RetroArch, is left as it was: its newer version needs newer `encodings/base64`, `crypto/x509.h` and `retro_atomic.h`, a resync of its own.)
+  - The same answers: the comparison against the C++ RTC was run again, 20.8 million calls, no difference.
+  - Not run in a game yet.
+
 - The RTC library (`libSceRtc`: the game's clock, dates and ticks) is MSVC C89, registered in `sysmodule_internal.cpp`.
   - **The same answers:** checked against the C++ version, linked into one program, on 20.8 million calls of every function over random and edge dates, ticks, time zones and both SDK checks: no difference. Its quirks are kept, such as `sceRtcGetTick` adjusting the date it is given, and `sceRtcTickAddMonths` starting from its output tick.
   - **`std::chrono`** gave the length of a month and the day of the week; they are worked out in C, proleptic Gregorian as chrono's are. The formatting builds the same strings with `sprintf` instead of `std::string`.

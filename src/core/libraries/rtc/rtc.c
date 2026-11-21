@@ -6,6 +6,8 @@
 #include <stdio.h>
 #include <string.h>
 
+#include <time/rtime.h>
+
 #include "common/c_bridge.h"
 #include "core/libraries/error_codes.h"
 #include "core/libraries/kernel/kernel_c.h"
@@ -17,32 +19,6 @@
 #define RTC_HOUR_US ((s64)3600 * 1000000)
 #define RTC_DAY_US ((s64)86400 * 1000000)
 #define RTC_WEEK_US ((s64)604800 * 1000000)
-
-/* The proleptic Gregorian calendar, as std::chrono has it */
-static int rtc_is_leap(int year) {
-    return (year % 4 == 0 && year % 100 != 0) || year % 400 == 0;
-}
-
-/* The last day of @month (1 to 12) of @year */
-static int rtc_last_day(int year, int month) {
-    static const unsigned char days[12] = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
-    if (month == 2 && rtc_is_leap(year)) {
-        return 29;
-    }
-    return days[(month - 1) % 12];
-}
-
-/* The day of the week, 0 Sunday to 6 Saturday (std::chrono::weekday::c_encoding) */
-static int rtc_weekday(int year, int month, int day) {
-    /* Days from 1970-01-01 (Howard Hinnant's days_from_civil) */
-    s64 y = (s64)year - (month <= 2);
-    const s64 era = (y >= 0 ? y : y - 399) / 400;
-    const s64 yoe = y - era * 400;
-    const s64 doy = (153 * (month + (month > 2 ? -3 : 9)) + 2) / 5 + day - 1;
-    const s64 doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
-    const s64 days = era * 146097 + doe - 719468;
-    return (int)(((days + 4) % 7 + 7) % 7);
-}
 
 /* The character at @pos of a string @len long, or 0 past its end */
 static char rtc_char(const char* s, size_t len, size_t pos) {
@@ -87,7 +63,7 @@ int PS4_SYSV_ABI sceRtcCheckValid(OrbisRtcDateTime* pTime) {
     if (pTime->day == 0)
         return ORBIS_RTC_ERROR_INVALID_DAY;
 
-    if (pTime->day > rtc_last_day(pTime->year, pTime->month))
+    if (pTime->day > (int)rtime_days_in_month(pTime->year, pTime->month))
         return ORBIS_RTC_ERROR_INVALID_DAY;
 
     if (pTime->hour >= 24)
@@ -506,7 +482,7 @@ int PS4_SYSV_ABI sceRtcGetDayOfWeek(int year, int month, int day) {
     if (day <= 0 || day > daysInMonth)
         return ORBIS_RTC_ERROR_INVALID_DAY;
 
-    return rtc_weekday(year, month, day);
+    return (int)rtime_weekday(rtime_days_from_civil(year, (unsigned)month, (unsigned)day));
 }
 
 int PS4_SYSV_ABI sceRtcGetDaysInMonth(int year, int month) {
@@ -518,7 +494,7 @@ int PS4_SYSV_ABI sceRtcGetDaysInMonth(int year, int month) {
     if (month <= 0 || month > 12)
         return ORBIS_RTC_ERROR_INVALID_MONTH;
 
-    return rtc_last_day(year, month);
+    return (int)rtime_days_in_month(year, month);
 }
 
 int PS4_SYSV_ABI sceRtcGetDosTime(OrbisRtcDateTime* pTime, u32* dosTime) {
@@ -644,7 +620,7 @@ int PS4_SYSV_ABI sceRtcIsLeapYear(int yearInt) {
     if (yearInt < 1)
         return ORBIS_RTC_ERROR_INVALID_YEAR;
 
-    return rtc_last_day(yearInt, 2) == 29;
+    return rtime_is_leap_year(yearInt);
 }
 
 static int rtc_month_from_string(const char* s, size_t len, size_t pos) {
@@ -1039,7 +1015,7 @@ int PS4_SYSV_ABI sceRtcTickAddMonths(OrbisRtcTick* pTick1, OrbisRtcTick* pTick2,
 
     time.month = tempMonth + 1;
 
-    lastDay = rtc_last_day(time.year, time.month);
+    lastDay = (int)rtime_days_in_month(time.year, time.month);
 
     if (time.day > lastDay) {
         time.day = (u16)lastDay;
