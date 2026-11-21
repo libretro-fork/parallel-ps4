@@ -439,7 +439,7 @@ ImageId TextureCache::ResolveDepthOverlap(const ImageInfo& requested_info, Bindi
 
     if (recreate) {
         ImageInfo new_info = requested_info;
-        // The larger of the two, as std::max took it: the requested one when they are equal
+        // The larger of the two, as Common::Max took it: the requested one when they are equal
         new_info.resources = requested_info.resources < cache_image.info.resources
                                  ? cache_image.info.resources
                                  : requested_info.resources;

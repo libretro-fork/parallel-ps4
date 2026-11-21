@@ -28,9 +28,9 @@ namespace AmdGpu {
 #define RESUME_GFX(task) task.handle.resume()
 #define RESUME_ASC(task, id) task.handle.resume()
 
-std::array<u8, 48_KB> Liverpool::ConstantEngine::constants_heap;
+u8 Liverpool::ConstantEngine::constants_heap[48_KB];
 
-static std::span<const u32> NextPacket(std::span<const u32> span, size_t offset) {
+static Common::Span<const u32> NextPacket(Common::Span<const u32> span, size_t offset) {
     if (offset > span.size()) {
         LOG_ERROR(
             Lib_GnmDriver,
@@ -196,7 +196,7 @@ void Liverpool::Process() {
     }
 }
 
-Liverpool::Task Liverpool::ProcessCeUpdate(std::span<const u32> ccb) {
+Liverpool::Task Liverpool::ProcessCeUpdate(Common::Span<const u32> ccb) {
 
     while (!ccb.empty()) {
         ProcessCommands();
@@ -218,15 +218,15 @@ Liverpool::Task Liverpool::ProcessCeUpdate(std::span<const u32> ccb) {
         case PM4ItOpcode::WriteConstRam: {
             const AmdGpu::PM4WriteConstRam* write_const =
                 reinterpret_cast<const PM4WriteConstRam*>(header);
-            memcpy(cblock.constants_heap.data() + write_const->Offset(), &write_const->data,
+            memcpy(cblock.constants_heap + write_const->Offset(), &write_const->data,
                    write_const->Size());
             break;
         }
         case PM4ItOpcode::DumpConstRam: {
             const AmdGpu::PM4DumpConstRam* dump_const =
                 reinterpret_cast<const PM4DumpConstRam*>(header);
-            memcpy(dump_const->Address<void*>(),
-                   cblock.constants_heap.data() + dump_const->Offset(), dump_const->Size());
+            memcpy(dump_const->Address<void*>(), cblock.constants_heap + dump_const->Offset(),
+                   dump_const->Size());
             break;
         }
         case PM4ItOpcode::IncrementCeCounter: {
@@ -266,7 +266,7 @@ Liverpool::Task Liverpool::ProcessCeUpdate(std::span<const u32> ccb) {
     }
 }
 
-Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb) {
+Liverpool::Task Liverpool::ProcessGraphics(Common::Span<const u32> dcb) {
 
     const uintptr_t base_addr = reinterpret_cast<uintptr_t>(dcb.data());
     while (!dcb.empty()) {
@@ -346,7 +346,7 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb) {
                     reinterpret_cast<const PM4CmdSetData*>(header);
                 const unsigned int reg_addr = Regs::ConfigRegWordOffset + set_data->reg_offset;
                 const u32* payload = reinterpret_cast<const u32*>(header + 2);
-                std::memcpy(&regs.reg_array[reg_addr], payload, (count - 1) * sizeof(u32));
+                memcpy(&regs.reg_array[reg_addr], payload, (count - 1) * sizeof(u32));
                 break;
             }
             case PM4ItOpcode::SetContextReg: {
@@ -355,7 +355,7 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb) {
                 const unsigned int reg_addr = Regs::ContextRegWordOffset + set_data->reg_offset;
                 const u32* payload = reinterpret_cast<const u32*>(header + 2);
 
-                std::memcpy(&regs.reg_array[reg_addr], payload, (count - 1) * sizeof(u32));
+                memcpy(&regs.reg_array[reg_addr], payload, (count - 1) * sizeof(u32));
 
                 // In the case of HW, render target memory has alignment as color block operates on
                 // tiles. There is no information of actual resource extents stored in CB context
@@ -434,18 +434,18 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb) {
                     ASSERT(set_size <= sizeof(ComputeProgram));
                     u32* addr = reinterpret_cast<u32*>(&mapped_queues[GfxQueueId].cs_state) +
                                 (set_data->reg_offset - 0x200);
-                    std::memcpy(addr, header + 2, set_size);
+                    memcpy(addr, header + 2, set_size);
                 } else {
-                    std::memcpy(&regs.reg_array[Regs::ShRegWordOffset + set_data->reg_offset],
-                                header + 2, set_size);
+                    memcpy(&regs.reg_array[Regs::ShRegWordOffset + set_data->reg_offset],
+                           header + 2, set_size);
                 }
                 break;
             }
             case PM4ItOpcode::SetUconfigReg: {
                 const AmdGpu::PM4CmdSetData* set_data =
                     reinterpret_cast<const PM4CmdSetData*>(header);
-                std::memcpy(&regs.reg_array[Regs::UconfigRegWordOffset + set_data->reg_offset],
-                            header + 2, (count - 1) * sizeof(u32));
+                memcpy(&regs.reg_array[Regs::UconfigRegWordOffset + set_data->reg_offset],
+                       header + 2, (count - 1) * sizeof(u32));
                 break;
             }
             case PM4ItOpcode::SetPredication: {
@@ -774,7 +774,7 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb) {
                     if (rasterizer) {
                         rasterizer->OnFence();
                     }
-                    std::memcpy(address, write_data->data, data_size);
+                    memcpy(address, write_data->data, data_size);
                 } else {
                     UNREACHABLE();
                 }
@@ -912,7 +912,7 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb) {
 }
 
 template <bool is_indirect>
-Liverpool::Task Liverpool::ProcessCompute(std::span<const u32> acb, u32 vqid) {
+Liverpool::Task Liverpool::ProcessCompute(Common::Span<const u32> acb, u32 vqid) {
     AmdGpu::Liverpool::AscQueueInfo& queue = asc_queues[{vqid}];
 
     struct IndirectPatch {
@@ -931,16 +931,15 @@ Liverpool::Task Liverpool::ProcessCompute(std::span<const u32> acb, u32 vqid) {
 
         // If we have a buffered packet, use it.
         if (queue.tmp_dwords > 0) [[unlikely]] {
-            header = reinterpret_cast<const PM4Header*>(queue.tmp_packet.data());
+            header = reinterpret_cast<const PM4Header*>(queue.tmp_packet);
             next_dw_off = header->type3.NumWords() + 1 - queue.tmp_dwords;
-            std::memcpy(queue.tmp_packet.data() + queue.tmp_dwords, acb.data(),
-                        next_dw_off * sizeof(u32));
+            memcpy(queue.tmp_packet + queue.tmp_dwords, acb.data(), next_dw_off * sizeof(u32));
             queue.tmp_dwords = 0;
         }
 
         // If the packet is split across ring boundary, buffer until next submission
         if (next_dw_off > acb.size()) [[unlikely]] {
-            std::memcpy(queue.tmp_packet.data(), acb.data(), acb.size_bytes());
+            memcpy(queue.tmp_packet, acb.data(), acb.size_bytes());
             queue.tmp_dwords = acb.size();
             if constexpr (!is_indirect) {
                 *queue.read_addr += acb.size();
@@ -1057,10 +1056,10 @@ Liverpool::Task Liverpool::ProcessCompute(std::span<const u32> acb, u32 vqid) {
                 ASSERT(set_size <= sizeof(ComputeProgram));
                 u32* addr = reinterpret_cast<u32*>(&mapped_queues[vqid + 1].cs_state) +
                             (set_data->reg_offset - 0x200);
-                std::memcpy(addr, header + 2, set_size);
+                memcpy(addr, header + 2, set_size);
             } else {
-                std::memcpy(&regs.reg_array[Regs::ShRegWordOffset + set_data->reg_offset],
-                            header + 2, set_size);
+                memcpy(&regs.reg_array[Regs::ShRegWordOffset + set_data->reg_offset], header + 2,
+                       set_size);
             }
             break;
         }
@@ -1122,7 +1121,7 @@ Liverpool::Task Liverpool::ProcessCompute(std::span<const u32> acb, u32 vqid) {
                 if (rasterizer) {
                     rasterizer->OnFence();
                 }
-                std::memcpy(write_data->Address<void*>(), write_data->data, data_size);
+                memcpy(write_data->Address<void*>(), write_data->data, data_size);
             } else {
                 UNREACHABLE();
             }
@@ -1183,24 +1182,27 @@ Liverpool::Task Liverpool::ProcessCompute(std::span<const u32> acb, u32 vqid) {
     }
 }
 
-Liverpool::CmdBuffer Liverpool::CopyCmdBuffers(std::span<const u32> dcb, std::span<const u32> ccb) {
+Liverpool::CmdBuffer Liverpool::CopyCmdBuffers(Common::Span<const u32> dcb,
+                                               Common::Span<const u32> ccb) {
     // Into room the GPU thread is done with; with none free, read where the game has them, as
     // with the copying off (cmd_copy_ring.h)
     const u32* dcb_copy = nullptr;
     const u32* ccb_copy = nullptr;
     if (!copy_ring || !cmd_copy_ring_copy(copy_ring, dcb.data(), dcb.size(), ccb.data(), ccb.size(),
                                           &dcb_copy, &ccb_copy)) {
-        return std::make_pair(dcb, ccb);
+        return CmdBuffer{dcb, ccb};
     }
-    return std::make_pair(std::span<const u32>{dcb_copy, dcb.size()},
-                          std::span<const u32>{ccb_copy, ccb.size()});
+    return CmdBuffer{Common::Span<const u32>{dcb_copy, dcb.size()},
+                     Common::Span<const u32>{ccb_copy, ccb.size()}};
 }
 
-void Liverpool::SubmitGfx(std::span<const u32> dcb, std::span<const u32> ccb) {
+void Liverpool::SubmitGfx(Common::Span<const u32> dcb, Common::Span<const u32> ccb) {
     AmdGpu::Liverpool::GpuQueue& queue = mapped_queues[GfxQueueId];
 
     if (emu_settings_get_copy_gpu_buffers()) {
-        std::tie(dcb, ccb) = CopyCmdBuffers(dcb, ccb);
+        const CmdBuffer copied = CopyCmdBuffers(dcb, ccb);
+        dcb = copied.dcb;
+        ccb = copied.ccb;
     }
 
     Liverpool::Task task = ProcessGraphics(dcb);
@@ -1218,7 +1220,7 @@ void Liverpool::SubmitGfx(std::span<const u32> dcb, std::span<const u32> ccb) {
     retro_eventcount_notify(&work_ec);
 }
 
-void Liverpool::SubmitAsc(u32 gnm_vqid, std::span<const u32> acb) {
+void Liverpool::SubmitAsc(u32 gnm_vqid, Common::Span<const u32> acb) {
     ASSERT_MSG(gnm_vqid > 0 && gnm_vqid < NumTotalQueues, "Invalid virtual ASC queue index");
     AmdGpu::Liverpool::GpuQueue& queue = mapped_queues[gnm_vqid];
 

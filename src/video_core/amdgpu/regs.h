@@ -14,8 +14,7 @@ namespace AmdGpu {
 
 #define DO_CONCAT2(x, y) x##y
 #define CONCAT2(x, y) DO_CONCAT2(x, y)
-#define INSERT_PADDING_WORDS(num_words)                                                            \
-    [[maybe_unused]] std::array<u32, num_words> CONCAT2(pad, __LINE__)
+#define INSERT_PADDING_WORDS(num_words) [[maybe_unused]] u32 CONCAT2(pad, __LINE__)[num_words]
 
 union Regs {
     static constexpr u32 NumRegs = 0xD000;
@@ -64,8 +63,8 @@ union Regs {
         ColorBufferMask color_shader_mask;
         ViewportScissor generic_scissor;
         INSERT_PADDING_WORDS(2);
-        std::array<ViewportScissor, NUM_VIEWPORTS> viewport_scissors;
-        std::array<ViewportDepth, NUM_VIEWPORTS> viewport_depths;
+        ViewportScissor viewport_scissors[NUM_VIEWPORTS];
+        ViewportDepth viewport_depths[NUM_VIEWPORTS];
         INSERT_PADDING_WORDS(46);
         u32 index_offset;
         u32 primitive_restart_index;
@@ -76,10 +75,10 @@ union Regs {
         StencilRefMask stencil_ref_front;
         StencilRefMask stencil_ref_back;
         INSERT_PADDING_WORDS(1);
-        std::array<ViewportBounds, NUM_VIEWPORTS> viewports;
-        std::array<ClipUserData, NUM_CLIP_PLANES> clip_user_data;
+        ViewportBounds viewports[NUM_VIEWPORTS];
+        ClipUserData clip_user_data[NUM_CLIP_PLANES];
         INSERT_PADDING_WORDS(10);
-        std::array<PsInputControl, 32> ps_inputs;
+        PsInputControl ps_inputs[32];
         VsOutputConfig vs_output_config;
         INSERT_PADDING_WORDS(1);
         PsInput ps_input_ena;
@@ -93,7 +92,7 @@ union Regs {
         ShaderExportFormat z_export_format;
         ColorExportFormat color_export_format;
         INSERT_PADDING_WORDS(26);
-        std::array<BlendControl, NUM_COLOR_BUFFERS> blend_control;
+        BlendControl blend_control[NUM_COLOR_BUFFERS];
         INSERT_PADDING_WORDS(17);
         IndexBufferBase index_base_address;
         INSERT_PADDING_WORDS(1);
@@ -165,7 +164,7 @@ union Regs {
         INSERT_PADDING_WORDS(2);
         TessFactorMemoryBase vgt_tf_memory_base;
     };
-    std::array<u32, NumRegs> reg_array;
+    u32 reg_array[NumRegs];
 
     const ShaderProgram* ProgramForStage(u32 index) const {
         switch (index) {

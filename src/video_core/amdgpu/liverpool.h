@@ -63,15 +63,15 @@ struct Liverpool {
 
     Regs regs{};
     u32 index_buffer_num_indices{};
-    std::array<CbDbExtent, NUM_COLOR_BUFFERS> last_cb_extent{};
+    CbDbExtent last_cb_extent[NUM_COLOR_BUFFERS]{};
     CbDbExtent last_db_extent{};
 
 public:
     explicit Liverpool();
     ~Liverpool();
 
-    void SubmitGfx(std::span<const u32> dcb, std::span<const u32> ccb);
-    void SubmitAsc(u32 gnm_vqid, std::span<const u32> acb);
+    void SubmitGfx(Common::Span<const u32> dcb, Common::Span<const u32> ccb);
+    void SubmitAsc(u32 gnm_vqid, Common::Span<const u32> acb);
 
     void SubmitDone() noexcept {
         if (copy_ring) {
@@ -122,7 +122,8 @@ public:
                 retro_eventcount_commit_wait(&command_done_ec, key);
             }
         } else {
-            PushCommand(new Command{{}, Common::UniqueFunction<void>{std::move(func)}, nullptr});
+            PushCommand(
+                new Command{{}, Common::UniqueFunction<void>{static_cast<F&&>(func)}, nullptr});
         }
     }
 
@@ -145,7 +146,7 @@ public:
         u32* read_addr;
         u32 ring_size_dw;
         u32 pipe_id;
-        std::array<u32, Pm4BufferSize> tmp_packet;
+        u32 tmp_packet[Pm4BufferSize];
         u32 tmp_dwords;
     };
     Common::SlotVector<AscQueueInfo> asc_queues{64};
@@ -197,12 +198,16 @@ private:
         Handle handle;
     };
 
-    using CmdBuffer = std::pair<std::span<const u32>, std::span<const u32>>;
-    CmdBuffer CopyCmdBuffers(std::span<const u32> dcb, std::span<const u32> ccb);
-    Task ProcessGraphics(std::span<const u32> dcb);
-    Task ProcessCeUpdate(std::span<const u32> ccb);
+    /// A submission's draw and constant command buffers
+    struct CmdBuffer {
+        Common::Span<const u32> dcb;
+        Common::Span<const u32> ccb;
+    };
+    CmdBuffer CopyCmdBuffers(Common::Span<const u32> dcb, Common::Span<const u32> ccb);
+    Task ProcessGraphics(Common::Span<const u32> dcb);
+    Task ProcessCeUpdate(Common::Span<const u32> ccb);
     template <bool is_indirect = false>
-    Task ProcessCompute(std::span<const u32> acb, u32 vqid);
+    Task ProcessCompute(Common::Span<const u32> acb, u32 vqid);
 
     void ProcessCommands();
     void ProcessCeQueue();
@@ -264,7 +269,7 @@ private:
         TaskQueue submits{};
         ComputeProgram cs_state{};
     };
-    std::array<GpuQueue, NumTotalQueues> mapped_queues{};
+    GpuQueue mapped_queues[NumTotalQueues]{};
     TaskQueue ce_submits;
     /// Copies of the game's graphics command buffers, with Copy GPU Buffers on
     cmd_copy_ring_t* copy_ring{};
@@ -296,7 +301,7 @@ private:
 
         u32 ce_count{};
         u32 de_count{};
-        static std::array<u8, 48_KB> constants_heap;
+        static u8 constants_heap[48_KB];
     } cblock{};
 
     Vulkan::Rasterizer* rasterizer{};

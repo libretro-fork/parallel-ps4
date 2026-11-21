@@ -278,7 +278,7 @@ constexpr MicroTileMode GetMicroTileMode(TileMode tile_mode) {
     }
 }
 
-std::string_view NameOf(TileMode tile_mode);
+const char* NameOf(TileMode tile_mode);
 
 PipeConfig GetPipeConfig(TileMode tile_mode);
 

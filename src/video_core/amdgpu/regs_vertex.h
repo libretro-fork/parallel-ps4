@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "common/alignment.h"
 #include "common/assert.h"
 #include "common/types.h"
 
@@ -34,7 +35,7 @@ struct IndexBufferBase {
 
     template <typename T = VAddr>
     T Address() const {
-        return std::bit_cast<T>((base_addr_lo & ~1U) | u64(base_addr_hi) << 32);
+        return Common::BitCast<T>((base_addr_lo & ~1U) | u64(base_addr_hi) << 32);
     }
 };
 

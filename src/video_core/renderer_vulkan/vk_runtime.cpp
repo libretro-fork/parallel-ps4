@@ -880,11 +880,10 @@ void Runtime::SetBackingSamples(VideoCore::Image* image, u32 num_samples, bool c
 
         Vulkan::SetObjectName(
             instance.GetDevice(), new_backing->image.image,
-            "Image %ux%ux%u %.*s %d 0x%" PRIx64 ":0x%x L:%u M:%u S:%u (backing)", info.size.width,
-            info.size.height, info.size.depth,
-            static_cast<int>(AmdGpu::NameOf(info.tile_mode).size()),
-            AmdGpu::NameOf(info.tile_mode).data(), static_cast<int>(info.pixel_format),
-            info.guest_address, info.guest_size, static_cast<unsigned>(info.resources.layers),
+            "Image %ux%ux%u %s %d 0x%" PRIx64 ":0x%x L:%u M:%u S:%u (backing)", info.size.width,
+            info.size.height, info.size.depth, AmdGpu::NameOf(info.tile_mode),
+            static_cast<int>(info.pixel_format), info.guest_address, info.guest_size,
+            static_cast<unsigned>(info.resources.layers),
             static_cast<unsigned>(info.resources.levels), static_cast<unsigned>(num_samples));
     }
 

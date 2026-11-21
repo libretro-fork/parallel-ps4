@@ -193,8 +193,7 @@ const VectorIds& GetAttributeType(EmitContext& ctx, AmdGpu::NumberFormat fmt) {
     default:
         break;
     }
-    UNREACHABLE_MSG("Invalid attribute type %.*s", static_cast<int>(AmdGpu::NameOf(fmt).size()),
-                    AmdGpu::NameOf(fmt).data());
+    UNREACHABLE_MSG("Invalid attribute type %s", AmdGpu::NameOf(fmt));
 }
 
 EmitContext::SpirvAttribute EmitContext::GetAttributeInfo(AmdGpu::NumberFormat fmt, Id id,
@@ -210,8 +209,7 @@ EmitContext::SpirvAttribute EmitContext::GetAttributeInfo(AmdGpu::NumberFormat f
     default:
         break;
     }
-    UNREACHABLE_MSG("Invalid attribute type %.*s", static_cast<int>(AmdGpu::NameOf(fmt).size()),
-                    AmdGpu::NameOf(fmt).data());
+    UNREACHABLE_MSG("Invalid attribute type %s", AmdGpu::NameOf(fmt));
 }
 
 Id EmitContext::GetBufferSize(const u32 sharp_idx) {
@@ -973,11 +971,8 @@ u32 GetFormat(const AmdGpu::Image& image) {
         image.GetNumberFmt() == AmdGpu::NumberFormat::Float) {
         return SpvImageFormatRgba32f;
     }
-    UNREACHABLE_MSG("Unknown storage format data_format=%.*s, num_format=%.*s",
-                    static_cast<int>(AmdGpu::NameOf(image.GetDataFmt()).size()),
-                    AmdGpu::NameOf(image.GetDataFmt()).data(),
-                    static_cast<int>(AmdGpu::NameOf(image.GetNumberFmt()).size()),
-                    AmdGpu::NameOf(image.GetNumberFmt()).data());
+    UNREACHABLE_MSG("Unknown storage format data_format=%s, num_format=%s",
+                    AmdGpu::NameOf(image.GetDataFmt()), AmdGpu::NameOf(image.GetNumberFmt()));
 }
 
 Id ImageType(EmitContext& ctx, const ImageResource& desc, Id sampled_type) {
@@ -1004,8 +999,7 @@ Id ImageType(EmitContext& ctx, const ImageResource& desc, Id sampled_type) {
     default:
         break;
     }
-    UNREACHABLE_MSG("Invalid texture type %.*s", static_cast<int>(AmdGpu::NameOf(type).size()),
-                    AmdGpu::NameOf(type).data());
+    UNREACHABLE_MSG("Invalid texture type %s", AmdGpu::NameOf(type));
 }
 
 void EmitContext::DefineImagesAndSamplers() {

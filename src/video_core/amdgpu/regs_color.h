@@ -11,7 +11,7 @@ namespace AmdGpu {
 
 static constexpr u32 NUM_COLOR_BUFFERS = 8;
 
-using BlendConstants = std::array<float, 4>;
+using BlendConstants = float[4];
 
 struct BlendControl {
     enum class BlendFactor : u32 {
@@ -195,7 +195,7 @@ struct ColorBuffer {
     } fmask_slice;
     u32 clear_word0;
     u32 clear_word1;
-    std::array<u32, 2> pad1;
+    u32 pad1[2];
 
     operator bool() const {
         return base_address && info.format;
@@ -262,36 +262,36 @@ struct ColorBuffer {
 
     CompMapping Swizzle() const {
         // clang-format off
-        static constexpr std::array<std::array<CompMapping, 4>, 4> mrt_swizzles{{
+        static constexpr CompMapping mrt_swizzles[4][4] = {
             // Standard
-            std::array<CompMapping, 4>{{
+            {
                 {.r = CompSwizzle::Red, .g = CompSwizzle::Zero, .b = CompSwizzle::Zero, .a = CompSwizzle::Zero},
                 {.r = CompSwizzle::Red, .g = CompSwizzle::Green, .b = CompSwizzle::Zero, .a = CompSwizzle::Zero},
                 {.r = CompSwizzle::Red, .g = CompSwizzle::Green, .b = CompSwizzle::Blue, .a = CompSwizzle::Zero},
                 {.r = CompSwizzle::Red, .g = CompSwizzle::Green, .b = CompSwizzle::Blue, .a = CompSwizzle::Alpha},
-            }},
+            },
             // Alternate
-            std::array<CompMapping, 4>{{
+            {
                 {.r = CompSwizzle::Green, .g = CompSwizzle::Zero, .b = CompSwizzle::Zero, .a = CompSwizzle::Zero},
                 {.r = CompSwizzle::Red, .g = CompSwizzle::Alpha, .b = CompSwizzle::Zero, .a = CompSwizzle::Zero},
                 {.r = CompSwizzle::Red, .g = CompSwizzle::Green, .b = CompSwizzle::Alpha, .a = CompSwizzle::Zero},
                 {.r = CompSwizzle::Blue, .g = CompSwizzle::Green, .b = CompSwizzle::Red, .a = CompSwizzle::Alpha},
-            }},
+            },
             // StandardReverse
-            std::array<CompMapping, 4>{{
+            {
                 {.r = CompSwizzle::Blue, .g = CompSwizzle::Zero, .b = CompSwizzle::Zero, .a = CompSwizzle::Zero},
                 {.r = CompSwizzle::Green, .g = CompSwizzle::Red, .b = CompSwizzle::Zero, .a = CompSwizzle::Zero},
                 {.r = CompSwizzle::Blue, .g = CompSwizzle::Green, .b = CompSwizzle::Red, .a = CompSwizzle::Zero},
                 {.r = CompSwizzle::Alpha, .g = CompSwizzle::Blue, .b = CompSwizzle::Green, .a = CompSwizzle::Red},
-            }},
+            },
             // AlternateReverse
-            std::array<CompMapping, 4>{{
+            {
                 {.r = CompSwizzle::Alpha, .g = CompSwizzle::Zero, .b = CompSwizzle::Zero, .a = CompSwizzle::Zero},
                 {.r = CompSwizzle::Alpha, .g = CompSwizzle::Red, .b = CompSwizzle::Zero, .a = CompSwizzle::Zero},
                 {.r = CompSwizzle::Alpha, .g = CompSwizzle::Green, .b = CompSwizzle::Red, .a = CompSwizzle::Zero},
                 {.r = CompSwizzle::Alpha, .g = CompSwizzle::Red, .b = CompSwizzle::Green, .a = CompSwizzle::Blue},
-            }},
-        }};
+            },
+        };
         // clang-format on
         const u32 swap_idx = static_cast<u32>(info.comp_swap);
         const u32 components_idx = NumComponents(DataFormat(info.format)) - 1;

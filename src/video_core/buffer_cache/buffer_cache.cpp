@@ -35,7 +35,7 @@ static u64 MaxU64(u64 a, u64 b) {
 static u64 ClampU64(u64 v, u64 lo, u64 hi) {
     return v < lo ? lo : (v > hi ? hi : v);
 }
-/// The number of bits @v takes (0 for 0), as std::bit_width
+/// The number of bits @v takes (0 for 0), as Common::BitWidth
 static u32 BitWidth(u64 v) {
     return v ? 64u - static_cast<u32>(__builtin_clzll(v)) : 0u;
 }

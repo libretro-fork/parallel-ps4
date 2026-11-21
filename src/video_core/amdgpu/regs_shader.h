@@ -3,6 +3,9 @@
 
 #pragma once
 
+#include <string.h>
+
+#include "common/alignment.h"
 #include "common/assert.h"
 #include "common/types.h"
 #include "shader_recompiler/params.h"
@@ -11,13 +14,12 @@ namespace AmdGpu {
 
 static constexpr u32 NUM_USER_DATA = 16;
 
-using UserData = std::array<u32, NUM_USER_DATA>;
+using UserData = u32[NUM_USER_DATA];
 
 struct BinaryInfo {
-    static constexpr std::array<u8, 7> signature_ref = {0x4f, 0x72, 0x62, 0x53,
-                                                        0x68, 0x64, 0x72}; // OrbShdr
+    static constexpr u8 signature_ref[7] = {0x4f, 0x72, 0x62, 0x53, 0x68, 0x64, 0x72}; // OrbShdr
 
-    std::array<u8, sizeof(signature_ref)> signature;
+    u8 signature[sizeof(signature_ref)];
     u8 version;
     u32 pssl_or_cg : 1;
     u32 cached : 1;
@@ -35,7 +37,7 @@ struct BinaryInfo {
     u32 crc32;
 
     bool Valid() const {
-        return signature == signature_ref;
+        return memcmp(signature, signature_ref, sizeof(signature)) == 0;
     }
 };
 
@@ -78,7 +80,7 @@ struct ShaderProgram {
 
     template <typename T = u8*>
     const T Address() const {
-        return std::bit_cast<T>(address << 8);
+        return Common::BitCast<T>(address << 8);
     }
 
     [[nodiscard]] u32 NumVgprs() const {
@@ -183,7 +185,7 @@ struct ComputeProgram {
     u32 pad0;
     u32 max_wave_id : 12;
     u64 address : 40;
-    std::array<u32, 4> pad1;
+    u32 pad1[4];
     struct {
         u32 num_vgprs : 6;
         u32 num_sgprs : 4;
@@ -206,12 +208,12 @@ struct ComputeProgram {
     } settings;
     u32 pad2;
     u32 resource_limits;
-    std::array<u32, 42> pad3;
+    u32 pad3[42];
     UserData user_data;
 
     template <typename T = u8*>
     const T Address() const {
-        return std::bit_cast<T>(address << 8);
+        return Common::BitCast<T>(address << 8);
     }
 
     u32 SharedMemSize() const noexcept {

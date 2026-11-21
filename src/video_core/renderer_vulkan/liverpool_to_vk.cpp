@@ -7,10 +7,8 @@
 #include "video_core/renderer_vulkan/liverpool_to_vk.h"
 
 #define INVALID_NUMBER_FORMAT_COMBO                                                                \
-    LOG_ERROR(Render_Vulkan, "Unsupported number type %.*s for format %.*s",                       \
-              static_cast<int>(AmdGpu::NameOf(number_type).size()),                                \
-              AmdGpu::NameOf(number_type).data(), static_cast<int>(AmdGpu::NameOf(format).size()), \
-              AmdGpu::NameOf(format).data());
+    LOG_ERROR(Render_Vulkan, "Unsupported number type %s for format %s",                           \
+              AmdGpu::NameOf(number_type), AmdGpu::NameOf(format));
 
 namespace Vulkan::LiverpoolToVK {
 
@@ -1156,8 +1154,7 @@ VkClearValue ColorBufferClearValue(const AmdGpu::ColorBuffer& color_buffer) {
         color.float32[3] = NumberUtils::U4ToUnorm(c0 >> 12);
         break;
     default:
-        LOG_ERROR(Render_Vulkan, "Unsupported color buffer format: %.*s",
-                  static_cast<int>(AmdGpu::NameOf(format).size()), AmdGpu::NameOf(format).data());
+        LOG_ERROR(Render_Vulkan, "Unsupported color buffer format: %s", AmdGpu::NameOf(format));
         break;
     }
 

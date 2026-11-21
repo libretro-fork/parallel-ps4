@@ -954,9 +954,7 @@ U32 IREmitter::Pack2x16(const AmdGpu::NumberFormat number_format, const Value& v
     case AmdGpu::NumberFormat::Float:
         return Inst<U32>(Opcode::PackHalf2x16, vector);
     default:
-        UNREACHABLE_MSG("Unsupported 2x16 number format: %.*s",
-                        static_cast<int>(AmdGpu::NameOf(number_format).size()),
-                        AmdGpu::NameOf(number_format).data());
+        UNREACHABLE_MSG("Unsupported 2x16 number format: %s", AmdGpu::NameOf(number_format));
     }
 }
 
@@ -973,9 +971,7 @@ Value IREmitter::Unpack2x16(const AmdGpu::NumberFormat number_format, const U32&
     case AmdGpu::NumberFormat::Float:
         return Inst(Opcode::UnpackHalf2x16, value);
     default:
-        UNREACHABLE_MSG("Unsupported 2x16 number format: %.*s",
-                        static_cast<int>(AmdGpu::NameOf(number_format).size()),
-                        AmdGpu::NameOf(number_format).data());
+        UNREACHABLE_MSG("Unsupported 2x16 number format: %s", AmdGpu::NameOf(number_format));
     }
 }
 
@@ -990,9 +986,7 @@ U32 IREmitter::Pack4x8(const AmdGpu::NumberFormat number_format, const Value& ve
     case AmdGpu::NumberFormat::Sint:
         return Inst<U32>(Opcode::PackSint4x8, vector);
     default:
-        UNREACHABLE_MSG("Unsupported 4x8 number format: %.*s",
-                        static_cast<int>(AmdGpu::NameOf(number_format).size()),
-                        AmdGpu::NameOf(number_format).data());
+        UNREACHABLE_MSG("Unsupported 4x8 number format: %s", AmdGpu::NameOf(number_format));
     }
 }
 
@@ -1007,9 +1001,7 @@ Value IREmitter::Unpack4x8(const AmdGpu::NumberFormat number_format, const U32& 
     case AmdGpu::NumberFormat::Sint:
         return Inst(Opcode::UnpackSint4x8, value);
     default:
-        UNREACHABLE_MSG("Unsupported 4x8 number format: %.*s",
-                        static_cast<int>(AmdGpu::NameOf(number_format).size()),
-                        AmdGpu::NameOf(number_format).data());
+        UNREACHABLE_MSG("Unsupported 4x8 number format: %s", AmdGpu::NameOf(number_format));
     }
 }
 
@@ -1018,9 +1010,7 @@ U32 IREmitter::Pack10_11_11(const AmdGpu::NumberFormat number_format, const Valu
     case AmdGpu::NumberFormat::Float:
         return Inst<U32>(Opcode::PackUfloat10_11_11, vector);
     default:
-        UNREACHABLE_MSG("Unsupported 10_11_11 number format: %.*s",
-                        static_cast<int>(AmdGpu::NameOf(number_format).size()),
-                        AmdGpu::NameOf(number_format).data());
+        UNREACHABLE_MSG("Unsupported 10_11_11 number format: %s", AmdGpu::NameOf(number_format));
     }
 }
 
@@ -1035,9 +1025,7 @@ U32 IREmitter::Pack2_10_10_10(const AmdGpu::NumberFormat number_format, const Va
     case AmdGpu::NumberFormat::Sint:
         return Inst<U32>(Opcode::PackSint2_10_10_10, vector);
     default:
-        UNREACHABLE_MSG("Unsupported 2_10_10_10 number format: %.*s",
-                        static_cast<int>(AmdGpu::NameOf(number_format).size()),
-                        AmdGpu::NameOf(number_format).data());
+        UNREACHABLE_MSG("Unsupported 2_10_10_10 number format: %s", AmdGpu::NameOf(number_format));
     }
 }
 
@@ -1052,9 +1040,7 @@ Value IREmitter::Unpack2_10_10_10(const AmdGpu::NumberFormat number_format, cons
     case AmdGpu::NumberFormat::Sint:
         return Inst(Opcode::UnpackSint2_10_10_10, value);
     default:
-        UNREACHABLE_MSG("Unsupported 2_10_10_10 number format: %.*s",
-                        static_cast<int>(AmdGpu::NameOf(number_format).size()),
-                        AmdGpu::NameOf(number_format).data());
+        UNREACHABLE_MSG("Unsupported 2_10_10_10 number format: %s", AmdGpu::NameOf(number_format));
     }
 }
 
@@ -1063,9 +1049,7 @@ Value IREmitter::Unpack10_11_11(const AmdGpu::NumberFormat number_format, const 
     case AmdGpu::NumberFormat::Float:
         return Inst(Opcode::UnpackUfloat10_11_11, value);
     default:
-        UNREACHABLE_MSG("Unsupported 10_11_11 number format: %.*s",
-                        static_cast<int>(AmdGpu::NameOf(number_format).size()),
-                        AmdGpu::NameOf(number_format).data());
+        UNREACHABLE_MSG("Unsupported 10_11_11 number format: %s", AmdGpu::NameOf(number_format));
     }
 }
 

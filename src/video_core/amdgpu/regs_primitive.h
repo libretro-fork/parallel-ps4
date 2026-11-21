@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "common/alignment.h"
 #include "common/types.h"
 
 namespace AmdGpu {
@@ -146,7 +147,7 @@ struct Scissor {
     };
 
     static u16 Clamp(s16 value) {
-        return std::max(s16(0), value);
+        return Common::Max(s16(0), value);
     }
 
     u32 GetWidth() const {

@@ -191,4 +191,64 @@ template <typename To, typename From>
     return __builtin_bit_cast(To, from);
 }
 
+/// @count Ts at @items, owned elsewhere (what std::span was)
+template <typename T>
+struct Span {
+    T* items = nullptr;
+    size_t count = 0;
+
+    constexpr Span() = default;
+    constexpr Span(T* items_, size_t count_) : items{items_}, count{count_} {}
+    template <size_t N>
+    constexpr Span(T (&array)[N]) : items{array}, count{N} {}
+    /// Of Us that are Ts (a Span of const T from one of T)
+    template <typename U>
+    constexpr Span(const Span<U>& other) : items{other.items}, count{other.count} {}
+    /// Of a container's elements, while code that still has one hands it over
+    template <typename C, typename = decltype(static_cast<T*>(static_cast<C*>(nullptr)->data()))>
+    constexpr Span(C& container) : items{container.data()}, count{container.size()} {}
+
+    constexpr T* data() const {
+        return items;
+    }
+    constexpr size_t size() const {
+        return count;
+    }
+    constexpr size_t size_bytes() const {
+        return count * sizeof(T);
+    }
+    constexpr bool empty() const {
+        return count == 0;
+    }
+    constexpr T& operator[](size_t i) const {
+        return items[i];
+    }
+    constexpr T* begin() const {
+        return items;
+    }
+    constexpr T* end() const {
+        return items + count;
+    }
+    constexpr T& front() const {
+        return items[0];
+    }
+    constexpr T& back() const {
+        return items[count - 1];
+    }
+    /// From @offset on
+    constexpr Span subspan(size_t offset) const {
+        return Span{items + offset, count - offset};
+    }
+    /// @n from @offset
+    constexpr Span subspan(size_t offset, size_t n) const {
+        return Span{items + offset, n};
+    }
+    constexpr Span first(size_t n) const {
+        return Span{items, n};
+    }
+    constexpr Span last(size_t n) const {
+        return Span{items + count - n, n};
+    }
+};
+
 } // namespace Common

@@ -7,7 +7,7 @@
 
 namespace AmdGpu {
 
-std::string_view NameOf(DataFormat fmt) {
+const char* NameOf(DataFormat fmt) {
     switch (fmt) {
     case DataFormat::FormatInvalid:
         return "FormatInvalid";
@@ -78,7 +78,7 @@ std::string_view NameOf(DataFormat fmt) {
     }
 }
 
-std::string_view NameOf(NumberFormat fmt) {
+const char* NameOf(NumberFormat fmt) {
     switch (fmt) {
     case NumberFormat::Unorm:
         return "Unorm";
@@ -111,7 +111,7 @@ std::string_view NameOf(NumberFormat fmt) {
     }
 }
 
-constexpr std::array<s32, NUM_ENTRIES> NUM_COMPONENTS = {
+constexpr s32 NUM_COMPONENTS[NUM_ENTRIES] = {
     0, //  0 FormatInvalid
     1, //  1 Format8
     1, //  2 Format16
@@ -156,7 +156,7 @@ constexpr std::array<s32, NUM_ENTRIES> NUM_COMPONENTS = {
     4, // 41 FormatBc7
 };
 
-constexpr std::array<s32, NUM_ENTRIES> BITS_PER_BLOCK = {
+constexpr s32 BITS_PER_BLOCK[NUM_ENTRIES] = {
     0,   //  0 FormatInvalid
     8,   //  1 Format8
     16,  //  2 Format16
@@ -201,7 +201,7 @@ constexpr std::array<s32, NUM_ENTRIES> BITS_PER_BLOCK = {
     128, // 41 FormatBc7
 };
 
-constexpr std::array<s32, NUM_ENTRIES> BITS_PER_ELEMENT = {
+constexpr s32 BITS_PER_ELEMENT[NUM_ENTRIES] = {
     0,   //  0 FormatInvalid
     8,   //  1 Format8
     16,  //  2 Format16

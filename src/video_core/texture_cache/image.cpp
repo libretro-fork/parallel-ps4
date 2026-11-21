@@ -196,11 +196,11 @@ Image::Image(const Vulkan::Instance& instance, Vulkan::Runtime& runtime_,
 
     Vulkan::SetObjectName(
         instance.GetDevice(), GetImage(),
-        "Image %ux%ux%u %.*s format %d 0x%" PRIx64 ":0x%x L:%u M:%u S:%u", info.size.width,
-        info.size.height, info.size.depth, static_cast<int>(AmdGpu::NameOf(info.tile_mode).size()),
-        AmdGpu::NameOf(info.tile_mode).data(), static_cast<int>(info.pixel_format),
-        info.guest_address, info.guest_size, static_cast<unsigned>(info.resources.layers),
-        static_cast<unsigned>(info.resources.levels), static_cast<unsigned>(info.num_samples));
+        "Image %ux%ux%u %s format %d 0x%" PRIx64 ":0x%x L:%u M:%u S:%u", info.size.width,
+        info.size.height, info.size.depth, AmdGpu::NameOf(info.tile_mode),
+        static_cast<int>(info.pixel_format), info.guest_address, info.guest_size,
+        static_cast<unsigned>(info.resources.layers), static_cast<unsigned>(info.resources.levels),
+        static_cast<unsigned>(info.num_samples));
 }
 
 Image::~Image() = default;

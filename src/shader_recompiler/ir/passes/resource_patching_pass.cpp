@@ -273,9 +273,7 @@ void PatchImageSharp(const ResourceDiscovery& resource, Info& info, Descriptors&
             case AmdGpu::ImageType::Color2DMsaa:
             case AmdGpu::ImageType::Color2DMsaaArray:
             default:
-                UNREACHABLE_MSG("Invalid image type %.*s",
-                                static_cast<int>(AmdGpu::NameOf(view_type).size()),
-                                AmdGpu::NameOf(view_type).data());
+                UNREACHABLE_MSG("Invalid image type %s", AmdGpu::NameOf(view_type));
             }
         }();
 
@@ -893,9 +891,7 @@ void PatchImageArgs(IR::Inst& inst, Info& info) {
         case AmdGpu::ImageType::Color3D:          // x, y, z, [lod]
             return {ir.CompositeConstruct(body->Arg(0), body->Arg(1), body->Arg(2)), body->Arg(3)};
         default:
-            UNREACHABLE_MSG("Unknown image type %.*s",
-                            static_cast<int>(AmdGpu::NameOf(view_type).size()),
-                            AmdGpu::NameOf(view_type).data());
+            UNREACHABLE_MSG("Unknown image type %s", AmdGpu::NameOf(view_type));
         }
     }();
 

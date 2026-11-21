@@ -117,10 +117,10 @@ union CompMapping {
         CompSwizzle b;
         CompSwizzle a;
     };
-    std::array<CompSwizzle, 4> array;
+    CompSwizzle array[4];
 
     bool operator==(const CompMapping& other) const {
-        return array == other.array;
+        return r == other.r && g == other.g && b == other.b && a == other.a;
     }
 
     /// The four components of @data swizzled, in place
@@ -391,14 +391,14 @@ constexpr bool IsFmask(DataFormat format) {
     return format >= DataFormat::FormatFmask8_S2_F1 && format <= DataFormat::FormatFmask64_S16_F8;
 }
 
-std::string_view NameOf(DataFormat fmt);
-std::string_view NameOf(NumberFormat fmt);
+const char* NameOf(DataFormat fmt);
+const char* NameOf(NumberFormat fmt);
 
 constexpr u32 NUM_ENTRIES = 42;
 
-extern const std::array<s32, NUM_ENTRIES> NUM_COMPONENTS;
-extern const std::array<s32, NUM_ENTRIES> BITS_PER_BLOCK;
-extern const std::array<s32, NUM_ENTRIES> BITS_PER_ELEMENT;
+extern const s32 NUM_COMPONENTS[NUM_ENTRIES];
+extern const s32 BITS_PER_BLOCK[NUM_ENTRIES];
+extern const s32 BITS_PER_ELEMENT[NUM_ENTRIES];
 
 constexpr u32 NumComponents(DataFormat format) noexcept {
     const u32 index = static_cast<u32>(format);

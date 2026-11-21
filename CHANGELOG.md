@@ -4,6 +4,13 @@ What changed in the libretro core of this fork, newest first. Changes that come 
 
 ## Unreleased
 
+- The GPU command processor and register headers (`video_core/amdgpu`) are off the STL.
+  - **Registers:** the register file, viewports, blend controls, user data, padding and the shader binary signature are plain arrays; their layout is the same.
+  - **Command buffers:** the command processor takes `Common::Span` (a pointer and a count, added to `common/concepts.h`) instead of `std::span`.
+  - **Names:** the format, tile mode and image type names are `const char*`; the log lines that printed them use `%s`.
+  - **Helpers:** `std::memcpy`/`memset`/`memcmp` are the C calls, and `std::bit_cast`, `min`, `max`, `bit_ceil`, `has_single_bit` and `bit_width` are the `Common` ones, across `video_core`.
+  - **Left:** the coroutine machinery (`std::coroutine_handle`, `std::suspend_always`) that C++ coroutines need, and `std::span` where the shader recompiler takes the shader's code.
+  - No change in behaviour intended. Not run in a game yet.
 - A crash after loading a save in Bloodborne ("No compatibility class for format 134") is addressed: the format compatibility switch made from the old lookup table had lost the 16 block-compressed formats (BC1 to BC7), whose entries had two classes each. They are back, with the classes the table gave them; the other 137 formats are as they were.
   - **Checked:** every BC format now has its class, and BC1 sRGB is compatible with BC1 UNORM and with R32G32_UINT, as before. Not run in a game yet.
 - No `auto` is left in `video_core`: each variable says its type, and the lambdas held in `auto` variables are plain loops, member functions or small structs.

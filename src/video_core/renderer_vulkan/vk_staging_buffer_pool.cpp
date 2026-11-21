@@ -29,7 +29,7 @@ constexpr size_t RING_KEPT_BLOCKS = 2;
 constexpr size_t RING_BLOCKS_ROOM = 32;
 
 u64 RoundAllocationSize(u64 size) {
-    const u64 step = std::max(std::bit_floor(size) / 4, LARGE_MIN_GRANULARITY);
+    const u64 step = Common::Max(std::bit_floor(size) / 4, LARGE_MIN_GRANULARITY);
     return Common::AlignUp(size, step);
 }
 
@@ -116,7 +116,7 @@ StagingBufferRef StagingBufferPool::RequestFromRing(Ring& ring, u64 size, u64 al
 StagingBufferRef StagingBufferPool::RequestLarge(u64 size, MemoryType type, bool deferred,
                                                  bool unsynchronized) {
     std::vector<Vulkan::StagingBufferPool::LargeBuffer>& cache = large_caches[u32(type)];
-    const u64 max_size = std::max(size + size / 4, RoundAllocationSize(size));
+    const u64 max_size = Common::Max(size + size / 4, RoundAllocationSize(size));
 
     LargeBuffer* best{};
     for (LargeBuffer& entry : cache) {

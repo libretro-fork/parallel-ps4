@@ -55,7 +55,7 @@ struct Buffer {
     }
 
     bool operator==(const Buffer& other) const noexcept {
-        return std::memcmp(this, &other, sizeof(Buffer)) == 0;
+        return memcmp(this, &other, sizeof(Buffer)) == 0;
     }
 
     CompMapping DstSelect() const {
@@ -116,7 +116,7 @@ enum class ImageType : u64 {
     Color2DMsaaArray = 15,
 };
 
-constexpr std::string_view NameOf(ImageType type) {
+constexpr const char* NameOf(ImageType type) {
     switch (type) {
     case ImageType::Invalid:
         return "Invalid";
@@ -235,7 +235,7 @@ struct Image {
             slices *= 6;
         }
         if (pow2pad) {
-            slices = std::bit_ceil(slices);
+            slices = Common::BitCeil(slices);
         }
         return slices;
     }
@@ -455,7 +455,7 @@ struct Sampler {
     }
 
     bool operator==(const Sampler& other) const noexcept {
-        return std::memcmp(this, &other, sizeof(Sampler)) == 0;
+        return memcmp(this, &other, sizeof(Sampler)) == 0;
     }
 
     float LodBias() const noexcept {

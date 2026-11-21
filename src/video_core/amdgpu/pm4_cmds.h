@@ -4,6 +4,7 @@
 #pragma once
 
 #include <cstring>
+#include "common/alignment.h"
 #include "common/assert.h"
 #include "common/bit_field.h"
 #include "common/types.h"
@@ -74,16 +75,16 @@ constexpr u32* WriteHeader(u32* cmdbuf, u32 size,
                            PM4ShaderType type = PM4ShaderType::ShaderGraphics,
                            PM4Predicate predicate = PM4Predicate::PredDisable) {
     PM4Type3Header header{opcode, size - 1, type, predicate};
-    std::memcpy(cmdbuf, &header, sizeof(header));
+    memcpy(cmdbuf, &header, sizeof(header));
     return ++cmdbuf;
 }
 
 // Write arguments
 template <typename... Args>
 constexpr u32* WriteBody(u32* cmdbuf, Args... data) {
-    const std::array<u32, sizeof...(Args)> args{data...};
-    std::memcpy(cmdbuf, args.data(), sizeof(args));
-    cmdbuf += args.size();
+    const u32 args[sizeof...(Args) + 1] = {static_cast<u32>(data)..., 0};
+    memcpy(cmdbuf, args, sizeof...(Args) * sizeof(u32));
+    cmdbuf += sizeof...(Args);
     return cmdbuf;
 }
 
@@ -430,7 +431,7 @@ struct PM4CmdEventWrite {
     T Address() const {
         ASSERT(event_index.Value() >= EventIndex::ZpassDone &&
                event_index.Value() <= EventIndex::SampleStreamoutStatSx);
-        return std::bit_cast<T>((u64(address[1]) << 32u) | u64(address[0]));
+        return Common::BitCast<T>((u64(address[1]) << 32u) | u64(address[0]));
     }
 };
 
@@ -574,12 +575,12 @@ struct PM4DmaData {
 
     template <typename T>
     T SrcAddress() const {
-        return std::bit_cast<T>(src_addr_lo | u64(src_addr_hi) << 32);
+        return Common::BitCast<T>(src_addr_lo | u64(src_addr_hi) << 32);
     }
 
     template <typename T>
     T DstAddress() const {
-        return std::bit_cast<T>(dst_addr_lo | u64(dst_addr_hi) << 32);
+        return Common::BitCast<T>(dst_addr_lo | u64(dst_addr_hi) << 32);
     }
 
     u32 NumBytes() const noexcept {
@@ -633,12 +634,12 @@ struct PM4CmdCopyData {
 
     template <typename T>
     T SrcAddress() const {
-        return std::bit_cast<T>(src_addr_lo | u64(src_addr_hi) << 32);
+        return Common::BitCast<T>(src_addr_lo | u64(src_addr_hi) << 32);
     }
 
     template <typename T>
     T DstAddress() const {
-        return std::bit_cast<T>(dst_addr_lo | u64(dst_addr_hi) << 32);
+        return Common::BitCast<T>(dst_addr_lo | u64(dst_addr_hi) << 32);
     }
 };
 
@@ -689,14 +690,14 @@ struct PM4CmdWaitRegMem {
 
     template <typename T = u32*>
     T Address() const {
-        return std::bit_cast<T>((uintptr_t(poll_addr_hi) << 32) | (poll_addr_lo << 2));
+        return Common::BitCast<T>((uintptr_t(poll_addr_hi) << 32) | (poll_addr_lo << 2));
     }
 
     u32 Reg() const {
         return reg.Value();
     }
 
-    bool Test(std::span<const u32> regs) const {
+    bool Test(const u32* regs) const {
         u32 value = mem_space.Value() == MemSpace::Memory ? *Address() : regs[Reg()];
         switch (function.Value()) {
         case Function::Always: {
@@ -849,7 +850,7 @@ struct PM4DumpConstRam {
 
     template <typename T>
     T Address() const {
-        return std::bit_cast<T>((u64(addr_hi) << 32u) | addr_lo);
+        return Common::BitCast<T>((u64(addr_hi) << 32u) | addr_lo);
     }
 
     [[nodiscard]] u32 Offset() const {
@@ -939,7 +940,7 @@ struct PM4CmdReleaseMem {
     template <typename T>
     T Address() const {
         u64 full_address = address_lo | (u64(address_hi) << 32);
-        return std::bit_cast<T>(full_address);
+        return Common::BitCast<T>(full_address);
     }
 
     u32 DataDWord() const {
@@ -1040,7 +1041,7 @@ struct PM4CmdDispatchIndirectMec {
 
     template <typename T>
     T Address() const {
-        return std::bit_cast<T>(address0 | (u64(address1 & 0xffff) << 32u));
+        return Common::BitCast<T>(address0 | (u64(address1 & 0xffff) << 32u));
     }
 };
 
@@ -1214,7 +1215,7 @@ struct PM4CmdMemSemaphore {
 
     template <typename T>
     [[nodiscard]] T Address() const {
-        return std::bit_cast<T>(u64(addr_lo) << 3 | (u64(addr_hi) << 32));
+        return Common::BitCast<T>(u64(addr_lo) << 3 | (u64(addr_hi) << 32));
     }
 
     [[nodiscard]] bool IsSignaling() const {
@@ -1260,8 +1261,8 @@ struct PM4CmdCondExec {
     };
 
     bool* Address() const {
-        return std::bit_cast<bool*>(u64(bool_addr_hi.Value()) << 32 | u64(bool_addr_lo.Value())
-                                                                          << 2);
+        return Common::BitCast<bool*>(u64(bool_addr_hi.Value()) << 32 | u64(bool_addr_lo.Value())
+                                                                            << 2);
     }
 };
 

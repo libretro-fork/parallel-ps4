@@ -105,7 +105,7 @@ struct PageManager::Impl {
     virtual void Protect(VAddr address, size_t size, Core::MemoryPermission perms) = 0;
 
     void EnsurePages(VAddr begin, VAddr end) {
-        end = std::min(end, VAddr{1} << ADDRESS_BITS) - 1;
+        end = Common::Min(end, VAddr{1} << ADDRESS_BITS) - 1;
         const size_t start_page = begin >> PM_PAGE_BITS;
         const size_t end_page = end >> PM_PAGE_BITS;
         cached_pages.reserve(start_page, end_page);
@@ -418,7 +418,7 @@ struct SignalImpl : public PageManager::Impl {
 
     static bool GuestFaultSignalHandler(void* context, void* fault_address) {
         const VAddr addr = reinterpret_cast<VAddr>(fault_address);
-        const u64 size = std::min<u64>(8, PageManager::GetNextPageAddr(addr) - addr);
+        const u64 size = Common::Min<u64>(8, PageManager::GetNextPageAddr(addr) - addr);
         const bool is_gpu_thread =
             sthread_get_current_thread_id() == rasterizer->GetGpuCommandProcessorThread();
         if (Common::IsWriteError(context)) {

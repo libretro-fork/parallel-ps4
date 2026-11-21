@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include <bit>
+#include "common/alignment.h"
 #include "common/enum_names.h"
 #include "video_core/amdgpu/tiling.h"
 
@@ -10,7 +11,7 @@ namespace AmdGpu {
 static constexpr u32 MICROTILE_SIZE = 8;
 static constexpr u32 DRAM_ROW_SIZE = 1024;
 
-std::string_view NameOf(TileMode tile_mode) {
+const char* NameOf(TileMode tile_mode) {
     return enum_name(&enum_names_AmdGpu_TileMode, static_cast<s64>(tile_mode));
 }
 
@@ -366,14 +367,14 @@ u32 CalculateTileSplit(TileMode tile_mode, ArrayMode array_mode, MicroTileMode m
     const u32 tile_split_hw = GetTileSplitHw(tile_mode);
     const u32 tile_thickness = GetMicroTileThickness(array_mode);
     const u32 tile_bytes_1x = (bpp * MICROTILE_SIZE * MICROTILE_SIZE * tile_thickness + 7) / 8;
-    const u32 color_tile_split = std::max(256U, sample_split * tile_bytes_1x);
+    const u32 color_tile_split = Common::Max(256U, sample_split * tile_bytes_1x);
     const u32 tile_split =
         micro_tile_mode == MicroTileMode::Depth ? tile_split_hw : color_tile_split;
-    return std::min(DRAM_ROW_SIZE, tile_split);
+    return Common::Min(DRAM_ROW_SIZE, tile_split);
 }
 
 MacroTileMode CalculateMacrotileMode(TileMode tile_mode, u32 bpp, u32 num_samples) {
-    ASSERT_MSG(std::has_single_bit(num_samples) && num_samples <= 16, "Invalid sample count %u",
+    ASSERT_MSG(Common::HasSingleBit(num_samples) && num_samples <= 16, "Invalid sample count %u",
                num_samples);
     ASSERT_MSG(bpp >= 1 && bpp <= 128, "Invalid bpp %u", bpp);
 
@@ -384,8 +385,8 @@ MacroTileMode CalculateMacrotileMode(TileMode tile_mode, u32 bpp, u32 num_sample
     const u32 tile_thickness = GetMicroTileThickness(array_mode);
     const u32 tile_bytes_1x = bpp * MICROTILE_SIZE * MICROTILE_SIZE * tile_thickness / 8;
     const u32 tilesplic = CalculateTileSplit(tile_mode, array_mode, micro_tile_mode, bpp);
-    const u32 tile_bytes = std::min(tilesplic, num_samples * tile_bytes_1x);
-    const u32 mtm_idx = std::bit_width(tile_bytes / 64) - 1;
+    const u32 tile_bytes = Common::Min(tilesplic, num_samples * tile_bytes_1x);
+    const u32 mtm_idx = Common::BitWidth(tile_bytes / 64) - 1;
     return IsPrt(array_mode) ? MacroTileMode(mtm_idx + 8) : MacroTileMode(mtm_idx);
 }
 

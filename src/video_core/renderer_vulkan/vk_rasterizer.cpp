@@ -2055,7 +2055,7 @@ void Rasterizer::UpdateRasterizationState() const {
 void Rasterizer::UpdateColorBlendingState(const GraphicsPipeline* pipeline) const {
     const AmdGpu::Regs& regs = liverpool->regs;
     DynamicState& dynamic_state = scheduler.GetDynamicState();
-    dynamic_state.SetBlendConstants(regs.blend_constants.data());
+    dynamic_state.SetBlendConstants(regs.blend_constants);
     dynamic_state.SetColorWriteMasks(pipeline->GetGraphicsKey().write_masks);
     dynamic_state.SetAttachmentFeedbackLoopEnabled(attachment_feedback_loop);
 }

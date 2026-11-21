@@ -8,7 +8,7 @@ namespace AmdGpu {
 
 // The following values are taken from fpPS4:
 // https://github.com/red-prig/fpPS4/blob/436b43064be4c78229500f3d3c054fc76639247d/chip/pm4_pfp.pas#L410
-static constexpr std::array REG_ARRAY_DEFAULT = {
+static constexpr u32 REG_ARRAY_DEFAULT[] = {
     0x00000000u, 0x80000000u, 0x40004000u, 0xdeadbeefu, 0x00000000u, 0x40004000u, 0x00000000u,
     0x40004000u, 0x00000000u, 0x40004000u, 0x00000000u, 0x40004000u, 0xaa99aaaau, 0x00000000u,
     0xdeadbeefu, 0xdeadbeefu, 0x80000000u, 0x40004000u, 0x00000000u, 0x00000000u, 0x80000000u,
@@ -25,10 +25,9 @@ static constexpr std::array REG_ARRAY_DEFAULT = {
 };
 
 void Regs::SetDefaults() {
-    std::memset(reg_array.data(), 0, reg_array.size() * sizeof(u32));
+    memset(reg_array, 0, sizeof(reg_array));
 
-    std::memcpy(&reg_array[ContextRegWordOffset + 0x80], REG_ARRAY_DEFAULT.data(),
-                REG_ARRAY_DEFAULT.size() * sizeof(u32));
+    memcpy(&reg_array[ContextRegWordOffset + 0x80], REG_ARRAY_DEFAULT, sizeof(REG_ARRAY_DEFAULT));
 
     // Individual context regs values
     reg_array[ContextRegWordOffset + 0x000d] = 0x40004000u;

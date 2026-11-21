@@ -339,7 +339,7 @@ void PipelineCache::WarmUp() {
             const std::optional<Common::FS::FileView> stamp =
                 Storage::DataBase::Instance().Load(Storage::BlobType::ShaderProfile, "build");
             same_build = stamp && stamp->size() == build.size() &&
-                         std::memcmp(stamp->data(), build.data(), build.size()) == 0;
+                         memcmp(stamp->data(), build.data(), build.size()) == 0;
             if (stamp && !same_build) {
                 LOG_INFO(Render, "Pipeline cache made by another build: started again");
             }
@@ -350,7 +350,7 @@ void PipelineCache::WarmUp() {
             Storage::DataBase::Instance().Save(Storage::BlobType::ShaderProfile, "build",
                                                std::move(new_build));
             std::vector<u8> new_profile(sizeof(profile));
-            std::memcpy(new_profile.data(), &profile, sizeof(profile));
+            memcpy(new_profile.data(), &profile, sizeof(profile));
             Storage::DataBase::Instance().Save(Storage::BlobType::ShaderProfile, "profile",
                                                std::move(new_profile));
             return;
@@ -362,7 +362,7 @@ void PipelineCache::WarmUp() {
         Storage::DataBase::Instance().Load(Storage::BlobType::ShaderProfile, "profile");
     if (!profile_data || profile_data->empty()) {
         std::vector<u8> new_profile(sizeof(profile));
-        std::memcpy(new_profile.data(), &profile, sizeof(profile));
+        memcpy(new_profile.data(), &profile, sizeof(profile));
         Storage::DataBase::Instance().Save(Storage::BlobType::ShaderProfile, "profile",
                                            std::move(new_profile));
         return;
@@ -376,7 +376,7 @@ void PipelineCache::WarmUp() {
     }
 
     Shader::Profile cached_profile{};
-    std::memcpy(&cached_profile, profile_data->data(), sizeof(cached_profile));
+    memcpy(&cached_profile, profile_data->data(), sizeof(cached_profile));
     if (cached_profile != profile) {
         LOG_WARNING(Render,
                     "Pipeline cache isn't compatible with current system. Ignoring the cache");

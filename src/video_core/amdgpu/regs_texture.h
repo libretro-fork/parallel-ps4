@@ -4,6 +4,7 @@
 #pragma once
 
 #include <bit>
+#include "common/alignment.h"
 #include "common/types.h"
 
 namespace AmdGpu {
@@ -13,7 +14,7 @@ struct BorderColorBuffer {
 
     template <typename T = VAddr>
     const T Address() const {
-        return std::bit_cast<T>(base_addr << 8);
+        return Common::BitCast<T>(base_addr << 8);
     }
 };
 
