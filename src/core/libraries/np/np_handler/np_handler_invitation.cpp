@@ -12,6 +12,7 @@
 #include "core/emulator_settings.h"
 #include "core/libraries/invitation_dialog/invitation_dialog.h"
 #include "core/libraries/np/np_handler/np_handler.h"
+#include "core/libraries/np/np_handler/np_handler_c.h"
 #include "core/libraries/np/np_handler/np_invitation_json.h"
 #include "core/libraries/system/systemservice.h"
 #include "core/net/net_service.h"
@@ -118,9 +119,6 @@ void NpHandler::PostSessionInvitationEvent(s32 user_id, const std::string& sessi
                                            const std::string& accepter_online_id,
                                            const std::string& inviter_online_id,
                                            OrbisNpAccountId inviter_account_id) {
-    using Libraries::InvitationDialog::ORBIS_NP_SESSION_INVITATION_EVENT_FLAG_INVITATION;
-    using Libraries::InvitationDialog::OrbisNpSessionInvitationEventParam;
-
     Libraries::SystemService::OrbisSystemServiceEvent event{};
     event.event_type = Libraries::SystemService::OrbisSystemServiceEventType::SessionInvitation;
 
@@ -256,4 +254,93 @@ extern "C" void ovl_invite_chosen(int user_id, const char* invitation_id, const 
     } else {
         delete job;
     }
+}
+
+extern "C" void np_lend_pending_invitations(s32 user_id,
+                                            void (*use)(const ovl_invdlg_invite_t* invites,
+                                                        int count, size_t pending, void* ctx),
+                                            void* ctx) {
+    const auto pend = Libraries::Np::NpHandler::GetInstance().GetPendingInvitations(user_id);
+    ovl_invdlg_invite_t invites[OVL_INVDLG_INVITES];
+    int n = 0;
+    for (; n < static_cast<int>(pend.size()) && n < OVL_INVDLG_INVITES; n++) {
+        invites[n].invitation_id = pend[n].invitation_id.c_str();
+        invites[n].from_npid = pend[n].from_npid.c_str();
+    }
+    use(invites, n, pend.size(), ctx);
+}
+
+// What the overlay's dialog asks of the core, on the overlay's thread. Sending, accepting and
+// declining hit the shadNet server (blocking HTTP inside NpHandler), so each runs on a thread
+// of its own; the dialog shows itself busy until a send or an acceptance says how it went.
+extern "C" int ovl_invitation_dialog_friends(int user_id, ovl_invdlg_friend_t* out, int max) {
+    const auto list = Libraries::Np::NpHandler::GetInstance().GetFriendList(user_id);
+    int n = 0;
+    for (const auto& f : list.friends) {
+        if (n == max) {
+            break;
+        }
+        const size_t len = std::min(f.npid.size(), sizeof(out[n].npid) - 1);
+        std::memcpy(out[n].npid, f.npid.data(), len);
+        out[n].npid[len] = '\0';
+        out[n].online = f.online;
+        n++;
+    }
+    return n;
+}
+
+// A request of the overlay's dialog, sent to the shadNet server (blocking HTTP inside
+// NpHandler) on a thread of its own that nobody joins
+struct InvitationJob {
+    enum Kind { Send, Accept, Decline } kind;
+    int user_id;
+    std::string id; // the session's, or the invitation's
+    std::string message;
+    std::vector<std::string> recipients;
+    unsigned token;
+
+    static void Run(void* arg) {
+        auto* const job = static_cast<InvitationJob*>(arg);
+        auto& np = Libraries::Np::NpHandler::GetInstance();
+        switch (job->kind) {
+        case Send:
+            ovl_invitation_dialog_request_done(
+                job->token,
+                np.SendSessionInvitation(job->user_id, job->id, job->recipients, job->message));
+            break;
+        case Accept:
+            ovl_invitation_dialog_request_done(job->token,
+                                               np.AcceptSessionInvitation(job->user_id, job->id));
+            break;
+        case Decline:
+            np.DeclineSessionInvitation(job->user_id, job->id);
+            break;
+        }
+        delete job;
+    }
+};
+
+static void StartInvitationJob(InvitationJob* job) {
+    if (sthread_t* thread = sthread_create(&InvitationJob::Run, job)) {
+        sthread_detach(thread);
+    } else {
+        delete job;
+    }
+}
+
+extern "C" void ovl_invitation_dialog_send(int user_id, const char* session_id, const char* message,
+                                           const char* const* to, int count, unsigned token) {
+    StartInvitationJob(new InvitationJob{InvitationJob::Send, user_id, session_id, message,
+                                         std::vector<std::string>(to, to + count), token});
+}
+
+extern "C" void ovl_invitation_dialog_accept(int user_id, const char* invitation_id,
+                                             unsigned token) {
+    StartInvitationJob(
+        new InvitationJob{InvitationJob::Accept, user_id, invitation_id, {}, {}, token});
+}
+
+extern "C" void ovl_invitation_dialog_decline(int user_id, const char* invitation_id) {
+    StartInvitationJob(
+        new InvitationJob{InvitationJob::Decline, user_id, invitation_id, {}, {}, 0});
 }

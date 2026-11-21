@@ -842,6 +842,31 @@ static void RegisterWebBrowserDialog(Core::Loader::SymbolsResolver* sym) {
                  WebBrowserDialog_Func_F2BE042771625F8C);
 }
 
+static void RegisterInvitationDialog(Core::Loader::SymbolsResolver* sym) {
+    LIB_FUNCTION("WWtCL5lzi7Y", "libSceInvitationDialog", 1, "libSceInvitationDialog",
+                 sceInvitationDialogClose);
+    LIB_FUNCTION("8XKR6wa64iQ", "libSceInvitationDialog", 1, "libSceInvitationDialog",
+                 sceInvitationDialogGetResult);
+    LIB_FUNCTION("WuuUhuKOxwQ", "libSceInvitationDialog", 1, "libSceInvitationDialog",
+                 sceInvitationDialogGetResultA);
+    LIB_FUNCTION("EiF92YDNHRA", "libSceInvitationDialog", 1, "libSceInvitationDialog",
+                 sceInvitationDialogGetStatus);
+    LIB_FUNCTION("XvA5KS56wcs", "libSceInvitationDialog", 1, "libSceInvitationDialog",
+                 sceInvitationDialogInitialize);
+    LIB_FUNCTION("0zU0G+wiVLA", "libSceInvitationDialog", 1, "libSceInvitationDialog",
+                 sceInvitationDialogOpen);
+    LIB_FUNCTION("sAxbHhAWMXM", "libSceInvitationDialog", 1, "libSceInvitationDialog",
+                 sceInvitationDialogOpenA);
+    LIB_FUNCTION("B6HVJtDYxEE", "libSceInvitationDialog", 1, "libSceInvitationDialog",
+                 sceInvitationDialogTerminate);
+    LIB_FUNCTION("9+g9iOq+7kg", "libSceInvitationDialog", 1, "libSceInvitationDialog",
+                 sceInvitationDialogUpdateStatus);
+    LIB_FUNCTION("8XKR6wa64iQ", "libSceInvitationDialogCompat", 1, "libSceInvitationDialog",
+                 sceInvitationDialogGetResult);
+    LIB_FUNCTION("0zU0G+wiVLA", "libSceInvitationDialogCompat", 1, "libSceInvitationDialog",
+                 sceInvitationDialogOpen);
+}
+
 static void RegisterPlayGo(Core::Loader::SymbolsResolver* sym) {
     LIB_FUNCTION("uEqMfMITvEI", "libSceDbgPlayGo", 1, "libScePlayGo", sceDbgPlayGoRequestNextChunk);
     LIB_FUNCTION("vU+FqrH+pEY", "libSceDbgPlayGo", 1, "libScePlayGo", sceDbgPlayGoSnapshot);
@@ -992,7 +1017,7 @@ void InitHLELibs(Core::Loader::SymbolsResolver* sym) {
             {"libSceVrTracker.sprx", RegisterVrTracker},
             {"libSceContentExport.sprx", RegisterContentExport},
             {"libSceVideoRecording.sprx", RegisterVideoRecording},
-            {"libSceInvitationDialog.sprx", Libraries::InvitationDialog::RegisterLib},
+            {"libSceInvitationDialog.sprx", RegisterInvitationDialog},
             {"libSceNpUtility.sprx", Libraries::Np::NpUtility::RegisterLib},
 #if defined(ARCH_X86_64) || defined(SHADPS4_ENABLE_FEX_GUEST_CPU)
             {"libSceFiber.sprx", Libraries::Fiber::RegisterLib},

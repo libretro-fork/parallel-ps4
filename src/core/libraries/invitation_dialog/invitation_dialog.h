@@ -1,136 +1,146 @@
-// SPDX-FileCopyrightText: Copyright 2026 shadPS4 Emulator Project
-// SPDX-License-Identifier: GPL-2.0-or-later
+/* SPDX-FileCopyrightText: Copyright 2026 shadPS4 Emulator Project
+ * SPDX-License-Identifier: GPL-2.0-or-later */
 
-#pragma once
+#ifndef SHADPS4_LIBRARIES_INVITATION_DIALOG_H
+#define SHADPS4_LIBRARIES_INVITATION_DIALOG_H
 
-#include <cstddef>
+/* libSceInvitationDialog: the dialog is the overlay's (video_core/overlay/ovl_invdialog.c).
+ * Defined in invitation_dialog.c, registered in libs.cpp; what the overlay asks of the NP
+ * handler is in np_handler_invitation.cpp. */
 
-#include <core/libraries/np/np_types.h>
-#include <core/libraries/system/commondialog.h>
-#include <core/libraries/system/userservice.h>
+#include <stddef.h>
+
+#include <retro_common_api.h>
+
 #include "common/types.h"
+#include "core/libraries/np/np_types_c.h"
+#include "core/libraries/system/commondialog_c.h"
 
-namespace Core::Loader {
-class SymbolsResolver;
-}
+RETRO_BEGIN_DECLS
 
-namespace Libraries::InvitationDialog {
+#define ORBIS_INVITATION_DIALOG_ADDRESS_USER_LIST_MAX_SIZE 16
+#define ORBIS_INVITATION_DIALOG_MAX_USER_MSG_SIZE 512
+#define ORBIS_NP_SESSION_ID_MAX_SIZE 45
 
-constexpr int ORBIS_INVITATION_DIALOG_ADDRESS_USER_LIST_MAX_SIZE = 16;
-constexpr int ORBIS_INVITATION_DIALOG_MAX_USER_MSG_SIZE = 512;
-constexpr int ORBIS_NP_SESSION_ID_MAX_SIZE = 45;
-
-struct OrbisInvitationDialogUserList {
+typedef struct OrbisInvitationDialogUserList {
     u32 count;
     struct {
-        Libraries::Np::OrbisNpOnlineId onlineId;
-        Libraries::Np::OrbisNpAccountId accountId;
+        np_online_id_t onlineId;
+        np_account_id_t accountId;
     } users[ORBIS_INVITATION_DIALOG_ADDRESS_USER_LIST_MAX_SIZE];
-};
+} OrbisInvitationDialogUserList;
 
-struct SceInvitationDialogOnlineIdList {
+typedef struct SceInvitationDialogOnlineIdList {
     u32 count;
-    Libraries::Np::OrbisNpOnlineId onlineId[ORBIS_INVITATION_DIALOG_ADDRESS_USER_LIST_MAX_SIZE];
-};
+    np_online_id_t onlineId[ORBIS_INVITATION_DIALOG_ADDRESS_USER_LIST_MAX_SIZE];
+} SceInvitationDialogOnlineIdList;
 
-constexpr int ORBIS_INVITATION_DIALOG_ERROR_BLOCKED_ALL_PLAYERS = 0x810A0001; // if errorCode !=0
+/* if errorCode != 0 */
+#define ORBIS_INVITATION_DIALOG_ERROR_BLOCKED_ALL_PLAYERS ((s32)0x810A0001)
 
-struct OrbisInvitationDialogResultA {
+typedef struct OrbisInvitationDialogResultA {
     void* callbackArg;
     s32 errorCode;
-    Libraries::CommonDialog::Result result;
+    u32 result; /* COMMON_DIALOG_RESULT_* */
     OrbisInvitationDialogUserList* sentUsers;
     u8 reserved[32];
-};
+} OrbisInvitationDialogResultA;
 
-struct OrbisInvitationDialogResult {
+typedef struct OrbisInvitationDialogResult {
     void* callbackArg;
     s32 errorCode;
-    Libraries::CommonDialog::Result result;
+    u32 result; /* COMMON_DIALOG_RESULT_* */
     SceInvitationDialogOnlineIdList* sentOnlineIds;
     u8 reserved[32];
-};
+} OrbisInvitationDialogResult;
 
-// dialog mode
-constexpr int ORBIS_INVITATION_DIALOG_MODE_INVALID = 0; // Invalid mode / initial value
-constexpr int ORBIS_INVITATION_DIALOG_MODE_SEND = 1;    // Send mode
-constexpr int ORBIS_INVITATION_DIALOG_MODE_RECV = 2;    // Receive mode
+/* dialog mode */
+#define ORBIS_INVITATION_DIALOG_MODE_INVALID 0 /* Invalid mode / initial value */
+#define ORBIS_INVITATION_DIALOG_MODE_SEND 1    /* Send mode */
+#define ORBIS_INVITATION_DIALOG_MODE_RECV 2    /* Receive mode */
 
-union OrbisInvitationDialogAddressInfoA {
+typedef union OrbisInvitationDialogAddressInfoA {
     struct {
-        const Libraries::Np::OrbisNpAccountId* accountIds;
+        const np_account_id_t* accountIds;
         u32 accountIdsCount;
-        int : 32;
+        u32 pad;
     } UserSelectDisableAddress;
     struct {
         u32 userMaxCount;
     } UserSelectEnableAddress;
-};
+} OrbisInvitationDialogAddressInfoA;
 
-union OrbisInvitationDialogAddressInfo {
+typedef union OrbisInvitationDialogAddressInfo {
     struct {
-        const Libraries::Np::OrbisNpOnlineId* onlineIds;
+        const np_online_id_t* onlineIds;
         u32 onlineIdsCount;
     } UserSelectDisableAddress;
     struct {
         u32 onlineIdsMaxCount;
     } UserSelectEnableAddress;
-};
+} OrbisInvitationDialogAddressInfo;
 
-// addressType
-constexpr int ORBIS_INVITATION_DIALOG_ADDRESS_TYPE_INVALID = 0;     // Invalid mode /initial value
-constexpr int ORBIS_INVITATION_DIALOG_ADDRESS_TYPE_USERDISABLE = 1; // Recipient list editing
-                                                                    // disabled
-constexpr int ORBIS_INVITATION_DIALOG_ADDRESS_TYPE_USERENABLE = 2; // Recipient list editing enabled
+/* addressType */
+#define ORBIS_INVITATION_DIALOG_ADDRESS_TYPE_INVALID 0     /* Invalid mode / initial value */
+#define ORBIS_INVITATION_DIALOG_ADDRESS_TYPE_USERDISABLE 1 /* Recipient list editing disabled */
+#define ORBIS_INVITATION_DIALOG_ADDRESS_TYPE_USERENABLE 2  /* Recipient list editing enabled */
 
-struct OrbisInvitationDialogAddressParam {
+typedef struct OrbisInvitationDialogAddressParam {
     s32 addressType;
     OrbisInvitationDialogAddressInfo addressInfo;
-};
+} OrbisInvitationDialogAddressParam;
 
-struct OrbisInvitationDialogAddressParamA {
+typedef struct OrbisInvitationDialogAddressParamA {
     s32 addressType;
-    int : 32;
+    u32 pad;
     OrbisInvitationDialogAddressInfoA addressInfo;
-};
+} OrbisInvitationDialogAddressParamA;
 
-struct OrbisNpSessionId {
+typedef struct OrbisNpSessionId {
     char data[ORBIS_NP_SESSION_ID_MAX_SIZE];
     char term;
     char padding[2];
-};
+} OrbisNpSessionId;
 
-constexpr int ORBIS_NP_INVITATION_ID_SIZE = 60;
+#define ORBIS_NP_INVITATION_ID_SIZE 60
 
-struct OrbisNpInvitationId {
+typedef struct OrbisNpInvitationId {
     char data[ORBIS_NP_INVITATION_ID_SIZE];
     char term;
-};
+} OrbisNpInvitationId;
 
-using OrbisNpSessionInvitationEventFlag = s32;
-constexpr OrbisNpSessionInvitationEventFlag ORBIS_NP_SESSION_INVITATION_EVENT_FLAG_INVITATION =
-    0x01;
+typedef s32 OrbisNpSessionInvitationEventFlag;
+#define ORBIS_NP_SESSION_INVITATION_EVENT_FLAG_INVITATION 0x01
 
-// Delivered via SceSystemServiceEvent::data::param on ORBIS_SYSTEM_SERVICE_EVENT_SESSION_INVITATION
-struct OrbisNpSessionInvitationEventParam {
+/* Delivered via SceSystemServiceEvent::data::param on ORBIS_SYSTEM_SERVICE_EVENT_SESSION_INVITATION
+ */
+typedef struct OrbisNpSessionInvitationEventParam {
     OrbisNpSessionId sessionId;
     OrbisNpInvitationId invitationId;
     OrbisNpSessionInvitationEventFlag flag;
     char padding[4];
-    Libraries::Np::OrbisNpOnlineId onlineId;               // accepting (local) user
-    Libraries::UserService::OrbisUserServiceUserId userId; // accepting (local) user
-    Libraries::Np::OrbisNpOnlineId referralOnlineId;       // inviter
-    Libraries::Np::OrbisNpAccountId referralAccountId;     // inviter
-};
-static_assert(offsetof(OrbisNpSessionInvitationEventParam, flag) == 112);
-static_assert(offsetof(OrbisNpSessionInvitationEventParam, onlineId) == 120);
-static_assert(offsetof(OrbisNpSessionInvitationEventParam, userId) == 140);
-static_assert(offsetof(OrbisNpSessionInvitationEventParam, referralOnlineId) == 144);
-static_assert(offsetof(OrbisNpSessionInvitationEventParam, referralAccountId) == 168);
-static_assert(sizeof(OrbisNpSessionInvitationEventParam) == 176,
-              "SESSION_INVITATION param must be 176 bytes");
+    np_online_id_t onlineId;           /* accepting (local) user */
+    s32 userId;                        /* accepting (local) user: OrbisUserServiceUserId */
+    np_online_id_t referralOnlineId;   /* inviter */
+    np_account_id_t referralAccountId; /* inviter */
+} OrbisNpSessionInvitationEventParam;
 
-union OrbisInvitationDialogDataParam {
+typedef char invitation_event_flag_at_112[offsetof(OrbisNpSessionInvitationEventParam, flag) == 112
+                                              ? 1
+                                              : -1];
+typedef char invitation_event_online_id_at_120
+    [offsetof(OrbisNpSessionInvitationEventParam, onlineId) == 120 ? 1 : -1];
+typedef char invitation_event_user_id_at_140
+    [offsetof(OrbisNpSessionInvitationEventParam, userId) == 140 ? 1 : -1];
+typedef char invitation_event_referral_online_id_at_144
+    [offsetof(OrbisNpSessionInvitationEventParam, referralOnlineId) == 144 ? 1 : -1];
+typedef char invitation_event_referral_account_id_at_168
+    [offsetof(OrbisNpSessionInvitationEventParam, referralAccountId) == 168 ? 1 : -1];
+/* SESSION_INVITATION param must be 176 bytes */
+typedef char
+    invitation_event_size_check[sizeof(OrbisNpSessionInvitationEventParam) == 176 ? 1 : -1];
+
+typedef union OrbisInvitationDialogDataParam {
     struct {
         const char* userMessage;
         const OrbisNpSessionId* sessionId;
@@ -139,9 +149,9 @@ union OrbisInvitationDialogDataParam {
     struct {
         u8 reserved[64];
     } RecvInfo;
-};
+} OrbisInvitationDialogDataParam;
 
-union OrbisInvitationDialogDataParamA {
+typedef union OrbisInvitationDialogDataParamA {
     struct {
         const char* userMessage;
         const OrbisNpSessionId* sessionId;
@@ -150,40 +160,40 @@ union OrbisInvitationDialogDataParamA {
     struct {
         u8 reserved[64];
     } RecvInfo;
-};
+} OrbisInvitationDialogDataParamA;
 
-struct OrbisInvitationDialogParam {
-    Libraries::CommonDialog::BaseParam baseParam;
+typedef struct OrbisInvitationDialogParam {
+    common_dialog_base_param baseParam;
     u32 size;
     s32 mode;
-    Libraries::UserService::OrbisUserServiceUserId userId;
+    s32 userId; /* OrbisUserServiceUserId */
     void* callbackArg;
     OrbisInvitationDialogDataParam* dataParam;
     u8 reserved[64];
-};
+} OrbisInvitationDialogParam;
 
-struct OrbisInvitationDialogParamA {
-    Libraries::CommonDialog::BaseParam baseParam;
+typedef struct OrbisInvitationDialogParamA {
+    common_dialog_base_param baseParam;
     u32 size;
     s32 mode;
-    Libraries::UserService::OrbisUserServiceUserId userId;
-    int : 32;
+    s32 userId; /* OrbisUserServiceUserId */
+    u32 pad;
     void* callbackArg;
     const OrbisInvitationDialogDataParamA* dataParam;
     u8 reserved[64];
-};
+} OrbisInvitationDialogParamA;
 
-Libraries::CommonDialog::Error PS4_SYSV_ABI sceInvitationDialogClose();
+/* The errors are COMMON_DIALOG_ERROR_*, the statuses COMMON_DIALOG_STATUS_* */
+u32 PS4_SYSV_ABI sceInvitationDialogClose(void);
 s32 PS4_SYSV_ABI sceInvitationDialogGetResult(OrbisInvitationDialogResult* result);
 s32 PS4_SYSV_ABI sceInvitationDialogGetResultA(OrbisInvitationDialogResultA* result);
-Libraries::CommonDialog::Status PS4_SYSV_ABI sceInvitationDialogGetStatus();
-Libraries::CommonDialog::Error PS4_SYSV_ABI sceInvitationDialogInitialize();
-Libraries::CommonDialog::Error PS4_SYSV_ABI
-sceInvitationDialogOpen(const OrbisInvitationDialogParam* param);
-Libraries::CommonDialog::Error PS4_SYSV_ABI
-sceInvitationDialogOpenA(const OrbisInvitationDialogParamA* param);
-Libraries::CommonDialog::Error PS4_SYSV_ABI sceInvitationDialogTerminate();
-Libraries::CommonDialog::Status PS4_SYSV_ABI sceInvitationDialogUpdateStatus();
+u32 PS4_SYSV_ABI sceInvitationDialogGetStatus(void);
+u32 PS4_SYSV_ABI sceInvitationDialogInitialize(void);
+u32 PS4_SYSV_ABI sceInvitationDialogOpen(const OrbisInvitationDialogParam* param);
+u32 PS4_SYSV_ABI sceInvitationDialogOpenA(const OrbisInvitationDialogParamA* param);
+u32 PS4_SYSV_ABI sceInvitationDialogTerminate(void);
+u32 PS4_SYSV_ABI sceInvitationDialogUpdateStatus(void);
 
-void RegisterLib(Core::Loader::SymbolsResolver* sym);
-} // namespace Libraries::InvitationDialog
+RETRO_END_DECLS
+
+#endif

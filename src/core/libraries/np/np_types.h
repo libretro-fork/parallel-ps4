@@ -9,6 +9,7 @@
 
 #include "common/types.h"
 #include "core/libraries/error_codes.h"
+#include "core/libraries/np/np_types_c.h"
 
 // For structs and constants shared between multiple Np libraries.
 namespace Libraries::Np {
@@ -31,6 +32,8 @@ struct OrbisNpOnlineId {
     s8 term;
     s8 dummy[3];
 };
+static_assert(sizeof(OrbisNpOnlineId) == sizeof(np_online_id_t));
+static_assert(ORBIS_NP_ONLINEID_MAX_LENGTH == NP_ONLINEID_MAX_LENGTH);
 
 struct OrbisNpId {
     OrbisNpOnlineId handle;
