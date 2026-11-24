@@ -1,38 +1,40 @@
-// SPDX-FileCopyrightText: Copyright 2025 shadPS4 Emulator Project
-// SPDX-License-Identifier: GPL-2.0-or-later
+/* SPDX-FileCopyrightText: Copyright 2025 shadPS4 Emulator Project
+ * SPDX-License-Identifier: GPL-2.0-or-later */
 
-#pragma once
+#ifndef SHADPS4_HMD_SETUP_DIALOG_H
+#define SHADPS4_HMD_SETUP_DIALOG_H
+
+/* libSceHmdSetupDialog: no headset, so the dialog is cancelled at once. MSVC C89. */
+
+#include <boolean.h>
+#include <retro_common_api.h>
 
 #include "common/types.h"
-#include "core/libraries/system/commondialog.h"
-#include "core/libraries/system/userservice.h"
+#include "core/libraries/system/commondialog_c.h"
 
-namespace Core::Loader {
-class SymbolsResolver;
-}
+RETRO_BEGIN_DECLS
 
-namespace Libraries::HmdSetupDialog {
-
-struct OrbisHmdSetupDialogParam {
-    Libraries::CommonDialog::BaseParam base_param;
+typedef struct OrbisHmdSetupDialogParam {
+    common_dialog_base_param base_param;
     u64 size;
-    Libraries::UserService::OrbisUserServiceUserId user_id;
+    s32 user_id;
     bool disable_handover_screen;
     u8 reserved[40];
-};
+} OrbisHmdSetupDialogParam;
 
-struct OrbisHmdSetupDialogResult {
-    Libraries::CommonDialog::Result result;
+typedef struct OrbisHmdSetupDialogResult {
+    u32 result; /* COMMON_DIALOG_RESULT_* */
     u8 reserved[32];
-};
+} OrbisHmdSetupDialogResult;
 
-s32 PS4_SYSV_ABI sceHmdSetupDialogClose();
+s32 PS4_SYSV_ABI sceHmdSetupDialogClose(void);
 s32 PS4_SYSV_ABI sceHmdSetupDialogGetResult(OrbisHmdSetupDialogResult* result);
-Libraries::CommonDialog::Status PS4_SYSV_ABI sceHmdSetupDialogGetStatus();
-s32 PS4_SYSV_ABI sceHmdSetupDialogInitialize();
+u32 PS4_SYSV_ABI sceHmdSetupDialogGetStatus(void);
+s32 PS4_SYSV_ABI sceHmdSetupDialogInitialize(void);
 s32 PS4_SYSV_ABI sceHmdSetupDialogOpen(const OrbisHmdSetupDialogParam* param);
-s32 PS4_SYSV_ABI sceHmdSetupDialogTerminate();
-Libraries::CommonDialog::Status PS4_SYSV_ABI sceHmdSetupDialogUpdateStatus();
+s32 PS4_SYSV_ABI sceHmdSetupDialogTerminate(void);
+u32 PS4_SYSV_ABI sceHmdSetupDialogUpdateStatus(void);
 
-void RegisterLib(Core::Loader::SymbolsResolver* sym);
-} // namespace Libraries::HmdSetupDialog
+RETRO_END_DECLS
+
+#endif

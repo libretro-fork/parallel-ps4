@@ -4,6 +4,13 @@ What changed in the libretro core of this fork, newest first. Changes that come 
 
 ## Unreleased
 
+- The headset libraries (`libSceHmd`, with its distortion and reprojection parts, and `libSceHmdSetupDialog`) are MSVC C89: `hmd/hmd.c`, `hmd_distortion.c`, `hmd_reprojection.c` and `hmd_setup_dialog.c`, registered in `libs.cpp`. There is still no headset: every call answers as the library does without one.
+  - The game's firmware version is read once as the library is registered (`hmd_library_init`, through `kernel_get_compiled_sdk_version`), as `RegisterLib` read it; the firmware 4.50 checks use `KERNEL_FW_450`.
+  - The headers are C: the device status as `u32` with `#define`s, the error codes as `#define`s, the setup dialog's result and status as the common dialog's C values.
+  - The functions known only by their numbers are `Hmd_Func_…` in C, so as not to meet other libraries' of the same name; they log under their old names (`Func_…`).
+  - As before, `sceHmdSetupDialogGetResult` writes to the result it is given without checking it.
+  - **The same answers:** the C and C++ libraries, linked into one program, were given 300,000 random calls each at four firmware versions (below, at and above 4.50) across all 190 functions, with handles, user ids and null or filled parameters: the same results, bytes written and log lines, in 3.6 million checks, under the address and undefined behaviour sanitizers.
+  - Not run in a game yet.
 - The music player library (`libSceMusicPlayerService`) is MSVC C89: `music/music_player_service.c`, registered in `libs.cpp`, with its playback thread, the game's track lists and USB devices, and its calls run one at a time by the C combiner, as they were by the C++ one.
   - **Playing allocates nothing:** the playback thread works on the track's URI and the paths made from it in buffers of its own (up to 4 KiB each, made with the player), where it made `std::string`s for each track; the window a track is decoded into is the player's, as it was. The track lists are still made when the game sets them, a string for each entry, and set straight from the game's entries rather than through a list made first.
   - **What stays C++ is reached through small C calls:** a guest path's host path (`fs_guest_host_path`) and a host file mapped where it lies (`fs_lend_host_file`), new in `fs_c.h`, in `fs.cpp`; and the note of a wake for a sound thread's pace (`kernel_game_note_wake`, in `time.cpp`). The system service asks `music_player_is_bgm_playing`. Whether a file is there is libretro-common's `path_is_valid`; its extension is taken as `std::filesystem::path` took it.

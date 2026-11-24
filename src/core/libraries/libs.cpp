@@ -1230,6 +1230,246 @@ static void RegisterMusicPlayerService(Core::Loader::SymbolsResolver* sym) {
                  sceMusicPlayerServiceGetTrackListVersion);
 }
 
+static void RegisterHmd(Core::Loader::SymbolsResolver* sym) {
+    hmd_library_init();
+    LIB_FUNCTION("6biw1XHTSqQ", "libSceHmd", 1, "libSceHmd", sceHmdClose);
+    LIB_FUNCTION("BWY-qKM5hxE", "libSceHmd", 1, "libSceHmd", sceHmdGet2DEyeOffset);
+    LIB_FUNCTION("Yx+CuF11D3Q", "libSceHmd", 1, "libSceHmd", sceHmdGetAssyError);
+    LIB_FUNCTION("thDt9upZlp8", "libSceHmd", 1, "libSceHmd", sceHmdGetDeviceInformation);
+    LIB_FUNCTION("1pxQfif1rkE", "libSceHmd", 1, "libSceHmd", sceHmdGetDeviceInformationByHandle);
+    LIB_FUNCTION("NPQwYFqi0bs", "libSceHmd", 1, "libSceHmd", sceHmdGetFieldOfView);
+    LIB_FUNCTION("rU3HK9Q0r8o", "libSceHmd", 1, "libSceHmd", sceHmdGetInertialSensorData);
+    LIB_FUNCTION("K4KnH0QkT2c", "libSceHmd", 1, "libSceHmd", sceHmdInitialize);
+    LIB_FUNCTION("s-J66ar9g50", "libSceHmd", 1, "libSceHmd", sceHmdInitialize315);
+    LIB_FUNCTION("riPQfAdebHk", "libSceHmd", 1, "libSceHmd", sceHmdInternal3dAudioClose);
+    LIB_FUNCTION("wHnZU1qtiqw", "libSceHmd", 1, "libSceHmd", sceHmdInternal3dAudioOpen);
+    LIB_FUNCTION("NuEjeN8WCBA", "libSceHmd", 1, "libSceHmd", sceHmdInternal3dAudioSendData);
+    LIB_FUNCTION("QasPTUPWVZE", "libSceHmd", 1, "libSceHmd", sceHmdInternalAnotherScreenClose);
+    LIB_FUNCTION("Wr5KVtyVDG0", "libSceHmd", 1, "libSceHmd",
+                 sceHmdInternalAnotherScreenGetAudioStatus);
+    LIB_FUNCTION("whRxl6Hhrzg", "libSceHmd", 1, "libSceHmd",
+                 sceHmdInternalAnotherScreenGetFadeState);
+    LIB_FUNCTION("w8BEUsIYn8w", "libSceHmd", 1, "libSceHmd",
+                 sceHmdInternalAnotherScreenGetVideoStatus);
+    LIB_FUNCTION("0cQDAbkOt2A", "libSceHmd", 1, "libSceHmd", sceHmdInternalAnotherScreenOpen);
+    LIB_FUNCTION("Asczi8gw1NM", "libSceHmd", 1, "libSceHmd", sceHmdInternalAnotherScreenSendAudio);
+    LIB_FUNCTION("6+v7m1vwE+0", "libSceHmd", 1, "libSceHmd", sceHmdInternalAnotherScreenSendVideo);
+    LIB_FUNCTION("E0BLvy57IiQ", "libSceHmd", 1, "libSceHmd",
+                 sceHmdInternalAnotherScreenSetFadeAndSwitch);
+    LIB_FUNCTION("UTqrWB+1+SU", "libSceHmd", 1, "libSceHmd", sceHmdInternalBindDeviceWithUserId);
+    LIB_FUNCTION("ego1YdqNGpI", "libSceHmd", 1, "libSceHmd", sceHmdInternalCheckDeviceModelMk3);
+    LIB_FUNCTION("WR7XsLdjcqQ", "libSceHmd", 1, "libSceHmd",
+                 sceHmdInternalCheckS3dPassModeAvailable);
+    LIB_FUNCTION("eMI1Hq+NEwY", "libSceHmd", 1, "libSceHmd", sceHmdInternalCrashReportCancel);
+    LIB_FUNCTION("dI3StPLQlMM", "libSceHmd", 1, "libSceHmd", sceHmdInternalCrashReportClose);
+    LIB_FUNCTION("lqPT-Bf1s4I", "libSceHmd", 1, "libSceHmd", sceHmdInternalCrashReportOpen);
+    LIB_FUNCTION("QxhJs6zHUmU", "libSceHmd", 1, "libSceHmd", sceHmdInternalCrashReportReadData);
+    LIB_FUNCTION("A2jWOLPzHHE", "libSceHmd", 1, "libSceHmd", sceHmdInternalCrashReportReadDataSize);
+    LIB_FUNCTION("E9scVxt0DNg", "libSceHmd", 1, "libSceHmd", sceHmdInternalCreateSharedMemory);
+    LIB_FUNCTION("6RclvsKxr3I", "libSceHmd", 1, "libSceHmd", sceHmdInternalDfuCheckAfterPvt);
+    LIB_FUNCTION("cE99PJR6b8w", "libSceHmd", 1, "libSceHmd",
+                 sceHmdInternalDfuCheckPartialUpdateAvailable);
+    LIB_FUNCTION("SuE90Qscg0s", "libSceHmd", 1, "libSceHmd", sceHmdInternalDfuClose);
+    LIB_FUNCTION("5f-6lp7L5cY", "libSceHmd", 1, "libSceHmd", sceHmdInternalDfuGetStatus);
+    LIB_FUNCTION("dv2RqD7ZBd4", "libSceHmd", 1, "libSceHmd", sceHmdInternalDfuOpen);
+    LIB_FUNCTION("pN0HjRU86Jo", "libSceHmd", 1, "libSceHmd", sceHmdInternalDfuReset);
+    LIB_FUNCTION("mdc++HCXSsQ", "libSceHmd", 1, "libSceHmd", sceHmdInternalDfuSend);
+    LIB_FUNCTION("gjyqnphjGZE", "libSceHmd", 1, "libSceHmd", sceHmdInternalDfuSendSize);
+    LIB_FUNCTION("bl4MkWNLxKs", "libSceHmd", 1, "libSceHmd", sceHmdInternalDfuSetMode);
+    LIB_FUNCTION("a1LmvXhZ6TM", "libSceHmd", 1, "libSceHmd", sceHmdInternalDfuStart);
+    LIB_FUNCTION("+UzzSnc0z9A", "libSceHmd", 1, "libSceHmd", sceHmdInternalEventInitialize);
+    LIB_FUNCTION("uQc9P8Hrr6U", "libSceHmd", 1, "libSceHmd", sceHmdInternalGetBrightness);
+    LIB_FUNCTION("nK1g+MwMV10", "libSceHmd", 1, "libSceHmd", sceHmdInternalGetCrashDumpInfo);
+    LIB_FUNCTION("L5WZgOTw41Y", "libSceHmd", 1, "libSceHmd", sceHmdInternalGetDebugMode);
+    LIB_FUNCTION("3w8SkMfCHY0", "libSceHmd", 1, "libSceHmd",
+                 sceHmdInternalGetDebugSocialScreenMode);
+    LIB_FUNCTION("1Xmb76MHXug", "libSceHmd", 1, "libSceHmd", sceHmdInternalGetDebugTextMode);
+    LIB_FUNCTION("S0ITgPRkfUg", "libSceHmd", 1, "libSceHmd", sceHmdInternalGetDefaultLedData);
+    LIB_FUNCTION("mxjolbeBa78", "libSceHmd", 1, "libSceHmd", sceHmdInternalGetDemoMode);
+    LIB_FUNCTION("RFIi20Wp9j0", "libSceHmd", 1, "libSceHmd", sceHmdInternalGetDeviceInformation);
+    LIB_FUNCTION("P04LQJQZ43Y", "libSceHmd", 1, "libSceHmd",
+                 sceHmdInternalGetDeviceInformationByHandle);
+    LIB_FUNCTION("PPCqsD8B5uM", "libSceHmd", 1, "libSceHmd", sceHmdInternalGetDeviceStatus);
+    LIB_FUNCTION("-u82z1UhOq4", "libSceHmd", 1, "libSceHmd", sceHmdInternalGetEyeStatus);
+    LIB_FUNCTION("iINSFzCIaB8", "libSceHmd", 1, "libSceHmd", sceHmdInternalGetHmuOpticalParam);
+    LIB_FUNCTION("Csuvq2MMXHU", "libSceHmd", 1, "libSceHmd",
+                 sceHmdInternalGetHmuPowerStatusForDebug);
+    LIB_FUNCTION("UhFPniZvm8U", "libSceHmd", 1, "libSceHmd", sceHmdInternalGetHmuSerialNumber);
+    LIB_FUNCTION("aTg7K0466r8", "libSceHmd", 1, "libSceHmd", Hmd_Func_69383B2B4E3AEABF);
+    LIB_FUNCTION("9exeDpk7JU8", "libSceHmd", 1, "libSceHmd", sceHmdInternalGetIPD);
+    LIB_FUNCTION("yNtYRsxZ6-A", "libSceHmd", 1, "libSceHmd",
+                 sceHmdInternalGetIpdSettingEnableForSystemService);
+    LIB_FUNCTION("EKn+IFVsz0M", "libSceHmd", 1, "libSceHmd", sceHmdInternalGetPuBuildNumber);
+    LIB_FUNCTION("AxQ6HtktYfQ", "libSceHmd", 1, "libSceHmd", sceHmdInternalGetPuPositionParam);
+    LIB_FUNCTION("ynKv9QCSbto", "libSceHmd", 1, "libSceHmd", sceHmdInternalGetPuRevision);
+    LIB_FUNCTION("3jcyx7XOm7A", "libSceHmd", 1, "libSceHmd", sceHmdInternalGetPUSerialNumber);
+    LIB_FUNCTION("+PDyXnclP5w", "libSceHmd", 1, "libSceHmd", sceHmdInternalGetPUVersion);
+    LIB_FUNCTION("67q17ERGBuw", "libSceHmd", 1, "libSceHmd", sceHmdInternalGetRequiredPUPVersion);
+    LIB_FUNCTION("uGyN1CkvwYU", "libSceHmd", 1, "libSceHmd", sceHmdInternalGetStatusReport);
+    LIB_FUNCTION("p9lSvZujLuo", "libSceHmd", 1, "libSceHmd", sceHmdInternalGetTv4kCapability);
+    LIB_FUNCTION("-Z+-9u98m9o", "libSceHmd", 1, "libSceHmd", sceHmdInternalGetVirtualDisplayDepth);
+    LIB_FUNCTION("df+b0FQnnVQ", "libSceHmd", 1, "libSceHmd", sceHmdInternalGetVirtualDisplayHeight);
+    LIB_FUNCTION("i6yROd9ygJs", "libSceHmd", 1, "libSceHmd", sceHmdInternalGetVirtualDisplaySize);
+    LIB_FUNCTION("Aajiktl6JXU", "libSceHmd", 1, "libSceHmd", sceHmdInternalGetVr2dData);
+    LIB_FUNCTION("GwFVF2KkIT4", "libSceHmd", 1, "libSceHmd", sceHmdInternalIsCommonDlgMiniAppVr2d);
+    LIB_FUNCTION("LWQpWHOSUvk", "libSceHmd", 1, "libSceHmd", sceHmdInternalIsCommonDlgVr2d);
+    LIB_FUNCTION("YiIVBPLxmfE", "libSceHmd", 1, "libSceHmd", sceHmdInternalIsGameVr2d);
+    LIB_FUNCTION("LMlWs+oKHTg", "libSceHmd", 1, "libSceHmd", sceHmdInternalIsMiniAppVr2d);
+    LIB_FUNCTION("nBv4CKUGX0Y", "libSceHmd", 1, "libSceHmd", sceHmdInternalMapSharedMemory);
+    LIB_FUNCTION("4hTD8I3CyAk", "libSceHmd", 1, "libSceHmd", sceHmdInternalMirroringModeSetAspect);
+    LIB_FUNCTION("EJwPtSSZykY", "libSceHmd", 1, "libSceHmd",
+                 sceHmdInternalMirroringModeSetAspectDebug);
+    LIB_FUNCTION("r7f7M5q3snU", "libSceHmd", 1, "libSceHmd", sceHmdInternalMmapGetCount);
+    LIB_FUNCTION("gCjTEtEsOOw", "libSceHmd", 1, "libSceHmd", sceHmdInternalMmapGetModeId);
+    LIB_FUNCTION("HAr740Mt9Hs", "libSceHmd", 1, "libSceHmd",
+                 sceHmdInternalMmapGetSensorCalibrationData);
+    LIB_FUNCTION("1PNiQR-7L6k", "libSceHmd", 1, "libSceHmd", sceHmdInternalMmapIsConnect);
+    LIB_FUNCTION("9-jaAXUNG-A", "libSceHmd", 1, "libSceHmd", sceHmdInternalPushVr2dData);
+    LIB_FUNCTION("1gkbLH5+kxU", "libSceHmd", 1, "libSceHmd", sceHmdInternalRegisterEventCallback);
+    LIB_FUNCTION("6kHBllapJas", "libSceHmd", 1, "libSceHmd", sceHmdInternalResetInertialSensor);
+    LIB_FUNCTION("k1W6RPkd0mc", "libSceHmd", 1, "libSceHmd", sceHmdInternalResetLedForVrTracker);
+    LIB_FUNCTION("dp1wu22jSGc", "libSceHmd", 1, "libSceHmd", sceHmdInternalResetLedForVsh);
+    LIB_FUNCTION("d2TeoKeqM5U", "libSceHmd", 1, "libSceHmd", sceHmdInternalSeparateModeClose);
+    LIB_FUNCTION("WxsnAsjPF7Q", "libSceHmd", 1, "libSceHmd",
+                 sceHmdInternalSeparateModeGetAudioStatus);
+    LIB_FUNCTION("eOOeG9SpEuc", "libSceHmd", 1, "libSceHmd",
+                 sceHmdInternalSeparateModeGetVideoStatus);
+    LIB_FUNCTION("gA4Xnn+NSGk", "libSceHmd", 1, "libSceHmd", sceHmdInternalSeparateModeOpen);
+    LIB_FUNCTION("stQ7AsondmE", "libSceHmd", 1, "libSceHmd", sceHmdInternalSeparateModeSendAudio);
+    LIB_FUNCTION("jfnS-OoDayM", "libSceHmd", 1, "libSceHmd", sceHmdInternalSeparateModeSendVideo);
+    LIB_FUNCTION("roHN4ml+tB8", "libSceHmd", 1, "libSceHmd", sceHmdInternalSetBrightness);
+    LIB_FUNCTION("0z2qLqedQH0", "libSceHmd", 1, "libSceHmd", sceHmdInternalSetCrashReportCommand);
+    LIB_FUNCTION("xhx5rVZEpnw", "libSceHmd", 1, "libSceHmd", sceHmdInternalSetDebugGpo);
+    LIB_FUNCTION("e7laRxRGCHc", "libSceHmd", 1, "libSceHmd", sceHmdInternalSetDebugMode);
+    LIB_FUNCTION("CRyJ7Q-ap3g", "libSceHmd", 1, "libSceHmd",
+                 sceHmdInternalSetDebugSocialScreenMode);
+    LIB_FUNCTION("dG4XPW4juU4", "libSceHmd", 1, "libSceHmd", sceHmdInternalSetDebugTextMode);
+    LIB_FUNCTION("rAXmGoO-VmE", "libSceHmd", 1, "libSceHmd", sceHmdInternalSetDefaultLedData);
+    LIB_FUNCTION("lu9I7jnUvWQ", "libSceHmd", 1, "libSceHmd", sceHmdInternalSetDemoMode);
+    LIB_FUNCTION("hyATMTuQSoQ", "libSceHmd", 1, "libSceHmd", sceHmdInternalSetDeviceConnection);
+    LIB_FUNCTION("c4mSi64bXUw", "libSceHmd", 1, "libSceHmd", sceHmdInternalSetForcedCrash);
+    LIB_FUNCTION("U9kPT4g1mFE", "libSceHmd", 1, "libSceHmd", sceHmdInternalSetHmuPowerControl);
+    LIB_FUNCTION("dX-MVpXIPwQ", "libSceHmd", 1, "libSceHmd",
+                 sceHmdInternalSetHmuPowerControlForDebug);
+    LIB_FUNCTION("4KIjvAf8PCA", "libSceHmd", 1, "libSceHmd", sceHmdInternalSetIPD);
+    LIB_FUNCTION("NbxTfUKO184", "libSceHmd", 1, "libSceHmd",
+                 sceHmdInternalSetIpdSettingEnableForSystemService);
+    LIB_FUNCTION("NnRKjf+hxW4", "libSceHmd", 1, "libSceHmd", sceHmdInternalSetLedOn);
+    LIB_FUNCTION("4AP0X9qGhqw", "libSceHmd", 1, "libSceHmd", sceHmdInternalSetM2LedBrightness);
+    LIB_FUNCTION("Mzzz2HPWM+8", "libSceHmd", 1, "libSceHmd", sceHmdInternalSetM2LedOn);
+    LIB_FUNCTION("LkBkse9Pit0", "libSceHmd", 1, "libSceHmd", sceHmdInternalSetPortConnection);
+    LIB_FUNCTION("v243mvYg0Y0", "libSceHmd", 1, "libSceHmd", sceHmdInternalSetPortStatus);
+    LIB_FUNCTION("EwXvkZpo9Go", "libSceHmd", 1, "libSceHmd", sceHmdInternalSetS3dPassMode);
+    LIB_FUNCTION("g3DKNOy1tYw", "libSceHmd", 1, "libSceHmd", sceHmdInternalSetSidetone);
+    LIB_FUNCTION("mjMsl838XM8", "libSceHmd", 1, "libSceHmd", sceHmdInternalSetUserType);
+    LIB_FUNCTION("8IS0KLkDNQY", "libSceHmd", 1, "libSceHmd", sceHmdInternalSetVirtualDisplayDepth);
+    LIB_FUNCTION("afhK5KcJOJY", "libSceHmd", 1, "libSceHmd", sceHmdInternalSetVirtualDisplayHeight);
+    LIB_FUNCTION("+zPvzIiB+BU", "libSceHmd", 1, "libSceHmd", sceHmdInternalSetVirtualDisplaySize);
+    LIB_FUNCTION("9z8Lc64NF1c", "libSceHmd", 1, "libSceHmd", sceHmdInternalSetVRMode);
+    LIB_FUNCTION("s5EqYh5kbwM", "libSceHmd", 1, "libSceHmd",
+                 sceHmdInternalSocialScreenGetFadeState);
+    LIB_FUNCTION("a1LMFZtK9b0", "libSceHmd", 1, "libSceHmd",
+                 sceHmdInternalSocialScreenSetFadeAndSwitch);
+    LIB_FUNCTION("-6FjKlMA+Yc", "libSceHmd", 1, "libSceHmd", sceHmdInternalSocialScreenSetOutput);
+    LIB_FUNCTION("d2g5Ij7EUzo", "libSceHmd", 1, "libSceHmd", sceHmdOpen);
+    LIB_FUNCTION("z-RMILqP6tE", "libSceHmd", 1, "libSceHmd", sceHmdTerminate);
+    LIB_FUNCTION("IC0NGmh-zS8", "libSceHmd", 1, "libSceHmd", Hmd_Func_202D0D1A687FCD2F);
+    LIB_FUNCTION("NY2-gYo9ihI", "libSceHmd", 1, "libSceHmd", Hmd_Func_358DBF818A3D8A12);
+    LIB_FUNCTION("XMutp2-o9A4", "libSceHmd", 1, "libSceHmd", Hmd_Func_5CCBADA76FE8F40E);
+    LIB_FUNCTION("Y9QDFn3AjPA", "libSceHmd", 1, "libSceHmd", Hmd_Func_63D403167DC08CF0);
+    LIB_FUNCTION("eRVgwy9PbWg", "libSceHmd", 1, "libSceHmd", Hmd_Func_791560C32F4F6D68);
+    LIB_FUNCTION("fJVZYeqFttM", "libSceHmd", 1, "libSceHmd", Hmd_Func_7C955961EA85B6D3);
+    LIB_FUNCTION("mVIneDkja6c", "libSceHmd", 1, "libSceHmd", Hmd_Func_9952277839236BA7);
+    LIB_FUNCTION("miduc55U7q8", "libSceHmd", 1, "libSceHmd", Hmd_Func_9A276E739E54EEAF);
+    LIB_FUNCTION("nlAZlOKJy+c", "libSceHmd", 1, "libSceHmd", Hmd_Func_9E501994E289CBE7);
+    LIB_FUNCTION("ox9NqLO9LhI", "libSceHmd", 1, "libSceHmd", Hmd_Func_A31F4DA8B3BD2E12);
+    LIB_FUNCTION("qS18I6w2SZM", "libSceHmd", 1, "libSceHmd", Hmd_Func_A92D7C23AC364993);
+    LIB_FUNCTION("rczCXLh2-b4", "libSceHmd", 1, "libSceHmd", Hmd_Func_ADCCC25CB876FDBE);
+    LIB_FUNCTION("sWZSZB-mnw4", "libSceHmd", 1, "libSceHmd", Hmd_Func_B16652641FE69F0E);
+    LIB_FUNCTION("-Bk71lPyry4", "libSceHmd", 1, "libSceHmd", Hmd_Func_FC193BD653F2AF2E);
+    LIB_FUNCTION("-y4OUwFf4jE", "libSceHmd", 1, "libSceHmd", Hmd_Func_FF2E0E53015FE231);
+    LIB_FUNCTION("gEokC+OGI8g", "libSceHmdDistortion", 1, "libSceHmd",
+                 sceHmdDistortionGet2dVrCommand);
+    LIB_FUNCTION("za4xJfzCBcM", "libSceHmd", 1, "libSceHmd", sceHmdDistortionGet2dVrCommand);
+    LIB_FUNCTION("ER2ar8yUmbk", "libSceHmdDistortion", 1, "libSceHmd",
+                 sceHmdDistortionGetCompoundEyeCorrectionCommand);
+    LIB_FUNCTION("HT8qWOTOGmo", "libSceHmdDistortion", 1, "libSceHmd",
+                 sceHmdDistortionGetCorrectionCommand);
+    LIB_FUNCTION("grCYks4m8Jw", "libSceHmd", 1, "libSceHmd", sceHmdDistortionGetCorrectionCommand);
+    LIB_FUNCTION("Vkkhy8RFIuk", "libSceHmdDistortion", 1, "libSceHmd",
+                 sceHmdDistortionGetWideNearCorrectionCommand);
+    LIB_FUNCTION("goi5ASvH-V8", "libSceHmd", 1, "libSceHmd",
+                 sceHmdDistortionGetWideNearCorrectionCommand);
+    LIB_FUNCTION("1cS7W5J-v3k", "libSceHmdDistortion", 1, "libSceHmd",
+                 sceHmdDistortionGetWorkMemoryAlign);
+    LIB_FUNCTION("8Ick-e6cDVY", "libSceHmd", 1, "libSceHmd", sceHmdDistortionGetWorkMemoryAlign);
+    LIB_FUNCTION("36xDKk+Hw7o", "libSceHmdDistortion", 1, "libSceHmd",
+                 sceHmdDistortionGetWorkMemorySize);
+    LIB_FUNCTION("D5JfdpJKvXk", "libSceHmd", 1, "libSceHmd", sceHmdDistortionGetWorkMemorySize);
+    LIB_FUNCTION("ao8NZ+FRYJE", "libSceHmdDistortion", 1, "libSceHmd", sceHmdDistortionInitialize);
+    LIB_FUNCTION("8A4T5ahi790", "libSceHmdDistortion", 1, "libSceHmd",
+                 sceHmdDistortionSetOutputMinColor);
+    LIB_FUNCTION("mP2ZcYmDg-o", "libSceHmd", 1, "libSceHmd", sceHmdGetDistortionParams);
+    LIB_FUNCTION("smQw6nT8PcA", "libSceHmdDistortion", 1, "libSceHmd", Hmd_Func_B26430EA74FC3DC0);
+    LIB_FUNCTION("thTykLZ-tZs", "libSceHmd", 1, "libSceHmd", Hmd_Func_B614F290B67FB59B);
+    LIB_FUNCTION("8gH1aLgty5I", "libsceHmdReprojectionMultilayer", 1, "libSceHmd",
+                 sceHmdReprojectionStartMultilayer);
+    LIB_FUNCTION("NTIbBpSH9ik", "libSceHmd", 1, "libSceHmd", sceHmdReprojectionAddDisplayBuffer);
+    LIB_FUNCTION("94+Ggm38KCg", "libSceHmd", 1, "libSceHmd", sceHmdReprojectionClearUserEventEnd);
+    LIB_FUNCTION("mdyFbaJj66M", "libSceHmd", 1, "libSceHmd", sceHmdReprojectionClearUserEventStart);
+    LIB_FUNCTION("MdV0akauNow", "libSceHmd", 1, "libSceHmd", sceHmdReprojectionDebugGetLastInfo);
+    LIB_FUNCTION("ymiwVjPB5+k", "libSceHmd", 1, "libSceHmd",
+                 sceHmdReprojectionDebugGetLastInfoMultilayer);
+    LIB_FUNCTION("ZrV5YIqD09I", "libSceHmd", 1, "libSceHmd", sceHmdReprojectionFinalize);
+    LIB_FUNCTION("utHD2Ab-Ixo", "libSceHmd", 1, "libSceHmd", sceHmdReprojectionFinalizeCapture);
+    LIB_FUNCTION("OuygGEWkins", "libSceHmd", 1, "libSceHmd", sceHmdReprojectionInitialize);
+    LIB_FUNCTION("BTrQnC6fcAk", "libSceHmd", 1, "libSceHmd", sceHmdReprojectionInitializeCapture);
+    LIB_FUNCTION("TkcANcGM0s8", "libSceHmd", 1, "libSceHmd",
+                 sceHmdReprojectionQueryGarlicBuffAlign);
+    LIB_FUNCTION("z0KtN1vqF2E", "libSceHmd", 1, "libSceHmd", sceHmdReprojectionQueryGarlicBuffSize);
+    LIB_FUNCTION("IWybWbR-xvA", "libSceHmd", 1, "libSceHmd", sceHmdReprojectionQueryOnionBuffAlign);
+    LIB_FUNCTION("kLUAkN6a1e8", "libSceHmd", 1, "libSceHmd", sceHmdReprojectionQueryOnionBuffSize);
+    LIB_FUNCTION("6CRWGc-evO4", "libSceHmd", 1, "libSceHmd", sceHmdReprojectionSetCallback);
+    LIB_FUNCTION("E+dPfjeQLHI", "libSceHmd", 1, "libSceHmd", sceHmdReprojectionSetDisplayBuffers);
+    LIB_FUNCTION("LjdLRysHU6Y", "libSceHmd", 1, "libSceHmd", sceHmdReprojectionSetOutputMinColor);
+    LIB_FUNCTION("knyIhlkpLgE", "libSceHmd", 1, "libSceHmd", sceHmdReprojectionSetUserEventEnd);
+    LIB_FUNCTION("7as0CjXW1B8", "libSceHmd", 1, "libSceHmd", sceHmdReprojectionSetUserEventStart);
+    LIB_FUNCTION("dntZTJ7meIU", "libSceHmd", 1, "libSceHmd", sceHmdReprojectionStart);
+    LIB_FUNCTION("q3e8+nEguyE", "libSceHmd", 1, "libSceHmd", sceHmdReprojectionStart2dVr);
+    LIB_FUNCTION("RrvyU1pjb9A", "libSceHmd", 1, "libSceHmd", sceHmdReprojectionStartCapture);
+    LIB_FUNCTION("XZ5QUzb4ae0", "libSceHmd", 1, "libSceHmd", sceHmdReprojectionStartLiveCapture);
+    LIB_FUNCTION("8gH1aLgty5I", "libSceHmd", 1, "libSceHmd", sceHmdReprojectionStartMultilayer);
+    LIB_FUNCTION("gqAG7JYeE7A", "libSceHmd", 1, "libSceHmd", sceHmdReprojectionStartMultilayer2);
+    LIB_FUNCTION("3JyuejcNhC0", "libSceHmd", 1, "libSceHmd", sceHmdReprojectionStartWideNear);
+    LIB_FUNCTION("mKa8scOc4-k", "libSceHmd", 1, "libSceHmd",
+                 sceHmdReprojectionStartWideNearWithOverlay);
+    LIB_FUNCTION("kcldQ7zLYQQ", "libSceHmd", 1, "libSceHmd", sceHmdReprojectionStartWithOverlay);
+    LIB_FUNCTION("vzMEkwBQciM", "libSceHmd", 1, "libSceHmd", sceHmdReprojectionStop);
+    LIB_FUNCTION("F7Sndm5teWw", "libSceHmd", 1, "libSceHmd", sceHmdReprojectionStopCapture);
+    LIB_FUNCTION("PAa6cUL5bR4", "libSceHmd", 1, "libSceHmd", sceHmdReprojectionStopLiveCapture);
+    LIB_FUNCTION("0wnZViigP9o", "libSceHmd", 1, "libSceHmd", sceHmdReprojectionUnsetCallback);
+    LIB_FUNCTION("iGNNpDDjcwo", "libSceHmd", 1, "libSceHmd", sceHmdReprojectionUnsetDisplayBuffers);
+    LIB_FUNCTION("oxoDINgOrZk", "libSceHmd", 1, "libSceHmd", Hmd_Func_A31A0320D80EAD99);
+    LIB_FUNCTION("uab6BzXsfkk", "libSceHmd", 1, "libSceHmd", Hmd_Func_B9A6FA0735EC7E49);
+}
+
+static void RegisterHmdSetupDialog(Core::Loader::SymbolsResolver* sym) {
+    LIB_FUNCTION("nmHzU4Gh0xs", "libSceHmdSetupDialog", 1, "libSceHmdSetupDialog",
+                 sceHmdSetupDialogClose);
+    LIB_FUNCTION("6lVRHMV5LY0", "libSceHmdSetupDialog", 1, "libSceHmdSetupDialog",
+                 sceHmdSetupDialogGetResult);
+    LIB_FUNCTION("J9eBpW1udl4", "libSceHmdSetupDialog", 1, "libSceHmdSetupDialog",
+                 sceHmdSetupDialogGetStatus);
+    LIB_FUNCTION("NB1Y2kA2jCY", "libSceHmdSetupDialog", 1, "libSceHmdSetupDialog",
+                 sceHmdSetupDialogInitialize);
+    LIB_FUNCTION("NNgiV4T+akU", "libSceHmdSetupDialog", 1, "libSceHmdSetupDialog",
+                 sceHmdSetupDialogOpen);
+    LIB_FUNCTION("+z4OJmFreZc", "libSceHmdSetupDialog", 1, "libSceHmdSetupDialog",
+                 sceHmdSetupDialogTerminate);
+    LIB_FUNCTION("Ud7j3+RDIBg", "libSceHmdSetupDialog", 1, "libSceHmdSetupDialog",
+                 sceHmdSetupDialogUpdateStatus);
+}
+
 static void RegisterPlayGo(Core::Loader::SymbolsResolver* sym) {
     LIB_FUNCTION("uEqMfMITvEI", "libSceDbgPlayGo", 1, "libScePlayGo", sceDbgPlayGoRequestNextChunk);
     LIB_FUNCTION("vU+FqrH+pEY", "libSceDbgPlayGo", 1, "libScePlayGo", sceDbgPlayGoSnapshot);
@@ -1412,8 +1652,8 @@ void InitHLELibs(Core::Loader::SymbolsResolver* sym) {
             {"libSceKeyboard.sprx", RegisterKeyboard},
             {"libSceWebBrowserDialog.sprx", RegisterWebBrowserDialog},
             {"libSceZlib.sprx", RegisterZlib},
-            {"libSceHmd.sprx", Libraries::Hmd::RegisterLib},
-            {"libSceHmdSetupDialog.sprx", Libraries::HmdSetupDialog::RegisterLib},
+            {"libSceHmd.sprx", RegisterHmd},
+            {"libSceHmdSetupDialog.sprx", RegisterHmdSetupDialog},
             {"libSceDiscMap.sprx", RegisterDiscMap},
             {"ulobjmgr.sprx", RegisterUlobjmgr},
             {"libSceSigninDialog.sprx", RegisterSigninDialog},
