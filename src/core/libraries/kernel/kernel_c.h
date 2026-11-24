@@ -74,6 +74,8 @@ s32 kernel_map_named_system_flexible_memory(void** addr_in_out, u64 len, s32 pro
                                             const char* name);
 /* sceKernelGetCompiledSdkVersion */
 s32 kernel_get_compiled_sdk_version(s32* ver);
+/* The firmware version the game's ELF asks for (Common::ElfInfo::FirmwareVer) */
+u32 kernel_firmware_version(void);
 /* Core::Memory::IsValidGpuMapping */
 bool kernel_is_valid_gpu_mapping(uintptr_t addr, u64 size);
 /* Core::Memory::VirtualQuery with no flags: 0 and the end of the area @addr is in, or the

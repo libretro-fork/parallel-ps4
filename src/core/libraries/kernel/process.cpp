@@ -367,6 +367,10 @@ void RegisterProcess(Core::Loader::SymbolsResolver* sym) {
 } // namespace Libraries::Kernel
 
 // For the libraries written in C (kernel_c.h)
+extern "C" u32 kernel_firmware_version(void) {
+    return Common::ElfInfo::Instance().FirmwareVer();
+}
+
 extern "C" s32 kernel_get_compiled_sdk_version(s32* ver) {
     return Libraries::Kernel::sceKernelGetCompiledSdkVersion(ver);
 }

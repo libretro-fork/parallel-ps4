@@ -178,7 +178,6 @@ CORE_SOURCES_CXX += $(addprefix src/core/libraries/np/np_web_api/,np_web_api.cpp
 	np_web_api_internal.cpp)
 CORE_SOURCES_CXX += $(addprefix src/core/libraries/np/np_web_api2/,np_web_api2.cpp \
 	np_web_api2_context.cpp np_web_api2_internal.cpp np_web_api2_push_event.cpp)
-CORE_SOURCES_CXX += $(addprefix src/core/libraries/pad/,pad.cpp)
 CORE_SOURCES_CXX += $(addprefix src/core/libraries/save_data/dialog/,savedatadialog.cpp \
 	savedatadialog_ui.cpp)
 CORE_SOURCES_CXX += $(addprefix src/core/libraries/save_data/,save_backup.cpp save_instance.cpp \
@@ -266,7 +265,7 @@ CORE_SOURCES_C += $(addprefix src/core/libraries/,companion/companion_httpd.c \
 	app_content/app_content.c invitation_dialog/invitation_dialog.c libc_internal/libc_internal_io.c \
 	libc_internal/libc_internal_math.c libc_internal/libc_internal_printf.c \
 	libc_internal/libc_internal_memory.c libc_internal/libc_internal_str.c \
-	libc_internal/libc_internal_threads.c playgo/playgo.c playgo/playgo_dialog.c system/commondialog.c \
+	libc_internal/libc_internal_threads.c pad/pad.c playgo/playgo.c playgo/playgo_dialog.c system/commondialog.c \
 	web_browser_dialog/webbrowserdialog.c zlib/zlib.c)
 CORE_SOURCES_C += $(addprefix src/shader_recompiler/backend/spirv/,spv_module.c)
 CORE_SOURCES_C += $(addprefix src/core/libraries/np/np_handler/,np_invitation_json.c)

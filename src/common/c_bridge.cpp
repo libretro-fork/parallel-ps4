@@ -44,6 +44,8 @@ static Common::Log::Class ToClass(c_log_class log_class) {
         return Common::Log::Class::Lib_LibcInternal;
     case C_LOG_LIB_APP_CONTENT:
         return Common::Log::Class::Lib_AppContent;
+    case C_LOG_LIB_PAD:
+        return Common::Log::Class::Lib_Pad;
     case C_LOG_LIB_VOICE:
         return Common::Log::Class::Lib_Voice;
     case C_LOG_LIB_RTC:
