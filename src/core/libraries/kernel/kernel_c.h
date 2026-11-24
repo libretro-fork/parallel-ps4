@@ -28,10 +28,14 @@ RETRO_BEGIN_DECLS
 
 /* The firmware versions sceKernelGetCompiledSdkVersion gives (Common::ElfInfo::FW_*) */
 #define KERNEL_FW_150 0x1500000
+#define KERNEL_FW_200 0x2000000
 #define KERNEL_FW_250 0x2500000
 #define KERNEL_FW_300 0x3000000
 #define KERNEL_FW_350 0x3500000
 #define KERNEL_FW_450 0x4500000
+#define KERNEL_FW_700 0x7000000
+#define KERNEL_FW_750 0x7500000
+#define KERNEL_FW_1150 0x11500000
 
 /* The kernel's time structures, as OrbisKernelTimespec, OrbisKernelTimeval and
  * OrbisKernelTimezone (time.h) */
@@ -134,6 +138,28 @@ s32 kernel_posix_close(s32 fd);
 s64 kernel_posix_lseek(s32 fd, s64 offset, s32 whence);
 s64 kernel_write(s32 fd, const void* buf, u64 nbytes);
 s64 kernel_read(s32 fd, void* buf, u64 nbytes);
+
+/* sceKernelIsNeoMode: 1 for a PS4 Pro in its enhanced mode (process.cpp) */
+s32 kernel_is_neo_mode(void);
+/* The game's serial (Common::ElfInfo::GameSerial), "" if none (process.cpp) */
+const char* kernel_game_serial(void);
+
+/* ORBIS_DBG_MAX_NAME_LENGTH */
+#define KERNEL_DBG_MAX_NAME_LENGTH 256
+
+/* Libraries::Kernel::OrbisModuleInfoForUnwind */
+typedef struct kernel_module_info_for_unwind {
+    u64 st_size;
+    char name[KERNEL_DBG_MAX_NAME_LENGTH];
+    u64 eh_frame_hdr_addr;
+    u64 eh_frame_addr;
+    u64 eh_frame_size;
+    u64 seg0_addr;
+    u64 seg0_size;
+} kernel_module_info_for_unwind_t;
+
+/* sceKernelGetModuleInfoForUnwind (process.cpp) */
+s32 kernel_get_module_info_for_unwind(u64 addr, s32 flags, kernel_module_info_for_unwind_t* info);
 
 RETRO_END_DECLS
 

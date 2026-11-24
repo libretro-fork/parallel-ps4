@@ -29,6 +29,7 @@
 #include "core/libraries/invitation_dialog/invitation_dialog.h"
 #include "core/libraries/kernel/kernel.h"
 #include "core/libraries/kernel/kernel_c.h"
+#include "core/libraries/kernel/process.h"
 #include "core/libraries/keyboard/keyboard.h"
 #include "core/libraries/libc_internal/libc_internal.h"
 #include "core/libraries/libc_internal/libc_internal_io.h"
@@ -1126,6 +1127,40 @@ static void RegisterPad(Core::Loader::SymbolsResolver* sym) {
     LIB_FUNCTION("7xA+hFtvBCA", "libScePad", 1, "libScePad", Pad_Func_EF103E845B6F0420);
 }
 
+static void RegisterSysmodule(Core::Loader::SymbolsResolver* sym) {
+    sysmodule_library_init();
+
+    LIB_FUNCTION("D8cuU4d72xM", "libSceSysmodule", 1, "libSceSysmodule",
+                 sceSysmoduleGetModuleHandleInternal);
+    LIB_FUNCTION("4fU5yvOkVG4", "libSceSysmodule", 1, "libSceSysmodule",
+                 sceSysmoduleGetModuleInfoForUnwind);
+    LIB_FUNCTION("ctfO7dQ7geg", "libSceSysmodule", 1, "libSceSysmodule",
+                 sceSysmoduleIsCalledFromSysModule);
+    LIB_FUNCTION("no6T3EfiS3E", "libSceSysmodule", 1, "libSceSysmodule",
+                 sceSysmoduleIsCameraPreloaded);
+    LIB_FUNCTION("fMP5NHUOaMk", "libSceSysmodule", 1, "libSceSysmodule", sceSysmoduleIsLoaded);
+    LIB_FUNCTION("ynFKQ5bfGks", "libSceSysmodule", 1, "libSceSysmodule",
+                 sceSysmoduleIsLoadedInternal);
+    LIB_FUNCTION("g8cM39EUZ6o", "libSceSysmodule", 1, "libSceSysmodule", sceSysmoduleLoadModule);
+    LIB_FUNCTION("CU8m+Qs+HN4", "libSceSysmodule", 1, "libSceSysmodule",
+                 sceSysmoduleLoadModuleByNameInternal);
+    LIB_FUNCTION("39iV5E1HoCk", "libSceSysmodule", 1, "libSceSysmodule",
+                 sceSysmoduleLoadModuleInternal);
+    LIB_FUNCTION("hHrGoGoNf+s", "libSceSysmodule", 1, "libSceSysmodule",
+                 sceSysmoduleLoadModuleInternalWithArg);
+    LIB_FUNCTION("lZ6RvVl0vo0", "libSceSysmodule", 1, "libSceSysmodule",
+                 sceSysmoduleMapLibcForLibkernel);
+    LIB_FUNCTION("DOO+zuW1lrE", "libSceSysmodule", 1, "libSceSysmodule",
+                 sceSysmodulePreloadModuleForLibkernel);
+    LIB_FUNCTION("eR2bZFAAU0Q", "libSceSysmodule", 1, "libSceSysmodule", sceSysmoduleUnloadModule);
+    LIB_FUNCTION("vpTHmA6Knvg", "libSceSysmodule", 1, "libSceSysmodule",
+                 sceSysmoduleUnloadModuleByNameInternal);
+    LIB_FUNCTION("vXZhrtJxkGc", "libSceSysmodule", 1, "libSceSysmodule",
+                 sceSysmoduleUnloadModuleInternal);
+    LIB_FUNCTION("aKa6YfBKZs4", "libSceSysmodule", 1, "libSceSysmodule",
+                 sceSysmoduleUnloadModuleInternalWithArg);
+}
+
 static void RegisterPlayGo(Core::Loader::SymbolsResolver* sym) {
     LIB_FUNCTION("uEqMfMITvEI", "libSceDbgPlayGo", 1, "libScePlayGo", sceDbgPlayGoRequestNextChunk);
     LIB_FUNCTION("vU+FqrH+pEY", "libSceDbgPlayGo", 1, "libScePlayGo", sceDbgPlayGoSnapshot);
@@ -1224,7 +1259,7 @@ void InitHLELibs(Core::Loader::SymbolsResolver* sym) {
             {"libSceSaveData.sprx", Libraries::SaveData::RegisterLib},
             {"libSceSaveDataDialog.sprx", Libraries::SaveData::Dialog::RegisterLib},
             {"libSceSsl2.sprx", Libraries::Ssl2::RegisterLib},
-            {"libSceSysmodule.sprx", Libraries::SysModule::RegisterLib},
+            {"libSceSysmodule.sprx", RegisterSysmodule},
             {"libSceNpCommerce.sprx", Libraries::Np::NpCommerce::RegisterLib},
             {"libSceNpCommon.sprx", Libraries::Np::NpCommon::RegisterLib},
             {"libSceNpManager.sprx", Libraries::Np::NpManager::RegisterLib},

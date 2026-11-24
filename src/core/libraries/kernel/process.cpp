@@ -3,6 +3,7 @@
 
 #include <cstdlib>
 
+#include <cstddef>
 #include "common/elf_info.h"
 #include "common/logging/log.h"
 #include "common/quick_exit.h"
@@ -367,6 +368,34 @@ void RegisterProcess(Core::Loader::SymbolsResolver* sym) {
 } // namespace Libraries::Kernel
 
 // For the libraries written in C (kernel_c.h)
+extern "C" s32 kernel_is_neo_mode(void) {
+    return Libraries::Kernel::sceKernelIsNeoMode();
+}
+
+extern "C" const char* kernel_game_serial(void) {
+    return Common::ElfInfo::Instance().GameSerial();
+}
+
+// The firmware versions kernel_c.h gives C
+static_assert(
+    KERNEL_FW_150 == Common::ElfInfo::FW_150 && KERNEL_FW_200 == Common::ElfInfo::FW_200 &&
+    KERNEL_FW_250 == Common::ElfInfo::FW_250 && KERNEL_FW_300 == Common::ElfInfo::FW_300 &&
+    KERNEL_FW_350 == Common::ElfInfo::FW_350 && KERNEL_FW_450 == Common::ElfInfo::FW_450 &&
+    KERNEL_FW_700 == Common::ElfInfo::FW_700 && KERNEL_FW_750 == Common::ElfInfo::FW_750 &&
+    KERNEL_FW_1150 == Common::ElfInfo::FW_1150);
+
+static_assert(sizeof(kernel_module_info_for_unwind_t) ==
+              sizeof(Libraries::Kernel::OrbisModuleInfoForUnwind));
+static_assert(offsetof(kernel_module_info_for_unwind_t, name) ==
+              offsetof(Libraries::Kernel::OrbisModuleInfoForUnwind, name));
+static_assert(KERNEL_DBG_MAX_NAME_LENGTH == Libraries::Kernel::ORBIS_DBG_MAX_NAME_LENGTH);
+
+extern "C" s32 kernel_get_module_info_for_unwind(u64 addr, s32 flags,
+                                                 kernel_module_info_for_unwind_t* info) {
+    return Libraries::Kernel::sceKernelGetModuleInfoForUnwind(
+        addr, flags, reinterpret_cast<Libraries::Kernel::OrbisModuleInfoForUnwind*>(info));
+}
+
 extern "C" u32 kernel_firmware_version(void) {
     return Common::ElfInfo::Instance().FirmwareVer();
 }

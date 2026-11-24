@@ -31,6 +31,7 @@
 #include "core/libraries/sysmodule/sysmodule.h"
 #include "core/libraries/sysmodule/sysmodule_internal.h"
 #include "core/linker.h"
+#include "core/linker_c.h"
 #include "core/memory.h"
 #include "core/tls.h"
 
@@ -616,7 +617,7 @@ void Linker::Execute(const std::vector<std::string>& args) {
         }
 
         // Have libSceSysmodule preload our libraries.
-        Libraries::SysModule::sceSysmodulePreloadModuleForLibkernel();
+        sceSysmodulePreloadModuleForLibkernel();
 
         // Load and start custom modules from the user directory.
         std::string_view id = Common::ElfInfo::Instance().GameSerial();
@@ -940,10 +941,10 @@ bool Linker::Resolve(const std::string& name, Loader::SymbolType sym_type, Modul
                     (library->name).c_str(), (module->name).c_str());
     } else {
         if (library->name == "libc" && return_info->symbol.nidName == "Need_sceLibc") {
-            Libraries::SysModule::g_need_scelibc = true;
+            sysmodule_need_scelibc = true;
         }
         if (library->name == "libSceFios2" && return_info->symbol.nidName == "sceFiosInitialize") {
-            Libraries::SysModule::g_need_scelibc = true;
+            sysmodule_need_scelibc = true;
         }
     }
     return false;
@@ -1079,3 +1080,9 @@ void Linker::DebugDump() {
 }
 
 } // namespace Core
+
+extern "C" s32 linker_load_and_start_module(const char* path, u64 args, const void* argp,
+                                            int* res) {
+    return Common::Singleton<Core::Linker>::Instance()->LoadAndStartModule(
+        Common::FS::PathFromUTF8String(path), args, argp, res);
+}
