@@ -66,6 +66,8 @@ static Common::Log::Class ToClass(c_log_class log_class) {
         return Common::Log::Class::Lib_Vdecsw;
     case C_LOG_LIB_FIBER:
         return Common::Log::Class::Lib_Fiber;
+    case C_LOG_LIB_USBD:
+        return Common::Log::Class::Lib_Usbd;
     case C_LOG_LIB_VOICE:
         return Common::Log::Class::Lib_Voice;
     case C_LOG_LIB_RTC:

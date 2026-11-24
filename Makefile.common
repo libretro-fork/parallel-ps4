@@ -178,9 +178,7 @@ CORE_SOURCES_CXX += $(addprefix src/core/libraries/save_data/,save_backup.cpp sa
 CORE_SOURCES_CXX += $(addprefix src/core/libraries/sysmodule/,sysmodule_internal.cpp)
 CORE_SOURCES_CXX += $(addprefix src/core/libraries/system/,msgdialog.cpp \
 	msgdialog_ui.cpp systemservice.cpp userservice.cpp)
-CORE_SOURCES_CXX += $(addprefix src/core/libraries/usbd/emulated/,dimensions.cpp infinity.cpp \
-	skylander.cpp)
-CORE_SOURCES_CXX += $(addprefix src/core/libraries/usbd/,usbd.cpp usbstorage.cpp)
+CORE_SOURCES_CXX += src/core/libraries/usbd/usbstorage.cpp
 CORE_SOURCES_CXX += $(addprefix src/core/libraries/videoout/,driver.cpp video_out.cpp)
 CORE_SOURCES_CXX += $(addprefix src/core/loader/,dwarf.cpp elf.cpp symbols_resolver.cpp)
 CORE_SOURCES_CXX += $(addprefix src/core/net/,guest_net.cpp host_net.cpp net_service.cpp \
@@ -242,6 +240,8 @@ CORE_SOURCES_C += $(addprefix src/core/libraries/network/,host_override.c)
 CORE_SOURCES_C += $(addprefix src/core/libraries/ngs2/,ngs2.c ngs2_core.c ngs2_util.c)
 CORE_SOURCES_C += $(addprefix src/core/libraries/audiodec/,audiodec.c)
 CORE_SOURCES_C += $(addprefix src/core/libraries/ime/,ime_support.c)
+CORE_SOURCES_C += $(addprefix src/core/libraries/usbd/,usb_backend.c usbd.c \
+	emulated/dimensions.c emulated/infinity.c emulated/skylander.c)
 CORE_SOURCES_C += $(addprefix src/core/libraries/ult/,ult.c ult_sync.c)
 # The small HLE libraries written in C, registered in libs.cpp and sysmodule_internal.cpp
 CORE_SOURCES_C += $(addprefix src/core/libraries/camera/,camera.c camera_audio.c \

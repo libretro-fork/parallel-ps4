@@ -1,15 +1,17 @@
-// SPDX - FileCopyrightText : Copyright 2024 shadPS4 Emulator Project
-// SPDX-License-Identifier: GPL-2.0-or-later
+/* SPDX-FileCopyrightText: Copyright 2024 shadPS4 Emulator Project
+ * SPDX-License-Identifier: GPL-2.0-or-later */
 
-#pragma once
+#ifndef SHADPS4_USBD_USBD_H
+#define SHADPS4_USBD_USBD_H
+
+/* libSceUsbd. Defined in usbd.c, registered in core/libraries/libs.cpp. */
+
+#include <retro_common_api.h>
 
 #include "common/types.h"
-#include "emulated/dimensions.h"
-#include "emulated/infinity.h"
-#include "emulated/skylander.h"
-#include "usb_backend.h"
 
-extern "C" {
+RETRO_BEGIN_DECLS
+
 struct libusb_device;
 struct libusb_device_handle;
 struct libusb_device_descriptor;
@@ -17,39 +19,29 @@ struct libusb_config_descriptor;
 struct libusb_transfer;
 struct libusb_control_setup;
 struct timeval;
-}
 
-namespace Core::Loader {
-class SymbolsResolver;
-}
+typedef struct libusb_device SceUsbdDevice;
+typedef struct libusb_device_handle SceUsbdDeviceHandle;
+typedef struct libusb_device_descriptor SceUsbdDeviceDescriptor;
+typedef struct libusb_config_descriptor SceUsbdConfigDescriptor;
+typedef struct libusb_transfer SceUsbdTransfer;
+typedef struct libusb_control_setup SceUsbdControlSetup;
+typedef void PS4_SYSV_ABI (*SceUsbdTransferCallback)(SceUsbdTransfer* transfer);
 
-namespace Libraries::Usbd {
+/* A device's speed */
+typedef u32 SceUsbdSpeed;
+#define SCE_USBD_SPEED_UNKNOWN 0u
+#define SCE_USBD_SPEED_LOW 1u
+#define SCE_USBD_SPEED_FULL 2u
+#define SCE_USBD_SPEED_HIGH 3u
+#define SCE_USBD_SPEED_SUPER 4u
+#define SCE_USBD_SPEED_SUPER_PLUS 5u
 
-extern std::shared_ptr<UsbBackend> usb_backend;
+/* Picks the device the library runs on (the setting's emulated toy, or the host's libusb) */
+void usbd_library_init(void);
 
-using SceUsbdDevice = libusb_device;
-using SceUsbdDeviceHandle = libusb_device_handle;
-using SceUsbdDeviceDescriptor = libusb_device_descriptor;
-using SceUsbdConfigDescriptor = libusb_config_descriptor;
-using SceUsbdTransfer = libusb_transfer;
-using SceUsbdControlSetup = libusb_control_setup;
-using SceUsbdTransferCallback = void PS4_SYSV_ABI (*)(SceUsbdTransfer* transfer);
-
-using SkylandersPortalBackend = SkylanderBackend;
-using InfinityBaseBackend = InfinityBackend;
-using DimensionsToypadBackend = DimensionsBackend;
-
-enum class SceUsbdSpeed : u32 {
-    UNKNOWN = 0,
-    LOW = 1,
-    FULL = 2,
-    HIGH = 3,
-    SUPER = 4,
-    SUPER_PLUS = 5
-};
-
-s32 PS4_SYSV_ABI sceUsbdInit();
-void PS4_SYSV_ABI sceUsbdExit();
+s32 PS4_SYSV_ABI sceUsbdInit(void);
+void PS4_SYSV_ABI sceUsbdExit(void);
 
 s64 PS4_SYSV_ABI sceUsbdGetDeviceList(SceUsbdDevice*** list);
 void PS4_SYSV_ABI sceUsbdFreeDeviceList(SceUsbdDevice** list, s32 unref_devices);
@@ -140,25 +132,26 @@ s32 PS4_SYSV_ABI sceUsbdGetStringDescriptor(SceUsbdDeviceHandle* dev_handle, u8 
 s32 PS4_SYSV_ABI sceUsbdGetStringDescriptorAscii(SceUsbdDeviceHandle* dev_handle, u8 desc_index,
                                                  u8* data, s32 length);
 
-s32 PS4_SYSV_ABI sceUsbdTryLockEvents();
-void PS4_SYSV_ABI sceUsbdLockEvents();
-void PS4_SYSV_ABI sceUsbdUnlockEvents();
-s32 PS4_SYSV_ABI sceUsbdEventHandlingOk();
-s32 PS4_SYSV_ABI sceUsbdEventHandlerActive();
-void PS4_SYSV_ABI sceUsbdLockEventWaiters();
-void PS4_SYSV_ABI sceUsbdUnlockEventWaiters();
-s32 PS4_SYSV_ABI sceUsbdWaitForEvent(timeval* tv);
+s32 PS4_SYSV_ABI sceUsbdTryLockEvents(void);
+void PS4_SYSV_ABI sceUsbdLockEvents(void);
+void PS4_SYSV_ABI sceUsbdUnlockEvents(void);
+s32 PS4_SYSV_ABI sceUsbdEventHandlingOk(void);
+s32 PS4_SYSV_ABI sceUsbdEventHandlerActive(void);
+void PS4_SYSV_ABI sceUsbdLockEventWaiters(void);
+void PS4_SYSV_ABI sceUsbdUnlockEventWaiters(void);
+s32 PS4_SYSV_ABI sceUsbdWaitForEvent(struct timeval* tv);
 
-s32 PS4_SYSV_ABI sceUsbdHandleEventsTimeout(timeval* tv);
-s32 PS4_SYSV_ABI sceUsbdHandleEvents();
-s32 PS4_SYSV_ABI sceUsbdHandleEventsLocked(timeval* tv);
+s32 PS4_SYSV_ABI sceUsbdHandleEventsTimeout(struct timeval* tv);
+s32 PS4_SYSV_ABI sceUsbdHandleEvents(void);
+s32 PS4_SYSV_ABI sceUsbdHandleEventsLocked(struct timeval* tv);
 
 s32 PS4_SYSV_ABI sceUsbdCheckConnected(SceUsbdDeviceHandle* dev_handle);
 
-int PS4_SYSV_ABI Func_65F6EF33E38FFF50();
-int PS4_SYSV_ABI Func_97F056BAD90AADE7();
-int PS4_SYSV_ABI Func_C55104A33B35B264();
-int PS4_SYSV_ABI Func_D56B43060720B1E0();
+int PS4_SYSV_ABI Func_65F6EF33E38FFF50(void);
+int PS4_SYSV_ABI Func_97F056BAD90AADE7(void);
+int PS4_SYSV_ABI Func_C55104A33B35B264(void);
+int PS4_SYSV_ABI Func_D56B43060720B1E0(void);
 
-void RegisterLib(Core::Loader::SymbolsResolver* sym);
-} // namespace Libraries::Usbd
+RETRO_END_DECLS
+
+#endif

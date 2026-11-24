@@ -40,6 +40,7 @@ enum c_log_class {
     C_LOG_LIB_VDEC2,
     C_LOG_LIB_VDECSW,
     C_LOG_LIB_FIBER,
+    C_LOG_LIB_USBD,
     C_LOG_LIB_VOICE,
     C_LOG_LIB_RTC,
     C_LOG_LIB_CAMERA,
@@ -89,6 +90,10 @@ void c_unreachable(const char* file, int line, const char* func, const char* msg
 void c_assert_fail(const char* file, int line, const char* func, const char* msg);
 
 /* ASSERT for C: @func names the calling function (C89 has no __func__) */
+/* windows.h (pulled in by libusb.h, say) has a C_ASSERT of its own: ours is the one meant */
+#ifdef C_ASSERT
+#undef C_ASSERT
+#endif
 #define C_ASSERT(cond, func)                                                                       \
     do {                                                                                           \
         if (!(cond)) {                                                                             \
