@@ -6,7 +6,9 @@
 #include "common/assert.h"
 #include "common/io_file.h"
 #include "common/logging/log.h"
+#include "common/path_util.h"
 #include "core/file_format/rif.h"
+#include "core/file_format/rif_c.h"
 
 bool RIF::Open(const std::filesystem::path& ridx_path, const std::filesystem::path& rifa_path) {
     // Both read where they lie
@@ -76,5 +78,21 @@ bool RIF::Open(std::span<const u8> ridx_buffer, std::span<const u8> rifa_buffer)
         }
     }
 
+    return true;
+}
+
+extern "C" bool rif_for_each_license_only_entitlement(
+    const char* ridx_path, const char* rifa_path, void (*opened)(void* ctx),
+    void (*use)(const char* label, size_t length, const u8* key, void* ctx), void* ctx) {
+    static_assert(sizeof(RIFEntitlementKey::data) == RIF_ENTITLEMENT_KEY_SIZE);
+    RIF rif;
+    if (!rif.Open(Common::FS::PathFromUTF8String(ridx_path),
+                  Common::FS::PathFromUTF8String(rifa_path))) {
+        return false;
+    }
+    opened(ctx);
+    for (const auto& entitlement : rif.GetLicenseOnlyEntitlements()) {
+        use(entitlement.first.c_str(), entitlement.first.size(), entitlement.second.data, ctx);
+    }
     return true;
 }

@@ -18,6 +18,9 @@ RETRO_BEGIN_DECLS
 /* sceSystemServiceParamGetInt */
 s32 system_service_param_get_int(s32 param_id, s32* value);
 
+/* An entitlement update for user 0 and service label 0, pushed as the system service's event */
+void system_service_push_entitlement_update(void);
+
 RETRO_END_DECLS
 
 #endif

@@ -944,6 +944,86 @@ void RegisterLib(Core::Loader::SymbolsResolver* sym) {
 
 } // namespace LibcInternal
 
+static void RegisterAppContent(Core::Loader::SymbolsResolver* sym) {
+    app_content_library_init();
+
+    LIB_FUNCTION("AS45QoYHjc4", "libSceAppContent", 1, "libSceAppContentUtil", AppContent_Z5dummyv);
+    LIB_FUNCTION("ZiATpP9gEkA", "libSceAppContent", 1, "libSceAppContentUtil",
+                 sceAppContentAddcontDelete);
+    LIB_FUNCTION("7gxh+5QubhY", "libSceAppContent", 1, "libSceAppContentUtil",
+                 sceAppContentAddcontEnqueueDownload);
+    LIB_FUNCTION("TVM-aYIsG9k", "libSceAppContent", 1, "libSceAppContentUtil",
+                 sceAppContentAddcontEnqueueDownloadSp);
+    LIB_FUNCTION("VANhIWcqYak", "libSceAppContent", 1, "libSceAppContentUtil",
+                 sceAppContentAddcontMount);
+    LIB_FUNCTION("D3H+cjfzzFY", "libSceAppContent", 1, "libSceAppContentUtil",
+                 sceAppContentAddcontShrink);
+    LIB_FUNCTION("3rHWaV-1KC4", "libSceAppContent", 1, "libSceAppContentUtil",
+                 sceAppContentAddcontUnmount);
+    LIB_FUNCTION("99b82IKXpH4", "libSceAppContent", 1, "libSceAppContentUtil",
+                 sceAppContentAppParamGetInt);
+    LIB_FUNCTION("+OlXCu8qxUk", "libSceAppContent", 1, "libSceAppContentUtil",
+                 sceAppContentAppParamGetString);
+    LIB_FUNCTION("gpGZDB4ZlrI", "libSceAppContent", 1, "libSceAppContentUtil",
+                 sceAppContentDownload0Expand);
+    LIB_FUNCTION("S5eMvWnbbXg", "libSceAppContent", 1, "libSceAppContentUtil",
+                 sceAppContentDownload0Shrink);
+    LIB_FUNCTION("B5gVeVurdUA", "libSceAppContent", 1, "libSceAppContentUtil",
+                 sceAppContentDownload1Expand);
+    LIB_FUNCTION("kUeYucqnb7o", "libSceAppContent", 1, "libSceAppContentUtil",
+                 sceAppContentDownload1Shrink);
+    LIB_FUNCTION("CN7EbEV7MFU", "libSceAppContent", 1, "libSceAppContentUtil",
+                 sceAppContentDownloadDataFormat);
+    LIB_FUNCTION("Gl6w5i0JokY", "libSceAppContent", 1, "libSceAppContentUtil",
+                 sceAppContentDownloadDataGetAvailableSpaceKb);
+    LIB_FUNCTION("5bvvbUSiFs4", "libSceAppContent", 1, "libSceAppContentUtil",
+                 sceAppContentGetAddcontDownloadProgress);
+    LIB_FUNCTION("m47juOmH0VE", "libSceAppContent", 1, "libSceAppContentUtil",
+                 sceAppContentGetAddcontInfo);
+    LIB_FUNCTION("xnd8BJzAxmk", "libSceAppContent", 1, "libSceAppContentUtil",
+                 sceAppContentGetAddcontInfoList);
+    LIB_FUNCTION("XTWR0UXvcgs", "libSceAppContent", 1, "libSceAppContentUtil",
+                 sceAppContentGetEntitlementKey);
+    LIB_FUNCTION("74-1x3lyZK8", "libSceAppContent", 1, "libSceAppContentUtil",
+                 sceAppContentGetRegion);
+    LIB_FUNCTION("R9lA82OraNs", "libSceAppContent", 1, "libSceAppContentUtil",
+                 sceAppContentInitialize);
+    LIB_FUNCTION("bVtF7v2uqT0", "libSceAppContent", 1, "libSceAppContentUtil",
+                 sceAppContentRequestPatchInstall);
+    LIB_FUNCTION("9Gq5rOkWzNU", "libSceAppContent", 1, "libSceAppContentUtil",
+                 sceAppContentSmallSharedDataFormat);
+    LIB_FUNCTION("xhb-r8etmAA", "libSceAppContent", 1, "libSceAppContentUtil",
+                 sceAppContentSmallSharedDataGetAvailableSpaceKb);
+    LIB_FUNCTION("QuApZnMo9MM", "libSceAppContent", 1, "libSceAppContentUtil",
+                 sceAppContentSmallSharedDataMount);
+    LIB_FUNCTION("EqMtBHWu-5M", "libSceAppContent", 1, "libSceAppContentUtil",
+                 sceAppContentSmallSharedDataUnmount);
+    LIB_FUNCTION("a5N7lAG0y2Q", "libSceAppContent", 1, "libSceAppContentUtil",
+                 sceAppContentTemporaryDataFormat);
+    LIB_FUNCTION("SaKib2Ug0yI", "libSceAppContent", 1, "libSceAppContentUtil",
+                 sceAppContentTemporaryDataGetAvailableSpaceKb);
+    LIB_FUNCTION("7bOLX66Iz-U", "libSceAppContent", 1, "libSceAppContentUtil",
+                 sceAppContentTemporaryDataMount);
+    LIB_FUNCTION("buYbeLOGWmA", "libSceAppContent", 1, "libSceAppContentUtil",
+                 sceAppContentTemporaryDataMount2);
+    LIB_FUNCTION("bcolXMmp6qQ", "libSceAppContent", 1, "libSceAppContentUtil",
+                 sceAppContentTemporaryDataUnmount);
+    LIB_FUNCTION("xmhnAoxN3Wk", "libSceAppContentPft", 1, "libSceAppContent",
+                 sceAppContentGetPftFlag);
+    LIB_FUNCTION("xZo2-418Wdo", "libSceAppContentBundle", 1, "libSceAppContent",
+                 AppContent_Func_C59A36FF8D7C59DA);
+    LIB_FUNCTION("kJmjt81mXKQ", "libSceAppContentIro", 1, "libSceAppContent",
+                 sceAppContentAddcontEnqueueDownloadByEntitlementId);
+    LIB_FUNCTION("efX3lrPwdKA", "libSceAppContentIro", 1, "libSceAppContent",
+                 sceAppContentAddcontMountByEntitlementId);
+    LIB_FUNCTION("z9hgjLd1SGA", "libSceAppContentIro", 1, "libSceAppContent",
+                 sceAppContentGetAddcontInfoByEntitlementId);
+    LIB_FUNCTION("3wUaDTGmjcQ", "libSceAppContentIro", 1, "libSceAppContent",
+                 sceAppContentGetAddcontInfoListByIroTag);
+    LIB_FUNCTION("TCqT7kPuGx0", "libSceAppContentSc", 1, "libSceAppContent",
+                 sceAppContentGetDownloadedStoreCountry);
+}
+
 static void RegisterPlayGo(Core::Loader::SymbolsResolver* sym) {
     LIB_FUNCTION("uEqMfMITvEI", "libSceDbgPlayGo", 1, "libScePlayGo", sceDbgPlayGoRequestNextChunk);
     LIB_FUNCTION("vU+FqrH+pEY", "libSceDbgPlayGo", 1, "libScePlayGo", sceDbgPlayGoSnapshot);
@@ -1059,7 +1139,7 @@ void InitHLELibs(Core::Loader::SymbolsResolver* sym) {
             {"libSceNpPartner001.sprx", Libraries::Np::NpPartner::RegisterLib},
             {"libSceNpTus.sprx", Libraries::Np::NpTus::RegisterLib},
             {"libSceScreenShot.sprx", RegisterScreenShot},
-            {"libSceAppContent.sprx", Libraries::AppContent::RegisterLib},
+            {"libSceAppContent.sprx", RegisterAppContent},
             {"libScePlayGo.sprx", RegisterPlayGo},
             {"libScePlayGoDialog.sprx", RegisterPlayGoDialog},
             {"libSceRandom.sprx", RegisterRandom},

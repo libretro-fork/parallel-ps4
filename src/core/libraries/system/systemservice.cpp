@@ -3457,3 +3457,12 @@ extern "C" s32 system_service_param_get_int(s32 param_id, s32* value) {
     return Libraries::SystemService::sceSystemServiceParamGetInt(
         static_cast<Libraries::SystemService::OrbisSystemServiceParamId>(param_id), value);
 }
+
+extern "C" void system_service_push_entitlement_update(void) {
+    using namespace Libraries::SystemService;
+    OrbisSystemServiceEvent event{};
+    event.event_type = OrbisSystemServiceEventType::EntitlementUpdate;
+    event.service_entitlement_update.userId = 0;
+    event.service_entitlement_update.np_service_label = 0;
+    PushSystemServiceEvent(event);
+}

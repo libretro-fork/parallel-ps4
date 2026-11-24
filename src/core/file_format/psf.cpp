@@ -11,7 +11,9 @@
 #include "common/io_file.h"
 #include "common/logging/log.h"
 #include "common/path_util.h"
+#include "common/singleton.h"
 #include "core/file_format/psf.h"
+#include "core/file_format/psf_c.h"
 
 static const std::unordered_map<std::string_view, u32> psf_known_max_sizes = {
     {"ACCOUNT_ID", 8},  {"CATEGORY", 4},  {"DETAIL", 1024},       {"FORMAT", 4},
@@ -298,4 +300,29 @@ std::pair<std::vector<PSF::Entry>::const_iterator, size_t> PSF::FindEntry(
     auto entry =
         std::ranges::find_if(entry_list, [&](const auto& entry) { return entry.key == key; });
     return {entry, std::distance(entry_list.begin(), entry)};
+}
+
+extern "C" bool psf_game_get_string(const char* key, char* out, size_t size, size_t* length) {
+    const auto value = Common::Singleton<PSF>::Instance()->GetString(key);
+    if (!value.has_value()) {
+        return false;
+    }
+    if (length != nullptr) {
+        *length = value->size();
+    }
+    if (size != 0) {
+        const size_t n = std::min(value->size(), size - 1);
+        std::memcpy(out, value->data(), n);
+        out[n] = '\0';
+    }
+    return true;
+}
+
+extern "C" bool psf_game_get_integer(const char* key, s32* value) {
+    const auto v = Common::Singleton<PSF>::Instance()->GetInteger(key);
+    if (!v.has_value()) {
+        return false;
+    }
+    *value = *v;
+    return true;
 }

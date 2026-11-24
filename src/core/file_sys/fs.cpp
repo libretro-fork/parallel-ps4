@@ -3,12 +3,16 @@
 
 #include <algorithm>
 #include <array>
+#include <cstring>
 #include <unordered_set>
 #include "common/assert.h"
+#include "common/io_file.h"
 #include "common/logging/log.h"
 #include "common/path_util.h"
 #include "common/singleton.h"
 #include "common/string_util.h"
+#include "core/file_format/psf.h"
+#include "core/file_format/rif.h"
 #include "core/file_sys/backends/host_fs.h"
 #include "core/file_sys/backends/zarchive_fs.h"
 #include "core/file_sys/devices/logger.h"
@@ -829,4 +833,98 @@ extern "C" bool fs_lend_guest_file(const char* guest_path,
     }
     use(bytes->data(), bytes->size(), ctx);
     return true;
+}
+
+extern "C" void fs_for_each_addcont(const char* dir, bool with_beside,
+                                    bool (*use)(const char* path, void* ctx), void* ctx) {
+    const auto folder = Common::FS::PathFromUTF8String(dir);
+    bool going = true;
+    Common::FS::ForEachEntry(folder, [&](std::string_view name, bool is_dir) {
+        if (going && (is_dir || name.ends_with(".zar") || name.ends_with(".pkg"))) {
+            going = use(
+                Common::FS::PathToUTF8String(folder / Common::FS::PathFromUTF8String(name)).c_str(),
+                ctx);
+        }
+    });
+    if (with_beside) {
+        for (const auto& pkg : Core::FileSys::MntPoints::libretro_addcont) {
+            if (!going) {
+                break;
+            }
+            going = use(Common::FS::PathToUTF8String(pkg).c_str(), ctx);
+        }
+    }
+}
+
+// The cut-to-fit, terminated copy fs_addcont_t holds
+static void CopyText(char* out, size_t size, std::string_view text) {
+    const size_t n = std::min(text.size(), size - 1);
+    std::memcpy(out, text.data(), n);
+    out[n] = '\0';
+}
+
+extern "C" s32 fs_read_addcont(const char* path, bool want_key, fs_addcont_t* out) {
+    constexpr u32 LicenseInfoKeyOffset = 0x30;
+    constexpr u32 LicenseDatKeyOffset =
+        offsetof(RIFData, encrypted_secret) + RIF_SECRET_ENTITLEMENT_KEY_OFFSET;
+    static_assert(sizeof(out->key) == sizeof(RIFEntitlementKey::data));
+    auto* mnt = Common::Singleton<Core::FileSys::MntPoints>::Instance();
+    std::memset(out, 0, sizeof(*out));
+
+    // A temporary backend, to look at the param.sfo
+    const auto host_path = Common::FS::PathFromUTF8String(path);
+    std::shared_ptr<Core::FileSys::IBackend> fs = mnt->CreateBackend(host_path, true);
+    if (!fs) {
+        return FS_ADDCONT_NO_BACKEND;
+    }
+    auto psf_handle = fs->Open("sce_sys/param.sfo", Common::FS::FileAccessMode::Read);
+    if (psf_handle == nullptr) {
+        return FS_ADDCONT_NO_PARAM_SFO;
+    }
+    PSF params;
+    if (!params.Open(psf_handle)) {
+        return FS_ADDCONT_BAD_PARAM_SFO;
+    }
+    if (const auto category = params.GetString("CATEGORY"); category.has_value()) {
+        out->has_category = true;
+        CopyText(out->category, sizeof(out->category), *category);
+    }
+    if (const auto content_id = params.GetString("CONTENT_ID"); content_id.has_value()) {
+        out->has_content_id = true;
+        out->content_id_length = content_id->size();
+        CopyText(out->content_id, sizeof(out->content_id), *content_id);
+    }
+    if (want_key) {
+        // license.info, or else license.dat
+        auto license_handle = fs->Open("sce_sys/license.info", Common::FS::FileAccessMode::Read);
+        u32 key_offset = LicenseInfoKeyOffset;
+        if (!license_handle) {
+            license_handle = fs->Open("sce_sys/license.dat", Common::FS::FileAccessMode::Read);
+            key_offset = LicenseDatKeyOffset;
+        }
+        out->has_key = license_handle &&
+                       license_handle->Seek(key_offset, Common::FS::SeekOrigin::SetOrigin) &&
+                       license_handle->Read(out->key, sizeof(out->key)) != 0;
+    }
+    return FS_ADDCONT_OK;
+}
+
+extern "C" void fs_mount(const char* host_path, const char* guest_folder, bool read_only) {
+    auto* mnt = Common::Singleton<Core::FileSys::MntPoints>::Instance();
+    mnt->Mount(Common::FS::PathFromUTF8String(host_path), guest_folder, read_only);
+}
+
+extern "C" void fs_unmount(const char* guest_folder) {
+    auto* mnt = Common::Singleton<Core::FileSys::MntPoints>::Instance();
+    mnt->Unmount(guest_folder);
+}
+
+extern "C" void fs_mount_made_folder(const char* host_dir, bool format, const char* guest_folder) {
+    const auto dir = Common::FS::PathFromUTF8String(host_dir);
+    if (format) {
+        Common::FS::RemoveAll(dir);
+    }
+    Common::FS::CreateDirectories(dir);
+    auto* mnt = Common::Singleton<Core::FileSys::MntPoints>::Instance();
+    mnt->Mount(dir, guest_folder);
 }

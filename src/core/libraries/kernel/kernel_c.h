@@ -27,6 +27,7 @@ RETRO_BEGIN_DECLS
 #define KERNEL_PROT_GPU_READ_WRITE 48u
 
 /* The firmware versions sceKernelGetCompiledSdkVersion gives (Common::ElfInfo::FW_*) */
+#define KERNEL_FW_150 0x1500000
 #define KERNEL_FW_250 0x2500000
 #define KERNEL_FW_300 0x3000000
 #define KERNEL_FW_350 0x3500000

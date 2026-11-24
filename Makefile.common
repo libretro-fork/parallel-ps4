@@ -130,7 +130,6 @@ CORE_SOURCES_CXX += $(addprefix src/core/file_sys/directories/,base_directory.cp
 CORE_SOURCES_CXX += $(addprefix src/core/file_sys/,fs.cpp ifile.cpp)
 CORE_SOURCES_CXX += $(addprefix src/core/libraries/ajm/,ajm.cpp ajm_aac.cpp ajm_at9.cpp \
 	ajm_batch.cpp ajm_context.cpp ajm_instance.cpp ajm_instance_statistics.cpp ajm_mp3.cpp)
-CORE_SOURCES_CXX += $(addprefix src/core/libraries/app_content/,app_content.cpp)
 CORE_SOURCES_CXX += $(addprefix src/core/libraries/audio/,audioin.cpp audioout.cpp \
 	frontend_audio_out.cpp silent_audio_in.cpp)
 CORE_SOURCES_CXX += $(addprefix src/core/libraries/audio3d/,audio3d.cpp)
@@ -264,7 +263,7 @@ CORE_SOURCES_C += $(addprefix src/core/libraries/,companion/companion_httpd.c \
 	remote_play/remoteplay.c rtc/rtc.c rudp/rudp.c screenshot/screenshot.c share_play/shareplay.c \
 	signin_dialog/signindialog.c system_gesture/system_gesture.c ulobjmgr/ulobjmgr.c \
 	video_recording/video_recording.c voice/voice.c vr_tracker/vr_tracker.c \
-	invitation_dialog/invitation_dialog.c libc_internal/libc_internal_io.c \
+	app_content/app_content.c invitation_dialog/invitation_dialog.c libc_internal/libc_internal_io.c \
 	libc_internal/libc_internal_math.c libc_internal/libc_internal_printf.c \
 	libc_internal/libc_internal_memory.c libc_internal/libc_internal_str.c \
 	libc_internal/libc_internal_threads.c playgo/playgo.c playgo/playgo_dialog.c system/commondialog.c \
