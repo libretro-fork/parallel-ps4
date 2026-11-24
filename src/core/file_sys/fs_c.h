@@ -21,6 +21,15 @@ RETRO_BEGIN_DECLS
 bool fs_lend_guest_file(const char* guest_path, void (*use)(const u8* data, size_t size, void* ctx),
                         void* ctx);
 
+/* MntPoints::GetHostPath of @guest_path, as UTF-8 in @out: false, with @out empty, if there is
+ * none or it does not fit in @size */
+bool fs_guest_host_path(const char* guest_path, char* out, size_t size);
+
+/* The host file at @host_path (UTF-8), mapped where it lies and lent to @use for as long as it
+ * runs (Common::FS::FileView::Map). false, with @use not called, if it cannot be mapped. */
+bool fs_lend_host_file(const char* host_path, void (*use)(const u8* data, size_t size, void* ctx),
+                       void* ctx);
+
 /* The additional content in the host folder @dir (UTF-8): its folders, .zar and .pkg files as
  * the folder lists them, then with @with_beside the PKGs the libretro core found beside the
  * game's PKG (MntPoints::libretro_addcont). Each one's host path is given to @use, until it

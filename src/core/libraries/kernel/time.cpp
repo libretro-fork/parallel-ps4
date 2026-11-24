@@ -818,6 +818,10 @@ extern "C" u64 kernel_game_deadline_in(u64 ns) {
     return Libraries::Kernel::GameDeadlineIn(ns);
 }
 
+extern "C" void kernel_game_note_wake(retro_atomic_int_t* word) {
+    Libraries::Kernel::GameNoteWake(word);
+}
+
 extern "C" bool kernel_game_wait(struct retro_eventcount* ec, u64 deadline, int (*ready)(void* ctx),
                                  void* ctx) {
     return game_clock_wait(Libraries::Kernel::GameClock(), ec, deadline, ready, ctx,

@@ -835,6 +835,30 @@ extern "C" bool fs_lend_guest_file(const char* guest_path,
     return true;
 }
 
+extern "C" bool fs_guest_host_path(const char* guest_path, char* out, size_t size) {
+    auto* mnt = Common::Singleton<Core::FileSys::MntPoints>::Instance();
+    const std::string host = Common::FS::PathToUTF8String(mnt->GetHostPath(guest_path));
+    if (size == 0) {
+        return false;
+    }
+    if (host.empty() || host.size() >= size) {
+        out[0] = '\0';
+        return false;
+    }
+    std::memcpy(out, host.c_str(), host.size() + 1);
+    return true;
+}
+
+extern "C" bool fs_lend_host_file(const char* host_path,
+                                  void (*use)(const u8* data, size_t size, void* ctx), void* ctx) {
+    const auto bytes = Common::FS::FileView::Map(Common::FS::PathFromUTF8String(host_path));
+    if (!bytes) {
+        return false;
+    }
+    use(bytes->data(), bytes->size(), ctx);
+    return true;
+}
+
 extern "C" void fs_for_each_addcont(const char* dir, bool with_beside,
                                     bool (*use)(const char* path, void* ctx), void* ctx) {
     const auto folder = Common::FS::PathFromUTF8String(dir);

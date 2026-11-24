@@ -32,6 +32,7 @@ enum c_log_class {
     C_LOG_LIB_PAD,
     C_LOG_LIB_SYS_MODULE,
     C_LOG_LIB_AUDIO3D,
+    C_LOG_LIB_AUDIO_OUT,
     C_LOG_LIB_VOICE,
     C_LOG_LIB_RTC,
     C_LOG_LIB_CAMERA,

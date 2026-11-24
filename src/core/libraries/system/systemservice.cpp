@@ -1094,7 +1094,7 @@ int PS4_SYSV_ABI sceShellCoreUtilIsBgmCpuBudgetAvailable() {
 
 int PS4_SYSV_ABI sceShellCoreUtilIsBgmPlaying() {
     LOG_DEBUG(Lib_SystemService, "called");
-    return Libraries::MusicPlayerService::IsBgmPlaying() ? 1 : 0;
+    return music_player_is_bgm_playing() ? 1 : 0;
 }
 
 int PS4_SYSV_ABI sceShellCoreUtilIsExternalStorageAppMoveInProgress() {
@@ -1830,7 +1830,7 @@ int PS4_SYSV_ABI sceSystemServiceIsAppSuspended() {
 
 int PS4_SYSV_ABI sceSystemServiceIsBgmPlaying() {
     LOG_DEBUG(Lib_SystemService, "called");
-    return Libraries::MusicPlayerService::IsBgmPlaying() ? 1 : 0;
+    return music_player_is_bgm_playing() ? 1 : 0;
 }
 
 int PS4_SYSV_ABI sceSystemServiceIsEyeToEyeDistanceAdjusted() {

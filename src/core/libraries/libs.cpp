@@ -1161,6 +1161,75 @@ static void RegisterSysmodule(Core::Loader::SymbolsResolver* sym) {
                  sceSysmoduleUnloadModuleInternalWithArg);
 }
 
+static void RegisterMusicPlayerService(Core::Loader::SymbolsResolver* sym) {
+    music_player_library_init();
+
+    LIB_FUNCTION("WypjBw-l+pE", "libSceMusicPlayerService", 1, "libSceMusicPlayerService",
+                 sceMusicPlayerServiceInitialize);
+    LIB_FUNCTION("xT55MQDY9lg", "libSceMusicPlayerService", 1, "libSceMusicPlayerService",
+                 sceMusicPlayerServiceInitialize2);
+    LIB_FUNCTION("sY8beqtqGv0", "libSceMusicPlayerService", 1, "libSceMusicPlayerService",
+                 sceMusicPlayerServiceInitialize3);
+    LIB_FUNCTION("uZXjTVsS-hU", "libSceMusicPlayerService", 1, "libSceMusicPlayerService",
+                 sceMusicPlayerServiceTerminate);
+    LIB_FUNCTION("JlbWOi1Webo", "libSceMusicPlayerService", 1, "libSceMusicPlayerService",
+                 sceMusicPlayerServiceSetUsbStorageDeviceInfo);
+    LIB_FUNCTION("-JE2KLnsg9I", "libSceMusicPlayerService", 1, "libSceMusicPlayerService",
+                 sceMusicPlayerServiceRemoveAllData);
+    LIB_FUNCTION("4cuKd4S83xw", "libSceMusicPlayerService", 1, "libSceMusicPlayerService",
+                 sceMusicPlayerServiceSetTrackList);
+    LIB_FUNCTION("iawJpYIQM7s", "libSceMusicPlayerService", 1, "libSceMusicPlayerService",
+                 sceMusicPlayerServiceSetTrackList2);
+    LIB_FUNCTION("KblnYfZ5AGM", "libSceMusicPlayerService", 1, "libSceMusicPlayerService",
+                 sceMusicPlayerServicePlay);
+    LIB_FUNCTION("kMb+qpZTQ18", "libSceMusicPlayerService", 1, "libSceMusicPlayerService",
+                 sceMusicPlayerServicePlayStartByTime);
+    LIB_FUNCTION("7Ayp3diNYnk", "libSceMusicPlayerService", 1, "libSceMusicPlayerService",
+                 sceMusicPlayerServiceStop);
+    LIB_FUNCTION("fIii6-0Adxc", "libSceMusicPlayerService", 1, "libSceMusicPlayerService",
+                 sceMusicPlayerServicePause);
+    LIB_FUNCTION("DLXiDjC1D1A", "libSceMusicPlayerService", 1, "libSceMusicPlayerService",
+                 sceMusicPlayerServiceUnpause);
+    LIB_FUNCTION("M76dl-GnCs8", "libSceMusicPlayerService", 1, "libSceMusicPlayerService",
+                 sceMusicPlayerServiceNextTrack);
+    LIB_FUNCTION("NuJT-nmTqrI", "libSceMusicPlayerService", 1, "libSceMusicPlayerService",
+                 sceMusicPlayerServicePreviousTrack);
+    LIB_FUNCTION("5LhFvqzrcug", "libSceMusicPlayerService", 1, "libSceMusicPlayerService",
+                 sceMusicPlayerServiceSeek);
+    LIB_FUNCTION("tMgpmzMA4Zc", "libSceMusicPlayerService", 1, "libSceMusicPlayerService",
+                 sceMusicPlayerServiceSetAudioVolume);
+    LIB_FUNCTION("3KChwrxsVPg", "libSceMusicPlayerService", 1, "libSceMusicPlayerService",
+                 sceMusicPlayerServiceGetAudioVolume);
+    LIB_FUNCTION("DMvAm4HFKg0", "libSceMusicPlayerService", 1, "libSceMusicPlayerService",
+                 sceMusicPlayerServiceSetShuffle);
+    LIB_FUNCTION("+uCwAp6KYtQ", "libSceMusicPlayerService", 1, "libSceMusicPlayerService",
+                 sceMusicPlayerServiceSetRepeatMode);
+    LIB_FUNCTION("TVe6T-UKcoc", "libSceMusicPlayerService", 1, "libSceMusicPlayerService",
+                 sceMusicPlayerServiceGetPlayStatusExtension);
+    LIB_FUNCTION("CNsRsR5a+qc", "libSceMusicPlayerService", 1, "libSceMusicPlayerService",
+                 sceMusicPlayerServiceGetCurrentPlayStatus);
+    LIB_FUNCTION("Py0XtCoi5IU", "libSceMusicPlayerService", 1, "libSceMusicPlayerService",
+                 sceMusicPlayerServiceReceiveEvent);
+    LIB_FUNCTION("1+KpQYgv1zk", "libSceMusicPlayerService", 1, "libSceMusicPlayerService",
+                 sceMusicPlayerServiceGetPlaybackResults);
+    LIB_FUNCTION("wHKiDjNLQwI", "libSceMusicPlayerService", 1, "libSceMusicPlayerService",
+                 sceMusicPlayerServiceGetTrackInfo);
+    LIB_FUNCTION("AbiIaBA50I0", "libSceMusicPlayerService", 1, "libSceMusicPlayerService",
+                 sceMusicPlayerServiceBeginTransaction);
+    LIB_FUNCTION("7SOVShNUDXo", "libSceMusicPlayerService", 1, "libSceMusicPlayerService",
+                 sceMusicPlayerServiceEndTransaction);
+    LIB_FUNCTION("mW3EHwAVHPA", "libSceMusicPlayerService", 1, "libSceMusicPlayerService",
+                 sceMusicPlayerServiceCreateTrackList);
+    LIB_FUNCTION("EF1lpApBn4s", "libSceMusicPlayerService", 1, "libSceMusicPlayerService",
+                 sceMusicPlayerServiceRemoveTrackList);
+    LIB_FUNCTION("R1SLegxzCGU", "libSceMusicPlayerService", 1, "libSceMusicPlayerService",
+                 sceMusicPlayerServiceInsertTrackEntry);
+    LIB_FUNCTION("QEIJRZErmxQ", "libSceMusicPlayerService", 1, "libSceMusicPlayerService",
+                 sceMusicPlayerServiceRemoveTrackEntry);
+    LIB_FUNCTION("qYbmAxRGuq8", "libSceMusicPlayerService", 1, "libSceMusicPlayerService",
+                 sceMusicPlayerServiceGetTrackListVersion);
+}
+
 static void RegisterPlayGo(Core::Loader::SymbolsResolver* sym) {
     LIB_FUNCTION("uEqMfMITvEI", "libSceDbgPlayGo", 1, "libScePlayGo", sceDbgPlayGoRequestNextChunk);
     LIB_FUNCTION("vU+FqrH+pEY", "libSceDbgPlayGo", 1, "libScePlayGo", sceDbgPlayGoSnapshot);
@@ -1326,7 +1395,7 @@ void InitHLELibs(Core::Loader::SymbolsResolver* sym) {
             {"libSceRandom.sprx", RegisterRandom},
             {"libSceUsbd.sprx", Libraries::Usbd::RegisterLib},
             {"libSceUsbStorage.sprx", Libraries::UsbStorage::RegisterLib},
-            {"libSceMusicPlayerService.sprx", Libraries::MusicPlayerService::RegisterLib},
+            {"libSceMusicPlayerService.sprx", RegisterMusicPlayerService},
             {"libSceAjm.sprx", Libraries::Ajm::RegisterLib},
             {"libSceErrorDialog.sprx", Libraries::ErrorDialog::RegisterLib},
             {"libSceImeDialog.sprx", Libraries::ImeDialog::RegisterLib},

@@ -12,6 +12,7 @@
 #include <stdint.h>
 
 #include <boolean.h>
+#include <retro_atomic.h>
 #include <retro_common_api.h>
 
 #include "common/types.h"
@@ -110,6 +111,9 @@ u64 kernel_game_deadline_in(u64 ns);
  * (false; 0: none), as the calling thread is counted (Kernel::GameWait) */
 bool kernel_game_wait(struct retro_eventcount* ec, u64 deadline, int (*ready)(void* ctx),
                       void* ctx);
+/* Before waking the game threads parked on an event whose epoch is @word, notes them for a
+ * sound output thread's pace (Kernel::GameNoteWake) */
+void kernel_game_note_wake(retro_atomic_int_t* word);
 
 /* Libraries::Kernel::PthreadMutexT and PthreadMutexAttrT, the game's mutexes: pointers to the
  * kernel's objects, as the game holds them */

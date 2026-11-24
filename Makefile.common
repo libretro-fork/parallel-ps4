@@ -150,7 +150,6 @@ CORE_SOURCES_CXX += $(addprefix src/core/libraries/kernel/threads/,barrier.cpp c
 	pthread_spec.cpp rwlock.cpp semaphore.cpp sleepq.cpp stack.cpp stack_asm.cpp tcb.cpp \
 	thread_state.cpp)
 CORE_SOURCES_CXX += $(addprefix src/core/libraries/,libs.cpp)
-CORE_SOURCES_CXX += $(addprefix src/core/libraries/music/,music_player_service.cpp)
 CORE_SOURCES_CXX += $(addprefix src/core/libraries/net/,net.cpp net_kernel.cpp net_log.cpp \
 	net_p2p.cpp net_p2p_ioctl.cpp net_resolver.cpp net_translate.cpp net_upnp.cpp net_util.cpp)
 CORE_SOURCES_CXX += $(addprefix src/core/libraries/network/,http.cpp http2.cpp net_ctl_obj.cpp \
@@ -266,7 +265,7 @@ CORE_SOURCES_C += $(addprefix src/core/libraries/,companion/companion_httpd.c \
 	libc_internal/libc_internal_memory.c libc_internal/libc_internal_str.c \
 	libc_internal/libc_internal_threads.c pad/pad.c playgo/playgo.c sysmodule/sysmodule.c \
 	sysmodule/sysmodule_internal.c playgo/playgo_dialog.c system/commondialog.c \
-	web_browser_dialog/webbrowserdialog.c zlib/zlib.c)
+	web_browser_dialog/webbrowserdialog.c zlib/zlib.c music/music_player_service.c)
 CORE_SOURCES_C += $(addprefix src/shader_recompiler/backend/spirv/,spv_module.c)
 CORE_SOURCES_C += $(addprefix src/core/libraries/np/np_handler/,np_invitation_json.c)
 CORE_SOURCES_C += $(addprefix src/shadnet/,pb_wire.c shadnet_msg.c)
