@@ -1,66 +1,67 @@
-// SPDX-FileCopyrightText: Copyright 2024 shadPS4 Emulator Project
-// SPDX-License-Identifier: GPL-2.0-or-later
+/* SPDX-FileCopyrightText: Copyright 2024 shadPS4 Emulator Project
+ * SPDX-License-Identifier: GPL-2.0-or-later */
 
-#pragma once
+#ifndef SHADPS4_NGS2_CUSTOM_H
+#define SHADPS4_NGS2_CUSTOM_H
 
-#include "ngs2.h"
-#include "ngs2_reverb.h"
+#include "core/libraries/ngs2/ngs2.h"
+#include "core/libraries/ngs2/ngs2_reverb.h"
 
-namespace Libraries::Ngs2 {
+#include <retro_common_api.h>
 
-class Ngs2Custom;
+RETRO_BEGIN_DECLS
 
-static const int ORBIS_NGS2_CUSTOM_MAX_MODULES = 24;
-static const int ORBIS_NGS2_CUSTOM_MAX_PORTS = 16;
-static const int ORBIS_NGS2_CUSTOM_DELAY_MAX_TAPS = 8;
+#define ORBIS_NGS2_CUSTOM_MAX_MODULES (24)
+#define ORBIS_NGS2_CUSTOM_MAX_PORTS (16)
+#define ORBIS_NGS2_CUSTOM_DELAY_MAX_TAPS (8)
 
-struct OrbisNgs2CustomModuleOption {
+typedef struct OrbisNgs2CustomModuleOption {
     u32 size;
-};
+} OrbisNgs2CustomModuleOption;
 
-struct OrbisNgs2CustomEnvelopeModuleOption {
+typedef struct OrbisNgs2CustomEnvelopeModuleOption {
     OrbisNgs2CustomModuleOption customModuleOption;
 
     u32 maxPoints;
     u32 reserved;
-};
+} OrbisNgs2CustomEnvelopeModuleOption;
 
-struct OrbisNgs2CustomReverbModuleOption {
+typedef struct OrbisNgs2CustomReverbModuleOption {
     OrbisNgs2CustomModuleOption customModuleOption;
 
     u32 reverbSize;
     u32 reserved;
-};
+} OrbisNgs2CustomReverbModuleOption;
 
-struct OrbisNgs2CustomChorusModuleOption {
+typedef struct OrbisNgs2CustomChorusModuleOption {
     OrbisNgs2CustomModuleOption customModuleOption;
 
     u32 maxPhases;
     u32 reserved;
 } OrbisNgs2CustomChorusModuleOption;
 
-struct OrbisNgs2CustomPeakMeterModuleOption {
+typedef struct OrbisNgs2CustomPeakMeterModuleOption {
     OrbisNgs2CustomModuleOption customModuleOption;
     u32 numBlocks;
     u32 reserved;
-};
+} OrbisNgs2CustomPeakMeterModuleOption;
 
-struct OrbisNgs2CustomDelayModuleOption {
+typedef struct OrbisNgs2CustomDelayModuleOption {
     OrbisNgs2CustomModuleOption customModuleOption;
 
     u32 type;
     u32 maxTaps;
     float maxLength;
     u32 reserved;
-};
+} OrbisNgs2CustomDelayModuleOption;
 
-struct OrbisNgs2CustomPitchShiftModuleOption {
+typedef struct OrbisNgs2CustomPitchShiftModuleOption {
     OrbisNgs2CustomModuleOption customModuleOption;
 
     u32 quality;
-};
+} OrbisNgs2CustomPitchShiftModuleOption;
 
-struct OrbisNgs2CustomUserFx2ModuleOption {
+typedef struct OrbisNgs2CustomUserFx2ModuleOption {
     OrbisNgs2CustomModuleOption customModuleOption;
 
     OrbisNgs2UserFx2SetupHandler setupHandler;
@@ -72,9 +73,9 @@ struct OrbisNgs2CustomUserFx2ModuleOption {
     size_t paramSize;
     size_t workSize;
     uintptr_t userData;
-};
+} OrbisNgs2CustomUserFx2ModuleOption;
 
-struct OrbisNgs2CustomRackModuleInfo {
+typedef struct OrbisNgs2CustomRackModuleInfo {
     const OrbisNgs2CustomModuleOption* option;
 
     u32 moduleId;
@@ -85,14 +86,14 @@ struct OrbisNgs2CustomRackModuleInfo {
     u32 stateSize;
     u32 reserved;
     u32 reserved2;
-};
+} OrbisNgs2CustomRackModuleInfo;
 
-struct OrbisNgs2CustomRackPortInfo {
+typedef struct OrbisNgs2CustomRackPortInfo {
     u32 sourceBufferId;
     u32 reserved;
-};
+} OrbisNgs2CustomRackPortInfo;
 
-struct OrbisNgs2CustomRackOption {
+typedef struct OrbisNgs2CustomRackOption {
     OrbisNgs2RackOption rackOption;
     u32 stateSize;
     u32 numBuffers;
@@ -100,9 +101,9 @@ struct OrbisNgs2CustomRackOption {
     u32 reserved;
     OrbisNgs2CustomRackModuleInfo aModule[ORBIS_NGS2_CUSTOM_MAX_MODULES];
     OrbisNgs2CustomRackPortInfo aPort[ORBIS_NGS2_CUSTOM_MAX_PORTS];
-};
+} OrbisNgs2CustomRackOption;
 
-struct OrbisNgs2CustomSamplerRackOption {
+typedef struct OrbisNgs2CustomSamplerRackOption {
     OrbisNgs2CustomRackOption customRackOption;
 
     u32 maxChannelWorks;
@@ -111,60 +112,60 @@ struct OrbisNgs2CustomSamplerRackOption {
     u32 maxAtrac9ChannelWorks;
     u32 maxAjmAtrac9Decoders;
     u32 maxCodecCaches;
-};
+} OrbisNgs2CustomSamplerRackOption;
 
-struct OrbisNgs2CustomSubmixerRackOption {
+typedef struct OrbisNgs2CustomSubmixerRackOption {
     OrbisNgs2CustomRackOption customRackOption;
 
     u32 maxChannels;
     u32 maxInputs;
-};
+} OrbisNgs2CustomSubmixerRackOption;
 
-struct OrbisNgs2CustomMasteringRackOption {
+typedef struct OrbisNgs2CustomMasteringRackOption {
     OrbisNgs2CustomRackOption customRackOption;
 
     u32 maxChannels;
     u32 maxInputs;
-};
+} OrbisNgs2CustomMasteringRackOption;
 
-struct OrbisNgs2CustomSamplerVoiceSetupParam {
+typedef struct OrbisNgs2CustomSamplerVoiceSetupParam {
     OrbisNgs2VoiceParamHeader header;
     OrbisNgs2WaveformFormat format;
     u32 flags;
     u32 reserved;
-};
+} OrbisNgs2CustomSamplerVoiceSetupParam;
 
-struct OrbisNgs2CustomSamplerVoiceWaveformBlocksParam {
+typedef struct OrbisNgs2CustomSamplerVoiceWaveformBlocksParam {
     OrbisNgs2VoiceParamHeader header;
     const void* data;
     u32 flags;
     u32 numBlocks;
     const OrbisNgs2WaveformBlock* aBlock;
-};
+} OrbisNgs2CustomSamplerVoiceWaveformBlocksParam;
 
-struct OrbisNgs2CustomSamplerVoiceWaveformAddressParam {
+typedef struct OrbisNgs2CustomSamplerVoiceWaveformAddressParam {
     OrbisNgs2VoiceParamHeader header;
     const void* from;
     const void* to;
-};
+} OrbisNgs2CustomSamplerVoiceWaveformAddressParam;
 
-struct OrbisNgs2CustomSamplerVoiceWaveformFrameOffsetParam {
+typedef struct OrbisNgs2CustomSamplerVoiceWaveformFrameOffsetParam {
     OrbisNgs2VoiceParamHeader header;
     u32 frameOffset;
     u32 reserved;
-};
+} OrbisNgs2CustomSamplerVoiceWaveformFrameOffsetParam;
 
-struct OrbisNgs2CustomSamplerVoiceExitLoopParam {
+typedef struct OrbisNgs2CustomSamplerVoiceExitLoopParam {
     OrbisNgs2VoiceParamHeader header;
-};
+} OrbisNgs2CustomSamplerVoiceExitLoopParam;
 
-struct OrbisNgs2CustomSamplerVoicePitchParam {
+typedef struct OrbisNgs2CustomSamplerVoicePitchParam {
     OrbisNgs2VoiceParamHeader header;
     float ratio;
     u32 reserved;
-};
+} OrbisNgs2CustomSamplerVoicePitchParam;
 
-struct OrbisNgs2CustomSamplerVoiceState {
+typedef struct OrbisNgs2CustomSamplerVoiceState {
     OrbisNgs2VoiceState voiceState;
     char padding[32];
     const void* waveformData;
@@ -173,48 +174,48 @@ struct OrbisNgs2CustomSamplerVoiceState {
     u64 userData;
     u32 reserved;
     u32 reserved2;
-};
+} OrbisNgs2CustomSamplerVoiceState;
 
-struct OrbisNgs2CustomSubmixerVoiceSetupParam {
+typedef struct OrbisNgs2CustomSubmixerVoiceSetupParam {
     OrbisNgs2VoiceParamHeader header;
     u32 numInputChannels;
     u32 numOutputChannels;
     u32 flags;
     u32 reserved;
-};
+} OrbisNgs2CustomSubmixerVoiceSetupParam;
 
-struct OrbisNgs2CustomSubmixerVoiceState {
-    OrbisNgs2VoiceState voiceState; // Voice state
+typedef struct OrbisNgs2CustomSubmixerVoiceState {
+    OrbisNgs2VoiceState voiceState; /* Voice state */
     u32 reserved;
     u32 reserved2;
-};
+} OrbisNgs2CustomSubmixerVoiceState;
 
-struct OrbisNgs2CustomMasteringVoiceSetupParam {
+typedef struct OrbisNgs2CustomMasteringVoiceSetupParam {
     OrbisNgs2VoiceParamHeader header;
     u32 numInputChannels;
     u32 flags;
-};
+} OrbisNgs2CustomMasteringVoiceSetupParam;
 
-struct OrbisNgs2CustomMasteringVoiceOutputParam {
+typedef struct OrbisNgs2CustomMasteringVoiceOutputParam {
     OrbisNgs2VoiceParamHeader header;
     u32 outputId;
     u32 reserved;
-};
+} OrbisNgs2CustomMasteringVoiceOutputParam;
 
-struct OrbisNgs2CustomMasteringVoiceState {
+typedef struct OrbisNgs2CustomMasteringVoiceState {
     OrbisNgs2VoiceState voiceState;
     u32 reserved;
     u32 reserved2;
-};
+} OrbisNgs2CustomMasteringVoiceState;
 
-struct OrbisNgs2CustomVoiceEnvelopeParam {
+typedef struct OrbisNgs2CustomVoiceEnvelopeParam {
     OrbisNgs2VoiceParamHeader header;
     u32 numForwardPoints;
     u32 numReleasePoints;
     const OrbisNgs2EnvelopePoint* aPoint;
-};
+} OrbisNgs2CustomVoiceEnvelopeParam;
 
-struct OrbisNgs2CustomVoiceDistortionParam {
+typedef struct OrbisNgs2CustomVoiceDistortionParam {
     OrbisNgs2VoiceParamHeader header;
     u32 flags;
     float a;
@@ -224,9 +225,9 @@ struct OrbisNgs2CustomVoiceDistortionParam {
     float wetLevel;
     float dryLevel;
     u32 reserved;
-};
+} OrbisNgs2CustomVoiceDistortionParam;
 
-struct OrbisNgs2CustomVoiceCompressorParam {
+typedef struct OrbisNgs2CustomVoiceCompressorParam {
     OrbisNgs2VoiceParamHeader header;
     u32 flags;
     float threshold;
@@ -236,9 +237,9 @@ struct OrbisNgs2CustomVoiceCompressorParam {
     float releaseTime;
     float level;
     u32 reserved;
-};
+} OrbisNgs2CustomVoiceCompressorParam;
 
-struct OrbisNgs2CustomVoiceFilterParam {
+typedef struct OrbisNgs2CustomVoiceFilterParam {
     OrbisNgs2VoiceParamHeader header;
     u32 type;
     u32 channelMask;
@@ -259,63 +260,63 @@ struct OrbisNgs2CustomVoiceFilterParam {
         } fcq;
     } param;
     u32 reserved3;
-};
+} OrbisNgs2CustomVoiceFilterParam;
 
-struct OrbisNgs2CustomVoiceLfeFilterParam {
+typedef struct OrbisNgs2CustomVoiceLfeFilterParam {
     OrbisNgs2VoiceParamHeader header;
     u32 enableFlag;
     u32 fc;
-};
+} OrbisNgs2CustomVoiceLfeFilterParam;
 
-struct OrbisNgs2CustomVoiceGainParam {
+typedef struct OrbisNgs2CustomVoiceGainParam {
     OrbisNgs2VoiceParamHeader header;
     float aLevel[ORBIS_NGS2_MAX_VOICE_CHANNELS];
-};
+} OrbisNgs2CustomVoiceGainParam;
 
-struct OrbisNgs2CustomVoiceMixerParam {
+typedef struct OrbisNgs2CustomVoiceMixerParam {
     OrbisNgs2VoiceParamHeader header;
     float aSourceLevel[ORBIS_NGS2_MAX_VOICE_CHANNELS];
     float aDestLevel[ORBIS_NGS2_MAX_VOICE_CHANNELS];
-};
+} OrbisNgs2CustomVoiceMixerParam;
 
-struct OrbisNgs2CustomVoiceChannelMixerParam {
+typedef struct OrbisNgs2CustomVoiceChannelMixerParam {
     OrbisNgs2VoiceParamHeader header;
     float aLevel[ORBIS_NGS2_MAX_VOICE_CHANNELS][ORBIS_NGS2_MAX_VOICE_CHANNELS];
-};
+} OrbisNgs2CustomVoiceChannelMixerParam;
 
-struct OrbisNgs2CustomVoiceUserFxParam {
+typedef struct OrbisNgs2CustomVoiceUserFxParam {
     OrbisNgs2VoiceParamHeader header;
     OrbisNgs2UserFxProcessHandler handler;
 
     uintptr_t userData0;
     uintptr_t userData1;
     uintptr_t userData2;
-};
+} OrbisNgs2CustomVoiceUserFxParam;
 
-struct OrbisNgs2CustomVoiceUserFx2Param {
+typedef struct OrbisNgs2CustomVoiceUserFx2Param {
     OrbisNgs2VoiceParamHeader header;
     const void* data;
     size_t dataSize;
-};
+} OrbisNgs2CustomVoiceUserFx2Param;
 
-struct OrbisNgs2CustomVoiceOutputParam {
+typedef struct OrbisNgs2CustomVoiceOutputParam {
     OrbisNgs2VoiceParamHeader header;
     u32 outputId;
     u32 reserved;
-};
+} OrbisNgs2CustomVoiceOutputParam;
 
-struct OrbisNgs2CustomVoicePeakMeterParam {
+typedef struct OrbisNgs2CustomVoicePeakMeterParam {
     OrbisNgs2VoiceParamHeader header;
     u32 enableFlag;
     u32 reserved;
 } OrbisNgs2CustomVoicePeakMeterParam;
 
-struct OrbisNgs2CustomVoiceReverbParam {
+typedef struct OrbisNgs2CustomVoiceReverbParam {
     OrbisNgs2VoiceParamHeader header;
     OrbisNgs2ReverbI3DL2Param i3dl2;
-};
+} OrbisNgs2CustomVoiceReverbParam;
 
-struct OrbisNgs2CustomVoiceChorusParam {
+typedef struct OrbisNgs2CustomVoiceChorusParam {
     OrbisNgs2VoiceParamHeader header;
     u32 flags;
     u32 numPhases;
@@ -327,14 +328,14 @@ struct OrbisNgs2CustomVoiceChorusParam {
     float feedbackLevel;
     float wetLevel;
     float dryLevel;
-};
+} OrbisNgs2CustomVoiceChorusParam;
 
-struct OrbisNgs2DelayTapInfo {
+typedef struct OrbisNgs2DelayTapInfo {
     float tapLevel;
     float delayTime;
-};
+} OrbisNgs2DelayTapInfo;
 
-struct OrbisNgs2CustomVoiceDelayParam {
+typedef struct OrbisNgs2CustomVoiceDelayParam {
     OrbisNgs2VoiceParamHeader header;
     float dryLevel;
     float wetLevel;
@@ -346,42 +347,42 @@ struct OrbisNgs2CustomVoiceDelayParam {
     float aInputMixLevel[ORBIS_NGS2_MAX_VOICE_CHANNELS];
     u32 channelMask;
     u32 flags;
-};
+} OrbisNgs2CustomVoiceDelayParam;
 
-struct OrbisNgs2CustomVoiceNoiseGateParam {
+typedef struct OrbisNgs2CustomVoiceNoiseGateParam {
     OrbisNgs2VoiceParamHeader header;
     u32 flags;
     float threshold;
     float attackTime;
     float releaseTime;
-};
+} OrbisNgs2CustomVoiceNoiseGateParam;
 
-struct OrbisNgs2CustomVoicePitchShiftParam {
+typedef struct OrbisNgs2CustomVoicePitchShiftParam {
     OrbisNgs2VoiceParamHeader header;
     s32 cent;
-};
+} OrbisNgs2CustomVoicePitchShiftParam;
 
-struct OrbisNgs2CustomEnvelopeModuleState {
+typedef struct OrbisNgs2CustomEnvelopeModuleState {
     float height;
     u32 reserved;
-};
+} OrbisNgs2CustomEnvelopeModuleState;
 
-struct OrbisNgs2CustomCompressorModuleState {
+typedef struct OrbisNgs2CustomCompressorModuleState {
     float peakHeight;
     float compressorHeight;
-};
+} OrbisNgs2CustomCompressorModuleState;
 
-struct OrbisNgs2CustomPeakMeterModuleState {
+typedef struct OrbisNgs2CustomPeakMeterModuleState {
     float peak;
     float aChannelPeak[ORBIS_NGS2_MAX_VOICE_CHANNELS];
     u32 reserved;
-};
+} OrbisNgs2CustomPeakMeterModuleState;
 
-struct OrbisNgs2CustomNoiseGateModuleState {
+typedef struct OrbisNgs2CustomNoiseGateModuleState {
     float gateHeight;
-};
+} OrbisNgs2CustomNoiseGateModuleState;
 
-struct OrbisNgs2CustomRackInfo {
+typedef struct OrbisNgs2CustomRackInfo {
     OrbisNgs2RackInfo rackInfo;
     u32 stateSize;
     u32 numBuffers;
@@ -389,9 +390,9 @@ struct OrbisNgs2CustomRackInfo {
     u32 reserved;
     OrbisNgs2CustomRackModuleInfo aModule[ORBIS_NGS2_CUSTOM_MAX_MODULES];
     OrbisNgs2CustomRackPortInfo aPort[ORBIS_NGS2_CUSTOM_MAX_PORTS];
-};
+} OrbisNgs2CustomRackInfo;
 
-struct OrbisNgs2CustomSamplerRackInfo {
+typedef struct OrbisNgs2CustomSamplerRackInfo {
     OrbisNgs2CustomRackInfo customRackInfo;
 
     u32 maxChannelWorks;
@@ -400,23 +401,23 @@ struct OrbisNgs2CustomSamplerRackInfo {
     u32 maxAtrac9ChannelWorks;
     u32 maxAjmAtrac9Decoders;
     u32 maxCodecCaches;
-};
+} OrbisNgs2CustomSamplerRackInfo;
 
-struct OrbisNgs2CustomSubmixerRackInfo {
+typedef struct OrbisNgs2CustomSubmixerRackInfo {
     OrbisNgs2CustomRackInfo customRackInfo;
 
     u32 maxChannels;
     u32 maxInputs;
-};
+} OrbisNgs2CustomSubmixerRackInfo;
 
-struct OrbisNgs2CustomMasteringRackInfo {
+typedef struct OrbisNgs2CustomMasteringRackInfo {
     OrbisNgs2CustomRackInfo customRackInfo;
 
     u32 maxChannels;
     u32 maxInputs;
-};
+} OrbisNgs2CustomMasteringRackInfo;
 
-struct OrbisNgs2CustomModuleInfo {
+typedef struct OrbisNgs2CustomModuleInfo {
     u32 moduleId;
     u32 sourceBufferId;
     u32 extraBufferId;
@@ -425,20 +426,22 @@ struct OrbisNgs2CustomModuleInfo {
     u32 stateSize;
     u32 reserved;
     u32 reserved2;
-};
+} OrbisNgs2CustomModuleInfo;
 
-struct OrbisNgs2CustomEnvelopeModuleInfo {
+typedef struct OrbisNgs2CustomEnvelopeModuleInfo {
     OrbisNgs2CustomModuleInfo moduleInfo;
 
     u32 maxPoints;
     u32 reserved;
-};
+} OrbisNgs2CustomEnvelopeModuleInfo;
 
-struct OrbisNgs2CustomReverbModuleInfo {
+typedef struct OrbisNgs2CustomReverbModuleInfo {
     OrbisNgs2CustomModuleInfo moduleInfo;
 
     u32 reverbSize;
     u32 reserved;
-};
+} OrbisNgs2CustomReverbModuleInfo;
 
-} // namespace Libraries::Ngs2
+RETRO_END_DECLS
+
+#endif

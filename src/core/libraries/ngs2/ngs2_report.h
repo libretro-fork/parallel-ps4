@@ -1,44 +1,45 @@
-// SPDX-FileCopyrightText: Copyright 2024 shadPS4 Emulator Project
-// SPDX-License-Identifier: GPL-2.0-or-later
+/* SPDX-FileCopyrightText: Copyright 2024 shadPS4 Emulator Project
+ * SPDX-License-Identifier: GPL-2.0-or-later */
 
-#pragma once
+#ifndef SHADPS4_NGS2_REPORT_H
+#define SHADPS4_NGS2_REPORT_H
 
-#include "ngs2.h"
+#include "core/libraries/ngs2/ngs2.h"
 
-#include <stdarg.h> // va_list
+#include <stdarg.h> /* va_list */
 
-namespace Libraries::Ngs2 {
+#include <retro_common_api.h>
 
-class Ngs2Report;
+RETRO_BEGIN_DECLS
 
-struct OrbisNgs2ReportDataHeader {
+typedef struct OrbisNgs2ReportDataHeader {
     size_t size;
     OrbisNgs2Handle handle;
     u32 type;
     s32 result;
-};
+} OrbisNgs2ReportDataHeader;
 
-using OrbisNgs2ReportHandler = void PS4_SYSV_ABI (*)(const OrbisNgs2ReportDataHeader* data,
-                                                     uintptr_t user_data);
+typedef void(PS4_SYSV_ABI* OrbisNgs2ReportHandler)(const OrbisNgs2ReportDataHeader* data,
+                                                   uintptr_t user_data);
 
-struct OrbisNgs2ReportMessageData {
+typedef struct OrbisNgs2ReportMessageData {
     OrbisNgs2ReportDataHeader header;
     const char* message;
-};
+} OrbisNgs2ReportMessageData;
 
-struct OrbisNgs2ReportApiData {
+typedef struct OrbisNgs2ReportApiData {
     OrbisNgs2ReportDataHeader header;
     const char* functionName;
     const char* format;
     va_list argument;
-};
+} OrbisNgs2ReportApiData;
 
-struct OrbisNgs2ReportControlData {
+typedef struct OrbisNgs2ReportControlData {
     OrbisNgs2ReportDataHeader header;
     const OrbisNgs2VoiceParamHeader* param;
-};
+} OrbisNgs2ReportControlData;
 
-struct OrbisNgs2ReportOutputData {
+typedef struct OrbisNgs2ReportOutputData {
     OrbisNgs2ReportDataHeader header;
     const OrbisNgs2RenderBufferInfo* bufferInfo;
 
@@ -46,23 +47,23 @@ struct OrbisNgs2ReportOutputData {
     u32 sampleRate;
     u32 numGrainSamples;
     u32 reserved;
-};
+} OrbisNgs2ReportOutputData;
 
-struct OrbisNgs2ReportCpuLoadData {
+typedef struct OrbisNgs2ReportCpuLoadData {
     OrbisNgs2ReportDataHeader header;
     float totalRatio;
     float flushRatio;
     float processRatio;
     float feedbackRatio;
-};
+} OrbisNgs2ReportCpuLoadData;
 
-struct OrbisNgs2ReportRenderStateData {
+typedef struct OrbisNgs2ReportRenderStateData {
     OrbisNgs2ReportDataHeader header;
     u32 state;
     u32 reserved;
-};
+} OrbisNgs2ReportRenderStateData;
 
-struct OrbisNgs2ReportVoiceWaveformData {
+typedef struct OrbisNgs2ReportVoiceWaveformData {
     OrbisNgs2ReportDataHeader header;
     u32 location;
     u32 waveformType;
@@ -71,9 +72,11 @@ struct OrbisNgs2ReportVoiceWaveformData {
     u32 numGrainSamples;
     u32 reserved;
     void* const* aData;
-};
+} OrbisNgs2ReportVoiceWaveformData;
 
 s32 PS4_SYSV_ABI sceNgs2ReportRegisterHandler(u32 reportType, OrbisNgs2ReportHandler handler,
                                               uintptr_t userData, OrbisNgs2Handle* outHandle);
 
-} // namespace Libraries::Ngs2
+RETRO_END_DECLS
+
+#endif

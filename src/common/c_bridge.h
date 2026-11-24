@@ -35,6 +35,7 @@ enum c_log_class {
     C_LOG_LIB_AUDIO_OUT,
     C_LOG_LIB_HMD,
     C_LOG_LIB_HMD_SETUP_DIALOG,
+    C_LOG_LIB_NGS2,
     C_LOG_LIB_VOICE,
     C_LOG_LIB_RTC,
     C_LOG_LIB_CAMERA,

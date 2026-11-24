@@ -1,15 +1,16 @@
-// SPDX-FileCopyrightText: Copyright 2024 shadPS4 Emulator Project
-// SPDX-License-Identifier: GPL-2.0-or-later
+/* SPDX-FileCopyrightText: Copyright 2024 shadPS4 Emulator Project
+ * SPDX-License-Identifier: GPL-2.0-or-later */
 
-#pragma once
+#ifndef SHADPS4_NGS2_SAMPLER_H
+#define SHADPS4_NGS2_SAMPLER_H
 
-#include "ngs2.h"
+#include "core/libraries/ngs2/ngs2.h"
 
-namespace Libraries::Ngs2 {
+#include <retro_common_api.h>
 
-class Ngs2Sampler;
+RETRO_BEGIN_DECLS
 
-struct OrbisNgs2SamplerRackOption {
+typedef struct OrbisNgs2SamplerRackOption {
     OrbisNgs2RackOption rackOption;
     u32 maxChannelWorks;
     u32 maxCodecCaches;
@@ -20,60 +21,60 @@ struct OrbisNgs2SamplerRackOption {
     u32 maxAtrac9ChannelWorks;
     u32 maxAjmAtrac9Decoders;
     u32 numPeakMeterBlocks;
-};
+} OrbisNgs2SamplerRackOption;
 
-struct OrbisNgs2SamplerVoiceSetupParam {
+typedef struct OrbisNgs2SamplerVoiceSetupParam {
     OrbisNgs2VoiceParamHeader header;
 
     OrbisNgs2WaveformFormat format;
     u32 flags;
     u32 reserved;
-};
+} OrbisNgs2SamplerVoiceSetupParam;
 
-struct OrbisNgs2SamplerVoiceWaveformBlocksParam {
+typedef struct OrbisNgs2SamplerVoiceWaveformBlocksParam {
     OrbisNgs2VoiceParamHeader header;
 
     const void* data;
     u32 flags;
     u32 numBlocks;
     const OrbisNgs2WaveformBlock* aBlock;
-    // Blocks
-};
+    /* Blocks */
+} OrbisNgs2SamplerVoiceWaveformBlocksParam;
 
-struct OrbisNgs2SamplerVoiceWaveformAddressParam {
+typedef struct OrbisNgs2SamplerVoiceWaveformAddressParam {
     OrbisNgs2VoiceParamHeader header;
 
     const void* from;
     const void* to;
-};
+} OrbisNgs2SamplerVoiceWaveformAddressParam;
 
-struct OrbisNgs2SamplerVoiceWaveformFrameOffsetParam {
+typedef struct OrbisNgs2SamplerVoiceWaveformFrameOffsetParam {
     OrbisNgs2VoiceParamHeader header;
 
     u32 frameOffset;
     u32 reserved;
-};
+} OrbisNgs2SamplerVoiceWaveformFrameOffsetParam;
 
-struct OrbisNgs2SamplerVoiceExitLoopParam {
+typedef struct OrbisNgs2SamplerVoiceExitLoopParam {
     OrbisNgs2VoiceParamHeader header;
-};
+} OrbisNgs2SamplerVoiceExitLoopParam;
 
-struct OrbisNgs2SamplerVoicePitchParam {
+typedef struct OrbisNgs2SamplerVoicePitchParam {
     OrbisNgs2VoiceParamHeader header;
 
     float ratio;
     u32 reserved;
-};
+} OrbisNgs2SamplerVoicePitchParam;
 
-struct OrbisNgs2SamplerVoiceEnvelopeParam {
+typedef struct OrbisNgs2SamplerVoiceEnvelopeParam {
     OrbisNgs2VoiceParamHeader header;
 
     u32 numForwardPoints;
     u32 numReleasePoints;
     const OrbisNgs2EnvelopePoint* aPoint;
-};
+} OrbisNgs2SamplerVoiceEnvelopeParam;
 
-struct OrbisNgs2SamplerVoiceDistortionParam {
+typedef struct OrbisNgs2SamplerVoiceDistortionParam {
     OrbisNgs2VoiceParamHeader header;
 
     u32 flags;
@@ -84,9 +85,9 @@ struct OrbisNgs2SamplerVoiceDistortionParam {
     float wetLevel;
     float dryLevel;
     u32 reserved;
-};
+} OrbisNgs2SamplerVoiceDistortionParam;
 
-struct OrbisNgs2SamplerVoiceUserFxParam {
+typedef struct OrbisNgs2SamplerVoiceUserFxParam {
     OrbisNgs2VoiceParamHeader header;
 
     OrbisNgs2UserFxProcessHandler handler;
@@ -94,16 +95,16 @@ struct OrbisNgs2SamplerVoiceUserFxParam {
     uintptr_t userData0;
     uintptr_t userData1;
     uintptr_t userData2;
-};
+} OrbisNgs2SamplerVoiceUserFxParam;
 
-struct OrbisNgs2SamplerVoicePeakMeterParam {
+typedef struct OrbisNgs2SamplerVoicePeakMeterParam {
     OrbisNgs2VoiceParamHeader header;
 
     u32 enableFlag;
     u32 reserved;
-};
+} OrbisNgs2SamplerVoicePeakMeterParam;
 
-struct OrbisNgs2SamplerVoiceFilterParam {
+typedef struct OrbisNgs2SamplerVoiceFilterParam {
     OrbisNgs2VoiceParamHeader header;
 
     u32 index;
@@ -127,16 +128,16 @@ struct OrbisNgs2SamplerVoiceFilterParam {
         } fcq;
     } param;
     u32 reserved3;
-};
+} OrbisNgs2SamplerVoiceFilterParam;
 
-struct OrbisNgs2SamplerVoiceNumFilters {
+typedef struct OrbisNgs2SamplerVoiceNumFilters {
     OrbisNgs2VoiceParamHeader header;
 
     u32 numFilters;
     u32 reserved;
-};
+} OrbisNgs2SamplerVoiceNumFilters;
 
-struct OrbisNgs2SamplerVoiceState {
+typedef struct OrbisNgs2SamplerVoiceState {
     OrbisNgs2VoiceState voiceState;
     float envelopeHeight;
     float peakHeight;
@@ -145,9 +146,9 @@ struct OrbisNgs2SamplerVoiceState {
     u64 decodedDataSize;
     u64 userData;
     const void* waveformData;
-};
+} OrbisNgs2SamplerVoiceState;
 
-struct OrbisNgs2SamplerRackInfo {
+typedef struct OrbisNgs2SamplerRackInfo {
     OrbisNgs2RackInfo rackInfo;
     u32 maxChannelWorks;
     u32 maxCodecCaches;
@@ -157,6 +158,8 @@ struct OrbisNgs2SamplerRackInfo {
     u32 maxAtrac9Decoders;
     u32 maxAtrac9ChannelWorks;
     u32 maxAjmAtrac9Decoders;
-};
+} OrbisNgs2SamplerRackInfo;
 
-} // namespace Libraries::Ngs2
+RETRO_END_DECLS
+
+#endif

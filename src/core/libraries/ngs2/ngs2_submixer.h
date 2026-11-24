@@ -1,38 +1,39 @@
-// SPDX-FileCopyrightText: Copyright 2024 shadPS4 Emulator Project
-// SPDX-License-Identifier: GPL-2.0-or-later
+/* SPDX-FileCopyrightText: Copyright 2024 shadPS4 Emulator Project
+ * SPDX-License-Identifier: GPL-2.0-or-later */
 
-#pragma once
+#ifndef SHADPS4_NGS2_SUBMIXER_H
+#define SHADPS4_NGS2_SUBMIXER_H
 
-#include "ngs2.h"
+#include "core/libraries/ngs2/ngs2.h"
 
-namespace Libraries::Ngs2 {
+#include <retro_common_api.h>
 
-class Ngs2Submixer;
+RETRO_BEGIN_DECLS
 
-struct OrbisNgs2SubmixerRackOption {
+typedef struct OrbisNgs2SubmixerRackOption {
     OrbisNgs2RackOption rackOption;
     u32 maxChannels;
     u32 maxEnvelopePoints;
     u32 maxFilters;
     u32 maxInputs;
     u32 numPeakMeterBlocks;
-};
+} OrbisNgs2SubmixerRackOption;
 
-struct OrbisNgs2SubmixerVoiceSetupParam {
+typedef struct OrbisNgs2SubmixerVoiceSetupParam {
     OrbisNgs2VoiceParamHeader header;
     u32 numIoChannels;
     u32 flags;
-};
+} OrbisNgs2SubmixerVoiceSetupParam;
 
-struct OrbisNgs2SubmixerVoiceEnvelopeParam {
+typedef struct OrbisNgs2SubmixerVoiceEnvelopeParam {
     OrbisNgs2VoiceParamHeader header;
 
     u32 numForwardPoints;
     u32 numReleasePoints;
     const OrbisNgs2EnvelopePoint* aPoint;
-};
+} OrbisNgs2SubmixerVoiceEnvelopeParam;
 
-struct OrbisNgs2SubmixerVoiceCompressorParam {
+typedef struct OrbisNgs2SubmixerVoiceCompressorParam {
     OrbisNgs2VoiceParamHeader header;
 
     u32 flags;
@@ -43,9 +44,9 @@ struct OrbisNgs2SubmixerVoiceCompressorParam {
     float releaseTime;
     float level;
     u32 reserved;
-};
+} OrbisNgs2SubmixerVoiceCompressorParam;
 
-struct OrbisNgs2SubmixerVoiceDistortionParam {
+typedef struct OrbisNgs2SubmixerVoiceDistortionParam {
     OrbisNgs2VoiceParamHeader header;
 
     u32 flags;
@@ -56,9 +57,9 @@ struct OrbisNgs2SubmixerVoiceDistortionParam {
     float wetLevel;
     float dryLevel;
     u32 reserved;
-};
+} OrbisNgs2SubmixerVoiceDistortionParam;
 
-struct OrbisNgs2SubmixerVoiceUserFxParam {
+typedef struct OrbisNgs2SubmixerVoiceUserFxParam {
     OrbisNgs2VoiceParamHeader header;
 
     OrbisNgs2UserFxProcessHandler handler;
@@ -66,16 +67,16 @@ struct OrbisNgs2SubmixerVoiceUserFxParam {
     uintptr_t userData0;
     uintptr_t userData1;
     uintptr_t userData2;
-};
+} OrbisNgs2SubmixerVoiceUserFxParam;
 
-struct OrbisNgs2SubmixerVoicePeakMeterParam {
+typedef struct OrbisNgs2SubmixerVoicePeakMeterParam {
     OrbisNgs2VoiceParamHeader header;
 
     u32 enableFlag;
     u32 reserved;
-};
+} OrbisNgs2SubmixerVoicePeakMeterParam;
 
-struct OrbisNgs2SubmixerVoiceFilterParam {
+typedef struct OrbisNgs2SubmixerVoiceFilterParam {
     OrbisNgs2VoiceParamHeader header;
 
     u32 index;
@@ -99,28 +100,30 @@ struct OrbisNgs2SubmixerVoiceFilterParam {
         } fcq;
     } param;
     u32 reserved3;
-};
+} OrbisNgs2SubmixerVoiceFilterParam;
 
-struct OrbisNgs2SubmixerVoiceNumFilters {
+typedef struct OrbisNgs2SubmixerVoiceNumFilters {
     OrbisNgs2VoiceParamHeader header;
 
     u32 numFilters;
     u32 reserved;
-};
+} OrbisNgs2SubmixerVoiceNumFilters;
 
-struct OrbisNgs2SubmixerVoiceState {
+typedef struct OrbisNgs2SubmixerVoiceState {
     OrbisNgs2VoiceState voiceState;
     float envelopeHeight;
     float peakHeight;
     float compressorHeight;
-};
+} OrbisNgs2SubmixerVoiceState;
 
-struct OrbisNgs2SubmixerRackInfo {
+typedef struct OrbisNgs2SubmixerRackInfo {
     OrbisNgs2RackInfo rackInfo;
     u32 maxChannels;
     u32 maxEnvelopePoints;
     u32 maxFilters;
     u32 maxInputs;
-};
+} OrbisNgs2SubmixerRackInfo;
 
-} // namespace Libraries::Ngs2
+RETRO_END_DECLS
+
+#endif

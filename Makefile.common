@@ -152,9 +152,6 @@ CORE_SOURCES_CXX += $(addprefix src/core/libraries/net/,net.cpp net_kernel.cpp n
 	net_p2p.cpp net_p2p_ioctl.cpp net_resolver.cpp net_translate.cpp net_upnp.cpp net_util.cpp)
 CORE_SOURCES_CXX += $(addprefix src/core/libraries/network/,http.cpp http2.cpp net_ctl_obj.cpp \
 	netctl.cpp ssl.cpp ssl2.cpp)
-CORE_SOURCES_CXX += $(addprefix src/core/libraries/ngs2/,ngs2.cpp ngs2_custom.cpp ngs2_eq.cpp \
-	ngs2_geom.cpp ngs2_mastering.cpp ngs2_pan.cpp ngs2_report.cpp ngs2_reverb.cpp \
-	ngs2_sampler.cpp ngs2_submixer.cpp)
 CORE_SOURCES_CXX += $(addprefix src/core/libraries/np/np_auth/,np_auth.cpp)
 CORE_SOURCES_CXX += $(addprefix src/core/libraries/np/np_commerce/,np_commerce.cpp)
 CORE_SOURCES_CXX += $(addprefix src/core/libraries/np/,np_common.cpp np_manager.cpp np_partner.cpp \
@@ -244,7 +241,7 @@ CORE_SOURCES_C += $(addprefix src/core/libraries/avplayer/,avplayer_clock.c avpl
 CORE_SOURCES_C += $(addprefix src/core/libraries/audio3d/,audio3d.c audio3d_port.c)
 CORE_SOURCES_C += $(addprefix src/core/libraries/font/,font_blit.c)
 CORE_SOURCES_C += $(addprefix src/core/libraries/network/,host_override.c)
-CORE_SOURCES_C += $(addprefix src/core/libraries/ngs2/,ngs2_core.c ngs2_util.c)
+CORE_SOURCES_C += $(addprefix src/core/libraries/ngs2/,ngs2.c ngs2_core.c ngs2_util.c)
 CORE_SOURCES_C += $(addprefix src/core/libraries/audiodec/,audiodec.c)
 CORE_SOURCES_C += $(addprefix src/core/libraries/ime/,ime_support.c)
 CORE_SOURCES_C += $(addprefix src/core/libraries/ult/,ult.c ult_sync.c)

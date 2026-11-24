@@ -7,6 +7,8 @@
 #include "common/path_util.h"
 #include "common/singleton.h"
 #include "core/emulator_settings.h"
+#include "core/guest_call.h"
+#include "core/guest_call_c.h"
 #include "core/libraries/ajm/ajm.h"
 #include "core/libraries/app_content/app_content.h"
 #include "core/libraries/audio/audioin.h"
@@ -121,6 +123,12 @@ void LinkFunctionImpl(Core::Loader::SymbolsResolver* sym, char const* nid, char 
     sym->AddFunction(sr, std::move(adapter));
 }
 #endif
+
+// Core::CallGuest for the code written in C (core/guest_call_c.h)
+extern "C" u64 core_call_guest4(const void* function, u64 a0, u64 a1, u64 a2, u64 a3) {
+    using Function = u64 PS4_SYSV_ABI (*)(u64, u64, u64, u64);
+    return Core::CallGuest(reinterpret_cast<Function>(const_cast<void*>(function)), a0, a1, a2, a3);
+}
 
 namespace Libraries {
 

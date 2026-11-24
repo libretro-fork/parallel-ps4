@@ -56,6 +56,8 @@ static Common::Log::Class ToClass(c_log_class log_class) {
         return Common::Log::Class::Lib_Hmd;
     case C_LOG_LIB_HMD_SETUP_DIALOG:
         return Common::Log::Class::Lib_HmdSetupDialog;
+    case C_LOG_LIB_NGS2:
+        return Common::Log::Class::Lib_Ngs2;
     case C_LOG_LIB_VOICE:
         return Common::Log::Class::Lib_Voice;
     case C_LOG_LIB_RTC:
