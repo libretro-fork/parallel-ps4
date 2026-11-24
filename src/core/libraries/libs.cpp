@@ -1520,6 +1520,48 @@ extern "C" u64 core_hle_fiber_exit_address(void) {
 #endif
 #endif
 
+static void RegisterUsbStorage(Core::Loader::SymbolsResolver* sym) {
+    usb_storage_library_init();
+    LIB_FUNCTION("BDDZwF5kuTc", "libSceUsbStorage", 1, "libSceUsbStorage", sceUsbStorageInit);
+    LIB_FUNCTION("Wp8zHTocS5E", "libSceUsbStorage", 1, "libSceUsbStorage", sceUsbStorageTerm);
+    LIB_FUNCTION("vFkdkzJgSpw", "libSceUsbStorage", 1, "libSceUsbStorage",
+                 sceUsbStorageRegisterCallback);
+    LIB_FUNCTION("+Ib-MHNUf80", "libSceUsbStorage", 1, "libSceUsbStorage",
+                 sceUsbStorageUnregisterCallback);
+    LIB_FUNCTION("IDYJZSeBgDs", "libSceUsbStorage", 1, "libSceUsbStorage", sceUsbStorageRequestMap);
+    LIB_FUNCTION("rx7EcAS2ARk", "libSceUsbStorage", 1, "libSceUsbStorage",
+                 sceUsbStorageRequestMapWSB);
+    LIB_FUNCTION("rx7EcAS2ARk", "libSceUsbStorageAux", 1, "libSceUsbStorage",
+                 sceUsbStorageRequestMapWSB);
+    LIB_FUNCTION("fl3roYs7F9U", "libSceUsbStorage", 1, "libSceUsbStorage",
+                 sceUsbStorageRequestUnmap);
+    LIB_FUNCTION("mryrNITeYvI", "libSceUsbStorage", 1, "libSceUsbStorage",
+                 sceUsbStorageGetDeviceList);
+    LIB_FUNCTION("-GvBqz54ssU", "libSceUsbStorage", 1, "libSceUsbStorage",
+                 sceUsbStorageGetDeviceInfo);
+    LIB_FUNCTION("tO8DvyElInw", "libSceUsbStorage", 1, "libSceUsbStorage", sceUsbStorageIsExist);
+    LIB_FUNCTION("0rG6xtn7N5Q", "libSceUsbStorage", 1, "libSceUsbStorage",
+                 sceUsbStorageRegisterCallbackForMapAvailable);
+    LIB_FUNCTION("C3ETNYXsht4", "libSceUsbStorage", 1, "libSceUsbStorage",
+                 sceUsbStorageUnregisterCallbackForMapAvailable);
+    LIB_FUNCTION("8mpZuu7xfbM", "libSceUsbStorage", 1, "libSceUsbStorage",
+                 sceUsbStorageRegisterCallbackForMapUnavailable);
+    LIB_FUNCTION("4YMBk1lfUm0", "libSceUsbStorage", 1, "libSceUsbStorage",
+                 sceUsbStorageUnregisterCallbackForMapUnavailable);
+    LIB_FUNCTION("2LrlpFmBTC8", "libSceUsbStorage", 1, "libSceUsbStorage",
+                 sceUsbStorageGetdentsOpen);
+    LIB_FUNCTION("2LrlpFmBTC8", "libSceUsbStorageAux", 1, "libSceUsbStorage",
+                 sceUsbStorageGetdentsOpen);
+    LIB_FUNCTION("OeJdPEmLYX4", "libSceUsbStorage", 1, "libSceUsbStorage",
+                 sceUsbStorageGetdentsRead);
+    LIB_FUNCTION("OeJdPEmLYX4", "libSceUsbStorageAux", 1, "libSceUsbStorage",
+                 sceUsbStorageGetdentsRead);
+    LIB_FUNCTION("w1mZOJCxvhQ", "libSceUsbStorage", 1, "libSceUsbStorage",
+                 sceUsbStorageGetdentsClose);
+    LIB_FUNCTION("w1mZOJCxvhQ", "libSceUsbStorageAux", 1, "libSceUsbStorage",
+                 sceUsbStorageGetdentsClose);
+}
+
 static void RegisterUsbd(Core::Loader::SymbolsResolver* sym) {
     usbd_library_init();
     LIB_FUNCTION("0ktE1PhzGFU", "libSceUsbd", 1, "libSceUsbd", sceUsbdAllocTransfer);
@@ -1806,7 +1848,7 @@ void InitHLELibs(Core::Loader::SymbolsResolver* sym) {
             {"libScePlayGoDialog.sprx", RegisterPlayGoDialog},
             {"libSceRandom.sprx", RegisterRandom},
             {"libSceUsbd.sprx", RegisterUsbd},
-            {"libSceUsbStorage.sprx", Libraries::UsbStorage::RegisterLib},
+            {"libSceUsbStorage.sprx", RegisterUsbStorage},
             {"libSceMusicPlayerService.sprx", RegisterMusicPlayerService},
             {"libSceAjm.sprx", Libraries::Ajm::RegisterLib},
             {"libSceErrorDialog.sprx", Libraries::ErrorDialog::RegisterLib},

@@ -627,7 +627,9 @@ void Emulator::Run(std::filesystem::path file, std::vector<std::string> args,
     }
     mnt->Mount(mount_download_dir, "/download0");
 
-    const auto mount_usb_dir = Libraries::UsbStorage::GetUsbMountPath();
+    char usb_dir[4096];
+    usb_storage_mount_path(0, usb_dir, sizeof(usb_dir));
+    const auto mount_usb_dir = Common::FS::PathFromUTF8String(usb_dir);
     std::error_code ec_usb;
     Common::FS::CreateDirectories(mount_usb_dir);
     mnt->Mount(mount_usb_dir, "/mnt/usb0");
