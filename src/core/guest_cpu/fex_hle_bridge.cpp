@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "fex_hle_bridge.h"
+#include "hle_frame_c.h"
 #include "hle_trace.h"
 
 #include <algorithm>
@@ -201,3 +202,8 @@ void HleGuestBridge::Report(const HleCallFailure& failure) const {
 }
 
 } // namespace Core::GuestCpu
+
+extern "C" u64* core_hle_call_frame_gpr(void) {
+    Core::GuestCpu::HleCallFrame* frame = Core::GuestCpu::CurrentHleCallFrame();
+    return frame ? frame->gpr.data() : nullptr;
+}

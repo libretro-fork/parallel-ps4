@@ -9,9 +9,7 @@
 #include <malloc.h>
 #endif
 
-namespace Libraries::Fiber {
 struct OrbisFiberContext;
-}
 
 namespace Core {
 
@@ -26,7 +24,7 @@ struct Tcb {
     void* tcb_thread;
     void* tcb_spare[2];
     u64 tcb_canary;
-    ::Libraries::Fiber::OrbisFiberContext* tcb_fiber;
+    ::OrbisFiberContext* tcb_fiber;
 };
 
 #ifdef _WIN32

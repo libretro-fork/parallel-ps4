@@ -21,6 +21,11 @@
 #include "core/libraries/content_export/content_export.h"
 #include "core/libraries/disc_map/disc_map.h"
 #include "core/libraries/fiber/fiber.h"
+#ifdef SHADPS4_ENABLE_FEX_GUEST_CPU
+#include "core/guest_cpu/hle_call_adapter.h"
+#include "core/guest_cpu/hle_frame_c.h"
+#include "core/linker.h"
+#endif
 #include "core/libraries/game_live_streaming/gamelivestreaming.h"
 #include "core/libraries/gnmdriver/gnmdriver.h"
 #include "core/libraries/hmd/hmd.h"
@@ -1478,6 +1483,43 @@ static void RegisterHmdSetupDialog(Core::Loader::SymbolsResolver* sym) {
                  sceHmdSetupDialogUpdateStatus);
 }
 
+#if defined(ARCH_X86_64) || defined(SHADPS4_ENABLE_FEX_GUEST_CPU)
+static void RegisterFiber(Core::Loader::SymbolsResolver* sym) {
+    LIB_FUNCTION("hVYD7Ou2pCQ", "libSceFiber", 1, "libSceFiber", sceFiberInitialize);
+    LIB_FUNCTION("7+OJIpko9RY", "libSceFiber", 1, "libSceFiber",
+                 sceFiberInitializeImpl); // _sceFiberInitializeWithInternalOptionImpl
+    LIB_FUNCTION("asjUJJ+aa8s", "libSceFiber", 1, "libSceFiber", sceFiberOptParamInitialize);
+    LIB_FUNCTION("JeNX5F-NzQU", "libSceFiber", 1, "libSceFiber", sceFiberFinalize);
+
+    LIB_FUNCTION("a0LLrZWac0M", "libSceFiber", 1, "libSceFiber", sceFiberRun);
+    LIB_FUNCTION("PFT2S-tJ7Uk", "libSceFiber", 1, "libSceFiber", sceFiberSwitch);
+    LIB_FUNCTION("p+zLIOg27zU", "libSceFiber", 1, "libSceFiber", sceFiberGetSelf);
+    LIB_FUNCTION("B0ZX2hx9DMw", "libSceFiber", 1, "libSceFiber", sceFiberReturnToThread);
+
+    LIB_FUNCTION("avfGJ94g36Q", "libSceFiber", 1, "libSceFiber",
+                 sceFiberRunImpl); // _sceFiberAttachContextAndRun
+    LIB_FUNCTION("ZqhZFuzKT6U", "libSceFiber", 1, "libSceFiber",
+                 sceFiberSwitchImpl); // _sceFiberAttachContextAndSwitch
+
+    LIB_FUNCTION("uq2Y5BFz0PE", "libSceFiber", 1, "libSceFiber", sceFiberGetInfo);
+    LIB_FUNCTION("Lcqty+QNWFc", "libSceFiber", 1, "libSceFiber", sceFiberStartContextSizeCheck);
+    LIB_FUNCTION("Kj4nXMpnM8Y", "libSceFiber", 1, "libSceFiber", sceFiberStopContextSizeCheck);
+    LIB_FUNCTION("JzyT91ucGDc", "libSceFiber", 1, "libSceFiber", sceFiberRename);
+
+    LIB_FUNCTION("0dy4JtMUcMQ", "libSceFiber", 1, "libSceFiber",
+                 sceFiberGetThreadFramePointerAddress);
+}
+
+#ifdef SHADPS4_ENABLE_FEX_GUEST_CPU
+// A fiber entry's return address: the veneer of fiber_entry_returned, made once
+extern "C" u64 core_hle_fiber_exit_address(void) {
+    static const u64 address = Common::Singleton<Core::Linker>::Instance()->AllocateHleVeneer(
+        Core::GuestCpu::MakeHleCallAdapter(&fiber_entry_returned), "libSceFiber#entry_returned");
+    return address;
+}
+#endif
+#endif
+
 static void RegisterVdecsw(Core::Loader::SymbolsResolver* sym) {
     LIB_FUNCTION("hIgrg5h4V6s", "libSceVdecsw", 1, "libSceVdecsw", sceVdecswAllocateComputeQueue);
     LIB_FUNCTION("+L5ArV1tPGA", "libSceVdecsw", 1, "libSceVdecsw", sceVdecswCreateDecoder);
@@ -1728,7 +1770,7 @@ void InitHLELibs(Core::Loader::SymbolsResolver* sym) {
             {"libSceInvitationDialog.sprx", RegisterInvitationDialog},
             {"libSceNpUtility.sprx", Libraries::Np::NpUtility::RegisterLib},
 #if defined(ARCH_X86_64) || defined(SHADPS4_ENABLE_FEX_GUEST_CPU)
-            {"libSceFiber.sprx", Libraries::Fiber::RegisterLib},
+            {"libSceFiber.sprx", RegisterFiber},
 #endif
             // Loading libSceSsl is locked behind a title workaround that currently applies to
             // nothing.

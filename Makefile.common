@@ -282,8 +282,8 @@ ifeq ($(OS_LINUX),1)
    CORE_SOURCES_C += $(LIBRETRO_HOST_BLOB)
 endif
 ifeq ($(ARCH_X86_64),1)
-   CORE_SOURCES_CXX += src/core/cpu_patches.cpp \
-	$(addprefix src/core/libraries/fiber/,fiber.cpp fiber_context.cpp)
+   CORE_SOURCES_CXX += src/core/cpu_patches.cpp
+   CORE_SOURCES_C += $(addprefix src/core/libraries/fiber/,fiber.c fiber_context.c)
 endif
 
 CORE_FLAGS := -DVK_ENABLE_BETA_EXTENSIONS \
@@ -393,8 +393,9 @@ FEXFLOAT_FLAGS := $(FEX_DEFS) $(FEX_SF_DEFS) -I$(FEX_DIR)/External/SoftFloat-3e 
 FEXFLOAT_CXXFLAGS := $(FEX_CXX)
 # Linked from one archive, so only what the core reaches comes in, as from FEX's own
 FEX_GROUPS := FEXCORE FEXCORESF FEXALLOC FEXCOMMON FEXFLOAT
-# libSceFiber HLE, its switches done on the guest's registers (no fiber_context.cpp asm)
-CORE_SOURCES_CXX += src/core/libraries/fiber/fiber.cpp src/core/fex/fex_guest_engine.cpp \
+# libSceFiber HLE, its switches done on the guest's registers (no fiber_context.c asm)
+CORE_SOURCES_C += src/core/libraries/fiber/fiber.c
+CORE_SOURCES_CXX += src/core/fex/fex_guest_engine.cpp \
 	$(addprefix src/core/guest_cpu/,fex_guest_cpu.cpp fex_hle_bridge.cpp guest_cpu.cpp \
 	hle_call_adapter.cpp)
 # The core's own FEX code takes only FEX's attribute defines

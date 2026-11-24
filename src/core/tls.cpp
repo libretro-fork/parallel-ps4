@@ -8,6 +8,7 @@
 #include "common/run_once.h"
 #include "core/libraries/kernel/threads/pthread.h"
 #include "core/tls.h"
+#include "core/tls_c.h"
 
 #ifdef _WIN32
 #include <windows.h>
@@ -250,3 +251,7 @@ void InitializeTLS() {
 }
 
 } // namespace Core
+
+extern "C" OrbisFiberContext** core_tcb_fiber(void) {
+    return &Core::GetTcbBase()->tcb_fiber;
+}
