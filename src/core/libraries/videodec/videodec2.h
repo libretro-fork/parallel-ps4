@@ -1,26 +1,24 @@
-// SPDX-FileCopyrightText: Copyright 2024-2026 shadPS4 Emulator Project
-// SPDX-License-Identifier: GPL-2.0-or-later
+/* SPDX-FileCopyrightText: Copyright 2024-2026 shadPS4 Emulator Project
+ * SPDX-License-Identifier: GPL-2.0-or-later */
 
-#pragma once
+#ifndef SHADPS4_VIDEODEC2_H
+#define SHADPS4_VIDEODEC2_H
 
 #include "common/types.h"
 
-namespace Core::Loader {
-class SymbolsResolver;
-}
-namespace Libraries::Videodec2 {
+#include <boolean.h>
+#include <retro_common_api.h>
 
-class VdecDecoder;
+RETRO_BEGIN_DECLS
 
-using OrbisVideodec2Decoder = VdecDecoder*;
-using OrbisVideodec2ComputeQueue = void*;
+typedef struct videodec2_decoder* OrbisVideodec2Decoder;
+typedef void* OrbisVideodec2ComputeQueue;
 
-enum class OrbisVideodec2CodecType : u32 {
-    Avc = 1,
-    Hevc = 974921,
-};
+typedef u32 OrbisVideodec2CodecType;
+#define ORBIS_VIDEODEC2_CODEC_TYPE_AVC 1u
+#define ORBIS_VIDEODEC2_CODEC_TYPE_HEVC 974921u
 
-struct OrbisVideodec2DecoderConfigInfo {
+typedef struct OrbisVideodec2DecoderConfigInfo {
     u64 this_size;
     u32 resource_type;
     OrbisVideodec2CodecType codec_type;
@@ -38,10 +36,11 @@ struct OrbisVideodec2DecoderConfigInfo {
     u8 reserved0;
     u8 reserved1;
     void* extra_config_info;
-};
-static_assert(sizeof(OrbisVideodec2DecoderConfigInfo) == 0x48);
+} OrbisVideodec2DecoderConfigInfo;
+typedef char
+    shadps4_videodec2_h_check_1[(sizeof(OrbisVideodec2DecoderConfigInfo) == 0x48) ? 1 : -1];
 
-struct OrbisVideodec2DecoderMemoryInfo {
+typedef struct OrbisVideodec2DecoderMemoryInfo {
     u64 this_size;
     u64 cpu_memory_size;
     void* cpu_memory;
@@ -52,20 +51,21 @@ struct OrbisVideodec2DecoderMemoryInfo {
     u64 max_frame_buffer_size;
     u32 frame_buffer_alignment;
     u32 reserved0;
-};
-static_assert(sizeof(OrbisVideodec2DecoderMemoryInfo) == 0x48);
+} OrbisVideodec2DecoderMemoryInfo;
+typedef char
+    shadps4_videodec2_h_check_2[(sizeof(OrbisVideodec2DecoderMemoryInfo) == 0x48) ? 1 : -1];
 
-struct OrbisVideodec2InputData {
+typedef struct OrbisVideodec2InputData {
     u64 this_size;
     void* au_data;
     u64 au_size;
     u64 pts_data;
     u64 dts_data;
     u64 attached_data;
-};
-static_assert(sizeof(OrbisVideodec2InputData) == 0x30);
+} OrbisVideodec2InputData;
+typedef char shadps4_videodec2_h_check_3[(sizeof(OrbisVideodec2InputData) == 0x30) ? 1 : -1];
 
-struct OrbisVideodec2OutputInfo {
+typedef struct OrbisVideodec2OutputInfo {
     u64 this_size;
     bool is_valid;
     bool is_error_frame;
@@ -78,35 +78,37 @@ struct OrbisVideodec2OutputInfo {
     u64 frame_buffer_size;
     u32 frame_format;
     u32 frame_pitch_in_bytes;
-};
-static_assert(sizeof(OrbisVideodec2OutputInfo) == 0x38);
+} OrbisVideodec2OutputInfo;
+typedef char shadps4_videodec2_h_check_4[(sizeof(OrbisVideodec2OutputInfo) == 0x38) ? 1 : -1];
 
-struct OrbisVideodec2FrameBuffer {
+typedef struct OrbisVideodec2FrameBuffer {
     u64 this_size;
     void* frame_buffer;
     u64 frame_buffer_size;
     bool is_accepted;
-};
-static_assert(sizeof(OrbisVideodec2FrameBuffer) == 0x20);
+} OrbisVideodec2FrameBuffer;
+typedef char shadps4_videodec2_h_check_5[(sizeof(OrbisVideodec2FrameBuffer) == 0x20) ? 1 : -1];
 
-struct OrbisVideodec2ComputeMemoryInfo {
+typedef struct OrbisVideodec2ComputeMemoryInfo {
     u64 this_size;
     u64 cpu_gpu_memory_size;
     void* cpu_gpu_memory;
-};
-static_assert(sizeof(OrbisVideodec2ComputeMemoryInfo) == 0x18);
+} OrbisVideodec2ComputeMemoryInfo;
+typedef char
+    shadps4_videodec2_h_check_6[(sizeof(OrbisVideodec2ComputeMemoryInfo) == 0x18) ? 1 : -1];
 
-struct OrbisVideodec2ComputeConfigInfo {
+typedef struct OrbisVideodec2ComputeConfigInfo {
     u64 this_size;
     u16 compute_pipe_id;
     u16 compute_queue_id;
     bool check_memory_type;
     u8 reserved0;
     u16 reserved1;
-};
-static_assert(sizeof(OrbisVideodec2ComputeConfigInfo) == 0x10);
+} OrbisVideodec2ComputeConfigInfo;
+typedef char
+    shadps4_videodec2_h_check_7[(sizeof(OrbisVideodec2ComputeConfigInfo) == 0x10) ? 1 : -1];
 
-struct OrbisVideodec2AvcPictureInfo {
+typedef struct OrbisVideodec2AvcPictureInfo {
     u64 this_size;
 
     bool is_valid;
@@ -170,10 +172,10 @@ struct OrbisVideodec2AvcPictureInfo {
     u8 constraint_set3_flag;
     u8 constraint_set4_flag;
     u8 constraint_set5_flag;
-};
-static_assert(sizeof(OrbisVideodec2AvcPictureInfo) == 0x78);
+} OrbisVideodec2AvcPictureInfo;
+typedef char shadps4_videodec2_h_check_8[(sizeof(OrbisVideodec2AvcPictureInfo) == 0x78) ? 1 : -1];
 
-struct OrbisVideodec2HevcPictureInfo {
+typedef struct OrbisVideodec2HevcPictureInfo {
     u64 this_size;
     bool is_valid;
     u64 pts_data;
@@ -249,8 +251,8 @@ struct OrbisVideodec2HevcPictureInfo {
     u32 frame_crop_right_offset;
     u32 frame_crop_top_offset;
     u32 frame_crop_bottom_offset;
-};
-static_assert(sizeof(OrbisVideodec2HevcPictureInfo) == 0xB8);
+} OrbisVideodec2HevcPictureInfo;
+typedef char shadps4_videodec2_h_check_9[(sizeof(OrbisVideodec2HevcPictureInfo) == 0xB8) ? 1 : -1];
 
 s32 PS4_SYSV_ABI
 sceVideodec2QueryComputeMemoryInfo(OrbisVideodec2ComputeMemoryInfo* compute_mem_info);
@@ -292,5 +294,6 @@ s32 PS4_SYSV_ABI sceVideodec2GetAvcPictureInfo(const OrbisVideodec2OutputInfo* o
 s32 PS4_SYSV_ABI sceVideodec2GetHevcPictureInfo(const OrbisVideodec2OutputInfo* p_output_info,
                                                 OrbisVideodec2HevcPictureInfo* p_picture_info);
 
-void RegisterLib(Core::Loader::SymbolsResolver* sym);
-} // namespace Libraries::Videodec2
+RETRO_END_DECLS
+
+#endif

@@ -1,26 +1,24 @@
-// SPDX-FileCopyrightText: Copyright 2026 shadPS4 Emulator Project
-// SPDX-License-Identifier: GPL-2.0-or-later
+/* SPDX-FileCopyrightText: Copyright 2026 shadPS4 Emulator Project
+ * SPDX-License-Identifier: GPL-2.0-or-later */
 
-#pragma once
+#ifndef SHADPS4_VDECSW_H
+#define SHADPS4_VDECSW_H
 
 #include "common/types.h"
 
-namespace Core::Loader {
-class SymbolsResolver;
-}
-namespace Libraries::Vdecsw {
+#include <boolean.h>
+#include <retro_common_api.h>
 
-class VdecDecoder;
+RETRO_BEGIN_DECLS
 
-using OrbisVdecswDecoder = VdecDecoder*;
-using OrbisVdecswComputeQueue = void*;
+typedef struct vdecsw_decoder* OrbisVdecswDecoder;
+typedef void* OrbisVdecswComputeQueue;
 
-enum class OrbisVdecswCodecType : u32 {
-    Avc = 1,
-    Hevc = 974921,
-};
+typedef u32 OrbisVdecswCodecType;
+#define ORBIS_VDECSW_CODEC_TYPE_AVC 1u
+#define ORBIS_VDECSW_CODEC_TYPE_HEVC 974921u
 
-struct OrbisVdecswDecoderConfigInfo {
+typedef struct OrbisVdecswDecoderConfigInfo {
     u64 this_size;
     u32 resource_type;
     OrbisVdecswCodecType codec_type;
@@ -40,10 +38,10 @@ struct OrbisVdecswDecoderConfigInfo {
     void* extra_config_info;
     bool disable_sync_decode_output;
     u32 max_pending_sync_count;
-};
-static_assert(sizeof(OrbisVdecswDecoderConfigInfo) == 0x50);
+} OrbisVdecswDecoderConfigInfo;
+typedef char shadps4_vdecsw_h_check_1[(sizeof(OrbisVdecswDecoderConfigInfo) == 0x50) ? 1 : -1];
 
-struct OrbisVdecswDecoderConfigInfoV1 {
+typedef struct OrbisVdecswDecoderConfigInfoV1 {
     u64 this_size;
     u32 resource_type;
     OrbisVdecswCodecType codec_type;
@@ -61,10 +59,10 @@ struct OrbisVdecswDecoderConfigInfoV1 {
     u8 reserved0;
     s8 extra_dpb_frame_count;
     void* extra_config_info;
-};
-static_assert(sizeof(OrbisVdecswDecoderConfigInfoV1) == 0x48);
+} OrbisVdecswDecoderConfigInfoV1;
+typedef char shadps4_vdecsw_h_check_2[(sizeof(OrbisVdecswDecoderConfigInfoV1) == 0x48) ? 1 : -1];
 
-struct OrbisVdecswDecoderMemoryInfo {
+typedef struct OrbisVdecswDecoderMemoryInfo {
     u64 this_size;
     u64 cpu_memory_size;
     void* cpu_memory;
@@ -75,28 +73,28 @@ struct OrbisVdecswDecoderMemoryInfo {
     u64 max_frame_buffer_size;
     u32 frame_buffer_alignment;
     u32 reserved0;
-};
-static_assert(sizeof(OrbisVdecswDecoderMemoryInfo) == 0x48);
+} OrbisVdecswDecoderMemoryInfo;
+typedef char shadps4_vdecsw_h_check_3[(sizeof(OrbisVdecswDecoderMemoryInfo) == 0x48) ? 1 : -1];
 
-struct OrbisVdecswInputData {
+typedef struct OrbisVdecswInputData {
     u64 this_size;
     void* au_data;
     u64 au_size;
     u64 pts_data;
     u64 dts_data;
     u64 attached_data;
-};
-static_assert(sizeof(OrbisVdecswInputData) == 0x30);
+} OrbisVdecswInputData;
+typedef char shadps4_vdecsw_h_check_4[(sizeof(OrbisVdecswInputData) == 0x30) ? 1 : -1];
 
-struct OrbisVdecswInputResult {
+typedef struct OrbisVdecswInputResult {
     u64 this_size;
     void* decoded_au;
     u32 output_frame_count;
     u32 reserved0;
-};
-static_assert(sizeof(OrbisVdecswInputResult) == 0x18);
+} OrbisVdecswInputResult;
+typedef char shadps4_vdecsw_h_check_5[(sizeof(OrbisVdecswInputResult) == 0x18) ? 1 : -1];
 
-struct OrbisVdecswOutputInfo {
+typedef struct OrbisVdecswOutputInfo {
     u64 this_size;
     bool is_valid;
     bool is_last_frame;
@@ -111,34 +109,34 @@ struct OrbisVdecswOutputInfo {
     u64 frame_buffer_size;
     u32 frame_format;
     u32 frame_pitch_in_bytes;
-};
-static_assert(sizeof(OrbisVdecswOutputInfo) == 0x38);
+} OrbisVdecswOutputInfo;
+typedef char shadps4_vdecsw_h_check_6[(sizeof(OrbisVdecswOutputInfo) == 0x38) ? 1 : -1];
 
-struct OrbisVdecswFrameBuffer {
+typedef struct OrbisVdecswFrameBuffer {
     u64 this_size;
     void* frame_buffer;
     u64 frame_buffer_size;
-};
-static_assert(sizeof(OrbisVdecswFrameBuffer) == 0x18);
+} OrbisVdecswFrameBuffer;
+typedef char shadps4_vdecsw_h_check_7[(sizeof(OrbisVdecswFrameBuffer) == 0x18) ? 1 : -1];
 
-struct OrbisVdecswComputeMemoryInfo {
+typedef struct OrbisVdecswComputeMemoryInfo {
     u64 this_size;
     u64 cpu_gpu_memory_size;
     void* cpu_gpu_memory;
-};
-static_assert(sizeof(OrbisVdecswComputeMemoryInfo) == 0x18);
+} OrbisVdecswComputeMemoryInfo;
+typedef char shadps4_vdecsw_h_check_8[(sizeof(OrbisVdecswComputeMemoryInfo) == 0x18) ? 1 : -1];
 
-struct OrbisVdecswComputeConfigInfo {
+typedef struct OrbisVdecswComputeConfigInfo {
     u64 this_size;
     u16 compute_pipe_id;
     u16 compute_queue_id;
     bool check_memory_type;
     u8 reserved0;
     u16 reserved1;
-};
-static_assert(sizeof(OrbisVdecswComputeConfigInfo) == 0x10);
+} OrbisVdecswComputeConfigInfo;
+typedef char shadps4_vdecsw_h_check_9[(sizeof(OrbisVdecswComputeConfigInfo) == 0x10) ? 1 : -1];
 
-struct OrbisVdecswAvcPictureInfo {
+typedef struct OrbisVdecswAvcPictureInfo {
     u64 this_size;
 
     bool is_valid;
@@ -202,10 +200,10 @@ struct OrbisVdecswAvcPictureInfo {
     u8 constraint_set3_flag;
     u8 constraint_set4_flag;
     u8 constraint_set5_flag;
-};
-static_assert(sizeof(OrbisVdecswAvcPictureInfo) == 0x78);
+} OrbisVdecswAvcPictureInfo;
+typedef char shadps4_vdecsw_h_check_10[(sizeof(OrbisVdecswAvcPictureInfo) == 0x78) ? 1 : -1];
 
-struct OrbisVdecswHevcExtraConfigInfo {
+typedef struct OrbisVdecswHevcExtraConfigInfo {
     u64 this_size;
     s32 tier_type;
     s8 max_bit_depth_luma;
@@ -214,10 +212,10 @@ struct OrbisVdecswHevcExtraConfigInfo {
     s32 max_temporal_id_to_decode;
     u32 hdr_frame_format;
     u32 gpu_load_level;
-};
-static_assert(sizeof(OrbisVdecswHevcExtraConfigInfo) == 0x20);
+} OrbisVdecswHevcExtraConfigInfo;
+typedef char shadps4_vdecsw_h_check_11[(sizeof(OrbisVdecswHevcExtraConfigInfo) == 0x20) ? 1 : -1];
 
-struct OrbisVdecswHevcPictureInfo {
+typedef struct OrbisVdecswHevcPictureInfo {
     u64 this_size;
     bool is_valid;
     u64 pts_data;
@@ -293,8 +291,46 @@ struct OrbisVdecswHevcPictureInfo {
     u32 frame_crop_right_offset;
     u32 frame_crop_top_offset;
     u32 frame_crop_bottom_offset;
-};
-static_assert(sizeof(OrbisVdecswHevcPictureInfo) == 0xB8);
+} OrbisVdecswHevcPictureInfo;
+typedef char shadps4_vdecsw_h_check_12[(sizeof(OrbisVdecswHevcPictureInfo) == 0xB8) ? 1 : -1];
 
-void RegisterLib(Core::Loader::SymbolsResolver* sym);
-} // namespace Libraries::Vdecsw
+/* The library's calls (vdecsw.c) */
+s32 PS4_SYSV_ABI sceVdecswQueryComputeMemoryInfo(OrbisVdecswComputeMemoryInfo* compute_mem_info);
+s32 PS4_SYSV_ABI
+sceVdecswAllocateComputeQueue(const OrbisVdecswComputeConfigInfo* compute_cfg_info_in,
+                              const OrbisVdecswComputeMemoryInfo* compute_mem_info_in,
+                              OrbisVdecswComputeQueue* compute_queue_out);
+s32 PS4_SYSV_ABI sceVdecswReleaseComputeQueue(OrbisVdecswComputeQueue compute_queue_in);
+s32 PS4_SYSV_ABI
+sceVdecswQueryDecoderMemoryInfo(const OrbisVdecswDecoderConfigInfo* decoder_config_info_in,
+                                OrbisVdecswDecoderMemoryInfo* decoder_memory_info_out);
+s32 PS4_SYSV_ABI sceVdecswCreateDecoder(const OrbisVdecswDecoderConfigInfo* decoder_config_info_in,
+                                        const OrbisVdecswDecoderMemoryInfo* decoder_memory_info_in,
+                                        OrbisVdecswDecoder* decoder_instance_out);
+s32 PS4_SYSV_ABI sceVdecswDeleteDecoder(OrbisVdecswDecoder decoder_instance_in);
+s32 PS4_SYSV_ABI sceVdecswResetDecoder(OrbisVdecswDecoder decoder_instance_in);
+s32 PS4_SYSV_ABI sceVdecswSetDecodeInput(OrbisVdecswDecoder decoder_instance_in,
+                                         const OrbisVdecswInputData* input_data_in);
+s32 PS4_SYSV_ABI sceVdecswSyncDecodeInput(OrbisVdecswDecoder decoder_instance_in,
+                                          OrbisVdecswInputResult* input_result_out);
+s32 PS4_SYSV_ABI sceVdecswTrySyncDecodeInput(OrbisVdecswDecoder decoder_instance_in,
+                                             OrbisVdecswInputResult* input_result_out);
+s32 PS4_SYSV_ABI sceVdecswSetDecodeOutput(OrbisVdecswDecoder decoder_instance_in,
+                                          OrbisVdecswFrameBuffer* frame_buffer_in_out);
+s32 PS4_SYSV_ABI sceVdecswSyncDecodeOutput(OrbisVdecswDecoder decoder_instance_in,
+                                           OrbisVdecswOutputInfo* output_info_out);
+s32 PS4_SYSV_ABI sceVdecswTrySyncDecodeOutput(OrbisVdecswDecoder decoder_instance_in,
+                                              OrbisVdecswOutputInfo* output_info_out);
+s32 PS4_SYSV_ABI sceVdecswFinalizeDecodeSequence(OrbisVdecswDecoder decoder_instance_in);
+s32 PS4_SYSV_ABI sceVdecswGetPictureInfo(const OrbisVdecswOutputInfo* output_info_in,
+                                         void* p_1st_picture_info_out,
+                                         void* p_2nd_picture_info_out);
+s32 PS4_SYSV_ABI sceVdecswGetAvcPictureInfo(const OrbisVdecswOutputInfo* output_info_in,
+                                            OrbisVdecswAvcPictureInfo* p_1st_picture_info_out,
+                                            OrbisVdecswAvcPictureInfo* p_2nd_picture_info_out);
+s32 PS4_SYSV_ABI sceVdecswGetHevcPictureInfo(const OrbisVdecswOutputInfo* output_info_in,
+                                             OrbisVdecswHevcPictureInfo* picture_info_out);
+
+RETRO_END_DECLS
+
+#endif

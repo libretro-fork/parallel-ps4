@@ -320,7 +320,14 @@ private:
     bool m_fully_loaded = false;
     rmp4_t* m_demuxer = nullptr;
 
-    std::unique_ptr<Videodec::SwDecoder> m_video_decoder;
+    /// The video stream's decoder, freed with the source
+    struct VideoDecoderFree {
+        void operator()(video_sw_decoder_t* decoder) const {
+            video_sw_decoder_free(decoder);
+            delete decoder;
+        }
+    };
+    std::unique_ptr<video_sw_decoder_t, VideoDecoderFree> m_video_decoder;
     raac_t* m_audio_decoder = nullptr;
     u64 m_audio_skip = 0; // samples a channel the edit list trims, still to drop
 

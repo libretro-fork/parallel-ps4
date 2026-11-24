@@ -1,17 +1,17 @@
-// SPDX-FileCopyrightText: Copyright 2024 shadPS4 Emulator Project
-// SPDX-License-Identifier: GPL-2.0-or-later
+/* SPDX-FileCopyrightText: Copyright 2024 shadPS4 Emulator Project
+ * SPDX-License-Identifier: GPL-2.0-or-later */
 
-#pragma once
+#ifndef SHADPS4_VIDEODEC_H
+#define SHADPS4_VIDEODEC_H
 
 #include "common/types.h"
 
-namespace Core::Loader {
-class SymbolsResolver;
-}
+#include <boolean.h>
+#include <retro_common_api.h>
 
-namespace Libraries::Videodec {
+RETRO_BEGIN_DECLS
 
-struct OrbisVideodecConfigInfo {
+typedef struct OrbisVideodecConfigInfo {
     u64 thisSize;
     u32 codecType;
     u32 profile;
@@ -20,9 +20,9 @@ struct OrbisVideodecConfigInfo {
     s32 maxFrameHeight;
     s32 maxDpbFrameCount;
     u64 videodecFlags;
-};
+} OrbisVideodecConfigInfo;
 
-struct OrbisVideodecResourceInfo {
+typedef struct OrbisVideodecResourceInfo {
     u64 thisSize;
     u64 cpuMemorySize;
     void* pCpuMemory;
@@ -30,21 +30,21 @@ struct OrbisVideodecResourceInfo {
     void* pCpuGpuMemory;
     u64 maxFrameBufferSize;
     u32 frameBufferAlignment;
-};
+} OrbisVideodecResourceInfo;
 
-struct OrbisVideodecCtrl {
+typedef struct OrbisVideodecCtrl {
     u64 thisSize;
     void* handle;
     u64 version;
-};
+} OrbisVideodecCtrl;
 
-struct OrbisVideodecFrameBuffer {
+typedef struct OrbisVideodecFrameBuffer {
     u64 thisSize;
     void* pFrameBuffer;
     u64 frameBufferSize;
-};
+} OrbisVideodecFrameBuffer;
 
-struct OrbisVideodecAvcInfo {
+typedef struct OrbisVideodecAvcInfo {
     u32 numUnitsInTick;
     u32 timeScale;
     u8 fixedFrameRateFlag;
@@ -59,14 +59,14 @@ struct OrbisVideodecAvcInfo {
     u32 frameCropRightOffset;
     u32 frameCropTopOffset;
     u32 frameCropBottomOffset;
-};
+} OrbisVideodecAvcInfo;
 
-union OrbisVideodecCodecInfo {
+typedef union OrbisVideodecCodecInfo {
     u8 reserved[64];
     OrbisVideodecAvcInfo avc;
-};
+} OrbisVideodecCodecInfo;
 
-struct OrbisVideodecPictureInfo {
+typedef struct OrbisVideodecPictureInfo {
     u64 thisSize;
     u32 isValid;
     u32 codecType;
@@ -77,16 +77,16 @@ struct OrbisVideodecPictureInfo {
     u64 ptsData;
     u64 attachedData;
     OrbisVideodecCodecInfo codec;
-};
+} OrbisVideodecPictureInfo;
 
-struct OrbisVideodecInputData {
+typedef struct OrbisVideodecInputData {
     u64 thisSize;
     void* pAuData;
     u64 auSize;
     u64 ptsData;
     u64 dtsData;
     u64 attachedData;
-};
+} OrbisVideodecInputData;
 
 int PS4_SYSV_ABI sceVideodecCreateDecoder(const OrbisVideodecConfigInfo* pCfgInfoIn,
                                           const OrbisVideodecResourceInfo* pRsrcInfoIn,
@@ -99,10 +99,11 @@ int PS4_SYSV_ABI sceVideodecDeleteDecoder(OrbisVideodecCtrl* pCtrlIn);
 int PS4_SYSV_ABI sceVideodecFlush(OrbisVideodecCtrl* pCtrlIn,
                                   OrbisVideodecFrameBuffer* pFrameBufferInOut,
                                   OrbisVideodecPictureInfo* pPictureInfoOut);
-int PS4_SYSV_ABI sceVideodecMapMemory();
+int PS4_SYSV_ABI sceVideodecMapMemory(void);
 int PS4_SYSV_ABI sceVideodecQueryResourceInfo(const OrbisVideodecConfigInfo* pCfgInfoIn,
                                               OrbisVideodecResourceInfo* pRsrcInfoOut);
 int PS4_SYSV_ABI sceVideodecReset(OrbisVideodecCtrl* pCtrlIn);
 
-void RegisterLib(Core::Loader::SymbolsResolver* sym);
-} // namespace Libraries::Videodec
+RETRO_END_DECLS
+
+#endif

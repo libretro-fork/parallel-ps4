@@ -309,9 +309,10 @@ bool AvPlayerSource::Start() {
     if (m_video_stream_index) {
         const rmp4_track& track =
             *rmp4_get_track(m_demuxer, m_streams[m_video_stream_index.value()].track);
-        m_video_decoder = std::make_unique<Videodec::SwDecoder>(track.codec == RMP4_CODEC_H265);
-        if (!m_video_decoder->IsOpen() ||
-            !m_video_decoder->SetExtradata(track.codec_private, track.codec_private_size)) {
+        m_video_decoder.reset(new video_sw_decoder_t{});
+        if (!video_sw_decoder_init(m_video_decoder.get(), track.codec == RMP4_CODEC_H265) ||
+            !video_sw_decoder_set_extradata(m_video_decoder.get(), track.codec_private,
+                                            track.codec_private_size)) {
             LOG_ERROR(Lib_AvPlayer, "Could not open the decoder for video stream %d.",
                       m_video_stream_index.value());
             return false;
@@ -616,7 +617,7 @@ void AvPlayerSource::VideoDecoderThread() {
         return; // no video stream enabled
     }
     LOG_INFO(Lib_AvPlayer, "Video Decoder Thread started");
-    auto& decoder = *m_video_decoder;
+    video_sw_decoder_t* const decoder = m_video_decoder.get();
     std::optional<u32> spare; // a buffer taken and not filled
     // Writes the ready picture straight into a guest buffer
     const auto output = [&]() -> bool {
@@ -629,16 +630,16 @@ void AvPlayerSource::VideoDecoderThread() {
         }
         const GuestBuffer& buffer = m_video_pool[*spare];
         u8* p_buffer = buffer.GetBuffer();
-        if (!decoder.WriteNV12(p_buffer, buffer.Size())) {
+        if (!video_sw_decoder_write_nv12(decoder, p_buffer, buffer.Size())) {
             LOG_ERROR(Lib_AvPlayer, "The %ux%u picture does not fit the frame buffer",
-                      decoder.Width(), decoder.Height());
+                      decoder->width, decoder->height);
             return true; // the buffer is kept for the next picture
         }
-        const auto width = Common::AlignUp<u32>(decoder.Width(), 16);
-        const auto pitch = decoder.Pitch();
-        const auto height = decoder.AlignedHeight();
+        const auto width = Common::AlignUp<u32>(decoder->width, 16);
+        const auto pitch = video_sw_decoder_pitch(decoder);
+        const auto height = video_sw_decoder_aligned_height(decoder);
         Core::Memory::Instance()->InvalidateMemory(reinterpret_cast<VAddr>(p_buffer),
-                                                   decoder.Nv12Size());
+                                                   video_sw_decoder_nv12_size(decoder));
         const u32 index = *spare;
         spare.reset();
         return m_video_frames.Push(Frame{
@@ -646,7 +647,7 @@ void AvPlayerSource::VideoDecoderThread() {
             .info =
                 {
                     .p_data = p_buffer,
-                    .timestamp = decoder.Meta().pts,
+                    .timestamp = decoder->meta.pts,
                     .details =
                         {
                             .video =
@@ -655,9 +656,9 @@ void AvPlayerSource::VideoDecoderThread() {
                                     .height = height,
                                     .aspect_ratio = 1.0f, // square samples
                                     .crop_left_offset = 0,
-                                    .crop_right_offset = pitch - decoder.Width(),
+                                    .crop_right_offset = pitch - decoder->width,
                                     .crop_top_offset = 0,
-                                    .crop_bottom_offset = height - decoder.Height(),
+                                    .crop_bottom_offset = height - decoder->height,
                                     .pitch = pitch,
                                     .luma_bit_depth = 8,
                                     .chroma_bit_depth = 8,
@@ -669,8 +670,8 @@ void AvPlayerSource::VideoDecoderThread() {
 
     Packet packet;
     while (!m_video_decoder_thread.Stopping() && m_video_packets.Pop(packet)) {
-        const Videodec::PictureMeta meta{.pts = packet.timestamp};
-        const int res = decoder.Decode(packet.data, packet.size, meta);
+        const video_picture_meta_t meta{packet.timestamp, 0, 0};
+        const int res = video_sw_decoder_decode(decoder, packet.data, packet.size, &meta);
         if (res < 0) {
             LOG_ERROR(Lib_AvPlayer, "Could not decode a video sample. Error = %d", res);
             m_state.OnError();
@@ -681,7 +682,7 @@ void AvPlayerSource::VideoDecoderThread() {
         }
     }
     // The pictures still held for display order
-    while (!m_video_decoder_thread.Stopping() && decoder.Drain()) {
+    while (!m_video_decoder_thread.Stopping() && video_sw_decoder_drain(decoder)) {
         if (!output()) {
             break;
         }

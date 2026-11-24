@@ -1,81 +1,70 @@
-// SPDX-FileCopyrightText: Copyright 2024-2026 shadPS4 Emulator Project
-// SPDX-License-Identifier: GPL-2.0-or-later
+/* SPDX-FileCopyrightText: Copyright 2024-2026 shadPS4 Emulator Project
+ * SPDX-License-Identifier: GPL-2.0-or-later */
 
-#pragma once
+#ifndef SHADPS4_VIDEODEC_VIDEO_UTILS_H
+#define SHADPS4_VIDEODEC_VIDEO_UTILS_H
 
-#include <array>
-#include <cstddef>
+/* An H.264 or HEVC decoder (libretro-common's rh264 and rh265) that writes its pictures as the
+ * console's NV12 frames: luma then interleaved chroma, the pitch rounded up to 64 and the
+ * height to 16, the last row repeated below the picture. MSVC C89. */
+
+#include <stddef.h>
+
+#include <boolean.h>
+#include <retro_common_api.h>
 
 #include "common/types.h"
 
-typedef struct rh264_video rh264_video;
-typedef struct rh265_video rh265_video;
+RETRO_BEGIN_DECLS
 
-namespace Libraries::Videodec {
+/* What the game gave with an access unit, handed back with the picture it opens */
+typedef struct video_picture_meta {
+    u64 pts;
+    u64 dts;
+    u64 attached;
+} video_picture_meta_t;
 
-// What the game gave with an access unit, handed back with the picture it opens.
-struct PictureMeta {
-    u64 pts = 0;
-    u64 dts = 0;
-    u64 attached = 0;
-};
+/* More than any stream holds back */
+#define VIDEO_SW_META_RING 64
 
-// An H.264 or HEVC decoder (libretro-common's rh264 and rh265) that writes its pictures as
-// the console's NV12 frames: luma then interleaved chroma, the pitch rounded up to 64 and the
-// height to 16, the last row repeated below the picture.
-class SwDecoder {
-public:
-    explicit SwDecoder(bool hevc);
-    ~SwDecoder();
-    SwDecoder(const SwDecoder&) = delete;
-    SwDecoder& operator=(const SwDecoder&) = delete;
+typedef struct video_sw_decoder {
+    struct rh264_video* h264;
+    struct rh265_video* h265;
+    video_picture_meta_t ring[VIDEO_SW_META_RING];
+    u64 seq;
+    /* The ready picture's, valid until the next decode, drain or reset */
+    video_picture_meta_t meta;
+    u32 width;
+    u32 height;
+} video_sw_decoder_t;
 
-    bool IsOpen() const {
-        return m_h264 || m_h265;
-    }
-    bool IsHevc() const {
-        return m_h265 != nullptr;
-    }
+/* Opens @dec's decoder (zeroed first): HEVC or H.264. Whether it opened. */
+bool video_sw_decoder_init(video_sw_decoder_t* dec, bool hevc);
+void video_sw_decoder_free(video_sw_decoder_t* dec);
 
-    // The avcC/hvcC record of an MP4 track, for its length-prefixed samples.
-    bool SetExtradata(const u8* data, std::size_t size);
+bool video_sw_decoder_is_open(const video_sw_decoder_t* dec);
+bool video_sw_decoder_is_hevc(const video_sw_decoder_t* dec);
 
-    // 1 when a picture is ready, 0 when none is (yet), negative for a stream the decoder
-    // cannot take.
-    int Decode(const u8* data, std::size_t size, const PictureMeta& meta);
-    // The next picture still held for display order, at the end of the stream: 1 or 0.
-    int Drain();
-    // Forgets the pictures held for display order; the stream goes on from its next IDR.
-    void Reset();
+/* The avcC/hvcC record of an MP4 track, for its length-prefixed samples */
+bool video_sw_decoder_set_extradata(video_sw_decoder_t* dec, const u8* data, size_t size);
 
-    // The ready picture, valid until the next Decode, Drain or Reset.
-    u32 Width() const {
-        return m_width;
-    }
-    u32 Height() const {
-        return m_height;
-    }
-    u32 Pitch() const;
-    u32 AlignedHeight() const;
-    u64 Nv12Size() const;
-    const PictureMeta& Meta() const {
-        return m_meta;
-    }
-    u8 ColourPrimaries() const;
-    // False, writing nothing, when the frame does not fit in max_size.
-    bool WriteNV12(u8* dst, u64 max_size) const;
+/* 1 when a picture is ready, 0 when none is (yet), negative for a stream the decoder cannot
+ * take */
+int video_sw_decoder_decode(video_sw_decoder_t* dec, const u8* data, size_t size,
+                            const video_picture_meta_t* meta);
+/* The next picture still held for display order, at the end of the stream: 1 or 0 */
+int video_sw_decoder_drain(video_sw_decoder_t* dec);
+/* Forgets the pictures held for display order; the stream goes on from its next IDR */
+void video_sw_decoder_reset(video_sw_decoder_t* dec);
 
-private:
-    bool Ready(int tag);
+/* The ready picture's frame: its pitch, height, size */
+u32 video_sw_decoder_pitch(const video_sw_decoder_t* dec);
+u32 video_sw_decoder_aligned_height(const video_sw_decoder_t* dec);
+u64 video_sw_decoder_nv12_size(const video_sw_decoder_t* dec);
+u8 video_sw_decoder_colour_primaries(const video_sw_decoder_t* dec);
+/* False, writing nothing, when the frame does not fit in @max_size */
+bool video_sw_decoder_write_nv12(const video_sw_decoder_t* dec, u8* dst, u64 max_size);
 
-    static constexpr std::size_t MetaRing = 64; // more than any stream holds back
-    rh264_video* m_h264 = nullptr;
-    rh265_video* m_h265 = nullptr;
-    std::array<PictureMeta, MetaRing> m_ring{};
-    u64 m_seq = 0;
-    PictureMeta m_meta{};
-    u32 m_width = 0;
-    u32 m_height = 0;
-};
+RETRO_END_DECLS
 
-} // namespace Libraries::Videodec
+#endif

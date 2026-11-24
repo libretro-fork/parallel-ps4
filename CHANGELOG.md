@@ -4,6 +4,13 @@ What changed in the libretro core of this fork, newest first. Changes that come 
 
 ## Unreleased
 
+- The video decoder libraries (`libSceVideodec`, `libSceVideodec2`, `libSceVdecsw`) are MSVC C89: `videodec/videodec.c`, `videodec2.c`, `vdecsw.c`, over `video_utils.c`, the software decoder (libretro-common's `rh264`/`rh265`) that they and the media player share. Their headers are C (`videodec.h`, `videodec2.h`, `vdecsw.h`, `videodec_error.h`), and the libraries are registered in `libs.cpp`. The C++ files and the `*_impl.h` headers are gone.
+  - **The media player** (`avplayer_source.cpp`) uses the decoder through its C calls (`video_sw_decoder_init`, `_decode`, `_write_nv12` and the rest).
+  - **`libSceVdecsw`'s worker** keeps its lock-free rings and its thread (`stop_thread`), and waits on eventcounts as before.
+  - **Trace logs** are built only in debug builds.
+  - **When the host is out of memory** making a decoder, the call now gives the library's `API_FAIL` error.
+  - **The same answers:** the C and C++ libraries, linked into one program, were given random calls (create, decode, flush, reset, destroy, in any order) over five streams made with ffmpeg (H.264 8-bit, 10-bit and 4:2:2 10-bit; HEVC 8-bit and 10-bit): about 1.2 million checks over five seeds, 0 differences, under the address and undefined-behaviour checkers, and none under the thread checker. A planted bug in the chroma copy was caught. One HEVC stream gave no pictures from either side.
+  - Not run in a game yet.
 - The sound engine library's front (`libSceNgs2`) is MSVC C89: `ngs2/ngs2.c`, over the engine of `ngs2_core.c`, which was C already, registered in `sysmodule_internal.cpp`. Its headers are C (`ngs2.h` and the rest: typedef'd structures, function pointer typedefs and `#define`s), with the library's calls declared in a new `ngs2_lib.h`; the ten `.cpp` files that held nothing are gone.
   - **The system's lock** (`sceNgs2SystemLock`, and what each call takes) is a C structure laid out as the C++ one was, so the buffers the game is asked for are the same size: an owner taken with `retro_atomic`, the owner's count of times in, and a `retro_eventcount` a thread that finds it held waits on through `kernel_game_wait`. The owner is the calling thread's id from rthreads, where it was the address of a `thread_local`.
   - **Calls into the game's code** (its allocator, voice callbacks, user effects and waveform reader) go through `core_call_guest4`, new in `core/guest_call_c.h` and defined in `libs.cpp` over `Core::CallGuest`, so they still go through FEX for the game's code on the aarch64 core.
