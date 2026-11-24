@@ -132,7 +132,6 @@ CORE_SOURCES_CXX += $(addprefix src/core/libraries/ajm/,ajm.cpp ajm_aac.cpp ajm_
 	ajm_batch.cpp ajm_context.cpp ajm_instance.cpp ajm_instance_statistics.cpp ajm_mp3.cpp)
 CORE_SOURCES_CXX += $(addprefix src/core/libraries/audio/,audioin.cpp audioout.cpp \
 	frontend_audio_out.cpp silent_audio_in.cpp)
-CORE_SOURCES_CXX += $(addprefix src/core/libraries/audio3d/,audio3d.cpp)
 CORE_SOURCES_CXX += $(addprefix src/core/libraries/avplayer/,avplayer.cpp avplayer_common.cpp \
 	avplayer_file_streamer.cpp avplayer_handle_streamer.cpp avplayer_impl.cpp avplayer_source.cpp \
 	avplayer_state.cpp)
@@ -245,7 +244,7 @@ CORE_SOURCES_C += $(addprefix src/common/,audio_stream.c enum_names.c event_latc
 CORE_SOURCES_C += $(addprefix src/core/,emulator_settings.c user_manager.c file_format/playgo_chunk.c)
 CORE_SOURCES_C += src/common/combine.c src/input/controller.c
 CORE_SOURCES_C += $(addprefix src/core/libraries/avplayer/,avplayer_clock.c avplayer_fsm.c)
-CORE_SOURCES_C += $(addprefix src/core/libraries/audio3d/,audio3d_port.c)
+CORE_SOURCES_C += $(addprefix src/core/libraries/audio3d/,audio3d.c audio3d_port.c)
 CORE_SOURCES_C += $(addprefix src/core/libraries/font/,font_blit.c)
 CORE_SOURCES_C += $(addprefix src/core/libraries/network/,host_override.c)
 CORE_SOURCES_C += $(addprefix src/core/libraries/ngs2/,ngs2_core.c ngs2_util.c)

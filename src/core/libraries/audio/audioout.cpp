@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright 2024-2026 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include <cstring>
 #include <memory>
 #include "common/enum_names.h"
 
@@ -11,6 +12,7 @@
 #include "core/emulator_settings.h"
 #include "core/libraries/audio/audioout.h"
 #include "core/libraries/audio/audioout_backend.h"
+#include "core/libraries/audio/audioout_c.h"
 #include "core/libraries/audio/audioout_error.h"
 #include "core/libraries/kernel/time.h"
 #include "core/libraries/libs.h"
@@ -1171,3 +1173,38 @@ void RegisterLib(Core::Loader::SymbolsResolver* sym) {
 };
 
 } // namespace Libraries::AudioOut
+
+// The bridge for the libraries written in C (audioout_c.h)
+static_assert(AUDIOOUT_FORMAT_FLOAT_STEREO ==
+              static_cast<u32>(Libraries::AudioOut::OrbisAudioOutParamFormat::FloatStereo));
+static_assert(AUDIOOUT_FORMAT_FLOAT_8CH ==
+              static_cast<u32>(Libraries::AudioOut::OrbisAudioOutParamFormat::Float_8CH));
+static_assert(AUDIOOUT_FORMAT_FLOAT_8CH_STD ==
+              static_cast<u32>(Libraries::AudioOut::OrbisAudioOutParamFormat::Float_8CH_Std));
+static_assert(AUDIOOUT_PORT_AUDIO3D ==
+              static_cast<s32>(Libraries::AudioOut::OrbisAudioOutPort::Audio3d));
+static_assert(AUDIOOUT_ERROR_ALREADY_INIT == ORBIS_AUDIO_OUT_ERROR_ALREADY_INIT);
+static_assert(sizeof(audioout_output_param_t) ==
+              sizeof(Libraries::AudioOut::OrbisAudioOutOutputParam));
+static_assert(sizeof(Libraries::AudioOut::OrbisAudioOutParamExtendedInformation) == sizeof(u32));
+
+extern "C" s32 audioout_init(void) {
+    return Libraries::AudioOut::sceAudioOutInit();
+}
+
+extern "C" s32 audioout_open(s32 user_id, s32 port_type, s32 index, u32 length, u32 sample_rate,
+                             u32 param) {
+    Libraries::AudioOut::OrbisAudioOutParamExtendedInformation ext;
+    std::memcpy(&ext, &param, sizeof(ext));
+    return Libraries::AudioOut::sceAudioOutOpen(
+        user_id, static_cast<Libraries::AudioOut::OrbisAudioOutPort>(port_type), index, length,
+        sample_rate, ext);
+}
+
+extern "C" s32 audioout_output(s32 handle, void* ptr) {
+    return Libraries::AudioOut::sceAudioOutOutput(handle, ptr);
+}
+
+extern "C" s32 audioout_close(s32 handle) {
+    return Libraries::AudioOut::sceAudioOutClose(handle);
+}

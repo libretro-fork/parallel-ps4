@@ -476,28 +476,6 @@ static const enum_name_entry_t enum_names_Libraries_Ajm_AjmCodecType_entries[] =
 const enum_names_t enum_names_Libraries_Ajm_AjmCodecType = {enum_names_Libraries_Ajm_AjmCodecType_entries,
     sizeof(enum_names_Libraries_Ajm_AjmCodecType_entries) / sizeof(enum_names_Libraries_Ajm_AjmCodecType_entries[0])};
 
-static const enum_name_entry_t enum_names_Libraries_Audio3d_OrbisAudio3dBlocking_entries[] = {
-    {(int64_t)0, "ORBIS_AUDIO3D_BLOCKING_ASYNC"},
-    {(int64_t)1, "ORBIS_AUDIO3D_BLOCKING_SYNC"},
-};
-const enum_names_t enum_names_Libraries_Audio3d_OrbisAudio3dBlocking = {enum_names_Libraries_Audio3d_OrbisAudio3dBlocking_entries,
-    sizeof(enum_names_Libraries_Audio3d_OrbisAudio3dBlocking_entries) / sizeof(enum_names_Libraries_Audio3d_OrbisAudio3dBlocking_entries[0])};
-
-static const enum_name_entry_t enum_names_Libraries_Audio3d_OrbisAudio3dFormat_entries[] = {
-    {(int64_t)0, "ORBIS_AUDIO3D_FORMAT_S16"},
-    {(int64_t)1, "ORBIS_AUDIO3D_FORMAT_FLOAT"},
-};
-const enum_names_t enum_names_Libraries_Audio3d_OrbisAudio3dFormat = {enum_names_Libraries_Audio3d_OrbisAudio3dFormat_entries,
-    sizeof(enum_names_Libraries_Audio3d_OrbisAudio3dFormat_entries) / sizeof(enum_names_Libraries_Audio3d_OrbisAudio3dFormat_entries[0])};
-
-static const enum_name_entry_t enum_names_Libraries_Audio3d_OrbisAudio3dOutputRoute_entries[] = {
-    {(int64_t)0, "ORBIS_AUDIO3D_OUTPUT_BOTH"},
-    {(int64_t)1, "ORBIS_AUDIO3D_OUTPUT_HMU_ONLY"},
-    {(int64_t)2, "ORBIS_AUDIO3D_OUTPUT_TV_ONLY"},
-};
-const enum_names_t enum_names_Libraries_Audio3d_OrbisAudio3dOutputRoute = {enum_names_Libraries_Audio3d_OrbisAudio3dOutputRoute_entries,
-    sizeof(enum_names_Libraries_Audio3d_OrbisAudio3dOutputRoute_entries) / sizeof(enum_names_Libraries_Audio3d_OrbisAudio3dOutputRoute_entries[0])};
-
 static const enum_name_entry_t enum_names_Libraries_AudioOut_OrbisAudioOutParamAttr_entries[] = {
     {(int64_t)0, "None"},
     {(int64_t)1, "Restricted"},
@@ -674,6 +652,28 @@ static const enum_name_entry_t enum_names_Libraries_SaveData_OrbisSaveDataParamT
 };
 const enum_names_t enum_names_Libraries_SaveData_OrbisSaveDataParamType = {enum_names_Libraries_SaveData_OrbisSaveDataParamType_entries,
     sizeof(enum_names_Libraries_SaveData_OrbisSaveDataParamType_entries) / sizeof(enum_names_Libraries_SaveData_OrbisSaveDataParamType_entries[0])};
+
+static const enum_name_entry_t enum_names_OrbisAudio3dBlocking_entries[] = {
+    {(int64_t)0, "ORBIS_AUDIO3D_BLOCKING_ASYNC"},
+    {(int64_t)1, "ORBIS_AUDIO3D_BLOCKING_SYNC"},
+};
+const enum_names_t enum_names_OrbisAudio3dBlocking = {enum_names_OrbisAudio3dBlocking_entries,
+    sizeof(enum_names_OrbisAudio3dBlocking_entries) / sizeof(enum_names_OrbisAudio3dBlocking_entries[0])};
+
+static const enum_name_entry_t enum_names_OrbisAudio3dFormat_entries[] = {
+    {(int64_t)0, "ORBIS_AUDIO3D_FORMAT_S16"},
+    {(int64_t)1, "ORBIS_AUDIO3D_FORMAT_FLOAT"},
+};
+const enum_names_t enum_names_OrbisAudio3dFormat = {enum_names_OrbisAudio3dFormat_entries,
+    sizeof(enum_names_OrbisAudio3dFormat_entries) / sizeof(enum_names_OrbisAudio3dFormat_entries[0])};
+
+static const enum_name_entry_t enum_names_OrbisAudio3dOutputRoute_entries[] = {
+    {(int64_t)0, "ORBIS_AUDIO3D_OUTPUT_BOTH"},
+    {(int64_t)1, "ORBIS_AUDIO3D_OUTPUT_HMU_ONLY"},
+    {(int64_t)2, "ORBIS_AUDIO3D_OUTPUT_TV_ONLY"},
+};
+const enum_names_t enum_names_OrbisAudio3dOutputRoute = {enum_names_OrbisAudio3dOutputRoute_entries,
+    sizeof(enum_names_OrbisAudio3dOutputRoute_entries) / sizeof(enum_names_OrbisAudio3dOutputRoute_entries[0])};
 
 static const enum_name_entry_t enum_names_OrbisImeDisableDevice_entries[] = {
     {(int64_t)0, "DEFAULT"},
