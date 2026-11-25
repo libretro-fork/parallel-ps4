@@ -1082,6 +1082,29 @@ s32 PS4_SYSV_ABI sceNgs2VoiceControl(OrbisNgs2Handle voiceHandle,
               "voice %u of rack 0x%x: 0x%x (list starts with 0x%x, 0x%x)", ngs2_voice_index(voice),
               ngs2_rack_description(ngs2_voice_rack(voice))->rack_id, (u32)result,
               param ? param->id : 0, word);
+        /* A patch refused: where it was to go, to tell which of its checks failed */
+        if (result == ORBIS_NGS2_ERROR_INVALID_PATCH && param && param->id == 5 &&
+            param->size >= 24) {
+            u32 input;
+            uintptr_t handle;
+            const ngs2_voice* dest;
+            memcpy(&input, (const u8*)param + 12, sizeof(input));
+            memcpy(&handle, (const u8*)param + 16, sizeof(handle));
+            dest = ngs2_voice_from(handle);
+            if (!dest) {
+                c_log(C_LOG_LIB_NGS2, C_LOG_LEVEL_ERROR, "sceNgs2VoiceControl",
+                      "  patch to handle 0x%llx, input %u: not a voice", (unsigned long long)handle,
+                      input);
+            } else {
+                const ngs2_rack* dest_rack = ngs2_voice_rack(dest);
+                const ngs2_rack_desc* d = ngs2_rack_description(dest_rack);
+                c_log(C_LOG_LIB_NGS2, C_LOG_LEVEL_ERROR, "sceNgs2VoiceControl",
+                      "  patch to voice %u of rack 0x%x, input %u (inputs %u, buffers %u)%s%s",
+                      ngs2_voice_index(dest), d->rack_id, input, d->max_inputs, d->num_buffers,
+                      dest == voice ? ", itself" : "",
+                      ngs2_rack_system(dest_rack) != system ? ", another system" : "");
+            }
+        }
     }
     lock_unlock(lock);
     return result;
