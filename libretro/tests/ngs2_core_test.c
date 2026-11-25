@@ -823,7 +823,7 @@ static void test_hevag(void) {
    rig_open(&r, RATE);
    vag[0] = 0x04; /* row 0, shift 4: each nibble 7 is 0x700 */
    memset(&vag[2], 0x77, 14);
-   vag[16] = 0xfc; /* row 0xf | 0x70 = 127, shift 12 */
+   vag[16] = 0xfe; /* row 0xf | 0x70 = 127, shift 14: as it is, not 9 as the PS1's */
    vag[17] = 0x70;
    for (k = 2; k < 16; k++)
       vag[16 + k] = (uint8_t)(k * 29);
@@ -839,7 +839,7 @@ static void test_hevag(void) {
       } else if (i < 56) {
          unsigned j = i - 28;
          int nibble = (vag[16 + 2 + j / 2] >> ((j & 1) * 4)) & 15;
-         s = (int32_t)((int16_t)(nibble << 12)) >> 12;
+         s = (int32_t)((int16_t)(nibble << 12)) >> 14;
          s += (h[0] * row127[0] + h[1] * row127[1] + h[2] * row127[2] + h[3] * row127[3] + 4096) >> 13;
          if (s > 32767)
             s = 32767;

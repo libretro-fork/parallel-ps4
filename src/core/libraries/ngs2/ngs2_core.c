@@ -3018,7 +3018,9 @@ static void vag_frame(ngs2_voice* v, const uint8_t* frame, uint32_t channel) {
     if (predict > 127)
         predict = 0;
     c = ngs2_vag_coefs[predict];
-    if (shift > 12)
+    /* The PS1's shifts past 12 act as 9; HEVAG takes its shift as it is (GR2port, vgmstream):
+     * with 9 a frame shifted by 13 to 15 came out 16 to 64 times too loud */
+    if (predict <= 4 && shift > 12)
         shift = 9;
     for (i = 0; i < VAG_SAMPLES; i++) {
         int32_t s = 0;

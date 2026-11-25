@@ -4,6 +4,8 @@ What changed in the libretro core of this fork, newest first. Changes that come 
 
 ## Unreleased
 
+- **HEVAG frames take their shift as it is.** The PS1's VAG treats a shift of 13 to 15 as 9, and the HEVAG decode kept that: a frame of a predictor past the PS1's five with such a shift came out 16 to 64 times too loud. GR2port and vgmstream take HEVAG's shift as it is. Gravity Rush 2's voices were still garbled after the HEVAG predictors went in. The PS1's five predictors keep the old rule.
+  - Not run in a game yet.
 - **Ngs2's VAG decodes HEVAG frames**: the 128 predictors of four taps each (the table from GR2port), not only the PS1's five of two. A frame's predictor is the high nibble of byte 0 with the high nibble of byte 1 above it; a frame naming a row past 4 was decoded with no prediction, which turns a voice into noise. Gravity Rush 2's music played and its voices were garbled and static. Flag 7 (byte 1's low nibble) is a silent frame, as in GR2port. For rows 0 to 4 the decode is the same to the bit as before (`ngs2_vag_coefs.h`, C89; a test decodes a row-127 frame and a silent one).
   - Not run in a game yet.
 - **The analog sticks' dead zone is 15% by default** (was 4%). GR2port, the Gravity Rush 2 port by the author of GR2fork, raised its default from 5 of 127 steps to 20 (left stick) and 15 (right), about 16% and 12%, for sticks that rest off centre. This core has one setting for both sticks; 15% sits between the two. The option still goes from 0 to 30%.
