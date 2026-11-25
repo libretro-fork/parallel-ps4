@@ -4,6 +4,8 @@ What changed in the libretro core of this fork, newest first. Changes that come 
 
 ## Unreleased
 
+- **A refused Ngs2 patch to a handle that is no voice says where that handle lands**: in which of the system's racks (its handle, its buffer, the offset into it, where its voice 0 is and how far apart its voices are, and whether it is the rack itself), or in none. Gravity Rush 2's patches of its submixer and sampler voices go to handles that are no voice of ours; this tells whether the game works its handles out itself or is given wrong ones. `CreateRack` also logs each rack's handle and its voice 0.
+  - A diagnostic: nothing else changes.
 - **The analog sticks have a dead zone, 4% by default** (core option "Analog Stick Dead Zone", 0 to 30%, takes effect at once). In Gravity Rush 2's intro Kat walked with no one touching the stick. Standalone shadPS4 cut 5 of 127 steps about rest off each stick axis (its default input config); this core had no dead zone at all since the SDL input went, so a stick a little off centre at rest reached the game, which takes the pad's own reported dead zone of 1. Within the dead zone an axis reads as at rest; past it the rest of the travel is spread over the full range, so the edges are still reached. Each axis on its own, as standalone does.
   - Not run in a game yet.
 - **A refused Ngs2 patch says where it was to go.** Gravity Rush 2's first `sceNgs2VoiceControl` patches its submixer's voice 0 and is refused (`0x804a0305`, invalid patch), which may be why it has no sound. The error line is now followed by one naming the voice and rack the patch was to go to, its input, that rack's inputs and buffers, and whether it was the voice itself or another system's, or "not a voice" when the handle is none. Only on that error.

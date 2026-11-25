@@ -572,9 +572,11 @@ static s32 create_rack(ngs2_system* system, u32 rack_id, const OrbisNgs2RackOpti
     object->lock = NULL;
     *out_handle = (OrbisNgs2Handle)rack;
     c_log(C_LOG_LIB_NGS2, C_LOG_LEVEL_INFO, "CreateRack",
-          "rack 0x%x '%s': %u voices, %u channels, %u ports, %u matrices, %u modules", rack_id,
-          desc.name, desc.max_voices, desc.max_channels, desc.max_ports, desc.max_matrices,
-          desc.num_modules);
+          "rack 0x%x '%s': %u voices, %u channels, %u ports, %u matrices, %u modules, handle "
+          "0x%llx, voice 0 0x%llx",
+          rack_id, desc.name, desc.max_voices, desc.max_channels, desc.max_ports,
+          desc.max_matrices, desc.num_modules, (unsigned long long)(uintptr_t)rack,
+          (unsigned long long)(uintptr_t)ngs2_rack_voice(rack, 0));
     for (i = 0; i < desc.num_modules; i++) {
         const ngs2_module_desc* m = &desc.modules[i];
         /* The modules the engine has; another passes its sound on as it came */
@@ -1092,9 +1094,38 @@ s32 PS4_SYSV_ABI sceNgs2VoiceControl(OrbisNgs2Handle voiceHandle,
             memcpy(&handle, (const u8*)param + 16, sizeof(handle));
             dest = ngs2_voice_from(handle);
             if (!dest) {
+                u32 i;
+                bool found = false;
                 c_log(C_LOG_LIB_NGS2, C_LOG_LEVEL_ERROR, "sceNgs2VoiceControl",
                       "  patch to handle 0x%llx, input %u: not a voice", (unsigned long long)handle,
                       input);
+                /* Where it lands among the system's racks, if in one: to tell a handle the game
+                 * worked out itself from one the library gave it */
+                for (i = 0; i < ngs2_system_rack_count(system); i++) {
+                    ngs2_rack* const r = ngs2_system_rack(system, i);
+                    size_t size;
+                    const uintptr_t mem = (uintptr_t)ngs2_rack_memory(r, &size);
+                    const uintptr_t start = mem - NGS2_OBJECT_SIZE;
+                    const ngs2_voice* const v0 = ngs2_rack_voice(r, 0);
+                    const ngs2_voice* const v1 = ngs2_rack_voice(r, 1);
+                    if (handle < start || handle >= mem + size) {
+                        continue;
+                    }
+                    found = true;
+                    c_log(C_LOG_LIB_NGS2, C_LOG_LEVEL_ERROR, "sceNgs2VoiceControl",
+                          "  it is in rack 0x%x (handle 0x%llx, buffer from 0x%llx, 0x%llx bytes) "
+                          "at +0x%llx; voice 0 at +0x%llx, voices 0x%llx apart%s",
+                          ngs2_rack_description(r)->rack_id, (unsigned long long)(uintptr_t)r,
+                          (unsigned long long)start, (unsigned long long)(size + NGS2_OBJECT_SIZE),
+                          (unsigned long long)(handle - (uintptr_t)r),
+                          (unsigned long long)((uintptr_t)v0 - (uintptr_t)r),
+                          v1 ? (unsigned long long)((uintptr_t)v1 - (uintptr_t)v0) : 0ull,
+                          handle == (uintptr_t)r ? " (the rack itself)" : "");
+                }
+                if (!found) {
+                    c_log(C_LOG_LIB_NGS2, C_LOG_LEVEL_ERROR, "sceNgs2VoiceControl",
+                          "  it is in none of the system's %u racks", ngs2_system_rack_count(system));
+                }
             } else {
                 const ngs2_rack* dest_rack = ngs2_voice_rack(dest);
                 const ngs2_rack_desc* d = ngs2_rack_description(dest_rack);
