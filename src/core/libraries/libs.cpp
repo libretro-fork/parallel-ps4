@@ -2201,6 +2201,22 @@ static void RegisterAudio3d(Core::Loader::SymbolsResolver* sym) {
     LIB_FUNCTION("WW1TS2iz5yc", "libSceAudio3d", 1, "libSceAudio3d", sceAudio3dTerminate);
 }
 
+static void RegisterMsgDialog(Core::Loader::SymbolsResolver* sym) {
+    LIB_FUNCTION("HTrcDKlFKuM", "libSceMsgDialog", 1, "libSceMsgDialog", sceMsgDialogClose);
+    LIB_FUNCTION("Lr8ovHH9l6A", "libSceMsgDialog", 1, "libSceMsgDialog", sceMsgDialogGetResult);
+    LIB_FUNCTION("CWVW78Qc3fI", "libSceMsgDialog", 1, "libSceMsgDialog", sceMsgDialogGetStatus);
+    LIB_FUNCTION("lDqxaY1UbEo", "libSceMsgDialog", 1, "libSceMsgDialog", sceMsgDialogInitialize);
+    LIB_FUNCTION("b06Hh0DPEaE", "libSceMsgDialog", 1, "libSceMsgDialog", sceMsgDialogOpen);
+    LIB_FUNCTION("Gc5k1qcK4fs", "libSceMsgDialog", 1, "libSceMsgDialog",
+                 sceMsgDialogProgressBarInc);
+    LIB_FUNCTION("6H-71OdrpXM", "libSceMsgDialog", 1, "libSceMsgDialog",
+                 sceMsgDialogProgressBarSetMsg);
+    LIB_FUNCTION("wTpfglkmv34", "libSceMsgDialog", 1, "libSceMsgDialog",
+                 sceMsgDialogProgressBarSetValue);
+    LIB_FUNCTION("ePw-kqZmelo", "libSceMsgDialog", 1, "libSceMsgDialog", sceMsgDialogTerminate);
+    LIB_FUNCTION("6fIC3XKt2k0", "libSceMsgDialog", 1, "libSceMsgDialog", sceMsgDialogUpdateStatus);
+}
+
 static void RegisterGnmDriver(Core::Loader::SymbolsResolver* sym) {
     gnm_driver_init();
 
@@ -2581,7 +2597,7 @@ void InitHLELibs(Core::Loader::SymbolsResolver* sym) {
             {"libSceSystemService.sprx", Libraries::SystemService::RegisterLib},
             {"libScePad.sprx", RegisterPad},
             {"libSceCommonDialog.sprx", RegisterCommonDialog},
-            {"libSceMsgDialog.sprx", Libraries::MsgDialog::RegisterLib},
+            {"libSceMsgDialog.sprx", RegisterMsgDialog},
             {"libSceAudioOut.sprx", RegisterAudioOut},
             {"libSceAudioIn.sprx", RegisterAudioIn},
             {"libSceAudio3d.sprx", RegisterAudio3d},

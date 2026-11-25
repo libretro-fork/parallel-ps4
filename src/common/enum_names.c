@@ -511,13 +511,13 @@ static const enum_name_entry_t enum_names_Libraries_Kernel_OrbisKernelEvent_Filt
 const enum_names_t enum_names_Libraries_Kernel_OrbisKernelEvent_Filter = {enum_names_Libraries_Kernel_OrbisKernelEvent_Filter_entries,
     sizeof(enum_names_Libraries_Kernel_OrbisKernelEvent_Filter_entries) / sizeof(enum_names_Libraries_Kernel_OrbisKernelEvent_Filter_entries[0])};
 
-static const enum_name_entry_t enum_names_Libraries_MsgDialog_MsgDialogMode_entries[] = {
-    {(int64_t)1, "USER_MSG"},
-    {(int64_t)2, "PROGRESS_BAR"},
-    {(int64_t)3, "SYSTEM_MSG"},
+static const enum_name_entry_t enum_names_MsgDialogMode_entries[] = {
+    {(int64_t)1, "MSG_DIALOG_MODE_USER_MSG"},
+    {(int64_t)2, "MSG_DIALOG_MODE_PROGRESS_BAR"},
+    {(int64_t)3, "MSG_DIALOG_MODE_SYSTEM_MSG"},
 };
-const enum_names_t enum_names_Libraries_MsgDialog_MsgDialogMode = {enum_names_Libraries_MsgDialog_MsgDialogMode_entries,
-    sizeof(enum_names_Libraries_MsgDialog_MsgDialogMode_entries) / sizeof(enum_names_Libraries_MsgDialog_MsgDialogMode_entries[0])};
+const enum_names_t enum_names_MsgDialogMode = {enum_names_MsgDialogMode_entries,
+    sizeof(enum_names_MsgDialogMode_entries) / sizeof(enum_names_MsgDialogMode_entries[0])};
 
 static const enum_name_entry_t enum_names_Libraries_Np_NpWebApi_OrbisNpWebApiHttpMethod_entries[] = {
     {(int64_t)0, "ORBIS_NP_WEBAPI_HTTP_METHOD_GET"},

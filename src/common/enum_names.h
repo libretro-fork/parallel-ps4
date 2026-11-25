@@ -67,7 +67,7 @@ extern const enum_names_t enum_names_Libraries_CommonDialog_Result;
 extern const enum_names_t enum_names_Libraries_CommonDialog_Status;
 extern const enum_names_t enum_names_Libraries_Kernel_MemoryTypes;
 extern const enum_names_t enum_names_Libraries_Kernel_OrbisKernelEvent_Filter;
-extern const enum_names_t enum_names_Libraries_MsgDialog_MsgDialogMode;
+extern const enum_names_t enum_names_MsgDialogMode;
 extern const enum_names_t enum_names_Libraries_Np_NpWebApi_OrbisNpWebApiHttpMethod;
 extern const enum_names_t enum_names_AjmCodecType;
 extern const enum_names_t enum_names_AvPlayerEvents;

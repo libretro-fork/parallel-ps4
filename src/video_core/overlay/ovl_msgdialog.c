@@ -1,7 +1,7 @@
 /* SPDX-FileCopyrightText: Copyright 2026 shadPS4 Emulator Project
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
-/* The system's message dialog (libSceMsgDialog), as core/libraries/system/msgdialog_ui.cpp drew
+/* The system's message dialog (libSceMsgDialog), as the old msgdialog_ui.cpp drew
  * it with ImGui: a message centred in a window in the middle of the screen, over a progress bar
  * or one or two buttons, moved between with the d-pad and pressed with cross, circle going to
  * the button that cancels. And the error dialog (libSceErrorDialog), as ime/error_dialog.cpp
@@ -184,7 +184,7 @@ int ovl_msg_dialog_active(void) {
 }
 
 /* ------------------------------------------------------------------------------------------ */
-/* Drawing, as msgdialog_ui.cpp */
+/* Drawing, as the old msgdialog_ui.cpp */
 
 #define BUTTON_W 100.0f
 #define BUTTON_H 30.0f
