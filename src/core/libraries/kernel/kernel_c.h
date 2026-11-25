@@ -187,6 +187,9 @@ bool kernel_equeue_add_event(s64 eq, const kernel_event_t* event, void* data);
 void kernel_equeue_remove_event(s64 eq, u64 id, s16 filter);
 void kernel_equeue_trigger_event(s64 eq, u64 ident, s16 filter, void* trigger_data);
 
+/* Until @deadline on the game's time (Kernel::GameSleepUntil; 0: forever) (time.cpp) */
+void kernel_game_sleep_until(u64 deadline);
+
 /* sceKernelGetProcessTime and sceKernelReadTsc (time.cpp) */
 u64 kernel_get_process_time(void);
 u64 kernel_read_tsc(void);

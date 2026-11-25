@@ -1,89 +1,99 @@
-// SPDX-FileCopyrightText: Copyright 2024 shadPS4 Emulator Project
-// SPDX-License-Identifier: GPL-2.0-or-later
+/* SPDX-FileCopyrightText: Copyright 2024 shadPS4 Emulator Project
+ * SPDX-License-Identifier: GPL-2.0-or-later */
 
-#pragma once
+#ifndef SHADPS4_AUDIO_AUDIOIN_H
+#define SHADPS4_AUDIO_AUDIOIN_H
 
-#include <memory>
-#include <core/libraries/system/userservice.h>
-#include "common/combiner.h"
+/* libSceAudioIn. Defined in audioin.c, registered in core/libraries/libs.cpp. */
+
+#include <retro_atomic.h>
+#include <retro_common_api.h>
+
+#include "common/combine.h"
 #include "common/types.h"
+#include "core/libraries/audio/audioin_backend.h"
 
-namespace Core::Loader {
-class SymbolsResolver;
-}
+RETRO_BEGIN_DECLS
 
-namespace Libraries::AudioIn {
+#define ORBIS_AUDIO_IN_NUM_PORTS 7
 
-class PortInBackend;
+/* OrbisAudioInParamFormat */
+#define ORBIS_AUDIO_IN_PARAM_FORMAT_S16_MONO 0u
+#define ORBIS_AUDIO_IN_PARAM_FORMAT_S16_STEREO 2u
 
-constexpr s32 ORBIS_AUDIO_IN_NUM_PORTS = 7;
+/* OrbisAudioInType */
+#define ORBIS_AUDIO_IN_TYPE_VOICE_CHAT 0u
+#define ORBIS_AUDIO_IN_TYPE_GENERAL 1u
+#define ORBIS_AUDIO_IN_TYPE_VOICE_RECOGNITION 5u
 
-enum class OrbisAudioInParamFormat : u32 { S16Mono = 0, S16Stereo = 2 };
+#define ORBIS_AUDIO_IN_SILENT_STATE_DEVICE_NONE 0x00000001
+#define ORBIS_AUDIO_IN_SILENT_STATE_PRIORITY_LOW 0x00000002
+#define ORBIS_AUDIO_IN_SILENT_STATE_USER_SETTING 0x0000000
+#define ORBIS_AUDIO_IN_SILENT_STATE_UNABLE_FORMAT 0x00000008
 
-enum class OrbisAudioInType : u32 { VoiceChat = 0, General = 1, VoiceRecognition = 5 };
+typedef struct PortIn {
+    /* The calls that use the backend run one at a time here, and so does Close's reset of it */
+    combiner_t access;
+    /* The open's number while open, 0 while closed: a call that found the port open does
+     * nothing once it has been closed (or opened again) meanwhile */
+    retro_atomic_int_t open;
+    /* The open whose backend is in impl (under access), 0 for none */
+    int impl_open;
+    audioin_port_backend_t impl;
+    u32 type;
+    u32 format;
+    u32 samples_num;
+    u32 freq;
+    u32 channels_num;
+    u32 sample_size;
+} PortIn;
 
-constexpr int ORBIS_AUDIO_IN_SILENT_STATE_DEVICE_NONE = 0x00000001;
-constexpr int ORBIS_AUDIO_IN_SILENT_STATE_PRIORITY_LOW = 0x00000002;
-constexpr int ORBIS_AUDIO_IN_SILENT_STATE_USER_SETTING = 0x0000000;
-constexpr int ORBIS_AUDIO_IN_SILENT_STATE_UNABLE_FORMAT = 0x00000008;
+/* Once, when the library is registered */
+void audio_in_library_init(void);
 
-struct PortIn {
-    /// The calls that use impl run one at a time here, and so does Close's reset of it
-    Common::Combiner access;
-    std::unique_ptr<PortInBackend> impl{};
-    OrbisAudioInType type;
-    OrbisAudioInParamFormat format;
-
-    u32 samples_num = 0;
-    u32 freq = 0;
-    u32 channels_num = 0;
-    u32 sample_size = 0;
-};
-
-int PS4_SYSV_ABI sceAudioInChangeAppModuleState();
+int PS4_SYSV_ABI sceAudioInOpen(s32 userId, u32 type, u32 index, u32 len, u32 freq, u32 param);
+int PS4_SYSV_ABI sceAudioInHqOpen(s32 userId, u32 type, u32 index, u32 len, u32 freq, u32 param);
 int PS4_SYSV_ABI sceAudioInClose(s32 handle);
-int PS4_SYSV_ABI sceAudioInCountPorts();
-int PS4_SYSV_ABI sceAudioInDeviceHqOpen();
-int PS4_SYSV_ABI sceAudioInDeviceIdHqOpen();
-int PS4_SYSV_ABI sceAudioInDeviceIdOpen();
-int PS4_SYSV_ABI sceAudioInDeviceOpen();
-int PS4_SYSV_ABI sceAudioInDeviceOpenEx();
-int PS4_SYSV_ABI sceAudioInExtClose();
-int PS4_SYSV_ABI sceAudioInExtCtrl();
-int PS4_SYSV_ABI sceAudioInExtInput();
-int PS4_SYSV_ABI sceAudioInExtOpen();
-int PS4_SYSV_ABI sceAudioInExtSetAecMode();
-int PS4_SYSV_ABI sceAudioInGetGain();
-int PS4_SYSV_ABI sceAudioInGetHandleStatusInfo();
-int PS4_SYSV_ABI sceAudioInGetRerouteCount();
-int PS4_SYSV_ABI sceAudioInGetSilentState(s32 handle);
-int PS4_SYSV_ABI sceAudioInHqOpen(Libraries::UserService::OrbisUserServiceUserId userId, u32 type,
-                                  u32 index, u32 len, u32 freq, u32 param);
-int PS4_SYSV_ABI sceAudioInHqOpenEx();
-int PS4_SYSV_ABI sceAudioInInit();
 int PS4_SYSV_ABI sceAudioInInput(s32 handle, void* dest);
-int PS4_SYSV_ABI sceAudioInInputs();
-int PS4_SYSV_ABI sceAudioInIsSharedDevice();
-int PS4_SYSV_ABI sceAudioInOpen(Libraries::UserService::OrbisUserServiceUserId userId, u32 type,
-                                u32 index, u32 len, u32 freq, u32 param);
-int PS4_SYSV_ABI sceAudioInOpenEx();
-int PS4_SYSV_ABI sceAudioInSetAllMute();
-int PS4_SYSV_ABI sceAudioInSetCompressorPreGain();
-int PS4_SYSV_ABI sceAudioInSetConnections();
-int PS4_SYSV_ABI sceAudioInSetConnectionsForUser();
-int PS4_SYSV_ABI sceAudioInSetDevConnection();
-int PS4_SYSV_ABI sceAudioInSetFocusForUser();
-int PS4_SYSV_ABI sceAudioInSetMode();
-int PS4_SYSV_ABI sceAudioInSetMode2();
-int PS4_SYSV_ABI sceAudioInSetPortConnections();
-int PS4_SYSV_ABI sceAudioInSetPortStatuses();
-int PS4_SYSV_ABI sceAudioInSetSparkParam();
-int PS4_SYSV_ABI sceAudioInSetSparkSideTone();
-int PS4_SYSV_ABI sceAudioInSetUsbGain();
-int PS4_SYSV_ABI sceAudioInSetUserMute();
-int PS4_SYSV_ABI sceAudioInVmicCreate();
-int PS4_SYSV_ABI sceAudioInVmicDestroy();
-int PS4_SYSV_ABI sceAudioInVmicWrite();
+int PS4_SYSV_ABI sceAudioInGetSilentState(s32 handle);
+int PS4_SYSV_ABI sceAudioInChangeAppModuleState(void);
+int PS4_SYSV_ABI sceAudioInCountPorts(void);
+int PS4_SYSV_ABI sceAudioInDeviceHqOpen(void);
+int PS4_SYSV_ABI sceAudioInDeviceIdHqOpen(void);
+int PS4_SYSV_ABI sceAudioInDeviceIdOpen(void);
+int PS4_SYSV_ABI sceAudioInDeviceOpen(void);
+int PS4_SYSV_ABI sceAudioInDeviceOpenEx(void);
+int PS4_SYSV_ABI sceAudioInExtClose(void);
+int PS4_SYSV_ABI sceAudioInExtCtrl(void);
+int PS4_SYSV_ABI sceAudioInExtInput(void);
+int PS4_SYSV_ABI sceAudioInExtOpen(void);
+int PS4_SYSV_ABI sceAudioInExtSetAecMode(void);
+int PS4_SYSV_ABI sceAudioInGetGain(void);
+int PS4_SYSV_ABI sceAudioInGetHandleStatusInfo(void);
+int PS4_SYSV_ABI sceAudioInGetRerouteCount(void);
+int PS4_SYSV_ABI sceAudioInHqOpenEx(void);
+int PS4_SYSV_ABI sceAudioInInit(void);
+int PS4_SYSV_ABI sceAudioInInputs(void);
+int PS4_SYSV_ABI sceAudioInIsSharedDevice(void);
+int PS4_SYSV_ABI sceAudioInOpenEx(void);
+int PS4_SYSV_ABI sceAudioInSetAllMute(void);
+int PS4_SYSV_ABI sceAudioInSetCompressorPreGain(void);
+int PS4_SYSV_ABI sceAudioInSetConnections(void);
+int PS4_SYSV_ABI sceAudioInSetConnectionsForUser(void);
+int PS4_SYSV_ABI sceAudioInSetDevConnection(void);
+int PS4_SYSV_ABI sceAudioInSetFocusForUser(void);
+int PS4_SYSV_ABI sceAudioInSetMode(void);
+int PS4_SYSV_ABI sceAudioInSetMode2(void);
+int PS4_SYSV_ABI sceAudioInSetPortConnections(void);
+int PS4_SYSV_ABI sceAudioInSetPortStatuses(void);
+int PS4_SYSV_ABI sceAudioInSetSparkParam(void);
+int PS4_SYSV_ABI sceAudioInSetSparkSideTone(void);
+int PS4_SYSV_ABI sceAudioInSetUsbGain(void);
+int PS4_SYSV_ABI sceAudioInSetUserMute(void);
+int PS4_SYSV_ABI sceAudioInVmicCreate(void);
+int PS4_SYSV_ABI sceAudioInVmicDestroy(void);
+int PS4_SYSV_ABI sceAudioInVmicWrite(void);
 
-void RegisterLib(Core::Loader::SymbolsResolver* sym);
-} // namespace Libraries::AudioIn
+RETRO_END_DECLS
+
+#endif

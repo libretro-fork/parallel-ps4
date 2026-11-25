@@ -835,3 +835,7 @@ extern "C" u64 kernel_get_process_time(void) {
 extern "C" u64 kernel_read_tsc(void) {
     return Libraries::Kernel::sceKernelReadTsc();
 }
+
+extern "C" void kernel_game_sleep_until(u64 deadline) {
+    Libraries::Kernel::GameSleepUntil(deadline);
+}

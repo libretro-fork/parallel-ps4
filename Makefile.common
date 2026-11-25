@@ -130,8 +130,7 @@ CORE_SOURCES_CXX += $(addprefix src/core/file_sys/directories/,base_directory.cp
 CORE_SOURCES_CXX += $(addprefix src/core/file_sys/,fs.cpp ifile.cpp)
 CORE_SOURCES_CXX += $(addprefix src/core/libraries/ajm/,ajm.cpp ajm_aac.cpp ajm_at9.cpp \
 	ajm_batch.cpp ajm_context.cpp ajm_instance.cpp ajm_instance_statistics.cpp ajm_mp3.cpp)
-CORE_SOURCES_CXX += $(addprefix src/core/libraries/audio/,audioin.cpp audioout.cpp \
-	frontend_audio_out.cpp silent_audio_in.cpp)
+CORE_SOURCES_CXX += $(addprefix src/core/libraries/audio/,audioout.cpp frontend_audio_out.cpp)
 CORE_SOURCES_CXX += $(addprefix src/core/libraries/avplayer/,avplayer.cpp avplayer_common.cpp \
 	avplayer_file_streamer.cpp avplayer_handle_streamer.cpp avplayer_impl.cpp avplayer_source.cpp \
 	avplayer_state.cpp)
@@ -239,6 +238,7 @@ CORE_SOURCES_C += $(addprefix src/core/libraries/ngs2/,ngs2.c ngs2_core.c ngs2_u
 CORE_SOURCES_C += $(addprefix src/core/libraries/audiodec/,audiodec.c)
 CORE_SOURCES_C += $(addprefix src/core/libraries/ime/,ime_support.c)
 CORE_SOURCES_C += $(addprefix src/core/libraries/videoout/,driver.c video_out.c)
+CORE_SOURCES_C += $(addprefix src/core/libraries/audio/,audioin.c silent_audio_in.c)
 CORE_SOURCES_C += $(addprefix src/core/libraries/usbd/,usb_backend.c usbd.c \
 	emulated/dimensions.c emulated/infinity.c emulated/skylander.c usbstorage.c)
 CORE_SOURCES_C += $(addprefix src/core/libraries/ult/,ult.c ult_sync.c)

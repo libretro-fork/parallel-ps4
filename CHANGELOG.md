@@ -4,6 +4,12 @@ What changed in the libretro core of this fork, newest first. Changes that come 
 
 ## Unreleased
 
+- The audio input library (`libSceAudioIn`) is MSVC C89: `audio/audioin.c` and its silent microphone `silent_audio_in.c`, with C headers (`audioin.h`, `audioin_backend.h`, `audioin_error.h`), registered in `libs.cpp`. `libSceAudioOut` stays C++ for now.
+  - **No allocation:** the seven ports live for the program, each with its backend's state in it (a backend is a table of calls, ready for a microphone to plug in), where opening a port allocated it and its backend. A call that found a port open does nothing to it once it has been closed or opened again meanwhile, as before.
+  - **`kernel_game_sleep_until`** (`kernel_c.h`, `time.cpp`) gives C the game's time sleep.
+  - **Logs** from opening a port carry `sceAudioInOpen`, where they said `operator()`.
+  - **The same answers:** the C and C++ libraries were run side by side, each in its own process, with random calls (open and HQ open with good and bad lengths, rates, formats and types, close and reads of good, stale and bad handles, silent state, stubs) on a stub game clock: 300 worlds, about 6 million checks, 0 differences in what was returned, read, slept for or logged, under the address and undefined-behaviour checkers. Planted bugs (the fell-behind catch-up, a buffer's length in time, the handle, the size limit, the stereo channels) were caught. Opens, reads and closes on four threads at once gave only whole buffers or `NOT_OPENED`, under the thread checker and the address checker.
+  - Not run in a game yet.
 - The video output library (`libSceVideoOut`) is MSVC C89: `videoout/video_out.c` over `driver.c` (the port, its present thread and the flip queue), with C headers (`video_out.h`, `driver.h`, `buffer.h`, `videoout_error.h`), registered in `libs.cpp` (the driver stopped when the program's statics are, as before).
   - **New ways to C:** the presenter, the GPU thread and its flip interrupt through `videoout/videoout_gpu_c.h` (defined in `gnmdriver.cpp`, which holds the presenter and the GPU); event queues, `sceKernelGetProcessTime` and `sceKernelReadTsc` through `kernel_c.h` (`equeue.cpp`, `time.cpp`); the frontend's vblank ticks through `libretro/vblank_c.h` (`host.cpp`).
   - **The GPU's VO label wait** (`liverpool.cpp`), the presenter, the texture cache and `gnmdriver.cpp` use the C port and buffer types.
