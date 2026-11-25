@@ -183,8 +183,9 @@ LIBS := $(FEX_ARCHIVE) $(LIBS)
 endif
 
 # The toolchain and configuration a tree was built with; a change wipes it,
-# since nothing in an object's name says which compiler produced it.
-BUILD_TAG := $(CC)|$(CXX)|$(platform)|$(arch)|$(DEBUG)|$(LTO)|$(SANITIZER)|$(LIBRETRO_X86_64_PARTS)|$(ENABLE_FEX_GUEST_CPU)
+# since nothing in an object's name says which compiler produced it. ("deps": the trees
+# built before the objects listed their headers are wiped once.)
+BUILD_TAG := $(CC)|$(CXX)|$(platform)|$(arch)|$(DEBUG)|$(LTO)|$(SANITIZER)|$(LIBRETRO_X86_64_PARTS)|$(ENABLE_FEX_GUEST_CPU)|deps
 BUILD_TAG_STATUS := $(shell \
 	if [ "`cat $(OBJ_DIR)/.build-tag 2>/dev/null`" != "$(BUILD_TAG)" ]; then \
 		rm -rf $(OBJ_DIR); mkdir -p $(OBJ_DIR); \
@@ -224,25 +225,31 @@ ifeq ($(OS_WIN),1)
 endif
 	$(CXX) -o $@ $(LINK_OBJECTS) $(LDFLAGS) $(LIBS)
 
+# Each object lists the headers it was built from (obj/.../x.c.d), so a changed header
+# rebuilds every object that includes it: without this an incremental build kept objects
+# built against the old header, with its old enum values and struct layouts
+DEPFLAGS := -MMD -MP
+-include $(OBJECTS:.o=.d) $(FEX_OBJECTS:.o=.d)
+
 $(OBJ_DIR)/%.c.o: %.c
 	@mkdir -p $(@D)
 	@$(if $(E),echo CC $<,)
-	$(CC) $(CFLAGS) $($(GROUP)_FLAGS) $($(GROUP)_CFLAGS) -c $< -o $@
+	$(CC) $(CFLAGS) $($(GROUP)_FLAGS) $($(GROUP)_CFLAGS) $(DEPFLAGS) -c $< -o $@
 
 $(OBJ_DIR)/%.cpp.o: %.cpp
 	@mkdir -p $(@D)
 	@$(if $(E),echo CXX $<,)
-	$(CXX) $(CXXFLAGS) $($(GROUP)_FLAGS) $($(GROUP)_CXXFLAGS) -c $< -o $@
+	$(CXX) $(CXXFLAGS) $($(GROUP)_FLAGS) $($(GROUP)_CXXFLAGS) $(DEPFLAGS) -c $< -o $@
 
 $(OBJ_DIR)/%.cc.o: %.cc
 	@mkdir -p $(@D)
 	@$(if $(E),echo CXX $<,)
-	$(CXX) $(CXXFLAGS) $($(GROUP)_FLAGS) $($(GROUP)_CXXFLAGS) -c $< -o $@
+	$(CXX) $(CXXFLAGS) $($(GROUP)_FLAGS) $($(GROUP)_CXXFLAGS) $(DEPFLAGS) -c $< -o $@
 
 $(OBJ_DIR)/%.S.o: %.S
 	@mkdir -p $(@D)
 	@$(if $(E),echo AS $<,)
-	$(CC) $(CFLAGS) $($(GROUP)_FLAGS) -c $< -o $@
+	$(CC) $(CFLAGS) $($(GROUP)_FLAGS) $(DEPFLAGS) -c $< -o $@
 
 clean:
 	rm -rf obj
