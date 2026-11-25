@@ -54,6 +54,10 @@ ImageInfo::ImageInfo(const BufferAttributeGroup& group, VAddr cpu_address) noexc
                                                                : (size.width + 127) & (~127);
     num_bits = attrib.pixel_format != VIDEO_OUT_PIXEL_FORMAT_A16R16G16B16_FLOAT ? 32 : 64;
     ASSERT(num_bits == 32);
+    // On a PS4 Pro the tiled display buffers use the alternate tiling, as the color buffers the
+    // game renders into them do: without it the two are different images at one address, and
+    // what the game drew was not what was shown (Shadow of the Colossus, as its PC port has it)
+    alt_tile = Libraries::Kernel::sceKernelIsNeoMode() && props.is_tiled;
 
     guest_address = cpu_address;
     UpdateSize();
