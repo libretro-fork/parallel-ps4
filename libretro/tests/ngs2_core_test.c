@@ -810,6 +810,65 @@ static void test_formats(void) {
    rig_close(&r);
 }
 
+/* HEVAG: a predictor past the PS1's five, from the high nibble of byte 1, weighs four samples;
+ * flag 7 is a silent frame */
+static void test_hevag(void) {
+   static const int row127[4] = {5333, 2999, 775, -1132};
+   rig r;
+   static uint8_t vag[16 * 3];
+   float out[GRAIN * 2];
+   int32_t want[28 * 3], h[4];
+   ngs2_voice *v;
+   unsigned i, k;
+   rig_open(&r, RATE);
+   vag[0] = 0x04; /* row 0, shift 4: each nibble 7 is 0x700 */
+   memset(&vag[2], 0x77, 14);
+   vag[16] = 0xfc; /* row 0xf | 0x70 = 127, shift 12 */
+   vag[17] = 0x70;
+   for (k = 2; k < 16; k++)
+      vag[16 + k] = (uint8_t)(k * 29);
+   vag[32] = 0x04;
+   vag[33] = 0x07; /* silent */
+   memset(&vag[34], 0x77, 14);
+   for (i = 0; i < 4; i++)
+      h[i] = 0;
+   for (i = 0; i < 28 * 3; i++) {
+      int32_t s = 0;
+      if (i < 28) {
+         s = 0x700;
+      } else if (i < 56) {
+         unsigned j = i - 28;
+         int nibble = (vag[16 + 2 + j / 2] >> ((j & 1) * 4)) & 15;
+         s = (int32_t)((int16_t)(nibble << 12)) >> 12;
+         s += (h[0] * row127[0] + h[1] * row127[1] + h[2] * row127[2] + h[3] * row127[3] + 4096) >> 13;
+         if (s > 32767)
+            s = 32767;
+         if (s < -32768)
+            s = -32768;
+      }
+      h[3] = h[2];
+      h[2] = h[1];
+      h[1] = h[0];
+      h[0] = s;
+      want[i] = s;
+   }
+   v = ngs2_rack_voice(r.samplers, 0);
+   CHECK(sampler_setup(v, NGS2_WAVE_VAG, 1, RATE) == NGS2_OK);
+   CHECK(add_block(v, vag, sizeof(vag), 28 * 3, 0, 0, 0) == NGS2_OK);
+   CHECK(patch(v, 0, r.master) == NGS2_OK);
+   CHECK(event(v, NGS2_EVENT_PLAY) == NGS2_OK);
+   render(&r, out, 2);
+   for (i = 0; i < 28 * 3; i++) {
+      float expect = (float)want[i] / 32768.0f * 0.70710678f;
+      if (fabs(out[(i + 3) * 2] - expect) > 1e-5) {
+         printf("hevag: sample %u is %f, not %f\n", i, out[(i + 3) * 2], expect);
+         CHECK(!"HEVAG sample differs");
+         break;
+      }
+   }
+   rig_close(&r);
+}
+
 /* VAG in two blocks, the stream coming a block at a time: the prediction goes on across
  * them, every sample the same as one block's (started again, the wave broke at the block:
  * a click) */
@@ -1596,6 +1655,7 @@ int main(void) {
    test_formats();
    test_atrac9();
    test_vag_blocks();
+   test_hevag();
    test_game_racks();
    if (failures) {
       printf("ngs2_core_test: %d failed\n", failures);

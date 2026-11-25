@@ -7,6 +7,7 @@
 #include <formats/ratrac9.h>
 
 #include "ngs2_core.h"
+#include "ngs2_vag_coefs.h"
 
 #define MAGIC_SYSTEM 0x5332474eu /* "NG2S" */
 #define MAGIC_RACK 0x5232474eu
@@ -294,7 +295,7 @@ struct ngs2_voice {
     uint32_t window_pos;
     uint32_t window_count;
     uint32_t at9_frame; /* frames of the superframe decoded */
-    int32_t vag_history[NGS2_MAX_CHANNELS][2];
+    int32_t vag_history[NGS2_MAX_CHANNELS][4]; /* newest first */
     float vag_window[NGS2_MAX_CHANNELS * VAG_SAMPLES];
 };
 
@@ -3004,29 +3005,38 @@ static void block_end(ngs2_voice* v) {
     v->block_started = 0;
 }
 
+/* A frame of 16 bytes, 28 samples. The predictor is the high nibble of byte 0, with the high
+ * nibble of byte 1 above it for the HEVAG rows past the PS1's five (Gravity Rush 2's voices); the
+ * low nibble of byte 1 is the flag, 7 a silent frame. Each sample is weighed against the four
+ * before it. For rows 0 to 4 this is the PS1's decode to the bit. */
 static void vag_frame(ngs2_voice* v, const uint8_t* frame, uint32_t channel) {
-    static const int coef[5][2] = {{0, 0}, {60, 0}, {115, -52}, {98, -55}, {122, -60}};
-    int predict = frame[0] >> 4, shift = frame[0] & 15, i;
-    int32_t h0 = v->vag_history[channel][0], h1 = v->vag_history[channel][1];
+    int predict = (frame[0] >> 4) | (frame[1] & 0xf0), shift = frame[0] & 15, i;
+    const int silent = (frame[1] & 15) == 7;
+    int32_t* h = v->vag_history[channel];
+    const short* c;
     float* out = v->window + (size_t)channel * VAG_SAMPLES;
-    if (predict > 4)
+    if (predict > 127)
         predict = 0;
+    c = ngs2_vag_coefs[predict];
     if (shift > 12)
         shift = 9;
     for (i = 0; i < VAG_SAMPLES; i++) {
-        int nibble = (frame[2 + i / 2] >> ((i & 1) * 4)) & 15;
-        int32_t s = (int32_t)((int16_t)(nibble << 12)) >> shift;
-        s += (h0 * coef[predict][0] + h1 * coef[predict][1] + 32) >> 6;
-        if (s > 32767)
-            s = 32767;
-        if (s < -32768)
-            s = -32768;
-        h1 = h0;
-        h0 = s;
+        int32_t s = 0;
+        if (!silent) {
+            int nibble = (frame[2 + i / 2] >> ((i & 1) * 4)) & 15;
+            s = (int32_t)((int16_t)(nibble << 12)) >> shift;
+            s += (h[0] * c[0] + h[1] * c[1] + h[2] * c[2] + h[3] * c[3] + 4096) >> 13;
+            if (s > 32767)
+                s = 32767;
+            if (s < -32768)
+                s = -32768;
+        }
+        h[3] = h[2];
+        h[2] = h[1];
+        h[1] = h[0];
+        h[0] = s;
         out[i] = (float)s / 32768.0f;
     }
-    v->vag_history[channel][0] = h0;
-    v->vag_history[channel][1] = h1;
 }
 
 /* Fills the window with the block's next frame. 0 when its data is at an end. */

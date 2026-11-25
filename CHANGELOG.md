@@ -4,6 +4,8 @@ What changed in the libretro core of this fork, newest first. Changes that come 
 
 ## Unreleased
 
+- **Ngs2's VAG decodes HEVAG frames**: the 128 predictors of four taps each (the table from GR2port), not only the PS1's five of two. A frame's predictor is the high nibble of byte 0 with the high nibble of byte 1 above it; a frame naming a row past 4 was decoded with no prediction, which turns a voice into noise. Gravity Rush 2's music played and its voices were garbled and static. Flag 7 (byte 1's low nibble) is a silent frame, as in GR2port. For rows 0 to 4 the decode is the same to the bit as before (`ngs2_vag_coefs.h`, C89; a test decodes a row-127 frame and a silent one).
+  - Not run in a game yet.
 - **The analog sticks' dead zone is 15% by default** (was 4%). GR2port, the Gravity Rush 2 port by the author of GR2fork, raised its default from 5 of 127 steps to 20 (left stick) and 15 (right), about 16% and 12%, for sticks that rest off centre. This core has one setting for both sticks; 15% sits between the two. The option still goes from 0 to 30%.
   - Not run in a game yet.
 - **An Ngs2 patch to a rack goes to that rack's first voice**, as GR2port (the Gravity Rush 2 port) has it. Gravity Rush 2 patches its submixer to the mastering rack's handle and its sampler voices to the submixer rack's, not to a voice's; each such patch was refused (`0x804a0305`), so nothing reached the mastering voice: likely why it had no sound. The other checks (same system, not a sampler, the input in range) are as before.
