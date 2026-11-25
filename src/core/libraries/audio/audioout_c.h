@@ -4,7 +4,7 @@
 #ifndef SHADPS4_LIBRARIES_AUDIOOUT_C_H
 #define SHADPS4_LIBRARIES_AUDIOOUT_C_H
 
-/* AudioOut's calls the libraries written in C make. Defined in audioout.cpp. */
+/* AudioOut's calls the libraries written in C make. Defined in audioout.c. */
 
 #include <retro_common_api.h>
 

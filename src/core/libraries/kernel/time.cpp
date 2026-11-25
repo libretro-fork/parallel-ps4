@@ -828,6 +828,14 @@ extern "C" bool kernel_game_wait(struct retro_eventcount* ec, u64 deadline, int 
                            Libraries::Kernel::GameThreadSelf()) != 0;
 }
 
+extern "C" struct game_clock* kernel_game_clock(void) {
+    return Libraries::Kernel::GameClock();
+}
+
+extern "C" int kernel_game_take_wakes(retro_atomic_int_t** words, int max) {
+    return Libraries::Kernel::GameTakeWakes(words, max);
+}
+
 extern "C" u64 kernel_get_process_time(void) {
     return Libraries::Kernel::sceKernelGetProcessTime();
 }

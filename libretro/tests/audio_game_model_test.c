@@ -19,7 +19,7 @@
  * Each case: from the first frame with sound, exactly 800 samples a run, every one the game's,
  * once and in order: nothing padded, nothing late, nothing dropped. The stopped engine: its
  * sound to the end, then silence. FMOD's: no slot output before its mixer filled it, its output
- * held as audioout.cpp holds it (built with MODEL_UNHELD, without the hold, the case with the
+ * held as audioout.c holds it (built with MODEL_UNHELD, without the hold, the case with the
  * busy render thread fails; with MODEL_UNPACED too, Output as fast as the queue has room, both
  * fail; MODEL_UNPACED alone passes, the hold being enough). The same with a render thread busy most of the frame: the frame's
  * buffers go as that thread waits, late in the frame, and the next frame starts among them,
@@ -123,7 +123,7 @@ static void write_buffer(unsigned* count) {
  * back to the mixer: it never waits for the mixer, relying on the call's pace to leave the
  * mixer the time to fill it. Output returning faster (as before: as soon as the queue had room)
  * outputs slots the mixer has not filled again yet: the same sound twice, a click. The output
- * is also held as audioout.cpp's PaceOutput holds it, until the mixer it woke waits again or a
+ * is also held as audioout.c's PaceOutput holds it, until the mixer it woke waits again or a
  * whole frame has gone by (game_clock_woken_waiting): without the hold, which the core has,
  * the case passed only while the mixer happened to run soon enough, and under ThreadSanitizer
  * on a busy host now and then it did not. */
@@ -194,7 +194,7 @@ static void fmod_output_thread(void* data) {
             hold.woke = 0;
         }
 #ifndef MODEL_UNPACED
-        /* sceAudioOutOutput's pace (audioout.cpp, PaceOutput) */
+        /* sceAudioOutOutput's pace (audioout.c, PaceOutput) */
         due = game_clock_cadence(&clk, &start, &count, BUFFER, 48000);
         if (due > game_clock_now(&clk))
             port_sleep(due);

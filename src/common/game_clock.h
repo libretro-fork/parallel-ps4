@@ -90,7 +90,7 @@ void game_clock_init(game_clock_t* clock, unsigned fps_num, unsigned fps_den);
 /* Whether the game has FMOD in it (1, as at init) or not (0), set before its code runs. FMOD's
  * engine outputs from a ring its mixer fills a slot at a time without waiting for it, and needs
  * the sound's output to wait, before each buffer, for the threads it woke to wait again
- * (game_clock_woken_waiting, audioout.cpp's PaceOutput): no other game gets that hold. The
+ * (game_clock_woken_waiting, audioout.c's PaceOutput): no other game gets that hold. The
  * time is the frames' either way, and a woken thread that has not run yet holds it for every
  * game (game_clock_park): without that, a timeout could end before the work it waits for. */
 void game_clock_set_fmod(game_clock_t* clock, int fmod);
@@ -192,7 +192,7 @@ int game_clock_park(game_clock_t* clock, retro_atomic_int_t* word, int key);
 int game_clock_waiting_on(game_clock_t* clock, retro_atomic_int_t* word);
 void game_clock_repark(game_clock_t* clock, int slot, int key);
 /* The sound's output holds its next buffer until the threads it woke since its last one
- * (@words, @n of them: parked on each) wait again (audioout.cpp, PaceOutput): 1 once they all
+ * (@words, @n of them: parked on each) wait again (audioout.c, PaceOutput): 1 once they all
  * do, or once two frames have started since @frame (the frames started when it began to hold):
  * a whole frame gone by, so that a woken thread that never waits again holds the sound for two
  * frames at most. Not at the first frame to start: that one may start the moment after, the

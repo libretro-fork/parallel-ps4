@@ -105,7 +105,7 @@ game_clock_thread_t* GameThreadSelf();
 
 /// The calling thread is about to bump *@word (a semaphore's releases, an eventcount's epoch):
 /// a sound output thread notes the game threads its wakes find waiting, for its next buffer's
-/// pace (audioout.cpp). Before the wake, not after: a thread woken may be running, and no
+/// pace (audioout.c). Before the wake, not after: a thread woken may be running, and no
 /// longer be seen parked, before its waker has looked
 void GameNoteWake(retro_atomic_int_t* word);
 /// The wakes the calling thread noted since it last asked, up to @max; marks it a sound

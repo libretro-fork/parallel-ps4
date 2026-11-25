@@ -190,6 +190,12 @@ void kernel_equeue_trigger_event(s64 eq, u64 ident, s16 filter, void* trigger_da
 /* Until @deadline on the game's time (Kernel::GameSleepUntil; 0: forever) (time.cpp) */
 void kernel_game_sleep_until(u64 deadline);
 
+/* The game's time, which the frontend's frames move (Kernel::GameClock; time.cpp) */
+struct game_clock* kernel_game_clock(void);
+/* The wakes the calling thread noted since it last asked, up to @max, into @words; marks it a
+ * sound output thread (Kernel::GameTakeWakes; time.cpp) */
+int kernel_game_take_wakes(retro_atomic_int_t** words, int max);
+
 /* sceKernelGetProcessTime and sceKernelReadTsc (time.cpp) */
 u64 kernel_get_process_time(void);
 u64 kernel_read_tsc(void);

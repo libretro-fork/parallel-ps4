@@ -476,39 +476,6 @@ static const enum_name_entry_t enum_names_Libraries_Ajm_AjmCodecType_entries[] =
 const enum_names_t enum_names_Libraries_Ajm_AjmCodecType = {enum_names_Libraries_Ajm_AjmCodecType_entries,
     sizeof(enum_names_Libraries_Ajm_AjmCodecType_entries) / sizeof(enum_names_Libraries_Ajm_AjmCodecType_entries[0])};
 
-static const enum_name_entry_t enum_names_Libraries_AudioOut_OrbisAudioOutParamAttr_entries[] = {
-    {(int64_t)0, "None"},
-    {(int64_t)1, "Restricted"},
-    {(int64_t)2, "MixToMain"},
-};
-const enum_names_t enum_names_Libraries_AudioOut_OrbisAudioOutParamAttr = {enum_names_Libraries_AudioOut_OrbisAudioOutParamAttr_entries,
-    sizeof(enum_names_Libraries_AudioOut_OrbisAudioOutParamAttr_entries) / sizeof(enum_names_Libraries_AudioOut_OrbisAudioOutParamAttr_entries[0])};
-
-static const enum_name_entry_t enum_names_Libraries_AudioOut_OrbisAudioOutParamFormat_entries[] = {
-    {(int64_t)0, "S16Mono"},
-    {(int64_t)1, "S16Stereo"},
-    {(int64_t)2, "S16_8CH"},
-    {(int64_t)3, "FloatMono"},
-    {(int64_t)4, "FloatStereo"},
-    {(int64_t)5, "Float_8CH"},
-    {(int64_t)6, "S16_8CH_Std"},
-    {(int64_t)7, "Float_8CH_Std"},
-};
-const enum_names_t enum_names_Libraries_AudioOut_OrbisAudioOutParamFormat = {enum_names_Libraries_AudioOut_OrbisAudioOutParamFormat_entries,
-    sizeof(enum_names_Libraries_AudioOut_OrbisAudioOutParamFormat_entries) / sizeof(enum_names_Libraries_AudioOut_OrbisAudioOutParamFormat_entries[0])};
-
-static const enum_name_entry_t enum_names_Libraries_AudioOut_OrbisAudioOutPort_entries[] = {
-    {(int64_t)0, "Main"},
-    {(int64_t)1, "Bgm"},
-    {(int64_t)2, "Voice"},
-    {(int64_t)3, "Personal"},
-    {(int64_t)4, "PadSpk"},
-    {(int64_t)126, "Audio3d"},
-    {(int64_t)127, "Aux"},
-};
-const enum_names_t enum_names_Libraries_AudioOut_OrbisAudioOutPort = {enum_names_Libraries_AudioOut_OrbisAudioOutPort_entries,
-    sizeof(enum_names_Libraries_AudioOut_OrbisAudioOutPort_entries) / sizeof(enum_names_Libraries_AudioOut_OrbisAudioOutPort_entries[0])};
-
 static const enum_name_entry_t enum_names_Libraries_AvPlayer_AvPlayerEvents_entries[] = {
     {(int64_t)1, "StateStop"},
     {(int64_t)2, "StateReady"},
@@ -674,6 +641,39 @@ static const enum_name_entry_t enum_names_OrbisAudio3dOutputRoute_entries[] = {
 };
 const enum_names_t enum_names_OrbisAudio3dOutputRoute = {enum_names_OrbisAudio3dOutputRoute_entries,
     sizeof(enum_names_OrbisAudio3dOutputRoute_entries) / sizeof(enum_names_OrbisAudio3dOutputRoute_entries[0])};
+
+static const enum_name_entry_t enum_names_OrbisAudioOutParamAttr_entries[] = {
+    {(int64_t)0, "ORBIS_AUDIO_OUT_PARAM_ATTR_NONE"},
+    {(int64_t)1, "ORBIS_AUDIO_OUT_PARAM_ATTR_VALUE_RESTRICTED"},
+    {(int64_t)2, "ORBIS_AUDIO_OUT_PARAM_ATTR_VALUE_MIX_TO_MAIN"},
+};
+const enum_names_t enum_names_OrbisAudioOutParamAttr = {enum_names_OrbisAudioOutParamAttr_entries,
+    sizeof(enum_names_OrbisAudioOutParamAttr_entries) / sizeof(enum_names_OrbisAudioOutParamAttr_entries[0])};
+
+static const enum_name_entry_t enum_names_OrbisAudioOutParamFormat_entries[] = {
+    {(int64_t)0, "ORBIS_AUDIO_OUT_PARAM_FORMAT_S16_MONO"},
+    {(int64_t)1, "ORBIS_AUDIO_OUT_PARAM_FORMAT_S16_STEREO"},
+    {(int64_t)2, "ORBIS_AUDIO_OUT_PARAM_FORMAT_S16_8CH"},
+    {(int64_t)3, "ORBIS_AUDIO_OUT_PARAM_FORMAT_FLOAT_MONO"},
+    {(int64_t)4, "ORBIS_AUDIO_OUT_PARAM_FORMAT_FLOAT_STEREO"},
+    {(int64_t)5, "ORBIS_AUDIO_OUT_PARAM_FORMAT_FLOAT_8CH"},
+    {(int64_t)6, "ORBIS_AUDIO_OUT_PARAM_FORMAT_S16_8CH_STD"},
+    {(int64_t)7, "ORBIS_AUDIO_OUT_PARAM_FORMAT_FLOAT_8CH_STD"},
+};
+const enum_names_t enum_names_OrbisAudioOutParamFormat = {enum_names_OrbisAudioOutParamFormat_entries,
+    sizeof(enum_names_OrbisAudioOutParamFormat_entries) / sizeof(enum_names_OrbisAudioOutParamFormat_entries[0])};
+
+static const enum_name_entry_t enum_names_OrbisAudioOutPort_entries[] = {
+    {(int64_t)0, "ORBIS_AUDIO_OUT_PORT_MAIN"},
+    {(int64_t)1, "ORBIS_AUDIO_OUT_PORT_BGM"},
+    {(int64_t)2, "ORBIS_AUDIO_OUT_PORT_VOICE"},
+    {(int64_t)3, "ORBIS_AUDIO_OUT_PORT_PERSONAL"},
+    {(int64_t)4, "ORBIS_AUDIO_OUT_PORT_PAD_SPK"},
+    {(int64_t)126, "ORBIS_AUDIO_OUT_PORT_AUDIO3D"},
+    {(int64_t)127, "ORBIS_AUDIO_OUT_PORT_AUX"},
+};
+const enum_names_t enum_names_OrbisAudioOutPort = {enum_names_OrbisAudioOutPort_entries,
+    sizeof(enum_names_OrbisAudioOutPort_entries) / sizeof(enum_names_OrbisAudioOutPort_entries[0])};
 
 static const enum_name_entry_t enum_names_OrbisImeDisableDevice_entries[] = {
     {(int64_t)0, "DEFAULT"},
