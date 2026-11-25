@@ -4,6 +4,8 @@ What changed in the libretro core of this fork, newest first. Changes that come 
 
 ## Unreleased
 
+- **Audio3d's object attributes have their right numbers**, as upstream shadPS4's "audio3d: Fix swapped attribute ids" (#5499), which GR2port carries: priority is 2, position 3, gain 5, reset state 7, ambisonics 9. They were position 2, gain 3, priority 5, ambisonics 7, reset state 9, so an object's position was taken as its gain (its first coordinate as how loud it is: any value, negative or far past 1), its real gain was dropped, and an ambisonics attribute reset the object. Gravity Rush 2 opens an Audio3d port; its voices came out garbled and static while its music played.
+  - Not run in a game yet.
 - **HEVAG frames take their shift as it is.** The PS1's VAG treats a shift of 13 to 15 as 9, and the HEVAG decode kept that: a frame of a predictor past the PS1's five with such a shift came out 16 to 64 times too loud. GR2port and vgmstream take HEVAG's shift as it is. Gravity Rush 2's voices were still garbled after the HEVAG predictors went in. The PS1's five predictors keep the old rule.
   - Not run in a game yet.
 - **Ngs2's VAG decodes HEVAG frames**: the 128 predictors of four taps each (the table from GR2port), not only the PS1's five of two. A frame's predictor is the high nibble of byte 0 with the high nibble of byte 1 above it; a frame naming a row past 4 was decoded with no prediction, which turns a voice into noise. Gravity Rush 2's music played and its voices were garbled and static. Flag 7 (byte 1's low nibble) is a silent frame, as in GR2port. For rows 0 to 4 the decode is the same to the bit as before (`ngs2_vag_coefs.h`, C89; a test decodes a row-127 frame and a silent one).
