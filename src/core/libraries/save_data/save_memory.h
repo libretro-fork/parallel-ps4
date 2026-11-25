@@ -9,7 +9,9 @@
 #include "common/io_file.h"
 #include "core/libraries/save_data/save_backup.h"
 
+namespace Libraries::SaveData {
 class PSF;
+}
 
 namespace Libraries::SaveData::SaveMemory {
 

@@ -119,7 +119,7 @@ CORE_SOURCES_CXX += $(addprefix src/common/logging/,classes.cpp log.cpp)
 CORE_SOURCES_CXX += $(addprefix src/core/,address_space.cpp debugger.cpp \
 	emulator_state.cpp linker.cpp memory.cpp module.cpp signals.cpp thread.cpp tls.cpp)
 CORE_SOURCES_CXX += $(addprefix src/core/aerolib/,aerolib.cpp stubs.cpp)
-CORE_SOURCES_CXX += $(addprefix src/core/file_format/,npbind.cpp psf.cpp rif.cpp \
+CORE_SOURCES_CXX += $(addprefix src/core/file_format/,npbind.cpp rif.cpp \
 	trp.cpp)
 CORE_SOURCES_CXX += $(addprefix src/core/file_sys/backends/,host_fs.cpp zarchive_fs.cpp)
 CORE_SOURCES_CXX += $(addprefix src/core/file_sys/devices/,base_device.cpp console_device.cpp \
@@ -226,6 +226,7 @@ CORE_SOURCES_C += $(addprefix src/core/,emulator_settings.c user_manager.c file_
 CORE_SOURCES_C += src/common/combine.c src/input/controller.c
 CORE_SOURCES_C += $(addprefix src/core/libraries/avplayer/,avplayer.c avplayer_clock.c avplayer_common.c \
 	avplayer_data_streamer.c avplayer_fsm.c avplayer_impl.c avplayer_source.c avplayer_state.c)
+CORE_SOURCES_C += $(addprefix src/core/file_format/,psf.c)
 CORE_SOURCES_C += $(addprefix src/core/libraries/audio3d/,audio3d.c audio3d_port.c)
 CORE_SOURCES_C += $(addprefix src/core/libraries/font/,font_blit.c)
 CORE_SOURCES_C += $(addprefix src/core/libraries/network/,host_override.c)

@@ -12,7 +12,7 @@
 
 #include "common/c_bridge.h"
 #include "core/emulator_settings.h"
-#include "core/file_format/psf_c.h"
+#include "core/file_format/psf.h"
 #include "core/file_format/rif_c.h"
 #include "core/file_sys/fs_c.h"
 #include "core/libraries/app_content/app_content.h"

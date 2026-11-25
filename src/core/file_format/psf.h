@@ -1,97 +1,104 @@
-// SPDX-FileCopyrightText: Copyright 2024 shadPS4 Emulator Project
-// SPDX-License-Identifier: GPL-2.0-or-later
+/* SPDX-FileCopyrightText: Copyright 2024-2026 shadPS4 Emulator Project
+ * SPDX-License-Identifier: GPL-2.0-or-later */
 
-#pragma once
+#ifndef SHADPS4_FILE_FORMAT_PSF_H
+#define SHADPS4_FILE_FORMAT_PSF_H
 
-#include <chrono>
-#include <filesystem>
-#include <span>
-#include <string>
-#include <string_view>
-#include <unordered_map>
-#include <vector>
-#include "common/endian.h"
-#include "core/file_sys/ifile.h"
+/* param.sfo: a list of keys, each with a string, a 32-bit integer or bytes. */
 
-constexpr u32 PSF_MAGIC = 0x00505346;
-constexpr u32 PSF_VERSION_1_1 = 0x00000101;
-constexpr u32 PSF_VERSION_1_0 = 0x00000100;
+#include <stddef.h>
 
-struct PSFHeader {
-    u32_be magic;
-    u32_le version;
-    u32_le key_table_offset;
-    u32_le data_table_offset;
-    u32_le index_table_entries;
-};
-static_assert(sizeof(PSFHeader) == 0x14);
+#include <boolean.h>
+#include <retro_common_api.h>
 
-struct PSFRawEntry {
-    u16_le key_offset;
-    u16_be param_fmt;
-    u32_le param_len;
-    u32_le param_max_len;
-    u32_le data_offset;
-};
-static_assert(sizeof(PSFRawEntry) == 0x10);
+#include "common/types.h"
 
-enum class PSFEntryFmt : u16 {
-    Binary = 0x0004,  // Binary data
-    Text = 0x0204,    // String in UTF-8 format and NULL terminated
-    Integer = 0x0404, // Signed 32-bit integer
-};
+RETRO_BEGIN_DECLS
 
-class PSF {
-    struct Entry {
-        std::string key;
-        PSFEntryFmt param_fmt;
-        u32 max_len;
-    };
+#define PSF_MAGIC 0x00505346u /* "\0PSF", read big-endian */
+#define PSF_VERSION_1_1 0x00000101u
+#define PSF_VERSION_1_0 0x00000100u
 
-public:
-    PSF() = default;
-    ~PSF() = default;
+/* Sizes in the file */
+#define PSF_HEADER_SIZE 0x14
+#define PSF_RAW_ENTRY_SIZE 0x10
 
-    PSF(const PSF& other) = default;
-    PSF(PSF&& other) noexcept = default;
-    PSF& operator=(const PSF& other) = default;
-    PSF& operator=(PSF&& other) noexcept = default;
+/* At most this many keys (a game's param.sfo has about forty, a save's about twelve) */
+#define PSF_MAX_ENTRIES 128
 
-    bool Open(const std::filesystem::path& filepath);
-    bool Open(const std::unique_ptr<Core::FileSys::IFile>& file);
-    bool Open(std::span<const u8> psf_buffer);
+/* The kind of a value, a little-endian u16 in the file */
+typedef enum psf_fmt {
+    PSF_FMT_BINARY = 0x0004, /* bytes */
+    PSF_FMT_TEXT = 0x0204,   /* UTF-8, terminated */
+    PSF_FMT_INTEGER = 0x0404 /* signed 32-bit */
+} psf_fmt_t;
 
-    [[nodiscard]] std::vector<u8> Encode() const;
-    void Encode(std::vector<u8>& buf) const;
-    bool Encode(const std::filesystem::path& filepath) const;
+typedef struct psf_entry {
+    u32 key;     /* offset in the arena, terminated */
+    u32 value;   /* offset in the arena; a string is terminated past its length */
+    u32 length;  /* of the value (a string's without its terminator) */
+    u32 room;    /* bytes the value may take where it is in the arena */
+    u32 max_len; /* the room the file gives it */
+    u16 fmt;     /* psf_fmt_t */
+} psf_entry_t;
 
-    std::optional<std::span<const u8>> GetBinary(std::string_view key) const;
-    std::optional<std::string_view> GetString(std::string_view key) const;
-    std::optional<s32> GetInteger(std::string_view key) const;
+typedef struct psf {
+    psf_entry_t entries[PSF_MAX_ENTRIES];
+    u32 count;
+    /* The keys and values, one allocation; grown when a value outgrows its room */
+    u8* arena;
+    u32 arena_used;
+    u32 arena_size;
+    /* When the file was last written (seconds since 1970): its time when opened from a path,
+     * the time of writing when written to one */
+    s64 last_write;
+} psf_t;
 
-    void AddBinary(std::string key, std::vector<u8> value, bool update = false);
-    void AddBinary(std::string key, uint64_t value, bool update = false); // rsv4 format
-    void AddString(std::string key, std::string value, bool update = false);
-    void AddInteger(std::string key, s32 value, bool update = false);
+/* An empty list. A zeroed psf_t is one too. */
+void psf_init(psf_t* psf);
+/* Frees what @psf holds; it is empty after */
+void psf_free(psf_t* psf);
+/* @dst (initialized) becomes a copy of @src: false, @dst empty, if it cannot be allocated */
+bool psf_copy(psf_t* dst, const psf_t* src);
 
-    [[nodiscard]] std::chrono::system_clock::time_point GetLastWrite() const {
-        return last_write;
-    }
+/* Reads @size bytes at @data: false, the list empty, when they are not a param.sfo. The time
+ * of the last write is left as it was. */
+bool psf_open_buffer(psf_t* psf, const void* data, size_t size);
+/* Reads the file at @path (mapped where it lies) and takes its time */
+bool psf_open_path(psf_t* psf, const char* path);
 
-    [[nodiscard]] const std::vector<Entry>& GetEntries() const {
-        return entry_list;
-    }
+/* The file's size */
+size_t psf_encoded_size(const psf_t* psf);
+/* Writes the file into @out, @size bytes (at least psf_encoded_size): its size, or 0 */
+size_t psf_encode(const psf_t* psf, void* out, size_t size);
+/* Writes the file at @path, whole, and takes the time */
+bool psf_encode_path(psf_t* psf, const char* path);
 
-private:
-    mutable std::chrono::system_clock::time_point last_write;
+/* The value of @key: false if there is none or it is of another kind. A string comes
+ * terminated, with its length in @length (if not NULL). It stays valid until the list is
+ * changed. */
+bool psf_get_string(const psf_t* psf, const char* key, const char** value, size_t* length);
+bool psf_get_integer(const psf_t* psf, const char* key, s32* value);
+bool psf_get_binary(const psf_t* psf, const char* key, const u8** value, u32* length);
 
-    std::vector<Entry> entry_list;
+/* Adds @key, or with @update changes it (without @update a key that is there is left alone
+ * and an error logged). False if there is no room or the key has another kind. */
+bool psf_set_string(psf_t* psf, const char* key, const char* value, size_t length, bool update);
+bool psf_set_integer(psf_t* psf, const char* key, s32 value, bool update);
+bool psf_set_binary(psf_t* psf, const char* key, const void* value, u32 length, bool update);
+/* Eight bytes, little-endian */
+bool psf_set_binary_u64(psf_t* psf, const char* key, u64 value, bool update);
 
-    std::unordered_map<size_t, std::vector<u8>> map_binaries;
-    std::unordered_map<size_t, std::string> map_strings;
-    std::unordered_map<size_t, s32> map_integers;
+/* The game's param.sfo, read at boot */
+psf_t* psf_game(void);
 
-    [[nodiscard]] std::pair<std::vector<Entry>::iterator, size_t> FindEntry(std::string_view key);
-    [[nodiscard]] std::pair<std::vector<Entry>::const_iterator, size_t> FindEntry(
-        std::string_view key) const;
-};
+/* The game's string @key: false if there is none. Its length is put in @length (if not NULL),
+ * and the string, cut to fit and terminated, in @out (if @size is not 0). */
+bool psf_game_get_string(const char* key, char* out, size_t size, size_t* length);
+
+/* The game's integer @key: false if there is none */
+bool psf_game_get_integer(const char* key, s32* value);
+
+RETRO_END_DECLS
+
+#endif

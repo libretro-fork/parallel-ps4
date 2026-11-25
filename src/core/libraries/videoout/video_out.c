@@ -5,7 +5,7 @@
 #include <string.h>
 
 #include "common/c_bridge.h"
-#include "core/file_format/psf_c.h"
+#include "core/file_format/psf.h"
 #include "core/libraries/error_codes.h"
 #include "core/libraries/kernel/kernel_c.h"
 #include "core/libraries/videoout/driver.h"

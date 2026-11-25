@@ -11,7 +11,9 @@ namespace Core::Loader {
 class SymbolsResolver;
 }
 
+namespace Libraries::SaveData {
 class PSF;
+}
 
 namespace Libraries::SaveData {
 

@@ -62,8 +62,10 @@ uint64_t SaveInstance::GetMaxBlockFromSFO(const PSF& psf) {
     if (!vec.has_value()) {
         return OrbisSaveDataBlocksMax;
     }
-    auto value = vec.value();
-    return *(uint64_t*)value.data();
+    // Little-endian, unaligned where it lies
+    uint64_t value = 0;
+    std::memcpy(&value, vec->data(), std::min<size_t>(vec->size(), sizeof(value)));
+    return value;
 }
 
 fs::path SaveInstance::GetParamSFOPath(const fs::path& dir_path) {
@@ -79,14 +81,14 @@ void SaveInstance::SetupDefaultParamSFO(PSF& param_sfo, std::string dir_name,
 
 #define P(type, key, ...) param_sfo.Add##type(std::string{key}, __VA_ARGS__)
     // TODO Link with user service
-    P(Binary, SaveParams::ACCOUNT_ID, {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00});
+    P(Binary, SaveParams::ACCOUNT_ID, u64{0});
     P(String, SaveParams::MAINTITLE, default_title.at(locale));
     P(String, SaveParams::SUBTITLE, "");
     P(String, SaveParams::DETAIL, "");
     P(String, SaveParams::SAVEDATA_DIRECTORY, std::move(dir_name));
     P(Integer, SaveParams::SAVEDATA_LIST_PARAM, 0);
     P(String, SaveParams::TITLE_ID, std::move(game_serial));
-    P(Binary, SaveParams::SAVEDATA_BLOCKS, {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00});
+    P(Binary, SaveParams::SAVEDATA_BLOCKS, u64{0});
 #undef P
 }
 

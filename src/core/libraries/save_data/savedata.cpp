@@ -16,7 +16,6 @@
 #include "common/path_util.h"
 #include "common/string_util.h"
 #include "core/emulator_settings.h"
-#include "core/file_format/psf.h"
 #include "core/file_sys/fs.h"
 #include "core/libraries/error_codes.h"
 #include "core/libraries/libs.h"
@@ -316,11 +315,18 @@ static std::string g_game_serial;
 static u32 g_fw_ver;
 static std::array<std::optional<SaveInstance>, 16> g_mount_slots;
 
+std::string GameSaveSerial() {
+    const char* value;
+    size_t length;
+    if (psf_get_string(psf_game(), "INSTALL_DIR_SAVEDATA", &value, &length)) {
+        return std::string{value, length};
+    }
+    return std::string{ElfInfo::Instance().GameSerial()};
+}
+
 static void initialize() {
     g_initialized = true;
-    g_game_serial = Common::Singleton<PSF>::Instance()
-                        ->GetString("INSTALL_DIR_SAVEDATA")
-                        .value_or(ElfInfo::Instance().GameSerial());
+    g_game_serial = GameSaveSerial();
     g_fw_ver = ElfInfo::Instance().FirmwareVer();
     Backup::StartThread();
 }
@@ -529,10 +535,10 @@ void OrbisSaveDataParam::FromSFO(const PSF& sfo) {
 }
 
 void OrbisSaveDataParam::ToSFO(PSF& sfo) const {
-    sfo.AddString(std::string{SaveParams::MAINTITLE}, std::string{title}, true);
-    sfo.AddString(std::string{SaveParams::SUBTITLE}, std::string{subTitle}, true);
-    sfo.AddString(std::string{SaveParams::DETAIL}, std::string{detail}, true);
-    sfo.AddInteger(std::string{SaveParams::SAVEDATA_LIST_PARAM}, static_cast<s32>(userParam), true);
+    sfo.AddString(SaveParams::MAINTITLE, std::string{title}, true);
+    sfo.AddString(SaveParams::SUBTITLE, std::string{subTitle}, true);
+    sfo.AddString(SaveParams::DETAIL, std::string{detail}, true);
+    sfo.AddInteger(SaveParams::SAVEDATA_LIST_PARAM, static_cast<s32>(userParam), true);
 }
 
 int PS4_SYSV_ABI sceSaveDataAbort() {

@@ -48,6 +48,7 @@
 #include "common/io_file.h"
 #include "common/memory_patcher.h"
 #include "common/patch_catalog.h"
+#include "common/path_util.h"
 #include "common/run_once.h"
 #include "common/scm_rev.h"
 #include "core/file_format/psf.h"
@@ -257,16 +258,21 @@ bool patch_change_told = false;
 // The game's serial, as the emulator works it out: the title of the content ID in its
 // param.sfo, or the title ID.
 std::string EbootSerial(const std::string& eboot) {
-    PSF psf;
-    if (!psf.Open(Utf8Path(eboot).parent_path() / "sce_sys" / "param.sfo")) {
-        return {};
+  psf_t psf;
+  psf_init(&psf);
+  const auto path = Utf8Path(eboot).parent_path() / "sce_sys" / "param.sfo";
+  std::string serial;
+  if (psf_open_path(&psf, Common::FS::PathToUTF8String(path).c_str())) {
+    const char *value;
+    size_t length;
+    if (psf_get_string(&psf, "CONTENT_ID", &value, &length) && length >= 16) {
+      serial.assign(value + 7, 9);
+    } else if (psf_get_string(&psf, "TITLE_ID", &value, &length)) {
+      serial.assign(value, length);
     }
-    const auto content_id = psf.GetString("CONTENT_ID");
-    if (content_id && content_id->size() >= 16) {
-        return std::string(content_id->substr(7, 9));
-    }
-    const auto title_id = psf.GetString("TITLE_ID");
-    return title_id ? std::string(*title_id) : std::string{};
+  }
+  psf_free(&psf);
+  return serial;
 }
 
 // The patch's description: its note's first paragraph, who made it and where it is from, the

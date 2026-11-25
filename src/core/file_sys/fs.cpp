@@ -905,19 +905,24 @@ extern "C" s32 fs_read_addcont(const char* path, bool want_key, fs_addcont_t* ou
     if (psf_handle == nullptr) {
         return FS_ADDCONT_NO_PARAM_SFO;
     }
-    PSF params;
-    if (!params.Open(psf_handle)) {
+    psf_t params;
+    psf_init(&params);
+    if (!PsfOpenFile(&params, psf_handle)) {
+        psf_free(&params);
         return FS_ADDCONT_BAD_PARAM_SFO;
     }
-    if (const auto category = params.GetString("CATEGORY"); category.has_value()) {
+    const char* value;
+    size_t length;
+    if (psf_get_string(&params, "CATEGORY", &value, &length)) {
         out->has_category = true;
-        CopyText(out->category, sizeof(out->category), *category);
+        CopyText(out->category, sizeof(out->category), std::string_view{value, length});
     }
-    if (const auto content_id = params.GetString("CONTENT_ID"); content_id.has_value()) {
+    if (psf_get_string(&params, "CONTENT_ID", &value, &length)) {
         out->has_content_id = true;
-        out->content_id_length = content_id->size();
-        CopyText(out->content_id, sizeof(out->content_id), *content_id);
+        out->content_id_length = length;
+        CopyText(out->content_id, sizeof(out->content_id), std::string_view{value, length});
     }
+    psf_free(&params);
     if (want_key) {
         // license.info, or else license.dat
         auto license_handle = fs->Open("sce_sys/license.info", Common::FS::FileAccessMode::Read);

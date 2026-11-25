@@ -153,11 +153,7 @@ bool ConvertValueToHex(const char* type, const char* value, char* out, size_t si
 
 // The game's version, as its patches name it (AppVer)
 void GetAppVersion(char* out, size_t size) {
-    PSF* const param_sfo = Common::Singleton<PSF>::Instance();
-    const std::optional<std::string_view> version = param_sfo->GetString("APP_VER");
-    if (version) {
-        snprintf(out, size, "%.*s", static_cast<int>(version->size()), version->data());
-    } else {
+    if (!psf_game_get_string("APP_VER", out, size, nullptr)) {
         strlcpy(out, "Unknown version", size);
     }
 }

@@ -185,7 +185,7 @@ std::optional<Common::FS::FileView> GetIcon(u32 slot_id) {
 
 void SaveSFO(u32 slot_id) {
     g_slot_mtx.Run([&] {
-        const auto& data = g_attached_slots[slot_id];
+        auto& data = g_attached_slots[slot_id];
         const auto sfo_path = SaveInstance::GetParamSFOPath(data.folder_path);
         Common::FS::CreateDirectories(sfo_path.parent_path());
         const bool ok = data.sfo.Encode(sfo_path);

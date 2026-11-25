@@ -3,10 +3,20 @@
 
 #pragma once
 
+#include <algorithm>
+#include <array>
+#include <chrono>
+#include <cstring>
+#include <ctime>
 #include <filesystem>
+#include <optional>
+#include <span>
+#include <string>
+#include <string_view>
 
 #include <core/libraries/system/userservice.h>
 #include "common/io_file.h"
+#include "common/path_util.h"
 #include "core/file_format/psf.h"
 
 namespace Core::FileSys {
@@ -32,6 +42,94 @@ constexpr std::string_view TITLE_ID = "TITLE_ID";
 } // namespace SaveParams
 
 using OrbisUserServiceUserId = s32;
+
+// A save's param.sfo (psf.c), held for the C++ that is left here
+class PSF {
+public:
+    PSF() {
+        psf_init(&psf);
+    }
+    ~PSF() {
+        psf_free(&psf);
+    }
+    PSF(const PSF& other) {
+        psf_init(&psf);
+        psf_copy(&psf, &other.psf);
+    }
+    PSF(PSF&& other) noexcept : psf{other.psf} {
+        psf_init(&other.psf);
+    }
+    PSF& operator=(const PSF& other) {
+        psf_copy(&psf, &other.psf);
+        return *this;
+    }
+    PSF& operator=(PSF&& other) noexcept {
+        if (this != &other) {
+            psf_free(&psf);
+            psf = other.psf;
+            psf_init(&other.psf);
+        }
+        return *this;
+    }
+
+    bool Open(const std::filesystem::path& path) {
+        return psf_open_path(&psf, Common::FS::PathToUTF8String(path).c_str());
+    }
+    bool Encode(const std::filesystem::path& path) {
+        return psf_encode_path(&psf, Common::FS::PathToUTF8String(path).c_str());
+    }
+
+    std::optional<std::string_view> GetString(std::string_view key) const {
+        const char* value;
+        size_t length;
+        if (!psf_get_string(&psf, Key(key).data(), &value, &length)) {
+            return std::nullopt;
+        }
+        return std::string_view{value, length};
+    }
+    std::optional<s32> GetInteger(std::string_view key) const {
+        s32 value;
+        if (!psf_get_integer(&psf, Key(key).data(), &value)) {
+            return std::nullopt;
+        }
+        return value;
+    }
+    std::optional<std::span<const u8>> GetBinary(std::string_view key) const {
+        const u8* value;
+        u32 length;
+        if (!psf_get_binary(&psf, Key(key).data(), &value, &length)) {
+            return std::nullopt;
+        }
+        return std::span<const u8>{value, length};
+    }
+
+    void AddString(std::string_view key, std::string_view value, bool update = false) {
+        psf_set_string(&psf, Key(key).data(), value.data(), value.size(), update);
+    }
+    void AddInteger(std::string_view key, s32 value, bool update = false) {
+        psf_set_integer(&psf, Key(key).data(), value, update);
+    }
+    void AddBinary(std::string_view key, u64 value, bool update = false) {
+        psf_set_binary_u64(&psf, Key(key).data(), value, update);
+    }
+
+    std::chrono::system_clock::time_point GetLastWrite() const {
+        return std::chrono::system_clock::from_time_t(static_cast<std::time_t>(psf.last_write));
+    }
+
+private:
+    // @key terminated: the keys are short
+    static std::array<char, 64> Key(std::string_view key) {
+        std::array<char, 64> out{};
+        std::memcpy(out.data(), key.data(), std::min(key.size(), out.size() - 1));
+        return out;
+    }
+
+    psf_t psf;
+};
+
+// The game's INSTALL_DIR_SAVEDATA, or else its serial
+std::string GameSaveSerial();
 
 class SaveInstance {
     int slot_num{};

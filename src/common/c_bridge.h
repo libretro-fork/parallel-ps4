@@ -16,6 +16,7 @@ RETRO_BEGIN_DECLS
 /* Log classes used from C. Mapped to Common::Log::Class in c_bridge.cpp. */
 enum c_log_class {
     C_LOG_CONFIG = 0,
+    C_LOG_CORE,
     C_LOG_KEY_MANAGER,
     C_LOG_LIB_AUDIODEC,
     C_LOG_LIB_HTTP,

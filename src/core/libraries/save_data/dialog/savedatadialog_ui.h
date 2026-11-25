@@ -9,7 +9,7 @@
 #include <variant>
 #include <vector>
 
-#include "core/file_format/psf.h"
+#include "core/libraries/save_data/save_instance.h"
 #include "core/libraries/save_data/savedata.h"
 #include "core/libraries/system/commondialog.h"
 #include "video_core/overlay/ovl_layers.h"

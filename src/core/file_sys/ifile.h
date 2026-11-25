@@ -13,7 +13,9 @@
 
 #include "common/concepts.h"
 #include "common/io_file.h"
+#include "common/path_util.h"
 #include "common/types.h"
+#include "core/file_format/psf.h"
 
 namespace Core::FileSys {
 
@@ -267,12 +269,25 @@ public:
 // Returns a real path on the host filesystem for rel_path inside game_root.
 // For directory-backed games this is just game_root / rel_path; for archives
 // the entry is extracted into the cache directory first so that code which
-// requires a real file (QImage, QMediaPlayer, PSF::Open, ...) keeps working.
+// requires a real file (QImage, QMediaPlayer, psf_open_path, ...) keeps working.
 [[nodiscard]] std::optional<std::filesystem::path> ResolveGameFilePath(
     const std::filesystem::path& game_root, std::string_view rel_path);
 
 // Total size in bytes of a game root: the archive's own file size for .zar,
 // otherwise the recursive size of the directory.
 [[nodiscard]] u64 GetGameRootSize(const std::filesystem::path& game_root);
+
+// Reads a param.sfo: from its host file where it has one (mapped), else (in an archive) read
+// out into a buffer
+inline bool PsfOpenFile(psf_t* psf, const std::unique_ptr<IFile>& file) {
+    if (const auto host_path = file->GetHostPath()) {
+        return psf_open_path(psf, Common::FS::PathToUTF8String(*host_path).c_str());
+    }
+    std::vector<u8> buf(file->Size());
+    if (file->Read(buf.data(), buf.size()) != static_cast<s64>(buf.size())) {
+        return false;
+    }
+    return psf_open_buffer(psf, buf.data(), buf.size());
+}
 
 } // namespace Core::FileSys

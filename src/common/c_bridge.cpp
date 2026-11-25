@@ -120,6 +120,8 @@ static Common::Log::Class ToClass(c_log_class log_class) {
         return Common::Log::Class::Lib_SigninDialog;
     case C_LOG_LIB_VIDEO_RECORDING:
         return Common::Log::Class::Lib_VideoRecording;
+    case C_LOG_CORE:
+        return Common::Log::Class::Core;
     case C_LOG_LOADER:
         return Common::Log::Class::Loader;
     case C_LOG_NP_HANDLER:

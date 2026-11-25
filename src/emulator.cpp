@@ -404,27 +404,41 @@ void Emulator::Run(std::filesystem::path file, std::vector<std::string> args,
     Common::PSFAttributes psf_attributes{};
 
     if (auto psf_handle = mnt->Open("/app0/sce_sys/param.sfo", /*writable=*/false)) {
-        auto* param_sfo = Common::Singleton<PSF>::Instance();
-        ASSERT_MSG(param_sfo->Open(psf_handle), "Failed to open param.sfo");
+        psf_t* const param_sfo = psf_game();
+        ASSERT_MSG(Core::FileSys::PsfOpenFile(param_sfo, psf_handle), "Failed to open param.sfo");
         param_sfo_exists = true;
+        const auto get_string = [param_sfo](const char* key) -> std::optional<std::string_view> {
+            const char* value;
+            size_t length;
+            if (!psf_get_string(param_sfo, key, &value, &length)) {
+                return std::nullopt;
+            }
+            return std::string_view{value, length};
+        };
+        const auto get_integer = [param_sfo](const char* key) -> std::optional<s32> {
+            s32 value;
+            if (!psf_get_integer(param_sfo, key, &value)) {
+                return std::nullopt;
+            }
+            return value;
+        };
 
-        const auto content_id = param_sfo->GetString("CONTENT_ID");
-        const auto title_id = param_sfo->GetString("TITLE_ID");
+        const auto content_id = get_string("CONTENT_ID");
+        const auto title_id = get_string("TITLE_ID");
         if (content_id.has_value() && !content_id->empty()) {
             id = std::string(*content_id, 7, 9);
         } else if (title_id.has_value()) {
             id = *title_id;
         }
-        title = param_sfo->GetString("TITLE").value_or("Unknown title");
-        fw_version = param_sfo->GetInteger("SYSTEM_VER").value_or(0x4700000);
-        app_version = param_sfo->GetString("APP_VER").value_or("Unknown version");
-        if (const auto raw_attributes = param_sfo->GetInteger("ATTRIBUTE")) {
+        title = get_string("TITLE").value_or("Unknown title");
+        fw_version = get_integer("SYSTEM_VER").value_or(0x4700000);
+        app_version = get_string("APP_VER").value_or("Unknown version");
+        if (const auto raw_attributes = get_integer("ATTRIBUTE")) {
             psf_attributes.raw = *raw_attributes;
         }
 
         // Extract sdk version from pubtool info.
-        std::string_view pubtool_info =
-            param_sfo->GetString("PUBTOOLINFO").value_or("Unknown value");
+        std::string_view pubtool_info = get_string("PUBTOOLINFO").value_or("Unknown value");
         u64 sdk_ver_offset = pubtool_info.find("sdk_ver");
 
         if (sdk_ver_offset == pubtool_info.npos) {

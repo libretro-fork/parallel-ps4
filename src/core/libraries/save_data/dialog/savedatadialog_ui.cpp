@@ -7,7 +7,6 @@
 #include "common/elf_info.h"
 #include "common/singleton.h"
 #include "common/string_util.h"
-#include "core/file_format/psf.h"
 #include "core/file_sys/fs.h"
 #include "core/libraries/save_data/save_instance.h"
 #include "savedatadialog_ui.h"
@@ -64,9 +63,7 @@ SaveDialogState::SaveDialogState(const OrbisSaveDataDialogParam& param) {
         this->enable_back = {param.optionParam->back == OptionBack::ENABLE};
     }
 
-    const auto& game_serial = Common::Singleton<PSF>::Instance()
-                                  ->GetString("INSTALL_DIR_SAVEDATA")
-                                  .value_or(ElfInfo::Instance().GameSerial());
+    const std::string game_serial = GameSaveSerial();
 
     const auto item = param.items;
     this->user_id = item->userId;
