@@ -390,7 +390,7 @@ void ReadCoreOptions(Libretro::SharedOptions& options) {
         return OptionValue(key, fallback) == "enabled" ? 1 : 0;
     };
     stick_dead_zone =
-        std::clamp(std::atoi(OptionValue("shadps4_stick_dead_zone", "4").c_str()), 0, 30) *
+        std::clamp(std::atoi(OptionValue("shadps4_stick_dead_zone", "15").c_str()), 0, 30) *
         0x7fffL / 100;
     options.neo_mode = enabled("shadps4_neo_mode", "disabled");
     options.circle_enter = OptionValue("shadps4_confirm_button", "cross") == "circle" ? 1 : 0;

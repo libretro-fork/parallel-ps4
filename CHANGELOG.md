@@ -4,6 +4,8 @@ What changed in the libretro core of this fork, newest first. Changes that come 
 
 ## Unreleased
 
+- **The analog sticks' dead zone is 15% by default** (was 4%). GR2port, the Gravity Rush 2 port by the author of GR2fork, raised its default from 5 of 127 steps to 20 (left stick) and 15 (right), about 16% and 12%, for sticks that rest off centre. This core has one setting for both sticks; 15% sits between the two. The option still goes from 0 to 30%.
+  - Not run in a game yet.
 - **An Ngs2 patch to a rack goes to that rack's first voice**, as GR2port (the Gravity Rush 2 port) has it. Gravity Rush 2 patches its submixer to the mastering rack's handle and its sampler voices to the submixer rack's, not to a voice's; each such patch was refused (`0x804a0305`), so nothing reached the mastering voice: likely why it had no sound. The other checks (same system, not a sampler, the input in range) are as before.
   - Not run in a game yet.
 - **A refused Ngs2 patch to a handle that is no voice says where that handle lands**: in which of the system's racks (its handle, its buffer, the offset into it, where its voice 0 is and how far apart its voices are, and whether it is the rack itself), or in none. Gravity Rush 2's patches of its submixer and sampler voices go to handles that are no voice of ours; this tells whether the game works its handles out itself or is given wrong ones. `CreateRack` also logs each rack's handle and its voice 0.

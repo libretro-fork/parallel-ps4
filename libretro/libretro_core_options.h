@@ -262,7 +262,7 @@ struct retro_core_option_v2_definition option_defs_us[] = {
          {"30", "30%"},
          {NULL, NULL},
      },
-     "4"},
+     "15"},
     {"shadps4_show_splash",
      "Show Splash Screen",
      NULL,
