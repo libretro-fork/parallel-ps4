@@ -1,47 +1,57 @@
-// SPDX-FileCopyrightText: Copyright 2024 shadPS4 Emulator Project
-// SPDX-License-Identifier: GPL-2.0-or-later
+/* SPDX-FileCopyrightText: Copyright 2024-2026 shadPS4 Emulator Project
+ * SPDX-License-Identifier: GPL-2.0-or-later */
 
-#pragma once
+#ifndef SHADPS4_LIBRARIES_SAVE_DATA_SAVE_MEMORY_H
+#define SHADPS4_LIBRARIES_SAVE_DATA_SAVE_MEMORY_H
 
-#include <optional>
-#include <vector>
-#include <core/libraries/system/userservice.h>
-#include "common/io_file.h"
-#include "core/libraries/save_data/save_backup.h"
+/* Save data memory (save_memory.c): a save the game reads and writes as bytes, kept in
+ * memory.dat of the save sce_sdmemory (sce_sdmemoryN for slot N), with a param.sfo and an
+ * icon. Up to SAVE_MEMORY_SLOTS slots. */
 
-namespace Libraries::SaveData {
-class PSF;
-}
+#include <stddef.h>
 
-namespace Libraries::SaveData::SaveMemory {
+#include <boolean.h>
+#include <retro_common_api.h>
 
-void PersistMemory(u32 slot_id, bool lock = true);
+#include "common/types.h"
+#include "core/file_format/psf.h"
 
-[[nodiscard]] std::string GetSaveDir(u32 slot_id);
+RETRO_BEGIN_DECLS
 
-[[nodiscard]] std::filesystem::path GetSavePath(
-    Libraries::UserService::OrbisUserServiceUserId user_id, u32 slot_id,
-    std::string_view game_serial);
+#define SAVE_MEMORY_SLOTS 16
 
-// returns the size of the save memory if exists
-size_t SetupSaveMemory(Libraries::UserService::OrbisUserServiceUserId user_id, u32 slot_id,
-                       std::string_view game_serial, size_t memory_size);
+/* Writes the slot's bytes to memory.dat */
+void save_memory_persist(u32 slot_id);
 
-// Write the icon. Set buf to null to read the standard icon.
-void SetIcon(u32 slot_id, void* buf = nullptr, size_t buf_size = 0);
+/* The slot's save folder name */
+void save_memory_dir_name(u32 slot_id, char* out, size_t size);
+/* The slot's save folder */
+void save_memory_save_path(s32 user_id, u32 slot_id, const char* game_serial, char* out,
+                           size_t size);
 
-[[nodiscard]] bool IsSaveMemoryInitialized(u32 slot_id);
+/* Attaches the slot, @memory_size bytes, with a new param.sfo or the one there (restoring the
+ * backup of a broken save): false if there is no room for another slot. @existed_size is the
+ * size of the memory.dat there, 0 if none. */
+bool save_memory_setup(s32 user_id, u32 slot_id, const char* game_serial, size_t memory_size,
+                       size_t* existed_size);
 
-[[nodiscard]] PSF& GetParamSFO(u32 slot_id);
+/* Writes the slot's icon from @buf, or with @buf NULL the game's own */
+void save_memory_set_icon(u32 slot_id, const void* buf, size_t buf_size);
 
-/// The slot's icon0.png, mapped where it lies; nothing when there is none.
-[[nodiscard]] std::optional<Common::FS::FileView> GetIcon(u32 slot_id);
+bool save_memory_is_initialized(u32 slot_id);
 
-// Save now or wait for the background thread to save
-void SaveSFO(u32 slot_id);
+/* The slot's param.sfo (NULL if the slot is not attached) */
+psf_t* save_memory_param_sfo(u32 slot_id);
 
-void ReadMemory(u32 slot_id, void* buf, size_t buf_size, int64_t offset);
+/* Copies the slot's icon0.png into @buf, up to @size bytes: how many */
+size_t save_memory_copy_icon(u32 slot_id, void* buf, size_t size);
 
-void WriteMemory(u32 slot_id, void* buf, size_t buf_size, int64_t offset);
+/* Writes the slot's param.sfo: false if it could not */
+bool save_memory_save_sfo(u32 slot_id);
 
-} // namespace Libraries::SaveData::SaveMemory
+void save_memory_read(u32 slot_id, void* buf, size_t buf_size, s64 offset);
+void save_memory_write(u32 slot_id, const void* buf, size_t buf_size, s64 offset);
+
+RETRO_END_DECLS
+
+#endif

@@ -1,236 +1,109 @@
-// SPDX-FileCopyrightText: Copyright 2024-2026 shadPS4 Emulator Project
-// SPDX-License-Identifier: GPL-2.0-or-later
+/* SPDX-FileCopyrightText: Copyright 2024-2026 shadPS4 Emulator Project
+ * SPDX-License-Identifier: GPL-2.0-or-later */
 
-#pragma once
+#ifndef SHADPS4_LIBRARIES_SAVE_DATA_SAVE_INSTANCE_H
+#define SHADPS4_LIBRARIES_SAVE_DATA_SAVE_INSTANCE_H
 
-#include <algorithm>
-#include <array>
-#include <chrono>
-#include <cstring>
-#include <ctime>
-#include <filesystem>
-#include <optional>
-#include <span>
-#include <string>
-#include <string_view>
+/* One save folder, mounted at /savedataN while the game uses it (save_instance.c), and what
+ * the save library's parts share: where saves are, a save's param.sfo. */
 
-#include <core/libraries/system/userservice.h>
-#include "common/io_file.h"
-#include "common/path_util.h"
+#include <stddef.h>
+
+#include <boolean.h>
+#include <retro_common_api.h>
+#include <retro_miscellaneous.h>
+
+#include "common/types.h"
 #include "core/file_format/psf.h"
+#include "core/libraries/save_data/savedata.h"
 
-namespace Core::FileSys {
-class MntPoints;
-}
+RETRO_BEGIN_DECLS
 
-namespace Libraries::SaveData {
+/* A save's param.sfo keys */
+#define SAVE_PARAM_ACCOUNT_ID "ACCOUNT_ID"
+#define SAVE_PARAM_ATTRIBUTE "ATTRIBUTE"
+#define SAVE_PARAM_CATEGORY "CATEGORY"
+#define SAVE_PARAM_DETAIL "DETAIL"
+#define SAVE_PARAM_FORMAT "FORMAT"
+#define SAVE_PARAM_MAINTITLE "MAINTITLE"
+#define SAVE_PARAM_PARAMS "PARAMS"
+#define SAVE_PARAM_SAVEDATA_BLOCKS "SAVEDATA_BLOCKS"
+#define SAVE_PARAM_SAVEDATA_DIRECTORY "SAVEDATA_DIRECTORY"
+#define SAVE_PARAM_SAVEDATA_LIST_PARAM "SAVEDATA_LIST_PARAM"
+#define SAVE_PARAM_SUBTITLE "SUBTITLE"
+#define SAVE_PARAM_TITLE_ID "TITLE_ID"
 
-// Used constexpr to easily use as string
-namespace SaveParams {
-constexpr std::string_view ACCOUNT_ID = "ACCOUNT_ID";
-constexpr std::string_view ATTRIBUTE = "ATTRIBUTE";
-constexpr std::string_view CATEGORY = "CATEGORY";
-constexpr std::string_view DETAIL = "DETAIL";
-constexpr std::string_view FORMAT = "FORMAT";
-constexpr std::string_view MAINTITLE = "MAINTITLE";
-constexpr std::string_view PARAMS = "PARAMS";
-constexpr std::string_view SAVEDATA_BLOCKS = "SAVEDATA_BLOCKS";
-constexpr std::string_view SAVEDATA_DIRECTORY = "SAVEDATA_DIRECTORY";
-constexpr std::string_view SAVEDATA_LIST_PARAM = "SAVEDATA_LIST_PARAM";
-constexpr std::string_view SUBTITLE = "SUBTITLE";
-constexpr std::string_view TITLE_ID = "TITLE_ID";
-} // namespace SaveParams
+/* The longest serial or folder name kept, terminator included */
+#define SAVE_NAME_SIZE 64
 
-using OrbisUserServiceUserId = s32;
-
-// A save's param.sfo (psf.c), held for the C++ that is left here
-class PSF {
-public:
-    PSF() {
-        psf_init(&psf);
-    }
-    ~PSF() {
-        psf_free(&psf);
-    }
-    PSF(const PSF& other) {
-        psf_init(&psf);
-        psf_copy(&psf, &other.psf);
-    }
-    PSF(PSF&& other) noexcept : psf{other.psf} {
-        psf_init(&other.psf);
-    }
-    PSF& operator=(const PSF& other) {
-        psf_copy(&psf, &other.psf);
-        return *this;
-    }
-    PSF& operator=(PSF&& other) noexcept {
-        if (this != &other) {
-            psf_free(&psf);
-            psf = other.psf;
-            psf_init(&other.psf);
-        }
-        return *this;
-    }
-
-    bool Open(const std::filesystem::path& path) {
-        return psf_open_path(&psf, Common::FS::PathToUTF8String(path).c_str());
-    }
-    bool Encode(const std::filesystem::path& path) {
-        return psf_encode_path(&psf, Common::FS::PathToUTF8String(path).c_str());
-    }
-
-    std::optional<std::string_view> GetString(std::string_view key) const {
-        const char* value;
-        size_t length;
-        if (!psf_get_string(&psf, Key(key).data(), &value, &length)) {
-            return std::nullopt;
-        }
-        return std::string_view{value, length};
-    }
-    std::optional<s32> GetInteger(std::string_view key) const {
-        s32 value;
-        if (!psf_get_integer(&psf, Key(key).data(), &value)) {
-            return std::nullopt;
-        }
-        return value;
-    }
-    std::optional<std::span<const u8>> GetBinary(std::string_view key) const {
-        const u8* value;
-        u32 length;
-        if (!psf_get_binary(&psf, Key(key).data(), &value, &length)) {
-            return std::nullopt;
-        }
-        return std::span<const u8>{value, length};
-    }
-
-    void AddString(std::string_view key, std::string_view value, bool update = false) {
-        psf_set_string(&psf, Key(key).data(), value.data(), value.size(), update);
-    }
-    void AddInteger(std::string_view key, s32 value, bool update = false) {
-        psf_set_integer(&psf, Key(key).data(), value, update);
-    }
-    void AddBinary(std::string_view key, u64 value, bool update = false) {
-        psf_set_binary_u64(&psf, Key(key).data(), value, update);
-    }
-
-    std::chrono::system_clock::time_point GetLastWrite() const {
-        return std::chrono::system_clock::from_time_t(static_cast<std::time_t>(psf.last_write));
-    }
-
-private:
-    // @key terminated: the keys are short
-    static std::array<char, 64> Key(std::string_view key) {
-        std::array<char, 64> out{};
-        std::memcpy(out.data(), key.data(), std::min(key.size(), out.size() - 1));
-        return out;
-    }
-
-    psf_t psf;
+/* What setting a save up can end in */
+enum {
+    SAVE_SETUP_OK = 0,
+    SAVE_SETUP_BROKEN, /* corrupted, or its param.sfo unreadable */
+    SAVE_SETUP_NO_SPACE,
+    SAVE_SETUP_FAILED
 };
 
-// The game's INSTALL_DIR_SAVEDATA, or else its serial
-std::string GameSaveSerial();
+typedef struct save_instance {
+    int slot_num;
+    s32 user_id;
+    char game_serial[SAVE_NAME_SIZE];
+    char dir_name[SAVE_NAME_SIZE];
+    char save_path[PATH_MAX_LENGTH];
+    char mount_point[SAVE_DATA_MOUNT_POINT_DATA_MAXSIZE];
+    psf_t param_sfo;
+    int max_blocks;
+    bool exists;
+    bool mounted;
+    bool read_only;
+} save_instance_t;
 
-class SaveInstance {
-    int slot_num{};
-    int user_id{};
-    std::string game_serial;
-    std::string dir_name;
+/* Where all of a title's saves are: <home>/<user>/savedata/<serial> */
+void save_make_title_path(char* out, size_t size, s32 user_id, const char* game_serial);
+/* Where one save is: <home>/<user>/savedata/<serial>/<dir> */
+void save_make_dir_path(char* out, size_t size, s32 user_id, const char* game_serial,
+                        const char* dir_name);
+/* @dir/@rel */
+void save_join(char* out, size_t size, const char* dir, const char* rel);
 
-    std::filesystem::path save_path;
-    std::filesystem::path param_sfo_path;
-    std::filesystem::path corrupt_file_path;
+/* The blocks SAVEDATA_BLOCKS gives, or the most there may be */
+u64 save_max_blocks_from_sfo(const psf_t* psf);
+/* A new save's param.sfo: a title in the console's language, @dir_name and @game_serial */
+void save_default_param_sfo(psf_t* psf, const char* dir_name, const char* game_serial);
 
-    PSF param_sfo;
-    std::string mount_point;
+/* OrbisSaveDataParam::FromSFO: the param's texts and user value, and when it was written */
+void save_param_from_sfo(OrbisSaveDataParam* param, const psf_t* sfo);
+/* OrbisSaveDataParam::ToSFO */
+void save_param_to_sfo(const OrbisSaveDataParam* param, psf_t* sfo);
 
-    int max_blocks{};
-    bool exists{};
-    bool mounted{};
-    bool read_only{};
+/* The game's INSTALL_DIR_SAVEDATA, or else its serial, cut to fit in @size */
+void save_game_serial(char* out, size_t size);
 
-public:
-    // Location of all save data for a title
-    static std::filesystem::path MakeTitleSavePath(
-        Libraries::UserService::OrbisUserServiceUserId user_id, std::string_view game_serial);
+/* A new instance at slot @slot_num (0 to 15), for @dir_name of @game_serial; the blocks are
+ * clamped to what a save may have */
+void save_instance_init(save_instance_t* s, int slot_num, s32 user_id, const char* game_serial,
+                        const char* dir_name, int max_blocks);
+/* Frees what it holds (unmounted first if mounted) */
+void save_instance_free(save_instance_t* s);
+/* Makes the save if it is not there, checks it (restoring its backup when it is broken), and
+ * mounts it: SAVE_SETUP_* */
+int save_instance_setup_and_mount(save_instance_t* s, bool read_only, bool copy_icon,
+                                  bool ignore_corrupt, bool dont_restore_backup);
+/* Writes its param.sfo and unmounts it: false if the param.sfo could not be written (it is
+ * unmounted all the same) */
+bool save_instance_umount(save_instance_t* s);
+/* <save>/sce_sys/icon0.png */
+void save_instance_icon_path(const save_instance_t* s, char* out, size_t size);
 
-    // Location of a specific save data directory
-    static std::filesystem::path MakeDirSavePath(
-        Libraries::UserService::OrbisUserServiceUserId user_id, std::string_view game_serial,
-        std::string_view dir_name);
+/* Writes @size bytes at @path whole, replacing it: false if it could not */
+bool save_write_file(const char* path, const void* data, size_t size);
+/* Writes the game's sce_sys/save_data.png at @path: false if the game has none */
+bool save_write_game_icon(const char* path);
+/* Shows @msg in the emulator's message dialog, with OK, until it is pressed */
+void save_show_message(const char* msg);
+/* The bytes in the folder @dir and everything in it */
+u64 save_dir_size(const char* dir);
 
-    static uint64_t GetMaxBlockFromSFO(const PSF& psf);
+RETRO_END_DECLS
 
-    // Get param.sfo path from a dir_path generated by MakeDirSavePath
-    static std::filesystem::path GetParamSFOPath(const std::filesystem::path& dir_path);
-
-    static void SetupDefaultParamSFO(PSF& param_sfo, std::string dir_name, std::string game_serial);
-
-    explicit SaveInstance(int slot_num, Libraries::UserService::OrbisUserServiceUserId user_id,
-                          std::string game_serial, std::string_view dir_name, int max_blocks = 0);
-
-    ~SaveInstance();
-
-    SaveInstance(const SaveInstance& other) = delete;
-    SaveInstance(SaveInstance&& other) noexcept;
-
-    SaveInstance& operator=(const SaveInstance& other) = delete;
-    SaveInstance& operator=(SaveInstance&& other) noexcept;
-
-    void SetupAndMount(bool read_only = false, bool copy_icon = false, bool ignore_corrupt = false,
-                       bool dont_restore_backup = false);
-
-    void Umount();
-
-    [[nodiscard]] std::filesystem::path GetIconPath() const noexcept {
-        return save_path / "sce_sys" / "icon0.png";
-    }
-
-    [[nodiscard]] bool Exists() const noexcept {
-        return exists;
-    }
-
-    [[nodiscard]] OrbisUserServiceUserId GetUserId() const noexcept {
-        return user_id;
-    }
-
-    [[nodiscard]] std::string_view GetTitleId() const noexcept {
-        return game_serial;
-    }
-
-    [[nodiscard]] const std::string& GetDirName() const noexcept {
-        return dir_name;
-    }
-
-    [[nodiscard]] const std::filesystem::path& GetSavePath() const noexcept {
-        return save_path;
-    }
-
-    [[nodiscard]] const PSF& GetParamSFO() const noexcept {
-        return param_sfo;
-    }
-
-    [[nodiscard]] PSF& GetParamSFO() noexcept {
-        return param_sfo;
-    }
-
-    [[nodiscard]] const std::string& GetMountPoint() const noexcept {
-        return mount_point;
-    }
-
-    [[nodiscard]] int GetMaxBlocks() const noexcept {
-        return max_blocks;
-    }
-
-    [[nodiscard]] bool Mounted() const noexcept {
-        return mounted;
-    }
-
-    [[nodiscard]] bool IsReadOnly() const noexcept {
-        return read_only;
-    }
-
-    void CreateFiles();
-};
-
-} // namespace Libraries::SaveData
+#endif

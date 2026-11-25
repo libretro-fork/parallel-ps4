@@ -89,7 +89,7 @@ void Emulator::Shutdown() {
 
 void Emulator::ShutdownOnce() {
     Common::Log::Flush();
-    Libraries::SaveData::Backup::StopThread();
+    save_backup_stop_thread();
     Storage::DataBase::Instance().Close();
 }
 

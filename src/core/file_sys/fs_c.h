@@ -67,6 +67,8 @@ s32 fs_read_addcont(const char* path, bool want_key, fs_addcont_t* out);
  * @guest_folder */
 void fs_mount(const char* host_path, const char* guest_folder, bool read_only);
 void fs_unmount(const char* guest_folder);
+/* MntPoints::GetMount: whether something is mounted at the game's @guest_folder */
+bool fs_is_mounted(const char* guest_folder);
 
 /* The host folder @host_dir made (emptied first with @format) and mounted at @guest_folder */
 void fs_mount_made_folder(const char* host_dir, bool format, const char* guest_folder);

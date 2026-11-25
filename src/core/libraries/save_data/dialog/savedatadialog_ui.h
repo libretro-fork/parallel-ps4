@@ -1,301 +1,255 @@
-// SPDX-FileCopyrightText: Copyright 2024 shadPS4 Emulator Project
-// SPDX-License-Identifier: GPL-2.0-or-later
+/* SPDX-FileCopyrightText: Copyright 2024-2026 shadPS4 Emulator Project
+ * SPDX-License-Identifier: GPL-2.0-or-later */
 
-#pragma once
+#ifndef SHADPS4_LIBRARIES_SAVE_DATA_DIALOG_SAVEDATADIALOG_UI_H
+#define SHADPS4_LIBRARIES_SAVE_DATA_DIALOG_SAVEDATADIALOG_UI_H
 
-#include <chrono>
-#include <optional>
-#include <string>
-#include <variant>
-#include <vector>
+/* What the save data dialog shows (savedatadialog_ui.c): read from the game's saves when it
+ * opens, and drawn by the overlay (video_core/overlay/ovl_savedialog.c), which it lends its
+ * texts and the saves' icons. */
 
+#include <stddef.h>
+
+#include <boolean.h>
+#include <retro_common_api.h>
+
+#include "common/types.h"
 #include "core/libraries/save_data/save_instance.h"
 #include "core/libraries/save_data/savedata.h"
-#include "core/libraries/system/commondialog.h"
+#include "core/libraries/system/commondialog_c.h"
 #include "video_core/overlay/ovl_layers.h"
 
-namespace Libraries::SaveData::Dialog {
+RETRO_BEGIN_DECLS
 
-using OrbisUserServiceUserId = s32;
+typedef enum SaveDataDialogMode {
+    SAVE_DATA_DIALOG_MODE_INVALID = 0,
+    SAVE_DATA_DIALOG_MODE_LIST = 1,
+    SAVE_DATA_DIALOG_MODE_USER_MSG = 2,
+    SAVE_DATA_DIALOG_MODE_SYSTEM_MSG = 3,
+    SAVE_DATA_DIALOG_MODE_ERROR_CODE = 4,
+    SAVE_DATA_DIALOG_MODE_PROGRESS_BAR = 5
+} SaveDataDialogMode;
 
-enum class SaveDataDialogMode : u32 {
-    INVALID = 0,
-    LIST = 1,
-    USER_MSG = 2,
-    SYSTEM_MSG = 3,
-    ERROR_CODE = 4,
-    PROGRESS_BAR = 5,
-};
+/* DialogType */
+#define SAVE_DATA_DIALOG_TYPE_SAVE 1u
+#define SAVE_DATA_DIALOG_TYPE_LOAD 2u
+#define SAVE_DATA_DIALOG_TYPE_DELETE 3u
 
-enum class DialogType : u32 {
-    SAVE = 1,
-    LOAD = 2,
-    DELETE = 3,
-};
+/* ButtonId */
+#define SAVE_DATA_DIALOG_BUTTON_INVALID 0u
+#define SAVE_DATA_DIALOG_BUTTON_OK 1u
+#define SAVE_DATA_DIALOG_BUTTON_YES 1u
+#define SAVE_DATA_DIALOG_BUTTON_NO 2u
 
-enum class DialogAnimation : u32 {
-    ON = 0,
-    OFF = 1,
-};
+/* UserMessageType */
+#define SAVE_DATA_DIALOG_USER_MSG_NORMAL 0u
+#define SAVE_DATA_DIALOG_USER_MSG_ERROR 1u
 
-enum class ButtonId : u32 {
-    INVALID = 0,
-    OK = 1,
-    YES = 1,
-    NO = 2,
-};
+/* FocusPos */
+#define SAVE_DATA_DIALOG_FOCUS_LISTHEAD 0u
+#define SAVE_DATA_DIALOG_FOCUS_LISTTAIL 1u
+#define SAVE_DATA_DIALOG_FOCUS_DATAHEAD 2u
+#define SAVE_DATA_DIALOG_FOCUS_DATATAIL 3u
+#define SAVE_DATA_DIALOG_FOCUS_DATALATEST 4u
+#define SAVE_DATA_DIALOG_FOCUS_DATAOLDEST 5u
+#define SAVE_DATA_DIALOG_FOCUS_DIRNAME 6u
 
-enum class ButtonType : u32 {
-    OK = 0,
-    YESNO = 1,
-    NONE = 2,
-    OKCANCEL = 3,
-};
+typedef enum SaveDataSystemMessageType {
+    SAVE_DATA_SYSTEM_MESSAGE_NODATA = 1,
+    SAVE_DATA_SYSTEM_MESSAGE_CONFIRM = 2,
+    SAVE_DATA_SYSTEM_MESSAGE_OVERWRITE = 3,
+    SAVE_DATA_SYSTEM_MESSAGE_NOSPACE = 4,
+    SAVE_DATA_SYSTEM_MESSAGE_PROGRESS = 5,
+    SAVE_DATA_SYSTEM_MESSAGE_FILE_CORRUPTED = 6,
+    SAVE_DATA_SYSTEM_MESSAGE_FINISHED = 7,
+    SAVE_DATA_SYSTEM_MESSAGE_NOSPACE_CONTINUABLE = 8,
+    SAVE_DATA_SYSTEM_MESSAGE_CORRUPTED_AND_DELETED = 10,
+    SAVE_DATA_SYSTEM_MESSAGE_CORRUPTED_AND_CREATED = 11,
+    SAVE_DATA_SYSTEM_MESSAGE_CORRUPTED_AND_RESTORE = 13,
+    SAVE_DATA_SYSTEM_MESSAGE_TOTAL_SIZE_EXCEEDED = 14
+} SaveDataSystemMessageType;
 
-enum class UserMessageType : u32 {
-    NORMAL = 0,
-    ERROR = 1,
-};
+/* ProgressSystemMessageType */
+#define SAVE_DATA_DIALOG_PROGRESS_INVALID 0u
+#define SAVE_DATA_DIALOG_PROGRESS_PROGRESS 1u
+#define SAVE_DATA_DIALOG_PROGRESS_RESTORE 2u
 
-enum class FocusPos : u32 {
-    LISTHEAD = 0,
-    LISTTAIL = 1,
-    DATAHEAD = 2,
-    DATATAIL = 3,
-    DATALTATEST = 4,
-    DATAOLDEST = 5,
-    DIRNAME = 6,
-};
+/* OptionBack */
+#define SAVE_DATA_DIALOG_BACK_ENABLE 0u
+#define SAVE_DATA_DIALOG_BACK_DISABLE 1u
 
-enum class ItemStyle : u32 {
-    TITLE_DATASIZE_SUBTITLE = 0,
-    TITLE_SUBTITLE_DATESIZE = 1,
-    TITLE_DATESIZE = 2,
-};
+/* OrbisSaveDataDialogProgressBarTarget */
+#define SAVE_DATA_DIALOG_PROGRESS_BAR_TARGET_DEFAULT 0u
 
-enum class SystemMessageType : u32 {
-    NODATA = 1,
-    CONFIRM = 2,
-    OVERWRITE = 3,
-    NOSPACE = 4,
-    PROGRESS = 5,
-    FILE_CORRUPTED = 6,
-    FINISHED = 7,
-    NOSPACE_CONTINUABLE = 8,
-    CORRUPTED_AND_DELETED = 10,
-    CORRUPTED_AND_CREATED = 11,
-    CORRUPTED_AND_RESTORE = 13,
-    TOTAL_SIZE_EXCEEDED = 14,
-};
+typedef struct SaveDataDialogAnimationParam {
+    u32 userOK;
+    u32 userCancel;
+    u8 _reserved[32];
+} SaveDataDialogAnimationParam;
 
-enum class ProgressBarType : u32 {
-    PERCENTAGE = 0,
-};
-
-enum class ProgressSystemMessageType : u32 {
-    INVALID = 0,
-    PROGRESS = 1,
-    RESTORE = 2,
-};
-
-enum class OptionBack : u32 {
-    ENABLE = 0,
-    DISABLE = 1,
-};
-
-enum class OrbisSaveDataDialogProgressBarTarget : u32 {
-    DEFAULT = 0,
-};
-
-struct AnimationParam {
-    DialogAnimation userOK;
-    DialogAnimation userCancel;
-    std::array<u8, 32> _reserved;
-};
-
-struct SaveDialogNewItem {
+typedef struct SaveDataDialogNewItem {
     const char* title;
     void* iconBuf;
     size_t iconSize;
-    std::array<u8, 32> _reserved;
-};
+    u8 _reserved[32];
+} SaveDataDialogNewItem;
 
-struct SaveDialogItems {
-    OrbisUserServiceUserId userId;
-    s32 : 32;
+typedef struct SaveDataDialogItems {
+    s32 userId;
+    u8 _pad[4];
     const OrbisSaveDataTitleId* titleId;
     const OrbisSaveDataDirName* dirName;
     u32 dirNameNum;
-    s32 : 32;
-    const SaveDialogNewItem* newItem;
-    FocusPos focusPos;
-    s32 : 32;
+    u8 _pad2[4];
+    const SaveDataDialogNewItem* newItem;
+    u32 focusPos;
+    u8 _pad3[4];
     const OrbisSaveDataDirName* focusPosDirName;
-    ItemStyle itemStyle;
-    std::array<u8, 32> _reserved;
-};
+    u32 itemStyle;
+    u8 _reserved[32];
+} SaveDataDialogItems;
 
-struct UserMessageParam {
-    ButtonType buttonType;
-    UserMessageType msgType;
+typedef struct SaveDataDialogUserMessageParam {
+    u32 buttonType;
+    u32 msgType;
     const char* msg;
-    std::array<u8, 32> _reserved;
-};
+    u8 _reserved[32];
+} SaveDataDialogUserMessageParam;
 
-struct SystemMessageParam {
-    SystemMessageType msgType;
-    s32 : 32;
+typedef struct SaveDataDialogSystemMessageParam {
+    u32 msgType;
+    u8 _pad[4];
     u64 value;
-    std::array<u8, 32> _reserved;
-};
+    u8 _reserved[32];
+} SaveDataDialogSystemMessageParam;
 
-struct ErrorCodeParam {
+typedef struct SaveDataDialogErrorCodeParam {
     u32 errorCode;
-    std::array<u8, 32> _reserved;
-};
+    u8 _reserved[32];
+} SaveDataDialogErrorCodeParam;
 
-struct ProgressBarParam {
-    ProgressBarType barType;
-    s32 : 32;
+typedef struct SaveDataDialogProgressBarParam {
+    u32 barType;
+    u8 _pad[4];
     const char* msg;
-    ProgressSystemMessageType sysMsgType;
-    std::array<u8, 28> _reserved;
-};
+    u32 sysMsgType;
+    u8 _reserved[28];
+} SaveDataDialogProgressBarParam;
 
-struct OptionParam {
-    OptionBack back;
-    std::array<u8, 32> _reserved;
-};
+typedef struct SaveDataDialogOptionParam {
+    u32 back;
+    u8 _reserved[32];
+} SaveDataDialogOptionParam;
 
-struct OrbisSaveDataDialogParam {
-    CommonDialog::BaseParam baseParam;
+typedef struct OrbisSaveDataDialogParam {
+    common_dialog_base_param baseParam;
     s32 size;
-    SaveDataDialogMode mode;
-    DialogType dispType;
-    s32 : 32;
-    AnimationParam* animParam;
-    SaveDialogItems* items;
-    UserMessageParam* userMsgParam;
-    SystemMessageParam* sysMsgParam;
-    ErrorCodeParam* errorCodeParam;
-    ProgressBarParam* progressBarParam;
+    u32 mode;
+    u32 dispType;
+    u8 _pad[4];
+    SaveDataDialogAnimationParam* animParam;
+    SaveDataDialogItems* items;
+    SaveDataDialogUserMessageParam* userMsgParam;
+    SaveDataDialogSystemMessageParam* sysMsgParam;
+    SaveDataDialogErrorCodeParam* errorCodeParam;
+    SaveDataDialogProgressBarParam* progressBarParam;
     void* userData;
-    OptionParam* optionParam;
-    std::array<u8, 24> _reserved;
-};
+    SaveDataDialogOptionParam* optionParam;
+    u8 _reserved[24];
+} OrbisSaveDataDialogParam;
 
-struct OrbisSaveDataDialogResult {
-    SaveDataDialogMode mode{};
-    CommonDialog::Result result{};
-    ButtonId buttonId{};
-    s32 : 32;
+typedef struct OrbisSaveDataDialogResult {
+    u32 mode;
+    u32 result;
+    u32 buttonId;
+    u8 _pad[4];
     OrbisSaveDataDirName* dirName;
     OrbisSaveDataParam* param;
     void* userData;
-    std::array<u8, 32> _reserved;
+    u8 _reserved[32];
+} OrbisSaveDataDialogResult;
+
+/* A dialog's result, kept until the game asks for it */
+typedef struct save_dialog_result {
+    u32 mode;
+    u32 result; /* COMMON_DIALOG_RESULT_* */
+    u32 button_id;
+    char dir_name[SAVE_NAME_SIZE];
+    bool has_param; /* the save chosen has a title */
+    OrbisSaveDataParam param;
+    void* user_data;
+} save_dialog_result_t;
+
+/* A save the dialog shows */
+typedef struct save_dialog_item {
+    char dir_name[SAVE_NAME_SIZE];
+    int icon; /* the overlay's image (ovl_tex_decode_icon), 0 for none */
+    char title[256];
+    char subtitle[256];
+    char date[64];
+    char size[32];
+    s64 last_write;
+    bool has_param; /* its param.sfo has a title: param is what the game is given */
+    OrbisSaveDataParam param;
+    bool is_corrupted;
+} save_dialog_item_t;
+
+/* What a message shows */
+enum {
+    SAVE_DIALOG_STATE_NONE = 0,
+    SAVE_DIALOG_STATE_USER,
+    SAVE_DIALOG_STATE_SYSTEM,
+    SAVE_DIALOG_STATE_ERROR_CODE,
+    SAVE_DIALOG_STATE_PROGRESS_BAR
 };
 
-struct SaveDialogResult {
-    SaveDataDialogMode mode{};
-    CommonDialog::Result result{CommonDialog::Result::OK};
-    ButtonId button_id{ButtonId::INVALID};
-    std::string dir_name{};
-    PSF param{};
-    void* user_data{};
+/* Where the focus starts */
+enum { SAVE_DIALOG_FOCUS_NONE = 0, SAVE_DIALOG_FOCUS_POS, SAVE_DIALOG_FOCUS_DIR };
 
-    void CopyTo(OrbisSaveDataDialogResult& result) const;
-};
+typedef struct save_dialog_state {
+    u32 mode; /* SaveDataDialogMode */
+    u32 type; /* SAVE_DATA_DIALOG_TYPE_* */
+    void* user_data;
+    int enable_back; /* the game's option: 1, 0, or -1 when it gave none */
 
-/// What a dialog shows, read from the game's saves when it opens; drawn by the overlay
-/// (video_core/overlay/ovl_savedialog.c), which it lends its texts and the saves' icons.
-class SaveDialogState {
-public:
-    struct UserState {
-        ButtonType type{};
-        UserMessageType msg_type{};
-        std::string msg{};
+    s32 user_id;
+    char title_id[SAVE_NAME_SIZE];
+    /* The saves: kept, and their room, from one dialog to the next */
+    save_dialog_item_t* save_list;
+    size_t save_count;
+    size_t save_room;
+    int focus_kind; /* SAVE_DIALOG_FOCUS_* */
+    u32 focus_pos;
+    char focus_dir[SAVE_NAME_SIZE];
+    u32 style;
 
-        UserState(const OrbisSaveDataDialogParam& param);
-    };
-    struct SystemState {
-        std::string msg{};
-        bool hide_ok{};
-        bool show_no{}; // Yes instead of OK
-        bool show_cancel{};
+    bool has_new_item;
+    save_dialog_item_t new_item;
 
-        bool return_cancel{};
+    int state; /* SAVE_DIALOG_STATE_* */
+    char msg[2048];
+    u32 user_type, user_msg_type;                      /* a user message's */
+    bool hide_ok, show_no, show_cancel, return_cancel; /* a system message's */
 
-        SystemState(const SaveDialogState& state, const OrbisSaveDataDialogParam& param);
-    };
-    struct ErrorCodeState {
-        std::string error_msg{};
+    /* What the overlay draws from, lending the strings above */
+    ovl_save_item_t* view;
+    size_t view_room;
+} save_dialog_state_t;
 
-        ErrorCodeState(const OrbisSaveDataDialogParam& param);
-    };
-    struct ProgressBarState {
-        std::string msg{};
+/* Reads what @param asks to show into @s, which it keeps */
+void save_dialog_state_build(save_dialog_state_t* s, const OrbisSaveDataDialogParam* param);
+/* What the overlay is opened with, lending @s's texts and icons */
+ovl_save_dialog_param_t save_dialog_state_make_param(save_dialog_state_t* s);
+/* The result of a dialog finished with @button and @result, @item the save chosen (an index
+ * into what make_param lent, -1 for none) */
+void save_dialog_state_make_result(const save_dialog_state_t* s, save_dialog_result_t* out,
+                                   int button, int result, int item);
+/* Lets the icons go, once the overlay no longer draws them */
+void save_dialog_state_release_icons(save_dialog_state_t* s);
 
-        ProgressBarState(const SaveDialogState& state, const OrbisSaveDataDialogParam& param);
-    };
+/* SaveDialogResult::CopyTo */
+void save_dialog_result_copy_to(const save_dialog_result_t* r, OrbisSaveDataDialogResult* out);
 
-    struct Item {
-        std::string dir_name{};
-        int icon{}; ///< the overlay's image (ovl_tex_decode_icon), 0 for none
+RETRO_END_DECLS
 
-        std::string title{};
-        std::string subtitle{};
-        std::string details{};
-        std::string date{};
-        std::string size{};
-
-        std::chrono::system_clock::time_point last_write{};
-        PSF pfo{};
-        bool is_corrupted{};
-    };
-
-private:
-    SaveDataDialogMode mode{};
-    DialogType type{};
-    void* user_data{};
-    std::optional<bool> enable_back{};
-
-    OrbisUserServiceUserId user_id{};
-    std::string title_id{};
-    std::vector<Item> save_list{};
-    std::variant<FocusPos, std::string, std::monostate> focus_pos{std::monostate{}};
-    ItemStyle style{};
-
-    std::optional<Item> new_item{};
-
-    std::variant<UserState, SystemState, ErrorCodeState, ProgressBarState, std::monostate> state{
-        std::monostate{}};
-
-    /// What the overlay draws from, lending the strings above
-    std::vector<ovl_save_item_t> view{};
-
-    [[nodiscard]] int FocusIndex() const;
-
-public:
-    explicit SaveDialogState(const OrbisSaveDataDialogParam& param);
-
-    SaveDialogState() = default;
-
-    [[nodiscard]] SaveDataDialogMode GetMode() const {
-        return mode;
-    }
-
-    template <typename T>
-    [[nodiscard]] T& GetState() {
-        return std::get<T>(state);
-    }
-
-    /// What the overlay is opened with, lending this state's texts and icons
-    [[nodiscard]] ovl_save_dialog_param_t MakeParam();
-    /// The result of a dialog finished with @button and @result, @item the save chosen (an
-    /// index into what MakeParam lent, -1 for none)
-    void MakeResult(SaveDialogResult& out, int button, int result, int item) const;
-    /// Lets the icons go, once the overlay no longer draws them
-    void ReleaseIcons();
-};
-
-}; // namespace Libraries::SaveData::Dialog
+#endif

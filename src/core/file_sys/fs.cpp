@@ -948,6 +948,11 @@ extern "C" void fs_unmount(const char* guest_folder) {
     mnt->Unmount(guest_folder);
 }
 
+extern "C" bool fs_is_mounted(const char* guest_folder) {
+    auto* mnt = Common::Singleton<Core::FileSys::MntPoints>::Instance();
+    return mnt->GetMount(guest_folder) != nullptr;
+}
+
 extern "C" void fs_mount_made_folder(const char* host_dir, bool format, const char* guest_folder) {
     const auto dir = Common::FS::PathFromUTF8String(host_dir);
     if (format) {

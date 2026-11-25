@@ -32,6 +32,10 @@ static Common::Log::Class ToClass(c_log_class log_class) {
         return Common::Log::Class::Lib_PlayGo;
     case C_LOG_LIB_PLAYGO_DIALOG:
         return Common::Log::Class::Lib_PlayGoDialog;
+    case C_LOG_LIB_SAVE_DATA:
+        return Common::Log::Class::Lib_SaveData;
+    case C_LOG_LIB_SAVE_DATA_DIALOG:
+        return Common::Log::Class::Lib_SaveDataDialog;
     case C_LOG_LIB_COMMON_DLG:
         return Common::Log::Class::Lib_CommonDlg;
     case C_LOG_LIB_WEB_BROWSER_DIALOG:

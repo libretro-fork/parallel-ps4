@@ -529,54 +529,6 @@ static const enum_name_entry_t enum_names_Libraries_Np_NpWebApi_OrbisNpWebApiHtt
 const enum_names_t enum_names_Libraries_Np_NpWebApi_OrbisNpWebApiHttpMethod = {enum_names_Libraries_Np_NpWebApi_OrbisNpWebApiHttpMethod_entries,
     sizeof(enum_names_Libraries_Np_NpWebApi_OrbisNpWebApiHttpMethod_entries) / sizeof(enum_names_Libraries_Np_NpWebApi_OrbisNpWebApiHttpMethod_entries[0])};
 
-static const enum_name_entry_t enum_names_Libraries_SaveData_Backup_WorkerStatus_entries[] = {
-    {(int64_t)0, "NotStarted"},
-    {(int64_t)1, "Waiting"},
-    {(int64_t)2, "Running"},
-    {(int64_t)3, "Stopping"},
-};
-const enum_names_t enum_names_Libraries_SaveData_Backup_WorkerStatus = {enum_names_Libraries_SaveData_Backup_WorkerStatus_entries,
-    sizeof(enum_names_Libraries_SaveData_Backup_WorkerStatus_entries) / sizeof(enum_names_Libraries_SaveData_Backup_WorkerStatus_entries[0])};
-
-static const enum_name_entry_t enum_names_Libraries_SaveData_Dialog_SaveDataDialogMode_entries[] = {
-    {(int64_t)0, "INVALID"},
-    {(int64_t)1, "LIST"},
-    {(int64_t)2, "USER_MSG"},
-    {(int64_t)3, "SYSTEM_MSG"},
-    {(int64_t)4, "ERROR_CODE"},
-    {(int64_t)5, "PROGRESS_BAR"},
-};
-const enum_names_t enum_names_Libraries_SaveData_Dialog_SaveDataDialogMode = {enum_names_Libraries_SaveData_Dialog_SaveDataDialogMode_entries,
-    sizeof(enum_names_Libraries_SaveData_Dialog_SaveDataDialogMode_entries) / sizeof(enum_names_Libraries_SaveData_Dialog_SaveDataDialogMode_entries[0])};
-
-static const enum_name_entry_t enum_names_Libraries_SaveData_Dialog_SystemMessageType_entries[] = {
-    {(int64_t)1, "NODATA"},
-    {(int64_t)2, "CONFIRM"},
-    {(int64_t)3, "OVERWRITE"},
-    {(int64_t)4, "NOSPACE"},
-    {(int64_t)5, "PROGRESS"},
-    {(int64_t)6, "FILE_CORRUPTED"},
-    {(int64_t)7, "FINISHED"},
-    {(int64_t)8, "NOSPACE_CONTINUABLE"},
-    {(int64_t)10, "CORRUPTED_AND_DELETED"},
-    {(int64_t)11, "CORRUPTED_AND_CREATED"},
-    {(int64_t)13, "CORRUPTED_AND_RESTORE"},
-    {(int64_t)14, "TOTAL_SIZE_EXCEEDED"},
-};
-const enum_names_t enum_names_Libraries_SaveData_Dialog_SystemMessageType = {enum_names_Libraries_SaveData_Dialog_SystemMessageType_entries,
-    sizeof(enum_names_Libraries_SaveData_Dialog_SystemMessageType_entries) / sizeof(enum_names_Libraries_SaveData_Dialog_SystemMessageType_entries[0])};
-
-static const enum_name_entry_t enum_names_Libraries_SaveData_OrbisSaveDataParamType_entries[] = {
-    {(int64_t)0, "ALL"},
-    {(int64_t)1, "TITLE"},
-    {(int64_t)2, "SUB_TITLE"},
-    {(int64_t)3, "DETAIL"},
-    {(int64_t)4, "USER_PARAM"},
-    {(int64_t)5, "MTIME"},
-};
-const enum_names_t enum_names_Libraries_SaveData_OrbisSaveDataParamType = {enum_names_Libraries_SaveData_OrbisSaveDataParamType_entries,
-    sizeof(enum_names_Libraries_SaveData_OrbisSaveDataParamType_entries) / sizeof(enum_names_Libraries_SaveData_OrbisSaveDataParamType_entries[0])};
-
 static const enum_name_entry_t enum_names_AjmCodecType_entries[] = {
     {(int64_t)0, "AJM_CODEC_TYPE_MP3_DEC"},
     {(int64_t)1, "AJM_CODEC_TYPE_AT9_DEC"},
@@ -848,6 +800,54 @@ static const enum_name_entry_t enum_names_OrbisJpengEncEncodeParamSamplingType_e
 };
 const enum_names_t enum_names_OrbisJpengEncEncodeParamSamplingType = {enum_names_OrbisJpengEncEncodeParamSamplingType_entries,
     sizeof(enum_names_OrbisJpengEncEncodeParamSamplingType_entries) / sizeof(enum_names_OrbisJpengEncEncodeParamSamplingType_entries[0])};
+
+static const enum_name_entry_t enum_names_OrbisSaveDataParamType_entries[] = {
+    {(int64_t)0, "ORBIS_SAVE_DATA_PARAM_TYPE_ALL"},
+    {(int64_t)1, "ORBIS_SAVE_DATA_PARAM_TYPE_TITLE"},
+    {(int64_t)2, "ORBIS_SAVE_DATA_PARAM_TYPE_SUB_TITLE"},
+    {(int64_t)3, "ORBIS_SAVE_DATA_PARAM_TYPE_DETAIL"},
+    {(int64_t)4, "ORBIS_SAVE_DATA_PARAM_TYPE_USER_PARAM"},
+    {(int64_t)5, "ORBIS_SAVE_DATA_PARAM_TYPE_MTIME"},
+};
+const enum_names_t enum_names_OrbisSaveDataParamType = {enum_names_OrbisSaveDataParamType_entries,
+    sizeof(enum_names_OrbisSaveDataParamType_entries) / sizeof(enum_names_OrbisSaveDataParamType_entries[0])};
+
+static const enum_name_entry_t enum_names_SaveDataBackupStatus_entries[] = {
+    {(int64_t)0, "SAVE_DATA_BACKUP_STATUS_NOT_STARTED"},
+    {(int64_t)1, "SAVE_DATA_BACKUP_STATUS_WAITING"},
+    {(int64_t)2, "SAVE_DATA_BACKUP_STATUS_RUNNING"},
+    {(int64_t)3, "SAVE_DATA_BACKUP_STATUS_STOPPING"},
+};
+const enum_names_t enum_names_SaveDataBackupStatus = {enum_names_SaveDataBackupStatus_entries,
+    sizeof(enum_names_SaveDataBackupStatus_entries) / sizeof(enum_names_SaveDataBackupStatus_entries[0])};
+
+static const enum_name_entry_t enum_names_SaveDataDialogMode_entries[] = {
+    {(int64_t)0, "SAVE_DATA_DIALOG_MODE_INVALID"},
+    {(int64_t)1, "SAVE_DATA_DIALOG_MODE_LIST"},
+    {(int64_t)2, "SAVE_DATA_DIALOG_MODE_USER_MSG"},
+    {(int64_t)3, "SAVE_DATA_DIALOG_MODE_SYSTEM_MSG"},
+    {(int64_t)4, "SAVE_DATA_DIALOG_MODE_ERROR_CODE"},
+    {(int64_t)5, "SAVE_DATA_DIALOG_MODE_PROGRESS_BAR"},
+};
+const enum_names_t enum_names_SaveDataDialogMode = {enum_names_SaveDataDialogMode_entries,
+    sizeof(enum_names_SaveDataDialogMode_entries) / sizeof(enum_names_SaveDataDialogMode_entries[0])};
+
+static const enum_name_entry_t enum_names_SaveDataSystemMessageType_entries[] = {
+    {(int64_t)1, "SAVE_DATA_SYSTEM_MESSAGE_NODATA"},
+    {(int64_t)2, "SAVE_DATA_SYSTEM_MESSAGE_CONFIRM"},
+    {(int64_t)3, "SAVE_DATA_SYSTEM_MESSAGE_OVERWRITE"},
+    {(int64_t)4, "SAVE_DATA_SYSTEM_MESSAGE_NOSPACE"},
+    {(int64_t)5, "SAVE_DATA_SYSTEM_MESSAGE_PROGRESS"},
+    {(int64_t)6, "SAVE_DATA_SYSTEM_MESSAGE_FILE_CORRUPTED"},
+    {(int64_t)7, "SAVE_DATA_SYSTEM_MESSAGE_FINISHED"},
+    {(int64_t)8, "SAVE_DATA_SYSTEM_MESSAGE_NOSPACE_CONTINUABLE"},
+    {(int64_t)10, "SAVE_DATA_SYSTEM_MESSAGE_CORRUPTED_AND_DELETED"},
+    {(int64_t)11, "SAVE_DATA_SYSTEM_MESSAGE_CORRUPTED_AND_CREATED"},
+    {(int64_t)13, "SAVE_DATA_SYSTEM_MESSAGE_CORRUPTED_AND_RESTORE"},
+    {(int64_t)14, "SAVE_DATA_SYSTEM_MESSAGE_TOTAL_SIZE_EXCEEDED"},
+};
+const enum_names_t enum_names_SaveDataSystemMessageType = {enum_names_SaveDataSystemMessageType_entries,
+    sizeof(enum_names_SaveDataSystemMessageType_entries) / sizeof(enum_names_SaveDataSystemMessageType_entries[0])};
 
 static const enum_name_entry_t enum_names_Shader_Gcn_DppCtrl_entries[] = {
     {(int64_t)0, "DppQuadPerm"},
