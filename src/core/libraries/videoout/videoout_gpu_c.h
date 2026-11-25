@@ -6,7 +6,7 @@
 
 /* The GPU's side of libSceVideoOut, for driver.c: the presenter (Vulkan::Presenter), the GPU
  * thread (AmdGpu::Liverpool) and its flip interrupt (Platform::IrqC). Defined in
- * core/libraries/gnmdriver/gnmdriver.cpp, which holds the presenter and the GPU. */
+ * video_core/amdgpu/liverpool.cpp, which holds the presenter and the GPU. */
 
 #include <boolean.h>
 #include <retro_common_api.h>

@@ -1,20 +1,35 @@
-// SPDX-FileCopyrightText: Copyright 2025 shadPS4 Emulator Project
-// SPDX-License-Identifier: GPL-2.0-or-later
+/* SPDX-FileCopyrightText: Copyright 2025 shadPS4 Emulator Project */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 
-#pragma once
+#ifndef SHADPS4_LIBRARIES_GNMDRIVER_GNMDRIVER_INIT_H
+#define SHADPS4_LIBRARIES_GNMDRIVER_GNMDRIVER_INIT_H
 
-#include <array>
+/* The sequences of packets libSceGnmDriver sets the hardware and a context up with. Only
+ * gnmdriver.c takes this in: the tables are its own. */
 
-namespace Libraries::GnmDriver {
+#include "common/types.h"
 
-constexpr auto HwInitPacketSize = 0x100u;
+/* @decl, a table, at an address that is a multiple of 256: a shader's address is given to the GPU
+ * without its low eight bits */
+#if defined(_MSC_VER)
+#define GNM_ALIGN_256(decl) __declspec(align(256)) decl
+#else
+#define GNM_ALIGN_256(decl) decl __attribute__((aligned(256)))
+#endif
 
-// clang-format off
-constexpr std::array InitSequence{
-    // A fake preamble to mimic context reset sent by FW
-    0xc0001200u, 0u, // IT_CLEAR_STATE
+/* The words of a table */
+#define GNM_WORDS(table) ((u32)(sizeof(table) / sizeof((table)[0])))
+/* Does not compile unless @cond holds */
+#define GNM_STATIC_ASSERT(name, cond) typedef char gnm_static_assert_##name[(cond) ? 1 : -1]
 
-    // Actual init state sequence
+#define HW_INIT_PACKET_SIZE 0x100u
+
+/* clang-format off */
+static const u32 gnm_init_sequence[] = {
+    /* A fake preamble to mimic context reset sent by FW */
+    0xc0001200u, 0u, /* IT_CLEAR_STATE */
+
+    /* Actual init state sequence */
     0xc0017600u, 0x216u, 0xffffffffu,
     0xc0017600u, 0x217u, 0xffffffffu,
     0xc0017600u, 0x215u, 0u,
@@ -54,13 +69,13 @@ constexpr std::array InitSequence{
     0xc0036900u, 0x295u, 0x100u, 0x100u, 4u,
     0xc0017900u, 0x200u, 0xe0000000u,
 };
-static_assert(InitSequence.size() == 0x73 + 2);
+GNM_STATIC_ASSERT(gnm_init_sequence_size, GNM_WORDS(gnm_init_sequence) == 0x73 + 2);
 
-constexpr std::array InitSequence175{
-    // A fake preamble to mimic context reset sent by FW
-    0xc0001200u, 0u, // IT_CLEAR_STATE
+static const u32 gnm_init_sequence175[] = {
+    /* A fake preamble to mimic context reset sent by FW */
+    0xc0001200u, 0u, /* IT_CLEAR_STATE */
 
-    // Actual init state sequence 
+    /* Actual init state sequence */
     0xc0017600u, 0x216u, 0xffffffffu,
     0xc0017600u, 0x217u, 0xffffffffu,
     0xc0017600u, 0x215u, 0u,
@@ -100,13 +115,13 @@ constexpr std::array InitSequence175{
     0xc0036900u, 0x295u, 0x100u, 0x100u, 4u,
     0xc0017900u, 0x200u, 0xe0000000u,
 };
-static_assert(InitSequence175.size() == 0x73 + 2);
+GNM_STATIC_ASSERT(gnm_init_sequence175_size, GNM_WORDS(gnm_init_sequence175) == 0x73 + 2);
 
-constexpr std::array InitSequence200{
-    // A fake preamble to mimic context reset sent by FW
-    0xc0001200u, 0u, // IT_CLEAR_STATE
+static const u32 gnm_init_sequence200[] = {
+    /* A fake preamble to mimic context reset sent by FW */
+    0xc0001200u, 0u, /* IT_CLEAR_STATE */
 
-    // Actual init state sequence    
+    /* Actual init state sequence */
     0xc0017600u, 0x216u, 0xffffffffu,
     0xc0017600u, 0x217u, 0xffffffffu,
     0xc0017600u, 0x215u, 0u,
@@ -147,13 +162,13 @@ constexpr std::array InitSequence200{
     0xc0036900u, 0x295u, 0x100u, 0x100u, 4u,
     0xc0017900u, 0x200u, 0xe0000000u,
 };
-static_assert(InitSequence200.size() == 0x76 + 2);
+GNM_STATIC_ASSERT(gnm_init_sequence200_size, GNM_WORDS(gnm_init_sequence200) == 0x76 + 2);
 
-constexpr std::array InitSequence200Neo{
-    // A fake preamble to mimic context reset sent by FW
-    0xc0001200u, 0u, // IT_CLEAR_STATE
+static const u32 gnm_init_sequence200_neo[] = {
+    /* A fake preamble to mimic context reset sent by FW */
+    0xc0001200u, 0u, /* IT_CLEAR_STATE */
 
-    // Actual init state sequence
+    /* Actual init state sequence */
     0xc0017600u, 0x216u, 0xffffffffu,
     0xc0017600u, 0x217u, 0xffffffffu,
     0xc0017600u, 0x219u, 0xffffffffu,
@@ -198,13 +213,13 @@ constexpr std::array InitSequence200Neo{
     0xc0017900u, 0x200u, 0xe0000000u,
     0xc0017900u, 0x40000258u, 0x6d007fu,
 };
-static_assert(InitSequence200Neo.size() == 0x83 + 2);
+GNM_STATIC_ASSERT(gnm_init_sequence200_neo_size, GNM_WORDS(gnm_init_sequence200_neo) == 0x83 + 2);
 
-constexpr std::array InitSequence200NeoCompat{
-    // A fake preamble to mimic context reset sent by FW
-    0xc0001200u, 0u, // IT_CLEAR_STATE
+static const u32 gnm_init_sequence200_neo_compat[] = {
+    /* A fake preamble to mimic context reset sent by FW */
+    0xc0001200u, 0u, /* IT_CLEAR_STATE */
 
-    // Actual init state sequence
+    /* Actual init state sequence */
     0xc0017600u, 0x216u, 0xffffffffu,
     0xc0017600u, 0x217u, 0xffffffffu,
     0xc0017600u, 0x219u, 0xffffffffu,
@@ -249,13 +264,13 @@ constexpr std::array InitSequence200NeoCompat{
     0xc0017900u, 0x200u, 0xe0000000u,
     0xc0016900u, 0x100002aau, 0xd00ffu,
 };
-static_assert(InitSequence200NeoCompat.size() == 0x83 + 2);
+GNM_STATIC_ASSERT(gnm_init_sequence200_neo_compat_size, GNM_WORDS(gnm_init_sequence200_neo_compat) == 0x83 + 2);
 
-constexpr std::array InitSequence350{
-    // A fake preamble to mimic context reset sent by FW
-    0xc0001200u, 0u, // IT_CLEAR_STATE
+static const u32 gnm_init_sequence350[] = {
+    /* A fake preamble to mimic context reset sent by FW */
+    0xc0001200u, 0u, /* IT_CLEAR_STATE */
 
-    // Actual init state sequence    
+    /* Actual init state sequence */
     0xc0017600u, 0x216u, 0xffffffffu,
     0xc0017600u, 0x217u, 0xffffffffu,
     0xc0017600u, 0x215u, 0u,
@@ -298,13 +313,13 @@ constexpr std::array InitSequence350{
     0xc0017900u, 0x200u, 0xe0000000u,
     0xc0016900u, 0x2aau, 0xffu,
 };
-static_assert(InitSequence350.size() == 0x7c + 2);
+GNM_STATIC_ASSERT(gnm_init_sequence350_size, GNM_WORDS(gnm_init_sequence350) == 0x7c + 2);
 
-constexpr std::array InitSequence350Neo{
-    // A fake preamble to mimic context reset sent by FW
-    0xc0001200u, 0u, // IT_CLEAR_STATE
+static const u32 gnm_init_sequence350_neo[] = {
+    /* A fake preamble to mimic context reset sent by FW */
+    0xc0001200u, 0u, /* IT_CLEAR_STATE */
 
-    // Actual init state sequence
+    /* Actual init state sequence */
     0xc0017600u, 0x216u, 0xffffffffu,
     0xc0017600u, 0x217u, 0xffffffffu,
     0xc0017600u, 0x219u, 0xffffffffu,
@@ -350,13 +365,13 @@ constexpr std::array InitSequence350Neo{
     0xc0017900u, 0x200u, 0xe0000000u,
     0xc0017900u, 0x40000258u, 0x6d007fu,
 };
-static_assert(InitSequence350Neo.size() == 0x86 + 2);
+GNM_STATIC_ASSERT(gnm_init_sequence350_neo_size, GNM_WORDS(gnm_init_sequence350_neo) == 0x86 + 2);
 
-constexpr std::array InitSequence350NeoCompat{
-    // A fake preamble to mimic context reset sent by FW
-    0xc0001200u, 0u, // IT_CLEAR_STATE
+static const u32 gnm_init_sequence350_neo_compat[] = {
+    /* A fake preamble to mimic context reset sent by FW */
+    0xc0001200u, 0u, /* IT_CLEAR_STATE */
 
-    // Actual init state sequence
+    /* Actual init state sequence */
     0xc0017600u, 0x216u, 0xffffffffu,
     0xc0017600u, 0x217u, 0xffffffffu,
     0xc0017600u, 0x219u, 0xffffffffu,
@@ -402,9 +417,9 @@ constexpr std::array InitSequence350NeoCompat{
     0xc0017900u, 0x200u, 0xe0000000u,
     0xc0016900u, 0x100002aau, 0xd00ffu,
 };
-static_assert(InitSequence350NeoCompat.size() == 0x86 + 2);
+GNM_STATIC_ASSERT(gnm_init_sequence350_neo_compat_size, GNM_WORDS(gnm_init_sequence350_neo_compat) == 0x86 + 2);
 
-constexpr std::array CtxInitSequence{
+static const u32 gnm_ctx_init_sequence[] = {
     0xc0012800u, 0x80000000u, 0x80000000u,
     0xc0001200u, 0u,
     0xc0002f00u, 1u,
@@ -412,9 +427,9 @@ constexpr std::array CtxInitSequence{
     0xc0016900u, 0x202u, 0xcc0010u,
     0xc0111000u, 0u
 };
-static_assert(CtxInitSequence.size() == 0x0f);
+GNM_STATIC_ASSERT(gnm_ctx_init_sequence_size, GNM_WORDS(gnm_ctx_init_sequence) == 0x0f);
 
-constexpr std::array CtxInitSequenceNeo{
+static const u32 gnm_ctx_init_sequence_neo[] = {
     0xc0012800u, 0x80000000u, 0x80000000u,
     0xc0001200u, 0u,
     0xc0002f00u, 1u,
@@ -423,9 +438,9 @@ constexpr std::array CtxInitSequenceNeo{
     0xc0026900u, 0xebu, 0xff00ff00u, 0xff00u,
     0xc00d1000, 0u
 };
-static_assert(CtxInitSequenceNeo.size() == 0x13);
+GNM_STATIC_ASSERT(gnm_ctx_init_sequence_neo_size, GNM_WORDS(gnm_ctx_init_sequence_neo) == 0x13);
 
-constexpr std::array CtxInitSequence400{
+static const u32 gnm_ctx_init_sequence400[] = {
     0xc0012800u, 0x80000000u, 0x80000000u,
     0xc0001200u, 0u,
     0xc0016900u, 0x2f9u, 0x2du,
@@ -460,9 +475,9 @@ constexpr std::array CtxInitSequence400{
     0xc0016900u, 0x2aau, 0xffu,
     0xc09e1000u, 0u,
 };
-static_assert(CtxInitSequence400.size() == 0x62);
+GNM_STATIC_ASSERT(gnm_ctx_init_sequence400_size, GNM_WORDS(gnm_ctx_init_sequence400) == 0x62);
 
-constexpr std::array CtxInitSequence400Neo{
+static const u32 gnm_ctx_init_sequence400_neo[] = {
     0xc0012800u, 0x80000000u, 0x80000000u,
     0xc0001200u, 0u,
     0xc0016900u, 0x2f9u, 0x2du,
@@ -498,9 +513,9 @@ constexpr std::array CtxInitSequence400Neo{
     0xc0017900u, 0x40000258u, 0x6d007fu,
     0xc09a1000u, 0u,
 };
-static_assert(CtxInitSequence400Neo.size() == 0x66);
+GNM_STATIC_ASSERT(gnm_ctx_init_sequence400_neo_size, GNM_WORDS(gnm_ctx_init_sequence400_neo) == 0x66);
 
-constexpr std::array CtxInitSequence400NeoCompat{
+static const u32 gnm_ctx_init_sequence400_neo_compat[] = {
     0xc0012800u, 0x80000000u, 0x80000000u,
     0xc0001200u, 0u,
     0xc0016900u, 0x2f9u, 0x2du,
@@ -536,7 +551,7 @@ constexpr std::array CtxInitSequence400NeoCompat{
     0xc0016900u, 0x100002aau, 0xd00ffu,
     0xc09a1000u, 0u,
 };
-static_assert(CtxInitSequence400Neo.size() == 0x66);
-// clang-format on
+GNM_STATIC_ASSERT(gnm_ctx_init_sequence400_neo_compat_size, GNM_WORDS(gnm_ctx_init_sequence400_neo_compat) == 0x66);
+/* clang-format on */
 
-} // namespace Libraries::GnmDriver
+#endif

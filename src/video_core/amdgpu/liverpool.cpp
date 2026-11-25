@@ -6,13 +6,19 @@
 #include "common/enum_names.h"
 #include "common/scope_exit.h"
 #include "common/thread_name.h"
+#include "core/address_space.h"
 #include "core/emulator_settings.h"
+#include "core/libraries/gnmdriver/gnm_gpu_c.h"
+#include "core/libraries/kernel/equeue.h"
+#include "core/libraries/kernel/orbis_error.h"
 #include "core/libraries/kernel/process.h"
 #include "core/libraries/videoout/driver.h"
+#include "core/libraries/videoout/videoout_gpu_c.h"
 #include "core/memory.h"
 #include "core/platform.h"
 #include "video_core/amdgpu/liverpool.h"
 #include "video_core/amdgpu/pm4_cmds.h"
+#include "video_core/renderer_vulkan/vk_presenter.h"
 #include "video_core/renderer_vulkan/vk_rasterizer.h"
 
 namespace AmdGpu {
@@ -1248,3 +1254,184 @@ void Liverpool::SubmitAsc(u32 gnm_vqid, Common::Span<const u32> acb) {
 }
 
 } // namespace AmdGpu
+
+// The GPU and the presenter, made as libSceGnmDriver is registered (gnm_gpu_create)
+static std::unique_ptr<Vulkan::Presenter> presenter;
+static std::unique_ptr<AmdGpu::Liverpool> liverpool;
+
+static_assert(GNM_GPU_NUM_COMPUTE_PIPES == AmdGpu::Liverpool::NumComputePipes);
+static_assert(GNM_GPU_NUM_QUEUES_PER_PIPE == AmdGpu::Liverpool::NumQueuesPerPipe);
+static_assert(GNM_GPU_NUM_COMPUTE_RINGS == AmdGpu::Liverpool::NumComputeRings);
+
+// The GPU's side of libSceGnmDriver (gnm_gpu_c.h)
+
+extern "C" void gnm_gpu_create(void) {
+    liverpool = std::make_unique<AmdGpu::Liverpool>();
+    presenter = std::make_unique<Vulkan::Presenter>(liverpool.get());
+}
+
+extern "C" void gnm_gpu_reserve_copy_buffer_space(void) {
+    liverpool->ReserveCopyBufferSpace();
+}
+
+extern "C" void gnm_gpu_on_idle(void (*on_idle)(void)) {
+    Platform::IrqC::Instance()->Register(
+        Platform::InterruptId::GpuIdle, [on_idle](Platform::InterruptId) { on_idle(); }, nullptr);
+}
+
+extern "C" bool gnm_gpu_is_idle(void) {
+    return liverpool->IsGpuIdle();
+}
+
+extern "C" void gnm_gpu_submit_gfx(const u32* dcb, u32 dcb_dw, const u32* ccb, u32 ccb_dw) {
+    liverpool->SubmitGfx({dcb, dcb_dw}, {ccb, ccb_dw});
+}
+
+extern "C" void gnm_gpu_submit_asc(u32 gnm_vqid, const u32* acb, u32 acb_dw) {
+    liverpool->SubmitAsc(gnm_vqid, {acb, acb_dw});
+}
+
+extern "C" void gnm_gpu_submit_done(void) {
+    liverpool->SubmitDone();
+}
+
+extern "C" u32 gnm_gpu_asc_map(uintptr_t ring_base_addr, u32* read_ptr_addr, u32 ring_size_dw,
+                               u32 pipe_id) {
+    return liverpool->asc_queues.Insert(VAddr(ring_base_addr), read_ptr_addr, ring_size_dw, pipe_id)
+        .index;
+}
+
+extern "C" void gnm_gpu_asc_unmap(u32 index) {
+    liverpool->asc_queues.Erase(Common::SlotId{index});
+}
+
+extern "C" void gnm_gpu_asc_queue(u32 index, const u32** map_addr, u32* ring_size_dw) {
+    const auto& queue = liverpool->asc_queues[{index}];
+    *map_addr = reinterpret_cast<const u32*>(queue.map_addr);
+    *ring_size_dw = queue.ring_size_dw;
+}
+
+extern "C" void gnm_gpu_set_gs_ring_sizes(u32 esgs, u32 gsvs) {
+    if (liverpool) {
+        liverpool->regs.vgt_esgs_ring_size = esgs;
+        liverpool->regs.vgt_gsvs_ring_size = gsvs;
+    }
+}
+
+extern "C" uintptr_t gnm_gpu_tessellation_ring_base(void) {
+    auto& address_space = Core::Memory::Instance()->GetAddressSpace();
+    return address_space.SystemReservedVirtualBase() + address_space.SystemReservedVirtualSize() -
+           0x10000000;
+}
+
+static bool IsValidEventType(Platform::InterruptId id) {
+    return (static_cast<u32>(id) >= static_cast<u32>(Platform::InterruptId::Compute0RelMem) &&
+            static_cast<u32>(id) <= static_cast<u32>(Platform::InterruptId::Compute6RelMem)) ||
+           static_cast<u32>(id) == static_cast<u32>(Platform::InterruptId::GfxEop);
+}
+
+extern "C" s32 gnm_eq_event_add(s64 eq, u64 id, void* udata) {
+    using namespace Libraries::Kernel;
+    auto equeue = GetEqueue(eq);
+    if (!equeue) {
+        return ORBIS_KERNEL_ERROR_EBADF;
+    }
+
+    EqueueEvent kernel_event{};
+    kernel_event.event.ident = id;
+    kernel_event.event.filter = OrbisKernelEvent::Filter::GraphicsCore;
+    kernel_event.event.flags = OrbisKernelEvent::Flags::Add;
+    kernel_event.event.fflags = 0;
+    kernel_event.event.data = id;
+    kernel_event.event.udata = udata;
+
+    equeue->AddEvent(kernel_event);
+
+    Platform::IrqC::Instance()->Register(
+        static_cast<Platform::InterruptId>(id),
+        [=](Platform::InterruptId irq) {
+            ASSERT_MSG(irq == static_cast<Platform::InterruptId>(id), "An unexpected IRQ occured");
+
+            // We need to convert IRQ# to event id
+            if (!IsValidEventType(irq))
+                return;
+
+            // Event data is expected to be an event type as per sceGnmGetEqEventType: the
+            // interrupt's own number
+            equeue->TriggerEvent(id, OrbisKernelEvent::Filter::GraphicsCore,
+                                 reinterpret_cast<void*>(id));
+        },
+        equeue);
+    return ORBIS_OK;
+}
+
+extern "C" s32 gnm_eq_event_delete(s64 eq, u64 id) {
+    using namespace Libraries::Kernel;
+    auto equeue = GetEqueue(eq);
+    if (!equeue) {
+        return ORBIS_KERNEL_ERROR_EBADF;
+    }
+
+    equeue->RemoveEvent(id, OrbisKernelEvent::Filter::GraphicsCore);
+
+    Platform::IrqC::Instance()->Unregister(static_cast<Platform::InterruptId>(id), equeue);
+    return ORBIS_OK;
+}
+
+// The GPU's side of libSceVideoOut (videoout_gpu_c.h), on the presenter and GPU held here
+static Vulkan::Frame* ToFrame(videoout_frame* frame) {
+    return reinterpret_cast<Vulkan::Frame*>(frame);
+}
+
+static videoout_frame* FromFrame(Vulkan::Frame* frame) {
+    return reinterpret_cast<videoout_frame*>(frame);
+}
+
+extern "C" void videoout_gpu_register_surface(const BufferAttributeGroup* group,
+                                              uintptr_t address) {
+    presenter->RegisterVideoOutSurface(*group, address);
+}
+
+extern "C" videoout_frame* videoout_gpu_prepare_frame(const BufferAttributeGroup* group,
+                                                      uintptr_t address, bool game_hdr) {
+    return FromFrame(presenter->PrepareFrame(*group, address, game_hdr));
+}
+
+extern "C" videoout_frame* videoout_gpu_prepare_blank_frame(bool present_thread) {
+    return FromFrame(presenter->PrepareBlankFrame(present_thread));
+}
+
+extern "C" videoout_frame* videoout_gpu_prepare_last_frame(void) {
+    return FromFrame(presenter->PrepareLastFrame());
+}
+
+extern "C" void videoout_gpu_present(videoout_frame* frame, bool is_reusing_frame,
+                                     bool is_game_frame) {
+    presenter->Present(ToFrame(frame), is_reusing_frame, is_game_frame);
+}
+
+extern "C" bool videoout_gpu_is_hdr_supported(void) {
+    return presenter->IsHDRSupported();
+}
+
+extern "C" void videoout_gpu_set_gamma(float gamma) {
+    presenter->GetPPSettingsRef().gamma = gamma;
+}
+
+extern "C" void videoout_gpu_set_vo_port(VideoOutPort* port) {
+    liverpool->SetVoPort(port);
+}
+
+extern "C" void videoout_gpu_send_flip(videoout_flip_fn fn, VideoOutPort* port, s32 index,
+                                       s64 flip_arg, bool is_eop) {
+    liverpool->SendCommand([=] { fn(port, index, flip_arg, is_eop); });
+}
+
+extern "C" void videoout_gpu_on_flip_irq(videoout_flip_irq_fn fn, VideoOutPort* port, u32 buf_id,
+                                         s64 flip_arg) {
+    Platform::IrqC::Instance()->RegisterOnce(
+        Platform::InterruptId::GfxFlip, [=](Platform::InterruptId irq) {
+            ASSERT_MSG(irq == Platform::InterruptId::GfxFlip, "An unexpected IRQ occured");
+            fn(port, buf_id, flip_arg);
+        });
+}

@@ -130,7 +130,6 @@ CORE_SOURCES_CXX += $(addprefix src/core/file_sys/directories/,base_directory.cp
 CORE_SOURCES_CXX += $(addprefix src/core/file_sys/,fs.cpp ifile.cpp)
 CORE_SOURCES_CXX += $(addprefix src/core/libraries/font/,font.cpp font_face.cpp font_internal.cpp \
 	fontft.cpp fontft_internal.cpp)
-CORE_SOURCES_CXX += $(addprefix src/core/libraries/gnmdriver/,gnmdriver.cpp)
 CORE_SOURCES_CXX += $(addprefix src/core/libraries/ime/,error_dialog.cpp ime.cpp ime_dialog.cpp \
 	ime_dialog_ui.cpp ime_kb_layout.cpp ime_ui.cpp ime_ui_shared.cpp)
 CORE_SOURCES_CXX += $(addprefix src/core/libraries/kernel/,aio.cpp debug.cpp equeue.cpp \
@@ -223,6 +222,7 @@ CORE_SOURCES_C += src/common/combine.c src/input/controller.c
 CORE_SOURCES_C += $(addprefix src/core/libraries/avplayer/,avplayer.c avplayer_clock.c avplayer_common.c \
 	avplayer_data_streamer.c avplayer_fsm.c avplayer_impl.c avplayer_source.c avplayer_state.c)
 CORE_SOURCES_C += $(addprefix src/core/file_format/,psf.c)
+CORE_SOURCES_C += $(addprefix src/core/libraries/gnmdriver/,gnmdriver.c)
 CORE_SOURCES_C += $(addprefix src/core/libraries/save_data/,save_backup.c save_instance.c \
 	save_memory.c savedata.c dialog/savedatadialog.c dialog/savedatadialog_ui.c)
 CORE_SOURCES_C += $(addprefix src/core/libraries/audio3d/,audio3d.c audio3d_port.c)

@@ -346,7 +346,7 @@ static u64 GetGpuClock64() {
 
 static u64 GetGpuPerfCounter() {
     const u64 cpu_freq = Libraries::Kernel::sceKernelGetTscFrequency();
-    const u32 gpu_freq = Libraries::GnmDriver::sceGnmGetGpuCoreClockFrequency();
+    const u32 gpu_freq = sceGnmGetGpuCoreClockFrequency();
 
     const u64 cpu_cycles = Libraries::Kernel::sceKernelReadTsc();
     const u64 gpu_cycles = Common::MultiplyAndDivide64(cpu_cycles, gpu_freq, cpu_freq);
