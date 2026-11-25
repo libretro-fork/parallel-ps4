@@ -4,6 +4,14 @@ What changed in the libretro core of this fork, newest first. Changes that come 
 
 ## Unreleased
 
+- The video output library (`libSceVideoOut`) is MSVC C89: `videoout/video_out.c` over `driver.c` (the port, its present thread and the flip queue), with C headers (`video_out.h`, `driver.h`, `buffer.h`, `videoout_error.h`), registered in `libs.cpp` (the driver stopped when the program's statics are, as before).
+  - **New ways to C:** the presenter, the GPU thread and its flip interrupt through `videoout/videoout_gpu_c.h` (defined in `gnmdriver.cpp`, which holds the presenter and the GPU); event queues, `sceKernelGetProcessTime` and `sceKernelReadTsc` through `kernel_c.h` (`equeue.cpp`, `time.cpp`); the frontend's vblank ticks through `libretro/vblank_c.h` (`host.cpp`).
+  - **The GPU's VO label wait** (`liverpool.cpp`), the presenter, the texture cache and `gnmdriver.cpp` use the C port and buffer types.
+  - **The port starts zeroed:** its buffer groups, labels and other slots were left as the heap had them until the first `sceVideoOutClose`.
+  - **`sceVideoOutGetEventCount`** gives the event data's count bits; it always gave 0 (the data was put in the struct's first field). The driver's own events have 0 there.
+  - **An EOP flip's log lines** carry `sceVideoOutSubmitEopFlip`, where they said `operator()`.
+  - **The same answers:** the C and C++ libraries were run side by side, each in its own process with the same stub presenter, GPU, event queues, flip interrupt and frontend ticks, the present thread parked between ticks so its work is in order, with random calls (open, close, buffers registered with good and bad attributes, unregistered and changed, flips of every index and in bursts past the queue's limit, EOP flips with their interrupt, ticks, flip rate, flip and vblank events added and deleted on good and bad queues, event ids and data, status, resolution, gamma, output mode, HDR capability, labels, margins): 500 worlds, about 2.9 million checks, 0 differences in what was answered, presented, queued, triggered or logged, under the address and undefined-behaviour checkers, and none under the thread checker. Planted bugs (the flip rate, the queue's limit, the previous label's reset, an event id, the event data, the HDR mode) were caught. The old driver's memory was zeroed for the test.
+  - Not run in a game yet.
 - The USB storage library (`libSceUsbStorage`) is MSVC C89: `usbd/usbstorage.c`, with a C header, registered in `libs.cpp`; `emulator.cpp` gets the stick's folder from `usb_storage_mount_path`.
   - **Directory listings** are kept in a fixed table of 64 open at once (a 65th is refused with `NOTSUP` and an error logged) instead of a growing map; each listing's names are one buffer, made when it is opened, as before.
   - **Logs** from the listing calls carry their own function names, where they said `operator()`.

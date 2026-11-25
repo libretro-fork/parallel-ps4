@@ -165,6 +165,32 @@ typedef struct kernel_module_info_for_unwind {
 /* sceKernelGetModuleInfoForUnwind (process.cpp) */
 s32 kernel_get_module_info_for_unwind(u64 addr, s32 flags, kernel_module_info_for_unwind_t* info);
 
+/* Libraries::Kernel::OrbisKernelEvent, an event as an event queue gives it */
+typedef struct kernel_event {
+    u64 ident;
+    s16 filter;
+    u16 flags;
+    u32 fflags;
+    u64 data;
+    void* udata;
+} kernel_event_t;
+
+/* OrbisKernelEvent::Filter::VideoOut and OrbisKernelEvent::Flags::Add */
+#define KERNEL_EVFILT_VIDEO_OUT ((s16) - 13)
+#define KERNEL_EV_ADD 1u
+
+/* An event queue's handle stands for one (Kernel::GetEqueue; equeue.cpp) */
+bool kernel_equeue_exists(s64 eq);
+/* EqueueInternal::AddEvent of @event, its EqueueEvent::data @data; false without the queue */
+bool kernel_equeue_add_event(s64 eq, const kernel_event_t* event, void* data);
+/* EqueueInternal::RemoveEvent and TriggerEvent; nothing without the queue */
+void kernel_equeue_remove_event(s64 eq, u64 id, s16 filter);
+void kernel_equeue_trigger_event(s64 eq, u64 ident, s16 filter, void* trigger_data);
+
+/* sceKernelGetProcessTime and sceKernelReadTsc (time.cpp) */
+u64 kernel_get_process_time(void);
+u64 kernel_read_tsc(void);
+
 RETRO_END_DECLS
 
 #endif

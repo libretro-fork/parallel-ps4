@@ -19,6 +19,7 @@
 #include "core/libraries/kernel/time.h"
 #include "core/libraries/libs.h"
 #include "core/libraries/videoout/video_out.h"
+#include "core/libraries/videoout/videoout_gpu_c.h"
 #include "core/memory.h"
 #include "core/platform.h"
 #include "video_core/amdgpu/liverpool.h"
@@ -1178,7 +1179,7 @@ s32 PS4_SYSV_ABI sceGnmInsertWaitFlipDone(u32* cmdbuf, u32 size, s32 vo_handle, 
     }
 
     uintptr_t label_addr{};
-    ASSERT_MSG(VideoOut::sceVideoOutGetBufferLabelAddress(vo_handle, &label_addr) == 16,
+    ASSERT_MSG(sceVideoOutGetBufferLabelAddress(vo_handle, &label_addr) == 16,
                "sceVideoOutGetBufferLabelAddress call failed");
 
     auto* wait_reg_mem = reinterpret_cast<PM4CmdWaitRegMem*>(cmdbuf);
@@ -1334,8 +1335,8 @@ static inline s32 PatchFlipRequest(u32* cmdbuf, u32 size, u32 vo_handle, u32 buf
                "Invalid flip packet");
     ASSERT_MSG(buf_idx != 0xffff'ffffu, "Invalid VO buffer index");
 
-    const s32 flip_result = VideoOut::sceVideoOutSubmitEopFlip(vo_handle, buf_idx, flip_mode,
-                                                               flip_arg, nullptr /*unk*/);
+    const s32 flip_result =
+        sceVideoOutSubmitEopFlip(vo_handle, buf_idx, flip_mode, flip_arg, nullptr /*unk*/);
     if (flip_result != 0) {
         if (flip_result == 0x80290012) {
             LOG_ERROR(Lib_GnmDriver, "Flip queue is full");
@@ -1347,7 +1348,7 @@ static inline s32 PatchFlipRequest(u32* cmdbuf, u32 size, u32 vo_handle, u32 buf
     }
 
     uintptr_t label_addr{};
-    ASSERT_MSG(VideoOut::sceVideoOutGetBufferLabelAddress(vo_handle, &label_addr) == 16,
+    ASSERT_MSG(sceVideoOutGetBufferLabelAddress(vo_handle, &label_addr) == 16,
                "sceVideoOutGetBufferLabelAddress call failed");
 
     // Write event to lock the VO surface
@@ -3347,3 +3348,61 @@ void RegisterLib(Core::Loader::SymbolsResolver* sym) {
 };
 
 } // namespace Libraries::GnmDriver
+
+// The GPU's side of libSceVideoOut (videoout_gpu_c.h), on the presenter and GPU held here
+static Vulkan::Frame* ToFrame(videoout_frame* frame) {
+    return reinterpret_cast<Vulkan::Frame*>(frame);
+}
+
+static videoout_frame* FromFrame(Vulkan::Frame* frame) {
+    return reinterpret_cast<videoout_frame*>(frame);
+}
+
+extern "C" void videoout_gpu_register_surface(const BufferAttributeGroup* group,
+                                              uintptr_t address) {
+    presenter->RegisterVideoOutSurface(*group, address);
+}
+
+extern "C" videoout_frame* videoout_gpu_prepare_frame(const BufferAttributeGroup* group,
+                                                      uintptr_t address, bool game_hdr) {
+    return FromFrame(presenter->PrepareFrame(*group, address, game_hdr));
+}
+
+extern "C" videoout_frame* videoout_gpu_prepare_blank_frame(bool present_thread) {
+    return FromFrame(presenter->PrepareBlankFrame(present_thread));
+}
+
+extern "C" videoout_frame* videoout_gpu_prepare_last_frame(void) {
+    return FromFrame(presenter->PrepareLastFrame());
+}
+
+extern "C" void videoout_gpu_present(videoout_frame* frame, bool is_reusing_frame,
+                                     bool is_game_frame) {
+    presenter->Present(ToFrame(frame), is_reusing_frame, is_game_frame);
+}
+
+extern "C" bool videoout_gpu_is_hdr_supported(void) {
+    return presenter->IsHDRSupported();
+}
+
+extern "C" void videoout_gpu_set_gamma(float gamma) {
+    presenter->GetPPSettingsRef().gamma = gamma;
+}
+
+extern "C" void videoout_gpu_set_vo_port(VideoOutPort* port) {
+    liverpool->SetVoPort(port);
+}
+
+extern "C" void videoout_gpu_send_flip(videoout_flip_fn fn, VideoOutPort* port, s32 index,
+                                       s64 flip_arg, bool is_eop) {
+    liverpool->SendCommand([=] { fn(port, index, flip_arg, is_eop); });
+}
+
+extern "C" void videoout_gpu_on_flip_irq(videoout_flip_irq_fn fn, VideoOutPort* port, u32 buf_id,
+                                         s64 flip_arg) {
+    Platform::IrqC::Instance()->RegisterOnce(
+        Platform::InterruptId::GfxFlip, [=](Platform::InterruptId irq) {
+            ASSERT_MSG(irq == Platform::InterruptId::GfxFlip, "An unexpected IRQ occured");
+            fn(port, buf_id, flip_arg);
+        });
+}

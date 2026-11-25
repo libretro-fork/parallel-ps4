@@ -50,6 +50,7 @@
 #include "input/controller.h"
 #include "libretro.h"
 #include "libretro_bridge.h"
+#include "vblank_c.h"
 #include "pixel_order.h"
 #include "shared_state.h"
 #include "touch_track.h"
@@ -683,6 +684,18 @@ bool WaitVblankTicks(std::uint32_t seen, retro_atomic_int_t *stop) {
 }
 
 } // namespace Libretro
+
+extern "C" uint32_t libretro_vblank_ticks(void) {
+  return Libretro::VblankTicks();
+}
+
+extern "C" bool libretro_wait_vblank_ticks(uint32_t seen, retro_atomic_int_t* stop) {
+  return Libretro::WaitVblankTicks(seen, stop);
+}
+
+extern "C" void libretro_wake_vblank_waits(void) {
+  Libretro::WakeVblankWaits();
+}
 
 // The controllers' (input/controller.c) way to the frontend's rumble
 extern "C" void libretro_set_rumble(uint32_t pad, uint8_t small_motor,

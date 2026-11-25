@@ -41,6 +41,7 @@ enum c_log_class {
     C_LOG_LIB_VDECSW,
     C_LOG_LIB_FIBER,
     C_LOG_LIB_USBD,
+    C_LOG_LIB_VIDEO_OUT,
     C_LOG_LIB_VOICE,
     C_LOG_LIB_RTC,
     C_LOG_LIB_CAMERA,

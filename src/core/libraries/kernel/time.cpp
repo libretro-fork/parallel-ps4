@@ -827,3 +827,11 @@ extern "C" bool kernel_game_wait(struct retro_eventcount* ec, u64 deadline, int 
     return game_clock_wait(Libraries::Kernel::GameClock(), ec, deadline, ready, ctx,
                            Libraries::Kernel::GameThreadSelf()) != 0;
 }
+
+extern "C" u64 kernel_get_process_time(void) {
+    return Libraries::Kernel::sceKernelGetProcessTime();
+}
+
+extern "C" u64 kernel_read_tsc(void) {
+    return Libraries::Kernel::sceKernelReadTsc();
+}

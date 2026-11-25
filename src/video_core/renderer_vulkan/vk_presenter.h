@@ -63,8 +63,8 @@ public:
         return emu_settings_get_hdr_allowed();
     }
 
-    VideoCore::Image& RegisterVideoOutSurface(
-        const Libraries::VideoOut::BufferAttributeGroup& attribute, VAddr cpu_address) {
+    VideoCore::Image& RegisterVideoOutSurface(const BufferAttributeGroup& attribute,
+                                              VAddr cpu_address) {
         vo_buffers_addr.emplace_back(cpu_address);
         // Resolution: Default hands over the game's own size
         Libretro::SetGameSize(attribute.attrib.width, attribute.attrib.height);
@@ -78,8 +78,7 @@ public:
     bool IsVideoOutSurface(const AmdGpu::ColorBuffer& color_buffer) const;
 
     /// @game_hdr: the game set its output to HDR (Bt2020PQ): its buffer holds PQ already
-    Frame* PrepareFrame(const Libraries::VideoOut::BufferAttributeGroup& attribute,
-                        VAddr cpu_address, bool game_hdr);
+    Frame* PrepareFrame(const BufferAttributeGroup& attribute, VAddr cpu_address, bool game_hdr);
 
     Frame* PrepareBlankFrame(bool present_thread);
 

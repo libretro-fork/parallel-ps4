@@ -102,7 +102,7 @@ public:
                   bool write_buffer = false)
             : info{buffer, view.NumSlices(), htile_address, hint, write_buffer},
               view_info{buffer, view, ctl}, type{BindingType::DepthTarget} {}
-        ImageDesc(const Libraries::VideoOut::BufferAttributeGroup& group, VAddr cpu_address)
+        ImageDesc(const BufferAttributeGroup& group, VAddr cpu_address)
             : info{group, cpu_address}, type{BindingType::VideoOut} {}
     };
     static_assert(__is_trivially_destructible(ImageDesc));

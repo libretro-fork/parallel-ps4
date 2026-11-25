@@ -714,15 +714,15 @@ Frame* Presenter::PrepareLastFrame() {
     return frame;
 }
 
-static VkFormat GetFrameViewFormat(const Libraries::VideoOut::PixelFormat format) {
+static VkFormat GetFrameViewFormat(const VideoOutPixelFormat format) {
     switch (format) {
-    case Libraries::VideoOut::PixelFormat::A8B8G8R8Srgb:
+    case VIDEO_OUT_PIXEL_FORMAT_A8B8G8R8_SRGB:
         return VK_FORMAT_R8G8B8A8_SRGB;
-    case Libraries::VideoOut::PixelFormat::A8R8G8B8Srgb:
+    case VIDEO_OUT_PIXEL_FORMAT_A8R8G8B8_SRGB:
         return VK_FORMAT_B8G8R8A8_SRGB;
-    case Libraries::VideoOut::PixelFormat::A2R10G10B10:
-    case Libraries::VideoOut::PixelFormat::A2R10G10B10Srgb:
-    case Libraries::VideoOut::PixelFormat::A2R10G10B10Bt2020Pq:
+    case VIDEO_OUT_PIXEL_FORMAT_A2R10G10B10:
+    case VIDEO_OUT_PIXEL_FORMAT_A2R10G10B10_SRGB:
+    case VIDEO_OUT_PIXEL_FORMAT_A2R10G10B10_BT2020_PQ:
         return VK_FORMAT_A2R10G10B10_UNORM_PACK32;
     default:
         break;
@@ -744,8 +744,8 @@ static const char* FrameNotesDir() {
     return dir;
 }
 
-Frame* Presenter::PrepareFrame(const Libraries::VideoOut::BufferAttributeGroup& attribute,
-                               VAddr cpu_address, bool game_hdr) {
+Frame* Presenter::PrepareFrame(const BufferAttributeGroup& attribute, VAddr cpu_address,
+                               bool game_hdr) {
     // A frame of the game's is done: a vertex capture counts them
     VertexCapture::OnFlip();
     rasterizer->OnFlip();
@@ -788,7 +788,7 @@ Frame* Presenter::PrepareFrame(const Libraries::VideoOut::BufferAttributeGroup& 
     // Vulkan has no sRGB variant of the 10-bit format, so an A2R10G10B10Srgb buffer reaches
     // the post process pass still sRGB encoded and has to be decoded there instead.
     pp_settings.srgb_input =
-        attribute.attrib.pixel_format == Libraries::VideoOut::PixelFormat::A2R10G10B10Srgb;
+        attribute.attrib.pixel_format == VIDEO_OUT_PIXEL_FORMAT_A2R10G10B10_SRGB;
     // HDR Output: a game's own HDR (PQ in a ten-bit buffer) goes through as it is; any other
     // picture is turned into PQ, its white at the frontend's paper white
     const bool hdr_output = IsHDRSupported();

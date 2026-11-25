@@ -16,6 +16,7 @@
 #include "core/file_sys/fs.h"
 #include "core/libraries/kernel/equeue.h"
 #include "core/libraries/kernel/kernel.h"
+#include "core/libraries/kernel/kernel_c.h"
 #include "core/libraries/kernel/orbis_error.h"
 #include "core/libraries/kernel/posix_error.h"
 #include "core/libraries/kernel/time.h"
@@ -996,3 +997,37 @@ void RegisterEventQueue(Core::Loader::SymbolsResolver* sym) {
 }
 
 } // namespace Libraries::Kernel
+
+static_assert(sizeof(kernel_event_t) == sizeof(Libraries::Kernel::OrbisKernelEvent));
+static_assert(offsetof(kernel_event_t, data) ==
+              offsetof(Libraries::Kernel::OrbisKernelEvent, data));
+static_assert(offsetof(kernel_event_t, udata) ==
+              offsetof(Libraries::Kernel::OrbisKernelEvent, udata));
+
+extern "C" bool kernel_equeue_exists(s64 eq) {
+    return Libraries::Kernel::GetEqueue(eq) != nullptr;
+}
+
+extern "C" bool kernel_equeue_add_event(s64 eq, const kernel_event_t* event, void* data) {
+    auto* equeue = Libraries::Kernel::GetEqueue(eq);
+    if (equeue == nullptr) {
+        return false;
+    }
+    Libraries::Kernel::EqueueEvent ev{};
+    std::memcpy(&ev.event, event, sizeof(ev.event));
+    ev.data = data;
+    equeue->AddEvent(ev);
+    return true;
+}
+
+extern "C" void kernel_equeue_remove_event(s64 eq, u64 id, s16 filter) {
+    if (auto* equeue = Libraries::Kernel::GetEqueue(eq)) {
+        equeue->RemoveEvent(id, filter);
+    }
+}
+
+extern "C" void kernel_equeue_trigger_event(s64 eq, u64 ident, s16 filter, void* trigger_data) {
+    if (auto* equeue = Libraries::Kernel::GetEqueue(eq)) {
+        equeue->TriggerEvent(ident, filter, trigger_data);
+    }
+}

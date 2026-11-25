@@ -17,19 +17,17 @@
 namespace VideoCore {
 
 using namespace Vulkan;
-using Libraries::VideoOut::TilingMode;
-using VideoOutFormat = Libraries::VideoOut::PixelFormat;
 
-static VkFormat ConvertPixelFormat(const VideoOutFormat format) {
+static VkFormat ConvertPixelFormat(const VideoOutPixelFormat format) {
     switch (format) {
-    case VideoOutFormat::A8B8G8R8Srgb:
+    case VIDEO_OUT_PIXEL_FORMAT_A8B8G8R8_SRGB:
     // Remaining formats are mapped to RGBA for internal consistency and changed to BGRA in the
     // frame image view.
-    case VideoOutFormat::A8R8G8B8Srgb:
+    case VIDEO_OUT_PIXEL_FORMAT_A8R8G8B8_SRGB:
         return VK_FORMAT_R8G8B8A8_SRGB;
-    case VideoOutFormat::A2R10G10B10:
-    case VideoOutFormat::A2R10G10B10Srgb:
-    case VideoOutFormat::A2R10G10B10Bt2020Pq:
+    case VIDEO_OUT_PIXEL_FORMAT_A2R10G10B10:
+    case VIDEO_OUT_PIXEL_FORMAT_A2R10G10B10_SRGB:
+    case VIDEO_OUT_PIXEL_FORMAT_A2R10G10B10_BT2020_PQ:
         return VK_FORMAT_A2B10G10R10_UNORM_PACK32;
     default:
         break;
@@ -38,11 +36,10 @@ static VkFormat ConvertPixelFormat(const VideoOutFormat format) {
     return {};
 }
 
-ImageInfo::ImageInfo(const Libraries::VideoOut::BufferAttributeGroup& group,
-                     VAddr cpu_address) noexcept {
-    const Libraries::VideoOut::BufferAttribute& attrib = group.attrib;
+ImageInfo::ImageInfo(const BufferAttributeGroup& group, VAddr cpu_address) noexcept {
+    const BufferAttribute& attrib = group.attrib;
     props = ImageProperties{
-        .is_tiled = attrib.tiling_mode == TilingMode::Tile,
+        .is_tiled = attrib.tiling_mode == VIDEO_OUT_TILING_MODE_TILE,
     };
     tile_mode =
         props.is_tiled ? AmdGpu::TileMode::Display2DThin : AmdGpu::TileMode::DisplayLinearAligned;
@@ -53,8 +50,9 @@ ImageInfo::ImageInfo(const Libraries::VideoOut::BufferAttributeGroup& group,
     size.width = attrib.width;
     size.height = attrib.height;
     size.depth = 1;
-    pitch = attrib.tiling_mode == TilingMode::Linear ? size.width : (size.width + 127) & (~127);
-    num_bits = attrib.pixel_format != VideoOutFormat::A16R16G16B16Float ? 32 : 64;
+    pitch = attrib.tiling_mode == VIDEO_OUT_TILING_MODE_LINEAR ? size.width
+                                                               : (size.width + 127) & (~127);
+    num_bits = attrib.pixel_format != VIDEO_OUT_PIXEL_FORMAT_A16R16G16B16_FLOAT ? 32 : 64;
     ASSERT(num_bits == 32);
 
     guest_address = cpu_address;

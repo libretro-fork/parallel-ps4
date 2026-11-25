@@ -26,9 +26,7 @@ namespace Vulkan {
 class Rasterizer;
 }
 
-namespace Libraries::VideoOut {
 struct VideoOutPort;
-}
 
 namespace AmdGpu {
 
@@ -96,7 +94,7 @@ public:
         return static_cast<u32>(retro_atomic_load_seq_cst_int(&num_submits)) == 0;
     }
 
-    void SetVoPort(Libraries::VideoOut::VideoOutPort* port) {
+    void SetVoPort(VideoOutPort* port) {
         vo_port = port;
     }
 
@@ -305,7 +303,7 @@ private:
     } cblock{};
 
     Vulkan::Rasterizer* rasterizer{};
-    Libraries::VideoOut::VideoOutPort* vo_port{};
+    VideoOutPort* vo_port{};
     const bool guest_markers_enabled;
     stop_thread_t process_thread = STOP_THREAD_INIT;
     retro_atomic_int_t num_submits{};

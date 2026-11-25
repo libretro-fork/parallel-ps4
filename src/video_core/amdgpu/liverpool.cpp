@@ -827,14 +827,24 @@ Liverpool::Task Liverpool::ProcessGraphics(Common::Span<const u32> dcb) {
                 // there are no other submits to yield to we can sleep the thread
                 // instead and allow other tasks to run.
                 const u64* wait_addr = wait_reg_mem->Address<u64*>();
-                if (vo_port->IsVoLabel(wait_addr) && [this] {
+                if (videoout_port_is_vo_label(vo_port, wait_addr) && [this] {
                         // Everything submitted so far is in the GFX queue
                         TaskQueue& gfx_submits = mapped_queues[GfxQueueId].submits;
                         gfx_submits.Take();
                         return static_cast<u32>(retro_atomic_load_seq_cst_int(&num_submits)) ==
                                gfx_submits.size;
                     }()) {
-                    vo_port->WaitVoLabel([&] { return wait_reg_mem->Test(regs.reg_array); });
+                    struct LabelWait {
+                        const PM4CmdWaitRegMem* wait_reg_mem;
+                        const u32* reg_array;
+                    } label_wait{wait_reg_mem, regs.reg_array};
+                    videoout_port_wait_vo_label(
+                        vo_port,
+                        [](void* ctx) -> int {
+                            const auto* w = static_cast<const LabelWait*>(ctx);
+                            return w->wait_reg_mem->Test(w->reg_array) ? 1 : 0;
+                        },
+                        &label_wait);
                     break;
                 }
                 while (!wait_reg_mem->Test(regs.reg_array)) {

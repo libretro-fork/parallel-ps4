@@ -1,199 +1,106 @@
-﻿// SPDX-FileCopyrightText: Copyright 2024 shadPS4 Emulator Project
-// SPDX-License-Identifier: GPL-2.0-or-later
+/* SPDX-FileCopyrightText: Copyright 2024 shadPS4 Emulator Project
+ * SPDX-License-Identifier: GPL-2.0-or-later */
 
-#pragma once
+#ifndef SHADPS4_VIDEOOUT_DRIVER_H
+#define SHADPS4_VIDEOOUT_DRIVER_H
 
-#include <chrono>
-#include "common/stop_thread.h"
-#include "core/libraries/kernel/time.h"
-#include "core/libraries/videoout/video_out.h"
+/* libSceVideoOut's driver: the one port, its present thread, and the flips the game and the
+ * GPU submit to it. Defined in driver.c. */
 
-#include <array>
-
+#include <boolean.h>
 #include <retro_atomic.h>
-#include <retro_spsc.h>
+#include <retro_common_api.h>
 #include <rthreads/retro_eventcount.h>
 #include <rthreads/retro_seqlock.h>
+#include <stdint.h>
 
-namespace Vulkan {
-struct Frame;
-}
+#include "common/types.h"
+#include "core/libraries/videoout/buffer.h"
+#include "core/libraries/videoout/video_out.h"
 
-namespace Libraries::VideoOut {
+RETRO_BEGIN_DECLS
 
-struct VideoOutPort {
+/* The event queues a port tells of its flips, and of its vblanks */
+#define VIDEO_OUT_MAX_EVENT_QUEUES 16
+
+typedef struct VideoOutPort {
     SceVideoOutResolutionStatus resolution;
-    std::array<VideoOutBuffer, MaxDisplayBuffers> buffer_slots;
-    std::array<u64, MaxDisplayBuffers> buffer_labels; // should be contiguous in memory
-    static_assert(sizeof(buffer_labels[0]) == 8u);
-    std::array<BufferAttributeGroup, MaxDisplayBufferGroups> groups;
-    /// The present thread's part of the flip status (count, times, flip_arg, current_buffer),
-    /// written by it alone under flip_seq; the counts the submitters change are flip_pending
-    /// and gc_queue, and submit_tsc. GetFlipStatus puts them together.
+    VideoOutBuffer buffer_slots[VIDEO_OUT_MAX_DISPLAY_BUFFERS];
+    u64 buffer_labels[VIDEO_OUT_MAX_DISPLAY_BUFFERS]; /* should be contiguous in memory */
+    BufferAttributeGroup groups[VIDEO_OUT_MAX_DISPLAY_BUFFER_GROUPS];
+    /* The present thread's part of the flip status (count, times, flip_arg, current_buffer),
+     * written by it alone under flip_seq; the counts the submitters change are flip_pending and
+     * gc_queue, and submit_tsc. videoout_port_get_flip_status puts them together. */
     FlipStatus flip_status;
-    retro_seqlock_t flip_seq{};
-    retro_atomic_int_t flip_pending{};
-    retro_atomic_int_t gc_queue{};
-    retro_atomic_64_t submit_tsc{};
-    /// Written by the present thread alone, under vblank_seq; vblank_ec is notified after each.
+    retro_seqlock_t flip_seq;
+    retro_atomic_int_t flip_pending;
+    retro_atomic_int_t gc_queue;
+    retro_atomic_64_t submit_tsc;
+    /* Written by the present thread alone, under vblank_seq; vblank_ec is notified after
+     * each. */
     SceVideoOutVblankStatus vblank_status;
-    retro_seqlock_t vblank_seq{};
-    retro_eventcount_t vblank_ec{};
-    /// The event queues to tell; a slot holds 0 when free, and is taken and freed with a
-    /// compare-exchange, so the present thread walks them while the game adds and deletes.
-    static constexpr size_t MaxEventQueues = 16;
-    using EventQueues = std::array<retro_atomic_64_t, MaxEventQueues>;
-    EventQueues flip_events{};
-    EventQueues vblank_events{};
-    /// The GPU thread waiting on a VO label parks on vo_ec; a flip that clears one notifies it.
-    retro_eventcount_t vo_ec{};
-    /// Close asks the present thread to clear what only it writes.
-    retro_atomic_int_t reset_status{0};
-    int flip_rate = 0;
-    int prev_index = -1;
-    bool is_open = false;
-    bool is_hdr = false;
+    retro_seqlock_t vblank_seq;
+    retro_eventcount_t vblank_ec;
+    /* The event queues to tell; a slot holds 0 when free, and is taken and freed with a
+     * compare-exchange, so the present thread walks them while the game adds and deletes. */
+    retro_atomic_64_t flip_events[VIDEO_OUT_MAX_EVENT_QUEUES];
+    retro_atomic_64_t vblank_events[VIDEO_OUT_MAX_EVENT_QUEUES];
+    /* The GPU thread waiting on a VO label parks on vo_ec; a flip that clears one notifies
+     * it. */
+    retro_eventcount_t vo_ec;
+    /* Close asks the present thread to clear what only it writes. */
+    retro_atomic_int_t reset_status;
+    int flip_rate;
+    int prev_index;
+    bool is_open;
+    bool is_hdr;
+} VideoOutPort;
 
-    VideoOutPort() {
-        retro_seqlock_init(&flip_seq);
-        retro_seqlock_init(&vblank_seq);
-        retro_eventcount_init(&vblank_ec);
-        retro_eventcount_init(&vo_ec);
-    }
-    ~VideoOutPort() {
-        retro_eventcount_free(&vo_ec);
-        retro_eventcount_free(&vblank_ec);
-    }
+/* An event queue (@eq) added to, or removed from, one of the port's lists: false when there
+ * is no room */
+bool videoout_port_add_event_queue(retro_atomic_64_t* queues, s64 eq);
+void videoout_port_remove_event_queue(retro_atomic_64_t* queues, s64 eq);
 
-    static bool AddEventQueue(EventQueues& queues, Kernel::OrbisKernelEqueue eq) {
-        for (auto& slot : queues) {
-            if (retro_atomic_cas_64(&slot, 0, eq)) {
-                return true;
-            }
-        }
-        return false;
-    }
-    static void RemoveEventQueue(EventQueues& queues, Kernel::OrbisKernelEqueue eq) {
-        for (auto& slot : queues) {
-            if (retro_atomic_cas_64(&slot, eq, 0)) {
-                return;
-            }
-        }
-    }
+void videoout_port_get_flip_status(VideoOutPort* port, FlipStatus* status);
+void videoout_port_get_vblank_status(VideoOutPort* port, SceVideoOutVblankStatus* status);
+/* Until the next vblank (not counted running meanwhile: kernel_game_wait) */
+void videoout_port_wait_vblank(VideoOutPort* port);
 
-    FlipStatus GetFlipStatus() {
-        FlipStatus status;
-        int seq;
-        do {
-            seq = retro_seqlock_read_begin(&flip_seq);
-            status = flip_status;
-        } while (retro_seqlock_read_retry(&flip_seq, seq));
-        status.submit_tsc = static_cast<u64>(retro_atomic_load_relaxed_64(&submit_tsc));
-        status.gc_queue_num = static_cast<s32>(retro_atomic_load_relaxed_int(&gc_queue));
-        status.flip_pending_num = static_cast<s32>(retro_atomic_load_relaxed_int(&flip_pending));
-        return status;
-    }
+/* The first group not occupied; VIDEO_OUT_MAX_DISPLAY_BUFFER_GROUPS when all are */
+s32 videoout_port_find_free_group(const VideoOutPort* port);
 
-    SceVideoOutVblankStatus GetVblankStatus() {
-        SceVideoOutVblankStatus status;
-        int seq;
-        do {
-            seq = retro_seqlock_read_begin(&vblank_seq);
-            status = vblank_status;
-        } while (retro_seqlock_read_retry(&vblank_seq, seq));
-        return status;
-    }
+/* @address is one of the port's buffer labels */
+bool videoout_port_is_vo_label(const VideoOutPort* port, const u64* address);
+/* From the GPU thread: until @ready(@ctx), looked at again whenever a label is cleared */
+void videoout_port_wait_vo_label(VideoOutPort* port, int (*ready)(void* ctx), void* ctx);
+void videoout_port_signal_vo_label(VideoOutPort* port);
 
-    /// Until the next vblank.
-    void WaitVblank() {
-        // Not counted running meanwhile (Kernel::GameWait)
-        const u64 prev_count = GetVblankStatus().count;
-        Kernel::GameWait(&vblank_ec, 0, [&] { return GetVblankStatus().count != prev_count; });
-    }
-
-    s32 FindFreeGroup() const {
-        s32 index = 0;
-        while (index < groups.size() && groups[index].is_occupied) {
-            index++;
-        }
-        return index;
-    }
-
-    bool IsVoLabel(const u64* address) const {
-        const u64* start = &buffer_labels[0];
-        const u64* end = &buffer_labels[MaxDisplayBuffers - 1];
-        return address >= start && address <= end;
-    }
-
-    void WaitVoLabel(auto&& pred) {
-        Kernel::GameWait(&vo_ec, 0, pred);
-    }
-
-    void SignalVoLabel() {
-        retro_eventcount_notify(&vo_ec);
-    }
-
-    [[nodiscard]] int NumRegisteredBuffers() const {
-        return std::count_if(buffer_slots.cbegin(), buffer_slots.cend(),
-                             [](auto& buffer) { return buffer.group_index != -1; });
-    }
-};
-
-struct ServiceThreadParams {
+/* The ServiceThreadParams sceVideoOutOpen may be given */
+typedef struct ServiceThreadParams {
     u32 unknown;
     bool set_priority;
     u32 priority;
     bool set_affinity;
     u64 affinity;
-};
+} ServiceThreadParams;
 
-class VideoOutDriver {
-public:
-    VideoOutDriver(u32 width, u32 height);
-    ~VideoOutDriver();
+/* The driver, with its port of @width by @height, and its present thread started; once */
+void videoout_driver_init(u32 width, u32 height);
+/* The present thread stopped (woken from its wait for the frontend's next frame) */
+void videoout_driver_deinit(void);
 
-    int Open(const ServiceThreadParams* params);
-    void Close(s32 handle);
+int videoout_driver_open(const ServiceThreadParams* params);
+void videoout_driver_close(s32 handle);
+/* NULL for any handle but 1 */
+VideoOutPort* videoout_driver_get_port(s32 handle);
+int videoout_driver_register_buffers(VideoOutPort* port, s32 startIndex, void* const* addresses,
+                                     s32 bufferNum, const BufferAttribute* attribute);
+int videoout_driver_unregister_buffers(VideoOutPort* port, s32 attributeIndex);
+int videoout_driver_change_buffer_attribute(VideoOutPort* port, s32 bufferIndex,
+                                            const BufferAttribute* attribute);
+/* false when the flip queue is full */
+bool videoout_driver_submit_flip(VideoOutPort* port, s32 index, s64 flip_arg, bool is_eop);
 
-    VideoOutPort* GetPort(s32 handle);
+RETRO_END_DECLS
 
-    int RegisterBuffers(VideoOutPort* port, s32 startIndex, void* const* addresses, s32 bufferNum,
-                        const BufferAttribute* attribute);
-    int UnregisterBuffers(VideoOutPort* port, s32 attributeIndex);
-    int ChangeBufferAttribute(VideoOutPort* port, s32 bufferIndex,
-                              const BufferAttribute* attribute);
-
-    bool SubmitFlip(VideoOutPort* port, s32 index, s64 flip_arg, bool is_eop = false);
-
-private:
-    struct Request {
-        Vulkan::Frame* frame;
-        VideoOutPort* port;
-        s64 flip_arg;
-        s32 index;
-        bool eop;
-
-        operator bool() const noexcept {
-            return frame != nullptr;
-        }
-    };
-
-    void Flip(const Request& req);
-    void DrawBlankFrame(); // Video port out not open
-    void DrawLastFrame();  // Used when there is no flip request
-    void SubmitFlipInternal(VideoOutPort* port, s32 index, s64 flip_arg, bool is_eop = false);
-    void PresentThread();
-    /// One of the console's vblanks: a flip taken if one is due, the vblank events, the status.
-    void Vblank();
-    Request ReceiveRequest();
-    void ResetStatus();
-
-    VideoOutPort main_port{};
-    /// Flip requests, from the GPU thread (which runs every flip, EOP or not) to the present
-    /// thread; a full ring has the GPU thread wait on request_taken_ec.
-    retro_spsc_t requests{};
-    retro_eventcount_t request_taken_ec{};
-    stop_thread_t present_thread = STOP_THREAD_INIT;
-};
-
-} // namespace Libraries::VideoOut
+#endif
