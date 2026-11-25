@@ -28,13 +28,17 @@ static int failures;
       } \
    } while (0)
 
-static unsigned fx_calls;
+static unsigned fx_calls, fx_apart;
 static unsigned fx2_setups, fx2_cleanups, fx2_processes;
 
 static int host_user_fx(void *handler, ngs2_user_fx_context *context) {
    unsigned c, i;
    (void)handler;
    fx_calls++;
+   /* All eight channels, each a grain after the one before */
+   for (c = 1; c < NGS2_MAX_CHANNELS; c++)
+      if (context->channel_data[c] != context->channel_data[0] + c * context->grain_samples)
+         fx_apart++;
    /* Halves every channel */
    for (c = 0; c < context->channels; c++)
       for (i = 0; i < context->grain_samples; i++)
@@ -329,13 +333,16 @@ static void test_passthrough(void) {
       CHECK(ngs2_voice_state_flags(v) == (NGS2_STATE_INUSE | NGS2_STATE_PLAYING));
    }
    ngs2_voice_sampler_state(v, &state);
+   /* Where the decoder last read, not the block's start: a game streaming into a ring goes by it */
+   CHECK((const int16_t *)state.waveform_data > pcm &&
+         (const int16_t *)state.waveform_data < pcm + 1024);
    CHECK(state.decoded_samples == 1024);
    CHECK(state.decoded_bytes == sizeof(pcm));
    CHECK(state.user_data == 77);
    /* The waveform is at its end: one more grain and the voice has stopped */
    render(&r, out, 2);
    render(&r, out, 2);
-   CHECK(ngs2_voice_state_flags(v) == NGS2_STATE_INUSE);
+   CHECK(ngs2_voice_state_flags(v) == 0); /* ended: free again */
    for (i = 0; i < GRAIN * 2; i++)
       CHECK(out[i] == 0.0f);
    /* Played again it starts from the top */
@@ -443,7 +450,7 @@ static void test_blocks(void) {
    CHECK(last_user == 2);
    /* 900 samples of the first, 200 of the second */
    CHECK(total == 900 + 200 * 10000);
-   CHECK(ngs2_voice_state_flags(v) == NGS2_STATE_INUSE);
+   CHECK(ngs2_voice_state_flags(v) == 0); /* ended: free again */
 
    /* A stream: with more to come the voice waits, flagged empty, and goes on */
    CHECK(sampler_setup(v, NGS2_WAVE_PCM_I16L, 1, RATE) == NGS2_OK);
@@ -460,7 +467,7 @@ static void test_blocks(void) {
    CHECK(ngs2_voice_state_flags(v) == (NGS2_STATE_INUSE | NGS2_STATE_PLAYING));
    render(&r, out, 2);
    render(&r, out, 2);
-   CHECK(ngs2_voice_state_flags(v) == NGS2_STATE_INUSE);
+   CHECK(ngs2_voice_state_flags(v) == 0); /* ended: free again */
    /* More blocks than the rack has room for */
    for (i = 0; i < 4; i++)
       CHECK(add_block(v, a, sizeof(a), 300, 0, 0, 0) == NGS2_OK);
@@ -542,7 +549,7 @@ static void test_levels(void) {
    CHECK(event(v, NGS2_EVENT_STOP) == NGS2_OK);
    render(&r, out, 2);
    CHECK(out[1] > 0.49f && out[255 * 2 + 1] < 0.01f);
-   CHECK(ngs2_voice_state_flags(v) == NGS2_STATE_INUSE);
+   CHECK(ngs2_voice_state_flags(v) == 0); /* ended: free again */
    render(&r, out, 2);
    CHECK(out[1] == 0.0f);
    rig_close(&r);
@@ -622,6 +629,7 @@ static void test_chain(void) {
    }
    CHECK(peak > 0.0f);
    CHECK(fx_calls == 400);
+   CHECK(fx_apart == 0);
    CHECK(tail > 30);  /* it rang on */
    CHECK(tail < 399); /* and rang out */
    /* A ring */
@@ -711,6 +719,7 @@ static void test_custom(void) {
    CHECK(fabs(out[100 * 2] - 0.5f * 0.5f * 0.5f) < 1e-6);
    CHECK(fabs(out[100 * 2 + 1] - 0.5f * 2.0f * 0.5f) < 1e-6);
    CHECK(fx_calls == 2);
+   CHECK(fx_apart == 0);
    CHECK(fx2_processes == 2);
    rig_close(&r);
    CHECK(fx2_cleanups == 2);
@@ -1146,7 +1155,7 @@ static void test_effects(void) {
    render(&r, out, 2);
    CHECK(fabs(out[64 * 2] - LEVEL * 0.75f) < 1e-4);
    CHECK(fabs(out[192 * 2] - LEVEL * 0.25f) < 1e-4);
-   CHECK(ngs2_voice_state_flags(v) == NGS2_STATE_INUSE);
+   CHECK(ngs2_voice_state_flags(v) == 0); /* ended: free again */
    render(&r, out, 2);
    CHECK(out[100] == 0.0f);
 

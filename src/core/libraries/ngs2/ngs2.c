@@ -1055,6 +1055,53 @@ s32 PS4_SYSV_ABI sceNgs2SystemUnlock(OrbisNgs2Handle systemHandle) {
     return lock_unlock(lock_of(system)) ? ORBIS_OK : ORBIS_NGS2_ERROR_INVALID_OPERATION;
 }
 
+/* Each kind of parameter a game gives, logged the first time it is seen: the rack it went to,
+ * its id and size and its first words. A waveform of another type, or blocks given with other
+ * flags, is another kind. A fixed table of 64: past it nothing more is logged. In the system's
+ * lock. */
+static void note_params(const ngs2_voice* voice, const OrbisNgs2VoiceParamHeader* list) {
+    static u32 seen[64][3];
+    static u32 seen_count;
+    const u32 rack_id = ngs2_rack_description(ngs2_voice_rack(voice))->rack_id;
+    const OrbisNgs2VoiceParamHeader* p = list;
+    u32 guard;
+    for (guard = 0; p && guard < 64; guard++) {
+        OrbisNgs2VoiceParamHeader h;
+        u32 w[6] = {0, 0, 0, 0, 0, 0};
+        u32 kind = 0, i;
+        memcpy(&h, p, sizeof(h));
+        if (h.size < sizeof(h)) {
+            break;
+        }
+        memcpy(w, p + 1, h.size - sizeof(h) < sizeof(w) ? h.size - sizeof(h) : sizeof(w));
+        if (h.id == 0x10000000u) {
+            kind = w[0]; /* the waveform's type */
+        } else if (h.id == 0x10000001u) {
+            kind = w[2]; /* the blocks' flags */
+        }
+        for (i = 0; i < seen_count; i++) {
+            if (seen[i][0] == rack_id && seen[i][1] == h.id && seen[i][2] == kind) {
+                break;
+            }
+        }
+        if (i == seen_count && seen_count < 64) {
+            seen[seen_count][0] = rack_id;
+            seen[seen_count][1] = h.id;
+            seen[seen_count][2] = kind;
+            seen_count++;
+            c_log(C_LOG_LIB_NGS2, C_LOG_LEVEL_INFO, "sceNgs2VoiceControl",
+                  "first of its kind: rack 0x%x voice %u, parameter 0x%x of %u bytes: 0x%x 0x%x "
+                  "0x%x 0x%x 0x%x 0x%x",
+                  rack_id, ngs2_voice_index(voice), h.id, h.size, w[0], w[1], w[2], w[3], w[4],
+                  w[5]);
+        }
+        if (h.next == 0) {
+            break;
+        }
+        p = (const OrbisNgs2VoiceParamHeader*)((const u8*)p + h.next);
+    }
+}
+
 s32 PS4_SYSV_ABI sceNgs2VoiceControl(OrbisNgs2Handle voiceHandle,
                                      const OrbisNgs2VoiceParamHeader* paramList) {
     ngs2_system_lock* lock;
@@ -1071,6 +1118,7 @@ s32 PS4_SYSV_ABI sceNgs2VoiceControl(OrbisNgs2Handle voiceHandle,
         lock_unlock(lock);
         return ORBIS_NGS2_ERROR_INVALID_VOICE_HANDLE;
     }
+    note_params(voice, paramList);
     result = ngs2_voice_control(voice, (const ngs2_param_header*)paramList);
     if (result != ORBIS_OK) {
         /* The list's first parameter and its first word, to tell which call of the game's it

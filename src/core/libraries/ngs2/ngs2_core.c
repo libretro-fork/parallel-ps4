@@ -341,6 +341,7 @@ struct ngs2_system {
     uint64_t render_count;
     uint32_t rack_count;
     ngs2_rack* racks[MAX_RACKS];
+    float* fx;  /* a user effect's channels, one after the other a grain apart */
     float* mix; /* NGS2_MAX_OUTPUTS of max_grain * NGS2_MAX_CHANNELS, interleaved */
     int mix_used[NGS2_MAX_OUTPUTS];
     ngs2_pending_callback callbacks[MAX_CALLBACKS];
@@ -1479,9 +1480,12 @@ static ngs2_system* system_layout(arena* a, uint32_t max_grain) {
     ngs2_system* s = (ngs2_system*)arena_take(a, sizeof(ngs2_system));
     float* mix = (float*)arena_take(a, (size_t)NGS2_MAX_OUTPUTS * max_grain * NGS2_MAX_CHANNELS *
                                            sizeof(float));
-    if (s)
+    float* fx = (float*)arena_take(a, (size_t)max_grain * NGS2_MAX_CHANNELS * sizeof(float));
+    if (s) {
         s->mix = mix;
-    return mix ? s : NULL;
+        s->fx = fx;
+    }
+    return mix && fx ? s : NULL;
 }
 
 size_t ngs2_system_size(uint32_t max_grain_samples) {
@@ -2244,7 +2248,8 @@ static void voice_event(ngs2_voice* v, uint32_t event) {
     case NGS2_EVENT_KILL:
         v->play = PLAY_EMPTY;
         v->ramp = RAMP_NONE;
-        v->flags = event == NGS2_EVENT_KILL || !v->setup ? 0 : NGS2_STATE_INUSE;
+        v->flags =
+            event == NGS2_EVENT_KILL || !v->setup || is_sampler(v->rack) ? 0 : NGS2_STATE_INUSE;
         voice_fx_restart(v);
         if (v->reverb)
             reverb_clear(v->reverb);
@@ -3048,6 +3053,7 @@ static int window_fill(ngs2_voice* v, ngs2_block* b) {
     if (v->format.type == NGS2_WAVE_VAG) {
         if (!b->data || v->block_pos + VAG_BYTES * channels > b->info.data_size)
             return 0;
+        v->waveform_data = b->data + v->block_pos;
         for (c = 0; c < channels; c++)
             vag_frame(v, b->data + v->block_pos + (size_t)c * VAG_BYTES, c);
         v->block_pos += VAG_BYTES * channels;
@@ -3064,6 +3070,7 @@ static int window_fill(ngs2_voice* v, ngs2_block* b) {
             end = b->info.data_size;
         if (!b->data || v->block_pos >= end)
             return 0;
+        v->waveform_data = b->data + v->block_pos;
         /* Channel after channel, each of the frame's samples, as the window is read */
         if (ratrac9_decode_f32(at9, b->data + v->block_pos, end - v->block_pos, v->window, true,
                                &used) < 0 ||
@@ -3107,6 +3114,7 @@ static uint32_t sampler_read(ngs2_voice* v, float* dst, uint32_t stride, uint32_
             n = count - done < v->block_left ? count - done : v->block_left;
             if (b->data) {
                 const uint8_t* src = b->data + v->block_pos;
+                v->waveform_data = src;
                 for (c = 0; c < channels; c++) {
                     float* out = dst + (size_t)c * stride + done;
                     const uint8_t* s = src + (size_t)c * bytes;
@@ -3311,24 +3319,41 @@ static void send(ngs2_voice* v, float* const* src, uint32_t stride, uint32_t gra
     }
 }
 
+/* The game's effect is given all eight channels, each a grain after the one before it in one
+ * piece of memory (as GR2port has it: Gravity Rush 2's effect on its voices reads them so, and
+ * with the channels a largest grain apart it read what no one had written: static). The voice's
+ * channels are a largest grain apart, so they go there and back unless that is the same. */
 static int run_user_fx(ngs2_system* s, void* handler, const uintptr_t* data, uint32_t* flags,
                        float* samples, uint32_t channels, uint32_t stride) {
     float* pointers[NGS2_MAX_CHANNELS];
     ngs2_user_fx_context ctx;
-    uint32_t c;
+    uint32_t c, grain = s->grain;
+    const int in_place = stride == grain && channels == NGS2_MAX_CHANNELS;
+    float* planes = in_place ? samples : s->fx;
     if (!handler || !s->host.user_fx)
         return 0;
-    for (c = 0; c < channels; c++)
-        pointers[c] = samples + (size_t)c * stride;
+    if (channels > NGS2_MAX_CHANNELS)
+        channels = NGS2_MAX_CHANNELS;
+    if (!in_place) {
+        for (c = 0; c < channels; c++)
+            memcpy(planes + (size_t)c * grain, samples + (size_t)c * stride, sizeof(float) * grain);
+        memset(planes + (size_t)channels * grain, 0,
+               sizeof(float) * grain * (NGS2_MAX_CHANNELS - channels));
+    }
+    for (c = 0; c < NGS2_MAX_CHANNELS; c++)
+        pointers[c] = planes + (size_t)c * grain;
     ctx.channel_data = pointers;
     ctx.user_data0 = data[0];
     ctx.user_data1 = data[1];
     ctx.user_data2 = data[2];
     ctx.flags = *flags;
     ctx.channels = channels;
-    ctx.grain_samples = s->grain;
+    ctx.grain_samples = grain;
     ctx.sample_rate = s->sample_rate;
     s->host.user_fx(handler, &ctx);
+    if (!in_place)
+        for (c = 0; c < channels; c++)
+            memcpy(samples + (size_t)c * stride, planes + (size_t)c * grain, sizeof(float) * grain);
     *flags = 0;
     return 1;
 }
@@ -3580,7 +3605,9 @@ static void voice_settle(ngs2_voice* v) {
         v->flags = NGS2_STATE_INUSE | NGS2_STATE_PAUSED;
         break;
     default:
-        v->flags = v->setup ? NGS2_STATE_INUSE : 0;
+        /* A sampler voice that has ended is free again, in use no more (GR2port): a game finds
+         * its ended voices by this */
+        v->flags = v->setup && !is_sampler(v->rack) ? NGS2_STATE_INUSE : 0;
         break;
     }
 }

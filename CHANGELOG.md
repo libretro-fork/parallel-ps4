@@ -4,6 +4,13 @@ What changed in the libretro core of this fork, newest first. Changes that come 
 
 ## Unreleased
 
+- **Ngs2 as GR2port has it, in three places found by running its mixer and this engine side by side on the same parameters** (Gravity Rush 2's voices are still garbled; its decode of VAG now matches GR2port's):
+  - **A game's effect is given all eight channels, each a grain after the one before, in one piece of memory.** The voice's channels are a largest grain apart (512 where the grain is 256), and only the voice's own channels had a pointer at all. An effect that goes from the first channel's pointer by the grain read what no one had written. Gravity Rush 2 puts an effect of its own on a submixer. The channels are copied to such a piece and back around the call (in place when they already lie so); the piece is the system's, made with it.
+  - **A sampler's state says where the decoder last read** (`waveformData`), not where the block starts: a game that streams into a ring goes by it.
+  - **A sampler voice that has ended, or was stopped, is in use no more** (state flags 0, not `INUSE`): a game finds its ended voices by this. Mixing voices are as before.
+  - Not taken: GR2port starts a VAG block's prediction from nothing (this engine goes on across blocks, which a test holds to: started again, a stream broke with a click at each block), and plays a block of N repeats N+1 times (here N).
+  - Each kind of parameter a game gives `sceNgs2VoiceControl` is logged the first time it is seen (rack, id, size, first words; a waveform type or blocks' flags not seen before is a new kind; 64 at most).
+  - Not run in a game yet.
 - **Audio3d's object attributes have their right numbers**, as upstream shadPS4's "audio3d: Fix swapped attribute ids" (#5499), which GR2port carries: priority is 2, position 3, gain 5, reset state 7, ambisonics 9. They were position 2, gain 3, priority 5, ambisonics 7, reset state 9, so an object's position was taken as its gain (its first coordinate as how loud it is: any value, negative or far past 1), its real gain was dropped, and an ambisonics attribute reset the object. Gravity Rush 2 opens an Audio3d port; its voices came out garbled and static while its music played.
   - Not run in a game yet.
 - **HEVAG frames take their shift as it is.** The PS1's VAG treats a shift of 13 to 15 as 9, and the HEVAG decode kept that: a frame of a predictor past the PS1's five with such a shift came out 16 to 64 times too loud. GR2port and vgmstream take HEVAG's shift as it is. Gravity Rush 2's voices were still garbled after the HEVAG predictors went in. The PS1's five predictors keep the old rule.
