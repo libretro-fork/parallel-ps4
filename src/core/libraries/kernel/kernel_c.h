@@ -86,6 +86,12 @@ bool kernel_is_valid_gpu_mapping(uintptr_t addr, u64 size);
 /* The CPU wrote [@addr, @addr + @size) behind the GPU caches' backs
  * (Core::Memory::InvalidateMemory; memory.cpp) */
 void kernel_invalidate_memory(uintptr_t addr, u64 size);
+
+/* A stack of @size bytes from the threads' stack allocator (ThreadState::CreateStack), in
+ * memory the GPU never tracks: NULL if none could be made (threads/stack.cpp) */
+void* kernel_fiber_stack_create(u64 size);
+/* Gives it back to the allocator's spare stacks */
+void kernel_fiber_stack_free(void* stack, u64 size);
 /* Core::Memory::VirtualQuery with no flags: 0 and the end of the area @addr is in, or the
  * kernel's error */
 s32 kernel_virtual_query_end(uintptr_t addr, uintptr_t* end);

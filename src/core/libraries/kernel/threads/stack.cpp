@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include "common/assert.h"
+#include "core/libraries/kernel/kernel_c.h"
 #include "core/libraries/kernel/threads/pthread.h"
 #include "core/libraries/kernel/threads/thread_state.h"
 #include "core/memory.h"
@@ -149,3 +150,21 @@ void ThreadState::FreeStack(PthreadAttr* attr) {
 }
 
 } // namespace Libraries::Kernel
+
+extern "C" void* kernel_fiber_stack_create(u64 size) {
+    Libraries::Kernel::PthreadAttr attr{};
+    attr.stacksize_attr = size;
+    if (Libraries::Kernel::ThrState::Instance()->CreateStack(&attr) != 0) {
+        return nullptr;
+    }
+    return attr.stackaddr_attr;
+}
+
+extern "C" void kernel_fiber_stack_free(void* stack, u64 size) {
+    auto* thread_state = Libraries::Kernel::ThrState::Instance();
+    Libraries::Kernel::PthreadAttr attr{};
+    attr.stackaddr_attr = stack;
+    attr.stacksize_attr = size;
+    // The spare stack lists are kept in step by the thread list's combiner
+    thread_state->thread_list_combiner.Run([&] { thread_state->FreeStack(&attr); });
+}

@@ -12,7 +12,12 @@
 #include "core/libraries/error_codes.h"
 #include "core/libraries/fiber/fiber.h"
 #include "core/libraries/fiber/fiber_error.h"
+#include "core/libraries/kernel/kernel_c.h"
 #include "core/tls_c.h"
+#ifdef _WIN32
+#include "common/combine.h"
+#include "common/run_once.h"
+#endif
 #ifdef SHADPS4_ENABLE_FEX_GUEST_CPU
 #include "core/guest_cpu/hle_frame_c.h"
 #endif
@@ -54,6 +59,128 @@ __attribute__((used)) void PS4_SYSV_ABI _sceFiberForceQuit(u64 ret) {
 }
 #endif
 
+#ifdef _WIN32
+/* Windows puts the record of a fault on the stack of the thread that faulted, so a fiber cannot
+ * run on game memory the GPU caches may write-protect: a fault there finds no room for its
+ * record and ends the process. A fiber runs on a stack of its own from the threads' stack
+ * allocator instead, one for each context the game gives (fibers given the same context share
+ * it), in a fixed table the combiner runs on one at a time. */
+#define FIBER_STACKS_MAX 1024
+
+typedef struct fiber_stack {
+    uintptr_t start; /* the game's context */
+    u64 size;
+    void* stack;
+    u32 num_fibers;
+} fiber_stack_t;
+
+static fiber_stack_t g_fiber_stacks[FIBER_STACKS_MAX];
+static u32 g_fiber_stack_count;
+static combiner_t g_fiber_stack_lock;
+static run_once_t g_fiber_stack_once = RUN_ONCE_INIT;
+
+typedef struct fiber_stack_call {
+    void* addr_context;
+    u64 size_context;
+    const OrbisFiber* fiber;
+    void* stack;
+} fiber_stack_call_t;
+
+static void fiber_stack_init_once(void* arg) {
+    (void)arg;
+    combiner_init(&g_fiber_stack_lock);
+}
+
+static void fiber_stack_remove(u32 i) {
+    kernel_fiber_stack_free(g_fiber_stacks[i].stack, g_fiber_stacks[i].size);
+    g_fiber_stacks[i] = g_fiber_stacks[--g_fiber_stack_count];
+}
+
+static void fiber_acquire_stack_locked(void* ctx) {
+    fiber_stack_call_t* c = (fiber_stack_call_t*)ctx;
+    const uintptr_t start = (uintptr_t)c->addr_context;
+    u32 i = 0;
+    while (i < g_fiber_stack_count) {
+        fiber_stack_t* s = &g_fiber_stacks[i];
+        if (s->start < start + c->size_context && start < s->start + s->size) {
+            if (s->start == start && s->size == c->size_context) {
+                s->num_fibers++;
+                c->stack = s->stack;
+                return;
+            }
+            /* A PS4 would overwrite the older context, so no fiber runs on it anymore; this
+             * also frees the stacks of fibers never finalized */
+            fiber_stack_remove(i);
+            continue;
+        }
+        i++;
+    }
+    c->stack = NULL;
+    if (g_fiber_stack_count == FIBER_STACKS_MAX) {
+        c_log(C_LOG_LIB_FIBER, C_LOG_LEVEL_ERROR, "fiber_acquire_stack",
+              "%d fiber stacks in use: this fiber runs on its context", FIBER_STACKS_MAX);
+        return;
+    }
+    c->stack = kernel_fiber_stack_create(c->size_context);
+    if (c->stack != NULL) {
+        fiber_stack_t* s = &g_fiber_stacks[g_fiber_stack_count++];
+        s->start = start;
+        s->size = c->size_context;
+        s->stack = c->stack;
+        s->num_fibers = 1;
+    }
+}
+
+static void fiber_release_stack_locked(void* ctx) {
+    const fiber_stack_call_t* c = (const fiber_stack_call_t*)ctx;
+    u32 i;
+    for (i = 0; i < g_fiber_stack_count; i++) {
+        fiber_stack_t* s = &g_fiber_stacks[i];
+        if (s->start == (uintptr_t)c->fiber->addr_context) {
+            if (s->stack == c->fiber->context_start && --s->num_fibers == 0) {
+                fiber_stack_remove(i);
+            }
+            return;
+        }
+    }
+}
+#endif
+
+/* Where a fiber given @addr_context runs: on Windows a stack of its own, else the context */
+static void* fiber_acquire_stack(void* addr_context, u64 size_context) {
+#ifdef _WIN32
+    fiber_stack_call_t c;
+    run_once(&g_fiber_stack_once, fiber_stack_init_once, NULL);
+    c.addr_context = addr_context;
+    c.size_context = size_context;
+    c.fiber = NULL;
+    c.stack = NULL;
+    combiner_run(&g_fiber_stack_lock, fiber_acquire_stack_locked, &c);
+    return c.stack != NULL ? c.stack : addr_context;
+#else
+    (void)size_context;
+    return addr_context;
+#endif
+}
+
+/* A finalized fiber's stack goes back once no fiber uses it */
+static void fiber_release_stack(const OrbisFiber* fiber) {
+#ifdef _WIN32
+    fiber_stack_call_t c;
+    if (fiber->context_start == fiber->addr_context) {
+        return; /* on its context */
+    }
+    run_once(&g_fiber_stack_once, fiber_stack_init_once, NULL);
+    c.addr_context = NULL;
+    c.size_context = 0;
+    c.fiber = fiber;
+    c.stack = NULL;
+    combiner_run(&g_fiber_stack_lock, fiber_release_stack_locked, &c);
+#else
+    (void)fiber;
+#endif
+}
+
 /* Stops the emulator: the fiber's stack of @stack_size bytes overflowed */
 static void fiber_stack_overflow(u64 stack_size) {
     char msg[80];
@@ -68,15 +195,15 @@ static void fiber_stack_overflow(u64 stack_size) {
 }
 
 static void PS4_SYSV_ABI _sceFiberCheckStackOverflow(OrbisFiberContext* ctx) {
-    u64* stack_base = (u64*)ctx->current_fiber->addr_context;
-    if (stack_base && *stack_base != FIBER_STACK_SIGNATURE) {
+    const OrbisFiber* fiber = ctx->current_fiber;
+    if (fiber->addr_context && *(u64*)fiber->context_start != FIBER_STACK_SIGNATURE) {
         fiber_stack_overflow(ctx->current_fiber->size_context);
     }
 }
 
 /* The stack's first word signed, and with the size check the rest filled with its pattern */
 static void fiber_sign_stack(OrbisFiber* fiber, int size_check) {
-    *(u64*)fiber->addr_context = FIBER_STACK_SIGNATURE;
+    *(u64*)fiber->context_start = FIBER_STACK_SIGNATURE;
     if (size_check) {
         u64* stack_ptr = (u64*)fiber->context_start + 1;
         u64* stack_end = (u64*)fiber->context_end;
@@ -103,8 +230,8 @@ static s32 PS4_SYSV_ABI _sceFiberAttachContext(OrbisFiber* fiber, void* addr_con
 
     fiber->addr_context = addr_context;
     fiber->size_context = size_context;
-    fiber->context_start = addr_context;
-    fiber->context_end = (u8*)addr_context + size_context;
+    fiber->context_start = fiber_acquire_stack(addr_context, size_context);
+    fiber->context_end = (u8*)fiber->context_start + size_context;
     fiber_sign_stack(fiber, (fiber->flags & ORBIS_FIBER_FLAG_CONTEXT_SIZE_CHECK) != 0);
     return ORBIS_OK;
 }
@@ -159,8 +286,7 @@ static void PS4_SYSV_ABI _sceFiberSwitchToFiber(OrbisFiber* fiber, u64 arg_on_ru
         ctx->prev_fiber = NULL;
         prev_state = (u32*)&prev_fiber->state;
     }
-    fiber_switch_entry(fiber, arg_on_run_to, (u8*)fiber->addr_context + fiber->size_context,
-                       prev_state);
+    fiber_switch_entry(fiber, arg_on_run_to, (u8*)fiber->context_end, prev_state);
 }
 
 static void PS4_SYSV_ABI _sceFiberSwitch(OrbisFiber* cur_fiber, OrbisFiber* fiber,
@@ -244,8 +370,8 @@ s32 PS4_SYSV_ABI sceFiberInitializeImpl(OrbisFiber* fiber, const char* name, Orb
     fiber->magic_end = FIBER_SIGNATURE1;
 
     if (addr_context != NULL) {
-        fiber->context_start = addr_context;
-        fiber->context_end = (u8*)addr_context + size_context;
+        fiber->context_start = fiber_acquire_stack(addr_context, size_context);
+        fiber->context_end = (u8*)fiber->context_start + size_context;
         /* The caller's flags, not those the context size check added */
         fiber_sign_stack(fiber, (flags & ORBIS_FIBER_FLAG_CONTEXT_SIZE_CHECK) != 0);
     }
@@ -279,6 +405,9 @@ s32 PS4_SYSV_ABI sceFiberFinalize(OrbisFiber* fiber) {
     if (!retro_atomic_cas_int(&fiber->state, ORBIS_FIBER_STATE_IDLE,
                               ORBIS_FIBER_STATE_TERMINATED)) {
         return ORBIS_FIBER_ERROR_STATE;
+    }
+    if (fiber->addr_context) {
+        fiber_release_stack(fiber);
     }
     return ORBIS_OK;
 }
@@ -500,7 +629,7 @@ static void fiber_suspend_current(u64* gpr, OrbisFiber* fiber, u64* arg_on_run) 
     fiber_suspended_call* call =
         (fiber_suspended_call*)fiber_stack_room(gpr[FIBER_REG_RSP], sizeof(fiber_suspended_call));
     /* No room above the stack's signature: what is below is not the fiber's */
-    if ((u8*)call < (u8*)fiber->addr_context + 8) {
+    if ((u8*)call < (u8*)fiber->context_start + 8) {
         fiber_stack_overflow(fiber->size_context);
     }
     memcpy(call->gpr, gpr, sizeof(call->gpr));
@@ -551,7 +680,7 @@ static void fiber_switch_to(u64* gpr, OrbisFiber* fiber, u64 arg_on_run_to,
         g_ctx->prev_fiber = NULL;
     }
     fiber_start_entry(gpr, fiber->entry, fiber->arg_on_initialize, arg_on_run_to,
-                      (u64)(uintptr_t)fiber->addr_context + fiber->size_context, prev_state);
+                      (u64)(uintptr_t)fiber->context_end, prev_state);
 }
 
 static void fiber_switch(u64* gpr, OrbisFiber* cur_fiber, OrbisFiber* fiber, u64 arg_on_run_to,
