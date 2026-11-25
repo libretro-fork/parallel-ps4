@@ -71,6 +71,23 @@ void fs_unmount(const char* guest_folder);
 /* The host folder @host_dir made (emptied first with @format) and mounted at @guest_folder */
 void fs_mount_made_folder(const char* host_dir, bool format, const char* guest_folder);
 
+/* fs_open_guest_read's answers */
+#define FS_OPEN_GUEST_NONE 0   /* no file there: @host_out holds MntPoints::GetHostPath */
+#define FS_OPEN_GUEST_HOST 1   /* a host file: @host_out holds its path */
+#define FS_OPEN_GUEST_HANDLE 2 /* a backend's file with no host path: *@handle, to read */
+
+/* MntPoints::Open of @guest_path (@length bytes) for reading: as above, the host path as UTF-8
+ * in @host_out (empty when it does not fit in @size). A handle is read with fs_guest_file_* and
+ * closed with fs_guest_file_close. */
+int fs_open_guest_read(const char* guest_path, size_t length, char* host_out, size_t size,
+                       void** handle);
+/* IFile::IsOpen and IFile::Size of a handle fs_open_guest_read gave */
+bool fs_guest_file_is_open(void* handle);
+u64 fs_guest_file_size(void* handle);
+/* IFile::Seek to @offset, then IFile::Read of @size bytes into @dst: what Read gave */
+s64 fs_guest_file_read_at(void* handle, u64 offset, void* dst, u64 size);
+void fs_guest_file_close(void* handle);
+
 RETRO_END_DECLS
 
 #endif

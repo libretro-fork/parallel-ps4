@@ -83,6 +83,9 @@ s32 kernel_get_compiled_sdk_version(s32* ver);
 u32 kernel_firmware_version(void);
 /* Core::Memory::IsValidGpuMapping */
 bool kernel_is_valid_gpu_mapping(uintptr_t addr, u64 size);
+/* The CPU wrote [@addr, @addr + @size) behind the GPU caches' backs
+ * (Core::Memory::InvalidateMemory; memory.cpp) */
+void kernel_invalidate_memory(uintptr_t addr, u64 size);
 /* Core::Memory::VirtualQuery with no flags: 0 and the end of the area @addr is in, or the
  * kernel's error */
 s32 kernel_virtual_query_end(uintptr_t addr, uintptr_t* end);

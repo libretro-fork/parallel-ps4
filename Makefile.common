@@ -130,9 +130,6 @@ CORE_SOURCES_CXX += $(addprefix src/core/file_sys/directories/,base_directory.cp
 CORE_SOURCES_CXX += $(addprefix src/core/file_sys/,fs.cpp ifile.cpp)
 CORE_SOURCES_CXX += $(addprefix src/core/libraries/ajm/,ajm.cpp ajm_aac.cpp ajm_at9.cpp \
 	ajm_batch.cpp ajm_context.cpp ajm_instance.cpp ajm_instance_statistics.cpp ajm_mp3.cpp)
-CORE_SOURCES_CXX += $(addprefix src/core/libraries/avplayer/,avplayer.cpp avplayer_common.cpp \
-	avplayer_file_streamer.cpp avplayer_handle_streamer.cpp avplayer_impl.cpp avplayer_source.cpp \
-	avplayer_state.cpp)
 CORE_SOURCES_CXX += $(addprefix src/core/libraries/font/,font.cpp font_face.cpp font_internal.cpp \
 	fontft.cpp fontft_internal.cpp)
 CORE_SOURCES_CXX += $(addprefix src/core/libraries/gnmdriver/,gnmdriver.cpp)
@@ -229,7 +226,8 @@ CORE_SOURCES_C += $(addprefix src/common/,audio_stream.c enum_names.c event_latc
 	u64_map.c vblank_clock.c word_name.c x64_decode.c x64_emit.c)
 CORE_SOURCES_C += $(addprefix src/core/,emulator_settings.c user_manager.c file_format/playgo_chunk.c)
 CORE_SOURCES_C += src/common/combine.c src/input/controller.c
-CORE_SOURCES_C += $(addprefix src/core/libraries/avplayer/,avplayer_clock.c avplayer_fsm.c)
+CORE_SOURCES_C += $(addprefix src/core/libraries/avplayer/,avplayer.c avplayer_clock.c avplayer_common.c \
+	avplayer_data_streamer.c avplayer_fsm.c avplayer_impl.c avplayer_source.c avplayer_state.c)
 CORE_SOURCES_C += $(addprefix src/core/libraries/audio3d/,audio3d.c audio3d_port.c)
 CORE_SOURCES_C += $(addprefix src/core/libraries/font/,font_blit.c)
 CORE_SOURCES_C += $(addprefix src/core/libraries/network/,host_override.c)

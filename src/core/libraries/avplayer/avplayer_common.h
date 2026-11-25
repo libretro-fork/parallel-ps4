@@ -1,127 +1,62 @@
-// SPDX-FileCopyrightText: Copyright 2024 shadPS4 Emulator Project
-// SPDX-License-Identifier: GPL-2.0-or-later
+/* SPDX-FileCopyrightText: Copyright 2024 shadPS4 Emulator Project
+ * SPDX-License-Identifier: GPL-2.0-or-later */
 
-#pragma once
+#ifndef SHADPS4_AVPLAYER_AVPLAYER_COMMON_H
+#define SHADPS4_AVPLAYER_AVPLAYER_COMMON_H
 
-#include <array>
-#include <cstddef>
-#include <optional>
-#include <string_view>
-#include <type_traits>
+#include <stddef.h>
 
-#include <retro_atomic.h>
+#include <retro_common_api.h>
+
 #include "core/libraries/avplayer/avplayer.h"
+#include "core/libraries/avplayer/avplayer_fsm.h"
+
+RETRO_BEGIN_DECLS
 
 #define AVPLAYER_IS_ERROR(x) ((x) < 0)
 
-namespace Libraries::AvPlayer {
-
-enum class AvState {
-    Unknown,
-    Initial,
-    AddingSource,
-    Ready,
-    Play,
-    Stop,
-    EndOfFile,
-    Pause,
-    C0x08,
-    Jump,
-    TrickMode,
-    C0x0B,
-    Buffering,
-    Starting,
-    Error,
+/* The player's states, as avplayer_fsm.h numbers them */
+enum AvState {
+    AV_STATE_UNKNOWN = AVPLAYER_FSM_UNKNOWN,
+    AV_STATE_INITIAL = AVPLAYER_FSM_INITIAL,
+    AV_STATE_ADDING_SOURCE = AVPLAYER_FSM_ADDING_SOURCE,
+    AV_STATE_READY = AVPLAYER_FSM_READY,
+    AV_STATE_PLAY = AVPLAYER_FSM_PLAY,
+    AV_STATE_STOP = AVPLAYER_FSM_STOP,
+    AV_STATE_END_OF_FILE = AVPLAYER_FSM_END_OF_FILE,
+    AV_STATE_PAUSE = AVPLAYER_FSM_PAUSE,
+    AV_STATE_C0X08 = AVPLAYER_FSM_C0X08,
+    AV_STATE_JUMP = AVPLAYER_FSM_JUMP,
+    AV_STATE_TRICK_MODE = AVPLAYER_FSM_TRICK_MODE,
+    AV_STATE_C0X0B = AVPLAYER_FSM_C0X0B,
+    AV_STATE_BUFFERING = AVPLAYER_FSM_BUFFERING,
+    AV_STATE_STARTING = AVPLAYER_FSM_STARTING,
+    AV_STATE_ERROR = AVPLAYER_FSM_ERROR
 };
 
-enum class AvEventType {
-    ChangeFlowState = 21,
-    WarningId = 22,
-    RevertState = 30,
-    AddSource = 40,
-    Error = 255,
+enum AvEventType {
+    AV_EVENT_TYPE_CHANGE_FLOW_STATE = 21,
+    AV_EVENT_TYPE_WARNING_ID = 22,
+    AV_EVENT_TYPE_REVERT_STATE = 30,
+    AV_EVENT_TYPE_ADD_SOURCE = 40,
+    AV_EVENT_TYPE_ERROR = 255
 };
 
-union AvPlayerEventData {
-    u32 num_frames; // 20
-    AvState state;  // AvEventType::ChangeFlowState
-    s32 error;      // AvEventType::WarningId
-    u32 attempt;    // AvEventType::AddSource
-};
+typedef union AvPlayerEventData {
+    u32 num_frames; /* 20 */
+    s32 state;      /* AV_EVENT_TYPE_CHANGE_FLOW_STATE: an AvState */
+    s32 error;      /* AV_EVENT_TYPE_WARNING_ID */
+    u32 attempt;    /* AV_EVENT_TYPE_ADD_SOURCE */
+} AvPlayerEventData;
 
-struct AvPlayerEvent {
-    AvEventType event;
+typedef struct AvPlayerEvent {
+    s32 event; /* AvEventType */
     AvPlayerEventData payload;
-};
+} AvPlayerEvent;
 
-// A bounded FIFO many threads put into and one takes from, without a lock (Vyukov's queue).
-template <class T, std::size_t N>
-class MpscRing {
-    static_assert(std::is_trivially_copyable_v<T> && (N & (N - 1)) == 0);
+/* What a path names, by its extension (a URI's, without its query or fragment) */
+s32 avplayer_get_source_type(const char* path, size_t length);
 
-public:
-    MpscRing() {
-        for (std::size_t i = 0; i < N; ++i) {
-            retro_atomic_store_relaxed_64(&m_cells[i].seq, i);
-        }
-    }
+RETRO_END_DECLS
 
-    // False when the ring is full.
-    bool Push(const T& value) {
-        std::size_t pos = static_cast<std::size_t>(retro_atomic_load_relaxed_64(&m_tail));
-        for (;;) {
-            Cell& cell = m_cells[pos & (N - 1)];
-            const std::size_t seq =
-                static_cast<std::size_t>(retro_atomic_load_acquire_64(&cell.seq));
-            const auto diff = static_cast<std::ptrdiff_t>(seq - pos);
-            if (diff == 0) {
-                if ((retro_atomic_cas_64(&m_tail, pos, pos + 1) ||
-                     ((pos = static_cast<std::size_t>(retro_atomic_load_acquire_64(&m_tail))),
-                      false))) {
-                    cell.value = value;
-                    retro_atomic_store_release_64(&cell.seq, pos + 1);
-                    return true;
-                }
-            } else if (diff < 0) {
-                return false;
-            } else {
-                pos = static_cast<std::size_t>(retro_atomic_load_relaxed_64(&m_tail));
-            }
-        }
-    }
-
-    // The consumer's.
-    std::optional<T> Pop() {
-        Cell& cell = m_cells[m_head & (N - 1)];
-        if (static_cast<std::size_t>(retro_atomic_load_acquire_64(&cell.seq)) != m_head + 1) {
-            return std::nullopt;
-        }
-        const T value = cell.value;
-        retro_atomic_store_release_64(&cell.seq, m_head + N);
-        ++m_head;
-        return value;
-    }
-
-    bool Empty() const {
-        return static_cast<std::size_t>(
-                   retro_atomic_load_acquire_64(&m_cells[m_head & (N - 1)].seq)) != m_head + 1;
-    }
-
-    void Clear() {
-        while (Pop()) {
-        }
-    }
-
-private:
-    struct Cell {
-        retro_atomic_64_t seq;
-        T value;
-    };
-    std::array<Cell, N> m_cells{};
-    alignas(64) retro_atomic_64_t m_tail{0};
-    alignas(64) std::size_t m_head = 0;
-};
-
-AvPlayerSourceType GetSourceType(std::string_view path);
-
-} // namespace Libraries::AvPlayer
+#endif

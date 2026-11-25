@@ -952,3 +952,50 @@ extern "C" void fs_mount_made_folder(const char* host_dir, bool format, const ch
     auto* mnt = Common::Singleton<Core::FileSys::MntPoints>::Instance();
     mnt->Mount(dir, guest_folder);
 }
+
+static void FsCopyHostPath(const std::filesystem::path& path, char* out, size_t size) {
+    const std::string host = Common::FS::PathToUTF8String(path);
+    if (size == 0) {
+        return;
+    }
+    if (host.size() >= size) {
+        out[0] = '\0';
+        return;
+    }
+    std::memcpy(out, host.c_str(), host.size() + 1);
+}
+
+extern "C" int fs_open_guest_read(const char* guest_path, size_t length, char* host_out,
+                                  size_t size, void** handle) {
+    auto* mnt = Common::Singleton<Core::FileSys::MntPoints>::Instance();
+    const std::string_view path{guest_path, length};
+    *handle = nullptr;
+    if (auto file = mnt->Open(path, /*writable=*/false)) {
+        if (auto host = file->GetHostPath(); host.has_value()) {
+            FsCopyHostPath(*host, host_out, size);
+            return FS_OPEN_GUEST_HOST;
+        }
+        *handle = file.release();
+        return FS_OPEN_GUEST_HANDLE;
+    }
+    FsCopyHostPath(mnt->GetHostPath(path), host_out, size);
+    return FS_OPEN_GUEST_NONE;
+}
+
+extern "C" bool fs_guest_file_is_open(void* handle) {
+    return handle != nullptr && static_cast<Core::FileSys::IFile*>(handle)->IsOpen();
+}
+
+extern "C" u64 fs_guest_file_size(void* handle) {
+    return static_cast<Core::FileSys::IFile*>(handle)->Size();
+}
+
+extern "C" s64 fs_guest_file_read_at(void* handle, u64 offset, void* dst, u64 size) {
+    auto* file = static_cast<Core::FileSys::IFile*>(handle);
+    file->Seek(static_cast<s64>(offset), Common::FS::SeekOrigin::SetOrigin);
+    return file->Read(dst, size);
+}
+
+extern "C" void fs_guest_file_close(void* handle) {
+    delete static_cast<Core::FileSys::IFile*>(handle);
+}

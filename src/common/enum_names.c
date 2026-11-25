@@ -476,40 +476,6 @@ static const enum_name_entry_t enum_names_Libraries_Ajm_AjmCodecType_entries[] =
 const enum_names_t enum_names_Libraries_Ajm_AjmCodecType = {enum_names_Libraries_Ajm_AjmCodecType_entries,
     sizeof(enum_names_Libraries_Ajm_AjmCodecType_entries) / sizeof(enum_names_Libraries_Ajm_AjmCodecType_entries[0])};
 
-static const enum_name_entry_t enum_names_Libraries_AvPlayer_AvPlayerEvents_entries[] = {
-    {(int64_t)1, "StateStop"},
-    {(int64_t)2, "StateReady"},
-    {(int64_t)3, "StatePlay"},
-    {(int64_t)4, "StatePause"},
-    {(int64_t)5, "StateBuffering"},
-    {(int64_t)16, "TimedTextDelivery"},
-    {(int64_t)32, "WarningId"},
-    {(int64_t)48, "Encryption"},
-    {(int64_t)64, "DrmError"},
-};
-const enum_names_t enum_names_Libraries_AvPlayer_AvPlayerEvents = {enum_names_Libraries_AvPlayer_AvPlayerEvents_entries,
-    sizeof(enum_names_Libraries_AvPlayer_AvPlayerEvents_entries) / sizeof(enum_names_Libraries_AvPlayer_AvPlayerEvents_entries[0])};
-
-static const enum_name_entry_t enum_names_Libraries_AvPlayer_AvState_entries[] = {
-    {(int64_t)0, "Unknown"},
-    {(int64_t)1, "Initial"},
-    {(int64_t)2, "AddingSource"},
-    {(int64_t)3, "Ready"},
-    {(int64_t)4, "Play"},
-    {(int64_t)5, "Stop"},
-    {(int64_t)6, "EndOfFile"},
-    {(int64_t)7, "Pause"},
-    {(int64_t)8, "C0x08"},
-    {(int64_t)9, "Jump"},
-    {(int64_t)10, "TrickMode"},
-    {(int64_t)11, "C0x0B"},
-    {(int64_t)12, "Buffering"},
-    {(int64_t)13, "Starting"},
-    {(int64_t)14, "Error"},
-};
-const enum_names_t enum_names_Libraries_AvPlayer_AvState = {enum_names_Libraries_AvPlayer_AvState_entries,
-    sizeof(enum_names_Libraries_AvPlayer_AvState_entries) / sizeof(enum_names_Libraries_AvPlayer_AvState_entries[0])};
-
 static const enum_name_entry_t enum_names_Libraries_CommonDialog_Result_entries[] = {
     {(int64_t)0, "OK"},
     {(int64_t)1, "USER_CANCELED"},
@@ -619,6 +585,40 @@ static const enum_name_entry_t enum_names_Libraries_SaveData_OrbisSaveDataParamT
 };
 const enum_names_t enum_names_Libraries_SaveData_OrbisSaveDataParamType = {enum_names_Libraries_SaveData_OrbisSaveDataParamType_entries,
     sizeof(enum_names_Libraries_SaveData_OrbisSaveDataParamType_entries) / sizeof(enum_names_Libraries_SaveData_OrbisSaveDataParamType_entries[0])};
+
+static const enum_name_entry_t enum_names_AvPlayerEvents_entries[] = {
+    {(int64_t)1, "AV_PLAYER_EVENTS_STATE_STOP"},
+    {(int64_t)2, "AV_PLAYER_EVENTS_STATE_READY"},
+    {(int64_t)3, "AV_PLAYER_EVENTS_STATE_PLAY"},
+    {(int64_t)4, "AV_PLAYER_EVENTS_STATE_PAUSE"},
+    {(int64_t)5, "AV_PLAYER_EVENTS_STATE_BUFFERING"},
+    {(int64_t)16, "AV_PLAYER_EVENTS_TIMED_TEXT_DELIVERY"},
+    {(int64_t)32, "AV_PLAYER_EVENTS_WARNING_ID"},
+    {(int64_t)48, "AV_PLAYER_EVENTS_ENCRYPTION"},
+    {(int64_t)64, "AV_PLAYER_EVENTS_DRM_ERROR"},
+};
+const enum_names_t enum_names_AvPlayerEvents = {enum_names_AvPlayerEvents_entries,
+    sizeof(enum_names_AvPlayerEvents_entries) / sizeof(enum_names_AvPlayerEvents_entries[0])};
+
+static const enum_name_entry_t enum_names_AvState_entries[] = {
+    {(int64_t)0, "AV_STATE_UNKNOWN"},
+    {(int64_t)1, "AV_STATE_INITIAL"},
+    {(int64_t)2, "AV_STATE_ADDING_SOURCE"},
+    {(int64_t)3, "AV_STATE_READY"},
+    {(int64_t)4, "AV_STATE_PLAY"},
+    {(int64_t)5, "AV_STATE_STOP"},
+    {(int64_t)6, "AV_STATE_END_OF_FILE"},
+    {(int64_t)7, "AV_STATE_PAUSE"},
+    {(int64_t)8, "AV_STATE_C0X08"},
+    {(int64_t)9, "AV_STATE_JUMP"},
+    {(int64_t)10, "AV_STATE_TRICK_MODE"},
+    {(int64_t)11, "AV_STATE_C0X0B"},
+    {(int64_t)12, "AV_STATE_BUFFERING"},
+    {(int64_t)13, "AV_STATE_STARTING"},
+    {(int64_t)14, "AV_STATE_ERROR"},
+};
+const enum_names_t enum_names_AvState = {enum_names_AvState_entries,
+    sizeof(enum_names_AvState_entries) / sizeof(enum_names_AvState_entries[0])};
 
 static const enum_name_entry_t enum_names_OrbisAudio3dBlocking_entries[] = {
     {(int64_t)0, "ORBIS_AUDIO3D_BLOCKING_ASYNC"},

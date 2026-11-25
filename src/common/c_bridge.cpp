@@ -72,6 +72,8 @@ static Common::Log::Class ToClass(c_log_class log_class) {
         return Common::Log::Class::Lib_VideoOut;
     case C_LOG_LIB_AUDIO_IN:
         return Common::Log::Class::Lib_AudioIn;
+    case C_LOG_LIB_AV_PLAYER:
+        return Common::Log::Class::Lib_AvPlayer;
     case C_LOG_LIB_VOICE:
         return Common::Log::Class::Lib_Voice;
     case C_LOG_LIB_RTC:

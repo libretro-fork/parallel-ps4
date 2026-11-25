@@ -1097,6 +1097,10 @@ extern "C" bool kernel_is_valid_gpu_mapping(uintptr_t addr, u64 size) {
     return Core::Memory::Instance()->IsValidGpuMapping(addr, size);
 }
 
+extern "C" void kernel_invalidate_memory(uintptr_t addr, u64 size) {
+    Core::Memory::Instance()->InvalidateMemory(addr, size);
+}
+
 extern "C" s32 kernel_virtual_query_end(uintptr_t addr, uintptr_t* end) {
     Libraries::Kernel::OrbisVirtualQueryInfo info{};
     const s32 result = Core::Memory::Instance()->VirtualQuery(addr, 0, &info);

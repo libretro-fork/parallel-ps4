@@ -1,57 +1,50 @@
-// SPDX-FileCopyrightText: Copyright 2024 shadPS4 Emulator Project
-// SPDX-License-Identifier: GPL-2.0-or-later
+/* SPDX-FileCopyrightText: Copyright 2024 shadPS4 Emulator Project
+ * SPDX-License-Identifier: GPL-2.0-or-later */
 
-#pragma once
+#ifndef SHADPS4_AVPLAYER_AVPLAYER_IMPL_H
+#define SHADPS4_AVPLAYER_AVPLAYER_IMPL_H
+
+/* A player the game holds: its init data, with its allocator and file replacement called
+ * through the player, and its state. Defined in avplayer_impl.c. */
+
+#include <stddef.h>
+
+#include <boolean.h>
+#include <retro_common_api.h>
 
 #include "core/libraries/avplayer/avplayer.h"
 #include "core/libraries/avplayer/avplayer_state.h"
 
-#include <memory>
-#include <string_view>
+RETRO_BEGIN_DECLS
 
-namespace Libraries::AvPlayer {
-
-class AvPlayer {
-public:
-    AvPlayer(const AvPlayerInitData& data);
-
-    s32 PostInit(const AvPlayerPostInitData& data);
-    s32 AddSource(std::string_view filename);
-    s32 AddSourceEx(std::string_view path, AvPlayerSourceType source_type);
-    s32 GetStreamCount();
-    s32 GetStreamInfo(u32 stream_index, AvPlayerStreamInfo& info);
-    s32 EnableStream(u32 stream_index);
-    s32 Start();
-    s32 Pause();
-    s32 Resume();
-    s32 SetAvSyncMode(AvPlayerAvSyncMode sync_mode);
-    bool GetAudioData(AvPlayerFrameInfo& audio_info);
-    bool GetVideoData(AvPlayerFrameInfo& video_info);
-    bool GetVideoData(AvPlayerFrameInfoEx& video_info);
-    bool IsActive();
-    u64 CurrentTime();
-    s32 Stop();
-    bool SetLooping(bool is_looping);
-
-private:
-    // Memory Replacement
-    static void* PS4_SYSV_ABI Allocate(void* handle, u32 alignment, u32 size);
-    static void PS4_SYSV_ABI Deallocate(void* handle, void* memory);
-    static void* PS4_SYSV_ABI AllocateTexture(void* handle, u32 alignment, u32 size);
-    static void PS4_SYSV_ABI DeallocateTexture(void* handle, void* memory);
-
-    // File Replacement
-    static int PS4_SYSV_ABI OpenFile(void* handle, const char* filename);
-    static int PS4_SYSV_ABI CloseFile(void* handle);
-    static int PS4_SYSV_ABI ReadOffsetFile(void* handle, u8* buffer, u64 position, u32 length);
-    static u64 PS4_SYSV_ABI SizeFile(void* handle);
-
-    AvPlayerInitData StubInitData(const AvPlayerInitData& data);
-
-    AvPlayerInitData m_init_data{};
-    AvPlayerInitData m_init_data_original{};
-
-    std::unique_ptr<AvPlayerState> m_state{};
+struct AvPlayer {
+    AvPlayerInitData init_data;
+    AvPlayerInitData init_data_original;
+    AvPlayerState state;
 };
 
-} // namespace Libraries::AvPlayer
+/* NULL if it cannot be made */
+struct AvPlayer* avplayer_new(const AvPlayerInitData* data);
+void avplayer_delete(struct AvPlayer* player);
+s32 avplayer_post_init(struct AvPlayer* player, const AvPlayerPostInitData* data);
+s32 avplayer_add_source(struct AvPlayer* player, const char* path, size_t length);
+s32 avplayer_add_source_ex(struct AvPlayer* player, const char* path, size_t length,
+                           s32 source_type);
+s32 avplayer_get_stream_count(struct AvPlayer* player);
+s32 avplayer_get_stream_info(struct AvPlayer* player, u32 stream_index, AvPlayerStreamInfo* info);
+s32 avplayer_enable_stream(struct AvPlayer* player, u32 stream_index);
+s32 avplayer_start(struct AvPlayer* player);
+s32 avplayer_pause(struct AvPlayer* player);
+s32 avplayer_resume(struct AvPlayer* player);
+s32 avplayer_set_av_sync_mode(struct AvPlayer* player, s32 sync_mode);
+bool avplayer_get_audio_data(struct AvPlayer* player, AvPlayerFrameInfo* audio_info);
+bool avplayer_get_video_data(struct AvPlayer* player, AvPlayerFrameInfo* video_info);
+bool avplayer_get_video_data_ex(struct AvPlayer* player, AvPlayerFrameInfoEx* video_info);
+bool avplayer_is_active(struct AvPlayer* player);
+u64 avplayer_current_time(struct AvPlayer* player);
+s32 avplayer_stop(struct AvPlayer* player);
+bool avplayer_set_looping(struct AvPlayer* player, bool is_looping);
+
+RETRO_END_DECLS
+
+#endif

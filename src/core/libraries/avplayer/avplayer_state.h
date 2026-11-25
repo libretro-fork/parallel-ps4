@@ -1,113 +1,86 @@
-// SPDX-FileCopyrightText: Copyright 2024 shadPS4 Emulator Project
-// SPDX-License-Identifier: GPL-2.0-or-later
+/* SPDX-FileCopyrightText: Copyright 2024 shadPS4 Emulator Project
+ * SPDX-License-Identifier: GPL-2.0-or-later */
 
-#pragma once
+#ifndef SHADPS4_AVPLAYER_AVPLAYER_STATE_H
+#define SHADPS4_AVPLAYER_AVPLAYER_STATE_H
 
-#include <optional>
-#include <string_view>
-#include "common/event_count.h"
-#include "common/pin_gate.h"
+/* The player's state, its controller thread and the events it tells the game. Defined in
+ * avplayer_state.c. */
 
+#include <stddef.h>
+
+#include <boolean.h>
 #include <retro_atomic.h>
+#include <retro_common_api.h>
+#include <rthreads/retro_eventcount.h>
+
+#include "common/mpsc_ring.h"
+#include "common/pin_gate.h"
+#include "common/types.h"
 #include "core/libraries/avplayer/avplayer.h"
 #include "core/libraries/avplayer/avplayer_fsm.h"
 #include "core/libraries/avplayer/avplayer_source.h"
-#include "core/libraries/kernel/threads.h"
+#include "core/libraries/kernel/kernel_c.h"
 
-namespace Libraries::AvPlayer {
+RETRO_BEGIN_DECLS
 
-class Stream;
-class AvDecoder;
+#define AVPLAYER_EVENT_QUEUE_SIZE 64
 
-class AvPlayerState : public AvPlayerStateCallback {
-public:
-    AvPlayerState(const AvPlayerInitData& init_data);
-    ~AvPlayerState();
+typedef struct AvPlayerState {
+    /* The source (AvPlayerSource*, owned), published by AddSource; readers go through
+     * source_gate, which its changes close (finding its streams, its start, the end) */
+    retro_atomic_ptr_t source;
+    retro_atomic_int_t source_taken;
+    pin_gate_t source_gate;
+    AvPlayerInitData init_data;
+    AvPlayerPostInitData post_init_data;
+    AvPlayerEventReplacement event_replacement;
+    bool auto_start;
+    char default_language[4];
+    s32 sync_mode; /* AvPlayerAvSyncMode */
+    avplayer_fsm_t fsm;
+    avplayer_transport_t transport;
+    retro_atomic_int_t eof_stop_event_sent;
+    kernel_service_thread_t controller_thread;
+    retro_atomic_int_t controller_stop;
+    /* AvPlayerEvent, many threads put, the controller takes */
+    mpsc_ring_t event_queue;
+    /* Notified on every event pushed: the controller thread parks here between its looks at
+     * the buffering state. */
+    retro_eventcount_t event_ready;
+} AvPlayerState;
 
-    void PostInit(const AvPlayerPostInitData& post_init_data);
-    bool AddSource(std::string_view filename, AvPlayerSourceType source_type);
-    s32 GetStreamCount();
-    bool GetStreamInfo(u32 stream_index, AvPlayerStreamInfo& info);
-    bool EnableStream(u32 stream_index);
-    bool Start();
-    bool Stop();
-    bool Pause();
-    bool Resume();
-    void SetAvSyncMode(AvPlayerAvSyncMode sync_mode);
-    bool GetAudioData(AvPlayerFrameInfo& audio_info);
-    bool GetVideoData(AvPlayerFrameInfo& video_info);
-    bool GetVideoData(AvPlayerFrameInfoEx& video_info);
-    bool IsActive();
-    u64 CurrentTime();
-    bool SetLooping(bool is_looping);
+/* Made in place (@state does not move after), its controller thread started */
+void avplayer_state_init(AvPlayerState* state, const AvPlayerInitData* init_data);
+/* No thread of the player's is left, then the source goes */
+void avplayer_state_deinit(AvPlayerState* state);
 
-private:
-    // Event Replacement
-    static void PS4_SYSV_ABI AutoPlayEventCallback(void* handle, AvPlayerEvents event_id,
-                                                   s32 source_id, void* event_data);
+void avplayer_state_post_init(AvPlayerState* state, const AvPlayerPostInitData* post_init_data);
+/* @path: @length bytes */
+bool avplayer_state_add_source(AvPlayerState* state, const char* path, size_t length,
+                               s32 source_type);
+s32 avplayer_state_get_stream_count(AvPlayerState* state);
+bool avplayer_state_get_stream_info(AvPlayerState* state, u32 stream_index,
+                                    AvPlayerStreamInfo* info);
+bool avplayer_state_enable_stream(AvPlayerState* state, u32 stream_index);
+bool avplayer_state_start(AvPlayerState* state);
+bool avplayer_state_stop(AvPlayerState* state);
+bool avplayer_state_pause(AvPlayerState* state);
+bool avplayer_state_resume(AvPlayerState* state);
+void avplayer_state_set_av_sync_mode(AvPlayerState* state, s32 sync_mode);
+bool avplayer_state_get_audio_data(AvPlayerState* state, AvPlayerFrameInfo* audio_info);
+bool avplayer_state_get_video_data(AvPlayerState* state, AvPlayerFrameInfo* video_info);
+bool avplayer_state_get_video_data_ex(AvPlayerState* state, AvPlayerFrameInfoEx* video_info);
+bool avplayer_state_is_active(AvPlayerState* state);
+u64 avplayer_state_current_time(AvPlayerState* state);
+bool avplayer_state_set_looping(AvPlayerState* state, bool is_looping);
 
-    static void PS4_SYSV_ABI DefaultEventCallback(void* handle, AvPlayerEvents event_id,
-                                                  s32 source_id, void* event_data);
+/* What the source tells its player, from any of its threads */
+s32 avplayer_state_get_sync_mode(AvPlayerState* state);
+void avplayer_state_on_warning(AvPlayerState* state, u32 id);
+void avplayer_state_on_error(AvPlayerState* state);
+void avplayer_state_on_eof(AvPlayerState* state);
 
-    AvPlayerAvSyncMode GetSyncMode() override;
-    void OnWarning(u32 id) override;
-    void OnError() override;
-    void OnEOF() override;
+RETRO_END_DECLS
 
-    void OnPlaybackStateChanged(AvState state);
-    std::optional<bool> OnBufferingCheckEvent(u32 num_frames);
-
-    void EmitEvent(AvPlayerEvents event_id, void* event_data = nullptr);
-    bool SetState(AvState state);
-    AvState State();
-    AvState PreviousState();
-
-    /// The source, pinned until UnpinSource, if there is one and it is not being changed (the
-    /// gate is open); else nullptr, and nothing to unpin. No one waits.
-    AvPlayerSource* PinSource();
-    void UnpinSource();
-
-    /// Start and Stop: the thread that gets the transport does it, and then whatever was asked
-    /// of it meanwhile (avplayer_fsm.h)
-    bool Transport(int op);
-    bool DoStart();
-    bool DoStop();
-
-    void AvControllerThread();
-
-    void AddSourceEvent();
-    void WarningEvent(s32 id);
-
-    void StartControllerThread();
-    void ProcessEvent();
-    void UpdateBufferingState();
-    void UpdateEndOfFileState();
-
-    /// The source (AvPlayerSource*, owned), published by AddSource; readers go through
-    /// m_source_gate, which its changes close (FindStreams, the source's Start, the end)
-    retro_atomic_ptr_t m_source{};
-    retro_atomic_int_t m_source_taken{0};
-    pin_gate_t m_source_gate{};
-
-    AvPlayerInitData m_init_data{};
-    AvPlayerPostInitData m_post_init_data{};
-    AvPlayerEventReplacement m_event_replacement{};
-    bool m_auto_start{};
-    char m_default_language[4]{};
-    AvPlayerAvSyncMode m_sync_mode = AvPlayerAvSyncMode::Default;
-
-    avplayer_fsm_t m_fsm{};
-    avplayer_transport_t m_transport{};
-    retro_atomic_int_t m_eof_stop_event_sent{0};
-    u32 m_thread_priority;
-    u32 m_thread_affinity;
-    retro_atomic_int_t m_some_event_result{};
-
-    Kernel::Thread m_controller_thread{};
-    MpscRing<AvPlayerEvent, 64> m_event_queue{};
-    /// Notified on every event pushed: the controller thread parks here between its looks at
-    /// the buffering state.
-    Common::EventCount m_event_ready;
-};
-
-} // namespace Libraries::AvPlayer
+#endif
