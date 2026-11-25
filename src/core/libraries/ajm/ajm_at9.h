@@ -1,72 +1,67 @@
-// SPDX-FileCopyrightText: Copyright 2024 shadPS4 Emulator Project
-// SPDX-License-Identifier: GPL-2.0-or-later
+/* SPDX-FileCopyrightText: Copyright 2024 shadPS4 Emulator Project
+ * SPDX-License-Identifier: GPL-2.0-or-later */
 
-#pragma once
+#ifndef SHADPS4_AJM_AJM_AT9_H
+#define SHADPS4_AJM_AJM_AT9_H
 
-#include "common/enum.h"
+/* The ATRAC9 codec, on libretro-common's decoder. Defined in ajm_at9.c. */
+
+#include <boolean.h>
+#include <retro_common_api.h>
+
 #include "common/types.h"
-#include "core/libraries/ajm/ajm_instance.h"
+#include "core/libraries/ajm/ajm_codec.h"
+
+RETRO_BEGIN_DECLS
 
 struct ratrac9;
 
-#include <span>
-#include <vector>
+/* AjmAt9CodecFlags */
+#define AJM_AT9_PARSE_RIFF_HEADER 1u
+#define AJM_AT9_NON_INTERLEAVED_OUTPUT (1u << 8)
 
-namespace Libraries::Ajm {
+/* A frame's PCM at the most: 256 samples a channel, 8 channels, 4 bytes a sample */
+#define AJM_AT9_MAX_PCM_BYTES (256 * 8 * 4)
 
-enum AjmAt9CodecFlags : u32 {
-    ParseRiffHeader = 1 << 0,
-    NonInterleavedOutput = 1 << 8,
-};
-DECLARE_ENUM_FLAG_OPERATORS(AjmAt9CodecFlags)
-
-struct AjmSidebandDecAt9CodecInfo {
+typedef struct AjmSidebandDecAt9CodecInfo {
     u32 super_frame_size;
     u32 frames_in_super_frame;
     u32 next_frame_size;
     u32 frame_samples;
-};
+} AjmSidebandDecAt9CodecInfo;
 
-struct AjmAt9Decoder final : AjmCodec {
-    explicit AjmAt9Decoder(AjmFormatEncoding format, AjmAt9CodecFlags flags, u32 channels);
-    ~AjmAt9Decoder() override;
+typedef struct ajm_at9 {
+    u32 format; /* AjmFormatEncoding */
+    u32 flags;  /* AjmAt9CodecFlags */
+    bool is_initialized;
+    struct ratrac9* decoder;
+    u8 config_data[ORBIS_AT9_CONFIG_DATA_SIZE];
+    u32 superframe_bytes_remain;
+    u32 num_frames;
+    u32 channels;
+    u32 sample_rate;
+    u32 frame_samples;
+    u32 superframe_bytes;
+    u32 frames_in_superframe;
+    /* The frame's PCM: pcm_bytes of it */
+    size_t pcm_bytes;
+    union {
+        u8 bytes[AJM_AT9_MAX_PCM_BYTES];
+        float align;
+    } pcm;
+} ajm_at9_t;
 
-    void Reset() override;
-    void Initialize(const void* buffer, u32 buffer_size) override;
-    void GetInfo(void* out_info) const override;
-    AjmSidebandFormat GetFormat() const override;
-    u32 GetMinimumInputSize() const override;
-    u32 GetNextFrameSize(const AjmInstanceGapless& gapless) const override;
-    DecoderResult ProcessData(std::span<u8>& input, SparseOutputBuffer& output,
-                              AjmInstanceGapless& gapless) override;
+void ajm_at9_init(ajm_at9_t* d, u32 format, u32 flags);
+void ajm_at9_free(ajm_at9_t* d);
+void ajm_at9_reset(ajm_at9_t* d);
+void ajm_at9_initialize(ajm_at9_t* d, const void* buffer, u32 buffer_size);
+void ajm_at9_get_info(const ajm_at9_t* d, void* out_info);
+AjmSidebandFormat ajm_at9_get_format(const ajm_at9_t* d);
+u32 ajm_at9_get_minimum_input_size(const ajm_at9_t* d);
+u32 ajm_at9_get_next_frame_size(const ajm_at9_t* d, const ajm_gapless_t* gapless);
+ajm_decoder_result_t ajm_at9_process_data(ajm_at9_t* d, ajm_input_t* input, ajm_output_t* output,
+                                          ajm_gapless_t* gapless);
 
-private:
-    template <class T>
-    size_t WriteOutputSamples(SparseOutputBuffer& output, u32 skipped_samples, u32 max_samples) {
-        std::span<T> pcm_data{reinterpret_cast<T*>(m_pcm_buffer.data()),
-                              m_pcm_buffer.size() / sizeof(T)};
-        pcm_data = pcm_data.subspan(skipped_samples * m_channels);
-        const auto pcm_size = std::min(u32(pcm_data.size()), max_samples);
-        return output.Write(pcm_data.subspan(0, pcm_size));
-    }
+RETRO_END_DECLS
 
-    bool ParseRIFFHeader(std::span<u8>& input, AjmInstanceGapless& gapless);
-
-    const AjmFormatEncoding m_format;
-    const AjmAt9CodecFlags m_flags;
-
-    bool m_is_initialized{};
-    // libretro-common's ATRAC9 decoder
-    ratrac9* m_decoder{};
-    u8 m_config_data[ORBIS_AT9_CONFIG_DATA_SIZE]{};
-    u32 m_superframe_bytes_remain{};
-    u32 m_num_frames{};
-    u32 m_channels{};
-    u32 m_sample_rate{};
-    u32 m_frame_samples{};
-    u32 m_superframe_bytes{};
-    u32 m_frames_in_superframe{};
-    std::vector<u8> m_pcm_buffer;
-};
-
-} // namespace Libraries::Ajm
+#endif

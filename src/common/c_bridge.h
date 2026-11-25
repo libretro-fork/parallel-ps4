@@ -44,6 +44,7 @@ enum c_log_class {
     C_LOG_LIB_VIDEO_OUT,
     C_LOG_LIB_AUDIO_IN,
     C_LOG_LIB_AV_PLAYER,
+    C_LOG_LIB_AJM,
     C_LOG_LIB_VOICE,
     C_LOG_LIB_RTC,
     C_LOG_LIB_CAMERA,

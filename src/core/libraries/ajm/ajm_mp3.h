@@ -1,35 +1,33 @@
-// SPDX-FileCopyrightText: Copyright 2024-2026 shadPS4 Emulator Project
-// SPDX-License-Identifier: GPL-2.0-or-later
+/* SPDX-FileCopyrightText: Copyright 2024-2026 shadPS4 Emulator Project
+ * SPDX-License-Identifier: GPL-2.0-or-later */
 
-#pragma once
+#ifndef SHADPS4_AJM_AJM_MP3_H
+#define SHADPS4_AJM_AJM_MP3_H
 
-#include <memory>
+/* The MP3 codec, on libretro-common's decoder, and the frame parser the game can call. Defined
+ * in ajm_mp3.c. */
 
-#include "common/enum.h"
+#include <boolean.h>
+#include <formats/rmp3.h>
+#include <retro_common_api.h>
+
 #include "common/types.h"
-#include "core/libraries/ajm/ajm_instance.h"
+#include "core/libraries/ajm/ajm_codec.h"
 
-namespace Libraries::Ajm {
+RETRO_BEGIN_DECLS
 
-enum class AjmDecMp3OflType : u32 {
-    None = 0,
-    Lame = 1,
-    Vbri = 2,
-    Fgh = 3,
-    VbriAndFgh = 4,
-};
+/* AjmDecMp3OflType */
+#define AJM_DEC_MP3_OFL_NONE 0u
+#define AJM_DEC_MP3_OFL_LAME 1u
+#define AJM_DEC_MP3_OFL_VBRI 2u
+#define AJM_DEC_MP3_OFL_FGH 3u
+#define AJM_DEC_MP3_OFL_VBRI_AND_FGH 4u
 
-enum AjmMp3CodecFlags : u32 {
-    IgnoreOfl = 1 << 0,
-    VlcRewind = 1 << 8,
-};
-DECLARE_ENUM_FLAG_OPERATORS(AjmMp3CodecFlags)
+/* AjmMp3CodecFlags */
+#define AJM_MP3_IGNORE_OFL 1u
+#define AJM_MP3_VLC_REWIND (1u << 8)
 
-// 11-bit syncword if MPEG 2.5 extensions are enabled
-static constexpr u8 SYNCWORDH = 0xff;
-static constexpr u8 SYNCWORDL = 0xe0;
-
-struct AjmDecMp3ParseFrame {
+typedef struct AjmDecMp3ParseFrame {
     u64 frame_size;
     u32 num_channels;
     u32 samples_per_channel;
@@ -38,58 +36,51 @@ struct AjmDecMp3ParseFrame {
     u32 encoder_delay;
     u32 num_frames;
     u32 total_samples;
-    AjmDecMp3OflType ofl_type;
-};
+    u32 ofl_type; /* AjmDecMp3OflType */
+} AjmDecMp3ParseFrame;
 
-enum class ChannelMode : u8 {
-    Stereo = 0,
-    JointStero = 1,
-    Dual = 2,
-    Mono = 3,
-};
+/* ChannelMode */
+#define AJM_MP3_CHANNEL_MODE_STEREO 0u
+#define AJM_MP3_CHANNEL_MODE_JOINT_STEREO 1u
+#define AJM_MP3_CHANNEL_MODE_DUAL 2u
+#define AJM_MP3_CHANNEL_MODE_MONO 3u
 
-struct AjmSidebandDecMp3CodecInfo {
+typedef struct AjmSidebandDecMp3CodecInfo {
     u32 header;
     bool has_crc;
-    ChannelMode channel_mode;
+    u8 channel_mode;
     u8 mode_extension;
     u8 copyright;
     u8 original;
     u8 emphasis;
     u16 reserved[3];
-};
+} AjmSidebandDecMp3CodecInfo;
 
-class AjmMp3Decoder : public AjmCodec {
-public:
-    explicit AjmMp3Decoder(AjmFormatEncoding format, AjmMp3CodecFlags flags, u32 channels);
-    ~AjmMp3Decoder() override;
+typedef struct ajm_mp3 {
+    u32 format; /* AjmFormatEncoding */
+    u32 flags;  /* AjmMp3CodecFlags */
+    rmp3dec decoder;
+    rmp3_frame_buf pcm;
+    bool has_header;
+    u32 header;
+    u32 frame_samples;
+    u32 channels;
+    u32 sample_rate;
+    u32 bitrate;
+} ajm_mp3_t;
 
-    void Reset() override;
-    void Initialize(const void* buffer, u32 buffer_size) override {}
-    void GetInfo(void* out_info) const override;
-    AjmSidebandFormat GetFormat() const override;
-    u32 GetMinimumInputSize() const override;
-    u32 GetNextFrameSize(const AjmInstanceGapless& gapless) const override;
-    DecoderResult ProcessData(std::span<u8>& input, SparseOutputBuffer& output,
-                              AjmInstanceGapless& gapless) override;
+void ajm_mp3_init(ajm_mp3_t* d, u32 format, u32 flags);
+void ajm_mp3_reset(ajm_mp3_t* d);
+void ajm_mp3_get_info(const ajm_mp3_t* d, void* out_info);
+AjmSidebandFormat ajm_mp3_get_format(const ajm_mp3_t* d);
+u32 ajm_mp3_get_minimum_input_size(const ajm_mp3_t* d);
+u32 ajm_mp3_get_next_frame_size(const ajm_mp3_t* d, const ajm_gapless_t* gapless);
+ajm_decoder_result_t ajm_mp3_process_data(ajm_mp3_t* d, ajm_input_t* input, ajm_output_t* output,
+                                          ajm_gapless_t* gapless);
+/* The header of the frame at @buf: any layer, or layer III only */
+int ajm_mp3_parse_header(const u8* buf, u32 stream_size, int parse_ofl, AjmDecMp3ParseFrame* frame);
+int ajm_mp3_parse_frame(const u8* buf, u32 stream_size, int parse_ofl, AjmDecMp3ParseFrame* frame);
 
-    static int ParseMp3Header(const u8* buf, u32 stream_size, int parse_ofl,
-                              AjmDecMp3ParseFrame* frame);
-    static int ParseMp3Frame(const u8* buf, u32 stream_size, int parse_ofl,
-                             AjmDecMp3ParseFrame* frame);
+RETRO_END_DECLS
 
-private:
-    struct State;
-
-    const AjmFormatEncoding m_format;
-    [[maybe_unused]] const AjmMp3CodecFlags m_flags;
-    // The decoder and its frame of PCM, allocated with the instance.
-    std::unique_ptr<State> m_state;
-    std::optional<u32> m_header;
-    u32 m_frame_samples = 0;
-    u32 m_channels = 0;
-    u32 m_sample_rate = 0;
-    u32 m_bitrate = 0;
-};
-
-} // namespace Libraries::Ajm
+#endif

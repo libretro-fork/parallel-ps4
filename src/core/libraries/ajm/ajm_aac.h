@@ -1,70 +1,62 @@
-// SPDX-FileCopyrightText: Copyright 2026 shadPS4 Emulator Project
-// SPDX-License-Identifier: GPL-2.0-or-later
+/* SPDX-FileCopyrightText: Copyright 2026 shadPS4 Emulator Project
+ * SPDX-License-Identifier: GPL-2.0-or-later */
 
-#pragma once
+#ifndef SHADPS4_AJM_AJM_AAC_H
+#define SHADPS4_AJM_AJM_AAC_H
 
-#include "common/enum.h"
+/* The AAC codec, on libretro-common's decoder. Defined in ajm_aac.c. */
+
+#include <stddef.h>
+
+#include <boolean.h>
+#include <retro_common_api.h>
+
 #include "common/types.h"
-#include "core/libraries/ajm/ajm_instance.h"
+#include "core/libraries/ajm/ajm_codec.h"
 
-#include <array>
-#include <span>
+RETRO_BEGIN_DECLS
 
-typedef struct raac raac_t;
+struct raac;
 
-namespace Libraries::Ajm {
+/* ConfigType */
+#define AJM_AAC_CONFIG_ADTS 1u
+#define AJM_AAC_CONFIG_RAW 2u
 
-enum ConfigType : u32 {
-    ADTS = 1,
-    RAW = 2,
-};
+/* AjmAacCodecFlags */
+#define AJM_AAC_ENABLE_SBR_DECODE 1u
+#define AJM_AAC_ENABLE_NONDELAY_OUTPUT 2u
+#define AJM_AAC_SURROUND_EXTL_EXTR_LS_RS 4u
+#define AJM_AAC_SURROUND_LS_RS_EXTL_EXTR 8u
 
-enum AjmAacCodecFlags : u32 {
-    EnableSbrDecode = 1 << 0,
-    EnableNondelayOutput = 1 << 1,
-    SurroundChannelInterleaveOrderExtlExtrLsRs = 1 << 2,
-    SurroundChannelInterleaveOrderLsRsExtlExtr = 1 << 3,
-};
-DECLARE_ENUM_FLAG_OPERATORS(AjmAacCodecFlags)
-
-struct AjmSidebandDecM4aacCodecInfo {
+typedef struct AjmSidebandDecM4aacCodecInfo {
     u32 heaac;
     u32 reserved;
-};
+} AjmSidebandDecM4aacCodecInfo;
 
-struct AjmAacDecoder final : AjmCodec {
-    explicit AjmAacDecoder(AjmFormatEncoding format, AjmAacCodecFlags flags, u32 channels);
-    ~AjmAacDecoder() override;
+typedef struct ajm_aac {
+    u32 format; /* AjmFormatEncoding */
+    u32 flags;  /* AjmAacCodecFlags */
+    u32 channels;
+    u32 skip_frames;
+    u32 last_frame_bytes;
+    u32 config_type;        /* ConfigType */
+    u32 sampling_freq_type; /* the initialize parameters */
+    struct raac* decoder;
+    u8 asc[32];
+    size_t asc_size;
+} ajm_aac_t;
 
-    void Reset() override;
-    void Initialize(const void* buffer, u32 buffer_size) override;
-    void GetInfo(void* out_info) const override;
-    AjmSidebandFormat GetFormat() const override;
-    u32 GetMinimumInputSize() const override;
-    u32 GetNextFrameSize(const AjmInstanceGapless& gapless) const override;
-    DecoderResult ProcessData(std::span<u8>& input, SparseOutputBuffer& output,
-                              AjmInstanceGapless& gapless) override;
+void ajm_aac_init(ajm_aac_t* d, u32 format, u32 flags, u32 channels);
+void ajm_aac_free(ajm_aac_t* d);
+void ajm_aac_reset(ajm_aac_t* d);
+void ajm_aac_initialize(ajm_aac_t* d, const void* buffer, u32 buffer_size);
+void ajm_aac_get_info(const ajm_aac_t* d, void* out_info);
+AjmSidebandFormat ajm_aac_get_format(const ajm_aac_t* d);
+u32 ajm_aac_get_minimum_input_size(const ajm_aac_t* d);
+u32 ajm_aac_get_next_frame_size(const ajm_aac_t* d, const ajm_gapless_t* gapless);
+ajm_decoder_result_t ajm_aac_process_data(ajm_aac_t* d, ajm_input_t* input, ajm_output_t* output,
+                                          ajm_gapless_t* gapless);
 
-private:
-    struct InitializeParameters {
-        ConfigType config_type;
-        u32 sampling_freq_type;
-    };
+RETRO_END_DECLS
 
-    // Opens the decoder for an AudioSpecificConfig, keeping the open one when it is the same.
-    bool Open(const u8* asc, size_t asc_size);
-    void Close();
-
-    const AjmFormatEncoding m_format;
-    const AjmAacCodecFlags m_flags;
-    const u32 m_channels;
-
-    u32 m_skip_frames = 0;
-    u32 m_last_frame_bytes = 0;
-    InitializeParameters m_init_params = {};
-    raac_t* m_decoder = nullptr;
-    std::array<u8, 32> m_asc{};
-    size_t m_asc_size = 0;
-};
-
-} // namespace Libraries::Ajm
+#endif

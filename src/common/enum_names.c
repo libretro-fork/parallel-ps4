@@ -467,15 +467,6 @@ static const enum_name_entry_t enum_names_Core_VMAType_entries[] = {
 const enum_names_t enum_names_Core_VMAType = {enum_names_Core_VMAType_entries,
     sizeof(enum_names_Core_VMAType_entries) / sizeof(enum_names_Core_VMAType_entries[0])};
 
-static const enum_name_entry_t enum_names_Libraries_Ajm_AjmCodecType_entries[] = {
-    {(int64_t)0, "Mp3Dec"},
-    {(int64_t)1, "At9Dec"},
-    {(int64_t)2, "M4aacDec"},
-    {(int64_t)23, "Max"},
-};
-const enum_names_t enum_names_Libraries_Ajm_AjmCodecType = {enum_names_Libraries_Ajm_AjmCodecType_entries,
-    sizeof(enum_names_Libraries_Ajm_AjmCodecType_entries) / sizeof(enum_names_Libraries_Ajm_AjmCodecType_entries[0])};
-
 static const enum_name_entry_t enum_names_Libraries_CommonDialog_Result_entries[] = {
     {(int64_t)0, "OK"},
     {(int64_t)1, "USER_CANCELED"},
@@ -585,6 +576,15 @@ static const enum_name_entry_t enum_names_Libraries_SaveData_OrbisSaveDataParamT
 };
 const enum_names_t enum_names_Libraries_SaveData_OrbisSaveDataParamType = {enum_names_Libraries_SaveData_OrbisSaveDataParamType_entries,
     sizeof(enum_names_Libraries_SaveData_OrbisSaveDataParamType_entries) / sizeof(enum_names_Libraries_SaveData_OrbisSaveDataParamType_entries[0])};
+
+static const enum_name_entry_t enum_names_AjmCodecType_entries[] = {
+    {(int64_t)0, "AJM_CODEC_TYPE_MP3_DEC"},
+    {(int64_t)1, "AJM_CODEC_TYPE_AT9_DEC"},
+    {(int64_t)2, "AJM_CODEC_TYPE_M4AAC_DEC"},
+    {(int64_t)23, "AJM_CODEC_TYPE_MAX"},
+};
+const enum_names_t enum_names_AjmCodecType = {enum_names_AjmCodecType_entries,
+    sizeof(enum_names_AjmCodecType_entries) / sizeof(enum_names_AjmCodecType_entries[0])};
 
 static const enum_name_entry_t enum_names_AvPlayerEvents_entries[] = {
     {(int64_t)1, "AV_PLAYER_EVENTS_STATE_STOP"},
