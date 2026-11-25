@@ -17,6 +17,26 @@ static unsigned pad_scale_stick(int raw)
    return (unsigned)(v < 0 ? 0 : v > 255 ? 255 : v);
 }
 
+/* A stick axis as above with a dead zone of dead (0..0x7fff) about rest: within it the stick
+ * reads as at rest, past it the rest of the travel is spread over the whole range again, so the
+ * edge is still reached. A worn stick at rest is a little off centre, and a game that takes the
+ * pad's own small dead zone walks on with no one touching it. */
+static unsigned pad_scale_stick_dead_zone(int raw, long dead)
+{
+   long mag = raw < 0 ? -(long)raw : (long)raw;
+   long scaled;
+   if (dead <= 0)
+      return pad_scale_stick(raw);
+   if (dead > 0x7fffL)
+      dead = 0x7fffL;
+   if (mag <= dead)
+      return 128;
+   scaled = ((mag - dead) * 0x8000L + (0x8000L - dead) / 2) / (0x8000L - dead);
+   if (raw < 0)
+      return pad_scale_stick((int)-scaled);
+   return pad_scale_stick((int)(scaled > 0x7fffL ? 0x7fffL : scaled));
+}
+
 /* A trigger, 0..0x7fff, to 0..255 */
 static unsigned pad_scale_trigger(int raw)
 {

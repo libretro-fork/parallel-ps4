@@ -382,10 +382,16 @@ void ReadPatchOptions(Libretro::SharedOptions& options) {
     }
 }
 
+// The sticks' dead zone, in libretro's units (0..0x7fff); read where the sticks are, here
+long stick_dead_zone = 0;
+
 void ReadCoreOptions(Libretro::SharedOptions& options) {
     const auto enabled = [](const char* key, const char* fallback) -> uint32_t {
         return OptionValue(key, fallback) == "enabled" ? 1 : 0;
     };
+    stick_dead_zone =
+        std::clamp(std::atoi(OptionValue("shadps4_stick_dead_zone", "4").c_str()), 0, 30) *
+        0x7fffL / 100;
     options.neo_mode = enabled("shadps4_neo_mode", "disabled");
     options.circle_enter = OptionValue("shadps4_confirm_button", "cross") == "circle" ? 1 : 0;
     options.network = enabled("shadps4_network", "disabled");
@@ -1194,9 +1200,11 @@ void SendInput() {
             put(shared->touch[pad][1], slots[pad][1]);
         }
 
-        // libretro's -0x8000..0x7fff to the pad's 0..255, rest at its centre (pad_scale.h)
+        // libretro's -0x8000..0x7fff to the pad's 0..255, rest at its centre, past the dead
+        // zone (pad_scale.h)
         const auto stick = [pad](unsigned index, unsigned id) -> uint32_t {
-            return pad_scale_stick(input_state_cb(pad, RETRO_DEVICE_ANALOG, index, id));
+            return pad_scale_stick_dead_zone(input_state_cb(pad, RETRO_DEVICE_ANALOG, index, id),
+                                             stick_dead_zone);
         };
         auto& axes = shared->axes[pad];
         put(axes[Libretro::SHARED_AXIS_LEFT_X],
