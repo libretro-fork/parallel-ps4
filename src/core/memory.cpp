@@ -199,7 +199,10 @@ u64 MemoryManager::BackingRun(VAddr virtual_addr, u64 size, u64* backing_offset)
         const u64 page = virtual_addr >> GUEST_PAGE_BITS;
         const u64 offset_in_page = virtual_addr % GUEST_PAGE_SIZE;
         const u64 run_size = std::min<u64>(GUEST_PAGE_SIZE - offset_in_page, size);
-        const auto* entry = backing_pages.find(page);
+        // An address past the guest's (the emulator's own data: the embedded vertex shader's
+        // code, say) has no backing, and no place in the table: looking it up read past it
+        const bool in_guest = (virtual_addr >> Core::AddressSpace::Traits::ADDRESS_SPACE_BITS) == 0;
+        const auto* entry = in_guest ? backing_pages.find(page) : nullptr;
         const bool page_backed = entry && *entry;
         if (run == 0) {
             backed = page_backed;
