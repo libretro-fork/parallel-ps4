@@ -534,8 +534,11 @@ TextureCache::OverlapResult TextureCache::ResolveOverlap(const ImageInfo& image_
         }
 
         // Size is greater but resources are not, because the tiling mode is different.
-        // Likely the address is reused for a image with a different tiling mode.
-        if (image_info.tile_mode != cache_image.info.tile_mode) {
+        // Likely the address is reused for a image with a different tiling mode or alternate
+        // tiling: Shadow of the Colossus asks for its 1920x1080 target again with the alternate
+        // tiling, which is larger in the game's memory (as its PC port has it)
+        if (image_info.tile_mode != cache_image.info.tile_mode ||
+            image_info.alt_tile != cache_image.info.alt_tile) {
             if (safe_to_delete) {
                 FreeImage(cache_image_id);
             }
