@@ -7,9 +7,7 @@
 #include <optional>
 
 #include <string>
-#include <rthreads/retro_eventcount.h>
 #include "common/singleton.h"
-#include "common/stop_thread.h"
 #include "core/linker.h"
 #include "frontend_window.h"
 #include "input/controller.h"
@@ -32,7 +30,6 @@ public:
              std::optional<std::filesystem::path> game_folder = {},
              std::vector<std::pair<std::filesystem::path, std::string>> mounts = {},
              std::vector<std::string> const& env_vars = {}, bool append_log = false);
-    void UpdatePlayTime(const std::string_view serial);
     void Shutdown();
     void ShutdownOnce();
 
@@ -55,12 +52,6 @@ private:
 
     Core::MemoryManager* memory;
     Core::Linker* linker;
-    // The game's time (nanoseconds) the play time was last counted up to; 0: not counting
-    u64 start_time{};
-    stop_thread_t play_time_thread = STOP_THREAD_INIT;
-    // What the play time thread waits on between its counts: notified to stop it
-    retro_eventcount_t play_time_wake;
-    std::string play_time_serial;
 };
 
 } // namespace Core

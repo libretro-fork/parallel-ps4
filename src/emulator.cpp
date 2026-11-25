@@ -3,7 +3,6 @@
 
 #include <algorithm>
 #include <cstdio>
-#include <ctime>
 #include <filesystem>
 #include <functional>
 #include <iostream>
@@ -92,13 +91,6 @@ void Emulator::ShutdownOnce() {
     Common::Log::Flush();
     Libraries::SaveData::Backup::StopThread();
     Storage::DataBase::Instance().Close();
-    if (stop_thread_started(&play_time_thread)) {
-        stop_thread_request(&play_time_thread);
-        retro_eventcount_notify(&play_time_wake);
-        stop_thread_join(&play_time_thread);
-        retro_eventcount_free(&play_time_wake);
-    }
-    UpdatePlayTime(Common::Singleton<Common::ElfInfo>::Instance()->GameSerial());
 }
 
 // Whether the game has FMOD in it: built into its executable (FMOD's classes, namespace FMOD,
@@ -696,26 +688,6 @@ void Emulator::Run(std::filesystem::path file, std::vector<std::string> args,
                       : "No FMOD: the sound output goes at the device's pace alone");
     }
 
-    if (!id.empty()) {
-        // The play time is the game's time, which the frontend's frames move: counted up
-        // every minute of it, until the thread is stopped
-        start_time = Libraries::Kernel::GameDeadlineIn(0);
-
-        play_time_serial = id;
-        retro_eventcount_init(&play_time_wake);
-        stop_thread_start(
-            &play_time_thread,
-            [](void* arg) {
-                auto* self = static_cast<Emulator*>(arg);
-                while (!Libraries::Kernel::GameWait(
-                    &self->play_time_wake, Libraries::Kernel::GameDeadlineIn(60'000'000'000ULL),
-                    [self] { return stop_thread_stopping(&self->play_time_thread) != 0; })) {
-                    self->UpdatePlayTime(self->play_time_serial);
-                }
-            },
-            this);
-    }
-
     linker->Execute(args);
 
     Frontend::WaitForQuit();
@@ -844,90 +816,6 @@ void Emulator::Restart(std::filesystem::path eboot_path,
 #endif
 
     Common::QuickExit(0);
-}
-
-void Emulator::UpdatePlayTime(const std::string_view serial) {
-    if (serial.empty() || start_time == 0) {
-        return;
-    }
-
-    const auto user_dir = Common::FS::GetUserPath(Common::FS::PathType::UserDir);
-    const auto file_path = user_dir / "play_time.txt";
-
-    // Whole seconds of the game's time; what is left over of a second is counted next time
-    const u64 end_time = Libraries::Kernel::GameDeadlineIn(0);
-    const int total_seconds = static_cast<int>((end_time - start_time) / 1'000'000'000);
-    start_time += static_cast<u64>(total_seconds) * 1'000'000'000;
-
-    // One line a game, "serial h:mm:ss last-played", read where it lies (mapped)
-    auto file = Common::FS::FileView::Map(file_path);
-    const std::string_view text =
-        file ? std::string_view{reinterpret_cast<const char*>(file->data()), file->size()}
-             : std::string_view{};
-    const auto first_word = [](std::string_view line) {
-        return line.substr(0, line.find_first_of(" \t\r"));
-    };
-
-    int accumulated_seconds = 0;
-    for (size_t pos = 0; pos < text.size();) {
-        const size_t end = std::min(text.find('\n', pos), text.size());
-        const std::string_view line = text.substr(pos, end - pos);
-        pos = end + 1;
-        if (first_word(line) != serial) {
-            continue;
-        }
-        const std::string fields{line.substr(serial.size())};
-        int h, m, s_;
-        if (std::sscanf(fields.c_str(), " %d:%d:%d", &h, &m, &s_) == 3) {
-            accumulated_seconds = h * 3600 + m * 60 + s_;
-        }
-        break;
-    }
-
-    accumulated_seconds += total_seconds;
-    int hours = accumulated_seconds / 3600;
-    int minutes = (accumulated_seconds % 3600) / 60;
-    int seconds = accumulated_seconds % 60;
-
-    std::string playTimeSaved = Common::StringFromFormat("%d:%02d:%02d", hours, minutes, seconds);
-
-    const std::time_t last_time_played = std::time(nullptr);
-
-    // The other games' lines as they were, this one's replaced or added
-    std::string out;
-    out.reserve(text.size() + 64);
-    bool lineUpdated = false;
-    for (size_t pos = 0; pos < text.size();) {
-        const size_t end = std::min(text.find('\n', pos), text.size());
-        const std::string_view line = text.substr(pos, end - pos);
-        pos = end + 1;
-        if (first_word(line) == serial) {
-            out += Common::StringFromFormat("%.*s %s %lld\n", static_cast<int>((serial).size()),
-                                            (serial).data(), (playTimeSaved).c_str(),
-                                            static_cast<long long>(last_time_played));
-            lineUpdated = true;
-        } else {
-            out += line;
-            out += '\n';
-        }
-    }
-    if (!lineUpdated) {
-        out += Common::StringFromFormat("%.*s %s %lld\n", static_cast<int>((serial).size()),
-                                        (serial).data(), (playTimeSaved).c_str(),
-                                        static_cast<long long>(last_time_played));
-    }
-
-    // Written whole, replacing the old file only once it is complete; the mapping goes first, as
-    // Windows will not replace a mapped file
-    file.reset();
-    if (!filestream_write_file_atomic(Common::FS::PathToUTF8String(file_path).c_str(), out.data(),
-                                      static_cast<s64>(out.size()))) {
-        LOG_INFO(Loader, "Error writing play_time.txt");
-        return;
-    }
-
-    LOG_INFO(Loader, "Playing time for %.*s: %s %lld", static_cast<int>((serial).size()),
-             (serial).data(), (playTimeSaved).c_str(), static_cast<long long>(last_time_played));
 }
 
 } // namespace Core

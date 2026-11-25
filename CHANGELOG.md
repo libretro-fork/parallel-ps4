@@ -4,6 +4,8 @@ What changed in the libretro core of this fork, newest first. Changes that come 
 
 ## Unreleased
 
+- **No more play time file.** The core counted how long each game ran and rewrote `play_time.txt` in the user folder every minute, from a thread of its own, and again at shutdown. Only shadPS4's own game list showed it, and the core has none; RetroArch keeps its own play time for each content. The thread, the file and the code are gone: one thread fewer, no file written each minute and none at close. An old `play_time.txt` is left where it is and no longer read.
+  - Not run in a game yet.
 - **No more waiting on the network when it is not there.** The core does not need an internet connection: with *Connected to Network* off (the default) the game is told the console is offline. Two things still reached out, and both could hang on a PC that has a link but no internet, where nothing answers and the system waits for its TCP timeout (about 20 seconds on Windows, 2 minutes on Linux, every time):
   - Finding the console's own IP address made a TCP connection to 1.1.1.1. It is a UDP connect now, which only asks the system which route and address it would use: nothing is sent and it returns at once, or fails at once with no route. It is asked when a game wants its NAT details (only while *Connected to Network* is on now) or its signaling address, and the signaling calls asked again each time it had failed.
   - A game's own socket connect went to the PC's network even when the console was offline. Now, offline, a connect to anything but this machine (`127.x.x.x`, `::1`, the unspecified address) fails with "network unreachable", like an unplugged console, instead of waiting.
