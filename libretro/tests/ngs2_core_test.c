@@ -309,8 +309,12 @@ static void test_passthrough(void) {
    CHECK(sampler_setup(v, NGS2_WAVE_PCM_I16L, 1, RATE) == NGS2_OK);
    CHECK(ngs2_voice_state_flags(v) == NGS2_STATE_INUSE);
    CHECK(add_block(v, pcm, sizeof(pcm), 1024, 0, 0, 77) == NGS2_OK);
-   CHECK(patch(v, 0, r.master) == NGS2_OK);
+   /* A rack as the destination is its first voice (Gravity Rush 2 patches to racks): the
+    * sound below still reaches the mastering voice */
+   CHECK(patch(v, 0, (ngs2_voice *)r.masters) == NGS2_OK);
    CHECK(patch(v, 1, v) != NGS2_OK);
+   CHECK(patch(v, 1, (ngs2_voice *)r.samplers) != NGS2_OK); /* a sampler rack: still refused */
+   CHECK(patch(v, 1, NULL) == NGS2_OK);
    CHECK(event(v, NGS2_EVENT_PLAY) == NGS2_OK);
    for (g = 0; g < 4; g++) {
       render(&r, out, 2);

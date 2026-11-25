@@ -2405,7 +2405,13 @@ static int common_param(ngs2_voice* v, const ngs2_param_header* p) {
         handle = rdp(p, 16);
         if (port >= r->desc.max_ports)
             return NGS2_ERROR_INVALID_PORT_INDEX;
+        /* A rack as the destination is its first voice: Gravity Rush 2 patches its submixers
+         * and samplers to the rack handles of the mastering rack and submixer (as GR2port) */
         dest = handle ? ngs2_voice_from(handle) : NULL;
+        if (handle && !dest) {
+            ngs2_rack* const dest_rack = ngs2_rack_from(handle);
+            dest = dest_rack ? ngs2_rack_voice(dest_rack, 0) : NULL;
+        }
         if (handle && (!dest || dest == v || dest->rack->system != r->system ||
                        is_sampler(dest->rack) || input >= dest->rack->buffers))
             return NGS2_ERROR_INVALID_PATCH;

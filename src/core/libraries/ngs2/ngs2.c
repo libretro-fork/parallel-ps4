@@ -1093,6 +1093,9 @@ s32 PS4_SYSV_ABI sceNgs2VoiceControl(OrbisNgs2Handle voiceHandle,
             memcpy(&input, (const u8*)param + 12, sizeof(input));
             memcpy(&handle, (const u8*)param + 16, sizeof(handle));
             dest = ngs2_voice_from(handle);
+            if (!dest && ngs2_rack_from(handle)) {
+                dest = ngs2_rack_voice(ngs2_rack_from(handle), 0); /* a rack: its first voice */
+            }
             if (!dest) {
                 u32 i;
                 bool found = false;
