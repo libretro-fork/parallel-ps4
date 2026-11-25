@@ -275,7 +275,7 @@ int PS4_SYSV_ABI sceNetCtlGetNatInfo(OrbisNetCtlNatInfo* nat_info) {
     } else {
         nat_info->stun_status = 0;
         nat_info->mapped_addr = inet_addr("127.0.0.1");
-        if (netinfo->RetrieveIp()) {
+        if (emu_settings_get_connected_to_network() && netinfo->RetrieveIp()) {
             nat_info->mapped_addr = inet_addr(netinfo->GetIp().c_str());
         }
     }

@@ -356,7 +356,9 @@ u32 NetUtilInternal::GetNatType() const {
 
 bool NetUtilInternal::RetrieveIp() {
     return m_mutex.Run([&]() -> bool {
-        auto sockfd = socket(AF_INET, SOCK_STREAM, 0);
+        // A UDP connect only picks the route and local address: nothing is sent and it never
+        // waits. With no route it fails at once.
+        auto sockfd = socket(AF_INET, SOCK_DGRAM, 0);
         if (sockfd == -1) {
             return false;
         }

@@ -1013,6 +1013,27 @@ s32 PS4_SYSV_ABI sceNetConfigWlanSetDeviceConfig() {
     return ORBIS_OK;
 }
 
+// Loopback or the unspecified address: reachable with no network.
+static bool IsLocalHostAddress(const sockaddr_storage& host) {
+    if (host.ss_family == AF_INET) {
+        const u32 a = ntohl(reinterpret_cast<const sockaddr_in*>(&host)->sin_addr.s_addr);
+        return (a >> 24) == 127 || a == 0;
+    }
+    if (host.ss_family == AF_INET6) {
+        const u8* b = reinterpret_cast<const sockaddr_in6*>(&host)->sin6_addr.s6_addr;
+        static const u8 zero[10] = {};
+        if (std::memcmp(b, zero, 10) != 0) {
+            return false;
+        }
+        if (b[10] == 0 && b[11] == 0 && b[12] == 0 && b[13] == 0 && b[14] == 0) {
+            return b[15] <= 1; // :: or ::1
+        }
+        return b[10] == 0xff && b[11] == 0xff &&
+               (b[12] == 127 || (b[12] | b[13] | b[14] | b[15]) == 0);
+    }
+    return true; // not an internet address
+}
+
 s32 PS4_SYSV_ABI sceNetConnect(OrbisNetId s, const OrbisNetSockaddr* addr, u32 addrlen) {
     LOG_DEBUG(Lib_Net, "s = %d, addr = %s", s, (FormatSockaddr(addr, addrlen)).c_str());
     Core::Net::SocketInfo info{};
@@ -1071,6 +1092,16 @@ s32 PS4_SYSV_ABI sceNetConnect(OrbisNetId s, const OrbisNetSockaddr* addr, u32 a
         reinterpret_cast<const sockaddr_in*>(&host)->sin_addr.s_addr ==
             ORBIS_NET_INADDR_BROADCAST) {
         return SetErrno(ORBIS_NET_EACCES);
+    }
+    // Offline the console has no route out. A blocking connect to a server would otherwise wait
+    // for the host's TCP timeout (minutes) when the PC has a link but no internet.
+    if (!IsLocalHostAddress(host)) {
+        const auto hooks = GetSystemHooks();
+        if (hooks.is_online && !hooks.is_online()) {
+            LOG_DEBUG(Lib_Net, "s = %d: offline, no route to %s", s,
+                      (FormatSockaddr(addr, addrlen)).c_str());
+            return SetErrno(ORBIS_NET_ENETUNREACH);
+        }
     }
     return Return(Core::Net::SocketConnect(s, reinterpret_cast<sockaddr*>(&host), host_len));
 }
