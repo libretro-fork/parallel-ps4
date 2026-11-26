@@ -456,7 +456,11 @@ Liverpool::Task Liverpool::ProcessGraphics(Common::Span<const u32> dcb) {
                 break;
             }
             case PM4ItOpcode::SetPredication: {
-                LOG_WARNING(Render, "Unimplemented IT_SET_PREDICATION");
+                // Said once: a game sends it every frame
+                static retro_atomic_int_t said{0};
+                if (retro_atomic_exchange_int(&said, 1) == 0) {
+                    LOG_WARNING(Render, "Unimplemented IT_SET_PREDICATION (said once)");
+                }
                 break;
             }
             case PM4ItOpcode::IndexType: {

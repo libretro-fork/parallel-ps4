@@ -44,20 +44,25 @@ Id EmitFPFma64(EmitContext& ctx, IR::Inst* inst, Id a, Id b, Id c) {
     return DecorateFp(ctx, inst, spv_OpFma(&ctx.m, ctx.F64[1], a, b, c));
 }
 
+// The console's V_MIN and V_MAX give the other operand when one is not a number. FMin and FMax
+// leave that case undefined, and a GPU that passes the NaN on keeps one the console drops:
+// Shadow of the Colossus marks what is not valid in its fog's history with NaN and takes a
+// maximum with it, and the NaN spread until the fog covered the picture (from the shadPS4 fork
+// for that game, by way of its PC port). NMin and NMax are the console's.
 Id EmitFPMax32(EmitContext& ctx, Id a, Id b) {
-    return spv_OpFMax(&ctx.m, ctx.F32[1], a, b);
+    return spv_OpNMax(&ctx.m, ctx.F32[1], a, b);
 }
 
 Id EmitFPMax64(EmitContext& ctx, Id a, Id b) {
-    return spv_OpFMax(&ctx.m, ctx.F64[1], a, b);
+    return spv_OpNMax(&ctx.m, ctx.F64[1], a, b);
 }
 
 Id EmitFPMin32(EmitContext& ctx, Id a, Id b) {
-    return spv_OpFMin(&ctx.m, ctx.F32[1], a, b);
+    return spv_OpNMin(&ctx.m, ctx.F32[1], a, b);
 }
 
 Id EmitFPMin64(EmitContext& ctx, Id a, Id b) {
-    return spv_OpFMin(&ctx.m, ctx.F64[1], a, b);
+    return spv_OpNMin(&ctx.m, ctx.F64[1], a, b);
 }
 
 Id EmitFPMinTri32(EmitContext& ctx, Id a, Id b, Id c) {
