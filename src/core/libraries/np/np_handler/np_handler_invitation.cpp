@@ -119,11 +119,14 @@ void NpHandler::PostSessionInvitationEvent(s32 user_id, const std::string& sessi
                                            const std::string& accepter_online_id,
                                            const std::string& inviter_online_id,
                                            OrbisNpAccountId inviter_account_id) {
-    Libraries::SystemService::OrbisSystemServiceEvent event{};
-    event.event_type = Libraries::SystemService::OrbisSystemServiceEventType::SessionInvitation;
+    // Written where it waits for the game: an event is 8 KiB
+    OrbisSystemServiceEvent* event = system_service_event_claim();
+    if (!event) {
+        return;
+    }
+    event->event_type = ORBIS_SYSTEM_SERVICE_EVENT_SESSION_INVITATION;
 
-    auto* param = reinterpret_cast<OrbisNpSessionInvitationEventParam*>(event.param);
-    std::memset(param, 0, sizeof(*param));
+    auto* param = reinterpret_cast<OrbisNpSessionInvitationEventParam*>(event->param);
     std::strncpy(param->sessionId.data, session_id.c_str(), sizeof(param->sessionId.data) - 1);
     if (!invitation_id.empty()) {
         std::strncpy(param->invitationId.data, invitation_id.c_str(),
@@ -139,7 +142,7 @@ void NpHandler::PostSessionInvitationEvent(s32 user_id, const std::string& sessi
                  sizeof(param->referralOnlineId.data));
     param->referralAccountId = inviter_account_id;
 
-    Libraries::SystemService::PushSystemServiceEvent(event);
+    system_service_event_post(event);
     LOG_INFO(NpHandler,
              "Posted SESSION_INVITATION user_id=%d session='%s' invitation='%s' flag=%d "
              "onlineId='%s' referral='%s'(%" PRIu64 ")",

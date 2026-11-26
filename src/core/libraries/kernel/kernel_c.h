@@ -35,8 +35,10 @@ RETRO_BEGIN_DECLS
 #define KERNEL_FW_350 0x3500000
 #define KERNEL_FW_400 0x4000000
 #define KERNEL_FW_450 0x4500000
+#define KERNEL_FW_500 0x5000000
 #define KERNEL_FW_700 0x7000000
 #define KERNEL_FW_750 0x7500000
+#define KERNEL_FW_1000 0x10000000
 #define KERNEL_FW_1150 0x11500000
 
 /* The kernel's time structures, as OrbisKernelTimespec, OrbisKernelTimeval and

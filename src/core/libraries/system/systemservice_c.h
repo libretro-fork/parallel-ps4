@@ -4,7 +4,7 @@
 #ifndef SHADPS4_LIBRARIES_SYSTEMSERVICE_C_H
 #define SHADPS4_LIBRARIES_SYSTEMSERVICE_C_H
 
-/* The system service's calls the libraries written in C make. Defined in systemservice.cpp. */
+/* The system service's calls the libraries written in C make. Defined in systemservice.c. */
 
 #include <retro_common_api.h>
 

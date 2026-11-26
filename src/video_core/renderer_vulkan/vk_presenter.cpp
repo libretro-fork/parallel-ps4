@@ -908,7 +908,7 @@ void Presenter::Present(Frame* frame, bool is_reusing_frame, bool is_game_frame)
         // The game's picture is copied into the image, and the overlays drawn over it; or, while
         // the game shows its splash screen and it is decoded, the splash drawn in its place.
         // The frame image goes back to being sampled after (PrepareLastFrame).
-        const bool splash_visible = Libraries::SystemService::IsSplashVisible();
+        const bool splash_visible = system_service_is_splash_visible();
         if (!splash_visible) {
             ovl_vk_splash_done();
         }

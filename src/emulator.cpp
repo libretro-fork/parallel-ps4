@@ -41,6 +41,7 @@
 #include "core/libraries/np/np_trophy.h"
 #include "core/libraries/np/trophy_ui.h"
 #include "core/libraries/save_data/save_backup.h"
+#include "core/libraries/system/systemservice.h"
 #include "core/libraries/usbd/usbstorage.h"
 #include "core/linker.h"
 #include "core/memory.h"
@@ -833,3 +834,31 @@ void Emulator::Restart(std::filesystem::path eboot_path,
 }
 
 } // namespace Core
+
+// sceSystemServiceLoadExec's work (system/systemservice.c)
+extern "C" void system_service_load_exec(const char* path, const char* const* argv) {
+    auto emu = Common::Singleton<Core::Emulator>::Instance();
+    auto mnt = Common::Singleton<Core::FileSys::MntPoints>::Instance();
+    // Validate through the mount stack so archive-backed targets resolve.
+    if (!mnt->Exists(std::string_view(path))) {
+        LOG_INFO(Lib_SystemService, "Restart called with invalid file '%s', exiting.", path);
+        Common::QuickExit(0);
+    }
+    std::filesystem::path exec_path;
+    if (auto handle = mnt->Open(std::string_view(path), /*writable=*/false)) {
+        if (auto host = handle->GetHostPath(); host.has_value()) {
+            exec_path = *host;
+        } else {
+            exec_path = std::filesystem::path(std::string_view(path));
+        }
+    } else {
+        exec_path = mnt->GetHostPath(std::string_view(path));
+    }
+    std::vector<std::string> args;
+    if (argv != nullptr) {
+        for (const char* const* ptr = argv; *ptr != nullptr; ptr++) {
+            args.push_back(std::string(*ptr));
+        }
+    }
+    emu->Restart(exec_path, args);
+}
