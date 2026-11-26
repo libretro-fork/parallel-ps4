@@ -257,8 +257,8 @@ OrbisNpTrophyGrade GetTrophyGradeFromChar(char trophyType) {
 }
 
 s32 PS4_SYSV_ABI sceNpTrophyCreateContext(OrbisNpTrophyContext* context,
-                                          Libraries::UserService::OrbisUserServiceUserId user_id,
-                                          uint32_t service_label, u64 options) {
+                                          OrbisUserServiceUserId user_id, uint32_t service_label,
+                                          u64 options) {
     if (!context || options != 0ull) {
         return ORBIS_NP_TROPHY_ERROR_INVALID_ARGUMENT;
     }

@@ -563,7 +563,7 @@ static_assert(sizeof(OrbisNpMatching2CreateContextParameter) == 0x28);
 
 // Create context parameter (account-id variant)
 struct OrbisNpMatching2CreateContextParameterA {
-    Libraries::UserService::OrbisUserServiceUserId userId;
+    OrbisUserServiceUserId userId;
     Libraries::Np::OrbisNpServiceLabel serviceLabel;
     u64 size;
 };

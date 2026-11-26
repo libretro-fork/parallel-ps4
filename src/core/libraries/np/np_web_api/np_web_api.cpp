@@ -216,12 +216,11 @@ s32 PS4_SYSV_ABI sceNpWebApiClearUnusedConnection(s32 userCtxId, const char* pAp
     return ORBIS_OK;
 }
 
-s32 PS4_SYSV_ABI sceNpWebApiCreateContextA(s32 libCtxId,
-                                           Libraries::UserService::OrbisUserServiceUserId userId) {
+s32 PS4_SYSV_ABI sceNpWebApiCreateContextA(s32 libCtxId, OrbisUserServiceUserId userId) {
     if (libCtxId >= 0x8000) {
         return ORBIS_NP_WEBAPI_ERROR_INVALID_LIB_CONTEXT_ID;
     }
-    if (userId == Libraries::UserService::ORBIS_USER_SERVICE_USER_ID_INVALID) {
+    if (userId == ORBIS_USER_SERVICE_USER_ID_INVALID) {
         return ORBIS_NP_WEBAPI_ERROR_INVALID_ARGUMENT;
     }
     return createUserContext(libCtxId, userId);

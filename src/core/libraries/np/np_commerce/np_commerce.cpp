@@ -131,9 +131,8 @@ s32 PS4_SYSV_ABI sceNpCommerceDialogOpen(const OrbisNpCommerceDialogParam* param
     shown.features = param->mode == ORBIS_NP_COMMERCE_DIALOG_MODE_PLUS ? param->features : 0;
 
     // Resolve the calling user's name for display
-    char name_buf[Libraries::UserService::ORBIS_USER_SERVICE_MAX_USER_NAME_LENGTH + 1] = {};
-    if (Libraries::UserService::sceUserServiceGetUserName(param->userId, name_buf,
-                                                          sizeof(name_buf)) >= 0) {
+    char name_buf[ORBIS_USER_SERVICE_MAX_USER_NAME_LENGTH + 1] = {};
+    if (sceUserServiceGetUserName(param->userId, name_buf, sizeof(name_buf)) >= 0) {
         shown.username = name_buf;
     }
 

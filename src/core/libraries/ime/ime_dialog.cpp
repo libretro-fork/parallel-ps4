@@ -31,8 +31,8 @@ static bool g_ime_dlg_result_committed = false;
 static bool g_ime_dlg_sw_version_cached = false;
 static u32 g_ime_dlg_sw_version_hex = 0;
 static OrbisImeExtKeyboardFilter g_ime_dlg_ext_keyboard_filter = nullptr;
-static Libraries::UserService::OrbisUserServiceUserId g_ime_dlg_ext_keyboard_filter_user_id =
-    Libraries::UserService::ORBIS_USER_SERVICE_USER_ID_INVALID;
+static OrbisUserServiceUserId g_ime_dlg_ext_keyboard_filter_user_id =
+    ORBIS_USER_SERVICE_USER_ID_INVALID;
 static bool g_ime_dlg_ext_keyboard_filter_registered = false;
 static bool g_ime_dlg_ext_keyboard_filter_active = false;
 static u32 g_ime_dlg_resource_id = 0;
@@ -51,7 +51,7 @@ static Error ComputeImeDialogPanelSizeExtended(const OrbisImeDialogParam* param,
 struct ImeDialogClientStub {
     bool connected = false;
     bool started = false;
-    u32 user_id = static_cast<u32>(Libraries::UserService::ORBIS_USER_SERVICE_USER_ID_INVALID);
+    u32 user_id = static_cast<u32>(ORBIS_USER_SERVICE_USER_ID_INVALID);
     u32 resource_id = 0;
     int dialog_state = 0;
 };
@@ -75,12 +75,11 @@ static void InitImeDialogClient(ImeDialogClientStub* client) {
         return;
     }
     *client = {};
-    client->user_id = static_cast<u32>(Libraries::UserService::ORBIS_USER_SERVICE_USER_ID_INVALID);
+    client->user_id = static_cast<u32>(ORBIS_USER_SERVICE_USER_ID_INVALID);
 }
 
 static int ImeDialogClientConnect(ImeDialogClientStub* client, u32 client_type, u32 resource_id,
-                                  Libraries::UserService::OrbisUserServiceUserId user_id,
-                                  bool internal) {
+                                  OrbisUserServiceUserId user_id, bool internal) {
     (void)client_type;
     if (!client) {
         return static_cast<int>(Error::INTERNAL);
@@ -135,7 +134,7 @@ static Error ImeDialogClientDisconnect(ImeDialogClientStub* client) {
     return Error::OK;
 }
 
-static int RegisterExtKeyboardFilter(Libraries::UserService::OrbisUserServiceUserId user_id,
+static int RegisterExtKeyboardFilter(OrbisUserServiceUserId user_id,
                                      OrbisImeExtKeyboardFilter filter) {
     (void)user_id;
     (void)filter;
@@ -154,8 +153,7 @@ static void NotifyExtKeyboardFilterState(bool active) {
     SetExtKeyboardFilterActive(active);
 }
 
-static void ComputeUserFlags(Libraries::UserService::OrbisUserServiceUserId user_id, u32* flags,
-                             s64* out_user) {
+static void ComputeUserFlags(OrbisUserServiceUserId user_id, u32* flags, s64* out_user) {
     u32 local_flags = 0x11;
     s64 local_user = 0;
     const s32 uid = user_id;
@@ -396,8 +394,8 @@ static bool IsValidDialogUserId(s32 user_id, bool internal) {
     }
 
     if (!internal) {
-        if (user_id == Libraries::UserService::ORBIS_USER_SERVICE_USER_ID_INVALID ||
-            user_id == Libraries::UserService::ORBIS_USER_SERVICE_USER_ID_SYSTEM) {
+        if (user_id == ORBIS_USER_SERVICE_USER_ID_INVALID ||
+            user_id == ORBIS_USER_SERVICE_USER_ID_SYSTEM) {
             return false;
         }
         if (user_id == 0xfe) {
@@ -501,8 +499,7 @@ static Error ValidateImeDialogParam(const OrbisImeDialogParam* param,
     if (!IsValidDialogUserId(param->user_id, internal)) {
         return Error::INVALID_USER_ID;
     }
-    if (!internal && sdk < 0x1500000 &&
-        param->user_id == Libraries::UserService::ORBIS_USER_SERVICE_USER_ID_INVALID) {
+    if (!internal && sdk < 0x1500000 && param->user_id == ORBIS_USER_SERVICE_USER_ID_INVALID) {
         return Error::INVALID_USER_ID;
     }
 
@@ -592,8 +589,7 @@ Error PS4_SYSV_ABI sceImeDialogForceClose() {
     g_ime_dlg_has_extended = false;
     g_ime_dlg_result_committed = false;
     g_ime_dlg_ext_keyboard_filter = nullptr;
-    g_ime_dlg_ext_keyboard_filter_user_id =
-        Libraries::UserService::ORBIS_USER_SERVICE_USER_ID_INVALID;
+    g_ime_dlg_ext_keyboard_filter_user_id = ORBIS_USER_SERVICE_USER_ID_INVALID;
     g_ime_dlg_ext_keyboard_filter_registered = false;
     g_ime_dlg_ext_keyboard_filter_active = false;
     g_ime_dlg_resource_id = 0;
@@ -998,8 +994,7 @@ static Error SetupDialogState(OrbisImeDialogParam* param, OrbisImeParamExtended*
 
     g_ime_dlg_resource_id = 0;
     g_ime_dlg_ext_keyboard_filter = nullptr;
-    g_ime_dlg_ext_keyboard_filter_user_id =
-        Libraries::UserService::ORBIS_USER_SERVICE_USER_ID_INVALID;
+    g_ime_dlg_ext_keyboard_filter_user_id = ORBIS_USER_SERVICE_USER_ID_INVALID;
     g_ime_dlg_ext_keyboard_filter_registered = false;
 
     if (param->max_text_length == 0 || param->max_text_length > ORBIS_IME_MAX_TEXT_LENGTH) {
@@ -1247,8 +1242,7 @@ Error PS4_SYSV_ABI sceImeDialogInit(OrbisImeDialogParam* param, OrbisImeParamExt
                           static_cast<u32>(g_ime_dlg_ext_keyboard_filter_user_id));
             } else {
                 g_ime_dlg_ext_keyboard_filter = nullptr;
-                g_ime_dlg_ext_keyboard_filter_user_id =
-                    Libraries::UserService::ORBIS_USER_SERVICE_USER_ID_INVALID;
+                g_ime_dlg_ext_keyboard_filter_user_id = ORBIS_USER_SERVICE_USER_ID_INVALID;
             }
         }
 
@@ -1368,8 +1362,7 @@ Error PS4_SYSV_ABI sceImeDialogTerm() {
     g_ime_dlg_has_extended = false;
     g_ime_dlg_result_committed = false;
     g_ime_dlg_ext_keyboard_filter = nullptr;
-    g_ime_dlg_ext_keyboard_filter_user_id =
-        Libraries::UserService::ORBIS_USER_SERVICE_USER_ID_INVALID;
+    g_ime_dlg_ext_keyboard_filter_user_id = ORBIS_USER_SERVICE_USER_ID_INVALID;
     g_ime_dlg_ext_keyboard_filter_registered = false;
     g_ime_dlg_ext_keyboard_filter_active = false;
     g_ime_dlg_resource_id = 0;

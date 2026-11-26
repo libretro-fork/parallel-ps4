@@ -32,7 +32,7 @@ struct OrbisNpAuthGetAuthorizationCodeParameter {
 
 struct OrbisNpAuthGetAuthorizationCodeParameterA {
     u64 size;
-    Libraries::UserService::OrbisUserServiceUserId user_id;
+    OrbisUserServiceUserId user_id;
     u8 padding[4];
     const OrbisNpClientId* client_id;
     const char* scope;
@@ -48,7 +48,7 @@ struct OrbisNpAuthGetIdTokenParameter {
 
 struct OrbisNpAuthGetIdTokenParameterA {
     u64 size;
-    Libraries::UserService::OrbisUserServiceUserId user_id;
+    OrbisUserServiceUserId user_id;
     u8 padding[4];
     const OrbisNpClientId* client_id;
     const OrbisNpClientSecret* client_secret;

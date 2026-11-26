@@ -32,7 +32,7 @@ struct OrbisNpProfileDialogParam {
     CommonDialog::BaseParam baseParam;
     u64 size;
     OrbisNpProfileDialogMode mode;
-    Libraries::UserService::OrbisUserServiceUserId userId;
+    OrbisUserServiceUserId userId;
     Libraries::Np::OrbisNpOnlineId targetOnlineId;
     void* userData;
     u8 reserved[32];
@@ -47,7 +47,7 @@ struct OrbisNpProfileDialogParamA {
     CommonDialog::BaseParam baseParam;
     u64 size;
     OrbisNpProfileDialogMode mode;
-    Libraries::UserService::OrbisUserServiceUserId userId;
+    OrbisUserServiceUserId userId;
     Libraries::Np::OrbisNpAccountId targetAccountId;
     int : 32;
     void* userData;

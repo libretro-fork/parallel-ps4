@@ -164,7 +164,7 @@ struct OrbisNpScorePlayerRankDataForCrossSave {
 int PS4_SYSV_ABI sceNpScoreCreateNpTitleCtx(OrbisNpServiceLabel serviceLabel,
                                             const OrbisNpId* selfNpId);
 int PS4_SYSV_ABI sceNpScoreCreateNpTitleCtxA(OrbisNpServiceLabel npServiceLabel,
-                                             UserService::OrbisUserServiceUserId selfId);
+                                             OrbisUserServiceUserId selfId);
 s32 PS4_SYSV_ABI sceNpScoreDeleteNpTitleCtx(s32 titleCtxId);
 //***********************************
 // Request management functions

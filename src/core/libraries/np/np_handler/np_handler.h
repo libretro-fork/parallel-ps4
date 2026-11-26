@@ -363,8 +363,8 @@ public:
                    bool hasDateCheck, u64 isLastChangedDate,
                    std::shared_ptr<NpTus::TusRequestCtx> ctx);
     // State callbacks
-    using StateCallback = std::function<void(Libraries::UserService::OrbisUserServiceUserId user_id,
-                                             NpManager::OrbisNpState state)>;
+    using StateCallback =
+        std::function<void(OrbisUserServiceUserId user_id, NpManager::OrbisNpState state)>;
 
     s32 RegisterStateCallback(StateCallback cb, void* userdata);
     void UnregisterStateCallback(s32 handle);

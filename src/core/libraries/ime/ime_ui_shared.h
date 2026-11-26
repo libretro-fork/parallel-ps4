@@ -102,8 +102,7 @@ ImeKbLayoutSelection ResolveInitialKbLayoutSelection(OrbisImeExtOption ext_optio
 void InitializeDefaultOskSelectionAnchor(const ImeKbLayoutSelection& layout_selection,
                                          OrbisImeExtOption ext_option, int& pending_row,
                                          int& pending_col, int& last_row, int& last_col);
-VirtualPadSnapshot ReadVirtualPadSnapshot(Libraries::UserService::OrbisUserServiceUserId user_id,
-                                          float delta_time);
+VirtualPadSnapshot ReadVirtualPadSnapshot(OrbisUserServiceUserId user_id, float delta_time);
 
 struct OskPadInputState {
     u32& prev_virtual_buttons;

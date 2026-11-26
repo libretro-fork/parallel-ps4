@@ -200,7 +200,7 @@ void NpHandler::Initialize() {
     }
 
     int connected_count = 0;
-    for (int i = 0; i < Libraries::UserService::ORBIS_USER_SERVICE_MAX_LOGIN_USERS; ++i) {
+    for (int i = 0; i < ORBIS_USER_SERVICE_MAX_LOGIN_USERS; ++i) {
         const struct user* u = user_manager_get_logged_in(static_cast<unsigned>(i));
         if (!u)
             continue;

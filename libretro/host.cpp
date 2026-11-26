@@ -281,9 +281,8 @@ void PumpInput() {
                 }
                 input_controller_get(pad)->user_id = user->user_id;
                 if (user_manager_login(user, static_cast<s32>(pad) + 1)) {
-                  Libraries::UserService::AddUserServiceEvent(
-                      {Libraries::UserService::OrbisUserServiceEventType::Login,
-                       user->user_id});
+                  userservice_add_event(ORBIS_USER_SERVICE_EVENT_TYPE_LOGIN,
+                                        user->user_id);
                 }
                 input_controller_connect(input_controller_get(pad));
                 LOG_INFO(Input, "Controller %u connected from the frontend's port %u", pad + 1, pad + 1);

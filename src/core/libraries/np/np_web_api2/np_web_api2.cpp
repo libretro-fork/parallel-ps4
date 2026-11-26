@@ -99,13 +99,12 @@ s32 PS4_SYSV_ABI sceNpWebApi2CreateRequest(s32 user_ctx_id, const char* api_grou
     return result;
 }
 
-s32 PS4_SYSV_ABI sceNpWebApi2CreateUserContext(s32 lib_ctx_id,
-                                               UserService::OrbisUserServiceUserId user_id) {
+s32 PS4_SYSV_ABI sceNpWebApi2CreateUserContext(s32 lib_ctx_id, OrbisUserServiceUserId user_id) {
     if (lib_ctx_id >= 0x8000) {
         LOG_ERROR(Lib_NpWebApi2, "Invalid library context id 0x%x", lib_ctx_id);
         return ORBIS_NP_WEBAPI2_ERROR_INVALID_LIB_CONTEXT_ID;
     }
-    if (user_id == UserService::ORBIS_USER_SERVICE_USER_ID_INVALID) {
+    if (user_id == ORBIS_USER_SERVICE_USER_ID_INVALID) {
         LOG_ERROR(Lib_NpWebApi2, "Invalid user id");
         return ORBIS_NP_WEBAPI2_ERROR_INVALID_ARGUMENT;
     }

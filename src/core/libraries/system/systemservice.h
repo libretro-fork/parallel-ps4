@@ -120,12 +120,12 @@ struct OrbisSystemServiceEvent {
             char boot_argument[7169];
         } join_event;
         struct {
-            Libraries::UserService::OrbisUserServiceUserId userId;
+            OrbisUserServiceUserId userId;
             u32 np_service_label;
             u8 reserved[8184];
         } service_entitlement_update;
         struct {
-            Libraries::UserService::OrbisUserServiceUserId userId;
+            OrbisUserServiceUserId userId;
             u32 np_service_label;
             u8 reserved[8184];
         } unified_entitlement_update;

@@ -163,9 +163,9 @@ public:
         filter->RemoveUser();
     }
 
-    s32 CreateUserContext(Libraries::UserService::OrbisUserServiceUserId user_id);
+    s32 CreateUserContext(OrbisUserServiceUserId user_id);
     UserContext* GetUserContext(s32 user_ctx_id);
-    UserContext* GetUserContextByUserId(Libraries::UserService::OrbisUserServiceUserId user_id);
+    UserContext* GetUserContextByUserId(OrbisUserServiceUserId user_id);
 
     obj_table_t* UserContexts() {
         return &user_contexts;
@@ -193,7 +193,7 @@ class UserContext {
 public:
     obj_head_t head{}; // first: its id, its slot and how it is freed
 
-    UserContext(LibraryContext* parent, Libraries::UserService::OrbisUserServiceUserId user_id)
+    UserContext(LibraryContext* parent, OrbisUserServiceUserId user_id)
         : user_id(user_id), parent_ctx(parent) {
         head.destroy = Destroy;
         obj_table_init(&requests, MaxRequests);
@@ -233,7 +233,7 @@ public:
         return static_cast<s32>(head.id);
     }
 
-    Libraries::UserService::OrbisUserServiceUserId GetUserId() {
+    OrbisUserServiceUserId GetUserId() {
         return user_id;
     }
 
@@ -272,7 +272,7 @@ public:
     void Delete();
 
 private:
-    Libraries::UserService::OrbisUserServiceUserId user_id{};
+    OrbisUserServiceUserId user_id{};
     s32 http_template_id{};
     retro_atomic_int_t deleting{0};
     LibraryContext* parent_ctx{};

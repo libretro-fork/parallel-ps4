@@ -23,6 +23,14 @@ void np_lend_pending_invitations(s32 user_id,
                                              size_t pending, void* ctx),
                                  void* ctx);
 
+/* Tells NP a user logged in or out (@event is an OrbisUserServiceEventType), as the game takes
+ * the event. Defined in np_manager.cpp. */
+void np_notify_user_service_event(s32 event, s32 user_id);
+
+/* @user_id's online ID when signed in to PSN, copied to @out with its terminator: its length,
+ * or 0 when not signed in, there is none or it does not fit. Defined in np_manager.cpp. */
+size_t np_signed_in_online_id(s32 user_id, char* out, size_t size);
+
 RETRO_END_DECLS
 
 #endif

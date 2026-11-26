@@ -274,9 +274,9 @@ s32 terminateContext(s32 libCtxId) {
     return deleteContext(libCtxId);
 }
 
-OrbisNpWebApiUserContext* findUserContextByUserId(
-    OrbisNpWebApiContext* context, Libraries::UserService::OrbisUserServiceUserId userId) {
-    if (userId == Libraries::UserService::ORBIS_USER_SERVICE_USER_ID_INVALID) {
+OrbisNpWebApiUserContext* findUserContextByUserId(OrbisNpWebApiContext* context,
+                                                  OrbisUserServiceUserId userId) {
+    if (userId == ORBIS_USER_SERVICE_USER_ID_INVALID) {
         return nullptr;
     }
 
@@ -313,12 +313,12 @@ OrbisNpWebApiUserContext* findUserContext(OrbisNpWebApiContext* context, s32 tit
 s32 createUserContextWithOnlineId(s32 libCtxId, OrbisNpOnlineId* onlineId) {
     LOG_WARNING(Lib_NpWebApi, "called libCtxId = %d", libCtxId);
 
-    Libraries::UserService::OrbisUserServiceUserId user_id = 0;
-    Libraries::UserService::sceUserServiceGetInitialUser(&user_id);
+    OrbisUserServiceUserId user_id = 0;
+    sceUserServiceGetInitialUser(&user_id);
     return createUserContext(libCtxId, user_id);
 }
 
-s32 createUserContext(s32 libCtxId, Libraries::UserService::OrbisUserServiceUserId userId) {
+s32 createUserContext(s32 libCtxId, OrbisUserServiceUserId userId) {
     LOG_INFO(Lib_NpWebApi, "libCtxId = %d, userId = %d", libCtxId, userId);
     OrbisNpWebApiContext* context = findAndValidateContext(libCtxId);
     if (context == nullptr) {

@@ -168,7 +168,7 @@ struct OrbisNpTusDataStatusForCrossSave {
 
 s32 PS4_SYSV_ABI sceNpTssCreateNpTitleCtx(OrbisNpServiceLabel serviceLabel, OrbisNpId* npId);
 s32 PS4_SYSV_ABI sceNpTssCreateNpTitleCtxA(OrbisNpServiceLabel serviceLabel,
-                                           Libraries::UserService::OrbisUserServiceUserId userId);
+                                           OrbisUserServiceUserId userId);
 s32 PS4_SYSV_ABI sceNpTssGetData(int reqId, s32 slotId, OrbisNpTssDataStatus* dataStatus,
                                  u64 dataStatusSize, void* data, u64 recvSize,
                                  OrbisNpTssGetDataOptParam* option);
@@ -242,7 +242,7 @@ s32 PS4_SYSV_ABI sceNpTusAddAndGetVariableVUserAsync(
 s32 PS4_SYSV_ABI sceNpTusChangeModeForOtherSaveDataOwners();
 s32 PS4_SYSV_ABI sceNpTusCreateNpTitleCtx(OrbisNpServiceLabel serviceLabel, OrbisNpId* npId);
 s32 PS4_SYSV_ABI sceNpTusCreateNpTitleCtxA(OrbisNpServiceLabel serviceLabel,
-                                           Libraries::UserService::OrbisUserServiceUserId userId);
+                                           OrbisUserServiceUserId userId);
 s32 PS4_SYSV_ABI sceNpTusCreateRequest(int libCtxId);
 s32 PS4_SYSV_ABI sceNpTusCreateTitleCtx();
 s32 PS4_SYSV_ABI sceNpTusDeleteMultiSlotData(int reqId, const OrbisNpId* targetNpId, s32* slotIds,

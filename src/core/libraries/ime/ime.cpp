@@ -86,7 +86,7 @@ bool IsValidImeExtOption(u32 option) {
     return ((~allow & option) == 0);
 }
 
-bool IsValidImeUserId(Libraries::UserService::OrbisUserServiceUserId user_id) {
+bool IsValidImeUserId(OrbisUserServiceUserId user_id) {
     const u32 sdk = GetCompiledSdkVersion();
     const u32 uid_u = static_cast<u32>(user_id);
 
@@ -97,8 +97,8 @@ bool IsValidImeUserId(Libraries::UserService::OrbisUserServiceUserId user_id) {
         return user_id >= 0;
     }
 
-    if (user_id == Libraries::UserService::ORBIS_USER_SERVICE_USER_ID_INVALID ||
-        user_id == Libraries::UserService::ORBIS_USER_SERVICE_USER_ID_SYSTEM) {
+    if (user_id == ORBIS_USER_SERVICE_USER_ID_INVALID ||
+        user_id == ORBIS_USER_SERVICE_USER_ID_SYSTEM) {
         return false;
     }
     if (user_id == 0xfe) {
@@ -476,7 +476,7 @@ Error PS4_SYSV_ABI sceImeGetPanelSize(const OrbisImeParam* param, u32* width, u3
     return Error::OK;
 }
 
-Error PS4_SYSV_ABI sceImeKeyboardClose(Libraries::UserService::OrbisUserServiceUserId userId) {
+Error PS4_SYSV_ABI sceImeKeyboardClose(OrbisUserServiceUserId userId) {
     LOG_INFO(Lib_Ime, "called");
 
     if (!g_keyboard_handler) {
@@ -484,7 +484,7 @@ Error PS4_SYSV_ABI sceImeKeyboardClose(Libraries::UserService::OrbisUserServiceU
         return Error::NOT_OPENED;
     }
     // TODO: Check for valid user IDs.
-    if (userId == Libraries::UserService::ORBIS_USER_SERVICE_USER_ID_INVALID) {
+    if (userId == ORBIS_USER_SERVICE_USER_ID_INVALID) {
         // Maybe g_keyboard_handler should hold a user ID and I must compare it here?
         LOG_ERROR(Lib_Ime, "Invalid userId: %d", userId);
         return Error::INVALID_USER_ID;
@@ -508,9 +508,8 @@ int PS4_SYSV_ABI sceImeKeyboardGetInfo(u32 resourceId, OrbisImeKeyboardInfo* inf
     LOG_ERROR(Lib_Ime, "(STUBBED) called");
     return ORBIS_OK;
 }
-Error PS4_SYSV_ABI
-sceImeKeyboardGetResourceId(Libraries::UserService::OrbisUserServiceUserId userId,
-                            OrbisImeKeyboardResourceIdArray* resourceIdArray) {
+Error PS4_SYSV_ABI sceImeKeyboardGetResourceId(OrbisUserServiceUserId userId,
+                                               OrbisImeKeyboardResourceIdArray* resourceIdArray) {
     LOG_INFO(Lib_Ime, "(partial) called");
 
     if (!resourceIdArray) {
@@ -519,7 +518,7 @@ sceImeKeyboardGetResourceId(Libraries::UserService::OrbisUserServiceUserId userI
     }
 
     // TODO: Check for valid user IDs.
-    if (userId == Libraries::UserService::ORBIS_USER_SERVICE_USER_ID_INVALID) {
+    if (userId == ORBIS_USER_SERVICE_USER_ID_INVALID) {
         LOG_ERROR(Lib_Ime, "Invalid userId: %d", userId);
         /*
         resourceIdArray->user_id = userId;
@@ -551,7 +550,7 @@ sceImeKeyboardGetResourceId(Libraries::UserService::OrbisUserServiceUserId userI
     return Error::OK;
 }
 
-Error PS4_SYSV_ABI sceImeKeyboardOpen(Libraries::UserService::OrbisUserServiceUserId userId,
+Error PS4_SYSV_ABI sceImeKeyboardOpen(OrbisUserServiceUserId userId,
                                       const OrbisImeKeyboardParam* param) {
     LOG_INFO(Lib_Ime, "called");
     if (!param) {
@@ -589,7 +588,7 @@ Error PS4_SYSV_ABI sceImeKeyboardOpen(Libraries::UserService::OrbisUserServiceUs
     }
 
     // TODO: Check for valid user IDs.
-    if (userId == Libraries::UserService::ORBIS_USER_SERVICE_USER_ID_INVALID) {
+    if (userId == ORBIS_USER_SERVICE_USER_ID_INVALID) {
         LOG_ERROR(Lib_Ime, "Invalid userId: %d", userId);
         return Error::INVALID_USER_ID;
     }
@@ -631,8 +630,7 @@ int PS4_SYSV_ABI sceImeKeyboardOpenInternal() {
     return ORBIS_OK;
 }
 
-int PS4_SYSV_ABI sceImeKeyboardSetMode(Libraries::UserService::OrbisUserServiceUserId userId,
-                                       u32 mode) {
+int PS4_SYSV_ABI sceImeKeyboardSetMode(OrbisUserServiceUserId userId, u32 mode) {
     (void)userId;
     (void)mode;
     LOG_ERROR(Lib_Ime, "(STUBBED) called");
@@ -926,7 +924,7 @@ void PS4_SYSV_ABI sceImeParamInit(OrbisImeParam* param) {
     }
 
     memset(param, 0, sizeof(OrbisImeParam));
-    param->user_id = Libraries::UserService::ORBIS_USER_SERVICE_USER_ID_INVALID;
+    param->user_id = ORBIS_USER_SERVICE_USER_ID_INVALID;
 }
 
 int PS4_SYSV_ABI sceImeSetCandidateIndex(s32 index) {

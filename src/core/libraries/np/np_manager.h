@@ -31,16 +31,16 @@ enum class OrbisNpReachabilityState {
     Reachable = 2,
 };
 
-using OrbisNpStateCallback =
-    PS4_SYSV_ABI void (*)(Libraries::UserService::OrbisUserServiceUserId userId, OrbisNpState state,
-                          OrbisNpId* npId, void* userdata);
-using OrbisNpStateCallbackA = PS4_SYSV_ABI void (*)(
-    Libraries::UserService::OrbisUserServiceUserId userId, OrbisNpState state, void* userdata);
-using OrbisNpStateCallbackForNpToolkit = PS4_SYSV_ABI void (*)(
-    Libraries::UserService::OrbisUserServiceUserId userId, OrbisNpState state, void* userdata);
-using OrbisNpReachabilityStateCallback =
-    PS4_SYSV_ABI void (*)(Libraries::UserService::OrbisUserServiceUserId userId,
-                          OrbisNpReachabilityState state, void* userdata);
+using OrbisNpStateCallback = PS4_SYSV_ABI void (*)(OrbisUserServiceUserId userId,
+                                                   OrbisNpState state, OrbisNpId* npId,
+                                                   void* userdata);
+using OrbisNpStateCallbackA = PS4_SYSV_ABI void (*)(OrbisUserServiceUserId userId,
+                                                    OrbisNpState state, void* userdata);
+using OrbisNpStateCallbackForNpToolkit = PS4_SYSV_ABI void (*)(OrbisUserServiceUserId userId,
+                                                               OrbisNpState state, void* userdata);
+using OrbisNpReachabilityStateCallback = PS4_SYSV_ABI void (*)(OrbisUserServiceUserId userId,
+                                                               OrbisNpReachabilityState state,
+                                                               void* userdata);
 
 enum class OrbisNpGamePresenseStatus {
     Offline = 0,
@@ -86,7 +86,7 @@ struct OrbisNpParentalControlInfo {
 
 struct OrbisNpCheckPlusParameter {
     u64 size;
-    Libraries::UserService::OrbisUserServiceUserId user_id;
+    OrbisUserServiceUserId user_id;
     u8 padding[4];
     u64 features;
     u8 reserved[32];
@@ -106,22 +106,16 @@ struct OrbisNpCreateAsyncRequestParameter {
 
 void RegisterNpCallback(std::string key, std::function<void()> cb);
 void DeregisterNpCallback(std::string key);
-void NotifyNpStateFromUserServiceEvent(Libraries::UserService::OrbisUserServiceEventType event_type,
-                                       Libraries::UserService::OrbisUserServiceUserId user_id);
+void NotifyNpStateFromUserServiceEvent(OrbisUserServiceEventType event_type,
+                                       OrbisUserServiceUserId user_id);
 
-s32 PS4_SYSV_ABI sceNpGetNpId(Libraries::UserService::OrbisUserServiceUserId user_id,
-                              OrbisNpId* np_id);
-s32 PS4_SYSV_ABI sceNpGetAccountIdA(Libraries::UserService::OrbisUserServiceUserId user_id,
-                                    u64* account_id);
-s32 PS4_SYSV_ABI sceNpGetOnlineId(Libraries::UserService::OrbisUserServiceUserId user_id,
-                                  OrbisNpOnlineId* online_id);
-s32 PS4_SYSV_ABI sceNpCheckNpAvailabilityA(s32 req_id,
-                                           Libraries::UserService::OrbisUserServiceUserId user_id);
-s32 PS4_SYSV_ABI sceNpGetAccountLanguageA(s32 req_id,
-                                          Libraries::UserService::OrbisUserServiceUserId user_id,
+s32 PS4_SYSV_ABI sceNpGetNpId(OrbisUserServiceUserId user_id, OrbisNpId* np_id);
+s32 PS4_SYSV_ABI sceNpGetAccountIdA(OrbisUserServiceUserId user_id, u64* account_id);
+s32 PS4_SYSV_ABI sceNpGetOnlineId(OrbisUserServiceUserId user_id, OrbisNpOnlineId* online_id);
+s32 PS4_SYSV_ABI sceNpCheckNpAvailabilityA(s32 req_id, OrbisUserServiceUserId user_id);
+s32 PS4_SYSV_ABI sceNpGetAccountLanguageA(s32 req_id, OrbisUserServiceUserId user_id,
                                           OrbisNpLanguageCode* language);
-s32 PS4_SYSV_ABI
-sceNpGetParentalControlInfoA(s32 req_id, Libraries::UserService::OrbisUserServiceUserId user_id,
-                             s8* age, OrbisNpParentalControlInfo* info);
+s32 PS4_SYSV_ABI sceNpGetParentalControlInfoA(s32 req_id, OrbisUserServiceUserId user_id, s8* age,
+                                              OrbisNpParentalControlInfo* info);
 void RegisterLib(Core::Loader::SymbolsResolver* sym);
 } // namespace Libraries::Np::NpManager

@@ -133,7 +133,7 @@ using OrbisNpWebApiNotificationCallback = PS4_SYSV_ABI void (*)(); // dummy
 // on the game's thread during sceNpCheckCallback.This mirrors the real lib, where push events
 // arrive via the NP push/notification subsystem and are pumped on the callback-check thread.
 struct PushEventInput {
-    Libraries::UserService::OrbisUserServiceUserId targetUserId = 0;
+    OrbisUserServiceUserId targetUserId = 0;
     std::string npServiceName; // e.g. "np:service:..."; empty for basic push
     OrbisNpServiceLabel npServiceLabel = 0;
     std::string dataType; // OrbisNpWebApiPushEventDataType value
@@ -151,8 +151,7 @@ void EnqueuePushEvent(const PushEventInput& ev);
 
 s32 PS4_SYSV_ABI sceNpWebApiInitialize(s32 libHttpCtxId, u64 poolSize);
 s32 PS4_SYSV_ABI sceNpWebApiTerminate(s32 libCtxId);
-s32 PS4_SYSV_ABI sceNpWebApiCreateContextA(s32 libCtxId,
-                                           Libraries::UserService::OrbisUserServiceUserId userId);
+s32 PS4_SYSV_ABI sceNpWebApiCreateContextA(s32 libCtxId, OrbisUserServiceUserId userId);
 s32 PS4_SYSV_ABI sceNpWebApiDeleteContext(s32 titleUserCtxId);
 s32 PS4_SYSV_ABI sceNpWebApiCreateRequest(s32 titleUserCtxId, const char* pApiGroup,
                                           const char* pPath, OrbisNpWebApiHttpMethod method,

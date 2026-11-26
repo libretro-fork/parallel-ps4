@@ -366,7 +366,7 @@ s32 PS4_SYSV_ABI sceNpAuthGetIdToken(s32 req_id, const OrbisNpAuthGetIdTokenPara
 
     // For simplicity, call sceUserServiceGetInitialUser to get the user_id.
     s32 user_id = 0;
-    ASSERT(UserService::sceUserServiceGetInitialUser(&user_id) == 0);
+    ASSERT(sceUserServiceGetInitialUser(&user_id) == 0);
 
     // Library constructs an OrbisNpAuthGetIdTokenParameterA struct,
     // then uses that to call GetIdToken.

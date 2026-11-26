@@ -41,7 +41,7 @@ void LibraryContext::CheckTimeout() {
         &time);
 }
 
-s32 LibraryContext::CreateUserContext(Libraries::UserService::OrbisUserServiceUserId user_id) {
+s32 LibraryContext::CreateUserContext(OrbisUserServiceUserId user_id) {
     UserContext* user_ctx = new UserContext(this, user_id);
     // Its id: this context's above, its slot and the table's count below
     if (!obj_table_put(&user_contexts, &user_ctx->head, 6, 16, static_cast<s64>(GetId()) << 0x10)) {
@@ -133,9 +133,8 @@ UserContext* LibraryContext::GetUserContext(s32 user_ctx_id) {
     return user_ctx;
 }
 
-UserContext* LibraryContext::GetUserContextByUserId(
-    Libraries::UserService::OrbisUserServiceUserId user_id) {
-    if (user_id == Libraries::UserService::ORBIS_USER_SERVICE_USER_ID_INVALID) {
+UserContext* LibraryContext::GetUserContextByUserId(OrbisUserServiceUserId user_id) {
+    if (user_id == ORBIS_USER_SERVICE_USER_ID_INVALID) {
         return nullptr;
     }
 

@@ -195,7 +195,7 @@ s32 terminateLibraryContext(s32 lib_ctx_id) {
     return ORBIS_OK;
 }
 
-s32 createUserContext(s32 lib_ctx_id, Libraries::UserService::OrbisUserServiceUserId user_id) {
+s32 createUserContext(s32 lib_ctx_id, OrbisUserServiceUserId user_id) {
     LibraryContext* lib_ctx = getLibraryContext(lib_ctx_id);
     if (!lib_ctx) {
         LOG_ERROR(Lib_NpWebApi2, "No library context with id 0x%x", lib_ctx_id);

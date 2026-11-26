@@ -21,7 +21,7 @@ static constexpr u32 ORBIS_NP_COMMERCE_DIALOG_NUM_TARGETS_MAX = 10;
 struct OrbisNpCommerceDialogParam {
     BaseParam baseParam;
     s32 size;
-    Libraries::UserService::OrbisUserServiceUserId userId;
+    OrbisUserServiceUserId userId;
     s32 mode;
     u32 serviceLabel;
     const char* const* targets;

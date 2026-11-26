@@ -95,7 +95,7 @@ s32 PS4_SYSV_ABI sceNpLookupCreateAsyncRequest(
     OrbisNpLookupTitleCtxId titleCtxId, const OrbisNpLookupCreateAsyncRequestParameter* param);
 s32 PS4_SYSV_ABI sceNpLookupCreateRequest(OrbisNpLookupTitleCtxId titleCtxId);
 s32 PS4_SYSV_ABI sceNpLookupCreateTitleCtx(const OrbisNpId* selfNpId);
-s32 PS4_SYSV_ABI sceNpLookupCreateTitleCtxA(UserService::OrbisUserServiceUserId userId);
+s32 PS4_SYSV_ABI sceNpLookupCreateTitleCtxA(OrbisUserServiceUserId userId);
 s32 PS4_SYSV_ABI sceNpLookupDeleteRequest(OrbisNpLookupRequestId reqId);
 s32 PS4_SYSV_ABI sceNpLookupDeleteTitleCtx(OrbisNpLookupTitleCtxId titleCtxId);
 s32 PS4_SYSV_ABI sceNpLookupNpId(OrbisNpLookupRequestId reqId, const OrbisNpOnlineId* onlineId,
@@ -151,7 +151,7 @@ sceNpWordFilterCreateAsyncRequest(OrbisNpWordFilterTitleCtxId titleCtxId,
                                   const OrbisNpWordFilterCreateAsyncRequestParameter* param);
 s32 PS4_SYSV_ABI sceNpWordFilterCreateRequest(OrbisNpWordFilterTitleCtxId titleCtxId);
 s32 PS4_SYSV_ABI sceNpWordFilterCreateTitleCtx(const OrbisNpId* selfNpId);
-s32 PS4_SYSV_ABI sceNpWordFilterCreateTitleCtxA(UserService::OrbisUserServiceUserId userId);
+s32 PS4_SYSV_ABI sceNpWordFilterCreateTitleCtxA(OrbisUserServiceUserId userId);
 s32 PS4_SYSV_ABI sceNpWordFilterDeleteRequest(OrbisNpWordFilterRequestId reqId);
 s32 PS4_SYSV_ABI sceNpWordFilterDeleteTitleCtx(OrbisNpWordFilterTitleCtxId titleCtxId);
 s32 PS4_SYSV_ABI sceNpWordFilterPollAsync(OrbisNpWordFilterRequestId reqId, s32* result);

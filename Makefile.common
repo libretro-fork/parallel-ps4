@@ -164,7 +164,7 @@ CORE_SOURCES_CXX += $(addprefix src/core/libraries/np/np_web_api/,np_web_api.cpp
 CORE_SOURCES_CXX += $(addprefix src/core/libraries/np/np_web_api2/,np_web_api2.cpp \
 	np_web_api2_context.cpp np_web_api2_internal.cpp np_web_api2_push_event.cpp)
 CORE_SOURCES_CXX += $(addprefix src/core/libraries/sysmodule/,sysmodule_internal.cpp)
-CORE_SOURCES_CXX += $(addprefix src/core/libraries/system/,systemservice.cpp userservice.cpp)
+CORE_SOURCES_CXX += $(addprefix src/core/libraries/system/,systemservice.cpp)
 CORE_SOURCES_CXX += $(addprefix src/core/loader/,dwarf.cpp elf.cpp symbols_resolver.cpp)
 CORE_SOURCES_CXX += $(addprefix src/core/net/,guest_net.cpp host_net.cpp net_service.cpp \
 	p2p_codec.cpp p2p_crypto.cpp p2p_tcp.cpp p2p_transport.cpp)
@@ -222,7 +222,7 @@ CORE_SOURCES_C += $(addprefix src/core/libraries/avplayer/,avplayer.c avplayer_c
 	avplayer_data_streamer.c avplayer_fsm.c avplayer_impl.c avplayer_source.c avplayer_state.c)
 CORE_SOURCES_C += $(addprefix src/core/file_format/,psf.c)
 CORE_SOURCES_C += $(addprefix src/core/libraries/gnmdriver/,gnmdriver.c)
-CORE_SOURCES_C += $(addprefix src/core/libraries/system/,msgdialog.c)
+CORE_SOURCES_C += $(addprefix src/core/libraries/system/,msgdialog.c userservice.c)
 CORE_SOURCES_C += $(addprefix src/core/libraries/save_data/,save_backup.c save_instance.c \
 	save_memory.c savedata.c dialog/savedatadialog.c dialog/savedatadialog_ui.c)
 CORE_SOURCES_C += $(addprefix src/core/libraries/audio3d/,audio3d.c audio3d_port.c)

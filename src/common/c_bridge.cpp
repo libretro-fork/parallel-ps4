@@ -36,6 +36,8 @@ static Common::Log::Class ToClass(c_log_class log_class) {
         return Common::Log::Class::Lib_GnmDriver;
     case C_LOG_LIB_MSG_DLG:
         return Common::Log::Class::Lib_MsgDlg;
+    case C_LOG_LIB_USER_SERVICE:
+        return Common::Log::Class::Lib_UserService;
     case C_LOG_LIB_SAVE_DATA:
         return Common::Log::Class::Lib_SaveData;
     case C_LOG_LIB_SAVE_DATA_DIALOG:

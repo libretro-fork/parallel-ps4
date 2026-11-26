@@ -33,16 +33,14 @@ int PS4_SYSV_ABI sceImeFilterText();
 int PS4_SYSV_ABI sceImeForTestFunction();
 int PS4_SYSV_ABI sceImeGetPanelPositionAndForm(OrbisImePositionAndForm* posForm);
 Error PS4_SYSV_ABI sceImeGetPanelSize(const OrbisImeParam* param, u32* width, u32* height);
-Error PS4_SYSV_ABI sceImeKeyboardClose(Libraries::UserService::OrbisUserServiceUserId userId);
+Error PS4_SYSV_ABI sceImeKeyboardClose(OrbisUserServiceUserId userId);
 int PS4_SYSV_ABI sceImeKeyboardGetInfo(u32 resourceId, OrbisImeKeyboardInfo* info);
-Error PS4_SYSV_ABI
-sceImeKeyboardGetResourceId(Libraries::UserService::OrbisUserServiceUserId userId,
-                            OrbisImeKeyboardResourceIdArray* resourceIdArray);
-Error PS4_SYSV_ABI sceImeKeyboardOpen(Libraries::UserService::OrbisUserServiceUserId userId,
+Error PS4_SYSV_ABI sceImeKeyboardGetResourceId(OrbisUserServiceUserId userId,
+                                               OrbisImeKeyboardResourceIdArray* resourceIdArray);
+Error PS4_SYSV_ABI sceImeKeyboardOpen(OrbisUserServiceUserId userId,
                                       const OrbisImeKeyboardParam* param);
 int PS4_SYSV_ABI sceImeKeyboardOpenInternal();
-int PS4_SYSV_ABI sceImeKeyboardSetMode(Libraries::UserService::OrbisUserServiceUserId userId,
-                                       u32 mode);
+int PS4_SYSV_ABI sceImeKeyboardSetMode(OrbisUserServiceUserId userId, u32 mode);
 int PS4_SYSV_ABI sceImeKeyboardUpdate();
 Error PS4_SYSV_ABI sceImeOpen(const OrbisImeParam* param, const OrbisImeParamExtended* extended);
 int PS4_SYSV_ABI sceImeOpenInternal();

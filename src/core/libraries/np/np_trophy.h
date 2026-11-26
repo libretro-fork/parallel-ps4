@@ -132,8 +132,8 @@ int PS4_SYSV_ABI sceNpTrophyConfigGetTrophySetVersion();
 int PS4_SYSV_ABI sceNpTrophyConfigGetTrophyTitleDetails();
 int PS4_SYSV_ABI sceNpTrophyConfigHasGroupFeature();
 s32 PS4_SYSV_ABI sceNpTrophyCreateContext(OrbisNpTrophyContext* context,
-                                          Libraries::UserService::OrbisUserServiceUserId user_id,
-                                          u32 service_label, u64 options);
+                                          OrbisUserServiceUserId user_id, u32 service_label,
+                                          u64 options);
 s32 PS4_SYSV_ABI sceNpTrophyCreateHandle(OrbisNpTrophyHandle* handle);
 int PS4_SYSV_ABI sceNpTrophyDestroyContext(OrbisNpTrophyContext context);
 s32 PS4_SYSV_ABI sceNpTrophyDestroyHandle(OrbisNpTrophyHandle handle);

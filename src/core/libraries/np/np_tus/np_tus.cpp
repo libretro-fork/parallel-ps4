@@ -154,7 +154,7 @@ s32 PS4_SYSV_ABI sceNpTssCreateNpTitleCtx(OrbisNpServiceLabel serviceLabel, Orbi
 }
 
 s32 PS4_SYSV_ABI sceNpTusCreateNpTitleCtxA(OrbisNpServiceLabel serviceLabel,
-                                           Libraries::UserService::OrbisUserServiceUserId userId) {
+                                           OrbisUserServiceUserId userId) {
     LOG_INFO(Lib_NpTus, "serviceLabel = %u, userId = %d", serviceLabel, userId);
     OrbisNpId npId;
     auto ret = Np::NpManager::sceNpGetNpId(userId, &npId);
@@ -167,7 +167,7 @@ s32 PS4_SYSV_ABI sceNpTusCreateNpTitleCtxA(OrbisNpServiceLabel serviceLabel,
 }
 
 s32 PS4_SYSV_ABI sceNpTssCreateNpTitleCtxA(OrbisNpServiceLabel serviceLabel,
-                                           Libraries::UserService::OrbisUserServiceUserId userId) {
+                                           OrbisUserServiceUserId userId) {
     LOG_INFO(Lib_NpTus, "redirecting to sceNpTusCreateNpTitleCtxA");
     return sceNpTusCreateNpTitleCtxA(serviceLabel, userId);
 }

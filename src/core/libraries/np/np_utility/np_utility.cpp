@@ -60,7 +60,7 @@ s32 PS4_SYSV_ABI sceNpLookupCreateTitleCtx(const OrbisNpId* selfNpId) {
     });
 }
 
-s32 PS4_SYSV_ABI sceNpLookupCreateTitleCtxA(UserService::OrbisUserServiceUserId userId) {
+s32 PS4_SYSV_ABI sceNpLookupCreateTitleCtxA(OrbisUserServiceUserId userId) {
     return g_lookup_mutex.Run([&]() -> s32 {
         if (static_cast<s32>(g_lookup_title_ctxs.size()) >= ORBIS_NP_LOOKUP_MAX_CTX_NUM) {
             LOG_ERROR(Lib_NpUtility, "too many title contexts (%zu)", g_lookup_title_ctxs.size());
@@ -842,7 +842,7 @@ s32 PS4_SYSV_ABI sceNpWordFilterCreateTitleCtx(const OrbisNpId* selfNpId) {
     return CreateWordFilterTitleCtx(userId, *selfNpId);
 }
 
-s32 PS4_SYSV_ABI sceNpWordFilterCreateTitleCtxA(UserService::OrbisUserServiceUserId userId) {
+s32 PS4_SYSV_ABI sceNpWordFilterCreateTitleCtxA(OrbisUserServiceUserId userId) {
     return CreateWordFilterTitleCtx(userId, NpHandler::GetInstance().GetNpId(userId));
 }
 

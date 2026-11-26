@@ -91,7 +91,7 @@ s32 PS4_SYSV_ABI sceNpScoreCreateNpTitleCtx(OrbisNpServiceLabel serviceLabel,
 }
 
 s32 PS4_SYSV_ABI sceNpScoreCreateNpTitleCtxA(OrbisNpServiceLabel npServiceLabel,
-                                             UserService::OrbisUserServiceUserId selfId) {
+                                             OrbisUserServiceUserId selfId) {
 
     if (!Libraries::Np::NpHandler::GetInstance().IsPsnSignedIn(selfId)) {
         LOG_ERROR(Lib_NpScore, "userId %d is not signed in to NP", selfId);

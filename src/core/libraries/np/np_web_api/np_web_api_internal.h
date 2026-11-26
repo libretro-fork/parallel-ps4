@@ -47,7 +47,7 @@ struct OrbisNpWebApiUserContext {
     obj_head_t base;
     OrbisNpWebApiContext* parentContext;
     s32 userCtxId;
-    Libraries::UserService::OrbisUserServiceUserId userId;
+    OrbisUserServiceUserId userId;
     obj_table_t requests;
     obj_table_t pushEventCallbacks;
     obj_table_t servicePushEventCallbacks;
@@ -195,14 +195,13 @@ s32 deleteContext(s32 libCtxId);                                          // FUN
 s32 terminateContext(s32 libCtxId);                                       // FUN_010014b0
 
 // User context functions
-OrbisNpWebApiUserContext* findUserContextByUserId(
-    OrbisNpWebApiContext* context,
-    Libraries::UserService::OrbisUserServiceUserId userId); // FUN_010075c0
+OrbisNpWebApiUserContext* findUserContextByUserId(OrbisNpWebApiContext* context,
+                                                  OrbisUserServiceUserId userId); // FUN_010075c0
 OrbisNpWebApiUserContext* findUserContext(OrbisNpWebApiContext* context,
                                           s32 userCtxId);                   // FUN_01007530
 s32 createUserContextWithOnlineId(s32 libCtxId, OrbisNpOnlineId* onlineId); // FUN_010016a0
 s32 createUserContext(s32 libCtxId,
-                      Libraries::UserService::OrbisUserServiceUserId userId); // FUN_010015c0
+                      OrbisUserServiceUserId userId); // FUN_010015c0
 s32 registerNotificationCallback(s32 titleUserCtxId, OrbisNpWebApiNotificationCallback cbFunc,
                                  void* pUserArg);                       // FUN_01003770
 s32 unregisterNotificationCallback(s32 titleUserCtxId);                 // FUN_01003800

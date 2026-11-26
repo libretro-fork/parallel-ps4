@@ -42,8 +42,7 @@ s32 PS4_SYSV_ABI sceNpEAAccessInitialize() {
     return ORBIS_OK;
 }
 
-s32 PS4_SYSV_ABI sceNpHasEAAccessSubscription(UserService::OrbisUserServiceUserId user_id,
-                                              bool* result) {
+s32 PS4_SYSV_ABI sceNpHasEAAccessSubscription(OrbisUserServiceUserId user_id, bool* result) {
     LOG_ERROR(Lib_NpPartner, "(STUBBED) called");
     if (!g_library_init) {
         return ORBIS_NP_PARTNER_ERROR_NOT_INITIALIZED;

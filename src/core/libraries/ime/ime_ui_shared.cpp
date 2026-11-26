@@ -70,8 +70,7 @@ float ToAxisUnit(const s32 axis) {
     return std::clamp(centered, -1.0f, 1.0f);
 }
 
-bool ReadControllerState(Libraries::UserService::OrbisUserServiceUserId user_id,
-                         input_state_t* out_state) {
+bool ReadControllerState(OrbisUserServiceUserId user_id, input_state_t* out_state) {
     if (!out_state) {
         return false;
     }
@@ -539,8 +538,7 @@ static float ApplyAxisDeadzone(float v) {
     return std::copysign(std::clamp(scaled, 0.0f, 1.0f), v);
 }
 
-VirtualPadSnapshot ReadVirtualPadSnapshot(Libraries::UserService::OrbisUserServiceUserId user_id,
-                                          float delta_time) {
+VirtualPadSnapshot ReadVirtualPadSnapshot(OrbisUserServiceUserId user_id, float delta_time) {
     VirtualPadSnapshot snapshot{};
 
     float lx = 0.0f;

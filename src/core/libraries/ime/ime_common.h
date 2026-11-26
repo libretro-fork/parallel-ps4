@@ -402,18 +402,18 @@ struct OrbisImeKeycode {
     char16_t character;
     u32 status;
     OrbisImeKeyboardType type;
-    Libraries::UserService::OrbisUserServiceUserId user_id;
+    OrbisUserServiceUserId user_id;
     u32 resource_id;
     OrbisRtcTick timestamp;
 };
 
 struct OrbisImeKeyboardResourceIdArray {
-    Libraries::UserService::OrbisUserServiceUserId user_id;
+    OrbisUserServiceUserId user_id;
     u32 resource_id[5];
 };
 
 struct OrbisImeKeyboardInfo {
-    Libraries::UserService::OrbisUserServiceUserId user_id;
+    OrbisUserServiceUserId user_id;
     OrbisImeKeyboardDeviceType device;
     OrbisImeKeyboardType type;
     u32 repeat_delay;
@@ -500,7 +500,7 @@ struct OrbisImeKeyboardParam {
 };
 
 struct OrbisImeParam {
-    Libraries::UserService::OrbisUserServiceUserId user_id;
+    OrbisUserServiceUserId user_id;
     OrbisImeType type;
     OrbisImeLanguage supported_languages;
     OrbisImeEnterLabel enter_label;
@@ -527,7 +527,7 @@ struct OrbisImeCaret {
 };
 
 struct OrbisImeDialogParam {
-    Libraries::UserService::OrbisUserServiceUserId user_id;
+    OrbisUserServiceUserId user_id;
     OrbisImeType type;
     OrbisImeLanguage supported_languages;
     OrbisImeEnterLabel enter_label;
