@@ -4,6 +4,7 @@ What changed in the libretro core of this fork, newest first. Changes that come 
 
 ## Unreleased
 
+- **libSceNgs2 takes up to 256 racks in a system, where it took 64** (`ngs2_core.c`: `MAX_RACKS`). Shadow of the Colossus makes a submixer for every effect of its mix; its log shows 64 racks made and the 65th refused (`sceNgs2RackCreate: rack 0x2000 not made`), after which it sets up no more of its sound, and it was silent. `ngs2_core_test` makes 200 racks in one system. Not run in a game yet.
 - **What the two on-screen keyboards share around the keys is C89** (`ime/ime_ui_shared.c`, `ime_ui_shared.h`; `ime_ui_shared.cpp` is gone). The pad as the panel reads it with its repeats and shortcuts, the selector's fade, the caret in the text field, the edit menu, the text conversions and the keyboard's clipboard.
   - The functions take pointers. The two structures that held references to a keyboard's state (`OskPadInputState`, `OskShortcutRepeatState`) hold pointers; `OskVirtualPadInputView`'s methods are `OskVirtualPadDown`, `OskVirtualPadPressed` and `OskVirtualPadRepeatPressed`, with `ORBIS_PAD_BUTTON_*` bits for buttons; `SelectorFadeState` is made by `MakeSelectorFadeState`.
   - The four templates are functions: the edit menu that is open is an `OskEditMenuPopup` (`OSK_EDIT_MENU_*`) in both keyboards, where each had an enum class of its own, and `DrawAndHandleOskEditMenuPopup` calls back through a function pointer and a context.

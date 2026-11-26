@@ -13,7 +13,8 @@
 #define MAGIC_RACK 0x5232474eu
 #define MAGIC_VOICE 0x5632474eu
 
-#define MAX_RACKS 64
+/* Shadow of the Colossus makes more than 64: a submixer for every effect of its mix */
+#define MAX_RACKS 256
 #define MAX_CALLBACKS 256
 #define MIN_GRAIN 64u
 #define MAX_GRAIN 2048u

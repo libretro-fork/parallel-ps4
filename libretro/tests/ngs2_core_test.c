@@ -1651,7 +1651,33 @@ static void test_game_racks(void) {
    free(data);
 }
 
+/* A game with a submixer for every effect of its mix makes well over 64 racks */
+static void test_many_racks(void) {
+   rig r;
+   ngs2_rack_desc d;
+   static void *mems[200];
+   static ngs2_rack *racks[200];
+   unsigned i;
+   uint32_t before;
+   rig_open(&r, RATE);
+   before = ngs2_system_rack_count(r.system);
+   base_desc(&d, NGS2_RACK_SUBMIXER);
+   d.max_voices = 1;
+   for (i = 0; i < 200; i++) {
+      racks[i] = make_rack(r.system, &d, &mems[i]);
+      CHECK(racks[i] != NULL);
+   }
+   CHECK(ngs2_system_rack_count(r.system) == before + 200);
+   for (i = 0; i < 200; i++) {
+      ngs2_rack_destroy(racks[i]);
+      free(mems[i]);
+   }
+   CHECK(ngs2_system_rack_count(r.system) == before);
+   rig_close(&r);
+}
+
 int main(void) {
+   test_many_racks();
    test_passthrough();
    test_resample();
    test_blocks();
