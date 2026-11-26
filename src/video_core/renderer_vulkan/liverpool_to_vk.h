@@ -118,9 +118,24 @@ constexpr VkFormat SurfaceFormat(AmdGpu::DataFormat data_format,
                                  AmdGpu::NumberFormat num_format) noexcept {
     VkFormat result =
         surface_format_table.formats[GetSurfaceFormatTableIndex(data_format, num_format)];
-    bool found = result != VK_FORMAT_UNDEFINED || data_format == AmdGpu::DataFormat::FormatInvalid;
-    ASSERT_MSG(found, "Unknown data_format=%u and num_format=%u", static_cast<u32>(data_format),
-               static_cast<u32>(num_format));
+    if (result != VK_FORMAT_UNDEFINED || data_format == AmdGpu::DataFormat::FormatInvalid) {
+        return result;
+    }
+    // The descriptor of a binding the shader never uses can hold a pair no real resource has.
+    // The bit layout is kept with another number format, and the core stays up.
+    result = surface_format_table
+                 .formats[GetSurfaceFormatTableIndex(data_format, AmdGpu::NumberFormat::Unorm)];
+    if (result == VK_FORMAT_UNDEFINED) {
+        result = surface_format_table
+                     .formats[GetSurfaceFormatTableIndex(data_format, AmdGpu::NumberFormat::Uint)];
+    }
+    if (result == VK_FORMAT_UNDEFINED) {
+        result = surface_format_table
+                     .formats[GetSurfaceFormatTableIndex(data_format, AmdGpu::NumberFormat::Float)];
+    }
+    if (result == VK_FORMAT_UNDEFINED) {
+        result = VK_FORMAT_R8G8B8A8_UNORM;
+    }
     return result;
 }
 

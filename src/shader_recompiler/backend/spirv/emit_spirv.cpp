@@ -154,7 +154,24 @@ Id TypeId(const EmitContext& ctx, IR::Type type) {
     }
 }
 
+// The most loop passes one run of a shader may make, over all its loops together. A game's loop
+// often ends on a value read from memory; fed stale data it can go round billions of times, which
+// ends in a GPU timeout and a lost device. Real content stays far below this, so cutting the
+// loops short spoils one frame at worst instead of ending the session.
+static constexpr u32 LoopPassBudget = 1U << 18;
+
 void Traverse(EmitContext& ctx, const IR::Program& program) {
+    Id loop_counter{};
+    const auto get_loop_counter = [&] {
+        if (loop_counter == 0) {
+            const Id ptr_type{spv_TypePointer(&ctx.m, u32(SpvStorageClassPrivate), ctx.U32[1])};
+            loop_counter = spv_AddGlobalVariable(&ctx.m, ptr_type, u32(SpvStorageClassPrivate),
+                                                 ctx.u32_zero_value);
+            ctx.interfaces.push_back(loop_counter);
+        }
+        return loop_counter;
+    };
+
     IR::Block* current_block{};
     for (const IR::AbstractSyntaxNode& node : program.syntax_list) {
         switch (node.type) {
@@ -184,6 +201,13 @@ void Traverse(EmitContext& ctx, const IR::Program& program) {
             const Id continue_label{node.data.loop.continue_block->Definition<Id>()};
             const Id endloop_label{node.data.loop.merge->Definition<Id>()};
 
+            {
+                // The header runs once a pass
+                const Id counter{get_loop_counter()};
+                const Id count{spv_OpLoad(&ctx.m, ctx.U32[1], counter)};
+                spv_OpStore(&ctx.m, counter,
+                            spv_OpIAdd(&ctx.m, ctx.U32[1], count, ctx.ConstU32(1U)));
+            }
             spv_OpLoopMerge(&ctx.m, endloop_label, continue_label, u32(SpvLoopControlMaskNone));
             spv_OpBranch(&ctx.m, body_label);
             break;
@@ -204,6 +228,12 @@ void Traverse(EmitContext& ctx, const IR::Program& program) {
             Id cond{ctx.Def(node.data.repeat.cond)};
             const Id loop_header_label{node.data.repeat.loop_header->Definition<Id>()};
             const Id merge_label{node.data.repeat.merge->Definition<Id>()};
+            {
+                const Id count{spv_OpLoad(&ctx.m, ctx.U32[1], get_loop_counter())};
+                const Id within{
+                    spv_OpULessThan(&ctx.m, ctx.U1[1], count, ctx.ConstU32(LoopPassBudget))};
+                cond = spv_OpLogicalAnd(&ctx.m, ctx.U1[1], cond, within);
+            }
             spv_OpBranchConditional(&ctx.m, cond, loop_header_label, merge_label);
             break;
         }

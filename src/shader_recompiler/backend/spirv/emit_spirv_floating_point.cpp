@@ -164,11 +164,15 @@ Id EmitFPSaturate64(EmitContext& ctx, Id value) {
 }
 
 Id EmitFPClamp32(EmitContext& ctx, Id value, Id min_value, Id max_value) {
-    return spv_OpFClamp(&ctx.m, ctx.F32[1], value, min_value, max_value);
+    // A NaN gives the lower bound, as the console's clamp does
+    return spv_OpNMin(&ctx.m, ctx.F32[1], spv_OpNMax(&ctx.m, ctx.F32[1], value, min_value),
+                      max_value);
 }
 
 Id EmitFPClamp64(EmitContext& ctx, Id value, Id min_value, Id max_value) {
-    return spv_OpFClamp(&ctx.m, ctx.F64[1], value, min_value, max_value);
+    // A NaN gives the lower bound, as the console's clamp does
+    return spv_OpNMin(&ctx.m, ctx.F64[1], spv_OpNMax(&ctx.m, ctx.F64[1], value, min_value),
+                      max_value);
 }
 
 Id EmitFPRoundEven32(EmitContext& ctx, Id value) {

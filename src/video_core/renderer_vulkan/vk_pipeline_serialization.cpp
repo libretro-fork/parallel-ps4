@@ -14,7 +14,7 @@
 
 namespace Serialization {
 /* You should increment versions below once corresponding serialization scheme is changed. */
-static constexpr u32 ShaderBinaryVersion = 17u; // 17: wave lane reads
+static constexpr u32 ShaderBinaryVersion = 18u; // 18: loop pass budget
 static constexpr u32 ShaderMetaVersion = 8u;    // 8: the fetch shader's 1.0 registers
 static constexpr u32 PipelineKeyVersion = 3u;
 } // namespace Serialization

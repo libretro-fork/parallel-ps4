@@ -444,7 +444,9 @@ VkComponentSwizzle ComponentSwizzle(AmdGpu::CompSwizzle comp_swizzle) {
     case AmdGpu::CompSwizzle::Alpha:
         return VK_COMPONENT_SWIZZLE_A;
     default:
-        UNREACHABLE();
+        // 2 and 3 are reserved. They only turn up in the descriptor of a binding the shader
+        // never uses, which must not bring the core down.
+        return VK_COMPONENT_SWIZZLE_IDENTITY;
     }
 }
 

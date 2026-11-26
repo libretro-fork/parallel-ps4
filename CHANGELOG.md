@@ -4,6 +4,11 @@ What changed in the libretro core of this fork, newest first. Changes that come 
 
 ## Unreleased
 
+- **A shader's loops stop after a set number of passes, and the descriptor of an unused binding no longer brings the core down** (`Traverse`, `SurfaceFormat`, `ComponentSwizzle`, `EmitFPClamp32/64`). Taken from the GPU fixes of the Shadow of the Colossus PC port. Not run in a game yet.
+  - One run of a shader may make 262144 loop passes over all its loops together; past that its loops end. A game's loop often ends on a value read from memory, and fed stale data it went round until the GPU timed out and the device was lost. The cost is one add and one compare a pass.
+  - A data format and number format no resource really has, found in the descriptor of a binding the shader does not use, stopped the core on an assertion. The same bit layout is now taken with another number format. A reserved component swizzle (2 or 3) is taken as the identity instead of stopping the core.
+  - A shader's clamp gives the lower bound for a NaN, as the console's does, where the result was undefined before.
+  - The shader cache version is 18, so shaders built before this are rebuilt.
 - **Compute shaders written for a wave of 64 read the right lanes on a GPU with waves of 32** (`LowerWave64BallotPass`, `SharedMemoryBarrierPass`, `FindWave64UniformBlocks`). Taken from the GPU fixes of the Shadow of the Colossus PC port, which is built on the same renderer. Not run in a game yet.
   - A workgroup of 32 threads or fewer was left alone, but its code still reads lane 32 to join the two halves of a reduction. That read went past the host's subgroup, which leaves the result undefined. When what is read is a step of a reduction (min, max, add, multiply, and, or, xor over `ShuffleXor`), the idle half now gives the value that changes nothing; any other such read is folded into the lower half.
   - In a workgroup of one wave, a read of a fixed lane or a ballot is the same in every thread once it is passed through shared memory. A branch on it is therefore not divergent, and the lane reads and ballots behind such a branch are lowered too instead of being left as they were with the warning "instruction in non uniform control flow". The barrier pass treats those reads the same way, so it no longer holds back its barriers behind such a branch.
