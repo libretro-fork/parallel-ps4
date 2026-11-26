@@ -529,13 +529,29 @@ TextureCache::OverlapResult TextureCache::ResolveOverlap(const ImageInfo& image_
         // since a stale descriptor may still bind it. Only a write the CPU made in the image's
         // own range counts: MaybeCpuDirty is a write elsewhere in a page it shares, which leaves
         // the image as the GPU drew it while its memory is stale.
-        const bool cpu_rewrote_gpu_image = True(cache_image.flags & ImageFlagBits::GpuModified) &&
-                                           True(cache_image.flags & ImageFlagBits::CpuDirty);
+        // The GPU image must also be out of use: one the game used in the last frames is a live
+        // target, and a CPU write into it is not a new texture. Read from the game's memory, which
+        // holds none of what the GPU drew there, it came out as blocks of other data for a frame
+        // (Dead or Alive Xtreme 3, with read backs off too).
+        static constexpr u32 IDLE_FRAMES_BEFORE_REUSE = 2;
+        const bool cpu_rewrote_gpu_image =
+            True(cache_image.flags & ImageFlagBits::GpuModified) &&
+            True(cache_image.flags & ImageFlagBits::CpuDirty) &&
+            draw_frame - cache_image.frame_accessed_last > IDLE_FRAMES_BEFORE_REUSE;
         if (binding == BindingType::Texture &&
             image_info.props.is_block == cache_image.info.props.is_block &&
             (False(cache_image.flags & ImageFlagBits::GpuModified) || cpu_rewrote_gpu_image) &&
             (image_info.size.width != cache_image.info.size.width ||
              image_info.size.height != cache_image.info.size.height)) {
+            // Said for the first few, so a log shows whether a game takes this way
+            static retro_atomic_int_t said{0};
+            if (retro_atomic_fetch_add_int(&said, 1) < 16) {
+                LOG_WARNING(
+                    Render_Vulkan, "Texture pool slot reused at 0x%" PRIxPTR ": %ux%u -> %ux%u%s",
+                    image_info.guest_address, cache_image.info.size.width,
+                    cache_image.info.size.height, image_info.size.width, image_info.size.height,
+                    cpu_rewrote_gpu_image ? " (GPU image rewritten)" : "");
+            }
             if (safe_to_delete && !cpu_rewrote_gpu_image) {
                 FreeImage(cache_image_id);
             }
