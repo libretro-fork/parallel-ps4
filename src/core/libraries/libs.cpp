@@ -3986,6 +3986,23 @@ static void RegisterUserService(Core::Loader::SymbolsResolver* sym) {
                  sceUserServiceGetRegisteredUserIdList);
 }
 
+static void RegisterErrorDialog(Core::Loader::SymbolsResolver* sym) {
+    LIB_FUNCTION("ekXHb1kDBl0", "libSceErrorDialog", 1, "libSceErrorDialog", sceErrorDialogClose);
+    LIB_FUNCTION("t2FvHRXzgqk", "libSceErrorDialog", 1, "libSceErrorDialog",
+                 sceErrorDialogGetStatus);
+    LIB_FUNCTION("I88KChlynSs", "libSceErrorDialog", 1, "libSceErrorDialog",
+                 sceErrorDialogInitialize);
+    LIB_FUNCTION("M2ZF-ClLhgY", "libSceErrorDialog", 1, "libSceErrorDialog", sceErrorDialogOpen);
+    LIB_FUNCTION("jrpnVQfJYgQ", "libSceErrorDialog", 1, "libSceErrorDialog",
+                 sceErrorDialogOpenDetail);
+    LIB_FUNCTION("wktCiyWoDTI", "libSceErrorDialog", 1, "libSceErrorDialog",
+                 sceErrorDialogOpenWithReport);
+    LIB_FUNCTION("9XAxK2PMwk8", "libSceErrorDialog", 1, "libSceErrorDialog",
+                 sceErrorDialogTerminate);
+    LIB_FUNCTION("WWiGuh9XfgQ", "libSceErrorDialog", 1, "libSceErrorDialog",
+                 sceErrorDialogUpdateStatus);
+}
+
 static void RegisterMsgDialog(Core::Loader::SymbolsResolver* sym) {
     LIB_FUNCTION("HTrcDKlFKuM", "libSceMsgDialog", 1, "libSceMsgDialog", sceMsgDialogClose);
     LIB_FUNCTION("Lr8ovHH9l6A", "libSceMsgDialog", 1, "libSceMsgDialog", sceMsgDialogGetResult);
@@ -4418,7 +4435,7 @@ void InitHLELibs(Core::Loader::SymbolsResolver* sym) {
             {"libSceUsbStorage.sprx", RegisterUsbStorage},
             {"libSceMusicPlayerService.sprx", RegisterMusicPlayerService},
             {"libSceAjm.sprx", RegisterAjm},
-            {"libSceErrorDialog.sprx", Libraries::ErrorDialog::RegisterLib},
+            {"libSceErrorDialog.sprx", RegisterErrorDialog},
             {"libSceImeDialog.sprx", Libraries::ImeDialog::RegisterLib},
             {"libSceVdecsw.sprx", RegisterVdecsw},
             {"libSceVideodec.sprx", RegisterVideodec},

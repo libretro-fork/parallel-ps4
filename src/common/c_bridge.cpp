@@ -40,6 +40,8 @@ static Common::Log::Class ToClass(c_log_class log_class) {
         return Common::Log::Class::Lib_UserService;
     case C_LOG_LIB_SYSTEM_SERVICE:
         return Common::Log::Class::Lib_SystemService;
+    case C_LOG_LIB_ERROR_DIALOG:
+        return Common::Log::Class::Lib_ErrorDialog;
     case C_LOG_LIB_SAVE_DATA:
         return Common::Log::Class::Lib_SaveData;
     case C_LOG_LIB_SAVE_DATA_DIALOG:

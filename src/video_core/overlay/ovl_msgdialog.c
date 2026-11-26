@@ -4,7 +4,7 @@
 /* The system's message dialog (libSceMsgDialog), as the old msgdialog_ui.cpp drew
  * it with ImGui: a message centred in a window in the middle of the screen, over a progress bar
  * or one or two buttons, moved between with the d-pad and pressed with cross, circle going to
- * the button that cancels. And the error dialog (libSceErrorDialog), as ime/error_dialog.cpp
+ * the button that cancels. And the error dialog (libSceErrorDialog), as ime/error_dialog.c
  * drew it: its message, larger, over ImGui's slowly shifting grey, and OK.
  *
  * Three of them: the game's message dialog, the emulator's own (ShowMsgDialog, the save data
