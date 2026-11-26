@@ -2,8 +2,11 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include <unordered_set>
+#include <vector>
+#include <queue>
 #include "shader_recompiler/ir/breadth_first_search.h"
 #include "shader_recompiler/ir/ir_emitter.h"
+#include "shader_recompiler/ir/passes/ir_passes.h"
 #include "shader_recompiler/ir/program.h"
 #include "shader_recompiler/profile.h"
 
@@ -70,26 +73,52 @@ static void EmitBarrierAtBlockStart(IR::Block* block) {
     ir.Barrier();
 }
 
-static bool IsDivergent(const IR::U1& cond, const RuntimeInfo& runtime_info) {
-    return IR::BreadthFirstSearch(cond, [&runtime_info](IR::Inst* inst) -> std::optional<bool> {
-               if (inst->GetOpcode() == IR::Opcode::GetAttributeU32 &&
-                   inst->Arg(0).Attribute() == IR::Attribute::LocalInvocationId) {
-                   const u32 component = inst->Arg(1).U32();
-                   if (runtime_info.hw.cs.workgroup_size[component] > 1) {
-                       return true;
-                   }
-               }
-               return std::nullopt;
-           }) == true;
+struct DivergenceContext {
+    const RuntimeInfo& runtime_info;
+    // Blocks whose reads of a fixed lane the wave lowering turns into a value that is the same
+    // in the whole workgroup.
+    NodeSet uniform_readlane_blocks;
+};
+
+// A condition is divergent when it depends on the thread's place in the workgroup. The search
+// does not go through the uniform lane reads: what a whole wave reduced to, like a tile's nearest
+// and farthest depth, is the same in every thread though what went into it is not.
+static bool IsDivergent(const IR::U1& cond, const DivergenceContext& ctx) {
+    if (cond.IsImmediate()) {
+        return false;
+    }
+    std::unordered_set<const IR::Inst*> visited{cond.Inst()};
+    std::queue<const IR::Inst*> queue;
+    queue.push(cond.Inst());
+    while (!queue.empty()) {
+        const IR::Inst* inst = queue.front();
+        queue.pop();
+        if (inst->GetOpcode() == IR::Opcode::GetAttributeU32 &&
+            inst->Arg(0).Attribute() == IR::Attribute::LocalInvocationId &&
+            ctx.runtime_info.hw.cs.workgroup_size[inst->Arg(1).U32()] > 1) {
+            return true;
+        }
+        if (inst->GetOpcode() == IR::Opcode::ReadLane && inst->Arg(1).IsImmediate() &&
+            ctx.uniform_readlane_blocks.contains(inst->GetParent())) {
+            continue;
+        }
+        for (size_t arg = 0; arg < inst->NumArgs(); ++arg) {
+            const IR::Inst* arg_inst = inst->Arg(arg).TryInst();
+            if (arg_inst && visited.insert(arg_inst).second) {
+                queue.push(arg_inst);
+            }
+        }
+    }
+    return false;
 }
 
 // Inserts a barrier after divergent conditional blocks to avoid undefined
 // behavior when some threads write and others read from shared memory.
 static void EmitBarrierInMergeBlock(const IR::AbstractSyntaxNode::Data& data,
                                     NodeSet& divergence_end, u32& divergence_depth,
-                                    const RuntimeInfo& runtime_info) {
+                                    const DivergenceContext& ctx) {
     const IR::U1 cond = data.if_node.cond;
-    if (IsDivergent(cond, runtime_info)) {
+    if (IsDivergent(cond, ctx)) {
         if (divergence_depth == 0) {
             EmitBarrierAtBlockStart(data.if_node.merge);
         }
@@ -101,17 +130,17 @@ static void EmitBarrierInMergeBlock(const IR::AbstractSyntaxNode::Data& data,
 // A barrier inside a loop is invalid when different invocations leave on different iterations.
 // Mark such loops so their shared-memory synchronization can be deferred to the merge block.
 static NodeSet FindDivergentLoops(const IR::AbstractSyntaxList& syntax_list,
-                                  const RuntimeInfo& runtime_info) {
+                                  const DivergenceContext& ctx) {
     NodeSet divergent_loops;
     for (const IR::AbstractSyntaxNode& node : syntax_list) {
         switch (node.type) {
         case IR::AbstractSyntaxNode::Type::Repeat:
-            if (IsDivergent(node.data.repeat.cond, runtime_info)) {
+            if (IsDivergent(node.data.repeat.cond, ctx)) {
                 divergent_loops.emplace(node.data.repeat.merge);
             }
             break;
         case IR::AbstractSyntaxNode::Type::Break:
-            if (IsDivergent(node.data.break_node.cond, runtime_info)) {
+            if (IsDivergent(node.data.break_node.cond, ctx)) {
                 divergent_loops.emplace(node.data.break_node.merge);
             }
             break;
@@ -150,9 +179,14 @@ void SharedMemoryBarrierPass(IR::Program& program, const RuntimeInfo& runtime_in
         return;
     }
     using Type = IR::AbstractSyntaxNode::Type;
+    DivergenceContext ctx{runtime_info, {}};
+    {
+        const std::vector<IR::Block*> blocks = FindWave64UniformBlocks(program, nullptr);
+        ctx.uniform_readlane_blocks.insert(blocks.begin(), blocks.end());
+    }
     u32 divergence_depth{};
     NodeSet divergence_end;
-    const NodeSet divergent_loops = FindDivergentLoops(program.syntax_list, runtime_info);
+    const NodeSet divergent_loops = FindDivergentLoops(program.syntax_list, ctx);
     for (const IR::AbstractSyntaxNode& node : program.syntax_list) {
         if (node.type == Type::EndIf) {
             if (divergence_end.contains(node.data.end_if.merge)) {
@@ -163,7 +197,7 @@ void SharedMemoryBarrierPass(IR::Program& program, const RuntimeInfo& runtime_in
         // Check if branch depth is zero, we don't want to insert barrier in potentially divergent
         // code.
         if (node.type == Type::If) {
-            EmitBarrierInMergeBlock(node.data, divergence_end, divergence_depth, runtime_info);
+            EmitBarrierInMergeBlock(node.data, divergence_end, divergence_depth, ctx);
             continue;
         }
         if (node.type == Type::Loop && divergent_loops.contains(node.data.loop.merge)) {

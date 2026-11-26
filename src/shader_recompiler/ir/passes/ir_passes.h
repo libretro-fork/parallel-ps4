@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include <unordered_set>
+#include <vector>
 #include "shader_recompiler/ir/basic_block.h"
 #include "shader_recompiler/ir/passes/resource_pass.h"
 #include "shader_recompiler/ir/program.h"
@@ -18,6 +20,10 @@ void SsaRewritePass(IR::Program& program);
 void SsaRepairPass(IR::Program& program);
 void PhiSimplificationPass(IR::Program& program);
 void InverseBallotEliminationPass(IR::Program& program);
+/// Blocks every thread of a workgroup goes through together. uniform_insts are taken to have the
+/// same result in the whole workgroup.
+std::vector<IR::Block*> FindWave64UniformBlocks(
+    const IR::Program& program, const std::unordered_set<const IR::Inst*>* uniform_insts);
 void LowerWave64BallotPass(IR::Program& program, const RuntimeInfo& runtime_info,
                            const Profile& profile);
 void LowerHardwareIntrinsics(IR::Program& program);
