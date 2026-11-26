@@ -216,7 +216,10 @@ struct HwFragmentRuntimeInfo {
     u32 dual_source_blending : 1;
     u32 clip_distance_emulation : 1;
     u32 depth_before_shader : 1;
-    u32 : 12;
+    /// The game tests depth and stencil before the pixel shader (DB_SHADER_CONTROL.Z_ORDER early,
+    /// with nothing exported that the tests need)
+    u32 early_z : 1;
+    u32 : 11;
 
     bool operator==(const HwFragmentRuntimeInfo& other) const noexcept {
         return std::ranges::equal(color_buffers, other.color_buffers) &&
@@ -226,7 +229,7 @@ struct HwFragmentRuntimeInfo {
                front_face_all_bits == other.front_face_all_bits &&
                dual_source_blending == other.dual_source_blending &&
                clip_distance_emulation == other.clip_distance_emulation &&
-               depth_before_shader == other.depth_before_shader &&
+               depth_before_shader == other.depth_before_shader && early_z == other.early_z &&
                std::ranges::equal(inputs.begin(), inputs.begin() + num_inputs, other.inputs.begin(),
                                   other.inputs.begin() + num_inputs);
     }

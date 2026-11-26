@@ -476,6 +476,12 @@ void DefineEntryPoint(const Info& info, const RuntimeInfo& runtime_info, EmitCon
         if (runtime_info.hw.fs.depth_before_shader) {
             spv_AddExecutionMode0(&ctx.m, main, u32(SpvExecutionModeEarlyFragmentTests));
             ASSERT_MSG(!stores_depth, "DEPTH_BEFORE_SHADER enabled with depth exporting shader");
+        } else if (runtime_info.hw.fs.early_z && info.has_storage_images && !info.has_discard &&
+                   !stores_depth && !info.stores.Get(IR::Attribute::StencilRef) &&
+                   !info.stores.Get(IR::Attribute::SampleMask)) {
+            // Only where what the shader does besides its colour depends on it: storage writes,
+            // and nothing an early test would change
+            spv_AddExecutionMode0(&ctx.m, main, u32(SpvExecutionModeEarlyFragmentTests));
         }
         break;
     }

@@ -291,6 +291,17 @@ const Shader::RuntimeInfo& PipelineCache::BuildRuntimeInfo(HwStage stage, SwStag
                                (stencil_ref_export_enable << 1) |
                                (regs.depth_shader_control.mask_export_enable << 2) |
                                (regs.depth_shader_control.coverage_to_mask_enable << 3);
+        // The console tests depth and stencil before the pixel shader when Z_ORDER asks for it, so
+        // a fragment that fails never runs. A shader that writes storage needs to be told so
+        // here, or the writes of failing fragments land too (the deferred decals of Shadow of the
+        // Colossus painted their whole box into the G-buffer, as its PC port found). Not with a
+        // depth, stencil reference or sample mask export, which the tests need.
+        {
+            const AmdGpu::ZOrder z_order = regs.depth_shader_control.z_order;
+            info.hw.fs.early_z =
+                (z_order == AmdGpu::ZOrder::EarlyZLateZ || z_order == AmdGpu::ZOrder::EarlyZReZ) &&
+                (info.hw.fs.mrtz_mask & 0x7) == 0;
+        }
         const AmdGpu::BlendControl& cb0_blend = regs.blend_control[0];
         if (cb0_blend.enable) {
             info.hw.fs.dual_source_blending =

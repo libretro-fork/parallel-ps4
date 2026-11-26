@@ -4,6 +4,9 @@ What changed in the libretro core of this fork, newest first. Changes that come 
 
 ## Unreleased
 
+- **A pixel shader that writes storage is tested for depth first when the game asks for early depth** (`BuildRuntimeInfo`, `DefineEntryPoint`, `HwFragmentRuntimeInfo::early_z`). Taken from the Shadow of the Colossus PC port, where deferred decals painted their whole box into the G-buffer as rectangles on the ground. Not run in a game yet.
+  - `DB_SHADER_CONTROL.Z_ORDER` set to early (`EarlyZLateZ`, `EarlyZReZ`) means a fragment that fails depth or stencil never runs on the console. Only `DEPTH_BEFORE_SHADER` was honoured; the order was not. It is now, for a shader that has storage images, no discard, and no depth, stencil reference or sample mask export.
+  - The shader cache version is 19.
 - **A texture of another size at the address of a cached one is taken as a new texture** (`TextureCache::ResolveOverlap`). Taken from the Shadow of the Colossus PC port, where it removed blocks of colour on textures after a load. Not run in a game yet.
   - A game that keeps its textures in a pool puts a texture of another size where an old one was. The cached image was reused as a view, so the new texels were read with the old width and height. For a texture binding of the same kind (block compressed or not) whose width or height differs, the cached image is no longer used: one the CPU wrote is freed once it has not been used for 32 frames, and one the GPU wrote and the CPU then wrote over is kept, since a stale descriptor may still bind it. An image only the GPU wrote stays a view, as before.
 - **A shader's loops stop after a set number of passes, and the descriptor of an unused binding no longer brings the core down** (`Traverse`, `SurfaceFormat`, `ComponentSwizzle`, `EmitFPClamp32/64`). Taken from the GPU fixes of the Shadow of the Colossus PC port. Not run in a game yet.
