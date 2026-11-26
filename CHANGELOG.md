@@ -4,6 +4,12 @@ What changed in the libretro core of this fork, newest first. Changes that come 
 
 ## Unreleased
 
+- **The on-screen keyboard's layouts and its grid of keys are C89** (`ime/ime_kb_layout.c`, `ime_kb_layout.h`; `ime_kb_layout.cpp` is gone). The key tables, the panel's sizes, the colours, cursor movement and the drawing of the keys, for libSceIme's keyboard and libSceImeDialog's.
+  - The enum classes are integer types with `IME_KB_*` and `IME_TOP_PANEL_*` macros, the functions take pointers, and the structures' default values come from `MakeImeKbGridLayout`, `MakeImeKbDrawParams`, `MakeImeEdgeWrapNavState` and `GetDefaultImeStyleConfig`. `ImeSelectionGridIndex`'s members that were used are the `ImeSelection*` functions.
+  - Drawing a frame allocates nothing: the grid is laid out in a structure on the stack of at most 12 rows by 16 columns (the layouts have 6 or 7 rows of 10), where four `thread_local` vectors were, and the cursor of each window that draws a grid is in a table of 8 where an `unordered_map` was. A grid past those bounds is not drawn.
+  - `ComputePressPulseExpand` and its two constants moved here from `ime_ui_shared`. Its sine is taken in double precision (C89 has no `sinf`), which can change the selector's pulse by one unit in the last place.
+  - `presenter_output_resolution` in `vk_presenter.cpp` gives the C code the size of the picture last output.
+  - Compared with the C++ it replaces over a mocked overlay: 300000 frames of random layouts, selections, colours, pad input and requested moves gave the same draw calls byte for byte and the same pressed key, key code, character and cursor, and 40 rounds over the tables and the other functions gave the same output. Not run in a game yet.
 - **A pixel shader that writes storage is tested for depth first when the game asks for early depth** (`BuildRuntimeInfo`, `DefineEntryPoint`, `HwFragmentRuntimeInfo::early_z`). Taken from the Shadow of the Colossus PC port, where deferred decals painted their whole box into the G-buffer as rectangles on the ground. Not run in a game yet.
   - `DB_SHADER_CONTROL.Z_ORDER` set to early (`EarlyZLateZ`, `EarlyZReZ`) means a fragment that fails depth or stencil never runs on the console. Only `DEPTH_BEFORE_SHADER` was honoured; the order was not. It is now, for a shader that has storage images, no discard, and no depth, stencil reference or sample mask export.
   - The shader cache version is 19.

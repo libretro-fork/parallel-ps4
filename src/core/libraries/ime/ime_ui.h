@@ -17,7 +17,6 @@ namespace Libraries::Ime {
 
 class ImeHandler;
 class ImeUi;
-struct ImePanelMetrics;
 
 class ImeState {
     friend class ImeHandler;
@@ -73,7 +72,7 @@ class ImeUi : public ImeLayer {
     ImeState* state{};
     const OrbisImeParam* ime_param{};
     const OrbisImeParamExtended* extended_param{};
-    ImeStyleConfig style_config{};
+    ImeStyleConfig style_config = GetDefaultImeStyleConfig();
 
     bool first_render = true;
     bool accept_armed = false;
@@ -106,7 +105,7 @@ class ImeUi : public ImeLayer {
     double virtual_dpad_right_next_repeat_time = 0.0;
     double virtual_dpad_up_next_repeat_time = 0.0;
     double virtual_dpad_down_next_repeat_time = 0.0;
-    ImeEdgeWrapNavState panel_vertical_nav_state{};
+    ImeEdgeWrapNavState panel_vertical_nav_state = MakeImeEdgeWrapNavState();
     bool panel_position_initialized = false;
     ovl_vec2_t panel_position{};
     ovl_vec2_t input_scroll{}; // how far the field's text is moved to keep the caret in view
@@ -126,7 +125,7 @@ class ImeUi : public ImeLayer {
     ImeKbLayoutSelection kb_layout_selection{};
     ImeKbLayoutSelection last_nav_layout_selection{};
     bool nav_layout_selection_initialized = false;
-    ImeKbLayoutFamily kb_alpha_family = ImeKbLayoutFamily::Latin;
+    ImeKbLayoutFamily kb_alpha_family = IME_KB_LAYOUT_FAMILY_LATIN;
 
 public:
     explicit ImeUi(ImeState* state = nullptr, const OrbisImeParam* param = nullptr,

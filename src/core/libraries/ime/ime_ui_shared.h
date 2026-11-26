@@ -25,8 +25,6 @@ struct VirtualPadSnapshot {
 constexpr double kPanelEdgeWrapHoldDelaySec = 0.5;
 constexpr double kRepeatIntentWindowSec = 0.45;
 constexpr float kSelectorFadeOutDurationSec = 0.2f;
-constexpr float kSelectorPressPulseDurationSec = 0.2f;
-constexpr float kSelectorPressPulseExpandBorderFactor = 1.0f;
 
 // A press held repeats after this long and then this often, in seconds (ImGui's)
 constexpr float kKeyRepeatDelay = 0.275f;
@@ -89,8 +87,6 @@ struct SelectorFadeState {
 };
 
 void TriggerSelectorPressPulse(SelectorFadeState& state, double now);
-float ComputePressPulseExpand(double pulse_started_at, double now, float pulse_duration_sec,
-                              float max_expand_px);
 void UpdateSelectorFadeState(SelectorFadeState& state, ovl_vec2_t pos, ovl_vec2_t size, float inset,
                              float corner_radius, bool selected, double now);
 void DrawSelectorFadeState(const SelectorFadeState& state, ovl_draw_list_t* draw_list,
@@ -189,7 +185,7 @@ struct OskShortcutRepeatState {
 };
 
 struct OskShortcutActionResult {
-    ImeKbKeyAction action = ImeKbKeyAction::None;
+    ImeKbKeyAction action = IME_KB_KEY_ACTION_NONE;
     bool clear_all = false;
 };
 

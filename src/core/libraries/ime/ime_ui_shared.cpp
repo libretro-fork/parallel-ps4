@@ -5,7 +5,6 @@
 
 #include <cmath>
 #include <cstring>
-#include <numbers>
 
 #include <encodings/utf.h>
 
@@ -187,21 +186,6 @@ void TriggerSelectorPressPulse(SelectorFadeState& state, double now) {
     state.press_pulse_started_at = now;
 }
 
-float ComputePressPulseExpand(double pulse_started_at, double now, float pulse_duration_sec,
-                              float max_expand_px) {
-    if (pulse_started_at < 0.0 || pulse_duration_sec <= 0.0f || max_expand_px <= 0.0f) {
-        return 0.0f;
-    }
-    const double elapsed = now - pulse_started_at;
-    if (elapsed < 0.0 || elapsed >= static_cast<double>(pulse_duration_sec)) {
-        return 0.0f;
-    }
-
-    const float t = static_cast<float>(elapsed / static_cast<double>(pulse_duration_sec));
-    const float envelope = std::sin(t * std::numbers::pi_v<float>);
-    return std::max(0.0f, envelope) * max_expand_px;
-}
-
 void UpdateSelectorFadeState(SelectorFadeState& state, ovl_vec2_t pos, ovl_vec2_t size, float inset,
                              float corner_radius, bool selected, double now) {
     bool next_visible = false;
@@ -273,24 +257,24 @@ ImeKbLayoutSelection ResolveInitialKbLayoutSelection(OrbisImeExtOption ext_optio
     if (set_priority) {
         switch (panel_priority) {
         case ORBIS_IME_PANEL_PRIORITY_SYMBOL:
-            selection.family = ImeKbLayoutFamily::Symbols;
+            selection.family = IME_KB_LAYOUT_FAMILY_SYMBOLS;
             break;
         case ORBIS_IME_PANEL_PRIORITY_ACCENT:
-            selection.family = ImeKbLayoutFamily::Specials;
+            selection.family = IME_KB_LAYOUT_FAMILY_SPECIALS;
             break;
         case ORBIS_IME_PANEL_PRIORITY_ALPHABET:
         case ORBIS_IME_PANEL_PRIORITY_DEFAULT:
         default:
-            selection.family = ImeKbLayoutFamily::Latin;
+            selection.family = IME_KB_LAYOUT_FAMILY_LATIN;
             break;
         }
     }
 
     const bool shift_lock =
         set_priority && ((ext_option & ORBIS_IME_EXT_OPTION_PRIORITY_SHIFT) != 0);
-    if (shift_lock && selection.family != ImeKbLayoutFamily::Symbols) {
+    if (shift_lock && selection.family != IME_KB_LAYOUT_FAMILY_SYMBOLS) {
         // SDK docs: PRIORITY_SHIFT starts the initial panel in Shift-lock state.
-        selection.case_state = ImeKbCaseState::CapsLock;
+        selection.case_state = IME_KB_CASE_STATE_CAPS_LOCK;
     }
     return selection;
 }
@@ -301,8 +285,8 @@ void InitializeDefaultOskSelectionAnchor(const ImeKbLayoutSelection& layout_sele
     constexpr int kLatinLowerDefaultRow = 2;
     constexpr int kLatinLowerDefaultCol = 4;
 
-    const bool is_default_latin_lower = layout_selection.family == ImeKbLayoutFamily::Latin &&
-                                        layout_selection.case_state == ImeKbCaseState::Lower;
+    const bool is_default_latin_lower = layout_selection.family == IME_KB_LAYOUT_FAMILY_LATIN &&
+                                        layout_selection.case_state == IME_KB_CASE_STATE_LOWER;
     const bool game_requested_other =
         ((ext_option & ORBIS_IME_EXT_OPTION_SET_PRIORITY) != 0) && !is_default_latin_lower;
     if (!is_default_latin_lower || game_requested_other) {
@@ -317,15 +301,15 @@ void InitializeDefaultOskSelectionAnchor(const ImeKbLayoutSelection& layout_sele
 
 void CycleKeyboardCaseState(ImeKbLayoutSelection& selection) {
     switch (selection.case_state) {
-    case ImeKbCaseState::Lower:
-        selection.case_state = ImeKbCaseState::Upper;
+    case IME_KB_CASE_STATE_LOWER:
+        selection.case_state = IME_KB_CASE_STATE_UPPER;
         break;
-    case ImeKbCaseState::Upper:
-        selection.case_state = ImeKbCaseState::CapsLock;
+    case IME_KB_CASE_STATE_UPPER:
+        selection.case_state = IME_KB_CASE_STATE_CAPS_LOCK;
         break;
-    case ImeKbCaseState::CapsLock:
+    case IME_KB_CASE_STATE_CAPS_LOCK:
     default:
-        selection.case_state = ImeKbCaseState::Lower;
+        selection.case_state = IME_KB_CASE_STATE_LOWER;
         break;
     }
 }
@@ -335,26 +319,26 @@ void ToggleKeyboardFamilyMode(ImeKbLayoutSelection& selection, ImeKbLayoutFamily
     const auto set_family_and_reset_page = [&](const ImeKbLayoutFamily family) {
         selection.family = family;
         selection.page = 0;
-        if (family == ImeKbLayoutFamily::Latin || family == ImeKbLayoutFamily::Specials) {
+        if (family == IME_KB_LAYOUT_FAMILY_LATIN || family == IME_KB_LAYOUT_FAMILY_SPECIALS) {
             alpha_family = family;
         }
     };
 
-    if (target_family == ImeKbLayoutFamily::Symbols) {
-        if (selection.family == ImeKbLayoutFamily::Symbols) {
+    if (target_family == IME_KB_LAYOUT_FAMILY_SYMBOLS) {
+        if (selection.family == IME_KB_LAYOUT_FAMILY_SYMBOLS) {
             set_family_and_reset_page(alpha_family);
         } else {
-            if (selection.family == ImeKbLayoutFamily::Latin ||
-                selection.family == ImeKbLayoutFamily::Specials) {
+            if (selection.family == IME_KB_LAYOUT_FAMILY_LATIN ||
+                selection.family == IME_KB_LAYOUT_FAMILY_SPECIALS) {
                 alpha_family = selection.family;
             }
-            set_family_and_reset_page(ImeKbLayoutFamily::Symbols);
+            set_family_and_reset_page(IME_KB_LAYOUT_FAMILY_SYMBOLS);
         }
         return;
     }
 
     if (selection.family == target_family) {
-        set_family_and_reset_page(ImeKbLayoutFamily::Latin);
+        set_family_and_reset_page(IME_KB_LAYOUT_FAMILY_LATIN);
     } else {
         set_family_and_reset_page(target_family);
     }
@@ -362,7 +346,7 @@ void ToggleKeyboardFamilyMode(ImeKbLayoutSelection& selection, ImeKbLayoutFamily
 
 bool FocusKeyboardActionKeySelection(const ImeKbLayoutSelection& selection, ImeKbKeyAction action,
                                      int& out_row, int& out_col) {
-    const auto& layout = GetImeKeyboardLayout(selection);
+    const auto& layout = *GetImeKeyboardLayout(&selection);
     if (!layout.keys || layout.key_count == 0) {
         return false;
     }
@@ -380,8 +364,8 @@ bool FocusKeyboardActionKeySelection(const ImeKbLayoutSelection& selection, ImeK
 }
 
 void FlipKeyboardModePage(ImeKbLayoutSelection& selection, int direction) {
-    if (selection.family != ImeKbLayoutFamily::Symbols &&
-        selection.family != ImeKbLayoutFamily::Specials) {
+    if (selection.family != IME_KB_LAYOUT_FAMILY_SYMBOLS &&
+        selection.family != IME_KB_LAYOUT_FAMILY_SPECIALS) {
         return;
     }
     const int page = static_cast<int>(selection.page);
@@ -822,26 +806,26 @@ OskShortcutActionResult EvaluateOskShortcutAction(bool allow_osk_shortcuts, bool
 
     const bool symbols_shortcut_pressed = (l2_down && tri_edge_pressed) || (tri_down && l2_pressed);
     if (symbols_shortcut_pressed) {
-        result.action = ImeKbKeyAction::SymbolsMode;
+        result.action = IME_KB_KEY_ACTION_SYMBOLS_MODE;
     } else if (tri_space_pressed) {
-        result.action = ImeKbKeyAction::Space;
-    } else if (layout_family != ImeKbLayoutFamily::Symbols &&
+        result.action = IME_KB_KEY_ACTION_SPACE;
+    } else if (layout_family != IME_KB_LAYOUT_FAMILY_SYMBOLS &&
                virtual_pad_input.Pressed(Libraries::Pad::OrbisPadButtonDataOffset::L3)) {
-        result.action = ImeKbKeyAction::SpecialsMode;
+        result.action = IME_KB_KEY_ACTION_SPECIALS_MODE;
     } else if (virtual_pad_input.Pressed(Libraries::Pad::OrbisPadButtonDataOffset::R2)) {
-        result.action = ImeKbKeyAction::Done;
+        result.action = IME_KB_KEY_ACTION_DONE;
     } else if (clear_all_shortcut_pressed) {
         result.clear_all = true;
     } else if (square_repeat_pressed) {
-        result.action = ImeKbKeyAction::Backspace;
+        result.action = IME_KB_KEY_ACTION_BACKSPACE;
     } else if (l1_repeat_pressed) {
-        result.action = ImeKbKeyAction::ArrowLeft;
+        result.action = IME_KB_KEY_ACTION_ARROW_LEFT;
     } else if (r1_repeat_pressed) {
-        result.action = ImeKbKeyAction::ArrowRight;
+        result.action = IME_KB_KEY_ACTION_ARROW_RIGHT;
     } else if (virtual_pad_input.Pressed(Libraries::Pad::OrbisPadButtonDataOffset::R3)) {
-        result.action = ImeKbKeyAction::Settings;
-    } else if (layout_family != ImeKbLayoutFamily::Symbols && l2_pressed) {
-        result.action = ImeKbKeyAction::Shift;
+        result.action = IME_KB_KEY_ACTION_SETTINGS;
+    } else if (layout_family != IME_KB_LAYOUT_FAMILY_SYMBOLS && l2_pressed) {
+        result.action = IME_KB_KEY_ACTION_SHIFT;
     }
     return result;
 }

@@ -29,6 +29,12 @@
 #include <string.h>
 #include "libretro/libretro_bridge.h"
 
+/* For the C on-screen keyboard (ime_kb_layout.c): the size of the picture last output */
+extern "C" void presenter_output_resolution(u32* width, u32* height) {
+    *width = DebugState.output_resolution.first;
+    *height = DebugState.output_resolution.second;
+}
+
 namespace Vulkan {
 
 /// One colour layer of an image's first level

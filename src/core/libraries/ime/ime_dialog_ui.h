@@ -15,10 +15,6 @@ namespace Libraries::ImeDialog {
 class ImeDialogUi;
 } // namespace Libraries::ImeDialog
 
-namespace Libraries::Ime {
-struct ImePanelMetrics;
-}
-
 namespace Libraries::ImeDialog {
 
 class ImeDialogState final {
@@ -36,7 +32,7 @@ class ImeDialogState final {
     OrbisImeExtOption ext_option = ORBIS_IME_EXT_OPTION_DEFAULT;
     OrbisImeDisableDevice disable_device = ORBIS_IME_DISABLE_DEVICE_DEFAULT;
     OrbisImePanelPriority panel_priority = ORBIS_IME_PANEL_PRIORITY_DEFAULT;
-    Libraries::Ime::ImeStyleConfig style_config{};
+    ImeStyleConfig style_config = GetDefaultImeStyleConfig();
 
     s32 user_id{};
     bool is_multi_line{};
@@ -132,7 +128,7 @@ class ImeDialogUi final : public Libraries::Ime::ImeLayer {
     double virtual_dpad_right_next_repeat_time = 0.0;
     double virtual_dpad_up_next_repeat_time = 0.0;
     double virtual_dpad_down_next_repeat_time = 0.0;
-    Libraries::Ime::ImeEdgeWrapNavState panel_vertical_nav_state{};
+    ImeEdgeWrapNavState panel_vertical_nav_state = MakeImeEdgeWrapNavState();
     bool panel_position_initialized = false;
     bool panel_layout_anchor_initialized = false;
     ovl_vec2_t panel_position{};
@@ -151,10 +147,10 @@ class ImeDialogUi final : public Libraries::Ime::ImeLayer {
     int last_keyboard_selected_row = 0;
     int last_keyboard_selected_col = 0;
     int edit_menu_index = 0;
-    Libraries::Ime::ImeKbLayoutSelection kb_layout_selection{};
-    Libraries::Ime::ImeKbLayoutSelection last_nav_layout_selection{};
+    ImeKbLayoutSelection kb_layout_selection{};
+    ImeKbLayoutSelection last_nav_layout_selection{};
     bool nav_layout_selection_initialized = false;
-    Libraries::Ime::ImeKbLayoutFamily kb_alpha_family = Libraries::Ime::ImeKbLayoutFamily::Latin;
+    ImeKbLayoutFamily kb_alpha_family = IME_KB_LAYOUT_FAMILY_LATIN;
 
 public:
     explicit ImeDialogUi(ImeDialogState* state = nullptr, OrbisImeDialogStatus* status = nullptr,
@@ -170,7 +166,7 @@ private:
     void FinishDialog(OrbisImeDialogEndStatus endstatus, bool restore_original, const char* reason);
     void Free();
 
-    void DrawInputText(const Libraries::Ime::ImePanelMetrics& metrics, bool multiline);
+    void DrawInputText(const ImePanelMetrics& metrics, bool multiline);
 };
 
 } // namespace Libraries::ImeDialog
