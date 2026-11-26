@@ -469,7 +469,7 @@ void Emulator::Run(std::filesystem::path file, std::vector<std::string> args,
     // The frontend's core options, on top of what the config files say.
     Libretro::ApplyCoreOptions();
     // Before the game runs: a trophy unlocked in play decodes nothing.
-    Libraries::Np::NpTrophy::PreloadTrophySound();
+    trophy_ui_preload_sound();
     // Switch to configured log
     const std::string log_name =
         (!id.empty() && emu_settings_get_log_separate()) ? id + ".log" : "shad_log.txt";

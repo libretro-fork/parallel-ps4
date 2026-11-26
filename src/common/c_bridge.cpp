@@ -7,6 +7,7 @@
 
 #include "common/assert.h"
 #include "common/c_bridge.h"
+#include "common/embedded_resources.h"
 #include "common/logging/log.h"
 #include "common/path_util.h"
 #include "common/scm_rev.h"
@@ -142,6 +143,8 @@ static Common::Log::Class ToClass(c_log_class log_class) {
         return Common::Log::Class::Lib_NpParty;
     case C_LOG_LIB_NP_COMMERCE:
         return Common::Log::Class::Lib_NpCommerce;
+    case C_LOG_LIB_NP_TROPHY:
+        return Common::Log::Class::Lib_NpTrophy;
     case C_LOG_CORE:
         return Common::Log::Class::Core;
     case C_LOG_LOADER:
@@ -187,6 +190,10 @@ extern "C" size_t c_get_user_path(c_user_path type, char* s, size_t len) {
         s[n] = '\0';
     }
     return size;
+}
+
+extern "C" const unsigned char* c_get_embedded_resource(const char* path, size_t* size) {
+    return Common::GetEmbeddedResource(path, size);
 }
 
 extern "C" const char* c_get_scm_rev(void) {

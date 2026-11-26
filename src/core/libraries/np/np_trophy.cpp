@@ -1119,10 +1119,12 @@ int PS4_SYSV_ABI sceNpTrophyUnlockTrophy(OrbisNpTrophyContext context, OrbisNpTr
     }
 
     // Queue UI notifications (only once, using the primary XML's strings).
-    AddTrophyToQueue(trophy_icon_path, trophy_name, trophy_type);
+    trophy_ui_queue(Common::FS::PathToUTF8String(trophy_icon_path).c_str(), trophy_name.c_str(),
+                    std::string(trophy_type).c_str(), false);
     if (unlock_platinum) {
         // Shown once the trophy's notification has had its time
-        AddTrophyToQueue(platinum_icon_path, platinum_name, "P", true);
+        trophy_ui_queue(Common::FS::PathToUTF8String(platinum_icon_path).c_str(),
+                        platinum_name.c_str(), "P", true);
     }
 
     ApplyUnlockToXmlFile(ctx.xml_save_file, trophyId, trophy_timestamp, unlock_platinum,

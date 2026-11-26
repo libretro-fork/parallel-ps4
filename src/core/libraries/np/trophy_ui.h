@@ -1,22 +1,29 @@
-// SPDX-FileCopyrightText: Copyright 2025 shadPS4 Emulator Project
-// SPDX-License-Identifier: GPL-2.0-or-later
+/* SPDX-FileCopyrightText: Copyright 2025 shadPS4 Emulator Project
+ * SPDX-License-Identifier: GPL-2.0-or-later */
 
-#pragma once
+/* A trophy's notification (trophy_ui.c): its sound, made once, and its popup, which the overlay
+ * shows (video_core/overlay/ovl_trophy.c) */
 
-#include <string>
+#ifndef SHADPS4_LIBRARIES_NP_TROPHY_UI_H
+#define SHADPS4_LIBRARIES_NP_TROPHY_UI_H
 
-#include <filesystem>
-#include <string_view>
+#include <boolean.h>
 
-namespace Libraries::Np::NpTrophy {
+#ifdef __cplusplus
+extern "C" {
+#endif
 
-/// Makes the trophy sound ready for the core's mix: the custom one in the user's folder, or the
-/// built-in one. Called once, before the game runs, so nothing is decoded when a trophy unlocks.
-void PreloadTrophySound();
+/* Makes the trophy sound ready for the core's mix: the custom one in the user's folder, or the
+ * built-in one. Called once, before the game runs, so nothing is decoded when a trophy unlocks. */
+void trophy_ui_preload_sound(void);
 
-/// @after: shown once the one showing (or queued before it) has had its time, rather than in
-/// its place
-void AddTrophyToQueue(const std::filesystem::path& trophyIconPath, const std::string& trophyName,
-                      const std::string_view& rarity, bool after = false);
+/* Queues a trophy's popup: its icon at @icon_path (UTF-8), its name, and its rarity ("P", "G",
+ * "S" or "B"). @after: shown once the one showing (or queued before it) has had its time, rather
+ * than in its place */
+void trophy_ui_queue(const char* icon_path, const char* name, const char* rarity, bool after);
 
-}; // namespace Libraries::Np::NpTrophy
+#ifdef __cplusplus
+}
+#endif
+
+#endif

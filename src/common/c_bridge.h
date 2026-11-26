@@ -79,6 +79,7 @@ enum c_log_class {
     C_LOG_LIB_NP_SNS_FACEBOOK_DIALOG,
     C_LOG_LIB_NP_PARTY,
     C_LOG_LIB_NP_COMMERCE,
+    C_LOG_LIB_NP_TROPHY,
     C_LOG_LOADER,
     C_LOG_NP_HANDLER,
     C_LOG_RENDER_VULKAN
@@ -150,6 +151,10 @@ enum c_user_path {
 /* Writes the UTF-8 directory into s. Returns its length; a result of len
  * or more means it didn't fit. */
 size_t c_get_user_path(enum c_user_path type, char* s, size_t len);
+
+/* The resource the core carries at @path, and its size in *@size; NULL (and 0) when there is
+ * none (common/embedded_resources.h) */
+const unsigned char* c_get_embedded_resource(const char* path, size_t* size);
 
 /* The git revision this build was made from. */
 const char* c_get_scm_rev(void);
